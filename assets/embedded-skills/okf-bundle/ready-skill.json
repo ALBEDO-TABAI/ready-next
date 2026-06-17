@@ -1,0 +1,15 @@
+{
+  "id": "okf-bundle",
+  "name": "okf-bundle",
+  "displayName": "OKF Bundle",
+  "description": "把指定范围的资料提炼成符合 OKF v0.1 规范的单个知识包，并登记到工作区母题索引",
+  "version": "0.1.0",
+  "runtime": "reference",
+  "execution": { "mode": "advisory" },
+  "actions": {
+    "read_skill": {
+      "runtime": "reference",
+      "visibility": "internal"
+    }
+  }
+}

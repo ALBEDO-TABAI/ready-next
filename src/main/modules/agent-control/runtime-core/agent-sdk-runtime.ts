@@ -1,5 +1,6 @@
 import { EventEmitter } from 'events'
 import { randomUUID } from 'crypto'
+import { existsSync } from 'fs'
 import { mkdir, readFile, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
 import { basename, join } from 'path'
@@ -400,10 +401,19 @@ interface SkillContextOrchestratorLike {
     id?: string
     skillId?: string
     name?: string
+    managedPath?: string
   }>
   buildPreferredSkillToolNames?: (userText: string, sessionId?: string) => string[] | null
   getCurrentReferenceSkillHint?: (sessionId?: string) => { id: string; name: string } | null
   rememberExplicitReferenceSkillHint?: (userText: string, sessionId?: string) => boolean
+  maybeInjectExplicitSkillContext?: (params: {
+    userText: string
+    session: { messages: Array<{ role: string; content: string | Array<Record<string, unknown>> }> }
+    sessionId?: string
+    emitOutput: (chunk: string, type: string) => void
+    emitToolAction: (tool: string, args: Record<string, unknown>) => void
+    executeTool: (tool: string, args: Record<string, unknown>) => Promise<ToolExecutionOutput>
+  }) => Promise<void>
 }
 
 export interface AgentSdkRuntimeDeps {
@@ -713,13 +723,49 @@ const SDK_CONTEXT_MARKERS = [
   '--- 附件:',
 ] as const
 
-function allowedPrimitiveToolsForSdkSkillTurn(): string[] {
+function explicitReferenceSkillHasScripts(
+  skill: { managedPath?: string } | null,
+  typedActions: ReadonlyArray<string>,
+): boolean {
+  if (!skill || typedActions.length > 0) return false
+  const managedPath = typeof skill.managedPath === 'string' ? skill.managedPath : ''
+  if (!managedPath) return false
+  try {
+    return existsSync(join(managedPath, 'scripts'))
+  } catch {
+    return false
+  }
+}
+
+function skillContextMessagesToInstruction(
+  messages: Array<{ role: string; content: string | Array<Record<string, unknown>> }>,
+): string {
+  const sections = messages
+    .map((message) => {
+      const content = Array.isArray(message.content)
+        ? message.content.map((item) => {
+          if (typeof item.text === 'string') return item.text
+          return JSON.stringify(item)
+        }).join('\n')
+        : message.content
+      const text = String(content || '').trim()
+      if (!text) return ''
+      return `【skill context / ${message.role || 'system'}】\n${text}`
+    })
+    .filter(Boolean)
+  return sections.join('\n\n')
+}
+
+function allowedPrimitiveToolsForSdkSkillTurn(options: { allowRunShell?: boolean } = {}): string[] {
   const safeSkillPrimitives = new Set([
     'skill_ask_user',
     'skill_write_artifact',
     'skill_read_artifact',
     'skill_inspect_run_state',
   ])
+  if (options.allowRunShell) {
+    safeSkillPrimitives.add('skill_run_shell')
+  }
   return PRIMITIVE_TOOL_DEFS
     .map((definition) => definition.name)
     .filter((name) => safeSkillPrimitives.has(name))
@@ -4298,6 +4344,22 @@ export class AgentSdkRuntime extends EventEmitter {
         taskBudgetRuntime: liveTaskBudgetRuntime,
         budgetWarningMessages: [],
       }
+      const skillContextMessages: Array<{ role: string; content: string | Array<Record<string, unknown>> }> = []
+      if (this.skillContextOrchestrator?.maybeInjectExplicitSkillContext) {
+        await this.skillContextOrchestrator.maybeInjectExplicitSkillContext({
+          userText: messageToText(content as RunMessage),
+          session: { messages: skillContextMessages },
+          sessionId,
+          emitOutput: () => undefined,
+          emitToolAction: () => undefined,
+          executeTool: async (toolName, args) => this.executeToolCall(
+            toolName,
+            args,
+            this.buildExecutorContext(toolBridgeRuntimeContext),
+          ),
+        })
+      }
+      const skillContextInstruction = skillContextMessagesToInstruction(skillContextMessages)
       const finishBudgetCheckpointIfNeeded = async (): Promise<ExecutionTurnResult | null> => {
         if (!liveTaskBudgetRuntime || liveTaskBudgetRuntime.warningLevel !== 'exhausted') return null
         const checkpoint = await this.writeBudgetCheckpointState({
@@ -4458,6 +4520,7 @@ export class AgentSdkRuntime extends EventEmitter {
         hasVeaPipelineTool
           ? '本轮 VEA 长任务必须优先调用 skill_video_expert_pipeline；不要用 skill_run_shell、手工建目录或口头说明替代真实启动。'
           : '',
+        skillContextInstruction,
         hasMapAmbiguityQuestionTools
           ? '地图路线工具返回 errorKind=place_ambiguous 时，必须使用 ask_user_questions 让用户从候选地点中选择；不要把失败结果改写成路线成功。'
           : '',
@@ -6111,11 +6174,12 @@ export class AgentSdkRuntime extends EventEmitter {
     const typedActions = Array.from(typedActionNames)
     const skillId = explicitSkillId || (typedActions.length > 0 ? referenceHint?.id || null : null)
     if (!skillId) return buildExplicitNoSkillAuthorization('no_skill_signal')
+    const allowRunShell = explicitReferenceSkillHasScripts(explicitSkill, typedActions)
 
     return buildSelectedSkillToolAuthorization({
       skillId,
       allowedTypedActions: typedActions,
-      allowedPrimitives: allowedPrimitiveToolsForSdkSkillTurn(),
+      allowedPrimitives: allowedPrimitiveToolsForSdkSkillTurn({ allowRunShell }),
       source: explicitSkillId ? 'explicit' : 'active_task',
       reason: explicitSkillId ? 'explicit_user_mention' : 'reference_hint',
     })

@@ -1,0 +1,15 @@
+{
+  "id": "okf-library",
+  "name": "okf-library",
+  "displayName": "OKF Library",
+  "description": "盘点工作区内的 OKF 知识包，归并去重并沉淀进受控知识库目录",
+  "version": "0.1.0",
+  "runtime": "reference",
+  "execution": { "mode": "advisory" },
+  "actions": {
+    "read_skill": {
+      "runtime": "reference",
+      "visibility": "internal"
+    }
+  }
+}

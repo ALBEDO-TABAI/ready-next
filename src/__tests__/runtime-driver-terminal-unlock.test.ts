@@ -163,6 +163,7 @@ driver.initAgentListeners()
 type DriverApi = {
   armInfrastructureWatchdog: (scopeId: string, requestId: string, options?: { timeoutMs?: number }) => void
   clearInfrastructureWatchdog: (scopeId: string, requestId: string | null | undefined) => void
+  completeScopeRunAfterSendSuccess: (scopeId: string, requestId: string) => void
 }
 const driverApi = driver as unknown as DriverApi
 
@@ -439,6 +440,62 @@ test('X2.6 — runtime liveness extends the bootstrap watchdog window', async ()
     typeof m.content === 'string' && m.content.includes('Ready 跟丢了'))
   assert.equal(lostTrackMsg, undefined, 'active runtime liveness does not trip the bootstrap lost-track toast')
   assert.equal(getSessionSlice(state, 'session-A').scopeRunStates['scope-A']?.phase, 'planning')
+})
+
+test('sendScoped success fallback unlocks a completed run with stale composer locks', () => {
+  seedTwoSessions({
+    activeSessionId: 'session-A',
+    lockedSessionId: 'session-A',
+    lockedScopeId: 'scope-A',
+    otherScopeId: 'scope-B',
+    requestId: 'req-A',
+  })
+
+  const before = useAgent.getState()
+  const slice = getSessionSlice(before, 'session-A')
+  const completedRun = {
+    ...slice.scopeRunStates['scope-A'],
+    phase: 'done' as const,
+    terminalReason: 'done' as const,
+  }
+  useAgent.setState({
+    sessions: {
+      ...before.sessions,
+      'session-A': {
+        ...slice,
+        isStreaming: true,
+        foregroundBusy: true,
+        composerLocked: true,
+        streamingMessageId: 'msg-1',
+        streamingRequestId: 'req-A',
+        scopeRunStates: {
+          ...slice.scopeRunStates,
+          'scope-A': completedRun,
+        },
+      },
+    },
+    scopeRunStates: {
+      ...before.scopeRunStates,
+      'scope-A': completedRun,
+    },
+    isStreaming: true,
+    foregroundBusy: true,
+    composerLocked: true,
+    streamingMessageId: 'msg-1',
+    streamingRequestId: 'req-A',
+  })
+
+  driverApi.completeScopeRunAfterSendSuccess('scope-A', 'req-A')
+
+  const state = useAgent.getState()
+  const afterSlice = getSessionSlice(state, 'session-A')
+  assert.equal(afterSlice.isStreaming, false, 'success fallback clears stale session streaming flag')
+  assert.equal(afterSlice.foregroundBusy, false, 'success fallback clears stale foreground lock')
+  assert.equal(afterSlice.composerLocked, false, 'success fallback unlocks the composer')
+  assert.equal(afterSlice.streamingRequestId, null, 'success fallback hides the Stop button')
+  assert.equal(state.isStreaming, false, 'active mirror streaming flag is cleared')
+  assert.equal(state.composerLocked, false, 'active mirror composer lock is cleared')
+  assert.equal(afterSlice.scopeRunStates['scope-A']?.terminalReason, 'done')
 })
 
 test('scope run events ignore stale non-started run ids but allow takeover and started handoff', () => {

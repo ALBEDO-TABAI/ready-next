@@ -14,6 +14,10 @@ export type EmbeddedSkillId =
   | 'image-reverse-descriptor'
   | 'context-compact'
   | 'fastnote'
+  | 'surf-pro'
+  | 'okf-bundle'
+  | 'okf-library'
+  | 'script-expert-ready'
 
 export interface EmbeddedSkillManifest {
   id: EmbeddedSkillId
@@ -127,6 +131,34 @@ export const EMBEDDED_SKILLS: EmbeddedSkillManifest[] = [
     name: 'FastNote',
     description: '笔记快捷模式路由方法论：把 IM-style 混合输入按 -/: / -/2: 触发深度档位分发到剪藏 / study-notes / image-analysis-router / video-* 并写入工作区',
     version: '2026.05.17',
+    requirementsFile: 'requirements.txt',
+  },
+  {
+    id: 'surf-pro',
+    name: 'Surf Pro',
+    description: '专业网页调研与本地资料归档方法论：机制拆解、多路搜索、来源分级、URL/图片/文本证据库、停止搜索判定和证据报告',
+    version: '2026.06.16',
+    requirementsFile: 'requirements.txt',
+  },
+  {
+    id: 'okf-bundle',
+    name: 'OKF Bundle',
+    description: '把指定范围的资料提炼成符合 OKF v0.1 规范的单个知识包，并登记到工作区母题索引',
+    version: '2026.06.17',
+    requirementsFile: 'requirements.txt',
+  },
+  {
+    id: 'okf-library',
+    name: 'OKF Library',
+    description: '盘点工作区内的 OKF 知识包，归并去重并沉淀进受控知识库目录',
+    version: '2026.06.17',
+    requirementsFile: 'requirements.txt',
+  },
+  {
+    id: 'script-expert-ready',
+    name: 'Script Expert Ready',
+    description: '将成熟故事转化为可拍摄执行的影视剧本、分镜方案、镜头信息卡和数字资产清单',
+    version: '0.5.0',
     requirementsFile: 'requirements.txt',
   },
 ]

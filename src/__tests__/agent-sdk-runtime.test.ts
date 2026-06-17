@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -4488,6 +4488,62 @@ test('agent sdk runtime exposes authorized skill tools for explicit skill turns'
   } finally {
     __setSkillActionToolDefsForTests(null)
     clearLastReferenceSkill('scope-skill-tools')
+  }
+})
+
+test('agent sdk runtime exposes skill_run_shell for explicit script-backed reference skills', async () => {
+  const skillRoot = await mkdtemp(join(tmpdir(), 'ready-script-reference-skill-'))
+  await mkdir(join(skillRoot, 'scripts'))
+  const seenToolNames: string[] = []
+  let seenInstructions = ''
+  let injected = false
+  const runtime = createRuntime({
+    skillContextOrchestrator: {
+      findExplicitlyRequestedSkills: () => [{
+        id: 'okf-bundle',
+        name: 'OKF Bundle',
+        managedPath: skillRoot,
+      }],
+      buildPreferredSkillToolNames: () => ['skill_run_shell', 'skill_write_artifact', 'skill_read_artifact'],
+      rememberExplicitReferenceSkillHint: () => {
+        rememberLastReferenceSkill('scope-script-reference-tools', {
+          id: 'okf-bundle',
+          name: 'OKF Bundle',
+        })
+        return true
+      },
+      maybeInjectExplicitSkillContext: async ({ session }) => {
+        injected = true
+        session.messages.push({
+          role: 'system',
+          content: '已加载技能「OKF Bundle」。必须实际创建知识包文件夹并写入 .md 文件。',
+        })
+      },
+    },
+    runAgent: async ({ tools, instructions, onTextDelta }) => {
+      seenToolNames.push(...tools.map((item) => item.name))
+      seenInstructions = instructions
+      onTextDelta('脚本型 reference skill 工具面已加载')
+      return { finalText: '脚本型 reference skill 工具面已加载' }
+    },
+  })
+  runtime.newSession('butler::scope-script-reference-tools', 'system prompt')
+
+  try {
+    const result = await runtime.sendMessage('butler::scope-script-reference-tools', '使用 okf-bundle 提取知识包', 'run-script-reference-tools', {
+      publicSessionId: 'scope-script-reference-tools',
+      taskId: 'task-script-reference-tools',
+    })
+
+    assert.equal(result.success, true)
+    assert.equal(injected, true)
+    assert.match(seenInstructions, /必须实际创建知识包文件夹/)
+    assert.equal(seenToolNames.includes('skill_run_shell'), true)
+    assert.equal(seenToolNames.includes('skill_write_artifact'), true)
+    assert.equal(seenToolNames.includes('skill_start_detached'), false)
+  } finally {
+    clearLastReferenceSkill('scope-script-reference-tools')
+    await rm(skillRoot, { recursive: true, force: true })
   }
 })
 

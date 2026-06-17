@@ -381,11 +381,53 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
 
   function completeScopeRunAfterSendSuccess(scopeId: string, requestId: string): void {
     clearInfrastructureWatchdog(scopeId, requestId)
-    const runState = store.getState().scopeRunStates[scopeId] || null
-    if (runState?.requestId && runState.requestId !== requestId) return
-    if (!runState || runState.terminalReason || !isForegroundBusyScopeRunState(runState)) return
-    finalizeScopeRunAfterStreamDone(scopeId, runState)
-    void persistAssistantMessageForRun(scopeId, store.getState().scopeRunStates[scopeId] || runState)
+    let persistedRunState: ScopeRunState | null = null
+    store.setState((state: any) => {
+      const sessionId = sessionKeyForScopeId(state, scopeId)
+      const currentSlice = normalizeSessionSlice(state.sessions?.[sessionId])
+      const previous = currentSlice.scopeRunStates[scopeId] || state.scopeRunStates?.[scopeId] || null
+      if (previous?.requestId && previous.requestId !== requestId) return {}
+
+      const activeRequestId = currentSlice.streamingRequestId || state.streamingRequestId || null
+      const ownsScope = (
+        currentSlice.conversationId === scopeId ||
+        state.currentScopeId === scopeId ||
+        activeRequestId === requestId
+      )
+      if (!ownsScope) return {}
+      if (!previous && activeRequestId !== requestId) return {}
+
+      const nextRun = previous
+        ? {
+          ...previous,
+          scopeId,
+          phase: previous.terminalReason ? previous.phase : 'done',
+          terminalReason: previous.terminalReason || 'done',
+          updatedAt: new Date().toISOString(),
+        }
+        : null
+      persistedRunState = nextRun
+      return withSessionSliceAndActiveRuntimeMirror(state, sessionId, {
+        scopeRunStates: nextRun
+          ? {
+            ...currentSlice.scopeRunStates,
+            [scopeId]: nextRun,
+          }
+          : currentSlice.scopeRunStates,
+        isStreaming: false,
+        foregroundBusy: false,
+        composerLocked: false,
+        streamingMessageId: null,
+        streamingRequestId: null,
+      })
+    })
+
+    if (persistedRunState) {
+      const state = store.getState()
+      const sessionId = sessionKeyForScopeId(state, scopeId)
+      const currentSlice = normalizeSessionSlice(state.sessions?.[sessionId])
+      void persistAssistantMessageForRun(scopeId, currentSlice.scopeRunStates[scopeId] || state.scopeRunStates?.[scopeId] || persistedRunState)
+    }
   }
 
   function upsertScopeRunState(

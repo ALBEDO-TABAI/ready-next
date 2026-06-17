@@ -1,0 +1,15 @@
+{
+  "id": "script-expert-ready",
+  "name": "script-expert-ready",
+  "displayName": "Script Expert Ready",
+  "description": "将成熟故事转化为可拍摄执行的影视剧本、分镜方案、镜头信息卡和数字资产清单",
+  "version": "0.5.0",
+  "runtime": "reference",
+  "execution": { "mode": "advisory" },
+  "actions": {
+    "read_skill": {
+      "runtime": "reference",
+      "visibility": "internal"
+    }
+  }
+}
