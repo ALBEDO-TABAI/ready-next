@@ -16,6 +16,7 @@ test('chat header opens one source/history switcher from the title and source bu
   assert.match(chatHeader, /data-chat-session-menu="true"/)
   assert.match(chatHeader, /data-chat-session-title="true"/)
   assert.match(chatHeader, /data-chat-session-title="true"[\s\S]*color: 'var\(--text-body\)'/)
+  assert.match(chatHeader, /data-chat-session-title="true"[\s\S]*width:\s*'100%'[\s\S]*WebkitMaskImage: 'linear-gradient\(to right, #000 calc\(100% - 28px\), transparent 100%\)'/)
   assert.match(chatHeader, /title="会话来源"/)
   assert.match(chatHeader, /MessageSquare/)
   assert.match(chatHeader, /ChevronRight/)
@@ -63,4 +64,20 @@ test('chat header opens one source/history switcher from the title and source bu
   assert.doesNotMatch(chatHeader, /ios-segmented-control/)
   assert.doesNotMatch(chatHeader, /filteredScopes\.map/)
   assert.doesNotMatch(chatHeader, /sessionSections\.map/)
+})
+
+test('chat header row action menu survives history panel repositioning', () => {
+  const chatHeader = readWorkspaceFile('src/renderer/components/agent/ChatHeader.tsx')
+
+  assert.match(chatHeader, /const rowMenuTriggerRef = useRef<HTMLButtonElement \| null>\(null\)/)
+  assert.match(chatHeader, /const computeRowMenuPosition = useCallback/)
+  assert.match(chatHeader, /const rowTrigger = rowMenuTriggerRef\.current/)
+  assert.match(chatHeader, /document\.body\.contains\(rowTrigger\)/)
+  assert.match(chatHeader, /return \{ \.\.\.current, position \}/)
+  assert.match(chatHeader, /const trigger = event\.currentTarget/)
+  assert.match(chatHeader, /rowMenuTriggerRef\.current = trigger/)
+  assert.doesNotMatch(
+    chatHeader,
+    /const syncMenuPositions = \(\) => \{\s*\/\/ A fixed-positioned row menu detaches from its trigger on scroll\/resize\.\s*setRowMenu\(null\)/,
+  )
 })

@@ -86,6 +86,7 @@ export default function ChatHeader({
   const titleTriggerRef = useRef<HTMLButtonElement>(null)
   const historyMenuRef = useRef<HTMLDivElement>(null)
   const rowMenuRef = useRef<HTMLDivElement>(null)
+  const rowMenuTriggerRef = useRef<HTMLButtonElement | null>(null)
   const portalRoot = typeof document !== 'undefined' ? document.body : null
   const historyMenuWidth = 340
   const recallActionRailWidth = 72
@@ -109,6 +110,10 @@ export default function ChatHeader({
     }
   }, [])
 
+  const computeRowMenuPosition = useCallback((trigger: HTMLButtonElement | null): FloatingMenuPosition | null => (
+    computeMenuPosition(trigger, 140, 'right')
+  ), [computeMenuPosition])
+
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       const target = e.target as Node
@@ -128,7 +133,10 @@ export default function ChatHeader({
           rowMenuRef.current?.contains(target) ||
           (target instanceof Element && target.closest('[data-row-menu-trigger="true"]'))
         )
-        if (!clickedRowMenu) setRowMenu(null)
+        if (!clickedRowMenu) {
+          rowMenuTriggerRef.current = null
+          setRowMenu(null)
+        }
       }
     }
     document.addEventListener('mousedown', handler)
@@ -138,12 +146,16 @@ export default function ChatHeader({
   // Close the per-row "更多" menu whenever the history dropdown closes, so a
   // detached menu never lingers after the list it belongs to is gone.
   useEffect(() => {
-    if (!showHistory) setRowMenu(null)
+    if (!showHistory) {
+      rowMenuTriggerRef.current = null
+      setRowMenu(null)
+    }
   }, [showHistory])
 
   const closeHistoryMenu = useCallback(() => {
     setShowHistory(false)
     setHistoryMenuPosition(null)
+    rowMenuTriggerRef.current = null
     setRowMenu(null)
   }, [])
 
@@ -186,8 +198,23 @@ export default function ChatHeader({
     if (!showHistory) return
 
     const syncMenuPositions = () => {
-      // A fixed-positioned row menu detaches from its trigger on scroll/resize.
-      setRowMenu(null)
+      setRowMenu((current) => {
+        if (!current) return current
+        const rowTrigger = rowMenuTriggerRef.current
+        if (!rowTrigger || !document.body.contains(rowTrigger)) {
+          rowMenuTriggerRef.current = null
+          return null
+        }
+        const position = computeRowMenuPosition(rowTrigger)
+        if (!position) {
+          rowMenuTriggerRef.current = null
+          return null
+        }
+        if (position.left === current.position.left && position.top === current.position.top) {
+          return current
+        }
+        return { ...current, position }
+      })
       const trigger = historyMenuAnchor === 'scope' ? scopeTriggerRef.current : titleTriggerRef.current
       const align = historyMenuAnchor === 'scope' ? 'right' : 'left'
       setHistoryMenuPosition(computeMenuPosition(trigger, historyMenuWidth, align))
@@ -200,7 +227,7 @@ export default function ChatHeader({
       unsubscribeWindowResize()
       window.removeEventListener('scroll', syncMenuPositions, true)
     }
-  }, [computeMenuPosition, historyMenuAnchor, historyMenuWidth, showHistory])
+  }, [computeMenuPosition, computeRowMenuPosition, historyMenuAnchor, historyMenuWidth, showHistory])
 
   const historyMenuStyle = {
     ...buildChatHeaderFloatingMenuStyle(historyMenuWidth),
@@ -355,19 +382,19 @@ export default function ChatHeader({
             data-row-menu-trigger="true"
             onClick={(event) => {
               event.stopPropagation()
-              const rect = event.currentTarget.getBoundingClientRect()
+              const trigger = event.currentTarget
               setRowMenu((prev) => {
-                if (prev?.conversationId === conv.conversationId) return null
-                const menuWidth = 140
-                const margin = 8
-                const left = Math.max(
-                  margin,
-                  Math.min(rect.right - menuWidth, window.innerWidth - menuWidth - margin),
-                )
+                if (prev?.conversationId === conv.conversationId) {
+                  rowMenuTriggerRef.current = null
+                  return null
+                }
+                rowMenuTriggerRef.current = trigger
+                const position = computeRowMenuPosition(trigger)
+                if (!position) return null
                 return {
                   conversationId: conv.conversationId,
                   title: conv.title || '新对话',
-                  position: { left: Math.round(left), top: Math.round(rect.bottom + 6) },
+                  position,
                 }
               })
             }}
@@ -421,6 +448,7 @@ export default function ChatHeader({
                 alignItems: 'center',
                 gap: 5,
                 maxWidth: '100%',
+                width: '100%',
                 height: '100%',
                 border: 'none',
                 background: 'transparent',
@@ -708,6 +736,7 @@ export default function ChatHeader({
             type="button"
             onClick={() => {
               setPendingRenameSession({ conversationId: rowMenu.conversationId, title: rowMenu.title })
+              rowMenuTriggerRef.current = null
               setRowMenu(null)
               closeHistoryMenu()
             }}
@@ -721,6 +750,7 @@ export default function ChatHeader({
             type="button"
             onClick={() => {
               setPendingDeleteSession({ conversationId: rowMenu.conversationId, title: rowMenu.title })
+              rowMenuTriggerRef.current = null
               setRowMenu(null)
               closeHistoryMenu()
             }}
