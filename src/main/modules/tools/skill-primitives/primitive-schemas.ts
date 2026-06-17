@@ -53,7 +53,7 @@ export const SKILL_PRIMITIVE_SCHEMAS = {
       .describe('默认 utf-8；base64 用于二进制内容'),
   }),
   skill_read_artifact: z.object({
-    relativePath: TRIMMED_STRING.describe('相对 artifact 根目录的路径；也接受同一 artifact 根目录内、由工具结果返回的绝对路径'),
+    relativePath: TRIMMED_STRING.describe('相对 artifact 根目录、当前任务读根或 skill 托管资源目录的路径；也接受这些根目录内、由工具结果返回的绝对路径'),
     maxBytes: z
       .number()
       .int()

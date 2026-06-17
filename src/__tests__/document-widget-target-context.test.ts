@@ -120,6 +120,8 @@ describe('document widget target context', () => {
     assert.equal(typeof composed, 'string')
     assert.match(String(composed), /### 技能目录引用/)
     assert.match(String(composed), /skillId: video-expert-analyzer/)
+    assert.doesNotMatch(String(composed), /Library\/Application Support\/ready\/skill-runtime/)
+    assert.match(String(composed), /不要把它当作普通 workspace 文件路径读取/)
     assert.doesNotMatch(String(composed), /\/skill video-expert-analyzer/)
   })
 
@@ -156,6 +158,44 @@ describe('document widget target context', () => {
     const text = String(composed)
     assert.equal((text.match(/### 技能目录引用/g) || []).length, 1)
     assert.doesNotMatch(text, /--- 引用技能目录:/)
+    assert.doesNotMatch(text, /Library\/Application Support\/ready\/skill-runtime/)
+  })
+
+  it('injects skill pool mentions without exposing the local skill directory path', async () => {
+    ;(globalThis as { window?: unknown }).window = {
+      electronAPI: {
+        settings: {
+          getAIConfig: async () => ({ success: true, data: { provider: 'anthropic', baseUrl: 'https://api.example.com' } }),
+        },
+        chat: {
+          readFileForAI: async () => ({ success: false, error: 'not used' }),
+        },
+      },
+    }
+
+    const skillAttachment = {
+      id: 'skill-att-2',
+      name: 'okf-bundle',
+      path: '/Users/user/Library/Application Support/ready/skill-runtime/custom-skills/okf-bundle',
+      type: 'text' as const,
+      size: 0,
+      ext: '.skill',
+      source: 'skill-folder' as const,
+      skillId: 'okf-bundle',
+      skillFolderPath: '/Users/user/Library/Application Support/ready/skill-runtime/custom-skills/okf-bundle',
+    }
+
+    const composed = await buildComposedAgentInput({
+      content: '用@[okf-bundle]整理这些资料',
+      attachments: [],
+      filePool: [skillAttachment],
+    })
+
+    const text = String(composed)
+    assert.match(text, /--- 引用技能目录: okf-bundle ---/)
+    assert.match(text, /skillId: okf-bundle/)
+    assert.match(text, /不要把它当作普通 workspace 文件路径读取/)
+    assert.doesNotMatch(text, /Library\/Application Support\/ready\/skill-runtime/)
   })
 
   it('injects document tab and calendar event references into composed input', async () => {

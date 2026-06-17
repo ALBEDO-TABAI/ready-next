@@ -62,6 +62,42 @@ test('reads an absolute artifact path when it is still under the sandbox root', 
   }
 })
 
+test('reads bundled skill assets from the read-only asset root', async () => {
+  const fx = makeFixture()
+  try {
+    mkdirSync(join(fx.assetRoot, 'references'), { recursive: true })
+    writeFileSync(join(fx.assetRoot, 'references', 'okf-spec.md'), '# OKF spec', 'utf-8')
+
+    const out = await executeReadArtifact(
+      { relativePath: 'references/okf-spec.md' },
+      { skillId: 'test-skill', lookupSkillRoots: fx.lookup },
+    )
+
+    assert.equal(out.text, '# OKF spec')
+    assert.equal((out.data as any)?.absolutePath, join(fx.assetRoot, 'references', 'okf-spec.md'))
+  } finally {
+    fx.cleanup()
+  }
+})
+
+test('keeps artifactRoot precedence over bundled skill assets for relative reads', async () => {
+  const fx = makeFixture()
+  try {
+    writeFileSync(join(fx.artifactRoot, 'report.md'), 'artifact report', 'utf-8')
+    writeFileSync(join(fx.assetRoot, 'report.md'), 'asset report', 'utf-8')
+
+    const out = await executeReadArtifact(
+      { relativePath: 'report.md' },
+      { skillId: 'test-skill', lookupSkillRoots: fx.lookup },
+    )
+
+    assert.equal(out.text, 'artifact report')
+    assert.equal((out.data as any)?.absolutePath, join(fx.artifactRoot, 'report.md'))
+  } finally {
+    fx.cleanup()
+  }
+})
+
 test('honors maxBytes and marks truncated=true when the file is larger', async () => {
   const fx = makeFixture()
   try {
@@ -111,7 +147,7 @@ test('surfaces not_a_file when path is a directory', async () => {
   }
 })
 
-test('refuses path_escape for ../.. attempts', async () => {
+test('refuses path escapes across every configured read root', async () => {
   const fx = makeFixture()
   try {
     await assert.rejects(
@@ -119,7 +155,10 @@ test('refuses path_escape for ../.. attempts', async () => {
         { relativePath: '../../etc/passwd' },
         { skillId: 'test-skill', lookupSkillRoots: fx.lookup },
       ),
-      (error: unknown) => (error as { errorKind?: string })?.errorKind === 'path_escape',
+      (error: unknown) => {
+        const kind = (error as { errorKind?: string })?.errorKind
+        return kind === 'path_escape' || kind === 'no_root_match'
+      },
     )
   } finally {
     fx.cleanup()

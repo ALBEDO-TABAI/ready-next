@@ -520,7 +520,7 @@ export async function buildComposedAgentInputWithDiagnostics(params: {
             '### 技能目录引用',
             `- 名称: ${att.name}`,
             att.skillId ? `- skillId: ${att.skillId}` : null,
-            `- 路径: ${att.skillFolderPath || att.path}`,
+            '- 状态: 已安装到 Ready 托管区；不要把它当作普通 workspace 文件路径读取。',
             '如果需要执行这个 skill，请优先直接调用当前工具列表里真实存在的 `skill_*` 工具，不要把 `/skill ...` 当作普通文本回复。',
           ].filter(Boolean)
           blocks.push({ type: 'text', text: `\n\n${skillLines.join('\n')}` })
@@ -705,7 +705,7 @@ export async function buildComposedAgentInputWithDiagnostics(params: {
         if (poolFile.source === 'skill-folder') {
           finalMessage = appendTextBlock(
             finalMessage,
-            `\n\n--- 引用技能目录: ${poolFile.name} ---\n路径: ${poolFile.skillFolderPath || poolFile.path}\n${poolFile.skillId ? `skillId: ${poolFile.skillId}\n` : ''}如果需要执行它，请优先直接调用真实的 skill_* 工具，不要只输出 /skill 文本命令。`,
+            `\n\n--- 引用技能目录: ${poolFile.name} ---\n${poolFile.skillId ? `skillId: ${poolFile.skillId}\n` : ''}状态: 已安装到 Ready 托管区；不要把它当作普通 workspace 文件路径读取。\n如果需要执行它，请优先直接调用真实的 skill_* 工具，不要只输出 /skill 文本命令。`,
           )
           continue
         }

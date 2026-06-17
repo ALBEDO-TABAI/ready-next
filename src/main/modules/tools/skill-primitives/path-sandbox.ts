@@ -7,13 +7,9 @@
  *   artifactRoot  = <outputsRoot>/<skillId>/       — writable, read-visible
  *   assetRoot     = <managedPath>                  — READ-ONLY for primitives
  *
- * Write primitives always resolve against `artifactRoot`. The `assetRoot`
- * exists so tests / read primitives can surface skill-bundled assets
- * (SKILL.md, README, templates/) without duplicating files into the output
- * dir. Phase 1 only exposes write-to-artifactRoot; asset access is
- * deliberately NOT added — if the model needs to peek at an asset it can use
- * `skill_run_shell` with `cat`. This keeps the write surface as small as
- * possible.
+ * Write primitives always resolve against `artifactRoot`. Read primitives may
+ * also resolve against `assetRoot` so a skill can consult bundled assets
+ * (SKILL.md, README, templates/) without copying them into the output dir.
  *
  * Path validation strategy:
  *   1. Reject `null` / empty / non-string relativePath early.

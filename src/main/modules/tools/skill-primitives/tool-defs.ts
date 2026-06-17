@@ -48,7 +48,7 @@ export const PRIMITIVE_TOOL_DEFS: SkillToolDef[] = [
   {
     name: 'skill_read_artifact',
     description:
-      '从技能 artifact 目录（<outputsRoot>/<skillId>/）读取文件。优先传相对路径；如果上一条 skill_run_shell 返回了该目录内的绝对日志路径，也可以直接传入。默认最多读取 32K 字符，超出部分会被截断并标注 truncated=true。若要读取技能 bundled 的脚本 / 模板，请用 skill_run_shell 的 cat 命令。',
+      '从技能 artifact 目录（<outputsRoot>/<skillId>/）、当前任务读根或 skill 托管资源目录读取文件。优先传相对路径；如果上一条工具返回了允许根内的绝对日志路径，也可以直接传入。默认最多读取 32K 字符，超出部分会被截断并标注 truncated=true。',
     kind: 'primitive',
     params: zodObjectToParamList(SKILL_PRIMITIVE_SCHEMAS.skill_read_artifact),
   },

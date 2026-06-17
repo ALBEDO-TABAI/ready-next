@@ -1,7 +1,8 @@
 /**
  * Handler for `skill_read_artifact`. Reads up to `maxBytes` from the per-skill
- * artifact root. Truncation is explicit in the structured payload so the LLM
- * can tell when it only saw a prefix. Missing file surfaces as a structured
+ * artifact root, active task read roots, or the skill's read-only bundled asset
+ * root. Truncation is explicit in the structured payload so the LLM can tell
+ * when it only saw a prefix. Missing file surfaces as a structured
  * ToolDomainError('not_found', …) by way of the dispatch layer.
  */
 
@@ -114,12 +115,13 @@ export async function executeReadArtifact(
   }
 
   // Build the candidate root list: per-skill artifactRoot first (existing
-  // relative-path semantics keep working), then any additional read-only
-  // roots declared by the active TurnFrame skill slice.
+  // relative-path semantics keep working), then any active TurnFrame read
+  // roots, then the skill's read-only bundled assets (SKILL.md, references/*,
+  // templates/*). Writes still resolve only against artifactRoot.
   const additionalRoots = Array.isArray(deps.additionalAllowedReadRoots)
     ? deps.additionalAllowedReadRoots.filter((root): root is string => typeof root === 'string' && root.trim().length > 0)
     : []
-  const candidateRoots = [roots.artifactRoot, ...additionalRoots]
+  const candidateRoots = Array.from(new Set([roots.artifactRoot, ...additionalRoots, roots.assetRoot]))
 
   let resolution: ReadArtifactPathResolution
   try {
