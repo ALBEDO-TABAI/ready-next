@@ -1390,25 +1390,29 @@ class SkillChildRunner {
             },
           })
           const actionInput = actionHandle.ok ? actionHandle.input : action.input
-          const gatewayResult = await executeSkillActionViaToolGateway({
-            skillId: active.skillId,
-            action: action.action,
-            input: actionInput,
-            childRunId: active.childRunId,
-            scopeId: active.scopeId,
-            sessionId: active.sessionId,
-            outputDir: active.outputDir || null,
-            runStatePath: active.runStatePath || null,
-            childInternal: true,
-            agentContext: active.agentContext,
-            signal: parentAbortLink.childSignal,
-            runtimeManager: this.config.runtimeManager,
-          })
-          const result = gatewayResult.skillRunResult
-          if (!result) {
-            throw makeGatewayExecutionError(gatewayResult)
+          const runGatewayAction = async (): Promise<SkillRunResult> => {
+            const gatewayResult = await executeSkillActionViaToolGateway({
+              skillId: active.skillId,
+              action: action.action,
+              input: actionInput,
+              childRunId: active.childRunId,
+              scopeId: active.scopeId,
+              sessionId: active.sessionId,
+              outputDir: active.outputDir || null,
+              runStatePath: active.runStatePath || null,
+              childInternal: true,
+              agentContext: active.agentContext,
+              signal: parentAbortLink.childSignal,
+              runtimeManager: this.config.runtimeManager,
+            })
+            const result = gatewayResult.skillRunResult
+            if (!result) {
+              throw makeGatewayExecutionError(gatewayResult)
+            }
+            return result
           }
-          const recoveredResult = await this.completePendingHandoffsAfterBlockedAction(active, result)
+          const result = await runGatewayAction()
+          const recoveredResult = await this.completePendingHandoffsAfterBlockedAction(active, result, runGatewayAction)
           actionResults.push(recoveredResult)
           return recoveredResult
         } catch (error) {
@@ -1512,6 +1516,7 @@ class SkillChildRunner {
   private async completePendingHandoffsAfterBlockedAction(
     active: ActiveRun,
     result: SkillRunResult,
+    retryAction?: () => Promise<SkillRunResult>,
   ): Promise<SkillRunResult> {
     const outputs = result.outputs ?? {}
     const outputDir = pickString(result.outputDir)
@@ -1521,30 +1526,12 @@ class SkillChildRunner {
     if (!outputDir) return result
     if (!this.hasCompletableHandoffTasks(outputDir)) return result
     if (!active.agentContext) return result
+    let completed: Awaited<ReturnType<typeof completePendingSkillHandoffs>>
     try {
-      const completed = await completePendingSkillHandoffs({
+      completed = await completePendingSkillHandoffs({
         outputDir,
         agentContext: active.agentContext,
       })
-      if (completed.length === 0) return result
-      logAgentMetric('skill_child_handoff_completed', {
-        childRunId: active.childRunId,
-        skillId: active.skillId,
-        action: result.action,
-        outputDir,
-        tasks: completed.map((item) => item.name),
-      })
-      return {
-        ...result,
-        success: true,
-        status: 'done',
-        outputDir,
-        error: undefined,
-        stdout: [
-          result.stdout,
-          `completed handoff tasks: ${completed.map((item) => item.name).join(', ')}`,
-        ].filter(Boolean).join('\n'),
-      }
     } catch (error) {
       logAgentMetric('skill_child_handoff_completion_failed', {
         childRunId: active.childRunId,
@@ -1554,6 +1541,37 @@ class SkillChildRunner {
         error: errorMessage(error),
       })
       return result
+    }
+    if (completed.length === 0) return result
+    logAgentMetric('skill_child_handoff_completed', {
+      childRunId: active.childRunId,
+      skillId: active.skillId,
+      action: result.action,
+      outputDir,
+      tasks: completed.map((item) => item.name),
+    })
+    if (retryAction) {
+      const retryResult = await retryAction()
+      return {
+        ...retryResult,
+        stdout: [
+          result.stdout,
+          `completed handoff tasks: ${completed.map((item) => item.name).join(', ')}`,
+          retryResult.stdout,
+        ].filter(Boolean).join('\n'),
+      }
+    }
+    return {
+      ...result,
+      success: false,
+      status: 'blocked',
+      outputDir,
+      error: result.error ?? 'handoff completed; rerun finalize required',
+      stdout: [
+        result.stdout,
+        `completed handoff tasks: ${completed.map((item) => item.name).join(', ')}`,
+        'handoff outputs are ready; rerun finalize to produce final artifacts',
+      ].filter(Boolean).join('\n'),
     }
   }
 

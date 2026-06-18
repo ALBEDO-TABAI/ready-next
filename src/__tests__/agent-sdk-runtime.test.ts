@@ -283,6 +283,87 @@ test('agent sdk runtime exposes only background collection workflow tools for mu
   assert.ok(!toolNames.includes('browser_download_urls'))
 })
 
+test('agent sdk runtime suppresses browser task tools for active VEA skill resume after recent collection intent', async () => {
+  const seenToolNames: string[][] = []
+  let activeSkillHint = false
+  __setSkillActionToolDefsForTests(() => [
+    {
+      name: 'skill_video_expert_pipeline',
+      description: 'Run VEA pipeline',
+      kind: 'skill_action',
+      skillId: 'video-expert-analyzer',
+      action: 'video_expert_pipeline',
+      visibility: 'public',
+      params: [],
+    },
+    {
+      name: 'skill_video_expert_ai_analyze',
+      description: 'Run VEA analysis',
+      kind: 'skill_action',
+      skillId: 'video-expert-analyzer',
+      action: 'video_expert_ai_analyze',
+      visibility: 'public',
+      params: [],
+    },
+  ])
+  const runtime = createRuntime({
+    skillContextOrchestrator: {
+      findExplicitlyRequestedSkills: () => [],
+      buildPreferredSkillToolNames: () => [],
+      getCurrentReferenceSkillHint: () => activeSkillHint
+        ? { id: 'video-expert-analyzer', name: 'Video Expert Analyzer' }
+        : null,
+    },
+    runAgent: async ({ tools }) => {
+      seenToolNames.push(tools.map((tool) => tool.name))
+      return { finalText: 'ok' }
+    },
+  })
+  runtime.setBrowserController({} as never)
+  runtime.newSession('butler::scope-vea-resume-tools', 'system prompt')
+
+  try {
+    const collect = await runtime.sendMessage(
+      'butler::scope-vea-resume-tools',
+      '把这个博主的每篇笔记都采集下来并保存图片',
+      'run-vea-resume-tools-1',
+      {
+        publicSessionId: 'scope-vea-resume-tools',
+        taskId: 'task-vea-resume-tools-1',
+        requestEnvelope: {
+          primaryInstruction: '把这个博主的每篇笔记都采集下来并保存图片',
+          resources: [],
+        },
+      },
+    )
+    activeSkillHint = true
+    const resume = await runtime.sendMessage(
+      'butler::scope-vea-resume-tools',
+      '跑 finalize',
+      'run-vea-resume-tools-2',
+      {
+        publicSessionId: 'scope-vea-resume-tools',
+        taskId: 'task-vea-resume-tools-2',
+        requestEnvelope: {
+          primaryInstruction: '跑 finalize',
+          resources: [],
+        },
+      },
+    )
+
+    assert.equal(collect.success, true)
+    assert.equal(resume.success, true)
+    assert.ok(seenToolNames[0]?.includes('browser_resume_task'))
+    assert.ok(seenToolNames[1]?.includes('skill_video_expert_pipeline'))
+    assert.ok(seenToolNames[1]?.includes('skill_video_expert_ai_analyze'))
+    for (const name of ['browser_get_task', 'browser_resume_task', 'browser_visible_collect', 'browser_collect_notes', 'browser_download_collected_media']) {
+      assert.equal(seenToolNames[1]?.includes(name), false, `${name} should be hidden during active skill resume`)
+    }
+  } finally {
+    __setSkillActionToolDefsForTests(null)
+  }
+})
+
 test('agent sdk runtime keeps Send IM visible for a bare retry after explicit local Send IM', async () => {
   const seenToolNames: string[][] = []
   const runtime = createRuntime({

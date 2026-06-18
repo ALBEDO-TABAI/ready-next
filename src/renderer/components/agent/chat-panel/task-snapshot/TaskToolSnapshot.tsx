@@ -108,9 +108,37 @@ function taskRunSnapshotKey(run: TaskCardRun): string {
   return `${run.scopeId}:${getTaskRunDisplayKey(run)}`
 }
 
-function newerTaskSnapshot(snapshot: TaskCardRun, liveTaskRuns: TaskCardRun[]): TaskCardRun {
+function stableTaskIdentity(value: string | null | undefined): string | null {
+  const normalized = String(value || '').trim()
+  return normalized || null
+}
+
+function taskRunIdentityValues(run: TaskCardRun): Set<string> {
+  const childRunId = stableTaskIdentity(run.taskContinuation?.childRunId)
+  const values = [
+    stableTaskIdentity(run.taskId),
+    stableTaskIdentity(run.taskContinuation?.taskId),
+    childRunId,
+    childRunId ? `skill-child:${childRunId}` : null,
+  ]
+  return new Set(values.filter((value): value is string => Boolean(value)))
+}
+
+function taskRunsShareIdentity(left: TaskCardRun, right: TaskCardRun): boolean {
+  if (left.scopeId !== right.scopeId) return false
+  const leftValues = taskRunIdentityValues(left)
+  if (leftValues.size === 0) return false
+  for (const value of taskRunIdentityValues(right)) {
+    if (leftValues.has(value)) return true
+  }
+  return false
+}
+
+export function newerTaskSnapshot(snapshot: TaskCardRun, liveTaskRuns: TaskCardRun[]): TaskCardRun {
   const snapshotKey = taskRunSnapshotKey(snapshot)
-  const liveRun = liveTaskRuns.find((run) => taskRunSnapshotKey(run) === snapshotKey)
+  const liveRun =
+    liveTaskRuns.find((run) => taskRunSnapshotKey(run) === snapshotKey) ||
+    liveTaskRuns.find((run) => taskRunsShareIdentity(snapshot, run))
   if (!liveRun) return snapshot
   const liveUpdatedAt = new Date(liveRun.updatedAt).getTime()
   const snapshotUpdatedAt = new Date(snapshot.updatedAt).getTime()

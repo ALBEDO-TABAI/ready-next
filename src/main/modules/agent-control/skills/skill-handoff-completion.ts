@@ -82,12 +82,15 @@ export function listHandoffValidationRepairTasks(outputDir: string): SkillHandof
   if (!tasks) return []
   const repairs: SkillHandoffTask[] = []
   for (const [name, rawTask] of Object.entries(tasks)) {
+    const task = objectValue(rawTask)
+    const status = (stringValue(task?.status) ?? '').toLowerCase()
     const item = resolveTaskPaths(outputDir, name, rawTask)
     if (!item) continue
     const validationErrorsPath = join(outputDir, HANDOFF_DIR, name, 'validation_errors.json')
     if (!existsSync(validationErrorsPath) || !existsSync(item.outputPath)) continue
     try {
-      if (statSync(validationErrorsPath).mtimeMs <= statSync(item.outputPath).mtimeMs) continue
+      if (status !== 'validation_failed'
+          && statSync(validationErrorsPath).mtimeMs <= statSync(item.outputPath).mtimeMs) continue
     } catch {
       continue
     }

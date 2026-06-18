@@ -3510,10 +3510,14 @@ export class AgentSdkRuntime extends EventEmitter {
     const msgBatchIntent = messageHasBrowserBatchCollectionIntent(params.message, params.requestEnvelope)
     const localSendImIntent = params.localSendImIntent === true
       || hasLocalSendImIntentForTurn(params.message, params.requestEnvelope)
+    const skillResumeOrRepairContext = params.authorization.mode === 'selected' && params.authorization.source !== 'explicit'
+    const explicitBrowserCollectionIntent = msgIntent || msgBatchIntent
+    const suppressBrowserContentTasks = skillResumeOrRepairContext && !explicitBrowserCollectionIntent
     const collectionExposure =
       params.browserHostAvailable &&
       browserDecisionMode === 'free_tool_loop' &&
       !localSendImIntent &&
+      !suppressBrowserContentTasks &&
       (msgIntent || params.recentCollectionIntent === true)
     const batchCollectionExposure = collectionExposure && (msgBatchIntent || params.recentBatchCollectionIntent === true)
     appendToolCapabilityLog([
@@ -3525,6 +3529,7 @@ export class AgentSdkRuntime extends EventEmitter {
       `batchIntent=${msgBatchIntent}`,
       `recentBatch=${params.recentBatchCollectionIntent === true}`,
       `localSendIm=${localSendImIntent}`,
+      `skillResumeSuppress=${suppressBrowserContentTasks}`,
       `exposure=${collectionExposure}`,
       `batchExposure=${batchCollectionExposure}`,
     ].join(' '))
@@ -3538,6 +3543,8 @@ export class AgentSdkRuntime extends EventEmitter {
       },
       intentGroupModes: collectionExposure
         ? { browser_interaction: true, browser_content_tasks: true }
+        : suppressBrowserContentTasks
+          ? { browser_content_tasks: false }
         : undefined,
     })
     appendToolCapabilityLog([

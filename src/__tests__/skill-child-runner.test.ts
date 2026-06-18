@@ -1146,7 +1146,7 @@ test('Worker B: terminal close refreshes child-created output subdirectory even 
   assert.equal(repo.state.rows.get(launch.childRunId)?.outputDir, childOutputDir)
 })
 
-test('VEA child runner completes pending handoff packets before rerunning finalize', async () => {
+test('VEA child runner completes pending handoff packets and reruns finalize before completion', async () => {
   const outputDir = mkdtempSync(join(tmpdir(), 'ready-vea-handoff-runner-'))
   mkdirSync(join(outputDir, 'audiovisual_handoff', 'body'), { recursive: true })
   writeFileSync(join(outputDir, 'audiovisual_handoff', 'body', 'task.md'), 'write report body', 'utf8')
@@ -1165,16 +1165,17 @@ test('VEA child runner completes pending handoff packets before rerunning finali
   }), { status: 200 })) as typeof fetch
   try {
     const { runtime } = setupRunner({ launchStuckGuardMs: 5_000 })
+    let actionCalls = 0
     runtime.manager.runSkill = (async (request: SkillRunRequest) => ({
-      success: false,
+      success: ++actionCalls > 1,
       skillId: request.skillId,
       action: request.action,
-      stdout: '',
+      stdout: actionCalls > 1 ? 'finalized after handoff' : '',
       stderr: '',
       command: [],
-      status: 'blocked',
+      status: actionCalls > 1 ? 'done' : 'blocked',
       outputDir,
-      error: 'handoff pending',
+      error: actionCalls > 1 ? undefined : 'handoff pending',
     })) as never
     registerStubDriver('video-expert-analyzer', {
       plans: [
@@ -1202,6 +1203,7 @@ test('VEA child runner completes pending handoff packets before rerunning finali
 
     const close = await pollUntil(() => getSkillChildRunCloseEvent(launch.childRunId))
     assert.equal(close.status, 'completed')
+    assert.equal(actionCalls, 2)
     assert.equal(readFileSync(join(outputDir, 'audiovisual_handoff', 'body', 'output.md'), 'utf8'), 'generated report body')
     const receipt = JSON.parse(readFileSync(join(outputDir, 'audiovisual_handoff', 'receipt.json'), 'utf8'))
     assert.equal(receipt.tasks.body.status, 'completed')

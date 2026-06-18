@@ -550,6 +550,143 @@ print(json.dumps({
   assert.match(payload.long_error, /模块正文不足/)
 })
 
+test('audiovisual report validation normalizes heading quotes and reports all remaining gaps', () => {
+  const script = `
+import json
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path.cwd() / "scripts"))
+from audiovisual.reporting import template_engine
+
+rules = {
+    "min_chars_per_section": 100,
+    "min_subsection_chars": 20,
+    "min_scene_evidence_per_section": 3,
+    "require_scene_evidence_per_section": True,
+    "required_subsections": {
+        "品牌符号学与意识形态分析": ['意识形态"自然化"评估'],
+    },
+}
+body = """## 品牌符号学与意识形态分析
+
+### 意识形态“自然化”评估
+
+Scene 001 Scene 002 Scene 003 这里用弯引号标题写出完整分析内容，机器应该把它视为 prompt 里的直引号标题同一个子条目。
+
+## 媒介语境与 Campaign 生态位分析
+
+太短。
+"""
+try:
+    template_engine._validate_required_sections(
+        body,
+        ["## 品牌符号学与意识形态分析", "## 媒介语境与 Campaign 生态位分析"],
+        source="raw_prompt",
+        validation_rules=rules,
+    )
+    error = ""
+except ValueError as exc:
+    error = str(exc)
+
+print(json.dumps({
+    "error": error,
+    "naturalization_missing": '缺子条目 ### 意识形态"自然化"评估' in error,
+    "has_module_gap": "模块正文不足" in error,
+    "has_scene_gap": "不同场景证据不足" in error,
+}, ensure_ascii=False))
+`
+  const raw = execFileSync('python3', ['-c', script], {
+    cwd: SKILL_DIR,
+    encoding: 'utf8',
+  })
+  const payload = JSON.parse(raw)
+
+  assert.equal(payload.naturalization_missing, false)
+  assert.equal(payload.has_module_gap, true)
+  assert.equal(payload.has_scene_gap, true)
+  assert.match(payload.error, /Prompt fidelity failure/)
+})
+
+test('audiovisual validation failure writes repair handoff and direct finalize consumes newer repair output', () => {
+  const script = `
+import json
+import sys
+import tempfile
+import time
+from pathlib import Path
+
+sys.path.insert(0, str(Path.cwd() / "scripts"))
+from audiovisual.reporting import template_engine
+
+with tempfile.TemporaryDirectory() as tmp:
+    out = Path(tmp)
+    draft = "## 导读\\n\\n失败草稿。\\n"
+    template_engine._dump_validation_errors(
+        out,
+        draft,
+        ["## 导读"],
+        "Prompt fidelity failure: 模块正文不足",
+        validation_rules={"min_chars_per_section": 100},
+    )
+    handoff = out / "audiovisual_handoff"
+    output_path = handoff / "body" / "output.md"
+    validation_path = handoff / "body" / "validation_errors.json"
+    receipt = json.loads((handoff / "receipt.json").read_text(encoding="utf-8"))
+    initial_read = template_engine._read_repaired_validation_body(out)
+
+    time.sleep(0.02)
+    repaired = "## 导读\\n\\n修复后的正文。\\n"
+    output_path.write_text(repaired, encoding="utf-8")
+    repaired_read = template_engine._read_repaired_validation_body(out)
+
+    def fake_prompt(_data, _route):
+        return {
+            "system_prompt": "sys",
+            "user_message": "user",
+            "required_sections": ["## 导读"],
+            "context": {"generated_at": "now"},
+            "python_direct": [],
+            "source": "template",
+            "validation_rules": {},
+        }
+
+    def should_not_request(_system_prompt, _user_message):
+        raise RuntimeError("request_fn should not be called when a newer repaired body exists")
+
+    template_engine.build_audiovisual_body_prompt = fake_prompt
+    final = template_engine.synthesize_audiovisual_report(
+        {"scenes": []},
+        {"framework": "generic", "route_label": "测试路由"},
+        report_dir=out,
+        request_fn=should_not_request,
+    )
+
+    print(json.dumps({
+        "receipt_status": receipt["tasks"]["body"]["status"],
+        "task_exists": (handoff / "body" / "task.md").exists(),
+        "brief_exists": (handoff / "brief.md").exists(),
+        "validation_exists": validation_path.exists(),
+        "initial_read": initial_read,
+        "repaired_read": repaired_read,
+        "final_contains_repair": "修复后的正文" in final,
+    }, ensure_ascii=False))
+`
+  const raw = execFileSync('python3', ['-c', script], {
+    cwd: SKILL_DIR,
+    encoding: 'utf8',
+  })
+  const payload = JSON.parse(raw)
+
+  assert.equal(payload.receipt_status, 'validation_failed')
+  assert.equal(payload.task_exists, true)
+  assert.equal(payload.brief_exists, true)
+  assert.equal(payload.validation_exists, true)
+  assert.equal(payload.initial_read, null)
+  assert.equal(payload.repaired_read, '## 导读\n\n修复后的正文。\n')
+  assert.equal(payload.final_contains_repair, true)
+})
+
 test('audiovisual report generation does not require handoff unless explicitly enabled', () => {
   const script = `
 import json

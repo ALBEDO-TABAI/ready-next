@@ -1874,7 +1874,9 @@ describe('browser_download_collected_media', () => {
         undefined,
         'scope-media',
       )
-      const parsed = JSON.parse(out) as { ok?: boolean; success?: number; mediaCandidateCount?: number }
+      const parsed = (typeof out === 'string'
+        ? JSON.parse(out)
+        : out.data || JSON.parse(out.text)) as { ok?: boolean; success?: number; mediaCandidateCount?: number }
 
       assert.equal(parsed.ok, true)
       assert.equal(parsed.success, 2)
@@ -1918,15 +1920,25 @@ describe('browser_download_collected_media', () => {
 })
 
 describe('browser task id guardrails', () => {
-  it('rejects chat task ids for browser_get_task / browser_cancel_task with an actionable status', async () => {
+  it('rejects chat and skill task ids for browser_get_task / browser_resume_task / browser_cancel_task with an actionable status', async () => {
+    let resumeCalls = 0
     const controller = createControllerMock({
       getTask: async () => null,
       cancelTask: async () => null,
+      resumeTask: async () => {
+        resumeCalls += 1
+        return null
+      },
     })
     const getResult = await executeBrowserTool('browser_get_task', { task_id: 'task-chat-1' }, controller)
     const cancelResult = await executeBrowserTool('browser_cancel_task', { task_id: 'task-chat-1' }, controller)
+    const resumeChatResult = await executeBrowserTool('browser_resume_task', { task_id: 'task-0db610cf-c6f1-4f8e-ae71-d881959d529b' }, controller)
+    const resumeSkillResult = await executeBrowserTool('browser_resume_task', { task_id: 'skill-child:vez51e5su' }, controller)
 
     assert.equal((JSON.parse(getResult) as { status: string }).status, 'wrong_id_type')
     assert.equal((JSON.parse(cancelResult) as { status: string }).status, 'wrong_id_type')
+    assert.equal((JSON.parse(resumeChatResult) as { status: string }).status, 'wrong_id_type')
+    assert.equal((JSON.parse(resumeSkillResult) as { status: string }).status, 'wrong_id_type')
+    assert.equal(resumeCalls, 0)
   })
 })

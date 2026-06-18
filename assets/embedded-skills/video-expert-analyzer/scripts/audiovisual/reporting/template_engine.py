@@ -7,6 +7,7 @@ import logging
 import os
 from pathlib import Path
 import re
+import unicodedata
 from typing import Any, Callable, Dict, List, Sequence
 
 from . import raw_prompt_adapter as _raw_prompt_adapter
@@ -1420,7 +1421,7 @@ def synthesize_audiovisual_report(
                 runtime_config=runtime_config,
             )
         request_fn = _default_request
-    agent_text = request_fn(spec["system_prompt"], spec["user_message"])
+    agent_text = _read_repaired_validation_body(report_dir) or request_fn(spec["system_prompt"], spec["user_message"])
     try:
         return _assemble_final_report(
             agent_text,
@@ -1484,6 +1485,23 @@ def _build_body_repair_message(original_user_message: str, draft_body: str, erro
             "上一版正文如下：\n\n" + draft_body.strip(),
         ]
     )
+
+
+def _read_repaired_validation_body(report_dir: Path | None) -> str | None:
+    if report_dir is None:
+        return None
+    handoff_body_dir = Path(report_dir) / "audiovisual_handoff" / "body"
+    output_path = handoff_body_dir / "output.md"
+    validation_path = handoff_body_dir / "validation_errors.json"
+    if not output_path.exists() or not validation_path.exists():
+        return None
+    try:
+        if output_path.stat().st_mtime <= validation_path.stat().st_mtime:
+            return None
+        text = output_path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    return text if text.strip() else None
 
 
 def _request_agent_report(
@@ -1916,6 +1934,27 @@ def _strip_formatting_for_count(text: str) -> str:
     return re.sub(r"\s+", "", text)
 
 
+def _normalize_heading_for_match(text: str) -> str:
+    normalized = unicodedata.normalize("NFKC", str(text or ""))
+    normalized = normalized.replace("“", '"').replace("”", '"').replace("＂", '"')
+    normalized = normalized.replace("‘", "'").replace("’", "'").replace("＇", "'")
+    normalized = re.sub(r"^#{1,6}\s*", "", normalized.strip())
+    return re.sub(r"\s+", " ", normalized).strip()
+
+
+def _heading_lookup(mapping: Dict[str, Any]) -> Dict[str, str]:
+    lookup: Dict[str, str] = {}
+    for key in mapping.keys():
+        lookup.setdefault(_normalize_heading_for_match(key), key)
+    return lookup
+
+
+def _resolve_heading_key(mapping: Dict[str, Any], lookup: Dict[str, str], expected: str) -> str | None:
+    if expected in mapping:
+        return expected
+    return lookup.get(_normalize_heading_for_match(expected))
+
+
 def _dump_validation_errors(
     report_dir: Path | None,
     body: str,
@@ -1928,9 +1967,18 @@ def _dump_validation_errors(
     try:
         target_dir = Path(report_dir) / "audiovisual_handoff" / "body"
         target_dir.mkdir(parents=True, exist_ok=True)
+        (target_dir / "output.md").write_text(
+            body.strip() + ("\n" if body.strip() else ""),
+            encoding="utf-8",
+        )
         detailed = _split_body_sections_detailed(body)
+        section_lookup = _heading_lookup(detailed)
         present = set(detailed.keys())
-        missing = [section for section in required_sections if section not in present]
+        missing = [
+            section
+            for section in required_sections
+            if _resolve_heading_key(detailed, section_lookup, section) is None
+        ]
 
         rules = validation_rules or {}
         min_section_chars = int(rules.get("min_chars_per_section") or 0)
@@ -1945,7 +1993,8 @@ def _dump_validation_errors(
 
         section_stats: List[Dict[str, Any]] = []
         for section in required_sections:
-            info = detailed.get(section)
+            actual_section = _resolve_heading_key(detailed, section_lookup, section)
+            info = detailed.get(actual_section) if actual_section else None
             if info is None:
                 section_stats.append({"section": section, "present": False})
                 continue
@@ -1958,6 +2007,7 @@ def _dump_validation_errors(
                 section_stats.append(
                     {
                         "section": section,
+                        "actual_section": actual_section,
                         "present": True,
                         "chars": chars,
                         "char_excess": max(0, chars - summary_max) if summary_max else 0,
@@ -1970,6 +2020,7 @@ def _dump_validation_errors(
                 continue
             entry: Dict[str, Any] = {
                 "section": section,
+                "actual_section": actual_section,
                 "present": True,
                 "chars": chars,
                 "char_deficit": max(0, min_section_chars - chars) if min_section_chars else 0,
@@ -2026,103 +2077,148 @@ def _validate_required_sections(
 
     rules = validation_rules or {}
     section_map_detailed = _split_body_sections_detailed(text)
-    present = set(section_map_detailed.keys())
-    missing = [section for section in required_sections if section not in present]
-    if missing:
+    section_lookup = _heading_lookup(section_map_detailed)
+    missing = [
+        section
+        for section in required_sections
+        if _resolve_heading_key(section_map_detailed, section_lookup, section) is None
+    ]
+    if missing and source != "raw_prompt":
         raise ValueError(f"Missing required sections: {', '.join(missing)}")
 
     if source != "raw_prompt":
         return text
 
-    section_map = {heading: info["body"] for heading, info in section_map_detailed.items()}
+    failures: List[str] = []
+    if missing:
+        failures.append("缺模块 " + "、".join(missing))
+
+    section_info_by_required: Dict[str, Dict[str, Any]] = {}
+    section_map: Dict[str, str] = {}
+    for section in required_sections:
+        actual_section = _resolve_heading_key(section_map_detailed, section_lookup, section)
+        if actual_section is None:
+            continue
+        info = section_map_detailed.get(actual_section) or {}
+        section_info_by_required[section] = info
+        section_map[section] = info.get("body", "")
 
     # 「导读」的校验方向与正文模块相反：限上限、查术语、保引用，
     # 不参与下方 700 字下限 / 子条目 / anchor 的循环。
     summary_section = str(rules.get("summary_section") or "")
-    if summary_section and summary_section in present:
-        summary_body = section_map.get(summary_section, "")
+    active_required_sections = list(required_sections)
+    if summary_section:
+        summary_actual = _resolve_heading_key(section_map_detailed, section_lookup, summary_section)
+        if summary_actual:
+            summary_body = (section_map_detailed.get(summary_actual) or {}).get("body", "")
+        else:
+            summary_body = ""
         summary_failures: List[str] = []
-        max_chars = int(rules.get("summary_max_chars") or 0)
-        if max_chars > 0:
-            actual = len(_strip_formatting_for_count(summary_body))
-            if actual > max_chars:
-                summary_failures.append(f"导读超长（{actual} 字 > 上限 {max_chars} 字），请压缩，导读是速读不是正文")
-        min_refs = int(rules.get("summary_min_scene_evidence") or 0)
-        if min_refs > 0:
-            evidence_hits = len(_SCENE_EVIDENCE_RE.findall(summary_body))
-            distinct_scenes = len(_distinct_scene_numbers(summary_body))
-            if max(evidence_hits, distinct_scenes) < min_refs:
-                summary_failures.append(f"导读至少需要 {min_refs} 处 Scene 编号或时间码定位（当前 {max(evidence_hits, distinct_scenes)} 处）")
-        jargon_hits = [term for term in (rules.get("summary_jargon_blacklist") or []) if term and term in summary_body]
-        if jargon_hits:
-            summary_failures.append("导读出现框架术语（必须说人话）：" + "、".join(jargon_hits))
-        if "###" in summary_body:
-            summary_failures.append("导读不允许 ### 子条目")
-        if summary_failures:
-            raise ValueError("Prompt fidelity failure: " + "；".join(summary_failures))
-        required_sections = [section for section in required_sections if section != summary_section]
+        if summary_actual:
+            max_chars = int(rules.get("summary_max_chars") or 0)
+            if max_chars > 0:
+                actual = len(_strip_formatting_for_count(summary_body))
+                if actual > max_chars:
+                    summary_failures.append(f"导读超长（{actual} 字 > 上限 {max_chars} 字），请压缩，导读是速读不是正文")
+            min_refs = int(rules.get("summary_min_scene_evidence") or 0)
+            if min_refs > 0:
+                evidence_hits = len(_SCENE_EVIDENCE_RE.findall(summary_body))
+                distinct_scenes = len(_distinct_scene_numbers(summary_body))
+                if max(evidence_hits, distinct_scenes) < min_refs:
+                    summary_failures.append(f"导读至少需要 {min_refs} 处 Scene 编号或时间码定位（当前 {max(evidence_hits, distinct_scenes)} 处）")
+            jargon_hits = [term for term in (rules.get("summary_jargon_blacklist") or []) if term and term in summary_body]
+            if jargon_hits:
+                summary_failures.append("导读出现框架术语（必须说人话）：" + "、".join(jargon_hits))
+            if "###" in summary_body:
+                summary_failures.append("导读不允许 ### 子条目")
+        failures.extend(summary_failures)
+        summary_norm = _normalize_heading_for_match(summary_section)
+        active_required_sections = [
+            section
+            for section in active_required_sections
+            if _normalize_heading_for_match(section) != summary_norm
+        ]
 
     required_subsections_by_module: Dict[str, List[str]] = rules.get("required_subsections") or {}
-    subsection_failures: List[str] = []
-    for section in required_sections:
+    for section in active_required_sections:
+        info = section_info_by_required.get(section)
+        if info is None:
+            continue
         module_name = section.removeprefix("## ").strip()
         expected = required_subsections_by_module.get(module_name) or []
         if not expected:
             continue
-        present_subs = set(section_map_detailed.get(section, {}).get("subsections", {}).keys())
-        missing_subs = [f"### {title}" for title in expected if f"### {title}" not in present_subs]
+        sub_map = info.get("subsections", {}) or {}
+        sub_lookup = _heading_lookup(sub_map)
+        missing_subs = [
+            f"### {title}"
+            for title in expected
+            if _resolve_heading_key(sub_map, sub_lookup, f"### {title}") is None
+        ]
         if missing_subs:
-            subsection_failures.append(f"{section}: 缺子条目 " + "、".join(missing_subs))
-    if subsection_failures:
-        raise ValueError("Prompt fidelity failure: " + "；".join(subsection_failures))
+            failures.append(f"{section}: 缺子条目 " + "、".join(missing_subs))
 
     min_subsection_chars = int(rules.get("min_subsection_chars") or 0)
     if min_subsection_chars > 0 and required_subsections_by_module:
         thin_subs: List[str] = []
-        for section in required_sections:
+        for section in active_required_sections:
+            info = section_info_by_required.get(section)
+            if info is None:
+                continue
             module_name = section.removeprefix("## ").strip()
             expected = required_subsections_by_module.get(module_name) or []
-            sub_map = section_map_detailed.get(section, {}).get("subsections", {})
+            sub_map = info.get("subsections", {}) or {}
+            sub_lookup = _heading_lookup(sub_map)
             for title in expected:
                 key = f"### {title}"
-                body = sub_map.get(key, "")
+                actual_key = _resolve_heading_key(sub_map, sub_lookup, key)
+                if actual_key is None:
+                    continue
+                body = sub_map.get(actual_key, "")
                 if len(_strip_formatting_for_count(body)) < min_subsection_chars:
                     thin_subs.append(f"{section} > {key} (<{min_subsection_chars}字)")
         if thin_subs:
-            raise ValueError("Prompt fidelity failure: 子条目正文不足 — " + "；".join(thin_subs))
+            failures.append("子条目正文不足 — " + "；".join(thin_subs))
 
     min_chars_per_section = int(rules.get("min_chars_per_section") or 0)
     if min_chars_per_section > 0:
         thin_sections: List[str] = []
-        for section in required_sections:
+        for section in active_required_sections:
+            if section not in section_map:
+                continue
             body = section_map.get(section, "")
             if len(_strip_formatting_for_count(body)) < min_chars_per_section:
                 thin_sections.append(f"{section} (<{min_chars_per_section}字)")
         if thin_sections:
-            raise ValueError("Prompt fidelity failure: 模块正文不足 — " + "；".join(thin_sections))
+            failures.append("模块正文不足 — " + "；".join(thin_sections))
 
     if rules.get("require_scene_evidence_per_section"):
         missing_evidence = [
             section
-            for section in required_sections
+            for section in active_required_sections
+            if section in section_map
             if not _SCENE_EVIDENCE_RE.search(section_map.get(section, ""))
         ]
         if missing_evidence:
-            raise ValueError(f"Prompt fidelity failure: sections missing scene/timestamp evidence: {', '.join(missing_evidence)}")
+            failures.append(f"sections missing scene/timestamp evidence: {', '.join(missing_evidence)}")
 
         min_scene_evidence = int(rules.get("min_scene_evidence_per_section") or 0)
         if min_scene_evidence > 0:
             thin_evidence: List[str] = []
-            for section in required_sections:
+            for section in active_required_sections:
+                if section not in section_map:
+                    continue
                 scenes = _distinct_scene_numbers(section_map.get(section, ""))
                 if len(scenes) < min_scene_evidence:
                     thin_evidence.append(f"{section} (仅 {len(scenes)} 个不同 Scene，需 ≥{min_scene_evidence})")
             if thin_evidence:
-                raise ValueError("Prompt fidelity failure: 不同场景证据不足 — " + "；".join(thin_evidence))
+                failures.append("不同场景证据不足 — " + "；".join(thin_evidence))
 
         section_anchor_terms = rules.get("section_anchor_terms") or {}
         anchor_failures: List[str] = []
-        for section in required_sections:
+        for section in active_required_sections:
+            if section not in section_map:
+                continue
             section_name = section.removeprefix("## ").strip()
             terms = section_anchor_terms.get(section_name) or []
             if not terms:
@@ -2133,7 +2229,9 @@ def _validate_required_sections(
             if len(hits) < min_hits:
                 anchor_failures.append(f"{section} (expected anchors: {'/'.join(terms[:4])})")
         if anchor_failures:
-            raise ValueError(f"Prompt fidelity failure: sections missing prompt anchors: {', '.join(anchor_failures)}")
+            failures.append(f"sections missing prompt anchors: {', '.join(anchor_failures)}")
+    if failures:
+        raise ValueError("Prompt fidelity failure: " + "；".join(failures))
     return text
 
 

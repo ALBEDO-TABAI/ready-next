@@ -986,6 +986,22 @@ async function startCollectionFromCompletedVisibleTask(
   return controller.startNoteCollection(handoff.plan, sessionId)
 }
 
+function isLikelyReadyNonBrowserTaskId(taskId: string): boolean {
+  if (taskId.startsWith('skill-child:') || taskId.startsWith('skill:')) return true
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(taskId)) return true
+  if (/^task-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(taskId)) return true
+  if (/^task-(?!\d+$).+/.test(taskId)) return true
+  return false
+}
+
+function wrongBrowserTaskIdPayload(toolName: string, taskId: string): Record<string, unknown> {
+  return {
+    taskId,
+    status: 'wrong_id_type',
+    message: `${toolName} 只能处理浏览器后台任务 id。这个 id 更像 Ready 聊天任务或技能子任务，请改用对应任务卡/技能续跑入口。`,
+  }
+}
+
 /**
  * WP3 — high-control platform script blacklist (plan §4.4). On strong-detection
  * platforms (小红书/抖音/微博/…), script-hard tools and script params are refused;
@@ -6093,12 +6109,8 @@ export async function executeBrowserTool(
         const result = await controller.getTask(taskId)
         const resumedCollection = result ? await startCollectionFromCompletedVisibleTask(controller, result, sessionId) : null
         if (resumedCollection) return JSON.stringify(resumedCollection, null, 2)
-        if (!result && taskId.startsWith('task-')) {
-          return JSON.stringify({
-            taskId,
-            status: 'wrong_id_type',
-            message: 'browser_get_task 只能查询 browser-task-*。这是聊天任务或锁持有者 id，请使用 browser_collect_notes / browser_visible_collect 返回的 taskId。',
-          }, null, 2)
+        if (!result && isLikelyReadyNonBrowserTaskId(taskId)) {
+          return JSON.stringify(wrongBrowserTaskIdPayload('browser_get_task', taskId), null, 2)
         }
         return JSON.stringify(result ? enrichBrowserTaskPayload(result) : { taskId, status: 'missing' }, null, 2)
       }
@@ -6115,6 +6127,9 @@ export async function executeBrowserTool(
         }
         const resumedCollection = current ? await startCollectionFromCompletedVisibleTask(controller, current, sessionId) : null
         if (resumedCollection) return JSON.stringify(resumedCollection, null, 2)
+        if (!current && isLikelyReadyNonBrowserTaskId(taskId)) {
+          return JSON.stringify(wrongBrowserTaskIdPayload('browser_resume_task', taskId), null, 2)
+        }
         const result = await controller.resumeTask(taskId)
         return JSON.stringify(result || { taskId, status: 'missing' }, null, 2)
       }
@@ -6123,12 +6138,8 @@ export async function executeBrowserTool(
         const taskId = String(args.task_id || '').trim()
         if (!taskId) return 'Error: task_id is required'
         const result = await controller.cancelTask(taskId)
-        if (!result && taskId.startsWith('task-')) {
-          return JSON.stringify({
-            taskId,
-            status: 'wrong_id_type',
-            message: 'browser_cancel_task 只能取消 browser-task-*。这是聊天任务或锁持有者 id，请使用浏览器任务返回的 taskId。',
-          }, null, 2)
+        if (!result && isLikelyReadyNonBrowserTaskId(taskId)) {
+          return JSON.stringify(wrongBrowserTaskIdPayload('browser_cancel_task', taskId), null, 2)
         }
         return JSON.stringify(result || { taskId, status: 'missing' }, null, 2)
       }

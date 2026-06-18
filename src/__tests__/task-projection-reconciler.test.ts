@@ -115,6 +115,43 @@ function baseProjection(overrides: Partial<TaskProjectionRecord> = {}): TaskProj
   }
 }
 
+function baseTaskRun(overrides: Partial<SkillTaskRunRecord> = {}): SkillTaskRunRecord {
+  return {
+    id: 'child_done',
+    scopeId: 'scope-1',
+    sessionId: 'scope-1',
+    agent: null,
+    runId: null,
+    skillId: 'video-expert-analyzer',
+    skillName: 'video-expert-analyzer',
+    action: 'video_expert_pipeline',
+    toolName: null,
+    runKind: 'child_run',
+    status: 'done',
+    interactionState: 'suspended',
+    goalText: null,
+    resourceRefs: [],
+    params: {},
+    steps: [],
+    currentStepId: null,
+    artifacts: [],
+    outputDir: null,
+    runStatePath: null,
+    sceneScoresPath: null,
+    deliveryReportPath: null,
+    failureKind: null,
+    failureDetail: null,
+    jobId: null,
+    detachedTaskId: null,
+    resumePayload: null,
+    createdAt: OLD,
+    startedAt: OLD,
+    updatedAt: NOW,
+    finishedAt: NOW,
+    ...overrides,
+  }
+}
+
 function writeIncompleteRunState(outputDir: string): string {
   const runStatePath = join(outputDir, 'run_state.json')
   writeJson(runStatePath, {
@@ -291,6 +328,12 @@ test('reconcileTaskProjections marks complete VEA output done and is idempotent'
 test('reconcileTaskProjections enriches completed child projections with delivery report artifacts', async () => {
   const outputDir = createRoot('done-enrich-artifacts')
   const { runStatePath, deliveryReportPath } = writeCompletedRun(outputDir, { includeAudiovisual: true })
+  const taskRun = baseTaskRun({
+    id: 'vcr_done_enrich',
+    outputDir,
+    runStatePath,
+    deliveryReportPath,
+  })
   const { store, records, updates } = createStore([
     baseProjection({
       taskId: 'skill-child:vcr_done_enrich',
@@ -318,14 +361,159 @@ test('reconcileTaskProjections enriches completed child projections with deliver
     }),
   ])
 
-  await reconcileTaskProjections({ store, records: Array.from(records.values()), now: NOW })
-  await reconcileTaskProjections({ store, records: Array.from(records.values()), now: NOW })
+  await reconcileTaskProjections({ store, records: Array.from(records.values()), taskRuns: [taskRun], now: NOW })
+  await reconcileTaskProjections({ store, records: Array.from(records.values()), taskRuns: [taskRun], now: NOW })
 
   const updated = records.get('skill-child:vcr_done_enrich')!
   assert.equal(updated.status, 'completed')
   assert.equal(updated.blockedReason, null)
   assert.ok(updated.recentArtifacts?.some((item) => item.kind === 'delivery_report' && item.path === deliveryReportPath))
   assert.equal(updates.length, 1)
+})
+
+test('reconcileTaskProjections completes failed parent from completed child_run step artifacts', async () => {
+  const outputDir = createRoot('parent-from-child')
+  const { runStatePath, deliveryReportPath } = writeCompletedRun(outputDir, { includeAudiovisual: true })
+  const childRun = baseTaskRun({
+    id: 'child_done',
+    outputDir,
+    runStatePath,
+    deliveryReportPath,
+  })
+  const { store, records } = createStore([
+    baseProjection({
+      taskId: 'task-parent',
+      runId: 'parent-run',
+      status: 'failed',
+      taskSummary: '任务 child_done 已丢失',
+      blockedReason: '任务已丢失',
+      currentStepId: 'finalize',
+      steps: [
+        { id: 'child_run:child_done', description: '技能子任务', status: 'running', updatedAt: OLD },
+        { id: 'finalize', description: 'finalize', status: 'error', updatedAt: OLD },
+      ],
+      continuationRef: null,
+      recentArtifacts: [],
+    }),
+    baseProjection({
+      taskId: 'skill-child:child_done',
+      runId: 'child_done',
+      status: 'completed',
+      currentStepId: 'child_run:child_done',
+      continuationRef: {
+        childRunId: 'child_done',
+        skillId: 'video-expert-analyzer',
+        action: 'video_expert_pipeline',
+        outputDir,
+        runStatePath,
+      },
+      recentArtifacts: [],
+    }),
+  ])
+
+  await reconcileTaskProjections({ store, records: Array.from(records.values()), taskRuns: [childRun], now: NOW })
+
+  const parent = records.get('task-parent')!
+  assert.equal(parent.status, 'completed')
+  assert.equal(parent.taskSummary, '技能任务已完成')
+  assert.equal(parent.blockedReason, null)
+  assert.deepEqual(parent.resumableActions, ['open_artifact'])
+  assert.ok(parent.recentArtifacts?.some((item) => item.kind === 'delivery_report' && item.path === deliveryReportPath))
+  assert.equal(parent.steps.find((step) => step.id === 'child_run:child_done')?.status, 'done')
+})
+
+test('reconcileTaskProjections supersedes an old blocked child when a newer child finishes the same output', async () => {
+  const outputDir = createRoot('superseded-child')
+  const { runStatePath, deliveryReportPath } = writeCompletedRun(outputDir, { includeAudiovisual: true })
+  const oldRun = baseTaskRun({
+    id: 'old_child',
+    status: 'blocked',
+    outputDir,
+    runStatePath,
+    deliveryReportPath,
+    updatedAt: OLD,
+    finishedAt: null,
+  })
+  const newRun = baseTaskRun({
+    id: 'new_child',
+    outputDir,
+    runStatePath,
+    deliveryReportPath,
+    updatedAt: NOW,
+    finishedAt: NOW,
+  })
+  const { store, records } = createStore([
+    baseProjection({
+      taskId: 'skill-child:old_child',
+      runId: 'old_child',
+      status: 'completed',
+      currentStepId: 'child_run:old_child',
+      continuationRef: {
+        childRunId: 'old_child',
+        skillId: 'video-expert-analyzer',
+        action: 'video_expert_pipeline',
+        outputDir,
+        runStatePath,
+      },
+    }),
+    baseProjection({
+      taskId: 'skill-child:new_child',
+      runId: 'new_child',
+      status: 'completed',
+      currentStepId: 'child_run:new_child',
+      continuationRef: {
+        childRunId: 'new_child',
+        skillId: 'video-expert-analyzer',
+        action: 'video_expert_pipeline',
+        outputDir,
+        runStatePath,
+      },
+    }),
+  ])
+
+  await reconcileTaskProjections({ store, records: Array.from(records.values()), taskRuns: [oldRun, newRun], now: NOW })
+
+  const oldProjection = records.get('skill-child:old_child')!
+  const newProjection = records.get('skill-child:new_child')!
+  assert.equal(oldProjection.status, 'killed')
+  assert.equal(oldProjection.degradationReason, 'superseded_by_child_run')
+  assert.equal((oldProjection.continuationRef as { supersededByChildRunId?: string } | null)?.supersededByChildRunId, 'new_child')
+  assert.equal(newProjection.status, 'completed')
+})
+
+test('reconcileTaskProjections does not complete a blocked child from complete sibling artifacts alone', async () => {
+  const outputDir = createRoot('blocked-child-strict')
+  const { runStatePath, deliveryReportPath } = writeCompletedRun(outputDir, { includeAudiovisual: true })
+  const blockedRun = baseTaskRun({
+    id: 'blocked_child',
+    status: 'blocked',
+    outputDir,
+    runStatePath,
+    deliveryReportPath,
+    finishedAt: null,
+  })
+  const { store, records } = createStore([
+    baseProjection({
+      taskId: 'skill-child:blocked_child',
+      runId: 'blocked_child',
+      status: 'blocked',
+      currentStepId: 'child_run:blocked_child',
+      continuationRef: {
+        childRunId: 'blocked_child',
+        skillId: 'video-expert-analyzer',
+        action: 'video_expert_pipeline',
+        outputDir,
+        runStatePath,
+      },
+    }),
+  ])
+
+  await reconcileTaskProjections({ store, records: Array.from(records.values()), taskRuns: [blockedRun], now: NOW })
+
+  const updated = records.get('skill-child:blocked_child')!
+  assert.equal(updated.status, 'blocked')
+  assert.notDeepEqual(updated.resumableActions, ['open_artifact'])
+  assert.equal(updated.blockedReason, '任务产物尚未完成，可从已保存的进度继续')
 })
 
 test('reconcileTaskProjections restores child-run handles from DB row and event log before checking artifacts', async () => {
@@ -363,7 +551,7 @@ test('reconcileTaskProjections restores child-run handles from DB row and event 
     action: 'video_expert_pipeline',
     toolName: null,
     runKind: 'child_run',
-    status: 'blocked',
+    status: 'done',
     interactionState: 'suspended',
     goalText: null,
     resourceRefs: [],
@@ -391,8 +579,8 @@ test('reconcileTaskProjections restores child-run handles from DB row and event 
     },
     createdAt: OLD,
     startedAt: OLD,
-    updatedAt: OLD,
-    finishedAt: null,
+    updatedAt: NOW,
+    finishedAt: NOW,
   }
   const { store, records } = createStore([
     baseProjection({

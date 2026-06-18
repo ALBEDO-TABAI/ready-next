@@ -58,16 +58,51 @@ def mark_validation_failure(video_dir: Path, task: str, message: str) -> None:
     """
     handoff_dir = Path(video_dir) / HANDOFF_DIRNAME
     receipt_path = handoff_dir / "receipt.json"
-    if not receipt_path.exists():
-        return
-    try:
-        data = json.loads(receipt_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return
-    if not isinstance(data, dict):
-        return
-    coordinator = AudiovisualHandoffCoordinator(Path(video_dir), str(data.get("video_id", "")))
-    coordinator._mark_task(task, "validation_failed", validation_error=message)
+    data: Dict[str, Any] = {"video_id": Path(video_dir).name, "tasks": {}}
+    if receipt_path.exists():
+        try:
+            parsed = json.loads(receipt_path.read_text(encoding="utf-8"))
+            if isinstance(parsed, dict):
+                data = parsed
+        except (OSError, json.JSONDecodeError):
+            pass
+    video_id = str(data.get("video_id") or Path(video_dir).name)
+    coordinator = AudiovisualHandoffCoordinator(Path(video_dir), video_id)
+    coordinator._ensure_handoff_dir()
+    task_dir = coordinator._subtask_dir(task)
+    task_dir.mkdir(parents=True, exist_ok=True)
+    task_path = task_dir / "task.md"
+    output_rel = f"{task}/output.md"
+    if not task_path.exists():
+        lines = [
+            f"# 视听剖析 · {task} 校验修复任务",
+            "",
+            "> 上一次 finalize 已生成正文草稿，但没有通过机器校验；请修复输出文件后重新运行 finalize。",
+            "",
+            "## 输入文件",
+            "",
+            f"- 当前失败草稿：`{HANDOFF_DIRNAME}/{output_rel}`",
+            f"- 机器校验差额：`{HANDOFF_DIRNAME}/{task}/validation_errors.json`",
+            "",
+            "## 输出文件",
+            "",
+            f"- `{HANDOFF_DIRNAME}/{output_rel}` — 写入完整修复后的 Markdown 正文，不要只写补丁。",
+            "",
+            "## 修复要求",
+            "",
+            f"- 当前错误：{message}",
+            "- 保留可用分析内容，一次性补齐 validation_errors.json 里列出的所有缺口。",
+            "- 标题必须继续使用 `##` / `###` Markdown 层级；不要添加顶层 `#` 标题，不要用代码块包住整份正文。",
+            "",
+        ]
+        task_path.write_text("\n".join(lines), encoding="utf-8")
+    coordinator._mark_task(
+        task,
+        "validation_failed",
+        task=str(task_path.relative_to(Path(video_dir))),
+        output=output_rel,
+        validation_error=message,
+    )
     coordinator._write_brief()
 
 

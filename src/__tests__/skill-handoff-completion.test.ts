@@ -6,6 +6,7 @@ import test from 'node:test'
 
 import {
   completePendingSkillHandoffs,
+  listHandoffValidationRepairTasks,
   listPendingSkillHandoffTasks,
 } from '../main/modules/agent-control/skills/skill-handoff-completion'
 import {
@@ -336,4 +337,28 @@ test('skill handoff validation repair also uses single-flight for duplicate call
   assert.equal(secondResult[0].repairedValidation, true)
   assert.equal(requestCount, 1)
   assert.equal(readFileSync(join(root, 'audiovisual_handoff', 'body', 'output.md'), 'utf8'), 'repaired once')
+})
+
+test('skill handoff validation repair honors explicit validation_failed status without mtime gap', () => {
+  const root = mkdtempSync(join(tmpdir(), 'ready-handoff-repair-status-'))
+  writeJson(join(root, 'audiovisual_handoff', 'receipt.json'), {
+    tasks: {
+      body: {
+        status: 'validation_failed',
+        task: 'audiovisual_handoff/body/task.md',
+        output: 'body/output.md',
+      },
+    },
+  })
+  mkdirSync(join(root, 'audiovisual_handoff', 'body'), { recursive: true })
+  writeFileSync(join(root, 'audiovisual_handoff', 'body', 'task.md'), 'repair the body', 'utf8')
+  writeJson(join(root, 'audiovisual_handoff', 'body', 'validation_errors.json'), {
+    errors: ['missing section'],
+  })
+  writeFileSync(join(root, 'audiovisual_handoff', 'body', 'output.md'), 'old output written after validation', 'utf8')
+
+  const repairs = listHandoffValidationRepairTasks(root)
+
+  assert.equal(repairs.length, 1)
+  assert.equal(repairs[0].name, 'body')
 })

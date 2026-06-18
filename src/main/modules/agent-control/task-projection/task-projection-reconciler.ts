@@ -10,7 +10,7 @@ import { PROJECTION_OBSERVABILITY_METRICS } from '../projection-observability-me
 import { canResumeShape } from '../contracts/resume-handle'
 import { validateRunStateRecord } from './run-state-schema'
 
-const RECONCILABLE_STATUSES = new Set<TaskProjectionRecord['status']>(['running', 'queued', 'blocked', 'completed'])
+const RECONCILABLE_STATUSES = new Set<TaskProjectionRecord['status']>(['running', 'queued', 'blocked', 'failed', 'completed'])
 const STALE_WITHOUT_HANDLE_MS = 30 * 60 * 1000
 const REQUIRED_VEA_OUTPUT_KEYS = ['storyboard_md', 'storyboard_pdf', 'audiovisual_md', 'audiovisual_pdf']
 
@@ -676,6 +676,126 @@ function projectionIsDone(handles: ProjectionHandles): boolean {
   return isCompleteStatus(delivery.status) && hasCleanDeliveryBlockers(delivery)
 }
 
+function taskRunIsDone(taskRun: SkillTaskRunRecord | null | undefined): boolean {
+  return taskRun?.status === 'done'
+}
+
+function taskRunTimeMs(taskRun: SkillTaskRunRecord | null | undefined): number {
+  if (!taskRun) return 0
+  for (const value of [taskRun.finishedAt, taskRun.updatedAt, taskRun.startedAt, taskRun.createdAt]) {
+    if (!value) continue
+    const ms = Date.parse(value)
+    if (Number.isFinite(ms)) return ms
+  }
+  return 0
+}
+
+function isChildProjectionRecord(record: TaskProjectionRecord, handles: ProjectionHandles): boolean {
+  return record.taskId.startsWith('skill-child:')
+    || (Boolean(handles.childRunId) && record.runId === handles.childRunId)
+}
+
+function projectionIsDoneForRecord(
+  record: TaskProjectionRecord,
+  handles: ProjectionHandles,
+  taskRun: SkillTaskRunRecord | null,
+): boolean {
+  if (isChildProjectionRecord(record, handles) && handles.childRunId) {
+    return taskRunIsDone(taskRun) && projectionIsDone(handles)
+  }
+  return projectionIsDone(handles)
+}
+
+function extractChildRunIdsFromProjection(record: TaskProjectionRecord): string[] {
+  const ids = new Set<string>()
+  const addMatches = (value: unknown): void => {
+    if (typeof value !== 'string') return
+    for (const match of value.matchAll(/(?:child_run:|skill-child:)([A-Za-z0-9_-]+)/g)) {
+      if (match[1]) ids.add(match[1])
+    }
+  }
+  const continuation = asRecord(record.continuationRef)
+  const continuationChildRunId = stringValue(continuation?.childRunId)
+  if (continuationChildRunId) ids.add(continuationChildRunId)
+  for (const step of record.steps || []) {
+    addMatches(step.id)
+    addMatches(step.description)
+    addMatches(step.detail)
+    addMatches(step.title)
+    for (const child of step.childTasks || []) {
+      addMatches(child.taskId)
+    }
+  }
+  return Array.from(ids)
+}
+
+function projectionMatchesChildRun(record: TaskProjectionRecord, childRunId: string): boolean {
+  const continuation = asRecord(record.continuationRef)
+  return record.taskId === `skill-child:${childRunId}`
+    || record.runId === childRunId
+    || stringValue(continuation?.childRunId) === childRunId
+}
+
+function findProjectionForChildRun(
+  records: TaskProjectionRecord[],
+  childRunId: string,
+): TaskProjectionRecord | null {
+  return records.find((record) => projectionMatchesChildRun(record, childRunId)) || null
+}
+
+function findCompletedChildForParent(
+  parent: TaskProjectionRecord,
+  records: TaskProjectionRecord[],
+  taskRuns: SkillTaskRunRecord[],
+): { record: TaskProjectionRecord; taskRun: SkillTaskRunRecord | null; handles: ProjectionHandles } | null {
+  if (parent.taskId.startsWith('skill-child:')) return null
+  const childRunIds = extractChildRunIdsFromProjection(parent)
+  for (const childRunId of childRunIds) {
+    const child = findProjectionForChildRun(records, childRunId)
+    if (!child) continue
+    const taskRun = findTaskRunForProjection(child, taskRuns)
+    const handles = deriveHandles(child, taskRun)
+    if (projectionIsDoneForRecord(child, handles, taskRun)) {
+      return { record: child, taskRun, handles }
+    }
+  }
+  return null
+}
+
+function sameResolvedOutput(left: ProjectionHandles, right: ProjectionHandles): boolean {
+  const leftOutputDir = normalizePath(left.outputDir)
+  const rightOutputDir = normalizePath(right.outputDir)
+  if (leftOutputDir && rightOutputDir && leftOutputDir === rightOutputDir) return true
+  const leftRunStatePath = normalizePath(left.runStatePath)
+  const rightRunStatePath = normalizePath(right.runStatePath)
+  return Boolean(leftRunStatePath && rightRunStatePath && leftRunStatePath === rightRunStatePath)
+}
+
+function findNewerCompletedSiblingChild(
+  record: TaskProjectionRecord,
+  handles: ProjectionHandles,
+  taskRun: SkillTaskRunRecord | null,
+  records: TaskProjectionRecord[],
+  taskRuns: SkillTaskRunRecord[],
+): { childRunId: string } | null {
+  if (!isChildProjectionRecord(record, handles) || !handles.childRunId || taskRunIsDone(taskRun)) return null
+  const currentTime = taskRunTimeMs(taskRun)
+  for (const sibling of records) {
+    if (sibling.taskId === record.taskId) continue
+    const siblingTaskRun = findTaskRunForProjection(sibling, taskRuns)
+    const siblingHandles = deriveHandles(sibling, siblingTaskRun)
+    if (!isChildProjectionRecord(sibling, siblingHandles)) continue
+    if (!siblingHandles.childRunId || siblingHandles.childRunId === handles.childRunId) continue
+    if (handles.skillId && siblingHandles.skillId && handles.skillId !== siblingHandles.skillId) continue
+    if (!sameResolvedOutput(handles, siblingHandles)) continue
+    if (!taskRunIsDone(siblingTaskRun)) continue
+    if (taskRunTimeMs(siblingTaskRun) <= currentTime) continue
+    if (!projectionIsDoneForRecord(sibling, siblingHandles, siblingTaskRun)) continue
+    return { childRunId: siblingHandles.childRunId }
+  }
+  return null
+}
+
 function timestampMs(value: string | Date | number): number {
   const ms = value instanceof Date ? value.getTime() : typeof value === 'number' ? value : Date.parse(value)
   return Number.isFinite(ms) ? ms : Date.now()
@@ -825,10 +945,72 @@ function patchSteps(
   })
 }
 
+function patchParentStepsFromCompletedChild(
+  record: TaskProjectionRecord,
+  childRunId: string,
+  now: string,
+): TaskProjectionRecord['steps'] {
+  return patchSteps(record, 'completed', now).map((step) => {
+    if (step.id !== `child_run:${childRunId}`) return step
+    if (step.status === 'done') return step
+    return {
+      ...step,
+      status: 'done',
+      updatedAt: now,
+    }
+  })
+}
+
 function completedTaskSummary(record: TaskProjectionRecord): string {
   const summary = String(record.taskSummary || '').trim()
   if (!summary || summary.includes('进行中')) return '技能任务已完成'
   return summary
+}
+
+function completedTaskTarget(
+  record: TaskProjectionRecord,
+  handles: ProjectionHandles,
+  now: string,
+  options: { summary?: string; steps?: TaskProjectionRecord['steps'] } = {},
+): Partial<TaskProjectionRecord> {
+  const progress = progressFromHandles(handles)
+  return {
+    status: 'completed',
+    interactionState: 'suspended',
+    waitingFor: 'none',
+    taskSummary: options.summary ?? completedTaskSummary(record),
+    blockedReason: null,
+    degradationReason: null,
+    resumableActions: ['open_artifact'],
+    continuationRef: completedContinuationRef(record, handles, progress),
+    progress,
+    recentArtifacts: mergeProjectionArtifacts(record, handles, now),
+    steps: options.steps ?? patchSteps(record, 'completed', now),
+  }
+}
+
+function supersededChildTarget(
+  record: TaskProjectionRecord,
+  handles: ProjectionHandles,
+  now: string,
+  supersededByChildRunId: string,
+): Partial<TaskProjectionRecord> {
+  return {
+    status: 'killed',
+    interactionState: 'suspended',
+    waitingFor: 'none',
+    taskSummary: '已由后续技能子任务完成',
+    blockedReason: null,
+    degradationReason: 'superseded_by_child_run',
+    resumableActions: ['none'],
+    continuationRef: {
+      ...(mergeContinuationRef(record, handles) || {}),
+      blockerType: 'superseded',
+      pauseReason: 'superseded',
+      supersededByChildRunId,
+    } as TaskProjectionRecord['continuationRef'] & { supersededByChildRunId: string },
+    steps: patchSteps(record, 'killed', now),
+  }
 }
 
 function buildPatch(
@@ -867,37 +1049,37 @@ export function reconcileTaskProjections(params: ReconcileTaskProjectionsParams)
     emitProjectionHandleLegacyOriginMetrics(record.taskId, origins)
 
     let target: Partial<TaskProjectionRecord> | null = null
-    if (record.status === 'completed') {
-      if (!projectionIsDone(handles)) continue
-      const progress = progressFromHandles(handles)
-      target = {
-        status: 'completed',
-        interactionState: 'suspended',
-        waitingFor: 'none',
-        taskSummary: completedTaskSummary(record),
-        blockedReason: null,
-        degradationReason: null,
-        resumableActions: ['open_artifact'],
-        continuationRef: completedContinuationRef(record, handles, progress),
-        progress,
-        recentArtifacts: mergeProjectionArtifacts(record, handles, now),
-        steps: patchSteps(record, 'completed', now),
+    const completedChild = findCompletedChildForParent(record, params.records, params.taskRuns || [])
+    const supersededChild = findNewerCompletedSiblingChild(record, handles, taskRun, params.records, params.taskRuns || [])
+    const done = projectionIsDoneForRecord(record, handles, taskRun)
+    if (supersededChild) {
+      target = supersededChildTarget(record, handles, now, supersededChild.childRunId)
+    } else if (completedChild) {
+      target = completedTaskTarget(record, completedChild.handles, now, {
+        summary: '技能任务已完成',
+        steps: completedChild.handles.childRunId
+          ? patchParentStepsFromCompletedChild(record, completedChild.handles.childRunId, now)
+          : patchSteps(record, 'completed', now),
+      })
+    } else if (done) {
+      target = completedTaskTarget(record, handles, now)
+    } else if (record.status === 'completed') {
+      if (isChildProjectionRecord(record, handles) && taskRun && !taskRunIsDone(taskRun) && hasDurableHandle(handles)) {
+        target = {
+          status: 'blocked',
+          interactionState: 'suspended',
+          waitingFor: 'background',
+          blockedReason: '技能子任务尚未完成，不能用同目录产物判定完成',
+          degradationReason: null,
+          resumableActions: appendMissingActions(record.resumableActions, ['continue', 'cancel']),
+          continuationRef: mergeContinuationRef(record, handles),
+          steps: patchSteps(record, 'blocked', now),
+        }
+      } else {
+        continue
       }
-    } else if (projectionIsDone(handles)) {
-      const progress = progressFromHandles(handles)
-      target = {
-        status: 'completed',
-        interactionState: 'suspended',
-        waitingFor: 'none',
-        taskSummary: completedTaskSummary(record),
-        blockedReason: null,
-        degradationReason: null,
-        resumableActions: ['open_artifact'],
-        continuationRef: completedContinuationRef(record, handles, progress),
-        progress,
-        recentArtifacts: mergeProjectionArtifacts(record, handles, now),
-        steps: patchSteps(record, 'completed', now),
-      }
+    } else if (record.status === 'failed') {
+      continue
     } else if (hasDurableHandle(handles)) {
       target = {
         status: 'blocked',
