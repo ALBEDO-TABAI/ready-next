@@ -195,6 +195,43 @@ test('RunProjection still prefers structured projection truth when legacy browse
   assert.deepEqual(summary?.steps.map((step) => step.id), ['ensure_upload'])
 })
 
+test('RunProjection preserves recent media even when later non-media artifacts arrive', () => {
+  const store = new Map<string, ScopeRunSummary>()
+  const projection = new RunProjection({
+    getScope: () => createScope(),
+    getPrevious: (scopeId) => store.get(scopeId),
+    setSummary: (scopeId, summary) => {
+      store.set(scopeId, summary)
+    },
+    toChannelKey: () => 'local:app',
+  })
+
+  const artifacts = [
+    { id: 'img-1', module: 'browser', kind: 'image', label: '图 1', path: '/tmp/1.jpg', mimeType: 'image/jpeg', createdAt: '2026-04-10T01:00:01.000Z' },
+    { id: 'img-2', module: 'browser', kind: 'image', label: '图 2', path: '/tmp/2.jpg', mimeType: 'image/jpeg', createdAt: '2026-04-10T01:00:02.000Z' },
+    { id: 'img-3', module: 'browser', kind: 'image', label: '图 3', path: '/tmp/3.jpg', mimeType: 'image/jpeg', createdAt: '2026-04-10T01:00:03.000Z' },
+    { id: 'img-4', module: 'browser', kind: 'image', label: '图 4', path: '/tmp/4.jpg', mimeType: 'image/jpeg', createdAt: '2026-04-10T01:00:04.000Z' },
+    { id: 'doc-1', module: 'document', kind: 'artifact', label: '说明', path: '/tmp/readme.md', mimeType: 'text/markdown', createdAt: '2026-04-10T01:00:05.000Z' },
+  ]
+
+  const summary = projection.recordEvent({
+    type: 'updated',
+    scopeId: 'scope-1',
+    agent: 'butler',
+    phase: 'tool_running',
+    recentArtifacts: artifacts,
+    timestamp: '2026-04-10T01:00:05.000Z',
+  })
+
+  assert.deepEqual(summary?.recentArtifacts?.map((artifact) => artifact.id), [
+    'img-1',
+    'img-2',
+    'img-3',
+    'img-4',
+    'doc-1',
+  ])
+})
+
 test('RunProjection clears stale skill blockers when projection truth explicitly sends null', () => {
   const store = new Map<string, ScopeRunSummary>()
   const projection = new RunProjection({

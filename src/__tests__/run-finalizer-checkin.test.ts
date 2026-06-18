@@ -1,5 +1,5 @@
 /**
- * EP2-Q4a — shadow adjudication inside the REAL finalize funnel:
+ * EP2-Q4a/G0 — enforced adjudication inside the REAL finalize funnel:
  * every RunOutcome.kind produces a CheckIn (enumerated, not hardcoded);
  * zero-proof done → verdict reject + divergence metric + terminal state
  * downgraded; valid paused continuation proof can become checkpoint; ordering
@@ -62,7 +62,7 @@ test('every RunOutcome.kind produces a CheckIn through the real funnel (enumerat
     })
     const checkins = store.rows.get(`task-${kind}`)!.checkins as CheckInRecord[]
     assert.equal(checkins.length, 1, `${kind} must produce exactly one CheckIn`)
-    assert.equal(checkins[0].kind, 'shadow')
+    assert.equal(checkins[0].kind, 'enforce')
     assert.equal(checkins[0].ts, NOW.toISOString())
   }
 })
@@ -84,12 +84,13 @@ test('zero-proof done: verdict reject + divergence metric + terminal state downg
       now: () => NOW,
     })
     const checkins = store.rows.get('task-zero')!.checkins as CheckInRecord[]
+    assert.equal(checkins[0].kind, 'enforce')
     assert.equal(checkins[0].verdict, 'reject')
     assert.ok(checkins[0].blockers.includes('zero_proof_done'))
     assert.equal(finalized.status, 'error')
-    assert.equal(finalized.terminalReason, 'adjudication_degraded')
+    assert.equal(finalized.terminalReason, 'proof_gap')
     assert.equal(runMeta.get('run-z')!.status, 'error')
-    assert.equal(runMeta.get('run-z')!.terminalReason, 'adjudication_degraded')
+    assert.equal(runMeta.get('run-z')!.terminalReason, 'proof_gap')
     for (const patch of store.patches) {
       assert.ok(!('status' in patch) && !('interactionState' in patch), 'projection lifecycle fields untouched by adjudication')
     }
@@ -99,6 +100,77 @@ test('zero-proof done: verdict reject + divergence metric + terminal state downg
   } finally {
     __setMetricSinkForTests(null)
   }
+})
+
+test('failed delivery facts produce a specific terminal reason, never accept or adjudication_degraded', async () => {
+  const store = fakeStore({
+    taskId: 'task-delivery-failed',
+    taskType: 'short_task' as never,
+    module: 'skill',
+    proofRefs: [],
+  })
+  const finalized = await finalizeRunOutcome({
+    kind: 'done',
+    runId: 'run-delivery-failed',
+    taskId: 'task-delivery-failed',
+    scopeId: 's1',
+    durationMs: 10,
+    toolCallsUsed: 1,
+    initiator: 'done',
+    finalText: '微信发送失败。',
+    projectionPatch: {
+      taskType: 'short_task',
+      module: 'skill',
+      skillExecutionForm: 'direct',
+      terminalFailureReason: 'delivery_failed',
+      terminalFailureTool: 'skill_send_im_file',
+    },
+  }, {
+    writeRunCloseMetric: () => {},
+    taskProjectionStore: store,
+    now: () => NOW,
+  })
+
+  const checkins = store.rows.get('task-delivery-failed')!.checkins as CheckInRecord[]
+  assert.equal(finalized.status, 'error')
+  assert.equal(finalized.terminalReason, 'delivery_failed')
+  assert.equal(checkins[0].kind, 'enforce')
+  assert.notEqual(checkins[0].verdict, 'accept')
+  assert.notEqual(finalized.terminalReason, 'adjudication_degraded')
+})
+
+test('action tasks with structurally missing proof become proof_gap, not accept or adjudication_degraded', async () => {
+  const store = fakeStore({
+    taskId: 'task-proof-gap',
+    taskType: 'short_task' as never,
+    module: 'system',
+    proofRefs: [],
+  })
+  const finalized = await finalizeRunOutcome({
+    kind: 'done',
+    runId: 'run-proof-gap',
+    taskId: 'task-proof-gap',
+    scopeId: 's1',
+    durationMs: 10,
+    toolCallsUsed: 1,
+    initiator: 'done',
+    finalText: '',
+    projectionPatch: {
+      taskType: 'short_task',
+      module: 'system',
+    },
+  }, {
+    writeRunCloseMetric: () => {},
+    taskProjectionStore: store,
+    now: () => NOW,
+  })
+
+  const checkins = store.rows.get('task-proof-gap')!.checkins as CheckInRecord[]
+  assert.equal(finalized.status, 'error')
+  assert.equal(finalized.terminalReason, 'proof_gap')
+  assert.equal(checkins[0].kind, 'enforce')
+  assert.notEqual(checkins[0].verdict, 'accept')
+  assert.notEqual(finalized.terminalReason, 'adjudication_degraded')
 })
 
 test('zero-proof done with valid paused continuation becomes checkpoint', async () => {
@@ -133,6 +205,74 @@ test('zero-proof done with valid paused continuation becomes checkpoint', async 
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
+})
+
+test('direct skill done does not require skill_run_state but still needs tool proof', async () => {
+  const store = fakeStore({
+    taskId: 'task-direct-skill',
+    taskType: 'short_task' as never,
+    module: 'skill',
+    proofRefs: [collectToolResultProof('skill_send_im_file', 'ok', NOW)],
+  })
+  const finalized = await finalizeRunOutcome({
+    kind: 'done',
+    runId: 'run-direct-skill',
+    taskId: 'task-direct-skill',
+    scopeId: 's1',
+    durationMs: 10,
+    toolCallsUsed: 1,
+    initiator: 'done',
+    projectionPatch: {
+      module: 'skill',
+      taskType: 'short_task',
+      skillExecutionForm: 'direct',
+    },
+  }, {
+    writeRunCloseMetric: () => {},
+    taskProjectionStore: store,
+    now: () => NOW,
+  })
+
+  const checkins = store.rows.get('task-direct-skill')!.checkins as CheckInRecord[]
+  assert.equal(finalized.status, 'done')
+  assert.equal(finalized.terminalReason, 'done')
+  assert.equal(checkins[0].verdict, 'accept')
+  assert.equal(checkins[0].satisfiedCount, 1)
+  assert.equal(checkins[0].totalCount, 1)
+  assert.equal(checkins[0].blockers.includes('criteria_unsatisfied:s1'), false)
+})
+
+test('child-loop skill still requires skill_run_state proof', async () => {
+  const store = fakeStore({
+    taskId: 'task-child-skill',
+    taskType: 'short_task' as never,
+    module: 'skill',
+    proofRefs: [collectToolResultProof('skill_video_expert_pipeline', 'ok', NOW)],
+  })
+  const finalized = await finalizeRunOutcome({
+    kind: 'done',
+    runId: 'run-child-skill',
+    taskId: 'task-child-skill',
+    scopeId: 's1',
+    durationMs: 10,
+    toolCallsUsed: 1,
+    initiator: 'done',
+    projectionPatch: {
+      module: 'skill',
+      taskType: 'short_task',
+      skillExecutionForm: 'child_loop',
+    },
+  }, {
+    writeRunCloseMetric: () => {},
+    taskProjectionStore: store,
+    now: () => NOW,
+  })
+
+  const checkins = store.rows.get('task-child-skill')!.checkins as CheckInRecord[]
+  assert.equal(finalized.status, 'error')
+  assert.equal(finalized.terminalReason, 'proof_gap')
+  assert.equal(checkins[0].verdict, 'degraded')
+  assert.ok(checkins[0].blockers.includes('criteria_unsatisfied:s1'))
 })
 
 test('ordering hard clause: direct_answer done with finalText is judged WITH the digest proof — zero divergence', async () => {

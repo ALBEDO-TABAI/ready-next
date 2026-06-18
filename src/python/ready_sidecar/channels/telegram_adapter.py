@@ -55,7 +55,8 @@ class TelegramAdapter(ChannelAdapter):
             self._thread.join(timeout=1.5)
         self.mark_stopped()
 
-    def send(self, thread: Optional[str], text: str) -> tuple[bool, Optional[str]]:
+    def send(self, thread: Optional[str], text: str, attachments: Optional[list[Dict[str, Any]]] = None) -> tuple[bool, Optional[str]]:
+        _ = attachments
         chat_id = str(thread or self.config.get("defaultChatId") or "").strip()
         if not chat_id:
             return False, "缺少 Telegram chat_id（thread）"
@@ -127,4 +128,3 @@ class TelegramAdapter(ChannelAdapter):
             except Exception as exc:
                 self.mark_error(str(exc))
                 time.sleep(2.0)
-

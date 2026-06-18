@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
+import mimetypes
 import os
 import random
 import re
+import secrets
 import socket
 import threading
 import time
@@ -18,14 +21,26 @@ from .base import ChannelAdapter, now_iso
 
 
 DEFAULT_BASE_URL = "https://ilinkai.weixin.qq.com"
+DEFAULT_CDN_BASE_URL = "https://novac2c.cdn.weixin.qq.com/c2c"
 DEFAULT_BOT_TYPE = "3"
-CHANNEL_VERSION = "2.4.3"
+CHANNEL_VERSION = "2.4.4"
 ILINK_APP_ID = "bot"
-ILINK_CLIENT_VERSION = str((2 << 16) | (4 << 8) | 3)
+ILINK_CLIENT_VERSION = str((2 << 16) | (4 << 8) | 4)
 LOGIN_TTL_SECONDS = 5 * 60
 LOGIN_WAIT_SECONDS = 8 * 60
 QR_POLL_TIMEOUT_SECONDS = 35
 GET_UPDATES_TIMEOUT_SECONDS = 35
+WEIXIN_MEDIA_MAX_BYTES = 100 * 1024 * 1024
+UPLOAD_MEDIA_IMAGE = 1
+UPLOAD_MEDIA_VIDEO = 2
+UPLOAD_MEDIA_FILE = 3
+MESSAGE_TYPE_BOT = 2
+MESSAGE_STATE_FINISH = 2
+ITEM_TYPE_TEXT = 1
+ITEM_TYPE_IMAGE = 2
+ITEM_TYPE_VOICE = 3
+ITEM_TYPE_FILE = 4
+ITEM_TYPE_VIDEO = 5
 
 
 def _safe_account_filename(account_id: str) -> str:
@@ -50,21 +65,237 @@ def _generate_client_id() -> str:
     return f"ready-weixin-{uuid.uuid4().hex}"
 
 
+def _safe_filename(name: str, fallback: str = "attachment") -> str:
+    value = str(name or "").strip() or fallback
+    safe = "".join(ch if ch.isalnum() or ch in {"-", "_", "."} else "-" for ch in value).strip("-")
+    return safe or fallback
+
+
+def _guess_mime_type(path_or_name: str) -> str:
+    guessed, _ = mimetypes.guess_type(path_or_name)
+    return guessed or "application/octet-stream"
+
+
+def _attachment_kind_for_file(path: Path) -> str:
+    mime = _guess_mime_type(path.name)
+    if mime.startswith("image/"):
+        return "image"
+    if mime.startswith("video/"):
+        return "video"
+    suffix = path.suffix.lower()
+    if suffix in {".xls", ".xlsx", ".numbers"}:
+        return "spreadsheet"
+    if suffix in {".txt", ".md", ".markdown", ".json", ".csv", ".doc", ".docx", ".pdf"}:
+        return "text"
+    return "other"
+
+
+def _upload_media_type_for_file(path: Path) -> int:
+    mime = _guess_mime_type(path.name)
+    if mime.startswith("image/"):
+        return UPLOAD_MEDIA_IMAGE
+    if mime.startswith("video/"):
+        return UPLOAD_MEDIA_VIDEO
+    return UPLOAD_MEDIA_FILE
+
+
+def _aes_ecb_padded_size(size: int) -> int:
+    return ((int(size) // 16) + 1) * 16
+
+
+def _encrypt_aes_ecb(plaintext: bytes, key: bytes) -> bytes:
+    try:
+        from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+    except Exception as exc:
+        raise RuntimeError("缺少 cryptography，无法上传微信附件。请重新启动 Ready 让 sidecar 安装依赖。") from exc
+    pad_len = 16 - (len(plaintext) % 16)
+    padded = plaintext + bytes([pad_len]) * pad_len
+    encryptor = Cipher(algorithms.AES(key), modes.ECB()).encryptor()
+    return encryptor.update(padded) + encryptor.finalize()
+
+
+def _decrypt_aes_ecb(ciphertext: bytes, key: bytes) -> bytes:
+    try:
+        from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+    except Exception as exc:
+        raise RuntimeError("缺少 cryptography，无法下载微信附件。请重新启动 Ready 让 sidecar 安装依赖。") from exc
+    decryptor = Cipher(algorithms.AES(key), modes.ECB()).decryptor()
+    padded = decryptor.update(ciphertext) + decryptor.finalize()
+    if not padded:
+        return padded
+    pad_len = padded[-1]
+    if pad_len < 1 or pad_len > 16:
+        return padded
+    return padded[:-pad_len]
+
+
+def _parse_cdn_aes_key(raw: str) -> Optional[bytes]:
+    value = str(raw or "").strip()
+    if not value:
+        return None
+    try:
+        decoded = base64.b64decode(value)
+        if len(decoded) == 16:
+            return decoded
+        if len(decoded) == 32 and re.fullmatch(rb"[0-9a-fA-F]{32}", decoded):
+            return bytes.fromhex(decoded.decode("ascii"))
+    except Exception:
+        pass
+    if re.fullmatch(r"[0-9a-fA-F]{32}", value):
+        return bytes.fromhex(value)
+    return None
+
+
+def _build_cdn_download_url(media: Dict[str, Any], cdn_base_url: str) -> str:
+    full_url = str(media.get("full_url") or "").strip()
+    if full_url:
+        return full_url
+    encrypted_param = str(media.get("encrypt_query_param") or "").strip()
+    if not encrypted_param:
+        return ""
+    return f"{cdn_base_url.rstrip('/')}/download?encrypted_query_param={parse.quote(encrypted_param, safe='')}"
+
+
+def _build_cdn_upload_url(upload_param: str, filekey: str, cdn_base_url: str) -> str:
+    return (
+        f"{cdn_base_url.rstrip('/')}/upload"
+        f"?encrypted_query_param={parse.quote(upload_param, safe='')}"
+        f"&filekey={parse.quote(filekey, safe='')}"
+    )
+
+
+def _is_success_business_code(value: Any) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, bool):
+        return value is False
+    if isinstance(value, (int, float)):
+        return int(value) == 0
+    text = str(value).strip().lower()
+    return text in {"", "0", "ok", "success", "succeeded"}
+
+
+def _raise_for_business_error(endpoint: str, response: Dict[str, Any]) -> None:
+    for key in ("ret", "errcode", "error_code", "code"):
+        if key not in response:
+            continue
+        value = response.get(key)
+        if _is_success_business_code(value):
+            continue
+        message = str(response.get("errmsg") or response.get("err_msg") or response.get("message") or "").strip()
+        suffix = f"：{message}" if message else ""
+        raise RuntimeError(f"微信接口返回错误 {key}={value} ({endpoint}){suffix}")
+
+
 def _extract_text(item_list: Any) -> str:
     if not isinstance(item_list, list):
         return ""
     for item in item_list:
         if not isinstance(item, dict):
             continue
-        if item.get("type") == 1:
+        if item.get("type") == ITEM_TYPE_TEXT:
             text_item = item.get("text_item")
             if isinstance(text_item, dict) and text_item.get("text") is not None:
                 return str(text_item.get("text") or "")
-        if item.get("type") == 3:
+        if item.get("type") == ITEM_TYPE_VOICE:
             voice_item = item.get("voice_item")
             if isinstance(voice_item, dict) and voice_item.get("text") is not None:
                 return str(voice_item.get("text") or "")
     return ""
+
+
+def _coerce_attachment_type(raw: str, name: str = "", mime_type: str = "") -> str:
+    value = str(raw or "").strip().lower()
+    if value in {"image", "video", "text", "spreadsheet", "other"}:
+        return value
+    mime = str(mime_type or "").strip().lower()
+    suffix = Path(name or "").suffix.lower()
+    if mime.startswith("image/") or suffix in {".jpg", ".jpeg", ".png", ".gif", ".webp", ".heic"}:
+        return "image"
+    if mime.startswith("video/") or suffix in {".mp4", ".mov", ".m4v", ".webm"}:
+        return "video"
+    if suffix in {".txt", ".md", ".markdown", ".json", ".csv", ".doc", ".docx", ".pdf"}:
+        return "text"
+    if suffix in {".xls", ".xlsx", ".numbers"}:
+        return "spreadsheet"
+    return "other"
+
+
+def _normalize_attachment(raw: Any, fallback_id: str, fallback_kind: str = "other") -> Optional[Dict[str, Any]]:
+    if not isinstance(raw, dict):
+        return None
+    remote_id = str(
+        raw.get("id")
+        or raw.get("file_id")
+        or raw.get("media_id")
+        or raw.get("file_key")
+        or raw.get("url")
+        or raw.get("cdn_url")
+        or fallback_id
+    ).strip()
+    name = str(
+        raw.get("name")
+        or raw.get("file_name")
+        or raw.get("filename")
+        or raw.get("title")
+        or f"微信附件-{remote_id[-8:] if remote_id else fallback_id[-8:]}"
+    ).strip()
+    mime_type = str(raw.get("mimeType") or raw.get("mime_type") or raw.get("content_type") or "").strip()
+    path = str(raw.get("path") or raw.get("local_path") or "").strip()
+    url = str(raw.get("url") or raw.get("download_url") or raw.get("cdn_url") or "").strip()
+    ext = str(raw.get("ext") or Path(name).suffix or "").strip()
+    size_raw = raw.get("size") or raw.get("file_size") or 0
+    try:
+        size = int(size_raw or 0)
+    except Exception:
+        size = 0
+    kind = _coerce_attachment_type(str(raw.get("type") or fallback_kind), name, mime_type)
+    attachment_path = path or (url if url else f"wechat://attachment/{remote_id or fallback_id}")
+    item: Dict[str, Any] = {
+        "id": f"wx-attachment-{(remote_id or fallback_id)[-12:]}",
+        "name": name,
+        "path": attachment_path,
+        "type": kind,
+        "ext": ext,
+        "size": size,
+        "remoteId": remote_id or fallback_id,
+    }
+    if url:
+        item["url"] = url
+    if mime_type:
+        item["mimeType"] = mime_type
+    return item
+
+
+def _extract_attachments(item_list: Any, raw_id: str) -> List[Dict[str, Any]]:
+    if not isinstance(item_list, list):
+        return []
+    attachments: List[Dict[str, Any]] = []
+    for index, item in enumerate(item_list):
+        if not isinstance(item, dict):
+            continue
+        item_type = item.get("type")
+        if item_type in {ITEM_TYPE_TEXT, ITEM_TYPE_VOICE}:
+            continue
+        fallback_id = f"{raw_id}-{index}"
+        candidates: List[Tuple[str, Any]] = [
+            ("image", item.get("image_item")),
+            ("video", item.get("video_item")),
+            ("text", item.get("file_item")),
+            ("other", item.get("attachment_item")),
+            ("other", item.get("media_item")),
+        ]
+        added = False
+        for kind, raw in candidates:
+            attachment = _normalize_attachment(raw, fallback_id, kind)
+            if attachment:
+                attachments.append(attachment)
+                added = True
+        if not added:
+            attachment = _normalize_attachment(item, fallback_id, "other")
+            if attachment:
+                attachments.append(attachment)
+    return attachments
 
 
 class WechatOpenClawAdapter(ChannelAdapter):
@@ -74,14 +305,19 @@ class WechatOpenClawAdapter(ChannelAdapter):
         self._monitor_thread: Optional[threading.Thread] = None
         self._login_lock = threading.Lock()
         self._login_sessions: Dict[str, Dict[str, Any]] = {}
-
-    @property
-    def default_target(self) -> str:
-        return str(self.config.get("defaultTarget") or "").strip()
+        self._typing_tickets: Dict[str, str] = {}
 
     @property
     def configured_account_id(self) -> str:
         return str(self.config.get("accountId") or "").strip()
+
+    @property
+    def configured_route_tag(self) -> str:
+        return str(self.config.get("routeTag") or self.config.get("skRouteTag") or "").strip()
+
+    @property
+    def configured_bot_agent(self) -> str:
+        return str(self.config.get("botAgent") or "").strip()
 
     @property
     def state_dir(self) -> Path:
@@ -92,6 +328,18 @@ class WechatOpenClawAdapter(ChannelAdapter):
         if root:
             return Path(root).expanduser() / "wechat-openclaw"
         return Path.home() / ".ready" / "wechat-openclaw"
+
+    @property
+    def runtime_root(self) -> Path:
+        configured = str(self.config.get("runtimeRoot") or os.environ.get("READY_SIDECAR_RUNTIME_ROOT") or "").strip()
+        if configured:
+            return Path(configured).expanduser()
+        return self.state_dir.parent
+
+    @property
+    def attachment_root(self) -> Path:
+        safe_channel = "".join(ch if ch.isalnum() or ch in {"-", "_"} else "-" for ch in self.channel_id).strip("-") or "wechat"
+        return self.runtime_root / "channel-attachments" / safe_channel
 
     @property
     def accounts_dir(self) -> Path:
@@ -112,6 +360,11 @@ class WechatOpenClawAdapter(ChannelAdapter):
         if not account:
             self.mark_error("微信尚未绑定")
             return False, "微信尚未绑定，请先扫码绑定。"
+        try:
+            self._notify_start(account)
+        except Exception as exc:
+            self.mark_error(str(exc))
+            return False, str(exc)
         self._stop_event.clear()
         if not self._monitor_thread or not self._monitor_thread.is_alive():
             self._monitor_thread = threading.Thread(target=self._monitor_loop, daemon=True, name=f"wechat-{self.channel_id}")
@@ -121,45 +374,224 @@ class WechatOpenClawAdapter(ChannelAdapter):
 
     def stop(self) -> None:
         self._stop_event.set()
+        account = self._resolve_account()
+        if account:
+            try:
+                self._notify_stop(account)
+            except Exception:
+                pass
         self.mark_stopped()
 
-    def send(self, thread: Optional[str], text: str) -> tuple[bool, Optional[str]]:
+    def send(self, thread: Optional[str], text: str, attachments: Optional[List[Dict[str, Any]]] = None) -> tuple[bool, Optional[str]]:
         account = self._resolve_account()
         if not account:
             return False, "微信尚未绑定，请先扫码绑定。"
-        target = str(thread or self.default_target).strip()
+        target = self._resolve_outbound_target(account, thread)
         body = str(text or "").strip()
+        outbound_attachments = self._normalize_external_attachments(attachments or [])
         if not target:
-            return False, "缺少微信收件人"
-        if not body:
+            return False, "微信账号凭据缺少可发送目标"
+        if not body and not outbound_attachments:
             return False, "消息内容不能为空"
 
+        try:
+            if body:
+                self._send_message_items(account, target, [{"type": ITEM_TYPE_TEXT, "text_item": {"text": body}}])
+            for attachment in outbound_attachments:
+                self._send_attachment(account, target, attachment)
+            self.beat()
+            return True, None
+        except Exception as exc:
+            self.mark_error(str(exc))
+            return False, str(exc)
+
+    def send_typing(self, thread: Optional[str], typing: bool = True) -> tuple[bool, Optional[str]]:
+        account = self._resolve_account()
+        if not account:
+            return False, "微信尚未绑定，请先扫码绑定。"
+        target = self._resolve_outbound_target(account, thread)
+        if not target:
+            return False, "微信账号凭据缺少可发送目标"
+
+        try:
+            ticket_key = f"{account['accountId']}:{target}"
+            ticket = self._typing_tickets.get(ticket_key, "")
+            if typing and not ticket:
+                context_token = self._load_context_tokens(account["accountId"]).get(target)
+                config = self._post_json(
+                    account.get("baseUrl") or DEFAULT_BASE_URL,
+                    "ilink/bot/getconfig",
+                    {
+                        "ilink_user_id": target,
+                        **({"context_token": context_token} if context_token else {}),
+                        "base_info": self._base_info(),
+                    },
+                    token=account["token"],
+                    timeout=10,
+                )
+                ticket = str(config.get("typing_ticket") or "").strip()
+                if ticket:
+                    self._typing_tickets[ticket_key] = ticket
+            if not ticket:
+                return True, None
+
+            self._post_json(
+                account.get("baseUrl") or DEFAULT_BASE_URL,
+                "ilink/bot/sendtyping",
+                {
+                    "ilink_user_id": target,
+                    "typing_ticket": ticket,
+                    "status": 1 if typing else 2,
+                    "base_info": self._base_info(),
+                },
+                token=account["token"],
+                timeout=10,
+            )
+            self.beat()
+            return True, None
+        except Exception as exc:
+            return False, str(exc)
+
+    def _resolve_outbound_target(self, account: Dict[str, str], thread: Optional[str]) -> str:
+        target = str(thread or "").strip()
+        if target:
+            return target
+        return str(account.get("userId") or account.get("accountId") or "").strip()
+
+    def _notify_start(self, account: Dict[str, str]) -> None:
+        self._post_json(
+            account.get("baseUrl") or DEFAULT_BASE_URL,
+            "ilink/bot/msg/notifystart",
+            {"base_info": self._base_info()},
+            token=account["token"],
+            timeout=10,
+        )
+
+    def _notify_stop(self, account: Dict[str, str]) -> None:
+        self._post_json(
+            account.get("baseUrl") or DEFAULT_BASE_URL,
+            "ilink/bot/msg/notifystop",
+            {"base_info": self._base_info()},
+            token=account["token"],
+            timeout=10,
+        )
+
+    def _send_message_items(self, account: Dict[str, str], target: str, items: List[Dict[str, Any]]) -> None:
         context_token = self._load_context_tokens(account["accountId"]).get(target)
         payload = {
             "msg": {
                 "from_user_id": "",
                 "to_user_id": target,
                 "client_id": _generate_client_id(),
-                "message_type": 2,
-                "message_state": 2,
-                "item_list": [{"type": 1, "text_item": {"text": body}}],
+                "message_type": MESSAGE_TYPE_BOT,
+                "message_state": MESSAGE_STATE_FINISH,
+                "item_list": items,
                 **({"context_token": context_token} if context_token else {}),
             },
             "base_info": self._base_info(),
         }
-        try:
-            self._post_json(
-                account.get("baseUrl") or DEFAULT_BASE_URL,
-                "ilink/bot/sendmessage",
-                payload,
-                token=account["token"],
-                timeout=15,
-            )
-            self.beat()
-            return True, None
-        except Exception as exc:
-            self.mark_error(str(exc))
-            return False, str(exc)
+        self._post_json(
+            account.get("baseUrl") or DEFAULT_BASE_URL,
+            "ilink/bot/sendmessage",
+            payload,
+            token=account["token"],
+            timeout=15,
+        )
+
+    def _send_attachment(self, account: Dict[str, str], target: str, attachment: Dict[str, Any]) -> None:
+        path = Path(str(attachment.get("path") or "")).expanduser()
+        if not path.is_absolute() or not path.exists() or not path.is_file():
+            raise RuntimeError(f"微信附件文件不可用：{attachment.get('name') or path}")
+        stat = path.stat()
+        if stat.st_size <= 0:
+            raise RuntimeError(f"微信附件为空：{path.name}")
+        if stat.st_size > WEIXIN_MEDIA_MAX_BYTES:
+            raise RuntimeError(f"微信附件超过 100MB：{path.name}")
+
+        media_type = _upload_media_type_for_file(path)
+        uploaded = self._upload_attachment_to_cdn(account, target, path, media_type)
+        aes_key_b64 = base64.b64encode(uploaded["aeskey"].encode("ascii")).decode("ascii")
+        media = {
+            "encrypt_query_param": uploaded["downloadEncryptedQueryParam"],
+            "aes_key": aes_key_b64,
+            "encrypt_type": 1,
+        }
+        if media_type == UPLOAD_MEDIA_IMAGE:
+            item = {
+                "type": ITEM_TYPE_IMAGE,
+                "image_item": {
+                    "media": media,
+                    "mid_size": uploaded["fileSizeCiphertext"],
+                },
+            }
+        elif media_type == UPLOAD_MEDIA_VIDEO:
+            item = {
+                "type": ITEM_TYPE_VIDEO,
+                "video_item": {
+                    "media": media,
+                    "video_size": uploaded["fileSizeCiphertext"],
+                },
+            }
+        else:
+            item = {
+                "type": ITEM_TYPE_FILE,
+                "file_item": {
+                    "media": media,
+                    "file_name": str(attachment.get("name") or path.name),
+                    "len": str(uploaded["fileSize"]),
+                },
+            }
+        self._send_message_items(account, target, [item])
+
+    def _upload_attachment_to_cdn(
+        self,
+        account: Dict[str, str],
+        target: str,
+        path: Path,
+        media_type: int,
+    ) -> Dict[str, Any]:
+        plaintext = path.read_bytes()
+        raw_size = len(plaintext)
+        raw_md5 = hashlib.md5(plaintext).hexdigest()
+        filekey = secrets.token_hex(16)
+        aeskey = secrets.token_bytes(16)
+        aeskey_hex = aeskey.hex()
+        encrypted = _encrypt_aes_ecb(plaintext, aeskey)
+        upload_resp = self._post_json(
+            account.get("baseUrl") or DEFAULT_BASE_URL,
+            "ilink/bot/getuploadurl",
+            {
+                "filekey": filekey,
+                "media_type": media_type,
+                "to_user_id": target,
+                "rawsize": raw_size,
+                "rawfilemd5": raw_md5,
+                "filesize": len(encrypted),
+                "no_need_thumb": True,
+                "aeskey": aeskey_hex,
+                "base_info": self._base_info(),
+            },
+            token=account["token"],
+            timeout=15,
+        )
+        upload_url = str(upload_resp.get("upload_full_url") or "").strip()
+        upload_param = str(upload_resp.get("upload_param") or "").strip()
+        if not upload_url:
+            if not upload_param:
+                raise RuntimeError("微信服务未返回附件上传地址")
+            upload_url = _build_cdn_upload_url(upload_param, filekey, account.get("cdnBaseUrl") or DEFAULT_CDN_BASE_URL)
+
+        headers = self._post_bytes(upload_url, encrypted, timeout=60)
+        download_param = str(headers.get("x-encrypted-param") or headers.get("X-Encrypted-Param") or "").strip()
+        if not download_param:
+            raise RuntimeError("微信 CDN 上传成功但未返回下载参数")
+        return {
+            "filekey": filekey,
+            "downloadEncryptedQueryParam": download_param,
+            "aeskey": aeskey_hex,
+            "fileSize": raw_size,
+            "fileSizeCiphertext": _aes_ecb_padded_size(raw_size),
+        }
 
     def start_login(self, force: bool = False) -> Dict[str, Any]:
         session_key = str(uuid.uuid4())
@@ -241,10 +673,11 @@ class WechatOpenClawAdapter(ChannelAdapter):
             return False, "invalid payload"
         text = str(context.get("content") or context.get("text") or context.get("message") or "").strip()
         thread = str(context.get("from") or context.get("thread") or context.get("target") or "").strip()
-        if not text or not thread:
-            return False, "微信入站事件缺少 sender/thread 或文本"
+        attachments = self._normalize_external_attachments(context.get("attachments") or payload.get("attachments"))
+        if (not text and not attachments) or not thread:
+            return False, "微信入站事件缺少 sender/thread 或文本/附件"
         raw_id = str(payload.get("id") or context.get("id") or int(time.time() * 1000))
-        self._emit_message(thread, thread, text, raw_id, {})
+        self._emit_message(thread, thread, text, raw_id, {}, attachments)
         return True, None
 
     def _poll_login_session(self, session_key: str) -> None:
@@ -310,6 +743,7 @@ class WechatOpenClawAdapter(ChannelAdapter):
                     "accountId": account_id,
                     "token": token,
                     "baseUrl": str(response.get("baseurl") or DEFAULT_BASE_URL).strip() or DEFAULT_BASE_URL,
+                    "cdnBaseUrl": str(response.get("cdnBaseUrl") or response.get("cdn_base_url") or DEFAULT_CDN_BASE_URL).strip() or DEFAULT_CDN_BASE_URL,
                     "userId": str(response.get("ilink_user_id") or "").strip(),
                     "savedAt": now_iso(),
                 }
@@ -390,13 +824,111 @@ class WechatOpenClawAdapter(ChannelAdapter):
             if token:
                 context_tokens[thread] = token
             text = _extract_text(msg.get("item_list")).strip()
-            if not text:
-                continue
             raw_id = str(msg.get("msg_id") or msg.get("client_id") or int(time.time() * 1000))
-            self._emit_message(thread, thread, text, raw_id, {"accountId": account["accountId"]})
+            attachments = self._extract_message_attachments(account, msg.get("item_list"), raw_id)
+            if not text and not attachments:
+                continue
+            self._emit_message(thread, thread, text, raw_id, {"accountId": account["accountId"]}, attachments)
         self._save_context_tokens(account["accountId"], context_tokens)
 
-    def _emit_message(self, thread: str, sender: str, text: str, raw_id: str, meta: Dict[str, Any]) -> None:
+    def _extract_message_attachments(self, account: Dict[str, str], item_list: Any, raw_id: str) -> List[Dict[str, Any]]:
+        if not isinstance(item_list, list):
+            return []
+        attachments: List[Dict[str, Any]] = []
+        for index, item in enumerate(item_list):
+            if not isinstance(item, dict):
+                continue
+            item_type = item.get("type")
+            if item_type in {ITEM_TYPE_TEXT, ITEM_TYPE_VOICE}:
+                continue
+            fallback_id = f"{raw_id}-{index}"
+            downloaded = self._download_message_attachment(account, item, fallback_id)
+            if downloaded:
+                attachments.append(downloaded)
+                continue
+            extracted = _extract_attachments([item], fallback_id)
+            attachments.extend(extracted)
+        return attachments
+
+    def _download_message_attachment(
+        self,
+        account: Dict[str, str],
+        item: Dict[str, Any],
+        fallback_id: str,
+    ) -> Optional[Dict[str, Any]]:
+        item_type = item.get("type")
+        raw: Any = None
+        filename = f"wechat-{fallback_id}.bin"
+        mime_type = "application/octet-stream"
+        kind = "other"
+        if item_type == ITEM_TYPE_IMAGE:
+            raw = item.get("image_item")
+            filename = f"image-{int(time.time() * 1000)}.jpg"
+            mime_type = "image/jpeg"
+            kind = "image"
+        elif item_type == ITEM_TYPE_FILE:
+            raw = item.get("file_item")
+            if isinstance(raw, dict):
+                filename = str(raw.get("file_name") or raw.get("name") or filename)
+            mime_type = _guess_mime_type(filename)
+            kind = _coerce_attachment_type("text", filename, mime_type)
+        elif item_type == ITEM_TYPE_VIDEO:
+            raw = item.get("video_item")
+            filename = f"video-{int(time.time() * 1000)}.mp4"
+            mime_type = "video/mp4"
+            kind = "video"
+        if not isinstance(raw, dict):
+            return None
+        media = raw.get("media")
+        if not isinstance(media, dict):
+            return None
+        url = _build_cdn_download_url(media, account.get("cdnBaseUrl") or DEFAULT_CDN_BASE_URL)
+        if not url:
+            return None
+        aes_key = _parse_cdn_aes_key(str(raw.get("aeskey") or media.get("aes_key") or ""))
+        try:
+            data = self._get_bytes(url, timeout=60)
+            if len(data) > WEIXIN_MEDIA_MAX_BYTES:
+                return None
+            if aes_key:
+                data = _decrypt_aes_ecb(data, aes_key)
+            safe_name = _safe_filename(filename, "wechat-attachment.bin")
+            self.attachment_root.mkdir(parents=True, exist_ok=True)
+            target = self.attachment_root / f"{_safe_filename(fallback_id)}-{safe_name}"
+            target.write_bytes(data)
+            return {
+                "id": f"wx-attachment-{fallback_id[-12:]}",
+                "name": safe_name,
+                "path": str(target),
+                "type": kind,
+                "ext": Path(safe_name).suffix,
+                "size": len(data),
+                "mimeType": mime_type,
+                "remoteId": fallback_id,
+                "downloaded": True,
+            }
+        except Exception:
+            return None
+
+    def _normalize_external_attachments(self, raw: Any) -> List[Dict[str, Any]]:
+        if not isinstance(raw, list):
+            return []
+        attachments: List[Dict[str, Any]] = []
+        for index, item in enumerate(raw):
+            attachment = _normalize_attachment(item, f"hook-{index}", "other")
+            if attachment:
+                attachments.append(attachment)
+        return attachments
+
+    def _emit_message(
+        self,
+        thread: str,
+        sender: str,
+        text: str,
+        raw_id: str,
+        meta: Dict[str, Any],
+        attachments: Optional[List[Dict[str, Any]]] = None,
+    ) -> None:
         event_id = f"wx:{self.channel_id}:{raw_id}"
         self.emit_inbound({
             "id": event_id,
@@ -408,7 +940,7 @@ class WechatOpenClawAdapter(ChannelAdapter):
             "timestamp": now_iso(),
             "idempotencyKey": event_id,
             "meta": {"messageId": raw_id, **meta},
-            "attachments": [],
+            "attachments": attachments or [],
         })
 
     def _resolve_account(self) -> Optional[Dict[str, str]]:
@@ -446,6 +978,7 @@ class WechatOpenClawAdapter(ChannelAdapter):
                 "accountId": str(parsed.get("accountId") or account_id),
                 "token": token,
                 "baseUrl": str(parsed.get("baseUrl") or DEFAULT_BASE_URL).strip() or DEFAULT_BASE_URL,
+                "cdnBaseUrl": str(parsed.get("cdnBaseUrl") or DEFAULT_CDN_BASE_URL).strip() or DEFAULT_CDN_BASE_URL,
                 "userId": str(parsed.get("userId") or "").strip(),
             }
         except Exception:
@@ -495,7 +1028,7 @@ class WechatOpenClawAdapter(ChannelAdapter):
     def _base_info(self) -> Dict[str, str]:
         return {
             "channel_version": CHANNEL_VERSION,
-            "bot_agent": "Ready/0.1.0 OpenClaw-Weixin/2.4.3",
+            "bot_agent": self.configured_bot_agent or f"Ready/0.1.0 OpenClaw-Weixin/{CHANNEL_VERSION}",
         }
 
     def _headers(self, token: Optional[str] = None) -> Dict[str, str]:
@@ -508,6 +1041,9 @@ class WechatOpenClawAdapter(ChannelAdapter):
         }
         if token:
             headers["Authorization"] = f"Bearer {token}"
+        route_tag = self.configured_route_tag
+        if route_tag:
+            headers["SKRouteTag"] = route_tag
         return headers
 
     def _get_json(self, base_url: str, endpoint: str, timeout: int) -> Dict[str, Any]:
@@ -523,7 +1059,18 @@ class WechatOpenClawAdapter(ChannelAdapter):
             raw = exc.read().decode("utf-8", errors="replace")
             raise RuntimeError(f"HTTP {exc.code}: {raw}") from exc
         parsed = json.loads(raw or "{}")
-        return parsed if isinstance(parsed, dict) else {}
+        parsed_dict = parsed if isinstance(parsed, dict) else {}
+        _raise_for_business_error(endpoint, parsed_dict)
+        return parsed_dict
+
+    def _get_bytes(self, url: str, timeout: int = 60) -> bytes:
+        req = request.Request(url, method="GET")
+        try:
+            with request.urlopen(req, timeout=timeout) as resp:
+                return resp.read()
+        except urlerror.HTTPError as exc:
+            raw = exc.read().decode("utf-8", errors="replace")
+            raise RuntimeError(f"HTTP {exc.code}: {raw}") from exc
 
     def _post_json(
         self,
@@ -533,7 +1080,9 @@ class WechatOpenClawAdapter(ChannelAdapter):
         token: Optional[str] = None,
         timeout: int = 15,
     ) -> Dict[str, Any]:
-        return self._http_request_json("POST", base_url, endpoint, payload, token=token, timeout=timeout)
+        response = self._http_request_json("POST", base_url, endpoint, payload, token=token, timeout=timeout)
+        _raise_for_business_error(endpoint, response)
+        return response
 
     def _http_request_json(
         self,
@@ -555,3 +1104,18 @@ class WechatOpenClawAdapter(ChannelAdapter):
             raise RuntimeError(f"HTTP {exc.code}: {raw}") from exc
         parsed = json.loads(raw or "{}")
         return parsed if isinstance(parsed, dict) else {}
+
+    def _post_bytes(self, url: str, data: bytes, timeout: int = 60) -> Dict[str, str]:
+        req = request.Request(
+            url,
+            data=data,
+            headers={"Content-Type": "application/octet-stream"},
+            method="POST",
+        )
+        try:
+            with request.urlopen(req, timeout=timeout) as resp:
+                resp.read()
+                return {key: value for key, value in resp.headers.items()}
+        except urlerror.HTTPError as exc:
+            raw = exc.read().decode("utf-8", errors="replace")
+            raise RuntimeError(f"HTTP {exc.code}: {raw}") from exc

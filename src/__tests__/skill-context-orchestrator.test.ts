@@ -70,6 +70,62 @@ test('SkillContextOrchestrator builds preferred skill tool names from explicit s
   )
 })
 
+test('SkillContextOrchestrator routes referenced local file sends to send-im', () => {
+  const sendImSkill = {
+    id: 'send-im',
+    name: 'Send IM',
+    description: 'send local file to remote IM',
+    defaultAction: 'send_file',
+    actions: [{ name: 'send_file', visibility: 'public' }],
+  } as any
+  const orchestrator = new SkillContextOrchestrator({
+    extractPrimaryUserInstruction: (raw) => raw,
+    listSkills: () => [
+      sendImSkill,
+      {
+        id: 'notes-organizer',
+        name: 'Notes Organizer',
+        description: '整理学习笔记',
+        defaultAction: 'read_skill',
+        actions: [{ name: 'read_skill', visibility: 'public' }],
+      } as any,
+    ],
+    resolveSkillToolByAction: (skillId, action) => ({
+      name: skillId === 'send-im' && action === 'send_file' ? 'skill_send_im_file' : `skill_${action}`,
+      action,
+    }) as any,
+  })
+
+  const matched = orchestrator.findExplicitlyRequestedSkills('把@[《置身钉内》学习笔记拷貝.md]这个文件发到我微信')
+  assert.deepEqual(matched.map((skill) => skill.id), ['send-im'])
+  assert.ok(
+    orchestrator
+      .buildPreferredSkillToolNames('把@[《置身钉内》学习笔记拷貝.md]这个文件发到我微信', 'scope-send-im')
+      .includes('skill_send_im_file'),
+  )
+
+  const recentMediaMatched = orchestrator.findExplicitlyRequestedSkills('把这四张图发到我微信')
+  assert.deepEqual(recentMediaMatched.map((skill) => skill.id), ['send-im'])
+  assert.ok(
+    orchestrator
+      .buildPreferredSkillToolNames('把这四张图发到我微信', 'scope-send-im')
+      .includes('skill_send_im_file'),
+  )
+
+  assert.equal(
+    orchestrator
+      .findExplicitlyRequestedSkills('帮我整理@[《置身钉内》学习笔记拷貝.md]这个学习笔记')
+      .some((skill) => skill.id === 'send-im'),
+    false,
+  )
+  assert.equal(
+    orchestrator
+      .findExplicitlyRequestedSkills('帮我找一些图片资料发到微信')
+      .some((skill) => skill.id === 'send-im'),
+    false,
+  )
+})
+
 test('SkillContextOrchestrator only prefers compact primitive for context-compact skill turns', () => {
   const contextCompactSkill: SkillState = {
     id: 'context-compact',

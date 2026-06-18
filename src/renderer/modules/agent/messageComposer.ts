@@ -653,7 +653,7 @@ export async function buildComposedAgentInputWithDiagnostics(params: {
         if (att.type === 'video' && !supportsNativeVideo) {
           blocks.push({
             type: 'text',
-            text: `\n\n--- 附件: ${att.name} ---\n[当前模型接口暂不支持原生视频输入，已自动降级为文件描述]\n本地视频路径: ${att.path}`,
+            text: `\n\n--- 附件: ${att.name} ---\n- 路径: ${att.path}\n- 类型: video\n[当前模型接口暂不支持原生视频输入，已自动降级为文件描述]`,
           })
           markIncluded()
           continue
@@ -662,9 +662,17 @@ export async function buildComposedAgentInputWithDiagnostics(params: {
         const fileResult = await window.electronAPI.chat.readFileForAI(att.path)
         if (fileResult.success && fileResult.data) {
           if (fileResult.data.type === 'image' && fileResult.data.base64) {
+            blocks.push({
+              type: 'text',
+              text: `\n\n--- 附件: ${att.name} ---\n- 路径: ${att.path}\n- 类型: image`,
+            })
             blocks.push({ type: 'image', base64: fileResult.data.base64, mimeType: fileResult.data.mimeType || 'image/png' })
             markIncluded()
           } else if (fileResult.data.type === 'video' && fileResult.data.base64) {
+            blocks.push({
+              type: 'text',
+              text: `\n\n--- 附件: ${att.name} ---\n- 路径: ${att.path}\n- 类型: video`,
+            })
             blocks.push({ type: 'video', base64: fileResult.data.base64, mimeType: fileResult.data.mimeType || 'video/mp4' })
             markIncluded()
           } else if (fileResult.data.type === 'text') {

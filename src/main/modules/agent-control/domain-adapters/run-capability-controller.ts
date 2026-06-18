@@ -145,7 +145,7 @@ function resolveActiveSkillAllowedTools(
     // Lazy require so we don't import the runtime manager at module load
     // time (would create a circular import via skill_*-tools paths).
      
-    const { getSkillsRuntimeManager } = require('../skills-runtime/runtime-manager') as {
+    const { getSkillsRuntimeManager } = require('../../skills-runtime/runtime-manager') as {
       getSkillsRuntimeManager: () => { listSkills(): Array<{ id: string; allowedTools?: string[] | null }> }
     }
     const skill = getSkillsRuntimeManager()

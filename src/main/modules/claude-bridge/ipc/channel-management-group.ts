@@ -69,7 +69,6 @@ export interface UpsertChannelPayload {
  */
 export interface StartWechatLoginPayload {
   id?: string
-  defaultTarget?: string
   force?: boolean
 }
 

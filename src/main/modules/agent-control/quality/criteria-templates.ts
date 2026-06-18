@@ -36,6 +36,8 @@ export interface CriteriaItem {
   notApplicable?: { reason: string }
 }
 
+export type SkillExecutionForm = 'direct' | 'child_loop' | 'python'
+
 export interface ResolvedCriteria {
   taskType: TaskType
   module: string
@@ -99,14 +101,24 @@ if (CRITERIA_BASE_TASK_TYPES.length !== TASK_TYPES.length
   throw new Error('[criteria-templates] base template keys drifted from TASK_TYPES')
 }
 
-export function resolveCriteria(taskType: TaskType, module: string): ResolvedCriteria {
+export function resolveCriteria(
+  taskType: TaskType,
+  module: string,
+  options?: { skillExecutionForm?: SkillExecutionForm | null },
+): ResolvedCriteria {
   const base = BASE_TEMPLATES[taskType] ?? BASE_TEMPLATES.short_task
   const overlay = OVERLAY_TEMPLATES[module] ?? []
+  const items = [...base, ...overlay].map((entry) => ({ ...entry }))
+  const resolvedItems = module === 'skill' && options?.skillExecutionForm === 'direct'
+    ? items.map((entry) => entry.id === 's1'
+      ? markNotApplicable(entry, 'direct skill 交付即 tool_result，无 run_state/delivery_report')
+      : entry)
+    : items
   return {
     taskType,
     module,
     // fresh copies — resolved sets are mutated downstream (model追加/裁决标注)
-    items: [...base, ...overlay].map((entry) => ({ ...entry })),
+    items: resolvedItems,
     proofExpectation: taskType === 'direct_answer' ? 'assistant_response_digest' : 'tool_or_artifact_proof',
     ...(taskType === 'direct_answer' ? { actionDeclarationReclassify: 'short_task' as TaskType } : {}),
   }

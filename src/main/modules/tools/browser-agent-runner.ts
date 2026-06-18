@@ -779,17 +779,18 @@ export class BrowserAgentRunner {
     // Lane-A: refresh the user-view lease before each tool so a long run does
     // not expire mid-loop, then gate the call through the lease.
     this.leaseHeartbeat?.()
-    const result = await executeBrowserTool(
-      toolName,
-      args,
-      this.controller,
+	    const result = await executeBrowserTool(
+	      toolName,
+	      args,
+	      this.controller,
       this.abortSignal,
-      this.sessionId,
-      this.leaseGate,
-    )
-    if (!options?.silent) {
-      this.emitToolEvent?.('tool_result', result.slice(0, 220))
-    }
+	      this.sessionId,
+	      this.leaseGate,
+	    )
+	    const resultText = typeof result === 'string' ? result : result.text
+	    if (!options?.silent) {
+	      this.emitToolEvent?.('tool_result', resultText.slice(0, 220))
+	    }
     if ([
       'browser_navigate',
       'browser_upload_scope_attachment',
@@ -807,8 +808,8 @@ export class BrowserAgentRunner {
     ].includes(toolName)) {
       this.invalidateWorkflowCaches()
     }
-    return result
-  }
+	    return resultText
+	  }
 
   private invalidateWorkflowCaches(options?: { keepVision?: boolean }): void {
     this.workflowSnapshotCache.clear()

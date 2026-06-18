@@ -94,6 +94,7 @@ export interface ToolContext {
   sessionId?: string
   scopeId?: string
   currentUserText?: string
+  requestEnvelope?: unknown
   runId?: string
   taskId?: string
   parentTaskId?: string
@@ -532,9 +533,14 @@ async function executeToolCallInner(
           return executeSkillTool(toolName, args, context.sessionId, context.registerRunCleanup, context.abortSignal, context.agentContext, {
             scopeId: context.scopeId || context.scope?.id || context.sessionId,
             runId: context.runId,
+            taskId: context.taskId,
+            taskProjectionId: context.taskProjectionId,
             frameSkillId: context.frameSkillId ?? null,
             // EP3-I4 — user's words this turn, byte-for-byte (05 §4).
             currentUserText: context.currentUserText,
+            requestEnvelope: context.requestEnvelope,
+            runtime: context.runtime,
+            sidecarManager: context.sidecarManager,
             // Phase 3 — forward the live active-frame slot so the skill
             // dispatcher (`skill_read_artifact`) can prefer fresh artifact
             // roots emitted by earlier tools in the same batch.

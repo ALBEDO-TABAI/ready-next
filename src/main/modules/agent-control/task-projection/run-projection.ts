@@ -33,6 +33,33 @@ function hasDefinedOwn(value: object, key: string): boolean {
   return hasOwn(value, key) && (value as Record<string, unknown>)[key] !== undefined
 }
 
+function artifactKey(artifact: NonNullable<ScopeRunSummary['recentArtifacts']>[number]): string {
+  const record = artifact as Record<string, unknown>
+  return String(record.id || record.path || record.label || JSON.stringify(record))
+}
+
+function isMediaArtifact(artifact: NonNullable<ScopeRunSummary['recentArtifacts']>[number]): boolean {
+  const record = artifact as Record<string, unknown>
+  const kind = String(record.kind || '').toLowerCase()
+  if (kind === 'image' || kind === 'media' || kind === 'video') return true
+  const mimeType = String(record.mimeType || record.contentType || '').toLowerCase()
+  if (mimeType.startsWith('image/') || mimeType.startsWith('video/')) return true
+  const path = String(record.path || '').toLowerCase()
+  return /\.(png|jpe?g|webp|gif|heic|mp4|mov|m4v|webm)$/.test(path)
+}
+
+function selectRecentArtifacts(
+  artifacts: ScopeRunSummary['recentArtifacts'],
+): ScopeRunSummary['recentArtifacts'] {
+  const source = Array.isArray(artifacts) ? artifacts.filter(Boolean) : []
+  if (source.length <= 4) return source
+  const selectedKeys = new Set([
+    ...source.filter(isMediaArtifact).slice(-4).map(artifactKey),
+    ...source.slice(-4).map(artifactKey),
+  ])
+  return source.filter((artifact) => selectedKeys.has(artifactKey(artifact)))
+}
+
 export class RunProjection {
   constructor(private readonly deps: {
     getScope: (scopeId: string) => ConversationScope | null
@@ -74,7 +101,12 @@ export class RunProjection {
     const truthHasWaitingFor = hasDefinedOwn(truthPatch, 'waitingFor')
     const payloadHasResumableActions = hasDefinedOwn(payload, 'resumableActions')
     const truthHasResumableActions = hasDefinedOwn(truthPatch, 'resumableActions')
-    const recentArtifacts = (payload.recentArtifacts || payload.artifactRefs || previous?.recentArtifacts || []).slice(-4)
+    const truthRecentArtifacts = Array.isArray(truthPatch.recentArtifacts)
+      ? truthPatch.recentArtifacts as ScopeRunSummary['recentArtifacts']
+      : null
+    const recentArtifacts = selectRecentArtifacts(
+      truthRecentArtifacts || payload.recentArtifacts || payload.artifactRefs || previous?.recentArtifacts || [],
+    )
     const activePhase =
       payload.phase === 'queued'
       || payload.phase === 'planning'

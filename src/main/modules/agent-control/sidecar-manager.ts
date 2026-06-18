@@ -27,6 +27,15 @@ const SIDECAR_PIP_ENV = {
   PYO3_USE_ABI3_FORWARD_COMPATIBILITY: '1',
   PIP_PREFER_BINARY: '1',
 }
+const SIDECAR_REQUIRED_IMPORTS = [
+  'fastapi',
+  'uvicorn',
+  'apscheduler',
+  'pydantic',
+  'requests',
+  'lark_oapi',
+  'cryptography',
+]
 
 function wait(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
@@ -238,8 +247,20 @@ export class SidecarManager {
     id: string
     thread?: string
     text: string
+    attachments?: Array<Record<string, unknown>>
   }): Promise<Record<string, unknown>> {
     return this.request('/channels/send', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    })
+  }
+
+  async sendChannelTyping(payload: {
+    id: string
+    thread?: string
+    typing?: boolean
+  }): Promise<Record<string, unknown>> {
+    return this.request('/channels/typing', {
       method: 'POST',
       body: JSON.stringify(payload),
     })
@@ -366,6 +387,9 @@ export class SidecarManager {
     const started = Date.now()
     let lastError = 'Sidecar health check timed out'
     while (Date.now() - started < SIDECAR_HEALTH_TIMEOUT_MS) {
+      if (!this.process || this.process.exitCode !== null) {
+        throw new Error(this.status.error || 'Sidecar exited before health check')
+      }
       try {
         await this.request('/health')
         this.status.lastHeartbeatAt = new Date().toISOString()
@@ -426,7 +450,9 @@ export class SidecarManager {
       })
     }
 
-    if (existsSync(requirementsPath) && stateDigest !== digest) {
+    if (existsSync(requirementsPath) && (
+      stateDigest !== digest || !(await this.hasRequiredPythonModules(venvPython))
+    )) {
       await execFileAsync(venvPython, ['-m', 'pip', 'install', '--disable-pip-version-check', '-r', requirementsPath], {
         timeout: 300_000,
         maxBuffer: 16 * 1024 * 1024,
@@ -436,6 +462,23 @@ export class SidecarManager {
     }
 
     return venvPython
+  }
+
+  private async hasRequiredPythonModules(pythonBin: string): Promise<boolean> {
+    try {
+      await execFileAsync(
+        pythonBin,
+        ['-c', SIDECAR_REQUIRED_IMPORTS.map((name) => `import ${name}`).join('; ')],
+        {
+          timeout: 10_000,
+          env: this.getPythonRuntimeEnv(),
+        },
+      )
+      return true
+    } catch {
+      // silent-catch: dependency probe failure means requirements must be reinstalled below.
+      return false
+    }
   }
 
   private getVenvPythonPath(): string {

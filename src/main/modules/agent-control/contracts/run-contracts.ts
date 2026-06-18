@@ -1012,6 +1012,9 @@ export interface DomainOrchestrationDecision {
 }
 
 export interface RunProjectionPatch {
+  taskType?: TaskType
+  module?: ScopeRunEventPayload['module'] | string | null
+  skillExecutionForm?: 'direct' | 'child_loop' | 'python' | null
   taskTitle?: string | null
   taskSummary?: string | null
   interactionState?: TaskInteractionState
@@ -1022,6 +1025,7 @@ export interface RunProjectionPatch {
   taskContinuation?: ScopeRunTaskContinuation | null
   blockedReason?: string | null
   progress?: ScopeRunSkillProgress | null
+  recentArtifacts?: ScopeRunEventPayload['artifactRefs']
 }
 
 export type PreparedRunPayload = PromptAssemblyResult

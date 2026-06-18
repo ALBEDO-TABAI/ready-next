@@ -33,6 +33,7 @@ import {
 } from '../main/modules/agent-control/skills/skill-tool-fallback-throttle'
 import { __setMetricSinkForTests, type AgentMetricEvent } from '../main/modules/agent-control/metrics'
 import { buildSelectedSkillToolAuthorization } from '../main/modules/agent-control/skills/skill-tool-authorization'
+import { SkillContextOrchestrator } from '../main/modules/agent-control/skills/skill-context-orchestrator'
 import { ToolRegistry } from '../main/modules/agent-control/tools-runtime/tool-registry'
 import { TOOL_ERROR_METRICS } from '../main/modules/agent-control/tools-runtime/tool-error-metrics'
 
@@ -55,14 +56,26 @@ const SELECTED_AUTH = buildSelectedSkillToolAuthorization({
   source: 'explicit',
   reason: 'test_setup',
 })
+const SEND_IM_AUTH = buildSelectedSkillToolAuthorization({
+  skillId: 'send-im',
+  allowedTypedActions: ['skill_send_im_file'],
+  allowedPrimitives: [],
+  source: 'explicit',
+  reason: 'test_send_im',
+})
 import {
   __setSkillActionToolDefsForTests,
+  buildSkillToolName,
   findSkillToolByNameForExecution,
   findSkillToolByNameForExecutionDetailed,
   findSkillToolBySkillAction,
   getSkillActionSchemas,
 } from '../main/modules/tools/skills-tools'
 import { resolveToolInputSchemaForExecution } from '../main/modules/agent-control/tools-runtime/tool-registry'
+import {
+  getStaticSkillActionDefBySkillAction,
+  getStaticSkillToolNameForAction,
+} from '../main/modules/tools/skills-tools-static'
 
 const LOOKUP_METRIC = PROJECTION_OBSERVABILITY_METRICS.skillToolDynamicLookupFailed
 
@@ -173,6 +186,83 @@ test('tool-registry falls back to static skills definitions and schemas when dyn
   ])
 })
 
+test('tool-registry exposes send-im direct send tool for selected Send IM turns', () => {
+  const registry = new ToolRegistry()
+
+  const definitions = registry.getToolDefinitionsResolutionForGroup('skills', undefined, SEND_IM_AUTH)
+  assert.ok(definitions.definitions.some((tool) => tool.name === 'skill_send_im_file'))
+
+  const schemas = registry.getToolSchemasResolutionForGroup('skills', 'openai', undefined, SEND_IM_AUTH)
+  assert.ok(schemas.tools.some((tool) => (tool.function as { name?: string }).name === 'skill_send_im_file'))
+
+  const executionDef = registry.getToolDefinitionForExecution('skill_send_im_file')
+  assert.equal(executionDef?.name, 'skill_send_im_file')
+})
+
+test('explicit Send IM mention makes the final model-visible send tool available', () => {
+  const registry = new ToolRegistry()
+  const orchestrator = new SkillContextOrchestrator({
+    extractPrimaryUserInstruction: (raw) => raw,
+    listSkills: () => [
+      {
+        id: 'send-im',
+        name: 'Send IM',
+        description: 'send local files to remote IM',
+        defaultAction: 'send_file',
+        actions: [{ name: 'send_file', visibility: 'public' }],
+      } as any,
+    ],
+    resolveSkillToolByAction: (skillId, action) => findSkillToolBySkillAction(skillId, action) as any,
+  })
+  const userText = '@[Send IM]把这四张图发到我微信'
+  const explicitSkills = orchestrator.findExplicitlyRequestedSkills(userText)
+  const preferred = orchestrator.buildPreferredSkillToolNames(userText, 'scope-send-im')
+  const typedActions = preferred.filter((name) => !STANDARD_PRIMITIVES.includes(name))
+  const auth = buildSelectedSkillToolAuthorization({
+    skillId: explicitSkills[0]?.id || '',
+    allowedTypedActions: typedActions,
+    allowedPrimitives: preferred.filter((name) => STANDARD_PRIMITIVES.includes(name)),
+    source: 'explicit',
+    reason: 'explicit_send_im_mention',
+  })
+
+  assert.deepEqual(explicitSkills.map((skill) => skill.id), ['send-im'])
+  assert.ok(typedActions.includes('skill_send_im_file'))
+  const definitions = registry.getToolDefinitionsResolutionForGroup('skills', undefined, auth)
+  const schemas = registry.getToolSchemasResolutionForGroup('skills', 'openai', undefined, auth)
+  assert.ok(definitions.definitions.some((tool) => tool.name === 'skill_send_im_file'))
+  assert.ok(schemas.tools.some((tool) => (tool.function as { name?: string }).name === 'skill_send_im_file'))
+})
+
+test('send-im skill action uses one tool name across dynamic and static registries', () => {
+  assert.equal(buildSkillToolName('send-im', 'send_file'), 'skill_send_im_file')
+  assert.equal(getStaticSkillToolNameForAction('send-im', 'send_file'), 'skill_send_im_file')
+  assert.equal(findSkillToolBySkillAction('send-im', 'send_file')?.name, 'skill_send_im_file')
+  assert.equal(findSkillToolByNameForExecution('skill_send_im_file')?.name, 'skill_send_im_file')
+  assert.equal(findSkillToolByNameForExecution('skill_send_im_send_file'), null)
+})
+
+test('skill action tool names have a single static source of truth', () => {
+  // eslint-disable-next-line ready/no-source-grep-test -- reviewed drift guard: D4 explicitly retired the duplicate local static-name table.
+  const source = readFileSync(resolve(process.cwd(), 'src/main/modules/tools/skills-tools.ts'), 'utf8')
+
+  assert.doesNotMatch(source, /const\s+STATIC_TOOL_NAMES\s*:/)
+  assert.match(source, /getStaticSkillToolNameForAction\(skillId,\s*actionName\)/)
+})
+
+test('skill action lookup does not fall back to the first action for unknown action names', () => {
+  assert.equal(findSkillToolBySkillAction('send-im', 'not_real_action'), null)
+  assert.equal(getStaticSkillActionDefBySkillAction('send-im', 'not_real_action'), null)
+})
+
+test('child-loop skill dispatch carries explicit execution form in projection patch', () => {
+  // eslint-disable-next-line ready/no-source-grep-test -- private dispatch helper: child-loop execution form must be explicit for finalizer criteria selection.
+  const source = readFileSync(resolve(process.cwd(), 'src/main/modules/tools/skills-tools.ts'), 'utf8')
+  const childLoopBlock = source.match(/async function dispatchChildLoopSkillAction[\s\S]*?return createToolExecutionOutput\(text,[\s\S]*?\n\}/)?.[0] || ''
+
+  assert.match(childLoopBlock, /projectionPatch:\s*\{[\s\S]*module:\s*'skill'[\s\S]*skillExecutionForm:\s*'child_loop'/)
+})
+
 // =============================================================================
 // Stage 4 W4 — Fallback observability contract
 // =============================================================================
@@ -203,7 +293,10 @@ test('Stage 4 W4: find_by_name emits manager_throw with only the safe payload fi
   try {
     withSkillActionLookupThrowing(() => {
       const result = findSkillToolByNameForExecutionDetailed('skill_video_expert_pipeline')
-      assert.deepEqual(result, { ok: false, reason: 'manager_throw' })
+      assert.equal(result.ok, true)
+      if (result.ok) {
+        assert.equal(result.def.name, 'skill_video_expert_pipeline')
+      }
     })
     const lookup = lookupEvents(events)
     assert.equal(lookup.length, 1)
@@ -217,24 +310,22 @@ test('Stage 4 W4: find_by_name emits manager_throw with only the safe payload fi
   }
 })
 
-test('Stage 4 W4: find_by_name emits boot-safe manifest_miss but not forged manifest_miss', () => {
+test('Stage 4 W4: find_by_name uses static manifest defs without manifest_miss metrics', () => {
   const { events, restore } = captureMetrics()
   try {
     withSkillActionDefs(() => [], () => {
       const bootSafe = findSkillToolByNameForExecutionDetailed('skill_video_expert_pipeline')
-      assert.deepEqual(bootSafe, { ok: false, reason: 'manifest_miss' })
+      assert.equal(bootSafe.ok, true)
+      if (bootSafe.ok) {
+        assert.equal(bootSafe.def.name, 'skill_video_expert_pipeline')
+      }
 
       const forged = findSkillToolByNameForExecutionDetailed('skill_fake_action')
       assert.deepEqual(forged, { ok: false, reason: 'manifest_miss' })
     })
 
     const lookup = lookupEvents(events)
-    assert.equal(lookup.length, 1)
-    assertLookupPayload(lookup[0], {
-      entry: 'find_by_name',
-      reason: 'manifest_miss',
-      toolName: 'skill_video_expert_pipeline',
-    })
+    assert.equal(lookup.length, 0)
   } finally {
     restore()
   }
@@ -250,7 +341,8 @@ test('Stage 4 W4: find_by_skill_action emits at the real catch with skillId/acti
   const { events, restore } = captureMetrics()
   try {
     withSkillActionLookupThrowing(() => {
-      assert.equal(findSkillToolBySkillAction('video-expert-analyzer', 'video_expert_pipeline'), null)
+      const tool = findSkillToolBySkillAction('video-expert-analyzer', 'video_expert_pipeline')
+      assert.equal(tool?.name, 'skill_video_expert_pipeline')
     })
     const lookup = lookupEvents(events)
     assert.equal(lookup.length, 1)
@@ -259,6 +351,41 @@ test('Stage 4 W4: find_by_skill_action emits at the real catch with skillId/acti
       reason: 'manager_throw',
       skillId: 'video-expert-analyzer',
       action: 'video_expert_pipeline',
+    })
+  } finally {
+    restore()
+  }
+})
+
+test('Stage 4 W4: send-im explicit skill action falls back to static manifest tool defs', () => {
+  const { events, restore } = captureMetrics()
+  try {
+    withSkillActionLookupThrowing(() => {
+      const byAction = findSkillToolBySkillAction('send-im', 'send_file')
+      assert.equal(byAction?.name, 'skill_send_im_file')
+      assert.equal(byAction?.skillId, 'send-im')
+      assert.equal(byAction?.action, 'send_file')
+      assert.ok(byAction?.params.some((param) => param.name === 'filePath'))
+
+      const byName = findSkillToolByNameForExecutionDetailed('skill_send_im_file')
+      assert.equal(byName.ok, true)
+      if (byName.ok) {
+        assert.equal(byName.def.skillId, 'send-im')
+        assert.equal(byName.def.action, 'send_file')
+      }
+    })
+    const lookup = lookupEvents(events)
+    assert.equal(lookup.length, 2)
+    assertLookupPayload(lookup[0], {
+      entry: 'find_by_skill_action',
+      reason: 'manager_throw',
+      skillId: 'send-im',
+      action: 'send_file',
+    })
+    assertLookupPayload(lookup[1], {
+      entry: 'find_by_name',
+      reason: 'manager_throw',
+      toolName: 'skill_send_im_file',
     })
   } finally {
     restore()

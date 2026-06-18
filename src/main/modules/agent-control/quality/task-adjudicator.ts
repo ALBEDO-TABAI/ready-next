@@ -8,8 +8,8 @@
  * legal proof (direct_answer's deliverable is the reply itself), so the rule
  * stays uniform across task types with no exemptions.
  *
- * Shadow mode (this ticket): the verdict NEVER changes the terminal state;
- * divergence is recorded as a metric for the Q4b promotion review.
+ * Lifecycle policy belongs to the caller. Shadow callers observe only;
+ * finalizer callers may enforce the verdict at the terminal funnel.
  */
 
 import type { ProofRef } from './proof-collector'
@@ -51,6 +51,7 @@ export interface AdjudicationInput {
   terminalReason: string
   criteria: ReadonlyArray<CriteriaItem>
   proofs: ReadonlyArray<unknown>
+  mode?: CheckInRecord['kind']
   /** Q4b admission: learning refs must exist on disk BEFORE bookkeeping. */
   learningRefsValid?: boolean
   now: Date
@@ -92,7 +93,7 @@ export function adjudicateTerminalOutcome(input: AdjudicationInput): Adjudicatio
   return {
     verdict,
     checkIn: {
-      kind: 'shadow',
+      kind: input.mode ?? 'shadow',
       verdict,
       terminalStatus: input.terminalStatus,
       terminalReason: input.terminalReason,

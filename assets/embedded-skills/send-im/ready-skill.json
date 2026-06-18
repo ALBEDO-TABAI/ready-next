@@ -1,0 +1,28 @@
+{
+  "id": "send-im",
+  "name": "Send IM",
+  "description": "把 Ready 本地文件直接发送到已连接的远程 IM。微信通道固定发送到已绑定账号本人，适用于“把 @[文件] 发到我微信 / 发送到远程 IM”这类明确文件交付请求。",
+  "version": "0.1.0",
+  "runtime": "node",
+  "execution": { "mode": "direct" },
+  "allowed_tools": ["skill_send_im_file"],
+  "actions": [
+    {
+      "name": "send_file",
+      "description": "直接把 Ready 已引用、已下载或已选中的本地文件作为附件发送到微信远程 IM。微信固定发送到已绑定账号本人。优先传 filePaths/filePath；也可传 fileNames/fileName，或在用户说“这几张图/四张图”时让 Ready 使用本会话最近媒体产物。",
+      "runtime": "node",
+      "entry": "noop.js",
+      "visibility": "public",
+      "inputMode": "json",
+      "params": [
+        { "name": "filePaths", "type": "array", "description": "要发送的一个或多个本地文件绝对路径。多附件发送优先使用这个参数。", "required": false },
+        { "name": "filePath", "type": "string", "description": "要发送的单个本地文件绝对路径；如果省略，Ready 会从本轮 @[文件] 引用或最近媒体产物中解析。", "required": false },
+        { "name": "fileNames", "type": "array", "description": "要发送的一个或多个文件名或 @[文件] 显示名。", "required": false },
+        { "name": "fileName", "type": "string", "description": "要发送的单个文件名或 @[文件] 显示名。", "required": false },
+        { "name": "target", "type": "string", "description": "目标 IM；目前支持 wechat / 微信。", "required": false },
+        { "name": "channelId", "type": "string", "description": "可选：指定微信通道 id；省略时使用已启用的默认微信通道。", "required": false },
+        { "name": "message", "type": "string", "description": "可选：随附件一起发送的简短文字。", "required": false }
+      ]
+    }
+  ]
+}

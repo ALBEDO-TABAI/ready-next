@@ -33,6 +33,7 @@ export const STATIC_SKILL_TOOL_NAMES_BY_ACTION: Record<string, string> = {
   'lets-go-rss:rss_status': 'skill_rss_status',
   'lets-go-rss:rss_list': 'skill_rss_list',
   'lets-go-rss:rss_stats': 'skill_rss_stats',
+  'send-im:send_file': 'skill_send_im_file',
 }
 
 export function getStaticSkillToolNameForAction(skillId: string, actionName: string): string | null {
@@ -95,6 +96,9 @@ interface StaticSkillActionParams {
   skillId: string
   actionName: string
   toolName: string
+  description: string
+  visibility: string
+  timeoutMs?: number
   params: SkillParamDefinition[]
 }
 
@@ -119,12 +123,20 @@ function readStaticSkillActionParams(): Map<string, StaticSkillActionParams> {
       const manifest = JSON.parse(readFileSync(manifestPath, 'utf-8')) as {
         id?: unknown
         actions?: unknown
+        host_requirements?: { default_action_timeout_ms?: unknown }
       }
       const skillId = typeof manifest.id === 'string' ? manifest.id : entry.name
       const actions = Array.isArray(manifest.actions) ? manifest.actions : []
       for (const rawAction of actions) {
         if (!rawAction || typeof rawAction !== 'object') continue
-        const action = rawAction as { name?: unknown; params?: unknown }
+        const action = rawAction as {
+          name?: unknown
+          description?: unknown
+          params?: unknown
+          visibility?: unknown
+          timeoutMs?: unknown
+          timeout_ms?: unknown
+        }
         if (typeof action.name !== 'string') continue
         const aliasKey = `${skillId}:${action.name}`
         const toolName = STATIC_SKILL_TOOL_NAMES_BY_ACTION[aliasKey]
@@ -135,7 +147,21 @@ function readStaticSkillActionParams(): Map<string, StaticSkillActionParams> {
               .map((p) => normalizeManifestParam(p))
               .filter((p): p is SkillParamDefinition => p !== null)
           : []
-        map.set(toolName, { skillId, actionName: action.name, toolName, params })
+        map.set(toolName, {
+          skillId,
+          actionName: action.name,
+          toolName,
+          description: typeof action.description === 'string' && action.description.trim()
+            ? action.description.trim()
+            : `执行 ${action.name}`,
+          visibility: typeof action.visibility === 'string' && action.visibility.trim()
+            ? action.visibility.trim()
+            : 'public',
+          timeoutMs: parsePositiveTimeout(action.timeoutMs)
+            || parsePositiveTimeout(action.timeout_ms)
+            || parsePositiveTimeout(manifest.host_requirements?.default_action_timeout_ms),
+          params,
+        })
       }
     } catch {
       continue
@@ -143,6 +169,10 @@ function readStaticSkillActionParams(): Map<string, StaticSkillActionParams> {
   }
   staticSkillActionParamsCache = map
   return map
+}
+
+function parsePositiveTimeout(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? Math.max(1000, Math.round(value)) : undefined
 }
 
 function normalizeManifestParam(raw: Record<string, unknown>): SkillParamDefinition | null {
@@ -158,6 +188,20 @@ function normalizeManifestParam(raw: Record<string, unknown>): SkillParamDefinit
       : undefined,
     additionalProperties: raw.additionalProperties === true ? true : undefined,
   }
+}
+
+export function getStaticSkillActionDefByToolName(toolName: string): StaticSkillActionParams | null {
+  return readStaticSkillActionParams().get(toolName) || null
+}
+
+export function getStaticSkillActionDefBySkillAction(
+  skillId: string,
+  actionName?: string,
+): StaticSkillActionParams | null {
+  const entries = Array.from(readStaticSkillActionParams().values())
+    .filter((entry) => entry.skillId === skillId)
+  if (!actionName) return entries[0] || null
+  return entries.find((entry) => entry.actionName === actionName) || null
 }
 
 /**

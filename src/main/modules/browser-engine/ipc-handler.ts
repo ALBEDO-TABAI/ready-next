@@ -254,11 +254,12 @@ export class BrowserController {
           surface,
           execute: async (toolName, args, gateSurface, gateLeaseId) => {
             const { executeBrowserTool } = await import('../tools/browser-tools')
-            return executeBrowserTool(toolName, args, this, undefined, undefined, {
+            const output = await executeBrowserTool(toolName, args, this, undefined, undefined, {
               service: getBrowserWriteLeaseService(),
               surface: gateSurface,
               leaseId: gateLeaseId,
             })
+            return typeof output === 'string' ? output : output.text
           },
           }),
           // Only a CONFIRMED freeze cancels the background task; pending_confirm

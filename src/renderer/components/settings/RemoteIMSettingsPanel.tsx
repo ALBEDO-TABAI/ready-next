@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import QRCode from 'qrcode'
-import { Bot, CheckCircle2, ChevronDown, ChevronUp, Eye, EyeOff, Loader2, MessageSquare, RefreshCcw, Send, Trash2, XCircle } from 'lucide-react'
+import { AlertTriangle, Bot, CheckCircle2, ChevronDown, ChevronUp, Eye, EyeOff, Loader2, MessageSquare, RefreshCcw, Send, Trash2, XCircle } from 'lucide-react'
 import {
   SETTINGS_CARD_STYLE,
   SETTINGS_INPUT_STYLE,
@@ -95,14 +95,16 @@ export default function RemoteIMSettingsPanel() {
   const [feishuAppSecret, setFeishuAppSecret] = useState('')
   const [feishuVerificationToken, setFeishuVerificationToken] = useState('')
   const [feishuEncryptKey, setFeishuEncryptKey] = useState('')
-  const [wechatDefaultTarget, setWechatDefaultTarget] = useState('')
   const [wechatLoginSessionKey, setWechatLoginSessionKey] = useState('')
   const [wechatLoginStatus, setWechatLoginStatus] = useState('')
   const [wechatQrImage, setWechatQrImage] = useState('')
   const [wechatVerifyCode, setWechatVerifyCode] = useState('')
+  const [wechatRouteTag, setWechatRouteTag] = useState('')
+  const [wechatBotAgent, setWechatBotAgent] = useState('')
   const [showFeishuSecret, setShowFeishuSecret] = useState(false)
   const [showFeishuAdvanced, setShowFeishuAdvanced] = useState(false)
   const [showTelegramToken, setShowTelegramToken] = useState(false)
+  const [showWechatAdvanced, setShowWechatAdvanced] = useState(false)
 
   const runWithBusy = useCallback(async <T,>(actionKey: string, task: () => Promise<T>): Promise<T | null> => {
     setBusyAction(actionKey)
@@ -127,7 +129,6 @@ export default function RemoteIMSettingsPanel() {
     setChannels(list)
     const tg = list.find((item) => item.type === 'telegram-bot')
     const fs = list.find((item) => item.type === 'feishu-app')
-    const wx = list.find((item) => item.type === 'wechat-openclaw')
     if (tg) {
       const token = String(tg.config?.token || tg.config?.botToken || '')
       if (token) setTelegramToken(token)
@@ -143,9 +144,13 @@ export default function RemoteIMSettingsPanel() {
       if (encryptKey) setFeishuEncryptKey(encryptKey)
       if (verificationToken || encryptKey) setShowFeishuAdvanced(true)
     }
+    const wx = list.find((item) => item.type === 'wechat-openclaw')
     if (wx) {
-      const defaultTarget = String(wx.config?.defaultTarget || '')
-      if (defaultTarget) setWechatDefaultTarget(defaultTarget)
+      const routeTag = String(wx.config?.routeTag || wx.config?.skRouteTag || '')
+      const botAgent = String(wx.config?.botAgent || '')
+      setWechatRouteTag(routeTag)
+      setWechatBotAgent(botAgent)
+      if (routeTag || botAgent) setShowWechatAdvanced(true)
     }
   }, [])
 
@@ -269,35 +274,44 @@ export default function RemoteIMSettingsPanel() {
     })
   }
 
-  const saveWechatChannel = useCallback(async (accountId?: string) => {
+  const saveWechatChannel = useCallback(async (
+    accountId?: string,
+    options?: { enabled?: boolean; silent?: boolean },
+  ) => {
     if (!window.electronAPI?.agent) return
-    const defaultTarget = wechatDefaultTarget.trim()
+    const existingAccountId = String(wechatChannel?.config?.accountId || '')
     const config: Record<string, string> = {}
-    if (defaultTarget) config.defaultTarget = defaultTarget
-    if (accountId) config.accountId = accountId
+    const nextAccountId = accountId || existingAccountId
+    const routeTag = wechatRouteTag.trim()
+    const botAgent = wechatBotAgent.trim()
+    if (nextAccountId) config.accountId = nextAccountId
+    if (routeTag) config.routeTag = routeTag
+    if (botAgent) config.botAgent = botAgent
     const save = await window.electronAPI.agent.upsertChannel({
       id: wechatChannel?.id || WECHAT_CHANNEL_ID,
       type: 'wechat-openclaw' as const,
       name: '微信',
-      enabled: true,
+      enabled: options?.enabled ?? true,
       config,
     })
     if (!save.success) {
       setStatusText(`保存失败：${save.error || '未知错误'}`)
       return
     }
-    setStatusText('微信已启用')
+    if (!options?.silent) setStatusText('微信已启用')
     await refresh()
-  }, [refresh, wechatChannel?.id, wechatDefaultTarget])
+  }, [refresh, wechatBotAgent, wechatChannel?.config, wechatChannel?.id, wechatRouteTag])
 
   const connectWechat = async () => {
     if (!window.electronAPI?.agent) return
     setStatusText('正在生成微信绑定二维码…')
     await runWithBusy('wechat-connect', async () => {
       const channelId = wechatChannel?.id || WECHAT_CHANNEL_ID
+      if (wechatRouteTag.trim() || wechatBotAgent.trim()) {
+        await saveWechatChannel(undefined, { enabled: Boolean(wechatChannel?.enabled), silent: true })
+      }
       const res = await window.electronAPI.agent.startWechatLogin({
         id: channelId,
-        defaultTarget: wechatDefaultTarget.trim(),
         force: true,
       })
       if (!res.success || !res.data) {
@@ -639,14 +653,8 @@ export default function RemoteIMSettingsPanel() {
               点击启用后会直接生成二维码，用手机微信扫码确认即可绑定。
             </div>
           </div>
-          <div className="grid grid-cols-1" style={{ gap: 16 }}>
-            <input
-              value={wechatDefaultTarget}
-              onChange={(e) => setWechatDefaultTarget(e.target.value)}
-              placeholder="默认收件人（可选，用于测试发送）"
-              className="border text-[13px] focus:outline-none"
-              style={fieldStyle}
-            />
+          <div className="text-[12px] leading-6" style={{ color: 'var(--text-muted)' }}>
+            微信通道会发送到当前绑定的微信账号本人，无需设置收件人。
           </div>
           <div className="flex items-center flex-wrap" style={{ gap: 12 }}>
             <button
@@ -686,7 +694,46 @@ export default function RemoteIMSettingsPanel() {
                 </button>
               </>
             )}
+            <button
+              className="border text-[13px]"
+              style={secondaryButtonStyle}
+              onClick={() => setShowWechatAdvanced((value) => !value)}
+            >
+              <span className="inline-flex items-center gap-2">
+                {showWechatAdvanced ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                高级
+              </span>
+            </button>
           </div>
+          {showWechatAdvanced && (
+            <div className="grid grid-cols-1 md:grid-cols-2" style={{ gap: 12 }}>
+              <input
+                value={wechatRouteTag}
+                onChange={(e) => setWechatRouteTag(e.target.value)}
+                placeholder="OpenClaw routeTag（可选）"
+                className="border text-[13px] focus:outline-none"
+                style={fieldStyle}
+              />
+              <input
+                value={wechatBotAgent}
+                onChange={(e) => setWechatBotAgent(e.target.value)}
+                placeholder="botAgent（可选）"
+                className="border text-[13px] focus:outline-none"
+                style={fieldStyle}
+              />
+              <button
+                disabled={isBusy('wechat-save')}
+                onClick={() => { void runWithBusy('wechat-save', () => saveWechatChannel()) }}
+                className="border text-[13px] md:col-span-2"
+                style={{ ...secondaryButtonStyle, justifySelf: 'start' }}
+              >
+                <span className="inline-flex items-center gap-2">
+                  {isBusy('wechat-save') && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                  保存配置
+                </span>
+              </button>
+            </div>
+          )}
           {wechatQrImage && (
             <div className="flex flex-col border" style={{ borderColor: 'var(--border-subtle)', borderRadius: 12, padding: 16, gap: 14, width: 286 }}>
               <img src={wechatQrImage} alt="微信绑定二维码" style={{ width: 240, height: 240, alignSelf: 'center' }} />
@@ -740,6 +787,8 @@ export default function RemoteIMSettingsPanel() {
           {channels.map((channel) => {
             const adapter = currentAdapters.find((item) => item.id === channel.id)
             const running = channel.enabled && (adapter?.status === 'running' || adapter?.healthy)
+            const channelError = adapter?.error || channel.lastError
+            const sendError = running && Boolean(channel.lastError)
             return (
               <div
                 key={channel.id}
@@ -750,7 +799,11 @@ export default function RemoteIMSettingsPanel() {
                   <div className="text-[13px] font-medium flex items-center gap-3" style={{ color: 'var(--text-title)' }}>
                     <Bot className="w-4 h-4" />
                     {channel.name}
-                    {running ? (
+                    {sendError ? (
+                      <span className="inline-flex items-center gap-1.5 text-[11px]" style={{ color: 'var(--color-red)' }}>
+                        <AlertTriangle className="w-3.5 h-3.5" /> 发送异常
+                      </span>
+                    ) : running ? (
                       <span className="inline-flex items-center gap-1.5 text-[11px]" style={{ color: 'var(--color-green)' }}>
                         <CheckCircle2 className="w-3.5 h-3.5" /> 运行中
                       </span>
@@ -763,9 +816,9 @@ export default function RemoteIMSettingsPanel() {
                   <div className="text-[11px] mt-2 leading-6" style={{ color: 'var(--text-muted)' }}>
                     {channel.type} · {adapter?.lastBeatAt ? `最近心跳 ${new Date(adapter.lastBeatAt).toLocaleString()}` : '暂无心跳'}
                   </div>
-                  {(adapter?.error || channel.lastError) && (
+                  {channelError && (
                     <div className="text-[11px] mt-2 leading-6" style={{ color: 'var(--color-red)' }}>
-                      {adapter?.error || channel.lastError}
+                      {channelError}
                     </div>
                   )}
                 </div>

@@ -19,8 +19,8 @@ class NoopAdapter(ChannelAdapter):
     def stop(self) -> None:
         self.mark_stopped()
 
-    def send(self, thread: Optional[str], text: str) -> tuple[bool, Optional[str]]:
-        _ = thread, text
+    def send(self, thread: Optional[str], text: str, attachments: Optional[list[Dict[str, Any]]] = None) -> tuple[bool, Optional[str]]:
+        _ = thread, text, attachments
         return True, None
 
 
@@ -66,11 +66,24 @@ class ChannelManager:
         self.channels.pop(channel_id, None)
         return {"success": True}
 
-    def send(self, channel_id: str, thread: Optional[str], text: str) -> Dict[str, Any]:
+    def send(
+        self,
+        channel_id: str,
+        thread: Optional[str],
+        text: str,
+        attachments: Optional[list[Dict[str, Any]]] = None,
+    ) -> Dict[str, Any]:
         adapter = self.adapters.get(channel_id)
         if not adapter:
             return {"success": False, "error": "channel not found"}
-        ok, err = adapter.send(thread, text)
+        ok, err = adapter.send(thread, text, attachments)
+        return {"success": bool(ok), "error": err}
+
+    def send_typing(self, channel_id: str, thread: Optional[str], typing: bool = True) -> Dict[str, Any]:
+        adapter = self.adapters.get(channel_id)
+        if not adapter:
+            return {"success": False, "error": "channel not found"}
+        ok, err = adapter.send_typing(thread, typing)
         return {"success": bool(ok), "error": err}
 
     def state(self) -> Dict[str, Any]:

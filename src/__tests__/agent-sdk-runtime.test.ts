@@ -283,6 +283,104 @@ test('agent sdk runtime exposes only background collection workflow tools for mu
   assert.ok(!toolNames.includes('browser_download_urls'))
 })
 
+test('agent sdk runtime keeps Send IM visible for a bare retry after explicit local Send IM', async () => {
+  const seenToolNames: string[][] = []
+  const runtime = createRuntime({
+    runAgent: async ({ tools }) => {
+      seenToolNames.push(tools.map((tool) => tool.name))
+      return { finalText: 'ok' }
+    },
+  })
+  runtime.setBrowserController({} as never)
+  runtime.newSession('butler::scope-send-im-retry-tools', 'system prompt')
+
+  const first = await runtime.sendMessage(
+    'butler::scope-send-im-retry-tools',
+    '@[Send IM]把这四张图发到我微信',
+    'run-send-im-retry-tools-1',
+    {
+      publicSessionId: 'scope-send-im-retry-tools',
+      taskId: 'task-send-im-retry-tools-1',
+      requestEnvelope: {
+        primaryInstruction: '@[Send IM]把这四张图发到我微信',
+        resources: [],
+      },
+    },
+  )
+  const retry = await runtime.sendMessage(
+    'butler::scope-send-im-retry-tools',
+    '重试一次',
+    'run-send-im-retry-tools-2',
+    {
+      publicSessionId: 'scope-send-im-retry-tools',
+      taskId: 'task-send-im-retry-tools-2',
+      requestEnvelope: {
+        primaryInstruction: '重试一次',
+        resources: [],
+      },
+    },
+  )
+
+  assert.equal(first.success, true)
+  assert.equal(retry.success, true)
+  assert.equal(seenToolNames.length, 2)
+  assert.ok(seenToolNames[0]?.includes('skill_send_im_file'))
+  assert.ok(seenToolNames[1]?.includes('skill_send_im_file'))
+  assert.equal(seenToolNames[1]?.includes('browser_visible_collect'), false)
+  assert.equal(seenToolNames[1]?.includes('browser_download_urls'), false)
+})
+
+test('agent sdk runtime keeps Send IM visible for an attached try-this follow-up', async () => {
+  const seenToolNames: string[][] = []
+  const runtime = createRuntime({
+    runAgent: async ({ tools }) => {
+      seenToolNames.push(tools.map((tool) => tool.name))
+      return { finalText: 'ok' }
+    },
+  })
+  runtime.setBrowserController({} as never)
+  runtime.newSession('butler::scope-send-im-attachment-followup', 'system prompt')
+
+  const first = await runtime.sendMessage(
+    'butler::scope-send-im-attachment-followup',
+    '@[Send IM]把这四张图发到我微信',
+    'run-send-im-attachment-followup-1',
+    {
+      publicSessionId: 'scope-send-im-attachment-followup',
+      taskId: 'task-send-im-attachment-followup-1',
+      requestEnvelope: {
+        primaryInstruction: '@[Send IM]把这四张图发到我微信',
+        resources: [],
+      },
+    },
+  )
+  const followUp = await runtime.sendMessage(
+    'butler::scope-send-im-attachment-followup',
+    '@[BV1shJP6TEEQ.mp4]再试试这个',
+    'run-send-im-attachment-followup-2',
+    {
+      publicSessionId: 'scope-send-im-attachment-followup',
+      taskId: 'task-send-im-attachment-followup-2',
+      requestEnvelope: {
+        primaryInstruction: '@[BV1shJP6TEEQ.mp4]再试试这个',
+        resources: [{
+          name: 'BV1shJP6TEEQ.mp4',
+          path: '/tmp/BV1shJP6TEEQ.mp4',
+          kind: 'video',
+          source: 'attachment',
+        }],
+      },
+    },
+  )
+
+  assert.equal(first.success, true)
+  assert.equal(followUp.success, true)
+  assert.equal(seenToolNames.length, 2)
+  assert.ok(seenToolNames[1]?.includes('skill_send_im_file'))
+  assert.equal(seenToolNames[1]?.includes('browser_visible_collect'), false)
+  assert.equal(seenToolNames[1]?.includes('browser_download_urls'), false)
+})
+
 test('agent sdk runtime preempts old run and cancels pending renderer actions', async () => {
   let cancelCount = 0
   let firstSignal: AbortSignal | null = null

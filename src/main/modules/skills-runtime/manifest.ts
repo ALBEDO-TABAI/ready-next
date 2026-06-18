@@ -18,6 +18,7 @@ export type EmbeddedSkillId =
   | 'okf-bundle'
   | 'okf-library'
   | 'script-expert-ready'
+  | 'send-im'
 
 export interface EmbeddedSkillManifest {
   id: EmbeddedSkillId
@@ -159,6 +160,13 @@ export const EMBEDDED_SKILLS: EmbeddedSkillManifest[] = [
     name: 'Script Expert Ready',
     description: '将成熟故事转化为可拍摄执行的影视剧本、分镜方案、镜头信息卡和数字资产清单',
     version: '0.5.0',
+    requirementsFile: 'requirements.txt',
+  },
+  {
+    id: 'send-im',
+    name: 'Send IM',
+    description: '把 Ready 本地文件直接发送到已连接的远程 IM，微信固定发送到已绑定账号本人。',
+    version: '0.1.0',
     requirementsFile: 'requirements.txt',
   },
 ]

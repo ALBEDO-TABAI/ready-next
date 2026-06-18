@@ -107,7 +107,8 @@ class FeishuAppAdapter(ChannelAdapter):
             self._thread.join(timeout=1.5)
         self.mark_stopped()
 
-    def send(self, thread: Optional[str], text: str) -> tuple[bool, Optional[str]]:
+    def send(self, thread: Optional[str], text: str, attachments: Optional[list[Dict[str, Any]]] = None) -> tuple[bool, Optional[str]]:
+        _ = attachments
         receive_id = str(thread or self.config.get("defaultChatId") or "").strip()
         if not receive_id:
             return False, "缺少飞书会话 ID（thread/chat_id）"

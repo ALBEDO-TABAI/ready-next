@@ -57,6 +57,7 @@ export function buildToolRuntimeContext(params: {
   activeNegations?: ReadonlyArray<string>
   scopeId?: string
   currentUserText?: string
+  requestEnvelope?: unknown
   runId?: string
   taskId?: string
   parentTaskId?: string
@@ -94,6 +95,7 @@ export function buildToolRuntimeContext(params: {
     activeNegations: params.activeNegations,
     scopeId,
     currentUserText: params.currentUserText,
+    requestEnvelope: params.requestEnvelope,
     runId: params.runId,
     taskId: params.taskId,
     parentTaskId: params.parentTaskId,
@@ -122,6 +124,7 @@ export function toToolExecutorContext(context: ToolRuntimeContext): ToolContext 
     activeNegations: context.activeNegations as never,
     scopeId: context.scopeId || context.scope?.id || context.sessionId,
     currentUserText: context.currentUserText,
+    requestEnvelope: context.requestEnvelope,
     runId: context.runId,
     taskId: context.taskId,
     parentTaskId: context.parentTaskId,

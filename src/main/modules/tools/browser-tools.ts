@@ -56,6 +56,10 @@ import { resolveFastCardVideo } from '../browser-engine/fastcard-video-resolver'
 import type { AgentControlRuntime } from '../agent-control/runtime-core/runtime'
 import type { ScopeRunSkillProgress } from '../agent-control/contracts/types'
 import type { TaskProjectionRecord } from '../agent-control/contracts/run-contracts'
+import {
+  createToolExecutionOutput,
+  type ToolExecutionOutput,
+} from '../agent-control/tools-runtime/tool-result-types'
 
 const logger = createRotatingLogger('ready-tools.log')
 function log(msg: string) {
@@ -1322,6 +1326,70 @@ async function writeFileSmart(
   throw new Error(`无法在目录中写入文件：${directory}`)
 }
 
+function mimeTypeFromDownloadedPath(path: string, contentType?: string | null): string | null {
+  const normalizedContentType = String(contentType || '').split(';')[0].trim().toLowerCase()
+  if (normalizedContentType) return normalizedContentType
+  switch (extname(path).toLowerCase()) {
+    case '.png': return 'image/png'
+    case '.jpg':
+    case '.jpeg': return 'image/jpeg'
+    case '.webp': return 'image/webp'
+    case '.gif': return 'image/gif'
+    case '.mp4': return 'video/mp4'
+    case '.mov': return 'video/quicktime'
+    case '.pdf': return 'application/pdf'
+    case '.md':
+    case '.markdown': return 'text/markdown'
+    case '.txt': return 'text/plain'
+    default: return null
+  }
+}
+
+function artifactKindForDownload(path: string, mimeType?: string | null): string {
+  if (mimeType?.startsWith('image/')) return 'image'
+  if (mimeType?.startsWith('video/')) return 'video'
+  const ext = extname(path).toLowerCase()
+  if (['.png', '.jpg', '.jpeg', '.webp', '.gif'].includes(ext)) return 'image'
+  if (['.mp4', '.mov'].includes(ext)) return 'video'
+  return 'download'
+}
+
+function buildDownloadedArtifacts(results: Array<Record<string, unknown>>, directory: string): Array<{
+  id: string
+  module: string
+  kind: string
+  label: string
+  path: string
+  mimeType: string | null
+  sourceRunId: null
+  createdAt: string
+  meta: Record<string, unknown>
+}> {
+  const createdAt = new Date().toISOString()
+  return results
+    .filter((item) => item.success === true && typeof item.path === 'string' && item.path.trim())
+    .map((item, index) => {
+      const path = String(item.path)
+      const mimeType = mimeTypeFromDownloadedPath(path, String(item.content_type || ''))
+      return {
+        id: `browser-download:${Date.now()}:${index}`,
+        module: 'browser',
+        kind: artifactKindForDownload(path, mimeType),
+        label: String(item.filename || basename(path)),
+        path,
+        mimeType,
+        sourceRunId: null,
+        createdAt,
+        meta: {
+          source: 'browser_download',
+          directory,
+          via: item.via || null,
+          url: item.url || null,
+        },
+      }
+    })
+}
+
 async function downloadUrlsToDirectory(
   controller: BrowserController,
   params: {
@@ -1332,7 +1400,7 @@ async function downloadUrlsToDirectory(
     tabId?: string | null
     referer?: string | null
   },
-): Promise<string> {
+): Promise<string | ToolExecutionOutput> {
   const urls = params.urls
     .map((item) => String(item || '').trim())
     .filter((item) => item.length > 0)
@@ -1441,13 +1509,29 @@ async function downloadUrlsToDirectory(
   if (successCount > 0) {
     try { broadcastDirectoryChanged([directory]) } catch { /* never break the download result */ }
   }
-  return JSON.stringify({
+  const body = {
     directory,
     total: results.length,
     success: successCount,
     failed: results.length - successCount,
     results,
-  }, null, 2)
+  }
+  const artifacts = buildDownloadedArtifacts(results, directory)
+  const text = JSON.stringify(body, null, 2)
+  if (artifacts.length === 0) return text
+  return createToolExecutionOutput(text, {
+    shape: 'json',
+    data: body,
+    projectionPatch: { recentArtifacts: artifacts },
+    contextModifier: {
+      activeFrame: {
+        discoveredHandles: artifacts.map((artifact) => ({
+          ...artifact,
+          type: 'recent_artifact',
+        })),
+      },
+    },
+  })
 }
 
 async function sleep(ms: number): Promise<void> {
@@ -4436,7 +4520,7 @@ export async function executeBrowserTool(
   leaseGate?: BrowserLeaseGate,
   currentUserText?: string,
   runtime?: AgentControlRuntime | null,
-): Promise<string> {
+): Promise<string | ToolExecutionOutput> {
   log(`executeBrowserTool: ${toolName} args=${JSON.stringify(args).slice(0, 200)}`)
 
   // WP3 — high-control platform script blacklist: on 小红书/抖音/微博/… do not
@@ -5751,8 +5835,9 @@ export async function executeBrowserTool(
           overwrite: args.overwrite === true,
           referer,
         })
-        if (output.startsWith('Error:')) return output
-        const parsed = JSON.parse(output) as Record<string, unknown>
+        const outputText = typeof output === 'string' ? output : output.text
+        if (outputText.startsWith('Error:')) return output
+        const parsed = JSON.parse(outputText) as Record<string, unknown>
         // EP2 dogfood gap 2 — completion must reconcile discovered/saved/
         // failed/remaining. A page-claimed total (expected_total) that
         // exceeds the discovered set means undiscovered images remain: this
@@ -5781,7 +5866,7 @@ export async function executeBrowserTool(
             expectedTotal,
           })
         } catch { /* progress write-back must not fail the download result */ }
-        return JSON.stringify({
+        const collectedText = JSON.stringify({
           ok: saved > 0,
           completion,
           sourceTaskId,
@@ -5796,6 +5881,24 @@ export async function executeBrowserTool(
             : `已保存全部已发现的 ${saved} 张。`,
           ...parsed,
         }, null, 2)
+        if (typeof output === 'string') return collectedText
+        return createToolExecutionOutput(collectedText, {
+          shape: 'json',
+          data: {
+            ok: saved > 0,
+            completion,
+            sourceTaskId,
+            mediaCandidateCount: discovered,
+            discovered,
+            saved,
+            failedCount: failed,
+            remaining,
+            expectedTotal,
+            ...parsed,
+          },
+          projectionPatch: output.projectionPatch,
+          contextModifier: output.contextModifier,
+        })
       }
 
       case 'browser_click_at': {

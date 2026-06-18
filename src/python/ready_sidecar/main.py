@@ -92,6 +92,13 @@ class ChannelSendPayload(BaseModel):
     id: str
     thread: Optional[str] = None
     text: str
+    attachments: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+class ChannelTypingPayload(BaseModel):
+    id: str
+    thread: Optional[str] = None
+    typing: bool = True
 
 
 class WechatLoginStartPayload(BaseModel):
@@ -299,7 +306,13 @@ def delete_channel(payload: Dict[str, str], _: None = Depends(check_auth)) -> Di
 
 @app.post("/channels/send")
 def send_channel(payload: ChannelSendPayload, _: None = Depends(check_auth)) -> Dict[str, Any]:
-    result = state.channel_manager.send(payload.id, payload.thread, payload.text)
+    result = state.channel_manager.send(payload.id, payload.thread, payload.text, payload.attachments)
+    return result
+
+
+@app.post("/channels/typing")
+def send_channel_typing(payload: ChannelTypingPayload, _: None = Depends(check_auth)) -> Dict[str, Any]:
+    result = state.channel_manager.send_typing(payload.id, payload.thread, payload.typing)
     return result
 
 

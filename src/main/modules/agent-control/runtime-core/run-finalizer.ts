@@ -1,7 +1,7 @@
 import { logAgentMetric } from '../metrics'
 import { collectResponseDigestProof, appendProofRefs } from '../quality/proof-collector'
 import { adjudicateTerminalOutcome, appendCheckIns, type CheckInRecord } from '../quality/task-adjudicator'
-import { resolveCriteria } from '../quality/criteria-templates'
+import { resolveCriteria, type SkillExecutionForm } from '../quality/criteria-templates'
 import type { TaskType } from '../../../../shared/task-types'
 import type { TaskProjectionRecord } from '../contracts/run-contracts'
 import { canResumeAsUserPoint } from '../contracts/resume-handle'
@@ -110,6 +110,27 @@ export const defaultRunFinalizerDeps: RunFinalizerDeps = {
   writeRunCloseMetric,
 }
 
+interface EffectiveTaskFacts {
+  taskType: string | null
+  module: string | null
+  skillExecutionForm: SkillExecutionForm | null
+}
+
+type TerminalFailureReason = 'delivery_failed' | 'tool_unavailable' | 'no_artifact' | 'proof_gap'
+
+interface TerminalAdjudicationDecision {
+  verdict: CheckInRecord['verdict']
+  blockers: string[]
+  proofCount: number
+}
+
+const TERMINAL_FAILURE_REASONS = new Set<TerminalFailureReason>([
+  'delivery_failed',
+  'tool_unavailable',
+  'no_artifact',
+  'proof_gap',
+])
+
 export function buildTerminalProjectionPatch(params: {
   nextTaskId: string
   updatedAt: string
@@ -160,6 +181,12 @@ function statusFromOutcomeKind(kind: Exclude<RunOutcome['kind'], 'done' | 'check
   return 'cancelled'
 }
 
+function normalizeSkillExecutionForm(value: unknown): SkillExecutionForm | null {
+  return value === 'direct' || value === 'child_loop' || value === 'python'
+    ? value
+    : null
+}
+
 /** P0-3 — the row in task_projections may still carry first-build defaults
  *  (short_task) at finalize time: the terminal projectionPatch is the
  *  authoritative correction and must win for adjudication AND coverage
@@ -167,8 +194,12 @@ function statusFromOutcomeKind(kind: Exclude<RunOutcome['kind'], 'done' | 'check
 function resolveEffectiveTaskFacts(
   outcome: RunOutcome,
   deps: RunFinalizerDeps,
-): { taskType: string | null; module: string | null } {
-  const patch = outcome.projectionPatch as { taskType?: unknown; module?: unknown } | null | undefined
+): EffectiveTaskFacts {
+  const patch = outcome.projectionPatch as {
+    taskType?: unknown
+    module?: unknown
+    skillExecutionForm?: unknown
+  } | null | undefined
   let rowTaskType: string | null = null
   let rowModule: string | null = null
   if (deps.taskProjectionStore && outcome.taskId) {
@@ -181,6 +212,7 @@ function resolveEffectiveTaskFacts(
   return {
     taskType: (typeof patch?.taskType === 'string' && patch.taskType ? patch.taskType : rowTaskType),
     module: (typeof patch?.module === 'string' && patch.module ? patch.module : rowModule),
+    skillExecutionForm: normalizeSkillExecutionForm(patch?.skillExecutionForm),
   }
 }
 
@@ -191,17 +223,17 @@ async function writeTerminalOutcome(
   terminalReason: string,
 ): Promise<FinalizedRunOutcome> {
   const facts = resolveEffectiveTaskFacts(outcome, deps)
-  const verdict = recordShadowAdjudication(outcome, deps, status, terminalReason, facts)
+  const adjudication = recordTerminalAdjudication(outcome, deps, status, terminalReason, facts)
   let effectiveStatus = status
   let effectiveTerminalReason = terminalReason
-  if (status === 'done' && verdict && verdict !== 'accept') {
+  if (status === 'done' && adjudication && adjudication.verdict !== 'accept') {
     const taskContinuation = continuationFromProjectionPatch(outcome.projectionPatch)
     if (canResumeAsUserPoint(taskContinuation)) {
       effectiveStatus = 'checkpoint'
       effectiveTerminalReason = 'checkpoint_budget'
     } else {
       effectiveStatus = 'error'
-      effectiveTerminalReason = 'adjudication_degraded'
+      effectiveTerminalReason = resolveTerminalFailureReason(outcome.projectionPatch, adjudication)
     }
   }
   writeRunMetaOutcome(outcome, deps, effectiveStatus, effectiveTerminalReason)
@@ -210,6 +242,31 @@ async function writeTerminalOutcome(
   }
   deps.writeRunCloseMetric({ ...toRunCloseMetric(outcome, effectiveTerminalReason), taskType: facts.taskType })
   return { status: effectiveStatus, terminalReason: effectiveTerminalReason }
+}
+
+function readTerminalFailureReason(value: unknown): TerminalFailureReason | null {
+  return typeof value === 'string' && TERMINAL_FAILURE_REASONS.has(value as TerminalFailureReason)
+    ? value as TerminalFailureReason
+    : null
+}
+
+function resolveTerminalFailureReason(
+  projectionPatch: Record<string, unknown> | null | undefined,
+  adjudication: TerminalAdjudicationDecision,
+): TerminalFailureReason {
+  const directReason = readTerminalFailureReason(projectionPatch?.terminalFailureReason)
+  if (directReason) return directReason
+
+  const terminalFailure = projectionPatch?.terminalFailure
+  if (terminalFailure && typeof terminalFailure === 'object') {
+    const nestedReason = readTerminalFailureReason((terminalFailure as Record<string, unknown>).reason)
+    if (nestedReason) return nestedReason
+  }
+
+  if (adjudication.blockers.includes('zero_proof_done') || adjudication.proofCount === 0) {
+    return 'proof_gap'
+  }
+  return 'proof_gap'
 }
 
 function continuationFromProjectionPatch(
@@ -223,22 +280,21 @@ function continuationFromProjectionPatch(
 }
 
 /**
- * EP2-Q4a — shadow adjudication INSIDE the finalize funnel. Ordering hard
+ * EP2-Q4a/G0 — enforced adjudication INSIDE the finalize funnel. Ordering hard
  * clause: the response-digest proof lands on the projection FIRST, then the
  * adjudicator judges with the refreshed proof set — a direct_answer run can
- * never be structurally zero-proof at judging time. Shadow semantics: the
- * verdict NEVER mutates lifecycle status/terminal state; divergence between
- * verdict and the actual terminal status is recorded as the
- * `adjudicator_shadow_divergence` metric (Q4b promotion evidence).
+ * never be structurally zero-proof at judging time. Finalizer policy may
+ * mutate lifecycle status after the CheckIn is recorded; divergence is logged
+ * with both the new enforce metric and the legacy shadow metric name.
  * Failures degrade to a metric — adjudication never blocks finalize.
  */
-function recordShadowAdjudication(
+function recordTerminalAdjudication(
   outcome: RunOutcome,
   deps: RunFinalizerDeps,
   status: string,
   terminalReason: string,
-  facts?: { taskType: string | null; module: string | null },
-): CheckInRecord['verdict'] | null {
+  facts?: EffectiveTaskFacts,
+): TerminalAdjudicationDecision | null {
   const store = deps.taskProjectionStore
   const taskId = outcome.taskId
   if (!store || !taskId) return null
@@ -258,12 +314,15 @@ function recordShadowAdjudication(
     // task facts (terminal patch wins over the stale row — P0-3)
     const effectiveTaskType = (facts?.taskType ?? projection.taskType) as TaskType
     const effectiveModule = String(facts?.module ?? projection.module ?? 'system')
-    const criteria = resolveCriteria(effectiveTaskType, effectiveModule)
+    const criteria = resolveCriteria(effectiveTaskType, effectiveModule, {
+      skillExecutionForm: facts?.skillExecutionForm ?? null,
+    })
     const { verdict, checkIn } = adjudicateTerminalOutcome({
       terminalStatus: status,
       terminalReason,
       criteria: criteria.items,
       proofs: proofRefs,
+      mode: 'enforce',
       now,
     })
 
@@ -271,7 +330,7 @@ function recordShadowAdjudication(
     store.update(taskId, {
       proofRefs,
       checkins: appendCheckIns(projection.checkins ?? [], checkIn),
-    }, { silent: true, reasonHint: 'shadow_adjudication' })
+    }, { silent: true, reasonHint: 'terminal_adjudication' })
 
     if (deps.learnFromCheckIn) {
       try {
@@ -287,7 +346,7 @@ function recordShadowAdjudication(
 
     // ④ divergence metric when the verdict disagrees with the actual terminal
     if (status === 'done' && verdict !== 'accept') {
-      logAgentMetric('adjudicator_shadow_divergence', {
+      const divergencePayload = {
         runId: outcome.runId,
         taskId,
         taskType: (facts?.taskType ?? projection.taskType),
@@ -296,9 +355,11 @@ function recordShadowAdjudication(
         terminalReason,
         proofCount: checkIn.proofCount,
         blockers: checkIn.blockers,
-      })
+      }
+      logAgentMetric('adjudicator_enforce_divergence', divergencePayload)
+      logAgentMetric('adjudicator_shadow_divergence', { ...divergencePayload, compatibility: true })
     }
-    return verdict
+    return { verdict, blockers: checkIn.blockers, proofCount: checkIn.proofCount }
   } catch (error) {
     logAgentMetric('adjudication_failed', {
       runId: outcome.runId,

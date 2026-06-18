@@ -37,6 +37,9 @@ import type {
   SkillInputValue,
 } from '../../../shared/skill-execution-types'
 import {
+  getStaticSkillActionDefBySkillAction,
+  getStaticSkillActionDefByToolName,
+  getStaticSkillToolNameForAction,
   STATIC_SKILL_TOOL_NAMES as STATIC_SKILL_TOOL_NAMES_PURE,
   STATIC_SKILL_TOOL_NAMES_BOOT_SAFE,
 } from './skills-tools-static'
@@ -74,6 +77,7 @@ import {
 } from './skill-tool-types'
 import { paramListToZodObject } from './paramList-to-zod'
 import type { AgentSpawnContext } from '../../../shared/skill-host-contract'
+import { executeSendImFileTool, type SendImSkillRuntimeContext } from './send-im-skill-tool'
 
 export { STATIC_SKILL_TOOL_NAMES_PURE as STATIC_SKILL_TOOL_NAMES }
 export { isChildLoopSkillAction } from './child-loop-skill-actions'
@@ -90,6 +94,9 @@ interface SkillToolRuntimeContext {
   /** EP3-I4 — the user's words this turn, forwarded byte-for-byte into
    *  child-run launches (05 §4 最小传话). */
   currentUserText?: string
+  requestEnvelope?: unknown
+  runtime?: SendImSkillRuntimeContext['runtime']
+  sidecarManager?: SendImSkillRuntimeContext['sidecarManager']
   /**
    * Stage 4 W3b — per-turn skill tool authorization. Stage 10 made this
    * the single source of truth for the primitive's skillId: identity is
@@ -119,17 +126,6 @@ interface SkillToolRuntimeContext {
   turnFeatureFlags?: TurnFeatureFlags
 }
 
-const STATIC_TOOL_NAMES: Record<string, string> = {
-  'video-expert-analyzer:video_expert_pipeline': 'skill_video_expert_pipeline',
-  'video-expert-analyzer:video_expert_ai_analyze': 'skill_video_expert_ai_analyze',
-  'video-copy-analyzer:video_copy_analyze': 'skill_video_copy_analyze',
-  'lets-go-rss:rss_add': 'skill_rss_add',
-  'lets-go-rss:rss_update': 'skill_rss_update',
-  'lets-go-rss:rss_status': 'skill_rss_status',
-  'lets-go-rss:rss_list': 'skill_rss_list',
-  'lets-go-rss:rss_stats': 'skill_rss_stats',
-}
-
 function sanitizeToolToken(value: string): string {
   return value
     .trim()
@@ -139,7 +135,7 @@ function sanitizeToolToken(value: string): string {
 }
 
 function buildToolName(skillId: string, actionName: string): string {
-  const staticName = STATIC_TOOL_NAMES[`${skillId}:${actionName}`]
+  const staticName = getStaticSkillToolNameForAction(skillId, actionName)
   if (staticName) return staticName
   return `skill_${sanitizeToolToken(skillId)}_${sanitizeToolToken(actionName)}`
 }
@@ -269,6 +265,19 @@ function getSkillActionToolDefs(opts?: {
         params: action.params,
       }))
   })
+}
+
+function staticSkillActionToToolDef(entry: NonNullable<ReturnType<typeof getStaticSkillActionDefByToolName>>): SkillToolDef {
+  return {
+    name: entry.toolName,
+    description: entry.description,
+    kind: 'skill_action',
+    skillId: entry.skillId,
+    action: entry.actionName,
+    visibility: entry.visibility,
+    timeoutMs: entry.timeoutMs,
+    params: entry.params,
+  }
 }
 
 // Dynamic-skill-action Zod schema cache (Phase 2.5 PR 12). Keyed by tool name
@@ -1135,6 +1144,8 @@ export function findSkillToolByNameForExecutionDetailedWithEntry(
 
   const primitiveTool = PRIMITIVE_TOOL_DEFS.find((item) => item.name === toolName) || null
   if (primitiveTool) return { ok: true, def: primitiveTool }
+  const staticActionTool = getStaticSkillActionDefByToolName(toolName)
+  if (staticActionTool) return { ok: true, def: staticSkillActionToToolDef(staticActionTool) }
   if (managerFailed) return { ok: false, reason: 'manager_throw' }
 
   if (STATIC_SKILL_TOOL_NAMES_BOOT_SAFE.includes(toolName)) {
@@ -1169,8 +1180,12 @@ export function findSkillToolBySkillAction(skillId: string, actionName?: string)
     })
     defs = []
   }
-  if (!actionName) return defs[0] || null
-  return defs.find((item) => item.action === actionName) || defs[0] || null
+  const dynamic = actionName
+    ? defs.find((item) => item.action === actionName) || null
+    : defs[0] || null
+  if (dynamic) return dynamic
+  const staticActionTool = getStaticSkillActionDefBySkillAction(skillId, actionName)
+  return staticActionTool ? staticSkillActionToToolDef(staticActionTool) : null
 }
 
 export function resolveStartDetachedActionTool(args: {
@@ -1945,6 +1960,22 @@ export async function executeSkillTool(
   // Phase 4: execution_control (skill_get_state / skill_submit_* /
   // skill_restart_from_step / skill_cancel_execution) branch retired.
 
+  if (tool.skillId === 'send-im' && tool.action === 'send_file') {
+    return executeSendImFileTool(args, {
+      runtime: runtimeContext?.runtime,
+      sidecarManager: runtimeContext?.sidecarManager,
+      scopeId: runtimeContext?.scopeId || sessionId,
+      sessionId,
+      taskId: runtimeContext?.taskId,
+      taskProjectionId: runtimeContext?.taskProjectionId,
+      currentUserText: runtimeContext?.currentUserText,
+      requestEnvelope: runtimeContext?.requestEnvelope,
+      activeFrame: runtimeContext?.activeFrame
+        ? { discoveredHandles: runtimeContext.activeFrame.discoveredHandles }
+        : null,
+    })
+  }
+
   const isVideoCopyAnalyze = tool.skillId === 'video-copy-analyzer' && tool.action === 'video_copy_analyze'
   const started = recordSkillTaskEvent({
     scopeId: runtimeContext?.scopeId,
@@ -2122,10 +2153,14 @@ export async function executeSkillTool(
     }),
     summary: formatted.slice(0, 240),
   })
-  const projectionPatch = buildSkillProjectionPatch({
-    sessionId,
-    skillId: tool.skillId || undefined,
-  })
+  const projectionPatch = {
+    ...(buildSkillProjectionPatch({
+      sessionId,
+      skillId: tool.skillId || undefined,
+    }) || {}),
+    module: 'skill',
+    skillExecutionForm: 'python',
+  }
 
   // Stage C C3 + C4 — emit framePatch carrying the SkillRunContract that
   // Epsilon's force-tool dispatch will read on the next turn. The
@@ -2448,6 +2483,10 @@ async function dispatchChildLoopSkillAction(params: {
   return createToolExecutionOutput(text, {
     shape: 'json',
     data: envelope,
+    projectionPatch: {
+      module: 'skill',
+      skillExecutionForm: 'child_loop',
+    },
     framePatch,
     contextModifier,
   })

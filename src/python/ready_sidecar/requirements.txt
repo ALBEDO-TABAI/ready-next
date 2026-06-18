@@ -4,3 +4,4 @@ apscheduler==3.10.4
 pydantic==2.11.9
 requests==2.32.3
 lark-oapi
+cryptography>=42.0.0

@@ -86,5 +86,9 @@ class ChannelAdapter:
     def stop(self) -> None:
         raise NotImplementedError
 
-    def send(self, thread: Optional[str], text: str) -> tuple[bool, Optional[str]]:
+    def send(self, thread: Optional[str], text: str, attachments: Optional[list[Dict[str, Any]]] = None) -> tuple[bool, Optional[str]]:
         raise NotImplementedError
+
+    def send_typing(self, thread: Optional[str], typing: bool = True) -> tuple[bool, Optional[str]]:
+        _ = thread, typing
+        return True, None

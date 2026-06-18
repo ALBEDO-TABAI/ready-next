@@ -440,10 +440,16 @@ function isTurnTerminalReason(value: unknown): value is TurnTerminalReason {
     || value === 'checkpoint_budget'
     || value === 'checkpoint_background'
     || value === 'checkpoint_user_input'
+    || value === 'checkpoint_steered'
     || value === 'blocked_config'
     || value === 'blocked_external'
+    || value === 'context_overflow'
     || value === 'blocked_tool_error'
     || value === 'adjudication_degraded'
+    || value === 'delivery_failed'
+    || value === 'tool_unavailable'
+    || value === 'no_artifact'
+    || value === 'proof_gap'
     || value === 'failed_skill'
     || value === 'resume_launch_failed'
     || value === 'persistence_failed'
@@ -470,7 +476,13 @@ function statusFromTerminalReason(
     reason === 'failed_skill'
     || reason === 'resume_launch_failed'
     || reason === 'persistence_failed'
+    || reason === 'context_overflow'
+    || reason === 'blocked_tool_error'
     || reason === 'adjudication_degraded'
+    || reason === 'delivery_failed'
+    || reason === 'tool_unavailable'
+    || reason === 'no_artifact'
+    || reason === 'proof_gap'
   ) {
     return 'error'
   }
@@ -1255,6 +1267,8 @@ export class TurnEngine {
     // throws a structural invariant error rather than silently passing
     // an indeterminate authorization to downstream filters.
     let __authorization: SkillToolAuthorization | null = null
+    let toolContextCurrentUserText = ''
+    let toolContextRequestEnvelope: unknown = request.requestEnvelope || null
 
     const buildHostToolContext = (allowedToolNames: string[] | null | undefined, scope?: unknown) => {
       if (!__authorization) {
@@ -1273,6 +1287,8 @@ export class TurnEngine {
         abortSignal: request.abortSignal,
         sessionId: request.sessionId,
         taskId: request.taskId,
+        currentUserText: toolContextCurrentUserText,
+        requestEnvelope: toolContextRequestEnvelope,
         parentTaskId: request.taskId,
         parentStepId: request.parentStepId,
         taskProjectionId: request.taskId,
@@ -1411,6 +1427,8 @@ export class TurnEngine {
         sessionId: request.sessionId,
         scopeId: request.sessionId,
       })
+      toolContextCurrentUserText = requestEnvelope.primaryInstruction || requestEnvelope.pureUserText || userText
+      toolContextRequestEnvelope = requestEnvelope
       const hookRegistry = host.hookRegistry || NOOP_HOOK_REGISTRY
       await fireUserPromptSubmitHook(hookRegistry, {
         userText,

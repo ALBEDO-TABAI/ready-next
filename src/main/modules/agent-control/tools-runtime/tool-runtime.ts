@@ -79,6 +79,7 @@ export interface ToolRuntimeContext {
   sessionId?: string
   scopeId?: string
   currentUserText?: string
+  requestEnvelope?: unknown
   runId?: string
   taskId?: string
   parentTaskId?: string

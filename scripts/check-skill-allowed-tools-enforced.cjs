@@ -145,6 +145,12 @@ function main() {
         reason: 'must call `resolveActiveSkillAllowedTools(...)` to derive the allowlist from runtime',
       })
     }
+    if (!/require\s*\(\s*['"]\.\.\/\.\.\/skills-runtime\/runtime-manager['"]\s*\)/.test(source)) {
+      violations.push({
+        file: CONTROLLER_FILE,
+        reason: 'resolveActiveSkillAllowedTools must require ../../skills-runtime/runtime-manager from domain-adapters',
+      })
+    }
   }
 
   if (violations.length > 0) {

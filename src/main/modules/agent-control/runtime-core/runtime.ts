@@ -1,6 +1,6 @@
 import { app, BrowserWindow } from 'electron'
 import { EventEmitter } from 'events'
-import { randomUUID } from 'crypto'
+import { createHash, randomUUID } from 'crypto'
 // L5-C-Universal: channel-agnostic remote-message → calendar-event detector.
 // Imported here so the inbound-channel pipeline can opportunistically push
 // suggestions to the renderer without each adapter implementing detection.
@@ -10,8 +10,9 @@ import {
   type RemoteChannelKind,
   type RemoteChannelMessage,
 } from '../../../../shared/calendar-remote-channel'
+import { hasRemoteFileDeliveryIntent } from '../../../../shared/remote-im-file-intent'
 import { existsSync, readFileSync, readdirSync, rmSync, statSync } from 'fs'
-import { extname, isAbsolute, join } from 'path'
+import { basename, extname, isAbsolute, join } from 'path'
 import {
   getDefaultConfig,
   normalizeAIConfig,
@@ -75,8 +76,9 @@ import { canResumeAsUserPoint, type ResumePointHandle } from '../contracts/resum
 import { deriveTaskProjectionCanResume } from '../task-projection/task-projection-resume'
 import { isAwaitingUserInteractionState } from '../../../../shared/task-interaction-state'
 import { assertSkillTaskRunInvariantConsistency } from '../skills/skill-task-tracker'
-import type { ProjectionTruthSnapshot, TaskProjectionRecord } from '../contracts/run-contracts'
+import type { ExecutionHostResult, ProjectionTruthSnapshot, TaskProjectionRecord } from '../contracts/run-contracts'
 import { createTaskBudgetRuntime, getBudgetUsagePercent, restoreContinuationTaskBudgetRuntime } from '../task-projection/run-budget-policy'
+import { normalizeChannelDeliveryResult } from './channel-delivery-result'
 import {
   normalizeContinuationIntent,
   selectContinuationProjection,
@@ -189,6 +191,16 @@ interface TaskProjectionChildSummaryRow {
   recent_artifacts_json: string | null
   created_at: string
   updated_at: string
+}
+
+type PendingInboundChannel = {
+  channelId: string
+  thread: string
+  sender: string
+  eventIds: string[]
+  texts: string[]
+  attachments: ChannelAttachment[]
+  timer: NodeJS.Timeout | null
 }
 
 function parseRecordJson(value: string | null | undefined): Record<string, unknown> | null {
@@ -422,15 +434,7 @@ export class AgentControlRuntime extends EventEmitter {
   })
   private readonly pendingInboundChannels = new Map<
     string,
-    {
-      channelId: string
-      thread: string
-      sender: string
-      eventIds: string[]
-      texts: string[]
-      attachments: ChannelAttachment[]
-      timer: NodeJS.Timeout | null
-    }
+    PendingInboundChannel
   >()
   private pollTimer: NodeJS.Timeout | null = null
   private readonly scopeRunSummaries = new Map<string, ScopeRunSummary>()
@@ -726,9 +730,11 @@ export class AgentControlRuntime extends EventEmitter {
       lastBeatAt: new Date().toISOString()
     }
 
-    const { connected, errors } = this.sidecar.isRunning()
+    const { connected, errors: sidecarErrors } = this.sidecar.isRunning()
       ? this.channelStateCache
       : { connected: 0, errors: 0 }
+    const persistedErrorCount = channels.filter((item) => item.enabled && item.lastError).length
+    const errors = Math.max(sidecarErrors, persistedErrorCount)
 
     return {
       orchestrator: this.orchestrator.getRuntimeKernel(),
@@ -1601,6 +1607,16 @@ export class AgentControlRuntime extends EventEmitter {
                 outboundText
               )
               if (!sendOk.success) {
+                if (result.success && result.usedTools.includes('skill_send_im_file')) {
+                  logAgentMetric('send_scoped_channel_ack_failed_after_send_im', {
+                    scopeId: scope.id,
+                    channelId: scope.sourceId,
+                    taskId: result.taskId || null,
+                    runId: payload.requestId || null,
+                    error: sendOk.error || 'Failed to send channel reply',
+                  })
+                  return
+                }
                 throw new Error(sendOk.error || 'Failed to send channel reply')
               }
             }
@@ -1845,14 +1861,32 @@ export class AgentControlRuntime extends EventEmitter {
     const channel = this.db.getAgentChannel(id)
     if (!channel) return { success: false, error: `Channel not found: ${id}` }
     try {
-      await this.sidecar.sendChannel({
+      const response = await this.sidecar.sendChannel({
         id,
         text: text.trim() || 'Ready 连接测试成功'
       })
-      return { success: true }
+      const result = normalizeChannelDeliveryResult(response, '远程 IM 连接测试发送失败')
+      this.recordChannelDeliveryResult(id, result)
+      return result
     } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : String(error) }
+      // silent-catch: probe errors are returned to the caller and persisted on the channel row.
+      const result = { success: false, error: error instanceof Error ? error.message : String(error) }
+      this.recordChannelDeliveryResult(id, result)
+      return result
     }
+  }
+
+  recordChannelDeliveryResult(
+    channelId: string,
+    result: { success: boolean; error?: string }
+  ): void {
+    if (!this.db.getAgentChannel(channelId)) return
+    if (result.success) {
+      this.db.setAgentChannelError(channelId, null)
+      this.db.markAgentChannelSeen(channelId)
+      return
+    }
+    this.db.setAgentChannelError(channelId, result.error || '远程 IM 发送失败')
   }
 
   async testChannel(payload: UpsertChannelPayload): Promise<{ success: boolean; error?: string }> {
@@ -1878,7 +1912,6 @@ export class AgentControlRuntime extends EventEmitter {
 
   async startWechatLogin(payload: {
     id?: string
-    defaultTarget?: string
     force?: boolean
   }): Promise<Record<string, unknown>> {
     if (!this.sidecar.isRunning()) {
@@ -1889,11 +1922,10 @@ export class AgentControlRuntime extends EventEmitter {
     const existingConfig = existing
       ? decryptChannelConfig(this.tryParseJson<Record<string, unknown>>(existing.config_json, {}))
       : {}
-    const defaultTarget = String(payload.defaultTarget || existingConfig.defaultTarget || '').trim()
     const config: Record<string, unknown> = {
       ...existingConfig,
-      ...(defaultTarget ? { defaultTarget } : {}),
     }
+    delete config.defaultTarget
     await this.sidecar.upsertChannel({
       id,
       type: 'wechat-openclaw',
@@ -2203,6 +2235,112 @@ export class AgentControlRuntime extends EventEmitter {
     }
   }
 
+  private describeInboundChannelFailure(
+    errorText: string,
+    result: ExecutionHostResult,
+    inboundText: string
+  ): { reason: string; reply: string } {
+    const terminalReason = String(result.terminalReason || '')
+    const rawError = String(errorText || result.error || '').trim()
+    let reason = rawError && rawError !== 'Agent execution failed'
+      ? rawError
+      : 'Agent execution failed'
+
+    if (terminalReason === 'adjudication_degraded') {
+      reason = hasRemoteFileDeliveryIntent(inboundText)
+        ? '这轮生成了内容，但没有找到可发送的文件，或文件附件发送没有完成。'
+        : '这轮已经生成回复，但完成判定没有通过。'
+    } else if (reason === 'Agent execution failed' && terminalReason) {
+      reason = `执行没有正常收口：${terminalReason}`
+    } else if (reason === 'Agent execution failed') {
+      reason = 'Agent 执行没有正常收口。'
+    }
+
+    const finalText = String(result.finalText || '').trim()
+    if (!finalText) return { reason, reply: `处理失败：${reason}` }
+
+    return {
+      reason,
+      reply: `处理未完全完成：${reason}\n\n本轮已经生成的内容：\n${finalText}`,
+    }
+  }
+
+  private collectOutboundChannelAttachments(
+    result: ExecutionHostResult,
+    inboundText: string,
+    channelId: string
+  ): ChannelAttachment[] {
+    if (!this.channelSupportsOutboundAttachments(channelId)) return []
+    if (!hasRemoteFileDeliveryIntent(inboundText)) return []
+    const taskIds = [result.taskProjectionId, result.taskId]
+      .map((value) => String(value || '').trim())
+      .filter(Boolean)
+    const projections = taskIds
+      .map((taskId) => this.getTaskProjection(taskId))
+      .filter(Boolean) as TaskProjectionRecord[]
+    if (projections.length === 0) return []
+
+    const paths = new Set<string>()
+    for (const projection of projections) {
+      const proofRefs = Array.isArray(projection.proofRefs) ? projection.proofRefs : []
+      const hasDeliveryToolProof = proofRefs.some((proof) => {
+        if (!proof || typeof proof !== 'object') return false
+        const record = proof as Record<string, unknown>
+        return record.kind === 'tool_result'
+          && (record.ref === 'present_file' || record.ref === 'document_save_tab')
+      })
+      if (!hasDeliveryToolProof) continue
+      for (const proof of proofRefs) {
+        if (!proof || typeof proof !== 'object') continue
+        const record = proof as Record<string, unknown>
+        if (record.kind !== 'artifact') continue
+        const candidate = String(record.ref || '').trim()
+        if (candidate) paths.add(candidate)
+      }
+    }
+
+    const attachments: ChannelAttachment[] = []
+    for (const candidate of paths) {
+      if (!isAbsolute(candidate) || !existsSync(candidate)) continue
+      const name = basename(candidate)
+      if (!name || name === 'run_state.json' || name === 'delivery_report.json') continue
+      const stat = statSync(candidate)
+      if (!stat.isFile() || stat.size <= 0 || stat.size > 100 * 1024 * 1024) continue
+      const ext = extname(candidate).toLowerCase()
+      const mimeType = this.mimeTypeFromExt(ext, 'application/octet-stream')
+      attachments.push({
+        name,
+        path: candidate,
+        ext,
+        size: stat.size,
+        mimeType,
+        type: this.channelAttachmentTypeFromPath(candidate, mimeType),
+      })
+    }
+    if (attachments.length > 0) {
+      logAgentMetric('remote_channel_outbound_attachments_collected', {
+        taskIds,
+        count: attachments.length,
+        names: attachments.map((attachment) => attachment.name),
+      })
+    }
+    return attachments.slice(0, 5)
+  }
+
+  private channelSupportsOutboundAttachments(channelId: string): boolean {
+    const channel = this.db.getAgentChannel(channelId)
+    return channel?.type === 'wechat-openclaw'
+  }
+
+  private channelAttachmentTypeFromPath(path: string, mimeType: string): ChannelAttachment['type'] {
+    const ext = extname(path).toLowerCase()
+    if (mimeType.startsWith('image/')) return 'image'
+    if (mimeType.startsWith('video/')) return 'video'
+    if (['.xls', '.xlsx', '.numbers'].includes(ext)) return 'spreadsheet'
+    if (['.txt', '.md', '.markdown', '.json', '.csv', '.doc', '.docx', '.pdf'].includes(ext)) return 'text'
+    return 'other'
+  }
+
   /**
    * L5-C-Universal — channel-agnostic calendar-event detection on
    * inbound messages.
@@ -2292,6 +2430,9 @@ export class AgentControlRuntime extends EventEmitter {
     }
 
     const agent = 'butler'
+    const commandHandled = await this.handleInboundChannelCommand(pending, inboundText, agent)
+    if (commandHandled) return
+
     const scope = this.ensureChannelScope(pending.channelId, pending.thread, agent, pending.sender)
     this.db.upsertAgentChannelThread({
       channelId: pending.channelId,
@@ -2327,25 +2468,43 @@ export class AgentControlRuntime extends EventEmitter {
     // best-effort enhancement, not part of the conversation contract.
     this.maybeEmitRemoteCalendarSuggestions(pending, inboundText)
 
-    if (!mergedText) {
-      this.markInboundChannelEvents(pending.eventIds, pending.channelId, 'done', null)
-      return
-    }
-
-    let statusSent = false
-    const statusTimer = setTimeout(() => {
-      // fire-and-forget: cosmetic "处理中…" status push to the upstream channel; failure means the user sees no typing indicator, which is acceptable degradation.
-      void this.sidecar
-        .sendChannel({
+    let typingIndicatorShown = false
+    let typingIndicatorActive = false
+    let typingIndicatorStopped = false
+    let typingIndicatorStart: Promise<void> | null = null
+    const typingIndicatorTimer = setTimeout(() => {
+      // Cosmetic native IM typing state; it must not create a visible chat message.
+      typingIndicatorStart = this.sidecar
+        .sendChannelTyping({
           id: pending.channelId,
           thread: pending.thread,
-          text: '处理中…'
+          typing: true
         })
-        .then(() => {
-          statusSent = true
+        .then((response) => {
+          if (response.success !== false) {
+            typingIndicatorShown = true
+            typingIndicatorActive = true
+          }
         })
         .catch(() => undefined)
     }, 2500)
+    const stopTypingIndicator = async (): Promise<void> => {
+      if (typingIndicatorStopped) return
+      typingIndicatorStopped = true
+      clearTimeout(typingIndicatorTimer)
+      if (typingIndicatorStart) {
+        await typingIndicatorStart.catch(() => undefined)
+      }
+      if (!typingIndicatorActive) return
+      await this.sidecar
+        .sendChannelTyping({
+          id: pending.channelId,
+          thread: pending.thread,
+          typing: false
+        })
+        .catch(() => undefined)
+      typingIndicatorActive = false
+    }
 
     const promptPayload = this.buildInboundChannelPayload(inboundText, pending.attachments)
     const requestId = `channel-${pending.eventIds[pending.eventIds.length - 1]}`
@@ -2359,12 +2518,13 @@ export class AgentControlRuntime extends EventEmitter {
         coordinators: this.getDomainAdapters()
       },
       {
-        onFailure: async (errorText) => {
-          clearTimeout(statusTimer)
-          this.markInboundChannelEvents(pending.eventIds, pending.channelId, 'failed', errorText)
+        onFailure: async (errorText, executionResult) => {
+          await stopTypingIndicator()
+          const failure = this.describeInboundChannelFailure(errorText, executionResult, inboundText)
+          this.markInboundChannelEvents(pending.eventIds, pending.channelId, 'failed', failure.reason)
           const errorMessage = this.createConversationMessage(scope.id, {
             role: 'system',
-            content: `处理失败：${errorText}`,
+            content: failure.reply,
             meta: {
               source: 'channel',
               channelId: pending.channelId,
@@ -2378,14 +2538,20 @@ export class AgentControlRuntime extends EventEmitter {
             scope: this.refreshScope(scope.id),
             message: errorMessage
           })
-          await this.sendLongTextToChannel(
+          const failureAttachments = this.collectOutboundChannelAttachments(
+            executionResult,
+            inboundText,
+            pending.channelId
+          )
+          await this.sendChannelReply(
             pending.channelId,
             pending.thread,
-            `处理失败：${errorText}`
+            failure.reply,
+            failureAttachments
           ).catch(() => undefined)
         },
         onSuccess: async (executionResult) => {
-          clearTimeout(statusTimer)
+          await stopTypingIndicator()
           const finalText =
             executionResult.finalText.trim() || '任务已完成，但本次没有产生可发送的文本结果。'
           const assistantMessage = this.createConversationMessage(scope.id, {
@@ -2397,24 +2563,222 @@ export class AgentControlRuntime extends EventEmitter {
               threadKey: pending.thread,
               sender: agent,
               direction: 'outbound',
-              delayedStatusSent: statusSent
+              typingIndicatorSent: typingIndicatorShown
             }
           })
-          this.markInboundChannelEvents(pending.eventIds, pending.channelId, 'done', null)
-          this.db.markAgentChannelSeen(pending.channelId)
           this.emitConversationEvent({
             type: 'message_added',
             scope: this.refreshScope(scope.id),
             message: assistantMessage
           })
-          await this.sendLongTextToChannel(pending.channelId, pending.thread, finalText).catch(
-            () => undefined
+          const outboundAttachments = this.collectOutboundChannelAttachments(
+            executionResult,
+            inboundText,
+            pending.channelId
           )
+          const delivery = await this.sendChannelReply(
+            pending.channelId,
+            pending.thread,
+            finalText,
+            outboundAttachments
+          )
+          if (!delivery.success) {
+            const reason = delivery.error || '远程 IM 回复发送失败'
+            this.markInboundChannelEvents(pending.eventIds, pending.channelId, 'failed', reason)
+            const notice = this.createConversationMessage(scope.id, {
+              role: 'system',
+              content: `处理未完全完成：${reason}`,
+              meta: {
+                source: 'channel',
+                channelId: pending.channelId,
+                threadKey: pending.thread,
+                direction: 'outbound',
+                error: true
+              }
+            })
+            this.emitConversationEvent({
+              type: 'message_added',
+              scope: this.refreshScope(scope.id),
+              message: notice
+            })
+            await this.sendLongTextToChannel(
+              pending.channelId,
+              pending.thread,
+              `处理未完全完成：${reason}`
+            ).catch(() => undefined)
+            return
+          }
+          this.markInboundChannelEvents(pending.eventIds, pending.channelId, 'done', null)
+          this.db.markAgentChannelSeen(pending.channelId)
         }
       }
     )
-    clearTimeout(statusTimer)
+    await stopTypingIndicator()
     if (!result.success) return
+  }
+
+  private parseInboundChannelCommand(text: string): { command: string; args: string } | null {
+    const trimmed = text.trim()
+    if (!trimmed.startsWith('/')) return null
+    const firstLine = trimmed.split(/\r?\n/, 1)[0]?.trim() || ''
+    const match = firstLine.match(/^\/([a-zA-Z][a-zA-Z0-9_-]*)(?:\s+([\s\S]*))?$/)
+    if (!match) return null
+    return {
+      command: match[1].toLowerCase(),
+      args: (match[2] || '').trim()
+    }
+  }
+
+  private async handleInboundChannelCommand(
+    pending: PendingInboundChannel,
+    inboundText: string,
+    agent: string
+  ): Promise<boolean> {
+    const parsed = this.parseInboundChannelCommand(inboundText)
+    if (!parsed) return false
+
+    let scope = this.ensureChannelScope(pending.channelId, pending.thread, agent, pending.sender)
+    this.db.upsertAgentChannelThread({
+      channelId: pending.channelId,
+      remoteThread: pending.thread,
+      sessionId: scope.id,
+      conversationId: scope.id
+    })
+
+    const commandLabel = `/${parsed.command}`
+    let reply: string
+
+    switch (parsed.command) {
+      case 'help':
+      case 'commands':
+        reply = this.formatRemoteCommandHelp()
+        break
+      case 'status':
+        reply = await this.formatRemoteCommandStatus(scope)
+        break
+      case 'model':
+        reply = this.formatRemoteModelCommand(parsed.args)
+        break
+      case 'new':
+      case 'reset':
+        scope = this.startNewRemoteChannelSession(pending, agent)
+        reply = '已开启新的 Ready 远程会话。之后这条微信聊天里的消息会进入新会话，旧会话会保留。'
+        break
+      default:
+        reply = `暂不支持 ${commandLabel}。\n\n${this.formatRemoteCommandHelp()}`
+        break
+    }
+
+    await this.completeInboundChannelCommand(pending, scope, commandLabel, reply)
+    return true
+  }
+
+  private startNewRemoteChannelSession(
+    pending: PendingInboundChannel,
+    agent: string
+  ): ConversationScope {
+    const token = randomUUID()
+    this.db.setSetting(
+      this.getRemoteChannelSessionSettingKey(pending.channelId, pending.thread, agent),
+      token
+    )
+    const scope = this.ensureChannelScope(pending.channelId, pending.thread, agent, pending.sender)
+    this.db.upsertAgentChannelThread({
+      channelId: pending.channelId,
+      remoteThread: pending.thread,
+      sessionId: scope.id,
+      conversationId: scope.id
+    })
+    return scope
+  }
+
+  private async completeInboundChannelCommand(
+    pending: PendingInboundChannel,
+    scope: ConversationScope,
+    command: string,
+    reply: string
+  ): Promise<void> {
+    const message = this.createConversationMessage(scope.id, {
+      role: 'system',
+      content: reply,
+      meta: {
+        source: 'channel',
+        channelId: pending.channelId,
+        threadKey: pending.thread,
+        direction: 'outbound',
+        command
+      }
+    })
+    this.emitConversationEvent({
+      type: 'message_added',
+      scope: this.refreshScope(scope.id),
+      message
+    })
+
+    const delivery = await this.sendLongTextToChannel(pending.channelId, pending.thread, reply)
+    if (!delivery.success) {
+      this.markInboundChannelEvents(
+        pending.eventIds,
+        pending.channelId,
+        'failed',
+        delivery.error || '远程 IM 指令回复发送失败'
+      )
+      return
+    }
+    this.markInboundChannelEvents(pending.eventIds, pending.channelId, 'done', null)
+    this.db.markAgentChannelSeen(pending.channelId)
+  }
+
+  private formatRemoteCommandHelp(): string {
+    return [
+      'Ready 远程指令',
+      '/status 查看运行状态',
+      '/new 开启新的 Ready 会话',
+      '/model status 查看当前模型',
+      '/help 查看这份指令'
+    ].join('\n')
+  }
+
+  private async formatRemoteCommandStatus(scope: ConversationScope): Promise<string> {
+    const status = await this.getRuntimeStatus()
+    const config = normalizeAIConfig(this.settingsRepository.getAIConfig() || getDefaultConfig())
+    const messageCount = this.db.getChatMessages(scope.id).length
+    const sidecarLine = status.sidecar.error
+      ? `${status.sidecar.status}（${status.sidecar.error}）`
+      : status.sidecar.status
+
+    return [
+      'Ready 状态',
+      `Sidecar：${sidecarLine}`,
+      `远程 IM：${status.channels.connected}/${status.channels.enabled} 已连接，错误 ${status.channels.errors}`,
+      `当前模型：${this.formatAIModelConfig(config)}`,
+      `当前会话：${scope.id}`,
+      `会话消息：${messageCount} 条`,
+      `活跃任务：${status.heartbeat.orchestrator.activeTasks}`,
+      `可用工具：${status.heartbeat.toolGateway.availableTools}`
+    ].join('\n')
+  }
+
+  private formatRemoteModelCommand(args: string): string {
+    const config = normalizeAIConfig(this.settingsRepository.getAIConfig() || getDefaultConfig())
+    const current = this.formatAIModelConfig(config)
+    if (!args || args.toLowerCase() === 'status') {
+      return [
+        `当前模型：${current}`,
+        '远程 IM 暂不直接切换模型；请先在 Ready 设置里切换，避免微信指令误改本机全局模型。'
+      ].join('\n')
+    }
+    return [
+      `收到模型切换请求：${args}`,
+      `当前模型仍是：${current}`,
+      'Ready 现在只有全局模型设置，暂不通过远程 IM 修改。'
+    ].join('\n')
+  }
+
+  private formatAIModelConfig(config: AIModelConfig): string {
+    const name = String(config.displayName || '').trim()
+    const model = String(config.model || '').trim() || '未设置'
+    return name ? `${name}（${config.provider}/${model}）` : `${config.provider}/${model}`
   }
 
   private mapChannelRow(row: AgentChannelRecord): AgentChannelConfig {
@@ -2487,21 +2851,26 @@ export class AgentControlRuntime extends EventEmitter {
   ): ConversationScope {
     const channel = this.db.getAgentChannel(channelId)
     const channelMeta = channel ? this.mapChannelRow(channel) : null
-    const existing = this.db.findConversationScope('channel', channelId, remoteThread, agent)
+    const scopedThreadKey = this.getScopedRemoteThreadKey(channelId, remoteThread, agent)
+    const existing = this.db.findConversationScope('channel', channelId, scopedThreadKey, agent)
     const { row } = this.db.upsertConversationScope({
       id: existing?.id || `conv-${randomUUID()}`,
       agent,
       title: existing?.title || sender || channelMeta?.name || '远程会话',
       sourceKind: 'channel',
       sourceId: channelId,
-      threadKey: remoteThread,
+      threadKey: scopedThreadKey,
       meta: {
         ...(existing
           ? this.tryParseJson<Record<string, unknown>>(existing.meta_json || '{}', {})
           : {}),
         sourceLabel: channelMeta?.name || '远程 IM',
         channelType: channelMeta?.type || 'generic-webhook',
-        sender
+        sender,
+        remoteThread,
+        channelSessionToken: this.db.getSetting(
+          this.getRemoteChannelSessionSettingKey(channelId, remoteThread, agent)
+        ) || null
       }
     })
     const scope = this.mapConversationRow(row)
@@ -2517,6 +2886,26 @@ export class AgentControlRuntime extends EventEmitter {
       scope
     })
     return scope
+  }
+
+  private getRemoteChannelSessionSettingKey(
+    channelId: string,
+    remoteThread: string,
+    agent: string
+  ): string {
+    const threadHash = createHash('sha256').update(remoteThread).digest('hex').slice(0, 32)
+    return `remote_channel_session_v1:${channelId}:${agent}:${threadHash}`
+  }
+
+  private getScopedRemoteThreadKey(
+    channelId: string,
+    remoteThread: string,
+    agent: string
+  ): string {
+    const token = this.db.getSetting(
+      this.getRemoteChannelSessionSettingKey(channelId, remoteThread, agent)
+    )
+    return token ? `${remoteThread}#session:${token}` : remoteThread
   }
 
   private refreshScope(scopeId: string): ConversationScope {
@@ -3175,7 +3564,17 @@ export class AgentControlRuntime extends EventEmitter {
       '.webm': 'video/webm',
       '.mkv': 'video/x-matroska',
       '.avi': 'video/x-msvideo',
-      '.m4v': 'video/x-m4v'
+      '.m4v': 'video/x-m4v',
+      '.md': 'text/markdown',
+      '.markdown': 'text/markdown',
+      '.txt': 'text/plain',
+      '.json': 'application/json',
+      '.csv': 'text/csv',
+      '.pdf': 'application/pdf',
+      '.doc': 'application/msword',
+      '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      '.xls': 'application/vnd.ms-excel',
+      '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
     }
     return table[ext] || fallback
   }
@@ -3193,23 +3592,68 @@ export class AgentControlRuntime extends EventEmitter {
     return chunks
   }
 
+  private async sendChannelReply(
+    channelId: string,
+    thread: string,
+    text: string,
+    attachments: ChannelAttachment[] = []
+  ): Promise<{ success: boolean; error?: string }> {
+    const body = String(text || '').trim()
+    if (body) {
+      const textResult = await this.sendLongTextToChannel(channelId, thread, body)
+      if (!textResult.success) return textResult
+    }
+    if (attachments.length === 0) return { success: true }
+    try {
+      const response = await this.sidecar.sendChannel({
+        id: channelId,
+        thread,
+        text: '',
+        attachments: attachments.map((attachment) => ({
+          name: attachment.name,
+          path: attachment.path,
+          mimeType: attachment.mimeType,
+          size: attachment.size,
+          type: attachment.type,
+          ext: attachment.ext,
+        })),
+      })
+      const result = normalizeChannelDeliveryResult(response, '远程 IM 附件发送失败')
+      this.recordChannelDeliveryResult(channelId, result)
+      return result
+    } catch (error) {
+      // silent-catch: outbound attachment errors are converted into delivery results and persisted.
+      const result = {
+        success: false as const,
+        error: error instanceof Error ? error.message : String(error),
+      }
+      this.recordChannelDeliveryResult(channelId, result)
+      return result
+    }
+  }
+
   private async sendLongTextToChannel(
     channelId: string,
     thread: string,
     text: string
   ): Promise<{ success: boolean; error?: string }> {
     for (const chunk of this.splitLongText(text)) {
-      const result = await this.sidecar
-        .sendChannel({
+      let result: { success: boolean; error?: string }
+      try {
+        const response = await this.sidecar.sendChannel({
           id: channelId,
           thread,
           text: chunk
         })
-        .then(() => ({ success: true as const }))
-        .catch((error) => ({
-          success: false as const,
+        result = normalizeChannelDeliveryResult(response, '远程 IM 文本发送失败')
+      } catch (error) {
+        // silent-catch: chunk send errors are returned as delivery failures for the caller.
+        result = {
+          success: false,
           error: error instanceof Error ? error.message : String(error)
-        }))
+        }
+      }
+      this.recordChannelDeliveryResult(channelId, result)
       if (!result.success) {
         return result
       }

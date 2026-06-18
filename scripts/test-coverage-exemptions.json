@@ -14,12 +14,6 @@
       "owner": "stage6-ui-contracts-park"
     },
     {
-      "path": "src/__tests__/ui-contracts/icon-rail-resting-thumb-contract.test.ts",
-      "reason": "Stage 6 §0.2 bucket-B: ui-contracts drift parked; run on demand via npm run test:ui-contracts (not in verify chain). Workbench-shell-rework is the owning track.",
-      "since": "2026-05-06",
-      "owner": "stage6-ui-contracts-park"
-    },
-    {
       "path": "src/__tests__/ui-contracts/rss-list-row-style-contract.test.ts",
       "reason": "Stage 6 §0.2 bucket-B: ui-contracts drift parked; run on demand via npm run test:ui-contracts (not in verify chain). Workbench-shell-rework is the owning track.",
       "since": "2026-05-06",
@@ -134,6 +128,24 @@
       "reason": "transitive value-import reaches a nativeBackedModule via wrapper modules but never triggers native sqlite load in any test path (all sqlite-touching call sites use fakes/stubs); verified passing on host-Node test runs as of 2026-05-06",
       "since": "2026-05-06",
       "owner": "stage5-bulk-import"
+    },
+    {
+      "path": "src/__tests__/browser-download-recent-artifacts.test.ts",
+      "reason": "tests execute browser_download_urls with a fake browser controller and mocked fetch only; transitive browser-tools imports reach sqlite-capable modules but no test path opens better-sqlite3 or reads a repository. Verified passing on host-Node.",
+      "since": "2026-06-18",
+      "owner": "send-im-l1"
+    },
+    {
+      "path": "src/__tests__/capability-gate-arbitration.test.ts",
+      "reason": "tests exercise pure capability arbitration helpers with synthetic configs and fake runtime availability; transitive controller imports reach sqlite-capable modules but no test path opens better-sqlite3 or reads a repository. Verified passing on host-Node.",
+      "since": "2026-06-18",
+      "owner": "send-im-l1"
+    },
+    {
+      "path": "src/__tests__/run-capability-controller.test.ts",
+      "reason": "tests exercise prepareInitialRun/reconcileAfterBrowserDecision with synthetic envelopes and fake runtime availability; transitive controller imports reach sqlite-capable modules but no test path opens better-sqlite3 or reads a repository. Verified passing on host-Node.",
+      "since": "2026-06-18",
+      "owner": "send-im-l1"
     },
     {
       "path": "src/__tests__/coordinator-contract.test.ts",

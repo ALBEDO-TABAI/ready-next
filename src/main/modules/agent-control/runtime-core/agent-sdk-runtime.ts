@@ -116,7 +116,9 @@ import {
   isBrowserBatchCollectionWorkflowTool,
   stepCollectionIntentTtl,
 } from '../../../../shared/browser-collection-intent'
+import { hasLocalSendImFileIntent } from '../../../../shared/remote-im-file-intent'
 import { classifyFollowupIntent, followupConsultsRecalledContext, detectNegationReleases, type FollowupTaskRef } from '../../../../shared/agent-followup-intent'
+import { isRetryOnlyTurn } from '../skills/skill-detection-inputs'
 import { wrapRunMetaRepositoryWithCloseoutSnapshot } from '../task-projection/run-meta-snapshot'
 import { recordNegations, releaseNegations, activeNegations } from '../safety/negation-state'
 import { detectVerbatimGrants, recordVerbatimGrant, revokeAuthorizationsForCategories, authCategoriesForNegationFamilies } from '../safety/authorization-fact-store'
@@ -304,6 +306,7 @@ interface ToolBridgeRuntimeContext {
   taskId: string
   sessionId?: string
   currentUserText?: string
+  requestEnvelope?: unknown
   signal: AbortSignal
   allowedToolNames: string[]
   definitionByName: Map<string, ToolDefinition>
@@ -428,6 +431,7 @@ export interface AgentSdkRuntimeDeps {
     browserHostAvailable: boolean
     feishuConnected: boolean
     authorization: SkillToolAuthorization
+    localSendImIntent?: boolean
     recentCollectionIntent?: boolean
     recentBatchCollectionIntent?: boolean
     requestEnvelope?: unknown
@@ -460,6 +464,74 @@ function messageToText(message: RunMessage): string {
     .map((block) => typeof block.text === 'string' ? block.text : '')
     .join('\n')
     .trim()
+}
+
+function messageHasMediaAttachment(message: RunMessage): boolean {
+  return Array.isArray(message) && message.some((block) => block.type === 'image' || block.type === 'video')
+}
+
+function hasCurrentTurnAttachmentContext(message: RunMessage, requestEnvelope?: unknown): boolean {
+  if (messageHasMediaAttachment(message)) return true
+  if (parseAttachmentReferences(message).length > 0) return true
+  return parseEnvelopeResourceReferences(requestEnvelope).resources.length > 0
+}
+
+function hasLocalSendImIntentForTurn(message: RunMessage, requestEnvelope?: unknown): boolean {
+  const envelopeRefs = parseEnvelopeResourceReferences(requestEnvelope)
+  const primary = envelopeRefs.primaryInstruction || primaryInstructionText(message)
+  return hasLocalSendImFileIntent(primary, {
+    hasAttachmentContext: hasCurrentTurnAttachmentContext(message, requestEnvelope),
+  })
+}
+
+function isLocalSendImRetryFollowup(message: RunMessage, requestEnvelope?: unknown): boolean {
+  const envelopeRefs = parseEnvelopeResourceReferences(requestEnvelope)
+  const primary = envelopeRefs.primaryInstruction || primaryInstructionText(message)
+  if (isRetryOnlyTurn(primary)) return true
+  if (!hasCurrentTurnAttachmentContext(message, requestEnvelope)) return false
+  return isLocalSendImAttachmentFollowup(primary)
+}
+
+function isLocalSendImAttachmentFollowup(text: string): boolean {
+  const normalized = String(text || '')
+    .replace(/@\[[^\]]+\]/g, '')
+    .replace(/\s+/g, '')
+    .trim()
+  if (!normalized || normalized.length > 24) return false
+  if (/[?？]|帮我|帮忙|请|整理|写|撰写|搜|搜索|查询|查|分析|总结|提取|翻译|改写|润色|生成|制作|打开|预览|查看/.test(normalized)) {
+    return false
+  }
+  return /^(?:再|重新)?(?:试试|试一下|试一次|重试|重发|重新发)(?:这个|这个文件|这个附件|它)?$/.test(normalized)
+    || /^(?:这个|这个文件|这个附件|它)(?:也|再)?(?:试试|试一下|发(?:一下)?|传(?:一下)?|重发|重新发)$/.test(normalized)
+}
+
+function stripMediaBlocksForLocalSendIm(
+  message: RunMessage,
+  requestEnvelope?: unknown,
+  forceLocalSendIm = false,
+): RunMessage {
+  if (!Array.isArray(message)) return message
+  if (!forceLocalSendIm && !hasLocalSendImIntentForTurn(message, requestEnvelope)) return message
+  let stripped = false
+  const textForType = (type: string): string => type === 'video'
+    ? '[视频附件已作为 Send IM 待发送文件处理，不发送给模型解析。]'
+    : '[图片附件已作为 Send IM 待发送文件处理，不发送给模型解析。]'
+  const next = message.map((block) => {
+    if (block.type !== 'image' && block.type !== 'video') return block
+    stripped = true
+    return { type: 'text', text: textForType(block.type) }
+  })
+  return stripped ? next : message
+}
+
+function buildLocalSendImSkillAuthorization(reason: string): SkillToolAuthorization {
+  return buildSelectedSkillToolAuthorization({
+    skillId: 'send-im',
+    allowedTypedActions: ['skill_send_im_file'],
+    allowedPrimitives: [],
+    source: 'explicit',
+    reason,
+  })
 }
 
 function countReadableContentUnits(text: string): number {
@@ -1845,6 +1917,51 @@ function readStructuredResultRecord(output: ToolExecutionOutput): Record<string,
   return {}
 }
 
+type TerminalFailureReason = 'delivery_failed' | 'tool_unavailable' | 'no_artifact' | 'proof_gap'
+
+function terminalFailureReasonFromToolFailure(
+  toolName: string,
+  structuredData: Record<string, unknown>,
+): TerminalFailureReason {
+  const errorKind = typeof structuredData.errorKind === 'string'
+    ? structuredData.errorKind.trim()
+    : ''
+  if (errorKind === 'send_failed' || errorKind === 'blocked_external') return 'delivery_failed'
+  if (
+    errorKind === 'sidecar_unavailable'
+    || errorKind === 'channel_not_ready'
+    || errorKind === 'tool_not_registered'
+    || errorKind === 'tool_restricted_this_turn'
+    || errorKind === 'authorization_denied'
+  ) {
+    return 'tool_unavailable'
+  }
+  if (
+    errorKind === 'file_not_found'
+    || errorKind === 'file_ambiguous'
+    || errorKind === 'directory_not_supported'
+    || errorKind === 'path_missing'
+  ) {
+    return 'no_artifact'
+  }
+  if (toolName === 'skill_send_im_file' && errorKind) return 'delivery_failed'
+  return 'proof_gap'
+}
+
+function buildTerminalFailureProjectionPatch(
+  toolName: string,
+  structuredData: Record<string, unknown>,
+): Record<string, unknown> {
+  const errorKind = typeof structuredData.errorKind === 'string' ? structuredData.errorKind : null
+  const errorCode = typeof structuredData.errorCode === 'string' ? structuredData.errorCode : null
+  return {
+    terminalFailureReason: terminalFailureReasonFromToolFailure(toolName, structuredData),
+    terminalFailureTool: toolName,
+    ...(errorKind ? { terminalFailureErrorKind: errorKind } : {}),
+    ...(errorCode ? { terminalFailureErrorCode: errorCode } : {}),
+  }
+}
+
 const LOCAL_DOCUMENT_SOURCE_READ_TOOL_NAMES = new Set([
   'file_read_excerpt',
   'document_read_section',
@@ -2250,6 +2367,10 @@ function sdkStatusFromTerminalReason(
     || reason === 'persistence_failed'
     || reason === 'blocked_tool_error'
     || reason === 'adjudication_degraded'
+    || reason === 'delivery_failed'
+    || reason === 'tool_unavailable'
+    || reason === 'no_artifact'
+    || reason === 'proof_gap'
   ) {
     return 'error'
   }
@@ -3325,6 +3446,7 @@ export class AgentSdkRuntime extends EventEmitter {
    */
   private readonly collectionIntentTtl = new Map<string, number>()
   private readonly batchCollectionIntentTtl = new Map<string, number>()
+  private readonly localSendImIntentTtl = new Map<string, number>()
   private static readonly COLLECTION_INTENT_TTL_TURNS = 6
 
   /** Update the TTL for THIS turn and return whether a recent turn (incl. now) had intent. */
@@ -3354,6 +3476,10 @@ export class AgentSdkRuntime extends EventEmitter {
     return this.trackIntentTtl(this.batchCollectionIntentTtl, sessionId, currentMessageHasIntent)
   }
 
+  private trackLocalSendImIntent(sessionId: string | undefined, currentMessageHasIntent: boolean): boolean {
+    return this.trackIntentTtl(this.localSendImIntentTtl, sessionId, currentMessageHasIntent)
+  }
+
   private listDefaultToolDefinitionsForTurn(params: {
     message: RunMessage
     sessionId?: string
@@ -3362,6 +3488,8 @@ export class AgentSdkRuntime extends EventEmitter {
     browserHostAvailable: boolean
     feishuConnected: boolean
     authorization: SkillToolAuthorization
+    /** Continuity: a recent explicit local Send IM turn can be retried directly. */
+    localSendImIntent?: boolean
     /** Continuity: a recent turn in this session expressed collection intent. */
     recentCollectionIntent?: boolean
     /** Continuity: a recent turn expressed multi-item collection intent. */
@@ -3380,9 +3508,12 @@ export class AgentSdkRuntime extends EventEmitter {
     // exposed.
     const msgIntent = messageHasBrowserCollectionIntent(params.message, params.requestEnvelope)
     const msgBatchIntent = messageHasBrowserBatchCollectionIntent(params.message, params.requestEnvelope)
+    const localSendImIntent = params.localSendImIntent === true
+      || hasLocalSendImIntentForTurn(params.message, params.requestEnvelope)
     const collectionExposure =
       params.browserHostAvailable &&
       browserDecisionMode === 'free_tool_loop' &&
+      !localSendImIntent &&
       (msgIntent || params.recentCollectionIntent === true)
     const batchCollectionExposure = collectionExposure && (msgBatchIntent || params.recentBatchCollectionIntent === true)
     appendToolCapabilityLog([
@@ -3393,6 +3524,7 @@ export class AgentSdkRuntime extends EventEmitter {
       `recentIntent=${params.recentCollectionIntent === true}`,
       `batchIntent=${msgBatchIntent}`,
       `recentBatch=${params.recentBatchCollectionIntent === true}`,
+      `localSendIm=${localSendImIntent}`,
       `exposure=${collectionExposure}`,
       `batchExposure=${batchCollectionExposure}`,
     ].join(' '))
@@ -4066,7 +4198,22 @@ export class AgentSdkRuntime extends EventEmitter {
           terminalReason: outcome.terminalReason,
         })
       }
-      const authorization = this.resolveSkillAuthorizationForTurn(content as RunMessage, sessionId)
+      const currentLocalSendImTurn = hasLocalSendImIntentForTurn(
+        content as RunMessage,
+        effectiveExecutionOptions?.requestEnvelope,
+      )
+      const recentLocalSendImTurn = this.trackLocalSendImIntent(sessionId, currentLocalSendImTurn)
+      const localSendImTurn = currentLocalSendImTurn
+        || (recentLocalSendImTurn && isLocalSendImRetryFollowup(
+          content as RunMessage,
+          effectiveExecutionOptions?.requestEnvelope,
+        ))
+      const authorization = this.resolveSkillAuthorizationForTurn(
+        content as RunMessage,
+        sessionId,
+        effectiveExecutionOptions?.requestEnvelope,
+        localSendImTurn,
+      )
       const documentTargetGuard = resolveDocumentTargetGuard(content as RunMessage, effectiveExecutionOptions?.requestEnvelope)
       documentTargetGuardForRecovery = documentTargetGuard
       if (documentTargetGuard?.preserveExistingContent) {
@@ -4086,15 +4233,24 @@ export class AgentSdkRuntime extends EventEmitter {
         effectiveExecutionOptions?.requestEnvelope,
       )
       requiresLocalDocumentWriteForRecovery = requiresLocalDocumentWrite
+      const providerContent = stripMediaBlocksForLocalSendIm(
+        content as RunMessage,
+        effectiveExecutionOptions?.requestEnvelope,
+        localSendImTurn,
+      )
       // Synchronous continuity (no await in the run hot path): track this turn's
       // collection intent and decay the TTL so bare follow-ups stay exposed.
+      if (localSendImTurn && sessionId) {
+        this.collectionIntentTtl.delete(sessionId)
+        this.batchCollectionIntentTtl.delete(sessionId)
+      }
       const recentCollectionIntent = this.trackCollectionIntent(
         sessionId,
-        messageHasBrowserCollectionIntent(content as RunMessage, effectiveExecutionOptions?.requestEnvelope),
+        localSendImTurn ? false : messageHasBrowserCollectionIntent(content as RunMessage, effectiveExecutionOptions?.requestEnvelope),
       )
       const recentBatchCollectionIntent = this.trackBatchCollectionIntent(
         sessionId,
-        messageHasBrowserBatchCollectionIntent(content as RunMessage, effectiveExecutionOptions?.requestEnvelope),
+        localSendImTurn ? false : messageHasBrowserBatchCollectionIntent(content as RunMessage, effectiveExecutionOptions?.requestEnvelope),
       )
       let toolDefinitions = this.listToolDefinitionsForTurn({
         message: content as RunMessage,
@@ -4106,6 +4262,7 @@ export class AgentSdkRuntime extends EventEmitter {
         authorization,
         recentCollectionIntent,
         recentBatchCollectionIntent,
+        localSendImIntent: localSendImTurn,
         requestEnvelope: effectiveExecutionOptions?.requestEnvelope,
       })
       if (shouldUseLocalDocumentToolSet(content as RunMessage, effectiveExecutionOptions?.requestEnvelope)) {
@@ -4227,6 +4384,7 @@ export class AgentSdkRuntime extends EventEmitter {
         taskId,
         sessionId,
         currentUserText: messageToText(content as RunMessage),
+        requestEnvelope: effectiveExecutionOptions?.requestEnvelope,
         signal: abortController.signal,
         allowedToolNames,
         definitionByName,
@@ -4281,7 +4439,15 @@ export class AgentSdkRuntime extends EventEmitter {
           const documentToolFailed = this.isDocumentToolFailure(normalized)
           const sourceReadFailed = LOCAL_DOCUMENT_SOURCE_READ_TOOL_NAMES.has(toolName)
             && isLocalDocumentSourceReadFailureText(normalized.text)
-          const toolReportedFailure = documentToolFailed || structuredData.ok === false || sourceReadFailed
+          const structuredStatus = typeof structuredData.status === 'string'
+            ? structuredData.status.trim().toLowerCase()
+            : ''
+          const toolReportedFailure = documentToolFailed
+            || structuredData.ok === false
+            || typeof structuredData.errorKind === 'string'
+            || structuredStatus === 'error'
+            || structuredStatus === 'failed'
+            || sourceReadFailed
           if (!toolReportedFailure) {
             hasSuccessfulToolProgress = true
           }
@@ -4337,6 +4503,9 @@ export class AgentSdkRuntime extends EventEmitter {
           longSkillCheckpoint = extractLongSkillCheckpoint(toolName, normalized, longSkillCheckpoint)
           if (normalized.projectionPatch) {
             projectionPatches.push(normalized.projectionPatch)
+          }
+          if (toolReportedFailure) {
+            projectionPatches.push(buildTerminalFailureProjectionPatch(toolName, structuredData))
           }
         },
         agentContext,
@@ -4547,11 +4716,11 @@ export class AgentSdkRuntime extends EventEmitter {
       // Subsequent provider request builders can then assume any remaining
       // image/video blocks are historical residue and strip them silently
       // (the second SDK-side segment lives in the provider Model classes).
-      if (Array.isArray(content)) {
+      if (Array.isArray(providerContent)) {
         // MultimodalBlock shapes vary by `block.type`; treat each as a
         // record-with-type for the capability check (helper only inspects
         // `type`). The cast keeps the helper free of MultimodalBlock import.
-        const blocksForCheck = content
+        const blocksForCheck = providerContent
           .filter((b): b is MultimodalBlock => Boolean(b && typeof b === 'object'))
           .map((b) => ({ ...(b as unknown as Record<string, unknown>) })) as Array<{ type: string; [key: string]: unknown }>
         try {
@@ -4585,9 +4754,9 @@ export class AgentSdkRuntime extends EventEmitter {
           })
         }
       }
-      let nextInput = toSdkInput(content as RunMessage)
+      let nextInput = toSdkInput(providerContent)
       const agentSdkMaxTurns = resolveAgentSdkMaxTurns({
-        message: content as RunMessage,
+        message: providerContent,
         requestEnvelope: effectiveExecutionOptions?.requestEnvelope,
         requiresLocalDocumentWrite,
         taskBudgetRuntime: liveTaskBudgetRuntime,
@@ -5855,6 +6024,7 @@ export class AgentSdkRuntime extends EventEmitter {
       // EP2-I2 — standing user negations for dispatch interception.
       activeNegations: activeNegations(runtimeContext.sessionId),
       currentUserText: runtimeContext.currentUserText,
+      requestEnvelope: runtimeContext.requestEnvelope,
       runId: runtimeContext.runId,
       taskId: runtimeContext.taskId,
       parentTaskId: runtimeContext.taskId,
@@ -6148,14 +6318,21 @@ export class AgentSdkRuntime extends EventEmitter {
   private resolveSkillAuthorizationForTurn(
     message: RunMessage,
     sessionId?: string,
+    requestEnvelope?: unknown,
+    forceLocalSendImIntent = false,
   ): SkillToolAuthorization {
+    const localSendImIntent = forceLocalSendImIntent || hasLocalSendImIntentForTurn(message, requestEnvelope)
     const orchestrator = this.skillContextOrchestrator
-    if (!orchestrator) return buildExplicitNoSkillAuthorization('no_skill_signal')
-    const userText = messageToText(message)
+    if (!orchestrator) {
+      return localSendImIntent
+        ? buildLocalSendImSkillAuthorization('local_send_im_intent')
+        : buildExplicitNoSkillAuthorization('no_skill_signal')
+    }
+    const userText = parseEnvelopeResourceReferences(requestEnvelope).primaryInstruction || messageToText(message)
     if (!userText) return buildExplicitNoSkillAuthorization('no_skill_signal')
     const explicitSkills = orchestrator.findExplicitlyRequestedSkills?.(userText) || []
     const explicitSkill = explicitSkills[0] || null
-    const explicitSkillId = explicitSkill?.id || explicitSkill?.skillId || null
+    const explicitSkillId = explicitSkill?.id || explicitSkill?.skillId || (localSendImIntent ? 'send-im' : null)
     if (explicitSkillId) {
       try {
         orchestrator.rememberExplicitReferenceSkillHint?.(userText, sessionId)
@@ -6167,6 +6344,9 @@ export class AgentSdkRuntime extends EventEmitter {
     const referenceHint = orchestrator.getCurrentReferenceSkillHint?.(sessionId) || null
     const typedActionNames = new Set((orchestrator.buildPreferredSkillToolNames?.(userText, sessionId) || [])
       .filter((name) => name.startsWith('skill_') && !PRIMITIVE_TOOL_NAME_SET.has(name)))
+    if (localSendImIntent) {
+      typedActionNames.add('skill_send_im_file')
+    }
     if (explicitSkillId === 'video-expert-analyzer' || referenceHint?.id === 'video-expert-analyzer') {
       typedActionNames.add('skill_video_expert_pipeline')
       typedActionNames.add('skill_video_expert_ai_analyze')

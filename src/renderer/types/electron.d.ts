@@ -734,6 +734,10 @@ type ScopeRunTerminalReasonData =
   | 'blocked_config'
   | 'blocked_external'
   | 'blocked_tool_error'
+  | 'delivery_failed'
+  | 'tool_unavailable'
+  | 'no_artifact'
+  | 'proof_gap'
   | 'failed_skill'
   | 'resume_launch_failed'
   | 'persistence_failed'
@@ -1037,7 +1041,6 @@ interface ElectronAgentAPI {
   }) => Promise<{ success: boolean; error?: string }>
   startWechatLogin: (payload: {
     id?: string
-    defaultTarget?: string
     force?: boolean
   }) => Promise<IPCResponse<{
     sessionKey?: string

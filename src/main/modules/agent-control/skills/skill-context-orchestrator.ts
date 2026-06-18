@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import type { SkillState } from '../../skills-runtime/runtime-manager'
+import { hasLocalSendImFileIntent } from '../../../../shared/remote-im-file-intent'
 import type { ToolExecutionOutput } from '../tools-runtime/tool-result-types'
 import { rememberLastReferenceSkill, getLastReferenceSkill } from './skill-reference-hints'
 import { logAgentMetric } from '../metrics'
@@ -104,6 +105,8 @@ export class SkillContextOrchestrator {
     const exactMatches: Array<{ skill: SkillState; position: number; index: number }> = []
     const aliasMatches: Array<{ skill: SkillState; position: number; index: number }> = []
     const descriptionMatches: Array<{ skill: SkillState; position: number; index: number }> = []
+    const sendImSkill = skills.find((skill) => skill.id === 'send-im')
+    if (sendImSkill && hasLocalSendImFileIntent(primary)) return [sendImSkill]
 
     skills.forEach((skill, index) => {
       const candidates = [skill.id, skill.name]

@@ -216,7 +216,6 @@ const agentAPI = {
   }) => ipcRenderer.invoke('agent:testChannel', payload),
   startWechatLogin: (payload: {
     id?: string
-    defaultTarget?: string
     force?: boolean
   }) => ipcRenderer.invoke('agent:startWechatLogin', payload),
   getWechatLoginStatus: (payload: {
