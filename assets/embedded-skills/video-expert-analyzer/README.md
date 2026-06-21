@@ -21,6 +21,13 @@
 | 🤖 **Model Support** | Gemini / Kimi / Claude | **GPT-5.4, Kimi K2.6, GLM-5v-turbo, Xiaomi-v2-omni** tested for vision; **K2.6, GLM-5.1, Xiaomi-v2-pro** tested for report generation |
 | 🔗 **Orchestration** | Standalone only | **OpenClaw relay mode** — controller + batch worker handoff for distributed execution |
 
+### Ready Integration Update — 2026-06-18
+
+- Ready VEA finalize now treats audiovisual report repair as a resumable closure flow: validation failures preserve the draft, expose actionable gaps, and continue through finalize after repair.
+- Quote-width / punctuation variants in required headings are normalized before fidelity checks, so `"` and `“”` do not create false missing-subheading failures.
+- Parent task cards, child-run cards, `run_state.json`, `delivery_report.json`, and generated `*_audiovisual_analysis.md/.pdf` are reconciled together; old blocked child runs can be marked superseded when a newer child run finishes the same output directory.
+- In Ready, user prompts such as `跑 finalize` or `再试一次` should resume the VEA skill context, not browser task resume tools.
+
 ## ✨ Core Features
 
 | Feature | Description |

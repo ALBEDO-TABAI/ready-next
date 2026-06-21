@@ -1,8 +1,22 @@
 # Ready 开发进展
 
-> 更新时间: 2026-06-11
+> 更新时间: 2026-06-18
 
 ## 当前真值摘要
+
+- `2026-06-18` **VEA finalize 续跑与任务状态收口修复**：
+  - Video Expert Analyzer 的视听剖析 finalize 已从“失败后只 blocked”改为可修复、可续跑、可收口的链路。标题校验会归一化直引号/弯引号、全半角和空白差异，校验失败会一次性暴露缺项与差额，并保留失败草稿供下一轮修复。
+  - “跑 finalize / 再试一次”这类续跑轮次会保留 VEA skill 工具，同时默认压掉 browser 内容任务 resume/get/cancel 工具；`browser_resume_task` 对 Ready 聊天任务、skill 子任务和 UUID 任务 id 会返回可解释的 wrong-id 结果，不再误报“任务丢失”后继续浏览器续跑。
+  - 任务投影 reconciler 现在能从父任务 steps 的 `child_run:<id>` 找到已完成子任务，并把父任务从 failed/blocked/running 收口为 completed；旧 blocked childRun 如果已有更新完成的同目录 childRun，会标记为 superseded/killed，避免旧失败卡被新产物误判为完成。
+  - 前台历史消息里的旧 task snapshot 会被同 taskId 的实时投影覆盖。真实 Ready dev 重启后，同一条“跑 finalize”历史卡已从“等待继续”变为“已完成”；`BV1vs411e7QF_audiovisual_analysis.md` 与 `.pdf` 已被识别为完成产物。
+  - 验证：聚焦回归 181 pass / 4 host-Node SQLite ABI skip（由 native 覆盖），`npm run typecheck`、`npm run verify:native`、`git diff --check` 均通过。
+
+- `2026-06-18` **新 clean DMG 已打包**：
+  - 命令：`READY_RELEASE_SKILL_RUNTIME_ROOT=/Users/user/ready-release-runtime-src npm run pack:clean`。首次打包暴露发布 runtime manifest 缺 `context-compact` 覆盖声明；该 skill 无额外 Python 依赖，已把本机发布 runtime manifest 补齐后重跑通过。
+  - 第二轮安装验收暴露 DMG 级缺口：electron-builder 生成的 DMG 漏掉 `Electron Framework.framework/Versions/A/Electron Framework`，导致安装后的 `/Applications/Ready.app` 启动即 dyld 崩溃；`exports/mac-arm64/Ready.app` 本体是完整的。
+  - 修复：clean packer 改为在 electron-builder 输出 `.app` 后，用 `hdiutil` 重建 HFS DMG，并挂载最终 DMG 校验 Electron Framework 主文件和 app 签名；校验失败会直接终止打包。
+  - 最终产物：`exports/Ready-0.1.0-arm64.dmg`，771,464,757 bytes（约 736MB），SHA256 `cd11d29f3bd38a0e64960f488c0f272901802c240594dba42fa7d8d6820efef4`。
+  - 校验：`pack:clean` 内置 `rebuild:native`、`native:check`、`typecheck` 和生产构建全部通过；`hdiutil verify` 显示 checksum valid；挂载 DMG 后 `Ready.app` 签名通过且 Electron Framework 主文件存在；覆盖安装到 `/Applications/Ready.app` 后启动 12 秒保持运行，日志到 `[Main] App ready`。
 
 - `2026-06-11` **聊天输入框液态玻璃实装收口**：
   - 输入框从普通 inset slot 改为 `LiquidLens` 真折射层，生产参数收口到雾化 `3.5px`、折射强度 `6.4`、圆角 `18`、折射带 `22`、`ior 1.34`、`dome 5`。

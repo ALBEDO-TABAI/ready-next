@@ -13,6 +13,8 @@ import {
   readdirSync,
   readFileSync,
   rmSync,
+  statSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs'
 import { spawnSync } from 'node:child_process'
@@ -28,6 +30,7 @@ const cleanSeedPath = join(stagingRoot, 'build', 'runtime-seeds', 'ai-settings.s
 const cleanPythonRoot = join(stagingRoot, 'src', 'python')
 const cleanEmbeddedSkillsRoot = join(stagingRoot, 'assets', 'embedded-skills')
 const cleanPackagedRuntimeRoot = join(stagingRoot, 'release-runtime', 'skill-runtime')
+const dmgVerifyMountPoint = join(stagingRoot, 'dmg-verify-mount')
 const builderConfigPath = join(projectRoot, 'electron-builder.yml')
 const tempBuilderConfigPath = join(stagingRoot, 'electron-builder.clean.yml')
 const manifestPath = join(exportsDir, 'clean-package-manifest.json')
@@ -745,6 +748,105 @@ function getElectronBuilderBin() {
     : join(projectRoot, 'node_modules', '.bin', 'electron-builder')
 }
 
+function getAppBuilderBin() {
+  if (process.platform === 'darwin') {
+    return join(projectRoot, 'node_modules', 'app-builder-bin', 'mac', process.arch === 'arm64' ? 'app-builder_arm64' : 'app-builder_amd64')
+  }
+  if (process.platform === 'win32') {
+    return join(projectRoot, 'node_modules', 'app-builder-bin', 'win', process.arch === 'arm64' ? 'arm64' : process.arch === 'ia32' ? 'ia32' : 'x64', 'app-builder.exe')
+  }
+  return join(projectRoot, 'node_modules', 'app-builder-bin', 'linux', process.arch === 'arm64' ? 'arm64' : process.arch === 'ia32' ? 'ia32' : 'x64', 'app-builder')
+}
+
+function appBundlePath(root = exportsDir) {
+  return join(root, 'mac-arm64', 'Ready.app')
+}
+
+function findDmgArtifact() {
+  const dmgNames = existsSync(exportsDir)
+    ? readdirSync(exportsDir).filter((name) => /^Ready-.*-arm64\.dmg$/u.test(name)).sort()
+    : []
+  if (dmgNames.length !== 1) {
+    throw new Error(`Expected exactly one Ready arm64 DMG artifact, found ${dmgNames.length}: ${dmgNames.join(', ')}`)
+  }
+  return join(exportsDir, dmgNames[0])
+}
+
+function verifyElectronFramework(appPath) {
+  const frameworkBinary = join(appPath, 'Contents', 'Frameworks', 'Electron Framework.framework', 'Versions', 'A', 'Electron Framework')
+  if (!existsSync(frameworkBinary)) {
+    throw new Error(`Packaged app is missing Electron Framework binary: ${frameworkBinary}`)
+  }
+  const stat = statSync(frameworkBinary)
+  if (!stat.isFile() || stat.size < 100 * 1024 * 1024) {
+    throw new Error(`Packaged Electron Framework binary looks invalid: ${frameworkBinary} (${stat.size} bytes)`)
+  }
+  return { frameworkBinary, frameworkBinarySize: stat.size }
+}
+
+function detachDmgVerifyMount() {
+  spawnSync('hdiutil', ['detach', dmgVerifyMountPoint, '-quiet'], { stdio: 'ignore' })
+}
+
+function verifyDmgArtifact(dmgPath) {
+  if (process.platform !== 'darwin') return null
+  cleanDir(dmgVerifyMountPoint)
+  ensureDir(dmgVerifyMountPoint)
+  detachDmgVerifyMount()
+  try {
+    runCommand('hdiutil', ['attach', '-nobrowse', '-readonly', '-mountpoint', dmgVerifyMountPoint, dmgPath])
+    const appPath = join(dmgVerifyMountPoint, 'Ready.app')
+    if (!existsSync(appPath)) throw new Error(`Mounted DMG does not contain Ready.app: ${dmgPath}`)
+    const framework = verifyElectronFramework(appPath)
+    runCommand('codesign', ['--verify', '--deep', '--strict', '--verbose=1', appPath])
+    return {
+      dmgPath,
+      mountedAppPath: appPath,
+      ...framework,
+    }
+  } finally {
+    detachDmgVerifyMount()
+    cleanDir(dmgVerifyMountPoint)
+  }
+}
+
+function rebuildDmgWithHdiutil() {
+  if (process.platform !== 'darwin' || dirOnly) return null
+  const appPath = appBundlePath()
+  if (!existsSync(appPath)) throw new Error(`Packaged app not found: ${appPath}`)
+  verifyElectronFramework(appPath)
+
+  const dmgPath = findDmgArtifact()
+  const blockmapPath = `${dmgPath}.blockmap`
+  const macOutputDir = join(exportsDir, 'mac-arm64')
+  const applicationsLink = join(macOutputDir, 'Applications')
+
+  rmSync(dmgPath, { force: true })
+  rmSync(blockmapPath, { force: true })
+  rmSync(applicationsLink, { recursive: true, force: true })
+  symlinkSync('/Applications', applicationsLink)
+  try {
+    runCommand('hdiutil', [
+      'create',
+      '-volname',
+      basename(dmgPath, '.dmg'),
+      '-srcfolder',
+      macOutputDir,
+      '-ov',
+      '-format',
+      'UDZO',
+      '-fs',
+      'HFS+',
+      dmgPath,
+    ])
+  } finally {
+    rmSync(applicationsLink, { recursive: true, force: true })
+  }
+
+  runCommand(getAppBuilderBin(), ['blockmap', '--input', dmgPath, '--output', blockmapPath])
+  return verifyDmgArtifact(dmgPath)
+}
+
 function main() {
   logStep('prepare', 'clean staging')
   cleanDir(stagingRoot)
@@ -780,11 +882,15 @@ function main() {
   logStep('build', `electron-builder ${builderArgs.join(' ')}`)
   runCommand(electronBuilderBin, builderArgs)
 
+  logStep('build', 'rebuild DMG with hdiutil and verify mounted app')
+  const dmgVerification = rebuildDmgWithHdiutil()
+
   logStep('cleanup', 'remove builder debug helpers')
   removeGeneratedDebugFiles()
 
   logStep('verify', 'inspect packaged resources')
   const verification = verifyPackagedResources()
+  if (dmgVerification) verification.dmg = dmgVerification
   writeManifest(verification, runtime)
 
   if (!keepStaging) {

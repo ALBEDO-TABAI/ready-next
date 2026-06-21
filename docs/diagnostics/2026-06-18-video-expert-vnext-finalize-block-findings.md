@@ -1,7 +1,7 @@
 # Findings — video-expert-analyzer vnext "没法续做也没一次完成"
 
 > 诊断日期：2026-06-18 ｜ 工具：ready-debug（账本巡检 + 产物层 run_state + 技能脚本 + git 溯源）
-> 分支：agent-evolution/phase1 ｜ 状态：**仅诊断，未改代码**
+> 分支：agent-evolution/phase1 ｜ 状态：**已修复并验证**（见 §6）
 > 触发：Codex 修好远程发送后，回头跑 video-expert vnext，既无法一次跑完、也无法续跑。
 
 ---
@@ -102,5 +102,20 @@
 ## 5. 临时绕过
 - 当前**无干净绕过**：直接重跑很可能必现。可行的人工兜底不是只补 `### 意识形态"自然化"评估`，而是对照 `audiovisual_handoff/body/validation_errors.json` 一次性补齐所有字数与 Scene 证据缺口，并确保修复稿能被下一次 finalize 读取；临时放宽校验只可用于本地定位，不是正式修复。
 
-## 6. 修复尝试
-**待实施。** 本文已从"缺一个子节"修正为"标题归一化误判 + 真实缺口被短路遮住 + 缺修复回环 + handoff 补完未必 finalize"的分层根因；修复应按第 4 节顺序落地并配测试。
+## 6. 修复结果（2026-06-18）
+
+已按第 4 节分层落地，并补齐 Ready 任务卡收口链路：
+
+- `template_engine.py`：标题匹配归一化直引号/弯引号、全半角和空白差异；校验失败不再首个 `raise` 后短路，而是汇总缺子条目、字数、Scene 证据等缺口。
+- `handoff.py` / `skill-handoff-completion.ts` / `skill-child-runner.ts`：保真度失败会保留失败草稿和缺项清单，形成可续修复回环；补完 handoff 后继续 finalize，只有最终 `.md/.pdf` 与 delivery report 齐备才完成。
+- `agent-sdk-runtime.ts` / `browser-tools.ts`：VEA skill resume / repair 轮次压掉 browser 内容任务工具；`browser_resume_task` / get / cancel 对 Ready 聊天任务、skill child 和 UUID 任务 id 返回 wrong-id 说明，不再跨域接管。
+- `task-projection-reconciler.ts`：父任务可从 `child_run:<id>` steps 回补已完成子任务；同一输出目录下旧 blocked childRun 若已有更新 done childRun，会标记为 `killed / superseded_by_child_run`，避免旧失败卡被新产物污染成完成。
+- `TaskToolSnapshot.tsx`：历史消息里的旧 task snapshot 会被同 taskId 的实时 task projection 覆盖，解决 DB 已完成但聊天卡仍显示“等待继续”的前台漂移。
+
+验证记录：
+
+- 聚焦回归：`task-projection-reconciler`、`browser-tools`、`skill-child-runner`、`skill-handoff-completion`、`agent-sdk-runtime`、`task-bottom-background-selection` 共 185 项；181 pass，4 项 host-Node SQLite ABI skip（由 native 验证覆盖）。
+- `npm run typecheck` 通过。
+- `npm run verify:native` 通过。
+- `git diff --check` 通过。
+- 真实 Ready dev 重启验收：父任务 `task-0db610cf-c6f1-4f8e-ae71-d881959d529b` 为 `completed`；新 childRun `vez51e5su` 为 `completed`；旧 childRun `vh1rxrxow` 为 `killed` 且 `degradation_reason=superseded_by_child_run`；目标目录存在 `BV1vs411e7QF_audiovisual_analysis.md` 与 `.pdf`。

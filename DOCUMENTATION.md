@@ -1,6 +1,6 @@
 # Ready 开发文档
 
-> 更新时间: 2026-04-28
+> 更新时间: 2026-06-18
 
 ## 1. 架构概览
 Ready 采用 Electron 三层架构：
@@ -49,6 +49,12 @@ Ready 采用 Electron 三层架构：
 - 工具：`src/main/modules/tools/*`
 - 技能运行时：`src/main/modules/skills-runtime/*`
 - Python sidecar：`src/python/ready_sidecar/*`
+
+VEA / 长技能收口补充：
+- Video Expert Analyzer 这类长技能的完成真值来自 `run_state.json`、`delivery_report.json` 和实际产物文件；任务卡只消费 main 侧 task projection，不在 renderer 里猜测完成。
+- VEA finalize 的视听剖析失败会保留失败草稿、缺项清单和 handoff 状态；修复稿写回后必须继续执行 finalize，只有必需 `.md/.pdf` 产物存在且 delivery report 通过，父任务和 child run 才能显示完成。
+- 续跑轮次应走 skill 续跑工具；browser task resume/get/cancel 只处理真实 browser task id，遇到 Ready 聊天任务、skill child 或 UUID 任务 id 时返回 wrong-id 说明，不能跨域接管。
+- 历史消息里的 task snapshot 只是旧状态缓存；同一 taskId 的实时 task projection 更新后，前台应显示实时投影状态，避免旧“等待继续/失败”卡盖住已完成产物。
 
 ### 3.4b Agent 主控当前分层
 - `AgentControlRuntime` 当前已进一步回到 control plane 角色：

@@ -11,6 +11,7 @@
 - 会要求提供一份预构建的共享 `skill-runtime`，让内置技能安装后即可使用，不依赖用户机器现场安装 Python、ffmpeg 或 pip 依赖
 - 会清理 `exports/` 下旧的构建结果，然后再重新产出
 - 会在打包结束后检查发行包内是否仍然混入 `ready.db`、`agent-memory`、`channel-attachments`、`puppeteer-cache` 等运行时数据
+- 会挂载最终 DMG，确认镜像里的 `Ready.app` 仍包含 Electron Framework 主文件且签名有效
 - 会把校验摘要写到 `exports/clean-package-manifest.json`
 
 ## 用法
@@ -25,6 +26,10 @@ READY_RELEASE_SKILL_RUNTIME_ROOT=/path/to/release/skill-runtime npm run pack:cle
 - `python/bin/python3`（Windows 为 `python/Scripts/python.exe`）
 - `bin/ffmpeg` 与 `bin/ffprobe`
 - 内置视频 / OCR / RSS 技能需要的 Python 包与模型缓存
+
+`runtime-manifest.json` 的 `embeddedSkillIds` 必须覆盖 `Packer/pack-clean-release.mjs` 里的 `REQUIRED_RUNTIME_SKILLS`。即便 `context-compact` 这类 reference skill 没有额外 Python 依赖，也要写入 manifest；否则 clean packer 会在复制 packaged runtime 阶段失败。
+
+macOS DMG 会在 electron-builder 生成后由 clean packer 用 `hdiutil` 重建，并立刻挂载最终镜像做 app 级校验。不要只用 `hdiutil verify` 的 checksum 当通过；还必须确认镜像内 `Ready.app/Contents/Frameworks/Electron Framework.framework/Versions/A/Electron Framework` 存在并且 app 签名有效。
 
 仅开发调试、明确允许运行时联网补依赖时，才使用：
 

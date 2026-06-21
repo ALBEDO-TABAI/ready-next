@@ -64,6 +64,7 @@ LLM 看到工具名时按下表对应：
 - **续跑 / 观察 / 诊断**：只有用户给出 `run_state.json`、`scene_scores.json`、输出目录、任务卡继续、childRunId，或明确要求查进度/历史时，才 inspect/read 对应状态和 artifact。
 - **历史目录**：如果偶然发现历史任务，但用户没有要求续跑，表述为“检测到历史任务；它不影响这次新的分析”，继续按新分析推进，不要暗示正在恢复旧任务。
 - **配置**：Ready 会通过 host requirements 写入当前 agent 的视觉模型配置。只有用户主动要求改输出根目录、报告语言或模型偏好时才讨论配置；不要把配置扫描当作新分析前置步骤。API key 只让用户自己设置环境变量，绝不写进 JSON。
+- **finalize 续跑**：用户说“跑 finalize / 再试一次 / 接力完成”且上下文已有 VEA childRun、`run_state.json` 或输出目录时，继续同一个 VEA skill 任务。不要调用 `browser_resume_task`、不要重新做浏览器采集，也不要因为旧任务卡显示失败就改找另一个 browser 任务。
 
 ## 默认执行模式
 
@@ -96,6 +97,7 @@ LLM 看到工具名时按下表对应：
 15. 正文第一个模块必须是 `## 导读`：写给普通观众的总-分速读。先用 2-3 句白话回答该类型的"价值问题"（task.md 会给出默认问题；**如果用户在对话里明确表达过自己的关注点——比如"想看看这访谈聊了什么观点"——导读必须优先回答用户的问题**，默认问题退为兜底），再列 2-4 条亮点（一句话结论 + Scene 编号/时间码）。允许否定或中性结论，不要强行夸。导读受上限约束：默认 ≤400 字、≥2 处 Scene/时间码引用、禁止"双轴""路由""冯·雷斯托夫""加权分"这类框架术语——机器校验会打回。
 16. 脚本自动插入的场景截图只能来自当前视频目录的截图目录，不得凭空编造；导读、路由判断、结构图/总览图、尾部总结块、评分表、代码块和表格内部不插图，同一张截图不会重复刷屏。
 17. Handoff `receipt.json` 会记录每个子任务的 `input_hash`；当分类结果或 prompt 变化时，已有 `output.md/svg/json` 会被自动作废，需要重新生成。若 receipt 里某任务是 `validation_failed`，说明上次输出没过机器校验，先看 `brief.md` 里的失败原因和 `validation_errors.json` 的逐模块差额，改完再跑 finalize。
+18. 补完 handoff 正文不等于任务完成。完成标准始终是 `run_state.json` 与 `delivery_report.json` 都确认通过，并且必需的 `*_audiovisual_analysis.md` / `.pdf` 真实存在。旧 blocked childRun 如果已被新的 childRun 完成，应视为 superseded，不要继续围绕旧卡重试。
 
 ## OpenClaw 主控原则（仅 OpenClaw 接力场景适用）
 

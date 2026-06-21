@@ -1,5 +1,21 @@
 # Ready V5 - 更新日志
 
+## [Unreleased] - 2026-06-18
+
+### Video Expert Analyzer — finalize 续跑与任务卡收口
+
+- 修复 VEA 视听剖析 finalize 卡死：标题校验会归一化直引号/弯引号、全半角与空白差异，不再把已存在的子条目误判为缺失。
+- 保真度失败会进入可修复回环：失败草稿、缺项清单和 handoff 状态会被保留；补齐后继续跑 finalize，而不是把任务永久卡成 blocked。
+- Ready 续跑轮次会优先保留 VEA skill 工具，并压掉无关 browser task resume 工具，避免“跑 finalize / 再试一次”误触发浏览器续跑。
+- 任务投影收口补齐：父任务能从 `child_run:<id>` 子任务结果回补完成态；旧 blocked 子任务在同目录有更新 completed 子任务时标记为 superseded/killed，不再被新产物污染成完成。
+- 聊天历史任务卡现在会用实时任务投影覆盖旧 snapshot；VEA 输出完成后，父任务卡、子任务卡和可打开产物状态一致显示完成。
+
+### Packaging
+
+- 生成新的 macOS arm64 clean DMG：`exports/Ready-0.1.0-arm64.dmg`，大小 771,464,757 bytes（约 736MB），SHA256 `cd11d29f3bd38a0e64960f488c0f272901802c240594dba42fa7d8d6820efef4`。
+- clean packer 使用 packaged skill runtime；发布 runtime manifest 已补齐 `context-compact` 覆盖声明，打包校验确认未回退到 network runtime。
+- 修复 clean DMG 启动即崩：electron-builder 生成的 DMG 曾漏掉 `Electron Framework.framework/Versions/A/Electron Framework`；clean packer 现在会用 `hdiutil` 重建 DMG，并挂载最终镜像校验 Electron Framework 主文件与 app 签名。
+
 ## [Unreleased] - 2026-06-15
 
 ### Reference 画板
