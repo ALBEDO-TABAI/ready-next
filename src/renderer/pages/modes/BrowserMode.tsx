@@ -10,6 +10,7 @@ import { useBrowserPanelData } from '../../modules/browser/useBrowserPanelData'
 import { useBrowserResizeFreeze } from '../../modules/browser/useBrowserResizeFreeze'
 import { useBrowserRuntimeEffects } from '../../modules/browser/useBrowserRuntimeEffects'
 import { useAgentBrowserSupervision } from '../../modules/browser/useAgentBrowserSupervision'
+import { resolveBrowserOwnershipStatus } from '../../modules/browser/browserOwnershipStatus'
 import { useBrowserTabActions } from '../../modules/browser/useBrowserTabActions'
 import { getBrowserTabFitKey, isFitted, markFitted } from '../../modules/browser/browserTabFitRegistry'
 import { planBrowserHostPresentation } from '../../modules/browser/browserHostPresentation'
@@ -26,6 +27,7 @@ import { useFastCard } from '../../stores/useFastCard'
 import { toFileUrl } from '../../utils/dragDrop'
 import type { BrowserUtilityMenuKind } from '../../../shared/browser-utility-menu'
 import type { BrowserHostLayoutPhase } from '../../../shared/browser-view-layout'
+import type { BrowserLockOverlaySnapshot } from '../../../shared/browser-lock-overlay'
 import {
   buildFastCardItemTags,
   createFastCardId,
@@ -186,6 +188,14 @@ export default function BrowserMode({
   const activeTab = tabs.find(t => t.id === activeTabId) || null
   const splitTab = splitTabId && splitTabId !== activeTabId ? tabs.find(t => t.id === splitTabId) || null : null
   const activeAgentTasks = agentSupervision.tasks.filter((task) => task.status === 'running' || task.status === 'queued' || task.status === 'paused')
+  const browserOwnershipStatus = useMemo(() => resolveBrowserOwnershipStatus({
+    activeTab,
+    agentTabId: agentSupervision.agentTabId,
+    activeAgentTaskCount: activeAgentTasks.length,
+    controlState: agentSupervision.controlState,
+    surfaces: agentSupervision.surfaces,
+    activeWriteSurface: agentSupervision.activeWriteSurface,
+  }), [activeAgentTasks.length, activeTab, agentSupervision.activeWriteSurface, agentSupervision.agentTabId, agentSupervision.controlState, agentSupervision.surfaces])
   const visibleAgentTask = activeAgentTasks[0] || null
   const agentRuntimeTab = agentSupervision.agentTabId
     ? tabs.find(t => t.id === agentSupervision.agentTabId) || null
@@ -659,6 +669,13 @@ export default function BrowserMode({
 
   useEffect(() => {
     if (!isElectron) return
+    return () => {
+      void window.electronAPI?.browser?.hideBrowserLockOverlay?.()
+    }
+  }, [isElectron])
+
+  useEffect(() => {
+    if (!isElectron) return
     const shouldShowOverlay = isActive && (fastCardResultPanel !== null || fastCardPanelOpen)
     if (!shouldShowOverlay) {
       void window.electronAPI?.browser?.hideFastCardOverlay?.()
@@ -707,6 +724,60 @@ export default function BrowserMode({
       window.removeEventListener('resize', scheduleSnapshot)
     }
   }, [fastCardItems, fastCardPanelOpen, fastCardResultPanel, isActive, isElectron])
+
+  useEffect(() => {
+    if (!isElectron) return
+    const lockKind = browserOwnershipStatus.kind
+    const overlayKind = lockKind === 'user-view' ? null : lockKind
+    if (!isActive || !shouldPresentBrowserHost || shouldHideAllBrowserHosts || !overlayKind) {
+      void window.electronAPI?.browser?.hideBrowserLockOverlay?.()
+      return
+    }
+    const resolvedOverlayKind = overlayKind
+
+    let frame = 0
+    const sendSnapshot = () => {
+      frame = 0
+      const element = browserContentFrameRef.current || contentRef.current
+      if (!element) {
+        void window.electronAPI?.browser?.hideBrowserLockOverlay?.()
+        return
+      }
+      const rect = element.getBoundingClientRect()
+      if (rect.width <= 0 || rect.height <= 0) {
+        void window.electronAPI?.browser?.hideBrowserLockOverlay?.()
+        return
+      }
+      const snapshot: BrowserLockOverlaySnapshot = {
+        kind: resolvedOverlayKind,
+        label: browserOwnershipStatus.label,
+        detail: browserOwnershipStatus.detail,
+        tone: browserOwnershipStatus.tone === 'warning' ? 'warning' : 'agent',
+        bounds: {
+          left: rect.left,
+          top: rect.top,
+          width: rect.width,
+          height: rect.height,
+        },
+      }
+      void window.electronAPI?.browser?.showBrowserLockOverlay?.(snapshot)
+    }
+    const scheduleSnapshot = () => {
+      if (frame) return
+      frame = window.requestAnimationFrame(sendSnapshot)
+    }
+
+    scheduleSnapshot()
+    const observer = new ResizeObserver(scheduleSnapshot)
+    const element = browserContentFrameRef.current
+    if (element) observer.observe(element)
+    window.addEventListener('resize', scheduleSnapshot)
+    return () => {
+      if (frame) window.cancelAnimationFrame(frame)
+      observer.disconnect()
+      window.removeEventListener('resize', scheduleSnapshot)
+    }
+  }, [browserOwnershipStatus, isActive, isElectron, shouldHideAllBrowserHosts, shouldPresentBrowserHost])
 
   const {
     browserRuntimeReady,
@@ -1013,10 +1084,12 @@ export default function BrowserMode({
             fastCardOpen={fastCardPanelOpen || fastCardResultPanel !== null}
             fastCardItemCount={fastCardItems.length}
             onToggleFastCard={handleToggleFastCard}
+            ownershipStatus={browserOwnershipStatus}
           />
 
           <div
             ref={browserContentFrameRef}
+            data-browser-content-frame=""
             style={{
               position: 'relative',
               zIndex: 1,
@@ -1060,6 +1133,8 @@ export default function BrowserMode({
                       requestInterruption={agentSupervision.requestInterruption}
                       confirmInterruption={agentSupervision.confirmInterruption}
                       dismissInterruption={agentSupervision.dismissInterruption}
+                      surfaces={agentSupervision.surfaces}
+                      activeWriteSurface={agentSupervision.activeWriteSurface}
                       variant="collapsedRail"
                       onExpand={() => setAgentPaneCollapsed(false)}
                     />
@@ -1089,6 +1164,8 @@ export default function BrowserMode({
                         requestInterruption={agentSupervision.requestInterruption}
                         confirmInterruption={agentSupervision.confirmInterruption}
                         dismissInterruption={agentSupervision.dismissInterruption}
+                        surfaces={agentSupervision.surfaces}
+                        activeWriteSurface={agentSupervision.activeWriteSurface}
                         variant="pane"
                         onCollapse={() => setAgentPaneCollapsed(true)}
                         onClose={() => {

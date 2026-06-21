@@ -166,7 +166,7 @@ test('AgentDerivationPanel confirms and rejects candidates through visible contr
         confirmDerivation: async (payload: unknown) => {
           confirmCalls.push(payload)
           rows = []
-          return { success: true, data: {} }
+          return { success: true, data: { blueprintId: 'bp-xhs-collector' } }
         },
         rejectDerivation: async (relPath: string) => {
           rejectCalls.push(relPath)
@@ -181,11 +181,12 @@ test('AgentDerivationPanel confirms and rejects candidates through visible contr
     try {
       assert.match(first.container.textContent || '', /小红书采集/)
       await act(async () => {
-        findButton(first.container, '创建').click()
+        findButton(first.container, '生成蓝图').click()
       })
       await flush()
       assert.equal(confirmCalls.length, 1)
-      assert.equal(refreshEvents, 1, 'creating a specialist should refresh the registry panel')
+      assert.equal(refreshEvents, 0, 'staging a blueprint must not refresh the registry panel')
+      assert.match(first.container.textContent || '', /Agent System Studio/)
     } finally {
       await unmount(first.root)
     }
@@ -201,6 +202,48 @@ test('AgentDerivationPanel confirms and rejects candidates through visible contr
       assert.match(second.container.textContent || '', /暂无可派生候选/)
     } finally {
       await unmount(second.root)
+    }
+  } finally {
+    handle.restore()
+  }
+})
+
+test('AgentDerivationPanel does not point needs_clarification blueprints to confirm-create', async () => {
+  const handle = installDom()
+  try {
+    const { default: AgentDerivationPanel } = await import('../renderer/components/personality/AgentDerivationPanel')
+    let rows = [candidate()]
+    ;(handle.dom.window as Window & { electronAPI?: unknown }).electronAPI = {
+      agent: {
+        listDerivationCandidates: async () => ({ success: true, data: rows }),
+        confirmDerivation: async () => {
+          rows = []
+          return {
+            success: true,
+            data: {
+              blueprintId: 'bp-xhs-collector',
+              status: 'needs_clarification',
+              clarification: {
+                nextTool: 'ask_user_questions',
+                questions: [{ id: 'nonGoals', question: '这个专项 agent 明确不该做哪些事？' }],
+              },
+            },
+          }
+        },
+      },
+    }
+
+    const mounted = await mount(createElement(AgentDerivationPanel))
+    try {
+      await act(async () => {
+        findButton(mounted.container, '生成蓝图').click()
+      })
+      await flush()
+      const text = mounted.container.textContent || ''
+      assert.match(text, /需补齐信息/)
+      assert.doesNotMatch(text, /确认创建/)
+    } finally {
+      await unmount(mounted.root)
     }
   } finally {
     handle.restore()

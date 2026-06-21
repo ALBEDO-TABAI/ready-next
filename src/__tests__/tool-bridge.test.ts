@@ -135,4 +135,23 @@ describe('buildTextToolResultMessage', () => {
     assert.match(message, /"module":"document"/)
     assert.match(message, /"taskTitle":"文档信息卡"/)
   })
+
+  it('redacts host paths in model-readable text bridge tool results', () => {
+    const message = buildTextToolResultMessage([
+      {
+        id: 'call_3',
+        name: 'skill_inspect_run_state',
+        result: createToolExecutionOutput('', {
+          projectionPatch: {
+            taskContinuation: {
+              runStatePath: '/Users/alice/Ready/run_state.json',
+            },
+          },
+        }),
+      },
+    ])
+
+    assert.doesNotMatch(message, /\/Users\/alice/)
+    assert.match(message, /\/Users\/<redacted>\/Ready\/run_state\.json/)
+  })
 })

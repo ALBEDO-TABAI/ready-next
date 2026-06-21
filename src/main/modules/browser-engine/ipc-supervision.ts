@@ -1,4 +1,6 @@
 import { ipcMain } from 'electron'
+import type { AgentBrowserSurface } from './agent-browser-errors'
+import type { BrowserLeaseState } from './browser-write-lease'
 import type { BrowserCapabilityTaskHandle } from './capability-types'
 
 /**
@@ -14,12 +16,27 @@ import type { BrowserCapabilityTaskHandle } from './capability-types'
 
 export type AgentControlState = 'active' | 'pending_confirm' | 'frozen'
 
+export interface BrowserLeaseSurfaceSnapshot {
+  surface: AgentBrowserSurface
+  state: BrowserLeaseState
+  heldBy: string | null
+  runId: string | null
+  tabId: string | null
+  leaseId: string | null
+}
+
+export interface BrowserLeaseSupervisionSnapshot {
+  surfaces: Record<AgentBrowserSurface, BrowserLeaseSurfaceSnapshot>
+  activeWriteSurface: AgentBrowserSurface | null
+}
+
 export interface BrowserSupervisionIPCController {
   requestAgentInterruption(): { state: AgentControlState; pending: boolean }
   confirmAgentInterruption(): Promise<{ state: AgentControlState; frozen: boolean; takeoverTabId?: string | null }>
   dismissAgentInterruption(): { state: AgentControlState }
   getAgentControlState(): AgentControlState
   getAgentTabId(): string | null
+  getBrowserLeaseSnapshot(): BrowserLeaseSupervisionSnapshot
   listAgentCollectionTasks(): Promise<BrowserCapabilityTaskHandle[]>
 }
 
@@ -56,6 +73,7 @@ export function setupBrowserSupervisionIPC(controller: BrowserSupervisionIPCCont
         controlState: controller.getAgentControlState(),
         agentTabId: activeTasks.length > 0 ? controller.getAgentTabId() : null,
         tasks: activeTasks,
+        ...controller.getBrowserLeaseSnapshot(),
       }
     } catch (error) {
       return { controlState: 'active' as AgentControlState, agentTabId: null, tasks: [], error: error instanceof Error ? error.message : String(error) }

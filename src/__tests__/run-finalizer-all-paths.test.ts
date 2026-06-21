@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { describe, test } from 'node:test'
 
 import {
@@ -14,6 +17,9 @@ import { syncTaskProjection } from '../main/modules/agent-control/task-projectio
 import { ReflectionService } from '../main/modules/agent-control/reflection-service'
 import type { ScopeRunEventPayload, ScopeRunSummary } from '../main/modules/agent-control/contracts/types'
 import type { TaskProjectionRecord, TaskProjectionStore } from '../main/modules/agent-control/contracts/run-contracts'
+import { createTaskBudgetRuntime } from '../main/modules/agent-control/task-projection/run-budget-policy'
+import { createToolExecutionOutput } from '../main/modules/agent-control/tools-runtime/tool-result-types'
+import type { ToolDefinition } from '../main/modules/agent-control/tools-runtime/tool-definition'
 
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 
@@ -125,6 +131,125 @@ function createRuntime(deps: Partial<AgentSdkRuntimeDeps>): {
   return { runtime, repository, outputs }
 }
 
+function attachFinalizeStore(
+  runtime: AgentSdkRuntime,
+  repository: RunMetaRepository,
+  store: TaskProjectionStore,
+): void {
+  runtime.setRuntime({
+    getRunMetaRepository: () => repository,
+    getTaskProjectionStoreForFinalize: () => store,
+    getTaskProjection: (taskId: string) => store.get(taskId),
+  } as never)
+}
+
+function createProjectionStore(records: Map<string, TaskProjectionRecord>): TaskProjectionStore {
+  return {
+    create(record) {
+      records.set(record.taskId, record)
+    },
+    update(taskId, patch) {
+      records.set(taskId, {
+        ...records.get(taskId)!,
+        ...patch,
+      })
+    },
+    get(taskId) {
+      return records.get(taskId) || null
+    },
+    listByScope(scopeId) {
+      return Array.from(records.values()).filter((record) => record.scopeId === scopeId)
+    },
+    listByParentTask(parentTaskId) {
+      return Array.from(records.values()).filter((record) => record.parentTaskId === parentTaskId)
+    },
+    findByArtifactSiblings() {
+      return Array.from(records.values())
+    },
+  }
+}
+
+function createProjectionRecord(patch: Partial<TaskProjectionRecord> = {}): TaskProjectionRecord {
+  return {
+    taskId: 'task-finalizer',
+    scopeId: 'scope-finalizer',
+    runId: 'run-finalizer',
+    taskType: 'short_task',
+    module: 'system',
+    taskTitle: '测试任务',
+    taskSummary: '正在处理',
+    status: 'running',
+    interactionState: 'running',
+    waitingFor: 'none',
+    steps: [],
+    currentStepId: null,
+    budget: null,
+    budgetUsagePercent: null,
+    budgetWarningLevel: null,
+    recoveryHistory: [],
+    degradationReason: null,
+    blockedReason: null,
+    resumableActions: ['cancel'],
+    continuationRef: null,
+    progress: null,
+    recentArtifacts: [],
+    createdAt: '2026-06-10T09:59:00.000Z',
+    updatedAt: '2026-06-10T09:59:00.000Z',
+    ...patch,
+  }
+}
+
+function createResearchTool(): ToolDefinition {
+  return {
+    name: 'web_search',
+    groupId: 'general_research',
+    domain: 'general_research',
+    kind: 'read',
+    concurrency: 'parallel_read_safe',
+    interruptBehavior: 'abort_signal',
+    timeoutProfile: 'default',
+    supportsTextBridge: true,
+    projectionHint: { emitsProjectionPatch: true },
+    description: 'Search test source',
+    schema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string' },
+      },
+      required: ['query'],
+      additionalProperties: false,
+    },
+    executionVisibility: 'model',
+    resultShape: 'json',
+  }
+}
+
+function createDocumentTool(name: string, kind: ToolDefinition['kind']): ToolDefinition {
+  return {
+    name,
+    groupId: 'document',
+    domain: 'document',
+    kind,
+    concurrency: kind === 'read' ? 'parallel_read_safe' : 'serialized',
+    timeoutProfile: 'document_write',
+    description: name,
+    schema: {
+      type: 'object',
+      properties: name === 'document_set_content'
+        ? { content: { type: 'string' } }
+        : { path: { type: 'string' } },
+      required: name === 'document_set_content'
+        ? ['content']
+        : name === 'document_save_tab'
+          ? []
+          : ['path'],
+      additionalProperties: false,
+    },
+    executionVisibility: 'model',
+    resultShape: 'json',
+  }
+}
+
 function createSummary(patch: Partial<ScopeRunSummary> = {}): ScopeRunSummary {
   return {
     scopeId: 'scope-finalizer',
@@ -203,6 +328,252 @@ describe('run finalizer all paths', () => {
     assert.equal(row?.status, 'error')
     assert.equal(row?.initiator, 'error')
     assert.ok(row?.terminalReason)
+  })
+
+  test('pre-model config failure records adjudication through finalizer', async () => {
+    const { runtime, repository } = createRuntime({
+      loadAIConfig: () => ({ ok: false, reason: 'json_corrupt', message: 'bad json' }),
+    })
+    const records = new Map<string, TaskProjectionRecord>()
+    const store = createProjectionStore(records)
+    records.set('task-config-finalizer', createProjectionRecord({
+      taskId: 'task-config-finalizer',
+      scopeId: 'scope-config-finalizer',
+      runId: 'run-config-finalizer',
+    }))
+    attachFinalizeStore(runtime, repository, store)
+    runtime.newSession('butler::scope-config-finalizer', 'system prompt')
+
+    const result = await runtime.sendMessage('butler::scope-config-finalizer', 'hello', 'run-config-finalizer', {
+      publicSessionId: 'scope-config-finalizer',
+      taskId: 'task-config-finalizer',
+    })
+
+    const row = repository.get('run-config-finalizer')
+    const projection = records.get('task-config-finalizer')
+    assert.equal(result.success, false)
+    assert.equal(result.terminalReason, 'blocked_config')
+    assert.equal(row?.status, 'error')
+    assert.equal(row?.terminalReason, 'blocked_config')
+    assert.equal(row?.initiator, 'error')
+    assert.ok((projection?.checkins?.length || 0) > 0)
+  })
+
+  test('budget checkpoint early return records adjudication through finalizer', async () => {
+    const { runtime, repository } = createRuntime({
+      listToolDefinitions: () => [createResearchTool()],
+      executeToolCall: async () => createToolExecutionOutput('search result', {
+        shape: 'json',
+        data: { ok: true },
+      }),
+      runAgent: async ({ tools }) => {
+        const sdkTool = tools[0] as { invoke: (context: unknown, input: string) => Promise<string> }
+        await sdkTool.invoke({}, JSON.stringify({ query: 'budget proof' }))
+        return { finalText: 'done' }
+      },
+    })
+    const records = new Map<string, TaskProjectionRecord>()
+    const store = createProjectionStore(records)
+    records.set('task-budget-finalizer', createProjectionRecord({
+      taskId: 'task-budget-finalizer',
+      scopeId: 'scope-budget-finalizer',
+      runId: 'run-budget-finalizer',
+      taskType: 'research',
+    }))
+    attachFinalizeStore(runtime, repository, store)
+    runtime.newSession('butler::scope-budget-finalizer', 'system prompt')
+
+    const result = await runtime.sendMessage(
+      'butler::scope-budget-finalizer',
+      'research budget proof',
+      'run-budget-finalizer',
+      {
+        publicSessionId: 'scope-budget-finalizer',
+        taskId: 'task-budget-finalizer',
+        taskBudgetRuntime: createTaskBudgetRuntime('research', {
+          budget: {
+            maxIterations: 2,
+            maxToolCalls: 1,
+            maxParallelToolGroups: 5,
+            reservedToolCalls: 0,
+          },
+        }),
+      },
+    )
+
+    const row = repository.get('run-budget-finalizer')
+    const projection = records.get('task-budget-finalizer')
+    assert.equal(result.success, true)
+    assert.equal(result.terminalReason, 'checkpoint_budget')
+    assert.equal(row?.status, 'checkpoint')
+    assert.equal(row?.terminalReason, 'checkpoint_budget')
+    assert.equal(row?.initiator, 'checkpoint')
+    assert.ok((projection?.checkins?.length || 0) > 0)
+  })
+
+  test('max-turn saved document done branch records adjudication through finalizer', async () => {
+    const tmpRoot = await mkdtemp(join(tmpdir(), 'ready-finalizer-max-turn-done-'))
+    const targetPath = join(tmpRoot, 'report.md')
+    await writeFile(targetPath, '# Report\n\n', 'utf-8')
+    try {
+      const { runtime, repository } = createRuntime({
+        listToolDefinitions: () => [
+          createDocumentTool('document_set_content', 'write'),
+          createDocumentTool('document_open_tab', 'read'),
+          createDocumentTool('document_save_tab', 'write'),
+        ],
+        executeToolCall: async (name, args) => {
+          if (name === 'document_set_content') {
+            await writeFile(targetPath, String(args.content || ''), 'utf-8')
+          }
+          return createToolExecutionOutput(`${name} ok`, {
+            shape: 'json',
+            data: { ok: true },
+          })
+        },
+        runAgent: async ({ tools }) => {
+          const setContentTool = tools[0] as { invoke: (context: unknown, input: string) => Promise<string> }
+          await setContentTool.invoke({}, JSON.stringify({
+            content: '# Report\n\n已写入并保存。',
+          }))
+          throw new Error('Max turns (16) exceeded')
+        },
+      })
+      const records = new Map<string, TaskProjectionRecord>()
+      const store = createProjectionStore(records)
+      records.set('task-max-turn-done-finalizer', createProjectionRecord({
+        taskId: 'task-max-turn-done-finalizer',
+        scopeId: 'scope-max-turn-done-finalizer',
+        runId: 'run-max-turn-done-finalizer',
+        proofRefs: [{
+          kind: 'tool_result',
+          ref: 'document_set_content',
+          ts: '2026-06-10T10:00:00.000Z',
+          digest: 'b'.repeat(64),
+        }],
+      }))
+      attachFinalizeStore(runtime, repository, store)
+      runtime.newSession('butler::scope-max-turn-done-finalizer', 'system prompt')
+
+      const result = await runtime.sendMessage(
+        'butler::scope-max-turn-done-finalizer',
+        [
+          '把内容写入@[report.md]里。',
+          '',
+          '--- 附件: report.md ---',
+          `- 路径: ${targetPath}`,
+        ].join('\n'),
+        'run-max-turn-done-finalizer',
+        {
+          publicSessionId: 'scope-max-turn-done-finalizer',
+          taskId: 'task-max-turn-done-finalizer',
+          requestEnvelope: {
+            primaryInstruction: '把内容写入@[report.md]里。',
+            resources: [
+              { name: 'report.md', path: targetPath },
+            ],
+          },
+        },
+      )
+
+      const row = repository.get('run-max-turn-done-finalizer')
+      const projection = records.get('task-max-turn-done-finalizer')
+      assert.equal(result.success, true)
+      assert.equal(result.terminalReason, 'done')
+      assert.equal(row?.status, 'done')
+      assert.equal(row?.terminalReason, 'done')
+      assert.ok((projection?.checkins?.length || 0) > 0)
+    } finally {
+      await rm(tmpRoot, { recursive: true, force: true })
+    }
+  })
+
+  test('child resume parent close records adjudication through finalizer', async () => {
+    const cases = [
+      {
+        label: 'done',
+        close: {
+          status: 'completed',
+          terminalReason: 'completed',
+          projectionPatch: { taskContinuation: { childRunId: 'child-done' } },
+        },
+        expectedStatus: 'done',
+        expectedReason: 'done',
+        expectedSuccess: true,
+      },
+      {
+        label: 'checkpoint',
+        close: {
+          status: 'budget_paused',
+          terminalReason: 'checkpoint_budget',
+          projectionPatch: { taskContinuation: { childRunId: 'child-checkpoint' } },
+        },
+        expectedStatus: 'checkpoint',
+        expectedReason: 'checkpoint_budget',
+        expectedSuccess: true,
+      },
+      {
+        label: 'error',
+        close: {
+          status: 'failed',
+          terminalReason: 'failed_skill',
+          error: { kind: 'failed_skill', message: 'driver failed' },
+          projectionPatch: { taskContinuation: { childRunId: 'child-error' } },
+        },
+        expectedStatus: 'error',
+        expectedReason: 'failed_skill',
+        expectedSuccess: false,
+      },
+    ] as const
+
+    for (const item of cases) {
+      const { runtime, repository } = createRuntime({
+        resumeSkillChildRun: async (childRunId: string) => ({
+          childRunId,
+          closeEvent: item.close,
+        }) as never,
+        waitForSkillChildRunClose: async () => {
+          throw new Error('close event is returned inline')
+        },
+        runAgent: async () => {
+          throw new Error('child resume path must return before model run')
+        },
+      })
+      const records = new Map<string, TaskProjectionRecord>()
+      const store = createProjectionStore(records)
+      records.set(`task-child-${item.label}`, createProjectionRecord({
+        taskId: `task-child-${item.label}`,
+        scopeId: `scope-child-${item.label}`,
+        runId: `run-child-${item.label}`,
+        proofRefs: [{
+          kind: 'tool_result',
+          ref: `child-${item.label}`,
+          ts: '2026-06-10T10:00:00.000Z',
+          digest: 'a'.repeat(64),
+        }],
+      }))
+      attachFinalizeStore(runtime, repository, store)
+      runtime.newSession(`butler::scope-child-${item.label}`, 'system prompt')
+
+      const result = await runtime.sendMessage(
+        `butler::scope-child-${item.label}`,
+        '继续',
+        `run-child-${item.label}`,
+        {
+          publicSessionId: `scope-child-${item.label}`,
+          taskId: `task-child-${item.label}`,
+          continuationIntent: { childRunId: `child-${item.label}` },
+        },
+      )
+
+      const row = repository.get(`run-child-${item.label}`)
+      const projection = records.get(`task-child-${item.label}`)
+      assert.equal(result.success, item.expectedSuccess)
+      assert.equal(result.terminalReason, item.expectedReason)
+      assert.equal(row?.status, item.expectedStatus)
+      assert.equal(row?.terminalReason, item.expectedReason)
+      assert.ok((projection?.checkins?.length || 0) > 0)
+    }
   })
 
   test('user_stop path records terminal run_meta and closure capsule', async () => {

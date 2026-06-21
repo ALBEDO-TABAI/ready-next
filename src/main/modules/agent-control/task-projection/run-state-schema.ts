@@ -1,7 +1,21 @@
 import { logAgentMetric } from '../metrics'
 import { TOOL_ERROR_METRICS } from '../tools-runtime/tool-error-metrics'
 
-export type NormalizedRunStateStatus = 'running' | 'done' | 'failed' | 'cancelled' | 'blocked'
+export const NORMALIZED_RUN_STATE_STATUSES = [
+  'running',
+  'done',
+  'failed',
+  'cancelled',
+  'blocked',
+] as const
+
+export type NormalizedRunStateStatus = typeof NORMALIZED_RUN_STATE_STATUSES[number]
+
+const NORMALIZED_RUN_STATE_STATUS_SET = new Set<string>(NORMALIZED_RUN_STATE_STATUSES)
+
+export function isNormalizedRunStateStatus(value: unknown): value is NormalizedRunStateStatus {
+  return typeof value === 'string' && NORMALIZED_RUN_STATE_STATUS_SET.has(value)
+}
 
 export interface ParsedRunStateRecord {
   raw: Record<string, unknown>

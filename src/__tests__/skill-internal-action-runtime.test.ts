@@ -190,7 +190,8 @@ test('ToolRuntime preflight still rejects non-skill tools missing from allowedTo
   })
 
   assert.equal(executorCalls, 0, 'runtime preflight must reject non-skill tool BEFORE the executor is invoked')
-  assert.equal(result.results[0]?.result.data?.reason, 'tool_restricted_this_turn')
+  assert.equal(result.results[0]?.result.data?.errorKind, 'tool_restricted_this_turn')
+  assert.equal(result.results[0]?.result.data?.reason, undefined)
 })
 
 test('tool executor admits frame-scoped internal VEA actions after explicit allowlist', async () => {

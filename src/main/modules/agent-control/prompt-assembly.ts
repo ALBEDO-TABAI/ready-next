@@ -10,7 +10,7 @@ import {
   type PromptCompressionReport
 } from './compaction/context-compression'
 import { logAgentMetric } from './metrics'
-import { buildContextBill, emitContextBill } from './context-bill'
+import { buildContextBill, emitContextBill, type ContextBillPayload, type ContextBillSectionInput } from './context-bill'
 import type { IntentClassification } from './intent-classifier'
 import { classifyIntent } from './intent-classifier'
 import type { RequestEnvelope } from './contracts/request-envelope'
@@ -22,6 +22,7 @@ import { isSafeAgentScopeId } from './knowledge/belief-card-store'
 import { MAIN_AGENT_ID } from '../repositories/agent-registry-repository'
 import type { SessionRecallCapsule } from '../../../shared/session-recall'
 import type { CoordinatorPromptFragment, DomainAdapter } from './domain-adapters/domain-adapter'
+import type { AgentSystemStudioAgentStatus } from '../../../shared/agent-system-studio'
 
 export type PromptMemoryLayer = 'l0' | 'l1' | 'l2' | 'recall'
 export type PromptMemorySourceType = MemorySourceType | 'session_recall'
@@ -51,6 +52,16 @@ export interface PromptBudgetReport {
   l0Chars: number
   l1Chars: number
   l2Chars: number
+  rulesChars: number
+  knowledgeIndexChars: number
+  agentRoutingChars: number
+  recallChars: number
+  autoRecallChars: number
+  sectionChars: Record<string, number>
+  totalBytes: number
+  sectionBytes: Record<string, number>
+  truncations: string[]
+  truncationReasons: Record<string, 'section_budget'>
   droppedRefs: string[]
 }
 
@@ -85,11 +96,12 @@ export interface PromptAssemblyDeps {
   /** EP1-X1a: current-scope task index entries (already scope-filtered by SQL). */
   getScopeTaskIndexEntries?: (scopeId: string) => TaskIndexEntry[] | Promise<TaskIndexEntry[]>
   /** EP2-K3: belief card store for the L1.5 knowledge index (active cards only). */
-  getBeliefCardStore?: () => {
-    renderKnowledgeIndex(opts: { maxChars: number; ownerAgentId?: string | null; excludeRelPaths?: readonly string[] }): { text: string; renderedCount: number; omittedCount: number }
-    /** EP3-A3: active routing-fix cards for the main-session routing index. */
-    listRoutingCards?(): Array<{ relPath: string; title: string; description: string; targetAgentId: string }>
-  } | null
+	  getBeliefCardStore?: () => {
+	    renderKnowledgeIndex(opts: { maxChars: number; ownerAgentId?: string | null; excludeRelPaths?: readonly string[] }): { text: string; renderedCount: number; omittedCount: number }
+	    /** EP3-A3: active routing-fix cards for the main-session routing index. */
+	    listRoutingCards?(): Array<{ relPath: string; title: string; description: string; targetAgentId: string }>
+	    listRoutingCardInventory?(agents: ReadonlyArray<{ id: string; status: AgentSystemStudioAgentStatus }>): Array<{ relPath: string; targetStatus: string }>
+	  } | null
   /** EP3-A3: agents-table roster for the main-session charter/routing index. */
   getAgentRoster?: () => Array<{ id: string; name: string; charter: string | null; status: string }>
   /** EP2-K6: rollback switch — false stops RULES/index injection entirely. */
@@ -244,6 +256,10 @@ function hasCurrentExplicitResourceRefs(envelope: RequestEnvelope): boolean {
   )
 }
 
+function isAgentSystemStudioAgentStatus(status: string): status is AgentSystemStudioAgentStatus {
+  return status === 'active' || status === 'retired' || status === 'merged'
+}
+
 function formatMemorySection(title: string, body: string): string {
   return `## ${title}\n${body.trim()}`.trim()
 }
@@ -303,7 +319,53 @@ function applyBudget(parts: { l0Text: string; l1Text: string; l2Sections: string
   return {
     l1Text,
     l2Text,
-    budget: { totalChars, l0Chars, l1Chars, l2Chars, droppedRefs }
+    budget: {
+      totalChars,
+      l0Chars,
+      l1Chars,
+      l2Chars,
+      rulesChars: 0,
+      knowledgeIndexChars: 0,
+      agentRoutingChars: 0,
+      recallChars: 0,
+      autoRecallChars: 0,
+      sectionChars: {},
+      totalBytes: 0,
+      sectionBytes: {},
+      truncations: [],
+      truncationReasons: {},
+      droppedRefs
+    }
+  }
+}
+
+function buildPromptBudgetReport(
+  base: PromptBudgetReport,
+  sections: ReadonlyArray<ContextBillSectionInput>,
+  bill: ContextBillPayload,
+): PromptBudgetReport {
+  const sectionChars: Record<string, number> = {}
+  for (const { section, text } of sections) {
+    if (!text) continue
+    sectionChars[section] = (sectionChars[section] ?? 0) + text.length
+  }
+  const totalChars = Object.values(sectionChars).reduce((sum, value) => sum + value, 0)
+  return {
+    ...base,
+    totalChars,
+    l0Chars: sectionChars.L0 ?? 0,
+    l1Chars: sectionChars.L1_summary ?? 0,
+    l2Chars: sectionChars.L2_triggers ?? 0,
+    rulesChars: sectionChars.L0_rules ?? 0,
+    knowledgeIndexChars: sectionChars.L1_5_knowledge_index ?? 0,
+    agentRoutingChars: sectionChars.L1_5_agent_routing ?? 0,
+    recallChars: sectionChars.recall ?? 0,
+    autoRecallChars: sectionChars.autoRecall ?? 0,
+    sectionChars,
+    totalBytes: bill.total,
+    sectionBytes: bill.sections,
+    truncations: bill.truncations,
+    truncationReasons: bill.truncationReasons,
   }
 }
 
@@ -1016,15 +1078,26 @@ export class PromptAssemblyService {
     try {
       const beliefStore = knowledgeEnabled ? (this.deps.getBeliefCardStore?.() ?? null) : null
       if (beliefStore) {
-        const rawRoutingCards = params.scope.agent === MAIN_AGENT_ID
-          ? (beliefStore.listRoutingCards?.() ?? [])
-          : []
-        mainSessionRoutingCards = rawRoutingCards
-          .filter((card) => !activeAgentIds || activeAgentIds.has(card.targetAgentId))
-        const excludedRoutingRelPaths = rawRoutingCards
-          .filter((card) => activeAgentIds && !activeAgentIds.has(card.targetAgentId))
-          .map((card) => card.relPath)
-        const index = beliefStore.renderKnowledgeIndex({
+	        const rawRoutingCards = params.scope.agent === MAIN_AGENT_ID
+	          ? (beliefStore.listRoutingCards?.() ?? [])
+	          : []
+	        mainSessionRoutingCards = rawRoutingCards
+	          .filter((card) => !activeAgentIds || activeAgentIds.has(card.targetAgentId))
+	        const inventoryExcludedRelPaths = params.scope.agent === MAIN_AGENT_ID
+	          ? (beliefStore.listRoutingCardInventory?.((roster ?? [])
+	            .filter((agent): agent is { id: string; name: string; charter: string | null; status: AgentSystemStudioAgentStatus } => (
+	              isAgentSystemStudioAgentStatus(agent.status)
+	            ))) ?? [])
+	            .filter((card) => card.targetStatus !== 'active')
+	            .map((card) => card.relPath)
+	          : []
+	        const excludedRoutingRelPaths = [
+	          ...rawRoutingCards
+	            .filter((card) => activeAgentIds && !activeAgentIds.has(card.targetAgentId))
+	            .map((card) => card.relPath),
+	          ...inventoryExcludedRelPaths,
+	        ]
+	        const index = beliefStore.renderKnowledgeIndex({
           maxChars: MAX_KNOWLEDGE_INDEX_CHARS,
           ownerAgentId: injectionOwner,
           excludeRelPaths: excludedRoutingRelPaths,
@@ -1087,7 +1160,7 @@ export class PromptAssemblyService {
       intentClassification,
     )
     const l2Sections = triggerMatches.flatMap((item) => item.sections)
-    const { l1Text, l2Text, budget } = applyBudget({ l0Text: l0.text, l1Text: l1.text, l2Sections })
+    const { l1Text, l2Text, budget: baseBudget } = applyBudget({ l0Text: l0.text, l1Text: l1.text, l2Sections })
 
     const bootstrapMessages = [
       l1Text ? formatMemorySection('L1 会话上下文', l1Text) : '',
@@ -1118,18 +1191,19 @@ export class PromptAssemblyService {
     // (not content) so injection size is measurable. Section keys map to the
     // memory layers actually injected this turn; task-index/reminders join
     // later phases via additional entries.
-    emitContextBill(
-      buildContextBill(params.scope.id, [
-        { section: 'L0', text: l0.text },
-        { section: 'L0_rules', text: rulesText },
-        { section: 'L1_summary', text: l1Text },
-        { section: 'L1_5_knowledge_index', text: knowledgeIndexText },
-        { section: 'L1_5_agent_routing', text: agentRoutingText },
-        { section: 'recall', text: recall.text },
-        { section: 'autoRecall', text: autoRecall.text },
-        { section: 'L2_triggers', text: l2Text },
-      ]),
-    )
+    const billSections = [
+      { section: 'L0', text: l0.text },
+      { section: 'L0_rules', text: rulesText },
+      { section: 'L1_summary', text: l1Text },
+      { section: 'L1_5_knowledge_index', text: knowledgeIndexText },
+      { section: 'L1_5_agent_routing', text: agentRoutingText },
+      { section: 'recall', text: recall.text },
+      { section: 'autoRecall', text: autoRecall.text },
+      { section: 'L2_triggers', text: l2Text },
+    ] satisfies ContextBillSectionInput[]
+    const contextBill = buildContextBill(params.scope.id, billSections)
+    emitContextBill(contextBill)
+    const budget = buildPromptBudgetReport(baseBudget, billSections, contextBill)
 
     return {
       systemPrompt: [

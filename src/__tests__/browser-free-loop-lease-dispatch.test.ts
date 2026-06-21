@@ -74,6 +74,16 @@ describe('free-loop browser dispatch lease gating (WP2)', () => {
     assert.equal(service.getState('user-view'), 'held')
   })
 
+  it('write tools without a turn surface are refused before browser dispatch', async () => {
+    const controller = createController({
+      goBack: () => {
+        throw new Error('goBack must not dispatch')
+      },
+    })
+    const out = await executeToolCall('browser_go_back', {}, ctx(controller, null))
+    assert.equal(parseError(out)?.errorCode, 'browser_surface_undeclared')
+  })
+
   it('write tools are blocked with lease_takeover after the user takes over mid-turn', async () => {
     const service = new BrowserWriteLeaseService()
     const turnLease = new BrowserTurnLease({ taskId: 't', runId: 'r1' }, 'user-view', service)

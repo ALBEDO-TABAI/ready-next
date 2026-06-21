@@ -48,6 +48,17 @@ function assertNoOldTerminalReturns(rel, names) {
   }
 }
 
+function assertNoOldProjectionStatusWrites(rel) {
+  const text = read(rel)
+  const re = /status\s*:\s*['"](done|cancelled)['"]/g
+  let match
+  while ((match = re.exec(text))) {
+    const window = text.slice(Math.max(0, match.index - 160), Math.min(text.length, match.index + 160))
+    if (/\.\.\.step\b/.test(window) || /TaskProjectionRecord\['steps'\]/.test(window)) continue
+    fail('reconciler_old_status_write', `${rel} writes old projection terminal status`)
+  }
+}
+
 function main() {
   const wireRel = 'src/shared/ipc-contracts/task-projection.ts'
   const wire = read(wireRel)
@@ -82,10 +93,7 @@ function main() {
     fail('sync_old_terminal_mapping', 'resolveStatus still returns done/cancelled')
   }
 
-  const reconciler = read('src/main/modules/agent-control/task-projection/task-projection-reconciler.ts')
-  if (/status\s*:\s*['"](done|cancelled)['"]/.test(reconciler)) {
-    fail('reconciler_old_status_write', 'task-projection-reconciler writes old projection terminal status')
-  }
+  assertNoOldProjectionStatusWrites('src/main/modules/agent-control/task-projection/task-projection-reconciler.ts')
 
   assertNoOldTerminalReturns('src/main/modules/agent-control/skills/skill-child-runner.ts', [
     'childProjectionStatusForState',

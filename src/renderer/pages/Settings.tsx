@@ -39,6 +39,7 @@ import type { MemoryQueryFilters } from '../types/electron'
 import PersonalityEditor from '../components/personality/PersonalityEditor'
 import AgentDerivationPanel from '../components/personality/AgentDerivationPanel'
 import AgentRegistryPanel from '../components/personality/AgentRegistryPanel'
+import AgentSystemStudio from '../components/agent-system/AgentSystemStudio'
 import UserProfileEditor from '../components/profile/UserProfileEditor'
 
 const AGENT_AUTO_NARRATION_CONTINUATION_SETTING_KEY = 'agent.autoNarrationContinuation'
@@ -171,6 +172,13 @@ const settingsData: SettingSection[] = [
     icon: Sparkles,
     description: '定义聊天面板可切换 Agent 的人格和语气',
     settings: [] // Rendered dynamically via PersonalityEditor
+  },
+  {
+    id: 'agent-system',
+    title: 'Agent 系统',
+    icon: Bot,
+    description: '查看主 agent、专项 agent、路由、任务归属和分派 trace',
+    settings: []
   },
   {
     id: 'user-profiles',
@@ -3012,7 +3020,7 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
   }
 
   const isDynamicSection = currentSection
-    ? ['ai', 'remote-im', 'external-services', 'mcp', 'memory', 'personalities', 'user-profiles', 'pet', 'rss-storage', MODELS_RUNTIME_SETTINGS_SECTION, 'storage'].includes(currentSection.id)
+    ? ['ai', 'remote-im', 'external-services', 'mcp', 'memory', 'personalities', 'agent-system', 'user-profiles', 'pet', 'rss-storage', MODELS_RUNTIME_SETTINGS_SECTION, 'storage'].includes(currentSection.id)
     : false
 
   return (
@@ -3165,6 +3173,10 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
                     <AgentDerivationPanel />
                     <AgentRegistryPanel />
                   </div>
+                )}
+
+                {currentSection.id === 'agent-system' && (
+                  <AgentSystemStudio />
                 )}
 
                 {/* User Profiles — custom layout */}

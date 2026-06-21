@@ -1,12 +1,20 @@
 import { basename } from 'node:path'
 import type { IpcMain } from 'electron'
-import {
-  deriveSpecialistAgent,
-  type AgentFactoryRegistry,
-  type DeriveSpecialistAgentInput,
-} from '../../agent-control/agents/agent-factory'
+import type { AgentFactoryRegistry } from '../../agent-control/agents/agent-factory'
+import { evaluateSpecialistBlueprintAdmission } from '../../agent-control/agents/specialist-blueprint-admission'
+import type { SpecialistBlueprintStore } from '../../agent-control/agents/specialist-blueprint-store'
 import type { BeliefCard, BeliefCardStore } from '../../agent-control/knowledge/belief-card-store'
-import type { AgentRegistryRecord } from '../../repositories/agent-registry-repository'
+import type {
+  SpecialistAgentBlueprint,
+  SpecialistBlueprintAdmissionVerdict,
+  SpecialistBlueprintKnowledgeSeed,
+  SpecialistBlueprintStatus,
+} from '../../../../shared/agent-specialist-blueprint'
+import { renderSpecialistFoundationMarkdown } from '../../agent-control/agents/specialist-blueprint-quality'
+import {
+  buildSpecialistBlueprintClarificationContract,
+  type SpecialistBlueprintClarificationContract,
+} from '../../../../shared/agent-specialist-blueprint-clarification'
 import type { IpcChannelGroup, IpcDisposeHandle } from './types'
 
 interface IPCResponse<T = unknown> {
@@ -48,15 +56,23 @@ export interface AgentDerivationConfirmPayload {
 }
 
 export interface AgentDerivationConfirmResult {
-  agent: AgentRegistryRecord
-  rulesRelPath: string
-  routingCardRelPath: string
-  migratedCards: Array<{ from: string; to: string }>
+  blueprint: SpecialistAgentBlueprint
+  blueprintId: string
+  specialistId: string
+  status: SpecialistBlueprintStatus
+  verdict: SpecialistBlueprintAdmissionVerdict
+  missing: string[]
+  clarification?: SpecialistBlueprintClarificationContract
+  createdAgent: false
+  routingActivated: false
+  migratedCards: []
 }
 
 export interface AgentDerivationGroupDeps {
   getBeliefCardStore(): BeliefCardStore | null
   getAgentRegistry(): AgentFactoryRegistry
+  getBlueprintStore(): SpecialistBlueprintStore
+  now?: () => Date
 }
 
 const CHANNELS = [
@@ -120,6 +136,14 @@ function buildDefaultRules(name: string, domain: string, card: BeliefCard, dates
   ].join('\n')
 }
 
+function defaultKnowledgeSeed(candidate: AgentDerivationCandidate, card: BeliefCard): SpecialistBlueprintKnowledgeSeed {
+  return {
+    title: `${candidate.title} 证据摘要`,
+    body: card.body.slice(0, 2000),
+    evidenceRefs: [candidate.candidateRelPath, ...candidate.evidenceDates.slice(0, 5)],
+  }
+}
+
 function migrationCandidatesFor(store: BeliefCardStore, card: BeliefCard, domain: string): AgentDerivationMigrationCandidate[] {
   const needle = domain.toLowerCase()
   if (!needle) return []
@@ -176,27 +200,146 @@ function cleanString(value: unknown): string {
   return String(value || '').trim()
 }
 
+function statusForVerdict(verdict: SpecialistBlueprintAdmissionVerdict): SpecialistBlueprintStatus {
+  if (verdict.kind === 'admit') return 'staged'
+  if (verdict.kind === 'clarify') return 'needs_clarification'
+  return 'rejected'
+}
+
+function buildBlueprintFromCandidate(
+  candidate: AgentDerivationCandidate,
+  card: BeliefCard,
+  payload: AgentDerivationConfirmPayload,
+  migrateCardRelPaths: readonly string[],
+  createdAt: string,
+): SpecialistAgentBlueprint {
+  const specialistId = cleanString(payload?.specialistId) || candidate.defaultSpecialistId
+  const name = cleanString(payload?.name) || candidate.defaultName
+  const charter = cleanString(payload?.charter) || candidate.defaultCharter
+  const seedRulesText = cleanString(payload?.seedRulesText) || candidate.defaultSeedRulesText
+  const routingTriggers = (payload?.routingTriggers ?? candidate.defaultRoutingTriggers).map(cleanString).filter(Boolean)
+  const provenanceText = `从涌现候选卡生成：${card.frontmatter.title}`
+  const blueprint: SpecialistAgentBlueprint = {
+    blueprintId: `bp-${specialistId}`,
+    status: 'draft',
+    inferredScope: {
+      slug: specialistId,
+      displayName: name,
+      domain: extractDomain(card),
+      routingTriggers,
+    },
+    foundationDocs: {
+      status: 'staged',
+      charter,
+      rulesText: seedRulesText,
+      knowledgeSeeds: [defaultKnowledgeSeed(candidate, card)],
+      toolSafetyNotes: '自动派生候选只生成蓝图；创建、路由激活和知识迁移都必须等用户确认。',
+      foundationText: '',
+    },
+    provenance: {
+      userRequestVerbatim: provenanceText,
+      sourceSessionId: null,
+      sourceRunId: null,
+      sourceMessageId: null,
+      sourceMessageUnavailableReason: 'message_id_unavailable',
+      createdAt,
+    },
+    confirmation: {
+      tokenId: null,
+      confirmedAt: null,
+      usedAt: null,
+    },
+    rolePersona: `${name} 只作为候选专项 agent 草案存在，等用户补齐稳定职责、判断口径和边界后才能创建。`,
+    taskExamples: {
+      suitable: [],
+      unsuitable: [],
+    },
+    mainVsSpecialistSplit: '',
+    toolBoundaries: {
+      browser: { mode: 'confirm', notes: '候选草案阶段不允许自动浏览或接管用户浏览器。' },
+      write: { mode: 'confirm', notes: '候选草案阶段不写入长期资产，创建前必须用户确认。' },
+      externalSend: { mode: 'deny', notes: '候选草案不得外发消息、文件或网络请求。' },
+      longMemory: { mode: 'confirm', notes: '候选草案只能保留 staged 证据，长期记忆写入必须用户确认。' },
+    },
+    memoryProfilePolicy: '',
+    lifecycleNotes: '',
+    specialistId,
+    displayName: name,
+    charter,
+    intendedDomain: extractDomain(card),
+    nonGoals: [],
+    recurringTasks: [],
+    requiredInputs: [],
+    expectedOutputs: [],
+    routingTriggers,
+    routingActivateOnCreate: false,
+    seedRulesText,
+    knowledgeSeeds: [defaultKnowledgeSeed(candidate, card)],
+    migrationCandidates: [...migrateCardRelPaths],
+    toolSafetyNotes: '自动派生候选只生成蓝图；创建、路由激活和知识迁移都必须等用户确认。',
+    source: 'emergence-candidate',
+    userRequestVerbatim: provenanceText,
+    clarificationAnswers: [],
+    admissionVerdict: { kind: 'clarify', missing: ['admission_not_run'] },
+    qualityChecks: [],
+  }
+  blueprint.foundationDocs.foundationText = renderSpecialistFoundationMarkdown(blueprint)
+  return blueprint
+}
+
 function confirmDerivation(deps: AgentDerivationGroupDeps, payload: AgentDerivationConfirmPayload): AgentDerivationConfirmResult {
   const store = deps.getBeliefCardStore()
   if (!store) throw new Error('Belief card store not available')
   const candidateRelPath = cleanString(payload?.candidateRelPath)
   const candidate = listDerivationCandidates(store).find((item) => item.candidateRelPath === candidateRelPath)
   if (!candidate) throw new Error('Derivation candidate not found or no longer eligible')
+  const card = store.readCard(candidateRelPath, { includeStaged: true })
+  if (!card) throw new Error('Derivation candidate card not found')
   const allowedMigrations = new Set(candidate.migrationCandidates.map((item) => item.relPath))
   const migrateCardRelPaths = (payload?.migrateCardRelPaths ?? []).map(cleanString).filter(Boolean)
   const illegalMigration = migrateCardRelPaths.find((relPath) => !allowedMigrations.has(relPath))
   if (illegalMigration) throw new Error(`Migration card was not offered for this candidate: ${illegalMigration}`)
-  const input: DeriveSpecialistAgentInput = {
-    candidateRelPath,
-    specialistId: cleanString(payload?.specialistId),
-    name: cleanString(payload?.name),
-    charter: cleanString(payload?.charter),
-    seedRulesText: cleanString(payload?.seedRulesText),
-    routingTriggers: (payload?.routingTriggers ?? []).map(cleanString).filter(Boolean),
-    activateRouting: payload?.activateRouting === true,
+  const draft = buildBlueprintFromCandidate(
+    candidate,
+    card,
+    payload,
     migrateCardRelPaths,
+    (deps.now ? deps.now() : new Date()).toISOString(),
+  )
+  const current = deps.getBlueprintStore().get(draft.blueprintId)
+  if (current?.status === 'confirmed') throw new Error('confirmed blueprint cannot be overwritten')
+  const admission = evaluateSpecialistBlueprintAdmission(deps.getAgentRegistry(), draft)
+  const status = statusForVerdict(admission.verdict)
+  const blueprint = deps.getBlueprintStore().upsert({
+    ...draft,
+    status,
+    admissionVerdict: admission.verdict,
+    qualityChecks: admission.qualityChecks,
+    foundationDocs: {
+      ...draft.foundationDocs,
+      foundationText: renderSpecialistFoundationMarkdown({
+        ...draft,
+        status,
+        admissionVerdict: admission.verdict,
+        qualityChecks: admission.qualityChecks,
+      }),
+    },
+  })
+  const clarification = status === 'needs_clarification' && admission.verdict.kind === 'clarify'
+    ? buildSpecialistBlueprintClarificationContract(blueprint, admission.verdict.missing)
+    : null
+  return {
+    blueprint,
+    blueprintId: blueprint.blueprintId,
+    specialistId: blueprint.specialistId,
+    status,
+    verdict: admission.verdict,
+    missing: admission.missing,
+    ...(clarification ? { clarification } : {}),
+    createdAgent: false,
+    routingActivated: false,
+    migratedCards: [],
   }
-  return deriveSpecialistAgent(deps.getAgentRegistry(), store, input)
 }
 
 function rejectDerivation(deps: AgentDerivationGroupDeps, payload: { candidateRelPath?: string }): AgentDerivationCandidate[] {

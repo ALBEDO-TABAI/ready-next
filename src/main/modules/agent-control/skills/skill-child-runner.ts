@@ -2610,7 +2610,7 @@ function scopeRunPhaseFromTerminalReason(
   terminalReason: NonNullable<ScopeRunEventPayload['terminalReason']>,
 ): ScopeRunEventPayload['phase'] {
   if (terminalReason === 'done') return 'done'
-  if (terminalReason === 'cancelled_user' || terminalReason === 'cancelled_runtime') return 'cancelled'
+  if (terminalReason === 'cancelled_user' || terminalReason === 'cancelled_runtime' || terminalReason === 'main_no_progress_timeout') return 'cancelled'
   if (
     terminalReason === 'failed_skill'
     || terminalReason === 'resume_launch_failed'

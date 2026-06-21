@@ -54,6 +54,24 @@ export function mapBackendErrorToFriendly(input: {
     }
   }
 
+  if (errorKind === 'renderer_infrastructure_timeout') {
+    return {
+      friendlyMessage: '这次请求超时，Ready 已接管收口，可以继续发送',
+      technicalDetails: error || undefined,
+      recoverable: true,
+      retryStrategy: 'user_action',
+    }
+  }
+
+  if (errorKind === 'main_no_progress_timeout') {
+    return {
+      friendlyMessage: '这次请求长时间没有进展，Ready 已接管收口，可以继续发送',
+      technicalDetails: error || undefined,
+      recoverable: true,
+      retryStrategy: 'user_action',
+    }
+  }
+
   if (/scope_id is required/i.test(error)) {
     return {
       friendlyMessage: '操作失败，请刷新会话',
@@ -139,16 +157,30 @@ export function mapBackendErrorToFriendly(input: {
     }
   }
 
-  if (
-    errorKind === 'timeout_model' ||
-    errorKind === 'timeout_tool' ||
-    /timeout|timed out|请求超时/i.test(source)
-  ) {
+  if (errorKind === 'timeout_tool') {
+    return {
+      friendlyMessage: '工具响应超时，请稍后重试或继续这项任务',
+      technicalDetails: error || undefined,
+      recoverable: true,
+      retryStrategy: 'user_action',
+    }
+  }
+
+  if (errorKind === 'timeout_model' || /timeout|timed out|请求超时/i.test(source)) {
     return {
       friendlyMessage: '模型响应超时，请稍后重试',
       technicalDetails: error || undefined,
       recoverable: true,
       retryStrategy: 'auto',
+    }
+  }
+
+  if (errorKind === 'proof_gap') {
+    return {
+      friendlyMessage: '结果证据不足，请继续这项任务',
+      technicalDetails: error || undefined,
+      recoverable: true,
+      retryStrategy: 'user_action',
     }
   }
 

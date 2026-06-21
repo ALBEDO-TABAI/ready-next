@@ -22,6 +22,7 @@ import {
   executeBrowserTool,
 } from '../main/modules/tools/browser-tools'
 import { __setWebContentsProviderForTests, broadcastDirectoryChanged } from '../main/modules/document-engine/ipc/directory-change-broadcast'
+import type { ToolExecutionOutput } from '../main/modules/agent-control/tools-runtime/tool-result-types'
 
 test('collection-download-chain declares transitive sqlite ABI guard', (t) => {
   skipIfSqliteUnavailable(t, 'collection-download-chain transitive sqlite load')
@@ -81,6 +82,10 @@ function createConsentStoreMock() {
   }
 }
 
+function parseBrowserJson(output: string | ToolExecutionOutput): any {
+  return JSON.parse(typeof output === 'string' ? output : output.text)
+}
+
 function makeController(over: Record<string, unknown> = {}) {
   const recorded: Array<Record<string, unknown>> = []
   return {
@@ -109,7 +114,7 @@ test('gap 1: raw browser_download_urls redirects to the chained tool when a gall
     urls: ['https://example.com/img-0.jpg'],
     directory: '~/Documents',
   }, controller, undefined, 'scope-img')
-  const parsed = JSON.parse(output)
+  const parsed = parseBrowserJson(output)
   assert.equal(parsed.ok, false)
   assert.equal(parsed.errorCode, 'use_collected_media_download')
   assert.equal(parsed.sourceTaskId, 'task-gallery-1')
@@ -122,7 +127,7 @@ test('gap 1: raw browser_download_urls redirects to the chained tool when a gall
     directory: '~/Documents',
     unrelated_to_collection: true,
   }, controller, undefined, 'scope-img')
-  const unrelatedParsed = JSON.parse(unrelated)
+  const unrelatedParsed = parseBrowserJson(unrelated)
   assert.equal(unrelatedParsed.results[0].error, 'unsupported_protocol')
 
   // no gallery task in scope → no redirect either
@@ -131,7 +136,7 @@ test('gap 1: raw browser_download_urls redirects to the chained tool when a gall
     urls: ['ftp://example.com/file.bin'],
     directory: '~/Documents',
   }, bare, undefined, 'scope-img')
-  assert.equal(JSON.parse(free).results[0].error, 'unsupported_protocol')
+  assert.equal(parseBrowserJson(free).results[0].error, 'unsupported_protocol')
 
   const partial = makeController({
     listTasksByKind: async () => [partialGalleryTask('task-gallery-1')],
@@ -141,7 +146,7 @@ test('gap 1: raw browser_download_urls redirects to the chained tool when a gall
     urls: ['https://example.com/img-0.jpg'],
     directory: '~/Documents',
   }, partial, undefined, 'scope-img')
-  const redirectedPartialParsed = JSON.parse(redirectedPartial)
+  const redirectedPartialParsed = parseBrowserJson(redirectedPartial)
   assert.equal(redirectedPartialParsed.errorCode, 'use_collected_media_download')
   assert.equal(redirectedPartialParsed.sourceTaskId, 'task-gallery-1')
 })
@@ -155,7 +160,7 @@ test('gaps 2+3: collected-media download reconciles discovered/saved/remaining a
       directory: dir,
       expected_total: 72,
     }, controller, undefined, 'scope-img')
-    const parsed = JSON.parse(output)
+    const parsed = parseBrowserJson(output)
     assert.equal(parsed.discovered, 3)
     assert.equal(parsed.saved, 3)
     assert.equal(parsed.failedCount, 0)
@@ -176,7 +181,7 @@ test('gaps 2+3: collected-media download reconciles discovered/saved/remaining a
       source_task_id: 'task-gallery-1',
       directory: dir,
     }, controller, undefined, 'scope-img')
-    const fullParsed = JSON.parse(full)
+    const fullParsed = parseBrowserJson(full)
     assert.equal(fullParsed.completion, 'complete')
     assert.equal(fullParsed.remaining, 0)
 
@@ -191,7 +196,7 @@ test('gaps 2+3: collected-media download reconciles discovered/saved/remaining a
       source_task_id: 'task-gallery-1',
       directory: dir,
     }, claimedController, undefined, 'scope-img')
-    const claimedParsed = JSON.parse(claimed)
+    const claimedParsed = parseBrowserJson(claimed)
     assert.equal(claimedParsed.completion, 'partial', 'source-recorded claim forces partial without the arg')
     assert.equal(claimedParsed.remaining, 69)
   } finally {
@@ -213,7 +218,7 @@ test('partial gallery sources require consent, then download discovered media wi
       directory: dir,
       allow_partial: true,
     }, controller, undefined, 'scope-img')
-    const blockedParsed = JSON.parse(blocked)
+    const blockedParsed = parseBrowserJson(blocked)
     assert.equal(blockedParsed.errorCode, 'partial_collection_consent_required')
     assert.equal(blockedParsed.allowPartialIgnored, true)
     assert.match(blockedParsed.pendingConsentRequest?.requestId || '', /^browser-consent-test-/)
@@ -224,7 +229,7 @@ test('partial gallery sources require consent, then download discovered media wi
       directory: dir,
       allow_partial: true,
     }, controller, undefined, 'scope-img')
-    const allowedParsed = JSON.parse(allowed)
+    const allowedParsed = parseBrowserJson(allowed)
     assert.equal(allowedParsed.completion, 'partial')
     assert.equal(allowedParsed.discovered, 3)
     assert.equal(allowedParsed.saved, 3)

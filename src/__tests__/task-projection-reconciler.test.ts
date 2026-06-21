@@ -282,7 +282,7 @@ test('reconcileTaskProjections does not mark VEA done when delivery_report lacks
   assert.ok(updated.blockedReason?.includes('尚未完成'))
 })
 
-test('reconcileTaskProjections marks complete VEA output done and is idempotent', async () => {
+test('reconcileTaskProjections does not complete VEA output from a read-path reconcile', async () => {
   const outputDir = createRoot('done')
   const { runStatePath, deliveryReportPath } = writeCompletedRun(outputDir, { includeAudiovisual: true })
   const { store, records, updates } = createStore([
@@ -311,18 +311,17 @@ test('reconcileTaskProjections marks complete VEA output done and is idempotent'
   await reconcileTaskProjections({ store, records: Array.from(records.values()), now: '2026-05-04T10:05:00.000Z' })
 
   const updated = records.get('skill:run_state:done')!
-  assert.equal(updated.status, 'completed')
-  assert.equal(updated.interactionState, 'suspended')
-  assert.equal(updated.waitingFor, 'none')
-  assert.equal(updated.taskSummary, '技能任务已完成')
-  assert.deepEqual(updated.resumableActions, ['open_artifact'])
-  assert.equal(updated.continuationRef?.blockerType, 'completed')
-  assert.equal(updated.continuationRef?.pauseReason, 'completed')
-  assert.equal(updated.continuationRef?.progress?.stage, 'completed')
-  assert.equal(updated.continuationRef?.progress?.completed, 64)
-  assert.equal(updated.continuationRef?.progress?.total, 64)
-  assert.equal(updated.progress?.lastError, null)
+  assert.equal(updated.status, 'running')
+  assert.equal(updated.interactionState, 'running')
+  assert.equal(updated.waitingFor, 'background')
+  assert.equal(updated.taskSummary, '视频分析进行中')
+  assert.deepEqual(updated.resumableActions, ['cancel'])
+  assert.equal(updated.continuationRef?.blockerType, undefined)
   assert.equal(updates.length, 1)
+  const patch = updates[0]?.patch ?? {}
+  assert.equal('status' in patch, false)
+  assert.equal(patch.continuationRef?.blockerType, undefined)
+  assert.equal(patch.continuationRef?.pauseReason, undefined)
 })
 
 test('reconcileTaskProjections enriches completed child projections with delivery report artifacts', async () => {
@@ -371,7 +370,7 @@ test('reconcileTaskProjections enriches completed child projections with deliver
   assert.equal(updates.length, 1)
 })
 
-test('reconcileTaskProjections completes failed parent from completed child_run step artifacts', async () => {
+test('reconcileTaskProjections does not complete failed parent from child artifacts in read path', async () => {
   const outputDir = createRoot('parent-from-child')
   const { runStatePath, deliveryReportPath } = writeCompletedRun(outputDir, { includeAudiovisual: true })
   const childRun = baseTaskRun({
@@ -414,15 +413,15 @@ test('reconcileTaskProjections completes failed parent from completed child_run 
   await reconcileTaskProjections({ store, records: Array.from(records.values()), taskRuns: [childRun], now: NOW })
 
   const parent = records.get('task-parent')!
-  assert.equal(parent.status, 'completed')
-  assert.equal(parent.taskSummary, '技能任务已完成')
-  assert.equal(parent.blockedReason, null)
-  assert.deepEqual(parent.resumableActions, ['open_artifact'])
-  assert.ok(parent.recentArtifacts?.some((item) => item.kind === 'delivery_report' && item.path === deliveryReportPath))
-  assert.equal(parent.steps.find((step) => step.id === 'child_run:child_done')?.status, 'done')
+  assert.equal(parent.status, 'failed')
+  assert.equal(parent.taskSummary, '任务 child_done 已丢失')
+  assert.equal(parent.blockedReason, '任务已丢失')
+  assert.deepEqual(parent.resumableActions, ['cancel'])
+  assert.equal(parent.recentArtifacts?.some((item) => item.kind === 'delivery_report' && item.path === deliveryReportPath), false)
+  assert.equal(parent.steps.find((step) => step.id === 'child_run:child_done')?.status, 'running')
 })
 
-test('reconcileTaskProjections supersedes an old blocked child when a newer child finishes the same output', async () => {
+test('reconcileTaskProjections does not supersede an old child from a read-path reconcile', async () => {
   const outputDir = createRoot('superseded-child')
   const { runStatePath, deliveryReportPath } = writeCompletedRun(outputDir, { includeAudiovisual: true })
   const oldRun = baseTaskRun({
@@ -475,9 +474,9 @@ test('reconcileTaskProjections supersedes an old blocked child when a newer chil
 
   const oldProjection = records.get('skill-child:old_child')!
   const newProjection = records.get('skill-child:new_child')!
-  assert.equal(oldProjection.status, 'killed')
-  assert.equal(oldProjection.degradationReason, 'superseded_by_child_run')
-  assert.equal((oldProjection.continuationRef as { supersededByChildRunId?: string } | null)?.supersededByChildRunId, 'new_child')
+  assert.equal(oldProjection.status, 'completed')
+  assert.equal(oldProjection.degradationReason, null)
+  assert.equal((oldProjection.continuationRef as { supersededByChildRunId?: string } | null)?.supersededByChildRunId, undefined)
   assert.equal(newProjection.status, 'completed')
 })
 
@@ -599,14 +598,16 @@ test('reconcileTaskProjections restores child-run handles from DB row and event 
   await reconcileTaskProjections(params)
 
   const updated = records.get('skill-child:vcr_db_done')!
-  assert.equal(updated.status, 'completed')
-  assert.equal(updated.interactionState, 'suspended')
-  assert.equal(updated.waitingFor, 'none')
+  assert.equal(updated.status, 'running')
+  assert.equal(updated.interactionState, 'running')
+  assert.equal(updated.waitingFor, 'background')
   assert.equal(updated.continuationRef?.childRunId, 'vcr_db_done')
   assert.equal(updated.continuationRef?.skillId, 'video-expert-analyzer')
   assert.equal(updated.continuationRef?.action, 'video_expert_pipeline')
   assert.equal(updated.continuationRef?.outputDir, outputDir)
   assert.equal(updated.continuationRef?.runStatePath, runStatePath)
+  assert.equal(updated.continuationRef?.blockerType, undefined)
+  assert.equal(updated.continuationRef?.pauseReason, undefined)
 })
 
 /**

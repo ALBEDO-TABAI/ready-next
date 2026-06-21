@@ -1,4 +1,5 @@
-import { serializeToolExecutionOutput, type ToolExecutionResultLike } from '../agent-control/tools-runtime/tool-result-types'
+import { serializeToolExecutionOutputForModel } from '../agent-control/tools-runtime/model-visible-tool-output'
+import type { ToolExecutionResultLike } from '../agent-control/tools-runtime/tool-result-types'
 
 export interface TextToolBridgeCall {
   name: string
@@ -199,7 +200,7 @@ export function buildTextToolResultMessage(
     `call_id: ${item.id}`,
     `tool: ${item.name}`,
     'result:',
-    serializeToolExecutionOutput(item.result),
+    serializeToolExecutionOutputForModel(item.result),
     '[/tool_result]',
   ].join('\n'))
 

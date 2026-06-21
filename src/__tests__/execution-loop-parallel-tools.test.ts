@@ -280,44 +280,39 @@ test('ExecutionLoopOrchestrator still applies transport fallback when runtime re
   assert.equal(response.text, 'fallback-ok')
 })
 
-test('ExecutionLoopOrchestrator retries once after context compression when the model request overflows context', async () => {
+test('ExecutionLoopOrchestrator surfaces context overflow without dormant compression retry', async () => {
   const orchestrator = new ExecutionLoopOrchestrator({ log: () => {} })
   let attempts = 0
-  let compressed = 0
+  const retrySignals: unknown[] = []
+  const contextOverflowError = new Error('maximum context length exceeded')
 
-  const response = await orchestrator.requestToolLoopResponse({
-    useAnthropicProtocol: false,
-    hasVideoInputs: false,
-    session: {},
-    config: {},
-    baseUrl: 'https://api.openai.com/v1',
-    provider: {},
-    signal: new AbortController().signal,
-    callAnthropicWithTools: async () => {
-      throw new Error('unused')
-    },
-    callOpenAIWithTools: async () => {
-      attempts += 1
-      if (attempts === 1) {
-        throw new Error('maximum context length exceeded')
-      }
-      return {
-        text: 'compressed-ok',
-        toolCalls: [],
-        stopReason: 'stop',
-      }
-    },
-    compressContext: async () => {
-      compressed += 1
-      return true
-    },
-    buildVideoFrameFallbackMessages: async () => [],
-    assignFallbackMessages: () => {},
-  })
+  await assert.rejects(
+    orchestrator.requestToolLoopResponse({
+      useAnthropicProtocol: false,
+      hasVideoInputs: false,
+      session: {},
+      config: {},
+      baseUrl: 'https://api.openai.com/v1',
+      provider: {},
+      signal: new AbortController().signal,
+      callAnthropicWithTools: async () => {
+        throw new Error('unused')
+      },
+      callOpenAIWithTools: async () => {
+        attempts += 1
+        throw contextOverflowError
+      },
+      onBeforeRetry: (result, attempt) => {
+        retrySignals.push({ result, attempt })
+      },
+      buildVideoFrameFallbackMessages: async () => [],
+      assignFallbackMessages: () => {},
+    }),
+    (error) => error === contextOverflowError,
+  )
 
-  assert.equal(attempts, 2)
-  assert.equal(compressed, 1)
-  assert.equal(response.text, 'compressed-ok')
+  assert.equal(attempts, 1)
+  assert.deepEqual(retrySignals, [])
 })
 
 test('ExecutionLoopOrchestrator notifies the caller before retrying a model timeout', async () => {

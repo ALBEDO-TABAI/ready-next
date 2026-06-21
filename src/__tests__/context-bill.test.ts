@@ -21,6 +21,7 @@ test('bill byte counts equal UTF-8 byte length of each injected section', () => 
   assert.equal(bill.sections.L1_summary, Buffer.byteLength(l1, 'utf8'))
   assert.equal(bill.total, Buffer.byteLength(l0, 'utf8') + Buffer.byteLength(l1, 'utf8'))
   assert.deepEqual(bill.truncations, [])
+  assert.deepEqual(bill.truncationReasons, {})
 })
 
 test('empty sections are omitted from the bill', () => {
@@ -49,6 +50,7 @@ test('truncation marker flags the section', () => {
     { section: 'L0', text: 'whole' },
   ])
   assert.deepEqual(bill.truncations, ['L1_summary'])
+  assert.deepEqual(bill.truncationReasons, { L1_summary: 'section_budget' })
 })
 
 test('emitContextBill writes exactly one context_bill metric row', () => {
@@ -65,4 +67,5 @@ test('emitContextBill writes exactly one context_bill metric row', () => {
   assert.equal(events[0].scopeId, 'scope-5')
   assert.equal((events[0].sections as Record<string, number>).L0, Buffer.byteLength('常驻', 'utf8'))
   assert.equal(events[0].total, Buffer.byteLength('常驻', 'utf8'))
+  assert.deepEqual(events[0].truncationReasons, {})
 })

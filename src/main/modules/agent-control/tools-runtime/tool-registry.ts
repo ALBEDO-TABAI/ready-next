@@ -2,6 +2,7 @@ import { existsSync, readdirSync, readFileSync } from 'fs'
 import { join } from 'path'
 import type { ZodObject, ZodRawShape } from 'zod'
 import type { CapabilityGroupId } from '../../../../shared/ai-capability-groups'
+import { TOOL_ADMISSION_ERROR_KINDS } from '../contracts/error-kinds'
 import { getToolResourceTag } from './tool-parallelism-policy'
 import {
   buildExplicitNoSkillAuthorization,
@@ -1304,7 +1305,7 @@ export async function executeSkillActionViaToolGateway(
   if (!registryDefinition) {
     // Stage U PR U1.1 — top-level `tool_not_registered` errorKind (AGENTS.md §3).
     return makeChildGatewayError({
-      errorKind: 'tool_not_registered',
+      errorKind: TOOL_ADMISSION_ERROR_KINDS.toolNotRegistered.code,
       message: `Tool is not registered: ${toolName}`,
       detail: {
         toolName,

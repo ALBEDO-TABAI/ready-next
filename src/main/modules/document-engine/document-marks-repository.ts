@@ -1,4 +1,6 @@
 import { randomUUID } from 'crypto'
+import { existsSync } from 'fs'
+import { basename, dirname, sep } from 'path'
 import type {
   DocumentMarkDraft,
   DocumentMarkPatch,
@@ -30,6 +32,10 @@ interface RunResult {
   changes?: number
 }
 
+interface DocumentMarkPathRow {
+  document_path: string
+}
+
 function normalizeText(value: string | null | undefined, fallback = ''): string {
   const next = (value ?? '').trim()
   return next || fallback
@@ -53,6 +59,13 @@ function normalizeOrdinal(value: number | null | undefined): number | null {
 function normalizeProgress(value: number | null | undefined): number | null {
   if (!Number.isFinite(value)) return null
   return Math.max(0, Math.min(1, Number(value)))
+}
+
+function getMoveSuffix(documentPath: string): string | null {
+  const fileName = basename(documentPath)
+  const parentName = basename(dirname(documentPath))
+  if (!fileName || !parentName || parentName === sep) return null
+  return `${sep}${parentName}${sep}${fileName}`
 }
 
 function rowToRecord(row: DocumentMarkRow): DocumentMarkRecord {
@@ -79,17 +92,41 @@ function rowToRecord(row: DocumentMarkRow): DocumentMarkRecord {
 export class DocumentMarksRepository {
   constructor(private readonly db: DatabaseConnection) {}
 
+  private findMovedDocumentPaths(documentPath: string): string[] {
+    if (!existsSync(documentPath)) return []
+    const suffix = getMoveSuffix(documentPath)
+    if (!suffix) return []
+    const rows = this.db
+      .prepare(`
+        SELECT DISTINCT document_path
+        FROM document_marks
+        WHERE document_path != ?
+          AND document_path LIKE ?
+      `)
+      .all<DocumentMarkPathRow>(documentPath, `%${suffix}`)
+    return rows
+      .map((row) => normalizeText(row.document_path))
+      .filter((candidate) => (
+        candidate &&
+        candidate !== documentPath &&
+        candidate.endsWith(suffix) &&
+        !existsSync(candidate)
+      ))
+  }
+
   list(documentPath: string): DocumentMarkRecord[] {
     const normalizedPath = normalizeText(documentPath)
     if (!normalizedPath) return []
+    const paths = [normalizedPath, ...this.findMovedDocumentPaths(normalizedPath)]
+    const placeholders = paths.map(() => '?').join(', ')
     return this.db
       .prepare(`
         SELECT *
         FROM document_marks
-        WHERE document_path = ?
+        WHERE document_path IN (${placeholders})
         ORDER BY kind ASC, group_name ASC, sort_order ASC, updated_at DESC
       `)
-      .all<DocumentMarkRow>(normalizedPath)
+      .all<DocumentMarkRow>(...paths)
       .map(rowToRecord)
   }
 

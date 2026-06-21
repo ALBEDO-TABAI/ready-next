@@ -79,7 +79,7 @@ test('mode:selected with primitive NOT in allowedPrimitives → authorization_de
 test('invoker:host + skill_* + mode:none → bypasses authorization (host calls have their own admission)', async () => {
   // Host invokers (e.g. internal turn-engine probe) must not trip the
   // authorization gate even when authorization is mode:'none'. They
-  // continue through the legacy allowedToolNames gate.
+  // continue through the allowedToolNames gate.
   const context: Partial<ToolContext> = {
     allowedToolNames: new Set<string>(), // legacy gate will reject
     invoker: 'host',
@@ -88,9 +88,9 @@ test('invoker:host + skill_* + mode:none → bypasses authorization (host calls 
   }
   const output = await executeToolCall('skill_run_shell', { command: 'echo' }, context as ToolContext)
   const data = output.data || {}
-  // Falls through to legacy gate, NOT authorization_denied.
-  assert.equal(data.errorKind, 'host_unavailable', 'host invoker must NOT return authorization_denied')
-  assert.equal(data.reason, 'tool_restricted_this_turn')
+  // Falls through to allowedToolNames gate, NOT authorization_denied.
+  assert.equal(data.errorKind, 'tool_restricted_this_turn', 'host invoker must NOT return authorization_denied')
+  assert.equal(data.reason, undefined)
 })
 
 // ---------------------------------------------------------------------------
@@ -99,8 +99,8 @@ test('invoker:host + skill_* + mode:none → bypasses authorization (host calls 
 
 test('non-skill tool + mode:none → legacy allowedToolNames gate (not authorization_denied)', async () => {
   // Authorization only applies to `skill_*` tools. A document_* / browser_*
-  // tool with mode:'none' and missing allowedToolNames must still report
-  // the legacy `tool_restricted_this_turn`, not the new `authorization_denied`.
+  // tool with mode:'none' and missing allowedToolNames must report
+  // `tool_restricted_this_turn`, not `authorization_denied`.
   const context: Partial<ToolContext> = {
     allowedToolNames: new Set<string>(),
     invoker: 'model',
@@ -125,7 +125,7 @@ test('source: authorization check appears in tool-executor.ts BEFORE the allowed
     'utf8',
   )
   const authIdx = source.indexOf('checkSkillToolAuthorization(toolName, authorization, isPrimitive)')
-  const allowlistIdx = source.indexOf("reason: 'tool_restricted_this_turn'")
+  const allowlistIdx = source.indexOf('errorKind: TOOL_ADMISSION_ERROR_KINDS.toolRestrictedThisTurn.code')
   assert.ok(authIdx > 0, 'authorization check must exist')
   assert.ok(allowlistIdx > 0, 'tool_restricted_this_turn allowlist gate must exist')
   assert.ok(

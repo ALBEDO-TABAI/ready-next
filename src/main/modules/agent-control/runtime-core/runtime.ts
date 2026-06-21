@@ -34,11 +34,22 @@ import {
 } from '../../database'
 import { ReadyAgentOrchestrator } from './orchestrator'
 import { defaultSystemPrompt } from './agent-sdk-runtime'
+import {
+  buildManualSuspendProjectionPatch,
+  finalizeRunOutcome,
+  type RunMetaRepositoryLike,
+  writeRunCloseMetric,
+} from './run-finalizer'
 import { composePersonaSystemPrompt } from './persona-system-prompt'
 import { PromptAssemblyService } from '../prompt-assembly'
 import { selectScopeTaskIndexEntries } from '../session/daily-task-index-builder'
 import { selectFollowupTaskRefs } from '../intent-state-first'
 import { BeliefCardStore } from '../knowledge/belief-card-store'
+import type { MirrorDb } from '../knowledge/belief-card-mirror'
+import {
+  getSpecialistContentEditProposalStore,
+} from '../agents/specialist-content-edit-runtime'
+import type { SpecialistContentEditProposalStore } from '../agents/specialist-content-edit-proposals'
 import { RunCoordinator } from '../task-projection/run-coordinator'
 import { executeAgentSchedule, type ScheduleTriggerSource } from './schedule-execution'
 import type { DomainAdapter } from '../domain-adapters/domain-adapter'
@@ -71,6 +82,11 @@ import { defaultToolRegistry } from '../tools-runtime/tool-registry'
 import { ToolNameCollisionError } from '../tools-runtime/tool-registry-errors'
 import { RunProjection } from '../task-projection/run-projection'
 import { syncTaskProjection } from '../task-projection/task-projection-sync'
+import {
+  drainPendingProjectionSyncs,
+  isTerminalProjectionSyncPayload,
+  PendingProjectionSyncRepository,
+} from '../task-projection/projection-terminal-retry-ledger'
 import { reconcileTaskProjections } from '../task-projection/task-projection-reconciler'
 import { canResumeAsUserPoint, type ResumePointHandle } from '../contracts/resume-handle'
 import { deriveTaskProjectionCanResume } from '../task-projection/task-projection-resume'
@@ -111,19 +127,22 @@ import { SidecarManager } from '../sidecar-manager'
 import { MemoryRepository } from '../../repositories/memory-repository'
 import { MemoryLifecycleManager } from '../memory/memory-lifecycle'
 import { ReflectionService } from '../reflection-service'
+import { runUserPictureCasMerge } from '../maintenance/cas-merge'
 import { UserProfileRepository } from '../../repositories/user-profile-repository'
 import { AgentPersonalityRepository } from '../../repositories/agent-personality-repository'
 import { AppSettingsRepository } from '../../repositories/app-settings-repository'
 import { readAgentAutoNarrationContinuationSetting } from '../../settings-engine/agent-auto-narration-setting'
 import { readAgentSessionPrerouteMode } from '../../settings-engine/agent-session-preroute-setting'
 import { decideSessionPreroute, type PrerouteResult } from '../agents/session-preroute'
+import { buildSessionPrerouteTrace, pushSessionPrerouteTraceSafely, SessionPrerouteTraceRingBuffer } from '../agents/session-preroute-trace'
 import type { CapabilityRuntimeSnapshot } from '../../../../shared/ai-capability-runtime'
+import type { AgentSystemStudioPrerouteTrace, AgentSystemStudioRoutingSimulation } from '../../../../shared/agent-system-studio'
 import { ExternalMemoryProviderSlot } from '../memory/external-memory-provider-slot'
 import { decryptChannelConfig, encryptChannelConfig } from '../memory/secret-storage'
 import { ToolGateway } from '../tools-runtime/tool-gateway'
 import { buildCapabilityRuntimeSnapshot } from '../domain-adapters/capability-runtime-snapshot'
 import { TaskProjectionRepository } from '../../repositories/task-projection-repository'
-import { AgentRegistryRepository } from '../../repositories/agent-registry-repository'
+import { AgentRegistryRepository, MAIN_AGENT_ID } from '../../repositories/agent-registry-repository'
 import { RunMetaRepository } from '../task-projection/run-meta-repository'
 import { appendToolCapabilityLog } from '../../tools/tool-event-log'
 import {
@@ -148,6 +167,37 @@ import type {
   ScopeRunSummary
 } from '../contracts/types'
 import type { SessionRecallCapsule, SessionRecallHit } from '../../../../shared/session-recall'
+
+function buildStudioPrerouteActions(input: {
+  result: PrerouteResult
+  targetName: string | null
+  targetStatus: string
+}): AgentSystemStudioRoutingSimulation['actions'] {
+  const targetId = input.result.decision.targetAgentId
+  const targetLabel = input.targetName || targetId
+  const hasSpecialistHit = targetId !== MAIN_AGENT_ID && input.targetStatus === 'active' && input.result.effect !== 'none'
+  const hasPrecedentHit = hasSpecialistHit && input.result.decision.tier === 'precedent'
+  return [{
+    kind: 'use_once',
+    label: hasSpecialistHit ? `本次用 ${targetLabel}` : '本次用专项 agent',
+    description: hasSpecialistHit
+      ? '只把这次请求交给该专项 agent，不改变路由卡。'
+      : '当前样例没有命中可用专项 agent。',
+    enabled: hasSpecialistHit,
+  }, {
+    kind: 'always_route',
+    label: '总是路由这类',
+    description: hasPrecedentHit
+      ? '需要用户确认后才会让这类触发词长期生效。'
+      : '只有命中可用路由卡后，才能把这类请求设成长期路由。',
+    enabled: hasPrecedentHit,
+  }, {
+    kind: 'keep_main',
+    label: '留在主 agent',
+    description: '保持主 agent 处理这次请求，不启用专项分派。',
+    enabled: true,
+  }]
+}
 
 export interface UpsertChannelPayload {
   id?: string
@@ -385,6 +435,26 @@ export class AgentControlRuntime extends EventEmitter {
           .get(key) as { value: string } | undefined
         return row?.value || null
       }
+    },
+    pictureCasMerge: ({ userId, observations }) => {
+      const rawDb = this.db.getRawDb()
+      if (!rawDb) {
+        return {
+          decision: 'error',
+          reason: 'db_unavailable',
+          accepted: observations.length,
+          rejected: 0,
+          addedCount: 0,
+          droppedCount: 0,
+          mirrorSynced: false,
+        }
+      }
+      return runUserPictureCasMerge({
+        db: rawDb as never,
+        userId,
+        observations,
+        now: new Date(),
+      })
     }
   })
   private readonly promptAssembly = new PromptAssemblyService({
@@ -401,6 +471,7 @@ export class AgentControlRuntime extends EventEmitter {
         channelKey: this.toChannelKey(scope),
         sourceKind: scope.sourceKind,
         userId: scope.userId,
+        agent: scope.agent,
         limit: 2
       }),
     // EP1-X1a: lazy — taskProjectionStore is declared after this field, so we
@@ -420,6 +491,8 @@ export class AgentControlRuntime extends EventEmitter {
   private readonly runCoordinator: RunCoordinator
   private readonly runProjection: RunProjection
   private readonly taskProjectionStore = new TaskProjectionRepository(this.db)
+  private readonly pendingProjectionSyncs = new PendingProjectionSyncRepository(this.db)
+  private readonly sessionPrerouteTraces = new SessionPrerouteTraceRingBuffer()
   private knowledgeWatcher: KnowledgeWatcher | null = null
   private beliefCardStore: BeliefCardStore | null = null
   private readonly skillTaskRunRepository = new SkillTaskRunRepository(this.db)
@@ -454,6 +527,7 @@ export class AgentControlRuntime extends EventEmitter {
       lastBeatAt: new Date().toISOString()
     }
   }
+  private projectionSyncRetryDrainInFlight: Promise<void> | null = null
 
   constructor(agentManager: AgentManager, browserController?: BrowserController) {
     super()
@@ -622,6 +696,10 @@ export class AgentControlRuntime extends EventEmitter {
     return this.beliefCardStore
   }
 
+  getBeliefCardMirrorDb(): MirrorDb | null {
+    return this.db.getRawDb?.() as MirrorDb | null
+  }
+
   private getDomainAdapters(): ReadonlyArray<DomainAdapter> {
     return this.orchestrator.getDomainAdapters()
   }
@@ -643,6 +721,7 @@ export class AgentControlRuntime extends EventEmitter {
     taskEventBridge.registerProjectionSink(
       createTaskEventProofListener(createTaskProofSink(this.taskProjectionStore)),
     )
+    this.scheduleTerminalProjectionSyncRetryDrain('startup')
 
     // EP2-K6 — truth-source boundary: startup full sync (K2 handover) +
     // hand-edit watcher, both behind the rollback switch. Files are never
@@ -856,6 +935,10 @@ export class AgentControlRuntime extends EventEmitter {
     return this.agentRegistry
   }
 
+  getSpecialistContentEditProposalStore(): SpecialistContentEditProposalStore {
+    return getSpecialistContentEditProposalStore()
+  }
+
   applyKnowledgeSystemEnabled(enabled: boolean): void {
     const rawDb = this.db.getRawDb?.()
     if (!rawDb) return
@@ -875,6 +958,16 @@ export class AgentControlRuntime extends EventEmitter {
    *  with projection facts, active routing cards, and registry status). */
   evaluateSessionPreroute(firstMessage: string): PrerouteResult {
     const mode = readAgentSessionPrerouteMode(this.settingsRepository)
+    if (mode === 'off') {
+      return decideSessionPreroute({
+        firstMessage,
+        recentOwnedTasks: [],
+        routingCards: [],
+        isAgentActive: () => false,
+        mode,
+      })
+    }
+    const agents = this.agentRegistry.list()
     const recentOwnedTasks = this.taskProjectionStore.listRecentTasksForPreroute(10).map((record) => ({
       taskId: record.taskId,
       status: String(record.status),
@@ -883,18 +976,121 @@ export class AgentControlRuntime extends EventEmitter {
       blockerCategory: record.blockedReason ?? null,
       ownerAgentId: record.ownerAgentId ?? null,
     }))
-    const routingCards = (this.getBeliefCardStore()?.listRoutingCards() ?? []).map((card) => ({
+    const store = this.getBeliefCardStore()
+    const routingCards = (store?.listRoutingCards() ?? []).map((card) => ({
       relPath: card.relPath,
       targetAgentId: card.targetAgentId,
       triggers: card.triggers,
     }))
-    return decideSessionPreroute({
+    const result = decideSessionPreroute({
       firstMessage,
       recentOwnedTasks,
       routingCards,
       isAgentActive: (agentId) => this.agentRegistry.get(agentId)?.status === 'active',
       mode,
     })
+    pushSessionPrerouteTraceSafely({
+      sink: this.sessionPrerouteTraces,
+      id: `preroute-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      now: new Date(),
+      firstMessage,
+      mode,
+      result,
+      recentOwnedTasks,
+      getRoutingInventory: () => store?.listRoutingCardInventory(agents) ?? [],
+      isAgentActive: (agentId) => this.agentRegistry.get(agentId)?.status === 'active',
+    })
+    return result
+  }
+
+  /** P8g-8a — read-only Studio simulation. It reuses the preroute rules but
+   * deliberately does not push a trace, so typed samples never pollute the
+   * real recent-routing history. */
+  simulateSessionPrerouteForStudio(firstMessage: string): AgentSystemStudioRoutingSimulation {
+    const sample = String(firstMessage || '').trim()
+    const mode = readAgentSessionPrerouteMode(this.settingsRepository)
+    if (mode === 'off') {
+      const result = decideSessionPreroute({
+        firstMessage: sample,
+        recentOwnedTasks: [],
+        routingCards: [],
+        isAgentActive: () => false,
+        mode,
+      })
+      const targetStatus = 'missing'
+      return {
+        sample,
+        mode,
+        effect: result.effect,
+        decisionTier: result.decision.tier,
+        targetAgentId: result.decision.targetAgentId,
+        targetAgentName: null,
+        targetStatus,
+        matchedKeywords: [],
+        cardRelPath: null,
+        fallbackReason: result.decision.tier === 'fallback' ? result.decision.reason : null,
+        conflicts: result.decision.tier === 'fallback' ? (result.decision.conflicts ?? []) : [],
+        reasons: ['routing_off'],
+        actions: buildStudioPrerouteActions({ result, targetName: null, targetStatus }),
+      }
+    }
+    const agents = this.agentRegistry.list()
+    const recentOwnedTasks = this.taskProjectionStore.listRecentTasksForPreroute(10).map((record) => ({
+      taskId: record.taskId,
+      status: String(record.status),
+      interactionState: record.interactionState ?? null,
+      summary: record.taskSummary ?? null,
+      blockerCategory: record.blockedReason ?? null,
+      ownerAgentId: record.ownerAgentId ?? null,
+    }))
+    const store = this.getBeliefCardStore()
+    const routingCards = (store?.listRoutingCards() ?? []).map((card) => ({
+      relPath: card.relPath,
+      targetAgentId: card.targetAgentId,
+      triggers: card.triggers,
+    }))
+    const result = decideSessionPreroute({
+      firstMessage: sample,
+      recentOwnedTasks,
+      routingCards,
+      isAgentActive: (agentId) => this.agentRegistry.get(agentId)?.status === 'active',
+      mode,
+    })
+    const trace = buildSessionPrerouteTrace({
+      id: 'studio-routing-simulation',
+      now: new Date(),
+      firstMessage: sample,
+      mode,
+      result,
+      recentOwnedTasks,
+      routingInventory: store?.listRoutingCardInventory(agents) ?? [],
+      isAgentActive: (agentId) => this.agentRegistry.get(agentId)?.status === 'active',
+    })
+    const target = this.agentRegistry.get(result.decision.targetAgentId)
+    const targetStatus = target?.status ?? 'missing'
+    const matchedKeywords = result.decision.tier === 'precedent' ? result.decision.matchedKeywords : []
+    const cardRelPath = result.decision.tier === 'precedent' ? result.decision.cardRelPath : null
+    const fallbackReason = result.decision.tier === 'fallback' ? result.decision.reason : null
+    const conflicts = result.decision.tier === 'fallback' ? (result.decision.conflicts ?? []) : []
+    return {
+      sample,
+      mode,
+      effect: result.effect,
+      decisionTier: result.decision.tier,
+      targetAgentId: result.decision.targetAgentId,
+      targetAgentName: target?.name ?? null,
+      targetStatus,
+      matchedKeywords,
+      cardRelPath,
+      fallbackReason,
+      conflicts,
+      reasons: trace.reasons,
+      actions: buildStudioPrerouteActions({ result, targetName: target?.name ?? null, targetStatus }),
+    }
+  }
+
+  listRecentSessionPrerouteTraces(limit = 10): AgentSystemStudioPrerouteTrace[] {
+    return this.sessionPrerouteTraces.listRecent(limit)
   }
 
   private hasActiveNarrationContinuationRun(): boolean {
@@ -1056,6 +1252,11 @@ export class AgentControlRuntime extends EventEmitter {
     return refreshed.map((record) => deriveTaskProjectionCanResume(record))
   }
 
+  listTaskProjectionsByOwner(ownerAgentId: string, limit = 20): TaskProjectionRecord[] {
+    const records = this.taskProjectionStore.listByOwnerAgent(ownerAgentId, limit) as TaskProjectionRecord[]
+    return records.map((record) => deriveTaskProjectionCanResume(record))
+  }
+
   getTaskProjection(taskId: string): TaskProjectionRecord | null {
     const normalizedTaskId = String(taskId || '').trim()
     if (!normalizedTaskId) return null
@@ -1073,6 +1274,7 @@ export class AgentControlRuntime extends EventEmitter {
     channelKey?: string
     sourceKind?: ConversationSourceKind
     userId?: string
+    agent?: string
     hasAttachments?: boolean
     currentScopeId?: string
     limit?: number
@@ -1084,6 +1286,7 @@ export class AgentControlRuntime extends EventEmitter {
     channelKey?: string
     sourceKind?: ConversationSourceKind
     userId?: string
+    agent?: string
     hasAttachments?: boolean
     currentScopeId?: string
     limit?: number
@@ -1589,6 +1792,7 @@ export class AgentControlRuntime extends EventEmitter {
               | string
               | Array<{ type: string; text?: string; base64?: string; mimeType?: string }>,
             requestId: payload.requestId,
+            sourceMessageId: payload.userMessage?.id ?? null,
             taskId: payload.taskId,
             parentTaskId: payload.parentTaskId,
             parentStepId: payload.parentStepId,
@@ -1641,8 +1845,6 @@ export class AgentControlRuntime extends EventEmitter {
     if (!target) {
       return { success: false, error: 'Conversation scope not found' }
     }
-    this.orchestrator.kill(target.scope.agent, target.scope.id)
-
     const restored = restoreContinuationTaskBudgetRuntime({
       taskType: target.projection?.taskType || 'short_task',
       projectionBudget: target.projection?.budget || null,
@@ -1655,49 +1857,120 @@ export class AgentControlRuntime extends EventEmitter {
         frozen: true,
       }
       : null
-    const resolvedTaskId = target.projection?.taskId || target.scopeRunSummary?.taskId || payload.taskId
-    const resolvedTaskType = target.projection?.taskType || target.scopeRunSummary?.taskType || 'short_task'
+    const resolvedTaskId =
+      target.projection?.taskId
+      || target.scopeRunSummary?.taskId
+      || target.scopeRunSummary?.taskProjectionId
+      || payload.taskId
+      || null
+    if (!resolvedTaskId) {
+      return { success: false, error: 'Task projection not found' }
+    }
+    const stopped = this.orchestrator.interruptForSuspend(target.scope.agent, target.scope.id)
+    const resolvedRunId =
+      stopped.runId
+      || target.projection?.runId
+      || target.scopeRunSummary?.runId
+      || null
+    if (!resolvedRunId) {
+      return { success: false, error: 'Active run not found' }
+    }
     const timestamp = new Date().toISOString()
-    this.emitScopeRunEvent({
-      type: 'updated',
-      scopeId: target.scope.id,
-      agent: target.scope.agent,
-      runId: target.projection?.runId,
+    const projectionPatch = buildManualSuspendProjectionPatch({
+      projection: target.projection,
+      taskTitle: target.projection?.taskTitle ?? target.scopeRunSummary?.taskTitle ?? null,
+      taskSummary: target.projection?.taskSummary ?? target.scopeRunSummary?.taskSummary ?? null,
+      steps: target.projection?.steps ?? [],
+      currentStepId: target.projection?.currentStepId ?? target.scopeRunSummary?.currentStepId ?? null,
+      continuationRef: target.projection?.continuationRef ?? target.scopeRunSummary?.taskContinuation ?? null,
+      budget: target.projection?.budget ?? null,
+      budgetUsagePercent: runtime ? getBudgetUsagePercent(runtime) : target.projection?.budgetUsagePercent ?? null,
+      budgetWarningLevel: runtime?.warningLevel ?? target.projection?.budgetWarningLevel ?? null,
+      recoveryHistory: target.projection?.recoveryHistory ?? [],
+      updatedAt: timestamp,
+    })
+    await finalizeRunOutcome({
+      kind: 'interrupted',
+      runId: resolvedRunId,
       taskId: resolvedTaskId,
-      phase: 'takeover',
-      taskType: resolvedTaskType,
-      interactionState: 'suspended',
-      taskTitle: target.projection?.taskTitle || target.scopeRunSummary?.taskTitle || undefined,
-      taskSummary: target.projection?.taskSummary || target.scopeRunSummary?.taskSummary || undefined,
-      steps: (target.projection?.steps || target.scopeRunSummary?.steps || []) as any,
-      currentStepId: target.projection?.currentStepId || target.scopeRunSummary?.currentStepId || null,
-      waitingFor: 'none',
-      resumableActions: ['continue', 'cancel'],
-      blockedReason: '任务已暂停，等待继续。',
-      taskContinuation: target.projection?.continuationRef || target.scopeRunSummary?.taskContinuation || undefined,
-      taskProjectionId: resolvedTaskId,
-      executionDiagnostics: runtime
-        ? {
-          taskId: resolvedTaskId,
-          taskBudgetRuntime: runtime,
-          budget: {
-            ...runtime.budget,
-            ...runtime.usage,
-          },
-          stepBudget: runtime.stepBudget
-            ? {
-              stepId: runtime.stepBudget.stepId || null,
-              maxIterations: runtime.stepBudget.maxIterations,
-              remainingIterations: runtime.stepBudget.remainingIterations,
-            }
-            : null,
-          budgetUsagePercent: getBudgetUsagePercent(runtime),
-          budgetWarningLevel: runtime.warningLevel,
-        }
-        : null,
-      timestamp,
+      scopeId: target.scope.id,
+      durationMs: 1,
+      toolCallsUsed: 0,
+      initiator: 'manual_suspend',
+      terminalReason: 'manual_suspend',
+      projectionPatch,
+      taskBudgetRuntime: runtime,
+    }, {
+      runMetaRepository: this.getRunMetaRepository() as unknown as RunMetaRepositoryLike | null,
+      taskProjectionStore: this.getTaskProjectionStoreForFinalize(),
+      writeProjectionTerminalPatch: async (patch) => {
+        if (!patch) return
+        this.taskProjectionStore.update(
+          resolvedTaskId,
+          patch as Partial<TaskProjectionRecord>,
+          { reasonHint: 'update' },
+        )
+      },
+      writeRunCloseMetric,
     })
     return { success: true }
+  }
+
+  async reportInfrastructureTimeout(payload: {
+    scopeId: string
+    requestId: string
+    elapsedMs?: number
+  }): Promise<{
+    success: boolean
+    state?: 'cancel_requested' | 'stale' | 'not_found'
+    error?: string
+    errorKind?: string
+    activeRunId?: string | null
+  }> {
+    const scopeId = String(payload.scopeId || '').trim()
+    const requestId = String(payload.requestId || '').trim()
+    if (!scopeId || !requestId) {
+      return {
+        success: false,
+        state: 'not_found',
+        error: 'scopeId and requestId are required',
+        errorKind: 'invalid_payload',
+      }
+    }
+
+    const scope = this.getConversationScope(scopeId)
+    if (!scope) {
+      return {
+        success: false,
+        state: 'not_found',
+        error: `Conversation scope not found: ${scopeId}`,
+        errorKind: 'scope_missing',
+      }
+    }
+
+    const result = this.orchestrator.interruptActiveRunIfMatches(
+      scope.agent,
+      scope.id,
+      requestId,
+      'process_exit',
+    )
+    logAgentMetric('renderer_infrastructure_timeout_main_report', {
+      scopeId,
+      requestId,
+      elapsedMs: Number.isFinite(Number(payload.elapsedMs)) ? Number(payload.elapsedMs) : null,
+      state: result.state,
+      activeRunId: result.activeRunId || result.runId || null,
+    })
+
+    if (result.state === 'stale') {
+      return {
+        success: true,
+        state: result.state,
+        errorKind: 'stale_request',
+        activeRunId: result.activeRunId || null,
+      }
+    }
+    return { success: true, state: result.state }
   }
 
   async resumeRun(payload: {
@@ -3223,28 +3496,88 @@ export class AgentControlRuntime extends EventEmitter {
       // renderer can show a diagnostic instead of pretending sync went
       // through. See plan §3 U2.1 / audit §3.3 fire-and-forget remediation.
       void syncTaskProjection(this.taskProjectionStore, summary, payload, projectionTruth).catch((error) => {
-        const reason = error instanceof Error ? error.message : String(error)
-        const failurePayload = {
-          scopeId: summary.scopeId,
-          taskId: payload.taskId || summary.taskId || null,
-          reason,
-          timestamp: new Date().toISOString(),
-        }
-        console.error('[AgentControlRuntime] Failed to sync task projection:', error)
-        logAgentMetric('projection.sync_failed', failurePayload)
-        // Emit on the runtime EventEmitter so claude-bridge/ipc-handler.ts
-        // can forward it to the renderer alongside scopeRunEvent. The
-        // emit is wrapped because we are already inside a fire-and-forget
-        // catch — re-throwing would surface as unhandledRejection.
-        try {
-          this.emit('projectionSyncFailed', failurePayload)
-        } catch (emitErr) {
-          // silent-catch: emit failure is purely an observability degradation; the runtime must keep running.
-          console.error('[AgentControlRuntime] projectionSyncFailed emit failed:', emitErr)
-        }
+        this.handleProjectionSyncFailure(summary, payload, projectionTruth, error)
       })
     }
     return summary
+  }
+
+  private handleProjectionSyncFailure(
+    summary: ScopeRunSummary,
+    payload: ScopeRunEventPayload,
+    projectionTruth: ProjectionTruthSnapshot | null | undefined,
+    error: unknown,
+  ): void {
+    const reason = error instanceof Error ? error.message : String(error)
+    const failurePayload = {
+      scopeId: summary.scopeId,
+      taskId: payload.taskId || summary.taskId || null,
+      reason,
+      timestamp: new Date().toISOString(),
+    }
+    console.error('[AgentControlRuntime] Failed to sync task projection:', error)
+    logAgentMetric('projection.sync_failed', failurePayload)
+    // Emit on the runtime EventEmitter so claude-bridge/ipc-handler.ts
+    // can forward it to the renderer alongside scopeRunEvent. The emit is
+    // wrapped because this path already runs inside a fire-and-forget catch.
+    try {
+      this.emit('projectionSyncFailed', failurePayload)
+    } catch (emitErr) {
+      // silent-catch: emit failure is purely an observability degradation; the runtime must keep running.
+      console.error('[AgentControlRuntime] projectionSyncFailed emit failed:', emitErr)
+    }
+    if (!isTerminalProjectionSyncPayload(summary)) return
+    try {
+      this.pendingProjectionSyncs.upsertPending({
+        summary,
+        eventPayload: payload,
+        projectionTruth,
+        error,
+      })
+      this.scheduleTerminalProjectionSyncRetryDrain('terminal_sync_failed')
+    } catch (enqueueErr) {
+      logAgentMetric('projection.sync_retry_enqueue_failed', {
+        scopeId: summary.scopeId,
+        taskId: payload.taskId || summary.taskId || null,
+        reason: enqueueErr instanceof Error ? enqueueErr.message : String(enqueueErr),
+      })
+      console.error('[AgentControlRuntime] Failed to enqueue terminal projection sync retry:', enqueueErr)
+    }
+  }
+
+  private scheduleTerminalProjectionSyncRetryDrain(reason: string): void {
+    if (this.projectionSyncRetryDrainInFlight) return
+    this.projectionSyncRetryDrainInFlight = this.drainTerminalProjectionSyncRetries(reason)
+      .catch((error) => {
+        logAgentMetric('projection.sync_retry_drain_failed', {
+          reason: error instanceof Error ? error.message : String(error),
+          source: reason,
+        })
+        console.error('[AgentControlRuntime] terminal projection sync retry drain failed:', error)
+      })
+      .finally(() => {
+        this.projectionSyncRetryDrainInFlight = null
+      })
+  }
+
+  private async drainTerminalProjectionSyncRetries(reason: string): Promise<void> {
+    await drainPendingProjectionSyncs({
+      repository: this.pendingProjectionSyncs,
+      sync: async (entry) => {
+        await syncTaskProjection(
+          this.taskProjectionStore,
+          entry.summary,
+          entry.eventPayload,
+          entry.projectionTruth,
+        )
+      },
+      onMetric: (metric) => {
+        logAgentMetric(metric.name, {
+          ...metric.payload,
+          source: reason,
+        })
+      },
+    })
   }
 
   private recordRunProjectionEvent(payload: ScopeRunEventPayload, projectionTruth?: ProjectionTruthSnapshot | null): ScopeRunSummary | null {
@@ -3720,11 +4053,6 @@ export class AgentControlRuntime extends EventEmitter {
         content: msg.content
       }))
 
-      // Skip reflection for very short conversations
-      if (messages.length < 2) {
-        return null
-      }
-
       // Run reflection
       const result = await this.reflectionService.reflectOnConversation({
         scope,
@@ -3735,6 +4063,18 @@ export class AgentControlRuntime extends EventEmitter {
       return result.memoryCapture || null
     } catch (error) {
       console.error('[Runtime] Failed to reflect on conversation:', error)
+      logAgentMetric('reflection_outcome', {
+        scopeId: scope.id,
+        agent: scope.agent,
+        decision: 'error',
+        reason: error instanceof Error ? error.message : String(error),
+        preferences: 0,
+        accepted: null,
+        rejected: null,
+        addedCount: null,
+        droppedCount: null,
+        summaryKept: false,
+      })
       return null
     }
   }

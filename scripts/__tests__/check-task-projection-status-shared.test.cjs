@@ -128,3 +128,33 @@ test('gate fails when migration 043 is missing', (t) => {
   assert.equal(r.status, 1)
   assert.match(r.stderr, /migration_missing/)
 })
+
+test('gate allows task step done status inside reconciler step patches', (t) => {
+  const root = makeHarnessRoot(t)
+  writeValidHarness(root)
+  writeFile(root, 'src/main/modules/agent-control/task-projection/task-projection-reconciler.ts', `
+function patchParentStepsFromCompletedChild(record: any, childRunId: string, now: string): TaskProjectionRecord['steps'] {
+  return record.steps.map((step: any) => {
+    if (step.id !== childRunId) return step
+    return {
+      ...step,
+      status: 'done',
+      updatedAt: now,
+    }
+  })
+}
+`)
+  const r = runIn(root)
+  assert.equal(r.status, 0, r.stdout + r.stderr)
+})
+
+test('gate still fails when reconciler writes old projection terminal status', (t) => {
+  const root = makeHarnessRoot(t)
+  writeValidHarness(root)
+  writeFile(root, 'src/main/modules/agent-control/task-projection/task-projection-reconciler.ts', `
+export const target = { status: 'done' }
+`)
+  const r = runIn(root)
+  assert.equal(r.status, 1)
+  assert.match(r.stderr, /reconciler_old_status_write/)
+})

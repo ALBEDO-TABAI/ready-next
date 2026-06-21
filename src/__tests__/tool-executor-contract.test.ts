@@ -167,7 +167,7 @@ test('Stage U U1.1: tool-executor returns errorKind:tool_not_registered (top-lev
   // `errorKind`. AGENTS.md §3 requires mutual exclusivity with `authorization_denied`.
   assert.match(
     source,
-    /errorKind: 'tool_not_registered'/,
+    /errorKind:\s*TOOL_ADMISSION_ERROR_KINDS\.toolNotRegistered\.code/,
     'tool_not_registered must be the top-level errorKind for fabricated tool names (U1.1)',
   )
   // The registration check ordering comment must remain (it documents the contract).
@@ -183,8 +183,8 @@ test('Stage 4 W0: tool-runtime preflight rejects unallowed tools as tool_restric
   const source = readWorkspaceFile('src/main/modules/agent-control/tools-runtime/tool-runtime.ts')
   assert.match(
     source,
-    /reason: 'tool_restricted_this_turn'/,
-    'tool-runtime preflight must keep tool_restricted_this_turn errorKind for non-skill tools after W3',
+    /errorKind:\s*TOOL_ADMISSION_ERROR_KINDS\.toolRestrictedThisTurn\.code/,
+    'tool-runtime preflight must keep top-level tool_restricted_this_turn for non-skill tools after W3',
   )
   assert.match(
     source,

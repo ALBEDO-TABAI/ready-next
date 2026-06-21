@@ -158,6 +158,18 @@ test('string-content messages pass through unchanged even when capability off', 
   assert.equal(out.filtered[1].content, 'another text')
 })
 
+test('non-message history items pass through unchanged even when capability off', () => {
+  const item = {
+    type: 'function_call_output',
+    call_id: 'call-prev',
+    output: 'previous tool output',
+  } as unknown as CapabilityMessage
+  const out = sanitizeHistoricalMessagesByCapability([item], VISION_OFF)
+  assert.equal(out.removedImageBlocks, 0)
+  assert.equal(out.removedVideoBlocks, 0)
+  assert.deepEqual(out.filtered[0], item)
+})
+
 test('non-content top-level fields are tunneled untouched (tool_calls, reasoning_content, providerData)', () => {
   const messages: CapabilityMessage[] = [
     {

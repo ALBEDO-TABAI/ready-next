@@ -2720,9 +2720,13 @@ export class SkillsRuntimeManager {
   }
 
   createSchedule(request: CreateSkillScheduleRequest): SkillScheduleRecord {
-    const knownSkill = this.listSkills().some((skill) => skill.id === request.skillId)
-    if (!knownSkill) {
+    const skill = this.listSkills().find((item) => item.id === request.skillId)
+    if (!skill) {
       throw new Error(`Unknown skill: ${request.skillId}`)
+    }
+    const knownAction = skill.actions.some((action) => action.name === request.action)
+    if (!knownAction) {
+      throw new Error(`Unknown action: ${request.action}`)
     }
 
     const db = this.getRawDatabase()
@@ -2922,7 +2926,7 @@ export class SkillsRuntimeManager {
   private async runScheduledTask(schedule: SkillScheduleRow): Promise<void> {
     try {
       const params = this.parseJson<Record<string, unknown>>(schedule.params_json || '{}', {})
-      await this.runSkill({
+      const result = await this.runSkill({
         skillId: schedule.skill_id,
         action: schedule.action,
         params,
@@ -2932,6 +2936,12 @@ export class SkillsRuntimeManager {
       const db = this.getRawDatabase()
       if (!db) return
       const now = Date.now()
+      if (!result.success) {
+        const retryRunAt = new Date(now + 5 * 60_000).toISOString()
+        db.prepare('UPDATE skills_schedules SET next_run_at = ?, updated_at = ? WHERE id = ?')
+          .run(retryRunAt, new Date(now).toISOString(), schedule.id)
+        return
+      }
       const nextRunAt = new Date(now + Math.max(1, schedule.interval_minutes) * 60_000).toISOString()
       db.prepare(`
         UPDATE skills_schedules

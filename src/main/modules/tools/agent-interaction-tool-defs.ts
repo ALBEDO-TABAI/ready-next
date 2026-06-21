@@ -1,10 +1,9 @@
 /**
  * LLM-facing tool defs for the `agent_interaction` capability group.
  *
- * Single tool today: `ask_user_questions`. The schema is hand-authored to
- * keep the JSONSchema description prose under tight control — derivation
- * via `zodObjectToParamList` would lose the per-property descriptions on
- * the nested questions[] item and the `kind` enum constraints we want to
+ * Schemas are hand-authored to keep the JSONSchema description prose under
+ * tight control — derivation via `zodObjectToParamList` would lose the
+ * per-property descriptions on nested items and enum constraints we want to
  * surface verbatim to the model.
  *
  * Description is the load-bearing piece: it must instruct the model WHEN
@@ -21,6 +20,7 @@ import {
 export const AGENT_INTERACTION_TOOL_NAMES: readonly string[] = [
   'ask_user_questions',
   'agent_propose_handoff',
+  'propose_specialist_blueprint',
 ] as const
 
 const ASK_USER_QUESTIONS_DESCRIPTION = [
@@ -92,7 +92,7 @@ const ASK_USER_QUESTIONS_INPUT_SCHEMA = {
 // EP3-A4 — handoff proposal. M4 advisory: proposes only, executes no
 // external action; adoption is ALWAYS a user click on the card.
 const PROPOSE_HANDOFF_DESCRIPTION = [
-  '向用户提议把当前任务转办给一个已存在的专项 agent，弹出一张转办建议卡（采纳/新会话接手/拒绝）。这是建议性工具：你只能提议，采纳永远由用户点击决定，不存在无确认自动转办。',
+  '向用户提议把当前任务转办给一个已存在的专项 agent，弹出一张转办建议卡（采纳当前会话继续/拒绝）。这是建议性工具：你只能提议，采纳永远由用户点击决定，不存在无确认自动转办。',
   '',
   '何时使用：主 agent 会话的注入区列出了可转办的专项 agent，且当前请求明显落在某个专项 agent 的 charter 范围内。',
   '',
@@ -132,6 +132,191 @@ const PROPOSE_HANDOFF_INPUT_SCHEMA = {
   additionalProperties: false,
 } as const
 
+const PROPOSE_SPECIALIST_BLUEPRINT_DESCRIPTION = [
+  '把用户「想要某类专项 agent / 智能体」的自然语言请求草拟成一份专项 agent 蓝图，并放入 Agent System Studio 等待用户确认。',
+  '',
+  '何时使用：用户明确说想创建、新建、需要、准备一个某类型专项 agent，且你能从对话里整理出工作范围、非目标、常见任务、输入、输出、初始规则和风险边界。',
+  '',
+  '专业访谈纪律：',
+  '- 如果用户只给出类型名（例如「我要一个 xxx 类型的专项 agent」），但没有说明稳定工作范围、成功标准、非目标、主/专项分工、输入输出或工具/记忆边界，先调用 ask_user_questions，不要直接编造完整蓝图。',
+  '- 访谈一次最多三问：1) 它长期服务的工作对象/场景是什么、一次做好怎样算完成、最重要的输出样式是什么；2) 哪些事不交给它、主 agent 保留什么判断、哪些例子适合或不适合交给它；3) 它需要哪些启动输入、初始知识/证据来源，以及浏览器/写入/外发/长期记忆哪些必须确认或禁止。',
+  '- 这三问对应 P8g-9b 专业访谈合同：workScope、boundaryExamples、inputsKnowledgeTools。不要把它们合成一道大作文题。',
+  '- 访谈目标不是填字段，而是得到一份能写出 P8g-9c foundation pack 的专业基础设计：charter、RULES、FOUNDATION、role persona、memory/profile policy、tool boundaries、routing triggers 和 lifecycle。',
+  '- 用户回答后，再把答案补进本工具字段；原始 user_request_verbatim 仍必须保留用户最初那句话，不能替换成访谈总结。',
+  '',
+  '硬性约束：',
+  '- 这个工具只草拟 blueprint，不创建 agent，不激活路由，不转移任务归属。',
+  '- user_request_verbatim 必须逐字复制用户原话中的片段，禁止摘要或改写。',
+  '- specialist_id 必须是小写 slug（例 visual-researcher / script-doctor），不要用中文、空格或标题文本。',
+  '- routing_triggers 只是候选触发词；确认前不会生效。',
+  '- 如果已经有足够上下文但仍缺局部字段，可提交蓝图让 admission 返回 needs_clarification；不要伪造用户没有表达过的硬需求。',
+  '- 如果这个工具返回 needs_clarification，并给出 ask_user_questions 参数，下一步先调用 ask_user_questions；用户回答后把答案补回对应字段，再重新调用本工具。',
+  '',
+  '不要使用：用户只是问「专项 agent 是什么」、只是讨论架构、或只是把当前任务转给已存在 agent（那应使用 agent_propose_handoff）。',
+].join('\n')
+
+const KNOWLEDGE_SEED_ITEM_SCHEMA = {
+  type: 'object',
+  properties: {
+    title: {
+      type: 'string',
+      description: '知识种子标题，1-120 字符。',
+    },
+    body: {
+      type: 'string',
+      description: '可迁移进该专项 agent 的初始知识、偏好或经验，1-2000 字符。',
+    },
+    evidence_refs: {
+      type: 'array',
+      items: { type: 'string' },
+      description: '可选引用，只放路径、消息 id、卡片 slug 等引用，不转述长内容。',
+    },
+  },
+  required: ['title', 'body'],
+  additionalProperties: false,
+} as const
+
+const TOOL_BOUNDARY_SCHEMA = {
+  type: 'object',
+  properties: {
+    mode: {
+      type: 'string',
+      enum: ['allow', 'deny', 'confirm'],
+      description: '该工具类别的默认边界：allow = 可直接用；deny = 禁用；confirm = 使用前需要用户确认。',
+    },
+    notes: {
+      type: 'string',
+      description: '该边界的具体说明，写清楚什么情况下允许、拒绝或需要确认。',
+    },
+  },
+  required: ['mode', 'notes'],
+  additionalProperties: false,
+} as const
+
+const PROPOSE_SPECIALIST_BLUEPRINT_INPUT_SCHEMA = {
+  type: 'object',
+  properties: {
+    specialist_id: {
+      type: 'string',
+      description: '拟创建专项 agent 的小写 slug，例如 visual-researcher；代码会再次归一化。',
+    },
+    display_name: {
+      type: 'string',
+      description: '展示名，例如「视觉研究专项 Agent」。',
+    },
+    charter: {
+      type: 'string',
+      description: '职责范围说明，必须具体到能判断什么该交给它、什么不该交给它。',
+    },
+    intended_domain: {
+      type: 'string',
+      description: '聚焦领域，例如「视觉参考研究」「短视频脚本诊断」。',
+    },
+    role_persona: {
+      type: 'string',
+      description: '该专项 agent 的角色、判断风格和工作姿态，避免只是空泛职责名。',
+    },
+    non_goals: {
+      type: 'array',
+      items: { type: 'string' },
+      description: '明确非目标，避免变成全能 agent。',
+    },
+    recurring_tasks: {
+      type: 'array',
+      items: { type: 'string' },
+      description: '该专项 agent 会反复处理的任务类型。',
+    },
+    required_inputs: {
+      type: 'array',
+      items: { type: 'string' },
+      description: '启动工作前需要用户或上下文提供的输入。',
+    },
+    expected_outputs: {
+      type: 'array',
+      items: { type: 'string' },
+      description: '它应该产出的具体交付物。',
+    },
+    suitable_task_examples: {
+      type: 'array',
+      items: { type: 'string' },
+      description: '适合交给该专项 agent 的任务例子，用来帮助主 agent 和用户判断边界。',
+    },
+    unsuitable_task_examples: {
+      type: 'array',
+      items: { type: 'string' },
+      description: '不适合交给该专项 agent 的任务例子，避免职责外扩。',
+    },
+    main_vs_specialist_split: {
+      type: 'string',
+      description: '主 agent 与该专项 agent 的分工：主 agent 保留什么，该专项 agent 接什么。',
+    },
+    routing_triggers: {
+      type: 'array',
+      items: { type: 'string' },
+      description: '候选触发词，最多 8 个；确认前不参与路由。',
+    },
+    seed_rules_text: {
+      type: 'string',
+      description: '初始 RULES 文档草稿，包含行为规则、工作流、边界。',
+    },
+    knowledge_seeds: {
+      type: 'array',
+      items: KNOWLEDGE_SEED_ITEM_SCHEMA,
+      description: '可选：初始知识种子。',
+    },
+    tool_boundaries: {
+      type: 'object',
+      properties: {
+        browser: TOOL_BOUNDARY_SCHEMA,
+        write: TOOL_BOUNDARY_SCHEMA,
+        external_send: TOOL_BOUNDARY_SCHEMA,
+        long_memory: TOOL_BOUNDARY_SCHEMA,
+      },
+      required: ['browser', 'write', 'external_send', 'long_memory'],
+      additionalProperties: false,
+      description: '浏览器、写入、外发和长期记忆的工具边界。',
+    },
+    tool_safety_notes: {
+      type: 'string',
+      description: '工具、浏览器、外发、隐私、权限等安全边界说明。',
+    },
+    memory_profile_policy: {
+      type: 'string',
+      description: '该专项 agent 能记住什么、不能记住什么，以及写入长期画像前需要什么确认。',
+    },
+    lifecycle_notes: {
+      type: 'string',
+      description: '该专项 agent 何时需要更新、合并、退休或重新确认职责。',
+    },
+    user_request_verbatim: {
+      type: 'string',
+      description: '用户原话逐字片段，必须直接复制，禁止转述。',
+    },
+  },
+  required: [
+    'specialist_id',
+    'display_name',
+    'charter',
+    'intended_domain',
+    'role_persona',
+    'non_goals',
+    'recurring_tasks',
+    'required_inputs',
+    'expected_outputs',
+    'suitable_task_examples',
+    'unsuitable_task_examples',
+    'main_vs_specialist_split',
+    'routing_triggers',
+    'seed_rules_text',
+    'tool_boundaries',
+    'tool_safety_notes',
+    'memory_profile_policy',
+    'lifecycle_notes',
+    'user_request_verbatim',
+  ],
+  additionalProperties: false,
+} as const
+
 export function getAgentInteractionAnthropicTools(): Array<Record<string, unknown>> {
   return [
     normalizeAnthropicToolSchema({
@@ -143,6 +328,11 @@ export function getAgentInteractionAnthropicTools(): Array<Record<string, unknow
       name: 'agent_propose_handoff',
       description: PROPOSE_HANDOFF_DESCRIPTION,
       input_schema: PROPOSE_HANDOFF_INPUT_SCHEMA,
+    }),
+    normalizeAnthropicToolSchema({
+      name: 'propose_specialist_blueprint',
+      description: PROPOSE_SPECIALIST_BLUEPRINT_DESCRIPTION,
+      input_schema: PROPOSE_SPECIALIST_BLUEPRINT_INPUT_SCHEMA,
     }),
   ]
 }
@@ -163,6 +353,14 @@ export function getAgentInteractionOpenAITools(): Array<Record<string, unknown>>
         name: 'agent_propose_handoff',
         description: PROPOSE_HANDOFF_DESCRIPTION,
         parameters: PROPOSE_HANDOFF_INPUT_SCHEMA,
+      },
+    }),
+    normalizeOpenAIToolSchema({
+      type: 'function',
+      function: {
+        name: 'propose_specialist_blueprint',
+        description: PROPOSE_SPECIALIST_BLUEPRINT_DESCRIPTION,
+        parameters: PROPOSE_SPECIALIST_BLUEPRINT_INPUT_SCHEMA,
       },
     }),
   ]

@@ -1,6 +1,7 @@
-import { existsSync, mkdirSync, renameSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join, resolve, sep } from 'node:path'
 import { MAIN_AGENT_ID, type AgentRegistryRecord } from '../../repositories/agent-registry-repository'
+import type { SpecialistAgentBlueprint, SpecialistBlueprintKnowledgeSeed } from '../../../../shared/agent-specialist-blueprint'
 import {
   BeliefCardStore,
   isAllowedCardPath,
@@ -9,12 +10,18 @@ import {
   type BeliefCard,
   type BeliefCardFrontmatter,
 } from '../knowledge/belief-card-store'
+import { evaluateSpecialistBlueprintAdmission } from './specialist-blueprint-admission'
+import {
+  assertSpecialistBlueprintQualityPasses,
+  renderSpecialistFoundationMarkdown,
+} from './specialist-blueprint-quality'
 
 export const DERIVED_AGENT_ID = /^[a-z0-9][a-z0-9._-]*$/
 const EVIDENCE_DATE_RE = /\b20\d{2}-\d{2}-\d{2}\b/g
 
 export interface AgentFactoryRegistry {
   get(id: string): AgentRegistryRecord | null
+  list?(): AgentRegistryRecord[]
   create(input: {
     id: string
     name: string
@@ -42,8 +49,37 @@ export interface DeriveSpecialistAgentInput {
 export interface DeriveSpecialistAgentResult {
   agent: AgentRegistryRecord
   rulesRelPath: string
+  foundationRelPath?: string
+  seedRelPaths: string[]
   routingCardRelPath: string
   migratedCards: Array<{ from: string; to: string }>
+}
+
+export interface DeriveSpecialistAgentFromBlueprintInput {
+  blueprint: SpecialistAgentBlueprint
+  confirmationTokenId: string
+  parentAgentId?: string | null
+  migrateCardRelPaths?: string[]
+  now?: Date
+}
+
+export interface SpecialistAgentBlueprintDerivationPlan {
+  specialistId: string
+  name: string
+  charter: string
+  parentAgentId: string
+  blueprintId: string
+  confirmationTokenId: string
+  rulesRelPath: string
+  foundationRelPath: string
+  routingCardRelPath: string
+  seedRelPaths: string[]
+  seedRulesText: string
+  knowledgeSeeds: SpecialistBlueprintKnowledgeSeed[]
+  routingTriggers: string[]
+  routingBody: string
+  cardMigrations: Array<{ from: string; to: string }>
+  created: string
 }
 
 export interface AgentKnowledgeMigrationPlan {
@@ -112,9 +148,20 @@ function migrateCard(store: BeliefCardStore, agentId: string, relPath: string): 
   const { from, to } = planCardMigration(store, agentId, relPath)
   const fromAbs = absInside(store.rootPath, from)
   const toAbs = absInside(store.rootPath, to)
+  if (existsSync(toAbs)) throw new Error(`[agent-factory] target card already exists: ${to}`)
   mkdirSync(dirname(toAbs), { recursive: true })
   renameSync(fromAbs, toAbs)
   return { from, to }
+}
+
+function rollbackMigratedCards(store: BeliefCardStore, migratedCards: Array<{ from: string; to: string }>): void {
+  for (const migration of migratedCards.reverse()) {
+    const fromAbs = absInside(store.rootPath, migration.from)
+    const toAbs = absInside(store.rootPath, migration.to)
+    if (!existsSync(toAbs) || existsSync(fromAbs)) continue
+    mkdirSync(dirname(fromAbs), { recursive: true })
+    renameSync(toAbs, fromAbs)
+  }
 }
 
 function planCardMigration(store: BeliefCardStore, agentId: string, relPath: string): { from: string; to: string } {
@@ -187,6 +234,8 @@ export function migrateAgentKnowledgeCards(
   })
 }
 
+// P5e/C23 legacy dormant derivation path: retained for candidate-era tests only.
+// Production specialist creation must use deriveSpecialistAgentFromBlueprint via agent:specialistBlueprint:confirmCreate.
 export function prepareSpecialistAgentDerivation(
   registry: AgentFactoryRegistry,
   store: BeliefCardStore,
@@ -238,6 +287,8 @@ export function prepareSpecialistAgentDerivation(
   }
 }
 
+// P5e/C23 legacy dormant derivation path: retained for candidate-era tests only.
+// Production specialist creation must use deriveSpecialistAgentFromBlueprint via agent:specialistBlueprint:confirmCreate.
 export function deriveSpecialistAgent(
   registry: AgentFactoryRegistry,
   store: BeliefCardStore,
@@ -285,5 +336,180 @@ export function deriveSpecialistAgent(
     if (!updated.ok) throw new Error(`[agent-factory] candidate update rejected: ${updated.reason}`)
   }
 
-  return { agent, rulesRelPath: plan.rulesRelPath, routingCardRelPath: plan.routingCardRelPath, migratedCards }
+  return {
+    agent,
+    rulesRelPath: plan.rulesRelPath,
+    seedRelPaths: [],
+    routingCardRelPath: plan.routingCardRelPath,
+    migratedCards,
+  }
+}
+
+export function prepareSpecialistAgentFromBlueprint(
+  registry: AgentFactoryRegistry,
+  store: BeliefCardStore,
+  input: DeriveSpecialistAgentFromBlueprintInput,
+): SpecialistAgentBlueprintDerivationPlan {
+  const blueprint = input.blueprint
+  const confirmationTokenId = ensureNonEmpty(input.confirmationTokenId, 'confirmation token')
+  if (blueprint.status !== 'confirmed') throw new Error('[agent-factory] blueprint must be confirmed')
+  if (blueprint.confirmation.tokenId !== confirmationTokenId) throw new Error('[agent-factory] confirmation token mismatch')
+  if (blueprint.admissionVerdict.kind !== 'admit') throw new Error('[agent-factory] blueprint admission must be admit')
+  const admission = evaluateSpecialistBlueprintAdmission(registry, blueprint)
+  if (admission.verdict.kind !== 'admit') throw new Error(`[agent-factory] blueprint admission rejected: ${admission.verdict.kind}`)
+  assertSpecialistBlueprintQualityPasses(blueprint)
+
+  const specialistId = ensureNonEmpty(blueprint.specialistId, 'specialist id')
+  assertDerivedAgentId(specialistId)
+  if (registry.get(specialistId)) throw new Error(`[agent-factory] agent already exists: ${specialistId}`)
+  const name = ensureNonEmpty(blueprint.displayName, 'name')
+  const charter = ensureNonEmpty(blueprint.charter || blueprint.foundationDocs.charter, 'charter')
+  const seedRulesText = ensureNonEmpty(blueprint.foundationDocs.rulesText || blueprint.seedRulesText, 'seed rules')
+  const triggers = parseTriggersValue(blueprint.routingTriggers)
+  if (!triggers.ok) throw new Error(`[agent-factory] invalid routing triggers: ${triggers.reason}`)
+  const rulesRelPath = `agents/${specialistId}/RULES.md`
+  const foundationRelPath = `agents/${specialistId}/FOUNDATION.md`
+  const routingCardRelPath = `knowledge/routing-${specialistId}.md`
+  if (existsSync(absInside(store.rootPath, rulesRelPath))) {
+    throw new Error(`[agent-factory] agent rules already exist: ${rulesRelPath}`)
+  }
+  if (existsSync(absInside(store.rootPath, foundationRelPath))) {
+    throw new Error(`[agent-factory] agent foundation already exists: ${foundationRelPath}`)
+  }
+  if (existsSync(absInside(store.rootPath, `agents/${specialistId}/knowledge`))) {
+    throw new Error(`[agent-factory] agent knowledge directory already exists: agents/${specialistId}/knowledge`)
+  }
+  if (existsSync(absInside(store.rootPath, routingCardRelPath))) {
+    throw new Error(`[agent-factory] routing card already exists: ${routingCardRelPath}`)
+  }
+  const seedRelPaths = blueprint.foundationDocs.knowledgeSeeds.map((_, index) => (
+    `agents/${specialistId}/knowledge/seed-${String(index + 1).padStart(2, '0')}.md`
+  ))
+  const allowedMigrations = new Set(blueprint.migrationCandidates.map((relPath) => relPath.replace(/\\/g, '/')))
+  const selectedMigrations = [...new Set((input.migrateCardRelPaths ?? [])
+    .map((relPath) => String(relPath || '').trim().replace(/\\/g, '/'))
+    .filter(Boolean))]
+  const illegalMigration = selectedMigrations.find((relPath) => !allowedMigrations.has(relPath))
+  if (illegalMigration) {
+    throw new Error(`[agent-factory] migration card was not offered for this blueprint: ${illegalMigration}`)
+  }
+  const cardMigrations = selectedMigrations.map((relPath) => planCardMigration(store, specialistId, relPath))
+  const reservedSeedTargets = new Set(seedRelPaths)
+  const reservedMigration = cardMigrations.find((migration) => reservedSeedTargets.has(migration.to))
+  if (reservedMigration) {
+    throw new Error(`[agent-factory] migration target conflicts with blueprint seed: ${reservedMigration.to}`)
+  }
+  const created = (input.now ?? new Date()).toISOString().slice(0, 10)
+  return {
+    specialistId,
+    name,
+    charter,
+    parentAgentId: input.parentAgentId ?? MAIN_AGENT_ID,
+    blueprintId: ensureNonEmpty(blueprint.blueprintId, 'blueprint id'),
+    confirmationTokenId,
+    rulesRelPath,
+    foundationRelPath,
+    routingCardRelPath,
+    seedRelPaths,
+    seedRulesText,
+    knowledgeSeeds: blueprint.foundationDocs.knowledgeSeeds,
+    routingTriggers: triggers.triggers ?? [],
+    routingBody: `用户确认后将相关请求转给 ${name}。`,
+    cardMigrations,
+    created,
+  }
+}
+
+export function deriveSpecialistAgentFromBlueprint(
+  registry: AgentFactoryRegistry,
+  store: BeliefCardStore,
+  input: DeriveSpecialistAgentFromBlueprintInput,
+): DeriveSpecialistAgentResult {
+  const plan = prepareSpecialistAgentFromBlueprint(registry, store, input)
+  const createdRelPaths: string[] = []
+  const createdDirPaths: string[] = []
+  const migratedCards: Array<{ from: string; to: string }> = []
+  try {
+    const agentDir = `agents/${plan.specialistId}`
+    const agentKnowledgeDir = `agents/${plan.specialistId}/knowledge`
+    const agentSitesDir = join(agentKnowledgeDir, 'sites')
+    if (!existsSync(absInside(store.rootPath, agentDir))) createdDirPaths.push(agentDir)
+    if (!existsSync(absInside(store.rootPath, agentKnowledgeDir))) createdDirPaths.push(agentKnowledgeDir)
+    if (!existsSync(absInside(store.rootPath, agentSitesDir))) createdDirPaths.push(agentSitesDir)
+    mkdirSync(absInside(store.rootPath, agentKnowledgeDir), { recursive: true })
+    mkdirSync(absInside(store.rootPath, agentSitesDir), { recursive: true })
+
+    const rulesAbs = absInside(store.rootPath, plan.rulesRelPath)
+    writeFileSync(rulesAbs, `${plan.seedRulesText}\n`, 'utf-8')
+    createdRelPaths.push(plan.rulesRelPath)
+
+    const foundationAbs = absInside(store.rootPath, plan.foundationRelPath)
+    writeFileSync(foundationAbs, `${renderSpecialistFoundationMarkdown(input.blueprint)}\n`, 'utf-8')
+    createdRelPaths.push(plan.foundationRelPath)
+
+    plan.knowledgeSeeds.forEach((seed, index) => {
+      const relPath = plan.seedRelPaths[index]
+      const written = store.writeCard({
+        relPath,
+        frontmatter: {
+          title: seed.title,
+          description: seed.evidenceRefs.join(', ') || '用户确认的专项 agent 初始知识',
+          confidence: 'M',
+          tag: 'knowledge',
+          created: plan.created,
+          status: 'staged',
+          source: `blueprint:${plan.blueprintId}`,
+        },
+        body: seed.body,
+      })
+      if (!written.ok) throw new Error(`[agent-factory] blueprint knowledge seed rejected: ${written.reason}`)
+      createdRelPaths.push(relPath)
+    })
+
+    for (const migration of plan.cardMigrations) {
+      migratedCards.push(migrateCard(store, plan.specialistId, migration.from))
+    }
+
+    const routing = store.writeCard({
+      relPath: plan.routingCardRelPath,
+      frontmatter: {
+        title: `路由：${plan.name}`,
+        description: plan.charter,
+        confidence: 'H',
+        tag: 'self',
+        created: plan.created,
+        status: 'staged',
+        source: `blueprint:${plan.blueprintId}`,
+        triggers: plan.routingTriggers,
+      },
+      body: plan.routingBody,
+    })
+    if (!routing.ok) throw new Error(`[agent-factory] routing card rejected: ${routing.reason}`)
+    createdRelPaths.push(plan.routingCardRelPath)
+
+    const agent = registry.create({
+      id: plan.specialistId,
+      name: plan.name,
+      charter: plan.charter,
+      parentAgentId: plan.parentAgentId,
+      derivationReason: `blueprint:${plan.blueprintId}`,
+    })
+    return {
+      agent,
+      rulesRelPath: plan.rulesRelPath,
+      foundationRelPath: plan.foundationRelPath,
+      seedRelPaths: plan.seedRelPaths,
+      routingCardRelPath: plan.routingCardRelPath,
+      migratedCards,
+    }
+  } catch (error) {
+    rollbackMigratedCards(store, migratedCards)
+    for (const relPath of createdRelPaths.reverse()) {
+      rmSync(absInside(store.rootPath, relPath), { force: true })
+    }
+    for (const relPath of createdDirPaths.reverse()) {
+      rmSync(absInside(store.rootPath, relPath), { recursive: true, force: true })
+    }
+    throw error
+  }
 }

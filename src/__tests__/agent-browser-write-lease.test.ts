@@ -78,6 +78,24 @@ describe('BrowserWriteLease', () => {
     assert.equal(denied?.errorCode, 'lease_takeover')
   })
 
+  it('emits lease transitions for ownership push without duplicating suppressed signals', () => {
+    const { service } = makeService()
+    const transitions: string[] = []
+    service.onTransition((transition) => {
+      transitions.push(`${transition.surface}:${transition.previousState}->${transition.state}:${transition.source}`)
+    })
+    const lease = service.acquire({ surface: 'user-view', taskId: 't1', runId: 'r1' })
+    if (isAgentBrowserError(lease)) throw new Error('expected lease')
+    const corr = service.beginAgentAction('user-view')
+    assert.equal(service.recordUserSignal({ surface: 'user-view', source: 'navigation' }), false)
+    service.endAgentAction('user-view', corr)
+    assert.equal(service.recordUserSignal({ surface: 'user-view', source: 'keyboard' }), true)
+    assert.deepEqual(transitions, [
+      'user-view:idle->held:acquire',
+      'user-view:held->takeover:user_signal',
+    ])
+  })
+
   it('suppresses signals while an agent action window is open (no false takeover from agent-driven nav)', () => {
     const { service } = makeService()
     service.acquire({ surface: 'user-view', taskId: 't1', runId: 'r1' })

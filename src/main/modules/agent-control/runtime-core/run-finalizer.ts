@@ -3,7 +3,11 @@ import { collectResponseDigestProof, appendProofRefs } from '../quality/proof-co
 import { adjudicateTerminalOutcome, appendCheckIns, type CheckInRecord } from '../quality/task-adjudicator'
 import { resolveCriteria, type SkillExecutionForm } from '../quality/criteria-templates'
 import type { TaskType } from '../../../../shared/task-types'
-import type { TaskProjectionRecord } from '../contracts/run-contracts'
+import {
+  isRunMetaTerminalStatus,
+  type RunMetaTerminalStatus,
+} from '../../../../shared/run-meta-terminal-status'
+import type { TaskBudgetRuntime, TaskProjectionRecord } from '../contracts/run-contracts'
 import { canResumeAsUserPoint } from '../contracts/resume-handle'
 
 export interface RunCloseMetric {
@@ -22,8 +26,29 @@ export interface FinalizedRunOutcome {
   terminalReason: string
 }
 
+interface RunOutcomeTaskFacts {
+  taskBudgetRuntime?: TaskBudgetRuntime | null
+  providerDiagnostics?: RunOutcomeProviderDiagnostics | null
+  usage?: RunOutcomeUsage | null
+}
+
+interface RunOutcomeProviderDiagnostics {
+  provider?: string | null
+  agentProtocol?: string | null
+  wireApi?: string | null
+  contextWindow?: number | null
+  protocolSource?: 'explicit' | 'inferred' | null
+  contextWindowSource?: 'explicit' | 'model' | 'fallback' | null
+}
+
+interface RunOutcomeUsage {
+  inputTokens?: number
+  outputTokens?: number
+  totalTokens?: number
+}
+
 export type RunOutcome =
-  | {
+  | ({
     kind: 'done'
     runId: string
     taskId?: string | null
@@ -37,8 +62,8 @@ export type RunOutcome =
      *  default-text fallback branch). Q4a generates the response-digest
      *  proof from this INSIDE finalizeRunOutcome, before the verdict. */
     finalText?: string | null
-  }
-  | {
+  } & RunOutcomeTaskFacts)
+  | ({
     kind: 'checkpoint'
     runId: string
     taskId?: string | null
@@ -51,8 +76,8 @@ export type RunOutcome =
     terminalReason?: string | null
     /** EP2-Q3 — see the done variant. */
     finalText?: string | null
-  }
-  | {
+  } & RunOutcomeTaskFacts)
+  | ({
     kind: 'error' | 'cancelled' | 'preempted' | 'interrupted'
     runId: string
     taskId?: string | null
@@ -62,7 +87,7 @@ export type RunOutcome =
     initiator: string
     terminalReason: string
     projectionPatch?: Record<string, unknown> | null
-  }
+  } & RunOutcomeTaskFacts)
 
 export interface RunMetaRepositoryLike {
   get(runId: string): unknown | null
@@ -92,6 +117,8 @@ export interface RunFinalizerDeps {
     checkIn: CheckInRecord
     projection: TaskProjectionRecord
     now: Date
+    terminalStatus?: string | null
+    terminalReason?: string | null
   }) => void
 }
 
@@ -152,6 +179,65 @@ export function buildTerminalProjectionPatch(params: {
   }
 }
 
+export function buildSupersededChildTerminalProjectionPatch(params: {
+  baseContinuationRef: TaskProjectionRecord['continuationRef']
+  supersededByChildRunId: string
+  steps: TaskProjectionRecord['steps']
+}): Partial<TaskProjectionRecord> {
+  return {
+    status: 'killed',
+    interactionState: 'suspended',
+    waitingFor: 'none',
+    taskSummary: '已由后续技能子任务完成',
+    blockedReason: null,
+    degradationReason: 'superseded_by_child_run',
+    resumableActions: ['none'],
+    continuationRef: {
+      ...(params.baseContinuationRef || {}),
+      blockerType: 'superseded',
+      pauseReason: 'superseded',
+      supersededByChildRunId: params.supersededByChildRunId,
+    } as TaskProjectionRecord['continuationRef'] & { supersededByChildRunId: string },
+    steps: params.steps,
+  }
+}
+
+export function buildManualSuspendProjectionPatch(params: {
+  projection?: TaskProjectionRecord | null
+  taskTitle?: string | null
+  taskSummary?: string | null
+  steps?: TaskProjectionRecord['steps'] | null
+  currentStepId?: string | null
+  continuationRef?: TaskProjectionRecord['continuationRef'] | null
+  budget?: TaskProjectionRecord['budget'] | null
+  budgetUsagePercent?: number | null
+  budgetWarningLevel?: TaskProjectionRecord['budgetWarningLevel'] | null
+  recoveryHistory?: TaskProjectionRecord['recoveryHistory'] | null
+  updatedAt: string
+}): Partial<TaskProjectionRecord> {
+  const projection = params.projection || null
+  const continuationRef = params.continuationRef ?? projection?.continuationRef ?? null
+  const canResume = canResumeAsUserPoint(continuationRef)
+  return {
+    status: canResume ? 'recoverable_paused' : 'blocked',
+    interactionState: 'suspended',
+    waitingFor: 'none',
+    taskTitle: params.taskTitle ?? projection?.taskTitle ?? null,
+    taskSummary: params.taskSummary ?? projection?.taskSummary ?? '任务已暂停，等待继续。',
+    steps: params.steps ?? projection?.steps ?? [],
+    currentStepId: params.currentStepId ?? projection?.currentStepId ?? null,
+    blockedReason: '任务已暂停，等待继续。',
+    degradationReason: projection?.degradationReason ?? null,
+    resumableActions: canResume ? ['continue', 'cancel'] : ['cancel'],
+    continuationRef,
+    budget: params.budget ?? projection?.budget ?? null,
+    budgetUsagePercent: params.budgetUsagePercent ?? projection?.budgetUsagePercent ?? null,
+    budgetWarningLevel: params.budgetWarningLevel ?? projection?.budgetWarningLevel ?? null,
+    recoveryHistory: params.recoveryHistory ?? projection?.recoveryHistory ?? [],
+    updatedAt: params.updatedAt,
+  }
+}
+
 export async function finalizeRunOutcome(outcome: RunOutcome, deps: RunFinalizerDeps): Promise<FinalizedRunOutcome> {
   if (outcome.kind === 'done') {
     return writeTerminalOutcome(outcome, deps, 'done', outcome.terminalReason || 'done')
@@ -175,7 +261,7 @@ export async function finalizeRunOutcome(outcome: RunOutcome, deps: RunFinalizer
   )
 }
 
-function statusFromOutcomeKind(kind: Exclude<RunOutcome['kind'], 'done' | 'checkpoint'>): string {
+function statusFromOutcomeKind(kind: Exclude<RunOutcome['kind'], 'done' | 'checkpoint'>): RunMetaTerminalStatus {
   if (kind === 'error') return 'error'
   if (kind === 'interrupted') return 'interrupted'
   return 'cancelled'
@@ -219,12 +305,12 @@ function resolveEffectiveTaskFacts(
 async function writeTerminalOutcome(
   outcome: RunOutcome,
   deps: RunFinalizerDeps,
-  status: string,
+  status: RunMetaTerminalStatus,
   terminalReason: string,
 ): Promise<FinalizedRunOutcome> {
   const facts = resolveEffectiveTaskFacts(outcome, deps)
   const adjudication = recordTerminalAdjudication(outcome, deps, status, terminalReason, facts)
-  let effectiveStatus = status
+  let effectiveStatus: RunMetaTerminalStatus = status
   let effectiveTerminalReason = terminalReason
   if (status === 'done' && adjudication && adjudication.verdict !== 'accept') {
     const taskContinuation = continuationFromProjectionPatch(outcome.projectionPatch)
@@ -334,7 +420,7 @@ function recordTerminalAdjudication(
 
     if (deps.learnFromCheckIn) {
       try {
-        deps.learnFromCheckIn({ checkIn, projection, now })
+        deps.learnFromCheckIn({ checkIn, projection, now, terminalStatus: status, terminalReason })
       } catch (error) {
         logAgentMetric('site_card_learning_checkin_failed', {
           runId: outcome.runId,
@@ -373,12 +459,18 @@ function recordTerminalAdjudication(
 function writeRunMetaOutcome(
   outcome: RunOutcome,
   deps: RunFinalizerDeps,
-  status: string,
+  status: RunMetaTerminalStatus,
   terminalReason: string,
 ): void {
+  if (!isRunMetaTerminalStatus(status)) {
+    throw new Error(`Invalid terminal run_meta status: ${status}`)
+  }
   const repository = deps.runMetaRepository
   if (!repository) return
-  const patch = {
+  const providerDiagnostics = outcome.providerDiagnostics || null
+  const taskBudgetRuntime = outcome.taskBudgetRuntime || null
+  const usage = outcome.usage || null
+  const patch: Record<string, unknown> = {
     runId: outcome.runId,
     taskId: outcome.taskId ?? null,
     scopeId: outcome.scopeId ?? null,
@@ -386,6 +478,24 @@ function writeRunMetaOutcome(
     terminalReason,
     initiator: outcome.initiator,
     durationMs: outcome.durationMs,
+  }
+  if (taskBudgetRuntime) {
+    patch.taskType = taskBudgetRuntime.taskType || null
+    patch.budget = {
+      ...taskBudgetRuntime.budget,
+      ...taskBudgetRuntime.usage,
+    }
+  }
+  if (providerDiagnostics) {
+    patch.providerProtocol = providerDiagnostics.agentProtocol || null
+    patch.wireApi = providerDiagnostics.wireApi || null
+    patch.contextWindow = providerDiagnostics.contextWindow || null
+    patch.providerDiagnostics = providerDiagnostics
+  }
+  if (usage) {
+    patch.inputTokens = usage.inputTokens ?? 0
+    patch.outputTokens = usage.outputTokens ?? 0
+    patch.totalTokens = usage.totalTokens ?? 0
   }
   if (repository.get(outcome.runId)) {
     repository.update(outcome.runId, patch)

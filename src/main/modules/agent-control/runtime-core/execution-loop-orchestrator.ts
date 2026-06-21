@@ -62,7 +62,6 @@ export class ExecutionLoopOrchestrator {
     policy?: unknown
     callAnthropicWithTools: () => Promise<APIResponseLike>
     callOpenAIWithTools: () => Promise<APIResponseLike>
-    compressContext?: () => Promise<boolean> | boolean
     onBeforeRetry?: (result: ErrorClassifierResult, attempt: number) => Promise<void> | void
     buildVideoFrameFallbackMessages: () => Promise<unknown>
     assignFallbackMessages: (messages: unknown) => void
@@ -70,7 +69,6 @@ export class ExecutionLoopOrchestrator {
     if (params.useAnthropicProtocol) {
       const runtimeResult = await this.runModelRequestWithRecovery({
         request: params.callAnthropicWithTools,
-        compressContext: params.compressContext,
         onBeforeRetry: params.onBeforeRetry,
       })
       if (runtimeResult.value) {
@@ -98,7 +96,6 @@ export class ExecutionLoopOrchestrator {
 
     const runtimeResult = await this.runModelRequestWithRecovery({
       request: params.callOpenAIWithTools,
-      compressContext: params.compressContext,
       onBeforeRetry: params.onBeforeRetry,
     })
     if (runtimeResult.value) {
@@ -148,13 +145,11 @@ export class ExecutionLoopOrchestrator {
 
   private async runModelRequestWithRecovery<T>(params: {
     request: () => Promise<T>
-    compressContext?: () => Promise<boolean> | boolean
     onBeforeRetry?: (result: ErrorClassifierResult, attempt: number) => Promise<void> | void
   }): Promise<{ value?: T; error?: unknown; recoveryHistory: RecoveryRecord[] }> {
     const recoveryHistory: RecoveryRecord[] = []
     const pendingRecoveries: Array<{ result: KnownExecutionErrorResult; attempt: number }> = []
     const retryCounts: Partial<Record<ErrorClassifierResult['kind'], number>> = {}
-    let contextCompressed = false
 
     while (true) {
       try {
@@ -167,20 +162,7 @@ export class ExecutionLoopOrchestrator {
         const plan = buildRecoveryPlan(classified)
         const nextAttempt = (retryCounts[classified.kind] || 0) + 1
 
-        if (classified.kind === 'context_overflow' && plan.shouldCompressContext && !contextCompressed && params.compressContext) {
-          const compressed = await params.compressContext()
-          retryCounts[classified.kind] = nextAttempt
-          if (compressed) {
-            contextCompressed = true
-            pendingRecoveries.push({ result: classified as KnownExecutionErrorResult, attempt: nextAttempt })
-            await params.onBeforeRetry?.(classified, nextAttempt)
-            continue
-          }
-          recoveryHistory.push(this.buildRecoveryRecord(classified as KnownExecutionErrorResult, nextAttempt, false))
-          return { error, recoveryHistory }
-        }
-
-        if (plan.shouldRetry && nextAttempt <= plan.maxAttempts) {
+        if (plan.shouldRetry && !plan.shouldCompressContext && nextAttempt <= plan.maxAttempts) {
           retryCounts[classified.kind] = nextAttempt
           pendingRecoveries.push({ result: classified as KnownExecutionErrorResult, attempt: nextAttempt })
           await params.onBeforeRetry?.(classified, nextAttempt)

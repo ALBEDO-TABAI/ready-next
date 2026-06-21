@@ -1,5 +1,6 @@
 /**
  * EP3-PK4 — aggregation packet settlement: child-failure three-way decision
+ * P5c/C22 unwired: this module is not in production path.
  * + the Matrix upstream report contract + the parent CheckIn through the
  * Q4a adjudication channel (09 §3.3/§3.4).
  *

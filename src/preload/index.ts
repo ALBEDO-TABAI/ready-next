@@ -15,6 +15,9 @@ import type {
   FileEmergenceRecordReadingSessionPayload,
 } from '../shared/file-emergence'
 import type {
+  BrowserLockOverlaySnapshot,
+} from '../shared/browser-lock-overlay'
+import type {
   BrowserFastCardContextActionEvent,
   FastCardOverlayCommand,
   FastCardOverlaySnapshot,
@@ -73,6 +76,33 @@ const agentAPI = {
   listChannels: () => ipcRenderer.invoke('agent:listChannels'),
   listRegistry: () => ipcRenderer.invoke('agent:registry:list'),
   listRegistryKnowledge: (id: string) => ipcRenderer.invoke('agent:registry:listKnowledge', { id }),
+  getSystemStudioSnapshot: () => ipcRenderer.invoke('agent:systemStudio:getSnapshot'),
+  simulateSystemStudioRouting: (firstMessage: string) =>
+    ipcRenderer.invoke('agent:systemStudio:simulateRouting', { firstMessage }),
+  stageSystemStudioContentEdit: (payload: unknown) =>
+    ipcRenderer.invoke('agent:systemStudio:stageContentEdit', payload),
+  confirmSystemStudioContentEdit: (proposalId: string) =>
+    ipcRenderer.invoke('agent:systemStudio:confirmContentEdit', { proposalId }),
+  rejectSystemStudioContentEdit: (proposalId: string) =>
+    ipcRenderer.invoke('agent:systemStudio:rejectContentEdit', { proposalId }),
+  listSpecialistBlueprints: () => ipcRenderer.invoke('agent:specialistBlueprint:list'),
+  upsertSpecialistBlueprintDraft: (blueprint: unknown) =>
+    ipcRenderer.invoke('agent:specialistBlueprint:upsertDraft', { blueprint }),
+  runSpecialistBlueprintAdmission: (payload: { blueprint?: unknown; blueprintId?: string }) =>
+    ipcRenderer.invoke('agent:specialistBlueprint:runAdmission', payload),
+  requestSpecialistBlueprintConfirmation: (payload: {
+    blueprintId: string
+    sessionId: string
+    runId?: string | null
+    unverifiedSemanticReviewAck?: { kind: 'unverified_semantic_review'; contentHash: string }
+  }) =>
+    ipcRenderer.invoke('agent:specialistBlueprint:requestConfirmation', payload),
+  confirmSpecialistDraftCreate: (payload: { blueprintId: string; sessionId: string; runId?: string | null; tokenId: string; migrateCardRelPaths?: string[] }) =>
+    ipcRenderer.invoke('agent:specialistBlueprint:confirmCreate', payload),
+  rejectSpecialistBlueprint: (blueprintId: string) =>
+    ipcRenderer.invoke('agent:specialistBlueprint:reject', { blueprintId }),
+  expireSpecialistBlueprint: (blueprintId: string) =>
+    ipcRenderer.invoke('agent:specialistBlueprint:expire', { blueprintId }),
   updateRegistryStatus: (payload: {
     id: string
     status: 'retired' | 'merged'
@@ -181,6 +211,8 @@ const agentAPI = {
     name: RendererAgentMetricName,
     payload: Record<string, unknown> = {},
   ) => ipcRenderer.invoke('agent:emitRendererMetric', { name, payload }),
+  reportInfrastructureTimeout: (payload: { scopeId: string; requestId: string; elapsedMs?: number }) =>
+    ipcRenderer.invoke('agent:reportInfrastructureTimeout', payload),
   suspendRun: (payload: { scopeId: string; taskId?: string }) =>
     ipcRenderer.invoke('agent:suspendRun', payload),
   resumeRun: (payload: {
@@ -409,6 +441,17 @@ const browserAPI = {
     ipcRenderer.on('browser:agentControlChanged', handler)
     return () => ipcRenderer.removeListener('browser:agentControlChanged', handler)
   },
+  onLeaseChanged: (callback: (data: {
+    surfaces?: Record<string, unknown>
+    activeWriteSurface?: string | null
+  }) => void) => {
+    const handler = (_event: unknown, data: {
+      surfaces?: Record<string, unknown>
+      activeWriteSurface?: string | null
+    }) => callback(data)
+    ipcRenderer.on('browser:leaseChanged', handler)
+    return () => ipcRenderer.removeListener('browser:leaseChanged', handler)
+  },
   setAdblockEnabled: (enabled: boolean, scope?: 'main' | 'preview' | 'all') =>
     ipcRenderer.invoke('browser:setAdblockEnabled', { enabled, scope }),
   toggleAdblockDomain: (domain: string) => ipcRenderer.invoke('browser:toggleAdblockDomain', { domain }),
@@ -424,6 +467,13 @@ const browserAPI = {
   },
   previewClose: () => ipcRenderer.invoke('browser:previewClose'),
   previewGetState: () => ipcRenderer.invoke('browser:previewGetState'),
+  p7cLiveProofStartUserViewLease: () => ipcRenderer.invoke('browser:p7cLiveProofStartUserViewLease'),
+  p7cLiveProofCreateManualTab: () => ipcRenderer.invoke('browser:p7cLiveProofCreateManualTab'),
+  p7cLiveProofPrepareForegroundProbe: () => ipcRenderer.invoke('browser:p7cLiveProofPrepareForegroundProbe'),
+  p7cLiveProofSampleActiveTabState: () => ipcRenderer.invoke('browser:p7cLiveProofSampleActiveTabState'),
+  p7cLiveProofSendUserKey: (key?: string) => ipcRenderer.invoke('browser:p7cLiveProofSendUserKey', key),
+  p7cLiveProofCheckWriteDenied: () => ipcRenderer.invoke('browser:p7cLiveProofCheckWriteDenied'),
+  p7cLiveProofClear: () => ipcRenderer.invoke('browser:p7cLiveProofClear'),
   onPreviewUpdate: (callback: (data: unknown) => void) => {
     const handler = (_: unknown, data: unknown): void => callback(data)
     ipcRenderer.on('browser:previewUpdate', handler)
@@ -472,6 +522,17 @@ const browserAPI = {
     const handler = (_: unknown, snapshot: FastCardOverlaySnapshot): void => callback(snapshot)
     ipcRenderer.on('browser:fastCardOverlaySnapshot', handler)
     return () => ipcRenderer.removeListener('browser:fastCardOverlaySnapshot', handler)
+  },
+  showBrowserLockOverlay: (payload: BrowserLockOverlaySnapshot) =>
+    ipcRenderer.invoke('browser:lockOverlayShow', payload),
+  hideBrowserLockOverlay: () =>
+    ipcRenderer.invoke('browser:lockOverlayHide'),
+  getBrowserLockOverlaySnapshot: () =>
+    ipcRenderer.invoke('browser:lockOverlayGetSnapshot'),
+  onBrowserLockOverlaySnapshot: (callback: (snapshot: BrowserLockOverlaySnapshot) => void) => {
+    const handler = (_: unknown, snapshot: BrowserLockOverlaySnapshot): void => callback(snapshot)
+    ipcRenderer.on('browser:lockOverlaySnapshot', handler)
+    return () => ipcRenderer.removeListener('browser:lockOverlaySnapshot', handler)
   },
 
   // Bookmarks

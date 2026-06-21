@@ -6,6 +6,66 @@ import {
   hasRemoteFileDeliveryIntent,
 } from '../shared/remote-im-file-intent'
 import { normalizeChannelDeliveryResult } from '../main/modules/agent-control/runtime-core/channel-delivery-result'
+import { AgentSdkRuntime, type AgentSdkRuntimeDeps } from '../main/modules/agent-control/runtime-core/agent-sdk-runtime'
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
+
+const fakeConfig: NonNullable<ReturnType<NonNullable<AgentSdkRuntimeDeps['loadAIConfig']>>['config']> = {
+  provider: 'openai',
+  baseUrl: 'https://api.openai.com/v1',
+  apiKey: 'test-key',
+  model: 'gpt-test',
+}
+
+function createRuntimeToolNames(params: {
+  message: string
+  requestEnvelope?: unknown
+  localSendImIntent?: boolean
+}): string[] {
+  const runtime = new AgentSdkRuntime({
+    loadAIConfig: () => ({ ok: true, config: fakeConfig, reason: 'present' }),
+    domainAdapters: [],
+  })
+  const privateRuntime = runtime as unknown as {
+    resolveSkillAuthorizationForTurn: (
+      message: string,
+      sessionId?: string,
+      requestEnvelope?: unknown,
+      forceLocalSendImIntent?: boolean,
+    ) => unknown
+    listDefaultToolDefinitionsForTurn: (input: {
+      message: string
+      sessionId?: string
+      scopeId?: string
+      config: typeof fakeConfig
+      browserHostAvailable: boolean
+      feishuConnected: boolean
+      authorization: unknown
+      localSendImIntent?: boolean
+      requestEnvelope?: unknown
+    }) => Array<{ name: string }>
+  }
+  const authorization = privateRuntime.resolveSkillAuthorizationForTurn(
+    params.message,
+    'scope-send-im-browser-tools',
+    params.requestEnvelope,
+    params.localSendImIntent === true,
+  )
+  return privateRuntime.listDefaultToolDefinitionsForTurn({
+    message: params.message,
+    sessionId: 'scope-send-im-browser-tools',
+    scopeId: 'scope-send-im-browser-tools',
+    config: fakeConfig,
+    browserHostAvailable: true,
+    feishuConnected: false,
+    authorization,
+    localSendImIntent: params.localSendImIntent,
+    requestEnvelope: params.requestEnvelope,
+  }).map((definition) => definition.name)
+}
+
+test('remote-im-attachment-contract declares transitive sqlite ABI guard', (t) => {
+  skipIfSqliteUnavailable(t, 'remote-im-attachment-contract transitive sqlite load')
+})
 
 test('remote IM attachment-only inbound messages continue into the agent payload', () => {
   // eslint-disable-next-line ready/no-source-grep-test -- private runtime guard: full AgentControlRuntime construction needs Electron/DB wiring; this locks the regression-prone early return.
@@ -138,6 +198,27 @@ test('local send-im attached media turns bypass model vision input and browser c
   assert.match(source, /let nextInput = toSdkInput\(providerContent\)/)
 })
 
+test('local send-im collection wording removes browser tools from the runtime tool surface', () => {
+  const collectionMessage = '把小红书这个博主的图片都采集下来'
+  const collectionToolNames = createRuntimeToolNames({ message: collectionMessage })
+  assert.ok(collectionToolNames.includes('browser_visible_collect'))
+
+  const sendImMessage = '把小红书这个博主的图片都采集下来，并把这四张图发到我微信'
+  const requestEnvelope = {
+    primaryInstruction: sendImMessage,
+    resources: [
+      { name: '图1.png', path: '/tmp/ready-send-im-proof/图1.png', kind: 'image' },
+    ],
+  }
+  const sendImToolNames = createRuntimeToolNames({
+    message: sendImMessage,
+    requestEnvelope,
+  })
+
+  assert.ok(sendImToolNames.includes('skill_send_im_file'))
+  assert.equal(sendImToolNames.some((name) => name.startsWith('browser_')), false)
+})
+
 test('renderer keeps a parseable local path next to image and video attachment blocks', () => {
   // eslint-disable-next-line ready/no-source-grep-test -- renderer composer is the only place that has both attachment path and base64 media block.
   const source = readFileSync(new URL('../renderer/modules/agent/messageComposer.ts', import.meta.url), 'utf8')
@@ -214,6 +295,7 @@ test('send-im skill only exposes the direct file send tool and no recipient opti
 test('remote IM outbound file delivery is gated by explicit inbound send intent', () => {
   // eslint-disable-next-line ready/no-source-grep-test -- private runtime guard: attachment sending must be driven by the remote user's request, not a generic "已整理好" model reply.
   const source = readFileSync(new URL('../main/modules/agent-control/runtime-core/runtime.ts', import.meta.url), 'utf8')
+  // eslint-disable-next-line ready/no-source-grep-test -- intent keyword coverage is a static shared-module contract.
   const intentSource = readFileSync(new URL('../shared/remote-im-file-intent.ts', import.meta.url), 'utf8')
 
   assert.match(intentSource, /笔记/)
@@ -261,6 +343,7 @@ test('remote IM runtime status counts persisted outbound delivery errors', () =>
 test('remote IM delayed progress uses native typing state instead of a chat message', () => {
   // eslint-disable-next-line ready/no-source-grep-test -- private runtime guard: prevents regressing to a visible "处理中…" upstream message.
   const runtimeSource = readFileSync(new URL('../main/modules/agent-control/runtime-core/runtime.ts', import.meta.url), 'utf8')
+  // eslint-disable-next-line ready/no-source-grep-test -- sidecar typing bridge is a static channel contract.
   const sidecarSource = readFileSync(new URL('../main/modules/agent-control/sidecar-manager.ts', import.meta.url), 'utf8')
 
   assert.match(sidecarSource, /sendChannelTyping/)

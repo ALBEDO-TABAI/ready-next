@@ -6,6 +6,8 @@
 //   agent:listActiveChildRuns    (snapshot of background child-runs, with
 //                                 projection diagnostics)
 //   agent:cancelChildRun         (cancel a background child-run by id)
+//   agent:reportInfrastructureTimeout
+//                                 (renderer watchdog reports a stuck foreground run)
 //   agent:suspendRun             (pause a scope-run; emits 'suspended' update)
 //   agent:resumeRun              (resume a paused scope-run via durable handle)
 //   agent:respondToInteraction   (reply to an in-flight interaction request)
@@ -55,6 +57,20 @@ interface IPCResponse<T = unknown> {
 export interface SuspendRunPayload {
   scopeId: string
   taskId?: string
+}
+
+export interface ReportInfrastructureTimeoutPayload {
+  scopeId: string
+  requestId: string
+  elapsedMs?: number
+}
+
+export interface ReportInfrastructureTimeoutResult {
+  success: boolean
+  state?: 'cancel_requested' | 'stale' | 'not_found'
+  error?: string
+  errorKind?: string
+  activeRunId?: string | null
 }
 
 /**
@@ -163,6 +179,11 @@ export interface RunControlGroupDeps {
    */
   suspendRun(payload: SuspendRunPayload): Promise<{ success: boolean; error?: string }>
   /**
+   * Bound `runtime.reportInfrastructureTimeout` — async, renderer watchdog
+   * report with request-id authority. A stale report is a successful no-op.
+   */
+  reportInfrastructureTimeout(payload: ReportInfrastructureTimeoutPayload): Promise<ReportInfrastructureTimeoutResult>
+  /**
    * Bound `runtime.resumeRun` — async, resolves to `{success, error?, errorKind?}`.
    * The `errorKind` is forwarded so the renderer can distinguish
    * `'not_resumable'` from generic failures.
@@ -179,6 +200,7 @@ export interface RunControlGroupDeps {
 const CHANNELS = [
   'agent:listActiveChildRuns',
   'agent:cancelChildRun',
+  'agent:reportInfrastructureTimeout',
   'agent:suspendRun',
   'agent:resumeRun',
   'agent:respondToInteraction',
@@ -201,6 +223,23 @@ export const runControlGroup: IpcChannelGroup<RunControlGroupDeps> = {
 
     ipcMain.handle('agent:cancelChildRun', async (_, payload: { childRunId?: string }): Promise<IPCResponse> => {
       return (await deps.cancelChildRun(payload)) as IPCResponse
+    })
+
+    ipcMain.handle('agent:reportInfrastructureTimeout', async (_, payload: ReportInfrastructureTimeoutPayload): Promise<IPCResponse> => {
+      try {
+        const result = await deps.reportInfrastructureTimeout(payload)
+        return {
+          success: result.success,
+          data: {
+            state: result.state,
+            activeRunId: result.activeRunId || null,
+          },
+          error: result.error,
+          errorKind: result.errorKind,
+        }
+      } catch (error) {
+        return { success: false, error: error instanceof Error ? error.message : String(error) }
+      }
     })
 
     ipcMain.handle('agent:suspendRun', async (_, payload: SuspendRunPayload): Promise<IPCResponse> => {

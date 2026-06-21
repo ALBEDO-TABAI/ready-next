@@ -2,9 +2,12 @@ import type { AIModelConfig } from '../../../../shared/ai-providers'
 import type { ToolContext } from '../../tools/tool-executor'
 import {
   createToolExecutionOutput,
-  serializeToolExecutionOutput,
   type ToolExecutionOutput,
 } from '../tools-runtime/tool-result-types'
+import {
+  redactModelVisibleToolText,
+  serializeToolExecutionOutputForModel,
+} from '../tools-runtime/model-visible-tool-output'
 import {
   applyFormatSectionByPath,
   applyRewriteSectionByPath,
@@ -29,6 +32,10 @@ function isDocumentNoMutationText(text: string): boolean {
 
 function isDocumentActionFailure(result: ToolExecutionOutput): boolean {
   return hasToolErrorKind(result) || isDocumentActionFailureText(result.text)
+}
+
+function redactDocumentVisibleText(text: string): string {
+  return redactModelVisibleToolText(text)
 }
 
 export class DocumentDomainOrchestrator {
@@ -95,7 +102,7 @@ export class DocumentDomainOrchestrator {
     this.deps.emitOutput({
       agent: params.agentName,
       type: 'tool_result',
-      chunk: serializeToolExecutionOutput(result),
+      chunk: serializeToolExecutionOutputForModel(result),
       projectionPatch: result.projectionPatch,
     })
   }
@@ -125,14 +132,15 @@ export class DocumentDomainOrchestrator {
             `- 文件: ${targetPath}`,
             `- ${directResult.message}`,
           ].join('\n')
+          const visibleSummary = redactDocumentVisibleText(summary)
           this.emitStructuredTaskPatch({
             agentName,
             taskTitle: '文档格式优化',
             taskSummary: `已完成：${targetScope}`,
             detailTitle: targetScope,
           })
-          this.deps.emitOutput({ agent: agentName, chunk: summary, type: 'text' })
-          onAssistantSummary?.(summary)
+          this.deps.emitOutput({ agent: agentName, chunk: visibleSummary, type: 'text' })
+          onAssistantSummary?.(visibleSummary)
           return true
         }
         this.deps.log(`deterministic section format fallback to tool chain: ${directResult.message}`)
@@ -141,11 +149,11 @@ export class DocumentDomainOrchestrator {
       if (targetPath) {
         this.deps.emitOutput({
           agent: agentName,
-          chunk: `document_open_tab(${JSON.stringify({ path: targetPath }).slice(0, 180)})`,
+          chunk: redactDocumentVisibleText(`document_open_tab(${JSON.stringify({ path: targetPath }).slice(0, 180)})`),
           type: 'tool_use',
         })
         const openResult = await this.deps.executeToolCall('document_open_tab', { path: targetPath }, toolContext)
-        this.deps.emitOutput({ agent: agentName, chunk: openResult.text.slice(0, 200), type: 'tool_result' })
+        this.deps.emitOutput({ agent: agentName, chunk: redactModelVisibleToolText(openResult.text).slice(0, 200), type: 'tool_result' })
         this.deps.log(`deterministic section format open result=${openResult.text.slice(0, 180)}`)
         if (isDocumentActionFailure(openResult)) return false
       }
@@ -157,7 +165,7 @@ export class DocumentDomainOrchestrator {
         type: 'tool_use',
       })
       const formatResult = await this.deps.executeToolCall('document_format_section', formatArgs, toolContext)
-      this.deps.emitOutput({ agent: agentName, chunk: formatResult.text.slice(0, 200), type: 'tool_result' })
+      this.deps.emitOutput({ agent: agentName, chunk: redactModelVisibleToolText(formatResult.text).slice(0, 200), type: 'tool_result' })
       this.deps.log(`deterministic section format result=${formatResult.text.slice(0, 180)}`)
       if (isDocumentActionFailure(formatResult) || isDocumentNoMutationText(formatResult.text)) {
         return false
@@ -169,7 +177,7 @@ export class DocumentDomainOrchestrator {
         type: 'tool_use',
       })
       const saveResult = await this.deps.executeToolCall('document_save_tab', {}, toolContext)
-      this.deps.emitOutput({ agent: agentName, chunk: saveResult.text.slice(0, 200), type: 'tool_result' })
+      this.deps.emitOutput({ agent: agentName, chunk: redactModelVisibleToolText(saveResult.text).slice(0, 200), type: 'tool_result' })
       this.deps.log(`deterministic section format save result=${saveResult.text.slice(0, 180)}`)
       if (isDocumentActionFailure(saveResult)) return false
 
@@ -179,14 +187,15 @@ export class DocumentDomainOrchestrator {
         `- ${formatResult.text}`,
         `- ${saveResult.text}`,
       ].join('\n')
+      const visibleSummary = redactDocumentVisibleText(summary)
       this.emitStructuredTaskPatch({
         agentName,
         taskTitle: '文档格式优化',
         taskSummary: `已完成：${targetScope}`,
         detailTitle: targetScope,
       })
-      this.deps.emitOutput({ agent: agentName, chunk: summary, type: 'text' })
-      onAssistantSummary?.(summary)
+      this.deps.emitOutput({ agent: agentName, chunk: visibleSummary, type: 'text' })
+      onAssistantSummary?.(visibleSummary)
       return true
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error)
@@ -269,14 +278,15 @@ export class DocumentDomainOrchestrator {
             `- 文件: ${targetPath}`,
             `- ${directResult.message}`,
           ].join('\n')
+          const visibleSummary = redactDocumentVisibleText(summary)
           this.emitStructuredTaskPatch({
             agentName,
             taskTitle: '章节改写',
             taskSummary: `已完成：${finalPlan.sectionTitle}`,
             detailTitle: finalPlan.sectionTitle,
           })
-          this.deps.emitOutput({ agent: agentName, chunk: summary, type: 'text' })
-          onAssistantSummary(summary)
+          this.deps.emitOutput({ agent: agentName, chunk: visibleSummary, type: 'text' })
+          onAssistantSummary(visibleSummary)
           return true
         }
         this.deps.log(`deterministic section rewrite fallback to tool chain: ${directResult.message}`)
@@ -285,11 +295,11 @@ export class DocumentDomainOrchestrator {
       if (targetPath) {
         this.deps.emitOutput({
           agent: agentName,
-          chunk: `document_open_tab(${JSON.stringify({ path: targetPath }).slice(0, 180)})`,
+          chunk: redactDocumentVisibleText(`document_open_tab(${JSON.stringify({ path: targetPath }).slice(0, 180)})`),
           type: 'tool_use',
         })
         const openResult = await this.deps.executeToolCall('document_open_tab', { path: targetPath }, toolContext)
-        this.deps.emitOutput({ agent: agentName, chunk: openResult.text.slice(0, 200), type: 'tool_result' })
+        this.deps.emitOutput({ agent: agentName, chunk: redactModelVisibleToolText(openResult.text).slice(0, 200), type: 'tool_result' })
         this.deps.log(`deterministic section rewrite open result=${openResult.text.slice(0, 180)}`)
         if (isDocumentActionFailure(openResult)) return false
       }
@@ -304,7 +314,7 @@ export class DocumentDomainOrchestrator {
         type: 'tool_use',
       })
       const rewriteResult = await this.deps.executeToolCall('document_rewrite_section', rewriteArgs, toolContext)
-      this.deps.emitOutput({ agent: agentName, chunk: rewriteResult.text.slice(0, 200), type: 'tool_result' })
+      this.deps.emitOutput({ agent: agentName, chunk: redactModelVisibleToolText(rewriteResult.text).slice(0, 200), type: 'tool_result' })
       this.deps.log(`deterministic section rewrite tool result=${rewriteResult.text.slice(0, 180)}`)
       if (isDocumentActionFailure(rewriteResult) || isDocumentNoMutationText(rewriteResult.text)) {
         return false
@@ -316,7 +326,7 @@ export class DocumentDomainOrchestrator {
         type: 'tool_use',
       })
       const saveResult = await this.deps.executeToolCall('document_save_tab', {}, toolContext)
-      this.deps.emitOutput({ agent: agentName, chunk: saveResult.text.slice(0, 200), type: 'tool_result' })
+      this.deps.emitOutput({ agent: agentName, chunk: redactModelVisibleToolText(saveResult.text).slice(0, 200), type: 'tool_result' })
       this.deps.log(`deterministic section rewrite save result=${saveResult.text.slice(0, 180)}`)
       if (isDocumentActionFailure(saveResult)) return false
 
@@ -325,14 +335,15 @@ export class DocumentDomainOrchestrator {
         `- ${rewriteResult.text}`,
         `- ${saveResult.text}`,
       ].join('\n')
+      const visibleSummary = redactDocumentVisibleText(summary)
       this.emitStructuredTaskPatch({
         agentName,
         taskTitle: '章节改写',
         taskSummary: `已完成：${finalPlan.sectionTitle}`,
         detailTitle: finalPlan.sectionTitle,
       })
-      this.deps.emitOutput({ agent: agentName, chunk: summary, type: 'text' })
-      onAssistantSummary(summary)
+      this.deps.emitOutput({ agent: agentName, chunk: visibleSummary, type: 'text' })
+      onAssistantSummary(visibleSummary)
       return true
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error)

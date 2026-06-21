@@ -4,10 +4,11 @@ import { existsSync, readFileSync } from 'fs'
 import type { SkillRunRequest, SkillRunResult } from '../skills-runtime/runtime-manager'
 import { atomicWriteJson } from './atomic-write'
 import { upsertDetachedSkillTaskRun } from './skills/skill-task-tracker'
+import type { NormalizedRunStateStatus } from './task-projection/run-state-schema'
 import { selectRunStateCandidate } from './task-projection/run-state-selection'
 import { logAgentMetric } from './metrics'
 
-export type DetachedSkillTaskStatus = 'running' | 'done' | 'failed' | 'cancelled' | 'blocked'
+export type DetachedSkillTaskStatus = NormalizedRunStateStatus
 
 export interface DetachedSkillTaskRecord {
   id: string

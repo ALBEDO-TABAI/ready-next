@@ -284,6 +284,14 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
     infrastructureWatchdogs.delete(key)
   }
 
+  function reportInfrastructureTimeoutToMain(scopeId: string, requestId: string, elapsedMs: number): void {
+    const report = typeof window !== 'undefined'
+      ? window.electronAPI?.agent?.reportInfrastructureTimeout
+      : undefined
+    if (typeof report !== 'function') return
+    void report({ scopeId, requestId, elapsedMs }).catch(() => undefined)
+  }
+
   function fireInfrastructureTimeout(scopeId: string, requestId: string): void {
     const key = watchdogKey(scopeId, requestId)
     const watchdog = infrastructureWatchdogs.get(key)
@@ -295,6 +303,8 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
     const state = store.getState()
     const runState = state.scopeRunStates?.[scopeId]
     if (runState && runState.requestId !== requestId) return
+
+    reportInfrastructureTimeoutToMain(scopeId, requestId, watchdog.timeoutMs)
 
     store.setState((current: { currentScopeId?: string | null; sessions?: Record<string, unknown>; currentAgent?: string }) => {
       const sessionId = sessionKeyForScopeId(current, scopeId)

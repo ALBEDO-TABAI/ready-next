@@ -7,6 +7,7 @@ import type {
   ScopeRunWaitingFor,
 } from '../contracts/types'
 import type { SkillTaskLifecycleReason } from '../contracts/run-contracts'
+import { DETACHED_TASK_ERROR_KINDS } from '../contracts/error-kinds'
 import { parseRunStateJson, type NormalizedRunStateStatus } from '../task-projection/run-state-schema'
 import { getRepositoryDatabase } from '../../repositories/database-accessor'
 import {
@@ -1107,7 +1108,7 @@ export function upsertDetachedSkillTaskRun(record: {
       runStatePath: record.runStatePath ?? null,
       sceneScoresPath: record.sceneScoresPath ?? null,
       deliveryReportPath: record.deliveryReportPath ?? null,
-      failureKind: effectiveStatus === 'failed' ? 'detached_task_failed' : null,
+      failureKind: effectiveStatus === 'failed' ? DETACHED_TASK_ERROR_KINDS.taskFailed.code : null,
       failureDetail: effectiveStatus === 'failed' ? record.error ?? null : null,
       jobId: record.id,
       detachedTaskId: record.id,
@@ -1138,7 +1139,7 @@ export function upsertDetachedSkillTaskRun(record: {
     runStatePath: record.runStatePath ?? existing.runStatePath ?? null,
     sceneScoresPath: record.sceneScoresPath ?? existing.sceneScoresPath ?? null,
     deliveryReportPath: record.deliveryReportPath ?? existing.deliveryReportPath ?? null,
-    failureKind: effectiveStatus === 'failed' ? 'detached_task_failed' : null,
+    failureKind: effectiveStatus === 'failed' ? DETACHED_TASK_ERROR_KINDS.taskFailed.code : null,
     failureDetail: effectiveStatus === 'failed' ? record.error ?? null : null,
     resumePayload,
     updatedAt: record.updatedAt,

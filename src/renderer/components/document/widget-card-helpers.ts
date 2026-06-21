@@ -146,6 +146,14 @@ function replaceCloneCanvasWithImages(cloneRoot: HTMLElement, sourceRoot: HTMLEl
   })
 }
 
+export function prepareSvgElementsForWidgetExport(root: HTMLElement): void {
+  for (const svg of Array.from(root.querySelectorAll('svg'))) {
+    if (!svg.getAttribute('xmlns')) {
+      svg.setAttribute('xmlns', 'http://www.w3.org/2000/svg')
+    }
+  }
+}
+
 function buildWidgetExportSvgMarkup(
   htmlMarkup: string,
   styleBlock: string,
@@ -230,6 +238,7 @@ async function renderWidgetToPngBase64(
     )
     const clone = root.cloneNode(true) as HTMLElement
     replaceCloneCanvasWithImages(clone, root)
+    prepareSvgElementsForWidgetExport(clone)
 
     const svgMarkup = buildWidgetExportSvgMarkup(clone.outerHTML, exportStyleBlock, width, height)
     const image = await loadImage(svgMarkupToDataUrl(svgMarkup))

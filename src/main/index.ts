@@ -357,8 +357,8 @@ async function showMainWindow(): Promise<void> {
 
 const MAIN_WINDOW_RENDERER_RETRY_DELAY_MS = 500
 const TRANSPARENT_SURFACE_REFRESH_DELAY_MS = 50
-const STARTUP_SPLASH_MIN_VISIBLE_MS = 2400
-const STARTUP_SPLASH_CLOSE_FALLBACK_MS = 9000
+const STARTUP_SPLASH_MIN_VISIBLE_MS = 900
+const STARTUP_SPLASH_CLOSE_FALLBACK_MS = 5000
 let transparentSurfaceRefreshInFlight = false
 
 async function refreshMainWindowTransparentSurface(): Promise<void> {
@@ -373,11 +373,6 @@ async function refreshMainWindowTransparentSurface(): Promise<void> {
   } finally {
     transparentSurfaceRefreshInFlight = false
   }
-}
-
-function resolveStartupSplashVariant(): 'orange' | 'pink' {
-  const skin = resolveStoredThemeSkin()
-  return skin === 'solid-green-glass' || skin === 'solid-blue-glass' ? 'pink' : 'orange'
 }
 
 async function loadRendererRoute(window: BrowserWindow, hashPath?: string): Promise<void> {
@@ -462,12 +457,11 @@ function showStartupSplashWindow(splashWindow: BrowserWindow): void {
   startupSplashShownAtMs ??= Date.now()
 }
 
-async function createStartupSplashWindow(): Promise<void> {
+async function createStartupSplashWindow(variant: 'orange' | 'pink' = 'orange'): Promise<void> {
   if (startupSplashWindow && !startupSplashWindow.isDestroyed()) return
 
   startupSplashFinishing = false
   startupSplashShownAtMs = null
-  const variant = resolveStartupSplashVariant()
   const splashWindow = new BrowserWindow({
     width: 650,
     height: 190,
@@ -950,6 +944,7 @@ app.whenReady().then(async () => {
   electronApp.setAppUserModelId('com.ready.app')
   applyAppIcon()
   setupApplicationMenu()
+  await createStartupSplashWindow()
 
   // Reap any orphaned child processes from a previous Ready instance that was
   // force-quit / crashed. Must run BEFORE rsshub / skill runtime spawns so we
@@ -974,7 +969,6 @@ app.whenReady().then(async () => {
     stopBootForDatabaseFailure(error)
     return
   }
-  await createStartupSplashWindow()
   try {
     reconcileStartupRunsOnStartup()
   } catch (error) {

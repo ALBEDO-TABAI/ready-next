@@ -8,6 +8,7 @@ import type { ExecutionHostRequest, ExecutionHostResult } from '../contracts/run
 import type { IntentClassification } from '../intent-classifier'
 import type { RequestEnvelope } from '../contracts/request-envelope'
 import type { ContinuationIntent, ContinuationState } from '../contracts/continuation-state'
+import type { AbortInitiator } from '../contracts/run-contracts-internal'
 import { AgentSessionManager, parseSessionKey } from '../session/session-manager'
 import { createScopedRunCollector, type SendAndCollectResult } from '../task-projection/run-collector'
 import { RunCleanupRegistry, type RunCleanupCallback } from '../task-projection/run-cleanup-registry'
@@ -42,6 +43,20 @@ interface ReadyAgentOrchestratorOptions {
   browserController?: BrowserController
   sidecarManager?: SidecarManager
   agentSdkRuntimeDeps?: AgentSdkRuntimeDeps
+  mainRunNoProgressTimeoutMs?: number
+  nowMs?: () => number
+  scheduleNoProgressCheck?: (callback: () => void, delayMs: number) => unknown
+  clearNoProgressCheck?: (handle: unknown) => void
+}
+
+const DEFAULT_MAIN_RUN_NO_PROGRESS_TIMEOUT_MS = 15 * 60 * 1000
+
+interface ActiveRunLiveness {
+  agent: string
+  sessionId?: string
+  requestId: string
+  lastProgressAt: number
+  timer: unknown | null
 }
 
 type SendAndCollectExecutionResult = SendAndCollectResult & {
@@ -49,6 +64,15 @@ type SendAndCollectExecutionResult = SendAndCollectResult & {
 }
 
 type PersonaSystemPromptResolver = (agent: string) => Promise<string | undefined>
+
+export interface StopActiveGenerationResult {
+  runId: string | null
+}
+
+export interface RequestScopedStopActiveGenerationResult extends StopActiveGenerationResult {
+  state: 'cancel_requested' | 'stale' | 'not_found'
+  activeRunId?: string | null
+}
 
 interface CompactSessionReport {
   beforeTokens: number
@@ -91,10 +115,23 @@ export class ReadyAgentOrchestrator extends EventEmitter {
   private readonly descriptors = new Map<string, SessionDescriptor>()
   private readonly runCleanupRegistry = new RunCleanupRegistry()
   private readonly activeRunIds = new Map<string, string>()
+  private readonly activeRunLiveness = new Map<string, ActiveRunLiveness>()
+  private readonly mainRunNoProgressTimeoutMs: number
+  private readonly nowMs: () => number
+  private readonly scheduleNoProgressCheck: (callback: () => void, delayMs: number) => unknown
+  private readonly clearNoProgressCheck: (handle: unknown) => void
   private personaResolver: PersonaSystemPromptResolver | null = null
 
   constructor(options?: ReadyAgentOrchestratorOptions) {
     super()
+    this.mainRunNoProgressTimeoutMs = typeof options?.mainRunNoProgressTimeoutMs === 'number' && Number.isFinite(options.mainRunNoProgressTimeoutMs) && options.mainRunNoProgressTimeoutMs > 0
+      ? options.mainRunNoProgressTimeoutMs
+      : DEFAULT_MAIN_RUN_NO_PROGRESS_TIMEOUT_MS
+    this.nowMs = options?.nowMs || (() => Date.now())
+    this.scheduleNoProgressCheck = options?.scheduleNoProgressCheck || ((callback, delayMs) => setTimeout(callback, delayMs))
+    this.clearNoProgressCheck = options?.clearNoProgressCheck || ((handle) => {
+      clearTimeout(handle as ReturnType<typeof setTimeout>)
+    })
     this.domainAdapterEngine = new DirectChatEngine()
     this.sdkEngine = new AgentSdkRuntime({
       domainAdapters: this.domainAdapterEngine.getDomainAdapters(),
@@ -113,14 +150,13 @@ export class ReadyAgentOrchestrator extends EventEmitter {
       },
     })
 
-    // Stage U PR U1.3 — DirectChatEngine no longer participates in event
-    // emission. It survives as a DomainAdapter / SkillContextOrchestrator
-    // provider only (read-only consumer of `getDomainAdapters()` /
-    // `getSkillContextOrchestrator()`). Binding its EventEmitter here used
-    // to mean any code path that touched the legacy engine could surface
-    // events on `agent:stream` / `agent:status` / `agent:error` alongside
-    // the SDK runtime — exactly the dual-shape pollution U1.2 / U1.3 are
-    // closing. SDK runtime is the single emission producer now.
+    // Stage U PR U1.3 + P6f — DirectChatEngine no longer participates in
+    // renderer-facing event emission or production turn execution. It still
+    // survives as the DomainAdapter / SkillContextOrchestrator and dependency
+    // host for now. Binding its EventEmitter here used to mean any code path
+    // that touched the legacy engine could surface events on `agent:stream` /
+    // `agent:status` / `agent:error` alongside the SDK runtime. SDK runtime is
+    // the single emission producer and live turn executor now.
     this.bindEngineEvents(this.sdkEngine)
 
     if (options?.browserController) {
@@ -136,6 +172,7 @@ export class ReadyAgentOrchestrator extends EventEmitter {
     engine.on('output', (payload) => {
       const descriptor = this.resolveDescriptor(payload.agent)
       const taskKey = this.toTaskKey(descriptor.agent, descriptor.sessionId)
+      this.refreshActiveRunProgressForEvent(payload.agent, descriptor, this.readPayloadRunId(payload))
       if (payload.type === 'done') {
         this.sessions.setState(taskKey, 'done')
       } else if (payload.type === 'error') {
@@ -155,6 +192,7 @@ export class ReadyAgentOrchestrator extends EventEmitter {
     engine.on('status', (payload) => {
       const descriptor = this.resolveDescriptor(payload.agent)
       const taskKey = this.toTaskKey(descriptor.agent, descriptor.sessionId)
+      this.refreshActiveRunProgressForEvent(payload.agent, descriptor, this.readPayloadRunId(payload))
       if (payload.status === 'working') {
         this.sessions.setState(taskKey, 'planning')
       } else if (payload.status === 'done') {
@@ -174,6 +212,7 @@ export class ReadyAgentOrchestrator extends EventEmitter {
     engine.on('error', (payload) => {
       const descriptor = this.resolveDescriptor(payload.agent)
       const taskKey = this.toTaskKey(descriptor.agent, descriptor.sessionId)
+      this.refreshActiveRunProgressForEvent(payload.agent, descriptor, this.readPayloadRunId(payload))
       this.sessions.setState(taskKey, 'failed', payload.error)
       this.emit('error', {
         ...payload,
@@ -184,12 +223,117 @@ export class ReadyAgentOrchestrator extends EventEmitter {
 
     engine.on('toolAction', (payload) => {
       const descriptor = this.resolveDescriptor(payload.agent)
+      this.refreshActiveRunProgressForEvent(payload.agent, descriptor, this.readPayloadRunId(payload))
       this.emit('toolAction', {
         ...payload,
         agent: descriptor.agent,
         sessionId: descriptor.sessionId,
       })
     })
+  }
+
+  private readPayloadRunId(payload: { runId?: unknown }): string | undefined {
+    return typeof payload.runId === 'string' && payload.runId.length > 0
+      ? payload.runId
+      : undefined
+  }
+
+  private refreshActiveRunProgressForEvent(
+    rawAgentKey: string,
+    descriptor: SessionDescriptor,
+    requestId?: string,
+  ): void {
+    const parsed = parseSessionKey(rawAgentKey)
+    const parsedSessionId = parsed.sessionId ?? undefined
+    if (this.refreshActiveRunProgress(parsed.agent, parsedSessionId, requestId)) return
+    this.refreshActiveRunProgress(descriptor.agent, descriptor.sessionId, requestId)
+  }
+
+  private registerActiveRun(agent: string, sessionId: string | undefined, requestId: string): void {
+    const taskKey = this.toTaskKey(agent, sessionId)
+    this.clearActiveRunIfMatches(taskKey)
+    this.activeRunIds.set(taskKey, requestId)
+    this.activeRunLiveness.set(taskKey, {
+      agent,
+      sessionId,
+      requestId,
+      lastProgressAt: this.nowMs(),
+      timer: null,
+    })
+    this.scheduleRunNoProgressGuard(taskKey, requestId)
+  }
+
+  private clearActiveRunIfMatches(taskKey: string, requestId?: string): string | null {
+    const activeRunId = this.activeRunIds.get(taskKey) || null
+    const liveness = this.activeRunLiveness.get(taskKey) || null
+    if (requestId && activeRunId && activeRunId !== requestId) return null
+    if (requestId && !activeRunId && liveness?.requestId !== requestId) return null
+    if (activeRunId) {
+      this.activeRunIds.delete(taskKey)
+    }
+    this.clearRunNoProgressGuard(taskKey, requestId)
+    return activeRunId || liveness?.requestId || null
+  }
+
+  private clearRunNoProgressGuard(taskKey: string, requestId?: string): void {
+    const liveness = this.activeRunLiveness.get(taskKey)
+    if (!liveness) return
+    if (requestId && liveness.requestId !== requestId) return
+    if (liveness.timer) {
+      this.clearNoProgressCheck(liveness.timer)
+    }
+    this.activeRunLiveness.delete(taskKey)
+  }
+
+  private refreshActiveRunProgress(agent: string, sessionId: string | undefined, requestId?: string): boolean {
+    const taskKey = this.toTaskKey(agent, sessionId)
+    const activeRunId = this.activeRunIds.get(taskKey)
+    if (!activeRunId) return false
+    if (requestId && activeRunId !== requestId) return false
+    const liveness = this.activeRunLiveness.get(taskKey)
+    if (!liveness || liveness.requestId !== activeRunId) return false
+    liveness.lastProgressAt = this.nowMs()
+    this.scheduleRunNoProgressGuard(taskKey, activeRunId)
+    return true
+  }
+
+  private scheduleRunNoProgressGuard(taskKey: string, requestId: string): void {
+    const liveness = this.activeRunLiveness.get(taskKey)
+    if (!liveness || liveness.requestId !== requestId) return
+    if (liveness.timer) {
+      this.clearNoProgressCheck(liveness.timer)
+      liveness.timer = null
+    }
+    const elapsedMs = Math.max(0, this.nowMs() - liveness.lastProgressAt)
+    const delayMs = Math.max(0, this.mainRunNoProgressTimeoutMs - elapsedMs)
+    const timer = this.scheduleNoProgressCheck(() => {
+      this.handleRunNoProgressTimeout(taskKey, requestId)
+    }, delayMs)
+    const unref = timer && (timer as { unref?: unknown }).unref
+    if (typeof unref === 'function') {
+      unref.call(timer)
+    }
+    liveness.timer = timer
+  }
+
+  private handleRunNoProgressTimeout(taskKey: string, requestId: string): void {
+    const liveness = this.activeRunLiveness.get(taskKey)
+    if (!liveness || liveness.requestId !== requestId) return
+    if (this.activeRunIds.get(taskKey) !== requestId) return
+    const elapsedMs = Math.max(0, this.nowMs() - liveness.lastProgressAt)
+    if (elapsedMs < this.mainRunNoProgressTimeoutMs) {
+      this.scheduleRunNoProgressGuard(taskKey, requestId)
+      return
+    }
+    const stopped = this.interruptActiveRunIfMatches(
+      liveness.agent,
+      liveness.sessionId,
+      requestId,
+      'timeout',
+    )
+    if (stopped.state === 'cancel_requested') {
+      this.sessions.setState(taskKey, 'cancelled', 'main_no_progress_timeout')
+    }
   }
 
   getRuntimeKernel(): AgentRuntimeKernel {
@@ -339,6 +483,7 @@ export class ReadyAgentOrchestrator extends EventEmitter {
     continuationIntent?: ContinuationIntent | null,
     continuationState?: ContinuationState | null,
     sessionIdOverride?: string,
+    sourceMessageId?: string | null,
   ): Promise<{
     success: boolean
     error?: string
@@ -371,7 +516,7 @@ export class ReadyAgentOrchestrator extends EventEmitter {
     }
     this.descriptors.set(internalKey, { agent, sessionId })
     this.sessions.setState(taskKey, 'queued')
-    this.activeRunIds.set(taskKey, effectiveRequestId)
+    this.registerActiveRun(agent, effectiveSessionId, effectiveRequestId)
     try {
       let resolvedSystemPrompt = systemPrompt
       if (systemPrompt === undefined && this.personaResolver) {
@@ -399,15 +544,14 @@ export class ReadyAgentOrchestrator extends EventEmitter {
         taskBudgetRuntime,
         continuationIntent,
         continuationState,
+        sourceMessageId: sourceMessageId ?? null,
       })
       if (!result.success) {
         this.sessions.setState(taskKey, 'failed', result.error)
       }
       return result
     } finally {
-      if (this.activeRunIds.get(taskKey) === effectiveRequestId) {
-        this.activeRunIds.delete(taskKey)
-      }
+      this.clearActiveRunIfMatches(taskKey, effectiveRequestId)
       await this.drainRunCleanup(effectiveRequestId)
     }
   }
@@ -427,6 +571,7 @@ export class ReadyAgentOrchestrator extends EventEmitter {
     continuationIntent?: ContinuationIntent | null,
     continuationState?: ContinuationState | null,
     sessionIdOverride?: string,
+    sourceMessageId?: string | null,
   ): Promise<SendAndCollectExecutionResult> {
     const collector = createScopedRunCollector({ agent, sessionId, requestId })
     const cleanupFns: Array<() => void> = []
@@ -462,6 +607,7 @@ export class ReadyAgentOrchestrator extends EventEmitter {
       continuationIntent,
       continuationState,
       sessionIdOverride,
+      sourceMessageId,
     ).then((result) => {
       executionDiagnostics = result.executionDiagnostics || null
       resolvedTaskId = result.taskId
@@ -573,6 +719,7 @@ export class ReadyAgentOrchestrator extends EventEmitter {
       request.continuationIntent,
       request.continuationState,
       request.sessionIdOverride,
+      request.sourceMessageId ?? null,
     )
     return {
       success: result.success,
@@ -625,17 +772,49 @@ export class ReadyAgentOrchestrator extends EventEmitter {
     }
   }
 
-  kill(agent: string, sessionId?: string): void {
+  private stopActiveGeneration(
+    agent: string,
+    sessionId: string | undefined,
+    initiator: AbortInitiator,
+  ): StopActiveGenerationResult {
     const taskKey = this.toTaskKey(agent, sessionId)
-    const runId = this.activeRunIds.get(taskKey)
+    const runId = this.activeRunIds.get(taskKey) || null
     const internalKey = this.toInternalSessionKey(agent, sessionId)
-    this.domainAdapterEngine.stopGeneration(internalKey)
-    this.sdkEngine.stopGeneration(internalKey)
-    this.sessions.setState(taskKey, 'cancelled')
+    this.domainAdapterEngine.stopGeneration(internalKey, initiator)
+    this.sdkEngine.stopGeneration(internalKey, initiator)
     if (runId) {
-      this.activeRunIds.delete(taskKey)
+      this.clearActiveRunIfMatches(taskKey, runId)
       void this.drainRunCleanup(runId)
     }
+    return { runId }
+  }
+
+  kill(agent: string, sessionId?: string): void {
+    const taskKey = this.toTaskKey(agent, sessionId)
+    this.stopActiveGeneration(agent, sessionId, 'user_stop')
+    this.sessions.setState(taskKey, 'cancelled')
+  }
+
+  interruptForSuspend(agent: string, sessionId?: string): StopActiveGenerationResult {
+    return this.stopActiveGeneration(agent, sessionId, 'manual_suspend')
+  }
+
+  interruptActiveRunIfMatches(
+    agent: string,
+    sessionId: string | undefined,
+    requestId: string,
+    initiator: AbortInitiator,
+  ): RequestScopedStopActiveGenerationResult {
+    const taskKey = this.toTaskKey(agent, sessionId)
+    const activeRunId = this.activeRunIds.get(taskKey) || null
+    if (!activeRunId) {
+      return { state: 'not_found', runId: null }
+    }
+    if (activeRunId !== requestId) {
+      return { state: 'stale', runId: null, activeRunId }
+    }
+    const stopped = this.stopActiveGeneration(agent, sessionId, initiator)
+    return { state: 'cancel_requested', runId: stopped.runId }
   }
 
   async compactSession(agent: string, sessionId?: string): Promise<CompactSessionResult> {
@@ -732,7 +911,7 @@ export class ReadyAgentOrchestrator extends EventEmitter {
     // `'closed'` so the V3.3d guard rejects it as a live target.
     const runId = this.activeRunIds.get(taskKey)
     if (runId) {
-      this.activeRunIds.delete(taskKey)
+      this.clearActiveRunIfMatches(taskKey, runId)
       void this.drainRunCleanup(runId)
     }
     if (wasLive) {

@@ -56,7 +56,7 @@ html.ready-startup-preview-root body {
 }
 
 .startup-preview__matrix--logo {
-  will-change: clip-path;
+  will-change: opacity;
 }
 
 .startup-preview__matrix--logo svg {

@@ -2294,6 +2294,123 @@ const migrations: Migration[] = [
       const has = (name: string) => cols.some((c) => c.name === name)
       if (!has('merged_into_agent_id')) db.exec('ALTER TABLE agents ADD COLUMN merged_into_agent_id TEXT')
     }
+  },
+  {
+    // P8g-2 — specialist blueprint review state and one-shot confirmation
+    // tokens must survive app restarts before the factory creates real assets.
+    name: '060_specialist_blueprint_persistence',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS specialist_blueprints (
+          blueprint_id TEXT PRIMARY KEY,
+          status TEXT NOT NULL,
+          specialist_id TEXT,
+          source TEXT,
+          content_json TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+      `)
+      db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_specialist_blueprints_status
+        ON specialist_blueprints(status)
+      `)
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS specialist_blueprint_confirmations (
+          token_id TEXT PRIMARY KEY,
+          blueprint_id TEXT NOT NULL,
+          session_id TEXT NOT NULL,
+          run_id TEXT,
+          blueprint_hash TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          used_at TEXT
+        )
+      `)
+    }
+  },
+  {
+    // P1b-C06 — terminal projection sync failures must survive process
+    // restarts so the runtime can retry them without blocking event ack.
+    name: '061_pending_projection_syncs',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS pending_projection_syncs (
+          id TEXT PRIMARY KEY,
+          status TEXT NOT NULL CHECK(status IN ('pending', 'exhausted')),
+          attempts INTEGER NOT NULL DEFAULT 0,
+          next_attempt_at TEXT,
+          last_error TEXT,
+          payload_json TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+      `)
+      db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_pending_projection_syncs_due
+        ON pending_projection_syncs(status, next_attempt_at)
+      `)
+    }
+  },
+  {
+    // P8g-8b — Studio content edits are durable staged proposals. The
+    // active RULES/FOUNDATION/card files are only mutated after confirm.
+    name: '062_specialist_content_edit_proposals',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS specialist_content_edit_proposals (
+          proposal_id TEXT PRIMARY KEY,
+          agent_id TEXT NOT NULL,
+          target_kind TEXT NOT NULL,
+          target_rel_path TEXT NOT NULL,
+          base_hash TEXT NOT NULL,
+          base_content TEXT NOT NULL,
+          proposed_content TEXT NOT NULL,
+          status TEXT NOT NULL CHECK(status IN ('staged', 'applied', 'rejected', 'conflict')),
+          provenance_json TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          applied_at TEXT
+        )
+      `)
+      db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_specialist_content_edit_agent_status
+        ON specialist_content_edit_proposals(agent_id, status, updated_at)
+      `)
+    }
+  },
+  {
+    // P4-D/C27 — session recall metadata must carry the owning scope agent
+    // so automatic recall cannot leak another specialist's history into the
+    // current agent prompt. Legacy rows are backfilled from chat_conversations;
+    // rows without a surviving conversation remain NULL and are excluded by
+    // agent-filtered reads.
+    name: '063_session_recall_agent_column',
+    up: (db) => {
+      const columns = db
+        .prepare('PRAGMA table_info(session_recall_metadata)')
+        .all<{ name: string }>()
+      const hasAgent = columns.some((column) => column.name === 'agent')
+      if (!hasAgent) {
+        db.exec('ALTER TABLE session_recall_metadata ADD COLUMN agent TEXT')
+      }
+      db.exec(`
+        UPDATE session_recall_metadata
+        SET agent = (
+          SELECT chat_conversations.agent
+          FROM chat_conversations
+          WHERE chat_conversations.id = session_recall_metadata.conversation_id
+        )
+        WHERE agent IS NULL
+          AND EXISTS (
+            SELECT 1
+            FROM chat_conversations
+            WHERE chat_conversations.id = session_recall_metadata.conversation_id
+          )
+      `)
+      db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_session_recall_agent
+        ON session_recall_metadata(agent, channel_key, updated_at DESC)
+      `)
+    }
   }
 ]
 
@@ -2312,6 +2429,14 @@ const migrations: Migration[] = [
  */
 export function __getMigrationNamesForTests(): string[] {
   return migrations.map((m) => m.name)
+}
+
+export function __runMigrationForTests(name: string, db: MigrationDatabase): void {
+  const migration = migrations.find((item) => item.name === name)
+  if (!migration) {
+    throw new Error(`Migration not found: ${name}`)
+  }
+  migration.up(db)
 }
 
 export function runMigrations(db: MigrationDatabase): void {

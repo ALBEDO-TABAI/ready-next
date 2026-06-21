@@ -64,6 +64,13 @@ export const BrowserExtractStructuredSchema = z.object({
   limit: z.number().optional().describe('最多提取条数'),
   min_width: z.number().optional().describe('图片提取最小宽度'),
   custom_script: z.string().optional().describe('可选：直接执行自定义提取脚本'),
+  script_template: z
+    .enum(['read_text', 'read_attr', 'read_all_text', 'count_selector', 'exists_selector', 'read_rect', 'read_meta'])
+    .optional()
+    .describe('可选：命名只读脚本模板；传入后由代码侧拼装固定只读 JS'),
+  selector: z.string().optional().describe('script_template 需要选择器时使用'),
+  attr: z.string().optional().describe('script_template=read_attr 时读取的属性名'),
+  name: z.string().optional().describe('script_template=read_meta 时读取 title/href/readyState 或 meta name/property'),
 })
 
 export const BrowserScrollCollectSchema = z.object({
@@ -77,6 +84,13 @@ export const BrowserScrollCollectSchema = z.object({
   max_scrolls: z.number().optional().describe('最大滚动次数'),
   scroll_delay_ms: z.number().optional().describe('每次滚动后的等待时间'),
   custom_script: z.string().optional().describe('可选：直接执行自定义提取脚本'),
+  script_template: z
+    .enum(['read_text', 'read_attr', 'read_all_text', 'count_selector', 'exists_selector', 'read_rect', 'read_meta'])
+    .optional()
+    .describe('可选：命名只读脚本模板；传入后由代码侧拼装固定只读 JS'),
+  selector: z.string().optional().describe('script_template 需要选择器时使用'),
+  attr: z.string().optional().describe('script_template=read_attr 时读取的属性名'),
+  name: z.string().optional().describe('script_template=read_meta 时读取 title/href/readyState 或 meta name/property'),
 })
 
 export const BrowserStartTaskSchema = z.object({
@@ -161,7 +175,18 @@ export const BrowserRunWorkflowSchema = z.object({
 })
 
 export const BrowserExecuteJsSchema = z.object({
-  code: z.string().describe('要执行的 JavaScript 代码'),
+  code: z.string().optional().describe('旧自由 JavaScript 入口；P3c 后普通站点会拒绝自由脚本，请改用命名只读模板'),
+  template: z
+    .enum(['read_text', 'read_attr', 'read_all_text', 'count_selector', 'exists_selector', 'read_rect', 'read_meta'])
+    .optional()
+    .describe('命名只读脚本模板，由代码侧拼装固定只读 JS'),
+  script_template: z
+    .enum(['read_text', 'read_attr', 'read_all_text', 'count_selector', 'exists_selector', 'read_rect', 'read_meta'])
+    .optional()
+    .describe('命名只读脚本模板别名，优先于 template'),
+  selector: z.string().optional().describe('template/script_template 需要选择器时使用'),
+  attr: z.string().optional().describe('read_attr 模板读取的属性名'),
+  name: z.string().optional().describe('read_meta 模板读取 title/href/readyState 或 meta name/property'),
   tab_id: TabIdOptional,
 })
 

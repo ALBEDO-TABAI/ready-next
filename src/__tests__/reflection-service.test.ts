@@ -2,6 +2,7 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert'
 
 import { ReflectionService } from '../main/modules/agent-control/reflection-service'
+import type { CasMergeReport, PictureObservation } from '../main/modules/agent-control/maintenance/cas-merge'
 
 function createMemoryRepositoryStub() {
   const created: Array<Record<string, unknown>> = []
@@ -28,16 +29,22 @@ function createMemoryRepositoryStub() {
 }
 
 describe('ReflectionService', () => {
-  it('only stores conservative user preferences and summaries', async () => {
+  it('routes conservative user preferences through CAS without resident/scope memory writes', async () => {
     const memoryRepository = createMemoryRepositoryStub()
-    const knowledge = new Map<string, string>()
+    const casCalls: Array<{ userId: string; observations: PictureObservation[] }> = []
     const service = new ReflectionService({
       memoryRepository: memoryRepository as never,
-      knowledgeRepository: {
-        set: async (key: string, value: string) => {
-          knowledge.set(key, value)
-        },
-        get: async (key: string) => knowledge.get(key) || null
+      pictureCasMerge: ({ userId, observations }): CasMergeReport => {
+        casCalls.push({ userId, observations })
+        return {
+          decision: 'merged',
+          reason: 'cas_ok',
+          accepted: observations.length,
+          rejected: 0,
+          addedCount: 1,
+          droppedCount: 0,
+          mirrorSynced: false,
+        }
       },
       llmProvider: async () =>
         JSON.stringify({
@@ -70,46 +77,30 @@ describe('ReflectionService', () => {
       success: true
     })
 
-    assert.strictEqual(memoryRepository.created.length, 2)
-    assert.deepStrictEqual(
-      memoryRepository.created.map((item) => item.category),
-      ['user_preference', 'summary']
-    )
-    assert.deepStrictEqual(
-      memoryRepository.created.map((item) => item.sourceType),
-      ['resident_user', 'scope_memory']
-    )
-    assert.strictEqual(result.memoryCapture?.items.length, 2)
-    assert.ok(result.memoryCapture?.items.every((item) => item.category !== 'global_fact'))
-    assert.deepStrictEqual(
-      result.memoryCapture?.items.map((item) => item.sourceType),
-      ['resident_user', 'scope_memory']
-    )
+    assert.strictEqual(memoryRepository.created.length, 0)
+    assert.strictEqual(casCalls.length, 1)
+    assert.strictEqual(casCalls[0]?.userId, 'default-user')
+    assert.strictEqual(casCalls[0]?.observations.length, 1)
+    assert.strictEqual(result.memoryCapture ?? null, null)
+    assert.deepStrictEqual(result.globalFacts, [])
+    assert.strictEqual(result.sessionSummary, '整理了一版任务执行方案。')
   })
 
-  it('deduplicates repeated automatic preferences for the same user', async () => {
+  it('lets CAS skip repeated automatic preferences without writing prompt-visible memory', async () => {
     const memoryRepository = createMemoryRepositoryStub()
-    const knowledge = new Map<string, string>()
-    const existingKey = 'pref-existing'
-    knowledge.set(existingKey, 'User prefers concise answers')
-    memoryRepository.existingByCategory.set('default-user:user_preference', [
-      {
-        id: 'mem-existing',
-        userId: 'default-user',
-        category: 'user_preference',
-        title: 'Communication Style',
-        summary: 'User prefers concise answers',
-        contentKey: existingKey
-      }
-    ])
 
     const service = new ReflectionService({
       memoryRepository: memoryRepository as never,
-      knowledgeRepository: {
-        set: async (key: string, value: string) => {
-          knowledge.set(key, value)
-        },
-        get: async (key: string) => knowledge.get(key) || null
+      pictureCasMerge: (): CasMergeReport => {
+        return {
+          decision: 'gate_skip',
+          reason: 'all_duplicates',
+          accepted: 1,
+          rejected: 0,
+          addedCount: 0,
+          droppedCount: 0,
+          mirrorSynced: false,
+        }
       },
       llmProvider: async () =>
         JSON.stringify({
@@ -143,6 +134,6 @@ describe('ReflectionService', () => {
     })
 
     assert.strictEqual(memoryRepository.created.length, 0)
-    assert.deepStrictEqual(result.memoryCapture?.items || [], [])
+    assert.strictEqual(result.memoryCapture ?? null, null)
   })
 })

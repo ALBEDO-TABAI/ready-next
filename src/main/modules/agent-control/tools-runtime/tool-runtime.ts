@@ -6,10 +6,12 @@ import { isTerminalInfrastructureError } from '../../tools/tool-errors'
 import type { SidecarManager } from '../sidecar-manager'
 import type { AgentControlRuntime } from '../runtime-core/runtime'
 import type { ConversationScope } from '../contracts/types'
+import { TOOL_ADMISSION_ERROR_KINDS } from '../contracts/error-kinds'
 import type { BrowserController } from '../../browser-engine/ipc-handler'
 import type { ToolDefinition } from './tool-definition'
 import { defaultToolRegistry } from './tool-registry'
 import type { AgentSpawnContext } from '../../../../shared/skill-host-contract'
+import type { SpecialistBlueprintSourceMessageUnavailableReason } from '../../../../shared/agent-specialist-blueprint'
 import type { TurnFeatureFlags } from '../runtime-core/turn-feature-flags'
 import {
   buildExplicitNoSkillAuthorization,
@@ -79,6 +81,8 @@ export interface ToolRuntimeContext {
   sessionId?: string
   scopeId?: string
   currentUserText?: string
+  sourceMessageId?: string | null
+  sourceMessageUnavailableReason?: SpecialistBlueprintSourceMessageUnavailableReason | null
   requestEnvelope?: unknown
   runId?: string
   taskId?: string
@@ -488,7 +492,7 @@ export class ToolRuntime {
       return createToolExecutionOutput(buildUnknownToolMessage(toolName), {
         shape: 'json',
         data: {
-          errorKind: 'tool_not_registered',
+          errorKind: TOOL_ADMISSION_ERROR_KINDS.toolNotRegistered.code,
           toolName,
         },
       })
@@ -507,8 +511,7 @@ export class ToolRuntime {
         return createToolExecutionOutput(buildToolNotAllowedMessage(toolName, allowedToolNames || new Set()), {
           shape: 'json',
           data: {
-            errorKind: 'host_unavailable',
-            reason: 'tool_restricted_this_turn',
+            errorKind: TOOL_ADMISSION_ERROR_KINDS.toolRestrictedThisTurn.code,
             toolName,
           },
         })
@@ -517,8 +520,7 @@ export class ToolRuntime {
         return createToolExecutionOutput(buildToolNotAllowedMessage(toolName, allowedToolNames), {
           shape: 'json',
           data: {
-            errorKind: 'host_unavailable',
-            reason: 'tool_restricted_this_turn',
+            errorKind: TOOL_ADMISSION_ERROR_KINDS.toolRestrictedThisTurn.code,
             toolName,
           },
         })

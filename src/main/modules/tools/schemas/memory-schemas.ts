@@ -75,7 +75,7 @@ export const MemoryWriteCardSchema = z.object({
   status: z
     .enum(['staged', 'active'])
     .optional()
-    .describe('状态：默认 staged(待确认，不进注入)；用户明确要求记住时用 active'),
+    .describe('请求状态：模型写入会被强制 staged；active 只来自确认/晋升流程'),
   source: z.string().optional().describe('来源，一行 provenance'),
   site: z.string().optional().describe('站点域名，仅站点卡(knowledge/sites/*.md)需要'),
 })

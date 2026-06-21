@@ -431,6 +431,19 @@ export class TaskProjectionRepository implements TaskProjectionStore {
     ).all<TaskProjectionRow>(scopeId).map((row) => this.mapRow(row))
   }
 
+  listByOwnerAgent(ownerAgentId: string, limit = 20): TaskProjectionRecord[] {
+    const owner = String(ownerAgentId || '').trim()
+    if (!owner) return []
+    const normalizedLimit = Number.isFinite(Number(limit))
+      ? Math.max(1, Math.min(100, Math.trunc(Number(limit))))
+      : 20
+    const db = this.dbManager.getRawDb()
+    if (!db) throw new Error('Database not available')
+    return db.prepare(
+      'SELECT * FROM task_projections WHERE owner_agent_id = ? ORDER BY updated_at DESC LIMIT ?',
+    ).all<TaskProjectionRow>(owner, normalizedLimit).map((row) => this.mapRow(row))
+  }
+
   /**
    * EP3-A4 — the scope's effective injection owner: the most recently
    * updated row carrying an ownerAgentId. Once a task in this scope was

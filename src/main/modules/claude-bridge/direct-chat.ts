@@ -50,7 +50,6 @@ import { buildToolRuntimeContext } from '../agent-control/tools-runtime/tool-run
 import { TurnEngine } from '../agent-control/turn-engine'
 import {
   createToolExecutionOutput,
-  serializeToolExecutionOutput,
   type ToolExecutionOutput,
 } from '../agent-control/tools-runtime/tool-result-types'
 import { getToolResourceTag } from '../agent-control/tools-runtime/tool-parallelism-policy'
@@ -130,7 +129,6 @@ import { compactToolPolicyHistory } from './tool-policy-context'
 import { DEFAULT_API_REQUEST_TIMEOUT_MS } from './request-timeout-policy'
 import { ChatRepository } from '../repositories/chat-repository'
 import type { ConversationScope } from '../agent-control/contracts/types'
-import { compressHistoryForPrompt } from '../agent-control/compaction/context-compression'
 import { resolveExecutionIntentContext } from '../agent-control/execution-intent-resolver'
 import type { IntentClassification } from '../agent-control/intent-classifier'
 import { classifyIntent } from '../agent-control/intent-classifier'
@@ -810,7 +808,11 @@ export class DirectChatEngine extends EventEmitter {
         ? 'cancelled_user'
         : initiator === 'process_exit'
           ? 'process_exit'
-          : 'cancelled_runtime'
+          : initiator === 'manual_suspend'
+            ? 'manual_suspend'
+            : initiator === 'timeout'
+              ? 'main_no_progress_timeout'
+              : 'cancelled_runtime'
       this.unregisterSessionAbortSource(name, undefined, previousAbortController)
       previousAbortController.abort(new Error(message))
       session.abortController = null
@@ -1161,12 +1163,32 @@ export class DirectChatEngine extends EventEmitter {
           ? 'preempted'
           : reasonMessage === 'process_exit'
             ? 'process_exit'
-            : 'user_stop'
+            : reasonMessage === 'manual_suspend'
+              ? 'manual_suspend'
+              : reasonMessage === 'main_no_progress_timeout'
+                ? 'timeout'
+                : 'user_stop'
         const terminalReason: TurnTerminalReason = abortInitiator === 'user_stop'
           ? 'cancelled_user'
-          : 'cancelled_runtime'
+          : abortInitiator === 'manual_suspend'
+            ? 'manual_suspend'
+            : abortInitiator === 'timeout'
+              ? 'main_no_progress_timeout'
+              : 'cancelled_runtime'
         if (abortInitiator === 'user_stop') {
           emitOutputForRun('已手动停止，进度已保存至当前会话。', 'text')
+        }
+        if (abortInitiator === 'manual_suspend') {
+          return {
+            success: true,
+            finalText: '',
+            usedTools: [],
+            cancelled: false,
+            taskId,
+            taskProjectionId: taskId,
+            status: 'checkpoint',
+            terminalReason,
+          }
         }
         await finalizeRunOutcome({
           kind: abortInitiator === 'preempted' ? 'preempted' : 'cancelled',
@@ -1349,7 +1371,6 @@ export class DirectChatEngine extends EventEmitter {
         requestedTransport?: 'native' | 'text' | 'none'
         supportsNativeTools?: boolean
         preferTextToolBridgeOnce?: boolean
-        compressContext?: () => Promise<boolean> | boolean
         onBeforeRetry?: (result: unknown, attempt: number) => Promise<void> | void
       }) => this.requestToolLoopResponse(raw),
       executeToolBatch: async (raw: {
@@ -1458,7 +1479,6 @@ export class DirectChatEngine extends EventEmitter {
     requestedTransport?: 'native' | 'text' | 'none'
     supportsNativeTools?: boolean
     preferTextToolBridgeOnce?: boolean
-    compressContext?: () => Promise<boolean> | boolean
     onBeforeRetry?: (result: unknown, attempt: number) => Promise<void> | void
   }): Promise<TurnModelResponse> {
     if (params.capabilityLogLine) {
@@ -1504,7 +1524,6 @@ export class DirectChatEngine extends EventEmitter {
           expectedAllowedToolNames: params.allowedToolNames || [],
         },
       }),
-      compressContext: params.compressContext,
       onBeforeRetry: params.onBeforeRetry as any,
       buildVideoFrameFallbackMessages: () => this.videoFallbackService.buildVideoFrameFallbackMessages(params.session.messages),
       assignFallbackMessages: (messages) => {
@@ -1523,30 +1542,6 @@ export class DirectChatEngine extends EventEmitter {
       .filter((block) => block?.type === 'text' && typeof block.text === 'string')
       .map((block) => String(block.text || ''))
       .join('\n')
-  }
-
-  private compressSessionMessagesForRetry(session: DirectChatSession): boolean {
-    if (session.messages.length <= 6) return false
-    const earlierMessages = session.messages
-      .slice(0, -6)
-      .map((message) => ({
-        role: message.role,
-        content: this.extractIncomingText(message.content).trim(),
-      }))
-      .filter((message) => message.content.length > 0)
-    if (earlierMessages.length === 0) return false
-
-    const compressed = compressHistoryForPrompt(earlierMessages, {
-      keepRecent: 2,
-      maxChars: 900,
-    })
-    if (!compressed.compressed) return false
-
-    session.messages = [
-      { role: 'system', content: `更早对话已压缩以继续执行：\n${compressed.text}` },
-      ...session.messages.slice(-6),
-    ]
-    return true
   }
 
   private extractTaskIdFromText(text: string): string | null {

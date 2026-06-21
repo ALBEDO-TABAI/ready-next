@@ -6,6 +6,10 @@ import {
   type AgentSdkRuntimeDeps,
 } from '../main/modules/agent-control/runtime-core/agent-sdk-runtime'
 import type { AbortInitiator } from '../main/modules/agent-control/contracts/run-contracts-internal'
+import {
+  __setMetricSinkForTests,
+  type AgentMetricEvent,
+} from '../main/modules/agent-control/metrics'
 
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 
@@ -142,4 +146,77 @@ test('takeover preemption records preempted on the old run handle before abortin
   assert.equal(firstResult.cancelled, true)
   assert.equal(second.success, true)
   assert.equal(second.finalText, 'second run complete')
+})
+
+test('timeout abort closes through the finalizer with run_meta and run_close reason', async () => {
+  const name = 'butler::scope-abort-timeout'
+  let signalReadyResolve!: () => void
+  const signalReady = new Promise<void>((resolve) => {
+    signalReadyResolve = resolve
+  })
+  const runMeta = new Map<string, Record<string, unknown>>()
+  const metrics: AgentMetricEvent[] = []
+  __setMetricSinkForTests((event) => metrics.push(event))
+  try {
+    const runtime = createRuntime({
+      runAgent: ({ signal }) => {
+        signalReadyResolve()
+        return new Promise((_resolve, reject) => {
+          signal.addEventListener('abort', () => {
+            const error = new Error('main_no_progress_timeout')
+            error.name = 'AbortError'
+            reject(error)
+          }, { once: true })
+        })
+      },
+    })
+    runtime.setRuntime({
+      getRunMetaRepository: () => ({
+        get: (runId: string) => runMeta.get(runId) ?? null,
+        create: (input: Record<string, unknown>) => {
+          runMeta.set(String(input.runId), input)
+          return input
+        },
+        update: (runId: string, patch: Record<string, unknown>) => {
+          const next = { ...(runMeta.get(runId) ?? { runId }), ...patch }
+          runMeta.set(runId, next)
+          return next
+        },
+      }),
+      getTaskProjection: () => null,
+      getTaskProjectionStoreForFinalize: () => null,
+    } as never)
+    runtime.newSession(name, 'system prompt')
+
+    const pending = runtime.sendMessage(name, 'first run', 'run-timeout', {
+      publicSessionId: 'scope-abort-timeout',
+      taskId: 'task-timeout',
+    })
+    await signalReady
+
+    runtime.stopGeneration(name, 'timeout')
+    const result = await pending
+
+    assert.equal(result.cancelled, true)
+    assert.equal(result.terminalReason, 'main_no_progress_timeout')
+    assert.deepEqual(
+      result.projectionTruth?.transcriptEvents
+        .filter((event) => event.kind === 'status')
+        .map((event) => [event.status, event.terminalReason]),
+      [
+        ['working', null],
+        ['cancelled', 'main_no_progress_timeout'],
+      ],
+    )
+    const meta = runMeta.get('run-timeout')
+    assert.equal(meta?.status, 'cancelled')
+    assert.equal(meta?.initiator, 'timeout')
+    assert.equal(meta?.terminalReason, 'main_no_progress_timeout')
+
+    const closeMetric = metrics.find((event) => event.metric === 'run_close' && event.runId === 'run-timeout')
+    assert.equal(closeMetric?.initiator, 'timeout')
+    assert.equal(closeMetric?.terminalReason, 'main_no_progress_timeout')
+  } finally {
+    __setMetricSinkForTests(null)
+  }
 })

@@ -13,8 +13,14 @@ import {
 import type { ToolDefinition } from '../agent-control/tools-runtime/tool-definition'
 import { logAgentMetric } from '../agent-control/metrics'
 import { TOOL_ERROR_METRICS } from '../agent-control/tools-runtime/tool-error-metrics'
+import {
+  ACTION_CONFIRMATION_ERROR_KINDS,
+  BROWSER_TOOL_ERROR_KINDS,
+  TOOL_ADMISSION_ERROR_KINDS,
+} from '../agent-control/contracts/error-kinds'
 import type { ConversationScope } from '../agent-control/contracts/types'
 import type { AgentSpawnContext } from '../../../shared/skill-host-contract'
+import type { SpecialistBlueprintSourceMessageUnavailableReason } from '../../../shared/agent-specialist-blueprint'
 import type { ToolRuntimeActiveFrameContext } from '../agent-control/tools-runtime/tool-runtime'
 import type { TurnFeatureFlags } from '../agent-control/runtime-core/turn-feature-flags'
 import {
@@ -40,16 +46,21 @@ import {
   type ToolInteractionHint,
 } from '../agent-control/tools-runtime/tool-result-types'
 import { executeBrowserTool } from './browser-tools'
-import { classifyBrowserToolCall } from '../browser-engine/browser-tool-write-classification'
 import { isAgentBrowserError } from '../browser-engine/agent-browser-errors'
 import type { BrowserLeaseGate } from '../browser-engine/agent-browser-lease-gate'
 import type { BrowserTurnLease } from '../browser-engine/agent-browser-turn-lease'
+import {
+  isBrowserBackgroundHandoffTool,
+  resolveBrowserToolSurfaceBinding,
+} from '../browser-engine/browser-surface-binding'
 import { executeCalendarTool } from './calendar-tools'
 import { executeDocumentTool } from './document-tools'
 import { executeGeneralResearchTool } from './general-research-tools'
 import { executeMapTool } from './map-tools'
 import { executeAskUserQuestions } from './builtins/ask-user-questions'
 import { executeProposeHandoff } from './builtins/propose-handoff'
+import { executeProposeSpecialistBlueprint } from './builtins/propose-specialist-blueprint'
+import { resolveSpecialistFoundationSemanticJudge } from '../agent-control/agents/specialist-foundation-semantic-judge-provider'
 import { executeInstallSkill } from './builtins/install-skill'
 import {
   getAskUserQuestionsCardEmitter,
@@ -63,6 +74,7 @@ import { executeFeishuTool } from './feishu-tools'
 import { executeMemoryTool } from './memory-tools'
 import { executePetTool } from './pet-tools'
 import { executeSessionRecallTool } from './session-recall-tools'
+import { getSpecialistBlueprintStore } from '../agent-control/agents/specialist-blueprint-runtime'
 import { getSkillsRuntimeManager } from '../skills-runtime/runtime-manager'
 import {
   ToolDomainError,
@@ -79,6 +91,7 @@ import {
 } from './tool-not-allowed-message'
 import { STATIC_SKILL_ACTIONS_BY_TOOL_NAME } from './skills-tools-static'
 import { ExternalServiceStore } from '../settings-engine/external-service-store'
+import { createBrowserStructuredOutput as browserFailureOutput } from './browser-failure-output'
 
 export interface ToolContext {
   browserController?: BrowserController | null
@@ -94,6 +107,8 @@ export interface ToolContext {
   sessionId?: string
   scopeId?: string
   currentUserText?: string
+  sourceMessageId?: string | null
+  sourceMessageUnavailableReason?: SpecialistBlueprintSourceMessageUnavailableReason | null
   requestEnvelope?: unknown
   runId?: string
   taskId?: string
@@ -201,7 +216,7 @@ async function executeToolCallInner(
     return createToolExecutionOutput(buildUnknownToolMessage(toolName), {
       shape: 'json',
       data: {
-        errorKind: 'tool_not_registered',
+        errorKind: TOOL_ADMISSION_ERROR_KINDS.toolNotRegistered.code,
         toolName,
       },
     })
@@ -235,7 +250,7 @@ async function executeToolCallInner(
         {
           shape: 'json',
           data: {
-            errorKind: 'authorization_denied',
+            errorKind: TOOL_ADMISSION_ERROR_KINDS.authorizationDenied.code,
             reason: decision.reason,
             toolName,
           },
@@ -267,8 +282,7 @@ async function executeToolCallInner(
     return createToolExecutionOutput(`Tool ${toolName} is internal-only and cannot be called from this context.`, {
       shape: 'json',
       data: {
-        errorKind: 'host_unavailable',
-        reason: 'internal_tool_not_allowed',
+        errorKind: TOOL_ADMISSION_ERROR_KINDS.internalToolNotAllowed.code,
         toolName,
       },
     })
@@ -278,8 +292,7 @@ async function executeToolCallInner(
     return createToolExecutionOutput(buildToolNotAllowedMessage(toolName, allowedToolNames || new Set()), {
       shape: 'json',
       data: {
-        errorKind: 'host_unavailable',
-        reason: 'tool_restricted_this_turn',
+        errorKind: TOOL_ADMISSION_ERROR_KINDS.toolRestrictedThisTurn.code,
         toolName,
       },
     })
@@ -288,8 +301,7 @@ async function executeToolCallInner(
     return createToolExecutionOutput(buildToolNotAllowedMessage(toolName, allowedToolNames), {
       shape: 'json',
       data: {
-        errorKind: 'host_unavailable',
-        reason: 'tool_restricted_this_turn',
+        errorKind: TOOL_ADMISSION_ERROR_KINDS.toolRestrictedThisTurn.code,
         toolName,
       },
     })
@@ -360,7 +372,7 @@ async function executeToolCallInner(
         {
           shape: 'json',
           data: {
-            errorKind: 'denied_by_user_negation',
+            errorKind: TOOL_ADMISSION_ERROR_KINDS.deniedByUserNegation.code,
             family: negatedFamily,
             toolName,
           },
@@ -397,7 +409,7 @@ async function executeToolCallInner(
     }
     if (confirmation.action === 'manual_only') {
       return deniedOutput(
-        'denied_manual_only',
+        ACTION_CONFIRMATION_ERROR_KINDS.deniedManualOnly.code,
         `工具 ${toolName} 被行动确认策略拦截（M1：必须由用户亲手完成）。${confirmation.reason}。`
         + '请把当前进度与下一步操作位置告诉用户，引导用户亲自完成这一步；不要代替用户执行或尝试绕过。',
       )
@@ -409,7 +421,7 @@ async function executeToolCallInner(
       if (!frozenCallStore) {
         // No confirmation channel wired (boot order / headless) — keep the
         // I3-1 placeholder denial: an unconfirmable call NEVER executes.
-        return deniedOutput('denied_pending_confirmation', pendingDeniedText)
+        return deniedOutput(ACTION_CONFIRMATION_ERROR_KINDS.deniedPendingConfirmation.code, pendingDeniedText)
       }
       // EP1-I3-2 — freeze the validated args and suspend INSIDE this run's
       // execution context until the user decides on the confirmation card
@@ -448,13 +460,13 @@ async function executeToolCallInner(
           })
         case 'denied_by_user':
           return deniedOutput(
-            'confirmation_denied_by_user',
+            ACTION_CONFIRMATION_ERROR_KINDS.confirmationDeniedByUser.code,
             `用户拒绝了本次操作（${toolName}）。请不要重试同一动作；如有替代方案，先向用户说明再行动。`,
             { frozenCallId: outcome.frozenCallId },
           )
         case 'expired':
           return deniedOutput(
-            'confirmation_expired',
+            ACTION_CONFIRMATION_ERROR_KINDS.confirmationExpired.code,
             `确认超时已取消：工具 ${toolName} 的确认请求未在时限内得到用户确认（${outcome.reason}）。`
             + '该调用未执行；如仍需要，请重新发起并等待用户确认。',
             { frozenCallId: outcome.frozenCallId },
@@ -462,7 +474,7 @@ async function executeToolCallInner(
         case 'pending_exists':
         case 'unavailable':
         default:
-          return deniedOutput('denied_pending_confirmation', pendingDeniedText)
+          return deniedOutput(ACTION_CONFIRMATION_ERROR_KINDS.deniedPendingConfirmation.code, pendingDeniedText)
       }
     }
   }
@@ -477,20 +489,29 @@ async function executeToolCallInner(
           // WP2 — gate free-tool-loop browser writes through the turn lease.
           let browserLeaseGate: BrowserLeaseGate | undefined
           const turnLease = context.browserLease
-          if (turnLease) {
-            if (toolName === 'browser_visible_collect' || toolName === 'browser_collect_notes' || toolName === 'browser_resume_task') {
+          const surfaceBinding = resolveBrowserToolSurfaceBinding({
+            toolName,
+            args,
+            dispatch: 'tool-executor',
+            hasTurnLease: Boolean(turnLease),
+          })
+          if (!surfaceBinding.ok) {
+            return browserFailureOutput(surfaceBinding.error as unknown as Record<string, unknown>)
+          }
+          if (turnLease && surfaceBinding.binding.effect === 'write') {
+            if (isBrowserBackgroundHandoffTool(toolName)) {
               // Hand the surface to a background browser task (single writer):
               // release the turn lease so the task can acquire or use its own lane.
               turnLease.releaseForBackgroundHandoff()
-            } else if (classifyBrowserToolCall(toolName, args) === 'write') {
+            } else {
               const ensured = turnLease.ensureGate()
               if (isAgentBrowserError(ensured)) {
-                return JSON.stringify(ensured)
+                return browserFailureOutput(ensured as unknown as Record<string, unknown>)
               }
               browserLeaseGate = ensured
             }
           }
-          return executeBrowserTool(
+          const browserResult = await executeBrowserTool(
             toolName,
             args,
             context.browserController,
@@ -500,6 +521,15 @@ async function executeToolCallInner(
             context.currentUserText,
             context.runtime,
           )
+          if (typeof browserResult === 'string' && browserResult.startsWith('Error:')) {
+            return browserFailureOutput({
+              ok: false,
+              errorKind: BROWSER_TOOL_ERROR_KINDS.browserToolFailed.code,
+              toolName,
+              message: browserResult.slice('Error:'.length).trim(),
+            })
+          }
+          return browserResult
         }
 
         case 'document':
@@ -662,6 +692,38 @@ async function executeToolCallInner(
           })
 
         case 'agent_interaction':
+          if (toolName === 'propose_specialist_blueprint') {
+            const runtime = context.runtime
+            if (!runtime) {
+              return createToolExecutionOutput('专项 agent 蓝图未保存：runtime 不可用。', {
+                shape: 'json',
+                data: {
+                  errorKind: 'runtime_unavailable',
+                  toolName,
+                },
+              })
+            }
+            const semanticJudge = resolveSpecialistFoundationSemanticJudge()
+            const sourceMessageId = typeof context.sourceMessageId === 'string' && context.sourceMessageId.trim()
+              ? context.sourceMessageId.trim()
+              : null
+            return executeProposeSpecialistBlueprint(
+              args as Parameters<typeof executeProposeSpecialistBlueprint>[0],
+              {
+                blueprintStore: getSpecialistBlueprintStore(),
+                registry: runtime.getAgentRegistry(),
+                sessionId: context.sessionId ?? null,
+                runId: context.runId ?? null,
+                sourceMessageId,
+                sourceMessageUnavailableReason: sourceMessageId
+                  ? null
+                  : context.sourceMessageUnavailableReason || 'message_id_unavailable',
+                currentUserText: context.currentUserText ?? null,
+                runSemanticFoundationJudge: semanticJudge.judge,
+                semanticFoundationJudgeUnavailableReason: semanticJudge.unavailableReason,
+              },
+            )
+          }
           // EP3-A4 — handoff proposal: same card machinery, plus registry
           // lookup and the codebase's ONLY ownerAgentId value write (via
           // the runtime's projection repository).

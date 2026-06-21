@@ -103,6 +103,8 @@ const captured: CapturedHandlers = {
   onTaskProjectionsChanged: [],
 }
 
+const infrastructureTimeoutReports: Array<{ scopeId: string; requestId: string; elapsedMs?: number }> = []
+
 function register<K extends keyof CapturedHandlers>(slot: K) {
   return (cb: Handler) => {
     captured[slot].push(cb)
@@ -127,6 +129,10 @@ const electronAPIStub = {
     onReferenceSkillHintChanged: register('onReferenceSkillHintChanged'),
     onTaskProjectionsChanged: register('onTaskProjectionsChanged'),
     completeToolActionRequest: async () => ({ success: true }),
+    reportInfrastructureTimeout: async (payload: { scopeId: string; requestId: string; elapsedMs?: number }) => {
+      infrastructureTimeoutReports.push(payload)
+      return { success: true, data: { state: 'cancel_requested' } }
+    },
     kill: async () => ({ success: true }),
     newSession: async () => ({ success: true }),
     createLocalScope: async () => ({ success: true }),
@@ -379,6 +385,7 @@ test('X2.1 #5 — mid-send scope switch: terminal still unlocks the originating 
 // ---------------------------------------------------------------------------
 
 test('X2.6 — infrastructure_timeout fires after timeout with no terminal event', async () => {
+  infrastructureTimeoutReports.length = 0
   seedTwoSessions({
     activeSessionId: 'session-A',
     lockedSessionId: 'session-A',
@@ -401,6 +408,11 @@ test('X2.6 — infrastructure_timeout fires after timeout with no terminal event
   assert.equal(slice.streamingRequestId, null, 'infrastructure_timeout clears streamingRequestId (Stop button hidden)')
   assert.equal(slice.scopeRunStates['scope-A']?.phase, 'error', 'infrastructure_timeout marks the active run terminal')
   assert.equal(slice.scopeRunStates['scope-A']?.terminalReason, 'infra_error', 'infrastructure_timeout releases active-run aliases')
+  assert.deepEqual(
+    infrastructureTimeoutReports,
+    [{ scopeId: 'scope-A', requestId: 'req-A', elapsedMs: 10 }],
+    'infrastructure_timeout reports the stuck request to main with request-id authority',
+  )
   assert.equal(state.composerLocked, false, 'active mirror also unlocks after infrastructure_timeout')
   assert.equal(state.foregroundBusy, false, 'active mirror foregroundBusy is not resurrected by a stale planning run')
 

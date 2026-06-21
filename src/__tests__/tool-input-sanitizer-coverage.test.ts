@@ -48,3 +48,36 @@ test('sanitizer leaves clean history untouched', () => {
   const sanitized = sanitizeOpenAICompatibleMessageHistory(messages as never)
   assert.equal(sanitized.length, 2)
 })
+
+test('sanitizer redacts host paths when flattening Anthropic tool_result history', () => {
+  const sanitized = sanitizeOpenAICompatibleMessageHistory([
+    {
+      role: 'user',
+      content: [
+        {
+          type: 'tool_result',
+          tool_use_id: 'toolu-path',
+          content: 'run state: /Users/alice/Ready/run_state.json',
+        },
+      ],
+    },
+  ] as never)
+
+  const content = String(sanitized[0]?.content || '')
+  assert.doesNotMatch(content, /\/Users\/alice/)
+  assert.match(content, /\/Users\/<redacted>\/Ready\/run_state\.json/)
+})
+
+test('sanitizer redacts host paths in OpenAI tool-role history content', () => {
+  const sanitized = sanitizeOpenAICompatibleMessageHistory([
+    {
+      role: 'tool',
+      tool_call_id: 'call-path',
+      content: 'saved output to C:\\Users\\alice\\Ready\\out.txt',
+    },
+  ] as never)
+
+  const content = String(sanitized[0]?.content || '')
+  assert.doesNotMatch(content, /C:\\Users\\alice/)
+  assert.match(content, /C:\\Users\\<redacted>\\Ready\\out\.txt/)
+})

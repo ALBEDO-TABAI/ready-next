@@ -283,6 +283,113 @@ test('agent sdk runtime exposes only background collection workflow tools for mu
   assert.ok(!toolNames.includes('browser_download_urls'))
 })
 
+test('agent sdk runtime demotes widget edits before exposing browser tools', async () => {
+  let toolNames: string[] = []
+  const runtime = createRuntime({
+    runAgent: async ({ tools }) => {
+      toolNames = tools.map((tool) => tool.name)
+      return { finalText: 'widget tools captured' }
+    },
+  })
+  runtime.setBrowserController({} as never)
+  runtime.newSession('butler::scope-widget-tool-surface', 'system prompt')
+
+  const result = await runtime.sendMessage(
+    'butler::scope-widget-tool-surface',
+    '把当前天气卡标题字号调大一点',
+    'run-widget-tool-surface',
+    {
+      publicSessionId: 'scope-widget-tool-surface',
+      taskId: 'task-widget-tool-surface',
+      requestEnvelope: {
+        rawUserText: '## 环境信息\n当前模式: 文档模式\n\n把当前天气卡标题字号调大一点',
+        primaryInstruction: '把当前天气卡标题字号调大一点',
+        environmentHints: {
+          hasDocumentContext: true,
+          hasWidgetTargetContext: true,
+          hasAttachments: false,
+          hasBootstrapContext: true,
+        },
+        resources: [
+          {
+            name: '天气卡',
+            path: '/virtual/widget/weather-card',
+            kind: 'widget_target',
+            source: 'widget_target',
+          },
+        ],
+      },
+    },
+  )
+
+  assert.equal(result.success, true)
+  assert.ok(toolNames.includes('document_update_widget'))
+  assert.equal(toolNames.some((name) => name.startsWith('browser_')), false)
+})
+
+test('agent sdk runtime exposes map tools for deterministic route intent', async () => {
+  let toolNames: string[] = []
+  const runtime = createRuntime({
+    runAgent: async ({ tools }) => {
+      toolNames = tools.map((tool) => tool.name)
+      return { finalText: 'map tools captured' }
+    },
+  })
+  runtime.newSession('butler::scope-map-tool-surface', 'system prompt')
+
+  const result = await runtime.sendMessage(
+    'butler::scope-map-tool-surface',
+    '从公司到虹桥机场怎么走',
+    'run-map-tool-surface',
+    {
+      publicSessionId: 'scope-map-tool-surface',
+      taskId: 'task-map-tool-surface',
+      requestEnvelope: {
+        primaryInstruction: '从公司到虹桥机场怎么走',
+        resources: [],
+      },
+    },
+  )
+
+  assert.equal(result.success, true)
+  assert.ok(toolNames.includes('map_plan_route'))
+})
+
+test('agent sdk runtime applies selected skill allowed_tools to default surface', async () => {
+  let toolNames: string[] = []
+  const runtime = createRuntime({
+    runAgent: async ({ tools }) => {
+      toolNames = tools.map((tool) => tool.name)
+      return { finalText: 'send-im tools captured' }
+    },
+  })
+  runtime.newSession('butler::scope-send-im-tool-surface', 'system prompt')
+
+  const result = await runtime.sendMessage(
+    'butler::scope-send-im-tool-surface',
+    '把这个附件发到我微信',
+    'run-send-im-tool-surface',
+    {
+      publicSessionId: 'scope-send-im-tool-surface',
+      taskId: 'task-send-im-tool-surface',
+      requestEnvelope: {
+        primaryInstruction: '把这个附件发到我微信',
+        resources: [
+          {
+            name: '成片.png',
+            path: '/tmp/ready-send-im-proof/成片.png',
+            kind: 'attachment',
+            source: 'user_attachment',
+          },
+        ],
+      },
+    },
+  )
+
+  assert.equal(result.success, true)
+  assert.deepEqual(toolNames, ['skill_send_im_file'])
+})
+
 test('agent sdk runtime suppresses browser task tools for active VEA skill resume after recent collection intent', async () => {
   const seenToolNames: string[][] = []
   let activeSkillHint = false
@@ -1488,10 +1595,10 @@ test('agent sdk runtime uses Ready Anthropic model adapter with SDK tool loop', 
       },
     }),
     listToolDefinitions: () => [toolDefinition],
-    executeToolCall: async () => createToolExecutionOutput('found result', {
+    executeToolCall: async () => createToolExecutionOutput('found result at /Users/alice/Ready/out.txt', {
       shape: 'json',
-      data: { ok: true },
-      projectionPatch: { taskTitle: 'Research' },
+      data: { ok: true, absolutePath: '/Users/alice/Ready/out.txt' },
+      projectionPatch: { taskTitle: 'Research', runStatePath: '/Users/alice/Ready/run_state.json' },
     }),
     fetchWithTimeout: async (url, init) => {
       requests.push({
@@ -1532,8 +1639,14 @@ test('agent sdk runtime uses Ready Anthropic model adapter with SDK tool loop', 
   assert.equal(requests.length, 2)
   assert.equal(requests[0].url, 'https://api.anthropic.com/v1/messages')
   assert.ok(Array.isArray((requests[0].body as { tools?: unknown[] }).tools))
-  assert.match(JSON.stringify((requests[1].body as { messages?: unknown[] }).messages), /function_call_result|tool_result|found result/)
-  assert.deepEqual(result.projectionTruth?.projectionPatch, { taskTitle: 'Research' })
+  const secondAnthropicMessages = JSON.stringify((requests[1].body as { messages?: unknown[] }).messages)
+  assert.match(secondAnthropicMessages, /function_call_result|tool_result|found result/)
+  assert.doesNotMatch(secondAnthropicMessages, /\/Users\/alice/)
+  assert.match(secondAnthropicMessages, /\/Users\/<redacted>\/Ready/)
+  assert.deepEqual(result.projectionTruth?.projectionPatch, {
+    taskTitle: 'Research',
+    runStatePath: '/Users/alice/Ready/run_state.json',
+  })
 })
 
 test('agent sdk runtime uses Ready OpenAI-compatible adapter and provider patchers', async () => {
@@ -1554,10 +1667,10 @@ test('agent sdk runtime uses Ready OpenAI-compatible adapter and provider patche
       },
     }),
     listToolDefinitions: () => [toolDefinition],
-    executeToolCall: async () => createToolExecutionOutput('found result', {
+    executeToolCall: async () => createToolExecutionOutput('found result at C:\\Users\\alice\\Ready\\out.txt', {
       shape: 'json',
-      data: { ok: true },
-      projectionPatch: { taskTitle: 'Compatible research' },
+      data: { ok: true, absolutePath: 'C:\\Users\\alice\\Ready\\out.txt' },
+      projectionPatch: { taskTitle: 'Compatible research', runStatePath: 'C:\\Users\\alice\\Ready\\run_state.json' },
     }),
     fetchWithTimeout: async (url, init) => {
       requests.push({
@@ -1609,8 +1722,15 @@ test('agent sdk runtime uses Ready OpenAI-compatible adapter and provider patche
   assert.deepEqual((requests[0].body as { stream_options?: Record<string, unknown> }).stream_options, {
     include_usage: true,
   })
-  assert.match(JSON.stringify((requests[1].body as { messages?: unknown[] }).messages), /function_call_result|found result|tool/)
-  assert.deepEqual(result.projectionTruth?.projectionPatch, { taskTitle: 'Compatible research' })
+  const secondCompatibleMessages = JSON.stringify((requests[1].body as { messages?: unknown[] }).messages)
+  assert.match(secondCompatibleMessages, /function_call_result|found result|tool/)
+  assert.doesNotMatch(secondCompatibleMessages, /C:\\Users\\alice/)
+  assert.match(secondCompatibleMessages, /<redacted>/)
+  assert.match(secondCompatibleMessages, /Ready/)
+  assert.deepEqual(result.projectionTruth?.projectionPatch, {
+    taskTitle: 'Compatible research',
+    runStatePath: 'C:\\Users\\alice\\Ready\\run_state.json',
+  })
 })
 
 test('agent sdk runtime carries compatible reasoning content across tool turns', async () => {
@@ -4121,6 +4241,13 @@ test('agent sdk runtime honors Ready OpenAI-compatible responses wire API', asyn
     },
   })
   runtime.newSession('butler::scope-responses', 'system prompt')
+  await seedSdkSession(runtime, 'butler::scope-responses', [
+    {
+      type: 'function_call_result',
+      callId: 'call-prev-path',
+      output: 'previous run at /Users/alice/Ready/run_state.json',
+    } as AgentInputItem,
+  ])
 
   const result = await runtime.sendMessage('butler::scope-responses', '你好', 'run-responses', {
     publicSessionId: 'scope-responses',
@@ -4132,6 +4259,9 @@ test('agent sdk runtime honors Ready OpenAI-compatible responses wire API', asyn
   assert.equal(requests.length, 1)
   assert.equal(requests[0].url, 'https://code.newcli.com/codex/v1/responses')
   assert.equal((requests[0].body as { stream?: boolean }).stream, false)
+  const responsesInput = JSON.stringify((requests[0].body as { input?: unknown[] }).input)
+  assert.doesNotMatch(responsesInput, /\/Users\/alice/)
+  assert.match(responsesInput, /\/Users\/<redacted>\/Ready\/run_state\.json/)
 })
 
 test('agent sdk runtime compacts oversized session history before sending wire input', async () => {
@@ -4775,8 +4905,8 @@ test('agent sdk runtime threads selected skill authorization into tool execution
   assert.deepEqual(result.projectionTruth?.projectionPatch, { taskTitle: 'VEA' })
 })
 
-test('agent sdk runtime carries skill contextModifier active roots into later SDK tool calls', async () => {
-  const outputDir = join(tmpdir(), 'ready-agent-sdk-active-root')
+test('agent sdk runtime redacts model-visible tool output while carrying raw active roots into later SDK tool calls', async () => {
+  const outputDir = '/Users/alice/ready-agent-sdk-active-root'
   const pipelineDefinition = createToolDefinition({
     name: 'skill_video_expert_pipeline',
     groupId: 'skills',
@@ -4792,6 +4922,7 @@ test('agent sdk runtime carries skill contextModifier active roots into later SD
     description: 'Read skill artifact',
   })
   let observedRoots: string[] = []
+  let pipelineToolReturn = ''
   const runtime = createRuntime({
     listToolDefinitions: () => [pipelineDefinition, readArtifactDefinition],
     executeToolCall: async (name, _args, context) => {
@@ -4828,7 +4959,7 @@ test('agent sdk runtime carries skill contextModifier active roots into later SD
     runAgent: async ({ tools }) => {
       const pipelineTool = tools.find((item) => item.name === 'skill_video_expert_pipeline') as { invoke: (context: unknown, input: string) => Promise<string> }
       const readTool = tools.find((item) => item.name === 'skill_read_artifact') as { invoke: (context: unknown, input: string) => Promise<string> }
-      await pipelineTool.invoke({}, JSON.stringify({ url: 'fixture.mp4', outputDir }))
+      pipelineToolReturn = await pipelineTool.invoke({}, JSON.stringify({ url: 'fixture.mp4', outputDir }))
       await readTool.invoke({}, JSON.stringify({ relativePath: 'scene_scores.json' }))
       return { finalText: '已读取产物' }
     },
@@ -4841,6 +4972,8 @@ test('agent sdk runtime carries skill contextModifier active roots into later SD
   })
 
   assert.equal(result.success, true)
+  assert.doesNotMatch(pipelineToolReturn, /\/Users\/alice/)
+  assert.match(pipelineToolReturn, /\/Users\/<redacted>\/ready-agent-sdk-active-root/)
   assert.ok(observedRoots.includes(outputDir))
 })
 
@@ -4926,7 +5059,7 @@ test('agent sdk runtime reports provider quota failures as external blockers', a
   )
 })
 
-test('agent sdk runtime inherits Ready model-visible tool surface', async () => {
+test('agent sdk runtime keeps default model-visible surface intent-scoped', async () => {
   const seenToolNames: string[] = []
   const runtime = createRuntime({
     runAgent: async ({ tools, onTextDelta }) => {
@@ -4944,9 +5077,12 @@ test('agent sdk runtime inherits Ready model-visible tool surface', async () => 
 
   assert.equal(result.success, true)
   assert.ok(seenToolNames.includes('document_set_content'))
-  assert.ok(seenToolNames.includes('rss_fetch_updates'))
-  assert.ok(seenToolNames.includes('calendar_list_window'))
-  assert.ok(seenToolNames.includes('web_search'))
+  assert.ok(seenToolNames.includes('file_search'))
+  assert.ok(seenToolNames.includes('memory_search'))
+  assert.ok(seenToolNames.includes('session_search'))
+  assert.equal(seenToolNames.includes('rss_fetch_updates'), false)
+  assert.equal(seenToolNames.includes('calendar_list_window'), false)
+  assert.equal(seenToolNames.includes('web_search'), false)
   assert.equal(seenToolNames.some((name) => name.startsWith('browser_')), false)
 })
 
@@ -4968,7 +5104,7 @@ test('agent sdk runtime exposes browser, feishu, file, pet, and research tools w
 
   const result = await runtime.sendMessage(
     'butler::scope-domain-tools',
-    '打开网页搜索资料，点击并输入内容，同时回复飞书，找文件，给宠物贴一条提醒',
+    '打开网页搜索资料，点击并输入内容，同时回复飞书，找文件，给宠物贴一条提醒，并对比市场趋势',
     'run-domain-tools',
     {
       publicSessionId: 'scope-domain-tools',

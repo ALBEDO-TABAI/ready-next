@@ -88,6 +88,39 @@ test('oversized tool results are truncated without breaking their call/result pa
   assert.match(String((result.items[1] as { output?: unknown }).output), /tool-result-truncated/)
 })
 
+test('compactAgentInputItems keeps the latest user request with retained tail context', async () => {
+  const latestRequest = 'LATEST_USER_REQUEST_KEEP_ME'
+  const result = await compactAgentInputItems([
+    userMessage('system seed'),
+    userMessage('older context '.repeat(500)),
+    functionCall('tail-call'),
+    functionResult('tail-call', 'tail result'),
+    userMessage(latestRequest),
+  ], {
+    windowTokens: 80,
+    keepHeadCount: 1,
+    keepTailCount: 3,
+  })
+
+  assert.equal(result.compacted, true)
+  assert.ok(JSON.stringify(result.items).includes(latestRequest))
+  assert.deepEqual(itemTypes(result.items).slice(-3), ['function_call', 'function_call_result', 'message'])
+})
+
+test('normalizeSessionSnapshotForSeed preserves retained request text while dropping orphan tool items', () => {
+  const latestRequest = 'RESTORED_LATEST_USER_REQUEST'
+  const normalized = normalizeSessionSnapshotForSeed([
+    userMessage('head'),
+    functionCall('complete'),
+    functionResult('complete', 'ok'),
+    functionCall('orphan'),
+    userMessage(latestRequest),
+  ])
+
+  assert.deepEqual(itemTypes(normalized), ['message', 'function_call', 'function_call_result', 'message'])
+  assert.ok(JSON.stringify(normalized).includes(latestRequest))
+})
+
 function userMessage(content: string): AgentInputItem {
   return { role: 'user', content } as AgentInputItem
 }

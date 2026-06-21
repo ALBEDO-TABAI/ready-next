@@ -8,6 +8,8 @@
  */
 
 import type { ConversationScope, ScopeRunMemoryCapture } from './contracts/types'
+import { logAgentMetric } from './metrics'
+import type { CasMergeReport, PictureObservation } from './maintenance/cas-merge'
 import type { MemoryRepository } from '../repositories/memory-repository'
 import type { UserProfileRepository } from '../repositories/user-profile-repository'
 
@@ -23,6 +25,11 @@ export interface ReflectionDeps {
   userProfileRepository?: UserProfileRepository
   knowledgeRepository?: any
   llmProvider?: (prompt: string) => Promise<string>
+  pictureCasMerge?: (params: {
+    userId: string
+    observations: PictureObservation[]
+    scope: ConversationScope
+  }) => CasMergeReport
 }
 
 function shouldKeepSessionSummary(params: {
@@ -53,6 +60,12 @@ export class ReflectionService {
   }): Promise<ReflectionResult> {
     // Skip reflection for very short conversations
     if (params.messages.length < 2) {
+      this.logOutcome(params.scope, {
+        decision: 'skip',
+        reason: 'too_short',
+        preferences: 0,
+        summaryKept: false,
+      })
       return {
         globalFacts: [],
         userPreferences: [],
@@ -70,38 +83,28 @@ export class ReflectionService {
         pureConversationDone: params.pureConversationDone,
         sessionSummary: reflection.sessionSummary,
       })
-      const captureItems: NonNullable<ScopeRunMemoryCapture['items']> = []
-
-      // Store user preferences
-      if (params.scope.userId) {
-        for (const pref of reflection.userPreferences) {
-          const stored = await this.storeUserPreference(params.scope.userId, pref)
-          if (stored) captureItems.push(stored)
-        }
-      }
-
-      // Store session summary
-      if (sessionSummary) {
-        const stored = await this.storeSessionSummary(params.scope, sessionSummary)
-        if (stored) captureItems.push(stored)
-      }
+      const observations = this.toPictureObservations(reflection.userPreferences)
+      const outcome = this.applyPictureCas({
+        scope: params.scope,
+        observations,
+        summaryKept: Boolean(sessionSummary),
+      })
+      this.logOutcome(params.scope, outcome)
 
       return {
         ...reflection,
         globalFacts: [],
         sessionSummary,
-        memoryCapture:
-          captureItems.length > 0
-            ? {
-                status: 'ready',
-                createdAt: new Date().toISOString(),
-                note: '已保守记录本次稳定偏好和当前上下文摘要，可直接撤销或补充。',
-                items: captureItems
-              }
-            : null
+        memoryCapture: null
       }
     } catch (error) {
       console.error('[ReflectionService] Failed to reflect on conversation:', error)
+      this.logOutcome(params.scope, {
+        decision: 'error',
+        reason: error instanceof Error ? error.message : String(error),
+        preferences: 0,
+        summaryKept: false,
+      })
       return {
         globalFacts: [],
         userPreferences: [],
@@ -157,19 +160,141 @@ Rules:
 - Return ONLY the JSON, no other text
 `.trim()
 
-    try {
-      // Use LLM provider if available
-      if (this.deps.llmProvider) {
-        const response = await this.deps.llmProvider(prompt)
-        return this.parseReflectionResponse(response)
-      }
-
-      // Fallback: simple heuristic-based extraction
-      return this.heuristicExtraction(params)
-    } catch (error) {
-      console.error('[ReflectionService] LLM analysis failed:', error)
-      return this.heuristicExtraction(params)
+    // Use LLM provider if available
+    if (this.deps.llmProvider) {
+      const response = await this.deps.llmProvider(prompt)
+      return this.parseReflectionResponse(response)
     }
+
+    // Fallback: simple heuristic-based extraction
+    return this.heuristicExtraction(params)
+  }
+
+  private toPictureObservations(
+    preferences: Array<{ title: string; content: string }>
+  ): PictureObservation[] {
+    const observations: PictureObservation[] = []
+    for (const pref of preferences) {
+      const text = String(pref.content || '').trim()
+      if (!text) continue
+      const title = String(pref.title || '').toLowerCase()
+      const lowerText = text.toLowerCase()
+      const kind: PictureObservation['kind'] =
+        title.includes('communication') ||
+        title.includes('style') ||
+        lowerText.includes('concise') ||
+        lowerText.includes('direct')
+          ? 'communication_style'
+          : 'preference'
+      observations.push({ kind, text })
+    }
+    return observations
+  }
+
+  private applyPictureCas(params: {
+    scope: ConversationScope
+    observations: PictureObservation[]
+    summaryKept: boolean
+  }): {
+    decision: 'cas_merged' | 'skip' | 'error'
+    reason: string
+    preferences: number
+    accepted?: number
+    rejected?: number
+    addedCount?: number
+    droppedCount?: number
+    summaryKept: boolean
+  } {
+    if (params.observations.length === 0) {
+      return {
+        decision: 'skip',
+        reason: params.summaryKept ? 'summary_not_persisted' : 'no_candidates',
+        preferences: 0,
+        summaryKept: params.summaryKept,
+      }
+    }
+    if (!params.scope.userId) {
+      return {
+        decision: 'skip',
+        reason: 'missing_user',
+        preferences: params.observations.length,
+        summaryKept: params.summaryKept,
+      }
+    }
+    if (!this.deps.pictureCasMerge) {
+      return {
+        decision: 'skip',
+        reason: 'cas_unavailable',
+        preferences: params.observations.length,
+        summaryKept: params.summaryKept,
+      }
+    }
+    const report = this.deps.pictureCasMerge({
+      userId: params.scope.userId,
+      observations: params.observations,
+      scope: params.scope,
+    })
+    if (report.decision === 'merged') {
+      return {
+        decision: 'cas_merged',
+        reason: report.reason,
+        preferences: params.observations.length,
+        accepted: report.accepted,
+        rejected: report.rejected,
+        addedCount: report.addedCount,
+        droppedCount: report.droppedCount,
+        summaryKept: params.summaryKept,
+      }
+    }
+    if (report.decision === 'error') {
+      return {
+        decision: 'error',
+        reason: report.reason,
+        preferences: params.observations.length,
+        accepted: report.accepted,
+        rejected: report.rejected,
+        addedCount: report.addedCount,
+        droppedCount: report.droppedCount,
+        summaryKept: params.summaryKept,
+      }
+    }
+    return {
+      decision: 'skip',
+      reason: report.reason || report.decision,
+      preferences: params.observations.length,
+      accepted: report.accepted,
+      rejected: report.rejected,
+      addedCount: report.addedCount,
+      droppedCount: report.droppedCount,
+      summaryKept: params.summaryKept,
+    }
+  }
+
+  private logOutcome(
+    scope: ConversationScope,
+    outcome: {
+      decision: 'cas_merged' | 'skip' | 'error'
+      reason: string
+      preferences: number
+      accepted?: number
+      rejected?: number
+      addedCount?: number
+      droppedCount?: number
+      summaryKept: boolean
+    }
+  ): void {
+    logAgentMetric('reflection_outcome', {
+      scopeId: scope.id,
+      agent: scope.agent,
+      decision: outcome.decision,
+      reason: outcome.reason,
+      preferences: outcome.preferences,
+      accepted: outcome.accepted ?? null,
+      rejected: outcome.rejected ?? null,
+      addedCount: outcome.addedCount ?? null,
+      droppedCount: outcome.droppedCount ?? null,
+      summaryKept: outcome.summaryKept,
+    })
   }
 
   /**
@@ -251,160 +376,4 @@ Rules:
     }
   }
 
-  private normalizeValue(value: string): string {
-    return String(value || '')
-      .trim()
-      .replace(/\s+/g, ' ')
-      .toLowerCase()
-  }
-
-  private async isDuplicateMemory(params: {
-    category: 'user_preference' | 'summary'
-    scopeId?: string | null
-    userId?: string | null
-    title: string
-    content: string
-  }): Promise<boolean> {
-    const existing = await this.deps.memoryRepository.queryMemories({
-      category: params.category,
-      scopeId: params.scopeId === undefined ? undefined : params.scopeId,
-      userId: params.userId || undefined,
-      includeArchived: false,
-      limit: 20
-    })
-    const normalizedTitle = this.normalizeValue(params.title)
-    const normalizedContent = this.normalizeValue(params.content)
-    for (const item of existing) {
-      const sameTitle = this.normalizeValue(item.title) === normalizedTitle
-      const sameSummary = this.normalizeValue(item.summary || '') === normalizedContent
-      let sameContent = false
-      if (this.deps.knowledgeRepository?.get && item.contentKey) {
-        try {
-          const stored = await this.deps.knowledgeRepository.get(item.contentKey)
-          sameContent = this.normalizeValue(stored || '') === normalizedContent
-        } catch {
-          sameContent = false
-        }
-      }
-      if (sameTitle && (sameSummary || sameContent)) {
-        return true
-      }
-    }
-    return false
-  }
-
-  /**
-   * Store a user preference in the memory system
-   */
-  private async storeUserPreference(
-    userId: string,
-    pref: { title: string; content: string }
-  ): Promise<ScopeRunMemoryCapture['items'][number] | null> {
-    try {
-      if (
-        await this.isDuplicateMemory({
-          category: 'user_preference',
-          scopeId: null,
-          userId,
-          title: pref.title,
-          content: pref.content
-        })
-      ) {
-        return null
-      }
-
-      // Generate unique content key
-      const contentKey = `pref-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
-
-      // Store content in knowledge repository
-      if (this.deps.knowledgeRepository) {
-        await this.deps.knowledgeRepository.set(contentKey, pref.content)
-      }
-
-      // Create memory entry
-      const created = await this.deps.memoryRepository.createMemory({
-        layer: 'l0',
-        scopeId: null,
-        userId,
-        sourceType: 'resident_user',
-        category: 'user_preference',
-        title: pref.title,
-        summary: pref.content.slice(0, 100),
-        contentKey,
-        priority: 5,
-        tags: ['auto-learned']
-      })
-
-      console.log(`[ReflectionService] Stored user preference for ${userId}: ${pref.title}`)
-      return {
-        memoryId: created.id,
-        category: 'user_preference',
-        sourceType: 'resident_user',
-        title: pref.title,
-        summary: pref.content.slice(0, 100)
-      }
-    } catch (error) {
-      console.error('[ReflectionService] Failed to store user preference:', error)
-      return null
-    }
-  }
-
-  /**
-   * Store a session summary in the memory system
-   */
-  private async storeSessionSummary(
-    scope: ConversationScope,
-    summary: string
-  ): Promise<ScopeRunMemoryCapture['items'][number] | null> {
-    try {
-      if (
-        await this.isDuplicateMemory({
-          category: 'summary',
-          scopeId: scope.id,
-          userId: scope.userId || null,
-          title: `Session ${new Date().toISOString().split('T')[0]}`,
-          content: summary
-        })
-      ) {
-        return null
-      }
-
-      // Generate unique content key
-      const contentKey = `summary-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
-
-      // Store content in knowledge repository
-      if (this.deps.knowledgeRepository) {
-        await this.deps.knowledgeRepository.set(contentKey, summary)
-      }
-
-      // Create memory entry with 30-day expiry
-      const expiresAt = Date.now() + 30 * 24 * 60 * 60 * 1000
-
-      const created = await this.deps.memoryRepository.createMemory({
-        layer: 'l1',
-        scopeId: scope.id,
-        userId: scope.userId || null,
-        sourceType: 'scope_memory',
-        category: 'summary',
-        title: `Session ${new Date().toISOString().split('T')[0]}`,
-        summary: summary.slice(0, 100),
-        contentKey,
-        priority: 0,
-        expiresAt,
-        tags: ['auto-summary']
-      })
-
-      console.log(`[ReflectionService] Stored session summary for scope ${scope.id}`)
-      return {
-        memoryId: created.id,
-        category: 'summary',
-        sourceType: 'scope_memory',
-        title: `Session ${new Date().toISOString().split('T')[0]}`,
-        summary: summary.slice(0, 100)
-      }
-    } catch (error) {
-      console.error('[ReflectionService] Failed to store session summary:', error)
-      return null
-    }
-  }
 }

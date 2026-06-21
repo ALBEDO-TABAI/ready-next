@@ -15,10 +15,13 @@ export interface PolicyArbitration {
 
 export const MAX_ARBITRATION_RECURSION = 1
 
-export function resolvePolicyConflicts(params: {
-  toolPolicy: ToolPolicy
+export function resolvePolicyConflictFacts(params: {
+  forceDocumentTool: boolean
+  allowBrowserTools: boolean
+  preferredSkillToolNames?: string[] | null
   browserDecisionMode: BrowserTaskDecisionMode
-  executionIntentContext: ExecutionIntentContext
+  documentWidgetTaskKind: ExecutionIntentContext['documentWidgetTaskKind']
+  explicitWidgetCreateIntent: boolean
 }): {
   conflicts: PolicyConflictType[]
   demotedBrowserDecisionMode: BrowserTaskDecisionMode | null
@@ -28,21 +31,21 @@ export function resolvePolicyConflicts(params: {
   const browserWorkflow =
     params.browserDecisionMode === 'browser_workflow' ||
     params.browserDecisionMode === 'browser_upload_workflow'
-  const widgetTaskKind = params.executionIntentContext.documentWidgetTaskKind
+  const widgetTaskKind = params.documentWidgetTaskKind
   const widgetMaintenanceKind =
     widgetTaskKind === 'update' || widgetTaskKind === 'inspect' || widgetTaskKind === 'remove'
-  const explicitCreate = params.executionIntentContext.explicitWidgetCreateIntent === true
+  const explicitCreate = params.explicitWidgetCreateIntent === true
 
-  if (params.toolPolicy.forceDocumentTool && browserWorkflow && !explicitCreate) {
+  if (params.forceDocumentTool && browserWorkflow && !explicitCreate) {
     conflicts.push('force_document_x_browser_workflow')
   }
-  if (widgetMaintenanceKind && params.toolPolicy.allowBrowserTools && browserWorkflow && !explicitCreate) {
+  if (widgetMaintenanceKind && params.allowBrowserTools && !explicitCreate) {
     conflicts.push('widget_task_x_browser_tools_allowed')
   }
   const hasExplicitSkillPreference =
-    Array.isArray(params.toolPolicy.preferredSkillToolNames)
-    && params.toolPolicy.preferredSkillToolNames.length > 0
-  if (params.toolPolicy.forceDocumentTool && hasExplicitSkillPreference) {
+    Array.isArray(params.preferredSkillToolNames)
+    && params.preferredSkillToolNames.length > 0
+  if (params.forceDocumentTool && hasExplicitSkillPreference) {
     conflicts.push('force_document_x_skill_preferred')
   }
 
@@ -58,4 +61,23 @@ export function resolvePolicyConflicts(params: {
     demotedBrowserDecisionMode: hasBrowserConflicts ? 'free_tool_loop' : null,
     skillPassthroughApplied: hasSkillConflict,
   }
+}
+
+export function resolvePolicyConflicts(params: {
+  toolPolicy: ToolPolicy
+  browserDecisionMode: BrowserTaskDecisionMode
+  executionIntentContext: ExecutionIntentContext
+}): {
+  conflicts: PolicyConflictType[]
+  demotedBrowserDecisionMode: BrowserTaskDecisionMode | null
+  skillPassthroughApplied: boolean
+} {
+  return resolvePolicyConflictFacts({
+    forceDocumentTool: params.toolPolicy.forceDocumentTool,
+    allowBrowserTools: params.toolPolicy.allowBrowserTools,
+    preferredSkillToolNames: params.toolPolicy.preferredSkillToolNames,
+    browserDecisionMode: params.browserDecisionMode,
+    documentWidgetTaskKind: params.executionIntentContext.documentWidgetTaskKind,
+    explicitWidgetCreateIntent: params.executionIntentContext.explicitWidgetCreateIntent,
+  })
 }

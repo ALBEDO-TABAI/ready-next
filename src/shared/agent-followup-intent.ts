@@ -17,6 +17,8 @@
  * family (collection) even though the verb "采集" appears.
  */
 
+import { isSkillChildRunOpenStatus } from './skill-child-run-status'
+
 const CONTINUE_PATTERN =
   /(?:继续|接着(?:弄|做|来|跑|采|处理)?|接续|重试|再试|再来一次|再跑|再采|恢复|go on|continue|retry|keep going|try again|resume|carry on)/i
 
@@ -73,12 +75,10 @@ export interface FollowupTaskRef {
   blockerCategory?: string | null
 }
 
-const CONTINUABLE_STATUSES = new Set(['running', 'queued', 'blocked', 'recoverable_paused', 'budget_paused'])
-
 /** True when at least one ref is active / blocked / pending adjudication. */
 export function hasContinuableTaskRef(refs: ReadonlyArray<FollowupTaskRef>): boolean {
   return refs.some((ref) =>
-    CONTINUABLE_STATUSES.has(ref.status) || ref.interactionState === 'check_in_pending')
+    isSkillChildRunOpenStatus(ref.status) || ref.interactionState === 'check_in_pending')
 }
 
 export interface FollowupIntentContext {
@@ -168,7 +168,7 @@ export function classifyFollowupIntent(
   // status question precisely when a continuable task exists to report on.
   const continuable = ctx.taskRefs
     ? ctx.taskRefs.filter((ref) =>
-      CONTINUABLE_STATUSES.has(ref.status) || ref.interactionState === 'check_in_pending')
+      isSkillChildRunOpenStatus(ref.status) || ref.interactionState === 'check_in_pending')
     : null
   const VAGUE_INTERROGATIVE = /(?:[？?]\s*$|[吗呢]\s*$|啥情况|什么情况|卡在哪|到哪了)/
   if (

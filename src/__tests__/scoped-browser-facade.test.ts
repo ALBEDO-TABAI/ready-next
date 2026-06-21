@@ -27,6 +27,25 @@ function makeFacade(overrides?: { controlGate?: AgentTabControlGate; surface?: '
   return { facade, calls, controlGate, leaseService, leaseId: lease.leaseId }
 }
 
+function makeFacadeWithAgentTabId(agentTabId: string) {
+  const calls: Array<{ tool: string; args: Record<string, unknown>; surface: string; leaseId: string }> = []
+  const leaseService = new BrowserWriteLeaseService()
+  const lease = leaseService.acquire({ surface: 'agent-view', taskId: 'collect', runId: 'r1' })
+  if ('errorCode' in lease) throw new Error('expected lease')
+  const facade = new ScopedBrowserFacade({
+    agentTabId,
+    leaseService,
+    leaseId: lease.leaseId,
+    controlGate: new AgentTabControlGate(),
+    surface: 'agent-view',
+    execute: async (tool, args, surface, leaseId) => {
+      calls.push({ tool, args, surface, leaseId })
+      return JSON.stringify({ ok: true, tool })
+    },
+  })
+  return { facade, calls }
+}
+
 function parseErr(out: string) {
   try { const o = JSON.parse(out); return isAgentBrowserError(o) ? o : null } catch { return null }
 }
@@ -92,5 +111,12 @@ describe('ScopedBrowserFacade (§3.4 dispatch keystone)', () => {
     await facade.run('browser_collect_images', {})
     assert.equal(calls[0].surface, 'agent-view')
     assert.equal(calls[0].leaseId, leaseId)
+  })
+
+  it('refuses agent-view writes when the scoped tab binding is missing', async () => {
+    const { facade, calls } = makeFacadeWithAgentTabId('')
+    const out = await facade.run('browser_navigate', { url: 'https://x' })
+    assert.equal(parseErr(out)?.errorCode, 'browser_surface_binding_violation')
+    assert.equal(calls.length, 0)
   })
 })

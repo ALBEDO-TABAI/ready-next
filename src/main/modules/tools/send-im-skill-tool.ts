@@ -2,6 +2,7 @@ import { existsSync, readdirSync, statSync } from 'node:fs'
 import { basename, extname, isAbsolute, join } from 'node:path'
 
 import { createToolExecutionOutput, type ToolExecutionOutput } from '../agent-control/tools-runtime/tool-result-types'
+import { SEND_IM_ERROR_KINDS } from '../agent-control/contracts/error-kinds'
 import { isRetryOnlyTurn } from '../agent-control/skills/skill-detection-inputs'
 import { normalizeChannelDeliveryResult } from '../agent-control/runtime-core/channel-delivery-result'
 import { hasNegatedLocalSendImFileIntent } from '../../../shared/remote-im-file-intent'
@@ -317,12 +318,18 @@ function filesToRecentArtifacts(files: ResolvedSendImFile[]): SendImProjectionAr
 }
 
 function terminalFailureReasonForSendImError(errorKind: string): TerminalFailureReason {
-  if (errorKind === 'send_failed' || errorKind === 'blocked_external') return 'delivery_failed'
-  if (errorKind === 'sidecar_unavailable' || errorKind === 'channel_not_ready') return 'tool_unavailable'
   if (
-    errorKind === 'file_not_found'
-    || errorKind === 'file_ambiguous'
-    || errorKind === 'directory_not_supported'
+    errorKind === SEND_IM_ERROR_KINDS.sendFailed.code
+    || errorKind === SEND_IM_ERROR_KINDS.blockedExternal.code
+  ) return 'delivery_failed'
+  if (
+    errorKind === SEND_IM_ERROR_KINDS.sidecarUnavailable.code
+    || errorKind === SEND_IM_ERROR_KINDS.channelNotReady.code
+  ) return 'tool_unavailable'
+  if (
+    errorKind === SEND_IM_ERROR_KINDS.fileNotFound.code
+    || errorKind === SEND_IM_ERROR_KINDS.fileAmbiguous.code
+    || errorKind === SEND_IM_ERROR_KINDS.directoryNotSupported.code
   ) {
     return 'no_artifact'
   }
@@ -490,7 +497,7 @@ function diagnoseSendFailure(error: unknown): SendImFailureDiagnosis {
         '这不是 Ready 找不到文件，也没有证据指向附件尺寸限制；本轮直接重试大概率仍会失败。',
         '请先从微信给 Ready 发一条新消息刷新发送会话后重试；仍失败再重新绑定微信。',
       ].join(''),
-      errorKind: 'blocked_external',
+      errorKind: SEND_IM_ERROR_KINDS.blockedExternal.code,
       errorCode: 'wechat_sendmessage_ret_-2',
       retryable: false,
       rawError,
@@ -498,8 +505,8 @@ function diagnoseSendFailure(error: unknown): SendImFailureDiagnosis {
   }
   return {
     text: `微信文件发送失败：${rawError || '未知错误'}`,
-    errorKind: 'send_failed',
-    errorCode: 'send_failed',
+    errorKind: SEND_IM_ERROR_KINDS.sendFailed.code,
+    errorCode: SEND_IM_ERROR_KINDS.sendFailed.code,
     retryable: true,
     rawError,
   }
@@ -548,7 +555,7 @@ function resolveFiles(args: Record<string, unknown>, context: SendImSkillRuntime
       return {
         ok: false,
         error: `目标是文件夹，不是可直接发送的文件：${candidate.path}`,
-        errorKind: 'directory_not_supported',
+        errorKind: SEND_IM_ERROR_KINDS.directoryNotSupported.code,
         detail: { path: candidate.path },
       }
     }
@@ -557,7 +564,7 @@ function resolveFiles(args: Record<string, unknown>, context: SendImSkillRuntime
       return {
         ok: false,
         error: `文件夹里没有找到可发送的图片或视频：${candidate.path}`,
-        errorKind: 'file_not_found',
+        errorKind: SEND_IM_ERROR_KINDS.fileNotFound.code,
         detail: { path: candidate.path },
       }
     }
@@ -565,7 +572,7 @@ function resolveFiles(args: Record<string, unknown>, context: SendImSkillRuntime
       return {
         ok: false,
         error: `文件夹里只找到 ${expanded.length} 个媒体文件，少于用户要求的 ${requestedMediaCount} 个。`,
-        errorKind: 'file_not_found',
+        errorKind: SEND_IM_ERROR_KINDS.fileNotFound.code,
         detail: {
           requestedCount: requestedMediaCount,
           mediaCount: expanded.length,
@@ -578,7 +585,7 @@ function resolveFiles(args: Record<string, unknown>, context: SendImSkillRuntime
       return {
         ok: false,
         error: '文件夹里找到多个媒体文件，请说明要发哪几张，或传入 fileNames/filePaths。',
-        errorKind: 'file_ambiguous',
+        errorKind: SEND_IM_ERROR_KINDS.fileAmbiguous.code,
         detail: {
           mediaCount: expanded.length,
           candidates: expanded.map((item) => ({ name: item.name, path: item.path })).slice(0, 12),
@@ -606,7 +613,7 @@ function resolveFiles(args: Record<string, unknown>, context: SendImSkillRuntime
         return {
           ok: false,
           error: '上下文里找到多个可发送文件，请明确要发哪几个。',
-          errorKind: 'file_ambiguous',
+          errorKind: SEND_IM_ERROR_KINDS.fileAmbiguous.code,
           detail: {
             textPathCount: textResources.length,
             candidates: textResources.map((item) => ({
@@ -628,7 +635,7 @@ function resolveFiles(args: Record<string, unknown>, context: SendImSkillRuntime
     return {
       ok: false,
       error: `只找到 ${recentMedia.length} 个最近媒体，少于用户要求的 ${recentMediaCount} 个。`,
-      errorKind: 'file_not_found',
+      errorKind: SEND_IM_ERROR_KINDS.fileNotFound.code,
       detail: {
         requestedCount: recentMediaCount,
         recentMediaCount: recentMedia.length,
@@ -644,7 +651,7 @@ function resolveFiles(args: Record<string, unknown>, context: SendImSkillRuntime
     return {
       ok: false,
       error: '找到多个最近媒体，请说明要发哪几张，或传入 fileNames/filePaths。',
-      errorKind: 'file_ambiguous',
+      errorKind: SEND_IM_ERROR_KINDS.fileAmbiguous.code,
       detail: {
         recentMediaCount: recentMedia.length,
         candidates: recentMedia.map((item) => ({
@@ -667,7 +674,9 @@ function resolveFiles(args: Record<string, unknown>, context: SendImSkillRuntime
       path: item.path,
       kind: item.kind || null,
     })).slice(0, 12)
-    const errorKind = available.length > 1 ? 'file_ambiguous' : 'file_not_found'
+    const errorKind = available.length > 1
+      ? SEND_IM_ERROR_KINDS.fileAmbiguous.code
+      : SEND_IM_ERROR_KINDS.fileNotFound.code
     return {
       ok: false,
       error: available.length > 1
@@ -688,7 +697,7 @@ function resolveFiles(args: Record<string, unknown>, context: SendImSkillRuntime
   for (const candidate of candidates) {
     if (files.some((file) => file.path === candidate.path)) continue
     const resolved = validateResolvedFile(candidate.path, candidate.name)
-    if (!resolved.ok) return { ...resolved, errorKind: 'file_not_found' }
+    if (!resolved.ok) return { ...resolved, errorKind: SEND_IM_ERROR_KINDS.fileNotFound.code }
     files.push(resolved.file)
   }
   return { ok: true, files }
@@ -741,16 +750,16 @@ export async function executeSendImFileTool(
   if (hasNegatedLocalSendImFileIntent(context.currentUserText || '')) {
     return createToolExecutionOutput('用户明确表示不要发送到远程 IM，已取消发送。', {
       shape: 'json',
-      data: { status: 'error', errorKind: 'intent_negated' },
-      projectionPatch: skillProjectionPatch(undefined, 'intent_negated'),
+      data: { status: 'error', errorKind: SEND_IM_ERROR_KINDS.intentNegated.code },
+      projectionPatch: skillProjectionPatch(undefined, SEND_IM_ERROR_KINDS.intentNegated.code),
     })
   }
   const sidecar = context.sidecarManager
   if (!sidecar?.sendChannel) {
     return createToolExecutionOutput('远程 IM 发送通道不可用。', {
       shape: 'json',
-      data: { status: 'error', errorKind: 'sidecar_unavailable' },
-      projectionPatch: skillProjectionPatch(undefined, 'sidecar_unavailable'),
+      data: { status: 'error', errorKind: SEND_IM_ERROR_KINDS.sidecarUnavailable.code },
+      projectionPatch: skillProjectionPatch(undefined, SEND_IM_ERROR_KINDS.sidecarUnavailable.code),
     })
   }
   const resolved = resolveFiles(args, context)
@@ -765,8 +774,8 @@ export async function executeSendImFileTool(
   if (!target.ok) {
     return createToolExecutionOutput(target.error, {
       shape: 'json',
-      data: { status: 'error', errorKind: 'channel_not_ready', detail: target.detail || null },
-      projectionPatch: skillProjectionPatch(resolved.files, 'channel_not_ready'),
+      data: { status: 'error', errorKind: SEND_IM_ERROR_KINDS.channelNotReady.code, detail: target.detail || null },
+      projectionPatch: skillProjectionPatch(resolved.files, SEND_IM_ERROR_KINDS.channelNotReady.code),
     })
   }
   if (sidecar.isRunning && !sidecar.isRunning() && sidecar.start) {

@@ -28,6 +28,12 @@ export type AgentBrowserErrorCode =
   | 'login_required'
   /** A high-control platform refused a script-hard tool / script param (§4.4). */
   | 'script_blocked'
+  /** A browser script-hard tool received freeform JS instead of a named read-only template. */
+  | 'freeform_script_denied'
+  /** An agent browser write reached dispatch without a code-derived surface intent. */
+  | 'browser_surface_undeclared'
+  /** A code-derived surface intent conflicts with the browser engine binding. */
+  | 'browser_surface_binding_violation'
 
 export interface AgentBrowserStructuredError {
   ok: false

@@ -1,7 +1,12 @@
 import { useState, type ReactElement } from 'react'
-import { AlertCircle, Bot, CheckCircle2, ChevronDown, ChevronRight, Loader2, Minimize2, ShieldAlert, X } from 'lucide-react'
+import { AlertCircle, Bot, CheckCircle2, ChevronDown, ChevronRight, Loader2, LockKeyhole, Minimize2, ShieldAlert, X } from 'lucide-react'
 
-import type { AgentBrowserCollectionTask, AgentBrowserControlState } from '../../modules/browser/useAgentBrowserSupervision'
+import type {
+  AgentBrowserCollectionTask,
+  AgentBrowserControlState,
+  AgentBrowserSurface,
+  BrowserLeaseSurfaceSnapshot,
+} from '../../modules/browser/useAgentBrowserSupervision'
 
 interface AgentBrowserSupervisionPanelProps {
   controlState: AgentBrowserControlState
@@ -9,10 +14,30 @@ interface AgentBrowserSupervisionPanelProps {
   requestInterruption: () => Promise<void>
   confirmInterruption: () => Promise<void>
   dismissInterruption: () => Promise<void>
+  surfaces?: Record<AgentBrowserSurface, BrowserLeaseSurfaceSnapshot> | null
+  activeWriteSurface?: AgentBrowserSurface | null
   variant?: 'floating' | 'pane' | 'collapsed' | 'collapsedRail'
   onCollapse?: () => void
   onExpand?: () => void
   onClose?: () => void
+}
+
+function surfaceLabel(surface: AgentBrowserSurface): string {
+  return surface === 'user-view' ? '当前可见页协作' : '后台 Agent 页'
+}
+
+function activeSurfaceLockText(
+  surfaces?: Record<AgentBrowserSurface, BrowserLeaseSurfaceSnapshot> | null,
+  activeWriteSurface?: AgentBrowserSurface | null,
+): string | null {
+  if (!surfaces) return null
+  const takeoverSurface = (['user-view', 'agent-view'] as AgentBrowserSurface[])
+    .find((surface) => surfaces[surface]?.state === 'takeover')
+  if (takeoverSurface) return `${surfaceLabel(takeoverSurface)}已由用户接管`
+  if (!activeWriteSurface) return null
+  const snapshot = surfaces[activeWriteSurface]
+  if (!snapshot || snapshot.state !== 'held') return null
+  return `${surfaceLabel(activeWriteSurface)}写锁${snapshot.heldBy ? ` · ${snapshot.heldBy}` : ''}`
 }
 
 function isActiveTask(task: AgentBrowserCollectionTask): boolean {
@@ -52,6 +77,8 @@ export function AgentBrowserSupervisionPanel({
   requestInterruption,
   confirmInterruption,
   dismissInterruption,
+  surfaces,
+  activeWriteSurface,
   variant = 'floating',
   onCollapse,
   onExpand,
@@ -72,6 +99,17 @@ export function AgentBrowserSupervisionPanel({
       : controlState === 'active'
         ? '浏览中'
         : '等待确认'
+  const surfaceLockText = activeSurfaceLockText(surfaces, activeWriteSurface)
+  const surfaceModeLabel = activeWriteSurface === 'user-view'
+    ? '当前页协作'
+    : activeWriteSurface === 'agent-view'
+      ? '后台 Agent 页'
+      : 'Agent 浏览器'
+  const headerTitle = activeWriteSurface === 'user-view'
+    ? 'Agent 正在协作当前页'
+    : activeWriteSurface === 'agent-view'
+      ? 'Agent 正在后台页工作'
+      : 'Agent 浏览器监控'
 
   if (variant === 'collapsed' || variant === 'collapsedRail') {
     const task = visibleTasks[0]
@@ -88,7 +126,7 @@ export function AgentBrowserSupervisionPanel({
         }}
       >
         <Bot style={{ width: 15, height: 15 }} className="text-[var(--color-blue)]" strokeWidth={2} />
-        <span>Agent 浏览器</span>
+        <span>{surfaceModeLabel}</span>
         <span style={{ color: 'var(--text-gray)', fontWeight: 500 }}>{task ? taskStatusLabel(task) : statusText}</span>
       </button>
     )
@@ -118,7 +156,7 @@ export function AgentBrowserSupervisionPanel({
         style={{ color: 'var(--text-title)' }}
       >
         <Bot style={{ width: 15, height: 15 }} className="text-[var(--color-blue)]" strokeWidth={2} />
-        <span className="flex-1 font-semibold">Agent 正在使用浏览器</span>
+        <span className="flex-1 font-semibold">{headerTitle}</span>
         <span
           className="rounded-full px-1.5 py-0.5 text-[10px] font-semibold"
           style={{ background: 'var(--color-blue-light)', color: 'var(--color-blue)' }}
@@ -157,6 +195,20 @@ export function AgentBrowserSupervisionPanel({
       {panelOpen && (
         <div className="flex flex-col gap-1.5 px-2 pb-2">
           {/* Sub-agent session cards */}
+          {surfaceLockText && (
+            <div
+              className="flex items-center gap-1.5 rounded-[8px] px-2 py-1.5 text-[11px] font-medium"
+              data-browser-surface-lock={activeWriteSurface || 'takeover'}
+              style={{
+                background: 'color-mix(in srgb, var(--color-blue) 10%, transparent)',
+                color: 'var(--text-title)',
+              }}
+            >
+              <LockKeyhole style={{ width: 13, height: 13 }} className="text-[var(--color-blue)]" strokeWidth={2} />
+              <span className="min-w-0 truncate">{surfaceLockText}</span>
+            </div>
+          )}
+
           {visibleTasks.map((task) => {
             const total = task.progress.total || task.progress.completed + task.progress.failed
             const done = task.progress.completed + task.progress.failed

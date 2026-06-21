@@ -135,7 +135,7 @@ function extractOpenclawPairingCommand(userText: string): string | null {
  * so `getPolicyOpenAIToolBundle` / `getPolicyAnthropicTools` can apply
  * `filterToolsByAllowedTools` without re-resolving the runtime per call.
  */
-function resolveActiveSkillAllowedTools(
+export function resolveActiveSkillAllowedTools(
   authorization: SkillToolAuthorization,
 ): ReadonlyArray<string> | null {
   if (authorization.mode !== 'selected') return null

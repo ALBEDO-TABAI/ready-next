@@ -7,14 +7,15 @@
  * are summarized by downstream agents, not by raw content overflow.
  *
  * Failure semantics mirror `web_search`: both backends failing throws
- * `ToolDomainError('web_fetch_failed', ...)` so the dispatch layer maps
- * to the explicit `errorKind`.
+ * `ToolDomainError(WEB_RESEARCH_ERROR_KINDS.webFetchFailed.code, ...)`
+ * so the dispatch layer maps to the shared explicit `errorKind`.
  *
  * Pure module — no electron, no skills-runtime imports.
  */
 
 import { z } from 'zod'
 
+import { WEB_RESEARCH_ERROR_KINDS } from '../../agent-control/contracts/error-kinds'
 import { logAgentMetric } from '../../agent-control/metrics'
 import { ToolDomainError } from '../tool-errors'
 import { WEB_TOOL_FALLBACK_METRICS } from './web-tool-metrics'
@@ -170,7 +171,7 @@ export async function executeWebFetch(
   }
 
   throw new ToolDomainError(
-    'web_fetch_failed',
+    WEB_RESEARCH_ERROR_KINDS.webFetchFailed.code,
     `Both Jina and Tavily Extract failed: jina=${jinaError instanceof Error ? jinaError.message : String(jinaError)}, tavily=${tavilyError instanceof Error ? tavilyError.message : String(tavilyError)}`,
     {
       url: args.url,

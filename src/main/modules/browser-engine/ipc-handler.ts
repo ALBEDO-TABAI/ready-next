@@ -21,7 +21,12 @@ import { ScopedBrowserFacade } from './scoped-browser-facade'
 import type { BrowserCollectionTarget } from './collection-targets'
 import { AgentTabControlGate } from './agent-tab-control-gate'
 import { getBrowserWriteLeaseService } from './agent-browser-lease-singleton'
-import type { AgentBrowserSurface } from './agent-browser-errors'
+import { isAgentBrowserError, type AgentBrowserSurface } from './agent-browser-errors'
+import {
+  isUserViewKeyboardTakeoverInput,
+  recordUserViewTakeoverSignal,
+  shouldRecordUserViewTabSwitch,
+} from './user-view-takeover-bridge'
 import { isHighControlPlatformText } from '../../../shared/browser-collection-intent'
 import type {
   BrowserCDPErrorCode,
@@ -60,8 +65,11 @@ import { setupBrowserClipDraggedTabIPC } from './ipc-clip-dragged-tab'
 import { setupBrowserContentStudyIPC } from './ipc-content-study-dragged-tab'
 import { setupBrowserDataIPC } from './ipc-data'
 import { setupBrowserFastCardIPC } from './ipc-fastcard'
+import { setupBrowserLockOverlayIPC } from './ipc-browser-lock-overlay'
 import { setupBrowserShellIPC } from './ipc-shell'
 import { setupBrowserSupervisionIPC } from './ipc-supervision'
+import type { BrowserLeaseSupervisionSnapshot } from './ipc-supervision'
+import { buildBrowserLeaseSupervisionSnapshot } from './browser-lease-supervision-snapshot'
 import { BrowserPreviewService } from './preview-service'
 import { BrowserPageBackgroundService } from './page-background-service'
 import { BrowserSessionPolicyService } from './session-policy-service'
@@ -159,6 +167,8 @@ export class BrowserController {
   private readonly appShortcutBridgeService: BrowserAppShortcutBridgeService
   private readonly utilityMenuService: BrowserUtilityMenuService
   private readonly windowOpenService: BrowserWindowOpenService
+  private readonly userViewTakeoverWebContentsIds = new Set<number>()
+  private p7cLiveProofLeaseId: string | null = null
 
   constructor(mainWindow: BrowserWindow, useMock = false) {
     this.mainWindow = mainWindow
@@ -386,6 +396,9 @@ export class BrowserController {
       openExternal: (url) => {
         shell.openExternal(url)
       },
+    })
+    getBrowserWriteLeaseService().onTransition(() => {
+      this.notifyBrowserLeaseChanged()
     })
     void this.contentTaskRunner.resumePendingTasks()
   }
@@ -1004,6 +1017,30 @@ export class BrowserController {
     this.sendToRenderer('browser:agentControlChanged', { state: this.agentTabControlGate.getState() })
   }
 
+  private notifyBrowserLeaseChanged(): void {
+    this.sendToRenderer('browser:leaseChanged', this.getBrowserLeaseSnapshot())
+  }
+
+  private attachUserViewLeaseTakeover(tabId: string): void {
+    const webContents = this.tabs.get(tabId)?.view?.webContents
+    if (!webContents || this.userViewTakeoverWebContentsIds.has(webContents.id)) return
+    this.userViewTakeoverWebContentsIds.add(webContents.id)
+    webContents.on('before-input-event', (_event, input) => {
+      if (!isUserViewKeyboardTakeoverInput(input)) return
+      const tab = this.tabs.get(tabId)
+      if (!tab || tab.owner === 'agent') return
+      recordUserViewTakeoverSignal({
+        service: getBrowserWriteLeaseService(),
+        activeTabId: this.activeTabId,
+        signalTabId: tabId,
+        source: 'keyboard',
+      })
+    })
+    webContents.once('destroyed', () => {
+      this.userViewTakeoverWebContentsIds.delete(webContents.id)
+    })
+  }
+
   getAgentTabId(): string | null {
     const tab = this.agentTabId ? this.tabs.get(this.agentTabId) : null
     return tab?.owner === 'agent' ? this.agentTabId : null
@@ -1138,6 +1175,176 @@ export class BrowserController {
     return this.agentTabControlGate.getState()
   }
 
+  getBrowserLeaseSnapshot(): BrowserLeaseSupervisionSnapshot {
+    return buildBrowserLeaseSupervisionSnapshot(getBrowserWriteLeaseService())
+  }
+
+  private isP7cLiveProofEnabled(): boolean {
+    return process.env.READY_P7C_LIVE_PROOF === '1'
+  }
+
+  private async readP7cLiveProofPageState(tab: Tab): Promise<{
+    focusToken: string
+    scrollX: number
+    scrollY: number
+    url: string
+    title: string
+  }> {
+    if (!tab.view?.webContents) throw new Error('active tab has no browser webContents')
+    const pageState = await tab.view.webContents.executeJavaScript(`(() => {
+      const active = document.activeElement;
+      const tokenParts = [];
+      if (active) {
+        tokenParts.push(active.tagName || '');
+        tokenParts.push(active.id || '');
+        tokenParts.push(active.getAttribute('name') || '');
+        tokenParts.push(active.getAttribute('role') || '');
+        tokenParts.push(active.getAttribute('aria-label') || '');
+        tokenParts.push(active.className && typeof active.className === 'string' ? active.className : '');
+      }
+      return {
+        focusToken: tokenParts.join('#'),
+        scrollX: Math.round(window.scrollX || document.documentElement.scrollLeft || document.body.scrollLeft || 0),
+        scrollY: Math.round(window.scrollY || document.documentElement.scrollTop || document.body.scrollTop || 0),
+        url: location.href,
+        title: document.title || '',
+      };
+    })()`, true) as {
+      focusToken?: unknown
+      scrollX?: unknown
+      scrollY?: unknown
+      url?: unknown
+      title?: unknown
+    }
+    return {
+      focusToken: String(pageState?.focusToken || ''),
+      scrollX: Number(pageState?.scrollX || 0),
+      scrollY: Number(pageState?.scrollY || 0),
+      url: String(pageState?.url || tab.url || ''),
+      title: String(pageState?.title || tab.title || ''),
+    }
+  }
+
+  async prepareP7cLiveProofForegroundProbe(): Promise<{
+    success: boolean
+    state?: { tabId: string; url: string; title: string; focusToken: string; scrollX: number; scrollY: number }
+    error?: string
+  }> {
+    if (!this.isP7cLiveProofEnabled()) {
+      return { success: false, error: 'p7c live proof is disabled' }
+    }
+    const tab = this.getActiveTab()
+    if (!tab?.view?.webContents) return { success: false, error: 'no active browser webContents' }
+    try {
+      await tab.view.webContents.executeJavaScript(`(() => {
+        document.title = 'Ready P7c2 foreground proof';
+        document.body.innerHTML = [
+          '<main id="ready-p7c2-proof-root" style="min-height:2400px;padding:24px;font-family:sans-serif">',
+          '<label for="ready-p7c2-focus">P7c2 focus target</label>',
+          '<input id="ready-p7c2-focus" name="ready-p7c2-focus" aria-label="P7c2 focus target" value="focus target" />',
+          '<section style="height:1800px">scroll proof spacer</section>',
+          '</main>'
+        ].join('');
+        const input = document.getElementById('ready-p7c2-focus');
+        if (input) input.focus();
+        window.scrollTo(0, 360);
+        return true;
+      })()`, true)
+      const state = await this.readP7cLiveProofPageState(tab)
+      return { success: true, state: { tabId: tab.id, ...state } }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  }
+
+  async sampleP7cLiveProofActiveTabState(): Promise<{
+    success: boolean
+    state?: { tabId: string; url: string; title: string; focusToken: string; scrollX: number; scrollY: number }
+    error?: string
+  }> {
+    if (!this.isP7cLiveProofEnabled()) {
+      return { success: false, error: 'p7c live proof is disabled' }
+    }
+    const tab = this.getActiveTab()
+    if (!tab?.view?.webContents) return { success: false, error: 'no active browser webContents' }
+    try {
+      const state = await this.readP7cLiveProofPageState(tab)
+      return { success: true, state: { tabId: tab.id, ...state } }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  }
+
+  async createP7cLiveProofManualTab(): Promise<{ success: boolean; tabId?: string; error?: string }> {
+    if (!this.isP7cLiveProofEnabled()) {
+      return { success: false, error: 'p7c live proof is disabled' }
+    }
+    const created = await this.createTab(READY_BROWSER_BLANK_URL)
+    if (!created.success || !created.tabId) {
+      return { success: false, error: created.error || 'failed to create p7c proof tab' }
+    }
+    this.updateTabRuntimeState(created.tabId, { owner: 'manual', activity: 'idle', required: false })
+    return { success: true, tabId: created.tabId }
+  }
+
+  startP7cLiveProofUserViewLease(): { success: boolean; leaseId?: string; tabId?: string; error?: string } {
+    if (!this.isP7cLiveProofEnabled()) {
+      return { success: false, error: 'p7c live proof is disabled' }
+    }
+    const tab = this.getActiveTab()
+    if (!tab?.id) return { success: false, error: 'no active browser tab' }
+    const service = getBrowserWriteLeaseService()
+    const state = service.getState('user-view')
+    if (state === 'takeover' || state === 'expired') {
+      service.clearTakeover('user-view')
+    }
+    const lease = service.acquire({
+      surface: 'user-view',
+      taskId: 'p7c-live-proof',
+      runId: `p7c-live-proof-${Date.now()}`,
+      tabId: tab.id,
+      ttlMs: 30_000,
+    })
+    if (isAgentBrowserError(lease)) {
+      return { success: false, error: lease.message || lease.errorCode }
+    }
+    this.p7cLiveProofLeaseId = lease.leaseId
+    return { success: true, leaseId: lease.leaseId, tabId: tab.id }
+  }
+
+  sendP7cLiveProofUserKey(key = 'a'): { success: boolean; error?: string } {
+    if (!this.isP7cLiveProofEnabled()) {
+      return { success: false, error: 'p7c live proof is disabled' }
+    }
+    const tab = this.getActiveTab()
+    const webContents = tab?.view?.webContents
+    if (!webContents) return { success: false, error: 'no active browser webContents' }
+    webContents.sendInputEvent({ type: 'keyDown', keyCode: key })
+    webContents.sendInputEvent({ type: 'keyUp', keyCode: key })
+    return { success: true }
+  }
+
+  checkP7cLiveProofWriteDenied(): { success: boolean; errorKind?: string; error?: string } {
+    if (!this.isP7cLiveProofEnabled()) {
+      return { success: false, error: 'p7c live proof is disabled' }
+    }
+    const denied = getBrowserWriteLeaseService().checkWrite({
+      surface: 'user-view',
+      leaseId: this.p7cLiveProofLeaseId,
+    })
+    if (!denied) return { success: false, error: 'write was still allowed' }
+    return { success: true, errorKind: denied.errorCode }
+  }
+
+  clearP7cLiveProofState(): { success: boolean; error?: string } {
+    if (!this.isP7cLiveProofEnabled()) {
+      return { success: false, error: 'p7c live proof is disabled' }
+    }
+    this.p7cLiveProofLeaseId = null
+    getBrowserWriteLeaseService().clearTakeover('user-view')
+    return { success: true }
+  }
+
   private createBrowserError(code: BrowserCDPErrorCode, message: string): Error {
     const error = new Error(message)
     ;(error as Error & { code?: BrowserCDPErrorCode }).code = code
@@ -1248,7 +1455,11 @@ export class BrowserController {
     options?: { background?: boolean },
   ): Promise<{ success: boolean; tabId?: string; error?: string }> {
     if (!options?.background) this.clearSplitTabHost()
-    return this.tabLifecycleService.createTab(url, options)
+    const result = await this.tabLifecycleService.createTab(url, options)
+    if (result.success && result.tabId) {
+      this.attachUserViewLeaseTakeover(result.tabId)
+    }
+    return result
   }
 
   async openForCaptureTarget(
@@ -1711,6 +1922,8 @@ export class BrowserController {
   switchTab(tabId: string): {
     success: boolean
     error?: string
+    previousActiveTabId?: string | null
+    activeTabId?: string | null
     url?: string
     title?: string
     domain?: string
@@ -1722,7 +1935,27 @@ export class BrowserController {
     canGoBack?: boolean
     canGoForward?: boolean
   } {
-    return this.tabShellService.switchTab(tabId)
+    const result = this.tabShellService.switchTab(tabId)
+    if (result.success) {
+      const leaseTabId = getBrowserWriteLeaseService().getLease('user-view')?.tabId ?? null
+      const nextTab = this.tabs.get(tabId)
+      if (
+        nextTab?.owner !== 'agent'
+        && shouldRecordUserViewTabSwitch({
+          previousActiveTabId: result.previousActiveTabId ?? null,
+          nextActiveTabId: result.activeTabId ?? tabId,
+          leaseTabId,
+        })
+      ) {
+        recordUserViewTakeoverSignal({
+          service: getBrowserWriteLeaseService(),
+          activeTabId: this.activeTabId,
+          signalTabId: tabId,
+          source: 'tab-switch',
+        })
+      }
+    }
+    return result
   }
 
   updateViewBounds(bounds: BrowserViewBoundsUpdate): { success: boolean } {
@@ -1941,6 +2174,11 @@ export function setupBrowserIPC(
     },
   })
   setupBrowserFastCardIPC({
+    getMainWindow: () => controller.getMainWindow(),
+    preloadPath: options?.preloadPath || join(__dirname, '../preload/index.mjs'),
+    rendererFile: options?.rendererFile || join(__dirname, '../renderer/index.html'),
+  })
+  setupBrowserLockOverlayIPC({
     getMainWindow: () => controller.getMainWindow(),
     preloadPath: options?.preloadPath || join(__dirname, '../preload/index.mjs'),
     rendererFile: options?.rendererFile || join(__dirname, '../renderer/index.html'),

@@ -229,7 +229,7 @@ export default function BeliefCardsPanel({
               上次运行 {formatDate(snapshot.maintenance.lastLifecycleMaintenanceAt)}；
               LLM 维护回合 {snapshot.maintenance.llmRound
                 ? `${snapshot.maintenance.llmRound.decision === 'skip' ? '跳过' : '运行'}，写入 ${snapshot.maintenance.llmRound.applied}，驳回 ${snapshot.maintenance.llmRound.rejected}`
-                : '尚未记录'}。
+                : '未接入驱动'}。
             </div>
           </div>
 

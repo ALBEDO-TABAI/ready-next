@@ -7,7 +7,14 @@ import {
   type ToolParamSchemaSpec
 } from './tool-schema'
 import { MEMORY_SCHEMAS } from './schemas/memory-schemas'
-import { isKnowledgeSystemEnabled } from '../agent-control/knowledge/knowledge-truth-source'
+import {
+  isKnowledgeSystemEnabled,
+  syncBeliefCardFile,
+  type FileSyncResult,
+} from '../agent-control/knowledge/knowledge-truth-source'
+import { isSafeAgentScopeId, type BeliefCard, type BeliefCardStore } from '../agent-control/knowledge/belief-card-store'
+import type { MirrorDb } from '../agent-control/knowledge/belief-card-mirror'
+import { logAgentMetric } from '../agent-control/metrics'
 import { AppSettingsRepository } from '../repositories/app-settings-repository'
 import { zodObjectToParamList } from './zod-param-derivation'
 
@@ -68,6 +75,84 @@ const MEMORY_TOOLS: MemoryToolDef[] = [
 ]
 
 const CARD_TOOL_NAMES = new Set(['memory_write_card', 'memory_read_card'])
+
+type CardWriteStatus = 'staged' | 'active'
+
+type CardWriteAuthorization =
+  | { ok: true; status: CardWriteStatus }
+  | { ok: false; reason: string }
+
+function agentOwnerFromCardPath(relPath: string): string | null {
+  const match = relPath.replace(/\\/g, '/').match(/^agents\/([^/]+)\/knowledge(?:\/|$)/)
+  return match?.[1] ?? null
+}
+
+export function resolveCardWriteAuthorization(input: {
+  requestedStatus?: CardWriteStatus
+  relPath: string
+  invoker?: ToolContext['invoker']
+  ownerAgentId: string | null
+  existingCard: BeliefCard | null
+}): CardWriteAuthorization {
+  const ownerFromPath = agentOwnerFromCardPath(input.relPath)
+  if (ownerFromPath !== null) {
+    if (!isSafeAgentScopeId(ownerFromPath)) {
+      return { ok: false, reason: 'agent-scoped card owner is invalid' }
+    }
+    if (!input.ownerAgentId || input.ownerAgentId !== ownerFromPath) {
+      return { ok: false, reason: 'agent-scoped card owner mismatch' }
+    }
+  }
+
+  const hostAuthorized = input.invoker === 'host'
+  if (!hostAuthorized && input.existingCard?.frontmatter.status === 'active') {
+    return { ok: false, reason: 'active card overwrite requires host confirmation' }
+  }
+
+  return {
+    ok: true,
+    status: hostAuthorized && input.requestedStatus === 'active' ? 'active' : 'staged',
+  }
+}
+
+function getMirrorDb(runtime: ToolContext['runtime']): MirrorDb | null {
+  const candidate = runtime as (ToolContext['runtime'] & {
+    getBeliefCardMirrorDb?: () => MirrorDb | null
+  }) | null | undefined
+  return candidate?.getBeliefCardMirrorDb?.() ?? null
+}
+
+function mirrorFailurePayload(relPath: string, errorKind: string, error?: unknown): Record<string, unknown> {
+  return {
+    relPath,
+    errorKind,
+    ...(error instanceof Error ? { message: error.message } : error ? { message: String(error) } : {}),
+  }
+}
+
+function syncMirrorAfterCardWrite(
+  runtime: ToolContext['runtime'],
+  store: BeliefCardStore,
+  relPath: string,
+): { mirrorSynced: true; mirrorSyncResult: FileSyncResult } | { mirrorSynced: false; mirrorSyncErrorKind: string } {
+  const db = getMirrorDb(runtime)
+  if (!db) {
+    return { mirrorSynced: false, mirrorSyncErrorKind: 'mirror_db_unavailable' }
+  }
+  try {
+    const result = syncBeliefCardFile(db, store, relPath)
+    if (result === 'invalid') {
+      const errorKind = 'mirror_invalid_after_write'
+      logAgentMetric('belief_card_mirror_sync_failed', mirrorFailurePayload(relPath, errorKind))
+      return { mirrorSynced: false, mirrorSyncErrorKind: errorKind }
+    }
+    return { mirrorSynced: true, mirrorSyncResult: result }
+  } catch (error) {
+    const errorKind = 'mirror_sync_failed'
+    logAgentMetric('belief_card_mirror_sync_failed', mirrorFailurePayload(relPath, errorKind, error))
+    return { mirrorSynced: false, mirrorSyncErrorKind: errorKind }
+  }
+}
 
 /** EP2-K6 — rollback switch: card tools disappear from exposure when the
  *  knowledge system is off (files untouched, injection already gated). */
@@ -276,6 +361,17 @@ export async function executeMemoryTool(
             site?: string
           }
         const store = runtime.getBeliefCardStore()
+        const existingCard = store.readCard(rel_path, { includeStaged: true })
+        const authorization = resolveCardWriteAuthorization({
+          requestedStatus: status,
+          relPath: rel_path,
+          invoker: context.invoker,
+          ownerAgentId: context.scope?.agent ?? null,
+          existingCard,
+        })
+        if (!authorization.ok) {
+          return JSON.stringify({ success: false, error: authorization.reason })
+        }
         const result = store.writeCard({
           relPath: rel_path,
           frontmatter: {
@@ -284,7 +380,7 @@ export async function executeMemoryTool(
             confidence,
             tag,
             created: new Date().toISOString().slice(0, 10),
-            status: status ?? 'staged',
+            status: authorization.status,
             ...(source ? { source } : {}),
             ...(site ? { site } : {}),
           },
@@ -293,12 +389,15 @@ export async function executeMemoryTool(
         if (!result.ok) {
           return JSON.stringify({ success: false, error: result.reason })
         }
-        log(`[memory_write_card] wrote ${result.relPath} (${status ?? 'staged'})`)
+        const mirrorReceipt = syncMirrorAfterCardWrite(runtime, store, result.relPath)
+        log(`[memory_write_card] wrote ${result.relPath} (${authorization.status})`)
         return JSON.stringify({
           success: true,
           rel_path: result.relPath,
-          status: status ?? 'staged',
-          message: `已写入信念卡 ${result.relPath}（${status ?? 'staged'}）`,
+          status: authorization.status,
+          mirrorSynced: mirrorReceipt.mirrorSynced,
+          ...(!mirrorReceipt.mirrorSynced ? { mirrorSyncErrorKind: mirrorReceipt.mirrorSyncErrorKind } : {}),
+          message: `已写入信念卡 ${result.relPath}（${authorization.status}）`,
         })
       }
 

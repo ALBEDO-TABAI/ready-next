@@ -23,8 +23,10 @@ export type TurnTerminalReason =
   | 'failed_skill'
   | 'resume_launch_failed'
   | 'persistence_failed'
+  | 'manual_suspend'
   | 'cancelled_user'
   | 'cancelled_runtime'
+  | 'main_no_progress_timeout'
 
 export type TurnUserIntent =
   | 'start'
@@ -301,6 +303,7 @@ const TURN_FRAME_LIVENESS_RANK: Record<TurnFrameLiveness, number> = {
 const TURN_TERMINAL_REASON_RANK: Record<TurnTerminalReason, number> = {
   cancelled_user: 100,
   cancelled_runtime: 90,
+  main_no_progress_timeout: 90,
   failed_skill: 80,
   persistence_failed: 75,
   blocked_config: 70,
@@ -315,6 +318,7 @@ const TURN_TERMINAL_REASON_RANK: Record<TurnTerminalReason, number> = {
   resume_launch_failed: 55,
   done: 50,
   checkpoint_background: 30,
+  manual_suspend: 25,
   checkpoint_budget: 20,
   checkpoint_steered: 15,
   checkpoint_user_input: 10,

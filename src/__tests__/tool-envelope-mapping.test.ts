@@ -7,6 +7,7 @@ import {
   mapErrorKindToEnvelopeKind,
   type ToolEnvelopeKind,
 } from '../main/modules/tools/tool-result-envelope'
+import { WEB_RESEARCH_ERROR_KINDS } from '../main/modules/agent-control/contracts/error-kinds'
 
 // Every errorKind literal present in HEAD (harvested from tool-errors.ts +
 // tools/ + agent-control/). Each must map explicitly (mapped === true) to the
@@ -30,15 +31,18 @@ const EXPECTED: Record<string, ToolEnvelopeKind> = {
   no_driver_registered: 'not_found',
   host_unavailable: 'upstream_error',
   mcp_tool_failed: 'upstream_error',
-  web_search_failed: 'upstream_error',
+  [WEB_RESEARCH_ERROR_KINDS.webSearchFailed.code]: 'upstream_error',
+  [WEB_RESEARCH_ERROR_KINDS.webFetchFailed.code]: 'upstream_error',
   driver_init_failed: 'upstream_error',
   launch_stuck: 'upstream_error',
   timeout: 'network_error',
   authorization_denied: 'denied_by_policy',
   tool_restricted_this_turn: 'denied_by_policy',
   internal_tool_not_allowed: 'denied_by_policy',
+  denied_by_user_negation: 'denied_by_policy',
   command_high_risk_blocked: 'denied_by_policy',
   denied_manual_only: 'denied_by_policy',
+  freeform_script_denied: 'denied_by_policy',
   denied_pending_confirmation: 'denied_by_policy',
   confirmation_denied_by_user: 'denied_by_policy',
   confirmation_expired: 'denied_by_policy',

@@ -1,6 +1,7 @@
 /**
  * EP3-PK3 — packet execution-channel dispatch (09 §3.2 channel table) +
  * verbatim brief injection (05 §4 最小传话铁律).
+ * P5c/C22 unwired: this module is not in production path.
  *
  * Channel selection is a STATIC LOOKUP over declared packet traits — never
  * a model judgment. The three channels:

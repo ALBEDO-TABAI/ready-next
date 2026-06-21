@@ -138,8 +138,9 @@ export function sanitizeHistoricalMessagesByCapability(
   let removedVideoBlocks = 0
   let replacedWithPlaceholders = 0
   const filtered: CapabilityMessage[] = messages.map((msg) => {
-    if (typeof msg.content === 'string') return { ...msg }
-    const blocks = msg.content
+    const content = msg.content
+    if (typeof content === 'string' || !Array.isArray(content)) return { ...msg }
+    const blocks = content
     const kept: CapabilityBlock[] = []
     let perMsgImagesDropped = 0
     let perMsgVideosDropped = 0

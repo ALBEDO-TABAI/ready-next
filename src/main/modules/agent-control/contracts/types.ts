@@ -218,6 +218,16 @@ export interface ScopeRunContextBudget {
   l0Chars: number
   l1Chars: number
   l2Chars: number
+  rulesChars?: number
+  knowledgeIndexChars?: number
+  agentRoutingChars?: number
+  recallChars?: number
+  autoRecallChars?: number
+  sectionChars?: Record<string, number>
+  totalBytes?: number
+  sectionBytes?: Record<string, number>
+  truncations?: string[]
+  truncationReasons?: Record<string, 'section_budget'>
   droppedRefs: string[]
 }
 

@@ -46,6 +46,8 @@ interface BrowserShellIPCController {
   switchTab(tabId: string): {
     success: boolean
     error?: string
+    previousActiveTabId?: string | null
+    activeTabId?: string | null
     url?: string
     title?: string
     domain?: string
@@ -78,6 +80,13 @@ interface BrowserShellIPCController {
   previewUpdateBounds(bounds: { x: number; y: number; width: number; height: number }): { success: boolean }
   previewClose(): { success: boolean }
   previewGetState(): unknown
+  createP7cLiveProofManualTab(): Promise<{ success: boolean; tabId?: string; error?: string }>
+  startP7cLiveProofUserViewLease(): { success: boolean; leaseId?: string; tabId?: string; error?: string }
+  prepareP7cLiveProofForegroundProbe(): Promise<{ success: boolean; state?: unknown; error?: string }>
+  sampleP7cLiveProofActiveTabState(): Promise<{ success: boolean; state?: unknown; error?: string }>
+  sendP7cLiveProofUserKey(key?: string): { success: boolean; error?: string }
+  checkP7cLiveProofWriteDenied(): { success: boolean; errorKind?: string; error?: string }
+  clearP7cLiveProofState(): { success: boolean; error?: string }
 }
 
 export function setupBrowserShellIPC(controller: BrowserShellIPCController): void {
@@ -241,4 +250,54 @@ export function setupBrowserShellIPC(controller: BrowserShellIPCController): voi
   )
   ipcMain.handle('browser:previewClose', () => controller.previewClose())
   ipcMain.handle('browser:previewGetState', () => controller.previewGetState())
+
+  ipcMain.handle('browser:p7cLiveProofStartUserViewLease', () => {
+    try {
+      return controller.startP7cLiveProofUserViewLease()
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+  ipcMain.handle('browser:p7cLiveProofCreateManualTab', async () => {
+    try {
+      return await controller.createP7cLiveProofManualTab()
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+  ipcMain.handle('browser:p7cLiveProofPrepareForegroundProbe', async () => {
+    try {
+      return await controller.prepareP7cLiveProofForegroundProbe()
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+  ipcMain.handle('browser:p7cLiveProofSampleActiveTabState', async () => {
+    try {
+      return await controller.sampleP7cLiveProofActiveTabState()
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+  ipcMain.handle('browser:p7cLiveProofSendUserKey', (_, key?: string) => {
+    try {
+      return controller.sendP7cLiveProofUserKey(key)
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+  ipcMain.handle('browser:p7cLiveProofCheckWriteDenied', () => {
+    try {
+      return controller.checkP7cLiveProofWriteDenied()
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+  ipcMain.handle('browser:p7cLiveProofClear', () => {
+    try {
+      return controller.clearP7cLiveProofState()
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
 }

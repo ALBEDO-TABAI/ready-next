@@ -51,6 +51,7 @@ import { canResumeShape } from './resume-handle'
 import type { RecentSkillRunForResume } from '../skills/skill-turn-identity-snapshot'
 import type { RequestEnvelope } from './request-envelope'
 import type { ContinuationIntent, ContinuationState } from './continuation-state'
+import { isDirectlyResumableTaskStatus, isPausedTaskStatus } from './task-open-status'
 import type { DomainAdapter } from '../domain-adapters/domain-adapter'
 import type { ToolExecutionHooks } from '../tools-runtime/tool-execution-hooks'
 import type { ToolRuntimeContext } from '../tools-runtime/tool-runtime'
@@ -547,6 +548,7 @@ export interface RunCoordinatorRequest {
   message: RunMessage
   coordinators: ReadonlyArray<DomainAdapter>
   requestId?: string
+  sourceMessageId?: string | null
   taskId?: string
   parentTaskId?: string
   parentStepId?: string
@@ -572,6 +574,7 @@ export interface ExecutionHostRequest {
   sessionId?: string
   sessionIdOverride?: string
   requestId?: string
+  sourceMessageId?: string | null
   taskId?: string
   parentTaskId?: string
   parentStepId?: string
@@ -941,7 +944,6 @@ export interface TurnEngineHost<TSession extends TurnEngineSession = TurnEngineS
     requestedTransport?: 'native' | 'text' | 'none'
     supportsNativeTools?: boolean
     preferTextToolBridgeOnce?: boolean
-    compressContext?: () => Promise<boolean> | boolean
     onBeforeRetry?: (result: unknown, attempt: number) => Promise<void> | void
   }) => Promise<TurnModelResponse>
   executeToolBatch: (params: {
@@ -1371,8 +1373,8 @@ function livenessFromSupervisorSnapshot(
   if (snapshot.status === 'killed') return 'done'
   if (snapshot.hasLiveWork) return 'running_process'
   if (snapshot.hasRecentProgress) return 'recent_progress'
-  if (snapshot.status === 'recoverable_paused' || snapshot.status === 'budget_paused') return 'recoverable_paused'
-  if (snapshot.status === 'blocked') return 'blocked'
+  if (isDirectlyResumableTaskStatus(snapshot.status)) return 'recoverable_paused'
+  if (isPausedTaskStatus(snapshot.status)) return 'blocked'
   return 'unknown'
 }
 

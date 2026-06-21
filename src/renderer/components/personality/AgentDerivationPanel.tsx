@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { CheckCircle2, GitBranchPlus, RefreshCw, XCircle } from 'lucide-react'
-import type { AgentDerivationCandidateData } from '../../types/electron'
+import type { AgentDerivationCandidateData, AgentDerivationConfirmData } from '../../types/electron'
 import {
   SETTINGS_CARD_STYLE,
   SETTINGS_FLAT_BUTTON_STYLE,
@@ -14,7 +14,6 @@ type Draft = {
   charter: string
   seedRulesText: string
   routingTriggersText: string
-  activateRouting: boolean
   selectedMigrations: string[]
 }
 
@@ -25,7 +24,6 @@ function draftFromCandidate(candidate: AgentDerivationCandidateData): Draft {
     charter: candidate.defaultCharter,
     seedRulesText: candidate.defaultSeedRulesText,
     routingTriggersText: candidate.defaultRoutingTriggers.join(', '),
-    activateRouting: false,
     selectedMigrations: [],
   }
 }
@@ -37,12 +35,21 @@ function parseTriggers(value: string): string[] {
     .filter(Boolean)
 }
 
+function noticeForConfirmResult(result: AgentDerivationConfirmData | undefined, fallbackId: string): string {
+  const blueprintId = result?.blueprintId || fallbackId
+  if (result?.status === 'needs_clarification' || result?.clarification) {
+    return `已生成 ${blueprintId}，请到 Agent System Studio 查看需补齐信息。`
+  }
+  return `已生成 ${blueprintId}，请到 Agent System Studio 确认创建。`
+}
+
 export default function AgentDerivationPanel() {
   const [candidates, setCandidates] = useState<AgentDerivationCandidateData[]>([])
   const [drafts, setDrafts] = useState<Record<string, Draft>>({})
   const [loading, setLoading] = useState(false)
   const [actionRunning, setActionRunning] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
 
   const loadCandidates = async () => {
     if (!window.electronAPI?.agent?.listDerivationCandidates) return
@@ -93,9 +100,10 @@ export default function AgentDerivationPanel() {
   const confirmDerivation = async (candidate: AgentDerivationCandidateData) => {
     if (!window.electronAPI?.agent?.confirmDerivation) return
     const draft = drafts[candidate.candidateRelPath] || draftFromCandidate(candidate)
-    if (!window.confirm(`确认创建 ${draft.name}？`)) return
+    if (!window.confirm(`为 ${draft.name} 生成待确认蓝图？`)) return
     setActionRunning(candidate.candidateRelPath)
     setError(null)
+    setNotice(null)
     try {
       const result = await window.electronAPI.agent.confirmDerivation({
         candidateRelPath: candidate.candidateRelPath,
@@ -104,11 +112,11 @@ export default function AgentDerivationPanel() {
         charter: draft.charter,
         seedRulesText: draft.seedRulesText,
         routingTriggers: parseTriggers(draft.routingTriggersText),
-        activateRouting: draft.activateRouting,
+        activateRouting: false,
         migrateCardRelPaths: draft.selectedMigrations,
       })
-      if (!result.success) throw new Error(result.error || '创建 Agent 失败')
-      window.dispatchEvent(new CustomEvent('ready:agent-registry-changed'))
+      if (!result.success) throw new Error(result.error || '生成蓝图失败')
+      setNotice(noticeForConfirmResult(result.data, draft.specialistId))
       await loadCandidates()
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -122,6 +130,7 @@ export default function AgentDerivationPanel() {
     if (!window.confirm(`驳回 ${candidate.title}？`)) return
     setActionRunning(candidate.candidateRelPath)
     setError(null)
+    setNotice(null)
     try {
       const result = await window.electronAPI.agent.rejectDerivation(candidate.candidateRelPath)
       if (!result.success) throw new Error(result.error || '驳回派生候选失败')
@@ -151,7 +160,7 @@ export default function AgentDerivationPanel() {
             </h3>
           </div>
           <p className="text-[12px] leading-5" style={{ color: 'var(--text-muted)', margin: '6px 0 0' }}>
-            满足证据门槛的候选卡可以在这里确认创建为专项 Agent。
+            满足证据门槛的候选卡可以在这里转成待确认蓝图。
           </p>
         </div>
         <button
@@ -168,6 +177,11 @@ export default function AgentDerivationPanel() {
       {error && (
         <div className="mt-4 text-[13px]" style={{ color: 'var(--color-red)' }}>
           {error}
+        </div>
+      )}
+      {notice && (
+        <div className="mt-4 text-[13px]" style={{ color: 'var(--color-green)' }}>
+          {notice}
         </div>
       )}
 
@@ -227,7 +241,7 @@ export default function AgentDerivationPanel() {
 	                    style={{ ...SETTINGS_PRIMARY_BUTTON_STYLE, padding: '8px 11px' }}
 	                  >
 	                    <CheckCircle2 className="w-3.5 h-3.5" />
-	                    创建
+	                    生成蓝图
 	                  </button>
 	                </div>
               </div>
@@ -274,7 +288,7 @@ export default function AgentDerivationPanel() {
                 />
               </label>
 
-              <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-3 mt-3">
+              <div className="grid grid-cols-1 gap-3 mt-3">
                 <label className="text-[12px]" style={{ color: 'var(--text-muted)' }}>
                   路由触发词
                   <input
@@ -283,14 +297,6 @@ export default function AgentDerivationPanel() {
                     className="mt-1 w-full border rounded-lg text-[13px]"
                     style={{ ...SETTINGS_FLAT_INPUT_STYLE, padding: '8px 10px' }}
                   />
-                </label>
-                <label className="inline-flex items-center gap-2 self-end text-[13px]" style={{ color: 'var(--text-body)' }}>
-                  <input
-                    type="checkbox"
-                    checked={draft.activateRouting}
-                    onChange={(event) => updateDraft(candidate.candidateRelPath, { activateRouting: event.target.checked })}
-                  />
-                  立即生效
                 </label>
               </div>
 

@@ -1,7 +1,7 @@
 import type { BrowserTaskDecisionMode } from '../../../shared/browser-agent-task'
 import type { AIModelConfig } from '../../../shared/ai-providers'
 import { getDefaultConfig } from '../../../shared/ai-providers'
-import type { CapabilityProfileId } from '../../../shared/ai-capability-groups'
+import type { CapabilityGroupId, CapabilityProfileId } from '../../../shared/ai-capability-groups'
 import type { ToolVisibilityPlan } from './contracts/run-contracts'
 import { buildToolVisibilityPlan } from './tool-policy/execution-tool-policy'
 import type { ToolPolicy } from './tool-policy/execution-tool-config'
@@ -175,6 +175,108 @@ export function resolveExecutionIntentContext(params: {
   }
 }
 
+export interface IntentCapabilityGroupModeResolution {
+  intentGroupModes: Partial<Record<CapabilityGroupId, boolean>>
+  allowDocumentTools: boolean
+  allowRSSTools: boolean
+  allowCalendarTools: boolean
+  allowFeishuTools: boolean
+  allowPetTools: boolean
+  allowSkillTools: boolean
+  allowResearchTools: boolean
+  allowMapTools: boolean
+  forceDocumentTool: boolean
+}
+
+export function resolveIntentCapabilityGroupModes(params: {
+  hasTools: boolean
+  capabilityProfile?: CapabilityProfileId
+  contextualUserInput: string
+  userInstructionText: string
+  intentClassification: IntentClassification
+  hasDocumentEnvironment: boolean
+  hasWidgetTargetContext: boolean
+  explicitWidgetCreateIntent: boolean
+  documentWidgetTaskKind: DocumentWidgetTaskKind
+  preferredSkillToolNames?: string[] | null
+  mapSemanticIntent?: MapSemanticIntent | null
+}): IntentCapabilityGroupModeResolution {
+  const hasLiveInfoBrowserIntent = params.intentClassification.objectSignals.some((signal) => /browser-live-info/i.test(signal))
+  const positiveDomains = new Set<IntentClassification['primaryDomain'] | Exclude<IntentClassification['primaryDomain'], 'generic'>>([
+    params.intentClassification.primaryDomain,
+    ...params.intentClassification.mentionedDomains,
+  ])
+  const excludedDomains = new Set(params.intentClassification.excludedDomains)
+  const hasDocumentKeyword =
+    /(文档|文稿|原文|文章|段落|章节|docx?|markdown|\.md\b|widget|show-widget|图表|趋势图|卡片|信息卡|提示块|表格|对比卡|进度卡|日程卡|待办|习惯|计划板|计算器|保存|写入|追加|替换|编辑|改写|润色|排版|格式)/i
+      .test(params.userInstructionText)
+  const hasDocumentIntent = positiveDomains.has('document') && !excludedDomains.has('document')
+  const hasRSSIntent = positiveDomains.has('rss') && !excludedDomains.has('rss')
+  const hasCalendarIntent = positiveDomains.has('calendar') && !excludedDomains.has('calendar')
+  const hasFeishuIntent = positiveDomains.has('feishu') && !excludedDomains.has('feishu')
+  const hasPetIntent = positiveDomains.has('pet') && !excludedDomains.has('pet')
+  const hasMapIntent = isMapSemanticIntentActive(params.mapSemanticIntent)
+  const mapSecondarySignals = new Set(params.mapSemanticIntent?.secondarySignals || [])
+  const isPetDominantIntent = params.intentClassification.primaryDomain === 'pet' && hasPetIntent
+  const hasExplicitDocumentSurface =
+    /(文档|文稿|原文|文章|段落|章节|docx?|markdown|\.md\b|widget|show-widget|图表|趋势图|卡片|信息卡|提示块|表格|对比卡|进度卡|保存|写入|追加|替换|编辑|改写|润色|排版|格式)/i
+      .test(params.userInstructionText)
+  const allowDocumentTools = params.hasTools && (
+    (!isPetDominantIntent && hasDocumentKeyword) ||
+    (params.hasDocumentEnvironment && (hasDocumentKeyword || hasExplicitDocumentSurface)) ||
+    params.hasWidgetTargetContext ||
+    Boolean(params.documentWidgetTaskKind) ||
+    shouldForceDocumentToolCall(params.contextualUserInput) ||
+    hasExplicitDocumentSurface ||
+    hasDocumentIntent ||
+    (hasMapIntent && mapSecondarySignals.has('document_output'))
+  )
+  const allowRSSTools = params.hasTools && hasRSSIntent
+  const allowCalendarTools = params.hasTools && hasCalendarIntent
+  const allowFeishuTools = params.hasTools && (
+    params.capabilityProfile === 'remote_channel' ||
+    hasFeishuIntent
+  )
+  const allowPetTools = params.hasTools && hasPetIntent
+  const allowSkillTools = params.hasTools
+    && Array.isArray(params.preferredSkillToolNames)
+    && params.preferredSkillToolNames.length > 0
+  const hasResearchIntent = positiveDomains.has('research') && !excludedDomains.has('research')
+  const allowResearchTools = params.hasTools && (
+    hasResearchIntent || (hasMapIntent && mapSecondarySignals.has('research_lookup'))
+  )
+  const allowMapTools = params.hasTools && hasMapIntent
+  const allowMapBrowserTools = hasMapIntent && mapSecondarySignals.has('browser_lookup')
+  const forceDocumentTool = allowDocumentTools && (
+    (params.hasWidgetTargetContext && !params.explicitWidgetCreateIntent) ||
+    shouldForceDocumentToolCall(params.contextualUserInput)
+  )
+
+  return {
+    intentGroupModes: {
+      ...(hasLiveInfoBrowserIntent ? { browser_interaction: true } : {}),
+      ...(allowMapBrowserTools ? { browser_interaction: true, browser_content_tasks: true } : {}),
+      document: allowDocumentTools,
+      rss: allowRSSTools,
+      calendar: allowCalendarTools,
+      channel_feishu: allowFeishuTools,
+      pet: allowPetTools,
+      skills: allowSkillTools,
+      general_research: allowResearchTools,
+      map_planning: allowMapTools,
+    },
+    allowDocumentTools,
+    allowRSSTools,
+    allowCalendarTools,
+    allowFeishuTools,
+    allowPetTools,
+    allowSkillTools,
+    allowResearchTools,
+    allowMapTools,
+    forceDocumentTool,
+  }
+}
+
 export function buildExecutionToolState(params: {
   config?: AIModelConfig
   capabilityProfile?: CapabilityProfileId
@@ -197,7 +299,6 @@ export function buildExecutionToolState(params: {
   feishuConnected?: boolean
   sessionId?: string
 }): { visibilityPlan: ToolVisibilityPlan; toolPolicy: ToolPolicy; capabilityResolution: CapabilityResolution } {
-  const hasLiveInfoBrowserIntent = params.intentClassification.objectSignals.some((signal) => /browser-live-info/i.test(signal))
   const baseVisibilityPlan = buildToolVisibilityPlan({
     supportsToolCalls: params.supportsToolCalls,
     hasVideoInputs: params.hasVideoInputs,
@@ -207,51 +308,20 @@ export function buildExecutionToolState(params: {
       params.browserDecisionMode === 'browser_workflow' || params.browserDecisionMode === 'browser_upload_workflow',
     preferredSkillToolNames: params.preferredSkillToolNames,
   })
-  const positiveDomains = new Set<IntentClassification['primaryDomain'] | Exclude<IntentClassification['primaryDomain'], 'generic'>>([
-    params.intentClassification.primaryDomain,
-    ...params.intentClassification.mentionedDomains,
-  ])
-  const excludedDomains = new Set(params.intentClassification.excludedDomains)
-  const hasDocumentKeyword =
-    /(文档|文稿|原文|文章|段落|章节|docx?|markdown|\.md\b|widget|show-widget|图表|趋势图|卡片|信息卡|提示块|表格|对比卡|进度卡|日程卡|待办|习惯|计划板|计算器|保存|写入|追加|替换|编辑|改写|润色|排版|格式)/i
-      .test(params.userInstructionText)
-  const hasDocumentIntent = positiveDomains.has('document') && !excludedDomains.has('document')
-  const hasRSSIntent = positiveDomains.has('rss') && !excludedDomains.has('rss')
-  const hasCalendarIntent = positiveDomains.has('calendar') && !excludedDomains.has('calendar')
-  const hasFeishuIntent = positiveDomains.has('feishu') && !excludedDomains.has('feishu')
-  const hasPetIntent = positiveDomains.has('pet') && !excludedDomains.has('pet')
-  const hasMapIntent = isMapSemanticIntentActive(params.mapSemanticIntent)
-  const mapSecondarySignals = new Set(params.mapSemanticIntent?.secondarySignals || [])
-  const isPetDominantIntent = params.intentClassification.primaryDomain === 'pet' && hasPetIntent
-  const hasExplicitDocumentSurface =
-    /(文档|文稿|原文|文章|段落|章节|docx?|markdown|\.md\b|widget|show-widget|图表|趋势图|卡片|信息卡|提示块|表格|对比卡|进度卡|保存|写入|追加|替换|编辑|改写|润色|排版|格式)/i
-      .test(params.userInstructionText)
-  const allowDocumentTools = baseVisibilityPlan.hasTools && (
-    (!isPetDominantIntent && hasDocumentKeyword) ||
-    (params.hasDocumentEnvironment && (hasDocumentKeyword || hasExplicitDocumentSurface)) ||
-    params.hasWidgetTargetContext ||
-    Boolean(params.documentWidgetTaskKind) ||
-    shouldForceDocumentToolCall(params.contextualUserInput) ||
-    hasExplicitDocumentSurface ||
-    hasDocumentIntent ||
-    (hasMapIntent && mapSecondarySignals.has('document_output'))
-  )
-  const allowRSSTools = baseVisibilityPlan.hasTools && hasRSSIntent
-  const allowCalendarTools = baseVisibilityPlan.hasTools && hasCalendarIntent
-  const allowFeishuTools = baseVisibilityPlan.hasTools && (
-    params.capabilityProfile === 'remote_channel' ||
-    hasFeishuIntent
-  )
-  const allowPetTools = baseVisibilityPlan.hasTools && hasPetIntent
-  const allowSkillTools = baseVisibilityPlan.hasTools
-    && Array.isArray(params.preferredSkillToolNames)
-    && params.preferredSkillToolNames.length > 0
-  const hasResearchIntent = positiveDomains.has('research') && !excludedDomains.has('research')
-  const allowResearchTools = baseVisibilityPlan.hasTools && (
-    hasResearchIntent || (hasMapIntent && mapSecondarySignals.has('research_lookup'))
-  )
-  const allowMapTools = baseVisibilityPlan.hasTools && hasMapIntent
-  const allowMapBrowserTools = hasMapIntent && mapSecondarySignals.has('browser_lookup')
+  const intentModes = resolveIntentCapabilityGroupModes({
+    hasTools: baseVisibilityPlan.hasTools,
+    capabilityProfile: params.capabilityProfile,
+    contextualUserInput: params.contextualUserInput,
+    userInstructionText: params.userInstructionText,
+    intentClassification: params.intentClassification,
+    hasDocumentEnvironment: params.hasDocumentEnvironment,
+    hasWidgetTargetContext: params.hasWidgetTargetContext,
+    explicitWidgetCreateIntent: params.explicitWidgetCreateIntent,
+    documentWidgetTaskKind: params.documentWidgetTaskKind,
+    preferredSkillToolNames: params.preferredSkillToolNames,
+    mapSemanticIntent: params.mapSemanticIntent,
+  })
+  const { allowDocumentTools } = intentModes
   const capabilityResolution = resolveCapabilityResolution({
     config: params.config || getDefaultConfig(),
     profile: params.capabilityProfile || 'local_chat',
@@ -260,18 +330,7 @@ export function buildExecutionToolState(params: {
       browserHostAvailable: params.browserHostAvailable ?? true,
       feishuConnected: params.feishuConnected ?? true,
     },
-    intentGroupModes: {
-      ...(hasLiveInfoBrowserIntent ? { browser_interaction: true } : {}),
-      ...(allowMapBrowserTools ? { browser_interaction: true, browser_content_tasks: true } : {}),
-      document: allowDocumentTools,
-      rss: allowRSSTools,
-      calendar: allowCalendarTools,
-      channel_feishu: allowFeishuTools,
-      pet: allowPetTools,
-      skills: allowSkillTools,
-      general_research: allowResearchTools,
-      map_planning: allowMapTools,
-    },
+    intentGroupModes: intentModes.intentGroupModes,
   })
   const allowBrowserTools = capabilityResolution.visibleCapabilityGroupIds.includes('browser_interaction')
     || capabilityResolution.visibleCapabilityGroupIds.includes('browser_content_tasks')
@@ -289,10 +348,7 @@ export function buildExecutionToolState(params: {
     visibilityPlan,
     capabilityResolution,
     toolPolicy: {
-      forceDocumentTool: allowDocumentTools && (
-        (params.hasWidgetTargetContext && !params.explicitWidgetCreateIntent) ||
-        shouldForceDocumentToolCall(params.contextualUserInput)
-      ),
+      forceDocumentTool: intentModes.forceDocumentTool,
       allowDocumentTools,
       forceDesignTool: false,
       preferredDesignTool: null,

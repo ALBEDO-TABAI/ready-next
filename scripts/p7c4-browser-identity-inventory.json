@@ -1,0 +1,42 @@
+{
+  "policy": "shared-persist-browser",
+  "description": "P7c4 current policy inventory: these browser surfaces still resolve to the shared persist:browser identity root.",
+  "surfaces": [
+    {
+      "id": "normal-and-agent-tabs",
+      "file": "src/main/modules/browser-engine/tab-lifecycle-service.ts",
+      "partition": "persist:browser",
+      "evidence": "this.host.createHost('persist:browser')"
+    },
+    {
+      "id": "preview-view",
+      "file": "src/main/modules/browser-engine/preview-service.ts",
+      "partition": "persist:browser",
+      "evidence": "this.deps.createHost('persist:browser')"
+    },
+    {
+      "id": "auth-popup",
+      "file": "src/main/modules/browser-engine/auth-popup-manager.ts",
+      "partition": "persist:browser",
+      "evidence": "partition: 'persist:browser'"
+    },
+    {
+      "id": "background-probe",
+      "file": "src/main/modules/browser-engine/ipc-handler.ts",
+      "partition": "persist:browser",
+      "evidence": "partition: 'persist:browser'"
+    },
+    {
+      "id": "download-session",
+      "file": "src/main/modules/browser-engine/ipc-handler.ts",
+      "partition": "persist:browser",
+      "evidence": "session.fromPartition('persist:browser')"
+    },
+    {
+      "id": "permission-and-adblock-policy",
+      "file": "src/main/modules/browser-engine/session-policy-service.ts",
+      "partition": "persist:browser",
+      "evidence": "applyForPartition('persist:browser')"
+    }
+  ]
+}

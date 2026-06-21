@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, type MouseEvent } from 'react'
+import { Bot, ShieldAlert, UserRound } from 'lucide-react'
 
 import HeaderUtilityActions from './HeaderUtilityActions'
 import TabRail from './TabRail'
@@ -6,6 +7,7 @@ import { useBrowserHeaderInteraction } from '../../modules/browser/useBrowserHea
 import { WORKBENCH_HEADER_EDGE_X, WORKBENCH_TAB_ROW_HEIGHT } from '../../modules/workbench/chrome'
 import type { BrowserTab } from '../../stores/useBrowserTabs'
 import type { BrowserUtilityMenuKind } from '../../../shared/browser-utility-menu'
+import type { BrowserOwnershipStatus } from '../../modules/browser/browserOwnershipStatus'
 
 interface BrowserHeaderProps {
   isActive: boolean
@@ -37,6 +39,39 @@ interface BrowserHeaderProps {
   fastCardOpen: boolean
   fastCardItemCount: number
   onToggleFastCard: () => void
+  ownershipStatus?: BrowserOwnershipStatus
+}
+
+function BrowserOwnershipChip({ status }: { status: BrowserOwnershipStatus }) {
+  const Icon = status.tone === 'warning'
+    ? ShieldAlert
+    : status.tone === 'agent'
+      ? Bot
+      : UserRound
+  const accent = status.tone === 'warning'
+    ? 'var(--color-orange)'
+    : status.tone === 'agent'
+      ? 'var(--color-blue)'
+      : 'var(--text-gray)'
+  return (
+    <div
+      className="flex h-[28px] flex-shrink-0 items-center gap-1.5 rounded-[9px] border px-2 text-[11px] font-semibold"
+      title={status.detail}
+      data-browser-ownership={status.kind}
+      style={{
+        borderColor: status.tone === 'neutral'
+          ? 'color-mix(in srgb, var(--text-gray) 18%, transparent)'
+          : `color-mix(in srgb, ${accent} 34%, transparent)`,
+        background: status.tone === 'neutral'
+          ? 'color-mix(in srgb, var(--surface-card-bg) 16%, transparent)'
+          : `color-mix(in srgb, ${accent} 10%, transparent)`,
+        color: status.tone === 'neutral' ? 'var(--text-gray)' : accent,
+      }}
+    >
+      <Icon style={{ width: 13, height: 13 }} strokeWidth={2} />
+      <span className="whitespace-nowrap">{status.label}</span>
+    </div>
+  )
 }
 
 export default function BrowserHeader({
@@ -69,6 +104,7 @@ export default function BrowserHeader({
   fastCardOpen,
   fastCardItemCount,
   onToggleFastCard,
+  ownershipStatus,
 }: BrowserHeaderProps) {
   const committingNavigationRef = useRef(false)
   const collapseActiveTabRef = useRef<() => void>(() => undefined)
@@ -194,6 +230,8 @@ export default function BrowserHeader({
           }}
           onToggleBookmarkForTab={onToggleBookmarkForTab}
         />
+
+        {ownershipStatus && <BrowserOwnershipChip status={ownershipStatus} />}
 
         <HeaderUtilityActions
           onShowUtilityMenu={(kind, anchorRect) => {

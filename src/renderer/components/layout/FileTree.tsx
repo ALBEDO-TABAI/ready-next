@@ -68,6 +68,12 @@ import {
   computeNextFileTreeSelection,
   type FileTreeDeleteTarget,
 } from './fileTreeSelection'
+import {
+  buildWorkspaceDragTransferPayload,
+  parseWorkspaceDragPayloads,
+  writeWorkspaceDragData,
+  type WorkspaceDragPayload,
+} from './fileTreeDragPayload'
 import FileEmergenceSection from './FileEmergenceSection'
 import { buildFileEmergenceViewModel } from './fileEmergenceViewModel'
 import { recordFileEmergenceActivity, readFileEmergenceEnabled } from '../../modules/file-emergence/fileEmergenceClient'
@@ -196,21 +202,6 @@ function fileIcon(item: FileItem, _expanded = false) {
   return <FileText className="w-[14px] h-[14px]" style={iconStyle} strokeWidth={iconStroke} />
 }
 
-interface WorkspaceDragPayload {
-  type: 'file' | 'folder'
-  path: string
-  name: string
-  ext?: string
-  size?: number
-  isDirectory: boolean
-  movable: boolean
-}
-
-interface WorkspaceDragBatchPayload {
-  type: 'batch'
-  items: WorkspaceDragPayload[]
-}
-
 interface FileTreeExternalDropMenuState {
   x: number
   y: number
@@ -219,8 +210,6 @@ interface FileTreeExternalDropMenuState {
 }
 
 interface PutDragDataOptions {
-  useNativeFileDrag?: boolean
-  onNativeFileDragStart?: (payload: WorkspaceDragPayload) => void
   selectedItems?: FileItem[]
 }
 
@@ -228,74 +217,9 @@ function hasNativeFileDrop(dataTransfer: DataTransfer): boolean {
   return dataTransfer.types.includes('Files')
 }
 
-function hasRememberedNativeFileDrag(
-  payload: WorkspaceDragPayload | null,
-  targetDir: string,
-): payload is WorkspaceDragPayload {
-  return Boolean(payload && canMoveToDirectory(payload, targetDir))
-}
-
-function buildWorkspaceDragPayload(item: FileItem, movable: boolean): WorkspaceDragPayload {
-  const ext = getFileExt(item)
-  return {
-    type: item.isDirectory ? 'folder' : 'file',
-    path: item.path,
-    name: item.name,
-    ext,
-    size: item.size,
-    isDirectory: item.isDirectory,
-    movable,
-  }
-}
-
 function putDragData(e: React.DragEvent, item: FileItem, movable = true, options: PutDragDataOptions = {}) {
-  const payload = buildWorkspaceDragPayload(item, movable)
-  const selectedFiles = options.selectedItems
-    ?.filter((selectedItem) => !selectedItem.isDirectory)
-    .filter((selectedItem, index, items) => items.findIndex((candidate) => candidate.path === selectedItem.path) === index)
-  const batchItems = selectedFiles && selectedFiles.length > 1 && selectedFiles.some((selectedItem) => selectedItem.path === item.path)
-    ? selectedFiles
-    : null
-  if (batchItems) {
-    const batchPayload: WorkspaceDragBatchPayload = {
-      type: 'batch',
-      items: batchItems.map((selectedItem) => buildWorkspaceDragPayload(selectedItem, movable)),
-    }
-    const serialized = JSON.stringify(batchPayload)
-    const paths = batchItems.map((selectedItem) => selectedItem.path)
-    e.dataTransfer.setData('application/x-ready-drag', serialized)
-    e.dataTransfer.setData('application/x-ready-file', serialized)
-    e.dataTransfer.setData('application/x-ready-workspace-item', serialized)
-    e.dataTransfer.setData('text/plain', paths.join('\n'))
-    e.dataTransfer.setData('text/uri-list', paths.map((path) => `file://${encodeURI(path)}`).join('\n'))
-    e.dataTransfer.effectAllowed = 'copyMove'
-    return
-  }
-  if (options.useNativeFileDrag && !item.isDirectory && window.electronAPI?.startNativeFileDrag) {
-    e.preventDefault()
-    options.onNativeFileDragStart?.(payload)
-    window.electronAPI.startNativeFileDrag([item.path])
-    return
-  }
-  const serialized = JSON.stringify(payload)
-  e.dataTransfer.setData('application/x-ready-drag', serialized)
-  e.dataTransfer.setData('application/x-ready-file', serialized)
-  e.dataTransfer.setData('application/x-ready-workspace-item', serialized)
-  e.dataTransfer.setData('text/plain', item.path)
-  e.dataTransfer.setData('text/uri-list', `file://${encodeURI(item.path)}`)
-  e.dataTransfer.effectAllowed = 'copyMove'
-}
-
-function parseWorkspaceDragPayload(dataTransfer: DataTransfer): WorkspaceDragPayload | null {
-  const raw = dataTransfer.getData('application/x-ready-workspace-item')
-  if (!raw) return null
-  try {
-    const parsed = JSON.parse(raw) as WorkspaceDragPayload
-    if (!parsed.path || !parsed.name) return null
-    return parsed
-  } catch {
-    return null
-  }
+  const payload = buildWorkspaceDragTransferPayload(item, movable, options.selectedItems)
+  writeWorkspaceDragData(e.dataTransfer, payload)
 }
 
 function joinPath(dir: string, name: string): string {
@@ -322,6 +246,10 @@ function canMoveToDirectory(source: WorkspaceDragPayload, targetDir: string): bo
     }
   }
   return true
+}
+
+function canMoveAllToDirectory(sources: readonly WorkspaceDragPayload[], targetDir: string): boolean {
+  return sources.length > 0 && sources.every((source) => canMoveToDirectory(source, targetDir))
 }
 
 function buildSelectedDragItemsByPath(
@@ -444,7 +372,6 @@ function FileTreeItem({
   onContextMenu,
   onDragStart,
   onDragEnd,
-  onNativeFileDragStart,
   onDragOver,
   onDragLeave,
   onDrop,
@@ -469,7 +396,6 @@ function FileTreeItem({
   onContextMenu: (e: React.MouseEvent) => void
   onDragStart?: (e: React.DragEvent) => void
   onDragEnd?: (e: React.DragEvent) => void
-  onNativeFileDragStart?: (payload: WorkspaceDragPayload) => void
   onDragOver?: (e: React.DragEvent) => void
   onDragLeave?: (e: React.DragEvent) => void
   onDrop?: (e: React.DragEvent) => void
@@ -486,8 +412,6 @@ function FileTreeItem({
       onDragStart={(e) => {
         onDragStart?.(e)
         putDragData(e, item, dragMovable ?? true, {
-          useNativeFileDrag: true,
-          onNativeFileDragStart,
           selectedItems: dragItems,
         })
       }}
@@ -672,7 +596,6 @@ function GridItemCard({
   onContextMenu,
   onDragStart,
   onDragEnd,
-  onNativeFileDragStart,
   onDragOver,
   onDragLeave,
   onDrop,
@@ -692,7 +615,6 @@ function GridItemCard({
   onContextMenu: (e: React.MouseEvent) => void
   onDragStart?: (e: React.DragEvent) => void
   onDragEnd?: (e: React.DragEvent) => void
-  onNativeFileDragStart?: (payload: WorkspaceDragPayload) => void
   onDragOver?: (e: React.DragEvent) => void
   onDragLeave?: (e: React.DragEvent) => void
   onDrop?: (e: React.DragEvent) => void
@@ -709,8 +631,6 @@ function GridItemCard({
       onDragStart={(e) => {
         onDragStart?.(e)
         putDragData(e, item, dragMovable ?? true, {
-          useNativeFileDrag: true,
-          onNativeFileDragStart,
           selectedItems: dragItems,
         })
       }}
@@ -1130,7 +1050,6 @@ function FileTreeRecursive({
   onContextMenu,
   onItemDragStart,
   onItemDragEnd,
-  onNativeFileDragStart,
   onItemDragOver,
   onItemDragLeave,
   onItemDrop,
@@ -1164,7 +1083,6 @@ function FileTreeRecursive({
   onContextMenu: (e: React.MouseEvent, item: FileItem) => void
   onItemDragStart: () => void
   onItemDragEnd: () => void
-  onNativeFileDragStart: (payload: WorkspaceDragPayload) => void
   onItemDragOver: (e: React.DragEvent, item: FileItem, containerPath: string) => void
   onItemDragLeave: (e: React.DragEvent, item: FileItem) => void
   onItemDrop: (e: React.DragEvent, item: FileItem, containerPath: string) => void
@@ -1241,7 +1159,6 @@ function FileTreeRecursive({
               onContextMenu={(e) => onContextMenu(e, item)}
               onDragStart={onItemDragStart}
               onDragEnd={onItemDragEnd}
-              onNativeFileDragStart={onNativeFileDragStart}
               onDragOver={(e) => onItemDragOver(e, item, containerPath)}
               onDragLeave={(e) => onItemDragLeave(e, item)}
               onDrop={(e) => onItemDrop(e, item, containerPath)}
@@ -1274,7 +1191,6 @@ function FileTreeRecursive({
                 onContextMenu={onContextMenu}
                 onItemDragStart={onItemDragStart}
                 onItemDragEnd={onItemDragEnd}
-                onNativeFileDragStart={onNativeFileDragStart}
                 onItemDragOver={onItemDragOver}
                 onItemDragLeave={onItemDragLeave}
                 onItemDrop={onItemDrop}
@@ -1358,8 +1274,6 @@ export default function FileTree({
   const [internalGridPath, setInternalGridPath] = useState<string | null>(null)
   const treeRootRef = useRef<HTMLDivElement>(null)
   const gridPreviewLoadingRef = useRef(new Set<string>())
-  const activeNativeFileDragRef = useRef<WorkspaceDragPayload | null>(null)
-  const nativeFileDragClearTimerRef = useRef<number | null>(null)
   const fileTreeSurfaceRefreshTimerRef = useRef<number | null>(null)
   const selectionAnchorPathRef = useRef<string | null>(null)
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set())
@@ -1380,32 +1294,11 @@ export default function FileTree({
   const setEffectiveGridPath = onGridPathChange ?? setInternalGridPath
   const activeAnalysisJobKey = useMemo(() => buildAnalysisJobKey(pendingClips), [pendingClips])
 
-  const clearNativeFileDragSource = useCallback(() => {
-    activeNativeFileDragRef.current = null
-    if (nativeFileDragClearTimerRef.current !== null) {
-      window.clearTimeout(nativeFileDragClearTimerRef.current)
-      nativeFileDragClearTimerRef.current = null
-    }
-  }, [])
-
-  const rememberNativeFileDragSource = useCallback((payload: WorkspaceDragPayload) => {
-    clearNativeFileDragSource()
-    activeNativeFileDragRef.current = payload
-    nativeFileDragClearTimerRef.current = window.setTimeout(() => {
-      clearNativeFileDragSource()
-    }, 15000)
-  }, [clearNativeFileDragSource])
-
   const clearFileTreeDragState = useCallback(() => {
     setIsDragOver(false)
     setMoveDropTargetDir(null)
     setFileTreeDropTarget(null)
   }, [])
-
-  const clearAllFileTreeDragState = useCallback(() => {
-    clearFileTreeDragState()
-    clearNativeFileDragSource()
-  }, [clearFileTreeDragState, clearNativeFileDragSource])
 
   const requestFileTreeSurfaceRefresh = useCallback(() => {
     const refresh = window.electronAPI?.window?.refreshTransparentSurface
@@ -1509,10 +1402,10 @@ export default function FileTree({
   }, [fileEmergenceEnabled, safeWorkspaceRoots, safeWorkspaceRootsKey, activeDocTabId, splitDocTabId, docTabs.length])
 
   useEffect(() => {
-    const handleDragCleanup = () => clearAllFileTreeDragState()
+    const handleDragCleanup = () => clearFileTreeDragState()
     const handleVisibilityCleanup = () => {
       if (document.visibilityState === 'hidden') {
-        clearAllFileTreeDragState()
+        clearFileTreeDragState()
       }
     }
 
@@ -1526,9 +1419,8 @@ export default function FileTree({
       window.removeEventListener('drop', handleDragCleanup)
       window.removeEventListener('blur', handleDragCleanup)
       document.removeEventListener('visibilitychange', handleVisibilityCleanup)
-      clearNativeFileDragSource()
     }
-  }, [clearAllFileTreeDragState, clearNativeFileDragSource])
+  }, [clearFileTreeDragState])
 
   const shouldPreserveDropHint = useCallback((event: React.DragEvent<HTMLElement>) => {
     const currentTarget = event.currentTarget
@@ -1919,11 +1811,13 @@ export default function FileTree({
     if (next.selectedPaths.size === 0) selectFile(null)
   }, [selectFile, selectedFile, selectedPaths])
 
-  const moveWorkspaceItem = useCallback(async (payload: WorkspaceDragPayload, targetDir: string) => {
-    if (!canMoveToDirectory(payload, targetDir)) return
-    const nextPath = joinPath(targetDir, payload.name)
-    if (nextPath === payload.path) return
-    await moveItem(payload.path, nextPath)
+  const moveWorkspaceItems = useCallback(async (payloads: readonly WorkspaceDragPayload[], targetDir: string) => {
+    if (!canMoveAllToDirectory(payloads, targetDir)) return
+    for (const payload of payloads) {
+      const nextPath = joinPath(targetDir, payload.name)
+      if (nextPath === payload.path) continue
+      await moveItem(payload.path, nextPath)
+    }
   }, [moveItem])
 
   const getExternalDropPayload = useCallback(
@@ -2098,15 +1992,6 @@ export default function FileTree({
   }, [handleReadyBoardResourceDrop, handleWebDownloadDrop])
 
   const handleDirectoryDrop = useCallback((e: React.DragEvent, dirPath: string) => {
-    const nativePayload = activeNativeFileDragRef.current
-    if (hasRememberedNativeFileDrag(nativePayload, dirPath)) {
-      e.preventDefault()
-      e.stopPropagation()
-      clearAllFileTreeDragState()
-      void moveWorkspaceItem(nativePayload, dirPath)
-      return
-    }
-
     const externalPayload = getExternalDropPayload(e.dataTransfer)
     if (externalPayload) {
       e.preventDefault()
@@ -2127,28 +2012,18 @@ export default function FileTree({
       return
     }
 
-    const payload = parseWorkspaceDragPayload(e.dataTransfer)
-    if (!payload || !canMoveToDirectory(payload, dirPath)) return
+    const payloads = parseWorkspaceDragPayloads(e.dataTransfer)
+    if (!canMoveAllToDirectory(payloads, dirPath)) return
     e.preventDefault()
     e.stopPropagation()
     setMoveDropTargetDir(null)
     setFileTreeDropTarget(null)
-    void moveWorkspaceItem(payload, dirPath)
-  }, [clearAllFileTreeDragState, getExternalDropPayload, handleResolvedExternalDrop, moveWorkspaceItem])
+    void moveWorkspaceItems(payloads, dirPath)
+  }, [getExternalDropPayload, handleResolvedExternalDrop, moveWorkspaceItems])
 
   const handleItemDragOver = useCallback((e: React.DragEvent, item: FileItem, containerPath: string) => {
-    const nativePayload = activeNativeFileDragRef.current
-    if (item.isDirectory && hasRememberedNativeFileDrag(nativePayload, item.path)) {
-      e.preventDefault()
-      e.stopPropagation()
-      e.dataTransfer.dropEffect = 'move'
-      if (moveDropTargetDir !== item.path) setMoveDropTargetDir(item.path)
-      setFileTreeDropTarget(null)
-      return
-    }
-
-    const workspacePayload = parseWorkspaceDragPayload(e.dataTransfer)
-    if (item.isDirectory && workspacePayload && canMoveToDirectory(workspacePayload, item.path)) {
+    const workspacePayloads = parseWorkspaceDragPayloads(e.dataTransfer)
+    if (item.isDirectory && canMoveAllToDirectory(workspacePayloads, item.path)) {
       e.preventDefault()
       e.stopPropagation()
       e.dataTransfer.dropEffect = 'move'
@@ -2225,15 +2100,8 @@ export default function FileTree({
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault()
     e.stopPropagation()
-    const nativePayload = activeNativeFileDragRef.current
-    if (hasRememberedNativeFileDrag(nativePayload, currentPath)) {
-      e.dataTransfer.dropEffect = 'move'
-      setIsDragOver(false)
-      return
-    }
-
-    const payload = parseWorkspaceDragPayload(e.dataTransfer)
-    if (payload && canMoveToDirectory(payload, currentPath)) {
+    const payloads = parseWorkspaceDragPayloads(e.dataTransfer)
+    if (canMoveAllToDirectory(payloads, currentPath)) {
       e.dataTransfer.dropEffect = 'move'
       return
     }
@@ -2278,16 +2146,9 @@ export default function FileTree({
     e.stopPropagation()
     clearFileTreeDragState()
     const lastDropTarget = fileTreeDropTarget
-    const nativePayload = activeNativeFileDragRef.current
-    if (hasRememberedNativeFileDrag(nativePayload, currentPath)) {
-      clearNativeFileDragSource()
-      await moveWorkspaceItem(nativePayload, currentPath)
-      return
-    }
-
-    const payload = parseWorkspaceDragPayload(e.dataTransfer)
-    if (payload && canMoveToDirectory(payload, currentPath)) {
-      await moveWorkspaceItem(payload, currentPath)
+    const payloads = parseWorkspaceDragPayloads(e.dataTransfer)
+    if (canMoveAllToDirectory(payloads, currentPath)) {
+      await moveWorkspaceItems(payloads, currentPath)
       return
     }
 
@@ -2310,14 +2171,13 @@ export default function FileTree({
 
     const droppedFiles = e.dataTransfer.files
     if (!droppedFiles || droppedFiles.length === 0) return
-    clearNativeFileDragSource()
     if (typeof window !== 'undefined' && window.electronAPI) {
       for (let i = 0; i < droppedFiles.length; i++) {
         const p = window.electronAPI.getFilePathFromDrop(droppedFiles[i])
         if (p) addPinnedFolder(p)
       }
     }
-  }, [addPinnedFolder, clearFileTreeDragState, clearNativeFileDragSource, fileTreeDropTarget, currentPath, getExternalDropPayload, handleResolvedExternalDrop, moveWorkspaceItem])
+  }, [addPinnedFolder, clearFileTreeDragState, fileTreeDropTarget, currentPath, getExternalDropPayload, handleResolvedExternalDrop, moveWorkspaceItems])
 
   const handleExternalDropAction = useCallback(
     (action: FileTreeExternalDropAction) => {
@@ -2460,8 +2320,7 @@ export default function FileTree({
               onDragOver={(e) => handleItemDragOver(e, pinnedItem, currentPath)}
               onDragLeave={(e) => handleItemDragLeave(e, pinnedItem)}
               onDragStart={clearFileTreeDragState}
-              onDragEnd={clearAllFileTreeDragState}
-              onNativeFileDragStart={rememberNativeFileDragSource}
+              onDragEnd={clearFileTreeDragState}
               onDrop={(e) => handleItemDrop(e, pinnedItem, currentPath)}
               onRenameConfirm={(newName) => renameItem(folderPath, newName)}
               onRenameCancel={cancelRenaming}
@@ -2495,8 +2354,7 @@ export default function FileTree({
                   setContextMenu({ x: e.clientX, y: e.clientY, item })
                 }}
                 onItemDragStart={clearFileTreeDragState}
-                onItemDragEnd={clearAllFileTreeDragState}
-                onNativeFileDragStart={rememberNativeFileDragSource}
+                onItemDragEnd={clearFileTreeDragState}
                 onItemDragOver={handleItemDragOver}
                 onItemDragLeave={handleItemDragLeave}
                 onItemDrop={handleItemDrop}
@@ -2568,8 +2426,7 @@ export default function FileTree({
             setContextMenu({ x: e.clientX, y: e.clientY, item })
           }}
           onItemDragStart={clearFileTreeDragState}
-          onItemDragEnd={clearAllFileTreeDragState}
-          onNativeFileDragStart={rememberNativeFileDragSource}
+          onItemDragEnd={clearFileTreeDragState}
           onItemDragOver={handleItemDragOver}
           onItemDragLeave={handleItemDragLeave}
           onItemDrop={handleItemDrop}
@@ -2888,8 +2745,7 @@ export default function FileTree({
                   setContextMenu({ x: e.clientX, y: e.clientY, item })
                 }}
                 onDragStart={clearFileTreeDragState}
-                onDragEnd={clearAllFileTreeDragState}
-                onNativeFileDragStart={rememberNativeFileDragSource}
+                onDragEnd={clearFileTreeDragState}
                 onDragOver={(e) => handleItemDragOver(e, item, gridContainerPath)}
                 onDragLeave={(e) => handleItemDragLeave(e, item)}
                 onDrop={(e) => handleItemDrop(e, item, gridContainerPath)}

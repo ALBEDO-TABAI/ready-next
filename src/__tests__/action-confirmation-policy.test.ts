@@ -345,7 +345,8 @@ test('ordering: M2 tool missing from allowedToolNames → tool_restricted_this_t
   const output = await executeToolCall('calendar_delete_event', { id: 'evt-1' }, modelContext({
     allowedToolNames: new Set<string>(),
   }))
-  assert.equal(output.data?.reason, 'tool_restricted_this_turn')
+  assert.equal(output.data?.errorKind, 'tool_restricted_this_turn')
+  assert.equal(output.data?.reason, undefined)
   assert.notEqual(output.data?.errorKind, 'denied_pending_confirmation')
 })
 

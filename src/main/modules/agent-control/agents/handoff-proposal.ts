@@ -122,7 +122,7 @@ export async function runHandoffProposal(
       `原话：「${clipForDisplay(input.userRequestVerbatim, 120)}」`,
     ].join('\n'),
     kind: 'single_choice' as const,
-    options: [HANDOFF_ADOPT_OPTION, HANDOFF_NEW_SESSION_OPTION, HANDOFF_REJECT_OPTION],
+    options: [HANDOFF_ADOPT_OPTION, HANDOFF_REJECT_OPTION],
   }
 
   let answer: string | null = null
@@ -161,6 +161,7 @@ export async function runHandoffProposal(
     return { kind: 'adopted', targetAgentId: target.id, taskId: input.taskId ?? null, ownerWritten }
   }
 
+  // unwired-handoff-newsession: retained future asset; hidden from the production card until real renderer/preload wiring exists.
   if (answer === HANDOFF_NEW_SESSION_OPTION) {
     logAgentMetric(METRIC_ADOPTED, {
       targetAgentId: target.id,

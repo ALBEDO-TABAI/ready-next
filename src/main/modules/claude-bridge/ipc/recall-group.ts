@@ -63,6 +63,7 @@ export interface SearchSessionRecallPayload {
   channelKey?: string
   sourceKind?: ConversationSourceKind
   userId?: string
+  agent?: string
   hasAttachments?: boolean
   currentScopeId?: string
   limit?: number
@@ -76,6 +77,7 @@ export interface ListRecentSessionsPayload {
   channelKey?: string
   sourceKind?: ConversationSourceKind
   userId?: string
+  agent?: string
   hasAttachments?: boolean
   currentScopeId?: string
   limit?: number

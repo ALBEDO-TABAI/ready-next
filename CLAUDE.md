@@ -1,6 +1,6 @@
 # Ready 项目协作指引（CLAUDE）
 
-> 更新时间: 2026-05-20
+> 更新时间: 2026-06-20
 > 根目录指引只保留全局工作方式、当前不可破合同和索引。阶段性细节放在 `docs/superpowers/plans/`、`docs/superpowers/specs/`、`docs/superpowers/testing-conventions.md` 与 `.claude/architectural-principles.md`。
 
 ## 0. 开工前
@@ -12,6 +12,7 @@
 - 模型只做判断题：分类、抽取、总结、草拟和语义判断可以交给 LLM；路由、重试、状态机、权限、预算、可重复转换必须由代码、合同或测试承担。
 - 预算是硬限制：上下文、token、iteration 接近警戒线时先摘要、切分或新建上下文；产品内预算超限必须可观测。
 - 失败要响亮：检查没跑、路径没验证、测试被跳过、假设没证明，就不能说完成。
+- 外部复审无输出只能算失败留痕，不能算通过；Claude 不可用或无输出时，必须用具名 subagent/替代复审补位，并把复审结论与测试/gate 一起写进 closeout。
 
 ## 0.5 架构红线
 架构级改动先写可机器验证的合同；合同写不出来就不要开始。详细解释见 `.claude/architectural-principles.md`。
@@ -36,16 +37,21 @@
 - 会话 scope 按“来源频道 + 线程/本地 conversation + agent”隔离；工具日志只留前台运行态或胶囊层，不混入正文消息。
 - 飞书/远程图片和文件先进入会话资源层，不自动触发 agent；后续任务必须显式选择附件资源。
 - Browser Agent 走“理解 -> 计划 -> 分步执行 -> 复核”；链接是资源，不是立即执行指令。
+- 浏览器脚本类工具普通站点只接受命名只读模板（`browser-readonly-script-templates.ts`）；自由 `code` / `custom_js` / `custom_script` / workflow `execute_js` / start_task 脚本 payload 一律结构化拒绝为 `freeform_script_denied`，高风控平台 `script_blocked` guard 仍先命中。
 - AI provider 能力必须从共享能力层判断；不要把“OpenAI 兼容”当成原生 tools/vision/video 一定可用。
 - 工具错误由 dispatch 层转成结构化 `ToolExecutionOutput` 回灌模型；只有 Abort 或 host 不可用这类基础设施错误可以冒泡。
 - 主进程启动、日志轮转、SQLite native gate 和 `better-sqlite3` 真实加载都是验收边界；SQLite 路径不能用 host Node skip 当通过。
+- Windows 同步/移植不是 macOS 打包的副本：必须在 Windows 本机重装依赖并重编 `better-sqlite3`，路径使用 `app.getPath`/`process.resourcesPath`/`path.join`/`path.delimiter`，打包扩展 `electron-builder.yml` 的 win/nsis/dir 目标，不能带入 macOS `node_modules`、`.app`、`.dmg`、`.icns`、本机种子、缓存或密钥。
+- Windows 顶部 chrome 必须按 Windows 原生按钮设计：右上角保留最小化/最大化/关闭，Ready 圆点从 `ModeSlider` 右上迁到左上，中心 X 对齐 `IconRail` 槽位中心（`WORKBENCH_EDGE_RAIL_SLOT_INSET_X + WORKBENCH_EDGE_RAIL_SLOT_SIZE / 2`，当前 25px）。标题栏颜色接壤优先用 `titleBarStyle: 'hidden'` + `titleBarOverlay` 让 renderer 同层背景画到顶边；Mica 只作 Windows 11 22H2+ 增强，必须有普通背景 fallback。
 - Run 终止走唯一收口通道：所有退出路径经 `runtime-core/run-finalizer.ts` 的 `finalizeRunOutcome()`，终态账本与可见收口原子完成；通道外写终态被 `check-run-finalize-funnel.cjs` 禁止。零工具的"行动宣告"不得直接判 done（先转向、再 checkpoint）。
+- Run continuity：renderer infrastructure timeout 不得只在本地宣告恢复；必须让 main 侧可见，并经 `finalizeRunOutcome()`、明确 cancel/takeover 或 durable resumable mark 收口。main 侧 active run 必须有不依赖 renderer watchdog 的 no-progress 守卫，守卫 tick 必须按 requestId 仲裁，超时以 `main_no_progress_timeout` 区分于 renderer/model/tool timeout。旧 run 晚到不得覆盖同 scope 新 run 的可见状态，已落库消息不得被展示成消息丢失。
 - 后台任务（browser_tasks/skill child）终态必须经 `TaskEventBridge` 推回 agent 循环（活跃 run 注提醒 / 无 run 落 pending + 播报续跑）；无注册路由的 scheduleTask 运行时断言失败。自动续跑仅限播报建议（narration 档），执行类动作需用户显式确认。
 - 采集终态判决唯一来自 `browser-engine/collection-verdict.ts` 的 `resolveCollectionVerdict()`：0 条永不 completed；部分进展永不清断点；整任务重试只重试失败项。
 - 聊天输入框液态玻璃以真实 Electron dev 为验收面；`#/liquid-test` 只用于调参。生产输入框不得加外部暗色阴影、不得用静态镜像/截图贴片冒充实时折射，消息列表底部必须保留由输入框浮层高度测出的空白尾巴，避免最后一条消息被压住。
 - 稳定性合同回归入口：`npm run verify:stability`（终止合同/事件桥/判定矩阵/意图分类/会话快照全链焦点测试 + 三个 gate）。
 - 高危工具调用走行动确认闸门：M1-M4 静态策略表（`agent-control/safety/action-confirmation-policy.ts`）在 `tool-executor` authorization 之后裁决——M1 拒绝并引导用户亲手做；M2/M3 冻结原始参数、确认后经 `frozen-call-store.release(id, token)` 在原 run 内逐字节放行，token 只跳过再次确认、注册/authorization/工具策略照常重跑（确认 ≠ 提权）；阶段一禁止确认缓存与意图预批准（I-auth 前 M3 一律降级 M2）。浏览器执行层在拿到页面真实目标文本处做第二道 M1 拦截（target_id/CSS selector/坐标点击不带语义也拦得住）；密码框填充无 args 线索一律拒绝改道确认。
 - 信念卡 staged 状态不得进入 prompt 注入：`BeliefCardStore` 读 API 默认排除 staged（真实注入接线属 K3）。
+- Reflection 产物不得直接写入 prompt 可见的 `resident_user` / `scope_memory` 常驻记忆；用户偏好只能经 user-picture CAS 或后续明确 staged 路径进入，reflection 必须发 `reflection_outcome` 可观测账本。
 - Agent 进化阶段一合同回归入口：`npm run verify:evolution-p1`（全部焦点测试 + `verify:native`）。
 - 专项 agent 注入面（阶段三）：per-agent RULES/knowledge 注入 owner 解析三段式——显式 `ownerAgentId` 优先；完全未传 owner 时回退 `scope.agent`；显式但非法的 id 降级 global-only（不回退 scope.agent，防腐败 owner 借道注入他人谱系，也永不成为路径片段）。charter/路由索引段只进主 agent 会话；`ownerAgentId` 写值唯一来自 handoff 采纳（用户点击后经 `repository.update`），后续轮注入随 scope 最近 owner 切换。
 - 任务包合同（阶段三）：packet 嵌套两层硬上限在 projection 写侧强制；`direct_answer`/`short_task` 永不分包、multi_step/research 需多目标（门槛是代码不是模型）；子包失败只有重派(≤1)/降级(必须写理由)/阻塞三选一，静默吞=测试红；上行报告 ≤5 行摘要+引用不转述。
@@ -89,6 +95,10 @@
 - 破坏 singleton、全局状态、admission 或 lifecycle 的 helper 必须显式声明风险。
 - SQLite-backed 验收先跑 `npm run verify:native`；普通 Node 下的 ABI skip 只说明 host-Node 未覆盖该路径。
 - 阶段 verify 链以当前 `package.json` 为准；修改某阶段合同要同步对应 `verify:*`、gate 和测试。
+- Agent audit P6b 回归入口：`npm run verify:evolution-p6b`（contextBudget 全段统计、compaction/snapshot 保真、live/dormant compaction 边界）。它不代表 TurnEngine 退役，也不覆盖 C30/C31/C32。
+- Agent audit P6d/C32 回归入口：`npm run verify:evolution-p6d`（run_meta 终态共享源、paused/direct-resume 谓词、detached task status alias、detached_task/send-im errorKind 登记与 drift gate）。它不代表 P6 完成，也不覆盖 C30/C31-b/C29。
+- Agent audit P6e 回归入口：`npm run verify:evolution-p6e`（SDK-shaped `CapabilityResolution` 与 TurnEngine/controller 能力准备路径的 parity 准入测试）。它只是 C29 退役前置证明，不代表 TurnEngine/DirectChat 退役、C29 关闭或 C30 拆分完成。
+- Agent audit P6f 回归入口：`npm run verify:evolution-p6f`（SDK live 执行、DirectChat/TurnEngine dormant 执行边界、dormant compaction 边界）。它不删除 TurnEngine/DirectChat，也不关闭 C31-b/C30/C32。
 
 ## 7. 新功能最小闭环
 新增跨进程功能至少同步：

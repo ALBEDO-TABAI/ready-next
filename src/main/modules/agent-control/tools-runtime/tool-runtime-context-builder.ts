@@ -15,6 +15,7 @@ import {
   type TurnFeatureFlags,
 } from '../runtime-core/turn-feature-flags'
 import type { SkillToolAuthorization } from '../skills/skill-tool-authorization'
+import type { SpecialistBlueprintSourceMessageUnavailableReason } from '../../../../shared/agent-specialist-blueprint'
 
 /**
  * Phase 3 (Team T7) — derive the initial `ToolRuntimeActiveFrameContext`
@@ -57,6 +58,8 @@ export function buildToolRuntimeContext(params: {
   activeNegations?: ReadonlyArray<string>
   scopeId?: string
   currentUserText?: string
+  sourceMessageId?: string | null
+  sourceMessageUnavailableReason?: SpecialistBlueprintSourceMessageUnavailableReason | null
   requestEnvelope?: unknown
   runId?: string
   taskId?: string
@@ -95,6 +98,8 @@ export function buildToolRuntimeContext(params: {
     activeNegations: params.activeNegations,
     scopeId,
     currentUserText: params.currentUserText,
+    sourceMessageId: params.sourceMessageId ?? null,
+    sourceMessageUnavailableReason: params.sourceMessageUnavailableReason ?? null,
     requestEnvelope: params.requestEnvelope,
     runId: params.runId,
     taskId: params.taskId,
@@ -124,6 +129,8 @@ export function toToolExecutorContext(context: ToolRuntimeContext): ToolContext 
     activeNegations: context.activeNegations as never,
     scopeId: context.scopeId || context.scope?.id || context.sessionId,
     currentUserText: context.currentUserText,
+    sourceMessageId: context.sourceMessageId ?? null,
+    sourceMessageUnavailableReason: context.sourceMessageUnavailableReason ?? null,
     requestEnvelope: context.requestEnvelope,
     runId: context.runId,
     taskId: context.taskId,

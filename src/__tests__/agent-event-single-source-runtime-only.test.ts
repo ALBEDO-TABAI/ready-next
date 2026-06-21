@@ -36,8 +36,8 @@ test('U1.3 ipc-handler: no remaining agentManager.on(output|status|error) forwar
 
 test('U1.3 orchestrator: bindEngineEvents only on sdkEngine, not domainAdapterEngine', () => {
   const source = readWorkspaceFile('src/main/modules/agent-control/runtime-core/orchestrator.ts')
-  // Only sdkEngine should be bound — DirectChatEngine is a read-only
-  // adapter/orchestrator provider after U1.3.
+  // Only sdkEngine should be bound. DirectChatEngine still hosts adapters and
+  // dependency wiring, but it must not produce renderer-facing events.
   assert.match(
     source,
     /this\.bindEngineEvents\(this\.sdkEngine\)/,
@@ -60,7 +60,7 @@ test('U1.3 retirement is announced in code comments', () => {
   const orchestrator = readWorkspaceFile('src/main/modules/agent-control/runtime-core/orchestrator.ts')
   assert.match(
     orchestrator,
-    /U1\.3[\s\S]*DirectChatEngine no longer participates in event[\s\S]*emission/,
+    /U1\.3[\s\S]*DirectChatEngine no longer participates in[\s\S]*event[\s\S]*emission/,
     'orchestrator must contain the U1.3 retirement note',
   )
 })

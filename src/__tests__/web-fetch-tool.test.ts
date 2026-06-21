@@ -7,7 +7,9 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
+import { WEB_RESEARCH_ERROR_KINDS } from '../main/modules/agent-control/contracts/error-kinds'
 import {
+  executeWebFetch,
   webFetchSchema,
   WEB_FETCH_CONTENT_HARD_CAP,
 } from '../main/modules/tools/builtins/web-fetch'
@@ -26,4 +28,23 @@ test('webFetchSchema accepts http/https URL', () => {
 
 test('WEB_FETCH_CONTENT_HARD_CAP is 4096 characters', () => {
   assert.equal(WEB_FETCH_CONTENT_HARD_CAP, 4096)
+})
+
+test('executeWebFetch throws the shared web_fetch_failed errorKind when all backends fail', async () => {
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = (async () => new Response('bad request', { status: 400 })) as typeof fetch
+  try {
+    await assert.rejects(
+      executeWebFetch({ url: 'https://example.com/article' }, { tavilyKey: 'tvly-test' }),
+      (error: unknown) => {
+        assert.equal(
+          (error as { errorKind?: string }).errorKind,
+          WEB_RESEARCH_ERROR_KINDS.webFetchFailed.code,
+        )
+        return true
+      },
+    )
+  } finally {
+    globalThis.fetch = originalFetch
+  }
 })

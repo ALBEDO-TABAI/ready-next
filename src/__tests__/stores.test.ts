@@ -41,6 +41,7 @@ const documentMock = {
     documentElement: {
         setAttribute: (name: string, value: string) => { documentAttributes.set(name, value) },
         getAttribute: (name: string) => documentAttributes.get(name) ?? null,
+        removeAttribute: (name: string) => { documentAttributes.delete(name) },
     },
 }
 
@@ -1495,6 +1496,93 @@ describe('useAgent Store', () => {
         assert.match(errorMessage!.content, /消息保存失败，请重试/)
         assert.doesNotMatch(errorMessage!.content, /SQLITE/i)
         assert.equal(useAgent.getState().isStreaming, false)
+    })
+
+    it('should not classify a persisted user message as a persistence failure when the run fails later', async () => {
+        const metricCalls: Array<{ name: string; payload?: Record<string, unknown> }> = []
+
+        ;(globalThis as any).window.electronAPI = {
+            agent: {
+                createLocalScope: async (_agent: string, scopeId?: string) => ({
+                    success: true,
+                    data: {
+                        id: scopeId || 'conv-local-run-failed-after-persist',
+                        agent: 'butler',
+                        title: '新对话',
+                        sourceKind: 'local',
+                        sourceId: 'app',
+                        threadKey: scopeId || 'conv-local-run-failed-after-persist',
+                        meta: { sourceLabel: '应用内', createdBy: 'app' },
+                        createdAt: '2026-04-15T10:00:00.000Z',
+                        updatedAt: '2026-04-15T10:00:00.000Z',
+                        lastMessageAt: null,
+                    },
+                }),
+                sendScoped: async () => ({
+                    success: false,
+                    error: 'blocked by external tool',
+                    errorKind: 'blocked_external',
+                    persistence: {
+                        scope: 'pre-existing',
+                        message: 'persisted',
+                        attachments: 'none',
+                        inputAttachments: 'none',
+                    },
+                }),
+                emitRendererMetric: async (name: string, payload?: Record<string, unknown>) => {
+                    metricCalls.push({ name, payload })
+                    return { success: true }
+                },
+                kill: async () => ({ success: true }),
+            },
+            chat: {
+                createConversation: async () => ({ success: true }),
+                saveMessage: async () => ({ success: true }),
+                updateConversationTitle: async () => ({ success: true }),
+            },
+            settings: {
+                getAIConfig: async () => ({ success: true, data: null }),
+            },
+        }
+
+        useAgent.setState({
+            currentAgent: 'butler',
+            currentScopeId: 'conv-local-run-failed-after-persist',
+            currentScope: {
+                id: 'conv-local-run-failed-after-persist',
+                agent: 'butler',
+                title: '新对话',
+                sourceKind: 'local',
+                sourceId: 'app',
+                threadKey: 'conv-local-run-failed-after-persist',
+                meta: { sourceLabel: '应用内', createdBy: 'app' },
+                createdAt: '2026-04-15T10:00:00.000Z',
+                updatedAt: '2026-04-15T10:00:00.000Z',
+                lastMessageAt: null,
+            },
+            scopes: [],
+            conversations: [],
+            messages: [],
+            attachments: [],
+            filePool: [],
+            isStreaming: false,
+            sendCoalescingEnabled: false,
+        })
+
+        const result = await useAgent.getState().sendMessage('hello')
+
+        assert.equal(result.success, false)
+        assert.equal(result.preserveInput, false)
+        assert.equal(result.shouldClearInput, true)
+        assert.ok(
+            metricCalls.some((call) => call.name === 'renderer_send_failed_after_persisted_message'),
+            'persisted-message run failures use the run-failure metric',
+        )
+        assert.equal(
+            metricCalls.some((call) => call.name === 'renderer_send_persistence_failed'),
+            false,
+            'persisted-message run failures must not be reported as persistence failures',
+        )
     })
 
     it('should stop sending and keep attachments when attachment input cannot be read', async () => {

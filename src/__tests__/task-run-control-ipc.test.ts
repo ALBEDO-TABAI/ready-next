@@ -20,6 +20,7 @@ test('task run control actions are exposed through runtime, IPC, preload, render
   const taskInteractionHandlers = readWorkspaceFile('src/renderer/components/agent/chat-panel/task-interaction/use-task-interaction-handlers.ts')
 
   assert.match(runtime, /async suspendRun\(/)
+  assert.match(runtime, /async reportInfrastructureTimeout\(/)
   assert.match(runtime, /async resumeRun\(/)
   assert.match(runtime, /async respondToInteraction\(/)
   assert.match(runtime, /scopeRunSummary\?\.taskId/)
@@ -28,6 +29,7 @@ test('task run control actions are exposed through runtime, IPC, preload, render
   assert.doesNotMatch(runtime, /taskTitle:\s*target\.projection\?\.taskId/)
 
   assert.match(runControlGroup, /ipcMain\.handle\('agent:suspendRun'/)
+  assert.match(runControlGroup, /ipcMain\.handle\('agent:reportInfrastructureTimeout'/)
   assert.match(runControlGroup, /ipcMain\.handle\('agent:resumeRun'/)
   assert.match(runControlGroup, /ipcMain\.handle\('agent:respondToInteraction'/)
 
@@ -36,12 +38,14 @@ test('task run control actions are exposed through runtime, IPC, preload, render
   assert.match(preload, /continuationIntent\?: ContinuationIntentPayload \| null/)
   assert.match(preload, /ipcRenderer\.invoke\('agent:sendScoped', payload\)/)
   assert.match(preload, /suspendRun:\s*\(payload:\s*\{\s*scopeId: string; taskId\?: string \}\)\s*=>\s*ipcRenderer\.invoke\('agent:suspendRun', payload\)/)
+  assert.match(preload, /reportInfrastructureTimeout:\s*\(payload:\s*\{\s*scopeId: string; requestId: string; elapsedMs\?: number \}\)\s*=>\s*ipcRenderer\.invoke\('agent:reportInfrastructureTimeout', payload\)/)
   assert.match(preload, /resumeRun:\s*\(payload:\s*\{/)
   assert.match(preload, /respondToInteraction:\s*\(payload:\s*\{/)
   assert.match(preload, /responseText\?: string/)
   assert.match(preload, /responseText: string/)
 
   assert.match(rendererTypes, /suspendRun:\s*\(payload:\s*\{/)
+  assert.match(rendererTypes, /reportInfrastructureTimeout:\s*\(payload:\s*\{/)
   assert.match(rendererTypes, /resumeRun:\s*\(payload:\s*\{/)
   assert.match(rendererTypes, /respondToInteraction:\s*\(payload:\s*\{/)
   assert.match(rendererTypes, /sendScoped:\s*\(\s*payload:\s*\{/)

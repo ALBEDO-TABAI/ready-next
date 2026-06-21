@@ -1,5 +1,6 @@
 export const RENDERER_AGENT_METRICS = [
   'renderer_send_persistence_failed',
+  'renderer_send_failed_after_persisted_message',
   'renderer_attachment_input_failed',
   'renderer_friendly_error_surfaced',
   'renderer_assistant_persistence_failed',

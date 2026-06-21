@@ -6,7 +6,12 @@ import type { CapabilityRuntimeSnapshot } from '../../shared/ai-capability-runti
 import type { RendererAgentMetricName } from '../../shared/renderer-agent-metrics'
 import type { ModelPackDownloadUpdate, ModelPackId, ModelPackSelfTestReport, ModelPackStatus, ModelSource } from '../../shared/model-pack-types'
 import type { SkillSourceSelfTestReport } from '../../shared/skill-source-types'
-import type { AgentBrowserControlState, AgentBrowserCollectionTask } from '../modules/browser/useAgentBrowserSupervision'
+import type {
+  AgentBrowserCollectionTask,
+  AgentBrowserControlState,
+  AgentBrowserSurface,
+  BrowserLeaseSurfaceSnapshot,
+} from '../modules/browser/useAgentBrowserSupervision'
 import type {
   PetActivitySnapshot,
   PetDefinition,
@@ -47,6 +52,10 @@ import type {
   DocumentMarkRecord,
 } from '../../shared/document-side-panels'
 import type {
+  BrowserLockOverlayIPCResult,
+  BrowserLockOverlaySnapshot,
+} from '../../shared/browser-lock-overlay'
+import type {
   BrowserFastCardContextActionEvent,
   FastCardOverlayCommand,
   FastCardOverlaySnapshot,
@@ -63,6 +72,20 @@ import type {
   ReadyBoardAssetKind,
   ReadyBoardState,
 } from '../../shared/ready-board'
+import type {
+  AgentSystemStudioConfirmContentEditInput,
+  AgentSystemStudioContentEditProposal,
+  AgentSystemStudioRejectContentEditInput,
+  AgentSystemStudioRoutingSimulation,
+  AgentSystemStudioSnapshot,
+  AgentSystemStudioStageContentEditInput,
+} from '../../shared/agent-system-studio'
+import type {
+  SpecialistAgentBlueprint,
+  SpecialistBlueprintAdmissionVerdict,
+  SpecialistBlueprintStatus,
+} from '../../shared/agent-specialist-blueprint'
+import type { SpecialistBlueprintClarificationContract } from '../../shared/agent-specialist-blueprint-clarification'
 
 // Type declarations for window.electronAPI exposed by preload
 
@@ -148,10 +171,42 @@ interface AgentDerivationCandidateData {
 }
 
 interface AgentDerivationConfirmData {
+  blueprint: SpecialistAgentBlueprint
+  blueprintId: string
+  specialistId: string
+  status: SpecialistBlueprintStatus
+  verdict: SpecialistBlueprintAdmissionVerdict
+  missing: string[]
+  clarification?: SpecialistBlueprintClarificationContract
+  createdAgent: false
+  routingActivated: false
+  migratedCards: []
+}
+
+interface SpecialistAgentCreateResultData {
   agent: AgentRegistryRecordData
   rulesRelPath: string
+  foundationRelPath?: string
+  seedRelPaths: string[]
   routingCardRelPath: string
   migratedCards: Array<{ from: string; to: string }>
+}
+
+interface SpecialistBlueprintAdmissionData {
+  blueprint: SpecialistAgentBlueprint
+  verdict: SpecialistBlueprintAdmissionVerdict
+  missing: string[]
+}
+
+interface SpecialistBlueprintConfirmationData {
+  blueprint: SpecialistAgentBlueprint
+  tokenId: string
+  contentHash: string
+}
+
+interface SpecialistBlueprintConfirmCreateData {
+  blueprint: SpecialistAgentBlueprint
+  result: SpecialistAgentCreateResultData
 }
 
 interface AgentRegistryKnowledgeCardData {
@@ -352,6 +407,16 @@ interface ScopeRunContextBudgetData {
   l0Chars: number
   l1Chars: number
   l2Chars: number
+  rulesChars?: number
+  knowledgeIndexChars?: number
+  agentRoutingChars?: number
+  recallChars?: number
+  autoRecallChars?: number
+  sectionChars?: Record<string, number>
+  totalBytes?: number
+  sectionBytes?: Record<string, number>
+  truncations?: string[]
+  truncationReasons?: Record<string, 'section_budget'>
   droppedRefs: string[]
 }
 
@@ -743,6 +808,7 @@ type ScopeRunTerminalReasonData =
   | 'persistence_failed'
   | 'cancelled_user'
   | 'cancelled_runtime'
+  | 'main_no_progress_timeout'
   | 'context_overflow'
   | 'infra_error'
 
@@ -870,6 +936,32 @@ interface ElectronAgentAPI {
   listChannels: () => Promise<IPCResponse<AgentChannelConfigData[]>>
   listRegistry: () => Promise<IPCResponse<AgentRegistryRecordData[]>>
   listRegistryKnowledge: (id: string) => Promise<IPCResponse<AgentRegistryKnowledgeCardData[]>>
+  getSystemStudioSnapshot: () => Promise<IPCResponse<AgentSystemStudioSnapshot>>
+  simulateSystemStudioRouting: (firstMessage: string) => Promise<IPCResponse<AgentSystemStudioRoutingSimulation>>
+  stageSystemStudioContentEdit: (payload: AgentSystemStudioStageContentEditInput) => Promise<IPCResponse<AgentSystemStudioContentEditProposal>>
+  confirmSystemStudioContentEdit: (proposalId: AgentSystemStudioConfirmContentEditInput['proposalId']) => Promise<IPCResponse<AgentSystemStudioContentEditProposal>>
+  rejectSystemStudioContentEdit: (proposalId: AgentSystemStudioRejectContentEditInput['proposalId']) => Promise<IPCResponse<AgentSystemStudioContentEditProposal>>
+  listSpecialistBlueprints: () => Promise<IPCResponse<SpecialistAgentBlueprint[]>>
+  upsertSpecialistBlueprintDraft: (blueprint: unknown) => Promise<IPCResponse<SpecialistAgentBlueprint>>
+  runSpecialistBlueprintAdmission: (payload: {
+    blueprint?: unknown
+    blueprintId?: string
+  }) => Promise<IPCResponse<SpecialistBlueprintAdmissionData>>
+  requestSpecialistBlueprintConfirmation: (payload: {
+    blueprintId: string
+    sessionId: string
+    runId?: string | null
+    unverifiedSemanticReviewAck?: { kind: 'unverified_semantic_review'; contentHash: string }
+  }) => Promise<IPCResponse<SpecialistBlueprintConfirmationData>>
+	  confirmSpecialistDraftCreate: (payload: {
+	    blueprintId: string
+	    sessionId: string
+	    runId?: string | null
+	    tokenId: string
+	    migrateCardRelPaths?: string[]
+	  }) => Promise<IPCResponse<SpecialistBlueprintConfirmCreateData>>
+  rejectSpecialistBlueprint: (blueprintId: string) => Promise<IPCResponse<SpecialistAgentBlueprint>>
+  expireSpecialistBlueprint: (blueprintId: string) => Promise<IPCResponse<SpecialistAgentBlueprint>>
   updateRegistryStatus: (payload: {
     id: string
     status: 'retired' | 'merged'
@@ -1006,6 +1098,14 @@ interface ElectronAgentAPI {
 	    name: RendererAgentMetricName,
 	    payload?: Record<string, unknown>
 	  ) => Promise<IPCResponse>
+  reportInfrastructureTimeout: (payload: {
+    scopeId: string
+    requestId: string
+    elapsedMs?: number
+  }) => Promise<IPCResponse<{
+    state?: 'cancel_requested' | 'stale' | 'not_found'
+    activeRunId?: string | null
+  }>>
   suspendRun: (payload: {
     scopeId: string
     taskId?: string
@@ -1353,6 +1453,8 @@ interface ElectronBrowserAPI {
     controlState: AgentBrowserControlState
     agentTabId: string | null
     tasks: AgentBrowserCollectionTask[]
+    surfaces?: Record<AgentBrowserSurface, BrowserLeaseSurfaceSnapshot>
+    activeWriteSurface?: AgentBrowserSurface | null
     error?: string
   }>
   requestAgentInterruption: () => Promise<{ state: AgentBrowserControlState; pending: boolean; error?: string }>
@@ -1366,6 +1468,10 @@ interface ElectronBrowserAPI {
     taskId: string
   }) => Promise<{ success: boolean; data?: unknown; error?: string }>
   onAgentControlChanged: (callback: (data: { state: AgentBrowserControlState }) => void) => () => void
+  onLeaseChanged: (callback: (data: {
+    surfaces?: Record<AgentBrowserSurface, BrowserLeaseSurfaceSnapshot>
+    activeWriteSurface?: AgentBrowserSurface | null
+  }) => void) => () => void
   setAdblockEnabled: (
     enabled: boolean,
     scope?: 'main' | 'preview' | 'all'
@@ -1389,6 +1495,21 @@ interface ElectronBrowserAPI {
   }) => Promise<{ success: boolean }>
   previewClose: () => Promise<{ success: boolean }>
   previewGetState: () => Promise<BrowserPreviewState>
+  p7cLiveProofStartUserViewLease: () => Promise<{ success: boolean; leaseId?: string; tabId?: string; error?: string }>
+  p7cLiveProofCreateManualTab: () => Promise<{ success: boolean; tabId?: string; error?: string }>
+  p7cLiveProofPrepareForegroundProbe: () => Promise<{
+    success: boolean
+    state?: { tabId: string; url: string; title: string; focusToken: string; scrollX: number; scrollY: number }
+    error?: string
+  }>
+  p7cLiveProofSampleActiveTabState: () => Promise<{
+    success: boolean
+    state?: { tabId: string; url: string; title: string; focusToken: string; scrollX: number; scrollY: number }
+    error?: string
+  }>
+  p7cLiveProofSendUserKey: (key?: string) => Promise<{ success: boolean; error?: string }>
+  p7cLiveProofCheckWriteDenied: () => Promise<{ success: boolean; errorKind?: string; error?: string }>
+  p7cLiveProofClear: () => Promise<{ success: boolean; error?: string }>
   onPreviewUpdate: (callback: (data: BrowserPreviewState) => void) => () => void
   onTabUpdate: (callback: (data: BrowserTabUpdateEvent) => void) => () => void
   onTabOpened: (callback: (data: BrowserTabOpenedEvent) => void) => () => void
@@ -1403,6 +1524,10 @@ interface ElectronBrowserAPI {
   sendFastCardOverlayCommand: (command: FastCardOverlayCommand) => Promise<FastCardIPCResult<void>>
   onFastCardOverlayCommand: (callback: (command: FastCardOverlayCommand) => void) => () => void
   onFastCardOverlaySnapshot: (callback: (snapshot: FastCardOverlaySnapshot) => void) => () => void
+  showBrowserLockOverlay: (payload: BrowserLockOverlaySnapshot) => Promise<BrowserLockOverlayIPCResult<void>>
+  hideBrowserLockOverlay: () => Promise<BrowserLockOverlayIPCResult<void>>
+  getBrowserLockOverlaySnapshot: () => Promise<BrowserLockOverlayIPCResult<BrowserLockOverlaySnapshot | null>>
+  onBrowserLockOverlaySnapshot: (callback: (snapshot: BrowserLockOverlaySnapshot) => void) => () => void
 
   // Bookmarks
   addBookmark: (

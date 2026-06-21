@@ -82,6 +82,37 @@ test('restart restore seeds the session and notifies the model', async () => {
   clearScopeSessionSnapshot(scope)
 })
 
+test('restart restore normalizes snapshot seed without dropping latest user request', async () => {
+  const scope = `butler::scope-restore-normalized-${process.pid}`
+  const latestRequest = 'RESTORE_LATEST_USER_REQUEST'
+  clearScopeSessionSnapshot(scope)
+  writeScopeSessionSnapshot(scope, [
+    { type: 'function_call', callId: 'orphan-call', name: 'lookup', arguments: '{}' },
+    { type: 'function_call', callId: 'complete-call', name: 'lookup', arguments: '{}' },
+    { type: 'function_call_result', callId: 'complete-call', name: 'lookup', status: 'completed', output: 'ok' },
+    { role: 'user', content: latestRequest },
+  ])
+
+  let seededItemsText = ''
+  const runtime = new AgentSdkRuntime({
+    loadAIConfig: () => ({ ok: true, config: fakeConfig, reason: 'present' }),
+    domainAdapters: [],
+    listToolDefinitions: () => [],
+    runAgent: async ({ session }) => {
+      const items = await (session as { getItems: () => Promise<unknown[]> }).getItems()
+      seededItemsText = JSON.stringify(items)
+      return { finalText: '继续中。', toolTrace: [] }
+    },
+  } as Partial<AgentSdkRuntimeDeps> as AgentSdkRuntimeDeps)
+
+  await runtime.sendMessage(scope, '继续', 'run-restore-normalized-1', {})
+
+  assert.ok(seededItemsText.includes(latestRequest))
+  assert.ok(!seededItemsText.includes('orphan-call'))
+  assert.ok(seededItemsText.includes('complete-call'))
+  clearScopeSessionSnapshot(scope)
+})
+
 test('corrupt snapshot resets with an explicit notice', async () => {
   const scope = `butler::scope-corrupt-${process.pid}`
   clearScopeSessionSnapshot(scope)

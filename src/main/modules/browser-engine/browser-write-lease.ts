@@ -57,6 +57,14 @@ export interface BrowserWriteLeaseOptions {
   generateId?: (prefix: string) => string
 }
 
+export interface BrowserLeaseTransition {
+  surface: AgentBrowserSurface
+  previousState: BrowserLeaseState
+  state: BrowserLeaseState
+  leaseId: string | null
+  source: 'acquire' | 'release' | 'user_signal' | 'clear' | 'expire'
+}
+
 const SURFACES: AgentBrowserSurface[] = ['user-view', 'agent-view']
 
 export class BrowserWriteLeaseService {
@@ -66,6 +74,7 @@ export class BrowserWriteLeaseService {
   private readonly generateId: (prefix: string) => string
   private seq = 0
   private surfaces: Record<AgentBrowserSurface, SurfaceState>
+  private transitionListeners = new Set<(transition: BrowserLeaseTransition) => void>()
 
   constructor(options: BrowserWriteLeaseOptions = {}) {
     this.now = options.now ?? (() => Date.now())
@@ -83,11 +92,39 @@ export class BrowserWriteLeaseService {
     return { state: 'idle', lease: null, openActions: new Set(), suppressUntil: 0 }
   }
 
+  onTransition(listener: (transition: BrowserLeaseTransition) => void): () => void {
+    this.transitionListeners.add(listener)
+    return () => {
+      this.transitionListeners.delete(listener)
+    }
+  }
+
+  private emitTransition(
+    surface: AgentBrowserSurface,
+    previousState: BrowserLeaseState,
+    source: BrowserLeaseTransition['source'],
+  ): void {
+    const s = this.surfaces[surface]
+    if (previousState === s.state) return
+    const transition: BrowserLeaseTransition = {
+      surface,
+      previousState,
+      state: s.state,
+      leaseId: s.lease?.leaseId ?? null,
+      source,
+    }
+    for (const listener of this.transitionListeners) {
+      listener(transition)
+    }
+  }
+
   /** Lazily roll a held-but-expired lease to `expired` before any read of state. */
   private reconcile(surface: AgentBrowserSurface): SurfaceState {
     const s = this.surfaces[surface]
     if (s.state === 'held' && s.lease && this.now() > s.lease.expiresAt) {
+      const previous = s.state
       s.state = 'expired'
+      this.emitTransition(surface, previous, 'expire')
     }
     return s
   }
@@ -127,6 +164,7 @@ export class BrowserWriteLeaseService {
     }
     const at = this.now()
     const ttl = Math.max(1_000, params.ttlMs ?? this.defaultTtlMs)
+    const previous = s.state
     const lease: BrowserWriteLease = {
       leaseId: this.generateId('lease'),
       surface: params.surface,
@@ -141,6 +179,7 @@ export class BrowserWriteLeaseService {
     s.lease = lease
     s.openActions.clear()
     s.suppressUntil = 0
+    this.emitTransition(params.surface, previous, 'acquire')
     return lease
   }
 
@@ -177,7 +216,9 @@ export class BrowserWriteLeaseService {
           s.openActions.clear()
           return
         }
+        const previous = s.state
         this.surfaces[surface] = this.freshSurface()
+        this.emitTransition(surface, previous, 'release')
         return
       }
     }
@@ -249,13 +290,17 @@ export class BrowserWriteLeaseService {
     //  - navigation / tab-switch: can be an echo of the agent's own action, so
     //    they are suppressed both during an open window and the post-action grace.
     if (params.source === 'explicit-button') {
+      const previous = s.state
       s.state = 'takeover'
+      this.emitTransition(params.surface, previous, 'user_signal')
       return true
     }
     if (s.openActions.size > 0) return false
     if (params.source !== 'keyboard' && this.now() < s.suppressUntil) return false
 
+    const previous = s.state
     s.state = 'takeover'
+    this.emitTransition(params.surface, previous, 'user_signal')
     return true
   }
 
@@ -263,7 +308,9 @@ export class BrowserWriteLeaseService {
   clearTakeover(surface: AgentBrowserSurface): void {
     const s = this.surfaces[surface]
     if (s.state === 'takeover' || s.state === 'expired') {
+      const previous = s.state
       this.surfaces[surface] = this.freshSurface()
+      this.emitTransition(surface, previous, 'clear')
     }
   }
 }

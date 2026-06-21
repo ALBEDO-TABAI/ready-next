@@ -70,6 +70,48 @@
   ],
   "c4Exempt": [
     {
+      "path": "src/__tests__/orchestrator-infrastructure-timeout.test.ts",
+      "reason": "P6a: tests request-id authority on ReadyAgentOrchestrator with injected fake domain/sdk stopGeneration handlers and an in-memory activeRunIds map. Transitive imports reach sqlite-capable runtime modules, but no test path opens better-sqlite3 or reads the real DB.",
+      "since": "2026-06-20",
+      "owner": "p6a-run-continuity-hotfix"
+    },
+    {
+      "path": "src/__tests__/orchestrator-main-no-progress-guard.test.ts",
+      "reason": "P6a-R2: tests ReadyAgentOrchestrator no-progress timing with fake timers and injected stopGeneration handlers. Transitive imports reach sqlite-capable runtime modules, but no test path opens better-sqlite3 or reads the real DB.",
+      "since": "2026-06-20",
+      "owner": "p6a-r2-main-no-progress-guard"
+    },
+    {
+      "path": "src/__tests__/migration-session-recall-agent.test.ts",
+      "reason": "P4-D/C27: tests migration 063 with a fake MigrationDatabase and never opens better-sqlite3 or the app DB. Transitive migration imports reach sqlite-capable modules only through the registry surface.",
+      "since": "2026-06-20",
+      "owner": "p4d-session-recall-agent-scope"
+    },
+    {
+      "path": "src/__tests__/prompt-context-budget-coverage.test.ts",
+      "reason": "P6b/C28: tests PromptAssemblyService context-budget accounting with filesystem fixtures and fake stores. Transitive imports reach sqlite-capable runtime modules, but no test path opens better-sqlite3 or reads the real DB.",
+      "since": "2026-06-20",
+      "owner": "p6b-context-budget-coverage"
+    },
+    {
+      "path": "src/__tests__/sdk-turnengine-capability-parity.test.ts",
+      "reason": "P6e: tests controller and SDK-shaped capability resolution with synthetic request envelopes, configs, authorization, and fake runtime availability. Transitive imports reach sqlite-capable runtime modules, but no test path opens better-sqlite3 or reads a repository; host-Node coverage must stay active for parity drift.",
+      "since": "2026-06-20",
+      "owner": "p6e-sdk-turnengine-capability-parity"
+    },
+    {
+      "path": "src/__tests__/session-recall-agent-scope.test.ts",
+      "reason": "P4-D/C27: tests SessionRecallService and DatabaseManager recall metadata behavior with fake adapters/connections. Transitive imports reach sqlite-capable modules, but no test path opens better-sqlite3 or reads the real DB.",
+      "since": "2026-06-20",
+      "owner": "p4d-session-recall-agent-scope"
+    },
+    {
+      "path": "src/__tests__/child-loop-terminal-funnel.test.ts",
+      "reason": "P1c/C17: tests drive SkillChildRunner with an injected fake SkillTaskRunRepository and fake TaskProjectionStore. The transitive runner imports reach sqlite-capable repository modules, but no test path opens better-sqlite3 or reads the real repository; the focused contract is child-loop terminal projection behavior.",
+      "since": "2026-06-20",
+      "owner": "p1c-child-loop-terminal-boundary"
+    },
+    {
       "path": "src/__tests__/sandbox-bash-high-risk.test.ts",
       "reason": "Stage T (Stage 14) PR-T2/W7.1: tests only exercise auditBashCommand pure regex matrix + executeRunShell with mkdtempSync filesystem fixtures (no sqlite). Transitive value-import reaches nativeBackedModules via tools/skill-primitives/run-shell.ts barrel, but no test path opens better-sqlite3 or reads any repository. Verified passing on host-Node.",
       "since": "2026-05-09",
@@ -716,6 +758,12 @@
       "reason": "Pre-release model-pack manager: tests construct SkillsRuntimeManager with startBackgroundTasks:false and exercise only the model-pack methods (listModelPacks/getModelPackStatus/startModelPackDownload with fake spawn/cancelModelPackDownload/selfTestModelPacks) plus getBaseEnv env injection over mkdtemp filesystem fixtures. Transitive value-import reaches native-backed runtime-manager, but the constructor gates all SQLite jobs/schedules work behind startBackgroundTasks and no model-pack code path calls a db.prepare method, so better-sqlite3 is never loaded. Verified passing on host-Node.",
       "since": "2026-05-29",
       "owner": "readyguy-prerelease-model-packs"
+    },
+    {
+      "path": "src/__tests__/skill-schedule-tick-outcome.test.ts",
+      "reason": "P1b-C16 schedule outcome tests construct SkillsRuntimeManager with startBackgroundTasks:false and replace getRawDatabase with an in-memory fake DB. They exercise createSchedule and runScheduledTask outcome branching only; no path opens better-sqlite3 under host Node. Native coverage remains enforced by npm run verify:native.",
+      "since": "2026-06-20",
+      "owner": "agent-audit-p1b-c16"
     }
   ]
 }

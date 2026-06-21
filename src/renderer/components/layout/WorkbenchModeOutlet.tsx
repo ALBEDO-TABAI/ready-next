@@ -1,4 +1,4 @@
-import { lazy, memo, Suspense, useLayoutEffect, useRef, useState } from 'react'
+import { lazy, memo, Suspense, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { WorkbenchMode } from '../../stores/useMode'
 import type { BrowserHostLayoutPhase } from '../../../shared/browser-view-layout'
 
@@ -42,6 +42,13 @@ const ALL_WORKBENCH_MODES: WorkbenchMode[] = ['browser', 'document', 'rss', 'cal
 const ALL_MODE_LOADERS = [loadBrowserMode, loadDocumentMode, loadRSSMode, loadCalendarMode]
 const MODE_SCENE_TRANSITION_MS = 280
 let hasPreloadedWorkbenchModes = false
+
+type IdleCallbackHandle = ReturnType<Window['setTimeout']>
+type IdleCallbackDeadline = { didTimeout: boolean; timeRemaining: () => number }
+type IdleSchedulerWindow = Window & {
+  requestIdleCallback?: (callback: (deadline: IdleCallbackDeadline) => void, options?: { timeout?: number }) => IdleCallbackHandle
+  cancelIdleCallback?: (handle: IdleCallbackHandle) => void
+}
 
 function prefersReducedMotion(): boolean {
   if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return false
@@ -142,12 +149,32 @@ export default function WorkbenchModeOutlet({
     direction: 'forward',
   })
 
-  useLayoutEffect(() => {
+  useEffect(() => {
     if (hasPreloadedWorkbenchModes) return
-    hasPreloadedWorkbenchModes = true
-    ALL_MODE_LOADERS.forEach((loadMode) => {
-      void loadMode()
-    })
+
+    const idleWindow = window as IdleSchedulerWindow
+    let cancelled = false
+    const preloadModes = () => {
+      if (cancelled || hasPreloadedWorkbenchModes) return
+      hasPreloadedWorkbenchModes = true
+      ALL_MODE_LOADERS.forEach((loadMode) => {
+        void loadMode()
+      })
+    }
+
+    if (typeof idleWindow.requestIdleCallback === 'function') {
+      const handle = idleWindow.requestIdleCallback(preloadModes, { timeout: 4_000 })
+      return () => {
+        cancelled = true
+        idleWindow.cancelIdleCallback?.(handle)
+      }
+    }
+
+    const timer = window.setTimeout(preloadModes, 1_500)
+    return () => {
+      cancelled = true
+      window.clearTimeout(timer)
+    }
   }, [])
 
   useLayoutEffect(() => {

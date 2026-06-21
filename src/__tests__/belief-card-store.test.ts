@@ -102,6 +102,64 @@ test('listCards default excludes staged; includeStaged returns them', () => {
   }
 })
 
+test('routing inventory shows staged and disabled cards without changing active-only routing cards', () => {
+  const dir = root()
+  try {
+    const store = new BeliefCardStore({ memoryRoot: dir })
+    assert.ok(store.writeCard({
+      relPath: 'knowledge/routing-writer.md',
+      frontmatter: fm({
+        title: '路由：写作',
+        description: '写作请求',
+        status: 'active',
+        tag: 'self',
+        triggers: ['写作'],
+      }),
+      body: 'x',
+    }).ok)
+    assert.ok(store.writeCard({
+      relPath: 'knowledge/routing-collector.md',
+      frontmatter: fm({
+        title: '路由：采集',
+        description: '采集请求',
+        status: 'staged',
+        tag: 'self',
+        triggers: ['采集'],
+      }),
+      body: 'x',
+    }).ok)
+    assert.ok(store.writeCard({
+      relPath: 'knowledge/routing-editor.md',
+      frontmatter: fm({
+        title: '路由：编辑',
+        description: '缺触发词',
+        status: 'active',
+        tag: 'self',
+      }),
+      body: 'x',
+    }).ok)
+
+    const active = store.listRoutingCards()
+    assert.deepEqual(active.map((card) => card.targetAgentId), ['writer'], 'staged and triggerless cards stay out of preroute')
+
+    const inventory = store.listRoutingCardInventory([
+      { id: 'writer', status: 'active' },
+      { id: 'collector', status: 'active' },
+      { id: 'editor', status: 'retired' },
+    ])
+    assert.deepEqual(
+      inventory.map((card) => [card.targetAgentId, card.disabledReason]),
+      [
+        ['collector', 'card_staged'],
+        ['editor', 'missing_triggers'],
+        ['writer', null],
+      ],
+    )
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('transition staged → active makes the card readable by default', () => {
   const dir = root()
   try {

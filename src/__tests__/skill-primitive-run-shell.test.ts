@@ -116,7 +116,7 @@ test('script wrappers are invoked through bash/python rather than direct ./scrip
     }) as unknown as typeof import('node:child_process').spawn
 
     await executeRunShell(
-      { command: 'bash scripts/run_update_cron.sh' },
+      { command: 'cd "$CLAUDE_SKILL_DIR" && bash scripts/run_update_cron.sh' },
       {
         skillId: 'test-skill',
         lookupSkillRoots: fx.lookup,
@@ -124,8 +124,8 @@ test('script wrappers are invoked through bash/python rather than direct ./scrip
       },
     )
     assert.equal(captured.bin, 'bash')
-    assert.deepEqual(captured.args, ['scripts/run_update_cron.sh'])
-    assert.equal(captured.cwd, fx.assetRoot)
+    assert.deepEqual(captured.args, ['-c', 'cd "$CLAUDE_SKILL_DIR" && bash scripts/run_update_cron.sh'])
+    assert.equal(captured.cwd, fx.artifactRoot)
 
     await assert.rejects(
       executeRunShell(
@@ -150,9 +150,9 @@ test('echo produces stdout and exitCode=0 with env CLAUDE_SKILL_DIR set to asset
     const data = out.data as any
     assert.equal(data?.exitCode, 0)
     assert.ok((data?.stdout || '').includes('hello'))
-    // cwd should match assetRoot — `ls marker.txt` finds the file.
+    // cwd is the writable artifactRoot; bundled assets are read through CLAUDE_SKILL_DIR.
     const ls = await executeRunShell(
-      { command: 'ls marker.txt' },
+      { command: 'ls "$CLAUDE_SKILL_DIR/marker.txt"' },
       { skillId: 'test-skill', lookupSkillRoots: fx.lookup },
     )
     const lsData = ls.data as any
@@ -178,7 +178,7 @@ test('shell-style commands expand skill env vars and support pipelines', async (
     assert.equal(envData?.command?.bin, 'bash')
 
     const pipeOut = await executeRunShell(
-      { command: 'find . -name "marker.txt" | head -n 1' },
+      { command: 'find "$CLAUDE_SKILL_DIR" -name "marker.txt" | head -n 1' },
       { skillId: 'test-skill', lookupSkillRoots: fx.lookup },
     )
     const pipeData = pipeOut.data as any
@@ -223,7 +223,7 @@ test('pwd is allowed as a harmless cwd probe', async () => {
 
     const data = out.data as any
     assert.equal(data?.exitCode, 0)
-    assert.equal((data?.stdout || '').trim(), fx.assetRoot)
+    assert.equal((data?.stdout || '').trim(), fx.artifactRoot)
   } finally {
     fx.cleanup()
   }
@@ -318,7 +318,7 @@ test('stdout over 8K chars is truncated and logged to an overflow artifact', asy
     const bigPath = join(fx.assetRoot, 'big.txt')
     writeFileSync(bigPath, 'A'.repeat(20_000), 'utf-8')
     const out = await executeRunShell(
-      { command: 'cat big.txt' },
+      { command: 'cat "$CLAUDE_SKILL_DIR/big.txt"' },
       { skillId: 'test-skill', lookupSkillRoots: fx.lookup },
     )
     const data = out.data as any
@@ -464,7 +464,7 @@ test('overflow artifact write failure degrades gracefully and preserves command 
     chmodSync(fx.artifactRoot, 0o500)
 
     const out = await executeRunShell(
-      { command: 'cat big.txt' },
+      { command: 'cat "$CLAUDE_SKILL_DIR/big.txt"' },
       { skillId: 'test-skill', lookupSkillRoots: fx.lookup },
     )
     const data = out.data as any
@@ -492,7 +492,7 @@ test('detached spawn flag does not break stream capture', async () => {
   try {
     writeFileSync(join(fx.assetRoot, 'data.txt'), 'abc\n', 'utf-8')
     const out = await executeRunShell(
-      { command: 'cat data.txt' },
+      { command: 'cat "$CLAUDE_SKILL_DIR/data.txt"' },
       { skillId: 'test-skill', lookupSkillRoots: fx.lookup },
     )
     const data = out.data as any

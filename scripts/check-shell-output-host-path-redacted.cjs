@@ -47,6 +47,10 @@ function checkRedactor(source) {
     if (!/\/Users\//.test(source)) fail('redactor must redact /Users/<name>')
   }
   if (!/\/home\//.test(source)) fail('redactor must redact /home/<name>')
+  if (!/USERPROFILE/.test(source)) fail('redactor must reference USERPROFILE')
+  if (!/\\\\Users\\\\/.test(source)) fail('redactor must redact Windows \\\\Users\\\\<name> paths')
+  if (!/WINDOWS_USERS_DRIVE_ESCAPED_PATTERN/.test(source)) fail('redactor must define JSON-escaped Windows drive path handling')
+  if (!/\\\\\\\\Users\\\\\\\\/.test(source)) fail('redactor must redact JSON-escaped Windows \\\\\\\\Users paths')
 }
 
 function countInvocations(source) {

@@ -144,11 +144,280 @@ export const PROVIDER_ERROR_KINDS = {
 export type ProviderErrorKindKey = keyof typeof PROVIDER_ERROR_KINDS
 export type ProviderErrorKind = (typeof PROVIDER_ERROR_KINDS)[ProviderErrorKindKey]['code']
 
+// ---------- detached skill tasks ----------
+
+export const DETACHED_TASK_ERROR_KINDS = {
+  taskFailed: {
+    code: 'detached_task_failed',
+    noMetric: true,
+    description: 'Detached skill task reached a failed terminal state.',
+  },
+  notFound: {
+    code: 'detached_task_not_found',
+    noMetric: true,
+    description: 'Requested detached skill task id was not found.',
+  },
+  forbidden: {
+    code: 'detached_task_forbidden',
+    noMetric: true,
+    description: 'Detached skill task exists but is not available in this session.',
+  },
+  runtimeUnavailable: {
+    code: 'detached_task_runtime_unavailable',
+    noMetric: true,
+    description: 'Detached skill task tracker/runtime is unavailable.',
+  },
+  skillActionUnknown: {
+    code: 'detached_task_skill_action_unknown',
+    noMetric: true,
+    description: 'Requested skill action is not exposed by the loaded skill tool registry.',
+  },
+  skillNotLoaded: {
+    code: 'detached_task_skill_not_loaded',
+    noMetric: true,
+    description: 'Skill manifest is not loaded for the requested detached action.',
+  },
+  hintRequired: {
+    code: 'detached_task_hint_required',
+    noMetric: true,
+    description: 'Detached action requires a reference-skill hint to be armed.',
+  },
+  visibilityInternal: {
+    code: 'detached_task_visibility_internal',
+    noMetric: true,
+    description: 'Detached action is internal and is not exposed for this turn.',
+  },
+  startFailed: {
+    code: 'detached_task_start_failed',
+    noMetric: true,
+    description: 'Detached skill task failed to start.',
+  },
+} as const satisfies Record<string, ErrorKindMeta>
+
+export type DetachedTaskErrorKindKey = keyof typeof DETACHED_TASK_ERROR_KINDS
+export type DetachedTaskErrorKind =
+  (typeof DETACHED_TASK_ERROR_KINDS)[DetachedTaskErrorKindKey]['code']
+
+// ---------- send-im ----------
+
+export const SEND_IM_ERROR_KINDS = {
+  blockedExternal: {
+    code: 'blocked_external',
+    noMetric: true,
+    description: 'External IM service rejected the send operation.',
+  },
+  sendFailed: {
+    code: 'send_failed',
+    noMetric: true,
+    description: 'Remote IM send failed after dispatch.',
+  },
+  sidecarUnavailable: {
+    code: 'sidecar_unavailable',
+    noMetric: true,
+    description: 'Remote IM sidecar is unavailable.',
+  },
+  channelNotReady: {
+    code: 'channel_not_ready',
+    noMetric: true,
+    description: 'No usable remote IM channel is ready for this send.',
+  },
+  directoryNotSupported: {
+    code: 'directory_not_supported',
+    noMetric: true,
+    description: 'A directory was selected where a concrete file is required.',
+  },
+  fileNotFound: {
+    code: 'file_not_found',
+    noMetric: true,
+    description: 'The requested local file could not be resolved.',
+  },
+  fileAmbiguous: {
+    code: 'file_ambiguous',
+    noMetric: true,
+    description: 'Multiple candidate files matched the send request.',
+  },
+  intentNegated: {
+    code: 'intent_negated',
+    noMetric: true,
+    description: 'User text explicitly negated the remote IM send intent.',
+  },
+} as const satisfies Record<string, ErrorKindMeta>
+
+export type SendImErrorKindKey = keyof typeof SEND_IM_ERROR_KINDS
+export type SendImErrorKind = (typeof SEND_IM_ERROR_KINDS)[SendImErrorKindKey]['code']
+
+// ---------- document target guards ----------
+
+export const TARGET_DOCUMENT_ERROR_KINDS = {
+  preservedContentMissing: {
+    code: 'target_document_preserved_content_missing',
+    noMetric: true,
+    description: 'A target document mutation would remove required preserved content.',
+  },
+  openUnavailable: {
+    code: 'target_document_open_unavailable',
+    noMetric: true,
+    description: 'The current turn did not expose the tool required to open the target document.',
+  },
+  openFailed: {
+    code: 'target_document_open_failed',
+    noMetric: true,
+    description: 'The target document open guard failed before mutation.',
+  },
+  saveUnavailable: {
+    code: 'target_document_save_unavailable',
+    noMetric: true,
+    description: 'The current turn did not expose the tool required to save the target document.',
+  },
+  saveFailed: {
+    code: 'target_document_save_failed',
+    noMetric: true,
+    description: 'The target document save guard failed after mutation.',
+  },
+  required: {
+    code: 'target_document_required',
+    noMetric: true,
+    description: 'A document write attempted to bypass the explicit target document.',
+  },
+} as const satisfies Record<string, ErrorKindMeta>
+
+export type TargetDocumentErrorKindKey = keyof typeof TARGET_DOCUMENT_ERROR_KINDS
+export type TargetDocumentErrorKind =
+  (typeof TARGET_DOCUMENT_ERROR_KINDS)[TargetDocumentErrorKindKey]['code']
+
+// ---------- browser tool fallbacks ----------
+
+export const BROWSER_TOOL_ERROR_KINDS = {
+  browserToolFailed: {
+    code: 'browser_tool_failed',
+    noMetric: true,
+    description: 'Browser tool returned a legacy or unclassified failure that must be surfaced as structured data.',
+  },
+} as const satisfies Record<string, ErrorKindMeta>
+
+export type BrowserToolErrorKindKey = keyof typeof BROWSER_TOOL_ERROR_KINDS
+export type BrowserToolErrorKind =
+  (typeof BROWSER_TOOL_ERROR_KINDS)[BrowserToolErrorKindKey]['code']
+
+// ---------- tool admission/control ----------
+
+export const TOOL_ADMISSION_ERROR_KINDS = {
+  toolNotRegistered: {
+    code: 'tool_not_registered',
+    noMetric: true,
+    description: 'The model or child gateway attempted to call a tool that is not registered.',
+  },
+  authorizationDenied: {
+    code: 'authorization_denied',
+    metricName: 'authorization_denied',
+    description: 'A model-issued skill tool exists but is not authorized for this turn.',
+  },
+  internalToolNotAllowed: {
+    code: 'internal_tool_not_allowed',
+    noMetric: true,
+    description: 'An internal-only tool was called from a context that cannot use internal tools.',
+  },
+  toolRestrictedThisTurn: {
+    code: 'tool_restricted_this_turn',
+    noMetric: true,
+    description: 'The tool exists but is not in the current turn allowlist.',
+  },
+  deniedByUserNegation: {
+    code: 'denied_by_user_negation',
+    metricName: 'user_negation_denied',
+    description: 'The user has an active standing negation for this tool family.',
+  },
+} as const satisfies Record<string, ErrorKindMeta>
+
+export type ToolAdmissionErrorKindKey = keyof typeof TOOL_ADMISSION_ERROR_KINDS
+export type ToolAdmissionErrorKind =
+  (typeof TOOL_ADMISSION_ERROR_KINDS)[ToolAdmissionErrorKindKey]['code']
+
+// ---------- action confirmation/control ----------
+
+export const ACTION_CONFIRMATION_ERROR_KINDS = {
+  deniedManualOnly: {
+    code: 'denied_manual_only',
+    noMetric: true,
+    description: 'The action confirmation policy requires the user to perform this action manually.',
+  },
+  deniedPendingConfirmation: {
+    code: 'denied_pending_confirmation',
+    noMetric: true,
+    description: 'The action requires explicit user confirmation before execution.',
+  },
+  confirmationDeniedByUser: {
+    code: 'confirmation_denied_by_user',
+    noMetric: true,
+    description: 'The user denied a pending action confirmation request.',
+  },
+  confirmationExpired: {
+    code: 'confirmation_expired',
+    noMetric: true,
+    description: 'The pending action confirmation request expired before user approval.',
+  },
+} as const satisfies Record<string, ErrorKindMeta>
+
+export type ActionConfirmationErrorKindKey = keyof typeof ACTION_CONFIRMATION_ERROR_KINDS
+export type ActionConfirmationErrorKind =
+  (typeof ACTION_CONFIRMATION_ERROR_KINDS)[ActionConfirmationErrorKindKey]['code']
+
+// ---------- specialist blueprint ----------
+
+export const SPECIALIST_BLUEPRINT_ERROR_KINDS = {
+  verbatimSourceUnavailable: {
+    code: 'verbatim_source_unavailable',
+    noMetric: true,
+    description: 'The propose_specialist_blueprint tool could not verify the current user text source.',
+  },
+  verbatimMismatch: {
+    code: 'verbatim_mismatch',
+    noMetric: true,
+    description: 'The propose_specialist_blueprint user_request_verbatim does not match the source user text.',
+  },
+  confirmedBlueprintImmutable: {
+    code: 'confirmed_blueprint_immutable',
+    noMetric: true,
+    description: 'The propose_specialist_blueprint tool attempted to overwrite an already confirmed blueprint.',
+  },
+} as const satisfies Record<string, ErrorKindMeta>
+
+export type SpecialistBlueprintErrorKindKey = keyof typeof SPECIALIST_BLUEPRINT_ERROR_KINDS
+export type SpecialistBlueprintErrorKind =
+  (typeof SPECIALIST_BLUEPRINT_ERROR_KINDS)[SpecialistBlueprintErrorKindKey]['code']
+
+// ---------- web research ----------
+
+export const WEB_RESEARCH_ERROR_KINDS = {
+  webSearchFailed: {
+    code: 'web_search_failed',
+    noMetric: true,
+    description: 'The web_search tool could not complete through its configured search backends.',
+  },
+  webFetchFailed: {
+    code: 'web_fetch_failed',
+    noMetric: true,
+    description: 'The web_fetch tool could not complete through its configured fetch/extract backends.',
+  },
+} as const satisfies Record<string, ErrorKindMeta>
+
+export type WebResearchErrorKindKey = keyof typeof WEB_RESEARCH_ERROR_KINDS
+export type WebResearchErrorKind =
+  (typeof WEB_RESEARCH_ERROR_KINDS)[WebResearchErrorKindKey]['code']
+
 // ---------- helpers ----------
 
 const ALL_REGISTERED_CODES: ReadonlySet<string> = new Set<string>([
   ...Object.values(ASK_USER_ERROR_KINDS).map((m) => m.code),
   ...Object.values(PROVIDER_ERROR_KINDS).map((m) => m.code),
+  ...Object.values(DETACHED_TASK_ERROR_KINDS).map((m) => m.code),
+  ...Object.values(SEND_IM_ERROR_KINDS).map((m) => m.code),
+  ...Object.values(TARGET_DOCUMENT_ERROR_KINDS).map((m) => m.code),
+  ...Object.values(BROWSER_TOOL_ERROR_KINDS).map((m) => m.code),
+  ...Object.values(TOOL_ADMISSION_ERROR_KINDS).map((m) => m.code),
+  ...Object.values(ACTION_CONFIRMATION_ERROR_KINDS).map((m) => m.code),
+  ...Object.values(SPECIALIST_BLUEPRINT_ERROR_KINDS).map((m) => m.code),
+  ...Object.values(WEB_RESEARCH_ERROR_KINDS).map((m) => m.code),
 ])
 
 /** True iff `kind` is a registered errorKind in either group. */
@@ -162,6 +431,30 @@ export function lookupErrorKindMeta(code: string): ErrorKindMeta | null {
     if (meta.code === code) return meta
   }
   for (const meta of Object.values(PROVIDER_ERROR_KINDS)) {
+    if (meta.code === code) return meta
+  }
+  for (const meta of Object.values(DETACHED_TASK_ERROR_KINDS)) {
+    if (meta.code === code) return meta
+  }
+  for (const meta of Object.values(SEND_IM_ERROR_KINDS)) {
+    if (meta.code === code) return meta
+  }
+  for (const meta of Object.values(TARGET_DOCUMENT_ERROR_KINDS)) {
+    if (meta.code === code) return meta
+  }
+  for (const meta of Object.values(BROWSER_TOOL_ERROR_KINDS)) {
+    if (meta.code === code) return meta
+  }
+  for (const meta of Object.values(TOOL_ADMISSION_ERROR_KINDS)) {
+    if (meta.code === code) return meta
+  }
+  for (const meta of Object.values(ACTION_CONFIRMATION_ERROR_KINDS)) {
+    if (meta.code === code) return meta
+  }
+  for (const meta of Object.values(SPECIALIST_BLUEPRINT_ERROR_KINDS)) {
+    if (meta.code === code) return meta
+  }
+  for (const meta of Object.values(WEB_RESEARCH_ERROR_KINDS)) {
     if (meta.code === code) return meta
   }
   return null

@@ -7,6 +7,12 @@
  * (rate_limited / denied_*), etc.
  */
 
+import {
+  ACTION_CONFIRMATION_ERROR_KINDS,
+  TOOL_ADMISSION_ERROR_KINDS,
+  WEB_RESEARCH_ERROR_KINDS,
+} from '../agent-control/contracts/error-kinds'
+
 export type ToolEnvelopeKind =
   | 'ok'
   | 'arg_error'
@@ -16,7 +22,7 @@ export type ToolEnvelopeKind =
   | 'upstream_error'
   | 'network_error'
   | 'denied_by_policy'
-  | 'denied_by_user_negation'
+  | typeof TOOL_ADMISSION_ERROR_KINDS.deniedByUserNegation.code
   | 'internal_error'
 
 export interface ToolResultEnvelope {
@@ -62,7 +68,7 @@ const EXPLICIT_KIND_MAP: Record<string, ToolEnvelopeKind> = {
   widget_not_found: 'not_found',
   detached_task_not_found: 'not_found',
   mcp_tool_unregistered: 'not_found',
-  tool_not_registered: 'not_found',
+  [TOOL_ADMISSION_ERROR_KINDS.toolNotRegistered.code]: 'not_found',
   no_driver_registered: 'not_found',
   detached_task_skill_not_loaded: 'not_found',
   detached_task_skill_action_unknown: 'not_found',
@@ -71,7 +77,8 @@ const EXPLICIT_KIND_MAP: Record<string, ToolEnvelopeKind> = {
   mcp_client_missing: 'upstream_error',
   mcp_tool_failed: 'upstream_error',
   clip_fetch_failed: 'upstream_error',
-  web_search_failed: 'upstream_error',
+  [WEB_RESEARCH_ERROR_KINDS.webSearchFailed.code]: 'upstream_error',
+  [WEB_RESEARCH_ERROR_KINDS.webFetchFailed.code]: 'upstream_error',
   present_file_failed: 'upstream_error',
   target_document_open_unavailable: 'upstream_error',
   target_document_save_unavailable: 'upstream_error',
@@ -85,17 +92,19 @@ const EXPLICIT_KIND_MAP: Record<string, ToolEnvelopeKind> = {
   // network_error — transport-level failure
   timeout: 'network_error',
   // denied_by_policy — authorization / safety gate refused
-  authorization_denied: 'denied_by_policy',
-  tool_restricted_this_turn: 'denied_by_policy',
-  internal_tool_not_allowed: 'denied_by_policy',
+  [TOOL_ADMISSION_ERROR_KINDS.authorizationDenied.code]: 'denied_by_policy',
+  [TOOL_ADMISSION_ERROR_KINDS.toolRestrictedThisTurn.code]: 'denied_by_policy',
+  [TOOL_ADMISSION_ERROR_KINDS.internalToolNotAllowed.code]: 'denied_by_policy',
+  [TOOL_ADMISSION_ERROR_KINDS.deniedByUserNegation.code]: 'denied_by_policy',
   detached_task_forbidden: 'denied_by_policy',
   blocked_config: 'denied_by_policy',
   blocked_external: 'denied_by_policy',
   command_high_risk_blocked: 'denied_by_policy',
-  denied_manual_only: 'denied_by_policy',
-  denied_pending_confirmation: 'denied_by_policy',
-  confirmation_denied_by_user: 'denied_by_policy',
-  confirmation_expired: 'denied_by_policy',
+  [ACTION_CONFIRMATION_ERROR_KINDS.deniedManualOnly.code]: 'denied_by_policy',
+  freeform_script_denied: 'denied_by_policy',
+  [ACTION_CONFIRMATION_ERROR_KINDS.deniedPendingConfirmation.code]: 'denied_by_policy',
+  [ACTION_CONFIRMATION_ERROR_KINDS.confirmationDeniedByUser.code]: 'denied_by_policy',
+  [ACTION_CONFIRMATION_ERROR_KINDS.confirmationExpired.code]: 'denied_by_policy',
   nested_child_run: 'denied_by_policy',
   detached_task_visibility_internal: 'denied_by_policy',
   path_outside_outputs: 'denied_by_policy',

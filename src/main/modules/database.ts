@@ -2678,8 +2678,8 @@ export class DatabaseManager {
     this.db.prepare(`
       INSERT INTO session_recall_metadata (
         conversation_id, lineage_root_id, resume_title, title, source_kind, source_id, thread_key,
-        user_id, channel_key, preview_text, latest_task_title, latest_task_summary, attachment_names_json, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        user_id, agent, channel_key, preview_text, latest_task_title, latest_task_summary, attachment_names_json, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(conversation_id) DO UPDATE SET
         lineage_root_id = excluded.lineage_root_id,
         resume_title = excluded.resume_title,
@@ -2688,6 +2688,7 @@ export class DatabaseManager {
         source_id = excluded.source_id,
         thread_key = excluded.thread_key,
         user_id = excluded.user_id,
+        agent = excluded.agent,
         channel_key = excluded.channel_key,
         preview_text = excluded.preview_text,
         latest_task_title = excluded.latest_task_title,
@@ -2703,6 +2704,7 @@ export class DatabaseManager {
       conversation.source_id,
       conversation.thread_key,
       conversation.user_id || null,
+      conversation.agent || null,
       channelKey,
       previewText ? previewText.slice(0, 280) : null,
       latestTaskTitle || null,

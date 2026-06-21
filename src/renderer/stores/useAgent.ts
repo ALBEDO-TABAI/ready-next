@@ -2426,13 +2426,19 @@ export const useAgent = create<AgentState>((set, get) => ({
             error: result.error || '发送失败',
             errorKind: result.errorKind || undefined,
           })
-          emitRendererAgentMetric('renderer_send_persistence_failed', {
-            scopeId: activeScopeId,
-            agent: activeAgentName,
-            errorKind: result.errorKind || 'unknown',
-            messageStatus: result.persistence?.message || null,
-            attachmentStatus: result.persistence?.attachments || null,
-          })
+          const messageStatus = result.persistence?.message || null
+          emitRendererAgentMetric(
+            messageStatus === 'persisted'
+              ? 'renderer_send_failed_after_persisted_message'
+              : 'renderer_send_persistence_failed',
+            {
+              scopeId: activeScopeId,
+              agent: activeAgentName,
+              errorKind: result.errorKind || 'unknown',
+              messageStatus,
+              attachmentStatus: result.persistence?.attachments || null,
+            },
+          )
           emitRendererAgentMetric('renderer_friendly_error_surfaced', {
             scopeId: activeScopeId,
             agent: activeAgentName,

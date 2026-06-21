@@ -47,9 +47,61 @@ test('redactHostPaths replaces /home/<name> with /home/<redacted>', () => {
   assert.doesNotMatch(out, /\/home\/bob/)
 })
 
+test('redactHostPaths replaces Windows drive-letter user home paths', () => {
+  const out = redactHostPaths('error in C:\\Users\\alice\\Ready\\secret.txt')
+  assert.match(out, /C:\\Users\\<redacted>\\Ready\\secret\.txt/)
+  assert.doesNotMatch(out, /C:\\Users\\alice/)
+
+  const lowerDrive = redactHostPaths('error in c:\\Users\\erin\\Ready\\secret.txt')
+  assert.match(lowerDrive, /c:\\Users\\<redacted>\\Ready\\secret\.txt/)
+  assert.doesNotMatch(lowerDrive, /c:\\Users\\erin/)
+})
+
+test('redactHostPaths replaces Windows root-backslash user home paths', () => {
+  const out = redactHostPaths('log: \\Users\\carol\\.ready\\state.json')
+  assert.match(out, /\\Users\\<redacted>\\\.ready\\state\.json/)
+  assert.doesNotMatch(out, /\\Users\\carol/)
+
+  const assigned = redactHostPaths('path=\\Users\\frank\\.ready\\state.json')
+  assert.match(assigned, /path=\\Users\\<redacted>\\\.ready\\state\.json/)
+  assert.doesNotMatch(assigned, /\\Users\\frank/)
+})
+
+test('redactHostPaths replaces JSON-escaped Windows user home paths', () => {
+  const drive = redactHostPaths('{"path":"C:\\\\Users\\\\alice\\\\Ready\\\\secret.txt"}')
+  assert.ok(drive.includes('C:\\\\Users\\\\<redacted>\\\\Ready\\\\secret.txt'))
+  assert.doesNotMatch(drive, /Users\\\\alice/)
+
+  const root = redactHostPaths('{"path":"\\\\Users\\\\carol\\\\.ready\\\\state.json"}')
+  assert.ok(root.includes('\\\\Users\\\\<redacted>\\\\.ready\\\\state.json'))
+  assert.doesNotMatch(root, /Users\\\\carol/)
+})
+
+test('redactHostPaths replaces USERPROFILE literal and runtime values', () => {
+  const previous = process.env.USERPROFILE
+  process.env.USERPROFILE = 'D:\\Profiles\\dana'
+  try {
+    const literal = redactHostPaths('path=%USERPROFILE%\\Ready\\secret')
+    assert.match(literal, /<userprofile>\\Ready\\secret/)
+    assert.doesNotMatch(literal, /%USERPROFILE%/)
+
+    const runtime = redactHostPaths('path=D:\\Profiles\\dana\\Ready\\secret')
+    assert.match(runtime, /<userprofile>\\Ready\\secret/)
+    assert.doesNotMatch(runtime, /D:\\Profiles\\dana/)
+
+    const escapedRuntime = redactHostPaths('{"path":"D:\\\\Profiles\\\\dana\\\\Ready\\\\secret"}')
+    assert.ok(escapedRuntime.includes('<userprofile>\\\\Ready\\\\secret'))
+    assert.doesNotMatch(escapedRuntime, /D:\\\\Profiles\\\\dana/)
+  } finally {
+    if (previous === undefined) delete process.env.USERPROFILE
+    else process.env.USERPROFILE = previous
+  }
+})
+
 test('redactHostPaths is a no-op for paths that contain no host-style segments', () => {
   assert.equal(redactHostPaths('hello world'), 'hello world')
   assert.equal(redactHostPaths(''), '')
+  assert.equal(redactHostPaths('relative\\Users\\alice\\file.txt'), 'relative\\Users\\alice\\file.txt')
 })
 
 test('executeRunShell redacts stdout before returning to the caller', async () => {

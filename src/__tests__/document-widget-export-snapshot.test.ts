@@ -2,11 +2,13 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
+import { JSDOM } from 'jsdom'
 import { buildWidgetExportSnapshot } from '../renderer/components/document/widget-export-snapshot'
 import { buildDocumentHtmlSnapshotExport } from '../shared/document-widget-html-export'
 import {
   getWidgetPersistenceKey,
   mergeWidgetStateMapIntoContent,
+  prepareSvgElementsForWidgetExport,
   renameWidgetFenceTitleInContent,
 } from '../renderer/components/document/widget-card-helpers'
 
@@ -87,6 +89,31 @@ describe('widget export snapshot helper', () => {
     assert.match(preloadSource, /contentBase64\?: string/)
     assert.match(mainSource, /contentBase64\?: string/)
     assert.match(mainSource, /Buffer\.from\(payload\.contentBase64, 'base64'\)/)
+  })
+
+  it('preserves inline svg namespaces for foreignObject image export', () => {
+    const dom = new JSDOM('<div class="widget-root"><svg viewBox="0 0 100 40"><line x1="0" y1="20" x2="100" y2="20" stroke="red" /><text x="10" y="18">label</text></svg></div>')
+
+    try {
+      const root = dom.window.document.querySelector('.widget-root') as HTMLElement
+      prepareSvgElementsForWidgetExport(root)
+
+      const exportSvg = [
+        '<svg xmlns="http://www.w3.org/2000/svg">',
+        '<foreignObject width="100%" height="100%">',
+        `<div xmlns="http://www.w3.org/1999/xhtml">${root.outerHTML}</div>`,
+        '</foreignObject>',
+        '</svg>',
+      ].join('')
+      const parsed = new dom.window.DOMParser().parseFromString(exportSvg, 'image/svg+xml')
+      const nestedSvg = parsed.querySelector('foreignObject svg')
+      const nestedLine = parsed.querySelector('foreignObject line')
+
+      assert.equal(nestedSvg?.namespaceURI, 'http://www.w3.org/2000/svg')
+      assert.equal(nestedLine?.namespaceURI, 'http://www.w3.org/2000/svg')
+    } finally {
+      dom.window.close()
+    }
   })
 
   it('writes widget_state into the saved widget fence content', () => {

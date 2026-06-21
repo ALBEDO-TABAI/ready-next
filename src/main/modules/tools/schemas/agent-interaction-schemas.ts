@@ -14,7 +14,9 @@
 import type { ZodObject, ZodRawShape } from 'zod'
 
 import { askUserQuestionsSchema } from '../builtins/ask-user-questions'
+import { proposeSpecialistBlueprintSchema } from '../builtins/propose-specialist-blueprint'
 
 export const AGENT_INTERACTION_SCHEMAS: Record<string, ZodObject<ZodRawShape>> = {
   ask_user_questions: askUserQuestionsSchema as unknown as ZodObject<ZodRawShape>,
+  propose_specialist_blueprint: proposeSpecialistBlueprintSchema as unknown as ZodObject<ZodRawShape>,
 }

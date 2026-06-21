@@ -4,6 +4,7 @@ import { executeBrowserTool } from './browser-tools'
 import { getBrowserWriteLeaseService } from '../browser-engine/agent-browser-lease-singleton'
 import { runUnderUserViewLease } from '../browser-engine/agent-browser-lane'
 import type { BrowserLeaseGate } from '../browser-engine/agent-browser-lease-gate'
+import { resolveBrowserToolSurfaceBinding } from '../browser-engine/browser-surface-binding'
 import { createRotatingLogger } from '../../utils/rotating-logger'
 import { BrowserAgentRuntimeAdapter } from '../browser-engine/agent-runtime-adapter'
 import { BrowserPageStateService } from '../browser-engine/page-state-service'
@@ -775,6 +776,15 @@ export class BrowserAgentRunner {
   ): Promise<string> {
     if (!options?.silent) {
       this.emitToolEvent?.('tool_use', `${toolName}(${JSON.stringify(args).slice(0, 160)})`)
+    }
+    const surfaceBinding = resolveBrowserToolSurfaceBinding({
+      toolName,
+      args,
+      dispatch: 'browser-agent-runner',
+      hasRunnerLeaseGate: Boolean(this.leaseGate),
+    })
+    if (!surfaceBinding.ok) {
+      return JSON.stringify(surfaceBinding.error)
     }
     // Lane-A: refresh the user-view lease before each tool so a long run does
     // not expire mid-loop, then gate the call through the lease.

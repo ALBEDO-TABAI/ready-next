@@ -301,7 +301,12 @@ function resolveTerminalInteractionState(reason?: ScopeRunSummary['terminalReaso
   if (reason === 'blocked_config' || reason === 'blocked_external' || reason === 'checkpoint_user_input') {
     return 'awaiting_clarification'
   }
-  if (reason === 'blocked_tool_error' || reason === 'checkpoint_budget' || reason === 'checkpoint_background') {
+  if (
+    reason === 'blocked_tool_error'
+    || reason === 'checkpoint_budget'
+    || reason === 'checkpoint_background'
+    || reason === 'manual_suspend'
+  ) {
     return 'suspended'
   }
   return null
@@ -347,7 +352,7 @@ function resolveWaitingFor(
 function resolveTerminalStatus(reason?: ScopeRunSummary['terminalReason'] | null): TaskProjectionRecord['status'] | null {
   if (!reason) return null
   if (reason === 'done') return 'completed'
-  if (reason === 'cancelled_user' || reason === 'cancelled_runtime') return 'killed'
+  if (reason === 'cancelled_user' || reason === 'cancelled_runtime' || reason === 'main_no_progress_timeout') return 'killed'
   if (
     reason === 'failed_skill'
     || reason === 'resume_launch_failed'
@@ -363,7 +368,13 @@ function resolveTerminalStatus(reason?: ScopeRunSummary['terminalReason'] | null
   return 'blocked'
 }
 
-function resolveStatus(summary: ScopeRunSummary): TaskProjectionRecord['status'] {
+function resolveStatus(
+  summary: ScopeRunSummary,
+  previous?: TaskProjectionRecord | null,
+): TaskProjectionRecord['status'] {
+  if (summary.terminalReason === 'manual_suspend' && previous?.status === 'recoverable_paused') {
+    return 'recoverable_paused'
+  }
   const terminalStatus = resolveTerminalStatus(summary.terminalReason)
   if (terminalStatus) return terminalStatus
   const interactionState = resolveInteractionState(summary)
@@ -400,6 +411,11 @@ function resolveTerminalResumableActions(
     return ['continue', 'cancel']
   }
   if (reason === 'blocked_tool_error') return ['retry', 'cancel']
+  if (reason === 'manual_suspend') {
+    return summary.taskContinuation || previous?.continuationRef
+      ? ['continue', 'cancel']
+      : ['cancel']
+  }
   if (reason === 'checkpoint_budget' && (summary.taskContinuation || previous?.continuationRef)) {
     return ['continue', 'retry', 'cancel']
   }
@@ -463,6 +479,7 @@ function resolveTerminalBlockedReason(reason?: ScopeRunSummary['terminalReason']
   if (reason === 'no_artifact') return '没有找到可发送文件'
   if (reason === 'proof_gap') return '缺少完成证据'
   if (reason === 'checkpoint_user_input') return '等待补充信息'
+  if (reason === 'manual_suspend') return '任务已暂停，等待继续。'
   if (reason === 'checkpoint_budget') return '预算已暂停'
   if (reason === 'checkpoint_background') return '后台任务仍在运行'
   return null
@@ -474,7 +491,9 @@ function resolveContinuationRef(
   previous?: TaskProjectionRecord | null,
 ): ScopeRunSummary['taskContinuation'] {
   if (summary.taskContinuation) return summary.taskContinuation
-  if (status === 'blocked' || status === 'failed') return previous?.continuationRef || null
+  if (status === 'blocked' || status === 'failed' || status === 'recoverable_paused') {
+    return previous?.continuationRef || null
+  }
   return null
 }
 
@@ -732,7 +751,7 @@ export function buildTaskProjectionRecord(
       : summary.progress,
   }
 
-  const status = resolveStatus(effectiveSummary)
+  const status = resolveStatus(effectiveSummary, previous)
   const blockedReasonWasCleared = truthPatch?.blockedReason === null || summary.blockedReason === null
   // Auto-clear stale blocker when frame explicitly says no stale blocker
   // exists for this skill — only when there is also no fresh blocker on

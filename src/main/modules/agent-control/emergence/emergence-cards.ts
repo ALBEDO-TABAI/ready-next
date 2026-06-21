@@ -1,4 +1,6 @@
 /**
+ * P5d/C26 unwired: not in production driver path.
+ *
  * EP2-E1 — emergence kernel v1 (10 篇 §3): three intent-density card types
  * extracted from structured task/knowledge signals. Deterministic, zero LLM.
  *

@@ -9,6 +9,7 @@ import { logAgentMetric } from '../metrics'
 import { emitSkillReferenceInlined } from './skill-reference-inlined-bridge'
 import { isRetryOnlyTurn } from './skill-detection-inputs'
 import { TOOL_ERROR_METRICS } from '../tools-runtime/tool-error-metrics'
+import { redactModelVisibleToolText } from '../tools-runtime/model-visible-tool-output'
 
 /**
  * Filenames we try to read from the skill's managedPath when inlining a
@@ -363,8 +364,10 @@ export class SkillContextOrchestrator {
       params.emitToolAction(tool.name || '', args)
       params.emitOutput(`${tool.name}(${JSON.stringify(args)})`, 'tool_use')
       const result = await params.executeTool(tool.name || '', args)
-      params.emitOutput(result.text.slice(0, 600), 'tool_result')
-      const skillContent = this.extractSkillReferenceContent(result.text).slice(
+      const modelVisibleResultText = redactModelVisibleToolText(result.text)
+      params.emitOutput(modelVisibleResultText.slice(0, 600), 'tool_result')
+      const extractedSkillContent = this.extractSkillReferenceContent(modelVisibleResultText)
+      const skillContent = extractedSkillContent.slice(
         0,
         REFERENCE_SKILL_INLINE_CAP_CHARS,
       )
@@ -378,7 +381,7 @@ export class SkillContextOrchestrator {
         ].filter(Boolean).join('\n'),
       })
       const fallbackBytesInjected = skillContent.length
-      const fallbackTruncated = skillContent.length < this.extractSkillReferenceContent(result.text).length
+      const fallbackTruncated = skillContent.length < extractedSkillContent.length
       logAgentMetric('skill_reference_inlined', {
         skillId: skill.id,
         source: 'tool_fallback',
@@ -453,7 +456,7 @@ export class SkillContextOrchestrator {
       .filter((name): name is string => typeof name === 'string' && name.length > 0)
     const longTaskGuidance = childLoopToolNames.length > 0
       ? `本技能的长任务已由 Ready child-loop 接管；启动或续跑时优先直接调用 ${childLoopToolNames.join(' / ')}，不要用 skill_start_detached 包一层。`
-      : '如需启动耗时较长的技能 action，用 skill_start_detached。'
+      : '如需执行脚本或观察产物状态，只使用本轮已开放的技能工具；不要假设存在后台 detached 启动工具。'
     const header = `已加载技能「${skill.name}」。请直接按此方法论输出结果。如需向用户追问细节，用 skill_ask_user；如需执行脚本或读写文件，用 skill_run_shell / skill_write_artifact / skill_read_artifact；${longTaskGuidance}`
     const goal = skill.description ? `技能目标：${skill.description}` : ''
     return [header, goal, '技能说明正文：', docText].filter(Boolean).join('\n')

@@ -13,6 +13,7 @@ interface MetadataRow {
   source_id: string
   thread_key: string
   user_id: string | null
+  agent: string | null
   channel_key: string
   preview_text: string | null
   latest_task_title: string | null
@@ -178,6 +179,7 @@ function createMetadata(params: Partial<MetadataRow> & Pick<MetadataRow, 'conver
     source_id: sourceId,
     thread_key: params.thread_key || params.conversation_id,
     user_id: params.user_id ?? null,
+    agent: params.agent ?? 'butler',
     channel_key: params.channel_key || `${sourceKind}:${sourceKind === 'local' ? 'app' : sourceId}`,
     preview_text: params.preview_text ?? null,
     latest_task_title: params.latest_task_title ?? null,

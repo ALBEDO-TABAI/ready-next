@@ -23,4 +23,5 @@ export type AbortInitiator =
   | 'host_unavailable'
   | 'budget'
   | 'error'
+  | 'manual_suspend'
   | 'process_exit'

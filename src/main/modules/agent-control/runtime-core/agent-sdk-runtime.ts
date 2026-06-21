@@ -36,14 +36,18 @@ import type {
   TaskProjectionRecord,
   TurnTranscriptEvent,
 } from '../contracts/run-contracts'
+import {
+  TARGET_DOCUMENT_ERROR_KINDS,
+  TOOL_ADMISSION_ERROR_KINDS,
+} from '../contracts/error-kinds'
 import type { CheckInRecord } from '../quality/task-adjudicator'
 import type { AbortInitiator } from '../contracts/run-contracts-internal'
 import type { ScopeRunEventPayload } from '../contracts/types'
 import type { TurnTerminalReason } from './turn-frame'
 import type { ContinuationIntent, ContinuationState } from '../contracts/continuation-state'
 import {
-  resumeSkillChildRun,
-  waitForSkillChildRunClose,
+  resumeSkillChildRun as defaultResumeSkillChildRun,
+  waitForSkillChildRunClose as defaultWaitForSkillChildRunClose,
 } from '../skills/skill-child-runner'
 import {
   isCompletedChildCloseStatus,
@@ -57,6 +61,10 @@ import {
   buildTextToolResultMessage,
   parseTextToolBridgeResponse,
 } from '../../claude-bridge/tool-bridge'
+import {
+  hasExplicitDocumentWidgetCreateIntent,
+  inferDocumentWidgetTaskKind,
+} from '../../claude-bridge/tool-policy-heuristics'
 import {
   readAIConfigDetailed,
   type AIConfigLoad,
@@ -75,6 +83,9 @@ import {
   DEFAULT_CONTEXT_WINDOW,
   resolveModelContextWindow,
 } from '../../../../shared/context-budget-types'
+import type {
+  SpecialistBlueprintSourceMessageUnavailableReason,
+} from '../../../../shared/agent-specialist-blueprint'
 import {
   applyProviderRequestPatch,
   applyProviderResponsePatch,
@@ -109,6 +120,15 @@ import {
   type SkillToolAuthorization,
 } from '../skills/skill-tool-authorization'
 import { resolveCapabilityResolution } from '../domain-adapters/capability-resolver'
+import { resolveActiveSkillAllowedTools } from '../domain-adapters/run-capability-controller'
+import { buildRequestEnvelope } from '../contracts/request-envelope'
+import { classifyIntent } from '../intent-classifier'
+import { resolveIntentCapabilityGroupModes } from '../execution-intent-resolver'
+import {
+  applyMapSemanticIntentToIntentClassification,
+  classifyMapSemanticIntentFallback,
+} from '../map-semantic-intent'
+import { resolvePolicyConflictFacts } from '../policy-arbitration'
 import {
   resolveBrowserCollectionIntent,
   isBrowserCollectionSubsetTool,
@@ -121,10 +141,11 @@ import { classifyFollowupIntent, followupConsultsRecalledContext, detectNegation
 import { isRetryOnlyTurn } from '../skills/skill-detection-inputs'
 import { wrapRunMetaRepositoryWithCloseoutSnapshot } from '../task-projection/run-meta-snapshot'
 import { recordNegations, releaseNegations, activeNegations } from '../safety/negation-state'
+import { stageSpecialistTaskEvolutionProposal } from '../agents/specialist-task-evolution-proposals'
 import { detectVerbatimGrants, recordVerbatimGrant, revokeAuthorizationsForCategories, authCategoriesForNegationFamilies } from '../safety/authorization-fact-store'
 import { classifyBrowserToolCall } from '../../browser-engine/browser-tool-write-classification'
 import { createBrowserTurnLease, type BrowserTurnLease } from '../../browser-engine/agent-browser-turn-lease'
-import { filterToolsByVisionCapability } from '../tools-runtime/tool-gateway'
+import { filterToolsByAllowedTools, filterToolsByVisionCapability } from '../tools-runtime/tool-gateway'
 import {
   buildToolRuntimeContext,
   toToolExecutorContext,
@@ -144,6 +165,10 @@ import {
   normalizeToolExecutionOutput,
   type ToolExecutionOutput,
 } from '../tools-runtime/tool-result-types'
+import {
+  buildModelVisibleToolResultPayload,
+  redactModelVisibleToolText,
+} from '../tools-runtime/model-visible-tool-output'
 import {
   collectToolOutputProofs,
   createTaskProofSink,
@@ -306,6 +331,8 @@ interface ToolBridgeRuntimeContext {
   taskId: string
   sessionId?: string
   currentUserText?: string
+  sourceMessageId?: string | null
+  sourceMessageUnavailableReason?: SpecialistBlueprintSourceMessageUnavailableReason | null
   requestEnvelope?: unknown
   signal: AbortSignal
   allowedToolNames: string[]
@@ -368,6 +395,7 @@ interface RunMetaRepositoryLike {
 interface AgentSdkExecutionOptions {
   taskId?: string
   publicSessionId?: string
+  sourceMessageId?: string | null
   requestEnvelope?: unknown
   intentClassification?: unknown
   budget?: RunBudgetSeed | null
@@ -449,6 +477,8 @@ export interface AgentSdkRuntimeDeps {
     timeoutMs?: number,
   ) => Promise<Response>
   skillContextOrchestrator?: SkillContextOrchestratorLike | null
+  resumeSkillChildRun?: typeof defaultResumeSkillChildRun
+  waitForSkillChildRunClose?: typeof defaultWaitForSkillChildRunClose
   /** EP2-I1 — task-ref facts for state-first follow-up routing (05 §2.1).
    *  Absent = legacy text-recall behavior (facts unavailable). */
   getScopeTaskRefs?: (scopeId: string) => FollowupTaskRef[]
@@ -464,6 +494,25 @@ function messageToText(message: RunMessage): string {
     .map((block) => typeof block.text === 'string' ? block.text : '')
     .join('\n')
     .trim()
+}
+
+function resolveSourceMessageProvenance(params: {
+  sourceMessageId?: string | null
+  requestEnvelope?: unknown
+}): {
+  sourceMessageId: string | null
+  sourceMessageUnavailableReason: SpecialistBlueprintSourceMessageUnavailableReason | null
+} {
+  const sourceMessageId = typeof params.sourceMessageId === 'string' && params.sourceMessageId.trim()
+    ? params.sourceMessageId.trim()
+    : null
+  if (sourceMessageId) {
+    return { sourceMessageId, sourceMessageUnavailableReason: null }
+  }
+  if (params.requestEnvelope && typeof params.requestEnvelope === 'object' && !Array.isArray(params.requestEnvelope)) {
+    return { sourceMessageId: null, sourceMessageUnavailableReason: 'request_envelope_missing_message_id' }
+  }
+  return { sourceMessageId: null, sourceMessageUnavailableReason: 'message_id_unavailable' }
 }
 
 function messageHasMediaAttachment(message: RunMessage): boolean {
@@ -980,6 +1029,76 @@ function parseEnvelopeResourceReferences(envelope: unknown): {
   return { primaryInstruction, resources }
 }
 
+function resolveAuthorizationPreferredToolNames(authorization: SkillToolAuthorization): string[] | null {
+  if (authorization.mode !== 'selected') return null
+  return Array.from(new Set([
+    ...Array.from(authorization.allowedTypedActions),
+    ...Array.from(authorization.allowedPrimitives),
+  ]))
+}
+
+interface SdkDefaultIntentSurface {
+  intentGroupModes: Partial<Record<CapabilityGroupId, boolean>>
+  forceDocumentTool: boolean
+  allowBrowserTools: boolean
+  preferredSkillToolNames: string[] | null
+  documentWidgetTaskKind: ReturnType<typeof inferDocumentWidgetTaskKind>
+  explicitWidgetCreateIntent: boolean
+}
+
+function resolveSdkDefaultIntentSurface(params: {
+  message: RunMessage
+  requestEnvelope?: unknown
+  authorization: SkillToolAuthorization
+  browserDecisionMode: BrowserTaskDecisionMode
+}): SdkDefaultIntentSurface {
+  const envelopeRefs = parseEnvelopeResourceReferences(params.requestEnvelope)
+  const userInstructionText = envelopeRefs.primaryInstruction || primaryInstructionText(params.message)
+  const envelopeRecord = asRecord(params.requestEnvelope)
+  const environmentHints = asRecord(envelopeRecord?.environmentHints)
+  const rawUserText = stringField(envelopeRecord, 'rawUserText') || messageToText(params.message)
+  const hasWidgetTargetContext = environmentHints?.hasWidgetTargetContext === true
+    || envelopeRefs.resources.some((resource) => resource.kind === 'widget_target' || resource.source === 'widget_target')
+  const explicitWidgetCreateIntent = hasExplicitDocumentWidgetCreateIntent(userInstructionText)
+  const documentWidgetTaskKind = hasWidgetTargetContext && !explicitWidgetCreateIntent
+    ? 'update'
+    : inferDocumentWidgetTaskKind(userInstructionText)
+  const preferredSkillToolNames = resolveAuthorizationPreferredToolNames(params.authorization)
+  const requestEnvelope = buildRequestEnvelope({ userText: userInstructionText })
+  const mapSemanticIntent = classifyMapSemanticIntentFallback(userInstructionText)
+  const intentClassification = applyMapSemanticIntentToIntentClassification(
+    classifyIntent(requestEnvelope),
+    mapSemanticIntent,
+  )
+
+  const intentModes = resolveIntentCapabilityGroupModes({
+    hasTools: true,
+    capabilityProfile: 'local_chat',
+    contextualUserInput: userInstructionText,
+    userInstructionText,
+    intentClassification,
+    hasDocumentEnvironment: rawUserText.includes('## 环境信息') && rawUserText.includes('当前模式: 文档模式'),
+    hasWidgetTargetContext,
+    explicitWidgetCreateIntent,
+    documentWidgetTaskKind,
+    preferredSkillToolNames,
+    mapSemanticIntent,
+  })
+
+  return {
+    intentGroupModes: intentModes.intentGroupModes,
+    forceDocumentTool: intentModes.forceDocumentTool,
+    allowBrowserTools:
+      params.browserDecisionMode === 'browser_workflow'
+      || params.browserDecisionMode === 'browser_upload_workflow'
+      || intentModes.intentGroupModes.browser_interaction === true
+      || intentModes.intentGroupModes.browser_content_tasks === true,
+    preferredSkillToolNames,
+    documentWidgetTaskKind,
+    explicitWidgetCreateIntent,
+  }
+}
+
 function findAttachmentByMention(
   attachments: Array<{ name: string; path: string }>,
   mention: string,
@@ -1153,7 +1272,7 @@ function createPreservedContentViolationOutput(
     {
       shape: 'json',
       data: {
-        errorKind: 'target_document_preserved_content_missing',
+        errorKind: TARGET_DOCUMENT_ERROR_KINDS.preservedContentMissing.code,
         targetPath: guard.targetPath,
         missingSnippets: missingSnippets.slice(0, 6),
       },
@@ -1886,16 +2005,15 @@ function usageFromModelResponse(response: ModelResponse | undefined): ReadyAgent
   }
 }
 
+function stringifyModelVisibleFunctionResult(output: unknown): string {
+  const text = typeof output === 'string'
+    ? output
+    : JSON.stringify(output || '')
+  return redactModelVisibleToolText(text)
+}
+
 function stringifyToolResult(output: ToolExecutionOutput): string {
-  const normalized = normalizeToolExecutionOutput(output)
-  return JSON.stringify({
-    text: normalized.text,
-    shape: normalized.shape,
-    data: normalized.data,
-    projectionPatch: normalized.projectionPatch,
-    framePatch: normalized.framePatch,
-    interactionHint: normalized.interactionHint,
-  })
+  return JSON.stringify(buildModelVisibleToolResultPayload(output))
 }
 
 function readStructuredResultRecord(output: ToolExecutionOutput): Record<string, unknown> {
@@ -1930,9 +2048,9 @@ function terminalFailureReasonFromToolFailure(
   if (
     errorKind === 'sidecar_unavailable'
     || errorKind === 'channel_not_ready'
-    || errorKind === 'tool_not_registered'
-    || errorKind === 'tool_restricted_this_turn'
-    || errorKind === 'authorization_denied'
+    || errorKind === TOOL_ADMISSION_ERROR_KINDS.toolNotRegistered.code
+    || errorKind === TOOL_ADMISSION_ERROR_KINDS.toolRestrictedThisTurn.code
+    || errorKind === TOOL_ADMISSION_ERROR_KINDS.authorizationDenied.code
   ) {
     return 'tool_unavailable'
   }
@@ -2344,7 +2462,7 @@ function turnTerminalReasonFromChildClose(close: SkillChildCloseEvent): TurnTerm
       return 'resume_launch_failed'
     case 'persistence_failed':
       return 'persistence_failed'
-    case 'tool_not_registered':
+    case TOOL_ADMISSION_ERROR_KINDS.toolNotRegistered.code:
     case 'input_validation':
       return 'blocked_tool_error'
     case 'process_restarted':
@@ -2360,7 +2478,7 @@ function sdkStatusFromTerminalReason(
   reason: TurnTerminalReason,
 ): 'done' | 'error' | 'cancelled' | 'checkpoint' {
   if (reason === 'done') return 'done'
-  if (reason === 'cancelled_user' || reason === 'cancelled_runtime') return 'cancelled'
+  if (reason === 'cancelled_user' || reason === 'cancelled_runtime' || reason === 'main_no_progress_timeout') return 'cancelled'
   if (
     reason === 'failed_skill'
     || reason === 'resume_launch_failed'
@@ -2382,6 +2500,7 @@ function isCheckpointTerminalReason(reason: TurnTerminalReason): boolean {
     || reason === 'checkpoint_background'
     || reason === 'checkpoint_user_input'
     || reason === 'checkpoint_steered'
+    || reason === 'manual_suspend'
 }
 
 function summarizeChildResume(
@@ -2585,9 +2704,7 @@ function modelInputToOpenAIChatMessages(input: ModelRequest['input']): Array<Rec
       continue
     }
     if (item.type === 'function_call_result') {
-      const output = typeof item.output === 'string'
-        ? item.output
-        : JSON.stringify(item.output || '')
+      const output = stringifyModelVisibleFunctionResult(item.output)
       messages.push({
         role: 'tool',
         tool_call_id: String(item.callId || item.call_id || item.id || ''),
@@ -2629,9 +2746,7 @@ function modelInputToOpenAIResponsesInput(input: ModelRequest['input']): Array<R
       continue
     }
     if (item.type === 'function_call_result') {
-      const output = typeof item.output === 'string'
-        ? item.output
-        : JSON.stringify(item.output || '')
+      const output = stringifyModelVisibleFunctionResult(item.output)
       items.push({
         type: 'function_call_output',
         call_id: String(item.callId || item.call_id || item.id || ''),
@@ -3033,9 +3148,7 @@ function modelInputToAnthropicMessages(input: ModelRequest['input']): Array<Reco
       continue
     }
     if (item.type === 'function_call_result') {
-      const output = typeof item.output === 'string'
-        ? item.output
-        : JSON.stringify(item.output || '')
+      const output = stringifyModelVisibleFunctionResult(item.output)
       messages.push({
         role: 'user',
         content: [{
@@ -3250,7 +3363,7 @@ function formatToolCallTrace(toolName: string, args: Record<string, unknown>): s
 
 function formatToolResultTrace(toolName: string, output: ToolExecutionOutput): string {
   const normalized = normalizeToolExecutionOutput(output)
-  const text = String(normalized.text || '').trim()
+  const text = redactModelVisibleToolText(String(normalized.text || '')).trim()
   return text ? `${toolName}: ${text.slice(0, 240)}` : `${toolName}: 已完成`
 }
 
@@ -3265,6 +3378,8 @@ export class AgentSdkRuntime extends EventEmitter {
   private readonly executeToolCall: NonNullable<AgentSdkRuntimeDeps['executeToolCall']>
   private readonly fetchWithTimeout: NonNullable<AgentSdkRuntimeDeps['fetchWithTimeout']>
   private readonly skillContextOrchestrator: SkillContextOrchestratorLike | null
+  private readonly resumeSkillChildRun: typeof defaultResumeSkillChildRun
+  private readonly waitForSkillChildRunClose: typeof defaultWaitForSkillChildRunClose
   private browserController: BrowserController | null = null
   private sidecarManager: SidecarManager | null = null
   private runtime: AgentControlRuntime | null = null
@@ -3291,6 +3406,8 @@ export class AgentSdkRuntime extends EventEmitter {
     this.executeToolCall = deps.executeToolCall || executeReadyToolCall
     this.fetchWithTimeout = deps.fetchWithTimeout || defaultFetchWithTimeout
     this.skillContextOrchestrator = deps.skillContextOrchestrator || null
+    this.resumeSkillChildRun = deps.resumeSkillChildRun || defaultResumeSkillChildRun
+    this.waitForSkillChildRunClose = deps.waitForSkillChildRunClose || defaultWaitForSkillChildRunClose
     this.getScopeTaskRefs = deps.getScopeTaskRefs || null
     this.listToolDefinitionsForTurn = deps.listToolDefinitions || ((params) =>
       this.listDefaultToolDefinitionsForTurn(params))
@@ -3368,7 +3485,10 @@ export class AgentSdkRuntime extends EventEmitter {
     checkIn: CheckInRecord
     projection: TaskProjectionRecord
     now: Date
+    terminalStatus?: string | null
+    terminalReason?: string | null
   }): void {
+    this.stageSpecialistTaskEvolutionFromCheckIn(input)
     if (input.checkIn.blockers.length === 0) return
     const continuationRef = input.projection.continuationRef && typeof input.projection.continuationRef === 'object'
       ? input.projection.continuationRef
@@ -3379,6 +3499,45 @@ export class AgentSdkRuntime extends EventEmitter {
       now: input.now,
     })
     for (const signal of signals) this.writeSiteCardLearningSignal(signal, 'checkin')
+  }
+
+  private stageSpecialistTaskEvolutionFromCheckIn(input: {
+    checkIn: CheckInRecord
+    projection: TaskProjectionRecord
+    now: Date
+    terminalStatus?: string | null
+    terminalReason?: string | null
+  }): void {
+    try {
+      const store = this.runtime?.getBeliefCardStore?.()
+      const registry = this.runtime?.getAgentRegistry?.()
+      const proposalStore = this.runtime?.getSpecialistContentEditProposalStore?.()
+      if (!store || !registry || !proposalStore) return
+      const result = stageSpecialistTaskEvolutionProposal({
+        registry,
+        store,
+        proposalStore,
+        now: input.now,
+      }, {
+        projection: input.projection,
+        checkIn: input.checkIn,
+        terminalStatus: input.terminalStatus ?? null,
+        terminalReason: input.terminalReason ?? null,
+      })
+      logAgentMetric('specialist_task_evolution_proposal', {
+        taskId: input.projection.taskId,
+        ownerAgentId: input.projection.ownerAgentId ?? null,
+        status: result.status,
+        reason: result.status === 'skipped' ? result.reason : null,
+        proposalId: result.proposal?.proposalId ?? null,
+      })
+    } catch (error) {
+      logAgentMetric('specialist_task_evolution_proposal_failed', {
+        taskId: input.projection.taskId,
+        ownerAgentId: input.projection.ownerAgentId ?? null,
+        error: error instanceof Error ? error.message : String(error),
+      })
+    }
   }
 
   private learnSiteCardFromToolFailure(
@@ -3498,6 +3657,21 @@ export class AgentSdkRuntime extends EventEmitter {
     requestEnvelope?: unknown
   }): ToolDefinition[] {
     const browserDecisionMode = resolveBrowserDecisionMode(params.message, params.browserHostAvailable)
+    const sdkIntentSurface = resolveSdkDefaultIntentSurface({
+      message: params.message,
+      requestEnvelope: params.requestEnvelope,
+      authorization: params.authorization,
+      browserDecisionMode,
+    })
+    const policyConflict = resolvePolicyConflictFacts({
+      forceDocumentTool: sdkIntentSurface.forceDocumentTool,
+      allowBrowserTools: sdkIntentSurface.allowBrowserTools,
+      preferredSkillToolNames: sdkIntentSurface.preferredSkillToolNames,
+      browserDecisionMode,
+      documentWidgetTaskKind: sdkIntentSurface.documentWidgetTaskKind,
+      explicitWidgetCreateIntent: sdkIntentSurface.explicitWidgetCreateIntent,
+    })
+    const effectiveBrowserDecisionMode = policyConflict.demotedBrowserDecisionMode || browserDecisionMode
     // WP1: decouple browser collection exposure from the deterministic workflow
     // decision. Expose the browser groups (via intentGroupModes, WITHOUT changing
     // the decision mode) when this turn — or a recent turn — shows browser
@@ -3517,13 +3691,14 @@ export class AgentSdkRuntime extends EventEmitter {
       params.browserHostAvailable &&
       browserDecisionMode === 'free_tool_loop' &&
       !localSendImIntent &&
-      !suppressBrowserContentTasks &&
-      (msgIntent || params.recentCollectionIntent === true)
+      (msgIntent || params.recentCollectionIntent === true) &&
+      !suppressBrowserContentTasks
     const batchCollectionExposure = collectionExposure && (msgBatchIntent || params.recentBatchCollectionIntent === true)
     appendToolCapabilityLog([
       '[collection_exposure]',
       `host=${params.browserHostAvailable}`,
       `mode=${browserDecisionMode}`,
+      `effectiveMode=${effectiveBrowserDecisionMode}`,
       `msgIntent=${msgIntent}`,
       `recentIntent=${params.recentCollectionIntent === true}`,
       `batchIntent=${msgBatchIntent}`,
@@ -3533,19 +3708,27 @@ export class AgentSdkRuntime extends EventEmitter {
       `exposure=${collectionExposure}`,
       `batchExposure=${batchCollectionExposure}`,
     ].join(' '))
+    const browserConflictGroupModes = policyConflict.demotedBrowserDecisionMode
+      ? { browser_interaction: false, browser_content_tasks: false }
+      : {}
+    const intentGroupModes = {
+      ...sdkIntentSurface.intentGroupModes,
+      ...(collectionExposure
+        ? { browser_interaction: true, browser_content_tasks: true }
+        : suppressBrowserContentTasks
+          ? { browser_content_tasks: false }
+          : {}),
+      ...browserConflictGroupModes,
+    }
     const capabilityResolution = resolveCapabilityResolution({
       config: params.config,
       profile: 'local_chat',
-      browserDecisionMode,
+      browserDecisionMode: effectiveBrowserDecisionMode,
       runtimeAvailability: {
         browserHostAvailable: params.browserHostAvailable,
         feishuConnected: params.feishuConnected,
       },
-      intentGroupModes: collectionExposure
-        ? { browser_interaction: true, browser_content_tasks: true }
-        : suppressBrowserContentTasks
-          ? { browser_content_tasks: false }
-        : undefined,
+      intentGroupModes,
     })
     appendToolCapabilityLog([
       '[tool_capability]',
@@ -3575,6 +3758,16 @@ export class AgentSdkRuntime extends EventEmitter {
         if (batchCollectionExposure) return isBrowserBatchCollectionWorkflowTool(name)
         return isBrowserCollectionSubsetTool(name)
       })
+    }
+    const fallbackSkillAllowedTools =
+      params.authorization.mode === 'selected'
+      && sdkIntentSurface.preferredSkillToolNames
+      && sdkIntentSurface.preferredSkillToolNames.length > 0
+        ? sdkIntentSurface.preferredSkillToolNames
+        : null
+    const activeSkillAllowedTools = resolveActiveSkillAllowedTools(params.authorization) || fallbackSkillAllowedTools
+    if (activeSkillAllowedTools) {
+      definitions = filterToolsByAllowedTools(definitions, activeSkillAllowedTools)
     }
     return filterToolsByVisionCapability(
       definitions as unknown as Array<Record<string, unknown>>,
@@ -3620,7 +3813,11 @@ export class AgentSdkRuntime extends EventEmitter {
         ? 'cancelled_user'
         : initiator === 'process_exit'
           ? 'process_exit'
-          : 'cancelled_runtime'
+          : initiator === 'manual_suspend'
+            ? 'manual_suspend'
+            : initiator === 'timeout'
+              ? 'main_no_progress_timeout'
+              : 'cancelled_runtime'
       currentRun.abortController.abort(createInitiatorAbort(currentRun, initiator, message))
       currentRun.abortController = null
     }
@@ -4097,6 +4294,75 @@ export class AgentSdkRuntime extends EventEmitter {
         recoverable: false,
       })
     }
+    const finalizeEarlyReturn = async (params: {
+      status: 'done' | 'error' | 'cancelled' | 'checkpoint'
+      terminalReason: TurnTerminalReason
+      finalText: string
+      error?: string
+      continuationHandle?: string | null
+      taskBudgetRuntime?: TaskBudgetRuntime | null
+      providerDiagnostics?: AgentSdkProviderDiagnostics | null
+      initiator?: string
+    }): Promise<ExecutionTurnResult> => {
+      const projectionPatch = this.mergeProjectionPatches(projectionPatches)
+      const base = {
+        runId,
+        taskId,
+        scopeId: sessionId || null,
+        durationMs: Math.max(1, Date.now() - runStartedAt),
+        toolCallsUsed: usedTools.length,
+        initiator: params.initiator || params.status,
+        projectionPatch,
+        taskBudgetRuntime: params.taskBudgetRuntime ?? runMetaBudgetRuntime,
+        providerDiagnostics: params.providerDiagnostics ?? runMetaProviderDiagnostics,
+        usage: runMetaUsage,
+      }
+      const deps = {
+        runMetaRepository: this.getRunMetaRepositoryForFinalize(),
+        taskProjectionStore: this.runtime?.getTaskProjectionStoreForFinalize?.() ?? null,
+        learnFromCheckIn: (input: { checkIn: CheckInRecord; projection: TaskProjectionRecord; now: Date }) => this.learnSiteCardsFromCheckIn(input),
+        writeProjectionTerminalPatch: (patch: Record<string, unknown> | null, terminalReason: string, status: string) => {
+          emitOutputForRun('', 'done', patch)
+          emitStatusForRun(status, terminalReason as TurnTerminalReason)
+        },
+        writeRunCloseMetric,
+      }
+      const finalized = params.status === 'done'
+        ? await finalizeRunOutcome({
+          kind: 'done',
+          ...base,
+          finalText: params.finalText,
+        }, deps)
+        : params.status === 'checkpoint'
+          ? await finalizeRunOutcome({
+            kind: 'checkpoint',
+            ...base,
+            continuationHandle: params.continuationHandle || null,
+            terminalReason: params.terminalReason,
+            finalText: params.finalText,
+          }, deps)
+          : await finalizeRunOutcome({
+            kind: params.status === 'cancelled' ? 'cancelled' : 'error',
+            ...base,
+            terminalReason: params.terminalReason,
+          }, deps)
+      const terminalReason = finalized.terminalReason as TurnTerminalReason
+      const cancelled = finalized.status === 'cancelled'
+      const success = finalized.status !== 'error'
+      return this.buildResult({
+        success,
+        error: success ? undefined : params.error,
+        finalText: params.finalText,
+        cancelled,
+        taskId,
+        usedTools,
+        transcriptEvents,
+        projectionPatches,
+        terminalReason,
+        taskBudgetRuntime: params.taskBudgetRuntime ?? runMetaBudgetRuntime,
+        providerDiagnostics: params.providerDiagnostics ?? runMetaProviderDiagnostics,
+      })
+    }
 
     emitStatus('working')
 
@@ -4108,35 +4374,21 @@ export class AgentSdkRuntime extends EventEmitter {
             ? 'AI 配置已损坏（JSON 解析失败），请前往设置页重置'
             : 'AI 配置读取失败（数据库错误），请稍后重试或检查日志'
         emitOutput(userMessage, 'error')
-        emitOutput('', 'done')
-        emitStatus('error', configDetail.reason === 'json_corrupt' ? 'blocked_config' : 'persistence_failed')
-        return this.buildResult({
-          success: false,
+        return finalizeEarlyReturn({
+          status: 'error',
+          terminalReason: configDetail.reason === 'json_corrupt' ? 'blocked_config' : 'persistence_failed',
           error: userMessage,
           finalText: '',
-          cancelled: false,
-          taskId,
-          usedTools,
-          transcriptEvents,
-          projectionPatches,
-          terminalReason: configDetail.reason === 'json_corrupt' ? 'blocked_config' : 'persistence_failed',
         })
       }
       if (!configDetail.config?.apiKey) {
         const userMessage = '未配置 API Key，请前往设置页配置'
         emitOutput(userMessage, 'error')
-        emitOutput('', 'done')
-        emitStatus('error', 'blocked_config')
-        return this.buildResult({
-          success: false,
+        return finalizeEarlyReturn({
+          status: 'error',
+          terminalReason: 'blocked_config',
           error: userMessage,
           finalText: '',
-          cancelled: false,
-          taskId,
-          usedTools,
-          transcriptEvents,
-          projectionPatches,
-          terminalReason: 'blocked_config',
         })
       }
 
@@ -4176,10 +4428,10 @@ export class AgentSdkRuntime extends EventEmitter {
           args: { childRunId: resumeChildRunId },
         })
         emitOutput(`正在继续技能任务 ${resumeChildRunId}。`, 'text')
-        const resumed = await resumeSkillChildRun(resumeChildRunId, { agentContext })
+        const resumed = await this.resumeSkillChildRun(resumeChildRunId, { agentContext })
         const waited = resumed.closeEvent
           ? null
-          : await waitForSkillChildRunClose(resumed.childRunId, {
+          : await this.waitForSkillChildRunClose(resumed.childRunId, {
             timeoutMs: SDK_CHILD_RESUME_AWAIT_TIMEOUT_MS,
             signal: abortController.signal,
           })
@@ -4191,18 +4443,17 @@ export class AgentSdkRuntime extends EventEmitter {
         const outcome = summarizeChildResume(resumed.childRunId, close)
         finalText = outcome.message
         emitOutput(outcome.message, outcome.status === 'error' ? 'error' : 'text', closeProjectionPatch)
-        emitOutput('', 'done', closeProjectionPatch)
-        emitStatus(outcome.status, outcome.terminalReason)
-        return this.buildResult({
-          success: outcome.status !== 'error',
+        const childContinuation = closeProjectionPatch?.taskContinuation as Record<string, unknown> | undefined
+        return finalizeEarlyReturn({
+          status: outcome.status,
+          terminalReason: outcome.terminalReason,
           error: outcome.status === 'error' ? outcome.message : undefined,
           finalText,
-          cancelled: outcome.status === 'cancelled',
-          taskId,
-          usedTools,
-          transcriptEvents,
-          projectionPatches,
-          terminalReason: outcome.terminalReason,
+          continuationHandle: outcome.status === 'checkpoint'
+            ? (nonEmptyString(childContinuation?.runStatePath)
+              || nonEmptyString(childContinuation?.childRunId)
+              || resumed.childRunId)
+            : null,
         })
       }
       const currentLocalSendImTurn = hasLocalSendImIntentForTurn(
@@ -4344,18 +4595,11 @@ export class AgentSdkRuntime extends EventEmitter {
       if (restoredToolSurface.missingToolNames.length > 0) {
         const message = `续跑所需工具已经变化，无法安全继续：${restoredToolSurface.missingToolNames.join(', ')}`
         emitOutput(message, 'error')
-        emitOutput('', 'done')
-        emitStatus('error', 'blocked_tool_error')
-        return this.buildResult({
-          success: false,
+        return finalizeEarlyReturn({
+          status: 'error',
+          terminalReason: 'blocked_tool_error',
           error: message,
           finalText: '',
-          cancelled: false,
-          taskId,
-          usedTools,
-          transcriptEvents,
-          projectionPatches,
-          terminalReason: 'blocked_tool_error',
           taskBudgetRuntime: runMetaBudgetRuntime,
           providerDiagnostics: runMetaProviderDiagnostics,
         })
@@ -4385,12 +4629,18 @@ export class AgentSdkRuntime extends EventEmitter {
       let lastDocumentSaveFailure: string | null = null
       let newDocumentNeedsSave = false
       let hasSuccessfulLocalDocumentSourceRead = false
+      const sourceMessageProvenance = resolveSourceMessageProvenance({
+        sourceMessageId: effectiveExecutionOptions?.sourceMessageId,
+        requestEnvelope: effectiveExecutionOptions?.requestEnvelope,
+      })
       const toolBridgeRuntimeContext: ToolBridgeRuntimeContext = {
         agentName: name,
         runId,
         taskId,
         sessionId,
         currentUserText: messageToText(content as RunMessage),
+        sourceMessageId: sourceMessageProvenance.sourceMessageId,
+        sourceMessageUnavailableReason: sourceMessageProvenance.sourceMessageUnavailableReason,
         requestEnvelope: effectiveExecutionOptions?.requestEnvelope,
         signal: abortController.signal,
         allowedToolNames,
@@ -4557,17 +4807,11 @@ export class AgentSdkRuntime extends EventEmitter {
         projectionPatches.push(checkpoint.projectionPatch)
         finalText = '本轮工具预算已用完，我已保存续跑检查点，可以继续。'
         emitOutput(finalText, 'text', checkpoint.projectionPatch)
-        emitOutput('', 'done', checkpoint.projectionPatch)
-        emitStatus('checkpoint', 'checkpoint_budget')
-        return this.buildResult({
-          success: true,
-          finalText,
-          cancelled: false,
-          taskId,
-          usedTools,
-          transcriptEvents,
-          projectionPatches,
+        return finalizeEarlyReturn({
+          status: 'checkpoint',
           terminalReason: 'checkpoint_budget',
+          finalText,
+          continuationHandle: checkpoint.runStatePath,
           taskBudgetRuntime: liveTaskBudgetRuntime,
           providerDiagnostics: runMetaProviderDiagnostics,
         })
@@ -4659,6 +4903,9 @@ export class AgentSdkRuntime extends EventEmitter {
           terminalReason: 'checkpoint_steered',
           projectionPatch: finalProjectionPatch,
           finalText, // EP2-Q3: same variable emitted above
+          taskBudgetRuntime: liveTaskBudgetRuntime,
+          providerDiagnostics: runMetaProviderDiagnostics,
+          usage: runMetaUsage,
         }, {
           runMetaRepository: this.getRunMetaRepositoryForFinalize(),
           taskProjectionStore: this.runtime?.getTaskProjectionStoreForFinalize?.() ?? null,
@@ -4746,18 +4993,11 @@ export class AgentSdkRuntime extends EventEmitter {
             errorMessage: userMessage.slice(0, 200),
           })
           emitOutput(userMessage, 'error')
-          emitOutput('', 'done')
-          emitStatus('error', 'blocked_config')
-          return this.buildResult({
-            success: false,
+          return finalizeEarlyReturn({
+            status: 'error',
+            terminalReason: 'blocked_config',
             error: userMessage,
             finalText: '',
-            cancelled: false,
-            taskId,
-            usedTools,
-            transcriptEvents,
-            projectionPatches,
-            terminalReason: 'blocked_config',
           })
         }
       }
@@ -4998,7 +5238,7 @@ export class AgentSdkRuntime extends EventEmitter {
                   result: createToolExecutionOutput(`工具 ${call.name} 未在本轮授权列表中。`, {
                     shape: 'json',
                     data: {
-                      errorKind: 'tool_restricted_this_turn',
+                      errorKind: TOOL_ADMISSION_ERROR_KINDS.toolRestrictedThisTurn.code,
                       toolName: call.name,
                     },
                   }),
@@ -5187,7 +5427,7 @@ export class AgentSdkRuntime extends EventEmitter {
               result: createToolExecutionOutput(`工具 ${call.name} 未在本轮授权列表中。`, {
                 shape: 'json',
                 data: {
-                  errorKind: 'tool_restricted_this_turn',
+                  errorKind: TOOL_ADMISSION_ERROR_KINDS.toolRestrictedThisTurn.code,
                   toolName: call.name,
                 },
               }),
@@ -5481,6 +5721,9 @@ export class AgentSdkRuntime extends EventEmitter {
         // EP2-Q3: the SAME variable emitted to the user above — including
         // the empty-reply default-text branch that just ran.
         finalText,
+        taskBudgetRuntime: liveTaskBudgetRuntime,
+        providerDiagnostics: runMetaProviderDiagnostics,
+        usage: runMetaUsage,
       }, {
         runMetaRepository: this.getRunMetaRepositoryForFinalize(),
         taskProjectionStore: this.runtime?.getTaskProjectionStoreForFinalize?.() ?? null,
@@ -5523,10 +5766,28 @@ export class AgentSdkRuntime extends EventEmitter {
           || (preemptedByNewerSend ? 'preempted' : 'user_stop')
         const terminalReason: TurnTerminalReason = abortInitiator === 'user_stop'
           ? 'cancelled_user'
-          : 'cancelled_runtime'
+          : abortInitiator === 'manual_suspend'
+            ? 'manual_suspend'
+            : abortInitiator === 'timeout'
+              ? 'main_no_progress_timeout'
+              : 'cancelled_runtime'
         const latestRunId = this.sessions.get(name)?.currentRun?.runId
         if (abortInitiator === 'user_stop') {
           emitOutputForRun('已手动停止，进度已保存至当前会话。', 'text')
+        }
+        if (abortInitiator === 'manual_suspend') {
+          return this.buildResult({
+            success: true,
+            finalText: '',
+            cancelled: false,
+            taskId,
+            usedTools,
+            transcriptEvents,
+            projectionPatches,
+            terminalReason,
+            taskBudgetRuntime: runMetaBudgetRuntime,
+            providerDiagnostics: runMetaProviderDiagnostics,
+          })
         }
         await finalizeRunOutcome({
           kind: abortInitiator === 'preempted' ? 'preempted' : 'cancelled',
@@ -5538,6 +5799,9 @@ export class AgentSdkRuntime extends EventEmitter {
           initiator: abortInitiator,
           terminalReason,
           projectionPatch: this.mergeProjectionPatches(projectionPatches),
+          taskBudgetRuntime: runMetaBudgetRuntime,
+          providerDiagnostics: runMetaProviderDiagnostics,
+          usage: runMetaUsage,
         }, {
           runMetaRepository: this.getRunMetaRepositoryForFinalize(),
           taskProjectionStore: this.runtime?.getTaskProjectionStoreForFinalize?.() ?? null,
@@ -5607,17 +5871,10 @@ export class AgentSdkRuntime extends EventEmitter {
           if (!finalText) {
             emitOutput(fallbackText, 'text')
           }
-          emitOutput('', 'done', this.mergeProjectionPatches(projectionPatches))
-          emitStatus('done', 'done')
-          return this.buildResult({
-            success: true,
-            finalText: fallbackText,
-            cancelled: false,
-            taskId,
-            usedTools,
-            transcriptEvents,
-            projectionPatches,
+          return finalizeEarlyReturn({
+            status: 'done',
             terminalReason: 'done',
+            finalText: fallbackText,
           })
         }
       }
@@ -5712,6 +5969,9 @@ export class AgentSdkRuntime extends EventEmitter {
         initiator: 'error',
         terminalReason: failure.terminalReason,
         projectionPatch: this.mergeProjectionPatches(projectionPatches),
+        taskBudgetRuntime: runMetaBudgetRuntime,
+        providerDiagnostics: runMetaProviderDiagnostics,
+        usage: runMetaUsage,
       }, {
         runMetaRepository: this.getRunMetaRepositoryForFinalize(),
         taskProjectionStore: this.runtime?.getTaskProjectionStoreForFinalize?.() ?? null,
@@ -6031,6 +6291,8 @@ export class AgentSdkRuntime extends EventEmitter {
       // EP2-I2 — standing user negations for dispatch interception.
       activeNegations: activeNegations(runtimeContext.sessionId),
       currentUserText: runtimeContext.currentUserText,
+      sourceMessageId: runtimeContext.sourceMessageId ?? null,
+      sourceMessageUnavailableReason: runtimeContext.sourceMessageUnavailableReason ?? null,
       requestEnvelope: runtimeContext.requestEnvelope,
       runId: runtimeContext.runId,
       taskId: runtimeContext.taskId,
@@ -6124,7 +6386,7 @@ export class AgentSdkRuntime extends EventEmitter {
       return createToolExecutionOutput(`无法打开目标文档 ${guard.targetName}：本轮未开放 document_open_tab。`, {
         shape: 'json',
         data: {
-          errorKind: 'target_document_open_unavailable',
+          errorKind: TARGET_DOCUMENT_ERROR_KINDS.openUnavailable.code,
           targetPath: guard.targetPath,
         },
       })
@@ -6137,7 +6399,7 @@ export class AgentSdkRuntime extends EventEmitter {
       return createToolExecutionOutput(`无法打开目标文档 ${guard.targetName}，已停止写入，避免写错文件。`, {
         shape: 'json',
         data: {
-          errorKind: 'target_document_open_failed',
+          errorKind: TARGET_DOCUMENT_ERROR_KINDS.openFailed.code,
           targetPath: guard.targetPath,
           openResult: normalized.text,
         },
@@ -6157,7 +6419,7 @@ export class AgentSdkRuntime extends EventEmitter {
       return createToolExecutionOutput(`目标文档 ${guard.targetName} 已修改，但本轮未开放 document_save_tab，无法确认落盘。`, {
         shape: 'json',
         data: {
-          errorKind: 'target_document_save_unavailable',
+          errorKind: TARGET_DOCUMENT_ERROR_KINDS.saveUnavailable.code,
           targetPath: guard.targetPath,
         },
       })
@@ -6167,7 +6429,7 @@ export class AgentSdkRuntime extends EventEmitter {
       return createToolExecutionOutput(`目标文档 ${guard.targetName} 保存失败，不能声明完成。`, {
         shape: 'json',
         data: {
-          errorKind: 'target_document_save_failed',
+          errorKind: TARGET_DOCUMENT_ERROR_KINDS.saveFailed.code,
           targetPath: guard.targetPath,
           saveResult: normalizeToolExecutionOutput(output).text,
         },
@@ -6231,7 +6493,7 @@ export class AgentSdkRuntime extends EventEmitter {
         {
           shape: 'json',
           data: {
-            errorKind: 'target_document_required',
+            errorKind: TARGET_DOCUMENT_ERROR_KINDS.required.code,
             targetPath: guard.targetPath,
           },
         },

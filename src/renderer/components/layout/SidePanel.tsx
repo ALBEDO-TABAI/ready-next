@@ -1,11 +1,7 @@
 import { AnimatePresence, motion, useIsPresent, usePresenceData, useReducedMotion } from 'framer-motion'
-import { useEffect, useMemo, useRef, type ReactNode } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useRef, type ComponentType, type ReactNode } from 'react'
 
 import FilesPanel from './FilesPanel'
-import GlobalSearchPanel from './GlobalSearchPanel'
-import SkillsCenterPanel from './SkillsCenterPanel'
-import BacklinksCenterPanel from './BacklinksCenterPanel'
-import GraphCenterPanel from './GraphCenterPanel'
 import { FILES_PANEL_DIMENSIONS } from './panelTokens'
 import {
   WORKBENCH_PANEL_MOTION_DURATION_S,
@@ -29,7 +25,16 @@ interface AnimatedPanelSlots {
   body: ReactNode
 }
 
+type DeferredPanelProps = {
+  children: (slots: AnimatedPanelSlots) => ReactNode
+}
+
 type PanelDirection = -1 | 0 | 1
+
+const GlobalSearchPanel = lazy(() => import('./GlobalSearchPanel')) as ComponentType<DeferredPanelProps>
+const SkillsCenterPanel = lazy(() => import('./SkillsCenterPanel')) as ComponentType<DeferredPanelProps>
+const BacklinksCenterPanel = lazy(() => import('./BacklinksCenterPanel')) as ComponentType<DeferredPanelProps>
+const GraphCenterPanel = lazy(() => import('./GraphCenterPanel')) as ComponentType<DeferredPanelProps>
 
 const PANEL_STACK_ORDER: Record<RenderableSidePanelVariant, number> = {
   files: 0,
@@ -116,66 +121,40 @@ export default function SidePanel({
     lastVisibleVariantRef.current = variant
   }, [isVisible, variant])
 
+  const renderDeferredPanel = (
+    Panel: ComponentType<DeferredPanelProps>,
+    panelKey: string,
+  ) => (
+    <Suspense key={panelKey} fallback={null}>
+      <Panel>
+        {(slots: AnimatedPanelSlots) => (
+          <AnimatedPanelLayer
+            direction={transitionDirection}
+            reduceMotion={!!reduceMotion}
+            header={slots.header}
+            body={slots.body}
+          />
+        )}
+      </Panel>
+    </Suspense>
+  )
+
   const renderAnimatedPanel = (targetVariant: RenderableSidePanelVariant) => {
     const panelKey = `side-panel-${targetVariant}`
     if (targetVariant === 'search') {
-      return (
-        <GlobalSearchPanel key={panelKey}>
-          {(slots) => (
-            <AnimatedPanelLayer
-              direction={transitionDirection}
-              reduceMotion={!!reduceMotion}
-              header={slots.header}
-              body={slots.body}
-            />
-          )}
-        </GlobalSearchPanel>
-      )
+      return renderDeferredPanel(GlobalSearchPanel, panelKey)
     }
 
     if (targetVariant === 'skills') {
-      return (
-        <SkillsCenterPanel key={panelKey}>
-          {(slots) => (
-            <AnimatedPanelLayer
-              direction={transitionDirection}
-              reduceMotion={!!reduceMotion}
-              header={slots.header}
-              body={slots.body}
-            />
-          )}
-        </SkillsCenterPanel>
-      )
+      return renderDeferredPanel(SkillsCenterPanel, panelKey)
     }
 
     if (targetVariant === 'backlinks') {
-      return (
-        <BacklinksCenterPanel key={panelKey}>
-          {(slots) => (
-            <AnimatedPanelLayer
-              direction={transitionDirection}
-              reduceMotion={!!reduceMotion}
-              header={slots.header}
-              body={slots.body}
-            />
-          )}
-        </BacklinksCenterPanel>
-      )
+      return renderDeferredPanel(BacklinksCenterPanel, panelKey)
     }
 
     if (targetVariant === 'graph') {
-      return (
-        <GraphCenterPanel key={panelKey}>
-          {(slots) => (
-            <AnimatedPanelLayer
-              direction={transitionDirection}
-              reduceMotion={!!reduceMotion}
-              header={slots.header}
-              body={slots.body}
-            />
-          )}
-        </GraphCenterPanel>
-      )
+      return renderDeferredPanel(GraphCenterPanel, panelKey)
     }
 
     return (

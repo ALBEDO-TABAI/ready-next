@@ -400,6 +400,11 @@ test('skill_inspect_run_state dispatch forwards expectedTaskId to select the mat
       undefined,
       {
         frameSkillId: 'video-expert-analyzer',
+        activeFrame: {
+          activeArtifactRoots: [root],
+          runContract: null,
+          discoveredHandles: [],
+        },
         authorization: buildSelectedSkillToolAuthorization({
           skillId: 'video-expert-analyzer',
           allowedTypedActions: [],
@@ -438,6 +443,11 @@ test('skill_inspect_run_state dispatch forwards runStatePath instead of forcing 
       undefined,
       {
         frameSkillId: 'video-expert-analyzer',
+        activeFrame: {
+          activeArtifactRoots: [root],
+          runContract: null,
+          discoveredHandles: [],
+        },
         authorization: buildSelectedSkillToolAuthorization({
           skillId: 'video-expert-analyzer',
           allowedTypedActions: [],

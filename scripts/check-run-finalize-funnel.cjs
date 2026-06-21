@@ -13,24 +13,32 @@ const fs = require('node:fs')
 const path = require('node:path')
 
 const ROOT = process.cwd()
+const RUN_META_TERMINAL_STATUS_REL = 'src/shared/run-meta-terminal-status.ts'
 const RUN_FINALIZER_REL = 'src/main/modules/agent-control/runtime-core/run-finalizer.ts'
+const AGENT_SDK_RUNTIME_REL = 'src/main/modules/agent-control/runtime-core/agent-sdk-runtime.ts'
 const RUN_META_REPOSITORY_REL = 'src/main/modules/agent-control/task-projection/run-meta-repository.ts'
 const SCAN_DIRS = [
   'src/main/modules/agent-control/',
   'src/main/modules/claude-bridge/',
 ]
 
-const TERMINAL_RUN_META_STATUSES = [
-  'done',
-  'error',
-  'cancelled',
-  'preempted',
-  'interrupted',
-  'checkpoint',
-  'completed',
-  'failed',
-  'killed',
-]
+function readConstArray(rel, name) {
+  const file = path.join(ROOT, rel)
+  if (!fs.existsSync(file)) {
+    throw new Error(`${rel} missing; ${name} must be the shared terminal status source`)
+  }
+  const text = fs.readFileSync(file, 'utf8')
+  const match = text.match(new RegExp(`export\\s+const\\s+${name}\\s*=\\s*\\[([\\s\\S]*?)\\]\\s+as\\s+const`))
+  if (!match) {
+    throw new Error(`${rel} missing export const ${name} = [...] as const`)
+  }
+  return [...match[1].matchAll(/['"]([a-z][a-z0-9_]*)['"]/g)].map((m) => m[1])
+}
+
+const TERMINAL_RUN_META_STATUSES = readConstArray(
+  RUN_META_TERMINAL_STATUS_REL,
+  'RUN_META_TERMINAL_STATUSES',
+)
 const TERMINAL_STATUS_ALT = TERMINAL_RUN_META_STATUSES.join('|')
 
 function listFiles(dirAbs) {
@@ -84,6 +92,141 @@ function pushRegexViolations(violations, rel, text, rules) {
         kind: rule.kind,
         detail: rule.detail,
       })
+    }
+  }
+}
+
+function sliceBetween(text, startNeedle, endNeedle) {
+  const start = text.indexOf(startNeedle)
+  if (start < 0) return ''
+  const end = text.indexOf(endNeedle, start + startNeedle.length)
+  return end < 0 ? text.slice(start) : text.slice(start, end)
+}
+
+function pushAgentSdkC03Violations(violations, text) {
+  const rel = AGENT_SDK_RUNTIME_REL
+  if (!text.includes('const finalizeEarlyReturn = async')) {
+    violations.push({
+      file: rel,
+      line: 1,
+      kind: 'agent_sdk_c03_early_return',
+      detail: 'P1b-1b-C03 early-return families must use finalizeEarlyReturn',
+    })
+  }
+
+  const sections = [
+    {
+      name: 'config_pre_model',
+      start: 'const configDetail = this.loadAIConfig()',
+      end: 'const normalizedConfig = normalizeAIConfig',
+      required: [
+        "terminalReason: configDetail.reason === 'json_corrupt' ? 'blocked_config' : 'persistence_failed'",
+        "terminalReason: 'blocked_config'",
+      ],
+      forbidden: [
+        /emitStatus\('error',\s*configDetail\.reason/,
+        /emitStatus\('error',\s*'blocked_config'\)/,
+      ],
+    },
+    {
+      name: 'child_resume_close',
+      start: 'const resumeChildRunId = continuationChildRunId',
+      end: 'const currentLocalSendImTurn = hasLocalSendImIntentForTurn',
+      required: [
+        'status: outcome.status',
+        'continuationHandle: outcome.status === \'checkpoint\'',
+      ],
+      forbidden: [
+        /emitStatus\(outcome\.status,\s*outcome\.terminalReason\)/,
+      ],
+    },
+    {
+      name: 'restored_tool_surface_missing',
+      start: 'if (restoredToolSurface.missingToolNames.length > 0)',
+      end: 'const hasVeaPipelineTool =',
+      required: [
+        "terminalReason: 'blocked_tool_error'",
+      ],
+      forbidden: [
+        /emitStatus\('error',\s*'blocked_tool_error'\)/,
+      ],
+    },
+    {
+      name: 'current_message_capability_block',
+      start: 'assertCurrentMessageCapability(blocksForCheck',
+      end: 'let nextInput = toSdkInput',
+      required: [
+        "terminalReason: 'blocked_config'",
+      ],
+      forbidden: [
+        /emitStatus\('error',\s*'blocked_config'\)/,
+      ],
+    },
+    {
+      name: 'budget_checkpoint_helper',
+      start: 'const finishBudgetCheckpointIfNeeded = async',
+      end: 'const hasUnfinishedActionTaskReference =',
+      required: [
+        "terminalReason: 'checkpoint_budget'",
+        'continuationHandle: checkpoint.runStatePath',
+      ],
+      forbidden: [
+        /emitStatus\('checkpoint',\s*'checkpoint_budget'\)/,
+      ],
+    },
+    {
+      name: 'max_turn_saved_document_done',
+      start: 'const contentIssue = await inspectDocumentTargetContent(documentTargetGuardForRecovery',
+      end: '&& !hasSuccessfulDocumentTargetMutation',
+      required: [
+        "status: 'done'",
+        "terminalReason: 'done'",
+        'finalText: fallbackText',
+      ],
+      forbidden: [
+        /emitStatus\('done',\s*'done'\)/,
+      ],
+    },
+  ]
+
+  for (const section of sections) {
+    const body = sliceBetween(text, section.start, section.end)
+    if (!body) {
+      violations.push({
+        file: rel,
+        line: 1,
+        kind: 'agent_sdk_c03_early_return',
+        detail: `P1b-1b-C03 section not found: ${section.name}`,
+      })
+      continue
+    }
+    if (!body.includes('finalizeEarlyReturn({')) {
+      violations.push({
+        file: rel,
+        line: lineOf(text, text.indexOf(section.start)),
+        kind: 'agent_sdk_c03_early_return',
+        detail: `P1b-1b-C03 ${section.name} must call finalizeEarlyReturn`,
+      })
+    }
+    for (const required of section.required) {
+      if (!body.includes(required)) {
+        violations.push({
+          file: rel,
+          line: lineOf(text, text.indexOf(section.start)),
+          kind: 'agent_sdk_c03_early_return',
+          detail: `P1b-1b-C03 ${section.name} is missing required finalizer field: ${required}`,
+        })
+      }
+    }
+    for (const forbidden of section.forbidden) {
+      if (forbidden.test(body)) {
+        violations.push({
+          file: rel,
+          line: lineOf(text, text.indexOf(section.start)),
+          kind: 'agent_sdk_c03_early_return',
+          detail: `P1b-1b-C03 ${section.name} still emits terminal status before returning`,
+        })
+      }
     }
   }
 }
@@ -174,6 +317,11 @@ function main() {
     if (!isAllowedProjectionPatchConstructor(rel)) {
       pushRegexViolations(violations, rel, text, projectionPatchRules)
     }
+  }
+
+  const agentSdkRuntimePath = path.join(ROOT, AGENT_SDK_RUNTIME_REL)
+  if (fs.existsSync(agentSdkRuntimePath)) {
+    pushAgentSdkC03Violations(violations, fs.readFileSync(agentSdkRuntimePath, 'utf8'))
   }
 
   if (violations.length === 0) {

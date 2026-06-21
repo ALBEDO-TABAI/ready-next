@@ -1,5 +1,6 @@
 import { randomUUID } from 'crypto'
 import { buildRequestEnvelope } from './contracts/request-envelope'
+import { isDirectlyResumableTaskStatus } from './contracts/task-open-status'
 import { hashToolCallArgs } from './tools-runtime/tool-call-args-hash'
 
 /**
@@ -314,7 +315,6 @@ import {
   parseTextToolBridgeResponse,
   shouldEnforceBrowserToolRetry,
 } from '../claude-bridge/tool-bridge'
-import { compressHistoryForPrompt } from './compaction/context-compression'
 import type { CapabilityGroupId } from '../../../shared/ai-capability-groups'
 import {
   advanceTaskStepProgress,
@@ -326,15 +326,17 @@ import { inspectDocumentToolCall } from '../claude-bridge/document-tool-flow'
 import { deriveAgentErrorContract } from '../claude-bridge/error-contract'
 import {
   normalizeToolExecutionOutput,
-  serializeToolExecutionOutput,
   type ToolExecutionOutput,
 } from './tools-runtime/tool-result-types'
+import {
+  redactModelVisibleToolText,
+  serializeToolExecutionOutputForModel,
+} from './tools-runtime/model-visible-tool-output'
 import { TurnState } from './runtime-core/turn-state'
 import { TurnTranscript } from './runtime-core/turn-transcript'
 import { createSystemReminderRegistry, type ReminderEntry } from './system-reminders/system-reminder-registry'
 import { composePetStickynoteRetryReminder } from './system-reminders/pet-stickynote-retry-reminder'
 import { composeBrowserTaskCorrectionReminder } from './system-reminders/browser-task-correction-reminder'
-import { createLayeredCompactor, type LayeredCompactorMetricName } from './compaction/layered-compactor'
 import type { HookRegistry } from './system-reminders/hook-registry'
 import { buildLongSkillRunningProjection } from './skills/skill-running-projection'
 import { buildSkillTaskLifecycleSignal } from './skills/skill-task-lifecycle'
@@ -403,19 +405,6 @@ import { resolveAIConfigCapabilities } from '../../../shared/ai-providers'
 const LONG_TYPED_SKILL_ACTION_MIN_TIMEOUT_MS = 5 * 60 * 1000
 const LONG_TYPED_SKILL_ACTION_HEARTBEAT_MS = 30 * 1000
 const CHILD_SELF_AWAIT_TIMEOUT_MS = 1_500
-const LAYERED_COMPACTOR_METRIC_MAP: Record<LayeredCompactorMetricName, string> = {
-  compactionCircuitBreak: TOOL_ERROR_METRICS.compactionCircuitBreak,
-  compactionL2Failed: TOOL_ERROR_METRICS.compactionL2Failed,
-}
-const layeredCompactor = createLayeredCompactor({
-  metric: (name, payload) => {
-    try {
-      logAgentMetric(LAYERED_COMPACTOR_METRIC_MAP[name], { ...payload })
-    } catch {
-      // Metrics must never break a turn.
-    }
-  },
-})
 const NOOP_HOOK_REGISTRY: Pick<HookRegistry, 'fire'> = {
   fire: async () => {},
 }
@@ -455,6 +444,7 @@ function isTurnTerminalReason(value: unknown): value is TurnTerminalReason {
     || value === 'persistence_failed'
     || value === 'cancelled_user'
     || value === 'cancelled_runtime'
+    || value === 'main_no_progress_timeout'
 }
 
 function mapChildCloseToTurnTerminalReason(close: SkillChildCloseEvent): TurnTerminalReason {
@@ -471,7 +461,7 @@ function statusFromTerminalReason(
   reason: TurnTerminalReason,
 ): 'done' | 'error' | 'cancelled' | 'checkpoint' {
   if (reason === 'done') return 'done'
-  if (reason === 'cancelled_user' || reason === 'cancelled_runtime') return 'cancelled'
+  if (reason === 'cancelled_user' || reason === 'cancelled_runtime' || reason === 'main_no_progress_timeout') return 'cancelled'
   if (
     reason === 'failed_skill'
     || reason === 'resume_launch_failed'
@@ -589,7 +579,7 @@ function matchesChildCancelIntent(...texts: Array<string | null | undefined>): b
 }
 
 function isDirectlyResumableChildStatus(status: SkillChildCloseEvent['status']): boolean {
-  return status === 'recoverable_paused' || status === 'budget_paused'
+  return isDirectlyResumableTaskStatus(status)
 }
 
 /**
@@ -740,24 +730,7 @@ function cloneSession<TSession extends TurnEngineSession>(session: TSession): TS
 }
 
 function buildModelInputSession<TSession extends TurnEngineSession>(session: TSession): TSession {
-  if (session.messages.some((message) => typeof message.content !== 'string')) {
-    return cloneSession(session)
-  }
-
-  const compactedMessages = layeredCompactor.maybeCompact(
-    session.messages.map((message) => ({
-      role: message.role,
-      content: message.content as string,
-    })),
-  )
-
-  return {
-    ...session,
-    messages: compactedMessages.map((message) => ({
-      role: message.role as TurnEngineSessionMessage['role'],
-      content: message.content,
-    })),
-  }
+  return cloneSession(session)
 }
 
 function extractIncomingText(content: string | Array<Record<string, unknown>>): string {
@@ -770,30 +743,6 @@ function extractIncomingText(content: string | Array<Record<string, unknown>>): 
 
 function extractTaskIdFromText(text: string): string | null {
   return String(text || '').match(/^Task ID:\s*(.+)$/m)?.[1]?.trim() || null
-}
-
-function compressSessionMessagesForRetry<TSession extends TurnEngineSession>(session: TSession): boolean {
-  if (session.messages.length <= 6) return false
-  const earlierMessages = session.messages
-    .slice(0, -6)
-    .map((message) => ({
-      role: message.role,
-      content: extractIncomingText(message.content as string | Array<Record<string, unknown>>).trim(),
-    }))
-    .filter((message) => message.content.length > 0)
-  if (earlierMessages.length === 0) return false
-
-  const compressed = compressHistoryForPrompt(earlierMessages, {
-    keepRecent: 2,
-    maxChars: 900,
-  })
-  if (!compressed.compressed) return false
-
-  session.messages = [
-    { role: 'system', content: `更早对话已压缩以继续执行：\n${compressed.text}` },
-    ...session.messages.slice(-6),
-  ]
-  return true
 }
 
 function normalizeToolBatchResult(result: TurnToolBatchResult): {
@@ -2872,9 +2821,10 @@ export class TurnEngine {
           transcript.emitOutput(hostShortcutResult.toolUseText, 'tool_use')
         }
         if (hostShortcutResult.outputText) {
-          transcript.emitOutput(hostShortcutResult.outputText.slice(0, 300), 'tool_result')
-          transcript.emitOutput(hostShortcutResult.outputText, 'text')
-          pushAssistantTextSafely(session, hostShortcutResult.outputText, { sessionId: request.sessionId })
+          const redactedOutputText = redactModelVisibleToolText(hostShortcutResult.outputText)
+          transcript.emitOutput(redactedOutputText.slice(0, 300), 'tool_result')
+          transcript.emitOutput(redactedOutputText, 'text')
+          pushAssistantTextSafely(session, redactedOutputText, { sessionId: request.sessionId })
         }
         return finish({ success: true, status: 'done' })
       }
@@ -3774,7 +3724,6 @@ export class TurnEngine {
               requestedTransport: toolLoopRequestSnapshot.requestedTransport,
               supportsNativeTools: toolLoopRequestSnapshot.supportsNativeTools,
               preferTextToolBridgeOnce,
-              compressContext: () => compressSessionMessagesForRetry(session),
             }) as TurnModelResponse
           } finally {
             preferTextToolBridgeOnce = false
@@ -4209,7 +4158,7 @@ export class TurnEngine {
           for (const executedTool of executedToolBatch.results) {
             const result = executedTool.result as ToolExecutionOutput
             const resultText = result.text
-            const serializedResult = serializeToolExecutionOutput(result)
+            const serializedResult = serializeToolExecutionOutputForModel(result)
             const toolName = executedTool.name
             if (isLongTypedSkillActionName(toolName)) {
               // Stage N (Phase 3) — child-loop typed actions launch a child

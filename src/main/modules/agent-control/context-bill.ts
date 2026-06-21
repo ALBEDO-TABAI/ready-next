@@ -23,6 +23,8 @@ export interface ContextBillPayload {
   total: number
   /** Section keys whose injected text was truncated this turn. */
   truncations: string[]
+  /** Stable truncation reason per truncated section. */
+  truncationReasons: Record<string, 'section_budget'>
 }
 
 /** Marker appended by prompt-assembly `clip()` when a section overflows budget. */
@@ -44,6 +46,7 @@ export function buildContextBill(
 ): ContextBillPayload {
   const sectionBytes: Record<string, number> = {}
   const truncations: string[] = []
+  const truncationReasons: Record<string, 'section_budget'> = {}
   let total = 0
   for (const { section, text } of sections) {
     if (!text) continue
@@ -52,9 +55,10 @@ export function buildContextBill(
     total += bytes
     if (text.includes(TRUNCATION_MARKER)) {
       truncations.push(section)
+      truncationReasons[section] = 'section_budget'
     }
   }
-  return { scopeId, sections: sectionBytes, total, truncations }
+  return { scopeId, sections: sectionBytes, total, truncations, truncationReasons }
 }
 
 /** Emit the bill through the shared metrics sink (one `context_bill` row). */
@@ -64,5 +68,6 @@ export function emitContextBill(payload: ContextBillPayload): void {
     sections: payload.sections,
     total: payload.total,
     truncations: payload.truncations,
+    truncationReasons: payload.truncationReasons,
   })
 }

@@ -231,6 +231,16 @@ export const BrowserWaitForConditionSchema = z.object({
     .describe('等待条件：page_readable/selector/network_idle/content_stable/custom_js'),
   selector: z.string().optional().describe('condition=selector 时使用'),
   custom_js: z.string().optional().describe('condition=custom_js 时返回 truthy 视为满足'),
+  template: z
+    .enum(['read_text', 'read_attr', 'read_all_text', 'count_selector', 'exists_selector', 'read_rect', 'read_meta'])
+    .optional()
+    .describe('命名只读脚本模板，由代码侧拼装固定只读 JS'),
+  script_template: z
+    .enum(['read_text', 'read_attr', 'read_all_text', 'count_selector', 'exists_selector', 'read_rect', 'read_meta'])
+    .optional()
+    .describe('命名只读脚本模板别名，优先于 template'),
+  attr: z.string().optional().describe('read_attr 模板读取的属性名'),
+  name: z.string().optional().describe('read_meta 模板读取 title/href/readyState 或 meta name/property'),
   timeout_ms: z.number().optional().describe('超时时间，默认 8000ms'),
   check_interval_ms: z.number().optional().describe('轮询间隔，默认 250ms'),
   stable_iterations: z

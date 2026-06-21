@@ -90,6 +90,25 @@ test('browser header extracts refresh dock and right-side utility actions into f
   assert.doesNotMatch(utilityActions, /BROWSER_OVERLAY_LOCK_EVENT/)
 })
 
+test('browser header surfaces browser ownership status from BrowserMode supervision state', () => {
+  const browserMode = readWorkspaceFile('src/renderer/pages/modes/BrowserMode.tsx')
+  const browserHeader = readWorkspaceFile('src/renderer/components/browser/BrowserHeader.tsx')
+  const supervisionPanel = readWorkspaceFile('src/renderer/components/browser/AgentBrowserSupervisionPanel.tsx')
+
+  assert.match(browserMode, /resolveBrowserOwnershipStatus/)
+  assert.match(browserMode, /surfaces:\s*agentSupervision\.surfaces/)
+  assert.match(browserMode, /activeWriteSurface:\s*agentSupervision\.activeWriteSurface/)
+  assert.match(browserMode, /ownershipStatus=\{browserOwnershipStatus\}/)
+  assert.match(browserMode, /surfaces=\{agentSupervision\.surfaces\}/)
+  assert.match(browserMode, /activeWriteSurface=\{agentSupervision\.activeWriteSurface\}/)
+  assert.match(browserHeader, /ownershipStatus\?: BrowserOwnershipStatus/)
+  assert.match(browserHeader, /data-browser-ownership=\{status\.kind\}/)
+  assert.match(browserHeader, /<BrowserOwnershipChip status=\{ownershipStatus\} \/>/)
+  assert.match(supervisionPanel, /surfaces\?: Record<AgentBrowserSurface, BrowserLeaseSurfaceSnapshot> \| null/)
+  assert.match(supervisionPanel, /activeWriteSurface\?: AgentBrowserSurface \| null/)
+  assert.match(supervisionPanel, /data-browser-surface-lock=\{activeWriteSurface \|\| 'takeover'\}/)
+})
+
 test('tab rail can toggle bookmarks from explicit tab affordances, not only from the active address surface', () => {
   const browserMode = readWorkspaceFile('src/renderer/pages/modes/BrowserMode.tsx')
   const panelDataHook = readWorkspaceFile('src/renderer/modules/browser/useBrowserPanelData.ts')

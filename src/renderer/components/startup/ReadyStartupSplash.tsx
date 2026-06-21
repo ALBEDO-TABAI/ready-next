@@ -1,5 +1,6 @@
-import { type CSSProperties, useEffect, useId, useMemo, useState } from 'react'
-import readyWordmark from '../../assets/ready-wordmark.svg'
+import { type CSSProperties, useEffect, useMemo, useState } from 'react'
+import { createReadyLogoDotPattern } from '../../../shared/ready-logo-dots'
+import readyWordmarkSvg from '../../assets/ready-wordmark.svg?raw'
 import '../../styles/startup-preview.css'
 
 export type ReadyStartupVariant = 'orange' | 'pink'
@@ -8,30 +9,31 @@ type ReadyStartupSkin = 'liquid-glass' | 'ready-glass' | 'solid-green-glass' | '
 
 const GRID_ROWS = 8
 const GRID_COLUMNS = 37
-const LOGO_WIDTH = 4048
 const MATRIX_ROW_STEP = 137
 const MATRIX_COLUMN_STEP = 139
 const MATRIX_DOT_RADIUS = 52
 const MATRIX_X_START = 75
 const MATRIX_Y_START = 75
 const LOGO_X_OFFSET = MATRIX_COLUMN_STEP * 4
-const MATRIX_HEIGHT = MATRIX_Y_START * 2 + MATRIX_ROW_STEP * (GRID_ROWS - 1)
-const MATRIX_WIDTH = LOGO_WIDTH + LOGO_X_OFFSET * 2
 const LOGO_Y_OFFSET = MATRIX_ROW_STEP
-const LOGO_HEIGHT = 845
-const BACKDROP_REVEAL_MS = 1050
-const LOGO_START_DELAY_MS = 520
-const LOGO_ON_MS = 1280
-const LOGO_HOLD_MS = 780
-const LOGO_OFF_MS = 1060
-const LOGO_DARK_MS = 340
-const LOGO_LOOP_MS = LOGO_ON_MS + LOGO_HOLD_MS + LOGO_OFF_MS + LOGO_DARK_MS
-const SIMULATED_READY_MS = 11600
-const BACKDROP_FADE_MS = 760
-const FINAL_LOGO_HOLD_MS = 2000
-const CARD_EXIT_MS = 620
+const MATRIX_WIDTH = 5160
+const MATRIX_HEIGHT = 1109
+const READY_LOGO_PATTERN = createReadyLogoDotPattern(readyWordmarkSvg, {
+  xOffset: LOGO_X_OFFSET,
+  yOffset: LOGO_Y_OFFSET,
+  matrixXStart: MATRIX_X_START,
+  matrixColumnStep: MATRIX_COLUMN_STEP,
+})
+const BACKDROP_REVEAL_MS = 680
+const LOGO_COLUMN_MS = 86
+const SIMULATED_READY_MS = 5200
+const LOGO_COMPLETE_MS = 980
+const BACKDROP_FADE_DELAY_MS = 240
+const BACKDROP_FADE_MS = 560
+const FINAL_LOGO_HOLD_MS = 460
+const CARD_EXIT_MS = 280
 const RESTART_PAUSE_MS = 850
-const EXIT_TOTAL_MS = BACKDROP_FADE_MS + FINAL_LOGO_HOLD_MS + CARD_EXIT_MS
+const EXIT_TOTAL_MS = LOGO_COMPLETE_MS + FINAL_LOGO_HOLD_MS + CARD_EXIT_MS
 const DEMO_LOOP_MS = SIMULATED_READY_MS + EXIT_TOTAL_MS + RESTART_PAUSE_MS
 
 const VARIANT_COLORS: Record<ReadyStartupVariant, { logo: string; glow: string }> = {
@@ -71,38 +73,33 @@ function easeInOutCubic(value: number): number {
   return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2
 }
 
-function resolveLoopLogoClipPath(elapsedMs: number): string {
-  if (elapsedMs < LOGO_START_DELAY_MS) return 'inset(0 100% 0 0)'
-
-  const cycleMs = (elapsedMs - LOGO_START_DELAY_MS) % LOGO_LOOP_MS
-
-  if (cycleMs < LOGO_ON_MS) {
-    const progress = easeOutCubic(cycleMs / LOGO_ON_MS)
-    return `inset(0 ${(1 - progress) * 100}% 0 0)`
-  }
-
-  if (cycleMs < LOGO_ON_MS + LOGO_HOLD_MS) {
-    return 'inset(0 0 0 0)'
-  }
-
-  if (cycleMs < LOGO_ON_MS + LOGO_HOLD_MS + LOGO_OFF_MS) {
-    const progress = easeInOutCubic((cycleMs - LOGO_ON_MS - LOGO_HOLD_MS) / LOGO_OFF_MS)
-    return `inset(0 0 0 ${progress * 100}%)`
-  }
-
-  return 'inset(0 100% 0 0)'
-}
-
 function resolveFinishBackdropOpacity(finishElapsedMs: number | null): number {
   if (finishElapsedMs === null) return 1
-  return 1 - easeInOutCubic(finishElapsedMs / BACKDROP_FADE_MS)
+  const fadeElapsedMs = Math.max(0, finishElapsedMs - BACKDROP_FADE_DELAY_MS)
+  return 1 - easeInOutCubic(fadeElapsedMs / BACKDROP_FADE_MS)
 }
 
 function resolveCardOpacity(finishElapsedMs: number | null): number {
   if (finishElapsedMs === null) return 1
-  const exitElapsedMs = finishElapsedMs - BACKDROP_FADE_MS - FINAL_LOGO_HOLD_MS
+  const exitElapsedMs = finishElapsedMs - LOGO_COMPLETE_MS - FINAL_LOGO_HOLD_MS
   if (exitElapsedMs <= 0) return 1
   return 1 - easeInOutCubic(exitElapsedMs / CARD_EXIT_MS)
+}
+
+function resolveLogoDotOpacity(
+  columnIndex: number,
+  loopElapsedMs: number,
+  finishElapsedMs: number | null,
+): number {
+  if (finishElapsedMs !== null) {
+    const buildProgress = easeOutCubic(finishElapsedMs / LOGO_COMPLETE_MS) * READY_LOGO_PATTERN.columnCount
+    return 0.96 * clamp01(buildProgress - columnIndex)
+  }
+
+  const activeColumnIndex = Math.floor(loopElapsedMs / LOGO_COLUMN_MS) % READY_LOGO_PATTERN.columnCount
+  if (columnIndex !== activeColumnIndex) return 0
+  const phase = (loopElapsedMs % LOGO_COLUMN_MS) / LOGO_COLUMN_MS
+  return 0.78 + 0.18 * Math.sin(phase * Math.PI)
 }
 
 interface ReadyStartupSplashProps {
@@ -120,11 +117,6 @@ export default function ReadyStartupSplash({
   overlay = false,
   onExitComplete
 }: ReadyStartupSplashProps) {
-  const rawMaskId = useId()
-  const logoMaskId = useMemo(
-    () => `ready-startup-logo-mask-${rawMaskId.replace(/:/g, '')}`,
-    [rawMaskId]
-  )
   const [nowMs, setNowMs] = useState(() => performance.now())
   const [startedAtMs] = useState(() => performance.now())
   const [finishStartedAtMs, setFinishStartedAtMs] = useState<number | null>(null)
@@ -184,8 +176,6 @@ export default function ReadyStartupSplash({
       : GRID_COLUMNS
   const backdropOpacity = resolveFinishBackdropOpacity(finishElapsedMs)
   const cardOpacity = resolveCardOpacity(finishElapsedMs)
-  const logoClipPath =
-    finishElapsedMs === null ? resolveLoopLogoClipPath(loopElapsedMs) : 'inset(0 0 0 0)'
   const colors = VARIANT_COLORS[variant]
 
   return (
@@ -218,36 +208,19 @@ export default function ReadyStartupSplash({
         </div>
         <div
           className="startup-preview__matrix startup-preview__matrix--logo"
-          style={{ clipPath: logoClipPath }}
           aria-hidden="true"
         >
           <svg viewBox={`0 0 ${MATRIX_WIDTH} ${MATRIX_HEIGHT}`} preserveAspectRatio="xMidYMid meet">
-            <defs>
-              <mask
-                id={logoMaskId}
-                maskUnits="userSpaceOnUse"
-                x={LOGO_X_OFFSET}
-                y={LOGO_Y_OFFSET}
-                width={LOGO_WIDTH}
-                height={LOGO_HEIGHT}
-              >
-                <image
-                  href={readyWordmark}
-                  x={LOGO_X_OFFSET}
-                  y={LOGO_Y_OFFSET}
-                  width={LOGO_WIDTH}
-                  height={LOGO_HEIGHT}
-                />
-              </mask>
-            </defs>
-            <rect
-              x={LOGO_X_OFFSET}
-              y={LOGO_Y_OFFSET}
-              width={LOGO_WIDTH}
-              height={LOGO_HEIGHT}
-              fill={colors.logo}
-              mask={`url(#${logoMaskId})`}
-            />
+            {READY_LOGO_PATTERN.dots.map((dot, index) => (
+              <circle
+                key={`${dot.x}-${dot.y}-${index}`}
+                cx={dot.x}
+                cy={dot.y}
+                r={dot.r}
+                fill={colors.logo}
+                opacity={resolveLogoDotOpacity(dot.columnIndex, loopElapsedMs, finishElapsedMs)}
+              />
+            ))}
           </svg>
         </div>
       </section>

@@ -22,6 +22,7 @@ import type { AgentBrowserSurface } from './agent-browser-errors'
 import type { BrowserWriteLeaseService } from './browser-write-lease'
 import type { AgentTabControlGate } from './agent-tab-control-gate'
 import { classifyBrowserToolCall } from './browser-tool-write-classification'
+import { resolveBrowserToolSurfaceBinding } from './browser-surface-binding'
 
 export type ExecuteBrowserToolFn = (
   toolName: string,
@@ -107,7 +108,16 @@ export class ScopedBrowserFacade {
       tab_id: this.opts.agentTabId,
       collection_surface: this.surface,
     }
-    // 5. Dispatch under the matching lease.
+    // 5. Require the scoped code-derived surface binding before dispatch.
+    const surfaceBinding = resolveBrowserToolSurfaceBinding({
+      toolName,
+      args: scopedArgs,
+      dispatch: 'scoped-facade',
+      scopedSurface: this.surface,
+      agentTabId: this.opts.agentTabId,
+    })
+    if (!surfaceBinding.ok) return JSON.stringify(surfaceBinding.error)
+    // 6. Dispatch under the matching lease.
     return this.opts.execute(toolName, scopedArgs, this.surface, this.opts.leaseId)
   }
 }

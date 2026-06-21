@@ -14,6 +14,7 @@ import { constants as fsConstants, existsSync } from 'fs'
 import { basename, extname, join } from 'path'
 import { homedir } from 'os'
 import { analyzeViewportWithVision } from './browser-vision'
+import { compileBrowserReadonlyScriptTemplate } from './browser-readonly-script-templates'
 import { domainsLikelyMatch } from '../agent-control/domain-adapters/browser-action-heuristics'
 import { AgentRepository } from '../repositories/agent-repository'
 import { createRotatingLogger } from '../../utils/rotating-logger'
@@ -36,13 +37,14 @@ import {
   buildBrowserReadonlyProbeJs,
   normalizeBrowserReadonlyProbeRequest,
 } from '../../../shared/browser-readonly-probe'
-import { agentBrowserError, isAgentBrowserError } from '../browser-engine/agent-browser-errors'
+import { agentBrowserError, isAgentBrowserError, type AgentBrowserStructuredError } from '../browser-engine/agent-browser-errors'
 import { ToolDomainError } from './tool-errors'
 import {
   MANUAL_ONLY_TARGET_REGEX_SOURCES,
   argsCarryPasswordCue,
   matchManualOnlyBrowserTarget,
 } from '../agent-control/safety/action-confirmation-policy'
+import { ACTION_CONFIRMATION_ERROR_KINDS } from '../agent-control/contracts/error-kinds'
 import { buildPageMap, parseTargetId, type PageMap, type RawAxNode } from '../browser-engine/agent-browser-page-map'
 import { gateActOnTarget, type AgentBrowserAction, type AgentBrowserReadBack } from '../browser-engine/agent-browser-act'
 import { normalizeCollectionTargets, targetsFromTask, type BrowserCollectionTarget } from '../browser-engine/collection-targets'
@@ -60,10 +62,23 @@ import {
   createToolExecutionOutput,
   type ToolExecutionOutput,
 } from '../agent-control/tools-runtime/tool-result-types'
+import {
+  createBrowserStructuredJsonText as browserStructuredJsonText,
+  createBrowserStructuredOutput as browserStructuredOutput,
+  stringifyBrowserJsonOrFailure,
+} from './browser-failure-output'
 
 const logger = createRotatingLogger('ready-tools.log')
 function log(msg: string) {
   try { logger.append(`[${new Date().toISOString()}] ${msg}\n`) } catch { /* */ }
+}
+
+export const __breaksInvariants = [
+  'test-only browser collection consent/page-map singleton reset mutates shared browser tool state',
+]
+
+function browserStructuredErrorOutput(error: AgentBrowserStructuredError): ToolExecutionOutput {
+  return browserStructuredOutput(error as unknown as Record<string, unknown>)
 }
 
 let collectionConsentStore = new BrowserCollectionConsentStore()
@@ -464,14 +479,14 @@ function throwIfLiveTargetGuardBlocked(result: unknown, detail: Record<string, u
   if (marker.__readyManualOnlyBlocked === true) {
     const label = String(marker.label || '')
     throw new ToolDomainError(
-      'denied_manual_only',
+      ACTION_CONFIRMATION_ERROR_KINDS.deniedManualOnly.code,
       `目标「${label.slice(0, 80)}」命中 M1 规则（支付确认/改密提交/验证码必须由用户亲手完成）。请引导用户亲自完成这一步，不要代替执行或绕过。`,
       { ...detail, label },
     )
   }
   if (marker.__readyPasswordFillBlocked === true) {
     throw new ToolDomainError(
-      'denied_pending_confirmation',
+      ACTION_CONFIRMATION_ERROR_KINDS.deniedPendingConfirmation.code,
       '目标是密码输入框。请在调用参数中说明目标（如「登录密码输入框」），经用户确认后执行。',
       { ...detail, ruleId: 'm3-login-existing-account' },
     )
@@ -996,6 +1011,8 @@ function isLikelyReadyNonBrowserTaskId(taskId: string): boolean {
 
 function wrongBrowserTaskIdPayload(toolName: string, taskId: string): Record<string, unknown> {
   return {
+    ok: false,
+    errorCode: 'wrong_browser_task_id_type',
     taskId,
     status: 'wrong_id_type',
     message: `${toolName} 只能处理浏览器后台任务 id。这个 id 更像 Ready 聊天任务或技能子任务，请改用对应任务卡/技能续跑入口。`,
@@ -1136,7 +1153,7 @@ function highControlScriptGuard(
   toolName: string,
   args: Record<string, unknown>,
   candidateUrls: string[],
-): string | null {
+): ToolExecutionOutput | null {
   if (!candidateUrls.some((url) => isHighControlPlatformText(url))) return null
   const hasCustomScript = typeof args.custom_script === 'string' && args.custom_script.trim().length > 0
   const hasCustomJs =
@@ -1151,13 +1168,156 @@ function highControlScriptGuard(
     // it on high-control platforms so the start_task wrapper can't bypass.
     (toolName === 'browser_start_task' && startTaskPayloadHasScript(args))
   if (!blocked) return null
-  return JSON.stringify(
+  return browserStructuredErrorOutput(
     agentBrowserError(
       'script_blocked',
       '该平台为强检测平台，已禁用脚本硬操作（execute_js / run_workflow / custom_script / custom_js）。请改用可见采集：browser_read_page、browser_collect_images、browser_visible_collect（模板路径）、browser_capture_viewport、滚动。',
       { highControlPlatform: true, tool: toolName },
     ),
   )
+}
+
+type ScriptReadOnlyVerdict =
+  | { output: ToolExecutionOutput; args?: never }
+  | { output?: never; args: Record<string, unknown> }
+
+function stringValue(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+function scriptDeniedOutput(toolName: string, reason: string, detail?: Record<string, unknown>): ToolExecutionOutput {
+  return browserStructuredErrorOutput(agentBrowserError(
+    'freeform_script_denied',
+    '浏览器脚本工具只接受命名只读模板；自由 JavaScript 已被拒绝。请改用 read_text/read_attr/read_all_text/count_selector/exists_selector/read_rect/read_meta 模板。',
+    { tool: toolName, reason, ...(detail || {}) },
+  ))
+}
+
+function compileReadonlyScriptFromArgs(
+  toolName: string,
+  args: Record<string, unknown>,
+  options?: { allowTemplateAlias?: boolean; location?: string },
+): { code: string | null; output?: ToolExecutionOutput } {
+  const template =
+    stringValue(args.script_template)
+    || (options?.allowTemplateAlias ? stringValue(args.template) : '')
+  if (!template) return { code: null }
+
+  const compiled = compileBrowserReadonlyScriptTemplate({
+    template,
+    selector: args.selector,
+    attr: args.attr,
+    name: args.name,
+  })
+  if (!compiled.ok) {
+    return {
+      code: null,
+      output: scriptDeniedOutput(toolName, compiled.reason, {
+        template: compiled.template || template,
+        location: options?.location || toolName,
+      }),
+    }
+  }
+  return { code: compiled.code }
+}
+
+function resolveScriptReadOnlyVerdict(
+  toolName: string,
+  args: Record<string, unknown>,
+): ScriptReadOnlyVerdict {
+  if (toolName === 'browser_execute_js') {
+    if (stringValue(args.code)) {
+      return { output: scriptDeniedOutput(toolName, 'freeform_code', { field: 'code' }) }
+    }
+    const compiled = compileReadonlyScriptFromArgs(toolName, args, { allowTemplateAlias: true })
+    if (compiled.output) return { output: compiled.output }
+    if (compiled.code) return { args: { ...args, code: compiled.code } }
+    return { args }
+  }
+
+  if (toolName === 'browser_wait_for_condition') {
+    if (stringValue(args.custom_js)) {
+      return { output: scriptDeniedOutput(toolName, 'freeform_custom_js', { field: 'custom_js' }) }
+    }
+    const compiled = compileReadonlyScriptFromArgs(toolName, args, { allowTemplateAlias: true })
+    if (compiled.output) return { output: compiled.output }
+    if (compiled.code) return { args: { ...args, condition: 'custom_js', custom_js: compiled.code } }
+    if (args.condition === 'custom_js') {
+      return { output: scriptDeniedOutput(toolName, 'missing_readonly_template', { field: 'custom_js' }) }
+    }
+    return { args }
+  }
+
+  if (toolName === 'browser_extract_structured' || toolName === 'browser_scroll_collect') {
+    if (stringValue(args.custom_script)) {
+      return { output: scriptDeniedOutput(toolName, 'freeform_custom_script', { field: 'custom_script' }) }
+    }
+    const compiled = compileReadonlyScriptFromArgs(toolName, args, { allowTemplateAlias: false })
+    if (compiled.output) return { output: compiled.output }
+    if (compiled.code) return { args: { ...args, custom_script: compiled.code } }
+    return { args }
+  }
+
+  if (toolName === 'browser_run_workflow') {
+    if (!Array.isArray(args.steps)) return { args }
+    const nextSteps: unknown[] = []
+    for (const step of args.steps) {
+      if (!step || typeof step !== 'object') {
+        nextSteps.push(step)
+        continue
+      }
+      const current = step as Record<string, unknown>
+      if (String(current.action || '').trim().toLowerCase() !== 'execute_js') {
+        nextSteps.push(current)
+        continue
+      }
+      if (stringValue(current.code)) {
+        return { output: scriptDeniedOutput(toolName, 'workflow_freeform_code', { field: 'steps[].code' }) }
+      }
+      const compiled = compileReadonlyScriptFromArgs(toolName, current, {
+        allowTemplateAlias: true,
+        location: 'workflow.execute_js',
+      })
+      if (compiled.output) return { output: compiled.output }
+      nextSteps.push(compiled.code ? { ...current, code: compiled.code } : current)
+    }
+    return { args: { ...args, steps: nextSteps } }
+  }
+
+  if (toolName === 'browser_start_task') {
+    const payload = args.payload && typeof args.payload === 'object' ? args.payload as Record<string, unknown> : null
+    if (!payload) return { args }
+    if (stringValue(payload.customScript)) {
+      return { output: scriptDeniedOutput(toolName, 'payload_freeform_custom_script', { field: 'payload.customScript' }) }
+    }
+    const nextPayload: Record<string, unknown> = { ...payload }
+    const payloadCompiled = compileReadonlyScriptFromArgs(toolName, payload, {
+      allowTemplateAlias: false,
+      location: 'payload.customScript',
+    })
+    if (payloadCompiled.output) return { output: payloadCompiled.output }
+    if (payloadCompiled.code) nextPayload.customScript = payloadCompiled.code
+
+    const wait = payload.wait && typeof payload.wait === 'object' ? payload.wait as Record<string, unknown> : null
+    if (wait) {
+      if (stringValue(wait.customJs)) {
+        return { output: scriptDeniedOutput(toolName, 'payload_wait_freeform_custom_js', { field: 'payload.wait.customJs' }) }
+      }
+      const waitCompiled = compileReadonlyScriptFromArgs(toolName, wait, {
+        allowTemplateAlias: true,
+        location: 'payload.wait.customJs',
+      })
+      if (waitCompiled.output) return { output: waitCompiled.output }
+      if (waitCompiled.code) {
+        nextPayload.wait = { ...wait, condition: 'custom_js', customJs: waitCompiled.code }
+      } else if (wait.condition === 'custom_js') {
+        return { output: scriptDeniedOutput(toolName, 'payload_wait_missing_readonly_template', { field: 'payload.wait.customJs' }) }
+      }
+    }
+    return { args: { ...args, payload: nextPayload } }
+  }
+
+  return { args }
 }
 
 function activePageLikelyMatchesTarget(activeUrl: string | undefined, target: string): boolean {
@@ -1560,6 +1720,10 @@ function createAbortError(): Error {
   return error
 }
 
+function isBrowserAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === 'AbortError'
+}
+
 function throwIfAborted(signal?: AbortSignal | null): void {
   if (signal?.aborted) {
     throw createAbortError()
@@ -1770,7 +1934,7 @@ async function runGuardedCoordinateClick(
       const manualHit = matchManualOnlyBrowserTarget(String(p.label || ''))
       if (manualHit) {
         throw new ToolDomainError(
-          'denied_manual_only',
+          ACTION_CONFIRMATION_ERROR_KINDS.deniedManualOnly.code,
           `坐标点击目标「${String(p.label || '').slice(0, 80)}」命中 M1 规则（${manualHit.reason}）。请引导用户亲自完成这一步。`,
           { x, y, ruleId: manualHit.ruleId },
         )
@@ -1848,7 +2012,7 @@ async function runGuardedCoordinateType(
       const clickHit = matchManualOnlyBrowserTarget(clickLabel)
       if (clickHit) {
         throw new ToolDomainError(
-          'denied_manual_only',
+          ACTION_CONFIRMATION_ERROR_KINDS.deniedManualOnly.code,
           `坐标输入会先点击目标「${clickLabel.slice(0, 80)}」，命中 M1 规则（${clickHit.reason}）。请引导用户亲自完成这一步。`,
           { x, y, ruleId: clickHit.ruleId },
         )
@@ -1860,14 +2024,14 @@ async function runGuardedCoordinateType(
       const fieldHit = matchManualOnlyBrowserTarget(inputLabel)
       if (fieldHit) {
         throw new ToolDomainError(
-          'denied_manual_only',
+          ACTION_CONFIRMATION_ERROR_KINDS.deniedManualOnly.code,
           `坐标输入目标「${inputLabel.slice(0, 80)}」命中 M1 规则（${fieldHit.reason}）。请引导用户亲自完成这一步。`,
           { x, y, ruleId: fieldHit.ruleId },
         )
       }
       if (p.password === true && !opts.allowPasswordFill) {
         throw new ToolDomainError(
-          'denied_pending_confirmation',
+          ACTION_CONFIRMATION_ERROR_KINDS.deniedPendingConfirmation.code,
           '坐标输入目标是密码输入框。请在调用参数中说明目标（如「登录密码输入框」），经用户确认后执行。',
           { x, y, ruleId: 'm3-login-existing-account' },
         )
@@ -1918,14 +2082,14 @@ async function sendKeyStroke(
       const manualHit = matchManualOnlyBrowserTarget(inputLabel)
       if (manualHit) {
         throw new ToolDomainError(
-          'denied_manual_only',
+          ACTION_CONFIRMATION_ERROR_KINDS.deniedManualOnly.code,
           `当前焦点字段「${inputLabel.slice(0, 80)}」命中 M1 规则（${manualHit.reason}）。请引导用户亲自完成这一步，不要逐键代输。`,
           { key: keyLabel, ruleId: manualHit.ruleId },
         )
       }
       if (probed.password === true) {
         throw new ToolDomainError(
-          'denied_pending_confirmation',
+          ACTION_CONFIRMATION_ERROR_KINDS.deniedPendingConfirmation.code,
           '当前焦点是密码输入框，不能逐键代输。请改用 browser_type 并在参数中说明目标（如「登录密码输入框」），经用户确认后执行。',
           { key: keyLabel, ruleId: 'm3-login-existing-account' },
         )
@@ -3253,7 +3417,7 @@ async function runWorkflowStep(
     const textHit = matchManualOnlyBrowserTarget(text)
     if (textHit) {
       throw new ToolDomainError(
-        'denied_manual_only',
+        ACTION_CONFIRMATION_ERROR_KINDS.deniedManualOnly.code,
         `workflow click_text 目标文本「${text.slice(0, 80)}」命中 M1 规则（${textHit.reason}）。请引导用户亲自完成这一步。`,
         { text, ruleId: textHit.ruleId },
       )
@@ -3341,7 +3505,7 @@ async function runWorkflowStep(
   }
 
   if (action === 'execute_js') {
-    const code = String(step.code || '')
+    const code = typeof step.code === 'string' ? step.code : ''
     if (!code) return 'Error: workflow execute_js missing code'
     return String(await controller.executeJS(tabId, code))
   }
@@ -4550,10 +4714,17 @@ export async function executeBrowserTool(
     return highControlDenied
   }
 
+  const scriptReadOnlyVerdict = resolveScriptReadOnlyVerdict(toolName, args)
+  if (scriptReadOnlyVerdict.output) {
+    log(`Browser tool freeform-script-denied: ${toolName}`)
+    return scriptReadOnlyVerdict.output
+  }
+  args = scriptReadOnlyVerdict.args
+
   const gate = beginLeaseGate(leaseGate, toolName, args)
   if (gate.deniedMessage !== null) {
     log(`Browser tool lease-denied: ${toolName} ${gate.deniedMessage}`)
-    return gate.deniedMessage
+    return browserStructuredJsonText(gate.deniedMessage)
   }
 
   try {
@@ -4669,17 +4840,17 @@ export async function executeBrowserTool(
         const requestedGeneration = Number(args.generation)
         const currentGeneration = currentBrowserPageMapGeneration(controller, tabId)
         if (!Number.isFinite(requestedGeneration) || requestedGeneration <= 0) {
-          return JSON.stringify(agentBrowserError(
+          return browserStructuredErrorOutput(agentBrowserError(
             'stale_page_map',
             'generation is required. Call browser_read_page_map first and pass its pageIdentity.generation.',
-          ), null, 2)
+          ))
         }
         if (currentGeneration === null || currentGeneration !== requestedGeneration) {
-          return JSON.stringify(agentBrowserError(
+          return browserStructuredErrorOutput(agentBrowserError(
             'stale_page_map',
             'Readonly probe requires a fresh page map generation. Call browser_read_page_map again.',
             { currentGeneration, requestedGeneration },
-          ), null, 2)
+          ))
         }
         const activeUrl = tabId
           ? controller.getTabList?.().find((tab) => tab.id === tabId)?.url
@@ -4705,23 +4876,23 @@ export async function executeBrowserTool(
         const value = args.value === undefined ? undefined : String(args.value)
         const disambiguation = String(args.disambiguation || '').trim()
         const readBack = String(args.read_back || args.readBack || 'delta') as AgentBrowserReadBack
-        if (!targetId) return JSON.stringify(agentBrowserError('target_not_found', 'target_id is required'), null, 2)
+        if (!targetId) return browserStructuredErrorOutput(agentBrowserError('target_not_found', 'target_id is required'))
         if (!['click', 'expand', 'choose', 'fill', 'hover'].includes(action)) {
-          return JSON.stringify(agentBrowserError('target_not_found', `Unsupported action: ${String(args.action || '')}`), null, 2)
+          return browserStructuredErrorOutput(agentBrowserError('target_not_found', `Unsupported action: ${String(args.action || '')}`))
         }
         let tabId = (args.tab_id as string) || null
         tabId = (await resolveHighControlAgentTab(controller, args, { signal: abortSignal })).tabId
         const parsed = parseTargetId(targetId)
         if (!parsed) {
-          return JSON.stringify(agentBrowserError('target_not_found', `Malformed target id: ${targetId}`), null, 2)
+          return browserStructuredErrorOutput(agentBrowserError('target_not_found', `Malformed target id: ${targetId}`))
         }
         const currentGeneration = currentBrowserPageMapGeneration(controller, tabId)
         if (currentGeneration === null) {
-          return JSON.stringify(agentBrowserError(
+          return browserStructuredErrorOutput(agentBrowserError(
             'stale_page_map',
             'No page map has been read for this tab. Call browser_read_page_map first.',
             { targetGeneration: parsed.generation },
-          ), null, 2)
+          ))
         }
         const liveProbe = await controller.executeJS(tabId, buildBrowserTargetProbeJs(parsed.node)) as {
           matchCount?: number
@@ -4737,30 +4908,30 @@ export async function executeBrowserTool(
             ambiguityGroup: currentBrowserPageMapAmbiguity(controller, tabId, targetId),
           },
         )
-        if (isAgentBrowserError(gated)) return JSON.stringify(gated, null, 2)
+        if (isAgentBrowserError(gated)) return browserStructuredErrorOutput(gated)
         if (!liveProbe) {
-          return JSON.stringify(agentBrowserError(
+          return browserStructuredErrorOutput(agentBrowserError(
             'target_not_found',
             `Target ${targetId} was not found on the current page.`,
             { targetId },
-          ), null, 2)
+          ))
         }
         if (liveProbe?.disabled === true) {
-          return JSON.stringify(agentBrowserError(
+          return browserStructuredErrorOutput(agentBrowserError(
             'target_not_found',
             `Target ${targetId} is disabled.`,
             { targetId, target: liveProbe.target },
-          ), null, 2)
+          ))
         }
         const targetRecord = liveProbe?.target && typeof liveProbe.target === 'object'
           ? liveProbe.target as { role?: string; name?: string; value?: string; states?: Record<string, unknown> }
           : null
         if (targetRecord?.states?.fileInput === true) {
-          return JSON.stringify(agentBrowserError(
+          return browserStructuredErrorOutput(agentBrowserError(
             'script_blocked',
             `Target ${targetId} is a file input. Use browser_upload_scope_attachment for file upload.`,
             { targetId, target: liveProbe.target },
-          ), null, 2)
+          ))
         }
         // EP1-I3 live-target net — the dispatch gate only saw the args; a
         // bare target_id legally carries no semantics. Re-check the REAL
@@ -4779,7 +4950,7 @@ export async function executeBrowserTool(
         const manualOnlyHit = matchManualOnlyBrowserTarget(liveLabel)
         if (manualOnlyHit) {
           throw new ToolDomainError(
-            'denied_manual_only',
+            ACTION_CONFIRMATION_ERROR_KINDS.deniedManualOnly.code,
             `目标「${liveLabel.slice(0, 80)}」命中 M1 规则（${manualOnlyHit.reason}）。请引导用户亲自完成这一步，不要代替执行或绕过。`,
             { targetId, ruleId: manualOnlyHit.ruleId },
           )
@@ -4795,7 +4966,7 @@ export async function executeBrowserTool(
           && !argsCarryPasswordCue(JSON.stringify(args))
         ) {
           throw new ToolDomainError(
-            'denied_pending_confirmation',
+            ACTION_CONFIRMATION_ERROR_KINDS.deniedPendingConfirmation.code,
             `目标 ${targetId} 是密码输入框。请改用带 disambiguation 说明（如「登录密码输入框」）的调用重试，经用户确认后执行。`,
             { targetId, ruleId: 'm3-login-existing-account' },
           )
@@ -4812,7 +4983,7 @@ export async function executeBrowserTool(
         const failureKind = actionFailed
           ? String((actionResult as { errorCode?: unknown }).errorCode || 'action_failed')
           : null
-        return JSON.stringify({
+        const payload = {
           ok: !actionFailed,
           targetId,
           action,
@@ -4824,7 +4995,8 @@ export async function executeBrowserTool(
           changed: didBrowserActionChange(before, after),
           failureKind,
           nextSuggestedAction: actionFailed ? 'read map again' : 'read map again',
-        }, null, 2)
+        }
+        return actionFailed ? browserStructuredOutput(payload) : JSON.stringify(payload, null, 2)
       }
 
       case 'browser_click': {
@@ -5097,7 +5269,7 @@ export async function executeBrowserTool(
         const tabId = (args.tab_id as string) || null
         const action = String(args.action || '').trim() as 'upload' | 'send' | 'close' | 'back'
         if (!['upload', 'send', 'close', 'back'].includes(action)) {
-          return JSON.stringify({ ok: false, reason: 'invalid_action' }, null, 2)
+          return browserStructuredOutput({ ok: false, reason: 'invalid_action' })
         }
         const targets = await locateActionTargets(controller, tabId, action)
         const toolMeta = resolveToolContextMeta(controller, tabId)
@@ -5154,7 +5326,7 @@ export async function executeBrowserTool(
         const tabId = (args.tab_id as string) || null
         const action = String(args.action || '').trim() as 'upload' | 'send' | 'close' | 'back' | 'input'
         if (!['upload', 'send', 'close', 'back', 'input'].includes(action)) {
-          return JSON.stringify({ ok: false, reason: 'invalid_action' }, null, 2)
+          return browserStructuredOutput({ ok: false, reason: 'invalid_action' })
         }
         const includeDomCandidates = args.include_dom_candidates !== false
         const domCandidates = includeDomCandidates
@@ -5170,9 +5342,10 @@ export async function executeBrowserTool(
           domCandidates,
         })
         const toolMeta = resolveToolContextMeta(controller, tabId)
-        return JSON.stringify({
+        const payload = {
           ok: analysis.ok,
           ...toolMeta,
+          ...(!analysis.ok ? { errorCode: 'viewport_analysis_failed' } : {}),
           action,
           latencyMs: Date.now() - startedAt,
           reason: analysis.reason,
@@ -5182,7 +5355,8 @@ export async function executeBrowserTool(
             ...domCandidates.flatMap((item) => item.evidence || []),
             ...((analysis.analysis?.targets || []).map((item) => String(item.reason || ''))),
           ]),
-        }, null, 2)
+        }
+        return stringifyBrowserJsonOrFailure(payload)
       }
 
       case 'browser_list_upload_targets': {
@@ -5203,32 +5377,35 @@ export async function executeBrowserTool(
         const attachments = await listScopeAttachmentsForTool(sessionId)
         const selected = selectScopeAttachment(attachments, args)
         if (selected.reason) {
-          return JSON.stringify({
+          return browserStructuredOutput({
             ok: false,
+            errorCode: 'attachment_selection_failed',
             ...uploadMetaFor(null),
             reason: selected.reason,
             candidates: attachments.slice(0, 6),
-          }, null, 2)
+          })
         }
         if (selected.ambiguous && selected.ambiguous.length > 0) {
-          return JSON.stringify({
+          return browserStructuredOutput({
             ok: false,
+            errorCode: 'attachment_selection_ambiguous',
             ...uploadMetaFor(null),
             reason: '存在多个候选附件，请补充 attachment_id 或 attachment_name。',
             candidates: selected.ambiguous,
-          }, null, 2)
+          })
         }
         const attachment = selected.attachment
         if (!attachment) {
-          return JSON.stringify({ ok: false, ...uploadMetaFor(null), reason: '未能选择附件。' }, null, 2)
+          return browserStructuredOutput({ ok: false, errorCode: 'attachment_not_selected', ...uploadMetaFor(null), reason: '未能选择附件。' })
         }
         if (!existsSync(attachment.path)) {
-          return JSON.stringify({
+          return browserStructuredOutput({
             ok: false,
+            errorCode: 'attachment_file_missing',
             ...uploadMetaFor(null),
             reason: `附件文件不存在: ${attachment.path}`,
             attachment,
-          }, null, 2)
+          })
         }
 
         const tabId = (args.tab_id as string) || null
@@ -5295,7 +5472,7 @@ export async function executeBrowserTool(
           const openResult = await clickActionTarget(controller, tabId, chosenTarget, abortSignal)
           if (!openResult.ok) {
             const recovered = await attemptRecoverPageState(controller, tabId, abortSignal)
-            return JSON.stringify({
+            return browserStructuredOutput({
               ok: false,
               ...uploadMetaFor(tabId),
               reason: 'failed_to_open_upload_path',
@@ -5303,7 +5480,7 @@ export async function executeBrowserTool(
               target: chosenTarget,
               recovery: recovered,
               evidenceIds: uniqueStrings(chosenTarget?.evidence || []),
-            }, null, 2)
+            })
           }
           await sleepWithAbort(220, abortSignal)
           targets = await locateActionTargets(controller, tabId, 'upload')
@@ -5329,15 +5506,16 @@ export async function executeBrowserTool(
           y: effectiveCoords?.cssY,
         })
         if (!setResult.ok) {
-          return JSON.stringify({
+          return browserStructuredOutput({
             ok: false,
+            errorCode: 'upload_target_not_found',
             ...uploadMetaFor(tabId),
             reason: '未找到可用的上传入口。',
             attachment,
             candidates: targets.slice(0, 8),
             target: setResult.targetDescription,
             evidenceIds: uniqueStrings(targets.flatMap((item) => item.evidence || [])),
-          }, null, 2)
+          })
         }
 
         await settleAfterAction(controller, tabId, abortSignal)
@@ -5362,8 +5540,9 @@ export async function executeBrowserTool(
             uploadedAt: Date.now(),
           })
         }
-        return JSON.stringify({
+        const payload = {
           ok: effectiveVerification.success,
+          ...(!effectiveVerification.success ? { errorCode: 'upload_verification_failed' } : {}),
           ...uploadMetaFor(tabId),
           attachment: {
             attachmentId: attachment.attachmentId,
@@ -5381,7 +5560,8 @@ export async function executeBrowserTool(
             ...(effectiveVerification.evidence || []),
             ...(chosenTarget?.evidence || []),
           ]),
-        }, null, 2)
+        }
+        return stringifyBrowserJsonOrFailure(payload)
       }
 
       case 'browser_collect_images': {
@@ -5737,10 +5917,12 @@ export async function executeBrowserTool(
           },
         })).video
 
-        return JSON.stringify({
+        const payload = {
           ok: video.parseStatus !== 'failed',
+          ...(video.parseStatus === 'failed' ? { errorCode: 'video_parse_failed' } : {}),
           video,
-        }, null, 2)
+        }
+        return stringifyBrowserJsonOrFailure(payload)
       }
 
       case 'browser_download_urls': {
@@ -5752,13 +5934,13 @@ export async function executeBrowserTool(
         if (args.unrelated_to_collection !== true) {
           const chained = await findScopeImageGallerySourceTask(controller, sessionId)
           if (chained) {
-            return JSON.stringify({
+            return browserStructuredOutput({
               ok: false,
               errorCode: 'use_collected_media_download',
               message: `本会话已有图片采集任务 ${chained.taskId}（已发现 ${mediaUrlsFromVisibleCollectTask(chained).length} 张）。保存这些图片必须用 browser_download_collected_media(source_task_id) 让下载结果回到采集卡；只有与该采集无关的下载才可以传 unrelated_to_collection: true 继续使用本工具。`,
               sourceTaskId: chained.taskId,
               suggestedNextTool: 'browser_download_collected_media',
-            }, null, 2)
+            })
           }
         }
         return await downloadUrlsToDirectory(controller, {
@@ -5781,30 +5963,30 @@ export async function executeBrowserTool(
           ? ((controller as { getTaskPayload: (taskId: string) => Record<string, unknown> | null }).getTaskPayload(sourceTaskId) || null)
           : null
         if (!sourceTask) {
-          return JSON.stringify({
+          return browserStructuredOutput({
             ok: false,
             errorCode: 'source_task_missing',
             message: `source_task_id ${sourceTaskId} 不存在，无法下载已发现图片。`,
             sourceTaskId,
-          }, null, 2)
+          })
         }
         const sourceScopeId = stringField(sourcePayload?.scopeId)
         if (sessionId && sourceScopeId && sourceScopeId !== sessionId) {
-          return JSON.stringify({
+          return browserStructuredOutput({
             ok: false,
             errorCode: 'stale_source_task_scope',
             message: `source_task_id ${sourceTaskId} 属于另一个会话，不能接力下载。请使用本轮 browser_visible_collect 返回的 source_task_id。`,
             sourceTaskId,
-          }, null, 2)
+          })
         }
         if (!isImageGallerySourceTask(sourceTask, sourcePayload)) {
-          return JSON.stringify({
+          return browserStructuredOutput({
             ok: false,
             errorCode: 'source_task_not_image_gallery',
             message: `source_task_id ${sourceTaskId} 不是 browser_visible_collect(image_gallery) 任务，不能用图片下载接力。`,
             sourceTaskId,
             kind: sourceTask.kind,
-          }, null, 2)
+          })
         }
         if (!isCompleteSourceTask(sourceTask)) {
           const result = resultObject(sourceTask)
@@ -5820,7 +6002,7 @@ export async function executeBrowserTool(
             })
             const message = `source_task_id ${sourceTaskId} 的图片发现还未证明是完整全量（discoveryStatus=${status}, stopReason=${stopReason}, 已发现 ${frozenCount} 张）。请先用 browser_resume_task 继续发现；如果用户明确只下载当前已发现图片，需要先完成部分采集确认。`
             await upsertCollectionConsentProjection(runtime, pendingConsentRequest, message)
-            return JSON.stringify({
+            return browserStructuredOutput({
               ok: false,
               errorCode: 'partial_collection_consent_required',
               message,
@@ -5830,17 +6012,17 @@ export async function executeBrowserTool(
               frozenCount,
               allowPartialIgnored: args.allow_partial === true,
               pendingConsentRequest,
-            }, null, 2)
+            })
           }
         }
         const urls = mediaUrlsFromVisibleCollectTask(sourceTask)
         if (urls.length === 0) {
-          return JSON.stringify({
+          return browserStructuredOutput({
             ok: false,
             errorCode: 'source_task_has_no_media',
             message: `source_task_id ${sourceTaskId} 没有可下载的图片 URL。`,
             sourceTaskId,
-          }, null, 2)
+          })
         }
         const result = resultObject(sourceTask)
         const referer = stringField(result?.targetUrl) || stringField(sourcePayload?.url)
@@ -5852,7 +6034,9 @@ export async function executeBrowserTool(
           referer,
         })
         const outputText = typeof output === 'string' ? output : output.text
-        if (outputText.startsWith('Error:')) return output
+        if (outputText.startsWith('Error:')) {
+          return browserStructuredJsonText(outputText)
+        }
         const parsed = JSON.parse(outputText) as Record<string, unknown>
         // EP2 dogfood gap 2 — completion must reconcile discovered/saved/
         // failed/remaining. A page-claimed total (expected_total) that
@@ -5871,6 +6055,7 @@ export async function executeBrowserTool(
         const undiscovered = expectedTotal !== null ? Math.max(0, expectedTotal - discovered) : 0
         const remaining = undiscovered + Math.max(0, discovered - saved - failed)
         const completion = remaining > 0 || failed > 0 ? 'partial' : 'complete'
+        const ok = saved > 0 && completion === 'complete'
         // EP2 dogfood gap 3 — downloads flow BACK to the source task so the
         // collection card's numbers move (saved/failed/remaining visible).
         try {
@@ -5882,8 +6067,9 @@ export async function executeBrowserTool(
             expectedTotal,
           })
         } catch { /* progress write-back must not fail the download result */ }
-        const collectedText = JSON.stringify({
-          ok: saved > 0,
+        const collectedPayload = {
+          ok,
+          ...(!ok ? { errorCode: completion === 'partial' ? 'collected_media_download_partial' : 'collected_media_download_failed' } : {}),
           completion,
           sourceTaskId,
           mediaCandidateCount: discovered,
@@ -5896,22 +6082,20 @@ export async function executeBrowserTool(
             ? `已保存已发现的 ${saved} 张${failed > 0 ? `（${failed} 张失败）` : ''}${undiscovered > 0 ? `，页面声称共 ${expectedTotal} 张，仍有 ${undiscovered} 张未发现/未加载——请继续发现后再下载，不要宣告完成` : ''}。`
             : `已保存全部已发现的 ${saved} 张。`,
           ...parsed,
-        }, null, 2)
-        if (typeof output === 'string') return collectedText
+        }
+        const collectedText = JSON.stringify(collectedPayload, null, 2)
+        if (typeof output === 'string') {
+          return ok ? collectedText : browserStructuredOutput(collectedPayload)
+        }
+        if (!ok) {
+          return browserStructuredOutput(collectedPayload, {
+            projectionPatch: output.projectionPatch,
+            contextModifier: output.contextModifier,
+          })
+        }
         return createToolExecutionOutput(collectedText, {
           shape: 'json',
-          data: {
-            ok: saved > 0,
-            completion,
-            sourceTaskId,
-            mediaCandidateCount: discovered,
-            discovered,
-            saved,
-            failedCount: failed,
-            remaining,
-            expectedTotal,
-            ...parsed,
-          },
+          data: collectedPayload,
           projectionPatch: output.projectionPatch,
           contextModifier: output.contextModifier,
         })
@@ -6034,10 +6218,11 @@ export async function executeBrowserTool(
       case 'browser_wait_for_condition': {
         let tabId = (args.tab_id as string) || null
         tabId = (await resolveHighControlAgentTab(controller, args, { signal: abortSignal })).tabId
+        const customJs = typeof args.custom_js === 'string' ? args.custom_js : undefined
         const result = await controller.waitForCondition(tabId, {
           condition: String(args.condition || 'page_readable') as never,
           selector: typeof args.selector === 'string' ? args.selector : undefined,
-          customJs: typeof args.custom_js === 'string' ? args.custom_js : undefined,
+          customJs,
           timeoutMs: Number(args.timeout_ms || 0) || undefined,
           checkIntervalMs: Number(args.check_interval_ms || 0) || undefined,
           stableIterations: Number(args.stable_iterations || 0) || undefined,
@@ -6056,13 +6241,14 @@ export async function executeBrowserTool(
               .filter((item) => item && typeof item === 'object' && typeof (item as { name?: unknown }).name === 'string')
               .map((item) => item as BrowserStructuredFieldMapping))
           : undefined
+        const customScript = typeof args.custom_script === 'string' ? args.custom_script : undefined
         const options = {
           template,
           itemSelector: typeof args.item_selector === 'string' ? args.item_selector : undefined,
           fields,
           limit: Number(args.limit || 0) || undefined,
           minWidth: Number(args.min_width || 0) || undefined,
-          customScript: typeof args.custom_script === 'string' ? args.custom_script : undefined,
+          customScript,
         }
         const result = url && !scoped.redirected
           ? await controller.extractStructuredFromUrl(url, options)
@@ -6081,13 +6267,14 @@ export async function executeBrowserTool(
           }
           tabId = opened.tabId
         }
+        const customScript = typeof args.custom_script === 'string' ? args.custom_script : undefined
         const result = await controller.scrollCollect(tabId, {
           template,
           itemSelector: typeof args.item_selector === 'string' ? args.item_selector : undefined,
           limit: Number(args.limit || 0) || undefined,
           maxScrolls: Number(args.max_scrolls || 0) || undefined,
           scrollDelayMs: Number(args.scroll_delay_ms || 0) || undefined,
-          customScript: typeof args.custom_script === 'string' ? args.custom_script : undefined,
+          customScript,
         })
         return JSON.stringify(result, null, 2)
       }
@@ -6098,7 +6285,7 @@ export async function executeBrowserTool(
         const payload = args.payload && typeof args.payload === 'object' ? args.payload as Record<string, unknown> : {}
         const result = await controller.startTask({
           kind: kind as never,
-          payload,
+          payload: { ...payload },
         })
         return JSON.stringify(result, null, 2)
       }
@@ -6110,7 +6297,7 @@ export async function executeBrowserTool(
         const resumedCollection = result ? await startCollectionFromCompletedVisibleTask(controller, result, sessionId) : null
         if (resumedCollection) return JSON.stringify(resumedCollection, null, 2)
         if (!result && isLikelyReadyNonBrowserTaskId(taskId)) {
-          return JSON.stringify(wrongBrowserTaskIdPayload('browser_get_task', taskId), null, 2)
+          return browserStructuredOutput(wrongBrowserTaskIdPayload('browser_get_task', taskId))
         }
         return JSON.stringify(result ? enrichBrowserTaskPayload(result) : { taskId, status: 'missing' }, null, 2)
       }
@@ -6128,7 +6315,7 @@ export async function executeBrowserTool(
         const resumedCollection = current ? await startCollectionFromCompletedVisibleTask(controller, current, sessionId) : null
         if (resumedCollection) return JSON.stringify(resumedCollection, null, 2)
         if (!current && isLikelyReadyNonBrowserTaskId(taskId)) {
-          return JSON.stringify(wrongBrowserTaskIdPayload('browser_resume_task', taskId), null, 2)
+          return browserStructuredOutput(wrongBrowserTaskIdPayload('browser_resume_task', taskId))
         }
         const result = await controller.resumeTask(taskId)
         return JSON.stringify(result || { taskId, status: 'missing' }, null, 2)
@@ -6139,7 +6326,7 @@ export async function executeBrowserTool(
         if (!taskId) return 'Error: task_id is required'
         const result = await controller.cancelTask(taskId)
         if (!result && isLikelyReadyNonBrowserTaskId(taskId)) {
-          return JSON.stringify(wrongBrowserTaskIdPayload('browser_cancel_task', taskId), null, 2)
+          return browserStructuredOutput(wrongBrowserTaskIdPayload('browser_cancel_task', taskId))
         }
         return JSON.stringify(result || { taskId, status: 'missing' }, null, 2)
       }
@@ -6210,7 +6397,7 @@ export async function executeBrowserTool(
       }
 
       case 'browser_execute_js': {
-        const code = args.code as string
+        const code = typeof args.code === 'string' ? args.code : ''
         if (!code) return 'Error: code is required'
         const tabId = (args.tab_id as string) || null
         log(`Executing JS: ${code.slice(0, 100)}`)
@@ -6247,6 +6434,9 @@ export async function executeBrowserTool(
         const result = startVisibleCollection
           ? await startVisibleCollection.call(controller, payload, sessionId)
           : await controller.startTask({ kind: 'visible_collect', payload })
+        if (result && typeof result === 'object' && (result as { ok?: unknown }).ok === false) {
+          return browserStructuredOutput(result as Record<string, unknown>)
+        }
         return JSON.stringify(result, null, 2)
       }
 
@@ -6270,21 +6460,33 @@ export async function executeBrowserTool(
         if (sourceTaskId) {
           sourceTask = await controller.getTask(sourceTaskId)
           const frozenNotes = targetsFromTask(sourceTask)
-          if (!sourceTask) return `Error: source_task_id ${sourceTaskId} 不存在，无法接力采集。`
+          if (!sourceTask) {
+            return browserStructuredOutput({
+              ok: false,
+              errorCode: 'source_task_missing',
+              message: `source_task_id ${sourceTaskId} 不存在，无法接力采集。`,
+              sourceTaskId,
+            })
+          }
           const sourcePayload = typeof (controller as { getTaskPayload?: (taskId: string) => Record<string, unknown> | null }).getTaskPayload === 'function'
             ? ((controller as { getTaskPayload: (taskId: string) => Record<string, unknown> | null }).getTaskPayload(sourceTaskId) || null)
             : null
           const mismatch = sourceTaskHandoffMismatch(sourceTaskId, sourcePayload, resultObject(sourceTask), sessionId, requestedOutputRootDir)
           if (mismatch) {
             log(`browser_collect_notes refusal ${mismatch.errorCode} sourceTaskId=${sourceTaskId}`)
-            return JSON.stringify({
+            return browserStructuredOutput({
               ok: false,
               ...mismatch,
               sourceTaskId,
-            }, null, 2)
+            })
           }
           if (frozenNotes.length === 0) {
-            return `Error: source_task_id ${sourceTaskId} 没有可接力的冻结目标清单。`
+            return browserStructuredOutput({
+              ok: false,
+              errorCode: 'source_task_has_no_targets',
+              message: `source_task_id ${sourceTaskId} 没有可接力的冻结目标清单。`,
+              sourceTaskId,
+            })
           }
           if (!isCompleteSourceTask(sourceTask) && !partialConsent) {
             const status = sourceTaskDiscoveryStatus(sourceTask)
@@ -6299,7 +6501,7 @@ export async function executeBrowserTool(
             const message = `source_task_id ${sourceTaskId} 的发现清单不是完整全量（discoveryStatus=${status}, stopReason=${stopReason}, 已冻结 ${frozenNotes.length} 条）。请先用 browser_resume_task 继续发现：${continueTaskId}；如果用户明确只采当前这部分，需要先完成部分采集确认。`
             await upsertCollectionConsentProjection(runtime, pendingConsentRequest, message)
             log(`browser_collect_notes refusal partial_collection sourceTaskId=${sourceTaskId}`)
-            return JSON.stringify({
+            return browserStructuredOutput({
               ok: false,
               errorCode: 'partial_collection_consent_required',
               message,
@@ -6308,15 +6510,26 @@ export async function executeBrowserTool(
               frozenCount: frozenNotes.length,
               allowPartialIgnored: allowPartial,
               pendingConsentRequest,
-            }, null, 2)
+            })
           }
           if (notes.length > 0 && notes.length !== frozenNotes.length) {
-            return `Error: browser_collect_notes 数量不一致：source_task_id ${sourceTaskId} 有 ${frozenNotes.length} 条，传入 notes 有 ${notes.length} 条。请直接使用 source_task_id 接力。`
+            return browserStructuredOutput({
+              ok: false,
+              errorCode: 'source_task_note_count_mismatch',
+              message: `browser_collect_notes 数量不一致：source_task_id ${sourceTaskId} 有 ${frozenNotes.length} 条，传入 notes 有 ${notes.length} 条。请直接使用 source_task_id 接力。`,
+              sourceTaskId,
+              frozenCount: frozenNotes.length,
+              requestedCount: notes.length,
+            })
           }
           notes = frozenNotes
         }
         if (notes.length === 0) {
-          return 'Error: browser_collect_notes 需要 source_task_id，或至少一条带 http(s) URL 的 notes。'
+          return browserStructuredOutput({
+            ok: false,
+            errorCode: 'collection_targets_required',
+            message: 'browser_collect_notes 需要 source_task_id，或至少一条带 http(s) URL 的 notes。',
+          })
         }
         if (!sourceTaskId) {
           const largerFrozen = await findLargerRecentFrozenCollection(controller, notes)
@@ -6329,7 +6542,7 @@ export async function executeBrowserTool(
             const message = `browser_collect_notes 检测到最近的 browser_visible_collect (${largerFrozen.taskId}) 已冻结 ${largerFrozen.count} 条目标，但当前只传入 ${notes.length} 条。请改用 source_task_id 接力；若用户明确只要部分采集，需要先完成部分采集确认。`
             await upsertCollectionConsentProjection(runtime, pendingConsentRequest, message)
             log(`browser_collect_notes refusal partial_collection recentFrozen=${largerFrozen.taskId}`)
-            return JSON.stringify({
+            return browserStructuredOutput({
               ok: false,
               errorCode: 'partial_collection_consent_required',
               message,
@@ -6338,21 +6551,27 @@ export async function executeBrowserTool(
               requestedCount: notes.length,
               allowPartialIgnored: allowPartial,
               pendingConsentRequest,
-            }, null, 2)
+            })
           }
           const missingUrls = missingUserProvidedUrls(notes, currentUserText || '')
           if (missingUrls.length > 0) {
             log(`browser_collect_notes refusal url_provenance_required missing=${missingUrls.length}`)
-            return JSON.stringify({
+            return browserStructuredOutput({
               ok: false,
               errorCode: 'url_provenance_required',
               message: 'browser_collect_notes 直接接收 URL 列表时，必须确认这些 URL 来自当前用户消息原文或用户显式选择的会话资源；当前缺少可证明来源的 URL。',
               missingUrls,
-            }, null, 2)
+            })
           }
         }
         if (expectedCount > 0 && notes.length !== expectedCount) {
-          return `Error: browser_collect_notes 数量不一致：预期 ${expectedCount} 条，实际冻结清单 ${notes.length} 条。`
+          return browserStructuredOutput({
+            ok: false,
+            errorCode: 'collection_expected_count_mismatch',
+            message: `browser_collect_notes 数量不一致：预期 ${expectedCount} 条，实际冻结清单 ${notes.length} 条。`,
+            expectedCount,
+            actualCount: notes.length,
+          })
         }
         const requestedMaxNotes = Math.max(0, Number(args.max_notes || 0) || 0)
         if (requestedMaxNotes > 0 && requestedMaxNotes < notes.length) {
@@ -6383,11 +6602,11 @@ export async function executeBrowserTool(
             }, scopeId?: string) => BrowserCapabilityTaskHandle | Promise<BrowserCapabilityTaskHandle>
           }).createSyntheticVisibleCollection
           if (typeof createSyntheticVisibleCollection !== 'function') {
-            return JSON.stringify({
+            return browserStructuredOutput({
               ok: false,
               errorCode: 'synthetic_source_not_ready',
               message: 'browser_collect_notes 直接 URL 列表已通过来源校验，但当前浏览器控制器未注册 synthetic source task 入口，不能启动无 source_task_id 的采集。',
-            }, null, 2)
+            })
           }
           sourceTask = await createSyntheticVisibleCollection.call(controller, {
             targets: notes,
@@ -6421,7 +6640,7 @@ export async function executeBrowserTool(
             const message = '该目标命中高风控平台，不能在没有明确降级确认的情况下使用 url_batch 硬跳详情页。请改用 strategy=card_loop，或先完成高风控 URL 批处理降级确认。'
             await upsertCollectionConsentProjection(runtime, pendingConsentRequest, message)
             log(`browser_collect_notes refusal high_control_url_batch sourceTaskId=${effectiveSourceTaskId || ''} host=${targetHost}`)
-            return JSON.stringify({
+            return browserStructuredOutput({
               ok: false,
               errorCode: 'high_control_url_batch_denied',
               message,
@@ -6429,7 +6648,7 @@ export async function executeBrowserTool(
               sourceTaskId: effectiveSourceTaskId,
               targetHost,
               pendingConsentRequest,
-            }, null, 2)
+            })
           }
         }
         const plan = {
@@ -6454,6 +6673,9 @@ export async function executeBrowserTool(
                 strategy,
               }
           : await controller.startNoteCollection(plan, sessionId)
+        if (result && typeof result === 'object' && (result as { ok?: unknown }).ok === false) {
+          return browserStructuredOutput(result as Record<string, unknown>)
+        }
         return JSON.stringify(result, null, 2)
       }
 
@@ -6461,27 +6683,27 @@ export async function executeBrowserTool(
         const requestId = String(args.request_id || '').trim()
         const confirmedVia = String(args.confirmed_via || '').trim()
         if (!requestId) {
-          return JSON.stringify({
+          return browserStructuredOutput({
             ok: false,
             errorCode: 'collection_consent_request_id_required',
             message: 'browser_confirm_collection_consent 需要 request_id。',
-          }, null, 2)
+          })
         }
         if (confirmedVia !== 'ask_user_questions' && confirmedVia !== 'ui_action') {
-          return JSON.stringify({
+          return browserStructuredOutput({
             ok: false,
             errorCode: 'collection_consent_via_invalid',
             message: 'confirmed_via 必须是 ask_user_questions 或 ui_action。',
-          }, null, 2)
+          })
         }
         const record = collectionConsentStore.confirmPendingRequest(requestId, confirmedVia)
         if (!record) {
-          return JSON.stringify({
+          return browserStructuredOutput({
             ok: false,
             errorCode: 'collection_consent_request_not_found',
             message: `找不到可确认的浏览器采集确认请求：${requestId}`,
             requestId,
-          }, null, 2)
+          })
         }
         await clearCollectionConsentProjection(runtime, record)
         return JSON.stringify({ ok: true, record }, null, 2)
@@ -6498,6 +6720,7 @@ export async function executeBrowserTool(
         return `Unknown browser tool: ${toolName}`
     }
   } catch (error) {
+    if (isBrowserAbortError(error)) throw error
     // EP1-T4-2 (browser pilot) — let structured domain errors flow to the
     // dispatcher's error contract (errorKind + envelope) instead of being
     // flattened to a string. No browser handler throws ToolDomainError at

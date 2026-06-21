@@ -21,7 +21,9 @@ import { randomUUID } from 'node:crypto'
 
 import { logAgentMetric } from '../metrics'
 import { decideCrystallizeRun, type CrystallizeSignals } from './crystallize-gate'
+// eslint-disable-next-line ready/no-subagent-leak -- EP3-C3 pins the maintenance LLM container to runSubAgent by contract.
 import { runSubAgent } from '../sub-agent/sub-agent-runner'
+// eslint-disable-next-line ready/no-subagent-leak -- Type-only context for the same EP3-C3 subagent container contract.
 import type { SubAgent, SubAgentContext } from '../sub-agent/sub-agent-types'
 import { BeliefCardStore, isAllowedCardPath, BELIEF_CONFIDENCE, BELIEF_TAGS } from '../knowledge/belief-card-store'
 import { runBeliefDecayRound, type BeliefDecaySignals, type BeliefDecayEffectors, type BeliefDecayRoundReport } from '../memory/belief-decay'
@@ -139,7 +141,10 @@ function defaultPrompt(): string {
   }
 }
 
-/** Drive one maintenance round through the PINNED runSubAgent container. */
+/**
+ * P5d/C26 unwired: runMaintenanceLlmRound is not in production driver path.
+ * Drive one maintenance round through the PINNED runSubAgent container.
+ */
 export async function runMaintenanceLlmRound(deps: MaintenanceRoundDeps): Promise<MaintenanceRoundReport> {
   const gate = decideCrystallizeRun(deps.signals, deps.now)
   if (gate.decision === 'skip') {
@@ -245,7 +250,7 @@ export function collectBeliefDecaySignals(
   const incoming = new Map<string, number>()
   for (const file of files) {
     if (!file.card) continue
-    const matches = file.card.body.matchAll(/\[\[([^\[\]\n]+)\]\]/g)
+    const matches = file.card.body.matchAll(/\[\[([^\][\n]+)\]\]/g)
     for (const match of matches) {
       const slug = match[1].trim()
       const key = `${file.scopeId}|${slug}`

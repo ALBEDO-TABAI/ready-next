@@ -1,3 +1,5 @@
+import { redactModelVisibleToolText } from '../agent-control/tools-runtime/model-visible-tool-output'
+
 interface OpenAIHistoryMessage {
   role?: unknown
   content?: unknown
@@ -36,7 +38,7 @@ function sanitizeAnthropicToolContent(content: unknown): unknown {
     if (!isRecord(block)) continue
     if (block.type === 'tool_use') continue
     if (block.type === 'tool_result') {
-      const toolResultText = stringifyToolResultContent(block.content)
+      const toolResultText = redactModelVisibleToolText(stringifyToolResultContent(block.content))
       if (toolResultText) textParts.push(toolResultText)
       continue
     }
@@ -54,6 +56,10 @@ function sanitizeAnthropicToolContent(content: unknown): unknown {
     ]
   }
   return textParts.join('\n\n')
+}
+
+function sanitizeOpenAIToolMessageContent(content: unknown): string {
+  return redactModelVisibleToolText(stringifyToolResultContent(content))
 }
 
 export interface SanitizeOpenAIHistoryOptions {
@@ -83,7 +89,9 @@ export function sanitizeOpenAICompatibleMessageHistory(
     const raw = message as unknown as Record<string, unknown>
     return {
       ...raw,
-      content: sanitizeAnthropicToolContent(message.content),
+      content: message.role === 'tool'
+        ? sanitizeOpenAIToolMessageContent(message.content)
+        : sanitizeAnthropicToolContent(message.content),
     }
   })
 

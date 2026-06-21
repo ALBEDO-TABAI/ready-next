@@ -26,6 +26,8 @@ import { __resetBrowserAgentPageMapForTests } from '../main/modules/tools/browse
 import { matchManualOnlyBrowserTarget } from '../main/modules/agent-control/safety/action-confirmation-policy'
 import { buildExplicitNoSkillAuthorization } from '../main/modules/agent-control/skills/skill-tool-authorization'
 import type { BrowserController } from '../main/modules/browser-engine/ipc-handler'
+import { BrowserWriteLeaseService } from '../main/modules/browser-engine/browser-write-lease'
+import { BrowserTurnLease } from '../main/modules/browser-engine/agent-browser-turn-lease'
 
 test('action-confirmation-live-target declares transitive sqlite ABI guard', (t) => {
   skipIfSqliteUnavailable(t, 'action-confirmation-live-target transitive sqlite load')
@@ -65,11 +67,14 @@ function makeController(
 }
 
 function modelContext(controller: BrowserController, overrides: Partial<ToolContext> = {}): ToolContext {
+  const leaseService = new BrowserWriteLeaseService()
   return {
     invoker: 'model',
     authorization: buildExplicitNoSkillAuthorization('no_skill_signal'),
     sessionId: 'live-target-test',
+    runId: 'live-target-run',
     browserController: controller,
+    browserLease: new BrowserTurnLease({ taskId: 'live-target-task', runId: 'live-target-run' }, 'user-view', leaseService),
     ...overrides,
   } as ToolContext
 }

@@ -1,7 +1,7 @@
 import {
   createToolExecutionOutput,
-  serializeToolExecutionOutput,
 } from '../tools-runtime/tool-result-types'
+import { serializeToolExecutionOutputForModel } from '../tools-runtime/model-visible-tool-output'
 import type { TurnTranscriptEvent } from '../contracts/run-contracts'
 import type { TurnTerminalReason } from './turn-frame'
 import { sanitizeAssistantText } from '../tools-runtime/tool-call-text-guard'
@@ -70,7 +70,7 @@ export class TurnTranscript {
   emitStructuredPayload(payload: unknown): void {
     const projectionPatch = payload && typeof payload === 'object' ? payload as Record<string, unknown> : null
     this.events.push({ kind: 'structured_payload', projectionPatch })
-    this.emitOutput(serializeToolExecutionOutput(createToolExecutionOutput('', {
+    this.emitOutput(serializeToolExecutionOutputForModel(createToolExecutionOutput('', {
       projectionPatch,
     })), 'tool_result', {
       projectionPatch,

@@ -8,9 +8,11 @@ import { inspectSkillProgressArtifacts } from '../skills/skill-progress-artifact
 import { logAgentMetric } from '../metrics'
 import { PROJECTION_OBSERVABILITY_METRICS } from '../projection-observability-metrics'
 import { canResumeShape } from '../contracts/resume-handle'
+import { buildSupersededChildTerminalProjectionPatch } from '../runtime-core/run-finalizer'
 import { validateRunStateRecord } from './run-state-schema'
 
 const RECONCILABLE_STATUSES = new Set<TaskProjectionRecord['status']>(['running', 'queued', 'blocked', 'failed', 'completed'])
+const READ_PATH_TERMINAL_STATUSES = new Set<TaskProjectionRecord['status']>(['completed', 'failed', 'killed'])
 const STALE_WITHOUT_HANDLE_MS = 30 * 60 * 1000
 const REQUIRED_VEA_OUTPUT_KEYS = ['storyboard_md', 'storyboard_pdf', 'audiovisual_md', 'audiovisual_pdf']
 
@@ -995,22 +997,11 @@ function supersededChildTarget(
   now: string,
   supersededByChildRunId: string,
 ): Partial<TaskProjectionRecord> {
-  return {
-    status: 'killed',
-    interactionState: 'suspended',
-    waitingFor: 'none',
-    taskSummary: '已由后续技能子任务完成',
-    blockedReason: null,
-    degradationReason: 'superseded_by_child_run',
-    resumableActions: ['none'],
-    continuationRef: {
-      ...(mergeContinuationRef(record, handles) || {}),
-      blockerType: 'superseded',
-      pauseReason: 'superseded',
-      supersededByChildRunId,
-    } as TaskProjectionRecord['continuationRef'] & { supersededByChildRunId: string },
+  return buildSupersededChildTerminalProjectionPatch({
+    baseContinuationRef: mergeContinuationRef(record, handles),
+    supersededByChildRunId,
     steps: patchSteps(record, 'killed', now),
-  }
+  })
 }
 
 function buildPatch(
@@ -1035,6 +1026,38 @@ function buildPatch(
   if (Object.keys(patch).length === 0) return null
   patch.updatedAt = now
   return patch
+}
+
+function isReadPathTerminalStatusTransition(
+  record: TaskProjectionRecord,
+  target: Partial<TaskProjectionRecord>,
+): boolean {
+  return Boolean(
+    target.status
+    && target.status !== record.status
+    && READ_PATH_TERMINAL_STATUSES.has(target.status),
+  )
+}
+
+function nonTerminalReadPathRepairTarget(
+  record: TaskProjectionRecord,
+  target: Partial<TaskProjectionRecord>,
+): Partial<TaskProjectionRecord> {
+  if (!isReadPathTerminalStatusTransition(record, target)) return target
+  const nextContinuation = asRecord(target.continuationRef)
+  if (!nextContinuation) return {}
+  const currentContinuation = asRecord(record.continuationRef)
+  const safeContinuation: Record<string, unknown> = {
+    ...(currentContinuation || {}),
+  }
+  for (const key of ['taskId', 'childRunId', 'taskRunId', 'skillId', 'action', 'outputDir', 'runStatePath']) {
+    const value = stringValue(nextContinuation[key])
+    if (value) safeContinuation[key] = value
+  }
+  if (!safeContinuation.taskId) safeContinuation.taskId = record.taskId
+  return {
+    continuationRef: safeContinuation as TaskProjectionRecord['continuationRef'],
+  }
 }
 
 export function reconcileTaskProjections(params: ReconcileTaskProjectionsParams): number {
@@ -1103,7 +1126,8 @@ export function reconcileTaskProjections(params: ReconcileTaskProjectionsParams)
     }
 
     if (!target) continue
-    const patch = buildPatch(record, now, target)
+    const safeTarget = nonTerminalReadPathRepairTarget(record, target)
+    const patch = buildPatch(record, now, safeTarget)
     if (!patch) continue
     // Stage O §0.2 / O2.1 — reconciler writes are themselves driven by a
     // renderer fetch (`runtime.listTaskProjections` calls reconcileTaskProjections

@@ -26,6 +26,7 @@ import {
   classifyFollowupIntent,
   type FollowupTaskRef,
 } from '../../../../shared/agent-followup-intent'
+import { isOpenTaskStatus } from '../contracts/task-open-status'
 import { MAIN_AGENT_ID } from '../../repositories/agent-registry-repository'
 
 export type SessionPrerouteMode = 'off' | 'suggest' | 'auto'
@@ -57,10 +58,8 @@ export interface PrerouteResult {
   effect: PrerouteEffect
 }
 
-const OPEN_TASK_STATUSES = new Set(['running', 'active', 'blocked', 'recoverable_paused', 'budget_paused'])
-
 function isOpenTask(ref: PrerouteOwnedTaskRef): boolean {
-  return OPEN_TASK_STATUSES.has(String(ref.status)) || ref.interactionState === 'check_in_pending'
+  return isOpenTaskStatus(ref.status) || ref.interactionState === 'check_in_pending'
 }
 
 export function decideSessionPreroute(input: {

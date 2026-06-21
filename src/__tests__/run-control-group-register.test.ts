@@ -1,11 +1,13 @@
 // Stage V V2.1i — behavior test for `runControlGroup.register` /
 // `IpcDisposeHandle.dispose()`.
 //
-// V2.1i extracts the 5 run-control channels from claude-bridge's
+// V2.1i extracts the run-control channels from claude-bridge's
 // `setupAgentIPC`:
 //
 //   agent:listActiveChildRuns    (snapshot of background child-runs)
 //   agent:cancelChildRun         (cancel a background child-run by id)
+//   agent:reportInfrastructureTimeout
+//                                 (renderer watchdog reports a stuck run)
 //   agent:suspendRun             (pause a scope-run)
 //   agent:resumeRun              (resume a paused scope-run via durable handle)
 //   agent:respondToInteraction   (reply to an in-flight interaction request)
@@ -13,11 +15,11 @@
 // The V5 IPC contract gate proves the channel literals still exist on the
 // renderer side, but it cannot prove:
 //
-//   1. `register` wires EXACTLY the 5 channel names the group owns via
-//      `ipcMain.handle` (no extras, no missing ones — all 5 are invoke /
+//   1. `register` wires EXACTLY the 6 channel names the group owns via
+//      `ipcMain.handle` (no extras, no missing ones — all are invoke /
 //      async so they all live on the handle slot).
 //   2. The returned dispose handle calls `removeHandler` for each of those
-//      same 5 channels — so dev-reload re-registration and
+//      same 6 channels — so dev-reload re-registration and
 //      `cleanupAgentRuntime` shutdown don't leak handler slots.
 //
 // Handler bodies are NOT exercised here — those are covered by pre-existing
@@ -72,13 +74,14 @@ function createMockDeps(): RunControlGroupDeps {
   return {
     listActiveChildRuns: fail('listActiveChildRuns') as RunControlGroupDeps['listActiveChildRuns'],
     cancelChildRun: fail('cancelChildRun') as RunControlGroupDeps['cancelChildRun'],
+    reportInfrastructureTimeout: fail('reportInfrastructureTimeout') as RunControlGroupDeps['reportInfrastructureTimeout'],
     suspendRun: fail('suspendRun') as RunControlGroupDeps['suspendRun'],
     resumeRun: fail('resumeRun') as RunControlGroupDeps['resumeRun'],
     respondToInteraction: fail('respondToInteraction') as RunControlGroupDeps['respondToInteraction'],
   }
 }
 
-test('runControlGroup.register wires the 5 documented channels exactly once each via ipcMain.handle', () => {
+test('runControlGroup.register wires the documented channels exactly once each via ipcMain.handle', () => {
   const { ipc, handleCalls } = createMockIpc()
   runControlGroup.register(ipc, createMockDeps())
 
@@ -87,9 +90,9 @@ test('runControlGroup.register wires the 5 documented channels exactly once each
   assert.deepEqual(
     registered,
     expected,
-    'register must subscribe to exactly the 5 run-control channels',
+    'register must subscribe to exactly the run-control channels',
   )
-  assert.equal(handleCalls.length, 5, 'each channel must be registered exactly once')
+  assert.equal(handleCalls.length, _runControlGroupChannelsForTest.length, 'each channel must be registered exactly once')
 
   // Spot-check the exact channel literals per the plan (V2.1i, §3 V2.1) so
   // accidental renames trip this test even if the channel count happens to
@@ -98,6 +101,7 @@ test('runControlGroup.register wires the 5 documented channels exactly once each
   for (const required of [
     'agent:listActiveChildRuns',
     'agent:cancelChildRun',
+    'agent:reportInfrastructureTimeout',
     'agent:suspendRun',
     'agent:resumeRun',
     'agent:respondToInteraction',
@@ -116,7 +120,7 @@ test('runControlGroup namespace is the documented label so dispose ordering can 
   assert.equal(runControlGroup.namespace, 'agent:runControl')
 })
 
-test('IpcDisposeHandle.dispose removes the same 5 channels that register added', () => {
+test('IpcDisposeHandle.dispose removes the same channels that register added', () => {
   const { ipc, removeHandlerCalls } = createMockIpc()
   const handle = runControlGroup.register(ipc, createMockDeps())
 
@@ -147,7 +151,7 @@ test('dispose is idempotent — calling twice does not throw and stays bounded',
   // invocation must NOT throw. We allow the call to issue removeHandler
   // again — what we care about is no exception, no handler-slot leak.
   assert.doesNotThrow(() => handle.dispose())
-  // Second dispose runs the same 5 removeHandler calls; total count grows by
+  // Second dispose runs the same removeHandler calls; total count grows by
   // exactly the channel count, never more.
   assert.equal(
     removeHandlerCalls.length - afterFirst,

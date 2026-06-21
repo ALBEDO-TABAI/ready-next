@@ -1,4 +1,6 @@
 /**
+ * P5d/C26 unwired: not in production driver path.
+ *
  * EP2-C2 — deterministic crystallize gate + v1 round runner (03 §3.2/§6).
  *
  * Gate: pure code decides run/skip BEFORE any expensive work — skip is a

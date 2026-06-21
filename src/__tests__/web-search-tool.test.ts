@@ -8,7 +8,8 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import { webSearchSchema } from '../main/modules/tools/builtins/web-search'
+import { WEB_RESEARCH_ERROR_KINDS } from '../main/modules/agent-control/contracts/error-kinds'
+import { executeWebSearch, webSearchSchema } from '../main/modules/tools/builtins/web-search'
 
 test('webSearchSchema rejects empty query', () => {
   const result = webSearchSchema.safeParse({ query: '' })
@@ -30,4 +31,23 @@ test('webSearchSchema rejects topK out of range', () => {
   const r2 = webSearchSchema.safeParse({ query: 'x', topK: 999 })
   assert.equal(r1.success, false)
   assert.equal(r2.success, false)
+})
+
+test('executeWebSearch throws the shared web_search_failed errorKind when all backends fail', async () => {
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = (async () => new Response('bad request', { status: 400 })) as typeof fetch
+  try {
+    await assert.rejects(
+      executeWebSearch({ query: 'ready agent', topK: 1 }, { tavilyKey: 'tvly-test' }),
+      (error: unknown) => {
+        assert.equal(
+          (error as { errorKind?: string }).errorKind,
+          WEB_RESEARCH_ERROR_KINDS.webSearchFailed.code,
+        )
+        return true
+      },
+    )
+  } finally {
+    globalThis.fetch = originalFetch
+  }
 })

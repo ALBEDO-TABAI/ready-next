@@ -926,7 +926,7 @@ test('TurnEngine fires user_prompt_submit hook before direct model request', asy
   assert.equal(typeof calls[0]?.timestamp, 'number')
 })
 
-test('TurnEngine compacts string-only model session without mutating persisted messages', async () => {
+test('TurnEngine preserves string-only model session for active prompt assembly', async () => {
   const engine = new TurnEngine()
   let modelMessages: TurnEngineSessionMessage[] = []
   const { request } = createRequest({
@@ -949,13 +949,11 @@ test('TurnEngine compacts string-only model session without mutating persisted m
 
   await engine.execute(request)
 
-  assert.ok(modelMessages.length < originalMessages.length)
-  assert.equal(modelMessages[0]?.role, 'system')
-  assert.match(String(modelMessages[0]?.content || ''), /\[ready:l1-compacted\]/)
+  assert.deepEqual(modelMessages, originalMessages)
   assert.deepEqual(request.session.messages.slice(0, originalMessages.length), originalMessages)
 })
 
-test('TurnEngine skips compaction when session contains rich content blocks', async () => {
+test('TurnEngine preserves rich content blocks for active prompt assembly', async () => {
   const engine = new TurnEngine()
   let modelMessages: TurnEngineSessionMessage[] = []
   const { request } = createRequest({
@@ -1432,10 +1430,10 @@ test('TurnEngine lets a domain adapter block once and then finish a document too
   )
 })
 
-test('TurnEngine short-circuits host shortcuts and returns their output text', async () => {
+test('TurnEngine short-circuits host shortcuts and redacts model-visible output text', async () => {
   const engine = new TurnEngine()
   let hostDispatches = 0
-  const { request } = createRequest({
+  const { request, events } = createRequest({
     userText: '查一下之前记住的偏好',
     host: {
       providerContext: {
@@ -1460,7 +1458,7 @@ test('TurnEngine short-circuits host shortcuts and returns their output text', a
           return {
             handled: true,
             toolUseText: 'memory_search({"query":"偏好"})',
-            outputText: '找到了相关偏好',
+            outputText: '找到了相关偏好：/Users/alice/Ready/out.txt',
           }
         },
       },
@@ -1470,7 +1468,13 @@ test('TurnEngine short-circuits host shortcuts and returns their output text', a
   const result = await engine.execute(request)
 
   assert.equal(hostDispatches, 1)
-  assert.equal(result.finalText, '找到了相关偏好')
+  assert.equal(result.finalText, '找到了相关偏好：/Users/<redacted>/Ready/out.txt')
+  const visibleOutput = events
+    .filter((event) => event.kind === 'output')
+    .map((event) => String(event.chunk || ''))
+    .join('\n')
+  assert.doesNotMatch(visibleOutput, /\/Users\/alice/)
+  assert.match(visibleOutput, /\/Users\/<redacted>\/Ready\/out\.txt/)
 })
 
 test('TurnEngine restores continuation budgets before running the resumed turn', async () => {

@@ -5,14 +5,24 @@ import { DEFAULT_BROWSER_URL, extractBrowserDomain } from './url-utils'
 
 /**
  * Polls the agent-browser supervision state (plan §3.6): the control-gate state
- * + active background note-collection tasks. A progress panel does not need
- * sub-second latency, so we poll (2.5s) rather than add a push pipeline; the
- * data bridge is browser.getAgentSupervisionState. Returns the state plus the
- * two-step interrupt actions.
+ * + active background note-collection tasks. Polling remains the fallback; the
+ * lease snapshot also has a push path so ownership chips update immediately
+ * when the user takes over the visible browser surface.
  */
 
 /** Agent-browser control-gate state (plan §3.6). */
 export type AgentBrowserControlState = 'active' | 'pending_confirm' | 'frozen'
+export type AgentBrowserSurface = 'user-view' | 'agent-view'
+export type BrowserLeaseState = 'idle' | 'held' | 'takeover' | 'expired'
+
+export interface BrowserLeaseSurfaceSnapshot {
+  surface: AgentBrowserSurface
+  state: BrowserLeaseState
+  heldBy: string | null
+  runId: string | null
+  tabId: string | null
+  leaseId: string | null
+}
 
 /** A background note-collection task surfaced to the supervision panel. */
 export interface AgentBrowserCollectionTask {
@@ -30,9 +40,16 @@ export interface AgentBrowserSupervisionState {
   controlState: AgentBrowserControlState
   agentTabId: string | null
   tasks: AgentBrowserCollectionTask[]
+  surfaces: Record<AgentBrowserSurface, BrowserLeaseSurfaceSnapshot> | null
+  activeWriteSurface: AgentBrowserSurface | null
 }
 
-const EMPTY: AgentBrowserSupervisionState = { controlState: 'active', agentTabId: null, tasks: [] }
+export interface BrowserLeaseSupervisionSnapshot {
+  surfaces?: Record<AgentBrowserSurface, BrowserLeaseSurfaceSnapshot>
+  activeWriteSurface?: AgentBrowserSurface | null
+}
+
+const EMPTY: AgentBrowserSupervisionState = { controlState: 'active', agentTabId: null, tasks: [], surfaces: null, activeWriteSurface: null }
 const POLL_MS = 2500
 
 interface BrowserTabInfoLike {
@@ -95,6 +112,20 @@ async function syncAgentTabFromRuntime(
   nextStore.setUrlInput(fallback.url === DEFAULT_BROWSER_URL ? '' : fallback.url)
 }
 
+export function applyLeaseSnapshotToSupervisionState(
+  current: AgentBrowserSupervisionState,
+  snapshot: BrowserLeaseSupervisionSnapshot,
+): AgentBrowserSupervisionState {
+  const hasActiveWriteSurface = Object.prototype.hasOwnProperty.call(snapshot, 'activeWriteSurface')
+  return {
+    ...current,
+    surfaces: snapshot.surfaces ?? current.surfaces,
+    activeWriteSurface: hasActiveWriteSurface
+      ? snapshot.activeWriteSurface ?? null
+      : current.activeWriteSurface,
+  }
+}
+
 export function useAgentBrowserSupervision(): AgentBrowserSupervisionState & {
   requestInterruption: () => Promise<void>
   confirmInterruption: () => Promise<void>
@@ -112,7 +143,13 @@ export function useAgentBrowserSupervision(): AgentBrowserSupervisionState & {
         if (next.agentTabId) {
           await syncAgentTabFromRuntime(api, next.agentTabId)
         }
-        setState({ controlState: next.controlState, agentTabId: next.agentTabId, tasks: next.tasks ?? [] })
+        setState({
+          controlState: next.controlState,
+          agentTabId: next.agentTabId,
+          tasks: next.tasks ?? [],
+          surfaces: next.surfaces ?? null,
+          activeWriteSurface: next.activeWriteSurface ?? null,
+        })
       }
     } catch {
       // silent-catch: transient IPC failure keeps the last known supervision state.
@@ -128,10 +165,15 @@ export function useAgentBrowserSupervision(): AgentBrowserSupervisionState & {
     const off = window.electronAPI?.browser?.onAgentControlChanged?.(() => {
       void refresh()
     })
+    const offLease = window.electronAPI?.browser?.onLeaseChanged?.((snapshot) => {
+      if (!mounted.current) return
+      setState((current) => applyLeaseSnapshotToSupervisionState(current, snapshot))
+    })
     return () => {
       mounted.current = false
       window.clearInterval(id)
       off?.()
+      offLease?.()
     }
   }, [refresh])
 

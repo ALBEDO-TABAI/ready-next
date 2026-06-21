@@ -91,6 +91,10 @@ function strongKeywordFallback(prompt: string): MapSemanticIntent | null {
   }
 }
 
+export function classifyMapSemanticIntentFallback(prompt: string): MapSemanticIntent | null {
+  return strongKeywordFallback(prompt)
+}
+
 function hasPotentialMapSignal(prompt: string): boolean {
   const text = prompt.replace(/\s+/g, '')
   const compactEnglish = prompt.toLowerCase().replace(/\s+/g, ' ')

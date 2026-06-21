@@ -135,6 +135,7 @@ function normalizeTerminalReason(value: unknown): ScopeRunTerminalReason | null 
     normalized === 'proof_gap' ||
     normalized === 'cancelled_user' ||
     normalized === 'cancelled_runtime' ||
+    normalized === 'main_no_progress_timeout' ||
     normalized === 'context_overflow' ||
     normalized === 'infra_error'
   ) {
@@ -150,7 +151,7 @@ export function phaseToToolTraceStatus(
   if (!phase || phase === 'idle') return 'idle'
   if (terminalReason) {
     if (terminalReason === 'done') return 'done'
-    if (terminalReason === 'cancelled_user' || terminalReason === 'cancelled_runtime') return 'cancelled'
+    if (terminalReason === 'cancelled_user' || terminalReason === 'cancelled_runtime' || terminalReason === 'main_no_progress_timeout') return 'cancelled'
     if (
       terminalReason === 'failed_skill'
       || terminalReason === 'resume_launch_failed'

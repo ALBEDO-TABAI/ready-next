@@ -26,7 +26,7 @@ import { existsSync, readFileSync, rmSync, unlinkSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { isAbsolute, resolve as resolvePath, sep } from 'node:path'
 
-import type { AgentSpawnContext, SkillHostRequirements } from '../../../shared/skill-host-contract'
+import { isDestructiveShellCommand, type AgentSpawnContext, type SkillHostRequirements } from '../../../shared/skill-host-contract'
 import { atomicWriteText } from '../agent-control/atomic-write'
 import { getCurrentAgentContext } from './agent-context-source'
 import {
@@ -335,7 +335,7 @@ export class SkillHostController {
     const extensions = requirements?.shell_allowlist_extensions
     if (!extensions || extensions.length === 0) return merged
     for (const cmd of extensions) {
-      if (typeof cmd === 'string' && cmd.length > 0) {
+      if (typeof cmd === 'string' && cmd.length > 0 && !isDestructiveShellCommand(cmd)) {
         merged.add(cmd)
       }
     }

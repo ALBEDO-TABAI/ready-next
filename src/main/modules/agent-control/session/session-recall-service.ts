@@ -11,6 +11,7 @@ interface SessionRecallMetadataRow {
   source_id: string
   thread_key: string
   user_id: string | null
+  agent: string | null
   channel_key: string
   preview_text: string | null
   latest_task_title: string | null
@@ -64,6 +65,7 @@ export class SessionRecallService {
     channelKey?: string
     sourceKind?: ConversationSourceKind
     userId?: string
+    agent?: string
     hasAttachments?: boolean
     currentScopeId?: string
     limit?: number
@@ -124,6 +126,7 @@ export class SessionRecallService {
     channelKey?: string
     sourceKind?: ConversationSourceKind
     userId?: string
+    agent?: string
     hasAttachments?: boolean
     currentScopeId?: string
     limit?: number
@@ -151,6 +154,7 @@ export class SessionRecallService {
     channelKey?: string
     sourceKind?: ConversationSourceKind
     userId?: string
+    agent?: string
     hasAttachments?: boolean
     currentScopeId?: string
     limit?: number
@@ -414,6 +418,7 @@ export class SessionRecallService {
       source_id: sourceId,
       thread_key: row.thread_key || row.id,
       user_id: row.user_id || null,
+      agent: row.agent || null,
       channel_key: `${sourceKind}:${sourceKind === 'local' ? 'app' : sourceId}`,
       preview_text: null,
       latest_task_title: null,
@@ -436,6 +441,7 @@ export class SessionRecallService {
       channelKey?: string
       sourceKind?: ConversationSourceKind
       userId?: string
+      agent?: string
       hasAttachments?: boolean
     },
     exclusionLineageRootId: string | null,
@@ -444,6 +450,7 @@ export class SessionRecallService {
     if (params.channelKey && metadata.channel_key !== params.channelKey) return false
     if (params.sourceKind && metadata.source_kind !== params.sourceKind) return false
     if (params.userId && metadata.user_id !== params.userId) return false
+    if (params.agent && metadata.agent !== params.agent) return false
     if (params.hasAttachments && this.parseAttachmentNames(metadata.attachment_names_json).length === 0) return false
     return true
   }
@@ -620,6 +627,7 @@ export class SessionRecallService {
       channelKey?: string
       sourceKind?: ConversationSourceKind
       userId?: string
+      agent?: string
       hasAttachments?: boolean
     },
     exclusionLineageRootId: string | null,

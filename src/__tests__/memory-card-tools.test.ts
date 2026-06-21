@@ -13,9 +13,10 @@ test('memory-card-tools declares transitive sqlite ABI guard', (t) => {
   skipIfSqliteUnavailable(t, 'memory-card-tools transitive sqlite load')
 })
 
-function makeContext(memoryRoot: string): ToolContext {
+function makeContext(memoryRoot: string): ToolContext & { store: BeliefCardStore } {
   const store = new BeliefCardStore({ memoryRoot })
   return {
+    store,
     runtime: {
       getBeliefCardStore: () => store,
       // executeMemoryTool retrieves these up-front for all tools; card cases
@@ -23,7 +24,7 @@ function makeContext(memoryRoot: string): ToolContext {
       getMemoryRepository: () => ({}),
       getPromptAssembly: () => ({}),
     } as unknown as ToolContext['runtime'],
-  }
+  } as ToolContext & { store: BeliefCardStore }
 }
 
 test('memory_write_card defaults to staged and is hidden from default read', async () => {
@@ -69,23 +70,34 @@ test('memory_write_card defaults to staged and is hidden from default read', asy
   }
 })
 
-test('memory_write_card honors explicit active status (user said remember)', async () => {
+test('memory_write_card downgrades model active request; transition remains the confirmation path', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'ready-card-tool-'))
   try {
     const ctx = makeContext(dir)
-    await executeMemoryTool(
-      'memory_write_card',
-      {
-        rel_path: 'knowledge/pref.md',
-        title: '偏好',
-        description: 'x',
-        confidence: 'H',
-        tag: 'preference',
-        body: 'b',
-        status: 'active',
-      },
-      ctx,
+    const writeRes = JSON.parse(
+      await executeMemoryTool(
+        'memory_write_card',
+        {
+          rel_path: 'knowledge/pref.md',
+          title: '偏好',
+          description: 'x',
+          confidence: 'H',
+          tag: 'preference',
+          body: 'b',
+          status: 'active',
+        },
+        ctx,
+      ),
     )
+    assert.equal(writeRes.success, true)
+    assert.equal(writeRes.status, 'staged')
+
+    const hidden = JSON.parse(
+      await executeMemoryTool('memory_read_card', { rel_path: 'knowledge/pref.md' }, ctx),
+    )
+    assert.equal(hidden.success, false)
+
+    assert.equal(ctx.store.transition('knowledge/pref.md', 'active'), true)
     const read = JSON.parse(
       await executeMemoryTool('memory_read_card', { rel_path: 'knowledge/pref.md' }, ctx),
     )

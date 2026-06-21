@@ -7,9 +7,7 @@
  *   1. Fabricated non-skill name → `tool_not_registered` (top-level)
  *   2. Fabricated skill name (skill_*) → `tool_not_registered`
  *   3. Real non-skill tool missing from allowedToolNames →
- *      `errorKind: 'host_unavailable', reason: 'tool_restricted_this_turn'`
- *      (preserved — this is NOT the legacy nested `tool_not_registered`
- *      pair; `tool_restricted_this_turn` is a separate signal)
+ *      `errorKind: 'tool_restricted_this_turn'` (top-level)
  *   4. Real skill tool with mode:'none' authorization → `authorization_denied`
  *      (covered by tool-executor-authorization.test.ts; re-asserted here)
  *
@@ -61,7 +59,7 @@ test('U1.1 class 2: fabricated skill_* name → errorKind: tool_not_registered (
     'authorization_denied is reserved for skill tools that EXIST but lack admission (mutual exclusivity)')
 })
 
-test('U1.1 class 3: real non-skill tool missing from allowedToolNames → tool_restricted_this_turn (preserved)', async () => {
+test('U1.1 class 3: real non-skill tool missing from allowedToolNames → top-level tool_restricted_this_turn', async () => {
   // Pick a real registered non-skill tool. We use `browser_open_url` which
   // is part of the browser tool catalog. The empty allowedToolNames forces
   // the preflight restriction path. This path is INTENTIONALLY distinct
@@ -73,16 +71,18 @@ test('U1.1 class 3: real non-skill tool missing from allowedToolNames → tool_r
   // Either tool_restricted_this_turn (real tool, blocked by allowlist) or
   // tool_not_registered (if host-Node skipped registering this tool). Both
   // are acceptable as long as neither leaks the legacy nested pair.
-  if (data.errorKind === 'host_unavailable') {
-    assert.equal(data.reason, 'tool_restricted_this_turn',
-      'host_unavailable must only pair with tool_restricted_this_turn now, never with tool_not_registered (U1.1)')
-  } else {
+  if (data.errorKind === 'tool_not_registered') {
     assert.equal(data.errorKind, 'tool_not_registered',
       'if browser_open_url is not registered in host-Node, errorKind must be top-level tool_not_registered')
+  } else {
+    assert.equal(data.errorKind, 'tool_restricted_this_turn',
+      'registered non-skill tools blocked by allowedToolNames must use a top-level policy errorKind')
+    assert.equal(data.reason, undefined,
+      'tool_restricted_this_turn must not be hidden under host_unavailable anymore')
   }
 })
 
-test('U1.1 mutual exclusivity: no admission output carries both host_unavailable AND tool_not_registered', async () => {
+test('U1.1 mutual exclusivity: no admission output carries nested host_unavailable policy reasons', async () => {
   // Exercise three paths and assert none produces the retired nested shape.
   const fixtures = [
     { name: 'definitely_not_a_real_tool', kind: 'fabricated' },
@@ -96,5 +96,8 @@ test('U1.1 mutual exclusivity: no admission output carries both host_unavailable
     const isLegacyNested = data.errorKind === 'host_unavailable' && data.reason === 'tool_not_registered'
     assert.equal(isLegacyNested, false,
       `fixture ${fx.kind} (${fx.name}) must NOT return host_unavailable + reason:tool_not_registered (U1.1 mutual exclusivity)`)
+    const isPolicyNested = data.errorKind === 'host_unavailable' && data.reason === 'tool_restricted_this_turn'
+    assert.equal(isPolicyNested, false,
+      `fixture ${fx.kind} (${fx.name}) must NOT return host_unavailable + reason:tool_restricted_this_turn (P3a policy signal split)`)
   }
 })

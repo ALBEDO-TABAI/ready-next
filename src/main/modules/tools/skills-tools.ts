@@ -15,6 +15,7 @@ import {
   loadSkillRunContract,
   type SkillRunContract,
 } from '../agent-control/contracts/run-contracts'
+import { DETACHED_TASK_ERROR_KINDS } from '../agent-control/contracts/error-kinds'
 import {
   startSkillChildRun,
 } from '../agent-control/skills/skill-child-runner'
@@ -1347,13 +1348,13 @@ export async function executeSkillTool(
       if (!record) {
         return createToolExecutionOutput(`Detached skill task not found: ${taskId}`, {
           shape: 'json',
-          data: { errorKind: 'detached_task_not_found', taskId },
+          data: { errorKind: DETACHED_TASK_ERROR_KINDS.notFound.code, taskId },
         })
       }
       if (!detachedTaskBelongsToSession(record, sessionId)) {
         return createToolExecutionOutput(`Detached skill task is not available in this session: ${taskId}`, {
           shape: 'json',
-          data: { errorKind: 'detached_task_forbidden', taskId, sessionId: sessionId || null },
+          data: { errorKind: DETACHED_TASK_ERROR_KINDS.forbidden.code, taskId, sessionId: sessionId || null },
         })
       }
       // Stage D4 — emit framePatch with handles, status, liveness, output
@@ -1400,13 +1401,13 @@ export async function executeSkillTool(
       if (!record) {
         return createToolExecutionOutput(`Detached skill task not found: ${taskId}`, {
           shape: 'json',
-          data: { errorKind: 'detached_task_not_found', taskId },
+          data: { errorKind: DETACHED_TASK_ERROR_KINDS.notFound.code, taskId },
         })
       }
       if (!detachedTaskBelongsToSession(record, sessionId)) {
         return createToolExecutionOutput(`Detached skill task is not available in this session: ${taskId}`, {
           shape: 'json',
-          data: { errorKind: 'detached_task_forbidden', taskId, sessionId: sessionId || null },
+          data: { errorKind: DETACHED_TASK_ERROR_KINDS.forbidden.code, taskId, sessionId: sessionId || null },
         })
       }
       // Stage D7 — emit terminal framePatch so the frame and projection
@@ -1554,7 +1555,7 @@ export async function executeSkillTool(
       if (!tracker) {
         return createToolExecutionOutput('Detached skill task runtime is not ready.', {
           shape: 'json',
-          data: { errorKind: 'detached_task_runtime_unavailable' },
+          data: { errorKind: DETACHED_TASK_ERROR_KINDS.runtimeUnavailable.code },
         })
       }
       const requestedAction = asString(args.action)
@@ -1580,12 +1581,12 @@ export async function executeSkillTool(
       let detachedReject: { errorKind: string; reason: string } | null = null
       if (!action || actionTool?.kind !== 'skill_action' || actionTool.skillId !== skillId || actionTool.action !== action) {
         detachedReject = {
-          errorKind: 'detached_task_skill_action_unknown',
+          errorKind: DETACHED_TASK_ERROR_KINDS.skillActionUnknown.code,
           reason: `No typed action "${requestedAction}" exposed for skill ${skillId}.`,
         }
       } else if (!skillDef) {
         detachedReject = {
-          errorKind: 'detached_task_skill_not_loaded',
+          errorKind: DETACHED_TASK_ERROR_KINDS.skillNotLoaded.code,
           reason: `Skill ${skillId} is not in the loaded manifest list. It may still be installing or the manifest failed to load.`,
         }
       } else if (
@@ -1602,12 +1603,12 @@ export async function executeSkillTool(
         const armedForThisSkill = referenceHintSkillId === skillId
         if (isInternal && !armedForThisSkill && (skillDef.hostRequirements?.expose_when_hint_armed ?? []).includes(action)) {
           detachedReject = {
-            errorKind: 'detached_task_hint_required',
+            errorKind: DETACHED_TASK_ERROR_KINDS.hintRequired.code,
             reason: `Action "${action}" requires a reference-skill hint for ${skillId} to be armed. The skill's SKILL.md was not inlined this session — re-trigger the skill (e.g. mention it by name) to arm the hint.`,
           }
         } else {
           detachedReject = {
-            errorKind: 'detached_task_visibility_internal',
+            errorKind: DETACHED_TASK_ERROR_KINDS.visibilityInternal.code,
             reason: `Action "${action}" is marked visibility=internal and is not in expose_when_hint_armed. Use a public action of skill ${skillId} instead.`,
           }
         }
@@ -1686,7 +1687,7 @@ export async function executeSkillTool(
         return createToolExecutionOutput('Detached skill task failed to start.', {
           shape: 'json',
           data: {
-            errorKind: 'detached_task_start_failed',
+            errorKind: DETACHED_TASK_ERROR_KINDS.startFailed.code,
             detail: error instanceof Error ? error.message : String(error),
           },
         })
@@ -1923,6 +1924,11 @@ export async function executeSkillTool(
           // can be persisted by `applyTurnFramePatch` even when no prior
           // contract exists on the frame.
           skillId: typeof skillId === 'string' && skillId.length > 0 ? skillId : undefined,
+          scopeBinding: {
+            sessionId: sessionId || null,
+            scopeId: runtimeContext?.scopeId || null,
+            activeRoots: runtimeContext?.activeFrame?.activeArtifactRoots || [],
+          },
         })
         const status = inferSkillRunStatusFromOutput(output)
         recordPrimitive({

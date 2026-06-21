@@ -58,6 +58,46 @@ test('maps superseded sends to a user-action handoff message', () => {
   assert.equal(result.retryStrategy, 'user_action')
 })
 
+test('maps renderer infrastructure timeout separately from model outage', () => {
+  const result = mapBackendErrorToFriendly({
+    error: 'renderer watchdog fired',
+    errorKind: 'renderer_infrastructure_timeout',
+  })
+
+  assert.equal(result.friendlyMessage, '这次请求超时，Ready 已接管收口，可以继续发送')
+  assert.equal(result.recoverable, true)
+  assert.equal(result.retryStrategy, 'user_action')
+  assert.doesNotMatch(result.friendlyMessage, /模型服务|模型响应/)
+})
+
+test('maps main no-progress timeout as takeover rather than model outage', () => {
+  const result = mapBackendErrorToFriendly({
+    error: 'main no-progress guard fired',
+    errorKind: 'main_no_progress_timeout',
+  })
+
+  assert.equal(result.friendlyMessage, '这次请求长时间没有进展，Ready 已接管收口，可以继续发送')
+  assert.equal(result.recoverable, true)
+  assert.equal(result.retryStrategy, 'user_action')
+  assert.doesNotMatch(result.friendlyMessage, /模型服务|模型响应|发送失败/)
+})
+
+test('maps tool timeout separately from model timeout', () => {
+  const tool = mapBackendErrorToFriendly({
+    error: 'renderer-watchdog:15000',
+    errorKind: 'timeout_tool',
+  })
+  const model = mapBackendErrorToFriendly({
+    error: 'provider timed out',
+    errorKind: 'timeout_model',
+  })
+
+  assert.equal(tool.friendlyMessage, '工具响应超时，请稍后重试或继续这项任务')
+  assert.equal(tool.retryStrategy, 'user_action')
+  assert.equal(model.friendlyMessage, '模型响应超时，请稍后重试')
+  assert.equal(model.retryStrategy, 'auto')
+})
+
 test('maps provider quota failures to a recovery-specific message', () => {
   const result = mapBackendErrorToFriendly({
     error: 'HTTP 402: Insufficient balance',

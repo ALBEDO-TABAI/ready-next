@@ -6,8 +6,9 @@
  * HTML scrape. Both backends populate the same result shape so downstream
  * consumers (deep-research methodology, present_file pipelines) do not have
  * to branch on `source`. When BOTH fail, the handler throws
- * `ToolDomainError('web_search_failed', ...)` so the dispatch layer
- * (`tool-executor.ts`) maps the failure to `errorKind: 'web_search_failed'`
+ * `ToolDomainError(WEB_RESEARCH_ERROR_KINDS.webSearchFailed.code, ...)`
+ * so the dispatch layer (`tool-executor.ts`) maps the failure to the
+ * shared `web_search_failed` errorKind
  * via `tool-errors.ts:errorKindFor`. A bare `Error` would otherwise be
  * silently bucketed into `tool_handler_failure` — we want the explicit kind
  * to enable model self-recovery and retry policy gating.
@@ -17,6 +18,7 @@
 
 import { z } from 'zod'
 
+import { WEB_RESEARCH_ERROR_KINDS } from '../../agent-control/contracts/error-kinds'
 import { logAgentMetric } from '../../agent-control/metrics'
 import { ToolDomainError } from '../tool-errors'
 import { WEB_TOOL_FALLBACK_METRICS } from './web-tool-metrics'
@@ -186,7 +188,7 @@ export async function executeWebSearch(
   let ddgError: unknown = null
   if (ctx.ddgEnabled === false) {
     throw new ToolDomainError(
-      'web_search_failed',
+      WEB_RESEARCH_ERROR_KINDS.webSearchFailed.code,
       `Tavily failed and DDG is disabled: tavily=${tavilyError instanceof Error ? tavilyError.message : String(tavilyError ?? 'not_attempted')}`,
       {
         query: args.query,
@@ -209,7 +211,7 @@ export async function executeWebSearch(
   }
 
   throw new ToolDomainError(
-    'web_search_failed',
+    WEB_RESEARCH_ERROR_KINDS.webSearchFailed.code,
     `Both Tavily and DDG failed: tavily=${tavilyError instanceof Error ? tavilyError.message : String(tavilyError ?? 'not_attempted')}, ddg=${ddgError instanceof Error ? ddgError.message : String(ddgError)}`,
     {
       query: args.query,

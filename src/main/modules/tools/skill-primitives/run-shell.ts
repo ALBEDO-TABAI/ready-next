@@ -8,14 +8,15 @@
  */
 
 import { spawn } from 'node:child_process'
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { existsSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs'
+import { isAbsolute, join, relative, resolve } from 'node:path'
 import { randomUUID } from 'node:crypto'
 
 import { createToolExecutionOutput, type ToolExecutionOutput } from '../../agent-control/tools-runtime/tool-result-types'
 import { ToolDomainError } from '../tool-errors'
 import { logAgentMetric } from '../../agent-control/metrics'
 import { TOOL_ERROR_METRICS } from '../../agent-control/tools-runtime/tool-error-metrics'
+import { DESTRUCTIVE_SHELL_COMMANDS } from '../../../../shared/skill-host-contract'
 import { auditBashCommand } from './bash-risk-patterns'
 import { redactHostPaths } from './host-path-redactor'
 import { defaultLookupSkillRoots, type LookupSkillRoots } from './root-resolver'
@@ -104,8 +105,9 @@ function shouldUseShell(command: string): boolean {
 }
 
 function findDeniedShellCommand(command: string): string | null {
-  const matched = command.match(/(?:^|[;&|]\s*|\|\|\s*|&&\s*)(?:sudo\s+)?(rm|cp|mv)\b/)
-    || command.match(/-exec\s+(?:sudo\s+)?(rm|cp|mv)\b/)
+  const destructiveAlt = DESTRUCTIVE_SHELL_COMMANDS.join('|')
+  const matched = command.match(new RegExp(`(?:^|[;&|]\\s*|\\|\\|\\s*|&&\\s*)(?:sudo\\s+)?(${destructiveAlt})\\b`, 'i'))
+    || command.match(new RegExp(`-exec\\s+(?:sudo\\s+)?(${destructiveAlt})\\b`, 'i'))
   return matched?.[1] || null
 }
 
@@ -121,6 +123,45 @@ function assertShellCommandAllowed(command: string): void {
     'cmd_not_allowlisted',
     `skill_run_shell: command "${denied}" is not allowed inside shell snippets.`,
     { bin: denied, allowlist: Array.from(SHELL_ALLOWLIST) },
+  )
+}
+
+function canonicalRoot(path: string): string {
+  try {
+    return realpathSync.native(path)
+  } catch {
+    return resolve(path)
+  }
+}
+
+function isPathWithinRoot(root: string, targetPath: string): boolean {
+  const rel = relative(canonicalRoot(root), resolve(targetPath))
+  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel))
+}
+
+function findOutsideSandboxRedirection(command: string, workspaceRoot: string): string | null {
+  const redirectionPattern = /(?:^|[\s;&|])(?:\d*)>>?\s*(?:"([^"]+)"|'([^']+)'|([^\s;&|]+))/g
+  let match: RegExpExecArray | null
+  while ((match = redirectionPattern.exec(command))) {
+    const target = match[1] || match[2] || match[3] || ''
+    if (!target || !isAbsolute(target)) continue
+    if (!isPathWithinRoot(workspaceRoot, target)) return target
+  }
+  return null
+}
+
+function assertExplicitWritesStayInWorkspace(command: string, workspaceRoot: string): void {
+  const outsideTarget = findOutsideSandboxRedirection(command, workspaceRoot)
+  if (!outsideTarget) return
+  logAgentMetric(TOOL_ERROR_METRICS.skillPrimitiveRejected, {
+    primitive: 'skill_run_shell',
+    reason: 'write_outside_sandbox',
+    target: outsideTarget,
+  })
+  throw new ToolDomainError(
+    'write_outside_sandbox',
+    'skill_run_shell: explicit shell redirection must write inside CLAUDE_SKILL_OUTPUT_DIR.',
+    { target: outsideTarget, workspaceRoot },
   )
 }
 
@@ -240,6 +281,17 @@ export async function executeRunShell(
       { skillId: deps.skillId || null },
     )
   }
+  if (!existsSync(roots.assetRoot)) {
+    throw new ToolDomainError(
+      'missing_skill',
+      `Skill asset root ${roots.assetRoot} does not exist on disk.`,
+      { assetRoot: roots.assetRoot },
+    )
+  }
+
+  // Ensure artifactRoot exists so CLAUDE_SKILL_OUTPUT_DIR is always valid and
+  // shell cwd defaults to the writable workspace, not the read-only asset root.
+  mkdirSync(roots.artifactRoot, { recursive: true })
 
   // Stage T W7.1 — high-risk pattern audit. Runs BEFORE the shouldUseShell
   // branch so both the `bash -c <full command>` compound path and the
@@ -263,6 +315,7 @@ export async function executeRunShell(
       },
     )
   }
+  assertExplicitWritesStayInWorkspace(args.command, roots.artifactRoot)
 
   let parsed: ParsedCommand | null
   if (shouldUseShell(args.command)) {
@@ -310,17 +363,6 @@ export async function executeRunShell(
     )
   }
 
-  if (!existsSync(roots.assetRoot)) {
-    throw new ToolDomainError(
-      'missing_skill',
-      `Skill asset root ${roots.assetRoot} does not exist on disk.`,
-      { assetRoot: roots.assetRoot },
-    )
-  }
-
-  // Ensure artifactRoot exists so CLAUDE_SKILL_OUTPUT_DIR is always valid.
-  mkdirSync(roots.artifactRoot, { recursive: true })
-
   const timeoutMs = Math.min(
     typeof args.timeoutMs === 'number' && args.timeoutMs > 0 ? args.timeoutMs : DEFAULT_TIMEOUT_MS,
     HARD_CAP_TIMEOUT_MS,
@@ -340,7 +382,7 @@ export async function executeRunShell(
   // is approximated via taskkill below if needed.
   const useProcessGroup = process.platform !== 'win32'
   const child = spawnFn(parsed.bin, parsed.args, {
-    cwd: roots.assetRoot,
+    cwd: roots.artifactRoot,
     env,
     stdio: ['pipe', 'pipe', 'pipe'],
     detached: useProcessGroup,

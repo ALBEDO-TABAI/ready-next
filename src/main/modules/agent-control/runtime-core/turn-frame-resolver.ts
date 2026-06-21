@@ -6,6 +6,7 @@ import {
   type SkillRunContract,
   type TaskProjectionRecord,
 } from '../contracts/run-contracts'
+import { isDirectlyResumableTaskStatus, isPausedTaskStatus } from '../contracts/task-open-status'
 import type { SkillTaskRunRecord } from '../../repositories/skill-task-run-repository'
 import type { SkillTaskSupervisorSnapshot } from '../skills/skill-task-supervisor'
 import {
@@ -163,8 +164,8 @@ function inferLiveness(
     if (snapshot.status === 'failed') return 'failed'
     if (snapshot.hasLiveWork) return 'running_process'
     if (snapshot.hasRecentProgress) return 'recent_progress'
-    if (snapshot.status === 'recoverable_paused' || snapshot.status === 'budget_paused') return 'recoverable_paused'
-    if (snapshot.status === 'blocked') return 'blocked'
+    if (isDirectlyResumableTaskStatus(snapshot.status)) return 'recoverable_paused'
+    if (isPausedTaskStatus(snapshot.status)) return 'blocked'
   }
   // ActiveSkillContext.status carries the projection / task-run status
   // strings, which still use legacy `done` / `background_running` /
@@ -173,8 +174,8 @@ function inferLiveness(
   if (context.status === 'done' || context.status === 'completed') return 'done'
   if (context.status === 'failed') return 'failed'
   if (context.status === 'background_running' || context.status === 'running') return 'running_process'
-  if (context.status === 'budget_paused' || context.status === 'recoverable_paused') return 'recoverable_paused'
-  if (context.status === 'blocked') return 'blocked'
+  if (isDirectlyResumableTaskStatus(context.status)) return 'recoverable_paused'
+  if (isPausedTaskStatus(context.status)) return 'blocked'
   return 'unknown'
 }
 
@@ -184,8 +185,8 @@ function livenessFromSupervisorSnapshot(snapshot?: SkillTaskSupervisorSnapshot |
   if (snapshot.status === 'failed') return 'failed'
   if (snapshot.hasLiveWork) return 'running_process'
   if (snapshot.hasRecentProgress) return 'recent_progress'
-  if (snapshot.status === 'recoverable_paused' || snapshot.status === 'budget_paused') return 'recoverable_paused'
-  if (snapshot.status === 'blocked') return 'blocked'
+  if (isDirectlyResumableTaskStatus(snapshot.status)) return 'recoverable_paused'
+  if (isPausedTaskStatus(snapshot.status)) return 'blocked'
   return null
 }
 

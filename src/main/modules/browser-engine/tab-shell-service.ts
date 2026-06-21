@@ -49,6 +49,8 @@ export interface BrowserShellTabRecord {
 export interface BrowserTabSwitchResult {
   success: boolean
   error?: string
+  previousActiveTabId?: string | null
+  activeTabId?: string | null
   url?: string
   title?: string
   domain?: string
@@ -192,6 +194,7 @@ export class BrowserTabShellService {
   }
 
   switchTab(tabId: string): BrowserTabSwitchResult {
+    const previousActiveTabId = this.host.getActiveTabId()
     const nextTab = this.host.tabs.get(tabId)
     if (!nextTab?.view) return { success: false, error: 'Tab not found' }
     const currentSplitTabId = this.host.getSplitTabId()
@@ -217,6 +220,8 @@ export class BrowserTabShellService {
 
     return {
       success: true,
+      previousActiveTabId,
+      activeTabId: tabId,
       url: nextTab.url,
       title: nextTab.title,
       domain: nextTab.domain,

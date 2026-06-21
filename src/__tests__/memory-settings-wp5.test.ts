@@ -228,7 +228,10 @@ interface MemoryHarness {
   alerts: string[]
 }
 
-function installElectronAPI(dom: JSDOM): MemoryHarness {
+function installElectronAPI(
+  dom: JSDOM,
+  snapshot: BeliefCardSettingsSnapshotData = beliefSnapshot,
+): MemoryHarness {
   const harness: MemoryHarness = {
     queryCalls: [],
     statsCalls: 0,
@@ -287,24 +290,24 @@ function installElectronAPI(dom: JSDOM): MemoryHarness {
     memoryCards: {
       list: async () => {
         harness.beliefCardListCalls += 1
-        return { success: true, data: beliefSnapshot }
+        return { success: true, data: snapshot }
       },
       transition: async (payload: { relPath: string; action: 'approve' | 'reject' }) => {
         harness.beliefCardTransitions.push(payload)
         return {
           success: true,
           data: {
-            ...beliefSnapshot,
-            cards: beliefSnapshot.cards.map((card) =>
+            ...snapshot,
+            cards: snapshot.cards.map((card) =>
               card.relPath === payload.relPath ? { ...card, status: payload.action === 'approve' ? 'active' as const : 'rejected' as const } : card,
             ),
-            summary: { ...beliefSnapshot.summary, staged: 0, active: 2 },
+            summary: { ...snapshot.summary, staged: 0, active: 2 },
           },
         }
       },
       setKnowledgeSystemEnabled: async (enabled: boolean) => {
         harness.knowledgeSwitches.push(enabled)
-        return { success: true, data: { ...beliefSnapshot, knowledgeSystemEnabled: enabled } }
+        return { success: true, data: { ...snapshot, knowledgeSystemEnabled: enabled } }
       },
     },
     trigger: {
@@ -340,8 +343,11 @@ function setFormValue(
   element.dispatchEvent(new dom.window.Event('change', { bubbles: true, cancelable: true }))
 }
 
-async function mountMemorySettings(handle: DomHandle): Promise<{ root: Root; harness: MemoryHarness }> {
-  const harness = installElectronAPI(handle.dom)
+async function mountMemorySettings(
+  handle: DomHandle,
+  snapshot: BeliefCardSettingsSnapshotData = beliefSnapshot,
+): Promise<{ root: Root; harness: MemoryHarness }> {
+  const harness = installElectronAPI(handle.dom, snapshot)
   const [{ createRoot }, SettingsModule] = await Promise.all([
     import('react-dom/client'),
     import('../renderer/pages/Settings'),
@@ -397,6 +403,25 @@ test('WP5 memory settings default view hides internal tools and re-queries when 
     await act(async () => { confirmButton.click() })
     await flushAsync()
     assert.deepEqual(harness.beliefCardTransitions, [{ relPath: 'knowledge/new-learning.md', action: 'approve' }])
+  } finally {
+    await act(async () => { root.unmount() })
+    await new Promise((resolve) => setTimeout(resolve, 25))
+    handle.restore()
+  }
+})
+
+test('WP5 memory settings labels missing LLM maintenance driver explicitly', async () => {
+  const handle = installDomGlobals()
+  const { root } = await mountMemorySettings(handle, {
+    ...beliefSnapshot,
+    maintenance: { ...beliefSnapshot.maintenance, llmRound: null },
+  })
+  try {
+    assert.ok(
+      handle.dom.window.document.body.textContent?.includes('LLM 维护回合 未接入驱动'),
+      'null maintenance LLM status must read as disabled driver, not a missing record',
+    )
+    assert.ok(!handle.dom.window.document.body.textContent?.includes('LLM 维护回合 尚未记录'))
   } finally {
     await act(async () => { root.unmount() })
     await new Promise((resolve) => setTimeout(resolve, 25))

@@ -5,6 +5,7 @@ import ReadyMode from './pages/ReadyMode'
 import Settings from './pages/Settings'
 import PetWindow from './pages/PetWindow'
 import FastCardOverlayWindow from './pages/FastCardOverlayWindow'
+import BrowserLockOverlayWindow from './pages/BrowserLockOverlayWindow'
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import RitualOverlay from './components/overlay/RitualOverlay'
@@ -145,6 +146,13 @@ function App() {
     return (
       <ErrorBoundary>
         <FastCardOverlayWindow />
+      </ErrorBoundary>
+    )
+  }
+  if (location.pathname === '/browser-lock-overlay') {
+    return (
+      <ErrorBoundary>
+        <BrowserLockOverlayWindow />
       </ErrorBoundary>
     )
   }

@@ -317,7 +317,10 @@ describe('PromptAssemblyService', () => {
       ]
     })
 
-    assert.ok(result.contextBudget.totalChars <= 16000)
+    assert.ok(
+      result.contextBudget.l0Chars + result.contextBudget.l1Chars + result.contextBudget.l2Chars <= 16000
+    )
+    assert.ok(result.contextBudget.totalChars >= result.contextBudget.l0Chars + result.contextBudget.l1Chars + result.contextBudget.l2Chars)
     assert.ok(result.contextBudget.droppedRefs.length > 0)
 
     service.recordRunOutcome({

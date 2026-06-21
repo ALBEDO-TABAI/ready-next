@@ -17,6 +17,23 @@ import { z } from 'zod'
 // SkillHostRequirements — the declarative contract a skill manifest can opt into.
 // Read by SkillHostController to provide a generic skill-hosting environment.
 
+export const DESTRUCTIVE_SHELL_COMMANDS = [
+  'rm',
+  'cp',
+  'mv',
+  'dd',
+  'mkfs',
+  'chmod',
+  'chown',
+  'ln',
+] as const
+
+const DESTRUCTIVE_SHELL_COMMAND_SET = new Set<string>(DESTRUCTIVE_SHELL_COMMANDS)
+
+export function isDestructiveShellCommand(command: string): boolean {
+  return DESTRUCTIVE_SHELL_COMMAND_SET.has(command.trim().toLowerCase())
+}
+
 export const SpawnConfigFileSchema = z.object({
   path: z.string().min(1), // template, e.g. "~/.config/${skill.id}/config.json"
   format: z.enum(['json', 'yaml', 'toml', 'ini']),
@@ -82,6 +99,16 @@ export const SkillHostRequirementsSchema = z
     spawn_context: SpawnContextSchema.optional(),
     shell_allowlist_extensions: z
       .array(z.string().regex(/^[a-z0-9_-]+$/i))
+      .superRefine((commands, ctx) => {
+        commands.forEach((command, index) => {
+          if (!isDestructiveShellCommand(command)) return
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: [index],
+            message: `shell_allowlist_extensions cannot include destructive command "${command}"`,
+          })
+        })
+      })
       .optional(),
     default_action_timeout_ms: z
       .number()

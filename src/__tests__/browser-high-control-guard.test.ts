@@ -24,7 +24,10 @@ function controllerOn(url: string, overrides?: Partial<BrowserController>): Brow
   return mock as BrowserController
 }
 
-function parseError(out: string): { errorCode?: string } | null {
+function parseError(out: string | { data?: unknown }): { errorCode?: string } | null {
+  if (typeof out !== 'string') {
+    return isAgentBrowserError(out.data) ? out.data : null
+  }
   try {
     const o = JSON.parse(out)
     return isAgentBrowserError(o) ? o : null
@@ -66,10 +69,13 @@ describe('high-control platform script blacklist (WP3)', () => {
     assert.match(out, /visible text/)
   })
 
-  it('does NOT block execute_js on a generic site (only high-control platforms)', async () => {
-    const out = await executeBrowserTool('browser_execute_js', { code: 'document.title' }, controllerOn(GENERIC))
-    assert.equal(parseError(out)?.errorCode, undefined, 'generic site is not script-blocked')
-    assert.match(out, /js-ran/)
+  it('generic sites reject execute_js freeform code but allow named read-only templates', async () => {
+    const blocked = await executeBrowserTool('browser_execute_js', { code: 'document.title' }, controllerOn(GENERIC))
+    assert.equal(parseError(blocked)?.errorCode, 'freeform_script_denied', 'P3c blocks ordinary-site freeform scripts')
+
+    const allowed = await executeBrowserTool('browser_execute_js', { template: 'read_meta', name: 'title' }, controllerOn(GENERIC))
+    assert.equal(parseError(allowed)?.errorCode, undefined, 'named read-only template must not hit the high-control guard')
+    assert.match(allowed, /js-ran/)
   })
 
   it('blocks a high-control TARGET url even when the active tab is a generic page (no bypass)', async () => {

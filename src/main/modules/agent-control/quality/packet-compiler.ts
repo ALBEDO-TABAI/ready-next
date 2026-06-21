@@ -1,5 +1,6 @@
 /**
  * EP3-PK2 — dispatch compiler gate + packet-tree validation (09 §3).
+ * P5c/C22 unwired: this module is not in production path.
  *
  * The trigger threshold is CODE, never the model: only multi_step_task /
  * research with multiple targets enter compilation; direct_answer and

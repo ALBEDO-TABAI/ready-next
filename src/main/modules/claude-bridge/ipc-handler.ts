@@ -52,6 +52,8 @@ import { agentLifecycleGroup } from './ipc/agent-lifecycle-group'
 import { agentRuntimeGroup } from './ipc/agent-runtime-group'
 import { agentRegistryGroup } from './ipc/agent-registry-group'
 import { agentDerivationGroup } from './ipc/agent-derivation-group'
+import { agentSystemStudioGroup } from './ipc/agent-system-studio-group'
+import { agentSpecialistBlueprintGroup } from './ipc/agent-specialist-blueprint-group'
 import { sessionPrerouteGroup } from './ipc/session-preroute-group'
 import { beliefCardGroup } from './ipc/belief-card-group'
 import { conversationGroup } from './ipc/conversation-group'
@@ -66,6 +68,12 @@ import { chatPersistenceGroup } from './ipc/chat-persistence-group'
 import { memoryGroup } from './ipc/memory-group'
 import { triggerGroup } from './ipc/trigger-group'
 import type { IpcDisposeHandle } from './ipc/types'
+import {
+  getSpecialistBlueprintConfirmationStore,
+  getSpecialistBlueprintStore,
+} from '../agent-control/agents/specialist-blueprint-runtime'
+import { getSpecialistContentEditProposalStore } from '../agent-control/agents/specialist-content-edit-runtime'
+import { resolveSpecialistFoundationSemanticJudge } from '../agent-control/agents/specialist-foundation-semantic-judge-provider'
 import { logAgentMetric } from '../agent-control/metrics'
 import { KNOWLEDGE_SYSTEM_SETTING_KEY, isKnowledgeSystemEnabled } from '../agent-control/knowledge/knowledge-truth-source'
 import { learnSiteCardFromFailure } from '../agent-control/knowledge/site-card-learning'
@@ -166,7 +174,8 @@ function normalizeScopeRunTerminalReason(value: unknown): ScopeRunEventPayload['
     normalized === 'resume_launch_failed' ||
     normalized === 'persistence_failed' ||
     normalized === 'cancelled_user' ||
-    normalized === 'cancelled_runtime'
+    normalized === 'cancelled_runtime' ||
+    normalized === 'main_no_progress_timeout'
   ) {
     return normalized
   }
@@ -249,6 +258,12 @@ let agentRegistryGroupDispose: IpcDisposeHandle | null = null
 
 /** EP4-A6b — dispose handle for candidate-to-agent derivation channels. */
 let agentDerivationGroupDispose: IpcDisposeHandle | null = null
+
+/** P8a/P8b — dispose handle for read-only Agent System Studio snapshot. */
+let agentSystemStudioGroupDispose: IpcDisposeHandle | null = null
+
+/** P8c/P8f — dispose handle for specialist blueprint draft/admission channels. */
+let agentSpecialistBlueprintGroupDispose: IpcDisposeHandle | null = null
 
 /** EP4-A5 — dispose handle for the session preroute evaluate channel. */
 let sessionPrerouteGroupDispose: IpcDisposeHandle | null = null
@@ -500,6 +515,14 @@ export async function cleanupAgentRuntime(): Promise<void> {
   if (agentDerivationGroupDispose) {
     try { agentDerivationGroupDispose.dispose() } catch { /* ignore */ }
     agentDerivationGroupDispose = null
+  }
+  if (agentSystemStudioGroupDispose) {
+    try { agentSystemStudioGroupDispose.dispose() } catch { /* ignore */ }
+    agentSystemStudioGroupDispose = null
+  }
+  if (agentSpecialistBlueprintGroupDispose) {
+    try { agentSpecialistBlueprintGroupDispose.dispose() } catch { /* ignore */ }
+    agentSpecialistBlueprintGroupDispose = null
   }
   // EP4-A5 — symmetric release of the session preroute evaluate channel.
   if (sessionPrerouteGroupDispose) {
@@ -911,6 +934,34 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
   agentDerivationGroupDispose = agentDerivationGroup.register(ipcMain, {
     getBeliefCardStore: () => runtime?.getBeliefCardStore() ?? null,
     getAgentRegistry: () => runtime!.getAgentRegistry(),
+    getBlueprintStore: getSpecialistBlueprintStore,
+  })
+  if (agentSpecialistBlueprintGroupDispose) {
+    try { agentSpecialistBlueprintGroupDispose.dispose() } catch { /* ignore — handlers may already be gone */ }
+    agentSpecialistBlueprintGroupDispose = null
+  }
+  const specialistSemanticJudge = resolveSpecialistFoundationSemanticJudge()
+  agentSpecialistBlueprintGroupDispose = agentSpecialistBlueprintGroup.register(ipcMain, {
+    getBlueprintStore: getSpecialistBlueprintStore,
+    getConfirmationStore: getSpecialistBlueprintConfirmationStore,
+    getBeliefCardStore: () => runtime?.getBeliefCardStore() ?? null,
+    getAgentRegistry: () => runtime!.getAgentRegistry(),
+    runSemanticFoundationJudge: specialistSemanticJudge.judge,
+    semanticFoundationJudgeUnavailableReason: specialistSemanticJudge.unavailableReason,
+  })
+  if (agentSystemStudioGroupDispose) {
+    try { agentSystemStudioGroupDispose.dispose() } catch { /* ignore — handlers may already be gone */ }
+    agentSystemStudioGroupDispose = null
+  }
+  agentSystemStudioGroupDispose = agentSystemStudioGroup.register(ipcMain, {
+    listAgents: () => runtime!.getAgentRegistry().list(),
+    getAgentRegistry: () => runtime!.getAgentRegistry(),
+    getBeliefCardStore: () => runtime?.getBeliefCardStore() ?? null,
+    getContentEditProposalStore: getSpecialistContentEditProposalStore,
+    listOwnedTasks: (agentId) => runtime!.listTaskProjectionsByOwner(agentId, 8),
+    listRecentPrerouteTraces: (limit) => runtime!.listRecentSessionPrerouteTraces(limit),
+    listStagedBlueprints: () => getSpecialistBlueprintStore().list(['draft', 'needs_clarification', 'staged', 'confirmed']),
+    simulateRouting: (firstMessage) => runtime!.simulateSessionPrerouteForStudio(firstMessage),
   })
 
   // EP4-A5 — session preroute evaluate (pure, read-only; renderer acts).
@@ -1029,6 +1080,7 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
   runControlGroupDispose = runControlGroup.register(ipcMain, {
     listActiveChildRuns: () => listActiveChildRunsForIpc(runtime),
     cancelChildRun: (payload) => cancelChildRunForIpc(runtime, payload),
+    reportInfrastructureTimeout: (payload) => runtime!.reportInfrastructureTimeout(payload),
     suspendRun: (payload) => runtime!.suspendRun(payload),
     resumeRun: (payload) => runtime!.resumeRun(payload),
     respondToInteraction: (payload) => runtime!.respondToInteraction(payload),

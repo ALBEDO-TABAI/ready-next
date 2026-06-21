@@ -24,13 +24,13 @@
  */
 
 import { existsSync, readFileSync, statSync } from 'node:fs'
-import { basename, dirname } from 'node:path'
+import { basename, dirname, resolve } from 'node:path'
 
 import { createToolExecutionOutput, type ToolExecutionOutput } from '../../agent-control/tools-runtime/tool-result-types'
 import { ToolDomainError } from '../tool-errors'
 import { logAgentMetric } from '../../agent-control/metrics'
 import { TOOL_ERROR_METRICS } from '../../agent-control/tools-runtime/tool-error-metrics'
-import { getDetachedSkillTaskTracker } from '../../agent-control/detached-skill-task-tracker'
+import { getDetachedSkillTaskTracker, type DetachedSkillTaskRecord } from '../../agent-control/detached-skill-task-tracker'
 import { inspectSkillProgressArtifacts, type SkillProgressArtifacts } from '../../agent-control/skills/skill-progress-artifacts'
 import { selectRunStateCandidate, type RunStateCandidate } from '../../agent-control/task-projection/run-state-selection'
 import {
@@ -40,6 +40,7 @@ import {
 } from '../../agent-control/contracts/run-contracts'
 import type { TurnFrame, TurnFramePatch } from '../../agent-control/runtime-core/turn-frame'
 import { resolveVeaResumeAction } from '../../agent-control/vea-resume-action'
+import { PathSandboxError, resolveReadableWithinAnyRoot } from './path-sandbox'
 
 const RUN_STATE_FILENAME = 'run_state.json'
 const DEFAULT_MAX_RAW_BYTES = 16_384
@@ -60,6 +61,11 @@ export interface InspectRunStateArgs {
    * may decline to create a fresh contract object without a skillId anchor.
    */
   skillId?: string
+  scopeBinding?: {
+    sessionId?: string | null
+    scopeId?: string | null
+    activeRoots?: string[] | null
+  }
 }
 
 interface RunStateSummary {
@@ -236,6 +242,53 @@ function frameLivenessFromReconciled(reconciled: string): TurnFrame['liveness'] 
       return reconciled
     default:
       return 'unknown'
+  }
+}
+
+function normalizedBindingValue(value: string | null | undefined): string | null {
+  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null
+}
+
+function detachedRecordVisibleToScope(
+  record: DetachedSkillTaskRecord,
+  binding: InspectRunStateArgs['scopeBinding'],
+): boolean {
+  if (!binding) return true
+  const expectedSessionId = normalizedBindingValue(binding.sessionId)
+  const expectedScopeId = normalizedBindingValue(binding.scopeId)
+  if (!expectedSessionId && !expectedScopeId) return true
+  const recordSessionId = normalizedBindingValue(record.sessionId)
+  const recordScopeId = normalizedBindingValue(record.scopeId)
+  if (!recordSessionId && !recordScopeId) return false
+  if (expectedSessionId && recordSessionId && recordSessionId !== expectedSessionId) return false
+  if (expectedScopeId && recordScopeId && recordScopeId !== expectedScopeId) return false
+  return true
+}
+
+function assertExplicitPathWithinActiveRoots(
+  targetPath: string,
+  binding: InspectRunStateArgs['scopeBinding'],
+): void {
+  if (!binding) return
+  const roots = Array.isArray(binding.activeRoots)
+    ? binding.activeRoots.filter((root): root is string => typeof root === 'string' && root.trim().length > 0)
+    : []
+  const resolvedTarget = resolve(targetPath)
+  if (roots.some((root) => resolve(root) === resolvedTarget)) return
+  try {
+    resolveReadableWithinAnyRoot(roots, targetPath)
+  } catch (error) {
+    if (error instanceof PathSandboxError) {
+      logAgentMetric(TOOL_ERROR_METRICS.skillPrimitiveRejected, {
+        primitive: 'skill_inspect_run_state',
+        reason: error.reason,
+      })
+      throw new ToolDomainError(error.reason, error.message, {
+        path: targetPath,
+        activeRoots: roots,
+      })
+    }
+    throw error
   }
 }
 
@@ -477,6 +530,18 @@ export async function executeInspectRunState(
         { taskId: args.taskId },
       )
     }
+    if (!detachedRecordVisibleToScope(record, args.scopeBinding)) {
+      logAgentMetric(TOOL_ERROR_METRICS.skillPrimitiveRejected, {
+        primitive: 'skill_inspect_run_state',
+        reason: 'detached_task_not_found',
+        taskId: args.taskId,
+      })
+      throw new ToolDomainError(
+        'not_found',
+        `Detached task ${args.taskId} not found.`,
+        { taskId: args.taskId },
+      )
+    }
     outputDir = record.outputDir || (record.runStatePath ? dirname(record.runStatePath) : null)
     explicitRunStatePath = record.runStatePath || null
     resolvedFromTaskId = args.taskId
@@ -489,8 +554,10 @@ export async function executeInspectRunState(
         { runStatePath: args.runStatePath },
       )
     }
+    assertExplicitPathWithinActiveRoots(args.runStatePath, args.scopeBinding)
     outputDir = dirname(args.runStatePath)
   } else if (args.outputDir) {
+    assertExplicitPathWithinActiveRoots(args.outputDir, args.scopeBinding)
     outputDir = args.outputDir
   }
 

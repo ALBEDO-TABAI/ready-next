@@ -203,8 +203,9 @@ test('release re-enters the same dispatch path and is stopped by admission when 
   answerPendingCard(sessionId, FROZEN_CALL_CONFIRM_OPTION)
   const output = await pending
 
-  assert.equal(output.data?.reason, 'tool_restricted_this_turn',
+  assert.equal(output.data?.errorKind, 'tool_restricted_this_turn',
     'release must be stopped by the allowlist admission gate, not waved through by the token')
+  assert.equal(output.data?.reason, undefined)
   assert.deepEqual(executed, [], 'tool must NOT execute after losing authorization')
 })
 

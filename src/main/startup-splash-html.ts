@@ -1,6 +1,25 @@
 import readyWordmarkSvg from '../renderer/assets/ready-wordmark.svg?raw'
+import { createReadyLogoDotPattern } from '../shared/ready-logo-dots'
 
 type StartupSplashVariant = 'orange' | 'pink'
+
+const GRID_ROWS = 8
+const GRID_COLUMNS = 37
+const MATRIX_ROW_STEP = 137
+const MATRIX_COLUMN_STEP = 139
+const MATRIX_DOT_RADIUS = 52
+const MATRIX_X_START = 75
+const MATRIX_Y_START = 75
+const LOGO_X_OFFSET = MATRIX_COLUMN_STEP * 4
+const LOGO_Y_OFFSET = MATRIX_ROW_STEP
+const MATRIX_WIDTH = 5160
+const MATRIX_HEIGHT = 1109
+const READY_LOGO_PATTERN = createReadyLogoDotPattern(readyWordmarkSvg, {
+  xOffset: LOGO_X_OFFSET,
+  yOffset: LOGO_Y_OFFSET,
+  matrixXStart: MATRIX_X_START,
+  matrixColumnStep: MATRIX_COLUMN_STEP,
+})
 
 const VARIANT_COLORS: Record<StartupSplashVariant, { logo: string; glow: string }> = {
   orange: {
@@ -22,16 +41,9 @@ function escapeHtml(value: string): string {
     .replace(/'/g, '&#39;')
 }
 
-function createInlineWordmark(): string {
-  return readyWordmarkSvg
-    .replace('<svg ', '<svg class="ready-startup-wordmark" aria-hidden="true" ')
-    .replace('role="img"', '')
-    .replace('aria-label="Ready"', '')
-}
-
 export function createStartupSplashDataUrl(variant: StartupSplashVariant): string {
   const colors = VARIANT_COLORS[variant]
-  const wordmark = createInlineWordmark()
+  const logoDots = JSON.stringify(READY_LOGO_PATTERN.dots)
   const html = `<!doctype html>
 <html>
 <head>
@@ -68,67 +80,58 @@ export function createStartupSplashDataUrl(variant: StartupSplashVariant): strin
       opacity: 1;
     }
 
-    .matrix {
+    .matrix,
+    .logo {
       position: absolute;
       inset: 3% 7%;
+    }
+
+    .matrix {
       color: #dfded9;
     }
 
-    .matrix svg {
+    .logo {
+      color: ${escapeHtml(colors.logo)};
+      filter: drop-shadow(0 0 8px ${escapeHtml(colors.glow)});
+    }
+
+    .matrix svg,
+    .logo svg {
       display: block;
       width: 100%;
       height: 100%;
       overflow: visible;
-    }
-
-    .logo {
-      position: absolute;
-      inset: 3% 7%;
-      clip-path: inset(0 100% 0 0);
-      will-change: clip-path;
-    }
-
-    .ready-startup-wordmark {
-      position: absolute;
-      left: 10.775%;
-      top: 12.354%;
-      width: 78.45%;
-      height: 76.2%;
-      filter: drop-shadow(0 0 8px ${escapeHtml(colors.glow)});
-    }
-
-    .ready-startup-wordmark g {
-      fill: ${escapeHtml(colors.logo)};
     }
   </style>
 </head>
 <body>
   <section class="card" aria-label="Ready loading mark">
     <div class="matrix" aria-hidden="true">
-      <svg id="ready-startup-grid" viewBox="0 0 5160 1109" preserveAspectRatio="xMidYMid meet"></svg>
+      <svg id="ready-startup-grid" viewBox="0 0 ${MATRIX_WIDTH} ${MATRIX_HEIGHT}" preserveAspectRatio="xMidYMid meet"></svg>
     </div>
-    <div class="logo" aria-hidden="true">${wordmark}</div>
+    <div class="logo" aria-hidden="true">
+      <svg id="ready-startup-logo" viewBox="0 0 ${MATRIX_WIDTH} ${MATRIX_HEIGHT}" preserveAspectRatio="xMidYMid meet"></svg>
+    </div>
   </section>
   <script>
     (() => {
-      const GRID_ROWS = 8;
-      const GRID_COLUMNS = 37;
-      const MATRIX_ROW_STEP = 137;
-      const MATRIX_COLUMN_STEP = 139;
-      const MATRIX_DOT_RADIUS = 52;
-      const MATRIX_X_START = 75;
-      const MATRIX_Y_START = 75;
-      const BACKDROP_REVEAL_MS = 1050;
-      const LOGO_START_DELAY_MS = 520;
-      const LOGO_ON_MS = 1280;
-      const LOGO_HOLD_MS = 780;
-      const LOGO_OFF_MS = 1060;
-      const LOGO_DARK_MS = 340;
-      const LOGO_LOOP_MS = LOGO_ON_MS + LOGO_HOLD_MS + LOGO_OFF_MS + LOGO_DARK_MS;
-      const BACKDROP_FADE_MS = 760;
-      const FINAL_LOGO_HOLD_MS = 2000;
-      const CARD_EXIT_MS = 620;
-      const EXIT_TOTAL_MS = BACKDROP_FADE_MS + FINAL_LOGO_HOLD_MS + CARD_EXIT_MS;
+      const GRID_ROWS = ${GRID_ROWS};
+      const GRID_COLUMNS = ${GRID_COLUMNS};
+      const MATRIX_ROW_STEP = ${MATRIX_ROW_STEP};
+      const MATRIX_COLUMN_STEP = ${MATRIX_COLUMN_STEP};
+      const MATRIX_DOT_RADIUS = ${MATRIX_DOT_RADIUS};
+      const MATRIX_X_START = ${MATRIX_X_START};
+      const MATRIX_Y_START = ${MATRIX_Y_START};
+      const LOGO_DOTS = ${logoDots};
+      const LOGO_COLUMN_COUNT = ${READY_LOGO_PATTERN.columnCount};
+      const BACKDROP_REVEAL_MS = 680;
+      const LOGO_COLUMN_MS = 86;
+      const LOGO_COMPLETE_MS = 980;
+      const BACKDROP_FADE_DELAY_MS = 240;
+      const BACKDROP_FADE_MS = 560;
+      const FINAL_LOGO_HOLD_MS = 460;
+      const CARD_EXIT_MS = 280;
+      const EXIT_TOTAL_MS = LOGO_COMPLETE_MS + FINAL_LOGO_HOLD_MS + CARD_EXIT_MS;
 
       const clamp01 = value => Math.max(0, Math.min(1, value));
       const easeOutCubic = value => 1 - Math.pow(1 - clamp01(value), 3);
@@ -138,9 +141,10 @@ export function createStartupSplashDataUrl(variant: StartupSplashVariant): strin
       };
 
       const grid = document.getElementById('ready-startup-grid');
-      const logo = document.querySelector('.logo');
+      const logo = document.getElementById('ready-startup-logo');
       const card = document.querySelector('.card');
-      const dots = [];
+      const matrixDots = [];
+      const logoDotElements = [];
 
       for (let row = 0; row < GRID_ROWS; row += 1) {
         for (let column = 0; column < GRID_COLUMNS; column += 1) {
@@ -151,23 +155,37 @@ export function createStartupSplashDataUrl(variant: StartupSplashVariant): strin
           circle.setAttribute('fill', 'currentColor');
           circle.setAttribute('opacity', '0');
           grid.appendChild(circle);
-          dots.push({ column, circle });
+          matrixDots.push({ column, circle });
         }
       }
 
-      function resolveLoopLogoClipPath(elapsedMs) {
-        if (elapsedMs < LOGO_START_DELAY_MS) return 'inset(0 100% 0 0)';
-        const cycleMs = (elapsedMs - LOGO_START_DELAY_MS) % LOGO_LOOP_MS;
-        if (cycleMs < LOGO_ON_MS) {
-          const progress = easeOutCubic(cycleMs / LOGO_ON_MS);
-          return 'inset(0 ' + ((1 - progress) * 100) + '% 0 0)';
+      for (const dot of LOGO_DOTS) {
+        const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        circle.setAttribute('cx', String(dot.x));
+        circle.setAttribute('cy', String(dot.y));
+        circle.setAttribute('r', String(dot.r));
+        circle.setAttribute('fill', 'currentColor');
+        circle.setAttribute('opacity', '0');
+        logo.appendChild(circle);
+        logoDotElements.push({ columnIndex: dot.columnIndex, circle });
+      }
+
+      function resolveBackdropOpacity(finishElapsedMs) {
+        if (finishElapsedMs === null) return 1;
+        const fadeElapsedMs = Math.max(0, finishElapsedMs - BACKDROP_FADE_DELAY_MS);
+        return 1 - easeInOutCubic(fadeElapsedMs / BACKDROP_FADE_MS);
+      }
+
+      function resolveLogoDotOpacity(dot, loopElapsedMs, finishElapsedMs) {
+        if (finishElapsedMs !== null) {
+          const buildProgress = easeOutCubic(finishElapsedMs / LOGO_COMPLETE_MS) * LOGO_COLUMN_COUNT;
+          return 0.96 * clamp01(buildProgress - dot.columnIndex);
         }
-        if (cycleMs < LOGO_ON_MS + LOGO_HOLD_MS) return 'inset(0 0 0 0)';
-        if (cycleMs < LOGO_ON_MS + LOGO_HOLD_MS + LOGO_OFF_MS) {
-          const progress = easeInOutCubic((cycleMs - LOGO_ON_MS - LOGO_HOLD_MS) / LOGO_OFF_MS);
-          return 'inset(0 0 0 ' + (progress * 100) + '%)';
-        }
-        return 'inset(0 100% 0 0)';
+
+        const activeColumnIndex = Math.floor(loopElapsedMs / LOGO_COLUMN_MS) % LOGO_COLUMN_COUNT;
+        if (dot.columnIndex !== activeColumnIndex) return 0;
+        const phase = (loopElapsedMs % LOGO_COLUMN_MS) / LOGO_COLUMN_MS;
+        return 0.78 + 0.18 * Math.sin(phase * Math.PI);
       }
 
       const startedAt = performance.now();
@@ -180,18 +198,18 @@ export function createStartupSplashDataUrl(variant: StartupSplashVariant): strin
         const visibleColumns = loopElapsedMs < BACKDROP_REVEAL_MS
           ? easeOutCubic(loopElapsedMs / BACKDROP_REVEAL_MS) * GRID_COLUMNS
           : GRID_COLUMNS;
-        const backdropOpacity = finishElapsedMs === null
-          ? 1
-          : 1 - easeInOutCubic(finishElapsedMs / BACKDROP_FADE_MS);
+        const backdropOpacity = resolveBackdropOpacity(finishElapsedMs);
 
-        for (const dot of dots) {
-          dot.circle.setAttribute('opacity', String(backdropOpacity * 0.34 * clamp01(visibleColumns - dot.column)));
+        for (const dot of matrixDots) {
+          dot.circle.setAttribute('opacity', String(backdropOpacity * 0.32 * clamp01(visibleColumns - dot.column)));
         }
 
-        logo.style.clipPath = finishElapsedMs === null ? resolveLoopLogoClipPath(loopElapsedMs) : 'inset(0 0 0 0)';
+        for (const dot of logoDotElements) {
+          dot.circle.setAttribute('opacity', String(resolveLogoDotOpacity(dot, loopElapsedMs, finishElapsedMs)));
+        }
 
         if (finishElapsedMs !== null) {
-          const exitElapsedMs = finishElapsedMs - BACKDROP_FADE_MS - FINAL_LOGO_HOLD_MS;
+          const exitElapsedMs = finishElapsedMs - LOGO_COMPLETE_MS - FINAL_LOGO_HOLD_MS;
           if (exitElapsedMs > 0) {
             card.style.opacity = String(1 - easeInOutCubic(exitElapsedMs / CARD_EXIT_MS));
           }

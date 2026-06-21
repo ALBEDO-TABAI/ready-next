@@ -25,7 +25,7 @@ import type { TurnTerminalReason } from '../runtime-core/turn-frame'
 function phaseFromTerminalReason(reason: TurnTerminalReason | null | undefined): ScopeRunEventPayload['phase'] | null {
   if (!reason) return null
   if (reason === 'done') return 'done'
-  if (reason === 'cancelled_runtime' || reason === 'cancelled_user') return 'cancelled'
+  if (reason === 'cancelled_runtime' || reason === 'cancelled_user' || reason === 'main_no_progress_timeout') return 'cancelled'
   if (reason === 'failed_skill' || reason === 'resume_launch_failed' || reason === 'persistence_failed') return 'error'
   return 'checkpoint'
 }
@@ -154,6 +154,7 @@ export class RunCoordinator {
       sessionId: request.scope.id,
       sessionIdOverride: request.sessionIdOverride,
       requestId: request.requestId,
+      sourceMessageId: request.sourceMessageId ?? null,
       taskId,
       parentTaskId: request.parentTaskId,
       parentStepId: request.parentStepId,
@@ -217,14 +218,19 @@ export class RunCoordinator {
         ? projectionPatch.taskContinuation as ScopeRunEventPayload['taskContinuation']
         : undefined
     const lifecycleSignal = result.skillTaskLifecycle || null
-    const finalInteractionState = lifecycleSignal?.interactionState || result.interactionState
+    const finalInteractionState = lifecycleSignal?.interactionState
+      || (result.terminalReason === 'manual_suspend' ? 'suspended' : result.interactionState)
     const finalWaitingFor = lifecycleSignal ? lifecycleSignal.waitingFor : projectionWaitingFor
     const finalResumableActions = lifecycleSignal
       ? lifecycleSignal.resumableActions
-      : projectionResumableActions as ScopeRunEventPayload['resumableActions'] | undefined
+      : result.terminalReason === 'manual_suspend'
+        ? (projectionResumableActions as ScopeRunEventPayload['resumableActions'] | undefined) || ['cancel']
+        : projectionResumableActions as ScopeRunEventPayload['resumableActions'] | undefined
     const finalBlockedReason = lifecycleSignal
       ? lifecycleSignal.blockedReason
-      : projectionBlockedReason
+      : result.terminalReason === 'manual_suspend'
+        ? projectionBlockedReason || '任务已暂停，等待继续。'
+        : projectionBlockedReason
     const finalTaskContinuation = lifecycleSignal
       ? lifecycleSignal.taskContinuation
       : projectionTaskContinuation
@@ -304,6 +310,10 @@ export class RunCoordinator {
         error: result.error || 'Agent execution failed',
         scopeRunAuthority: result.scopeRunAuthority,
       }
+    }
+
+    if (result.terminalReason === 'manual_suspend') {
+      return { success: true }
     }
 
     await hooks?.onSuccess?.(result)

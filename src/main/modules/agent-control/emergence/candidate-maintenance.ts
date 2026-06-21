@@ -1,4 +1,6 @@
 /**
+ * P5d/C26 unwired: not in production driver path.
+ *
  * EP3-C5 — emergence candidate maintenance (03 §5). Deterministic, zero LLM
  * — the file-emergence paradigm (多源证据 → 候选 → 打分 → 可解释投影)
  * extended to agent candidates:

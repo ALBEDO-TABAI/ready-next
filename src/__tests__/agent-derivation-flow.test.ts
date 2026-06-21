@@ -10,6 +10,7 @@ import {
   _agentDerivationGroupChannelsForTest,
   type AgentDerivationGroupDeps,
 } from '../main/modules/claude-bridge/ipc/agent-derivation-group'
+import { SpecialistBlueprintStore } from '../main/modules/agent-control/agents/specialist-blueprint-store'
 import { BeliefCardStore, type BeliefCardFrontmatter } from '../main/modules/agent-control/knowledge/belief-card-store'
 import type { AgentRegistryRecord } from '../main/modules/repositories/agent-registry-repository'
 
@@ -86,6 +87,7 @@ test('agentDerivationGroup registers and disposes derivation channels', () => {
     const deps: AgentDerivationGroupDeps = {
       getBeliefCardStore: () => new BeliefCardStore({ memoryRoot: root }),
       getAgentRegistry: () => registry(),
+      getBlueprintStore: () => new SpecialistBlueprintStore(),
     }
     const handle = agentDerivationGroup.register(ipc, deps)
     assert.deepEqual([...handlers.keys()].sort(), [..._agentDerivationGroupChannelsForTest].sort())
@@ -99,11 +101,12 @@ test('agentDerivationGroup registers and disposes derivation channels', () => {
   }
 })
 
-test('agent derivation preview is read-only; confirm creates the specialist and routing card', async () => {
+test('agent derivation preview is read-only; confirm stages a blueprint without creating assets', async () => {
   const { ipc, handlers } = createMockIpc()
   const root = makeRoot()
   try {
     const store = new BeliefCardStore({ memoryRoot: root })
+    const blueprintStore = new SpecialistBlueprintStore()
     assert.ok(store.writeCard({
       relPath: 'knowledge/agent-candidate-domain.md',
       frontmatter: fm(),
@@ -124,6 +127,8 @@ test('agent derivation preview is read-only; confirm creates the specialist and 
     const deps: AgentDerivationGroupDeps = {
       getBeliefCardStore: () => store,
       getAgentRegistry: () => repo,
+      getBlueprintStore: () => blueprintStore,
+      now: () => new Date('2026-06-19T12:00:00.000Z'),
     }
     agentDerivationGroup.register(ipc, deps)
 
@@ -149,12 +154,53 @@ test('agent derivation preview is read-only; confirm creates the specialist and 
       migrateCardRelPaths: ['knowledge/xhs-note.md'],
     })
     assert.equal((confirmed as { success: boolean }).success, true)
-    assert.equal(repo.rows.get('xhs.collector')?.derivationReason, 'knowledge/agent-candidate-domain.md')
-    assert.ok(readFileSync(join(root, 'agents', 'xhs.collector', 'RULES.md'), 'utf-8').includes('低频可见采集'))
-    assert.equal(store.readCard('knowledge/xhs-note.md', { includeStaged: true }), null)
-    assert.ok(store.readCard('agents/xhs.collector/knowledge/xhs-note.md', { includeStaged: true }))
-    assert.equal(store.readCard('knowledge/routing-xhs.collector.md', { includeStaged: true })?.frontmatter.status, 'active')
-    assert.equal(store.readCard('knowledge/agent-candidate-domain.md', { includeStaged: true })?.frontmatter.stage, 'emerged')
+    const result = confirmed as {
+      data: {
+        blueprintId: string
+        specialistId: string
+        createdAgent: boolean
+        routingActivated: boolean
+        migratedCards: unknown[]
+        missing: string[]
+        clarification?: {
+          nextTool?: string
+          questions?: Array<{ id: string }>
+          askUserQuestionsArgs?: { questions?: Array<{ id: string }> }
+        }
+      }
+    }
+    assert.equal(result.data.blueprintId, 'bp-xhs.collector')
+    assert.equal(result.data.specialistId, 'xhs.collector')
+    assert.equal(result.data.createdAgent, false)
+    assert.equal(result.data.routingActivated, false)
+    assert.deepEqual(result.data.migratedCards, [])
+    const blueprint = blueprintStore.get('bp-xhs.collector')
+    assert.equal(blueprint?.status, 'needs_clarification')
+    assert.equal(blueprint?.source, 'emergence-candidate')
+    assert.equal(blueprint?.routingActivateOnCreate, false)
+    assert.deepEqual(blueprint?.migrationCandidates, ['knowledge/xhs-note.md'])
+    assert.equal(blueprint?.foundationDocs.rulesText.includes('低频可见采集'), true)
+    assert.deepEqual(result.data.missing, ['nonGoals', 'recurringTasks', 'requiredInputs', 'expectedOutputs'])
+    assert.equal(result.data.clarification?.nextTool, 'ask_user_questions')
+    assert.deepEqual(result.data.clarification?.questions?.map((question) => question.id), [
+      'nonGoals',
+      'recurringTasks',
+      'requiredInputs',
+    ])
+    assert.deepEqual(result.data.clarification?.askUserQuestionsArgs?.questions?.map((question) => question.id), [
+      'nonGoals',
+      'recurringTasks',
+      'requiredInputs',
+    ])
+    assert.deepEqual(result.data.clarification?.remainingMissing, ['expectedOutputs'])
+    assert.equal(blueprint?.provenance.userRequestVerbatim, '从涌现候选卡生成：专项 agent 候选：小红书行情采集')
+    assert.equal(blueprint?.provenance.createdAt, '2026-06-19T12:00:00.000Z')
+    assert.equal(repo.rows.size, 0, 'confirm must not create an agent')
+    assert.equal(existsSync(join(root, 'agents', 'xhs.collector', 'RULES.md')), false, 'confirm must not write RULES')
+    assert.equal(existsSync(join(root, 'knowledge', 'routing-xhs.collector.md')), false, 'confirm must not write routing card')
+    assert.ok(store.readCard('knowledge/xhs-note.md', { includeStaged: true }), 'selected migration card remains in place')
+    assert.equal(store.readCard('agents/xhs.collector/knowledge/xhs-note.md', { includeStaged: true }), null)
+    assert.equal(store.readCard('knowledge/agent-candidate-domain.md', { includeStaged: true })?.frontmatter.stage, 'candidate')
   } finally {
     rmSync(root, { recursive: true, force: true })
   }
@@ -180,9 +226,11 @@ test('agent derivation confirm only migrates cards offered in the preview list',
       body: '不能被该候选清单迁移。',
     }).ok)
     const repo = registry()
+    const blueprintStore = new SpecialistBlueprintStore()
     agentDerivationGroup.register(ipc, {
       getBeliefCardStore: () => store,
       getAgentRegistry: () => repo,
+      getBlueprintStore: () => blueprintStore,
     })
 
     const confirmed = await handlers.get('agent:derivation:confirm')?.({} as IpcMainInvokeEvent, {
@@ -197,6 +245,7 @@ test('agent derivation confirm only migrates cards offered in the preview list',
     assert.equal((confirmed as { success: boolean }).success, false)
     assert.match((confirmed as { error?: string }).error || '', /not offered/)
     assert.equal(repo.rows.size, 0, 'rejected IPC payload must not create an agent')
+    assert.equal(blueprintStore.list().length, 0, 'rejected IPC payload must not stage a blueprint')
     assert.ok(store.readCard('knowledge/unrelated.md', { includeStaged: true }), 'unoffered card remains in place')
     assert.equal(existsSync(join(root, 'agents', 'xhs.collector', 'RULES.md')), false)
   } finally {
@@ -221,6 +270,7 @@ test('agent derivation reject marks the staged candidate rejected and removes it
     agentDerivationGroup.register(ipc, {
       getBeliefCardStore: () => store,
       getAgentRegistry: () => registry(),
+      getBlueprintStore: () => new SpecialistBlueprintStore(),
     })
 
     const rejected = await handlers.get('agent:derivation:reject')?.({} as IpcMainInvokeEvent, {

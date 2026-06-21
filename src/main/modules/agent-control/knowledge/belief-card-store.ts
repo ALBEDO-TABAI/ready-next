@@ -2,12 +2,17 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFile
 import { join, resolve, sep, dirname } from 'path'
 import { randomUUID } from 'crypto'
 import { logAgentMetric } from '../metrics'
+import type {
+  AgentSystemStudioAgentStatus,
+  AgentSystemStudioRoutingCard,
+  AgentSystemStudioRoutingDisabledReason,
+} from '../../../../shared/agent-system-studio'
 
 /**
  * Belief card store (EP1-K1). File-is-truth knowledge cards under the agent
  * memory root. Enforces:
- *   - a two-glob WRITE whitelist (normal `**​/knowledge/*.md`, site
- *     `**​/knowledge/sites/*.md`); any other path (incl. other knowledge
+ *   - a two-glob WRITE whitelist (normal knowledge cards and site cards
+ *     under every readable scope); any other path (incl. other knowledge
  *     subdirs, traversal, out-of-root) is refused;
  *   - a five-state lifecycle (staged → active → rejected; staged→expired
  *     cleanup; invalid for unparseable cards);
@@ -148,7 +153,7 @@ export interface BeliefCardStoreOptions {
 }
 
 function parseFrontmatter(text: string): { meta: Record<string, string>; body: string } | null {
-  const normalized = text.replace(/^﻿/, '')
+  const normalized = text.replace(/^\uFEFF/, '')
   const match = normalized.match(/^---\s*\r?\n([\s\S]*?)\r?\n---\s*(?:\r?\n|$)/)
   if (!match) return null
   const meta: Record<string, string> = {}
@@ -353,6 +358,8 @@ export class BeliefCardStore {
     return this.listCards()
       .filter((card) =>
         card.frontmatter.status === 'active'
+        && Array.isArray(card.frontmatter.triggers)
+        && card.frontmatter.triggers.length > 0
         && /(^|\/)knowledge\/routing-[a-z0-9._-]+\.md$/.test(card.relPath))
       .map((card) => ({
         relPath: card.relPath,
@@ -362,6 +369,50 @@ export class BeliefCardStore {
         targetAgentId: card.relPath.replace(/^.*routing-/, '').replace(/\.md$/, ''),
         triggers: card.frontmatter.triggers ?? null,
       }))
+  }
+
+  listRoutingCardInventory(agents: ReadonlyArray<{ id: string; status: AgentSystemStudioAgentStatus }> = []): AgentSystemStudioRoutingCard[] {
+    const statusByAgent = new Map(agents.map((agent) => [agent.id, agent.status]))
+    return this.listAllCardFiles('knowledge')
+      .filter((file) => /(^|\/)knowledge\/routing-[a-z0-9._-]+\.md$/.test(file.relPath))
+      .map((file) => {
+        const targetAgentId = file.relPath.replace(/^.*routing-/, '').replace(/\.md$/, '')
+        const targetStatus: AgentSystemStudioAgentStatus | 'missing' = statusByAgent.get(targetAgentId) ?? 'missing'
+        if (!file.card) {
+          const invalid: AgentSystemStudioRoutingCard = {
+            relPath: file.relPath,
+            title: 'Invalid routing card',
+            description: 'Card frontmatter is invalid or unreadable.',
+            status: 'invalid',
+            targetAgentId,
+            targetStatus,
+            triggers: null,
+            disabledReason: 'invalid_card',
+          }
+          return invalid
+        }
+        const status = file.card.frontmatter.status
+        const triggers = file.card.frontmatter.triggers ?? null
+        const disabledReason: AgentSystemStudioRoutingDisabledReason | null =
+          status !== 'active'
+            ? (status === 'staged' ? 'card_staged' : 'invalid_card')
+            : !triggers || triggers.length === 0
+              ? 'missing_triggers'
+              : targetStatus !== 'active'
+                ? 'target_inactive'
+                : null
+        return {
+          relPath: file.relPath,
+          title: file.card.frontmatter.title,
+          description: file.card.frontmatter.description,
+          status,
+          targetAgentId,
+          targetStatus,
+          triggers,
+          disabledReason,
+        }
+      })
+      .sort((a, b) => a.relPath.localeCompare(b.relPath))
   }
 
   /**
