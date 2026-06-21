@@ -172,9 +172,56 @@ test('due terminal row retries and deletes on success', async () => {
     sync: async () => {},
     onMetric: (metric) => metrics.push(metric.name),
   })
-  assert.deepEqual(result, { attempted: 1, succeeded: 1, failed: 0, exhausted: 0 })
+  assert.deepEqual(result, { attempted: 1, succeeded: 1, failed: 0, exhausted: 0, nextAttemptAt: null })
   assert.equal(fake.rows.size, 0)
   assert.deepEqual(metrics, ['projection.sync_retry_succeeded'])
+})
+
+test('failed drain reports the next retry due time and retries again when due', async () => {
+  const fake = createFakeDb()
+  const repository = new PendingProjectionSyncRepository(fake)
+  const row = repository.upsertPending({
+    summary: summary({ terminalReason: 'done' }),
+    eventPayload: payload(),
+    error: new Error('first failure'),
+    now: new Date('2026-06-20T00:00:00.000Z'),
+  })
+  assert.ok(row)
+
+  let attempts = 0
+  const first = await drainPendingProjectionSyncs({
+    repository,
+    now: new Date('2026-06-20T00:00:00.000Z'),
+    sync: async () => {
+      attempts += 1
+      throw new Error('still failing')
+    },
+  })
+
+  assert.equal(attempts, 1)
+  assert.equal(first.failed, 1)
+  assert.equal(first.nextAttemptAt, '2026-06-20T00:00:30.000Z')
+
+  const early = await drainPendingProjectionSyncs({
+    repository,
+    now: new Date('2026-06-20T00:00:29.000Z'),
+    sync: async () => {
+      attempts += 1
+    },
+  })
+  assert.equal(early.attempted, 0)
+  assert.equal(attempts, 1)
+
+  const due = await drainPendingProjectionSyncs({
+    repository,
+    now: new Date('2026-06-20T00:00:30.000Z'),
+    sync: async () => {
+      attempts += 1
+    },
+  })
+  assert.equal(due.succeeded, 1)
+  assert.equal(due.nextAttemptAt, null)
+  assert.equal(attempts, 2)
 })
 
 test('repeated retry failures become exhausted and emit metric', async () => {

@@ -563,6 +563,50 @@ test('two finalize attempts in the same lifecycle do not double-resolve', async 
   resolveHang(makeTerminalClose('test-skill-double-finalize', 'completed', 'completed'))
 })
 
+test('concurrent finalize attempts in the same lifecycle write only once', async () => {
+  const { repo } = setupRunner({ launchStuckGuardMs: 10_000 })
+
+  let resolveHang!: (close: SkillChildCloseEvent) => void
+  const hangPromise = new Promise<SkillChildCloseEvent>((resolve) => { resolveHang = resolve })
+  registerHangingDriver('test-skill-concurrent-finalize', hangPromise)
+
+  const first = await startSkillChildRun({
+    scopeId: 'scope-concurrent-finalize',
+    sessionId: 'session-concurrent-finalize',
+    skillId: 'test-skill-concurrent-finalize',
+    action: 'do_thing',
+    requestedInput: { url: 'https://example.com/concurrent-finalize' },
+  })
+  assert.equal(first.status, 'running')
+
+  const runner = getSkillChildRunner() as unknown as {
+    active: Map<string, unknown>
+    finalizeRun: (active: unknown, close: SkillChildCloseEvent) => Promise<void>
+    recentCloses: Map<string, SkillChildCloseEvent>
+  }
+  const activeRef = runner.active.get(first.childRunId)
+  assert.ok(activeRef, 'active map must contain the in-flight run')
+
+  repo.state.updateCalls.set(first.childRunId, 0)
+
+  const closeA = makeTerminalClose('test-skill-concurrent-finalize', 'failed', 'launch_stuck')
+  closeA.childRunId = first.childRunId
+  const closeB = makeTerminalClose('test-skill-concurrent-finalize', 'completed', 'completed')
+  closeB.childRunId = first.childRunId
+  await Promise.all([
+    runner.finalizeRun(activeRef, closeA),
+    runner.finalizeRun(activeRef, closeB),
+  ])
+
+  assert.equal(repo.state.updateCalls.get(first.childRunId), 1, 'concurrent finalize must persist exactly once')
+  assert.equal(runner.active.get(first.childRunId), undefined, 'active entry must be claimed by first finalize')
+  const cached = runner.recentCloses.get(first.childRunId)
+  assert.ok(cached, 'first finalize must populate recent close')
+  assert.equal(cached!.terminalReason, 'launch_stuck')
+
+  resolveHang(makeTerminalClose('test-skill-concurrent-finalize', 'completed', 'completed'))
+})
+
 test('process_restarted reconciliation followed by user resume completes', async () => {
   // Build the row directly via createChildRun, simulating "row exists but
   // singleton has no in-memory active." The first startSkillChildRun call

@@ -1957,9 +1957,23 @@ async function runWithOpenAIAgentsSdk(
       const result = await compactAgentInputItems(modelData.input, {
         windowTokens: params.contextWindowTokens,
       })
-      return result.compacted
-        ? { ...modelData, input: result.items }
-        : modelData
+      if (!result.compacted) return modelData
+      logAgentMetric('agent_sdk_auto_context_compacted', {
+        agentName: params.agentName,
+        sessionId: params.sessionId || null,
+        runId: params.runId,
+        taskId: params.taskId,
+        contextWindowTokens: params.contextWindowTokens,
+        beforeTokens: result.report.beforeTokens,
+        afterTokens: result.report.afterTokens,
+        droppedItems: result.report.droppedItems,
+        truncatedToolResults: result.report.truncatedToolResults,
+        summarized: result.report.summarized,
+        itemsBefore: modelData.input.length,
+        itemsAfter: result.items.length,
+      })
+      log(`auto context compacted agent=${params.agentName} run=${params.runId} before=${result.report.beforeTokens} after=${result.report.afterTokens} dropped=${result.report.droppedItems} truncated=${result.report.truncatedToolResults}`)
+      return { ...modelData, input: result.items }
     },
     toolExecution: {
       maxFunctionToolConcurrency: 1,

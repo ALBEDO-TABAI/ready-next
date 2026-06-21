@@ -1424,3 +1424,141 @@ test('syncTaskProjection clears stale progress when truth patch explicitly sends
 
   assert.equal(result?.progress, null)
 })
+
+function createCountingProjectionStore() {
+  const records = new Map<string, TaskProjectionRecord>()
+  const counters = { updateCount: 0 }
+  const store: TaskProjectionStore = {
+    create(record) {
+      records.set(record.taskId, record)
+    },
+    update(taskId, patch) {
+      counters.updateCount += 1
+      records.set(taskId, {
+        ...records.get(taskId)!,
+        ...patch,
+      })
+    },
+    get(taskId) {
+      return records.get(taskId) || null
+    },
+    listByScope(scopeId) {
+      return Array.from(records.values()).filter((record) => record.scopeId === scopeId)
+    },
+    listByParentTask(parentTaskId) {
+      return Array.from(records.values()).filter((record) => record.parentTaskId === parentTaskId)
+    },
+  }
+  return { store, records, counters }
+}
+
+test('syncTaskProjection does not let non-terminal late writes reopen terminal projections', async () => {
+  const { store, records, counters } = createCountingProjectionStore()
+  await syncTaskProjection(store, {
+    ...createSummary(),
+    phase: 'done',
+    terminalReason: 'done',
+    taskId: 'task-terminal-sticky',
+    taskProjectionId: 'task-terminal-sticky',
+    taskSummary: '已经完成',
+    updatedAt: '2026-04-16T11:02:00.000Z',
+  }, {
+    ...createPayload(),
+    type: 'finished',
+    phase: 'done',
+    runId: 'req-1781928173304-new',
+    taskId: 'task-terminal-sticky',
+    timestamp: '2026-04-16T11:02:00.000Z',
+  })
+  assert.equal(records.get('task-terminal-sticky')?.status, 'completed')
+
+  counters.updateCount = 0
+  const result = await syncTaskProjection(store, {
+    ...createSummary(),
+    phase: 'tool_running',
+    terminalReason: null,
+    taskId: 'task-terminal-sticky',
+    taskProjectionId: 'task-terminal-sticky',
+    taskSummary: '旧事件又显示进行中',
+    updatedAt: '2026-04-16T11:03:00.000Z',
+  }, {
+    ...createPayload(),
+    type: 'updated',
+    phase: 'tool_running',
+    runId: 'req-1781928173304-new',
+    taskId: 'task-terminal-sticky',
+    timestamp: '2026-04-16T11:03:00.000Z',
+  })
+
+  assert.equal(counters.updateCount, 0)
+  assert.equal(result?.status, 'completed')
+  assert.equal(records.get('task-terminal-sticky')?.taskSummary, '已经完成')
+})
+
+test('syncTaskProjection ignores older runId writes after a newer run owns the projection', async () => {
+  const { store, records, counters } = createCountingProjectionStore()
+  await syncTaskProjection(store, {
+    ...createSummary(),
+    taskId: 'task-run-monotonic',
+    taskProjectionId: 'task-run-monotonic',
+    taskSummary: '新请求正在进行',
+    updatedAt: '2026-04-16T11:02:00.000Z',
+  }, {
+    ...createPayload(),
+    runId: 'req-1781928173304-new',
+    taskId: 'task-run-monotonic',
+    timestamp: '2026-04-16T11:02:00.000Z',
+  })
+
+  counters.updateCount = 0
+  const result = await syncTaskProjection(store, {
+    ...createSummary(),
+    taskId: 'task-run-monotonic',
+    taskProjectionId: 'task-run-monotonic',
+    taskSummary: '旧请求晚到覆盖',
+    updatedAt: '2026-04-16T11:10:00.000Z',
+  }, {
+    ...createPayload(),
+    runId: 'req-1781926218353-old',
+    taskId: 'task-run-monotonic',
+    timestamp: '2026-04-16T11:10:00.000Z',
+  })
+
+  assert.equal(counters.updateCount, 0)
+  assert.equal(result?.runId, 'req-1781928173304-new')
+  assert.equal(records.get('task-run-monotonic')?.taskSummary, '新请求正在进行')
+})
+
+test('syncTaskProjection lets a newer runId take over an existing projection', async () => {
+  const { store, records, counters } = createCountingProjectionStore()
+  await syncTaskProjection(store, {
+    ...createSummary(),
+    taskId: 'task-run-newer',
+    taskProjectionId: 'task-run-newer',
+    taskSummary: '旧请求',
+    updatedAt: '2026-04-16T11:00:00.000Z',
+  }, {
+    ...createPayload(),
+    runId: 'req-1781926218353-old',
+    taskId: 'task-run-newer',
+    timestamp: '2026-04-16T11:00:00.000Z',
+  })
+
+  counters.updateCount = 0
+  const result = await syncTaskProjection(store, {
+    ...createSummary(),
+    taskId: 'task-run-newer',
+    taskProjectionId: 'task-run-newer',
+    taskSummary: '新请求接管',
+    updatedAt: '2026-04-16T11:02:00.000Z',
+  }, {
+    ...createPayload(),
+    runId: 'req-1781928173304-new',
+    taskId: 'task-run-newer',
+    timestamp: '2026-04-16T11:02:00.000Z',
+  })
+
+  assert.equal(counters.updateCount, 1)
+  assert.equal(result?.runId, 'req-1781928173304-new')
+  assert.equal(records.get('task-run-newer')?.taskSummary, '新请求接管')
+})

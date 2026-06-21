@@ -528,6 +528,8 @@ export class AgentControlRuntime extends EventEmitter {
     }
   }
   private projectionSyncRetryDrainInFlight: Promise<void> | null = null
+  private projectionSyncRetryTimer: NodeJS.Timeout | null = null
+  private projectionSyncRetryTimerDueAt = 0
 
   constructor(agentManager: AgentManager, browserController?: BrowserController) {
     super()
@@ -3545,8 +3547,30 @@ export class AgentControlRuntime extends EventEmitter {
     }
   }
 
-  private scheduleTerminalProjectionSyncRetryDrain(reason: string): void {
+  private clearProjectionSyncRetryTimer(): void {
+    if (this.projectionSyncRetryTimer) {
+      clearTimeout(this.projectionSyncRetryTimer)
+      this.projectionSyncRetryTimer = null
+      this.projectionSyncRetryTimerDueAt = 0
+    }
+  }
+
+  private scheduleTerminalProjectionSyncRetryDrain(reason: string, delayMs = 0): void {
+    if (delayMs > 0) {
+      const dueAt = Date.now() + delayMs
+      if (this.projectionSyncRetryTimer && this.projectionSyncRetryTimerDueAt <= dueAt) return
+      this.clearProjectionSyncRetryTimer()
+      this.projectionSyncRetryTimerDueAt = dueAt
+      this.projectionSyncRetryTimer = setTimeout(() => {
+        this.projectionSyncRetryTimer = null
+        this.projectionSyncRetryTimerDueAt = 0
+        this.scheduleTerminalProjectionSyncRetryDrain(`${reason}:timer`)
+      }, delayMs)
+      this.projectionSyncRetryTimer.unref?.()
+      return
+    }
     if (this.projectionSyncRetryDrainInFlight) return
+    this.clearProjectionSyncRetryTimer()
     this.projectionSyncRetryDrainInFlight = this.drainTerminalProjectionSyncRetries(reason)
       .catch((error) => {
         logAgentMetric('projection.sync_retry_drain_failed', {
@@ -3561,7 +3585,7 @@ export class AgentControlRuntime extends EventEmitter {
   }
 
   private async drainTerminalProjectionSyncRetries(reason: string): Promise<void> {
-    await drainPendingProjectionSyncs({
+    const result = await drainPendingProjectionSyncs({
       repository: this.pendingProjectionSyncs,
       sync: async (entry) => {
         await syncTaskProjection(
@@ -3578,6 +3602,13 @@ export class AgentControlRuntime extends EventEmitter {
         })
       },
     })
+    const nextAttemptAt = result.nextAttemptAt ? Date.parse(result.nextAttemptAt) : NaN
+    if (Number.isFinite(nextAttemptAt)) {
+      this.scheduleTerminalProjectionSyncRetryDrain(
+        'terminal_sync_retry_backoff',
+        Math.max(0, nextAttemptAt - Date.now()),
+      )
+    }
   }
 
   private recordRunProjectionEvent(payload: ScopeRunEventPayload, projectionTruth?: ProjectionTruthSnapshot | null): ScopeRunSummary | null {

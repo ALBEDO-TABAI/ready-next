@@ -66,6 +66,7 @@ export interface PendingProjectionSyncDrainResult {
   succeeded: number
   failed: number
   exhausted: number
+  nextAttemptAt: string | null
 }
 
 export interface PendingProjectionSyncDrainMetric {
@@ -258,6 +259,7 @@ export async function drainPendingProjectionSyncs(params: {
     succeeded: 0,
     failed: 0,
     exhausted: 0,
+    nextAttemptAt: null,
   }
   for (const row of rows) {
     result.attempted += 1
@@ -284,6 +286,10 @@ export async function drainPendingProjectionSyncs(params: {
           },
         })
       } else {
+        const nextAttemptAt = failure?.row.nextAttemptAt || null
+        if (nextAttemptAt && (!result.nextAttemptAt || nextAttemptAt < result.nextAttemptAt)) {
+          result.nextAttemptAt = nextAttemptAt
+        }
         params.onMetric?.({
           name: 'projection.sync_retry_failed',
           payload: {

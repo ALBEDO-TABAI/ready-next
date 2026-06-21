@@ -7,6 +7,7 @@ import {
   __resetBackgroundTaskTerminalReminderForTests,
   __setPendingTaskEventDatabaseForTests,
   listPendingTaskEventsForTests,
+  markPendingTaskEventConsumed,
   type PendingTaskEventDatabase,
 } from '../main/modules/agent-control/system-reminders/background-task-terminal-reminder'
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
@@ -68,6 +69,16 @@ class PendingTaskEventMemoryDb implements PendingTaskEventDatabase {
         get: () => undefined,
       }
     }
+    if (normalized.startsWith('UPDATE pending_task_events SET consumed = 1 WHERE id = ?')) {
+      return {
+        run: (id: unknown) => {
+          const hit = this.rows.find((row) => row.id === Number(id))
+          if (hit) hit.consumed = 1
+        },
+        get: () => undefined,
+        all: () => [],
+      }
+    }
     throw new Error(`unexpected pending_task_events SQL: ${normalized}`)
   }
 }
@@ -110,7 +121,7 @@ describe('task event bridge', () => {
     assert.deepEqual(agentEvents, [payload])
   })
 
-  it('deduplicates repeated taskId and status publishes', () => {
+  it('deduplicates repeated terminal taskId and status publishes', () => {
     const events: TaskEventBridgePayload[] = []
     taskEventBridge.registerProjectionSink((payload) => events.push(payload))
 
@@ -119,6 +130,21 @@ describe('task event bridge', () => {
     taskEventBridge.publish(payload)
 
     assert.deepEqual(events, [payload])
+  })
+
+  it('allows re-enterable statuses through the bridge repeatedly', () => {
+    const events: TaskEventBridgePayload[] = []
+    const unregister = taskEventBridge.registerProjectionSink((payload) => events.push(payload))
+
+    const paused: TaskEventBridgePayload = { taskId: 'task-event-bridge-reentrant', status: 'paused' }
+    const needsAttention: TaskEventBridgePayload = { taskId: 'task-event-bridge-reentrant', status: 'needs_attention' }
+    taskEventBridge.publish(paused)
+    taskEventBridge.publish(paused)
+    taskEventBridge.publish(needsAttention)
+    taskEventBridge.publish(needsAttention)
+    unregister()
+
+    assert.deepEqual(events, [paused, paused, needsAttention, needsAttention])
   })
 
   it('throws when scheduling a task for an unregistered route', () => {
@@ -148,5 +174,32 @@ describe('task event bridge', () => {
     assert.equal(rows[0].taskRunId, payload.taskId)
     assert.equal(rows[0].consumed, 0)
     assert.deepEqual(JSON.parse(rows[0].eventPayload), payload)
+  })
+
+  it('allows a consumed paused event to be enqueued durably again', () => {
+    __resetBackgroundTaskTerminalReminderForTests()
+    const db = new PendingTaskEventMemoryDb()
+    __setPendingTaskEventDatabaseForTests(db)
+
+    const payload: TaskEventBridgePayload = {
+      taskId: 'task-event-bridge-paused-reentry',
+      status: 'paused',
+      extra: {
+        scopeId: 'scope-task-event-bridge-paused-reentry',
+        summary: '后台任务等待继续',
+      },
+    }
+    taskEventBridge.publish(payload)
+    const firstRows = listPendingTaskEventsForTests()
+    assert.equal(firstRows.length, 1)
+
+    markPendingTaskEventConsumed(firstRows[0].id)
+    taskEventBridge.publish(payload)
+
+    const rows = listPendingTaskEventsForTests()
+    assert.equal(rows.length, 2)
+    assert.equal(rows[0].consumed, 1)
+    assert.equal(rows[1].consumed, 0)
+    assert.deepEqual(JSON.parse(rows[1].eventPayload), payload)
   })
 })

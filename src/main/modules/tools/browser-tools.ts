@@ -3786,6 +3786,7 @@ async function runGeminiQuery(
       attempted,
     }, null, 2)
   } catch (error) {
+    if (isBrowserAbortError(error)) throw error
     log(`[browser-v3][fallback] browser_query_gemini error=${error instanceof Error ? error.message : String(error)}`)
     return formatBrowserV2Error('[browser-v3][fallback] browser_query_gemini failed', error, attempted)
   }

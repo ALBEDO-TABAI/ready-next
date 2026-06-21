@@ -16,7 +16,8 @@ import test from 'node:test'
 
 import { deriveTaskCardRuntimeState } from '../renderer/modules/agent/taskCardViewModel'
 import { deriveTaskProjectionCanResume } from '../main/modules/agent-control/task-projection/task-projection-resume'
-import type { TaskProjectionRecord } from '../main/modules/agent-control/contracts/run-contracts'
+import { reconcileTaskProjections } from '../main/modules/agent-control/task-projection/task-projection-reconciler'
+import type { TaskProjectionRecord, TaskProjectionStore } from '../main/modules/agent-control/contracts/run-contracts'
 
 function projection(overrides: Partial<TaskProjectionRecord>): TaskProjectionRecord {
   return {
@@ -221,4 +222,63 @@ test('cold-start canResume=false strips continue from background_running', () =>
     updatedAt: '2026-05-08T00:00:00.000Z',
   })
   assert.deepEqual(runtimeState.actionSet, ['open_artifact', 'cancel'])
+})
+
+test('A5: stale non-terminal projection without handle cannot render continue or retry after reconcile', async () => {
+  const records = new Map<string, TaskProjectionRecord>()
+  const store: TaskProjectionStore = {
+    create(record) {
+      records.set(record.taskId, record)
+    },
+    update(taskId, patch) {
+      records.set(taskId, {
+        ...records.get(taskId)!,
+        ...patch,
+      })
+    },
+    get(taskId) {
+      return records.get(taskId) || null
+    },
+    listByScope(scopeId) {
+      return Array.from(records.values()).filter((record) => record.scopeId === scopeId)
+    },
+    listByParentTask(parentTaskId) {
+      return Array.from(records.values()).filter((record) => record.parentTaskId === parentTaskId)
+    },
+  }
+  records.set('task-a5-zombie', projection({
+    taskId: 'task-a5-zombie',
+    scopeId: 'scope-a5',
+    runId: 'run-a5-zombie',
+    status: 'running',
+    interactionState: 'running',
+    waitingFor: 'background',
+    resumableActions: ['continue', 'retry', 'cancel'],
+    continuationRef: null,
+    createdAt: '2026-05-08T00:00:00.000Z',
+    updatedAt: '2026-05-08T00:00:00.000Z',
+  }))
+
+  reconcileTaskProjections({
+    store,
+    records: Array.from(records.values()),
+    now: '2026-05-08T00:31:00.000Z',
+  })
+  const reconciled = deriveTaskProjectionCanResume(records.get('task-a5-zombie')!)
+  const runtimeState = deriveTaskCardRuntimeState({
+    scopeId: reconciled.scopeId,
+    taskId: reconciled.taskId,
+    phase: 'checkpoint',
+    title: reconciled.taskTitle || 'stale task',
+    status: reconciled.status,
+    waitingFor: reconciled.waitingFor,
+    resumableActions: reconciled.resumableActions,
+    interactionState: reconciled.interactionState,
+    canResume: reconciled.canResume,
+    updatedAt: reconciled.updatedAt,
+  })
+
+  assert.equal(reconciled.canResume, false)
+  assert.equal(reconciled.degradationReason, 'stale_paused')
+  assert.deepEqual(runtimeState.actionSet, ['cancel'])
 })

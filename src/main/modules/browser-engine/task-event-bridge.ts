@@ -90,8 +90,10 @@ class TaskEventBridge {
 
   publish(payload: TaskEventBridgePayload): void {
     const key = `${payload.taskId}|${payload.status}`
-    if (this.publishedKeys.has(key)) return
-    this.publishedKeys.add(key)
+    if (payload.status === 'completed' || payload.status === 'failed') {
+      if (this.publishedKeys.has(key)) return
+      this.publishedKeys.add(key)
+    }
     for (const sink of this.projectionSinks) sink(payload)
     for (const notifier of this.agentNotifiers) notifier(payload)
   }

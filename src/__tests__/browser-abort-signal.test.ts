@@ -21,3 +21,24 @@ test('browser tool abort signal rethrows instead of returning an error string', 
     (error: unknown) => error instanceof Error && error.name === 'AbortError',
   )
 })
+
+test('browser_query_gemini rethrows mid-execution abort instead of formatting fallback text', async () => {
+  const abortError = new Error('mid execution abort')
+  abortError.name = 'AbortError'
+  const controller = {
+    getActiveTab: () => ({ id: 'tab-gemini', url: 'https://gemini.google.com', active: true }),
+    getTabList: () => [{ id: 'tab-gemini', url: 'https://gemini.google.com', active: true }],
+    executeJS: async () => {
+      throw abortError
+    },
+  } as unknown as BrowserController
+
+  await assert.rejects(
+    () => executeBrowserTool(
+      'browser_query_gemini',
+      { text: 'hello', tab_id: 'tab-gemini', wait_response_ms: 6000 },
+      controller,
+    ),
+    (error: unknown) => error instanceof Error && error.name === 'AbortError',
+  )
+})

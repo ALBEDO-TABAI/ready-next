@@ -2089,6 +2089,7 @@ class SkillChildRunner {
       return
     }
     const frozenClose = freezeSkillChildCloseEvent(close as MutableSkillChildCloseEvent)
+    this.active.delete(active.childRunId)
     // Stage T (W9.1) — Worker Event Ledger. Tag the terminal close event
     // with `event_kind` + `terminal_reason`; on cancel, also fill
     // `rollback_target` from the active run's `lastSafeStepId` (`null` if
@@ -2128,11 +2129,6 @@ class SkillChildRunner {
     }
     this.publishProjectionClose(active, frozenClose)
     this.rememberChildRunSummary(this.summaryFromClose(active, frozenClose))
-    // Delete the active entry BEFORE recordCloses + resolveClose so any
-    // re-entrant finalize attempt (or a downstream lookup that races
-    // resolveClose) cannot find this lifecycle's `active` and accidentally
-    // double-resolve or overwrite a freshly-resumed lifecycle's state.
-    this.active.delete(active.childRunId)
     this.recentCloses.set(active.childRunId, frozenClose)
     if (this.recentCloses.size > 64) {
       // Drop oldest. JS Maps preserve insertion order.

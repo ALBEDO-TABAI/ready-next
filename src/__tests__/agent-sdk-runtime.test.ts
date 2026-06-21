@@ -32,6 +32,10 @@ import {
   rememberLastReferenceSkill,
 } from '../main/modules/agent-control/skills/skill-reference-hints'
 import { __setSkillActionToolDefsForTests } from '../main/modules/tools/skills-tools'
+import {
+  __setMetricSinkForTests,
+  type AgentMetricEvent,
+} from '../main/modules/agent-control/metrics'
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 
 const fakeConfig = {
@@ -4266,6 +4270,8 @@ test('agent sdk runtime honors Ready OpenAI-compatible responses wire API', asyn
 
 test('agent sdk runtime compacts oversized session history before sending wire input', async () => {
   const requests: Array<Record<string, unknown>> = []
+  const metrics: AgentMetricEvent[] = []
+  __setMetricSinkForTests((event) => metrics.push(event))
   const runtime = new AgentSdkRuntime({
     loadAIConfig: () => ({
       ok: true,
@@ -4285,24 +4291,36 @@ test('agent sdk runtime compacts oversized session history before sending wire i
       return chatCompletionResponse('压缩后完成')
     },
   })
-  runtime.newSession('butler::scope-presend-compact', 'system prompt')
-  await seedSdkSession(runtime, 'butler::scope-presend-compact', [
-    ...historyTextItems('old-hidden-context', 16),
-    { role: 'user', content: 'recent-tail-marker' } as AgentInputItem,
-  ])
+  try {
+    runtime.newSession('butler::scope-presend-compact', 'system prompt')
+    await seedSdkSession(runtime, 'butler::scope-presend-compact', [
+      ...historyTextItems('old-hidden-context', 16),
+      { role: 'user', content: 'recent-tail-marker' } as AgentInputItem,
+    ])
 
-  const result = await runtime.sendMessage('butler::scope-presend-compact', 'CURRENT_INPUT_UNIQUE', 'run-presend-compact', {
-    publicSessionId: 'scope-presend-compact',
-    taskId: 'task-presend-compact',
-  })
+    const result = await runtime.sendMessage('butler::scope-presend-compact', 'CURRENT_INPUT_UNIQUE', 'run-presend-compact', {
+      publicSessionId: 'scope-presend-compact',
+      taskId: 'task-presend-compact',
+    })
 
-  assert.equal(result.success, true)
-  assert.equal(requests.length, 1)
-  const bodyText = JSON.stringify(requests[0])
-  assert.match(bodyText, /ready:context-compacted/)
-  assert.doesNotMatch(bodyText, /old-hidden-context-4/)
-  assert.match(bodyText, /recent-tail-marker/)
-  assert.equal(countOccurrences(bodyText, 'CURRENT_INPUT_UNIQUE'), 1)
+    assert.equal(result.success, true)
+    assert.equal(requests.length, 1)
+    const bodyText = JSON.stringify(requests[0])
+    assert.match(bodyText, /ready:context-compacted/)
+    assert.doesNotMatch(bodyText, /old-hidden-context-4/)
+    assert.match(bodyText, /recent-tail-marker/)
+    assert.equal(countOccurrences(bodyText, 'CURRENT_INPUT_UNIQUE'), 1)
+    const compactionMetric = metrics.find((event) => event.metric === 'agent_sdk_auto_context_compacted')
+    assert.ok(compactionMetric, 'automatic compaction must emit an observability metric')
+    assert.equal(compactionMetric.runId, 'run-presend-compact')
+    assert.equal(compactionMetric.taskId, 'task-presend-compact')
+    assert.equal(typeof compactionMetric.beforeTokens, 'number')
+    assert.equal(typeof compactionMetric.afterTokens, 'number')
+    assert.equal(typeof compactionMetric.droppedItems, 'number')
+    assert.equal(typeof compactionMetric.truncatedToolResults, 'number')
+  } finally {
+    __setMetricSinkForTests(null)
+  }
 })
 
 test('agent sdk runtime retries context overflow after compacting the captured session', async () => {

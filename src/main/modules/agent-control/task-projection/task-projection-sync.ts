@@ -20,6 +20,37 @@ function toContinuationUpdatedAt(value: string | null | undefined): number {
   return Number.isFinite(parsed) ? parsed : Date.now()
 }
 
+function toTime(value: string | null | undefined): number | null {
+  const parsed = Date.parse(String(value || ''))
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+function runIdOrdinal(value: string | null | undefined): number | null {
+  const match = String(value || '').match(/\d{10,}/)
+  if (!match) return null
+  const parsed = Number(match[0])
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+function isTerminalProjectionStatus(status: TaskProjectionRecord['status']): boolean {
+  return status === 'completed' || status === 'failed' || status === 'killed'
+}
+
+function shouldSkipProjectionWrite(previous: TaskProjectionRecord, next: TaskProjectionRecord): boolean {
+  if (isTerminalProjectionStatus(previous.status) && !isTerminalProjectionStatus(next.status)) {
+    return true
+  }
+  if (previous.runId === next.runId) return false
+  const previousRunOrdinal = runIdOrdinal(previous.runId)
+  const nextRunOrdinal = runIdOrdinal(next.runId)
+  if (previousRunOrdinal !== null && nextRunOrdinal !== null) {
+    return nextRunOrdinal < previousRunOrdinal
+  }
+  const previousTime = toTime(previous.updatedAt)
+  const nextTime = toTime(next.updatedAt)
+  return previousTime !== null && nextTime !== null && nextTime <= previousTime
+}
+
 function readProjectionTruthPatch(projectionTruth?: ProjectionTruthSnapshot | null): Record<string, unknown> | null {
   let patch: Record<string, unknown> | null = null
   for (const event of projectionTruth?.transcriptEvents || []) {
@@ -865,6 +896,7 @@ export async function syncTaskProjection(
   if (!next) return null
 
   if (previous) {
+    if (shouldSkipProjectionWrite(previous, next)) return previous
     await store.update(taskId, next)
   } else {
     try {
@@ -875,6 +907,7 @@ export async function syncTaskProjection(
       if (!concurrentPrevious) throw error
       next = buildTaskProjectionRecord(summary, payload, concurrentPrevious, projectionTruth)
       if (!next) return null
+      if (shouldSkipProjectionWrite(concurrentPrevious, next)) return concurrentPrevious
       await store.update(taskId, next)
     }
   }
