@@ -1,4 +1,5 @@
 import { tmpdir } from 'node:os'
+import { realpathSync } from 'node:fs'
 
 /**
  * Stage T (PR-T2 / W7.3) — host-path redactor for shell tool outputs.
@@ -41,9 +42,18 @@ function redactLiteralRoot(text: string, root: string, replacement: string): str
 }
 
 function redactStaticRoot(text: string, root: string, replacement: string): string {
-  let out = redactLiteralRoot(text, root, replacement)
-  if (root.includes('\\')) {
-    out = redactLiteralRoot(out, root.replace(/\\/g, '\\\\'), replacement)
+  let out = text
+  const roots = new Set<string>([root])
+  try {
+    roots.add(realpathSync.native(root))
+  } catch {
+    // Some static roots are virtual in tests or absent in unpackaged dev runs.
+  }
+  for (const candidateRoot of roots) {
+    out = redactLiteralRoot(out, candidateRoot, replacement)
+    if (candidateRoot.includes('\\')) {
+      out = redactLiteralRoot(out, candidateRoot.replace(/\\/g, '\\\\'), replacement)
+    }
   }
   return out
 }

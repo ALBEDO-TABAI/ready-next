@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -11,6 +12,35 @@ import {
   buildModelVisibleToolResultPayload,
   serializeToolExecutionOutputForModel,
 } from '../main/modules/agent-control/tools-runtime/model-visible-tool-output'
+import { executeReadArtifact } from '../main/modules/tools/skill-primitives/read-artifact'
+import { executeWriteArtifact } from '../main/modules/tools/skill-primitives/write-artifact'
+import { executeInspectRunState } from '../main/modules/tools/skill-primitives/inspect-run-state'
+import type { SkillRootSet } from '../main/modules/tools/skill-primitives/root-resolver'
+
+function makeSkillPrimitiveFixture(prefix: string) {
+  const artifactRoot = realpathSync.native(mkdtempSync(join(tmpdir(), `${prefix}-artifact-`)))
+  const assetRoot = realpathSync.native(mkdtempSync(join(tmpdir(), `${prefix}-asset-`)))
+  const lookup = (id: string): SkillRootSet | null =>
+    id === 'test-skill' ? { skillId: 'test-skill', assetRoot, artifactRoot } : null
+  return {
+    artifactRoot,
+    assetRoot,
+    lookup,
+    cleanup: () => {
+      rmSync(artifactRoot, { recursive: true, force: true })
+      rmSync(assetRoot, { recursive: true, force: true })
+    },
+  }
+}
+
+function assertModelCopyOmitsRawPath(modelText: string, rawPath: string) {
+  assert.ok(rawPath.length > 0, 'test fixture must provide a raw path')
+  assert.equal(
+    modelText.includes(rawPath),
+    false,
+    `model-visible copy must not include raw path ${rawPath}`,
+  )
+}
 
 test('serializeToolExecutionOutput sends tool text to the model even when a projection patch exists', () => {
   const output = createToolExecutionOutput('exitCode=0\nSTDOUT:\nreport ready', {
@@ -132,6 +162,71 @@ test('serializeToolExecutionOutputForModel redacts tmp-root paths without mutati
   assert.equal((output.data as { outputDir: string }).outputDir, outputDir)
   assert.deepEqual(output.framePatch?.activeArtifactRoots, [outputDir])
   assert.equal(output.framePatch?.runContract?.runStatePath, runStatePath)
+})
+
+test('model-visible payload redacts real write/read artifact primitive paths without mutating raw handles', async () => {
+  const fx = makeSkillPrimitiveFixture('model-visible-primitive')
+  try {
+    const written = await executeWriteArtifact(
+      { relativePath: 'output/result.txt', content: 'hello model' },
+      { skillId: 'test-skill', lookupSkillRoots: fx.lookup },
+    )
+    const writtenPath = (written.data as { absolutePath: string }).absolutePath
+    const writeModelText = JSON.stringify(buildModelVisibleToolResultPayload(written))
+
+    assertModelCopyOmitsRawPath(writeModelText, writtenPath)
+    assertModelCopyOmitsRawPath(writeModelText, fx.artifactRoot)
+    assert.equal((written.data as { absolutePath: string }).absolutePath, writtenPath)
+    assert.equal((written.data as { artifactRoot: string }).artifactRoot, fx.artifactRoot)
+
+    const read = await executeReadArtifact(
+      { relativePath: 'output/result.txt' },
+      { skillId: 'test-skill', lookupSkillRoots: fx.lookup },
+    )
+    const readPath = (read.data as { absolutePath: string }).absolutePath
+    const readModelText = JSON.stringify(buildModelVisibleToolResultPayload(read))
+
+    assertModelCopyOmitsRawPath(readModelText, readPath)
+    assert.equal((read.data as { absolutePath: string }).absolutePath, readPath)
+    assert.equal(read.text, 'hello model')
+  } finally {
+    fx.cleanup()
+  }
+})
+
+test('model-visible payload redacts real inspect_run_state primitive paths while keeping contextModifier internal', async () => {
+  const outputDir = realpathSync.native(mkdtempSync(join(tmpdir(), 'model-visible-inspect-')))
+  try {
+    const runStatePath = join(outputDir, 'run_state.json')
+    writeFileSync(runStatePath, JSON.stringify({
+      taskId: 'task-model-visible',
+      currentStage: 'score_batches',
+      totalScenes: 3,
+      completedScenes: 1,
+      status: 'recoverable_paused',
+    }), 'utf8')
+
+    const result = await executeInspectRunState({
+      outputDir,
+      runStatePath,
+      skillId: 'video-expert-analyzer',
+    })
+    const payload = buildModelVisibleToolResultPayload(result)
+    const modelText = JSON.stringify(payload)
+
+    assertModelCopyOmitsRawPath(modelText, outputDir)
+    assertModelCopyOmitsRawPath(modelText, runStatePath)
+    assert.equal((result.data as { outputDir: string }).outputDir, outputDir)
+    assert.equal((result.data as { runStatePath: string }).runStatePath, runStatePath)
+    assert.deepEqual(result.framePatch?.activeArtifactRoots, [outputDir])
+    assert.equal(result.framePatch?.runContract?.outputDir, outputDir)
+    assert.equal(result.framePatch?.runContract?.runStatePath, runStatePath)
+    assert.deepEqual(result.contextModifier?.activeFrame?.activeArtifactRoots, [outputDir])
+    assert.equal(result.contextModifier?.activeFrame?.runContract?.outputDir, outputDir)
+    assert.equal(Object.prototype.hasOwnProperty.call(payload, 'contextModifier'), false)
+  } finally {
+    rmSync(outputDir, { recursive: true, force: true })
+  }
 })
 
 test('serializeToolExecutionOutputForModel redacts resourcesPath plain and JSON-escaped roots without mutating raw handles', () => {
