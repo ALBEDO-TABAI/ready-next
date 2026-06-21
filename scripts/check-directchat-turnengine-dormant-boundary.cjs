@@ -3,6 +3,7 @@
 
 const fs = require('node:fs')
 const path = require('node:path')
+const ts = require('typescript')
 
 const ROOT = process.cwd()
 const ORCHESTRATOR_REL = 'src/main/modules/agent-control/runtime-core/orchestrator.ts'
@@ -283,18 +284,86 @@ function pushConstructErrors(errors, rel, text, classExpr, kind) {
 function pushInstanceCallErrors(errors, rel, text, names, method, kind) {
   if (names.size === 0) return
   const nameExpr = [...names].map(escapeRegex).join('|')
-  pushMatches(errors, rel, text, new RegExp(`\\b(?:this\\.)?(?:${nameExpr})\\.${method}\\s*\\(`), kind)
+  const methodExpr = escapeRegex(method)
+  pushMatches(
+    errors,
+    rel,
+    text,
+    new RegExp(`\\b(?:this\\.)?(?:${nameExpr})(?:\\?\\.${methodExpr}|\\.${methodExpr}|\\?\\.\\s*\\[\\s*['"]${methodExpr}['"]\\s*\\]|\\s*\\[\\s*['"]${methodExpr}['"]\\s*\\])\\s*(?:\\?\\.\\s*)?\\(`),
+    kind,
+  )
 }
 
 function pushNonSdkSendMessageErrors(errors, rel, text) {
   if (rel === DIRECT_CHAT_REL) return
-  const re = /\.sendMessage\s*\(/g
-  let match
-  while ((match = re.exec(text))) {
-    const before = text.slice(Math.max(0, match.index - 48), match.index)
-    if (rel === ORCHESTRATOR_REL && /this\.sdkEngine\s*$/.test(before)) continue
-    errors.push(`production_calls_non_sdk_sendMessage:${rel}:${lineOf(text, match.index)}`)
+  const patterns = [
+    /\.sendMessage\s*(?:\?\.\s*)?\(/g,
+    /\[\s*['"]sendMessage['"]\s*\]\s*(?:\?\.\s*)?\(/g,
+  ]
+  for (const re of patterns) {
+    let match
+    while ((match = re.exec(text))) {
+      const before = text.slice(Math.max(0, match.index - 48), match.index)
+      if (rel === ORCHESTRATOR_REL && /this\.sdkEngine\s*$/.test(before)) continue
+      errors.push(`production_calls_non_sdk_sendMessage:${rel}:${lineOf(text, match.index)}`)
+    }
   }
+}
+
+function isLiteralName(node, expected) {
+  if (!node) return false
+  if (ts.isIdentifier(node) || ts.isPrivateIdentifier(node)) return node.text === expected
+  if (ts.isStringLiteral(node) || ts.isNumericLiteral(node)) return node.text === expected
+  if (ts.isComputedPropertyName(node)) {
+    const expr = node.expression
+    return ts.isStringLiteral(expr) && expr.text === expected
+  }
+  return false
+}
+
+function isThisSendMessageAssignment(node) {
+  if (!ts.isBinaryExpression(node)) return false
+  if (node.operatorToken.kind !== ts.SyntaxKind.EqualsToken) return false
+  const left = node.left
+  if (ts.isPropertyAccessExpression(left)) {
+    return left.expression.kind === ts.SyntaxKind.ThisKeyword && left.name.text === 'sendMessage'
+  }
+  if (ts.isElementAccessExpression(left)) {
+    const argument = left.argumentExpression
+    return left.expression.kind === ts.SyntaxKind.ThisKeyword
+      && !!argument
+      && ts.isStringLiteral(argument)
+      && argument.text === 'sendMessage'
+  }
+  return false
+}
+
+function pushDirectChatAstSendMessageErrors(errors, source) {
+  const sourceFile = ts.createSourceFile(DIRECT_CHAT_REL, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
+  const pushAt = (kind, node) => {
+    const line = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line + 1
+    errors.push(`${kind}:${DIRECT_CHAT_REL}:${line}`)
+  }
+  const visit = (node) => {
+    if (ts.isClassDeclaration(node) && node.name?.text === 'DirectChatEngine') {
+      for (const member of node.members) {
+        if ('name' in member && isLiteralName(member.name, 'sendMessage')) {
+          pushAt('direct_chat_declares_sendMessage', member)
+        }
+        if (ts.isConstructorDeclaration(member)) {
+          const visitConstructor = (child) => {
+            if (isThisSendMessageAssignment(child)) {
+              pushAt('direct_chat_declares_sendMessage', child)
+            }
+            ts.forEachChild(child, visitConstructor)
+          }
+          ts.forEachChild(member, visitConstructor)
+        }
+      }
+    }
+    ts.forEachChild(node, visit)
+  }
+  visit(sourceFile)
 }
 
 function check({ root = ROOT } = {}) {
@@ -328,15 +397,87 @@ function check({ root = ROOT } = {}) {
   if (!fs.existsSync(directChatPath)) {
     errors.push(`missing_direct_chat:${DIRECT_CHAT_REL}`)
   } else {
-    const source = read(root, DIRECT_CHAT_REL)
-    if (!/private readonly turnEngine:\s*TurnEngine/.test(source)) {
-      errors.push('direct_chat_missing_dormant_turn_engine_member')
+    const source = stripComments(read(root, DIRECT_CHAT_REL))
+    const turnEngineImports = findImports(source, 'turn-engine')
+    const turnEngineRuntimeDynamicImports = findRuntimeDynamicImports(source, 'turn-engine')
+    if (turnEngineImports.length > 0) {
+      pushImportErrors(errors, DIRECT_CHAT_REL, source, turnEngineImports, 'direct_chat_imports_turn_engine_class')
     }
-    if (!/async sendMessage\s*\(/.test(source)) {
-      errors.push('direct_chat_missing_dormant_sendMessage')
+    if (turnEngineRuntimeDynamicImports.length > 0) {
+      pushImportErrors(
+        errors,
+        DIRECT_CHAT_REL,
+        source,
+        turnEngineRuntimeDynamicImports,
+        'direct_chat_dynamic_imports_turn_engine_module',
+      )
     }
-    if (!/this\.turnEngine\.execute\s*\(/.test(source)) {
-      errors.push('direct_chat_missing_dormant_turn_engine_execute')
+    pushDirectChatAstSendMessageErrors(errors, source)
+    pushMatches(
+      errors,
+      DIRECT_CHAT_REL,
+      source,
+      /private\s+readonly\s+turnEngine\b/,
+      'direct_chat_declares_turn_engine_member',
+    )
+    pushMatches(
+      errors,
+      DIRECT_CHAT_REL,
+      source,
+      /\bthis\.turnEngine\b/,
+      'direct_chat_references_turn_engine_member',
+    )
+    pushMatches(
+      errors,
+      DIRECT_CHAT_REL,
+      source,
+      /\b(?:async\s+)?sendMessage\s*(?:<[^>{}]+>)?\s*\(/,
+      'direct_chat_declares_sendMessage',
+    )
+    pushMatches(
+      errors,
+      DIRECT_CHAT_REL,
+      source,
+      /\[\s*['"]sendMessage['"]\s*\]\s*(?:<[^>{}]+>)?\s*\(/,
+      'direct_chat_declares_sendMessage',
+    )
+    pushMatches(
+      errors,
+      DIRECT_CHAT_REL,
+      source,
+      /\bsendMessage\s*(?::[\s\S]{0,240}?)?=\s*(?:async\s*)?/,
+      'direct_chat_declares_sendMessage',
+    )
+    pushMatches(
+      errors,
+      DIRECT_CHAT_REL,
+      source,
+      /\bfunction\s+sendMessage\s*(?:<[^>{}]+>)?\s*\(/,
+      'direct_chat_declares_sendMessage',
+    )
+    pushMatches(
+      errors,
+      DIRECT_CHAT_REL,
+      source,
+      /\[\s*['"]sendMessage['"]\s*\]\s*(?::[\s\S]{0,240}?)?=\s*(?:async\s*)?/,
+      'direct_chat_declares_sendMessage',
+    )
+    pushMatches(
+      errors,
+      DIRECT_CHAT_REL,
+      source,
+      /\bthis\s*\[\s*['"]sendMessage['"]\s*\]\s*=\s*(?:async\s*)?/,
+      'direct_chat_declares_sendMessage',
+    )
+    pushMatches(
+      errors,
+      DIRECT_CHAT_REL,
+      source,
+      /\bnew\s+TurnEngine\s*\(/,
+      'direct_chat_constructs_turn_engine',
+    )
+    if (/this\.turnEngine\.execute\s*\(/.test(source)) {
+      errors.push(`direct_chat_calls_turn_engine_execute:${DIRECT_CHAT_REL}`)
     }
   }
 
@@ -403,13 +544,13 @@ function check({ root = ROOT } = {}) {
 	          'production_dynamic_imports_turn_engine_module',
 	        )
 	        pushConstructErrors(errors, rel, searchable, turnEngineClassExpr, 'production_constructs_turn_engine')
-	        pushMatches(
-	          errors,
-	          rel,
-	          searchable,
-	          new RegExp(`\\bnew\\s+(?:${turnEngineClassExpr})\\s*\\(\\s*\\)\\.execute\\s*\\(`),
-	          'production_calls_turn_engine_execute',
-	        )
+        pushMatches(
+          errors,
+          rel,
+          searchable,
+          new RegExp(`\\bnew\\s+(?:${turnEngineClassExpr})\\s*\\(\\s*\\)(?:\\?\\.execute|\\.execute|\\?\\.\\s*\\[\\s*['"]execute['"]\\s*\\]|\\s*\\[\\s*['"]execute['"]\\s*\\])\\s*(?:\\?\\.\\s*)?\\(`),
+          'production_calls_turn_engine_execute',
+        )
 	        pushInstanceCallErrors(
 	          errors,
 	          rel,
@@ -437,13 +578,13 @@ function check({ root = ROOT } = {}) {
 	      }
 	      if (rel !== DIRECT_CHAT_REL) {
 	        pushNonSdkSendMessageErrors(errors, rel, searchable)
-	        pushMatches(
-	          errors,
-	          rel,
-	          searchable,
-	          new RegExp(`\\bnew\\s+(?:${directChatClassExpr})\\s*\\(\\s*\\)\\.sendMessage\\s*\\(`),
-	          'production_calls_direct_chat_sendMessage',
-	        )
+        pushMatches(
+          errors,
+          rel,
+          searchable,
+          new RegExp(`\\bnew\\s+(?:${directChatClassExpr})\\s*\\(\\s*\\)(?:\\?\\.sendMessage|\\.sendMessage|\\?\\.\\s*\\[\\s*['"]sendMessage['"]\\s*\\]|\\s*\\[\\s*['"]sendMessage['"]\\s*\\])\\s*(?:\\?\\.\\s*)?\\(`),
+          'production_calls_direct_chat_sendMessage',
+        )
 	        pushInstanceCallErrors(
 	          errors,
 	          rel,

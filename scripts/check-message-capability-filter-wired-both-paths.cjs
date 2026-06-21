@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 /**
- * Stage U (PR 2) — both the SDK runtime AND the legacy DirectChatEngine
+ * Stage U (PR 2) — the live SDK runtime and legacy provider execution
  * clients MUST wire `message-capability-filter` for the historical-image
  * carryover fix to be complete. If a future refactor accidentally drops
- * the call on either side, the bug returns:
+ * the call, the bug returns:
  *   - SDK path (modelInputToOpenAIChatMessages /
  *     modelInputToOpenAIResponsesInput / modelInputToAnthropicMessages)
  *     must funnel through `sanitizeMessagesForModelClient`
@@ -14,8 +14,6 @@
  *     `this.applyCapability(...)`.
  *   - Legacy anthropic-execution-client: every `this.deps.serializeMessages(`
  *     call must be wrapped with `this.applyCapability(...)`.
- *   - direct-chat.ts entry: the current-turn multimodal block array must be
- *     checked via `assertCurrentMessageCapability(...)` before pushing.
  */
 
 const { existsSync, readFileSync } = require('node:fs')
@@ -25,7 +23,6 @@ const HELPER_FILE = 'src/main/modules/agent-control/domain-adapters/message-capa
 const SDK_FILE = 'src/main/modules/agent-control/runtime-core/agent-sdk-runtime.ts'
 const OPENAI_CLIENT_FILE = 'src/main/modules/claude-bridge/openai-execution-client.ts'
 const ANTHROPIC_CLIENT_FILE = 'src/main/modules/claude-bridge/anthropic-execution-client.ts'
-const DIRECT_CHAT_FILE = 'src/main/modules/claude-bridge/direct-chat.ts'
 
 function read(rel) {
   const path = resolve(__dirname, '..', rel)
@@ -170,36 +167,12 @@ function main() {
     }
   }
 
-  // --- direct-chat current-turn intake ---
-  const dcSrcRaw = read(DIRECT_CHAT_FILE)
-  if (!dcSrcRaw) {
-    violations.push({ file: DIRECT_CHAT_FILE, reason: 'missing file' })
-  } else {
-    const dcSrc = stripComments(dcSrcRaw)
-    if (
-      !/from\s+['"](?:\.\.\/agent-control\/message-capability-filter|\.\.\/agent-control\/domain-adapters\/message-capability-filter)['"]/.test(
-        dcSrc,
-      )
-    ) {
-      violations.push({
-        file: DIRECT_CHAT_FILE,
-        reason: 'must import from ../agent-control/message-capability-filter or ../agent-control/domain-adapters/message-capability-filter',
-      })
-    }
-    if (!/assertCurrentMessageCapability\s*\(/.test(dcSrc)) {
-      violations.push({
-        file: DIRECT_CHAT_FILE,
-        reason: 'must call assertCurrentMessageCapability(...) on the current-turn multimodal block array',
-      })
-    }
-  }
-
   if (violations.length > 0) {
     console.error('check-message-capability-filter-wired-both-paths: VIOLATIONS\n')
     for (const v of violations) {
       console.error(`  ${v.file}: ${v.reason}`)
     }
-    console.error('\nBoth SDK and legacy DirectChatEngine paths must wire the capability filter — partial coverage leaves the original bug (image residue contaminating vision-off model requests) intact on one path.')
+    console.error('\nThe live SDK path and legacy provider clients must wire the capability filter — partial coverage leaves the original bug (image residue contaminating vision-off model requests) intact on one path.')
     process.exit(1)
   }
   console.log('check-message-capability-filter-wired-both-paths: OK')

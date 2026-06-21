@@ -223,9 +223,10 @@ test('runtime host is split into run coordinator, run projection, and execution 
   assert.match(directChat, /private readonly documentTaskPipelineExecutor: DocumentTaskPipelineExecutor/)
   assert.match(directChat, /private readonly executionLoopOrchestrator: ExecutionLoopOrchestrator/)
   assert.match(directChat, /private readonly hostCapabilityDispatcher: HostCapabilityDispatcher/)
-  assert.match(directChat, /import \{ TurnEngine \} from '\.\.\/agent-control\/turn-engine'/)
-  assert.match(directChat, /private readonly turnEngine: TurnEngine/)
-  assert.match(directChat, /return await this\.turnEngine\.execute\(/)
+  assert.doesNotMatch(directChat, /import \{ TurnEngine \} from '\.\.\/agent-control\/turn-engine'/)
+  assert.doesNotMatch(directChat, /private readonly turnEngine: TurnEngine/)
+  assert.doesNotMatch(directChat, /async sendMessage\(/)
+  assert.doesNotMatch(directChat, /this\.turnEngine\.execute\(/)
   assert.doesNotMatch(directChat, /private async maybeRunDocumentTaskPlanShortcut\(/)
   assert.doesNotMatch(directChat, /private async maybeRunDocumentWidgetPipelineShortcut\(/)
   assert.doesNotMatch(directChat, /private readonly documentInsightCache = new DocumentInsightCache\(\)/)
@@ -298,23 +299,11 @@ test('runtime host is split into run coordinator, run projection, and execution 
   assert.doesNotMatch(directChat, /response = await this\.callOpenAIWithTools\(/)
 })
 
-test('phase3 moves execution-host responsibilities from DirectChatEngine into TurnEngine while preserving host wiring', () => {
+test('P6t keeps execution-host helpers in DirectChat without a legacy send entry', () => {
   const directChat = readWorkspaceFile('src/main/modules/claude-bridge/direct-chat.ts')
   const turnEngine = readWorkspaceFile('src/main/modules/agent-control/turn-engine.ts')
 
   assertMatchesAll(directChat, [
-    {
-      label: 'phase3 should keep run setup explicit in sendMessage',
-      pattern: /const abortController = new AbortController\(/,
-    },
-    {
-      label: 'phase3 should keep provider context assembly explicit in sendMessage',
-      pattern: /providerContext: \{/,
-    },
-    {
-      label: 'phase3 should keep turn-engine host assembly explicit in direct chat',
-      pattern: /private buildTurnEngineHost\(/,
-    },
     {
       label: 'phase3 should keep requestSimpleText host callback local to direct chat',
       pattern: /private async requestSimpleText\(/,
@@ -445,7 +434,7 @@ test('phase0 freezes the target runtime boundary that later refactors must satis
   ])
 })
 
-test('phase3 keeps runtime ownership split while DirectChatEngine delegates single-turn execution to TurnEngine', () => {
+test('P6t keeps runtime ownership split with SDK as live sender and DirectChat as provider shell', () => {
   const orchestrator = readWorkspaceFile('src/main/modules/agent-control/runtime-core/orchestrator.ts')
   const directChat = readWorkspaceFile('src/main/modules/claude-bridge/direct-chat.ts')
   const turnEngine = readWorkspaceFile('src/main/modules/agent-control/turn-engine.ts')
@@ -473,20 +462,10 @@ test('phase3 keeps runtime ownership split while DirectChatEngine delegates sing
     },
   ])
 
-  assertMatchesAll(directChat, [
-    {
-      label: 'direct chat should import TurnEngine during phase3',
-      pattern: /import \{ TurnEngine \} from '\.\.\/agent-control\/turn-engine'/,
-    },
-    {
-      label: 'direct chat should keep a turn engine instance during phase3',
-      pattern: /private readonly turnEngine: TurnEngine/,
-    },
-    {
-      label: 'sendMessage should delegate to turn engine during phase3',
-      pattern: /return await this\.turnEngine\.execute\(/,
-    },
-  ])
+  assert.doesNotMatch(directChat, /import \{ TurnEngine \} from '\.\.\/agent-control\/turn-engine'/)
+  assert.doesNotMatch(directChat, /private readonly turnEngine: TurnEngine/)
+  assert.doesNotMatch(directChat, /async sendMessage\(/)
+  assert.doesNotMatch(directChat, /this\.turnEngine\.execute\(/)
 
   assertMatchesAll(orchestrator, [
     {

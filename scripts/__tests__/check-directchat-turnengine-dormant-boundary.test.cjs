@@ -41,13 +41,10 @@ export class ReadyAgentOrchestrator {
 }
 `)
   write(root, 'src/main/modules/claude-bridge/direct-chat.ts', `
-import { TurnEngine } from '../agent-control/turn-engine'
 export class DirectChatEngine {
-  private readonly turnEngine: TurnEngine
-  constructor() { this.turnEngine = new TurnEngine() }
-  async sendMessage() {
-    return await this.turnEngine.execute({})
-  }
+  stopGeneration() {}
+  getDomainAdapters() { return [] }
+  getSkillContextOrchestrator() { return {} }
 }
 `)
   write(root, 'src/main/modules/agent-control/turn-engine.ts', `
@@ -57,10 +54,150 @@ export class TurnEngine {
 `)
 }
 
-test('gate passes for sdk live execution and dormant DirectChat execution method', (t) => {
+test('gate passes for sdk live execution and DirectChat provider shell', (t) => {
   const root = makeRoot(t)
   const result = check({ root })
   assert.equal(result.ok, true, result.errors.join('\n'))
+})
+
+test('gate fails when DirectChat keeps a dormant TurnEngine sender', (t) => {
+  const root = makeRoot(t)
+  write(root, 'src/main/modules/claude-bridge/direct-chat.ts', `
+import { TurnEngine } from '../agent-control/turn-engine'
+export class DirectChatEngine {
+  private readonly turnEngine: TurnEngine
+  constructor() { this.turnEngine = new TurnEngine() }
+  async sendMessage() {
+    return await this.turnEngine.execute({})
+  }
+}
+`)
+  const result = check({ root })
+  assert.equal(result.ok, false)
+  assert.ok(result.errors.some((error) => error.includes('direct_chat_imports_turn_engine_class')))
+  assert.ok(result.errors.some((error) => error.includes('direct_chat_declares_turn_engine_member')))
+  assert.ok(result.errors.some((error) => error.includes('direct_chat_declares_sendMessage')))
+  assert.ok(result.errors.some((error) => error.includes('direct_chat_calls_turn_engine_execute')))
+})
+
+test('gate fails when DirectChat declares sendMessage without TurnEngine spelling', (t) => {
+  const root = makeRoot(t)
+  write(root, 'src/main/modules/claude-bridge/direct-chat.ts', `
+export class DirectChatEngine {
+  async sendMessage() {
+    return { success: false }
+  }
+}
+`)
+  const result = check({ root })
+  assert.equal(result.ok, false)
+  assert.ok(result.errors.some((error) => error.includes('direct_chat_declares_sendMessage')))
+})
+
+test('gate fails when DirectChat declares a non-async sendMessage method', (t) => {
+  const root = makeRoot(t)
+  write(root, 'src/main/modules/claude-bridge/direct-chat.ts', `
+export class DirectChatEngine {
+  sendMessage() {
+    return Promise.resolve({ success: false })
+  }
+}
+`)
+  const result = check({ root })
+  assert.equal(result.ok, false)
+  assert.ok(result.errors.some((error) => error.includes('direct_chat_declares_sendMessage')))
+})
+
+test('gate fails when DirectChat declares computed sendMessage method', (t) => {
+  const root = makeRoot(t)
+  write(root, 'src/main/modules/claude-bridge/direct-chat.ts', `
+export class DirectChatEngine {
+  ['sendMessage']() {
+    return Promise.resolve({ success: false })
+  }
+}
+`)
+  const result = check({ root })
+  assert.equal(result.ok, false)
+  assert.ok(result.errors.some((error) => error.includes('direct_chat_declares_sendMessage')))
+})
+
+test('gate fails when DirectChat declares spaced computed sendMessage method', (t) => {
+  const root = makeRoot(t)
+  write(root, 'src/main/modules/claude-bridge/direct-chat.ts', `
+export class DirectChatEngine {
+  [ 'sendMessage' ]() {
+    return Promise.resolve({ success: false })
+  }
+}
+`)
+  const result = check({ root })
+  assert.equal(result.ok, false)
+  assert.ok(result.errors.some((error) => error.includes('direct_chat_declares_sendMessage')))
+})
+
+test('gate fails when DirectChat declares typed sendMessage arrow property', (t) => {
+  const root = makeRoot(t)
+  write(root, 'src/main/modules/claude-bridge/direct-chat.ts', `
+export class DirectChatEngine {
+  sendMessage: () => Promise<unknown> = async () => ({ success: false })
+}
+`)
+  const result = check({ root })
+  assert.equal(result.ok, false)
+  assert.ok(result.errors.some((error) => error.includes('direct_chat_declares_sendMessage')))
+})
+
+test('gate fails when DirectChat declares multiline typed sendMessage arrow property', (t) => {
+  const root = makeRoot(t)
+  write(root, 'src/main/modules/claude-bridge/direct-chat.ts', `
+export class DirectChatEngine {
+  sendMessage:
+    () => Promise<unknown> = async () => ({ success: false })
+}
+`)
+  const result = check({ root })
+  assert.equal(result.ok, false)
+  assert.ok(result.errors.some((error) => error.includes('direct_chat_declares_sendMessage')))
+})
+
+test('gate fails when DirectChat declares computed sendMessage arrow property', (t) => {
+  const root = makeRoot(t)
+  write(root, 'src/main/modules/claude-bridge/direct-chat.ts', `
+export class DirectChatEngine {
+  ['sendMessage'] = async () => ({ success: false })
+}
+`)
+  const result = check({ root })
+  assert.equal(result.ok, false)
+  assert.ok(result.errors.some((error) => error.includes('direct_chat_declares_sendMessage')))
+})
+
+test('gate fails when DirectChat declares multiline computed sendMessage arrow property', (t) => {
+  const root = makeRoot(t)
+  write(root, 'src/main/modules/claude-bridge/direct-chat.ts', `
+export class DirectChatEngine {
+  ['sendMessage']:
+    () => Promise<unknown> = async () => ({ success: false })
+}
+`)
+  const result = check({ root })
+  assert.equal(result.ok, false)
+  assert.ok(result.errors.some((error) => error.includes('direct_chat_declares_sendMessage')))
+})
+
+test('gate fails when DirectChat assigns this computed sendMessage in constructor', (t) => {
+  const root = makeRoot(t)
+  write(root, 'src/main/modules/claude-bridge/direct-chat.ts', `
+export class DirectChatEngine {
+  constructor() {
+    this['sendMessage'] = async () => ({ success: false })
+  }
+}
+`)
+  const result = check({ root })
+  assert.equal(result.ok, false)
+  assert.ok(result.errors.some((error) => error.includes('direct_chat_declares_sendMessage')))
 })
 
 test('gate fails when orchestrator sends through DirectChat/domainAdapterEngine', (t) => {
@@ -157,12 +294,135 @@ export async function run(turnEngine) {
   assert.ok(result.errors.some((error) => error.includes('production_calls_turn_engine_execute')))
 })
 
+test('gate fails for optional turnEngine execute call outside DirectChat', (t) => {
+  const root = makeRoot(t)
+  write(root, 'src/main/modules/agent-control/runtime-core/legacy-runner.ts', `
+export async function run(localTurnEngine) {
+  return await localTurnEngine?.execute({})
+}
+`)
+  const result = check({ root })
+  assert.equal(result.ok, false)
+  assert.ok(result.errors.some((error) => error.includes('production_calls_turn_engine_execute')))
+})
+
+test('gate fails for optional bracket turnEngine execute call outside DirectChat', (t) => {
+  const root = makeRoot(t)
+  write(root, 'src/main/modules/agent-control/runtime-core/legacy-runner.ts', `
+export async function run(localTurnEngine) {
+  return await localTurnEngine?.['execute']({})
+}
+`)
+  const result = check({ root })
+  assert.equal(result.ok, false)
+  assert.ok(result.errors.some((error) => error.includes('production_calls_turn_engine_execute')))
+})
+
+test('gate fails for optional this.turnEngine execute call outside DirectChat', (t) => {
+  const root = makeRoot(t)
+  write(root, 'src/main/modules/agent-control/runtime-core/legacy-runner.ts', `
+export class LegacyRunner {
+  constructor(turnEngine) { this.turnEngine = turnEngine }
+  async run() {
+    return await this.turnEngine?.execute({})
+  }
+}
+`)
+  const result = check({ root })
+  assert.equal(result.ok, false)
+  assert.ok(result.errors.some((error) => error.includes('production_calls_turn_engine_execute')))
+})
+
+test('gate fails for optional bracket this.turnEngine execute call outside DirectChat', (t) => {
+  const root = makeRoot(t)
+  write(root, 'src/main/modules/agent-control/runtime-core/legacy-runner.ts', `
+export class LegacyRunner {
+  constructor(turnEngine) { this.turnEngine = turnEngine }
+  async run() {
+    return await this.turnEngine?.['execute']({})
+  }
+}
+`)
+  const result = check({ root })
+  assert.equal(result.ok, false)
+  assert.ok(result.errors.some((error) => error.includes('production_calls_turn_engine_execute')))
+})
+
+test('gate fails for optional-call turnEngine execute outside DirectChat', (t) => {
+  const root = makeRoot(t)
+  write(root, 'src/main/modules/agent-control/runtime-core/legacy-runner.ts', `
+export async function run(localTurnEngine) {
+  return await localTurnEngine.execute?.({})
+}
+`)
+  const result = check({ root })
+  assert.equal(result.ok, false)
+  assert.ok(result.errors.some((error) => error.includes('production_calls_turn_engine_execute')))
+})
+
+test('gate fails for optional-call bracket turnEngine execute outside DirectChat', (t) => {
+  const root = makeRoot(t)
+  write(root, 'src/main/modules/agent-control/runtime-core/legacy-runner.ts', `
+export async function run(localTurnEngine) {
+  return await localTurnEngine['execute']?.({})
+}
+`)
+  const result = check({ root })
+  assert.equal(result.ok, false)
+  assert.ok(result.errors.some((error) => error.includes('production_calls_turn_engine_execute')))
+})
+
+test('gate fails for optional-call this.turnEngine execute outside DirectChat', (t) => {
+  const root = makeRoot(t)
+  write(root, 'src/main/modules/agent-control/runtime-core/legacy-runner.ts', `
+export class LegacyRunner {
+  constructor(turnEngine) { this.turnEngine = turnEngine }
+  async run() {
+    return await this.turnEngine.execute?.({})
+  }
+}
+`)
+  const result = check({ root })
+  assert.equal(result.ok, false)
+  assert.ok(result.errors.some((error) => error.includes('production_calls_turn_engine_execute')))
+})
+
 test('gate fails for inline new TurnEngine execute outside DirectChat', (t) => {
   const root = makeRoot(t)
   write(root, 'src/main/modules/agent-control/runtime-core/legacy-runner.ts', `
 import { TurnEngine } from '../turn-engine'
 export async function run() {
   return await new TurnEngine().execute({})
+}
+`)
+  const result = check({ root })
+  assert.equal(result.ok, false)
+  assert.ok(result.errors.some((error) => error.includes('production_imports_turn_engine_class')))
+  assert.ok(result.errors.some((error) => error.includes('production_constructs_turn_engine')))
+  assert.ok(result.errors.some((error) => error.includes('production_calls_turn_engine_execute')))
+})
+
+test('gate fails for inline new TurnEngine bracket execute outside DirectChat', (t) => {
+  const root = makeRoot(t)
+  write(root, 'src/main/modules/agent-control/runtime-core/legacy-runner.ts', `
+import { TurnEngine } from '../turn-engine'
+export async function run() {
+  return await new TurnEngine()['execute']({})
+}
+`)
+  const result = check({ root })
+  assert.equal(result.ok, false)
+  assert.ok(result.errors.some((error) => error.includes('production_imports_turn_engine_class')))
+  assert.ok(result.errors.some((error) => error.includes('production_constructs_turn_engine')))
+  assert.ok(result.errors.some((error) => error.includes('production_calls_turn_engine_execute')))
+})
+
+test('gate fails for inline new TurnEngine optional bracket execute outside DirectChat', (t) => {
+  const root = makeRoot(t)
+  write(root, 'src/main/modules/agent-control/runtime-core/legacy-runner.ts', `
+import { TurnEngine } from '../turn-engine'
+export async function run() {
+  return await new TurnEngine()?.['execute']({})
 }
 `)
   const result = check({ root })
@@ -212,6 +472,62 @@ export async function run() {
   assert.ok(result.errors.some((error) => error.includes('production_calls_direct_chat_sendMessage')))
 })
 
+test('gate fails when production code calls DirectChatEngine via bracket sendMessage', (t) => {
+  const root = makeRoot(t)
+  write(root, 'src/main/modules/agent-control/runtime-core/legacy-runner.ts', `
+import type { DirectChatEngine } from '../../claude-bridge/direct-chat'
+export async function run(engine: DirectChatEngine) {
+  return await engine['sendMessage']('session', 'message')
+}
+`)
+  const result = check({ root })
+  assert.equal(result.ok, false)
+  assert.ok(result.errors.some((error) => error.includes('production_calls_direct_chat_sendMessage')))
+  assert.ok(result.errors.some((error) => error.includes('production_calls_non_sdk_sendMessage')))
+})
+
+test('gate fails when production code calls DirectChatEngine via optional bracket sendMessage', (t) => {
+  const root = makeRoot(t)
+  write(root, 'src/main/modules/agent-control/runtime-core/legacy-runner.ts', `
+import type { DirectChatEngine } from '../../claude-bridge/direct-chat'
+export async function run(engine: DirectChatEngine) {
+  return await engine?.['sendMessage']('session', 'message')
+}
+`)
+  const result = check({ root })
+  assert.equal(result.ok, false)
+  assert.ok(result.errors.some((error) => error.includes('production_calls_direct_chat_sendMessage')))
+  assert.ok(result.errors.some((error) => error.includes('production_calls_non_sdk_sendMessage')))
+})
+
+test('gate fails when production code optional-calls DirectChatEngine sendMessage', (t) => {
+  const root = makeRoot(t)
+  write(root, 'src/main/modules/agent-control/runtime-core/legacy-runner.ts', `
+import type { DirectChatEngine } from '../../claude-bridge/direct-chat'
+export async function run(engine: DirectChatEngine) {
+  return await engine.sendMessage?.('session', 'message')
+}
+`)
+  const result = check({ root })
+  assert.equal(result.ok, false)
+  assert.ok(result.errors.some((error) => error.includes('production_calls_direct_chat_sendMessage')))
+  assert.ok(result.errors.some((error) => error.includes('production_calls_non_sdk_sendMessage')))
+})
+
+test('gate fails when production code optional-calls bracket DirectChatEngine sendMessage', (t) => {
+  const root = makeRoot(t)
+  write(root, 'src/main/modules/agent-control/runtime-core/legacy-runner.ts', `
+import type { DirectChatEngine } from '../../claude-bridge/direct-chat'
+export async function run(engine: DirectChatEngine) {
+  return await engine['sendMessage']?.('session', 'message')
+}
+`)
+  const result = check({ root })
+  assert.equal(result.ok, false)
+  assert.ok(result.errors.some((error) => error.includes('production_calls_direct_chat_sendMessage')))
+  assert.ok(result.errors.some((error) => error.includes('production_calls_non_sdk_sendMessage')))
+})
+
 test('gate fails when production code uses a DirectChat namespace import to send', (t) => {
   const root = makeRoot(t)
   write(root, 'src/main/modules/agent-control/runtime-core/legacy-runner.ts', `
@@ -224,6 +540,32 @@ export async function run() {
   assert.equal(result.ok, false)
   assert.ok(result.errors.some((error) => error.includes('production_imports_direct_chat_engine')))
   assert.ok(result.errors.some((error) => error.includes('production_constructs_direct_chat_engine')))
+  assert.ok(result.errors.some((error) => error.includes('production_calls_direct_chat_sendMessage')))
+})
+
+test('gate fails when production code calls inline DirectChat construction via bracket sendMessage', (t) => {
+  const root = makeRoot(t)
+  write(root, 'src/main/modules/agent-control/runtime-core/legacy-runner.ts', `
+import * as DirectChat from '../../claude-bridge/direct-chat'
+export async function run() {
+  return await new DirectChat.DirectChatEngine()['sendMessage']('session', 'message')
+}
+`)
+  const result = check({ root })
+  assert.equal(result.ok, false)
+  assert.ok(result.errors.some((error) => error.includes('production_calls_direct_chat_sendMessage')))
+})
+
+test('gate fails when production code calls inline DirectChat construction via optional bracket sendMessage', (t) => {
+  const root = makeRoot(t)
+  write(root, 'src/main/modules/agent-control/runtime-core/legacy-runner.ts', `
+import * as DirectChat from '../../claude-bridge/direct-chat'
+export async function run() {
+  return await new DirectChat.DirectChatEngine()?.['sendMessage']('session', 'message')
+}
+`)
+  const result = check({ root })
+  assert.equal(result.ok, false)
   assert.ok(result.errors.some((error) => error.includes('production_calls_direct_chat_sendMessage')))
 })
 
@@ -363,6 +705,21 @@ type LegacyTurn =
 
 export async function run(engine: LegacyTurn) {
   return await engine.execute({})
+}
+`)
+  const result = check({ root })
+  assert.equal(result.ok, false)
+  assert.ok(result.errors.some((error) => error.includes('production_calls_turn_engine_execute')))
+})
+
+test('gate fails when a TurnEngine type alias bracket-executes outside DirectChat', (t) => {
+  const root = makeRoot(t)
+  write(root, 'src/main/modules/agent-control/runtime-core/legacy-runner.ts', `
+type LegacyTurn =
+  import('../turn-engine').TurnEngine
+
+export async function run(engine: LegacyTurn) {
+  return await engine['execute']({})
 }
 `)
   const result = check({ root })

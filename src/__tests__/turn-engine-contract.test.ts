@@ -179,36 +179,14 @@ function createContractTurnRequest(userText: string) {
   }
 }
 
-test('phase3 shrinks DirectChatEngine.sendMessage into a TurnEngine host-shell entrypoint', () => {
+test('P6t retires DirectChatEngine.sendMessage while TurnEngine remains test-only execution logic', () => {
   const directChat = readWorkspaceFile('src/main/modules/claude-bridge/direct-chat.ts')
   const turnEngine = readWorkspaceFile('src/main/modules/agent-control/turn-engine.ts')
 
-  assertMatchesAll(directChat, [
-    {
-      label: 'sendMessage should remain the single public turn entrypoint',
-      pattern: /async sendMessage\(/,
-    },
-    {
-      label: 'direct chat should keep the turn engine as a host-owned collaborator',
-      pattern: /private readonly turnEngine: TurnEngine/,
-    },
-    {
-      label: 'sendMessage should delegate the main turn execution to TurnEngine',
-      pattern: /return await this\.turnEngine\.execute\(/,
-    },
-    {
-      label: 'sendMessage should still own abort-controller wiring',
-      pattern: /const abortController = new AbortController\(/,
-    },
-    {
-      label: 'sendMessage should still emit working status before delegating',
-      pattern: /emitStatus\('working'\)/,
-    },
-    {
-      label: 'sendMessage should still normalize incoming multimodal messages into session history',
-      pattern: /session\.messages\.push\(\{ role: 'user', content: blocks \}\)/,
-    },
-  ])
+  assert.doesNotMatch(directChat, /import \{ TurnEngine \} from '\.\.\/agent-control\/turn-engine'/)
+  assert.doesNotMatch(directChat, /private readonly turnEngine: TurnEngine/)
+  assert.doesNotMatch(directChat, /async sendMessage\(/)
+  assert.doesNotMatch(directChat, /this\.turnEngine\.execute\(/)
 
   assertMatchesAll(turnEngine, [
     {
@@ -420,20 +398,10 @@ test('phase3 routes single-turn execution through TurnEngine and shrinks DirectC
     },
   ])
 
-  assertMatchesAll(directChat, [
-    {
-      label: 'direct chat should import turn engine',
-      pattern: /import \{ TurnEngine \} from '\.\.\/agent-control\/turn-engine'/,
-    },
-    {
-      label: 'direct chat should keep a turn engine instance',
-      pattern: /private readonly turnEngine: TurnEngine/,
-    },
-    {
-      label: 'sendMessage should delegate the main turn execution to TurnEngine',
-      pattern: /return await this\.turnEngine\.execute\(/,
-    },
-  ])
+  assert.doesNotMatch(directChat, /import \{ TurnEngine \} from '\.\.\/agent-control\/turn-engine'/)
+  assert.doesNotMatch(directChat, /private readonly turnEngine: TurnEngine/)
+  assert.doesNotMatch(directChat, /async sendMessage\(/)
+  assert.doesNotMatch(directChat, /this\.turnEngine\.execute\(/)
 
   assert.doesNotMatch(directChat, /const executionIntentContext = resolveExecutionIntentContext\(/)
   assert.doesNotMatch(directChat, /const initialTaskExecutionRoute = resolveTaskExecutionRoute\(/)
