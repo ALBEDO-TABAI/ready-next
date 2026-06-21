@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto'
+import { existsSync } from 'node:fs'
 
 function fsExistsSyncSafe(path: string): boolean {
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    return require('node:fs').existsSync(path)
+    return existsSync(path)
   } catch {
     return false
   }

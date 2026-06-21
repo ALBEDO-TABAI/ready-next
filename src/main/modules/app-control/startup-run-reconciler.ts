@@ -2,6 +2,7 @@ import type { DatabaseConnection } from '../database'
 import { getDatabase } from '../database'
 import { canResumeAsUserPoint } from '../agent-control/contracts/resume-handle'
 import { logAgentMetric } from '../agent-control/metrics'
+import { isRunMetaTerminalStatus } from '../../../shared/run-meta-terminal-status'
 import {
   SkillTaskRunRepository,
   type SkillTaskRunStartupReconciliationResult,
@@ -38,6 +39,8 @@ export interface StartupRunReconcilerOptions {
 interface TaskProjectionStartupRow {
   task_id: string
   continuation_ref_json: string | null
+  run_status: string | null
+  terminal_reason: string | null
 }
 
 interface BrowserTaskStartupRow {
@@ -90,12 +93,65 @@ function reconcileRunMeta(db: StartupRunReconcilerDb, nowMs: number): number {
   `).run(nowMs))
 }
 
+function terminalProjectionTarget(row: TaskProjectionStartupRow): {
+  status: 'completed' | 'failed' | 'killed'
+  actions: string[]
+  degradationReason: string | null
+  blockedReason: string | null
+} | null {
+  if (!isRunMetaTerminalStatus(row.run_status)) return null
+  const reason = typeof row.terminal_reason === 'string' ? row.terminal_reason : ''
+  if (row.run_status === 'done' || row.run_status === 'completed' || reason === 'done') {
+    return {
+      status: 'completed',
+      actions: [],
+      degradationReason: null,
+      blockedReason: null,
+    }
+  }
+  if (row.run_status === 'cancelled' || row.run_status === 'killed' || reason.startsWith('cancelled_')) {
+    return {
+      status: 'killed',
+      actions: ['none'],
+      degradationReason: reason || row.run_status,
+      blockedReason: '任务已停止。',
+    }
+  }
+  if (reason === 'blocked_config') {
+    return {
+      status: 'failed',
+      actions: [],
+      degradationReason: reason,
+      blockedReason: '当前模型或配置不支持这次请求，请切换模型、修复设置或移除不支持的附件后重新发送。',
+    }
+  }
+  if (reason === 'blocked_external') {
+    return {
+      status: 'failed',
+      actions: ['none'],
+      degradationReason: reason,
+      blockedReason: '这次请求已中断，Ready 已恢复；请重新发送。',
+    }
+  }
+  return {
+    status: 'failed',
+    actions: ['none'],
+    degradationReason: reason || row.run_status,
+    blockedReason: '任务已结束，但没有可续跑句柄；请重新发送。',
+  }
+}
+
 function reconcileTaskProjections(db: StartupRunReconcilerDb, nowIso: string): number {
   const rows = db.prepare(`
-    SELECT task_id, continuation_ref_json
-    FROM task_projections
-    WHERE status IN ('queued', 'running', 'blocked', 'budget_paused')
-    ORDER BY updated_at ASC
+    SELECT
+      p.task_id,
+      p.continuation_ref_json,
+      rm.status AS run_status,
+      rm.terminal_reason
+    FROM task_projections p
+    LEFT JOIN run_meta rm ON rm.run_id = p.run_id
+    WHERE p.status IN ('queued', 'running', 'blocked', 'budget_paused')
+    ORDER BY p.updated_at ASC
   `).all<TaskProjectionStartupRow>()
 
   const recoverable = db.prepare(`
@@ -122,6 +178,18 @@ function reconcileTaskProjections(db: StartupRunReconcilerDb, nowIso: string): n
       updated_at = ?
     WHERE task_id = ?
   `)
+  const terminal = db.prepare(`
+    UPDATE task_projections
+    SET
+      status = ?,
+      interaction_state = 'suspended',
+      waiting_for = 'none',
+      resumable_actions_json = ?,
+      degradation_reason = ?,
+      blocked_reason = ?,
+      updated_at = ?
+    WHERE task_id = ?
+  `)
 
   let count = 0
   for (const row of rows) {
@@ -130,6 +198,18 @@ function reconcileTaskProjections(db: StartupRunReconcilerDb, nowIso: string): n
     // must NOT be advertised as recoverable (review batch-1 finding).
     if (canResumeAsUserPoint(continuationRef)) {
       count += changed(recoverable.run(JSON.stringify(['continue', 'cancel']), nowIso, row.task_id))
+      continue
+    }
+    const terminalTarget = terminalProjectionTarget(row)
+    if (terminalTarget) {
+      count += changed(terminal.run(
+        terminalTarget.status,
+        JSON.stringify(terminalTarget.actions),
+        terminalTarget.degradationReason,
+        terminalTarget.blockedReason,
+        nowIso,
+        row.task_id,
+      ))
       continue
     }
     count += changed(interrupted.run(

@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict'
-import test from 'node:test'
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { afterEach, test } from 'node:test'
 
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 
@@ -22,6 +25,25 @@ interface TestDb {
 
 type SqliteCtor = new (path: string) => TestDb
 
+const roots: string[] = []
+
+afterEach(() => {
+  for (const root of roots.splice(0)) {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+function createRoot(name: string): string {
+  const root = join(tmpdir(), `ready-startup-run-reconciler-${name}-${Date.now()}-${Math.random().toString(16).slice(2)}`)
+  mkdirSync(root, { recursive: true })
+  roots.push(root)
+  return root
+}
+
+function writeJson(path: string, value: unknown): void {
+  writeFileSync(path, JSON.stringify(value, null, 2), 'utf8')
+}
+
 async function openDb(): Promise<TestDb> {
   const Sqlite = (await import('better-sqlite3')).default as SqliteCtor
   const db = new Sqlite(':memory:')
@@ -35,6 +57,34 @@ function seedRunMeta(db: TestDb): void {
       run_id, task_id, scope_id, agent_id, status, created_at, updated_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?)
   `).run('run-stale', 'task-run-meta', 'scope-a', 'agent-a', 'working', 1000, 1000)
+}
+
+function seedTerminalRunMeta(
+  db: TestDb,
+  input: {
+    runId: string
+    taskId: string
+    status: string
+    terminalReason: string
+  },
+): void {
+  db.prepare(`
+    INSERT INTO run_meta (
+      run_id, task_id, scope_id, agent_id, status, created_at, updated_at,
+      terminal_reason, initiator, duration_ms
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    input.runId,
+    input.taskId,
+    'scope-a',
+    'agent-a',
+    input.status,
+    1000,
+    2000,
+    input.terminalReason,
+    'error',
+    60000,
+  )
 }
 
 function seedTaskProjection(
@@ -221,10 +271,13 @@ test('startup run reconciler closes stale run, projection, browser, and skill ro
       status: 'completed',
       checkpoint: null,
     })
+    const skillOutputDir = createRoot('startup-skill-handle')
+    const skillRunStatePath = join(skillOutputDir, 'run_state.json')
+    writeJson(skillRunStatePath, { status: 'running' })
     seedSkillRun(db, {
       id: 'skill-with-handle',
-      outputDir: '/tmp/ready-s1-5-skill-with-handle',
-      runStatePath: '/tmp/ready-s1-5-skill-with-handle/run_state.json',
+      outputDir: skillOutputDir,
+      runStatePath: skillRunStatePath,
     })
     seedSkillRun(db, {
       id: 'skill-without-handle',
@@ -310,6 +363,85 @@ test('startup run reconciler closes stale run, projection, browser, and skill ro
     assert.equal(metrics.length, 1)
     assert.equal(metrics[0].name, 'startup_run_reconciler.reconciled')
     assert.deepEqual(metrics[0].payload.reconcileCount, result.reconcileCount)
+  } finally {
+    db.close()
+  }
+})
+
+test('startup run reconciler preserves terminal run reasons instead of rewriting them as restart interruptions', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'startup run reconciler terminal projection repair')) return
+  const db = await openDb()
+  try {
+    seedTerminalRunMeta(db, {
+      runId: 'run-infra-timeout',
+      taskId: 'projection-infra-timeout',
+      status: 'error',
+      terminalReason: 'blocked_external',
+    })
+    seedTerminalRunMeta(db, {
+      runId: 'run-blocked-config',
+      taskId: 'projection-blocked-config',
+      status: 'error',
+      terminalReason: 'blocked_config',
+    })
+    seedTaskProjection(db, {
+      taskId: 'projection-infra-timeout',
+      runId: 'run-infra-timeout',
+      status: 'blocked',
+      continuationRef: null,
+    })
+    seedTaskProjection(db, {
+      taskId: 'projection-blocked-config',
+      runId: 'run-blocked-config',
+      status: 'blocked',
+      continuationRef: null,
+    })
+
+    const result = reconcileStartupRunsOnStartup({
+      db,
+      now: new Date('2026-06-10T01:00:00.000Z'),
+      skillTaskRunRepository: new SkillTaskRunRepository({ getRawDb: () => db as never }),
+      logMetric: () => undefined,
+    })
+
+    assert.equal(result.reconcileCount.runMeta, 0)
+    assert.equal(result.reconcileCount.taskProjections, 2)
+
+    const timeoutProjection = db.prepare(`
+      SELECT status, interaction_state, waiting_for, degradation_reason, blocked_reason, resumable_actions_json
+      FROM task_projections WHERE task_id = ?
+    `).get<{
+      status: string
+      interaction_state: string
+      waiting_for: string
+      degradation_reason: string | null
+      blocked_reason: string | null
+      resumable_actions_json: string
+    }>('projection-infra-timeout')!
+    assert.equal(timeoutProjection.status, 'failed')
+    assert.equal(timeoutProjection.interaction_state, 'suspended')
+    assert.equal(timeoutProjection.waiting_for, 'none')
+    assert.equal(timeoutProjection.degradation_reason, 'blocked_external')
+    assert.equal(timeoutProjection.blocked_reason, '这次请求已中断，Ready 已恢复；请重新发送。')
+    assert.deepEqual(JSON.parse(timeoutProjection.resumable_actions_json), ['none'])
+
+    const configProjection = db.prepare(`
+      SELECT status, interaction_state, waiting_for, degradation_reason, blocked_reason, resumable_actions_json
+      FROM task_projections WHERE task_id = ?
+    `).get<{
+      status: string
+      interaction_state: string
+      waiting_for: string
+      degradation_reason: string | null
+      blocked_reason: string | null
+      resumable_actions_json: string
+    }>('projection-blocked-config')!
+    assert.equal(configProjection.status, 'failed')
+    assert.equal(configProjection.interaction_state, 'suspended')
+    assert.equal(configProjection.waiting_for, 'none')
+    assert.equal(configProjection.degradation_reason, 'blocked_config')
+    assert.match(configProjection.blocked_reason || '', /当前模型或配置不支持/)
+    assert.deepEqual(JSON.parse(configProjection.resumable_actions_json), [])
   } finally {
     db.close()
   }
