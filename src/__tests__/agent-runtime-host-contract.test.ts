@@ -198,11 +198,9 @@ test('runtime host is split into run coordinator, run projection, and execution 
   assert.match(directChat, /import \{ OpenAIExecutionClient \} from '\.\/openai-execution-client'/)
   assert.match(directChat, /import \{ resolveExecutionIntentContext \} from '\.\.\/agent-control\/execution-intent-resolver'/)
   assert.match(directChat, /import \{[\s\S]*prepareInitialRun[\s\S]*reconcileAfterBrowserDecision[\s\S]*\} from '\.\.\/agent-control\/domain-adapters\/run-capability-controller'/)
-  assert.match(directChat, /import \{ HostCapabilityDispatcher \} from '\.\.\/agent-control\/domain-adapters\/host-capability-dispatcher'/)
   assert.match(directChat, /import \{ SkillContextOrchestrator \} from '\.\.\/agent-control\/skills\/skill-context-orchestrator'/)
   assert.match(directChat, /import \{ buildToolRuntimeContext \} from '\.\.\/agent-control\/tools-runtime\/tool-runtime-context-builder'/)
   assert.match(directChat, /import \{[\s\S]*applyRunBudgetHint[\s\S]*\} from '\.\.\/agent-control\/task-projection\/run-budget-policy'/)
-  assert.match(directChat, /import \{ VideoFallbackService \} from '\.\/video-fallback-service'/)
   assert.match(directChat, /import \{ AnthropicExecutionClient \} from '\.\/anthropic-execution-client'/)
   assert.match(directChat, /import \{ KimiCodingClient \} from '\.\/kimi-coding-client'/)
   assert.match(directChat, /import \{[\s\S]*OpenAIExecutionClient[\s\S]*\} from '\.\/openai-execution-client'/)
@@ -210,19 +208,22 @@ test('runtime host is split into run coordinator, run projection, and execution 
   assert.match(directChat, /import \{ DesignToolLoopOrchestrator \} from '\.\.\/agent-control\/design-tool-loop-orchestrator'/)
   assert.match(directChat, /import \{ DocumentToolLoopOrchestrator \} from '\.\.\/document-engine\/pipeline\/document-tool-loop-orchestrator'/)
   assert.match(directChat, /import \{ DocumentDomainOrchestrator \} from '\.\.\/agent-control\/domain-adapters\/document-domain-orchestrator'/)
-  assert.match(directChat, /import \{ ExecutionLoopOrchestrator \} from '\.\.\/agent-control\/runtime-core\/execution-loop-orchestrator'/)
   assert.match(directChat, /private readonly browserDomainOrchestrator: BrowserDomainOrchestrator/)
   assert.match(directChat, /private readonly skillContextOrchestrator: SkillContextOrchestrator/)
   assert.match(directChat, /private readonly anthropicExecutionClient: AnthropicExecutionClient/)
   assert.match(directChat, /private readonly kimiCodingClient: KimiCodingClient/)
   assert.match(directChat, /private readonly openAIExecutionClient: OpenAIExecutionClient/)
-  assert.match(directChat, /private readonly videoFallbackService: VideoFallbackService/)
   assert.match(directChat, /private readonly designToolLoopOrchestrator: DesignToolLoopOrchestrator/)
   assert.match(directChat, /private readonly documentToolLoopOrchestrator: DocumentToolLoopOrchestrator/)
   assert.match(directChat, /private readonly documentDomainOrchestrator: DocumentDomainOrchestrator/)
   assert.match(directChat, /private readonly documentTaskPipelineExecutor: DocumentTaskPipelineExecutor/)
-  assert.match(directChat, /private readonly executionLoopOrchestrator: ExecutionLoopOrchestrator/)
-  assert.match(directChat, /private readonly hostCapabilityDispatcher: HostCapabilityDispatcher/)
+  assert.doesNotMatch(directChat, /\bExecutionLoopOrchestrator\b/)
+  assert.doesNotMatch(directChat, /\bHostCapabilityDispatcher\b/)
+  assert.doesNotMatch(directChat, /\bVideoFallbackService\b/)
+  assert.doesNotMatch(directChat, /\bexecutionLoopOrchestrator\b/)
+  assert.doesNotMatch(directChat, /\bhostCapabilityDispatcher\b/)
+  assert.doesNotMatch(directChat, /\brequestSimpleText\s*\(/)
+  assert.doesNotMatch(directChat, /\brequestToolLoopResponse\s*\(/)
   assert.doesNotMatch(directChat, /import \{ TurnEngine \} from '\.\.\/agent-control\/turn-engine'/)
   assert.doesNotMatch(directChat, /private readonly turnEngine: TurnEngine/)
   assert.doesNotMatch(directChat, /async sendMessage\(/)
@@ -299,20 +300,14 @@ test('runtime host is split into run coordinator, run projection, and execution 
   assert.doesNotMatch(directChat, /response = await this\.callOpenAIWithTools\(/)
 })
 
-test('P6t keeps execution-host helpers in DirectChat without a legacy send entry', () => {
+test('P6-F1 removes DirectChat-owned host callbacks while TurnEngine keeps dormant host contract', () => {
   const directChat = readWorkspaceFile('src/main/modules/claude-bridge/direct-chat.ts')
   const turnEngine = readWorkspaceFile('src/main/modules/agent-control/turn-engine.ts')
 
-  assertMatchesAll(directChat, [
-    {
-      label: 'phase3 should keep requestSimpleText host callback local to direct chat',
-      pattern: /private async requestSimpleText\(/,
-    },
-    {
-      label: 'phase3 should keep requestToolLoopResponse host callback local to direct chat',
-      pattern: /private async requestToolLoopResponse\(/,
-    },
-  ])
+  assert.doesNotMatch(directChat, /\brequestSimpleText\s*\(/)
+  assert.doesNotMatch(directChat, /\brequestToolLoopResponse\s*\(/)
+  assert.doesNotMatch(directChat, /\bExecutionLoopOrchestrator\b/)
+  assert.doesNotMatch(directChat, /\bHostCapabilityDispatcher\b/)
 
   assertMatchesAll(turnEngine, [
     {

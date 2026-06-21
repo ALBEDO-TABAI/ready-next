@@ -21,8 +21,6 @@ import { FeishuDomainAdapter } from '../agent-control/domain-adapters/feishu-dom
 import { DocumentDomainOrchestrator } from '../agent-control/domain-adapters/document-domain-orchestrator'
 import { DocumentDomainAdapter } from '../agent-control/domain-adapters/document-domain-adapter'
 import { DocumentToolLoopOrchestrator } from '../document-engine/pipeline/document-tool-loop-orchestrator'
-import { ExecutionLoopOrchestrator } from '../agent-control/runtime-core/execution-loop-orchestrator'
-import { HostCapabilityDispatcher } from '../agent-control/domain-adapters/host-capability-dispatcher'
 import { CalendarDomainAdapter } from '../agent-control/domain-adapters/calendar-domain-adapter'
 import { RSSDomainAdapter } from '../agent-control/domain-adapters/rss-domain-adapter'
 import { MapDomainAdapter } from '../agent-control/map-domain-adapter'
@@ -79,9 +77,6 @@ import type {
   TaskProjectionRecord,
   TaskInteractionState,
   TaskType,
-  TurnModelResponse,
-  TurnProviderContext,
-  TurnSimpleResponse,
 } from '../agent-control/contracts/run-contracts'
 import type { AbortInitiator } from '../agent-control/contracts/run-contracts-internal'
 import type {
@@ -112,7 +107,7 @@ import {
   shouldEnforceBrowserToolRetry,
 } from './tool-bridge'
 import { deriveAgentErrorContract } from './error-contract'
-import { buildExecutionFallbackState, type ExecutionFallbackInfo } from './execution-fallback-policy'
+import type { ExecutionFallbackInfo } from './execution-fallback-policy'
 import {
   extractPrimaryUserInstruction as extractPrimaryUserInstructionFromText,
 } from './tool-policy-heuristics'
@@ -140,13 +135,11 @@ import { resolveTaskType } from '../agent-control/task-type-resolver'
 import { AnthropicExecutionClient } from './anthropic-execution-client'
 import { KimiCodingClient } from './kimi-coding-client'
 import { OpenAIExecutionClient } from './openai-execution-client'
-import { VideoFallbackService } from './video-fallback-service'
 import { createRotatingLogger } from '../../utils/rotating-logger'
 import { readAIConfigDetailed, type AIConfigLoad } from './direct-chat-ai-config'
 import { AttachmentLoadFailureThrottle } from './direct-chat-attachment-metrics'
 import { logAgentMetric } from '../agent-control/metrics'
 import { TOOL_ERROR_METRICS } from '../agent-control/tools-runtime/tool-error-metrics'
-import { appendToolCapabilityLog } from '../tools/tool-event-log'
 
 const directChatLogger = createRotatingLogger('ready-directchat.log')
 const settingsRepository = new AppSettingsRepository()
@@ -282,13 +275,10 @@ export class DirectChatEngine {
   private readonly anthropicExecutionClient: AnthropicExecutionClient
   private readonly kimiCodingClient: KimiCodingClient
   private readonly openAIExecutionClient: OpenAIExecutionClient
-  private readonly videoFallbackService: VideoFallbackService
   private readonly designToolLoopOrchestrator: DesignToolLoopOrchestrator
   private readonly documentToolLoopOrchestrator: DocumentToolLoopOrchestrator
   private readonly documentDomainOrchestrator: DocumentDomainOrchestrator
   private readonly documentTaskPipelineExecutor: DocumentTaskPipelineExecutor
-  private readonly executionLoopOrchestrator: ExecutionLoopOrchestrator
-  private readonly hostCapabilityDispatcher: HostCapabilityDispatcher
   private readonly domainAdapters: DomainAdapter[]
   private sidecarManager: SidecarManager | null = null
   private runtime: import('../agent-control/runtime-core/runtime').AgentControlRuntime | null = null
@@ -357,7 +347,6 @@ export class DirectChatEngine {
       fetchWithTimeout: (url, init, signal, label, timeoutMs) => this.fetchWithTimeout(url, init, signal, label, timeoutMs),
       log,
     })
-    this.videoFallbackService = new VideoFallbackService({ log })
     this.designToolLoopOrchestrator = new DesignToolLoopOrchestrator()
     this.documentToolLoopOrchestrator = new DocumentToolLoopOrchestrator()
     this.documentDomainOrchestrator = new DocumentDomainOrchestrator({
@@ -444,10 +433,6 @@ export class DirectChatEngine {
       },
       resolveWidgetEditLease: (resolveParams) =>
         this.widgetEditLeaseStore.resolve(resolveParams.agent, resolveParams.sessionId),
-    })
-    this.executionLoopOrchestrator = new ExecutionLoopOrchestrator({ log })
-    this.hostCapabilityDispatcher = new HostCapabilityDispatcher({
-      executeHostTool: (toolName, args, toolContext) => executeToolCall(toolName, args, toolContext as any),
     })
     this.domainAdapters = [
       // Stage Y0.1.4 (plan §6.4 path a-reorder): ResearchDomainAdapter is
@@ -778,156 +763,6 @@ export class DirectChatEngine {
       this.unregisterSessionAbortSource(name, undefined, previousAbortController)
       previousAbortController.abort(new Error(message))
       session.abortController = null
-    }
-  }
-
-  private async requestSimpleText(params: {
-    session: DirectChatSession
-    signal: AbortSignal
-    providerContext: TurnProviderContext
-    enableKimiWebSearch?: boolean
-    timeoutMs?: number
-  }): Promise<TurnSimpleResponse> {
-    const hasVideoInputs = this.sessionHasVideoInputs(params.session.messages)
-    if (params.providerContext.isKimiCoding) {
-      const response = await this.kimiCodingClient.requestSimple({
-        session: params.session,
-        config: params.providerContext.config,
-        baseUrl: params.providerContext.baseUrl,
-        signal: params.signal,
-        hasVideoInputs,
-        timeoutMs: params.timeoutMs,
-        buildVideoFrameFallbackMessages: hasVideoInputs
-          ? () => this.videoFallbackService.buildVideoFrameFallbackMessages(params.session.messages)
-          : undefined,
-        assignFallbackMessages: (fallbackMessages) => {
-          params.session.messages = fallbackMessages as ChatMessage[]
-        },
-        fallbackToAnthropic: ({ messagesOverride }) => this.anthropicExecutionClient.requestSimple({
-          session: params.session,
-          config: params.providerContext.config,
-          baseUrl: params.providerContext.baseUrl,
-          signal: params.signal,
-          messagesOverride: messagesOverride as ChatMessage[] | undefined,
-          timeoutMs: params.timeoutMs,
-        }),
-      })
-      return {
-        text: response.text,
-        fallback: buildExecutionFallbackState(response.fallback),
-      }
-    }
-    if (params.providerContext.useAnthropicProtocol) {
-      const response = await this.anthropicExecutionClient.requestSimple({
-        session: params.session,
-        config: params.providerContext.config,
-        baseUrl: params.providerContext.baseUrl,
-        signal: params.signal,
-        hasVideoInputs,
-        timeoutMs: params.timeoutMs,
-        buildVideoFrameFallbackMessages: hasVideoInputs
-          ? () => this.videoFallbackService.buildVideoFrameFallbackMessages(params.session.messages)
-          : undefined,
-        onFallbackApplied: (fallbackMessages) => {
-          params.session.messages = fallbackMessages
-        },
-      })
-      return {
-        text: response.text,
-        fallback: buildExecutionFallbackState(response.fallback),
-      }
-    }
-    const response = await this.openAIExecutionClient.requestSimple({
-      session: params.session,
-      config: params.providerContext.config,
-      baseUrl: params.providerContext.baseUrl,
-      provider: params.providerContext.provider as ReturnType<typeof getProviderDef> | undefined,
-      signal: params.signal,
-      isKimi: params.providerContext.isKimi,
-      enableKimiWebSearch: params.enableKimiWebSearch,
-      timeoutMs: params.timeoutMs,
-    })
-    return {
-      text: response.text,
-      fallback: buildExecutionFallbackState(response.fallback),
-    }
-  }
-
-  private async requestToolLoopResponse(params: {
-    session: DirectChatSession
-    signal: AbortSignal
-    toolPolicy: unknown
-    allowedToolNames?: string[] | null
-    hasTools?: boolean
-    allowBrowserTools?: boolean
-    providerContext: TurnProviderContext
-    hasVideoInputs: boolean
-    browserDecisionMode?: string | null
-    runtimeSnapshot?: {
-      browserHostAvailable?: boolean
-      groups?: Record<string, { status: string }>
-    } | null
-    visibleCapabilityGroupIds?: import('../../../shared/ai-capability-groups').CapabilityGroupId[]
-    suppressedCapabilityGroupIds?: import('../../../shared/ai-capability-groups').CapabilityGroupId[]
-    capabilityLogLine?: string | null
-    iteration?: number
-    requestedTransport?: 'native' | 'text' | 'none'
-    supportsNativeTools?: boolean
-    preferTextToolBridgeOnce?: boolean
-    onBeforeRetry?: (result: unknown, attempt: number) => Promise<void> | void
-  }): Promise<TurnModelResponse> {
-    if (params.capabilityLogLine) {
-      appendToolCapabilityLog(`[tool_capability] stage=direct_chat_tool_loop ${params.capabilityLogLine}`)
-    }
-    const response = await this.executionLoopOrchestrator.requestToolLoopResponse({
-      useAnthropicProtocol: params.providerContext.useAnthropicProtocol,
-      hasVideoInputs: params.hasVideoInputs,
-      session: params.session,
-      config: params.providerContext.config,
-      baseUrl: params.providerContext.baseUrl,
-      provider: params.providerContext.provider as ReturnType<typeof getProviderDef> | undefined,
-      signal: params.signal,
-      policy: params.toolPolicy,
-      callAnthropicWithTools: () => this.anthropicExecutionClient.requestWithTools({
-        session: params.session,
-        config: params.providerContext.config,
-        baseUrl: params.providerContext.baseUrl,
-        signal: params.signal,
-        policy: params.toolPolicy as any,
-      }),
-      callOpenAIWithTools: () => this.openAIExecutionClient.requestWithTools({
-        session: params.session,
-        config: params.providerContext.config,
-        baseUrl: params.providerContext.baseUrl,
-        provider: params.providerContext.provider as ReturnType<typeof getProviderDef>,
-        signal: params.signal,
-        policy: params.toolPolicy as any,
-        preferTextToolBridgeOnce: params.preferTextToolBridgeOnce,
-        toolSnapshotContext: {
-          iteration: Math.max(0, Number(params.iteration || 0)),
-          browserDecisionMode: params.browserDecisionMode || null,
-          browserHostAvailable: typeof params.runtimeSnapshot?.browserHostAvailable === 'boolean'
-            ? params.runtimeSnapshot.browserHostAvailable
-            : null,
-          hasTools: params.hasTools ?? Boolean(params.allowedToolNames && params.allowedToolNames.length > 0),
-          allowBrowserTools: params.allowBrowserTools ?? Boolean((params.toolPolicy as { allowBrowserTools?: boolean } | null | undefined)?.allowBrowserTools),
-          visibleCapabilityGroupIds: [...(params.visibleCapabilityGroupIds || [])],
-          suppressedCapabilityGroupIds: [...(params.suppressedCapabilityGroupIds || [])],
-          requestedTransport: params.requestedTransport || (params.preferTextToolBridgeOnce ? 'text' : 'native'),
-          supportsNativeTools: params.supportsNativeTools ?? true,
-          preferTextToolBridge: Boolean(params.preferTextToolBridgeOnce),
-          expectedAllowedToolNames: params.allowedToolNames || [],
-        },
-      }),
-      onBeforeRetry: params.onBeforeRetry as any,
-      buildVideoFrameFallbackMessages: () => this.videoFallbackService.buildVideoFrameFallbackMessages(params.session.messages),
-      assignFallbackMessages: (messages) => {
-        params.session.messages = messages as ChatMessage[]
-      },
-    })
-    return {
-      ...response,
-      fallback: buildExecutionFallbackState(response.fallback),
     }
   }
 
@@ -1265,13 +1100,6 @@ export class DirectChatEngine {
         if (!block || typeof block !== 'object') return false
         return block.type === 'image' || block.type === 'video'
       })
-    })
-  }
-
-  private sessionHasVideoInputs(messages: ChatMessage[]): boolean {
-    return messages.some((msg) => {
-      if (!Array.isArray(msg.content)) return false
-      return msg.content.some((block) => block?.type === 'video')
     })
   }
 

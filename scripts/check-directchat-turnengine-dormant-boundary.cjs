@@ -66,16 +66,21 @@ function moduleBase(specifier) {
 
 function findImports(text, baseName) {
   const imports = []
-  const re = /import\s+(?:type\s+)?[\s\S]*?\s+from\s+['"]([^'"]+)['"]/g
-  let match
-  while ((match = re.exec(text))) {
-    if (moduleBase(match[1]) !== baseName) continue
-    imports.push({
-      statement: match[0],
-      index: match.index,
-      typeOnly: /^import\s+type\b/.test(match[0]),
-    })
+  const sourceFile = ts.createSourceFile('scan.ts', text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
+  const visit = (node) => {
+    if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier)) {
+      if (moduleBase(node.moduleSpecifier.text) === baseName) {
+        const statement = node.getText(sourceFile)
+        imports.push({
+          statement,
+          index: node.getStart(sourceFile),
+          typeOnly: Boolean(node.importClause?.isTypeOnly),
+        })
+      }
+    }
+    ts.forEachChild(node, visit)
   }
+  visit(sourceFile)
   return imports
 }
 
@@ -154,22 +159,27 @@ function dynamicImportAliases(text, baseName, importedName) {
 }
 
 function findRuntimeDynamicImports(text, baseName) {
-  const specExpr = moduleSpecifierExpression(baseName)
   const entries = []
   const seen = new Set()
-  const patterns = [
-    new RegExp(`\\bawait\\s+import\\s*\\(\\s*${specExpr}\\s*\\)`, 'g'),
-    new RegExp(`\\bimport\\s*\\(\\s*${specExpr}\\s*\\)\\s*\\.\\s*then\\s*\\(`, 'g'),
-    new RegExp(`\\b(?:const|let|var)\\s+[^=\\n;]+?=\\s*import\\s*\\(\\s*${specExpr}\\s*\\)`, 'g'),
-  ]
-  for (const pattern of patterns) {
-    let match
-    while ((match = pattern.exec(text))) {
-      if (seen.has(match.index)) continue
-      seen.add(match.index)
-      entries.push({ index: match.index })
+  const sourceFile = ts.createSourceFile('scan.ts', text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
+  const visit = (node) => {
+    if (
+      ts.isCallExpression(node)
+      && node.expression.kind === ts.SyntaxKind.ImportKeyword
+      && node.arguments.length > 0
+    ) {
+      const specifier = node.arguments[0]
+      if (ts.isStringLiteralLike(specifier) && moduleBase(specifier.text) === baseName) {
+        const index = node.getStart(sourceFile)
+        if (!seen.has(index)) {
+          seen.add(index)
+          entries.push({ index })
+        }
+      }
     }
+    ts.forEachChild(node, visit)
   }
+  visit(sourceFile)
   return entries
 }
 
@@ -321,21 +331,25 @@ function isLiteralName(node, expected) {
   return false
 }
 
-function isThisSendMessageAssignment(node) {
+function isThisPropertyAssignment(node, expected) {
   if (!ts.isBinaryExpression(node)) return false
   if (node.operatorToken.kind !== ts.SyntaxKind.EqualsToken) return false
   const left = node.left
   if (ts.isPropertyAccessExpression(left)) {
-    return left.expression.kind === ts.SyntaxKind.ThisKeyword && left.name.text === 'sendMessage'
+    return left.expression.kind === ts.SyntaxKind.ThisKeyword && left.name.text === expected
   }
   if (ts.isElementAccessExpression(left)) {
     const argument = left.argumentExpression
     return left.expression.kind === ts.SyntaxKind.ThisKeyword
       && !!argument
       && ts.isStringLiteral(argument)
-      && argument.text === 'sendMessage'
+      && argument.text === expected
   }
   return false
+}
+
+function isThisSendMessageAssignment(node) {
+  return isThisPropertyAssignment(node, 'sendMessage')
 }
 
 function pushDirectChatAstSendMessageErrors(errors, source) {
@@ -354,6 +368,43 @@ function pushDirectChatAstSendMessageErrors(errors, source) {
           const visitConstructor = (child) => {
             if (isThisSendMessageAssignment(child)) {
               pushAt('direct_chat_declares_sendMessage', child)
+            }
+            ts.forEachChild(child, visitConstructor)
+          }
+          ts.forEachChild(member, visitConstructor)
+        }
+      }
+    }
+    ts.forEachChild(node, visit)
+  }
+  visit(sourceFile)
+}
+
+function pushDirectChatAstMemberErrors(errors, source, expectedNames, kind) {
+  const sourceFile = ts.createSourceFile(DIRECT_CHAT_REL, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
+  const expected = new Set(expectedNames)
+  const pushAt = (node) => {
+    const line = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line + 1
+    errors.push(`${kind}:${DIRECT_CHAT_REL}:${line}`)
+  }
+  const visit = (node) => {
+    if (ts.isClassDeclaration(node) && node.name?.text === 'DirectChatEngine') {
+      for (const member of node.members) {
+        if ('name' in member) {
+          for (const name of expected) {
+            if (isLiteralName(member.name, name)) {
+              pushAt(member)
+              break
+            }
+          }
+        }
+        if (ts.isConstructorDeclaration(member)) {
+          const visitConstructor = (child) => {
+            for (const name of expected) {
+              if (isThisPropertyAssignment(child, name)) {
+                pushAt(child)
+                break
+              }
             }
             ts.forEachChild(child, visitConstructor)
           }
@@ -514,6 +565,86 @@ function check({ root = ROOT } = {}) {
     if (/this\.turnEngine\.execute\s*\(/.test(source)) {
       errors.push(`direct_chat_calls_turn_engine_execute:${DIRECT_CHAT_REL}`)
     }
+    const executionLoopImports = findImports(source, 'execution-loop-orchestrator')
+    const executionLoopRuntimeDynamicImports = findRuntimeDynamicImports(source, 'execution-loop-orchestrator')
+    if (executionLoopImports.length > 0) {
+      pushImportErrors(errors, DIRECT_CHAT_REL, source, executionLoopImports, 'direct_chat_imports_execution_loop_orchestrator')
+    }
+    if (executionLoopRuntimeDynamicImports.length > 0) {
+      pushImportErrors(
+        errors,
+        DIRECT_CHAT_REL,
+        source,
+        executionLoopRuntimeDynamicImports,
+        'direct_chat_dynamic_imports_execution_loop_orchestrator',
+      )
+    }
+    const hostCapabilityImports = findImports(source, 'host-capability-dispatcher')
+    const hostCapabilityRuntimeDynamicImports = findRuntimeDynamicImports(source, 'host-capability-dispatcher')
+    if (hostCapabilityImports.length > 0) {
+      pushImportErrors(errors, DIRECT_CHAT_REL, source, hostCapabilityImports, 'direct_chat_imports_host_capability_dispatcher')
+    }
+    if (hostCapabilityRuntimeDynamicImports.length > 0) {
+      pushImportErrors(
+        errors,
+        DIRECT_CHAT_REL,
+        source,
+        hostCapabilityRuntimeDynamicImports,
+        'direct_chat_dynamic_imports_host_capability_dispatcher',
+      )
+    }
+    pushMatches(
+      errors,
+      DIRECT_CHAT_REL,
+      source,
+      /\bnew\s+(?:ExecutionLoopOrchestrator|[A-Za-z_$][\w$]*\.ExecutionLoopOrchestrator)\s*\(/,
+      'direct_chat_constructs_execution_loop_orchestrator',
+    )
+    pushMatches(
+      errors,
+      DIRECT_CHAT_REL,
+      source,
+      /\bnew\s+(?:HostCapabilityDispatcher|[A-Za-z_$][\w$]*\.HostCapabilityDispatcher)\s*\(/,
+      'direct_chat_constructs_host_capability_dispatcher',
+    )
+    pushDirectChatAstMemberErrors(
+      errors,
+      source,
+      ['executionLoopOrchestrator'],
+      'direct_chat_declares_execution_loop_orchestrator_member',
+    )
+    pushDirectChatAstMemberErrors(
+      errors,
+      source,
+      ['hostCapabilityDispatcher'],
+      'direct_chat_declares_host_capability_dispatcher_member',
+    )
+    pushDirectChatAstMemberErrors(
+      errors,
+      source,
+      ['requestSimpleText'],
+      'direct_chat_declares_requestSimpleText',
+    )
+    pushDirectChatAstMemberErrors(
+      errors,
+      source,
+      ['requestToolLoopResponse'],
+      'direct_chat_declares_requestToolLoopResponse',
+    )
+    pushMatches(
+      errors,
+      DIRECT_CHAT_REL,
+      source,
+      /\bthis\.executionLoopOrchestrator(?:\?\.|\.)requestToolLoopResponse\s*(?:\?\.\s*)?\(/,
+      'direct_chat_calls_execution_loop_orchestrator_requestToolLoopResponse',
+    )
+    pushMatches(
+      errors,
+      DIRECT_CHAT_REL,
+      source,
+      /\bthis\.hostCapabilityDispatcher(?:\?\.|\.)dispatch\s*(?:\?\.\s*)?\(/,
+      'direct_chat_calls_host_capability_dispatcher_dispatch',
+    )
   }
 
   const mainRoot = path.join(root, MAIN_ROOT_REL)
