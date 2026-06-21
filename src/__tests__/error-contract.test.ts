@@ -14,6 +14,7 @@ import {
   ToolHostUnavailableError,
 } from '../main/modules/tools/tool-errors'
 import { deriveAgentErrorContract } from '../main/modules/claude-bridge/error-contract'
+import { PROVIDER_ERROR_KINDS } from '../main/modules/agent-control/contracts/error-kinds'
 
 test('ToolDomainError maps to custom errorKind + recoverable=true', () => {
   const error = new ToolDomainError('widget_not_found', 'Widget w-1 missing', { widgetId: 'w-1' })
@@ -113,4 +114,15 @@ test('Domain error with a kind that the classifier does NOT recognize stays reco
   const contract = deriveAgentErrorContract(new ToolDomainError('custom_domain_kind', 'x'))
   assert.equal(contract.errorKind, 'custom_domain_kind')
   assert.equal(contract.recoverable, true)
+})
+
+test('Provider domain errors are terminal even without a recoverable override', () => {
+  for (const errorKind of [
+    PROVIDER_ERROR_KINDS.providerRequestFailed.code,
+    PROVIDER_ERROR_KINDS.providerThinkingEchoRequired.code,
+  ]) {
+    const contract = deriveAgentErrorContract(new ToolDomainError(errorKind, 'provider blocked'))
+    assert.equal(contract.errorKind, errorKind)
+    assert.equal(contract.recoverable, false)
+  }
 })

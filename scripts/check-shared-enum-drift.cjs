@@ -19,6 +19,13 @@ const RUN_STATE_SCHEMA_REL = 'src/main/modules/agent-control/task-projection/run
 const DETACHED_TRACKER_REL = 'src/main/modules/agent-control/detached-skill-task-tracker.ts'
 const ERROR_KINDS_REL = 'src/main/modules/agent-control/contracts/error-kinds.ts'
 
+const PROVIDER_ERROR_KIND_TARGETS = [
+  'src/main/modules/claude-bridge/llm-resilience.ts',
+  'src/main/modules/agent-control/domain-adapters/message-capability-filter.ts',
+  'src/main/modules/agent-control/thinking-compatibility.ts',
+  'src/main/modules/claude-bridge/error-contract.ts',
+]
+
 const PAUSED_PREDICATE_TARGETS = [
   'src/main/modules/agent-control/turn-engine.ts',
   'src/main/modules/agent-control/contracts/run-contracts.ts',
@@ -114,6 +121,11 @@ const REQUIRED_TOOL_ADMISSION_ERROR_KINDS = [
   'internal_tool_not_allowed',
   'tool_restricted_this_turn',
   'denied_by_user_negation',
+]
+
+const REQUIRED_PROVIDER_ERROR_KINDS = [
+  'provider_request_failed',
+  'provider_thinking_echo_required',
 ]
 
 const REQUIRED_MCP_TOOL_ERROR_KINDS = [
@@ -307,6 +319,7 @@ function assertRequiredErrorKindFamily(violations, familyName, codes) {
 function assertRequiredErrorKindsRegistered(violations) {
   const registered = registeredErrorKinds()
   for (const code of [
+    ...REQUIRED_PROVIDER_ERROR_KINDS,
     ...REQUIRED_DETACHED_ERROR_KINDS,
     ...REQUIRED_SEND_IM_ERROR_KINDS,
     ...REQUIRED_TARGET_DOCUMENT_ERROR_KINDS,
@@ -321,6 +334,11 @@ function assertRequiredErrorKindsRegistered(violations) {
       push(violations, ERROR_KINDS_REL, 1, 'required_error_kind_unregistered', `${code} must be registered in error-kinds.ts`)
     }
   }
+  assertRequiredErrorKindFamily(
+    violations,
+    'PROVIDER_ERROR_KINDS',
+    REQUIRED_PROVIDER_ERROR_KINDS,
+  )
   assertRequiredErrorKindFamily(
     violations,
     'MCP_TOOL_ERROR_KINDS',
@@ -456,6 +474,12 @@ function main() {
     assertPausedPredicatesShared(violations)
     assertDetachedStatusShared(violations)
     assertRequiredErrorKindsRegistered(violations)
+    assertNoBareLocalLiterals(
+      violations,
+      PROVIDER_ERROR_KIND_TARGETS,
+      REQUIRED_PROVIDER_ERROR_KINDS,
+      'PROVIDER_ERROR_KINDS',
+    )
     assertNoLocalErrorKindLiterals(
       violations,
       DETACHED_ERROR_KIND_TARGETS,

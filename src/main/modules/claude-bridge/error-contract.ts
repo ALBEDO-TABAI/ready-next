@@ -15,6 +15,7 @@
  */
 
 import { errorKindFor } from '../tools/tool-errors'
+import { PROVIDER_ERROR_KINDS } from '../agent-control/contracts/error-kinds'
 import { classifyExecutionError, type ExecutionErrorKind } from './error-classifier'
 
 export type AgentErrorKind = ExecutionErrorKind | 'aborted' | 'tool_handler_failure' | string
@@ -39,8 +40,8 @@ const TERMINAL_KINDS: ReadonlySet<string> = new Set([
   'host_unavailable',
   'aborted',
   'unknown',
-  'provider_request_failed',
-  'provider_thinking_echo_required',
+  PROVIDER_ERROR_KINDS.providerRequestFailed.code,
+  PROVIDER_ERROR_KINDS.providerThinkingEchoRequired.code,
 ])
 
 function readRecoverableOverride(error: unknown): boolean | null {

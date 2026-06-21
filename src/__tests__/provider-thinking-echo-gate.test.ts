@@ -9,6 +9,7 @@ import {
 } from '../shared/ai-providers'
 import { deriveAgentErrorContract } from '../main/modules/claude-bridge/error-contract'
 import { OpenAIExecutionClient } from '../main/modules/claude-bridge/openai-execution-client'
+import { PROVIDER_ERROR_KINDS } from '../main/modules/agent-control/contracts/error-kinds'
 import { ReadyAnthropicModel, ReadyOpenAICompatibleModel } from '../main/modules/agent-control/runtime-core/agent-sdk-runtime'
 import { ToolDomainError } from '../main/modules/tools/tool-errors'
 
@@ -66,7 +67,7 @@ test('runtime thinking gate blocks SDK provider request before fetch', async () 
     } as never),
     (error) => {
       assert.ok(error instanceof ToolDomainError)
-      assert.equal(error.errorKind, 'provider_request_failed')
+      assert.equal(error.errorKind, PROVIDER_ERROR_KINDS.providerRequestFailed.code)
       assert.equal(error.detail?.recoverable, false)
       return true
     },
@@ -131,7 +132,7 @@ test('runtime thinking gate blocks legacy provider request before fetch', async 
     }),
     (error) => {
       assert.ok(error instanceof ToolDomainError)
-      assert.equal(error.errorKind, 'provider_request_failed')
+      assert.equal(error.errorKind, PROVIDER_ERROR_KINDS.providerRequestFailed.code)
       return true
     },
   )
@@ -139,9 +140,9 @@ test('runtime thinking gate blocks legacy provider request before fetch', async 
 })
 
 test('provider_request_failed with recoverable=false remains terminal in agent:error contract', () => {
-  const error = new ToolDomainError('provider_request_failed', 'blocked', { recoverable: false })
+  const error = new ToolDomainError(PROVIDER_ERROR_KINDS.providerRequestFailed.code, 'blocked', { recoverable: false })
   assert.deepEqual(deriveAgentErrorContract(error), {
-    errorKind: 'provider_request_failed',
+    errorKind: PROVIDER_ERROR_KINDS.providerRequestFailed.code,
     recoverable: false,
   })
 })

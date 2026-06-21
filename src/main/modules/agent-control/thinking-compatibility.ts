@@ -5,6 +5,7 @@ import {
   type AIModelConfig,
 } from '../../../shared/ai-providers'
 import type { MultiTurnThinkingPolicy } from '../../../shared/ai-providers/types'
+import { PROVIDER_ERROR_KINDS } from './contracts/error-kinds'
 import { ToolDomainError } from '../tools/tool-errors'
 import { logAgentMetric } from './metrics'
 import { TOOL_ERROR_METRICS } from './tools-runtime/tool-error-metrics'
@@ -34,7 +35,7 @@ export function assertManualThinkingModeProviderSafe(
     policy,
   })
   throw new ToolDomainError(
-    'provider_request_failed',
+    PROVIDER_ERROR_KINDS.providerRequestFailed.code,
     messageForPolicy(policy),
     {
       recoverable: false,

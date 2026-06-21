@@ -32,6 +32,7 @@ import {
   type CapabilityMessage,
   type MessageCapabilitySnapshot,
 } from '../main/modules/agent-control/domain-adapters/message-capability-filter'
+import { PROVIDER_ERROR_KINDS } from '../main/modules/agent-control/contracts/error-kinds'
 import { ToolDomainError } from '../main/modules/tools/tool-errors'
 
 const VISION_ON: MessageCapabilitySnapshot = { supportsVision: true, supportsVideo: true }
@@ -220,7 +221,8 @@ test('current turn: vision-off + image block → throws provider_request_failed'
       [{ type: 'text', text: 'caption' }, { type: 'image', source: 's' }],
       VISION_OFF,
     ),
-    (err: unknown) => err instanceof ToolDomainError && err.errorKind === 'provider_request_failed'
+    (err: unknown) => err instanceof ToolDomainError
+      && err.errorKind === PROVIDER_ERROR_KINDS.providerRequestFailed.code
       && /图片/.test(err.message),
   )
 })
@@ -238,7 +240,8 @@ test('current turn: video-off + video block → throws with 视频 in the messag
       [{ type: 'video', source: 'v' }],
       VISION_ON_VIDEO_OFF,
     ),
-    (err: unknown) => err instanceof ToolDomainError && err.errorKind === 'provider_request_failed'
+    (err: unknown) => err instanceof ToolDomainError
+      && err.errorKind === PROVIDER_ERROR_KINDS.providerRequestFailed.code
       && /视频/.test(err.message),
   )
 })
@@ -249,7 +252,8 @@ test('current turn: video-off + responses input_file video block → throws with
       [{ type: 'input_file', file_data: 'data:video/mp4;base64,AAAA', filename: 'upload.mp4' }],
       VISION_ON_VIDEO_OFF,
     ),
-    (err: unknown) => err instanceof ToolDomainError && err.errorKind === 'provider_request_failed'
+    (err: unknown) => err instanceof ToolDomainError
+      && err.errorKind === PROVIDER_ERROR_KINDS.providerRequestFailed.code
       && /视频/.test(err.message),
   )
 })
@@ -288,6 +292,7 @@ test('current turn: conservative undefined cap → throws on image', () => {
       [{ type: 'image', source: 's' }],
       UNDEFINED_CAP,
     ),
-    (err: unknown) => err instanceof ToolDomainError && err.errorKind === 'provider_request_failed',
+    (err: unknown) => err instanceof ToolDomainError
+      && err.errorKind === PROVIDER_ERROR_KINDS.providerRequestFailed.code,
   )
 })

@@ -31,6 +31,7 @@
  * `AgentInputItem` from the SDK. Callers adapt at the boundary.
  */
 
+import { PROVIDER_ERROR_KINDS } from '../contracts/error-kinds'
 import { ToolDomainError } from '../../tools/tool-errors'
 
 export interface CapabilityBlock {
@@ -228,7 +229,7 @@ export function assertCurrentMessageCapability(
   if (hasImage) parts.push('图片')
   if (hasVideo) parts.push('视频')
   throw new ToolDomainError(
-    'provider_request_failed',
+    PROVIDER_ERROR_KINDS.providerRequestFailed.code,
     `当前 AI 模型不支持${parts.join('/')}输入，请切换到支持视觉的模型，或移除${parts.join('/')}附件后重试。`,
     { hasImage, hasVideo, recoverable: false },
   )

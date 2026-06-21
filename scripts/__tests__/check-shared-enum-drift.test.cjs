@@ -61,6 +61,10 @@ import type { NormalizedRunStateStatus } from './task-projection/run-state-schem
 export type DetachedSkillTaskStatus = NormalizedRunStateStatus
 `)
   writeFile(root, 'src/main/modules/agent-control/contracts/error-kinds.ts', `
+export const PROVIDER_ERROR_KINDS = {
+  providerRequestFailed: { code: 'provider_request_failed' },
+  providerThinkingEchoRequired: { code: 'provider_thinking_echo_required' },
+}
 export const DETACHED_TASK_ERROR_KINDS = {
   taskFailed: { code: 'detached_task_failed' },
   notFound: { code: 'detached_task_not_found' },
@@ -133,6 +137,23 @@ export const failureKind = DETACHED_TASK_ERROR_KINDS.taskFailed.code
   writeFile(root, 'src/main/modules/tools/send-im-skill-tool.ts', `
 import { SEND_IM_ERROR_KINDS } from '../agent-control/contracts/error-kinds'
 export const output = { data: { errorKind: SEND_IM_ERROR_KINDS.fileNotFound.code } }
+`)
+  writeFile(root, 'src/main/modules/claude-bridge/llm-resilience.ts', `
+import { PROVIDER_ERROR_KINDS } from '../agent-control/contracts/error-kinds'
+export const classification = { errorKind: PROVIDER_ERROR_KINDS.providerThinkingEchoRequired.code }
+export function fail(ToolDomainError) { throw new ToolDomainError(PROVIDER_ERROR_KINDS.providerRequestFailed.code, 'blocked') }
+`)
+  writeFile(root, 'src/main/modules/agent-control/domain-adapters/message-capability-filter.ts', `
+import { PROVIDER_ERROR_KINDS } from '../contracts/error-kinds'
+export function fail(ToolDomainError) { throw new ToolDomainError(PROVIDER_ERROR_KINDS.providerRequestFailed.code, 'blocked') }
+`)
+  writeFile(root, 'src/main/modules/agent-control/thinking-compatibility.ts', `
+import { PROVIDER_ERROR_KINDS } from './contracts/error-kinds'
+export function fail(ToolDomainError) { throw new ToolDomainError(PROVIDER_ERROR_KINDS.providerRequestFailed.code, 'blocked') }
+`)
+  writeFile(root, 'src/main/modules/claude-bridge/error-contract.ts', `
+import { PROVIDER_ERROR_KINDS } from '../agent-control/contracts/error-kinds'
+export const terminalKinds = new Set([PROVIDER_ERROR_KINDS.providerRequestFailed.code, PROVIDER_ERROR_KINDS.providerThinkingEchoRequired.code])
 `)
   writeFile(root, 'src/main/modules/agent-control/runtime-core/agent-sdk-runtime.ts', `
 import { TARGET_DOCUMENT_ERROR_KINDS, TOOL_ADMISSION_ERROR_KINDS } from '../contracts/error-kinds'
@@ -722,6 +743,55 @@ export const map = {
   const result = runIn(root)
   assert.equal(result.status, 1)
   assert.match(result.stderr, /error_kind_envelope_mapping_missing/)
+})
+
+test('shared enum drift gate fails when provider codes are registered in the wrong family', (t) => {
+  const root = makeHarnessRoot(t)
+  const registryPath = path.join(root, 'src/main/modules/agent-control/contracts/error-kinds.ts')
+  const registry = fs.readFileSync(registryPath, 'utf8')
+    .replace(
+      'export const PROVIDER_ERROR_KINDS =',
+      'export const COPIED_PROVIDER_ERROR_KINDS =',
+    )
+  fs.writeFileSync(registryPath, registry)
+  const result = runIn(root)
+  assert.equal(result.status, 1)
+  assert.match(result.stderr, /error_kind_family_missing/)
+})
+
+test('shared enum drift gate fails when provider target imports registry from the wrong path', (t) => {
+  const root = makeHarnessRoot(t)
+  writeFile(root, 'src/main/modules/claude-bridge/llm-resilience.ts', `
+import { PROVIDER_ERROR_KINDS } from '../fake/contracts/error-kinds'
+export const classification = { errorKind: PROVIDER_ERROR_KINDS.providerThinkingEchoRequired.code }
+`)
+  const result = runIn(root)
+  assert.equal(result.status, 1)
+  assert.match(result.stderr, /error_kind_registry_not_imported/)
+})
+
+test('shared enum drift gate fails when provider producer copies a local literal', (t) => {
+  const root = makeHarnessRoot(t)
+  writeFile(root, 'src/main/modules/agent-control/thinking-compatibility.ts', `
+import { PROVIDER_ERROR_KINDS } from './contracts/error-kinds'
+export const registry = PROVIDER_ERROR_KINDS.providerRequestFailed.code
+export function fail(ToolDomainError) { throw new ToolDomainError('provider_request_failed', 'blocked') }
+`)
+  const result = runIn(root)
+  assert.equal(result.status, 1)
+  assert.match(result.stderr, /local_error_kind_literal/)
+})
+
+test('shared enum drift gate fails when provider consumer set copies a local literal', (t) => {
+  const root = makeHarnessRoot(t)
+  writeFile(root, 'src/main/modules/claude-bridge/error-contract.ts', `
+import { PROVIDER_ERROR_KINDS } from '../agent-control/contracts/error-kinds'
+export const registry = PROVIDER_ERROR_KINDS.providerRequestFailed.code
+export const terminalKinds = new Set(['provider_request_failed'])
+`)
+  const result = runIn(root)
+  assert.equal(result.status, 1)
+  assert.match(result.stderr, /local_error_kind_literal/)
 })
 
 test('shared enum drift gate fails when mcp tool codes are registered in the wrong family', (t) => {

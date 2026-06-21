@@ -65,14 +65,7 @@ function extractErrorKindLiterals(src) {
 
 function extractRegisteredErrorKinds(src) {
   // ASK_USER_ERROR_KINDS = { foo: { code: 'foo', ...}, bar: { code: 'bar', ... } }
-  // Extract each `code: 'X'` literal that appears within the ASK_USER_ERROR_KINDS
-  // object (heuristic: any `code: '<...>'` literal in the file. Acceptable
-  // because file scope is dedicated to the registry.)
-  const entries = []
-  const re = /code:\s*['"]([a-z][a-z0-9_]+)['"]/g
-  let m
-  while ((m = re.exec(src)) !== null) entries.push(m[1])
-  return entries
+  return extractErrorKindMappings(src).map((entry) => entry.code)
 }
 
 function extractMetricEntries(src) {
@@ -165,15 +158,10 @@ function main() {
   const registeredMetrics = extractMetricEntries(metricsSrc)
 
   // Step 1: every errorKind literal in the scanned source files must be in
-  // ASK_USER_ERROR_KINDS (or be one of the well-known provider/non-domain
-  // ones intentionally not in this registry).
-  // PR 3 will extend this with PROVIDER_ERROR_KINDS; for now we exempt the
-  // provider kinds that the plan reserves.
+  // ASK_USER_ERROR_KINDS (or be one of the well-known non-domain ones
+  // intentionally not in this registry). Provider request errors are now
+  // owned by PROVIDER_ERROR_KINDS and must not be hidden behind this gate.
   const ALLOWED_UNREGISTERED = new Set([
-    // PR 3 will register these — for now they're scaffolded but not yet
-    // emitted from the scanned files, so this exemption is defensive only.
-    'provider_request_failed',
-    'provider_thinking_echo_required',
     // Pre-existing tool dispatch kinds owned by other contracts:
     'tool_handler_failure',
     'tool_restricted_this_turn',
@@ -191,7 +179,7 @@ function main() {
       if (!registeredCodes.has(literal) && !ALLOWED_UNREGISTERED.has(literal)) {
         violations.push({
           file,
-          reason: `errorKind literal '${literal}' is not registered in ASK_USER_ERROR_KINDS (or the PR-3 PROVIDER_ERROR_KINDS reserve)`,
+          reason: `errorKind literal '${literal}' is not registered in ASK_USER_ERROR_KINDS`,
         })
       }
     }

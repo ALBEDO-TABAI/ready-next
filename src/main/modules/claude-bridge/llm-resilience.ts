@@ -18,6 +18,7 @@
  */
 
 import { logAgentMetric } from '../agent-control/metrics'
+import { PROVIDER_ERROR_KINDS } from '../agent-control/contracts/error-kinds'
 import { TOOL_ERROR_METRICS } from '../agent-control/tools-runtime/tool-error-metrics'
 import { ToolDomainError } from '../tools/tool-errors'
 import { readProviderTerminalError } from './provider-terminal-error'
@@ -39,7 +40,7 @@ export interface RetryOptions {
 }
 
 export interface ProviderErrorClassification {
-  errorKind: 'provider_thinking_echo_required'
+  errorKind: typeof PROVIDER_ERROR_KINDS.providerThinkingEchoRequired.code
   metricName: string
   recoverable: false
   message: string
@@ -84,9 +85,9 @@ export function classifyProviderError(error: unknown): ProviderErrorClassificati
   // Fall back to the legacy status+message heuristic for tests / callers
   // that build ad-hoc errors.
   const stamped = readProviderTerminalError(error)
-  if (stamped?.code === 'provider_thinking_echo_required') {
+  if (stamped?.code === PROVIDER_ERROR_KINDS.providerThinkingEchoRequired.code) {
     return {
-      errorKind: 'provider_thinking_echo_required',
+      errorKind: PROVIDER_ERROR_KINDS.providerThinkingEchoRequired.code,
       metricName: TOOL_ERROR_METRICS.providerThinkingEchoRequired400,
       recoverable: false,
       message: '当前供应商要求多轮回传 thinking 内容，但本地请求未能满足。请关闭思考模式或切换到已验证的供应商。',
@@ -99,7 +100,7 @@ export function classifyProviderError(error: unknown): ProviderErrorClassificati
     return null
   }
   return {
-    errorKind: 'provider_thinking_echo_required',
+    errorKind: PROVIDER_ERROR_KINDS.providerThinkingEchoRequired.code,
     metricName: TOOL_ERROR_METRICS.providerThinkingEchoRequired400,
     recoverable: false,
     message: '当前供应商要求多轮回传 thinking 内容，但本地请求未能满足。请关闭思考模式或切换到已验证的供应商。',
@@ -131,7 +132,7 @@ export async function withRetryBackoff<T>(
         // first failure happened mid-stream and the second attempt
         // benefits from the now-populated transcript).
         if (
-          providerClassification.errorKind === 'provider_thinking_echo_required'
+          providerClassification.errorKind === PROVIDER_ERROR_KINDS.providerThinkingEchoRequired.code
           && !thinkingEchoRetried
         ) {
           thinkingEchoRetried = true
@@ -148,7 +149,7 @@ export async function withRetryBackoff<T>(
                 status: readStatus(retryErr),
                 errorMessage: readMessage(retryErr).slice(0, 300),
               })
-              throw new ToolDomainError('provider_request_failed', retryClassification.message, {
+              throw new ToolDomainError(PROVIDER_ERROR_KINDS.providerRequestFailed.code, retryClassification.message, {
                 providerErrorKind: retryClassification.errorKind,
                 recoverable: false,
               })
@@ -167,7 +168,7 @@ export async function withRetryBackoff<T>(
           status: readStatus(err),
           errorMessage: readMessage(err).slice(0, 300),
         })
-        throw new ToolDomainError('provider_request_failed', providerClassification.message, {
+        throw new ToolDomainError(PROVIDER_ERROR_KINDS.providerRequestFailed.code, providerClassification.message, {
           providerErrorKind: providerClassification.errorKind,
           recoverable: false,
         })
