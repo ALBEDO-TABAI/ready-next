@@ -35,6 +35,7 @@ import {
 import { runBrowserCollection } from './browser-collector-engine'
 import type { NoteCollectFacade } from './browser-collector-actions'
 import { isHighControlPlatformText } from '../../../shared/browser-collection-intent'
+import { isBrowserSupervisionVisibleTaskStatus } from '../../../shared/browser-task-status'
 import { deriveCollectionTargets, type BrowserCollectionTarget } from './collection-targets'
 import { resolveCollectionVerdict } from './collection-verdict'
 import type { BrowserAgentRuntime } from './agent-runtime-adapter'
@@ -108,7 +109,7 @@ function noteCollectState(status: string): BrowserTaskProjectionInput['state'] {
 }
 
 function shouldReprojectBrowserCollectTask(status: BrowserCapabilityTaskHandle['status']): boolean {
-  return status === 'queued' || status === 'running' || status === 'paused' || status === 'waiting_human'
+  return isBrowserSupervisionVisibleTaskStatus(status)
 }
 
 function shouldReprojectLinkedTerminalCollectionTask(status: BrowserCapabilityTaskHandle['status']): boolean {

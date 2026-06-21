@@ -4,6 +4,7 @@ import BrowserDiagnosticsDock from '../../components/browser/BrowserDiagnosticsD
 import { AgentBrowserSupervisionPanel } from '../../components/browser/AgentBrowserSupervisionPanel'
 import BrowserHeader from '../../components/browser/BrowserHeader'
 import BrowserShellLayout from '../../components/browser/BrowserShellLayout'
+import { isBrowserSupervisionVisibleTaskStatus } from '../../../shared/browser-task-status'
 import { appendToAgentInput } from '../../modules/agent/chat-input-bridge'
 import { useBrowserDiagnosticsState } from '../../modules/browser/useBrowserDiagnosticsState'
 import { useBrowserPanelData } from '../../modules/browser/useBrowserPanelData'
@@ -187,7 +188,7 @@ export default function BrowserMode({
   const lastAgentPaneTaskIdRef = useRef<string | null>(null)
   const activeTab = tabs.find(t => t.id === activeTabId) || null
   const splitTab = splitTabId && splitTabId !== activeTabId ? tabs.find(t => t.id === splitTabId) || null : null
-  const activeAgentTasks = agentSupervision.tasks.filter((task) => task.status === 'running' || task.status === 'queued' || task.status === 'paused')
+  const activeAgentTasks = agentSupervision.tasks.filter((task) => isBrowserSupervisionVisibleTaskStatus(task.status))
   const browserOwnershipStatus = useMemo(() => resolveBrowserOwnershipStatus({
     activeTab,
     agentTabId: agentSupervision.agentTabId,

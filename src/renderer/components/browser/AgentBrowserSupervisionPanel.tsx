@@ -7,6 +7,11 @@ import type {
   AgentBrowserSurface,
   BrowserLeaseSurfaceSnapshot,
 } from '../../modules/browser/useAgentBrowserSupervision'
+import {
+  browserTaskStatusLabel,
+  isBrowserSupervisionVisibleTaskStatus,
+  isBrowserTaskTerminalStatus,
+} from '../../../shared/browser-task-status'
 
 interface AgentBrowserSupervisionPanelProps {
   controlState: AgentBrowserControlState
@@ -41,20 +46,11 @@ function activeSurfaceLockText(
 }
 
 function isActiveTask(task: AgentBrowserCollectionTask): boolean {
-  return task.status === 'running' || task.status === 'queued' || task.status === 'paused'
+  return isBrowserSupervisionVisibleTaskStatus(task.status)
 }
 
 function isTerminalTask(task: AgentBrowserCollectionTask): boolean {
-  return task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled'
-}
-
-function taskStatusLabel(task: AgentBrowserCollectionTask): string {
-  if (task.status === 'completed') return '已完成'
-  if (task.status === 'failed') return '失败'
-  if (task.status === 'cancelled') return '已取消'
-  if (task.status === 'queued') return '等待中'
-  if (task.status === 'paused') return '暂停'
-  return '运行中'
+  return isBrowserTaskTerminalStatus(task.status)
 }
 
 /**
@@ -92,10 +88,11 @@ export function AgentBrowserSupervisionPanel({
   const visibleTasks = activeTasks.length > 0 ? activeTasks : terminalTasks.slice(0, 1)
   const visible = variant === 'collapsed' || variant === 'collapsedRail' || activeTasks.length > 0 || terminalTasks.length > 0 || controlState !== 'active'
   if (!visible) return null
+  const waitingForVerification = activeTasks.some((task) => task.status === 'waiting_human')
   const statusText = activeTasks.length > 0
-    ? `${activeTasks.length} 个采集`
+    ? waitingForVerification ? '等待确认' : `${activeTasks.length} 个采集`
     : visibleTasks[0]
-      ? taskStatusLabel(visibleTasks[0])
+      ? browserTaskStatusLabel(visibleTasks[0].status)
       : controlState === 'active'
         ? '浏览中'
         : '等待确认'
@@ -127,7 +124,7 @@ export function AgentBrowserSupervisionPanel({
       >
         <Bot style={{ width: 15, height: 15 }} className="text-[var(--color-blue)]" strokeWidth={2} />
         <span>{surfaceModeLabel}</span>
-        <span style={{ color: 'var(--text-gray)', fontWeight: 500 }}>{task ? taskStatusLabel(task) : statusText}</span>
+        <span style={{ color: 'var(--text-gray)', fontWeight: 500 }}>{task ? browserTaskStatusLabel(task.status) : statusText}</span>
       </button>
     )
   }
@@ -215,6 +212,11 @@ export function AgentBrowserSupervisionPanel({
             const pct = total > 0 ? Math.round((done / total) * 100) : 0
             const open = expandedTaskId === task.taskId
             const active = isActiveTask(task)
+            const taskStatusText = task.status === 'waiting_human'
+              ? browserTaskStatusLabel(task.status)
+              : active
+                ? `${done}/${total || '?'}`
+                : browserTaskStatusLabel(task.status)
             return (
               <div
                 key={task.taskId}
@@ -236,7 +238,7 @@ export function AgentBrowserSupervisionPanel({
                         : <span className="inline-block h-[7px] w-[7px] rounded-full" style={{ background: 'var(--text-gray)' }} />}
                   <span className="min-w-0 flex-1 truncate">{task.progress.currentLabel || '浏览器采集子任务'}</span>
                   <span className="text-[10px]" style={{ color: 'var(--text-gray)' }}>
-                    {active ? `${done}/${total || '?'}` : taskStatusLabel(task)}
+                    {taskStatusText}
                   </span>
                 </button>
                 {/* progress bar */}

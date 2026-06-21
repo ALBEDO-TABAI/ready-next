@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { useBrowserTabs, type BrowserTab } from '../../stores/useBrowserTabs'
 import { DEFAULT_BROWSER_URL, extractBrowserDomain } from './url-utils'
+import type { BrowserSupervisionVisibleTaskStatus } from '../../../shared/browser-task-status'
 
 /**
  * Polls the agent-browser supervision state (plan §3.6): the control-gate state
@@ -28,7 +29,7 @@ export interface BrowserLeaseSurfaceSnapshot {
 export interface AgentBrowserCollectionTask {
   taskId: string
   kind: string
-  status: 'queued' | 'running' | 'waiting_human' | 'paused' | 'completed' | 'failed' | 'cancelled'
+  status: BrowserSupervisionVisibleTaskStatus | 'completed' | 'failed' | 'cancelled'
   progress: { total: number; completed: number; failed: number; currentLabel: string | null }
   result?: unknown
   error?: string | null

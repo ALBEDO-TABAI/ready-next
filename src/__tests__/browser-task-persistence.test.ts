@@ -124,6 +124,19 @@ describe('browser task persistence', () => {
     }
   })
 
+  it('keeps waiting_human out of startup pending tasks while visible supervision handles it separately', () => {
+    const repository = new FakeBrowserRepository()
+    const service = new BrowserTaskPersistenceService(repository as never)
+    for (const status of ['queued', 'running', 'paused', 'waiting_human', 'completed'] as const) {
+      repository.createTask({ ...makeRecord(`browser-task-${status}`), status })
+    }
+
+    assert.deepEqual(
+      service.listPendingTasks().map((task) => task.status),
+      ['queued', 'running', 'paused'],
+    )
+  })
+
   it('does not include undefined fields in browser task update SQL', async () => {
     const { DatabaseManager } = await import('../main/modules/database')
     let sql = ''

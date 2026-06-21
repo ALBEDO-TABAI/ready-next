@@ -2,6 +2,7 @@ import { ipcMain } from 'electron'
 import type { AgentBrowserSurface } from './agent-browser-errors'
 import type { BrowserLeaseState } from './browser-write-lease'
 import type { BrowserCapabilityTaskHandle } from './capability-types'
+import { isBrowserSupervisionVisibleTaskStatus } from '../../../shared/browser-task-status'
 
 /**
  * Agent-browser supervision IPC (plan §3.6/§0.1). Two surfaces:
@@ -68,7 +69,7 @@ export function setupBrowserSupervisionIPC(controller: BrowserSupervisionIPCCont
   ipcMain.handle('browser:getAgentSupervisionState', async () => {
     try {
       const tasks = await controller.listAgentCollectionTasks()
-      const activeTasks = tasks.filter((task) => task.status === 'running' || task.status === 'queued' || task.status === 'paused')
+      const activeTasks = tasks.filter((task) => isBrowserSupervisionVisibleTaskStatus(task.status))
       return {
         controlState: controller.getAgentControlState(),
         agentTabId: activeTasks.length > 0 ? controller.getAgentTabId() : null,

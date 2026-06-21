@@ -69,3 +69,24 @@ test('AgentBrowserSupervisionPanel renders background agent page copy for agent-
   assert.match(html, /后台 Agent 页写锁/)
   assert.doesNotMatch(html, /隔离/)
 })
+
+test('AgentBrowserSupervisionPanel keeps waiting_human tasks visible as verification waits', () => {
+  const waitingTask: AgentBrowserCollectionTask = {
+    ...task(),
+    status: 'waiting_human',
+    progress: { total: 3, completed: 2, failed: 0, currentLabel: '等待人工确认' },
+  }
+  const html = renderToStaticMarkup(createElement(AgentBrowserSupervisionPanel, {
+    controlState: 'active',
+    tasks: [waitingTask],
+    requestInterruption: noop,
+    confirmInterruption: noop,
+    dismissInterruption: noop,
+    surfaces: surfaces('agent-view'),
+    activeWriteSurface: 'agent-view',
+  }))
+
+  assert.match(html, /等待确认/)
+  assert.match(html, /等待人工确认/)
+  assert.doesNotMatch(html, /2\/3/)
+})
