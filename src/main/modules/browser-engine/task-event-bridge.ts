@@ -1,5 +1,8 @@
-import type { BrowserCapabilityTaskKind } from './capability-types'
-import type { BrowserCapabilityTaskHandle } from './capability-types'
+import {
+  BROWSER_CAPABILITY_TASK_KINDS,
+  type BrowserCapabilityTaskHandle,
+  type BrowserCapabilityTaskKind,
+} from './capability-types'
 import { enqueueBackgroundTaskTerminalReminderFromBridge } from '../agent-control/system-reminders/background-task-terminal-reminder'
 
 export type TaskEventBridgeStatus =
@@ -33,15 +36,6 @@ export interface WaitingHumanBrowserTaskResumeResult {
   error?: string
 }
 
-const DEFAULT_TASK_ROUTES: readonly BrowserCapabilityTaskKind[] = [
-  'download_urls',
-  'scroll_collect',
-  'research',
-  'visible_collect',
-  'note_collect',
-  'card_loop',
-]
-
 let waitingHumanBrowserTaskResumePort: WaitingHumanBrowserTaskResumePort | null = null
 
 export function isTaskEventBridgeStatus(status: string): status is TaskEventBridgeStatus {
@@ -56,7 +50,7 @@ class TaskEventBridge {
   private readonly projectionSinks = new Set<TaskEventBridgeConsumer>()
   private readonly agentNotifiers = new Set<TaskEventBridgeConsumer>()
   private readonly publishedKeys = new Set<string>()
-  private readonly registeredRoutes = new Set<string>(DEFAULT_TASK_ROUTES)
+  private readonly registeredRoutes = new Set<string>(BROWSER_CAPABILITY_TASK_KINDS)
 
   registerProjectionSink(fn: TaskEventBridgeConsumer): () => void {
     this.projectionSinks.add(fn)

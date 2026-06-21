@@ -74,7 +74,16 @@ export interface BrowserCapabilityTaskProgress {
   currentLabel?: string | null
 }
 
-export type BrowserCapabilityTaskKind = 'download_urls' | 'scroll_collect' | 'research' | 'visible_collect' | 'note_collect' | 'card_loop'
+export const BROWSER_CAPABILITY_TASK_KINDS = [
+  'download_urls',
+  'scroll_collect',
+  'research',
+  'visible_collect',
+  'note_collect',
+  'card_loop',
+] as const
+
+export type BrowserCapabilityTaskKind = typeof BROWSER_CAPABILITY_TASK_KINDS[number]
 export type BrowserCapabilityTaskStatus =
   | 'queued'
   | 'running'
