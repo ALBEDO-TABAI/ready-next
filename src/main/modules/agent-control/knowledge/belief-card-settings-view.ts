@@ -1,6 +1,7 @@
 import { isHighControlPlatformText } from '../../../../shared/browser-collection-intent'
 import type { BrowserSiteExperienceRiskLevel } from '../../../../shared/browser-site-experience'
 import type { BeliefCard, BeliefCardStore, BeliefCardStatus } from './belief-card-store'
+import { isPossibleRiskUpdateOfSource } from './reserved-card-source'
 
 export interface BeliefCardSettingsItem {
   relPath: string
@@ -91,7 +92,7 @@ function toItem(input: { relPath: string; scopeId: string; card: BeliefCard | nu
     siteRiskLevel: risk,
     siteRiskAuthority: risk ? 'code' : null,
     isSiteCard: Boolean(site),
-    isRiskSuggestion: Boolean(source?.startsWith('possible-risk-update-of')),
+    isRiskSuggestion: isPossibleRiskUpdateOfSource(source),
     bodyPreview: input.card.body.slice(0, 500),
   }
 }

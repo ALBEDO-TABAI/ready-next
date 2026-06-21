@@ -11,6 +11,7 @@
  */
 
 import type { BeliefCard, BeliefCardFrontmatter } from './belief-card-store'
+import { isPossibleDuplicateOfSource } from './reserved-card-source'
 
 export interface KnowledgeGraphPlan {
   /** Bodies whose backlinks block changed — apply via the card store's atomic write. */
@@ -177,7 +178,7 @@ export function buildKnowledgeGraphPlan(
         || a.relPath.localeCompare(b.relPath))
       const oldest = ordered[0]
       for (const newer of ordered.slice(1)) {
-        if (newer.frontmatter.source?.startsWith('possible-duplicate-of')) continue
+        if (isPossibleDuplicateOfSource(newer.frontmatter.source)) continue
         possibleDuplicates.push({ relPath: newer.relPath, duplicateOf: slugOf(oldest.relPath) })
       }
     }

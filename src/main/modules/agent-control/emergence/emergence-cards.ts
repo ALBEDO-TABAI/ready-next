@@ -15,6 +15,7 @@
  */
 
 import type { TaskProjectionRecord } from '../contracts/run-contracts'
+import { isPossibleDuplicateOfSource } from '../knowledge/reserved-card-source'
 
 export interface EmergenceEvidence {
   fact: string
@@ -132,7 +133,7 @@ export function extractCrystallizeCards(cards: ReadonlyArray<CrystallizeSignalCa
     // legacy path (any branch); they go through extractAgentCandidateCards
     // with the candidate+evidence≥3 gate.
     if (card.stage) continue
-    if (card.source && card.source.startsWith('possible-duplicate-of')) {
+    if (isPossibleDuplicateOfSource(card.source)) {
       out.push({
         id: `crystallize:dup:${card.relPath}`,
         type: 'crystallize',

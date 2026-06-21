@@ -20,6 +20,7 @@
 import { randomUUID } from 'node:crypto'
 
 import { logAgentMetric } from '../metrics'
+import { isPossibleDuplicateOfSource } from '../knowledge/reserved-card-source'
 import { decideCrystallizeRun, type CrystallizeSignals } from './crystallize-gate'
 // eslint-disable-next-line ready/no-subagent-leak -- EP3-C3 pins the maintenance LLM container to runSubAgent by contract.
 import { runSubAgent } from '../sub-agent/sub-agent-runner'
@@ -269,7 +270,7 @@ export function collectBeliefDecaySignals(
       wasUsefulCount: mirror?.wasUsefulCount ?? 0,
       backlinksCount: incoming.get(`${file.scopeId}|${slug}`) ?? 0,
       markedDecayed: String(file.card.frontmatter.source || '').includes('decayed'),
-      possibleDuplicate: String(file.card.frontmatter.source || '').startsWith('possible-duplicate-of'),
+      possibleDuplicate: isPossibleDuplicateOfSource(file.card.frontmatter.source),
     }]
   })
 }

@@ -1,3 +1,4 @@
+import { isReservedCardSourceValue } from '../agent-control/knowledge/reserved-card-source'
 import type { ToolContext } from './tool-executor'
 import { createRotatingLogger } from '../../utils/rotating-logger'
 import {
@@ -155,9 +156,7 @@ function syncMirrorAfterCardWrite(
 }
 
 function isReservedModelCardSource(source: string | undefined, invoker: ToolContext['invoker']): boolean {
-  return invoker === 'model'
-    && typeof source === 'string'
-    && source.trim().toLowerCase().startsWith('possible-update-of:')
+  return invoker === 'model' && isReservedCardSourceValue(source)
 }
 
 /** EP2-K6 — rollback switch: card tools disappear from exposure when the

@@ -1,4 +1,9 @@
 import { BeliefCardStore, type BeliefCardFrontmatter } from './belief-card-store'
+import {
+  FAILURE_LEARNING_PREFIX,
+  POSSIBLE_RISK_UPDATE_OF_PREFIX,
+  POSSIBLE_UPDATE_OF_PREFIX,
+} from './reserved-card-source'
 
 export const SITE_CARD_FAILURE_KINDS = [
   'login_wall',
@@ -252,9 +257,9 @@ export function learnSiteCardFromFailure(store: BeliefCardStore, signal: SiteCar
 
   const source = existing
     ? mode === 'risk-suggestion'
-      ? `possible-risk-update-of:${existingRelPath}`
-      : `possible-update-of:${existingRelPath}`
-    : `failure-learning:${failureKind}`
+      ? `${POSSIBLE_RISK_UPDATE_OF_PREFIX}${existingRelPath}`
+      : `${POSSIBLE_UPDATE_OF_PREFIX}${existingRelPath}`
+    : `${FAILURE_LEARNING_PREFIX}${failureKind}`
 
   const frontmatter: BeliefCardFrontmatter = {
     title: existing ? `${domain} 失败经验建议` : `${domain} 站点经验`,

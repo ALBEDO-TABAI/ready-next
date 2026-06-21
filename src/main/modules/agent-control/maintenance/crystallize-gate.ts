@@ -16,6 +16,7 @@ import { unlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { logAgentMetric } from '../metrics'
+import { POSSIBLE_DUPLICATE_OF_PREFIX } from '../knowledge/reserved-card-source'
 import { buildKnowledgeGraphPlan } from '../knowledge/knowledge-index-builder'
 import type { BeliefCardStore } from '../knowledge/belief-card-store'
 
@@ -76,7 +77,7 @@ export function createCrystallizeEffectors(store: BeliefCardStore): CrystallizeE
       if (!card) return
       store.writeCard({
         relPath,
-        frontmatter: { ...card.frontmatter, source: `possible-duplicate-of [[${duplicateOfSlug}]]` },
+        frontmatter: { ...card.frontmatter, source: `${POSSIBLE_DUPLICATE_OF_PREFIX} [[${duplicateOfSlug}]]` },
         body: card.body,
       })
     },

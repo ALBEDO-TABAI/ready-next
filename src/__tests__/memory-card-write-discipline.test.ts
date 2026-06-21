@@ -146,6 +146,31 @@ test('model write cannot set reserved possible-update-of source prefix', async (
   }
 })
 
+test('model write is blocked for the whole reserved source-prefix family, not just possible-update-of', async () => {
+  // B4: the guard previously matched only `possible-update-of:` and missed the
+  // sibling prefixes the system generates, which drive the same confused-deputy
+  // merge/dedup paths. The guard now reads the single reserved-prefix list.
+  const siblings = [
+    'possible-risk-update-of:knowledge/pref.md',
+    'possible-duplicate-of [[knowledge/pref]]',
+    'failure-learning:browser_login',
+  ]
+  for (const source of siblings) {
+    const dir = mkdtempSync(join(tmpdir(), 'ready-card-discipline-'))
+    try {
+      const ctx = makeContext(dir)
+      const writeRes = JSON.parse(
+        await executeMemoryTool('memory_write_card', cardArgs({ source }), ctx),
+      )
+      assert.equal(writeRes.success, false, `expected ${source} to be rejected`)
+      assert.equal(writeRes.errorKind, 'reserved_source_prefix', `expected reserved_source_prefix for ${source}`)
+      assert.equal(ctx.store.readCard('knowledge/pref.md', { includeStaged: true }), null)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  }
+})
+
 test('agent-scoped writes require matching owner and never fall back to global', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'ready-card-discipline-'))
   try {
