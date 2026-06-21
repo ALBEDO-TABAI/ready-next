@@ -170,7 +170,26 @@ function createControllerMock(overrides?: Partial<BrowserController>): BrowserCo
       }
       return null
     },
-    ...(overrides || {}),
+  }
+
+  const baseExecuteJS = mock.executeJS
+  Object.assign(mock, overrides || {})
+  if (overrides?.executeJS) {
+    const customExecuteJS = overrides.executeJS
+    mock.executeJS = async (tabId, code) => {
+      const result = await customExecuteJS(tabId, code)
+      if (result !== null && result !== undefined) return result
+      // Readiness-only fallthrough: settleAfterAction's real-timer waits
+      // (waitForLoadingStop 8s + waitForReady 6s) otherwise burn wall-clock
+      // (~28s per browser_click_text) when an override stubs only its own probe
+      // and returns null for the page-readiness probes the default stubs.
+      const source = String(code || '')
+      if (source.includes("document.readyState === 'interactive'")) return true
+      if (source.includes('readyState') && source.includes('bodyTextLen')) {
+        return { readyState: 'complete', bodyTextLen: 200, matched: true }
+      }
+      return result
+    }
   }
 
   return mock as BrowserController & MockedController
