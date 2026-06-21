@@ -84,6 +84,7 @@ const FAILED_TERMINAL_REASONS = new Set<NonNullable<ScopeRunSummary['terminalRea
   'tool_unavailable',
   'no_artifact',
   'proof_gap',
+  'blocked_config',
 ])
 
 function errorMessage(error: unknown): string {

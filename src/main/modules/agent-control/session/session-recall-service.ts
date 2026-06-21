@@ -184,7 +184,11 @@ export class SessionRecallService {
     if (!scope) return []
     const refs = this.readSessionRecallContextRefs(scope)
     return refs
-      .map((ref) => this.getSessionRecallCapsule({ conversationId: ref.conversationId }))
+      .map((ref) => {
+        const metadata = this.getMetadataRow(ref.conversationId)
+        if (!metadata || !this.canAttachSessionRecallContext(scope, metadata)) return null
+        return this.buildCapsule(metadata)
+      })
       .filter(Boolean) as SessionRecallCapsule[]
   }
 
@@ -194,8 +198,12 @@ export class SessionRecallService {
   } {
     const scope = this.db.getConversationScope(params.currentScopeId)
     if (!scope) throw new Error(`Conversation scope not found: ${params.currentScopeId}`)
-    const capsule = this.getSessionRecallCapsule({ conversationId: params.conversationId })
-    if (!capsule) throw new Error(`Session recall capsule not found: ${params.conversationId}`)
+    const metadata = this.getMetadataRow(params.conversationId)
+    if (!metadata) throw new Error(`Session recall capsule not found: ${params.conversationId}`)
+    if (!this.canAttachSessionRecallContext(scope, metadata)) {
+      throw new Error('Session recall context belongs to a different agent')
+    }
+    const capsule = this.buildCapsule(metadata)
     const refs = this.readSessionRecallContextRefs(scope)
     if (!refs.some((item) => item.conversationId === params.conversationId)) {
       refs.push({
@@ -259,10 +267,10 @@ export class SessionRecallService {
     const candidates = db.prepare(`
       SELECT *
       FROM session_recall_metadata
-      WHERE lineage_root_id = ? AND conversation_id != ?
+      WHERE lineage_root_id = ? AND conversation_id != ? AND COALESCE(agent, '') = ?
       ORDER BY updated_at DESC
       LIMIT ?
-    `).all<SessionRecallMetadataRow>(lineageRootId, params.currentScopeId, limit)
+    `).all<SessionRecallMetadataRow>(lineageRootId, params.currentScopeId, scope.agent || '', limit)
     if (candidates.length === 0) return { attached: [] }
     const attached: SessionRecallCapsule[] = []
     for (const row of candidates) {
@@ -453,6 +461,13 @@ export class SessionRecallService {
     if (params.agent && metadata.agent !== params.agent) return false
     if (params.hasAttachments && this.parseAttachmentNames(metadata.attachment_names_json).length === 0) return false
     return true
+  }
+
+  private canAttachSessionRecallContext(
+    scope: ChatConversationRecord,
+    metadata: SessionRecallMetadataRow,
+  ): boolean {
+    return (scope.agent || '') === (metadata.agent || '')
   }
 
   private mergeHit(

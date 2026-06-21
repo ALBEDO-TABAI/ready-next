@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { existsSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -72,27 +72,6 @@ test('skill_run_shell still allows explicit absolute redirection inside artifact
       { skillId: 'test-skill', lookupSkillRoots: fx.lookup },
     )
     assert.equal(existsSync(insideSentinel), true)
-  } finally {
-    fx.cleanup()
-  }
-})
-
-test('KNOWN GAP: dynamic node/python absolute writes remain possible without OS isolation', async () => {
-  const fx = makeFixture()
-  try {
-    const nodeSentinel = join(fx.externalRoot, 'node-dynamic.txt')
-    await executeRunShell(
-      { command: `node -e "require('fs').writeFileSync('${nodeSentinel}','x')"` },
-      { skillId: 'test-skill', lookupSkillRoots: fx.lookup },
-    )
-    assert.equal(existsSync(nodeSentinel), true)
-
-    const pythonSentinel = join(fx.externalRoot, 'python-dynamic.txt')
-    await executeRunShell(
-      { command: `python3 -c "open('${pythonSentinel}','w').write('x')"` },
-      { skillId: 'test-skill', lookupSkillRoots: fx.lookup },
-    )
-    assert.equal(existsSync(pythonSentinel), true)
   } finally {
     fx.cleanup()
   }

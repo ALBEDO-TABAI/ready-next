@@ -118,6 +118,7 @@ function payload(patch: Partial<ScopeRunEventPayload> = {}): ScopeRunEventPayloa
 test('classifies only terminal projection sync payloads for retry', () => {
   assert.equal(terminalProjectionStatusFromSummary(summary({ terminalReason: 'done' })), 'completed')
   assert.equal(terminalProjectionStatusFromSummary(summary({ terminalReason: 'failed_skill' })), 'failed')
+  assert.equal(terminalProjectionStatusFromSummary(summary({ terminalReason: 'blocked_config' })), 'failed')
   assert.equal(terminalProjectionStatusFromSummary(summary({ terminalReason: 'cancelled_runtime' })), 'killed')
   assert.equal(terminalProjectionStatusFromSummary(summary({ terminalReason: 'main_no_progress_timeout' })), 'killed')
   assert.equal(isTerminalProjectionSyncPayload(summary({ terminalReason: 'checkpoint_background' })), false)

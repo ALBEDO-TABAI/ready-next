@@ -147,12 +147,13 @@ function createConversation(params: {
   parentConversationId?: string | null
   lineageRootId?: string | null
   resumeTitle?: string | null
+  agent?: string
   meta?: Record<string, unknown>
   updatedAt?: string
 }): ChatConversationRecord {
   return {
     id: params.id,
-    agent: 'butler',
+    agent: params.agent || 'butler',
     user_id: null,
     title: params.title,
     parent_conversation_id: params.parentConversationId ?? null,
@@ -505,6 +506,75 @@ test('SessionRecallService can attach, list, detach, and resume recall contexts'
   })
   assert.equal(detached.scope.id, 'scope-current')
   assert.equal(service.listAttachedSessionRecallContexts('scope-current').length, 0)
+})
+
+test('SessionRecallService rejects and filters attached recall contexts from another agent', () => {
+  const conversations = [
+    createConversation({
+      id: 'scope-current',
+      title: '当前会话',
+      lineageRootId: 'scope-current',
+      resumeTitle: '当前会话',
+      agent: 'alpha',
+      meta: {
+        sessionRecallContext: [
+          { conversationId: 'conv-beta', attachedAt: '2026-04-12T10:00:00.000Z' },
+        ],
+      },
+    }),
+    createConversation({
+      id: 'conv-alpha',
+      title: 'alpha 旧会话',
+      lineageRootId: 'conv-alpha',
+      resumeTitle: 'alpha 旧会话',
+      agent: 'alpha',
+    }),
+    createConversation({
+      id: 'conv-beta',
+      title: 'beta 旧会话',
+      lineageRootId: 'conv-beta',
+      resumeTitle: 'beta 旧会话',
+      agent: 'beta',
+    }),
+  ]
+  const db = new FakeSessionRecallDb(
+    conversations,
+    [
+      createMetadata({
+        conversation_id: 'conv-alpha',
+        title: 'alpha 旧会话',
+        agent: 'alpha',
+        preview_text: 'alpha context',
+      }),
+      createMetadata({
+        conversation_id: 'conv-beta',
+        title: 'beta 旧会话',
+        agent: 'beta',
+        preview_text: 'beta context',
+      }),
+    ],
+    [],
+    [],
+  )
+  const service = new SessionRecallService(db)
+
+  assert.throws(
+    () => service.attachSessionRecallContext({ currentScopeId: 'scope-current', conversationId: 'conv-beta' }),
+    /different agent/,
+    'manual attach must not smuggle another agent lineage into the current prompt',
+  )
+  assert.deepEqual(
+    service.listAttachedSessionRecallContexts('scope-current').map((capsule) => capsule.conversationId),
+    [],
+    'pre-existing cross-agent refs are ignored before prompt assembly',
+  )
+
+  service.attachSessionRecallContext({ currentScopeId: 'scope-current', conversationId: 'conv-alpha' })
+  assert.deepEqual(
+    service.listAttachedSessionRecallContexts('scope-current').map((capsule) => capsule.conversationId),
+    ['conv-alpha'],
+    'same-agent refs remain attachable',
+  )
 })
 
 test('SessionRecallService persists local vectors and adds semantic matches into recall results', () => {

@@ -17,6 +17,7 @@ interface FakeMetaRow {
   source_id: string
   thread_key: string
   user_id: string | null
+  agent: string | null
   channel_key: string
   preview_text: string | null
   latest_task_title: string | null
@@ -56,9 +57,14 @@ class FakeAdapter {
           if (sql.includes('FROM session_recall_metadata') && sql.includes('lineage_root_id = ?')) {
             const lineageRootId = String(params[0])
             const excludeId = String(params[1])
-            const limit = Number(params[2])
+            const agent = String(params[2])
+            const limit = Number(params[3])
             const matches = all
-              .filter((row) => row.lineage_root_id === lineageRootId && row.conversation_id !== excludeId)
+              .filter((row) =>
+                row.lineage_root_id === lineageRootId &&
+                row.conversation_id !== excludeId &&
+                (row.agent || '') === agent
+              )
               .sort((a, b) => b.updated_at.localeCompare(a.updated_at))
               .slice(0, limit)
             return matches as unknown as T[]
@@ -96,6 +102,7 @@ function buildMetaRow(opts: {
   id: string
   lineageRootId: string
   title?: string
+  agent?: string | null
   updatedAt: string
 }): FakeMetaRow {
   return {
@@ -107,6 +114,7 @@ function buildMetaRow(opts: {
     source_id: 'src-1',
     thread_key: 'thread-A',
     user_id: null,
+    agent: opts.agent ?? 'a',
     channel_key: 'channel:src-1:thread-A',
     preview_text: 'prev',
     latest_task_title: 'last task',
@@ -116,10 +124,15 @@ function buildMetaRow(opts: {
   }
 }
 
-function buildScope(id: string, lineageRootId: string, metaJson: string | null = null): ScopeRow {
+function buildScope(
+  id: string,
+  lineageRootId: string,
+  metaJson: string | null = null,
+  agent = 'a',
+): ScopeRow {
   return {
     id,
-    agent: 'a',
+    agent,
     title: id,
     lineage_root_id: lineageRootId,
     source_kind: 'channel',
@@ -157,6 +170,32 @@ test('autoAttachOnResume: attaches top-N predecessors in same lineage when no re
   assert.ok(!result.attached.some((c) => c.conversationId === 'curr'), 'never attaches self')
   // lineage isolation
   assert.ok(!result.attached.some((c) => c.conversationId === 'other'), 'never attaches different lineage')
+})
+
+test('autoAttachOnResume: never attaches same-lineage sessions owned by another agent', () => {
+  const adapter = new FakeAdapter()
+  adapter.addScope(buildScope('curr', 'L1', null, 'alpha'))
+  adapter.addMetaRow(buildMetaRow({
+    id: 'beta-newer',
+    lineageRootId: 'L1',
+    agent: 'beta',
+    updatedAt: '2026-04-24T13:00:00.000Z',
+  }))
+  adapter.addMetaRow(buildMetaRow({
+    id: 'alpha-older',
+    lineageRootId: 'L1',
+    agent: 'alpha',
+    updatedAt: '2026-04-24T10:00:00.000Z',
+  }))
+
+  const service = new SessionRecallService(adapter as never)
+  const result = service.autoAttachOnResume({ currentScopeId: 'curr', intent: 'continue', limit: 3 })
+
+  assert.deepEqual(
+    result.attached.map((capsule) => capsule.conversationId),
+    ['alpha-older'],
+    'auto-continue only attaches prior context owned by the current agent',
+  )
 })
 
 test('autoAttachOnResume: no-op when scope already has manually-attached refs', () => {

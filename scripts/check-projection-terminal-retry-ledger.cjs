@@ -97,6 +97,9 @@ function validateProjectionTerminalRetrySources({ runtime, ledger, migrations })
   if (!/return\s+null[\s\S]*blocked_external/.test(ledger) && ledger.includes("'blocked_external'")) {
     errors.push('blocked_external must not be treated as a terminal retry status')
   }
+  if (!ledger.includes("'blocked_config'")) {
+    errors.push('blocked_config must be retried as a failed terminal projection status')
+  }
 
   if (!migrations.includes("name: '061_pending_projection_syncs'")) {
     errors.push('migration 061_pending_projection_syncs is missing')
