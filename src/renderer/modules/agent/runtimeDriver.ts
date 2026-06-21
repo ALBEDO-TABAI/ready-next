@@ -243,6 +243,7 @@ export function syncActiveScopeRunAliases(
  */
 const INFRASTRUCTURE_TIMEOUT_MS = 60_000
 const ACTIVE_RUN_INFRASTRUCTURE_TIMEOUT_MS = 5 * 60_000
+const INFRASTRUCTURE_TIMEOUT_REPORT_ACK_MS = 1_000
 
 interface InfrastructureWatchdog {
   scopeId: string
@@ -284,15 +285,37 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
     infrastructureWatchdogs.delete(key)
   }
 
-  function reportInfrastructureTimeoutToMain(scopeId: string, requestId: string, elapsedMs: number): void {
+  async function reportInfrastructureTimeoutToMain(
+    scopeId: string,
+    requestId: string,
+    elapsedMs: number,
+  ): Promise<'cancel_requested' | 'stale' | 'not_found' | null> {
     const report = typeof window !== 'undefined'
       ? window.electronAPI?.agent?.reportInfrastructureTimeout
       : undefined
-    if (typeof report !== 'function') return
-    void report({ scopeId, requestId, elapsedMs }).catch(() => undefined)
+    if (typeof report !== 'function') return null
+    let timeout: ReturnType<typeof setTimeout> | null = null
+    try {
+      const response = await Promise.race<unknown>([
+        report({ scopeId, requestId, elapsedMs }),
+        new Promise<null>((resolve) => {
+          timeout = setTimeout(() => resolve(null), INFRASTRUCTURE_TIMEOUT_REPORT_ACK_MS)
+        }),
+      ])
+      if (!response || typeof response !== 'object') return null
+      const record = response as { success?: unknown; data?: { state?: unknown } }
+      if (record.success !== true) return null
+      const state = record.data?.state
+      if (state === 'cancel_requested' || state === 'stale' || state === 'not_found') return state
+    } catch {
+      return null
+    } finally {
+      if (timeout) clearTimeout(timeout)
+    }
+    return null
   }
 
-  function fireInfrastructureTimeout(scopeId: string, requestId: string): void {
+  async function fireInfrastructureTimeout(scopeId: string, requestId: string): Promise<void> {
     const key = watchdogKey(scopeId, requestId)
     const watchdog = infrastructureWatchdogs.get(key)
     if (!watchdog) return
@@ -304,7 +327,8 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
     const runState = state.scopeRunStates?.[scopeId]
     if (runState && runState.requestId !== requestId) return
 
-    reportInfrastructureTimeoutToMain(scopeId, requestId, watchdog.timeoutMs)
+    const mainState = await reportInfrastructureTimeoutToMain(scopeId, requestId, watchdog.timeoutMs)
+    const shouldSurfaceLostTrack = mainState === null || mainState === 'not_found'
 
     store.setState((current: { currentScopeId?: string | null; sessions?: Record<string, unknown>; currentAgent?: string }) => {
       const sessionId = sessionKeyForScopeId(current, scopeId)
@@ -332,8 +356,10 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
                 scopeId,
                 requestId,
                 phase: 'error',
-                terminalReason: 'infra_error',
-                error: 'Ready 跟丢了这次请求，已自动恢复，可重新发送。',
+                terminalReason: shouldSurfaceLostTrack ? 'infra_error' : 'main_no_progress_timeout',
+                error: shouldSurfaceLostTrack
+                  ? 'Ready 跟丢了这次请求，已自动恢复，可重新发送。'
+                  : '这次请求超时，Ready 已请求停止当前运行，可重新发送。',
                 updatedAt: new Date().toISOString(),
               },
             },
@@ -343,7 +369,7 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
       }
     })
 
-    if (state.currentScopeId === scopeId && typeof state.addMessage === 'function') {
+    if (shouldSurfaceLostTrack && state.currentScopeId === scopeId && typeof state.addMessage === 'function') {
       state.addMessage({
         id: `infra-timeout-${Date.now()}`,
         agent: state.currentAgent || 'butler',
@@ -357,6 +383,7 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
       scopeId,
       requestId,
       elapsedMs: watchdog.timeoutMs,
+      mainState,
     })
   }
 
@@ -365,7 +392,7 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
     // Re-arming the same scope+requestId resets the timer.
     clearInfrastructureWatchdog(scopeId, requestId)
     const timeoutMs = options?.timeoutMs ?? INFRASTRUCTURE_TIMEOUT_MS
-    const timer = setTimeout(() => fireInfrastructureTimeout(scopeId, requestId), timeoutMs)
+    const timer = setTimeout(() => { void fireInfrastructureTimeout(scopeId, requestId) }, timeoutMs)
     infrastructureWatchdogs.set(watchdogKey(scopeId, requestId), {
       scopeId,
       requestId,
@@ -1358,6 +1385,13 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
         if (!isScopeRunPhase(event.phase) || event.phase === 'idle') return
 
         upsertScopeRunState(event.scopeId, (previous) => {
+          const startedNewRun = Boolean(
+            event.type === 'started' &&
+            event.runId &&
+            previous?.requestId &&
+            previous.requestId !== event.runId,
+          )
+          const previousForRun = startedNewRun ? null : previous
           if (
             event.type !== 'started'
             && event.runId
@@ -1367,15 +1401,15 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
             return previous
           }
           const currentState = store.getState()
-          const activeMessage = previous?.responseMessageId
-            ? currentState.messages.find((item: AgentMessage) => item.id === previous.responseMessageId) || null
+          const activeMessage = previousForRun?.responseMessageId
+            ? currentState.messages.find((item: AgentMessage) => item.id === previousForRun.responseMessageId) || null
             : null
           const shouldBreakSegment = Boolean(
             event.toolEvent &&
-            previous?.responseMessageId &&
-            String(activeMessage?.content || previous?.responseBuffer || '').trim(),
+            previousForRun?.responseMessageId &&
+            String(activeMessage?.content || previousForRun?.responseBuffer || '').trim(),
           )
-          const toolTrace = previous?.toolTrace || []
+          const toolTrace = previousForRun?.toolTrace || []
           const nextTrace = event.toolEvent
             ? [
               ...toolTrace,
@@ -1387,55 +1421,55 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
               },
             ]
             : toolTrace
-          const patch = deriveScopeRunStatePatch(event, previous)
+          const patch = deriveScopeRunStatePatch(event, previousForRun)
 
           return {
             scopeId: event.scopeId,
-            agent: previous?.agent || event.agent,
-            requestId: event.runId || previous?.requestId || null,
-            taskId: event.taskId || previous?.taskId || patch.taskContinuation?.taskId || null,
+            agent: previousForRun?.agent || event.agent,
+            requestId: event.runId || previousForRun?.requestId || null,
+            taskId: event.taskId || previousForRun?.taskId || patch.taskContinuation?.taskId || null,
             phase: patch.phase || event.phase,
             terminalReason: patch.terminalReason ?? null,
             toolTrace: nextTrace,
-            startedAt: previous?.startedAt || event.timestamp,
+            startedAt: previousForRun?.startedAt || event.timestamp,
             updatedAt: event.timestamp,
-            latestText: patch.latestText ?? previous?.latestText ?? null,
-            module: patch.module ?? event.module ?? previous?.module ?? null,
-            intent: patch.intent ?? event.intent ?? previous?.intent ?? null,
-            executionKind: patch.executionKind ?? event.executionKind ?? previous?.executionKind ?? null,
-            jobId: patch.jobId ?? event.jobId ?? previous?.jobId ?? null,
-            artifactRefs: mergeArtifacts(previous?.artifactRefs, patch.artifactRefs ?? event.artifactRefs),
-            memoryRefs: patch.memoryRefs ?? event.memoryRefs ?? previous?.memoryRefs ?? [],
-            triggerHits: patch.triggerHits ?? event.triggerHits ?? previous?.triggerHits ?? [],
-            contextBudget: patch.contextBudget ?? event.contextBudget ?? previous?.contextBudget ?? null,
-            ownerResourceId: patch.ownerResourceId ?? event.ownerResourceId ?? previous?.ownerResourceId ?? null,
-            lastEvidenceAt: patch.lastEvidenceAt ?? event.lastEvidenceAt ?? previous?.lastEvidenceAt ?? null,
-            blockedReason: patch.blockedReason ?? previous?.blockedReason ?? null,
-            controllerId: patch.controllerId ?? previous?.controllerId ?? null,
-            ownerTabId: patch.ownerTabId ?? previous?.ownerTabId ?? null,
-            checkpointExpiresAt: patch.checkpointExpiresAt ?? previous?.checkpointExpiresAt ?? null,
-            responseMessageId: previous?.responseMessageId || null,
-            responseBuffer: previous?.responseBuffer || '',
+            latestText: patch.latestText ?? previousForRun?.latestText ?? null,
+            module: patch.module ?? event.module ?? previousForRun?.module ?? null,
+            intent: patch.intent ?? event.intent ?? previousForRun?.intent ?? null,
+            executionKind: patch.executionKind ?? event.executionKind ?? previousForRun?.executionKind ?? null,
+            jobId: patch.jobId ?? event.jobId ?? previousForRun?.jobId ?? null,
+            artifactRefs: mergeArtifacts(previousForRun?.artifactRefs, patch.artifactRefs ?? event.artifactRefs),
+            memoryRefs: patch.memoryRefs ?? event.memoryRefs ?? previousForRun?.memoryRefs ?? [],
+            triggerHits: patch.triggerHits ?? event.triggerHits ?? previousForRun?.triggerHits ?? [],
+            contextBudget: patch.contextBudget ?? event.contextBudget ?? previousForRun?.contextBudget ?? null,
+            ownerResourceId: patch.ownerResourceId ?? event.ownerResourceId ?? previousForRun?.ownerResourceId ?? null,
+            lastEvidenceAt: patch.lastEvidenceAt ?? event.lastEvidenceAt ?? previousForRun?.lastEvidenceAt ?? null,
+            blockedReason: patch.blockedReason ?? previousForRun?.blockedReason ?? null,
+            controllerId: patch.controllerId ?? previousForRun?.controllerId ?? null,
+            ownerTabId: patch.ownerTabId ?? previousForRun?.ownerTabId ?? null,
+            checkpointExpiresAt: patch.checkpointExpiresAt ?? previousForRun?.checkpointExpiresAt ?? null,
+            responseMessageId: previousForRun?.responseMessageId || null,
+            responseBuffer: previousForRun?.responseBuffer || '',
             responseSegmentBreakPending: shouldBreakSegment
               ? true
-              : previous?.responseSegmentBreakPending ?? false,
-            responseSegmentToolTraceStart: previous?.responseSegmentToolTraceStart ?? 0,
-            stepMetrics: patch.stepMetrics ?? previous?.stepMetrics ?? { toolCalls: 0, toolResults: 0, lastToolAt: null },
-            designPhase: patch.designPhase ?? previous?.designPhase ?? null,
-            designTodo: patch.designTodo ?? previous?.designTodo ?? [],
-            designReviewSummary: patch.designReviewSummary ?? previous?.designReviewSummary ?? null,
-            ownedNodeIds: patch.ownedNodeIds ?? previous?.ownedNodeIds ?? [],
-            repairScope: patch.repairScope ?? previous?.repairScope ?? null,
-            taskTitle: patch.taskTitle ?? previous?.taskTitle ?? null,
-            taskSummary: patch.taskSummary ?? previous?.taskSummary ?? null,
-            steps: patch.steps ?? previous?.steps ?? [],
-            currentStepId: patch.currentStepId ?? previous?.currentStepId ?? null,
-            waitingFor: patch.waitingFor ?? previous?.waitingFor ?? 'none',
-            resumableActions: patch.resumableActions ?? previous?.resumableActions ?? [],
-            recentArtifacts: patch.recentArtifacts ?? previous?.recentArtifacts ?? [],
-            taskContinuation: patch.taskContinuation ?? previous?.taskContinuation ?? null,
-            memoryCapture: patch.memoryCapture ?? previous?.memoryCapture ?? null,
-            error: patch.error ?? event.error ?? previous?.error ?? null,
+              : previousForRun?.responseSegmentBreakPending ?? false,
+            responseSegmentToolTraceStart: previousForRun?.responseSegmentToolTraceStart ?? 0,
+            stepMetrics: patch.stepMetrics ?? previousForRun?.stepMetrics ?? { toolCalls: 0, toolResults: 0, lastToolAt: null },
+            designPhase: patch.designPhase ?? previousForRun?.designPhase ?? null,
+            designTodo: patch.designTodo ?? previousForRun?.designTodo ?? [],
+            designReviewSummary: patch.designReviewSummary ?? previousForRun?.designReviewSummary ?? null,
+            ownedNodeIds: patch.ownedNodeIds ?? previousForRun?.ownedNodeIds ?? [],
+            repairScope: patch.repairScope ?? previousForRun?.repairScope ?? null,
+            taskTitle: patch.taskTitle ?? previousForRun?.taskTitle ?? null,
+            taskSummary: patch.taskSummary ?? previousForRun?.taskSummary ?? null,
+            steps: patch.steps ?? previousForRun?.steps ?? [],
+            currentStepId: patch.currentStepId ?? previousForRun?.currentStepId ?? null,
+            waitingFor: patch.waitingFor ?? previousForRun?.waitingFor ?? 'none',
+            resumableActions: patch.resumableActions ?? previousForRun?.resumableActions ?? [],
+            recentArtifacts: patch.recentArtifacts ?? previousForRun?.recentArtifacts ?? [],
+            taskContinuation: patch.taskContinuation ?? previousForRun?.taskContinuation ?? null,
+            memoryCapture: patch.memoryCapture ?? previousForRun?.memoryCapture ?? null,
+            error: patch.error ?? event.error ?? previousForRun?.error ?? null,
           }
         })
 

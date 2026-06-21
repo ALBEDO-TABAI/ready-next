@@ -104,6 +104,7 @@ const captured: CapturedHandlers = {
 }
 
 const infrastructureTimeoutReports: Array<{ scopeId: string; requestId: string; elapsedMs?: number }> = []
+let infrastructureTimeoutReportResult: unknown = { success: true, data: { state: 'cancel_requested' } }
 
 function register<K extends keyof CapturedHandlers>(slot: K) {
   return (cb: Handler) => {
@@ -131,7 +132,7 @@ const electronAPIStub = {
     completeToolActionRequest: async () => ({ success: true }),
     reportInfrastructureTimeout: async (payload: { scopeId: string; requestId: string; elapsedMs?: number }) => {
       infrastructureTimeoutReports.push(payload)
-      return { success: true, data: { state: 'cancel_requested' } }
+      return infrastructureTimeoutReportResult
     },
     kill: async () => ({ success: true }),
     newSession: async () => ({ success: true }),
@@ -386,6 +387,7 @@ test('X2.1 #5 — mid-send scope switch: terminal still unlocks the originating 
 
 test('X2.6 — infrastructure_timeout fires after timeout with no terminal event', async () => {
   infrastructureTimeoutReports.length = 0
+  infrastructureTimeoutReportResult = { success: false, error: 'ipc unavailable' }
   seedTwoSessions({
     activeSessionId: 'session-A',
     lockedSessionId: 'session-A',
@@ -420,6 +422,158 @@ test('X2.6 — infrastructure_timeout fires after timeout with no terminal event
   const lostTrackMsg = state.messages.find((m: { content: string }) =>
     typeof m.content === 'string' && m.content.includes('Ready 跟丢了'))
   assert.ok(lostTrackMsg, 'a "Ready 跟丢了" system message is appended for the active scope')
+})
+
+test('X2.6 — main-acknowledged timeout does not surface a lost-track message', async () => {
+  infrastructureTimeoutReports.length = 0
+  infrastructureTimeoutReportResult = { success: true, data: { state: 'cancel_requested' } }
+  seedTwoSessions({
+    activeSessionId: 'session-A',
+    lockedSessionId: 'session-A',
+    lockedScopeId: 'scope-A',
+    otherScopeId: 'scope-B',
+    requestId: 'req-A',
+  })
+
+  driverApi.armInfrastructureWatchdog('scope-A', 'req-A', { timeoutMs: 10 })
+
+  await new Promise((resolve) => setTimeout(resolve, 50))
+
+  const state = useAgent.getState()
+  assert.deepEqual(
+    infrastructureTimeoutReports,
+    [{ scopeId: 'scope-A', requestId: 'req-A', elapsedMs: 10 }],
+    'timeout still reports to main with request-id authority',
+  )
+  const lostTrackMsg = state.messages.find((m: { content: string }) =>
+    typeof m.content === 'string' && m.content.includes('Ready 跟丢了'))
+  assert.equal(lostTrackMsg, undefined, 'main accepted the timeout, so renderer must not claim it lost the request')
+  assert.equal(getSessionSlice(state, 'session-A').composerLocked, false, 'composer still unlocks after acknowledged timeout')
+})
+
+test('X2.6 — hung main timeout report still releases the renderer lock', async () => {
+  infrastructureTimeoutReports.length = 0
+  infrastructureTimeoutReportResult = new Promise(() => undefined)
+  seedTwoSessions({
+    activeSessionId: 'session-A',
+    lockedSessionId: 'session-A',
+    lockedScopeId: 'scope-A',
+    otherScopeId: 'scope-B',
+    requestId: 'req-A',
+  })
+
+  driverApi.armInfrastructureWatchdog('scope-A', 'req-A', { timeoutMs: 10 })
+
+  await new Promise((resolve) => setTimeout(resolve, 1150))
+
+  const state = useAgent.getState()
+  const slice = getSessionSlice(state, 'session-A')
+  assert.deepEqual(
+    infrastructureTimeoutReports,
+    [{ scopeId: 'scope-A', requestId: 'req-A', elapsedMs: 10 }],
+    'renderer still attempts to report the stuck request to main',
+  )
+  assert.equal(slice.composerLocked, false, 'hung main report cannot keep the composer locked')
+  assert.equal(slice.isStreaming, false, 'hung main report cannot keep the session streaming')
+  assert.equal(slice.streamingRequestId, null, 'hung main report clears the in-flight request handle')
+  const lostTrackMsg = state.messages.find((m: { content: string }) =>
+    typeof m.content === 'string' && m.content.includes('Ready 跟丢了'))
+  assert.ok(lostTrackMsg, 'without a main ack, renderer still surfaces the local recovery message')
+})
+
+test('started event for a new request does not inherit the previous response segment', () => {
+  seedTwoSessions({
+    activeSessionId: 'session-A',
+    lockedSessionId: 'session-A',
+    lockedScopeId: 'scope-A',
+    otherScopeId: 'scope-B',
+    requestId: 'req-old',
+  })
+  useAgent.setState((state: any) => {
+    const slice = getSessionSlice(state, 'session-A')
+    const previousRun = slice.scopeRunStates['scope-A']
+    return {
+      ...state,
+      messages: [
+        {
+          id: 'response-old',
+          agent: 'butler',
+          type: 'agent',
+          content: '上一轮回答',
+          timestamp: new Date('2026-06-21T10:22:16.000Z'),
+        },
+      ],
+      sessions: {
+        ...state.sessions,
+        'session-A': {
+          ...slice,
+          messages: [
+            {
+              id: 'response-old',
+              agent: 'butler',
+              type: 'agent',
+              content: '上一轮回答',
+              timestamp: new Date('2026-06-21T10:22:16.000Z'),
+            },
+          ],
+          scopeRunStates: {
+            ...slice.scopeRunStates,
+            'scope-A': {
+              ...previousRun,
+              phase: 'done',
+              terminalReason: 'done',
+              responseMessageId: 'response-old',
+              responseBuffer: '上一轮回答',
+              toolTrace: [
+                {
+                  id: 'old-tool',
+                  kind: 'result',
+                  text: 'old result',
+                  timestamp: new Date('2026-06-21T10:22:10.000Z'),
+                },
+              ],
+            },
+          },
+        },
+      },
+      scopeRunStates: {
+        ...state.scopeRunStates,
+        'scope-A': {
+          ...previousRun,
+          phase: 'done',
+          terminalReason: 'done',
+          responseMessageId: 'response-old',
+          responseBuffer: '上一轮回答',
+          toolTrace: [
+            {
+              id: 'old-tool',
+              kind: 'result',
+              text: 'old result',
+              timestamp: new Date('2026-06-21T10:22:10.000Z'),
+            },
+          ],
+        },
+      },
+    }
+  })
+
+  fireOnScopeRunEvent({
+    type: 'started',
+    scopeId: 'scope-A',
+    sessionId: 'scope-A',
+    agent: 'butler',
+    runId: 'req-new',
+    phase: 'planning',
+    latestText: '正在理解需求',
+    timestamp: '2026-06-21T10:41:52.000Z',
+  })
+
+  const nextRun = getSessionSlice(useAgent.getState(), 'session-A').scopeRunStates['scope-A']
+  assert.equal(nextRun.requestId, 'req-new')
+  assert.equal(nextRun.responseMessageId, null, 'new run must not reuse the old assistant message id')
+  assert.equal(nextRun.responseBuffer, '', 'new run starts with an empty response buffer')
+  assert.deepEqual(nextRun.toolTrace, [], 'new run starts with a fresh tool trace')
+  assert.equal(nextRun.startedAt, '2026-06-21T10:41:52.000Z', 'new run owns its own start timestamp')
 })
 
 test('X2.6 — runtime liveness extends the bootstrap watchdog window', async () => {
