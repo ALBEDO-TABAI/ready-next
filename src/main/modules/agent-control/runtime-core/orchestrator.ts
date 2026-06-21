@@ -49,6 +49,10 @@ interface ReadyAgentOrchestratorOptions {
   clearNoProgressCheck?: (handle: unknown) => void
 }
 
+export interface ChildLivenessProvider {
+  hasActiveChildRunForScope(scopeId: string): boolean
+}
+
 const DEFAULT_MAIN_RUN_NO_PROGRESS_TIMEOUT_MS = 15 * 60 * 1000
 
 interface ActiveRunLiveness {
@@ -121,6 +125,7 @@ export class ReadyAgentOrchestrator extends EventEmitter {
   private readonly scheduleNoProgressCheck: (callback: () => void, delayMs: number) => unknown
   private readonly clearNoProgressCheck: (handle: unknown) => void
   private personaResolver: PersonaSystemPromptResolver | null = null
+  private childLivenessProvider: ChildLivenessProvider | null = null
 
   constructor(options?: ReadyAgentOrchestratorOptions) {
     super()
@@ -795,6 +800,19 @@ export class ReadyAgentOrchestrator extends EventEmitter {
 
   interruptForSuspend(agent: string, sessionId?: string): StopActiveGenerationResult {
     return this.stopActiveGeneration(agent, sessionId, 'manual_suspend')
+  }
+
+  hasActiveRun(agent: string, sessionId?: string): boolean {
+    return this.activeRunIds.has(this.toTaskKey(agent, sessionId))
+  }
+
+  setChildLivenessProvider(provider: ChildLivenessProvider | null): void {
+    this.childLivenessProvider = provider
+  }
+
+  isScopeLive(agent: string, scopeId: string): boolean {
+    return this.hasActiveRun(agent, scopeId)
+      || (this.childLivenessProvider?.hasActiveChildRunForScope(scopeId) ?? false)
   }
 
   interruptActiveRunIfMatches(

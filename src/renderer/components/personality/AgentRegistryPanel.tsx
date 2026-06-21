@@ -125,7 +125,7 @@ export default function AgentRegistryPanel() {
             Agent 生命周期
           </h3>
           <p className="text-[12px] leading-5" style={{ color: 'var(--text-muted)', margin: '6px 0 0' }}>
-            专项 Agent 的退休和合并需要显式确认，资产目录会保留。
+            专项 Agent 的退休和合并需要显式确认；合并时可迁移知识卡，未迁移资产仍留在原目录。
           </p>
         </div>
         <button

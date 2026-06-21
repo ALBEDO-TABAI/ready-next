@@ -1,6 +1,6 @@
 import type { IpcMain } from 'electron'
 import type { AgentRegistryRecord, AgentRegistryStatus } from '../../repositories/agent-registry-repository'
-import { migrateAgentKnowledgeCards } from '../../agent-control/agents/agent-factory'
+import { migrateAgentKnowledgeCards, rollbackAgentKnowledgeCardMigrations } from '../../agent-control/agents/agent-factory'
 import { agentScopeKnowledgeDir, type BeliefCardStore } from '../../agent-control/knowledge/belief-card-store'
 import type { IpcChannelGroup, IpcDisposeHandle } from './types'
 
@@ -75,6 +75,8 @@ export const agentRegistryGroup: IpcChannelGroup<AgentRegistryGroupDeps> = {
       mergedIntoAgentId?: string | null
       migrateCardRelPaths?: string[]
     }): IPCResponse<AgentRegistryRecord> => {
+      let migratedCards: Array<{ from: string; to: string }> = []
+      let rollbackStore: BeliefCardStore | null = null
       try {
         const status = payload?.status
         if (status !== 'retired' && status !== 'merged') {
@@ -97,13 +99,21 @@ export const agentRegistryGroup: IpcChannelGroup<AgentRegistryGroupDeps> = {
           }
           const store = deps.getBeliefCardStore()
           if (!store) return { success: false, error: 'Belief card store not available' }
-          migrateAgentKnowledgeCards(store, id, targetId, migrated)
+          rollbackStore = store
+          migratedCards = migrateAgentKnowledgeCards(store, id, targetId, migrated)
         }
         const record = deps.updateStatus(String(payload?.id || ''), status, {
           mergedIntoAgentId: payload?.mergedIntoAgentId ?? null,
         })
         return { success: true, data: record }
       } catch (error) {
+        if (rollbackStore && migratedCards.length > 0) {
+          try {
+            rollbackAgentKnowledgeCardMigrations(rollbackStore, migratedCards)
+          } catch (rollbackError) {
+            console.warn('[agent-registry] rollback migrated cards failed:', rollbackError)
+          }
+        }
         return { success: false, error: error instanceof Error ? error.message : String(error) }
       }
     })

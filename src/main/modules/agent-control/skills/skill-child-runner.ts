@@ -307,6 +307,15 @@ class SkillChildRunner {
     return Array.from(rows.values())
   }
 
+  hasActiveChildRunForScope(scopeId: string): boolean {
+    const normalizedScopeId = String(scopeId || '').trim()
+    if (!normalizedScopeId) return false
+    for (const run of this.active.values()) {
+      if (run.scopeId === normalizedScopeId) return true
+    }
+    return false
+  }
+
   async startSkillChildRun(params: StartSkillChildRunParams): Promise<StartSkillChildRunResult> {
     const driver = getSkillChildDriver(params.skillId)
     if (!driver) {

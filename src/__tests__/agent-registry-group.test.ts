@@ -180,3 +180,45 @@ test('agentRegistryGroup lists agent knowledge and migrates selected cards befor
     rmSync(root, { recursive: true, force: true })
   }
 })
+
+test('agentRegistryGroup rolls back migrated cards when merge status update fails', async () => {
+  const { ipc, handlers } = createMockIpc()
+  const root = makeRoot()
+  try {
+    const store = new BeliefCardStore({ memoryRoot: root })
+    assert.ok(store.writeCard({
+      relPath: 'agents/writer/knowledge/style.md',
+      frontmatter: fm(),
+      body: '短句优先。',
+    }).ok)
+    const rows = [
+      record({ id: 'writer', name: 'Writer', status: 'active' }),
+      record({ id: 'editor', name: 'Editor', status: 'active' }),
+    ]
+    let updateAttempts = 0
+    agentRegistryGroup.register(ipc, {
+      listAgents: () => rows,
+      getBeliefCardStore: () => store,
+      updateStatus: () => {
+        updateAttempts += 1
+        throw new Error('db write failed')
+      },
+    })
+
+    const update = await handlers.get('agent:registry:updateStatus')?.({} as IpcMainInvokeEvent, {
+      id: 'writer',
+      status: 'merged',
+      mergedIntoAgentId: 'editor',
+      migrateCardRelPaths: ['agents/writer/knowledge/style.md'],
+    })
+
+    assert.equal((update as { success: boolean }).success, false)
+    assert.equal(updateAttempts, 1)
+    assert.ok(store.readCard('agents/writer/knowledge/style.md', { includeStaged: true }))
+    assert.equal(store.readCard('agents/editor/knowledge/style.md', { includeStaged: true }), null)
+    assert.equal(existsSync(join(root, 'agents', 'writer', 'knowledge', 'style.md')), true)
+    assert.equal(existsSync(join(root, 'agents', 'editor', 'knowledge', 'style.md')), false)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})

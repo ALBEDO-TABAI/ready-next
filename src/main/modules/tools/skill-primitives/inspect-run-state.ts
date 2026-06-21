@@ -256,7 +256,7 @@ function detachedRecordVisibleToScope(
   if (!binding) return true
   const expectedSessionId = normalizedBindingValue(binding.sessionId)
   const expectedScopeId = normalizedBindingValue(binding.scopeId)
-  if (!expectedSessionId && !expectedScopeId) return true
+  if (!expectedSessionId && !expectedScopeId) return false
   const recordSessionId = normalizedBindingValue(record.sessionId)
   const recordScopeId = normalizedBindingValue(record.scopeId)
   if (!recordSessionId && !recordScopeId) return false

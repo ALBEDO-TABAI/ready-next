@@ -40,6 +40,7 @@ import {
   type RunMetaRepositoryLike,
   writeRunCloseMetric,
 } from './run-finalizer'
+import { finalizeStaleWithoutHandleProjections } from './stale-projection-finalizer'
 import { composePersonaSystemPrompt } from './persona-system-prompt'
 import { PromptAssemblyService } from '../prompt-assembly'
 import { selectScopeTaskIndexEntries } from '../session/daily-task-index-builder'
@@ -92,7 +93,7 @@ import { canResumeAsUserPoint, type ResumePointHandle } from '../contracts/resum
 import { deriveTaskProjectionCanResume } from '../task-projection/task-projection-resume'
 import { isAwaitingUserInteractionState } from '../../../../shared/task-interaction-state'
 import { assertSkillTaskRunInvariantConsistency } from '../skills/skill-task-tracker'
-import type { ExecutionHostResult, ProjectionTruthSnapshot, TaskProjectionRecord } from '../contracts/run-contracts'
+import type { ExecutionHostResult, ProjectionTruthSnapshot, RunCoordinatorResult, TaskProjectionRecord } from '../contracts/run-contracts'
 import { createTaskBudgetRuntime, getBudgetUsagePercent, restoreContinuationTaskBudgetRuntime } from '../task-projection/run-budget-policy'
 import { normalizeChannelDeliveryResult } from './channel-delivery-result'
 import {
@@ -594,12 +595,13 @@ export class AgentControlRuntime extends EventEmitter {
     // repository is ready and `getSkillsRuntimeManager()` is safe to
     // call.
     try {
-      configureSkillChildRunner({
+      const childRunner = configureSkillChildRunner({
         runtimeManager: getSkillsRuntimeManager(),
         repository: this.skillTaskRunRepository,
         taskProjectionStore: this.taskProjectionStore,
         publishScopeRunEvent: (payload) => this.publishScopeRunEvent(payload),
       })
+      this.orchestrator.setChildLivenessProvider(childRunner)
     } catch (error) {
       // Boot-time wiring failure is best-effort logged; the parent loop
       // continues to function via legacy paths if the child runner
@@ -1787,47 +1789,52 @@ export class AgentControlRuntime extends EventEmitter {
             incoming: intent,
           })
         })()
-        const result = await this.runCoordinator.runScoped(
-          {
-            scope,
-            message: payload.message as
-              | string
-              | Array<{ type: string; text?: string; base64?: string; mimeType?: string }>,
-            requestId: payload.requestId,
-            sourceMessageId: payload.userMessage?.id ?? null,
-            taskId: payload.taskId,
-            parentTaskId: payload.parentTaskId,
-            parentStepId: payload.parentStepId,
-            sessionIdOverride: payload.sessionIdOverride,
-            continuationIntent: normalizedContinuationIntent,
-            coordinators: this.getDomainAdapters(),
-          },
-          {
-            onSuccess: async (result) => {
-              if (scope.sourceKind !== 'channel') return
-              const outboundText =
-                result.finalText.trim() || '任务已完成，但本次没有产生可发送的文本结果。'
-              const sendOk = await this.sendLongTextToChannel(
-                scope.sourceId,
-                scope.threadKey,
-                outboundText
-              )
-              if (!sendOk.success) {
-                if (result.success && result.usedTools.includes('skill_send_im_file')) {
-                  logAgentMetric('send_scoped_channel_ack_failed_after_send_im', {
-                    scopeId: scope.id,
-                    channelId: scope.sourceId,
-                    taskId: result.taskId || null,
-                    runId: payload.requestId || null,
-                    error: sendOk.error || 'Failed to send channel reply',
-                  })
-                  return
+        let result: RunCoordinatorResult
+        try {
+          result = await this.runCoordinator.runScoped(
+            {
+              scope,
+              message: payload.message as
+                | string
+                | Array<{ type: string; text?: string; base64?: string; mimeType?: string }>,
+              requestId: payload.requestId,
+              sourceMessageId: payload.userMessage?.id ?? null,
+              taskId: payload.taskId,
+              parentTaskId: payload.parentTaskId,
+              parentStepId: payload.parentStepId,
+              sessionIdOverride: payload.sessionIdOverride,
+              continuationIntent: normalizedContinuationIntent,
+              coordinators: this.getDomainAdapters(),
+            },
+            {
+              onSuccess: async (result) => {
+                if (scope.sourceKind !== 'channel') return
+                const outboundText =
+                  result.finalText.trim() || '任务已完成，但本次没有产生可发送的文本结果。'
+                const sendOk = await this.sendLongTextToChannel(
+                  scope.sourceId,
+                  scope.threadKey,
+                  outboundText
+                )
+                if (!sendOk.success) {
+                  if (result.success && result.usedTools.includes('skill_send_im_file')) {
+                    logAgentMetric('send_scoped_channel_ack_failed_after_send_im', {
+                      scopeId: scope.id,
+                      channelId: scope.sourceId,
+                      taskId: result.taskId || null,
+                      runId: payload.requestId || null,
+                      error: sendOk.error || 'Failed to send channel reply',
+                    })
+                    return
+                  }
+                  throw new Error(sendOk.error || 'Failed to send channel reply')
                 }
-                throw new Error(sendOk.error || 'Failed to send channel reply')
               }
             }
-          }
-        )
+          )
+        } finally {
+          await this.finalizeStaleWithoutHandleProjectionsForScope(scope)
+        }
         return {
           ...result,
           errorKind: result.scopeRunAuthority?.state === 'lost'
@@ -1837,6 +1844,26 @@ export class AgentControlRuntime extends EventEmitter {
         }
       },
     })
+  }
+
+  private async finalizeStaleWithoutHandleProjectionsForScope(scope: ConversationScope): Promise<number> {
+    if (this.orchestrator.isScopeLive(scope.agent, scope.id)) return 0
+    const records = this.taskProjectionStore.listByScope(scope.id) as TaskProjectionRecord[]
+    const finalized = await finalizeStaleWithoutHandleProjections({
+      scopeId: scope.id,
+      records,
+      taskProjectionStore: this.getTaskProjectionStoreForFinalize(),
+      runMetaRepository: this.getRunMetaRepository() as unknown as RunMetaRepositoryLike | null,
+      hasActiveRun: () => this.orchestrator.isScopeLive(scope.agent, scope.id),
+    })
+    if (finalized > 0) {
+      logAgentMetric('stale_without_handle_projection_finalized', {
+        scopeId: scope.id,
+        agent: scope.agent,
+        count: finalized,
+      })
+    }
+    return finalized
   }
 
   async suspendRun(payload: {

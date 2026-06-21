@@ -154,6 +154,12 @@ function syncMirrorAfterCardWrite(
   }
 }
 
+function isReservedModelCardSource(source: string | undefined, invoker: ToolContext['invoker']): boolean {
+  return invoker === 'model'
+    && typeof source === 'string'
+    && source.trim().toLowerCase().startsWith('possible-update-of:')
+}
+
 /** EP2-K6 — rollback switch: card tools disappear from exposure when the
  *  knowledge system is off (files untouched, injection already gated). */
 function filterCardTools(defs: typeof MEMORY_TOOLS): typeof MEMORY_TOOLS {
@@ -361,6 +367,13 @@ export async function executeMemoryTool(
             site?: string
           }
         const store = runtime.getBeliefCardStore()
+        if (isReservedModelCardSource(source, context.invoker)) {
+          return JSON.stringify({
+            success: false,
+            errorKind: 'reserved_source_prefix',
+            error: 'reserved card source prefix requires host confirmation',
+          })
+        }
         const existingCard = store.readCard(rel_path, { includeStaged: true })
         const authorization = resolveCardWriteAuthorization({
           requestedStatus: status,

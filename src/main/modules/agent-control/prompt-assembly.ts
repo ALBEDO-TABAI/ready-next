@@ -1204,6 +1204,14 @@ export class PromptAssemblyService {
     const contextBill = buildContextBill(params.scope.id, billSections)
     emitContextBill(contextBill)
     const budget = buildPromptBudgetReport(baseBudget, billSections, contextBill)
+    if (budget.totalChars > MAX_TOTAL_CHARS) {
+      logAgentMetric('context_budget_overage', {
+        scopeId: params.scope.id,
+        totalChars: budget.totalChars,
+        maxTotalChars: MAX_TOTAL_CHARS,
+        sections: budget.sectionChars,
+      })
+    }
 
     return {
       systemPrompt: [

@@ -275,7 +275,10 @@ test('AgentRegistryPanel fails loudly on knowledge read errors and refreshes aft
 
     const ok = await mount(createElement(AgentRegistryPanel))
     try {
-      assert.match(ok.container.textContent || '', /写作专项/)
+      const okText = ok.container.textContent || ''
+      assert.match(okText, /写作专项/)
+      assert.match(okText, /合并时可迁移知识卡/)
+      assert.doesNotMatch(okText, /资产目录会保留/)
       await act(async () => {
         handle.dom.window.dispatchEvent(new handle.dom.window.CustomEvent('ready:agent-registry-changed'))
       })

@@ -16,6 +16,7 @@ import {
   executeRunShell,
   parseCommand,
 } from '../main/modules/tools/skill-primitives/run-shell'
+import { redactHostPaths } from '../main/modules/tools/skill-primitives/host-path-redactor'
 import type { SkillRootSet } from '../main/modules/tools/skill-primitives/root-resolver'
 import { __setMetricSinkForTests, type AgentMetricEvent } from '../main/modules/agent-control/metrics'
 
@@ -82,6 +83,53 @@ test('rejects cmd_not_allowlisted for non-whitelisted binaries', async () => {
       executeRunShell(
         { command: 'vim README.md' },
         { skillId: 'test-skill', lookupSkillRoots: fx.lookup },
+      ),
+      (error: unknown) => (error as { errorKind?: string })?.errorKind === 'cmd_not_allowlisted',
+    )
+  } finally {
+    fx.cleanup()
+  }
+})
+
+test('rejects shell write-surface binaries even when allowlist extensions include them', async () => {
+  const writeSurfaceCommands = [
+    'tee out.txt',
+    'truncate -s 0 out.txt',
+    'rsync source target',
+    'install source target',
+  ]
+  for (const command of writeSurfaceCommands) {
+    const fx = makeFixture()
+    try {
+      const bin = command.split(/\s+/, 1)[0]
+      await assert.rejects(
+        executeRunShell(
+          { command },
+          {
+            skillId: 'test-skill',
+            lookupSkillRoots: fx.lookup,
+            effectiveAllowlist: new Set([...SHELL_ALLOWLIST, bin]),
+          },
+        ),
+        (error: unknown) => (error as { errorKind?: string })?.errorKind === 'cmd_not_allowlisted',
+      )
+    } finally {
+      fx.cleanup()
+    }
+  }
+})
+
+test('rejects shell snippets that pipe into write-surface commands', async () => {
+  const fx = makeFixture()
+  try {
+    await assert.rejects(
+      executeRunShell(
+        { command: 'echo hello | tee out.txt' },
+        {
+          skillId: 'test-skill',
+          lookupSkillRoots: fx.lookup,
+          effectiveAllowlist: new Set([...SHELL_ALLOWLIST, 'tee']),
+        },
       ),
       (error: unknown) => (error as { errorKind?: string })?.errorKind === 'cmd_not_allowlisted',
     )
@@ -173,8 +221,8 @@ test('shell-style commands expand skill env vars and support pipelines', async (
     )
     const envData = envOut.data as any
     assert.equal(envData?.exitCode, 0)
-    assert.ok((envData?.stdout || '').includes(fx.assetRoot))
-    assert.ok((envData?.stdout || '').includes(fx.artifactRoot))
+    assert.ok((envData?.stdout || '').includes(redactHostPaths(fx.assetRoot)))
+    assert.ok((envData?.stdout || '').includes(redactHostPaths(fx.artifactRoot)))
     assert.equal(envData?.command?.bin, 'bash')
 
     const pipeOut = await executeRunShell(
@@ -223,7 +271,7 @@ test('pwd is allowed as a harmless cwd probe', async () => {
 
     const data = out.data as any
     assert.equal(data?.exitCode, 0)
-    assert.equal((data?.stdout || '').trim(), fx.artifactRoot)
+    assert.equal((data?.stdout || '').trim(), redactHostPaths(fx.artifactRoot))
   } finally {
     fx.cleanup()
   }
@@ -239,7 +287,7 @@ test('bash -lc commands with POSIX single quotes use shell compatibility mode', 
 
     const data = out.data as any
     assert.equal(data?.exitCode, 0)
-    assert.equal((data?.stdout || '').trim(), fx.assetRoot)
+    assert.equal((data?.stdout || '').trim(), redactHostPaths(fx.assetRoot))
     assert.equal(data?.command?.bin, 'bash')
   } finally {
     fx.cleanup()
@@ -326,8 +374,8 @@ test('stdout over 8K chars is truncated and logged to an overflow artifact', asy
     assert.equal(data?.stdoutTruncated, true)
     const logPath = data?.stdoutArtifactPath as string
     assert.ok(typeof logPath === 'string' && logPath.length > 0)
-    assert.ok(logPath.startsWith(fx.artifactRoot))
-    assert.ok(existsSync(logPath))
+    assert.ok(logPath.startsWith(redactHostPaths(fx.artifactRoot)))
+    assert.ok(logPath.includes('/.logs/shell-'))
   } finally {
     fx.cleanup()
   }

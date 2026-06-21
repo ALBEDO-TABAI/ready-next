@@ -4,6 +4,8 @@ import { resolve } from 'node:path'
 import test from 'node:test'
 
 import { SessionRecallService, type SessionRecallDatabaseAdapter } from '../main/modules/agent-control/session/session-recall-service'
+import { executeSessionRecallTool } from '../main/modules/tools/session-recall-tools'
+import type { ToolContext } from '../main/modules/tools/tool-executor'
 import {
   DatabaseManager,
   type ChatConversationRecord,
@@ -217,6 +219,44 @@ class FakeDatabaseManagerConnection implements DatabaseConnection {
     }
   }
 }
+
+test('session_search injects current scope agent into model-visible recall queries', async () => {
+  const captured: Array<{ agent?: string }> = []
+  const rows = [
+    { conversationId: 'conv-alpha', agent: 'alpha', title: 'alpha only' },
+    { conversationId: 'conv-beta', agent: 'beta', title: 'beta only' },
+  ]
+  const context = {
+    scope: {
+      id: 'scope-alpha',
+      agent: 'alpha',
+      title: 'Alpha',
+      sourceKind: 'local',
+      sourceId: 'app',
+      threadKey: 'thread-alpha',
+      meta: {},
+      createdAt: '2026-06-20T00:00:00.000Z',
+      updatedAt: '2026-06-20T00:00:00.000Z',
+    },
+    runtime: {
+      searchSessionRecall: (payload: { agent?: string }) => {
+        captured.push(payload)
+        return rows.filter((row) => row.agent === payload.agent)
+      },
+      listRecentSessions: (payload: { agent?: string }) => {
+        captured.push(payload)
+        return rows.filter((row) => row.agent === payload.agent)
+      },
+    },
+  } as unknown as ToolContext
+
+  const output = JSON.parse(await executeSessionRecallTool('session_search', { query: 'only' }, context))
+
+  assert.equal(captured[0]?.agent, 'alpha')
+  assert.equal(output.success, true)
+  assert.equal(output.count, 1)
+  assert.equal(output.sessions[0].conversationId, 'conv-alpha')
+})
 
 function createConversation(id: string, agent: string): ChatConversationRecord {
   return {

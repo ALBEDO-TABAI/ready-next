@@ -126,6 +126,26 @@ test('model write cannot silently overwrite an existing active card', async () =
   }
 })
 
+test('model write cannot set reserved possible-update-of source prefix', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'ready-card-discipline-'))
+  try {
+    const ctx = makeContext(dir)
+    const writeRes = JSON.parse(
+      await executeMemoryTool(
+        'memory_write_card',
+        cardArgs({ source: 'possible-update-of:knowledge/pref.md' }),
+        ctx,
+      ),
+    )
+    assert.equal(writeRes.success, false)
+    assert.equal(writeRes.errorKind, 'reserved_source_prefix')
+    assert.match(writeRes.error, /reserved|host/i)
+    assert.equal(ctx.store.readCard('knowledge/pref.md', { includeStaged: true }), null)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('agent-scoped writes require matching owner and never fall back to global', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'ready-card-discipline-'))
   try {

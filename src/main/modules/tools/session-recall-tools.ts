@@ -67,6 +67,7 @@ export async function executeSessionRecallTool(
     sourceKind,
     hasAttachments: args.hasAttachments === true,
     currentScopeId: context.scope.id,
+    agent: context.scope.agent,
     limit,
   }
   const hits = query

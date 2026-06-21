@@ -100,6 +100,39 @@ test('skill_inspect_run_state allows same-session detached taskId', async () => 
   }
 })
 
+test('skill_inspect_run_state fails closed when scope binding lacks both sessionId and scopeId', async () => {
+  const fx = makeOutputDir('skill-inspect-scope-empty-binding-')
+  try {
+    registerFakeTracker({
+      id: 'detached-current',
+      sessionId: 'session-current',
+      scopeId: 'scope-current',
+      skillId: 'skill-a',
+      action: 'run',
+      params: {},
+      status: 'running',
+      outputDir: fx.outputDir,
+      runStatePath: fx.runStatePath,
+      startedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    })
+
+    await assert.rejects(
+      executeInspectRunState({
+        taskId: 'detached-current',
+        scopeBinding: {
+          sessionId: null,
+          scopeId: null,
+          activeRoots: [],
+        },
+      }),
+      (error: unknown) => (error as { errorKind?: string })?.errorKind === 'not_found',
+    )
+  } finally {
+    fx.cleanup()
+  }
+})
+
 test('skill_inspect_run_state rejects explicit runStatePath outside active roots', async () => {
   const allowed = makeOutputDir('skill-inspect-allowed-')
   const outside = makeOutputDir('skill-inspect-outside-')

@@ -164,6 +164,13 @@ function rollbackMigratedCards(store: BeliefCardStore, migratedCards: Array<{ fr
   }
 }
 
+export function rollbackAgentKnowledgeCardMigrations(
+  store: BeliefCardStore,
+  migratedCards: Array<{ from: string; to: string }>,
+): void {
+  rollbackMigratedCards(store, [...migratedCards])
+}
+
 function planCardMigration(store: BeliefCardStore, agentId: string, relPath: string): { from: string; to: string } {
   const normalized = relPath.replace(/\\/g, '/')
   if (!isAllowedCardPath(normalized)) throw new Error(`[agent-factory] invalid source card path: ${relPath}`)
@@ -225,13 +232,20 @@ export function migrateAgentKnowledgeCards(
   relPaths: readonly string[],
 ): Array<{ from: string; to: string }> {
   const plan = prepareAgentKnowledgeMigration(store, fromAgentId, toAgentId, relPaths)
-  return plan.cardMigrations.map((migration) => {
-    const fromAbs = absInside(store.rootPath, migration.from)
-    const toAbs = absInside(store.rootPath, migration.to)
-    mkdirSync(dirname(toAbs), { recursive: true })
-    renameSync(fromAbs, toAbs)
-    return migration
-  })
+  const migratedCards: Array<{ from: string; to: string }> = []
+  try {
+    for (const migration of plan.cardMigrations) {
+      const fromAbs = absInside(store.rootPath, migration.from)
+      const toAbs = absInside(store.rootPath, migration.to)
+      mkdirSync(dirname(toAbs), { recursive: true })
+      renameSync(fromAbs, toAbs)
+      migratedCards.push(migration)
+    }
+    return migratedCards
+  } catch (error) {
+    rollbackMigratedCards(store, migratedCards)
+    throw error
+  }
 }
 
 // P5e/C23 legacy dormant derivation path: retained for candidate-era tests only.

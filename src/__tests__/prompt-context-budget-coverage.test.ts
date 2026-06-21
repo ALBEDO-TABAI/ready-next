@@ -27,7 +27,7 @@ function createScope(): ConversationScope {
   }
 }
 
-function capsule(id: string, title: string): SessionRecallCapsule {
+function capsule(id: string, title: string, summary = `历史摘要 ${title}，包含上次工具调用和任务进度。`): SessionRecallCapsule {
   return {
     conversationId: id,
     lineageRootId: id,
@@ -36,13 +36,78 @@ function capsule(id: string, title: string): SessionRecallCapsule {
     sourceKind: 'local',
     sourceId: 'app',
     threadKey: `${id}-thread`,
-    summary: `历史摘要 ${title}，包含上次工具调用和任务进度。`,
+    summary,
     latestTaskTitle: `${title} 任务`,
     latestTaskSummary: `${title} 最近任务摘要`,
     attachmentNames: [`${title}.md`],
     updatedAt: '2026-06-20T00:00:00.000Z',
   }
 }
+
+test('PromptAssembly emits context_budget_overage when actual injected sections exceed nominal total', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'ready-prompt-budget-overage-'))
+  const events: AgentMetricEvent[] = []
+  __setMetricSinkForTests((event) => events.push(event))
+  try {
+    mkdirSync(join(root, 'memory'), { recursive: true })
+    writeFileSync(join(root, 'MEMORY.md'), 'M'.repeat(5_000), 'utf8')
+    writeFileSync(join(root, 'AGENTS.md'), 'A'.repeat(5_000), 'utf8')
+    writeFileSync(join(root, 'USER.md'), 'U'.repeat(5_000), 'utf8')
+    writeFileSync(join(root, 'TOOLS.md'), 'T'.repeat(5_000), 'utf8')
+    writeFileSync(join(root, 'RULES.md'), 'R'.repeat(5_000), 'utf8')
+
+    const longSummary = '历史上下文'.repeat(800)
+    const service = new PromptAssemblyService({
+      getMemoryRoot: () => root,
+      getScopeMessages: () => [
+        { role: 'user', content: '继续处理超额预算。' },
+      ],
+      getBeliefCardStore: () => ({
+        renderKnowledgeIndex: (opts) => ({
+          text: 'K'.repeat(opts.maxChars),
+          renderedCount: 1,
+          omittedCount: 0,
+        }),
+        listRoutingCards: () => [],
+      }),
+      getAgentRoster: () => [
+        { id: 'butler', name: '主 agent', charter: null, status: 'active' },
+        { id: 'writer', name: '写作专家', charter: 'C'.repeat(2_000), status: 'active' },
+      ],
+      getScopeSessionRecallCapsules: () => [
+        capsule('manual-1', '手动一', longSummary),
+        capsule('manual-2', '手动二', longSummary),
+        capsule('manual-3', '手动三', longSummary),
+        capsule('manual-4', '手动四', longSummary),
+      ],
+      getAutoSessionRecallCapsules: () => [
+        capsule('auto-1', '自动一', longSummary),
+        capsule('auto-2', '自动二', longSummary),
+      ],
+      isKnowledgeSystemEnabled: () => true,
+      now: () => new Date('2026-06-20T00:00:00.000Z'),
+    })
+
+    const result = await service.buildForScopedRun({
+      scope: createScope(),
+      message: '请继续处理上下文预算。',
+      coordinators: [],
+    })
+
+    assert.ok(result.contextBudget.totalChars > 16_000)
+    const overage = events.find((event) => event.metric === 'context_budget_overage') as
+      | (AgentMetricEvent & { totalChars?: number; maxTotalChars?: number; sections?: Record<string, number> })
+      | undefined
+    assert.ok(overage, 'context_budget_overage metric emitted')
+    assert.equal(overage.maxTotalChars, 16_000)
+    assert.equal(overage.totalChars, result.contextBudget.totalChars)
+    assert.ok((overage.sections?.L0 ?? 0) > 0)
+    assert.ok((overage.sections?.recall ?? 0) > 0)
+  } finally {
+    __setMetricSinkForTests(null)
+    rmSync(root, { recursive: true, force: true })
+  }
+})
 
 test('PromptBudgetReport covers every injected context_bill section', async () => {
   const root = mkdtempSync(join(tmpdir(), 'ready-prompt-budget-coverage-'))

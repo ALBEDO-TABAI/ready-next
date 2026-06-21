@@ -58,6 +58,13 @@ const SINGLE_QUOTE_SHELL_COMPAT_BINS: ReadonlySet<string> = new Set([
   'sed',
 ])
 
+const WRITE_SURFACE_SHELL_COMMANDS: ReadonlySet<string> = new Set([
+  'tee',
+  'truncate',
+  'rsync',
+  'install',
+])
+
 export interface RunShellArgs {
   command: string
   timeoutMs?: number
@@ -105,9 +112,9 @@ function shouldUseShell(command: string): boolean {
 }
 
 function findDeniedShellCommand(command: string): string | null {
-  const destructiveAlt = DESTRUCTIVE_SHELL_COMMANDS.join('|')
-  const matched = command.match(new RegExp(`(?:^|[;&|]\\s*|\\|\\|\\s*|&&\\s*)(?:sudo\\s+)?(${destructiveAlt})\\b`, 'i'))
-    || command.match(new RegExp(`-exec\\s+(?:sudo\\s+)?(${destructiveAlt})\\b`, 'i'))
+  const deniedAlt = [...DESTRUCTIVE_SHELL_COMMANDS, ...WRITE_SURFACE_SHELL_COMMANDS].join('|')
+  const matched = command.match(new RegExp(`(?:^|[;&|]\\s*|\\|\\|\\s*|&&\\s*)(?:sudo\\s+)?(${deniedAlt})\\b`, 'i'))
+    || command.match(new RegExp(`-exec\\s+(?:sudo\\s+)?(${deniedAlt})\\b`, 'i'))
   return matched?.[1] || null
 }
 
@@ -342,6 +349,18 @@ export async function executeRunShell(
       reason: 'command_empty',
     })
     throw new ToolDomainError('command_empty', 'skill_run_shell.command is empty after tokenization.')
+  }
+  if (WRITE_SURFACE_SHELL_COMMANDS.has(parsed.bin)) {
+    logAgentMetric(TOOL_ERROR_METRICS.skillPrimitiveRejected, {
+      primitive: 'skill_run_shell',
+      reason: 'cmd_not_allowlisted',
+      bin: parsed.bin,
+    })
+    throw new ToolDomainError(
+      'cmd_not_allowlisted',
+      `skill_run_shell: command "${parsed.bin}" is not allowed as a shell write surface.`,
+      { bin: parsed.bin, allowlist: Array.from(SHELL_ALLOWLIST) },
+    )
   }
 
   // B-arch-4 — when the dispatcher passes an `effectiveAllowlist` (computed
