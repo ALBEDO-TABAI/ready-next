@@ -57,6 +57,7 @@ import type { TurnTerminalReason } from '../runtime-core/turn-frame'
 import type { CapabilityGroupId } from '../../../../shared/ai-capability-groups'
 import type { SkillChildRunStatus as SharedSkillChildRunStatus } from '../../../../shared/skill-child-run-status'
 import type { SkillRunContract } from './skill-run-contract'
+import type { RecoveryRecord, ToolSnapshot } from './tool-telemetry-contracts'
 import type {
   TurnModelResponse,
   TurnProviderContext,
@@ -69,6 +70,11 @@ import type {
 export type {
   SkillRunContract,
 } from './skill-run-contract'
+
+export type {
+  RecoveryRecord,
+  ToolSnapshot,
+} from './tool-telemetry-contracts'
 
 export type {
   TurnModelResponse,
@@ -236,46 +242,6 @@ export interface ContinuationBudgetRestoreDiagnostics {
   grantedIterationSafetyFloor: boolean
   grantedToolCallSafetyFloor: boolean
   grantedStepBudgetSafetyFloor: boolean
-}
-
-export interface RecoveryRecord {
-  kind:
-    | 'rate_limit'
-    | 'context_overflow'
-    | 'timeout_model'
-    | 'timeout_tool'
-    | 'auth'
-    | 'transient'
-    | 'host_unavailable'
-  source: 'model_request' | 'tool_execution' | 'runtime'
-  message: string
-  attempt: number
-  recovered: boolean
-  timestamp: string
-}
-
-export interface ToolSnapshot {
-  stage: 'host_prepared' | 'host_effective' | 'tool_loop_request' | 'provider_request' | 'provider_response'
-  source: 'host' | 'provider'
-  iteration: number
-  provider: string
-  baseUrl: string
-  model: string
-  wireApi?: 'responses' | 'chat/completions' | null
-  browserDecisionMode?: string | null
-  browserHostAvailable?: boolean | null
-  hasTools: boolean
-  allowBrowserTools: boolean
-  visibleCapabilityGroupIds: CapabilityGroupId[]
-  suppressedCapabilityGroupIds: CapabilityGroupId[]
-  allowedToolNames: string[]
-  requestedTransport: 'native' | 'text' | 'none'
-  effectiveTransport: 'native' | 'text' | 'none'
-  supportsNativeTools: boolean
-  preferTextToolBridge: boolean
-  fallbackReason?: string | null
-  toolCallsCount?: number | null
-  mismatch?: boolean
 }
 
 export interface ToolResolutionDiagnostics {

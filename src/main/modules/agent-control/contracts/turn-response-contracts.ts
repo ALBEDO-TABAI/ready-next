@@ -1,5 +1,6 @@
 import type { AIModelConfig } from '../../../../shared/ai-providers'
-import type { RecoveryRecord, TaskInteractionState, ToolSnapshot } from './run-contracts'
+import type { RecoveryRecord, ToolSnapshot } from './tool-telemetry-contracts'
+import type { TaskInteractionState } from './run-contracts'
 
 export interface TurnProviderContext {
   config: AIModelConfig

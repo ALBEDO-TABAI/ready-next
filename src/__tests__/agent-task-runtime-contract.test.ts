@@ -10,13 +10,17 @@ function readWorkspaceFile(path: string): string {
 
 test('agent runtime contracts expose unified task state, recovery history, and projection store contracts', () => {
   const runContracts = readWorkspaceFile('src/main/modules/agent-control/contracts/run-contracts.ts')
+  const toolTelemetryContracts = readWorkspaceFile('src/main/modules/agent-control/contracts/tool-telemetry-contracts.ts')
   const types = readWorkspaceFile('src/main/modules/agent-control/contracts/types.ts')
 
   assert.match(runContracts, /export type TaskType =/)
   assert.match(runContracts, /export type TaskInteractionState =/)
   assert.match(runContracts, /export interface TaskBudget/)
   assert.match(runContracts, /export interface TaskTypeResolution/)
-  assert.match(runContracts, /export interface RecoveryRecord/)
+  assert.doesNotMatch(runContracts, /export interface RecoveryRecord/)
+  assert.match(toolTelemetryContracts, /export interface RecoveryRecord/)
+  assert.match(toolTelemetryContracts, /export interface ToolSnapshot/)
+  assert.match(runContracts, /export type \{\s*RecoveryRecord,\s*ToolSnapshot,\s*\} from '\.\/tool-telemetry-contracts'/)
   assert.match(runContracts, /export interface ToolResourceTag/)
   assert.match(runContracts, /export interface UnifiedTaskState/)
   assert.match(runContracts, /export interface TaskProjectionRecord/)
