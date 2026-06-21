@@ -1825,6 +1825,31 @@ async function resolveCssPoint(
   }
 }
 
+async function resolveCoordinateProbePointOrThrow(
+  controller: BrowserController,
+  tabId: string | null,
+  x: number,
+  y: number,
+  action: 'click' | 'type',
+): Promise<{ cssX: number; cssY: number; width: number; height: number; nx: number; ny: number } | null> {
+  try {
+    return await resolveCssPoint(controller, tabId, x, y)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    const actionLabel = action === 'click' ? '点击' : '输入'
+    throw new ToolDomainError(
+      ACTION_CONFIRMATION_ERROR_KINDS.deniedPendingConfirmation.code,
+      `无法确认坐标${actionLabel}目标是否安全，已拒绝执行。请改用明确 selector/target_id，或引导用户亲自完成。`,
+      {
+        x,
+        y,
+        reason: 'coordinate_target_point_resolution_failed',
+        probeError: message,
+      },
+    )
+  }
+}
+
 function modifiersToMask(value: unknown): number {
   if (!value) return 0
   const input = Array.isArray(value) ? value : [value]
@@ -1961,7 +1986,7 @@ async function runGuardedCoordinateClick(
   y: number,
   abortSignal?: AbortSignal,
 ): Promise<{ nx: number; ny: number; cssX: number; cssY: number; width: number; height: number }> {
-  const probePoint = await resolveCssPoint(controller, tabId, x, y).catch(() => null)
+  const probePoint = await resolveCoordinateProbePointOrThrow(controller, tabId, x, y, 'click')
   const probe = probePoint
     ? await probeCoordinateTargetOrThrow(controller, tabId, probePoint, { x, y, action: 'click' })
     : null
@@ -2034,7 +2059,7 @@ async function runGuardedCoordinateType(
   opts: { clearBefore: boolean; pressEnter: boolean; useShiftEnter: boolean; allowPasswordFill: boolean },
   abortSignal?: AbortSignal,
 ): Promise<{ nx: number; ny: number; cssX: number; cssY: number; width: number; height: number }> {
-  const probePoint = await resolveCssPoint(controller, tabId, x, y).catch(() => null)
+  const probePoint = await resolveCoordinateProbePointOrThrow(controller, tabId, x, y, 'type')
   const probe = probePoint
     ? await probeCoordinateTargetOrThrow(controller, tabId, probePoint, { x, y, action: 'type' })
     : null
