@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict'
 import { describe, it, test } from 'node:test'
 
-import { taskEventBridge, type TaskEventBridgePayload } from '../main/modules/browser-engine/task-event-bridge'
+import { isTaskEventBridgeStatus, taskEventBridge, toBridgeStatus, type TaskEventBridgePayload } from '../main/modules/browser-engine/task-event-bridge'
+import type { BrowserCapabilityTaskStatus } from '../main/modules/browser-engine/capability-types'
 import {
   __resetBackgroundTaskTerminalReminderForTests,
   __setPendingTaskEventDatabaseForTests,
@@ -75,6 +76,25 @@ describe('task event bridge', () => {
   it('exports a singleton bridge', () => {
     assert.equal(typeof taskEventBridge.publish, 'function')
     assert.equal(typeof taskEventBridge.scheduleTask, 'function')
+  })
+
+  it('maps persisted browser task statuses to bridge publish statuses explicitly', () => {
+    const cases: Array<[BrowserCapabilityTaskStatus, ReturnType<typeof toBridgeStatus>]> = [
+      ['queued', null],
+      ['running', null],
+      ['waiting_human', 'waiting_human'],
+      ['paused', 'paused'],
+      ['completed', 'completed'],
+      ['failed', 'failed'],
+      ['cancelled', null],
+    ]
+
+    for (const [status, expected] of cases) {
+      assert.equal(toBridgeStatus(status), expected)
+    }
+    assert.equal(cases.some(([status]) => toBridgeStatus(status) === 'needs_attention'), false)
+    assert.equal(isTaskEventBridgeStatus('needs_attention'), true)
+    assert.equal(isTaskEventBridgeStatus('cancelled'), false)
   })
 
   it('publishes events to registered consumers', () => {

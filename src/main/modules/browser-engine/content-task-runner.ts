@@ -10,7 +10,7 @@ import type {
   BrowserStructuredItem,
 } from './capability-types'
 import { BrowserTaskPersistenceService } from './task-persistence-service'
-import { isTaskEventBridgeStatus, taskEventBridge } from './task-event-bridge'
+import { taskEventBridge, toBridgeStatus } from './task-event-bridge'
 import {
   DEFAULT_VISIBLE_COLLECT_LIMITS,
   DISCOVERY_ESCALATION_LOADING_GONE_JS,
@@ -561,8 +561,9 @@ function toStringArray(value: unknown): string[] {
 }
 
 function publishBrowserTaskEvent(taskId: string, status: BrowserCapabilityTaskStatus, extra?: unknown): void {
-  if (!isTaskEventBridgeStatus(status)) return
-  taskEventBridge.publish(extra === undefined ? { taskId, status } : { taskId, status, extra })
+  const bridgeStatus = toBridgeStatus(status)
+  if (!bridgeStatus) return
+  taskEventBridge.publish(extra === undefined ? { taskId, status: bridgeStatus } : { taskId, status: bridgeStatus, extra })
 }
 
 export class BrowserContentTaskRunner {

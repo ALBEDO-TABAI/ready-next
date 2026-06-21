@@ -2,6 +2,7 @@ import {
   BROWSER_CAPABILITY_TASK_KINDS,
   type BrowserCapabilityTaskHandle,
   type BrowserCapabilityTaskKind,
+  type BrowserCapabilityTaskStatus,
 } from './capability-types'
 import { enqueueBackgroundTaskTerminalReminderFromBridge } from '../agent-control/system-reminders/background-task-terminal-reminder'
 
@@ -11,6 +12,16 @@ export type TaskEventBridgeStatus =
   | 'paused'
   | 'needs_attention'
   | 'waiting_human'
+
+const BROWSER_TASK_BRIDGE_PUBLISH: Record<BrowserCapabilityTaskStatus, TaskEventBridgeStatus | null> = {
+  queued: null,
+  running: null,
+  waiting_human: 'waiting_human',
+  paused: 'paused',
+  completed: 'completed',
+  failed: 'failed',
+  cancelled: null,
+}
 
 export interface TaskEventBridgePayload {
   taskId: string
@@ -44,6 +55,10 @@ export function isTaskEventBridgeStatus(status: string): status is TaskEventBrid
     || status === 'paused'
     || status === 'needs_attention'
     || status === 'waiting_human'
+}
+
+export function toBridgeStatus(status: BrowserCapabilityTaskStatus): TaskEventBridgeStatus | null {
+  return BROWSER_TASK_BRIDGE_PUBLISH[status]
 }
 
 class TaskEventBridge {
