@@ -66,6 +66,12 @@ function createFakeDb() {
           if (normalizedSql.startsWith('SELECT * FROM pending_projection_syncs WHERE id = ?')) {
             return rows.get(String(params[0]))
           }
+          if (normalizedSql.startsWith('SELECT next_attempt_at')) {
+            const hit = [...rows.values()]
+              .filter((row) => row.status === 'pending' && row.next_attempt_at !== null)
+              .sort((a, b) => `${a.next_attempt_at}:${a.created_at}`.localeCompare(`${b.next_attempt_at}:${b.created_at}`))[0]
+            return hit ? { next_attempt_at: hit.next_attempt_at } : undefined
+          }
           return undefined
         },
         all: (...params: unknown[]) => {
@@ -222,6 +228,36 @@ test('failed drain reports the next retry due time and retries again when due', 
   assert.equal(due.succeeded, 1)
   assert.equal(due.nextAttemptAt, null)
   assert.equal(attempts, 2)
+})
+
+test('future pending row reports nextAttemptAt without attempting sync', async () => {
+  const fake = createFakeDb()
+  const repository = new PendingProjectionSyncRepository(fake)
+  const row = repository.upsertPending({
+    summary: summary({ terminalReason: 'done' }),
+    eventPayload: payload(),
+    error: new Error('first failure'),
+    now: new Date('2026-06-20T00:00:30.000Z'),
+  })
+  assert.ok(row)
+
+  let attempts = 0
+  const result = await drainPendingProjectionSyncs({
+    repository,
+    now: new Date('2026-06-20T00:00:00.000Z'),
+    sync: async () => {
+      attempts += 1
+    },
+  })
+
+  assert.deepEqual(result, {
+    attempted: 0,
+    succeeded: 0,
+    failed: 0,
+    exhausted: 0,
+    nextAttemptAt: '2026-06-20T00:00:30.000Z',
+  })
+  assert.equal(attempts, 0)
 })
 
 test('repeated retry failures become exhausted and emit metric', async () => {

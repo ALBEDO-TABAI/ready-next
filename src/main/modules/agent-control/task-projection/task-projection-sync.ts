@@ -20,11 +20,6 @@ function toContinuationUpdatedAt(value: string | null | undefined): number {
   return Number.isFinite(parsed) ? parsed : Date.now()
 }
 
-function toTime(value: string | null | undefined): number | null {
-  const parsed = Date.parse(String(value || ''))
-  return Number.isFinite(parsed) ? parsed : null
-}
-
 function runIdOrdinal(value: string | null | undefined): number | null {
   const match = String(value || '').match(/\d{10,}/)
   if (!match) return null
@@ -36,19 +31,39 @@ function isTerminalProjectionStatus(status: TaskProjectionRecord['status']): boo
   return status === 'completed' || status === 'failed' || status === 'killed'
 }
 
-function shouldSkipProjectionWrite(previous: TaskProjectionRecord, next: TaskProjectionRecord): boolean {
+function durableProjectionIdentity(record: TaskProjectionRecord): string | null {
+  const continuation = recordFromUnknown(record.continuationRef)
+  const childRunId = stringFromRecord(continuation, 'childRunId')
+  if (childRunId) return `child:${childRunId}`
+  const detachedTaskId = stringFromRecord(continuation, 'detachedTaskId')
+  if (detachedTaskId) return `detached:${detachedTaskId}`
+  const runStatePath = stringFromRecord(continuation, 'runStatePath')
+  if (runStatePath) return `run_state:${runStatePath}`
+  const outputDir = stringFromRecord(continuation, 'outputDir')
+  if (outputDir) return `output:${outputDir}`
+  return null
+}
+
+function shouldSkipProjectionWrite(
+  previous: TaskProjectionRecord,
+  next: TaskProjectionRecord,
+  payload: ScopeRunEventPayload,
+): boolean {
   if (isTerminalProjectionStatus(previous.status) && !isTerminalProjectionStatus(next.status)) {
     return true
   }
+  if (!previous.runId || !next.runId) return false
   if (previous.runId === next.runId) return false
+  if (payload.type === 'started') return false
+  const previousIdentity = durableProjectionIdentity(previous)
+  const nextIdentity = durableProjectionIdentity(next)
+  if (previousIdentity && previousIdentity === nextIdentity) return false
   const previousRunOrdinal = runIdOrdinal(previous.runId)
   const nextRunOrdinal = runIdOrdinal(next.runId)
   if (previousRunOrdinal !== null && nextRunOrdinal !== null) {
     return nextRunOrdinal < previousRunOrdinal
   }
-  const previousTime = toTime(previous.updatedAt)
-  const nextTime = toTime(next.updatedAt)
-  return previousTime !== null && nextTime !== null && nextTime <= previousTime
+  return true
 }
 
 function readProjectionTruthPatch(projectionTruth?: ProjectionTruthSnapshot | null): Record<string, unknown> | null {
@@ -896,7 +911,7 @@ export async function syncTaskProjection(
   if (!next) return null
 
   if (previous) {
-    if (shouldSkipProjectionWrite(previous, next)) return previous
+    if (shouldSkipProjectionWrite(previous, next, payload)) return previous
     await store.update(taskId, next)
   } else {
     try {
@@ -907,7 +922,7 @@ export async function syncTaskProjection(
       if (!concurrentPrevious) throw error
       next = buildTaskProjectionRecord(summary, payload, concurrentPrevious, projectionTruth)
       if (!next) return null
-      if (shouldSkipProjectionWrite(concurrentPrevious, next)) return concurrentPrevious
+      if (shouldSkipProjectionWrite(concurrentPrevious, next, payload)) return concurrentPrevious
       await store.update(taskId, next)
     }
   }

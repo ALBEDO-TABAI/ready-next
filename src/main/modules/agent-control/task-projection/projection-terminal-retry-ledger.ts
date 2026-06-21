@@ -195,6 +195,20 @@ export class PendingProjectionSyncRepository {
     `).all<PendingProjectionSyncDbRow>(now.toISOString(), limit).map(parseRow)
   }
 
+  nextPendingAttemptAt(): string | null {
+    const db = this.resolveDb()
+    if (!db) return null
+    const row = db.prepare(`
+      SELECT next_attempt_at
+      FROM pending_projection_syncs
+      WHERE status = 'pending'
+        AND next_attempt_at IS NOT NULL
+      ORDER BY next_attempt_at ASC, created_at ASC
+      LIMIT 1
+    `).get<{ next_attempt_at?: string | null }>()
+    return row?.next_attempt_at || null
+  }
+
   markRetryFailure(id: string, error: unknown, now: Date = new Date()): PendingProjectionSyncFailureResult | null {
     const db = this.requireDb()
     const existing = this.get(id)
@@ -301,6 +315,9 @@ export async function drainPendingProjectionSyncs(params: {
         })
       }
     }
+  }
+  if (!result.nextAttemptAt) {
+    result.nextAttemptAt = params.repository.nextPendingAttemptAt()
   }
   return result
 }

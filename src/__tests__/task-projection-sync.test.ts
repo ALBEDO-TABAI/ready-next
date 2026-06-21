@@ -1427,7 +1427,7 @@ test('syncTaskProjection clears stale progress when truth patch explicitly sends
 
 function createCountingProjectionStore() {
   const records = new Map<string, TaskProjectionRecord>()
-  const counters = { updateCount: 0 }
+  const counters = { updateCount: 0, siblingLookupCount: 0 }
   const store: TaskProjectionStore = {
     create(record) {
       records.set(record.taskId, record)
@@ -1447,6 +1447,10 @@ function createCountingProjectionStore() {
     },
     listByParentTask(parentTaskId) {
       return Array.from(records.values()).filter((record) => record.parentTaskId === parentTaskId)
+    },
+    findByArtifactSiblings() {
+      counters.siblingLookupCount += 1
+      return []
     },
   }
   return { store, records, counters }
@@ -1527,6 +1531,87 @@ test('syncTaskProjection ignores older runId writes after a newer run owns the p
   assert.equal(counters.updateCount, 0)
   assert.equal(result?.runId, 'req-1781928173304-new')
   assert.equal(records.get('task-run-monotonic')?.taskSummary, '新请求正在进行')
+})
+
+test('syncTaskProjection ignores non-started UUID run writes when a different run owns the projection', async () => {
+  const { store, records, counters } = createCountingProjectionStore()
+  await syncTaskProjection(store, {
+    ...createSummary(),
+    taskId: 'skill:run_state:uuid-owner',
+    taskProjectionId: 'skill:run_state:uuid-owner',
+    taskContinuation: {
+      skillId: 'video-expert-analyzer',
+      outputDir: '/tmp/ready-a3-current-output',
+      runStatePath: '/tmp/ready-a3-current-output/run_state.json',
+    },
+    taskSummary: 'UUID 新请求已经拥有任务卡',
+    updatedAt: '2026-04-16T11:02:00.000Z',
+  }, {
+    ...createPayload(),
+    runId: 'run-new-alpha',
+    taskId: 'skill:run_state:uuid-owner',
+    timestamp: '2026-04-16T11:02:00.000Z',
+  })
+
+  counters.updateCount = 0
+  counters.siblingLookupCount = 0
+  const result = await syncTaskProjection(store, {
+    ...createSummary(),
+    taskId: 'skill:run_state:uuid-owner',
+    taskProjectionId: 'skill:run_state:uuid-owner',
+    taskContinuation: {
+      skillId: 'video-expert-analyzer',
+      outputDir: '/tmp/ready-a3-stale-output',
+      runStatePath: '/tmp/ready-a3-stale-output/run_state.json',
+    },
+    taskSummary: 'UUID 旧请求晚到覆盖',
+    updatedAt: '2026-04-16T11:10:00.000Z',
+  }, {
+    ...createPayload(),
+    runId: 'run-old-beta',
+    taskId: 'skill:run_state:uuid-owner',
+    timestamp: '2026-04-16T11:10:00.000Z',
+  })
+
+  assert.equal(counters.updateCount, 0)
+  assert.equal(counters.siblingLookupCount, 0)
+  assert.equal(result?.runId, 'run-new-alpha')
+  assert.equal(records.get('skill:run_state:uuid-owner')?.taskSummary, 'UUID 新请求已经拥有任务卡')
+})
+
+test('syncTaskProjection lets a UUID started event claim an existing projection', async () => {
+  const { store, records, counters } = createCountingProjectionStore()
+  await syncTaskProjection(store, {
+    ...createSummary(),
+    taskId: 'task-run-uuid-started',
+    taskProjectionId: 'task-run-uuid-started',
+    taskSummary: '旧 UUID 请求',
+    updatedAt: '2026-04-16T11:02:00.000Z',
+  }, {
+    ...createPayload(),
+    runId: 'run-old-alpha',
+    taskId: 'task-run-uuid-started',
+    timestamp: '2026-04-16T11:02:00.000Z',
+  })
+
+  counters.updateCount = 0
+  const result = await syncTaskProjection(store, {
+    ...createSummary(),
+    taskId: 'task-run-uuid-started',
+    taskProjectionId: 'task-run-uuid-started',
+    taskSummary: '新 UUID started 接管',
+    updatedAt: '2026-04-16T11:01:00.000Z',
+  }, {
+    ...createPayload(),
+    type: 'started',
+    runId: 'run-new-gamma',
+    taskId: 'task-run-uuid-started',
+    timestamp: '2026-04-16T11:01:00.000Z',
+  })
+
+  assert.equal(counters.updateCount, 1)
+  assert.equal(result?.runId, 'run-new-gamma')
+  assert.equal(records.get('task-run-uuid-started')?.taskSummary, '新 UUID started 接管')
 })
 
 test('syncTaskProjection lets a newer runId take over an existing projection', async () => {
