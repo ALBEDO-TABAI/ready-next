@@ -13,6 +13,10 @@ import { basename, join, resolve } from 'node:path'
 
 import type { SkillHostRequirements } from '../../../../shared/skill-host-contract'
 import { atomicWriteJson } from '../../agent-control/atomic-write'
+import {
+  isRunStateBlockedStatus,
+  isRunStateFailedStatus,
+} from '../../agent-control/task-projection/run-state-schema'
 import { createToolExecutionOutput, type ToolExecutionOutput } from '../../agent-control/tools-runtime/tool-result-types'
 import { ToolDomainError } from '../tool-errors'
 import type { TurnFramePatch } from '../../agent-control/runtime-core/turn-frame'
@@ -335,7 +339,7 @@ function clearStaleConfigBlockerAfterValidation(
   const previousStatus = asString(state.status)
   if (!previousError || !isConfigBlockerText(previousError)) return null
   state.last_error = ''
-  if (previousStatus === 'blocked' || previousStatus === 'failed' || previousStatus === 'paused') {
+  if (isRunStateBlockedStatus(previousStatus) || isRunStateFailedStatus(previousStatus)) {
     state.status = 'running'
   }
   state.updated_at = new Date().toISOString()

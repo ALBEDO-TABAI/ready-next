@@ -172,7 +172,7 @@ test('runtime host is split into run coordinator, run projection, and execution 
   assert.match(runtime, /import \{ RunProjection \} from '\.\.\/task-projection\/run-projection'/)
   assert.match(runtime, /private readonly runCoordinator: RunCoordinator/)
   assert.match(runtime, /private readonly runProjection: RunProjection/)
-  assert.match(runtime, /(?:return|const\s+\w+\s*=\s*await)\s+this\.runCoordinator\.runScoped\(/)
+  assert.match(runtime, /(?:return|const\s+\w+\s*=\s*await|\w+\s*=\s*await)\s+this\.runCoordinator\.runScoped\(/)
   assert.match(runtime, /(?:return\s+|const\s+\w+\s*=\s*)?await\s+this\.runCoordinator\.runInboundChannel\(/)
   assert.match(runtime, /return this\.runProjection\.recordEvent\(/)
   assert.doesNotMatch(runtime, /const promptAssembly = await this\.promptAssembly\.buildForScopedRun\(/)

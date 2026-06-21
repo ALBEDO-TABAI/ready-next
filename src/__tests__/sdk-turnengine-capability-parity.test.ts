@@ -11,6 +11,7 @@ import {
   reconcileAfterBrowserDecision,
 } from '../main/modules/agent-control/domain-adapters/run-capability-controller'
 import { resolveCapabilityResolution } from '../main/modules/agent-control/domain-adapters/capability-resolver'
+import { AgentSdkRuntime } from '../main/modules/agent-control/runtime-core/agent-sdk-runtime'
 import {
   buildExplicitNoSkillAuthorization,
   buildSelectedSkillToolAuthorization,
@@ -95,6 +96,39 @@ function buildControllerResolution(testCase: CapabilityCase) {
       userText: testCase.userText,
     },
   })
+}
+
+function listLiveSdkDefaultToolNames(input: {
+  userText: string
+  requestEnvelope?: unknown
+  authorization?: SkillToolAuthorization
+}): string[] {
+  const runtime = new AgentSdkRuntime({
+    loadAIConfig: () => ({ ok: true, config: BASE_CONFIG, reason: 'present' }),
+    domainAdapters: [],
+  })
+  const privateRuntime = runtime as unknown as {
+    listDefaultToolDefinitionsForTurn: (params: {
+      message: string
+      sessionId?: string
+      scopeId?: string
+      config: AIModelConfig
+      browserHostAvailable: boolean
+      feishuConnected: boolean
+      authorization: SkillToolAuthorization
+      requestEnvelope?: unknown
+    }) => Array<{ name: string }>
+  }
+  return privateRuntime.listDefaultToolDefinitionsForTurn({
+    message: input.userText,
+    sessionId: 'scope-live-sdk-parity',
+    scopeId: 'scope-live-sdk-parity',
+    config: BASE_CONFIG,
+    browserHostAvailable: true,
+    feishuConnected: true,
+    authorization: input.authorization || buildExplicitNoSkillAuthorization('p9c_live_sdk_tool_list'),
+    requestEnvelope: input.requestEnvelope,
+  }).map((definition) => definition.name).sort()
 }
 
 function buildSdkShapedResolution(testCase: CapabilityCase): CapabilityResolution {
@@ -323,6 +357,25 @@ test('P6e documents the SDK default-tools boundary for collection exposure', () 
   assert.ok(sdkCollection.visibleCapabilityGroupIds.includes('browser_content_tasks'))
   assert.equal(sdkCollection.groupStates.browser_interaction.reason, 'enabled')
   assert.equal(sdkCollection.groupStates.browser_content_tasks.reason, 'enabled')
+})
+
+test('P9C checks the live SDK default tool list exposes only the collection subset', () => {
+  const userText = [
+    '继续采集',
+    '',
+    '### 浏览页面引用',
+    '标题: 示例页面',
+    'URL: https://example.test/',
+  ].join('\n')
+  const toolNames = listLiveSdkDefaultToolNames({
+    userText,
+    requestEnvelope: buildRequestEnvelope({ userText }),
+  })
+
+  assert.ok(toolNames.includes('browser_visible_collect'))
+  assert.ok(toolNames.includes('ask_user_questions'))
+  assert.equal(toolNames.includes('browser_click'), false)
+  assert.equal(toolNames.includes('browser_type'), false)
 })
 
 test('P6e keeps reconcileAfterBrowserDecision parity for late browser upload decisions', () => {

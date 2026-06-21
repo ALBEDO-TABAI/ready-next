@@ -244,7 +244,7 @@ export async function finalizeRunOutcome(outcome: RunOutcome, deps: RunFinalizer
   }
 
   if (outcome.kind === 'checkpoint') {
-    if (!isValidContinuationHandle(outcome.continuationHandle)) {
+    if (requiresCheckpointContinuationHandle(outcome.terminalReason) && !isValidContinuationHandle(outcome.continuationHandle)) {
       writeRunMetaOutcome(outcome, deps, 'error', 'checkpoint_degraded_error')
       deps.writeRunCloseMetric(toRunCloseMetric(outcome, 'checkpoint_degraded_error'))
       throw new Error('checkpoint outcome requires a valid continuation handle')
@@ -519,4 +519,8 @@ function toRunCloseMetric(
 
 function isValidContinuationHandle(handle: string | null): handle is string {
   return typeof handle === 'string' && handle.trim().length > 0
+}
+
+function requiresCheckpointContinuationHandle(terminalReason?: string | null): boolean {
+  return terminalReason !== 'checkpoint_user_input'
 }

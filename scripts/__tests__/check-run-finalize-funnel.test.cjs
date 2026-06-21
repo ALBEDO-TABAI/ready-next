@@ -123,6 +123,7 @@ export async function sendMessage() {
   const r = runIn(root)
   assert.equal(r.status, 1)
   assert.match(r.stderr, /agent_sdk_c03_early_return/)
+  assert.match(r.stderr, /agent_sdk_structural_terminal_return/)
 })
 
 test('run finalize gate passes on the real codebase', () => {

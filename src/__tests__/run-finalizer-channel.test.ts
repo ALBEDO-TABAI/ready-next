@@ -163,7 +163,30 @@ describe('finalizeRunOutcome', () => {
     }])
   })
 
-  test('checkpoint path with a null or empty handle rejects and writes degraded metric', async () => {
+  test('checkpoint_user_input can close through the finalizer without a file handle', async () => {
+    const { metrics, deps } = createMetricSpy()
+
+    await finalizeRunOutcome({
+      kind: 'checkpoint',
+      runId: 'run-user-input-checkpoint',
+      continuationHandle: null,
+      terminalReason: 'checkpoint_user_input',
+      durationMs: 400,
+      toolCallsUsed: 2,
+      initiator: 'user_input',
+    }, deps)
+
+    assert.deepEqual(metrics, [{
+      runId: 'run-user-input-checkpoint',
+      terminalReason: 'checkpoint_user_input',
+      initiator: 'user_input',
+      toolCallsUsed: 2,
+      durationMs: 400,
+      taskType: null,
+    }])
+  })
+
+  test('budget checkpoint path with a null or empty handle rejects and writes degraded metric', async () => {
     for (const continuationHandle of [null, '']) {
       const { metrics, deps } = createMetricSpy()
 
@@ -172,6 +195,7 @@ describe('finalizeRunOutcome', () => {
           kind: 'checkpoint',
           runId: 'run-degraded',
           continuationHandle: continuationHandle as string,
+          terminalReason: 'checkpoint_budget',
           durationMs: 300,
           toolCallsUsed: 1,
           initiator: 'budget',

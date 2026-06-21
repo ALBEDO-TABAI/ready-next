@@ -65,6 +65,49 @@ export function normalizeRunStateStatus(value: unknown): NormalizedRunStateStatu
   return null
 }
 
+export function runStateStatusText(value: unknown): string | null {
+  const raw = typeof value === 'string' ? value.trim().toLowerCase() : ''
+  return raw || null
+}
+
+export function isRunStateDoneStatus(value: unknown): boolean {
+  return normalizeRunStateStatus(value) === 'done'
+}
+
+export function isRunStateFailedStatus(value: unknown): boolean {
+  return normalizeRunStateStatus(value) === 'failed'
+}
+
+export function isRunStateCancelledStatus(value: unknown): boolean {
+  return normalizeRunStateStatus(value) === 'cancelled'
+}
+
+export function isRunStateFailedOrCancelledStatus(value: unknown): boolean {
+  return isRunStateFailedStatus(value) || isRunStateCancelledStatus(value)
+}
+
+export function isRunStateBlockedStatus(value: unknown): boolean {
+  return normalizeRunStateStatus(value) === 'blocked'
+}
+
+export function isRunStateRunningStatus(value: unknown): boolean {
+  return normalizeRunStateStatus(value) === 'running'
+}
+
+export function isRunStateReadyToFinalizeStatus(value: unknown): boolean {
+  const raw = runStateStatusText(value)
+  return raw === 'ready_to_resume' || raw === 'ready_to_finalize'
+}
+
+export function isRunStateRecoverablePausedStatus(value: unknown): boolean {
+  const raw = runStateStatusText(value)
+  return raw === 'recoverable_paused' || raw === 'budget_paused'
+}
+
+export function isRunStatePausedStatus(value: unknown): boolean {
+  return runStateStatusText(value) === 'paused'
+}
+
 function nonEmptyString(rec: Record<string, unknown>, keys: readonly string[]): string | null {
   for (const key of keys) {
     const value = rec[key]

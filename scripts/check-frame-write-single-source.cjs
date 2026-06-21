@@ -36,11 +36,15 @@
 const fs = require('node:fs')
 const path = require('node:path')
 
-const REPO = path.resolve(__dirname, '..')
+const REPO = process.env.READY_FRAME_GATE_ROOT
+  ? path.resolve(process.env.READY_FRAME_GATE_ROOT)
+  : path.resolve(__dirname, '..')
 
 const SCOPE_B_FILE = path.join(REPO, 'src/main/modules/agent-control/turn-engine.ts')
 
 const SCOPE_A_DIR = path.join(REPO, 'src/main/modules/tools')
+const LIVE_TOOL_RUNTIME_DIR = path.join(REPO, 'src/main/modules/agent-control/tools-runtime')
+const LIVE_TOOL_RUNTIME_FILE = path.join(LIVE_TOOL_RUNTIME_DIR, 'tool-runtime.ts')
 
 // Patterns that fail in BOTH scopes — direct mutations of the live TurnFrame.
 // Tools should never touch a TurnFrame at all; the engine should only do so
@@ -121,6 +125,60 @@ function scanFile(file, patterns) {
   return violations
 }
 
+function functionRange(text, name) {
+  const start = text.indexOf(`function ${name}`)
+  if (start < 0) return null
+  const open = text.indexOf('{', start)
+  if (open < 0) return null
+  let depth = 0
+  for (let index = open; index < text.length; index++) {
+    const ch = text[index]
+    if (ch === '{') depth += 1
+    if (ch === '}') {
+      depth -= 1
+      if (depth === 0) return { start, end: index + 1 }
+    }
+  }
+  return null
+}
+
+function blankRangePreserveLines(text, range) {
+  return text.slice(0, range.start)
+    + text.slice(range.start, range.end).replace(/[^\r\n]/g, ' ')
+    + text.slice(range.end)
+}
+
+function scanLiveActiveFrameWriters(file) {
+  const violations = []
+  let src
+  try {
+    src = fs.readFileSync(file, 'utf8')
+  } catch {
+    return violations
+  }
+  src = src.replace(/\/\*[\s\S]*?\*\//g, (match) => match.replace(/[^\n]/g, ' '))
+  if (path.resolve(file) === path.resolve(LIVE_TOOL_RUNTIME_FILE)) {
+    const allowed = functionRange(src, 'applyContextModifier')
+    if (allowed) src = blankRangePreserveLines(src, allowed)
+  }
+  const patterns = [
+    /\bcontext\.activeFrame\s*=/,
+    /\bcontext\.activeFrame\.(?:activeArtifactRoots|runContract|discoveredHandles)\s*=/,
+    /\bcontext\.activeFrame\.(?:activeArtifactRoots|discoveredHandles)\.(?:push|unshift|splice)\s*\(/,
+    /\bObject\.assign\s*\(\s*context\.activeFrame\b/,
+  ]
+  const lines = src.split('\n')
+  for (let i = 0; i < lines.length; i++) {
+    const stripped = stripComments(lines[i])
+    for (const pattern of patterns) {
+      if (pattern.test(stripped)) {
+        violations.push({ file, line: i + 1, code: lines[i].trim(), pattern: pattern.toString() })
+      }
+    }
+  }
+  return violations
+}
+
 function main() {
   let allViolations = []
 
@@ -134,6 +192,10 @@ function main() {
   // assembly here.
   for (const file of listFiles(SCOPE_A_DIR)) {
     allViolations = allViolations.concat(scanFile(file, FORBIDDEN_PATTERNS_ALL))
+  }
+
+  for (const file of listFiles(LIVE_TOOL_RUNTIME_DIR)) {
+    allViolations = allViolations.concat(scanLiveActiveFrameWriters(file))
   }
 
   if (allViolations.length === 0) {

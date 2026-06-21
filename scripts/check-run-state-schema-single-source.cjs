@@ -12,11 +12,15 @@ const path = require('node:path')
 const ROOT = process.cwd()
 const SCAN_RELS = [
   'src/main/modules/agent-control/task-projection',
+  'src/main/modules/agent-control/video-expert-child-driver.ts',
   'src/main/modules/agent-control/skills/skill-running-projection.ts',
   'src/main/modules/agent-control/skills/skill-task-tracker.ts',
   'src/main/modules/agent-control/skills/skill-task-supervisor.ts',
   'src/main/modules/agent-control/skills/skill-child-runner.ts',
   'src/main/modules/agent-control/skills/skill-child-sub-agent.ts',
+  'src/main/modules/tools/skills-tools.ts',
+  'src/main/modules/tools/skill-primitives/inspect-run-state.ts',
+  'src/main/modules/tools/skill-primitives/patch-config.ts',
 ]
 const SCHEMA_REL = 'src/main/modules/agent-control/task-projection/run-state-schema.ts'
 
@@ -58,6 +62,18 @@ function main() {
     if (!/export\s+function\s+validateRunStateRecord\s*\(/.test(schemaText)) {
       violations.push({ file: SCHEMA_REL, line: 0, kind: 'validator_missing', detail: 'validateRunStateRecord is not exported' })
     }
+    for (const helper of [
+      'isRunStateDoneStatus',
+      'isRunStateFailedStatus',
+      'isRunStateFailedOrCancelledStatus',
+      'isRunStateBlockedStatus',
+      'isRunStateRunningStatus',
+      'isRunStateReadyToFinalizeStatus',
+    ]) {
+      if (!new RegExp(`export\\s+function\\s+${helper}\\s*\\(`).test(schemaText)) {
+        violations.push({ file: SCHEMA_REL, line: 0, kind: 'status_helper_missing', detail: `${helper} is not exported` })
+      }
+    }
   }
 
   for (const rel of SCAN_RELS) {
@@ -78,6 +94,24 @@ function main() {
           line: lineOf(text, match.index),
           kind: 'direct_run_state_json_parse',
           detail: 'run_state.json reads must go through run-state-schema.ts',
+        })
+      }
+      const copiedStatusSet = /const\s+\w*STATUSES\s*=\s*new Set\s*\(\s*\[[\s\S]{0,300}?(?:ready_to_finalize|pending_review|awaiting_input|succeeded|cancelled|canceled)[\s\S]{0,300}?\]\s*\)/g
+      while ((match = copiedStatusSet.exec(text))) {
+        violations.push({
+          file: fileRel,
+          line: lineOf(text, match.index),
+          kind: 'local_run_state_status_set',
+          detail: 'run_state status groups must use helpers from run-state-schema.ts',
+        })
+      }
+      const localNormalizer = /function\s+normalizeRunStateStatus\s*\(/g
+      while ((match = localNormalizer.exec(text))) {
+        violations.push({
+          file: fileRel,
+          line: lineOf(text, match.index),
+          kind: 'local_run_state_status_normalizer',
+          detail: 'run_state status normalization must use run-state-schema.ts',
         })
       }
     }

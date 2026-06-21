@@ -29,6 +29,12 @@ function writeSchema(root) {
   writeFile(root, 'src/main/modules/agent-control/task-projection/run-state-schema.ts', `
 export function parseRunStateJson(): void {}
 export function validateRunStateRecord(): void {}
+export function isRunStateDoneStatus(): void {}
+export function isRunStateFailedStatus(): void {}
+export function isRunStateFailedOrCancelledStatus(): void {}
+export function isRunStateBlockedStatus(): void {}
+export function isRunStateRunningStatus(): void {}
+export function isRunStateReadyToFinalizeStatus(): void {}
 `)
 }
 
@@ -50,10 +56,27 @@ test('gate fails when schema parser export is missing', (t) => {
   const root = makeHarnessRoot(t)
   writeFile(root, 'src/main/modules/agent-control/task-projection/run-state-schema.ts', `
 export function validateRunStateRecord(): void {}
+export function isRunStateDoneStatus(): void {}
+export function isRunStateFailedStatus(): void {}
+export function isRunStateFailedOrCancelledStatus(): void {}
+export function isRunStateBlockedStatus(): void {}
+export function isRunStateRunningStatus(): void {}
+export function isRunStateReadyToFinalizeStatus(): void {}
 `)
   const r = runIn(root)
   assert.equal(r.status, 1)
   assert.match(r.stderr, /parser_missing/)
+})
+
+test('gate fails when schema status helpers are missing', (t) => {
+  const root = makeHarnessRoot(t)
+  writeFile(root, 'src/main/modules/agent-control/task-projection/run-state-schema.ts', `
+export function parseRunStateJson(): void {}
+export function validateRunStateRecord(): void {}
+`)
+  const r = runIn(root)
+  assert.equal(r.status, 1)
+  assert.match(r.stderr, /status_helper_missing/)
 })
 
 test('gate flags direct run_state JSON.parse(readFileSync(...)) readers', (t) => {
@@ -68,6 +91,18 @@ export function readRunState(path: string) {
   const r = runIn(root)
   assert.equal(r.status, 1)
   assert.match(r.stderr, /direct_run_state_json_parse/)
+})
+
+test('gate flags copied run_state status sets in live readers', (t) => {
+  const root = makeHarnessRoot(t)
+  writeSchema(root)
+  writeFile(root, 'src/main/modules/agent-control/video-expert-child-driver.ts', `
+const COMPLETED_STATUSES = new Set(['completed', 'success', 'done', 'succeeded', 'complete'])
+export function ok(status: string) { return COMPLETED_STATUSES.has(status) }
+`)
+  const r = runIn(root)
+  assert.equal(r.status, 1)
+  assert.match(r.stderr, /local_run_state_status_set/)
 })
 
 test('gate ignores non-run_state JSON helpers in scanned files', (t) => {

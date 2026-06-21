@@ -18,6 +18,7 @@ const TASK_OPEN_STATUS_REL = 'src/main/modules/agent-control/contracts/task-open
 const RUN_STATE_SCHEMA_REL = 'src/main/modules/agent-control/task-projection/run-state-schema.ts'
 const DETACHED_TRACKER_REL = 'src/main/modules/agent-control/detached-skill-task-tracker.ts'
 const ERROR_KINDS_REL = 'src/main/modules/agent-control/contracts/error-kinds.ts'
+const TOOL_RESULT_ENVELOPE_REL = 'src/main/modules/tools/tool-result-envelope.ts'
 
 const PROVIDER_ERROR_KIND_TARGETS = [
   'src/main/modules/claude-bridge/llm-resilience.ts',
@@ -286,6 +287,57 @@ function registeredErrorKinds() {
   return new Set([...registry.matchAll(/code:\s*['"]([a-z][a-z0-9_]+)['"]/g)].map((m) => m[1]))
 }
 
+function errorKindMemberCodeMap() {
+  const registry = read(ERROR_KINDS_REL)
+  const out = new Map()
+  const familyRe = /export\s+const\s+(\w+_ERROR_KINDS)\s*=\s*\{([\s\S]*?)\n\}\s+as\s+const/g
+  let familyMatch
+  while ((familyMatch = familyRe.exec(registry))) {
+    const familyName = familyMatch[1]
+    const familyBody = familyMatch[2]
+    const memberRe = /\n\s*(\w+):\s*\{[\s\S]*?code:\s*['"]([a-z][a-z0-9_]+)['"]/g
+    let memberMatch
+    while ((memberMatch = memberRe.exec(familyBody))) {
+      out.set(`${familyName}.${memberMatch[1]}.code`, memberMatch[2])
+    }
+  }
+  return out
+}
+
+function readConstObjectBlock(rel, name) {
+  const text = read(rel)
+  const declaration = new RegExp(`const\\s+${name}\\s*(?::[^=]+)?=\\s*\\{`).exec(text)
+  if (!declaration) return null
+  const open = text.indexOf('{', declaration.index)
+  let depth = 0
+  for (let index = open; index < text.length; index += 1) {
+    const ch = text[index]
+    if (ch === '{') depth += 1
+    if (ch === '}') {
+      depth -= 1
+      if (depth === 0) return text.slice(open + 1, index)
+    }
+  }
+  return null
+}
+
+function explicitEnvelopeMappedKinds() {
+  const block = stripComments(readConstObjectBlock(TOOL_RESULT_ENVELOPE_REL, 'EXPLICIT_KIND_MAP') || '')
+  const members = errorKindMemberCodeMap()
+  const out = new Set()
+  let match
+  const literalKey = /(?:^|[\n,])\s*([a-z][a-z0-9_]+)\s*:/g
+  while ((match = literalKey.exec(block))) {
+    out.add(match[1])
+  }
+  const computedKey = /\[\s*([A-Z_]+_ERROR_KINDS\.\w+\.code)\s*\]\s*:/g
+  while ((match = computedKey.exec(block))) {
+    const code = members.get(match[1])
+    if (code) out.add(code)
+  }
+  return out
+}
+
 function readExportedObjectBlock(rel, name) {
   const text = read(rel)
   const declaration = new RegExp(`export\\s+const\\s+${name}\\s*=\\s*\\{`).exec(text)
@@ -449,7 +501,7 @@ function assertNoBareLocalLiterals(violations, rels, codes, constantName) {
 }
 
 function assertExplicitEnvelopeMappings(violations, familyName, mappings) {
-  const rel = 'src/main/modules/tools/tool-result-envelope.ts'
+  const rel = TOOL_RESULT_ENVELOPE_REL
   const text = stripComments(read(rel))
   for (const [member, expectedKind] of mappings) {
     const pattern = new RegExp(
@@ -462,6 +514,21 @@ function assertExplicitEnvelopeMappings(violations, familyName, mappings) {
         1,
         'error_kind_envelope_mapping_missing',
         `${familyName}.${member}.code must be explicitly mapped to ${expectedKind}`,
+      )
+    }
+  }
+}
+
+function assertRegisteredErrorKindsEnvelopeMapped(violations) {
+  const mapped = explicitEnvelopeMappedKinds()
+  for (const code of registeredErrorKinds()) {
+    if (!mapped.has(code)) {
+      push(
+        violations,
+        TOOL_RESULT_ENVELOPE_REL,
+        1,
+        'error_kind_envelope_mapping_missing',
+        `${code} is registered in error-kinds.ts but missing from EXPLICIT_KIND_MAP`,
       )
     }
   }
@@ -544,6 +611,7 @@ function main() {
       ['clientMissing', 'upstream_error'],
       ['toolFailed', 'upstream_error'],
     ])
+    assertRegisteredErrorKindsEnvelopeMapped(violations)
   } catch (error) {
     console.error(`check-shared-enum-drift: ${error instanceof Error ? error.message : String(error)}`)
     process.exit(1)

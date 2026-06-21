@@ -27,6 +27,8 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { execFileSync } from 'node:child_process'
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -34,14 +36,23 @@ const __dirnameLocal = dirname(fileURLToPath(import.meta.url))
 const REPO = resolve(__dirnameLocal, '..', '..')
 const GATE = join(REPO, 'scripts', 'check-frame-write-single-source.cjs')
 
-function runGate(): { ok: boolean; output: string } {
+function runGate(root?: string): { ok: boolean; output: string } {
   try {
-    const stdout = execFileSync('node', [GATE], { encoding: 'utf8' })
+    const stdout = execFileSync('node', [GATE], {
+      encoding: 'utf8',
+      env: root ? { ...process.env, READY_FRAME_GATE_ROOT: root } : process.env,
+    })
     return { ok: true, output: stdout }
   } catch (err: unknown) {
     const e = err as { status?: number; stdout?: string; stderr?: string }
     return { ok: false, output: `${e.stdout || ''}\n${e.stderr || ''}` }
   }
+}
+
+function write(root: string, rel: string, text: string): void {
+  const abs = join(root, rel)
+  mkdirSync(dirname(abs), { recursive: true })
+  writeFileSync(abs, text)
 }
 
 test('check-frame-write-single-source: passes on the current Stage M codebase', () => {
@@ -66,4 +77,24 @@ test('check-frame-write-single-source: catches direct turnFrame.terminalReason =
   for (const p of forbiddenPatterns) {
     assert.ok(typeof p === 'string' && p.length > 0)
   }
+})
+
+test('check-frame-write-single-source: catches live activeFrame writes outside applyContextModifier', (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'frame-write-gate-'))
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  write(root, 'src/main/modules/agent-control/turn-engine.ts', 'export function ok() {}\n')
+  write(root, 'src/main/modules/tools/noop.ts', 'export function ok() {}\n')
+  write(root, 'src/main/modules/agent-control/tools-runtime/tool-runtime.ts', `
+export function applyContextModifier(context, output) {
+  context.activeFrame = output.activeFrame
+}
+`)
+  write(root, 'src/main/modules/agent-control/tools-runtime/rogue-live-frame.ts', `
+export function rogue(context) {
+  context.activeFrame.runContract = null
+}
+`)
+  const result = runGate(root)
+  assert.equal(result.ok, false)
+  assert.match(result.output, /rogue-live-frame\.ts/)
 })

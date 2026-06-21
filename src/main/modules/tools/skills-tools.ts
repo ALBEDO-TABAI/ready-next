@@ -17,6 +17,13 @@ import {
 } from '../agent-control/contracts/run-contracts'
 import { DETACHED_TASK_ERROR_KINDS } from '../agent-control/contracts/error-kinds'
 import {
+  isRunStateBlockedStatus,
+  isRunStateDoneStatus,
+  isRunStateFailedOrCancelledStatus,
+  isRunStateRunningStatus,
+  parseRunStateJson,
+} from '../agent-control/task-projection/run-state-schema'
+import {
   startSkillChildRun,
 } from '../agent-control/skills/skill-child-runner'
 import type {
@@ -485,19 +492,18 @@ function resourceRefsFromParams(params?: Record<string, unknown> | null): unknow
   return refs
 }
 
-function normalizeRunStateStatus(value: unknown): SkillTaskEventStatus | null {
-  const status = typeof value === 'string' ? value.trim().toLowerCase() : ''
-  if (['running', 'in_progress', 'waiting_for_batches', 'ready_to_finalize'].includes(status)) return 'running'
-  if (['done', 'completed', 'complete', 'success', 'succeeded'].includes(status)) return 'done'
-  if (['blocked', 'pending_review', 'awaiting_input'].includes(status)) return 'blocked'
-  if (['failed', 'failure', 'error'].includes(status)) return 'error'
+function skillTaskEventStatusFromRunStateStatus(value: unknown): SkillTaskEventStatus | null {
+  if (isRunStateRunningStatus(value)) return 'running'
+  if (isRunStateDoneStatus(value)) return 'done'
+  if (isRunStateBlockedStatus(value)) return 'blocked'
+  if (isRunStateFailedOrCancelledStatus(value)) return 'error'
   return null
 }
 
 function findStatusInObject(value: unknown, depth = 0): SkillTaskEventStatus | null {
   if (depth > 4 || !value || typeof value !== 'object') return null
   const rec = value as Record<string, unknown>
-  const direct = normalizeRunStateStatus(rec.status)
+  const direct = skillTaskEventStatusFromRunStateStatus(rec.status)
   if (direct) return direct
   for (const key of ['run_state', 'runState', 'projection', 'data', 'summary']) {
     const nested = findStatusInObject(rec[key], depth + 1)
@@ -508,7 +514,7 @@ function findStatusInObject(value: unknown, depth = 0): SkillTaskEventStatus | n
 
 function findStatusInText(text: string): SkillTaskEventStatus | null {
   const match = String(text || '').match(/(?:^|\n)\s*status\s*[:=]\s*([a-z0-9_-]+)/i)
-  return match ? normalizeRunStateStatus(match[1]) : null
+  return match ? skillTaskEventStatusFromRunStateStatus(match[1]) : null
 }
 
 function parseJsonCandidates(text: string): unknown[] {
@@ -562,7 +568,8 @@ function readRunStateStatus(path: string): SkillTaskEventStatus | null {
   try {
     if (!existsSync(path)) return null
     const raw = readFileSync(path, 'utf-8')
-    return findStatusInObject(JSON.parse(raw))
+    const parsed = parseRunStateJson(raw, { path })
+    return parsed.ok ? skillTaskEventStatusFromRunStateStatus(parsed.value.statusText) : null
   } catch {
     return null
   }

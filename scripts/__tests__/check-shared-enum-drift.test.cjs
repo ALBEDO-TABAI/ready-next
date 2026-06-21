@@ -185,16 +185,65 @@ export function fail(ToolDomainError) { throw new ToolDomainError(MCP_TOOL_ERROR
 export const fallback = MCP_TOOL_ERROR_KINDS.toolFailed.code
 `)
   writeFile(root, 'src/main/modules/tools/tool-result-envelope.ts', `
-import { ACTION_CONFIRMATION_ERROR_KINDS, MCP_TOOL_ERROR_KINDS, TOOL_ADMISSION_ERROR_KINDS, WEB_RESEARCH_ERROR_KINDS } from '../agent-control/contracts/error-kinds'
-export const map = { [TOOL_ADMISSION_ERROR_KINDS.toolNotRegistered.code]: 'not_found' }
-export const mcpMap = {
+import {
+  ACTION_CONFIRMATION_ERROR_KINDS,
+  MCP_TOOL_ERROR_KINDS,
+  TOOL_ADMISSION_ERROR_KINDS,
+  WEB_RESEARCH_ERROR_KINDS,
+} from '../agent-control/contracts/error-kinds'
+const EXPLICIT_KIND_MAP = {
+  input_validation: 'arg_error',
+  persistence_failed: 'internal_error',
+  waiting_task_gone: 'not_found',
+  card_resolver_missed: 'internal_error',
+  overlapping_card: 'denied_by_policy',
+  user_skipped: 'denied_by_policy',
+  user_cancelled: 'denied_by_policy',
+  aborted: 'internal_error',
+  timeout: 'network_error',
+  cancel_persist_failed: 'internal_error',
+  provider_request_failed: 'upstream_error',
+  provider_thinking_echo_required: 'upstream_error',
+  detached_task_failed: 'internal_error',
+  detached_task_not_found: 'not_found',
+  detached_task_forbidden: 'denied_by_policy',
+  detached_task_runtime_unavailable: 'upstream_error',
+  detached_task_skill_action_unknown: 'not_found',
+  detached_task_skill_not_loaded: 'not_found',
+  detached_task_hint_required: 'arg_error',
+  detached_task_visibility_internal: 'denied_by_policy',
+  detached_task_start_failed: 'internal_error',
+  blocked_external: 'denied_by_policy',
+  send_failed: 'upstream_error',
+  sidecar_unavailable: 'upstream_error',
+  channel_not_ready: 'upstream_error',
+  directory_not_supported: 'arg_error',
+  file_not_found: 'not_found',
+  file_ambiguous: 'arg_error',
+  intent_negated: 'denied_by_policy',
+  target_document_preserved_content_missing: 'arg_error',
+  target_document_open_unavailable: 'upstream_error',
+  target_document_open_failed: 'upstream_error',
+  target_document_save_unavailable: 'upstream_error',
+  target_document_save_failed: 'upstream_error',
+  target_document_required: 'arg_error',
+  browser_tool_failed: 'upstream_error',
+  tool_not_registered: 'not_found',
+  authorization_denied: 'denied_by_policy',
+  internal_tool_not_allowed: 'denied_by_policy',
+  tool_restricted_this_turn: 'denied_by_policy',
+  denied_by_user_negation: 'denied_by_policy',
   [MCP_TOOL_ERROR_KINDS.toolUnregistered.code]: 'not_found',
   [MCP_TOOL_ERROR_KINDS.authorizationDenied.code]: 'denied_by_policy',
   [MCP_TOOL_ERROR_KINDS.clientMissing.code]: 'upstream_error',
   [MCP_TOOL_ERROR_KINDS.toolFailed.code]: 'upstream_error',
-}
-export const confirmationMap = { [ACTION_CONFIRMATION_ERROR_KINDS.deniedManualOnly.code]: 'denied_by_policy' }
-export const webMap = {
+  [ACTION_CONFIRMATION_ERROR_KINDS.deniedManualOnly.code]: 'denied_by_policy',
+  denied_pending_confirmation: 'denied_by_policy',
+  confirmation_denied_by_user: 'denied_by_policy',
+  confirmation_expired: 'denied_by_policy',
+  verbatim_source_unavailable: 'arg_error',
+  verbatim_mismatch: 'arg_error',
+  confirmed_blueprint_immutable: 'denied_by_policy',
   [WEB_RESEARCH_ERROR_KINDS.webSearchFailed.code]: 'upstream_error',
   [WEB_RESEARCH_ERROR_KINDS.webFetchFailed.code]: 'upstream_error',
 }
@@ -743,6 +792,17 @@ export const map = {
   const result = runIn(root)
   assert.equal(result.status, 1)
   assert.match(result.stderr, /error_kind_envelope_mapping_missing/)
+})
+
+test('shared enum drift gate fails when any registered errorKind is missing from EXPLICIT_KIND_MAP', (t) => {
+  const root = makeHarnessRoot(t)
+  const rel = 'src/main/modules/tools/tool-result-envelope.ts'
+  const abs = path.join(root, rel)
+  const text = fs.readFileSync(abs, 'utf8')
+  fs.writeFileSync(abs, text.replace("  provider_request_failed: 'upstream_error',\n", ''))
+  const result = runIn(root)
+  assert.equal(result.status, 1)
+  assert.match(result.stderr, /provider_request_failed is registered/)
 })
 
 test('shared enum drift gate fails when provider codes are registered in the wrong family', (t) => {

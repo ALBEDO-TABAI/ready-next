@@ -231,6 +231,62 @@ function pushAgentSdkC03Violations(violations, text) {
   }
 }
 
+function terminalReasonFromEmitStatusCall(callText) {
+  const args = callText.slice(callText.indexOf('(') + 1, callText.lastIndexOf(')'))
+  const firstArg = args.split(',')[0]?.trim().replace(/^['"]|['"]$/g, '')
+  if (TERMINAL_RUN_META_STATUSES.includes(firstArg)) return firstArg
+  return null
+}
+
+function pushAgentSdkStructuralFinalizerViolations(violations, text) {
+  const rel = AGENT_SDK_RUNTIME_REL
+  const start = text.indexOf('async sendMessage(')
+  const end = text.indexOf('\n  private async persistRunMetaSnapshot', start)
+  const body = start >= 0 && end > start ? text.slice(start, end) : text
+  const bodyLineOffset = start >= 0 ? lineOf(text, start) - 1 : 0
+  const emitStatusRe = /\bemitStatus\s*\([^)]*\)/g
+  let emitMatch
+  while ((emitMatch = emitStatusRe.exec(body))) {
+    const call = emitMatch[0]
+    const terminalStatus = terminalReasonFromEmitStatusCall(call)
+    const secondArgTerminal = /,\s*(?:['"](?:done|error|cancelled|checkpoint|blocked_[a-z_]+|checkpoint_[a-z_]+|persistence_failed|failed_skill|cancelled_[a-z_]+)['"]|[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)/.test(call)
+    if (!terminalStatus && !secondArgTerminal) continue
+    const nextReturn = body.indexOf('return this.buildResult', emitMatch.index)
+    if (nextReturn < 0) continue
+    const nextFinalize = Math.min(
+      ...[
+        body.indexOf('finalizeEarlyReturn', emitMatch.index),
+        body.indexOf('finalizeRunOutcome', emitMatch.index),
+        body.indexOf('recordAdmissionRejection', emitMatch.index),
+      ].filter((idx) => idx >= 0),
+    )
+    if (Number.isFinite(nextFinalize) && nextFinalize < nextReturn) continue
+    violations.push({
+      file: rel,
+      line: bodyLineOffset + lineOf(body, emitMatch.index),
+      kind: 'agent_sdk_structural_terminal_return',
+      detail: 'terminal emitStatus before return buildResult must route through finalizeEarlyReturn/finalizeRunOutcome',
+    })
+  }
+
+  const returnRe = /return\s+this\.buildResult\s*\(\s*\{/g
+  let returnMatch
+  while ((returnMatch = returnRe.exec(body))) {
+    const window = body.slice(returnMatch.index, Math.min(body.length, returnMatch.index + 900))
+    if (!/\bterminalReason\s*:/.test(window)) continue
+    const prefix = body.slice(Math.max(0, returnMatch.index - 5000), returnMatch.index)
+    const allowed = /finalizeEarlyReturn|finalizeRunOutcome|recordAdmissionRejection/.test(prefix)
+    const manualSuspend = /abortInitiator\s*===\s*['"]manual_suspend['"][\s\S]{0,900}$/.test(prefix)
+    if (allowed || manualSuspend) continue
+    violations.push({
+      file: rel,
+      line: bodyLineOffset + lineOf(body, returnMatch.index),
+      kind: 'agent_sdk_structural_terminal_return',
+      detail: 'return buildResult with terminalReason must be preceded by finalizeEarlyReturn/finalizeRunOutcome or the admission finalizer',
+    })
+  }
+}
+
 function main() {
   const violations = []
   const files = []
@@ -321,7 +377,9 @@ function main() {
 
   const agentSdkRuntimePath = path.join(ROOT, AGENT_SDK_RUNTIME_REL)
   if (fs.existsSync(agentSdkRuntimePath)) {
-    pushAgentSdkC03Violations(violations, fs.readFileSync(agentSdkRuntimePath, 'utf8'))
+    const agentSdkRuntimeText = fs.readFileSync(agentSdkRuntimePath, 'utf8')
+    pushAgentSdkC03Violations(violations, agentSdkRuntimeText)
+    pushAgentSdkStructuralFinalizerViolations(violations, agentSdkRuntimeText)
   }
 
   if (violations.length === 0) {

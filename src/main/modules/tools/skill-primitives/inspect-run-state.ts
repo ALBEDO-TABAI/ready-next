@@ -32,6 +32,15 @@ import { logAgentMetric } from '../../agent-control/metrics'
 import { TOOL_ERROR_METRICS } from '../../agent-control/tools-runtime/tool-error-metrics'
 import { getDetachedSkillTaskTracker, type DetachedSkillTaskRecord } from '../../agent-control/detached-skill-task-tracker'
 import { inspectSkillProgressArtifacts, type SkillProgressArtifacts } from '../../agent-control/skills/skill-progress-artifacts'
+import {
+  isRunStateBlockedStatus,
+  isRunStateDoneStatus,
+  isRunStateFailedOrCancelledStatus,
+  isRunStatePausedStatus,
+  isRunStateRecoverablePausedStatus,
+  isRunStateRunningStatus,
+  parseRunStateJson,
+} from '../../agent-control/task-projection/run-state-schema'
 import { selectRunStateCandidate, type RunStateCandidate } from '../../agent-control/task-projection/run-state-selection'
 import {
   buildContractFramePatch,
@@ -190,17 +199,17 @@ function createMissingRunStateOutput(params: {
   )
 }
 
-function normalizeStatus(value: unknown): string | null {
-  return typeof value === 'string' && value.trim().length > 0 ? value.trim().toLowerCase() : null
-}
-
 function deriveReconciledLiveness(summary: RunStateSummary, artifactProgress: SkillProgressArtifacts): string {
-  const status = normalizeStatus(summary.status)
-  if (['completed', 'success', 'done'].includes(status || '')) return 'done'
-  if (['failed', 'failure', 'error'].includes(status || '')) return 'failed'
-  if (['blocked', 'pending_review', 'awaiting_input'].includes(status || '')) return 'blocked'
-  if (['recoverable_paused', 'budget_paused'].includes(status || '')) return 'recoverable_paused'
-  if (['running', 'waiting_for_batches', 'ready_to_finalize', 'paused'].includes(status || '')) {
+  const status = summary.status
+  if (isRunStateDoneStatus(status)) return 'done'
+  if (isRunStateFailedOrCancelledStatus(status)) return 'failed'
+  if (isRunStateRecoverablePausedStatus(status)) return 'recoverable_paused'
+  if (isRunStatePausedStatus(status)) {
+    if (artifactProgress.hasEvidence) return 'recoverable_paused'
+    return 'unknown'
+  }
+  if (isRunStateBlockedStatus(status)) return 'blocked'
+  if (isRunStateRunningStatus(status)) {
     if (artifactProgress.hasEvidence) return 'recoverable_paused'
     return 'unknown'
   }
@@ -669,14 +678,15 @@ export async function executeInspectRunState(
   }
   let parsed: unknown
   let parseError: string | null = null
-  try {
-    parsed = JSON.parse(raw)
-  } catch (error) {
+  const parsedRunState = parseRunStateJson(raw, { path: runStatePath })
+  if (parsedRunState.ok) {
+    parsed = parsedRunState.value.raw
+  } else {
     parsed = null
-    parseError = error instanceof Error ? error.message : String(error)
+    parseError = parsedRunState.message
     logAgentMetric(TOOL_ERROR_METRICS.skillPrimitiveRejected, {
       primitive: 'skill_inspect_run_state',
-      reason: 'json_parse_failed',
+      reason: parsedRunState.reason,
       runStatePath,
     })
   }

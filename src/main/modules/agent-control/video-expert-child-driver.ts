@@ -35,6 +35,13 @@ import { logAgentMetric } from './metrics'
 import type { SkillRunContract } from './contracts/run-contracts'
 import { inspectSkillProgressArtifacts, type SkillProgressArtifacts } from './skills/skill-progress-artifacts'
 import {
+  isRunStateBlockedStatus,
+  isRunStateDoneStatus,
+  isRunStateFailedOrCancelledStatus,
+  isRunStateReadyToFinalizeStatus,
+  parseRunStateJson,
+} from './task-projection/run-state-schema'
+import {
   registerSkillChildDriver,
   type SkillChildDriver,
 } from './skills/skill-child-drivers'
@@ -80,15 +87,6 @@ type VeaProviderPreflightConfigReader = () => AIModelConfig | null
 let providerPreflightConfigReaderForTests: VeaProviderPreflightConfigReader | null = null
 let settingsRepository: AppSettingsRepository | null = null
 
-const COMPLETED_STATUSES = new Set(['completed', 'success', 'done', 'succeeded', 'complete'])
-const READY_TO_FINALIZE_STATUSES = new Set(['ready_to_resume', 'ready_to_finalize'])
-const BLOCKED_STATUSES = new Set([
-  'blocked',
-  'pending_review',
-  'awaiting_input',
-  'paused',
-])
-const FAILED_STATUSES = new Set(['failed', 'error', 'cancelled', 'canceled'])
 const POST_SCORE_STAGES = new Set(['score_batches', 'merge_validate', 'finalize'])
 
 function trim(value: unknown): string | null {
@@ -216,15 +214,10 @@ function readRunState(runStatePath: string | null): ParsedVeaRunState | null {
   } catch {
     return null
   }
-  let rec: Record<string, unknown>
-  try {
-    const parsed = JSON.parse(raw) as unknown
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null
-    rec = parsed as Record<string, unknown>
-  } catch {
-    return null
-  }
-  const status = trimLower(rec.status)
+  const parsed = parseRunStateJson(raw, { path: runStatePath })
+  if (!parsed.ok) return null
+  const rec = parsed.value.raw
+  const status = parsed.value.statusText
   const currentStage = pickString(rec, ['current_stage', 'currentStage', 'current_step', 'currentStep'])
   const sceneScoresPath = pickString(rec, ['scene_scores_path', 'sceneScoresPath', 'scores_path'])
   const totalScenes = pickNumber(rec, ['total_scenes', 'totalScenes'])
@@ -498,9 +491,9 @@ class VideoExpertChildDriver implements SkillChildDriver {
     const stagePostScore = parsed?.currentStage
       ? POST_SCORE_STAGES.has(parsed.currentStage)
       : false
-    const readyToFinalize = parsed?.status ? READY_TO_FINALIZE_STATUSES.has(parsed.status) : false
+    const readyToFinalize = parsed?.status ? isRunStateReadyToFinalizeStatus(parsed.status) : false
 
-    if (parsed?.status && COMPLETED_STATUSES.has(parsed.status) && hasUnfinishedArtifactProgress(artifactProgress)) {
+    if (parsed?.status && isRunStateDoneStatus(parsed.status) && hasUnfinishedArtifactProgress(artifactProgress)) {
       if (sceneScoresPath) {
         const input: Record<string, unknown> = { sceneScoresPath }
         const mode = trim(state.requestedInput.mode)
@@ -520,7 +513,7 @@ class VideoExpertChildDriver implements SkillChildDriver {
     }
 
     // Terminal: completed.
-    if (parsed?.status && COMPLETED_STATUSES.has(parsed.status)) {
+    if (parsed?.status && isRunStateDoneStatus(parsed.status)) {
       return {
         ...makeBaseClose(state, parsed, artifactProgress),
         status: 'completed',
@@ -535,7 +528,7 @@ class VideoExpertChildDriver implements SkillChildDriver {
     // real config problems before any host batches launch.
     if (
       parsed?.status
-      && BLOCKED_STATUSES.has(parsed.status)
+      && isRunStateBlockedStatus(parsed.status)
       && !parsed.configIssue
       && parsed.currentStage === 'score_batches'
       && sceneScoresPath
@@ -554,7 +547,7 @@ class VideoExpertChildDriver implements SkillChildDriver {
     // a chance to run the finalize path instead of freezing the parent task.
     if (
       parsed?.status
-      && BLOCKED_STATUSES.has(parsed.status)
+      && isRunStateBlockedStatus(parsed.status)
       && !parsed.configIssue
       && parsed.currentStage === 'finalize'
       && sceneScoresPath
@@ -569,7 +562,7 @@ class VideoExpertChildDriver implements SkillChildDriver {
     }
 
     // Terminal: blocked / awaiting input.
-    if (parsed?.status && BLOCKED_STATUSES.has(parsed.status)) {
+    if (parsed?.status && isRunStateBlockedStatus(parsed.status)) {
       const reason: SkillChildCloseEvent['terminalReason'] = parsed.configIssue
         ? 'blocked_config'
         : 'blocked_external'
@@ -585,7 +578,7 @@ class VideoExpertChildDriver implements SkillChildDriver {
     }
 
     // Terminal: skill-declared failure.
-    if (parsed?.status && FAILED_STATUSES.has(parsed.status)) {
+    if (parsed?.status && isRunStateFailedOrCancelledStatus(parsed.status)) {
       return {
         ...makeBaseClose(state, parsed, artifactProgress),
         status: 'failed',

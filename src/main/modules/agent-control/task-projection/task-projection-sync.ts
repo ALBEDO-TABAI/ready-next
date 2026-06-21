@@ -12,6 +12,11 @@ import { buildTerminalProjectionPatch } from '../runtime-core/run-finalizer'
 import { clearContinuationState, rememberContinuationState } from '../session/session-continuity'
 import type { ScopeRunEventPayload, ScopeRunSummary } from '../contracts/types'
 import type { RecoveryRecord } from '../contracts/run-contracts'
+import {
+  resolveTerminalProjectionInteractionState,
+  resolveTerminalProjectionStatus,
+  resolveTerminalProjectionWaitingFor,
+} from './task-projection-terminal-shape'
 
 const GENERIC_PLANNING_TASK_SUMMARY = '正在整理任务边界、上下文与可用能力'
 
@@ -330,7 +335,7 @@ function isTaskProjectionUniqueRace(error: unknown): boolean {
 }
 
 function resolveInteractionState(summary: ScopeRunSummary): TaskInteractionState {
-  const terminalInteractionState = resolveTerminalInteractionState(summary.terminalReason)
+  const terminalInteractionState = resolveTerminalProjectionInteractionState(summary.terminalReason)
   if (
     terminalInteractionState
     && (!summary.interactionState || summary.interactionState === 'running' || summary.interactionState === 'resuming')
@@ -343,22 +348,6 @@ function resolveInteractionState(summary: ScopeRunSummary): TaskInteractionState
   if (summary.waitingFor === 'input' || summary.waitingFor === 'clarification') return 'awaiting_clarification'
   if (summary.phase === 'resuming') return 'resuming'
   return 'running'
-}
-
-function resolveTerminalInteractionState(reason?: ScopeRunSummary['terminalReason'] | null): TaskInteractionState | null {
-  if (reason === 'blocked_config') return 'suspended'
-  if (reason === 'blocked_external' || reason === 'checkpoint_user_input') {
-    return 'awaiting_clarification'
-  }
-  if (
-    reason === 'blocked_tool_error'
-    || reason === 'checkpoint_budget'
-    || reason === 'checkpoint_background'
-    || reason === 'manual_suspend'
-  ) {
-    return 'suspended'
-  }
-  return null
 }
 
 function resolveRecordInteractionState(
@@ -380,15 +369,6 @@ function resolveRecordInteractionState(
   return interactionState
 }
 
-function resolveTerminalWaitingFor(reason?: ScopeRunSummary['terminalReason'] | null): TaskProjectionRecord['waitingFor'] | null {
-  if (reason === 'blocked_config') return 'none'
-  if (reason === 'blocked_external' || reason === 'checkpoint_user_input') {
-    return 'input'
-  }
-  if (reason === 'checkpoint_background') return 'background'
-  return null
-}
-
 function resolveWaitingFor(
   summary: ScopeRunSummary,
   status: TaskProjectionRecord['status'],
@@ -396,27 +376,7 @@ function resolveWaitingFor(
 ): TaskProjectionRecord['waitingFor'] {
   const waitingFor = summary.waitingFor || (status === 'completed' ? 'none' : previous?.waitingFor) || 'none'
   if (waitingFor !== 'none') return waitingFor
-  return resolveTerminalWaitingFor(summary.terminalReason) || 'none'
-}
-
-function resolveTerminalStatus(reason?: ScopeRunSummary['terminalReason'] | null): TaskProjectionRecord['status'] | null {
-  if (!reason) return null
-  if (reason === 'done') return 'completed'
-  if (reason === 'cancelled_user' || reason === 'cancelled_runtime' || reason === 'main_no_progress_timeout') return 'killed'
-  if (
-    reason === 'failed_skill'
-    || reason === 'resume_launch_failed'
-    || reason === 'persistence_failed'
-    || reason === 'context_overflow'
-    || reason === 'blocked_tool_error'
-    || reason === 'adjudication_degraded'
-    || reason === 'delivery_failed'
-    || reason === 'tool_unavailable'
-    || reason === 'no_artifact'
-    || reason === 'proof_gap'
-    || reason === 'blocked_config'
-  ) return 'failed'
-  return 'blocked'
+  return resolveTerminalProjectionWaitingFor(summary.terminalReason) || 'none'
 }
 
 function resolveStatus(
@@ -426,7 +386,7 @@ function resolveStatus(
   if (summary.terminalReason === 'manual_suspend' && previous?.status === 'recoverable_paused') {
     return 'recoverable_paused'
   }
-  const terminalStatus = resolveTerminalStatus(summary.terminalReason)
+  const terminalStatus = resolveTerminalProjectionStatus(summary.terminalReason)
   if (terminalStatus) return terminalStatus
   const interactionState = resolveInteractionState(summary)
   const waitingForBlocker = Boolean(summary.waitingFor && summary.waitingFor !== 'none')
