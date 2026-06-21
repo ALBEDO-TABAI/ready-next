@@ -19,7 +19,7 @@ import {
 } from 'lucide-react'
 import { openWebpageInBrowser } from '../../modules/browser/openWebpageInBrowser'
 import { appendToAgentInput } from '../../modules/agent/chat-input-bridge'
-import { EBOOK_MARKDOWN_MARKER } from '../../../shared/ebook'
+import { EBOOK_INLINE_IMAGE_TITLE, EBOOK_MARKDOWN_MARKER } from '../../../shared/ebook'
 import {
   buildStructuredNotePreview,
   resolvePreviewReference,
@@ -625,14 +625,15 @@ function NotePreview({
         </a>
       )
     },
-    img: ({ src, alt }: { src?: string; alt?: string }) => {
+    img: ({ src, alt, title }: { src?: string; alt?: string; title?: string }) => {
       const reference = src || ''
       const resolved = resolvePreviewReference(reference, notePath)
+      const isInlineEbookImage = title === EBOOK_INLINE_IMAGE_TITLE
       return (
         <img
           src={resolved.resolvedUrl}
-          alt={alt || 'embedded media'}
-          className="note-preview-image"
+          alt={alt || (isInlineEbookImage ? '' : 'embedded media')}
+          className={isInlineEbookImage ? 'note-preview-image note-preview-image--inline' : 'note-preview-image'}
           loading="lazy"
           decoding="async"
         />

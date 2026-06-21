@@ -7,6 +7,7 @@ export const EBOOK_BINARY_EXTENSIONS: ReadonlySet<string> = new Set(
 )
 
 export const EBOOK_MARKDOWN_MARKER = '<!-- ready:ebook-import -->'
+export const EBOOK_INLINE_IMAGE_TITLE = 'ready-ebook-inline-image'
 
 export function normalizeEbookExtension(input: string | null | undefined): string {
   return (input || '').trim().toLowerCase().replace(/^\./, '')

@@ -1,6 +1,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { buildStructuredNotePreview } from '../renderer/components/document/note-preview-parser'
+import { EBOOK_INLINE_IMAGE_TITLE } from '../shared/ebook'
 
 describe('buildStructuredNotePreview', () => {
   it('parses YAML frontmatter into properties, tags and a YouTube card', () => {
@@ -101,6 +102,26 @@ type: #type/video/youtube/new
       'local-file:///Users/demo/project/gQlMMD8auMs_audiovisual_structure.png',
     )
     assert.equal(preview.embeds[0]?.displayUrl, 'gQlMMD8auMs_audiovisual_structure.png')
+  })
+
+  it('keeps angle-wrapped image paths with parentheses intact', () => {
+    const preview = buildStructuredNotePreview(
+      '![](<assets/hero (draft).png>)',
+      '/vault/notes/demo.md',
+    )
+
+    assert.equal(preview.embeds[0]?.kind, 'image')
+    assert.equal(preview.embeds[0]?.localPath, '/vault/notes/assets/hero (draft).png')
+  })
+
+  it('does not promote ebook inline image markers into standalone embeds', () => {
+    const preview = buildStructuredNotePreview(
+      `![](<assets/glyph.png> "${EBOOK_INLINE_IMAGE_TITLE}")`,
+      '/vault/notes/demo.md',
+    )
+
+    assert.equal(preview.embeds.length, 0)
+    assert.equal(preview.blocks[0]?.type, 'markdown')
   })
 
   it('normalizes inline Obsidian image embeds inside markdown blocks', () => {

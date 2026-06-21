@@ -4,7 +4,7 @@ import React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 
 import NotePreview from '../renderer/components/document/NotePreview'
-import { EBOOK_MARKDOWN_MARKER } from '../shared/ebook'
+import { EBOOK_INLINE_IMAGE_TITLE, EBOOK_MARKDOWN_MARKER } from '../shared/ebook'
 
 test('NotePreview renders markdown tables with a dedicated preview shell', () => {
   const markdown = [
@@ -292,6 +292,44 @@ test('NotePreview only applies ebook reading class to imported ebook markdown', 
   assert.doesNotMatch(ebookHtml, /ready:ebook-import/)
 })
 
+test('NotePreview renders imported ebook inline images without block image chrome', () => {
+  const html = renderToStaticMarkup(
+    React.createElement(NotePreview, {
+      content: [
+        EBOOK_MARKDOWN_MARKER,
+        '',
+        '# Book',
+        '',
+        `正文前 ![](<glyph.png> "${EBOOK_INLINE_IMAGE_TITLE}") 正文后。`,
+      ].join('\n'),
+      notePath: '/tmp/book.md',
+    }),
+  )
+
+  assert.match(html, /class="note-preview-image note-preview-image--inline"/)
+  assert.match(html, /local-file:\/\/\/tmp\/glyph\.png/)
+  assert.doesNotMatch(html, new RegExp(EBOOK_INLINE_IMAGE_TITLE))
+})
+
+test('NotePreview does not double-encode imported ebook inline image paths', () => {
+  const html = renderToStaticMarkup(
+    React.createElement(NotePreview, {
+      content: [
+        EBOOK_MARKDOWN_MARKER,
+        '',
+        '# 春琴抄',
+        '',
+        `春琴，本名 ![](<春琴抄.assets/00004.jpeg> "${EBOOK_INLINE_IMAGE_TITLE}") 屋琴。`,
+      ].join('\n'),
+      notePath: '/tmp/多看书/春琴抄/春琴抄.md',
+    }),
+  )
+
+  assert.match(html, /local-file:\/\/\/tmp\/%E5%A4%9A%E7%9C%8B%E4%B9%A6\/%E6%98%A5%E7%90%B4%E6%8A%84\/%E6%98%A5%E7%90%B4%E6%8A%84\.assets\/00004\.jpeg/)
+  assert.doesNotMatch(html, /%25E5|%25E6|%25E7/)
+  assert.match(html, /class="note-preview-image note-preview-image--inline"/)
+})
+
 test('ebook reading CSS covers body text and non-indented block elements', async () => {
   const css = await import('node:fs/promises').then(({ readFile }) => (
     readFile(new URL('../renderer/styles/index.css', import.meta.url), 'utf-8')
@@ -302,6 +340,7 @@ test('ebook reading CSS covers body text and non-indented block elements', async
   assert.match(css, /\.note-preview-shell--ebook \.note-preview-markdown-quote/)
   assert.match(css, /\.note-preview-shell--ebook \.note-preview-table-scroll/)
   assert.match(css, /\.note-preview-shell--ebook \.note-preview-image/)
+  assert.match(css, /\.note-preview-shell--ebook \.note-preview-image--inline/)
   const paragraphRule = css.match(/\.note-preview-shell--ebook \.note-preview-markdown-p\s*\{[^}]+\}/)?.[0] || ''
   assert.doesNotMatch(paragraphRule, /text-indent/)
 })

@@ -1836,6 +1836,17 @@ html[data-skin='liquid-glass']:is([data-glass-variant='solid-green'], [data-glas
   border-radius: 16px;
 }
 
+.note-preview-image--inline {
+  display: inline-block;
+  width: auto;
+  max-width: none;
+  height: 1em;
+  margin: 0 0.04em;
+  vertical-align: -0.12em;
+  object-fit: contain;
+  border-radius: 0;
+}
+
 .note-preview-youtube-iframe {
   display: block;
   width: 100%;
@@ -2354,6 +2365,10 @@ html[data-skin='liquid-glass']:is([data-glass-variant='solid-green'], [data-glas
 
 .note-preview-shell--ebook .note-preview-image {
   margin: 8px auto 18px;
+}
+
+.note-preview-shell--ebook .note-preview-image--inline {
+  margin: 0 0.04em;
 }
 
 @media (max-width: 860px) {

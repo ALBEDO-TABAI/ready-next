@@ -4,7 +4,7 @@ import { basename, dirname, extname, join, posix } from 'path'
 import { XMLParser } from 'fast-xml-parser'
 import JSZip from 'jszip'
 import TurndownService from 'turndown'
-import { EBOOK_MARKDOWN_MARKER } from '../../../shared/ebook'
+import { EBOOK_INLINE_IMAGE_TITLE, EBOOK_MARKDOWN_MARKER } from '../../../shared/ebook'
 
 export interface EbookMarkdownImportResult {
   success: boolean
@@ -288,6 +288,20 @@ function escapeHtmlText(value: string): string {
     .replace(/>/g, '&gt;')
 }
 
+function escapeMarkdownImageText(value: string): string {
+  return value.replace(/\\/g, '\\\\').replace(/\[/g, '\\[').replace(/\]/g, '\\]')
+}
+
+function escapeMarkdownImageTitle(value: string): string {
+  return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
+}
+
+function formatMarkdownImage(src: string, alt: string, title?: string | null): string {
+  const safeAlt = escapeMarkdownImageText(alt)
+  const safeTitle = title ? ` "${escapeMarkdownImageTitle(title)}"` : ''
+  return `![${safeAlt}](<${src}>${safeTitle})`
+}
+
 function extractHtmlBody(html: string): string {
   const match = html.match(/<body\b[^>]*>([\s\S]*?)<\/body>/i)
   return match?.[1] ? match[1] : html
@@ -331,11 +345,35 @@ function normalizeFootnotes(html: string): string {
     )
 }
 
+function markInlineEbookImages(html: string): string {
+  return html.replace(/<p\b[^>]*>[\s\S]*?<\/p>/gi, (paragraph) => {
+    if (!/<img\b/i.test(paragraph)) return paragraph
+    const textOutsideImages = stripHtmlTags(paragraph).trim()
+    if (!textOutsideImages) return paragraph
+    return paragraph.replace(/<img\b(?![^>]*\bdata-ready-ebook-inline=)/gi, '<img data-ready-ebook-inline="true"')
+  })
+}
+
 function createTurndown(): TurndownService {
   const service = new TurndownService({
     headingStyle: 'atx',
     codeBlockStyle: 'fenced',
     bulletListMarker: '-',
+  })
+  service.addRule('image', {
+    filter: 'img',
+    replacement(_content, node) {
+      const image = node as unknown as {
+        getAttribute?: (name: string) => string | null
+      }
+      const src = image.getAttribute?.('src') || ''
+      if (!src) return ''
+      const alt = image.getAttribute?.('alt') || ''
+      const inlineTitle = image.getAttribute?.('data-ready-ebook-inline') === 'true'
+        ? EBOOK_INLINE_IMAGE_TITLE
+        : null
+      return formatMarkdownImage(src, alt, inlineTitle)
+    },
   })
   service.addRule('tableCell', {
     filter: ['th', 'td'],
@@ -399,6 +437,7 @@ async function rewriteAssets(
   baseDir: string,
   assetsDir: string,
   usedAssetNames: Set<string>,
+  assetNamesBySource: Map<string, string>,
   warnings: string[],
 ): Promise<{ html: string; assetCount: number }> {
   let assetCount = 0
@@ -416,10 +455,14 @@ async function rewriteAssets(
     const lower = resolved.toLowerCase()
     const isImage = IMAGE_MEDIA_TYPES.has(file.comment || '') || /\.(png|jpe?g|gif|webp|svg|bmp)$/i.test(lower)
     if (!isImage || attr !== 'src') continue
-    const assetName = safeAssetName(resolved, usedAssetNames)
-    await mkdir(assetsDir, { recursive: true })
-    await writeFile(join(assetsDir, assetName), await file.async('nodebuffer'))
-    assetCount += 1
+    let assetName = assetNamesBySource.get(resolved)
+    if (!assetName) {
+      assetName = safeAssetName(resolved, usedAssetNames)
+      assetNamesBySource.set(resolved, assetName)
+      await mkdir(assetsDir, { recursive: true })
+      await writeFile(join(assetsDir, assetName), await file.async('nodebuffer'))
+      assetCount += 1
+    }
     replacements.push({ raw, next: ` src="${basename(assetsDir)}/${assetName}"` })
   }
   let nextHtml = html
@@ -454,6 +497,7 @@ export async function importEpubAsMarkdown(sourcePath: string): Promise<EbookMar
 
     const turndown = createTurndown()
     const usedAssetNames = new Set<string>()
+    const assetNamesBySource = new Map<string, string>()
     const warnings: string[] = []
     const sections: string[] = []
     let assetCount = 0
@@ -478,7 +522,8 @@ export async function importEpubAsMarkdown(sourcePath: string): Promise<EbookMar
       const chapterBase = posix.dirname(chapterPath).replace(/^\.$/, '')
       const rawHtml = stripUnsafeHtml(normalizeFootnotes(await chapterFile.async('text')))
       const bodyHtml = prependTocHeading(extractHtmlBody(rawHtml), tocByPath.get(chapterPath))
-      const rewritten = await rewriteAssets(zip, bodyHtml, chapterBase, assetsDir, usedAssetNames, warnings)
+      const inlineMarkedHtml = markInlineEbookImages(bodyHtml)
+      const rewritten = await rewriteAssets(zip, inlineMarkedHtml, chapterBase, assetsDir, usedAssetNames, assetNamesBySource, warnings)
       assetCount += rewritten.assetCount
       const markdown = demoteMarkdownHeadings(normalizeMarkdownFootnotes(turndown.turndown(rewritten.html)))
         .replace(/\n{3,}/g, '\n\n')

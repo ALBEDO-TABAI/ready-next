@@ -10,11 +10,11 @@ import { BINARY_EXTENSIONS } from '../main/modules/document-engine/binary-extens
 import { decideFileForIndex } from '../main/modules/search-engine/adapters'
 import { importEpubAsMarkdown } from '../main/modules/document-engine/ebook-importer'
 import { toLocalFileUrl } from '../renderer/utils/dragDrop'
-import { EBOOK_MARKDOWN_MARKER } from '../shared/ebook'
+import { EBOOK_INLINE_IMAGE_TITLE, EBOOK_MARKDOWN_MARKER } from '../shared/ebook'
 
 async function writeMinimalEpub(
   path: string,
-  options?: { unsafe?: boolean; image?: boolean; footnote?: boolean; title?: string | null },
+  options?: { unsafe?: boolean; image?: boolean; inlineImage?: boolean; footnote?: boolean; title?: string | null },
 ): Promise<void> {
   const zip = new JSZip()
   const titleMarkup = options?.title === null
@@ -35,6 +35,7 @@ async function writeMinimalEpub(
   <manifest>
     <item id="chapter" href="chapter.xhtml" media-type="application/xhtml+xml"/>
     ${options?.image ? '<item id="cover" href="cover.png" media-type="image/png"/>' : ''}
+    ${options?.inlineImage ? '<item id="glyph" href="glyph.png" media-type="image/png"/>' : ''}
   </manifest>
   <spine>
     <itemref idref="chapter"/>
@@ -46,12 +47,16 @@ async function writeMinimalEpub(
     <h1>Hello</h1>
     <p>Readable text.</p>
     ${options?.image ? '<p><img src="cover.png" alt="Cover"/></p>' : ''}
+    ${options?.inlineImage ? '<p>Missing<img src="glyph.png"/>Glyph<img src="glyph.png"/>Done</p>' : ''}
     ${options?.footnote ? '<p>Claim<a epub:type="noteref" href="#fn1">1</a></p><aside epub:type="footnote" id="fn1"><p>Footnote text.</p></aside>' : ''}
     ${options?.unsafe ? '<script>globalThis.__readyEbookUnsafe = true</script><p><a href=javascript:alert(1) onclick=alert(2)>bad</a><img src=javascript:alert(3) onerror=alert(4) /></p>' : ''}
   </body>
 </html>`)
   if (options?.image) {
     zip.file('OEBPS/cover.png', Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
+  }
+  if (options?.inlineImage) {
+    zip.file('OEBPS/glyph.png', Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
   }
   const buffer = await zip.generateAsync({ type: 'nodebuffer', mimeType: 'application/epub+zip' })
   await writeFile(path, buffer)
@@ -184,6 +189,30 @@ test('importEpubAsMarkdown writes a book-named markdown file and assets without 
     assert.notEqual(second.indexPath, first.indexPath)
     assert.equal(second.outputDir, dir)
     assert.equal(basename(second.indexPath!), 'Minimal Book 2.md')
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('importEpubAsMarkdown reuses repeated inline image assets', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'ready-ebook-inline-image-'))
+  try {
+    const epubPath = join(dir, 'Inline Glyph.epub')
+    await writeMinimalEpub(epubPath, { image: true, inlineImage: true, title: 'Inline Glyph' })
+
+    const result = await importEpubAsMarkdown(epubPath)
+    assert.equal(result.success, true, result.error)
+    assert.equal(result.assetCount, 2)
+    assert.equal(existsSync(join(dir, 'Inline Glyph.assets', 'cover.png')), true)
+    assert.equal(existsSync(join(dir, 'Inline Glyph.assets', 'glyph.png')), true)
+    assert.equal(existsSync(join(dir, 'Inline Glyph.assets', 'glyph-2.png')), false)
+
+    const markdown = await readFile(result.indexPath!, 'utf-8')
+    assert.match(markdown, /!\[Cover\]\(<Inline Glyph\.assets\/cover\.png>\)/)
+    assert.equal(
+      (markdown.match(new RegExp(`!\\[\\]\\(<Inline Glyph\\.assets\\/glyph\\.png> "${EBOOK_INLINE_IMAGE_TITLE}"\\)`, 'g')) || []).length,
+      2,
+    )
   } finally {
     await rm(dir, { recursive: true, force: true })
   }

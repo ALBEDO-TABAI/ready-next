@@ -1,5 +1,6 @@
 import { format, isValid, parseISO } from 'date-fns'
 import { parse as parseYaml } from 'yaml'
+import { EBOOK_INLINE_IMAGE_TITLE } from '../../../shared/ebook'
 import { parseBareWidgetPayloadSegments, parseShowWidgetFences, type DocumentWidgetData } from './widget-fence-parser'
 
 export interface PreviewTag {
@@ -451,6 +452,15 @@ function normalizePath(input: string): string {
   return input.replace(/\\/g, '/')
 }
 
+function decodeLocalReference(input: string): string {
+  if (!/%[0-9a-f]{2}/i.test(input)) return input
+  try {
+    return decodeURIComponent(input)
+  } catch {
+    return input
+  }
+}
+
 function getDirectory(path: string | null | undefined): string | null {
   if (!path) return null
   const normalized = normalizePath(path)
@@ -569,16 +579,18 @@ function resolveReference(reference: string, notePath: string | null | undefined
   localPath: string | null
   isLocal: boolean
 } {
-  const trimmed = stripMarkdownDestinationBrackets(stripWrappingQuotes(reference))
+  const rawReference = stripMarkdownDestinationBrackets(stripWrappingQuotes(reference))
 
-  if (/^(https?:|data:|local-file:|file:)/i.test(trimmed)) {
+  if (/^(https?:|data:|local-file:|file:)/i.test(rawReference)) {
     return {
-      displayUrl: trimmed,
-      resolvedUrl: trimmed,
+      displayUrl: rawReference,
+      resolvedUrl: rawReference,
       localPath: null,
-      isLocal: /^(local-file:|file:)/i.test(trimmed),
+      isLocal: /^(local-file:|file:)/i.test(rawReference),
     }
   }
+
+  const trimmed = decodeLocalReference(rawReference)
 
   if (isAbsolutePath(trimmed)) {
     return {
@@ -651,6 +663,22 @@ function extractBilibiliEmbed(line: string): { bvid: string; embedUrl: string; p
     embedUrl: canonical.toString(),
     pageUrl: `https://www.bilibili.com/video/${bvid}/`,
   }
+}
+
+function parseMarkdownImageLine(line: string): { alt: string; target: string } | null {
+  const match = line.trim().match(/^!\[([^\]]*)\]\((.+)\)$/)
+  if (!match) return null
+
+  const rawDestination = match[2].trim()
+  if (rawDestination.startsWith('<')) {
+    const closingIndex = rawDestination.indexOf('>')
+    if (closingIndex <= 0) return null
+    const title = stripWrappingQuotes(rawDestination.slice(closingIndex + 1).trim())
+    if (title === EBOOK_INLINE_IMAGE_TITLE) return null
+    return { alt: match[1], target: rawDestination.slice(1, closingIndex) }
+  }
+
+  return { alt: match[1], target: rawDestination }
 }
 
 function extractYouTubeVideoId(url: string): string | null {
@@ -939,10 +967,10 @@ function parseStandaloneEmbedLine(
     })
   }
 
-  const markdownImage = trimmed.match(/^!\[([^\]]*)\]\(([^)]+)\)$/)
+  const markdownImage = parseMarkdownImageLine(trimmed)
   if (markdownImage) {
-    return buildBodyEmbed('image', markdownImage[2], notePath, {
-      alt: markdownImage[1],
+    return buildBodyEmbed('image', markdownImage.target, notePath, {
+      alt: markdownImage.alt,
     })
   }
 
