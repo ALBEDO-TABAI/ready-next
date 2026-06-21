@@ -100,6 +100,12 @@ export const TOOL_ADMISSION_ERROR_KINDS = {
   toolRestrictedThisTurn: { code: 'tool_restricted_this_turn' },
   deniedByUserNegation: { code: 'denied_by_user_negation' },
 }
+export const MCP_TOOL_ERROR_KINDS = {
+  toolUnregistered: { code: 'mcp_tool_unregistered' },
+  authorizationDenied: { code: 'mcp_authorization_denied' },
+  clientMissing: { code: 'mcp_client_missing' },
+  toolFailed: { code: 'mcp_tool_failed' },
+}
 export const ACTION_CONFIRMATION_ERROR_KINDS = {
   deniedManualOnly: { code: 'denied_manual_only' },
   deniedPendingConfirmation: { code: 'denied_pending_confirmation' },
@@ -152,9 +158,20 @@ export const output = { data: { errorKind: TOOL_ADMISSION_ERROR_KINDS.toolRestri
 import { TOOL_ADMISSION_ERROR_KINDS } from '../contracts/error-kinds'
 export const output = { data: { errorKind: TOOL_ADMISSION_ERROR_KINDS.toolNotRegistered.code } }
 `)
+  writeFile(root, 'src/main/modules/tools/mcp-tools.ts', `
+import { MCP_TOOL_ERROR_KINDS } from '../agent-control/contracts/error-kinds'
+export function fail(ToolDomainError) { throw new ToolDomainError(MCP_TOOL_ERROR_KINDS.authorizationDenied.code, 'denied') }
+export const fallback = MCP_TOOL_ERROR_KINDS.toolFailed.code
+`)
   writeFile(root, 'src/main/modules/tools/tool-result-envelope.ts', `
-import { ACTION_CONFIRMATION_ERROR_KINDS, TOOL_ADMISSION_ERROR_KINDS, WEB_RESEARCH_ERROR_KINDS } from '../agent-control/contracts/error-kinds'
+import { ACTION_CONFIRMATION_ERROR_KINDS, MCP_TOOL_ERROR_KINDS, TOOL_ADMISSION_ERROR_KINDS, WEB_RESEARCH_ERROR_KINDS } from '../agent-control/contracts/error-kinds'
 export const map = { [TOOL_ADMISSION_ERROR_KINDS.toolNotRegistered.code]: 'not_found' }
+export const mcpMap = {
+  [MCP_TOOL_ERROR_KINDS.toolUnregistered.code]: 'not_found',
+  [MCP_TOOL_ERROR_KINDS.authorizationDenied.code]: 'denied_by_policy',
+  [MCP_TOOL_ERROR_KINDS.clientMissing.code]: 'upstream_error',
+  [MCP_TOOL_ERROR_KINDS.toolFailed.code]: 'upstream_error',
+}
 export const confirmationMap = { [ACTION_CONFIRMATION_ERROR_KINDS.deniedManualOnly.code]: 'denied_by_policy' }
 export const webMap = {
   [WEB_RESEARCH_ERROR_KINDS.webSearchFailed.code]: 'upstream_error',
@@ -700,6 +717,68 @@ test('shared enum drift gate fails when web_fetch_failed is not explicitly mappe
 import { WEB_RESEARCH_ERROR_KINDS } from '../agent-control/contracts/error-kinds'
 export const map = {
   [WEB_RESEARCH_ERROR_KINDS.webSearchFailed.code]: 'upstream_error',
+}
+`)
+  const result = runIn(root)
+  assert.equal(result.status, 1)
+  assert.match(result.stderr, /error_kind_envelope_mapping_missing/)
+})
+
+test('shared enum drift gate fails when mcp tool codes are registered in the wrong family', (t) => {
+  const root = makeHarnessRoot(t)
+  const registryPath = path.join(root, 'src/main/modules/agent-control/contracts/error-kinds.ts')
+  const registry = fs.readFileSync(registryPath, 'utf8')
+    .replace(
+      'export const MCP_TOOL_ERROR_KINDS =',
+      'export const COPIED_MCP_TOOL_ERROR_KINDS =',
+    )
+  fs.writeFileSync(registryPath, registry)
+  const result = runIn(root)
+  assert.equal(result.status, 1)
+  assert.match(result.stderr, /error_kind_family_missing/)
+})
+
+test('shared enum drift gate fails when mcp tools import registry from the wrong path', (t) => {
+  const root = makeHarnessRoot(t)
+  writeFile(root, 'src/main/modules/tools/mcp-tools.ts', `
+import { MCP_TOOL_ERROR_KINDS } from '../fake/contracts/error-kinds'
+export const failure = MCP_TOOL_ERROR_KINDS.authorizationDenied.code
+`)
+  const result = runIn(root)
+  assert.equal(result.status, 1)
+  assert.match(result.stderr, /error_kind_registry_not_imported/)
+})
+
+test('shared enum drift gate fails when mcp tools copy a local literal', (t) => {
+  const root = makeHarnessRoot(t)
+  writeFile(root, 'src/main/modules/tools/mcp-tools.ts', `
+import { MCP_TOOL_ERROR_KINDS } from '../agent-control/contracts/error-kinds'
+export function bad(ToolDomainError) { throw new ToolDomainError('mcp_authorization_denied', 'denied') }
+`)
+  const result = runIn(root)
+  assert.equal(result.status, 1)
+  assert.match(result.stderr, /local_error_kind_literal/)
+})
+
+test('shared enum drift gate fails when tool-result-envelope copies an mcp object key', (t) => {
+  const root = makeHarnessRoot(t)
+  writeFile(root, 'src/main/modules/tools/tool-result-envelope.ts', `
+import { MCP_TOOL_ERROR_KINDS } from '../agent-control/contracts/error-kinds'
+export const map = { mcp_tool_unregistered: 'not_found' }
+`)
+  const result = runIn(root)
+  assert.equal(result.status, 1)
+  assert.match(result.stderr, /local_error_kind_literal/)
+})
+
+test('shared enum drift gate fails when mcp_authorization_denied is not explicitly mapped', (t) => {
+  const root = makeHarnessRoot(t)
+  writeFile(root, 'src/main/modules/tools/tool-result-envelope.ts', `
+import { MCP_TOOL_ERROR_KINDS } from '../agent-control/contracts/error-kinds'
+export const map = {
+  [MCP_TOOL_ERROR_KINDS.toolUnregistered.code]: 'not_found',
+  [MCP_TOOL_ERROR_KINDS.clientMissing.code]: 'upstream_error',
+  [MCP_TOOL_ERROR_KINDS.toolFailed.code]: 'upstream_error',
 }
 `)
   const result = runIn(root)

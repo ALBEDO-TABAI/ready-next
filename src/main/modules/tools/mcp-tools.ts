@@ -10,6 +10,7 @@
  */
 
 import { ToolDomainError } from './tool-errors'
+import { MCP_TOOL_ERROR_KINDS } from '../agent-control/contracts/error-kinds'
 import { createToolExecutionOutput, type ToolExecutionOutput } from '../agent-control/tools-runtime/tool-result-types'
 import { getMcpClient } from '../mcp/client'
 import { getMcpServerForTool, isAuthorized } from '../mcp/registry'
@@ -27,7 +28,10 @@ export async function executeMcpTool(
 ): Promise<ToolExecutionOutput> {
   const serverId = getMcpServerForTool(toolName)
   if (!serverId) {
-    throw new ToolDomainError('mcp_tool_unregistered', `MCP tool ${toolName} is not registered against any server`)
+    throw new ToolDomainError(
+      MCP_TOOL_ERROR_KINDS.toolUnregistered.code,
+      `MCP tool ${toolName} is not registered against any server`,
+    )
   }
   // Stage T R5 fix: re-check isAuthorized at execution time. The model-
   // visible filter (tool-registry list resolver) gates discovery, but
@@ -36,14 +40,18 @@ export async function executeMcpTool(
   // unless we re-verify here. scopeId is the canonical authorization key.
   if (!isAuthorized(toolName, ctx.sessionId, ctx.scopeId)) {
     throw new ToolDomainError(
-      'mcp_authorization_denied',
+      MCP_TOOL_ERROR_KINDS.authorizationDenied.code,
       `MCP tool ${toolName} not authorized for current scope`,
       { serverId, toolName, sessionId: ctx.sessionId, scopeId: ctx.scopeId },
     )
   }
   const client = getMcpClient(serverId)
   if (!client) {
-    throw new ToolDomainError('mcp_client_missing', `No MCP client connected for server ${serverId}`, { serverId, toolName })
+    throw new ToolDomainError(
+      MCP_TOOL_ERROR_KINDS.clientMissing.code,
+      `No MCP client connected for server ${serverId}`,
+      { serverId, toolName },
+    )
   }
 
   let result
@@ -55,11 +63,15 @@ export async function executeMcpTool(
     })
   } catch (err) {
     if (err instanceof ToolDomainError) throw err
-    throw new ToolDomainError('mcp_tool_failed', err instanceof Error ? err.message : String(err), { serverId, toolName })
+    throw new ToolDomainError(
+      MCP_TOOL_ERROR_KINDS.toolFailed.code,
+      err instanceof Error ? err.message : String(err),
+      { serverId, toolName },
+    )
   }
 
   if (!result.ok) {
-    const kind = result.error?.kind || 'mcp_tool_failed'
+    const kind = result.error?.kind || MCP_TOOL_ERROR_KINDS.toolFailed.code
     const message = result.error?.message || `MCP tool ${toolName} returned a non-ok result`
     throw new ToolDomainError(kind, message, { serverId, toolName })
   }

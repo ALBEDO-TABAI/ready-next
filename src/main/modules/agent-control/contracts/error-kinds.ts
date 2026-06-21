@@ -333,6 +333,35 @@ export type ToolAdmissionErrorKindKey = keyof typeof TOOL_ADMISSION_ERROR_KINDS
 export type ToolAdmissionErrorKind =
   (typeof TOOL_ADMISSION_ERROR_KINDS)[ToolAdmissionErrorKindKey]['code']
 
+// ---------- MCP tool dispatcher ----------
+
+export const MCP_TOOL_ERROR_KINDS = {
+  toolUnregistered: {
+    code: 'mcp_tool_unregistered',
+    noMetric: true,
+    description: 'An MCP tool call did not resolve to any registered MCP server.',
+  },
+  authorizationDenied: {
+    code: 'mcp_authorization_denied',
+    noMetric: true,
+    description: 'The MCP tool is not authorized for the current session/scope tuple.',
+  },
+  clientMissing: {
+    code: 'mcp_client_missing',
+    noMetric: true,
+    description: 'The registered MCP server has no connected client.',
+  },
+  toolFailed: {
+    code: 'mcp_tool_failed',
+    noMetric: true,
+    description: 'The MCP client call threw or returned a non-ok result without a more specific kind.',
+  },
+} as const satisfies Record<string, ErrorKindMeta>
+
+export type McpToolErrorKindKey = keyof typeof MCP_TOOL_ERROR_KINDS
+export type McpToolErrorKind =
+  (typeof MCP_TOOL_ERROR_KINDS)[McpToolErrorKindKey]['code']
+
 // ---------- action confirmation/control ----------
 
 export const ACTION_CONFIRMATION_ERROR_KINDS = {
@@ -415,6 +444,7 @@ const ALL_REGISTERED_CODES: ReadonlySet<string> = new Set<string>([
   ...Object.values(TARGET_DOCUMENT_ERROR_KINDS).map((m) => m.code),
   ...Object.values(BROWSER_TOOL_ERROR_KINDS).map((m) => m.code),
   ...Object.values(TOOL_ADMISSION_ERROR_KINDS).map((m) => m.code),
+  ...Object.values(MCP_TOOL_ERROR_KINDS).map((m) => m.code),
   ...Object.values(ACTION_CONFIRMATION_ERROR_KINDS).map((m) => m.code),
   ...Object.values(SPECIALIST_BLUEPRINT_ERROR_KINDS).map((m) => m.code),
   ...Object.values(WEB_RESEARCH_ERROR_KINDS).map((m) => m.code),
@@ -446,6 +476,9 @@ export function lookupErrorKindMeta(code: string): ErrorKindMeta | null {
     if (meta.code === code) return meta
   }
   for (const meta of Object.values(TOOL_ADMISSION_ERROR_KINDS)) {
+    if (meta.code === code) return meta
+  }
+  for (const meta of Object.values(MCP_TOOL_ERROR_KINDS)) {
     if (meta.code === code) return meta
   }
   for (const meta of Object.values(ACTION_CONFIRMATION_ERROR_KINDS)) {

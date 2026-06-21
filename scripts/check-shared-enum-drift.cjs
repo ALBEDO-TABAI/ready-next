@@ -51,6 +51,11 @@ const TOOL_ADMISSION_ERROR_KIND_TARGETS = [
   'src/main/modules/tools/tool-result-envelope.ts',
 ]
 
+const MCP_TOOL_ERROR_KIND_TARGETS = [
+  'src/main/modules/tools/mcp-tools.ts',
+  'src/main/modules/tools/tool-result-envelope.ts',
+]
+
 const ACTION_CONFIRMATION_ERROR_KIND_TARGETS = [
   'src/main/modules/tools/tool-executor.ts',
   'src/main/modules/tools/browser-tools.ts',
@@ -109,6 +114,13 @@ const REQUIRED_TOOL_ADMISSION_ERROR_KINDS = [
   'internal_tool_not_allowed',
   'tool_restricted_this_turn',
   'denied_by_user_negation',
+]
+
+const REQUIRED_MCP_TOOL_ERROR_KINDS = [
+  'mcp_tool_unregistered',
+  'mcp_authorization_denied',
+  'mcp_client_missing',
+  'mcp_tool_failed',
 ]
 
 const REQUIRED_ACTION_CONFIRMATION_ERROR_KINDS = [
@@ -300,6 +312,7 @@ function assertRequiredErrorKindsRegistered(violations) {
     ...REQUIRED_TARGET_DOCUMENT_ERROR_KINDS,
     ...REQUIRED_BROWSER_TOOL_ERROR_KINDS,
     ...REQUIRED_TOOL_ADMISSION_ERROR_KINDS,
+    ...REQUIRED_MCP_TOOL_ERROR_KINDS,
     ...REQUIRED_ACTION_CONFIRMATION_ERROR_KINDS,
     ...REQUIRED_SPECIALIST_BLUEPRINT_ERROR_KINDS,
     ...REQUIRED_WEB_RESEARCH_ERROR_KINDS,
@@ -308,6 +321,11 @@ function assertRequiredErrorKindsRegistered(violations) {
       push(violations, ERROR_KINDS_REL, 1, 'required_error_kind_unregistered', `${code} must be registered in error-kinds.ts`)
     }
   }
+  assertRequiredErrorKindFamily(
+    violations,
+    'MCP_TOOL_ERROR_KINDS',
+    REQUIRED_MCP_TOOL_ERROR_KINDS,
+  )
   assertRequiredErrorKindFamily(
     violations,
     'ACTION_CONFIRMATION_ERROR_KINDS',
@@ -470,6 +488,12 @@ function main() {
     )
     assertNoBareLocalLiterals(
       violations,
+      MCP_TOOL_ERROR_KIND_TARGETS,
+      REQUIRED_MCP_TOOL_ERROR_KINDS,
+      'MCP_TOOL_ERROR_KINDS',
+    )
+    assertNoBareLocalLiterals(
+      violations,
       ACTION_CONFIRMATION_ERROR_KIND_TARGETS,
       REQUIRED_ACTION_CONFIRMATION_ERROR_KINDS,
       'ACTION_CONFIRMATION_ERROR_KINDS',
@@ -489,6 +513,12 @@ function main() {
     assertExplicitEnvelopeMappings(violations, 'WEB_RESEARCH_ERROR_KINDS', [
       ['webSearchFailed', 'upstream_error'],
       ['webFetchFailed', 'upstream_error'],
+    ])
+    assertExplicitEnvelopeMappings(violations, 'MCP_TOOL_ERROR_KINDS', [
+      ['toolUnregistered', 'not_found'],
+      ['authorizationDenied', 'denied_by_policy'],
+      ['clientMissing', 'upstream_error'],
+      ['toolFailed', 'upstream_error'],
     ])
   } catch (error) {
     console.error(`check-shared-enum-drift: ${error instanceof Error ? error.message : String(error)}`)

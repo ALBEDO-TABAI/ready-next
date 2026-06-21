@@ -7,7 +7,10 @@ import {
   mapErrorKindToEnvelopeKind,
   type ToolEnvelopeKind,
 } from '../main/modules/tools/tool-result-envelope'
-import { WEB_RESEARCH_ERROR_KINDS } from '../main/modules/agent-control/contracts/error-kinds'
+import {
+  MCP_TOOL_ERROR_KINDS,
+  WEB_RESEARCH_ERROR_KINDS,
+} from '../main/modules/agent-control/contracts/error-kinds'
 
 // Every errorKind literal present in HEAD (harvested from tool-errors.ts +
 // tools/ + agent-control/). Each must map explicitly (mapped === true) to the
@@ -27,10 +30,11 @@ const EXPECTED: Record<string, ToolEnvelopeKind> = {
   no_record: 'not_found',
   widget_not_found: 'not_found',
   tool_not_registered: 'not_found',
-  mcp_tool_unregistered: 'not_found',
+  [MCP_TOOL_ERROR_KINDS.toolUnregistered.code]: 'not_found',
   no_driver_registered: 'not_found',
   host_unavailable: 'upstream_error',
-  mcp_tool_failed: 'upstream_error',
+  [MCP_TOOL_ERROR_KINDS.clientMissing.code]: 'upstream_error',
+  [MCP_TOOL_ERROR_KINDS.toolFailed.code]: 'upstream_error',
   [WEB_RESEARCH_ERROR_KINDS.webSearchFailed.code]: 'upstream_error',
   [WEB_RESEARCH_ERROR_KINDS.webFetchFailed.code]: 'upstream_error',
   driver_init_failed: 'upstream_error',
@@ -40,6 +44,7 @@ const EXPECTED: Record<string, ToolEnvelopeKind> = {
   tool_restricted_this_turn: 'denied_by_policy',
   internal_tool_not_allowed: 'denied_by_policy',
   denied_by_user_negation: 'denied_by_policy',
+  [MCP_TOOL_ERROR_KINDS.authorizationDenied.code]: 'denied_by_policy',
   command_high_risk_blocked: 'denied_by_policy',
   denied_manual_only: 'denied_by_policy',
   freeform_script_denied: 'denied_by_policy',

@@ -9,6 +9,7 @@
 
 import {
   ACTION_CONFIRMATION_ERROR_KINDS,
+  MCP_TOOL_ERROR_KINDS,
   TOOL_ADMISSION_ERROR_KINDS,
   WEB_RESEARCH_ERROR_KINDS,
 } from '../agent-control/contracts/error-kinds'
@@ -67,15 +68,15 @@ const EXPLICIT_KIND_MAP: Record<string, ToolEnvelopeKind> = {
   no_record: 'not_found',
   widget_not_found: 'not_found',
   detached_task_not_found: 'not_found',
-  mcp_tool_unregistered: 'not_found',
+  [MCP_TOOL_ERROR_KINDS.toolUnregistered.code]: 'not_found',
   [TOOL_ADMISSION_ERROR_KINDS.toolNotRegistered.code]: 'not_found',
   no_driver_registered: 'not_found',
   detached_task_skill_not_loaded: 'not_found',
   detached_task_skill_action_unknown: 'not_found',
   // upstream_error — a dependency/service is down or failed
   host_unavailable: 'upstream_error',
-  mcp_client_missing: 'upstream_error',
-  mcp_tool_failed: 'upstream_error',
+  [MCP_TOOL_ERROR_KINDS.clientMissing.code]: 'upstream_error',
+  [MCP_TOOL_ERROR_KINDS.toolFailed.code]: 'upstream_error',
   clip_fetch_failed: 'upstream_error',
   [WEB_RESEARCH_ERROR_KINDS.webSearchFailed.code]: 'upstream_error',
   [WEB_RESEARCH_ERROR_KINDS.webFetchFailed.code]: 'upstream_error',
@@ -96,6 +97,7 @@ const EXPLICIT_KIND_MAP: Record<string, ToolEnvelopeKind> = {
   [TOOL_ADMISSION_ERROR_KINDS.toolRestrictedThisTurn.code]: 'denied_by_policy',
   [TOOL_ADMISSION_ERROR_KINDS.internalToolNotAllowed.code]: 'denied_by_policy',
   [TOOL_ADMISSION_ERROR_KINDS.deniedByUserNegation.code]: 'denied_by_policy',
+  [MCP_TOOL_ERROR_KINDS.authorizationDenied.code]: 'denied_by_policy',
   detached_task_forbidden: 'denied_by_policy',
   blocked_config: 'denied_by_policy',
   blocked_external: 'denied_by_policy',
