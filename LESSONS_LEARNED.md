@@ -1,6 +1,6 @@
 # Ready 经验文档
 
-> 更新时间: 2026-06-08
+> 更新时间: 2026-06-17
 
 ## -2. Stage 10 (P) — Transitional bridge retirement (2026-05-07)
 
@@ -67,6 +67,12 @@ Stage 4 W3 引入 `SkillToolAuthorization` 三层分离时，留了一个显式�
 - 输入框现在是绝对定位覆盖在消息列表底部，所以消息列表末尾必须有由输入框高度测出来的空白块。不要只给滚动容器加一个固定小 padding，否则最后一条消息会被输入框压住。
 - 这类视觉改动的验收顺序必须是：调参页找方向 -> 真实 Electron dev 里让文字滚到输入框背后 -> 截图确认没有透显、冻结感和暗色外阴影。预览页过关不等于实装过关。
 
+### 0.4 Windows 顶部 chrome 不能照搬 macOS 交通灯和 vibrancy
+- Windows 的最小化/最大化/关闭在右上角，Ready 自绘圆点不能继续占这个位置。Windows 端应把 `ModeSlider` 里的 Ready 圆点迁到左上，中心 X 用 `IconRail` 的槽位几何计算：`WORKBENCH_EDGE_RAIL_SLOT_INSET_X + WORKBENCH_EDGE_RAIL_SLOT_SIZE / 2`，当前是 25px。不要靠肉眼拖到“差不多”。
+- Windows 标题栏颜色接壤不要复制 macOS 的 `hiddenInset + vibrancy: under-window`。更稳的是 `titleBarStyle: 'hidden'` + `titleBarOverlay` 保留原生按钮，并让 renderer 的同一层背景画到窗口顶边；如果 overlay 透明不稳定，再用同一份主题常量同时驱动 main 侧 overlay 颜色和 renderer CSS 变量。
+- `setBackgroundMaterial('mica')` 只是 Windows 11 22H2+ 的增强，不是基础依赖。旧系统、节能模式或不支持 Mica 时必须回到普通不透明背景，不能出现黑块、灰条或 1px 色差。
+- 验收要看真实 Windows 窗口：普通/最大化、浅色/深色、solid-green/solid-blue 都要截图；右上角系统按钮不能被 Ready 自绘元素覆盖，左上圆点要和左侧竖向切换槽图标中心在同一条竖线上。
+
 ## 1. 架构经验
 ### 1.0 Electron 开发态里，原生依赖 ABI 不匹配会把“设置丢失 / 历史空白 / scope not found”伪装成前端问题
 - 这次真正的根因不是设置页没保存，也不是历史会话被清空，而是主进程数据库根本没起来。
@@ -83,6 +89,12 @@ Stage 4 W3 引入 `SkillToolAuthorization` 三层分离时，留了一个显式�
   - `package.json` 的 `dev / build / verify` 都要先跑 `electron-builder install-app-deps`
   - `postinstall` 也要补这一步，避免换环境后继续用旧的 `.node`
   - 排这类问题时，优先看 `ready-database.log`，不要先怀疑 Zustand、Settings 页面或聊天面板
+
+### 1.0b Windows 同步包要交付“可重建源码”，不是 macOS 运行现场
+- Ready 当前进度同步给 Windows coding agent 时，应该导出 live working tree，因为真正要交接的进度可能还在未提交文件里；同时记录分支和 HEAD 只用于溯源。
+- 源码包必须剥掉本机运行痕迹：`.git`、`node_modules`、`out`、`dist`、`exports`、`.env*`、`.app`、`.dmg`、`.icns`、本机 seed、缓存、日志和密钥都不应进入 Windows 交接包。
+- Windows 端必须在本机重新 `npm ci`、重编 `better-sqlite3`，并验证 `native:check`。Python venv、RSSHub、Puppeteer、sidecar、`local-file://`、用户数据目录都要按 Windows 路径真跑，不能把 macOS 路径或资源布局当成默认正确。
+- Windows 打包要扩展 `electron-builder.yml` 的 `win/nsis/dir` 目标并使用 `build/icon.ico`；macOS 的 codesign、`.app`、`.dmg`、`.icns` 和 `setWindowButtonPosition` 都不能变成 Windows 公共路径。
 
 ### 1.1 “OpenAI 兼容”不等于真的兼容 tools
 - 有些供应商虽然长得像 OpenAI API，但会吞掉 `tools` 或只实现一部分字段。
