@@ -61,13 +61,37 @@ export function buildContextBill(
   return { scopeId, sections: sectionBytes, total, truncations, truncationReasons }
 }
 
-/** Emit the bill through the shared metrics sink (one `context_bill` row). */
-export function emitContextBill(payload: ContextBillPayload): void {
+/** Distinguishes the runtime preamble bill (instructions/reminders the SDK
+ * runtime appends) from the prompt-assembly context bill (stage absent). */
+export const RUNTIME_PREAMBLE_STAGE = 'runtime_preamble'
+
+/** Emit the bill through the shared metrics sink (one `context_bill` row).
+ * `extra.stage` marks the assembly phase (absent = prompt-assembly context
+ * bill); `extra.runId` lets a preamble row join its run. */
+export function emitContextBill(payload: ContextBillPayload, extra?: { stage?: string; runId?: string }): void {
   logAgentMetric('context_bill', {
     scopeId: payload.scopeId,
     sections: payload.sections,
     total: payload.total,
     truncations: payload.truncations,
     truncationReasons: payload.truncationReasons,
+    ...(extra?.stage ? { stage: extra.stage } : {}),
+    ...(extra?.runId ? { runId: extra.runId } : {}),
   })
+}
+
+/** Build the runtime preamble bill — the system-prompt instructions (and any
+ * composed reminders) the SDK runtime appends AFTER the prompt-assembly context
+ * budget is computed. Emitting this (stage=runtime_preamble) makes the
+ * "budget != actually sent" delta observable by joining it with the context
+ * bill on scopeId/runId. Pure accounting; reuses buildContextBill. */
+export function buildRuntimePreambleBill(
+  scopeId: string,
+  parts: { instructions: string; reminders?: string },
+): ContextBillPayload {
+  const sections: ContextBillSectionInput[] = [
+    { section: 'runtime_instructions', text: parts.instructions },
+  ]
+  if (parts.reminders) sections.push({ section: 'system_reminders', text: parts.reminders })
+  return buildContextBill(scopeId, sections)
 }

@@ -3,7 +3,9 @@ import test from 'node:test'
 
 import {
   buildContextBill,
+  buildRuntimePreambleBill,
   emitContextBill,
+  RUNTIME_PREAMBLE_STAGE,
 } from '../main/modules/agent-control/context-bill'
 import {
   __setMetricSinkForTests,
@@ -68,4 +70,36 @@ test('emitContextBill writes exactly one context_bill metric row', () => {
   assert.equal((events[0].sections as Record<string, number>).L0, Buffer.byteLength('常驻', 'utf8'))
   assert.equal(events[0].total, Buffer.byteLength('常驻', 'utf8'))
   assert.deepEqual(events[0].truncationReasons, {})
+})
+
+test('runtime preamble bill measures instructions (+reminders) and emits with stage+runId', () => {
+  // B6 (N-CTX-01 budget): the SDK runtime appends these AFTER the prompt-assembly
+  // context budget, so they are otherwise invisible. The preamble bill makes the
+  // "budget != sent" delta observable (joins the context bill on scopeId/runId).
+  const instructions = 'You are Ready 助手。\n本轮可用工具已按策略过滤。'
+  const reminders = '系统提醒：注意上下文预算。'
+  const bill = buildRuntimePreambleBill('scope-pre', { instructions, reminders })
+  assert.equal(bill.sections.runtime_instructions, Buffer.byteLength(instructions, 'utf8'))
+  assert.equal(bill.sections.system_reminders, Buffer.byteLength(reminders, 'utf8'))
+  assert.equal(
+    bill.total,
+    Buffer.byteLength(instructions, 'utf8') + Buffer.byteLength(reminders, 'utf8'),
+  )
+
+  const events: AgentMetricEvent[] = []
+  __setMetricSinkForTests((e) => events.push(e))
+  try {
+    emitContextBill(bill, { stage: RUNTIME_PREAMBLE_STAGE, runId: 'run-9' })
+  } finally {
+    __setMetricSinkForTests(null)
+  }
+  assert.equal(events.length, 1)
+  assert.equal(events[0].metric, 'context_bill')
+  assert.equal(events[0].stage, RUNTIME_PREAMBLE_STAGE)
+  assert.equal(events[0].runId, 'run-9')
+})
+
+test('runtime preamble bill omits the reminders section when not provided', () => {
+  const bill = buildRuntimePreambleBill('scope-pre2', { instructions: 'only instructions' })
+  assert.deepEqual(Object.keys(bill.sections), ['runtime_instructions'])
 })

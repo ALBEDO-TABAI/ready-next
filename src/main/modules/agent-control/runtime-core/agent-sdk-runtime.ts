@@ -190,7 +190,7 @@ import {
 } from '../task-projection/run-budget-policy'
 import { readResumeKind, type ResumeKind } from '../contracts/resume-handle'
 import { createRotatingLogger } from '../../../utils/rotating-logger'
-import { finalizeRunOutcome, writeRunCloseMetric } from './run-finalizer'
+import { finalizeRunOutcome, type RunOutcome, writeRunCloseMetric } from './run-finalizer'
 import {
   learnSiteCardFromFailure,
   siteCardLearningSignalFromToolFailure,
@@ -201,6 +201,7 @@ import {
   buildActionAnnouncementSteerInput,
   evaluateActionAnnouncementGuard,
 } from './action-announcement-guard'
+import { buildRuntimePreambleBill, emitContextBill, RUNTIME_PREAMBLE_STAGE } from '../context-bill'
 import { createSystemReminderRegistry } from '../system-reminders/system-reminder-registry'
 import { registerActionAnnouncementSteerReminder } from '../system-reminders/action-announcement-steer-reminder'
 import {
@@ -2588,6 +2589,10 @@ function summarizeLongSkillCheckpoint(checkpoint: SdkLongSkillCheckpoint): strin
   ].filter(Boolean).join('\n')
 }
 
+function continuationHandleFromLongSkillCheckpoint(checkpoint: SdkLongSkillCheckpoint): string | null {
+  return checkpoint.runStatePath || checkpoint.outputDir || checkpoint.childRunId || null
+}
+
 function extractLongSkillCheckpoint(
   toolName: string,
   output: ToolExecutionOutput,
@@ -4176,7 +4181,7 @@ export class AgentSdkRuntime extends EventEmitter {
       if (!ownsBudgetCheckpointFlight) {
         const restore = checkpointRestore
         if (!restore) {
-          this.recordAdmissionRejection({
+          await this.recordAdmissionRejection({
             name, runId, taskId, scopeId: sessionId || null,
             status: 'error', terminalReason: 'persistence_failed',
             finalText: '', firstMessageText: messageToText(content as RunMessage),
@@ -4193,7 +4198,7 @@ export class AgentSdkRuntime extends EventEmitter {
             terminalReason: 'persistence_failed',
           })
         }
-        this.recordAdmissionRejection({
+        await this.recordAdmissionRejection({
           name, runId, taskId, scopeId: sessionId || null,
           status: 'done', terminalReason: 'checkpoint_budget',
           finalText: '这项任务已经在继续执行，请等待当前续跑完成。',
@@ -4216,7 +4221,7 @@ export class AgentSdkRuntime extends EventEmitter {
     const begin = await this.beginRun({ name, runId, sessionId })
     if (!begin.ok) {
       if (ownsBudgetCheckpointFlight) releaseBudgetCheckpointFlight(budgetCheckpointFlightKey)
-      this.recordAdmissionRejection({
+      await this.recordAdmissionRejection({
         name, runId, taskId, scopeId: sessionId || null,
         status: 'cancelled', terminalReason: 'blocked_external',
         finalText: '', firstMessageText: messageToText(content as RunMessage),
@@ -4375,6 +4380,40 @@ export class AgentSdkRuntime extends EventEmitter {
         terminalReason,
         taskBudgetRuntime: params.taskBudgetRuntime ?? runMetaBudgetRuntime,
         providerDiagnostics: params.providerDiagnostics ?? runMetaProviderDiagnostics,
+      })
+    }
+    let checkpointRequiredCapabilityGroups: string[] = []
+    let checkpointRequiredToolNames: string[] = []
+    const finalizeBudgetCheckpointReturn = async (checkpointText: string): Promise<ExecutionTurnResult> => {
+      const checkpointBudgetRuntime = runMetaBudgetRuntime || createTaskBudgetRuntime('short_task')
+      runMetaBudgetRuntime = checkpointBudgetRuntime
+      const checkpoint = await this.writeBudgetCheckpointState({
+        agentName: name,
+        sessionId,
+        runId,
+        taskId,
+        taskBudgetRuntime: checkpointBudgetRuntime,
+        runHandle,
+        usedTools,
+        requiredCapabilityGroups: checkpointRequiredCapabilityGroups,
+        requiredToolNames: checkpointRequiredToolNames,
+        lastUserMessage: messageToText(content as RunMessage),
+        terminalReason: 'checkpoint_budget',
+        resumeKind: 'paused',
+      })
+      runMetaContinuationRef = checkpoint.projectionPatch.taskContinuation && typeof checkpoint.projectionPatch.taskContinuation === 'object'
+        ? checkpoint.projectionPatch.taskContinuation as Record<string, unknown>
+        : null
+      projectionPatches.push(checkpoint.projectionPatch)
+      finalText = checkpointText
+      emitOutput(finalText, 'text', checkpoint.projectionPatch)
+      return finalizeEarlyReturn({
+        status: 'checkpoint',
+        terminalReason: 'checkpoint_budget',
+        finalText,
+        continuationHandle: checkpoint.runStatePath,
+        taskBudgetRuntime: checkpointBudgetRuntime,
+        providerDiagnostics: runMetaProviderDiagnostics,
       })
     }
 
@@ -4633,6 +4672,8 @@ export class AgentSdkRuntime extends EventEmitter {
       ].join(' '))
       const definitionByName = new Map(toolDefinitions.map((definition) => [definition.name, definition]))
       const requiredCapabilityGroups = Array.from(new Set(toolDefinitions.map((definition) => definition.groupId)))
+      checkpointRequiredCapabilityGroups = requiredCapabilityGroups
+      checkpointRequiredToolNames = allowedToolNames
       const taskProofStore = this.runtime?.getTaskProjectionStoreForFinalize?.() ?? null
       const taskProofSink = taskProofStore ? createTaskProofSink(taskProofStore) : null
       let liveTaskBudgetRuntime = resolveAgentSdkTaskBudgetRuntime({
@@ -4977,6 +5018,16 @@ export class AgentSdkRuntime extends EventEmitter {
         `当前日期：${new Date().toISOString().slice(0, 10)}`,
       ].join('\n')
 
+      // B6 (N-CTX-01 budget) — the prompt-assembly context budget is computed
+      // before these instructions are appended, so it is not what is actually
+      // sent. Emit the runtime preamble bill once per run so the delta is
+      // observable by joining stage=runtime_preamble with the context bill on
+      // scopeId/runId. Per-turn reminders stay out (dynamic per model call).
+      emitContextBill(buildRuntimePreambleBill(sessionId || '', { instructions }), {
+        stage: RUNTIME_PREAMBLE_STAGE,
+        runId,
+      })
+
       // PR 2 (Phase C.2 first segment) — current-turn capability pre-check.
       // If `content` is a multimodal block array (image/video/...), validate
       // it BEFORE entering the SDK. Vision-off + image → throws
@@ -5216,18 +5267,11 @@ export class AgentSdkRuntime extends EventEmitter {
             nativeMapCriticalClose.message,
             nativeMapCriticalClose.status === 'error' ? 'error' : 'text',
           )
-          emitOutput('', 'done')
-          emitStatus(nativeMapCriticalClose.status, nativeMapCriticalClose.terminalReason)
-          return this.buildResult({
-            success: nativeMapCriticalClose.success,
+          return finalizeEarlyReturn({
+            status: nativeMapCriticalClose.status,
+            terminalReason: nativeMapCriticalClose.terminalReason,
             error: nativeMapCriticalClose.success ? undefined : nativeMapCriticalClose.message,
             finalText,
-            cancelled: false,
-            taskId,
-            usedTools,
-            transcriptEvents,
-            projectionPatches,
-            terminalReason: nativeMapCriticalClose.terminalReason,
           })
         }
         if (!useTextToolBridge) {
@@ -5285,18 +5329,11 @@ export class AgentSdkRuntime extends EventEmitter {
             if (criticalClose) {
               finalText = criticalClose.message
               emitOutput(criticalClose.message, criticalClose.status === 'error' ? 'error' : 'text')
-              emitOutput('', 'done')
-              emitStatus(criticalClose.status, criticalClose.terminalReason)
-              return this.buildResult({
-                success: criticalClose.success,
+              return finalizeEarlyReturn({
+                status: criticalClose.status,
+                terminalReason: criticalClose.terminalReason,
                 error: criticalClose.success ? undefined : criticalClose.message,
                 finalText,
-                cancelled: false,
-                taskId,
-                usedTools,
-                transcriptEvents,
-                projectionPatches,
-                terminalReason: criticalClose.terminalReason,
               })
             }
             if (handledMapAmbiguity) {
@@ -5474,18 +5511,11 @@ export class AgentSdkRuntime extends EventEmitter {
         if (criticalClose) {
           finalText = criticalClose.message
           emitOutput(criticalClose.message, criticalClose.status === 'error' ? 'error' : 'text')
-          emitOutput('', 'done')
-          emitStatus(criticalClose.status, criticalClose.terminalReason)
-          return this.buildResult({
-            success: criticalClose.success,
+          return finalizeEarlyReturn({
+            status: criticalClose.status,
+            terminalReason: criticalClose.terminalReason,
             error: criticalClose.success ? undefined : criticalClose.message,
             finalText,
-            cancelled: false,
-            taskId,
-            usedTools,
-            transcriptEvents,
-            projectionPatches,
-            terminalReason: criticalClose.terminalReason,
           })
         }
         if (handledMapAmbiguity) {
@@ -5507,35 +5537,21 @@ export class AgentSdkRuntime extends EventEmitter {
       if (requiresLocalDocumentExcerpt && !hasSuccessfulLocalDocumentSourceRead) {
         const message = '还没有读取指定文档正文，不能声明完成。'
         emitOutput(message, 'error')
-        emitOutput('', 'done')
-        emitStatus('error', 'blocked_tool_error')
-        return this.buildResult({
-          success: false,
+        return finalizeEarlyReturn({
+          status: 'error',
+          terminalReason: 'blocked_tool_error',
           error: message,
           finalText: '',
-          cancelled: false,
-          taskId,
-          usedTools,
-          transcriptEvents,
-          projectionPatches,
-          terminalReason: 'blocked_tool_error',
         })
       }
       if (documentTargetGuard && finalTextIndicatesIncompleteDocument(finalText)) {
         const message = `目标文档 ${documentTargetGuard.targetName} 仍未补完，不能声明完成。`
         emitOutput(message, 'error')
-        emitOutput('', 'done')
-        emitStatus('error', 'blocked_tool_error')
-        return this.buildResult({
-          success: false,
+        return finalizeEarlyReturn({
+          status: 'error',
+          terminalReason: 'blocked_tool_error',
           error: message,
           finalText: '',
-          cancelled: false,
-          taskId,
-          usedTools,
-          transcriptEvents,
-          projectionPatches,
-          terminalReason: 'blocked_tool_error',
         })
       }
       if (documentTargetGuard) {
@@ -5545,36 +5561,22 @@ export class AgentSdkRuntime extends EventEmitter {
         if (contentIssue) {
           const message = `目标文档 ${documentTargetGuard.targetName} 内容未通过检查：${contentIssue}`
           emitOutput(message, 'error')
-          emitOutput('', 'done')
-          emitStatus('error', 'blocked_tool_error')
-          return this.buildResult({
-            success: false,
+          return finalizeEarlyReturn({
+            status: 'error',
+            terminalReason: 'blocked_tool_error',
             error: message,
             finalText: '',
-            cancelled: false,
-            taskId,
-            usedTools,
-            transcriptEvents,
-            projectionPatches,
-            terminalReason: 'blocked_tool_error',
           })
         }
       }
       if (documentTargetGuard && !hasSuccessfulDocumentTargetMutation) {
         const message = `目标文档 ${documentTargetGuard.targetName} 尚未实际写入，不能声明完成。`
         emitOutput(message, 'error')
-        emitOutput('', 'done')
-        emitStatus('error', 'blocked_tool_error')
-        return this.buildResult({
-          success: false,
+        return finalizeEarlyReturn({
+          status: 'error',
+          terminalReason: 'blocked_tool_error',
           error: message,
           finalText: '',
-          cancelled: false,
-          taskId,
-          usedTools,
-          transcriptEvents,
-          projectionPatches,
-          terminalReason: 'blocked_tool_error',
         })
       }
       if (
@@ -5586,53 +5588,32 @@ export class AgentSdkRuntime extends EventEmitter {
         if (observedDocumentMutationConflict) {
           const message = '本轮修改涉及多个文档，不能自动判断要保存哪一个。请明确目标文档后继续。'
           emitOutput(message, 'error')
-          emitOutput('', 'done')
-          emitStatus('error', 'blocked_tool_error')
-          return this.buildResult({
-            success: false,
+          return finalizeEarlyReturn({
+            status: 'error',
+            terminalReason: 'blocked_tool_error',
             error: message,
             finalText: '',
-            cancelled: false,
-            taskId,
-            usedTools,
-            transcriptEvents,
-            projectionPatches,
-            terminalReason: 'blocked_tool_error',
           })
         }
         const observedTarget = observedDocumentMutationTarget as ObservedDocumentToolTarget | null
         if (observedDocumentMutationMissingTarget || !observedTarget) {
           const message = '文档已经发生修改，但工具没有回传明确的文档身份，不能自动保存或声明完成。'
           emitOutput(message, 'error')
-          emitOutput('', 'done')
-          emitStatus('error', 'blocked_tool_error')
-          return this.buildResult({
-            success: false,
+          return finalizeEarlyReturn({
+            status: 'error',
+            terminalReason: 'blocked_tool_error',
             error: message,
             finalText: '',
-            cancelled: false,
-            taskId,
-            usedTools,
-            transcriptEvents,
-            projectionPatches,
-            terminalReason: 'blocked_tool_error',
           })
         }
         if (!observedTarget.path && observedTarget.requiresSave) {
           const message = `文档 ${observedTarget.title} 还没有保存路径，不能在后台自动保存。请先指定保存位置。`
           emitOutput(message, 'error')
-          emitOutput('', 'done')
-          emitStatus('error', 'blocked_tool_error')
-          return this.buildResult({
-            success: false,
+          return finalizeEarlyReturn({
+            status: 'error',
+            terminalReason: 'blocked_tool_error',
             error: message,
             finalText: '',
-            cancelled: false,
-            taskId,
-            usedTools,
-            transcriptEvents,
-            projectionPatches,
-            terminalReason: 'blocked_tool_error',
           })
         }
         if (observedTarget.path && observedTarget.requiresSave) {
@@ -5681,35 +5662,21 @@ export class AgentSdkRuntime extends EventEmitter {
       if (lastDocumentSaveFailure && hasSuccessfulDocumentTargetMutation) {
         const message = `文档保存失败，不能声明完成：${lastDocumentSaveFailure}`
         emitOutput(message, 'error')
-        emitOutput('', 'done')
-        emitStatus('error', 'persistence_failed')
-        return this.buildResult({
-          success: false,
+        return finalizeEarlyReturn({
+          status: 'error',
+          terminalReason: 'persistence_failed',
           error: message,
           finalText: '',
-          cancelled: false,
-          taskId,
-          usedTools,
-          transcriptEvents,
-          projectionPatches,
-          terminalReason: 'persistence_failed',
         })
       }
       if (newDocumentNeedsSave) {
         const message = '新文档已经修改但尚未保存，不能声明完成。'
         emitOutput(message, 'error')
-        emitOutput('', 'done')
-        emitStatus('error', 'persistence_failed')
-        return this.buildResult({
-          success: false,
+        return finalizeEarlyReturn({
+          status: 'error',
+          terminalReason: 'persistence_failed',
           error: message,
           finalText: '',
-          cancelled: false,
-          taskId,
-          usedTools,
-          transcriptEvents,
-          projectionPatches,
-          terminalReason: 'persistence_failed',
         })
       }
       if (!finalText.trim() && usedTools.length > 0) {
@@ -5854,17 +5821,11 @@ export class AgentSdkRuntime extends EventEmitter {
         if (!finalText) {
           emitOutput(checkpointText, 'text')
         }
-        emitOutput('', 'done', this.mergeProjectionPatches(projectionPatches))
-        emitStatus('checkpoint', recoverableLongSkillCheckpoint.terminalReason)
-        return this.buildResult({
-          success: true,
-          finalText: checkpointText,
-          cancelled: false,
-          taskId,
-          usedTools,
-          transcriptEvents,
-          projectionPatches,
+        return finalizeEarlyReturn({
+          status: 'checkpoint',
           terminalReason: recoverableLongSkillCheckpoint.terminalReason,
+          finalText: checkpointText,
+          continuationHandle: continuationHandleFromLongSkillCheckpoint(recoverableLongSkillCheckpoint),
         })
       }
       if (
@@ -5898,19 +5859,7 @@ export class AgentSdkRuntime extends EventEmitter {
         && !hasSuccessfulDocumentTargetMutation
       ) {
         const checkpointText = `本轮工具调用次数已用完，但目标文档 ${documentTargetGuardForRecovery.targetName} 还没有发生有效写入。请继续这项任务，我会从当前文档状态接着修。`
-        emitOutput(checkpointText, 'text')
-        emitOutput('', 'done', this.mergeProjectionPatches(projectionPatches))
-        emitStatus('checkpoint', 'checkpoint_budget')
-        return this.buildResult({
-          success: true,
-          finalText: checkpointText,
-          cancelled: false,
-          taskId,
-          usedTools,
-          transcriptEvents,
-          projectionPatches,
-          terminalReason: 'checkpoint_budget',
-        })
+        return finalizeBudgetCheckpointReturn(checkpointText)
       }
       if (
         /Max turns \(\d+\) exceeded/i.test(message)
@@ -5919,56 +5868,20 @@ export class AgentSdkRuntime extends EventEmitter {
         && !lastDocumentSaveSuccessText
       ) {
         const checkpointText = buildLocalDocumentWriteBudgetCheckpoint()
-        emitOutput(checkpointText, 'text')
-        emitOutput('', 'done', this.mergeProjectionPatches(projectionPatches))
-        emitStatus('checkpoint', 'checkpoint_budget')
-        return this.buildResult({
-          success: true,
-          finalText: checkpointText,
-          cancelled: false,
-          taskId,
-          usedTools,
-          transcriptEvents,
-          projectionPatches,
-          terminalReason: 'checkpoint_budget',
-        })
+        return finalizeBudgetCheckpointReturn(checkpointText)
       }
       if (
         /Max turns \(\d+\) exceeded/i.test(message)
         && fileReadExcerptCheckpointForRecovery
       ) {
-        emitOutput(fileReadExcerptCheckpointForRecovery, 'text')
-        emitOutput('', 'done', this.mergeProjectionPatches(projectionPatches))
-        emitStatus('checkpoint', 'checkpoint_budget')
-        return this.buildResult({
-          success: true,
-          finalText: fileReadExcerptCheckpointForRecovery,
-          cancelled: false,
-          taskId,
-          usedTools,
-          transcriptEvents,
-          projectionPatches,
-          terminalReason: 'checkpoint_budget',
-        })
+        return finalizeBudgetCheckpointReturn(fileReadExcerptCheckpointForRecovery)
       }
       if (
         /Max turns \(\d+\) exceeded/i.test(message)
         && hasSuccessfulToolProgress
       ) {
         const checkpointText = buildToolProgressBudgetCheckpoint(usedTools)
-        emitOutput(checkpointText, 'text')
-        emitOutput('', 'done', this.mergeProjectionPatches(projectionPatches))
-        emitStatus('checkpoint', 'checkpoint_budget')
-        return this.buildResult({
-          success: true,
-          finalText: checkpointText,
-          cancelled: false,
-          taskId,
-          usedTools,
-          transcriptEvents,
-          projectionPatches,
-          terminalReason: 'checkpoint_budget',
-        })
+        return finalizeBudgetCheckpointReturn(checkpointText)
       }
       const failure = classifySdkRuntimeError(error)
       emitOutput(`${failure.userMessagePrefix}: ${message}`, 'error')
@@ -6035,7 +5948,7 @@ export class AgentSdkRuntime extends EventEmitter {
   // Review-team A1: admission rejections exit before the try/finally net, so
   // they must write their own terminal run_meta row — a rejected request has
   // a real runId the caller observes, and "no row" reads as a silent run.
-  private recordAdmissionRejection(params: {
+  private async recordAdmissionRejection(params: {
     name: string
     runId: string
     taskId: string
@@ -6044,21 +5957,68 @@ export class AgentSdkRuntime extends EventEmitter {
     terminalReason: TurnTerminalReason
     finalText: string
     firstMessageText: string
-  }): void {
-    void this.persistRunMetaSnapshot({
-      agentName: params.name,
+  }): Promise<void> {
+    const kind: RunOutcome['kind'] = params.status === 'done'
+      ? 'done'
+      : params.status === 'cancelled'
+        ? 'cancelled'
+        : params.status === 'checkpoint'
+          ? 'checkpoint'
+          : 'error'
+    const base = {
       runId: params.runId,
       taskId: params.taskId,
       scopeId: params.scopeId,
-      status: params.status,
-      terminalReason: params.terminalReason,
+      durationMs: 1,
+      toolCallsUsed: 0,
+      initiator: 'admission',
+      projectionPatch: null,
       taskBudgetRuntime: null,
       providerDiagnostics: null,
-      continuationRef: null,
       usage: null,
-      firstMessageText: params.firstMessageText,
-      finalText: params.finalText,
-    }).catch((error) => {
+    }
+    try {
+      await finalizeRunOutcome(kind === 'done'
+        ? {
+          kind,
+          ...base,
+          terminalReason: params.terminalReason,
+          finalText: params.finalText,
+        }
+        : kind === 'checkpoint'
+          ? {
+            kind,
+            ...base,
+            continuationHandle: params.terminalReason === 'checkpoint_user_input' ? null : params.runId,
+            terminalReason: params.terminalReason,
+            finalText: params.finalText,
+          }
+          : {
+            kind,
+            ...base,
+            terminalReason: params.terminalReason,
+          }, {
+        runMetaRepository: this.getRunMetaRepositoryForFinalize(),
+        taskProjectionStore: this.runtime?.getTaskProjectionStoreForFinalize?.() ?? null,
+        learnFromCheckIn: (input) => this.learnSiteCardsFromCheckIn(input),
+        writeProjectionTerminalPatch: () => {},
+        writeRunCloseMetric,
+      })
+      await this.persistRunMetaSnapshot({
+        agentName: params.name,
+        runId: params.runId,
+        taskId: params.taskId,
+        scopeId: params.scopeId,
+        status: params.status,
+        terminalReason: params.terminalReason,
+        taskBudgetRuntime: null,
+        providerDiagnostics: null,
+        continuationRef: null,
+        usage: null,
+        firstMessageText: params.firstMessageText,
+        finalText: params.finalText,
+      })
+    } catch (error) {
       const message = errorMessage(error)
       logAgentMetric('run_meta_admission_rejection_persist_failed', {
         runId: params.runId,
@@ -6069,7 +6029,7 @@ export class AgentSdkRuntime extends EventEmitter {
         reason: message,
       })
       log(`recordAdmissionRejection persist failed runId=${params.runId}: ${message}`)
-    })
+    }
   }
 
   private async persistRunMetaSnapshot(params: {
