@@ -392,12 +392,47 @@ function check({ root = ROOT } = {}) {
       /this\.bindEngineEvents\s*\(\s*this\.domainAdapterEngine\s*\)/,
       'orchestrator_binds_domain_adapter_events',
     )
+    pushMatches(
+      errors,
+      ORCHESTRATOR_REL,
+      source,
+      /this\.domainAdapterEngine\.setRendererToolActionRequester\s*\(/,
+      'orchestrator_forwards_renderer_tool_action_requester_to_direct_chat',
+    )
+    pushMatches(
+      errors,
+      ORCHESTRATOR_REL,
+      source,
+      /this\.domainAdapterEngine\.setCancelPendingToolActions\s*\(/,
+      'orchestrator_forwards_tool_action_canceller_to_direct_chat',
+    )
   }
 
   if (!fs.existsSync(directChatPath)) {
     errors.push(`missing_direct_chat:${DIRECT_CHAT_REL}`)
   } else {
     const source = stripComments(read(root, DIRECT_CHAT_REL))
+    pushMatches(
+      errors,
+      DIRECT_CHAT_REL,
+      source,
+      /import\s+[\s\S]*?\s+from\s+['"](?:node:)?events['"]/,
+      'direct_chat_imports_events_module',
+    )
+    pushMatches(
+      errors,
+      DIRECT_CHAT_REL,
+      source,
+      /class\s+DirectChatEngine\s+extends\s+(?:[A-Za-z_$][\w$]*\.)?EventEmitter\b/,
+      'direct_chat_extends_event_emitter',
+    )
+    pushMatches(
+      errors,
+      DIRECT_CHAT_REL,
+      source,
+      /\bthis\.emit\s*\(\s*['"](?:output|status|error|toolAction)['"]/,
+      'direct_chat_emits_renderer_event',
+    )
     const turnEngineImports = findImports(source, 'turn-engine')
     const turnEngineRuntimeDynamicImports = findRuntimeDynamicImports(source, 'turn-engine')
     if (turnEngineImports.length > 0) {

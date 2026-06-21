@@ -31,8 +31,6 @@ test('document deterministic direct summary redacts model-visible target paths b
       executeToolCall: async () => {
         throw new Error('direct path should not call document tools')
       },
-      emitOutput: (payload) => emitted.push(payload),
-      emitToolAction: (payload) => toolActions.push({ tool: payload.tool, args: payload.args }),
       extractPrimaryUserInstruction: (raw) => raw,
       extractSectionTitleFromUserText: () => null,
       extractDocumentPathFromUserText: () => targetPath,
@@ -45,6 +43,10 @@ test('document deterministic direct summary redacts model-visible target paths b
       agentName: 'Ready',
       userText: `优化这个文档 ${targetPath}`,
       toolContext: {} as ToolContext,
+      emitters: {
+        emitOutput: (payload) => emitted.push(payload),
+        emitToolAction: (payload) => toolActions.push({ tool: payload.tool, args: payload.args }),
+      },
       onAssistantSummary: (summary) => summaries.push(summary),
     })
 
@@ -84,8 +86,6 @@ test('document deterministic fallback redacts model-visible tool chunks but keep
       }
       throw new Error(`Unexpected tool ${name}`)
     },
-    emitOutput: (payload) => emitted.push(payload),
-    emitToolAction: () => {},
     extractPrimaryUserInstruction: (raw) => raw,
     extractSectionTitleFromUserText: () => '第一章',
     extractDocumentPathFromUserText: () => targetPath,
@@ -98,6 +98,10 @@ test('document deterministic fallback redacts model-visible tool chunks but keep
     agentName: 'Ready',
     userText: `优化第一章 ${targetPath}`,
     toolContext: {} as ToolContext,
+    emitters: {
+      emitOutput: (payload) => emitted.push(payload),
+      emitToolAction: () => {},
+    },
     onAssistantSummary: (summary) => summaries.push(summary),
   })
 

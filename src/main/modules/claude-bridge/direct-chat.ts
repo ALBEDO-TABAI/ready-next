@@ -4,7 +4,6 @@
  * Supports tool calling for browser control and other integrations.
  */
 
-import { EventEmitter } from 'events'
 import { wrapRunMetaRepositoryWithCloseoutSnapshot } from '../agent-control/task-projection/run-meta-snapshot'
 import { existsSync } from 'fs'
 import { AIModelConfig, getProviderDef, normalizeAIConfig } from '../../../shared/ai-providers'
@@ -274,7 +273,7 @@ show-widget 规则：
 如果系统当前未启用工具，请不要伪造工具调用，直接给出文本回答。
 `
 
-export class DirectChatEngine extends EventEmitter {
+export class DirectChatEngine {
   private sessions = new Map<string, DirectChatSession>()
   private readonly widgetEditLeaseStore = new WidgetEditLeaseStore()
   private browserController: BrowserController | null = null
@@ -296,19 +295,10 @@ export class DirectChatEngine extends EventEmitter {
   private runCleanupRegistry: {
     registerRunCleanup: (runId: string, cleanup: () => void | Promise<void>) => void
   } | null = null
-  private rendererToolActionRequester: ((payload: {
-    agent?: string
-    sessionId?: string
-    runId?: string
-    tool: string
-    args: Record<string, unknown>
-    }) => Promise<Record<string, unknown>>) | null = null
-  private cancelPendingToolActions: ((agent: string, sessionId?: string) => void) | null = null
   private maxToolIterations = 24
   private attachmentLoadFailureThrottle = new AttachmentLoadFailureThrottle()
 
   constructor() {
-    super()
     const browserTaskPlanner = new BrowserTaskPlanner({
       getSessionAttachmentHints: (sessionId) => this.getSessionAttachmentHints(sessionId),
       getSessionAttachmentResourceList: (sessionId) => this.getSessionAttachmentResourceList(sessionId),
@@ -373,8 +363,6 @@ export class DirectChatEngine extends EventEmitter {
     this.documentDomainOrchestrator = new DocumentDomainOrchestrator({
       log,
       executeToolCall: (name, input, context) => executeToolCall(name, input, context as any),
-      emitOutput: (payload) => this.emit('output', payload),
-      emitToolAction: (payload) => this.emit('toolAction', payload),
       extractPrimaryUserInstruction: (raw) => this.extractPrimaryUserInstruction(raw),
       extractSectionTitleFromUserText: (raw) => this.extractSectionTitleFromUserText(raw),
       extractDocumentPathFromUserText: (raw) => this.extractDocumentPathFromUserText(raw),
@@ -617,24 +605,6 @@ export class DirectChatEngine extends EventEmitter {
     registerRunCleanup: (runId: string, cleanup: () => void | Promise<void>) => void
   } | null): void {
     this.runCleanupRegistry = registry
-  }
-
-  setRendererToolActionRequester(
-    requester: ((payload: {
-      agent?: string
-      sessionId?: string
-      runId?: string
-      tool: string
-      args: Record<string, unknown>
-    }) => Promise<Record<string, unknown>>) | null,
-  ): void {
-    this.rendererToolActionRequester = requester
-  }
-
-  setCancelPendingToolActions(
-    canceller: ((agent: string, sessionId?: string) => void) | null,
-  ): void {
-    this.cancelPendingToolActions = canceller
   }
 
   getAIConfigDetailed(): AIConfigLoad {

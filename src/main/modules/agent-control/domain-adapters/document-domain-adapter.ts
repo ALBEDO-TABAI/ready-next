@@ -12,6 +12,15 @@ interface DocumentDomainOrchestratorLike {
     agentName: string
     userText: string
     toolContext: unknown
+    emitters: {
+      emitOutput: (payload: {
+        agent: string
+        chunk: string
+        type: 'text' | 'tool_use' | 'tool_result'
+        projectionPatch?: Record<string, unknown> | null
+      }) => void
+      emitToolAction: (payload: { agent: string; tool: string; args: Record<string, unknown> }) => void
+    }
     onAssistantSummary?: (summary: string) => void
   }) => Promise<boolean>
   tryDeterministicSectionRewriteFlow: (params: {
@@ -26,6 +35,15 @@ interface DocumentDomainOrchestratorLike {
     useAnthropicProtocol: boolean
     userText: string
     toolContext: unknown
+    emitters: {
+      emitOutput: (payload: {
+        agent: string
+        chunk: string
+        type: 'text' | 'tool_use' | 'tool_result'
+        projectionPatch?: Record<string, unknown> | null
+      }) => void
+      emitToolAction: (payload: { agent: string; tool: string; args: Record<string, unknown> }) => void
+    }
     onAssistantSummary: (summary: string) => void
   }) => Promise<boolean>
 }
@@ -220,6 +238,21 @@ export class DocumentDomainAdapter implements DomainAdapter {
 
   async dispatch(params: Parameters<DomainAdapter['dispatch']>[0]): Promise<DomainAdapterDispatchResult> {
     const summaryRef = { value: '' }
+    const emitters = {
+      emitOutput: (payload: {
+        agent: string
+        chunk: string
+        type: 'text' | 'tool_use' | 'tool_result'
+        projectionPatch?: Record<string, unknown> | null
+      }) => {
+        params.request.emitters.emitOutput(payload.chunk, payload.type, {
+          projectionPatch: payload.projectionPatch,
+        })
+      },
+      emitToolAction: (payload: { agent: string; tool: string; args: Record<string, unknown> }) => {
+        params.request.emitters.emitToolAction(payload.tool, payload.args)
+      },
+    }
     const toolContext = {
       browserController: params.host.browserController as never,
       sidecarManager: params.host.sidecarManager as never,
@@ -266,6 +299,7 @@ export class DocumentDomainAdapter implements DomainAdapter {
         agentName: params.request.agentName,
         userText: params.userText,
         toolContext,
+        emitters,
         onAssistantSummary: (summary: string) => {
           summaryRef.value = summary
         },
@@ -295,6 +329,7 @@ export class DocumentDomainAdapter implements DomainAdapter {
         useAnthropicProtocol: params.host.providerContext.useAnthropicProtocol,
         userText: params.userText,
         toolContext,
+        emitters,
         onAssistantSummary: (summary: string) => {
           summaryRef.value = summary
         },

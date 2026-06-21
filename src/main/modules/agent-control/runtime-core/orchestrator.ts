@@ -153,8 +153,8 @@ export class ReadyAgentOrchestrator extends EventEmitter {
     // Stage U PR U1.3 + P6f — DirectChatEngine no longer participates in
     // renderer-facing event emission or production turn execution. It still
     // survives as the DomainAdapter / SkillContextOrchestrator and dependency
-    // host for now. Binding its EventEmitter here used to mean any code path
-    // that touched the legacy engine could surface events on `agent:stream` /
+    // host for now. Binding its former EventEmitter here used to mean any code
+    // path that touched the legacy engine could surface events on `agent:stream` /
     // `agent:status` / `agent:error` alongside the SDK runtime. SDK runtime is
     // the single emission producer and live turn executor now.
     this.bindEngineEvents(this.sdkEngine)
@@ -168,7 +168,7 @@ export class ReadyAgentOrchestrator extends EventEmitter {
     }
   }
 
-  private bindEngineEvents(engine: DirectChatEngine | AgentSdkRuntime): void {
+  private bindEngineEvents(engine: AgentSdkRuntime): void {
     engine.on('output', (payload) => {
       const descriptor = this.resolveDescriptor(payload.agent)
       const taskKey = this.toTaskKey(descriptor.agent, descriptor.sessionId)
@@ -453,14 +453,12 @@ export class ReadyAgentOrchestrator extends EventEmitter {
       args: Record<string, unknown>
     }) => Promise<Record<string, unknown>>) | null,
   ): void {
-    this.domainAdapterEngine.setRendererToolActionRequester(requester)
     this.sdkEngine.setRendererToolActionRequester(requester)
   }
 
   setCancelPendingToolActions(
     canceller: ((agent: string, sessionId?: string) => void) | null,
   ): void {
-    this.domainAdapterEngine.setCancelPendingToolActions(canceller)
     this.sdkEngine.setCancelPendingToolActions(canceller)
   }
 

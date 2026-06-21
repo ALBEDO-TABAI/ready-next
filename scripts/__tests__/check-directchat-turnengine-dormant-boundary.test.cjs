@@ -223,6 +223,72 @@ export class ReadyAgentOrchestrator {
   assert.ok(result.errors.some((error) => error.includes('orchestrator_calls_domain_adapter_sendMessage')))
 })
 
+test('gate fails when orchestrator forwards renderer tool-action plumbing to DirectChat', (t) => {
+  const root = makeRoot(t)
+  write(root, 'src/main/modules/agent-control/runtime-core/orchestrator.ts', `
+export class ReadyAgentOrchestrator {
+  private readonly domainAdapterEngine
+  private readonly sdkEngine
+  constructor(domainAdapterEngine, sdkEngine) {
+    this.domainAdapterEngine = domainAdapterEngine
+    this.sdkEngine = sdkEngine
+    this.bindEngineEvents(this.sdkEngine)
+  }
+  private bindEngineEvents(engine) { return engine }
+  async send() {
+    return await this.sdkEngine.sendMessage('session', 'message', 'run-1', {})
+  }
+  setRendererToolActionRequester(requester) {
+    this.domainAdapterEngine.setRendererToolActionRequester(requester)
+    this.sdkEngine.setRendererToolActionRequester(requester)
+  }
+  setCancelPendingToolActions(canceller) {
+    this.domainAdapterEngine.setCancelPendingToolActions(canceller)
+    this.sdkEngine.setCancelPendingToolActions(canceller)
+  }
+}
+`)
+  const result = check({ root })
+  assert.equal(result.ok, false)
+  assert.ok(result.errors.some((error) => error.includes('orchestrator_forwards_renderer_tool_action_requester_to_direct_chat')))
+  assert.ok(result.errors.some((error) => error.includes('orchestrator_forwards_tool_action_canceller_to_direct_chat')))
+})
+
+test('gate fails when DirectChat extends EventEmitter', (t) => {
+  const root = makeRoot(t)
+  write(root, 'src/main/modules/claude-bridge/direct-chat.ts', `
+import { EventEmitter } from 'events'
+export class DirectChatEngine extends EventEmitter {
+  stopGeneration() {}
+  getDomainAdapters() { return [] }
+  getSkillContextOrchestrator() { return {} }
+}
+`)
+  const result = check({ root })
+  assert.equal(result.ok, false)
+  assert.ok(result.errors.some((error) => error.includes('direct_chat_imports_events_module')))
+  assert.ok(result.errors.some((error) => error.includes('direct_chat_extends_event_emitter')))
+})
+
+test('gate fails when DirectChat emits renderer-facing events', (t) => {
+  const root = makeRoot(t)
+  write(root, 'src/main/modules/claude-bridge/direct-chat.ts', `
+export class DirectChatEngine {
+  emit() {}
+  stopGeneration() {}
+  getDomainAdapters() { return [] }
+  getSkillContextOrchestrator() { return {} }
+  announce(payload) {
+    this.emit('output', payload)
+    this.emit('toolAction', payload)
+  }
+}
+`)
+  const result = check({ root })
+  assert.equal(result.ok, false)
+  assert.ok(result.errors.some((error) => error.includes('direct_chat_emits_renderer_event')))
+})
+
 test('gate fails when production code imports the TurnEngine class outside DirectChat', (t) => {
   const root = makeRoot(t)
   write(root, 'src/main/modules/agent-control/runtime-core/legacy-runner.ts', `
