@@ -54,6 +54,8 @@ build/runtime-seeds/
 .claude/codex-audit/
 .claude/scheduled_tasks.lock
 .claude/worktrees/
+outputs/agent-audit/live/
+outputs/send-im-live-*/
 index-*.css
 index-*.js
 index-*.html
