@@ -91,6 +91,29 @@ export type {
   assert.equal(result.ok, true, result.errors.join('\n'))
 })
 
+test('gate handles unrelated type re-exports before turn-response island', (t) => {
+  const root = makeRoot(t)
+  writePassingHarness(root)
+  write(root, RUN_CONTRACTS_REL, `
+export type {
+  SkillRunContract,
+} from './skill-run-contract'
+
+export type {
+  TurnProviderContext,
+  TurnSimpleResponse,
+  TurnToolCall,
+  TurnToolExecutionResult,
+  TurnToolBatchResult,
+  TurnToolCallParseError,
+  TurnModelResponse,
+  TurnShortcutResult,
+} from './turn-response-contracts'
+`)
+  const result = check({ root })
+  assert.equal(result.ok, true, result.errors.join('\n'))
+})
+
 test('gate fails when run-contracts still defines a moved declaration', (t) => {
   const root = makeRoot(t)
   writePassingHarness(root)

@@ -1,7 +1,6 @@
 import type { ActiveSkillContextSource } from '../session/active-skill-context'
-// SkillRunContract lives in run-contracts.ts. Imported as a type so the
-// frame schema can carry the durable contract without circular runtime
-// dependencies.
+// SkillRunContract lives in the contract island and is imported through the
+// run-contracts compatibility surface so existing callsites stay stable.
 import type { SkillRunContract } from '../contracts/run-contracts'
 import { isVeaAction, isVeaStage, resolveVeaResumeAction } from '../vea-resume-action'
 
@@ -73,7 +72,7 @@ export interface TurnFrameSkillSlice {
    * Stage C — durable cross-turn skill run contract (Wave 1 → 2/3 lock).
    * Populated by `turn-frame-resolver` from supervisor + projection +
    * reference-hint signals; emitted by tool results via `framePatch.runContract`
-   * (see `buildContractFramePatch`). The shape lives in `run-contracts.ts`.
+   * (see `buildContractFramePatch`). The shape lives in `skill-run-contract.ts`.
    */
   runContract: SkillRunContract | null
 }

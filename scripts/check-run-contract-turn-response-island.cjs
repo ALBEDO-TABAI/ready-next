@@ -55,7 +55,7 @@ function exportedTypeDeclarationPattern(name) {
 }
 
 function parseTurnResponseTypeReexport(runText) {
-  const pattern = /\bexport\s+type\s*\{([\s\S]*?)\}\s+from\s+['"]\.\/turn-response-contracts['"]/m
+  const pattern = /\bexport\s+type\s*\{([^}]*)\}\s+from\s+['"]\.\/turn-response-contracts['"]/m
   const match = runText.match(pattern)
   if (!match) return null
   return match[1].split(',').map((part) => part.trim()).filter(Boolean)

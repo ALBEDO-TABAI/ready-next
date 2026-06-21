@@ -3,7 +3,8 @@ import { join } from 'node:path'
 
 import { canResumeShape } from './resume-handle'
 import { isDirectlyResumableTaskStatus, isPausedTaskStatus } from './task-open-status'
-import type { SkillRunContract, TaskProjectionRecord } from './run-contracts'
+import type { TaskProjectionRecord } from './run-contracts'
+import type { SkillRunContract } from './skill-run-contract'
 import type { ReferenceSkillHint } from '../skills/skill-reference-hints'
 import { decodeStoredSkillChildCloseEvent } from '../skills/skill-child-state-machine'
 import type {
