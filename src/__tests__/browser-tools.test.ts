@@ -115,6 +115,34 @@ type MockedController = Partial<BrowserController> & {
   }
 }
 
+// Browser tools migrated many failure / handle branches from JSON-string
+// returns to structured ToolExecutionOutput (C09). parseTool reads either
+// shape so a test asserting the JSON payload works regardless of which a
+// branch returns (string -> parse; ToolExecutionOutput -> its .data / .text).
+const rawJsonParse = JSON.parse.bind(JSON) as (text: string) => unknown
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function parseTool(out: unknown): any {
+  if (typeof out === 'string') return rawJsonParse(out)
+  if (out && typeof out === 'object') {
+    const o = out as { data?: unknown; text?: unknown }
+    if (o.data !== undefined && o.data !== null) return o.data
+    if (typeof o.text === 'string') return rawJsonParse(o.text)
+  }
+  return rawJsonParse(String(out))
+}
+
+// Text form of a tool result for substring/regex assertions: the JSON string
+// for a ToolExecutionOutput (whose .text carries the message field), or the
+// raw string when a branch still returns a plain string.
+function toolText(out: unknown): string {
+  if (typeof out === 'string') return out
+  if (out && typeof out === 'object' && 'text' in out) {
+    const t = (out as { text?: unknown }).text
+    if (typeof t === 'string') return t
+  }
+  return String(out)
+}
+
 function createControllerMock(overrides?: Partial<BrowserController>): BrowserController & MockedController {
   const calls = {
     normalized: [] as Array<{ x: number; y: number }>,
@@ -223,7 +251,7 @@ describe('browser-tools v2', () => {
     })
 
     const result = await executeBrowserTool('browser_read_page_map', {}, controller)
-    const payload = JSON.parse(result) as {
+    const payload = parseTool(result) as {
       pageIdentity: { generation: number; title: string }
       pageMap: {
         targets: Array<{ targetId: string; name: string }>
@@ -292,13 +320,13 @@ describe('browser-tools v2', () => {
     })
 
     const stale = await executeBrowserTool('browser_probe_readonly', { generation: 1, query: 'query', scope: 'forms' }, controller)
-    const stalePayload = JSON.parse(stale) as { ok: boolean; errorCode: string }
+    const stalePayload = parseTool(stale) as { ok: boolean; errorCode: string }
     assert.strictEqual(stalePayload.ok, false)
     assert.strictEqual(stalePayload.errorCode, 'stale_page_map')
 
     await executeBrowserTool('browser_read_page_map', {}, controller)
     const result = await executeBrowserTool('browser_probe_readonly', { generation: 1, query: 'query', scope: 'forms' }, controller)
-    const payload = JSON.parse(result) as { ok: boolean; scope: string; nodes: Array<{ text: string }> }
+    const payload = parseTool(result) as { ok: boolean; scope: string; nodes: Array<{ text: string }> }
     assert.strictEqual(payload.ok, true)
     assert.strictEqual(payload.scope, 'forms')
     assert.strictEqual(payload.nodes[0]?.text, 'Query')
@@ -333,7 +361,7 @@ describe('browser-tools v2', () => {
 
     await executeBrowserTool('browser_read_page_map', {}, controller)
     const result = await executeBrowserTool('browser_act_on_target', { target_id: '1:0:1', action: 'click' }, controller)
-    const payload = JSON.parse(result) as { ok: boolean; errorCode: string; detail?: Record<string, unknown> }
+    const payload = parseTool(result) as { ok: boolean; errorCode: string; detail?: Record<string, unknown> }
 
     assert.strictEqual(payload.ok, false)
     assert.strictEqual(payload.errorCode, 'ambiguous_target')
@@ -368,13 +396,13 @@ describe('browser-tools v2', () => {
     })
 
     const stale = await executeBrowserTool('browser_act_on_target', { target_id: '1:0:1', action: 'fill', value: 'hello' }, controller)
-    const stalePayload = JSON.parse(stale) as { ok: boolean; errorCode: string }
+    const stalePayload = parseTool(stale) as { ok: boolean; errorCode: string }
     assert.strictEqual(stalePayload.ok, false)
     assert.strictEqual(stalePayload.errorCode, 'stale_page_map')
 
     await executeBrowserTool('browser_read_page_map', {}, controller)
     const result = await executeBrowserTool('browser_act_on_target', { target_id: '1:0:1', action: 'fill', value: 'hello' }, controller)
-    const payload = JSON.parse(result) as { ok: boolean; action: string; readBack: string; changed: boolean; failureKind: string | null; result: { ok?: boolean } }
+    const payload = parseTool(result) as { ok: boolean; action: string; readBack: string; changed: boolean; failureKind: string | null; result: { ok?: boolean } }
 
     assert.strictEqual(payload.ok, true)
     assert.strictEqual(payload.action, 'fill')
@@ -388,7 +416,7 @@ describe('browser-tools v2', () => {
   it('browser_click_at should clamp normalized coordinates', async () => {
     const controller = createControllerMock()
     const result = await executeBrowserTool('browser_click_at', { x: -20, y: 1800 }, controller)
-    const payload = JSON.parse(result) as { normalized: { x: number; y: number } }
+    const payload = parseTool(result) as { normalized: { x: number; y: number } }
 
     assert.strictEqual(payload.normalized.x, 0)
     assert.strictEqual(payload.normalized.y, 999)
@@ -446,7 +474,7 @@ describe('browser-tools v2', () => {
       },
     })
     const result = await executeBrowserTool('browser_click_text', { text: '笔记一' }, controller)
-    const payload = JSON.parse(result) as { ok: boolean; normalized: { x: number; y: number } }
+    const payload = parseTool(result) as { ok: boolean; normalized: { x: number; y: number } }
 
     assert.strictEqual(payload.ok, true)
     assert.deepStrictEqual(payload.normalized, { x: 500, y: 400 })
@@ -466,7 +494,7 @@ describe('browser-tools v2', () => {
       },
     })
     const result = await executeBrowserTool('browser_click_text', { text: '笔记一', href_contains: 'source-1' }, controller)
-    const payload = JSON.parse(result) as { ok: boolean; clickedDirect: boolean; normalized: { x: number; y: number } }
+    const payload = parseTool(result) as { ok: boolean; clickedDirect: boolean; normalized: { x: number; y: number } }
 
     assert.strictEqual(payload.ok, true)
     assert.strictEqual(payload.clickedDirect, false)
@@ -490,7 +518,7 @@ describe('browser-tools v2', () => {
 	      },
 	    })
 	    const result = await executeBrowserTool('browser_collect_images', { include_hidden: false }, controller)
-	    const payload = JSON.parse(result) as { count: number; scope?: string }
+	    const payload = parseTool(result) as { count: number; scope?: string }
 
 	    assert.equal(payload.count, 0)
 	    assert.equal(payload.scope, 'xiaohongshu-detail')
@@ -537,7 +565,7 @@ describe('browser-tools v2', () => {
         executeJS: async (_tabId, code) => dom.window.Function('code', 'with (this) { return eval(code) }').call(dom.window, String(code || '')),
       })
       const result = await executeBrowserTool('browser_collect_images', { include_hidden: false, limit: 10 }, controller)
-      const payload = JSON.parse(result) as { count: number; scope?: string; images: Array<{ url: string }> }
+      const payload = parseTool(result) as { count: number; scope?: string; images: Array<{ url: string }> }
       const urls = payload.images.map((item) => item.url)
 
       assert.equal(payload.scope, 'xiaohongshu-detail')
@@ -581,7 +609,7 @@ describe('browser-tools v2', () => {
         executeJS: async (_tabId, code) => dom.window.Function('code', 'with (this) { return eval(code) }').call(dom.window, String(code || '')),
       })
       const result = await executeBrowserTool('browser_collect_images', { include_hidden: false, limit: 20 }, controller)
-      const payload = JSON.parse(result) as { count: number; expectedImageCount?: number; images: Array<{ url: string }> }
+      const payload = parseTool(result) as { count: number; expectedImageCount?: number; images: Array<{ url: string }> }
 
       assert.equal(payload.count, 1)
       assert.equal(payload.expectedImageCount, 10)
@@ -619,7 +647,7 @@ describe('browser-tools v2', () => {
         executeJS: async (_tabId, code) => dom.window.Function('code', 'with (this) { return eval(code) }').call(dom.window, String(code || '')),
       })
       const result = await executeBrowserTool('browser_collect_images', { include_hidden: false, limit: 10 }, controller)
-      const payload = JSON.parse(result) as { count: number; videoCount: number; scope?: string; videos: Array<{ posterUrl?: string }> }
+      const payload = parseTool(result) as { count: number; videoCount: number; scope?: string; videos: Array<{ posterUrl?: string }> }
 
       assert.equal(payload.scope, 'xiaohongshu-detail')
       assert.equal(payload.count, 0)
@@ -660,7 +688,7 @@ describe('browser-tools v2', () => {
         executeJS: async (_tabId, code) => dom.window.Function('code', 'with (this) { return eval(code) }').call(dom.window, String(code || '')),
       })
       const result = await executeBrowserTool('browser_collect_images', { include_hidden: false, limit: 10 }, controller)
-      const payload = JSON.parse(result) as { videoCount: number; videos: Array<{ url?: string }> }
+      const payload = parseTool(result) as { videoCount: number; videos: Array<{ url?: string }> }
 
       assert.equal(payload.videoCount, 1)
       assert.equal(payload.videos[0]?.url, 'https://sns-video.xhscdn.com/video.mp4?token=abc')
@@ -682,7 +710,7 @@ describe('browser-tools v2', () => {
       },
       controller,
     )
-    const payload = JSON.parse(result) as { ok: boolean; video: { parseStatus: string; downloadUrl?: string; posterUrl?: string; platform?: string } }
+    const payload = parseTool(result) as { ok: boolean; video: { parseStatus: string; downloadUrl?: string; posterUrl?: string; platform?: string } }
 
     assert.equal(payload.ok, true)
     assert.equal(payload.video.parseStatus, 'not_needed')
@@ -694,7 +722,7 @@ describe('browser-tools v2', () => {
   it('browser_type_at should clear, type and send enter by default', async () => {
     const controller = createControllerMock()
     const result = await executeBrowserTool('browser_type_at', { x: 500, y: 900, text: '今晚吃什么' }, controller)
-    const payload = JSON.parse(result) as { submitted: boolean; text_length: number }
+    const payload = parseTool(result) as { submitted: boolean; text_length: number }
 
     assert.strictEqual(payload.submitted, true)
     assert.strictEqual(payload.text_length, 5)
@@ -748,7 +776,7 @@ describe('browser-tools v2', () => {
   it('browser_query_gemini should fallback to coordinate typing when DOM compose fails', async () => {
     const controller = createControllerMock()
     const result = await executeBrowserTool('browser_query_gemini', { text: '今晚吃什么', wait_response_ms: 5000 }, controller)
-    const payload = JSON.parse(result) as {
+    const payload = parseTool(result) as {
       submitted: boolean
       response_detected: boolean
       attempted: string[]
@@ -809,7 +837,7 @@ describe('browser-tools v2', () => {
     })
 
     const result = await executeBrowserTool('browser_locate_input_targets', { target: '提示词' }, controller)
-    const payload = JSON.parse(result) as {
+    const payload = parseTool(result) as {
       active_target?: { label?: string; focused?: boolean }
       nearby_send_targets?: Array<{ label?: string; nearActiveInput?: boolean }>
       targets: Array<{ label?: string }>
@@ -838,7 +866,7 @@ describe('browser-tools v2', () => {
     } as Partial<BrowserController>)
 
     const result = await executeBrowserTool('browser_extract_structured', { template: 'article_list' }, controller)
-    const payload = JSON.parse(result) as { items: Array<{ title?: string }> }
+    const payload = parseTool(result) as { items: Array<{ title?: string }> }
 
     assert.strictEqual(payload.items.length, 1)
     assert.strictEqual(payload.items[0]?.title, 'First post')
@@ -864,10 +892,10 @@ describe('browser-tools v2', () => {
       kind: 'download_urls',
       payload: { urls: ['https://example.com/a.jpg'] },
     }, controller)
-    const startPayload = JSON.parse(startResult) as { taskId?: string; progress?: { completed?: number } }
+    const startPayload = parseTool(startResult) as { taskId?: string; progress?: { completed?: number } }
 
     const getResult = await executeBrowserTool('browser_get_task', { task_id: 'task-1' }, controller)
-    const getPayload = JSON.parse(getResult) as { status?: string; progress?: { currentLabel?: string } }
+    const getPayload = parseTool(getResult) as { status?: string; progress?: { currentLabel?: string } }
 
     assert.strictEqual(startPayload.taskId, 'task-1')
     assert.strictEqual(startPayload.progress?.completed, 2)
@@ -905,9 +933,9 @@ describe('browser-tools v2', () => {
       sort_by: 'source',
     }, controller)
 
-    assert.strictEqual((JSON.parse(resumeResult) as { status?: string }).status, 'running')
-    assert.strictEqual((JSON.parse(cancelResult) as { status?: string }).status, 'cancelled')
-    assert.strictEqual((JSON.parse(aggregateResult) as Array<{ title?: string }>).length, 1)
+    assert.strictEqual((parseTool(resumeResult) as { status?: string }).status, 'running')
+    assert.strictEqual((parseTool(cancelResult) as { status?: string }).status, 'cancelled')
+    assert.strictEqual((parseTool(aggregateResult) as Array<{ title?: string }>).length, 1)
   })
 
   it('browser_resume_task starts card_loop when resuming a completed high-control discovery task', async () => {
@@ -945,7 +973,7 @@ describe('browser-tools v2', () => {
       'scope-xhs-resume',
     )
 
-    assert.equal((JSON.parse(result) as { taskId?: string }).taskId, 'browser-task-card-from-resume')
+    assert.equal((parseTool(result) as { taskId?: string }).taskId, 'browser-task-card-from-resume')
     assert.equal(started.length, 1)
     const plan = started[0] as { strategy?: string; expectedCount?: number; sourceTaskId?: string; outputRootDir?: string; notes?: unknown[]; scopeId?: string }
     assert.equal(plan.strategy, 'card_loop')
@@ -988,7 +1016,7 @@ describe('browser-tools v2', () => {
       'scope-xhs-get',
     )
 
-    assert.equal((JSON.parse(result) as { taskId?: string }).taskId, 'browser-task-card-from-get')
+    assert.equal((parseTool(result) as { taskId?: string }).taskId, 'browser-task-card-from-get')
     assert.equal(started.length, 1)
     const plan = started[0] as { strategy?: string; sourceTaskId?: string; outputRootDir?: string; scopeId?: string }
     assert.equal(plan.strategy, 'card_loop')
@@ -1029,7 +1057,7 @@ describe('browser-tools v2', () => {
       controller,
     )
 
-    assert.equal((JSON.parse(result) as { taskId?: string }).taskId, 'browser-task-card-existing')
+    assert.equal((parseTool(result) as { taskId?: string }).taskId, 'browser-task-card-existing')
   })
 
   it('browser_download_gallery and browser_research_topic should offer thin task adapters for agents', async () => {
@@ -1063,8 +1091,8 @@ describe('browser-tools v2', () => {
       limit_per_page: 10,
     }, controller)
 
-    assert.strictEqual((JSON.parse(galleryResult) as { taskId?: string }).taskId, 'gallery-task')
-    assert.strictEqual((JSON.parse(researchResult) as { taskId?: string }).taskId, 'research-task')
+    assert.strictEqual((parseTool(galleryResult) as { taskId?: string }).taskId, 'gallery-task')
+    assert.strictEqual((parseTool(researchResult) as { taskId?: string }).taskId, 'research-task')
   })
 
   it('shares recent browser actions with planner continuity so duplicate work can be suppressed across turns', async () => {
@@ -1170,7 +1198,7 @@ describe('browser_collect_notes (background sub-agent dispatch)', () => {
       undefined,
       '请采集 https://example.com/note/1 和 https://example.com/note/2',
     )
-    const handle = JSON.parse(result) as { taskId: string }
+    const handle = parseTool(result) as { taskId: string }
     assert.equal(handle.taskId, 'task-note-1')
     assert.equal(synthetic.length, 1)
     assert.equal(started.length, 1)
@@ -1208,7 +1236,7 @@ describe('browser_collect_notes (background sub-agent dispatch)', () => {
       '请采集 https://example.com/note/other',
     )
 
-    const parsed = JSON.parse(result) as { errorCode?: string; missingUrls?: string[] }
+    const parsed = parseTool(result) as { errorCode?: string; missingUrls?: string[] }
     assert.equal(parsed.errorCode, 'url_provenance_required')
     assert.deepEqual(parsed.missingUrls, ['https://example.com/note/not-from-user'])
     assert.equal(dispatched, false)
@@ -1227,7 +1255,7 @@ describe('browser_collect_notes (background sub-agent dispatch)', () => {
       { target_profile_url: 'https://www.xiaohongshu.com/user/profile/abc', notes: [{ url: 'ftp://x' }] },
       controller,
     )
-    assert.match(result, /至少一条/)
+    assert.match(toolText(result), /至少一条/)
     assert.equal(dispatched, false)
   })
 
@@ -1265,7 +1293,7 @@ describe('browser_collect_notes (background sub-agent dispatch)', () => {
       controller,
     )
 
-    assert.equal((JSON.parse(result) as { taskId: string }).taskId, 'task-note-2')
+    assert.equal((parseTool(result) as { taskId: string }).taskId, 'task-note-2')
     const plan = started[0] as { notes: Array<{ url: string; canonicalUrl?: string; openUrl?: string; title?: string; sourceId?: string; order?: number }>; sourceTaskId?: string; expectedCount?: number }
     assert.equal(plan.sourceTaskId, 'browser-task-visible-1')
     assert.equal(plan.expectedCount, 2)
@@ -1320,7 +1348,7 @@ describe('browser_collect_notes (background sub-agent dispatch)', () => {
       'current-scope',
     )
 
-    const parsed = JSON.parse(result) as { ok: boolean; errorCode: string }
+    const parsed = parseTool(result) as { ok: boolean; errorCode: string }
     assert.equal(parsed.ok, false)
     assert.equal(parsed.errorCode, 'stale_source_task_scope')
     assert.equal(dispatched, false)
@@ -1359,7 +1387,7 @@ describe('browser_collect_notes (background sub-agent dispatch)', () => {
       undefined,
       'current-scope',
     )
-    const outputMismatch = JSON.parse(outputMismatchResult) as { ok: boolean; errorCode: string }
+    const outputMismatch = parseTool(outputMismatchResult) as { ok: boolean; errorCode: string }
     assert.equal(outputMismatch.ok, false)
     assert.equal(outputMismatch.errorCode, 'stale_source_task_output')
     assert.equal(dispatched, false)
@@ -1395,8 +1423,8 @@ describe('browser_collect_notes (background sub-agent dispatch)', () => {
       controller,
     )
 
-    assert.match(result, /不是完整全量/)
-    assert.match(result, /browser_resume_task/)
+    assert.match(toolText(result), /不是完整全量/)
+    assert.match(toolText(result), /browser_resume_task/)
     assert.equal(dispatched, false)
   })
 
@@ -1431,7 +1459,7 @@ describe('browser_collect_notes (background sub-agent dispatch)', () => {
       undefined,
       'scope-consent',
     )
-    const pending = (JSON.parse(first) as { pendingConsentRequest?: { requestId?: string } }).pendingConsentRequest
+    const pending = (parseTool(first) as { pendingConsentRequest?: { requestId?: string } }).pendingConsentRequest
     assert.match(pending?.requestId || '', /^browser-consent-/)
 
     const confirmed = await executeBrowserTool(
@@ -1444,7 +1472,7 @@ describe('browser_collect_notes (background sub-agent dispatch)', () => {
       undefined,
       'scope-consent',
     )
-    assert.equal((JSON.parse(confirmed) as { ok?: boolean }).ok, true)
+    assert.equal((parseTool(confirmed) as { ok?: boolean }).ok, true)
 
     const second = await executeBrowserTool(
       'browser_collect_notes',
@@ -1457,7 +1485,7 @@ describe('browser_collect_notes (background sub-agent dispatch)', () => {
       'scope-consent',
     )
 
-    assert.equal((JSON.parse(second) as { taskId?: string }).taskId, 'task-note-after-consent')
+    assert.equal((parseTool(second) as { taskId?: string }).taskId, 'task-note-after-consent')
     assert.equal(started.length, 1)
     assert.equal((started[0] as { sourceTaskId?: string }).sourceTaskId, 'browser-task-visible-partial-consent')
   })
@@ -1492,7 +1520,7 @@ describe('browser_collect_notes (background sub-agent dispatch)', () => {
       controller,
     )
 
-    assert.match(result, /数量不一致/)
+    assert.match(toolText(result), /数量不一致/)
     assert.equal(dispatched, false)
   })
 
@@ -1526,9 +1554,9 @@ describe('browser_collect_notes (background sub-agent dispatch)', () => {
       controller,
     )
 
-    assert.match(result, /source_task_id/)
-    assert.match(result, /31/)
-    assert.match(result, /12/)
+    assert.match(toolText(result), /source_task_id/)
+    assert.match(toolText(result), /31/)
+    assert.match(toolText(result), /12/)
     assert.equal(dispatched, false)
   })
 
@@ -1563,7 +1591,7 @@ describe('browser_collect_notes (background sub-agent dispatch)', () => {
       controller,
     )
 
-    const parsed = JSON.parse(result) as {
+    const parsed = parseTool(result) as {
       errorCode?: string
       allowPartialIgnored?: boolean
       pendingConsentRequest?: { requestId?: string; consentKind?: string; sourceTaskId?: string }
@@ -1607,7 +1635,7 @@ describe('browser_collect_notes (background sub-agent dispatch)', () => {
       runtime as never,
     )
 
-    const parsed = JSON.parse(first) as {
+    const parsed = parseTool(first) as {
       pendingConsentRequest?: { requestId?: string }
     }
     const requestId = parsed.pendingConsentRequest?.requestId || ''
@@ -1666,7 +1694,7 @@ describe('browser_collect_notes (background sub-agent dispatch)', () => {
       'scope-xhs',
     )
 
-    const parsed = JSON.parse(result) as {
+    const parsed = parseTool(result) as {
       errorCode?: string
       strategy?: string
       pendingConsentRequest?: { requestId?: string; consentKind?: string; sourceTaskId?: string; targetHost?: string }
@@ -1710,7 +1738,7 @@ describe('browser_collect_notes (background sub-agent dispatch)', () => {
       undefined,
       'scope-xhs-confirm',
     )
-    const pending = (JSON.parse(first) as { pendingConsentRequest?: { requestId?: string } }).pendingConsentRequest
+    const pending = (parseTool(first) as { pendingConsentRequest?: { requestId?: string } }).pendingConsentRequest
     assert.match(pending?.requestId || '', /^browser-consent-/)
 
     await executeBrowserTool(
@@ -1736,7 +1764,7 @@ describe('browser_collect_notes (background sub-agent dispatch)', () => {
       'scope-xhs-confirm',
     )
 
-    assert.equal((JSON.parse(second) as { taskId?: string }).taskId, 'task-xhs-url-batch')
+    assert.equal((parseTool(second) as { taskId?: string }).taskId, 'task-xhs-url-batch')
     assert.equal(started.length, 1)
     assert.equal((started[0] as { strategy?: string }).strategy, 'url_batch')
   })
@@ -1772,7 +1800,7 @@ describe('browser_collect_notes (background sub-agent dispatch)', () => {
       'scope-xhs',
     )
 
-    assert.equal((JSON.parse(result) as { taskId?: string }).taskId, 'task-card-loop')
+    assert.equal((parseTool(result) as { taskId?: string }).taskId, 'task-card-loop')
     assert.equal(started.length, 1)
     assert.equal((started[0] as { strategy?: string }).strategy, 'card_loop')
   })
@@ -1937,7 +1965,7 @@ describe('browser_visible_collect (agent pane dispatch)', () => {
       'scope-collection-1',
     )
 
-    const handle = JSON.parse(result) as { taskId: string }
+    const handle = parseTool(result) as { taskId: string }
     assert.equal(handle.taskId, 'browser-task-visible-1')
     assert.equal(started.length, 1)
     assert.equal(started[0]?.scopeId, 'scope-collection-1')
@@ -1979,8 +2007,8 @@ describe('browser_download_collected_media', () => {
         'scope-media',
       )
       const parsed = (typeof out === 'string'
-        ? JSON.parse(out)
-        : out.data || JSON.parse(out.text)) as { ok?: boolean; success?: number; mediaCandidateCount?: number }
+        ? parseTool(out)
+        : out.data || parseTool(out.text)) as { ok?: boolean; success?: number; mediaCandidateCount?: number }
 
       assert.equal(parsed.ok, true)
       assert.equal(parsed.success, 2)
@@ -2007,12 +2035,12 @@ describe('browser_download_collected_media', () => {
       getTaskPayload: (taskId: string) => ({ template: taskId === 'browser-task-empty' ? 'image_gallery' : 'card_list' }),
     })
 
-    const wrongKind = JSON.parse(await executeBrowserTool(
+    const wrongKind = parseTool(await executeBrowserTool(
       'browser_download_collected_media',
       { source_task_id: 'browser-task-not-gallery', directory: '/tmp/out' },
       controller,
     )) as { errorCode?: string }
-    const empty = JSON.parse(await executeBrowserTool(
+    const empty = parseTool(await executeBrowserTool(
       'browser_download_collected_media',
       { source_task_id: 'browser-task-empty', directory: '/tmp/out' },
       controller,
@@ -2039,10 +2067,10 @@ describe('browser task id guardrails', () => {
     const resumeChatResult = await executeBrowserTool('browser_resume_task', { task_id: 'task-0db610cf-c6f1-4f8e-ae71-d881959d529b' }, controller)
     const resumeSkillResult = await executeBrowserTool('browser_resume_task', { task_id: 'skill-child:vez51e5su' }, controller)
 
-    assert.equal((JSON.parse(getResult) as { status: string }).status, 'wrong_id_type')
-    assert.equal((JSON.parse(cancelResult) as { status: string }).status, 'wrong_id_type')
-    assert.equal((JSON.parse(resumeChatResult) as { status: string }).status, 'wrong_id_type')
-    assert.equal((JSON.parse(resumeSkillResult) as { status: string }).status, 'wrong_id_type')
+    assert.equal((parseTool(getResult) as { status: string }).status, 'wrong_id_type')
+    assert.equal((parseTool(cancelResult) as { status: string }).status, 'wrong_id_type')
+    assert.equal((parseTool(resumeChatResult) as { status: string }).status, 'wrong_id_type')
+    assert.equal((parseTool(resumeSkillResult) as { status: string }).status, 'wrong_id_type')
     assert.equal(resumeCalls, 0)
   })
 })
