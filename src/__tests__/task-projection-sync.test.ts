@@ -445,7 +445,16 @@ test('syncTaskProjection maps blocked terminal reasons instead of keeping stale 
     },
   }
 
-  await syncTaskProjection(store, createSummary(), createPayload())
+  await syncTaskProjection(store, {
+    ...createSummary(),
+    taskContinuation: {
+      taskId: 'task-1',
+      childRunId: 'child-old',
+      blockerType: 'background_running',
+    },
+    resumableActions: ['continue', 'cancel'],
+  }, createPayload())
+  assert.equal(getContinuationState('scope-1', { taskId: 'task-1' })?.continuationRef?.childRunId, 'child-old')
 
   const result = await syncTaskProjection(store, {
     ...createSummary(),
@@ -455,7 +464,7 @@ test('syncTaskProjection maps blocked terminal reasons instead of keeping stale 
     waitingFor: 'none',
     blockedReason: null,
     resumableActions: ['cancel'],
-    taskSummary: '请求失败，需要修复配置',
+    taskSummary: '正在整理任务边界、上下文与可用能力',
     updatedAt: '2026-04-28T01:11:00.000Z',
   }, {
     ...createPayload(),
@@ -464,11 +473,14 @@ test('syncTaskProjection maps blocked terminal reasons instead of keeping stale 
     timestamp: '2026-04-28T01:11:00.000Z',
   })
 
-  assert.equal(result?.status, 'blocked')
-  assert.equal(result?.interactionState, 'awaiting_clarification')
-  assert.equal(result?.waitingFor, 'input')
-  assert.equal(result?.blockedReason, '配置需要修复')
-  assert.deepEqual(result?.resumableActions, ['continue', 'cancel'])
+  assert.equal(result?.status, 'failed')
+  assert.equal(result?.interactionState, 'suspended')
+  assert.equal(result?.waitingFor, 'none')
+  assert.match(result?.blockedReason || '', /当前模型或配置不支持/)
+  assert.equal(result?.taskSummary, result?.blockedReason)
+  assert.deepEqual(result?.resumableActions, [])
+  assert.equal(result?.continuationRef, null)
+  assert.equal(getContinuationState('scope-1', { taskId: 'task-1' }), null)
 })
 
 test('syncTaskProjection keeps older blocked continuation snapshots when a newer task finishes', async () => {

@@ -192,3 +192,51 @@ test('TaskCard hides interaction badge for terminal failed runs', () => {
     rendered.unmount()
   }
 })
+
+test('TaskCard does not render supplement actions for blocked_config terminal runs', () => {
+  const run = taskProjectionToTaskCardRun({
+    scopeId: 'scope-blocked-config',
+    taskId: 'task-blocked-config',
+    status: 'failed',
+    phase: 'done',
+    terminalReason: 'blocked_config',
+    title: '图片请求失败',
+    taskTitle: '图片请求失败',
+    taskSummary: '当前模型或配置不支持这次请求，请切换模型、修复设置或移除不支持的附件后重新发送。',
+    steps: [],
+    currentStepId: null,
+    waitingFor: 'none',
+    resumableActions: [],
+    recentArtifacts: [],
+    taskContinuation: null,
+    progress: null,
+    memoryCapture: null,
+    taskType: 'short_task',
+    interactionState: 'suspended',
+    canResume: false,
+    blockedReason: '当前模型或配置不支持这次请求，请切换模型、修复设置或移除不支持的附件后重新发送。',
+    error: 'blocked_config',
+    updatedAt: '2026-06-21T10:04:28.238Z',
+    toolTrace: [],
+  })
+
+  const rendered = mount(createElement(TaskCard, {
+    run,
+    taskKey: 'scope-blocked-config:task-blocked-config',
+    expanded: true,
+  }))
+
+  try {
+    const text = rendered.container.textContent || ''
+    const labels = Array.from(rendered.container.querySelectorAll('button'))
+      .map((button) => button.textContent?.trim() || '')
+    assert.match(text, /失败/)
+    assert.match(text, /当前模型或配置不支持/)
+    assert.equal(text.includes('等补充'), false)
+    assert.equal(labels.includes('补充后继续'), false)
+    assert.equal(labels.includes('继续运行'), false)
+    assert.equal(labels.includes('重试'), false)
+  } finally {
+    rendered.unmount()
+  }
+})

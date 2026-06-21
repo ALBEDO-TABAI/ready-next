@@ -13,6 +13,8 @@ import { clearContinuationState, rememberContinuationState } from '../session/se
 import type { ScopeRunEventPayload, ScopeRunSummary } from '../contracts/types'
 import type { RecoveryRecord } from '../contracts/run-contracts'
 
+const GENERIC_PLANNING_TASK_SUMMARY = '正在整理任务边界、上下文与可用能力'
+
 function toContinuationUpdatedAt(value: string | null | undefined): number {
   const parsed = Date.parse(String(value || ''))
   return Number.isFinite(parsed) ? parsed : Date.now()
@@ -298,7 +300,8 @@ function resolveInteractionState(summary: ScopeRunSummary): TaskInteractionState
 }
 
 function resolveTerminalInteractionState(reason?: ScopeRunSummary['terminalReason'] | null): TaskInteractionState | null {
-  if (reason === 'blocked_config' || reason === 'blocked_external' || reason === 'checkpoint_user_input') {
+  if (reason === 'blocked_config') return 'suspended'
+  if (reason === 'blocked_external' || reason === 'checkpoint_user_input') {
     return 'awaiting_clarification'
   }
   if (
@@ -332,7 +335,8 @@ function resolveRecordInteractionState(
 }
 
 function resolveTerminalWaitingFor(reason?: ScopeRunSummary['terminalReason'] | null): TaskProjectionRecord['waitingFor'] | null {
-  if (reason === 'blocked_config' || reason === 'blocked_external' || reason === 'checkpoint_user_input') {
+  if (reason === 'blocked_config') return 'none'
+  if (reason === 'blocked_external' || reason === 'checkpoint_user_input') {
     return 'input'
   }
   if (reason === 'checkpoint_background') return 'background'
@@ -364,6 +368,7 @@ function resolveTerminalStatus(reason?: ScopeRunSummary['terminalReason'] | null
     || reason === 'tool_unavailable'
     || reason === 'no_artifact'
     || reason === 'proof_gap'
+    || reason === 'blocked_config'
   ) return 'failed'
   return 'blocked'
 }
@@ -407,7 +412,8 @@ function resolveTerminalResumableActions(
   previous?: TaskProjectionRecord | null,
 ): ScopeRunSummary['resumableActions'] | null {
   const reason = summary.terminalReason
-  if (reason === 'blocked_config' || reason === 'blocked_external' || reason === 'checkpoint_user_input') {
+  if (reason === 'blocked_config') return []
+  if (reason === 'blocked_external' || reason === 'checkpoint_user_input') {
     return ['continue', 'cancel']
   }
   if (reason === 'blocked_tool_error') return ['retry', 'cancel']
@@ -430,6 +436,7 @@ function resolveResumableActions(
   status: TaskProjectionRecord['status'],
   previous?: TaskProjectionRecord | null,
 ): ScopeRunSummary['resumableActions'] {
+  if (summary.terminalReason === 'blocked_config') return []
   const terminalActions = resolveTerminalResumableActions(summary, previous)
   if (
     terminalActions
@@ -469,7 +476,7 @@ function resolveResumableActions(
 }
 
 function resolveTerminalBlockedReason(reason?: ScopeRunSummary['terminalReason'] | null): string | null {
-  if (reason === 'blocked_config') return '配置需要修复'
+  if (reason === 'blocked_config') return '当前模型或配置不支持这次请求，请切换模型、修复设置或移除不支持的附件后重新发送。'
   if (reason === 'blocked_external') return '等待外部条件'
   if (reason === 'blocked_tool_error') return '工具执行遇到问题'
   if (reason === 'context_overflow') return '上下文已超限'
@@ -485,11 +492,27 @@ function resolveTerminalBlockedReason(reason?: ScopeRunSummary['terminalReason']
   return null
 }
 
+function resolveTaskSummary(
+  summary: ScopeRunSummary,
+  previous: TaskProjectionRecord | null | undefined,
+  blockedReason: string | null,
+): string | null {
+  const current = typeof summary.taskSummary === 'string' ? summary.taskSummary.trim() : ''
+  if (
+    summary.terminalReason === 'blocked_config'
+    && (!current || current === GENERIC_PLANNING_TASK_SUMMARY)
+  ) {
+    return summary.blockedReason || blockedReason || null
+  }
+  return summary.taskSummary ?? previous?.taskSummary ?? null
+}
+
 function resolveContinuationRef(
   summary: ScopeRunSummary,
   status: TaskProjectionRecord['status'],
   previous?: TaskProjectionRecord | null,
 ): ScopeRunSummary['taskContinuation'] {
+  if (summary.terminalReason === 'blocked_config') return null
   if (summary.taskContinuation) return summary.taskContinuation
   if (status === 'blocked' || status === 'failed' || status === 'recoverable_paused') {
     return previous?.continuationRef || null
@@ -763,10 +786,12 @@ export function buildTaskProjectionRecord(
     if (!('staleBlockerReason' in skillSnapshot)) return false
     return skillSnapshot.staleBlockerReason === null
   })()
+  const terminalBlockedReason = resolveTerminalBlockedReason(effectiveSummary.terminalReason)
+  const shouldStoreTerminalBlockedReason = status === 'blocked' || effectiveSummary.terminalReason === 'blocked_config'
   const blockedReason =
     effectiveSummary.blockedReason
     || (status === 'blocked' && !blockedReasonWasCleared && !frameClearsStaleBlocker ? previous?.blockedReason : null)
-    || (status === 'blocked' ? resolveTerminalBlockedReason(effectiveSummary.terminalReason) : null)
+    || (shouldStoreTerminalBlockedReason ? terminalBlockedReason : null)
     || null
 
   return {
@@ -802,7 +827,7 @@ export function buildTaskProjectionRecord(
       if (status === 'queued' || status === 'running') return '正在生成…'
       return null
     })(),
-    taskSummary: effectiveSummary.taskSummary ?? previous?.taskSummary ?? null,
+    taskSummary: resolveTaskSummary(effectiveSummary, previous, blockedReason),
     status,
     interactionState: resolveRecordInteractionState(effectiveSummary, status),
     waitingFor: resolveWaitingFor(effectiveSummary, status, previous),

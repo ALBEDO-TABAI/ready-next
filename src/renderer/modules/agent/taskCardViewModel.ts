@@ -406,8 +406,7 @@ function hasBudgetPausedSignal(run: TaskCardRunLike): boolean {
 }
 
 function hasBlockedTerminalReason(run: TaskCardRunLike): boolean {
-  return run.terminalReason === 'blocked_config'
-    || run.terminalReason === 'blocked_external'
+  return run.terminalReason === 'blocked_external'
 }
 
 function hasBlockedContinuationReason(run: TaskCardRunLike): boolean {
@@ -463,6 +462,13 @@ export function deriveTaskCardRuntimeState(run: TaskCardRunLike): TaskCardRuntim
   const hasBudgetPaused = hasBudgetPausedSignal(run)
   const isAgentHandoff = isInternalAgentHandoffTask(run)
 
+  if (run.terminalReason === 'blocked_config' && !hasLiveBackground) {
+    return {
+      visualState: 'failed',
+      statusLabel: taskCardVisualStateLabel('failed'),
+      actionSet: [],
+    }
+  }
   if ((run.phase === 'error' || run.status === 'failed') && !hasLiveBackground) {
     return {
       visualState: 'failed',
