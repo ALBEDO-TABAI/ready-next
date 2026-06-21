@@ -6044,7 +6044,18 @@ export class AgentSdkRuntime extends EventEmitter {
       usage: null,
       firstMessageText: params.firstMessageText,
       finalText: params.finalText,
-    }).catch(() => undefined)
+    }).catch((error) => {
+      const message = errorMessage(error)
+      logAgentMetric('run_meta_admission_rejection_persist_failed', {
+        runId: params.runId,
+        taskId: params.taskId,
+        scopeId: params.scopeId,
+        status: params.status,
+        terminalReason: params.terminalReason,
+        reason: message,
+      })
+      log(`recordAdmissionRejection persist failed runId=${params.runId}: ${message}`)
+    })
   }
 
   private async persistRunMetaSnapshot(params: {

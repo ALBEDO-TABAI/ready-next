@@ -429,8 +429,8 @@ function buildInputGuardSnippetJs(allowPasswordFill: boolean): string {
  * EP1-I3 live-target net — best-effort target probe for coordinate actions
  * (click_at / type_at). Returns `{ label, inputLabel, password }` for the
  * clickable owner under the CSS point. Callers refuse M1 /
- * unconfirmed-password targets and proceed on empty or failed probes (the
- * visual channel must keep working).
+ * unconfirmed-password targets and proceed on empty probes. Probe exceptions
+ * fail closed because the M1 target guard did not actually run.
  */
 function buildClickPointLabelProbeJs(cssX: number, cssY: number): string {
   return `(() => {
@@ -449,6 +449,30 @@ function buildClickPointLabelProbeJs(cssX: number, cssY: number): string {
       editable: readyIsEditableField(owner),
     };
   })()`
+}
+
+async function probeCoordinateTargetOrThrow(
+  controller: BrowserController,
+  tabId: string | null,
+  point: { cssX: number; cssY: number },
+  detail: { x: number; y: number; action: 'click' | 'type' },
+): Promise<unknown> {
+  try {
+    return await controller.executeJS(tabId, buildClickPointLabelProbeJs(point.cssX, point.cssY))
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    const actionLabel = detail.action === 'click' ? '点击' : '输入'
+    throw new ToolDomainError(
+      ACTION_CONFIRMATION_ERROR_KINDS.deniedPendingConfirmation.code,
+      `无法确认坐标${actionLabel}目标是否安全，已拒绝执行。请改用明确 selector/target_id，或引导用户亲自完成。`,
+      {
+        x: detail.x,
+        y: detail.y,
+        reason: 'coordinate_target_probe_failed',
+        probeError: message,
+      },
+    )
+  }
 }
 
 /**
@@ -621,6 +645,19 @@ function didBrowserActionChange(before: unknown, after: unknown): boolean {
     return JSON.stringify(before) !== JSON.stringify(after)
   } catch {
     return true
+  }
+}
+
+async function readBrowserActionDeltaBestEffort(
+  controller: BrowserController,
+  tabId: string | null,
+  phase: 'before' | 'after',
+): Promise<unknown> {
+  try {
+    return await controller.executeJS(tabId, buildBrowserActionDeltaJs())
+  } catch (error) {
+    log(`browser action delta ${phase} readback failed: ${error instanceof Error ? error.message : String(error)}`)
+    return null
   }
 }
 
@@ -1926,7 +1963,7 @@ async function runGuardedCoordinateClick(
 ): Promise<{ nx: number; ny: number; cssX: number; cssY: number; width: number; height: number }> {
   const probePoint = await resolveCssPoint(controller, tabId, x, y).catch(() => null)
   const probe = probePoint
-    ? await controller.executeJS(tabId, buildClickPointLabelProbeJs(probePoint.cssX, probePoint.cssY)).catch(() => null)
+    ? await probeCoordinateTargetOrThrow(controller, tabId, probePoint, { x, y, action: 'click' })
     : null
   if (probe && typeof probe === 'object') {
     const p = probe as { label?: unknown; editable?: unknown }
@@ -1999,7 +2036,7 @@ async function runGuardedCoordinateType(
 ): Promise<{ nx: number; ny: number; cssX: number; cssY: number; width: number; height: number }> {
   const probePoint = await resolveCssPoint(controller, tabId, x, y).catch(() => null)
   const probe = probePoint
-    ? await controller.executeJS(tabId, buildClickPointLabelProbeJs(probePoint.cssX, probePoint.cssY)).catch(() => null)
+    ? await probeCoordinateTargetOrThrow(controller, tabId, probePoint, { x, y, action: 'type' })
     : null
   if (probe && typeof probe === 'object') {
     const p = probe as { label?: unknown; inputLabel?: unknown; password?: unknown; editable?: unknown }
@@ -4971,14 +5008,14 @@ export async function executeBrowserTool(
             { targetId, ruleId: 'm3-login-existing-account' },
           )
         }
-        const before = readBack === 'none' ? null : await controller.executeJS(tabId, buildBrowserActionDeltaJs()).catch(() => null)
+        const before = readBack === 'none' ? null : await readBrowserActionDeltaBestEffort(controller, tabId, 'before')
         const actionResult = await controller.executeJS(tabId, buildBrowserActOnTargetJs(parsed.node, action, value))
         await settleAfterAction(controller, tabId, abortSignal)
         const after = readBack === 'map'
           ? await captureAgentPageMap(controller, tabId)
           : readBack === 'none'
             ? null
-            : await controller.executeJS(tabId, buildBrowserActionDeltaJs()).catch(() => null)
+            : await readBrowserActionDeltaBestEffort(controller, tabId, 'after')
         const actionFailed = typeof actionResult === 'object' && actionResult !== null && (actionResult as { ok?: unknown }).ok === false
         const failureKind = actionFailed
           ? String((actionResult as { errorCode?: unknown }).errorCode || 'action_failed')

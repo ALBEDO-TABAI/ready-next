@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import test from 'node:test'
 
 import { createSkillChildRunId } from '../main/modules/agent-control/skills/skill-child-run-id'
@@ -337,60 +340,67 @@ function getChildPayload(record: SkillTaskRunRecord | null) {
 }
 
 test('SkillTaskRunRepository reconciles stale running rows on startup', () => {
+  const handleDir = mkdtempSync(join(tmpdir(), 'ready-skill-with-handle-'))
+  const runStatePath = join(handleDir, 'run_state.json')
+  writeFileSync(runStatePath, '{}')
   const { repository } = createRepositoryHarness()
-  repository.create(makeRun({
-    id: 'run-with-handle',
-    outputDir: '/tmp/ready-skill-with-handle',
-    runStatePath: '/tmp/ready-skill-with-handle/run_state.json',
-    updatedAt: '2026-06-09T08:00:00.000Z',
-    resumePayload: {
-      childRun: {
-        childRunId: 'run-with-handle',
-        status: 'running',
-        outputDir: '/tmp/ready-skill-with-handle',
-        runStatePath: '/tmp/ready-skill-with-handle/run_state.json',
+  try {
+    repository.create(makeRun({
+      id: 'run-with-handle',
+      outputDir: handleDir,
+      runStatePath,
+      updatedAt: '2026-06-09T08:00:00.000Z',
+      resumePayload: {
+        childRun: {
+          childRunId: 'run-with-handle',
+          status: 'running',
+          outputDir: handleDir,
+          runStatePath,
+        },
       },
-    },
-  }))
-  repository.create(makeRun({
-    id: 'run-without-handle',
-    outputDir: '',
-    runStatePath: '',
-    updatedAt: '2026-06-09T08:00:00.000Z',
-    resumePayload: null,
-  }))
-  repository.create(makeRun({
-    id: 'fresh-running',
-    outputDir: null,
-    runStatePath: null,
-    updatedAt: '2026-06-09T08:09:50.000Z',
-    resumePayload: null,
-  }))
+    }))
+    repository.create(makeRun({
+      id: 'run-without-handle',
+      outputDir: '',
+      runStatePath: '',
+      updatedAt: '2026-06-09T08:00:00.000Z',
+      resumePayload: null,
+    }))
+    repository.create(makeRun({
+      id: 'fresh-running',
+      outputDir: null,
+      runStatePath: null,
+      updatedAt: '2026-06-09T08:09:50.000Z',
+      resumePayload: null,
+    }))
 
-  const result = repository.reconcileRunningRowsOnStartup({
-    now: new Date('2026-06-09T08:10:00.000Z'),
-    staleAfterMs: 60_000,
-  })
+    const result = repository.reconcileRunningRowsOnStartup({
+      now: new Date('2026-06-09T08:10:00.000Z'),
+      staleAfterMs: 60_000,
+    })
 
-  assert.deepEqual(result, {
-    scanned: 3,
-    recoverablePaused: 1,
-    failedWithoutHandle: 1,
-    ignoredFresh: 1,
-  })
-  const recoverable = repository.get('run-with-handle')!
-  assert.equal(recoverable.status, 'blocked')
-  assert.equal(recoverable.interactionState, 'suspended')
-  assert.equal(recoverable.failureKind, 'process_restarted')
-  assert.equal(getChildPayload(recoverable)?.status, 'recoverable_paused')
+    assert.deepEqual(result, {
+      scanned: 3,
+      recoverablePaused: 1,
+      failedWithoutHandle: 1,
+      ignoredFresh: 1,
+    })
+    const recoverable = repository.get('run-with-handle')!
+    assert.equal(recoverable.status, 'blocked')
+    assert.equal(recoverable.interactionState, 'suspended')
+    assert.equal(recoverable.failureKind, 'process_restarted')
+    assert.equal(getChildPayload(recoverable)?.status, 'recoverable_paused')
 
-  const failed = repository.get('run-without-handle')!
-  assert.equal(failed.status, 'failed')
-  assert.equal(failed.failureKind, 'stale_running_without_handle')
+    const failed = repository.get('run-without-handle')!
+    assert.equal(failed.status, 'failed')
+    assert.equal(failed.failureKind, 'stale_running_without_handle')
 
-  const fresh = repository.get('fresh-running')!
-  assert.equal(fresh.status, 'running')
-  assert.equal(fresh.failureKind, null)
+    const fresh = repository.get('fresh-running')!
+    assert.equal(fresh.status, 'running')
+    assert.equal(fresh.failureKind, null)
+  } finally {
+    rmSync(handleDir, { recursive: true, force: true })
+  }
 })
 
 test('SkillTaskRunRepository persists and updates recoverable skill task runs', () => {

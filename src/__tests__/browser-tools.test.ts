@@ -153,6 +153,9 @@ function createControllerMock(overrides?: Partial<BrowserController>): BrowserCo
       if (source.includes('out.sort((a, b) => b.score - a.score)')) {
         return [{ x: 520, y: 880, score: 99, reason: 'prompt textarea' }]
       }
+      if (source.includes('__READY_CLICK_POINT_LABEL_PROBE__')) {
+        return { label: '', inputLabel: 'Prompt', password: false, editable: true }
+      }
       if (source.includes('responseDetected')) {
         return {
           responseDetected: true,
@@ -371,6 +374,28 @@ describe('browser-tools v2', () => {
     assert.strictEqual(payload.normalized.x, 0)
     assert.strictEqual(payload.normalized.y, 999)
     assert.ok(controller.calls.mouse.length >= 3)
+  })
+
+  it('browser_click_at fails closed when coordinate target probe throws', async () => {
+    const controller = createControllerMock({
+      executeJS: async (_tabId, code) => {
+        const source = String(code || '')
+        if (source.includes('__READY_CLICK_POINT_LABEL_PROBE__')) {
+          throw new Error('probe crashed')
+        }
+        return null
+      },
+    })
+
+    await assert.rejects(
+      executeBrowserTool('browser_click_at', { x: 500, y: 500 }, controller),
+      (error: unknown) => {
+        assert.equal(error instanceof Error ? error.name : '', 'ToolDomainError')
+        assert.match(error instanceof Error ? error.message : String(error), /无法确认坐标点击目标/)
+        return true
+      },
+    )
+    assert.equal(controller.calls.mouse.length, 0)
   })
 
   it('browser_click_text should locate text with JS but click through trusted mouse events', async () => {
@@ -639,6 +664,29 @@ describe('browser-tools v2', () => {
     assert.ok(controller.calls.typed.some((item) => item.text === '今晚吃什么'))
     assert.ok(controller.calls.key.some((item) => String(item.key || '').toLowerCase() === 'backspace'))
     assert.ok(controller.calls.key.some((item) => String(item.key || '').toLowerCase() === 'enter'))
+  })
+
+  it('browser_type_at fails closed when coordinate target probe throws', async () => {
+    const controller = createControllerMock({
+      executeJS: async (_tabId, code) => {
+        const source = String(code || '')
+        if (source.includes('__READY_CLICK_POINT_LABEL_PROBE__')) {
+          throw new Error('probe crashed')
+        }
+        return null
+      },
+    })
+
+    await assert.rejects(
+      executeBrowserTool('browser_type_at', { x: 500, y: 500, text: 'secret' }, controller),
+      (error: unknown) => {
+        assert.equal(error instanceof Error ? error.name : '', 'ToolDomainError')
+        assert.match(error instanceof Error ? error.message : String(error), /无法确认坐标输入目标/)
+        return true
+      },
+    )
+    assert.equal(controller.calls.mouse.length, 0)
+    assert.equal(controller.calls.typed.length, 0)
   })
 
   it('browser_query_gemini should fallback to coordinate typing when DOM compose fails', async () => {
