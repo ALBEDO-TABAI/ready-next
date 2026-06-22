@@ -42,10 +42,12 @@ import {
   getArrowVectorBounds,
   getBoardNodeBounds,
   getMarqueeSelectedNodeIds,
+  moveBoardNodesToLayer,
   normalizeBoardRect,
   resolveArrowEndpointDrag,
   resolveBoardSnapOffset,
   type BoardArrowEndpoint,
+  type BoardLayerPlacement,
   type BoardArrowGeometry,
   type BoardNodeBounds,
   type BoardRect,
@@ -62,6 +64,10 @@ type BoardContextMenuState = {
   y: number
   boardPoint: { x: number; y: number }
   selectedIds: string[]
+}
+type TextEditState = {
+  id: string
+  value: string
 }
 type BoardIPCResponse<T> = {
   success: boolean
@@ -117,6 +123,10 @@ function saveStatusLabel(status: SaveStatus): string {
 
 function updateNode(nodes: ReadyBoardNode[], id: string, patch: Partial<ReadyBoardNode>): ReadyBoardNode[] {
   return nodes.map((node) => node.id === id ? { ...node, ...patch } as ReadyBoardNode : node)
+}
+
+function isEditableEventTarget(target: EventTarget | null): boolean {
+  return target instanceof HTMLElement && Boolean(target.closest('input, textarea, [contenteditable="true"]'))
 }
 
 function assetUrl(boardPath: string | null, src: string): string {
@@ -306,12 +316,15 @@ export default function BoardEditor({ tab }: BoardEditorProps) {
   const [marqueeRect, setMarqueeRect] = useState<BoardRect | null>(null)
   const [snapGuides, setSnapGuides] = useState<BoardSnapGuide[]>([])
   const [contextMenu, setContextMenu] = useState<BoardContextMenuState | null>(null)
+  const [textEdit, setTextEdit] = useState<TextEditState | null>(null)
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle')
   const [error, setError] = useState<string | null>(null)
   const surfaceRef = useRef<HTMLDivElement | null>(null)
+  const textEditorRef = useRef<HTMLTextAreaElement | null>(null)
   const stateRef = useRef(state)
   const boardIdRef = useRef<string | null>(null)
   const selectedIdsRef = useRef<string[]>([])
+  const textEditRef = useRef<TextEditState | null>(null)
   const snapEnabledRef = useRef(false)
   const saveTimerRef = useRef<number | null>(null)
   const dragRef = useRef<
@@ -324,6 +337,11 @@ export default function BoardEditor({ tab }: BoardEditorProps) {
   >(null)
   const { openTab, markTabSaved } = useDocTabs()
 
+  const setTextEditState = useCallback((next: TextEditState | null) => {
+    textEditRef.current = next
+    setTextEdit(next)
+  }, [])
+
   useEffect(() => {
     stateRef.current = state
   }, [state])
@@ -331,6 +349,19 @@ export default function BoardEditor({ tab }: BoardEditorProps) {
   useEffect(() => {
     selectedIdsRef.current = selectedIds
   }, [selectedIds])
+
+  useEffect(() => {
+    textEditRef.current = textEdit
+  }, [textEdit])
+
+  useEffect(() => {
+    if (!textEdit) return
+    const frame = window.requestAnimationFrame(() => {
+      textEditorRef.current?.focus()
+      textEditorRef.current?.select()
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [textEdit?.id])
 
   useEffect(() => {
     snapEnabledRef.current = snapEnabled
@@ -398,6 +429,20 @@ export default function BoardEditor({ tab }: BoardEditorProps) {
     if (options?.save !== false) scheduleSave()
   }, [scheduleSave])
 
+  const commitTextEdit = useCallback(() => {
+    const edit = textEditRef.current
+    if (!edit) return
+    patchState((current) => ({
+      ...current,
+      nodes: current.nodes.map((node) => (
+        node.id === edit.id && (node.type === 'text' || node.type === 'note')
+          ? { ...node, text: edit.value } as ReadyBoardNode
+          : node
+      )),
+    }))
+    setTextEditState(null)
+  }, [patchState, setTextEditState])
+
   useEffect(() => {
     let disposed = false
     async function openBoard() {
@@ -413,6 +458,7 @@ export default function BoardEditor({ tab }: BoardEditorProps) {
         boardIdRef.current = result.data.boardId
         setState(result.data.state)
         stateRef.current = result.data.state
+        setTextEditState(null)
         void window.electronAPI?.board?.setActive?.({ boardId: result.data.boardId })
       } else {
         setError(result?.error || '画板打开失败')
@@ -442,6 +488,7 @@ export default function BoardEditor({ tab }: BoardEditorProps) {
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
+      if (isEditableEventTarget(event.target)) return
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') {
         event.preventDefault()
         void saveNow()
@@ -455,6 +502,7 @@ export default function BoardEditor({ tab }: BoardEditorProps) {
         setSelectedIds([])
       }
       if (event.key === 'Escape') {
+        setTextEditState(null)
         setSelectedIds([])
         setMarqueeRect(null)
         setSnapGuides([])
@@ -463,7 +511,7 @@ export default function BoardEditor({ tab }: BoardEditorProps) {
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [patchState, saveNow, selectedIds])
+  }, [patchState, saveNow, selectedIds, setTextEditState])
 
   useEffect(() => {
     return () => {
@@ -690,12 +738,17 @@ export default function BoardEditor({ tab }: BoardEditorProps) {
 
   const editTextNode = useCallback((node: ReadyBoardNode) => {
     if (node.type !== 'text' && node.type !== 'note') return
-    const next = window.prompt('', node.text)
-    if (next == null) return
+    setSelectedIds([node.id])
+    setTextEditState({ id: node.id, value: node.text })
+  }, [setTextEditState])
+
+  const moveSelectionLayer = useCallback((ids: readonly string[], placement: BoardLayerPlacement) => {
+    if (ids.length === 0) return
     patchState((current) => ({
       ...current,
-      nodes: updateNode(current.nodes, node.id, { text: next } as Partial<ReadyBoardNode>),
+      nodes: moveBoardNodesToLayer(current.nodes, ids, placement),
     }))
+    setSelectedIds([...ids])
   }, [patchState])
 
   const openMarkdownNode = useCallback(async (node: ReadyBoardMarkdownNode) => {
@@ -981,6 +1034,8 @@ export default function BoardEditor({ tab }: BoardEditorProps) {
 
   const renderNode = (node: ReadyBoardNode) => {
     const selected = selectedIdSet.has(node.id)
+    const isEditingText = textEdit?.id === node.id && node.type === 'text'
+    const isEditingNote = textEdit?.id === node.id && node.type === 'note'
     const arrowFrame = node.type === 'arrow' ? getArrowRenderFrame(node) : null
     const transferIds = selectedIds.includes(node.id) ? selectedIds : [node.id]
     const canDragSelection = selected && Boolean(buildTransferForIds(transferIds))
@@ -1009,10 +1064,52 @@ export default function BoardEditor({ tab }: BoardEditorProps) {
             <span>{node.excerpt}</span>
           </button>
         )}
-        {node.type === 'text' && (
+        {isEditingText && (
+          <textarea
+            ref={textEditorRef}
+            className="ready-board-text-editor ready-board-text-node"
+            value={textEdit?.value ?? ''}
+            style={{ fontSize: node.fontSize, color: node.color }}
+            aria-label="编辑文字"
+            data-ready-board-text-editor="true"
+            onChange={(event) => setTextEditState({ id: node.id, value: event.currentTarget.value })}
+            onBlur={commitTextEdit}
+            onPointerDown={(event) => event.stopPropagation()}
+            onDoubleClick={(event) => event.stopPropagation()}
+            onKeyDown={(event) => {
+              event.stopPropagation()
+              if (event.key === 'Escape') {
+                event.preventDefault()
+                setTextEditState(null)
+              }
+            }}
+          />
+        )}
+        {node.type === 'text' && !isEditingText && (
           <div className="ready-board-text-node" style={{ fontSize: node.fontSize, color: node.color }}>{node.text}</div>
         )}
-        {node.type === 'note' && (
+        {isEditingNote && (
+          <textarea
+            ref={textEditorRef}
+            className="ready-board-text-editor ready-board-note-node"
+            value={textEdit?.value ?? ''}
+            style={{ color: node.color, background: node.background }}
+            aria-label="编辑便签"
+            data-ready-board-text-editor="true"
+            onChange={(event) => setTextEditState({ id: node.id, value: event.currentTarget.value })}
+            onBlur={commitTextEdit}
+            onPointerDown={(event) => event.stopPropagation()}
+            onDoubleClick={(event) => event.stopPropagation()}
+            onKeyDown={(event) => {
+              event.stopPropagation()
+              if (event.key === 'Escape') {
+                event.preventDefault()
+                setTextEditState(null)
+              }
+            }}
+          />
+        )}
+        {node.type === 'note' && !isEditingNote && (
           <div className="ready-board-note-node" style={{ color: node.color, background: node.background }}>{node.text}</div>
         )}
         {node.type === 'rect' && (
@@ -1177,9 +1274,12 @@ export default function BoardEditor({ tab }: BoardEditorProps) {
         position={{ x: contextMenu?.x ?? 0, y: contextMenu?.y ?? 0 }}
         canCopy={Boolean(contextMenuTransfer)}
         canReference={Boolean(contextMenuTransfer)}
+        canArrange={Boolean(contextMenu?.selectedIds.length)}
         onCopy={() => void copyTransferToClipboard(contextMenuTransfer)}
         onPaste={() => void pasteClipboardAt(contextMenu?.boardPoint)}
         onReferenceToAgent={() => void referenceTransferToAgent(contextMenuTransfer)}
+        onBringToFront={() => moveSelectionLayer(contextMenu?.selectedIds ?? [], 'front')}
+        onSendToBack={() => moveSelectionLayer(contextMenu?.selectedIds ?? [], 'back')}
         onClose={closeContextMenu}
       />
     </div>

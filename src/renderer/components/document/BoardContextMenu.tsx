@@ -1,4 +1,4 @@
-import { ClipboardPaste, Copy, MessageSquareQuote } from 'lucide-react'
+import { BringToFront, ClipboardPaste, Copy, MessageSquareQuote, SendToBack } from 'lucide-react'
 import ContextMenu, { type ContextMenuItem } from '../layout/ContextMenu'
 
 interface BoardContextMenuProps {
@@ -6,9 +6,12 @@ interface BoardContextMenuProps {
   position: { x: number; y: number }
   canCopy: boolean
   canReference: boolean
+  canArrange: boolean
   onCopy: () => void
   onPaste: () => void
   onReferenceToAgent: () => void
+  onBringToFront: () => void
+  onSendToBack: () => void
   onClose: () => void
 }
 
@@ -17,9 +20,12 @@ export default function BoardContextMenu({
   position,
   canCopy,
   canReference,
+  canArrange,
   onCopy,
   onPaste,
   onReferenceToAgent,
+  onBringToFront,
+  onSendToBack,
   onClose,
 }: BoardContextMenuProps) {
   if (!visible) return null
@@ -41,6 +47,21 @@ export default function BoardContextMenu({
       onClick: onReferenceToAgent,
     },
     { id: 'div1', label: '', separator: true },
+    {
+      id: 'bring-to-front',
+      label: '置于最上方',
+      icon: <BringToFront style={{ width: 16, height: 16 }} />,
+      disabled: !canArrange,
+      onClick: onBringToFront,
+    },
+    {
+      id: 'send-to-back',
+      label: '置于最下方',
+      icon: <SendToBack style={{ width: 16, height: 16 }} />,
+      disabled: !canArrange,
+      onClick: onSendToBack,
+    },
+    { id: 'div2', label: '', separator: true },
     {
       id: 'paste',
       label: '粘贴',

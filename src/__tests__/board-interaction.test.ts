@@ -5,6 +5,7 @@ import {
   getArrowVectorBounds,
   getBoardNodeBounds,
   getMarqueeSelectedNodeIds,
+  moveBoardNodesToLayer,
   normalizeBoardRect,
   resolveArrowEndpointDrag,
   resolveBoardSnapOffset,
@@ -20,6 +21,32 @@ test('marquee selection returns every node intersecting the dragged rectangle', 
   const marquee = normalizeBoardRect({ x: 90, y: 0 }, { x: 220, y: 140 })
 
   assert.deepEqual(getMarqueeSelectedNodeIds(nodes, marquee), ['b'])
+})
+
+test('layer ordering moves selected nodes to the top while preserving their relative order', () => {
+  const nodes = [
+    { id: 'image' },
+    { id: 'text' },
+    { id: 'rect' },
+    { id: 'path' },
+  ]
+
+  const result = moveBoardNodesToLayer(nodes, ['text', 'path'], 'front')
+
+  assert.deepEqual(result.map((node) => node.id), ['image', 'rect', 'text', 'path'])
+})
+
+test('layer ordering moves selected nodes to the bottom while preserving their relative order', () => {
+  const nodes = [
+    { id: 'image' },
+    { id: 'text' },
+    { id: 'rect' },
+    { id: 'path' },
+  ]
+
+  const result = moveBoardNodesToLayer(nodes, ['text', 'path'], 'back')
+
+  assert.deepEqual(result.map((node) => node.id), ['text', 'path', 'image', 'rect'])
 })
 
 test('group bounds cover all selected nodes', () => {

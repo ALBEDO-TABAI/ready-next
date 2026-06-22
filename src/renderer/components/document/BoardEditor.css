@@ -218,6 +218,18 @@
   line-height: 1.38;
 }
 
+.ready-board-text-editor {
+  box-sizing: border-box;
+  border: 0;
+  outline: none;
+  resize: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: text;
+  user-select: text;
+}
+
 .ready-board-rect-node {
   width: 100%;
   height: 100%;

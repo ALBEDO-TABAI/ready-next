@@ -30,6 +30,7 @@ export interface BoardArrowGeometry {
 }
 
 export type BoardArrowEndpoint = 'tail' | 'head'
+export type BoardLayerPlacement = 'front' | 'back'
 
 function rectRight(rect: BoardRect): number {
   return rect.x + rect.width
@@ -66,6 +67,21 @@ export function getBoardNodeBounds(nodes: readonly BoardNodeBounds[]): BoardRect
 export function getMarqueeSelectedNodeIds(nodes: readonly BoardNodeBounds[], marquee: BoardRect): string[] {
   if (marquee.width <= 0 || marquee.height <= 0) return []
   return nodes.filter((node) => boardRectsIntersect(node, marquee)).map((node) => node.id)
+}
+
+export function moveBoardNodesToLayer<T extends { id: string }>(
+  nodes: readonly T[],
+  selectedIds: readonly string[],
+  placement: BoardLayerPlacement,
+): T[] {
+  const selectedIdSet = new Set(selectedIds)
+  if (selectedIdSet.size === 0) return [...nodes]
+  const selectedNodes = nodes.filter((node) => selectedIdSet.has(node.id))
+  if (selectedNodes.length === 0) return [...nodes]
+  const remainingNodes = nodes.filter((node) => !selectedIdSet.has(node.id))
+  return placement === 'front'
+    ? [...remainingNodes, ...selectedNodes]
+    : [...selectedNodes, ...remainingNodes]
 }
 
 function anchorsFor(rect: BoardRect, axis: 'x' | 'y'): number[] {
