@@ -926,6 +926,7 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
     listAgents: () => runtime!.getAgentRegistry().list(),
     getBeliefCardStore: () => runtime?.getBeliefCardStore() ?? null,
     updateStatus: (id, status, options) => runtime!.getAgentRegistry().updateStatus(id, status, options),
+    deleteAgent: (id) => runtime!.getAgentRegistry().deleteAgent(id),
   })
   if (agentDerivationGroupDispose) {
     try { agentDerivationGroupDispose.dispose() } catch { /* ignore — handlers may already be gone */ }

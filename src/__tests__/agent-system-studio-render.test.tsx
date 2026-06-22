@@ -146,6 +146,15 @@ function snapshot(): AgentSystemStudioSnapshot {
           targetStatus: 'active',
           triggers: ['写作'],
           disabledReason: null,
+        }, {
+          relPath: 'knowledge/routing-writer-draft.md',
+          title: '路由：写作草稿',
+          description: '草稿请求',
+          status: 'staged',
+          targetAgentId: 'writer',
+          targetStatus: 'active',
+          triggers: ['草稿'],
+          disabledReason: 'card_staged',
         }],
         ownedTasks: [{
           taskId: 'task-1',
@@ -157,7 +166,7 @@ function snapshot(): AgentSystemStudioSnapshot {
           ownerAgentId: 'writer',
           updatedAt: '2026-06-19T00:01:00.000Z',
         }],
-        contentSummary: { knowledgeCards: 1, routingCards: 1, ownedTasks: 1, stagedContentEdits: 1 },
+        contentSummary: { knowledgeCards: 1, routingCards: 2, ownedTasks: 1, stagedContentEdits: 1 },
         contentEditProposals: [{
           proposalId: 'sce-task-1',
           agentId: 'writer',
@@ -192,6 +201,15 @@ function snapshot(): AgentSystemStudioSnapshot {
       targetStatus: 'active',
       triggers: ['写作'],
       disabledReason: null,
+    }, {
+      relPath: 'knowledge/routing-writer-draft.md',
+      title: '路由：写作草稿',
+      description: '草稿请求',
+      status: 'staged',
+      targetAgentId: 'writer',
+      targetStatus: 'active',
+      triggers: ['草稿'],
+      disabledReason: 'card_staged',
     }, {
       relPath: 'knowledge/routing-ghost.md',
       title: '路由：幽灵',
@@ -316,6 +334,17 @@ async function mount(element: ReactElement): Promise<{ root: Root; container: HT
   return { root, container }
 }
 
+async function clickButtonContaining(container: HTMLElement, label: string): Promise<HTMLButtonElement> {
+  const button = Array.from(container.querySelectorAll('button'))
+    .find((candidate) => candidate.textContent?.includes(label)) as HTMLButtonElement | undefined
+  assert.ok(button, `expected button containing ${label}`)
+  await act(async () => {
+    button.click()
+  })
+  await flush()
+  return button
+}
+
 test('AgentSystemStudio renders read-only snapshot and specialist detail', async () => {
   const handle = installDom()
   try {
@@ -352,6 +381,8 @@ test('AgentSystemStudio renders read-only snapshot and specialist detail', async
       const text = mounted.container.textContent || ''
       assert.match(text, /只处理写作任务/)
       assert.match(text, /路由：写作/)
+      assert.match(text, /路由：写作草稿/)
+      assert.match(text, /启用路由/)
       assert.match(text, /路由：幽灵/)
       assert.match(text, /目标不可用/)
       assert.match(text, /写一版大纲/)
@@ -363,11 +394,138 @@ test('AgentSystemStudio renders read-only snapshot and specialist detail', async
       assert.match(text, /待补齐：nonGoals \/ requiredInputs/)
       assert.match(text, /需补齐信息/)
       assert.match(text, /这个专项 agent 明确不该做哪些事/)
-      assert.match(text, /先补齐信息/)
-      assert.match(text, /语义已校验/)
-      assert.match(text, /FOUNDATION 预览/)
-      assert.match(text, /# 视觉研究专项 Agent Foundation/)
-      assert.match(text, /确认创建/)
+      assert.doesNotMatch(text, /FOUNDATION 预览/)
+      await clickButtonContaining(mounted.container, '视觉研究专项 Agent')
+      const expandedText = mounted.container.textContent || ''
+      assert.match(expandedText, /先补齐信息/)
+      assert.match(expandedText, /语义已校验/)
+      assert.match(expandedText, /FOUNDATION 预览/)
+      assert.match(expandedText, /# 视觉研究专项 Agent Foundation/)
+      assert.match(expandedText, /确认创建/)
+      const confirmButton = Array.from(mounted.container.querySelectorAll('button'))
+        .find((button) => button.textContent?.includes('确认创建')) as HTMLButtonElement | undefined
+      assert.ok(confirmButton)
+      await act(async () => {
+        confirmButton.click()
+      })
+      await flush()
+      assert.deepEqual(calls.slice(-3), ['request-token', 'confirm-create', 'snapshot'])
+    } finally {
+      await act(async () => {
+        mounted.root.unmount()
+      })
+    }
+  } finally {
+    handle.restore()
+  }
+})
+
+test('AgentSystemStudio confirms staged routing cards from the studio surface', async () => {
+  const handle = installDom()
+  try {
+    const { default: AgentSystemStudio } = await import('../renderer/components/agent-system/AgentSystemStudio')
+    const calls: string[] = []
+    let snapshotData = snapshot()
+    ;(handle.dom.window as Window & { electronAPI?: unknown }).electronAPI = {
+      agent: {
+        getSystemStudioSnapshot: async () => {
+          calls.push('snapshot')
+          return { success: true, data: snapshotData }
+        },
+      },
+      memoryCards: {
+        transition: async (payload: { relPath: string; action: 'approve' | 'reject' }) => {
+          calls.push(`${payload.action}:${payload.relPath}`)
+          snapshotData = {
+            ...snapshotData,
+            routingCards: snapshotData.routingCards.map((card) => card.relPath === payload.relPath
+              ? { ...card, status: payload.action === 'approve' ? 'active' : 'rejected', disabledReason: null }
+              : card),
+            agents: snapshotData.agents.map((agent) => ({
+              ...agent,
+              routingCards: agent.routingCards.map((card) => card.relPath === payload.relPath
+                ? { ...card, status: payload.action === 'approve' ? 'active' : 'rejected', disabledReason: null }
+                : card),
+            })),
+          }
+          return { success: true, data: {} }
+        },
+      },
+    }
+    const mounted = await mount(createElement(AgentSystemStudio))
+    try {
+      await clickButtonContaining(mounted.container, 'writer')
+      assert.match(mounted.container.textContent || '', /路由：写作草稿/)
+      assert.match(mounted.container.textContent || '', /启用路由/)
+      await clickButtonContaining(mounted.container, '启用路由')
+      assert.deepEqual(calls, ['snapshot', 'approve:knowledge/routing-writer-draft.md', 'snapshot'])
+    } finally {
+      await act(async () => {
+        mounted.root.unmount()
+      })
+    }
+  } finally {
+    handle.restore()
+  }
+})
+
+test('AgentSystemStudio keeps blueprint details collapsed until selected', async () => {
+  const handle = installDom()
+  try {
+    const { default: AgentSystemStudio } = await import('../renderer/components/agent-system/AgentSystemStudio')
+    ;(handle.dom.window as Window & { electronAPI?: unknown }).electronAPI = {
+      agent: {
+        getSystemStudioSnapshot: async () => ({ success: true, data: snapshot() }),
+      },
+    }
+    const mounted = await mount(createElement(AgentSystemStudio))
+    try {
+      assert.match(mounted.container.textContent || '', /点开蓝图查看详情/)
+      assert.doesNotMatch(mounted.container.textContent || '', /FOUNDATION 预览/)
+      await clickButtonContaining(mounted.container, '视觉研究专项 Agent')
+      assert.match(mounted.container.textContent || '', /FOUNDATION 预览/)
+      await clickButtonContaining(mounted.container, '视觉研究专项 Agent')
+      assert.doesNotMatch(mounted.container.textContent || '', /FOUNDATION 预览/)
+    } finally {
+      await act(async () => {
+        mounted.root.unmount()
+      })
+    }
+  } finally {
+    handle.restore()
+  }
+})
+
+test('AgentSystemStudio can still confirm an expanded blueprint', async () => {
+  const handle = installDom()
+  try {
+    const { default: AgentSystemStudio } = await import('../renderer/components/agent-system/AgentSystemStudio')
+    const calls: string[] = []
+    ;(handle.dom.window as Window & { electronAPI?: unknown }).electronAPI = {
+      agent: {
+        getSystemStudioSnapshot: async () => {
+          calls.push('snapshot')
+          return { success: true, data: snapshot() }
+        },
+        requestSpecialistBlueprintConfirmation: async () => {
+          calls.push('request-token')
+          return { success: true, data: { blueprint: blueprint(), tokenId: 'token-1' } }
+        },
+        confirmSpecialistDraftCreate: async () => {
+          calls.push('confirm-create')
+          return { success: true, data: { blueprint: blueprint(), result: { agent: { id: 'visual-researcher' }, rulesRelPath: 'agents/visual-researcher/RULES.md', foundationRelPath: 'agents/visual-researcher/FOUNDATION.md', seedRelPaths: ['agents/visual-researcher/knowledge/seed-01.md'], routingCardRelPath: 'knowledge/routing-visual-researcher.md', migratedCards: [] } } }
+        },
+        rejectSpecialistBlueprint: async () => ({ success: true, data: blueprint({ status: 'rejected' }) }),
+      },
+    }
+	    const mounted = await mount(createElement(AgentSystemStudio))
+	    try {
+	      await clickButtonContaining(mounted.container, '视觉研究专项 Agent')
+	      const expandedText = mounted.container.textContent || ''
+	      assert.match(expandedText, /语义已校验/)
+	      assert.match(expandedText, /FOUNDATION 预览/)
+	      assert.match(expandedText, /# 视觉研究专项 Agent Foundation/)
+	      assert.match(expandedText, /确认创建/)
       const confirmButtons = Array.from(mounted.container.querySelectorAll('button'))
         .filter((button) => button.textContent?.includes('确认创建')) as HTMLButtonElement[]
       assert.equal(confirmButtons.length, 1)
@@ -627,10 +785,11 @@ test('AgentSystemStudio requires explicit unverified semantic ack before confirm
           return { success: true, data: { blueprint: blueprint(), result: { agent: { id: 'visual-researcher' }, rulesRelPath: 'agents/visual-researcher/RULES.md', foundationRelPath: 'agents/visual-researcher/FOUNDATION.md', seedRelPaths: [], routingCardRelPath: 'knowledge/routing-visual-researcher.md', migratedCards: [] } } }
         },
       },
-    }
-    const mounted = await mount(createElement(AgentSystemStudio))
-    try {
-      let text = mounted.container.textContent || ''
+	    }
+	    const mounted = await mount(createElement(AgentSystemStudio))
+	    try {
+	      await clickButtonContaining(mounted.container, '视觉研究专项 Agent')
+	      let text = mounted.container.textContent || ''
       assert.match(text, /语义未校验/)
       assert.match(text, /FOUNDATION 尚未完成语义校验/)
       assert.match(text, /我已阅读完整 FOUNDATION/)
@@ -712,10 +871,11 @@ test('AgentSystemStudio offers semantic refresh when a staged blueprint has no r
           return { success: true, data: { blueprint: reviewed, result: { agent: { id: 'visual-researcher' }, rulesRelPath: 'agents/visual-researcher/RULES.md', foundationRelPath: 'agents/visual-researcher/FOUNDATION.md', seedRelPaths: [], routingCardRelPath: 'knowledge/routing-visual-researcher.md', migratedCards: [] } } }
         },
       },
-    }
-    const mounted = await mount(createElement(AgentSystemStudio))
-    try {
-      assert.match(mounted.container.textContent || '', /FOUNDATION 还没有语义校验记录/)
+	    }
+	    const mounted = await mount(createElement(AgentSystemStudio))
+	    try {
+	      await clickButtonContaining(mounted.container, '视觉研究专项 Agent')
+	      assert.match(mounted.container.textContent || '', /FOUNDATION 还没有语义校验记录/)
       assert.match(mounted.container.textContent || '', /先刷新语义/)
       const refreshButton = Array.from(mounted.container.querySelectorAll('button'))
         .find((button) => button.textContent?.includes('刷新语义校验')) as HTMLButtonElement | undefined
@@ -776,10 +936,11 @@ test('AgentSystemStudio blocks confirm-create when semantic review has blocking 
           throw new Error('blocked semantic review should not create')
         },
       },
-    }
-    const mounted = await mount(createElement(AgentSystemStudio))
-    try {
-      const text = mounted.container.textContent || ''
+	    }
+	    const mounted = await mount(createElement(AgentSystemStudio))
+	    try {
+	      await clickButtonContaining(mounted.container, '视觉研究专项 Agent')
+	      const text = mounted.container.textContent || ''
       assert.match(text, /语义需修正/)
       assert.match(text, /语义缺口/)
       assert.match(text, /职责范围仍然过泛/)
@@ -835,10 +996,11 @@ test('AgentSystemStudio saves blueprint edits through admission without confirm-
 	        },
         rejectSpecialistBlueprint: async () => ({ success: true, data: blueprint({ status: 'rejected' }) }),
       },
-    }
-    const mounted = await mount(createElement(AgentSystemStudio))
-    try {
-      const charter = mounted.container.querySelector('textarea[aria-label="职责范围"]') as HTMLTextAreaElement | null
+	    }
+	    const mounted = await mount(createElement(AgentSystemStudio))
+	    try {
+	      await clickButtonContaining(mounted.container, '视觉研究专项 Agent')
+	      const charter = mounted.container.querySelector('textarea[aria-label="职责范围"]') as HTMLTextAreaElement | null
       const nonGoals = mounted.container.querySelector('textarea[aria-label="不做事项"]') as HTMLTextAreaElement | null
       const rules = mounted.container.querySelector('textarea[aria-label="RULES"]') as HTMLTextAreaElement | null
       assert.ok(charter)
@@ -930,10 +1092,11 @@ test('AgentSystemStudio passes selected blueprint migration cards into confirm-c
         },
         rejectSpecialistBlueprint: async () => ({ success: true, data: blueprint({ status: 'rejected' }) }),
       },
-    }
-    const mounted = await mount(createElement(AgentSystemStudio))
-    try {
-      assert.match(mounted.container.textContent || '', /采用时迁移的知识/)
+	    }
+	    const mounted = await mount(createElement(AgentSystemStudio))
+	    try {
+	      await clickButtonContaining(mounted.container, '视觉研究专项 Agent')
+	      assert.match(mounted.container.textContent || '', /采用时迁移的知识/)
       const checkbox = mounted.container.querySelector('input[type="checkbox"]') as HTMLInputElement | null
       assert.ok(checkbox)
       await act(async () => {
@@ -994,10 +1157,11 @@ test('AgentSystemStudio blocks confirm-create when blueprint quality has blockin
           throw new Error('quality failure should not create')
         },
       },
-    }
-    const mounted = await mount(createElement(AgentSystemStudio))
-    try {
-      assert.match(mounted.container.textContent || '', /质量缺口/)
+	    }
+	    const mounted = await mount(createElement(AgentSystemStudio))
+	    try {
+	      await clickButtonContaining(mounted.container, '视觉研究专项 Agent')
+	      assert.match(mounted.container.textContent || '', /质量缺口/)
       assert.match(mounted.container.textContent || '', /职责范围需要比用户原话更具体/)
       assert.match(mounted.container.textContent || '', /先修质量/)
       assert.equal(Array.from(mounted.container.querySelectorAll('button')).some((button) => button.textContent?.includes('确认创建')), false)
@@ -1059,10 +1223,11 @@ test('AgentSystemStudio can retry a confirmed blueprint that has not been adopte
           }
         },
       },
-    }
-    const mounted = await mount(createElement(AgentSystemStudio))
-    try {
-      const continueButton = Array.from(mounted.container.querySelectorAll('button'))
+	    }
+	    const mounted = await mount(createElement(AgentSystemStudio))
+	    try {
+	      await clickButtonContaining(mounted.container, '视觉研究专项 Agent')
+	      const continueButton = Array.from(mounted.container.querySelectorAll('button'))
         .find((button) => button.textContent?.includes('继续创建')) as HTMLButtonElement | undefined
       assert.ok(continueButton)
       await act(async () => {

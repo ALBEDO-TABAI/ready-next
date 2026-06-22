@@ -144,6 +144,11 @@ test('end-to-end: 提议 → 采纳 → ownerAgentId 经 repository.update 写�
       },
     )
     assert.equal(outcome.kind, 'adopted')
+    if (outcome.kind === 'adopted') {
+      assert.equal(outcome.userRequestVerbatim, VERBATIM, 'same-session handoff carries the original request into continuation')
+      assert.equal(outcome.targetAgentName, '采集手')
+      assert.equal(outcome.targetAgentCharter, '负责小红书与微博采集')
+    }
     assert.equal(rows.get('task-1')?.owner_agent_id, 'collector', 'ownerAgentId written through the repository')
     assert.equal(repository.getLatestOwnerAgentForScope('scope-1'), 'collector', '后续轮 owner 解析读到切换结果')
 
@@ -169,6 +174,28 @@ test('end-to-end: 提议 → 采纳 → ownerAgentId 经 repository.update 写�
   } finally {
     rmSync(root, { recursive: true, force: true })
   }
+})
+
+test('same-session adoption result tells the model to continue as the target agent, not stop at transfer', async () => {
+  const { deps } = cardDeps(HANDOFF_ADOPT_OPTION)
+  const output = await executeProposeHandoff(
+    {
+      target_agent_id: 'collector',
+      reason: '采集类任务更对口',
+      user_request_verbatim: VERBATIM,
+      task_id: 'task-continue-1',
+    },
+    { ...deps, taskId: null },
+  )
+  const outcome = (output.data as { outcome: { kind: string; userRequestVerbatim?: string } }).outcome
+  assert.equal(outcome.kind, 'adopted')
+  assert.equal(outcome.userRequestVerbatim, VERBATIM, 'structured result keeps verbatim for same-session continuation')
+  assert.match(output.text, /当前会话转给「采集手」继续处理/)
+  assert.match(output.text, /用户原始请求/)
+  assert.match(output.text, /现在请以该专项 agent 的职责继续完成用户原始请求/)
+  assert.match(output.text, /不要只说明/)
+  assert.match(output.text, /不要结束本轮/)
+  assert.ok(output.text.includes(VERBATIM), 'model-visible handoff result includes the exact original request')
 })
 
 test('verbatim passes byte-for-byte into the new-session prefill', async () => {

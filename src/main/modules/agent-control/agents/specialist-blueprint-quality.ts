@@ -27,21 +27,23 @@ export const SPECIALIST_FOUNDATION_PACK_SECTIONS = [
 ] as const
 
 const TRIGGER_FORBIDDEN_PATTERN = /[*?[\]{}()|\\^$+]/
-const GENERIC_TEXT_PATTERNS = [
+const ALWAYS_GENERIC_TEXT_PATTERNS = [
   /\bTODO\b/i,
   /\bTBD\b/i,
   /\bxxx\b/i,
   /待定/,
   /暂无/,
+  /^none$/i,
+  /^n\/a$/i,
+  /^示例[:：]?$/,
+  /^例如[:：]?$/,
+]
+const SHORT_GENERIC_TEXT_PATTERNS = [
   /按用户要求/,
   /根据用户(?:需求|要求)/,
   /输出结果/,
   /注意安全/,
   /不做无关/,
-  /^none$/i,
-  /^n\/a$/i,
-  /^示例[:：]?$/,
-  /^例如[:：]?$/,
 ]
 
 const GENERIC_ANCHORS = new Set([
@@ -68,7 +70,8 @@ function normalizeText(value: string): string {
 function isGenericText(value: string): boolean {
   const text = value.trim()
   if (!text) return true
-  return GENERIC_TEXT_PATTERNS.some((pattern) => pattern.test(text))
+  if (ALWAYS_GENERIC_TEXT_PATTERNS.some((pattern) => pattern.test(text))) return true
+  return text.length < 40 && SHORT_GENERIC_TEXT_PATTERNS.some((pattern) => pattern.test(text))
 }
 
 function isConcreteText(value: string, minLength = 12): boolean {
@@ -138,7 +141,7 @@ function boundaryIsComplete(boundary: SpecialistBlueprintToolBoundary): boolean 
 
 function riskyAllowHasJustification(boundary: SpecialistBlueprintToolBoundary): boolean {
   if (boundary.mode !== 'allow') return true
-  return isConcreteText(boundary.notes, 20)
+  return isConcreteText(boundary.notes, 8)
 }
 
 function boundariesComplete(boundaries: SpecialistBlueprintToolBoundaries): boolean {
@@ -168,8 +171,8 @@ function routingTriggersAreLiteral(triggers: readonly string[]): boolean {
 }
 
 function knowledgeSeedsHaveEvidence(blueprint: SpecialistAgentBlueprint): boolean {
-  return blueprint.knowledgeSeeds.length > 0
-    && blueprint.knowledgeSeeds.every((seed) => (
+  return blueprint.knowledgeSeeds.length === 0
+    || blueprint.knowledgeSeeds.every((seed) => (
       isConcreteText(seed.title, 4)
       && isConcreteText(seed.body, 8)
       && seed.evidenceRefs.some((ref) => isConcreteText(ref, 3))

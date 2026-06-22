@@ -69,7 +69,16 @@ export interface HandoffProposalDeps {
 }
 
 export type HandoffProposalOutcome =
-  | { kind: 'adopted'; targetAgentId: string; taskId: string | null; ownerWritten: boolean }
+  | {
+      kind: 'adopted'
+      targetAgentId: string
+      targetAgentName: string
+      targetAgentCharter: string
+      userRequestVerbatim: string
+      contextRefs: string[]
+      taskId: string | null
+      ownerWritten: boolean
+    }
   | {
       kind: 'adopted_new_session'
       targetAgentId: string
@@ -158,7 +167,16 @@ export async function runHandoffProposal(
       taskId: input.taskId ?? null,
       mode: 'same_session',
     })
-    return { kind: 'adopted', targetAgentId: target.id, taskId: input.taskId ?? null, ownerWritten }
+    return {
+      kind: 'adopted',
+      targetAgentId: target.id,
+      targetAgentName: target.name,
+      targetAgentCharter: target.charter || '',
+      userRequestVerbatim: input.userRequestVerbatim,
+      contextRefs,
+      taskId: input.taskId ?? null,
+      ownerWritten,
+    }
   }
 
   // unwired-handoff-newsession: retained future asset; hidden from the production card until real renderer/preload wiring exists.

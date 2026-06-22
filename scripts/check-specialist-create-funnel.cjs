@@ -11,21 +11,23 @@ const ALLOWED_REGISTRY_CREATE = new Set([
 ])
 const ALLOWED_BLUEPRINT_WRITE = new Set([
   'src/main/modules/agent-control/agents/agent-factory.ts',
+  'src/main/modules/agent-control/agents/specialist-blueprint-confirm-create.ts',
   'src/main/modules/agent-control/agents/specialist-blueprint-store.ts',
   'src/main/modules/claude-bridge/ipc/agent-specialist-blueprint-group.ts',
   'src/main/modules/claude-bridge/ipc/agent-derivation-group.ts',
+  'src/main/modules/tools/builtins/confirm-specialist-blueprint.ts',
   'src/main/modules/tools/builtins/propose-specialist-blueprint.ts',
   'src/preload/index.ts',
   'src/renderer/types/electron.d.ts',
 ])
 const ALLOWED_SEMANTIC_REVIEW_CALL = new Set([
   'src/main/modules/agent-control/agents/specialist-foundation-semantic-judge.ts',
-  'src/main/modules/claude-bridge/ipc/agent-specialist-blueprint-group.ts',
+  'src/main/modules/agent-control/agents/specialist-blueprint-confirm-create.ts',
   'src/main/modules/tools/builtins/propose-specialist-blueprint.ts',
 ])
 const ALLOWED_SEMANTIC_REVIEW_CALL_COUNT = new Map([
   ['src/main/modules/agent-control/agents/specialist-foundation-semantic-judge.ts', 1],
-  ['src/main/modules/claude-bridge/ipc/agent-specialist-blueprint-group.ts', 1],
+  ['src/main/modules/agent-control/agents/specialist-blueprint-confirm-create.ts', 1],
   ['src/main/modules/tools/builtins/propose-specialist-blueprint.ts', 1],
 ])
 const ALLOWED_SEMANTIC_JUDGE_RESOLVER_CALL = new Set([
@@ -37,6 +39,15 @@ const ALLOWED_SEMANTIC_JUDGE_RESOLVER_CALL_COUNT = new Map([
   ['src/main/modules/agent-control/agents/specialist-foundation-semantic-judge-provider.ts', 1],
   ['src/main/modules/claude-bridge/ipc-handler.ts', 1],
   ['src/main/modules/tools/tool-executor.ts', 1],
+])
+const ALLOWED_DIRECT_DERIVATION_CALL = new Set([
+  'src/main/modules/agent-control/agents/specialist-blueprint-confirm-create.ts',
+])
+const ALLOWED_CHAT_CREATE_SURFACE = new Set([
+  'src/main/modules/agent-control/agents/specialist-blueprint-confirm-create.ts',
+  'src/main/modules/claude-bridge/ipc/agent-specialist-blueprint-group.ts',
+  'src/main/modules/tools/builtins/confirm-specialist-blueprint.ts',
+  'src/main/modules/tools/schemas/agent-interaction-schemas.ts',
 ])
 
 function fail(message) {
@@ -125,13 +136,18 @@ for (const file of files) {
   if (REGISTRY_CREATE_RE.test(source) && !ALLOWED_REGISTRY_CREATE.has(relative)) {
     registryCreateViolations.push(relative)
   }
-  if (DIRECT_DERIVATION_RE.test(source) && relative !== 'src/main/modules/agent-control/agents/agent-factory.ts') {
+  if (DIRECT_DERIVATION_RE.test(source)
+    && relative !== 'src/main/modules/agent-control/agents/agent-factory.ts'
+    && !ALLOWED_DIRECT_DERIVATION_CALL.has(relative)) {
     directDerivationViolations.push(relative)
   }
-  if (LEGACY_DERIVATION_IMPORT_RE.test(source) && relative !== 'src/main/modules/agent-control/agents/agent-factory.ts') {
+  if (LEGACY_DERIVATION_IMPORT_RE.test(source)
+    && relative !== 'src/main/modules/agent-control/agents/agent-factory.ts'
+    && !ALLOWED_DIRECT_DERIVATION_CALL.has(relative)) {
     legacyDerivationImportViolations.push(relative)
   }
-  if (/agent:(?:specialist|blueprint):(?:create|confirm)|confirmSpecialistBlueprint|createSpecialistBlueprint/.test(source)) {
+  if (/agent:(?:specialist|blueprint):(?:create|confirm)|confirmSpecialistBlueprint|createSpecialistBlueprint/.test(source)
+    && !ALLOWED_CHAT_CREATE_SURFACE.has(relative)) {
     chatCreateChannelViolations.push(relative)
   }
   if (BLUEPRINT_WRITE_RE.test(source)
@@ -220,18 +236,24 @@ if (bareSourceMessageNullViolations.length > 0) {
 }
 
 const groupPath = path.join(ROOT, 'src/main/modules/claude-bridge/ipc/agent-specialist-blueprint-group.ts')
-if (fs.existsSync(groupPath)) {
+const confirmationHelperPath = path.join(ROOT, 'src/main/modules/agent-control/agents/specialist-blueprint-confirm-create.ts')
+if (fs.existsSync(groupPath) && fs.existsSync(confirmationHelperPath)) {
   const groupSource = fs.readFileSync(groupPath, 'utf8')
-  if (!/materializeSpecialistBlueprintForReview/.test(groupSource)
-    || !/hashSpecialistBlueprintReviewContent/.test(groupSource)
-    || !/acceptsSemanticReview/.test(groupSource)) {
-    fail('specialist confirmation IPC must use canonical review materialization, shared hash helper, and semantic acceptance check')
+  const confirmationSource = fs.readFileSync(confirmationHelperPath, 'utf8')
+  if (!/requestSpecialistBlueprintConfirmationForCreate/.test(groupSource)
+    || !/confirmSpecialistBlueprintCreateWithToken/.test(groupSource)) {
+    fail('specialist confirmation IPC must delegate to the shared confirm/create helper')
   }
-  if (!/isCurrentSemanticBlock/.test(groupSource) || !/review\?\.\s*status\s*===\s*'blocked'/.test(groupSource)) {
-    fail('specialist confirmation IPC must preserve current semantic blocked reviews for the same content hash')
+  if (!/materializeSpecialistBlueprintForReview/.test(confirmationSource)
+    || !/hashSpecialistBlueprintReviewContent/.test(confirmationSource)
+    || !/acceptsSpecialistBlueprintSemanticReview/.test(confirmationSource)) {
+    fail('specialist confirmation helper must use canonical review materialization, shared hash helper, and semantic acceptance check')
   }
-  if (!/semanticFoundationJudgeUnavailableReason/.test(groupSource)) {
-    fail('specialist confirmation IPC must carry observable semantic judge unavailable reasons')
+  if (!/isCurrentSemanticBlock/.test(confirmationSource) || !/review\?\.\s*status\s*===\s*'blocked'/.test(confirmationSource)) {
+    fail('specialist confirmation helper must preserve current semantic blocked reviews for the same content hash')
+  }
+  if (!/semanticFoundationJudgeUnavailableReason/.test(confirmationSource)) {
+    fail('specialist confirmation helper must carry observable semantic judge unavailable reasons')
   }
 }
 
@@ -241,7 +263,7 @@ if (fs.existsSync(semanticJudgePath)) {
   if (!/materializeSpecialistBlueprintForReview/.test(semanticJudgeSource)
     || !/hashSpecialistBlueprintReviewContent/.test(semanticJudgeSource)
     || !/isSpecialistFoundationSemanticIssueId/.test(semanticJudgeSource)) {
-    fail('specialist semantic judge must use canonical materialization, shared hash helper, and closed shared issue ids')
+    fail('specialist semantic judge must use canonical review materialization, shared hash helper, and closed shared issue ids')
   }
 }
 
@@ -262,7 +284,7 @@ if (fs.existsSync(toolExecutorPath)) {
     fail('propose_specialist_blueprint dispatch must not hardcode bare sourceMessageId: null')
   }
   if (!/resolveSpecialistFoundationSemanticJudge/.test(toolExecutorSource)
-    || !/semanticFoundationJudgeUnavailableReason:\s*semanticJudge\.unavailableReason/.test(toolExecutorSource)
+    || !/semanticFoundationJudgeUnavailableReason:\s*\w+\.unavailableReason/.test(toolExecutorSource)
     || !/sourceMessageUnavailableReason/.test(toolExecutorSource)) {
     fail('propose_specialist_blueprint dispatch must wire semantic judge resolver and message provenance reason')
   }

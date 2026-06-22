@@ -103,7 +103,7 @@ export interface PromptAssemblyDeps {
 	    listRoutingCardInventory?(agents: ReadonlyArray<{ id: string; status: AgentSystemStudioAgentStatus }>): Array<{ relPath: string; targetStatus: string }>
 	  } | null
   /** EP3-A3: agents-table roster for the main-session charter/routing index. */
-  getAgentRoster?: () => Array<{ id: string; name: string; charter: string | null; status: string }>
+  getAgentRoster?: () => Array<{ id: string; name: string; charter: string | null; status: string; personaRef?: string | null }>
   /** EP2-K6: rollback switch — false stops RULES/index injection entirely. */
   isKnowledgeSystemEnabled?: () => boolean
   /** EP3-C4: injectable memory-content accessor (agent_knowledge value by
@@ -213,6 +213,18 @@ function clip(text: string, maxChars: number): string {
   return text.length <= maxChars ? text : `${text.slice(0, maxChars)}\n...[truncated]`
 }
 
+function formatWorkspaceRootsForPrompt(roots: readonly string[] | null | undefined): string {
+  const normalized = Array.isArray(roots)
+    ? roots.map((root) => String(root || '').trim()).filter(Boolean)
+    : []
+  if (normalized.length === 0) return ''
+  return [
+    '文件管理已授权目录：',
+    ...normalized.map((root) => `- ${root}`),
+    '这些目录及其子目录内的文件可由 file_* 工具读取、创建、移动和整理；不要要求用户先把这些文件搬到 Ready 项目代码目录。',
+  ].join('\n')
+}
+
 function sanitizeCommandLikeContent(text: string): string {
   if (!text) return ''
   const patterns = [
@@ -257,7 +269,7 @@ function hasCurrentExplicitResourceRefs(envelope: RequestEnvelope): boolean {
 }
 
 function isAgentSystemStudioAgentStatus(status: string): status is AgentSystemStudioAgentStatus {
-  return status === 'active' || status === 'retired' || status === 'merged'
+  return status === 'active' || status === 'disabled' || status === 'retired' || status === 'merged'
 }
 
 function formatMemorySection(title: string, body: string): string {
@@ -500,6 +512,12 @@ export class PromptAssemblyService {
         const personality = await this.deps.agentPersonalityRepository.getPersonality(agentName)
         if (personality) {
           return personality.personalityText
+        }
+        const roster = this.deps.getAgentRoster?.()
+        const personaRef = roster?.find((agent) => agent.id === agentName)?.personaRef
+        if (personaRef && personaRef !== agentName) {
+          const referencedPersonality = await this.deps.agentPersonalityRepository.getPersonality(personaRef)
+          if (referencedPersonality) return referencedPersonality.personalityText
         }
       } catch (error) {
         console.error('[PromptAssembly] Failed to load personality from database:', error)
@@ -1025,6 +1043,7 @@ export class PromptAssemblyService {
     scope: ConversationScope
     message: string | Array<{ type: string; text?: string; base64?: string; mimeType?: string }>
     coordinators: ReadonlyArray<DomainAdapter>
+    workspaceRoots?: string[]
     /** EP3-A2 — 本轮任务 owner（projection 的 ownerAgentId）。三段式解析：
      *  显式合法 owner 优先；完全未传时回退 scope.agent；显式但非法的 id
      *  降级 global-only（不回退，防腐败 owner 借道注入他人谱系）。
@@ -1035,7 +1054,12 @@ export class PromptAssemblyService {
     // Stage T R2 fix: scoped runs must propagate sessionId/scopeId so
     // turn-engine's MCP authorization (`requestEnvelope.scopeId` at :2223)
     // sees real scope, not undefined. scopeId === scope.id is canonical.
-    const requestEnvelope = buildRequestEnvelope({ userText, sessionId: params.scope.id, scopeId: params.scope.id })
+    const requestEnvelope = buildRequestEnvelope({
+      userText,
+      sessionId: params.scope.id,
+      scopeId: params.scope.id,
+      workspaceRoots: params.workspaceRoots,
+    })
     const intentClassification = classifyIntent(requestEnvelope)
     const hasExplicitResourceRefs = hasCurrentExplicitResourceRefs(requestEnvelope)
     const l0 = await this.loadL0(params.scope)
@@ -1162,7 +1186,9 @@ export class PromptAssemblyService {
     const l2Sections = triggerMatches.flatMap((item) => item.sections)
     const { l1Text, l2Text, budget: baseBudget } = applyBudget({ l0Text: l0.text, l1Text: l1.text, l2Sections })
 
+    const workspaceRootsText = formatWorkspaceRootsForPrompt(params.workspaceRoots)
     const bootstrapMessages = [
+      workspaceRootsText ? formatMemorySection('环境信息', workspaceRootsText) : '',
       l1Text ? formatMemorySection('L1 会话上下文', l1Text) : '',
       knowledgeIndexText ? formatMemorySection('知识索引', knowledgeIndexText) : '',
       agentRoutingText ? formatMemorySection('专项 agent 与路由索引', agentRoutingText) : '',
@@ -1200,6 +1226,7 @@ export class PromptAssemblyService {
       { section: 'recall', text: recall.text },
       { section: 'autoRecall', text: autoRecall.text },
       { section: 'L2_triggers', text: l2Text },
+      { section: 'environment_workspace_roots', text: workspaceRootsText },
     ] satisfies ContextBillSectionInput[]
     const contextBill = buildContextBill(params.scope.id, billSections)
     emitContextBill(contextBill)

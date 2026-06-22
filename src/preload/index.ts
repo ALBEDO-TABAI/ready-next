@@ -54,6 +54,28 @@ type ContinuationIntentPayload = {
   childRunId?: string
 }
 
+function notifyAgentRegistryChanged(): void {
+  try {
+    queueMicrotask(() => {
+      try {
+        window.dispatchEvent(new CustomEvent('ready:agent-registry-changed'))
+      } catch {
+        // ignore — preview/test environments may not provide DOM events.
+      }
+    })
+  } catch {
+    // ignore
+  }
+}
+
+async function invokeAndNotifyAgentRegistry(channel: string, ...args: unknown[]): Promise<unknown> {
+  const result = await ipcRenderer.invoke(channel, ...args)
+  if (result && typeof result === 'object' && (result as { success?: unknown }).success === true) {
+    notifyAgentRegistryChanged()
+  }
+  return result
+}
+
 // Agent API
 const agentAPI = {
   send: (
@@ -98,18 +120,20 @@ const agentAPI = {
   }) =>
     ipcRenderer.invoke('agent:specialistBlueprint:requestConfirmation', payload),
   confirmSpecialistDraftCreate: (payload: { blueprintId: string; sessionId: string; runId?: string | null; tokenId: string; migrateCardRelPaths?: string[] }) =>
-    ipcRenderer.invoke('agent:specialistBlueprint:confirmCreate', payload),
+    invokeAndNotifyAgentRegistry('agent:specialistBlueprint:confirmCreate', payload),
   rejectSpecialistBlueprint: (blueprintId: string) =>
     ipcRenderer.invoke('agent:specialistBlueprint:reject', { blueprintId }),
   expireSpecialistBlueprint: (blueprintId: string) =>
     ipcRenderer.invoke('agent:specialistBlueprint:expire', { blueprintId }),
   updateRegistryStatus: (payload: {
     id: string
-    status: 'retired' | 'merged'
+    status: 'active' | 'disabled' | 'retired' | 'merged'
     mergedIntoAgentId?: string | null
     migrateCardRelPaths?: string[]
   }) =>
-    ipcRenderer.invoke('agent:registry:updateStatus', payload),
+    invokeAndNotifyAgentRegistry('agent:registry:updateStatus', payload),
+  deleteRegistryAgent: (id: string) =>
+    invokeAndNotifyAgentRegistry('agent:registry:delete', { id }),
   listDerivationCandidates: () => ipcRenderer.invoke('agent:derivation:listCandidates'),
   confirmDerivation: (payload: {
     candidateRelPath: string
@@ -192,6 +216,7 @@ const agentAPI = {
       agent?: string
       message: string | Array<{ type: string; text?: string; base64?: string; mimeType?: string }>
       requestId?: string
+      workspaceRoots?: string[]
       userMessage?: {
         id: string
         content: string
@@ -1197,14 +1222,14 @@ const agentPersonalityAPI = {
     personalityText: string
     tone?: string
     metaJson?: Record<string, unknown>
-  }) => ipcRenderer.invoke('agentPersonality:create', personality),
+  }) => invokeAndNotifyAgentRegistry('agentPersonality:create', personality),
   update: (agentName: string, updates: {
     displayName?: string
     personalityText?: string
     tone?: string
     metaJson?: Record<string, unknown>
-  }) => ipcRenderer.invoke('agentPersonality:update', agentName, updates),
-  delete: (agentName: string) => ipcRenderer.invoke('agentPersonality:delete', agentName),
+  }) => invokeAndNotifyAgentRegistry('agentPersonality:update', agentName, updates),
+  delete: (agentName: string) => invokeAndNotifyAgentRegistry('agentPersonality:delete', agentName),
 }
 
 const toolsAPI = {

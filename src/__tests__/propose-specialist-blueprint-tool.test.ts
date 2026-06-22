@@ -15,7 +15,11 @@ import {
   type ProposeSpecialistBlueprintArgs,
 } from '../main/modules/tools/builtins/propose-specialist-blueprint'
 import { serializeToolExecutionOutput } from '../main/modules/agent-control/tools-runtime/tool-result-types'
-import { resolveToolInputSchemaForExecution } from '../main/modules/agent-control/tools-runtime/tool-registry'
+import {
+  defaultToolRegistry,
+  resolveToolInputSchemaForExecution,
+} from '../main/modules/agent-control/tools-runtime/tool-registry'
+import { getToolResourceTag } from '../main/modules/agent-control/tools-runtime/tool-parallelism-policy'
 import {
   getAgentInteractionAnthropicTools,
   getAgentInteractionOpenAITools,
@@ -41,6 +45,7 @@ function makeRegistry(rows = new Map<string, AgentRegistryRecord>()) {
 type JsonSchemaObject = {
   properties?: Record<string, unknown>
   required?: string[]
+  maxItems?: number
 }
 
 function backendRequiredTopLevelKeys(): string[] {
@@ -127,6 +132,16 @@ test('propose_specialist_blueprint schema is registered for dispatch validation'
   assert.equal(schema?.safeParse({}).success, false)
 })
 
+test('propose_specialist_blueprint executes in agent_interaction domain', () => {
+  const tag = getToolResourceTag('propose_specialist_blueprint')
+  assert.deepEqual(tag, { domain: 'agent_interaction', accessMode: 'interactive' })
+
+  const definition = defaultToolRegistry.getToolDefinitionForExecution('propose_specialist_blueprint')
+  assert.equal(definition?.groupId, 'agent_interaction')
+  assert.equal(definition?.domain, 'agent_interaction')
+  assert.notEqual(definition?.domain, 'system')
+})
+
 test('model-visible propose_specialist_blueprint schemas expose backend-required fields', () => {
   const requiredKeys = backendRequiredTopLevelKeys()
   const schemas = [
@@ -141,6 +156,8 @@ test('model-visible propose_specialist_blueprint schemas expose backend-required
     }
     assert.ok(schema.properties?.knowledge_seeds, 'optional knowledge_seeds should remain model-visible')
     assert.equal(schema.required?.includes('knowledge_seeds'), false)
+    const routingTriggers = schema.properties?.routing_triggers as JsonSchemaObject | undefined
+    assert.equal(routingTriggers?.maxItems, 8, 'model-visible routing_triggers must mirror backend maxItems')
 
     const toolBoundaries = schema.properties?.tool_boundaries as JsonSchemaObject | undefined
     assert.ok(toolBoundaries?.properties, 'tool_boundaries must expose nested boundaries')
@@ -203,6 +220,32 @@ test('executeProposeSpecialistBlueprint stores a staged blueprint without creati
   assert.equal(stored?.provenance.sourceMessageId, null)
   assert.equal(stored?.provenance.sourceMessageUnavailableReason, 'message_id_unavailable')
   assert.equal(stored?.provenance.createdAt, '2026-06-19T00:00:00.000Z')
+})
+
+test('executeProposeSpecialistBlueprint clamps overlong model lists instead of rejecting the draft', async () => {
+  const store = new SpecialistBlueprintStore()
+  const routingTriggers = [
+    '视觉研究',
+    '参考整理',
+    '风格方向',
+    '参考图',
+    '素材归纳',
+    '视觉对标',
+    '灵感板',
+    '构图参考',
+    '色彩参考',
+    '版式参考',
+  ]
+
+  const output = await executeProposeSpecialistBlueprint(args({ routing_triggers: routingTriggers }), {
+    blueprintStore: store,
+    registry: makeRegistry(),
+    currentUserText: '我要一个视觉研究类型的专项 agent',
+  })
+
+  assert.equal(output.data?.status, 'staged')
+  const stored = store.get('bp-visual-researcher')
+  assert.deepEqual(stored?.routingTriggers, routingTriggers.slice(0, 8))
 })
 
 test('executeProposeSpecialistBlueprint returns a professional interview contract for broad type-label gaps', async () => {

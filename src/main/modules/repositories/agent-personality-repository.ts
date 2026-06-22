@@ -3,6 +3,8 @@
  * Each agent can have a custom personality definition that shapes its behavior.
  */
 
+import { isValidAgentSlug } from '../../../shared/agent-identity'
+
 export interface AgentPersonality {
   id: string
   agentName: string
@@ -58,12 +60,17 @@ export class AgentPersonalityRepository {
     if (!personality.agentName) {
       throw new Error('agentName is required')
     }
+    const agentName = String(personality.agentName).trim()
+    if (!isValidAgentSlug(agentName)) {
+      throw new Error('agentName must be a valid agent slug')
+    }
     if (!personality.personalityText) {
       throw new Error('personalityText is required')
     }
 
     const id = personality.id || `personality-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
     const now = Date.now()
+    const displayName = personality.displayName || agentName
 
     const metaJson = personality.metaJson ? JSON.stringify(personality.metaJson) : null
 
@@ -76,8 +83,8 @@ export class AgentPersonalityRepository {
       )
       .run(
         id,
-        personality.agentName,
-        personality.displayName || null,
+        agentName,
+        displayName,
         personality.personalityText,
         personality.tone || null,
         metaJson,
@@ -85,7 +92,22 @@ export class AgentPersonalityRepository {
         personality.updatedAt || now
       )
 
-    const created = await this.getPersonality(personality.agentName)
+    db.prepare(`
+      INSERT INTO agents (id, name, charter, persona_ref, status, parent_agent_id, derivation_reason, merged_into_agent_id, created_at)
+      VALUES (?, ?, ?, ?, 'active', NULL, ?, NULL, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        name = excluded.name,
+        persona_ref = excluded.persona_ref
+    `).run(
+      agentName,
+      displayName,
+      `用户创建的 ${displayName} agent`,
+      agentName,
+      'personality:create',
+      new Date().toISOString(),
+    )
+
+    const created = await this.getPersonality(agentName)
     if (!created) {
       throw new Error(`Failed to create agent personality: ${personality.agentName}`)
     }
@@ -133,6 +155,11 @@ export class AgentPersonalityRepository {
     db
       .prepare(`UPDATE agent_personalities SET ${fields.join(', ')} WHERE agent_name = ?`)
       .run(...values)
+
+    if (updates.displayName !== undefined && String(updates.displayName || '').trim()) {
+      db.prepare('UPDATE agents SET name = ? WHERE id = ?')
+        .run(String(updates.displayName).trim(), agentName)
+    }
   }
 
   /**

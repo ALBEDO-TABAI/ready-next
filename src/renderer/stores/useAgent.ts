@@ -21,10 +21,12 @@ import { emitRendererAgentMetric } from '../modules/agent/rendererMetrics'
 import { boundedCancelWithFallback } from '../modules/agent/boundedCancelWithFallback'
 import { createAgentRuntimeDriver, syncActiveScopeRunAliases } from '../modules/agent/runtimeDriver'
 import { installAgentPanelTestHarness } from '../modules/agent/agentPanelTestHarness'
+import { computeDesiredRoots, useWorkspace } from './useWorkspace'
 import {
   ScopeCreatePersistenceMetricThrottle,
   type ScopeCreatePersistenceSite,
 } from '../modules/agent/scope-create-persistence-metrics'
+import { defaultAgentEmoji } from '../../shared/agent-identity'
 
 /**
  * Stage 3 W4 — observability-only throttle for createLocalScope IPC failures
@@ -128,6 +130,12 @@ interface AgentPersonalityListItem {
   metaJson?: Record<string, unknown>
 }
 
+interface AgentRegistryListItem {
+  id: string
+  name: string
+  status: 'active' | 'disabled' | 'retired' | 'merged'
+}
+
 function cloneFallbackAgents(): Agent[] {
   return FALLBACK_AGENTS.map((agent) => ({ ...agent }))
 }
@@ -158,6 +166,33 @@ function mapPersonalitiesToAgents(
       avatar: readPersonalityEmoji(item.metaJson),
       status: 'idle' as const,
       selected: previous?.selected ?? item.agentName === nextCurrentAgent,
+    }
+  })
+  return { agents, currentAgent: nextCurrentAgent }
+}
+
+function mapRegistryToAgents(
+  registryAgents: AgentRegistryListItem[],
+  previousAgents: Agent[],
+  currentAgent: string,
+): { agents: Agent[]; currentAgent: string } {
+  const active = registryAgents.filter((agent) => agent.status === 'active')
+  const source = active.length > 0 ? active : cloneFallbackAgents().map((agent) => ({
+    id: agent.name,
+    name: agent.displayName,
+    status: 'active' as const,
+  }))
+  const nextCurrentAgent = source.some((item) => item.id === currentAgent)
+    ? currentAgent
+    : source[0].id
+  const agents = source.map((item) => {
+    const previous = previousAgents.find((agent) => agent.name === item.id)
+    return {
+      name: item.id,
+      displayName: item.name || item.id,
+      avatar: previous?.avatar || defaultAgentEmoji(item.id),
+      status: 'idle' as const,
+      selected: previous?.selected ?? item.id === nextCurrentAgent,
     }
   })
   return { agents, currentAgent: nextCurrentAgent }
@@ -1259,23 +1294,34 @@ export const useAgent = create<AgentState>((set, get) => ({
 
   reloadAgents: async () => {
     const previousState = get()
+    let registryAgents: AgentRegistryListItem[] = []
     let personalities: AgentPersonalityListItem[] = []
     try {
-      const api = typeof window !== 'undefined' ? window.electronAPI?.agentPersonality : undefined
-      const result = await api?.list?.()
+      const api = typeof window !== 'undefined' ? window.electronAPI?.agent : undefined
+      const result = await api?.listRegistry?.()
+      if (result?.success && Array.isArray(result.data)) {
+        registryAgents = result.data
+      }
+    } catch {
+      registryAgents = []
+    }
+
+    if (registryAgents.length === 0) {
+      try {
+        const api = typeof window !== 'undefined' ? window.electronAPI?.agentPersonality : undefined
+        const result = await api?.list?.()
       if (result?.success && Array.isArray(result.data)) {
         personalities = result.data
       }
-    } catch {
-      // silent-catch: agent personalities are optional; fall back to built-in agents if the bridge is unavailable.
-      personalities = []
+      } catch {
+        // silent-catch: agent personalities are optional; fall back to built-in agents if the bridge is unavailable.
+        personalities = []
+      }
     }
 
-    const { agents, currentAgent } = mapPersonalitiesToAgents(
-      personalities,
-      previousState.agents,
-      previousState.currentAgent,
-    )
+    const { agents, currentAgent } = registryAgents.length > 0
+      ? mapRegistryToAgents(registryAgents, previousState.agents, previousState.currentAgent)
+      : mapPersonalitiesToAgents(personalities, previousState.agents, previousState.currentAgent)
     set({ agents, currentAgent })
   },
 
@@ -2361,6 +2407,11 @@ export const useAgent = create<AgentState>((set, get) => ({
     try {
       if (typeof window !== 'undefined' && window.electronAPI) {
         const finalMessage = composedInput.message
+        const workspaceState = useWorkspace.getState()
+        const workspaceRoots = computeDesiredRoots({
+          workspaceRoot: workspaceState.workspaceRoot,
+          pinnedFolders: workspaceState.pinnedFolders,
+        })
 
         const sendWithCurrentScope = async (): Promise<AgentSendResult> => (
           window.electronAPI.agent.sendScoped
@@ -2369,6 +2420,7 @@ export const useAgent = create<AgentState>((set, get) => ({
               agent: activeScope.agent,
               message: finalMessage,
               requestId,
+              ...(workspaceRoots.length > 0 ? { workspaceRoots } : {}),
               userMessage: {
                 id: userMsgId,
                 content,
@@ -2769,9 +2821,16 @@ export function initAgentInteractionListeners(): () => void {
 
 export function initAgentListeners(): () => void {
   void useAgent.getState().reloadAgents()
+  const onAgentRegistryChanged = () => void useAgent.getState().reloadAgents()
+  try {
+    window.addEventListener('ready:agent-registry-changed', onAgentRegistryChanged)
+  } catch {
+    // ignore — tests may install a minimal global window.
+  }
   const offRuntime = agentRuntimeDriver.initAgentListeners()
   const offAgentInteraction = initAgentInteractionListeners()
   return () => {
+    try { window.removeEventListener('ready:agent-registry-changed', onAgentRegistryChanged) } catch { /* ignore */ }
     try { offRuntime() } catch { /* ignore */ }
     try { offAgentInteraction() } catch { /* ignore */ }
   }

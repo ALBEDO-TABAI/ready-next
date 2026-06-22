@@ -20,6 +20,7 @@ import {
   settingsNoticeStyle,
 } from '../settings/settings-theme'
 import { useAgent } from '../../stores/useAgent'
+import { isReservedAgentSlug, isValidAgentSlug, normalizeAgentSlug } from '../../../shared/agent-identity'
 
 interface AgentPersonality {
   id: string
@@ -46,11 +47,11 @@ function toneLabel(value?: string): string {
 }
 
 function normalizeAgentName(value: string): string {
-  return value.trim().toLowerCase()
+  return normalizeAgentSlug(value)
 }
 
 function isValidAgentName(value: string): boolean {
-  return /^[a-z0-9][a-z0-9-]*$/.test(value)
+  return isValidAgentSlug(value)
 }
 
 function resultError(result: { error?: string }, fallback: string): string {
@@ -158,6 +159,11 @@ export default function PersonalityEditor() {
 
   const refreshAgentSwitcher = async () => {
     await useAgent.getState().reloadAgents()
+    // §7.1 统一刷新契约：人格的双建（create/delete 同时落 registry 行）后，广播事件让
+    // AgentRegistryPanel / AgentSettingsHub「管理」区一并刷新，不止刷新聊天选择器。
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('ready:agent-registry-changed'))
+    }
   }
 
   const handleSelectPersonality = (agentName: string) => {
@@ -195,7 +201,11 @@ export default function PersonalityEditor() {
     const agentName = isCreating ? normalizeAgentName(draftAgentName) : selectedAgent
     if (!agentName) return
     if (isCreating && !isValidAgentName(agentName)) {
-      setError('Agent 标识只能使用小写字母、数字和连字符，并且必须以字母或数字开头。')
+      setError('Agent 标识只能使用小写字母、数字、点、下划线和连字符，并且必须以字母或数字开头。')
+      return
+    }
+    if (isCreating && isReservedAgentSlug(agentName)) {
+      setError(`Agent 标识 ${agentName} 是内置 Agent，不能被新建人格占用。`)
       return
     }
     if (isCreating && personalities.some((item) => item.agentName === agentName)) {
@@ -260,7 +270,7 @@ export default function PersonalityEditor() {
       return
     }
     if (!selectedAgent) return
-    if (!confirm(`确定删除 ${selectedAgent} 的人格配置吗？`)) {
+    if (!confirm(`确定删除 ${selectedAgent} 吗？旧会话和旧任务会保留为历史记录。`)) {
       return
     }
 
@@ -268,7 +278,9 @@ export default function PersonalityEditor() {
     setError(null)
 
     try {
-      const result = await window.electronAPI.agentPersonality.delete(selectedAgent)
+      const result = window.electronAPI.agent?.deleteRegistryAgent
+        ? await window.electronAPI.agent.deleteRegistryAgent(selectedAgent)
+        : await window.electronAPI.agentPersonality.delete(selectedAgent)
       if (!result.success) {
         throw new Error(resultError(result, '后端删除失败'))
       }

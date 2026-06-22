@@ -121,7 +121,7 @@ test('agentRegistryGroup rejects unsupported lifecycle statuses before deps writ
   })
   const result = await handlers.get('agent:registry:updateStatus')?.({} as IpcMainInvokeEvent, {
     id: 'writer',
-    status: 'active',
+    status: 'archived',
   })
   assert.equal(writes, 0)
   assert.deepEqual(result, {

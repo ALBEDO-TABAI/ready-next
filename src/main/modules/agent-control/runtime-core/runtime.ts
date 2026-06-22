@@ -144,6 +144,7 @@ import { ToolGateway } from '../tools-runtime/tool-gateway'
 import { buildCapabilityRuntimeSnapshot } from '../domain-adapters/capability-runtime-snapshot'
 import { TaskProjectionRepository } from '../../repositories/task-projection-repository'
 import { AgentRegistryRepository, MAIN_AGENT_ID } from '../../repositories/agent-registry-repository'
+import { reconcileAgentIdentityAssets } from '../agents/agent-identity-assets'
 import { RunMetaRepository } from '../task-projection/run-meta-repository'
 import { appendToolCapabilityLog } from '../../tools/tool-event-log'
 import {
@@ -733,10 +734,17 @@ export class AgentControlRuntime extends EventEmitter {
     try {
       const knowledgeEnabled = isKnowledgeSystemEnabled(this.db)
       const rawDb = this.db.getRawDb?.()
-      if (knowledgeEnabled && rawDb) {
-        runStartupBeliefSync(rawDb as never, this.getBeliefCardStore(), true)
-        this.knowledgeWatcher = new KnowledgeWatcher({ db: rawDb as never, store: this.getBeliefCardStore() })
-        this.knowledgeWatcher.start()
+      if (rawDb) {
+        // Identity asset reconciliation (064 reserved-slug reassign → move agents/<old> to
+        // agents/<new>) must run regardless of the knowledge toggle: the DB id already
+        // changed in the migration, so the on-disk asset dir has to follow even when the
+        // knowledge system is off. Idempotent via agent_identity_migration.asset_reconciled_at.
+        reconcileAgentIdentityAssets(rawDb as never, this.getBeliefCardStore())
+        if (knowledgeEnabled) {
+          runStartupBeliefSync(rawDb as never, this.getBeliefCardStore(), true)
+          this.knowledgeWatcher = new KnowledgeWatcher({ db: rawDb as never, store: this.getBeliefCardStore() })
+          this.knowledgeWatcher.start()
+        }
       }
     } catch (error) {
       console.error('[runtime] knowledge truth-source wiring failed:', error)
@@ -1707,6 +1715,7 @@ export class AgentControlRuntime extends EventEmitter {
     parentTaskId?: string
     parentStepId?: string
     sessionIdOverride?: string
+    workspaceRoots?: string[]
     continuationIntent?: ContinuationIntent | null
   }): Promise<SendScopedResponse> {
     return runConfirmedSendScoped({
@@ -1803,6 +1812,7 @@ export class AgentControlRuntime extends EventEmitter {
               parentTaskId: payload.parentTaskId,
               parentStepId: payload.parentStepId,
               sessionIdOverride: payload.sessionIdOverride,
+              workspaceRoots: payload.workspaceRoots,
               continuationIntent: normalizedContinuationIntent,
               coordinators: this.getDomainAdapters(),
             },

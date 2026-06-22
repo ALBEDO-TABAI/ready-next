@@ -143,7 +143,7 @@ interface AgentRegistryRecordData {
   name: string
   charter: string | null
   personaRef: string | null
-  status: 'active' | 'retired' | 'merged'
+  status: 'active' | 'disabled' | 'retired' | 'merged'
   parentAgentId: string | null
   derivationReason: string | null
   mergedIntoAgentId: string | null
@@ -964,10 +964,11 @@ interface ElectronAgentAPI {
   expireSpecialistBlueprint: (blueprintId: string) => Promise<IPCResponse<SpecialistAgentBlueprint>>
   updateRegistryStatus: (payload: {
     id: string
-    status: 'retired' | 'merged'
+    status: 'active' | 'disabled' | 'retired' | 'merged'
     mergedIntoAgentId?: string | null
     migrateCardRelPaths?: string[]
   }) => Promise<IPCResponse<AgentRegistryRecordData>>
+  deleteRegistryAgent: (id: string) => Promise<IPCResponse<AgentRegistryRecordData>>
   listDerivationCandidates: () => Promise<IPCResponse<AgentDerivationCandidateData[]>>
   confirmDerivation: (payload: {
     candidateRelPath: string
@@ -1079,6 +1080,7 @@ interface ElectronAgentAPI {
 	      agent?: string
 	      message: string | Array<{ type: string; text?: string; base64?: string; mimeType?: string }>
 	      requestId?: string
+	      workspaceRoots?: string[]
 	      userMessage?: {
 	        id: string
 	        content: string

@@ -2,6 +2,7 @@ import {
   FRAME_PATCH_EMITTING_TOOL_NAMES,
   isFramePatchEmittingToolName,
 } from '../contracts/run-contracts'
+import { AGENT_INTERACTION_TOOL_NAMES } from '../../tools/agent-interaction-tool-defs'
 
 /**
  * Phase 3 (skill-child-loop) — tools that may emit a `contextModifier` on
@@ -202,10 +203,9 @@ export function getToolResourceTag(toolName: string): ToolResourceTag {
   // mcp client and are interactive by default (the client makes a remote
   // call per invocation, no parallelism guarantee from the server side).
   if (normalized.startsWith('mcp_')) return { domain: 'mcp', accessMode: 'interactive' }
-  // agent_interaction group — the model pauses the turn waiting for the user
-  // to answer N inline question cards. Serialized so the same session never
-  // has two ask_user_questions cards pending in parallel.
-  if (normalized === 'ask_user_questions') return { domain: 'agent_interaction', accessMode: 'interactive' }
+  // agent_interaction group — user-facing coordination tools. Serialized so
+  // the same session never has overlapping inline proposals/questions.
+  if (AGENT_INTERACTION_TOOL_NAMES.includes(normalized)) return { domain: 'agent_interaction', accessMode: 'interactive' }
   // skill_install group — the main-agent two-phase remote-install tool. Name
   // has no `skill_` prefix on purpose (so skill authorization never strips it).
   // Interactive: phase 1 does network resolve, phase 2 drives a host download +

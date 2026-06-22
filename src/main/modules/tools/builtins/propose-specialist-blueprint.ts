@@ -33,7 +33,11 @@ import {
   type ToolExecutionOutput,
 } from '../../agent-control/tools-runtime/tool-result-types'
 
-const STRING_LIST = z.array(z.string().trim().min(1).max(200)).max(8)
+const STRING_LIST_LIMIT = 8
+const STRING_LIST = z.preprocess(
+  (value) => Array.isArray(value) ? value.slice(0, STRING_LIST_LIMIT) : value,
+  z.array(z.string().trim().min(1).max(200)).max(STRING_LIST_LIMIT),
+)
 
 const KNOWLEDGE_SEED_SCHEMA = z.object({
   title: z.string().trim().min(1).max(120),

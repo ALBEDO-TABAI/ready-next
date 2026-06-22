@@ -3,6 +3,7 @@ import { Bot, Brain, CheckCircle2, ClipboardList, FileText, GitBranch, History, 
 import type {
   AgentSystemStudioAgent,
   AgentSystemStudioContentEditTargetKind,
+  AgentSystemStudioRoutingCard,
   AgentSystemStudioRoutingDisabledReason,
   AgentSystemStudioRoutingSimulation,
   AgentSystemStudioRoutingSimulationAction,
@@ -220,10 +221,63 @@ function proposalSourceLabel(source: string): string {
 
 function Chip({ children }: { children: ReactNode }) {
   return (
-    <span className="rounded-md text-[11px]" style={{ ...SETTINGS_FLAT_CHIP_STYLE, padding: '3px 7px' }}>
+    <span className="inline-flex items-center rounded-md text-[11px] leading-4" style={{ ...SETTINGS_FLAT_CHIP_STYLE, padding: '4px 10px' }}>
       {children}
     </span>
   )
+}
+
+type BlueprintStatusTone = 'ready' | 'pending' | 'adopted' | 'inactive'
+
+const BLUEPRINT_TONE_STYLE: Record<BlueprintStatusTone, { color: string; background: string; borderColor: string }> = {
+  ready: { color: 'var(--color-blue)', background: 'color-mix(in srgb, var(--color-blue) 12%, transparent)', borderColor: 'color-mix(in srgb, var(--color-blue) 30%, transparent)' },
+  pending: { color: 'var(--color-orange)', background: 'color-mix(in srgb, var(--color-orange) 13%, transparent)', borderColor: 'color-mix(in srgb, var(--color-orange) 32%, transparent)' },
+  adopted: { color: 'var(--color-green)', background: 'color-mix(in srgb, var(--color-green) 13%, transparent)', borderColor: 'color-mix(in srgb, var(--color-green) 32%, transparent)' },
+  inactive: { color: 'var(--text-light)', background: 'color-mix(in srgb, var(--surface-panel-bg) 44%, transparent)', borderColor: 'color-mix(in srgb, var(--surface-border) 24%, transparent)' },
+}
+
+const boundaryModeLabel: Record<string, string> = { allow: '允许', deny: '禁止', confirm: '需确认' }
+
+function boundaryLabel(mode: string): string {
+  return boundaryModeLabel[mode] ?? mode
+}
+
+function blueprintStatusBadge(blueprint: SpecialistAgentBlueprint): { label: string; tone: BlueprintStatusTone } {
+  if (blueprint.adoption) return { label: '已采用', tone: 'adopted' }
+  if (blueprint.status === 'confirmed') return { label: '已确认', tone: 'adopted' }
+  if (blueprint.status === 'rejected') return { label: '已拒绝', tone: 'inactive' }
+  if (blueprint.status === 'expired') return { label: '已过期', tone: 'inactive' }
+  if (blueprint.status === 'needs_clarification' || blueprint.admissionVerdict.kind === 'clarify') {
+    return { label: '需补齐信息', tone: 'pending' }
+  }
+  return { label: '待确认', tone: 'ready' }
+}
+
+function StatusBadge({ tone, children }: { tone: BlueprintStatusTone; children: ReactNode }) {
+  return (
+    <span
+      className="inline-flex shrink-0 items-center gap-1.5 rounded-md border text-[11px] font-medium leading-4"
+      style={{ ...BLUEPRINT_TONE_STYLE[tone], padding: '4px 10px' }}
+    >
+      <span className="h-1.5 w-1.5 rounded-full" style={{ background: 'currentColor' }} />
+      {children}
+    </span>
+  )
+}
+
+function RouteStateText({ card }: { card: AgentSystemStudioRoutingCard }) {
+  const label = card.disabledReason ? disabledReasonLabel[card.disabledReason] : '可用'
+  return (
+    <span className="shrink-0 text-[11px] font-medium" style={{ color: card.disabledReason ? 'var(--color-orange)' : 'var(--color-green)' }}>
+      {label}
+    </span>
+  )
+}
+
+function canApproveRoutingCard(card: AgentSystemStudioRoutingCard): boolean {
+  return card.status === 'staged'
+    && card.targetStatus === 'active'
+    && Boolean(card.triggers?.length)
 }
 
 function EmptyLine({ text }: { text: string }) {
@@ -244,7 +298,7 @@ function Section({
       className="border rounded-lg"
       style={{
         ...SETTINGS_SUBTLE_CARD_STYLE,
-        padding: '14px 16px',
+        padding: '16px',
         boxShadow: 'none',
       }}
     >
@@ -377,6 +431,8 @@ export default function AgentSystemStudio() {
   const [routingProbeResult, setRoutingProbeResult] = useState<AgentSystemStudioRoutingSimulation | null>(null)
   const [routingProbeLoading, setRoutingProbeLoading] = useState(false)
   const [routingProbeError, setRoutingProbeError] = useState<string | null>(null)
+  const [routingCardActionRelPath, setRoutingCardActionRelPath] = useState<string | null>(null)
+  const [routingCardError, setRoutingCardError] = useState<string | null>(null)
   const [contentEditDraft, setContentEditDraft] = useState<ContentEditDraft | null>(null)
   const [contentEditSaving, setContentEditSaving] = useState(false)
   const [contentEditError, setContentEditError] = useState<string | null>(null)
@@ -393,8 +449,8 @@ export default function AgentSystemStudio() {
       if (!result.data.agents.some((agent) => agent.id === selectedId)) {
         setSelectedId(result.data.agents[0]?.id || 'butler')
       }
-      if (!result.data.stagedBlueprints.some((blueprint) => blueprint.blueprintId === selectedBlueprintId)) {
-        setSelectedBlueprintId(result.data.stagedBlueprints[0]?.blueprintId ?? null)
+      if (selectedBlueprintId && !result.data.stagedBlueprints.some((blueprint) => blueprint.blueprintId === selectedBlueprintId)) {
+        setSelectedBlueprintId(null)
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -419,7 +475,9 @@ export default function AgentSystemStudio() {
   }, [selectedAgent?.id])
 
   const selectedBlueprint = useMemo(
-    () => snapshot?.stagedBlueprints.find((blueprint) => blueprint.blueprintId === selectedBlueprintId) ?? snapshot?.stagedBlueprints[0] ?? null,
+    () => selectedBlueprintId
+      ? snapshot?.stagedBlueprints.find((blueprint) => blueprint.blueprintId === selectedBlueprintId) ?? null
+      : null,
     [snapshot, selectedBlueprintId],
   )
 
@@ -680,6 +738,24 @@ export default function AgentSystemStudio() {
     }
   }
 
+  const handleRoutingCardTransition = async (card: AgentSystemStudioRoutingCard, action: 'approve' | 'reject') => {
+    if (!window.electronAPI?.memoryCards?.transition) return
+    setRoutingCardActionRelPath(card.relPath)
+    setRoutingCardError(null)
+    try {
+      const result = await window.electronAPI.memoryCards.transition({
+        relPath: card.relPath,
+        action,
+      })
+      if (!result.success) throw new Error(result.error || '路由卡更新失败')
+      await load()
+    } catch (err) {
+      setRoutingCardError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setRoutingCardActionRelPath(null)
+    }
+  }
+
   const counts = useMemo(() => {
     const agents = snapshot?.agents ?? []
     return {
@@ -900,16 +976,49 @@ export default function AgentSystemStudio() {
 
                 <Section icon={<Route className="h-4 w-4" />} title="路由">
                   {selectedAgent.routingCards.length === 0 && <EmptyLine text="没有指向它的路由卡。" />}
+                  {routingCardError && (
+                    <div className="mb-3 text-[12px]" style={{ color: 'var(--color-red)' }}>{routingCardError}</div>
+                  )}
                   <div className="flex flex-col gap-2">
                     {selectedAgent.routingCards.map((card) => (
                       <div key={card.relPath} className="min-w-0 border-b pb-2 last:border-b-0 last:pb-0" style={{ borderColor: 'color-mix(in srgb, var(--surface-border) 12%, transparent)' }}>
                         <div className="flex items-center justify-between gap-2">
                           <div className="truncate text-[12px] font-medium" style={{ color: 'var(--text-title)' }}>{card.title}</div>
-                          <Chip>{card.disabledReason ? disabledReasonLabel[card.disabledReason] : '可用'}</Chip>
+                          <RouteStateText card={card} />
                         </div>
                         <div className="mt-1 truncate text-[11px]" style={{ color: 'var(--text-light)' }}>
                           {(card.triggers ?? []).join(' / ') || '无触发词'}
                         </div>
+                        {card.status === 'staged' && (
+                          <div className="mt-2 flex flex-wrap items-center gap-2">
+                            {canApproveRoutingCard(card) ? (
+                              <button
+                                type="button"
+                                onClick={() => void handleRoutingCardTransition(card, 'approve')}
+                                disabled={routingCardActionRelPath === card.relPath}
+                                className="border rounded-lg inline-flex items-center gap-1.5 text-[11px] disabled:opacity-50"
+                                style={{ ...SETTINGS_FLAT_BUTTON_STYLE, padding: '6px 8px' }}
+                              >
+                                <CheckCircle2 className="h-3.5 w-3.5" />
+                                启用路由
+                              </button>
+                            ) : (
+                              <span className="text-[11px]" style={{ color: 'var(--text-light)' }}>
+                                目标不可用或缺触发词，不能启用。
+                              </span>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => void handleRoutingCardTransition(card, 'reject')}
+                              disabled={routingCardActionRelPath === card.relPath}
+                              className="border rounded-lg inline-flex items-center gap-1.5 text-[11px] disabled:opacity-50"
+                              style={{ ...SETTINGS_FLAT_BUTTON_STYLE, padding: '6px 8px' }}
+                            >
+                              <XCircle className="h-3.5 w-3.5" />
+                              拒绝
+                            </button>
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -1064,80 +1173,81 @@ export default function AgentSystemStudio() {
             )}
 
             <Section icon={<GitBranch className="h-4 w-4" />} title="候选与蓝图">
-              <div className="grid gap-4 md:grid-cols-2">
-                <div>
-                  <div className="mb-2 text-[12px] font-medium" style={{ color: 'var(--text-title)' }}>涌现候选</div>
-                  {snapshot.derivationCandidates.length === 0 && <EmptyLine text="暂无候选。" />}
+              <div className="mb-2 text-[12px] font-medium" style={{ color: 'var(--text-title)' }}>涌现候选</div>
+              {snapshot.derivationCandidates.length === 0 ? (
+                <EmptyLine text="暂无候选。" />
+              ) : (
+                <div className="flex flex-col gap-2">
                   {snapshot.derivationCandidates.map((candidate) => (
-                    <div key={candidate.candidateRelPath} className="mb-2 min-w-0">
+                    <div key={candidate.candidateRelPath} className="min-w-0">
                       <div className="truncate text-[12px]" style={{ color: 'var(--text-title)' }}>{candidate.defaultName}</div>
                       <div className="truncate text-[11px]" style={{ color: 'var(--text-light)' }}>{candidate.candidateRelPath}</div>
                     </div>
                   ))}
                 </div>
-                <div>
-                  <div className="mb-2 text-[12px] font-medium" style={{ color: 'var(--text-title)' }}>蓝图草案</div>
-                  {snapshot.stagedBlueprints.length === 0 && <EmptyLine text="暂无蓝图草案。" />}
-                  {selectedBlueprint && blueprintDraft && (
-                    <div className="grid gap-3 xl:grid-cols-[210px_minmax(0,1fr)]">
-                      <div className="flex flex-col gap-2">
-                        {snapshot.stagedBlueprints.map((blueprint) => (
-                          <button
-                            type="button"
-                            key={blueprint.blueprintId}
-                            onClick={() => setSelectedBlueprintId(blueprint.blueprintId)}
-                            className="min-w-0 rounded-lg border text-left transition-[border-color,background-color]"
-                            style={{
-                              borderColor: blueprint.blueprintId === selectedBlueprint.blueprintId
-                                ? 'color-mix(in srgb, var(--color-blue) 48%, transparent)'
-                                : 'color-mix(in srgb, var(--surface-border) 14%, transparent)',
-                              padding: '9px 10px',
-                              background: blueprint.blueprintId === selectedBlueprint.blueprintId
-                                ? 'color-mix(in srgb, var(--color-blue) 9%, transparent)'
-                                : 'color-mix(in srgb, var(--surface-panel-bg) 42%, transparent)',
-                            }}
-                          >
+              )}
+
+              <div className="mt-6 mb-2 text-[12px] font-medium" style={{ color: 'var(--text-title)' }}>蓝图草案</div>
+              {snapshot.stagedBlueprints.length === 0 && <EmptyLine text="暂无蓝图草案。" />}
+              {snapshot.stagedBlueprints.length > 0 && (
+                <div className="flex flex-col gap-3">
+                  <div className="flex flex-wrap items-start gap-2">
+                    {snapshot.stagedBlueprints.map((blueprint) => {
+                      const badge = blueprintStatusBadge(blueprint)
+                      const active = blueprint.blueprintId === selectedBlueprintId
+                      return (
+                        <button
+                          type="button"
+                          key={blueprint.blueprintId}
+                          onClick={() => setSelectedBlueprintId(active ? null : blueprint.blueprintId)}
+                          className="min-w-[196px] max-w-[280px] flex-1 rounded-lg border text-left transition-[border-color,background-color]"
+                          style={{
+                            borderColor: active
+                              ? 'color-mix(in srgb, var(--color-blue) 48%, transparent)'
+                              : 'color-mix(in srgb, var(--surface-border) 14%, transparent)',
+                            padding: '12px',
+                            background: active
+                              ? 'color-mix(in srgb, var(--color-blue) 9%, transparent)'
+                              : 'color-mix(in srgb, var(--surface-panel-bg) 42%, transparent)',
+                          }}
+                        >
+                          <div className="flex items-center justify-between gap-2">
                             <div className="truncate text-[12px] font-medium" style={{ color: 'var(--text-title)' }}>
                               {blueprint.displayName}
                             </div>
-                            <div className="mt-1 truncate text-[11px]" style={{ color: 'var(--text-light)' }}>
-                              {blueprint.blueprintId}
-                            </div>
-                            <div className="mt-2 flex flex-wrap gap-1.5">
-                              <Chip>{blueprint.status === 'needs_clarification' ? '需补齐信息' : blueprint.status}</Chip>
-                              <Chip>{blueprint.admissionVerdict.kind}</Chip>
-                              <Chip>
-                                {blueprint.qualityChecks.length === 0
-                                  ? '质量待评估'
-                                  : blueprint.qualityChecks.some((check) => check.pass === false && check.blocking !== false)
-                                    ? '质量需修正'
-                                    : '质量通过'}
-                              </Chip>
-                              {blueprint.status === 'needs_clarification' && <Chip>先补齐信息</Chip>}
-                            </div>
-                            {blueprint.admissionVerdict.kind === 'clarify' && (() => {
-                              const clarification = buildSpecialistBlueprintClarificationContract(blueprint, blueprint.admissionVerdict.missing)
-                              return (
-                                <div className="mt-2 text-[11px] leading-5" style={{ color: 'var(--text-muted)' }}>
-                                  <div className="truncate">待补齐：{blueprint.admissionVerdict.missing.join(' / ')}</div>
-                                  {clarification.questions[0] && (
-                                    <div className="truncate">下一步：{clarification.questions[0].question}</div>
-                                  )}
-                                </div>
-                              )
-                            })()}
-                          </button>
-                        ))}
-                      </div>
+                            <StatusBadge tone={badge.tone}>{badge.label}</StatusBadge>
+                          </div>
+                          <div className="mt-1 truncate text-[11px]" style={{ color: 'var(--text-light)' }}>
+                            {blueprint.blueprintId}
+                          </div>
+                          {blueprint.admissionVerdict.kind === 'clarify' && (() => {
+                            const clarification = buildSpecialistBlueprintClarificationContract(blueprint, blueprint.admissionVerdict.missing)
+                            return (
+                              <div className="mt-2 text-[11px] leading-5" style={{ color: 'var(--text-muted)' }}>
+                                <div className="truncate">待补齐：{blueprint.admissionVerdict.missing.join(' / ')}</div>
+                                {clarification.questions[0] && (
+                                  <div className="truncate">下一步：{clarification.questions[0].question}</div>
+                                )}
+                                <div className="mt-1" style={{ color: 'var(--color-orange)' }}>先补齐信息后可确认</div>
+                              </div>
+                            )
+                          })()}
+	                        </button>
+	                      )
+	                    })}
+	                  </div>
 
-                      <div
-                        className="min-w-0 rounded-lg border"
-                        style={{
-                          borderColor: 'color-mix(in srgb, var(--surface-border) 14%, transparent)',
-                          padding: '12px',
-                          background: 'color-mix(in srgb, var(--surface-panel-bg) 42%, transparent)',
-                        }}
-                      >
+                  {!selectedBlueprint && <EmptyLine text="点开蓝图查看详情、编辑或确认创建。" />}
+
+                  {selectedBlueprint && blueprintDraft && (
+                    <div
+	                    className="min-w-0 rounded-lg border"
+	                    style={{
+	                      borderColor: 'color-mix(in srgb, var(--surface-border) 14%, transparent)',
+                      padding: '16px',
+                      background: 'color-mix(in srgb, var(--surface-panel-bg) 42%, transparent)',
+	                    }}
+	                  >
                         <div className="flex items-start justify-between gap-3">
                           <div className="min-w-0">
                             <div className="truncate text-[12px] font-medium" style={{ color: 'var(--text-title)' }}>
@@ -1147,13 +1257,17 @@ export default function AgentSystemStudio() {
                               {selectedBlueprint.blueprintId} · {selectedBlueprint.intendedDomain}
                             </div>
                           </div>
-                          <Chip>{selectedBlueprint.status === 'needs_clarification' ? '需补齐信息' : selectedBlueprint.status}</Chip>
+                          <StatusBadge tone={blueprintStatusBadge(selectedBlueprint).tone}>
+                            {blueprintStatusBadge(selectedBlueprint).label}
+                          </StatusBadge>
                         </div>
 
-                        <div className="mt-3 flex flex-wrap gap-1.5">
-                          <Chip>{selectedBlueprint.admissionVerdict.kind}</Chip>
-                          {selectedBlueprint.routingTriggers.map((trigger) => <Chip key={trigger}>{trigger}</Chip>)}
-                        </div>
+                        {selectedBlueprint.routingTriggers.length > 0 && (
+                          <div className="mt-4 flex flex-wrap items-center gap-2">
+                            <span className="text-[11px]" style={{ color: 'var(--text-light)' }}>触发词</span>
+                            {selectedBlueprint.routingTriggers.map((trigger) => <Chip key={trigger}>{trigger}</Chip>)}
+                          </div>
+                        )}
 
                         {selectedBlueprint.admissionVerdict.kind === 'clarify' && (
                           <div className="mt-3 text-[11px] leading-5" style={{ color: 'var(--text-muted)' }}>
@@ -1167,14 +1281,14 @@ export default function AgentSystemStudio() {
                         )}
 
                         <div
-                          className="mt-3 rounded-lg border p-3 text-[11px] leading-5"
+                          className="mt-4 rounded-lg border p-3 text-[11px] leading-5"
                           style={{
                             borderColor: 'color-mix(in srgb, var(--surface-border) 14%, transparent)',
                             background: 'color-mix(in srgb, var(--surface-panel-bg) 34%, transparent)',
                             color: 'var(--text-muted)',
                           }}
                         >
-                          <div className="mb-2 flex flex-wrap gap-1.5">
+                          <div className="mb-3 flex flex-wrap gap-2">
                             <Chip>{selectedBlueprintHasQualityPass ? '质量通过' : '质量需修正'}</Chip>
                             <Chip>{selectedBlueprint.foundationDocs.foundationText ? 'FOUNDATION 已预览' : 'FOUNDATION 待生成'}</Chip>
                             <Chip>
@@ -1186,10 +1300,10 @@ export default function AgentSystemStudio() {
                                     ? '语义需修正'
                                     : '语义未校验'}
                             </Chip>
-                            <Chip>浏览器 {selectedBlueprint.toolBoundaries.browser.mode}</Chip>
-                            <Chip>写入 {selectedBlueprint.toolBoundaries.write.mode}</Chip>
-                            <Chip>外发 {selectedBlueprint.toolBoundaries.externalSend.mode}</Chip>
-                            <Chip>长期记忆 {selectedBlueprint.toolBoundaries.longMemory.mode}</Chip>
+                            <Chip>浏览器 {boundaryLabel(selectedBlueprint.toolBoundaries.browser.mode)}</Chip>
+                            <Chip>写入 {boundaryLabel(selectedBlueprint.toolBoundaries.write.mode)}</Chip>
+                            <Chip>外发 {boundaryLabel(selectedBlueprint.toolBoundaries.externalSend.mode)}</Chip>
+                            <Chip>长期记忆 {boundaryLabel(selectedBlueprint.toolBoundaries.longMemory.mode)}</Chip>
                           </div>
                           {selectedBlueprintFailedQualityChecks.length > 0 ? (
                             <div>
@@ -1226,7 +1340,7 @@ export default function AgentSystemStudio() {
                         </div>
 
                         <div
-                          className="mt-3 rounded-lg border p-3"
+                          className="mt-4 rounded-lg border p-3"
                           style={{
                             borderColor: 'color-mix(in srgb, var(--surface-border) 14%, transparent)',
                             background: 'color-mix(in srgb, var(--surface-panel-bg) 34%, transparent)',
@@ -1292,7 +1406,7 @@ export default function AgentSystemStudio() {
                           <Field label="维护生命周期" value={blueprintDraft.lifecycleNotes} disabled={!selectedBlueprintCanEdit} multiline rows={4} onChange={(lifecycleNotes) => updateBlueprintDraft({ lifecycleNotes })} />
                         </div>
 
-                        <div className="mt-3">
+                        <div className="mt-4">
                           <Field label="RULES" value={blueprintDraft.seedRulesText} disabled={!selectedBlueprintCanEdit} multiline rows={7} onChange={(seedRulesText) => updateBlueprintDraft({ seedRulesText })} />
                         </div>
 
@@ -1455,26 +1569,58 @@ export default function AgentSystemStudio() {
                               拒绝
                             </button>
                           )}
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
+	                        </div>
+	                    </div>
+	                  )}
+	                </div>
+	              )}
             </Section>
 
             <Section icon={<Route className="h-4 w-4" />} title="全局路由清单">
               {snapshot.routingCards.length === 0 && <EmptyLine text="暂无路由卡。" />}
+              {routingCardError && (
+                <div className="mb-3 text-[12px]" style={{ color: 'var(--color-red)' }}>{routingCardError}</div>
+              )}
               <div className="flex flex-col gap-2">
                 {snapshot.routingCards.map((card) => (
                   <div key={card.relPath} className="min-w-0 border-b pb-2 last:border-b-0 last:pb-0" style={{ borderColor: 'color-mix(in srgb, var(--surface-border) 12%, transparent)' }}>
                     <div className="flex items-center justify-between gap-2">
                       <div className="truncate text-[12px] font-medium" style={{ color: 'var(--text-title)' }}>{card.title}</div>
-                      <Chip>{card.disabledReason ? disabledReasonLabel[card.disabledReason] : '可用'}</Chip>
+                      <RouteStateText card={card} />
                     </div>
                     <div className="mt-1 truncate text-[11px]" style={{ color: 'var(--text-light)' }}>
                       {card.targetAgentId} · {(card.triggers ?? []).join(' / ') || '无触发词'}
                     </div>
+                    {card.status === 'staged' && (
+                      <div className="mt-2 flex flex-wrap items-center gap-2">
+                        {canApproveRoutingCard(card) ? (
+                          <button
+                            type="button"
+                            onClick={() => void handleRoutingCardTransition(card, 'approve')}
+                            disabled={routingCardActionRelPath === card.relPath}
+                            className="border rounded-lg inline-flex items-center gap-1.5 text-[11px] disabled:opacity-50"
+                            style={{ ...SETTINGS_FLAT_BUTTON_STYLE, padding: '6px 8px' }}
+                          >
+                            <CheckCircle2 className="h-3.5 w-3.5" />
+                            启用路由
+                          </button>
+                        ) : (
+                          <span className="text-[11px]" style={{ color: 'var(--text-light)' }}>
+                            目标不可用或缺触发词，不能启用。
+                          </span>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => void handleRoutingCardTransition(card, 'reject')}
+                          disabled={routingCardActionRelPath === card.relPath}
+                          className="border rounded-lg inline-flex items-center gap-1.5 text-[11px] disabled:opacity-50"
+                          style={{ ...SETTINGS_FLAT_BUTTON_STYLE, padding: '6px 8px' }}
+                        >
+                          <XCircle className="h-3.5 w-3.5" />
+                          拒绝
+                        </button>
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>

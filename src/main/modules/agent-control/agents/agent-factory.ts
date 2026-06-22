@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'node:f
 import { basename, dirname, join, resolve, sep } from 'node:path'
 import { MAIN_AGENT_ID, type AgentRegistryRecord } from '../../repositories/agent-registry-repository'
 import type { SpecialistAgentBlueprint, SpecialistBlueprintKnowledgeSeed } from '../../../../shared/agent-specialist-blueprint'
+import { isReservedAgentSlug } from '../../../../shared/agent-identity'
 import {
   BeliefCardStore,
   isAllowedCardPath,
@@ -26,6 +27,7 @@ export interface AgentFactoryRegistry {
     id: string
     name: string
     charter?: string | null
+    personalityText?: string | null
     personaRef?: string | null
     parentAgentId?: string | null
     derivationReason?: string | null
@@ -108,6 +110,9 @@ function assertDerivedAgentId(id: string): void {
   if (!DERIVED_AGENT_ID.test(id)) {
     throw new Error('[agent-factory] specialist id must be a lowercase slug')
   }
+  if (isReservedAgentSlug(id)) {
+    throw new Error('[agent-factory] specialist id is reserved')
+  }
 }
 
 function absInside(root: string, relPath: string): string {
@@ -142,6 +147,26 @@ function assertEligibleCandidate(card: BeliefCard, relPath: string): void {
   if (countUniqueEvidenceDates(card.body) < 3) {
     throw new Error(`[agent-factory] candidate card needs at least 3 evidence dates: ${relPath}`)
   }
+}
+
+function renderSpecialistPersonalityTextFromBlueprint(blueprint: SpecialistAgentBlueprint): string {
+  return [
+    `# ${blueprint.displayName}`,
+    '',
+    blueprint.rolePersona,
+    '',
+    `职责边界：${blueprint.charter}`,
+    '',
+    `与主 agent 分工：${blueprint.mainVsSpecialistSplit}`,
+    '',
+    '适合处理：',
+    ...blueprint.recurringTasks.map((task) => `- ${task}`),
+    '',
+    '不负责：',
+    ...blueprint.nonGoals.map((goal) => `- ${goal}`),
+    '',
+    '工作方式：保持引用和证据链清楚；遇到外发、写入长期资产、更新长期记忆或职责边界不清时，先等待用户确认。',
+  ].join('\n')
 }
 
 function migrateCard(store: BeliefCardStore, agentId: string, relPath: string): { from: string; to: string } {
@@ -505,6 +530,7 @@ export function deriveSpecialistAgentFromBlueprint(
       id: plan.specialistId,
       name: plan.name,
       charter: plan.charter,
+      personalityText: renderSpecialistPersonalityTextFromBlueprint(input.blueprint),
       parentAgentId: plan.parentAgentId,
       derivationReason: `blueprint:${plan.blueprintId}`,
     })

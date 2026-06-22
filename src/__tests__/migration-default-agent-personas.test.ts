@@ -2,8 +2,8 @@ import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
 import test from 'node:test'
 
-import { DEFAULT_AGENT_PERSONAS } from '../main/modules/claude-bridge/default-personas'
 import { runMigrations, type MigrationDatabase } from '../main/modules/migrations'
+import { BUILTIN_AGENT_META } from '../shared/agent-identity'
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 
 type SqliteModule = new (path: string, options?: { readonly?: boolean }) => {
@@ -31,7 +31,7 @@ function openInMemory(): MigrationDatabase {
   return new Sqlite(':memory:') as unknown as MigrationDatabase
 }
 
-test('migration 045 seeds the four built-in agent personas', (t) => {
+test('migrations seed and upgrade the four built-in agent personas', (t) => {
   if (skipIfSqliteUnavailable(t, 'default agent persona seed')) return
   if (!loadSqlite()) return
   const db = openInMemory()
@@ -54,11 +54,12 @@ test('migration 045 seeds the four built-in agent personas', (t) => {
       }>()
 
     assert.equal(rows.length, 4)
-    for (const row of rows) {
-      assert.equal(row.personality_text, DEFAULT_AGENT_PERSONAS[row.agent_name])
-      assert.ok(row.display_name)
-      assert.ok(JSON.parse(row.meta_json).emoji)
-    }
+    const byName = new Map(rows.map((row) => [row.agent_name, row]))
+    assert.equal(byName.get('butler')?.display_name, BUILTIN_AGENT_META.butler.displayName)
+    assert.equal(byName.get('copywriter')?.display_name, BUILTIN_AGENT_META.copywriter.displayName)
+    assert.equal(byName.get('video-editor')?.display_name, BUILTIN_AGENT_META['video-editor'].displayName)
+    assert.equal(byName.get('analyst')?.display_name, BUILTIN_AGENT_META.analyst.displayName)
+    for (const row of rows) assert.ok(JSON.parse(row.meta_json).emoji)
   } finally {
     ;(db as unknown as { close?: () => void }).close?.()
   }

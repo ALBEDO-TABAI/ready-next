@@ -8,6 +8,15 @@
  */
 
 import { DEFAULT_AGENT_PERSONAS } from './claude-bridge/default-personas'
+import {
+  BUILTIN_AGENT_IDS,
+  BUILTIN_AGENT_META,
+  type BuiltinAgentId,
+  defaultAgentDisplayName,
+  isReservedAgentSlug,
+  normalizeAgentLifecycleStatus,
+  normalizeAgentSlug,
+} from '../../shared/agent-identity'
 
 // Minimal interface compatible with DatabaseConnection from database.ts.
 // Defined locally to avoid circular imports.
@@ -30,6 +39,96 @@ const DEFAULT_AGENT_PERSONA_SEEDS = [
   { agentName: 'video-editor', displayName: '剪辑', emoji: '🎬' },
   { agentName: 'analyst', displayName: '分析', emoji: '📊' },
 ] as const
+
+const AGENT_IDENTITY_PERSONAS: Record<BuiltinAgentId, string> = {
+  butler: DEFAULT_AGENT_PERSONAS.butler,
+  copywriter: DEFAULT_AGENT_PERSONAS.copywriter,
+  'video-editor': [
+    '# 美术 Agent (Visual Art)',
+    '',
+    '## 角色定位',
+    '你是 Ready 工作台里的视觉与美术顾问，负责画面分析、风格判断、构图色彩建议和视觉方案整理。',
+    '',
+    '## 核心能力',
+    '- **画面分析**: 判断构图、色彩、光线、层次、主体关系和视觉重心',
+    '- **风格建议**: 把参考图、品牌方向和场景需求转成可执行的视觉语言',
+    '- **素材判断**: 对图片、视频帧、视觉参考做筛选、归纳和改进建议',
+    '- **美术执行提示**: 输出适合设计、拍摄或 AI 生成的画面描述与注意事项',
+    '',
+    '## 行为准则',
+    '- 优先说清楚画面问题、判断依据和下一步可执行调整',
+    '- 不把审美判断说成绝对事实；必要时给出多个方向供用户选择',
+    '- 涉及真实图片、品牌资产或用户素材时，尊重原始限制和用户目标',
+  ].join('\n'),
+  analyst: [
+    '# 智识 Agent (Knowledge)',
+    '',
+    '## 角色定位',
+    '你是 Ready 工作台里的学习、研究与知识积累助手，负责把材料读透、归纳结构、抽取洞察并沉淀可复用知识。',
+    '',
+    '## 核心能力',
+    '- **学习整理**: 将书籍、文章、视频、网页和笔记整理成清晰结构',
+    '- **研究分析**: 对概念、论点、证据和背景做可追溯的分析判断',
+    '- **知识沉淀**: 区分事实、观点、推测和待验证问题，方便后续复用',
+    '- **问题拆解**: 把复杂问题拆成可查证、可推进、可复盘的子问题',
+    '',
+    '## 行为准则',
+    '- 先复述任务目标和资料边界，再给出结论',
+    '- 重要判断尽量说明依据；不确定时明确标注不确定',
+    '- 输出以结构清楚、便于后续继续研究为优先',
+  ].join('\n'),
+}
+
+interface MigrationAgentRow {
+  id: string
+  name: string
+  charter: string | null
+  persona_ref: string | null
+  status: string
+  parent_agent_id?: string | null
+  derivation_reason?: string | null
+  merged_into_agent_id?: string | null
+  created_at: string
+}
+
+interface MigrationPersonalityRow {
+  agent_name: string
+  display_name: string | null
+  personality_text: string
+  meta_json: string | null
+}
+
+function migrationNowIso(): string {
+  return new Date().toISOString()
+}
+
+function migrationNowMs(): number {
+  return Date.now()
+}
+
+function generatedPersonalityText(agentId: string, displayName: string, charter: string | null): string {
+  return [
+    `# ${displayName}`,
+    '',
+    '你是 Ready 工作台中的一个完整 Agent。',
+    charter ? `职责范围：${charter}` : '请围绕自己的职责范围稳定协助用户完成任务。',
+    '请用清晰、稳定、可复盘的方式工作；遇到边界不清时先向用户确认。',
+  ].join('\n')
+}
+
+function nextAvailableAgentSlug(existingIds: Set<string>, preferred: string, fallbackBase: string): string {
+  const normalizedPreferred = normalizeAgentSlug(preferred)
+  const normalizedFallback = normalizeAgentSlug(fallbackBase)
+  const base = normalizedPreferred && !isReservedAgentSlug(normalizedPreferred)
+    ? normalizedPreferred
+    : `${normalizedFallback || 'agent'}-custom`
+  if (!existingIds.has(base) && !isReservedAgentSlug(base)) return base
+  for (let index = 2; index < 1000; index += 1) {
+    const candidate = `${base}-${index}`
+    if (!existingIds.has(candidate) && !isReservedAgentSlug(candidate)) return candidate
+  }
+  return `${base}-${Date.now()}`
+}
 
 const migrations: Migration[] = [
   // ------------------------------------------------------------------ 001
@@ -2410,6 +2509,215 @@ const migrations: Migration[] = [
         CREATE INDEX IF NOT EXISTS idx_session_recall_agent
         ON session_recall_metadata(agent, channel_key, updated_at DESC)
       `)
+    }
+  },
+  {
+    // 2026-06-22 — Agent identity unification. Registry id, personality
+    // agent_name, scope.agent, and ownerAgentId all share one slug namespace.
+    // Legacy "retired" rows normalize to "disabled"; chat_conversations.agent
+    // is intentionally never rewritten.
+    name: '064_agent_identity_unification',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS agent_identity_migration (
+          id TEXT PRIMARY KEY,
+          kind TEXT NOT NULL,
+          old_agent_id TEXT,
+          new_agent_id TEXT,
+          details_json TEXT NOT NULL,
+          asset_reconciled_at TEXT,
+          created_at TEXT NOT NULL
+        )
+      `)
+
+      const now = migrationNowIso()
+      const nowMs = migrationNowMs()
+
+      const selectAgents = () => db.prepare(`
+        SELECT id, name, charter, persona_ref, status, parent_agent_id, derivation_reason, merged_into_agent_id, created_at
+        FROM agents
+      `).all<MigrationAgentRow>()
+      const selectPersonalities = () => db.prepare(`
+        SELECT agent_name, display_name, personality_text, meta_json
+        FROM agent_personalities
+      `).all<MigrationPersonalityRow>()
+
+      db.exec("UPDATE agents SET status = 'disabled' WHERE status = 'retired'")
+
+      let agentRows = selectAgents()
+      let existingIds = new Set(agentRows.map((row) => row.id))
+      const personalitiesByName = new Map(selectPersonalities().map((row) => [row.agent_name, row]))
+
+      for (const builtinId of BUILTIN_AGENT_IDS) {
+        const builtin = BUILTIN_AGENT_META[builtinId]
+        const current = agentRows.find((row) => row.id === builtinId)
+        const currentPersonality = personalitiesByName.get(builtinId)
+        const isDerivedConflict = Boolean(
+          current
+          && builtinId !== 'butler'
+          && (
+            current.parent_agent_id
+            || current.derivation_reason
+            || (current.status !== 'active' && current.name !== builtin.displayName)
+          )
+        )
+
+        if (current && isDerivedConflict) {
+          const reassignedId = nextAvailableAgentSlug(existingIds, current.name, builtinId)
+          existingIds.add(reassignedId)
+          db.prepare(`
+            UPDATE agents
+            SET id = ?, status = ?, persona_ref = ?
+            WHERE id = ?
+          `).run(
+            reassignedId,
+            normalizeAgentLifecycleStatus(current.status),
+            reassignedId,
+            builtinId,
+          )
+          db.prepare('UPDATE task_projections SET owner_agent_id = ? WHERE owner_agent_id = ?')
+            .run(reassignedId, builtinId)
+          db.prepare('UPDATE specialist_content_edit_proposals SET agent_id = ? WHERE agent_id = ?')
+            .run(reassignedId, builtinId)
+          db.prepare('UPDATE specialist_blueprints SET specialist_id = ? WHERE specialist_id = ?')
+            .run(reassignedId, builtinId)
+          db.prepare(`
+            UPDATE specialist_blueprints
+            SET content_json = replace(
+              replace(
+                replace(content_json, ?, ?),
+                ?, ?
+              ),
+              ?, ?
+            )
+          `).run(
+            `"specialistId":"${builtinId}"`,
+            `"specialistId":"${reassignedId}"`,
+            `"createdAgentId":"${builtinId}"`,
+            `"createdAgentId":"${reassignedId}"`,
+            `"targetAgentId":"${builtinId}"`,
+            `"targetAgentId":"${reassignedId}"`,
+          )
+          db.prepare(`
+            INSERT OR IGNORE INTO agent_identity_migration (
+              id, kind, old_agent_id, new_agent_id, details_json, asset_reconciled_at, created_at
+            ) VALUES (?, ?, ?, ?, ?, NULL, ?)
+          `).run(
+            `reassign-${builtinId}-${reassignedId}`,
+            'reserved_slug_reassigned',
+            builtinId,
+            reassignedId,
+            JSON.stringify({
+              oldName: current.name,
+              oldStatus: current.status,
+              parentAgentId: current.parent_agent_id ?? null,
+              derivationReason: current.derivation_reason ?? null,
+            }),
+            now,
+          )
+        }
+
+        if (!currentPersonality) {
+          db.prepare(`
+            INSERT INTO agent_personalities (
+              id, agent_name, display_name, personality_text, tone, meta_json, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          `).run(
+            `default-persona-${builtinId}`,
+            builtinId,
+            builtin.displayName,
+            AGENT_IDENTITY_PERSONAS[builtinId],
+            null,
+            JSON.stringify({ emoji: builtin.emoji }),
+            nowMs,
+            nowMs,
+          )
+        } else {
+          const previousDefault = DEFAULT_AGENT_PERSONAS[builtinId]
+          const shouldRefreshText = currentPersonality.personality_text === previousDefault
+          db.prepare(`
+            UPDATE agent_personalities
+            SET display_name = ?,
+                personality_text = CASE WHEN ? THEN ? ELSE personality_text END,
+                meta_json = ?,
+                updated_at = ?
+            WHERE agent_name = ?
+          `).run(
+            builtin.displayName,
+            shouldRefreshText ? 1 : 0,
+            AGENT_IDENTITY_PERSONAS[builtinId],
+            JSON.stringify({ emoji: builtin.emoji }),
+            nowMs,
+            builtinId,
+          )
+        }
+
+        db.prepare(`
+          INSERT INTO agents (id, name, charter, persona_ref, status, parent_agent_id, derivation_reason, merged_into_agent_id, created_at)
+          VALUES (?, ?, ?, ?, 'active', NULL, NULL, NULL, ?)
+          ON CONFLICT(id) DO UPDATE SET
+            name = excluded.name,
+            charter = COALESCE(agents.charter, excluded.charter),
+            persona_ref = excluded.persona_ref,
+            status = 'active'
+        `).run(
+          builtinId,
+          builtin.displayName,
+          builtin.charter,
+          builtinId,
+          now,
+        )
+
+        agentRows = selectAgents()
+        existingIds = new Set(agentRows.map((row) => row.id))
+      }
+
+      const agentsById = new Map(selectAgents().map((row) => [row.id, row]))
+      const personalities = selectPersonalities()
+
+      for (const personality of personalities) {
+        if (agentsById.has(personality.agent_name)) continue
+        const displayName = personality.display_name || defaultAgentDisplayName(personality.agent_name)
+        db.prepare(`
+          INSERT INTO agents (id, name, charter, persona_ref, status, parent_agent_id, derivation_reason, merged_into_agent_id, created_at)
+          VALUES (?, ?, ?, ?, 'active', NULL, ?, NULL, ?)
+        `).run(
+          personality.agent_name,
+          displayName,
+          `用户创建的 ${displayName} agent`,
+          personality.agent_name,
+          'personality-backfill',
+          now,
+        )
+      }
+
+      const personalityNames = new Set(selectPersonalities().map((row) => row.agent_name))
+      for (const agent of selectAgents()) {
+        if (personalityNames.has(agent.id)) continue
+        db.prepare(`
+          INSERT INTO agent_personalities (
+            id, agent_name, display_name, personality_text, tone, meta_json, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(
+          `personality-${agent.id}`,
+          agent.id,
+          agent.name,
+          generatedPersonalityText(agent.id, agent.name, agent.charter),
+          null,
+          JSON.stringify({ emoji: defaultAgentDisplayName(agent.id) === agent.name ? BUILTIN_AGENT_META[agent.id as BuiltinAgentId]?.emoji ?? '🤖' : '🤖' }),
+          nowMs,
+          nowMs,
+        )
+      }
+
+      db.exec(`
+        UPDATE agents
+        SET persona_ref = id
+        WHERE persona_ref IS NULL OR persona_ref = '' OR persona_ref NOT IN (
+          SELECT agent_name FROM agent_personalities
+        )
+      `)
+      db.exec("UPDATE agents SET status = 'disabled' WHERE status = 'retired'")
     }
   }
 ]

@@ -134,6 +134,9 @@ function fakeAgentsDb() {
           all: () => [], get: () => undefined,
         }
       }
+      if (normalized.startsWith('INSERT OR IGNORE INTO agent_personalities')) {
+        return { run: () => undefined, all: () => [], get: () => undefined }
+      }
       if (normalized.startsWith('SELECT') && normalized.includes('WHERE id = ?')) {
         return { get: <R>(id: unknown) => rows.get(String(id)) as R | undefined, run: () => undefined, all: () => [] }
       }

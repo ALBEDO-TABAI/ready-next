@@ -25,6 +25,12 @@ function installPersonalityListMock(list: () => Promise<unknown>): void {
   }
 }
 
+function installRegistryListMock(listRegistry: () => Promise<unknown>): void {
+  ;(globalThis as any).window.electronAPI = {
+    agent: { listRegistry },
+  }
+}
+
 describe('useAgent personality switcher contract', () => {
   beforeEach(() => {
     resetStore()
@@ -68,6 +74,27 @@ describe('useAgent personality switcher contract', () => {
     assert.equal(state.agents[1].avatar, '🤖')
     assert.equal(state.agents[1].selected, true)
     assert.equal(state.currentAgent, 'analyst')
+  })
+
+  it('reloadAgents prefers active registry agents over standalone personalities', async () => {
+    useAgent.setState({ currentAgent: 'disabled-writer' })
+    installRegistryListMock(async () => ({
+      success: true,
+      data: [
+        { id: 'butler', name: 'Ready', status: 'active' },
+        { id: 'campaign-writer', name: '营销文案', status: 'active' },
+        { id: 'disabled-writer', name: '停用文案', status: 'disabled' },
+        { id: 'merged-writer', name: '已合并文案', status: 'merged' },
+      ],
+    }))
+
+    await useAgent.getState().reloadAgents()
+
+    const state = useAgent.getState()
+    assert.deepEqual(state.agents.map((agent) => agent.name), ['butler', 'campaign-writer'])
+    assert.equal(state.agents[0].displayName, 'Ready')
+    assert.equal(state.agents[1].displayName, '营销文案')
+    assert.equal(state.currentAgent, 'butler')
   })
 
   it('reloadAgents falls back to built-in agents when the personality list is empty or fails', async () => {

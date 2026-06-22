@@ -97,6 +97,7 @@ export interface SendScopedPayload {
   agent?: string
   message: string | MultimodalBlock[]
   requestId?: string
+  workspaceRoots?: string[]
   userMessage?: SendScopedUserMessage
   continuationIntent?: {
     taskId: string

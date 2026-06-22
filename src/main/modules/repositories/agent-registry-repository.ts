@@ -6,6 +6,13 @@
  * A dead DB degrades to empty reads; it never throws into callers.
  */
 
+import {
+  MAIN_AGENT_ID as SHARED_MAIN_AGENT_ID,
+  type LegacyAgentLifecycleStatus,
+  isValidAgentSlug,
+  normalizeAgentLifecycleStatus,
+} from '../../../shared/agent-identity'
+
 interface AgentsStatement {
   run(...params: unknown[]): unknown
   get<T = unknown>(...params: unknown[]): T | undefined
@@ -20,10 +27,9 @@ interface AgentsDatabaseAccessor {
   getRawDb(): AgentsRawDatabase | null
 }
 
-/** The migration-055 seeded main-agent row id — the only row until A4
- *  adoption / phase-4 derivation add more. */
-export const MAIN_AGENT_ID = 'butler'
-export type AgentRegistryStatus = 'active' | 'retired' | 'merged'
+/** The migration-055 seeded main-agent row id. */
+export const MAIN_AGENT_ID = SHARED_MAIN_AGENT_ID
+export type AgentRegistryStatus = LegacyAgentLifecycleStatus
 
 export interface AgentRegistryRecord {
   id: string
@@ -49,8 +55,18 @@ interface AgentsRow {
   created_at: string
 }
 
+function defaultPersonalityText(id: string, name: string, charter: string | null): string {
+  return [
+    `# ${name}`,
+    '',
+    '你是 Ready 工作台中的一个完整 Agent。',
+    charter ? `职责范围：${charter}` : `请围绕 ${id} 的职责稳定协助用户完成任务。`,
+    '请用清晰、稳定、可复盘的方式工作；遇到边界不清时先向用户确认。',
+  ].join('\n')
+}
+
 function normalizeStatus(status: string | null | undefined): AgentRegistryStatus {
-  return status === 'retired' || status === 'merged' ? status : 'active'
+  return normalizeAgentLifecycleStatus(status)
 }
 
 function mapRow(row: AgentsRow): AgentRegistryRecord {
@@ -100,6 +116,7 @@ export class AgentRegistryRepository {
     id: string
     name: string
     charter?: string | null
+    personalityText?: string | null
     personaRef?: string | null
     parentAgentId?: string | null
     derivationReason?: string | null
@@ -118,6 +135,8 @@ export class AgentRegistryRepository {
       createdAt: new Date().toISOString(),
     }
     if (!record.id || !record.name) throw new Error('[agent-registry] id and name are required')
+    if (!isValidAgentSlug(record.id)) throw new Error('[agent-registry] id must be a valid agent slug')
+    record.personaRef = record.personaRef || record.id
     db.prepare('INSERT INTO agents (id, name, charter, persona_ref, status, parent_agent_id, derivation_reason, merged_into_agent_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
       .run(
         record.id,
@@ -130,42 +149,115 @@ export class AgentRegistryRepository {
         record.mergedIntoAgentId,
         record.createdAt,
       )
+    const personalityText = String(input.personalityText || '').trim()
+      || defaultPersonalityText(record.id, record.name, record.charter)
+    db.prepare(`
+      INSERT OR IGNORE INTO agent_personalities (
+        id, agent_name, display_name, personality_text, tone, meta_json, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      `personality-${record.id}`,
+      record.id,
+      record.name,
+      personalityText,
+      null,
+      JSON.stringify({ emoji: '🤖' }),
+      Date.now(),
+      Date.now(),
+    )
     return record
   }
 
-  updateStatus(
-    id: string,
-    status: Exclude<AgentRegistryStatus, 'active'>,
-    options: { mergedIntoAgentId?: string | null } = {},
-  ): AgentRegistryRecord {
+  updateName(id: string, name: string): AgentRegistryRecord {
     const normalizedId = String(id || '').trim()
+    const normalizedName = String(name || '').trim()
     if (!normalizedId) throw new Error('[agent-registry] id is required')
-    if (normalizedId === MAIN_AGENT_ID) throw new Error('[agent-registry] main agent cannot be retired or merged')
-    if (status !== 'retired' && status !== 'merged') throw new Error('[agent-registry] unsupported lifecycle status')
+    if (!normalizedName) throw new Error('[agent-registry] name is required')
+    if (normalizedId === MAIN_AGENT_ID) throw new Error('[agent-registry] main agent display name is managed separately')
 
     const db = this.dbManager.getRawDb()
     if (!db) throw new Error('Database not available')
     const current = this.get(normalizedId)
     if (!current) throw new Error('[agent-registry] agent not found')
-    if (current.status !== 'active') throw new Error('[agent-registry] only active agents can change lifecycle status')
+    if (current.status !== 'active') throw new Error('[agent-registry] only active agents can be renamed')
+
+    db.prepare('UPDATE agents SET name = ? WHERE id = ?')
+      .run(normalizedName, normalizedId)
+    db.prepare('UPDATE agent_personalities SET display_name = ?, updated_at = ? WHERE agent_name = ?')
+      .run(normalizedName, Date.now(), normalizedId)
+
+    return {
+      ...current,
+      name: normalizedName,
+    }
+  }
+
+  updateStatus(
+    id: string,
+    status: AgentRegistryStatus,
+    options: { mergedIntoAgentId?: string | null } = {},
+  ): AgentRegistryRecord {
+    const normalizedId = String(id || '').trim()
+    if (!normalizedId) throw new Error('[agent-registry] id is required')
+    const normalizedStatus = normalizeStatus(status)
+    if (normalizedId === MAIN_AGENT_ID && normalizedStatus !== 'active') {
+      throw new Error('[agent-registry] main agent cannot be disabled or merged')
+    }
+    if (normalizedStatus !== 'active' && normalizedStatus !== 'disabled' && normalizedStatus !== 'merged') {
+      throw new Error('[agent-registry] unsupported lifecycle status')
+    }
+
+    const db = this.dbManager.getRawDb()
+    if (!db) throw new Error('Database not available')
+    const current = this.get(normalizedId)
+    if (!current) throw new Error('[agent-registry] agent not found')
+    if (current.status === 'merged') throw new Error('[agent-registry] merged agents cannot change lifecycle status')
 
     const targetId = String(options.mergedIntoAgentId || '').trim()
     let mergedIntoAgentId: string | null = null
-    if (status === 'merged') {
+    if (normalizedStatus === 'merged') {
+      if (current.status !== 'active') throw new Error('[agent-registry] only active agents can be merged')
       if (!targetId) throw new Error('[agent-registry] merged agent requires a target')
       if (targetId === normalizedId) throw new Error('[agent-registry] merged target must be another agent')
       const target = this.get(targetId)
       if (!target || target.status !== 'active') throw new Error('[agent-registry] merged target must be active')
       mergedIntoAgentId = targetId
+    } else if (normalizedStatus === 'disabled') {
+      if (current.status !== 'active') throw new Error('[agent-registry] only active agents can be disabled')
+    } else if (normalizedStatus === 'active') {
+      if (current.status !== 'disabled') return current
     }
 
     db.prepare('UPDATE agents SET status = ?, merged_into_agent_id = ? WHERE id = ?')
-      .run(status, mergedIntoAgentId, normalizedId)
+      .run(normalizedStatus, mergedIntoAgentId, normalizedId)
 
     return {
       ...current,
-      status,
+      status: normalizedStatus,
       mergedIntoAgentId,
     }
+  }
+
+  deleteAgent(id: string): AgentRegistryRecord {
+    const normalizedId = String(id || '').trim()
+    if (!normalizedId) throw new Error('[agent-registry] id is required')
+    if (normalizedId === MAIN_AGENT_ID) throw new Error('[agent-registry] main agent cannot be deleted')
+    const db = this.dbManager.getRawDb()
+    if (!db) throw new Error('Database not available')
+    const current = this.get(normalizedId)
+    if (!current) throw new Error('[agent-registry] agent not found')
+
+    db.prepare("UPDATE specialist_content_edit_proposals SET status = 'rejected' WHERE agent_id = ? AND status = 'staged'")
+      .run(normalizedId)
+    db.prepare(`
+      UPDATE specialist_blueprints
+      SET status = 'rejected'
+      WHERE specialist_id = ?
+        AND status IN ('draft', 'needs_clarification', 'staged', 'confirmed')
+        AND content_json NOT LIKE '%"adoption"%'
+    `).run(normalizedId)
+    db.prepare('DELETE FROM agent_personalities WHERE agent_name = ?').run(normalizedId)
+    db.prepare('DELETE FROM agents WHERE id = ?').run(normalizedId)
+    return current
   }
 }

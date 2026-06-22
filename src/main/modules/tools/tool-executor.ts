@@ -58,8 +58,10 @@ import { executeDocumentTool } from './document-tools'
 import { executeGeneralResearchTool } from './general-research-tools'
 import { executeMapTool } from './map-tools'
 import { executeAskUserQuestions } from './builtins/ask-user-questions'
+import { executeConfirmSpecialistBlueprint } from './builtins/confirm-specialist-blueprint'
 import { executeProposeHandoff } from './builtins/propose-handoff'
 import { executeProposeSpecialistBlueprint } from './builtins/propose-specialist-blueprint'
+import { executeRenameSpecialistAgent } from './builtins/rename-specialist-agent'
 import { resolveSpecialistFoundationSemanticJudge } from '../agent-control/agents/specialist-foundation-semantic-judge-provider'
 import { executeInstallSkill } from './builtins/install-skill'
 import {
@@ -74,7 +76,10 @@ import { executeFeishuTool } from './feishu-tools'
 import { executeMemoryTool } from './memory-tools'
 import { executePetTool } from './pet-tools'
 import { executeSessionRecallTool } from './session-recall-tools'
-import { getSpecialistBlueprintStore } from '../agent-control/agents/specialist-blueprint-runtime'
+import {
+  getSpecialistBlueprintConfirmationStore,
+  getSpecialistBlueprintStore,
+} from '../agent-control/agents/specialist-blueprint-runtime'
 import { getSkillsRuntimeManager } from '../skills-runtime/runtime-manager'
 import {
   ToolDomainError,
@@ -152,6 +157,18 @@ export interface ToolContext {
    * skill_* calls — defense against `as any` bypasses.
    */
   authorization: SkillToolAuthorization
+}
+
+function workspaceRootsFromRequestEnvelope(envelope: unknown): string[] | null {
+  if (!envelope || typeof envelope !== 'object' || Array.isArray(envelope)) return null
+  const environmentHints = (envelope as { environmentHints?: unknown }).environmentHints
+  if (!environmentHints || typeof environmentHints !== 'object' || Array.isArray(environmentHints)) return null
+  const workspaceRoots = (environmentHints as { workspaceRoots?: unknown }).workspaceRoots
+  if (!Array.isArray(workspaceRoots)) return null
+  const roots = workspaceRoots
+    .filter((root): root is string => typeof root === 'string' && root.trim().length > 0)
+    .map((root) => root.trim())
+  return roots.length > 0 ? roots : null
 }
 
 function isFrameScopedInternalSkillActionAllowed(
@@ -541,7 +558,10 @@ async function executeToolCallInner(
         case 'file':
           {
             const { executeFileManagementTool } = await import('./file-management-tools')
-            return executeFileManagementTool(toolName, args, { abortSignal: context.abortSignal })
+            return executeFileManagementTool(toolName, args, {
+              abortSignal: context.abortSignal,
+              workspaceRoots: workspaceRootsFromRequestEnvelope(context.requestEnvelope),
+            })
           }
 
         case 'rss':
@@ -692,6 +712,55 @@ async function executeToolCallInner(
           })
 
         case 'agent_interaction':
+          const semanticJudge = toolName === 'confirm_specialist_blueprint' || toolName === 'propose_specialist_blueprint'
+            ? resolveSpecialistFoundationSemanticJudge()
+            : null
+          if (toolName === 'confirm_specialist_blueprint') {
+            const runtime = context.runtime
+            if (!runtime) {
+              return createToolExecutionOutput('专项 agent 创建未执行：runtime 不可用。', {
+                shape: 'json',
+                data: {
+                  errorKind: 'runtime_unavailable',
+                  toolName,
+                },
+              })
+            }
+            const specialistSemanticJudge = semanticJudge as NonNullable<typeof semanticJudge>
+            return executeConfirmSpecialistBlueprint(
+              args as Parameters<typeof executeConfirmSpecialistBlueprint>[0],
+              {
+                getBlueprintStore: getSpecialistBlueprintStore,
+                getConfirmationStore: getSpecialistBlueprintConfirmationStore,
+                getBeliefCardStore: () => runtime.getBeliefCardStore(),
+                getAgentRegistry: () => runtime.getAgentRegistry(),
+                runSemanticFoundationJudge: specialistSemanticJudge.judge,
+                semanticFoundationJudgeUnavailableReason: specialistSemanticJudge.unavailableReason,
+                sessionId: context.sessionId ?? context.scope?.id ?? null,
+                runId: context.runId ?? null,
+                currentUserText: context.currentUserText ?? null,
+              },
+            )
+          }
+          if (toolName === 'rename_specialist_agent') {
+            const runtime = context.runtime
+            if (!runtime) {
+              return createToolExecutionOutput('专项 agent 未改名：runtime 不可用。', {
+                shape: 'json',
+                data: {
+                  errorKind: 'runtime_unavailable',
+                  toolName,
+                },
+              })
+            }
+            return executeRenameSpecialistAgent(
+              args as Parameters<typeof executeRenameSpecialistAgent>[0],
+              {
+                registry: runtime.getAgentRegistry(),
+                currentUserText: context.currentUserText ?? null,
+              },
+            )
+          }
           if (toolName === 'propose_specialist_blueprint') {
             const runtime = context.runtime
             if (!runtime) {
@@ -703,7 +772,7 @@ async function executeToolCallInner(
                 },
               })
             }
-            const semanticJudge = resolveSpecialistFoundationSemanticJudge()
+            const specialistSemanticJudge = semanticJudge as NonNullable<typeof semanticJudge>
             const sourceMessageId = typeof context.sourceMessageId === 'string' && context.sourceMessageId.trim()
               ? context.sourceMessageId.trim()
               : null
@@ -719,8 +788,8 @@ async function executeToolCallInner(
                   ? null
                   : context.sourceMessageUnavailableReason || 'message_id_unavailable',
                 currentUserText: context.currentUserText ?? null,
-                runSemanticFoundationJudge: semanticJudge.judge,
-                semanticFoundationJudgeUnavailableReason: semanticJudge.unavailableReason,
+                runSemanticFoundationJudge: specialistSemanticJudge.judge,
+                semanticFoundationJudgeUnavailableReason: specialistSemanticJudge.unavailableReason,
               },
             )
           }

@@ -6,6 +6,7 @@ import type {
   SpecialistBlueprintQualityCheck,
 } from '../../../../shared/agent-specialist-blueprint'
 import { evaluateSpecialistBlueprintQuality } from './specialist-blueprint-quality'
+import { isReservedAgentSlug } from '../../../../shared/agent-identity'
 
 const DERIVED_AGENT_ID = /^[a-z0-9][a-z0-9._-]*$/
 const UNSAFE_RE = /(盗取|窃取|绕过|破解|木马|恶意|密码|credential|steal|bypass|malware)/i
@@ -80,6 +81,9 @@ export function evaluateSpecialistBlueprintAdmission(
   }
   if (!DERIVED_AGENT_ID.test(specialistId)) {
     return { verdict: { kind: 'clarify', missing: ['specialistId'] }, missing: ['specialistId'], qualityChecks: quality.checks }
+  }
+  if (isReservedAgentSlug(specialistId)) {
+    return { verdict: { kind: 'reject_duplicate', existingAgentId: specialistId }, missing: [], qualityChecks: quality.checks }
   }
   const existing = registry.get(specialistId)
   if (existing) {

@@ -1,5 +1,6 @@
 import type { IpcMain } from 'electron'
 import type { AgentRegistryRecord, AgentRegistryStatus } from '../../repositories/agent-registry-repository'
+import { deleteAgentIdentityAssets } from '../../agent-control/agents/agent-identity-assets'
 import { migrateAgentKnowledgeCards, rollbackAgentKnowledgeCardMigrations } from '../../agent-control/agents/agent-factory'
 import { agentScopeKnowledgeDir, type BeliefCardStore } from '../../agent-control/knowledge/belief-card-store'
 import type { IpcChannelGroup, IpcDisposeHandle } from './types'
@@ -16,15 +17,17 @@ export interface AgentRegistryGroupDeps {
   getBeliefCardStore(): BeliefCardStore | null
   updateStatus(
     id: string,
-    status: Exclude<AgentRegistryStatus, 'active'>,
+    status: AgentRegistryStatus,
     options?: { mergedIntoAgentId?: string | null },
   ): AgentRegistryRecord
+  deleteAgent(id: string): AgentRegistryRecord
 }
 
 const CHANNELS = [
   'agent:registry:list',
   'agent:registry:listKnowledge',
   'agent:registry:updateStatus',
+  'agent:registry:delete',
 ] as const
 
 export interface AgentRegistryKnowledgeCard {
@@ -71,7 +74,7 @@ export const agentRegistryGroup: IpcChannelGroup<AgentRegistryGroupDeps> = {
 
     ipcMain.handle('agent:registry:updateStatus', (_, payload: {
       id?: string
-      status?: Exclude<AgentRegistryStatus, 'active'>
+      status?: AgentRegistryStatus
       mergedIntoAgentId?: string | null
       migrateCardRelPaths?: string[]
     }): IPCResponse<AgentRegistryRecord> => {
@@ -79,7 +82,7 @@ export const agentRegistryGroup: IpcChannelGroup<AgentRegistryGroupDeps> = {
       let rollbackStore: BeliefCardStore | null = null
       try {
         const status = payload?.status
-        if (status !== 'retired' && status !== 'merged') {
+        if (status !== 'active' && status !== 'disabled' && status !== 'retired' && status !== 'merged') {
           return { success: false, error: 'unsupported lifecycle status', errorKind: 'input_validation' }
         }
         const migrated = Array.isArray(payload?.migrateCardRelPaths)
@@ -114,6 +117,20 @@ export const agentRegistryGroup: IpcChannelGroup<AgentRegistryGroupDeps> = {
             console.warn('[agent-registry] rollback migrated cards failed:', rollbackError)
           }
         }
+        return { success: false, error: error instanceof Error ? error.message : String(error) }
+      }
+    })
+
+    ipcMain.handle('agent:registry:delete', (_, payload: { id?: string }): IPCResponse<AgentRegistryRecord> => {
+      try {
+        const id = String(payload?.id || '').trim()
+        if (!id) return { success: false, error: 'agent id is required', errorKind: 'input_validation' }
+        const store = deps.getBeliefCardStore()
+        if (!store) return { success: false, error: 'Belief card store not available' }
+        deleteAgentIdentityAssets(store, id)
+        const record = deps.deleteAgent(id)
+        return { success: true, data: record }
+      } catch (error) {
         return { success: false, error: error instanceof Error ? error.message : String(error) }
       }
     })

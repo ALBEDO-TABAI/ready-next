@@ -23,6 +23,7 @@ import {
 import { createDebouncedFetch } from '../../modules/agent/debouncedFetch'
 import { filterUserVisibleToolTraceEvents } from '../../modules/agent/toolTraceVisibility'
 import type { SessionRecallCapsule, SessionRecallHit } from '../../../shared/session-recall'
+import { deletedAgentDisplayName } from '../../../shared/agent-identity'
 import type {
   ActiveChildRunSummaryData,
   RecoveryRecordData,
@@ -249,6 +250,8 @@ export default function ChatPanel({
     currentScope,
     currentScopeId,
   })
+  const currentAgentDisplayName = currentAgentData?.displayName
+    || (currentAgent && currentAgent !== 'butler' ? deletedAgentDisplayName(currentAgent) : '管家')
   const { setSelectedChannelKey, getScopeChannelKey } = channelEffects
   const {
     capsules: attachedSessionRecallCapsules,
@@ -1013,7 +1016,7 @@ export default function ChatPanel({
       agents={agents}
       currentAgent={currentAgent}
       currentAgentAvatar={currentAgentData?.avatar || '🤖'}
-      currentAgentDisplayName={currentAgentData?.displayName || '管家'}
+      currentAgentDisplayName={currentAgentDisplayName}
       isChannelScope={currentScope?.sourceKind === 'channel'}
       pendingSendCount={pendingSendCount}
       pendingSendCountdown={pendingSendCountdown}

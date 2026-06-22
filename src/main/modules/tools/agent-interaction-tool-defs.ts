@@ -21,6 +21,8 @@ export const AGENT_INTERACTION_TOOL_NAMES: readonly string[] = [
   'ask_user_questions',
   'agent_propose_handoff',
   'propose_specialist_blueprint',
+  'confirm_specialist_blueprint',
+  'rename_specialist_agent',
 ] as const
 
 const ASK_USER_QUESTIONS_DESCRIPTION = [
@@ -151,9 +153,94 @@ const PROPOSE_SPECIALIST_BLUEPRINT_DESCRIPTION = [
   '- routing_triggers 只是候选触发词；确认前不会生效。',
   '- 如果已经有足够上下文但仍缺局部字段，可提交蓝图让 admission 返回 needs_clarification；不要伪造用户没有表达过的硬需求。',
   '- 如果这个工具返回 needs_clarification，并给出 ask_user_questions 参数，下一步先调用 ask_user_questions；用户回答后把答案补回对应字段，再重新调用本工具。',
+  '- 如果这个工具返回 staged/admit，下一步不要只告诉用户去设置页；应在对话里调用 ask_user_questions 弹出确认卡，至少提供「确认创建」「不创建」「我想修改」三种选择。用户确认后再调用 confirm_specialist_blueprint。',
   '',
   '不要使用：用户只是问「专项 agent 是什么」、只是讨论架构、或只是把当前任务转给已存在 agent（那应使用 agent_propose_handoff）。',
 ].join('\n')
+
+const CONFIRM_SPECIALIST_BLUEPRINT_DESCRIPTION = [
+  '在用户已经明确确认后，把一份已暂存的专项 agent 蓝图创建成真实 agent；或者按用户选择拒绝这份蓝图。',
+  '',
+  '何时使用：propose_specialist_blueprint 已返回 staged/admit，随后用户通过 ask_user_questions 卡或当前消息明确选择「确认创建」/「不创建」。',
+  '',
+  '硬性约束：',
+  '- 这是二级确认工具。没有用户确认，不得调用 confirm_create。',
+  '- confirmation_source=ask_user_questions_card 时必须传 confirmation_card_id，且 user_confirmation_verbatim 仍必须逐字来自用户当前回答。',
+  '- user_confirmation_verbatim 必须逐字来自当前用户消息，并且包含确认或拒绝意图；如果原话同时包含拒绝和创建字样，以拒绝为准。',
+  '- action=confirm_create 会创建 agent 并写入 staged 路由卡；action=reject 只拒绝蓝图，不创建 agent。',
+  '- 如果用户说「我想改一下」，不要调用本工具；继续用 ask_user_questions 或重新调用 propose_specialist_blueprint 修订蓝图。',
+].join('\n')
+
+const CONFIRM_SPECIALIST_BLUEPRINT_INPUT_SCHEMA = {
+  type: 'object',
+  properties: {
+    action: {
+      type: 'string',
+      enum: ['confirm_create', 'reject'],
+      description: 'confirm_create = 用户确认创建；reject = 用户明确不创建。',
+    },
+    blueprint_id: {
+      type: 'string',
+      description: '要确认或拒绝的 blueprintId，例如 bp-copywriter。',
+    },
+    confirmation_source: {
+      type: 'string',
+      enum: ['direct_user_message', 'ask_user_questions_card'],
+      description: '用户确认来源：当前消息原话或结构化反问卡。',
+    },
+    user_confirmation_verbatim: {
+      type: 'string',
+      description: '必填，逐字复制用户当前消息里的确认/拒绝片段。',
+    },
+    confirmation_card_id: {
+      type: 'string',
+      description: '当 confirmation_source=ask_user_questions_card 时必填，记录回答来源卡片 id。',
+    },
+    allow_unverified_semantic_review: {
+      type: 'boolean',
+      description: '仅当用户明确接受 FOUNDATION 尚未完成语义校验时设为 true。',
+    },
+    migrate_card_rel_paths: {
+      type: 'array',
+      items: { type: 'string' },
+      description: '可选：创建时迁移到该 agent 的知识卡 relPath，最多 8 条。',
+    },
+  },
+  required: ['action', 'blueprint_id', 'confirmation_source', 'user_confirmation_verbatim'],
+  additionalProperties: false,
+} as const
+
+const RENAME_SPECIALIST_AGENT_DESCRIPTION = [
+  '按用户当前消息，把一个已存在的 active 专项 agent 改显示名。',
+  '',
+  '何时使用：用户明确说「把某个专项 agent 改名为 xxx」或同义表达，并且目标 agent 已存在。',
+  '如果用户只说“我要给它起个名字/改个名字”但没有给出新名字，先调用 ask_user_questions 向用户询问名称，不要回答“去设置页手动改”。',
+  '',
+  '硬性约束：',
+  '- 只能改专项 agent，不能改主 agent。',
+  '- display_name 必须出现在当前用户消息中。',
+  '- user_request_verbatim 必须逐字复制用户当前消息中的改名请求片段，禁止摘要。',
+].join('\n')
+
+const RENAME_SPECIALIST_AGENT_INPUT_SCHEMA = {
+  type: 'object',
+  properties: {
+    specialist_id: {
+      type: 'string',
+      description: '要改名的专项 agent id，例如 copywriter。',
+    },
+    display_name: {
+      type: 'string',
+      description: '新的显示名，必须来自用户当前消息。',
+    },
+    user_request_verbatim: {
+      type: 'string',
+      description: '用户原话逐字片段，必须直接复制当前用户消息里的改名请求。',
+    },
+  },
+  required: ['specialist_id', 'display_name', 'user_request_verbatim'],
+  additionalProperties: false,
+} as const
 
 const KNOWLEDGE_SEED_ITEM_SCHEMA = {
   type: 'object',
@@ -253,6 +340,7 @@ const PROPOSE_SPECIALIST_BLUEPRINT_INPUT_SCHEMA = {
     routing_triggers: {
       type: 'array',
       items: { type: 'string' },
+      maxItems: 8,
       description: '候选触发词，最多 8 个；确认前不参与路由。',
     },
     seed_rules_text: {
@@ -334,6 +422,16 @@ export function getAgentInteractionAnthropicTools(): Array<Record<string, unknow
       description: PROPOSE_SPECIALIST_BLUEPRINT_DESCRIPTION,
       input_schema: PROPOSE_SPECIALIST_BLUEPRINT_INPUT_SCHEMA,
     }),
+    normalizeAnthropicToolSchema({
+      name: 'confirm_specialist_blueprint',
+      description: CONFIRM_SPECIALIST_BLUEPRINT_DESCRIPTION,
+      input_schema: CONFIRM_SPECIALIST_BLUEPRINT_INPUT_SCHEMA,
+    }),
+    normalizeAnthropicToolSchema({
+      name: 'rename_specialist_agent',
+      description: RENAME_SPECIALIST_AGENT_DESCRIPTION,
+      input_schema: RENAME_SPECIALIST_AGENT_INPUT_SCHEMA,
+    }),
   ]
 }
 
@@ -361,6 +459,22 @@ export function getAgentInteractionOpenAITools(): Array<Record<string, unknown>>
         name: 'propose_specialist_blueprint',
         description: PROPOSE_SPECIALIST_BLUEPRINT_DESCRIPTION,
         parameters: PROPOSE_SPECIALIST_BLUEPRINT_INPUT_SCHEMA,
+      },
+    }),
+    normalizeOpenAIToolSchema({
+      type: 'function',
+      function: {
+        name: 'confirm_specialist_blueprint',
+        description: CONFIRM_SPECIALIST_BLUEPRINT_DESCRIPTION,
+        parameters: CONFIRM_SPECIALIST_BLUEPRINT_INPUT_SCHEMA,
+      },
+    }),
+    normalizeOpenAIToolSchema({
+      type: 'function',
+      function: {
+        name: 'rename_specialist_agent',
+        description: RENAME_SPECIALIST_AGENT_DESCRIPTION,
+        parameters: RENAME_SPECIALIST_AGENT_INPUT_SCHEMA,
       },
     }),
   ]

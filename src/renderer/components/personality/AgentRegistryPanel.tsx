@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { GitMerge, RefreshCw, UserX } from 'lucide-react'
+import { GitMerge, Power, RefreshCw, Trash2, UserX } from 'lucide-react'
 import type { AgentRegistryKnowledgeCardData } from '../../types/electron'
 import {
   SETTINGS_CARD_STYLE,
@@ -12,7 +12,7 @@ type AgentRegistryRecord = {
   id: string
   name: string
   charter: string | null
-  status: 'active' | 'retired' | 'merged'
+  status: 'active' | 'disabled' | 'retired' | 'merged'
   parentAgentId: string | null
   derivationReason: string | null
   mergedIntoAgentId: string | null
@@ -23,7 +23,8 @@ type AgentRegistryKnowledgeCard = AgentRegistryKnowledgeCardData
 
 const statusLabel: Record<AgentRegistryRecord['status'], string> = {
   active: '使用中',
-  retired: '已退休',
+  disabled: '已停用',
+  retired: '已停用',
   merged: '已合并',
 }
 
@@ -58,7 +59,7 @@ export default function AgentRegistryPanel() {
       const nextKnowledgeByAgent: Record<string, AgentRegistryKnowledgeCard[]> = {}
       if (window.electronAPI?.agent?.listRegistryKnowledge) {
         await Promise.all(next
-          .filter((agent) => agent.id !== 'butler' && agent.status === 'active')
+          .filter((agent) => agent.id !== 'butler' && agent.status !== 'merged')
           .map(async (agent) => {
             const cards = await window.electronAPI.agent.listRegistryKnowledge(agent.id)
             if (!cards.success) throw new Error(cards.error || `读取 ${agent.name} 的知识卡失败`)
@@ -93,11 +94,15 @@ export default function AgentRegistryPanel() {
     setMigrationSelections((current) => ({ ...current, [agentId]: [...selected] }))
   }
 
-  const updateStatus = async (agent: AgentRegistryRecord, status: 'retired' | 'merged') => {
+  const updateStatus = async (agent: AgentRegistryRecord, status: 'active' | 'disabled' | 'merged') => {
     if (!window.electronAPI?.agent?.updateRegistryStatus) return
     const defaultMergeTarget = activeAgents.find((item) => item.id !== agent.id)?.id || ''
     const target = status === 'merged' ? mergeTargets[agent.id] || defaultMergeTarget : ''
-    const label = status === 'retired' ? `退休 ${agent.name}` : `把 ${agent.name} 合并到 ${target}`
+    const label = status === 'disabled'
+      ? `停用 ${agent.name}`
+      : status === 'active'
+        ? `启用 ${agent.name}`
+        : `把 ${agent.name} 合并到 ${target}`
     if (!window.confirm(`确认${label}？`)) return
     setActionRunning(`${status}:${agent.id}`)
     setError(null)
@@ -110,6 +115,24 @@ export default function AgentRegistryPanel() {
       })
       if (!result.success) throw new Error(result.error || '更新 Agent 状态失败')
       await loadAgents()
+      window.dispatchEvent(new CustomEvent('ready:agent-registry-changed'))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setActionRunning(null)
+    }
+  }
+
+  const deleteAgent = async (agent: AgentRegistryRecord) => {
+    if (!window.electronAPI?.agent?.deleteRegistryAgent) return
+    if (!window.confirm(`确认删除 ${agent.name}？旧会话和旧任务会保留为历史记录。`)) return
+    setActionRunning(`delete:${agent.id}`)
+    setError(null)
+    try {
+      const result = await window.electronAPI.agent.deleteRegistryAgent(agent.id)
+      if (!result.success) throw new Error(result.error || '删除 Agent 失败')
+      await loadAgents()
+      window.dispatchEvent(new CustomEvent('ready:agent-registry-changed'))
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -125,7 +148,7 @@ export default function AgentRegistryPanel() {
             Agent 生命周期
           </h3>
           <p className="text-[12px] leading-5" style={{ color: 'var(--text-muted)', margin: '6px 0 0' }}>
-            专项 Agent 的退休和合并需要显式确认；合并时可迁移知识卡，未迁移资产仍留在原目录。
+            专项 Agent 可以停用、重新启用、合并或删除；旧会话和旧任务会保留为历史记录。
           </p>
         </div>
         <button
@@ -157,7 +180,7 @@ export default function AgentRegistryPanel() {
           </div>
         )}
         {agents.map((agent) => {
-          const canAct = agent.id !== 'butler' && agent.status === 'active'
+          const canAct = agent.id !== 'butler' && agent.status !== 'merged'
           const mergeOptions = activeAgents.filter((item) => item.id !== agent.id)
           const selectedTarget = mergeTargets[agent.id] || mergeOptions[0]?.id || ''
           const knowledgeCards = knowledgeByAgent[agent.id] || []
@@ -196,20 +219,33 @@ export default function AgentRegistryPanel() {
                     </div>
                   )}
                 </div>
-	                {canAct && (
+                {canAct && (
 	                  <div className="flex shrink-0 flex-col items-end gap-2">
 	                    <div className="flex items-center gap-2">
-	                      <button
-	                        type="button"
-	                        disabled={actionRunning === `retired:${agent.id}`}
-	                        onClick={() => void updateStatus(agent, 'retired')}
-	                        className="border rounded-lg inline-flex items-center gap-1.5 text-[12px] disabled:opacity-50"
-	                        style={{ ...SETTINGS_DANGER_BUTTON_STYLE, padding: '7px 10px' }}
-	                      >
-	                        <UserX className="w-3.5 h-3.5" />
-	                        退休
-	                      </button>
-	                      {mergeOptions.length > 0 && (
+                        {agent.status === 'active' ? (
+                          <button
+                            type="button"
+                            disabled={actionRunning === `disabled:${agent.id}`}
+                            onClick={() => void updateStatus(agent, 'disabled')}
+                            className="border rounded-lg inline-flex items-center gap-1.5 text-[12px] disabled:opacity-50"
+                            style={{ ...SETTINGS_DANGER_BUTTON_STYLE, padding: '7px 10px' }}
+                          >
+                            <UserX className="w-3.5 h-3.5" />
+                            停用
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            disabled={actionRunning === `active:${agent.id}`}
+                            onClick={() => void updateStatus(agent, 'active')}
+                            className="border rounded-lg inline-flex items-center gap-1.5 text-[12px] disabled:opacity-50"
+                            style={{ ...SETTINGS_PRIMARY_BUTTON_STYLE, padding: '7px 10px' }}
+                          >
+                            <Power className="w-3.5 h-3.5" />
+                            启用
+                          </button>
+                        )}
+	                      {agent.status === 'active' && mergeOptions.length > 0 && (
 	                        <>
 	                          <select
 	                            value={selectedTarget}
@@ -233,11 +269,21 @@ export default function AgentRegistryPanel() {
 	                          </button>
 	                        </>
 	                      )}
+                        <button
+                          type="button"
+                          disabled={actionRunning === `delete:${agent.id}`}
+                          onClick={() => void deleteAgent(agent)}
+                          className="border rounded-lg inline-flex items-center gap-1.5 text-[12px] disabled:opacity-50"
+                          style={{ ...SETTINGS_DANGER_BUTTON_STYLE, padding: '7px 10px' }}
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          删除
+                        </button>
 	                    </div>
-                    {mergeOptions.length > 0 && knowledgeCards.length > 0 && (
+                    {agent.status === 'active' && mergeOptions.length > 0 && knowledgeCards.length > 0 && (
                       <div className="w-64 text-left">
                         <div className="text-[11px] mb-1" style={{ color: 'var(--text-light)' }}>
-                          合并时迁移
+                          合并时可迁移知识卡
                         </div>
                         <div className="flex max-h-28 flex-col gap-1 overflow-auto pr-1">
                           {knowledgeCards.map((card) => (

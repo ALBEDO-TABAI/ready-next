@@ -1,7 +1,7 @@
 import type { SpecialistAgentBlueprint } from './agent-specialist-blueprint'
 import type { TaskProjectionRecord } from './ipc-contracts/task-projection'
 
-export type AgentSystemStudioAgentStatus = 'active' | 'retired' | 'merged'
+export type AgentSystemStudioAgentStatus = 'active' | 'disabled' | 'retired' | 'merged'
 export type AgentSystemStudioAgentKind = 'main' | 'specialist'
 
 export type AgentSystemStudioRoutingDisabledReason =
