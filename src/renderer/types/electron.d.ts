@@ -1995,7 +1995,7 @@ interface ElectronDocumentAPI {
   copyItem: (src: string, dest: string) => Promise<DocumentOperationResponse>
   moveItem: (src: string, dest: string) => Promise<DocumentOperationResponse>
   stat: (path: string) => Promise<DocumentStatResponse>
-  openFolder: (payload?: { validateAsWorkspace?: boolean }) => Promise<DocumentOpenFolderResponse>
+  openFolder: (payload?: { validateAsWorkspace?: boolean; title?: string }) => Promise<DocumentOpenFolderResponse>
   exportWorkspace: (payload: { name: string; folders: string[] }) => Promise<
     | { success: true; path: string; name: string }
     | { success: false; error: string }

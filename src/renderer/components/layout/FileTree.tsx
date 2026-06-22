@@ -69,6 +69,7 @@ import {
   type FileTreeDeleteTarget,
 } from './fileTreeSelection'
 import {
+  buildWorkspaceDragPayload,
   buildWorkspaceDragTransferPayload,
   parseWorkspaceDragPayloads,
   writeWorkspaceDragData,
@@ -2497,6 +2498,17 @@ export default function FileTree({
     }
     return compactFileTreeDeleteTargets(targets)
   }, [selectedPaths, visibleItemsByPath])
+  const selectedMoveItems = useMemo(() => {
+    const candidates: FileItem[] = []
+    for (const path of selectedPaths) {
+      const item = visibleItemsByPath.get(path)
+      if (item) candidates.push(item)
+    }
+    const byPath = new Map(candidates.map((item) => [item.path, item]))
+    return compactFileTreeDeleteTargets(candidates.map((item) => ({ path: item.path, name: item.name })))
+      .map((target) => byPath.get(target.path))
+      .filter((item): item is FileItem => Boolean(item))
+  }, [selectedPaths, visibleItemsByPath])
   const gridFolderPreviewKey = useMemo(
     () => gridItems.filter((item) => item.isDirectory).map((item) => item.path).join('\u0000'),
     [gridItems],
@@ -2789,6 +2801,7 @@ export default function FileTree({
           onOpenFile={handleOpenFile}
           onCreateBoard={handleCreateBoard}
           selectedDeleteTargets={selectedDeleteTargets}
+          selectedMoveItems={selectedMoveItems}
           onRequestDelete={(targets) => setPendingDelete({ kind: 'fs', targets })}
           onRequestUnpin={({ path, name }) => setPendingDelete({ kind: 'unpin', path, name })}
           workspaceRoot={workspaceRoot}
@@ -3024,6 +3037,7 @@ function ContextMenuBridge({
   onOpenFile,
   onCreateBoard,
   selectedDeleteTargets,
+  selectedMoveItems,
   onRequestDelete,
   onRequestUnpin,
   workspaceRoot,
@@ -3034,6 +3048,7 @@ function ContextMenuBridge({
   onOpenFile: (item: FileItem) => void
   onCreateBoard: (targetDir: string | null) => void
   selectedDeleteTargets: FileTreeDeleteTarget[]
+  selectedMoveItems: FileItem[]
   onRequestDelete: (targets: FileTreeDeleteTarget[]) => void
   onRequestUnpin: (info: { path: string; name: string }) => void
   workspaceRoot: string | null
@@ -3044,12 +3059,48 @@ function ContextMenuBridge({
     startCreating,
     showInFolder,
     refreshFiles,
+    moveItem,
   } = useWorkspace()
   const pinnedFolderSet = useMemo(() => new Set(pinnedFolders), [pinnedFolders])
 
   const nativeMenuAvailable = Boolean(
     typeof window !== 'undefined' && window.electronAPI?.ui?.showNativeContextMenu,
   )
+  const moveTargetDialogAvailable = Boolean(
+    typeof window !== 'undefined' && window.electronAPI?.document?.openFolder,
+  )
+
+  const isPinnedRootMoveTarget = useCallback((path: string) => {
+    return pinnedFolderSet.has(path) || path === workspaceRoot
+  }, [pinnedFolderSet, workspaceRoot])
+
+  const getMoveTargets = useCallback((item: FileItem): FileItem[] => {
+    const selectedMoveItemSet = new Set(selectedMoveItems.map((target) => target.path))
+    return selectedMoveItems.length > 1 && selectedMoveItemSet.has(item.path)
+      ? selectedMoveItems
+      : [item]
+  }, [selectedMoveItems])
+
+  const handleMoveTo = useCallback((item: FileItem) => {
+    const moveTargets = getMoveTargets(item)
+    const payloads = moveTargets.map((target) =>
+      buildWorkspaceDragPayload(target, !isPinnedRootMoveTarget(target.path)),
+    )
+
+    void (async () => {
+      const result = await window.electronAPI?.document?.openFolder?.({ title: '选择移动目标文件夹' })
+      if (!result?.success || !result.path) return
+      if (!canMoveAllToDirectory(payloads, result.path)) return
+
+      for (const payload of payloads) {
+        const nextPath = joinPath(result.path, payload.name)
+        if (nextPath === payload.path) continue
+        await moveItem(payload.path, nextPath)
+      }
+    })().catch((error) => {
+      console.error('Failed to move selected file tree items:', error)
+    })
+  }, [getMoveTargets, isPinnedRootMoveTarget, moveItem])
 
   const getContextItems = useCallback((item: FileItem | null): ContextMenuItem[] => {
     if (!item) {
@@ -3085,6 +3136,8 @@ function ContextMenuBridge({
     const deleteTargets = selectedDeleteTargets.length > 1 && selectedDeleteTargetSet.has(item.path)
       ? selectedDeleteTargets
       : [{ path: item.path, name: item.name }]
+    const moveTargets = getMoveTargets(item)
+    const moveDisabled = !moveTargetDialogAvailable || moveTargets.some((target) => isPinnedRootMoveTarget(target.path))
     return [
       ...(item.isDirectory ? [] : [
         {
@@ -3122,6 +3175,13 @@ function ContextMenuBridge({
         shortcut: '⌥⌘C',
         icon: <Copy style={{ width: 16, height: 16 }} />,
         onClick: () => copyPathToClipboard(item.path)
+      },
+      {
+        id: 'moveTo',
+        label: '移动到',
+        icon: <FolderOpen style={{ width: 16, height: 16 }} />,
+        disabled: moveDisabled,
+        onClick: () => handleMoveTo(item)
       },
       { id: 'sep2', label: '', separator: true },
       {
@@ -3166,7 +3226,7 @@ function ContextMenuBridge({
         onClick: () => onRequestDelete(deleteTargets)
       }
     ]
-  }, [onOpenFile, onCreateBoard, startRenaming, copyPathToClipboard, startCreating, showInFolder, refreshFiles, pinnedFolderSet, workspaceRoot, selectedDeleteTargets, onRequestDelete, onRequestUnpin])
+  }, [onOpenFile, onCreateBoard, startRenaming, copyPathToClipboard, getMoveTargets, moveTargetDialogAvailable, isPinnedRootMoveTarget, handleMoveTo, startCreating, showInFolder, refreshFiles, pinnedFolderSet, workspaceRoot, selectedDeleteTargets, onRequestDelete, onRequestUnpin])
 
   const contextItems = useMemo(() => getContextItems(contextMenu.item), [contextMenu.item, getContextItems])
 
@@ -3176,6 +3236,7 @@ function ContextMenuBridge({
       referenceToInput: '@',
       rename: '✎',
       copyPath: '⧉',
+      moveTo: '↪',
       newFile: '+',
       newFolder: '⊞',
       newBoard: '□',

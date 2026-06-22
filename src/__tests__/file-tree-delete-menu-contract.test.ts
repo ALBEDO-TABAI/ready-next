@@ -36,10 +36,21 @@ test('file tree delete action receives selected targets for bulk deletion', () =
   assert.match(source, /await deleteItem\(target\.path\)/)
 })
 
+test('file tree right-click menu moves selected items through the folder picker', () => {
+  const source = readWorkspaceFile('src/renderer/components/layout/FileTree.tsx')
+  assert.match(source, /selectedMoveItems=\{selectedMoveItems\}/)
+  assert.match(source, /selectedMoveItems\.length > 1 && selectedMoveItemSet\.has\(item\.path\)/)
+  assert.match(source, /label: '移动到'/)
+  assert.match(source, /openFolder\?\.\(\{ title: '选择移动目标文件夹' \}\)/)
+  assert.match(source, /canMoveAllToDirectory\(payloads, result\.path\)/)
+  assert.match(source, /await moveItem\(payload\.path, nextPath\)/)
+  assert.match(source, /pinnedFolderSet\.has\(path\) \|\| path === workspaceRoot/)
+})
+
 test('file tree internal native drags can drop without a system Files dataTransfer type', () => {
   const source = readWorkspaceFile('src/renderer/components/layout/FileTree.tsx')
-  assert.match(source, /function hasRememberedNativeFileDrag\(/)
-  assert.match(source, /return Boolean\(payload && canMoveToDirectory\(payload, targetDir\)\)/)
+  assert.match(source, /const payloads = parseWorkspaceDragPayloads\(e\.dataTransfer\)\s+if \(!canMoveAllToDirectory\(payloads, dirPath\)\) return/)
+  assert.match(source, /const payloads = parseWorkspaceDragPayloads\(e\.dataTransfer\)\s+if \(canMoveAllToDirectory\(payloads, currentPath\)\) \{\s+await moveWorkspaceItems\(payloads, currentPath\)/)
   assert.doesNotMatch(source, /nativePayload && hasNativeFileDrop\(e\.dataTransfer\) && canMoveToDirectory\(nativePayload, dirPath\)/)
   assert.doesNotMatch(source, /nativePayload && hasNativeFileDrop\(e\.dataTransfer\) && canMoveToDirectory\(nativePayload, currentPath\)/)
 })

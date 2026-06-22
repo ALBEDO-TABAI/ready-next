@@ -318,13 +318,13 @@ export const fileIoGroup: IpcChannelGroup<FileIoGroupDeps> = {
     // returning the path. Callers that pick a folder for *non*-workspace
     // purposes (e.g. RSS download dir, skill import) pass no payload and get
     // the legacy unconditional behavior.
-    ipcMain.handle('document:openFolder', async (event, payload?: { validateAsWorkspace?: boolean }) => {
+    ipcMain.handle('document:openFolder', async (event, payload?: { validateAsWorkspace?: boolean; title?: string }) => {
       try {
         const win = deps.resolveDialogWindow(deps.getBrowserWindowFromWebContents(event.sender))
         if (!win) return { success: false, error: 'No window' }
         const result = await deps.showOpenDialog(win, {
           properties: ['openDirectory'],
-          title: '选择工作区目录',
+          title: payload?.title || '选择工作区目录',
         })
         if (result.canceled || result.filePaths.length === 0) {
           return { success: false, error: 'cancelled' }

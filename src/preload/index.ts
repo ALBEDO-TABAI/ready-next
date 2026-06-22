@@ -648,7 +648,7 @@ const documentAPI = {
   copyItem: (src: string, dest: string) => ipcRenderer.invoke('document:copy', { src, dest }),
   moveItem: (src: string, dest: string) => ipcRenderer.invoke('document:move', { src, dest }),
   stat: (path: string) => ipcRenderer.invoke('document:stat', path),
-  openFolder: (payload?: { validateAsWorkspace?: boolean }) =>
+  openFolder: (payload?: { validateAsWorkspace?: boolean; title?: string }) =>
     ipcRenderer.invoke('document:openFolder', payload),
   exportWorkspace: (payload: { name: string; folders: string[] }) =>
     ipcRenderer.invoke('document:exportWorkspace', payload),
