@@ -1,4 +1,5 @@
 export const HTML_IN_CANVAS_BLINK_FEATURE = 'CanvasDrawElement'
+export const BROWSER_AUTOPLAY_POLICY = 'user-gesture-required'
 
 interface BlinkFeatureWebPreferences extends Record<string, unknown> {
   enableBlinkFeatures?: string
@@ -6,9 +7,10 @@ interface BlinkFeatureWebPreferences extends Record<string, unknown> {
 
 export function withHtmlInCanvasWebPreferences<T extends BlinkFeatureWebPreferences>(
   webPreferences: T,
-): T & { enableBlinkFeatures: string } {
+): T & { enableBlinkFeatures: string; autoplayPolicy: typeof BROWSER_AUTOPLAY_POLICY } {
   return {
     ...webPreferences,
+    autoplayPolicy: BROWSER_AUTOPLAY_POLICY,
     enableBlinkFeatures: appendBlinkFeature(
       webPreferences.enableBlinkFeatures,
       HTML_IN_CANVAS_BLINK_FEATURE,

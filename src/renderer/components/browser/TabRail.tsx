@@ -344,7 +344,7 @@ export default function TabRail({
       <div
         ref={scrollRef}
         className="browser-tab-rail-scroll flex min-w-0 flex-1 items-center overflow-x-auto overflow-y-hidden"
-        style={{ paddingLeft: WORKBENCH_HEADER_EDGE_X / 2, paddingRight: WORKBENCH_HEADER_EDGE_X / 2 }}
+        style={{ paddingLeft: 0, paddingRight: WORKBENCH_HEADER_EDGE_X / 2 }}
       >
         <MorphTabStrip layoutId="browser-unified-header" className="flex min-w-full w-max items-center gap-[6px]">
           {displayTabs.map((tab, index) => {

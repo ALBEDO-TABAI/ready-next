@@ -48,28 +48,18 @@ function BrowserOwnershipChip({ status }: { status: BrowserOwnershipStatus }) {
     : status.tone === 'agent'
       ? Bot
       : UserRound
-  const accent = status.tone === 'warning'
-    ? 'var(--color-orange)'
-    : status.tone === 'agent'
-      ? 'var(--color-blue)'
-      : 'var(--text-gray)'
+  const accent = status.tone === 'agent' ? 'var(--color-blue)' : 'var(--text-gray)'
   return (
     <div
-      className="flex h-[28px] flex-shrink-0 items-center gap-1.5 rounded-[9px] border px-2 text-[11px] font-semibold"
-      title={status.detail}
+      className="flex h-[28px] w-[14px] flex-shrink-0 items-center justify-center"
+      title={`${status.label}：${status.detail}`}
+      aria-label={status.label}
       data-browser-ownership={status.kind}
       style={{
-        borderColor: status.tone === 'neutral'
-          ? 'color-mix(in srgb, var(--text-gray) 18%, transparent)'
-          : `color-mix(in srgb, ${accent} 34%, transparent)`,
-        background: status.tone === 'neutral'
-          ? 'color-mix(in srgb, var(--surface-card-bg) 16%, transparent)'
-          : `color-mix(in srgb, ${accent} 10%, transparent)`,
-        color: status.tone === 'neutral' ? 'var(--text-gray)' : accent,
+        color: accent,
       }}
     >
-      <Icon style={{ width: 13, height: 13 }} strokeWidth={2} />
-      <span className="whitespace-nowrap">{status.label}</span>
+      <Icon style={{ width: 14, height: 14 }} strokeWidth={2} />
     </div>
   )
 }
@@ -159,6 +149,8 @@ export default function BrowserHeader({
           zIndex: 2,
         }}
       >
+        {ownershipStatus && <BrowserOwnershipChip status={ownershipStatus} />}
+
         <TabRail
           isActive={isActive}
           tabs={tabs}
@@ -230,8 +222,6 @@ export default function BrowserHeader({
           }}
           onToggleBookmarkForTab={onToggleBookmarkForTab}
         />
-
-        {ownershipStatus && <BrowserOwnershipChip status={ownershipStatus} />}
 
         <HeaderUtilityActions
           onShowUtilityMenu={(kind, anchorRect) => {
