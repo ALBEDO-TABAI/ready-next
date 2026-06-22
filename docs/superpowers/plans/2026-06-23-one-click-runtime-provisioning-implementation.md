@@ -14,6 +14,7 @@ decisions:
 review_log:
   - r1: 初版被 codex 审为「方向可以，但不能直接 ready-for-implementation」。6 点见 §0.7，已全部并入并降 draft。
   - r2: codex 二审 4 点（旧 venv 不重建 / 错误类型混淆 / 镜像优先级与文件名不清 / 解包护栏夸大）全部采纳，见 §0.8。
+  - r3: codex 三审 3 点（源循环须试完 / venv 比对用 realpath / P1 编号 C10）全部采纳，见 §0.9。codex 结论：补完即可进 P0 脚本阶段。
 gate_before_ready: §0.6 P0（钉死真实资产 + 真 sha256）未完成前，status 不得升 ready；P1 的注册表 gate 必须校验真实值而非「非空」。
 goal: 让安装包保持瘦壳（几十 MB），用户在「设置 › 模型与运行时」点一个按钮即自下载并配好 Python + ffmpeg + 技能核心依赖，使首次跑（在线）视频分析不再卡在环境/依赖下载上；无需预装系统 Python/homebrew。
 ---
@@ -60,17 +61,22 @@ goal: 让安装包保持瘦壳（几十 MB），用户在「设置 › 模型与
 9. **镜像两处不清**：① 资产模型加 `filename` 字段，镜像 URL = `${mirrorBase}/${platform}/${filename}`（不再含糊）。② 优先级定死：**用户镜像=强制最高优先**（先试，不参与测速排序；用户配它正是因为默认源不通，不能被测速排到后面）；其余默认源再按 `probeEndpointLatency` 排序。改 C9 + §3 helper。
 10. **解包护栏措辞夸大**：`skill-source-fetcher:98` 现有护栏只防绝对路径 + `..`，**未真正检查符号链接目标**。改写为「在现有(绝对路径/`..`)护栏**基础上新增**符号链接条目检查（拒绝 symlink 条目，或校验 link target 解析后仍在 extractDir 内）」——不是「复用同等护栏」。
 
+### 0.9 codex 三审 3 点（全部采纳，非方向性阻塞）
+1. **源循环须试完所有源**（→ C4 已补）：某源 hash/解包/架构失败不立即终止，继续下一源；全失败时聚合判类（只连接失败=unreachable；≥1 下载成功但校验失败=integrity_failed），错误体带每源原因。
+2. **venv 比对口径**（→ C10 已补）：`realpath` 归一化 + 判断 venv base 是否落在 `python-dist/` 下，禁止 raw string 比对（`home`=bin 目录、`executable`=版本化路径会误判）。
+3. **P1 编号**（→ §7 已修）：`C1–C9` 改 `C1–C10`。
+
 ## 1. 机器可验合同
 - **C1 就绪判定唯一源**：`runtime:status` 的 `{ python{ready,version,sslOk,path}, ffmpeg{ready,path,archOk}, ffprobe{ready,path}, coreDeps{ready,missing[]}, overallReady }` 必须由**真实探测**派生（`python --version` / `ssl.OPENSSL_VERSION` / `ffmpeg -version` 且校验架构 / `pip` 列核心包），不得「文件存在即 ready」。`overallReady = python.ready && ffmpeg.ready && ffprobe.ready && coreDeps.ready`。
 - **C2 完整性强制**：每资产有 pinned `sha256`（真实，§0.6）；不过即删 + 失败，禁止接通未校验二进制。
 - **C3 原子落盘**：下载→同盘临时目录→校验→解包(护栏)→`rename` 到目标；中断/失败不留半成品被误判 ready。
-- **C4 选源 + 错误分类**（0.8#8）：`selectRuntimeSourceOrder` = [用户镜像(强制置顶,不测速)] ++ [默认源按 `probeEndpointLatency` 升序]；**逐源实下载**。失败拆两类：所有源连接/HTTP 失败 → `all_sources_unreachable`（**才**提示填镜像）；下载成功但 **hash/解包/架构** 不过 → `asset_integrity_failed`（**不**提示镜像，提示「资产校验失败，疑似钉死值过期/被污染」）。区别于 modelPacks 的「退回首候选」，须测。
+- **C4 选源 + 错误分类**（0.8#8 / 0.9#1）：`selectRuntimeSourceOrder` = [用户镜像(强制置顶,不测速)] ++ [默认源按 `probeEndpointLatency` 升序]；**逐源实下载，必须把所有源都试完**（某源 hash/解包/架构失败**不**立即终止，继续下一个源——避免错过另一个干净源）。任一源完整成功并接通 → 成功。全失败时按聚合判：**只**发生连接/HTTP 失败 → `all_sources_unreachable`（**才**提示填镜像）；**至少一个源下载成功但校验/解包/架构失败**且无源接通 → `asset_integrity_failed`（**不**提示镜像）。错误体须带**每个源的失败原因**。区别于 modelPacks 的「退回首候选」，须测。
 - **C5 设置接通**：Python 解包后写 `skills_python_path` → 指向解包内解释器，须过 `isSupportedReadyPythonVersion`/`isSupportedReadyPythonSslVersion`。
 - **C6 平台/架构隔离**：按 `{platform,arch}` 选资产；缺条目 → `unsupported_platform`；ffmpeg 接通时校验架构（0.7#4），错架构拒绝。
 - **C7 幂等/单航班**：已 ready 组件跳过（除非 `force`）；进行中再点不重入（复用 modelPacks 取消/状态语义）。
 - **C8 依赖预热**：成功路径末尾 `ensureSkillInstalled('video-expert-analyzer')` 预装核心依赖；`coreDeps.ready` 进 `overallReady`（C1）。torch/模型不在此 gate。
 - **C9 镜像可配**（0.8#9）：设置 `runtime_asset_mirror_base` 非空时，按 `${base}/${platform}/${asset.filename}` 拼 URL，作为**强制最高优先源**（先试、不参与测速排序）；其余默认源再测速排序。
-- **C10 venv 接管**（0.8#7）：写 `skills_python_path` 后，若 `venvRoot/pyvenv.cfg` 的 `home`/`executable` 与新 Python 不一致 → `rm venvRoot` 强制重建，确保真用自下载 Python（而非旧系统 Python 建的 venv）。standalone Python 解包到 `skill-runtime/python-dist/`，与 `venvRoot=skill-runtime/python` 分目录。
+- **C10 venv 接管**（0.8#7 / 0.9#2）：写 `skills_python_path` 后判断 venv 是否需重建——**用 `realpath` 归一化**比对：读 `venvRoot/pyvenv.cfg` 的 `home`/`executable`，`realpath` 后判断 venv base 是否落在 `skill-runtime/python-dist/` 下（**不做 raw string 对比**，因 `home` 常是 bin 目录、`executable` 可能是 `python3.11` 版本化路径，裸比会误判反复重建）。不在 python-dist 下（或 venv 缺失）→ `rm venvRoot` 从新 Python 重建。standalone Python 解包到 `skill-runtime/python-dist/`，与 `venvRoot=skill-runtime/python` 分目录。
 
 ## 2. 数据模型 — `shared/runtime-asset-registry.ts`（新，真实值由 §0.6 脚本生成）
 ```
@@ -125,7 +131,7 @@ interface RuntimeAsset {
 
 ## 7. 分期
 - **P0（真机/真网，本机不可做）**：`scripts/pin-runtime-assets.mjs` + 在 mac arm64/x64 + win x64 各拉资产、产真实 sha256、定解包布局 → 填 `runtime-asset-registry.ts` 提交。**这是升 ready 的前提。**
-- **P1（本机可完整交付+测）**：注册表(真实值) + `RuntimeProvisioner`(mock 下载器跑通 C1–C9) + `selectRuntimeSourceOrder` + IPC/preload/类型 + §6 全部行为测试 + 注册表 gate 并入 verify。
+- **P1（本机可完整交付+测）**：注册表(真实值) + `RuntimeProvisioner`(mock 下载器跑通 C1–C10) + `selectRuntimeSourceOrder` + IPC/preload/类型 + §6 全部行为测试 + 注册表 gate 并入 verify。
 - **P2**：UI 卡 + 进度/失败镜像配置 + selfTest。
 - **P3（真机/真网验收）**：干净 Mac 一键→**首次 VEA 在线视频真实跑通**；Windows x64 实测（`.exe`/拷贝/quarantine 不适用/`verify:native`）。不接受单测绿当派发就绪。
 
