@@ -2799,6 +2799,7 @@ export default function FileTree({
         open={pendingDelete !== null}
         mode="confirm"
         danger
+        dimBackdrop={false}
         title={pendingDelete?.kind === 'unpin'
           ? '从列表中移除'
           : pendingDelete && pendingDelete.targets.length > 1
