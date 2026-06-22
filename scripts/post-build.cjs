@@ -16,6 +16,7 @@ exports.default = async function(context) {
     execSync(`codesign --force --deep --sign - "${appPath}"`, { stdio: 'inherit' });
     console.log('✅ 应用签名完成');
   } catch (error) {
-    console.error('⚠️  签名失败:', error.message);
+    console.error('❌ 签名失败:', error.message);
+    throw error;
   }
 };

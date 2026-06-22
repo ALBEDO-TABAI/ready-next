@@ -21,7 +21,7 @@
     "dev": "node ./scripts/sync-dev-icon.mjs && node scripts/ensure-native-dev.cjs && electron-vite dev",
     "build": "npm run rebuild:native && npm run native:check && npm run typecheck && electron-vite build",
     "build:dist": "npm run build && electron-builder --config electron-builder.yml",
-    "build:dist:seeded": "node ./scripts/export-ai-settings-seed.mjs && npm run build:dist",
+    "build:dist:seeded": "node ./scripts/build-seeded-dist.mjs",
     "build:dir": "npm run build && electron-builder --config electron-builder.yml --dir",
     "pack:clean": "node ./Packer/pack-clean-release.mjs",
     "preview": "electron-vite preview",

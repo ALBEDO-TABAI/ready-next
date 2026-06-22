@@ -36,6 +36,10 @@ export interface SkillChildDriver {
   planNextAction(
     state: SkillChildDriverState,
   ): Promise<SkillChildDriverAction | SkillChildCloseEvent>
+  closeAfterActionFailure?(
+    state: SkillChildDriverState,
+    result: SkillRunResult,
+  ): Promise<SkillChildCloseEvent | null>
   observeAfterAction(
     state: SkillChildDriverState,
     result: SkillRunResult,

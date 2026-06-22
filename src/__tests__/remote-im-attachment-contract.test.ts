@@ -142,6 +142,11 @@ test('local send-im file intent accepts referenced files or recent media with di
     '把最近下载的图片发微信',
     '@[Send IM]@@[实习纲要.md]',
     '@send-im 把这四张图发出去',
+    // Explicit skill mention / directed send + an inline absolute file path is unambiguous
+    //   even with no attachment context (regression: this used to short-circuit to BLOCK).
+    '@[Send IM]把 /Users/user/outputs/send-im-live/ready-send-im-live.md 发到我微信',
+    '把 /Users/user/outputs/report.pdf 发到我微信',
+    '用 sendim 把 /Users/user/x/foo.md 发到我微信',
   ]
   const negatives = [
     '帮我整理@[《置身钉内》学习笔记拷貝.md]这个学习笔记',

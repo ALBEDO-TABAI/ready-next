@@ -79,6 +79,7 @@ interface ParsedVeaRunState {
   totalScenes: number | null
   completedScenes: number | null
   coverageRatio: number | null
+  lastError: string | null
   configIssue: boolean
 }
 
@@ -223,6 +224,7 @@ function readRunState(runStatePath: string | null): ParsedVeaRunState | null {
   const totalScenes = pickNumber(rec, ['total_scenes', 'totalScenes'])
   const completedScenes = pickNumber(rec, ['completed_scenes', 'completedScenes'])
   const coverageRatio = pickNumber(rec, ['coverage_ratio', 'coverageRatio'])
+  const lastError = pickString(rec, ['last_error', 'lastError', 'error'])
   const blockerKind = trimLower(rec.blocker_kind ?? rec.blockerKind)
   const failureKind = trimLower(rec.failure_kind ?? rec.failureKind)
   const configIssue = (blockerKind === 'config' || blockerKind === 'config_repair' || failureKind === 'config')
@@ -233,6 +235,7 @@ function readRunState(runStatePath: string | null): ParsedVeaRunState | null {
     totalScenes,
     completedScenes,
     coverageRatio,
+    lastError,
     configIssue,
   }
 }
@@ -413,6 +416,57 @@ function maybeBlockVeaProviderPreflight(state: VeaDriverState, parsed: ParsedVea
   }
 }
 
+function isRecoverableVideoDownloadMessage(message: string | null): boolean {
+  if (!message) return false
+  return /yt-dlp|youtube|http error 403|forbidden|unable to download video data|requested format is not available|challenge solving failed|video download failed|下载失败/i.test(message)
+}
+
+function isRecoverableVideoDownloadError(parsed: ParsedVeaRunState | null): boolean {
+  if (!parsed?.lastError) return false
+  const stage = String(parsed.currentStage || '').toLowerCase()
+  if (stage && stage !== 'prepare' && stage !== 'download_video') return false
+  return isRecoverableVideoDownloadMessage(parsed.lastError)
+}
+
+function makeDownloadUnavailableClose(
+  state: VeaDriverState,
+  parsed: ParsedVeaRunState | null,
+  artifactProgress: SkillProgressArtifacts,
+  message: string | null,
+): SkillChildCloseEvent {
+  // Download exhausted yt-dlp's own multi-strategy retries (see pipeline_enhanced
+  //   ._download_remote_video_with_retry). What remains is a genuine "cannot fetch
+  //   from source" wall that only the user can clear (download with Ready browser,
+  //   resume with the local file). That is awaiting-user-action → blocked_external,
+  //   NOT checkpoint_background (which would falsely imply background progress and
+  //   trip the durable-resume narration path).
+  return {
+    ...makeBaseClose(state, parsed, artifactProgress),
+    status: 'blocked',
+    terminalReason: 'blocked_external',
+    error: {
+      kind: 'download_video_unavailable',
+      message: message || 'VEA video download failed; download the video with Ready browser and resume with the local file.',
+    },
+  }
+}
+
+function pickResultOutputDir(result: SkillRunResult): string | null {
+  return trim(result.outputDir) ?? trim(result.outputs?.outputDir) ?? trim(result.outputs?.output_dir)
+}
+
+function adoptResultOutputDir(state: VeaDriverState, result: SkillRunResult): void {
+  const outputDir = pickResultOutputDir(result)
+  if (outputDir && outputDir !== state.outputDir) {
+    state.outputDir = outputDir
+    state.runStatePath = join(outputDir, 'run_state.json')
+  }
+}
+
+function skillRunFailureMessage(result: SkillRunResult): string | null {
+  return trim(result.error) ?? trim(result.stderr) ?? trim(result.stdout)
+}
+
 function makeAiAnalyzePlan(
   state: VeaDriverState,
   parsed: ParsedVeaRunState | null,
@@ -563,6 +617,9 @@ class VideoExpertChildDriver implements SkillChildDriver {
 
     // Terminal: blocked / awaiting input.
     if (parsed?.status && isRunStateBlockedStatus(parsed.status)) {
+      if (isRecoverableVideoDownloadError(parsed)) {
+        return makeDownloadUnavailableClose(state, parsed, artifactProgress, parsed.lastError)
+      }
       const reason: SkillChildCloseEvent['terminalReason'] = parsed.configIssue
         ? 'blocked_config'
         : 'blocked_external'
@@ -656,20 +713,35 @@ class VideoExpertChildDriver implements SkillChildDriver {
     }
   }
 
+  async closeAfterActionFailure(
+    rawState: SkillChildDriverState,
+    result: SkillRunResult,
+  ): Promise<SkillChildCloseEvent | null> {
+    const state = rawState as VeaDriverState
+    adoptResultOutputDir(state, result)
+    const parsed = state.runStatePath ? readRunState(state.runStatePath) : null
+    state.parsedRunState = parsed ?? state.parsedRunState
+    const artifactProgress = inspectSkillProgressArtifacts({
+      outputDir: state.outputDir,
+      sceneScoresPath: trim(state.requestedInput.sceneScoresPath),
+    })
+    if (isRecoverableVideoDownloadError(parsed)) {
+      return makeDownloadUnavailableClose(state, parsed, artifactProgress, parsed?.lastError ?? null)
+    }
+    const message = skillRunFailureMessage(result)
+    if (isRecoverableVideoDownloadMessage(message)) {
+      return makeDownloadUnavailableClose(state, parsed, artifactProgress, message)
+    }
+    return null
+  }
+
   async observeAfterAction(
     rawState: SkillChildDriverState,
     result: SkillRunResult,
   ): Promise<SkillChildDriverState> {
     const state = rawState as VeaDriverState
     // Honor the runtime's view of where outputs landed.
-    if (
-      typeof result.outputDir === 'string'
-      && result.outputDir.trim()
-      && result.outputDir.trim() !== state.outputDir
-    ) {
-      state.outputDir = result.outputDir.trim()
-      state.runStatePath = join(state.outputDir, 'run_state.json')
-    }
+    adoptResultOutputDir(state, result)
     state.parsedRunState = state.runStatePath ? readRunState(state.runStatePath) : null
     return state
   }

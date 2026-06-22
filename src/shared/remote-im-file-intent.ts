@@ -42,7 +42,12 @@ const REMOTE_NEGATED_FILE_DELIVERY_SOURCE =
   `(?:${NEGATED_SEND_SOURCE}.{0,16}${REMOTE_SEND_VERB_SOURCE}.{0,16}${REMOTE_FILE_WORD_GROUP}|${NEGATED_SEND_SOURCE}.{0,16}${REMOTE_FILE_WORD_GROUP}.{0,16}${REMOTE_SEND_VERB_SOURCE}|${REMOTE_FILE_WORD_GROUP}.{0,16}${NEGATED_SEND_SOURCE}.{0,16}${REMOTE_SEND_VERB_SOURCE}|${REMOTE_FILE_WORD_GROUP}.{0,24}${REMOTE_DIRECTED_SEND_SOURCE}.{0,16}${CANCEL_SEND_SOURCE}|${SUMMARY_ONLY_SOURCE})`
 const LOCAL_IM_TARGET_SOURCE = '(?:微信|远程\\s*IM|remote\\s*im|\\bim\\b|wechat|weixin|wx)'
 const LOCAL_SEND_IM_SKILL_SOURCE =
-  '(?:@\\[\\s*Send\\s*IM\\s*\\]|@?\\bSend\\s*IM\\b|@?\\bsend-im\\b)'
+  '(?:@\\[\\s*Send\\s*IM\\s*\\]|@?\\bSend\\s*IM\\b|@?\\bsend-im\\b|@?\\bsendim\\b)'
+// An explicit, low-false-positive file signal: an inline absolute path with a known
+//   document/media extension. Mirrors `extractLocalFileResourcesFromText` in the
+//   send-im tool so that whenever this exposes the tool, the tool can also resolve it.
+const LOCAL_INLINE_ABSOLUTE_FILE_SOURCE =
+  '\\/(?:Users|Volumes|var|tmp|private|Applications|Library|opt|home)\\/[^\\n\\r`"\']+?\\.(?:md|markdown|txt|json|csv|pdf|docx?|xlsx?|png|jpe?g|webp|gif|mp4|mov|m4v|webm)'
 const LOCAL_SEND_IM_TARGET_OR_SKILL_SOURCE =
   `(?:${LOCAL_IM_TARGET_SOURCE}|${LOCAL_SEND_IM_SKILL_SOURCE})`
 const LOCAL_RECENT_MEDIA_SOURCE = [
@@ -65,6 +70,7 @@ const localNegatedSendImPattern = new RegExp(
 )
 const localGeneratedContentSendPattern = new RegExp(LOCAL_GENERATED_CONTENT_SEND_SOURCE, 'i')
 const localSendImSkillPattern = new RegExp(LOCAL_SEND_IM_SKILL_SOURCE, 'i')
+const localInlineAbsoluteFilePattern = new RegExp(LOCAL_INLINE_ABSOLUTE_FILE_SOURCE, 'i')
 const remoteFileDeliveryPatterns = [
   new RegExp(`${REMOTE_FILE_WORD_GROUP}.{0,24}${REMOTE_DIRECTED_SEND_SOURCE}`, 'i'),
   new RegExp(`${REMOTE_DIRECTED_SEND_SOURCE}.{0,24}${REMOTE_FILE_WORD_GROUP}`, 'i'),
@@ -107,6 +113,10 @@ export function hasLocalSendImFileIntent(
   if (localGeneratedContentSendPattern.test(value)) return false
   if (localSendImSkillPattern.test(value)) {
     if (hasNonSendImMention(value)) return true
+    // Explicit skill invocation + an inline absolute file path is unambiguous intent
+    //   (e.g. "@[Send IM] 把 /Users/.../foo.md 发到我微信"). Without this the branch
+    //   short-circuits and the most explicit possible request never exposes the tool.
+    if (localInlineAbsoluteFilePattern.test(value)) return true
     if (options.hasAttachmentContext === true && new RegExp(LOCAL_ATTACHED_FILE_SOURCE, 'i').test(value)) return true
     return new RegExp(LOCAL_RECENT_MEDIA_SOURCE, 'i').test(value)
   }
@@ -116,6 +126,9 @@ export function hasLocalSendImFileIntent(
     || new RegExp(`${LOCAL_IM_TARGET_SOURCE}.{0,12}${sendVerb}(?:一下|给我|给|这份|这个|文件|@\\[)`, 'i').test(value)
   if (!directedSend) return false
   if (/@\[[^\]]+\]/.test(value)) return true
+  // A directed send to WeChat that names an inline absolute file path is explicit enough
+  //   on its own (e.g. "把 /Users/.../foo.md 发到我微信"), even without an @[file] mention.
+  if (localInlineAbsoluteFilePattern.test(value)) return true
   if (options.hasAttachmentContext === true && new RegExp(LOCAL_ATTACHED_FILE_SOURCE, 'i').test(value)) return true
   return new RegExp(LOCAL_RECENT_MEDIA_SOURCE, 'i').test(value)
 }

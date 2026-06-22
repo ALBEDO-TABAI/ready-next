@@ -140,7 +140,8 @@ export function createSkillChildSubAgent(params: SkillChildSubAgentParams): SubA
         }
 
         if (!result.success) {
-          return toSubAgentResult(makeActionFailureClose(params, result))
+          const driverClose = await closeAfterActionFailure(params, state, result)
+          return toSubAgentResult(driverClose ?? makeActionFailureClose(params, result))
         }
 
         try {
@@ -180,6 +181,31 @@ export function getSkillChildCloseEventFromSubAgentClose(closeEvent: {
 }
 
 export { isSkillChildProgressPayload as isSkillChildSubAgentProgressPayload }
+
+async function closeAfterActionFailure(
+  params: SkillChildSubAgentParams,
+  state: SkillChildDriverState,
+  result: SkillRunResult,
+): Promise<SkillChildCloseEvent | null> {
+  if (!params.driver.closeAfterActionFailure) return null
+  let close: SkillChildCloseEvent | null
+  try {
+    close = await runDriverCall(params, () => params.driver.closeAfterActionFailure!(state, result))
+  } catch (error) {
+    return makeCloseEvent({
+      params,
+      status: 'failed',
+      terminalReason: 'failed_skill',
+      errorKind: 'driver_failure_close_failed',
+      message: errorMessage(error),
+    })
+  }
+  if (!close) return null
+  return freezeSkillChildCloseEvent({
+    ...close,
+    childRunId: params.childRunId,
+  } as MutableSkillChildCloseEvent)
+}
 
 function toSubAgentResult(closeEvent: SkillChildCloseEvent): SubAgentRunResult {
   const frozenCloseEvent = freezeSkillChildCloseEvent(closeEvent as MutableSkillChildCloseEvent)

@@ -1251,6 +1251,88 @@ class VideoAnalysisPipeline:
             print(f"\n❌ PIPELINE FAILED: {e}")
             raise
 
+    def _cleanup_partial_video(self):
+        """删除上一轮 yt-dlp 留下的半成品/分片文件，避免续传到损坏数据。"""
+        targets: List[Path] = []
+        if self.video_path.exists():
+            targets.append(self.video_path)
+        parent = self.video_path.parent
+        base = self.video_path.stem
+        try:
+            for pattern in (f"{base}*.part", f"{base}*.ytdl", f"{base}*.part-*"):
+                targets.extend(parent.glob(pattern))
+        except OSError:
+            pass
+        for target in targets:
+            try:
+                target.unlink()
+            except OSError:
+                # silent-catch: 残留临时文件删不掉不应阻断重试。
+                pass
+
+    def _download_remote_video_with_retry(self):
+        """
+        用 yt-dlp 下载非抖音平台视频。
+
+        YouTube 等平台会对自适应流（bestvideo+bestaudio 的 DASH 分片）间歇性返回
+        HTTP 403，单发调用毫无韧性。这里按"格式 + player_client"组合做多轮重试：
+        每一轮都重新抽取流地址，后续轮逐步放宽（轮换 player_client、回退到渐进式
+        单流格式），任意一轮成功即返回，全部失败才抛错。
+        """
+        adaptive_format = "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best"
+        progressive_format = "best[ext=mp4]/best"
+        is_youtube = bool(re.search(r"(?:youtube\.com|youtu\.be)", self.url, re.IGNORECASE))
+        # player_client 轮换只对 YouTube 有意义；其它平台保持空参数，但仍享受多轮重抽。
+        multi_client_args = (
+            ["--extractor-args", "youtube:player_client=default,tv,web_safari,mweb"]
+            if is_youtube
+            else []
+        )
+        strategies = [
+            ("default-adaptive", adaptive_format, []),
+            ("multiclient-adaptive", adaptive_format, multi_client_args),
+            ("multiclient-progressive", progressive_format, multi_client_args),
+        ]
+        # 每次调用的网络韧性参数：禁止续传损坏分片、强制覆盖、放大内部重试。
+        resilience_args = [
+            "--no-continue",
+            "--force-overwrites",
+            "--retries", "10",
+            "--fragment-retries", "10",
+            "--extractor-retries", "3",
+            "--no-progress",
+        ]
+        last_error = ""
+        for index, (label, fmt, extra_args) in enumerate(strategies, start=1):
+            self._cleanup_partial_video()
+            cmd = build_yt_dlp_command(
+                *resilience_args,
+                *extra_args,
+                "-f", fmt,
+                "-o", str(self.video_path),
+                self.url,
+            )
+            print(f"   ⏬ yt-dlp 尝试 {index}/{len(strategies)} [{label}]...")
+            try:
+                subprocess.run(cmd, check=True, capture_output=True, text=True)
+            except FileNotFoundError as exc:
+                raise RuntimeError(
+                    "未找到 yt-dlp 可执行文件，且 `python -m yt_dlp` 也不可用；"
+                    "请运行 `pip install yt-dlp` 或确保 yt-dlp 在 PATH 中。"
+                ) from exc
+            except subprocess.CalledProcessError as exc:
+                last_error = (exc.stderr or exc.stdout or "").strip()
+                tail = last_error.splitlines()[-1] if last_error else str(exc)
+                print(f"   ⚠️  尝试 {index} 失败：{tail}")
+                continue
+            if self.video_path.exists() and self.video_path.stat().st_size > 0:
+                if index > 1:
+                    print(f"   ✅ 第 {index} 轮 [{label}] 下载成功")
+                return
+            last_error = "yt-dlp 退出码为 0 但未产出有效视频文件"
+        self._cleanup_partial_video()
+        raise RuntimeError(f"yt-dlp 下载失败: {last_error or '未知错误'}")
+
     def _step_download_video(self):
         print("\n📥 Step 1: Preparing video source...")
         if self.source_kind == "local":
@@ -1282,23 +1364,9 @@ class VideoAnalysisPipeline:
             if not success:
                 raise RuntimeError("抖音视频下载失败")
         else:
-            # 使用yt-dlp下载其他平台视频
-            cmd = build_yt_dlp_command(
-                "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
-                "-o", str(self.video_path),
-                self.url,
-            )
-            try:
-                subprocess.run(cmd, check=True, capture_output=True, text=True)
-            except FileNotFoundError as exc:
-                raise RuntimeError(
-                    "未找到 yt-dlp 可执行文件，且 `python -m yt_dlp` 也不可用；"
-                    "请运行 `pip install yt-dlp` 或确保 yt-dlp 在 PATH 中。"
-                ) from exc
-            except subprocess.CalledProcessError as exc:
-                stderr = (exc.stderr or exc.stdout or "").strip()
-                raise RuntimeError(f"yt-dlp 下载失败: {stderr or exc}") from exc
-        
+            # 使用yt-dlp下载其他平台视频（YouTube 等会间歇性 403，需多轮重试）
+            self._download_remote_video_with_retry()
+
         if not self.video_path.exists():
             raise RuntimeError("Video download failed - file not found")
         file_size = self.video_path.stat().st_size / (1024 * 1024)

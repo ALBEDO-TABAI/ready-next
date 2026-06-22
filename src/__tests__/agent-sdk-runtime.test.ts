@@ -394,6 +394,45 @@ test('agent sdk runtime applies selected skill allowed_tools to default surface'
   assert.deepEqual(toolNames, ['skill_send_im_file'])
 })
 
+test('agent sdk runtime exposes skill_send_im_file when the file to send is referenced as @[file.md]', async () => {
+  // Regression: "@[Send IM]@[2026 世界杯-...md]" (the natural way to name the file to send)
+  //   used to collide with shouldUseLocalDocumentToolSet — the @[...md] reference routed the
+  //   turn to the document tool set, stripping skill_send_im_file and leaving zero tools
+  //   ("当前会话未开放 skill_send_im_file 工具").
+  let toolNames: string[] = []
+  const runtime = createRuntime({
+    runAgent: async ({ tools }) => {
+      toolNames = tools.map((tool) => tool.name)
+      return { finalText: 'send-im md ref captured' }
+    },
+  })
+  runtime.newSession('butler::scope-send-im-md-ref', 'system prompt')
+
+  const result = await runtime.sendMessage(
+    'butler::scope-send-im-md-ref',
+    '@[Send IM]@[2026 世界杯-1781619835060.md]',
+    'run-send-im-md-ref',
+    {
+      publicSessionId: 'scope-send-im-md-ref',
+      taskId: 'task-send-im-md-ref',
+      requestEnvelope: {
+        primaryInstruction: '@[Send IM]@[2026 世界杯-1781619835060.md]',
+        resources: [
+          {
+            name: '2026 世界杯-1781619835060.md',
+            path: '/tmp/ready-send-im-proof/2026 世界杯-1781619835060.md',
+            kind: 'attachment',
+            source: 'user_attachment',
+          },
+        ],
+      },
+    },
+  )
+
+  assert.equal(result.success, true)
+  assert.ok(toolNames.includes('skill_send_im_file'), `expected skill_send_im_file, got: ${toolNames.join(',') || '(none)'}`)
+})
+
 test('agent sdk runtime suppresses browser task tools for active VEA skill resume after recent collection intent', async () => {
   const seenToolNames: string[][] = []
   let activeSkillHint = false
@@ -5430,3 +5469,4 @@ test('agent sdk runtime does not leak host-only or unauthorized skill tools by d
   assert.equal(seenToolNames.includes('skill_run_shell'), false)
   assert.equal(seenToolNames.includes('skill_patch_config'), false)
 })
+

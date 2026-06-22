@@ -1651,6 +1651,15 @@ function shouldUseLocalDocumentToolSet(message: RunMessage, requestEnvelope?: un
   if (!hasLocalDocumentResource(message, requestEnvelope)) return false
   const envelopeRefs = parseEnvelopeResourceReferences(requestEnvelope)
   const primary = envelopeRefs.primaryInstruction || primaryInstructionText(message)
+  // A directed send-to-IM ("把 @[x.md] 发到我微信" / "@[Send IM]@[x.md]") is a delivery
+  //   intent, not document editing. Without this guard the @[...md] reference matches the
+  //   document regex below, narrowing the surface to document/file tools and stripping
+  //   skill_send_im_file — leaving the model with zero tools ("当前会话未开放").
+  if (hasLocalSendImFileIntent(primary, {
+    hasAttachmentContext: hasCurrentTurnAttachmentContext(message, requestEnvelope),
+  })) {
+    return false
+  }
   if (/(?:网页|浏览器|网站|url|https?:\/\/|www\.|网上|网络|搜索|检索|最新|今天|新闻|官网|公告|source|citation|research|search|latest|today|news)/i.test(primary)) {
     return false
   }

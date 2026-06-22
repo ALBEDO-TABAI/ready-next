@@ -88,6 +88,7 @@ function makeClose(
 function makeDriver(options: {
   plans: Array<SkillChildDriverAction | SkillChildCloseEvent>
   observe?: (state: SkillChildDriverState, result: SkillRunResult) => Promise<SkillChildDriverState>
+  closeAfterActionFailure?: (state: SkillChildDriverState, result: SkillRunResult) => Promise<SkillChildCloseEvent | null>
   planThrows?: boolean
 }): SkillChildDriver {
   return {
@@ -103,6 +104,11 @@ function makeDriver(options: {
       if (options.planThrows) throw new Error('plan exploded')
       const next = options.plans.shift()
       return next ?? makeClose()
+    },
+    async closeAfterActionFailure(state, result) {
+      return options.closeAfterActionFailure
+        ? options.closeAfterActionFailure(state, result)
+        : null
     },
     async observeAfterAction(state, result) {
       if (options.observe) return options.observe(state, result)
@@ -360,6 +366,40 @@ test('SkillChildSubAgent.run keeps true failed action results as failed_skill', 
   assert.equal(closeEvent.state, 'failed')
   assert.equal(childClose?.status, 'failed')
   assert.equal(childClose?.terminalReason, 'failed_skill')
+})
+
+test('SkillChildSubAgent.run lets a driver convert failed action results to recoverable close', async () => {
+  const subagent = makeSubAgent({
+    driver: makeDriver({
+      plans: [
+        { action: 'step_one', input: {} },
+        makeClose(),
+      ],
+      closeAfterActionFailure: async () => makeClose({
+        childRunId: 'wrong-id',
+        status: 'recoverable_paused',
+        terminalReason: 'checkpoint_background',
+        error: { kind: 'download_video_unavailable', message: 'download failed' },
+      }),
+    }),
+    executeAction: async () => makeResult({
+      success: false,
+      status: 'error',
+      error: 'yt-dlp download failed',
+    }),
+  })
+
+  const { closeEvent } = await collectRun(runSubAgent(subagent, {
+    abortSignal: new AbortController().signal,
+    cleanup: makeCleanup(),
+  }))
+
+  const childClose = getSkillChildCloseEventFromSubAgentClose(closeEvent)
+  assert.equal(closeEvent.state, 'blocked')
+  assert.equal(childClose?.childRunId, 'child-1')
+  assert.equal(childClose?.status, 'recoverable_paused')
+  assert.equal(childClose?.terminalReason, 'checkpoint_background')
+  assert.equal(childClose?.error?.kind, 'download_video_unavailable')
 })
 
 test('createSkillChildSubAgentFromPersisted reconstructs from durable payload', async () => {

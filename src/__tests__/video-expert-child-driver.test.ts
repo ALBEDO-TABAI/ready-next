@@ -29,6 +29,7 @@ import type {
   SkillChildCloseEvent,
   SkillChildDriverAction,
 } from '../main/modules/agent-control/skills/skill-child-run-types'
+import type { SkillRunResult } from '../main/modules/skills-runtime/runtime-manager'
 import type { AIModelConfig } from '../shared/ai-providers'
 
 async function makeTempOutputDir(): Promise<string> {
@@ -757,6 +758,76 @@ test('Phase 5: blocked run_state closes terminalReason=blocked_external', async 
   const close = asClose(next)
   assert.equal(close.status, 'blocked')
   assert.equal(close.terminalReason, 'blocked_external')
+})
+
+test('VEA YouTube download failure blocks externally for browser/local-file fallback', async () => {
+  const outputDir = await makeTempOutputDir()
+  const runStatePath = path.join(outputDir, 'run_state.json')
+  await fs.writeFile(
+    runStatePath,
+    JSON.stringify({
+      status: 'blocked',
+      current_stage: 'prepare',
+      last_error: 'yt-dlp 下载失败: ERROR: unable to download video data: HTTP Error 403: Forbidden',
+    }),
+    'utf8',
+  )
+
+  const driver = getSkillChildDriver('video-expert-analyzer')!
+  const state = await driver.createInitialState({
+    skillId: 'video-expert-analyzer',
+    action: 'video_expert_pipeline',
+    scopeId: 'scope-1',
+    sessionId: 'session-1',
+    requestedInput: {
+      url: 'https://www.youtube.com/watch?v=abc123',
+      outputDir,
+    },
+    parentNextHint: 'wait_for_close_event',
+    outputDir,
+  })
+
+  const close = asClose(await driver.planNextAction(state))
+  assert.equal(close.status, 'blocked')
+  assert.equal(close.terminalReason, 'blocked_external')
+  assert.equal(close.error?.kind, 'download_video_unavailable')
+  assert.match(close.error?.message || '', /HTTP Error 403/)
+})
+
+test('VEA failed pipeline result without run_state blocks externally on YouTube download error', async () => {
+  const outputDir = await makeTempOutputDir()
+  const driver = getSkillChildDriver('video-expert-analyzer')!
+  const state = await driver.createInitialState({
+    skillId: 'video-expert-analyzer',
+    action: 'video_expert_pipeline',
+    scopeId: 'scope-1',
+    sessionId: 'session-1',
+    requestedInput: {
+      url: 'https://www.youtube.com/watch?v=abc123',
+      outputDir,
+    },
+    parentNextHint: 'wait_for_close_event',
+    outputDir,
+  })
+
+  const result: SkillRunResult = {
+    success: false,
+    skillId: 'video-expert-analyzer',
+    action: 'video_expert_pipeline',
+    stdout: '',
+    stderr: '',
+    command: ['yt-dlp'],
+    status: 'error',
+    outputDir,
+    error: 'yt-dlp 下载失败: ERROR: unable to download video data: HTTP Error 403: Forbidden',
+  }
+
+  const close = await driver.closeAfterActionFailure?.(state, result)
+  assert.ok(close, 'expected VEA driver to convert download error into a blocked_external close')
+  assert.equal(close.status, 'blocked')
+  assert.equal(close.terminalReason, 'blocked_external')
+  assert.equal(close.error?.kind, 'download_video_unavailable')
+  assert.match(close.error?.message || '', /HTTP Error 403/)
 })
 
 test('VEA driver resumes blocked score_batches when artifacts prove scoring is incomplete', async () => {
