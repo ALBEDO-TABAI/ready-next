@@ -36,14 +36,8 @@ import {
 import { MemoryListPanel, TriggerManager, MemoryStatsCard, MemoryCreator, BeliefCardsPanel } from '../components/memory'
 import { useBeliefCards, useMemories, useMemoryLifecycle, useMemoryStats } from '../hooks/useMemory'
 import type { MemoryQueryFilters } from '../types/electron'
-import PersonalityEditor from '../components/personality/PersonalityEditor'
-import AgentDerivationPanel from '../components/personality/AgentDerivationPanel'
-import AgentRegistryPanel from '../components/personality/AgentRegistryPanel'
-import AgentSystemStudio from '../components/agent-system/AgentSystemStudio'
+import AgentSettingsHub from '../components/agent-system/AgentSettingsHub'
 import UserProfileEditor from '../components/profile/UserProfileEditor'
-
-const AGENT_AUTO_NARRATION_CONTINUATION_SETTING_KEY = 'agent.autoNarrationContinuation'
-const AGENT_SESSION_PREROUTE_SETTING_KEY = 'agent.sessionPrerouteMode'
 
 interface SettingSection {
   id: string
@@ -115,28 +109,8 @@ const settingsData: SettingSection[] = [
     id: 'agent',
     title: 'Agent',
     icon: Sparkles,
-    description: '控制 Agent 的后台任务提示与续跑',
-    settings: [
-      {
-        id: AGENT_AUTO_NARRATION_CONTINUATION_SETTING_KEY,
-        label: '后台任务自动播报',
-        description: '没有活跃对话运行时，后台任务完成后自动生成一条结果播报。',
-        type: 'toggle',
-        value: true,
-      },
-      {
-        id: AGENT_SESSION_PREROUTE_SETTING_KEY,
-        label: '新会话智能路由',
-        description: '新会话首条消息按"状态优先/先例次之"判定更合适的专项 agent：建议=显示建议条由你决定；自动=先例命中直接转给对应 agent（可一键改回）。派生新 agent 永远需要你确认。',
-        type: 'select',
-        value: 'suggest',
-        options: [
-          { value: 'off', label: '关闭' },
-          { value: 'suggest', label: '建议（默认）' },
-          { value: 'auto', label: '自动' },
-        ],
-      },
-    ],
+    description: '管理 Agent 的人格、知识、路由、生命周期与后台行为',
+    settings: [] // Rendered dynamically via AgentSettingsHub（合并原 Agent / Agent 人格 / Agent 系统 三个 Tab）
   },
   {
     id: 'remote-im',
@@ -165,20 +139,6 @@ const settingsData: SettingSection[] = [
     icon: Brain,
     description: '查看 Agent 已沉淀的记忆，高级工具按需展开',
     settings: [] // Rendered dynamically via Memory components
-  },
-  {
-    id: 'personalities',
-    title: 'Agent 人格',
-    icon: Sparkles,
-    description: '定义聊天面板可切换 Agent 的人格和语气',
-    settings: [] // Rendered dynamically via PersonalityEditor
-  },
-  {
-    id: 'agent-system',
-    title: 'Agent 系统',
-    icon: Bot,
-    description: '查看主 agent、专项 agent、路由、任务归属和分派 trace',
-    settings: []
   },
   {
     id: 'user-profiles',
@@ -2954,26 +2914,7 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
       if (result?.success) {
         updateSetting('privacy', FILE_EMERGENCE_SETTING_KEY, result.data !== 'false')
       }
-      const autoNarrationResult = window.electronAPI.settings.getAgentAutoNarrationContinuation
-        ? await window.electronAPI.settings.getAgentAutoNarrationContinuation()
-        : await window.electronAPI.settings.get(AGENT_AUTO_NARRATION_CONTINUATION_SETTING_KEY)
-      if (cancelled) return
-      if (autoNarrationResult?.success) {
-        updateSetting(
-          'agent',
-          AGENT_AUTO_NARRATION_CONTINUATION_SETTING_KEY,
-          typeof autoNarrationResult.data === 'boolean'
-            ? autoNarrationResult.data
-            : autoNarrationResult.data !== 'false',
-        )
-      }
-      const prerouteResult = window.electronAPI.settings.getAgentSessionPrerouteMode
-        ? await window.electronAPI.settings.getAgentSessionPrerouteMode()
-        : null
-      if (cancelled) return
-      if (prerouteResult?.success && typeof prerouteResult.data === 'string') {
-        updateSetting('agent', AGENT_SESSION_PREROUTE_SETTING_KEY, prerouteResult.data)
-      }
+      // Agent 后台播报 / 新会话路由 的读写已迁入 AgentSettingsHub「行为」子区（自包含）。
     })()
     return () => { cancelled = true }
   }, [])
@@ -2993,10 +2934,7 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
 
   const handleToggleSetting = async (sectionId: string, setting: SettingItem) => {
     const nextValue = !setting.value
-    if (
-      setting.id !== FILE_EMERGENCE_SETTING_KEY &&
-      setting.id !== AGENT_AUTO_NARRATION_CONTINUATION_SETTING_KEY
-    ) {
+    if (setting.id !== FILE_EMERGENCE_SETTING_KEY) {
       updateSetting(sectionId, setting.id, nextValue)
       return
     }
@@ -3004,9 +2942,7 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
       setSettingErrors((prev) => ({ ...prev, [setting.id]: '设置 IPC 不可用' }))
       return
     }
-    const result = setting.id === AGENT_AUTO_NARRATION_CONTINUATION_SETTING_KEY && window.electronAPI.settings.setAgentAutoNarrationContinuation
-      ? await window.electronAPI.settings.setAgentAutoNarrationContinuation(nextValue)
-      : await window.electronAPI.settings.set(setting.id, nextValue ? 'true' : 'false')
+    const result = await window.electronAPI.settings.set(setting.id, nextValue ? 'true' : 'false')
     if (result.success) {
       setSettingErrors((prev) => {
         const next = { ...prev }
@@ -3020,7 +2956,7 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
   }
 
   const isDynamicSection = currentSection
-    ? ['ai', 'remote-im', 'external-services', 'mcp', 'memory', 'personalities', 'agent-system', 'user-profiles', 'pet', 'rss-storage', MODELS_RUNTIME_SETTINGS_SECTION, 'storage'].includes(currentSection.id)
+    ? ['ai', 'remote-im', 'external-services', 'mcp', 'memory', 'agent', 'user-profiles', 'pet', 'rss-storage', MODELS_RUNTIME_SETTINGS_SECTION, 'storage'].includes(currentSection.id)
     : false
 
   return (
@@ -3166,17 +3102,9 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
                   <MemorySettingsSection />
                 )}
 
-                {/* Agent Personalities — custom layout */}
-                {currentSection.id === 'personalities' && (
-                  <div className="flex flex-col gap-5">
-                    <PersonalityEditor />
-                    <AgentDerivationPanel />
-                    <AgentRegistryPanel />
-                  </div>
-                )}
-
-                {currentSection.id === 'agent-system' && (
-                  <AgentSystemStudio />
+                {/* Agent — 单入口容器：人格 / registry / 派生 / 系统 + 行为开关 */}
+                {currentSection.id === 'agent' && (
+                  <AgentSettingsHub />
                 )}
 
                 {/* User Profiles — custom layout */}
@@ -3343,25 +3271,6 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
                             const nextValue = e.target.value
                             if (currentSection.id === 'appearance' && setting.id === 'theme') {
                               setAccent(nextValue as ThemeAccent)
-                              return
-                            }
-                            if (setting.id === AGENT_SESSION_PREROUTE_SETTING_KEY) {
-                              void (async () => {
-                                const api = window.electronAPI?.settings?.setAgentSessionPrerouteMode
-                                const result = api
-                                  ? await api(nextValue as 'off' | 'suggest' | 'auto')
-                                  : { success: false, error: '设置 IPC 不可用' }
-                                if (result.success) {
-                                  setSettingErrors((prev) => {
-                                    const next = { ...prev }
-                                    delete next[setting.id]
-                                    return next
-                                  })
-                                  updateSetting(currentSection.id, setting.id, nextValue)
-                                } else {
-                                  setSettingErrors((prev) => ({ ...prev, [setting.id]: result.error || '设置保存失败' }))
-                                }
-                              })()
                               return
                             }
                             updateSetting(currentSection.id, setting.id, nextValue)
