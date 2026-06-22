@@ -1,4 +1,5 @@
 import { extractPrimaryUserInstruction as extractPrimaryUserInstructionFromText } from '../../claude-bridge/tool-policy-heuristics'
+import { validateWorkspaceRoot } from '../../../../shared/workspace-validation'
 
 export type InputChunkSource =
   | 'user_message'
@@ -75,6 +76,7 @@ export interface RequestEnvelope {
     hasWidgetTargetContext: boolean
     hasAttachments: boolean
     hasBootstrapContext: boolean
+    workspaceRoots?: string[]
   }
   provenanceSummary: {
     countsBySource: Record<InputChunkSource, number>
@@ -413,6 +415,20 @@ function buildReferencedResources(raw: string): RequestEnvelopeResourceRef[] {
   return refs
 }
 
+function normalizeWorkspaceRoots(rawRoots: unknown): string[] {
+  if (!Array.isArray(rawRoots)) return []
+  const seen = new Set<string>()
+  const roots: string[] = []
+  for (const rawRoot of rawRoots) {
+    if (typeof rawRoot !== 'string') continue
+    const root = rawRoot.trim()
+    if (!root || !validateWorkspaceRoot(root).ok || seen.has(root)) continue
+    seen.add(root)
+    roots.push(root)
+  }
+  return roots
+}
+
 export function buildRequestEnvelope(params: {
   userText: string
   /**
@@ -425,11 +441,13 @@ export function buildRequestEnvelope(params: {
    */
   sessionId?: string
   scopeId?: string
+  workspaceRoots?: string[]
 }): RequestEnvelope {
   const rawUserText = String(params.userText || '')
   const pureUserText = extractPureUserInput(rawUserText)
   const primaryInstruction = extractPrimaryUserInstructionFromText(pureUserText || rawUserText).trim()
   const structuredBlocks = collectStructuredBlocks(rawUserText)
+  const workspaceRoots = normalizeWorkspaceRoots(params.workspaceRoots)
 
   const chunks: InputChunk[] = []
   if (pureUserText) {
@@ -482,6 +500,7 @@ export function buildRequestEnvelope(params: {
         || rawUserText.includes('## 跨会话回看')
         || rawUserText.includes('## 自动跨会话回看')
         || rawUserText.includes('## L2 按需规则'),
+      ...(workspaceRoots.length > 0 ? { workspaceRoots } : {}),
     },
     provenanceSummary: {
       countsBySource,

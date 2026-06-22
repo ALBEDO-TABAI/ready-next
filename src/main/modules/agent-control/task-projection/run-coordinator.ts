@@ -48,6 +48,7 @@ export class RunCoordinator {
         scope: ConversationScope
         message: RunMessage
         coordinators: RunCoordinatorRequest['coordinators']
+        workspaceRoots?: string[]
         /** EP3-A4 — the scope's effective owner; switches A2 injection. */
         ownerAgentId?: string | null
       }) => Promise<PreparedRunPayload>
@@ -96,6 +97,7 @@ export class RunCoordinator {
       scope: request.scope,
       message: request.message,
       coordinators: request.coordinators,
+      workspaceRoots: request.workspaceRoots,
       // EP3-A4 — adoption switched the scope's owner; this is where the
       // next turn's injection follows it (A2 channel).
       ownerAgentId: this.deps.resolveScopeOwnerAgent?.(request.scope.id) ?? null,

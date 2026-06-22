@@ -8,6 +8,7 @@ import type { SearchEngine } from '../search-engine/indexer'
 import { getWorkerDbBridge } from '../database/worker-bridge'
 import { parseDocumentGraph } from '../../../shared/document-graph-parse'
 import { resolveDocumentSectionAnchor } from '../../../shared/document-sectioning'
+import { validateWorkspaceRoot } from '../../../shared/workspace-validation'
 import {
   resolveIndexedDocumentCandidate as resolveIndexedDocumentCandidateFromDb,
   type IndexedDocumentRow,
@@ -27,6 +28,7 @@ interface FileManagementToolContext {
   searchEngine?: SearchEngine | null
   abortSignal?: AbortSignal
   organizeStoreDir?: string | null
+  workspaceRoots?: string[] | null
 }
 
 const DEFAULT_EXCERPT_CHARS = 32_000
@@ -93,12 +95,32 @@ type AuthorizedRoot =
   | { ok: true; rootPath: string; rootRealPath: string; workspaceRoot: string }
   | { ok: false; output: Record<string, unknown> }
 
-function assertInsideWorkspace(target: string, engine: SearchEngine): { ok: true; root: string } | { ok: false; error: string } {
+function normalizeExplicitWorkspaceRoots(roots: string[] | null | undefined): string[] | null {
+  if (!Array.isArray(roots)) return null
+  const seen = new Set<string>()
+  const normalized: string[] = []
+  for (const rawRoot of roots) {
+    const root = typeof rawRoot === 'string' ? resolvePath(rawRoot.trim()) : ''
+    if (!root || !validateWorkspaceRoot(root).ok || seen.has(root)) continue
+    seen.add(root)
+    normalized.push(root)
+  }
+  return normalized
+}
+
+function assertInsideWorkspace(
+  target: string,
+  engine: SearchEngine,
+  explicitRoots?: string[] | null,
+): { ok: true; root: string } | { ok: false; error: string } {
   if (!isAbsolute(target)) {
     return { ok: false, error: 'path must be absolute' }
   }
   const resolved = resolvePath(target)
-  const root = engine.findWorkspaceRootForPath(resolved)
+  const scopedRoots = normalizeExplicitWorkspaceRoots(explicitRoots)
+  const root = scopedRoots
+    ? scopedRoots.find((candidate) => isPathInsideRoot(resolved, candidate))
+    : engine.findWorkspaceRootForPath(resolved)
   if (!root) return { ok: false, error: `path is outside any known workspace: ${resolved}` }
   const rel = relative(root, resolved)
   if (rel.startsWith('..')) return { ok: false, error: `path escapes workspace root: ${rel}` }
@@ -110,12 +132,16 @@ function isPathInsideRoot(target: string, root: string): boolean {
   return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel))
 }
 
-async function authorizeRoot(rawRootPath: string, engine: SearchEngine): Promise<AuthorizedRoot> {
+async function authorizeRoot(
+  rawRootPath: string,
+  engine: SearchEngine,
+  explicitRoots?: string[] | null,
+): Promise<AuthorizedRoot> {
   const raw = String(rawRootPath || '').trim()
   if (!raw) return { ok: false, output: { ok: false, error: 'rootPath is required' } }
   const rootPath = resolvePath(raw)
   if (!isAbsolute(rootPath)) return { ok: false, output: { ok: false, error: 'rootPath must be absolute' } }
-  const guard = assertInsideWorkspace(rootPath, engine)
+  const guard = assertInsideWorkspace(rootPath, engine, explicitRoots)
   if (!guard.ok) return { ok: false, output: { ok: false, error: guard.error } }
   try {
     const rootStat = await stat(rootPath)
@@ -319,27 +345,27 @@ export async function executeFileManagementTool(
 
   switch (toolName) {
     case 'file_search':
-      return runFileSearch(args, engine)
+      return runFileSearch(args, engine, context)
     case 'file_locate':
-      return runFileLocate(args, engine)
+      return runFileLocate(args, engine, context)
     case 'file_read_excerpt':
-      return runFileReadExcerpt(args, engine)
+      return runFileReadExcerpt(args, engine, context)
     case 'file_get_backlinks':
-      return runFileGetBacklinks(args, engine)
+      return runFileGetBacklinks(args, engine, context)
     case 'file_get_graph':
-      return runFileGetGraph(args, engine)
+      return runFileGetGraph(args, engine, context)
     case 'file_classify':
-      return runFileClassify(args, engine)
+      return runFileClassify(args, engine, context)
     case 'file_rename':
-      return runFileRename(args, engine)
+      return runFileRename(args, engine, context)
     case 'file_move':
-      return runFileMove(args, engine)
+      return runFileMove(args, engine, context)
     case 'file_inventory':
-      return runFileInventory(args, engine)
+      return runFileInventory(args, engine, context)
     case 'file_extract_text':
-      return runFileExtractText(args, engine)
+      return runFileExtractText(args, engine, context)
     case 'file_create_folder':
-      return runFileCreateFolder(args, engine)
+      return runFileCreateFolder(args, engine, context)
     case 'file_organize_preview':
       return runFileOrganizePreview(args, engine, context)
     case 'file_organize_apply':
@@ -356,21 +382,26 @@ async function getDefaultSearchEngine(): Promise<SearchEngine | null> {
   return getSearchEngine()
 }
 
-async function runFileSearch(args: Record<string, unknown>, engine: SearchEngine): Promise<string> {
+async function runFileSearch(
+  args: Record<string, unknown>,
+  engine: SearchEngine,
+  context?: FileManagementToolContext,
+): Promise<string> {
   const query = typeof args.query === 'string' ? args.query : ''
   if (!query.trim()) return 'Error: query is required'
   const limit = typeof args.limit === 'number' ? Math.max(1, Math.min(200, args.limit)) : 20
   const sources = Array.isArray(args.sources) ? args.sources.filter((s): s is string => typeof s === 'string') : undefined
   const workspaceRoot = typeof args.workspaceRoot === 'string' ? args.workspaceRoot : undefined
+  const workspaceRoots = normalizeExplicitWorkspaceRoots(context?.workspaceRoots)
 
   // perf-rescue B1: FTS scan over an 80GB index used to lock the main thread.
   // Offload to worker; on worker failure fall back to the in-process engine so
   // we never break this tool path.
   let result: Awaited<ReturnType<SearchEngine['search']>>
   try {
-    result = await getWorkerDbBridge().searchDocuments({ query, limit, sources, workspaceRoot })
+    result = await getWorkerDbBridge().searchDocuments({ query, limit, sources, workspaceRoot, workspaceRoots: workspaceRoots ?? undefined })
   } catch {
-    result = await engine.search(query, { limit, sources, workspaceRoot })
+    result = await engine.search(query, { limit, sources, workspaceRoot, workspaceRoots: workspaceRoots ?? undefined })
   }
   return toJsonString({
     returned: result.stats.returned,
@@ -387,7 +418,11 @@ async function runFileSearch(args: Record<string, unknown>, engine: SearchEngine
   })
 }
 
-async function runFileLocate(args: Record<string, unknown>, engine: SearchEngine): Promise<string> {
+async function runFileLocate(
+  args: Record<string, unknown>,
+  engine: SearchEngine,
+  context?: FileManagementToolContext,
+): Promise<string> {
   const requestedPath = typeof args.path === 'string' ? args.path : ''
   if (!requestedPath) return 'Error: path is required'
   const anchor = typeof args.anchor === 'string' ? args.anchor : ''
@@ -403,7 +438,7 @@ async function runFileLocate(args: Record<string, unknown>, engine: SearchEngine
   const row = resolved.row
   let sourceType = row?.source_type || 'document'
   if (!row) {
-    const guard = assertInsideWorkspace(path, engine)
+    const guard = assertInsideWorkspace(path, engine, context?.workspaceRoots)
     if (!guard.ok) return toJsonString({ ok: false, error: 'path not in index', detail: guard.error })
     await engine.indexDocument(guard.root, path)
   }
@@ -456,6 +491,7 @@ async function runFileLocate(args: Record<string, unknown>, engine: SearchEngine
 async function resolveReadableDocumentPath(
   rawPath: string,
   engine: SearchEngine,
+  context?: FileManagementToolContext,
 ): Promise<
   | { ok: true; path: string; readPath: string; root: string }
   | { ok: false; output: Record<string, unknown> }
@@ -471,7 +507,7 @@ async function resolveReadableDocumentPath(
     return { ok: false, output: { ok: false, error: 'ambiguous path', candidates: resolved.ambiguous } }
   } else {
     path = resolved.path
-    const guard = assertInsideWorkspace(path, engine)
+    const guard = assertInsideWorkspace(path, engine, context?.workspaceRoots)
     if (!guard.ok) return { ok: false, output: { ok: false, error: 'path not in index', detail: guard.error } }
     await engine.indexDocument(guard.root, path)
   }
@@ -480,7 +516,7 @@ async function resolveReadableDocumentPath(
     return { ok: false, output: { ok: false, path, sourceType, error: 'non-filesystem source; open via host UI' } }
   }
 
-  const guard = assertInsideWorkspace(path, engine)
+  const guard = assertInsideWorkspace(path, engine, context?.workspaceRoots)
   if (!guard.ok) return { ok: false, output: { ok: false, error: guard.error } }
 
   const rootRealPath = await realpath(guard.root)
@@ -619,9 +655,13 @@ function resolveExcerptRange(
   }
 }
 
-async function runFileReadExcerpt(args: Record<string, unknown>, engine: SearchEngine): Promise<string> {
+async function runFileReadExcerpt(
+  args: Record<string, unknown>,
+  engine: SearchEngine,
+  context?: FileManagementToolContext,
+): Promise<string> {
   const rawPath = typeof args.path === 'string' ? args.path : ''
-  const resolved = await resolveReadableDocumentPath(rawPath, engine)
+  const resolved = await resolveReadableDocumentPath(rawPath, engine, context)
   if (!resolved.ok) return toJsonString(resolved.output)
 
   try {
@@ -659,9 +699,15 @@ async function runFileReadExcerpt(args: Record<string, unknown>, engine: SearchE
   }
 }
 
-async function runFileGetBacklinks(args: Record<string, unknown>, engine: SearchEngine): Promise<string> {
+async function runFileGetBacklinks(
+  args: Record<string, unknown>,
+  engine: SearchEngine,
+  context?: FileManagementToolContext,
+): Promise<string> {
   const path = typeof args.path === 'string' ? args.path : ''
   if (!path) return 'Error: path is required'
+  const guard = assertInsideWorkspace(path, engine, context?.workspaceRoots)
+  if (!guard.ok) return toJsonString({ ok: false, path, error: guard.error })
   const limit = typeof args.limit === 'number' ? Math.max(1, Math.min(200, args.limit)) : 50
   const db = engine.getRepository().getConnection()
   const target = db.prepare('SELECT id FROM documents WHERE path = ? LIMIT 1').get<{ id: number }>(path)
@@ -675,20 +721,26 @@ async function runFileGetBacklinks(args: Record<string, unknown>, engine: Search
        LIMIT ?`,
     )
     .all<{ path: string; name: string; kind: string }>(target.id, limit)
-  return toJsonString({ ok: true, path, references: rows })
+  const scopedRows = rows.filter((row) => assertInsideWorkspace(row.path, engine, context?.workspaceRoots).ok)
+  return toJsonString({ ok: true, path, references: scopedRows })
 }
 
-async function runFileGetGraph(args: Record<string, unknown>, _engine: SearchEngine): Promise<string> {
+async function runFileGetGraph(
+  args: Record<string, unknown>,
+  _engine: SearchEngine,
+  context?: FileManagementToolContext,
+): Promise<string> {
   const depth = typeof args.depth === 'number' ? Math.max(1, Math.min(6, args.depth)) : 2
   const centerPath = typeof args.centerPath === 'string' ? args.centerPath : undefined
   const workspaceRoot = typeof args.workspaceRoot === 'string' ? args.workspaceRoot : undefined
+  const workspaceRoots = normalizeExplicitWorkspaceRoots(context?.workspaceRoots)
 
   // perf-rescue B1: graph queries can scan 681K rows + N BFS round-trips.
   // Offload to the worker_thread so the main thread stays responsive.
   // Falls back to an error JSON if the worker is unavailable, matching the
   // contract for the original implementation (always returns a JSON string).
   try {
-    const result = await getWorkerDbBridge().getDocumentGraph({ depth, centerPath, workspaceRoot })
+    const result = await getWorkerDbBridge().getDocumentGraph({ depth, centerPath, workspaceRoot: workspaceRoot ?? workspaceRoots?.[0] })
     if (result.note === 'centerPath not in index') {
       return toJsonString({ nodes: [], edges: [], note: result.note })
     }
@@ -702,7 +754,11 @@ async function runFileGetGraph(args: Record<string, unknown>, _engine: SearchEng
   }
 }
 
-async function runFileClassify(args: Record<string, unknown>, engine: SearchEngine): Promise<string> {
+async function runFileClassify(
+  args: Record<string, unknown>,
+  engine: SearchEngine,
+  context?: FileManagementToolContext,
+): Promise<string> {
   const path = typeof args.path === 'string' ? args.path : ''
   if (!path) return 'Error: path is required'
   const addTags = Array.isArray(args.addTags) ? args.addTags.filter((t): t is string => typeof t === 'string') : []
@@ -718,7 +774,7 @@ async function runFileClassify(args: Record<string, unknown>, engine: SearchEngi
   if (!path.toLowerCase().endsWith('.md')) {
     return 'Error: file_classify only supports .md files'
   }
-  const guard = assertInsideWorkspace(path, engine)
+  const guard = assertInsideWorkspace(path, engine, context?.workspaceRoots)
   if (!guard.ok) return `Error: ${guard.error}`
 
   try {
@@ -849,9 +905,13 @@ async function extractTextFromPath(path: string): Promise<{ ok: true; text: stri
   }
 }
 
-async function runFileExtractText(args: Record<string, unknown>, engine: SearchEngine): Promise<string> {
+async function runFileExtractText(
+  args: Record<string, unknown>,
+  engine: SearchEngine,
+  context?: FileManagementToolContext,
+): Promise<string> {
   const rawPath = typeof args.path === 'string' ? args.path : ''
-  const resolved = await resolveReadableDocumentPath(rawPath, engine)
+  const resolved = await resolveReadableDocumentPath(rawPath, engine, context)
   if (!resolved.ok) return toJsonString(resolved.output)
   const extracted = await extractTextFromPath(resolved.readPath)
   if (!extracted.ok) return toJsonString({ ok: false, path: resolved.path, kind: extracted.kind, error: extracted.error })
@@ -896,8 +956,12 @@ async function collectInventory(
   return items
 }
 
-async function runFileInventory(args: Record<string, unknown>, engine: SearchEngine): Promise<string> {
-  const auth = await authorizeRoot(typeof args.rootPath === 'string' ? args.rootPath : '', engine)
+async function runFileInventory(
+  args: Record<string, unknown>,
+  engine: SearchEngine,
+  context?: FileManagementToolContext,
+): Promise<string> {
+  const auth = await authorizeRoot(typeof args.rootPath === 'string' ? args.rootPath : '', engine, context?.workspaceRoots)
   if (!auth.ok) return toJsonString(auth.output)
   const limit = typeof args.limit === 'number'
     ? Math.max(1, Math.min(MAX_INVENTORY_LIMIT, Math.floor(args.limit)))
@@ -936,8 +1000,12 @@ async function runFileInventory(args: Record<string, unknown>, engine: SearchEng
   }
 }
 
-async function runFileCreateFolder(args: Record<string, unknown>, engine: SearchEngine): Promise<string> {
-  const auth = await authorizeRoot(typeof args.rootPath === 'string' ? args.rootPath : '', engine)
+async function runFileCreateFolder(
+  args: Record<string, unknown>,
+  engine: SearchEngine,
+  context?: FileManagementToolContext,
+): Promise<string> {
+  const auth = await authorizeRoot(typeof args.rootPath === 'string' ? args.rootPath : '', engine, context?.workspaceRoots)
   if (!auth.ok) return toJsonString(auth.output)
   const target = resolveRelativeFolderInsideRoot(typeof args.relativePath === 'string' ? args.relativePath : '', auth)
   if (!target.ok) return toJsonString({ ok: false, error: target.error })
@@ -970,8 +1038,9 @@ async function validateOrganizePlan(
   createFoldersInput: unknown,
   operationsInput: unknown,
   engine: SearchEngine,
+  context?: FileManagementToolContext,
 ): Promise<{ ok: true; plan: OrganizePlan } | { ok: false; output: Record<string, unknown> }> {
-  const auth = await authorizeRoot(rootPath, engine)
+  const auth = await authorizeRoot(rootPath, engine, context?.workspaceRoots)
   if (!auth.ok) return { ok: false, output: auth.output }
   const conflicts: OrganizeConflict[] = []
   const createFolders = Array.isArray(createFoldersInput)
@@ -1069,7 +1138,7 @@ async function runFileOrganizePreview(
   context?: FileManagementToolContext,
 ): Promise<string> {
   const rootPath = typeof args.rootPath === 'string' ? args.rootPath : ''
-  const validated = await validateOrganizePlan(rootPath, args.createFolders, args.operations, engine)
+  const validated = await validateOrganizePlan(rootPath, args.createFolders, args.operations, engine, context)
   if (!validated.ok) return toJsonString(validated.output)
   const plan = validated.plan
   const storeDir = await getOrganizeStoreDir(context)
@@ -1127,7 +1196,7 @@ async function runFileOrganizeApply(
   if (plan.appliedJournalId) return toJsonString({ ok: false, planId, error: 'plan already applied', journalId: plan.appliedJournalId })
   if (new Date(plan.expiresAt).getTime() < Date.now()) return toJsonString({ ok: false, planId, error: 'plan expired' })
   if (plan.conflicts.length > 0) return toJsonString({ ok: false, planId, error: 'plan has conflicts', conflicts: plan.conflicts })
-  const auth = await authorizeRoot(plan.rootPath, engine)
+  const auth = await authorizeRoot(plan.rootPath, engine, context?.workspaceRoots)
   if (!auth.ok) return toJsonString(auth.output)
 
   const journal: OrganizeJournal = {
@@ -1188,7 +1257,7 @@ async function runFileOrganizeUndo(
   const journal = await readJsonFile<OrganizeJournal>(journalPath(storeDir, journalId))
   if (!journal) return toJsonString({ ok: false, journalId, error: 'journal not found' })
   if (journal.undoneAt) return toJsonString({ ok: false, journalId, error: 'journal already undone', undoneAt: journal.undoneAt })
-  const auth = await authorizeRoot(journal.rootPath, engine)
+  const auth = await authorizeRoot(journal.rootPath, engine, context?.workspaceRoots)
   if (!auth.ok) return toJsonString(auth.output)
   const undone: string[] = []
   try {
@@ -1228,17 +1297,21 @@ async function runFileOrganizeUndo(
   }
 }
 
-async function runFileRename(args: Record<string, unknown>, engine: SearchEngine): Promise<string> {
+async function runFileRename(
+  args: Record<string, unknown>,
+  engine: SearchEngine,
+  context?: FileManagementToolContext,
+): Promise<string> {
   const path = typeof args.path === 'string' ? args.path : ''
   const newName = typeof args.newName === 'string' ? args.newName.trim() : ''
   const overwrite = args.overwrite === true
   if (!path || !newName) return 'Error: path and newName required'
   if (newName.includes('/') || newName.includes('\\')) return 'Error: newName must not contain path separators'
 
-  const guard = assertInsideWorkspace(path, engine)
+  const guard = assertInsideWorkspace(path, engine, context?.workspaceRoots)
   if (!guard.ok) return `Error: ${guard.error}`
   const newPath = join(dirname(path), newName)
-  const newGuard = assertInsideWorkspace(newPath, engine)
+  const newGuard = assertInsideWorkspace(newPath, engine, context?.workspaceRoots)
   if (!newGuard.ok) return `Error: ${newGuard.error}`
 
   try {
@@ -1258,22 +1331,26 @@ async function runFileRename(args: Record<string, unknown>, engine: SearchEngine
   }
 }
 
-async function runFileMove(args: Record<string, unknown>, engine: SearchEngine): Promise<string> {
+async function runFileMove(
+  args: Record<string, unknown>,
+  engine: SearchEngine,
+  context?: FileManagementToolContext,
+): Promise<string> {
   const path = typeof args.path === 'string' ? args.path : ''
   const destDir = typeof args.destDir === 'string' ? args.destDir : ''
   const newName = typeof args.newName === 'string' ? args.newName.trim() : ''
   const overwrite = args.overwrite === true
   if (!path || !destDir) return 'Error: path and destDir required'
 
-  const srcGuard = assertInsideWorkspace(path, engine)
+  const srcGuard = assertInsideWorkspace(path, engine, context?.workspaceRoots)
   if (!srcGuard.ok) return `Error: ${srcGuard.error}`
-  const destGuard = assertInsideWorkspace(destDir, engine)
+  const destGuard = assertInsideWorkspace(destDir, engine, context?.workspaceRoots)
   if (!destGuard.ok) return `Error: ${destGuard.error}`
   if (srcGuard.root !== destGuard.root) return 'Error: cross-workspace move not supported'
 
   const fileName = newName || path.split(/[\\/]/).pop() || 'file'
   const newPath = join(destDir, fileName)
-  const newGuard = assertInsideWorkspace(newPath, engine)
+  const newGuard = assertInsideWorkspace(newPath, engine, context?.workspaceRoots)
   if (!newGuard.ok) return `Error: ${newGuard.error}`
 
   try {

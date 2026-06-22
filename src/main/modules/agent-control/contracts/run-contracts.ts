@@ -503,6 +503,7 @@ export interface RunCoordinatorRequest {
   parentTaskId?: string
   parentStepId?: string
   sessionIdOverride?: string
+  workspaceRoots?: string[]
   budget?: RunBudgetSeed
   continuationIntent?: ContinuationIntent | null
 }

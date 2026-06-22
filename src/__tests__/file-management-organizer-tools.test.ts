@@ -38,6 +38,30 @@ function fakeSearchEngine(root: string) {
   }
 }
 
+function fakeSearchEngineForRoots(roots: string[], indexedPaths: string[]) {
+  const indexed = new Set(indexedPaths)
+  const db = {
+    prepare() {
+      return {
+        get: (path: string) => indexed.has(path)
+          ? { id: indexedPaths.indexOf(path) + 1, path, source_type: 'document' }
+          : undefined,
+        all: () => [],
+        run: () => undefined,
+      }
+    },
+  }
+  return {
+    findWorkspaceRootForPath: (path: string) => roots.find((root) => path === root || path.startsWith(`${root}/`)) || null,
+    indexDocument: async () => ({ ok: true }),
+    getRepository: () => ({
+      getConnection: () => db,
+      ensureWorkspace: () => 1,
+      deletePath: () => undefined,
+    }),
+  }
+}
+
 async function makeDocx(path: string, text: string): Promise<void> {
   const doc = new Document({ sections: [{ children: [new Paragraph(text)] }] })
   await writeFile(path, await Packer.toBuffer(doc))
@@ -110,6 +134,36 @@ test('file organizer tools preview, apply, and undo a confirmed folder cleanup',
   } finally {
     await rm(root, { recursive: true, force: true })
     await rm(store, { recursive: true, force: true })
+  }
+})
+
+test('file tools honor current file-manager roots over stale indexed roots', async () => {
+  const allowedRoot = await mkdtemp(join(tmpdir(), 'ready-file-scope-allowed-'))
+  const staleRoot = await mkdtemp(join(tmpdir(), 'ready-file-scope-stale-'))
+  try {
+    const allowedPath = join(allowedRoot, 'note.md')
+    const stalePath = join(staleRoot, 'old.md')
+    await writeFile(allowedPath, '# Allowed\n当前文件管理器目录内容', 'utf-8')
+    await writeFile(stalePath, '# Stale\n旧索引目录内容', 'utf-8')
+    const context = {
+      searchEngine: fakeSearchEngineForRoots([allowedRoot, staleRoot], [allowedPath, stalePath]) as never,
+      workspaceRoots: [allowedRoot],
+    }
+
+    const allowed = JSON.parse(await executeFileManagementTool('file_read_excerpt', {
+      path: allowedPath,
+    }, context))
+    assert.equal(allowed.ok, true)
+    assert.match(allowed.content, /当前文件管理器目录内容/)
+
+    const denied = JSON.parse(await executeFileManagementTool('file_read_excerpt', {
+      path: stalePath,
+    }, context))
+    assert.equal(denied.ok, false)
+    assert.match(denied.error, /outside any known workspace/)
+  } finally {
+    await rm(allowedRoot, { recursive: true, force: true })
+    await rm(staleRoot, { recursive: true, force: true })
   }
 })
 

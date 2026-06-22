@@ -97,6 +97,20 @@ test('request envelope keeps repeated attachments and references as distinct res
   )
 })
 
+test('request envelope carries validated file-manager workspace roots', () => {
+  const envelope = buildRequestEnvelope({
+    userText: '整理当前文件管理器里的文件',
+    workspaceRoots: [
+      '/tmp/ready/workspace/lib-a',
+      '/tmp/ready/workspace/lib-a',
+      '/tmp',
+      '',
+    ],
+  })
+
+  assert.deepEqual(envelope.environmentHints.workspaceRoots, ['/tmp/ready/workspace/lib-a'])
+})
+
 test('request envelope records calendar event references as structured resources', () => {
   const envelope = buildRequestEnvelope({
     userText: [
