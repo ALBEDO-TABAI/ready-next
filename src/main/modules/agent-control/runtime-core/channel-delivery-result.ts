@@ -20,9 +20,10 @@ export function normalizeChannelDeliveryResult(
 }
 
 function normalizeChannelDeliveryError(error: string): string {
-  if (/ret\s*=\s*-2\b/i.test(error) && /sendmessage/i.test(error)) {
+  const sendMessageRet = error.match(/ret\s*=\s*(-[23])\b/i)?.[1] || ''
+  if (sendMessageRet && /sendmessage/i.test(error)) {
     return [
-      '微信出站发送会话已失效：ret=-2 (sendmessage)。',
+      `微信出站发送会话已失效：ret=${sendMessageRet} (sendmessage)。`,
       '这不是文件大小或文件类型问题；请先从微信给 Ready 发一条新消息后重试，仍失败就重新绑定微信。',
     ].join('')
   }

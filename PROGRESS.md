@@ -1,8 +1,17 @@
 # Ready 开发进展
 
-> 更新时间: 2026-06-18
+> 更新时间: 2026-06-22
 
 ## 当前真值摘要
+
+- `2026-06-22` **远程 IM / Send IM / 视频技能近端问题收口并准备打包**：
+  - Remote IM 真实日志中出现 `ret=-3 (ilink/bot/sendmessage)`，已与 `ret=-2` 一起归为微信出站发送会话失效；用户侧说明会指向“从微信给 Ready 发一条新消息刷新会话 / 必要时重新绑定”，不再误导为附件大小或临时失败。
+  - `@[Send IM]@@[文件]` 现在会被识别成显式 Send IM 文件发送意图，并暴露 `skill_send_im_file`；`@[Send IM] 这个技能能做什么` 不会误触发；`取消/算了 @[Send IM]@@[文件]` 会在入口和工具执行层都取消发送。
+  - 远程回传失败的边界已收窄：Send IM 文件已经发出时，后续回执文字发不回微信不会把本地任务打失败；普通远程 IM 问答的文字回复发不回微信仍保留失败信号，避免隐藏“用户没收到”的真问题。
+  - video-copy-analyzer 的坏产物缓存会被识别：逐句空行、缺少句读、结构化文稿无语义分段、三维分析报告为保底假报告时，不再当作成功产物复用；长文结构计划会重试一次，仍失败则响亮失败。
+  - 视频类 embedded skill 的 `yt-dlp`/FFmpeg 查找已适配安装版：依赖下限统一到 `yt-dlp>=2026.6.9`，增加 `quickjs` 兜底，并显式传入打包运行时里的 FFmpeg/FFprobe。
+  - 专项 agent 侧补齐内置预设资产 seed，Skill 反问卡改为右侧浮层，文档 widget 更新上下文改用行为测试守住。
+  - 验证：`npm run verify:send-im-l1` 通过（109 pass / 1 个 host-Node SQLite ABI skip），`npm run typecheck` 通过；Send IM 变更经过子 agent 对抗复审，两个初始 blocker 已关闭。
 
 - `2026-06-18` **VEA finalize 续跑与任务状态收口修复**：
   - Video Expert Analyzer 的视听剖析 finalize 已从“失败后只 blocked”改为可修复、可续跑、可收口的链路。标题校验会归一化直引号/弯引号、全半角和空白差异，校验失败会一次性暴露缺项与差额，并保留失败草稿供下一轮修复。

@@ -1,6 +1,6 @@
 # Ready 开发文档
 
-> 更新时间: 2026-06-18
+> 更新时间: 2026-06-22
 
 ## 1. 架构概览
 Ready 采用 Electron 三层架构：
@@ -55,6 +55,17 @@ VEA / 长技能收口补充：
 - VEA finalize 的视听剖析失败会保留失败草稿、缺项清单和 handoff 状态；修复稿写回后必须继续执行 finalize，只有必需 `.md/.pdf` 产物存在且 delivery report 通过，父任务和 child run 才能显示完成。
 - 续跑轮次应走 skill 续跑工具；browser task resume/get/cancel 只处理真实 browser task id，遇到 Ready 聊天任务、skill child 或 UUID 任务 id 时返回 wrong-id 说明，不能跨域接管。
 - 历史消息里的 task snapshot 只是旧状态缓存；同一 taskId 的实时 task projection 更新后，前台应显示实时投影状态，避免旧“等待继续/失败”卡盖住已完成产物。
+
+Remote IM / Send IM 补充：
+- `@[Send IM]` 是显式技能目标；当同轮带文件引用、附件上下文或最近媒体意图时，应直接授权 `skill_send_im_file`。单纯询问 Send IM 能力不能触发发送。
+- Send IM 的否定词必须前后都生效：`不要/别/取消/算了` 出现在 `@[Send IM]` 前后都应取消工具执行。
+- 微信 `sendmessage` 返回 `ret=-2` 或 `ret=-3` 都表示出站会话失效一类问题；错误说明应引导用户从微信向 Ready 发一条新消息刷新会话，必要时重新绑定。
+- 只有 Send IM 文件已成功发出但回执文字发不回微信时，才允许本地任务保持完成；普通远程 IM 问答的最终回复发不出去时必须保留失败可见。
+
+视频类 embedded skill 补充：
+- video-copy-analyzer 的 `文案分析报告` 和 `结构化文字稿` 是技能合同产物，不允许用“保底分析报告”或逐句空行/无句读的坏缓存冒充成功。
+- 结构化文字稿的分段应来自内容理解；模型给出的分段计划无效时可以重试一次，长文仍无有效计划应失败，而不是硬编码补标题。
+- 安装版不能假设 shell PATH 里有 `node`、`ffmpeg`、`ffprobe`；视频技能应优先使用 Ready 打包运行时解析工具路径，并为 `yt-dlp --js-runtimes` 提供 packaged node 或 quickjs 兜底。
 
 ### 3.4b Agent 主控当前分层
 - `AgentControlRuntime` 当前已进一步回到 control plane 角色：

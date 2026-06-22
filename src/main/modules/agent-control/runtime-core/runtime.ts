@@ -144,7 +144,7 @@ import { ToolGateway } from '../tools-runtime/tool-gateway'
 import { buildCapabilityRuntimeSnapshot } from '../domain-adapters/capability-runtime-snapshot'
 import { TaskProjectionRepository } from '../../repositories/task-projection-repository'
 import { AgentRegistryRepository, MAIN_AGENT_ID } from '../../repositories/agent-registry-repository'
-import { reconcileAgentIdentityAssets } from '../agents/agent-identity-assets'
+import { reconcileAgentIdentityAssets, seedBuiltinAgentAssets } from '../agents/agent-identity-assets'
 import { RunMetaRepository } from '../task-projection/run-meta-repository'
 import { appendToolCapabilityLog } from '../../tools/tool-event-log'
 import {
@@ -740,6 +740,16 @@ export class AgentControlRuntime extends EventEmitter {
         // changed in the migration, so the on-disk asset dir has to follow even when the
         // knowledge system is off. Idempotent via agent_identity_migration.asset_reconciled_at.
         reconcileAgentIdentityAssets(rawDb as never, this.getBeliefCardStore())
+        // 内置专项 agent（文案/美术/智识）预设资产 seed。独立 try/catch：seed 失败不得
+        // 拖垮后续知识同步与 watcher 启动。幂等（缺失才写 + soul 守卫更新）。
+        try {
+          const seeded = seedBuiltinAgentAssets(rawDb as never, this.getBeliefCardStore())
+          if (seeded.souls || seeded.files || seeded.cards) {
+            console.log(`[runtime] seeded builtin agent presets: souls=${seeded.souls} files=${seeded.files} cards=${seeded.cards}`)
+          }
+        } catch (seedError) {
+          console.error('[runtime] builtin agent preset seeding failed:', seedError)
+        }
         if (knowledgeEnabled) {
           runStartupBeliefSync(rawDb as never, this.getBeliefCardStore(), true)
           this.knowledgeWatcher = new KnowledgeWatcher({ db: rawDb as never, store: this.getBeliefCardStore() })
@@ -1833,6 +1843,7 @@ export class AgentControlRuntime extends EventEmitter {
                       channelId: scope.sourceId,
                       taskId: result.taskId || null,
                       runId: payload.requestId || null,
+                      usedTools: result.usedTools,
                       error: sendOk.error || 'Failed to send channel reply',
                     })
                     return

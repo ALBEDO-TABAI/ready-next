@@ -40,7 +40,9 @@ const DEFAULT_AGENT_PERSONA_SEEDS = [
   { agentName: 'analyst', displayName: '分析', emoji: '📊' },
 ] as const
 
-const AGENT_IDENTITY_PERSONAS: Record<BuiltinAgentId, string> = {
+// 064 迁移期内置 agent 的种子 soul。已冻结：builtin-agent-presets 的 seed 守卫用它判断
+// "用户没改过"（现值 == 此值才覆盖为新预设 soul）。不要修改这些字面量。
+export const AGENT_IDENTITY_PERSONAS: Record<BuiltinAgentId, string> = {
   butler: DEFAULT_AGENT_PERSONAS.butler,
   copywriter: DEFAULT_AGENT_PERSONAS.copywriter,
   'video-editor': [

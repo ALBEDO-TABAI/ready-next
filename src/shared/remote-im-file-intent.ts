@@ -36,10 +36,15 @@ const REMOTE_CONCRETE_ATTACHMENT_SOURCE =
   '(?:文件|文档|附件|md|markdown|pdf|docx?|xlsx?|png|jpe?g|webp|图片文件|照片文件)'
 const NEGATED_SEND_SOURCE = '(?:不要|别|先别|不用|无需|不必)'
 const CANCEL_SEND_SOURCE = '(?:取消|算了|不用了|先算了)'
+const LOCAL_STOP_SEND_SOURCE = `(?:${NEGATED_SEND_SOURCE}|${CANCEL_SEND_SOURCE})`
 const SUMMARY_ONLY_SOURCE = '(?:只发|只要|只需要|只给).{0,8}(?:总结|文字|文本|结论|内容)'
 const REMOTE_NEGATED_FILE_DELIVERY_SOURCE =
   `(?:${NEGATED_SEND_SOURCE}.{0,16}${REMOTE_SEND_VERB_SOURCE}.{0,16}${REMOTE_FILE_WORD_GROUP}|${NEGATED_SEND_SOURCE}.{0,16}${REMOTE_FILE_WORD_GROUP}.{0,16}${REMOTE_SEND_VERB_SOURCE}|${REMOTE_FILE_WORD_GROUP}.{0,16}${NEGATED_SEND_SOURCE}.{0,16}${REMOTE_SEND_VERB_SOURCE}|${REMOTE_FILE_WORD_GROUP}.{0,24}${REMOTE_DIRECTED_SEND_SOURCE}.{0,16}${CANCEL_SEND_SOURCE}|${SUMMARY_ONLY_SOURCE})`
 const LOCAL_IM_TARGET_SOURCE = '(?:微信|远程\\s*IM|remote\\s*im|\\bim\\b|wechat|weixin|wx)'
+const LOCAL_SEND_IM_SKILL_SOURCE =
+  '(?:@\\[\\s*Send\\s*IM\\s*\\]|@?\\bSend\\s*IM\\b|@?\\bsend-im\\b)'
+const LOCAL_SEND_IM_TARGET_OR_SKILL_SOURCE =
+  `(?:${LOCAL_IM_TARGET_SOURCE}|${LOCAL_SEND_IM_SKILL_SOURCE})`
 const LOCAL_RECENT_MEDIA_SOURCE = [
   '(?:这(?:些|几|[一二两三四五六七八九十0-9]+)?张?(?:图|图片|照片|素材))',
   '(?:(?:最近|刚刚|刚才|下载|已下载|保存|选中).{0,12}(?:图|图片|照片|素材))',
@@ -55,10 +60,11 @@ const remoteGeneratedContentSendPattern = new RegExp(REMOTE_GENERATED_CONTENT_SE
 const remoteConcreteAttachmentPattern = new RegExp(REMOTE_CONCRETE_ATTACHMENT_SOURCE, 'i')
 const remoteNegatedFileDeliveryPattern = new RegExp(REMOTE_NEGATED_FILE_DELIVERY_SOURCE, 'i')
 const localNegatedSendImPattern = new RegExp(
-  `${NEGATED_SEND_SOURCE}.{0,40}${LOCAL_IM_TARGET_SOURCE}|${NEGATED_SEND_SOURCE}.{0,24}@\\[[^\\]]+\\].{0,24}${LOCAL_IM_TARGET_SOURCE}|${LOCAL_IM_TARGET_SOURCE}.{0,24}${NEGATED_SEND_SOURCE}.{0,8}${REMOTE_SEND_VERB_SOURCE}|${LOCAL_IM_TARGET_SOURCE}.{0,24}${CANCEL_SEND_SOURCE}`,
+  `${LOCAL_STOP_SEND_SOURCE}.{0,40}${LOCAL_SEND_IM_TARGET_OR_SKILL_SOURCE}|${LOCAL_STOP_SEND_SOURCE}.{0,24}@\\[[^\\]]+\\].{0,24}${LOCAL_SEND_IM_TARGET_OR_SKILL_SOURCE}|${LOCAL_SEND_IM_TARGET_OR_SKILL_SOURCE}.{0,24}${NEGATED_SEND_SOURCE}.{0,8}${REMOTE_SEND_VERB_SOURCE}|${LOCAL_SEND_IM_TARGET_OR_SKILL_SOURCE}.{0,24}${CANCEL_SEND_SOURCE}`,
   'i',
 )
 const localGeneratedContentSendPattern = new RegExp(LOCAL_GENERATED_CONTENT_SEND_SOURCE, 'i')
+const localSendImSkillPattern = new RegExp(LOCAL_SEND_IM_SKILL_SOURCE, 'i')
 const remoteFileDeliveryPatterns = [
   new RegExp(`${REMOTE_FILE_WORD_GROUP}.{0,24}${REMOTE_DIRECTED_SEND_SOURCE}`, 'i'),
   new RegExp(`${REMOTE_DIRECTED_SEND_SOURCE}.{0,24}${REMOTE_FILE_WORD_GROUP}`, 'i'),
@@ -80,6 +86,13 @@ export function hasNegatedLocalSendImFileIntent(text: string): boolean {
   return Boolean(value && localNegatedSendImPattern.test(value))
 }
 
+function hasNonSendImMention(text: string): boolean {
+  return Array.from(text.matchAll(/@\[([^\]]+)\]/g)).some((match) => {
+    const name = String(match[1] || '').trim().toLowerCase().replace(/\s+/g, ' ')
+    return Boolean(name && name !== 'send im' && name !== 'send-im')
+  })
+}
+
 export interface LocalSendImFileIntentOptions {
   hasAttachmentContext?: boolean
 }
@@ -91,8 +104,13 @@ export function hasLocalSendImFileIntent(
   const value = text.trim()
   if (!value) return false
   if (hasNegatedLocalSendImFileIntent(value)) return false
-  if (!new RegExp(LOCAL_IM_TARGET_SOURCE, 'i').test(value)) return false
   if (localGeneratedContentSendPattern.test(value)) return false
+  if (localSendImSkillPattern.test(value)) {
+    if (hasNonSendImMention(value)) return true
+    if (options.hasAttachmentContext === true && new RegExp(LOCAL_ATTACHED_FILE_SOURCE, 'i').test(value)) return true
+    return new RegExp(LOCAL_RECENT_MEDIA_SOURCE, 'i').test(value)
+  }
+  if (!new RegExp(LOCAL_IM_TARGET_SOURCE, 'i').test(value)) return false
   const sendVerb = '(?:发送|传|发(?!现|起|生|挥|展|表|散|的))'
   const directedSend = new RegExp(`${sendVerb}(?:给|到|往)?(?:我|我的)?${LOCAL_IM_TARGET_SOURCE}`, 'i').test(value)
     || new RegExp(`${LOCAL_IM_TARGET_SOURCE}.{0,12}${sendVerb}(?:一下|给我|给|这份|这个|文件|@\\[)`, 'i').test(value)

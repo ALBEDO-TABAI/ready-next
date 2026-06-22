@@ -138,6 +138,9 @@ test('video_copy_analyze downloader accepts Ready browser cookies and configured
   assert.match(source, /READY_VIDEO_COOKIE_FILE/, 'Ready-exported browser cookies must be accepted for arbitrary video hosts')
   assert.match(source, /BILIBILI_COOKIE_FILE/, 'configured Bilibili cookie files must remain a fallback')
   assert.match(source, /YOUTUBE_COOKIE_FILE/, 'legacy YouTube cookie env must remain a fallback')
+  assert.match(source, /--js-runtimes/, 'yt-dlp JS runtime support must be enabled when available')
+  assert.match(source, /quickjs/, 'Ready-packaged Python runtime must be usable when desktop PATH has no node')
+  assert.match(source, /--ffmpeg-location/, 'yt-dlp must receive an explicit FFmpeg path in desktop app environments without shell PATH')
   assert.match(subtitleFetcher, /get_cookies_from_ready_cookie_file/, 'Bilibili subtitle API must reuse Ready-exported browser cookies before slow ASR fallback')
   const resolverBody = subtitleFetcher.slice(subtitleFetcher.indexOf('def get_bilibili_cookies'))
   assert.ok(
@@ -211,7 +214,7 @@ extractor_module = types.ModuleType("extract_subtitle_funasr")
 
 def smart_subtitle_extraction(video, srt, video_url=""):
     calls.append(("smart", video, srt, video_url))
-    Path(srt).write_text("1\\n00:00:00,000 --> 00:00:01,000\\ncaption text\\n\\n", encoding="utf-8")
+    Path(srt).write_text("1\\n00:00:00,000 --> 00:00:01,000\\ncaption text\\nsecond caption\\n\\n", encoding="utf-8")
     return True, "embedded"
 
 def extract_with_funasr(video, srt):
@@ -248,7 +251,9 @@ assert calls[0][3] == "", calls
   }
   assert.equal(result.outputs.subtitleEngine, 'embedded')
   assert.equal(result.outputs.asrEngine, 'funasr')
-  assert.match(readFileSync(result.outputs.transcriptPath, 'utf-8'), /caption text/)
+  const transcript = readFileSync(result.outputs.transcriptPath, 'utf-8')
+  assert.match(transcript, /caption text second caption/)
+  assert.doesNotMatch(transcript, /caption text\nsecond caption/)
 })
 
 test('video_copy_analyze artifact list excludes status-only output values', (t) => {
@@ -566,6 +571,178 @@ test('video_copy_analyze postprocess regenerates incomplete cached deliverables'
   assert.match(result.stdout, /已重新生成/)
   assert.match(readFileSync(analysisReportPath, 'utf-8'), /新生成报告内容/)
   assert.match(readFileSync(structuredTranscriptPath, 'utf-8'), /新的结构化文字稿内容/)
+})
+
+test('video_copy_analyze postprocess fails instead of writing fallback analysis report', async (t) => {
+  const outputDir = mkdtempSync(join(tmpdir(), 'ready-video-copy-fallback-report-'))
+  t.after(() => rmSync(outputDir, { recursive: true, force: true }))
+  const transcriptPath = join(outputDir, 'demo_文字稿.md')
+  writeFileSync(transcriptPath, '# demo 文字稿\n\n新的文字稿内容，需要完整文案分析。\n', 'utf-8')
+
+  const result = await completeVideoCopyAnalyzeResult({
+    result: {
+      success: true,
+      skillId: 'video-copy-analyzer',
+      action: 'video_copy_analyze',
+      stdout: 'transcript ready',
+      stderr: '',
+      outputDir,
+      outputs: {
+        outputDir,
+        sourceInput: 'https://example.com/watch?v=demo',
+        transcriptPath,
+      },
+      command: ['python', 'ready_extract_subtitle.py'],
+      status: 'done',
+      mode: 'direct',
+    },
+    args: {},
+    builder: {
+      async buildCopyDeliverables() {
+        return {
+          correctedTranscript: '# demo 校正文稿\n\n## 完整文稿\n\n新的校正文稿内容',
+          report: [
+            '## 一、TextContent Analysis 视角',
+            '- AI 深度分析未返回完整结果，当前报告基于文字稿自动保底整理。',
+            '## 二、Viral-Abstract-Script 视角',
+            '- 当前为保底报告。',
+            '## 三、Brainstorming 视角',
+            '- 当前为保底报告。',
+          ].join('\n'),
+          structuredTranscript: validStructuredTranscript('新的结构化文字稿内容已经重新整理。'),
+        }
+      },
+    },
+  })
+
+  assert.equal(result.success, false)
+  assert.match(result.error || '', /未能生成符合技能合同/)
+  assert.equal(existsSync(join(outputDir, 'demo_分析报告.md')), false)
+  assert.equal(existsSync(join(outputDir, 'demo_结构化文字稿.md')), false)
+})
+
+test('video_copy_analyze postprocess regenerates line-per-sentence cached structured transcript', async (t) => {
+  const outputDir = mkdtempSync(join(tmpdir(), 'ready-video-copy-line-per-sentence-reuse-'))
+  t.after(() => rmSync(outputDir, { recursive: true, force: true }))
+  const transcriptPath = join(outputDir, 'demo_文字稿.md')
+  const analysisReportPath = join(outputDir, 'demo_分析报告.md')
+  const structuredTranscriptPath = join(outputDir, 'demo_结构化文字稿.md')
+  writeFileSync(transcriptPath, '# demo 文字稿\n\n新的文字稿内容，需要完整文案分析。\n', 'utf-8')
+  writeFileSync(analysisReportPath, `# demo 文案分析报告\n\n${validCopyReport()}\n`, 'utf-8')
+  writeFileSync(
+    structuredTranscriptPath,
+    [
+      '# demo 结构化文字稿',
+      '',
+      '## 一、完整口播',
+      '',
+      '第一句，这是旧缓存里的一句话。',
+      '',
+      '第二句，它被错误地拆成独立段落。',
+      '',
+      '第三句，仍然是坏格式。',
+      '',
+      '第四句，阅读体验很差。',
+      '',
+      '第五句，不能继续复用。',
+      '',
+    ].join('\n'),
+    'utf-8',
+  )
+  let builderCalls = 0
+
+  const result = await completeVideoCopyAnalyzeResult({
+    result: {
+      success: true,
+      skillId: 'video-copy-analyzer',
+      action: 'video_copy_analyze',
+      stdout: 'transcript ready',
+      stderr: '',
+      outputDir,
+      outputs: {
+        outputDir,
+        sourceInput: 'https://example.com/watch?v=demo',
+        transcriptPath,
+      },
+      command: ['python', 'ready_extract_subtitle.py'],
+      status: 'done',
+      mode: 'direct',
+    },
+    args: {},
+    builder: {
+      async buildCopyDeliverables() {
+        builderCalls += 1
+        return {
+          correctedTranscript: '# demo 校正文稿\n\n## 完整文稿\n\n新的校正文稿内容',
+          report: validCopyReport('新生成报告内容完整覆盖三类分析视角。'),
+          structuredTranscript: validStructuredTranscript('新的结构化文字稿内容已经重新整理。'),
+        }
+      },
+    },
+  })
+
+  assert.equal(result.success, true)
+  assert.equal(builderCalls, 1)
+  assert.match(result.stdout, /已重新生成/)
+  assert.match(readFileSync(structuredTranscriptPath, 'utf-8'), /新的结构化文字稿内容已经重新整理/)
+})
+
+test('video_copy_analyze postprocess regenerates cached structured transcript without sentence punctuation', async (t) => {
+  const outputDir = mkdtempSync(join(tmpdir(), 'ready-video-copy-unpunctuated-reuse-'))
+  t.after(() => rmSync(outputDir, { recursive: true, force: true }))
+  const transcriptPath = join(outputDir, 'demo_文字稿.md')
+  const analysisReportPath = join(outputDir, 'demo_分析报告.md')
+  const structuredTranscriptPath = join(outputDir, 'demo_结构化文字稿.md')
+  writeFileSync(transcriptPath, '# demo 文字稿\n\n这是一段新的文字稿，需要生成带标点的结构化文案。\n', 'utf-8')
+  writeFileSync(analysisReportPath, `# demo 文案分析报告\n\n${validCopyReport()}\n`, 'utf-8')
+  writeFileSync(
+    structuredTranscriptPath,
+    [
+      '# demo 结构化文字稿',
+      '',
+      '## 一、完整口播',
+      '',
+      '去年我读了一本书叫你一生的故事但后来被改编成了电影降临今天想说的不是小说而是书里面提到的费马原理它让我开始相信命运这个事情如果命运已经确定了那我的选择还有意义答案是有而且选择更加重要',
+      '',
+    ].join('\n'),
+    'utf-8',
+  )
+  let builderCalls = 0
+
+  const result = await completeVideoCopyAnalyzeResult({
+    result: {
+      success: true,
+      skillId: 'video-copy-analyzer',
+      action: 'video_copy_analyze',
+      stdout: 'transcript ready',
+      stderr: '',
+      outputDir,
+      outputs: {
+        outputDir,
+        sourceInput: 'https://example.com/watch?v=demo',
+        transcriptPath,
+      },
+      command: ['python', 'ready_extract_subtitle.py'],
+      status: 'done',
+      mode: 'direct',
+    },
+    args: {},
+    builder: {
+      async buildCopyDeliverables() {
+        builderCalls += 1
+        return {
+          correctedTranscript: '# demo 校正文稿\n\n## 完整文稿\n\n新的校正文稿内容，已经补好标点。',
+          report: validCopyReport('新生成报告内容完整覆盖三类分析视角。'),
+          structuredTranscript: validStructuredTranscript('新的结构化文字稿内容，已经补好标点。'),
+        }
+      },
+    },
+  })
+
+  assert.equal(result.success, true)
+  assert.equal(builderCalls, 1)
+  assert.match(result.stdout, /已重新生成/)
+  assert.match(readFileSync(structuredTranscriptPath, 'utf-8'), /已经补好标点。/)
 })
 
 test('video_copy_analyze postprocess regenerates cached deliverables older than the transcript', async (t) => {

@@ -8,6 +8,13 @@ import subprocess
 from pathlib import Path
 from typing import Dict, Optional
 
+try:
+    from runtime_tools import resolve_tool_binary
+except ImportError:
+    import sys
+    sys.path.insert(0, str(Path(__file__).parent))
+    from runtime_tools import resolve_tool_binary
+
 
 SAMPLE_POSITIONS = {
     "start": 0.10,
@@ -34,7 +41,7 @@ def _get_ffmpeg_hwaccels() -> set[str]:
     if _FFMPEG_HWACCEL_CACHE is not None:
         return set(_FFMPEG_HWACCEL_CACHE)
 
-    ffmpeg_binary = shutil.which("ffmpeg") or "ffmpeg"
+    ffmpeg_binary = resolve_tool_binary("ffmpeg")
     try:
         result = subprocess.run(
             [ffmpeg_binary, "-hide_banner", "-hwaccels"],
@@ -70,7 +77,7 @@ def probe_duration_seconds(media_path: Path) -> float:
     try:
         result = subprocess.run(
             [
-                "ffprobe",
+                resolve_tool_binary("ffprobe"),
                 "-v",
                 "error",
                 "-show_entries",
@@ -105,7 +112,7 @@ def _extract_frames_single_pass(scene_path: Path, targets) -> bool:
     """
     if not targets:
         return True
-    cmd = ["ffmpeg", "-y", "-v", "error"]
+    cmd = [resolve_tool_binary("ffmpeg"), "-y", "-v", "error"]
     for timestamp, _ in targets:
         cmd.extend(["-ss", f"{timestamp:.3f}", "-i", str(scene_path)])
     for index, (_, output_path) in enumerate(targets):
@@ -134,7 +141,7 @@ def extract_scene_sample_frames(scene_path: Path, frames_dir: Path, scene_stem: 
     for name, timestamp, target_path in missing:
         attempts = []
         base_cmd = [
-            "ffmpeg",
+            resolve_tool_binary("ffmpeg"),
             "-ss",
             f"{timestamp:.3f}",
             "-i",
@@ -147,7 +154,7 @@ def extract_scene_sample_frames(scene_path: Path, frames_dir: Path, scene_stem: 
             "-y",
         ]
         if hwaccel_args:
-            attempts.append(["ffmpeg", *hwaccel_args, *base_cmd[1:]])
+            attempts.append([resolve_tool_binary("ffmpeg"), *hwaccel_args, *base_cmd[1:]])
         attempts.append(base_cmd)
 
         for cmd in attempts:

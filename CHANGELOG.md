@@ -1,5 +1,27 @@
 # Ready V5 - 更新日志
 
+## [Unreleased] - 2026-06-22
+
+### Remote IM / Send IM
+
+- 修复 `@[Send IM]@@[文件]` 这类显式技能调用不进入 send-im 授权的问题；带附件/文件引用的 Send IM 点名现在会暴露 `skill_send_im_file`，单纯询问 Send IM 能力不会误触发。
+- `ret=-3 (ilink/bot/sendmessage)` 与既有 `ret=-2` 统一归类为微信出站发送会话失效，提示用户先从微信给 Ready 发新消息刷新会话，而不是误报为文件大小、文件类型或临时重试问题。
+- Send IM 否定语义补洞：`取消 @[Send IM]@@[文件]`、`算了 @[Send IM]@@[文件]` 等前置取消不会再触发真实发送。
+- 收窄远程回执失败处理：只有 Send IM 文件已成功发出、额外回执文字发不回微信时，本地任务保留完成；普通远程 IM 问答如果回复发不回微信，仍保持失败可见，避免用户没收到结果却被隐藏。
+
+### Embedded Skills / 视频分析
+
+- video-copy-analyzer 的交付后处理不再复用坏缓存：逐句空行、缺少句读、结构化文稿不合格或分析报告为保底假报告时，会重新生成或响亮失败，不再把不符合 skill 合同的报告写成成功产物。
+- 结构化文字稿分段改为由模型按内容语义给出分段计划；长文分段计划无效时重试一次，仍无效则失败，不再用固定“每段补标题”的硬编码兜底。
+- video-copy-analyzer / video-expert-analyzer 的 `yt-dlp` 运行参数补齐桌面环境支持：依赖下限升到 `yt-dlp>=2026.6.9`，增加 `quickjs` 兜底，并在 PATH 不完整时显式传入 FFmpeg/FFprobe 路径。
+- Video Expert Analyzer vnext 运行时查找 FFmpeg/FFprobe/yt-dlp 会优先使用 Ready 打包运行时，降低安装版里“dev 环境可用、打包后失败”的概率。
+
+### Agent / 专项 Agent / UI
+
+- 内置专项 agent 预设资产开始随启动幂等 seed：文案、美术、智识会补齐 RULES / FOUNDATION / 知识卡 / 路由卡；SOUL 只在仍等于旧默认文案时更新，避免覆盖用户手动改过的人格。
+- Skill 反问卡位置从底部居中改为右侧浮层，避免在文档模式里位移到正文中央遮挡阅读。
+- 文档 widget 更新上下文从源码形状测试升级为行为测试，确保带 widget 目标上下文的“改边框/改内容”会强制走 document widget 更新工具，而不是被误判为普通聊天。
+
 ## [Unreleased] - 2026-06-18
 
 ### Video Expert Analyzer — finalize 续跑与任务卡收口

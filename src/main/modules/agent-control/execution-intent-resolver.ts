@@ -46,6 +46,21 @@ export interface ExecutionIntentContext {
   mapSemanticIntent?: MapSemanticIntent | null
 }
 
+const DOCUMENT_TOOL_SURFACE_PATTERN =
+  /(文档|文稿|原文|文章|段落|章节|docx?|markdown|\.md\b|widget|show-widget|图表|趋势图|卡片|信息卡|提示块|表格|对比卡|进度卡|日程卡|待办|习惯|计划板|计算器|保存|写入|追加|替换|编辑|改写|润色|排版|格式)/i
+
+const DOCUMENT_CONTEXT_CONTINUATION_PATTERN =
+  /(这篇|这份|这个|上面|前面|刚才|继续|再|确认|整理|分段|合并|子标题|小标题|标题|补上|附上|加上|改一下|改成|保存|写入|替换)/i
+
+function hasWritableDocumentContext(envelope: RequestEnvelope): boolean {
+  return envelope.environmentHints.hasDocumentContext
+    || envelope.resources.some((resource) => (
+      resource.kind === 'document_context'
+      || resource.source === 'current_document'
+      || resource.canWrite
+    ))
+}
+
 function normalizeRegisteredSkillToken(value: string): string {
   return String(value || '')
     .toLowerCase()
@@ -158,12 +173,16 @@ export function resolveExecutionIntentContext(params: {
       && params.intentClassification?.primaryDomain !== 'skill',
   })
 
+  const hasDocumentEnvironment =
+    hasWritableDocumentContext(params.requestEnvelope)
+    || (params.requestEnvelope.rawUserText.includes('## 环境信息') && params.requestEnvelope.rawUserText.includes('当前模式: 文档模式'))
+
   return {
     requestEnvelope: effectiveEnvelope,
     intentClassification,
     contextualUserInput,
     userInstructionText,
-    hasDocumentEnvironment: params.requestEnvelope.rawUserText.includes('## 环境信息') && params.requestEnvelope.rawUserText.includes('当前模式: 文档模式'),
+    hasDocumentEnvironment,
     hasWidgetTargetContext,
     explicitWidgetCreateIntent,
     documentWidgetTaskKind,
@@ -207,9 +226,7 @@ export function resolveIntentCapabilityGroupModes(params: {
     ...params.intentClassification.mentionedDomains,
   ])
   const excludedDomains = new Set(params.intentClassification.excludedDomains)
-  const hasDocumentKeyword =
-    /(文档|文稿|原文|文章|段落|章节|docx?|markdown|\.md\b|widget|show-widget|图表|趋势图|卡片|信息卡|提示块|表格|对比卡|进度卡|日程卡|待办|习惯|计划板|计算器|保存|写入|追加|替换|编辑|改写|润色|排版|格式)/i
-      .test(params.userInstructionText)
+  const hasDocumentKeyword = DOCUMENT_TOOL_SURFACE_PATTERN.test(params.userInstructionText)
   const hasDocumentIntent = positiveDomains.has('document') && !excludedDomains.has('document')
   const hasRSSIntent = positiveDomains.has('rss') && !excludedDomains.has('rss')
   const hasCalendarIntent = positiveDomains.has('calendar') && !excludedDomains.has('calendar')
@@ -218,12 +235,14 @@ export function resolveIntentCapabilityGroupModes(params: {
   const hasMapIntent = isMapSemanticIntentActive(params.mapSemanticIntent)
   const mapSecondarySignals = new Set(params.mapSemanticIntent?.secondarySignals || [])
   const isPetDominantIntent = params.intentClassification.primaryDomain === 'pet' && hasPetIntent
-  const hasExplicitDocumentSurface =
-    /(文档|文稿|原文|文章|段落|章节|docx?|markdown|\.md\b|widget|show-widget|图表|趋势图|卡片|信息卡|提示块|表格|对比卡|进度卡|保存|写入|追加|替换|编辑|改写|润色|排版|格式)/i
-      .test(params.userInstructionText)
+  const hasExplicitDocumentSurface = DOCUMENT_TOOL_SURFACE_PATTERN.test(params.userInstructionText)
+  const hasDocumentContextContinuation =
+    params.hasDocumentEnvironment
+    && DOCUMENT_CONTEXT_CONTINUATION_PATTERN.test(params.userInstructionText)
   const allowDocumentTools = params.hasTools && (
     (!isPetDominantIntent && hasDocumentKeyword) ||
     (params.hasDocumentEnvironment && (hasDocumentKeyword || hasExplicitDocumentSurface)) ||
+    hasDocumentContextContinuation ||
     params.hasWidgetTargetContext ||
     Boolean(params.documentWidgetTaskKind) ||
     shouldForceDocumentToolCall(params.contextualUserInput) ||
@@ -249,6 +268,7 @@ export function resolveIntentCapabilityGroupModes(params: {
   const allowMapBrowserTools = hasMapIntent && mapSecondarySignals.has('browser_lookup')
   const forceDocumentTool = allowDocumentTools && (
     (params.hasWidgetTargetContext && !params.explicitWidgetCreateIntent) ||
+    hasDocumentContextContinuation ||
     shouldForceDocumentToolCall(params.contextualUserInput)
   )
 

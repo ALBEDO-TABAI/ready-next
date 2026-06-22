@@ -89,6 +89,7 @@ test('vnext video download path supports Ready browser cookies and yt-dlp JS cha
   assert.match(source, /YOUTUBE_COOKIE_FILE/, 'legacy YouTube cookie env must remain a fallback')
   assert.match(source, /--js-runtimes/, 'yt-dlp JS runtime support must be enabled when available')
   assert.match(source, /--remote-components/, 'yt-dlp remote challenge components must be enabled when available')
+  assert.match(source, /--ffmpeg-location/, 'yt-dlp must receive an explicit FFmpeg path in desktop app environments without shell PATH')
   runPythonCompile([pipelinePath, join(SKILL_DIR, 'scripts', 'ready_compat.py')])
 })
 

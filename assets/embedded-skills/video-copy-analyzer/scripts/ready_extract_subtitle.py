@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import json
 import os
+import re
 import sys
 import uuid
 from contextlib import redirect_stderr, redirect_stdout
@@ -84,8 +85,16 @@ def build_transcript_from_srt(srt_path: Path) -> Path:
         if not stripped or stripped.isdigit() or "-->" in stripped:
             continue
         lines.append(stripped)
+    transcript = ""
+    for line in lines:
+        if not transcript:
+            transcript = line
+        elif re.search(r"[A-Za-z0-9]$", transcript) and re.match(r"^[A-Za-z0-9]", line):
+            transcript += " " + line
+        else:
+            transcript += line
     transcript_path.write_text(
-        "# 视频语音转录文字稿\n\n## 正文\n\n" + "\n".join(lines) + "\n",
+        "# 视频语音转录文字稿\n\n## 正文\n\n" + transcript + "\n",
         encoding="utf-8",
     )
     return transcript_path

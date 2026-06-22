@@ -1,7 +1,7 @@
 const ACTION_ANNOUNCEMENT_TAIL_PATTERN =
   /(?:让我|我来|我现在|我马上|接下来|现在去|I['’]ll now|let me)[\s\S]{0,120}[：:]\s*$/i
 const ACTION_ANNOUNCEMENT_PROMISE_PATTERN =
-  /(?:让我|我来|我现在|我马上|我会|接下来|现在|马上|这就)[\s\S]{0,120}(?:打开|搜索|搜集|采集|下载|保存|存档|落到|插入|写入|执行|处理|批量下载|open|search|collect|download|save|insert|write|run)/i
+  /(?:让我|我来|我现在|我马上|我会|接下来|现在|马上|这就)[\s\S]{0,120}(?:打开|搜索|搜集|采集|下载|保存|存档|落到|插入|写入|创建|新建|移动|整理|提取|还原|执行|处理|批量下载|open|search|collect|download|save|insert|write|create|move|extract|run)/i
 
 // Steered-turn re-promise: looser than the first-hit tail pattern (the
 // forensic run4 promised again WITHOUT the trailing colon). A blocker

@@ -2306,6 +2306,113 @@ test('TurnEngine arms VEA continuation from an explicit run_state resource witho
   }
 })
 
+test('TurnEngine arms VEA continuation from a selected task folder containing nested run_state.json', async () => {
+  const engine = new TurnEngine()
+  const metrics: AgentMetricEvent[] = []
+  let capturedAllowedToolNames: string[] = []
+  let armedHint: { id: string; name: string } | null = null
+
+  const taskFolder = mkdtempSync(join(tmpdir(), 'ready-turn-run-state-folder-'))
+  const outputDir = join(taskFolder, 'visual-analysis', '[e.l.f. Cosmetics] What the h.e.l.f. e.l.f. Hair is here!')
+  mkdirSync(outputDir, { recursive: true })
+  const runStatePath = join(outputDir, 'run_state.json')
+  writeFileSync(
+    runStatePath,
+    JSON.stringify({
+      version: 'vnext',
+      status: 'blocked',
+      current_stage: 'prepare',
+      task_id: 'task-vea',
+      child_run_id: 'child-vea',
+      video_dir: outputDir,
+      last_error: 'yt-dlp download failed',
+    }),
+    'utf8',
+  )
+  const userText = [
+    '@[Video Expert Analyzer (VNext)]继续这个任务',
+    '@[(22) What the h.e.l.f. e.l.f. Hair is here! - YouTube-4e09ca7a]',
+    '',
+    '### 文件夹引用',
+    '- 名称: (22) What the h.e.l.f. e.l.f. Hair is here! - YouTube-4e09ca7a',
+    `- 路径: ${taskFolder}`,
+  ].join('\n')
+
+  __setMetricSinkForTests((event) => metrics.push(event))
+  _resetLastReferenceSkillHintsForTests()
+  const restorePipelineToolDefinition = installLongSkillToolDefinitionForTest('skill_video_expert_pipeline')
+  try {
+    const { request } = createRequest({
+      userText,
+      host: {
+        providerContext: {
+          config: {
+            provider: 'openai',
+            model: 'gpt-test',
+            apiKey: 'test',
+            baseUrl: 'https://api.openai.com/v1',
+          },
+          baseUrl: 'https://api.openai.com/v1',
+          provider: undefined,
+          isKimi: false,
+          isKimiCoding: false,
+          useAnthropicProtocol: false,
+          supportsToolCalls: true,
+          supportsVideoBlock: true,
+          hasRawVideoInIncoming: false,
+        },
+        skillContextOrchestrator: {
+          shouldKeepToolsWithVideo: () => false,
+          findExplicitlyRequestedSkills: (text: string) =>
+            /video[-_\s]?expert|Video Expert Analyzer/i.test(text)
+              ? [{ id: 'video-expert-analyzer', name: 'Video Expert Analyzer (VNext)' }]
+              : [],
+          getCurrentReferenceSkillHint: () => armedHint,
+          rememberReferenceSkillFromRunStateResource: (skillId: string) => {
+            if (skillId !== 'video-expert-analyzer') return { armed: false }
+            armedHint = { id: 'video-expert-analyzer', name: 'Video Expert Analyzer (VNext)' }
+            rememberLastReferenceSkill('scope-test', armedHint)
+            return { armed: true, skillId: armedHint.id, skillName: armedHint.name }
+          },
+          rememberExplicitReferenceSkillHint: () => Boolean(armedHint),
+          buildPreferredSkillToolNames: () => armedHint?.id === 'video-expert-analyzer'
+            ? ['skill_video_expert_pipeline', 'skill_inspect_run_state']
+            : [],
+          maybeInjectExplicitSkillContext: async () => {},
+          listRegisteredSkillTokens: () => ['video-expert-analyzer', 'Video Expert Analyzer'],
+        },
+        requestToolLoopResponse: async (params: { allowedToolNames?: string[] }) => {
+          capturedAllowedToolNames = params.allowedToolNames || []
+          return {
+            text: '恢复完成',
+            toolCalls: [],
+            stopReason: 'stop',
+          }
+        },
+      },
+    })
+
+    await engine.execute(request)
+
+    assert.ok(metrics.some((event) => event.metric === 'skill_reference_hint_armed' && event.via === 'resource'))
+    assert.ok(metrics.some((event) =>
+      event.metric === 'turn_frame_resolved'
+      && event.mode === 'skill_resume'
+      && event.skillId === 'video-expert-analyzer'
+      && event.hasRunState === true
+      && event.hasOutputDir === true,
+    ), `metrics=${JSON.stringify(metrics)}`)
+    if (capturedAllowedToolNames.length > 0) {
+      assert.ok(capturedAllowedToolNames.includes('skill_inspect_run_state'))
+    }
+  } finally {
+    restorePipelineToolDefinition()
+    __setMetricSinkForTests(null)
+    _resetLastReferenceSkillHintsForTests()
+    rmSync(taskFolder, { recursive: true, force: true })
+  }
+})
+
 test('TurnEngine arms VEA continuation when the active document is run_state.json', async () => {
   const engine = new TurnEngine()
   const metrics: AgentMetricEvent[] = []

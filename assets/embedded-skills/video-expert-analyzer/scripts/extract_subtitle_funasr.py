@@ -16,6 +16,12 @@ from pathlib import Path
 import json
 import platform
 
+try:
+    from runtime_tools import resolve_tool_binary
+except ImportError:
+    sys.path.insert(0, str(Path(__file__).parent))
+    from runtime_tools import resolve_tool_binary
+
 
 MUSIC_KEYWORDS = (
     "music video",
@@ -539,7 +545,7 @@ def check_embedded_subtitle(video_path: str) -> tuple[bool, str]:
     """
     try:
         cmd = [
-            "ffprobe", "-v", "quiet", "-print_format", "json",
+            resolve_tool_binary("ffprobe"), "-v", "quiet", "-print_format", "json",
             "-show_streams", video_path
         ]
         result = subprocess.run(cmd, capture_output=True, text=True, check=True)
@@ -551,7 +557,7 @@ def check_embedded_subtitle(video_path: str) -> tuple[bool, str]:
         if subtitle_streams:
             output_srt = video_path.rsplit(".", 1)[0] + "_embedded.srt"
             cmd = [
-                "ffmpeg", "-y", "-i", video_path,
+                resolve_tool_binary("ffmpeg"), "-y", "-i", video_path,
                 "-map", f"0:s:0", output_srt
             ]
             subprocess.run(cmd, capture_output=True, check=True)
@@ -574,7 +580,7 @@ def capture_frame(video_path: str, timestamp: str = "00:00:05") -> str:
             frame_path = tmp.name
 
         cmd = [
-            "ffmpeg", "-y", "-ss", timestamp, "-i", video_path,
+            resolve_tool_binary("ffmpeg"), "-y", "-ss", timestamp, "-i", video_path,
             "-vframes", "1", "-q:v", "2", frame_path
         ]
         subprocess.run(cmd, capture_output=True, check=True)
@@ -624,7 +630,7 @@ def extract_burned_subtitle_ocr(video_path: str, output_srt: str) -> bool:
         print("🔍 使用 RapidOCR 提取烧录字幕...")
 
         cmd = [
-            "ffprobe", "-v", "error", "-show_entries",
+            resolve_tool_binary("ffprobe"), "-v", "error", "-show_entries",
             "format=duration", "-of", "default=noprint_wrappers=1:nokey=1",
             video_path
         ]
@@ -692,7 +698,7 @@ def extract_audio(video_path: str, audio_path: str) -> bool:
     """从视频中提取音频"""
     try:
         cmd = [
-            "ffmpeg", "-y", "-i", video_path,
+            resolve_tool_binary("ffmpeg"), "-y", "-i", video_path,
             "-vn", "-acodec", "pcm_s16le",
             "-ar", "16000", "-ac", "1",
             audio_path

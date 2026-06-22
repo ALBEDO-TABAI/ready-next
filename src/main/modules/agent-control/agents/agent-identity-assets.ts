@@ -1,8 +1,13 @@
-import { existsSync, mkdirSync, renameSync, rmSync } from 'fs'
+import { existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'fs'
 import { dirname, resolve, sep } from 'path'
 
 import type { BeliefCardStore } from '../knowledge/belief-card-store'
-import { isValidAgentSlug } from '../../../../shared/agent-identity'
+import { isValidAgentSlug, type BuiltinAgentId } from '../../../../shared/agent-identity'
+import {
+  BUILTIN_AGENT_PRESETS,
+  BUILTIN_AGENT_PRESET_VERSION,
+  LEGACY_BUILTIN_SOULS,
+} from './builtin-agent-presets'
 
 interface AgentIdentityDbStatement {
   all<T = unknown>(...params: unknown[]): T[]
@@ -61,4 +66,91 @@ export function deleteAgentIdentityAssets(store: BeliefCardStore, agentId: strin
   if (!isValidAgentSlug(id)) throw new Error('[agent-identity-assets] invalid agent id')
   rmSync(absInside(store.rootPath, `agents/${id}`), { recursive: true, force: true })
   rmSync(absInside(store.rootPath, `knowledge/routing-${id}.md`), { force: true })
+}
+
+function ensureFile(root: string, relPath: string, content: string): number {
+  const abs = absInside(root, relPath)
+  if (existsSync(abs)) return 0
+  mkdirSync(dirname(abs), { recursive: true })
+  writeFileSync(abs, content, 'utf-8')
+  return 1
+}
+
+/**
+ * 内置专项 agent（文案 / 美术 / 智识）的预设资产 seed。幂等：
+ * - SOUL：仅当现值 == 064 旧默认（未被用户改过）时覆盖为新预设 soul（守卫见 LEGACY_BUILTIN_SOULS）。
+ * - RULES.md / FOUNDATION.md：文件不存在才写。
+ * - 知识卡 / 路由卡：卡片不存在（含 staged）才写；内置 agent 是系统钦定实体，直接 active
+ *   （路由仍受 agent_auto_routing 默认 suggest 兜底，不会无确认自动转派）。
+ * 返回各类写入计数，便于启动日志与测试断言。
+ */
+export function seedBuiltinAgentAssets(
+  db: AgentIdentityDb,
+  store: BeliefCardStore,
+): { souls: number; files: number; cards: number } {
+  const created = new Date().toISOString().slice(0, 10)
+  let souls = 0
+  let files = 0
+  let cards = 0
+
+  for (const [agentId, preset] of Object.entries(BUILTIN_AGENT_PRESETS)) {
+    if (!preset || !isValidAgentSlug(agentId)) continue
+
+    // 1) SOUL —— 守卫式更新，绝不覆盖用户改过的 soul
+    const legacy = LEGACY_BUILTIN_SOULS[agentId as BuiltinAgentId]
+    if (legacy) {
+      const res = db.prepare(
+        `UPDATE agent_personalities
+         SET personality_text = ?, updated_at = ?
+         WHERE agent_name = ? AND personality_text = ?`,
+      ).run(preset.soul, Date.now(), agentId, legacy) as { changes?: number }
+      if (res && typeof res.changes === 'number') souls += res.changes
+    }
+
+    // 2) RULES.md / FOUNDATION.md —— 文件缺失才写
+    files += ensureFile(store.rootPath, `agents/${agentId}/RULES.md`, `${preset.rules}\n`)
+    files += ensureFile(store.rootPath, `agents/${agentId}/FOUNDATION.md`, `${preset.foundation}\n`)
+
+    // 3) 知识卡（active）—— 卡片缺失才写
+    for (const seed of preset.knowledge) {
+      const relPath = `agents/${agentId}/knowledge/${seed.slug}.md`
+      if (store.readCard(relPath, { includeStaged: true })) continue
+      const written = store.writeCard({
+        relPath,
+        frontmatter: {
+          title: seed.title,
+          description: seed.description,
+          confidence: seed.confidence,
+          tag: 'knowledge',
+          created,
+          status: 'active',
+          source: `builtin-preset:v${BUILTIN_AGENT_PRESET_VERSION}`,
+        },
+        body: seed.body,
+      })
+      if (written.ok) cards += 1
+    }
+
+    // 4) 路由卡（active，tag=self）—— 卡片缺失才写
+    const routingRel = `knowledge/routing-${agentId}.md`
+    if (!store.readCard(routingRel, { includeStaged: true })) {
+      const written = store.writeCard({
+        relPath: routingRel,
+        frontmatter: {
+          title: preset.routing.title,
+          description: preset.routing.description,
+          confidence: 'H',
+          tag: 'self',
+          created,
+          status: 'active',
+          source: `builtin-preset:v${BUILTIN_AGENT_PRESET_VERSION}`,
+          triggers: preset.routing.triggers,
+        },
+        body: preset.routing.body,
+      })
+      if (written.ok) cards += 1
+    }
+  }
+
+  return { souls, files, cards }
 }

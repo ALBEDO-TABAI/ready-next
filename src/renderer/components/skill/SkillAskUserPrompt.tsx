@@ -125,12 +125,10 @@ export function SkillAskUserPrompt(): ReactElement | null {
     <div
       style={{
         position: 'fixed',
-        bottom: 24,
-        left: '50%',
-        transform: 'translateX(-50%)',
+        right: 32,
+        bottom: 112,
         zIndex: 1500,
-        maxWidth: 560,
-        width: 'calc(100% - 32px)',
+        width: 'min(560px, calc(100vw - 32px))',
         borderRadius: 12,
         padding: 16,
         boxShadow: '0 12px 32px rgba(0,0,0,0.35)',

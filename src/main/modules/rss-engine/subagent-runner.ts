@@ -1,3 +1,7 @@
+import { existsSync, readFileSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
+
 import { type AIModelConfig, getProviderDef, normalizeAIConfig, resolveAIConfigCapabilities } from '../../../shared/ai-providers'
 import { parseJsonOrEventStreamResponse } from '../openai-responses'
 import { AppSettingsRepository } from '../repositories/app-settings-repository'
@@ -50,6 +54,11 @@ const REQUIRED_COPY_HEADINGS = [
   '## 二、Viral-Abstract-Script 视角',
   '## 三、Brainstorming 视角',
 ]
+const FALLBACK_COPY_SUMMARY_MARKERS = [
+  'AI 深度分析未返回完整结果',
+  '当前为保底报告',
+]
+let cachedVideoCopySkillContract: { analysis: string; structured: string } | null | undefined
 
 function clipText(input: string, maxChars: number): string {
   const text = input.replace(/\s+/g, ' ').trim()
@@ -61,6 +70,10 @@ function hasCompleteCopySummaryShape(text: string): boolean {
   const normalized = text.trim()
   if (!normalized) return false
   return REQUIRED_COPY_HEADINGS.every((heading) => normalized.includes(heading))
+}
+
+export function isFallbackCopySummary(text: string): boolean {
+  return FALLBACK_COPY_SUMMARY_MARKERS.some((marker) => text.includes(marker))
 }
 
 function splitTranscriptSnippets(text: string): string[] {
@@ -116,6 +129,46 @@ function buildFallbackCopySummary(input: CopySummaryInput): string {
   ].join('\n')
 }
 
+function readFirstExisting(paths: string[]): string {
+  for (const path of paths) {
+    try {
+      if (existsSync(path)) return readFileSync(path, 'utf-8')
+    } catch {
+      // silent-catch: optional SKILL.md candidates fall through to the bundled copy.
+    }
+  }
+  return ''
+}
+
+function extractSkillSection(markdown: string, heading: string): string {
+  const start = markdown.indexOf(heading)
+  if (start < 0) return ''
+  const rest = markdown.slice(start)
+  const nextMatch = rest.slice(heading.length).match(/\n---\n|\n### 阶段 \d+:/)
+  const end = nextMatch?.index === undefined
+    ? rest.length
+    : heading.length + nextMatch.index
+  return rest.slice(0, end).trim()
+}
+
+function loadVideoCopySkillContract(): { analysis: string; structured: string } | null {
+  if (cachedVideoCopySkillContract !== undefined) return cachedVideoCopySkillContract
+  const skillMarkdown = readFirstExisting([
+    process.env.READY_VIDEO_COPY_ANALYZER_SKILL_MD || '',
+    join(homedir(), 'Library', 'Application Support', 'ready', 'skill-runtime', 'skills', 'video-copy-analyzer', 'SKILL.md'),
+    join(process.cwd(), 'assets', 'embedded-skills', 'video-copy-analyzer', 'SKILL.md'),
+  ].filter(Boolean))
+  if (!skillMarkdown) {
+    cachedVideoCopySkillContract = null
+    return cachedVideoCopySkillContract
+  }
+  cachedVideoCopySkillContract = {
+    analysis: extractSkillSection(skillMarkdown, '### 阶段 4: 三维度综合分析'),
+    structured: extractSkillSection(skillMarkdown, '### 阶段 5: 结构化文字稿'),
+  }
+  return cachedVideoCopySkillContract
+}
+
 function getMarkdownBodyLength(text: string): number {
   return text
     .replace(/^#+\s+.*$/gm, '')
@@ -123,6 +176,41 @@ function getMarkdownBodyLength(text: string): number {
     .replace(/\s+/g, '')
     .trim()
     .length
+}
+
+export function hasReliableTranscriptPunctuation(text: string): boolean {
+  const bodyLength = getMarkdownBodyLength(text)
+  if (bodyLength < 40) return true
+
+  const sentenceMarks = text.match(/[。！？!?]/g)?.length || 0
+  if (sentenceMarks < 1) return false
+
+  const minSentenceMarks = bodyLength >= 500
+    ? Math.max(3, Math.floor(bodyLength / 260))
+    : 1
+  if (sentenceMarks < minSentenceMarks) return false
+
+  const separators = sentenceMarks + (text.match(/[，,、；;：:]/g)?.length || 0)
+  const minSeparators = bodyLength >= 500
+    ? Math.max(minSentenceMarks, Math.floor(bodyLength / 140))
+    : 1
+  return separators >= minSeparators
+}
+
+export function hasLinePerSentenceParagraphSmell(text: string): boolean {
+  const paragraphs = text
+    .replace(/\r/g, '\n')
+    .split(/\n{2,}/)
+    .map((item) => item.trim())
+    .filter((item) => item && !/^#{1,6}\s+/.test(item))
+  if (paragraphs.length < 5) return false
+
+  const shortSentenceParagraphs = paragraphs.filter((paragraph) => {
+    const bodyLength = getMarkdownBodyLength(paragraph)
+    const sentenceMarks = paragraph.match(/[。！？!?]/g)?.length || 0
+    return bodyLength <= 90 && sentenceMarks <= 1
+  })
+  return shortSentenceParagraphs.length / paragraphs.length >= 0.7
 }
 
 function hasCorrectedTranscriptShape(text: string, sourceText: string): boolean {
@@ -135,6 +223,10 @@ function hasCorrectedTranscriptShape(text: string, sourceText: string): boolean 
     ? Math.max(16, Math.floor(sourceLength * 0.6))
     : Math.floor(sourceLength * 0.8)
   return bodyLength >= minLength
+}
+
+function hasUsableCorrectedTranscriptShape(text: string, sourceText: string): boolean {
+  return hasCorrectedTranscriptShape(text, sourceText) && hasReliableTranscriptPunctuation(text)
 }
 
 function formatCorrectedTranscript(title: string, text: string): string {
@@ -154,7 +246,114 @@ function extractMarkdownBody(text: string): string {
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter((line) => line && !/^#+\s+/.test(line))
-  return lines.join('\n\n').trim()
+  return lines.join('\n').trim()
+}
+
+function getTranscriptPlainBody(text: string): string {
+  return extractMarkdownBody(text) || text.trim()
+}
+
+function joinInlineParts(parts: string[]): string {
+  let result = ''
+  for (const raw of parts) {
+    const part = raw.trim()
+    if (!part) continue
+    if (!result) {
+      result = part
+      continue
+    }
+    const needsSpace = /[A-Za-z0-9]$/.test(result) && /^[A-Za-z0-9]/.test(part)
+    result += `${needsSpace ? ' ' : ''}${part}`
+  }
+  return result
+}
+
+function splitSentenceUnits(text: string): string[] {
+  const normalized = text.replace(/\s+/g, ' ').trim()
+  if (!normalized) return []
+  const matches = normalized.match(/[^。！？!?]+[。！？!?]+|[^。！？!?]+$/gu)
+  return (matches || [normalized])
+    .map((item) => item.trim())
+    .filter(Boolean)
+}
+
+function formatTranscriptParagraphs(text: string): string {
+  const sentenceUnits: string[] = []
+  for (const rawParagraph of text.replace(/\r/g, '\n').split(/\n{2,}/)) {
+    const inline = joinInlineParts(
+      rawParagraph
+        .split(/\n+/)
+        .map((line) => line.trim())
+        .filter(Boolean),
+    )
+    sentenceUnits.push(...splitSentenceUnits(inline))
+  }
+  if (!sentenceUnits.length) return text.trim()
+
+  const paragraphs: string[] = []
+  let current: string[] = []
+  let currentLength = 0
+  const flush = () => {
+    if (!current.length) return
+    paragraphs.push(joinInlineParts(current))
+    current = []
+    currentLength = 0
+  }
+
+  for (const sentence of sentenceUnits) {
+    if (current.length >= 3 && currentLength + sentence.length > 360) {
+      flush()
+    }
+    current.push(sentence)
+    currentLength += sentence.length
+    if (current.length >= 5) {
+      flush()
+    }
+  }
+  flush()
+  return paragraphs.join('\n\n').trim()
+}
+
+function requiresStructuredSectionPlan(correctedTranscript: string): boolean {
+  const body = extractMarkdownBody(correctedTranscript) || correctedTranscript.trim()
+  return getMarkdownBodyLength(body) >= 500 && splitSentenceUnits(body).length >= 6
+}
+
+function isGenericStructuredTitle(title: string): boolean {
+  const normalized = title
+    .replace(/^#{1,6}\s*/, '')
+    .replace(/^[一二三四五六七八九十\d]+[、.．]\s*/, '')
+    .replace(/\s+/g, '')
+    .trim()
+  return [
+    '完整口播',
+    '完整文稿',
+    '完整文字稿',
+    '全文整理',
+    '全文',
+    '口播全文',
+    '结构化文字稿',
+  ].includes(normalized)
+}
+
+function hasOnlyGenericStructuredHeading(text: string): boolean {
+  const headings = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => /^##\s+/.test(line))
+  return headings.length === 1 && isGenericStructuredTitle(headings[0])
+}
+
+function hasUsableStructuredPlan(plan: TranscriptSectionPlan[], correctedTranscript: string): boolean {
+  if (!plan.length) return false
+  if (
+    requiresStructuredSectionPlan(correctedTranscript)
+    && plan.length === 1
+    && isGenericStructuredTitle(plan[0]?.title || '')
+  ) {
+    return false
+  }
+  return true
 }
 
 function splitTranscriptChunks(text: string, targetChars = 1_400): string[] {
@@ -201,7 +400,8 @@ function correctionChunkMaxTokens(chunk: string): number {
 }
 
 function buildFallbackStructuredTranscript(title: string, correctedTranscript: string): string {
-  const body = extractMarkdownBody(correctedTranscript)
+  const sourceBody = extractMarkdownBody(correctedTranscript) || correctedTranscript.trim()
+  const body = formatTranscriptParagraphs(sourceBody)
   return [
     `# ${title} 结构化文字稿`,
     '',
@@ -216,6 +416,9 @@ function hasStructuredTranscriptShape(text: string, correctedTranscript: string)
   if (!normalized) return false
   const sectionCount = normalized.match(/^##\s+/gm)?.length || 0
   if (sectionCount < 1) return false
+  if (requiresStructuredSectionPlan(correctedTranscript) && hasOnlyGenericStructuredHeading(normalized)) return false
+  if (hasLinePerSentenceParagraphSmell(normalized)) return false
+  if (!hasReliableTranscriptPunctuation(normalized)) return false
 
   const referenceLength = getMarkdownBodyLength(correctedTranscript)
   const structuredLength = getMarkdownBodyLength(normalized)
@@ -302,6 +505,13 @@ function buildStructuredTranscriptFromPlan(
 ): string {
   const body = extractMarkdownBody(correctedTranscript) || correctedTranscript.trim()
   if (!body || !plan.length) return buildFallbackStructuredTranscript(title, correctedTranscript)
+  if (
+    requiresStructuredSectionPlan(correctedTranscript)
+    && plan.length === 1
+    && isGenericStructuredTitle(plan[0]?.title || '')
+  ) {
+    return ''
+  }
 
   const boundaries: Array<{ title: string; index: number }> = [
     { title: plan[0]?.title || '完整口播', index: 0 },
@@ -315,7 +525,7 @@ function buildStructuredTranscriptFromPlan(
   }
 
   if (boundaries.length < 2 && plan.length > 1) {
-    return buildFallbackStructuredTranscript(title, correctedTranscript)
+    return ''
   }
 
   const parts = [`# ${title} 结构化文字稿`, '']
@@ -324,7 +534,7 @@ function buildStructuredTranscriptFromPlan(
     const next = boundaries[index + 1]
     const segment = body.slice(current.index, next?.index ?? body.length).trim()
     if (!segment) continue
-    parts.push(`## ${normalizePlanTitle(current.title, index)}`, '', segment, '')
+    parts.push(`## ${normalizePlanTitle(current.title, index)}`, '', formatTranscriptParagraphs(segment), '')
   }
   return parts.join('\n').trim()
 }
@@ -430,6 +640,9 @@ export class RSSSubagentRunner {
       ...input,
       extractedText: correctedTranscript,
     })
+    if (isFallbackCopySummary(report)) {
+      throw new Error('Video Copy Analyzer 未能生成符合技能合同的三维度文案分析报告。')
+    }
     options.onProgress?.({ message: '文案分析报告完成，正在整理结构化文字稿。', completed: 4 })
     const structuredTranscript = await this.structureCopyTranscript({
       ...input,
@@ -441,8 +654,9 @@ export class RSSSubagentRunner {
   }
 
   private async correctCopyTranscript(input: CopySummaryInput): Promise<string> {
-    const chunks = splitTranscriptChunks(input.extractedText)
-    if (!chunks.length) return formatCorrectedTranscript(input.title, input.extractedText)
+    const sourceBody = getTranscriptPlainBody(input.extractedText)
+    const chunks = splitTranscriptChunks(sourceBody)
+    if (!chunks.length) return formatCorrectedTranscript(input.title, sourceBody)
 
     const correctedChunks: string[] = []
     for (let index = 0; index < chunks.length; index += 1) {
@@ -468,30 +682,65 @@ export class RSSSubagentRunner {
         maxTokens: correctionChunkMaxTokens(chunk),
         timeoutMs: 120_000,
       })
-      const body = extractMarkdownBody(text) || text.trim()
-      correctedChunks.push(hasCorrectedTranscriptShape(body, chunk) ? body : chunk)
+      let body = extractMarkdownBody(text) || text.trim()
+      if (!hasUsableCorrectedTranscriptShape(body, chunk)) {
+        const retryText = await this.complete({
+          system: [
+            '你是短视频文稿标点恢复助手。',
+            '只输出当前片段校正后的正文，不要加标题。',
+            '必须补全中文句号、逗号、问号、感叹号和自然断句。',
+            '保留原意和口语风格，不增加原文没有的信息。',
+          ].join(''),
+          user: [
+            `标题: ${input.title}`,
+            `链接: ${input.link}`,
+            input.source ? `来源账号: ${input.source}` : '',
+            `片段: ${index + 1}/${chunks.length}`,
+            '',
+            '原始转录文本:',
+            chunk,
+            '',
+            body ? '上一次校正文稿缺少可靠标点:' : '上一次请求没有返回可用校正文稿:',
+            body || '(空)',
+            '',
+            '请重新输出这个片段的完整正文，必须有自然句子边界和中文标点。',
+          ].filter(Boolean).join('\n'),
+          maxTokens: correctionChunkMaxTokens(chunk),
+          timeoutMs: body ? 180_000 : 240_000,
+        })
+        const retryBody = extractMarkdownBody(retryText) || retryText.trim()
+        body = hasUsableCorrectedTranscriptShape(retryBody, chunk) ? retryBody : body
+      }
+      correctedChunks.push(hasUsableCorrectedTranscriptShape(body, chunk) ? body : chunk)
     }
 
     const corrected = correctedChunks.join('\n\n').trim()
-    if (hasCorrectedTranscriptShape(corrected, input.extractedText)) {
+    if (hasUsableCorrectedTranscriptShape(corrected, sourceBody)) {
       return formatCorrectedTranscript(input.title, corrected)
     }
 
-    return formatCorrectedTranscript(input.title, input.extractedText)
+    if (hasUsableCorrectedTranscriptShape(sourceBody, sourceBody)) {
+      return formatCorrectedTranscript(input.title, sourceBody)
+    }
+
+    throw new Error('Video Copy Analyzer 校正文稿缺少可靠标点，无法生成结构化文字稿。')
   }
 
   private async structureCopyTranscript(input: CopySummaryInput & {
     correctedTranscript: string
     report: string
   }): Promise<string> {
-    const text = await this.complete({
-      system: [
-        '你是短视频文稿结构化助手。',
-        '只输出 JSON，不输出 Markdown 正文。',
-        '你只负责给分段建议，正文会由代码从完整校正文稿中保留。',
-      ].join(''),
-      user: [
+    const system = [
+      '你是短视频文稿结构化助手。',
+      '只输出 JSON，不输出 Markdown 正文。',
+      '你只负责给分段建议，正文会由代码从完整校正文稿中保留。',
+      '必须遵循 Video Copy Analyzer SKILL.md 的结构化文字稿合同。',
+    ].join('')
+    const buildUserPrompt = (retryNote?: string) => [
         `标题: ${input.title}`,
+        '',
+        'Video Copy Analyzer SKILL.md 阶段 5 合同:',
+        loadVideoCopySkillContract()?.structured || '必须按自然叙事段落切分，为每段添加简洁小标题，并保持 3-5 句一段。',
         '',
         '校正文稿:',
         clipText(input.correctedTranscript, 12_000),
@@ -503,22 +752,60 @@ export class RSSSubagentRunner {
         '{"sections":[{"title":"段落标题","anchor":"这一段在校正文稿里的起始原文短句"}]}',
         '',
         '要求：',
-        '- sections 数量控制在 2-8 个；',
+        '- 按内容理解和叙事功能合并相关段落，不要机械按换行拆，也不要每个自然段都拆标题；',
+        '- sections 数量由内容决定，不要为了凑数拆分；',
+        '- 不要使用“完整口播/全文整理”这类泛标题替代内容理解；',
         '- anchor 必须直接摘自校正文稿，用于定位段落开头；',
         '- 不要输出任何正文内容。',
-      ].join('\n'),
+        retryNote ? '' : '',
+        retryNote || '',
+      ].join('\n')
+
+    const text = await this.complete({
+      system,
+      user: buildUserPrompt(),
       maxTokens: 900,
       timeoutMs: 120_000,
     })
-    const plan = parseStructuredTranscriptPlan(text)
-    const structured = buildStructuredTranscriptFromPlan(input.title, input.correctedTranscript, plan)
-    if (hasStructuredTranscriptShape(structured, input.correctedTranscript)) {
+    let plan = parseStructuredTranscriptPlan(text)
+    let structured = hasUsableStructuredPlan(plan, input.correctedTranscript)
+      ? buildStructuredTranscriptFromPlan(input.title, input.correctedTranscript, plan)
+      : ''
+    if (structured && hasStructuredTranscriptShape(structured, input.correctedTranscript)) {
       return structured
     }
-    return buildFallbackStructuredTranscript(input.title, input.correctedTranscript)
+
+    const retryText = await this.complete({
+      system,
+      user: buildUserPrompt([
+        text
+          ? '上一次分段计划不可用。请重新基于校正文稿和分析报告输出可定位的分段计划。'
+          : '上一次没有返回分段计划。请重新基于校正文稿和分析报告输出可定位的分段计划。',
+        requiresStructuredSectionPlan(input.correctedTranscript)
+          ? '如果文稿只有单一核心段落，可以只返回一个有内容指向的小标题；如果包含多个叙事功能，请合并成少量章节。不要返回“完整口播/全文整理”。'
+          : '如果内容确实很短，可以只返回一个章节。',
+        text ? `上一次输出:\n${clipText(text, 1_200)}` : '',
+      ].filter(Boolean).join('\n')),
+      maxTokens: 1_200,
+      timeoutMs: text ? 180_000 : 240_000,
+    })
+    plan = parseStructuredTranscriptPlan(retryText)
+    structured = hasUsableStructuredPlan(plan, input.correctedTranscript)
+      ? buildStructuredTranscriptFromPlan(input.title, input.correctedTranscript, plan)
+      : ''
+    if (structured && hasStructuredTranscriptShape(structured, input.correctedTranscript)) {
+      return structured
+    }
+
+    if (!requiresStructuredSectionPlan(input.correctedTranscript)) {
+      return buildFallbackStructuredTranscript(input.title, input.correctedTranscript)
+    }
+
+    throw new Error('Video Copy Analyzer 未能生成符合技能合同的结构化分段计划。')
   }
 
   async summarizeCopy(input: CopySummaryInput): Promise<string> {
+    const skillContract = loadVideoCopySkillContract()
     const user = [
       `标题: ${input.title}`,
       `链接: ${input.link}`,
@@ -527,7 +814,7 @@ export class RSSSubagentRunner {
       input.summary ? `原始摘要: ${clipText(input.summary, 600)}` : '',
       '',
       '正文或转录文本:',
-      clipText(input.extractedText, 8_000),
+      clipText(getTranscriptPlainBody(input.extractedText), 8_000),
     ]
       .filter(Boolean)
       .join('\n')
@@ -536,9 +823,13 @@ export class RSSSubagentRunner {
       '你是视频文案分析助手，严格对齐 video-copy-analyzer 的三维分析框架。',
       '只输出 Markdown；保留事实，不虚构，不擅自重写原文内容。',
       '优先做结构化分析与优化建议，不做大段改写。',
+      '必须遵循 Video Copy Analyzer SKILL.md 的三维度综合分析合同。',
     ].join('')
     const summaryPrompt = [
       `${user}`,
+      '',
+      'Video Copy Analyzer SKILL.md 阶段 4 合同:',
+      skillContract?.analysis || '必须从 TextContent Analysis、Viral-Abstract-Script、Brainstorming 三个视角完成分析。',
       '',
       '请严格按以下标题输出（不可改名、不可缺失）：',
       '## 一、TextContent Analysis 视角',

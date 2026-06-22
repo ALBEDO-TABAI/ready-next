@@ -1516,7 +1516,7 @@ export class TurnEngine {
         progressFollowupTurnDetected: isSkillProgressFollowupTurnDetected,
       })
       const isSkillRestartTurnDetected = taskOperationIntent.kind === 'restart_same_goal'
-      const isSkillResumeTurnDetected = (isRetryOnlyTurnDetected && !isSkillRestartTurnDetected) || isConfigRepairTurnDetected
+      let isSkillResumeTurnDetected = (isRetryOnlyTurnDetected && !isSkillRestartTurnDetected) || isConfigRepairTurnDetected
       // Stage Q (Stage 11) — `restartIntentClass` is computed below, AFTER
       // `explicitRunStateResourceForTurn` is resolved. See comment near
       // its definition for the contract.
@@ -1536,6 +1536,17 @@ export class TurnEngine {
         requestEnvelope.resources,
         requestEnvelope.referencedResources,
       )
+      if (
+        !isSkillResumeTurnDetected
+        && currentRunStateResourceResolution.status === 'resolved'
+        && [
+          requestEnvelope.primaryInstruction,
+          requestEnvelope.pureUserText,
+          contextualUserInput,
+        ].some((text) => matchesResumeIntent(String(text || ''), 'anywhere'))
+      ) {
+        isSkillResumeTurnDetected = true
+      }
       const historicalRunStateResourceResolution = currentRunStateResourceResolution.status === 'none' && isSkillResumeTurnDetected
         ? resolveRunStateResourceFromSessionText(
           session.messages
@@ -1905,7 +1916,7 @@ export class TurnEngine {
             ? 'start'
           : isConfigRepairTurnDetected
           ? 'repair_config'
-          : isRetryOnlyTurnDetected || (
+          : isSkillResumeTurnDetected || (
             isSkillProgressFollowupTurnDetected
             && hasNonHintSkillContextForTurn
           )

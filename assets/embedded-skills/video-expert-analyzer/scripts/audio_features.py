@@ -19,6 +19,13 @@ import subprocess
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
+try:
+    from runtime_tools import resolve_tool_binary
+except ImportError:
+    import sys
+    sys.path.insert(0, str(Path(__file__).parent))
+    from runtime_tools import resolve_tool_binary
+
 AUDIO_FEATURES_VERSION = "audio-features-v1"
 AUDIO_FEATURES_FILENAME = "audio_features.json"
 
@@ -55,7 +62,7 @@ def _decode_pcm(audio_path: Path, sample_rate: int = SAMPLE_RATE):
     import numpy as np
 
     cmd = [
-        "ffmpeg", "-v", "error",
+        resolve_tool_binary("ffmpeg"), "-v", "error",
         "-i", str(audio_path),
         "-ac", "1", "-ar", str(sample_rate),
         "-f", "s16le", "-",

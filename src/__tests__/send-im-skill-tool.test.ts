@@ -460,6 +460,42 @@ test('send-im file tool classifies WeChat ret=-2 sendmessage as a binding-side r
   })
 })
 
+test('send-im file tool classifies WeChat ret=-3 sendmessage as a binding-side rejection', async () => {
+  await withTempFile('report.pdf', '%PDF-1.4\n', async (filePath) => {
+    const output = await executeSendImFileTool(
+      { filePath, target: 'wechat' },
+      {
+        runtime: {
+          listChannels: () => [{
+            id: 'channel-wechat-openclaw-default',
+            type: 'wechat-openclaw',
+            name: '微信',
+            enabled: true,
+            config: {},
+          }],
+        },
+        sidecarManager: {
+          isRunning: () => true,
+          sendChannel: async () => ({
+            success: false,
+            error: '微信接口返回错误 ret=-3 (ilink/bot/sendmessage)',
+          }),
+        },
+      },
+    )
+
+    assert.equal(output.data?.status, 'error')
+    assert.equal(output.data?.errorKind, 'blocked_external')
+    assert.equal(output.data?.errorCode, 'wechat_sendmessage_ret_-3')
+    assert.equal(output.data?.retryable, false)
+    assert.match(output.text, /ret=-3/)
+    assert.match(output.text, /从微信给 Ready 发一条新消息/)
+    assert.doesNotMatch(output.text, /文件过大|临时异常|稍后重试/)
+    assert.equal(output.projectionPatch?.terminalFailureReason, 'delivery_failed')
+    assert.equal(output.projectionPatch?.terminalFailureErrorKind, 'blocked_external')
+  })
+})
+
 test('send-im file tool does not send a folder unless the user asks for media inside it', async () => {
   await withTempDirectoryFiles([
     { name: 'one.jpg', body: 'jpg1' },
@@ -677,6 +713,44 @@ test('send-im file tool cancels when the user cancels after the IM target', asyn
             mimeType: 'image/jpeg',
             createdAt: new Date(index).toISOString(),
           })),
+        },
+      },
+    )
+
+    assert.equal(output.data?.status, 'error')
+    assert.equal(output.data?.errorKind, 'intent_negated')
+    assert.equal(sendCalled, false)
+  })
+})
+
+test('send-im file tool cancels when the user cancels before explicit Send IM mention', async () => {
+  await withTempFile('报告.md', '# report\n', async (filePath) => {
+    let sendCalled = false
+    const output = await executeSendImFileTool(
+      { fileName: '报告.md', target: 'wechat' },
+      {
+        runtime: {
+          listChannels: () => [{
+            id: 'channel-wechat-openclaw-default',
+            type: 'wechat-openclaw',
+            name: '微信',
+            enabled: true,
+            config: {},
+          }],
+        },
+        sidecarManager: {
+          isRunning: () => true,
+          sendChannel: async () => {
+            sendCalled = true
+            return { success: true }
+          },
+        },
+        currentUserText: '取消 @[Send IM]@@[报告.md]',
+        requestEnvelope: {
+          resources: [{
+            name: '报告.md',
+            path: filePath,
+          }],
         },
       },
     )

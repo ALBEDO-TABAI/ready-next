@@ -90,13 +90,18 @@ async function withRunState(
   }
 }
 
-function runYtDlpCommandProbe(helpText: string): string[] {
+function runYtDlpCommandProbe(
+  helpText: string,
+  options: { withPathNode?: boolean; fakeQuickjs?: boolean; disableNodeResolver?: boolean } = {},
+): string[] {
+  const withPathNode = options.withPathNode ?? true
   const root = mkdtempSync(join(tmpdir(), 'vea-ytdlp-probe-'))
   try {
     const binDir = join(root, 'bin')
     mkdirSync(binDir, { recursive: true })
     const ytdlp = join(binDir, 'yt-dlp')
     const node = join(binDir, 'node')
+    const ffmpeg = join(binDir, 'ffmpeg')
     const harness = join(root, 'harness.py')
     writeFileSync(ytdlp, [
       '#!/bin/sh',
@@ -107,9 +112,16 @@ function runYtDlpCommandProbe(helpText: string): string[] {
       'printf "%s\\n" "$@"',
       '',
     ].join('\n'), 'utf8')
-    writeFileSync(node, '#!/bin/sh\nexit 0\n', 'utf8')
+    writeFileSync(ffmpeg, '#!/bin/sh\nexit 0\n', 'utf8')
     chmodSync(ytdlp, 0o755)
-    chmodSync(node, 0o755)
+    chmodSync(ffmpeg, 0o755)
+    if (withPathNode) {
+      writeFileSync(node, '#!/bin/sh\nexit 0\n', 'utf8')
+      chmodSync(node, 0o755)
+    }
+    if (options.fakeQuickjs) {
+      writeFileSync(join(root, 'quickjs.py'), '# fake quickjs module for importlib.util.find_spec\n', 'utf8')
+    }
     writeFileSync(harness, [
       'import importlib.util, json, sys, types',
       'download_douyin = types.SimpleNamespace(is_douyin_url=lambda _url: False, download_douyin_video=lambda *_args: False)',
@@ -127,6 +139,7 @@ function runYtDlpCommandProbe(helpText: string): string[] {
       'assert spec.loader is not None',
       'sys.modules["pipeline_enhanced"] = module',
       'spec.loader.exec_module(module)',
+      ...(options.disableNodeResolver ? ['module.resolve_node_js_runtime = lambda: ""'] : []),
       'print(json.dumps(module.build_yt_dlp_command("--version")))',
       '',
     ].join('\n'), 'utf8')
@@ -135,6 +148,7 @@ function runYtDlpCommandProbe(helpText: string): string[] {
       env: {
         ...process.env,
         PATH: `${binDir}:${process.env.PATH || ''}`,
+        PYTHONPATH: root,
       },
     })
     return JSON.parse(stdout.trim()) as string[]
@@ -154,7 +168,23 @@ test('VEA yt-dlp command includes --js-runtimes only when yt-dlp advertises it',
   const command = runYtDlpCommandProbe('Usage: yt-dlp [OPTIONS] URL\\n    --js-runtimes RUNTIMES')
 
   assert.equal(command.includes('--js-runtimes'), true)
-  assert.deepEqual(command.slice(-2), ['node', '--version'])
+  const runtimeIndex = command.indexOf('--js-runtimes')
+  assert.match(command[runtimeIndex + 1], /^node:.+\/node$/)
+  const ffmpegIndex = command.indexOf('--ffmpeg-location')
+  assert.match(command[ffmpegIndex + 1], /\/ffmpeg$/)
+  assert.deepEqual(command.slice(-1), ['--version'])
+})
+
+test('VEA yt-dlp command falls back to quickjs when desktop PATH has no node', () => {
+  const command = runYtDlpCommandProbe('Usage: yt-dlp [OPTIONS] URL\\n    --js-runtimes RUNTIMES', {
+    withPathNode: false,
+    fakeQuickjs: true,
+    disableNodeResolver: true,
+  })
+
+  const runtimeIndex = command.indexOf('--js-runtimes')
+  assert.equal(command[runtimeIndex + 1], 'quickjs')
+  assert.deepEqual(command.slice(-1), ['--version'])
 })
 
 test('VEA ready_compat writes blocked structured result from run_state even when subprocess exits 0', () => {

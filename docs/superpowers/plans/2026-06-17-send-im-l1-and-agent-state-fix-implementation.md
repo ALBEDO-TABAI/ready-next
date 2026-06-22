@@ -1,9 +1,9 @@
 ---
 title: send-im 修复 + Agent 状态架构（分阶段实施计划）
 date: 2026-06-17
-revised: 2026-06-18 (r8 — G0/G1/G3/G4/G2-error-path 已实现并验证；真实微信送达被 sendmessage ret=-2 阻塞)
+revised: 2026-06-22 (r9 — Send IM 显式点名/前置取消/ret=-3/远程回执边界补洞并验证)
 branch: agent-evolution/phase1
-status: implemented-code-verified-external-wechat-send-blocked
+status: implemented-code-verified-sendmessage-ret2-ret3-session-refresh-needed
 enforce: true
 executor: codex
 scope_note: G0 是 keystone 且先做（架构级、碰可见收口/判定红线，须配 verify:stability）；G1/G4 为 send-im 主链路；G2 须真机；G3 提示词+策略层。Problem A（⑥）与移动端（Phase 3）仍单独排。
@@ -22,9 +22,10 @@ review_log:
   - r6: Codex 复审 r5"方向稳、剩执行门槛不够硬"，提 3 处并已吸收——① 硬化 G0 测试（C-G0-2 必须断言"落明确病因码 且 verdict≠accept 且 ≠adjudication_degraded"，纯问答 accept 单独测 C-G0-2b，防实现者把失败改 accept 蒙混过测）；② 拆分 precheck(开工前只复现+定位)/postcheck(每步改完验证)，消除"没改码却要验证改后结果"悖论（§2.3/§3.3）；③ 新增 §1.5 现有改动对照归档（工作树已有 ~44 文件/2000+ 行未提交改动，不能从零实现），status→needs-reconcile-then-precheck。低风险清理：frontmatter→r6、§0.1 Problem B 指 §6、§0.2 ret=-2 证伪指 §4.5。
   - r7: §1.5 归档产物已存在并复核通过（`docs/diagnostics/2026-06-18-worktree-vs-plan-reconciliation.md`）；计划状态从"待归档"推进为"待 G0-root precheck + 实现"。下一步不再重复归档，直接补 G0-root + 防假成功测试，再回归已先行落地的 G1/G2/G4。
   - r8: Codex 执行完成：G0 终态如实化、G1/G4 直达 send-im、G3 防 present_file 兜底、G2 `ret=-2` 如实化与频道错误落库均已通过测试；真实文本探活与 Markdown 发送仍被微信 `sendmessage ret=-2` 拒绝，已证明非文件大小/类型、非目标 userId 缺失、非 Ready 工具绕路。
+  - r9: 06-22 真实使用补洞：`@[Send IM]@@[文件]` 显式点名进入 send-im 授权；`取消/算了 @[Send IM]@@[文件]` 前置取消不发送；`ret=-3 sendmessage` 与 `ret=-2` 同类归为微信出站会话失效；`sendScoped` 回执失败豁免收窄为仅 Send IM 工具成功后适用。经子 agent 复审后补齐两个 blocker，`npm run verify:send-im-l1` 与 `npm run typecheck` 通过。
 ---
 
-# 实施计划：send-im 修复 + Agent 状态架构（r8）
+# 实施计划：send-im 修复 + Agent 状态架构（r9）
 
 > 执行依据，给 Codex 用。证据见 `source_docs`，本文给"合同 → 触点 → 改向 → 测试 → 验证 → 非目标"。
 > **合同先行**（CLAUDE.md §0.5）：每项给机器可验合同；合同写不出来 / 根因未坐实，不得开工。
@@ -270,6 +271,14 @@ skill 授权只认**当前轮字面** `@[skill]`（`findExplicitlyRequestedSkill
 - 历史提示词变体：`@[Send IM]把 /Users/user/实验田/ready-cowork/outputs/send-im-live-20260618-135029/ready-send-im-live.md 发到我微信` 通过真实 Electron `agent.sendScoped` 执行；日志显示 `localSendIm=true`、浏览器采集 `exposure=false`、最终工具列表含 `skill_send_im_file`、实际工具调用为 `skill_send_im_file`。
 - 终态：该 run `terminalReason=delivery_failed`、`toolCallsUsed=1`，没有再塌缩成 `adjudication_degraded`，也没有绕到 `present_file`。
 - adapter 核验：本地账号有 `userId` 与 context token；真实短文本也失败，所以不是附件大小、PDF/视频类型、目标 userId 缺失，剩余阻塞在微信/OpenClaw 出站发送会话或绑定态。
+
+### 4.9 2026-06-22 真实使用补洞
+
+- [x] **C-G1-Z 显式 Send IM 技能点名**：`@[Send IM]@@[实习纲要.md]` 视为本轮文件发送意图并暴露 `skill_send_im_file`；`@[Send IM] 这个技能能做什么` 不触发发送。
+- [x] **C-G1-N 前置取消**：`取消 @[Send IM]@@[报告.md]` / `算了 @[Send IM]@@[报告.md]` 必须在意图识别与工具入口都取消，sidecar 不得被调用。
+- [x] **C-G2-3 ret=-3 如实化**：`ret=-3 (ilink/bot/sendmessage)` 与 `ret=-2` 同类归为微信出站发送会话失效，提示刷新微信会话/重新绑定，不归因到文件大小、类型或临时重试。
+- [x] **C-G2-4 回执失败边界**：普通远程 IM 问答的最终回复发不回微信仍是失败；只有 Send IM 文件已成功发出、额外回执文字发不回微信时，本地任务才保持完成。
+- **验证记录**：`npm run verify:send-im-l1` 通过（109 pass / 1 个 host-Node SQLite ABI skip，native 链覆盖）；`npm run typecheck` 通过；子 agent 对抗复审初次指出两个 blocker，二次复审确认已关闭。
 
 ---
 

@@ -89,6 +89,17 @@ describe('action announcement guard', () => {
     assert.equal(decision.kind, 'checkpoint')
   })
 
+  test('steers when a file workflow promises to create the next document', () => {
+    const decision = evaluateActionAnnouncementGuard({
+      assistantText: '好，笔记已移入新文件夹。现在创建"图片原文"文档——基于笔记内容还原小红书图片帖的逐图原文。',
+      toolCallsInCurrentResponse: 0,
+      hasUnfinishedTaskReference: true,
+      alreadySteered: false,
+    })
+
+    assert.equal(decision.kind, 'steer')
+  })
+
   test('steers once when an active task ends with an action announcement and no tools', async () => {
     let sawSteerReminder = false
     const scripted = new ScriptedAgentRunner({}, [

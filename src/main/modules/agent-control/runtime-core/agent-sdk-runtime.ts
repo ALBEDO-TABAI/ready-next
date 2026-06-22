@@ -1060,12 +1060,20 @@ function resolveSdkDefaultIntentSurface(params: {
   const rawUserText = stringField(envelopeRecord, 'rawUserText') || messageToText(params.message)
   const hasWidgetTargetContext = environmentHints?.hasWidgetTargetContext === true
     || envelopeRefs.resources.some((resource) => resource.kind === 'widget_target' || resource.source === 'widget_target')
+  const hasDocumentEnvironment = environmentHints?.hasDocumentContext === true
+    || rawUserText.includes('### 当前文档上下文')
+    || rawUserText.includes('### 文档引用')
+    || envelopeRefs.resources.some((resource) => (
+      resource.kind === 'document_context'
+      || resource.source === 'current_document'
+      || /\.(?:md|markdown|txt|docx?)$/i.test(`${resource.path || ''}\n${resource.name || ''}`)
+    ))
   const explicitWidgetCreateIntent = hasExplicitDocumentWidgetCreateIntent(userInstructionText)
   const documentWidgetTaskKind = hasWidgetTargetContext && !explicitWidgetCreateIntent
     ? 'update'
     : inferDocumentWidgetTaskKind(userInstructionText)
   const preferredSkillToolNames = resolveAuthorizationPreferredToolNames(params.authorization)
-  const requestEnvelope = buildRequestEnvelope({ userText: userInstructionText })
+  const requestEnvelope = buildRequestEnvelope({ userText: rawUserText || userInstructionText })
   const mapSemanticIntent = classifyMapSemanticIntentFallback(userInstructionText)
   const intentClassification = applyMapSemanticIntentToIntentClassification(
     classifyIntent(requestEnvelope),
@@ -1078,7 +1086,7 @@ function resolveSdkDefaultIntentSurface(params: {
     contextualUserInput: userInstructionText,
     userInstructionText,
     intentClassification,
-    hasDocumentEnvironment: rawUserText.includes('## 环境信息') && rawUserText.includes('当前模式: 文档模式'),
+    hasDocumentEnvironment: hasDocumentEnvironment || (rawUserText.includes('## 环境信息') && rawUserText.includes('当前模式: 文档模式')),
     hasWidgetTargetContext,
     explicitWidgetCreateIntent,
     documentWidgetTaskKind,

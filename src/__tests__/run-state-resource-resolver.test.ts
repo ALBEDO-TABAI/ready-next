@@ -43,6 +43,21 @@ function makeCurrentDocumentResource(path: string, order = 0): RequestEnvelopeRe
   }
 }
 
+function makeFolderResource(path: string, order = 0): RequestEnvelopeResource {
+  return {
+    id: `folder-${order}`,
+    kind: 'folder_reference',
+    source: 'folder_reference',
+    name: 'selected task folder',
+    path,
+    text: '',
+    summary: null,
+    order,
+    canRead: true,
+    canWrite: false,
+  }
+}
+
 function makeOutputDir(): string {
   return mkdtempSync(join(tmpdir(), 'ready-run-state-resource-'))
 }
@@ -122,6 +137,50 @@ test('resolveExplicitRunStateResource recognizes an explicit run_state path refe
   assert.equal(resolved.status, 'resolved')
   assert.equal(resolved.candidate?.runStatePath, runStatePath)
   assert.equal(resolved.candidate?.outputDir, outputDir)
+})
+
+test('resolveExplicitRunStateResource recognizes a VEA run_state nested under a selected task folder', () => {
+  const root = makeOutputDir()
+  const outputDir = join(root, 'visual-analysis', '[e.l.f. Cosmetics] What the h.e.l.f. e.l.f. Hair is here!')
+  mkdirSync(outputDir, { recursive: true })
+  const runStatePath = join(outputDir, 'run_state.json')
+  writeFileSync(
+    runStatePath,
+    JSON.stringify({
+      version: 'vnext',
+      status: 'blocked',
+      current_stage: 'prepare',
+      task_id: 'task-vea',
+      child_run_id: 'child-vea',
+      video_dir: outputDir,
+      last_error: 'download failed',
+    }),
+    'utf8',
+  )
+
+  const resolved = resolveExplicitRunStateResource([makeFolderResource(root)])
+
+  assert.equal(resolved.status, 'resolved')
+  assert.equal(resolved.candidate?.skillId, 'video-expert-analyzer')
+  assert.equal(resolved.candidate?.outputDir, outputDir)
+  assert.equal(resolved.candidate?.runStatePath, runStatePath)
+  assert.equal(resolved.candidate?.currentStage, 'prepare')
+  assert.equal(resolved.candidate?.status, 'blocked')
+})
+
+test('resolveExplicitRunStateResource keeps a selected folder ambiguous when it contains multiple VEA run_state files', () => {
+  const root = makeOutputDir()
+  const firstDir = join(root, 'visual-analysis', 'first')
+  const secondDir = join(root, 'visual-analysis', 'second')
+  mkdirSync(firstDir, { recursive: true })
+  mkdirSync(secondDir, { recursive: true })
+  writeFileSync(join(firstDir, 'run_state.json'), JSON.stringify({ version: 'vnext', video_dir: firstDir }), 'utf8')
+  writeFileSync(join(secondDir, 'run_state.json'), JSON.stringify({ version: 'vnext', video_dir: secondDir }), 'utf8')
+
+  const resolved = resolveExplicitRunStateResource([makeFolderResource(root)])
+
+  assert.equal(resolved.status, 'ambiguous')
+  assert.equal(resolved.candidateCount, 2)
 })
 
 test('resolveRunStateResourceFromSessionText recognizes a prior opened run_state path', () => {

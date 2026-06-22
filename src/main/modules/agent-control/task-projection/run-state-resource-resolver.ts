@@ -3,9 +3,11 @@ import { basename, dirname, isAbsolute, join } from 'node:path'
 
 import type { RequestEnvelopeResource, RequestEnvelopeResourceRef } from '../contracts/request-envelope'
 import { parseRunStateJson } from './run-state-schema'
+import { selectRunStateCandidate } from './run-state-selection'
 
 const RUN_STATE_FILE = 'run_state.json'
 const MAX_RUN_STATE_BYTES = 64 * 1024
+const FOLDER_RUN_STATE_SEARCH_DEPTH = 2
 const VEA_SKILL_ID = 'video-expert-analyzer'
 const VEA_SKILL_NAME = 'Video Expert Analyzer (VNext)'
 const VEA_AI_ANALYZE_ACTION = 'video_expert_ai_analyze'
@@ -44,6 +46,46 @@ function isRunStatePathRef(ref: RequestEnvelopeResourceRef): boolean {
   if (ref.kind !== 'path') return false
   const value = ref.value.trim()
   return Boolean(value) && basename(value) === RUN_STATE_FILE
+}
+
+function isTrustedRunStateFolderResource(resource: RequestEnvelopeResource): boolean {
+  if (!resource.canRead || typeof resource.path !== 'string' || !resource.path.trim()) return false
+  if (basename(resource.path.trim()) === RUN_STATE_FILE) return false
+  return resource.kind === 'folder_reference'
+    || resource.source === 'folder_reference'
+    || resource.source === 'user_attachment'
+    || resource.source === 'explicit_reference'
+}
+
+function collectRunStatePathsFromFolderResources(
+  resources: ReadonlyArray<RequestEnvelopeResource>,
+): ExplicitRunStateResourceResolution | { status: 'resolved_paths'; paths: string[] } {
+  const paths: string[] = []
+  for (const resource of resources) {
+    if (!isTrustedRunStateFolderResource(resource)) continue
+    const rootDir = resource.path?.trim() || ''
+    if (!isAbsolute(rootDir)) continue
+    try {
+      if (!statSync(rootDir).isDirectory()) continue
+    } catch {
+      continue
+    }
+    const selection = selectRunStateCandidate({
+      rootDir,
+      fileName: RUN_STATE_FILE,
+      searchDepth: FOLDER_RUN_STATE_SEARCH_DEPTH,
+    })
+    if (selection.ambiguous) {
+      return {
+        status: 'ambiguous',
+        reason: 'multiple run_state resources under selected folder',
+        candidateCount: selection.candidates.length,
+        paths: selection.candidates.map((candidate) => candidate.path),
+      }
+    }
+    if (selection.path) paths.push(selection.path)
+  }
+  return { status: 'resolved_paths', paths }
 }
 
 function collectRunStatePathsFromText(text: string): string[] {
@@ -165,11 +207,15 @@ export function resolveExplicitRunStateResource(
   resources: ReadonlyArray<RequestEnvelopeResource>,
   referencedResources: ReadonlyArray<RequestEnvelopeResourceRef> = [],
 ): ExplicitRunStateResourceResolution {
+  const folderResolution = collectRunStatePathsFromFolderResources(resources)
+  if (folderResolution.status !== 'resolved_paths') return folderResolution
+
   const paths = [
     ...resources
       .filter(isTrustedRunStateFileResource)
       .map((resource) => resource.path?.trim())
       .filter((path): path is string => Boolean(path)),
+    ...folderResolution.paths,
     ...referencedResources
       .filter(isRunStatePathRef)
       .map((ref) => ref.value.trim()),

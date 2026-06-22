@@ -489,16 +489,16 @@ function stringifySendError(error: unknown): string {
 
 function diagnoseSendFailure(error: unknown): SendImFailureDiagnosis {
   const rawError = stringifySendError(error).trim()
-  const hasSendMessageRetMinusTwo = /ret\s*=\s*-2\b/i.test(rawError) && /sendmessage/i.test(rawError)
-  if (hasSendMessageRetMinusTwo) {
+  const sendMessageRet = rawError.match(/ret\s*=\s*(-[23])\b/i)?.[1] || ''
+  if (sendMessageRet && /sendmessage/i.test(rawError)) {
     return {
       text: [
-        '微信发送接口拒绝了这次发送：ret=-2 (sendmessage)。',
+        `微信发送接口拒绝了这次发送：ret=${sendMessageRet} (sendmessage)。`,
         '这不是 Ready 找不到文件，也没有证据指向附件尺寸限制；本轮直接重试大概率仍会失败。',
         '请先从微信给 Ready 发一条新消息刷新发送会话后重试；仍失败再重新绑定微信。',
       ].join(''),
       errorKind: SEND_IM_ERROR_KINDS.blockedExternal.code,
-      errorCode: 'wechat_sendmessage_ret_-2',
+      errorCode: `wechat_sendmessage_ret_${sendMessageRet}`,
       retryable: false,
       rawError,
     }

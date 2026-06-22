@@ -18,6 +18,7 @@ import {
   type SkillToolAuthorization,
 } from '../main/modules/agent-control/skills/skill-tool-authorization'
 import {
+  resolveExecutionIntentContext,
   resolveIntentCapabilityGroupModes,
   type ExecutionIntentContext,
 } from '../main/modules/agent-control/execution-intent-resolver'
@@ -376,6 +377,76 @@ test('P9C checks the live SDK default tool list exposes only the collection subs
   assert.ok(toolNames.includes('ask_user_questions'))
   assert.equal(toolNames.includes('browser_click'), false)
   assert.equal(toolNames.includes('browser_type'), false)
+})
+
+test('document-context continuation keeps document write tools available for short follow-up turns', () => {
+  const userText = [
+    '再整理一下这篇',
+    '',
+    '### 当前文档上下文',
+    '- 标题: example.md',
+    '- 路径: /tmp/example.md',
+    '--- 文档摘要开始 ---',
+    '每一句散开一行，不好阅读。',
+    '--- 文档摘要结束 ---',
+  ].join('\n')
+  const requestEnvelope = buildRequestEnvelope({ userText })
+  const context = resolveExecutionIntentContext({
+    requestEnvelope,
+    previousInputs: [],
+    intentClassification: classifyIntent(requestEnvelope),
+  })
+  const intentModes = resolveIntentCapabilityGroupModes({
+    hasTools: true,
+    capabilityProfile: 'local_chat',
+    contextualUserInput: context.contextualUserInput,
+    userInstructionText: context.userInstructionText,
+    intentClassification: context.intentClassification,
+    hasDocumentEnvironment: context.hasDocumentEnvironment,
+    hasWidgetTargetContext: context.hasWidgetTargetContext,
+    explicitWidgetCreateIntent: context.explicitWidgetCreateIntent,
+    documentWidgetTaskKind: context.documentWidgetTaskKind,
+    preferredSkillToolNames: null,
+    mapSemanticIntent: context.mapSemanticIntent,
+  })
+  const liveToolNames = listLiveSdkDefaultToolNames({
+    userText,
+    requestEnvelope,
+  })
+
+  assert.equal(context.hasDocumentEnvironment, true)
+  assert.equal(intentModes.allowDocumentTools, true)
+  assert.equal(intentModes.forceDocumentTool, true)
+  assert.ok(liveToolNames.includes('document_switch_tab'))
+  assert.ok(liveToolNames.includes('document_set_content'))
+  assert.ok(liveToolNames.includes('document_save_tab'))
+})
+
+test('document-context confirmation with subtitle request keeps document write tools available only with document context', () => {
+  const plainText = '确认，最好附上子标题'
+  const plainTools = listLiveSdkDefaultToolNames({
+    userText: plainText,
+    requestEnvelope: buildRequestEnvelope({ userText: plainText }),
+  })
+  const documentText = [
+    plainText,
+    '',
+    '### 当前文档上下文',
+    '- 标题: example.md',
+    '- 路径: /tmp/example.md',
+    '--- 文档摘要开始 ---',
+    '整理状态: 待确认',
+    '--- 文档摘要结束 ---',
+  ].join('\n')
+  const documentTools = listLiveSdkDefaultToolNames({
+    userText: documentText,
+    requestEnvelope: buildRequestEnvelope({ userText: documentText }),
+  })
+
+  assert.equal(plainTools.includes('document_set_content'), false)
+  assert.equal(plainTools.includes('document_save_tab'), false)
+  assert.ok(documentTools.includes('document_set_content'))
+  assert.ok(documentTools.includes('document_save_tab'))
 })
 
 test('P6e keeps reconcileAfterBrowserDecision parity for late browser upload decisions', () => {

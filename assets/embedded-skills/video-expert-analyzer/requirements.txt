@@ -1,5 +1,6 @@
 # Core video processing
-yt-dlp>=2024.1
+yt-dlp>=2026.6.9
+quickjs>=1.19.4
 scenedetect[opencv]>=0.6
 ffmpeg-python>=0.2
 

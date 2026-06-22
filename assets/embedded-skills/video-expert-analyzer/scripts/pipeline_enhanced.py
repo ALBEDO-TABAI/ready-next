@@ -9,6 +9,7 @@ import os
 import sys
 import json
 import argparse
+import importlib.util
 import subprocess
 import tempfile
 import re
@@ -20,6 +21,12 @@ from urllib.parse import unquote
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
+
+try:
+    from runtime_tools import resolve_tool_binary
+except ImportError:
+    sys.path.insert(0, str(Path(__file__).parent))
+    from runtime_tools import resolve_tool_binary
 
 try:
     from scenedetect import AdaptiveDetector, ContentDetector, open_video
@@ -195,7 +202,7 @@ def _get_ffmpeg_encoder_names() -> set[str]:
     if _FFMPEG_ENCODER_CACHE is not None:
         return set(_FFMPEG_ENCODER_CACHE)
 
-    ffmpeg_binary = shutil.which("ffmpeg") or "ffmpeg"
+    ffmpeg_binary = resolve_tool_binary("ffmpeg")
     try:
         result = subprocess.run(
             [ffmpeg_binary, "-hide_banner", "-encoders"],
@@ -284,7 +291,7 @@ def _parse_ffprobe_fps(raw_fps: str) -> float:
 
 
 def _get_video_metadata(video_path: Path) -> tuple[float, float, int, bool]:
-    ffprobe_binary = shutil.which("ffprobe") or "ffprobe"
+    ffprobe_binary = resolve_tool_binary("ffprobe")
     cmd = [
         ffprobe_binary,
         "-v",
@@ -492,7 +499,7 @@ def _run_ffmpeg_trim(
     end_frame: int | None = None,
     has_audio: bool = True,
 ):
-    ffmpeg_binary = shutil.which("ffmpeg") or "ffmpeg"
+    ffmpeg_binary = resolve_tool_binary("ffmpeg")
     selected_codec, selected_reason = _select_scene_video_codec()
 
     def build_command(video_codec: str) -> list[str]:
@@ -688,15 +695,39 @@ def build_yt_dlp_command(*args: str) -> List[str]:
     这时自动回退到当前 Python 解释器里的 yt_dlp 模块。
     """
     base_command = ["yt-dlp"] if shutil.which("yt-dlp") else [sys.executable, "-m", "yt_dlp"]
-    runtime_args: List[str] = []
-    if shutil.which("node") and yt_dlp_supports_js_runtimes(base_command):
-        runtime_args = ["--js-runtimes", "node"]
+    runtime_args = resolve_yt_dlp_js_runtime_args(base_command)
+    ffmpeg_args = resolve_yt_dlp_ffmpeg_args()
     remote_component_args: List[str] = []
     if yt_dlp_supports_remote_components(base_command):
         remote_component_args = ["--remote-components", "ejs:github"]
     cookie_file = resolve_video_cookie_file()
     cookie_args = ["--cookies", cookie_file] if cookie_file and Path(cookie_file).exists() else []
-    return [*base_command, *runtime_args, *remote_component_args, *cookie_args, *args]
+    return [*base_command, *runtime_args, *remote_component_args, *ffmpeg_args, *cookie_args, *args]
+
+
+def resolve_yt_dlp_js_runtime_args(base_command: List[str]) -> List[str]:
+    if not yt_dlp_supports_js_runtimes(base_command):
+        return []
+    node_runtime = resolve_node_js_runtime()
+    if node_runtime:
+        return ["--js-runtimes", node_runtime]
+    if importlib.util.find_spec("quickjs"):
+        return ["--js-runtimes", "quickjs"]
+    return []
+
+
+def resolve_node_js_runtime() -> str:
+    node_path = resolve_tool_binary("node")
+    if node_path != "node":
+        return f"node:{node_path}"
+    return ""
+
+
+def resolve_yt_dlp_ffmpeg_args() -> List[str]:
+    ffmpeg_path = resolve_tool_binary("ffmpeg")
+    if Path(ffmpeg_path).is_absolute():
+        return ["--ffmpeg-location", ffmpeg_path]
+    return []
 
 
 def resolve_video_cookie_file() -> str:
@@ -1103,7 +1134,7 @@ class VideoAnalysisPipeline:
 
     def _extract_audio_from_video(self) -> bool:
         try:
-            cmd = ["ffmpeg", "-i", str(self.video_path), "-vn", "-c:a", "copy", str(self.audio_path), "-y"]
+            cmd = [resolve_tool_binary("ffmpeg"), "-i", str(self.video_path), "-vn", "-c:a", "copy", str(self.audio_path), "-y"]
             subprocess.run(cmd, check=True, capture_output=True)
             return self.audio_path.exists()
         except subprocess.CalledProcessError:
@@ -1663,7 +1694,7 @@ class VideoAnalysisPipeline:
         duration_seconds = probe_duration_seconds(scene_file)
         timestamp = max(duration_seconds * 0.5, 0.0) if duration_seconds > 0 else 0.0
         base_cmd = [
-            "ffmpeg",
+            resolve_tool_binary("ffmpeg"),
             "-ss",
             f"{timestamp:.3f}",
             "-i",
@@ -1678,7 +1709,7 @@ class VideoAnalysisPipeline:
         attempts = []
         hwaccel_args = ffmpeg_hwaccel_args()
         if hwaccel_args:
-            attempts.append(["ffmpeg", *hwaccel_args, *base_cmd[1:]])
+            attempts.append([resolve_tool_binary("ffmpeg"), *hwaccel_args, *base_cmd[1:]])
         attempts.append(base_cmd)
 
         for cmd in attempts:

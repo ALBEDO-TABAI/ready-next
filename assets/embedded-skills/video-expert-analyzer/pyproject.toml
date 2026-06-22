@@ -3,7 +3,8 @@ name = "video-expert-analyzer-vnext"
 # 代码使用 PEP 604 联合类型（X | None）等 3.10+ 语法
 requires-python = ">=3.10"
 dependencies = [
-    "yt-dlp>=2024.1",
+    "yt-dlp>=2026.6.9",
+    "quickjs>=1.19.4",
     "scenedetect[opencv]>=0.6",
     "ffmpeg-python>=0.2",
     "openai>=1.0",

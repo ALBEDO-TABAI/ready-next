@@ -1,7 +1,13 @@
 import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { SkillRunResult } from '../skills-runtime/runtime-manager'
-import { RSSSubagentRunner, type CopyDeliverableOptions } from '../rss-engine/subagent-runner'
+import {
+  hasLinePerSentenceParagraphSmell,
+  hasReliableTranscriptPunctuation,
+  isFallbackCopySummary,
+  RSSSubagentRunner,
+  type CopyDeliverableOptions,
+} from '../rss-engine/subagent-runner'
 
 interface CopyDeliverables {
   correctedTranscript: string
@@ -71,6 +77,8 @@ function hasReusableStructuredTranscriptShape(text: string): boolean {
   return text.includes('结构化文字稿')
     && /^##\s+/m.test(text)
     && getMarkdownBodyLength(text) >= 12
+    && !hasLinePerSentenceParagraphSmell(text)
+    && hasReliableTranscriptPunctuation(text)
 }
 
 function isFreshForTranscript(path: string, transcriptPath: string): boolean {
@@ -151,6 +159,12 @@ export async function completeVideoCopyAnalyzeResult(
         onProgress: (progress) => options.onProgress?.(progress.message, progress.completed),
       },
     )
+    if (isFallbackCopySummary(deliverables.report)) {
+      throw new Error('Video Copy Analyzer 未能生成符合技能合同的三维度文案分析报告。')
+    }
+    if (hasLinePerSentenceParagraphSmell(deliverables.structuredTranscript)) {
+      throw new Error('Video Copy Analyzer 生成的结构化文字稿仍是逐句空行格式。')
+    }
     writeFileSync(transcriptPath, `${deliverables.correctedTranscript.trim()}\n`, 'utf-8')
     writeFileSync(
       analysisReportPath,

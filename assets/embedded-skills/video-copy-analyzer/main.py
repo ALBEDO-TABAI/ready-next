@@ -9,6 +9,7 @@ import sys
 import subprocess
 import re
 import shutil
+import importlib.util
 from pathlib import Path
 
 _YT_DLP_JS_RUNTIMES_SUPPORT_CACHE = {}
@@ -75,11 +76,60 @@ def yt_dlp_supports_remote_components(base_command):
 def build_yt_dlp_command(*args):
     ytdlp = get_venv_ytdlp()
     base_command = [ytdlp] if shutil.which(ytdlp) or Path(ytdlp).exists() else [sys.executable, "-m", "yt_dlp"]
-    runtime_args = ["--js-runtimes", "node"] if shutil.which("node") and yt_dlp_supports_js_runtimes(base_command) else []
+    runtime_args = resolve_yt_dlp_js_runtime_args(base_command)
+    ffmpeg_args = resolve_yt_dlp_ffmpeg_args()
     remote_component_args = ["--remote-components", "ejs:github"] if yt_dlp_supports_remote_components(base_command) else []
     cookie_file = resolve_video_cookie_file()
     cookie_args = ["--cookies", cookie_file] if cookie_file and Path(cookie_file).exists() else []
-    return [*base_command, *runtime_args, *remote_component_args, *cookie_args, *args]
+    return [*base_command, *runtime_args, *remote_component_args, *ffmpeg_args, *cookie_args, *args]
+
+def resolve_yt_dlp_js_runtime_args(base_command):
+    if not yt_dlp_supports_js_runtimes(base_command):
+        return []
+    node_runtime = resolve_node_js_runtime()
+    if node_runtime:
+        return ["--js-runtimes", node_runtime]
+    if importlib.util.find_spec("quickjs"):
+        return ["--js-runtimes", "quickjs"]
+    return []
+
+def resolve_node_js_runtime():
+    node_path = resolve_tool_binary("node")
+    if node_path != "node":
+        return f"node:{node_path}"
+    return ""
+
+def resolve_yt_dlp_ffmpeg_args():
+    ffmpeg_path = resolve_tool_binary("ffmpeg")
+    if Path(ffmpeg_path).is_absolute():
+        return ["--ffmpeg-location", ffmpeg_path]
+    return []
+
+def resolve_tool_binary(binary_name):
+    found = shutil.which(binary_name)
+    if found:
+        return found
+    suffixes = [".exe", ""] if sys.platform == "win32" else [""]
+    roots = []
+    packaged_root = os.environ.get("READY_PACKAGED_SKILL_RUNTIME_ROOT", "").strip()
+    if packaged_root:
+        packaged = Path(packaged_root)
+        roots.append(packaged / "bin")
+        roots.append(packaged / "python" / ("Scripts" if sys.platform == "win32" else "bin"))
+    try:
+        roots.append(Path(sys.executable).resolve().parent)
+    except OSError:
+        pass
+    if sys.platform == "darwin":
+        roots.extend(Path(p) for p in ("/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"))
+    elif sys.platform != "win32":
+        roots.extend(Path(p) for p in ("/usr/local/bin", "/usr/bin", "/bin"))
+    for root in roots:
+        for suffix in suffixes:
+            candidate = root / f"{binary_name}{suffix}"
+            if candidate.is_file() and os.access(candidate, os.X_OK):
+                return str(candidate)
+    return binary_name
 
 def resolve_video_cookie_file():
     for env_name in ("READY_VIDEO_COOKIE_FILE", "VIDEO_COOKIE_FILE", "BILIBILI_COOKIE_FILE", "YOUTUBE_COOKIE_FILE"):

@@ -140,6 +140,8 @@ test('local send-im file intent accepts referenced files or recent media with di
     '微信里发一下@[学习笔记.md]',
     '把这四张图发到我微信',
     '把最近下载的图片发微信',
+    '@[Send IM]@@[实习纲要.md]',
+    '@send-im 把这四张图发出去',
   ]
   const negatives = [
     '帮我整理@[《置身钉内》学习笔记拷貝.md]这个学习笔记',
@@ -153,6 +155,10 @@ test('local send-im file intent accepts referenced files or recent media with di
     '把这四张图发到我微信，取消',
     '把这四张图发到我微信，不用了',
     '把这四张图发到我微信，算了',
+    '@[Send IM] 这个技能能做什么',
+    '不要 @[Send IM]@@[报告.md]',
+    '取消 @[Send IM]@@[报告.md]',
+    '算了 @[Send IM]@@[报告.md]',
   ]
 
   for (const input of positives) {
@@ -167,6 +173,7 @@ test('local send-im file intent accepts referenced files or recent media with di
     '请把附件发送到微信',
     '把这个文件发到我微信',
     '把它传到远程 IM',
+    '@[Send IM] 把这个文件发出去',
   ]
   const attachmentContextNegatives = [
     '帮我找一些图片资料发到微信',
@@ -265,6 +272,18 @@ test('remote IM channel delivery explains WeChat ret=-2 as an outbound session f
   assert.match(result.error || '', /出站发送会话已失效/)
   assert.match(result.error || '', /从微信给 Ready 发一条新消息/)
   assert.doesNotMatch(result.error || '', /文件过大|临时异常|稍后重试/)
+})
+
+test('remote IM channel delivery explains WeChat ret=-3 as an outbound session failure', () => {
+  const result = normalizeChannelDeliveryResult(
+    { success: false, error: '微信接口返回错误 ret=-3 (ilink/bot/sendmessage)' },
+    'fallback',
+  )
+
+  assert.equal(result.success, false)
+  assert.match(result.error || '', /ret=-3/)
+  assert.match(result.error || '', /出站发送会话已失效/)
+  assert.match(result.error || '', /从微信给 Ready 发一条新消息/)
 })
 
 test('sendScoped keeps successful Send IM attachment runs green when only the channel ack text fails', () => {
