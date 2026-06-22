@@ -1,6 +1,16 @@
 # Ready 经验文档
 
-> 更新时间: 2026-06-17
+> 更新时间: 2026-06-23
+
+## -3. VEA YouTube 下载 + Send IM 工具暴露：复现优先于读码推断 (2026-06-23)
+
+> 完整问题/修复/Windows 指引见 `docs/diagnostics/2026-06-23-vea-sendim-fixes-and-windows-runtime-guidance.md`。这里只留可迁移的方法论教训。
+
+- **「读代码推正则」连错两次，「运行时复现 + 开关验证」一次锁死。** Send IM「当前会话未开放 skill_send_im_file 工具」我先后猜了两个根因（ret=-3 是全部；`@[Send IM]+绝对路径`），都是只读代码推断，都错。真正坐定是：① 从 `ready.db chat_messages` 捞**用户真实输入** `@[Send IM]@[2026 世界杯.md]`；② 从 `ready-tools.log` 看到 `sdk_runtime_final_tools toolCount=0`；③ 用仓库真实测试夹具 `createRuntime` 复现 `tools(0)`，打补丁→`tools(1)`，**关补丁→回到 0**（开关验证证明这一行就是病根）。固化规则：症状是「工具没暴露 / 行为没发生」时，先复现真实输入 + 看 `tool_capability` 账本 + 在真实 runtime 夹具里跑，不许只凭正则推断下结论。
+- **两个启发式撞车，错的那个赢了。** `@[Send IM]@[文件.md]` 同时是「发文件到微信」(send-im 投递) 和「`@[...md]` 文档引用」。`shouldUseLocalDocumentToolSet` 的 `.md` 分支命中 → 整轮被当文档编辑 → `filter(isLocalDocumentToolDefinition)` 把 `skill_send_im_file` 剔光 → 0 工具。修复=在文档判定里给投递意图让路。教训：一个输入命中多条意图启发式时，要显式定义**优先级**，否则「谁先 return 谁赢」会咬到边界用例。
+- **测试只覆盖「唯一能成的路径」会留盲点。** codex 的 send-im 暴露修复只用**图片**验证（`把这四张图发到我微信`），图片不命中文档正则，所以图片路径绿、`.md` 文档路径红。教训：暴露/路由类修复必须覆盖**会改变路由的输入维度**（此处=附件扩展名 doc vs image），不能只测一类。
+- **修症状 vs 修根因（再次印证 §0.5 #2）。** VEA YouTube 下载间歇 403，codex 在 TS 编排层把失败转 `recoverable_paused` 提示「手动下载」，**没碰 Python 下载代码**。真修复在 `pipeline_enhanced.py`：单发 yt-dlp 加 3 策略重试 + player_client 轮换 + 渐进式回退。间歇性（同一视频先败后成）本身就证明「重试即可救回」，单发零重试才是根因。
+- **运行时是「瘦壳 + 本机置备」两层，不在安装包里。** 为什么不打包 `skill-runtime` 也能用：Python venv / yt-dlp / ffmpeg / 模型包都落在 `~/Library/Application Support/ready/skill-runtime`（跨安装持久、本机置备或按需下载），安装包只带瘦壳 + `embedded-skills` 脚本（脚本按内容 hash 经 `syncEmbeddedSkill` 自动重灌）。换版本只要改的是 TS 或脚本，普通 `build:dist` 即可、运行时零改动。seeded-bundle（`build-seeded-dist.mjs`）只为「全新无运行时机器」的离线分发，非日常必需，且当前是纯 macOS 实现——Windows 需独立置备/打包路径（详见上述 doc §4）。
 
 ## -2. Stage 10 (P) — Transitional bridge retirement (2026-05-07)
 

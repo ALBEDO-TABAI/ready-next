@@ -3,6 +3,8 @@
 > 诊断日期：2026-06-17 晚 ｜ 工具：ready-debug + 三路并行代码审查 + 账本核验 ｜ 分支：agent-evolution/phase1
 > 方法：先取证（日志/账本）→ 三路 reviewer（暴露/执行/横切）→ 自核验判定器是否真改判 → 排层。
 > 状态：仅诊断，未改代码。typecheck 通过（exit 0）。
+>
+> **⚠️ 2026-06-23 校正（Claude）**：本文「暴露层」用**图片**场景（`把这四张图发到我微信`）成立，但漏了 `.md` 文档场景。`@[Send IM]@[文件.md]` 命中 `agent-sdk-runtime.ts:shouldUseLocalDocumentToolSet` 的文档正则 → 整轮被当文档编辑、`filter(isLocalDocumentToolDefinition)` 把 `skill_send_im_file` 剔成 `toolCount=0`。图片不命中该正则故测不出。修复与完整记录见 `docs/diagnostics/2026-06-23-vea-sendim-fixes-and-windows-runtime-guidance.md`。
 
 ## 端到端失败链（截图那次 + 20:05 那次）
 

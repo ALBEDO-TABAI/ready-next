@@ -23,6 +23,7 @@ review_log:
   - r7: §1.5 归档产物已存在并复核通过（`docs/diagnostics/2026-06-18-worktree-vs-plan-reconciliation.md`）；计划状态从"待归档"推进为"待 G0-root precheck + 实现"。下一步不再重复归档，直接补 G0-root + 防假成功测试，再回归已先行落地的 G1/G2/G4。
   - r8: Codex 执行完成：G0 终态如实化、G1/G4 直达 send-im、G3 防 present_file 兜底、G2 `ret=-2` 如实化与频道错误落库均已通过测试；真实文本探活与 Markdown 发送仍被微信 `sendmessage ret=-2` 拒绝，已证明非文件大小/类型、非目标 userId 缺失、非 Ready 工具绕路。
   - r9: 06-22 真实使用补洞：`@[Send IM]@@[文件]` 显式点名进入 send-im 授权；`取消/算了 @[Send IM]@@[文件]` 前置取消不发送；`ret=-3 sendmessage` 与 `ret=-2` 同类归为微信出站会话失效；`sendScoped` 回执失败豁免收窄为仅 Send IM 工具成功后适用。经子 agent 复审后补齐两个 blocker，`npm run verify:send-im-l1` 与 `npm run typecheck` 通过。
+  - **r10 校正 (2026-06-23, Claude)：本计划的暴露(G1/AC-1)只用图片验证，漏了 `.md` 文档路径。** AC-1 与 r9 的验证都用 `@[Send IM] 把这四张图发到我微信`（`.png`）。但用户实际发的是 `@[Send IM]@[2026 世界杯.md]`（`.md` 文档），命中 `agent-sdk-runtime.ts:shouldUseLocalDocumentToolSet` 的 `@\[[^\]]+\.(?:md|markdown|txt|docx?)\]` 分支 → 整轮被当文档编辑、`filter(isLocalDocumentToolDefinition)` 把 `skill_send_im_file` 剔光 → `toolCount=0` → 「当前会话未开放」。图片不命中该文档正则，故图片路径绿、文档路径红——这是本计划暴露分析的盲点。修复：`shouldUseLocalDocumentToolSet` 在 `hasLocalSendImFileIntent` 为真时返回 false（投递≠文档编辑），并在 `agent-sdk-runtime.test.ts` 用真实 `createRuntime` 夹具 + 开关验证锁回归。同轮另修 VEA YouTube 下载单发 403（Python 重试）。完整记录见 `docs/diagnostics/2026-06-23-vea-sendim-fixes-and-windows-runtime-guidance.md`。其余 G0/G1/G2/G3 结论仍成立。
 ---
 
 # 实施计划：send-im 修复 + Agent 状态架构（r9）
