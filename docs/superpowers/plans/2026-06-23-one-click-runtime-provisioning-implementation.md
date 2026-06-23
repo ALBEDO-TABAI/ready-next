@@ -15,6 +15,7 @@ review_log:
   - r1: 初版被 codex 审为「方向可以，但不能直接 ready-for-implementation」。6 点见 §0.7，已全部并入并降 draft。
   - r2: codex 二审 4 点（旧 venv 不重建 / 错误类型混淆 / 镜像优先级与文件名不清 / 解包护栏夸大）全部采纳，见 §0.8。
   - r3: codex 三审 3 点（源循环须试完 / venv 比对用 realpath / P1 编号 C10）全部采纳，见 §0.9。codex 结论：补完即可进 P0 脚本阶段。
+  - r5（2026-06-23，P0 钉死）：**P0 已完成**——`pin-runtime-assets.mjs` 真机跑通，8 个 archive 全部填入真实 sha256（registry 0 占位）。修正：codex 写的 PBS tag/版本（20260325/3.11.14）不存在，实际是 **tag `20260610` / `3.11.15`**（GitHub API 查得）；win BtbN 大包 node fetch 反复 terminated，改用 curl 取得（167MB）。新增注册表「全 archive 已钉死」断言。真实 IO 烟测通过（`downloadRuntimeArchive`→sha 匹配→`extractRuntimeArchive` 守卫解包→解释器就位）。**⚠️ 遗留：win BtbN `latest` 是滚动 nightly，sha 会过期**，Windows 派发前需重钉或改 dated tag/自建镜像（mac osxexperts + python 是版本化文件名/tag，稳定）。**P3（干净 mac/win 真机 + venv/pip + 首次 VEA 真跑）仍未做。**
   - r4（2026-06-23，实现）：**P1+P2 已实现并提交**（commit `feat(skill-runtime): one-click runtime provisioning`）。文件见 §0.10。16 个行为测试（mock 下载器）+ web/node typecheck 全过。codex 对抗审查 FIX-FIRST→修复→**SHIP**：① 下载体积超限归类 integrity（非 unreachable）；② venv/依赖失败包成结构化 `runtime_setup_failed`。Claude 自审另修：tar 护栏的元数据前缀漏洞（改用 `tar -tf` 干净名做 abs/`..`，`tar -tvf` 仅取 symlink 目标）+ xattr 去隔离的 stale-path 竞态（改 rename 后同步执行）。**P0（真 sha256）与 P3（干净 mac/win 真机）仍未做** —— 见 §7/§8，未做完前 status 不升 ready、registry gate 不入 verify。
 gate_before_ready: §0.6 P0（钉死真实资产 + 真 sha256）未完成前，status 不得升 ready；P1 的注册表 gate 必须校验真实值而非「非空」。
 goal: 让安装包保持瘦壳（几十 MB），用户在「设置 › 模型与运行时」点一个按钮即自下载并配好 Python + ffmpeg + 技能核心依赖，使首次跑（在线）视频分析不再卡在环境/依赖下载上；无需预装系统 Python/homebrew。
@@ -150,7 +151,7 @@ interface RuntimeAsset {
 注册表 gate：每 `RuntimePlatformKey` 的 python+ffmpeg 条目齐全、每个 archive 的 **sha256 为真实 64-hex（§0.6 后）**、`sources≥1 primary`（镜像可选，用户镜像仍强制置顶）、`expectedArch` 对齐。**P0 未完成前此 gate 不并入 verify 链**（避免「非空即过」假绿，0.7#3）。
 
 ## 7. 分期
-- **P0（真机/真网，本机不可做）**：`scripts/pin-runtime-assets.mjs` + 在 mac arm64/x64 + win x64 各拉资产、产真实 sha256、定解包布局 → 填 `runtime-asset-registry.ts` 提交。**这是升 ready 的前提。**
+- **P0 ✅ 已完成**（2026-06-23）：`pin-runtime-assets.mjs` 真机跑通；8 个 archive（python ×3 / mac ffmpeg+ffprobe ×4 / win ffmpeg ×1）真实 sha256 已填入 registry（0 占位）；真实 IO 烟测通过。真值：PBS `tag 20260610 / 3.11.15`、osxexperts ffmpeg/ffprobe 8.1(arm)/8.0(intel)、BtbN win64-gpl latest。**遗留**：win BtbN `latest` sha 会随 nightly 过期，Windows 派发前需重钉/改 dated tag。
 - **P1（本机可完整交付+测）✅ 已完成**：注册表(占位 sha256) + `RuntimeProvisioner`(mock 下载器跑通 C1–C10) + `selectRuntimeSourceOrder` + IPC/preload/类型 + §6 全部行为测试（16 个）。注：注册表 gate **暂未并入 verify**（P0 未填真值前会假绿，§0.6）。
 - **P2 ✅ 已完成**：`RuntimeEnvironmentCard` UI 卡 + 进度/失败镜像配置 + selfTest。
 - **P3（真机/真网验收）**：干净 Mac 一键→**首次 VEA 在线视频真实跑通**；Windows x64 实测（`.exe`/拷贝/quarantine 不适用/`verify:native`）。不接受单测绿当派发就绪。

@@ -62,19 +62,19 @@ export type ProvisionErrorKind = 'all_sources_unreachable' | 'asset_integrity_fa
 // ffmpeg: win = BtbN/FFmpeg-Builds win64-gpl (bin/ffmpeg.exe + ffprobe.exe);
 //   mac = OSXExperts native static builds, where ffmpeg/ffprobe ship as two
 //   separate archives. P0 pins each archive independently.
-const PBS_RELEASE_TAG = '20260325'
-const PBS_BUILD_TAG = '20260211'
-const PY_VER = '3.11.14'
+const PBS_RELEASE_TAG = '20260610'
+const PBS_BUILD_TAG = '20260610'
+const PY_VER = '3.11.15'
 const GHPROXY = 'https://ghproxy.net/' // 国内可达镜像前缀（P0 复核连通性）
 const USTC_GITHUB_RELEASE = 'https://mirrors.ustc.edu.cn/github-release'
 
-function pbsArchive(triple: string, pythonRelPath: string): RuntimeAssetArchive {
+function pbsArchive(triple: string, pythonRelPath: string, sha256: string): RuntimeAssetArchive {
   const file = `cpython-${PY_VER}+${PBS_BUILD_TAG}-${triple}-install_only.tar.gz`
   const ustc = `${USTC_GITHUB_RELEASE}/astral-sh/python-build-standalone/${PBS_RELEASE_TAG}/${file}`
   const gh = `https://github.com/astral-sh/python-build-standalone/releases/download/${PBS_RELEASE_TAG}/${file}`
   return {
     filename: file,
-    sha256: RUNTIME_ASSET_PLACEHOLDER_SHA,
+    sha256,
     sources: [
       { url: ustc, kind: 'mirror' },
       { url: gh, kind: 'primary' },
@@ -90,10 +90,11 @@ function osxExpertsArchive(params: {
   filename: string
   output: 'ffmpeg' | 'ffprobe'
   expectedArch: 'arm64' | 'x64'
+  sha256: string
 }): RuntimeAssetArchive {
   return {
     filename: params.filename,
-    sha256: RUNTIME_ASSET_PLACEHOLDER_SHA,
+    sha256: params.sha256,
     sources: [{ url: `https://www.osxexperts.net/${params.filename}`, kind: 'primary' }],
     archiveKind: 'zip',
     expectedUncompressedBytes: 100 * 1024 * 1024,
@@ -104,22 +105,27 @@ function osxExpertsArchive(params: {
 export const RUNTIME_ASSET_REGISTRY: readonly RuntimeAsset[] = [
   {
     id: 'python', platform: 'darwin-arm64', version: PY_VER,
-    archives: [pbsArchive('aarch64-apple-darwin', 'python/bin/python3')],
+    archives: [pbsArchive('aarch64-apple-darwin', 'python/bin/python3', 'df2b410d16c0c0700f36c6ffdfc118c76dd88936a219b24f4417f0bb3dee23ff')],
   },
   {
     id: 'python', platform: 'darwin-x64', version: PY_VER,
-    archives: [pbsArchive('x86_64-apple-darwin', 'python/bin/python3')],
+    archives: [pbsArchive('x86_64-apple-darwin', 'python/bin/python3', 'e399b91ee2e920ca53ad37f27ba66e22fd8356f67078bb80a0f28866f12fc9b6')],
   },
   {
     id: 'python', platform: 'win32-x64', version: PY_VER,
-    archives: [pbsArchive('x86_64-pc-windows-msvc', 'python/python.exe')],
+    archives: [pbsArchive('x86_64-pc-windows-msvc', 'python/python.exe', '3300c38edb37f73114cf553e6ffd8e6b6ea47226fa07ef83184fcd4e4e81e776')],
   },
   {
+    // CAVEAT: BtbN's `latest` is a ROLLING nightly — this sha256 is valid only
+    //   for today's build and WILL rot on the next BtbN release. Before a Windows
+    //   distribution, re-pin (run pin-runtime-assets.mjs) or switch to a dated
+    //   BtbN tag / a self-hosted mirror so the digest stays stable. (mac osxexperts
+    //   + python are versioned filenames/tags → stable.)
     id: 'ffmpeg', platform: 'win32-x64', version: 'btbn-latest-gpl',
     archives: [
       {
         filename: 'ffmpeg-master-latest-win64-gpl.zip',
-        sha256: RUNTIME_ASSET_PLACEHOLDER_SHA,
+        sha256: 'b2522698aefcc5b07c3dff781dd60675e90e3597f768810c58464528d069a089',
         archiveKind: 'zip',
         expectedUncompressedBytes: 220 * 1024 * 1024,
         outputs: [
@@ -136,15 +142,15 @@ export const RUNTIME_ASSET_REGISTRY: readonly RuntimeAsset[] = [
   {
     id: 'ffmpeg', platform: 'darwin-arm64', version: 'osxexperts-8.1',
     archives: [
-      osxExpertsArchive({ filename: 'ffmpeg81arm.zip', output: 'ffmpeg', expectedArch: 'arm64' }),
-      osxExpertsArchive({ filename: 'ffprobe81arm.zip', output: 'ffprobe', expectedArch: 'arm64' }),
+      osxExpertsArchive({ filename: 'ffmpeg81arm.zip', output: 'ffmpeg', expectedArch: 'arm64', sha256: 'ebb82529562b71170807bbc6b0e7eb4f0b13af8cbb0e085bb9e8f6fe709598ad' }),
+      osxExpertsArchive({ filename: 'ffprobe81arm.zip', output: 'ffprobe', expectedArch: 'arm64', sha256: 'a6640a77d38a6f0527c5b597e599cb36a3427a6931444ed80bc62542421950a1' }),
     ],
   },
   {
     id: 'ffmpeg', platform: 'darwin-x64', version: 'osxexperts-8.0',
     archives: [
-      osxExpertsArchive({ filename: 'ffmpeg80intel.zip', output: 'ffmpeg', expectedArch: 'x64' }),
-      osxExpertsArchive({ filename: 'ffprobe80intel.zip', output: 'ffprobe', expectedArch: 'x64' }),
+      osxExpertsArchive({ filename: 'ffmpeg80intel.zip', output: 'ffmpeg', expectedArch: 'x64', sha256: '2d24d22db78c87f394a5822867acd5c5dc5e762cd261a44bd26923f3a5af3e07' }),
+      osxExpertsArchive({ filename: 'ffprobe80intel.zip', output: 'ffprobe', expectedArch: 'x64', sha256: '0b6576104a95c1b39d4939e2df86f8f7cf1d55287ff57da48777d94605d12feb' }),
     ],
   },
 ]

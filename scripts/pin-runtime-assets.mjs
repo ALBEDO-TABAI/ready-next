@@ -21,9 +21,9 @@ import { fileURLToPath } from 'node:url'
 const projectRoot = resolve(fileURLToPath(new URL('../', import.meta.url)))
 
 // Keep these in sync with src/shared/runtime-asset-registry.ts.
-const PBS_RELEASE_TAG = '20260325'
-const PBS_BUILD_TAG = '20260211'
-const PY_VER = '3.11.14'
+const PBS_RELEASE_TAG = '20260610'
+const PBS_BUILD_TAG = '20260610'
+const PY_VER = '3.11.15'
 const GHPROXY = 'https://ghproxy.net/'
 const USTC_GITHUB_RELEASE = 'https://mirrors.ustc.edu.cn/github-release'
 
@@ -99,9 +99,20 @@ const ASSETS = [
 
 async function download(url) {
   if (url.startsWith('file:')) return readFileSync(fileURLToPath(url))
-  const res = await fetch(url)
-  if (!res.ok) throw new Error(`HTTP ${res.status}`)
-  return Buffer.from(await res.arrayBuffer())
+  // Retry transient interrupts (large files from osxexperts/BtbN sometimes
+  //   "terminated" mid-stream); a 4xx/5xx HTTP code is not retried.
+  let lastErr = null
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      const res = await fetch(url)
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      return Buffer.from(await res.arrayBuffer())
+    } catch (error) {
+      lastErr = error
+      if (/HTTP [45]\d\d/.test(String(error?.message))) break
+    }
+  }
+  throw lastErr
 }
 
 function assertSafeEntry(entry) {

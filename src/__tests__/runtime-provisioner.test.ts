@@ -98,6 +98,10 @@ test('shipped registry: every platform has python+ffmpeg, sources have ≥1 prim
     }
     const python = assets.find((a) => a.id === 'python')
     assert.ok(python?.archives.every((archive) => archive.sources.some((s) => s.url.startsWith('https://mirrors.ustc.edu.cn/github-release/'))), `${key} python missing USTC mirror`)
+    // P0 done: every shipped archive must carry a real 64-hex sha256, never the placeholder.
+    for (const asset of assets) {
+      assert.ok(isRuntimeAssetPinned(asset), `${key}/${asset.id} not pinned (placeholder sha256 shipped)`)
+    }
   }
   assert.equal(resolveRuntimePlatformKey('darwin', 'arm64'), 'darwin-arm64')
   assert.equal(resolveRuntimePlatformKey('linux', 'x64'), null)
