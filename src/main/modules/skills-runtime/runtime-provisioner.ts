@@ -10,9 +10,11 @@ import {
   isRuntimeIntegrityError,
   selectRuntimeSourceOrder,
   classifyProvisionFailure,
+  findRuntimeAssetOutput,
   parsePyvenvCfg,
   venvNeedsRebuild,
   type RuntimeAsset,
+  type RuntimeAssetArchive,
   type RuntimePlatformKey,
   type RuntimeSourceAttempt,
   type ProvisionErrorKind,
@@ -107,13 +109,15 @@ export class RuntimeProvisioner {
     }
     const assets = deps.listAssets()
     const ffmpegAsset = assets.find((a) => a.id === 'ffmpeg')
+    const ffmpegOutput = findRuntimeAssetOutput(ffmpegAsset, 'ffmpeg')
+    const ffprobeOutput = findRuntimeAssetOutput(ffmpegAsset, 'ffprobe')
     const ffmpegPath = deps.fs.join(deps.runtimeRoot, 'bin', deps.isWindows ? 'ffmpeg.exe' : 'ffmpeg')
     const ffprobePath = deps.fs.join(deps.runtimeRoot, 'bin', deps.isWindows ? 'ffprobe.exe' : 'ffprobe')
 
     const [py, ff, fp, core] = await Promise.all([
       deps.probeVenvPython(),
-      deps.probeBinary(ffmpegPath, 'ffmpeg', ffmpegAsset?.expectedArch),
-      deps.probeBinary(ffprobePath, 'ffprobe'),
+      deps.probeBinary(ffmpegPath, 'ffmpeg', ffmpegOutput?.expectedArch),
+      deps.probeBinary(ffprobePath, 'ffprobe', ffprobeOutput?.expectedArch),
       deps.coreDepsStatus(),
     ])
 
@@ -178,7 +182,8 @@ export class RuntimeProvisioner {
 
   private assetAlreadyReady(asset: RuntimeAsset, status: RuntimeStatus): boolean {
     if (asset.id === 'ffmpeg') return status.ffmpeg.ready && status.ffprobe.ready
-    if (asset.id === 'python') return Boolean(this.deps.fs.exists(this.deps.fs.join(this.deps.pythonDistRoot(), asset.pythonRelPath || '')))
+    const pythonOutput = findRuntimeAssetOutput(asset, 'python')
+    if (asset.id === 'python' && pythonOutput) return Boolean(this.deps.fs.exists(this.deps.fs.join(this.deps.pythonDistRoot(), pythonOutput.relPath)))
     return false
   }
 
@@ -187,9 +192,20 @@ export class RuntimeProvisioner {
     signal: AbortSignal,
     onProgress: (p: RuntimeProvisionProgress) => void,
   ): Promise<void> {
+    for (const archive of asset.archives) {
+      await this.provisionArchive(asset, archive, signal, onProgress)
+    }
+  }
+
+  private async provisionArchive(
+    asset: RuntimeAsset,
+    archive: RuntimeAssetArchive,
+    signal: AbortSignal,
+    onProgress: (p: RuntimeProvisionProgress) => void,
+  ): Promise<void> {
     const { deps } = this
     onProgress({ assetId: asset.id, phase: 'probe' })
-    const order = await selectRuntimeSourceOrder(asset, deps.getMirrorBase(), deps.probe)
+    const order = await selectRuntimeSourceOrder(asset, archive, deps.getMirrorBase(), deps.probe)
     const attempts: RuntimeSourceAttempt[] = []
 
     for (const url of order) {
@@ -207,23 +223,25 @@ export class RuntimeProvisioner {
         continue
       }
       onProgress({ assetId: asset.id, phase: 'verify' })
-      if (deps.sha256(buffer) !== asset.sha256) {
+      if (deps.sha256(buffer) !== archive.sha256) {
         attempts.push({ url, ok: false, failureKind: 'integrity', reason: 'sha256 不匹配' })
         continue
       }
-      const extractDir = deps.fs.join(deps.runtimeRoot, asset.id === 'python' ? 'python-dist' : '.runtime-ffmpeg-extract')
+      const extractDir = asset.id === 'python'
+        ? deps.pythonDistRoot()
+        : deps.fs.join(deps.runtimeRoot, '.runtime-ffmpeg-extract', archive.filename.replace(/[^a-zA-Z0-9._-]/g, '_'))
       try {
         onProgress({ assetId: asset.id, phase: 'extract' })
         deps.fs.rmrf(extractDir)
         deps.fs.mkdirp(extractDir)
-        await deps.extractArchive({ buffer, archiveKind: asset.archiveKind, destDir: extractDir, sizeCap: Math.floor(asset.expectedUncompressedBytes * SIZE_CAP_SAFETY) })
+        await deps.extractArchive({ buffer, archiveKind: archive.archiveKind, destDir: extractDir, sizeCap: Math.floor(archive.expectedUncompressedBytes * SIZE_CAP_SAFETY) })
       } catch (error) {
         attempts.push({ url, ok: false, failureKind: 'integrity', reason: `解包失败：${errMsg(error)}` })
         continue
       }
       try {
         onProgress({ assetId: asset.id, phase: 'connect' })
-        await this.connectAsset(asset, extractDir)
+        await this.connectArchiveOutputs(archive, extractDir)
       } catch (error) {
         attempts.push({ url, ok: false, failureKind: 'integrity', reason: `接通失败：${errMsg(error)}` })
         continue
@@ -231,41 +249,37 @@ export class RuntimeProvisioner {
       return // success
     }
     const kind = classifyProvisionFailure(attempts)
-    throw new RuntimeProvisionError(kind, this.failureMessage(kind, asset, attempts), asset.id, attempts)
+    throw new RuntimeProvisionError(kind, this.failureMessage(kind, asset, archive, attempts), asset.id, attempts)
   }
 
-  private failureMessage(kind: ProvisionErrorKind, asset: RuntimeAsset, attempts: RuntimeSourceAttempt[]): string {
+  private failureMessage(kind: ProvisionErrorKind, asset: RuntimeAsset, archive: RuntimeAssetArchive, attempts: RuntimeSourceAttempt[]): string {
     const lines = attempts.map((a) => `  - ${a.url}: ${a.reason || '失败'}`).join('\n')
     if (kind === 'all_sources_unreachable') {
-      return `所有源都连接失败（${asset.id}）。可在下方填自定义镜像后重试。\n${lines}`
+      return `所有源都连接失败（${asset.id}/${archive.filename}）。可在下方填自定义镜像后重试。\n${lines}`
     }
-    return `运行时资产校验失败（${asset.id}，疑似钉死值过期或资产被污染）。换镜像通常无效。\n${lines}`
+    return `运行时资产校验失败（${asset.id}/${archive.filename}，疑似钉死值过期或资产被污染）。换镜像通常无效。\n${lines}`
   }
 
-  private async connectAsset(asset: RuntimeAsset, extractDir: string): Promise<void> {
+  private async connectArchiveOutputs(archive: RuntimeAssetArchive, extractDir: string): Promise<void> {
     const { deps } = this
-    if (asset.id === 'python') {
-      const interp = deps.fs.join(extractDir, asset.pythonRelPath || '')
-      if (!deps.fs.exists(interp)) throw new Error(`解包后未找到 Python：${asset.pythonRelPath}`)
-      deps.setSkillsPythonPath(interp)
-      return
-    }
-    // ffmpeg: place both binaries atomically into runtime bin (0.7#4)
-    const binDir = deps.fs.join(deps.runtimeRoot, 'bin')
-    deps.fs.mkdirp(binDir)
-    for (const which of ['ffmpeg', 'ffprobe'] as const) {
-      const rel = asset.ffmpegRelPaths?.[which]
-      if (!rel) throw new Error(`ffmpeg 资产缺少 ${which} 相对路径`)
-      const src = deps.fs.join(extractDir, rel)
-      if (!deps.fs.exists(src)) throw new Error(`解包后未找到 ${which}：${rel}`)
-      const dest = deps.fs.join(binDir, deps.isWindows ? `${which}.exe` : which)
-      const existing = await deps.probeBinary(dest, which === 'ffmpeg' ? 'ffmpeg' : 'ffprobe', asset.expectedArch)
+    for (const output of archive.outputs) {
+      if (output.kind === 'python') {
+        const interp = deps.fs.join(extractDir, output.relPath)
+        if (!deps.fs.exists(interp)) throw new Error(`解包后未找到 Python：${output.relPath}`)
+        deps.setSkillsPythonPath(interp)
+        continue
+      }
+      const binDir = deps.fs.join(deps.runtimeRoot, 'bin')
+      deps.fs.mkdirp(binDir)
+      const src = deps.fs.join(extractDir, output.relPath)
+      if (!deps.fs.exists(src)) throw new Error(`解包后未找到 ${output.kind}：${output.relPath}`)
+      const dest = deps.fs.join(binDir, deps.isWindows ? `${output.kind}.exe` : output.kind)
+      const existing = await deps.probeBinary(dest, output.kind, output.expectedArch)
       if (deps.fs.exists(dest) && !existing.ok) deps.fs.rmrf(dest) // remove stale/broken/wrong-arch
       deps.fs.placeExecutable(src, dest)
+      const verify = await deps.probeBinary(dest, output.kind, output.expectedArch)
+      if (!verify.ok || verify.archOk === false) throw new Error(`${output.kind} 架构校验未通过`)
     }
-    // architecture check (C6)
-    const verify = await deps.probeBinary(deps.fs.join(binDir, deps.isWindows ? 'ffmpeg.exe' : 'ffmpeg'), 'ffmpeg', asset.expectedArch)
-    if (!verify.ok || verify.archOk === false) throw new Error('ffmpeg 架构校验未通过')
   }
 
   /** C10: rebuild venv if its base no longer resolves under python-dist. */

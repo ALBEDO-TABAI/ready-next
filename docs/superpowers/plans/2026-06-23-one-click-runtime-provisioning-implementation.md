@@ -43,7 +43,7 @@ goal: 让安装包保持瘦壳（几十 MB），用户在「设置 › 模型与
 **因此承诺收窄为**：点完按钮，**在线**视频分析（yt-dlp 抽流 + ffmpeg 合流 + 视觉分析 + API 字幕）即刻可用；**本地 ASR 降级链**仍需用户另装 torch/模型（UI 明示）。
 
 ### 0.6 P0 前置（升 ready 的硬门）——回应 0.7#3
-开写实现前，必须先产出**真实资产清单**并钉死：每个 `{platform,arch}` 的 Python、ffmpeg 资产的**精确版本、URL、sha256、解包后相对路径**。
+开写实现前，必须先产出**真实资产清单**并钉死：每个 `{platform,arch}` 的 Python、ffmpeg 资产中每个 archive 的**精确版本、URL、sha256、解包后相对路径**。
 - 交付物：`scripts/pin-runtime-assets.mjs` —— 给定 pinned 版本，真实下载各平台资产、`sha256sum`、探明解包布局，**生成** `shared/runtime-asset-registry.ts` 的数据（含真实 hash）。
 - 该脚本须在**有网机器**上各跑一次（mac arm64/x64 + win x64 资产都拉一遍）；产出的 registry 连同 sha256 一起提交。
 - **本环境/CI 不能下载大文件 → 本机无法产出真 hash**；这是 P0 必须在真机完成的事，不得用占位 hash 进 P1 gate。
@@ -68,7 +68,7 @@ goal: 让安装包保持瘦壳（几十 MB），用户在「设置 › 模型与
 3. **P1 编号**（→ §7 已修）：`C1–C9` 改 `C1–C10`。
 
 ### 0.10 已实现文件（P1+P2，2026-06-23）
-- `src/shared/runtime-asset-registry.ts`：注册表（mac arm64/x64 + win x64）+ 纯 helper（`selectRuntimeSourceOrder`/`classifyProvisionFailure`/`venvNeedsRebuild`/`assertSafeRuntimeArchiveEntry`/`buildMirrorUrl`/integrity-error 标记）。sha256=`PENDING_P0_PIN` 占位 → 未钉死时 `provision()` 以 `assets_not_pinned` 拒绝。
+- `src/shared/runtime-asset-registry.ts`：注册表（mac arm64/x64 + win x64，archive 级 sha256；mac ffmpeg/ffprobe 为两个 archive）+ 纯 helper（`selectRuntimeSourceOrder`/`classifyProvisionFailure`/`venvNeedsRebuild`/`assertSafeRuntimeArchiveEntry`/`buildMirrorUrl`/integrity-error 标记）。sha256=`PENDING_P0_PIN` 占位 → 未钉死时 `provision()` 以 `assets_not_pinned` 拒绝。
 - `src/shared/runtime-provision-types.ts`：renderer-facing 类型。
 - `src/main/modules/skills-runtime/runtime-provisioner.ts`：编排（试完所有源 / 分类 / venv 接管 / ffmpeg 接通+架构校验 / 依赖预热）。注入 IO → 16 行为测试。
 - `src/main/modules/skills-runtime/runtime-provisioner-io.ts`：真实 IO（下载/护栏解包/原子放置/探测）。
@@ -88,39 +88,46 @@ goal: 让安装包保持瘦壳（几十 MB），用户在「设置 › 模型与
 - **C6 平台/架构隔离**：按 `{platform,arch}` 选资产；缺条目 → `unsupported_platform`；ffmpeg 接通时校验架构（0.7#4），错架构拒绝。
 - **C7 幂等/单航班**：已 ready 组件跳过（除非 `force`）；进行中再点不重入（复用 modelPacks 取消/状态语义）。
 - **C8 依赖预热**：成功路径末尾 `ensureSkillInstalled('video-expert-analyzer')` 预装核心依赖；`coreDeps.ready` 进 `overallReady`（C1）。torch/模型不在此 gate。
-- **C9 镜像可配**（0.8#9）：设置 `runtime_asset_mirror_base` 非空时，按 `${base}/${platform}/${asset.filename}` 拼 URL，作为**强制最高优先源**（先试、不参与测速排序）；其余默认源再测速排序。
+- **C9 镜像可配**（0.8#9）：设置 `runtime_asset_mirror_base` 非空时，按 `${base}/${platform}/${archive.filename}` 拼 URL，作为**强制最高优先源**（先试、不参与测速排序）；其余默认源再测速排序。
 - **C10 venv 接管**（0.8#7 / 0.9#2）：写 `skills_python_path` 后判断 venv 是否需重建——**用 `realpath` 归一化**比对：读 `venvRoot/pyvenv.cfg` 的 `home`/`executable`，`realpath` 后判断 venv base 是否落在 `skill-runtime/python-dist/` 下（**不做 raw string 对比**，因 `home` 常是 bin 目录、`executable` 可能是 `python3.11` 版本化路径，裸比会误判反复重建）。不在 python-dist 下（或 venv 缺失）→ `rm venvRoot` 从新 Python 重建。standalone Python 解包到 `skill-runtime/python-dist/`，与 `venvRoot=skill-runtime/python` 分目录。
 
 ## 2. 数据模型 — `shared/runtime-asset-registry.ts`（新，真实值由 §0.6 脚本生成）
 ```
 type RuntimePlatformKey = 'darwin-arm64' | 'darwin-x64' | 'win32-x64'
 interface RuntimeAssetSource { url: string; kind: 'primary' | 'mirror' }
+interface RuntimeAssetOutput {
+  kind: 'python' | 'ffmpeg' | 'ffprobe'
+  relPath: string
+  expectedArch?: 'arm64' | 'x64'
+}
+interface RuntimeAssetArchive {
+  sha256: string                                  // archive 真实钉死（§0.6）
+  filename: string                                // archive 文件名，用于镜像 URL 拼接（C9/0.8#9）
+  sources: RuntimeAssetSource[]
+  archiveKind: 'tar.gz' | 'zip'
+  expectedUncompressedBytes: number
+  outputs: RuntimeAssetOutput[]
+}
 interface RuntimeAsset {
   id: 'python' | 'ffmpeg'; platform: RuntimePlatformKey
-  version: string; sha256: string                 // 真实钉死（§0.6）
-  filename: string                                // 资产文件名，用于镜像 URL 拼接（C9/0.8#9）
-  sources: RuntimeAssetSource[]                    // GitHub 主 + 国内镜像
-  archiveKind: 'tar.gz' | 'zip'
-  expectedUncompressedBytes: number               // 体积上限基准（C3/护栏）
-  pythonRelPath?: string                          // 相对 python-dist：'bin/python3' | 'python.exe'
-  ffmpegRelPaths?: { ffmpeg: string; ffprobe: string }
-  expectedArch?: 'arm64' | 'x64'                  // ffmpeg 架构校验（C6）
+  version: string
+  archives: RuntimeAssetArchive[]
 }
 // 解包目标：python → skill-runtime/python-dist/（与 venvRoot=skill-runtime/python 分目录，0.8#7）；
 //   ffmpeg → skill-runtime/bin/。
 // 用户镜像：setting `runtime_asset_mirror_base`（如 https://my-cdn/ready-runtime/）→
-//   `${base}/${platform}/${asset.filename}`，强制最高优先（不测速，C9/0.8#9）。
+//   `${base}/${platform}/${archive.filename}`，强制最高优先（不测速，C9/0.8#9）。
 ```
-钉死源（版本由 §0.6 定，hash 由脚本填）：Python=`astral-sh/python-build-standalone` `cpython-3.11.x install_only`（triple: aarch64/x86_64-apple-darwin、x86_64-pc-windows-msvc）；ffmpeg=mac osxexperts/evermeet、win `BtbN/FFmpeg-Builds win64-gpl`。镜像=ghproxy 或域内 CDN。
+钉死源（版本由 §0.6 定，hash 由脚本填）：Python=`astral-sh/python-build-standalone` `cpython-3.11.14+20260211 install_only`（triple: aarch64/x86_64-apple-darwin、x86_64-pc-windows-msvc），**国内优先走 USTC GitHub Release 镜像** `https://mirrors.ustc.edu.cn/github-release/astral-sh/python-build-standalone/20260325/`，GitHub 原站和 ghproxy 仅兜底；ffmpeg=mac `OSXExperts`（arm64 8.1、Intel 8.0，ffmpeg/ffprobe 分 archive；页面提供输出文件 SHA256，P0 脚本会校验），win `BtbN/FFmpeg-Builds win64-gpl`（一个 archive 含 ffmpeg.exe/ffprobe.exe）。`Evermeet` 仅 Intel、`FFbinaries` 无 mac arm64、`eugeneware/ffmpeg-static` 不覆盖 ffprobe，均不作为当前主源。mac ffmpeg 和 BtbN 暂未找到可公开证明稳定收录的国内机构镜像；这两类资产国内分发走 `runtime_asset_mirror_base` 指向的自建/域内 CDN，并由同一套 archive sha256 防污染。
 
 ## 3. 主进程 — `RuntimeProvisioner`（新）
 - `getRuntimeStatus()`（C1，真实探测，5s 缓存）。
-- `provisionRuntime({force}, onProgress)`：每个未 ready 资产 → `selectRuntimeSourceOrder`（C4/C9）→ `downloadWithResume` → `verifySha256`（C2）→ `extractAtomic`（C3+护栏）→ 平台后处理 → 接通；末尾 `ensureSkillInstalled('video-expert-analyzer')`（C8）→ 复跑 `getRuntimeStatus`。
+- `provisionRuntime({force}, onProgress)`：每个未 ready 资产中的每个 archive → `selectRuntimeSourceOrder`（C4/C9）→ `downloadWithResume` → `verifySha256`（C2）→ `extractAtomic`（C3+护栏）→ 平台后处理 → 接通；末尾 `ensureSkillInstalled('video-expert-analyzer')`（C8）→ 复跑 `getRuntimeStatus`。
 - **解包护栏**（0.8#10）：在现有 `skill-source-fetcher` 的「拒绝绝对路径 / `..`」基础上**新增符号链接条目检查**（拒绝 symlink 条目，或解析 link target 后必须仍在 extractDir 内）；累计体积超 `expectedUncompressedBytes×安全系数` 即中止；临时目录与目标同盘（同卷 rename）。
-- **Python 接通**（C5/C10/0.8#7）：解包到 `skill-runtime/python-dist/` → 写 `skills_python_path` = `python-dist/${pythonRelPath}` → 读 `venvRoot/pyvenv.cfg`，`home`/`executable` 与新 Python 不一致（或 venv 缺失）→ `rm venvRoot` → `ensurePythonVenv` 从新 Python 重建。**确保不复用旧系统 Python 的 venv。**
+- **Python 接通**（C5/C10/0.8#7）：解包到 `skill-runtime/python-dist/` → 写 `skills_python_path` = `python-dist/${python output relPath}` → 读 `venvRoot/pyvenv.cfg`，`home`/`executable` 与新 Python 不一致（或 venv 缺失）→ `rm venvRoot` → `ensurePythonVenv` 从新 Python 重建。**确保不复用旧系统 Python 的 venv。**
 - **ffmpeg 接通**（0.7#4）：目标 `runtimeBin/ffmpeg(.exe)` 若已存在→跑 `-version` + 校验架构；坏/旧链接/错架构→`unlink` 旧入口；新二进制原子写入 + `chmod 0755`。Windows 直接拷 `.exe`、不建 symlink。
-- **macOS 后处理**：解包二进制 `xattr -d com.apple.quarantine`（否则 Gatekeeper 拦）。
-- `selectRuntimeSourceOrder(asset, mirrorBase, probe)`（新 helper，0.7#6/0.8#9）：返回 `[用户镜像URL(若配置, 置顶不测速)] ++ [asset.sources 按 probe 升序, null 排末不剔除]`，逐源实下载。
+- **macOS 后处理**：解包二进制 `xattr -d com.apple.quarantine`，并 best-effort `codesign -s -`（Apple Silicon 静态二进制可能需要临时签名）；最终仍以 `-version` 真实探测为准。
+- `selectRuntimeSourceOrder(asset, archive, mirrorBase, probe)`（新 helper，0.7#6/0.8#9）：返回 `[用户镜像URL(若配置, 置顶不测速)] ++ [archive.sources 按 probe 升序, null 排末不剔除]`，逐源实下载。
 - `cancel()`：AbortController 协作中止 + 半成品清理。
 
 ## 4. IPC — `skills-runtime/ipc-handler.ts`（照 modelPacks 形态）
@@ -140,7 +147,7 @@ interface RuntimeAsset {
 - **镜像强制优先**（C9/0.8#9）：配置 `runtime_asset_mirror_base` 后，镜像 URL 置顶被先试，即便其测速更慢/未测速；无配置→走默认源。
 - **成功路径** → 写设置 + venv 接管 + `ensureSkillInstalled` 被调 + status overallReady（C5/C8/C10）。
 - 原子性：中断后 status≠ready（C3）；force/幂等（C7）。
-注册表 gate：每 `RuntimePlatformKey` 的 python+ffmpeg 条目齐全、**sha256 为真实 64-hex（§0.6 后）**、`sources≥1 主+1 镜像`、`expectedArch` 对齐。**P0 未完成前此 gate 不并入 verify 链**（避免「非空即过」假绿，0.7#3）。
+注册表 gate：每 `RuntimePlatformKey` 的 python+ffmpeg 条目齐全、每个 archive 的 **sha256 为真实 64-hex（§0.6 后）**、`sources≥1 primary`（镜像可选，用户镜像仍强制置顶）、`expectedArch` 对齐。**P0 未完成前此 gate 不并入 verify 链**（避免「非空即过」假绿，0.7#3）。
 
 ## 7. 分期
 - **P0（真机/真网，本机不可做）**：`scripts/pin-runtime-assets.mjs` + 在 mac arm64/x64 + win x64 各拉资产、产真实 sha256、定解包布局 → 填 `runtime-asset-registry.ts` 提交。**这是升 ready 的前提。**

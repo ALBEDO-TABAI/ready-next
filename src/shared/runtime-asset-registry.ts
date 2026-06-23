@@ -12,31 +12,37 @@
 
 export type RuntimePlatformKey = 'darwin-arm64' | 'darwin-x64' | 'win32-x64'
 export type RuntimeAssetId = 'python' | 'ffmpeg'
+export type RuntimeAssetOutputKind = 'python' | 'ffmpeg' | 'ffprobe'
 
 export interface RuntimeAssetSource {
   url: string
   kind: 'primary' | 'mirror'
 }
 
-export interface RuntimeAsset {
-  id: RuntimeAssetId
-  platform: RuntimePlatformKey
-  version: string
+export interface RuntimeAssetOutput {
+  kind: RuntimeAssetOutputKind
+  relPath: string
+  expectedArch?: 'arm64' | 'x64'
+}
+
+export interface RuntimeAssetArchive {
   /** Real digest filled by P0 pin script; equals RUNTIME_ASSET_PLACEHOLDER_SHA until then. */
   sha256: string
   /** Bare archive filename — used to build a user-mirror URL `${base}/${platform}/${filename}`. */
   filename: string
-  /** GitHub primary + 国内 mirror (probe-ranked, except a user mirror which is forced first). */
+  /** Primary + optional mirror sources (probe-ranked, except a user mirror which is forced first). */
   sources: RuntimeAssetSource[]
   archiveKind: 'tar.gz' | 'zip'
   /** Size-cap basis for the extraction guard (×safety factor). */
   expectedUncompressedBytes: number
-  /** python only: interpreter path relative to the python-dist extract root. */
-  pythonRelPath?: string
-  /** ffmpeg only: both binaries relative to the extract root. */
-  ffmpegRelPaths?: { ffmpeg: string; ffprobe: string }
-  /** ffmpeg only: expected arch for the C6 architecture check. */
-  expectedArch?: 'arm64' | 'x64'
+  outputs: readonly RuntimeAssetOutput[]
+}
+
+export interface RuntimeAsset {
+  id: RuntimeAssetId
+  platform: RuntimePlatformKey
+  version: string
+  archives: readonly RuntimeAssetArchive[]
 }
 
 export const RUNTIME_PLATFORM_KEYS: readonly RuntimePlatformKey[] = [
@@ -54,63 +60,92 @@ export type ProvisionErrorKind = 'all_sources_unreachable' | 'asset_integrity_fa
 // Python: astral-sh/python-build-standalone `install_only` (relocatable). The
 //   archive expands to a top-level `python/` dir.
 // ffmpeg: win = BtbN/FFmpeg-Builds win64-gpl (bin/ffmpeg.exe + ffprobe.exe);
-//   mac = a combined static gpl build (P0 confirms exact host + layout).
-const PBS_TAG = '20240814'
-const PY_VER = '3.11.9'
+//   mac = OSXExperts native static builds, where ffmpeg/ffprobe ship as two
+//   separate archives. P0 pins each archive independently.
+const PBS_RELEASE_TAG = '20260325'
+const PBS_BUILD_TAG = '20260211'
+const PY_VER = '3.11.14'
 const GHPROXY = 'https://ghproxy.net/' // 国内可达镜像前缀（P0 复核连通性）
+const USTC_GITHUB_RELEASE = 'https://mirrors.ustc.edu.cn/github-release'
 
-function pbs(triple: string): RuntimeAsset['sources'] {
-  const file = `cpython-${PY_VER}+${PBS_TAG}-${triple}-install_only.tar.gz`
-  const gh = `https://github.com/astral-sh/python-build-standalone/releases/download/${PBS_TAG}/${file}`
-  return [
-    { url: gh, kind: 'primary' },
-    { url: `${GHPROXY}${gh}`, kind: 'mirror' },
-  ]
+function pbsArchive(triple: string, pythonRelPath: string): RuntimeAssetArchive {
+  const file = `cpython-${PY_VER}+${PBS_BUILD_TAG}-${triple}-install_only.tar.gz`
+  const ustc = `${USTC_GITHUB_RELEASE}/astral-sh/python-build-standalone/${PBS_RELEASE_TAG}/${file}`
+  const gh = `https://github.com/astral-sh/python-build-standalone/releases/download/${PBS_RELEASE_TAG}/${file}`
+  return {
+    filename: file,
+    sha256: RUNTIME_ASSET_PLACEHOLDER_SHA,
+    sources: [
+      { url: ustc, kind: 'mirror' },
+      { url: gh, kind: 'primary' },
+      { url: `${GHPROXY}${gh}`, kind: 'mirror' },
+    ],
+    archiveKind: 'tar.gz',
+    expectedUncompressedBytes: 320 * 1024 * 1024,
+    outputs: [{ kind: 'python', relPath: pythonRelPath }],
+  }
+}
+
+function osxExpertsArchive(params: {
+  filename: string
+  output: 'ffmpeg' | 'ffprobe'
+  expectedArch: 'arm64' | 'x64'
+}): RuntimeAssetArchive {
+  return {
+    filename: params.filename,
+    sha256: RUNTIME_ASSET_PLACEHOLDER_SHA,
+    sources: [{ url: `https://www.osxexperts.net/${params.filename}`, kind: 'primary' }],
+    archiveKind: 'zip',
+    expectedUncompressedBytes: 100 * 1024 * 1024,
+    outputs: [{ kind: params.output, relPath: params.output, expectedArch: params.expectedArch }],
+  }
 }
 
 export const RUNTIME_ASSET_REGISTRY: readonly RuntimeAsset[] = [
   {
-    id: 'python', platform: 'darwin-arm64', version: PY_VER, sha256: RUNTIME_ASSET_PLACEHOLDER_SHA,
-    filename: `cpython-${PY_VER}+${PBS_TAG}-aarch64-apple-darwin-install_only.tar.gz`,
-    sources: pbs('aarch64-apple-darwin'), archiveKind: 'tar.gz',
-    expectedUncompressedBytes: 320 * 1024 * 1024, pythonRelPath: 'python/bin/python3',
+    id: 'python', platform: 'darwin-arm64', version: PY_VER,
+    archives: [pbsArchive('aarch64-apple-darwin', 'python/bin/python3')],
   },
   {
-    id: 'python', platform: 'darwin-x64', version: PY_VER, sha256: RUNTIME_ASSET_PLACEHOLDER_SHA,
-    filename: `cpython-${PY_VER}+${PBS_TAG}-x86_64-apple-darwin-install_only.tar.gz`,
-    sources: pbs('x86_64-apple-darwin'), archiveKind: 'tar.gz',
-    expectedUncompressedBytes: 320 * 1024 * 1024, pythonRelPath: 'python/bin/python3',
+    id: 'python', platform: 'darwin-x64', version: PY_VER,
+    archives: [pbsArchive('x86_64-apple-darwin', 'python/bin/python3')],
   },
   {
-    id: 'python', platform: 'win32-x64', version: PY_VER, sha256: RUNTIME_ASSET_PLACEHOLDER_SHA,
-    filename: `cpython-${PY_VER}+${PBS_TAG}-x86_64-pc-windows-msvc-install_only.tar.gz`,
-    sources: pbs('x86_64-pc-windows-msvc'), archiveKind: 'tar.gz',
-    expectedUncompressedBytes: 320 * 1024 * 1024, pythonRelPath: 'python/python.exe',
+    id: 'python', platform: 'win32-x64', version: PY_VER,
+    archives: [pbsArchive('x86_64-pc-windows-msvc', 'python/python.exe')],
   },
   {
-    id: 'ffmpeg', platform: 'win32-x64', version: 'btbn-latest-gpl', sha256: RUNTIME_ASSET_PLACEHOLDER_SHA,
-    filename: 'ffmpeg-master-latest-win64-gpl.zip', archiveKind: 'zip', expectedArch: 'x64',
-    expectedUncompressedBytes: 220 * 1024 * 1024,
-    ffmpegRelPaths: { ffmpeg: 'ffmpeg-master-latest-win64-gpl/bin/ffmpeg.exe', ffprobe: 'ffmpeg-master-latest-win64-gpl/bin/ffprobe.exe' },
-    sources: [
-      { url: 'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip', kind: 'primary' },
-      { url: `${GHPROXY}https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip`, kind: 'mirror' },
+    id: 'ffmpeg', platform: 'win32-x64', version: 'btbn-latest-gpl',
+    archives: [
+      {
+        filename: 'ffmpeg-master-latest-win64-gpl.zip',
+        sha256: RUNTIME_ASSET_PLACEHOLDER_SHA,
+        archiveKind: 'zip',
+        expectedUncompressedBytes: 220 * 1024 * 1024,
+        outputs: [
+          { kind: 'ffmpeg', relPath: 'ffmpeg-master-latest-win64-gpl/bin/ffmpeg.exe', expectedArch: 'x64' },
+          { kind: 'ffprobe', relPath: 'ffmpeg-master-latest-win64-gpl/bin/ffprobe.exe', expectedArch: 'x64' },
+        ],
+        sources: [
+          { url: 'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip', kind: 'primary' },
+          { url: `${GHPROXY}https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip`, kind: 'mirror' },
+        ],
+      },
     ],
   },
-  // mac ffmpeg: P0 confirms exact static-build host + sha + internal layout.
   {
-    id: 'ffmpeg', platform: 'darwin-arm64', version: 'static-gpl', sha256: RUNTIME_ASSET_PLACEHOLDER_SHA,
-    filename: 'ffmpeg-ffprobe-darwin-arm64.zip', archiveKind: 'zip', expectedArch: 'arm64',
-    expectedUncompressedBytes: 180 * 1024 * 1024,
-    ffmpegRelPaths: { ffmpeg: 'ffmpeg', ffprobe: 'ffprobe' },
-    sources: [{ url: 'https://ready-runtime.invalid/darwin-arm64/ffmpeg-ffprobe-darwin-arm64.zip', kind: 'primary' }],
+    id: 'ffmpeg', platform: 'darwin-arm64', version: 'osxexperts-8.1',
+    archives: [
+      osxExpertsArchive({ filename: 'ffmpeg81arm.zip', output: 'ffmpeg', expectedArch: 'arm64' }),
+      osxExpertsArchive({ filename: 'ffprobe81arm.zip', output: 'ffprobe', expectedArch: 'arm64' }),
+    ],
   },
   {
-    id: 'ffmpeg', platform: 'darwin-x64', version: 'static-gpl', sha256: RUNTIME_ASSET_PLACEHOLDER_SHA,
-    filename: 'ffmpeg-ffprobe-darwin-x64.zip', archiveKind: 'zip', expectedArch: 'x64',
-    expectedUncompressedBytes: 180 * 1024 * 1024,
-    ffmpegRelPaths: { ffmpeg: 'ffmpeg', ffprobe: 'ffprobe' },
-    sources: [{ url: 'https://ready-runtime.invalid/darwin-x64/ffmpeg-ffprobe-darwin-x64.zip', kind: 'primary' }],
+    id: 'ffmpeg', platform: 'darwin-x64', version: 'osxexperts-8.0',
+    archives: [
+      osxExpertsArchive({ filename: 'ffmpeg80intel.zip', output: 'ffmpeg', expectedArch: 'x64' }),
+      osxExpertsArchive({ filename: 'ffprobe80intel.zip', output: 'ffprobe', expectedArch: 'x64' }),
+    ],
   },
 ]
 
@@ -128,16 +163,23 @@ export function getRuntimeAssets(platform: RuntimePlatformKey): RuntimeAsset[] {
 }
 
 export function isRuntimeAssetPinned(asset: RuntimeAsset): boolean {
-  return /^[0-9a-f]{64}$/i.test(asset.sha256)
+  return asset.archives.every((archive) => /^[0-9a-f]{64}$/i.test(archive.sha256))
+}
+
+export function findRuntimeAssetOutput(
+  asset: RuntimeAsset | undefined,
+  kind: RuntimeAssetOutputKind,
+): RuntimeAssetOutput | undefined {
+  return asset?.archives.flatMap((archive) => archive.outputs).find((output) => output.kind === kind)
 }
 
 // --- Pure provisioning helpers (no fs/network; injected deps → unit-testable) ---
 
 /** Build the forced user-mirror URL for an asset, or null when no mirror configured. */
-export function buildMirrorUrl(asset: RuntimeAsset, mirrorBase: string | null | undefined): string | null {
+export function buildMirrorUrl(asset: RuntimeAsset, archive: RuntimeAssetArchive, mirrorBase: string | null | undefined): string | null {
   const base = String(mirrorBase || '').trim().replace(/\/+$/, '')
   if (!base) return null
-  return `${base}/${asset.platform}/${asset.filename}`
+  return `${base}/${asset.platform}/${archive.filename}`
 }
 
 /**
@@ -147,14 +189,15 @@ export function buildMirrorUrl(asset: RuntimeAsset, mirrorBase: string | null | 
  */
 export async function selectRuntimeSourceOrder(
   asset: RuntimeAsset,
+  archive: RuntimeAssetArchive,
   mirrorBase: string | null | undefined,
   probe: (url: string) => Promise<number | null>,
 ): Promise<string[]> {
   const forced: string[] = []
-  const mirror = buildMirrorUrl(asset, mirrorBase)
+  const mirror = buildMirrorUrl(asset, archive, mirrorBase)
   if (mirror) forced.push(mirror)
   const probed = await Promise.all(
-    asset.sources.map(async (s, index) => ({ url: s.url, index, latency: await probe(s.url) })),
+    archive.sources.map(async (s, index) => ({ url: s.url, index, latency: await probe(s.url) })),
   )
   const ranked = probed
     .slice()

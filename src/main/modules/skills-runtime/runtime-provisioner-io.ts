@@ -118,6 +118,7 @@ export function placeRuntimeExecutable(srcPath: string, destPath: string): void 
   //   the pre-rename temp would target a path that no longer exists).
   if (process.platform === 'darwin') {
     try { execFileSync('xattr', ['-dr', 'com.apple.quarantine', destPath], { stdio: 'ignore' }) } catch { /* attr/xattr may be absent — best-effort */ }
+    try { execFileSync('codesign', ['-s', '-', destPath], { stdio: 'ignore' }) } catch { /* unsigned static binaries may still run — probe decides */ }
   }
 }
 

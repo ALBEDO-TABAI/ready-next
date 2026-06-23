@@ -52,6 +52,9 @@ function RuntimeEnvironmentCard() {
   const [errorKind, setErrorKind] = useState<string | null>(null)
   const [errorText, setErrorText] = useState<string | null>(null)
   const [mirror, setMirror] = useState('')
+  const [mirrorSaving, setMirrorSaving] = useState(false)
+  const [mirrorNotice, setMirrorNotice] = useState<string | null>(null)
+  const [mirrorNoticeKind, setMirrorNoticeKind] = useState<'error' | 'success'>('success')
 
   const refresh = useCallback(async () => {
     try {
@@ -102,10 +105,35 @@ function RuntimeEnvironmentCard() {
     }
   }, [refresh])
 
+  const saveMirror = useCallback(async () => {
+    const trimmed = mirror.trim()
+    setMirrorSaving(true)
+    setMirrorNotice(null)
+    try {
+      const res = await window.electronAPI.skills.setSkillRuntimeMirror({ mirror: trimmed })
+      if (!res.success) {
+        setMirrorNoticeKind('error')
+        setMirrorNotice(res.error || '保存镜像失败')
+        return false
+      }
+      setMirror(trimmed)
+      setMirrorNoticeKind('success')
+      setMirrorNotice(trimmed ? '自定义镜像已保存' : '自定义镜像已清空')
+      return true
+    } catch (err) {
+      setMirrorNoticeKind('error')
+      setMirrorNotice(err instanceof Error ? err.message : String(err))
+      return false
+    } finally {
+      setMirrorSaving(false)
+    }
+  }, [mirror])
+
   const saveMirrorAndRetry = useCallback(async () => {
-    await window.electronAPI.skills.setSkillRuntimeMirror({ mirror: mirror.trim() })
+    const saved = await saveMirror()
+    if (!saved) return
     await provision(false)
-  }, [mirror, provision])
+  }, [provision, saveMirror])
 
   const ready = status?.overallReady === true
   const unsupported = status?.platformSupported === false
@@ -148,6 +176,48 @@ function RuntimeEnvironmentCard() {
         </div>
       )}
 
+      {!unsupported && (
+        <div style={{ ...SETTINGS_SUBTLE_CARD_STYLE, marginTop: 10, padding: '12px 14px' }}>
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-title)' }}>运行时下载源</div>
+              <div style={{ ...SETTINGS_FIELD_HINT_STYLE, marginTop: 3 }}>
+                Python 默认先走中科大镜像；ffmpeg/ffprobe 默认走上游。填写自定义镜像后会优先尝试该地址。
+              </div>
+            </div>
+          </div>
+          <div className="flex gap-2" style={{ marginTop: 10 }}>
+            <input
+              value={mirror}
+              onChange={(e) => {
+                setMirror(e.target.value)
+                setMirrorNotice(null)
+                setMirrorNoticeKind('success')
+              }}
+              placeholder="https://your-cdn/ready-runtime"
+              className="flex-1 text-[12px]"
+              style={{ ...SETTINGS_FLAT_BUTTON_STYLE, padding: '8px 12px', textAlign: 'left', overflowWrap: 'anywhere' }}
+            />
+            <button
+              type="button"
+              onClick={() => void saveMirror()}
+              disabled={busy || mirrorSaving}
+              style={{ ...SETTINGS_FLAT_BUTTON_STYLE, padding: '8px 14px', opacity: busy || mirrorSaving ? 0.6 : 1 }}
+            >
+              {mirrorSaving ? '保存中…' : '保存'}
+            </button>
+          </div>
+          <div style={{ ...SETTINGS_FIELD_HINT_STYLE, marginTop: 6, overflowWrap: 'anywhere' }}>
+            镜像路径：&lt;base&gt;/&lt;platform&gt;/&lt;filename&gt;
+          </div>
+          {mirrorNotice && (
+            <div className="text-[12px]" style={{ ...settingsNoticeStyle(mirrorNoticeKind), marginTop: 8 }}>
+              {mirrorNotice}
+            </div>
+          )}
+        </div>
+      )}
+
       {errorText && (
         <div className="text-[12px]" style={{ ...settingsNoticeStyle('error'), marginTop: 10 }}>
           {errorText}
@@ -156,19 +226,10 @@ function RuntimeEnvironmentCard() {
 
       {errorKind === 'all_sources_unreachable' && (
         <div className="flex flex-col gap-2" style={{ marginTop: 10 }}>
-          <div style={SETTINGS_FIELD_HINT_STYLE}>所有源都连不上。可填一个自定义镜像（{'${base}/${platform}/${filename}'}）后重试：</div>
-          <div className="flex gap-2">
-            <input
-              value={mirror}
-              onChange={(e) => setMirror(e.target.value)}
-              placeholder="https://your-cdn/ready-runtime"
-              className="flex-1 text-[12px]"
-              style={{ ...SETTINGS_FLAT_BUTTON_STYLE, padding: '8px 12px', textAlign: 'left' }}
-            />
-            <button type="button" onClick={() => void saveMirrorAndRetry()} disabled={busy} style={{ ...SETTINGS_FLAT_BUTTON_STYLE, padding: '8px 14px' }}>
-              保存并重试
-            </button>
-          </div>
+          <div style={SETTINGS_FIELD_HINT_STYLE}>所有源都连不上。请在上方填写自定义镜像，或确认网络后重试。</div>
+          <button type="button" onClick={() => void saveMirrorAndRetry()} disabled={busy || mirrorSaving} style={{ ...SETTINGS_FLAT_BUTTON_STYLE, padding: '8px 14px', alignSelf: 'flex-start' }}>
+            保存并重试
+          </button>
         </div>
       )}
 

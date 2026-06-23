@@ -14,6 +14,7 @@ import {
   RUNTIME_PLATFORM_KEYS,
   resolveRuntimePlatformKey,
   type RuntimeAsset,
+  type RuntimeAssetArchive,
 } from '../shared/runtime-asset-registry'
 import {
   RuntimeProvisioner,
@@ -26,18 +27,22 @@ const HASH_GOOD = 'a'.repeat(64)
 // ---------------- pure helpers ----------------
 
 test('buildMirrorUrl composes base/platform/filename, null when no mirror', () => {
-  const asset = { platform: 'win32-x64', filename: 'x.zip' } as RuntimeAsset
-  assert.equal(buildMirrorUrl(asset, null), null)
-  assert.equal(buildMirrorUrl(asset, 'https://cdn/ready/'), 'https://cdn/ready/win32-x64/x.zip')
+  const asset = { platform: 'win32-x64' } as RuntimeAsset
+  const archive = { filename: 'x.zip' } as RuntimeAssetArchive
+  assert.equal(buildMirrorUrl(asset, archive, null), null)
+  assert.equal(buildMirrorUrl(asset, archive, 'https://cdn/ready/'), 'https://cdn/ready/win32-x64/x.zip')
 })
 
 test('selectRuntimeSourceOrder forces user mirror first, then probe-ascending, null last (not dropped)', async () => {
   const asset = {
-    platform: 'win32-x64', filename: 'x.zip',
-    sources: [{ url: 'A', kind: 'primary' }, { url: 'B', kind: 'mirror' }, { url: 'C', kind: 'mirror' }],
+    platform: 'win32-x64',
   } as RuntimeAsset
+  const archive = {
+    filename: 'x.zip',
+    sources: [{ url: 'A', kind: 'primary' }, { url: 'B', kind: 'mirror' }, { url: 'C', kind: 'mirror' }],
+  } as RuntimeAssetArchive
   const latency: Record<string, number | null> = { A: 300, B: null, C: 50 }
-  const order = await selectRuntimeSourceOrder(asset, 'https://cdn/', async (u) => latency[u] ?? null)
+  const order = await selectRuntimeSourceOrder(asset, archive, 'https://cdn/', async (u) => latency[u] ?? null)
   // mirror forced first, then C(50) < A(300) < B(null)
   assert.deepEqual(order, ['https://cdn/win32-x64/x.zip', 'C', 'A', 'B'])
 })
@@ -83,6 +88,16 @@ test('shipped registry: every platform has python+ffmpeg, sources have ≥1 prim
     const assets = RUNTIME_ASSET_REGISTRY.filter((a) => a.platform === key)
     assert.ok(assets.some((a) => a.id === 'python'), `${key} missing python`)
     assert.ok(assets.some((a) => a.id === 'ffmpeg'), `${key} missing ffmpeg`)
+    for (const asset of assets) {
+      assert.ok(asset.archives.length > 0, `${key}/${asset.id} missing archives`)
+      for (const archive of asset.archives) {
+        assert.ok(archive.sources.some((s) => s.kind === 'primary'), `${key}/${asset.id}/${archive.filename} missing primary`)
+        assert.ok(archive.outputs.length > 0, `${key}/${asset.id}/${archive.filename} missing outputs`)
+        assert.equal(archive.sources.some((s) => s.url.includes('ready-runtime.invalid')), false)
+      }
+    }
+    const python = assets.find((a) => a.id === 'python')
+    assert.ok(python?.archives.every((archive) => archive.sources.some((s) => s.url.startsWith('https://mirrors.ustc.edu.cn/github-release/'))), `${key} python missing USTC mirror`)
   }
   assert.equal(resolveRuntimePlatformKey('darwin', 'arm64'), 'darwin-arm64')
   assert.equal(resolveRuntimePlatformKey('linux', 'x64'), null)
@@ -92,18 +107,32 @@ test('shipped registry: every platform has python+ffmpeg, sources have ≥1 prim
 
 function pinnedPython(): RuntimeAsset {
   return {
-    id: 'python', platform: 'darwin-arm64', version: '3.11.9', sha256: HASH_GOOD,
-    filename: 'py.tar.gz', archiveKind: 'tar.gz', expectedUncompressedBytes: 1000,
-    pythonRelPath: 'python/bin/python3',
-    sources: [{ url: 'PY_A', kind: 'primary' }, { url: 'PY_B', kind: 'mirror' }],
+    id: 'python', platform: 'darwin-arm64', version: '3.11.9',
+    archives: [{
+      sha256: HASH_GOOD,
+      filename: 'py.tar.gz', archiveKind: 'tar.gz', expectedUncompressedBytes: 1000,
+      outputs: [{ kind: 'python', relPath: 'python/bin/python3' }],
+      sources: [{ url: 'PY_A', kind: 'primary' }, { url: 'PY_B', kind: 'mirror' }],
+    }],
   }
 }
 function pinnedFfmpeg(): RuntimeAsset {
   return {
-    id: 'ffmpeg', platform: 'darwin-arm64', version: 'static', sha256: HASH_GOOD,
-    filename: 'ff.zip', archiveKind: 'zip', expectedUncompressedBytes: 1000, expectedArch: 'arm64',
-    ffmpegRelPaths: { ffmpeg: 'ffmpeg', ffprobe: 'ffprobe' },
-    sources: [{ url: 'FF_A', kind: 'primary' }],
+    id: 'ffmpeg', platform: 'darwin-arm64', version: 'static',
+    archives: [
+      {
+        sha256: HASH_GOOD,
+        filename: 'ffmpeg.zip', archiveKind: 'zip', expectedUncompressedBytes: 1000,
+        outputs: [{ kind: 'ffmpeg', relPath: 'ffmpeg', expectedArch: 'arm64' }],
+        sources: [{ url: 'FF_A', kind: 'primary' }],
+      },
+      {
+        sha256: HASH_GOOD,
+        filename: 'ffprobe.zip', archiveKind: 'zip', expectedUncompressedBytes: 1000,
+        outputs: [{ kind: 'ffprobe', relPath: 'ffprobe', expectedArch: 'arm64' }],
+        sources: [{ url: 'FP_A', kind: 'primary' }],
+      },
+    ],
   }
 }
 
@@ -163,7 +192,8 @@ function makeDeps(over: Partial<RuntimeProvisionerDeps> & {
 }
 
 test('provision refuses when assets are not pinned (shipped placeholder registry)', async () => {
-  const unpinned = { ...pinnedPython(), sha256: 'PENDING_P0_PIN' }
+  const base = pinnedPython()
+  const unpinned = { ...base, archives: [{ ...base.archives[0], sha256: 'PENDING_P0_PIN' }] }
   assert.equal(isRuntimeAssetPinned(unpinned), false)
   const { deps } = makeDeps({ assets: [unpinned] })
   const p = new RuntimeProvisioner(deps)
