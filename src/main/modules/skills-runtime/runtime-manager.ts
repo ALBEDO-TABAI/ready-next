@@ -66,6 +66,17 @@ import {
   parsePythonVersionText,
   type PythonVersionInfo,
 } from './python-runtime-version'
+import { RuntimeProvisioner, type RuntimeProvisionerDeps } from './runtime-provisioner'
+import {
+  downloadRuntimeArchive,
+  extractRuntimeArchive,
+  placeRuntimeExecutable,
+  probeRuntimeBinary,
+  sha256Buffer,
+  realpathOrNull,
+  readTextOrNull,
+} from './runtime-provisioner-io'
+import { getRuntimeAssets, resolveRuntimePlatformKey } from '../../../shared/runtime-asset-registry'
 import {
   buildPackagedSkillRuntimeEnv,
   getPackagedSkillPythonBinDir,
@@ -517,6 +528,7 @@ export class SkillsRuntimeManager {
   private readonly skillConfigurationStore = new SkillConfigurationStore()
   private readonly retiredEmbeddedSkillIdsOverride?: ReadonlySet<string>
   private loader: SkillLoader | null = null
+  private runtimeProvisioner: RuntimeProvisioner | null = null
   private installLocks = new Map<SkillId, Promise<SkillInstallResult>>()
   private schedulerTimer: NodeJS.Timeout | null = null
   private referenceHintBootTimer: NodeJS.Timeout | null = null
@@ -2069,6 +2081,86 @@ export class SkillsRuntimeManager {
       })
     this.installLocks.set(skillId, installTask)
     return installTask
+  }
+
+  /**
+   * One-click runtime provisioner (download + configure Python/ffmpeg/core deps).
+   * Real IO is wired here; orchestration/classification live in RuntimeProvisioner.
+   * See docs/superpowers/plans/2026-06-23-one-click-runtime-provisioning-implementation.md
+   */
+  getRuntimeProvisioner(): RuntimeProvisioner {
+    if (this.runtimeProvisioner) return this.runtimeProvisioner
+    const platformKey = resolveRuntimePlatformKey(process.platform, process.arch)
+    const isWindows = process.platform === 'win32'
+    const provisionEnv = (): NodeJS.ProcessEnv => this.getBaseEnv({ allowPackaged: false })
+    const deps: RuntimeProvisionerDeps = {
+      runtimeRoot: this.runtimeRoot,
+      platformKey,
+      isWindows,
+      listAssets: () => (platformKey ? getRuntimeAssets(platformKey) : []),
+      fs: {
+        exists: (path) => existsSync(path),
+        readText: (path) => readTextOrNull(path),
+        realpath: (path) => realpathOrNull(path),
+        rmrf: (path) => rmSync(path, { recursive: true, force: true }),
+        mkdirp: (path) => mkdirSync(path, { recursive: true }),
+        placeExecutable: (src, dest) => placeRuntimeExecutable(src, dest),
+        join: (...parts) => join(...parts),
+      },
+      getMirrorBase: () => {
+        try {
+          return getDatabase().getSetting('runtime_asset_mirror_base')?.trim() || null
+        } catch {
+          // silent-catch: settings DB unavailable just means no custom mirror this run.
+          return null
+        }
+      },
+      setSkillsPythonPath: (path) => {
+        try {
+          getDatabase().setSetting('skills_python_path', path)
+        } catch {
+          // silent-catch: if the DB write fails the provisioner re-probes and surfaces not-ready.
+        }
+      },
+      probe: (url) => this.probeEndpointLatency(url),
+      download: (url, onProgress, signal) => downloadRuntimeArchive(url, onProgress, signal, 800 * 1024 * 1024),
+      sha256: (buffer) => sha256Buffer(buffer),
+      extractArchive: (params) => extractRuntimeArchive(params),
+      probeBinary: (path, kind, expectedArch) => probeRuntimeBinary(path, kind, provisionEnv(), expectedArch),
+      rebuildVenvFromBase: async () => {
+        await this.ensurePythonVenv({ allowPackaged: false })
+      },
+      probeVenvPython: async () => {
+        const pythonPath = this.getVenvPythonPath()
+        const result = await probeRuntimeBinary(pythonPath, 'python', provisionEnv())
+        return { ok: result.ok, version: result.version, sslOk: result.sslOk, path: result.ok ? pythonPath : undefined }
+      },
+      installCoreDeps: async () => {
+        const result = await this.ensureSkillInstalled('video-expert-analyzer')
+        return { ready: result.success, missing: result.success ? [] : ['video-expert-analyzer'] }
+      },
+      coreDepsStatus: async () => {
+        const pythonPath = this.getVenvPythonPath()
+        if (!existsSync(pythonPath)) return { ready: false, missing: ['python'] }
+        const mods = ['yt_dlp', 'scenedetect', 'numpy', 'PIL']
+        try {
+          const { stdout } = await execFileAsync(
+            pythonPath,
+            ['-c', `import importlib.util;mods=${JSON.stringify(mods)};print(','.join([m for m in mods if importlib.util.find_spec(m) is None]))`],
+            { env: provisionEnv(), timeout: 20_000 },
+          )
+          const missing = stdout.trim() ? stdout.trim().split(',') : []
+          return { ready: missing.length === 0, missing }
+        } catch {
+          // silent-catch: probe failure (venv mid-build) reads as not-ready, never throws.
+          return { ready: false, missing: ['probe_failed'] }
+        }
+      },
+      venvRootPath: () => this.venvRoot,
+      pythonDistRoot: () => join(this.runtimeRoot, 'python-dist'),
+    }
+    this.runtimeProvisioner = new RuntimeProvisioner(deps)
+    return this.runtimeProvisioner
   }
 
   /**

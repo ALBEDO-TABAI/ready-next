@@ -5,6 +5,7 @@ import type { NativeContextMenuRequest, NativeContextMenuResponse } from '../../
 import type { CapabilityRuntimeSnapshot } from '../../shared/ai-capability-runtime'
 import type { RendererAgentMetricName } from '../../shared/renderer-agent-metrics'
 import type { ModelPackDownloadUpdate, ModelPackId, ModelPackSelfTestReport, ModelPackStatus, ModelSource } from '../../shared/model-pack-types'
+import type { RuntimeStatus, RuntimeProvisionProgress } from '../../shared/runtime-provision-types'
 import type { SkillSourceSelfTestReport } from '../../shared/skill-source-types'
 import type {
   AgentBrowserCollectionTask,
@@ -3014,6 +3015,14 @@ interface ElectronSkillsAPI {
   cancelModelPackDownload: (payload: { id: ModelPackId }) => Promise<IPCResponse<ModelPackStatus>>
   selfTestModelPacks: () => Promise<IPCResponse<ModelPackSelfTestReport>>
   onModelPackDownloadUpdate?: (handler: (update: ModelPackDownloadUpdate) => void) => () => void
+  // One-click skill-runtime provisioning (Python + ffmpeg + core deps).
+  getSkillRuntimeStatus: () => Promise<IPCResponse<RuntimeStatus>>
+  provisionSkillRuntime: (payload?: { force?: boolean }) => Promise<IPCResponse<RuntimeStatus | { kind?: string }>>
+  cancelSkillRuntimeProvision: () => Promise<IPCResponse<void>>
+  getSkillRuntimeMirror: () => Promise<IPCResponse<string>>
+  setSkillRuntimeMirror: (payload: { mirror: string }) => Promise<IPCResponse<void>>
+  selfTestSkillRuntime: () => Promise<IPCResponse<RuntimeStatus>>
+  onSkillRuntimeProvisionUpdate?: (handler: (progress: RuntimeProvisionProgress) => void) => () => void
   // Skill-source diagnostics (reachability self-test for the agent install path).
   selfTestSkillSources: () => Promise<IPCResponse<SkillSourceSelfTestReport>>
   // Phase 4: skills:executions:* API surface retired along with the

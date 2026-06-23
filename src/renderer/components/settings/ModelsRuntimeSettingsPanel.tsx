@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { Activity, CheckCircle2, Download, HardDrive, Loader2, RefreshCw, XCircle } from 'lucide-react'
 import type { ModelPackId, ModelPackSelfTestReport, ModelPackStatus, ModelSource } from '../../../shared/model-pack-types'
 import type { SkillSourceSelfTestReport } from '../../../shared/skill-source-types'
+import type { RuntimeStatus, RuntimeProvisionProgress } from '../../../shared/runtime-provision-types'
 import { MODEL_SOURCES } from '../../../shared/model-pack-types'
 import {
   SETTINGS_CARD_STYLE,
@@ -29,6 +30,161 @@ function packState(pack: ModelPackStatus): 'ready' | 'downloading' | 'error' | '
   if (pack.available) return 'ready'
   if (pack.download.error) return 'error'
   return 'missing'
+}
+
+function StatusRow({ label, ready, detail }: { label: string; ready: boolean; detail?: string }) {
+  return (
+    <div className="flex items-center justify-between gap-3" style={{ padding: '6px 0' }}>
+      <div className="flex items-center gap-2">
+        {ready ? <CheckCircle2 size={14} style={{ color: 'var(--color-green)' }} /> : <XCircle size={14} style={{ color: 'var(--color-red)' }} />}
+        <span className="text-[13px]">{label}</span>
+      </div>
+      <span style={{ ...SETTINGS_FIELD_HINT_STYLE }}>{ready ? (detail || '已就绪') : (detail || '未配置')}</span>
+    </div>
+  )
+}
+
+function RuntimeEnvironmentCard() {
+  const [status, setStatus] = useState<RuntimeStatus | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [phase, setPhase] = useState<string | null>(null)
+  const [pct, setPct] = useState<number | null>(null)
+  const [errorKind, setErrorKind] = useState<string | null>(null)
+  const [errorText, setErrorText] = useState<string | null>(null)
+  const [mirror, setMirror] = useState('')
+
+  const refresh = useCallback(async () => {
+    try {
+      const res = await window.electronAPI.skills.getSkillRuntimeStatus()
+      if (res.success && res.data) setStatus(res.data)
+    } catch {
+      // status probe failure is non-fatal; the card just shows unknown.
+    }
+  }, [])
+
+  useEffect(() => {
+    void refresh()
+    void window.electronAPI.skills.getSkillRuntimeMirror().then((res) => {
+      if (res.success && typeof res.data === 'string') setMirror(res.data)
+    })
+    const off = window.electronAPI.skills.onSkillRuntimeProvisionUpdate?.((p: RuntimeProvisionProgress) => {
+      setPhase(p.phase)
+      if (p.phase === 'download' && p.totalBytes && p.receivedBytes) {
+        setPct(Math.min(100, Math.round((p.receivedBytes / p.totalBytes) * 100)))
+      } else {
+        setPct(null)
+      }
+    })
+    return () => { off?.() }
+  }, [refresh])
+
+  const provision = useCallback(async (force: boolean) => {
+    setBusy(true)
+    setErrorKind(null)
+    setErrorText(null)
+    setPhase('probe')
+    try {
+      const res = await window.electronAPI.skills.provisionSkillRuntime({ force })
+      if (res.success && res.data && 'overallReady' in res.data) {
+        setStatus(res.data as RuntimeStatus)
+      } else {
+        const kind = res.data && typeof res.data === 'object' && 'kind' in res.data ? String(res.data.kind) : null
+        setErrorKind(kind)
+        setErrorText(res.error || '配置失败')
+        await refresh()
+      }
+    } catch (err) {
+      setErrorText(err instanceof Error ? err.message : String(err))
+    } finally {
+      setBusy(false)
+      setPhase(null)
+      setPct(null)
+    }
+  }, [refresh])
+
+  const saveMirrorAndRetry = useCallback(async () => {
+    await window.electronAPI.skills.setSkillRuntimeMirror({ mirror: mirror.trim() })
+    await provision(false)
+  }, [mirror, provision])
+
+  const ready = status?.overallReady === true
+  const unsupported = status?.platformSupported === false
+
+  return (
+    <section className="glass-surface-card rounded-2xl border" style={{ ...SETTINGS_CARD_STYLE, padding: '18px 20px' }}>
+      <div className="flex items-center justify-between gap-3" style={{ marginBottom: 10 }}>
+        <div>
+          <div style={SETTINGS_TITLE_STYLE}>运行时环境</div>
+          <div style={{ ...SETTINGS_FIELD_HINT_STYLE, marginTop: 4 }}>
+            一键下载并配置 Python + ffmpeg + 技能核心依赖（在线视频分析所需）。本地 ASR 降级链需另装 torch/模型（见下方模型下载）。
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={() => void (ready ? refresh() : provision(false))}
+          disabled={busy || unsupported}
+          className="inline-flex items-center gap-1.5"
+          style={{ ...SETTINGS_FLAT_BUTTON_STYLE, minWidth: 0, padding: '8px 14px', opacity: busy || unsupported ? 0.6 : 1 }}
+        >
+          {busy ? <Loader2 size={13} className="animate-spin" /> : ready ? <RefreshCw size={13} /> : <Download size={13} />}
+          {ready ? '重新检测' : busy ? (phase || '配置中…') : '一键下载并配置'}
+        </button>
+      </div>
+
+      {unsupported ? (
+        <div className="text-[12px]" style={settingsNoticeStyle('error')}>当前平台暂不支持自动配置运行时。</div>
+      ) : (
+        <div style={{ ...SETTINGS_SUBTLE_CARD_STYLE, padding: '6px 12px' }}>
+          <StatusRow label="Python" ready={Boolean(status?.python.ready)} detail={status?.python.version} />
+          <StatusRow label="ffmpeg" ready={Boolean(status?.ffmpeg.ready)} />
+          <StatusRow label="ffprobe" ready={Boolean(status?.ffprobe.ready)} />
+          <StatusRow label="核心依赖" ready={Boolean(status?.coreDeps.ready)} detail={status?.coreDeps.missing?.length ? `缺：${status.coreDeps.missing.join('、')}` : undefined} />
+        </div>
+      )}
+
+      {busy && pct !== null && (
+        <div style={{ marginTop: 10, height: 6, borderRadius: 999, overflow: 'hidden', background: 'color-mix(in srgb, var(--surface-border) 60%, transparent)' }}>
+          <div style={{ height: '100%', width: `${pct}%`, borderRadius: 999, background: 'var(--color-blue)', transition: 'width 240ms ease' }} />
+        </div>
+      )}
+
+      {errorText && (
+        <div className="text-[12px]" style={{ ...settingsNoticeStyle('error'), marginTop: 10 }}>
+          {errorText}
+        </div>
+      )}
+
+      {errorKind === 'all_sources_unreachable' && (
+        <div className="flex flex-col gap-2" style={{ marginTop: 10 }}>
+          <div style={SETTINGS_FIELD_HINT_STYLE}>所有源都连不上。可填一个自定义镜像（{'${base}/${platform}/${filename}'}）后重试：</div>
+          <div className="flex gap-2">
+            <input
+              value={mirror}
+              onChange={(e) => setMirror(e.target.value)}
+              placeholder="https://your-cdn/ready-runtime"
+              className="flex-1 text-[12px]"
+              style={{ ...SETTINGS_FLAT_BUTTON_STYLE, padding: '8px 12px', textAlign: 'left' }}
+            />
+            <button type="button" onClick={() => void saveMirrorAndRetry()} disabled={busy} style={{ ...SETTINGS_FLAT_BUTTON_STYLE, padding: '8px 14px' }}>
+              保存并重试
+            </button>
+          </div>
+        </div>
+      )}
+
+      {errorKind === 'asset_integrity_failed' && (
+        <div className="text-[12px]" style={{ ...SETTINGS_FIELD_HINT_STYLE, marginTop: 8 }}>
+          资产校验失败（疑似钉死值过期或资产被污染）。换镜像通常无效，请反馈或稍后重试。
+        </div>
+      )}
+
+      {errorKind === 'assets_not_pinned' && (
+        <div className="text-[12px]" style={{ ...SETTINGS_FIELD_HINT_STYLE, marginTop: 8 }}>
+          运行时资产尚未发布真实校验值，请等待包含校验值的版本。
+        </div>
+      )}
+    </section>
+  )
 }
 
 export default function ModelsRuntimeSettingsPanel() {
@@ -148,6 +304,8 @@ export default function ModelsRuntimeSettingsPanel() {
           {error}
         </div>
       )}
+
+      <RuntimeEnvironmentCard />
 
       <section className="glass-surface-card rounded-2xl border" style={{ ...SETTINGS_CARD_STYLE, padding: '18px 20px' }}>
         <div className="flex items-center justify-between gap-3" style={{ marginBottom: 14 }}>

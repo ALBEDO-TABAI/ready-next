@@ -8,6 +8,7 @@ import type { BrowserUtilityMenuRequest } from '../shared/browser-utility-menu'
 import type { NativeContextMenuRequest } from '../shared/native-context-menu'
 import type { RendererAgentMetricName } from '../shared/renderer-agent-metrics'
 import type { ModelPackDownloadUpdate, ModelPackId, ModelSource } from '../shared/model-pack-types'
+import type { RuntimeStatus, RuntimeProvisionProgress } from '../shared/runtime-provision-types'
 import type { PetActivitySnapshot, PetSettings, PetStickyNoteInput, PetWindowSnapshot } from '../shared/pet'
 import type {
   FileEmergenceGetSnapshotPayload,
@@ -966,6 +967,25 @@ const skillsAPI = {
     const listener = (_event: unknown, update: ModelPackDownloadUpdate) => handler(update)
     ipcRenderer.on('modelPacks:downloadUpdate', listener)
     return () => ipcRenderer.removeListener('modelPacks:downloadUpdate', listener)
+  },
+  // One-click skill-runtime provisioning (Python + ffmpeg + core deps).
+  //   Named *SkillRuntime* to avoid colliding with the agent `getRuntimeStatus`.
+  getSkillRuntimeStatus: (): Promise<{ success: boolean; data?: RuntimeStatus; error?: string }> =>
+    ipcRenderer.invoke('runtime:status'),
+  provisionSkillRuntime: (payload?: { force?: boolean }): Promise<{ success: boolean; data?: RuntimeStatus | { kind?: string }; error?: string }> =>
+    ipcRenderer.invoke('runtime:provision', payload),
+  cancelSkillRuntimeProvision: (): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke('runtime:cancel'),
+  getSkillRuntimeMirror: (): Promise<{ success: boolean; data?: string; error?: string }> =>
+    ipcRenderer.invoke('runtime:getMirror'),
+  setSkillRuntimeMirror: (payload: { mirror: string }): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke('runtime:setMirror', payload),
+  selfTestSkillRuntime: (): Promise<{ success: boolean; data?: RuntimeStatus; error?: string }> =>
+    ipcRenderer.invoke('runtime:selfTest'),
+  onSkillRuntimeProvisionUpdate: (handler: (progress: RuntimeProvisionProgress) => void) => {
+    const listener = (_event: unknown, progress: RuntimeProvisionProgress) => handler(progress)
+    ipcRenderer.on('runtime:provisionUpdate', listener)
+    return () => ipcRenderer.removeListener('runtime:provisionUpdate', listener)
   },
   // Skill-source diagnostics (reachability self-test for the agent install path).
   selfTestSkillSources: () => ipcRenderer.invoke('skills:sourcesSelfTest'),
