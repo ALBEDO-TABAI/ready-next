@@ -88,6 +88,11 @@ Ready 是**瘦壳 + 本地置备的运行时**两层，运行时不在安装包�
 
 > codex 的 `build-seeded-dist.mjs` / `prepare-release-skill-runtime.mjs` 是**可选的**「把整套 runtime 也塞进 DMG」的发布路径（给全新无运行时的机器），不是日常 build:dist 的必需。日常 `build:dist` 只打瘦壳 + embedded-skills。
 
+### 3.1.1 更新（2026-06-23）：一键运行时配置已实现（P1+P2）
+全新机器原本需要预装系统 Python/ffmpeg、且 ASR 模型要手动下（见本节原结论）。现已实现「设置 › 模型与运行时 › 运行时环境」的**一键下载并配置**：自下载固定版 standalone Python + 静态 ffmpeg/ffprobe + 预热 VEA 核心 pip 依赖（不含 torch），用户点一下即可，无需系统 Python/homebrew。设计见 `docs/superpowers/plans/2026-06-23-one-click-runtime-provisioning-implementation.md`。
+- 已完成：注册表 + provisioner（试完所有源/校验/护栏解包/venv 接管/架构校验）+ IPC/preload/UI + 16 行为测试 + codex 对抗审查 SHIP。
+- **未完成（仍是派发前提）**：P0 = 用 `scripts/pin-runtime-assets.mjs` 在真机产出真实 sha256 填进注册表（在此之前按钮以 `assets_not_pinned` 礼貌拒绝）；P3 = 干净 mac/win 真机实测（含 `tar` 可用性、Windows `.exe`、首次 VEA 真跑）。ASR 大模型仍走独立下载按钮（运行时与模型分开）。
+
 ### 3.2 推论
 - 在**已有运行时**的机器上换版本，只要改的是 TS（瘦壳）或 embedded-skills（脚本），普通 `build:dist` 即可，运行时零改动。今天两处修复正是如此：send-im 是 TS、VEA 是 embedded-skills 脚本。
 - 真正需要 seeded-bundle 的，只有「目标机器没有也无法在线置备运行时」的场景（离线分发 / 全新 Windows）。

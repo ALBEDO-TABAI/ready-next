@@ -15,6 +15,7 @@ review_log:
   - r1: 初版被 codex 审为「方向可以，但不能直接 ready-for-implementation」。6 点见 §0.7，已全部并入并降 draft。
   - r2: codex 二审 4 点（旧 venv 不重建 / 错误类型混淆 / 镜像优先级与文件名不清 / 解包护栏夸大）全部采纳，见 §0.8。
   - r3: codex 三审 3 点（源循环须试完 / venv 比对用 realpath / P1 编号 C10）全部采纳，见 §0.9。codex 结论：补完即可进 P0 脚本阶段。
+  - r4（2026-06-23，实现）：**P1+P2 已实现并提交**（commit `feat(skill-runtime): one-click runtime provisioning`）。文件见 §0.10。16 个行为测试（mock 下载器）+ web/node typecheck 全过。codex 对抗审查 FIX-FIRST→修复→**SHIP**：① 下载体积超限归类 integrity（非 unreachable）；② venv/依赖失败包成结构化 `runtime_setup_failed`。Claude 自审另修：tar 护栏的元数据前缀漏洞（改用 `tar -tf` 干净名做 abs/`..`，`tar -tvf` 仅取 symlink 目标）+ xattr 去隔离的 stale-path 竞态（改 rename 后同步执行）。**P0（真 sha256）与 P3（干净 mac/win 真机）仍未做** —— 见 §7/§8，未做完前 status 不升 ready、registry gate 不入 verify。
 gate_before_ready: §0.6 P0（钉死真实资产 + 真 sha256）未完成前，status 不得升 ready；P1 的注册表 gate 必须校验真实值而非「非空」。
 goal: 让安装包保持瘦壳（几十 MB），用户在「设置 › 模型与运行时」点一个按钮即自下载并配好 Python + ffmpeg + 技能核心依赖，使首次跑（在线）视频分析不再卡在环境/依赖下载上；无需预装系统 Python/homebrew。
 ---
@@ -65,6 +66,18 @@ goal: 让安装包保持瘦壳（几十 MB），用户在「设置 › 模型与
 1. **源循环须试完所有源**（→ C4 已补）：某源 hash/解包/架构失败不立即终止，继续下一源；全失败时聚合判类（只连接失败=unreachable；≥1 下载成功但校验失败=integrity_failed），错误体带每源原因。
 2. **venv 比对口径**（→ C10 已补）：`realpath` 归一化 + 判断 venv base 是否落在 `python-dist/` 下，禁止 raw string 比对（`home`=bin 目录、`executable`=版本化路径会误判）。
 3. **P1 编号**（→ §7 已修）：`C1–C9` 改 `C1–C10`。
+
+### 0.10 已实现文件（P1+P2，2026-06-23）
+- `src/shared/runtime-asset-registry.ts`：注册表（mac arm64/x64 + win x64）+ 纯 helper（`selectRuntimeSourceOrder`/`classifyProvisionFailure`/`venvNeedsRebuild`/`assertSafeRuntimeArchiveEntry`/`buildMirrorUrl`/integrity-error 标记）。sha256=`PENDING_P0_PIN` 占位 → 未钉死时 `provision()` 以 `assets_not_pinned` 拒绝。
+- `src/shared/runtime-provision-types.ts`：renderer-facing 类型。
+- `src/main/modules/skills-runtime/runtime-provisioner.ts`：编排（试完所有源 / 分类 / venv 接管 / ffmpeg 接通+架构校验 / 依赖预热）。注入 IO → 16 行为测试。
+- `src/main/modules/skills-runtime/runtime-provisioner-io.ts`：真实 IO（下载/护栏解包/原子放置/探测）。
+- `runtime-manager.getRuntimeProvisioner()`：真实 deps 接线。
+- `ipc-handler.ts`：`runtime:status/provision/cancel/getMirror/setMirror/selfTest`(+progress)。
+- `preload/index.ts`：`skills.*SkillRuntime*`（避开 agent `getRuntimeStatus` 同名）。
+- `renderer/types/electron.d.ts` + `ModelsRuntimeSettingsPanel.tsx`（`RuntimeEnvironmentCard`：四行状态 + 一键按钮 + 进度 + 错误码分流镜像配置）。
+- `scripts/pin-runtime-assets.mjs`：P0 钉死工具。
+- `src/__tests__/runtime-provisioner.test.ts`：16 测试。
 
 ## 1. 机器可验合同
 - **C1 就绪判定唯一源**：`runtime:status` 的 `{ python{ready,version,sslOk,path}, ffmpeg{ready,path,archOk}, ffprobe{ready,path}, coreDeps{ready,missing[]}, overallReady }` 必须由**真实探测**派生（`python --version` / `ssl.OPENSSL_VERSION` / `ffmpeg -version` 且校验架构 / `pip` 列核心包），不得「文件存在即 ready」。`overallReady = python.ready && ffmpeg.ready && ffprobe.ready && coreDeps.ready`。
@@ -131,8 +144,8 @@ interface RuntimeAsset {
 
 ## 7. 分期
 - **P0（真机/真网，本机不可做）**：`scripts/pin-runtime-assets.mjs` + 在 mac arm64/x64 + win x64 各拉资产、产真实 sha256、定解包布局 → 填 `runtime-asset-registry.ts` 提交。**这是升 ready 的前提。**
-- **P1（本机可完整交付+测）**：注册表(真实值) + `RuntimeProvisioner`(mock 下载器跑通 C1–C10) + `selectRuntimeSourceOrder` + IPC/preload/类型 + §6 全部行为测试 + 注册表 gate 并入 verify。
-- **P2**：UI 卡 + 进度/失败镜像配置 + selfTest。
+- **P1（本机可完整交付+测）✅ 已完成**：注册表(占位 sha256) + `RuntimeProvisioner`(mock 下载器跑通 C1–C10) + `selectRuntimeSourceOrder` + IPC/preload/类型 + §6 全部行为测试（16 个）。注：注册表 gate **暂未并入 verify**（P0 未填真值前会假绿，§0.6）。
+- **P2 ✅ 已完成**：`RuntimeEnvironmentCard` UI 卡 + 进度/失败镜像配置 + selfTest。
 - **P3（真机/真网验收）**：干净 Mac 一键→**首次 VEA 在线视频真实跑通**；Windows x64 实测（`.exe`/拷贝/quarantine 不适用/`verify:native`）。不接受单测绿当派发就绪。
 
 ## 8. 不可在此环境验证（如实声明）
