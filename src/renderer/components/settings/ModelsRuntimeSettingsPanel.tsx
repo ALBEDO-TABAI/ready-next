@@ -44,6 +44,11 @@ function StatusRow({ label, ready, detail }: { label: string; ready: boolean; de
   )
 }
 
+const RUNTIME_PHASE_LABELS: Record<string, string> = {
+  probe: '探测下载源', download: '下载', verify: '校验', extract: '解压',
+  connect: '安装', venv: '构建 Python 环境', deps: '安装核心依赖', done: '完成',
+}
+
 function RuntimeEnvironmentCard() {
   const [status, setStatus] = useState<RuntimeStatus | null>(null)
   const [busy, setBusy] = useState(false)
@@ -55,6 +60,8 @@ function RuntimeEnvironmentCard() {
   const [mirrorSaving, setMirrorSaving] = useState(false)
   const [mirrorNotice, setMirrorNotice] = useState<string | null>(null)
   const [mirrorNoticeKind, setMirrorNoticeKind] = useState<'error' | 'success'>('success')
+  const [progressAsset, setProgressAsset] = useState<string | null>(null)
+  const [doneNotice, setDoneNotice] = useState<string | null>(null)
   // Advanced: the custom-mirror input is hidden by default (normal users never
   //   need to paste a CDN URL); it auto-opens only when all sources are unreachable.
   const [showMirror, setShowMirror] = useState(false)
@@ -75,6 +82,7 @@ function RuntimeEnvironmentCard() {
     })
     const off = window.electronAPI.skills.onSkillRuntimeProvisionUpdate?.((p: RuntimeProvisionProgress) => {
       setPhase(p.phase)
+      setProgressAsset(p.assetId ?? null)
       if (p.phase === 'download' && p.totalBytes && p.receivedBytes) {
         setPct(Math.min(100, Math.round((p.receivedBytes / p.totalBytes) * 100)))
       } else {
@@ -88,11 +96,14 @@ function RuntimeEnvironmentCard() {
     setBusy(true)
     setErrorKind(null)
     setErrorText(null)
+    setDoneNotice(null)
     setPhase('probe')
     try {
       const res = await window.electronAPI.skills.provisionSkillRuntime({ force })
       if (res.success && res.data && 'overallReady' in res.data) {
-        setStatus(res.data as RuntimeStatus)
+        const next = res.data as RuntimeStatus
+        setStatus(next)
+        setDoneNotice(next.overallReady ? '运行时已配置完成。' : '配置已结束，但部分组件仍未就绪，请重试。')
       } else {
         const kind = res.data && typeof res.data === 'object' && 'kind' in res.data ? String(res.data.kind) : null
         setErrorKind(kind)
@@ -106,6 +117,7 @@ function RuntimeEnvironmentCard() {
       setBusy(false)
       setPhase(null)
       setPct(null)
+      setProgressAsset(null)
     }
   }, [refresh])
 
@@ -153,13 +165,13 @@ function RuntimeEnvironmentCard() {
         </div>
         <button
           type="button"
-          onClick={() => void (ready ? refresh() : provision(false))}
+          onClick={() => void provision(ready)}
           disabled={busy || unsupported}
           className="inline-flex items-center gap-1.5"
           style={{ ...SETTINGS_FLAT_BUTTON_STYLE, minWidth: 0, padding: '8px 14px', opacity: busy || unsupported ? 0.6 : 1 }}
         >
-          {busy ? <Loader2 size={13} className="animate-spin" /> : ready ? <RefreshCw size={13} /> : <Download size={13} />}
-          {ready ? '重新检测' : busy ? (phase || '配置中…') : '一键下载并配置'}
+          {busy ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}
+          {busy ? '配置中…' : ready ? '重新配置' : '一键下载并配置'}
         </button>
       </div>
 
@@ -174,19 +186,28 @@ function RuntimeEnvironmentCard() {
         </div>
       )}
 
+      {busy && (
+        <div style={{ marginTop: 10 }}>
+          <div className="flex items-center justify-between" style={{ ...SETTINGS_FIELD_HINT_STYLE, marginBottom: 6 }}>
+            <span>
+              正在{RUNTIME_PHASE_LABELS[phase || ''] || '配置'}{progressAsset ? ` ${progressAsset}` : ''}…
+            </span>
+            {pct !== null && <span>{pct}%</span>}
+          </div>
+          <div style={{ height: 6, borderRadius: 999, overflow: 'hidden', background: 'color-mix(in srgb, var(--surface-border) 60%, transparent)' }}>
+            <div style={{ height: '100%', width: pct !== null ? `${pct}%` : '40%', borderRadius: 999, background: 'var(--color-blue)', transition: 'width 240ms ease', opacity: pct !== null ? 1 : 0.6 }} />
+          </div>
+        </div>
+      )}
+
+      {!busy && doneNotice && (
+        <div className="text-[12px]" style={{ ...settingsNoticeStyle(ready ? 'success' : 'error'), marginTop: 10 }}>
+          {doneNotice}
+        </div>
+      )}
+
       {!unsupported && (
-        <div className="flex items-center gap-4" style={{ marginTop: 8 }}>
-          {ready && (
-            <button
-              type="button"
-              onClick={() => void provision(true)}
-              disabled={busy}
-              className="inline-flex items-center gap-1"
-              style={{ ...SETTINGS_FIELD_HINT_STYLE, background: 'none', border: 'none', padding: 0, cursor: busy ? 'default' : 'pointer', opacity: busy ? 0.5 : 1 }}
-            >
-              <Download size={12} />重新下载并配置
-            </button>
-          )}
+        <div style={{ marginTop: 8 }}>
           <button
             type="button"
             onClick={() => setShowMirror((v) => !v)}
@@ -194,12 +215,6 @@ function RuntimeEnvironmentCard() {
           >
             {showMirror ? '收起自定义镜像' : '自定义下载镜像（高级）'}
           </button>
-        </div>
-      )}
-
-      {busy && pct !== null && (
-        <div style={{ marginTop: 10, height: 6, borderRadius: 999, overflow: 'hidden', background: 'color-mix(in srgb, var(--surface-border) 60%, transparent)' }}>
-          <div style={{ height: '100%', width: `${pct}%`, borderRadius: 999, background: 'var(--color-blue)', transition: 'width 240ms ease' }} />
         </div>
       )}
 
