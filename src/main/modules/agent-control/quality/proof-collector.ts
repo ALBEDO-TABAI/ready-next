@@ -139,6 +139,11 @@ export function collectToolOutputProofs(toolName: string, output: ToolExecutionO
   for (const path of paths) {
     proofs.push(collectArtifactProof(path, now))
   }
+  // NOTE: a bare `runStatePath` is NOT minted as a `run_state` proof here — a
+  // skill child emits its runStatePath at START (still running). The `run_state`
+  // KIND proof (which `skill_run_state`/`steps_complete` require) is minted ONLY
+  // in run-finalizer, after validating the run_state.json is terminally done +
+  // delivery report present. Tool-output level only yields the artifact path.
   return proofs
 }
 

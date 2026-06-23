@@ -1,5 +1,9 @@
+import { existsSync, readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+
 import { logAgentMetric } from '../metrics'
-import { collectResponseDigestProof, appendProofRefs } from '../quality/proof-collector'
+import { collectResponseDigestProof, collectRunStateProof, collectArtifactProof, appendProofRefs } from '../quality/proof-collector'
+import { parseRunStateJson } from '../task-projection/run-state-schema'
 import { adjudicateTerminalOutcome, appendCheckIns, type CheckInRecord } from '../quality/task-adjudicator'
 import { resolveCriteria, type SkillExecutionForm } from '../quality/criteria-templates'
 import type { TaskType } from '../../../../shared/task-types'
@@ -120,6 +124,39 @@ export interface RunFinalizerDeps {
     terminalStatus?: string | null
     terminalReason?: string | null
   }) => void
+  /** P1 — real validation for the run_state COMPLETION proof: a `run_state`
+   *  proof may only be seeded when run_state.json is terminally done AND its
+   *  delivery report exists (a skill child emits runStatePath at START). Default
+   *  reads + parses the file; injectable for tests. */
+  verifyRunStateTerminal?: (runStatePath: string) => boolean
+  /** P1 — existence check for handle-derived artifact proofs (outputDir/…). */
+  verifyArtifactExists?: (path: string) => boolean
+}
+
+const DELIVERY_REPORT_FILE = 'delivery_report.json'
+
+/** Default run_state COMPLETION validator: run_state.json must parse to a
+ *  terminal `done` status AND a delivery report must exist on disk. Real skills
+ *  (e.g. VEA) do NOT back-fill the report path into run_state — they write
+ *  `delivery_report.json` beside the outputs — so we resolve it from, in order:
+ *  the explicit `deliveryReportPath`, the run_state's `video_dir`/`outputDir`,
+ *  then the run_state's own directory. Still running/blocked, failed, or
+ *  report-missing → NOT verified. All failures degrade to "not verified". */
+export function defaultVerifyRunStateTerminal(runStatePath: string): boolean {
+  try {
+    if (!runStatePath || !existsSync(runStatePath)) return false
+    const parsed = parseRunStateJson(readFileSync(runStatePath, 'utf-8'), { path: runStatePath })
+    if (!parsed.ok || parsed.value.status !== 'done') return false
+    const explicit = parsed.value.deliveryReportPath
+    if (explicit && existsSync(explicit)) return true
+    const rawVideoDir = typeof parsed.value.raw?.video_dir === 'string' ? parsed.value.raw.video_dir : ''
+    const candidateDirs = [rawVideoDir, parsed.value.outputDir ?? '', dirname(runStatePath)]
+      .map((dir) => String(dir || '').trim())
+      .filter((dir) => dir.length > 0)
+    return candidateDirs.some((dir) => existsSync(join(dir, DELIVERY_REPORT_FILE)))
+  } catch {
+    return false
+  }
 }
 
 export function writeRunCloseMetric(metric: RunCloseMetric): void {
@@ -389,11 +426,40 @@ function recordTerminalAdjudication(
     if (!projection) return null
     const now = deps.now ? deps.now() : new Date()
 
-    // ① response digest proof FIRST (Q3 collector; empty finalText → null)
+    // ① response digest proof FIRST (Q3 collector; empty finalText → null), plus
+    // proofs seeded from the run's durable continuation handle — but only after
+    // REAL validation (a `runStatePath` string alone is a skill START, not a
+    // completion). `skill_run_state`/`steps_complete` accept only the `run_state`
+    // KIND, which no tool-output path mints; the finalizer is the sole minter and
+    // it gates on run_state.json being terminally done + delivery report present.
     const finalText = outcome.kind === 'done' || outcome.kind === 'checkpoint' ? outcome.finalText : null
     const digestProof = collectResponseDigestProof(finalText ?? null, now)
-    const proofRefs = digestProof
-      ? appendProofRefs(projection.proofRefs ?? [], [digestProof])
+    const continuation = continuationFromProjectionPatch(outcome.projectionPatch)
+    const handleString = (key: string): string => {
+      const value = continuation?.[key]
+      return typeof value === 'string' ? value.trim() : ''
+    }
+    // run_state COMPLETION proof — gated on REAL validation: run_state.json must
+    // be terminally done AND its delivery report must exist. A bare runStatePath
+    // (skill child START) is NOT completion evidence, so a still-running / blocked
+    // / failed / missing-delivery run can never spoof skill_run_state/steps_complete.
+    const verifyRunStateTerminal = deps.verifyRunStateTerminal ?? defaultVerifyRunStateTerminal
+    const verifyArtifactExists = deps.verifyArtifactExists ?? ((path: string) => existsSync(path))
+    const runStatePath = handleString('runStatePath')
+    const runStateDone = Boolean(runStatePath) && verifyRunStateTerminal(runStatePath)
+    // A5 — media / python-skill outputs can reach the loop only via framePatch
+    // (not data/projectionPatch). Seed artifact proofs from the durable handle's
+    // output paths, but only for paths that actually exist on disk.
+    const handleArtifactPaths = ['outputDir', 'deliveryReportPath', 'sceneScoresPath']
+      .map(handleString)
+      .filter((path) => path.length > 0 && verifyArtifactExists(path))
+    const seededProofs = [
+      ...(digestProof ? [digestProof] : []),
+      ...(runStateDone ? [collectRunStateProof(runStatePath, now)] : []),
+      ...handleArtifactPaths.map((path) => collectArtifactProof(path, now)),
+    ]
+    const proofRefs = seededProofs.length
+      ? appendProofRefs(projection.proofRefs ?? [], seededProofs)
       : (Array.isArray(projection.proofRefs) ? projection.proofRefs : [])
 
     // ② verdict SECOND, judging the refreshed proof set with the EFFECTIVE

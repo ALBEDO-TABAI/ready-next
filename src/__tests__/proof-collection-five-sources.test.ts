@@ -75,6 +75,18 @@ test('tool output proofs include successful tool results and saved artifact path
   assert.deepEqual(failed, [])
 })
 
+test('A1: a bare runStatePath is NOT a run_state COMPLETION proof at tool-output level (skill emits it at START)', () => {
+  const proofs = collectToolOutputProofs('skill_video_expert_pipeline', createToolExecutionOutput('技能已启动', {
+    shape: 'json',
+    data: { runStatePath: '/tmp/out/run_state.json' },
+  }), NOW)
+  const kinds = proofs.map((row) => row.kind)
+  // the path is a file artifact, but NOT a run_state-kind completion proof —
+  // that is minted only in run-finalizer after validating terminal done + delivery.
+  assert.ok(!kinds.includes('run_state'), 'no run_state proof from a bare path')
+  assert.ok(proofs.some((row) => row.kind === 'artifact' && row.ref === '/tmp/out/run_state.json'))
+})
+
 test('appendProofRefs: malformed additions rejected loudly; overflow rolls oldest into the archive', () => {
   assert.throws(
     () => appendProofRefs([], [{ kind: 'tool_result', ref: '', ts: 'bad', digest: 'nope' } as ProofRef]),

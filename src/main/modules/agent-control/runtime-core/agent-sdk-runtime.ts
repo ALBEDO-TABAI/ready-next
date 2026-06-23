@@ -2464,9 +2464,28 @@ function continuationRunStatePath(options?: AgentSdkExecutionOptions): string | 
     || nonEmptyString(options?.continuationState?.continuationRef?.runStatePath)
 }
 
-function projectionPatchFromChildClose(close: SkillChildCloseEvent | null): Record<string, unknown> | null {
-  const patch = asRecord(close?.projectionPatch)
-  return patch ? { ...patch } : null
+export function projectionPatchFromChildClose(close: SkillChildCloseEvent | null): Record<string, unknown> | null {
+  const existing = asRecord(close?.projectionPatch)
+  if (!close) return existing ? { ...existing } : null
+  // Synthesize a durable continuation handle from the REAL close-event fields.
+  // The genuine completion close carries runStatePath/outputDir/deliveryReportPath
+  // at the TOP LEVEL with projectionPatch === null — so without this the handle
+  // never reaches finalizeRunOutcome and a truly-complete skill run is wrongly
+  // force-converted to error/proof_gap (P1 wiring gap). An explicit continuation
+  // already in close.projectionPatch still wins (spread last).
+  //
+  // Deliberately path-fields ONLY (no childRunId/detachedTaskId): the finalizer
+  // reads these to seed completion proofs, but childRunId would trip
+  // canResumeAsUserPoint into its lenient branch and flip a done-but-failed run
+  // from error→checkpoint. This synthesis is for proof accounting, not resume.
+  const handle: Record<string, unknown> = {}
+  if (close.runStatePath) handle.runStatePath = close.runStatePath
+  if (close.outputDir) handle.outputDir = close.outputDir
+  if (close.deliveryReportPath) handle.deliveryReportPath = close.deliveryReportPath
+  if (close.sceneScoresPath) handle.sceneScoresPath = close.sceneScoresPath
+  const synthesized = Object.keys(handle).length > 0 ? { continuationRef: handle } : {}
+  const merged = { ...synthesized, ...(existing ?? {}) }
+  return Object.keys(merged).length > 0 ? merged : null
 }
 
 function turnTerminalReasonFromChildClose(close: SkillChildCloseEvent): TurnTerminalReason {

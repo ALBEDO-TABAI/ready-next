@@ -15,6 +15,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { finalizeRunOutcome, type RunOutcome } from '../main/modules/agent-control/runtime-core/run-finalizer'
+import { projectionPatchFromChildClose } from '../main/modules/agent-control/runtime-core/agent-sdk-runtime'
 import { adjudicateTerminalOutcome, appendCheckIns, type CheckInRecord } from '../main/modules/agent-control/quality/task-adjudicator'
 import { resolveCriteria } from '../main/modules/agent-control/quality/criteria-templates'
 import { collectToolResultProof } from '../main/modules/agent-control/quality/proof-collector'
@@ -100,6 +101,131 @@ test('zero-proof done: verdict reject + divergence metric + terminal state downg
   } finally {
     __setMetricSinkForTests(null)
   }
+})
+
+function skillRunDeps(runMeta: Map<string, Record<string, unknown>>, verifyRunStateTerminal: (p: string) => boolean) {
+  return {
+    writeRunCloseMetric: () => {},
+    runMetaRepository: {
+      get: (runId: string) => runMeta.get(runId) ?? null,
+      create: (input: Record<string, unknown>) => { runMeta.set(String(input.runId), input); return input },
+      update: (runId: string, patch: Record<string, unknown>) => { runMeta.set(runId, { ...runMeta.get(runId), ...patch }); return patch },
+    },
+    verifyRunStateTerminal,
+    verifyArtifactExists: () => false, // isolate s1 to the run_state proof only
+    now: () => NOW,
+  }
+}
+
+test('A1: a skill run whose run_state is VALIDATED terminal-done+delivery → s1 satisfied, stays done', async () => {
+  const store = fakeStore({
+    taskId: 'task-skill-ok', taskType: 'short_task' as never, module: 'skill',
+    proofRefs: [collectToolResultProof('skill_x', 'ok', NOW)], // satisfies c1 tool_call, NOT s1
+  })
+  const runMeta = new Map<string, Record<string, unknown>>()
+  const finalized = await finalizeRunOutcome({
+    kind: 'done', runId: 'run-skill-ok', taskId: 'task-skill-ok', scopeId: 's1',
+    durationMs: 10, toolCallsUsed: 1, initiator: 'done', finalText: '技能完成',
+    projectionPatch: { taskContinuation: { runStatePath: '/tmp/out/run_state.json' } },
+  } as RunOutcome, { ...skillRunDeps(runMeta, () => true), taskProjectionStore: store })
+  const checkins = store.rows.get('task-skill-ok')!.checkins as CheckInRecord[]
+  assert.equal(checkins.at(-1)!.verdict, 'accept', 's1 satisfied by the validated run_state proof')
+  assert.equal(finalized.status, 'done')
+})
+
+test('A1 control: run_state still running / missing delivery → NOT verified → s1 unsatisfied → force-converted', async () => {
+  const store = fakeStore({
+    taskId: 'task-skill-running', taskType: 'short_task' as never, module: 'skill',
+    proofRefs: [collectToolResultProof('skill_x', 'ok', NOW)],
+  })
+  const runMeta = new Map<string, Record<string, unknown>>()
+  const finalized = await finalizeRunOutcome({
+    kind: 'done', runId: 'run-skill-running', taskId: 'task-skill-running', scopeId: 's1',
+    durationMs: 10, toolCallsUsed: 1, initiator: 'done', finalText: '技能完成',
+    // handle present (skill emitted runStatePath at START) but NOT terminal-done
+    projectionPatch: { taskContinuation: { runStatePath: '/tmp/out/run_state.json' } },
+  } as RunOutcome, { ...skillRunDeps(runMeta, () => false), taskProjectionStore: store })
+  const checkins = store.rows.get('task-skill-running')!.checkins as CheckInRecord[]
+  assert.equal(checkins.at(-1)!.verdict, 'degraded')
+  assert.ok(checkins.at(-1)!.blockers.includes('criteria_unsatisfied:s1'), 'a bare/running run_state must not satisfy s1')
+  assert.equal(finalized.status, 'error')
+})
+
+test('A1 wiring: a REAL child close (projectionPatch null, top-level handle) synthesizes a continuationRef', () => {
+  const close = {
+    childRunId: 'child-vea', skillId: 'video-expert-analyzer', status: 'completed', terminalReason: 'completed',
+    outputDir: '/tmp/vea-out', runStatePath: '/tmp/vea-out/run_state.json',
+    sceneScoresPath: '/tmp/vea-out/scene_scores.json', deliveryReportPath: '/tmp/vea-out/delivery_report.json',
+    progress: { stage: 'completed', totalUnits: 3, completedUnits: 3, coverageRatio: 1, fingerprint: 'fp' },
+    framePatch: null, projectionPatch: null, error: null,
+  }
+  const patch = projectionPatchFromChildClose(close as never) as { continuationRef?: Record<string, unknown> }
+  assert.equal(patch?.continuationRef?.runStatePath, '/tmp/vea-out/run_state.json')
+  assert.equal(patch?.continuationRef?.deliveryReportPath, '/tmp/vea-out/delivery_report.json')
+  assert.equal(patch?.continuationRef?.outputDir, '/tmp/vea-out')
+})
+
+test('A1 wiring end-to-end: real completed child close → skill run stays done (s1 via synthesized handle)', async () => {
+  const close = {
+    childRunId: 'child-vea', skillId: 'video-expert-analyzer', status: 'completed', terminalReason: 'completed',
+    outputDir: '/tmp/vea-out', runStatePath: '/tmp/vea-out/run_state.json',
+    sceneScoresPath: null, deliveryReportPath: '/tmp/vea-out/delivery_report.json',
+    progress: { stage: 'completed', totalUnits: 3, completedUnits: 3, coverageRatio: 1, fingerprint: 'fp' },
+    framePatch: null, projectionPatch: null, error: null,
+  }
+  const projectionPatch = projectionPatchFromChildClose(close as never)!
+  const store = fakeStore({
+    taskId: 'task-vea', taskType: 'short_task' as never, module: 'skill',
+    proofRefs: [collectToolResultProof('skill_x', 'ok', NOW)],
+  })
+  const runMeta = new Map<string, Record<string, unknown>>()
+  const finalized = await finalizeRunOutcome({
+    kind: 'done', runId: 'run-vea', taskId: 'task-vea', scopeId: 's1',
+    durationMs: 10, toolCallsUsed: 1, initiator: 'done', finalText: 'VEA 完成', projectionPatch,
+  } as RunOutcome, { ...skillRunDeps(runMeta, () => true), taskProjectionStore: store })
+  const checkins = store.rows.get('task-vea')!.checkins as CheckInRecord[]
+  assert.equal(checkins.at(-1)!.verdict, 'accept', 's1 satisfied via the continuationRef synthesized from the real close')
+  assert.equal(finalized.status, 'done')
+})
+
+test('A1 wiring control: a real close whose run_state is NOT verified stays error (no error→checkpoint flip)', async () => {
+  const close = {
+    childRunId: 'child-vea', skillId: 'video-expert-analyzer', status: 'completed', terminalReason: 'completed',
+    outputDir: '/tmp/vea-out', runStatePath: '/tmp/vea-out/run_state.json',
+    sceneScoresPath: null, deliveryReportPath: '/tmp/vea-out/delivery_report.json',
+    progress: { stage: 'completed', totalUnits: 3, completedUnits: 3, coverageRatio: 1, fingerprint: 'fp' },
+    framePatch: null, projectionPatch: null, error: null,
+  }
+  const projectionPatch = projectionPatchFromChildClose(close as never)!
+  // synthesized handle must NOT carry childRunId (would trip canResumeAsUserPoint)
+  assert.equal((projectionPatch as { continuationRef?: Record<string, unknown> }).continuationRef?.childRunId, undefined)
+  const store = fakeStore({
+    taskId: 'task-vea-fail', taskType: 'short_task' as never, module: 'skill',
+    proofRefs: [collectToolResultProof('skill_x', 'ok', NOW)],
+  })
+  const runMeta = new Map<string, Record<string, unknown>>()
+  const finalized = await finalizeRunOutcome({
+    kind: 'done', runId: 'run-vea-fail', taskId: 'task-vea-fail', scopeId: 's1',
+    durationMs: 10, toolCallsUsed: 1, initiator: 'done', finalText: 'VEA 自称完成', projectionPatch,
+  } as RunOutcome, { ...skillRunDeps(runMeta, () => false), taskProjectionStore: store })
+  assert.equal(finalized.status, 'error', 'unverified completion stays error, not checkpoint')
+  assert.equal(finalized.terminalReason, 'proof_gap')
+})
+
+test('A1 control: no run_state handle at all → s1 unsatisfied → force-converted', async () => {
+  const store = fakeStore({
+    taskId: 'task-skill-gap', taskType: 'short_task' as never, module: 'skill',
+    proofRefs: [collectToolResultProof('skill_x', 'ok', NOW)],
+  })
+  const runMeta = new Map<string, Record<string, unknown>>()
+  const finalized = await finalizeRunOutcome({
+    kind: 'done', runId: 'run-skill-gap', taskId: 'task-skill-gap', scopeId: 's1',
+    durationMs: 10, toolCallsUsed: 1, initiator: 'done', finalText: '技能完成',
+  } as RunOutcome, { ...skillRunDeps(runMeta, () => true), taskProjectionStore: store })
+  const checkins = store.rows.get('task-skill-gap')!.checkins as CheckInRecord[]
+  assert.equal(checkins.at(-1)!.verdict, 'degraded')
+  assert.ok(checkins.at(-1)!.blockers.includes('criteria_unsatisfied:s1'))
+  assert.equal(finalized.status, 'error')
 })
 
 test('failed delivery facts produce a specific terminal reason, never accept or adjudication_degraded', async () => {

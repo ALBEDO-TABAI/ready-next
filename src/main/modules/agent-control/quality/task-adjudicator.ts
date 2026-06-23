@@ -36,7 +36,9 @@ const CRITERIA_PROOF_MAP: Record<CriteriaKind, ReadonlyArray<ProofRef['kind']>> 
   tool_call: ['tool_result'],
   steps_complete: ['run_state', 'task_event'],
   artifact: ['artifact'],
-  report_sources: ['artifact'],
+  // A research report's sources are the search/fetch tool results themselves —
+  // a synthesized inline answer (no written report file) must still be provable.
+  report_sources: ['artifact', 'tool_result'],
   media_file: ['artifact'],
   collection_verdict: ['task_event', 'artifact'],
   result_parseable: ['artifact', 'tool_result'],
