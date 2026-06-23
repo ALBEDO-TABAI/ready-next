@@ -55,6 +55,9 @@ function RuntimeEnvironmentCard() {
   const [mirrorSaving, setMirrorSaving] = useState(false)
   const [mirrorNotice, setMirrorNotice] = useState<string | null>(null)
   const [mirrorNoticeKind, setMirrorNoticeKind] = useState<'error' | 'success'>('success')
+  // Advanced: the custom-mirror input is hidden by default (normal users never
+  //   need to paste a CDN URL); it auto-opens only when all sources are unreachable.
+  const [showMirror, setShowMirror] = useState(false)
 
   const refresh = useCallback(async () => {
     try {
@@ -94,6 +97,7 @@ function RuntimeEnvironmentCard() {
         const kind = res.data && typeof res.data === 'object' && 'kind' in res.data ? String(res.data.kind) : null
         setErrorKind(kind)
         setErrorText(res.error || '配置失败')
+        if (kind === 'all_sources_unreachable') setShowMirror(true)
         await refresh()
       }
     } catch (err) {
@@ -170,17 +174,40 @@ function RuntimeEnvironmentCard() {
         </div>
       )}
 
+      {!unsupported && (
+        <div className="flex items-center gap-4" style={{ marginTop: 8 }}>
+          {ready && (
+            <button
+              type="button"
+              onClick={() => void provision(true)}
+              disabled={busy}
+              className="inline-flex items-center gap-1"
+              style={{ ...SETTINGS_FIELD_HINT_STYLE, background: 'none', border: 'none', padding: 0, cursor: busy ? 'default' : 'pointer', opacity: busy ? 0.5 : 1 }}
+            >
+              <Download size={12} />重新下载并配置
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => setShowMirror((v) => !v)}
+            style={{ ...SETTINGS_FIELD_HINT_STYLE, background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}
+          >
+            {showMirror ? '收起自定义镜像' : '自定义下载镜像（高级）'}
+          </button>
+        </div>
+      )}
+
       {busy && pct !== null && (
         <div style={{ marginTop: 10, height: 6, borderRadius: 999, overflow: 'hidden', background: 'color-mix(in srgb, var(--surface-border) 60%, transparent)' }}>
           <div style={{ height: '100%', width: `${pct}%`, borderRadius: 999, background: 'var(--color-blue)', transition: 'width 240ms ease' }} />
         </div>
       )}
 
-      {!unsupported && (
+      {!unsupported && showMirror && (
         <div style={{ ...SETTINGS_SUBTLE_CARD_STYLE, marginTop: 10, padding: '12px 14px' }}>
           <div className="flex items-start justify-between gap-3">
             <div>
-              <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-title)' }}>运行时下载源</div>
+              <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-title)' }}>自定义下载镜像（可选）</div>
               <div style={{ ...SETTINGS_FIELD_HINT_STYLE, marginTop: 3 }}>
                 Python 默认先走中科大镜像；ffmpeg/ffprobe 默认走上游。填写自定义镜像后会优先尝试该地址。
               </div>
