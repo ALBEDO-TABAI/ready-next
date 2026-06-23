@@ -404,6 +404,15 @@ function isLikelyCommentAssetUrl(rawUrl: string): boolean {
 function imageDedupeKey(rawUrl: string): string {
   try {
     const url = new URL(rawUrl)
+    // Pinterest serves the same pin at multiple resolutions via a leading PATH
+    // segment (/236x/, /474x/, /originals/, ...). Collapse those variants so a
+    // thumbnail and its original are not treated as two distinct images.
+    if (/(^|\.)pinimg\.com$/i.test(url.hostname)) {
+      const segments = url.pathname.split('/').filter(Boolean)
+      if (segments.length >= 2 && /^(originals|\d+x(\d+)?)$/i.test(segments[0])) {
+        return `${url.hostname}/${segments.slice(1).join('/')}`.toLowerCase()
+      }
+    }
     const path = url.pathname.replace(/!.+$/u, '')
     return `${url.hostname}${path}`.toLowerCase()
   } catch {

@@ -17,7 +17,7 @@ const TabIdOptional = z.string().optional().describe('标签页 ID，留空则�
 
 export const BrowserCollectImagesSchema = z.object({
   keyword: z.string().optional().describe('可选关键词，按图片 URL/alt/title 过滤'),
-  limit: z.number().optional().describe('最多返回条数，默认 20，最大 60'),
+  limit: z.number().optional().describe('最多返回条数，默认 20，最大 60（只看当前视口；整画板/图库请改用 browser_visible_collect(image_gallery)）'),
   min_width: z.number().optional().describe('最小宽度像素过滤，默认 120'),
   include_hidden: z.boolean().optional().describe('是否包含页面中已加载但当前不可见的候选大图，默认 false'),
   tab_id: TabIdOptional,
@@ -25,11 +25,11 @@ export const BrowserCollectImagesSchema = z.object({
 
 export const BrowserDownloadUrlsSchema = z.object({
   urls: z.array(z.string()).describe('要下载的 URL 数组（http/https）'),
-  directory: z.string().optional().describe('目标目录，默认 ~/Documents'),
+  directory: z.string().describe('目标目录（必填：不传会被拒绝；请用用户用 @[文件夹] 指定的目录，没有默认目录）'),
   filename_prefix: z.string().optional().describe('文件名前缀（可选）'),
   overwrite: z.boolean().optional().describe('同名是否覆盖，默认 false'),
   tab_id: z.string().optional().describe('可选标签页 ID（用于带 Referer 下载）'),
-  unrelated_to_collection: z.boolean().optional().describe('仅当本次下载与本会话的图片采集任务无关时传 true；采集相关的保存必须改用 browser_download_collected_media'),
+  unrelated_to_collection: z.boolean().optional().describe('仅当本次下载与本会话的图片采集任务无关时传 true；画板/图库等采集相关的保存必须改用 browser_visible_collect(image_gallery)+browser_download_collected_media'),
 })
 
 export const BrowserDownloadCollectedMediaSchema = z.object({

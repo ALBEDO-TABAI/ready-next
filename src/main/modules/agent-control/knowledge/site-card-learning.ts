@@ -79,6 +79,7 @@ const FAILURE_KIND_ALIASES: Record<string, SiteCardFailureKind> = {
   no_images: 'selector_missing',
   selector_mismatch: 'selector_missing',
   selector_missing: 'selector_missing',
+  script_failed_to_execute: 'selector_missing',
   automation_detected: 'script_detection',
   bot_detected: 'script_detection',
   script_detection: 'script_detection',

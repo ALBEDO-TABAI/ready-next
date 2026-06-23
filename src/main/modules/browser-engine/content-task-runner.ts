@@ -963,17 +963,75 @@ export class BrowserContentTaskRunner {
     if (this.activeRuns.has(taskId)) return
     const run = this.runTask(taskId, kind, payload)
       .catch((error) => {
+        // A user cancellation / takeover also rejects the run, but cancelTask
+        // already wrote 'cancelled' + projected it — never overwrite that as
+        // 'failed' (would mislabel the row, the bridge event AND the card).
+        if (this.cancelledTasks.has(taskId)) return
         this.persistenceService.updateProgress(taskId, {}, {
           status: 'failed',
           error: error instanceof Error ? error.message : String(error),
           finishedAt: new Date().toISOString(),
         })
         publishBrowserTaskEvent(taskId, 'failed')
+        // P0.4 — an UNCAUGHT throw (e.g. "Script failed to execute") bypassed
+        // the runner's own failed-closeout, so the foreground projection stays
+        // non-terminal and a later restart relabels it "main_process_restarted",
+        // masking the real failure. Finalize the card + trigger failure learning
+        // HERE so card, evidence and learning close out together.
+        this.finalizeUncaughtTaskFailure(taskId, kind, payload, error)
       })
       .finally(() => {
         this.activeRuns.delete(taskId)
       })
     this.activeRuns.set(taskId, run)
+  }
+
+  /** P0.4 — terminal closeout for a background collection task that died via an
+   *  uncaught throw. Writes the failed projection (so the card never reads as a
+   *  restart interruption) and, for an image/page-script extraction failure,
+   *  records a staged site-card learning signal. Never throws. */
+  private finalizeUncaughtTaskFailure(
+    taskId: string,
+    kind: BrowserCapabilityTaskKind,
+    payload: Record<string, unknown>,
+    error: unknown,
+  ): void {
+    try {
+      // A user cancellation / takeover throws too, but cancelTask already
+      // projected 'cancelled' — never relabel that as 'failed'.
+      if (this.cancelledTasks.has(taskId)) return
+      // Re-read the freshest payload: the loop persists the resolved page URL
+      // for current-page/tab_id collections, so a no-`url` task can still learn.
+      const freshPayload = this.persistenceService.getTaskPayload(taskId) || payload
+      const scopeId = typeof freshPayload.scopeId === 'string' ? freshPayload.scopeId.trim() : ''
+      if (!scopeId) return
+      const handle = this.persistenceService.getTask(taskId)
+      const progress = handle?.progress
+      if (kind === 'note_collect' || kind === 'card_loop') {
+        this.projectNoteCollect(taskId, scopeId, 'failed', progress?.total ?? 0, progress?.completed ?? 0, progress?.failed ?? 0, null)
+      } else if (kind === 'visible_collect') {
+        const template = String(freshPayload.template || '')
+        this.projectVisibleCollect(taskId, scopeId, 'failed', progress?.total ?? 0, null, {
+          mediaOnly: template === 'image_gallery',
+        })
+        // Failure learning: an in-page extraction throw is a page-shape failure
+        // (selector_missing family). Record it so the site card learns and the
+        // settings panel can surface a recurring failure for this domain. URL
+        // comes from payload.url, else the URL the loop resolved into the result.
+        const resultTargetUrl = String((handle?.result as Record<string, unknown> | undefined)?.targetUrl || '').trim()
+        const targetUrl = String(freshPayload.url || '').trim() || resultTargetUrl
+        const domain = targetUrl ? domainFromUrl(targetUrl) : null
+        if (domain && this.siteCardLearningSink) {
+          this.siteCardLearningSink.learnFromVisibleCollectFailure({
+            domain,
+            failureKind: 'selector_missing',
+            detail: `visible_collect 未捕获失败: ${(error instanceof Error ? error.message : String(error)).slice(0, 180)}`,
+          })
+        }
+      }
+    } catch {
+      // closeout must never throw back into the run lifecycle
+    }
   }
 
   /**
@@ -1068,6 +1126,20 @@ export class BrowserContentTaskRunner {
         mediaOnly: String(payload.template || '') === 'image_gallery',
       })
       return
+    }
+
+    // P0.4 — record the resolved page URL when the task was started WITHOUT an
+    // explicit `url` (current-page collection), so a later failure-learning
+    // closeout still has a domain. Only trust the active tab when NO specific
+    // tab was requested, or the active tab IS the requested one — otherwise we'd
+    // risk attributing the failure to the wrong site (skip rather than mislearn).
+    if (!targetUrl) {
+      const activeTab = this.capabilityService.getActiveTab?.()
+      const sameTab = !requestedTabId || (activeTab?.id != null && activeTab.id === requestedTabId)
+      const resolvedUrl = sameTab ? (activeTab?.url || '') : ''
+      if (resolvedUrl && resolvedUrl !== String(payload.url || '')) {
+        this.persistenceService.updateTaskPayload(taskId, { ...payload, url: resolvedUrl })
+      }
     }
 
     const limits: VisibleCollectLimits = {

@@ -20,11 +20,12 @@ const TAB_ID_OPTIONAL: SkillParamDefinition = {
   required: false,
 }
 const TEMPLATE_ENUM = ['article_list', 'image_gallery', 'link_list', 'card_list', 'custom']
+const SCRIPT_TEMPLATE_ENUM = ['read_text', 'read_attr', 'read_all_text', 'count_selector', 'exists_selector', 'read_rect', 'read_meta']
 
 test('browser_collect_images', () => {
   assert.deepEqual(zodObjectToParamList(BROWSER_CONTENT_SCHEMAS.browser_collect_images), [
     { name: 'keyword', type: 'string', description: '可选关键词，按图片 URL/alt/title 过滤', required: false },
-    { name: 'limit', type: 'number', description: '最多返回条数，默认 20，最大 60', required: false },
+    { name: 'limit', type: 'number', description: '最多返回条数，默认 20，最大 60（只看当前视口；整画板/图库请改用 browser_visible_collect(image_gallery)）', required: false },
     { name: 'min_width', type: 'number', description: '最小宽度像素过滤，默认 120', required: false },
     { name: 'include_hidden', type: 'boolean', description: '是否包含页面中已加载但当前不可见的候选大图，默认 false', required: false },
     TAB_ID_OPTIONAL,
@@ -40,11 +41,11 @@ test('browser_download_urls', () => {
       required: true,
       items: { type: 'string' },
     },
-    { name: 'directory', type: 'string', description: '目标目录，默认 ~/Documents', required: false },
+    { name: 'directory', type: 'string', description: '目标目录（必填：不传会被拒绝；请用用户用 @[文件夹] 指定的目录，没有默认目录）', required: true },
     { name: 'filename_prefix', type: 'string', description: '文件名前缀（可选）', required: false },
     { name: 'overwrite', type: 'boolean', description: '同名是否覆盖，默认 false', required: false },
     { name: 'tab_id', type: 'string', description: '可选标签页 ID（用于带 Referer 下载）', required: false },
-    { name: 'unrelated_to_collection', type: 'boolean', description: '仅当本次下载与本会话的图片采集任务无关时传 true；采集相关的保存必须改用 browser_download_collected_media', required: false },
+    { name: 'unrelated_to_collection', type: 'boolean', description: '仅当本次下载与本会话的图片采集任务无关时传 true；画板/图库等采集相关的保存必须改用 browser_visible_collect(image_gallery)+browser_download_collected_media', required: false },
   ])
 })
 
@@ -98,6 +99,16 @@ test('browser_extract_structured (fields has additionalProperties:true items)', 
     { name: 'limit', type: 'number', description: '最多提取条数', required: false },
     { name: 'min_width', type: 'number', description: '图片提取最小宽度', required: false },
     { name: 'custom_script', type: 'string', description: '可选：直接执行自定义提取脚本', required: false },
+    {
+      name: 'script_template',
+      type: 'string',
+      description: '可选：命名只读脚本模板；传入后由代码侧拼装固定只读 JS',
+      required: false,
+      enum: SCRIPT_TEMPLATE_ENUM,
+    },
+    { name: 'selector', type: 'string', description: 'script_template 需要选择器时使用', required: false },
+    { name: 'attr', type: 'string', description: 'script_template=read_attr 时读取的属性名', required: false },
+    { name: 'name', type: 'string', description: 'script_template=read_meta 时读取 title/href/readyState 或 meta name/property', required: false },
   ])
 })
 
@@ -117,6 +128,16 @@ test('browser_scroll_collect', () => {
     { name: 'max_scrolls', type: 'number', description: '最大滚动次数', required: false },
     { name: 'scroll_delay_ms', type: 'number', description: '每次滚动后的等待时间', required: false },
     { name: 'custom_script', type: 'string', description: '可选：直接执行自定义提取脚本', required: false },
+    {
+      name: 'script_template',
+      type: 'string',
+      description: '可选：命名只读脚本模板；传入后由代码侧拼装固定只读 JS',
+      required: false,
+      enum: SCRIPT_TEMPLATE_ENUM,
+    },
+    { name: 'selector', type: 'string', description: 'script_template 需要选择器时使用', required: false },
+    { name: 'attr', type: 'string', description: 'script_template=read_attr 时读取的属性名', required: false },
+    { name: 'name', type: 'string', description: 'script_template=read_meta 时读取 title/href/readyState 或 meta name/property', required: false },
   ])
 })
 
@@ -227,7 +248,24 @@ test('browser_run_workflow (steps has additionalProperties:true objects)', () =>
 
 test('browser_execute_js', () => {
   assert.deepEqual(zodObjectToParamList(BROWSER_CONTENT_SCHEMAS.browser_execute_js), [
-    { name: 'code', type: 'string', description: '要执行的 JavaScript 代码', required: true },
-    TAB_ID_OPTIONAL,
+    { name: 'code', type: 'string', description: '旧自由 JavaScript 入口；P3c 后普通站点会拒绝自由脚本，请改用命名只读模板', required: false },
+    {
+      name: 'template',
+      type: 'string',
+      description: '命名只读脚本模板，由代码侧拼装固定只读 JS',
+      required: false,
+      enum: SCRIPT_TEMPLATE_ENUM,
+    },
+    {
+      name: 'script_template',
+      type: 'string',
+      description: '命名只读脚本模板别名，优先于 template',
+      required: false,
+      enum: SCRIPT_TEMPLATE_ENUM,
+    },
+    { name: 'selector', type: 'string', description: 'template/script_template 需要选择器时使用', required: false },
+    { name: 'attr', type: 'string', description: 'read_attr 模板读取的属性名', required: false },
+    { name: 'name', type: 'string', description: 'read_meta 模板读取 title/href/readyState 或 meta name/property', required: false },
+    { name: 'tab_id', type: 'string', description: '标签页 ID，留空则使用当前活跃标签页', required: false },
   ])
 })

@@ -164,12 +164,12 @@ export const BROWSER_TOOLS: BrowserToolDef[] = [
   },
   {
     name: 'browser_collect_images',
-    description: '收集当前页面可见图片候选（URL/尺寸/alt），适合后续批量下载。',
+    description: '只读取当前视口可见的图片候选（URL/尺寸/alt，默认 20、最多 60），用于轻量探查。整画板/图库/“把这些图都采集下来”这类成规模采集必须用 browser_visible_collect(image_gallery) 走结构化采集链，不要用本工具配 browser_download_urls 手工批量下载。',
     params: zodObjectToParamList(BROWSER_CONTENT_SCHEMAS.browser_collect_images) as ToolParamSchemaSpec[],
   },
   {
     name: 'browser_download_urls',
-    description: '批量下载 URL 到本地目录（默认 ~/Documents），可用于一次性保存多张图片。',
+    description: '把一组 URL 下载到本地目录（directory 必填，不传会被拒绝）。仅用于与图片采集无关的零散下载；画板/图库的保存必须走 browser_visible_collect(image_gallery)+browser_download_collected_media，本工具会拦截图床批量下载。',
     params: zodObjectToParamList(BROWSER_CONTENT_SCHEMAS.browser_download_urls) as ToolParamSchemaSpec[],
   },
   {

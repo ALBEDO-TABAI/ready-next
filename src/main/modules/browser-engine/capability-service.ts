@@ -292,6 +292,13 @@ function buildStructuredExtractionScript(options: BrowserExtractStructuredOption
 export class BrowserCapabilityService {
   constructor(private readonly host: BrowserCapabilityHost) {}
 
+  /** Current active tab (id + url). Used by background collection to record the
+   *  resolved page URL when the task was started without an explicit `url`
+   *  (current-page collection), so failure-learning has a domain. */
+  getActiveTab(): { id: string; url: string } | undefined {
+    return this.host.getActiveTab()
+  }
+
   async openTarget(url: string, mode: BrowserOpenTargetMode = 'prefer_reuse'): Promise<BrowserOpenTargetResult> {
     if (mode === 'current_tab') {
       const activeTab = this.host.getActiveTab()

@@ -928,6 +928,40 @@ function isImageGallerySourceTask(
   return String(result?.template || payload?.template || '').trim() === 'image_gallery'
 }
 
+/** P0.1 — the failed counterpart of findScopeImageGallerySourceTask: a recent
+ *  FAILED image-gallery collection for this scope. After it, the model must
+ *  NOT silently fall back to manual `browser_download_urls`; it should retry /
+ *  resume the structured collection so the card, evidence and learning stay on
+ *  the collection chain. Bounded to the handoff window so a stale failure from
+ *  hours ago no longer blocks an unrelated raw download. */
+async function findScopeRecentFailedImageGalleryTask(
+  controller: BrowserController,
+  scopeId: string | null | undefined,
+): Promise<BrowserCapabilityTaskHandle | null> {
+  if (!scopeId) return null
+  const list = (controller as { listTasksByKind?: (kind: string) => Promise<BrowserCapabilityTaskHandle[]> }).listTasksByKind
+  if (typeof list !== 'function') return null
+  try {
+    const tasks = await list.call(controller, 'visible_collect')
+    const getPayload = (controller as { getTaskPayload?: (taskId: string) => Record<string, unknown> | null }).getTaskPayload
+    const now = Date.now()
+    const candidates = tasks.filter((task) => {
+      if (task.status !== 'failed') return false
+      // A failed task we cannot date must NOT block downloads indefinitely —
+      // treat an unparseable/missing timestamp as "not recent" (fail-open).
+      const timestamp = browserTaskTimestampMs(task)
+      if (timestamp <= 0 || now - timestamp > RECENT_COLLECTION_HANDOFF_WINDOW_MS) return false
+      const payload = typeof getPayload === 'function' ? (getPayload.call(controller, task.taskId) || null) : null
+      if (stringField(payload?.scopeId) !== scopeId) return false
+      return isImageGallerySourceTask(task, payload)
+    })
+    return candidates.sort((a, b) =>
+      String(b.updatedAt || b.createdAt || '').localeCompare(String(a.updatedAt || a.createdAt || '')))[0] || null
+  } catch {
+    return null
+  }
+}
+
 function hasSharedOrigin(
   left: Array<{ url: string }>,
   right: Array<{ url: string }>,
@@ -1603,6 +1637,100 @@ function buildDownloadedArtifacts(results: Array<Record<string, unknown>>, direc
     })
 }
 
+/** Pinterest serves the same pin at multiple resolutions via a leading PATH
+ *  segment (/236x/, /474x/, /564x/, /736x/, /1200x/, /originals/). The grid
+ *  lazy-loads thumbnails, so an ad-hoc collect→download mixes thumbnails with
+ *  duplicates of the same pin. We collapse resolution variants by a
+ *  size-independent fingerprint and prefer the /originals/ variant. */
+const PINIMG_SIZE_SEGMENT = /^(originals|\d+x(\d+)?)$/i
+
+function isPinimgHost(host: string): boolean {
+  return /(^|\.)pinimg\.com$/i.test(host)
+}
+
+/** Size-independent identity of a pinimg image (host + path minus the leading
+ *  size segment). null for non-pinimg or unexpected URL shapes. */
+function pinimgFingerprint(rawUrl: string): string | null {
+  try {
+    const url = new URL(rawUrl)
+    if (!isPinimgHost(url.hostname)) return null
+    const segments = url.pathname.split('/').filter(Boolean)
+    if (segments.length < 2 || !PINIMG_SIZE_SEGMENT.test(segments[0])) return null
+    return `${url.hostname.toLowerCase()}/${segments.slice(1).join('/').toLowerCase()}`
+  } catch {
+    return null
+  }
+}
+
+/** Upgrade a pinimg thumbnail URL to its /originals/ variant; null when the URL
+ *  is not an upgradeable pinimg URL. */
+export function pinimgOriginalsUrl(rawUrl: string): string | null {
+  try {
+    const url = new URL(rawUrl)
+    if (!isPinimgHost(url.hostname)) return null
+    const segments = url.pathname.split('/').filter(Boolean)
+    if (segments.length < 2 || !PINIMG_SIZE_SEGMENT.test(segments[0])) return null
+    if (segments[0].toLowerCase() === 'originals') return null
+    segments[0] = 'originals'
+    url.pathname = `/${segments.join('/')}`
+    return url.toString()
+  } catch {
+    return null
+  }
+}
+
+interface NormalizedDownloadTarget {
+  /** Preferred URL to download (/originals/ variant for pinimg thumbnails). */
+  url: string
+  /** Pre-upgrade URL, retried only if the preferred one fails to fetch. */
+  fallbackUrl: string | null
+}
+
+/** Dedupe a raw URL list; for Pinterest images upgrade to /originals/ and
+ *  collapse resolution variants of the same pin. Non-pinimg URLs dedupe by
+ *  exact string. First occurrence determines output order; the preferred URL is
+ *  always the /originals/ variant and the fetch-fallback is a thumbnail variant
+ *  if ANY non-originals variant of the same pin appears — regardless of order
+ *  (so an `/originals/`-first list still has a 403/404 fallback). */
+export function normalizeDownloadTargets(urls: string[]): NormalizedDownloadTarget[] {
+  const order: string[] = []
+  const byKey = new Map<string, NormalizedDownloadTarget>()
+  for (const raw of urls) {
+    const fingerprint = pinimgFingerprint(raw)
+    const dedupeKey = fingerprint ?? raw
+    const originals = pinimgOriginalsUrl(raw)
+    const existing = byKey.get(dedupeKey)
+    if (!existing) {
+      order.push(dedupeKey)
+      byKey.set(dedupeKey, originals
+        ? { url: originals, fallbackUrl: raw }          // thumbnail → originals, keep thumbnail as fallback
+        : { url: raw, fallbackUrl: null })              // originals (or non-pinimg) seen first
+      continue
+    }
+    // Same pin seen again at a different size. Keep the originals as preferred;
+    // if we don't yet have a thumbnail fallback, adopt this non-originals variant.
+    if (!existing.fallbackUrl && originals && originals !== raw) {
+      existing.fallbackUrl = raw
+    }
+  }
+  return order.map((key) => byKey.get(key)!)
+}
+
+/** Count URLs that look like image-board CDN assets (Pinterest pinimg). A batch
+ *  dominated by these is a board/gallery harvest that must go through the
+ *  structured image_gallery collection, not raw manual download. */
+function imageBoardHarvestUrlCount(urls: string[]): number {
+  let count = 0
+  for (const raw of urls) {
+    try {
+      if (isPinimgHost(new URL(String(raw)).hostname)) count += 1
+    } catch {
+      // ignore unparseable urls
+    }
+  }
+  return count
+}
+
 async function downloadUrlsToDirectory(
   controller: BrowserController,
   params: {
@@ -1614,11 +1742,13 @@ async function downloadUrlsToDirectory(
     referer?: string | null
   },
 ): Promise<string | ToolExecutionOutput> {
-  const urls = params.urls
+  const rawUrls = params.urls
     .map((item) => String(item || '').trim())
     .filter((item) => item.length > 0)
-    .slice(0, 100)
-  if (urls.length === 0) return 'Error: urls is required and must be a non-empty array'
+  // Pinterest dedupe/originals-upgrade BEFORE the 100 cap so the cap counts
+  // distinct pins, not resolution variants of the same pin.
+  const targets = normalizeDownloadTargets(rawUrls).slice(0, 100)
+  if (targets.length === 0) return 'Error: urls is required and must be a non-empty array'
 
   const tabId = params.tabId || null
   const overwrite = params.overwrite === true
@@ -1642,8 +1772,8 @@ async function downloadUrlsToDirectory(
   }
 
   const results: Array<Record<string, unknown>> = []
-  for (let index = 0; index < urls.length; index += 1) {
-    const url = urls[index]
+  for (let index = 0; index < targets.length; index += 1) {
+    const { url, fallbackUrl } = targets[index]
     if (!/^https?:\/\//i.test(url)) {
       results.push({ url, success: false, error: 'unsupported_protocol' })
       continue
@@ -1675,15 +1805,26 @@ async function downloadUrlsToDirectory(
     if (downloadedViaSession) continue
 
     try {
-      const response = await fetch(url, {
+      // Prefer the (upgraded /originals/) url; if it 404s, retry the original
+      // pre-upgrade variant so a missing original never drops the pin entirely.
+      const fetchOnce = (target: string) => fetch(target, {
         headers: {
           'User-Agent': 'Mozilla/5.0 (Ready Browser Agent)',
           ...(referer ? { Referer: referer } : {}),
         },
       })
+      let fetchedUrl = url
+      let response = await fetchOnce(url)
+      if (!response.ok && fallbackUrl && fallbackUrl !== url) {
+        const retry = await fetchOnce(fallbackUrl)
+        if (retry.ok) {
+          fetchedUrl = fallbackUrl
+          response = retry
+        }
+      }
       if (!response.ok) {
         results.push({
-          url,
+          url: fetchedUrl,
           success: false,
           error: `http_${response.status}`,
           via: 'fetch',
@@ -1696,10 +1837,10 @@ async function downloadUrlsToDirectory(
       const fallbackBase = filenamePrefix
         ? `${filenamePrefix}-${index + 1}`
         : `download-${index + 1}`
-      const parts = inferFilenameParts(url, fallbackBase, contentType)
+      const parts = inferFilenameParts(fetchedUrl, fallbackBase, contentType)
       const filePath = await writeFileSmart(directory, parts.base, parts.ext, buffer, overwrite)
       results.push({
-        url,
+        url: fetchedUrl,
         success: true,
         path: filePath,
         size: buffer.byteLength,
@@ -5995,6 +6136,9 @@ export async function executeBrowserTool(
         // the files from the collection card. Redirect to the chained tool;
         // an explicitly unrelated download passes with the declaration flag.
         if (args.unrelated_to_collection !== true) {
+          // A USABLE (completed/paused-with-media) gallery source wins first:
+          // the user should download what was collected, even if an earlier
+          // attempt in the same scope failed.
           const chained = await findScopeImageGallerySourceTask(controller, sessionId)
           if (chained) {
             return browserStructuredOutput({
@@ -6005,10 +6149,49 @@ export async function executeBrowserTool(
               suggestedNextTool: 'browser_download_collected_media',
             })
           }
+          // P0.1 — otherwise, if the most recent gallery attempt FAILED and there
+          // is no usable source to download, do NOT salvage it by switching to
+          // manual URL download (that orphans the card, drops the verdict/
+          // checkpoint, and downloads thumbnails). Steer back to the structured
+          // collection so card, evidence and failure-learning stay on the chain.
+          const failedGallery = await findScopeRecentFailedImageGalleryTask(controller, sessionId)
+          if (failedGallery) {
+            return browserStructuredOutput({
+              ok: false,
+              errorCode: 'image_gallery_collection_failed_retry_required',
+              message: `本会话最近的图片采集任务 ${failedGallery.taskId} 失败了（${stringField((failedGallery.result as Record<string, unknown> | null)?.stopReason) || failedGallery.status}）。不要改用 browser_download_urls 手工下载——请用 browser_start_task / browser_visible_collect(image_gallery) 重试或 browser_resume_task 续跑，让采集卡、证据和失败学习都留在采集链路上。只有与该采集无关的下载才可以传 unrelated_to_collection: true。`,
+              failedTaskId: failedGallery.taskId,
+              suggestedNextTool: 'browser_visible_collect',
+            })
+          }
+          // P0.1 — close the original bypass: even with NO prior collection task,
+          // a batch dominated by image-board CDN URLs (pinimg) is a board/gallery
+          // harvest. Route it through the structured image_gallery chain instead
+          // of the ad-hoc collect_images→download_urls path (which loses
+          // completeness/verdict/learning and mixes in thumbnails).
+          const harvestCount = imageBoardHarvestUrlCount(rawUrls.map((item) => String(item || '')))
+          if (harvestCount >= 3) {
+            return browserStructuredOutput({
+              ok: false,
+              errorCode: 'use_structured_image_gallery_collection',
+              message: `检测到 ${harvestCount} 张图床(pinimg)图片的批量下载，这属于画板/图库采集。请用 browser_visible_collect(image_gallery) 走结构化采集（自动滚动穷尽、按原图去重、产出采集卡与证据），再用 browser_download_collected_media 保存；不要用 browser_collect_images + browser_download_urls 手工批量下载。确实是与采集无关的零散下载才传 unrelated_to_collection: true。`,
+              suggestedNextTool: 'browser_visible_collect',
+            })
+          }
+        }
+        // P0.3 — the target folder must be explicit; a silent `~/Documents`
+        // default scatters collected images away from the user's chosen folder.
+        const downloadDirectory = String(args.directory || '').trim()
+        if (!downloadDirectory) {
+          return browserStructuredOutput({
+            ok: false,
+            errorCode: 'download_directory_required',
+            message: '缺少 directory：请明确传入目标文件夹（通常是用户用 @[文件夹] 指定的目录），不要使用默认目录。',
+          })
         }
         return await downloadUrlsToDirectory(controller, {
           urls: rawUrls.map((item) => String(item || '')),
-          directory: String(args.directory || '~/Documents'),
+          directory: downloadDirectory,
           filenamePrefix: String(args.filename_prefix || 'download'),
           overwrite: args.overwrite === true,
           tabId: (args.tab_id as string) || null,
@@ -6107,7 +6290,9 @@ export async function executeBrowserTool(
         // is PARTIAL, never "完成".
         const saved = Number(parsed.success || 0)
         const failed = Number(parsed.failed || 0)
-        const discovered = urls.length
+        // discovered must count DISTINCT pins (same dedupe/originals collapse the
+        // download applies), else a deduped save reads as a false "partial".
+        const discovered = normalizeDownloadTargets(urls).length
         // page-claimed total: explicit arg first, then the source task's own
         // recorded claim (user_expected_total survives in result/payload) —
         // a model that forgets to pass 72 can no longer silence the gap.
@@ -6346,10 +6531,31 @@ export async function executeBrowserTool(
         const kind = String(args.kind || '').trim()
         if (!kind) return 'Error: kind is required'
         const payload = args.payload && typeof args.payload === 'object' ? args.payload as Record<string, unknown> : {}
-        const result = await controller.startTask({
-          kind: kind as never,
-          payload: { ...payload },
-        })
+        // P0.1 — normalize the payload for this raw entry so a background
+        // collection started here behaves like the dedicated tools:
+        //   • map the external snake_case `tab_id` to the internal `tabId` the
+        //     runner reads — otherwise it ignores the target tab, scrapes the
+        //     active page and may learn the failure against the wrong site;
+        //   • stamp the current scope so scope-bound collection guards
+        //     (findScope…ImageGallery…) can see a failure started here.
+        // Neither overrides a value the caller already set in the internal shape.
+        const scopedPayload: Record<string, unknown> = { ...payload }
+        if (typeof scopedPayload.tabId !== 'string' && typeof scopedPayload.tab_id === 'string') {
+          scopedPayload.tabId = scopedPayload.tab_id
+        }
+        if (sessionId && typeof scopedPayload.scopeId !== 'string') {
+          scopedPayload.scopeId = sessionId
+        }
+        // P0.4 — a visible_collect started via this raw entry must resolve its
+        // page URL the SAME way the dedicated browser_visible_collect entry does
+        // (controller.startVisibleCollection reads the target tab's URL from the
+        // tab registry). Otherwise a tab_id-only collection has no page URL, and
+        // a later failure can't be learned against a domain. Fall back to raw
+        // startTask only for non-collection kinds or hosts without the method.
+        const startVisibleCollection = (controller as { startVisibleCollection?: (payload: Record<string, unknown>, scopeId?: string) => Promise<BrowserCapabilityTaskHandle> }).startVisibleCollection
+        const result = kind === 'visible_collect' && typeof startVisibleCollection === 'function'
+          ? await startVisibleCollection.call(controller, scopedPayload, sessionId)
+          : await controller.startTask({ kind: kind as never, payload: scopedPayload })
         return JSON.stringify(result, null, 2)
       }
 
