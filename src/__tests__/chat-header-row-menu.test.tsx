@@ -104,7 +104,11 @@ const recallHit: SessionRecallHit = {
   sessionStatus: 'done',
 }
 
-function mountChatHeader(): { root: Root; container: HTMLElement; unmount: () => void } {
+type ChatHeaderProps = Parameters<typeof ChatHeader>[0]
+
+function mountChatHeader(
+  overrides: Partial<ChatHeaderProps> = {},
+): { root: Root; container: HTMLElement; unmount: () => void } {
   const host = document.getElementById('root')
   if (!host) throw new Error('missing root')
   host.innerHTML = ''
@@ -115,6 +119,8 @@ function mountChatHeader(): { root: Root; container: HTMLElement; unmount: () =>
     root.render(createElement(ChatHeader, {
       currentChannel: localChannel,
       channelOptions: [localChannel],
+      // Empty query → the expanded list renders this channel's live sessions.
+      sessionsByChannelKey: { [localChannel.key]: [recallHit] },
       onChannelSelect: () => undefined,
       onNewSession: () => undefined,
       onLoadConversation: () => undefined,
@@ -131,6 +137,7 @@ function mountChatHeader(): { root: Root; container: HTMLElement; unmount: () =>
       onAttachSessionRecall: () => undefined,
       sessionTitle: '当前会话',
       formatTime: () => '刚刚',
+      ...overrides,
     }))
   })
   return {
@@ -179,6 +186,61 @@ test('chat header row menu stays open when the history panel scrolls and can ope
     click(renameButton)
 
     assert.match(document.body.textContent ?? '', /为这个会话取一个新名称/)
+  } finally {
+    unmount()
+  }
+})
+
+test('one channel expands into every distinct session — each remote /new is selectable', () => {
+  const wechatChannel = {
+    key: 'channel:wechat-bot',
+    sourceKind: 'channel' as const,
+    sourceId: 'wechat-bot',
+    label: '微信会话',
+    caption: '微信频道',
+  }
+  // Two scopes share one channel (same sourceId) but are distinct sessions —
+  // exactly what two `/new` commands in one IM thread produce.
+  const makeSession = (id: string, title: string): SessionRecallHit => ({
+    conversationId: id,
+    lineageRootId: id,
+    resumeTitle: title,
+    title,
+    sourceKind: 'channel',
+    sourceId: 'wechat-bot',
+    threadKey: id,
+    matchedBy: ['recent'],
+    score: 0,
+    attachmentNames: [],
+    updatedAt: '2026-06-23T00:00:00.000Z',
+    sessionStatus: null,
+  })
+  const sessionNew = makeSession('conv-new', '最新会话')
+  const sessionOld = makeSession('conv-old', '较早会话')
+
+  const selected: string[] = []
+  const { unmount } = mountChatHeader({
+    currentChannel: wechatChannel,
+    channelOptions: [wechatChannel],
+    sessionsByChannelKey: { [wechatChannel.key]: [sessionNew, sessionOld] },
+    sessionRecallResults: [],
+    onLoadConversation: (id) => selected.push(id),
+  })
+  try {
+    const historyButton = document.querySelector('button[title="会话来源"]')
+    assert.ok(historyButton, 'history/source button is rendered')
+    click(historyButton)
+
+    const text = document.body.textContent ?? ''
+    assert.match(text, /最新会话/, 'the freshly created session is listed')
+    assert.match(text, /较早会话/, 'the earlier session is still listed as a distinct row')
+
+    const newRow = Array.from(document.querySelectorAll('button')).find(
+      (button) => (button.textContent ?? '').includes('最新会话'),
+    )
+    assert.ok(newRow, 'each session is an individually selectable row')
+    click(newRow)
+    assert.deepEqual(selected, ['conv-new'], 'selecting a session loads that exact conversation')
   } finally {
     unmount()
   }

@@ -7,6 +7,28 @@ import { mapScopeToConversation } from '../helpers/projection'
 
 const SESSION_RECALL_HISTORY_LIMIT = 60
 
+// Map a live conversation scope onto the SessionRecallHit shape the history
+// list renders. Lets a live session (e.g. a freshly created remote `/new`)
+// appear in the per-channel list immediately, without waiting for the recall
+// search index. `sessionStatus: null` keeps the row dot unlit unless the live
+// status map lights it; the dedicated search path still supplies real hits.
+function scopeToSessionRow(scope: ConversationScope): SessionRecallHit {
+  return {
+    conversationId: scope.id,
+    lineageRootId: scope.lineageRootId || scope.id,
+    resumeTitle: scope.resumeTitle || scope.title,
+    title: scope.title,
+    sourceKind: scope.sourceKind,
+    sourceId: scope.sourceId,
+    threadKey: scope.threadKey,
+    matchedBy: ['recent'],
+    score: 0,
+    attachmentNames: [],
+    updatedAt: scope.lastMessageAt || scope.updatedAt,
+    sessionStatus: null,
+  }
+}
+
 // Stage V V1.9a — channel + session-recall state, derivations, effects and
 // callbacks extracted from ChatPanel.tsx (original L396-664 + L1011-1018
 // region after V1.7-V1.9c extractions). All store/IPC deps are injected via
@@ -57,6 +79,7 @@ export interface UseChannelSessionRecallReturn {
   currentAgentData: Agent | undefined
   currentChannel: ConversationChannelOption
   channelOptions: ConversationChannelOption[]
+  sessionsByChannelKey: Record<string, SessionRecallHit[]>
   recallState: RecallStateHandle
   detachCallback: (conversationId: string) => Promise<void>
   channelEffects: ChannelEffectsHandle
@@ -127,6 +150,24 @@ export function useChannelSessionRecall(
     }
 
     return Array.from(options.values())
+  }, [getScopeChannelKey, scopes])
+
+  // Live sessions grouped by the same key channelOptions dedupes on. The
+  // history menu expands a channel into these so every distinct session under
+  // one source (each remote `/new` is its own scope) is selectable, newest
+  // first — the channel row alone only ever shows one entry per source.
+  const sessionsByChannelKey = useMemo<Record<string, SessionRecallHit[]>>(() => {
+    const grouped: Record<string, SessionRecallHit[]> = {}
+    for (const scope of scopes) {
+      const key = getScopeChannelKey(scope)
+      ;(grouped[key] ||= []).push(scopeToSessionRow(scope))
+    }
+    for (const key of Object.keys(grouped)) {
+      grouped[key].sort(
+        (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
+      )
+    }
+    return grouped
   }, [getScopeChannelKey, scopes])
 
   const currentChannel = useMemo<ConversationChannelOption>(() => {
@@ -306,6 +347,7 @@ export function useChannelSessionRecall(
     currentAgentData,
     currentChannel,
     channelOptions,
+    sessionsByChannelKey,
     recallState,
     detachCallback: handleDetachSessionRecall,
     channelEffects,

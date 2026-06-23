@@ -1,21 +1,22 @@
 /**
  * Stage V V3.5 — ReadyAgentOrchestrator main-side session-limit enforcement.
  *
- * Locks the 3-session hard cap (`MAX_CONCURRENT_SESSIONS = 3`) at the
- * main-process entry, independent of the renderer's V3.4a UI disable
- * (plan §10 R12 — "session 上限绕过": main must reject even if a
- * developer bypasses the renderer disable via devtools).
+ * Locks the concurrent-session hard cap (`MAX_CONCURRENT_SESSIONS`, sourced
+ * from the shared `MAX_AGENT_SESSIONS`) at the main-process entry, independent
+ * of the renderer's V3.4a UI disable (plan §10 R12 — "session 上限绕过": main
+ * must reject even if a developer bypasses the renderer disable via devtools).
+ * The cap value lives in `src/shared/agent-session-limits.ts` so this guard and
+ * the renderer affordance can never diverge.
  *
  * Contract under test (mirrored from `runtime-core/orchestrator.ts`):
- *   1. Under limit (live count < 3): novel sessionId is admitted.
- *   2. At limit (live count == 3): novel sessionId throws a structured
+ *   1. Under limit (live count < cap): novel sessionId is admitted.
+ *   2. At limit (live count == cap): novel sessionId throws a structured
  *      `session_limit_exceeded` error (with `code: 'SESSION_LIMIT'`,
- *      `maxSessions: 3`, `liveCount`).
+ *      `maxSessions` echoing the cap, `liveCount`).
  *   3. Reuse: at the limit, REUSING an already-tracked sessionId is
  *      allowed — it is not a "new" admission.
- *   4. After close: closing one of three live sessions drops the live
- *      count below the cap, so a subsequent newSession with a novel id
- *      is admitted.
+ *   4. After close: closing one live session drops the live count below
+ *      the cap, so a subsequent newSession with a novel id is admitted.
  *
  * As with `orchestrator-close-session.test.ts` and
  * `orchestrator-list-all-sessions.test.ts`, the real orchestrator
@@ -23,7 +24,7 @@
  * Per CLAUDE.md §6 "minimal stand-in", we drive the real
  * `AgentSessionManager` directly and mirror the limit-check logic
  * verbatim. A paired source-grep at the end of the file locks the
- * production guard to its 3-cap structure so the stand-in cannot drift.
+ * production guard to the shared-cap structure so the stand-in cannot drift.
  *
  * Plan: docs/superpowers/plans/2026-05-21-V-stage-v-comprehensive-implementation.md
  *   §4 V3.5, §10 R12
@@ -36,10 +37,13 @@ import { resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { AgentSessionManager } from '../main/modules/agent-control/session/session-manager'
+import { MAX_AGENT_SESSIONS } from '../shared/agent-session-limits'
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..')
 
-const MAX_CONCURRENT_SESSIONS = 3
+// Cap is the shared single-source-of-truth constant; the orchestrator reads the
+// same one. Cases below are cap-relative so they never re-hardcode a number.
+const MAX_CONCURRENT_SESSIONS = MAX_AGENT_SESSIONS
 
 function toTaskKey(agent: string, sessionId?: string): string {
   return sessionId ? `${agent}::${sessionId}` : agent
@@ -137,33 +141,39 @@ class SessionLimitTestSubject {
   }
 }
 
-// Case (a): under limit — 2 live sessions, novel id is admitted.
+// Seed the subject up to exactly the cap with live sessions sess-1..sess-N.
+function seedAtCap(subj: SessionLimitTestSubject): void {
+  for (let i = 1; i <= MAX_CONCURRENT_SESSIONS; i++) {
+    subj.seedLiveSession('agent-A', `sess-${i}`, 'tool_running')
+  }
+}
+
+// Case (a): under limit — one slot free, novel id is admitted.
 test('V3.5 newSession with novel id succeeds when live count is under the cap', () => {
   const subj = new SessionLimitTestSubject()
-  subj.seedLiveSession('agent-A', 'sess-1', 'tool_running')
-  subj.seedLiveSession('agent-A', 'sess-2', 'responding')
+  for (let i = 1; i < MAX_CONCURRENT_SESSIONS; i++) {
+    subj.seedLiveSession('agent-A', `sess-${i}`, 'tool_running')
+  }
 
-  // live count = 2 < 3 cap; novel sess-3 must be admitted.
+  // live count = cap - 1; a novel session must be admitted.
   assert.doesNotThrow(() => {
-    subj.newSession('agent-A', 'sess-3')
-  }, 'newSession must succeed when live count (2) is below the cap (3)')
+    subj.newSession('agent-A', 'sess-novel')
+  }, 'newSession must succeed when live count is below the cap')
 
   // The new session is now tracked (terminal 'done' from newSession's
-  // post-call setState). Total tracked entries grew to 3.
-  assert.equal(subj.sessions.getState('agent-A::sess-3')?.state, 'done')
+  // post-call setState).
+  assert.equal(subj.sessions.getState('agent-A::sess-novel')?.state, 'done')
 })
 
-// Case (b): at limit — 3 live sessions, novel id is rejected.
+// Case (b): at limit — cap-many live sessions, novel id is rejected.
 test('V3.5 newSession with novel id throws session_limit_exceeded when live count is at the cap', () => {
   const subj = new SessionLimitTestSubject()
-  subj.seedLiveSession('agent-A', 'sess-1', 'tool_running')
-  subj.seedLiveSession('agent-A', 'sess-2', 'responding')
-  subj.seedLiveSession('agent-A', 'sess-3', 'queued')
+  seedAtCap(subj)
 
-  // live count = 3 == cap; novel sess-4 must throw structured error.
+  // live count == cap; a novel session must throw the structured error.
   let caught: unknown = null
   try {
-    subj.newSession('agent-A', 'sess-4')
+    subj.newSession('agent-A', 'sess-over')
   } catch (error) {
     caught = error
   }
@@ -172,81 +182,82 @@ test('V3.5 newSession with novel id throws session_limit_exceeded when live coun
   assert.equal(caught.message, 'session_limit_exceeded', 'error message must be the structured tag')
   const structured = caught as Error & { code?: string; maxSessions?: number; liveCount?: number }
   assert.equal(structured.code, 'SESSION_LIMIT', 'error must carry code: SESSION_LIMIT')
-  assert.equal(structured.maxSessions, 3, 'error must echo the cap (3)')
-  assert.equal(structured.liveCount, 3, 'error must report the live count at rejection time')
+  assert.equal(structured.maxSessions, MAX_CONCURRENT_SESSIONS, 'error must echo the cap')
+  assert.equal(structured.liveCount, MAX_CONCURRENT_SESSIONS, 'error must report the live count at rejection time')
 
   // The rejected session must NOT have been admitted into the
   // session manager — i.e. no side effect from a failed admit.
   assert.equal(
-    subj.sessions.getState('agent-A::sess-4'),
+    subj.sessions.getState('agent-A::sess-over'),
     null,
     'rejected session must not leak into the session manager',
   )
 })
 
-// Case (c): reuse — 3 live sessions, reusing existing id is allowed.
+// Case (c): reuse — cap-many live sessions, reusing existing id is allowed.
 test('V3.5 newSession reusing an already-tracked sessionId is admitted even at the cap', () => {
   const subj = new SessionLimitTestSubject()
-  subj.seedLiveSession('agent-A', 'sess-1', 'tool_running')
-  subj.seedLiveSession('agent-A', 'sess-2', 'responding')
-  subj.seedLiveSession('agent-A', 'sess-3', 'queued')
+  seedAtCap(subj)
 
-  // live count = 3 == cap; reusing sess-2 is NOT a new admission, so
-  // the guard must bypass even though we are at the cap.
+  // At the cap; reusing sess-2 is NOT a new admission, so the guard must
+  // bypass even though we are at the cap.
   assert.doesNotThrow(() => {
     subj.newSession('agent-A', 'sess-2')
   }, 'reusing an existing sessionId must bypass the limit (not a new session)')
 
-  // After reset, sess-2 is now 'done' (newSession's post-call
-  // setState). sess-1 and sess-3 are unchanged.
+  // After reset, sess-2 is now 'done' (newSession's post-call setState);
+  // sess-1 is unchanged.
   assert.equal(subj.sessions.getState('agent-A::sess-2')?.state, 'done')
   assert.equal(subj.sessions.getState('agent-A::sess-1')?.state, 'tool_running')
-  assert.equal(subj.sessions.getState('agent-A::sess-3')?.state, 'queued')
 })
 
 // Case (d): after close — count drops, novel id is admitted again.
-test('V3.5 newSession with novel id succeeds after one of three live sessions is closed', () => {
+test('V3.5 newSession with novel id succeeds after one of the live sessions is closed', () => {
   const subj = new SessionLimitTestSubject()
-  subj.seedLiveSession('agent-A', 'sess-1', 'tool_running')
-  subj.seedLiveSession('agent-A', 'sess-2', 'responding')
-  subj.seedLiveSession('agent-A', 'sess-3', 'queued')
+  seedAtCap(subj)
 
   // Sanity: at the cap to start.
   assert.throws(
-    () => subj.newSession('agent-A', 'sess-4-pre-close'),
+    () => subj.newSession('agent-A', 'sess-pre-close'),
     /session_limit_exceeded/,
     'baseline — at-cap rejection still in force',
   )
 
-  // Close one — drops live count from 3 to 2.
+  // Close one — drops live count below the cap.
   subj.closeSession('agent-A', 'sess-2')
   assert.equal(subj.sessions.getState('agent-A::sess-2')?.state, 'closed', 'closed session marked terminal')
 
   // Now a NEW novel id is admitted because the closed session no
   // longer counts as live (terminal state filtered out by guard).
   assert.doesNotThrow(() => {
-    subj.newSession('agent-A', 'sess-4-post-close')
+    subj.newSession('agent-A', 'sess-post-close')
   }, 'novel session must be admitted after closing one live session drops count below the cap')
 
-  assert.equal(subj.sessions.getState('agent-A::sess-4-post-close')?.state, 'done')
+  assert.equal(subj.sessions.getState('agent-A::sess-post-close')?.state, 'done')
 })
 
-// Paired structural gate: lock the production guard to its 3-cap
+// Paired structural gate: lock the production guard to the shared-cap
 // structure so the stand-in cannot silently drift away from the
 // orchestrator. Behavior is proven against the stand-in above; this
 // just prevents a future edit from quietly removing the cap.
 test('V3.5 orchestrator source declares MAX_CONCURRENT_SESSIONS cap + countLiveSessions guard', () => {
-  // eslint-disable-next-line ready/no-source-grep-test -- Stage V §0.7 paired structural gate: lock the V3.5 main-side cap to its 3-cap + terminal-state filter shape. Behavior is proven above against a faithful stand-in; this guards drift on the production guard (cap value, terminal set, send/newSession call sites).
+  // eslint-disable-next-line ready/no-source-grep-test -- Stage V §0.7 paired structural gate: lock the V3.5 main-side cap to the shared-constant + terminal-state filter shape. Behavior is proven above against a faithful stand-in; this guards drift on the production guard (cap source, terminal set, send/newSession call sites).
   const source = readFileSync(
     resolve(REPO_ROOT, 'src/main/modules/agent-control/runtime-core/orchestrator.ts'),
     'utf8',
   )
 
-  // Cap declared as a static readonly = 3.
+  // Cap sourced from the shared single-source-of-truth constant, NOT a literal,
+  // so the main guard can never drift from the renderer's "+" enable/disable.
   assert.match(
     source,
-    /private static readonly MAX_CONCURRENT_SESSIONS\s*=\s*3/,
-    'MAX_CONCURRENT_SESSIONS must be a private static readonly with value 3',
+    /import \{ MAX_AGENT_SESSIONS \} from '\.\.\/\.\.\/\.\.\/\.\.\/shared\/agent-session-limits'/,
+    'orchestrator must import MAX_AGENT_SESSIONS from the shared session-limits module',
+  )
+  assert.match(
+    source,
+    /private static readonly MAX_CONCURRENT_SESSIONS\s*=\s*MAX_AGENT_SESSIONS/,
+    'MAX_CONCURRENT_SESSIONS must be sourced from the shared MAX_AGENT_SESSIONS constant',
   )
 
   // countLiveSessions present and backed by listStatesEnriched + terminal filter.
@@ -275,7 +286,7 @@ test('V3.5 orchestrator source declares MAX_CONCURRENT_SESSIONS cap + countLiveS
 // Paired structural gate for the IPC surfacing — confirm the
 // agent-lifecycle-group catches the structured error and echoes it
 // as `{ success: false, error: 'session_limit_exceeded', code:
-// 'SESSION_LIMIT', maxSessions: 3 }` in the IPCResponse.
+// 'SESSION_LIMIT', maxSessions }` in the IPCResponse (maxSessions echoes the cap).
 test('V3.5 agent-lifecycle-group surfaces session_limit_exceeded with structured IPC response', () => {
   // eslint-disable-next-line ready/no-source-grep-test -- Stage V §0.7 paired structural gate: lock the IPC echo shape ({ success: false, error: 'session_limit_exceeded', code: 'SESSION_LIMIT', maxSessions }) so the renderer can pattern-match on `code` without parsing `error`.
   const source = readFileSync(

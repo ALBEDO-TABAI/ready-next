@@ -28,6 +28,13 @@ interface ChatHeaderProps {
   channelOptions: ConversationChannelOption[]
   onChannelSelect: (channel: ConversationChannelOption) => void
   onNewSession: () => void
+  /** When true the "+" buttons render disabled with an explanatory tooltip —
+   *  MAX_AGENT_SESSIONS conversations are still live. See ChatPanel. */
+  newSessionDisabled?: boolean
+  /** Per-channel live sessions (keyed by `${sourceKind}:${sourceId}`), newest
+   *  first. Drives the expanded history list so every session — including a
+   *  fresh remote `/new` — is individually selectable. */
+  sessionsByChannelKey: Record<string, SessionRecallHit[]>
   onLoadConversation: (convId: string) => void
   onDeleteConversation: (convId: string) => void
   onRenameConversation?: (conversationId: string, title: string) => void
@@ -57,6 +64,8 @@ export default function ChatHeader({
   channelOptions,
   onChannelSelect,
   onNewSession,
+  newSessionDisabled,
+  sessionsByChannelKey,
   onLoadConversation,
   onDeleteConversation,
   onRenameConversation,
@@ -503,7 +512,8 @@ export default function ChatHeader({
           <IconButton
             icon={<Plus style={{ width: 14, height: 14 }} strokeWidth={2} />}
             onClick={onNewSession}
-            title="新建对话"
+            disabled={newSessionDisabled}
+            title={newSessionDisabled ? '已有多个进行中的对话，完成后可再新建' : '新建对话'}
           />
 
           {onTogglePanel && (
@@ -603,9 +613,16 @@ export default function ChatHeader({
               {channelOptions.map((channel) => {
                 const expanded = expandedChannelKeys.includes(channel.key)
                 const selected = currentChannel.key === channel.key
-                const channelResults = sessionRecallResults.filter(
-                  (item) => item.sourceKind === channel.sourceKind && item.sourceId === channel.sourceId,
-                )
+                // With a query: show recall search hits. Without: show this
+                // channel's live sessions so every distinct conversation —
+                // including a fresh remote `/new` — is individually selectable
+                // (channelOptions itself dedupes one entry per source).
+                const hasQuery = sessionRecallQuery.trim().length > 0
+                const channelResults = hasQuery
+                  ? sessionRecallResults.filter(
+                      (item) => item.sourceKind === channel.sourceKind && item.sourceId === channel.sourceId,
+                    )
+                  : (sessionsByChannelKey[channel.key] || [])
                 return (
                   <div
                     key={channel.key}
@@ -694,7 +711,7 @@ export default function ChatHeader({
                       <div className="flex flex-col" style={{ gap: 6, paddingLeft: 8 }}>
                         {channelResults.length === 0 ? (
                           <div style={{ fontSize: 12, color: 'var(--text-gray)', padding: '8px 8px 10px', textAlign: 'center' }}>
-                            {sessionRecallSearching ? '搜索中…' : sessionRecallQuery.trim() ? '这个来源没有匹配的旧会话' : '这个来源暂无旧会话'}
+                            {sessionRecallSearching ? '搜索中…' : sessionRecallQuery.trim() ? '这个来源没有匹配的旧会话' : '这个来源暂无会话'}
                           </div>
                         ) : (
                           channelResults.map(renderConversationRow)

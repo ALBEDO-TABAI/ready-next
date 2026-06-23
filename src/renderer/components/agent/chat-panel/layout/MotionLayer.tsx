@@ -98,11 +98,13 @@ export function ChatPanelMotionLayer({
 export function CollapsedChatRail({
   onTogglePanel,
   onHistoryOpen,
-  onNewSession
+  onNewSession,
+  newSessionDisabled
 }: {
   onTogglePanel: () => void
   onHistoryOpen: () => void
   onNewSession: () => void
+  newSessionDisabled?: boolean
 }) {
   return (
     <div
@@ -141,7 +143,8 @@ export function CollapsedChatRail({
         <IconButton
           icon={<Plus style={{ width: 14, height: 14 }} strokeWidth={2} />}
           onClick={onNewSession}
-          title="新建对话"
+          disabled={newSessionDisabled}
+          title={newSessionDisabled ? '已有多个进行中的对话，完成后可再新建' : '新建对话'}
           style={{ border: 'none', background: 'transparent', boxShadow: 'none' }}
         />
       </div>

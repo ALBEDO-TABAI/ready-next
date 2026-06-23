@@ -4,6 +4,8 @@ import {
   useAgent,
   initAgentListeners,
   lookupSessionByConversation,
+  isLiveSession,
+  MAX_AGENT_SESSIONS,
   type ChatAttachment,
   type ConversationScope,
   type ScopeRunState
@@ -207,6 +209,14 @@ export default function ChatPanel({
   const { toggleChatPanel: toggleChatPanelStore } = useWorkspace()
   const toggleChatPanel = onTogglePanel ?? toggleChatPanelStore
 
+  // "New conversation" is only blocked when MAX_AGENT_SESSIONS conversations
+  // are still LIVE (unfinished); finished ones are pruned on create. When this
+  // is false the "+" buttons render disabled with an explanatory tooltip so the
+  // limit is visible instead of a silent no-op.
+  const canCreateSession = useAgent(
+    (s) => s.sessionOrder.filter((id) => isLiveSession(s, id)).length < MAX_AGENT_SESSIONS,
+  )
+
   const [toolTraceExpanded, setToolTraceExpanded] = useState(false)
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null)
   const [agentSelectionMenu, setAgentSelectionMenu] = useState<{
@@ -240,6 +250,7 @@ export default function ChatPanel({
     currentAgentData,
     currentChannel,
     channelOptions,
+    sessionsByChannelKey,
     recallState,
     detachCallback: handleDetachSessionRecall,
     channelEffects,
@@ -931,8 +942,10 @@ export default function ChatPanel({
     <ChatHeader
       currentChannel={currentChannel}
       channelOptions={channelOptions}
+      sessionsByChannelKey={sessionsByChannelKey}
       onChannelSelect={handleChannelSelect}
       onNewSession={handleNewSession}
+      newSessionDisabled={!canCreateSession}
       onLoadConversation={handleLoadConversation}
       onDeleteConversation={handleDeleteConversation}
       onRenameConversation={handleRenameConversation}
@@ -1069,6 +1082,7 @@ export default function ChatPanel({
                 handleNewSession()
                 toggleChatPanel()
               }}
+              newSessionDisabled={!canCreateSession}
             />
           </ChatPanelMotionLayer>
         ) : showExpandedPanel ? (

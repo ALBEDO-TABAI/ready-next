@@ -1,5 +1,6 @@
 import { EventEmitter } from 'events'
 import { randomUUID } from 'node:crypto'
+import { MAX_AGENT_SESSIONS } from '../../../../shared/agent-session-limits'
 import { DirectChatEngine, type MultimodalBlock } from '../../claude-bridge/direct-chat'
 import type { BrowserController } from '../../browser-engine/ipc-handler'
 import type { SidecarManager } from '../sidecar-manager'
@@ -111,8 +112,14 @@ export class ReadyAgentOrchestrator extends EventEmitter {
    * session, just a continuation of the existing turn loop), so this
    * cap only fires when a NOVEL sessionId would push the live count
    * past the limit.
+   *
+   * The value is the shared `MAX_AGENT_SESSIONS` — the SAME constant the
+   * renderer uses to enable/disable the "+" button — so the UI affordance and
+   * this guard can never diverge (a renderer-5 / main-3 split let sessions look
+   * creatable but get rejected here on send). See
+   * `src/shared/agent-session-limits.ts` + `agent-session-limit-parity.test.ts`.
    */
-  private static readonly MAX_CONCURRENT_SESSIONS = 3
+  private static readonly MAX_CONCURRENT_SESSIONS = MAX_AGENT_SESSIONS
   private readonly domainAdapterEngine: DirectChatEngine
   private readonly sdkEngine: AgentSdkRuntime
   private readonly sessions: AgentSessionManager

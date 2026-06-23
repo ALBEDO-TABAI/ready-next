@@ -27,6 +27,7 @@ import {
   type ScopeCreatePersistenceSite,
 } from '../modules/agent/scope-create-persistence-metrics'
 import { defaultAgentEmoji } from '../../shared/agent-identity'
+import { MAX_AGENT_SESSIONS } from '../../shared/agent-session-limits'
 
 /**
  * Stage 3 W4 — observability-only throttle for createLocalScope IPC failures
@@ -238,6 +239,12 @@ const TERMINAL_SESSION_STATES: ReadonlySet<SessionSliceState> = new Set([
   'closed',
 ])
 
+// Concurrent-live session cap. Single source of truth lives in
+// `src/shared/agent-session-limits.ts` so the renderer "+" disable and the main
+// orchestrator's admission guard never diverge (a 5-vs-3 split let sessions look
+// creatable but get rejected on send). Re-exported for the existing call sites.
+export { MAX_AGENT_SESSIONS }
+
 export interface SessionSlice {
   messages: AgentMessage[]
   pendingSendCount: number
@@ -398,8 +405,9 @@ interface AgentState {
   /**
    * V3.4a — create a fresh session slice, append its id to `sessionOrder`,
    * and switch the active session to it. Rejected (no-op) when the
-   * renderer-side hard limit is reached (`sessionOrder.length >= 3`); the
-   * caller can re-read `sessionOrder.length` after the call to detect this.
+   * renderer-side cap is reached (MAX_AGENT_SESSIONS *live* sessions; terminal
+   * ones are pruned and never count); the caller surfaces this as a disabled
+   * "+" by re-reading the live-session count.
    * Returns the newly created session id, or `null` if rejected.
    *
    * Stage X2.3 contract (b) — VISIBLE TAB API. ALL UI-reachable session
@@ -413,7 +421,8 @@ interface AgentState {
    * Two notes vs the legacy `newSession()`:
    *   1. This appends to `sessionOrder` — the new tab is immediately
    *      visible in `SessionTabs` (whereas `newSession()` swaps in place).
-   *   2. This respects the 3-session cap; `newSession()` does not.
+   *   2. This respects the shared MAX_AGENT_SESSIONS cap (live sessions only);
+   *      `newSession()` does not.
    */
   createNewSession: () => string | null
   /**
@@ -1462,9 +1471,9 @@ export const useAgent = create<AgentState>((set, get) => ({
   // =========================================================================
   // V3.4a — renderer-side session tab actions
   // =========================================================================
-  // The renderer enforces the ≤3 session hard limit on the create side; the
-  // main-process complement (V3.5) is a deliberate follow-up so this PR
-  // stays a renderer-only change. setActiveSessionId mirrors the
+  // The renderer enforces the MAX_AGENT_SESSIONS live-session cap on the create
+  // side; the main-process orchestrator enforces the SAME shared cap (V3.5) as
+  // defense in depth. setActiveSessionId mirrors the
   // per-session `inputValue` onto the top-level field to match the
   // V3.3b.1 read-through-mirror contract; selectors that still read
   // `state.inputValue` keep observing the active session's draft.
@@ -1484,15 +1493,32 @@ export const useAgent = create<AgentState>((set, get) => ({
 
   createNewSession: () => {
     const state = get()
-    // Renderer-side hard limit (plan §4 V3.4 + V3.5). Main-side enforcement
-    // lands in V3.5. Returning null lets the caller surface UI feedback
-    // without throwing.
-    if (state.sessionOrder.length >= 3) return null
+    // Count only LIVE sessions against the cap. Terminal sessions
+    // (done/error/cancelled/closed) are finished work whose conversation is
+    // persisted and reachable via history (loadScope re-materializes it on
+    // demand), so they must neither block a new conversation nor linger in
+    // memory — prune them here. Without this the button silently dead-ends
+    // once N conversations exist, because there is no UI to close a session.
+    // Returns null only when N sessions are genuinely still live, which the
+    // caller surfaces as a disabled "+".
+    const liveOrder = state.sessionOrder.filter((sid) => isLiveSession(state, sid))
+    if (liveOrder.length >= MAX_AGENT_SESSIONS) return null
     const id = generateSessionId()
     const slice = makeEmptySessionSlice()
+    // Keep live sessions plus anything still in flight, prune the rest. The
+    // streaming/busy guard matters because a re-activated terminal session can
+    // stream again without flipping back to 'live' (non-terminal run phases do
+    // not transition the slice state), so isLiveSession alone would mis-prune a
+    // session whose run is still going.
+    const kept = state.sessionOrder.filter((sid) => {
+      const existing = state.sessions[sid]
+      return isLiveSession(state, sid) || !!existing?.isStreaming || !!existing?.foregroundBusy
+    })
+    const nextSessions: Record<string, SessionSlice> = { [id]: slice }
+    for (const sid of kept) nextSessions[sid] = state.sessions[sid]
     set({
-      sessions: { ...state.sessions, [id]: slice },
-      sessionOrder: [...state.sessionOrder, id],
+      sessions: nextSessions,
+      sessionOrder: [...kept, id],
       activeSessionId: id,
       // Mirror the fresh slice's defaults onto the top-level fields so the
       // composer/coalescer selectors observe a clean slate for the new tab.
