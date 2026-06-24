@@ -464,7 +464,9 @@ test('X2.6 — hung main timeout report still releases the renderer lock', async
 
   driverApi.armInfrastructureWatchdog('scope-A', 'req-A', { timeoutMs: 10 })
 
-  await new Promise((resolve) => setTimeout(resolve, 1150))
+  // A hung report now resolves at the 5s ack window (bumped from 1s so a
+  // slow-but-alive main can answer); wait past it before asserting unlock.
+  await new Promise((resolve) => setTimeout(resolve, 5300))
 
   const state = useAgent.getState()
   const slice = getSessionSlice(state, 'session-A')
@@ -479,6 +481,41 @@ test('X2.6 — hung main timeout report still releases the renderer lock', async
   const lostTrackMsg = state.messages.find((m: { content: string }) =>
     typeof m.content === 'string' && m.content.includes('Ready 跟丢了'))
   assert.ok(lostTrackMsg, 'without a main ack, renderer still surfaces the local recovery message')
+})
+
+test('B step 1 — a slow-but-alive main (answers after 1s, before 5s) reaches main, no false lost-track', async () => {
+  infrastructureTimeoutReports.length = 0
+  // Resolve at ~2.5s: under the OLD 1s ack this raced out → null → false
+  // "lost track" recovery; under the 5s ack the alive main is heard.
+  infrastructureTimeoutReportResult = new Promise((resolve) =>
+    setTimeout(() => resolve({ success: true, data: { state: 'cancel_requested' } }), 2500))
+  seedTwoSessions({
+    activeSessionId: 'session-A',
+    lockedSessionId: 'session-A',
+    lockedScopeId: 'scope-A',
+    otherScopeId: 'scope-B',
+    requestId: 'req-A',
+  })
+
+  driverApi.armInfrastructureWatchdog('scope-A', 'req-A', { timeoutMs: 10 })
+  await new Promise((resolve) => setTimeout(resolve, 3000))
+
+  const state = useAgent.getState()
+  // Assert only renderer-observable facts: the alive main was reached (reported),
+  // no false "lost track" message, and the composer unlocked. We intentionally do
+  // NOT assert a "main-authoritative" terminalReason here — the value the renderer
+  // sets in this branch is a transient LOCAL label, not main's real terminal
+  // reason (a process_exit kill finalizes as cancelled_runtime on main). Asserting
+  // the real terminal reason belongs to a test that simulates main's terminal IPC.
+  const lostTrackMsg = state.messages.find((m: { content: string }) =>
+    typeof m.content === 'string' && m.content.includes('Ready 跟丢了'))
+  assert.equal(lostTrackMsg, undefined, 'a slow-but-alive main must NOT be mistaken for lost track')
+  assert.deepEqual(
+    infrastructureTimeoutReports,
+    [{ scopeId: 'scope-A', requestId: 'req-A', elapsedMs: 10 }],
+    'the alive main was actually reached (report delivered) within the 5s ack window',
+  )
+  assert.equal(getSessionSlice(state, 'session-A').composerLocked, false, 'composer unlocks after main answers')
 })
 
 test('started event for a new request does not inherit the previous response segment', () => {

@@ -243,7 +243,12 @@ export function syncActiveScopeRunAliases(
  */
 const INFRASTRUCTURE_TIMEOUT_MS = 60_000
 const ACTIVE_RUN_INFRASTRUCTURE_TIMEOUT_MS = 5 * 60_000
-const INFRASTRUCTURE_TIMEOUT_REPORT_ACK_MS = 1_000
+// B step 1 — the report→interrupt→finalize round-trip on main can take well over
+// 1s, so a 1s ack races it: evidence showed only 3/10 reports reached main, and
+// the 7 "lost" ones triggered the renderer's local false-recovery (contract
+// breach). A 5s ack lets a slow-but-alive main reliably answer so the renderer
+// only declares lost-track when main is genuinely unreachable.
+const INFRASTRUCTURE_TIMEOUT_REPORT_ACK_MS = 5_000
 
 interface InfrastructureWatchdog {
   scopeId: string
