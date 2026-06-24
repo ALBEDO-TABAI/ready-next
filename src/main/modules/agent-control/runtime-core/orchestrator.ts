@@ -62,6 +62,13 @@ interface ActiveRunLiveness {
   requestId: string
   lastProgressAt: number
   timer: unknown | null
+  /**
+   * Per-run no-progress timeout (B step 3). Defaults to the global
+   * mainRunNoProgressTimeoutMs (long) — only an EXPLICIT, proven-quick caller
+   * (e.g. a narration turn) passes a shorter value. We never infer a short
+   * timeout from a coarse task_type, so a long collection is never false-killed.
+   */
+  noProgressTimeoutMs: number
 }
 
 type SendAndCollectExecutionResult = SendAndCollectResult & {
@@ -261,16 +268,27 @@ export class ReadyAgentOrchestrator extends EventEmitter {
     this.refreshActiveRunProgress(descriptor.agent, descriptor.sessionId, requestId)
   }
 
-  private registerActiveRun(agent: string, sessionId: string | undefined, requestId: string): void {
+  private registerActiveRun(
+    agent: string,
+    sessionId: string | undefined,
+    requestId: string,
+    noProgressTimeoutMs?: number,
+  ): void {
     const taskKey = this.toTaskKey(agent, sessionId)
     this.clearActiveRunIfMatches(taskKey)
     this.activeRunIds.set(taskKey, requestId)
+    // Default long; a positive explicit value (only from a proven-quick caller)
+    // may shorten. Non-positive / undefined falls back to the global timeout.
+    const resolvedTimeoutMs = typeof noProgressTimeoutMs === 'number' && noProgressTimeoutMs > 0
+      ? noProgressTimeoutMs
+      : this.mainRunNoProgressTimeoutMs
     this.activeRunLiveness.set(taskKey, {
       agent,
       sessionId,
       requestId,
       lastProgressAt: this.nowMs(),
       timer: null,
+      noProgressTimeoutMs: resolvedTimeoutMs,
     })
     this.scheduleRunNoProgressGuard(taskKey, requestId)
   }
@@ -317,7 +335,7 @@ export class ReadyAgentOrchestrator extends EventEmitter {
       liveness.timer = null
     }
     const elapsedMs = Math.max(0, this.nowMs() - liveness.lastProgressAt)
-    const delayMs = Math.max(0, this.mainRunNoProgressTimeoutMs - elapsedMs)
+    const delayMs = Math.max(0, liveness.noProgressTimeoutMs - elapsedMs)
     const timer = this.scheduleNoProgressCheck(() => {
       this.handleRunNoProgressTimeout(taskKey, requestId)
     }, delayMs)
@@ -333,7 +351,7 @@ export class ReadyAgentOrchestrator extends EventEmitter {
     if (!liveness || liveness.requestId !== requestId) return
     if (this.activeRunIds.get(taskKey) !== requestId) return
     const elapsedMs = Math.max(0, this.nowMs() - liveness.lastProgressAt)
-    if (elapsedMs < this.mainRunNoProgressTimeoutMs) {
+    if (elapsedMs < liveness.noProgressTimeoutMs) {
       this.scheduleRunNoProgressGuard(taskKey, requestId)
       return
     }
@@ -494,6 +512,7 @@ export class ReadyAgentOrchestrator extends EventEmitter {
     continuationState?: ContinuationState | null,
     sessionIdOverride?: string,
     sourceMessageId?: string | null,
+    noProgressTimeoutMs?: number,
   ): Promise<{
     success: boolean
     error?: string
@@ -526,7 +545,7 @@ export class ReadyAgentOrchestrator extends EventEmitter {
     }
     this.descriptors.set(internalKey, { agent, sessionId })
     this.sessions.setState(taskKey, 'queued')
-    this.registerActiveRun(agent, effectiveSessionId, effectiveRequestId)
+    this.registerActiveRun(agent, effectiveSessionId, effectiveRequestId, noProgressTimeoutMs)
     try {
       let resolvedSystemPrompt = systemPrompt
       if (systemPrompt === undefined && this.personaResolver) {
