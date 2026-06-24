@@ -652,36 +652,6 @@
       "owner": "stage-n-parent-force-fence"
     },
     {
-      "path": "src/__tests__/skill-child-parent-force-blocked.test.ts",
-      "reason": "Stage N Phase 1.4 fence test — imports isParentForceForbiddenByManifest from run-contracts.ts which now statically imports the static-name table + child-loop predicate; transitive value-import reaches native-backed runtime-manager but only via the embedded-skills fallback (filesystem JSON read), never opens better-sqlite3.",
-      "since": "2026-05-07",
-      "owner": "stage-n-parent-force-fence"
-    },
-    {
-      "path": "src/__tests__/skill-run-contract-continuation.test.ts",
-      "reason": "Stage N transitive: run-contracts.ts now statically imports child-loop-skill-actions which loads runtime-manager (native-backed wrapper); existing test exercises contract continuation logic with synthetic fixtures only — no DB call.",
-      "since": "2026-05-07",
-      "owner": "stage-n-parent-force-fence"
-    },
-    {
-      "path": "src/__tests__/skill-run-contract-shape.test.ts",
-      "reason": "Stage N transitive: run-contracts.ts now statically imports child-loop-skill-actions which loads runtime-manager (native-backed wrapper); existing test asserts contract type shape with synthetic data only — no DB call.",
-      "since": "2026-05-07",
-      "owner": "stage-n-parent-force-fence"
-    },
-    {
-      "path": "src/__tests__/task-projection-supersede.test.ts",
-      "reason": "Stage N transitive: run-contracts.ts now statically imports child-loop-skill-actions which loads runtime-manager (native-backed wrapper); existing test exercises projection supersede logic with fakes — no DB call.",
-      "since": "2026-05-07",
-      "owner": "stage-n-parent-force-fence"
-    },
-    {
-      "path": "src/__tests__/turn-frame-patch.test.ts",
-      "reason": "Stage N transitive: turn-frame.ts imports run-contracts.ts which now statically imports child-loop-skill-actions / runtime-manager; existing test exercises pure patch helpers with synthetic frames — no DB call.",
-      "since": "2026-05-07",
-      "owner": "stage-n-parent-force-fence"
-    },
-    {
       "path": "src/__tests__/agent-sdk-runtime-capability-body.test.ts",
       "reason": "Stage calendar UI verification cleanup: static C4 scan reaches native-backed modules through shared wrappers, but this test exercises pure contracts or fake-injected paths and does not open better-sqlite3 under host Node.",
       "since": "2026-05-17",
@@ -776,6 +746,30 @@
       "reason": "P1b-C16 schedule outcome tests construct SkillsRuntimeManager with startBackgroundTasks:false and replace getRawDatabase with an in-memory fake DB. They exercise createSchedule and runScheduledTask outcome branching only; no path opens better-sqlite3 under host Node. Native coverage remains enforced by npm run verify:native.",
       "since": "2026-06-20",
       "owner": "agent-audit-p1b-c16"
+    },
+    {
+      "path": "src/__tests__/agent-registry-group.test.ts",
+      "reason": "P6/baseline: tests agent registry grouping with fake/in-memory fixtures; transitive imports reach sqlite-capable modules but no test path opens better-sqlite3 (verified passing host-Node, 0 skip).",
+      "since": "2026-06-24",
+      "owner": "stability-baseline-restore"
+    },
+    {
+      "path": "src/__tests__/builtin-agent-presets.test.ts",
+      "reason": "baseline: tests builtin agent preset resolution as a pure function; transitive imports reach sqlite-capable modules but no test path opens better-sqlite3 (verified passing host-Node, 0 skip).",
+      "since": "2026-06-24",
+      "owner": "stability-baseline-restore"
+    },
+    {
+      "path": "src/__tests__/stale-projection-finalizer.test.ts",
+      "reason": "baseline: tests projection finalizer behavior with in-memory fake stores; transitive imports reach sqlite-capable modules but no test path opens better-sqlite3 (verified passing host-Node, 0 skip).",
+      "since": "2026-06-24",
+      "owner": "stability-baseline-restore"
+    },
+    {
+      "path": "src/__tests__/tool-result-types.test.ts",
+      "reason": "baseline: tests tool-result envelope/type helpers as pure functions; transitive imports reach sqlite-capable modules but no test path opens better-sqlite3 (verified passing host-Node, 0 skip).",
+      "since": "2026-06-24",
+      "owner": "stability-baseline-restore"
     }
   ]
 }
