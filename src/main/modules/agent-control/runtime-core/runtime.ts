@@ -323,16 +323,6 @@ function summarizePendingTaskEvent(payload: TaskEventBridgePayload): string {
   return summary || `后台任务 ${payload.taskId} 已进入终态：${payload.status}`
 }
 
-/**
- * B step 3 — a narration continuation turn is advisory text only (no tools, no
- * browser, no collection per the narration contract), so it is a PROVEN-quick
- * run and may safely use a short main no-progress timeout instead of the long
- * default. A healthy narration streams within seconds; 3 min of total silence
- * means it is genuinely stuck. This is the one explicit proven-quick caller —
- * everything else keeps the long default (no false-kill of long tasks).
- */
-const NARRATION_NO_PROGRESS_TIMEOUT_MS = 3 * 60_000
-
 function buildPendingTaskNarrationPrompt(payload: TaskEventBridgePayload): string {
   const summary = summarizePendingTaskEvent(payload)
   return [
@@ -1209,9 +1199,6 @@ export class AgentControlRuntime extends EventEmitter {
       taskBudgetRuntime,
       undefined,
       continuationState,
-      undefined, // sessionIdOverride
-      undefined, // sourceMessageId
-      NARRATION_NO_PROGRESS_TIMEOUT_MS, // B step 3 — proven-quick narration turn
     )
 
     this.emitScopeRunEvent({

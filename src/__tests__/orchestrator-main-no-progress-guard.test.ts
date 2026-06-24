@@ -79,9 +79,9 @@ test('main no-progress guard refreshes on run progress before stopping', () => {
   assert.equal(timers.at(-1)?.delayMs, 500)
 })
 
-test('B3 step3: an explicit per-run timeout shortens the guard (proven-quick narration run)', () => {
+test('B3 step3: an explicit per-run timeout shortens the guard', () => {
   const { orchestrator, timers, stops, setNow } = createHarness()
-  // Global default is 1000; a proven-quick caller passes a shorter 200.
+  // Global default is 1000; a proven-quick caller may pass a shorter 200.
   ;(orchestrator as any).registerActiveRun('butler', 'scope-A', 'req-A', 200)
 
   assert.equal(timers[0]?.delayMs, 200, 'guard scheduled at the explicit per-run timeout, not the global default')
@@ -96,6 +96,17 @@ test('B3 step3: a non-positive / omitted per-run timeout falls back to the long 
   const { orchestrator, timers } = createHarness()
   ;(orchestrator as any).registerActiveRun('butler', 'scope-A', 'req-A', 0)
   assert.equal(timers[0]?.delayMs, 1000, '0 is not a valid shortening → global default')
+})
+
+test('B3 step3: a per-run timeout can only SHORTEN — a longer value is clamped to the global default', () => {
+  const { orchestrator, timers } = createHarness()
+  // A value LONGER than the 1000 global must NOT extend the guard.
+  ;(orchestrator as any).registerActiveRun('butler', 'scope-A', 'req-A', 5000)
+  assert.equal(timers[0]?.delayMs, 1000, 'longer per-run value clamped to global default (only-shorten)')
+
+  // Non-finite is rejected → global default.
+  ;(orchestrator as any).registerActiveRun('butler', 'scope-B', 'req-B', Number.POSITIVE_INFINITY)
+  assert.equal(timers.at(-1)?.delayMs, 1000, 'non-finite value rejected → global default')
 })
 
 test('B3 step3: a quick run does NOT shorten a coexisting long run (no false-kill of long tasks)', () => {

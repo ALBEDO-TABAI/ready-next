@@ -277,10 +277,12 @@ export class ReadyAgentOrchestrator extends EventEmitter {
     const taskKey = this.toTaskKey(agent, sessionId)
     this.clearActiveRunIfMatches(taskKey)
     this.activeRunIds.set(taskKey, requestId)
-    // Default long; a positive explicit value (only from a proven-quick caller)
-    // may shorten. Non-positive / undefined falls back to the global timeout.
-    const resolvedTimeoutMs = typeof noProgressTimeoutMs === 'number' && noProgressTimeoutMs > 0
-      ? noProgressTimeoutMs
+    // Default long; an explicit value may only SHORTEN (proven-quick callers).
+    // A finite positive value is clamped to ≤ the global default so a per-run
+    // value can never EXTEND the guard; anything else falls back to the global.
+    const resolvedTimeoutMs = typeof noProgressTimeoutMs === 'number'
+      && Number.isFinite(noProgressTimeoutMs) && noProgressTimeoutMs > 0
+      ? Math.min(noProgressTimeoutMs, this.mainRunNoProgressTimeoutMs)
       : this.mainRunNoProgressTimeoutMs
     this.activeRunLiveness.set(taskKey, {
       agent,
