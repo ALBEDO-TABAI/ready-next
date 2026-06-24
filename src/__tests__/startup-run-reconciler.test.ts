@@ -342,12 +342,14 @@ test('startup run reconciler closes stale run, projection, browser, and skill ro
     assert.equal(pausedBrowser.status, 'paused')
     assert.equal(pausedBrowser.finished_at, null)
 
-    const cancelledBrowser = db.prepare('SELECT status, error, result_json, finished_at FROM browser_tasks WHERE id = ?')
+    // B3 — a running browser task WITHOUT a usable checkpoint is now PAUSED with
+    // a rerun marker (resumable from the original request), not silently cancelled.
+    const rerunBrowser = db.prepare('SELECT status, error, result_json, finished_at FROM browser_tasks WHERE id = ?')
       .get<{ status: string; error: string | null; result_json: string | null; finished_at: string | null }>('browser-without-checkpoint')!
-    assert.equal(cancelledBrowser.status, 'cancelled')
-    assert.equal(cancelledBrowser.error, 'restart')
-    assert.equal(JSON.parse(cancelledBrowser.result_json || '{}').cancelReason, 'restart')
-    assert.ok(cancelledBrowser.finished_at)
+    assert.equal(rerunBrowser.status, 'paused', 'no-checkpoint browser task pauses, not cancels')
+    assert.equal(rerunBrowser.error, 'main_process_restarted')
+    assert.equal(JSON.parse(rerunBrowser.result_json || '{}').resumeKind, 'rerun_from_request')
+    assert.equal(rerunBrowser.finished_at, null, 'a resumable pause is not finished')
 
     const skillWithHandle = db.prepare('SELECT status, interaction_state, failure_kind FROM skill_task_runs WHERE id = ?')
       .get<{ status: string; interaction_state: string; failure_kind: string | null }>('skill-with-handle')!

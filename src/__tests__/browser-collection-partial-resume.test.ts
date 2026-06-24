@@ -120,7 +120,7 @@ test('browser collection startup keeps saved note_collect cursor resumable', asy
   assert.match(String(updates[0].extras.error || ''), /resume from the saved cursor/)
 })
 
-test('browser collection startup cancels stale note_collect without cursor', async () => {
+test('B3: startup pauses a cursor-less note_collect as a rerun (not a silent cancel)', async () => {
   const task = makeTask({
     taskId: 'browser-task-note-empty',
     checkpoint: null,
@@ -139,9 +139,45 @@ test('browser collection startup cancels stale note_collect without cursor', asy
 
   await runner.resumePendingTasks()
 
+  // B3 — no cursor → paused + rerun marker, NOT cancelled (the request survives).
   assert.equal(updates.length, 1)
-  assert.equal(updates[0].extras.status, 'cancelled')
-  assert.match(String(updates[0].extras.error || ''), /missing saved cursor/)
+  assert.equal(updates[0].extras.status, 'paused')
+  assert.equal(updates[0].extras.finishedAt, null)
+  assert.equal((updates[0].extras.result as { resumeKind?: string })?.resumeKind, 'rerun_from_request')
+})
+
+test('B3: a paused cursor-less task with the rerun marker is resumable (reruns from the original payload)', async () => {
+  const scheduled: Array<{ taskId: string; kind: string }> = []
+  const task: FakeStoredTask = {
+    taskId: 'browser-task-rerun',
+    kind: 'note_collect',
+    status: 'paused',
+    progress: { total: 5, completed: 0, failed: 0, currentLabel: null },
+    checkpoint: null, // no cursor → only the rerun marker makes it resumable
+    result: { resumeKind: 'rerun_from_request', restartReason: 'restart' },
+    error: 'note_collect paused on restart; resumable as a rerun from the original request',
+    payload: {
+      scopeId: 'scope-rerun',
+      agentTabId: 'tab-rerun',
+      plan: {
+        targetProfileUrl: 'https://www.xiaohongshu.com/user/profile/rerun',
+        notes: [{ url: 'https://www.xiaohongshu.com/note/r1', title: 'n1' }],
+        outputRootDir: '/tmp/ready-rerun',
+      },
+    },
+  }
+  const persistence = fakePersistenceWithTask(task)
+  const runner = new BrowserContentTaskRunner({} as never, persistence as unknown as BrowserTaskPersistenceService)
+  // Observe that resume re-dispatches the task (rerun from payload) rather than refusing.
+  ;(runner as unknown as { scheduleTask: (taskId: string, kind: string) => void }).scheduleTask = (taskId, kind) => {
+    scheduled.push({ taskId, kind })
+    persistence.updateProgress(taskId, {}, { status: 'running' })
+  }
+
+  const resumed = await runner.resumeTask('browser-task-rerun')
+
+  assert.deepEqual(scheduled, [{ taskId: 'browser-task-rerun', kind: 'note_collect' }], 'rerun marker → re-dispatched from payload')
+  assert.equal(resumed?.status, 'running')
 })
 
 test('browser_resume_task with a failed task and failure ledger retries only failed collection items', async () => {

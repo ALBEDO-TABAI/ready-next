@@ -760,18 +760,21 @@ describe('note_collect → chat task projection (scope-bound)', () => {
     assert.equal(upserts[1].state, 'failed')
   })
 
-  it('cancels stale note_collect on restart instead of resuming (lease safety)', async () => {
+  it('B3: pauses a stale cursor-less note_collect as rerunnable on restart, without auto-resuming (lease safety)', async () => {
     const { svc: persistence, tasks } = fakePersistence()
     const { svc: lease, released } = fakeLease()
     const runner = new BrowserContentTaskRunner({} as never, persistence as never, lease as never, okFacadeFactory())
     // Seed a pending note_collect as if left over from a previous session whose
-    // agent tab is now gone. resumePendingTasks must NOT resume it (which would
-    // re-acquire a lease against a dead tab and block new collections).
+    // agent tab is now gone. resumePendingTasks must NOT auto-resume it (which
+    // would re-acquire a lease against a dead tab and block new collections) —
+    // B3 pauses it with a rerun marker so the user can explicitly rerun later in
+    // a live session; the lease-safety property (no lease on startup) is kept.
     const handle = persistence.createTask({ kind: 'note_collect', payload: scopedPayload(3) })
     await runner.resumePendingTasks()
     const task = tasks.get(handle.taskId)!
-    assert.equal(task.status, 'cancelled', 'stale note_collect is cancelled, not resumed')
-    assert.equal(released.length, 0, 'no lease acquired/held for the stale task')
+    assert.equal(task.status, 'paused', 'stale note_collect pauses (rerunnable), not silently cancelled')
+    assert.equal((task.result as { resumeKind?: string })?.resumeKind, 'rerun_from_request', 'carries the rerun marker')
+    assert.equal(released.length, 0, 'no lease acquired/held on startup (not auto-resumed)')
   })
 
   it('projects failed (not stuck running) when the collection loop throws (Codex #A)', async () => {

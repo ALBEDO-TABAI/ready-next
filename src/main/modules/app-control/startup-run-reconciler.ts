@@ -76,9 +76,12 @@ function validBrowserCheckpoint(raw: string | null): boolean {
     || checkpoint.lastSeenFingerprint !== undefined
 }
 
-function resultWithCancelReason(raw: string | null): string {
+// B3 — a running browser task with no usable checkpoint is paused (not silently
+// cancelled) with a rerun marker so it stays resumable from the original request
+// (content-task-runner.canResumeTask honors `resumeKind:'rerun_from_request'`).
+function resultWithRerunMarker(raw: string | null): string {
   const result = parseJsonRecord(raw) || {}
-  return JSON.stringify({ ...result, cancelReason: 'restart' })
+  return JSON.stringify({ ...result, resumeKind: 'rerun_from_request', restartReason: 'restart' })
 }
 
 function reconcileRunMeta(db: StartupRunReconcilerDb, nowMs: number): number {
@@ -240,15 +243,18 @@ function reconcileBrowserTasks(db: StartupRunReconcilerDb, nowIso: string): numb
       finished_at = NULL
     WHERE id = ?
   `)
-  const cancel = db.prepare(`
+  // B3 — no usable checkpoint: pause + rerun marker instead of a silent cancel,
+  // so the task stays resumable as a rerun from the original request (its
+  // payload_json survives the restart).
+  const pauseRerun = db.prepare(`
     UPDATE browser_tasks
     SET
-      status = 'cancelled',
+      status = 'paused',
       current_label = NULL,
-      error = 'restart',
+      error = 'main_process_restarted',
       result_json = ?,
       updated_at = ?,
-      finished_at = ?
+      finished_at = NULL
     WHERE id = ?
   `)
 
@@ -258,7 +264,7 @@ function reconcileBrowserTasks(db: StartupRunReconcilerDb, nowIso: string): numb
       count += changed(pause.run('main_process_restarted', nowIso, row.id))
       continue
     }
-    count += changed(cancel.run(resultWithCancelReason(row.result_json), nowIso, nowIso, row.id))
+    count += changed(pauseRerun.run(resultWithRerunMarker(row.result_json), nowIso, row.id))
   }
   return count
 }

@@ -132,6 +132,17 @@ function hasBrowserTaskCheckpoint(task: BrowserCapabilityTaskHandle, payload: Re
   return false
 }
 
+/** B3 — a task paused on restart WITHOUT a usable checkpoint carries this marker
+ *  (in its result) so it is resumable as a RERUN from the original request
+ *  (payload), not a cursor-continue. Replaces the old silent cancel. */
+const RERUN_FROM_REQUEST_RESUME_KIND = 'rerun_from_request'
+
+function hasRerunFromRequestMarker(task: BrowserCapabilityTaskHandle): boolean {
+  const result = task.result
+  return Boolean(result && typeof result === 'object'
+    && (result as { resumeKind?: unknown }).resumeKind === RERUN_FROM_REQUEST_RESUME_KIND)
+}
+
 function noteCollectSummary(total: number, completed: number, failed: number, current: string | null, state: BrowserTaskProjectionInput['state']): string {
   if (state === 'completed') return `采集完成：成功 ${completed}${failed > 0 ? ` · 失败 ${failed}` : ''}，共 ${total} 篇`
   if (state === 'paused') return `采集已暂停：成功 ${completed}/${total}${failed > 0 ? ` · 失败 ${failed}` : ''}，等待验证或继续`
@@ -858,7 +869,9 @@ export class BrowserContentTaskRunner {
     if (task.status === 'completed' || task.status === 'cancelled' || task.status === 'running' || task.status === 'queued') {
       return false
     }
-    return hasBrowserTaskCheckpoint(task, payload)
+    // B3 — a checkpoint-less task paused on restart is resumable as a rerun from
+    // the original request; resumeTask→scheduleTask runs it fresh from payload.
+    return hasBrowserTaskCheckpoint(task, payload) || hasRerunFromRequestMarker(task)
   }
 
   async resumeTask(taskId: string): Promise<BrowserCapabilityTaskHandle | null> {
@@ -948,12 +961,18 @@ export class BrowserContentTaskRunner {
       })
       publishBrowserTaskEvent(task.taskId, 'paused')
     } else {
-      this.cancelledTasks.add(task.taskId)
+      // B3 — no saved cursor: do NOT silently cancel (which lost the request).
+      // Pause with a rerun-from-request marker so it stays resumable from the
+      // original payload (canResumeTask honors the marker). Preserve any prior
+      // result fields so a real failure isn't masked.
+      const priorResult = task.result && typeof task.result === 'object' ? task.result as Record<string, unknown> : {}
       this.persistenceService.updateProgress(task.taskId, { currentLabel: null }, {
-        status: 'cancelled',
-        error: 'note_collect cancelled on startup: missing saved cursor',
-        finishedAt: new Date().toISOString(),
+        status: 'paused',
+        error: 'note_collect paused on restart; resumable as a rerun from the original request',
+        result: { ...priorResult, resumeKind: RERUN_FROM_REQUEST_RESUME_KIND, restartReason: 'restart' },
+        finishedAt: null,
       })
+      publishBrowserTaskEvent(task.taskId, 'paused')
     }
     return true
   }
