@@ -294,6 +294,68 @@ test('browser_resume_task with a failed task and failure ledger retries only fai
   assert.equal(task.progress.failed, 0)
 })
 
+test('B3: resuming a LOOSE checkpoint (fails strict check) reruns FRESH — old progress is not reused', async () => {
+  const urls = Array.from({ length: 5 }, (_, index) => `https://www.xiaohongshu.com/note/loose-${index}`)
+  const navigated: string[] = []
+  const task: FakeStoredTask = {
+    taskId: 'browser-task-loose-consume',
+    kind: 'note_collect',
+    status: 'paused',
+    progress: { total: 5, completed: 4, failed: 1, currentLabel: null },
+    payload: {
+      agentTabId: 'tab-loose-consume',
+      surface: 'agent-view',
+      plan: {
+        targetProfileUrl: 'https://www.xiaohongshu.com/user/profile/loose',
+        notes: urls.map((url, index) => ({ url, title: `笔记${index + 1}` })),
+        outputRootDir: '/tmp/ready-browser-loose-consume',
+        stopConditions: { maxConsecutiveFailures: 10 },
+      },
+    },
+    // LOOSE checkpoint: stage + partialResults present, but cursor is EMPTY →
+    // fails hasBrowserTaskCheckpoint (which requires a non-empty cursor). The OLD
+    // ad-hoc consumption check (stage + partialResults only) would have wrongly
+    // reused this as resume progress; the unified strict gate must ignore it.
+    checkpoint: {
+      taskId: 'browser-task-loose-consume',
+      stage: 'note_collect_round',
+      cursor: '',
+      partialResults: {
+        cursor: 4,
+        collected: urls.slice(0, 4),
+        failed: [{ url: urls[4], reason: 'navigate:navigation_failed', attempts: 1, retryable: true }],
+        outputs: [],
+        consecutiveFailures: 0,
+        startedAt: 1780000000000,
+      },
+    },
+    result: { resumeKind: 'rerun_from_request', restartReason: 'restart' },
+    error: 'note_collect paused on restart; resumable',
+  }
+  const persistence = fakePersistenceWithTask(task)
+  const factory: CollectorFacadeFactory = () => ({
+    facade: {
+      run: async (tool, args = {}) => {
+        if (tool === 'browser_navigate') { navigated.push(String(args.url || '')); return JSON.stringify({ ok: true }) }
+        if (tool === 'browser_read_page') return '详情页'
+        if (tool === 'browser_collect_images') return JSON.stringify({ count: 1, images: [{ url: 'https://img.xhscdn.com/loose.jpg' }] })
+        if (tool === 'browser_download_urls') return JSON.stringify({ success: 1 })
+        return JSON.stringify({ ok: true })
+      },
+    },
+    isControlFrozen: () => false,
+  })
+  const runner = new BrowserContentTaskRunner({} as never, persistence as never, fakeLease() as never, factory)
+
+  await runner.resumeTask(task.taskId)
+  const run = (runner as unknown as { activeRuns: Map<string, Promise<void>> }).activeRuns.get(task.taskId)
+  if (run) await run
+
+  // FRESH rerun: every note is navigated (not just the previously-failed one),
+  // proving the loose checkpoint's stale "collected" progress was NOT reused.
+  assert.deepEqual(navigated, urls, 'loose checkpoint ignored → all notes re-collected from scratch')
+})
+
 test('browser_resume_task refuses failed note_collect without checkpoint proof', async () => {
   const task: FakeStoredTask = {
     taskId: 'browser-task-failed-empty',

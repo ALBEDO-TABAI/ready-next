@@ -887,10 +887,11 @@ export class BrowserContentTaskRunner {
 
   private prepareFailureLedgerResume(task: BrowserCapabilityTaskHandle, payload: Record<string, unknown>): void {
     if (task.kind !== 'note_collect' && task.kind !== 'card_loop') return
+    // Single source of truth — only a STRICT-valid checkpoint may seed a resume
+    // (rerun_from_request only authorizes re-scheduling, not reusing old progress).
+    if (!hasBrowserTaskCheckpoint(task, payload)) return
     const checkpoint = task.checkpoint
-    if (checkpoint?.stage !== 'note_collect_round' || !checkpoint.partialResults) return
-    const parsed = parseCollectionPlan(payload.plan)
-    if (!parsed.ok) return
+    if (!checkpoint?.partialResults) return
     const state = normalizeCollectionLoopState(checkpoint.partialResults as CollectionLoopState)
     const retryFailures = retryableCollectionFailures(state)
     if (retryFailures.length === 0) return
@@ -1180,7 +1181,11 @@ export class BrowserContentTaskRunner {
     // stopped (counterplan §5.5 "恢复后从 checkpoint 继续"), not from scratch.
     const existing = this.persistenceService.getTask(taskId)
     const checkpoint = existing?.checkpoint
-    if (checkpoint?.stage === 'visible_collect_round' && Array.isArray(checkpoint.partialResults)) {
+    // Only consume the checkpoint if it passes the SAME strict resumability check
+    // as canResumeTask — a loose/half checkpoint is ignored → clean fresh run
+    // (the rerun_from_request marker authorizes re-scheduling, not reusing it).
+    if (existing && hasBrowserTaskCheckpoint(existing, payload)
+      && checkpoint?.stage === 'visible_collect_round' && Array.isArray(checkpoint.partialResults)) {
       const prior = checkpoint.partialResults as BrowserStructuredItem[]
       for (const item of prior) {
         deduper.addBatch([{ link: item.link, text: item.title || item.summary, containerPath: item.sourceUrl }])
@@ -1432,10 +1437,14 @@ export class BrowserContentTaskRunner {
         await facade.run('browser_wait', { ms: isHighControl ? 1500 : 500 }).catch(() => '')
       }
 
-      // Resume from the last per-note checkpoint if one exists.
+      // Resume from the last per-note checkpoint ONLY if it passes the same
+      // strict resumability check as canResumeTask; a loose/half checkpoint is
+      // ignored → clean rerun (rerun_from_request authorizes re-scheduling, not
+      // reusing stale progress).
       const existing = this.persistenceService.getTask(taskId)
       const checkpoint = existing?.checkpoint
-      const initialState = checkpoint?.stage === 'note_collect_round' && checkpoint.partialResults
+      const initialState = existing && hasBrowserTaskCheckpoint(existing, payload)
+        && checkpoint?.stage === 'note_collect_round' && checkpoint.partialResults
         ? (checkpoint.partialResults as CollectionLoopState)
         : undefined
 
