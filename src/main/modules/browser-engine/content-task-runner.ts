@@ -947,33 +947,22 @@ export class BrowserContentTaskRunner {
 
   private reconcileStartupNoteCollectionTask(task: BrowserCapabilityTaskHandle): boolean {
     if (task.kind !== 'note_collect' && task.kind !== 'card_loop') return false
-    const checkpoint = task.checkpoint
-    const hasSavedCursor = checkpoint?.stage === 'note_collect_round'
-      && typeof checkpoint.cursor === 'string'
-      && checkpoint.cursor.trim().length > 0
-      && checkpoint.partialResults !== undefined
-      && checkpoint.partialResults !== null
-    if (hasSavedCursor) {
-      this.persistenceService.updateProgress(task.taskId, { currentLabel: null }, {
-        status: 'paused',
-        error: 'note_collect paused on startup; resume from the saved cursor explicitly',
-        finishedAt: null,
-      })
-      publishBrowserTaskEvent(task.taskId, 'paused')
-    } else {
-      // B3 — no saved cursor: do NOT silently cancel (which lost the request).
-      // Pause with a rerun-from-request marker so it stays resumable from the
-      // original payload (canResumeTask honors the marker). Preserve any prior
-      // result fields so a real failure isn't masked.
-      const priorResult = task.result && typeof task.result === 'object' ? task.result as Record<string, unknown> : {}
-      this.persistenceService.updateProgress(task.taskId, { currentLabel: null }, {
-        status: 'paused',
-        error: 'note_collect paused on restart; resumable as a rerun from the original request',
-        result: { ...priorResult, resumeKind: RERUN_FROM_REQUEST_RESUME_KIND, restartReason: 'restart' },
-        finishedAt: null,
-      })
-      publishBrowserTaskEvent(task.taskId, 'paused')
-    }
+    // B3 — pause every restart-leftover note_collect/card_loop WITH a rerun
+    // marker (never silent cancel). The marker is a "resumable floor" so
+    // canResumeTask is guaranteed true; we do NOT make a separate cursor judgment
+    // here (it diverged from the runner's stricter resume check — which also
+    // requires a valid plan — and produced "paused-but-un-resumable" tasks).
+    // checkpoint_json is preserved untouched, so the single strict check at
+    // resume time (hasBrowserTaskCheckpoint) still cursor-continues a valid
+    // checkpoint and falls back to a clean rerun otherwise.
+    const priorResult = task.result && typeof task.result === 'object' ? task.result as Record<string, unknown> : {}
+    this.persistenceService.updateProgress(task.taskId, { currentLabel: null }, {
+      status: 'paused',
+      error: 'note_collect paused on restart; resumable (cursor-continue if a valid checkpoint exists, else rerun from the original request)',
+      result: { ...priorResult, resumeKind: RERUN_FROM_REQUEST_RESUME_KIND, restartReason: 'restart' },
+      finishedAt: null,
+    })
+    publishBrowserTaskEvent(task.taskId, 'paused')
     return true
   }
 

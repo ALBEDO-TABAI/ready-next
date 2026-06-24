@@ -66,16 +66,6 @@ function parseJsonRecord(raw: string | null | undefined): Record<string, unknown
   }
 }
 
-function validBrowserCheckpoint(raw: string | null): boolean {
-  const checkpoint = parseJsonRecord(raw)
-  if (!checkpoint) return false
-  const stage = typeof checkpoint.stage === 'string' ? checkpoint.stage.trim() : ''
-  if (!stage) return false
-  return checkpoint.partialResults !== undefined
-    || checkpoint.cursor !== undefined
-    || checkpoint.lastSeenFingerprint !== undefined
-}
-
 // B3 — a running browser task with no usable checkpoint is paused (not silently
 // cancelled) with a rerun marker so it stays resumable from the original request
 // (content-task-runner.canResumeTask honors `resumeKind:'rerun_from_request'`).
@@ -233,19 +223,14 @@ function reconcileBrowserTasks(db: StartupRunReconcilerDb, nowIso: string): numb
     ORDER BY updated_at ASC
   `).all<BrowserTaskStartupRow>()
 
-  const pause = db.prepare(`
-    UPDATE browser_tasks
-    SET
-      status = 'paused',
-      current_label = NULL,
-      error = ?,
-      updated_at = ?,
-      finished_at = NULL
-    WHERE id = ?
-  `)
-  // B3 — no usable checkpoint: pause + rerun marker instead of a silent cancel,
-  // so the task stays resumable as a rerun from the original request (its
-  // payload_json survives the restart).
+  // B3 — every running browser task pauses (never silent cancel) WITH a rerun
+  // marker. The marker is a "resumable floor": canResumeTask is guaranteed true.
+  // We deliberately do NOT make a separate (looser) checkpoint judgment here —
+  // that diverged from the runner's stricter resume check and produced
+  // "paused-but-un-resumable" tasks. The single strict check at resume time
+  // (hasBrowserTaskCheckpoint) decides cursor-continue vs rerun-from-request;
+  // checkpoint_json is preserved untouched so a valid checkpoint still
+  // cursor-continues, while a loose/half checkpoint falls back to a clean rerun.
   const pauseRerun = db.prepare(`
     UPDATE browser_tasks
     SET
@@ -260,10 +245,6 @@ function reconcileBrowserTasks(db: StartupRunReconcilerDb, nowIso: string): numb
 
   let count = 0
   for (const row of rows) {
-    if (validBrowserCheckpoint(row.checkpoint_json)) {
-      count += changed(pause.run('main_process_restarted', nowIso, row.id))
-      continue
-    }
     count += changed(pauseRerun.run(resultWithRerunMarker(row.result_json), nowIso, row.id))
   }
   return count

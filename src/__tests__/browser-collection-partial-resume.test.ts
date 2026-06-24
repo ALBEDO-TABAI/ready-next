@@ -117,7 +117,11 @@ test('browser collection startup keeps saved note_collect cursor resumable', asy
   assert.equal(updates[0].taskId, 'browser-task-note-partial')
   assert.equal(updates[0].extras.status, 'paused')
   assert.equal(updates[0].extras.finishedAt, null)
-  assert.match(String(updates[0].extras.error || ''), /resume from the saved cursor/)
+  // B3 — a cursor task now also carries the rerun marker (resumable floor); the
+  // checkpoint is left untouched so the resume-time strict check still
+  // cursor-continues it. The marker just guarantees canResumeTask is true.
+  assert.equal((updates[0].extras.result as { resumeKind?: string })?.resumeKind, 'rerun_from_request')
+  assert.equal('checkpoint' in updates[0].extras, false, 'checkpoint_json is preserved untouched (not overwritten)')
 })
 
 test('B3: startup pauses a cursor-less note_collect as a rerun (not a silent cancel)', async () => {
@@ -177,6 +181,42 @@ test('B3: a paused cursor-less task with the rerun marker is resumable (reruns f
   const resumed = await runner.resumeTask('browser-task-rerun')
 
   assert.deepEqual(scheduled, [{ taskId: 'browser-task-rerun', kind: 'note_collect' }], 'rerun marker → re-dispatched from payload')
+  assert.equal(resumed?.status, 'running')
+})
+
+test('B3: a task the startup layer would call "has checkpoint" but the resume layer rejects still reruns (no paused-but-stuck)', async () => {
+  // Loose checkpoint (stage + cursor + partialResults) that the OLD startup rule
+  // accepted as "has checkpoint" — but the runner's strict hasBrowserTaskCheckpoint
+  // ALSO requires a valid plan, which this payload lacks → strict resume rejects.
+  // The unified fix always writes the rerun marker on pause, so it stays resumable.
+  const scheduled: Array<{ taskId: string; kind: string }> = []
+  const task: FakeStoredTask = {
+    taskId: 'browser-task-loose-ckpt',
+    kind: 'note_collect',
+    status: 'paused',
+    progress: { total: 5, completed: 2, failed: 0, currentLabel: null },
+    checkpoint: {
+      taskId: 'browser-task-loose-ckpt',
+      stage: 'note_collect_round',
+      cursor: '2',
+      partialResults: { cursor: 2, collected: [], failed: [], outputs: [], consecutiveFailures: 0, startedAt: 1 },
+    },
+    // marker present because B3 now writes it on EVERY restart pause
+    result: { resumeKind: 'rerun_from_request', restartReason: 'restart' },
+    error: 'note_collect paused on restart; resumable',
+    payload: { scopeId: 'scope-loose', agentTabId: 'tab-loose', plan: { notes: 'not-a-valid-plan' } },
+  }
+  const persistence = fakePersistenceWithTask(task)
+  const runner = new BrowserContentTaskRunner({} as never, persistence as unknown as BrowserTaskPersistenceService)
+  ;(runner as unknown as { scheduleTask: (taskId: string, kind: string) => void }).scheduleTask = (taskId, kind) => {
+    scheduled.push({ taskId, kind })
+    persistence.updateProgress(taskId, {}, { status: 'running' })
+  }
+
+  const resumed = await runner.resumeTask('browser-task-loose-ckpt')
+
+  assert.deepEqual(scheduled, [{ taskId: 'browser-task-loose-ckpt', kind: 'note_collect' }],
+    'strict-reject + rerun marker → still re-dispatched (not paused-but-stuck)')
   assert.equal(resumed?.status, 'running')
 })
 
