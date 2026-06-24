@@ -249,6 +249,14 @@ const ACTIVE_RUN_INFRASTRUCTURE_TIMEOUT_MS = 5 * 60_000
 // breach). A 5s ack lets a slow-but-alive main reliably answer so the renderer
 // only declares lost-track when main is genuinely unreachable.
 const INFRASTRUCTURE_TIMEOUT_REPORT_ACK_MS = 5_000
+// B step 2 (Option A) — when main is unreachable (report returns null after the
+// 5s ack) the renderer must NOT locally claim recovery. It re-arms a bounded
+// retry instead; a terminal event from main cancels it via clearInfrastructure-
+// Watchdog. Only after retries are exhausted does it surface an HONEST
+// run-state-unknown notice (never "已自动恢复"). ~3 × 8s ≈ a bounded wait, far
+// better than a 15-min lock and never a false "stopped" claim.
+const INFRASTRUCTURE_TIMEOUT_REPORT_RETRY_DELAY_MS = 2_000
+const INFRASTRUCTURE_TIMEOUT_REPORT_MAX_RETRIES = 1
 
 interface InfrastructureWatchdog {
   scopeId: string
@@ -256,6 +264,8 @@ interface InfrastructureWatchdog {
   timer: ReturnType<typeof setTimeout>
   startedAt: number
   timeoutMs: number
+  /** B step 2 — main-unreachable report retries already attempted. */
+  reportRetries?: number
 }
 
 export function createAgentRuntimeDriver(store: AgentStoreLike) {
@@ -324,6 +334,7 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
     const key = watchdogKey(scopeId, requestId)
     const watchdog = infrastructureWatchdogs.get(key)
     if (!watchdog) return
+    const reportRetries = watchdog.reportRetries ?? 0
     infrastructureWatchdogs.delete(key)
     // Sanity: if the session is no longer streaming this request, nothing
     // to recover. Could happen if a terminal event arrived in the same
@@ -333,8 +344,31 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
     if (runState && runState.requestId !== requestId) return
 
     const mainState = await reportInfrastructureTimeoutToMain(scopeId, requestId, watchdog.timeoutMs)
-    const shouldSurfaceLostTrack = mainState === null || mainState === 'not_found'
 
+    // B step 2 (Option A) — main UNREACHABLE (report returned null). The renderer
+    // must NOT locally claim recovery. Re-arm a bounded retry and keep the run
+    // locked: we don't know main's state, and a terminal event from main (which
+    // clears this watchdog) is the authoritative resolution we wait for. Only
+    // after retries are exhausted do we surface an HONEST unknown-state notice.
+    if (mainState === null && reportRetries < INFRASTRUCTURE_TIMEOUT_REPORT_MAX_RETRIES) {
+      const liveAfterReport = store.getState().scopeRunStates?.[scopeId]
+      if (liveAfterReport && liveAfterReport.requestId !== requestId) return
+      const timer = setTimeout(() => { void fireInfrastructureTimeout(scopeId, requestId) }, INFRASTRUCTURE_TIMEOUT_REPORT_RETRY_DELAY_MS)
+      const unref = (timer as { unref?: unknown }).unref
+      if (typeof unref === 'function') unref.call(timer)
+      infrastructureWatchdogs.set(key, { ...watchdog, timer, reportRetries: reportRetries + 1 })
+      emitRendererAgentMetric('renderer_infrastructure_timeout_report_retry', {
+        scopeId, requestId, attempt: reportRetries + 1, elapsedMs: watchdog.timeoutMs,
+      })
+      return
+    }
+
+    // Resolve. `null` here = retries exhausted, main genuinely unreachable.
+    // `not_found`/`cancel_requested`/`stale` = main answered (run is gone or it
+    // is handling the stop) → quiet unlock, no alarming message. NEVER claim the
+    // run was "已自动恢复" — that false claim invited duplicate resends while a
+    // live main run continued.
+    const mainUnreachable = mainState === null
     store.setState((current: { currentScopeId?: string | null; sessions?: Record<string, unknown>; currentAgent?: string }) => {
       const sessionId = sessionKeyForScopeId(current, scopeId)
       const currentSlice = normalizeSessionSlice(current.sessions?.[sessionId])
@@ -361,9 +395,9 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
                 scopeId,
                 requestId,
                 phase: 'error',
-                terminalReason: shouldSurfaceLostTrack ? 'infra_error' : 'main_no_progress_timeout',
-                error: shouldSurfaceLostTrack
-                  ? 'Ready 跟丢了这次请求，已自动恢复，可重新发送。'
+                terminalReason: mainUnreachable ? 'infra_error' : 'main_no_progress_timeout',
+                error: mainUnreachable
+                  ? 'Ready 暂时联系不上后台，已解锁输入；这次请求的实际状态未知，请先确认结果，不要重复发送同一任务。'
                   : '这次请求超时，Ready 已请求停止当前运行，可重新发送。',
                 updatedAt: new Date().toISOString(),
               },
@@ -374,11 +408,14 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
       }
     })
 
-    if (shouldSurfaceLostTrack && state.currentScopeId === scopeId && typeof state.addMessage === 'function') {
+    // Only the genuinely-unreachable case surfaces a message, and it states
+    // honest uncertainty (not a false recovery). When main answered, the run is
+    // being closed out on main authority — no renderer-side claim needed.
+    if (mainUnreachable && state.currentScopeId === scopeId && typeof state.addMessage === 'function') {
       state.addMessage({
         id: `infra-timeout-${Date.now()}`,
         agent: state.currentAgent || 'butler',
-        content: 'Ready 跟丢了这次请求，已自动恢复，可重新发送。',
+        content: 'Ready 暂时联系不上后台，已解锁输入；这次请求的实际状态未知，请先确认结果，不要重复发送同一任务。',
         type: 'system',
         timestamp: new Date(),
       })
@@ -389,6 +426,7 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
       requestId,
       elapsedMs: watchdog.timeoutMs,
       mainState,
+      reportRetries,
     })
   }
 

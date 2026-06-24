@@ -398,9 +398,9 @@ test('X2.6 — infrastructure_timeout fires after timeout with no terminal event
 
   driverApi.armInfrastructureWatchdog('scope-A', 'req-A', { timeoutMs: 10 })
 
-  // Wait the timeout window (+ a little headroom for the timer callback
-  // and the React-style setState flush).
-  await new Promise((resolve) => setTimeout(resolve, 50))
+  // B step 2: an unreachable main (report returns null) is RETRIED once before
+  // the renderer gives up; wait past the retry window (~2s) + headroom.
+  await new Promise((resolve) => setTimeout(resolve, 2300))
 
   const state = useAgent.getState()
   const slice = getSessionSlice(state, 'session-A')
@@ -409,19 +409,21 @@ test('X2.6 — infrastructure_timeout fires after timeout with no terminal event
   assert.equal(slice.foregroundBusy, false, 'infrastructure_timeout clears foregroundBusy')
   assert.equal(slice.streamingRequestId, null, 'infrastructure_timeout clears streamingRequestId (Stop button hidden)')
   assert.equal(slice.scopeRunStates['scope-A']?.phase, 'error', 'infrastructure_timeout marks the active run terminal')
-  assert.equal(slice.scopeRunStates['scope-A']?.terminalReason, 'infra_error', 'infrastructure_timeout releases active-run aliases')
-  assert.deepEqual(
-    infrastructureTimeoutReports,
-    [{ scopeId: 'scope-A', requestId: 'req-A', elapsedMs: 10 }],
-    'infrastructure_timeout reports the stuck request to main with request-id authority',
-  )
+  assert.equal(slice.scopeRunStates['scope-A']?.terminalReason, 'infra_error', 'unreachable main → infra_error')
+  // reported TWICE (initial + one retry) before declaring main unreachable
+  assert.equal(infrastructureTimeoutReports.length, 2, 'reports the stuck request, then retries once')
+  assert.deepEqual(infrastructureTimeoutReports[0], { scopeId: 'scope-A', requestId: 'req-A', elapsedMs: 10 })
   assert.equal(state.composerLocked, false, 'active mirror also unlocks after infrastructure_timeout')
   assert.equal(state.foregroundBusy, false, 'active mirror foregroundBusy is not resurrected by a stale planning run')
 
-  // A user-visible "lost track" system message lands in the active scope.
-  const lostTrackMsg = state.messages.find((m: { content: string }) =>
-    typeof m.content === 'string' && m.content.includes('Ready 跟丢了'))
-  assert.ok(lostTrackMsg, 'a "Ready 跟丢了" system message is appended for the active scope')
+  // B step 2: the surfaced message states HONEST uncertainty — it must NOT claim
+  // the request "已自动恢复" (that false claim invited duplicate resends).
+  const honestMsg = state.messages.find((m: { content: string }) =>
+    typeof m.content === 'string' && m.content.includes('联系不上后台'))
+  assert.ok(honestMsg, 'an honest unknown-state message is appended for the active scope')
+  const falseRecoveryMsg = state.messages.find((m: { content: string }) =>
+    typeof m.content === 'string' && m.content.includes('已自动恢复'))
+  assert.equal(falseRecoveryMsg, undefined, 'renderer must NOT claim local recovery')
 })
 
 test('X2.6 — main-acknowledged timeout does not surface a lost-track message', async () => {
@@ -464,23 +466,25 @@ test('X2.6 — hung main timeout report still releases the renderer lock', async
 
   driverApi.armInfrastructureWatchdog('scope-A', 'req-A', { timeoutMs: 10 })
 
-  // A hung report now resolves at the 5s ack window (bumped from 1s so a
-  // slow-but-alive main can answer); wait past it before asserting unlock.
-  await new Promise((resolve) => setTimeout(resolve, 5300))
+  // A hung report resolves at the 5s ack window; B step 2 then RETRIES once
+  // (another ~5s ack + 2s delay) before declaring main unreachable. Wait past
+  // both attempts (~12s) + headroom.
+  await new Promise((resolve) => setTimeout(resolve, 12500))
 
   const state = useAgent.getState()
   const slice = getSessionSlice(state, 'session-A')
-  assert.deepEqual(
-    infrastructureTimeoutReports,
-    [{ scopeId: 'scope-A', requestId: 'req-A', elapsedMs: 10 }],
-    'renderer still attempts to report the stuck request to main',
-  )
-  assert.equal(slice.composerLocked, false, 'hung main report cannot keep the composer locked')
+  assert.equal(infrastructureTimeoutReports.length, 2, 'renderer reports then retries once before giving up')
+  assert.deepEqual(infrastructureTimeoutReports[0], { scopeId: 'scope-A', requestId: 'req-A', elapsedMs: 10 })
+  assert.equal(slice.composerLocked, false, 'hung+unreachable main cannot keep the composer locked forever')
   assert.equal(slice.isStreaming, false, 'hung main report cannot keep the session streaming')
   assert.equal(slice.streamingRequestId, null, 'hung main report clears the in-flight request handle')
-  const lostTrackMsg = state.messages.find((m: { content: string }) =>
-    typeof m.content === 'string' && m.content.includes('Ready 跟丢了'))
-  assert.ok(lostTrackMsg, 'without a main ack, renderer still surfaces the local recovery message')
+  // honest uncertainty, never a false recovery claim
+  const honestMsg = state.messages.find((m: { content: string }) =>
+    typeof m.content === 'string' && m.content.includes('联系不上后台'))
+  assert.ok(honestMsg, 'an honest unknown-state message is surfaced when main stays unreachable')
+  const falseRecoveryMsg = state.messages.find((m: { content: string }) =>
+    typeof m.content === 'string' && m.content.includes('已自动恢复'))
+  assert.equal(falseRecoveryMsg, undefined, 'renderer must NOT claim local recovery')
 })
 
 test('B step 1 — a slow-but-alive main (answers after 1s, before 5s) reaches main, no false lost-track', async () => {
