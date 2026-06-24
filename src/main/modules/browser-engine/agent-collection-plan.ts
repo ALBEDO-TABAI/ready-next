@@ -96,12 +96,57 @@ export interface CollectionNoteOutput {
 }
 
 const NON_FATAL_FAILURE_REASONS = new Set(['skipped_video', 'unavailable'])
-const NON_RETRYABLE_FAILURE_REASON_PATTERN = /(?:permission|forbidden|unauthorized|deleted|unavailable|skipped_video|not_found|blocked_permanent|terminal_skip)/i
-const RETRYABLE_FAILURE_REASON_PATTERN = /(?:timeout|navigation|navigate|network|temporary|transient|risk_control|rate|throttle|lease_lost)/i
+
+/** Per-note failure escalation axis (E2): 'human' halts the whole collection
+ *  (a real access wall recurs on every note); 'none' is a per-note partial that
+ *  must NOT stop the rest of the task. */
+export type CollectionFailureEscalation = 'human' | 'none'
+
+export interface CollectionFailurePolicy {
+  retryable: boolean
+  escalate: CollectionFailureEscalation
+}
+
+/** The CODE of a reason string = the part before ':' (e.g. `download:<err>` →
+ *  `download`, `partial_images:3/5` → `partial_images`). */
+function collectionFailureReasonCode(reason: string): string {
+  const text = String(reason || '').trim()
+  const colon = text.indexOf(':')
+  return (colon >= 0 ? text.slice(0, colon) : text).toLowerCase()
+}
+
+// Single source of truth for per-note failure policy (replaces the old
+// retryable/non-retryable regex pair). Only TERMINAL (permanent) and HUMAN
+// (access-wall) codes are enumerated; everything else — transient load/DOM/
+// download/partial failures (detail_not_opened, no_images, detail_mismatch,
+// card_not_found, download_failed, open_card, collect, verify_detail,
+// return_list, partial_images, timeout, navigate, network, lease_lost, …) —
+// defaults to retryable+no-escalation. E1: those transient codes used to fall
+// through the regex as retryable=false and were permanently lost; they are now
+// retried in the final pass. E2: partial_images is retryable+none (per-note
+// partial, continue), no longer borrowing the access-wall halt.
+const HUMAN_ESCALATION_FAILURE_CODES = new Set<string>([
+  'needs_verification',
+])
+const TERMINAL_FAILURE_CODES = new Set<string>([
+  'permission', 'forbidden', 'unauthorized', 'deleted', 'unavailable',
+  'blocked_permanent', 'terminal_skip', 'skipped_video',
+  'video_resolve', 'video_download',
+])
+
+export function classifyCollectionFailureReason(reason: string): CollectionFailurePolicy {
+  const code = collectionFailureReasonCode(reason)
+  if (HUMAN_ESCALATION_FAILURE_CODES.has(code)) return { retryable: false, escalate: 'human' }
+  if (TERMINAL_FAILURE_CODES.has(code)) return { retryable: false, escalate: 'none' }
+  return { retryable: true, escalate: 'none' }
+}
 
 export function inferCollectionFailureRetryable(reason: string): boolean {
-  if (NON_RETRYABLE_FAILURE_REASON_PATTERN.test(reason)) return false
-  return RETRYABLE_FAILURE_REASON_PATTERN.test(reason)
+  return classifyCollectionFailureReason(reason).retryable
+}
+
+export function collectionFailureEscalation(reason: string): CollectionFailureEscalation {
+  return classifyCollectionFailureReason(reason).escalate
 }
 
 function failureUrlForNote(note: CollectionNote): string {

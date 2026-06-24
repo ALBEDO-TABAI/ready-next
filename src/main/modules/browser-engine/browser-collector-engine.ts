@@ -17,6 +17,7 @@ import {
   createCollectionLoopState,
   normalizeCollectionLoopState,
   retryableCollectionFailures,
+  collectionFailureEscalation,
   type CollectionPlan,
   type CollectionNote,
   type CollectionLoopState,
@@ -77,10 +78,6 @@ function progressOf(plan: CollectionPlan, state: CollectionLoopState, currentTit
 
 function normalizedTitle(value: string | undefined): string {
   return String(value || '').replace(/\s+/g, ' ').trim().toLowerCase()
-}
-
-function isPartialImagesReason(reason: string | undefined): boolean {
-  return String(reason || '').startsWith('partial_images')
 }
 
 function noteMatchesFailure(note: CollectionNote, url: string): boolean {
@@ -200,7 +197,7 @@ export async function runBrowserCollection(
         rounds += 1
         deps.onProgress?.(progressOf(plan, state, note.title ?? note.url, null))
         const { result, canonicalUrl, openUrl } = await collectPlannedNote(note, noteIndex)
-        if (result.reason === 'needs_verification' || isPartialImagesReason(result.reason)) {
+        if (collectionFailureEscalation(result.reason ?? '') === 'human') {
           await deps.onCheckpoint?.(state, progressOf(plan, state, note.title ?? note.url, 'needs_verification'))
           return 'needs_verification'
         }
@@ -252,7 +249,7 @@ export async function runBrowserCollection(
     deps.onProgress?.(progressOf(plan, state, note.title ?? note.url, null))
 
     const { result, canonicalUrl, openUrl } = await collectPlannedNote(note, step.index)
-    if (result.reason === 'needs_verification' || isPartialImagesReason(result.reason)) {
+    if (collectionFailureEscalation(result.reason ?? '') === 'human') {
       await deps.onCheckpoint?.(state, progressOf(plan, state, note.title ?? note.url, 'needs_verification'))
       deps.onProgress?.(progressOf(plan, state, null, 'needs_verification'))
       return { collected: state.collected, failed: state.failed, notes: state.outputs || [], rounds, stopReason: 'needs_verification', state }

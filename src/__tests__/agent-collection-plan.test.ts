@@ -6,6 +6,9 @@ import {
   createCollectionLoopState,
   planNextNote,
   recordNoteResult,
+  classifyCollectionFailureReason,
+  inferCollectionFailureRetryable,
+  collectionFailureEscalation,
   type CollectionPlan,
 } from '../main/modules/browser-engine/agent-collection-plan'
 
@@ -82,5 +85,44 @@ describe('per-note loop', () => {
     const pDur = { ...plan, stopConditions: { maxDurationMs: 1000 } }
     const fresh = createCollectionLoopState(0)
     assert.equal(planNextNote(pDur as CollectionPlan, fresh, 2000).stop, 'max_duration')
+  })
+})
+
+describe('E1/E2: collection failure reason → policy (single source of truth)', () => {
+  it('E1: transient load/DOM/download failures are now RETRYABLE (were permanently lost)', () => {
+    for (const reason of [
+      'detail_not_opened', 'no_images', 'detail_mismatch', 'card_not_found',
+      'download_failed', 'download:net::ERR', 'open_card:boom', 'collect:boom',
+      'verify_detail:boom', 'return_list:boom',
+    ]) {
+      assert.equal(inferCollectionFailureRetryable(reason), true, `${reason} must be retryable`)
+      assert.equal(collectionFailureEscalation(reason), 'none', `${reason} must not escalate`)
+    }
+  })
+
+  it('E2: partial_images is per-note partial (retryable, no human escalation)', () => {
+    for (const reason of ['partial_images:3/5', 'partial_images:2/unknown']) {
+      assert.deepEqual(classifyCollectionFailureReason(reason), { retryable: true, escalate: 'none' })
+    }
+  })
+
+  it('access wall stays human-escalating + non-retryable', () => {
+    assert.deepEqual(classifyCollectionFailureReason('needs_verification'), { retryable: false, escalate: 'human' })
+  })
+
+  it('terminal/permanent failures stay non-retryable, no escalation', () => {
+    for (const reason of ['permission', 'forbidden', 'deleted', 'unavailable', 'skipped_video', 'video_download:boom', 'blocked_permanent', 'terminal_skip']) {
+      assert.deepEqual(classifyCollectionFailureReason(reason), { retryable: false, escalate: 'none' }, reason)
+    }
+  })
+
+  it('retained transient reasons (timeout/navigate/network/lease_lost) stay retryable', () => {
+    for (const reason of ['timeout', 'navigate:nav_failed', 'network', 'lease_lost', 'rate', 'throttle']) {
+      assert.equal(inferCollectionFailureRetryable(reason), true, reason)
+    }
+  })
+
+  it('unknown reason defaults to retryable (never silently permanently-drop a recoverable note)', () => {
+    assert.deepEqual(classifyCollectionFailureReason('some_brand_new_reason'), { retryable: true, escalate: 'none' })
   })
 })

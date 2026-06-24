@@ -112,7 +112,7 @@ describe('runBrowserCollection (background per-note loop)', () => {
     assert.equal(navigated.length, 1, 'must not continue through the frozen target list after a verification wall')
   })
 
-  it('pauses before advancing when a carousel is visibly under-collected', async () => {
+  it('E2: a single under-collected carousel is a per-note partial — it does NOT halt the whole task', async () => {
     const plan = planOf(2)
     const imageUrl = 'https://sns-webpic-qc.xhscdn.com/notes_pre_post/image-1!nc_n_webp_mw_1'
     const res = await runBrowserCollection(plan, {
@@ -139,10 +139,14 @@ describe('runBrowserCollection (background per-note loop)', () => {
       now: fixedClock(),
     })
 
-    assert.equal(res.stopReason, 'needs_verification')
+    // E2 fix: an under-count on one note no longer escalates the whole collection
+    // to needs_verification/waiting_human; the task runs to completion and the
+    // partial note is recorded as a retryable per-note failure (verdict decides).
+    assert.notEqual(res.stopReason, 'needs_verification', 'under-count must not halt the task')
     assert.equal(res.collected.length, 0)
-    assert.equal(res.failed.length, 0)
-    assert.equal(res.state.cursor, 0, 'resume should retry the same note')
+    assert.ok(res.failed.length >= 1, 'under-collected note recorded as a per-note failure')
+    assert.ok(res.failed.every((f) => String(f.reason).startsWith('partial_images')), 'reason is partial_images')
+    assert.ok(res.failed.every((f) => f.retryable === true), 'partial_images is retryable, not a permanent loss')
   })
 
   it('paces between notes (not before the first) on high-control platforms', async () => {
