@@ -104,14 +104,31 @@ if (CRITERIA_BASE_TASK_TYPES.length !== TASK_TYPES.length
 export function resolveCriteria(
   taskType: TaskType,
   module: string,
-  options?: { skillExecutionForm?: SkillExecutionForm | null },
+  options?: { skillExecutionForm?: SkillExecutionForm | null; skillHasRunStateHandle?: boolean },
 ): ResolvedCriteria {
   const base = BASE_TEMPLATES[taskType] ?? BASE_TEMPLATES.short_task
   const overlay = OVERLAY_TEMPLATES[module] ?? []
   const items = [...base, ...overlay].map((entry) => ({ ...entry }))
-  const resolvedItems = module === 'skill' && options?.skillExecutionForm === 'direct'
+  // `s1`/skill_run_state can ONLY be satisfied by a `run_state` proof, minted
+  // only when a child run actually produced run_state.json (done) +
+  // delivery_report. A run is "child-bearing" — and so genuinely owes s1 — when
+  // it either declares a child-run form (`child_loop`/`python`) OR carries a
+  // run_state HANDLE (runStatePath/childRunId) the finalizer can verify. For a
+  // run with NEITHER (a `direct` send_im, or a primitive-only run via
+  // skill_run_shell/skill_write_artifact with no child run), s1 is structurally
+  // unsatisfiable and would force-fail an otherwise-successful run, so it is
+  // marked notApplicable; base criteria + artifact/tool_result proofs remain the
+  // terminal evidence. We do NOT loosen CRITERIA_PROOF_MAP.skill_run_state — a
+  // run that DID emit a handle still must verify it (an unverified handle stays
+  // a real failure), so child-run contracts are not weakened.
+  const skillForm = options?.skillExecutionForm ?? null
+  const skillHasChildRunState = skillForm === 'child_loop' || skillForm === 'python'
+    || options?.skillHasRunStateHandle === true
+  const resolvedItems = module === 'skill' && !skillHasChildRunState
     ? items.map((entry) => entry.id === 's1'
-      ? markNotApplicable(entry, 'direct skill 交付即 tool_result，无 run_state/delivery_report')
+      ? markNotApplicable(entry, skillForm === 'direct'
+        ? 'direct skill 交付即 tool_result，无 run_state/delivery_report'
+        : 'primitive skill 执行无 child run_state 句柄，artifact/tool_result 即终态证据')
       : entry)
     : items
   return {

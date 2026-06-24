@@ -213,20 +213,25 @@ test('A1 wiring control: a real close whose run_state is NOT verified stays erro
   assert.equal(finalized.terminalReason, 'adjudication_degraded')
 })
 
-test('A1 control: no run_state handle at all → s1 unsatisfied → force-converted', async () => {
+test('P0-2: a primitive-only skill run (NO run_state handle) exempts s1 → stays done on its tool_result proof', async () => {
+  // Primitive-only skill turn (skill_run_shell / skill_write_artifact): no child
+  // run, so no run_state handle and no run_state.json/delivery_report can ever
+  // exist. s1 is structurally unsatisfiable, so it must be notApplicable — the
+  // tool_result proof (short_task c1) is the terminal evidence. This must NOT be
+  // force-failed (the old behavior wrongly judged it error).
   const store = fakeStore({
-    taskId: 'task-skill-gap', taskType: 'short_task' as never, module: 'skill',
-    proofRefs: [collectToolResultProof('skill_x', 'ok', NOW)],
+    taskId: 'task-skill-primitive', taskType: 'short_task' as never, module: 'skill',
+    proofRefs: [collectToolResultProof('skill_write_artifact', 'ok', NOW)],
   })
   const runMeta = new Map<string, Record<string, unknown>>()
   const finalized = await finalizeRunOutcome({
-    kind: 'done', runId: 'run-skill-gap', taskId: 'task-skill-gap', scopeId: 's1',
+    kind: 'done', runId: 'run-skill-primitive', taskId: 'task-skill-primitive', scopeId: 's1',
     durationMs: 10, toolCallsUsed: 1, initiator: 'done', finalText: '技能完成',
   } as RunOutcome, { ...skillRunDeps(runMeta, () => true), taskProjectionStore: store })
-  const checkins = store.rows.get('task-skill-gap')!.checkins as CheckInRecord[]
-  assert.equal(checkins.at(-1)!.verdict, 'degraded')
-  assert.ok(checkins.at(-1)!.blockers.includes('criteria_unsatisfied:s1'))
-  assert.equal(finalized.status, 'error')
+  const last = (store.rows.get('task-skill-primitive')!.checkins as CheckInRecord[]).at(-1)!
+  assert.equal(last.verdict, 'accept', 'primitive skill with a tool_result proof is accepted')
+  assert.ok(!last.blockers.includes('criteria_unsatisfied:s1'), 's1 is notApplicable for a handle-less primitive run')
+  assert.equal(finalized.status, 'done', 'a successful primitive skill run is NOT force-failed')
 })
 
 test('failed delivery facts produce a specific terminal reason, never accept or adjudication_degraded', async () => {

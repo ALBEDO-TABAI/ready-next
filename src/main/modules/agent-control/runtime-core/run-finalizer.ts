@@ -472,8 +472,15 @@ function recordTerminalAdjudication(
     // task facts (terminal patch wins over the stale row — P0-3)
     const effectiveTaskType = (facts?.taskType ?? projection.taskType) as TaskType
     const effectiveModule = String(facts?.module ?? projection.module ?? 'system')
+    // A skill run is child-bearing (and so genuinely owes s1) when it carries a
+    // run_state handle the finalizer can verify — runStatePath / childRunId /
+    // detachedTaskId. Primitive-only runs (no handle) get s1 exempted upstream.
+    const skillHasRunStateHandle = Boolean(runStatePath)
+      || Boolean(handleString('childRunId'))
+      || Boolean(handleString('detachedTaskId'))
     const criteria = resolveCriteria(effectiveTaskType, effectiveModule, {
       skillExecutionForm: facts?.skillExecutionForm ?? null,
+      skillHasRunStateHandle,
     })
     const { verdict, checkIn } = adjudicateTerminalOutcome({
       terminalStatus: status,

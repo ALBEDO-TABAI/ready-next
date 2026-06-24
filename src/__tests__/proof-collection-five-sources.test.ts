@@ -75,6 +75,24 @@ test('tool output proofs include successful tool results and saved artifact path
   assert.deepEqual(failed, [])
 })
 
+test('P0-1 regression: skill_write_artifact (data.absolutePath) yields both a tool_result AND an artifact proof', () => {
+  // Exact shape returned by skill_write_artifact (write-artifact.ts): text
+  // "Wrote N bytes to <abs>" + data.absolutePath. The collector's keyed path
+  // extraction (proof-collector.ts:101-106) must mint an `artifact` proof from
+  // absolutePath so a skill-written document can satisfy artifact criteria — this
+  // locks that behavior against regression (the earlier diagnosis wrongly assumed
+  // it was missing).
+  const proofs = collectToolOutputProofs('skill_write_artifact', createToolExecutionOutput(
+    'Wrote 2048 bytes to /Users/user/Library/Application Support/ready/skill-runtime/outputs/hfp-space-design/方案.md',
+    { shape: 'json', data: { absolutePath: '/Users/user/Library/Application Support/ready/skill-runtime/outputs/hfp-space-design/方案.md', bytesWritten: 2048, encoding: 'utf8', artifactRoot: '/Users/user/Library/Application Support/ready/skill-runtime/outputs/hfp-space-design' } },
+  ), NOW)
+  assert.ok(proofs.some((row) => row.kind === 'tool_result'), 'tool_result proof present')
+  assert.ok(
+    proofs.some((row) => row.kind === 'artifact' && row.ref.endsWith('/hfp-space-design/方案.md')),
+    'absolutePath is minted as an artifact proof',
+  )
+})
+
 test('A1: a bare runStatePath is NOT a run_state COMPLETION proof at tool-output level (skill emits it at START)', () => {
   const proofs = collectToolOutputProofs('skill_video_expert_pipeline', createToolExecutionOutput('技能已启动', {
     shape: 'json',

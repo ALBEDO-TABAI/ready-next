@@ -79,3 +79,23 @@ test('model additions append after template items and can never delete or overri
   const original = hijack.find((item) => item.id === resolved.items[0].id)
   assert.equal(original?.text, resolved.items[0].text)
 })
+
+test('skill s1/skill_run_state is exempted for direct AND primitive-only runs, kept for child_loop/python (P0-2)', () => {
+  const s1Of = (form?: 'direct' | 'child_loop' | 'python' | null) =>
+    resolveCriteria('short_task', 'skill', form === undefined ? undefined : { skillExecutionForm: form })
+      .items.find((item) => item.id === 's1')
+
+  // child-bearing forms keep the real run_state contract (NOT loosened)
+  assert.equal(s1Of('child_loop')?.notApplicable, undefined, 'child_loop keeps s1 (has run_state contract)')
+  assert.equal(s1Of('python')?.notApplicable, undefined, 'python keeps s1 (has run_state contract)')
+
+  // direct + primitive-only (null / unset) are exempted — s1 is structurally
+  // unsatisfiable for them and must not force-fail a successful run
+  assert.ok(s1Of('direct')?.notApplicable?.reason, 'direct skill exempts s1')
+  assert.ok(s1Of(null)?.notApplicable?.reason, 'primitive-only (null form) exempts s1')
+  assert.ok(s1Of(undefined)?.notApplicable?.reason, 'primitive-only (unset form) exempts s1')
+  assert.match(String(s1Of(null)?.notApplicable?.reason), /primitive/, 'primitive exemption carries an explicit reason')
+
+  // exemption is scoped to the skill module only
+  assert.equal(resolveCriteria('short_task', 'system').items.find((i) => i.id === 's1'), undefined, 'no s1 outside skill module')
+})
