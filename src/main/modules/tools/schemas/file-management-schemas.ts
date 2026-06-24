@@ -72,6 +72,13 @@ export const FileMoveSchema = z.object({
   overwrite: z.boolean().optional().describe('可选：目标存在时是否覆盖（默认 false）'),
 })
 
+export const FileCopySchema = z.object({
+  path: z.string().describe('原文件绝对路径'),
+  destDir: z.string().describe('目标目录绝对路径'),
+  newName: z.string().optional().describe('可选：新文件名'),
+  overwrite: z.boolean().optional().describe('可选：目标存在时是否覆盖（默认 false）'),
+})
+
 const OrganizeOperationSchema = z.object({
   path: z.string().describe('原文件绝对路径'),
   destDir: z.string().describe('目标目录绝对路径'),
@@ -123,6 +130,7 @@ export type FileManagementToolName =
   | 'file_classify'
   | 'file_rename'
   | 'file_move'
+  | 'file_copy'
   | 'file_inventory'
   | 'file_extract_text'
   | 'file_create_folder'
@@ -139,6 +147,7 @@ export const FILE_MANAGEMENT_SCHEMAS: Record<FileManagementToolName, z.ZodObject
   file_classify: FileClassifySchema,
   file_rename: FileRenameSchema,
   file_move: FileMoveSchema,
+  file_copy: FileCopySchema,
   file_inventory: FileInventorySchema,
   file_extract_text: FileExtractTextSchema,
   file_create_folder: FileCreateFolderSchema,

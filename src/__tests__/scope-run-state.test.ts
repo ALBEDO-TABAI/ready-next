@@ -111,9 +111,11 @@ describe('scope run state helpers', () => {
     assert.strictEqual(phaseToToolTraceStatus('checkpoint', 'blocked_tool_error'), 'error')
     assert.strictEqual(phaseToToolTraceStatus('error', 'context_overflow'), 'error')
     assert.strictEqual(phaseToToolTraceStatus('cancelled'), 'cancelled')
-    // P2: both adjudication failure reasons render as error, never silently 'done'
+    // P2: zero-proof gaps stay red; proof-bearing degraded completions use the
+    // completed overlay shape instead of a false failure state.
     assert.strictEqual(phaseToToolTraceStatus('done', 'proof_gap'), 'error')
-    assert.strictEqual(phaseToToolTraceStatus('done', 'adjudication_degraded'), 'error')
+    assert.strictEqual(phaseToToolTraceStatus('done', 'adjudication_degraded'), 'done')
+    assert.strictEqual(phaseToToolTraceStatus('error', 'adjudication_degraded'), 'error')
   })
 
   it('preserves context overflow as a terminal reason instead of downgrading to null', () => {

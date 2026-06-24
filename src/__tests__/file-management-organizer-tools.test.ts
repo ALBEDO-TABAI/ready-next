@@ -260,3 +260,81 @@ test('file organizer rejects symlink escapes from an authorized root', async () 
     await rm(store, { recursive: true, force: true })
   }
 })
+
+
+test('file_copy copies within one workspace root and refuses unsafe overwrite targets', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'ready-file-copy-root-'))
+  try {
+    const source = join(root, 'source.md')
+    const destDir = join(root, 'exports')
+    await mkdir(destDir, { recursive: true })
+    await writeFile(source, '# Source', 'utf-8')
+    const context = { searchEngine: fakeSearchEngine(root) as never }
+
+    const copied = JSON.parse(await executeFileManagementTool('file_copy', {
+      path: source,
+      destDir,
+      newName: 'copy.md',
+    }, context))
+    assert.equal(copied.ok, true)
+    assert.equal(await readFile(join(destDir, 'copy.md'), 'utf-8'), '# Source')
+
+    const refusedExisting = JSON.parse(await executeFileManagementTool('file_copy', {
+      path: source,
+      destDir,
+      newName: 'copy.md',
+    }, context))
+    assert.equal(refusedExisting.ok, false)
+    assert.match(refusedExisting.error, /EEXIST|target exists/i)
+
+    await writeFile(join(destDir, 'copy.md'), 'old', 'utf-8')
+    const overwritten = JSON.parse(await executeFileManagementTool('file_copy', {
+      path: source,
+      destDir,
+      newName: 'copy.md',
+      overwrite: true,
+    }, context))
+    assert.equal(overwritten.ok, true)
+    assert.equal(await readFile(join(destDir, 'copy.md'), 'utf-8'), '# Source')
+
+    const outside = await mkdtemp(join(tmpdir(), 'ready-file-copy-outside-'))
+    try {
+      const crossRoot = await executeFileManagementTool('file_copy', {
+        path: source,
+        destDir: outside,
+        newName: 'copy.md',
+      }, context)
+      assert.match(crossRoot, /outside any known workspace|cross-workspace copy not supported/)
+    } finally {
+      await rm(outside, { recursive: true, force: true })
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('file_copy refuses to overwrite a symlink target', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'ready-file-copy-symlink-'))
+  try {
+    const source = join(root, 'source.md')
+    const outside = join(root, 'outside.md')
+    const destDir = join(root, 'exports')
+    await mkdir(destDir, { recursive: true })
+    await writeFile(source, '# Source', 'utf-8')
+    await writeFile(outside, 'outside', 'utf-8')
+    await symlink(outside, join(destDir, 'copy.md'))
+    const context = { searchEngine: fakeSearchEngine(root) as never }
+
+    const result = JSON.parse(await executeFileManagementTool('file_copy', {
+      path: source,
+      destDir,
+      newName: 'copy.md',
+      overwrite: true,
+    }, context))
+    assert.equal(result.ok, false)
+    assert.match(result.error, /symlink/i)
+    assert.equal(await readFile(outside, 'utf-8'), 'outside')
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})

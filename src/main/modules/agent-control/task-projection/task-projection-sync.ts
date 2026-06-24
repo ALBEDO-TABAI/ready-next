@@ -386,6 +386,9 @@ function resolveStatus(
   if (summary.terminalReason === 'manual_suspend' && previous?.status === 'recoverable_paused') {
     return 'recoverable_paused'
   }
+  if (summary.terminalReason === 'adjudication_degraded' && summary.phase === 'done') {
+    return 'completed'
+  }
   const terminalStatus = resolveTerminalProjectionStatus(summary.terminalReason)
   if (terminalStatus) return terminalStatus
   const interactionState = resolveInteractionState(summary)
@@ -486,7 +489,7 @@ function resolveTerminalBlockedReason(reason?: ScopeRunSummary['terminalReason']
   if (reason === 'blocked_external') return '等待外部条件'
   if (reason === 'blocked_tool_error') return '工具执行遇到问题'
   if (reason === 'context_overflow') return '上下文已超限'
-  if (reason === 'adjudication_degraded') return '完成判定未通过'
+  if (reason === 'adjudication_degraded') return '已生成结果，仍有待确认项'
   if (reason === 'delivery_failed') return '发送没有完成'
   if (reason === 'tool_unavailable') return '发送通道不可用'
   if (reason === 'no_artifact') return '没有找到可发送文件'

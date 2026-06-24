@@ -146,6 +146,7 @@ import { detectVerbatimGrants, recordVerbatimGrant, revokeAuthorizationsForCateg
 import { classifyBrowserToolCall } from '../../browser-engine/browser-tool-write-classification'
 import { createBrowserTurnLease, type BrowserTurnLease } from '../../browser-engine/agent-browser-turn-lease'
 import { filterToolsByAllowedTools, filterToolsByVisionCapability } from '../tools-runtime/tool-gateway'
+import { sanitizeAssistantText } from '../tools-runtime/tool-call-text-guard'
 import {
   buildToolRuntimeContext,
   toToolExecutorContext,
@@ -228,6 +229,7 @@ const settingsRepository = new AppSettingsRepository()
 const SDK_CHILD_RESUME_AWAIT_TIMEOUT_MS = 1_500
 const DEFAULT_AGENT_SDK_MAX_TURNS = 24
 // L-f5: refresh the durable budget checkpoint every N tool calls mid-run.
+const NATIVE_TEXT_BUFFER_SAFE_FLUSH_CHARS = 4000
 const ROLLING_BUDGET_CHECKPOINT_TOOL_INTERVAL = 4
 const LOCAL_DOCUMENT_WRITE_MAX_TURNS = 40
 const LONG_READING_TRIGGER_CHARS = 12_000
@@ -245,6 +247,25 @@ function log(message: string): void {
     // silent-catch: logging must never break the agent path.
     // logging must never break the agent path
   }
+}
+
+function filterSelectedSkillToolSurface(
+  definitions: ToolDefinition[],
+  allowedTools: ReadonlyArray<string> | null | undefined,
+): ToolDefinition[] {
+  if (!allowedTools || allowedTools.length === 0) return definitions
+  const filtered = filterToolsByAllowedTools(definitions, allowedTools)
+  if (filtered.length > 0) return filtered
+
+  const fallback = definitions.filter((definition) => definition.groupId !== 'skills' && definition.domain !== 'skill')
+  if (fallback.length === 0) return filtered
+  appendToolCapabilityLog([
+    '[tool_capability]',
+    'stage=sdk_runtime_skill_allowed_tools_fallback',
+    `allowedTools=${allowedTools.join('|') || 'none'}`,
+    `preservedTools=${fallback.map((definition) => definition.name).join('|') || 'none'}`,
+  ].join(' '))
+  return fallback
 }
 
 interface AgentSdkSession {
@@ -3851,7 +3872,7 @@ export class AgentSdkRuntime extends EventEmitter {
         : null
     const activeSkillAllowedTools = resolveActiveSkillAllowedTools(params.authorization) || fallbackSkillAllowedTools
     if (activeSkillAllowedTools) {
-      definitions = filterToolsByAllowedTools(definitions, activeSkillAllowedTools)
+      definitions = filterSelectedSkillToolSurface(definitions, activeSkillAllowedTools)
     }
     return filterToolsByVisionCapability(
       definitions as unknown as Array<Record<string, unknown>>,
@@ -4332,13 +4353,20 @@ export class AgentSdkRuntime extends EventEmitter {
       return Boolean(latest && latest.generation === runGeneration && latest.currentRun?.runId === runId)
     }
     const emitOutputForRun = (chunk: string, type: string, projectionPatch?: Record<string, unknown> | null): void => {
-      transcriptEvents.push({ kind: 'output', type, chunk, projectionPatch: projectionPatch || null })
+      const safeChunk = type === 'text'
+        ? sanitizeAssistantText(chunk, {
+            sessionId: sessionId || undefined,
+            source: 'transcript_emit',
+          })
+        : chunk
+      if (type === 'text' && !safeChunk) return
+      transcriptEvents.push({ kind: 'output', type, chunk: safeChunk, projectionPatch: projectionPatch || null })
       this.emit('output', {
         agent: name,
         sessionId,
         runId,
         taskId,
-        chunk,
+        chunk: safeChunk,
         type,
         projectionPatch: projectionPatch || null,
       })
@@ -5147,7 +5175,6 @@ export class AgentSdkRuntime extends EventEmitter {
       const bufferNativeTextUntilParsed =
         !useTextToolBridge
         && toolDefinitions.length > 0
-        && (normalizedConfig.provider !== 'openai' || capabilities?.agentProtocol === 'anthropic')
       for (let bridgeTurn = 0; bridgeTurn < (useTextToolBridge ? 4 : 3); bridgeTurn += 1) {
         let streamedText = ''
         let contextCompressedForBridgeTurn = false
@@ -5240,6 +5267,14 @@ export class AgentSdkRuntime extends EventEmitter {
                 streamedText += delta
                 if (!useTextToolBridge && !bufferNativeTextUntilParsed) {
                   emitOutput(delta, 'text')
+                } else if (
+                  !useTextToolBridge
+                  && bufferNativeTextUntilParsed
+                  && streamedText.length > NATIVE_TEXT_BUFFER_SAFE_FLUSH_CHARS
+                  && !/<tool_call|<function=|<parameter=|:::tool_call/i.test(streamedText)
+                ) {
+                  emitOutput(streamedText, 'text')
+                  streamedText = ''
                 }
               },
             })

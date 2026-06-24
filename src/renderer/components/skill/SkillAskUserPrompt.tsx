@@ -2,9 +2,8 @@
  * B Phase 1 PR2 T1-8 — renders a capsule asking the user to clarify a
  * skill-driven question. Subscribes to the `skill:askUserQuestion` IPC push,
  * stores pending questions locally, and submits the user's answer via
- * `skillsAPI.submitAskUserAnswer`. The capsule is bottom-anchored and
- * dismisses itself on submit — it doesn't read from the scopeRun store, so
- * the lifecycle is independent of a specific agent session run.
+ * `skillsAPI.submitAskUserAnswer`. The capsule is mounted once at the app
+ * shell so it does not remount with the chat panel or steal focus mid-stream.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react'
@@ -80,10 +79,6 @@ export function SkillAskUserPrompt(): ReactElement | null {
   useEffect(() => {
     setDraft('')
     setError(null)
-    if (current && inputRef.current) {
-      // Auto-focus on new question so keyboard users can answer without a click.
-      requestAnimationFrame(() => inputRef.current?.focus())
-    }
   }, [current?.executionId])
 
   const submit = useCallback(async (answer: string) => {
@@ -131,7 +126,8 @@ export function SkillAskUserPrompt(): ReactElement | null {
         width: 'min(560px, calc(100vw - 32px))',
         borderRadius: 12,
         padding: 16,
-        boxShadow: '0 12px 32px rgba(0,0,0,0.35)',
+        boxShadow: '0 12px 32px rgba(0,0,0,0.28)',
+        pointerEvents: 'auto',
         ...capsuleTone,
       }}
       role="dialog"

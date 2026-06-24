@@ -32,6 +32,7 @@ import {
   clearLastReferenceSkill,
   rememberLastReferenceSkill,
 } from '../main/modules/agent-control/skills/skill-reference-hints'
+import { buildSelectedSkillToolAuthorization } from '../main/modules/agent-control/skills/skill-tool-authorization'
 import { __setSkillActionToolDefsForTests } from '../main/modules/tools/skills-tools'
 import {
   __setMetricSinkForTests,
@@ -158,8 +159,7 @@ test('agent sdk runtime streams text and closes with terminal reason', async () 
       .filter((event) => event.channel === 'output')
       .map((event) => [event.type, event.chunk]),
     [
-      ['text', '你好'],
-      ['text', '，已完成'],
+      ['text', '你好，已完成'],
       ['done', ''],
     ],
   )
@@ -393,6 +393,74 @@ test('agent sdk runtime applies selected skill allowed_tools to default surface'
 
   assert.equal(result.success, true)
   assert.deepEqual(toolNames, ['skill_send_im_file'])
+})
+
+test('agent sdk runtime preserves base tools when selected skill tools are unavailable', () => {
+  const runtime = createRuntime({})
+  const privateRuntime = runtime as unknown as {
+    listDefaultToolDefinitionsForTurn: (params: {
+      message: string
+      sessionId?: string
+      scopeId?: string
+      config: typeof fakeConfig
+      browserHostAvailable: boolean
+      feishuConnected: boolean
+      authorization: ReturnType<typeof buildSelectedSkillToolAuthorization>
+      requestEnvelope?: unknown
+    }) => Array<{ name: string; groupId: string }>
+  }
+  const definitions = privateRuntime.listDefaultToolDefinitionsForTurn({
+    message: '输出方案文档到这个目录里',
+    sessionId: 'scope-missing-skill-tools',
+    scopeId: 'scope-missing-skill-tools',
+    config: fakeConfig,
+    browserHostAvailable: true,
+    feishuConnected: false,
+    authorization: buildSelectedSkillToolAuthorization({
+      skillId: 'missing-runtime-skill',
+      allowedTypedActions: ['skill_missing_runtime_action'],
+      allowedPrimitives: [],
+      source: 'explicit',
+      reason: 'test_missing_runtime_skill',
+    }),
+    requestEnvelope: buildRequestEnvelope({ userText: '输出方案文档到这个目录里' }),
+  })
+  const names = definitions.map((definition) => definition.name)
+
+  assert.equal(names.includes('skill_missing_runtime_action'), false)
+  assert.ok(names.length > 0)
+  assert.ok(names.some((name) => name.startsWith('document_') || name.startsWith('file_')))
+})
+
+test('agent sdk runtime sanitizes raw tool-call text before transcript output', async () => {
+  const runtime = createRuntime({
+    runAgent: async () => ({
+      finalText: [
+        '我先检查目录。',
+        '<function=file_list><parameter=path>/tmp',
+      ].join('\n'),
+    }),
+  })
+  runtime.newSession('butler::scope-sanitize-sdk-text', 'system prompt')
+
+  const result = await runtime.sendMessage(
+    'butler::scope-sanitize-sdk-text',
+    '检查目录',
+    'run-sanitize-sdk-text',
+    {
+      publicSessionId: 'scope-sanitize-sdk-text',
+      taskId: 'task-sanitize-sdk-text',
+      requestEnvelope: buildRequestEnvelope({ userText: '检查目录' }),
+    },
+  )
+  const visibleText = (result.projectionTruth?.transcriptEvents || [])
+    .filter((event) => event.kind === 'output' && event.type === 'text')
+    .map((event) => event.chunk)
+    .join('')
+
+  assert.equal(result.success, true)
+  assert.match(visibleText, /我先检查目录/)
+  assert.doesNotMatch(visibleText, /<tool_call|<function=|<parameter=/)
 })
 
 test('agent sdk runtime exposes skill_send_im_file when the file to send is referenced as @[file.md]', async () => {

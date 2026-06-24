@@ -152,6 +152,7 @@ export function phaseToToolTraceStatus(
   if (!phase || phase === 'idle') return 'idle'
   if (terminalReason) {
     if (terminalReason === 'done') return 'done'
+    if (terminalReason === 'adjudication_degraded' && phase === 'done') return 'done'
     if (terminalReason === 'cancelled_user' || terminalReason === 'cancelled_runtime' || terminalReason === 'main_no_progress_timeout') return 'cancelled'
     if (
       terminalReason === 'failed_skill'

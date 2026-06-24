@@ -58,6 +58,7 @@ const PRIMITIVE_TOOL_NAMES: string[] = [
   'skill_run_shell',
   'skill_write_artifact',
   'skill_read_artifact',
+  'skill_export_artifact',
   'skill_patch_config',
   'skill_start_detached',
   'skill_inspect_detached',

@@ -68,6 +68,7 @@ import { filterSkillPrimitivesBySession } from './skill-tool-session-gate'
 import { PRIMITIVE_TOOL_DEFS } from './skill-primitives/tool-defs'
 import {
   executeAskUser,
+  executeExportArtifact,
   executeInspectRunState,
   executePatchConfig,
   executeReadArtifact,
@@ -146,6 +147,18 @@ function buildToolName(skillId: string, actionName: string): string {
   const staticName = getStaticSkillToolNameForAction(skillId, actionName)
   if (staticName) return staticName
   return `skill_${sanitizeToolToken(skillId)}_${sanitizeToolToken(actionName)}`
+}
+
+function workspaceRootsFromRequestEnvelope(envelope: unknown): string[] | null {
+  if (!envelope || typeof envelope !== 'object' || Array.isArray(envelope)) return null
+  const environmentHints = (envelope as { environmentHints?: unknown }).environmentHints
+  if (!environmentHints || typeof environmentHints !== 'object' || Array.isArray(environmentHints)) return null
+  const workspaceRoots = (environmentHints as { workspaceRoots?: unknown }).workspaceRoots
+  if (!Array.isArray(workspaceRoots)) return null
+  const roots = workspaceRoots
+    .filter((root): root is string => typeof root === 'string' && root.trim().length > 0)
+    .map((root) => root.trim())
+  return roots.length > 0 ? roots : null
 }
 
 /**
@@ -1800,6 +1813,58 @@ export async function executeSkillTool(
             additionalAllowedWriteTargets: resolvePendingSkillHandoffWriteTargets(
               runtimeContext?.activeFrame?.activeArtifactRoots || [],
             ),
+          },
+        )
+        recordPrimitive({
+          scopeId: runtimeContext?.scopeId,
+          sessionId,
+          runId: runtimeContext?.runId,
+          agent: runtimeContext?.agent,
+          skillId,
+          skillName,
+          toolName,
+          stepId: started.stepId,
+          status: 'done',
+          output,
+        })
+        return attachSkillProjection(output, { sessionId, skillId })
+      } catch (error) {
+        recordPrimitive({
+          scopeId: runtimeContext?.scopeId,
+          sessionId,
+          runId: runtimeContext?.runId,
+          agent: runtimeContext?.agent,
+          skillId,
+          skillName,
+          toolName,
+          stepId: started.stepId,
+          status: 'error',
+          message: error instanceof Error ? error.message : String(error),
+        })
+        throw error
+      }
+    }
+    if (tool.name === 'skill_export_artifact') {
+      const started = recordPrimitive({
+        scopeId: runtimeContext?.scopeId,
+        sessionId,
+        runId: runtimeContext?.runId,
+        agent: runtimeContext?.agent,
+        skillId,
+        skillName,
+        toolName,
+        status: 'running',
+      })
+      try {
+        const output = await executeExportArtifact(
+          {
+            relativePath: asString(args.relativePath),
+            targetPath: asString(args.targetPath),
+            overwrite: args.overwrite === true,
+          },
+          {
+            skillId,
+            allowedExportRoots: workspaceRootsFromRequestEnvelope(runtimeContext?.requestEnvelope),
           },
         )
         recordPrimitive({

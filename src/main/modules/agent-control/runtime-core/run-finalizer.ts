@@ -182,10 +182,34 @@ interface EffectiveTaskFacts {
 
 type TerminalFailureReason = 'delivery_failed' | 'tool_unavailable' | 'no_artifact' | 'proof_gap' | 'adjudication_degraded'
 
+type EnforceMode = 'enforce' | 'degraded_visible'
+
+function resolveEnforceMode(): EnforceMode {
+  const flag = process.env.READY_ADJUDICATION_ENFORCE_MODE
+  if (flag === 'enforce') return 'enforce'
+  if (flag === 'degraded_visible') return 'degraded_visible'
+  return 'degraded_visible'
+}
+
 interface TerminalAdjudicationDecision {
   verdict: CheckInRecord['verdict']
   blockers: string[]
   proofCount: number
+}
+
+function canKeepProofBearingDegradedVisible(
+  adjudication: TerminalAdjudicationDecision,
+  projectionPatch: Record<string, unknown> | null | undefined,
+): boolean {
+  if (adjudication.verdict !== 'degraded') return false
+  if (adjudication.proofCount <= 0) return false
+  if (adjudication.blockers.some((blocker) => blocker === 'criteria_unsatisfied:s1')) return false
+  if (readTerminalFailureReason(projectionPatch?.terminalFailureReason)) return false
+  const terminalFailure = projectionPatch?.terminalFailure
+  if (terminalFailure && typeof terminalFailure === 'object') {
+    if (readTerminalFailureReason((terminalFailure as Record<string, unknown>).reason)) return false
+  }
+  return resolveEnforceMode() === 'degraded_visible'
 }
 
 const TERMINAL_FAILURE_REASONS = new Set<TerminalFailureReason>([
@@ -355,6 +379,11 @@ async function writeTerminalOutcome(
     if (canResumeAsUserPoint(taskContinuation)) {
       effectiveStatus = 'checkpoint'
       effectiveTerminalReason = 'checkpoint_budget'
+    } else if (canKeepProofBearingDegradedVisible(adjudication, outcome.projectionPatch)) {
+      // P1: a run that DID produce proofs but has unsatisfied criteria stays
+      // 'done' with a visible degraded reason — does not force-fail the run.
+      // Only zero-proof rejects are hard-converted in this mode.
+      effectiveTerminalReason = 'adjudication_degraded'
     } else {
       effectiveStatus = 'error'
       effectiveTerminalReason = resolveTerminalFailureReason(outcome.projectionPatch, adjudication)

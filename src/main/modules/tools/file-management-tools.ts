@@ -1,5 +1,5 @@
-import { mkdir, readFile, readdir, realpath, rename, stat, writeFile } from 'fs/promises'
-import { existsSync } from 'fs'
+import { copyFile, lstat, mkdir, readFile, readdir, realpath, rename, stat, writeFile } from 'fs/promises'
+import { constants, existsSync } from 'fs'
 import { randomUUID } from 'crypto'
 import { tmpdir } from 'os'
 import { basename, dirname, extname, isAbsolute, join, relative, resolve as resolvePath } from 'path'
@@ -360,6 +360,8 @@ export async function executeFileManagementTool(
       return runFileRename(args, engine, context)
     case 'file_move':
       return runFileMove(args, engine, context)
+    case 'file_copy':
+      return runFileCopy(args, engine, context)
     case 'file_inventory':
       return runFileInventory(args, engine, context)
     case 'file_extract_text':
@@ -1325,6 +1327,45 @@ async function runFileRename(
       db.prepare('DELETE FROM documents WHERE path = ?').run(path)
     }
     await engine.indexDocument(guard.root, newPath)
+    return toJsonString({ ok: true, newPath })
+  } catch (error) {
+    return toJsonString({ ok: false, error: error instanceof Error ? error.message : String(error) })
+  }
+}
+
+
+async function runFileCopy(
+  args: Record<string, unknown>,
+  engine: SearchEngine,
+  context?: FileManagementToolContext,
+): Promise<string> {
+  const path = typeof args.path === 'string' ? args.path : ''
+  const destDir = typeof args.destDir === 'string' ? args.destDir : ''
+  const newName = typeof args.newName === 'string' ? args.newName.trim() : ''
+  const overwrite = args.overwrite === true
+  if (!path || !destDir) return 'Error: path and destDir required'
+
+  const srcGuard = assertInsideWorkspace(path, engine, context?.workspaceRoots)
+  if (!srcGuard.ok) return `Error: ${srcGuard.error}`
+  const destGuard = assertInsideWorkspace(destDir, engine, context?.workspaceRoots)
+  if (!destGuard.ok) return `Error: ${destGuard.error}`
+  if (srcGuard.root !== destGuard.root) return 'Error: cross-workspace copy not supported'
+
+  const fileName = newName || path.split(/[\\/]/).pop() || 'file'
+  if (!fileName || fileName.includes('/') || fileName.includes('\\')) return 'Error: newName must not contain path separators'
+  const newPath = join(destDir, fileName)
+  const newGuard = assertInsideWorkspace(newPath, engine, context?.workspaceRoots)
+  if (!newGuard.ok) return `Error: ${newGuard.error}`
+
+  try {
+    const sourceStat = await stat(path)
+    if (!sourceStat.isFile()) return 'Error: source is not a file'
+    const destStat = await stat(destDir).catch(() => null)
+    if (!destStat || !destStat.isDirectory()) return 'Error: destDir is not a directory'
+    const targetLinkStats = await lstat(newPath).catch(() => null)
+    if (targetLinkStats?.isSymbolicLink()) return toJsonString({ ok: false, error: 'refusing to overwrite symlink target' })
+    await copyFile(path, newPath, overwrite ? 0 : constants.COPYFILE_EXCL)
+    await engine.indexDocument(srcGuard.root, newPath)
     return toJsonString({ ok: true, newPath })
   } catch (error) {
     return toJsonString({ ok: false, error: error instanceof Error ? error.message : String(error) })

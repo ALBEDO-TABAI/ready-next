@@ -53,6 +53,13 @@ export const PRIMITIVE_TOOL_DEFS: SkillToolDef[] = [
     params: zodObjectToParamList(SKILL_PRIMITIVE_SCHEMAS.skill_read_artifact),
   },
   {
+    name: 'skill_export_artifact',
+    description:
+      '把技能 artifact 目录内的一个既有产物导出到用户指定的绝对文件路径。只读取当前 skill artifact 根内的 relativePath；默认不覆盖目标文件。只有当用户明确要求把 skill 产物落到某个路径时才调用。',
+    kind: 'primitive',
+    params: zodObjectToParamList(SKILL_PRIMITIVE_SCHEMAS.skill_export_artifact),
+  },
+  {
     name: 'skill_patch_config',
     description:
       '受控修改当前 skill manifest 明确声明可修复的 JSON 配置文件。只能传 host_requirements.config_repair.files 中的 target id/basename/完整路径，支持 JSON pointer set/delete，工具会原子写入、回读校验并 mask key/token/secret。用于用户明确授权“改 key / 改模型 / 清 fallback 后继续”时；禁止用它尝试任意本地路径。',

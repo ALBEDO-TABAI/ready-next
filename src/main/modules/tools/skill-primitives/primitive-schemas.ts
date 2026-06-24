@@ -62,6 +62,11 @@ export const SKILL_PRIMITIVE_SCHEMAS = {
       .optional()
       .describe('最多读取字节数，默认 32768（32K），最大 1048576（1M）'),
   }),
+  skill_export_artifact: z.object({
+    relativePath: TRIMMED_STRING.describe('相对 artifact 根目录的源文件路径，必须指向已有 skill 产物'),
+    targetPath: TRIMMED_STRING.describe('要导出到的用户目标文件绝对路径'),
+    overwrite: z.boolean().optional().describe('目标已存在时是否覆盖，默认 false'),
+  }),
   skill_patch_config: z.object({
     target: TRIMMED_STRING.describe('manifest host_requirements.config_repair.files 中声明的 id、basename 或完整路径。'),
     operations: z

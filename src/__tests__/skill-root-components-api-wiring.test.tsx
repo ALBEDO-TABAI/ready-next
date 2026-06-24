@@ -94,6 +94,13 @@ test('SkillAskUserPrompt hydrates pending skill questions from electronAPI.skill
 
     assert.match(handle.dom.window.document.body.textContent || '', /请选择要继续的任务/)
     assert.match(handle.dom.window.document.body.textContent || '', /任务 A/)
+    const prompt = handle.dom.window.document.querySelector('[aria-label="Skill clarification"]') as HTMLElement | null
+    assert.ok(prompt)
+    assert.equal(prompt.style.position, 'fixed')
+    assert.equal(prompt.style.zIndex, '1500')
+    assert.match(prompt.style.width, /min\(560px/)
+    assert.equal(prompt.style.pointerEvents, 'auto')
+    assert.equal(prompt.getAttribute('role'), 'dialog')
 
     const option = Array.from(handle.dom.window.document.querySelectorAll('button'))
       .find((button) => button.textContent === '任务 A') as HTMLButtonElement | undefined

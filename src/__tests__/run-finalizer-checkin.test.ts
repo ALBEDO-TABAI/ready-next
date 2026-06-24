@@ -18,7 +18,7 @@ import { finalizeRunOutcome, type RunOutcome } from '../main/modules/agent-contr
 import { projectionPatchFromChildClose } from '../main/modules/agent-control/runtime-core/agent-sdk-runtime'
 import { adjudicateTerminalOutcome, appendCheckIns, type CheckInRecord } from '../main/modules/agent-control/quality/task-adjudicator'
 import { resolveCriteria } from '../main/modules/agent-control/quality/criteria-templates'
-import { collectToolResultProof } from '../main/modules/agent-control/quality/proof-collector'
+import { collectToolOutputProofs, collectToolResultProof } from '../main/modules/agent-control/quality/proof-collector'
 import type { TaskProjectionRecord } from '../main/modules/agent-control/contracts/run-contracts'
 import { __setMetricSinkForTests, type AgentMetricEvent } from '../main/modules/agent-control/metrics'
 
@@ -213,6 +213,21 @@ test('A1 wiring control: a real close whose run_state is NOT verified stays erro
   assert.equal(finalized.terminalReason, 'adjudication_degraded')
 })
 
+
+test('P0-1: skill_write_artifact absolutePath mints artifact proof', () => {
+  const proofs = collectToolOutputProofs('skill_write_artifact', {
+    text: 'Wrote 42 bytes to /tmp/ready-skill/out.md',
+    data: {
+      absolutePath: '/tmp/ready-skill/out.md',
+      bytesWritten: 42,
+      artifactRoot: '/tmp/ready-skill',
+    },
+  }, NOW)
+
+  assert.ok(proofs.some((proof) => proof.kind === 'tool_result' && proof.ref === 'skill_write_artifact'))
+  assert.ok(proofs.some((proof) => proof.kind === 'artifact' && proof.ref === '/tmp/ready-skill/out.md'))
+})
+
 test('P0-2: a primitive-only skill run (NO run_state handle) exempts s1 → stays done on its tool_result proof', async () => {
   // Primitive-only skill turn (skill_run_shell / skill_write_artifact): no child
   // run, so no run_state handle and no run_state.json/delivery_report can ever
@@ -232,6 +247,79 @@ test('P0-2: a primitive-only skill run (NO run_state handle) exempts s1 → stay
   assert.equal(last.verdict, 'accept', 'primitive skill with a tool_result proof is accepted')
   assert.ok(!last.blockers.includes('criteria_unsatisfied:s1'), 's1 is notApplicable for a handle-less primitive run')
   assert.equal(finalized.status, 'done', 'a successful primitive skill run is NOT force-failed')
+})
+
+
+test('P0-2 control: a skill run with an unverified run_state handle still owes s1', async () => {
+  const store = fakeStore({
+    taskId: 'task-skill-handle-unverified', taskType: 'short_task' as never, module: 'skill',
+    proofRefs: [collectToolResultProof('skill_write_artifact', 'ok', NOW)],
+  })
+  const runMeta = new Map<string, Record<string, unknown>>()
+  const finalized = await finalizeRunOutcome({
+    kind: 'done', runId: 'run-skill-handle-unverified', taskId: 'task-skill-handle-unverified', scopeId: 's1',
+    durationMs: 10, toolCallsUsed: 1, initiator: 'done', finalText: '技能完成',
+    projectionPatch: { taskContinuation: { runStatePath: '/tmp/out/run_state.json' } },
+  } as RunOutcome, { ...skillRunDeps(runMeta, () => false), taskProjectionStore: store })
+
+  const last = (store.rows.get('task-skill-handle-unverified')!.checkins as CheckInRecord[]).at(-1)!
+  assert.equal(last.verdict, 'degraded')
+  assert.ok(last.blockers.includes('criteria_unsatisfied:s1'))
+  assert.equal(finalized.status, 'error')
+})
+
+
+test('P1 degraded_visible mode keeps proof-bearing degraded runs done but still records the degraded reason', async () => {
+  const previous = process.env.READY_ADJUDICATION_ENFORCE_MODE
+  process.env.READY_ADJUDICATION_ENFORCE_MODE = 'degraded_visible'
+  try {
+    const store = fakeStore({
+      taskId: 'task-degraded-visible', taskType: 'research' as never, module: 'system',
+      proofRefs: [collectToolResultProof('web_search', 'sources found', NOW)],
+    })
+    const finalized = await finalizeRunOutcome({
+      kind: 'done', runId: 'run-degraded-visible', taskId: 'task-degraded-visible', scopeId: 's1',
+      durationMs: 10, toolCallsUsed: 1, initiator: 'done', finalText: '研究完成',
+      projectionPatch: { taskType: 'research', module: 'system' },
+    } as RunOutcome, {
+      writeRunCloseMetric: () => {},
+      taskProjectionStore: store,
+      now: () => NOW,
+    })
+    const last = (store.rows.get('task-degraded-visible')!.checkins as CheckInRecord[]).at(-1)!
+    assert.equal(last.verdict, 'degraded')
+    assert.ok(last.blockers.includes('criteria_unsatisfied:c1'))
+    assert.equal(finalized.status, 'done')
+    assert.equal(finalized.terminalReason, 'adjudication_degraded')
+  } finally {
+    if (previous === undefined) delete process.env.READY_ADJUDICATION_ENFORCE_MODE
+    else process.env.READY_ADJUDICATION_ENFORCE_MODE = previous
+  }
+})
+
+test('P1 degraded_visible mode still hard-fails zero-proof rejects', async () => {
+  const previous = process.env.READY_ADJUDICATION_ENFORCE_MODE
+  process.env.READY_ADJUDICATION_ENFORCE_MODE = 'degraded_visible'
+  try {
+    const store = fakeStore({ taskId: 'task-zero-visible', taskType: 'short_task' as never, proofRefs: [] })
+    const finalized = await finalizeRunOutcome({
+      kind: 'done', runId: 'run-zero-visible', taskId: 'task-zero-visible', scopeId: 's1',
+      durationMs: 10, toolCallsUsed: 0, initiator: 'done', finalText: '',
+      projectionPatch: { taskType: 'short_task', module: 'system' },
+    } as RunOutcome, {
+      writeRunCloseMetric: () => {},
+      taskProjectionStore: store,
+      now: () => NOW,
+    })
+    const last = (store.rows.get('task-zero-visible')!.checkins as CheckInRecord[]).at(-1)!
+    assert.equal(last.verdict, 'reject')
+    assert.ok(last.blockers.includes('zero_proof_done'))
+    assert.equal(finalized.status, 'error')
+    assert.equal(finalized.terminalReason, 'proof_gap')
+  } finally {
+    if (previous === undefined) delete process.env.READY_ADJUDICATION_ENFORCE_MODE
+    else process.env.READY_ADJUDICATION_ENFORCE_MODE = previous
+  }
 })
 
 test('failed delivery facts produce a specific terminal reason, never accept or adjudication_degraded', async () => {

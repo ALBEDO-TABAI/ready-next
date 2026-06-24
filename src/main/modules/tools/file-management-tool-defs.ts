@@ -80,6 +80,12 @@ export const FILE_MANAGEMENT_TOOLS: FileManagementToolDef[] = [
     params: zodObjectToParamList(FILE_MANAGEMENT_SCHEMAS.file_move) as ToolParam[],
   },
   {
+    name: 'file_copy',
+    description:
+      '把文件复制到另一个目录，可选同时改名。源路径与目标目录都必须在同一 workspace 根内；默认不覆盖已有文件。',
+    params: zodObjectToParamList(FILE_MANAGEMENT_SCHEMAS.file_copy) as ToolParam[],
+  },
+  {
     name: 'file_inventory',
     description:
       '盘点授权文件夹内的文件和子文件夹。支持分页、浅层递归和可选短摘要；用于批量整理前先了解目录内容。',

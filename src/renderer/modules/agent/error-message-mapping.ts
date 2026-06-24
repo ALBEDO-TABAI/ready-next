@@ -186,7 +186,7 @@ export function mapBackendErrorToFriendly(input: {
 
   if (errorKind === 'adjudication_degraded') {
     return {
-      friendlyMessage: '完成判定未通过，请继续这项任务',
+      friendlyMessage: '已生成结果，但仍有待确认项，可以继续补齐',
       technicalDetails: error || undefined,
       recoverable: true,
       retryStrategy: 'user_action',
