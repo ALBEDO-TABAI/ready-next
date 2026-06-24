@@ -180,7 +180,7 @@ interface EffectiveTaskFacts {
   skillExecutionForm: SkillExecutionForm | null
 }
 
-type TerminalFailureReason = 'delivery_failed' | 'tool_unavailable' | 'no_artifact' | 'proof_gap'
+type TerminalFailureReason = 'delivery_failed' | 'tool_unavailable' | 'no_artifact' | 'proof_gap' | 'adjudication_degraded'
 
 interface TerminalAdjudicationDecision {
   verdict: CheckInRecord['verdict']
@@ -193,6 +193,7 @@ const TERMINAL_FAILURE_REASONS = new Set<TerminalFailureReason>([
   'tool_unavailable',
   'no_artifact',
   'proof_gap',
+  'adjudication_degraded',
 ])
 
 export function buildTerminalProjectionPatch(params: {
@@ -386,10 +387,15 @@ function resolveTerminalFailureReason(
     if (nestedReason) return nestedReason
   }
 
+  // Distinguish the two failure shapes for observability (P2): a genuine
+  // zero-proof done → `proof_gap` (缺少完成证据); a run that DID produce proofs
+  // but failed acceptance criteria → `adjudication_degraded` (完成判定未通过).
+  // Conflating both as proof_gap hid the real cause (a degraded run looks like
+  // "no evidence" when it actually had evidence but unmet criteria).
   if (adjudication.blockers.includes('zero_proof_done') || adjudication.proofCount === 0) {
     return 'proof_gap'
   }
-  return 'proof_gap'
+  return 'adjudication_degraded'
 }
 
 function continuationFromProjectionPatch(

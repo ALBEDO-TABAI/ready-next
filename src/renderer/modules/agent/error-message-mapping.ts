@@ -184,6 +184,15 @@ export function mapBackendErrorToFriendly(input: {
     }
   }
 
+  if (errorKind === 'adjudication_degraded') {
+    return {
+      friendlyMessage: '完成判定未通过，请继续这项任务',
+      technicalDetails: error || undefined,
+      recoverable: true,
+      retryStrategy: 'user_action',
+    }
+  }
+
   if (
     errorKind === 'provider_thinking_echo_required' ||
     /thinking[\s_-]*block|extended[\s_-]*thinking|reasoning[\s_-]*replay|prior[\s_-]*thinking/i.test(source)

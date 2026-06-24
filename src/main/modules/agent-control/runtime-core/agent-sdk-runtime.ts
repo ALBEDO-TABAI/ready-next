@@ -2464,6 +2464,31 @@ function continuationRunStatePath(options?: AgentSdkExecutionOptions): string | 
     || nonEmptyString(options?.continuationState?.continuationRef?.runStatePath)
 }
 
+/** G1 — resolve the page URL for a browser tool failure so site-card learning
+ *  has a domain even when args/data carry no URL. Prefers the SPECIFIC targeted
+ *  `tab_id` (a failure on a non-active tab must not be learned against the
+ *  active tab's site); falls back to the active tab only when no tab_id was
+ *  targeted. Returns null when the targeted tab can't be resolved (no
+ *  wrong-domain attribution) or no controller is available. Never throws. */
+export function resolveToolFailurePageUrl(
+  controller: {
+    getTabList?: () => Array<{ id: string; url: string }> | undefined
+    getActiveTab?: () => { url: string } | undefined
+  } | null | undefined,
+  args: Record<string, unknown> | undefined,
+): string | null {
+  if (!controller) return null
+  try {
+    const targetedTabId = typeof args?.tab_id === 'string' ? args.tab_id : null
+    if (targetedTabId) {
+      return controller.getTabList?.()?.find((tab) => tab.id === targetedTabId)?.url ?? null
+    }
+    return controller.getActiveTab?.()?.url ?? null
+  } catch {
+    return null
+  }
+}
+
 export function projectionPatchFromChildClose(close: SkillChildCloseEvent | null): Record<string, unknown> | null {
   const existing = asRecord(close?.projectionPatch)
   if (!close) return existing ? { ...existing } : null
@@ -3606,12 +3631,16 @@ export class AgentSdkRuntime extends EventEmitter {
       ? data.errorKind
       : typeof data.errorCode === 'string' && data.errorCode ? data.errorCode : null
     if (!errorKind && data.ok !== false) return
+    // G1 — resolve the page URL so a collection tool failure that carries no URL
+    // in args/data still yields a domain (see resolveToolFailurePageUrl).
+    const pageUrl = resolveToolFailurePageUrl(this.browserController, args)
     const signal = siteCardLearningSignalFromToolFailure({
       toolName,
       errorKind,
       args,
       data,
       text: normalized.text,
+      pageUrl,
     })
     if (signal) this.writeSiteCardLearningSignal(signal, 'tool_error')
   }

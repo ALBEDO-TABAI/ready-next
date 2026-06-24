@@ -111,6 +111,9 @@ describe('scope run state helpers', () => {
     assert.strictEqual(phaseToToolTraceStatus('checkpoint', 'blocked_tool_error'), 'error')
     assert.strictEqual(phaseToToolTraceStatus('error', 'context_overflow'), 'error')
     assert.strictEqual(phaseToToolTraceStatus('cancelled'), 'cancelled')
+    // P2: both adjudication failure reasons render as error, never silently 'done'
+    assert.strictEqual(phaseToToolTraceStatus('done', 'proof_gap'), 'error')
+    assert.strictEqual(phaseToToolTraceStatus('done', 'adjudication_degraded'), 'error')
   })
 
   it('preserves context overflow as a terminal reason instead of downgrading to null', () => {

@@ -201,6 +201,39 @@ test('browser tool error envelopes map to site-card learning signals conservativ
   }), null)
 })
 
+test('G1: pageUrl resolves the domain when args/data carry no URL', () => {
+  // a tab_id-only / current-page collection failure: no URL anywhere except the tab
+  const sig = siteCardLearningSignalFromToolFailure({
+    toolName: 'browser_visible_collect',
+    errorKind: 'selector_missing',
+    args: { tab_id: 'tab-6' },
+    pageUrl: 'https://jp.pinterest.com/u/board',
+    now: NOW,
+  })
+  assert.equal(sig?.domain, 'jp.pinterest.com')
+  assert.equal(sig?.failureKind, 'selector_missing')
+  // args/data URL still wins over pageUrl
+  assert.equal(siteCardLearningSignalFromToolFailure({
+    toolName: 'browser_visible_collect',
+    errorKind: 'selector_missing',
+    args: { url: 'https://example.com/list' },
+    pageUrl: 'https://jp.pinterest.com/u/board',
+    now: NOW,
+  })?.domain, 'example.com')
+})
+
+test('G1: new failure-kind aliases map to learnable site-card kinds', () => {
+  const sig = (errorKind: string) => siteCardLearningSignalFromToolFailure({
+    toolName: 'browser_visible_collect', errorKind,
+    pageUrl: 'https://example.com/board', now: NOW,
+  })
+  assert.equal(sig('target_not_found')?.failureKind, 'selector_missing')
+  assert.equal(sig('ambiguous_target')?.failureKind, 'selector_missing')
+  // policy guards (not site misbehavior) must NOT produce a site card
+  assert.equal(sig('script_blocked'), null)
+  assert.equal(sig('freeform_script_denied'), null)
+})
+
 test('login-wall failure creates a new staged site card with dated evidence', () => {
   const root = makeRoot()
   try {

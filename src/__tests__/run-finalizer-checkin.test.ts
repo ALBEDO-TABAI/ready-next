@@ -209,7 +209,8 @@ test('A1 wiring control: a real close whose run_state is NOT verified stays erro
     durationMs: 10, toolCallsUsed: 1, initiator: 'done', finalText: 'VEA 自称完成', projectionPatch,
   } as RunOutcome, { ...skillRunDeps(runMeta, () => false), taskProjectionStore: store })
   assert.equal(finalized.status, 'error', 'unverified completion stays error, not checkpoint')
-  assert.equal(finalized.terminalReason, 'proof_gap')
+  // had proofs (tool_result) but s1 unsatisfied → adjudication_degraded, not proof_gap
+  assert.equal(finalized.terminalReason, 'adjudication_degraded')
 })
 
 test('A1 control: no run_state handle at all → s1 unsatisfied → force-converted', async () => {
@@ -396,7 +397,8 @@ test('child-loop skill still requires skill_run_state proof', async () => {
 
   const checkins = store.rows.get('task-child-skill')!.checkins as CheckInRecord[]
   assert.equal(finalized.status, 'error')
-  assert.equal(finalized.terminalReason, 'proof_gap')
+  // had a tool_result proof but s1 unsatisfied → adjudication_degraded (proofCount>0)
+  assert.equal(finalized.terminalReason, 'adjudication_degraded')
   assert.equal(checkins[0].verdict, 'degraded')
   assert.ok(checkins[0].blockers.includes('criteria_unsatisfied:s1'))
 })

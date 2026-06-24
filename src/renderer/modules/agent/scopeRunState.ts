@@ -133,6 +133,7 @@ function normalizeTerminalReason(value: unknown): ScopeRunTerminalReason | null 
     normalized === 'tool_unavailable' ||
     normalized === 'no_artifact' ||
     normalized === 'proof_gap' ||
+    normalized === 'adjudication_degraded' ||
     normalized === 'cancelled_user' ||
     normalized === 'cancelled_runtime' ||
     normalized === 'main_no_progress_timeout' ||
@@ -161,6 +162,7 @@ export function phaseToToolTraceStatus(
       || terminalReason === 'tool_unavailable'
       || terminalReason === 'no_artifact'
       || terminalReason === 'proof_gap'
+      || terminalReason === 'adjudication_degraded'
       || terminalReason === 'context_overflow'
       || terminalReason === 'infra_error'
     ) {

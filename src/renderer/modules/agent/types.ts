@@ -394,6 +394,7 @@ export type ScopeRunTerminalReason =
   | 'tool_unavailable'
   | 'no_artifact'
   | 'proof_gap'
+  | 'adjudication_degraded'
   | 'failed_skill'
   | 'resume_launch_failed'
   | 'persistence_failed'

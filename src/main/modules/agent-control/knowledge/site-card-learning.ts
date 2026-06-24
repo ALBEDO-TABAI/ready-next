@@ -37,6 +37,11 @@ export interface ToolFailureSiteCardLearningInput {
   args?: unknown
   data?: unknown
   text?: string | null
+  /** G1 — the current page URL, resolved from the active browser tab. Browser
+   *  collection tools often carry no URL in args/data (they act on a tab_id /
+   *  the current page), so without this a real failure can't resolve a domain
+   *  and never produces a site card. */
+  pageUrl?: string | null
   now?: Date
 }
 
@@ -80,6 +85,13 @@ const FAILURE_KIND_ALIASES: Record<string, SiteCardFailureKind> = {
   selector_mismatch: 'selector_missing',
   selector_missing: 'selector_missing',
   script_failed_to_execute: 'selector_missing',
+  // G1 — page-shape failures the model hits on browser collection tools.
+  target_not_found: 'selector_missing',
+  ambiguous_target: 'selector_missing',
+  // NOTE: script_blocked / freeform_script_denied are deliberately NOT mapped —
+  // they are OUR policy guards (high-control-platform script blacklist, file-input
+  // misuse, free-script refusal), not site misbehavior, and fire regardless of the
+  // page, so learning a site card from them would create noisy/wrong cards.
   automation_detected: 'script_detection',
   bot_detected: 'script_detection',
   script_detection: 'script_detection',
@@ -213,7 +225,9 @@ export function siteCardLearningSignalsFromCheckIn(input: CheckInSiteCardLearnin
 
 export function siteCardLearningSignalFromToolFailure(input: ToolFailureSiteCardLearningInput): SiteCardLearningSignal | null {
   if (!browserLearningToolName(input.toolName)) return null
-  const url = firstKnownUrl(input.args) || firstKnownUrl(input.data)
+  const url = firstKnownUrl(input.args)
+    || firstKnownUrl(input.data)
+    || (typeof input.pageUrl === 'string' ? input.pageUrl.trim() : '')
   const domain = domainFromUrl(url)
   if (!domain) return null
   const failureKind = toolFailureKind(input)

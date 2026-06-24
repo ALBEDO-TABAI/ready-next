@@ -6,6 +6,7 @@ import test from 'node:test'
 
 import {
   AgentSdkRuntime,
+  resolveToolFailurePageUrl,
   type AgentSdkRuntimeDeps,
 } from '../main/modules/agent-control/runtime-core/agent-sdk-runtime'
 import { buildRequestEnvelope } from '../main/modules/agent-control/contracts/request-envelope'
@@ -5470,3 +5471,21 @@ test('agent sdk runtime does not leak host-only or unauthorized skill tools by d
   assert.equal(seenToolNames.includes('skill_patch_config'), false)
 })
 
+
+test('G1: resolveToolFailurePageUrl prefers the targeted tab, falls back to active tab, never mis-attributes', () => {
+  const controller = {
+    getTabList: () => [
+      { id: 'tab-1', url: 'https://active.example.com/a' },
+      { id: 'tab-6', url: 'https://jp.pinterest.com/u/board' },
+    ],
+    getActiveTab: () => ({ url: 'https://active.example.com/a' }),
+  }
+  // targeted tab_id wins over the active tab (no wrong-domain attribution)
+  assert.equal(resolveToolFailurePageUrl(controller, { tab_id: 'tab-6' }), 'https://jp.pinterest.com/u/board')
+  // no tab_id → active tab
+  assert.equal(resolveToolFailurePageUrl(controller, {}), 'https://active.example.com/a')
+  // targeted tab not found (e.g. closed) → null, NOT the active tab
+  assert.equal(resolveToolFailurePageUrl(controller, { tab_id: 'tab-gone' }), null)
+  // no controller → null
+  assert.equal(resolveToolFailurePageUrl(null, { tab_id: 'tab-6' }), null)
+})
