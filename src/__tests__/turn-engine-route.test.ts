@@ -7,7 +7,7 @@ import { buildRequestEnvelope } from '../main/modules/agent-control/contracts/re
 import { RunCoordinator } from '../main/modules/agent-control/task-projection/run-coordinator'
 import { RunProjection } from '../main/modules/agent-control/task-projection/run-projection'
 import { syncTaskProjection } from '../main/modules/agent-control/task-projection/task-projection-sync'
-import { buildBudgetWarningMessage, renderChildCommandOutcome, TurnEngine } from '../main/modules/agent-control/turn-engine'
+import { buildBudgetWarningMessage, renderChildCommandOutcome, statusFromTerminalReason, TurnEngine } from '../main/modules/agent-control/turn-engine'
 import { SkillTaskSupervisor, type SkillTaskSupervisorSnapshot } from '../main/modules/agent-control/skills/skill-task-supervisor'
 import { __setMetricSinkForTests, type AgentMetricEvent } from '../main/modules/agent-control/metrics'
 import {
@@ -34,6 +34,11 @@ function createSession(userText: string): TurnEngineSession {
     lastDocumentContextInput: null,
   }
 }
+
+test('turn engine dormant status mapping treats adjudication_degraded as done', () => {
+  assert.equal(statusFromTerminalReason('adjudication_degraded'), 'done')
+  assert.equal(statusFromTerminalReason('adjudication_degraded', false), 'error')
+})
 
 function createIntent(overrides?: Partial<IntentClassification>): IntentClassification {
   return {

@@ -82,6 +82,18 @@
       "owner": "p1-p2-agent-adjudication"
     },
     {
+      "path": "src/__tests__/file-management-copy-contract.test.ts",
+      "reason": "P0 document-delivery support: tests only inspect file_copy schema/tool exposure and never instantiates the real DB. Transitive imports reach sqlite-capable file-management modules, but host-Node coverage must stay active for schema drift.",
+      "since": "2026-06-25",
+      "owner": "p0-document-delivery-visibility"
+    },
+    {
+      "path": "src/__tests__/skill-export-artifact-contract.test.ts",
+      "reason": "P0 artifact export support: tests execute filesystem-only export-artifact paths with temporary directories and fake skill roots; no test path opens better-sqlite3 or reads the real DB. Transitive imports reach sqlite-capable skill primitive barrels, but host-Node coverage must stay active for sandbox and proof contracts.",
+      "since": "2026-06-25",
+      "owner": "p0-document-delivery-visibility"
+    },
+    {
       "path": "src/__tests__/orchestrator-infrastructure-timeout.test.ts",
       "reason": "P6a: tests request-id authority on ReadyAgentOrchestrator with injected fake domain/sdk stopGeneration handlers and an in-memory activeRunIds map. Transitive imports reach sqlite-capable runtime modules, but no test path opens better-sqlite3 or reads the real DB.",
       "since": "2026-06-20",

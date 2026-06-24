@@ -80,7 +80,6 @@ const FAILED_TERMINAL_REASONS = new Set<NonNullable<ScopeRunSummary['terminalRea
   'persistence_failed',
   'context_overflow',
   'blocked_tool_error',
-  'adjudication_degraded',
   'delivery_failed',
   'tool_unavailable',
   'no_artifact',
@@ -115,17 +114,22 @@ function parseRow(row: PendingProjectionSyncDbRow): PendingProjectionSyncRow {
 }
 
 export function terminalProjectionStatusFromSummary(
-  summary: Pick<ScopeRunSummary, 'terminalReason'>,
+  summary: Pick<ScopeRunSummary, 'terminalReason' | 'phase'>,
 ): TaskProjectionRecord['status'] | null {
   const reason = summary.terminalReason
   if (!reason) return null
   if (reason === 'done') return 'completed'
+  if (reason === 'adjudication_degraded') {
+    if (summary.phase === 'done') return 'completed'
+    if (summary.phase === 'error') return 'failed'
+    return null
+  }
   if (reason === 'cancelled_user' || reason === 'cancelled_runtime' || reason === 'main_no_progress_timeout') return 'killed'
   if (FAILED_TERMINAL_REASONS.has(reason)) return 'failed'
   return null
 }
 
-export function isTerminalProjectionSyncPayload(summary: Pick<ScopeRunSummary, 'terminalReason'>): boolean {
+export function isTerminalProjectionSyncPayload(summary: Pick<ScopeRunSummary, 'terminalReason' | 'phase'>): boolean {
   return terminalProjectionStatusFromSummary(summary) !== null
 }
 

@@ -6,7 +6,10 @@ import test from 'node:test'
 
 import {
   AgentSdkRuntime,
+  removeAlreadyEmittedNativeText,
   resolveToolFailurePageUrl,
+  sdkStatusFromTerminalReason,
+  splitNativeTextBufferForSafeFlush,
   type AgentSdkRuntimeDeps,
 } from '../main/modules/agent-control/runtime-core/agent-sdk-runtime'
 import { buildRequestEnvelope } from '../main/modules/agent-control/contracts/request-envelope'
@@ -49,6 +52,35 @@ const fakeConfig = {
 
 test('agent sdk runtime declares transitive sqlite ABI guard', (t) => {
   skipIfSqliteUnavailable(t, 'agent-sdk-runtime transitive sqlite load')
+})
+
+test('agent sdk runtime treats adjudication_degraded as completed-with-warning status', () => {
+  assert.equal(sdkStatusFromTerminalReason('adjudication_degraded'), 'done')
+  assert.equal(sdkStatusFromTerminalReason('adjudication_degraded', false), 'error')
+})
+
+test('agent sdk native text buffer flushes safe prefixes before tool markers', () => {
+  const split = splitNativeTextBufferForSafeFlush('我先生成方案。<tool_call><function=web_search>')
+  assert.equal(split.emitText, '我先生成方案。')
+  assert.equal(split.remainingText, '<tool_call><function=web_search>')
+})
+
+test('agent sdk native text buffer time flush keeps dangling tool markers hidden', () => {
+  assert.deepEqual(
+    splitNativeTextBufferForSafeFlush('我先生成方案。', { flushWithoutMarker: true }),
+    { emitText: '我先生成方案。', remainingText: '' },
+  )
+  assert.deepEqual(
+    splitNativeTextBufferForSafeFlush('我先生成方案。<tool_', { flushWithoutMarker: true }),
+    { emitText: '', remainingText: '我先生成方案。<tool_' },
+  )
+})
+
+test('agent sdk native text buffer does not repeat already flushed visible text', () => {
+  assert.equal(
+    removeAlreadyEmittedNativeText('我先生成方案。\n已保存。', '我先生成方案。').trimStart(),
+    '已保存。',
+  )
 })
 
 function createRuntime(deps: Partial<AgentSdkRuntimeDeps>): AgentSdkRuntime {
@@ -868,7 +900,7 @@ test('agent sdk runtime buffers native text before recovering XML tool calls', a
     .map((event) => String(event.chunk || ''))
     .join('\n')
   assert.doesNotMatch(visibleText, /<tool_call>|<function=|<parameter=/)
-  assert.doesNotMatch(visibleText, /Now I will search/)
+  assert.match(visibleText, /Now I will search/)
   assert.match(visibleText, /研究完成/)
 })
 
@@ -5401,7 +5433,7 @@ test('agent sdk runtime records tool and artifact proofs before final adjudicati
     ],
     executeToolCall: async () => createToolExecutionOutput('已保存文档：/tmp/world-cup-report.md', {
       shape: 'json',
-      data: { documentSaved: true },
+      data: { documentSaved: true, path: '/tmp/world-cup-report.md' },
     }),
     runAgent: async ({ tools, onTextDelta }) => {
       const saveTool = tools.find((tool) => tool.name === 'document_save_tab') as { invoke: (context: unknown, input: string) => Promise<string> } | undefined

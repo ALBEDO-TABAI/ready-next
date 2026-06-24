@@ -230,6 +230,8 @@ const SDK_CHILD_RESUME_AWAIT_TIMEOUT_MS = 1_500
 const DEFAULT_AGENT_SDK_MAX_TURNS = 24
 // L-f5: refresh the durable budget checkpoint every N tool calls mid-run.
 const NATIVE_TEXT_BUFFER_SAFE_FLUSH_CHARS = 4000
+const NATIVE_TEXT_BUFFER_TIMED_FLUSH_MS = 700
+const NATIVE_TEXT_TOOL_MARKERS = ['<tool_call', '<function=', '<parameter=', ':::tool_call'] as const
 const ROLLING_BUDGET_CHECKPOINT_TOOL_INTERVAL = 4
 const LOCAL_DOCUMENT_WRITE_MAX_TURNS = 40
 const LONG_READING_TRIGGER_CHARS = 12_000
@@ -247,6 +249,62 @@ function log(message: string): void {
     // silent-catch: logging must never break the agent path.
     // logging must never break the agent path
   }
+}
+
+export function splitNativeTextBufferForSafeFlush(
+  text: string,
+  options: { flushWithoutMarker?: boolean; hardLimit?: number } = {},
+): { emitText: string; remainingText: string } {
+  const hardLimit = options.hardLimit ?? NATIVE_TEXT_BUFFER_SAFE_FLUSH_CHARS
+  const markerIndex = findNativeTextToolMarkerIndex(text)
+  if (markerIndex >= 0) {
+    return {
+      emitText: text.slice(0, markerIndex),
+      remainingText: text.slice(markerIndex),
+    }
+  }
+  if (
+    text.length > 0
+    && (options.flushWithoutMarker || text.length > hardLimit)
+    && !hasDanglingNativeTextToolMarker(text)
+  ) {
+    return { emitText: text, remainingText: '' }
+  }
+  return { emitText: '', remainingText: text }
+}
+
+export function removeAlreadyEmittedNativeText(text: string, emittedText: string): string {
+  if (!emittedText) return text
+  if (text.startsWith(emittedText)) return text.slice(emittedText.length)
+  const trimmedEmitted = emittedText.trim()
+  if (!trimmedEmitted) return text
+  const leadingWhitespace = text.length - text.trimStart().length
+  const trimmedText = text.slice(leadingWhitespace)
+  if (trimmedText.startsWith(trimmedEmitted)) {
+    return trimmedText.slice(trimmedEmitted.length)
+  }
+  return text
+}
+
+function findNativeTextToolMarkerIndex(text: string): number {
+  const lower = text.toLowerCase()
+  let index = -1
+  for (const marker of NATIVE_TEXT_TOOL_MARKERS) {
+    const found = lower.indexOf(marker)
+    if (found >= 0 && (index < 0 || found < index)) index = found
+  }
+  return index
+}
+
+function hasDanglingNativeTextToolMarker(text: string): boolean {
+  const lower = text.toLowerCase()
+  return NATIVE_TEXT_TOOL_MARKERS.some((marker) => {
+    const maxPrefix = Math.min(marker.length - 1, lower.length)
+    for (let length = 1; length <= maxPrefix; length += 1) {
+      if (lower.endsWith(marker.slice(0, length))) return true
+    }
+    return false
+  })
 }
 
 function filterSelectedSkillToolSurface(
@@ -2571,17 +2629,18 @@ function turnTerminalReasonFromChildClose(close: SkillChildCloseEvent): TurnTerm
   }
 }
 
-function sdkStatusFromTerminalReason(
+export function sdkStatusFromTerminalReason(
   reason: TurnTerminalReason,
+  success = true,
 ): 'done' | 'error' | 'cancelled' | 'checkpoint' {
   if (reason === 'done') return 'done'
+  if (reason === 'adjudication_degraded') return success ? 'done' : 'error'
   if (reason === 'cancelled_user' || reason === 'cancelled_runtime' || reason === 'main_no_progress_timeout') return 'cancelled'
   if (
     reason === 'failed_skill'
     || reason === 'resume_launch_failed'
     || reason === 'persistence_failed'
     || reason === 'blocked_tool_error'
-    || reason === 'adjudication_degraded'
     || reason === 'delivery_failed'
     || reason === 'tool_unavailable'
     || reason === 'no_artifact'
@@ -2636,7 +2695,7 @@ function summarizeChildResume(
       ? `继续技能任务 ${childRunId} 失败：${detail}`
       : `技能任务 ${childRunId} 仍在等待：${detail}`,
     terminalReason,
-    status: sdkStatusFromTerminalReason(terminalReason),
+    status: sdkStatusFromTerminalReason(terminalReason, isCompletedChildCloseStatus(close.status)),
   }
 }
 
@@ -5177,11 +5236,44 @@ export class AgentSdkRuntime extends EventEmitter {
         && toolDefinitions.length > 0
       for (let bridgeTurn = 0; bridgeTurn < (useTextToolBridge ? 4 : 3); bridgeTurn += 1) {
         let streamedText = ''
+        let nativeTextBuffer = ''
+        let nativeTextAlreadyEmitted = ''
+        let nativeTextFlushTimer: ReturnType<typeof setTimeout> | null = null
+        const clearNativeTextFlushTimer = () => {
+          if (nativeTextFlushTimer) {
+            clearTimeout(nativeTextFlushTimer)
+            nativeTextFlushTimer = null
+          }
+        }
+        const emitNativeText = (text: string) => {
+          if (!text) return
+          nativeTextAlreadyEmitted += text
+          emitOutput(text, 'text')
+        }
+        const flushNativeTextBuffer = (flushWithoutMarker = false) => {
+          const next = splitNativeTextBufferForSafeFlush(nativeTextBuffer, { flushWithoutMarker })
+          if (next.emitText) emitNativeText(next.emitText)
+          nativeTextBuffer = next.remainingText
+        }
+        const scheduleNativeTextFlush = () => {
+          if (nativeTextFlushTimer || !nativeTextBuffer) return
+          nativeTextFlushTimer = setTimeout(() => {
+            nativeTextFlushTimer = null
+            flushNativeTextBuffer(true)
+          }, NATIVE_TEXT_BUFFER_TIMED_FLUSH_MS)
+        }
+        const visibleNativeTextAfterFlush = (text: string): string => {
+          const remaining = removeAlreadyEmittedNativeText(text, nativeTextAlreadyEmitted)
+          return splitNativeTextBufferForSafeFlush(remaining, { flushWithoutMarker: true }).emitText.trimStart()
+        }
         let contextCompressedForBridgeTurn = false
         let providerRetryAttempts = 0
         let runResult: ReadyAgentSdkRunResult | null = null
         while (true) {
           streamedText = ''
+          nativeTextBuffer = ''
+          nativeTextAlreadyEmitted = ''
+          clearNativeTextFlushTimer()
           const baseItems = await runHandle.capturedSession.getItems()
           try {
             if (abortController.signal.aborted) {
@@ -5267,23 +5359,21 @@ export class AgentSdkRuntime extends EventEmitter {
                 streamedText += delta
                 if (!useTextToolBridge && !bufferNativeTextUntilParsed) {
                   emitOutput(delta, 'text')
-                } else if (
-                  !useTextToolBridge
-                  && bufferNativeTextUntilParsed
-                  && streamedText.length > NATIVE_TEXT_BUFFER_SAFE_FLUSH_CHARS
-                  && !/<tool_call|<function=|<parameter=|:::tool_call/i.test(streamedText)
-                ) {
-                  emitOutput(streamedText, 'text')
-                  streamedText = ''
+                } else if (!useTextToolBridge && bufferNativeTextUntilParsed) {
+                  nativeTextBuffer += delta
+                  flushNativeTextBuffer(false)
+                  scheduleNativeTextFlush()
                 }
               },
             })
+            clearNativeTextFlushTimer()
             if (runResult.usage) {
               session.lastUsageTokens = runResult.usage.totalTokens
               runMetaUsage = runResult.usage
             }
             break
           } catch (error) {
+            clearNativeTextFlushTimer()
             if (
               classifySdkRuntimeError(error).terminalReason === 'context_overflow'
               && !contextCompressedForBridgeTurn
@@ -5382,8 +5472,9 @@ export class AgentSdkRuntime extends EventEmitter {
             leakedToolCall = recoverLooseXmlToolCallText(modelText)
           }
           if (leakedToolCall.toolCalls.length > 0) {
-            if (leakedToolCall.visibleText && !shouldSuppressVisibleTextOnToolCall(leakedToolCall.visibleText)) {
-              emitOutput(leakedToolCall.visibleText, 'text')
+            const visibleText = visibleNativeTextAfterFlush(leakedToolCall.visibleText)
+            if (visibleText && !shouldSuppressVisibleTextOnToolCall(visibleText)) {
+              emitOutput(visibleText, 'text')
             }
             const bridgeResults: ToolBridgeResultItem[] = []
             for (const call of leakedToolCall.toolCalls) {
@@ -5451,7 +5542,8 @@ export class AgentSdkRuntime extends EventEmitter {
           }
           finalText = modelText
           if (bufferNativeTextUntilParsed && finalText) {
-            emitOutput(finalText, 'text')
+            const visibleText = visibleNativeTextAfterFlush(finalText)
+            if (visibleText) emitOutput(visibleText, 'text')
           } else if (!streamedText && finalText) {
             emitOutput(finalText, 'text')
           }

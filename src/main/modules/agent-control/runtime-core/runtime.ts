@@ -119,6 +119,7 @@ import { logAgentMetric } from '../metrics'
 import { TOOL_ERROR_METRICS } from '../tools-runtime/tool-error-metrics'
 import {
   classifySendScopedError,
+  normalizeSendScopedErrorKind,
   runConfirmedSendScoped,
   type SendScopedResponse,
   type SendScopedUserMessage,
@@ -1860,7 +1861,7 @@ export class AgentControlRuntime extends EventEmitter {
           ...result,
           errorKind: result.scopeRunAuthority?.state === 'lost'
             ? 'superseded'
-            : result.success ? undefined : classifySendScopedError(result.error, 'run'),
+            : result.success ? undefined : normalizeSendScopedErrorKind(result.errorKind) || classifySendScopedError(result.error, 'run'),
           persistence,
         }
       },

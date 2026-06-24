@@ -270,6 +270,98 @@ test('RunCoordinator forwards task metadata from execution results into the fina
   assert.equal(events.at(-1)?.executionDiagnostics?.degradationReason, 'browser_host_unavailable')
 })
 
+test('RunCoordinator treats successful adjudication_degraded results as done events', async () => {
+  const events: ScopeRunEventPayload[] = []
+  let recordedSuccess: boolean | null = null
+
+  const coordinator = new RunCoordinator({
+    promptAssembly: {
+      buildForScopedRun: async () => ({
+        systemPrompt: 'system prompt',
+        bootstrapMessages: [],
+        memoryRefs: [],
+        triggerHits: [],
+        contextBudget: { totalChars: 20, l0Chars: 10, l1Chars: 10, l2Chars: 0, droppedRefs: [] },
+      }),
+      applyToMessage: (message) => message,
+      recordRunOutcome: (payload) => {
+        recordedSuccess = payload.success
+      },
+    },
+    executeAndCollect: async () => ({
+      success: true,
+      finalText: '文档已保存',
+      cancelled: false,
+      usedTools: ['document_save_tab'],
+      terminalReason: 'adjudication_degraded',
+      taskType: 'multi_step_task',
+    }),
+    emitScopeRunEvent: (payload) => {
+      events.push(payload)
+    },
+    reflectOnConversation: async (): Promise<ScopeRunMemoryCapture | null> => null,
+  })
+
+  const result = await coordinator.runScoped({
+    scope: createScope(),
+    message: '保存文档',
+    requestId: 'req-degraded-completion',
+    coordinators: [],
+  })
+
+  assert.deepEqual(result, { success: true })
+  assert.equal(events.at(-1)?.phase, 'done')
+  assert.equal(events.at(-1)?.terminalReason, 'adjudication_degraded')
+  assert.equal(recordedSuccess, true)
+})
+
+test('RunCoordinator keeps failed adjudication_degraded results as error events', async () => {
+  const events: ScopeRunEventPayload[] = []
+  let recordedSuccess: boolean | null = null
+
+  const coordinator = new RunCoordinator({
+    promptAssembly: {
+      buildForScopedRun: async () => ({
+        systemPrompt: 'system prompt',
+        bootstrapMessages: [],
+        memoryRefs: [],
+        triggerHits: [],
+        contextBudget: { totalChars: 20, l0Chars: 10, l1Chars: 10, l2Chars: 0, droppedRefs: [] },
+      }),
+      applyToMessage: (message) => message,
+      recordRunOutcome: (payload) => {
+        recordedSuccess = payload.success
+      },
+    },
+    executeAndCollect: async () => ({
+      success: false,
+      error: 'criteria degraded',
+      finalText: '文档已保存',
+      cancelled: false,
+      usedTools: ['document_save_tab'],
+      terminalReason: 'adjudication_degraded',
+      taskType: 'multi_step_task',
+    }),
+    emitScopeRunEvent: (payload) => {
+      events.push(payload)
+    },
+    reflectOnConversation: async (): Promise<ScopeRunMemoryCapture | null> => null,
+  })
+
+  const result = await coordinator.runScoped({
+    scope: createScope(),
+    message: '保存文档',
+    requestId: 'req-degraded-failure',
+    coordinators: [],
+  })
+
+  assert.equal(result.success, false)
+  assert.equal(result.errorKind, 'adjudication_degraded')
+  assert.equal(events.at(-1)?.phase, 'error')
+  assert.equal(events.at(-1)?.terminalReason, 'adjudication_degraded')
+  assert.equal(recordedSuccess, false)
+})
+
 test('RunCoordinator creates a stable task id when execution host does not provide one', async () => {
   const events: ScopeRunEventPayload[] = []
 

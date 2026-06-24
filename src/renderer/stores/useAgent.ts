@@ -4,6 +4,7 @@ import {
   getActiveScopeRunState,
   isForegroundBusyScopeRunState,
   isStreamingScopeRunState,
+  normalizeTerminalReason,
   phaseToToolTraceStatus,
 } from '../modules/agent/scopeRunState'
 import type { TaskDisclosureState, TaskSectionKey } from '../modules/agent/taskCardViewModel'
@@ -2500,13 +2501,15 @@ export const useAgent = create<AgentState>((set, get) => ({
           if (get().streamingRequestId !== requestId) {
             return { success: false, shouldClearInput: false, preserveInput: true, errorKind: result.errorKind || 'stale_request' }
           }
+          const messageStatus = result.persistence?.message || null
           const friendly = mapBackendErrorToFriendly({
-            error: result.error || '发送失败',
+            error: result.error || undefined,
             errorKind: result.errorKind || undefined,
           })
-          const messageStatus = result.persistence?.message || null
+          const persistedUserMessage = messageStatus === 'persisted'
+          const failureTerminalReason = normalizeTerminalReason(result.errorKind)
           emitRendererAgentMetric(
-            messageStatus === 'persisted'
+            persistedUserMessage
               ? 'renderer_send_failed_after_persisted_message'
               : 'renderer_send_persistence_failed',
             {
@@ -2550,6 +2553,7 @@ export const useAgent = create<AgentState>((set, get) => ({
                     }),
                     requestId,
                     phase: 'error',
+                    terminalReason: failureTerminalReason,
                     updatedAt: new Date().toISOString(),
                     error: friendly.friendlyMessage,
                   },

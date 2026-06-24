@@ -32,9 +32,15 @@ export function resolveTerminalProjectionWaitingFor(
 
 export function resolveTerminalProjectionStatus(
   reason?: TurnTerminalReason | null,
+  phase?: string | null,
 ): TaskProjectionRecord['status'] | null {
   if (!reason) return null
   if (reason === 'done') return 'completed'
+  if (reason === 'adjudication_degraded') {
+    if (phase === 'done') return 'completed'
+    if (phase === 'error') return 'failed'
+    return null
+  }
   if (reason === 'cancelled_user' || reason === 'cancelled_runtime' || reason === 'main_no_progress_timeout') {
     return 'killed'
   }
@@ -44,7 +50,6 @@ export function resolveTerminalProjectionStatus(
     || reason === 'persistence_failed'
     || reason === 'context_overflow'
     || reason === 'blocked_tool_error'
-    || reason === 'adjudication_degraded'
     || reason === 'delivery_failed'
     || reason === 'tool_unavailable'
     || reason === 'no_artifact'

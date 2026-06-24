@@ -291,13 +291,6 @@ export async function executeModuleToolAction(
     pushTrace('call', `执行 ${tool}`, 'tool_running', { module: 'document', executionKind: 'deterministic' })
     const result = await performDocActionWithMetadata(docAction)
     const summary = result.summary
-    pushTrace('result', summary, 'tool_running', {
-      module: 'document',
-      intent: tool,
-      executionKind: 'deterministic',
-      lastEvidenceAt: new Date().toISOString(),
-      ...createSingleStepTask('文档任务', summary, new Date().toISOString()),
-    })
     const failureReason = classifyDocActionFailureReason(docAction, summary)
     const payload: Record<string, unknown> = {
       intent: tool,
@@ -313,9 +306,49 @@ export async function executeModuleToolAction(
       payload.documentRequiresSave = result.document.requiresSave
       payload.documentSaveState = result.document.saveState
     }
+    const mutationReason = typeof payload.mutationReason === 'string' ? payload.mutationReason : ''
+    const actionFailed = Boolean(failureReason)
+      || payload.ok === false
+      || mutationReason === 'validation_failed'
+      || mutationReason === 'rejected'
+      || mutationReason === 'no_match'
+      || mutationReason === 'cancelled'
+    const artifact = docAction.type === 'save_tab' && payload.documentSaved === true && typeof payload.documentPath === 'string'
+      ? createAgentArtifact(
+        {
+          kind: 'delivered_file',
+          label: payload.documentPath.split(/[/\\]/).pop() || payload.documentPath,
+          path: payload.documentPath,
+          mimeType: String(payload.documentPath).toLowerCase().endsWith('.md') ? 'text/markdown' : 'text/plain',
+          meta: {
+            deliverySource: 'document.saveTab',
+            deliveryStatus: 'verified',
+            requestedTarget: true,
+          },
+        },
+        'document',
+        runId,
+      )
+      : null
+    const tracePhase: ScopeRunState['phase'] = actionFailed ? 'error' : 'tool_running'
+    pushTrace('result', summary, tracePhase, {
+      module: 'document',
+      intent: tool,
+      executionKind: 'deterministic',
+      lastEvidenceAt: new Date().toISOString(),
+      ...(artifact ? { artifactRefs: [artifact], recentArtifacts: [artifact] } : {}),
+      ...createSingleStepTask('文档任务', summary, new Date().toISOString(), tracePhase),
+    })
+    if (artifact) {
+      payload.artifactRefs = [artifact]
+      payload.recentArtifacts = [artifact]
+    }
     if (failureReason) {
       payload.ok = false
       payload.reason = failureReason
+    } else if (actionFailed) {
+      payload.ok = false
+      payload.reason = 'document_action_failed'
     }
     return {
       handled: true,

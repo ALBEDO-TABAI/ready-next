@@ -48,6 +48,10 @@ export function collectToolResultProof(toolName: string, resultSummary: string, 
   return proof('tool_result', toolName, `${toolName}:${resultSummary}`, now)
 }
 
+function collectScopedToolResultProof(ref: string, resultSummary: string, now: Date): ProofRef {
+  return proof('tool_result', ref, `${ref}:${resultSummary}`, now)
+}
+
 export function collectArtifactProof(path: string, now: Date): ProofRef {
   return proof('artifact', path, path, now)
 }
@@ -78,11 +82,32 @@ function recordValue(value: unknown): Record<string, unknown> | null {
 function isFailedToolOutput(output: ToolExecutionOutput): boolean {
   const data = recordValue(output.data)
   const status = typeof data?.status === 'string' ? data.status.trim().toLowerCase() : ''
+  const mutationReason = typeof data?.mutationReason === 'string' ? data.mutationReason.trim() : ''
+  if (
+    mutationReason === 'validation_failed' ||
+    mutationReason === 'rejected' ||
+    mutationReason === 'no_match' ||
+    mutationReason === 'cancelled'
+  ) {
+    return true
+  }
   return typeof data?.errorKind === 'string'
     || data?.ok === false
     || status === 'error'
     || status === 'failed'
-    || /(?:^Error:|Document action failed|failed|失败|无法|没有可|未匹配到|未找到|缺少|已拒绝|被拒绝|已取消|被取消)/i.test(output.text)
+    || !(
+      data?.ok === true ||
+      data?.mutated === true ||
+      mutationReason === 'changed' ||
+      mutationReason === 'saved' ||
+      mutationReason === 'identical' ||
+      mutationReason === 'not_mutation' ||
+      data?.documentSaved === true ||
+      'documentTabId' in (data || {}) ||
+      'documentTitle' in (data || {}) ||
+      'documentSaveState' in (data || {}) ||
+      'documentDirty' in (data || {})
+    ) && /(?:^Error:|Document action failed|failed|失败|无法|没有可|未匹配到|未找到|缺少|已拒绝|被拒绝|已取消|被取消)/i.test(output.text)
 }
 
 function cleanArtifactPathCandidate(value: unknown): string | null {
@@ -115,6 +140,19 @@ function collectPathCandidatesFromRecord(record: Record<string, unknown> | null,
   }
 }
 
+function collectVerifiedDocumentSavePaths(toolName: string, record: Record<string, unknown> | null, paths: Set<string>): void {
+  if (toolName !== 'document_save_tab' || !record || record.documentSaved !== true) return
+  const nestedDocument = recordValue(record.document)
+  for (const key of ['path', 'savedPath', 'filePath', 'documentPath']) {
+    const path = cleanArtifactPathCandidate(record[key])
+    if (path) paths.add(path)
+  }
+  if (nestedDocument) {
+    const path = cleanArtifactPathCandidate(nestedDocument.path)
+    if (path) paths.add(path)
+  }
+}
+
 function collectPathCandidatesFromText(text: string, paths: Set<string>): void {
   for (const match of text.matchAll(/`([^`]+)`/g)) {
     const path = cleanArtifactPathCandidate(match[1])
@@ -131,11 +169,20 @@ export function collectToolOutputProofs(toolName: string, output: ToolExecutionO
   if (isFailedToolOutput(normalized)) return []
 
   const summary = normalized.text || JSON.stringify(normalized.data || normalized.projectionPatch || {})
-  const proofs = [collectToolResultProof(toolName, summary.slice(0, 500), now)]
+  const proofs: ProofRef[] = []
   const paths = new Set<string>()
-  collectPathCandidatesFromRecord(recordValue(normalized.data), paths)
-  collectPathCandidatesFromRecord(recordValue(normalized.projectionPatch), paths)
-  collectPathCandidatesFromText(normalized.text, paths)
+  const dataRecord = recordValue(normalized.data)
+  if (toolName === 'document_save_tab') {
+    collectVerifiedDocumentSavePaths(toolName, dataRecord, paths)
+  } else {
+    collectPathCandidatesFromRecord(dataRecord, paths)
+    collectPathCandidatesFromRecord(recordValue(normalized.projectionPatch), paths)
+    collectPathCandidatesFromText(normalized.text, paths)
+  }
+  const documentSavePath = toolName === 'document_save_tab' ? [...paths][0] : null
+  proofs.push(documentSavePath
+    ? collectScopedToolResultProof(`${toolName}:${documentSavePath}`, summary.slice(0, 500), now)
+    : collectToolResultProof(toolName, summary.slice(0, 500), now))
   for (const path of paths) {
     proofs.push(collectArtifactProof(path, now))
   }

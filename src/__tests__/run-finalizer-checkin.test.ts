@@ -18,11 +18,19 @@ import { finalizeRunOutcome, type RunOutcome } from '../main/modules/agent-contr
 import { projectionPatchFromChildClose } from '../main/modules/agent-control/runtime-core/agent-sdk-runtime'
 import { adjudicateTerminalOutcome, appendCheckIns, type CheckInRecord } from '../main/modules/agent-control/quality/task-adjudicator'
 import { resolveCriteria } from '../main/modules/agent-control/quality/criteria-templates'
-import { collectToolOutputProofs, collectToolResultProof } from '../main/modules/agent-control/quality/proof-collector'
+import { collectArtifactProof, collectToolOutputProofs, collectToolResultProof } from '../main/modules/agent-control/quality/proof-collector'
+import { createToolExecutionOutput } from '../main/modules/agent-control/tools-runtime/tool-result-types'
 import type { TaskProjectionRecord } from '../main/modules/agent-control/contracts/run-contracts'
 import { __setMetricSinkForTests, type AgentMetricEvent } from '../main/modules/agent-control/metrics'
 
 const NOW = new Date('2026-06-12T12:00:00.000Z')
+
+function collectDocumentSaveProofs(path = '/tmp/report.md') {
+  return collectToolOutputProofs('document_save_tab', createToolExecutionOutput(`已保存文档：${path}`, {
+    shape: 'json',
+    data: { documentSaved: true, path },
+  }), NOW)
+}
 
 function fakeStore(initial: Partial<TaskProjectionRecord> & { taskId: string }) {
   const rows = new Map<string, TaskProjectionRecord>()
@@ -268,6 +276,177 @@ test('P0-2 control: a skill run with an unverified run_state handle still owes s
   assert.equal(finalized.status, 'error')
 })
 
+
+test('document multi-step with no step source marks c1 notApplicable on document delivery proof', async () => {
+  const store = fakeStore({
+    taskId: 'task-document-multistep-save',
+    taskType: 'multi_step_task' as never,
+    module: 'document',
+    steps: [],
+    proofRefs: collectDocumentSaveProofs('/tmp/report.md'),
+  })
+  const runMeta = new Map<string, Record<string, unknown>>()
+  const finalized = await finalizeRunOutcome({
+    kind: 'done', runId: 'run-document-multistep-save', taskId: 'task-document-multistep-save', scopeId: 's1',
+    durationMs: 10, toolCallsUsed: 1, initiator: 'done', finalText: '文档已保存',
+    projectionPatch: { taskType: 'multi_step_task', module: 'document' },
+  } as RunOutcome, { ...skillRunDeps(runMeta, () => false), taskProjectionStore: store })
+
+  const last = (store.rows.get('task-document-multistep-save')!.checkins as CheckInRecord[]).at(-1)!
+  assert.equal(last.verdict, 'accept')
+  assert.equal(last.totalCount, 3)
+  assert.equal(last.blockers.includes('criteria_unsatisfied:c1'), false)
+  assert.equal(finalized.status, 'done')
+})
+
+test('document multi-step without document save proof still owes steps_complete proof', async () => {
+  const store = fakeStore({
+    taskId: 'task-document-multistep-unsaved',
+    taskType: 'multi_step_task' as never,
+    module: 'document',
+    steps: [],
+    proofRefs: [
+      collectToolResultProof('document_set_content', '已写入内容，尚未保存', NOW),
+      collectArtifactProof('/tmp/unsaved.md', NOW),
+    ],
+  })
+  const runMeta = new Map<string, Record<string, unknown>>()
+  await finalizeRunOutcome({
+    kind: 'done', runId: 'run-document-multistep-unsaved', taskId: 'task-document-multistep-unsaved', scopeId: 's1',
+    durationMs: 10, toolCallsUsed: 1, initiator: 'done', finalText: '文档已写入',
+    projectionPatch: { taskType: 'multi_step_task', module: 'document' },
+  } as RunOutcome, { ...skillRunDeps(runMeta, () => false), taskProjectionStore: store })
+
+  const last = (store.rows.get('task-document-multistep-unsaved')!.checkins as CheckInRecord[]).at(-1)!
+  assert.equal(last.verdict, 'degraded')
+  assert.ok(last.blockers.includes('criteria_unsatisfied:c1'))
+})
+
+test('document multi-step with failed save and unrelated artifact still owes steps_complete proof', async () => {
+  const store = fakeStore({
+    taskId: 'task-document-multistep-failed-save-unrelated-artifact',
+    taskType: 'multi_step_task' as never,
+    module: 'document',
+    steps: [],
+    proofRefs: [
+      collectToolResultProof('document_save_tab', '保存失败：权限不足', NOW),
+      collectArtifactProof('/tmp/unrelated-screenshot.png', NOW),
+    ],
+  })
+  const runMeta = new Map<string, Record<string, unknown>>()
+  const finalized = await finalizeRunOutcome({
+    kind: 'done', runId: 'run-document-multistep-failed-save-unrelated-artifact', taskId: 'task-document-multistep-failed-save-unrelated-artifact', scopeId: 's1',
+    durationMs: 10, toolCallsUsed: 1, initiator: 'done', finalText: '文档已保存',
+    projectionPatch: { taskType: 'multi_step_task', module: 'document' },
+  } as RunOutcome, { ...skillRunDeps(runMeta, () => false), taskProjectionStore: store })
+
+  const last = (store.rows.get('task-document-multistep-failed-save-unrelated-artifact')!.checkins as CheckInRecord[]).at(-1)!
+  assert.equal(last.verdict, 'degraded')
+  assert.ok(last.blockers.includes('criteria_unsatisfied:c1'))
+  assert.equal(finalized.terminalReason, 'adjudication_degraded')
+})
+
+test('document multi-step with synthetic document progress still marks c1 notApplicable', async () => {
+  const store = fakeStore({
+    taskId: 'task-document-multistep-document-progress',
+    taskType: 'multi_step_task' as never,
+    module: 'document',
+    steps: [
+      { id: 'document_write', title: '已写入内容', status: 'done', updatedAt: NOW.toISOString() },
+      { id: 'document_save', title: '已保存到指定目录', status: 'done', updatedAt: NOW.toISOString() },
+    ] as never,
+    proofRefs: [
+      collectToolResultProof('document_set_content', '已写入内容', NOW),
+      ...collectDocumentSaveProofs('/tmp/report.md'),
+    ],
+  })
+  const runMeta = new Map<string, Record<string, unknown>>()
+  const finalized = await finalizeRunOutcome({
+    kind: 'done', runId: 'run-document-multistep-document-progress', taskId: 'task-document-multistep-document-progress', scopeId: 's1',
+    durationMs: 10, toolCallsUsed: 2, initiator: 'done', finalText: '文档已保存',
+    projectionPatch: { taskType: 'multi_step_task', module: 'document' },
+  } as RunOutcome, { ...skillRunDeps(runMeta, () => false), taskProjectionStore: store })
+
+  const last = (store.rows.get('task-document-multistep-document-progress')!.checkins as CheckInRecord[]).at(-1)!
+  assert.equal(last.verdict, 'accept')
+  assert.equal(last.totalCount, 3)
+  assert.equal(last.blockers.includes('criteria_unsatisfied:c1'), false)
+  assert.equal(finalized.status, 'done')
+})
+
+test('document multi-step with failed synthetic document progress still owes steps_complete proof', async () => {
+  const store = fakeStore({
+    taskId: 'task-document-multistep-failed-document-progress',
+    taskType: 'multi_step_task' as never,
+    module: 'document',
+    steps: [
+      { id: 'document_write', title: '写入内容失败', status: 'error', updatedAt: NOW.toISOString() },
+      { id: 'document_save', title: '已保存到指定目录', status: 'done', updatedAt: NOW.toISOString() },
+    ] as never,
+    proofRefs: [
+      ...collectDocumentSaveProofs('/tmp/report.md'),
+    ],
+  })
+  const runMeta = new Map<string, Record<string, unknown>>()
+  const finalized = await finalizeRunOutcome({
+    kind: 'done', runId: 'run-document-multistep-failed-document-progress', taskId: 'task-document-multistep-failed-document-progress', scopeId: 's1',
+    durationMs: 10, toolCallsUsed: 2, initiator: 'done', finalText: '文档已保存',
+    projectionPatch: { taskType: 'multi_step_task', module: 'document' },
+  } as RunOutcome, { ...skillRunDeps(runMeta, () => false), taskProjectionStore: store })
+
+  const last = (store.rows.get('task-document-multistep-failed-document-progress')!.checkins as CheckInRecord[]).at(-1)!
+  assert.equal(last.verdict, 'degraded')
+  assert.ok(last.blockers.includes('criteria_unsatisfied:c1'))
+  assert.equal(finalized.terminalReason, 'adjudication_degraded')
+})
+
+test('document multi-step with planned steps still owes steps_complete proof', async () => {
+  const store = fakeStore({
+    taskId: 'task-document-multistep-planned',
+    taskType: 'multi_step_task' as never,
+    module: 'document',
+    steps: [{ id: 's1', title: '写入文档', status: 'running', updatedAt: NOW.toISOString() }] as never,
+    proofRefs: [
+      ...collectDocumentSaveProofs('/tmp/report.md'),
+    ],
+  })
+  const runMeta = new Map<string, Record<string, unknown>>()
+  await finalizeRunOutcome({
+    kind: 'done', runId: 'run-document-multistep-planned', taskId: 'task-document-multistep-planned', scopeId: 's1',
+    durationMs: 10, toolCallsUsed: 1, initiator: 'done', finalText: '文档已保存',
+    projectionPatch: { taskType: 'multi_step_task', module: 'document' },
+  } as RunOutcome, { ...skillRunDeps(runMeta, () => false), taskProjectionStore: store })
+
+  const last = (store.rows.get('task-document-multistep-planned')!.checkins as CheckInRecord[]).at(-1)!
+  assert.equal(last.verdict, 'degraded')
+  assert.ok(last.blockers.includes('criteria_unsatisfied:c1'))
+})
+
+test('document multi-step with terminal patch planned steps still owes steps_complete proof', async () => {
+  const store = fakeStore({
+    taskId: 'task-document-multistep-terminal-planned',
+    taskType: 'multi_step_task' as never,
+    module: 'document',
+    steps: [],
+    proofRefs: [
+      ...collectDocumentSaveProofs('/tmp/report.md'),
+    ],
+  })
+  const runMeta = new Map<string, Record<string, unknown>>()
+  await finalizeRunOutcome({
+    kind: 'done', runId: 'run-document-multistep-terminal-planned', taskId: 'task-document-multistep-terminal-planned', scopeId: 's1',
+    durationMs: 10, toolCallsUsed: 1, initiator: 'done', finalText: '文档已保存',
+    projectionPatch: {
+      taskType: 'multi_step_task',
+      module: 'document',
+      steps: [{ id: 'outline_review', title: '确认大纲', status: 'running', updatedAt: NOW.toISOString() }],
+    },
+  } as RunOutcome, { ...skillRunDeps(runMeta, () => false), taskProjectionStore: store })
+
+  const last = (store.rows.get('task-document-multistep-terminal-planned')!.checkins as CheckInRecord[]).at(-1)!
+  assert.equal(last.verdict, 'degraded')
+  assert.ok(last.blockers.includes('criteria_unsatisfied:c1'))
+})
 
 test('P1 degraded_visible mode keeps proof-bearing degraded runs done but still records the degraded reason', async () => {
   const previous = process.env.READY_ADJUDICATION_ENFORCE_MODE

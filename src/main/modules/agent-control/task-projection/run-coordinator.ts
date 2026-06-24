@@ -22,9 +22,10 @@ import { buildExecutionFallbackState } from '../../claude-bridge/execution-fallb
 import { randomUUID } from 'node:crypto'
 import type { TurnTerminalReason } from '../runtime-core/turn-frame'
 
-function phaseFromTerminalReason(reason: TurnTerminalReason | null | undefined): ScopeRunEventPayload['phase'] | null {
+function phaseFromTerminalReason(reason: TurnTerminalReason | null | undefined, success?: boolean): ScopeRunEventPayload['phase'] | null {
   if (!reason) return null
   if (reason === 'done') return 'done'
+  if (reason === 'adjudication_degraded') return success ? 'done' : 'error'
   if (reason === 'cancelled_runtime' || reason === 'cancelled_user' || reason === 'main_no_progress_timeout') return 'cancelled'
   if (reason === 'failed_skill' || reason === 'resume_launch_failed' || reason === 'persistence_failed') return 'error'
   return 'checkpoint'
@@ -241,7 +242,7 @@ export class RunCoordinator {
       || finalBlockedReason
       || (finalInteractionState && finalInteractionState !== 'running'),
     )
-    const terminalPhase = phaseFromTerminalReason(result.terminalReason)
+    const terminalPhase = phaseFromTerminalReason(result.terminalReason, result.success)
     const finalPhase: ScopeRunEventPayload['phase'] = result.cancelled
       ? 'cancelled'
       : lifecycleSignal
@@ -310,6 +311,7 @@ export class RunCoordinator {
       return {
         success: false,
         error: result.error || 'Agent execution failed',
+        errorKind: result.terminalReason || undefined,
         scopeRunAuthority: result.scopeRunAuthority,
       }
     }

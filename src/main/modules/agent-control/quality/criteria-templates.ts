@@ -104,7 +104,13 @@ if (CRITERIA_BASE_TASK_TYPES.length !== TASK_TYPES.length
 export function resolveCriteria(
   taskType: TaskType,
   module: string,
-  options?: { skillExecutionForm?: SkillExecutionForm | null; skillHasRunStateHandle?: boolean },
+  options?: {
+    skillExecutionForm?: SkillExecutionForm | null
+    skillHasRunStateHandle?: boolean
+    hasPlannedSteps?: boolean
+    hasStepCompletionProof?: boolean
+    hasDocumentDeliveryProof?: boolean
+  },
 ): ResolvedCriteria {
   const base = BASE_TEMPLATES[taskType] ?? BASE_TEMPLATES.short_task
   const overlay = OVERLAY_TEMPLATES[module] ?? []
@@ -124,13 +130,23 @@ export function resolveCriteria(
   const skillForm = options?.skillExecutionForm ?? null
   const skillHasChildRunState = skillForm === 'child_loop' || skillForm === 'python'
     || options?.skillHasRunStateHandle === true
-  const resolvedItems = module === 'skill' && !skillHasChildRunState
+  const stepsStructurallyUnavailable =
+    (taskType === 'multi_step_task' || taskType === 'continuation')
+    && options?.hasPlannedSteps !== true
+    && options?.hasStepCompletionProof !== true
+    && options?.hasDocumentDeliveryProof === true
+  const skillResolvedItems = module === 'skill' && !skillHasChildRunState
     ? items.map((entry) => entry.id === 's1'
       ? markNotApplicable(entry, skillForm === 'direct'
         ? 'direct skill 交付即 tool_result，无 run_state/delivery_report'
         : 'primitive skill 执行无 child run_state 句柄，artifact/tool_result 即终态证据')
       : entry)
     : items
+  const resolvedItems = stepsStructurallyUnavailable
+    ? skillResolvedItems.map((entry) => entry.id === 'c1' && entry.kind === 'steps_complete'
+      ? markNotApplicable(entry, '本轮无计划步骤/子任务状态来源，文档保存已由 document/artifact proof 证明')
+      : entry)
+    : skillResolvedItems
   return {
     taskType,
     module,

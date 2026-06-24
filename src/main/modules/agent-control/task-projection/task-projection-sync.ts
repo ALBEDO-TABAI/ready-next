@@ -389,7 +389,7 @@ function resolveStatus(
   if (summary.terminalReason === 'adjudication_degraded' && summary.phase === 'done') {
     return 'completed'
   }
-  const terminalStatus = resolveTerminalProjectionStatus(summary.terminalReason)
+  const terminalStatus = resolveTerminalProjectionStatus(summary.terminalReason, summary.phase)
   if (terminalStatus) return terminalStatus
   const interactionState = resolveInteractionState(summary)
   const waitingForBlocker = Boolean(summary.waitingFor && summary.waitingFor !== 'none')

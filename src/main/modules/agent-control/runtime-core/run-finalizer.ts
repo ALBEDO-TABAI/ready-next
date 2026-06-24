@@ -335,6 +335,44 @@ function normalizeSkillExecutionForm(value: unknown): SkillExecutionForm | null 
     : null
 }
 
+const DOCUMENT_PROGRESS_STEP_IDS = new Set(['document_create', 'document_write', 'document_save'])
+
+function stepRequiresCompletionProof(step: unknown): boolean {
+  if (!step || typeof step !== 'object') return false
+  const id = String((step as { id?: unknown }).id || '')
+  const status = String((step as { status?: unknown }).status || '')
+  return !DOCUMENT_PROGRESS_STEP_IDS.has(id) || status !== 'done'
+}
+
+function hasPlannedStepsRequiringProof(
+  projection: TaskProjectionRecord,
+  projectionPatch?: Record<string, unknown> | null,
+): boolean {
+  const storedSteps = Array.isArray(projection.steps) ? projection.steps : []
+  const patchSteps = Array.isArray(projectionPatch?.steps) ? projectionPatch.steps : []
+  return [...storedSteps, ...patchSteps].some(stepRequiresCompletionProof)
+}
+
+function hasProofKind(proofRefs: ReadonlyArray<unknown>, kinds: ReadonlySet<string>): boolean {
+  return proofRefs.some((row) => row && typeof row === 'object' && kinds.has(String((row as Record<string, unknown>).kind || '')))
+}
+
+function hasDocumentDeliveryProof(proofRefs: ReadonlyArray<unknown>): boolean {
+  const deliveredDocumentPaths = new Set<string>()
+  const artifactPaths = new Set<string>()
+  for (const row of proofRefs) {
+    if (!row || typeof row !== 'object') continue
+    const record = row as Record<string, unknown>
+    const ref = typeof record.ref === 'string' ? record.ref : ''
+    if (record.kind === 'tool_result' && ref.startsWith('document_save_tab:')) {
+      const path = ref.slice('document_save_tab:'.length).trim()
+      if (path) deliveredDocumentPaths.add(path)
+    }
+    if (record.kind === 'artifact' && ref) artifactPaths.add(ref)
+  }
+  return [...deliveredDocumentPaths].some((path) => artifactPaths.has(path))
+}
+
 /** P0-3 — the row in task_projections may still carry first-build defaults
  *  (short_task) at finalize time: the terminal projectionPatch is the
  *  authoritative correction and must win for adjudication AND coverage
@@ -510,6 +548,9 @@ function recordTerminalAdjudication(
     const criteria = resolveCriteria(effectiveTaskType, effectiveModule, {
       skillExecutionForm: facts?.skillExecutionForm ?? null,
       skillHasRunStateHandle,
+      hasPlannedSteps: hasPlannedStepsRequiringProof(projection, outcome.projectionPatch),
+      hasStepCompletionProof: hasProofKind(proofRefs, new Set(['run_state', 'task_event'])),
+      hasDocumentDeliveryProof: hasDocumentDeliveryProof(proofRefs),
     })
     const { verdict, checkIn } = adjudicateTerminalOutcome({
       terminalStatus: status,

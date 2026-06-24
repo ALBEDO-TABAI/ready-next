@@ -10,8 +10,9 @@
 // reply — and surfaces any panel-level diagnostics as test failures.
 
 import assert from 'node:assert/strict'
-import { mkdir, writeFile } from 'node:fs/promises'
-import { relative } from 'node:path'
+import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join, relative } from 'node:path'
 import test, { after } from 'node:test'
 
 import {
@@ -49,6 +50,9 @@ const acceptanceEvidenceOutputDir = process.env.READY_STAGE_Z_AGENT_ACCEPTANCE_D
 const acceptanceEvidenceSummaryPath =
   process.env.READY_STAGE_Z_AGENT_ACCEPTANCE_SUMMARY || STAGE_Z_AGENT_ACCEPTANCE_SUMMARY
 const acceptanceEvidenceRecords: SimulatedHumanEvidenceRecord[] = []
+const hfpAcceptanceDir = process.env.READY_HFP_ACCEPTANCE_DIR
+  || join(tmpdir(), 'ready-hfp-space-design-acceptance', 'hfp空间方案')
+const keepHfpAcceptanceArtifacts = Boolean(process.env.READY_HFP_ACCEPTANCE_DIR)
 
 const fakeConfig = {
   provider: 'openai',
@@ -59,6 +63,155 @@ const fakeConfig = {
 
 test('agent acceptance checklist declares transitive sqlite coverage', (t) => {
   skipIfSqliteUnavailable(t, 'agent acceptance checklist transitive sqlite guard')
+})
+
+test('HFP1: 最近 hfp 空间方案 prompt 通过 document.saveTab 可见交付并刷新回复', async (t) => {
+  const targetPath = join(hfpAcceptanceDir, 'ready-hfp-regression-岩洞风格方案.md')
+  const title = 'ready-hfp-regression-岩洞风格方案.md'
+  const documentBody = [
+    '# hfp™ 岩洞风格门店 · 温暖石穴方案',
+    '',
+    '## 空间叙事',
+    '以岩洞、温暖石穴、柔和灯带和护肤体验动线组织门店方案。',
+    '',
+    '## 执行提示',
+    '该文档来自 Ready agent panel test mode，用于验证 document.saveTab 交付链路。',
+    '',
+  ].join('\n')
+
+  try {
+    const r = await runChecklistItem({
+      itemId: 'HFP1',
+      input: '@[hfp-space-design]生成一版岩洞风格、温暖石穴感的 hfp™ 门店空间方案，输出方案文档到@[hfp空间方案]。如果前面已经准备过内容，就继续并把文档保存到指定目录里。',
+      tools: [
+        { name: 'document_create_tab', groupId: 'document', domain: 'document', kind: 'write', concurrency: 'serialized' },
+        { name: 'document_set_content', groupId: 'document', domain: 'document', kind: 'write', concurrency: 'serialized' },
+        { name: 'document_save_tab', groupId: 'document', domain: 'document', kind: 'write', concurrency: 'serialized' },
+      ],
+      plan: [
+        { name: 'document_create_tab', input: { title, path: targetPath } },
+        { name: 'document_set_content', input: { tabId: 'hfp-doc', content: documentBody } },
+        { name: 'document_save_tab', input: { tabId: 'hfp-doc' } },
+      ],
+      skillContextOrchestrator: {
+        findExplicitlyRequestedSkills: () => [{ id: 'hfp-space-design', name: 'hfp-space-design' }],
+        buildPreferredSkillToolNames: () => ['document_create_tab', 'document_set_content', 'document_save_tab'],
+        rememberExplicitReferenceSkillHint: () => {
+          rememberLastReferenceSkill('acc-hfp1', { id: 'hfp-space-design', name: 'hfp-space-design' })
+          return true
+        },
+      },
+      executeToolCall: async (toolName, args) => {
+        const now = new Date().toISOString()
+        if (toolName === 'document_create_tab') {
+          return createToolExecutionOutput(`已创建文档：${title}`, {
+            shape: 'json',
+            data: {
+              ok: true,
+              args,
+              documentTabId: 'hfp-doc',
+              documentTitle: title,
+              documentPath: targetPath,
+              documentDirty: false,
+              documentSaveState: 'saved',
+            },
+            projectionPatch: {
+              taskTitle: '正在创建文档',
+              taskSummary: '已创建 hfp 空间方案文档',
+              steps: [{ id: 'document_create', title: '已创建文档', status: 'done', updatedAt: now }],
+              currentStepId: 'document_create',
+            },
+          })
+        }
+        if (toolName === 'document_set_content') {
+          return createToolExecutionOutput('已写入岩洞风格空间方案正文', {
+            shape: 'json',
+            data: {
+              ok: true,
+              args,
+              mutated: true,
+              mutationReason: 'changed',
+              documentTabId: 'hfp-doc',
+              documentTitle: title,
+              documentPath: targetPath,
+              documentDirty: true,
+              documentSaveState: 'dirty',
+            },
+            projectionPatch: {
+              taskTitle: '正在写入文档',
+              taskSummary: '岩洞风格空间方案正文已写入',
+              steps: [{ id: 'document_write', title: '已写入内容', status: 'done', updatedAt: now }],
+              currentStepId: 'document_write',
+            },
+          })
+        }
+        if (toolName === 'document_save_tab') {
+          await mkdir(hfpAcceptanceDir, { recursive: true })
+          await writeFile(targetPath, documentBody, 'utf-8')
+          return createToolExecutionOutput(`已保存文档：${targetPath}`, {
+            shape: 'json',
+            data: {
+              ok: true,
+              args,
+              documentSaved: true,
+              path: targetPath,
+              document: {
+                tabId: 'hfp-doc',
+                title,
+                path: targetPath,
+                dirty: false,
+                requiresSave: false,
+                saveState: 'saved',
+              },
+            },
+            projectionPatch: {
+              taskTitle: '文档已保存',
+              taskSummary: `已保存到 ${targetPath}`,
+              steps: [{ id: 'document_save', title: '已保存到指定目录', status: 'done', updatedAt: now }],
+              currentStepId: 'document_save',
+              recentArtifacts: [{
+                id: 'hfp-regression-artifact',
+                module: 'document',
+                kind: 'delivered_file',
+                label: title,
+                path: targetPath,
+                mimeType: 'text/markdown',
+                createdAt: now,
+                meta: {
+                  deliverySource: 'document.saveTab',
+                  deliveryStatus: 'verified',
+                  requestedTarget: true,
+                },
+              }],
+            },
+          })
+        }
+        return createToolExecutionOutput(`${toolName} ok`, { shape: 'json', data: { args } })
+      },
+      finalText: `方案文档已保存：${targetPath}`,
+      sessionId: 'acc-hfp1',
+    })
+    reportPanel(t, r)
+    expectNoErrorDiagnostics(r)
+    expectUsedTools(r, ['document_create_tab', 'document_set_content', 'document_save_tab'])
+    expectToolTraceContains(r, 'document_save_tab')
+    expectTaskCardTitleIncludes(r, '文档已保存')
+    expectAgentMessageContains(r, targetPath)
+    assert.equal(r.result.success, true)
+    assert.equal(r.result.terminalReason || 'done', 'done')
+    assert.ok(r.outputEvents.some((event) => event.type === 'text' && String(event.chunk || '').includes('方案文档已保存')), '[HFP1] final reply should refresh with saved path')
+    assert.ok(r.scopeEvents.some((event) => event.payload.phase === 'tool_running'), '[HFP1] should emit in-progress scope events')
+    assert.ok(r.snapshot.infoCards.some((card) => card.kind === 'recent_artifact'), '[HFP1] expected visible file card')
+    assert.ok(r.snapshot.infoCards.some((card) => JSON.stringify(card).includes(targetPath)), '[HFP1] file card should include target path')
+    const saved = await readFile(targetPath, 'utf-8')
+    const savedStat = await stat(targetPath)
+    assert.ok(savedStat.size > 0, '[HFP1] saved document should be non-empty')
+    assert.match(saved, /hfp™ 岩洞风格门店/)
+  } finally {
+    if (!keepHfpAcceptanceArtifacts) {
+      await rm(targetPath, { force: true })
+    }
+  }
 })
 
 interface ToolStep {

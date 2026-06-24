@@ -517,6 +517,7 @@ export type ScopeRunAuthority = {
 export interface RunCoordinatorResult {
   success: boolean
   error?: string
+  errorKind?: string
   scopeRunAuthority?: ScopeRunAuthority
 }
 

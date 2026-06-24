@@ -5,6 +5,22 @@ export type SendScopedErrorKind =
   | 'host_unavailable'
   | 'circuit_break'
   | 'superseded'
+  | 'checkpoint_budget'
+  | 'blocked_config'
+  | 'blocked_external'
+  | 'context_overflow'
+  | 'blocked_tool_error'
+  | 'adjudication_degraded'
+  | 'delivery_failed'
+  | 'tool_unavailable'
+  | 'no_artifact'
+  | 'proof_gap'
+  | 'failed_skill'
+  | 'resume_launch_failed'
+  | 'persistence_failed'
+  | 'cancelled_user'
+  | 'cancelled_runtime'
+  | 'main_no_progress_timeout'
   | 'unknown'
 
 export type SendScopedScopeStatus = 'pre-existing' | 'lazy-created' | 'failed'
@@ -166,4 +182,39 @@ export function classifySendScopedError(
   if (/circuit_break|circuit breaker/i.test(message)) return 'circuit_break'
   if (/host_unavailable|host unavailable|ToolHostUnavailableError/i.test(message)) return 'host_unavailable'
   return 'unknown'
+}
+
+const SEND_SCOPED_ERROR_KINDS = new Set<SendScopedErrorKind>([
+  'scope_missing',
+  'message_persist_failed',
+  'attachment_unavailable',
+  'host_unavailable',
+  'circuit_break',
+  'superseded',
+  'checkpoint_budget',
+  'blocked_config',
+  'blocked_external',
+  'context_overflow',
+  'blocked_tool_error',
+  'adjudication_degraded',
+  'delivery_failed',
+  'tool_unavailable',
+  'no_artifact',
+  'proof_gap',
+  'failed_skill',
+  'resume_launch_failed',
+  'persistence_failed',
+  'cancelled_user',
+  'cancelled_runtime',
+  'main_no_progress_timeout',
+  'unknown',
+])
+
+export function normalizeSendScopedErrorKind(value: unknown): SendScopedErrorKind | null {
+  if (typeof value !== 'string') return null
+  const trimmed = value.trim()
+  if (!trimmed) return null
+  return SEND_SCOPED_ERROR_KINDS.has(trimmed as SendScopedErrorKind)
+    ? trimmed as SendScopedErrorKind
+    : null
 }

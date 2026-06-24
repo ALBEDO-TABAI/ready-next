@@ -32,6 +32,70 @@ describe('document tool execution', () => {
     assert.equal(toolText(result), 'Document save queued: document.saveTab')
   })
 
+  it('returns a visible delivered file artifact after document save succeeds', async () => {
+    const result = await executeDocumentTool(
+      'document_save_tab',
+      {},
+      {
+        requestModuleToolAction: async () => ({
+          summary: '已保存文档：/tmp/ready-report.md',
+          documentSaved: true,
+          documentPath: '/tmp/ready-report.md',
+        }),
+      },
+    )
+
+    assert.equal(typeof result, 'object')
+    if (typeof result === 'string') throw new Error('expected structured document save output')
+    const artifact = result.projectionPatch?.recentArtifacts as Array<Record<string, unknown>> | undefined
+    assert.equal(result.data?.documentSaved, true)
+    assert.equal(artifact?.[0]?.kind, 'delivered_file')
+    assert.equal(artifact?.[0]?.path, '/tmp/ready-report.md')
+    assert.equal(result.projectionPatch?.taskTitle, '文档已保存')
+  })
+
+  it('marks document save failures as failed progress, not running', async () => {
+    const result = await executeDocumentTool(
+      'document_save_tab',
+      {},
+      {
+        requestModuleToolAction: async () => ({
+          summary: '保存失败：权限不足',
+          documentSaved: false,
+          documentPath: '/tmp/ready-report.md',
+        }),
+      },
+    )
+
+    assert.equal(typeof result, 'object')
+    if (typeof result === 'string') throw new Error('expected structured document save output')
+    const steps = result.projectionPatch?.steps as Array<Record<string, unknown>> | undefined
+    assert.equal(result.projectionPatch?.taskTitle, '文档保存失败')
+    assert.equal(steps?.[0]?.status, 'error')
+    assert.equal(result.projectionPatch?.recentArtifacts, undefined)
+  })
+
+  it('does not mint a verified artifact when save is skipped without structured save success', async () => {
+    const result = await executeDocumentTool(
+      'document_save_tab',
+      {},
+      {
+        requestModuleToolAction: async () => ({
+          summary: '文档未改动，已跳过保存：/tmp/ready-report.md',
+          documentSaved: false,
+          documentPath: '/tmp/ready-report.md',
+        }),
+      },
+    )
+
+    assert.equal(typeof result, 'object')
+    if (typeof result === 'string') throw new Error('expected structured document save output')
+    const steps = result.projectionPatch?.steps as Array<Record<string, unknown>> | undefined
+    assert.equal(result.projectionPatch?.taskTitle, '文档未改动')
+    assert.equal(steps?.[0]?.status, 'done')
+    assert.equal(result.projectionPatch?.recentArtifacts, undefined)
+  })
+
   it('accepts componentSpec payloads for widget insertion tools', async () => {
     const result = await executeDocumentTool(
       'document_insert_widget',
@@ -75,5 +139,86 @@ describe('document tool execution', () => {
     assert.equal(typeof result, 'object')
     assert.equal(typeof result === 'string' ? null : result.data?.errorKind, 'widget_boundary_violation')
     assert.equal(typeof result === 'string' ? null : result.data?.mutated, false)
+    const steps = typeof result === 'string' ? null : result.projectionPatch?.steps as Array<Record<string, unknown>> | undefined
+    assert.equal(typeof result === 'string' ? null : result.projectionPatch?.taskTitle, '文档写入失败')
+    assert.equal(steps?.[0]?.status, 'error')
+  })
+
+  it('emits done progress for successful widget removal', async () => {
+    const result = await executeDocumentTool(
+      'document_remove_widget',
+      { target: 'price_card' },
+      {
+        requestModuleToolAction: async () => ({
+          summary: '已删除 widget：price_card',
+          mutated: true,
+          mutationReason: 'changed',
+        }),
+      },
+    )
+
+    assert.equal(typeof result, 'object')
+    const steps = typeof result === 'string' ? null : result.projectionPatch?.steps as Array<Record<string, unknown>> | undefined
+    assert.equal(typeof result === 'string' ? null : result.projectionPatch?.taskTitle, '正在写入文档')
+    assert.equal(steps?.[0]?.status, 'done')
+  })
+
+  it('does not treat successful mutation titles containing failure words as failed progress', async () => {
+    const result = await executeDocumentTool(
+      'document_rewrite_section',
+      { sectionTitle: '失败复盘', content: 'done' },
+      {
+        requestModuleToolAction: async () => ({
+          summary: '已重写章节（失败复盘）',
+          mutated: true,
+          mutationReason: 'changed',
+        }),
+      },
+    )
+
+    assert.equal(typeof result, 'object')
+    const steps = typeof result === 'string' ? null : result.projectionPatch?.steps as Array<Record<string, unknown>> | undefined
+    assert.equal(typeof result === 'string' ? null : result.projectionPatch?.taskTitle, '正在写入文档')
+    assert.equal(steps?.[0]?.status, 'done')
+  })
+
+  it('does not treat structured mutation summaries containing failure words as failed without an explicit failure', async () => {
+    const result = await executeDocumentTool(
+      'document_rewrite_section',
+      { sectionTitle: '失败复盘', content: 'done' },
+      {
+        requestModuleToolAction: async () => ({
+          summary: '已重写章节（失败复盘）',
+          documentTabId: 'doc-1',
+          documentTitle: '失败复盘.md',
+          documentDirty: true,
+          documentSaveState: 'dirty',
+        }),
+      },
+    )
+
+    assert.equal(typeof result, 'object')
+    const steps = typeof result === 'string' ? null : result.projectionPatch?.steps as Array<Record<string, unknown>> | undefined
+    assert.equal(typeof result === 'string' ? null : result.projectionPatch?.taskTitle, '正在写入文档')
+    assert.equal(steps?.[0]?.status, 'done')
+  })
+
+  it('emits failed progress for unsuccessful widget removal', async () => {
+    const result = await executeDocumentTool(
+      'document_remove_widget',
+      { target: 'price_card' },
+      {
+        requestModuleToolAction: async () => ({
+          summary: '未找到 widget：price_card',
+          mutated: false,
+          mutationReason: 'no_match',
+        }),
+      },
+    )
+
+    assert.equal(typeof result, 'object')
+    const steps = typeof result === 'string' ? null : result.projectionPatch?.steps as Array<Record<string, unknown>> | undefined
+    assert.equal(typeof result === 'string' ? null : result.projectionPatch?.taskTitle, '文档写入失败')
+    assert.equal(steps?.[0]?.status, 'error')
   })
 })

@@ -457,10 +457,12 @@ function mapChildCloseToTurnTerminalReason(close: SkillChildCloseEvent): TurnTer
   return 'checkpoint_user_input'
 }
 
-function statusFromTerminalReason(
+export function statusFromTerminalReason(
   reason: TurnTerminalReason,
+  success = true,
 ): 'done' | 'error' | 'cancelled' | 'checkpoint' {
   if (reason === 'done') return 'done'
+  if (reason === 'adjudication_degraded') return success ? 'done' : 'error'
   if (reason === 'cancelled_user' || reason === 'cancelled_runtime' || reason === 'main_no_progress_timeout') return 'cancelled'
   if (
     reason === 'failed_skill'
@@ -468,7 +470,6 @@ function statusFromTerminalReason(
     || reason === 'persistence_failed'
     || reason === 'context_overflow'
     || reason === 'blocked_tool_error'
-    || reason === 'adjudication_degraded'
     || reason === 'delivery_failed'
     || reason === 'tool_unavailable'
     || reason === 'no_artifact'
@@ -668,7 +669,7 @@ export function renderChildCommandOutcome(args: {
       return {
         message: `child run ${childRunId} 仍在等待：${close.terminalReason}`,
         terminalReason,
-        status: statusFromTerminalReason(terminalReason),
+        status: statusFromTerminalReason(terminalReason, false),
       }
     }
   }
@@ -2183,7 +2184,7 @@ export class TurnEngine {
             const terminalReason = mapChildCloseToTurnTerminalReason(childCommand.closeEvent)
             return finish({
               success: true,
-              status: statusFromTerminalReason(terminalReason),
+              status: statusFromTerminalReason(terminalReason, false),
               terminalReason,
             })
           }
@@ -3288,7 +3289,10 @@ export class TurnEngine {
           // surface as the same parent reasons the supervisor uses.
           const childStatus = childContinuation.closeEvent.status
           const turnTerminalReason = mapChildCloseToTurnTerminalReason(childContinuation.closeEvent)
-          const status = statusFromTerminalReason(turnTerminalReason)
+          const status = statusFromTerminalReason(
+            turnTerminalReason,
+            isCompletedChildCloseStatus(childStatus),
+          )
           if (turnFrame) {
             // Stage M (M2a) — terminal site, no steering refresh needed.
             turnFrame = applyTurnFramePatch(turnFrame, { terminalReason: turnTerminalReason })

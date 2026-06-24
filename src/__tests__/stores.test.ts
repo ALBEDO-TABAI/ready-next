@@ -81,6 +81,7 @@ if (typeof (globalThis as any).window === 'undefined') {
 const { useMode } = await import('../renderer/stores/useMode')
 const { useDocTabs } = await import('../renderer/stores/useDocTabs')
 const { useAgent } = await import('../renderer/stores/useAgent')
+const { phaseToToolTraceStatus } = await import('../renderer/modules/agent/scopeRunState')
 const { useWorkspace, computeDesiredRoots } = await import('../renderer/stores/useWorkspace')
 const { useTheme } = await import('../renderer/stores/useTheme')
 const { useRSSSession } = await import('../renderer/stores/useRSSSession')
@@ -554,6 +555,12 @@ describe('useDocTabs Store', () => {
 // ============================================================
 
 describe('useAgent Store', () => {
+    it('keeps error phase visible even when terminal reason is a blocking reason', () => {
+        assert.equal(phaseToToolTraceStatus('error', 'blocked_external'), 'error')
+        assert.equal(phaseToToolTraceStatus('error', 'blocked_config'), 'error')
+        assert.equal(phaseToToolTraceStatus('error', 'checkpoint_budget'), 'error')
+    })
+
     beforeEach(() => {
         ;(globalThis as any).window.electronAPI = undefined
         useAgent.setState({
@@ -1498,8 +1505,19 @@ describe('useAgent Store', () => {
         assert.equal(useAgent.getState().isStreaming, false)
     })
 
-    it('should not classify a persisted user message as a persistence failure when the run fails later', async () => {
+    it('should show a visible error when the run fails after persisting the user message', async () => {
         const metricCalls: Array<{ name: string; payload?: Record<string, unknown> }> = []
+        const scopeId = 'conv-local-run-failed-after-persist'
+        const staleRunState = {
+            scopeId,
+            agent: 'butler',
+            requestId: 'previous-request',
+            phase: 'done' as const,
+            terminalReason: 'done' as const,
+            toolTrace: [],
+            startedAt: '2026-04-15T09:59:00.000Z',
+            updatedAt: '2026-04-15T09:59:30.000Z',
+        }
 
         ;(globalThis as any).window.electronAPI = {
             agent: {
@@ -1547,14 +1565,129 @@ describe('useAgent Store', () => {
 
         useAgent.setState({
             currentAgent: 'butler',
-            currentScopeId: 'conv-local-run-failed-after-persist',
+            currentScopeId: scopeId,
             currentScope: {
-                id: 'conv-local-run-failed-after-persist',
+                id: scopeId,
                 agent: 'butler',
                 title: '新对话',
                 sourceKind: 'local',
                 sourceId: 'app',
-                threadKey: 'conv-local-run-failed-after-persist',
+                threadKey: scopeId,
+                meta: { sourceLabel: '应用内', createdBy: 'app' },
+                createdAt: '2026-04-15T10:00:00.000Z',
+                updatedAt: '2026-04-15T10:00:00.000Z',
+                lastMessageAt: null,
+            },
+            scopes: [],
+            conversations: [],
+            messages: [],
+            attachments: [],
+            filePool: [],
+            isStreaming: false,
+            sendCoalescingEnabled: false,
+            activeSessionId: scopeId,
+            sessionId: scopeId,
+            scopeRunStates: {
+                [scopeId]: staleRunState,
+            },
+            sessions: {
+                [scopeId]: {
+                    messages: [],
+                    pendingSendCount: 0,
+                    pendingSendFlushAt: null,
+                    isStreaming: false,
+                    foregroundBusy: false,
+                    composerLocked: false,
+                    streamingMessageId: null,
+                    streamingRequestId: null,
+                    scopeRunStates: {
+                        [scopeId]: staleRunState,
+                    },
+                    taskDisclosureState: {},
+                    state: 'live',
+                    conversationId: scopeId,
+                    inputValue: '',
+                },
+            },
+        })
+
+        const result = await useAgent.getState().sendMessage('hello')
+        const failedRunState = useAgent.getState().scopeRunStates[scopeId]
+
+        assert.equal(result.success, false)
+        assert.equal(result.preserveInput, false)
+        assert.equal(result.shouldClearInput, true)
+        assert.equal(failedRunState?.phase, 'error')
+        assert.equal(failedRunState?.terminalReason, 'blocked_external')
+        assert.equal(useAgent.getState().toolTraceStatus, 'error')
+        assert.ok(
+            metricCalls.some((call) => call.name === 'renderer_send_failed_after_persisted_message'),
+            'persisted-message run failures use the run-failure metric',
+        )
+        assert.equal(
+            useAgent.getState().messages.some((message) => message.type === 'system' && /模型服务暂时不可用/.test(message.content)),
+            true,
+            'post-persistence run failures still surface a visible error',
+        )
+        assert.equal(
+            metricCalls.some((call) => call.name === 'renderer_send_persistence_failed'),
+            false,
+            'persisted-message run failures must not be reported as persistence failures',
+        )
+    })
+
+    it('should keep hard adjudication-degraded failures visible after persisting the user message', async () => {
+        ;(globalThis as any).window.electronAPI = {
+            agent: {
+                createLocalScope: async (_agent: string, scopeId?: string) => ({
+                    success: true,
+                    data: {
+                        id: scopeId || 'conv-local-degraded-after-persist',
+                        agent: 'butler',
+                        title: '新对话',
+                        sourceKind: 'local',
+                        sourceId: 'app',
+                        threadKey: scopeId || 'conv-local-degraded-after-persist',
+                        meta: { sourceLabel: '应用内', createdBy: 'app' },
+                        createdAt: '2026-04-15T10:00:00.000Z',
+                        updatedAt: '2026-04-15T10:00:00.000Z',
+                        lastMessageAt: null,
+                    },
+                }),
+                sendScoped: async () => ({
+                    success: false,
+                    error: 'criteria degraded',
+                    errorKind: 'adjudication_degraded',
+                    persistence: {
+                        scope: 'pre-existing',
+                        message: 'persisted',
+                        attachments: 'none',
+                        inputAttachments: 'none',
+                    },
+                }),
+                emitRendererMetric: async () => ({ success: true }),
+                kill: async () => ({ success: true }),
+            },
+            chat: {
+                createConversation: async () => ({ success: true }),
+                saveMessage: async () => ({ success: true }),
+                updateConversationTitle: async () => ({ success: true }),
+            },
+            settings: {
+                getAIConfig: async () => ({ success: true, data: null }),
+            },
+        }
+
+        useAgent.setState({
+            currentAgent: 'butler',
+            currentScopeId: 'conv-local-degraded-after-persist',
+            currentScope: {
+                id: 'conv-local-degraded-after-persist',
+                agent: 'butler',
+                title: '新对话',
+                sourceKind: 'local',
+                sourceId: 'app',
+                threadKey: 'conv-local-degraded-after-persist',
                 meta: { sourceLabel: '应用内', createdBy: 'app' },
                 createdAt: '2026-04-15T10:00:00.000Z',
                 updatedAt: '2026-04-15T10:00:00.000Z',
@@ -1574,14 +1707,18 @@ describe('useAgent Store', () => {
         assert.equal(result.success, false)
         assert.equal(result.preserveInput, false)
         assert.equal(result.shouldClearInput, true)
-        assert.ok(
-            metricCalls.some((call) => call.name === 'renderer_send_failed_after_persisted_message'),
-            'persisted-message run failures use the run-failure metric',
+        assert.equal(
+            useAgent.getState().scopeRunStates['conv-local-degraded-after-persist']?.phase,
+            'error',
         )
         assert.equal(
-            metricCalls.some((call) => call.name === 'renderer_send_persistence_failed'),
-            false,
-            'persisted-message run failures must not be reported as persistence failures',
+            useAgent.getState().scopeRunStates['conv-local-degraded-after-persist']?.terminalReason,
+            'adjudication_degraded',
+        )
+        assert.equal(
+            useAgent.getState().messages.some((message) => message.type === 'system' && /已生成结果，但仍有待确认项/.test(message.content)),
+            true,
+            'hard adjudication failures remain visible instead of becoming green completions',
         )
     })
 

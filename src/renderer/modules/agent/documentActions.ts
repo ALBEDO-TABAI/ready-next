@@ -312,7 +312,7 @@ export function classifyDocActionMutationOutcome(
     return {
       mutated: false,
       mutationReason: 'saved',
-      documentSaved: /已保存文档|已另存文档|文档未改动，已跳过保存/.test(normalized),
+      documentSaved: /已保存文档|已另存文档/.test(normalized),
     }
   }
 

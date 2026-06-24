@@ -1,3 +1,5 @@
+import { basename } from 'node:path'
+
 import { DOCUMENT_SCHEMAS } from './schemas/document-schemas'
 import { zodObjectToParamList } from './zod-param-derivation'
 import { logAgentMetric } from '../agent-control/metrics'
@@ -159,6 +161,154 @@ interface DocumentToolContext {
   requestModuleToolAction?: (tool: string, args: Record<string, unknown>) => Promise<Record<string, unknown>>
 }
 
+const DOCUMENT_MUTATION_TOOLS = new Set([
+  'document_set_content',
+  'document_append_content',
+  'document_insert_widget',
+  'document_update_widget',
+  'document_remove_widget',
+  'document_replace_text',
+  'document_replace_exact',
+  'document_format_section',
+  'document_rewrite_section',
+])
+
+function cleanPath(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null
+}
+
+function pathFromSaveSummary(summary: string): string | null {
+  const match = summary.match(/(?:已保存文档|已另存文档|文档未改动，已跳过保存)[:：]\s*([^\n\r]+)/)
+  return cleanPath(match?.[1])
+}
+
+function documentArtifact(path: string, createdAt: string): Record<string, unknown> {
+  const name = basename(path) || path
+  return {
+    id: `document-save:${path}`,
+    module: 'document',
+    kind: 'delivered_file',
+    label: name,
+    path,
+    mimeType: name.toLowerCase().endsWith('.md') ? 'text/markdown' : 'text/plain',
+    sourceRunId: null,
+    createdAt,
+    meta: {
+      deliverySource: 'document.saveTab',
+      deliveryStatus: 'verified',
+      requestedTarget: true,
+    },
+  }
+}
+
+function documentMutationFailed(summary: string, data: Record<string, unknown>): boolean {
+  const mutationReason = typeof data.mutationReason === 'string' ? data.mutationReason : ''
+  if (
+    data.ok === false
+    || typeof data.errorKind === 'string'
+    || mutationReason === 'validation_failed'
+    || mutationReason === 'rejected'
+    || mutationReason === 'no_match'
+    || mutationReason === 'cancelled'
+  ) {
+    return true
+  }
+  if (data.mutated === true || mutationReason === 'changed' || data.ok === true) return false
+  if (
+    'mutated' in data ||
+    'ok' in data ||
+    Boolean(mutationReason) ||
+    'documentTabId' in data ||
+    'documentTitle' in data ||
+    'documentSaveState' in data ||
+    'documentDirty' in data
+  ) {
+    return false
+  }
+  return /(?:^Error:|Document action failed|failed|失败|无法|没有可|未匹配到|未找到|缺少|已拒绝|被拒绝|已取消|被取消)/i.test(summary)
+}
+
+function documentMutationSkipped(data: Record<string, unknown>): boolean {
+  const mutationReason = typeof data.mutationReason === 'string' ? data.mutationReason : ''
+  return data.mutated === false
+    && (mutationReason === 'identical' || mutationReason === 'not_mutation')
+}
+
+function documentProjectionPatch(toolName: string, summary: string, data: Record<string, unknown>): Record<string, unknown> | null {
+  const now = new Date().toISOString()
+  if (toolName === 'document_new_tab') {
+    return {
+      taskTitle: '正在创建文档',
+      taskSummary: summary,
+      steps: [{ id: 'document_create', title: '已创建文档', status: 'done', updatedAt: now }],
+      currentStepId: 'document_create',
+      waitingFor: 'none',
+    }
+  }
+  if (DOCUMENT_MUTATION_TOOLS.has(toolName)) {
+    if (documentMutationFailed(summary, data)) {
+      return {
+        taskTitle: '文档写入失败',
+        taskSummary: summary,
+        steps: [{ id: 'document_write', title: '写入内容失败', status: 'error', updatedAt: now }],
+        currentStepId: 'document_write',
+        waitingFor: 'none',
+      }
+    }
+    if (documentMutationSkipped(data)) {
+      return {
+        taskTitle: '文档未改动',
+        taskSummary: summary,
+        steps: [{ id: 'document_write', title: '无需写入内容', status: 'done', updatedAt: now }],
+        currentStepId: 'document_write',
+        waitingFor: 'none',
+      }
+    }
+    return {
+      taskTitle: '正在写入文档',
+      taskSummary: summary,
+      steps: [{ id: 'document_write', title: '已写入内容', status: 'done', updatedAt: now }],
+      currentStepId: 'document_write',
+      waitingFor: 'none',
+    }
+  }
+  if (toolName !== 'document_save_tab') return null
+
+  const saved = data.documentSaved === true
+  const skippedSave = /文档未改动，已跳过保存/.test(summary)
+  if (!saved) {
+    if (skippedSave) {
+      return {
+        taskTitle: '文档未改动',
+        taskSummary: summary,
+        steps: [{ id: 'document_save', title: '无需保存到指定目录', status: 'done', updatedAt: now }],
+        currentStepId: 'document_save',
+        waitingFor: 'none',
+      }
+    }
+    return {
+      taskTitle: '文档保存失败',
+      taskSummary: summary,
+      steps: [{ id: 'document_save', title: '保存到指定目录失败', status: 'error', updatedAt: now }],
+      currentStepId: 'document_save',
+      waitingFor: 'none',
+    }
+  }
+  const path = cleanPath(data.path)
+    || cleanPath(data.savedPath)
+    || cleanPath(data.documentPath)
+    || pathFromSaveSummary(summary)
+  const artifact = path ? documentArtifact(path, now) : null
+  return {
+    taskTitle: '文档已保存',
+    taskSummary: path ? `已保存到 ${path}` : summary,
+    steps: [{ id: 'document_save', title: '已保存到指定目录', status: 'done', updatedAt: now }],
+    currentStepId: 'document_save',
+    waitingFor: 'none',
+    ...(artifact ? { recentArtifacts: [artifact], artifactRefs: [artifact] } : {}),
+  }
+}
+
 export async function executeDocumentTool(
   toolName: string,
   args: Record<string, unknown>,
@@ -238,8 +388,10 @@ export async function executeDocumentTool(
             action: tool.action,
           })
         }
-        return Object.keys(data).length > 0
-          ? createToolExecutionOutput(summary, { shape: 'json', data })
+        const projectionPatch = documentProjectionPatch(toolName, summary, data)
+        const hasData = Object.keys(data).length > 0
+        return hasData || projectionPatch
+          ? createToolExecutionOutput(summary, { shape: hasData ? 'json' : undefined, data: hasData ? data : null, projectionPatch })
           : summary
       }
     } catch (error) {

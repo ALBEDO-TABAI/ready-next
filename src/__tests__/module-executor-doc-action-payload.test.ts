@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test, { describe, it } from 'node:test'
 
 import {
+  classifyDocActionMutationOutcome,
   classifyDocActionFailureReason,
   performDocAction,
   type DocActionPayload,
@@ -75,6 +76,16 @@ describe('classifyDocActionFailureReason', () => {
   it('空 summary 返回 null', () => {
     const action: DocActionPayload = { type: 'update_widget', target: 'widget_x', componentSpecPatch: {} }
     assert.equal(classifyDocActionFailureReason(action, ''), null)
+  })
+})
+
+describe('classifyDocActionMutationOutcome', () => {
+  it('save_tab skip does not claim a verified document save', () => {
+    const outcome = classifyDocActionMutationOutcome(
+      { type: 'save_tab' },
+      '文档未改动，已跳过保存：/tmp/ready-report.md',
+    )
+    assert.equal(outcome.documentSaved, false)
   })
 })
 
@@ -216,6 +227,68 @@ describe('executeModuleToolAction · document.updateWidget payload 合约', () =
     assert.equal(payload.documentTabId, 'doc-target')
     assert.equal(payload.documentPath, '/tmp/agent-target.md')
     assert.equal(payload.documentRequiresSave, true)
+  })
+
+  it('save_tab 失败分支把 trace 和步骤标成 error', async () => {
+    const previousWindow = (globalThis as { window?: unknown }).window
+    let latestState: { phase?: string; steps?: Array<{ status?: string }> } | null = null
+    ;(globalThis as { window?: unknown }).window = {
+      electronAPI: {
+        document: {
+          readFile: async () => ({ success: true, content: '' }),
+          writeFile: async () => ({ success: false, error: 'permission denied' }),
+        },
+      },
+    }
+    try {
+      useDocTabs.setState({
+        tabs: [
+          { id: 'doc-target', path: '/tmp/agent-target.md', title: 'agent-target.md', content: '# 标题\n', isDirty: true },
+        ],
+        activeTabId: 'doc-target',
+        splitTabId: null,
+      })
+
+      const result = await executeModuleToolAction({
+        ...makeParams('document.saveTab', { tabId: 'doc-target' }),
+        upsertScopeRunState: (_scopeId, updater) => {
+          latestState = updater(latestState as never) as typeof latestState
+        },
+        getScopeRunState: () => latestState as never,
+      })
+
+      assert.equal(result.handled, true)
+      assert.equal(result.payload?.ok, false)
+      assert.equal(result.payload?.reason, 'document_action_failed')
+      assert.equal(latestState?.phase, 'error')
+      assert.equal(latestState?.steps?.at(-1)?.status, 'error')
+    } finally {
+      ;(globalThis as { window?: unknown }).window = previousWindow
+    }
+  })
+
+  it('no_match mutation 分支把 trace 和步骤标成 error', async () => {
+    let latestState: { phase?: string; steps?: Array<{ status?: string }> } | null = null
+    useDocTabs.setState({
+      tabs: [
+        { id: 'doc-target', path: '/tmp/agent-target.md', title: 'agent-target.md', content: buildGuideFenceFixture(), isDirty: false },
+      ],
+      activeTabId: 'doc-target',
+      splitTabId: null,
+    })
+
+    const result = await executeModuleToolAction({
+      ...makeParams('document.removeWidget', { target: 'missing_card', tabId: 'doc-target' }),
+      upsertScopeRunState: (_scopeId, updater) => {
+        latestState = updater(latestState as never) as typeof latestState
+      },
+      getScopeRunState: () => latestState as never,
+    })
+
+    assert.equal(result.handled, true)
+    assert.equal(result.payload?.mutationReason, 'no_match')
+    assert.equal(latestState?.phase, 'error')
+    assert.equal(latestState?.steps?.at(-1)?.status, 'error')
   })
 
   it('非 update_widget 动作即使 summary 命中关键词也不会被错误标记', async () => {

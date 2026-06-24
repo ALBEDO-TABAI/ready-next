@@ -116,7 +116,7 @@ export function isStreamingScopeRunState(run: ScopeRunState | null | undefined):
   return isForegroundBusyScopeRunState(run)
 }
 
-function normalizeTerminalReason(value: unknown): ScopeRunTerminalReason | null {
+export function normalizeTerminalReason(value: unknown): ScopeRunTerminalReason | null {
   const normalized = String(value || '').trim()
   if (
     normalized === 'done' ||
@@ -150,6 +150,8 @@ export function phaseToToolTraceStatus(
   terminalReason?: ScopeRunState['terminalReason'] | null
 ): 'idle' | 'running' | 'done' | 'error' | 'cancelled' {
   if (!phase || phase === 'idle') return 'idle'
+  if (phase === 'error') return 'error'
+  if (phase === 'cancelled') return 'cancelled'
   if (terminalReason) {
     if (terminalReason === 'done') return 'done'
     if (terminalReason === 'adjudication_degraded' && phase === 'done') return 'done'
@@ -171,8 +173,6 @@ export function phaseToToolTraceStatus(
     }
     return 'done'
   }
-  if (phase === 'error') return 'error'
-  if (phase === 'cancelled') return 'cancelled'
   if (phase === 'done') return 'done'
   return 'running'
 }

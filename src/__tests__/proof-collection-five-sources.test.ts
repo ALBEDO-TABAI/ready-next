@@ -56,9 +56,10 @@ test('response digest: sha256 + truncated excerpt, never the full text; empty re
 test('tool output proofs include successful tool results and saved artifact paths only', () => {
   const saved = collectToolOutputProofs('document_save_tab', createToolExecutionOutput('已保存文档：/tmp/report.md', {
     shape: 'json',
-    data: { documentSaved: true },
+    data: { documentSaved: true, path: '/tmp/report.md' },
   }), NOW)
   assert.deepEqual(saved.map((row) => row.kind), ['tool_result', 'artifact'])
+  assert.equal(saved[0].ref, 'document_save_tab:/tmp/report.md')
   assert.equal(saved[1].ref, '/tmp/report.md')
 
   const artifactPatch = collectToolOutputProofs('present_file', createToolExecutionOutput('已呈现文件', {
@@ -73,6 +74,34 @@ test('tool output proofs include successful tool results and saved artifact path
     data: { ok: false },
   }), NOW)
   assert.deepEqual(failed, [])
+})
+
+test('unsaved document mutations do not mint artifact delivery proof from documentPath', () => {
+  const proofs = collectToolOutputProofs('document_set_content', createToolExecutionOutput('已写入内容，尚未保存', {
+    shape: 'json',
+    data: {
+      documentSaved: false,
+      documentDirty: true,
+      documentPath: '/tmp/unsaved.md',
+    },
+  }), NOW)
+
+  assert.deepEqual(proofs.map((row) => row.kind), ['tool_result'])
+  assert.equal(proofs.some((row) => row.kind === 'artifact' && row.ref === '/tmp/unsaved.md'), false)
+})
+
+test('structured document mutation proofs ignore benign failure words in titles', () => {
+  const proofs = collectToolOutputProofs('document_rewrite_section', createToolExecutionOutput('已重写章节（失败复盘）', {
+    shape: 'json',
+    data: {
+      documentTabId: 'doc-1',
+      documentTitle: '失败复盘.md',
+      documentDirty: true,
+      documentSaveState: 'dirty',
+    },
+  }), NOW)
+
+  assert.equal(proofs.some((row) => row.kind === 'tool_result' && row.ref === 'document_rewrite_section'), true)
 })
 
 test('P0-1 regression: skill_write_artifact (data.absolutePath) yields both a tool_result AND an artifact proof', () => {
