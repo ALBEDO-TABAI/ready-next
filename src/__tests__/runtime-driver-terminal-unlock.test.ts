@@ -522,6 +522,42 @@ test('B step 1 — a slow-but-alive main (answers after 1s, before 5s) reaches m
   assert.equal(getSessionSlice(state, 'session-A').composerLocked, false, 'composer unlocks after main answers')
 })
 
+test('B step 2 race — a main terminal event arriving DURING the report wait cancels retry, no false unknown-state', async () => {
+  infrastructureTimeoutReports.length = 0
+  // Report stays pending ~250ms so a terminal event can land mid-await.
+  infrastructureTimeoutReportResult = new Promise((resolve) =>
+    setTimeout(() => resolve({ success: false, error: 'still null' }), 250))
+  seedTwoSessions({
+    activeSessionId: 'session-A',
+    lockedSessionId: 'session-A',
+    lockedScopeId: 'scope-A',
+    otherScopeId: 'scope-B',
+    requestId: 'req-A',
+  })
+
+  driverApi.armInfrastructureWatchdog('scope-A', 'req-A', { timeoutMs: 10 })
+  // Let the watchdog fire and enter the (pending) report await.
+  await new Promise((resolve) => setTimeout(resolve, 60))
+  // Main's REAL terminal event lands while the report is still pending — its
+  // handler clears the watchdog. The fix must detect this after the await and
+  // NOT re-arm a retry nor overwrite the terminal with a local unknown-state.
+  fireOnError({
+    agent: 'butler', sessionId: 'session-A', scopeId: 'scope-A', runId: 'req-A',
+    error: 'HTTP 402: insufficient balance', type: 'runtime', errorKind: 'quota_exceeded', recoverable: false,
+  })
+  // Wait past the report resolution AND the retry delay (~2s) to be sure no
+  // retry fired.
+  await new Promise((resolve) => setTimeout(resolve, 2600))
+
+  const state = useAgent.getState()
+  assert.equal(infrastructureTimeoutReports.length, 1, 'no retry report after a terminal event cancels the watchdog')
+  const honestMsg = state.messages.find((m: { content: string }) =>
+    typeof m.content === 'string' && m.content.includes('联系不上后台'))
+  assert.equal(honestMsg, undefined, 'terminal-during-report-wait must NOT surface the unreachable notice')
+  assert.notEqual(getSessionSlice(state, 'session-A').scopeRunStates['scope-A']?.terminalReason, 'infra_error',
+    'main\'s real terminal must not be overwritten by a local infra_error')
+})
+
 test('started event for a new request does not inherit the previous response segment', () => {
   seedTwoSessions({
     activeSessionId: 'session-A',

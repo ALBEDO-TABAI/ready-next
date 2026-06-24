@@ -335,15 +335,31 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
     const watchdog = infrastructureWatchdogs.get(key)
     if (!watchdog) return
     const reportRetries = watchdog.reportRetries ?? 0
-    infrastructureWatchdogs.delete(key)
-    // Sanity: if the session is no longer streaming this request, nothing
-    // to recover. Could happen if a terminal event arrived in the same
-    // tick the timer fired.
+    // P1 race fix — do NOT delete the watchdog before awaiting the main report.
+    // If main's terminal event arrives during the (up to 5s) report wait, its
+    // handler calls clearInfrastructureWatchdog → deletes THIS entry; we detect
+    // that after the await and bail, so a slow-but-alive main's real terminal is
+    // never overwritten by a local retry / infra_error. (Deleting upfront made
+    // the terminal handler's clear a no-op against an already-empty slot.)
     const state = store.getState()
     const runState = state.scopeRunStates?.[scopeId]
-    if (runState && runState.requestId !== requestId) return
+    if (runState && runState.requestId !== requestId) {
+      infrastructureWatchdogs.delete(key)
+      return
+    }
 
     const mainState = await reportInfrastructureTimeoutToMain(scopeId, requestId, watchdog.timeoutMs)
+
+    // A terminal event during the report wait cleared (or a refresh replaced)
+    // our entry — main resolved authoritatively; do not re-arm or overwrite.
+    if (infrastructureWatchdogs.get(key) !== watchdog) return
+    const afterRun = store.getState().scopeRunStates?.[scopeId]
+    if (afterRun && afterRun.requestId !== requestId) {
+      infrastructureWatchdogs.delete(key)
+      return
+    }
+    // We still own the resolution — take the entry out of the map now.
+    infrastructureWatchdogs.delete(key)
 
     // B step 2 (Option A) — main UNREACHABLE (report returned null). The renderer
     // must NOT locally claim recovery. Re-arm a bounded retry and keep the run
@@ -351,8 +367,6 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
     // clears this watchdog) is the authoritative resolution we wait for. Only
     // after retries are exhausted do we surface an HONEST unknown-state notice.
     if (mainState === null && reportRetries < INFRASTRUCTURE_TIMEOUT_REPORT_MAX_RETRIES) {
-      const liveAfterReport = store.getState().scopeRunStates?.[scopeId]
-      if (liveAfterReport && liveAfterReport.requestId !== requestId) return
       const timer = setTimeout(() => { void fireInfrastructureTimeout(scopeId, requestId) }, INFRASTRUCTURE_TIMEOUT_REPORT_RETRY_DELAY_MS)
       const unref = (timer as { unref?: unknown }).unref
       if (typeof unref === 'function') unref.call(timer)
