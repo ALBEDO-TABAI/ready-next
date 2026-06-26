@@ -3,6 +3,7 @@ import { useCallback, useMemo } from 'react'
 import type { BrowserTab } from '../../stores/useBrowserTabs'
 import { useBrowserTabs } from '../../stores/useBrowserTabs'
 import { getDroppedFilesFromDataTransfer, toFileUrl } from '../../utils/dragDrop'
+import { filterBrowserLocalMediaUploadPaths } from '../../../shared/browser-local-media-upload'
 import { browserTabActivationSequencer } from './browserTabActivationSequencer'
 import { createBrowserTabSwitchExecutor } from './browserTabSwitchExecutor'
 import { DEFAULT_BROWSER_URL, extractBrowserDomain, isSupportedBrowserNavigationUrl } from './url-utils'
@@ -19,6 +20,8 @@ interface UseBrowserTabActionsParams {
   addTab: (tab: BrowserTab) => void
   updateTab: (tabId: string, patch: Partial<BrowserTab>) => void
   reorderTabs: (fromIndex: number, toIndex: number) => void
+  onLocalMediaUploadStatus?: (status: { kind: 'uploading' | 'success' | 'error'; message: string } | null) => void
+  onLocalMediaUploadSettled?: () => void
 }
 
 export function useBrowserTabActions({
@@ -33,6 +36,8 @@ export function useBrowserTabActions({
   addTab,
   updateTab,
   reorderTabs,
+  onLocalMediaUploadStatus,
+  onLocalMediaUploadSettled,
 }: UseBrowserTabActionsParams) {
   const syncTabsFromBackend = useCallback(async () => {
     if (!isElectron) return
@@ -250,6 +255,47 @@ export function useBrowserTabActions({
     const droppedFiles = getDroppedFilesFromDataTransfer(event.dataTransfer)
     if (droppedFiles.length > 0) {
       event.preventDefault()
+      const uploadPaths = filterBrowserLocalMediaUploadPaths(droppedFiles)
+      if (uploadPaths.length > 0) {
+        onLocalMediaUploadSettled?.()
+        onLocalMediaUploadStatus?.({
+          kind: 'uploading',
+          message: uploadPaths.length > 1 ? `正在上传 ${uploadPaths.length} 个素材...` : '正在上传素材...',
+        })
+        const uploadPromise = window.electronAPI?.browser?.uploadLocalMediaFiles?.({
+          tabId: tabId ?? activeTabId,
+          files: uploadPaths,
+        })
+        if (!uploadPromise) {
+          onLocalMediaUploadStatus?.({
+            kind: 'error',
+            message: '当前环境不能直接上传素材',
+          })
+          onLocalMediaUploadSettled?.()
+          return
+        }
+        void uploadPromise.then((result) => {
+          if (result?.success) {
+            onLocalMediaUploadStatus?.({
+              kind: 'success',
+              message: result.method === 'drop' ? '已把素材拖入网页' : '已把素材交给网页上传',
+            })
+            return
+          }
+          onLocalMediaUploadStatus?.({
+            kind: 'error',
+            message: result?.error || '网页没有接住这个素材',
+          })
+        }).catch((error) => {
+          onLocalMediaUploadStatus?.({
+            kind: 'error',
+            message: error instanceof Error ? error.message : '素材上传失败',
+          })
+        }).finally(() => {
+          onLocalMediaUploadSettled?.()
+        })
+        return
+      }
       void handleNavigate(toFileUrl(droppedFiles[0].path), { tabId })
       return
     }
@@ -258,7 +304,7 @@ export function useBrowserTabActions({
     if (!rawText) return
     event.preventDefault()
     void handleNavigate(rawText, { tabId })
-  }, [handleNavigate])
+  }, [activeTabId, handleNavigate, onLocalMediaUploadSettled, onLocalMediaUploadStatus])
 
   const handleGoBack = useCallback(async () => {
     if (!isElectron || !activeTabId) return

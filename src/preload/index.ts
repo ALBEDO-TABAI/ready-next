@@ -448,6 +448,8 @@ const browserAPI = {
     return () => ipcRenderer.removeListener('browser:intent-ack', handler)
   },
   fitActiveTabToBounds: (tabId?: string | null) => ipcRenderer.invoke('browser:fitActiveTabToBounds', tabId),
+  uploadLocalMediaFiles: (payload: { tabId?: string | null; files: string[]; x?: number; y?: number }) =>
+    ipcRenderer.invoke('browser:uploadLocalMediaFiles', payload),
   captureWindowSnapshot: (bounds: { x: number; y: number; width: number; height: number }) =>
     ipcRenderer.invoke('browser:captureWindowSnapshot', bounds),
   captureViewportSnapshot: (tabId?: string | null) => ipcRenderer.invoke('browser:captureViewportSnapshot', tabId),

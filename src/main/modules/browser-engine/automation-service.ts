@@ -8,6 +8,7 @@ import type {
   BrowserUploadTarget,
   BrowserViewportMetrics,
 } from './automation-types'
+import { filterBrowserLocalMediaUploadPaths } from '../../../shared/browser-local-media-upload'
 
 interface BrowserAutomationTabRecord {
   id: string
@@ -599,6 +600,105 @@ export class BrowserAutomationService {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       throw this.host.createBrowserError('CDP_COMMAND_FAILED', `DOM.setFileInputFiles failed: ${message}`)
+    }
+  }
+
+  async uploadLocalMediaFiles(
+    tabId: string | null,
+    payload: { files: string[]; x?: number; y?: number },
+  ): Promise<{
+    success: boolean
+    method?: 'file-input' | 'drop'
+    targetDescription?: string
+    assignedFileNames?: string[]
+    error?: string
+  }> {
+    const files = filterBrowserLocalMediaUploadPaths((payload.files || []).map((filePath) => ({ path: filePath })))
+    if (files.length === 0) {
+      return { success: false, error: '没有可上传的图片或视频文件。' }
+    }
+
+    const targets = await this.findUploadTargets(tabId)
+    const bestTarget = this.pickLocalMediaUploadTarget(targets, files.length)
+    const selector = bestTarget?.associatedInputSelector || (bestTarget?.kind === 'input' ? bestTarget.selectorHint : undefined)
+    const x = Number.isFinite(Number(payload.x)) ? Number(payload.x) : bestTarget?.x
+    const y = Number.isFinite(Number(payload.y)) ? Number(payload.y) : bestTarget?.y
+
+    let inputResult: Awaited<ReturnType<BrowserAutomationService['setFileInputFiles']>> | null = null
+    try {
+      inputResult = await this.setFileInputFiles(tabId, {
+        files,
+        selector,
+        target: bestTarget?.label,
+        x,
+        y,
+      })
+    } catch {
+      inputResult = null
+    }
+    if (inputResult?.ok && inputResult.filesAssigned) {
+      return {
+        success: true,
+        method: 'file-input',
+        targetDescription: inputResult.targetDescription,
+        assignedFileNames: inputResult.assignedFileNames,
+      }
+    }
+
+    const dropped = await this.dispatchLocalFileDrop(tabId, files, { x, y })
+    if (dropped) {
+      return {
+        success: true,
+        method: 'drop',
+        targetDescription: bestTarget?.label || '当前网页',
+        assignedFileNames: files.map((filePath) => filePath.split(/[\\/]/).pop() || filePath),
+      }
+    }
+
+    return {
+      success: false,
+      targetDescription: inputResult?.targetDescription || bestTarget?.label,
+      error: '当前页面没有找到可用的上传入口。',
+    }
+  }
+
+  private pickLocalMediaUploadTarget(targets: BrowserUploadTarget[], fileCount: number): BrowserUploadTarget | null {
+    const scored = targets
+      .map((target) => {
+        let score = Number(target.confidence || 0)
+        if (target.kind === 'input') score += 1
+        if (target.associatedInputSelector) score += 0.8
+        if (fileCount > 1 && target.multiple) score += 0.5
+        if (target.hidden && target.kind !== 'input') score -= 0.4
+        if (/(image|photo|media|video|图片|照片|媒体|视频)/i.test(`${target.label} ${target.accepts}`)) score += 0.4
+        return { target, score }
+      })
+      .sort((a, b) => b.score - a.score)
+    return scored[0]?.target || null
+  }
+
+  private async dispatchLocalFileDrop(
+    tabId: string | null,
+    files: string[],
+    point: { x?: number; y?: number },
+  ): Promise<boolean> {
+    const { view } = this.host.resolveTabView(tabId)
+    await this.ensureDebugger(tabId)
+    const metrics = await this.getViewportMetrics(tabId)
+    const x = Number.isFinite(Number(point.x)) ? Number(point.x) : Math.round(metrics.width / 2)
+    const y = Number.isFinite(Number(point.y)) ? Number(point.y) : Math.round(metrics.height / 2)
+    const data = {
+      items: [],
+      files,
+      dragOperationsMask: 1,
+    }
+    try {
+      await view.webContents.debugger.sendCommand('Input.dispatchDragEvent', { type: 'dragEnter', x, y, data })
+      await view.webContents.debugger.sendCommand('Input.dispatchDragEvent', { type: 'dragOver', x, y, data })
+      await view.webContents.debugger.sendCommand('Input.dispatchDragEvent', { type: 'drop', x, y, data })
+      return true
+    } catch {
+      return false
     }
   }
 }

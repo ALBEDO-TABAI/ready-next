@@ -1868,6 +1868,19 @@ export class BrowserController {
     return this.automationService.setFileInputFiles(tabId, payload)
   }
 
+  async uploadLocalMediaFiles(
+    tabId: string | null,
+    payload: { files: string[]; x?: number; y?: number },
+  ): Promise<{
+    success: boolean
+    method?: 'file-input' | 'drop'
+    targetDescription?: string
+    assignedFileNames?: string[]
+    error?: string
+  }> {
+    return this.automationService.uploadLocalMediaFiles(tabId, payload)
+  }
+
   /**
    * Navigate the active tab (or specified tab) to a URL.
    */

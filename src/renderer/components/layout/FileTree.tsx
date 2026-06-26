@@ -76,6 +76,7 @@ import {
   writeWorkspaceDragData,
   type WorkspaceDragPayload,
 } from './fileTreeDragPayload'
+import { startBrowserLocalMediaNativeFileDrag } from '../../modules/browser/localMediaDragBridge'
 import FileEmergenceSection from './FileEmergenceSection'
 import { buildFileEmergenceViewModel } from './fileEmergenceViewModel'
 import { recordFileEmergenceActivity, readFileEmergenceEnabled } from '../../modules/file-emergence/fileEmergenceClient'
@@ -233,6 +234,7 @@ function hasNativeFileDrop(dataTransfer: DataTransfer): boolean {
 function putDragData(e: React.DragEvent, item: FileItem, movable = true, options: PutDragDataOptions = {}) {
   const payload = buildWorkspaceDragTransferPayload(item, movable, options.selectedItems)
   writeWorkspaceDragData(e.dataTransfer, payload)
+  startBrowserLocalMediaNativeFileDrag(e)
 }
 
 function joinPath(dir: string, name: string): string {

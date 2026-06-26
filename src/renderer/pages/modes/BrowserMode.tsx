@@ -161,6 +161,7 @@ export default function BrowserMode({
   const hostPresentedRef = useRef(false)
   const surfaceReadyTimerRef = useRef<number | null>(null)
   const postActivationHostResyncTimerRef = useRef<number | null>(null)
+  const localMediaUploadStatusTimerRef = useRef<number | null>(null)
   const captureTokenConsumedRef = useRef(false)
   const captureTokenExpiryTimerRef = useRef<number | null>(null)
   const wasActiveRef = useRef<boolean>(isActive)
@@ -224,6 +225,7 @@ export default function BrowserMode({
   const openFastCard = useFastCard(s => s.open)
   const collapseFastCard = useFastCard(s => s.collapse)
   const [fastCardResultPanel, setFastCardResultPanel] = useState<FastCardResultPanelData | null>(null)
+  const [localMediaUploadStatus, setLocalMediaUploadStatus] = useState<{ kind: 'uploading' | 'success' | 'error'; message: string } | null>(null)
   const fastCardResultTargetRef = useRef<BrowserFastCardTarget | null>(null)
   const fastCardResultRequestIdRef = useRef(0)
   const setAddressEditing = useCallback((next: boolean) => {
@@ -264,6 +266,23 @@ export default function BrowserMode({
     chatPanelWidth,
     hasError: shouldHideAllBrowserHosts,
   })
+
+  const clearLocalMediaUploadStatusTimer = useCallback(() => {
+    if (localMediaUploadStatusTimerRef.current) {
+      window.clearTimeout(localMediaUploadStatusTimerRef.current)
+      localMediaUploadStatusTimerRef.current = null
+    }
+  }, [])
+
+  const publishLocalMediaUploadStatus = useCallback((status: { kind: 'uploading' | 'success' | 'error'; message: string } | null) => {
+    clearLocalMediaUploadStatusTimer()
+    setLocalMediaUploadStatus(status)
+    if (!status || status.kind === 'uploading') return
+    localMediaUploadStatusTimerRef.current = window.setTimeout(() => {
+      localMediaUploadStatusTimerRef.current = null
+      setLocalMediaUploadStatus(null)
+    }, 2600)
+  }, [clearLocalMediaUploadStatusTimer])
 
   useEffect(() => {
     if (!agentPaneTaskId || agentPaneTaskId === lastAgentPaneTaskIdRef.current) return
@@ -395,6 +414,7 @@ export default function BrowserMode({
     addTab,
     updateTab,
     reorderTabs,
+    onLocalMediaUploadStatus: publishLocalMediaUploadStatus,
   })
 
   const handleHeaderTabClick = useCallback((id: string, event: MouseEvent<HTMLButtonElement>) => {
@@ -1021,8 +1041,9 @@ export default function BrowserMode({
       clearPostActivationHostResyncTimer()
       clearCaptureTokenExpiryTimer()
       clearSurfaceReadyTimer()
+      clearLocalMediaUploadStatusTimer()
     }
-  }, [clearCaptureTokenExpiryTimer, clearPostActivationHostResyncTimer, clearSurfaceReadyTimer])
+  }, [clearCaptureTokenExpiryTimer, clearLocalMediaUploadStatusTimer, clearPostActivationHostResyncTimer, clearSurfaceReadyTimer])
 
   // Task 4: Empty state — no tabs
   if (tabs.length === 0) {
@@ -1112,6 +1133,7 @@ export default function BrowserMode({
                     onDragOver={handleContentDragOver}
                     onDrop={(event) => handleContentDrop(event, activeTab.id)}
                     onRetry={() => void handleRetry(activeTab.id)}
+                    mediaUploadStatus={localMediaUploadStatus}
                   />
                 </div>
                 {!agentPaneCollapsedVisible && (
@@ -1183,6 +1205,7 @@ export default function BrowserMode({
                       onDragOver={handleContentDragOver}
                       onDrop={(event) => handleContentDrop(event, visibleSplitTab.id)}
                       onRetry={() => void handleRetry(visibleSplitTab.id)}
+                      mediaUploadStatus={localMediaUploadStatus}
                     />
                     {isAgentSplitVisible && (
                       <div
@@ -1206,6 +1229,7 @@ export default function BrowserMode({
                 onDragOver={handleContentDragOver}
                 onDrop={handleContentDrop}
                 onRetry={() => void handleRetry()}
+                mediaUploadStatus={localMediaUploadStatus}
               />
             )}
             <BrowserDiagnosticsDock

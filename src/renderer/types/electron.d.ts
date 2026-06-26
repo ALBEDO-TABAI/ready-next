@@ -1436,6 +1436,18 @@ interface ElectronBrowserAPI {
   fitActiveTabToBounds: (
     tabId?: string | null
   ) => Promise<{ success: boolean; zoomFactor?: number; error?: string }>
+  uploadLocalMediaFiles: (payload: {
+    tabId?: string | null
+    files: string[]
+    x?: number
+    y?: number
+  }) => Promise<{
+    success: boolean
+    method?: 'file-input' | 'drop'
+    targetDescription?: string
+    assignedFileNames?: string[]
+    error?: string
+  }>
   captureWindowSnapshot: (bounds: {
     x: number
     y: number

@@ -70,6 +70,13 @@ interface BrowserShellIPCController {
   fitActiveTabToBounds(tabId?: string | null): Promise<{ success: boolean; zoomFactor?: number; error?: string }>
   captureWindowSnapshot(bounds: { x: number; y: number; width: number; height: number }): Promise<{ success: boolean; data?: string; error?: string }>
   captureViewportSnapshot(tabId?: string | null): Promise<{ success: boolean; data?: string; error?: string }>
+  uploadLocalMediaFiles(tabId: string | null, payload: { files: string[]; x?: number; y?: number }): Promise<{
+    success: boolean
+    method?: 'file-input' | 'drop'
+    targetDescription?: string
+    assignedFileNames?: string[]
+    error?: string
+  }>
   getTabList(): unknown
   getTabContext(tabId?: string | null): Promise<unknown>
   previewOpen(url: string): Promise<{ success: boolean; error?: string }>
@@ -201,6 +208,18 @@ export function setupBrowserShellIPC(controller: BrowserShellIPCController): voi
   ipcMain.handle('browser:captureViewportSnapshot', async (_, tabId?: string | null) => {
     try {
       return await controller.captureViewportSnapshot(tabId)
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+
+  ipcMain.handle('browser:uploadLocalMediaFiles', async (_, payload: { tabId?: string | null; files?: string[]; x?: number; y?: number }) => {
+    try {
+      return await controller.uploadLocalMediaFiles(payload?.tabId ?? null, {
+        files: Array.isArray(payload?.files) ? payload.files : [],
+        x: payload?.x,
+        y: payload?.y,
+      })
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : String(error) }
     }

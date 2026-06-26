@@ -1,5 +1,5 @@
 import type { DragEvent, RefObject } from 'react'
-import { AlertTriangle, CheckCircle, Globe, RefreshCw } from 'lucide-react'
+import { AlertTriangle, CheckCircle, Globe, RefreshCw, UploadCloud } from 'lucide-react'
 import readyWordmark from '../../assets/ready-wordmark.svg'
 import { isReadyBrowserBlankUrl } from '../../modules/browser/url-utils'
 import type { BrowserTab } from '../../stores/useBrowserTabs'
@@ -12,6 +12,8 @@ interface BrowserShellLayoutProps {
   onDragOver: (event: DragEvent<HTMLDivElement>) => void
   onDrop: (event: DragEvent<HTMLDivElement>) => void
   onRetry: () => void | Promise<void>
+  mediaDropActive?: boolean
+  mediaUploadStatus?: { kind: 'uploading' | 'success' | 'error'; message: string } | null
 }
 
 export default function BrowserShellLayout({
@@ -22,6 +24,8 @@ export default function BrowserShellLayout({
   onDragOver,
   onDrop,
   onRetry,
+  mediaDropActive = false,
+  mediaUploadStatus = null,
 }: BrowserShellLayoutProps) {
   const showReadyBlankPage = activeTab ? isReadyBrowserBlankUrl(activeTab.url) && !activeTab.error : false
   const showBrowserViewCornerFill = isElectron && Boolean(activeTab) && !showReadyBlankPage && !activeTab?.error
@@ -183,6 +187,44 @@ export default function BrowserShellLayout({
                   strokeWidth={2}
                 />
                 已保存登录状态
+              </div>
+            )}
+
+            {(mediaDropActive || mediaUploadStatus) && (
+              <div
+                className="absolute inset-0 flex items-end justify-center"
+                style={{
+                  zIndex: 35,
+                  pointerEvents: mediaDropActive ? 'auto' : 'none',
+                  paddingBottom: 18,
+                  background: 'transparent',
+                  cursor: mediaDropActive ? 'copy' : undefined,
+                }}
+              >
+                {mediaUploadStatus && (
+                  <div
+                    className="flex items-center gap-2 rounded-full border px-3 py-2"
+                    style={{
+                      borderColor: mediaUploadStatus.kind === 'error' ? 'var(--color-red)' : 'color-mix(in srgb, var(--color-blue) 34%, transparent)',
+                      background: 'color-mix(in srgb, var(--surface-floating-bg) 86%, transparent)',
+                      color: 'var(--text-body)',
+                      boxShadow: '0 8px 24px rgba(15, 23, 42, 0.12)',
+                      backdropFilter: 'blur(14px) saturate(132%)',
+                      WebkitBackdropFilter: 'blur(14px) saturate(132%)',
+                    }}
+                  >
+                    {mediaUploadStatus.kind === 'success' ? (
+                      <CheckCircle style={{ width: 15, height: 15, color: 'var(--color-green)' }} strokeWidth={2} />
+                    ) : mediaUploadStatus.kind === 'error' ? (
+                      <AlertTriangle style={{ width: 15, height: 15, color: 'var(--color-red)' }} strokeWidth={2} />
+                    ) : (
+                      <UploadCloud style={{ width: 15, height: 15, color: 'var(--color-blue)' }} strokeWidth={2} />
+                    )}
+                    <span className="text-[12px] font-medium">
+                      {mediaUploadStatus.message}
+                    </span>
+                  </div>
+                )}
               </div>
             )}
           </div>

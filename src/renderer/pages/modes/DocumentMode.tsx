@@ -34,6 +34,7 @@ import {
   canAcceptDocumentPaneDrop,
   getDocumentPaneDropPath,
 } from '../../modules/document/documentPaneDrop'
+import { startBrowserLocalMediaNativeFileDrag } from '../../modules/browser/localMediaDragBridge'
 import { getFileExtension } from '../../utils/path'
 import { isEbookExtension } from '../../../shared/ebook'
 import { isReadyBoardFile } from '../../../shared/ready-board'
@@ -775,6 +776,7 @@ export default function DocumentMode({
       })
       e.dataTransfer.setData('application/x-ready-document-tab', data)
       e.dataTransfer.setData('application/x-ready-drag', data)
+      startBrowserLocalMediaNativeFileDrag(e)
     }
   }, [tabs])
 
