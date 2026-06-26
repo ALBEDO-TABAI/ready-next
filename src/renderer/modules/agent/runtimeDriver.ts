@@ -15,6 +15,31 @@ interface AgentStoreLike {
 
 const PRIMARY_SESSION_KEY = '__primary__'
 
+function comparableAssistantTextSegment(text: string): string {
+  return String(text || '').replace(/\s+/g, '')
+}
+
+export function collapseAdjacentDuplicateAssistantTail(text: string): string {
+  let next = String(text || '')
+  for (let pass = 0; pass < 3; pass += 1) {
+    const trailing = next.match(/\s*$/)?.[0] || ''
+    const body = trailing ? next.slice(0, -trailing.length) : next
+    let collapsed: string | null = null
+    const maxLen = Math.floor(body.length / 2)
+    for (let len = maxLen; len >= 12; len -= 1) {
+      const left = body.slice(body.length - len * 2, body.length - len)
+      const right = body.slice(body.length - len)
+      if (!left || !right) continue
+      if (comparableAssistantTextSegment(left) !== comparableAssistantTextSegment(right)) continue
+      collapsed = `${body.slice(0, body.length - len)}${trailing}`
+      break
+    }
+    if (!collapsed || collapsed === next) return next
+    next = collapsed
+  }
+  return next
+}
+
 function activeSessionKeyFromState(state: any): string {
   return state?.activeSessionId || state?.sessionId || PRIMARY_SESSION_KEY
 }
@@ -300,11 +325,74 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
     infrastructureWatchdogs.delete(key)
   }
 
+  function getScopeRunStateFromState(state: any, scopeId: string | null | undefined): ScopeRunState | null {
+    if (!scopeId) return null
+    const sessionId = sessionKeyForScopeId(state, scopeId)
+    const currentSlice = normalizeSessionSlice(state.sessions?.[sessionId])
+    const fromCurrentSlice = currentSlice.scopeRunStates?.[scopeId] || null
+    if (fromCurrentSlice) return fromCurrentSlice
+    const fromTopLevel = state.scopeRunStates?.[scopeId] || null
+    if (fromTopLevel) return fromTopLevel
+    for (const sliceInput of Object.values(state.sessions || {}) as unknown[]) {
+      const slice = normalizeSessionSlice(sliceInput)
+      const candidate = slice.scopeRunStates?.[scopeId] || null
+      if (candidate) return candidate
+    }
+    return null
+  }
+
+  function findScopeIdByRunId(state: any, runId: string | null | undefined, agent?: string): string | null {
+    const requestId = typeof runId === 'string' && runId.trim() ? runId.trim() : null
+    if (!requestId) return null
+    const scan = (scopeRunStates: Record<string, ScopeRunState> | null | undefined): string | null => {
+      for (const [scopeId, runState] of Object.entries(scopeRunStates || {})) {
+        if (runState.requestId !== requestId) continue
+        if (agent && runState.agent !== agent) continue
+        return scopeId
+      }
+      return null
+    }
+    const activeSessionId = activeSessionKeyFromState(state)
+    const activeSlice = normalizeSessionSlice(state.sessions?.[activeSessionId])
+    const fromActiveSlice = scan(activeSlice.scopeRunStates)
+    if (fromActiveSlice) return fromActiveSlice
+    for (const sliceInput of Object.values(state.sessions || {}) as unknown[]) {
+      const slice = normalizeSessionSlice(sliceInput)
+      const fromSlice = scan(slice.scopeRunStates)
+      if (fromSlice) return fromSlice
+    }
+    return scan(state.scopeRunStates)
+  }
+
+  function finalizeDoneRunState(previous: ScopeRunState, scopeId: string): ScopeRunState {
+    const updatedAt = new Date().toISOString()
+    const hasArtifacts = (previous.recentArtifacts || []).length > 0 || (previous.artifactRefs || []).length > 0
+    const existingActions = previous.resumableActions || []
+    const resumableActions: ScopeRunState['resumableActions'] = existingActions.some((action) => action && action !== 'none')
+      ? existingActions
+      : hasArtifacts ? ['open_artifact'] : ['none']
+    return {
+      ...previous,
+      scopeId,
+      phase: 'done',
+      terminalReason: previous.terminalReason || 'done',
+      waitingFor: 'none',
+      checkpointExpiresAt: null,
+      resumableActions,
+      steps: (previous.steps || []).map((step) => (
+        step.status === 'running' || step.status === 'pending'
+          ? { ...step, status: 'done', detail: step.detail || '已完成', updatedAt }
+          : step
+      )),
+      updatedAt,
+    }
+  }
+
   async function reportInfrastructureTimeoutToMain(
     scopeId: string,
     requestId: string,
     elapsedMs: number,
-  ): Promise<'cancel_requested' | 'stale' | 'not_found' | null> {
+  ): Promise<'cancel_requested' | 'stale' | 'not_found' | 'paused_user_input' | null> {
     const report = typeof window !== 'undefined'
       ? window.electronAPI?.agent?.reportInfrastructureTimeout
       : undefined
@@ -321,7 +409,12 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
       const record = response as { success?: unknown; data?: { state?: unknown } }
       if (record.success !== true) return null
       const state = record.data?.state
-      if (state === 'cancel_requested' || state === 'stale' || state === 'not_found') return state
+      if (
+        state === 'cancel_requested'
+        || state === 'stale'
+        || state === 'not_found'
+        || state === 'paused_user_input'
+      ) return state
     } catch {
       return null
     } finally {
@@ -342,7 +435,7 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
     // never overwritten by a local retry / infra_error. (Deleting upfront made
     // the terminal handler's clear a no-op against an already-empty slot.)
     const state = store.getState()
-    const runState = state.scopeRunStates?.[scopeId]
+    const runState = getScopeRunStateFromState(state, scopeId)
     if (runState && runState.requestId !== requestId) {
       infrastructureWatchdogs.delete(key)
       return
@@ -353,13 +446,31 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
     // A terminal event during the report wait cleared (or a refresh replaced)
     // our entry — main resolved authoritatively; do not re-arm or overwrite.
     if (infrastructureWatchdogs.get(key) !== watchdog) return
-    const afterRun = store.getState().scopeRunStates?.[scopeId]
+    const afterRun = getScopeRunStateFromState(store.getState(), scopeId)
     if (afterRun && afterRun.requestId !== requestId) {
       infrastructureWatchdogs.delete(key)
       return
     }
     // We still own the resolution — take the entry out of the map now.
     infrastructureWatchdogs.delete(key)
+
+    if (mainState === 'paused_user_input') {
+      const timer = setTimeout(() => { void fireInfrastructureTimeout(scopeId, requestId) }, ACTIVE_RUN_INFRASTRUCTURE_TIMEOUT_MS)
+      const unref = (timer as { unref?: unknown }).unref
+      if (typeof unref === 'function') unref.call(timer)
+      infrastructureWatchdogs.set(key, {
+        ...watchdog,
+        timer,
+        timeoutMs: ACTIVE_RUN_INFRASTRUCTURE_TIMEOUT_MS,
+        reportRetries: 0,
+      })
+      emitRendererAgentMetric('renderer_infrastructure_timeout_paused_user_input', {
+        scopeId,
+        requestId,
+        elapsedMs: watchdog.timeoutMs,
+      })
+      return
+    }
 
     // B step 2 (Option A) — main UNREACHABLE (report returned null). The renderer
     // must NOT locally claim recovery. Re-arm a bounded retry and keep the run
@@ -479,7 +590,7 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
     store.setState((state: any) => {
       const sessionId = sessionKeyForScopeId(state, scopeId)
       const currentSlice = normalizeSessionSlice(state.sessions?.[sessionId])
-      const previous = currentSlice.scopeRunStates[scopeId] || state.scopeRunStates?.[scopeId] || null
+      const previous = currentSlice.scopeRunStates[scopeId] || getScopeRunStateFromState(state, scopeId)
       if (previous?.requestId && previous.requestId !== requestId) return {}
 
       const activeRequestId = currentSlice.streamingRequestId || state.streamingRequestId || null
@@ -492,13 +603,9 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
       if (!previous && activeRequestId !== requestId) return {}
 
       const nextRun = previous
-        ? {
-          ...previous,
-          scopeId,
-          phase: previous.terminalReason ? previous.phase : 'done',
-          terminalReason: previous.terminalReason || 'done',
-          updatedAt: new Date().toISOString(),
-        }
+        ? previous.terminalReason
+          ? { ...previous, scopeId, updatedAt: new Date().toISOString() }
+          : finalizeDoneRunState(previous, scopeId)
         : null
       persistedRunState = nextRun
       return withSessionSliceAndActiveRuntimeMirror(state, sessionId, {
@@ -518,9 +625,7 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
 
     if (persistedRunState) {
       const state = store.getState()
-      const sessionId = sessionKeyForScopeId(state, scopeId)
-      const currentSlice = normalizeSessionSlice(state.sessions?.[sessionId])
-      void persistAssistantMessageForRun(scopeId, currentSlice.scopeRunStates[scopeId] || state.scopeRunStates?.[scopeId] || persistedRunState)
+      void persistAssistantMessageForRun(scopeId, getScopeRunStateFromState(state, scopeId) || persistedRunState)
     }
   }
 
@@ -531,7 +636,7 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
     store.setState((state: any) => {
       const sessionId = sessionKeyForScopeId(state, scopeId)
       const currentSlice = normalizeSessionSlice(state.sessions?.[sessionId])
-      const previous = currentSlice.scopeRunStates[scopeId] || state.scopeRunStates?.[scopeId] || null
+      const previous = currentSlice.scopeRunStates[scopeId] || getScopeRunStateFromState(state, scopeId)
       const produced = updater(previous)
       const hasTerminalReasonField = Object.prototype.hasOwnProperty.call(produced, 'terminalReason')
       const sameRun = Boolean(
@@ -557,17 +662,11 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
     store.setState((state: any) => {
       const sessionId = sessionKeyForScopeId(state, scopeId)
       const currentSlice = normalizeSessionSlice(state.sessions?.[sessionId])
-      const previous = currentSlice.scopeRunStates[scopeId] || state.scopeRunStates?.[scopeId] || fallbackRunState || null
+      const previous = currentSlice.scopeRunStates[scopeId] || getScopeRunStateFromState(state, scopeId) || fallbackRunState || null
       const nextScopeRunStates = previous
         ? {
           ...currentSlice.scopeRunStates,
-          [scopeId]: {
-            ...previous,
-            scopeId,
-            phase: 'done',
-            terminalReason: previous.terminalReason || 'done',
-            updatedAt: new Date().toISOString(),
-          },
+          [scopeId]: finalizeDoneRunState(previous, scopeId),
         }
         : currentSlice.scopeRunStates
 
@@ -587,20 +686,20 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
   }
 
   function resolveScopeIdForRunPayload(payload: RunPayloadLike): string | null {
+    const state = store.getState()
     if (typeof payload.scopeId === 'string' && payload.scopeId.trim()) {
       return payload.scopeId.trim()
     }
     if (typeof payload.sessionId === 'string' && payload.sessionId.trim()) {
-      return payload.sessionId.trim()
+      const sessionId = payload.sessionId.trim()
+      const sessionSlice = state.sessions?.[sessionId]
+        ? normalizeSessionSlice(state.sessions[sessionId])
+        : null
+      if (sessionSlice?.conversationId) return sessionSlice.conversationId
+      return sessionId
     }
     if (!payload.runId) return null
-    const entries = Object.entries(store.getState().scopeRunStates as Record<string, ScopeRunState>)
-    for (const [scopeId, runState] of entries) {
-      if (runState.requestId !== payload.runId) continue
-      if (payload.agent && runState.agent !== payload.agent) continue
-      return scopeId
-    }
-    return null
+    return findScopeIdByRunId(state, payload.runId, payload.agent)
   }
 
   function activateWorkbenchMode(mode: 'browser' | 'document' | 'rss' | 'calendar'): void {
@@ -725,19 +824,19 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
         // Stage X2.6 — any terminal event for this scope clears the
         // infrastructure-timeout watchdog so it doesn't fire a false
         // positive after a normal completion.
-        const runStateForClear = store.getState().scopeRunStates[scopeId] || null
+        const runStateForClear = getScopeRunStateFromState(store.getState(), scopeId)
         clearInfrastructureWatchdog(scopeId, runStateForClear?.requestId || (typeof data.runId === 'string' ? data.runId : null))
         const runState = runStateForClear
         void (async () => {
           let finalized = false
           const finalize = () => {
-            finalizeScopeRunAfterStreamDone(scopeId, store.getState().scopeRunStates[scopeId] || runState)
+            finalizeScopeRunAfterStreamDone(scopeId, getScopeRunStateFromState(store.getState(), scopeId) || runState)
             finalized = true
           }
           try {
             await maybeAutoExecuteAssistantSkillCommand(scopeId, runState)
             finalize()
-            await persistAssistantMessageForRun(scopeId, store.getState().scopeRunStates[scopeId] || runState)
+            await persistAssistantMessageForRun(scopeId, getScopeRunStateFromState(store.getState(), scopeId) || runState)
           } catch (error) {
             emitRendererAgentMetric('renderer_assistant_done_finalize_failed', {
               scopeId,
@@ -754,7 +853,7 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
       if (data.type !== 'text' || !data.chunk) return
 
       const currentState = store.getState()
-      const runState = currentState.scopeRunStates[scopeId] || null
+      const runState = getScopeRunStateFromState(currentState, scopeId)
       refreshInfrastructureWatchdog(scopeId, runState?.requestId || (typeof data.runId === 'string' ? data.runId : null))
       const previousMessage = runState?.responseMessageId
         ? currentState.messages.find((item: AgentMessage) => item.id === runState.responseMessageId) || null
@@ -765,22 +864,26 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
         (scopeId === currentState.currentScopeId && runState?.responseMessageId && !previousMessage),
       )
 
+      const previousBuffer = runState?.responseBuffer || ''
       let targetResponseMessageId = runState?.responseMessageId || null
-      let nextBuffer = `${runState?.responseBuffer || ''}${data.chunk}`
+      let nextBuffer = collapseAdjacentDuplicateAssistantTail(`${previousBuffer}${data.chunk}`)
+      let chunkForDisplay = nextBuffer.startsWith(previousBuffer) ? nextBuffer.slice(previousBuffer.length) : data.chunk
 
       if (shouldStartNewSegment) {
         if (runState?.responseSegmentBreakPending) {
           sealResponseSegment(scopeId, runState)
         }
         targetResponseMessageId = generateResponseSegmentId()
-        nextBuffer = data.chunk
+        nextBuffer = collapseAdjacentDuplicateAssistantTail(data.chunk)
+        chunkForDisplay = nextBuffer
+        if (!chunkForDisplay.trim()) return
         // EP2 P0-2 — write-through: every streamed segment lands in the
         // scope's live cache so a later loadScope can restore it whether or
         // not this scope is in the foreground right now.
         currentState.appendScopeLiveMessage(scopeId, {
           id: targetResponseMessageId,
           agent: data.agent,
-          content: data.chunk,
+          content: chunkForDisplay,
           type: 'agent',
           timestamp: new Date(),
           meta: { transient: true },
@@ -789,7 +892,7 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
           currentState.addMessage({
             id: targetResponseMessageId,
             agent: data.agent,
-            content: data.chunk,
+            content: chunkForDisplay,
             type: 'agent',
             timestamp: new Date(),
             meta: { transient: true },
@@ -801,12 +904,13 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
           ))
         }
       } else if (targetResponseMessageId) {
-        upsertStreamedSegmentCache(currentState, scopeId, targetResponseMessageId, data.chunk, nextBuffer, data.agent)
+        upsertStreamedSegmentCache(currentState, scopeId, targetResponseMessageId, chunkForDisplay, nextBuffer, data.agent)
         if (
+          chunkForDisplay &&
           scopeId === currentState.currentScopeId &&
           currentState.messages.some((item: AgentMessage) => item.id === targetResponseMessageId)
         ) {
-          currentState.appendToMessage(targetResponseMessageId, data.chunk)
+          currentState.appendToMessage(targetResponseMessageId, chunkForDisplay)
         }
       }
 
@@ -876,7 +980,7 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
       const recoverable = data.recoverable === true
 
       const state = store.getState()
-      const runState = state.scopeRunStates[scopeId] || null
+      const runState = getScopeRunStateFromState(state, scopeId)
       // Stage X2.6 — clear infrastructure watchdog on any non-recoverable
       // terminal error. Recoverable errors (soft capsule) leave the
       // request in-flight so the watchdog must keep ticking.
@@ -1067,7 +1171,7 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
             runId,
             activateWorkbenchMode,
             upsertScopeRunState,
-            getScopeRunState: () => store.getState().scopeRunStates[scopeId] || null,
+            getScopeRunState: () => getScopeRunStateFromState(store.getState(), scopeId),
           })
           if (!handled) return
         })
@@ -1277,7 +1381,7 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
             runId,
             activateWorkbenchMode,
             upsertScopeRunState,
-            getScopeRunState: () => store.getState().scopeRunStates[scopeId] || null,
+            getScopeRunState: () => getScopeRunStateFromState(store.getState(), scopeId),
           }),
           watchdogPromise,
           cancelPromise,

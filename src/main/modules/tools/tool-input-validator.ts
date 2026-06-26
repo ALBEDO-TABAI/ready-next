@@ -17,6 +17,11 @@ import {
 } from '../agent-control/tools-runtime/tool-result-types'
 
 const MAX_REPORTED_ISSUES = 10
+const SKILL_ARTIFACT_RELATIVE_PATH_TOOLS = new Set([
+  'skill_write_artifact',
+  'skill_read_artifact',
+  'skill_export_artifact',
+])
 
 export interface ValidationIssueShape {
   path: string[]
@@ -34,6 +39,25 @@ export type ToolInputValidationOutcome =
       firstPath: string
     }
 
+function normalizeSkillArtifactPathAlias(
+  toolName: string,
+  args: Record<string, unknown>,
+): Record<string, unknown> {
+  if (!SKILL_ARTIFACT_RELATIVE_PATH_TOOLS.has(toolName)) return args
+  if (
+    typeof args.relativePath === 'string'
+    && args.relativePath.trim().length > 0
+  ) return args
+  if (
+    typeof args.path !== 'string'
+    || args.path.trim().length === 0
+  ) return args
+  return {
+    ...args,
+    relativePath: args.path,
+  }
+}
+
 export function validateToolInput(
   toolName: string,
   args: Record<string, unknown>,
@@ -45,7 +69,8 @@ export function validateToolInput(
     return { ok: true, data: args }
   }
 
-  const parsed = schema.safeParse(args)
+  const normalizedArgs = normalizeSkillArtifactPathAlias(toolName, args)
+  const parsed = schema.safeParse(normalizedArgs)
   if (parsed.success) {
     return { ok: true, data: parsed.data as Record<string, unknown> }
   }

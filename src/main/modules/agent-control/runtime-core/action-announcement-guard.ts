@@ -2,6 +2,10 @@ const ACTION_ANNOUNCEMENT_TAIL_PATTERN =
   /(?:让我|我来|我现在|我马上|接下来|现在去|I['’]ll now|let me)[\s\S]{0,120}[：:]\s*$/i
 const ACTION_ANNOUNCEMENT_PROMISE_PATTERN =
   /(?:让我|我来|我现在|我马上|我会|接下来|现在|马上|这就)[\s\S]{0,120}(?:打开|搜索|搜集|采集|下载|保存|存档|落到|插入|写入|创建|新建|移动|整理|提取|还原|执行|处理|批量下载|open|search|collect|download|save|insert|write|create|move|extract|run)/i
+const ACTION_ANNOUNCEMENT_START_PATTERN =
+  /(?:直接)?开始(?:写入|写|创建|新建|保存|输出|生成)[\s\S]{0,80}(?:文档|方案|文件|prompt)/i
+const ACTION_ANNOUNCEMENT_SEQUENCE_PATTERN =
+  /先(?:写|生成|创建)[\s\S]{0,80}再(?:写|生成|创建)/i
 
 // Steered-turn re-promise: looser than the first-hit tail pattern (the
 // forensic run4 promised again WITHOUT the trailing colon). A blocker
@@ -10,6 +14,13 @@ const STEERED_REPROMISE_PATTERN =
   /(?:让我|我来|我现在|我马上|接下来|现在去|这就去|马上去|我会(?:先|去)|I['’]ll now|let me)/i
 const BLOCKER_EXPLANATION_PATTERN =
   /(?:无法|不能|没有可|做不到|阻塞|失败|受限|被限制|需要你|需要用户|请提供|请先|缺少|登录|权限|cannot|unable|blocked|need you)/i
+
+function matchesActionAnnouncement(segment: string): boolean {
+  return ACTION_ANNOUNCEMENT_TAIL_PATTERN.test(segment)
+    || ACTION_ANNOUNCEMENT_PROMISE_PATTERN.test(segment)
+    || ACTION_ANNOUNCEMENT_START_PATTERN.test(segment)
+    || ACTION_ANNOUNCEMENT_SEQUENCE_PATTERN.test(segment)
+}
 
 export type ActionAnnouncementGuardDecision =
   | { kind: 'none' }
@@ -36,13 +47,13 @@ export function evaluateActionAnnouncementGuard(
   // ("我没有可调用工具，无法打开") is the steer's other legitimate exit and
   // closes as done.
   if (input.alreadySteered) {
-    const repromised = (STEERED_REPROMISE_PATTERN.test(segment) || ACTION_ANNOUNCEMENT_PROMISE_PATTERN.test(segment))
+    const repromised = (STEERED_REPROMISE_PATTERN.test(segment) || matchesActionAnnouncement(segment))
       && !BLOCKER_EXPLANATION_PATTERN.test(segment)
     return repromised
       ? { kind: 'checkpoint', actionSummary: summarizeActionAnnouncement(segment) }
       : { kind: 'none' }
   }
-  if (!ACTION_ANNOUNCEMENT_TAIL_PATTERN.test(segment) && !ACTION_ANNOUNCEMENT_PROMISE_PATTERN.test(segment)) {
+  if (!matchesActionAnnouncement(segment)) {
     return { kind: 'none' }
   }
   return { kind: 'steer', actionSummary: summarizeActionAnnouncement(segment) }

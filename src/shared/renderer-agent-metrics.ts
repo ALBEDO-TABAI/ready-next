@@ -16,10 +16,11 @@ export const RENDERER_AGENT_METRICS = [
   // send). The originating session is auto-unlocked and a "Ready lost
   // track" toast is surfaced. See plan §7.2 last paragraph.
   'renderer_infrastructure_timeout_fired',
-  // B step 2 — a main-unreachable timeout report is retried before the renderer
-  // gives up; this fires once per retry attempt.
-  'renderer_infrastructure_timeout_report_retry',
-] as const
+	  // B step 2 — a main-unreachable timeout report is retried before the renderer
+	  // gives up; this fires once per retry attempt.
+	  'renderer_infrastructure_timeout_report_retry',
+	  'renderer_infrastructure_timeout_paused_user_input',
+	] as const
 
 export type RendererAgentMetricName = typeof RENDERER_AGENT_METRICS[number]
 

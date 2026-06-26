@@ -33,6 +33,7 @@ if (typeof (globalThis as any).window === 'undefined') {
 }
 
 const { useAgent } = await import('../renderer/stores/useAgent')
+const { collapseAdjacentDuplicateAssistantTail } = await import('../renderer/modules/agent/runtimeDriver')
 
 describe('agent stream segmentation', () => {
   beforeEach(() => {
@@ -56,6 +57,14 @@ describe('agent stream segmentation', () => {
       attachments: [],
       filePool: [],
     })
+  })
+
+  it('collapses adjacent duplicated assistant status phrases at the stream tail', () => {
+    const duplicated = '我先加载所有参考文件，然后生成完整方案。好，所有参考文件已加载完毕。现在开始生成完整的岩洞晨光风线下门店设计方案，先写主体提案文档。好，所有参考文件已加载完毕。现在开始生成完整的岩洞晨光风线下门店设计方案，先写主体提案文档。'
+    assert.strictEqual(
+      collapseAdjacentDuplicateAssistantTail(duplicated),
+      '我先加载所有参考文件，然后生成完整方案。好，所有参考文件已加载完毕。现在开始生成完整的岩洞晨光风线下门店设计方案，先写主体提案文档。',
+    )
   })
 
   it('starts a new assistant reply segment after tool events instead of appending into the older reply', async () => {

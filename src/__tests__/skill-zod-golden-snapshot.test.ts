@@ -20,6 +20,7 @@ test('PRIMITIVE_TOOL_DEFS covers exactly the primitive names with kind=primitive
     'skill_ask_user',
     'skill_cancel_detached',
     'skill_compact_context',
+    'skill_export_artifact',
     'skill_inspect_detached',
     'skill_inspect_run_state',
     'skill_patch_config',
@@ -117,4 +118,6 @@ test('skill_ask_user advertises question as required + suspend-semantics in desc
   }
   assert.ok(anthropic.input_schema.required.includes('question'))
   assert.match(anthropic.description, /暂停当前 skill/)
+  assert.match(anthropic.description, /ask_user_questions/)
+  assert.match(anthropic.description, /多个问题/)
 })

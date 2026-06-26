@@ -97,7 +97,6 @@ const EXPLICIT_KIND_MAP: Record<string, ToolEnvelopeKind> = {
   [SEND_IM_ERROR_KINDS.sendFailed.code]: 'upstream_error',
   [SEND_IM_ERROR_KINDS.sidecarUnavailable.code]: 'upstream_error',
   [SEND_IM_ERROR_KINDS.channelNotReady.code]: 'upstream_error',
-  [BROWSER_TOOL_ERROR_KINDS.browserToolFailed.code]: 'upstream_error',
   present_file_failed: 'upstream_error',
   target_document_open_unavailable: 'upstream_error',
   target_document_save_unavailable: 'upstream_error',
@@ -155,6 +154,7 @@ const EXPLICIT_KIND_MAP: Record<string, ToolEnvelopeKind> = {
   not_resumable: 'internal_error',
   primitive_no_skill_context: 'internal_error',
   card_resolver_missed: 'internal_error',
+  [BROWSER_TOOL_ERROR_KINDS.browserToolFailed.code]: 'internal_error',
 }
 
 /** Pattern fallback for kinds not in the explicit table (future tools). */

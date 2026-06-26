@@ -45,7 +45,11 @@ import type { IpcChannelGroup, IpcDisposeHandle } from './types'
  */
 export type AskUserGroupDeps = Pick<
   EngineDeps,
-  'getDatabase' | 'getEphemeralExecutionStore' | 'getAskUserQuestionsStore' | 'logAgentMetric'
+  'getDatabase'
+  | 'getEphemeralExecutionStore'
+  | 'getAskUserQuestionsStore'
+  | 'logAgentMetric'
+  | 'refreshActiveRunProgress'
 >
 
 const CHANNELS = [
@@ -74,14 +78,18 @@ export const askUserGroup: IpcChannelGroup<AskUserGroupDeps> = {
       const answer = typeof payload.answer === 'string' ? payload.answer : ''
       if (!executionId) {
         return { success: false, error: 'executionId is required' }
-      }
-      const store = deps.getEphemeralExecutionStore()
-      const resolved = store.resolve(executionId, answer)
-      if (!resolved) {
-        return { success: false, error: 'No pending ask_user question with this id (already answered or timed out)' }
-      }
-      return { success: true }
-    })
+	      }
+	      const store = deps.getEphemeralExecutionStore()
+	      const record = store.get(executionId)
+	      const resolved = store.resolve(executionId, answer)
+	      if (!resolved) {
+	        return { success: false, error: 'No pending ask_user question with this id (already answered or timed out)' }
+	      }
+	      if (record?.agent && record.requestId) {
+	        deps.refreshActiveRunProgress(record.agent, record.scopeId || record.sessionId || undefined, record.requestId)
+	      }
+	      return { success: true }
+	    })
 
     ipcMain.handle('skills:askUser:pending', () => {
       return deps.getEphemeralExecutionStore().list()
@@ -122,12 +130,17 @@ export const askUserGroup: IpcChannelGroup<AskUserGroupDeps> = {
       // PR 1 — submit logic lives in `submitAskUserQuestionsAnswersCore` so it
       // can be unit-tested without electron / sqlite. This handler is the IPC
       // thin wrapper: payload unwrap + dep injection + result forward.
-      return submitAskUserQuestionsAnswersCore(cardId, answers, {
-        store: deps.getAskUserQuestionsStore(),
-        db: deps.getDatabase(),
-        logMetric: (name, payload) => deps.logAgentMetric(name, payload),
-      })
-    })
+	      const record = deps.getAskUserQuestionsStore().get(cardId)
+	      const result = submitAskUserQuestionsAnswersCore(cardId, answers, {
+	        store: deps.getAskUserQuestionsStore(),
+	        db: deps.getDatabase(),
+	        logMetric: (name, payload) => deps.logAgentMetric(name, payload),
+	      })
+	      if (result.success && record?.agent && record.requestId) {
+	        deps.refreshActiveRunProgress(record.agent, record.scopeId || record.sessionId || undefined, record.requestId)
+	      }
+	      return result
+	    })
 
     ipcMain.handle('agent:askUserQuestions:cancel', (_event, rawPayload: unknown) => {
       const payload = (rawPayload || {}) as { cardId?: string; reason?: string }
@@ -171,19 +184,23 @@ export const askUserGroup: IpcChannelGroup<AskUserGroupDeps> = {
       if (!card || card.questions[0]?.id !== FROZEN_CALL_QUESTION_ID) {
         return { success: false, error: 'No pending confirmation card for this frozen call' }
       }
-      return submitAskUserQuestionsAnswersCore(
-        card.cardId,
-        [{
-          id: FROZEN_CALL_QUESTION_ID,
+	      const result = submitAskUserQuestionsAnswersCore(
+	        card.cardId,
+	        [{
+	          id: FROZEN_CALL_QUESTION_ID,
           answer: decision === 'confirm' ? FROZEN_CALL_CONFIRM_OPTION : FROZEN_CALL_DENY_OPTION,
         }],
         {
           store: deps.getAskUserQuestionsStore(),
           db: deps.getDatabase(),
-          logMetric: (name, payload) => deps.logAgentMetric(name, payload),
-        },
-      )
-    })
+	          logMetric: (name, payload) => deps.logAgentMetric(name, payload),
+	        },
+	      )
+	      if (result.success && card.agent && card.requestId) {
+	        deps.refreshActiveRunProgress(card.agent, card.scopeId || card.sessionId || undefined, card.requestId)
+	      }
+	      return result
+	    })
 
     ipcMain.handle('agent:askUserQuestions:listPending', () => {
       // Source of truth = DB rows still tagged status='pending'. Combine with

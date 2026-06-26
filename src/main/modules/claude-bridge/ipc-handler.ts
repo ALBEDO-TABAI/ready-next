@@ -203,6 +203,7 @@ const chatRepository = new ChatRepository()
  * into a destroyed mainWindow.
  */
 let currentTaskProjectionsChangeOff: (() => void) | null = null
+let currentAskUserClearedOff: (() => void) | null = null
 
 /**
  * Stage U (PR 1, B.4b) — module-scoped guard so the ask_user_questions DB
@@ -482,6 +483,10 @@ export async function cleanupAgentRuntime(): Promise<void> {
     try { currentTaskProjectionsChangeOff() } catch { /* ignore */ }
     currentTaskProjectionsChangeOff = null
   }
+  if (currentAskUserClearedOff) {
+    try { currentAskUserClearedOff() } catch { /* ignore */ }
+    currentAskUserClearedOff = null
+  }
   // Stage V V2.1a — release the askUser channel handlers symmetric with
   // their register-on-setup. Other extracted groups follow the same shape.
   if (askUserGroupDispose) {
@@ -661,10 +666,18 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
   // B Phase 1 PR2 T1-7: wire `skill_ask_user` to push questions to the
   // renderer. The bridge keeps the handler independent of electron so it can
   // be unit-tested under `tsx --test`.
-  registerAskUserQuestionEmitter((event) => {
-    if (mainWindow.isDestroyed()) return
-    mainWindow.webContents.send('skill:askUserQuestion', event)
-  })
+	  registerAskUserQuestionEmitter((event) => {
+	    if (mainWindow.isDestroyed()) return
+	    mainWindow.webContents.send('skill:askUserQuestion', event)
+	  })
+	  if (currentAskUserClearedOff) {
+	    try { currentAskUserClearedOff() } catch { /* ignore */ }
+	    currentAskUserClearedOff = null
+	  }
+	  currentAskUserClearedOff = getEphemeralExecutionStore().onCleared((event) => {
+	    if (mainWindow.isDestroyed()) return
+	    mainWindow.webContents.send('skill:askUserCleared', event)
+	  })
   // agent_interaction — wire `ask_user_questions` emitter + persistor.
   // Boot sweep runs FIRST (synchronously, before any renderer hydrate) so
   // pending cards from a previous app run never resurrect with a missing
@@ -762,12 +775,14 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
     try { askUserGroupDispose.dispose() } catch { /* ignore — handlers may already be gone */ }
     askUserGroupDispose = null
   }
-  askUserGroupDispose = askUserGroup.register(ipcMain, {
-    getDatabase,
-    getEphemeralExecutionStore,
-    getAskUserQuestionsStore,
-    logAgentMetric: (name, payload) => logAgentMetric(name, payload),
-  })
+	  askUserGroupDispose = askUserGroup.register(ipcMain, {
+	    getDatabase,
+	    getEphemeralExecutionStore,
+	    getAskUserQuestionsStore,
+	    logAgentMetric: (name, payload) => logAgentMetric(name, payload),
+	    refreshActiveRunProgress: (agent, sessionId, requestId) =>
+	      runtime!.getOrchestrator().refreshActiveRunProgress(agent, sessionId, requestId),
+	  })
   const orchestrator = runtime.getOrchestrator()
   const pendingToolActionRequests = new Map<string, {
     resolve: (payload: Record<string, unknown>) => void

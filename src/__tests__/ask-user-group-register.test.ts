@@ -25,6 +25,8 @@ import {
   _askUserGroupChannelsForTest,
   type AskUserGroupDeps,
 } from '../main/modules/claude-bridge/ipc/ask-user-group'
+import { EphemeralExecutionStore } from '../main/modules/tools/skill-primitives/ephemeral-execution-store'
+import { AskUserQuestionsStore } from '../main/modules/tools/builtins/ask-user-questions-store'
 
 type HandlerFn = (event: IpcMainInvokeEvent, ...args: unknown[]) => unknown
 
@@ -66,7 +68,14 @@ function createMockDeps(): AskUserGroupDeps {
     logAgentMetric: () => {
       /* no-op */
     },
+    refreshActiveRunProgress: fail('refreshActiveRunProgress') as AskUserGroupDeps['refreshActiveRunProgress'],
   }
+}
+
+function getHandler(mock: MockIpc, channel: string): HandlerFn {
+  const found = mock.handleCalls.find((entry) => entry.channel === channel)
+  assert.ok(found, `expected handler for ${channel}`)
+  return found.handler
 }
 
 test('askUserGroup.register wires the 6 documented channels exactly once each', () => {
@@ -146,4 +155,48 @@ test('dispose is idempotent — calling twice does not throw and removes nothing
     _askUserGroupChannelsForTest.length,
     'second dispose issues at most one removeHandler per channel',
   )
+})
+
+test('skills:askUser:submit refreshes the active run after resolving the pending question', async () => {
+  const mock = createMockIpc()
+  const store = new EphemeralExecutionStore()
+  const timeoutHandle = setTimeout(() => {}, 60_000)
+  const refreshed: Array<{ agent: string; sessionId: string | undefined; requestId?: string }> = []
+  const answerPromise = new Promise<string>((resolve, reject) => {
+    store.register({
+      executionId: 'eau-refresh',
+      sessionId: 'scope-A',
+      scopeId: 'scope-A',
+      agent: 'butler',
+      requestId: 'req-A',
+      skillId: 'skill-a',
+      question: 'Need input?',
+      options: null,
+      placeholder: null,
+      askedAt: Date.now(),
+      resolve,
+      reject,
+      timeoutHandle,
+    })
+  })
+  const deps = {
+    ...createMockDeps(),
+    getEphemeralExecutionStore: () => store,
+    getAskUserQuestionsStore: () => new AskUserQuestionsStore(),
+    refreshActiveRunProgress: (agent: string, sessionId: string | undefined, requestId?: string) => {
+      refreshed.push({ agent, sessionId, requestId })
+      return true
+    },
+  } satisfies AskUserGroupDeps
+  askUserGroup.register(mock.ipc, deps)
+
+  const result = await getHandler(mock, 'skills:askUser:submit')({} as never, {
+    executionId: 'eau-refresh',
+    answer: '好的',
+  })
+
+  assert.deepEqual(result, { success: true })
+  assert.equal(await answerPromise, '好的')
+  assert.deepEqual(refreshed, [{ agent: 'butler', sessionId: 'scope-A', requestId: 'req-A' }])
+  clearTimeout(timeoutHandle)
 })

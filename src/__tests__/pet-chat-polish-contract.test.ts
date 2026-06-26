@@ -33,9 +33,40 @@ test('pet-facing chat hides internal skill/tool failure details from user-visibl
       text: '正在整理今日待办',
       timestamp: new Date(),
     },
+    {
+      id: 'reference-step',
+      kind: 'result' as const,
+      text: '技能步骤已完成',
+      timestamp: new Date(),
+    },
+    {
+      id: 'reference-read',
+      kind: 'result' as const,
+      text: '正在根据参考内容整理方案',
+      timestamp: new Date(),
+    },
+    {
+      id: 'skill-read-call',
+      kind: 'call' as const,
+      text: 'skill_read_artifact(relativePath)',
+      timestamp: new Date(),
+    },
+    {
+      id: 'skill-read-result',
+      kind: 'result' as const,
+      text: 'skill_read_artifact: # Reference content that should not flood the trace',
+      timestamp: new Date(),
+    },
+    {
+      id: 'skill-read-result-duplicate',
+      kind: 'result' as const,
+      text: 'skill_read_artifact: # Same hidden reference content',
+      timestamp: new Date(),
+    },
   ])
 
-  assert.deepEqual(events.map((event) => event.id), ['useful'])
+  assert.deepEqual(events.map((event) => event.id), ['useful', 'skill-read-call', 'skill-read-result'])
+  assert.equal(events.find((event) => event.id === 'skill-read-result')?.text, 'skill_read_artifact: 已读取')
   assert.equal(
     sanitizeInternalAgentDisplayText('Artifact not found: outputs', '正在继续处理'),
     '正在继续处理',

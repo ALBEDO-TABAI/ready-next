@@ -18,6 +18,11 @@ import {
   type SkillToolAuthorization,
 } from '../main/modules/agent-control/skills/skill-tool-authorization'
 import {
+  clearLastReferenceSkill,
+  getLastReferenceSkill,
+  rememberLastReferenceSkill,
+} from '../main/modules/agent-control/skills/skill-reference-hints'
+import {
   resolveExecutionIntentContext,
   resolveIntentCapabilityGroupModes,
   type ExecutionIntentContext,
@@ -101,6 +106,7 @@ function buildControllerResolution(testCase: CapabilityCase) {
 
 function listLiveSdkDefaultToolNames(input: {
   userText: string
+  sessionId?: string
   requestEnvelope?: unknown
   authorization?: SkillToolAuthorization
 }): string[] {
@@ -122,8 +128,8 @@ function listLiveSdkDefaultToolNames(input: {
   }
   return privateRuntime.listDefaultToolDefinitionsForTurn({
     message: input.userText,
-    sessionId: 'scope-live-sdk-parity',
-    scopeId: 'scope-live-sdk-parity',
+    sessionId: input.sessionId || 'scope-live-sdk-parity',
+    scopeId: input.sessionId || 'scope-live-sdk-parity',
     config: BASE_CONFIG,
     browserHostAvailable: true,
     feishuConnected: true,
@@ -377,6 +383,192 @@ test('P9C checks the live SDK default tool list exposes only the collection subs
   assert.ok(toolNames.includes('ask_user_questions'))
   assert.equal(toolNames.includes('browser_click'), false)
   assert.equal(toolNames.includes('browser_type'), false)
+})
+
+test('selected reference-skill authorization exposes export artifact for target-folder delivery', () => {
+  const userText = '@[hfp-space-design]生成一版洞穴风门店设计方案，输出到@[hfp空间方案]，文件名 ready-hfp-regression-洞穴风.md。不要追问，直接保存完整文档。'
+  const requestEnvelope = buildRequestEnvelope({ userText })
+  const sessionId = 'scope-hfp-space-design'
+  clearLastReferenceSkill(sessionId)
+  const runtime = new AgentSdkRuntime({
+    loadAIConfig: () => ({ ok: true, config: BASE_CONFIG, reason: 'present' }),
+    domainAdapters: [],
+    skillContextOrchestrator: {
+      findExplicitlyRequestedSkills: () => [{ id: 'hfp-space-design', name: 'hfp-space-design' }],
+      buildPreferredSkillToolNames: () => [
+        'skill_ask_user',
+        'skill_write_artifact',
+        'skill_read_artifact',
+        'skill_export_artifact',
+      ],
+      rememberExplicitReferenceSkillHint: () => rememberLastReferenceSkill(sessionId, {
+        id: 'hfp-space-design',
+        name: 'hfp-space-design',
+      }),
+      getCurrentReferenceSkillHint: () => ({ id: 'hfp-space-design', name: 'hfp-space-design' }),
+    } as any,
+  })
+  const privateRuntime = runtime as unknown as {
+    resolveSkillAuthorizationForTurn: (
+      message: string,
+      sessionId?: string,
+      requestEnvelope?: unknown,
+      forceLocalSendImIntent?: boolean,
+    ) => SkillToolAuthorization
+  }
+
+  try {
+    const authorization = privateRuntime.resolveSkillAuthorizationForTurn(
+      userText,
+      sessionId,
+      requestEnvelope,
+    )
+    if (authorization.mode !== 'selected') {
+      assert.fail(`expected selected authorization, got ${authorization.mode}`)
+    }
+    assert.equal(authorization.allowedPrimitives.has('skill_write_artifact'), true)
+    assert.equal(authorization.allowedPrimitives.has('skill_export_artifact'), true)
+    assert.equal(authorization.allowedPrimitives.has('skill_ask_user'), false)
+
+    const toolNames = listLiveSdkDefaultToolNames({
+      userText,
+      sessionId,
+      requestEnvelope,
+      authorization,
+    })
+    assert.ok(toolNames.includes('skill_write_artifact'))
+    assert.ok(toolNames.includes('skill_export_artifact'))
+    assert.equal(toolNames.includes('skill_ask_user'), false)
+  } finally {
+    clearLastReferenceSkill(sessionId)
+  }
+})
+
+test('selected reference-skill authorization exposes authorized primitives without legacy hint', () => {
+  const userText = '@[hfp-space-design]先只问我做线下门店方案还需要哪些补充信息，不要生成方案。'
+  const sessionId = 'scope-hfp-no-legacy-hint'
+  clearLastReferenceSkill(sessionId)
+  const authorization = buildSelectedSkillToolAuthorization({
+    skillId: 'hfp-space-design',
+    allowedTypedActions: [],
+    allowedPrimitives: [
+      'skill_ask_user',
+      'skill_write_artifact',
+      'skill_read_artifact',
+      'skill_export_artifact',
+      'skill_inspect_run_state',
+    ],
+    source: 'explicit',
+    reason: 'explicit_user_mention',
+  })
+
+  try {
+    const toolNames = listLiveSdkDefaultToolNames({
+      userText,
+      sessionId,
+      requestEnvelope: buildRequestEnvelope({ userText }),
+      authorization,
+    })
+
+    assert.ok(toolNames.includes('skill_ask_user'))
+    assert.ok(toolNames.includes('skill_read_artifact'))
+    assert.ok(toolNames.includes('skill_write_artifact'))
+    assert.ok(toolNames.includes('skill_export_artifact'))
+    assert.equal(getLastReferenceSkill(sessionId), null)
+  } finally {
+    clearLastReferenceSkill(sessionId)
+  }
+})
+
+test('SDK authorization uses raw user text when primary instruction strips explicit skill mention', () => {
+  const rawUserText = '@[hfp-space-design]生成一版岩洞晨光风线下门店设计方案，输出到@[hfp空间方案]'
+  const primaryInstruction = '生成一版岩洞晨光风线下门店设计方案，输出到 hfp空间方案'
+  const sessionId = 'scope-hfp-raw-skill-mention'
+  clearLastReferenceSkill(sessionId)
+  const requestEnvelope = {
+    rawUserText,
+    pureUserText: primaryInstruction,
+    primaryInstruction,
+    resources: [{
+      id: 'folder-hfp',
+      kind: 'folder_reference',
+      source: 'folder_reference',
+      name: 'hfp空间方案',
+      path: '/tmp/hfp空间方案',
+      text: '',
+      summary: null,
+      order: 0,
+      canRead: true,
+      canWrite: true,
+    }],
+  }
+  const runtime = new AgentSdkRuntime({
+    loadAIConfig: () => ({ ok: true, config: BASE_CONFIG, reason: 'present' }),
+    domainAdapters: [],
+    skillContextOrchestrator: {
+      findExplicitlyRequestedSkills: (text: string) =>
+        text.includes('@[hfp-space-design]')
+          ? [{ id: 'hfp-space-design', name: 'hfp-space-design' }]
+          : [],
+      buildPreferredSkillToolNames: (text: string) =>
+        text.includes('@[hfp-space-design]')
+          ? ['skill_ask_user', 'skill_write_artifact', 'skill_read_artifact', 'skill_export_artifact']
+          : [],
+      rememberExplicitReferenceSkillHint: (text: string, sid?: string) => {
+        if (!text.includes('@[hfp-space-design]')) return false
+        rememberLastReferenceSkill(sid, { id: 'hfp-space-design', name: 'hfp-space-design' })
+        return true
+      },
+      getCurrentReferenceSkillHint: (sid?: string) => {
+        const hint = getLastReferenceSkill(sid)
+        return hint ? { id: hint.id, name: hint.name } : null
+      },
+    } as any,
+  })
+  const privateRuntime = runtime as unknown as {
+    resolveSkillAuthorizationForTurn: (
+      message: string,
+      sessionId?: string,
+      requestEnvelope?: unknown,
+      forceLocalSendImIntent?: boolean,
+    ) => SkillToolAuthorization
+    listDefaultToolDefinitionsForTurn: (params: {
+      message: string
+      sessionId?: string
+      scopeId?: string
+      config: AIModelConfig
+      browserHostAvailable: boolean
+      feishuConnected: boolean
+      authorization: SkillToolAuthorization
+      requestEnvelope?: unknown
+    }) => Array<{ name: string }>
+  }
+
+  try {
+    const authorization = privateRuntime.resolveSkillAuthorizationForTurn(
+      primaryInstruction,
+      sessionId,
+      requestEnvelope,
+    )
+    assert.equal(authorization.mode, 'selected')
+    assert.equal(getLastReferenceSkill(sessionId)?.id, 'hfp-space-design')
+    const toolNames = privateRuntime.listDefaultToolDefinitionsForTurn({
+      message: primaryInstruction,
+      sessionId,
+      scopeId: sessionId,
+      config: BASE_CONFIG,
+      browserHostAvailable: true,
+      feishuConnected: false,
+      authorization,
+      requestEnvelope,
+    }).map((definition) => definition.name)
+    assert.ok(toolNames.includes('skill_read_artifact'))
+    assert.ok(toolNames.includes('skill_write_artifact'))
+    assert.ok(toolNames.includes('skill_export_artifact'))
+    assert.equal(toolNames.includes('skill_ask_user'), false)
+  } finally {
+    clearLastReferenceSkill(sessionId)
+  }
 })
 
 test('document-context continuation keeps document write tools available for short follow-up turns', () => {

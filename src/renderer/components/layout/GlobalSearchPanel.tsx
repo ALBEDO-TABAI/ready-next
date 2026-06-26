@@ -9,7 +9,7 @@ import { readJsonStorage, writeJsonStorage, removeStorage } from '../../utils/st
 import { GLOBAL_SEARCH_DIMENSIONS, PANEL_TOKENS } from './panelTokens'
 import Modal from '../ui/Modal'
 import { isLocalHtmlFilePath, openLocalHtmlFileInBrowser } from '../../modules/browser/localHtmlFileOpen'
-import { requestWorkbenchModeChange } from '../../modules/workbench/mode-transition'
+import { applyWorkbenchModeOpenDecision, requestWorkbenchModeChange } from '../../modules/workbench/mode-transition'
 
 interface SearchResultItem {
   path: string
@@ -204,6 +204,17 @@ function modeForPath(path: string): WorkbenchMode {
   return 'document'
 }
 
+function revealWorkbenchModeForSearchOpen(mode: WorkbenchMode): void {
+  const state = useMode.getState()
+  applyWorkbenchModeOpenDecision({
+    workbenchMode: state.workbenchMode,
+    splitMode: state.splitMode,
+  }, mode, {
+    setSplitMode: state.setSplitMode,
+    requestModeChange: requestWorkbenchModeChange,
+  })
+}
+
 function renderSnippet(snippet: string): ReactNode {
   if (!snippet) return null
   const parts: ReactNode[] = []
@@ -335,7 +346,6 @@ export default function GlobalSearchPanel({ resetSignal = 0, children }: GlobalS
   const workspaceRoot = useWorkspace((state) => state.workspaceRoot)
   const pinnedFolders = useWorkspace((state) => state.pinnedFolders)
   const selectFile = useWorkspace((state) => state.selectFile)
-  const setWorkbenchMode = useMode((state) => state.setWorkbenchMode)
   const tabs = useDocTabs((state) => state.tabs)
   const setActiveTab = useDocTabs((state) => state.setActiveTab)
   const openTab = useDocTabs((state) => state.openTab)
@@ -610,7 +620,7 @@ export default function GlobalSearchPanel({ resetSignal = 0, children }: GlobalS
   const openResult = useCallback((item: SearchResultItem) => {
     if (item.draft) {
       setActiveTab(item.draft.tabId)
-      setWorkbenchMode('document')
+      revealWorkbenchModeForSearchOpen('document')
       return
     }
     // Route by source_type. Filesystem documents flow through the normal
@@ -633,25 +643,25 @@ export default function GlobalSearchPanel({ resetSignal = 0, children }: GlobalS
         return
       }
       case 'calendar':
-        setWorkbenchMode('calendar')
+        revealWorkbenchModeForSearchOpen('calendar')
         return
       case 'agent':
-        setWorkbenchMode('document')
+        revealWorkbenchModeForSearchOpen('document')
         return
       case 'document':
       default:
         if (isLocalHtmlFilePath(item.path)) {
           selectFile(item.path)
           void openLocalHtmlFileInBrowser(item.path, item.name).then((opened) => {
-            if (opened) requestWorkbenchModeChange('browser')
+            if (opened) revealWorkbenchModeForSearchOpen('browser')
           })
           return
         }
         openTab(item.path)
         selectFile(item.path)
-        setWorkbenchMode(modeForPath(item.path))
+        revealWorkbenchModeForSearchOpen(modeForPath(item.path))
     }
-  }, [openTab, selectFile, setActiveTab, setWorkbenchMode])
+  }, [openTab, selectFile, setActiveTab])
 
   // Overlay unsaved (path-less or dirty) drafts from useDocTabs. Indexed search
   // only sees persisted files; this keeps brand-new or in-flight edits visible.

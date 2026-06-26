@@ -4751,6 +4751,67 @@ test('agent sdk runtime preserves structured tool validation errors', async () =
   assert.match(toolOutput, /"detail":"query is required"/)
 })
 
+test('agent sdk runtime does not turn recoverable skill path errors into terminal proof gaps', async () => {
+  const cases: Array<{
+    label: string
+    data: Record<string, unknown>
+  }> = [
+    {
+      label: 'sandbox path escape',
+      data: {
+        errorKind: 'path_escape',
+        relativePath: '/Users/example/out.md',
+      },
+    },
+    {
+      label: 'relativePath input validation',
+      data: {
+        errorKind: 'input_validation',
+        issues: [{
+          path: ['relativePath'],
+          code: 'invalid_type',
+          message: 'Expected string',
+        }],
+      },
+    },
+  ]
+
+  for (const item of cases) {
+    const toolDefinition = createToolDefinition({
+      name: 'skill_write_artifact',
+      groupId: 'skills',
+      domain: 'skills',
+      description: 'Write skill artifact',
+    })
+    const runtime = createRuntime({
+      listToolDefinitions: () => [toolDefinition],
+      executeToolCall: async () => createToolExecutionOutput('路径参数需要修正', {
+        shape: 'json',
+        data: item.data,
+      }),
+      runAgent: async ({ tools, onTextDelta }) => {
+        const sdkTool = tools[0] as { invoke: (context: unknown, input: string) => Promise<string> }
+        await sdkTool.invoke({}, JSON.stringify({ relativePath: '/Users/example/out.md', content: 'x' }))
+        onTextDelta(`继续修正 ${item.label}`)
+        return { finalText: `继续修正 ${item.label}` }
+      },
+    })
+    const slug = item.label.replace(/\s+/g, '-')
+    const sessionId = `butler::scope-skill-path-${slug}`
+    runtime.newSession(sessionId, 'system prompt')
+
+    const result = await runtime.sendMessage(sessionId, '写入方案', `run-skill-path-${slug}`, {
+      publicSessionId: sessionId,
+      taskId: `task-skill-path-${slug}`,
+    })
+
+    assert.equal(result.success, true)
+    assert.equal(result.projectionTruth?.projectionPatch?.terminalFailureReason, undefined)
+    assert.equal(result.projectionTruth?.projectionPatch?.terminalFailureTool, 'skill_write_artifact')
+    assert.equal(result.projectionTruth?.projectionPatch?.terminalFailureErrorKind, item.data.errorKind)
+  }
+})
+
 test('agent sdk runtime executes representative domain tools without losing projection truth', async () => {
   const cases: Array<{
     label: string

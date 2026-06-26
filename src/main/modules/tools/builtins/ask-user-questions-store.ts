@@ -56,6 +56,9 @@ export interface AskUserQuestionsCardRecord {
   cardId: string
   sessionId: string | null
   conversationId: string | null
+  scopeId?: string | null
+  agent?: string | null
+  requestId?: string | null
   questions: AskUserQuestionSpec[]
   askedAt: number
   resolve: (answerSet: AskUserQuestionsAnswerSet) => void
@@ -67,6 +70,9 @@ export interface PendingAskUserQuestionsCardView {
   cardId: string
   sessionId: string | null
   conversationId: string | null
+  scopeId?: string | null
+  agent?: string | null
+  requestId?: string | null
   questions: AskUserQuestionSpec[]
   askedAt: number
 }
@@ -110,6 +116,18 @@ export class AskUserQuestionsStore {
       if (record.sessionId === sessionId) return record
     }
     return null
+  }
+
+  hasPendingForRun(agent: string, sessionId: string | null | undefined, requestId: string): boolean {
+    if (!agent || !sessionId || !requestId) return false
+    for (const record of this.records.values()) {
+      const recordSessionId = record.scopeId || record.sessionId
+      if (recordSessionId !== sessionId) continue
+      if (record.agent !== agent) continue
+      if (record.requestId !== requestId) continue
+      return true
+    }
+    return false
   }
 
   /**
@@ -189,6 +207,9 @@ export class AskUserQuestionsStore {
         cardId: record.cardId,
         sessionId: record.sessionId,
         conversationId: record.conversationId,
+        scopeId: record.scopeId ?? record.sessionId,
+        agent: record.agent ?? null,
+        requestId: record.requestId ?? null,
         questions: record.questions,
         askedAt: record.askedAt,
       })

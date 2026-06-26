@@ -1000,22 +1000,39 @@ const skillsAPI = {
   submitAskUserAnswer: (payload: { executionId: string; answer: string }) =>
     ipcRenderer.invoke('skills:askUser:submit', payload),
   listPendingAskUser: () => ipcRenderer.invoke('skills:askUser:pending'),
-  onAskUserQuestion: (
-    handler: (event: {
-      executionId: string
-      sessionId: string | null
-      skillId: string | null
-      question: string
+	  onAskUserQuestion: (
+	    handler: (event: {
+	      executionId: string
+	      sessionId: string | null
+	      scopeId?: string | null
+	      agent?: string | null
+	      requestId?: string | null
+	      skillId: string | null
+	      question: string
       options: string[] | null
       placeholder: string | null
       askedAt: number
     }) => void,
   ) => {
     const listener = (_event: unknown, payload: Parameters<typeof handler>[0]) => handler(payload)
-    ipcRenderer.on('skill:askUserQuestion', listener)
-    return () => ipcRenderer.removeListener('skill:askUserQuestion', listener)
-  },
-  onSkillReferenceInlined: (
+	    ipcRenderer.on('skill:askUserQuestion', listener)
+	    return () => ipcRenderer.removeListener('skill:askUserQuestion', listener)
+	  },
+	  onAskUserCleared: (
+	    handler: (event: {
+	      executionId: string
+	      sessionId: string | null
+	      scopeId: string | null
+	      agent: string | null
+	      requestId: string | null
+	      reason: 'resolved' | 'rejected' | 'cleared'
+	    }) => void,
+	  ) => {
+	    const listener = (_event: unknown, payload: Parameters<typeof handler>[0]) => handler(payload)
+	    ipcRenderer.on('skill:askUserCleared', listener)
+	    return () => ipcRenderer.removeListener('skill:askUserCleared', listener)
+	  },
+	  onSkillReferenceInlined: (
     handler: (event: {
       sessionId: string | null
       skillId: string

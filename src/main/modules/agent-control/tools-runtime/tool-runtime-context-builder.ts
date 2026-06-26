@@ -50,6 +50,7 @@ export function buildToolRuntimeContext(params: {
   sidecarManager: SidecarManager | null
   runtime: AgentControlRuntime | null
   scope?: ConversationScope
+  agent?: string | null
   allowedToolNames?: Set<string> | string[] | null
   emitToolAction: (tool: string, args: Record<string, unknown>) => void
   requestModuleToolAction?: (tool: string, args: Record<string, unknown>) => Promise<Record<string, unknown>>
@@ -90,6 +91,7 @@ export function buildToolRuntimeContext(params: {
     sidecarManager: params.sidecarManager,
     runtime: params.runtime,
     scope: params.scope,
+    agent: params.agent ?? params.scope?.agent ?? null,
     allowedToolNames: params.allowedToolNames || null,
     emitToolAction: params.emitToolAction,
     requestModuleToolAction: params.requestModuleToolAction,
@@ -121,6 +123,7 @@ export function toToolExecutorContext(context: ToolRuntimeContext): ToolContext 
     sidecarManager: context.sidecarManager,
     runtime: context.runtime,
     scope: context.scope,
+    agent: context.agent ?? context.scope?.agent ?? null,
     allowedToolNames: context.allowedToolNames || null,
     emitToolAction: context.emitToolAction,
     requestModuleToolAction: context.requestModuleToolAction,

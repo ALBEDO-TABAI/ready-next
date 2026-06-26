@@ -20,7 +20,7 @@ export const PRIMITIVE_TOOL_DEFS: SkillToolDef[] = [
   {
     name: 'skill_ask_user',
     description:
-      '向用户发起一次澄清问题，暂停当前 skill 直到用户回复。最多 12 个预设选项按钮，用户也可自由输入。24 小时无响应自动超时。用于你需要一个关键参数 / 决策而无法从上下文推断时；禁止在已经能自行决策时调用。回复结果通过 tool_result 返回。',
+      '向用户发起一次澄清问题，暂停当前 skill 直到用户回复。最多 12 个预设选项按钮，用户也可自由输入。只用于一个问题的一组选项；如果需要同时询问 2 个以上问题 / 维度，必须改用 ask_user_questions，让 UI 逐题分页并一次性提交，禁止把多个问题塞进 options。任务已经完成后不要用本工具问用户要不要继续调整，直接在普通总结里一句话询问即可。24 小时无响应自动超时。用于你需要一个关键参数 / 决策而无法从上下文推断时；禁止在已经能自行决策时调用。回复结果通过 tool_result 返回。',
     kind: 'primitive',
     params: zodObjectToParamList(SKILL_PRIMITIVE_SCHEMAS.skill_ask_user),
   },
@@ -41,7 +41,7 @@ export const PRIMITIVE_TOOL_DEFS: SkillToolDef[] = [
   {
     name: 'skill_write_artifact',
     description:
-      '把字符串写入技能 artifact 目录（<outputsRoot>/<skillId>/）下的相对路径。禁止绝对路径 / .. / symlink 穿越 / 保留文件名（SKILL.md、ready-skill.json、skill.workflow.json）。同名文件允许覆盖。',
+      '把字符串写入技能 artifact 目录（<outputsRoot>/<skillId>/）下的路径；优先传相对路径，也接受 artifact 根内的绝对路径。禁止根外绝对路径 / ~/ / .. / symlink 穿越 / 保留文件名（SKILL.md、ready-skill.json、skill.workflow.json）。同名文件默认覆盖；长文档需要补齐尾部章节时可用 mode=append 追加。用户要求输出/保存到指定文件夹时，先用本工具写相对路径，随后用 skill_export_artifact 导出到目标绝对路径。',
     kind: 'primitive',
     params: zodObjectToParamList(SKILL_PRIMITIVE_SCHEMAS.skill_write_artifact),
   },
@@ -55,7 +55,7 @@ export const PRIMITIVE_TOOL_DEFS: SkillToolDef[] = [
   {
     name: 'skill_export_artifact',
     description:
-      '把技能 artifact 目录内的一个既有产物导出到用户指定的绝对文件路径。只读取当前 skill artifact 根内的 relativePath；默认不覆盖目标文件。只有当用户明确要求把 skill 产物落到某个路径时才调用。',
+      '把技能 artifact 目录内的一个既有产物导出到用户指定的绝对文件路径。只读取当前 skill artifact 根内的 relativePath；默认不覆盖目标文件。用户要求输出/保存到某个文件夹、@[文件夹] 或指定文件名时，必须在最终回复前完成导出。',
     kind: 'primitive',
     params: zodObjectToParamList(SKILL_PRIMITIVE_SCHEMAS.skill_export_artifact),
   },

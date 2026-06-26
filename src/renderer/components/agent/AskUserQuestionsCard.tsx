@@ -102,11 +102,12 @@ export function AskUserQuestionsCard({ card, onSubmit, onCancel }: AskUserQuesti
   const allRequiredAnswered = useMemo(() => {
     return card.questions.every((q) => !q.required || isQuestionAnswered(q, answers))
   }, [card.questions, answers])
+  const answeredCount = useMemo(() => {
+    return card.questions.filter((q) => isQuestionAnswered(q, answers)).length
+  }, [card.questions, answers])
 
   const canGoBack = safeIndex > 0
-  const canGoForward = safeIndex < totalQuestions - 1 && (
-    currentQ.required === false || isQuestionAnswered(currentQ, answers)
-  )
+  const canGoForward = safeIndex < totalQuestions - 1
   // Stage U (PR 1, B.5) — `localDisabled` is the pre-send cancel hook saying
   // "an in-flight cancel for this card timed out; do not allow submit until
   // the late cancel result lands". We keep status:'pending' so the card UI
@@ -121,12 +122,6 @@ export function AskUserQuestionsCard({ card, onSubmit, onCancel }: AskUserQuesti
   const handleSelectOption = useCallback((q: AskUserQuestionsCardState['questions'][number], option: string) => {
     if (q.kind === 'single_choice') {
       setAnswer(q.id, option)
-      // Auto-advance: feels like the question chain anticipates the user.
-      // Only when there's still a next question; on the last one we leave
-      // focus on the Submit button below.
-      if (safeIndex < totalQuestions - 1) {
-        setCurrentIndex(safeIndex + 1)
-      }
     } else if (q.kind === 'multi_choice') {
       const currentVal = Array.isArray(answers[q.id]) ? [...(answers[q.id] as string[])] : []
       const idx = currentVal.indexOf(option)
@@ -134,7 +129,7 @@ export function AskUserQuestionsCard({ card, onSubmit, onCancel }: AskUserQuesti
       else currentVal.push(option)
       setAnswer(q.id, currentVal)
     }
-  }, [answers, safeIndex, totalQuestions, setAnswer])
+  }, [answers, setAnswer])
 
   const handleFreeTextChange = useCallback((q: AskUserQuestionsCardState['questions'][number], value: string) => {
     setAnswer(q.id, value)
@@ -442,6 +437,10 @@ export function AskUserQuestionsCard({ card, onSubmit, onCancel }: AskUserQuesti
         >
           <ChevronRight size={16} />
         </button>
+
+        <span style={{ fontSize: 11.5, color: 'var(--text-light)', marginLeft: 2 }}>
+          已答 {answeredCount}/{totalQuestions}
+        </span>
 
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
           {localDisabled && (

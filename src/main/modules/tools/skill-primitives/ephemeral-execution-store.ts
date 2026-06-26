@@ -27,6 +27,9 @@ import { randomUUID } from 'node:crypto'
 export interface EphemeralAskUserRecord {
   executionId: string
   sessionId: string | null
+  scopeId?: string | null
+  agent?: string | null
+  requestId?: string | null
   skillId: string | null
   question: string
   options: string[] | null
@@ -41,11 +44,23 @@ export interface EphemeralAskUserRecord {
 export interface PendingAskUserView {
   executionId: string
   sessionId: string | null
+  scopeId?: string | null
+  agent?: string | null
+  requestId?: string | null
   skillId: string | null
   question: string
   options: string[] | null
   placeholder: string | null
   askedAt: number
+}
+
+export interface EphemeralAskUserClearedEvent {
+  executionId: string
+  sessionId: string | null
+  scopeId: string | null
+  agent: string | null
+  requestId: string | null
+  reason: 'resolved' | 'rejected' | 'cleared'
 }
 
 export const EPHEMERAL_ASK_USER_ID_PREFIX = 'eau-'
@@ -60,6 +75,7 @@ export function isEphemeralAskUserId(executionId: string): boolean {
 
 export class EphemeralExecutionStore {
   private readonly records = new Map<string, EphemeralAskUserRecord>()
+  private readonly clearListeners = new Set<(event: EphemeralAskUserClearedEvent) => void>()
 
   has(executionId: string): boolean {
     return this.records.has(executionId)
@@ -73,6 +89,29 @@ export class EphemeralExecutionStore {
     this.records.set(record.executionId, record)
   }
 
+  onCleared(listener: (event: EphemeralAskUserClearedEvent) => void): () => void {
+    this.clearListeners.add(listener)
+    return () => this.clearListeners.delete(listener)
+  }
+
+  private notifyCleared(record: EphemeralAskUserRecord, reason: EphemeralAskUserClearedEvent['reason']): void {
+    const event: EphemeralAskUserClearedEvent = {
+      executionId: record.executionId,
+      sessionId: record.sessionId,
+      scopeId: record.scopeId ?? record.sessionId,
+      agent: record.agent ?? null,
+      requestId: record.requestId ?? null,
+      reason,
+    }
+    for (const listener of this.clearListeners) {
+      try {
+        listener(event)
+      } catch {
+        /* listener failure must not break ask_user lifecycle */
+      }
+    }
+  }
+
   /**
    * Resolve a pending ask_user question with the user's answer. Returns true
    * when a record was actually resolved; false when no record existed (e.g.
@@ -83,6 +122,7 @@ export class EphemeralExecutionStore {
     if (!record) return false
     clearTimeout(record.timeoutHandle)
     this.records.delete(executionId)
+    this.notifyCleared(record, 'resolved')
     record.resolve(value)
     return true
   }
@@ -96,6 +136,7 @@ export class EphemeralExecutionStore {
     if (!record) return false
     clearTimeout(record.timeoutHandle)
     this.records.delete(executionId)
+    this.notifyCleared(record, 'rejected')
     record.reject(error)
     return true
   }
@@ -104,6 +145,7 @@ export class EphemeralExecutionStore {
   clear(): void {
     for (const [, record] of this.records) {
       clearTimeout(record.timeoutHandle)
+      this.notifyCleared(record, 'cleared')
       try {
         record.reject(new Error('Ephemeral ask_user store cleared'))
       } catch {
@@ -123,6 +165,7 @@ export class EphemeralExecutionStore {
       if (record.sessionId === sessionId) {
         clearTimeout(record.timeoutHandle)
         this.records.delete(executionId)
+        this.notifyCleared(record, 'rejected')
         try {
           record.reject(error)
         } catch {
@@ -148,6 +191,9 @@ export class EphemeralExecutionStore {
       out.push({
         executionId: record.executionId,
         sessionId: record.sessionId,
+        scopeId: record.scopeId ?? record.sessionId,
+        agent: record.agent ?? null,
+        requestId: record.requestId ?? null,
         skillId: record.skillId,
         question: record.question,
         options: record.options,
@@ -156,6 +202,18 @@ export class EphemeralExecutionStore {
       })
     }
     return out
+  }
+
+  hasPendingForRun(agent: string, sessionId: string | null | undefined, requestId: string): boolean {
+    if (!agent || !sessionId || !requestId) return false
+    for (const record of this.records.values()) {
+      const recordSessionId = record.scopeId || record.sessionId
+      if (recordSessionId !== sessionId) continue
+      if (record.agent !== agent) continue
+      if (record.requestId !== requestId) continue
+      return true
+    }
+    return false
   }
 }
 

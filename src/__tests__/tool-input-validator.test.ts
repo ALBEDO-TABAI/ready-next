@@ -32,6 +32,41 @@ test('validateToolInput returns parsed (coerced) data on success', () => {
   }
 })
 
+test('validateToolInput normalizes skill artifact path alias before schema validation', () => {
+  const schema = z.object({
+    relativePath: z.string().trim().min(1),
+    content: z.string(),
+  })
+  const outcome = validateToolInput(
+    'skill_write_artifact',
+    { path: ' 方案.md ', content: 'hello' },
+    { skill_write_artifact: schema },
+  )
+  assert.equal(outcome.ok, true)
+  if (outcome.ok) {
+    assert.deepEqual(outcome.data, {
+      relativePath: '方案.md',
+      content: 'hello',
+    })
+  }
+})
+
+test('validateToolInput keeps path alias scoped to skill artifact tools', () => {
+  const schema = z.object({
+    relativePath: z.string().trim().min(1),
+    content: z.string(),
+  })
+  const outcome = validateToolInput(
+    'some_tool',
+    { path: '方案.md', content: 'hello' },
+    { some_tool: schema },
+  )
+  assert.equal(outcome.ok, false)
+  if (!outcome.ok) {
+    assert.equal(outcome.firstPath, 'relativePath')
+  }
+})
+
 test('validateToolInput builds a structured error with errorKind input_validation on failure', () => {
   const schema = z.object({
     executionId: z.string().trim().min(1),

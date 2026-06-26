@@ -71,6 +71,7 @@ export interface SkillTaskEvent {
   detachedTaskId?: string | null
   resumePayload?: Record<string, unknown> | null
   progress?: ScopeRunSkillProgress | null
+  projectionOnly?: boolean
 }
 
 export interface SkillParentTaskLifecycleEvent {
@@ -166,6 +167,8 @@ function titleForTool(toolName: string): string {
       return '等待用户补充信息'
     case 'skill_write_artifact':
       return '写入技能产物'
+    case 'skill_export_artifact':
+      return '导出技能产物'
     case 'skill_read_artifact':
       return '读取技能产物'
     case 'skill_patch_config':
@@ -173,6 +176,80 @@ function titleForTool(toolName: string): string {
     default:
       return toolName.startsWith('skill_') ? '执行技能工具' : toolName
   }
+}
+
+function skillNameForDisplay(event: Pick<SkillTaskEvent, 'skillName' | 'skillId'>): string {
+  const raw = String(event.skillName || event.skillId || '').trim()
+  if (!raw) return '技能'
+  if (raw === 'hfp-space-design') return '空间设计技能'
+  return raw
+}
+
+function projectionTitleForEvent(event: SkillTaskEvent): string {
+  if (!event.projectionOnly) return titleForTool(event.toolName)
+  switch (event.toolName) {
+    case 'skill_read_artifact':
+      return '读取技能参考'
+    case 'skill_write_artifact':
+      return '写入方案草稿'
+    case 'skill_export_artifact':
+      return '保存到目标文件夹'
+    case 'skill_inspect_run_state':
+      return '确认任务状态'
+    case 'skill_run_shell':
+      return '执行技能步骤'
+    default:
+      return titleForTool(event.toolName)
+  }
+}
+
+function projectionSummaryForEvent(event: SkillTaskEvent): string {
+  if (!event.projectionOnly) return titleForTool(event.toolName)
+  if (event.status === 'error') return event.toolName === 'skill_export_artifact'
+    ? '保存没有完成，正在调整'
+    : '处理没有完成，正在调整'
+  if (event.status === 'blocked') return '等待补充信息'
+  const skillName = skillNameForDisplay(event)
+  switch (event.toolName) {
+    case 'skill_read_artifact':
+      return event.status === 'running'
+        ? `正在读取${skillName}的参考内容`
+        : '正在根据参考内容整理方案'
+    case 'skill_write_artifact':
+      return event.status === 'running'
+        ? '正在写入方案草稿'
+        : '方案草稿已写入，正在准备保存'
+    case 'skill_export_artifact':
+      return event.status === 'running'
+        ? '正在保存到目标文件夹'
+        : '已保存到目标文件夹'
+    case 'skill_inspect_run_state':
+      return event.status === 'running'
+        ? '正在确认任务状态'
+        : '任务状态已确认'
+    case 'skill_run_shell':
+      return event.status === 'running'
+        ? '正在执行技能步骤'
+        : '技能步骤已完成'
+    default:
+      return titleForTool(event.toolName)
+  }
+}
+
+function projectionTaskTitleForEvent(event: SkillTaskEvent, currentTitle: string): string {
+  if (!event.projectionOnly) return currentTitle
+  if (event.status === 'error') {
+    return event.toolName === 'skill_export_artifact' ? '保存失败' : '处理遇到问题'
+  }
+  if (event.status === 'blocked') return '等待补充信息'
+  if (event.toolName === 'skill_export_artifact' && event.status === 'done') return '文档已保存'
+  if (event.skillId === 'hfp-space-design') return '正在生成空间方案'
+  return `正在使用${skillNameForDisplay(event)}`
+}
+
+function projectionOnlyStepIdForEvent(event: SkillTaskEvent): string | null {
+  if (!event.projectionOnly) return null
+  return `reference:${event.toolName}`
 }
 
 function isMemoryOnlyEvent(event: SkillTaskEvent): boolean {
@@ -607,6 +684,7 @@ function buildRunArtifacts(event: SkillTaskEvent, stepId: string, nowIso: string
 }
 
 function shouldPreserveParentProjection(projection: SkillTaskProjectionState, event: SkillTaskEvent): boolean {
+  if (event.projectionOnly) return false
   if (
     projection.taskContinuation?.childRunId
     && event.runKind === 'typed_action'
@@ -794,14 +872,16 @@ export function recordSkillTaskEvent(event: SkillTaskEvent): { stepId: string } 
 
   const projection = getOrCreateProjection(event)
   const updatedAt = new Date().toISOString()
-  const stepId = event.stepId || nextStepId(projection.steps, event.toolName)
+  const stepId = event.stepId || projectionOnlyStepIdForEvent(event) || nextStepId(projection.steps, event.toolName)
   const preserveParentProjection = shouldPreserveParentProjection(projection, event)
   const existingIndex = projection.steps.findIndex((step) => step.id === stepId)
+  const projectedTitle = projectionTitleForEvent(event)
+  const projectedSummary = projectionSummaryForEvent(event)
   const step: ScopeRunTaskStep = {
     id: stepId,
-    title: titleForTool(event.toolName),
+    title: projectedTitle,
     status: event.status,
-    detail: event.message || null,
+    detail: projectedSummary || null,
     updatedAt,
   }
 
@@ -814,7 +894,8 @@ export function recordSkillTaskEvent(event: SkillTaskEvent): { stepId: string } 
   if (!preserveParentProjection) {
     projection.status = eventProjectionStatus(event.status)
     projection.currentStepId = stepId
-    projection.taskSummary = event.message || titleForTool(event.toolName)
+    projection.taskTitle = projectionTaskTitleForEvent(event, projection.taskTitle)
+    projection.taskSummary = projectedSummary
     projection.blockedReason = event.status === 'blocked' || event.status === 'error'
       ? event.message || (event.status === 'blocked' ? '等待用户补充信息' : '技能执行失败')
       : null
@@ -873,7 +954,9 @@ export function recordSkillTaskEvent(event: SkillTaskEvent): { stepId: string } 
       })),
     ].slice(-6)
   }
-  recordTaskRunEvent(event, stepId, updatedAt)
+  if (!event.projectionOnly) {
+    recordTaskRunEvent(event, stepId, updatedAt)
+  }
   return { stepId }
 }
 

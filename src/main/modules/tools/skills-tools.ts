@@ -1,5 +1,5 @@
-import { existsSync, readFileSync } from 'node:fs'
-import { dirname } from 'node:path'
+import { existsSync, readFileSync, statSync } from 'node:fs'
+import { basename, dirname, join } from 'node:path'
 import type { ZodObject, ZodRawShape } from 'zod'
 import { getSkillsRuntimeManager, type SkillState } from '../skills-runtime/runtime-manager'
 import { rememberSkillRun } from '../agent-control/session/session-continuity'
@@ -75,9 +75,12 @@ import {
   executeRunShell,
   executeWriteArtifact,
 } from './skill-primitives'
+import { resolveWritableWithinRoot } from './skill-primitives/path-sandbox'
+import { defaultLookupSkillRoots } from './skill-primitives/root-resolver'
 import { SHELL_ALLOWLIST } from './skill-primitives/run-shell'
 import { getAskUserQuestionEmitter } from '../agent-control/ask-user/ask-user-bridge'
 import { getSkillHostController } from '../skills-runtime/skill-host-controller'
+import { ToolDomainError } from './tool-errors'
 import {
   toAnthropicTool,
   toOpenAITool,
@@ -149,6 +152,109 @@ function buildToolName(skillId: string, actionName: string): string {
   return `skill_${sanitizeToolToken(skillId)}_${sanitizeToolToken(actionName)}`
 }
 
+const HFP_SPACE_DESIGN_FULL_PROPOSAL_SECTIONS: Array<{ label: string; pattern: RegExp }> = [
+  { label: '1. 方案名称', pattern: /^##\s*1\s*[.．、]\s*方案名称/m },
+  { label: '2. 一句话空间命题', pattern: /^##\s*2\s*[.．、]\s*一句话空间命题/m },
+  { label: '3. 用户真实场景', pattern: /^##\s*3\s*[.．、]\s*用户真实场景/m },
+  { label: '4. 设计目标与优先级', pattern: /^##\s*4\s*[.．、]\s*设计目标与优先级/m },
+  { label: '5. 核心空间概念', pattern: /^##\s*5\s*[.．、]\s*核心空间概念/m },
+  { label: '6. 空间动线与用户动作', pattern: /^##\s*6\s*[.．、]\s*空间动线与用户动作/m },
+  { label: '7. 七组单品表及组合内容', pattern: /^##\s*7\s*[.．、]\s*(?:7\s*组|七组)单品表及组合内容/m },
+  { label: '8. 设计风格', pattern: /^##\s*8\s*[.．、]\s*设计风格/m },
+  { label: '9. 色彩搭配', pattern: /^##\s*9\s*[.．、]\s*色彩搭配/m },
+  { label: '10. 材质 / 纹理搭配', pattern: /^##\s*10\s*[.．、]\s*材质\s*\/\s*纹理搭配/m },
+  { label: '11. 光线 / 灯光类型', pattern: /^##\s*11\s*[.．、]\s*光线\s*\/\s*灯光类型/m },
+  { label: '12. 信息与文案导视', pattern: /^##\s*12\s*[.．、]\s*信息与文案导视/m },
+  { label: '13. 空间描述（客户可读版）', pattern: /^##\s*13\s*[.．、]\s*空间描述/m },
+  { label: '14. 风险与退回标准', pattern: /^##\s*14\s*[.．、]\s*风险与退回标准/m },
+  { label: '15. 供应商 / 设计师执行要点', pattern: /^##\s*15\s*[.．、]\s*供应商\s*\/\s*设计师执行要点/m },
+]
+
+interface HfpProposalCompleteness {
+  missing: string[]
+  presentCount: number
+  complete: boolean
+}
+
+function assessHfpSpaceDesignProposalCompleteness(content: string): HfpProposalCompleteness {
+  const missing = HFP_SPACE_DESIGN_FULL_PROPOSAL_SECTIONS
+    .filter((section) => !section.pattern.test(content))
+    .map((section) => section.label)
+  return {
+    missing,
+    presentCount: HFP_SPACE_DESIGN_FULL_PROPOSAL_SECTIONS.length - missing.length,
+    complete: missing.length === 0,
+  }
+}
+
+function readExistingHfpDraft(args: { skillId: string; relativePath: string }): {
+  absolutePath: string
+  content: string
+  completeness: HfpProposalCompleteness
+} | null {
+  const roots = defaultLookupSkillRoots(args.skillId)
+  if (!roots) return null
+  const absolutePath = resolveWritableWithinRoot(roots.artifactRoot, args.relativePath)
+  if (!existsSync(absolutePath)) return null
+  const stat = statSync(absolutePath)
+  if (!stat.isFile()) return null
+  const content = readFileSync(absolutePath, 'utf-8')
+  return {
+    absolutePath,
+    content,
+    completeness: assessHfpSpaceDesignProposalCompleteness(content),
+  }
+}
+
+function buildHfpNeedsAppendOutput(args: {
+  baseOutput?: ToolExecutionOutput
+  absolutePath: string
+  relativePath: string
+  targetPath: string
+  missing: string[]
+  preservedExistingDraft?: boolean
+}): ToolExecutionOutput {
+  const missingText = args.missing.join('、')
+  const prefix = args.preservedExistingDraft
+    ? '已有草稿比本次 overwrite 更完整，已保留原草稿，未覆盖。'
+    : '草稿已保存，但尚未导出到目标文件夹。'
+  return createToolExecutionOutput(
+    `${prefix}下一步必须对同一个 relativePath 使用 mode="append"，只追加缺失章节：${missingText}。不要重写已有章节；补齐后会自动保存到目标文件夹：${args.targetPath}`,
+    {
+      shape: 'json',
+      data: {
+        ...(args.baseOutput?.data || {}),
+        absolutePath: args.absolutePath,
+        relativePath: args.relativePath,
+        preservedExistingDraft: Boolean(args.preservedExistingDraft),
+        autoExport: {
+          status: 'needs_append',
+          targetPath: args.targetPath,
+          missingSections: args.missing,
+          nextMode: 'append',
+        },
+      },
+    },
+  )
+}
+
+function shouldValidateHfpSpaceDesignProposal(args: {
+  skillId: string
+  relativePath: string
+  content: string
+  currentUserText?: string
+}): boolean {
+  if (args.skillId !== 'hfp-space-design') return false
+  if (!/\.(?:md|markdown)$/i.test(args.relativePath)) return false
+  const currentUserText = String(args.currentUserText || '')
+  const intakeOnly = /(?:只|先).{0,8}(?:问|追问|询问|确认|补充信息)/.test(currentUserText)
+    && !/(?:生成|输出|保存|写入).{0,16}(?:方案|提案|文档)/.test(currentUserText)
+  if (intakeOnly) return false
+  const userRequestedProposal = /(?:生成|写|输出|保存|写入).{0,24}(?:方案|提案|门店设计|空间设计|文档)/.test(currentUserText)
+  const contentStartedProposal = /^##\s*1\s*[.．、]\s*方案名称/m.test(args.content)
+  return userRequestedProposal || contentStartedProposal
+}
+
 function workspaceRootsFromRequestEnvelope(envelope: unknown): string[] | null {
   if (!envelope || typeof envelope !== 'object' || Array.isArray(envelope)) return null
   const environmentHints = (envelope as { environmentHints?: unknown }).environmentHints
@@ -159,6 +265,202 @@ function workspaceRootsFromRequestEnvelope(envelope: unknown): string[] | null {
     .filter((root): root is string => typeof root === 'string' && root.trim().length > 0)
     .map((root) => root.trim())
   return roots.length > 0 ? roots : null
+}
+
+function folderReferencePathsFromRequestEnvelope(envelope: unknown): string[] {
+  if (!envelope || typeof envelope !== 'object' || Array.isArray(envelope)) return []
+  const resources = (envelope as { resources?: unknown }).resources
+  if (!Array.isArray(resources)) return []
+  const paths: string[] = []
+  for (const resource of resources) {
+    if (!resource || typeof resource !== 'object' || Array.isArray(resource)) continue
+    const record = resource as { kind?: unknown; name?: unknown; path?: unknown }
+    if (record.kind !== 'folder_reference') continue
+    const path = typeof record.path === 'string' ? record.path.trim() : ''
+    if (!path || paths.includes(path)) continue
+    try {
+      if (existsSync(path) && statSync(path).isDirectory()) paths.push(path)
+    } catch {
+      // Ignore transient filesystem errors; executeExportArtifact performs the
+      // final path validation before writing.
+    }
+  }
+  return paths
+}
+
+function artifactExportRootsFromRequestEnvelope(envelope: unknown): string[] | null {
+  const roots = [
+    ...(workspaceRootsFromRequestEnvelope(envelope) || []),
+    ...folderReferencePathsFromRequestEnvelope(envelope),
+  ]
+  const seen = new Set<string>()
+  const deduped = roots.filter((root) => {
+    if (!root || seen.has(root)) return false
+    seen.add(root)
+    return true
+  })
+  return deduped.length > 0 ? deduped : null
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function envelopeInstructionText(envelope: unknown): string {
+  if (!envelope || typeof envelope !== 'object' || Array.isArray(envelope)) return ''
+  const record = envelope as {
+    primaryInstruction?: unknown
+    pureUserText?: unknown
+    rawUserText?: unknown
+  }
+  return [
+    record.primaryInstruction,
+    record.pureUserText,
+    record.rawUserText,
+  ]
+    .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+    .join('\n')
+}
+
+function hasArtifactExportIntent(text: string): boolean {
+  return /输出到|保存到|导出到|写到|写入到|落到|文件名|save\s+to|export\s+to|target\s+folder/i.test(text)
+}
+
+function explicitMarkdownFilenameFromText(text: string): string | null {
+  const patterns = [
+    /文件名\s*[:：]?\s*[`"'“”‘’]?([^`"'“”‘’\s，。；;,]+\.md)\b/i,
+    /命名为\s*[`"'“”‘’]?([^`"'“”‘’\s，。；;,]+\.md)\b/i,
+    /保存为\s*[`"'“”‘’]?([^`"'“”‘’\s，。；;,]+\.md)\b/i,
+  ]
+  for (const pattern of patterns) {
+    const match = text.match(pattern)
+    const raw = match?.[1]?.trim()
+    if (!raw) continue
+    const filename = basename(raw)
+    if (filename && filename !== '.' && filename !== '..') return filename
+  }
+  return null
+}
+
+function isGenericArtifactFilename(filename: string): boolean {
+  const stem = basename(filename).replace(/\.(?:md|markdown)$/i, '').trim().toLowerCase()
+  if (!stem) return true
+  if (/^(?:draft|artifact|output|result|document|proposal|plan)(?:[-_\s]*\d+)?$/.test(stem)) return true
+  return /^(?:草稿|临时|方案|提案|文档|结果)(?:[-_\s]*\d+)?$/.test(stem)
+}
+
+function mentionedFolderNamesFromText(text: string): string[] {
+  const names = new Set<string>()
+  for (const match of text.matchAll(/@\[([^\]]+)\]/g)) {
+    const raw = String(match[1] || '').trim()
+    const name = basename(raw)
+    if (name && name !== '.' && name !== '..') names.add(name)
+  }
+  return Array.from(names)
+}
+
+function targetFolderNamesFromText(text: string): string[] {
+  const names = new Set<string>()
+  const targetPatterns = [
+    /(?:输出到|保存到|导出到|写到|写入到|落到)\s*@\[([^\]]+)\]/g,
+    /(?:target\s+folder|save\s+to|export\s+to)\s*@\[([^\]]+)\]/gi,
+  ]
+  for (const pattern of targetPatterns) {
+    for (const match of text.matchAll(pattern)) {
+      const raw = String(match[1] || '').trim()
+      const name = basename(raw)
+      if (name && name !== '.' && name !== '..') names.add(name)
+    }
+  }
+  return Array.from(names)
+}
+
+function folderReferenceTargetFromEnvelope(text: string, envelope: unknown): string | null {
+  if (!envelope || typeof envelope !== 'object' || Array.isArray(envelope)) return null
+  const resources = (envelope as { resources?: unknown }).resources
+  if (!Array.isArray(resources)) return null
+  const targetNames = targetFolderNamesFromText(text)
+  const mentionedNames = targetNames.length > 0 ? targetNames : mentionedFolderNamesFromText(text)
+  if (mentionedNames.length === 0) return null
+  for (const resource of resources) {
+    if (!resource || typeof resource !== 'object' || Array.isArray(resource)) continue
+    const record = resource as { kind?: unknown; name?: unknown; path?: unknown }
+    if (record.kind !== 'folder_reference') continue
+    const resourceName = basename(String(record.name || '').trim())
+    if (!resourceName || !mentionedNames.includes(resourceName)) continue
+    const resourcePath = typeof record.path === 'string' ? record.path.trim() : ''
+    if (!resourcePath) continue
+    try {
+      if (existsSync(resourcePath) && statSync(resourcePath).isDirectory()) return resourcePath
+    } catch {
+      // Ignore and continue to workspace-root fallback.
+    }
+  }
+  return null
+}
+
+function mentionedWorkspaceRootForArtifactExport(text: string, roots: string[] | null): string | null {
+  if (!text.trim() || !roots?.length) return null
+  const targetNames = targetFolderNamesFromText(text)
+  if (targetNames.length > 0) {
+    for (const root of roots) {
+      const name = basename(root).trim()
+      if (name && targetNames.includes(name)) return root
+      for (const folderName of targetNames) {
+        const candidate = join(root, folderName)
+        if (!existsSync(candidate)) continue
+        try {
+          if (statSync(candidate).isDirectory()) return candidate
+        } catch {
+          // Fall through to the broader mention check below.
+        }
+      }
+    }
+  }
+  const mentionedFolders = mentionedFolderNamesFromText(text)
+  for (const root of roots) {
+    const name = basename(root).trim()
+    if (!name) continue
+    const mentionPattern = new RegExp(`@\\[\\s*${escapeRegExp(name)}\\s*\\]`)
+    if (mentionPattern.test(text) || text.includes(name)) return root
+    for (const folderName of mentionedFolders) {
+      const candidate = join(root, folderName)
+      if (!existsSync(candidate)) continue
+      try {
+        if (statSync(candidate).isDirectory()) return candidate
+      } catch {
+        // Ignore races with the file system; the explicit export tool still
+        // performs the authoritative writable-root validation.
+      }
+    }
+  }
+  return null
+}
+
+function resolveAutoExportTargetForReferenceArtifact(args: {
+  relativePath: string
+  currentUserText?: string
+  requestEnvelope?: unknown
+}): string | null {
+  const currentText = args.currentUserText || ''
+  const envelopeText = envelopeInstructionText(args.requestEnvelope)
+  const userText = [currentText, envelopeText].join('\n')
+  if (!hasArtifactExportIntent(userText)) return null
+  const root = folderReferenceTargetFromEnvelope(userText, args.requestEnvelope)
+    || mentionedWorkspaceRootForArtifactExport(
+      userText,
+      workspaceRootsFromRequestEnvelope(args.requestEnvelope),
+    )
+  if (!root) return null
+  const fallbackFilename = basename(String(args.relativePath || '').trim())
+  const currentFilename = explicitMarkdownFilenameFromText(currentText)
+  const envelopeFilename = explicitMarkdownFilenameFromText(envelopeText)
+  const filename = currentFilename
+    || (fallbackFilename && !isGenericArtifactFilename(fallbackFilename) ? fallbackFilename : null)
+    || envelopeFilename
+    || fallbackFilename
+  if (!filename || filename === '.' || filename === '..') return null
+  return join(root, filename)
 }
 
 /**
@@ -1031,26 +1333,6 @@ function recordPrimitiveOutcome(params: {
    */
   featureFlags?: TurnFeatureFlags
 }): { stepId: string } {
-  // Stage Q (Stage 11) — selected-skill primitive fence.
-  const fenceEnabled = params.featureFlags?.referencePrimitiveLifecycleFence !== false
-  if (params.skillKind?.isReferenceOrAdvisory && fenceEnabled) {
-    logAgentMetric('reference_primitive_lifecycle_skipped', {
-      sessionId: params.sessionId,
-      scopeId: params.scopeId,
-      skillId: params.skillId || null,
-      toolName: params.toolName,
-      status: params.status,
-    })
-    return { stepId: params.stepId || 'reference-noop' }
-  }
-  if (params.skillKind?.isReferenceOrAdvisory && !fenceEnabled) {
-    logAgentMetric('reference_primitive_lifecycle_fence_disabled', {
-      sessionId: params.sessionId,
-      scopeId: params.scopeId,
-      skillId: params.skillId || null,
-      toolName: params.toolName,
-    })
-  }
   const data = params.output?.data || {}
   const paths = outputPathsFromToolOutput(params.output)
   const hasDurableHandle = Boolean(paths.outputDir || paths.runStatePath || paths.sceneScoresPath || paths.deliveryReportPath)
@@ -1061,6 +1343,46 @@ function recordPrimitiveOutcome(params: {
       : typeof data.stderrArtifactPath === 'string'
         ? data.stderrArtifactPath
         : null
+  // Stage Q (Stage 11) — selected-skill primitive fence.
+  const fenceEnabled = params.featureFlags?.referencePrimitiveLifecycleFence !== false
+  if (params.skillKind?.isReferenceOrAdvisory && fenceEnabled) {
+    logAgentMetric('reference_primitive_lifecycle_skipped', {
+      sessionId: params.sessionId,
+      scopeId: params.scopeId,
+      skillId: params.skillId || null,
+      toolName: params.toolName,
+      status: params.status,
+    })
+    return recordSkillTaskEvent({
+      scopeId: params.scopeId,
+      sessionId: params.sessionId,
+      runId: params.runId,
+      agent: params.agent,
+      skillId: params.skillId || undefined,
+      skillName: params.skillName,
+      toolName: params.toolName,
+      action: params.toolName,
+      runKind: 'primitive',
+      stepId: params.stepId,
+      status: params.status,
+      message: params.message,
+      params: params.params || null,
+      goalText: goalTextFromParams(params.toolName, params.toolName, params.params),
+      resourceRefs: resourceRefsFromParams(params.params),
+      artifactPath,
+      artifactLabel: artifactLabel(artifactPath),
+      ...paths,
+      projectionOnly: true,
+    })
+  }
+  if (params.skillKind?.isReferenceOrAdvisory && !fenceEnabled) {
+    logAgentMetric('reference_primitive_lifecycle_fence_disabled', {
+      sessionId: params.sessionId,
+      scopeId: params.scopeId,
+      skillId: params.skillId || null,
+      toolName: params.toolName,
+    })
+  }
   const recorded = recordSkillTaskEvent({
     scopeId: params.scopeId,
     sessionId: params.sessionId,
@@ -1286,10 +1608,11 @@ export async function executeSkillTool(
     if (skillId) {
       const skillDef = listSkillsSafely().find((s) => s.id === skillId)
       const isAdvisorySkill = skillDef?.executionMode === 'advisory'
+      const isReferenceSkill = (skillDef as { runtime?: unknown } | undefined)?.runtime === 'reference'
       const hasReferenceAction = Boolean(
         skillDef?.actions?.some((a) => a.runtime === 'reference'),
       )
-      skillKind = { isReferenceOrAdvisory: isAdvisorySkill || hasReferenceAction }
+      skillKind = { isReferenceOrAdvisory: isAdvisorySkill || isReferenceSkill || hasReferenceAction }
     }
     const featureFlags = runtimeContext?.turnFeatureFlags
     // Stage Q (Stage 11) — local closure injects skillKind + featureFlags
@@ -1326,6 +1649,9 @@ export async function executeSkillTool(
           },
           {
             sessionId,
+            scopeId: runtimeContext?.scopeId || sessionId,
+            agent: runtimeContext?.agent || null,
+            requestId: runtimeContext?.runId || null,
             skillId: skillId || undefined,
             signal: abortSignal,
             emitAskUserQuestion: getAskUserQuestionEmitter(),
@@ -1791,6 +2117,7 @@ export async function executeSkillTool(
       }
     }
     if (tool.name === 'skill_write_artifact') {
+      const relativePath = asString(args.relativePath)
       const started = recordPrimitive({
         scopeId: runtimeContext?.scopeId,
         sessionId,
@@ -1801,12 +2128,71 @@ export async function executeSkillTool(
         toolName,
         status: 'running',
       })
+      let output: ToolExecutionOutput
+      const content = typeof args.content === 'string' ? args.content : ''
+      const autoExportTarget = skillKind.isReferenceOrAdvisory
+        ? resolveAutoExportTargetForReferenceArtifact({
+          relativePath,
+          currentUserText: runtimeContext?.currentUserText,
+          requestEnvelope: runtimeContext?.requestEnvelope,
+        })
+        : null
+      const requestedMode = args.mode === 'append' ? 'append' : 'overwrite'
+      if (autoExportTarget && requestedMode === 'overwrite' && shouldValidateHfpSpaceDesignProposal({
+        skillId,
+        relativePath,
+        content,
+        currentUserText: runtimeContext?.currentUserText,
+      })) {
+        const incomingCompleteness = assessHfpSpaceDesignProposalCompleteness(content)
+        const existingDraft = readExistingHfpDraft({ skillId, relativePath })
+        if (
+          existingDraft
+          && !existingDraft.completeness.complete
+          && !incomingCompleteness.complete
+          && existingDraft.completeness.presentCount > incomingCompleteness.presentCount
+        ) {
+          output = buildHfpNeedsAppendOutput({
+            absolutePath: existingDraft.absolutePath,
+            relativePath,
+            targetPath: autoExportTarget,
+            missing: existingDraft.completeness.missing,
+            preservedExistingDraft: true,
+          })
+          recordPrimitive({
+            scopeId: runtimeContext?.scopeId,
+            sessionId,
+            runId: runtimeContext?.runId,
+            agent: runtimeContext?.agent,
+            skillId,
+            skillName,
+            toolName,
+            stepId: started.stepId,
+            status: 'done',
+            output,
+          })
+          recordPrimitive({
+            scopeId: runtimeContext?.scopeId,
+            sessionId,
+            runId: runtimeContext?.runId,
+            agent: runtimeContext?.agent,
+            skillId,
+            skillName,
+            toolName: 'skill_export_artifact',
+            status: 'running',
+            message: '等待补齐缺失章节后保存到目标文件夹',
+            params: { relativePath, targetPath: autoExportTarget, overwrite: true },
+          })
+          return attachSkillProjection(output, { sessionId, skillId })
+        }
+      }
       try {
-        const output = await executeWriteArtifact(
+        output = await executeWriteArtifact(
           {
-            relativePath: asString(args.relativePath),
-            content: typeof args.content === 'string' ? args.content : '',
+            relativePath,
+            content,
             encoding: args.encoding === 'base64' ? 'base64' : 'utf-8',
+            mode: requestedMode,
           },
           {
             skillId,
@@ -1827,7 +2213,6 @@ export async function executeSkillTool(
           status: 'done',
           output,
         })
-        return attachSkillProjection(output, { sessionId, skillId })
       } catch (error) {
         recordPrimitive({
           scopeId: runtimeContext?.scopeId,
@@ -1840,6 +2225,105 @@ export async function executeSkillTool(
           stepId: started.stepId,
           status: 'error',
           message: error instanceof Error ? error.message : String(error),
+        })
+        throw error
+      }
+      if (!autoExportTarget) {
+        return attachSkillProjection(output, { sessionId, skillId })
+      }
+      const writtenPath = typeof output.data?.absolutePath === 'string' ? output.data.absolutePath : null
+      const writtenContent = writtenPath ? readFileSync(writtenPath, 'utf-8') : content
+      if (shouldValidateHfpSpaceDesignProposal({
+        skillId,
+        relativePath,
+        content: writtenContent,
+        currentUserText: runtimeContext?.currentUserText,
+      })) {
+        const completeness = assessHfpSpaceDesignProposalCompleteness(writtenContent)
+        if (!completeness.complete) {
+          const needsAppendOutput = buildHfpNeedsAppendOutput({
+            baseOutput: output,
+            absolutePath: writtenPath || relativePath,
+            relativePath,
+            targetPath: autoExportTarget,
+            missing: completeness.missing,
+          })
+          recordPrimitive({
+            scopeId: runtimeContext?.scopeId,
+            sessionId,
+            runId: runtimeContext?.runId,
+            agent: runtimeContext?.agent,
+            skillId,
+            skillName,
+            toolName: 'skill_export_artifact',
+            status: 'running',
+            message: '等待补齐缺失章节后保存到目标文件夹',
+            params: { relativePath, targetPath: autoExportTarget, overwrite: true },
+          })
+          return attachSkillProjection(needsAppendOutput, { sessionId, skillId })
+        }
+      }
+      const exportStarted = recordPrimitive({
+        scopeId: runtimeContext?.scopeId,
+        sessionId,
+        runId: runtimeContext?.runId,
+        agent: runtimeContext?.agent,
+        skillId,
+        skillName,
+        toolName: 'skill_export_artifact',
+        status: 'running',
+        message: '正在保存到目标文件夹',
+        params: { relativePath, targetPath: autoExportTarget, overwrite: true },
+      })
+      try {
+        const exportOutput = await executeExportArtifact(
+          {
+            relativePath,
+            targetPath: autoExportTarget,
+            overwrite: true,
+          },
+          {
+            skillId,
+            allowedExportRoots: artifactExportRootsFromRequestEnvelope(runtimeContext?.requestEnvelope),
+          },
+        )
+        recordPrimitive({
+          scopeId: runtimeContext?.scopeId,
+          sessionId,
+          runId: runtimeContext?.runId,
+          agent: runtimeContext?.agent,
+          skillId,
+          skillName,
+          toolName: 'skill_export_artifact',
+          stepId: exportStarted.stepId,
+          status: 'done',
+          output: exportOutput,
+          params: { relativePath, targetPath: autoExportTarget, overwrite: true },
+        })
+        const combinedOutput = createToolExecutionOutput(
+          `${output.text || 'Artifact written.'}\n已保存到目标文件夹：${autoExportTarget}`,
+          {
+            shape: 'json',
+            data: {
+              ...(output.data || {}),
+              autoExport: exportOutput.data || {},
+            },
+          },
+        )
+        return attachSkillProjection(combinedOutput, { sessionId, skillId })
+      } catch (error) {
+        recordPrimitive({
+          scopeId: runtimeContext?.scopeId,
+          sessionId,
+          runId: runtimeContext?.runId,
+          agent: runtimeContext?.agent,
+          skillId,
+          skillName,
+          toolName: 'skill_export_artifact',
+          stepId: exportStarted.stepId,
+          status: 'error',
+          message: error instanceof Error ? error.message : String(error),
+          params: { relativePath, targetPath: autoExportTarget, overwrite: true },
         })
         throw error
       }
@@ -1864,7 +2348,7 @@ export async function executeSkillTool(
           },
           {
             skillId,
-            allowedExportRoots: workspaceRootsFromRequestEnvelope(runtimeContext?.requestEnvelope),
+            allowedExportRoots: artifactExportRootsFromRequestEnvelope(runtimeContext?.requestEnvelope),
           },
         )
         recordPrimitive({

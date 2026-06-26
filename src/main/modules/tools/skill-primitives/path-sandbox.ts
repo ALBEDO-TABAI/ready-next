@@ -52,6 +52,7 @@ export class PathSandboxError extends Error {
   constructor(
     public readonly reason:
       | 'empty_path'
+      | 'home_path'
       | 'absolute_path'
       | 'path_escape'
       | 'symlink_escape'
@@ -73,6 +74,15 @@ function assertNonEmpty(relativePath: unknown): string {
     throw new PathSandboxError('empty_path', 'relativePath must be a non-empty string')
   }
   return trimmed
+}
+
+function assertNotHomePath(rel: string): void {
+  if (rel === '~' || rel.startsWith('~/') || rel.startsWith('~\\')) {
+    throw new PathSandboxError(
+      'home_path',
+      'relativePath must not use ~/; use a path relative to the skill artifact root',
+    )
+  }
 }
 
 function assertNotAbsolute(rel: string): void {
@@ -111,6 +121,7 @@ function canonicalizeRoot(root: string): string {
  */
 export function resolveWithinRoot(root: string, rel: string): string {
   const cleanRel = assertNonEmpty(rel)
+  assertNotHomePath(cleanRel)
   assertNotAbsolute(cleanRel)
 
   const canonRoot = canonicalizeRoot(root)
@@ -162,6 +173,28 @@ export function resolveWithinRoot(root: string, rel: string): string {
   }
 
   return absPath
+}
+
+/**
+ * Write helpers primarily receive relative paths, but the model can echo an
+ * absolute path previously returned by a write/read result. Accept that path
+ * only when it still points inside the writable artifact root, then pass it
+ * through the same relative-path validator so reserved names and symlink checks
+ * stay identical to `resolveWithinRoot`.
+ */
+export function resolveWritableWithinRoot(root: string, path: string): string {
+  const cleanPath = assertNonEmpty(path)
+  if (!isAbsolute(cleanPath)) return resolveWithinRoot(root, cleanPath)
+
+  const canonRoot = canonicalizeRoot(root)
+  const absPath = canonicalizeInputAbsPath(resolve(cleanPath))
+  if (!normalizedStartsWithRoot(absPath, canonRoot)) {
+    throw new PathSandboxError(
+      'path_escape',
+      `Absolute path ${absPath} is outside writable skill artifact root ${canonRoot}`,
+    )
+  }
+  return resolveWithinRoot(canonRoot, relative(canonRoot, absPath))
 }
 
 /**

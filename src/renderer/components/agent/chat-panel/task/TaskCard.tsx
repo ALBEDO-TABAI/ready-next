@@ -127,7 +127,7 @@ export function TaskCard({
     })
   }, [vm.legacyHandoffHit, vm.key, run.scopeId, run.taskId])
   const primaryTitle = vm.title
-  const steps = run.steps || []
+  const steps = vm.steps
   const PLAN_STEP_COLLAPSE_THRESHOLD = 10
   const [showAllPlanSteps, setShowAllPlanSteps] = useState(false)
   const planStepsToRender = showAllPlanSteps ? steps : steps.slice(0, PLAN_STEP_COLLAPSE_THRESHOLD)

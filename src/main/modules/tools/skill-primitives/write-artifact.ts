@@ -7,8 +7,8 @@
  * handlers are free to surface sandbox rejections as plain throws.
  */
 
-import { existsSync, lstatSync, mkdirSync, writeFileSync } from 'node:fs'
-import { dirname } from 'node:path'
+import { appendFileSync, existsSync, lstatSync, mkdirSync, writeFileSync } from 'node:fs'
+import { basename, dirname, isAbsolute } from 'node:path'
 
 import { createToolExecutionOutput, type ToolExecutionOutput } from '../../agent-control/tools-runtime/tool-result-types'
 import { markSkillHandoffOutputCompleted } from '../../agent-control/skills/skill-agent-handoff'
@@ -19,6 +19,7 @@ import {
   PathSandboxError,
   assertNotReservedPath,
   resolveWithinRoot,
+  resolveWritableWithinRoot,
 } from './path-sandbox'
 import { defaultLookupSkillRoots, type LookupSkillRoots } from './root-resolver'
 
@@ -33,6 +34,7 @@ export interface WriteArtifactArgs {
   relativePath: string
   content: string
   encoding?: 'utf-8' | 'base64'
+  mode?: 'overwrite' | 'append'
 }
 
 export interface WriteArtifactHandlerDeps {
@@ -57,6 +59,7 @@ function resolveAdditionalWriteTarget(
   targets: WriteArtifactHandlerDeps['additionalAllowedWriteTargets'],
 ): { absolutePath: string; target: NonNullable<WriteArtifactHandlerDeps['additionalAllowedWriteTargets']>[number] } | null {
   if (!Array.isArray(targets) || targets.length === 0) return null
+  if (isAbsolute(relativePath)) return null
   const requestedNamespace = firstPathSegment(relativePath)
   const targetNamespaces = new Set<string>()
   for (const target of targets) {
@@ -78,6 +81,21 @@ function resolveAdditionalWriteTarget(
     )
   }
   return null
+}
+
+function writePathErrorMessage(error: PathSandboxError, inputPath: unknown, artifactRoot: string): string {
+  const rawPath = typeof inputPath === 'string' ? inputPath.trim() : ''
+  const suggestedName = basename(rawPath) || 'output.md'
+  if (error.reason === 'home_path') {
+    return `relativePath 不能使用 ~/ 家目录前缀。artifact 根是 ${artifactRoot}；请改用相对路径，例如 "${suggestedName}"。`
+  }
+  if (error.reason === 'absolute_path') {
+    return `relativePath 不能是绝对路径。artifact 根是 ${artifactRoot}；请改用相对路径，例如 "${suggestedName}"。`
+  }
+  if (error.reason === 'path_escape' && rawPath && isAbsolute(rawPath)) {
+    return `这个绝对路径不在当前 skill artifact 根内，不能直接写入。artifact 根是 ${artifactRoot}；请先写入相对路径，例如 "${suggestedName}"，如需保存到用户文件夹再导出。`
+  }
+  return error.message
 }
 
 export async function executeWriteArtifact(
@@ -103,7 +121,7 @@ export async function executeWriteArtifact(
   let handoffTarget: NonNullable<WriteArtifactHandlerDeps['additionalAllowedWriteTargets']>[number] | null = null
   try {
     const additionalTarget = resolveAdditionalWriteTarget(args.relativePath, deps.additionalAllowedWriteTargets)
-    absPath = additionalTarget?.absolutePath || resolveWithinRoot(roots.artifactRoot, args.relativePath)
+    absPath = additionalTarget?.absolutePath || resolveWritableWithinRoot(roots.artifactRoot, args.relativePath)
     handoffTarget = additionalTarget?.target || null
     assertNotReservedPath(absPath)
   } catch (error) {
@@ -113,7 +131,7 @@ export async function executeWriteArtifact(
         reason: error.reason,
         relativePath: args.relativePath,
       })
-      throw new ToolDomainError(error.reason, error.message, {
+      throw new ToolDomainError(error.reason, writePathErrorMessage(error, args.relativePath, roots.artifactRoot), {
         relativePath: args.relativePath,
         artifactRoot: roots.artifactRoot,
       })
@@ -145,6 +163,7 @@ export async function executeWriteArtifact(
   }
 
   const encoding = args.encoding || 'utf-8'
+  const mode = args.mode === 'append' ? 'append' : 'overwrite'
   const buffer = encoding === 'base64'
     ? Buffer.from(args.content, 'base64')
     : Buffer.from(args.content, 'utf-8')
@@ -168,7 +187,11 @@ export async function executeWriteArtifact(
   }
 
   mkdirSync(dirname(absPath), { recursive: true })
-  writeFileSync(absPath, buffer)
+  if (mode === 'append') {
+    appendFileSync(absPath, buffer)
+  } else {
+    writeFileSync(absPath, buffer)
+  }
   if (handoffTarget?.receiptPath && handoffTarget.taskName) {
     markSkillHandoffOutputCompleted({
       receiptPath: handoffTarget.receiptPath,
@@ -191,6 +214,7 @@ export async function executeWriteArtifact(
         absolutePath: absPath,
         bytesWritten: buffer.length,
         encoding,
+        mode,
         artifactRoot: roots.artifactRoot,
       },
     },

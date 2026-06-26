@@ -1106,10 +1106,10 @@ interface ElectronAgentAPI {
     scopeId: string
     requestId: string
     elapsedMs?: number
-  }) => Promise<IPCResponse<{
-    state?: 'cancel_requested' | 'stale' | 'not_found'
-    activeRunId?: string | null
-  }>>
+	  }) => Promise<IPCResponse<{
+	    state?: 'cancel_requested' | 'stale' | 'not_found' | 'paused_user_input'
+	    activeRunId?: string | null
+	  }>>
   suspendRun: (payload: {
     scopeId: string
     taskId?: string
@@ -3024,9 +3024,42 @@ interface ElectronSkillsAPI {
   setSkillRuntimeMirror: (payload: { mirror: string }) => Promise<IPCResponse<void>>
   selfTestSkillRuntime: () => Promise<IPCResponse<RuntimeStatus>>
   onSkillRuntimeProvisionUpdate?: (handler: (progress: RuntimeProvisionProgress) => void) => () => void
-  // Skill-source diagnostics (reachability self-test for the agent install path).
-  selfTestSkillSources: () => Promise<IPCResponse<SkillSourceSelfTestReport>>
-  // Phase 4: skills:executions:* API surface retired along with the
+	  // Skill-source diagnostics (reachability self-test for the agent install path).
+	  selfTestSkillSources: () => Promise<IPCResponse<SkillSourceSelfTestReport>>
+	  submitAskUserAnswer: (payload: { executionId: string; answer: string }) => Promise<IPCResponse>
+	  listPendingAskUser: () => Promise<Array<{
+	    executionId: string
+	    sessionId: string | null
+	    scopeId?: string | null
+	    agent?: string | null
+	    requestId?: string | null
+	    skillId: string | null
+	    question: string
+	    options: string[] | null
+	    placeholder: string | null
+	    askedAt: number
+	  }>>
+	  onAskUserQuestion: (handler: (event: {
+	    executionId: string
+	    sessionId: string | null
+	    scopeId?: string | null
+	    agent?: string | null
+	    requestId?: string | null
+	    skillId: string | null
+	    question: string
+	    options: string[] | null
+	    placeholder: string | null
+	    askedAt: number
+	  }) => void) => () => void
+	  onAskUserCleared: (handler: (event: {
+	    executionId: string
+	    sessionId: string | null
+	    scopeId: string | null
+	    agent: string | null
+	    requestId: string | null
+	    reason: 'resolved' | 'rejected' | 'cleared'
+	  }) => void) => () => void
+	  // Phase 4: skills:executions:* API surface retired along with the
   // skill_executions state machine. Removed: listExecutions / getExecution /
   // submitInput / submitConfirmation / submitAgentResult / restartFromStep /
   // cancelExecution. Progress now exposed via in-memory todo projection.

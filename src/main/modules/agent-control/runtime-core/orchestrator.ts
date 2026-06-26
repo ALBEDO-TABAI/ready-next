@@ -19,6 +19,8 @@ import {
   AgentSdkRuntime,
   type AgentSdkRuntimeDeps,
 } from './agent-sdk-runtime'
+import { getEphemeralExecutionStore } from '../../tools/skill-primitives/ephemeral-execution-store'
+import { getAskUserQuestionsStore } from '../../tools/builtins/ask-user-questions-store'
 
 interface SessionDescriptor {
   agent: string
@@ -69,6 +71,7 @@ interface ActiveRunLiveness {
    * timeout from a coarse task_type, so a long collection is never false-killed.
    */
   noProgressTimeoutMs: number
+  defaultNoProgressTimeout: boolean
 }
 
 type SendAndCollectExecutionResult = SendAndCollectResult & {
@@ -291,6 +294,7 @@ export class ReadyAgentOrchestrator extends EventEmitter {
       lastProgressAt: this.nowMs(),
       timer: null,
       noProgressTimeoutMs: resolvedTimeoutMs,
+      defaultNoProgressTimeout: resolvedTimeoutMs === this.mainRunNoProgressTimeoutMs,
     })
     this.scheduleRunNoProgressGuard(taskKey, requestId)
   }
@@ -317,7 +321,7 @@ export class ReadyAgentOrchestrator extends EventEmitter {
     this.activeRunLiveness.delete(taskKey)
   }
 
-  private refreshActiveRunProgress(agent: string, sessionId: string | undefined, requestId?: string): boolean {
+  refreshActiveRunProgress(agent: string, sessionId: string | undefined, requestId?: string): boolean {
     const taskKey = this.toTaskKey(agent, sessionId)
     const activeRunId = this.activeRunIds.get(taskKey)
     if (!activeRunId) return false
@@ -327,6 +331,17 @@ export class ReadyAgentOrchestrator extends EventEmitter {
     liveness.lastProgressAt = this.nowMs()
     this.scheduleRunNoProgressGuard(taskKey, activeRunId)
     return true
+  }
+
+  isActiveRun(agent: string, sessionId: string | undefined, requestId: string): boolean {
+    if (!agent || !requestId) return false
+    return this.activeRunIds.get(this.toTaskKey(agent, sessionId)) === requestId
+  }
+
+  isActiveRunAwaitingUserInput(agent: string, sessionId: string | undefined, requestId: string): boolean {
+    if (!this.isActiveRun(agent, sessionId, requestId)) return false
+    return getEphemeralExecutionStore().hasPendingForRun(agent, sessionId ?? null, requestId)
+      || getAskUserQuestionsStore().hasPendingForRun(agent, sessionId ?? null, requestId)
   }
 
   private scheduleRunNoProgressGuard(taskKey: string, requestId: string): void {
@@ -354,6 +369,14 @@ export class ReadyAgentOrchestrator extends EventEmitter {
     if (this.activeRunIds.get(taskKey) !== requestId) return
     const elapsedMs = Math.max(0, this.nowMs() - liveness.lastProgressAt)
     if (elapsedMs < liveness.noProgressTimeoutMs) {
+      this.scheduleRunNoProgressGuard(taskKey, requestId)
+      return
+    }
+    if (
+      liveness.defaultNoProgressTimeout
+      && this.isActiveRunAwaitingUserInput(liveness.agent, liveness.sessionId, requestId)
+    ) {
+      liveness.lastProgressAt = this.nowMs()
       this.scheduleRunNoProgressGuard(taskKey, requestId)
       return
     }

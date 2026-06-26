@@ -7,7 +7,9 @@ import {
   type AgentSdkRuntimeDeps,
 } from '../main/modules/agent-control/runtime-core/agent-sdk-runtime'
 import { evaluateActionAnnouncementGuard } from '../main/modules/agent-control/runtime-core/action-announcement-guard'
+import { evaluateSkillClarificationGuard } from '../main/modules/agent-control/runtime-core/skill-clarification-guard'
 import { canResumeShape } from '../main/modules/agent-control/contracts/resume-handle'
+import type { ToolDefinition } from '../main/modules/agent-control/tools-runtime/tool-definition'
 import { ScriptedAgentRunner } from './helpers/scripted-agent-runner'
 
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
@@ -66,6 +68,32 @@ function createRuntime(deps: Partial<AgentSdkRuntimeDeps>): {
   return { runtime, repository, outputs }
 }
 
+function createSkillAskUserToolDefinition(): ToolDefinition {
+  return {
+    name: 'skill_ask_user',
+    groupId: 'skills',
+    domain: 'skill',
+    kind: 'interactive',
+    concurrency: 'serialized',
+    interruptBehavior: 'host_managed',
+    timeoutProfile: 'skill',
+    supportsTextBridge: true,
+    projectionHint: { emitsProjectionPatch: false },
+    description: 'Ask the user a clarification question for the active skill.',
+    schema: {
+      type: 'object',
+      properties: {
+        question: { type: 'string' },
+        options: { type: 'array' },
+      },
+      required: ['question'],
+      additionalProperties: false,
+    },
+    executionVisibility: 'model',
+    resultShape: 'json',
+  }
+}
+
 describe('action announcement guard', () => {
   test('steers when the current response promises action after earlier prep tools', () => {
     const decision = evaluateActionAnnouncementGuard({
@@ -98,6 +126,28 @@ describe('action announcement guard', () => {
     })
 
     assert.equal(decision.kind, 'steer')
+  })
+
+  test('steers when a document workflow says it will start writing files', () => {
+    const decision = evaluateActionAnnouncementGuard({
+      assistantText: '好，文件夹已存在，直接开始写入。先写设计方案文档，再写效果图 Prompt 文档。',
+      toolCallsInCurrentResponse: 0,
+      hasUnfinishedTaskReference: true,
+      alreadySteered: false,
+    })
+
+    assert.equal(decision.kind, 'steer')
+  })
+
+  test('checkpoints when the steered document workflow still only promises writing', () => {
+    const decision = evaluateActionAnnouncementGuard({
+      assistantText: '好，文件夹已存在，直接开始写入。先写设计方案文档，再写效果图 Prompt 文档。',
+      toolCallsInCurrentResponse: 0,
+      hasUnfinishedTaskReference: true,
+      alreadySteered: true,
+    })
+
+    assert.equal(decision.kind, 'checkpoint')
   })
 
   test('steers once when an active task ends with an action announcement and no tools', async () => {
@@ -214,5 +264,138 @@ describe('action announcement guard', () => {
     assert.equal(result.terminalReason, 'done')
     assert.equal(result.finalText, '让我先想一下：')
     assert.equal(unexpectedContinuation, false)
+  })
+})
+
+describe('skill clarification guard', () => {
+  const hfpClarificationText = [
+    '好问题。当前方案是基于假设推进的，有几块信息如果能补上，方案会更落地：',
+    '',
+    '最能提升方案质量的 5 个信息',
+    '',
+    '① 主推产品或系列',
+    '> 当前假设是 hfpTM 全线，重点提了精华/面霜/果酸线。如果你有明确的主推款，我可以把入口 C 位、壁龛分区、试用台陈列都围绕它重新排布。',
+    '',
+    '② 触点类型和面积',
+    '> 当前假设是 20-40m² 独立门店或商场中庭快闪。实际是哪种？',
+    '',
+    '③ 空间的核心目标优先级',
+    '> 当前排的是“产品识别 + 试用体验 + 低压咨询”。如果你更看重吸引进店、成交转化、用户返图传播，动线权重会不同。',
+  ].join('\n')
+
+  test('steers skill clarification lists into skill_ask_user', () => {
+    const decision = evaluateSkillClarificationGuard({
+      assistantText: hfpClarificationText,
+      toolCallsInCurrentResponse: 0,
+      hasSkillAskUserTool: true,
+      hasUnfinishedTaskReference: true,
+      alreadySteered: false,
+    })
+
+    assert.equal(decision.kind, 'steer')
+  })
+
+  test('does not steer optional improvement advice', () => {
+    const decision = evaluateSkillClarificationGuard({
+      assistantText: '可以补充主推产品、门店面积和核心目标，但我也可以先按默认假设继续。',
+      toolCallsInCurrentResponse: 0,
+      hasSkillAskUserTool: true,
+      hasUnfinishedTaskReference: false,
+      alreadySteered: false,
+    })
+
+    assert.equal(decision.kind, 'none')
+  })
+
+  test('does not steer post-completion adjustment offers into ask-user cards', () => {
+    const decision = evaluateSkillClarificationGuard({
+      assistantText: '方案已完成，文件已保存。需要我继续调整或生成效果图吗？',
+      toolCallsInCurrentResponse: 0,
+      hasSkillAskUserTool: true,
+      hasUnfinishedTaskReference: false,
+      alreadySteered: false,
+    })
+
+    assert.equal(decision.kind, 'none')
+  })
+
+  test('does not steer when skill_ask_user is unavailable', () => {
+    const decision = evaluateSkillClarificationGuard({
+      assistantText: hfpClarificationText,
+      toolCallsInCurrentResponse: 0,
+      hasSkillAskUserTool: false,
+      hasUnfinishedTaskReference: true,
+      alreadySteered: false,
+    })
+
+    assert.equal(decision.kind, 'none')
+  })
+
+  test('checkpoints when the steered clarification still asks in plain text', () => {
+    const decision = evaluateSkillClarificationGuard({
+      assistantText: '我需要你补充主推产品、门店面积和核心目标后再继续。',
+      toolCallsInCurrentResponse: 0,
+      hasSkillAskUserTool: true,
+      hasUnfinishedTaskReference: true,
+      alreadySteered: true,
+    })
+
+    assert.equal(decision.kind, 'checkpoint')
+  })
+
+  test('runtime steers skill clarification before emitting the plain question list', async () => {
+    let sawSteerReminder = false
+    const scripted = new ScriptedAgentRunner({}, [
+      {
+        turnIndex: 0,
+        response: hfpClarificationText,
+      },
+      {
+        turnIndex: 1,
+        response: '我已改用反问卡。',
+        assertions: ({ messages }) => {
+          const input = messages.find((message) =>
+            typeof message === 'object'
+            && message !== null
+            && (message as { turnIndex?: unknown }).turnIndex === 1
+            && Object.prototype.hasOwnProperty.call(message, 'input')
+          )
+          sawSteerReminder = /单个问题调用 skill_ask_user；多个问题调用 ask_user_questions/.test(JSON.stringify(input))
+        },
+      },
+    ])
+    const { runtime, outputs } = createRuntime({
+      ...scripted.deps,
+      loadAIConfig: () => ({
+        ok: true,
+        reason: 'present',
+        config: {
+          ...fakeConfig,
+          provider: 'openai-compatible',
+          baseUrl: 'https://token-plan-sgp.xiaomimimo.com/anthropic',
+          model: 'mimo-v2.5',
+          agentProtocol: 'anthropic',
+        },
+      }),
+      listToolDefinitions: () => [createSkillAskUserToolDefinition()],
+    })
+    runtime.newSession('butler::scope-skill-clarification-steer', 'system prompt')
+
+    const result = await runtime.sendMessage(
+      'butler::scope-skill-clarification-steer',
+      '继续 hfp-space-design 方案，需要补充信息就问我',
+      'run-skill-clarification-steer',
+      {
+        publicSessionId: 'scope-skill-clarification-steer',
+        taskId: 'task-skill-clarification-steer',
+        continuationIntent: { taskId: 'task-skill-clarification-steer' },
+      },
+    )
+
+    assert.equal(result.success, true)
+    assert.equal(result.terminalReason, 'done')
+    assert.equal(sawSteerReminder, true)
+    assert.equal(outputs.some((event) => event.chunk.includes('最能提升方案质量')), false)
+    assert.ok(outputs.some((event) => event.chunk.includes('我已改用反问卡。')))
   })
 })

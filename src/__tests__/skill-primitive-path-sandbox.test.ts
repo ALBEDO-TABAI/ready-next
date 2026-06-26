@@ -12,6 +12,7 @@ import {
   PathSandboxError,
   RESERVED_FILE_NAMES,
   assertNotReservedPath,
+  resolveWritableWithinRoot,
   resolveWithinRoot,
 } from '../main/modules/tools/skill-primitives/path-sandbox'
 
@@ -39,6 +40,42 @@ test('resolveWithinRoot rejects absolute paths', () => {
     assert.throws(
       () => resolveWithinRoot(root, '/etc/passwd'),
       (error: unknown) => error instanceof PathSandboxError && error.reason === 'absolute_path',
+    )
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('resolveWritableWithinRoot accepts an absolute path inside the root', () => {
+  const root = createSandboxRoot()
+  try {
+    const abs = resolveWritableWithinRoot(root, join(root, 'output', 'result.json'))
+    assert.equal(abs, join(root, 'output', 'result.json'))
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('resolveWritableWithinRoot rejects an absolute path outside the root', () => {
+  const root = createSandboxRoot()
+  const outside = createSandboxRoot()
+  try {
+    assert.throws(
+      () => resolveWritableWithinRoot(root, join(outside, 'result.json')),
+      (error: unknown) => error instanceof PathSandboxError && error.reason === 'path_escape',
+    )
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+    rmSync(outside, { recursive: true, force: true })
+  }
+})
+
+test('resolveWithinRoot rejects home-directory shorthand paths', () => {
+  const root = createSandboxRoot()
+  try {
+    assert.throws(
+      () => resolveWithinRoot(root, '~/result.json'),
+      (error: unknown) => error instanceof PathSandboxError && error.reason === 'home_path',
     )
   } finally {
     rmSync(root, { recursive: true, force: true })

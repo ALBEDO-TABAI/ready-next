@@ -12,6 +12,7 @@ export interface ParsedTextToolBridgeResponse {
 }
 
 const TOOL_CALL_BLOCK_REGEX = /:::tool_call\s*\n\s*({[\s\S]*?})\s*\n\s*:::/g
+const BRACKET_TOOL_CALL_BLOCK_REGEX = /\[tool_call\]\s*({[\s\S]*?})\s*(?:<\/tool_call>|\[\/tool_call\])/gi
 
 /**
  * Phase 3.1 — XML-style tool_call blocks the audit found leaking into chat.
@@ -167,6 +168,23 @@ export function parseTextToolBridgeResponse(text: string): ParsedTextToolBridgeR
         const args = parsed.args && typeof parsed.args === 'object' && !Array.isArray(parsed.args)
           ? parsed.args as Record<string, unknown>
           : {}
+        if (name) {
+          toolCalls.push({ name, args })
+        }
+      } catch {
+        // Ignore invalid JSON blocks.
+      }
+      return ''
+    })
+    .replace(BRACKET_TOOL_CALL_BLOCK_REGEX, (_match, jsonBlock) => {
+      try {
+        const parsed = JSON.parse(String(jsonBlock)) as Record<string, unknown>
+        const name = typeof parsed.tool === 'string' ? parsed.tool.trim() : ''
+        const args = parsed.input && typeof parsed.input === 'object' && !Array.isArray(parsed.input)
+          ? parsed.input as Record<string, unknown>
+          : parsed.args && typeof parsed.args === 'object' && !Array.isArray(parsed.args)
+            ? parsed.args as Record<string, unknown>
+            : {}
         if (name) {
           toolCalls.push({ name, args })
         }

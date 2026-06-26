@@ -103,6 +103,7 @@ export interface ToolContext {
   sidecarManager?: SidecarManager | null
   runtime?: AgentControlRuntime | null
   scope?: ConversationScope | null
+  agent?: string | null
   allowedToolNames?: Set<string> | string[] | null
   emitToolAction?: (tool: string, args: Record<string, unknown>) => void
   requestModuleToolAction?: (tool: string, args: Record<string, unknown>) => Promise<Record<string, unknown>>
@@ -583,6 +584,7 @@ async function executeToolCallInner(
           return executeSkillTool(toolName, args, context.sessionId, context.registerRunCleanup, context.abortSignal, context.agentContext, {
             scopeId: context.scopeId || context.scope?.id || context.sessionId,
             runId: context.runId,
+            agent: context.agent || context.scope?.agent || null,
             taskId: context.taskId,
             taskProjectionId: context.taskProjectionId,
             frameSkillId: context.frameSkillId ?? null,
@@ -826,6 +828,9 @@ async function executeToolCallInner(
           return executeAskUserQuestions(args as unknown as Parameters<typeof executeAskUserQuestions>[0], {
             sessionId: context.sessionId,
             conversationId: context.scope?.id || context.sessionId,
+            scopeId: context.scopeId || context.scope?.id || context.sessionId,
+            agent: context.agent || context.scope?.agent || null,
+            requestId: context.runId || null,
             signal: context.abortSignal,
             emitAskUserQuestionsCard: getAskUserQuestionsCardEmitter(),
             persistCardPending: getAskUserQuestionsCardPersistor(),

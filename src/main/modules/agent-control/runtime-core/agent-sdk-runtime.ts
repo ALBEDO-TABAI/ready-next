@@ -202,6 +202,12 @@ import {
   buildActionAnnouncementSteerInput,
   evaluateActionAnnouncementGuard,
 } from './action-announcement-guard'
+import {
+  buildSkillClarificationCheckpointMessage,
+  buildSkillClarificationSteerInput,
+  buildSkillClarificationSteerReminder,
+  evaluateSkillClarificationGuard,
+} from './skill-clarification-guard'
 import { buildRuntimePreambleBill, emitContextBill, RUNTIME_PREAMBLE_STAGE } from '../context-bill'
 import { createSystemReminderRegistry } from '../system-reminders/system-reminder-registry'
 import { registerActionAnnouncementSteerReminder } from '../system-reminders/action-announcement-steer-reminder'
@@ -231,7 +237,7 @@ const DEFAULT_AGENT_SDK_MAX_TURNS = 24
 // L-f5: refresh the durable budget checkpoint every N tool calls mid-run.
 const NATIVE_TEXT_BUFFER_SAFE_FLUSH_CHARS = 4000
 const NATIVE_TEXT_BUFFER_TIMED_FLUSH_MS = 700
-const NATIVE_TEXT_TOOL_MARKERS = ['<tool_call', '<function=', '<parameter=', ':::tool_call'] as const
+const NATIVE_TEXT_TOOL_MARKERS = ['<tool_call', '<function=', '<parameter=', ':::tool_call', '[tool_call]'] as const
 const ROLLING_BUDGET_CHECKPOINT_TOOL_INTERVAL = 4
 const LOCAL_DOCUMENT_WRITE_MAX_TURNS = 40
 const LONG_READING_TRIGGER_CHARS = 12_000
@@ -324,6 +330,31 @@ function filterSelectedSkillToolSurface(
     `preservedTools=${fallback.map((definition) => definition.name).join('|') || 'none'}`,
   ].join(' '))
   return fallback
+}
+
+function authorizedPrimitiveToolNames(authorization: SkillToolAuthorization): string[] {
+  if (authorization.mode !== 'selected') return []
+  return PRIMITIVE_TOOL_DEFS
+    .map((definition) => definition.name)
+    .filter((name) => authorization.allowedPrimitives.has(name))
+}
+
+function supplementAuthorizedSkillPrimitiveDefinitions(
+  definitions: ToolDefinition[],
+  authorization: SkillToolAuthorization,
+): ToolDefinition[] {
+  const primitiveNames = authorizedPrimitiveToolNames(authorization)
+  if (primitiveNames.length === 0) return definitions
+  const seen = new Set(definitions.map((definition) => definition.name))
+  const next = [...definitions]
+  for (const name of primitiveNames) {
+    if (seen.has(name)) continue
+    const definition = defaultToolRegistry.getToolDefinitionForExecution(name)
+    if (!definition) continue
+    next.push(definition)
+    seen.add(name)
+  }
+  return next
 }
 
 interface AgentSdkSession {
@@ -957,19 +988,39 @@ function skillContextMessagesToInstruction(
   return sections.join('\n\n')
 }
 
-function allowedPrimitiveToolsForSdkSkillTurn(options: { allowRunShell?: boolean } = {}): string[] {
+function allowedPrimitiveToolsForSdkSkillTurn(options: {
+  allowRunShell?: boolean
+  allowAskUser?: boolean
+} = {}): string[] {
   const safeSkillPrimitives = new Set([
-    'skill_ask_user',
     'skill_write_artifact',
     'skill_read_artifact',
+    'skill_export_artifact',
     'skill_inspect_run_state',
   ])
+  if (options.allowAskUser !== false) {
+    safeSkillPrimitives.add('skill_ask_user')
+  }
   if (options.allowRunShell) {
     safeSkillPrimitives.add('skill_run_shell')
   }
   return PRIMITIVE_TOOL_DEFS
     .map((definition) => definition.name)
     .filter((name) => safeSkillPrimitives.has(name))
+}
+
+function shouldSuppressSkillAskUserForArtifactDelivery(textCandidates: string[]): boolean {
+  const joined = textCandidates.join('\n')
+  if (!/(?:输出到|保存到|写入|写到|导出到|存到|落到|文件名|output\s+to|save\s+to|write\s+to|export\s+to)/i.test(joined)) {
+    return false
+  }
+  if (/(?:不要|不用|无需|不必|别|禁止).{0,8}(?:追问|问我|询问|提问|澄清|确认)|(?:直接|立刻|马上).{0,12}(?:生成|输出|保存|写入|完成)/i.test(joined)) {
+    return true
+  }
+  if (/(?:先问|追问|澄清|确认一下|问我|intake|clarify|ask\s+me)/i.test(joined)) {
+    return false
+  }
+  return true
 }
 
 /**
@@ -1107,6 +1158,21 @@ function parseEnvelopeResourceReferences(envelope: unknown): {
     }))
     .filter((item) => item.name && item.path)
   return { primaryInstruction, resources }
+}
+
+function skillAuthorizationTextCandidates(message: RunMessage, envelope: unknown): string[] {
+  const record = asRecord(envelope)
+  const candidates = [
+    parseEnvelopeResourceReferences(envelope).primaryInstruction,
+    stringField(record, 'primaryInstruction'),
+    stringField(record, 'pureUserText'),
+    stringField(record, 'rawUserText'),
+    primaryInstructionText(message),
+    messageToText(message),
+  ]
+    .map((item) => String(item || '').trim())
+    .filter(Boolean)
+  return Array.from(new Set(candidates))
 }
 
 function resolveAuthorizationPreferredToolNames(authorization: SkillToolAuthorization): string[] | null {
@@ -2148,13 +2214,52 @@ function readStructuredResultRecord(output: ToolExecutionOutput): Record<string,
 
 type TerminalFailureReason = 'delivery_failed' | 'tool_unavailable' | 'no_artifact' | 'proof_gap'
 
+const RECOVERABLE_SKILL_PATH_ERROR_KINDS = new Set([
+  'absolute_path',
+  'path_escape',
+  'home_path',
+  'empty_path',
+  'no_root_match',
+])
+
+const SKILL_ARTIFACT_TOOLS = new Set([
+  'skill_write_artifact',
+  'skill_read_artifact',
+  'skill_export_artifact',
+])
+
+function isRelativePathInputValidationFailure(
+  toolName: string,
+  structuredData: Record<string, unknown>,
+): boolean {
+  if (!SKILL_ARTIFACT_TOOLS.has(toolName)) return false
+  if (structuredData.errorKind !== 'input_validation') return false
+  const issues = Array.isArray(structuredData.issues) ? structuredData.issues : []
+  return issues.some((issue) => {
+    if (!issue || typeof issue !== 'object' || Array.isArray(issue)) return false
+    const path = (issue as { path?: unknown }).path
+    return Array.isArray(path) && path.map((segment) => String(segment)).includes('relativePath')
+  })
+}
+
+function isRecoverableSkillPathFailure(
+  toolName: string,
+  structuredData: Record<string, unknown>,
+  errorKind: string,
+): boolean {
+  if (!toolName.startsWith('skill_')) return false
+  return RECOVERABLE_SKILL_PATH_ERROR_KINDS.has(errorKind)
+    || isRelativePathInputValidationFailure(toolName, structuredData)
+}
+
 function terminalFailureReasonFromToolFailure(
   toolName: string,
   structuredData: Record<string, unknown>,
-): TerminalFailureReason {
+): TerminalFailureReason | null {
   const errorKind = typeof structuredData.errorKind === 'string'
     ? structuredData.errorKind.trim()
     : ''
+  if (isRecoverableSkillPathFailure(toolName, structuredData, errorKind)) return null
   if (errorKind === 'send_failed' || errorKind === 'blocked_external') return 'delivery_failed'
   if (
     errorKind === 'sidecar_unavailable'
@@ -2183,8 +2288,9 @@ function buildTerminalFailureProjectionPatch(
 ): Record<string, unknown> {
   const errorKind = typeof structuredData.errorKind === 'string' ? structuredData.errorKind : null
   const errorCode = typeof structuredData.errorCode === 'string' ? structuredData.errorCode : null
+  const terminalFailureReason = terminalFailureReasonFromToolFailure(toolName, structuredData)
   return {
-    terminalFailureReason: terminalFailureReasonFromToolFailure(toolName, structuredData),
+    ...(terminalFailureReason ? { terminalFailureReason } : {}),
     terminalFailureTool: toolName,
     ...(errorKind ? { terminalFailureErrorKind: errorKind } : {}),
     ...(errorCode ? { terminalFailureErrorCode: errorCode } : {}),
@@ -3923,13 +4029,20 @@ export class AgentSdkRuntime extends EventEmitter {
         return isBrowserCollectionSubsetTool(name)
       })
     }
+    if (capabilityResolution.visibleCapabilityGroupIds.includes('skills')) {
+      definitions = supplementAuthorizedSkillPrimitiveDefinitions(definitions, params.authorization)
+    }
     const fallbackSkillAllowedTools =
       params.authorization.mode === 'selected'
       && sdkIntentSurface.preferredSkillToolNames
       && sdkIntentSurface.preferredSkillToolNames.length > 0
         ? sdkIntentSurface.preferredSkillToolNames
         : null
-    const activeSkillAllowedTools = resolveActiveSkillAllowedTools(params.authorization) || fallbackSkillAllowedTools
+    const allowedPrimitiveNames = authorizedPrimitiveToolNames(params.authorization)
+    const resolvedSkillAllowedTools = resolveActiveSkillAllowedTools(params.authorization) || fallbackSkillAllowedTools
+    const activeSkillAllowedTools = resolvedSkillAllowedTools && allowedPrimitiveNames.length > 0
+      ? Array.from(new Set([...resolvedSkillAllowedTools, ...allowedPrimitiveNames]))
+      : resolvedSkillAllowedTools
     if (activeSkillAllowedTools) {
       definitions = filterSelectedSkillToolSurface(definitions, activeSkillAllowedTools)
     }
@@ -4311,6 +4424,7 @@ export class AgentSdkRuntime extends EventEmitter {
     let hasSuccessfulToolProgress = false
     let lastDocumentSaveSuccessText: string | null = null
     let actionAnnouncementSteered = false
+    let skillClarificationSteered = false
     let runMetaStatus: string = 'running'
     let runMetaTerminalReason: TurnTerminalReason | null = null
     let runMetaBudgetRuntime: TaskBudgetRuntime | null = null
@@ -5046,6 +5160,92 @@ export class AgentSdkRuntime extends EventEmitter {
         }
         return this.hasPendingTaskProjection(sessionId)
       }
+      const maybeHandleSkillClarificationGuard = async (
+        assistantText: string,
+      ): Promise<ExecutionTurnResult | 'continue' | null> => {
+        const decision = evaluateSkillClarificationGuard({
+          assistantText,
+          toolCallsInCurrentResponse: 0,
+          hasSkillAskUserTool: allowedToolNames.includes('skill_ask_user'),
+          hasUnfinishedTaskReference: hasUnfinishedActionTaskReference(),
+          alreadySteered: skillClarificationSteered,
+        })
+        if (decision.kind === 'none') return null
+        if (decision.kind === 'steer') {
+          skillClarificationSteered = true
+          nextInput = buildSkillClarificationSteerInput(
+            buildSkillClarificationSteerReminder(decision.questionSummary),
+          ) as AgentInputItem[]
+          return 'continue'
+        }
+
+        const checkpointBudgetRuntime = liveTaskBudgetRuntime
+          || createTaskBudgetRuntime(resolveTaskTypeFromToolDefinitions(toolDefinitions) || 'short_task')
+        liveTaskBudgetRuntime = checkpointBudgetRuntime
+        runMetaBudgetRuntime = checkpointBudgetRuntime
+        const checkpoint = await this.writeBudgetCheckpointState({
+          agentName: name,
+          sessionId,
+          runId,
+          taskId,
+          taskBudgetRuntime: checkpointBudgetRuntime,
+          runHandle,
+          usedTools,
+          requiredCapabilityGroups,
+          requiredToolNames: allowedToolNames,
+          lastUserMessage: messageToText(content as RunMessage),
+          terminalReason: 'checkpoint_steered',
+          blockerType: 'skill_clarification_not_card',
+          pauseReason: 'skill_clarification_not_card',
+          blockedReason: '技能流程需要用户补充信息，但模型没有调用反问卡。',
+          waitingFor: 'none',
+          resumeKind: 'paused',
+        })
+        runMetaContinuationRef = checkpoint.projectionPatch.taskContinuation && typeof checkpoint.projectionPatch.taskContinuation === 'object'
+          ? checkpoint.projectionPatch.taskContinuation as Record<string, unknown>
+          : null
+        projectionPatches.push(checkpoint.projectionPatch)
+        finalText = buildSkillClarificationCheckpointMessage(decision.questionSummary)
+        emitOutput(finalText, 'text', checkpoint.projectionPatch)
+        const finalProjectionPatch = this.mergeProjectionPatches(projectionPatches)
+        await finalizeRunOutcome({
+          kind: 'checkpoint',
+          runId,
+          taskId,
+          scopeId: sessionId || null,
+          continuationHandle: checkpoint.runStatePath,
+          durationMs: Math.max(1, Date.now() - runStartedAt),
+          toolCallsUsed: usedTools.length,
+          initiator: runHandle.abortInitiator || 'done',
+          terminalReason: 'checkpoint_steered',
+          projectionPatch: finalProjectionPatch,
+          finalText,
+          taskBudgetRuntime: liveTaskBudgetRuntime,
+          providerDiagnostics: runMetaProviderDiagnostics,
+          usage: runMetaUsage,
+        }, {
+          runMetaRepository: this.getRunMetaRepositoryForFinalize(),
+          taskProjectionStore: this.runtime?.getTaskProjectionStoreForFinalize?.() ?? null,
+          learnFromCheckIn: (input) => this.learnSiteCardsFromCheckIn(input),
+          writeProjectionTerminalPatch: (projectionPatch, terminalReason, status) => {
+            emitOutputForRun('', 'done', projectionPatch)
+            emitStatusForRun(status, terminalReason as TurnTerminalReason)
+          },
+          writeRunCloseMetric,
+        })
+        return this.buildResult({
+          success: true,
+          finalText,
+          cancelled: false,
+          taskId,
+          usedTools,
+          transcriptEvents,
+          projectionPatches,
+          terminalReason: 'checkpoint_steered',
+          taskBudgetRuntime: liveTaskBudgetRuntime,
+          providerDiagnostics: runMetaProviderDiagnostics,
+        })
+      }
       const maybeHandleActionAnnouncementGuard = async (
         assistantText: string,
       ): Promise<ExecutionTurnResult | 'continue' | null> => {
@@ -5234,6 +5434,9 @@ export class AgentSdkRuntime extends EventEmitter {
       const bufferNativeTextUntilParsed =
         !useTextToolBridge
         && toolDefinitions.length > 0
+      const holdNativeTextUntilFinal =
+        bufferNativeTextUntilParsed
+        && allowedToolNames.includes('skill_ask_user')
       for (let bridgeTurn = 0; bridgeTurn < (useTextToolBridge ? 4 : 3); bridgeTurn += 1) {
         let streamedText = ''
         let nativeTextBuffer = ''
@@ -5361,8 +5564,10 @@ export class AgentSdkRuntime extends EventEmitter {
                   emitOutput(delta, 'text')
                 } else if (!useTextToolBridge && bufferNativeTextUntilParsed) {
                   nativeTextBuffer += delta
-                  flushNativeTextBuffer(false)
-                  scheduleNativeTextFlush()
+                  if (!holdNativeTextUntilFinal) {
+                    flushNativeTextBuffer(false)
+                    scheduleNativeTextFlush()
+                  }
                 }
               },
             })
@@ -5541,6 +5746,11 @@ export class AgentSdkRuntime extends EventEmitter {
             continue
           }
           finalText = modelText
+          {
+            const skillClarificationResult = await maybeHandleSkillClarificationGuard(finalText)
+            if (skillClarificationResult === 'continue') continue
+            if (skillClarificationResult) return skillClarificationResult
+          }
           if (bufferNativeTextUntilParsed && finalText) {
             const visibleText = visibleNativeTextAfterFlush(finalText)
             if (visibleText) emitOutput(visibleText, 'text')
@@ -5606,11 +5816,16 @@ export class AgentSdkRuntime extends EventEmitter {
         }
 
         const parsed = parseTextToolBridgeResponse(modelText)
-        if (parsed.visibleText && (parsed.toolCalls.length === 0 || !shouldSuppressVisibleTextOnToolCall(parsed.visibleText))) {
-          emitOutput(parsed.visibleText, 'text')
-        }
         if (parsed.toolCalls.length === 0) {
           finalText = parsed.visibleText || modelText
+          {
+            const skillClarificationResult = await maybeHandleSkillClarificationGuard(finalText)
+            if (skillClarificationResult === 'continue') continue
+            if (skillClarificationResult) return skillClarificationResult
+          }
+          if (finalText) {
+            emitOutput(finalText, 'text')
+          }
           if (
             requiresLocalDocumentExcerpt
             && !hasSuccessfulLocalDocumentSourceRead
@@ -5657,6 +5872,10 @@ export class AgentSdkRuntime extends EventEmitter {
             if (actionAnnouncementResult) return actionAnnouncementResult
           }
           break
+        }
+
+        if (parsed.visibleText && !shouldSuppressVisibleTextOnToolCall(parsed.visibleText)) {
+          emitOutput(parsed.visibleText, 'text')
         }
 
         const bridgeResults: ToolBridgeResultItem[] = []
@@ -6448,6 +6667,7 @@ export class AgentSdkRuntime extends EventEmitter {
       scope: runtimeContext.sessionId
         ? this.runtime?.getConversationScope?.(runtimeContext.sessionId) || undefined
         : undefined,
+      agent: publicAgentName(runtimeContext.agentName),
       allowedToolNames: runtimeContext.allowedToolNames,
       // SDK runtime executes renderer-mediated tools through the request/ack
       // path below. Forwarding tool handlers' advisory emitToolAction here
@@ -6774,21 +6994,38 @@ export class AgentSdkRuntime extends EventEmitter {
         ? buildLocalSendImSkillAuthorization('local_send_im_intent')
         : buildExplicitNoSkillAuthorization('no_skill_signal')
     }
-    const userText = parseEnvelopeResourceReferences(requestEnvelope).primaryInstruction || messageToText(message)
-    if (!userText) return buildExplicitNoSkillAuthorization('no_skill_signal')
-    const explicitSkills = orchestrator.findExplicitlyRequestedSkills?.(userText) || []
-    const explicitSkill = explicitSkills[0] || null
+    const userTextCandidates = skillAuthorizationTextCandidates(message, requestEnvelope)
+    if (userTextCandidates.length === 0) return buildExplicitNoSkillAuthorization('no_skill_signal')
+    const explicitSkillMatches: Array<{
+      text: string
+      skill: { id?: string; skillId?: string; name?: string; managedPath?: string }
+    }> = []
+    for (const text of userTextCandidates) {
+      const skills = orchestrator.findExplicitlyRequestedSkills?.(text) || []
+      for (const skill of skills) {
+        if (!skill) continue
+        const skillId = skill.id || skill.skillId
+        if (!skillId) continue
+        if (explicitSkillMatches.some((entry) => (entry.skill.id || entry.skill.skillId) === skillId)) continue
+        explicitSkillMatches.push({ text, skill })
+      }
+    }
+    const explicitSkillEntry = explicitSkillMatches[0] || null
+    const explicitSkill = explicitSkillEntry?.skill || null
     const explicitSkillId = explicitSkill?.id || explicitSkill?.skillId || (localSendImIntent ? 'send-im' : null)
     if (explicitSkillId) {
       try {
-        orchestrator.rememberExplicitReferenceSkillHint?.(userText, sessionId)
+        orchestrator.rememberExplicitReferenceSkillHint?.(explicitSkillEntry?.text || userTextCandidates[0], sessionId)
       } catch (error) {
         log(`rememberExplicitReferenceSkillHint failed: ${errorMessage(error)}`)
       }
     }
 
     const referenceHint = orchestrator.getCurrentReferenceSkillHint?.(sessionId) || null
-    const typedActionNames = new Set((orchestrator.buildPreferredSkillToolNames?.(userText, sessionId) || [])
+    const preferredToolNames = userTextCandidates.flatMap((text) =>
+      orchestrator.buildPreferredSkillToolNames?.(text, sessionId) || [],
+    )
+    const typedActionNames = new Set(preferredToolNames
       .filter((name) => name.startsWith('skill_') && !PRIMITIVE_TOOL_NAME_SET.has(name)))
     if (localSendImIntent) {
       typedActionNames.add('skill_send_im_file')
@@ -6801,11 +7038,12 @@ export class AgentSdkRuntime extends EventEmitter {
     const skillId = explicitSkillId || (typedActions.length > 0 ? referenceHint?.id || null : null)
     if (!skillId) return buildExplicitNoSkillAuthorization('no_skill_signal')
     const allowRunShell = explicitReferenceSkillHasScripts(explicitSkill, typedActions)
+    const allowAskUser = !shouldSuppressSkillAskUserForArtifactDelivery(userTextCandidates)
 
     return buildSelectedSkillToolAuthorization({
       skillId,
       allowedTypedActions: typedActions,
-      allowedPrimitives: allowedPrimitiveToolsForSdkSkillTurn({ allowRunShell }),
+      allowedPrimitives: allowedPrimitiveToolsForSdkSkillTurn({ allowRunShell, allowAskUser }),
       source: explicitSkillId ? 'explicit' : 'active_task',
       reason: explicitSkillId ? 'explicit_user_mention' : 'reference_hint',
     })

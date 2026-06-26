@@ -91,6 +91,7 @@ export interface TaskCardViewModel {
   phase: ScopeRunState['phase']
   statusLabel: string
   summary: string
+  steps: NonNullable<TaskCardRunLike['steps']>
   currentStep?: NonNullable<TaskCardRunLike['steps']>[number] | null
   sections: Record<TaskSectionKey, TaskSectionViewModel>
   detailGroups: TaskEventGroupViewModel[]
@@ -327,6 +328,45 @@ function formatTaskTitleForUser(title: string | null | undefined): string {
   return sanitizeInternalAgentDisplayText(raw, '正在处理任务')
 }
 
+function isCollapsibleSkillStep(step: NonNullable<TaskCardRunLike['steps']>[number]): boolean {
+  const title = String(step.title || '').trim()
+  const detail = String(step.detail || '').trim()
+  return title === '执行技能步骤'
+    || title === '读取技能参考'
+    || title === '写入方案草稿'
+    || title === '保存到目标文件夹'
+    || title === '确认任务状态'
+    || detail === '技能步骤已完成'
+    || detail === '正在执行技能步骤'
+    || detail === '正在根据参考内容整理方案'
+}
+
+export function collapseTaskStepsForDisplay(
+  steps: NonNullable<TaskCardRunLike['steps']>,
+): NonNullable<TaskCardRunLike['steps']> {
+  const collapsed: NonNullable<TaskCardRunLike['steps']> = []
+  const indexByKey = new Map<string, number>()
+  for (const step of steps) {
+    const title = String(step.title || '').trim()
+    const detail = String(step.detail || '').trim()
+    const key = isCollapsibleSkillStep(step)
+      ? `skill:${title || 'step'}`
+      : `exact:${title}\u0000${detail}`
+    const existingIndex = indexByKey.get(key)
+    if (existingIndex == null) {
+      indexByKey.set(key, collapsed.length)
+      collapsed.push(step)
+      continue
+    }
+    collapsed[existingIndex] = {
+      ...collapsed[existingIndex],
+      ...step,
+      id: collapsed[existingIndex].id,
+    }
+  }
+  return collapsed
+}
+
 function buildDetailGroups(toolTrace: ToolTraceEvent[]): TaskEventGroupViewModel[] {
   const visibleToolTrace = filterUserVisibleToolTraceEvents(toolTrace)
   if (!Array.isArray(visibleToolTrace) || visibleToolTrace.length === 0) return []
@@ -398,6 +438,10 @@ function isCompletedTerminalRun(run: TaskCardRunLike): boolean {
     || (run.phase === 'done' && (terminalReason === 'done' || terminalReason === 'completed'))
 }
 
+function isStaleRunningSummaryForCompletedRun(text: string | null | undefined): boolean {
+  return /(?:正在继续处理|正在处理|正在根据|正在整理|正在生成|正在创建|正在保存|正在读取|继续处理|处理中)/.test(String(text || ''))
+}
+
 function hasBudgetPausedSignal(run: TaskCardRunLike): boolean {
   return run.taskContinuation?.pauseReason === 'budget_exhausted'
     || run.taskContinuation?.blockerType === 'budget_paused'
@@ -418,6 +462,17 @@ function hasBlockedContinuationReason(run: TaskCardRunLike): boolean {
 
 function hasBlockedSignal(run: TaskCardRunLike): boolean {
   return hasBlockedTerminalReason(run) || hasBlockedContinuationReason(run)
+}
+
+function hasActiveForegroundPhase(run: TaskCardRunLike): boolean {
+  if (run.terminalReason) return false
+  return run.phase === 'queued'
+    || run.phase === 'planning'
+    || run.phase === 'tool_running'
+    || run.phase === 'checkpoint'
+    || run.phase === 'takeover'
+    || run.phase === 'resuming'
+    || run.phase === 'responding'
 }
 
 /**
@@ -519,6 +574,13 @@ export function deriveTaskCardRuntimeState(run: TaskCardRunLike): TaskCardRuntim
       }),
     }
   }
+  if (hasActiveForegroundPhase(run)) {
+    return {
+      visualState: 'running',
+      statusLabel: taskPhaseLabel(run.phase),
+      actionSet: ['cancel'],
+    }
+  }
   if (run.phase === 'done' || run.status === 'completed') {
     return {
       visualState: 'done',
@@ -558,7 +620,7 @@ export function buildTaskCardViewModel(
     ...createDefaultTaskDisclosureState(run),
     ...(disclosure || {}),
   }
-  const steps = run.steps || []
+  const steps = collapseTaskStepsForDisplay(run.steps || [])
   const rawCurrentStep = steps.find((step) => step.id === run.currentStepId) || steps.find((step) => step.status === 'running') || null
   const currentStep = rawCurrentStep
     ? { ...rawCurrentStep, title: formatTaskStepDisplayTitle(rawCurrentStep.title, run.progress) }
@@ -567,9 +629,13 @@ export function buildTaskCardViewModel(
   const recentArtifacts = run.recentArtifacts || []
   const memoryItems = run.memoryCapture?.items || []
   const structuredHandoffMessage = run.progress?.handoff?.userMessage
-  const rawHandoffSource = run.taskSummary || run.blockedReason || run.error || taskPhaseLabel(run.phase)
+  const completedTerminal = isCompletedTerminalRun(run)
+  const rawHandoffSource = completedTerminal
+    ? (run.blockedReason || run.error || run.taskSummary || taskPhaseLabel(run.phase))
+    : (run.taskSummary || run.blockedReason || run.error || taskPhaseLabel(run.phase))
+  const formattedSummary = formatTaskUserFacingText(rawHandoffSource)
   const summary = structuredHandoffMessage
-    || formatTaskUserFacingText(rawHandoffSource)
+    || (completedTerminal && isStaleRunningSummaryForCompletedRun(formattedSummary) ? '已完成' : formattedSummary)
   const legacyHandoffHit = structuredHandoffMessage
     ? undefined
     : classifyInternalAgentHandoffText(rawHandoffSource)?.legacyHit
@@ -582,6 +648,7 @@ export function buildTaskCardViewModel(
     phase: run.phase,
     statusLabel,
     summary,
+    steps,
     legacyHandoffHit,
     currentStep,
     // Stage T (W9.2) — diagnostic passthrough; undefined for non-cancel

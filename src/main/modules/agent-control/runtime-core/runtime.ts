@@ -1973,7 +1973,7 @@ export class AgentControlRuntime extends EventEmitter {
     elapsedMs?: number
   }): Promise<{
     success: boolean
-    state?: 'cancel_requested' | 'stale' | 'not_found'
+    state?: 'cancel_requested' | 'stale' | 'not_found' | 'paused_user_input'
     error?: string
     errorKind?: string
     activeRunId?: string | null
@@ -1997,6 +1997,17 @@ export class AgentControlRuntime extends EventEmitter {
         error: `Conversation scope not found: ${scopeId}`,
         errorKind: 'scope_missing',
       }
+    }
+
+    if (this.orchestrator.isActiveRun(scope.agent, scope.id, requestId)
+      && this.orchestrator.isActiveRunAwaitingUserInput(scope.agent, scope.id, requestId)) {
+      this.orchestrator.refreshActiveRunProgress(scope.agent, scope.id, requestId)
+      logAgentMetric('renderer_infrastructure_timeout_awaiting_user_input', {
+        scopeId,
+        requestId,
+        elapsedMs: Number.isFinite(Number(payload.elapsedMs)) ? Number(payload.elapsedMs) : null,
+      })
+      return { success: true, state: 'paused_user_input' }
     }
 
     const result = this.orchestrator.interruptActiveRunIfMatches(

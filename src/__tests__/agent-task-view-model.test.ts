@@ -239,6 +239,52 @@ describe('task card view model', () => {
     assert.strictEqual(label, '正在分析第 12 个片段 · 12/30 · 总进度 42% · 最近更新 1 分钟前')
   })
 
+  it('collapses repeated reference skill internals in the visible plan', () => {
+    const run = createRun({
+      taskTitle: '正在生成空间方案',
+      taskSummary: '正在根据参考内容整理方案',
+      currentStepId: 'shell-7',
+      steps: [
+        { id: 'shell-1', title: '执行技能步骤', status: 'done', detail: '技能步骤已完成', updatedAt: '2026-05-04T10:00:00.000Z' },
+        { id: 'shell-2', title: '执行技能步骤', status: 'done', detail: '技能步骤已完成', updatedAt: '2026-05-04T10:00:01.000Z' },
+        { id: 'shell-3', title: '执行技能步骤', status: 'running', detail: '正在执行技能步骤', updatedAt: '2026-05-04T10:00:02.000Z' },
+        { id: 'read-1', title: '读取技能参考', status: 'done', detail: '正在根据参考内容整理方案', updatedAt: '2026-05-04T10:00:03.000Z' },
+        { id: 'read-2', title: '读取技能参考', status: 'done', detail: '正在根据参考内容整理方案', updatedAt: '2026-05-04T10:00:04.000Z' },
+        { id: 'export-1', title: '保存到目标文件夹', status: 'running', detail: '正在保存到目标文件夹', updatedAt: '2026-05-04T10:00:05.000Z' },
+      ],
+    })
+
+    const vm = buildTaskCardViewModel(run, createDefaultTaskDisclosureState(run))
+
+    assert.deepStrictEqual(
+      vm.steps.map((step) => `${step.title}:${step.status}`),
+      [
+        '执行技能步骤:running',
+        '读取技能参考:done',
+        '保存到目标文件夹:running',
+      ],
+    )
+    assert.strictEqual(vm.sections.plan.count, 3)
+    assert.strictEqual(vm.sections.plan.summary, '当前：执行技能步骤')
+  })
+
+  it('does not keep a running summary after a task completed', () => {
+    const run = createRun({
+      phase: 'done',
+      status: 'completed',
+      taskTitle: '文档已保存',
+      taskSummary: '正在继续处理',
+      steps: [],
+      recentArtifacts: [],
+      toolTrace: [],
+    })
+
+    const vm = buildTaskCardViewModel(run, createDefaultTaskDisclosureState(run))
+
+    assert.strictEqual(vm.summary, '已完成')
+    assert.strictEqual(vm.sections.overview.summary, '已完成')
+  })
+
   it('renders VEA audiovisual handoff blockers as user-facing continuation guidance', () => {
     const rawBlocker = '[qqyXmFYIdUo] 视听剖析子任务 `body` 待 agent 处理；请读取并完成 `audiovisual_handoff/body/task.md` 后重新运行 finalize。'
     const run = createRun({

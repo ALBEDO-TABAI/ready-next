@@ -1722,6 +1722,96 @@ describe('useAgent Store', () => {
         )
     })
 
+    it('should keep generated text visible for soft adjudication-degraded completions', async () => {
+        const scopeId = 'conv-local-soft-degraded-after-text'
+        ;(globalThis as any).window.electronAPI = {
+            agent: {
+                createLocalScope: async (_agent: string, requestedScopeId?: string) => ({
+                    success: true,
+                    data: {
+                        id: requestedScopeId || scopeId,
+                        agent: 'butler',
+                        title: '新对话',
+                        sourceKind: 'local',
+                        sourceId: 'app',
+                        threadKey: requestedScopeId || scopeId,
+                        meta: { sourceLabel: '应用内', createdBy: 'app' },
+                        createdAt: '2026-04-15T10:00:00.000Z',
+                        updatedAt: '2026-04-15T10:00:00.000Z',
+                        lastMessageAt: null,
+                    },
+                }),
+                sendScoped: async () => {
+                    const responseId = useAgent.getState().streamingMessageId
+                    assert.ok(responseId)
+                    useAgent.getState().appendToMessage(responseId, '已生成正文')
+                    return {
+                        success: false,
+                        error: 'criteria degraded',
+                        errorKind: 'adjudication_degraded',
+                        persistence: {
+                            scope: 'pre-existing',
+                            message: 'persisted',
+                            attachments: 'none',
+                            inputAttachments: 'none',
+                        },
+                    }
+                },
+                emitRendererMetric: async () => ({ success: true }),
+                kill: async () => ({ success: true }),
+            },
+            chat: {
+                createConversation: async () => ({ success: true }),
+                saveMessage: async () => ({ success: true }),
+                updateConversationTitle: async () => ({ success: true }),
+            },
+            settings: {
+                getAIConfig: async () => ({ success: true, data: null }),
+            },
+        }
+
+        useAgent.setState({
+            currentAgent: 'butler',
+            currentScopeId: scopeId,
+            currentScope: {
+                id: scopeId,
+                agent: 'butler',
+                title: '新对话',
+                sourceKind: 'local',
+                sourceId: 'app',
+                threadKey: scopeId,
+                meta: { sourceLabel: '应用内', createdBy: 'app' },
+                createdAt: '2026-04-15T10:00:00.000Z',
+                updatedAt: '2026-04-15T10:00:00.000Z',
+                lastMessageAt: null,
+            },
+            scopes: [],
+            conversations: [],
+            messages: [],
+            attachments: [],
+            filePool: [],
+            isStreaming: false,
+            sendCoalescingEnabled: false,
+        })
+
+        const result = await useAgent.getState().sendMessage('hello')
+
+        assert.equal(result.success, true)
+        assert.equal(result.preserveInput, false)
+        assert.equal(result.shouldClearInput, true)
+        assert.equal(useAgent.getState().scopeRunStates[scopeId]?.phase, 'done')
+        assert.equal(useAgent.getState().scopeRunStates[scopeId]?.terminalReason, 'adjudication_degraded')
+        assert.equal(useAgent.getState().toolTraceStatus, 'done')
+        assert.equal(
+            useAgent.getState().messages.some((message) => message.type === 'agent' && message.content === '已生成正文'),
+            true,
+        )
+        assert.equal(
+            useAgent.getState().messages.some((message) => message.type === 'system' && /已生成结果，但仍有待确认项/.test(message.content)),
+            false,
+        )
+    })
+
     it('should stop sending and keep attachments when attachment input cannot be read', async () => {
         const sendScopedCalls: Array<Record<string, unknown>> = []
         const originalAttachment = {

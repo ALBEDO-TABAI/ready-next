@@ -2508,6 +2508,12 @@ export const useAgent = create<AgentState>((set, get) => ({
           })
           const persistedUserMessage = messageStatus === 'persisted'
           const failureTerminalReason = normalizeTerminalReason(result.errorKind)
+          const existingResponse = get().messages.find((message) => message.id === responseId) || null
+          const canKeepExistingResponse = Boolean(
+            failureTerminalReason === 'adjudication_degraded'
+            && String(existingResponse?.content || '').trim(),
+          )
+          const isDegradedCompletion = canKeepExistingResponse
           emitRendererAgentMetric(
             persistedUserMessage
               ? 'renderer_send_failed_after_persisted_message'
@@ -2528,11 +2534,14 @@ export const useAgent = create<AgentState>((set, get) => ({
           set((state) => {
             const messages = state.messages.map(m =>
               m.id === responseId
-                ? { ...m, content: friendly.friendlyMessage, type: 'system' as const }
+                ? canKeepExistingResponse
+                  ? m
+                  : { ...m, content: friendly.friendlyMessage, type: 'system' as const }
                 : m
             )
             const sessionKey = sessionKeyForScopeId(state, activeScopeId)
             const slice = normalizeSessionSlice(state.sessions[sessionKey])
+            const nextPhase = isDegradedCompletion ? 'done' as const : 'error' as const
             return {
               ...withSessionSliceAndActiveMirror(state, sessionKey, {
                 messages,
@@ -2552,20 +2561,20 @@ export const useAgent = create<AgentState>((set, get) => ({
                       startedAt: new Date().toISOString(),
                     }),
                     requestId,
-                    phase: 'error',
+                    phase: nextPhase,
                     terminalReason: failureTerminalReason,
                     updatedAt: new Date().toISOString(),
-                    error: friendly.friendlyMessage,
+                    error: isDegradedCompletion ? null : friendly.friendlyMessage,
                   },
                 },
               }),
               attachments: result.persistence?.message === 'failed' ? currentAttachments : state.attachments,
-              toolTraceStatus: 'error',
+              toolTraceStatus: isDegradedCompletion ? 'done' : 'error',
             }
           })
-          const preserveInput = result.persistence?.message !== 'persisted'
+          const preserveInput = !isDegradedCompletion && result.persistence?.message !== 'persisted'
           return {
-            success: false,
+            success: isDegradedCompletion,
             shouldClearInput: !preserveInput,
             preserveInput,
             errorKind: result.errorKind || 'unknown',

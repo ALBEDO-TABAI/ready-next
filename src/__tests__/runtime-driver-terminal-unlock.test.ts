@@ -282,6 +282,10 @@ function fireOnError(data: Record<string, unknown>): void {
   for (const handler of captured.onError) handler(data)
 }
 
+function fireOnStream(data: Record<string, unknown>): void {
+  for (const handler of captured.onStream) handler(data)
+}
+
 function fireOnScopeRunEvent(data: Record<string, unknown>): void {
   for (const handler of captured.onScopeRunEvent) handler(data)
 }
@@ -451,6 +455,38 @@ test('X2.6 — main-acknowledged timeout does not surface a lost-track message',
     typeof m.content === 'string' && m.content.includes('Ready 跟丢了'))
   assert.equal(lostTrackMsg, undefined, 'main accepted the timeout, so renderer must not claim it lost the request')
   assert.equal(getSessionSlice(state, 'session-A').composerLocked, false, 'composer still unlocks after acknowledged timeout')
+})
+
+test('X2.6 — paused_user_input keeps the run alive and the composer locked', async () => {
+  infrastructureTimeoutReports.length = 0
+  infrastructureTimeoutReportResult = { success: true, data: { state: 'paused_user_input' } }
+  seedTwoSessions({
+    activeSessionId: 'session-A',
+    lockedSessionId: 'session-A',
+    lockedScopeId: 'scope-A',
+    otherScopeId: 'scope-B',
+    requestId: 'req-A',
+  })
+
+  driverApi.armInfrastructureWatchdog('scope-A', 'req-A', { timeoutMs: 10 })
+
+  await new Promise((resolve) => setTimeout(resolve, 50))
+
+  const state = useAgent.getState()
+  const slice = getSessionSlice(state, 'session-A')
+  assert.deepEqual(
+    infrastructureTimeoutReports,
+    [{ scopeId: 'scope-A', requestId: 'req-A', elapsedMs: 10 }],
+    'renderer still reports the timeout edge to main',
+  )
+  assert.equal(slice.composerLocked, true, 'normal composer stays locked while the ask card owns the reply')
+  assert.equal(slice.isStreaming, true, 'waiting for user input remains an active run')
+  assert.equal(slice.foregroundBusy, true, 'foreground run is not finalized locally')
+  assert.equal(slice.streamingRequestId, 'req-A', 'Stop button / run identity is not cleared')
+  assert.equal(slice.scopeRunStates['scope-A']?.phase, 'responding', 'paused user input is not rendered as an error')
+  const timeoutMsg = state.messages.find((m: { content: string }) =>
+    typeof m.content === 'string' && (m.content.includes('联系不上后台') || m.content.includes('超时')))
+  assert.equal(timeoutMsg, undefined, 'paused user input does not surface a timeout/lost-track message')
 })
 
 test('X2.6 — hung main timeout report still releases the renderer lock', async () => {
@@ -739,6 +775,86 @@ test('sendScoped success fallback unlocks a completed run with stale composer lo
   assert.equal(state.isStreaming, false, 'active mirror streaming flag is cleared')
   assert.equal(state.composerLocked, false, 'active mirror composer lock is cleared')
   assert.equal(afterSlice.scopeRunStates['scope-A']?.terminalReason, 'done')
+})
+
+test('done stream resolves session-slice run when the top-level mirror is stale', async () => {
+  seedTwoSessions({
+    activeSessionId: 'session-A',
+    lockedSessionId: 'session-A',
+    lockedScopeId: 'scope-A',
+    otherScopeId: 'scope-B',
+    requestId: 'req-A',
+  })
+
+  useAgent.setState((state: any) => {
+    const slice = getSessionSlice(state, 'session-A')
+    const sessionRun = {
+      ...slice.scopeRunStates['scope-A'],
+      phase: 'responding' as const,
+      waitingFor: 'background' as const,
+      resumableActions: ['continue' as const],
+      steps: [{
+        id: 'step-1',
+        title: '正在创建文档',
+        status: 'running' as const,
+        detail: '写入文件',
+        updatedAt: '2026-06-25T04:54:00.000Z',
+      }],
+    }
+    return {
+      ...state,
+      sessions: {
+        ...state.sessions,
+        'session-A': {
+          ...slice,
+          isStreaming: true,
+          foregroundBusy: true,
+          composerLocked: true,
+          streamingMessageId: 'msg-1',
+          streamingRequestId: 'req-A',
+          scopeRunStates: {
+            ...slice.scopeRunStates,
+            'scope-A': sessionRun,
+          },
+        },
+      },
+      scopeRunStates: {
+        'scope-A': {
+          ...sessionRun,
+          requestId: 'req-old',
+          phase: 'planning' as const,
+        },
+      },
+      isStreaming: true,
+      foregroundBusy: true,
+      composerLocked: true,
+      streamingMessageId: 'msg-1',
+      streamingRequestId: 'req-A',
+    }
+  })
+
+  fireOnStream({
+    type: 'done',
+    agent: 'butler',
+    runId: 'req-A',
+  })
+
+  await new Promise((resolve) => setTimeout(resolve, 20))
+
+  const state = useAgent.getState()
+  const slice = getSessionSlice(state, 'session-A')
+  const run = slice.scopeRunStates['scope-A']
+  assert.equal(run?.requestId, 'req-A', 'done event must resolve the real session-slice run by runId')
+  assert.equal(run?.phase, 'done')
+  assert.equal(run?.terminalReason, 'done')
+  assert.equal(run?.waitingFor, 'none')
+  assert.equal(run?.steps?.[0]?.status, 'done', 'running task step is closed on terminal done')
+  assert.equal(slice.isStreaming, false, 'done stream clears stale session streaming flag')
+  assert.equal(slice.foregroundBusy, false, 'done stream clears foreground busy')
+  assert.equal(slice.composerLocked, false, 'done stream unlocks composer')
+  assert.equal(slice.streamingRequestId, null, 'done stream hides Stop button')
+  assert.equal(state.scopeRunStates['scope-A']?.requestId, 'req-A', 'active mirror is refreshed from the session-slice run')
+  assert.equal(state.scopeRunStates['scope-A']?.phase, 'done')
 })
 
 test('scope run events ignore stale non-started run ids but allow takeover and started handoff', () => {

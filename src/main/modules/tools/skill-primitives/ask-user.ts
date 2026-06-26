@@ -37,6 +37,9 @@ export interface AskUserArgs {
 export interface AskUserQuestionEvent {
   executionId: string
   sessionId: string | null
+  scopeId?: string | null
+  agent?: string | null
+  requestId?: string | null
   skillId: string | null
   question: string
   options: string[] | null
@@ -48,6 +51,9 @@ export type EmitAskUserQuestion = (event: AskUserQuestionEvent) => void
 
 export interface AskUserHandlerDeps {
   sessionId?: string
+  scopeId?: string
+  agent?: string | null
+  requestId?: string | null
   skillId?: string
   signal?: AbortSignal
   /** Notifies the renderer a question is pending. No-op in unit tests. */
@@ -60,6 +66,41 @@ export interface AskUserHandlerDeps {
 
 const DEFAULT_TIMEOUT_MS = 24 * 60 * 60 * 1000 // 24h — matches the B Phase 1 plan
 const NOOP_EMIT: EmitAskUserQuestion = () => {}
+
+function normalizedOptionGroupLabel(option: string): string | null {
+  const match = String(option || '').trim().match(/^(?:[0-9①②③④⑤⑥⑦⑧⑨⑩]+[.)、]\s*)?([^:：?？]{2,18})[:：]\s*\S/)
+  if (!match) return null
+  return match[1].replace(/\s+/g, '')
+}
+
+function looksLikeQuestionOption(option: string): boolean {
+  const text = String(option || '').trim()
+  if (!text) return false
+  if (/[?？]\s*$/.test(text)) return true
+  return /^(?:是否|要不要|需要|可否|能否|哪种|哪个|什么|请确认|请补充)/.test(text)
+}
+
+function detectMultiQuestionOptions(options: string[] | null): { reason: string; labels?: string[] } | null {
+  if (!options || options.length < 2) return null
+  const questionLikeCount = options.filter(looksLikeQuestionOption).length
+  if (questionLikeCount >= 2) return { reason: 'question_like_options' }
+
+  const labels = Array.from(new Set(options.map(normalizedOptionGroupLabel).filter((label): label is string => Boolean(label))))
+  if (labels.length >= 2) return { reason: 'mixed_option_groups', labels }
+  return null
+}
+
+function looksLikePostCompletionFollowup(args: AskUserArgs): boolean {
+  const question = String(args.question || '').trim()
+  const options = Array.isArray(args.options) ? args.options.map((option) => String(option || '').trim()) : []
+  const text = [question, ...options].join(' ')
+  const completionSignal = /(?:方案|文档|文件|任务|产物).{0,12}(?:已完成|完成|已保存|已输出|已生成|已经写好|已写入)|(?:已完成|已保存|已输出|已生成).{0,12}(?:方案|文档|文件|任务|产物)/.test(text)
+  if (!completionSignal) return false
+  const followupSignal = /(?:需要|还要|是否|要不要|接下来|下一步|做什么|调整|修改|继续|生成效果图|完成)/.test(text)
+  if (!followupSignal) return false
+  const optionFollowup = options.some((option) => /^(?:完成|调整|修改|继续|生成效果图|导出|补充)$/.test(option))
+  return optionFollowup || /(?:需要(?:我)?做什么|还需要(?:我)?(?:调整|修改|继续|生成)|是否(?:需要|要)|要不要)/.test(question)
+}
 
 export async function executeAskUser(
   args: AskUserArgs,
@@ -74,11 +115,43 @@ export async function executeAskUser(
   const executionId = generateEphemeralAskUserId()
   const askedAt = Date.now()
   const sessionId = deps.sessionId || null
+  const scopeId = deps.scopeId || sessionId
+  const agent = deps.agent || null
+  const requestId = deps.requestId || null
   const skillId = deps.skillId || null
   const options = Array.isArray(args.options) && args.options.length > 0 ? args.options : null
   const placeholder = typeof args.placeholder === 'string' && args.placeholder.length > 0
     ? args.placeholder
     : null
+  const multiQuestionOptions = detectMultiQuestionOptions(options)
+  if (multiQuestionOptions) {
+    const labelHint = multiQuestionOptions.labels?.length
+      ? ` Detected option groups: ${multiQuestionOptions.labels.slice(0, 5).join(', ')}.`
+      : ''
+    throw new ToolDomainError(
+      'input_validation',
+      `skill_ask_user accepts one question only. These options look like multiple questions or dimensions.${labelHint} Use ask_user_questions with one question per item instead.`,
+      {
+        executionId,
+        reason: multiQuestionOptions.reason,
+        labels: multiQuestionOptions.labels || null,
+      },
+    )
+  }
+  if (looksLikePostCompletionFollowup(args)) {
+    return createToolExecutionOutput(
+      '任务已经完成后的可选后续帮助不应使用 skill_ask_user，也不应暂停任务。请直接用普通总结回复说明产物已完成，并简短询问用户是否需要调整。',
+      {
+        shape: 'json',
+        data: {
+          executionId,
+          skipped: true,
+          reason: 'post_completion_followup',
+          askedAt,
+        },
+      },
+    )
+  }
 
   const answer = await new Promise<string>((resolvePromise, rejectPromise) => {
     const timeoutHandle = setTimeout(() => {
@@ -103,6 +176,9 @@ export async function executeAskUser(
     store.register({
       executionId,
       sessionId,
+      scopeId,
+      agent,
+      requestId,
       skillId,
       question: args.question,
       options,
@@ -132,6 +208,9 @@ export async function executeAskUser(
       emit({
         executionId,
         sessionId,
+        scopeId,
+        agent,
+        requestId,
         skillId,
         question: args.question,
         options,

@@ -172,6 +172,9 @@ export interface AskUserQuestionsCardEvent {
   cardId: string
   sessionId: string | null
   conversationId: string | null
+  scopeId?: string | null
+  agent?: string | null
+  requestId?: string | null
   questions: AskUserQuestionSpec[]
   askedAt: number
 }
@@ -182,6 +185,9 @@ export interface PersistCardPendingArgs {
   cardId: string
   sessionId: string | null
   conversationId: string | null
+  scopeId?: string | null
+  agent?: string | null
+  requestId?: string | null
   questions: AskUserQuestionSpec[]
   askedAt: number
 }
@@ -191,6 +197,9 @@ export type PersistAskUserQuestionsCardPending = (args: PersistCardPendingArgs) 
 export interface AskUserQuestionsHandlerDeps {
   sessionId?: string
   conversationId?: string
+  scopeId?: string
+  agent?: string | null
+  requestId?: string | null
   signal?: AbortSignal
   /** Notifies the renderer a card is pending. No-op in unit tests. */
   emitAskUserQuestionsCard?: EmitAskUserQuestionsCard
@@ -524,6 +533,9 @@ export async function executeAskUserQuestions(
     : DEFAULT_TIMEOUT_MS
   const sessionId = deps.sessionId || null
   const conversationId = deps.conversationId || null
+  const scopeId = deps.scopeId || conversationId || sessionId
+  const agent = deps.agent || null
+  const requestId = deps.requestId || null
 
   // Single-pending invariant. The model must not stack reflection cards.
   if (sessionId) {
@@ -555,6 +567,9 @@ export async function executeAskUserQuestions(
       cardId,
       sessionId,
       conversationId,
+      scopeId,
+      agent,
+      requestId,
       questions,
       askedAt,
     })
@@ -587,12 +602,15 @@ export async function executeAskUserQuestions(
       )
     }, timeoutMs)
 
-    store.register({
-      cardId,
-      sessionId,
-      conversationId,
-      questions,
-      askedAt,
+      store.register({
+        cardId,
+        sessionId,
+        conversationId,
+        scopeId,
+        agent,
+        requestId,
+        questions,
+        askedAt,
       resolve: resolvePromise,
       reject: rejectPromise,
       timeoutHandle,
@@ -617,6 +635,9 @@ export async function executeAskUserQuestions(
         cardId,
         sessionId,
         conversationId,
+        scopeId,
+        agent,
+        requestId,
         questions,
         askedAt,
       })

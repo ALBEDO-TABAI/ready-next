@@ -72,6 +72,7 @@ export interface ToolRuntimeContext {
   sidecarManager?: SidecarManager | null
   runtime?: AgentControlRuntime | null
   scope?: ConversationScope | null
+  agent?: string | null
   allowedToolNames?: Set<string> | string[] | null
   emitToolAction?: (tool: string, args: Record<string, unknown>) => void
   requestModuleToolAction?: (tool: string, args: Record<string, unknown>) => Promise<Record<string, unknown>>

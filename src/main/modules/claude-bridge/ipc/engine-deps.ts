@@ -46,4 +46,6 @@ export interface EngineDeps {
   getAskUserQuestionsStore(): AskUserQuestionsStore
   /** Metric pipeline; askUser groups emit submit/cancel counters. */
   logAgentMetric: AgentMetricLogger
+  /** Refreshes the active run's no-progress clock after a user-input edge. */
+  refreshActiveRunProgress(agent: string, sessionId: string | undefined, requestId?: string): boolean
 }

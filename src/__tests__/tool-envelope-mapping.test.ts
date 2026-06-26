@@ -8,6 +8,7 @@ import {
   type ToolEnvelopeKind,
 } from '../main/modules/tools/tool-result-envelope'
 import {
+  BROWSER_TOOL_ERROR_KINDS,
   MCP_TOOL_ERROR_KINDS,
   WEB_RESEARCH_ERROR_KINDS,
 } from '../main/modules/agent-control/contracts/error-kinds'
@@ -55,6 +56,7 @@ const EXPECTED: Record<string, ToolEnvelopeKind> = {
   blocked_external: 'denied_by_policy',
   tool_handler_failure: 'internal_error',
   tool_failed: 'internal_error',
+  [BROWSER_TOOL_ERROR_KINDS.browserToolFailed.code]: 'internal_error',
   runner_uncaught: 'internal_error',
   persistence_failed: 'internal_error',
   aborted: 'internal_error',

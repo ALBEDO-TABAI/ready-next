@@ -4,6 +4,8 @@ import test from 'node:test'
 import { openRSSItemInBrowserTab } from '../renderer/modules/rss/open-rss-item-in-browser'
 import { isWorkbenchModePairActive, resolveWorkbenchSplitToggle } from '../renderer/modules/workbench/mode-split'
 import { resolveWorkbenchModeTabLayout } from '../renderer/modules/workbench/mode-tabs-layout'
+import { applyWorkbenchModeOpenDecision, resolveWorkbenchModeOpenDecision } from '../renderer/modules/workbench/mode-transition'
+import type { WorkbenchMode } from '../renderer/stores/useMode'
 
 test('Shift-click split selection adds, swaps, and removes only the secondary workbench module', () => {
   assert.equal(
@@ -73,6 +75,76 @@ test('browser and rss count as a split pair in either primary/secondary order', 
     }),
     false,
   )
+})
+
+test('file-open mode reveal preserves an existing split when the target module is visible', () => {
+  assert.deepEqual(
+    resolveWorkbenchModeOpenDecision({
+      workbenchMode: 'browser',
+      splitMode: 'document',
+    }, 'document'),
+    { kind: 'already-visible' },
+  )
+
+  assert.deepEqual(
+    resolveWorkbenchModeOpenDecision({
+      workbenchMode: 'document',
+      splitMode: 'rss',
+    }, 'document'),
+    { kind: 'already-visible' },
+  )
+})
+
+test('file-open mode reveal replaces only the secondary pane when split exists and target is hidden', () => {
+  assert.deepEqual(
+    resolveWorkbenchModeOpenDecision({
+      workbenchMode: 'browser',
+      splitMode: 'rss',
+    }, 'document'),
+    { kind: 'replace-split', splitMode: 'document' },
+  )
+})
+
+test('file-open mode reveal switches primary only when no split exists', () => {
+  assert.deepEqual(
+    resolveWorkbenchModeOpenDecision({
+      workbenchMode: 'browser',
+      splitMode: null,
+    }, 'document'),
+    { kind: 'switch-primary', workbenchMode: 'document' },
+  )
+})
+
+test('file-open mode reveal action preserves split instead of clearing it', () => {
+  const splitChanges: WorkbenchMode[] = []
+  const primaryChanges: WorkbenchMode[] = []
+
+  applyWorkbenchModeOpenDecision({
+    workbenchMode: 'browser',
+    splitMode: 'rss',
+  }, 'document', {
+    setSplitMode: (mode) => splitChanges.push(mode),
+    requestModeChange: (mode) => primaryChanges.push(mode),
+  })
+
+  assert.deepEqual(splitChanges, ['document'])
+  assert.deepEqual(primaryChanges, [])
+})
+
+test('file-open mode reveal action is a no-op when the target module is already visible in split', () => {
+  const splitChanges: WorkbenchMode[] = []
+  const primaryChanges: WorkbenchMode[] = []
+
+  applyWorkbenchModeOpenDecision({
+    workbenchMode: 'browser',
+    splitMode: 'document',
+  }, 'document', {
+    setSplitMode: (mode) => splitChanges.push(mode),
+    requestModeChange: (mode) => primaryChanges.push(mode),
+  })
+
+  assert.deepEqual(splitChanges, [])
+  assert.deepEqual(primaryChanges, [])
 })
 
 test('split mode tab layout pulls the secondary icon next to the primary and stretches the thumb over both', () => {

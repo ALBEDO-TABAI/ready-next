@@ -50,6 +50,26 @@ describe('parseTextToolBridgeResponse', () => {
     ])
     assert.strictEqual(parsed.visibleText, '我先看当前状态。\n看完后继续。')
   })
+
+  it('extracts bracket tool_call blocks with input payloads', () => {
+    const parsed = parseTextToolBridgeResponse([
+      '我先加载参考。',
+      '[tool_call]',
+      '{',
+      '  "tool": "skill_read_artifact",',
+      '  "input": {',
+      '    "path": "references/proposal-template.md"',
+      '  }',
+      '}',
+      '</tool_call>',
+      '加载后继续。',
+    ].join('\n'))
+
+    assert.deepStrictEqual(parsed.toolCalls, [
+      { name: 'skill_read_artifact', args: { path: 'references/proposal-template.md' } },
+    ])
+    assert.strictEqual(parsed.visibleText, '我先加载参考。\n加载后继续。')
+  })
 })
 
 describe('looksLikeMissingNativeToolsReply', () => {

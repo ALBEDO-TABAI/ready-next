@@ -575,6 +575,8 @@ export default function ChatMessages({
         return null
       })()}
 
+      <div data-skill-ask-user-anchor="true" aria-hidden="true" style={{ flex: '0 0 auto', width: '100%' }} />
+
       {!onlyWelcomePresent && bottomOverlayInset > 0 && (
         <div
           data-chat-bottom-overlay-spacer="true"

@@ -17,7 +17,7 @@ export const SKILL_PRIMITIVE_SCHEMAS = {
       .array(z.string())
       .max(12)
       .optional()
-      .describe('可选预设按钮。每条 ≤ 60 字；用户可以选按钮或自由输入。'),
+      .describe('单个问题的可选预设按钮；不要放多个问题或多个维度。多问题必须使用 ask_user_questions。'),
     placeholder: z
       .string()
       .max(200)
@@ -44,13 +44,17 @@ export const SKILL_PRIMITIVE_SCHEMAS = {
   }),
   skill_write_artifact: z.object({
     relativePath: TRIMMED_STRING.describe(
-      '相对 artifact 根目录的路径。禁止绝对路径、..、SKILL.md / ready-skill.json / skill.workflow.json 等保留文件。',
+      '相对 artifact 根目录的路径；也接受 artifact 根目录内、由工具结果返回的绝对路径。禁止根外绝对路径、~/、..、SKILL.md / ready-skill.json / skill.workflow.json 等保留文件。',
     ),
     content: z.string().describe('写入内容（utf-8 默认；若是二进制请用 base64 编码并设置 encoding）'),
     encoding: z
       .enum(['utf-8', 'base64'])
       .optional()
       .describe('默认 utf-8；base64 用于二进制内容'),
+    mode: z
+      .enum(['overwrite', 'append'])
+      .optional()
+      .describe('默认 overwrite 覆盖写入；长文档需要补齐尾部章节时用 append 追加到同一路径'),
   }),
   skill_read_artifact: z.object({
     relativePath: TRIMMED_STRING.describe('相对 artifact 根目录、当前任务读根或 skill 托管资源目录的路径；也接受这些根目录内、由工具结果返回的绝对路径'),

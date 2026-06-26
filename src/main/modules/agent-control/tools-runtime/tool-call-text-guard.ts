@@ -39,7 +39,7 @@ import { parseTextToolBridgeResponse } from '../../claude-bridge/tool-bridge'
  * surfaces every interception with `cleanedLen` so a regression to noisy
  * false-positive rate is observable.
  */
-export const TOOL_CALL_TEXT_PATTERN = /<tool_calls?>|<function=|<parameter=|:::tool_call/i
+export const TOOL_CALL_TEXT_PATTERN = /<tool_calls?>|<function=|<parameter=|:::tool_call|\[tool_call\]/i
 
 export interface SanitizeAssistantTextOptions {
   sessionId?: string

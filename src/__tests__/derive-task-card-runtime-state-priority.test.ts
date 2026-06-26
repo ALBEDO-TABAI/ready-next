@@ -134,6 +134,35 @@ test('rank-50 — completed projection ignores stale background continuation', (
   assert.deepEqual(state.actionSet, ['open_artifact'])
 })
 
+test('active foreground phase wins over stale completed projection', () => {
+  const state = deriveTaskCardRuntimeState(makeRun({
+    phase: 'tool_running',
+    status: 'completed',
+    taskSummary: '方案草稿已写入，正在准备保存',
+    recentArtifacts: [{
+      id: 'a1',
+      module: 'skill',
+      kind: 'artifact',
+      label: 'draft',
+      path: '/tmp/draft.md',
+      createdAt: new Date().toISOString(),
+    }],
+  }))
+  assert.equal(state.visualState, 'running')
+  assert.equal(state.statusLabel, '进行中')
+  assert.deepEqual(state.actionSet, ['cancel'])
+})
+
+test('active responding phase wins over stale completed projection', () => {
+  const state = deriveTaskCardRuntimeState(makeRun({
+    phase: 'responding',
+    status: 'completed',
+  }))
+  assert.equal(state.visualState, 'running')
+  assert.equal(state.statusLabel, '进行中')
+  assert.deepEqual(state.actionSet, ['cancel'])
+})
+
 test('rank-50 — cancelled projection ignores stale background signals', () => {
   const state = deriveTaskCardRuntimeState(makeRun({
     phase: 'cancelled',

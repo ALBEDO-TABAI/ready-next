@@ -65,6 +65,21 @@ test('allows overwriting an existing file at the same path', async () => {
   }
 })
 
+test('appends to an existing file when mode is append', async () => {
+  const fx = makeFixture()
+  try {
+    writeFileSync(join(fx.artifactRoot, 'r.txt'), 'old', 'utf-8')
+    const out = await executeWriteArtifact(
+      { relativePath: 'r.txt', content: '\nnew', mode: 'append' },
+      { skillId: 'test-skill', lookupSkillRoots: fx.lookup },
+    )
+    assert.equal(readFileSync(join(fx.artifactRoot, 'r.txt'), 'utf-8'), 'old\nnew')
+    assert.equal((out.data as any)?.mode, 'append')
+  } finally {
+    fx.cleanup()
+  }
+})
+
 test('creates intermediate directories as needed', async () => {
   const fx = makeFixture()
   try {
@@ -74,6 +89,64 @@ test('creates intermediate directories as needed', async () => {
     )
     const abs = join(fx.artifactRoot, 'deeply', 'nested', 'tree', 'file.md')
     assert.ok(existsSync(abs))
+  } finally {
+    fx.cleanup()
+  }
+})
+
+test('accepts an absolute path that is inside the artifact root', async () => {
+  const fx = makeFixture()
+  try {
+    const abs = join(fx.artifactRoot, 'absolute', 'inside.md')
+    const out = await executeWriteArtifact(
+      { relativePath: abs, content: '# inside' },
+      { skillId: 'test-skill', lookupSkillRoots: fx.lookup },
+    )
+    assert.equal(readFileSync(abs, 'utf-8'), '# inside')
+    assert.equal((out.data as any)?.absolutePath, abs)
+  } finally {
+    fx.cleanup()
+  }
+})
+
+test('rejects an absolute path outside the artifact root with a repair hint', async () => {
+  const fx = makeFixture()
+  const outsideRoot = realpathSync.native(mkdtempSync(join(tmpdir(), 'skill-prim-outside-')))
+  try {
+    await assert.rejects(
+      executeWriteArtifact(
+        { relativePath: join(outsideRoot, 'outside.md'), content: 'bad' },
+        { skillId: 'test-skill', lookupSkillRoots: fx.lookup },
+      ),
+      (error: unknown) => {
+        const err = error as { errorKind?: string; message?: string; detail?: Record<string, unknown> }
+        assert.equal(err.errorKind, 'path_escape')
+        assert.match(String(err.message || ''), /相对路径/)
+        assert.equal(err.detail?.artifactRoot, fx.artifactRoot)
+        return true
+      },
+    )
+  } finally {
+    fx.cleanup()
+    rmSync(outsideRoot, { recursive: true, force: true })
+  }
+})
+
+test('rejects home-directory shorthand paths with a repair hint', async () => {
+  const fx = makeFixture()
+  try {
+    await assert.rejects(
+      executeWriteArtifact(
+        { relativePath: '~/outside.md', content: 'bad' },
+        { skillId: 'test-skill', lookupSkillRoots: fx.lookup },
+      ),
+      (error: unknown) => {
+        const err = error as { errorKind?: string; message?: string }
+        assert.equal(err.errorKind, 'home_path')
+        assert.match(String(err.message || ''), /不能使用 ~\//)
+        return true
+      },
+    )
   } finally {
     fx.cleanup()
   }

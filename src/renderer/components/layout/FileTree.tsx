@@ -62,7 +62,8 @@ import { getActiveBrowserTabDragPayload } from '../../modules/browser/browserTab
 import { EBOOK_EXTENSIONS, isEbookExtension } from '../../../shared/ebook'
 import { isReadyBoardFile } from '../../../shared/ready-board'
 import { isLocalHtmlFilePath, openLocalHtmlFileInBrowser } from '../../modules/browser/localHtmlFileOpen'
-import { requestWorkbenchModeChange } from '../../modules/workbench/mode-transition'
+import { applyWorkbenchModeOpenDecision, requestWorkbenchModeChange } from '../../modules/workbench/mode-transition'
+import { useMode } from '../../stores/useMode'
 import {
   compactFileTreeDeleteTargets,
   computeNextFileTreeSelection,
@@ -118,6 +119,17 @@ const SPREADSHEET_EXTS = new Set(['xlsx', 'xls', 'csv', 'tsv'])
 export type FileKind = 'folder' | 'document' | 'code' | 'image' | 'video' | 'audio' | 'spreadsheet' | 'design' | 'other'
 export type FileViewMode = 'tree' | 'grid'
 export type FileFilterMap = Record<FileKind, boolean>
+
+function revealWorkbenchModeForFileOpen(mode: WorkbenchMode): void {
+  const state = useMode.getState()
+  applyWorkbenchModeOpenDecision({
+    workbenchMode: state.workbenchMode,
+    splitMode: state.splitMode,
+  }, mode, {
+    setSplitMode: state.setSplitMode,
+    requestModeChange: requestWorkbenchModeChange,
+  })
+}
 
 export const DEFAULT_FILE_FILTERS: FileFilterMap = {
   folder: true,
@@ -1722,7 +1734,7 @@ export default function FileTree({
         eventType: 'open',
         source,
       })
-      requestWorkbenchModeChange('document')
+      revealWorkbenchModeForFileOpen('document')
       return
     }
     if (isLocalHtmlFilePath(item.path)) {
@@ -1733,7 +1745,7 @@ export default function FileTree({
             eventType: 'open',
             source,
           })
-          requestWorkbenchModeChange('browser')
+          revealWorkbenchModeForFileOpen('browser')
         }
       })
       return
@@ -1764,7 +1776,7 @@ export default function FileTree({
         source,
       })
       if (!keepBoardActive) {
-        requestWorkbenchModeChange(modeMap[ext])
+        revealWorkbenchModeForFileOpen(modeMap[ext])
       }
     }
   }, [openTab, recordFileActivity, selectFile, toggleDir, viewMode])

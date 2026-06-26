@@ -97,6 +97,17 @@ test('direct readFileSync path skips the tool call when SKILL.md exists', async 
       'must not name retired execution-control tools after Phase 4',
     )
     assert.ok(msg.content.includes('skill_ask_user'), 'points the model at the ask_user primitive instead')
+    assert.ok(msg.content.includes('ask_user_questions'), 'points multi-question clarification at the paged card tool')
+    assert.ok(
+      msg.content.includes('不要把多个问题塞进 skill_ask_user.options'),
+      'must not let several questions collapse into one skill_ask_user options list',
+    )
+    assert.ok(msg.content.includes('skill_export_artifact'), 'points the model at export_artifact for user target paths')
+    assert.ok(
+      msg.content.includes('不要把用户目标文件夹的绝对路径传给 skill_write_artifact'),
+      'must steer target-folder delivery away from absolute write_artifact paths',
+    )
+    assert.ok(msg.content.includes('mode="append"'), 'must steer long documents toward append repair')
     assert.ok(msg.content.includes('写作指南正文内容'))
 
     const hint = getLastReferenceSkill('session-direct')

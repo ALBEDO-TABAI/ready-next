@@ -250,6 +250,99 @@ test('SkillTaskTracker appends repeated primitive steps and stores retry anchor 
   registerSkillTaskRunRepository(null)
 })
 
+test('SkillTaskTracker reuses projection-only reference primitive steps instead of appending duplicates', () => {
+  clearSkillTaskProjection('scope-reference-repeat')
+
+  for (let index = 0; index < 6; index += 1) {
+    recordSkillTaskEvent({
+      sessionId: 'scope-reference-repeat',
+      skillId: 'hfp-space-design',
+      skillName: 'hfp-space-design',
+      toolName: 'skill_run_shell',
+      status: index === 5 ? 'running' : 'done',
+      message: 'raw skill shell output that should not be surfaced',
+      projectionOnly: true,
+    })
+  }
+  for (let index = 0; index < 2; index += 1) {
+    recordSkillTaskEvent({
+      sessionId: 'scope-reference-repeat',
+      skillId: 'hfp-space-design',
+      skillName: 'hfp-space-design',
+      toolName: 'skill_read_artifact',
+      status: 'done',
+      message: 'raw read output that should not be surfaced',
+      projectionOnly: true,
+    })
+  }
+
+  const projection = readSkillTaskProjection({
+    sessionId: 'scope-reference-repeat',
+    skillId: 'hfp-space-design',
+  })
+
+  assert.deepEqual(
+    projection?.steps.map((step) => ({
+      id: step.id,
+      title: step.title,
+      status: step.status,
+      detail: step.detail,
+    })),
+    [
+      {
+        id: 'reference:skill_run_shell',
+        title: '执行技能步骤',
+        status: 'running',
+        detail: '正在执行技能步骤',
+      },
+      {
+        id: 'reference:skill_read_artifact',
+        title: '读取技能参考',
+        status: 'done',
+        detail: '正在根据参考内容整理方案',
+      },
+    ],
+  )
+  assert.equal(projection?.taskTitle, '正在生成空间方案')
+  assert.equal(projection?.taskSummary, '正在根据参考内容整理方案')
+})
+
+test('SkillTaskTracker projection-only errors override stale saved titles', () => {
+  clearSkillTaskProjection('scope-reference-error-title')
+
+  recordSkillTaskEvent({
+    sessionId: 'scope-reference-error-title',
+    skillId: 'hfp-space-design',
+    skillName: 'hfp-space-design',
+    toolName: 'skill_export_artifact',
+    status: 'done',
+    projectionOnly: true,
+  })
+  let projection = readSkillTaskProjection({
+    sessionId: 'scope-reference-error-title',
+    skillId: 'hfp-space-design',
+  })
+  assert.equal(projection?.taskTitle, '文档已保存')
+
+  recordSkillTaskEvent({
+    sessionId: 'scope-reference-error-title',
+    skillId: 'hfp-space-design',
+    skillName: 'hfp-space-design',
+    toolName: 'skill_write_artifact',
+    status: 'error',
+    message: 'relativePath is required',
+    projectionOnly: true,
+  })
+  projection = readSkillTaskProjection({
+    sessionId: 'scope-reference-error-title',
+    skillId: 'hfp-space-design',
+  })
+
+  assert.equal(projection?.taskTitle, '处理遇到问题')
+  assert.equal(projection?.status, 'failed')
+  assert.equal(projection?.blockedReason, 'relativePath is required')
+})
+
 test('SkillTaskTracker archives goal, resources, job and agent for recovery', () => {
   const { repository, rows } = createTaskRunRepositoryHarness()
   registerSkillTaskRunRepository(repository)

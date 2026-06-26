@@ -53,6 +53,19 @@ const MALFORMED_PLURAL_TOOL_CALLS_TEXT = [
   '这段内容不应该进入聊天正文。',
 ].join('\n')
 
+const BRACKET_TOOL_CALL_LEAK_TEXT = [
+  '我将先加载参考文件。',
+  '[tool_call]',
+  '{',
+  '  "tool": "skill_read_artifact",',
+  '  "input": {',
+  '    "path": "references/proposal-template.md"',
+  '  }',
+  '}',
+  '</tool_call>',
+  '加载完继续。',
+].join('\n')
+
 function makeTranscript() {
   const emittedChunks: Array<{ chunk: string; type: string }> = []
   const transcript = new TurnTranscript(
@@ -99,6 +112,16 @@ test('SCREENSHOT BUG — finalChunks accumulator stores the cleaned text, not th
   const finalText = transcript.getFinalText()
   assert.equal(TOOL_CALL_TEXT_PATTERN.test(finalText), false)
   assert.match(finalText, /好，从头来/)
+})
+
+test('SCREENSHOT BUG — bracket tool_call blocks are stripped before renderer emit', () => {
+  const { transcript, emittedChunks } = makeTranscript()
+  transcript.emitOutput(BRACKET_TOOL_CALL_LEAK_TEXT, 'text')
+
+  assert.equal(emittedChunks.length, 1)
+  assert.equal(TOOL_CALL_TEXT_PATTERN.test(emittedChunks[0].chunk), false)
+  assert.match(emittedChunks[0].chunk, /我将先加载参考文件/)
+  assert.match(emittedChunks[0].chunk, /加载完继续/)
 })
 
 test('SCREENSHOT BUG — non-text emits (tool_use, tool_result, done) are NOT sanitized', () => {
