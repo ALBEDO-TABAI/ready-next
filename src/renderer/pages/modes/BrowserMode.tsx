@@ -285,6 +285,13 @@ export default function BrowserMode({
   }, [clearLocalMediaUploadStatusTimer])
 
   useEffect(() => {
+    if (!isElectron) return
+    return window.electronAPI?.browser?.onLocalMediaUploadStatus?.((event) => {
+      publishLocalMediaUploadStatus(event.status)
+    })
+  }, [isElectron, publishLocalMediaUploadStatus])
+
+  useEffect(() => {
     if (!agentPaneTaskId || agentPaneTaskId === lastAgentPaneTaskIdRef.current) return
     lastAgentPaneTaskIdRef.current = agentPaneTaskId
     setAgentPaneCollapsed(false)

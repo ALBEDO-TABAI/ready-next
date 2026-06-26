@@ -7,9 +7,14 @@ import {
   isBrowserLocalMediaUploadFile,
 } from '../shared/browser-local-media-upload'
 import {
+  buildBrowserLocalMediaDropUrl,
+  parseBrowserLocalMediaDropUrl,
+} from '../shared/browser-local-media-drop'
+import {
   startBrowserLocalMediaNativeFileDrag,
 } from '../renderer/modules/browser/localMediaDragBridge'
 import { useMode } from '../renderer/stores/useMode'
+import { getDroppedFilesFromDataTransfer } from '../renderer/utils/dragDrop'
 
 test('browser local media upload accepts image and video files only', () => {
   assert.equal(isBrowserLocalMediaUploadFile({ path: '/tmp/a.png' }), true)
@@ -30,6 +35,38 @@ test('browser local media upload filters duplicates while preserving order', () 
     { path: '/tmp/readme.md' },
     { path: '/tmp/b.webm' },
   ]), ['/tmp/a.png', '/tmp/b.webm'])
+})
+
+test('browser local media drop URL preserves coordinates and filters non-media files', () => {
+  const url = buildBrowserLocalMediaDropUrl({
+    paths: ['/tmp/a.png', '/tmp/readme.md', '/tmp/b.mov'],
+    x: 120,
+    y: 240,
+  })
+  assert.deepEqual(parseBrowserLocalMediaDropUrl(url), {
+    paths: ['/tmp/a.png', '/tmp/b.mov'],
+    x: 120,
+    y: 240,
+  })
+  assert.equal(parseBrowserLocalMediaDropUrl('file:///tmp/a.png'), null)
+})
+
+test('browser local media drag parsing accepts document tab and standard file URI payloads', () => {
+  const docTabPayload = JSON.stringify({
+    type: 'doc-tab',
+    path: '/tmp/from-tab.webp',
+    name: 'from-tab.webp',
+    ext: '.webp',
+  })
+  const files = getDroppedFilesFromDataTransfer({
+    getData: (format: string) => {
+      if (format === 'application/x-ready-drag') return docTabPayload
+      if (format === 'text/uri-list') return 'file:///tmp/from-uri.mp4'
+      return ''
+    },
+    files: [],
+  } as unknown as DataTransfer)
+  assert.deepEqual(files.map((file) => file.path), ['/tmp/from-tab.webp', '/tmp/from-uri.mp4'])
 })
 
 test('browser local media drag bridge starts native file drag when browser is visible', () => {

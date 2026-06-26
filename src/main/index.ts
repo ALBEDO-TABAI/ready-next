@@ -5,9 +5,10 @@ import { resolve } from 'path'
 config({ path: resolve(__dirname, '../../.env') })
 
 import { app, shell, BrowserWindow, ipcMain, protocol, nativeImage, nativeTheme, Menu, dialog, clipboard, type MenuItemConstructorOptions, type NativeImage } from 'electron'
-import { join, extname, isAbsolute } from 'path'
-import { createReadStream, statSync, existsSync, mkdirSync } from 'fs'
+import { join, extname, isAbsolute, basename } from 'path'
+import { createReadStream, statSync, existsSync, mkdirSync, appendFileSync } from 'fs'
 import { readFile } from 'fs/promises'
+import { tmpdir } from 'os'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 
 // Import modules
@@ -67,6 +68,8 @@ const { autoUpdater } = pkg
 const ENABLE_MOCK_SERVICES = process.env.ENABLE_MOCK_SERVICES === 'true'
 const READY_NATIVE_FILE_DRAG_ENABLED = process.env.READY_NATIVE_FILE_DRAG_ENABLED !== '0'
 const READY_APP_NAME = 'Ready'
+const READY_BROWSER_LOG_PATH = join(tmpdir(), 'ready-browser.log')
+const NATIVE_FILE_DRAG_FALLBACK_ICON_DATA_URL = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAJElEQVR42mP4////JUoww+AywOTyzP/E4FEDRg2grQFDMzMBAGl5WG7b5B5RAAAAAElFTkSuQmCC'
 app.setName(READY_APP_NAME)
 
 const READY_USER_DATA_DIR = process.env.READY_USER_DATA_DIR?.trim()
@@ -192,11 +195,27 @@ function resolveAppIconPath(): string {
     : resolve(__dirname, '../../build/icon.png')
 }
 
+function logNativeFileDragDiag(message: string): void {
+  try {
+    appendFileSync(READY_BROWSER_LOG_PATH, `${new Date().toISOString()} [native-file-drag] ${message}\n`, 'utf8')
+  } catch {
+    // Diagnostics must never block a drag gesture.
+  }
+}
+
 let nativeFileDragIcon: NativeImage | null = null
+let nativeFileDragIconSource = ''
 function resolveNativeFileDragIcon(): NativeImage {
   if (nativeFileDragIcon) return nativeFileDragIcon
   const icon = nativeImage.createFromPath(resolveAppIconPath())
-  nativeFileDragIcon = icon.isEmpty() ? nativeImage.createEmpty() : icon.resize({ width: 32, height: 32 })
+  if (!icon.isEmpty()) {
+    nativeFileDragIconSource = resolveAppIconPath()
+    nativeFileDragIcon = icon.resize({ width: 32, height: 32 })
+    return nativeFileDragIcon
+  }
+  const fallbackIcon = nativeImage.createFromDataURL(NATIVE_FILE_DRAG_FALLBACK_ICON_DATA_URL)
+  nativeFileDragIconSource = fallbackIcon.isEmpty() ? 'empty-fallback' : 'embedded-fallback'
+  nativeFileDragIcon = fallbackIcon.isEmpty() ? nativeImage.createEmpty() : fallbackIcon.resize({ width: 32, height: 32 })
   return nativeFileDragIcon
 }
 
@@ -748,8 +767,14 @@ function setupGlobalIPC(): void {
 
   ipcMain.on('app:startNativeFileDrag', (event, paths: unknown) => {
     try {
-      if (!READY_NATIVE_FILE_DRAG_ENABLED) return
-      if (!Array.isArray(paths)) return
+      if (!READY_NATIVE_FILE_DRAG_ENABLED) {
+        logNativeFileDragDiag('ignored disabled')
+        return
+      }
+      if (!Array.isArray(paths)) {
+        logNativeFileDragDiag(`ignored invalid-payload type=${typeof paths}`)
+        return
+      }
       const files = paths
         .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
         .filter((filePath) => {
@@ -759,15 +784,24 @@ function setupGlobalIPC(): void {
             return false
           }
         })
-      if (files.length === 0) return
+      if (files.length === 0) {
+        logNativeFileDragDiag(`ignored no-valid-files requested=${paths.length}`)
+        return
+      }
       const icon = resolveNativeFileDragIcon()
-      if (icon.isEmpty()) return
+      if (icon.isEmpty()) {
+        logNativeFileDragDiag(`ignored icon-empty source=${nativeFileDragIconSource || 'none'} files=${files.length}`)
+        return
+      }
+      logNativeFileDragDiag(`start files=${files.length} primary=${basename(files[0])} icon=${nativeFileDragIconSource || 'unknown'}`)
       event.sender.startDrag({
         file: files[0],
         files,
         icon,
       })
+      logNativeFileDragDiag(`started files=${files.length} primary=${basename(files[0])}`)
     } catch (error) {
+      logNativeFileDragDiag(`failed ${error instanceof Error ? error.message : String(error)}`)
       console.warn('[drag] start native file drag failed:', error instanceof Error ? error.message : String(error))
     }
   })

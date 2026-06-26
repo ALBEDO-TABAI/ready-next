@@ -91,6 +91,7 @@ import {
 import { BrowserVisibilityCommandState } from './visibility-command-state'
 import type { BrowserUtilityMenuRequest } from '../../../shared/browser-utility-menu'
 import { READY_BROWSER_BLANK_URL } from '../../../shared/browser-defaults'
+import { parseBrowserLocalMediaDropUrl } from '../../../shared/browser-local-media-drop'
 
 interface Tab extends BrowserTabMetaRecord {
   id: string
@@ -312,6 +313,7 @@ export class BrowserController {
       ensureDownloadSession: (targetSession) => this.downloadService.ensureRegistered(targetSession),
       addHistoryEntry: (url, title, metadata) => this.dataService.addHistoryEntry(url, title, metadata),
       updateHistoryEntryTitle: (url, title, favicon) => this.dataService.updateHistoryEntryTitle(url, title, favicon),
+      handleLocalMediaDropNavigation: (tabId, url) => this.handleLocalMediaDropNavigation(tabId, url),
       browserUserAgent: this.browserUserAgent,
       useMock: this.useMock,
     })
@@ -485,6 +487,51 @@ export class BrowserController {
     if (!this.mainWindow.isDestroyed()) {
       this.mainWindow.webContents.send(channel, data)
     }
+  }
+
+  private handleLocalMediaDropNavigation(tabId: string, url: string): boolean {
+    const request = parseBrowserLocalMediaDropUrl(url)
+    if (!request) return false
+    this.logBrowserDiag(`[browser-v3][local-media-drop][tab:${tabId}] received ${request.paths.length} file(s)`)
+    this.sendToRenderer('browser:localMediaUploadStatus', {
+      tabId,
+      status: {
+        kind: 'uploading',
+        message: request.paths.length > 1 ? `正在上传 ${request.paths.length} 个素材...` : '正在上传素材...',
+      },
+    })
+    void this.uploadLocalMediaFiles(tabId, {
+      files: request.paths,
+      x: request.x,
+      y: request.y,
+    }).then((result) => {
+      if (result.success) {
+        this.sendToRenderer('browser:localMediaUploadStatus', {
+          tabId,
+          status: {
+            kind: 'success',
+            message: result.method === 'drop' ? '已把素材拖入网页' : '已把素材交给网页上传',
+          },
+        })
+        return
+      }
+      this.sendToRenderer('browser:localMediaUploadStatus', {
+        tabId,
+        status: {
+          kind: 'error',
+          message: result.error || '网页没有接住这个素材',
+        },
+      })
+    }).catch((error) => {
+      this.sendToRenderer('browser:localMediaUploadStatus', {
+        tabId,
+        status: {
+          kind: 'error',
+          message: error instanceof Error ? error.message : '素材上传失败',
+        },
+      })
+    })
+    return true
   }
 
   private openPopupInTab(url: string): void {

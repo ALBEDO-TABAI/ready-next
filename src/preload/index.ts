@@ -450,6 +450,11 @@ const browserAPI = {
   fitActiveTabToBounds: (tabId?: string | null) => ipcRenderer.invoke('browser:fitActiveTabToBounds', tabId),
   uploadLocalMediaFiles: (payload: { tabId?: string | null; files: string[]; x?: number; y?: number }) =>
     ipcRenderer.invoke('browser:uploadLocalMediaFiles', payload),
+  onLocalMediaUploadStatus: (callback: (data: { tabId?: string; status: { kind: 'uploading' | 'success' | 'error'; message: string } | null }) => void) => {
+    const handler = (_event: unknown, data: { tabId?: string; status: { kind: 'uploading' | 'success' | 'error'; message: string } | null }) => callback(data)
+    ipcRenderer.on('browser:localMediaUploadStatus', handler)
+    return () => ipcRenderer.removeListener('browser:localMediaUploadStatus', handler)
+  },
   captureWindowSnapshot: (bounds: { x: number; y: number; width: number; height: number }) =>
     ipcRenderer.invoke('browser:captureWindowSnapshot', bounds),
   captureViewportSnapshot: (tabId?: string | null) => ipcRenderer.invoke('browser:captureViewportSnapshot', tabId),

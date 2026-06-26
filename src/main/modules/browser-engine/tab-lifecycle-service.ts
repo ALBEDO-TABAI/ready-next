@@ -1,6 +1,10 @@
 import type { Session, WebContents } from 'electron'
 import type { BrowserHostView, BrowserRect } from './host-types'
 import { READY_BROWSER_BLANK_URL, isReadyBrowserBlankUrl } from '../../../shared/browser-defaults'
+import {
+  BROWSER_LOCAL_MEDIA_UPLOAD_EXTENSIONS,
+} from '../../../shared/browser-local-media-upload'
+import { READY_LOCAL_MEDIA_DROP_SCHEME } from '../../../shared/browser-local-media-drop'
 
 function applyRoundedViewport(_view: BrowserHostView): void {
   // Rounded clipping is handled at the native host view layer.
@@ -78,8 +82,100 @@ interface BrowserTabLifecycleHost {
     sessionId?: string | null
   }): void
   updateHistoryEntryTitle(url: string, title: string, favicon?: string | null): void
+  handleLocalMediaDropNavigation(tabId: string, url: string): boolean
   browserUserAgent: string
   useMock: boolean
+}
+
+function buildLocalMediaDropBridgeScript(): string {
+  const mediaExts = JSON.stringify(Array.from(BROWSER_LOCAL_MEDIA_UPLOAD_EXTENSIONS))
+  const dropScheme = JSON.stringify(READY_LOCAL_MEDIA_DROP_SCHEME)
+  return `
+    (() => {
+      if (window.__readyLocalMediaDropBridgeInstalled) return true;
+      Object.defineProperty(window, '__readyLocalMediaDropBridgeInstalled', {
+        value: true,
+        configurable: true,
+      });
+      const mediaExts = new Set(${mediaExts});
+      const dropScheme = ${dropScheme};
+      const mimeTypes = [
+        'application/x-ready-drag',
+        'application/x-ready-file',
+        'application/x-ready-document-tab',
+        'application/x-ready-workspace-item',
+      ];
+      const cleanExt = (value) => String(value || '').trim().toLowerCase().replace(/^\\./, '');
+      const extForPath = (path) => cleanExt(String(path || '').split(/[\\\\/]/).pop().split('.').pop());
+      const isMediaPath = (path) => Boolean(path) && mediaExts.has(extForPath(path));
+      const fileUrlToPath = (value) => {
+        try {
+          const url = new URL(value);
+          if (url.protocol !== 'file:') return null;
+          return decodeURIComponent(url.pathname || '');
+        } catch {
+          return null;
+        }
+      };
+      const pushPath = (paths, value) => {
+        const raw = String(value || '').trim();
+        if (!raw) return;
+        const fromFileUrl = raw.startsWith('file:') ? fileUrlToPath(raw) : null;
+        const path = fromFileUrl || raw;
+        if (!path.startsWith('/') || !isMediaPath(path) || paths.includes(path)) return;
+        paths.push(path);
+      };
+      const parseReadyPayload = (raw, paths) => {
+        if (!raw) return;
+        try {
+          const parsed = JSON.parse(raw);
+          const items = parsed && parsed.type === 'batch' && Array.isArray(parsed.items)
+            ? parsed.items
+            : [parsed];
+          for (const item of items) {
+            if (item && item.type !== 'folder' && !item.isDirectory) pushPath(paths, item.path);
+          }
+        } catch {}
+      };
+      const collectPaths = (dataTransfer) => {
+        const paths = [];
+        if (!dataTransfer) return paths;
+        for (const type of mimeTypes) parseReadyPayload(dataTransfer.getData(type), paths);
+        const uriList = dataTransfer.getData('text/uri-list') || '';
+        for (const line of uriList.split(/\\r?\\n/)) {
+          const trimmed = line.trim();
+          if (!trimmed || trimmed.startsWith('#')) continue;
+          pushPath(paths, trimmed);
+        }
+        const text = dataTransfer.getData('text/plain') || '';
+        for (const line of text.split(/\\r?\\n/)) pushPath(paths, line);
+        return paths;
+      };
+      const hasReadyLocalDragType = (dataTransfer) => {
+        const types = Array.from(dataTransfer?.types || []);
+        return types.some((type) => mimeTypes.includes(type) || type === 'text/uri-list');
+      };
+      document.addEventListener('dragover', (event) => {
+        if (!hasReadyLocalDragType(event.dataTransfer)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
+      }, true);
+      document.addEventListener('drop', (event) => {
+        const paths = collectPaths(event.dataTransfer);
+        if (paths.length === 0) return;
+        event.preventDefault();
+        event.stopPropagation();
+        const payload = encodeURIComponent(JSON.stringify({
+          paths,
+          x: Math.round(Number(event.clientX) || 0),
+          y: Math.round(Number(event.clientY) || 0),
+        }));
+        window.location.href = dropScheme + '//upload?payload=' + payload;
+      }, true);
+      return true;
+    })()
+  `
 }
 
 export class BrowserTabLifecycleService {
@@ -210,6 +306,15 @@ export class BrowserTabLifecycleService {
     view.webContents.on('dom-ready', () => {
       applyRoundedViewport(view)
       this.host.syncPageBackground(view)
+      void view.webContents.executeJavaScript(buildLocalMediaDropBridgeScript(), true).catch((error) => {
+        this.host.logBrowserDiag(`[browser-v3][local-media-drop][tab:${tabId}] inject failed: ${error instanceof Error ? error.message : String(error)}`)
+      })
+    })
+
+    view.webContents.on('will-navigate', (event, url) => {
+      if (this.host.handleLocalMediaDropNavigation(tabId, url)) {
+        event.preventDefault()
+      }
     })
 
     view.webContents.on('page-title-updated', (_event, title) => {

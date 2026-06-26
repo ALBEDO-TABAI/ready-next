@@ -763,7 +763,7 @@ export default function DocumentMode({
   const dragIndexRef = useRef<number | null>(null)
   const handleDragStart = useCallback((e: React.DragEvent, index: number) => {
     dragIndexRef.current = index
-    e.dataTransfer.effectAllowed = 'move'
+    e.dataTransfer.effectAllowed = 'copyMove'
     // Attach ready-drag data for cross-component drop (e.g. ChatPanel)
     const tab = tabs[index]
     if (tab && tab.path) {
@@ -776,6 +776,8 @@ export default function DocumentMode({
       })
       e.dataTransfer.setData('application/x-ready-document-tab', data)
       e.dataTransfer.setData('application/x-ready-drag', data)
+      e.dataTransfer.setData('text/plain', tab.path)
+      e.dataTransfer.setData('text/uri-list', `file://${encodeURI(tab.path)}`)
       startBrowserLocalMediaNativeFileDrag(e)
     }
   }, [tabs])

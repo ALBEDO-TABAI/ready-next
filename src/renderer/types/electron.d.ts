@@ -1448,6 +1448,10 @@ interface ElectronBrowserAPI {
     assignedFileNames?: string[]
     error?: string
   }>
+  onLocalMediaUploadStatus: (callback: (data: {
+    tabId?: string
+    status: { kind: 'uploading' | 'success' | 'error'; message: string } | null
+  }) => void) => () => void
   captureWindowSnapshot: (bounds: {
     x: number
     y: number

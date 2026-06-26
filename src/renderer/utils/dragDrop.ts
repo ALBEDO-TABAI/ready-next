@@ -51,6 +51,16 @@ function isLikelyAbsolutePath(value: string): boolean {
   return false
 }
 
+function fileUrlToPath(value: string): string | null {
+  try {
+    const url = new URL(value)
+    if (url.protocol !== 'file:') return null
+    return decodeURIComponent(url.pathname || '')
+  } catch {
+    return null
+  }
+}
+
 function parseReadyDrag(data: string): DroppedFile[] {
   try {
     const parsed = JSON.parse(data) as {
@@ -99,6 +109,16 @@ export function getDroppedFilesFromDataTransfer(dataTransfer: DataTransfer): Dro
   const readyFileRaw = dataTransfer.getData('application/x-ready-file')
   if (readyFileRaw) {
     files.push(...parseReadyDrag(readyFileRaw))
+  }
+
+  const uriList = dataTransfer.getData('text/uri-list') || ''
+  for (const line of uriList.split(/\r?\n/)) {
+    const trimmed = line.trim()
+    if (!trimmed || trimmed.startsWith('#')) continue
+    const filePath = fileUrlToPath(trimmed)
+    if (filePath && isLikelyAbsolutePath(filePath)) {
+      files.push(toDroppedFile(filePath))
+    }
   }
 
   const textPath = dataTransfer.getData('text/plain')?.trim()
