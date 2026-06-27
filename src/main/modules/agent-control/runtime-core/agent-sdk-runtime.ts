@@ -252,6 +252,7 @@ import type {
   RunMetaRepositoryLike,
   SdkLongSkillCheckpoint,
   SkillContextOrchestratorLike,
+  ToolBridgeResultItem,
   ToolBridgeRuntimeContext,
 } from './agent-sdk-types'
 import {
@@ -363,6 +364,7 @@ import {
 import { AgentSdkIntentTracker } from './agent-sdk-intent-tracker'
 import { AgentSdkCompactor } from './agent-sdk-compactor'
 import { AgentSdkRunLifecycle, createInitiatorAbort } from './agent-sdk-run-lifecycle'
+import { AgentSdkToolExecutor } from './agent-sdk-tool-executor'
 import { AgentSdkSessionManager } from './agent-sdk-session'
 
 
@@ -380,13 +382,6 @@ function isLocalDocumentSourceReadFailureText(text: string): boolean {
   if (!normalized) return false
   return /^(?:Error:|Document action failed:)/i.test(normalized)
     || /(?:ok["']?\s*:\s*false|未找到章节|没有可读取|无法读取|读取失败|不在当前工作区|工作区索引|not in index|outside any known workspace|path_missing|not found|找不到|未找到)/i.test(normalized)
-}
-
-interface ToolBridgeResultItem {
-  id: string
-  name: string
-  args: Record<string, unknown>
-  result: ToolExecutionOutput
 }
 
 interface MapCandidateChoice {
@@ -596,13 +591,6 @@ export class AgentSdkRuntime extends EventEmitter {
   private runCleanupRegistry: {
     registerRunCleanup: (runId: string, cleanup: () => void | Promise<void>) => void
   } | null = null
-  private rendererToolActionRequester: ((payload: {
-    agent?: string
-    sessionId?: string
-    runId?: string
-    tool: string
-    args: Record<string, unknown>
-  }) => Promise<Record<string, unknown>>) | null = null
   private cancelPendingToolActions: ((agent: string, sessionId?: string) => void) | null = null
   /** EP2-I1 — null = facts unavailable (legacy callers keep S4-1 behavior). */
   private readonly getScopeTaskRefs: ((scopeId: string) => FollowupTaskRef[]) | null
@@ -620,7 +608,7 @@ export class AgentSdkRuntime extends EventEmitter {
     this.waitForSkillChildRunClose = deps.waitForSkillChildRunClose || defaultWaitForSkillChildRunClose
     this.getScopeTaskRefs = deps.getScopeTaskRefs || null
     this.listToolDefinitionsForTurn = deps.listToolDefinitions || ((params) =>
-      this.listDefaultToolDefinitionsForTurn(params))
+      this.toolExecutor.listDefaultToolDefinitionsForTurn(params))
     const self = this
     this.runLifecycle = new AgentSdkRunLifecycle({
       sessionManager: this.sessionManager,
@@ -629,6 +617,30 @@ export class AgentSdkRuntime extends EventEmitter {
         return self.cancelPendingToolActions
       },
     })
+    this.toolExecutor = new AgentSdkToolExecutor({
+      executeToolCall: this.executeToolCall,
+      sessionManager: this.sessionManager,
+      get browserController() { return self.browserController },
+      get sidecarManager() { return self.sidecarManager },
+      get runtime() { return self.runtime },
+      get runCleanupRegistry() { return self.runCleanupRegistry },
+      compactCapturedSession: (name, runHandle, baseItems, reason, windowTokens) =>
+        self.compactCapturedSession(name, runHandle, baseItems, reason, windowTokens),
+      resolveMapPlaceAmbiguityIfNeeded: (params) =>
+        self.resolveMapPlaceAmbiguityIfNeeded(params),
+    })
+  }
+
+  setRendererToolActionRequester(
+    requester: ((payload: {
+      agent?: string
+      sessionId?: string
+      runId?: string
+      tool: string
+      args: Record<string, unknown>
+    }) => Promise<Record<string, unknown>>) | null,
+  ): void {
+    this.toolExecutor.setRendererToolActionRequester(requester)
   }
 
   setRunCleanupRegistry(registry: {
@@ -796,18 +808,6 @@ export class AgentSdkRuntime extends EventEmitter {
     }
   }
 
-  setRendererToolActionRequester(
-    requester: ((payload: {
-      agent?: string
-      sessionId?: string
-      runId?: string
-      tool: string
-      args: Record<string, unknown>
-    }) => Promise<Record<string, unknown>>) | null,
-  ): void {
-    this.rendererToolActionRequester = requester
-  }
-
   setCancelPendingToolActions(
     canceller: ((agent: string, sessionId?: string) => void) | null,
   ): void {
@@ -821,159 +821,11 @@ export class AgentSdkRuntime extends EventEmitter {
    */
   /** Run admission/release + budget-checkpoint I/O service (V3 Phase 4). Wired in the constructor. */
   private readonly runLifecycle: AgentSdkRunLifecycle
+  /** Tool building + execution + event publishing (V3 Phase 5-A). Wired in the constructor. */
+  private readonly toolExecutor: AgentSdkToolExecutor
   private readonly intentTracker = new AgentSdkIntentTracker()
   /** Pure session compaction primitive (V3 Phase 2). Lock orchestration stays in this class. */
   private readonly compactor = new AgentSdkCompactor()
-
-  private listDefaultToolDefinitionsForTurn(params: {
-    message: RunMessage
-    sessionId?: string
-    scopeId?: string
-    config: AIModelConfig
-    browserHostAvailable: boolean
-    feishuConnected: boolean
-    authorization: SkillToolAuthorization
-    /** Continuity: a recent explicit local Send IM turn can be retried directly. */
-    localSendImIntent?: boolean
-    /** Continuity: a recent turn in this session expressed collection intent. */
-    recentCollectionIntent?: boolean
-    /** Continuity: a recent turn expressed multi-item collection intent. */
-    recentBatchCollectionIntent?: boolean
-    /** Request envelope — used to read the canonical user instruction. */
-    requestEnvelope?: unknown
-  }): ToolDefinition[] {
-    const browserDecisionMode = resolveBrowserDecisionMode(params.message, params.browserHostAvailable)
-    const sdkIntentSurface = resolveSdkDefaultIntentSurface({
-      message: params.message,
-      requestEnvelope: params.requestEnvelope,
-      authorization: params.authorization,
-      browserDecisionMode,
-    })
-    const policyConflict = resolvePolicyConflictFacts({
-      forceDocumentTool: sdkIntentSurface.forceDocumentTool,
-      allowBrowserTools: sdkIntentSurface.allowBrowserTools,
-      preferredSkillToolNames: sdkIntentSurface.preferredSkillToolNames,
-      browserDecisionMode,
-      documentWidgetTaskKind: sdkIntentSurface.documentWidgetTaskKind,
-      explicitWidgetCreateIntent: sdkIntentSurface.explicitWidgetCreateIntent,
-    })
-    const effectiveBrowserDecisionMode = policyConflict.demotedBrowserDecisionMode || browserDecisionMode
-    // WP1: decouple browser collection exposure from the deterministic workflow
-    // decision. Expose the browser groups (via intentGroupModes, WITHOUT changing
-    // the decision mode) when this turn — or a recent turn — shows browser
-    // collection intent. messageHasBrowserCollectionIntent uses the "### 浏览页面
-    // 引用" reference marker plus the predicate over the PRIMARY instruction text
-    // (not the full text, so context markers don't over-trigger); recentCollection
-    // Intent carries the TTL continuity so a bare follow-up ("再试一次") stays
-    // exposed.
-    const msgIntent = messageHasBrowserCollectionIntent(params.message, params.requestEnvelope)
-    const msgBatchIntent = messageHasBrowserBatchCollectionIntent(params.message, params.requestEnvelope)
-    const localSendImIntent = params.localSendImIntent === true
-      || hasLocalSendImIntentForTurn(params.message, params.requestEnvelope)
-    const skillResumeOrRepairContext = params.authorization.mode === 'selected' && params.authorization.source !== 'explicit'
-    const explicitBrowserCollectionIntent = msgIntent || msgBatchIntent
-    const suppressBrowserContentTasks = skillResumeOrRepairContext && !explicitBrowserCollectionIntent
-    const collectionExposure =
-      params.browserHostAvailable &&
-      browserDecisionMode === 'free_tool_loop' &&
-      !localSendImIntent &&
-      (msgIntent || params.recentCollectionIntent === true) &&
-      !suppressBrowserContentTasks
-    const batchCollectionExposure = collectionExposure && (msgBatchIntent || params.recentBatchCollectionIntent === true)
-    appendToolCapabilityLog([
-      '[collection_exposure]',
-      `host=${params.browserHostAvailable}`,
-      `mode=${browserDecisionMode}`,
-      `effectiveMode=${effectiveBrowserDecisionMode}`,
-      `msgIntent=${msgIntent}`,
-      `recentIntent=${params.recentCollectionIntent === true}`,
-      `batchIntent=${msgBatchIntent}`,
-      `recentBatch=${params.recentBatchCollectionIntent === true}`,
-      `localSendIm=${localSendImIntent}`,
-      `skillResumeSuppress=${suppressBrowserContentTasks}`,
-      `exposure=${collectionExposure}`,
-      `batchExposure=${batchCollectionExposure}`,
-    ].join(' '))
-    const browserConflictGroupModes = policyConflict.demotedBrowserDecisionMode
-      ? { browser_interaction: false, browser_content_tasks: false }
-      : {}
-    const intentGroupModes = {
-      ...sdkIntentSurface.intentGroupModes,
-      ...(collectionExposure
-        ? { browser_interaction: true, browser_content_tasks: true }
-        : suppressBrowserContentTasks
-          ? { browser_content_tasks: false }
-          : {}),
-      ...browserConflictGroupModes,
-    }
-    const capabilityResolution = resolveCapabilityResolution({
-      config: params.config,
-      profile: 'local_chat',
-      browserDecisionMode: effectiveBrowserDecisionMode,
-      runtimeAvailability: {
-        browserHostAvailable: params.browserHostAvailable,
-        feishuConnected: params.feishuConnected,
-      },
-      intentGroupModes,
-    })
-    appendToolCapabilityLog([
-      '[tool_capability]',
-      'stage=sdk_runtime_default_tools',
-      'profile=local_chat',
-      'preferredSkillTools=none',
-      `visibleCapabilityGroups=${capabilityResolution.visibleCapabilityGroupIds.join('|') || 'none'}`,
-      `suppressedCapabilityGroups=${capabilityResolution.suppressedCapabilityGroupIds.join('|') || 'none'}`,
-      `hostOnlyCapabilityGroups=${capabilityResolution.hostOnlyCapabilityIds.join('|') || 'none'}`,
-      `supportsVision=${capabilityResolution.supportsVision === true}`,
-    ].join(' '))
-    let definitions = capabilityResolution.visibleCapabilityGroupIds.flatMap((groupId) =>
-      defaultToolRegistry.getToolDefinitionsForGroup(
-        groupId,
-        params.sessionId,
-        params.authorization,
-        params.scopeId,
-      ))
-    if (shouldSuppressAskUserQuestionsForOpenConversation({
-      message: params.message,
-      requestEnvelope: params.requestEnvelope,
-      authorization: params.authorization,
-    })) {
-      definitions = definitions.filter((definition) => definition.name !== 'ask_user_questions')
-    }
-    // WP1: when browser tools are surfaced by collection intent (not by a
-    // browser_workflow decision), narrow the browser groups to the collection
-    // subset. getToolDefinitionsForGroup expands a whole group, so the subset
-    // filter must live here at the tool-definition layer (Codex R2).
-    if (collectionExposure) {
-      definitions = definitions.filter((definition) => {
-        const name = (definition as { name?: unknown }).name
-        if (typeof name !== 'string' || !name.startsWith('browser_')) return true
-        if (batchCollectionExposure) return isBrowserBatchCollectionWorkflowTool(name)
-        return isBrowserCollectionSubsetTool(name)
-      })
-    }
-    if (capabilityResolution.visibleCapabilityGroupIds.includes('skills')) {
-      definitions = supplementAuthorizedSkillPrimitiveDefinitions(definitions, params.authorization)
-    }
-    const fallbackSkillAllowedTools =
-      params.authorization.mode === 'selected'
-      && sdkIntentSurface.preferredSkillToolNames
-      && sdkIntentSurface.preferredSkillToolNames.length > 0
-        ? sdkIntentSurface.preferredSkillToolNames
-        : null
-    const allowedPrimitiveNames = authorizedPrimitiveToolNames(params.authorization)
-    const resolvedSkillAllowedTools = resolveActiveSkillAllowedTools(params.authorization) || fallbackSkillAllowedTools
-    const activeSkillAllowedTools = resolvedSkillAllowedTools && allowedPrimitiveNames.length > 0
-      ? Array.from(new Set([...resolvedSkillAllowedTools, ...allowedPrimitiveNames]))
-      : resolvedSkillAllowedTools
-    if (activeSkillAllowedTools) {
-      definitions = filterSelectedSkillToolSurface(definitions, activeSkillAllowedTools)
-    }
-    return filterToolsByVisionCapability(
-      definitions as unknown as Array<Record<string, unknown>>,
-      { supportsVision: capabilityResolution.supportsVision === true },
-    ) as unknown as ToolDefinition[]
-  }
 
   newSession(name: string, systemPrompt?: string): void {
     this.stopGeneration(name)
@@ -1815,7 +1667,7 @@ export class AgentSdkRuntime extends EventEmitter {
           executeTool: async (toolName, args) => this.executeToolCall(
             toolName,
             args,
-            this.buildExecutorContext(toolBridgeRuntimeContext),
+            this.toolExecutor.buildExecutorContext(toolBridgeRuntimeContext),
           ),
         })
       }
@@ -2055,7 +1907,7 @@ export class AgentSdkRuntime extends EventEmitter {
       }
       const sdkTools = useTextToolBridge
         ? []
-        : toolDefinitions.map((definition) => this.buildSdkTool(definition, toolBridgeRuntimeContext))
+        : toolDefinitions.map((definition) => this.toolExecutor.buildSdkTool(definition, toolBridgeRuntimeContext))
 
       const instructions = [
         session.systemPrompt,
@@ -2416,7 +2268,7 @@ export class AgentSdkRuntime extends EventEmitter {
                 })
                 continue
               }
-              const output = await this.executeReadyToolDefinition(
+              const output = await this.toolExecutor.executeReadyToolDefinition(
                 definition,
                 call.args,
                 toolBridgeRuntimeContext,
@@ -2613,7 +2465,7 @@ export class AgentSdkRuntime extends EventEmitter {
             })
             continue
           }
-          const output = await this.executeReadyToolDefinition(
+          const output = await this.toolExecutor.executeReadyToolDefinition(
             definition,
             call.args,
             toolBridgeRuntimeContext,
@@ -2748,7 +2600,7 @@ export class AgentSdkRuntime extends EventEmitter {
           const saveDefinition = definitionByName.get('document_save_tab')
           if (saveDefinition) {
             emitOutput(`文档 ${observedTarget.title} 已修改但还没有保存，我会自动保存它。`, 'text')
-            const output = await this.executeReadyToolDefinition(
+            const output = await this.toolExecutor.executeReadyToolDefinition(
               saveDefinition,
               { tabId: observedTarget.tabId },
               toolBridgeRuntimeContext,
@@ -2772,7 +2624,7 @@ export class AgentSdkRuntime extends EventEmitter {
         const saveDefinition = definitionByName.get('document_save_tab')
         if (saveDefinition) {
           emitOutput('新文档已经写入但还没有保存，我会自动保存当前文档。', 'text')
-          const output = await this.executeReadyToolDefinition(saveDefinition, {}, toolBridgeRuntimeContext)
+          const output = await this.toolExecutor.executeReadyToolDefinition(saveDefinition, {}, toolBridgeRuntimeContext)
           const normalized = normalizeToolExecutionOutput(output)
           if (isDocumentToolFailure(normalized)) {
             lastDocumentSaveFailure = normalized.text || 'document_save_tab failed'
@@ -3272,7 +3124,7 @@ export class AgentSdkRuntime extends EventEmitter {
       if (!ambiguity) return handled
       handled = true
 
-      const askOutput = await this.executeReadyToolDefinition(
+      const askOutput = await this.toolExecutor.executeReadyToolDefinition(
         askDefinition,
         ambiguity.askArgs,
         params.runtimeContext,
@@ -3293,7 +3145,7 @@ export class AgentSdkRuntime extends EventEmitter {
         : null
       if (!mapDefinition || !retryArgs) return true
 
-      const retryOutput = await this.executeReadyToolDefinition(
+      const retryOutput = await this.toolExecutor.executeReadyToolDefinition(
         mapDefinition,
         retryArgs,
         params.runtimeContext,
@@ -3308,395 +3160,6 @@ export class AgentSdkRuntime extends EventEmitter {
       searchResults = [retryResult]
     }
     return handled
-  }
-
-  private buildSdkTool(
-    definition: ToolDefinition,
-    runtimeContext: ToolBridgeRuntimeContext,
-  ): AgentSdkTool {
-    const schema = definition.schema && definition.schema.type === 'object'
-      ? definition.schema
-      : { type: 'object', properties: {}, additionalProperties: false }
-    return tool({
-      name: definition.name,
-      description: definition.description,
-      parameters: schema as never,
-      strict: false,
-      timeoutMs: definition.executionTimeoutMs,
-      execute: async (input) => {
-        const args = input && typeof input === 'object' && !Array.isArray(input)
-          ? input as Record<string, unknown>
-          : {}
-        if (
-          definition.name === 'ask_user_questions'
-          && runtimeContext.nativeMapAmbiguityResolved
-          && typeof args.questions === 'string'
-        ) {
-          return stringifyToolResult(createToolExecutionOutput(
-            '地图地点歧义已经通过结构化问题卡处理完成，无需再次反问。',
-            {
-              shape: 'json',
-              data: {
-                ok: true,
-                skipped: true,
-                reason: 'map_ambiguity_already_resolved',
-              },
-            },
-          ))
-        }
-        const output = await this.executeReadyToolDefinition(definition, args, runtimeContext)
-        if (definition.name === 'map_plan_route') {
-          const bridgeResults: ToolBridgeResultItem[] = [{
-            id: `native-sdk-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-            name: definition.name,
-            args,
-            result: output,
-          }]
-          const handledMapAmbiguity = await this.resolveMapPlaceAmbiguityIfNeeded({
-            bridgeResults,
-            definitionByName: runtimeContext.definitionByName,
-            runtimeContext,
-          })
-          if (handledMapAmbiguity) {
-            runtimeContext.nativeMapAmbiguityResolved = true
-          }
-          const criticalClose = mapToolFailureClose(bridgeResults)
-          runtimeContext.nativeMapCriticalClose = criticalClose
-          if (criticalClose) {
-            return buildTextToolResultMessage(bridgeResults)
-          }
-          if (handledMapAmbiguity) {
-            return buildTextToolResultMessage(bridgeResults)
-          }
-        }
-        return stringifyToolResult(output)
-      },
-      errorFunction: (_context, error) => stringifyToolResult(createToolExecutionOutput(
-        `工具 ${definition.name} 失败：${errorMessage(error)}`,
-        {
-          shape: 'json',
-          data: {
-            errorKind: 'tool_failed',
-            toolName: definition.name,
-            message: errorMessage(error),
-          },
-        },
-      )),
-    }) as AgentSdkTool
-  }
-
-  private buildExecutorContext(
-    runtimeContext: ToolBridgeRuntimeContext,
-  ): ReturnType<typeof toToolExecutorContext> {
-    const executorContext = toToolExecutorContext(buildToolRuntimeContext({
-      browserController: this.browserController,
-      sidecarManager: this.sidecarManager,
-      runtime: this.runtime,
-      scope: runtimeContext.sessionId
-        ? this.runtime?.getConversationScope?.(runtimeContext.sessionId) || undefined
-        : undefined,
-      agent: publicAgentName(runtimeContext.agentName),
-      allowedToolNames: runtimeContext.allowedToolNames,
-      // SDK runtime executes renderer-mediated tools through the request/ack
-      // path below. Forwarding tool handlers' advisory emitToolAction here
-      // would make document/rss/calendar actions run twice in the renderer.
-      emitToolAction: () => undefined,
-      requestModuleToolAction: this.rendererToolActionRequester
-        ? (toolName, toolArgs) => this.rendererToolActionRequester!({
-          agent: runtimeContext.agentName,
-          sessionId: runtimeContext.sessionId,
-          runId: runtimeContext.runId,
-          tool: toolName,
-          args: toolArgs,
-        })
-        : undefined,
-      abortSignal: runtimeContext.signal,
-      sessionId: runtimeContext.sessionId,
-      scopeId: runtimeContext.sessionId,
-      // EP2-I2 — standing user negations for dispatch interception.
-      activeNegations: activeNegations(runtimeContext.sessionId),
-      currentUserText: runtimeContext.currentUserText,
-      sourceMessageId: runtimeContext.sourceMessageId ?? null,
-      sourceMessageUnavailableReason: runtimeContext.sourceMessageUnavailableReason ?? null,
-      requestEnvelope: runtimeContext.requestEnvelope,
-      runId: runtimeContext.runId,
-      taskId: runtimeContext.taskId,
-      parentTaskId: runtimeContext.taskId,
-      parentStepId: runtimeContext.taskId,
-      taskProjectionId: runtimeContext.taskId,
-      frameSkillId: null,
-      registerRunCleanup: (cleanup) => {
-        this.runCleanupRegistry?.registerRunCleanup(runtimeContext.runId, cleanup)
-      },
-      agentContext: runtimeContext.agentContext ?? null,
-      turnFeatureFlags: snapshotTurnFeatureFlags(),
-      activeFrame: runtimeContext.activeFrame,
-      authorization: runtimeContext.authorization,
-    }))
-    // WP2 — attach a turn-level user-view write lease so free-tool-loop browser
-    // writes are gated and a user takeover suspends them. Lazy (no acquire until
-    // a write); released on run cleanup (normal end / cancel / session close).
-    if (this.browserController && runtimeContext.runId) {
-      if (!runtimeContext.browserTurnLease) {
-        const turnLease = createBrowserTurnLease({
-          taskId: runtimeContext.taskId ?? runtimeContext.runId,
-          runId: runtimeContext.runId,
-        })
-        runtimeContext.browserTurnLease = turnLease
-        this.runCleanupRegistry?.registerRunCleanup(runtimeContext.runId, () => {
-          turnLease.release()
-          if (runtimeContext.browserTurnLease === turnLease) {
-            runtimeContext.browserTurnLease = null
-          }
-        })
-      }
-      executorContext.browserLease = runtimeContext.browserTurnLease
-    }
-    return executorContext
-  }
-
-  private async executeGuardDocumentTool(
-    definition: ToolDefinition,
-    args: Record<string, unknown>,
-    runtimeContext: ToolBridgeRuntimeContext,
-  ): Promise<ToolExecutionOutput> {
-    const callTrace = formatToolCallTrace(definition.name, args)
-    runtimeContext.emitOutput(callTrace, 'tool_use')
-    this.publishSdkToolEvent({
-      runtimeContext,
-      definition,
-      kind: 'call',
-      text: callTrace,
-    })
-    runtimeContext.emitToolAction(definition.name, args)
-    const output = await this.executeToolCall(
-      definition.name,
-      args,
-      this.buildExecutorContext(runtimeContext),
-    )
-    runtimeContext.recordToolResult(definition.name, output)
-    noteToolResultForActivePlan(runtimeContext.sessionId, definition.name, args, Date.now(), output)
-    const outputWithSteering = appendBudgetWarningSteering(output, runtimeContext)
-    const normalized = normalizeToolExecutionOutput(outputWithSteering)
-    const resultTrace = formatToolResultTrace(definition.name, normalized)
-    runtimeContext.emitOutput(resultTrace, 'tool_result', normalized.projectionPatch || null)
-    this.publishSdkToolEvent({
-      runtimeContext,
-      definition,
-      kind: 'result',
-      text: resultTrace,
-      projectionPatch: normalized.projectionPatch,
-    })
-    return outputWithSteering
-  }
-
-
-  private async ensureExplicitDocumentTargetOpened(
-    runtimeContext: ToolBridgeRuntimeContext,
-  ): Promise<ToolExecutionOutput | null> {
-    const guard = runtimeContext.documentTargetGuard
-    if (!guard || guard.opened) return null
-    const definition = guard.openToolDefinition
-    if (!definition) {
-      return createToolExecutionOutput(`无法打开目标文档 ${guard.targetName}：本轮未开放 document_open_tab。`, {
-        shape: 'json',
-        data: {
-          errorKind: TARGET_DOCUMENT_ERROR_KINDS.openUnavailable.code,
-          targetPath: guard.targetPath,
-        },
-      })
-    }
-
-    const args = { path: guard.targetPath }
-    const output = await this.executeGuardDocumentTool(definition, args, runtimeContext)
-    const normalized = normalizeToolExecutionOutput(output)
-    if (isDocumentToolFailure(normalized)) {
-      return createToolExecutionOutput(`无法打开目标文档 ${guard.targetName}，已停止写入，避免写错文件。`, {
-        shape: 'json',
-        data: {
-          errorKind: TARGET_DOCUMENT_ERROR_KINDS.openFailed.code,
-          targetPath: guard.targetPath,
-          openResult: normalized.text,
-        },
-      })
-    }
-    guard.opened = true
-    return null
-  }
-
-  private async ensureExplicitDocumentTargetSaved(
-    runtimeContext: ToolBridgeRuntimeContext,
-  ): Promise<ToolExecutionOutput | null> {
-    const guard = runtimeContext.documentTargetGuard
-    if (!guard) return null
-    const definition = guard.saveToolDefinition
-    if (!definition) {
-      return createToolExecutionOutput(`目标文档 ${guard.targetName} 已修改，但本轮未开放 document_save_tab，无法确认落盘。`, {
-        shape: 'json',
-        data: {
-          errorKind: TARGET_DOCUMENT_ERROR_KINDS.saveUnavailable.code,
-          targetPath: guard.targetPath,
-        },
-      })
-    }
-    const output = await this.executeGuardDocumentTool(definition, {}, runtimeContext)
-    if (isDocumentToolFailure(output)) {
-      return createToolExecutionOutput(`目标文档 ${guard.targetName} 保存失败，不能声明完成。`, {
-        shape: 'json',
-        data: {
-          errorKind: TARGET_DOCUMENT_ERROR_KINDS.saveFailed.code,
-          targetPath: guard.targetPath,
-          saveResult: normalizeToolExecutionOutput(output).text,
-        },
-      })
-    }
-    return null
-  }
-
-  private async executeReadyToolDefinition(
-    definition: ToolDefinition,
-    args: Record<string, unknown>,
-    runtimeContext: ToolBridgeRuntimeContext,
-  ): Promise<ToolExecutionOutput> {
-    if (definition.name === 'skill_compact_context') {
-      const callTrace = formatToolCallTrace(definition.name, args)
-      runtimeContext.emitOutput(callTrace, 'tool_use')
-      this.publishSdkToolEvent({
-        runtimeContext,
-        definition,
-        kind: 'call',
-        text: callTrace,
-      })
-      runtimeContext.emitToolAction(definition.name, args)
-      const compacted = await this.compactCapturedSession(
-        runtimeContext.agentName,
-        runtimeContext.runHandle,
-        undefined,
-        'manual',
-        this.sessionManager.get(runtimeContext.agentName)?.contextWindowTokens ?? DEFAULT_CONTEXT_WINDOW,
-      )
-      const output = createToolExecutionOutput(
-        compacted.status === 'superseded'
-          ? '当前运行已被新消息接管，未压缩新的会话。'
-          : compacted.status === 'compacted'
-            ? `已压缩当前会话上下文：${compacted.report.beforeTokens} → ${compacted.report.afterTokens} tokens。`
-            : compacted.status === 'noop'
-              ? '当前会话上下文尚未达到压缩阈值。'
-              : '已排队，当前运行结束后会压缩上下文。',
-        {
-          shape: 'json',
-          data: compacted,
-        },
-      )
-      runtimeContext.recordToolResult(definition.name, output)
-    noteToolResultForActivePlan(runtimeContext.sessionId, definition.name, args, Date.now(), output)
-      const outputWithSteering = appendBudgetWarningSteering(output, runtimeContext)
-      const resultTrace = formatToolResultTrace(definition.name, outputWithSteering)
-      runtimeContext.emitOutput(resultTrace, 'tool_result')
-      this.publishSdkToolEvent({
-        runtimeContext,
-        definition,
-        kind: 'result',
-        text: resultTrace,
-      })
-      return outputWithSteering
-    }
-    const guard = runtimeContext.documentTargetGuard
-    if (guard && definition.name === 'document_new_tab') {
-      return createToolExecutionOutput(
-        `用户已明确要求写入 ${guard.targetName}，不能新建临时文档替代。请打开目标文档后再修改。`,
-        {
-          shape: 'json',
-          data: {
-            errorKind: TARGET_DOCUMENT_ERROR_KINDS.required.code,
-            targetPath: guard.targetPath,
-          },
-        },
-      )
-    }
-    if (guard && definition.name === 'document_switch_tab') {
-      return createToolExecutionOutput(
-        `目标文档已固定为 ${guard.targetName}，本轮不需要切换到其他标签。`,
-        {
-          shape: 'json',
-          data: {
-            ok: true,
-            targetPath: guard.targetPath,
-            ignoredTool: definition.name,
-          },
-        },
-      )
-    }
-    if (guard && (DOCUMENT_TARGET_MUTATION_TOOL_NAMES.has(definition.name) || definition.name === 'document_save_tab')) {
-      const blocker = await this.ensureExplicitDocumentTargetOpened(runtimeContext)
-      if (blocker) return blocker
-    }
-    const effectiveArgs = guard
-      ? normalizeExplicitDocumentTargetToolArgs(definition.name, args)
-      : args
-
-    const callTrace = formatToolCallTrace(definition.name, effectiveArgs)
-    runtimeContext.emitOutput(callTrace, 'tool_use')
-    this.publishSdkToolEvent({
-      runtimeContext,
-      definition,
-      kind: 'call',
-      text: callTrace,
-    })
-    const preservationBlocker = DOCUMENT_TARGET_MUTATION_TOOL_NAMES.has(definition.name)
-      ? validatePreservedDocumentMutation(guard, definition.name, effectiveArgs)
-      : null
-    if (preservationBlocker) {
-      runtimeContext.recordToolResult(definition.name, preservationBlocker)
-      const blockerWithSteering = appendBudgetWarningSteering(preservationBlocker, runtimeContext)
-      const resultTrace = formatToolResultTrace(definition.name, normalizeToolExecutionOutput(blockerWithSteering))
-      runtimeContext.emitOutput(resultTrace, 'tool_result')
-      this.publishSdkToolEvent({
-        runtimeContext,
-        definition,
-        kind: 'result',
-        text: resultTrace,
-      })
-      return blockerWithSteering
-    }
-    runtimeContext.emitToolAction(definition.name, effectiveArgs)
-    const output = await this.executeToolCall(
-      definition.name,
-      effectiveArgs,
-      this.buildExecutorContext(runtimeContext),
-    )
-    runtimeContext.recordToolResult(definition.name, output)
-    noteToolResultForActivePlan(runtimeContext.sessionId, definition.name, args, Date.now(), output)
-    const outputWithSteering = appendBudgetWarningSteering(output, runtimeContext)
-    const normalized = normalizeToolExecutionOutput(outputWithSteering)
-    if (
-      guard
-      && definition.name === 'document_open_tab'
-      && String(effectiveArgs.path || '').trim() === guard.targetPath
-      && !(normalized.data && typeof normalized.data === 'object' && 'errorKind' in normalized.data)
-      && !isDocumentToolFailureText(normalized.text)
-    ) {
-      guard.opened = true
-    }
-    const resultTrace = formatToolResultTrace(definition.name, normalized)
-    runtimeContext.emitOutput(resultTrace, 'tool_result', normalized.projectionPatch || null)
-    this.publishSdkToolEvent({
-      runtimeContext,
-      definition,
-      kind: 'result',
-      text: resultTrace,
-      projectionPatch: normalized.projectionPatch,
-    })
-    if (
-      guard
-      && DOCUMENT_TARGET_MUTATION_TOOL_NAMES.has(definition.name)
-      && !isDocumentToolFailure(normalized)
-      && documentToolMutatedContent(normalized)
-    ) {
-      const saveBlocker = await this.ensureExplicitDocumentTargetSaved(runtimeContext)
-      if (saveBlocker) return saveBlocker
-    }
-    return outputWithSteering
   }
 
   private resolveSkillAuthorizationForTurn(
@@ -3769,46 +3232,6 @@ export class AgentSdkRuntime extends EventEmitter {
       source: explicitSkillId ? 'explicit' : 'active_task',
       reason: explicitSkillId ? 'explicit_user_mention' : 'reference_hint',
     })
-  }
-
-  private publishSdkToolEvent(params: {
-    runtimeContext: ToolBridgeRuntimeContext
-    definition: ToolDefinition
-    kind: 'call' | 'result'
-    text: string
-    projectionPatch?: Record<string, unknown> | null
-  }): void {
-    if (!params.runtimeContext.sessionId) return
-    const timestamp = new Date().toISOString()
-    const projectionPatch = params.projectionPatch || null
-    try {
-      this.runtime?.publishScopeRunEvent?.({
-      type: 'updated',
-      scopeId: params.runtimeContext.sessionId,
-      agent: publicAgentName(params.runtimeContext.agentName),
-      runId: params.runtimeContext.runId,
-      taskId: params.runtimeContext.taskId,
-      phase: params.kind === 'call' ? 'tool_running' : 'responding',
-      module: scopeRunModuleForTool(params.definition),
-      taskType: params.definition.domain === 'general_research' ? 'research' : undefined,
-      taskProjectionId: params.runtimeContext.taskId,
-      latestText: params.kind === 'result' ? params.text : undefined,
-      taskTitle: typeof projectionPatch?.taskTitle === 'string' ? projectionPatch.taskTitle : undefined,
-      taskSummary: typeof projectionPatch?.taskSummary === 'string' ? projectionPatch.taskSummary : undefined,
-      toolEvent: {
-        id: `sdk-tool-${params.kind}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        kind: params.kind,
-        text: params.text,
-        timestamp,
-      },
-      timestamp,
-      }, projectionPatch ? { projectionPatch, transcriptEvents: [] } : null)
-    } catch (publishError) {
-      // Event publication must never poison the tool result that triggered
-      // it (same contract as hooks/reminders: observer failure stays out of
-      // the main flow). Loud log, no rethrow.
-      log(`publishScopeRunEvent failed: ${errorMessage(publishError)}`)
-    }
   }
 
   private buildResult(params: {

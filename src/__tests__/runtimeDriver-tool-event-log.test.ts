@@ -80,9 +80,14 @@ describe('G-Z12 runtimeDriver 事件接入 ready-tools.log', () => {
     const directChatSource = readFileSync(DIRECT_CHAT_PATH, 'utf8')
     assert.doesNotMatch(directChatSource, /stage=direct_chat_tool_loop/)
     assert.doesNotMatch(directChatSource, /appendToolCapabilityLog/)
-    const agentSdkRuntimeSource = readFileSync(AGENT_SDK_RUNTIME_PATH, 'utf8')
-    assert.match(agentSdkRuntimeSource, /stage=sdk_runtime_default_tools/)
-    assert.match(agentSdkRuntimeSource, /visibleCapabilityGroups=\$\{capabilityResolution\.visibleCapabilityGroupIds/)
+    // listDefaultToolDefinitionsForTurn (which emits the default-tools capability
+    // log line) was extracted to agent-sdk-tool-executor.ts (V3 Phase 5-A).
+    const toolExecutorSource = readFileSync(
+      resolve(process.cwd(), 'src/main/modules/agent-control/runtime-core/agent-sdk-tool-executor.ts'),
+      'utf8',
+    )
+    assert.match(toolExecutorSource, /stage=sdk_runtime_default_tools/)
+    assert.match(toolExecutorSource, /visibleCapabilityGroups=\$\{capabilityResolution\.visibleCapabilityGroupIds/)
     assert.match(capabilityControllerSource, /visibleCapabilityGroups=/)
   })
 })

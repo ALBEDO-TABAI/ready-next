@@ -428,18 +428,21 @@ test('agent sdk runtime applies selected skill allowed_tools to default surface'
 test('agent sdk runtime preserves base tools when selected skill tools are unavailable', () => {
   const runtime = createRuntime({})
   const privateRuntime = runtime as unknown as {
-    listDefaultToolDefinitionsForTurn: (params: {
-      message: string
-      sessionId?: string
-      scopeId?: string
-      config: typeof fakeConfig
-      browserHostAvailable: boolean
-      feishuConnected: boolean
-      authorization: ReturnType<typeof buildSelectedSkillToolAuthorization>
-      requestEnvelope?: unknown
-    }) => Array<{ name: string; groupId: string }>
+    // listDefaultToolDefinitionsForTurn was extracted to AgentSdkToolExecutor (V3 Phase 5-A).
+    toolExecutor: {
+      listDefaultToolDefinitionsForTurn: (params: {
+        message: string
+        sessionId?: string
+        scopeId?: string
+        config: typeof fakeConfig
+        browserHostAvailable: boolean
+        feishuConnected: boolean
+        authorization: ReturnType<typeof buildSelectedSkillToolAuthorization>
+        requestEnvelope?: unknown
+      }) => Array<{ name: string; groupId: string }>
+    }
   }
-  const definitions = privateRuntime.listDefaultToolDefinitionsForTurn({
+  const definitions = privateRuntime.toolExecutor.listDefaultToolDefinitionsForTurn({
     message: '输出方案文档到这个目录里',
     sessionId: 'scope-missing-skill-tools',
     scopeId: 'scope-missing-skill-tools',

@@ -32,17 +32,19 @@ function createRuntimeToolNames(params: {
       requestEnvelope?: unknown,
       forceLocalSendImIntent?: boolean,
     ) => unknown
-    listDefaultToolDefinitionsForTurn: (input: {
-      message: string
-      sessionId?: string
-      scopeId?: string
-      config: typeof fakeConfig
-      browserHostAvailable: boolean
-      feishuConnected: boolean
-      authorization: unknown
-      localSendImIntent?: boolean
-      requestEnvelope?: unknown
-    }) => Array<{ name: string }>
+    toolExecutor: {
+      listDefaultToolDefinitionsForTurn: (input: {
+        message: string
+        sessionId?: string
+        scopeId?: string
+        config: typeof fakeConfig
+        browserHostAvailable: boolean
+        feishuConnected: boolean
+        authorization: unknown
+        localSendImIntent?: boolean
+        requestEnvelope?: unknown
+      }) => Array<{ name: string }>
+    }
   }
   const authorization = privateRuntime.resolveSkillAuthorizationForTurn(
     params.message,
@@ -50,7 +52,7 @@ function createRuntimeToolNames(params: {
     params.requestEnvelope,
     params.localSendImIntent === true,
   )
-  return privateRuntime.listDefaultToolDefinitionsForTurn({
+  return privateRuntime.toolExecutor.listDefaultToolDefinitionsForTurn({
     message: params.message,
     sessionId: 'scope-send-im-browser-tools',
     scopeId: 'scope-send-im-browser-tools',
@@ -203,11 +205,14 @@ test('local send-im attached media turns bypass model vision input and browser c
   const utilsSource = readFileSync(new URL('../main/modules/agent-control/runtime-core/agent-sdk-utils.ts', import.meta.url), 'utf8')
   // Per-session intent TTL state was extracted to AgentSdkIntentTracker (V3 Phase 2 split).
   const intentTrackerSource = readFileSync(new URL('../main/modules/agent-control/runtime-core/agent-sdk-intent-tracker.ts', import.meta.url), 'utf8')
+  // Default tool-surface selection (incl. the send-im collection-intent suppression)
+  // was extracted to AgentSdkToolExecutor (V3 Phase 5-A).
+  const toolExecutorSource = readFileSync(new URL('../main/modules/agent-control/runtime-core/agent-sdk-tool-executor.ts', import.meta.url), 'utf8')
 
   assert.match(utilsSource, /function hasLocalSendImIntentForTurn/)
   assert.match(utilsSource, /function stripMediaBlocksForLocalSendIm/)
   assert.match(source, /typedActionNames\.add\('skill_send_im_file'\)/)
-  assert.match(source, /!localSendImIntent\s*&&\s*\(\s*msgIntent \|\| params\.recentCollectionIntent === true\s*\)/)
+  assert.match(toolExecutorSource, /!localSendImIntent\s*&&\s*\(\s*msgIntent \|\| params\.recentCollectionIntent === true\s*\)/)
   // On a local-send-im turn the runtime resets collection intent via the tracker,
   // which clears BOTH the collection and batch-collection TTL maps.
   assert.match(source, /this\.intentTracker\.resetCollectionIntents\(sessionId\)/)

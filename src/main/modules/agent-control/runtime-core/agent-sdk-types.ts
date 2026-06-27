@@ -262,3 +262,11 @@ export interface AgentSdkRuntimeDeps {
 }
 
 export type TerminalFailureReason = 'delivery_failed' | 'tool_unavailable' | 'no_artifact' | 'proof_gap'
+
+/** One tool result inside a native-SDK tool-bridge turn (name + args + structured output). */
+export interface ToolBridgeResultItem {
+  id: string
+  name: string
+  args: Record<string, unknown>
+  result: ToolExecutionOutput
+}

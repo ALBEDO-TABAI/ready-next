@@ -115,18 +115,20 @@ function listLiveSdkDefaultToolNames(input: {
     domainAdapters: [],
   })
   const privateRuntime = runtime as unknown as {
-    listDefaultToolDefinitionsForTurn: (params: {
-      message: string
-      sessionId?: string
-      scopeId?: string
-      config: AIModelConfig
-      browserHostAvailable: boolean
-      feishuConnected: boolean
-      authorization: SkillToolAuthorization
-      requestEnvelope?: unknown
-    }) => Array<{ name: string }>
+    toolExecutor: {
+      listDefaultToolDefinitionsForTurn: (params: {
+        message: string
+        sessionId?: string
+        scopeId?: string
+        config: AIModelConfig
+        browserHostAvailable: boolean
+        feishuConnected: boolean
+        authorization: SkillToolAuthorization
+        requestEnvelope?: unknown
+      }) => Array<{ name: string }>
+    }
   }
-  return privateRuntime.listDefaultToolDefinitionsForTurn({
+  return privateRuntime.toolExecutor.listDefaultToolDefinitionsForTurn({
     message: input.userText,
     sessionId: input.sessionId || 'scope-live-sdk-parity',
     scopeId: input.sessionId || 'scope-live-sdk-parity',
@@ -532,16 +534,18 @@ test('SDK authorization uses raw user text when primary instruction strips expli
       requestEnvelope?: unknown,
       forceLocalSendImIntent?: boolean,
     ) => SkillToolAuthorization
-    listDefaultToolDefinitionsForTurn: (params: {
-      message: string
-      sessionId?: string
-      scopeId?: string
-      config: AIModelConfig
-      browserHostAvailable: boolean
-      feishuConnected: boolean
-      authorization: SkillToolAuthorization
-      requestEnvelope?: unknown
-    }) => Array<{ name: string }>
+    toolExecutor: {
+      listDefaultToolDefinitionsForTurn: (params: {
+        message: string
+        sessionId?: string
+        scopeId?: string
+        config: AIModelConfig
+        browserHostAvailable: boolean
+        feishuConnected: boolean
+        authorization: SkillToolAuthorization
+        requestEnvelope?: unknown
+      }) => Array<{ name: string }>
+    }
   }
 
   try {
@@ -552,7 +556,7 @@ test('SDK authorization uses raw user text when primary instruction strips expli
     )
     assert.equal(authorization.mode, 'selected')
     assert.equal(getLastReferenceSkill(sessionId)?.id, 'hfp-space-design')
-    const toolNames = privateRuntime.listDefaultToolDefinitionsForTurn({
+    const toolNames = privateRuntime.toolExecutor.listDefaultToolDefinitionsForTurn({
       message: primaryInstruction,
       sessionId,
       scopeId: sessionId,
