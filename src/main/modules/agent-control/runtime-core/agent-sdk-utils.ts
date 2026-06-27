@@ -1228,6 +1228,24 @@ export function isDocumentToolFailureText(text: string): boolean {
   return /(?:^Error:|Document action failed|failed|失败|无法|没有可|未匹配到|未找到|缺少|已拒绝|被拒绝|已取消|被取消)/i.test(text)
 }
 
+/** Whether a tool output represents a document-tool failure (error kind or failure text). */
+export function isDocumentToolFailure(output: ToolExecutionOutput): boolean {
+  const normalized = normalizeToolExecutionOutput(output)
+  const data = normalized.data && typeof normalized.data === 'object'
+    ? normalized.data as Record<string, unknown>
+    : {}
+  return (
+    typeof data.errorKind === 'string'
+    || isDocumentToolFailureText(normalized.text)
+  )
+}
+
+/** Shallow-merge a list of projection patch records; null when the list is empty. */
+export function mergeProjectionPatches(patches: Record<string, unknown>[]): Record<string, unknown> | null {
+  if (patches.length === 0) return null
+  return patches.reduce<Record<string, unknown>>((acc, patch) => ({ ...acc, ...patch }), {})
+}
+
 function getToolDataRecord(output: ToolExecutionOutput): Record<string, unknown> {
   return output.data && typeof output.data === 'object'
     ? output.data as Record<string, unknown>

@@ -297,6 +297,8 @@ import {
   isAbortError,
   isCheckpointTerminalReason,
   isDocumentToolFailureText,
+  isDocumentToolFailure,
+  mergeProjectionPatches,
   isLocalDocumentToolDefinition,
   isLocalSendImRetryFollowup,
   isSameObservedDocumentTarget,
@@ -1460,7 +1462,7 @@ export class AgentSdkRuntime extends EventEmitter {
       if (params.status === 'done' && usedTools.length === 0) {
         projectionPatches.push({ taskType: 'direct_answer', module: 'system' })
       }
-      const projectionPatch = this.mergeProjectionPatches(projectionPatches)
+      const projectionPatch = mergeProjectionPatches(projectionPatches)
       const base = {
         runId,
         taskId,
@@ -1899,7 +1901,7 @@ export class AgentSdkRuntime extends EventEmitter {
           const argsQueue = toolArgsByName.get(toolName)
           this.learnSiteCardFromToolFailure(toolName, argsQueue?.shift(), normalized)
           const structuredData = readStructuredResultRecord(normalized)
-          const documentToolFailed = this.isDocumentToolFailure(normalized)
+          const documentToolFailed = isDocumentToolFailure(normalized)
           const sourceReadFailed = LOCAL_DOCUMENT_SOURCE_READ_TOOL_NAMES.has(toolName)
             && isLocalDocumentSourceReadFailureText(normalized.text)
           const structuredStatus = typeof structuredData.status === 'string'
@@ -2094,7 +2096,7 @@ export class AgentSdkRuntime extends EventEmitter {
         projectionPatches.push(checkpoint.projectionPatch)
         finalText = buildSkillClarificationCheckpointMessage(assistantText)
         emitOutput(finalText, 'text', checkpoint.projectionPatch)
-        const finalProjectionPatch = this.mergeProjectionPatches(projectionPatches)
+        const finalProjectionPatch = mergeProjectionPatches(projectionPatches)
         await finalizeRunOutcome({
           kind: 'checkpoint',
           runId,
@@ -2185,7 +2187,7 @@ export class AgentSdkRuntime extends EventEmitter {
         projectionPatches.push(checkpoint.projectionPatch)
         finalText = buildActionAnnouncementCheckpointMessage(decision.actionSummary)
         emitOutput(finalText, 'text', checkpoint.projectionPatch)
-        const finalProjectionPatch = this.mergeProjectionPatches(projectionPatches)
+        const finalProjectionPatch = mergeProjectionPatches(projectionPatches)
         await finalizeRunOutcome({
           kind: 'checkpoint',
           runId,
@@ -2594,7 +2596,7 @@ export class AgentSdkRuntime extends EventEmitter {
                 toolBridgeRuntimeContext,
               )
               if (call.name === 'document_save_tab') {
-                lastDocumentSaveFailure = this.isDocumentToolFailure(output)
+                lastDocumentSaveFailure = isDocumentToolFailure(output)
                   ? normalizeToolExecutionOutput(output).text || 'document_save_tab failed'
                   : null
               }
@@ -2791,7 +2793,7 @@ export class AgentSdkRuntime extends EventEmitter {
             toolBridgeRuntimeContext,
           )
           if (call.name === 'document_save_tab') {
-            lastDocumentSaveFailure = this.isDocumentToolFailure(output)
+            lastDocumentSaveFailure = isDocumentToolFailure(output)
               ? normalizeToolExecutionOutput(output).text || 'document_save_tab failed'
               : null
           }
@@ -2926,7 +2928,7 @@ export class AgentSdkRuntime extends EventEmitter {
               toolBridgeRuntimeContext,
             )
             const normalized = normalizeToolExecutionOutput(output)
-            if (this.isDocumentToolFailure(normalized)) {
+            if (isDocumentToolFailure(normalized)) {
               lastDocumentSaveFailure = normalized.text || 'document_save_tab failed'
             } else if (lastDocumentSaveSuccessText && !finalText.includes(lastDocumentSaveSuccessText)) {
               const savedMessage = `已完成，${lastDocumentSaveSuccessText}`
@@ -2946,7 +2948,7 @@ export class AgentSdkRuntime extends EventEmitter {
           emitOutput('新文档已经写入但还没有保存，我会自动保存当前文档。', 'text')
           const output = await this.executeReadyToolDefinition(saveDefinition, {}, toolBridgeRuntimeContext)
           const normalized = normalizeToolExecutionOutput(output)
-          if (this.isDocumentToolFailure(normalized)) {
+          if (isDocumentToolFailure(normalized)) {
             lastDocumentSaveFailure = normalized.text || 'document_save_tab failed'
           } else if (lastDocumentSaveSuccessText && !finalText.includes(lastDocumentSaveSuccessText)) {
             const savedMessage = `已完成，${lastDocumentSaveSuccessText}`
@@ -2992,7 +2994,7 @@ export class AgentSdkRuntime extends EventEmitter {
       if (usedTools.length === 0) {
         projectionPatches.push({ taskType: 'direct_answer', module: 'system' })
       }
-      const finalProjectionPatch = this.mergeProjectionPatches(projectionPatches)
+      const finalProjectionPatch = mergeProjectionPatches(projectionPatches)
       const finalizedDone = await finalizeRunOutcome({
         kind: 'done',
         runId,
@@ -3084,7 +3086,7 @@ export class AgentSdkRuntime extends EventEmitter {
           toolCallsUsed: usedTools.length,
           initiator: abortInitiator,
           terminalReason,
-          projectionPatch: this.mergeProjectionPatches(projectionPatches),
+          projectionPatch: mergeProjectionPatches(projectionPatches),
           taskBudgetRuntime: runMetaBudgetRuntime,
           providerDiagnostics: runMetaProviderDiagnostics,
           usage: runMetaUsage,
@@ -3203,7 +3205,7 @@ export class AgentSdkRuntime extends EventEmitter {
         toolCallsUsed: usedTools.length,
         initiator: 'error',
         terminalReason: failure.terminalReason,
-        projectionPatch: this.mergeProjectionPatches(projectionPatches),
+        projectionPatch: mergeProjectionPatches(projectionPatches),
         taskBudgetRuntime: runMetaBudgetRuntime,
         providerDiagnostics: runMetaProviderDiagnostics,
         usage: runMetaUsage,
@@ -3662,16 +3664,6 @@ export class AgentSdkRuntime extends EventEmitter {
     return outputWithSteering
   }
 
-  private isDocumentToolFailure(output: ToolExecutionOutput): boolean {
-    const normalized = normalizeToolExecutionOutput(output)
-    const data = normalized.data && typeof normalized.data === 'object'
-      ? normalized.data as Record<string, unknown>
-      : {}
-    return (
-      typeof data.errorKind === 'string'
-      || isDocumentToolFailureText(normalized.text)
-    )
-  }
 
   private async ensureExplicitDocumentTargetOpened(
     runtimeContext: ToolBridgeRuntimeContext,
@@ -3692,7 +3684,7 @@ export class AgentSdkRuntime extends EventEmitter {
     const args = { path: guard.targetPath }
     const output = await this.executeGuardDocumentTool(definition, args, runtimeContext)
     const normalized = normalizeToolExecutionOutput(output)
-    if (this.isDocumentToolFailure(normalized)) {
+    if (isDocumentToolFailure(normalized)) {
       return createToolExecutionOutput(`无法打开目标文档 ${guard.targetName}，已停止写入，避免写错文件。`, {
         shape: 'json',
         data: {
@@ -3722,7 +3714,7 @@ export class AgentSdkRuntime extends EventEmitter {
       })
     }
     const output = await this.executeGuardDocumentTool(definition, {}, runtimeContext)
-    if (this.isDocumentToolFailure(output)) {
+    if (isDocumentToolFailure(output)) {
       return createToolExecutionOutput(`目标文档 ${guard.targetName} 保存失败，不能声明完成。`, {
         shape: 'json',
         data: {
@@ -3872,7 +3864,7 @@ export class AgentSdkRuntime extends EventEmitter {
     if (
       guard
       && DOCUMENT_TARGET_MUTATION_TOOL_NAMES.has(definition.name)
-      && !this.isDocumentToolFailure(normalized)
+      && !isDocumentToolFailure(normalized)
       && documentToolMutatedContent(normalized)
     ) {
       const saveBlocker = await this.ensureExplicitDocumentTargetSaved(runtimeContext)
@@ -3993,10 +3985,6 @@ export class AgentSdkRuntime extends EventEmitter {
     }
   }
 
-  private mergeProjectionPatches(patches: Record<string, unknown>[]): Record<string, unknown> | null {
-    if (patches.length === 0) return null
-    return patches.reduce<Record<string, unknown>>((acc, patch) => ({ ...acc, ...patch }), {})
-  }
 
   private async writeBudgetCheckpointState(params: {
     agentName: string
@@ -4169,7 +4157,7 @@ export class AgentSdkRuntime extends EventEmitter {
       },
       contextUsage,
       projectionTruth: {
-        projectionPatch: this.mergeProjectionPatches(params.projectionPatches),
+        projectionPatch: mergeProjectionPatches(params.projectionPatches),
         transcriptEvents: params.transcriptEvents,
       },
       terminalReason: params.terminalReason,
