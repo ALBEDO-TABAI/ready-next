@@ -17,6 +17,7 @@ import type {
   ScopeRunWaitingFor,
   ToolTraceEvent
 } from './types'
+import type { ContextUsageSnapshot } from '../../../shared/context-usage-types'
 
 function generateArtifactId(): string {
   return `artifact-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
@@ -273,6 +274,37 @@ function mergeTriggerHits(
   return merged
 }
 
+function parseContextUsage(input: unknown): ContextUsageSnapshot | null {
+  if (!input || typeof input !== 'object') return null
+  const record = input as Record<string, unknown>
+  const rawInputTokens = Number(record.usedInputTokens)
+  if (!Number.isFinite(rawInputTokens) || rawInputTokens <= 0) return null
+  const usedInputTokens = Math.ceil(rawInputTokens)
+  const rawWindowSource = String(record.windowSource || '').trim()
+  const windowSource =
+    rawWindowSource === 'explicit' || rawWindowSource === 'model' || rawWindowSource === 'fallback'
+      ? rawWindowSource
+      : null
+  const rawWindowTokens = Number(record.windowTokens)
+  const usableWindow = (windowSource === 'explicit' || windowSource === 'model' || windowSource === 'fallback')
+    && Number.isFinite(rawWindowTokens)
+    && rawWindowTokens > 0
+  const windowTokens = usableWindow ? Math.floor(rawWindowTokens) : null
+  const rawRatio = Number(record.ratio)
+  const ratio = usableWindow && Number.isFinite(rawRatio) && rawRatio >= 0 ? rawRatio : null
+  const timestamp = typeof record.timestamp === 'string' && record.timestamp.trim()
+    ? record.timestamp
+    : new Date().toISOString()
+  return {
+    usedInputTokens,
+    windowTokens,
+    ratio: windowTokens ? ratio : null,
+    windowSource,
+    source: 'last_model_request',
+    timestamp,
+  }
+}
+
 function parseExecutionDiagnostics(input: unknown): ScopeRunExecutionDiagnostics | null {
   if (!input || typeof input !== 'object') return null
   const record = input as Record<string, unknown>
@@ -365,9 +397,10 @@ function parseExecutionDiagnostics(input: unknown): ScopeRunExecutionDiagnostics
               : null,
         }
       : null
+  const contextUsage = parseContextUsage(record.contextUsage)
 
-  if (!compression && !budget && !fallback && !pipeline && !budgetLease) return null
-  return { compression, budget, fallback, pipeline, budgetLease }
+  if (!compression && !budget && !fallback && !pipeline && !budgetLease && !contextUsage) return null
+  return { compression, budget, fallback, pipeline, budgetLease, contextUsage }
 }
 
 export function mergeArtifacts(
@@ -733,6 +766,7 @@ export function createEmptyScopeRunState(params: {
     memoryRefs: [],
     triggerHits: [],
     contextBudget: null,
+    contextUsage: null,
     ownerResourceId: null,
     lastEvidenceAt: null,
     blockedReason: null,
@@ -795,6 +829,7 @@ export function deriveScopeRunStatePatch(
     memoryRefs?: AgentMemoryRef[]
     triggerHits?: AgentTriggerHit[]
     contextBudget?: AgentContextBudget | null
+    contextUsage?: ContextUsageSnapshot | Record<string, unknown> | null
     toolEvent?: { kind: ToolTraceEvent['kind']; text: string; timestamp: string }
     error?: string
     errorKind?: string
@@ -846,6 +881,8 @@ export function deriveScopeRunStatePatch(
   const structuredContinuation = parseTaskContinuation(event.taskContinuation)
   const structuredMemoryCapture = parseMemoryCapture(event.memoryCapture)
   const structuredExecutionDiagnostics = parseExecutionDiagnostics(event.executionDiagnostics)
+  const structuredContextUsage =
+    parseContextUsage(event.contextUsage) || structuredExecutionDiagnostics?.contextUsage || null
   const structuredProgress = parseSkillProgress(event.progress)
   const terminalReason = 'terminalReason' in event
     ? normalizeTerminalReason(event.terminalReason)
@@ -890,6 +927,7 @@ export function deriveScopeRunStatePatch(
     memoryRefs: mergeMemoryRefs(previous?.memoryRefs, event.memoryRefs),
     triggerHits: mergeTriggerHits(previous?.triggerHits, event.triggerHits),
     contextBudget: event.contextBudget || previous?.contextBudget || null,
+    contextUsage: structuredContextUsage || previous?.contextUsage || null,
     ownerResourceId:
       typeof event.ownerResourceId === 'string'
         ? event.ownerResourceId

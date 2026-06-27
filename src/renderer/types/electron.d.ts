@@ -4,6 +4,7 @@ import type { BrowserViewIntent, BrowserViewIntentAck } from '../../shared/brows
 import type { NativeContextMenuRequest, NativeContextMenuResponse } from '../../shared/native-context-menu'
 import type { CapabilityRuntimeSnapshot } from '../../shared/ai-capability-runtime'
 import type { RendererAgentMetricName } from '../../shared/renderer-agent-metrics'
+import type { ContextUsageSnapshot } from '../../shared/context-usage-types'
 import type { ModelPackDownloadUpdate, ModelPackId, ModelPackSelfTestReport, ModelPackStatus, ModelSource } from '../../shared/model-pack-types'
 import type { RuntimeStatus, RuntimeProvisionProgress } from '../../shared/runtime-provision-types'
 import type { SkillSourceSelfTestReport } from '../../shared/skill-source-types'
@@ -588,6 +589,7 @@ interface ScopeRunExecutionDiagnosticsData {
       usedSectionAnchors?: boolean
     } | null
   } | null
+  contextUsage?: ContextUsageSnapshot | null
 }
 
 type TaskTypeData = TaskType
@@ -704,6 +706,7 @@ interface ScopeRunSummaryData {
   taskContinuation?: ScopeRunTaskContinuationData | null
   memoryCapture?: ScopeRunMemoryCaptureData | null
   executionDiagnostics?: ScopeRunExecutionDiagnosticsData | null
+  contextUsage?: ContextUsageSnapshot | null
   blockedReason?: string | null
   error?: string | null
   terminalReason?: ScopeRunTerminalReasonData | null
@@ -877,6 +880,7 @@ interface ScopeRunEventData {
   memoryRefs?: ScopeRunMemoryRefData[]
   triggerHits?: ScopeRunTriggerHitData[]
   contextBudget?: ScopeRunContextBudgetData | null
+  contextUsage?: ContextUsageSnapshot | null
   ownerResourceId?: string
   lastEvidenceAt?: string
   toolEvent?: ScopeRunTraceItemData

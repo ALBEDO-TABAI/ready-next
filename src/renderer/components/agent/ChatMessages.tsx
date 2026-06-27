@@ -1,4 +1,5 @@
 import { useRef, useEffect, useMemo } from 'react'
+import type { ReactNode } from 'react'
 
 // EP2 dogfood gap 5 — safety margin appended to the measured composer tail.
 const CHAT_BOTTOM_SAFETY_MARGIN_PX = 12
@@ -19,6 +20,7 @@ interface ChatMessagesProps {
   messageToolTraceSnapshots: Record<string, React.ReactNode>
   pendingTaskRun: React.ReactNode | null
   pendingToolTrace: React.ReactNode | null
+  runDurationMeter: ReactNode
   isStreaming: boolean
   streamingMessageId: string | null
   toolTrace: ToolTraceEvent[]
@@ -46,6 +48,7 @@ export default function ChatMessages({
   messageToolTraceSnapshots,
   pendingTaskRun,
   pendingToolTrace,
+  runDurationMeter,
   isStreaming,
   streamingMessageId,
   toolTrace,
@@ -574,6 +577,8 @@ export default function ChatMessages({
         }
         return null
       })()}
+
+      {runDurationMeter}
 
       <div data-skill-ask-user-anchor="true" aria-hidden="true" style={{ flex: '0 0 auto', width: '100%' }} />
 

@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import type { SkillState } from '../../skills-runtime/runtime-manager'
 import { hasLocalSendImFileIntent } from '../../../../shared/remote-im-file-intent'
 import type { ToolExecutionOutput } from '../tools-runtime/tool-result-types'
-import { rememberLastReferenceSkill, getLastReferenceSkill } from './skill-reference-hints'
+import { rememberLastReferenceSkill, getLastReferenceSkill, peekLastReferenceSkill } from './skill-reference-hints'
 import { logAgentMetric } from '../metrics'
 import { emitSkillReferenceInlined } from './skill-reference-inlined-bridge'
 import { isRetryOnlyTurn } from './skill-detection-inputs'
@@ -225,6 +225,11 @@ export class SkillContextOrchestrator {
 
   getCurrentReferenceSkillHint(sessionId?: string): { id: string; name: string } | null {
     const hint = getLastReferenceSkill(sessionId)
+    return hint ? { id: hint.id, name: hint.name } : null
+  }
+
+  peekCurrentReferenceSkillHint(sessionId?: string): { id: string; name: string } | null {
+    const hint = peekLastReferenceSkill(sessionId)
     return hint ? { id: hint.id, name: hint.name } : null
   }
 

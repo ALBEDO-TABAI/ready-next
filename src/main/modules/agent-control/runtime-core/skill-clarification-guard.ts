@@ -4,6 +4,9 @@ const OPTIONAL_CLARIFICATION_PATTERN =
 const CLARIFICATION_WAIT_PATTERN =
   /(?:需要(?:你|用户|先)?(?:补充|确认|选择|提供|告诉)|请(?:你)?(?:补充|确认|选择|提供|告诉)|我需要(?:先)?确认|如果能补上|实际是(?:哪|什么|多少)|你的预期是|预期是(?:哪|什么|多少)|才能继续|先确认|补全(?:这些|信息|细节))/i
 
+const NEGATED_CLARIFICATION_WAIT_PATTERN =
+  /(?:不是|并非|不是说|不是因为|不(?:需要|用|必|必需)|无需|免(?:补充|确认)|不用你).{0,24}(?:补充|确认|选择|提供|告诉|等待|反问|信息|才能(?:继续|推进))/i
+
 const CLARIFICATION_TOPIC_PATTERN =
   /(?:补充|确认|选择|提供|告诉|主推|面积|预算|目标|优先级|风格|用途|周期|门店|快闪|固定|实际|预期|哪种|哪个|多少|是否)/i
 
@@ -24,17 +27,22 @@ export interface SkillClarificationGuardInput {
   assistantText: string
   toolCallsInCurrentResponse: number
   hasSkillAskUserTool: boolean
+  isSkillClarificationEligible: boolean
   hasUnfinishedTaskReference: boolean
   alreadySteered: boolean
+  taskType?: string | null
 }
 
 export function evaluateSkillClarificationGuard(
   input: SkillClarificationGuardInput,
 ): SkillClarificationGuardDecision {
   if (input.toolCallsInCurrentResponse !== 0) return { kind: 'none' }
+  if (!input.isSkillClarificationEligible) return { kind: 'none' }
   if (!input.hasSkillAskUserTool) return { kind: 'none' }
+  if (input.taskType === 'direct_answer') return { kind: 'none' }
   const text = normalizeGuardText(input.assistantText)
   if (!text || OPTIONAL_CLARIFICATION_PATTERN.test(text)) return { kind: 'none' }
+  if (NEGATED_CLARIFICATION_WAIT_PATTERN.test(text)) return { kind: 'none' }
   if (POST_COMPLETION_FOLLOWUP_PATTERN.test(text)) return { kind: 'none' }
 
   const waitsForUser = CLARIFICATION_WAIT_PATTERN.test(text)
@@ -79,9 +87,10 @@ export function buildSkillClarificationSteerReminder(questionSummary: string | n
   ].join('\n')
 }
 
-export function buildSkillClarificationCheckpointMessage(questionSummary: string | null): string {
-  const question = questionSummary ? `“${questionSummary}”` : '补充信息'
-  return `我需要你补充${question}但未能打开反问卡，已保存断点，回复'继续'可恢复。`
+export function buildSkillClarificationCheckpointMessage(assistantText: string): string {
+  const preserved = String(assistantText || '').trim()
+  const suffix = '我先暂停在这里，并已保存当前进度；你可以直接回复这些信息，或回复“继续”恢复。'
+  return preserved ? `${preserved}\n\n${suffix}` : suffix
 }
 
 function normalizeGuardText(text: string): string {

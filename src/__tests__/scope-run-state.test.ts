@@ -387,6 +387,48 @@ describe('scope run state helpers', () => {
     assert.strictEqual(patch.executionDiagnostics?.pipeline?.document?.usedSectionAnchors, true)
   })
 
+  it('stores context usage from scope run events and preserves it during the next live run', () => {
+    const contextUsage = {
+      usedInputTokens: 239_000,
+      windowTokens: 258_000,
+      ratio: 239_000 / 258_000,
+      windowSource: 'model' as const,
+      source: 'last_model_request' as const,
+      timestamp: '2026-06-27T00:00:00.000Z',
+    }
+    const patch = deriveScopeRunStatePatch(
+      {
+        phase: 'done',
+        runId: 'run-1',
+        contextUsage,
+        timestamp: '2026-06-27T00:00:00.000Z',
+      },
+      null,
+    )
+
+    assert.deepStrictEqual(patch.contextUsage, contextUsage)
+
+    const nextPatch = deriveScopeRunStatePatch(
+      {
+        phase: 'planning',
+        runId: 'run-2',
+        timestamp: '2026-06-27T00:00:10.000Z',
+      },
+      {
+        scopeId: 'scope-1',
+        agent: 'butler',
+        requestId: 'run-1',
+        phase: 'done',
+        toolTrace: [],
+        startedAt: '2026-06-27T00:00:00.000Z',
+        updatedAt: '2026-06-27T00:00:00.000Z',
+        contextUsage,
+      },
+    )
+
+    assert.deepStrictEqual(nextPatch.contextUsage, contextUsage)
+  })
+
   it('clears a stale blocker when a structured event sends blockedReason null', () => {
     const patch = deriveScopeRunStatePatch(
       {

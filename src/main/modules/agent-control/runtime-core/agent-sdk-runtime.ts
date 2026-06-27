@@ -83,6 +83,9 @@ import {
   DEFAULT_CONTEXT_WINDOW,
   resolveModelContextWindow,
 } from '../../../../shared/context-budget-types'
+import {
+  buildContextUsageSnapshot,
+} from '../../../../shared/context-usage-types'
 import type {
   SpecialistBlueprintSourceMessageUnavailableReason,
 } from '../../../../shared/agent-specialist-blueprint'
@@ -137,8 +140,10 @@ import {
   stepCollectionIntentTtl,
 } from '../../../../shared/browser-collection-intent'
 import { hasLocalSendImFileIntent } from '../../../../shared/remote-im-file-intent'
-import { classifyFollowupIntent, followupConsultsRecalledContext, detectNegationReleases, type FollowupTaskRef } from '../../../../shared/agent-followup-intent'
+import { classifyFollowupIntent, followupConsultsRecalledContext, detectNegationReleases, hasContinuableTaskRef, type FollowupTaskRef } from '../../../../shared/agent-followup-intent'
 import { isRetryOnlyTurn } from '../skills/skill-detection-inputs'
+import { peekLastReferenceSkill } from '../skills/skill-reference-hints'
+import { shouldDisplayReferenceSkillHintForLatestUserText } from '../reference-skill-hint-display'
 import { wrapRunMetaRepositoryWithCloseoutSnapshot } from '../task-projection/run-meta-snapshot'
 import { recordNegations, releaseNegations, activeNegations } from '../safety/negation-state'
 import { stageSpecialistTaskEvolutionProposal } from '../agents/specialist-task-evolution-proposals'
@@ -546,6 +551,7 @@ interface SkillContextOrchestratorLike {
     managedPath?: string
   }>
   buildPreferredSkillToolNames?: (userText: string, sessionId?: string) => string[] | null
+  peekCurrentReferenceSkillHint?: (sessionId?: string) => { id: string; name: string } | null
   getCurrentReferenceSkillHint?: (sessionId?: string) => { id: string; name: string } | null
   rememberExplicitReferenceSkillHint?: (userText: string, sessionId?: string) => boolean
   maybeInjectExplicitSkillContext?: (params: {
@@ -1162,17 +1168,116 @@ function parseEnvelopeResourceReferences(envelope: unknown): {
 
 function skillAuthorizationTextCandidates(message: RunMessage, envelope: unknown): string[] {
   const record = asRecord(envelope)
-  const candidates = [
+  const envelopeCandidates = [
     parseEnvelopeResourceReferences(envelope).primaryInstruction,
     stringField(record, 'primaryInstruction'),
     stringField(record, 'pureUserText'),
-    stringField(record, 'rawUserText'),
-    primaryInstructionText(message),
-    messageToText(message),
   ]
     .map((item) => String(item || '').trim())
     .filter(Boolean)
-  return Array.from(new Set(candidates))
+  if (envelopeCandidates.length > 0) return Array.from(new Set(envelopeCandidates))
+
+  const rawUserText = stringField(record, 'rawUserText')
+  if (rawUserText && !SDK_CONTEXT_MARKERS.some((marker) => rawUserText.includes(marker))) {
+    return [rawUserText.trim()]
+  }
+
+  const fallback = primaryInstructionText(message).trim()
+  return fallback ? [fallback] : []
+}
+
+interface SkillHintRelevanceDecision {
+  relevant: boolean
+  reason: string
+}
+
+function resolveSkillHintRelevanceForTurn(params: {
+  message: RunMessage
+  requestEnvelope?: unknown
+  sessionId?: string
+  orchestrator: SkillContextOrchestratorLike | null
+  localSendImIntent: boolean
+  continuationIntent?: ContinuationIntent | null
+  continuationState?: ContinuationState | null
+  checkpointRestore?: AgentSdkBudgetCheckpointRestore | null
+  taskRefs?: ReadonlyArray<FollowupTaskRef>
+}): SkillHintRelevanceDecision {
+  if (params.localSendImIntent) return { relevant: true, reason: 'local_send_im' }
+  const userTextCandidates = skillAuthorizationTextCandidates(params.message, params.requestEnvelope)
+  if (params.checkpointRestore || params.continuationIntent || params.continuationState) {
+    return { relevant: true, reason: 'continuation' }
+  }
+  if (userTextCandidates.length === 0 || !params.orchestrator) {
+    return { relevant: false, reason: 'no_skill_signal' }
+  }
+  for (const text of userTextCandidates) {
+    const explicitSkills = params.orchestrator.findExplicitlyRequestedSkills?.(text) || []
+    if (explicitSkills.some((skill) => skill?.id || skill?.skillId)) {
+      return { relevant: true, reason: 'explicit_skill' }
+    }
+  }
+  const referenceHint = resolveReferenceHintSnapshot(params.orchestrator, params.sessionId)
+  if (!referenceHint) return { relevant: false, reason: 'no_reference_hint' }
+  if (params.taskRefs && hasContinuableTaskRef(params.taskRefs)) {
+    return { relevant: true, reason: 'continuable_task' }
+  }
+  for (const text of userTextCandidates) {
+    if (shouldDisplayReferenceSkillHintForLatestUserText({
+      latestUserText: text,
+      skillId: referenceHint.id,
+      skillName: referenceHint.name,
+    })) {
+      return { relevant: true, reason: 'reference_hint_text' }
+    }
+    if (looksLikeNaturalReferenceSkillFollowup(text)) {
+      return { relevant: true, reason: 'natural_followup' }
+    }
+  }
+  return { relevant: false, reason: 'unrelated_turn' }
+}
+
+function resolveReferenceHintSnapshot(
+  orchestrator: SkillContextOrchestratorLike,
+  sessionId?: string,
+): { id: string; name: string } | null {
+  const fromOrchestrator = orchestrator.peekCurrentReferenceSkillHint?.(sessionId)
+  if (fromOrchestrator?.id) return fromOrchestrator
+  const hint = peekLastReferenceSkill(sessionId)
+  return hint ? { id: hint.id, name: hint.name } : null
+}
+
+function looksLikeNaturalReferenceSkillFollowup(text: string): boolean {
+  const normalized = String(text || '').replace(/\s+/g, '').trim()
+  if (!normalized || normalized.length > 80) return false
+  if (/[?？]/.test(normalized)) return false
+  if (/^(?:那就|就按|按(?:这个|那个|第[一二三四五六七八九十0-9]+|第一|第二|第三)|开始吧|执行吧|推进吧)/i.test(normalized)) {
+    return true
+  }
+  if (!/^(?:好|好的|可以|行|嗯|对|没问题|ok|yes|sure)[，,。.!！、]?(?:那|就|按|继续|开始|推进|执行|做|跑|用|走|来|把|从)?/i.test(normalized)) {
+    return false
+  }
+  return /(?:按|照|这个|那个|第[一二三四五六七八九十0-9]+|方案|方向|推进|执行|做|开始|继续|跑|预算|面积|主推|产品)/i.test(normalized)
+}
+
+function isOpenConversationInvitationTurn(message: RunMessage, requestEnvelope?: unknown): boolean {
+  const primary = parseEnvelopeResourceReferences(requestEnvelope).primaryInstruction
+    || primaryInstructionText(message)
+  const text = String(primary || '').trim()
+  if (!text) return false
+  if (/(?:帮我|请|搜索|查询|查一下|打开|生成|制作|保存|写入|整理|分析(?:一下)?|下载|发给)/.test(text)) {
+    return false
+  }
+  return /(?:让你(?:跟|和)我聊|陪我聊|(?:跟|和)我聊|聊聊|聊天).{0,24}(?:你会|怎么|如何|开头|开始|开场)/i.test(text)
+    || /^(?:hi|hello|hey|你好|嗨|哈喽)[，,\s].{0,40}(?:聊|哲学|怎么开头|你会怎么)/i.test(text)
+}
+
+function shouldSuppressAskUserQuestionsForOpenConversation(params: {
+  message: RunMessage
+  requestEnvelope?: unknown
+  authorization: SkillToolAuthorization
+}): boolean {
+  if (params.authorization.mode === 'selected') return false
+  return isOpenConversationInvitationTurn(params.message, params.requestEnvelope)
 }
 
 function resolveAuthorizationPreferredToolNames(authorization: SkillToolAuthorization): string[] | null {
@@ -4017,6 +4122,13 @@ export class AgentSdkRuntime extends EventEmitter {
         params.authorization,
         params.scopeId,
       ))
+    if (shouldSuppressAskUserQuestionsForOpenConversation({
+      message: params.message,
+      requestEnvelope: params.requestEnvelope,
+      authorization: params.authorization,
+    })) {
+      definitions = definitions.filter((definition) => definition.name !== 'ask_user_questions')
+    }
     // WP1: when browser tools are surfaced by collection intent (not by a
     // browser_workflow decision), narrow the browser groups to the collection
     // subset. getToolDefinitionsForGroup expands a whole group, so the subset
@@ -4589,6 +4701,9 @@ export class AgentSdkRuntime extends EventEmitter {
       providerDiagnostics?: AgentSdkProviderDiagnostics | null
       initiator?: string
     }): Promise<ExecutionTurnResult> => {
+      if (params.status === 'done' && usedTools.length === 0) {
+        projectionPatches.push({ taskType: 'direct_answer', module: 'system' })
+      }
       const projectionPatch = this.mergeProjectionPatches(projectionPatches)
       const base = {
         runId,
@@ -4646,6 +4761,7 @@ export class AgentSdkRuntime extends EventEmitter {
         terminalReason,
         taskBudgetRuntime: params.taskBudgetRuntime ?? runMetaBudgetRuntime,
         providerDiagnostics: params.providerDiagnostics ?? runMetaProviderDiagnostics,
+        usage: runMetaUsage,
       })
     }
     let checkpointRequiredCapabilityGroups: string[] = []
@@ -4785,11 +4901,24 @@ export class AgentSdkRuntime extends EventEmitter {
           content as RunMessage,
           effectiveExecutionOptions?.requestEnvelope,
         ))
+      const scopeTaskRefs = this.getScopeTaskRefs && sessionId ? this.getScopeTaskRefs(sessionId) : undefined
+      const skillHintRelevanceForTurn = resolveSkillHintRelevanceForTurn({
+        message: content as RunMessage,
+        sessionId,
+        requestEnvelope: effectiveExecutionOptions?.requestEnvelope,
+        orchestrator: this.skillContextOrchestrator,
+        localSendImIntent: localSendImTurn,
+        continuationIntent: effectiveExecutionOptions?.continuationIntent,
+        continuationState: effectiveExecutionOptions?.continuationState,
+        checkpointRestore,
+        taskRefs: scopeTaskRefs,
+      })
       const authorization = this.resolveSkillAuthorizationForTurn(
         content as RunMessage,
         sessionId,
         effectiveExecutionOptions?.requestEnvelope,
         localSendImTurn,
+        skillHintRelevanceForTurn.relevant,
       )
       const documentTargetGuard = resolveDocumentTargetGuard(content as RunMessage, effectiveExecutionOptions?.requestEnvelope)
       documentTargetGuardForRecovery = documentTargetGuard
@@ -4860,7 +4989,7 @@ export class AgentSdkRuntime extends EventEmitter {
         turnFollowupPrimary,
         {
           hasActiveTaskContext: hasRecalledTaskContext(messageToText(content as RunMessage)),
-          taskRefs: this.getScopeTaskRefs && sessionId ? this.getScopeTaskRefs(sessionId) : undefined,
+          taskRefs: scopeTaskRefs,
         },
       )
       // EP2-I2 — standing negation lifecycle (session lineage): record fresh
@@ -4935,6 +5064,7 @@ export class AgentSdkRuntime extends EventEmitter {
         `restore=${checkpointRestore ? 'true' : 'false'}`,
         `toolCount=${allowedToolNames.length}`,
         `tools=${allowedToolNames.join('|') || 'none'}`,
+        `skillHintRelevant=${skillHintRelevanceForTurn.relevant}:${skillHintRelevanceForTurn.reason}`,
       ].join(' '))
       const definitionByName = new Map(toolDefinitions.map((definition) => [definition.name, definition]))
       const requiredCapabilityGroups = Array.from(new Set(toolDefinitions.map((definition) => definition.groupId)))
@@ -5167,8 +5297,10 @@ export class AgentSdkRuntime extends EventEmitter {
           assistantText,
           toolCallsInCurrentResponse: 0,
           hasSkillAskUserTool: allowedToolNames.includes('skill_ask_user'),
+          isSkillClarificationEligible: skillHintRelevanceForTurn.relevant,
           hasUnfinishedTaskReference: hasUnfinishedActionTaskReference(),
           alreadySteered: skillClarificationSteered,
+          taskType: liveTaskBudgetRuntime?.taskType || null,
         })
         if (decision.kind === 'none') return null
         if (decision.kind === 'steer') {
@@ -5205,7 +5337,7 @@ export class AgentSdkRuntime extends EventEmitter {
           ? checkpoint.projectionPatch.taskContinuation as Record<string, unknown>
           : null
         projectionPatches.push(checkpoint.projectionPatch)
-        finalText = buildSkillClarificationCheckpointMessage(decision.questionSummary)
+        finalText = buildSkillClarificationCheckpointMessage(assistantText)
         emitOutput(finalText, 'text', checkpoint.projectionPatch)
         const finalProjectionPatch = this.mergeProjectionPatches(projectionPatches)
         await finalizeRunOutcome({
@@ -5244,6 +5376,7 @@ export class AgentSdkRuntime extends EventEmitter {
           terminalReason: 'checkpoint_steered',
           taskBudgetRuntime: liveTaskBudgetRuntime,
           providerDiagnostics: runMetaProviderDiagnostics,
+          usage: runMetaUsage,
         })
       }
       const maybeHandleActionAnnouncementGuard = async (
@@ -5334,6 +5467,7 @@ export class AgentSdkRuntime extends EventEmitter {
           terminalReason: 'checkpoint_steered',
           taskBudgetRuntime: liveTaskBudgetRuntime,
           providerDiagnostics: runMetaProviderDiagnostics,
+          usage: runMetaUsage,
         })
       }
       const sdkTools = useTextToolBridge
@@ -6100,6 +6234,9 @@ export class AgentSdkRuntime extends EventEmitter {
         const checkpointResult = await finishBudgetCheckpointIfNeeded()
         if (checkpointResult) return checkpointResult
       }
+      if (usedTools.length === 0) {
+        projectionPatches.push({ taskType: 'direct_answer', module: 'system' })
+      }
       const finalProjectionPatch = this.mergeProjectionPatches(projectionPatches)
       const finalizedDone = await finalizeRunOutcome({
         kind: 'done',
@@ -6148,6 +6285,7 @@ export class AgentSdkRuntime extends EventEmitter {
         terminalReason: finalizedTerminalReason,
         taskBudgetRuntime: liveTaskBudgetRuntime,
         providerDiagnostics: runMetaProviderDiagnostics,
+        usage: runMetaUsage,
       })
     } catch (error) {
       if (isAbortError(error)) {
@@ -6179,6 +6317,7 @@ export class AgentSdkRuntime extends EventEmitter {
             terminalReason,
             taskBudgetRuntime: runMetaBudgetRuntime,
             providerDiagnostics: runMetaProviderDiagnostics,
+            usage: runMetaUsage,
           })
         }
         await finalizeRunOutcome({
@@ -6213,6 +6352,9 @@ export class AgentSdkRuntime extends EventEmitter {
           transcriptEvents,
           projectionPatches,
           terminalReason,
+          taskBudgetRuntime: runMetaBudgetRuntime,
+          providerDiagnostics: runMetaProviderDiagnostics,
+          usage: runMetaUsage,
           scopeRunAuthority: preemptedByNewerSend
             ? {
               state: 'lost',
@@ -6330,6 +6472,9 @@ export class AgentSdkRuntime extends EventEmitter {
         transcriptEvents,
         projectionPatches,
         terminalReason: failure.terminalReason,
+        taskBudgetRuntime: runMetaBudgetRuntime,
+        providerDiagnostics: runMetaProviderDiagnostics,
+        usage: runMetaUsage,
       })
     } finally {
       try {
@@ -6986,6 +7131,7 @@ export class AgentSdkRuntime extends EventEmitter {
     sessionId?: string,
     requestEnvelope?: unknown,
     forceLocalSendImIntent = false,
+    skillHintRelevantForTurn = false,
   ): SkillToolAuthorization {
     const localSendImIntent = forceLocalSendImIntent || hasLocalSendImIntentForTurn(message, requestEnvelope)
     const orchestrator = this.skillContextOrchestrator
@@ -7020,6 +7166,9 @@ export class AgentSdkRuntime extends EventEmitter {
         log(`rememberExplicitReferenceSkillHint failed: ${errorMessage(error)}`)
       }
     }
+    if (!localSendImIntent && !explicitSkillId && !skillHintRelevantForTurn) {
+      return buildExplicitNoSkillAuthorization('no_skill_signal')
+    }
 
     const referenceHint = orchestrator.getCurrentReferenceSkillHint?.(sessionId) || null
     const preferredToolNames = userTextCandidates.flatMap((text) =>
@@ -7035,7 +7184,7 @@ export class AgentSdkRuntime extends EventEmitter {
       typedActionNames.add('skill_video_expert_ai_analyze')
     }
     const typedActions = Array.from(typedActionNames)
-    const skillId = explicitSkillId || (typedActions.length > 0 ? referenceHint?.id || null : null)
+    const skillId = explicitSkillId || (skillHintRelevantForTurn ? referenceHint?.id || null : null)
     if (!skillId) return buildExplicitNoSkillAuthorization('no_skill_signal')
     const allowRunShell = explicitReferenceSkillHasScripts(explicitSkill, typedActions)
     const allowAskUser = !shouldSuppressSkillAskUserForArtifactDelivery(userTextCandidates)
@@ -7226,11 +7375,18 @@ export class AgentSdkRuntime extends EventEmitter {
     terminalReason: TurnTerminalReason
     taskBudgetRuntime?: TaskBudgetRuntime | null
     providerDiagnostics?: AgentSdkProviderDiagnostics | null
+    usage?: ReadyAgentSdkRunResult['usage'] | null
     error?: string
     scopeRunAuthority?: ExecutionTurnResult['scopeRunAuthority']
   }): ExecutionTurnResult {
     const taskType = this.resolveTaskTypeFromTools(params.usedTools)
     const budgetDiagnostics = taskBudgetDiagnostics(params.taskBudgetRuntime || null)
+    const contextUsage = buildContextUsageSnapshot({
+      inputTokens: params.usage?.inputTokens ?? null,
+      windowTokens: params.providerDiagnostics?.contextWindow ?? null,
+      windowSource: params.providerDiagnostics?.contextWindowSource ?? null,
+      timestamp: new Date().toISOString(),
+    })
     return {
       success: params.success,
       status: params.cancelled
@@ -7253,8 +7409,10 @@ export class AgentSdkRuntime extends EventEmitter {
         budgetUsagePercent: budgetDiagnostics.budgetUsagePercent,
         budgetWarningLevel: budgetDiagnostics.budgetWarningLevel,
         providerDiagnostics: params.providerDiagnostics || null,
+        contextUsage,
         toolSnapshots: null,
       },
+      contextUsage,
       projectionTruth: {
         projectionPatch: this.mergeProjectionPatches(params.projectionPatches),
         transcriptEvents: params.transcriptEvents,

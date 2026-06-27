@@ -287,6 +287,7 @@ export class RunCoordinator {
       blockedReason: finalBlockedReason,
       taskContinuation: finalTaskContinuation,
       taskProjectionId: result.taskProjectionId || result.taskId || taskId,
+      contextUsage: result.contextUsage ?? result.executionDiagnostics?.contextUsage ?? null,
       executionDiagnostics: {
         taskId: result.taskId || taskId,
         taskBudgetRuntime: resolvedTaskBudgetRuntime || taskBudgetRuntime,
@@ -302,6 +303,7 @@ export class RunCoordinator {
         recoveryHistory: result.executionDiagnostics?.recoveryHistory ?? null,
         degradationReason: result.executionDiagnostics?.degradationReason ?? null,
         pipeline: result.executionDiagnostics?.pipeline ?? null,
+        contextUsage: result.contextUsage ?? result.executionDiagnostics?.contextUsage ?? null,
       },
       timestamp: new Date().toISOString(),
     }, result.projectionTruth || null)

@@ -157,6 +157,7 @@ export class RunProjection {
           : previous?.progress ?? null,
       memoryCapture: payload.memoryCapture ?? previous?.memoryCapture ?? null,
       executionDiagnostics: payload.executionDiagnostics ?? previous?.executionDiagnostics ?? null,
+      contextUsage: payload.contextUsage ?? payload.executionDiagnostics?.contextUsage ?? previous?.contextUsage ?? null,
       budgetUsagePercent:
         payload.budgetUsagePercent
         ?? payload.executionDiagnostics?.budgetUsagePercent

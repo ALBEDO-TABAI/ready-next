@@ -561,10 +561,16 @@ test('agent sdk runtime suppresses browser task tools for active VEA skill resum
     skillContextOrchestrator: {
       findExplicitlyRequestedSkills: () => [],
       buildPreferredSkillToolNames: () => [],
+      peekCurrentReferenceSkillHint: () => activeSkillHint
+        ? { id: 'video-expert-analyzer', name: 'Video Expert Analyzer' }
+        : null,
       getCurrentReferenceSkillHint: () => activeSkillHint
         ? { id: 'video-expert-analyzer', name: 'Video Expert Analyzer' }
         : null,
     },
+    getScopeTaskRefs: () => activeSkillHint
+      ? [{ taskId: 'task-vea-active', status: 'running' }]
+      : [],
     runAgent: async ({ tools }) => {
       seenToolNames.push(tools.map((tool) => tool.name))
       return { finalText: 'ok' }
@@ -4956,6 +4962,87 @@ test('agent sdk runtime uses Ready text bridge for non-native tool transports', 
   )
 })
 
+test('agent sdk runtime keeps skill eligibility fixed across text-bridge iterations', async () => {
+  const prompt = 'hi，今天让你跟我聊哲学的话，你会怎么开头'
+  const finalAnswer = '不是需要补充信息才能继续；我已经给了两个切入口：1. 我是谁？2. 今天的问题是什么？'
+  const webTool = createToolDefinition({ name: 'web_search', description: 'Search the web' })
+  const skillAskTool = createToolDefinition({
+    name: 'skill_ask_user',
+    groupId: 'skills',
+    domain: 'skill',
+    kind: 'interactive',
+    description: 'Ask user for active skill clarification',
+    schema: {
+      type: 'object',
+      properties: {
+        question: { type: 'string' },
+      },
+      required: ['question'],
+      additionalProperties: false,
+    },
+  })
+  let runCount = 0
+  const outputEvents: Array<Record<string, unknown>> = []
+  const runtime = createRuntime({
+    loadAIConfig: () => ({
+      ok: true,
+      reason: 'present',
+      config: {
+        ...fakeConfig,
+        provider: 'openai-compatible',
+        baseUrl: 'https://code.newcli.com/codex/v1',
+        agentProtocol: 'openai',
+        wireApi: 'chat/completions',
+      },
+    }),
+    skillContextOrchestrator: {
+      findExplicitlyRequestedSkills: () => [],
+      peekCurrentReferenceSkillHint: () => ({ id: 'hfp-space-design', name: 'hfp-space-design' }),
+      getCurrentReferenceSkillHint: () => {
+        throw new Error('unrelated chat must not consume stale skill hint')
+      },
+      buildPreferredSkillToolNames: () => {
+        throw new Error('unrelated chat must not expose skill primitives')
+      },
+    },
+    listToolDefinitions: () => [webTool, skillAskTool],
+    executeToolCall: async () => createToolExecutionOutput('found result', { shape: 'json', data: { ok: true } }),
+    runAgent: async ({ input }) => {
+      runCount += 1
+      if (runCount === 1) {
+        return {
+          finalText: [
+            ':::tool_call',
+            '{"tool":"web_search","args":{"query":"philosophy opener"}}',
+            ':::',
+          ].join('\n'),
+        }
+      }
+      assert.match(String(input), /found result/)
+      return { finalText: finalAnswer }
+    },
+  })
+  runtime.on('output', (event) => outputEvents.push(event))
+  runtime.newSession('butler::scope-stale-skill-text-bridge', 'system prompt')
+
+  const result = await runtime.sendMessage('butler::scope-stale-skill-text-bridge', prompt, 'run-stale-skill-text-bridge', {
+    publicSessionId: 'scope-stale-skill-text-bridge',
+    taskId: 'task-stale-skill-text-bridge',
+    requestEnvelope: {
+      primaryInstruction: prompt,
+      pureUserText: prompt,
+      rawUserText: prompt,
+      resources: [],
+    },
+  })
+
+  assert.equal(runCount, 2)
+  assert.equal(result.success, true)
+  assert.equal(result.terminalReason, 'done')
+  assert.equal(result.finalText, finalAnswer)
+  assert.equal(outputEvents.some((event) => String(event.chunk || '').includes('未能打开反问卡')), false)
+})
+
 test('agent sdk runtime exposes authorized skill tools for explicit skill turns', async () => {
   const seenToolNames: string[] = []
   let remembered = false
@@ -5017,6 +5104,216 @@ test('agent sdk runtime exposes authorized skill tools for explicit skill turns'
     __setSkillActionToolDefsForTests(null)
     clearLastReferenceSkill('scope-skill-tools')
   }
+})
+
+test('agent sdk runtime does not expose clarification tools for unrelated chat with stale reference hint', async () => {
+  const prompt = 'hi，今天让你跟我聊哲学的话，你会怎么开头'
+  const answer = '我会从一个能把球轻轻传回给你的问题开始：我到底是谁？如果今天只谈一件事，什么问题最值得停下来？'
+  const seenToolNames: string[] = []
+  const outputEvents: Array<Record<string, unknown>> = []
+  const runtime = createRuntime({
+    skillContextOrchestrator: {
+      findExplicitlyRequestedSkills: () => [],
+      peekCurrentReferenceSkillHint: () => ({ id: 'hfp-space-design', name: 'hfp-space-design' }),
+      getCurrentReferenceSkillHint: () => {
+        throw new Error('stale reference hint should not be consumed for unrelated chat')
+      },
+      buildPreferredSkillToolNames: () => {
+        throw new Error('stale reference hint should not expose skill primitives')
+      },
+    },
+    runAgent: async ({ tools, onTextDelta }) => {
+      seenToolNames.push(...tools.map((item) => item.name))
+      onTextDelta(answer)
+      return { finalText: answer }
+    },
+  })
+  runtime.on('output', (event) => outputEvents.push(event))
+  runtime.newSession('butler::scope-stale-skill-chat', 'system prompt')
+
+  const result = await runtime.sendMessage('butler::scope-stale-skill-chat', prompt, 'run-stale-skill-chat', {
+    publicSessionId: 'scope-stale-skill-chat',
+    taskId: 'task-stale-skill-chat',
+    requestEnvelope: {
+      primaryInstruction: prompt,
+      pureUserText: prompt,
+      rawUserText: prompt,
+      resources: [],
+    },
+  })
+
+  assert.equal(result.success, true)
+  assert.equal(result.terminalReason, 'done')
+  assert.equal(result.finalText, answer)
+  assert.equal(seenToolNames.includes('skill_ask_user'), false)
+  assert.equal(seenToolNames.includes('ask_user_questions'), false)
+  assert.equal(outputEvents.some((event) => event.type === 'text' && String(event.chunk || '').includes(answer)), true)
+  assert.equal(outputEvents.some((event) => String(event.chunk || '').includes('未能打开反问卡')), false)
+})
+
+test('agent sdk runtime ignores stale skill names in assembled context for no-tool image analysis', async () => {
+  const taskId = 'task-image-analysis-direct'
+  const now = new Date('2026-06-27T06:25:00.000Z').toISOString()
+  const rows = new Map<string, TaskProjectionRecord>()
+  rows.set(taskId, {
+    taskId,
+    scopeId: 'scope-image-analysis-direct',
+    runId: 'run-image-analysis-direct',
+    taskType: 'multi_step_task',
+    module: 'skill',
+    status: 'running',
+    interactionState: 'running',
+    steps: [],
+    proofRefs: [],
+    createdAt: now,
+    updatedAt: now,
+  } as TaskProjectionRecord)
+  const store = {
+    get: (id: string) => rows.get(id) ?? null,
+    update: (id: string, patch: Partial<TaskProjectionRecord>) => {
+      rows.set(id, { ...rows.get(id)!, ...patch })
+    },
+  }
+  const userPrompt = '那你试试按照这几层的方法来分析这张图'
+  const assembledMessage = [
+    '## 环境信息',
+    '旧上下文提到 hfp-space-design，但这不是本轮用户要求。',
+    '## 最近会话摘要',
+    '上一轮使用过 hfp-space-design。',
+    '',
+    userPrompt,
+  ].join('\n')
+  const answer = '分析已经完成了。简单总结一下：先看清楚是什么，再判断它为什么这样呈现。'
+  const seenToolNames: string[] = []
+  const scannedTexts: string[] = []
+  const runtime = createRuntime({
+    skillContextOrchestrator: {
+      findExplicitlyRequestedSkills: (text: string) => {
+        scannedTexts.push(text)
+        return text.includes('hfp-space-design')
+          ? [{ id: 'hfp-space-design', name: 'hfp-space-design' }]
+          : []
+      },
+      peekCurrentReferenceSkillHint: () => ({ id: 'hfp-space-design', name: 'hfp-space-design' }),
+      getCurrentReferenceSkillHint: () => {
+        throw new Error('stale context-only skill mention must not be consumed')
+      },
+      buildPreferredSkillToolNames: () => {
+        throw new Error('stale context-only skill mention must not expose primitives')
+      },
+      rememberExplicitReferenceSkillHint: () => {
+        throw new Error('context-only skill mention must not be remembered as explicit')
+      },
+    },
+    runAgent: async ({ tools, onTextDelta }) => {
+      seenToolNames.push(...tools.map((item) => item.name))
+      onTextDelta(answer)
+      return { finalText: answer }
+    },
+  })
+  runtime.setRuntime({
+    publishScopeRunEvent: () => {},
+    getTaskProjectionStoreForFinalize: () => store,
+  } as never)
+  runtime.newSession('butler::scope-image-analysis-direct', 'system prompt')
+
+  const result = await runtime.sendMessage(
+    'butler::scope-image-analysis-direct',
+    assembledMessage,
+    'run-image-analysis-direct',
+    {
+      publicSessionId: 'scope-image-analysis-direct',
+      taskId,
+      requestEnvelope: {
+        primaryInstruction: userPrompt,
+        pureUserText: userPrompt,
+        rawUserText: assembledMessage,
+        resources: [{ name: 'download-2.jpg', path: '/tmp/download-2.jpg', kind: 'image' }],
+      },
+    },
+  )
+
+  assert.equal(result.success, true)
+  assert.equal(result.terminalReason, 'done')
+  assert.equal(result.taskType, 'direct_answer')
+  assert.equal(result.finalText, answer)
+  assert.equal(seenToolNames.includes('skill_ask_user'), false)
+  assert.equal(scannedTexts.some((text) => text.includes('hfp-space-design')), false)
+  const row = rows.get(taskId)!
+  const checkins = row.checkins as CheckInRecord[]
+  assert.equal(checkins[0].verdict, 'accept')
+  assert.equal((row.proofRefs as Array<{ kind: string }>).some((proof) => proof.kind === 'assistant_response'), true)
+})
+
+test('agent sdk runtime keeps stale reference tools for natural skill follow-ups', async () => {
+  const seenToolNames: string[] = []
+  const runtime = createRuntime({
+    skillContextOrchestrator: {
+      findExplicitlyRequestedSkills: () => [],
+      peekCurrentReferenceSkillHint: () => ({ id: 'hfp-space-design', name: 'hfp-space-design' }),
+      getCurrentReferenceSkillHint: () => ({ id: 'hfp-space-design', name: 'hfp-space-design' }),
+      buildPreferredSkillToolNames: () => ['skill_ask_user', 'skill_inspect_run_state'],
+    },
+    runAgent: async ({ tools }) => {
+      seenToolNames.push(...tools.map((item) => item.name))
+      return { finalText: '继续推进' }
+    },
+  })
+  runtime.newSession('butler::scope-natural-skill-followup', 'system prompt')
+
+  const result = await runtime.sendMessage(
+    'butler::scope-natural-skill-followup',
+    '好的，那就按第二个方案推进，预算两万',
+    'run-natural-skill-followup',
+    {
+      publicSessionId: 'scope-natural-skill-followup',
+      taskId: 'task-natural-skill-followup',
+      requestEnvelope: {
+        primaryInstruction: '好的，那就按第二个方案推进，预算两万',
+        resources: [],
+      },
+    },
+  )
+
+  assert.equal(result.success, true)
+  assert.equal(seenToolNames.includes('skill_ask_user'), true)
+  assert.equal(seenToolNames.includes('skill_inspect_run_state'), true)
+})
+
+test('agent sdk runtime keeps reference tools for unfinished skill task facts', async () => {
+  const seenToolNames: string[] = []
+  const runtime = createRuntime({
+    skillContextOrchestrator: {
+      findExplicitlyRequestedSkills: () => [],
+      peekCurrentReferenceSkillHint: () => ({ id: 'hfp-space-design', name: 'hfp-space-design' }),
+      getCurrentReferenceSkillHint: () => ({ id: 'hfp-space-design', name: 'hfp-space-design' }),
+      buildPreferredSkillToolNames: () => ['skill_ask_user', 'skill_inspect_run_state'],
+    },
+    getScopeTaskRefs: () => [{ taskId: 'task-hfp-active', status: 'running' }],
+    runAgent: async ({ tools }) => {
+      seenToolNames.push(...tools.map((item) => item.name))
+      return { finalText: '继续推进' }
+    },
+  })
+  runtime.newSession('butler::scope-active-skill-followup', 'system prompt')
+
+  const result = await runtime.sendMessage(
+    'butler::scope-active-skill-followup',
+    '好的，那就按第二个方案继续推进，预算两万，门店面积大概三十平',
+    'run-active-skill-followup',
+    {
+      publicSessionId: 'scope-active-skill-followup',
+      taskId: 'task-active-skill-followup',
+      requestEnvelope: {
+        primaryInstruction: '好的，那就按第二个方案继续推进，预算两万，门店面积大概三十平',
+        resources: [],
+      },
+    },
+  )
+
+  assert.equal(result.success, true)
+  assert.equal(seenToolNames.includes('skill_ask_user'), true)
+  assert.equal(seenToolNames.includes('skill_inspect_run_state'), true)
 })
 
 test('agent sdk runtime exposes skill_run_shell for explicit script-backed reference skills', async () => {

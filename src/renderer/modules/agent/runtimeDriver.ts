@@ -1603,6 +1603,7 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
             memoryRefs: patch.memoryRefs ?? event.memoryRefs ?? previousForRun?.memoryRefs ?? [],
             triggerHits: patch.triggerHits ?? event.triggerHits ?? previousForRun?.triggerHits ?? [],
             contextBudget: patch.contextBudget ?? event.contextBudget ?? previousForRun?.contextBudget ?? null,
+            contextUsage: patch.contextUsage ?? event.contextUsage ?? previousForRun?.contextUsage ?? null,
             ownerResourceId: patch.ownerResourceId ?? event.ownerResourceId ?? previousForRun?.ownerResourceId ?? null,
             lastEvidenceAt: patch.lastEvidenceAt ?? event.lastEvidenceAt ?? previousForRun?.lastEvidenceAt ?? null,
             blockedReason: patch.blockedReason ?? previousForRun?.blockedReason ?? null,

@@ -177,7 +177,7 @@ export function mapBackendErrorToFriendly(input: {
 
   if (errorKind === 'proof_gap') {
     return {
-      friendlyMessage: '结果证据不足，请继续这项任务',
+      friendlyMessage: '这轮还没完整完成，可以继续发送',
       technicalDetails: error || undefined,
       recoverable: true,
       retryStrategy: 'user_action',

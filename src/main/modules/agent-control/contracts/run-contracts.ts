@@ -56,6 +56,7 @@ import type { SkillTaskSupervisorSnapshot } from '../skills/skill-task-superviso
 import type { TurnTerminalReason } from '../runtime-core/turn-frame'
 import type { CapabilityGroupId } from '../../../../shared/ai-capability-groups'
 import type { SkillChildRunStatus as SharedSkillChildRunStatus } from '../../../../shared/skill-child-run-status'
+import type { ContextUsageSnapshot } from '../../../../shared/context-usage-types'
 import type { SkillRunContract } from './skill-run-contract'
 import type { RecoveryRecord, ToolSnapshot } from './tool-telemetry-contracts'
 import type {
@@ -461,6 +462,7 @@ export interface ExecutionRunDiagnostics {
     protocolSource?: 'explicit' | 'inferred' | null
     contextWindowSource?: 'explicit' | 'model' | 'fallback' | null
   } | null
+  contextUsage?: ContextUsageSnapshot | null
   budgetLease?: {
     leaseId: string
     decision: SkillBudgetLeaseDecision
@@ -554,6 +556,7 @@ export interface ExecutionHostResult {
   interactionState?: TaskInteractionState
   taskProjectionId?: string | null
   executionDiagnostics?: ExecutionRunDiagnostics | null
+  contextUsage?: ContextUsageSnapshot | null
   projectionTruth?: ProjectionTruthSnapshot | null
   skillTaskLifecycle?: SkillTaskLifecycleSignal | null
   terminalReason?: TurnTerminalReason | null
@@ -572,6 +575,7 @@ export interface ExecutionTurnResult {
   interactionState?: TaskInteractionState
   taskProjectionId?: string | null
   executionDiagnostics?: ExecutionRunDiagnostics | null
+  contextUsage?: ContextUsageSnapshot | null
   projectionTruth?: ProjectionTruthSnapshot | null
   skillTaskLifecycle?: SkillTaskLifecycleSignal | null
   terminalReason?: TurnTerminalReason | null

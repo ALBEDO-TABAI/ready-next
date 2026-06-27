@@ -1,5 +1,6 @@
 import type { TurnTerminalReason } from '../runtime-core/turn-frame'
 import type { TaskType } from '../../../../shared/task-types'
+import type { ContextUsageSnapshot } from '../../../../shared/context-usage-types'
 
 export type ChannelAdapterType =
   | 'local-debug'
@@ -359,6 +360,7 @@ export interface ScopeRunExecutionDiagnostics {
   } | null
   budgetUsagePercent?: number | null
   budgetWarningLevel?: 'none' | 'warning' | 'converge' | 'exhausted' | null
+  contextUsage?: ContextUsageSnapshot | null
   budgetLease?: import('./run-contracts').ExecutionRunDiagnostics['budgetLease']
   recoveryHistory?: Array<{
     kind: string
@@ -421,6 +423,7 @@ export interface ScopeRunSummary {
   progress?: ScopeRunSkillProgress | null
   memoryCapture?: ScopeRunMemoryCapture | null
   executionDiagnostics?: ScopeRunExecutionDiagnostics | null
+  contextUsage?: ContextUsageSnapshot | null
   budgetUsagePercent?: number | null
   recoveryHistory?: ScopeRunExecutionDiagnostics['recoveryHistory']
   degradationReason?: string | null
@@ -484,6 +487,7 @@ export interface ScopeRunEventPayload {
   memoryRefs?: ScopeRunMemoryRef[]
   triggerHits?: ScopeRunTriggerHit[]
   contextBudget?: ScopeRunContextBudget | null
+  contextUsage?: ContextUsageSnapshot | null
   ownerResourceId?: string
   lastEvidenceAt?: string
   toolEvent?: ScopeRunTraceItem

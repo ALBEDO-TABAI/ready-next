@@ -7,7 +7,10 @@ import {
   type AgentSdkRuntimeDeps,
 } from '../main/modules/agent-control/runtime-core/agent-sdk-runtime'
 import { evaluateActionAnnouncementGuard } from '../main/modules/agent-control/runtime-core/action-announcement-guard'
-import { evaluateSkillClarificationGuard } from '../main/modules/agent-control/runtime-core/skill-clarification-guard'
+import {
+  buildSkillClarificationCheckpointMessage,
+  evaluateSkillClarificationGuard,
+} from '../main/modules/agent-control/runtime-core/skill-clarification-guard'
 import { canResumeShape } from '../main/modules/agent-control/contracts/resume-handle'
 import type { ToolDefinition } from '../main/modules/agent-control/tools-runtime/tool-definition'
 import { ScriptedAgentRunner } from './helpers/scripted-agent-runner'
@@ -288,6 +291,7 @@ describe('skill clarification guard', () => {
       assistantText: hfpClarificationText,
       toolCallsInCurrentResponse: 0,
       hasSkillAskUserTool: true,
+      isSkillClarificationEligible: true,
       hasUnfinishedTaskReference: true,
       alreadySteered: false,
     })
@@ -300,6 +304,7 @@ describe('skill clarification guard', () => {
       assistantText: '可以补充主推产品、门店面积和核心目标，但我也可以先按默认假设继续。',
       toolCallsInCurrentResponse: 0,
       hasSkillAskUserTool: true,
+      isSkillClarificationEligible: true,
       hasUnfinishedTaskReference: false,
       alreadySteered: false,
     })
@@ -312,6 +317,7 @@ describe('skill clarification guard', () => {
       assistantText: '方案已完成，文件已保存。需要我继续调整或生成效果图吗？',
       toolCallsInCurrentResponse: 0,
       hasSkillAskUserTool: true,
+      isSkillClarificationEligible: true,
       hasUnfinishedTaskReference: false,
       alreadySteered: false,
     })
@@ -324,6 +330,7 @@ describe('skill clarification guard', () => {
       assistantText: hfpClarificationText,
       toolCallsInCurrentResponse: 0,
       hasSkillAskUserTool: false,
+      isSkillClarificationEligible: true,
       hasUnfinishedTaskReference: true,
       alreadySteered: false,
     })
@@ -336,11 +343,69 @@ describe('skill clarification guard', () => {
       assistantText: '我需要你补充主推产品、门店面积和核心目标后再继续。',
       toolCallsInCurrentResponse: 0,
       hasSkillAskUserTool: true,
+      isSkillClarificationEligible: true,
       hasUnfinishedTaskReference: true,
       alreadySteered: true,
     })
 
     assert.equal(decision.kind, 'checkpoint')
+  })
+
+  test('does not steer conversational answers when this user turn is not skill-eligible', () => {
+    const answer = [
+      '我会从一个能把球轻轻传回给你的问题开始：',
+      '',
+      '1. “我”到底是谁？',
+      '2. 如果今天只谈一件事，什么问题最值得停下来？',
+      '',
+      '这不是需要补充信息才能推进的任务，只是一个开放对话邀请。',
+    ].join('\n')
+    const decision = evaluateSkillClarificationGuard({
+      assistantText: answer,
+      toolCallsInCurrentResponse: 0,
+      hasSkillAskUserTool: true,
+      isSkillClarificationEligible: false,
+      hasUnfinishedTaskReference: true,
+      alreadySteered: false,
+    })
+
+    assert.equal(decision.kind, 'none')
+  })
+
+  test('does not checkpoint negated clarification language after a steer', () => {
+    const decision = evaluateSkillClarificationGuard({
+      assistantText: '不是需要补充信息才能继续；我已经给了两个切入口：1. 我是谁？2. 今天的问题是什么？',
+      toolCallsInCurrentResponse: 0,
+      hasSkillAskUserTool: true,
+      isSkillClarificationEligible: true,
+      hasUnfinishedTaskReference: true,
+      alreadySteered: true,
+    })
+
+    assert.equal(decision.kind, 'none')
+  })
+
+  test('direct-answer task type is auxiliary insurance against skill clarification steering', () => {
+    const decision = evaluateSkillClarificationGuard({
+      assistantText: hfpClarificationText,
+      toolCallsInCurrentResponse: 0,
+      hasSkillAskUserTool: true,
+      isSkillClarificationEligible: true,
+      hasUnfinishedTaskReference: true,
+      alreadySteered: false,
+      taskType: 'direct_answer',
+    })
+
+    assert.equal(decision.kind, 'none')
+  })
+
+  test('checkpoint message preserves model text and does not claim the card failed to open', () => {
+    const original = '我需要你补充主推产品、门店面积和核心目标后再继续。'
+    const message = buildSkillClarificationCheckpointMessage(original)
+
+    assert.match(message, /主推产品、门店面积和核心目标/)
+    assert.doesNotMatch(message, /未能打开反问卡/)
+    assert.doesNotMatch(message, /我需要你补充“/)
   })
 
   test('runtime steers skill clarification before emitting the plain question list', async () => {

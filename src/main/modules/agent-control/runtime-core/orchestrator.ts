@@ -76,6 +76,7 @@ interface ActiveRunLiveness {
 
 type SendAndCollectExecutionResult = SendAndCollectResult & {
   scopeRunAuthority?: ExecutionHostResult['scopeRunAuthority']
+  contextUsage?: ExecutionHostResult['contextUsage']
 }
 
 type PersonaSystemPromptResolver = (agent: string) => Promise<string | undefined>
@@ -549,6 +550,7 @@ export class ReadyAgentOrchestrator extends EventEmitter {
     interactionState?: ExecutionHostResult['interactionState']
     taskProjectionId?: ExecutionHostResult['taskProjectionId']
     executionDiagnostics?: ExecutionHostResult['executionDiagnostics']
+    contextUsage?: ExecutionHostResult['contextUsage']
     projectionTruth?: ExecutionHostResult['projectionTruth']
     terminalReason?: ExecutionHostResult['terminalReason']
     scopeRunAuthority?: ExecutionHostResult['scopeRunAuthority']
@@ -645,6 +647,7 @@ export class ReadyAgentOrchestrator extends EventEmitter {
     let projectionTruth: ExecutionHostResult['projectionTruth']
     let terminalReason: ExecutionHostResult['terminalReason']
     let scopeRunAuthority: ExecutionHostResult['scopeRunAuthority']
+    let contextUsage: ExecutionHostResult['contextUsage']
     let usedToolsFromExecution: string[] | null = null
     const sendResultPromise = this.send(
       agent,
@@ -671,6 +674,7 @@ export class ReadyAgentOrchestrator extends EventEmitter {
       projectionTruth = result.projectionTruth
       terminalReason = result.terminalReason
       scopeRunAuthority = result.scopeRunAuthority
+      contextUsage = result.contextUsage
       usedToolsFromExecution = result.usedTools || null
       if (!result.success) {
         collector.handleError({
@@ -726,6 +730,7 @@ export class ReadyAgentOrchestrator extends EventEmitter {
             projectionTruth: projectionTruth || executionResult.projectionTruth,
             terminalReason: terminalReason || executionResult.terminalReason || (executionResult.cancelled ? 'cancelled_runtime' : null),
             scopeRunAuthority: scopeRunAuthority || executionResult.scopeRunAuthority,
+            contextUsage: contextUsage || executionResult.contextUsage || null,
           }
         }
         return {
@@ -749,6 +754,7 @@ export class ReadyAgentOrchestrator extends EventEmitter {
         projectionTruth,
         terminalReason,
         scopeRunAuthority,
+        contextUsage,
       }
     } finally {
       while (cleanupFns.length > 0) {
@@ -791,6 +797,7 @@ export class ReadyAgentOrchestrator extends EventEmitter {
       projectionTruth: result.projectionTruth || null,
       terminalReason: result.terminalReason || null,
       scopeRunAuthority: result.scopeRunAuthority,
+      contextUsage: result.contextUsage || null,
     }
   }
 

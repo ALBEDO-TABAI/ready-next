@@ -1,4 +1,6 @@
 // Legacy design types (design mode removed)
+import type { ContextUsageSnapshot } from '../../../shared/context-usage-types'
+
 type DesignLayoutBounds = { x: number; y: number; w: number; h: number }
 type DesignLayoutDigest = Record<string, unknown>
 type DesignRepairScope = 'run-owned' | 'selected'
@@ -374,6 +376,7 @@ export interface ScopeRunExecutionDiagnostics {
       usedSectionAnchors?: boolean
     } | null
   } | null
+  contextUsage?: ContextUsageSnapshot | null
 }
 
 export interface ScopeRunStepMetrics {
@@ -452,6 +455,7 @@ export interface ScopeRunState {
   memoryRefs?: AgentMemoryRef[]
   triggerHits?: AgentTriggerHit[]
   contextBudget?: AgentContextBudget | null
+  contextUsage?: ContextUsageSnapshot | null
   ownerResourceId?: string | null
   lastEvidenceAt?: string | null
   blockedReason?: string | null

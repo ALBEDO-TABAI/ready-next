@@ -143,6 +143,18 @@ test('maps local max-turn exhaustion without calling it model unavailable', () =
   assert.doesNotMatch(result.friendlyMessage, /模型服务|暂时不可用/)
 })
 
+test('maps proof gaps without exposing internal evidence wording', () => {
+  const result = mapBackendErrorToFriendly({
+    error: 'proof_gap',
+    errorKind: 'proof_gap',
+  })
+
+  assert.equal(result.friendlyMessage, '这轮还没完整完成，可以继续发送')
+  assert.equal(result.recoverable, true)
+  assert.equal(result.retryStrategy, 'user_action')
+  assert.doesNotMatch(result.friendlyMessage, /证据/)
+})
+
 test('unknown errors fall back to generic copy with technical details separated', () => {
   const result = mapBackendErrorToFriendly({ error: 'opaque backend detail' })
 

@@ -1,14 +1,15 @@
 import { forwardRef, useRef, useEffect, useState, useImperativeHandle, useCallback, useMemo } from 'react'
 import { createPortal } from 'react-dom'
-import { ArrowUp, AtSign, Plus, Square, Undo2, ChevronDown, Puzzle } from 'lucide-react'
-import { IconButton } from '../ui/IconButton'
+import { ArrowUp, Plus, Square, ChevronDown, Puzzle } from 'lucide-react'
 import { LiquidLens } from '../ui/liquid-glass/LiquidLens'
 import { LiquidBackdropProjection } from '../ui/liquid-glass/LiquidBackdropProjection'
 import { LiquidFloatingPanel } from '../ui/liquid-glass/LiquidFloatingPanel'
 import type { ChatAttachment } from '../../stores/useAgent'
 import type { ReadySkillReference } from '../../modules/agent/chat-input-bridge'
 import type { NativeContextMenuItem } from '../../../shared/native-context-menu'
+import type { ContextUsageSnapshot } from '../../../shared/context-usage-types'
 import { chatMenuItemStyle, chatMenuSurfaceStyle } from './chatMenuStyles'
+import { ContextUsageMeter } from './chat-panel/ContextUsageMeter'
 import {
   buildSlashSkillInsertion,
   filterSlashSkills,
@@ -23,6 +24,7 @@ interface ChatInputProps {
   pendingSendCount: number
   pendingSendCountdown: number
   isDragOver: boolean
+  contextUsage: ContextUsageSnapshot | null
   composerShellStyle: React.CSSProperties
   filePool: ChatAttachment[]
   filePoolCount: number
@@ -63,6 +65,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
   pendingSendCount,
   pendingSendCountdown,
   isDragOver,
+  contextUsage,
   composerShellStyle,
   filePool,
   filePoolCount,
@@ -735,26 +738,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
             </div>
 
             <div className="flex items-center" style={{ gap: 6, flexShrink: 0 }}>
-              {!composerLocked && hasUserMessages && (
-                <IconButton
-                  icon={<Undo2 style={{ width: 15, height: 15 }} strokeWidth={2} />}
-                  onClick={onUndo}
-                  title="撤回上一条消息"
-                />
-              )}
-
-              <IconButton
-                icon={<AtSign style={{ width: 15, height: 15 }} strokeWidth={2} />}
-                onClick={() => {
-                  if (filePool.length === 0) return
-                  setAtFilter('')
-                  setShowSlashMenu(false)
-                  setSlashFilter('')
-                  setShowAtMenu((value) => !value)
-                }}
-                title={filePoolCount > 0 ? '引用文件或文件夹' : '先用 + 添加文件'}
-                disabled={filePoolCount === 0}
-              />
+              <ContextUsageMeter usage={contextUsage} dimmed={composerLocked} />
 
               {composerLocked ? (
                 <button

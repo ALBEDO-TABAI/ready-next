@@ -40,6 +40,7 @@ import {
   TaskToolSnapshot,
   type TaskToolSnapshotProps,
 } from './task-snapshot/TaskToolSnapshot'
+import { RunDurationMeter } from './RunDurationMeter'
 
 interface AgentSelectionMenuState {
   x: number
@@ -181,6 +182,7 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
 
   const composerOverlayRef = useRef<HTMLDivElement | null>(null)
   const [composerBottomInset, setComposerBottomInset] = useState(CHAT_COMPOSER_FALLBACK_BOTTOM_INSET)
+  const currentRunForDurationMeter = currentScopeId ? scopeRunStates[currentScopeId] || null : null
 
   // 外壳保持透明：玻璃材质（折射/模糊/纱层）全部由 ChatInput 里的 LiquidLens 承担。
   const composerShellStyle = {
@@ -329,6 +331,7 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
             messageToolTraceSnapshots={messageToolTraceSnapshots}
             pendingTaskRun={pendingTaskRun}
             pendingToolTrace={pendingToolTrace}
+            runDurationMeter={<RunDurationMeter run={currentRunForDurationMeter} />}
             isStreaming={isStreaming}
             streamingMessageId={streamingMessageId}
             toolTrace={toolTrace}
@@ -606,6 +609,7 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
               pendingSendCount={pendingSendCount}
               pendingSendCountdown={pendingSendCountdown}
               isDragOver={isDragOver}
+              contextUsage={currentRunForDurationMeter?.contextUsage ?? null}
               composerShellStyle={composerShellStyle}
               filePool={filePool}
               filePoolCount={filePool.length}
