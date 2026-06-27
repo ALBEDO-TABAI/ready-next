@@ -199,13 +199,20 @@ test('local send-im file intent accepts referenced files or recent media with di
 test('local send-im attached media turns bypass model vision input and browser collection exposure', () => {
   // eslint-disable-next-line ready/no-source-grep-test -- private SDK runtime guard: this pins the regression where image-send turns were blocked as vision input or exposed collection tools.
   const source = readFileSync(new URL('../main/modules/agent-control/runtime-core/agent-sdk-runtime.ts', import.meta.url), 'utf8')
+  // The send-im intent/strip helpers were extracted to agent-sdk-utils.ts (V3 Phase 1 split); their wiring stays in the runtime class.
+  const utilsSource = readFileSync(new URL('../main/modules/agent-control/runtime-core/agent-sdk-utils.ts', import.meta.url), 'utf8')
+  // Per-session intent TTL state was extracted to AgentSdkIntentTracker (V3 Phase 2 split).
+  const intentTrackerSource = readFileSync(new URL('../main/modules/agent-control/runtime-core/agent-sdk-intent-tracker.ts', import.meta.url), 'utf8')
 
-  assert.match(source, /function hasLocalSendImIntentForTurn/)
-  assert.match(source, /function stripMediaBlocksForLocalSendIm/)
+  assert.match(utilsSource, /function hasLocalSendImIntentForTurn/)
+  assert.match(utilsSource, /function stripMediaBlocksForLocalSendIm/)
   assert.match(source, /typedActionNames\.add\('skill_send_im_file'\)/)
   assert.match(source, /!localSendImIntent\s*&&\s*\(\s*msgIntent \|\| params\.recentCollectionIntent === true\s*\)/)
-  assert.match(source, /this\.collectionIntentTtl\.delete\(sessionId\)/)
-  assert.match(source, /this\.batchCollectionIntentTtl\.delete\(sessionId\)/)
+  // On a local-send-im turn the runtime resets collection intent via the tracker,
+  // which clears BOTH the collection and batch-collection TTL maps.
+  assert.match(source, /this\.intentTracker\.resetCollectionIntents\(sessionId\)/)
+  assert.match(intentTrackerSource, /this\.collectionIntentTtl\.delete\(sessionId\)/)
+  assert.match(intentTrackerSource, /this\.batchCollectionIntentTtl\.delete\(sessionId\)/)
   assert.match(source, /const providerContent = stripMediaBlocksForLocalSendIm/)
   assert.match(source, /let nextInput = toSdkInput\(providerContent\)/)
 })

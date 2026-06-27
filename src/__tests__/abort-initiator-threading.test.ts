@@ -40,10 +40,10 @@ function createRuntime(deps: Partial<AgentSdkRuntimeDeps>): AgentSdkRuntime {
 }
 
 function currentRunHandle(runtime: AgentSdkRuntime, name: string): TestRunHandle | null {
-  const sessions = (runtime as unknown as {
-    sessions: Map<string, { currentRun: TestRunHandle | null }>
-  }).sessions
-  return sessions.get(name)?.currentRun || null
+  const session = (runtime as unknown as {
+    sessionManager: { get: (name: string) => { currentRun: TestRunHandle | null } | undefined }
+  }).sessionManager.get(name)
+  return session?.currentRun || null
 }
 
 const abortInitiatorValues: AbortInitiator[] = [

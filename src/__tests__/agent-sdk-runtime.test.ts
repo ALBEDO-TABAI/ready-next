@@ -122,19 +122,17 @@ async function seedSdkSession(
   name: string,
   items: AgentInputItem[],
 ): Promise<void> {
-  const sessions = (runtime as unknown as {
-    sessions: Map<string, { sdkSession: { addItems: (items: AgentInputItem[]) => Promise<void> } }>
-  }).sessions
-  const session = sessions.get(name)
+  const session = (runtime as unknown as {
+    sessionManager: { get: (name: string) => { sdkSession: { addItems: (items: AgentInputItem[]) => Promise<void> } } | undefined }
+  }).sessionManager.get(name)
   assert.ok(session, `missing test session ${name}`)
   await session.sdkSession.addItems(items)
 }
 
 async function readSdkSessionItems(runtime: AgentSdkRuntime, name: string): Promise<AgentInputItem[]> {
-  const sessions = (runtime as unknown as {
-    sessions: Map<string, { sdkSession: { getItems: () => Promise<AgentInputItem[]> } }>
-  }).sessions
-  const session = sessions.get(name)
+  const session = (runtime as unknown as {
+    sessionManager: { get: (name: string) => { sdkSession: { getItems: () => Promise<AgentInputItem[]> } } | undefined }
+  }).sessionManager.get(name)
   assert.ok(session, `missing test session ${name}`)
   return session.sdkSession.getItems()
 }
@@ -4569,10 +4567,9 @@ test('agent sdk runtime waits for idle manual compaction before starting a new r
   runtime.newSession(name, 'system prompt')
   await seedSdkSession(runtime, name, historyTextItems('lock-history', 20))
 
-  const sessions = (runtime as unknown as {
-    sessions: Map<string, { sdkSession: { clearSession: () => Promise<void> } }>
-  }).sessions
-  const session = sessions.get(name)
+  const session = (runtime as unknown as {
+    sessionManager: { get: (name: string) => { sdkSession: { clearSession: () => Promise<void> } } | undefined }
+  }).sessionManager.get(name)
   assert.ok(session, `missing test session ${name}`)
   const originalClearSession = session.sdkSession.clearSession.bind(session.sdkSession)
   session.sdkSession.clearSession = async () => {
