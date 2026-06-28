@@ -208,18 +208,21 @@ test('local send-im attached media turns bypass model vision input and browser c
   // Default tool-surface selection (incl. the send-im collection-intent suppression)
   // was extracted to AgentSdkToolExecutor (V3 Phase 5-A).
   const toolExecutorSource = readFileSync(new URL('../main/modules/agent-control/runtime-core/agent-sdk-tool-executor.ts', import.meta.url), 'utf8')
+  // The sendMessage turn loop (incl. the send-im strip/intent wiring) was extracted to
+  // AgentSdkTurnOrchestrator (V3 Phase 5-B); collaborators are reached via this.host.
+  const turnOrchestratorSource = readFileSync(new URL('../main/modules/agent-control/runtime-core/agent-sdk-turn-orchestrator.ts', import.meta.url), 'utf8')
 
   assert.match(utilsSource, /function hasLocalSendImIntentForTurn/)
   assert.match(utilsSource, /function stripMediaBlocksForLocalSendIm/)
   assert.match(source, /typedActionNames\.add\('skill_send_im_file'\)/)
   assert.match(toolExecutorSource, /!localSendImIntent\s*&&\s*\(\s*msgIntent \|\| params\.recentCollectionIntent === true\s*\)/)
-  // On a local-send-im turn the runtime resets collection intent via the tracker,
+  // On a local-send-im turn the orchestrator resets collection intent via the tracker,
   // which clears BOTH the collection and batch-collection TTL maps.
-  assert.match(source, /this\.intentTracker\.resetCollectionIntents\(sessionId\)/)
+  assert.match(turnOrchestratorSource, /this\.host\.intentTracker\.resetCollectionIntents\(sessionId\)/)
   assert.match(intentTrackerSource, /this\.collectionIntentTtl\.delete\(sessionId\)/)
   assert.match(intentTrackerSource, /this\.batchCollectionIntentTtl\.delete\(sessionId\)/)
-  assert.match(source, /const providerContent = stripMediaBlocksForLocalSendIm/)
-  assert.match(source, /let nextInput = toSdkInput\(providerContent\)/)
+  assert.match(turnOrchestratorSource, /const providerContent = stripMediaBlocksForLocalSendIm/)
+  assert.match(turnOrchestratorSource, /let nextInput = toSdkInput\(providerContent\)/)
 })
 
 test('local send-im collection wording removes browser tools from the runtime tool surface', () => {

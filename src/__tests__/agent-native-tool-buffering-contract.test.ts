@@ -4,9 +4,12 @@ import { join } from 'node:path'
 import test from 'node:test'
 
 const source = () => readFileSync(join(process.cwd(), 'src/main/modules/agent-control/runtime-core/agent-sdk-runtime.ts'), 'utf-8')
+// The sendMessage turn loop (incl. native-text buffering) was extracted to
+// AgentSdkTurnOrchestrator (V3 Phase 5-B).
+const turnOrchestratorSource = () => readFileSync(join(process.cwd(), 'src/main/modules/agent-control/runtime-core/agent-sdk-turn-orchestrator.ts'), 'utf-8')
 
 test('native tool text buffering applies whenever native tools are exposed, including OpenAI providers', () => {
-  const text = source()
+  const text = turnOrchestratorSource()
   assert.match(text, /const bufferNativeTextUntilParsed =\n\s*!useTextToolBridge\n\s*&& toolDefinitions\.length > 0/)
   assert.doesNotMatch(text, /normalizedConfig\.provider !== 'openai'/)
 })

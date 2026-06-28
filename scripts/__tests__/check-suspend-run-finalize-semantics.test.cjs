@@ -39,8 +39,8 @@ export class ReadyAgentOrchestrator {
   }
 }
 `)
-  writeFile(root, 'src/main/modules/agent-control/runtime-core/agent-sdk-runtime.ts', `
-export class AgentSdkRuntime {
+  writeFile(root, 'src/main/modules/agent-control/runtime-core/agent-sdk-turn-orchestrator.ts', `
+export class AgentSdkTurnOrchestrator {
   async sendMessage() {
     if (abortInitiator === 'manual_suspend') {
       return this.buildResult({

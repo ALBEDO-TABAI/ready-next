@@ -7,6 +7,8 @@ const root = process.cwd()
 const runtimePath = path.join(root, 'src/main/modules/agent-control/runtime-core/runtime.ts')
 const orchestratorPath = path.join(root, 'src/main/modules/agent-control/runtime-core/orchestrator.ts')
 const sdkRuntimePath = path.join(root, 'src/main/modules/agent-control/runtime-core/agent-sdk-runtime.ts')
+// V3 Phase 5-B: sendMessage's manual-suspend abort branch + buildResult return live here now.
+const sdkTurnOrchestratorPath = path.join(root, 'src/main/modules/agent-control/runtime-core/agent-sdk-turn-orchestrator.ts')
 const finalizerPath = path.join(root, 'src/main/modules/agent-control/runtime-core/run-finalizer.ts')
 
 function read(relPath) {
@@ -57,7 +59,7 @@ function extractMethod(source, methodName) {
 
 const runtime = read(runtimePath)
 const orchestrator = read(orchestratorPath)
-const sdkRuntime = read(sdkRuntimePath)
+const sdkTurnOrchestrator = read(sdkTurnOrchestratorPath)
 const finalizer = read(finalizerPath)
 
 const suspendRun = extractMethod(runtime, 'suspendRun')
@@ -97,10 +99,10 @@ if (!kill || !interrupt) {
   }
 }
 
-if (!/manual_suspend/.test(sdkRuntime) || !/abortInitiator === 'manual_suspend'/.test(sdkRuntime)) {
+if (!/manual_suspend/.test(sdkTurnOrchestrator) || !/abortInitiator === 'manual_suspend'/.test(sdkTurnOrchestrator)) {
   fail('AgentSdkRuntime abort path must branch on manual_suspend')
 }
-if (!/return this\.buildResult\(\{[\s\S]*terminalReason,[\s\S]*taskBudgetRuntime/.test(sdkRuntime)) {
+if (!/return this\.buildResult\(\{[\s\S]*terminalReason,[\s\S]*taskBudgetRuntime/.test(sdkTurnOrchestrator)) {
   fail('AgentSdkRuntime manual suspend branch must return without cancelled finalization')
 }
 

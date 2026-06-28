@@ -16,6 +16,10 @@ const ROOT = process.cwd()
 const RUN_META_TERMINAL_STATUS_REL = 'src/shared/run-meta-terminal-status.ts'
 const RUN_FINALIZER_REL = 'src/main/modules/agent-control/runtime-core/run-finalizer.ts'
 const AGENT_SDK_RUNTIME_REL = 'src/main/modules/agent-control/runtime-core/agent-sdk-runtime.ts'
+// V3 Phase 5-B: sendMessage + its funnel-pinned finalizers (finalizeEarlyReturn /
+// buildResult / recordAdmissionRejection / persistRunMetaSnapshot) now live in the
+// turn orchestrator. The structural + C03 checks below scan THIS file.
+const AGENT_SDK_TURN_ORCHESTRATOR_REL = 'src/main/modules/agent-control/runtime-core/agent-sdk-turn-orchestrator.ts'
 const RUN_META_REPOSITORY_REL = 'src/main/modules/agent-control/task-projection/run-meta-repository.ts'
 const SCAN_DIRS = [
   'src/main/modules/agent-control/',
@@ -104,7 +108,7 @@ function sliceBetween(text, startNeedle, endNeedle) {
 }
 
 function pushAgentSdkC03Violations(violations, text) {
-  const rel = AGENT_SDK_RUNTIME_REL
+  const rel = AGENT_SDK_TURN_ORCHESTRATOR_REL
   if (!text.includes('const finalizeEarlyReturn = async')) {
     violations.push({
       file: rel,
@@ -117,7 +121,7 @@ function pushAgentSdkC03Violations(violations, text) {
   const sections = [
     {
       name: 'config_pre_model',
-      start: 'const configDetail = this.loadAIConfig()',
+      start: 'const configDetail = this.host.loadAIConfig()',
       end: 'const normalizedConfig = normalizeAIConfig',
       required: [
         "terminalReason: configDetail.reason === 'json_corrupt' ? 'blocked_config' : 'persistence_failed'",
@@ -239,7 +243,7 @@ function terminalReasonFromEmitStatusCall(callText) {
 }
 
 function pushAgentSdkStructuralFinalizerViolations(violations, text) {
-  const rel = AGENT_SDK_RUNTIME_REL
+  const rel = AGENT_SDK_TURN_ORCHESTRATOR_REL
   const start = text.indexOf('async sendMessage(')
   const end = text.indexOf('\n  private async persistRunMetaSnapshot', start)
   const body = start >= 0 && end > start ? text.slice(start, end) : text
@@ -375,11 +379,11 @@ function main() {
     }
   }
 
-  const agentSdkRuntimePath = path.join(ROOT, AGENT_SDK_RUNTIME_REL)
-  if (fs.existsSync(agentSdkRuntimePath)) {
-    const agentSdkRuntimeText = fs.readFileSync(agentSdkRuntimePath, 'utf8')
-    pushAgentSdkC03Violations(violations, agentSdkRuntimeText)
-    pushAgentSdkStructuralFinalizerViolations(violations, agentSdkRuntimeText)
+  const turnOrchestratorPath = path.join(ROOT, AGENT_SDK_TURN_ORCHESTRATOR_REL)
+  if (fs.existsSync(turnOrchestratorPath)) {
+    const turnOrchestratorText = fs.readFileSync(turnOrchestratorPath, 'utf8')
+    pushAgentSdkC03Violations(violations, turnOrchestratorText)
+    pushAgentSdkStructuralFinalizerViolations(violations, turnOrchestratorText)
   }
 
   if (violations.length === 0) {

@@ -72,10 +72,10 @@ export function buildTerminalProjectionPatch() {
   return { status: 'killed' }
 }
 `)
-  writeFile(root, 'src/main/modules/agent-control/runtime-core/agent-sdk-runtime.ts', `
+  writeFile(root, 'src/main/modules/agent-control/runtime-core/agent-sdk-turn-orchestrator.ts', `
 export async function sendMessage() {
   const emitStatus = () => {}
-  const configDetail = this.loadAIConfig()
+  const configDetail = this.host.loadAIConfig()
   if (!configDetail.ok) {
     emitStatus('error', configDetail.reason === 'json_corrupt' ? 'blocked_config' : 'persistence_failed')
     return this.buildResult({})

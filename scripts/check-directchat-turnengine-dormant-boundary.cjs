@@ -7,6 +7,7 @@ const ts = require('typescript')
 
 const ROOT = process.cwd()
 const ORCHESTRATOR_REL = 'src/main/modules/agent-control/runtime-core/orchestrator.ts'
+const AGENT_SDK_RUNTIME_REL = 'src/main/modules/agent-control/runtime-core/agent-sdk-runtime.ts'
 const DIRECT_CHAT_REL = 'src/main/modules/claude-bridge/direct-chat.ts'
 const MAIN_ROOT_REL = 'src/main'
 
@@ -315,6 +316,8 @@ function pushNonSdkSendMessageErrors(errors, rel, text) {
     while ((match = re.exec(text))) {
       const before = text.slice(Math.max(0, match.index - 48), match.index)
       if (rel === ORCHESTRATOR_REL && /this\.sdkEngine\s*$/.test(before)) continue
+      // V3 Phase 5-B: AgentSdkRuntime delegates to its own turn orchestrator (still the SDK path).
+      if (rel === AGENT_SDK_RUNTIME_REL && /this\.turnOrchestrator\s*$/.test(before)) continue
       errors.push(`production_calls_non_sdk_sendMessage:${rel}:${lineOf(text, match.index)}`)
     }
   }
