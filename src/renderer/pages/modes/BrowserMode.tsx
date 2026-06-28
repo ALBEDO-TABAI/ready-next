@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import BrowserModeEmptyState from '../../components/browser/BrowserModeEmptyState'
 import BrowserDiagnosticsDock from '../../components/browser/BrowserDiagnosticsDock'
 import { AgentBrowserSupervisionPanel } from '../../components/browser/AgentBrowserSupervisionPanel'
-import BrowserHeader from '../../components/browser/BrowserHeader'
+import BrowserTopBar from '../../components/browser/BrowserTopBar'
+import VerticalTabRail, { BROWSER_VERTICAL_RAIL_WIDTH } from '../../components/browser/VerticalTabRail'
 import BrowserShellLayout from '../../components/browser/BrowserShellLayout'
 import { isBrowserSupervisionVisibleTaskStatus } from '../../../shared/browser-task-status'
 import { appendToAgentInput } from '../../modules/agent/chat-input-bridge'
@@ -424,7 +425,7 @@ export default function BrowserMode({
     onLocalMediaUploadStatus: publishLocalMediaUploadStatus,
   })
 
-  const handleHeaderTabClick = useCallback((id: string, event: MouseEvent<HTMLButtonElement>) => {
+  const handleHeaderTabClick = useCallback((id: string, event: { shiftKey: boolean }) => {
     if (event.shiftKey && id !== activeTabId) {
       setSplitTabId(id)
       return
@@ -1083,21 +1084,14 @@ export default function BrowserMode({
         }}
       >
         <div ref={shellRef} className="workbench-canvas-shell relative flex h-full min-h-0 flex-col">
-          <BrowserHeader
+          <BrowserTopBar
             isActive={isActive}
-            tabs={tabs}
-            activeTabId={activeTabId}
-            splitTabId={visibleSplitTab?.id || null}
+            activeTab={activeTab}
             urlInput={urlInput}
             loading={activeTab?.loading || false}
             canGoBack={activeTab?.canGoBack || false}
             canGoForward={activeTab?.canGoForward || false}
             isBookmarked={isBookmarked}
-            bookmarkedUrls={bookmarks.map((item) => item.url)}
-            onTabClick={handleHeaderTabClick}
-            onTabClose={handleCloseTab}
-            onNewTab={handleNewTab}
-            onReorder={handleReorder}
             onUrlChange={setUrlInput}
             onNavigate={handleNavigate}
             onGoBack={handleGoBack}
@@ -1108,7 +1102,6 @@ export default function BrowserMode({
             onEditStart={handleBrowserEditStart}
             onEditEnd={handleBrowserEditEnd}
             onToggleBookmark={handleToggleBookmark}
-            onToggleBookmarkForTab={handleToggleBookmarkForTab}
             onShowUtilityMenu={handleShowUtilityMenu}
             fastCardOpen={fastCardPanelOpen || fastCardResultPanel !== null}
             fastCardItemCount={fastCardItems.length}
@@ -1116,15 +1109,29 @@ export default function BrowserMode({
             ownershipStatus={browserOwnershipStatus}
           />
 
-          <div
-            ref={browserContentFrameRef}
-            data-browser-content-frame=""
-            style={{
-              position: 'relative',
-              zIndex: 1,
-            }}
-            className="flex min-h-0 flex-1"
-          >
+          <div className="flex min-h-0 flex-1">
+            <VerticalTabRail
+              isActive={isActive}
+              tabs={tabs}
+              activeTabId={activeTabId}
+              splitTabId={visibleSplitTab?.id || null}
+              bookmarkedUrls={bookmarks.map((item) => item.url)}
+              onTabClick={handleHeaderTabClick}
+              onTabClose={handleCloseTab}
+              onNewTab={handleNewTab}
+              onReorder={handleReorder}
+              onToggleBookmarkForTab={handleToggleBookmarkForTab}
+            />
+
+            <div
+              ref={browserContentFrameRef}
+              data-browser-content-frame=""
+              style={{
+                position: 'relative',
+                zIndex: 1,
+              }}
+              className="flex min-h-0 flex-1"
+            >
             {shouldRenderSplitLayout && activeTab ? (
               <div className="flex h-full min-w-0 flex-1 overflow-hidden" ref={splitContainerRef} style={{ gap: 0 }}>
                 <div
@@ -1239,13 +1246,14 @@ export default function BrowserMode({
                 mediaUploadStatus={localMediaUploadStatus}
               />
             )}
-            <BrowserDiagnosticsDock
-              browserDiagnostics={browserDiagnostics}
-              onContinue={handleContinueBrowserTask}
-              onRetry={handleRetryBrowserTask}
-              onOpenTarget={handleOpenBrowserTarget}
-              onRefresh={() => void refreshAdblockState()}
-            />
+              <BrowserDiagnosticsDock
+                browserDiagnostics={browserDiagnostics}
+                onContinue={handleContinueBrowserTask}
+                onRetry={handleRetryBrowserTask}
+                onOpenTarget={handleOpenBrowserTarget}
+                onRefresh={() => void refreshAdblockState()}
+              />
+            </div>
           </div>
 
           {/* 浏览器过渡遮罩 - 动画结束后但浏览器未准备好时显示 */}
@@ -1255,7 +1263,7 @@ export default function BrowserMode({
               style={{
                 position: 'absolute',
                 top: WORKBENCH_TAB_ROW_HEIGHT,
-                left: 0,
+                left: BROWSER_VERTICAL_RAIL_WIDTH,
                 right: 0,
                 bottom: 0,
                 zIndex: 45,
@@ -1292,7 +1300,7 @@ export default function BrowserMode({
               style={{
                 position: 'absolute',
                 top: WORKBENCH_TAB_ROW_HEIGHT,
-                left: 0,
+                left: BROWSER_VERTICAL_RAIL_WIDTH,
                 right: 0,
                 bottom: 0,
                 zIndex: 50,

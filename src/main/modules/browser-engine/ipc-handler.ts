@@ -65,6 +65,7 @@ import { setupBrowserClipDraggedTabIPC } from './ipc-clip-dragged-tab'
 import { setupBrowserContentStudyIPC } from './ipc-content-study-dragged-tab'
 import { setupBrowserDataIPC } from './ipc-data'
 import { setupBrowserFastCardIPC } from './ipc-fastcard'
+import { setupBrowserVerticalRailOverlayIPC } from './ipc-vertical-rail-overlay'
 import { setupBrowserLockOverlayIPC } from './ipc-browser-lock-overlay'
 import { setupBrowserShellIPC } from './ipc-shell'
 import { setupBrowserSupervisionIPC } from './ipc-supervision'
@@ -2239,6 +2240,11 @@ export function setupBrowserIPC(
     rendererFile: options?.rendererFile || join(__dirname, '../renderer/index.html'),
   })
   setupBrowserLockOverlayIPC({
+    getMainWindow: () => controller.getMainWindow(),
+    preloadPath: options?.preloadPath || join(__dirname, '../preload/index.mjs'),
+    rendererFile: options?.rendererFile || join(__dirname, '../renderer/index.html'),
+  })
+  setupBrowserVerticalRailOverlayIPC({
     getMainWindow: () => controller.getMainWindow(),
     preloadPath: options?.preloadPath || join(__dirname, '../preload/index.mjs'),
     rendererFile: options?.rendererFile || join(__dirname, '../renderer/index.html'),

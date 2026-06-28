@@ -58,6 +58,10 @@ import type {
   BrowserLockOverlaySnapshot,
 } from '../../shared/browser-lock-overlay'
 import type {
+  VerticalRailOverlayCommand,
+  VerticalRailOverlaySnapshot,
+} from '../../shared/browser-vertical-rail-overlay'
+import type {
   BrowserFastCardContextActionEvent,
   FastCardOverlayCommand,
   FastCardOverlaySnapshot,
@@ -1548,6 +1552,12 @@ interface ElectronBrowserAPI {
   sendFastCardOverlayCommand: (command: FastCardOverlayCommand) => Promise<FastCardIPCResult<void>>
   onFastCardOverlayCommand: (callback: (command: FastCardOverlayCommand) => void) => () => void
   onFastCardOverlaySnapshot: (callback: (snapshot: FastCardOverlaySnapshot) => void) => () => void
+  showVerticalRailOverlay: (payload: VerticalRailOverlaySnapshot) => Promise<{ success: boolean; error?: string }>
+  hideVerticalRailOverlay: () => Promise<{ success: boolean; error?: string }>
+  getVerticalRailOverlaySnapshot: () => Promise<{ success: boolean; error?: string; data?: VerticalRailOverlaySnapshot | null }>
+  sendVerticalRailOverlayCommand: (command: VerticalRailOverlayCommand) => Promise<{ success: boolean; error?: string }>
+  onVerticalRailOverlayCommand: (callback: (command: VerticalRailOverlayCommand) => void) => () => void
+  onVerticalRailOverlaySnapshot: (callback: (snapshot: VerticalRailOverlaySnapshot) => void) => () => void
   showBrowserLockOverlay: (payload: BrowserLockOverlaySnapshot) => Promise<BrowserLockOverlayIPCResult<void>>
   hideBrowserLockOverlay: () => Promise<BrowserLockOverlayIPCResult<void>>
   getBrowserLockOverlaySnapshot: () => Promise<BrowserLockOverlayIPCResult<BrowserLockOverlaySnapshot | null>>

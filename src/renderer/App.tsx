@@ -5,6 +5,7 @@ import ReadyMode from './pages/ReadyMode'
 import Settings from './pages/Settings'
 import PetWindow from './pages/PetWindow'
 import FastCardOverlayWindow from './pages/FastCardOverlayWindow'
+import VerticalRailOverlayWindow from './pages/VerticalRailOverlayWindow'
 import BrowserLockOverlayWindow from './pages/BrowserLockOverlayWindow'
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts'
 import { ErrorBoundary } from './components/ErrorBoundary'
@@ -146,6 +147,13 @@ function App() {
     return (
       <ErrorBoundary>
         <FastCardOverlayWindow />
+      </ErrorBoundary>
+    )
+  }
+  if (location.pathname === '/browser-vertical-rail-overlay') {
+    return (
+      <ErrorBoundary>
+        <VerticalRailOverlayWindow />
       </ErrorBoundary>
     )
   }
