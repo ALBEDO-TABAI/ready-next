@@ -52,7 +52,10 @@ export default function BrowserShellLayout({
             onDragOver={onDragOver}
             onDrop={onDrop}
             style={{
-              borderRadius: '0 0 var(--workbench-canvas-radius) var(--workbench-canvas-radius)',
+              // Bottom-left is square: the vertical rail sits to the left so that corner is
+              // interior. The native BrowserView rounds all four corners (setBorderRadius), so
+              // we mask its interior bottom-left rounding with a chrome fill below.
+              borderRadius: '0 0 var(--workbench-canvas-radius) 0',
               isolation: 'isolate',
             }}
           >
@@ -81,6 +84,20 @@ export default function BrowserShellLayout({
                     width: 'var(--workbench-canvas-radius)',
                     height: 'var(--workbench-canvas-radius)',
                     borderBottomLeftRadius: 'var(--workbench-canvas-radius)',
+                    background: 'var(--workbench-liquid-chrome-bg, var(--bg-content))',
+                    pointerEvents: 'none',
+                    zIndex: 2,
+                  }}
+                />
+                <div
+                  className="browser-shell-corner-fill-bottom-left"
+                  style={{
+                    position: 'absolute',
+                    left: 0,
+                    bottom: 0,
+                    width: 'var(--workbench-canvas-radius)',
+                    height: 'var(--workbench-canvas-radius)',
+                    borderTopRightRadius: 'var(--workbench-canvas-radius)',
                     background: 'var(--workbench-liquid-chrome-bg, var(--bg-content))',
                     pointerEvents: 'none',
                     zIndex: 2,

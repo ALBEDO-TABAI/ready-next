@@ -3,7 +3,7 @@ import { FileText, Loader2 } from 'lucide-react'
 import { computeDesiredRoots, useWorkspace } from '../../stores/useWorkspace'
 import { isImagePreviewPath, useDocTabs, type DocTab, type DocumentPaneTarget } from '../../stores/useDocTabs'
 import MarkdownEditor from '../../components/document/MarkdownEditor'
-import DocumentTabRail from '../../components/document/DocumentTabRail'
+import DocumentVerticalTabRail from '../../components/document/DocumentVerticalTabRail'
 import FilePreview from '../../components/document/FilePreview'
 import DraggableModeSwitch from '../../components/document/DraggableModeSwitch'
 import DocumentFloatingPanels, { DocumentPanelToggleButtons } from '../../components/document/DocumentFloatingPanels'
@@ -16,6 +16,8 @@ import {
   WORKBENCH_CANVAS_OUTER_PADDING_BOTTOM,
   WORKBENCH_CANVAS_OUTER_PADDING_TOP,
   WORKBENCH_CANVAS_OUTER_PADDING_X,
+  WORKBENCH_HEADER_EDGE_X,
+  WORKBENCH_TAB_ROW_HEIGHT,
 } from '../../modules/workbench/chrome'
 import { useRafResizeDrag } from '../../modules/workbench/useRafResizeDrag'
 import { freezeVisibleDocumentLayoutWidths } from '../../modules/document/documentLayoutFreeze'
@@ -862,81 +864,76 @@ export default function DocumentMode({
         }}
       >
         <div className="workbench-canvas-shell flex min-h-0 h-full flex-col">
-          <DocumentTabRail
-            layoutId="document-tabs"
-            tabs={tabs.map((tab) => {
-              const isPrimary = tab.id === activeTabId
-              const isSplit = tab.id === splitTabId
-              const isSplitOnly = isSplit && !isPrimary
-              return {
-                id: tab.id,
-                label: tab.title,
-                title: `${tab.title}${isSplit ? ' (分栏)' : ''}\n按住 Shift 点击可分栏`,
-                dotColor: isPrimary ? getFileTypeColor(tab.path) : undefined,
-                active: isPrimary,
-                secondaryActive: isSplitOnly,
-                dirty: tab.isDirty,
-              }
-            })}
-            onTabClick={(id, event) => handleTabClick(id, event)}
-            onTabClose={(id) => closeTab(id)}
-            onNewTab={() => {
-              setEditorMode('preview')
-              openTab('')
-            }}
-            onTabDragStart={(event, id) => {
-              const index = tabs.findIndex((tab) => tab.id === id)
-              if (index >= 0) handleDragStart(event, index)
-            }}
-            onTabDragOver={handleDragOver}
-            onTabDrop={handleDrop}
-            onTabDragEnd={handleDragEnd}
-            onTabContextMenu={handleTabContextMenu}
-            rightActions={
-              <>
-                <DocumentPanelToggleButtons
-                  outlineOpen={outlinePanelOpen}
-                  marksOpen={marksPanelOpen}
-                  onToggleOutline={() => setOutlinePanelOpen((value) => !value)}
-                  onToggleMarks={() => setMarksPanelOpen((value) => !value)}
-                  rail
-                />
-                <DraggableModeSwitch
-                  mode={editorMode}
-                  onChange={handleEditorModeChange}
-                />
-              </>
-            }
-          />
-
+          {/* Top bar: file path (moved up from the old second row) + panel/mode actions */}
           <div
-            className="document-path-bar flex items-center min-w-0"
+            className="document-path-bar workbench-tabs-surface glass-surface-panel flex-shrink-0 flex items-center no-drag"
             style={{
-              height: 30,
-              paddingLeft: 18,
-              paddingRight: 18,
-              background: 'var(--workbench-module-surface-bg)',
+              minHeight: WORKBENCH_TAB_ROW_HEIGHT,
+              paddingLeft: WORKBENCH_HEADER_EDGE_X,
+              paddingRight: WORKBENCH_HEADER_EDGE_X,
+              gap: 8,
             }}
           >
             <div
-              className="min-w-0 ml-auto"
-              style={{
-                fontSize: 11,
-                color: 'var(--text-light)',
-                maxWidth: '100%',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-                textAlign: 'right',
-              }}
+              className="min-w-0 flex-1 truncate"
+              style={{ fontSize: 12, color: 'var(--text-light)' }}
               title={activeTabPathLabel}
             >
               {activeTabPathLabel}
             </div>
+            <div className="flex flex-shrink-0 items-center" style={{ gap: 8 }}>
+              <DocumentPanelToggleButtons
+                outlineOpen={outlinePanelOpen}
+                marksOpen={marksPanelOpen}
+                onToggleOutline={() => setOutlinePanelOpen((value) => !value)}
+                onToggleMarks={() => setMarksPanelOpen((value) => !value)}
+                rail
+              />
+              <DraggableModeSwitch
+                mode={editorMode}
+                onChange={handleEditorModeChange}
+              />
+            </div>
           </div>
 
-          {/* Content Area */}
-          <div className="relative flex-1 min-h-0 overflow-hidden">
+          <div className="flex min-h-0 flex-1">
+            <DocumentVerticalTabRail
+              tabs={tabs.map((tab) => {
+                const isPrimary = tab.id === activeTabId
+                const isSplit = tab.id === splitTabId
+                return {
+                  id: tab.id,
+                  label: tab.title,
+                  pathLabel: tab.path || undefined,
+                  title: `${tab.title}${isSplit ? ' (分栏)' : ''}\n按住 Shift 点击可分栏`,
+                  dotColor: getFileTypeColor(tab.path),
+                  active: isPrimary,
+                  secondaryActive: isSplit && !isPrimary,
+                  dirty: tab.isDirty,
+                }
+              })}
+              onTabClick={(id, event) => handleTabClick(id, event)}
+              onTabClose={(id) => closeTab(id)}
+              onNewTab={() => {
+                setEditorMode('preview')
+                openTab('')
+              }}
+              onTabDragStart={(event, id) => {
+                const index = tabs.findIndex((tab) => tab.id === id)
+                if (index >= 0) handleDragStart(event, index)
+              }}
+              onTabDragOver={handleDragOver}
+              onTabDrop={handleDrop}
+              onTabDragEnd={handleDragEnd}
+              onTabContextMenu={(event, id) => handleTabContextMenu(event as React.MouseEvent<HTMLButtonElement>, id)}
+            />
+
+          {/* Content Area — rounded on all four corners so the editor reads as an inset card
+              like the browser content viewport. */}
+          <div
+            className="relative flex-1 min-h-0 overflow-hidden"
+            style={{ borderRadius: 'var(--workbench-canvas-radius)' }}
+          >
             {splitTab && activeTab ? (
               <div className="h-full flex min-w-0 overflow-hidden" ref={splitContainerRef} style={{ gap: 0 }}>
                 <div
@@ -1018,6 +1015,7 @@ export default function DocumentMode({
                 showToggles={false}
               />
             )}
+          </div>
           </div>
         </div>
       </div>
