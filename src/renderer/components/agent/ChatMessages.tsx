@@ -1,8 +1,13 @@
-import { useRef, useEffect, useMemo } from 'react'
+import { useRef, useEffect, useMemo, useCallback } from 'react'
 import type { ReactNode } from 'react'
 
 // EP2 dogfood gap 5 — safety margin appended to the measured composer tail.
 const CHAT_BOTTOM_SAFETY_MARGIN_PX = 12
+// Auto-scroll only "sticks" the view to the bottom while the user is already
+// near it. Once they scroll up (e.g. to read a tall 反问卡 / ask-user card that
+// overflows the viewport), composer-resize-driven re-renders must NOT yank the
+// view back down. 96px ≈ one short message of slack so小幅 overshoot still counts.
+const CHAT_STICK_TO_BOTTOM_THRESHOLD_PX = 96
 import { Copy, Check, ChevronRight, Wrench, CheckCircle2, CircleDashed } from 'lucide-react'
 import type { AgentMessage, ChatAttachment, ToolTraceEvent } from '../../stores/useAgent'
 import { formatToolTracePreview } from '../../modules/agent/toolTracePreview'
@@ -70,6 +75,17 @@ export default function ChatMessages({
   renderMarkdown,
 }: ChatMessagesProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const scrollRootRef = useRef<HTMLDivElement>(null)
+  // Whether the user is currently parked near the bottom of the scroll region.
+  // Starts true so the first messages anchor to the bottom as before.
+  const isNearBottomRef = useRef(true)
+
+  const handleScroll = useCallback(() => {
+    const el = scrollRootRef.current
+    if (!el) return
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
+    isNearBottomRef.current = distanceFromBottom <= CHAT_STICK_TO_BOTTOM_THRESHOLD_PX
+  }, [])
   // Welcome 文案是 renderer-only 的本地提示（不进 LLM 上下文）。一旦用户
   // 发出第一条消息就把它从可见列表里抹掉——视觉上"被新内容顶走"。
   const hasUserMessage = messages.some((msg) => msg.type === 'user')
@@ -82,8 +98,11 @@ export default function ChatMessages({
   // bottom-anchored 流：欢迎语从可见列表里消失，新消息从底部向上"顶"。
   const onlyWelcomePresent = !hasUserMessage && visibleMessages.every((msg) => /^welcome(?:-|$)/.test(msg.id))
 
-  // Auto-scroll to bottom when new messages arrive
+  // Auto-scroll to bottom when new messages arrive — but only while the user is
+  // already near the bottom. If they have scrolled up (reading a tall ask-user
+  // card), composer-resize-driven inset changes must not drag the view back down.
   useEffect(() => {
+    if (!isNearBottomRef.current) return
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [visibleMessages.length, bottomOverlayInset])
 
@@ -93,6 +112,8 @@ export default function ChatMessages({
 
   return (
     <div
+      ref={scrollRootRef}
+      onScroll={handleScroll}
       data-liquid-scroll-root="chat-messages"
       className="panel-hover-scrollbar flex-1 overflow-auto"
       style={{
