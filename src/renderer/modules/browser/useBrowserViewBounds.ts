@@ -323,14 +323,41 @@ export function useBrowserViewBounds({
     if (requestToken !== visibilitySyncTokenRef.current) return
 
     if (options.forceBoundsSync) {
-      await new Promise<void>((resolve) => {
-        if (typeof window === 'undefined' || typeof window.requestAnimationFrame !== 'function') {
-          resolve()
-          return
+      // Wait until the measured content bounds stop moving before revealing the host. On mode
+      // entrance the surrounding layout (rail / side panels / canvas) settles over several
+      // frames (x marches e.g. 9 → 319 → 325 → 329); revealing mid-settle shows the native
+      // BrowserView at an intermediate x and then snaps it to the final x while visible. Looping
+      // until two consecutive frames measure identically — and keeping the hidden view's bounds
+      // tracking the moving layout meanwhile — guarantees the first visible frame is final.
+      if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+        const signature = (bounds: MeasuredBounds | null) =>
+          bounds ? `${bounds.x}:${bounds.y}:${bounds.width}:${bounds.height}` : 'null'
+        // The entrance is an ease-out slide, so each rounded x lingers ~1-2 frames near the end
+        // (…327, 327, 329, 329, 329…). Requiring a longer unchanged streak skips those tail
+        // plateaus and only fires at the true rest (which holds indefinitely). MAX caps the wait
+        // so a never-settling layout still reveals eventually.
+        const REQUIRED_STABLE_FRAMES = 4
+        const MAX_SETTLE_FRAMES = 30
+        let previousSignature = signature(measureBounds())
+        let stableFrames = 0
+        for (let frame = 0; frame < MAX_SETTLE_FRAMES; frame += 1) {
+          await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()))
+          if (requestToken !== visibilitySyncTokenRef.current) return
+          const currentSignature = signature(measureBounds())
+          if (currentSignature === previousSignature) {
+            stableFrames += 1
+            if (stableFrames >= REQUIRED_STABLE_FRAMES) break
+            continue
+          }
+          stableFrames = 0
+          previousSignature = currentSignature
+          // Keep the (still hidden) view tracking the moving layout so the eventual show is a no-op move.
+          await sendBoundsImmediate({ forceExact: true, syncMode: 'transient' })
+          if (requestToken !== visibilitySyncTokenRef.current) return
         }
-        window.requestAnimationFrame(() => window.requestAnimationFrame(() => resolve()))
-      })
-      if (requestToken !== visibilitySyncTokenRef.current) return
+        await sendBoundsImmediate({ forceExact: true, syncMode: 'settled' })
+        if (requestToken !== visibilitySyncTokenRef.current) return
+      }
     }
 
     const shouldStillShowBrowserView =
@@ -455,7 +482,7 @@ export function useBrowserViewBounds({
   }, [clearFrameSync, clearSettleSyncTimeout, scheduleBoundsSync, startDragBoundsSync, stopDragBoundsSync])
 
   useEffect(() => {
-    void syncBrowserVisibility({ forceExact: true })
+    void syncBrowserVisibility({ forceExact: true, forceBoundsSync: isActive && isVisibleAllowed })
   }, [hasError, isActive, isVisibleAllowed, syncBrowserVisibility])
 
   useEffect(() => {
@@ -503,7 +530,10 @@ export function useBrowserViewBounds({
           if (overlayLockCountRef.current > 0) {
             overlayLockCountRef.current -= 1
             console.warn('[ready] overlayLockCount self-healed after', OVERLAY_LOCK_SELF_HEAL_MS, 'ms')
-            void syncBrowserVisibility({ forceExact: true })
+            void syncBrowserVisibility({
+              forceExact: true,
+              forceBoundsSync: isActiveRef.current && isVisibleAllowedRef.current,
+            })
           }
         }, OVERLAY_LOCK_SELF_HEAL_MS)
         pendingSelfHealTimers.push(selfHealTimer)
@@ -512,7 +542,10 @@ export function useBrowserViewBounds({
         cancelOldestSelfHeal()
       }
 
-      void syncBrowserVisibility({ forceExact: true })
+      void syncBrowserVisibility({
+        forceExact: true,
+        forceBoundsSync: isActiveRef.current && isVisibleAllowedRef.current,
+      })
     }
 
     window.addEventListener(BROWSER_OVERLAY_LOCK_EVENT, handleOverlayLock as EventListener)

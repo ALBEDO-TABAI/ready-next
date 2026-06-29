@@ -23,10 +23,28 @@ test('BrowserView show/hide decisions are consolidated inside useBrowserViewBoun
     hook,
     /sendIntent\(\{[\s\S]*kind: 'hide-all'[\s\S]*reason: 'overlay-open'[\s\S]*\}\)/,
   )
-  // Hook: reactive effect re-fires syncBrowserVisibility when isActive or isVisibleAllowed flip.
+  // Hook: reactive effect re-fires syncBrowserVisibility when isActive or isVisibleAllowed flip,
+  // and visible recovery must wait for stable bounds before showing the native BrowserView.
   assert.match(
     hook,
-    /useEffect\(\(\) => \{\s*void syncBrowserVisibility\(\{ forceExact: true \}\)\s*\}, \[hasError, isActive, isVisibleAllowed, syncBrowserVisibility\]\)/,
+    /useEffect\(\(\) => \{\s*void syncBrowserVisibility\(\{ forceExact: true, forceBoundsSync: isActive && isVisibleAllowed \}\)\s*\}, \[hasError, isActive, isVisibleAllowed, syncBrowserVisibility\]\)/,
+  )
+  assert.match(
+    hook,
+    /forceBoundsSync: isActiveRef\.current && isVisibleAllowedRef\.current/,
+  )
+  assert.doesNotMatch(hook, /syncBrowserVisibility\(\{ forceExact: true \}\)/)
+  assert.match(
+    browserMode,
+    /if \(layoutPhase !== 'idle'\) return\s*void syncBrowserVisibility\(\{ forceExact: true, forceBoundsSync: true \}\)/,
+  )
+  assert.doesNotMatch(
+    browserMode,
+    /if \(layoutPhase !== 'idle'\) return\s*void syncBrowserVisibility\(\{ forceExact: true \}\)/,
+  )
+  assert.match(
+    browserMode,
+    /await syncBrowserVisibility\('visible', \{ forceExact: true, forceBoundsSync: true \}\)\s*if \(cancelled\) return\s*clearPostActivationHostResyncTimer\(\)\s*hostPresentedRef\.current = true/,
   )
 
   // WorkbenchMode: the predictive hideAll inside handleWorkbenchModeChange is gone.

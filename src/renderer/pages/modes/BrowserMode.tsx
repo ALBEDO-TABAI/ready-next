@@ -969,6 +969,7 @@ export default function BrowserMode({
     const syncVisibleHost = async () => {
       if (presentationPlan.action === 'skip') return
       if (presentationPlan.action === 'hide') {
+        clearPostActivationHostResyncTimer()
         hostPresentedRef.current = false
         await syncBrowserVisibility('hidden')
         return
@@ -979,13 +980,15 @@ export default function BrowserMode({
       }
       if (cancelled) return
       if (presentationPlan.action === 'sync-bounds') {
-        await syncBrowserVisibility('visible', { forceExact: true })
+        await syncBrowserVisibility('visible', { forceExact: true, forceBoundsSync: true })
         if (cancelled) return
+        clearPostActivationHostResyncTimer()
         hostPresentedRef.current = true
         return
       }
-      await syncBrowserVisibility('visible', { forceExact: true })
+      await syncBrowserVisibility('visible', { forceExact: true, forceBoundsSync: true })
       if (cancelled) return
+      clearPostActivationHostResyncTimer()
       hostPresentedRef.current = true
     }
 
@@ -994,7 +997,7 @@ export default function BrowserMode({
     return () => {
       cancelled = true
     }
-  }, [activeTabId, browserRuntimeReady, fitBrowserTabIfNeeded, isElectron, sendBoundsImmediate, shouldHideAllBrowserHosts, splitTab?.id, syncBrowserVisibility, shouldPresentBrowserHost, shouldRevealBrowserHost, tabs.length])
+  }, [activeTabId, browserRuntimeReady, clearPostActivationHostResyncTimer, fitBrowserTabIfNeeded, isElectron, sendBoundsImmediate, shouldHideAllBrowserHosts, splitTab?.id, syncBrowserVisibility, shouldPresentBrowserHost, shouldRevealBrowserHost, tabs.length])
 
   useEffect(() => {
     if (!isElectron || !isActive) return
@@ -1041,7 +1044,7 @@ export default function BrowserMode({
   useEffect(() => {
     if (!isElectron || !isActive) return
     if (layoutPhase !== 'idle') return
-    void syncBrowserVisibility({ forceExact: true })
+    void syncBrowserVisibility({ forceExact: true, forceBoundsSync: true })
   }, [isActive, isElectron, layoutPhase, syncBrowserVisibility])
 
   useEffect(() => {
