@@ -112,6 +112,7 @@ interface AgentSendResult {
   success: boolean
   error?: string | null
   errorKind?: string | null
+  responseText?: string | null
   persistence?: {
     scope?: string | null
     message?: string | null
@@ -2580,7 +2581,15 @@ export const useAgent = create<AgentState>((set, get) => ({
             errorKind: result.errorKind || 'unknown',
           }
         }
-        agentRuntimeDriver.completeScopeRunAfterSendSuccess(activeScopeId, requestId)
+        const backendResponseText = typeof result.responseText === 'string'
+          ? result.responseText.trim()
+          : ''
+        if (backendResponseText) {
+          get().appendToMessage(responseId, backendResponseText)
+        }
+        agentRuntimeDriver.completeScopeRunAfterSendSuccess(activeScopeId, requestId, {
+          backendRecoveredResponse: Boolean(backendResponseText),
+        })
         set({ pendingContinuationIntent: null, pendingContinuationDraftAnchor: null })
         // Stream data arrives via onStream listener
         // Persistence of assistant message happens in onStream 'done' handler

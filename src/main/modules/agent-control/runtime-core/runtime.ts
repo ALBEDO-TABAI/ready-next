@@ -41,6 +41,7 @@ import {
   writeRunCloseMetric,
 } from './run-finalizer'
 import { finalizeStaleWithoutHandleProjections } from './stale-projection-finalizer'
+import { recoverUndeliveredAnswerForRetry } from './undelivered-answer-recovery'
 import { composePersonaSystemPrompt } from './persona-system-prompt'
 import { PromptAssemblyService } from '../prompt-assembly'
 import { selectScopeTaskIndexEntries } from '../session/daily-task-index-builder'
@@ -1767,6 +1768,7 @@ export class AgentControlRuntime extends EventEmitter {
         // predecessors in the same lineage so prompt assembly has prior context
         // when it runs.
         this.maybeAutoAttachSessionRecallOnResume(payload.scopeId, payload.message)
+        let recoveredUndeliveredAnswer: string | null = null
         const normalizedContinuationIntent = (() => {
           const intent = normalizeContinuationIntent(payload.continuationIntent || null)
           if (!intent) {
@@ -1790,6 +1792,22 @@ export class AgentControlRuntime extends EventEmitter {
               incoming: null,
               responseText: text,
             })
+            if (!built && targetProjection) {
+              const runMeta = targetProjection.runId
+                ? this.getRunMetaRepository()?.get(targetProjection.runId)
+                : null
+              recoveredUndeliveredAnswer = recoverUndeliveredAnswerForRetry({
+                projection: targetProjection,
+                runMeta,
+              })
+              if (recoveredUndeliveredAnswer) {
+                logAgentMetric('runtime_resume_recovered_undelivered_answer', {
+                  scopeId: scope.id,
+                  taskId: targetProjection.taskId,
+                  runId: targetProjection.runId,
+                })
+              }
+            }
             if (built) {
               logAgentMetric('runtime_resume_intent_auto_built_on_send', {
                 scopeId: scope.id,
@@ -1809,6 +1827,13 @@ export class AgentControlRuntime extends EventEmitter {
             incoming: intent,
           })
         })()
+        if (recoveredUndeliveredAnswer) {
+          return {
+            success: true,
+            responseText: recoveredUndeliveredAnswer,
+            persistence,
+          }
+        }
         let result: RunCoordinatorResult
         try {
           result = await this.runCoordinator.runScoped(
@@ -1857,6 +1882,21 @@ export class AgentControlRuntime extends EventEmitter {
         } finally {
           await this.finalizeStaleWithoutHandleProjectionsForScope(scope)
         }
+        const autoRecoveredUndeliveredAnswer = !result.success && payload.requestId
+          ? this.recoverUndeliveredAnswerForRun(scope.id, payload.requestId)
+          : null
+        if (autoRecoveredUndeliveredAnswer) {
+          logAgentMetric('runtime_auto_recovered_undelivered_answer', {
+            scopeId: scope.id,
+            runId: payload.requestId,
+            taskId: autoRecoveredUndeliveredAnswer.taskId,
+          })
+          return {
+            success: true,
+            responseText: autoRecoveredUndeliveredAnswer.responseText,
+            persistence,
+          }
+        }
         return {
           ...result,
           errorKind: result.scopeRunAuthority?.state === 'lost'
@@ -1866,6 +1906,17 @@ export class AgentControlRuntime extends EventEmitter {
         }
       },
     })
+  }
+
+  private recoverUndeliveredAnswerForRun(scopeId: string, runId: string): { responseText: string; taskId: string | null } | null {
+    const normalizedScopeId = String(scopeId || '').trim()
+    const normalizedRunId = String(runId || '').trim()
+    if (!normalizedScopeId || !normalizedRunId) return null
+    const projection = (this.taskProjectionStore.listByScope(normalizedScopeId) as TaskProjectionRecord[])
+      .find((record) => record.runId === normalizedRunId) || null
+    const runMeta = this.getRunMetaRepository()?.get(normalizedRunId) || null
+    const responseText = recoverUndeliveredAnswerForRetry({ projection, runMeta })
+    return responseText ? { responseText, taskId: projection?.taskId || null } : null
   }
 
   private async finalizeStaleWithoutHandleProjectionsForScope(scope: ConversationScope): Promise<number> {

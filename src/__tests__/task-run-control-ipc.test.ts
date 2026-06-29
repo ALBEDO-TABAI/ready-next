@@ -11,6 +11,7 @@ function readWorkspaceFile(path: string): string {
 test('task run control actions are exposed through runtime, IPC, preload, renderer types, and UI entry points', () => {
   const runtime = readWorkspaceFile('src/main/modules/agent-control/runtime-core/runtime.ts')
   const runControlGroup = readWorkspaceFile('src/main/modules/claude-bridge/ipc/run-control-group.ts')
+  const agentLifecycleGroup = readWorkspaceFile('src/main/modules/claude-bridge/ipc/agent-lifecycle-group.ts')
   const ipcHandler = readWorkspaceFile('src/main/modules/claude-bridge/ipc-handler.ts')
   const preload = readWorkspaceFile('src/preload/index.ts')
   const rendererTypes = readWorkspaceFile('src/renderer/types/electron.d.ts')
@@ -32,6 +33,7 @@ test('task run control actions are exposed through runtime, IPC, preload, render
   assert.match(runControlGroup, /ipcMain\.handle\('agent:reportInfrastructureTimeout'/)
   assert.match(runControlGroup, /ipcMain\.handle\('agent:resumeRun'/)
   assert.match(runControlGroup, /ipcMain\.handle\('agent:respondToInteraction'/)
+  assert.match(agentLifecycleGroup, /responseText:\s*result\.responseText/)
 
   assert.match(preload, /sendScoped:\s*\(\s*payload:\s*\{\s*scopeId: string/)
   assert.match(preload, /agent\?: string/)
@@ -51,8 +53,10 @@ test('task run control actions are exposed through runtime, IPC, preload, render
   assert.match(rendererTypes, /sendScoped:\s*\(\s*payload:\s*\{/)
   assert.match(rendererTypes, /agent\?: string/)
   assert.match(rendererTypes, /continuationIntent\?: ContinuationIntentData \| null/)
+  assert.match(rendererTypes, /responseText\?: string \| null/)
 
   assert.match(agentStore, /pendingContinuationIntent:/)
+  assert.match(agentStore, /result\.responseText/)
   assert.match(agentStore, /setComposerDraft:/)
   assert.match(agentStore, /agent:\s*currentAgent/)
   assert.match(agentStore, /continuationIntent:\s*pendingContinuationIntent \|\| undefined/)

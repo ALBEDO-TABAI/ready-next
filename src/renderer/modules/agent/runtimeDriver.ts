@@ -299,10 +299,29 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
   // Keyed by `${scopeId}::${requestId}` — at most one watchdog per
   // in-flight send. Cleared by any terminal-event handler below.
   const infrastructureWatchdogs = new Map<string, InfrastructureWatchdog>()
+  const backendRecoveredResponseRequests = new Set<string>()
   let lastInfrastructureToastAt = 0
 
   function watchdogKey(scopeId: string, requestId: string): string {
     return `${scopeId}::${requestId}`
+  }
+
+  function isRecoverableUndeliveredAnswerErrorKind(errorKind: unknown): boolean {
+    return errorKind === 'proof_gap' || errorKind === 'adjudication_degraded' || errorKind === 'delivery_failed'
+  }
+
+  function markBackendRecoveredResponse(scopeId: string, requestId: string): void {
+    if (!scopeId || !requestId) return
+    backendRecoveredResponseRequests.add(watchdogKey(scopeId, requestId))
+  }
+
+  function isBackendRecoveredResponse(scopeId: string, requestId: string | null | undefined, errorKind: unknown): boolean {
+    return Boolean(
+      scopeId
+      && requestId
+      && backendRecoveredResponseRequests.has(watchdogKey(scopeId, requestId))
+      && isRecoverableUndeliveredAnswerErrorKind(errorKind)
+    )
   }
 
   function clearInfrastructureWatchdogForScope(scopeId: string): void {
@@ -584,8 +603,15 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
     })
   }
 
-  function completeScopeRunAfterSendSuccess(scopeId: string, requestId: string): void {
+  function completeScopeRunAfterSendSuccess(
+    scopeId: string,
+    requestId: string,
+    options?: { backendRecoveredResponse?: boolean },
+  ): void {
     clearInfrastructureWatchdog(scopeId, requestId)
+    if (options?.backendRecoveredResponse) {
+      markBackendRecoveredResponse(scopeId, requestId)
+    }
     let persistedRunState: ScopeRunState | null = null
     store.setState((state: any) => {
       const sessionId = sessionKeyForScopeId(state, scopeId)
@@ -603,12 +629,35 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
       if (!previous && activeRequestId !== requestId) return {}
 
       const nextRun = previous
-        ? previous.terminalReason
-          ? { ...previous, scopeId, updatedAt: new Date().toISOString() }
-          : finalizeDoneRunState(previous, scopeId)
+        ? options?.backendRecoveredResponse
+          ? {
+            ...finalizeDoneRunState({
+              ...previous,
+              terminalReason: null,
+              blockedReason: null,
+              error: null,
+              softError: null,
+            }, scopeId),
+            terminalReason: 'done' as const,
+          }
+          : previous.terminalReason
+            ? { ...previous, scopeId, updatedAt: new Date().toISOString() }
+            : finalizeDoneRunState(previous, scopeId)
         : null
       persistedRunState = nextRun
+      const messages = options?.backendRecoveredResponse
+        ? (currentSlice.messages || state.messages || []).filter((message: AgentMessage) => {
+          const meta = (message.meta || {}) as Record<string, unknown>
+          return !(
+            message.type === 'system'
+            && meta.runtimeTerminalError === true
+            && meta.scopeId === scopeId
+            && meta.requestId === requestId
+          )
+        })
+        : undefined
       return withSessionSliceAndActiveRuntimeMirror(state, sessionId, {
+        ...(messages ? { messages } : {}),
         scopeRunStates: nextRun
           ? {
             ...currentSlice.scopeRunStates,
@@ -987,6 +1036,10 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
       if (!recoverable) {
         clearInfrastructureWatchdog(scopeId, runState?.requestId || (typeof data.runId === 'string' ? data.runId : null))
       }
+      const requestId = runState?.requestId || (typeof data.runId === 'string' ? data.runId : null)
+      if (!recoverable && isBackendRecoveredResponse(scopeId, requestId, data.errorKind)) {
+        return
+      }
 
       if (recoverable) {
         const friendly = mapBackendErrorToFriendly({
@@ -1104,6 +1157,12 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
           content: friendly.friendlyMessage,
           type: 'system',
           timestamp: new Date(),
+          meta: {
+            runtimeTerminalError: true,
+            scopeId,
+            requestId: runState?.requestId || (typeof data.runId === 'string' ? data.runId : null),
+            errorKind: data.errorKind || 'unknown',
+          },
         })
       }
 

@@ -59,6 +59,7 @@ export interface SendScopedResponse {
   success: boolean
   error?: string
   errorKind?: SendScopedErrorKind
+  responseText?: string
   persistence?: SendScopedPersistence
 }
 

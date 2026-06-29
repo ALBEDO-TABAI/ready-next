@@ -43,6 +43,7 @@ interface IPCResponse<T = unknown> {
   error?: string
   mock?: boolean
   errorKind?: string
+  responseText?: string
   persistence?: unknown
   /**
    * Stage V V3.5 — structured error tag for `session_limit_exceeded`.
@@ -84,6 +85,7 @@ interface SendScopedResult {
   success: boolean
   error?: string
   errorKind?: string
+  responseText?: string
   persistence?: unknown
 }
 
@@ -292,6 +294,7 @@ export const agentLifecycleGroup: IpcChannelGroup<AgentLifecycleGroupDeps> = {
           success: result.success,
           error: result.error,
           errorKind: result.errorKind,
+          responseText: result.responseText,
           persistence: result.persistence,
         }
       } catch (error) {

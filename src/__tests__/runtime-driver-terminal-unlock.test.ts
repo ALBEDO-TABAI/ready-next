@@ -170,7 +170,11 @@ driver.initAgentListeners()
 type DriverApi = {
   armInfrastructureWatchdog: (scopeId: string, requestId: string, options?: { timeoutMs?: number }) => void
   clearInfrastructureWatchdog: (scopeId: string, requestId: string | null | undefined) => void
-  completeScopeRunAfterSendSuccess: (scopeId: string, requestId: string) => void
+  completeScopeRunAfterSendSuccess: (
+    scopeId: string,
+    requestId: string,
+    options?: { backendRecoveredResponse?: boolean },
+  ) => void
 }
 const driverApi = driver as unknown as DriverApi
 
@@ -775,6 +779,56 @@ test('sendScoped success fallback unlocks a completed run with stale composer lo
   assert.equal(state.isStreaming, false, 'active mirror streaming flag is cleared')
   assert.equal(state.composerLocked, false, 'active mirror composer lock is cleared')
   assert.equal(afterSlice.scopeRunStates['scope-A']?.terminalReason, 'done')
+})
+
+test('backend recovered response clears same-run proof-gap interruption UI', () => {
+  seedTwoSessions({
+    activeSessionId: 'session-A',
+    lockedSessionId: 'session-A',
+    lockedScopeId: 'scope-A',
+    otherScopeId: 'scope-B',
+    requestId: 'req-A',
+  })
+
+  fireOnError({
+    agent: 'butler',
+    sessionId: 'session-A',
+    scopeId: 'scope-A',
+    runId: 'req-A',
+    error: 'proof_gap',
+    type: 'runtime',
+    errorKind: 'proof_gap',
+    recoverable: false,
+  })
+
+  useAgent.getState().addMessage({
+    id: 'response-A',
+    agent: 'butler',
+    content: '刚才的结果没有成功显示，我重新发一次：广州一周天气。',
+    type: 'agent',
+    timestamp: new Date(),
+  })
+  driverApi.completeScopeRunAfterSendSuccess('scope-A', 'req-A', { backendRecoveredResponse: true })
+
+  const state = useAgent.getState()
+  const slice = getSessionSlice(state, 'session-A')
+  assert.equal(
+    state.messages.some((message: { type: string; content: string }) =>
+      message.type === 'system' && message.content.includes('这轮还没完整完成')
+    ),
+    false,
+    'stale interruption prompt is removed',
+  )
+  assert.equal(
+    state.messages.some((message: { type: string; content: string }) =>
+      message.type === 'agent' && message.content.includes('广州一周天气')
+    ),
+    true,
+    'recovered answer remains visible',
+  )
+  assert.equal(slice.scopeRunStates['scope-A']?.phase, 'done')
+  assert.equal(slice.scopeRunStates['scope-A']?.terminalReason, 'done')
+  assert.equal(slice.scopeRunStates['scope-A']?.error, null)
 })
 
 test('done stream resolves session-slice run when the top-level mirror is stale', async () => {

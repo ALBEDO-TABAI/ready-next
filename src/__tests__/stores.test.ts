@@ -1636,6 +1636,87 @@ describe('useAgent Store', () => {
         )
     })
 
+    it('should render backend responseText returned by sendScoped success', async () => {
+        const scopeId = 'conv-local-response-text'
+        const savedMessages: Array<{ role: string; content: string }> = []
+
+        ;(globalThis as any).window.electronAPI = {
+            agent: {
+                createLocalScope: async (_agent: string, scopeId?: string) => ({
+                    success: true,
+                    data: {
+                        id: scopeId || 'conv-local-response-text',
+                        agent: 'butler',
+                        title: '新对话',
+                        sourceKind: 'local',
+                        sourceId: 'app',
+                        threadKey: scopeId || 'conv-local-response-text',
+                        meta: { sourceLabel: '应用内', createdBy: 'app' },
+                        createdAt: '2026-04-15T10:00:00.000Z',
+                        updatedAt: '2026-04-15T10:00:00.000Z',
+                        lastMessageAt: null,
+                    },
+                }),
+                sendScoped: async () => ({
+                    success: true,
+                    responseText: '刚才的结果没有成功显示，我重新发一次：\n\n广州一周天气：小雨为主。',
+                    persistence: {
+                        scope: 'pre-existing',
+                        message: 'persisted',
+                        attachments: 'none',
+                        inputAttachments: 'none',
+                    },
+                }),
+                emitRendererMetric: async () => ({ success: true }),
+                kill: async () => ({ success: true }),
+            },
+            chat: {
+                createConversation: async () => ({ success: true }),
+                saveMessage: async (message: { role: string; content: string }) => {
+                    savedMessages.push({ role: message.role, content: message.content })
+                    return { success: true }
+                },
+                updateConversationTitle: async () => ({ success: true }),
+            },
+            settings: {
+                getAIConfig: async () => ({ success: true, data: null }),
+            },
+        }
+
+        useAgent.setState({
+            currentAgent: 'butler',
+            currentScopeId: scopeId,
+            currentScope: {
+                id: scopeId,
+                agent: 'butler',
+                title: '新对话',
+                sourceKind: 'local',
+                sourceId: 'app',
+                threadKey: scopeId,
+                meta: { sourceLabel: '应用内', createdBy: 'app' },
+                createdAt: '2026-04-15T10:00:00.000Z',
+                updatedAt: '2026-04-15T10:00:00.000Z',
+                lastMessageAt: null,
+            },
+            scopes: [],
+            conversations: [],
+            messages: [],
+            attachments: [],
+            filePool: [],
+            isStreaming: false,
+            sendCoalescingEnabled: false,
+        })
+
+        const result = await useAgent.getState().sendMessage('继续')
+        const assistantMessage = useAgent.getState().messages.find((message) => message.type === 'agent')
+
+        assert.equal(result.success, true)
+        assert.match(assistantMessage?.content || '', /广州一周天气/)
+        assert.equal(useAgent.getState().isStreaming, false)
+        await new Promise<void>((resolve) => setTimeout(resolve, 0))
+        assert.equal(savedMessages.some((message) => message.role === 'assistant' && /广州一周天气/.test(message.content)), true)
+    })
+
     it('should keep hard adjudication-degraded failures visible after persisting the user message', async () => {
         ;(globalThis as any).window.electronAPI = {
             agent: {

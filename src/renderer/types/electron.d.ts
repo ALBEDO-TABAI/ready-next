@@ -112,6 +112,7 @@ interface SendScopedResponse {
   success: boolean
   error?: string | null
   errorKind?: string | null
+  responseText?: string | null
   persistence?: {
     scope: 'pre-existing' | 'lazy-created' | 'failed'
     message: 'persisted' | 'failed' | 'skipped'
