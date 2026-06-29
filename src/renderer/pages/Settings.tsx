@@ -11,6 +11,7 @@ import { resolveAIConfigCapabilities, getActiveAIProfile } from '../../shared/ai
 import { nextIntentId } from '../../shared/browser-view-intent'
 import type { CapabilityRuntimeSnapshot } from '../../shared/ai-capability-runtime'
 import { listSettingsCapabilityGroups, type CapabilityGroupId } from '../../shared/ai-capability-groups'
+import { BROWSER_POWER_MODE_SETTING_KEY } from '../../shared/browser-power'
 import { useSettings, getProviderDef } from '../stores/useSettings'
 import type { AIProviderCategory } from '../stores/useSettings'
 import type { ExternalServiceOptionValue, ExternalServiceUpdateInput, PublicExternalServiceProfile } from '../../shared/external-services'
@@ -204,6 +205,13 @@ const settingsData: SettingSection[] = [
         description: '根据日程、文件活动、最近对话和浏览记录，在文件管理顶部显示可能相关的项目。',
         type: 'toggle',
         value: true,
+      },
+      {
+        id: BROWSER_POWER_MODE_SETTING_KEY,
+        label: '浏览器 Power Mode',
+        description: '允许 Agent 在浏览器任务中使用自由脚本、CDP、网络追踪和高级资源嗅探；支付、删除、改凭据等动作仍需单独授权。',
+        type: 'toggle',
+        value: false,
       },
       { id: 'analytics', label: '使用分析', description: '帮助我们改善产品体验（匿名数据）', type: 'toggle', value: false },
       { id: 'crashReports', label: '崩溃报告', description: '自动发送崩溃信息协助排查问题', type: 'toggle', value: true }
@@ -2909,10 +2917,16 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
     if (typeof window === 'undefined' || !window.electronAPI?.settings?.get) return
     let cancelled = false
     void (async () => {
-      const result = await window.electronAPI.settings.get(FILE_EMERGENCE_SETTING_KEY)
+      const [fileEmergenceResult, browserPowerResult] = await Promise.all([
+        window.electronAPI.settings.get(FILE_EMERGENCE_SETTING_KEY),
+        window.electronAPI.settings.get(BROWSER_POWER_MODE_SETTING_KEY),
+      ])
       if (cancelled) return
-      if (result?.success) {
-        updateSetting('privacy', FILE_EMERGENCE_SETTING_KEY, result.data !== 'false')
+      if (fileEmergenceResult?.success) {
+        updateSetting('privacy', FILE_EMERGENCE_SETTING_KEY, fileEmergenceResult.data !== 'false')
+      }
+      if (browserPowerResult?.success) {
+        updateSetting('privacy', BROWSER_POWER_MODE_SETTING_KEY, browserPowerResult.data === 'true')
       }
       // Agent 后台播报 / 新会话路由 的读写已迁入 AgentSettingsHub「行为」子区（自包含）。
     })()
@@ -2934,7 +2948,8 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
 
   const handleToggleSetting = async (sectionId: string, setting: SettingItem) => {
     const nextValue = !setting.value
-    if (setting.id !== FILE_EMERGENCE_SETTING_KEY) {
+    const persistedToggleIds = new Set([FILE_EMERGENCE_SETTING_KEY, BROWSER_POWER_MODE_SETTING_KEY])
+    if (!persistedToggleIds.has(setting.id)) {
       updateSetting(sectionId, setting.id, nextValue)
       return
     }

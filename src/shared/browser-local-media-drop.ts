@@ -4,6 +4,7 @@ export const READY_LOCAL_MEDIA_DROP_SCHEME = 'ready-local-media-drop:'
 
 export interface BrowserLocalMediaDropRequest {
   paths: string[]
+  urls?: string[]
   x?: number
   y?: number
 }
@@ -30,12 +31,30 @@ export function parseBrowserLocalMediaDropUrl(url: string): BrowserLocalMediaDro
         ? payload.paths.map((path) => ({ path: String(path || '') }))
         : [],
     )
-    if (paths.length === 0) return null
-    return {
+    const urls = Array.isArray(payload.urls)
+      ? Array.from(new Set(payload.urls
+        .map((value) => normalizeRemoteMediaUrl(value))
+        .filter((value): value is string => Boolean(value))))
+        .slice(0, 8)
+      : []
+    if (paths.length === 0 && urls.length === 0) return null
+    const request: BrowserLocalMediaDropRequest = {
       paths,
       x: finiteNumber(payload.x),
       y: finiteNumber(payload.y),
     }
+    if (urls.length > 0) request.urls = urls
+    return request
+  } catch {
+    return null
+  }
+}
+
+function normalizeRemoteMediaUrl(value: unknown): string | null {
+  try {
+    const parsed = new URL(String(value || '').trim())
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null
+    return parsed.href
   } catch {
     return null
   }

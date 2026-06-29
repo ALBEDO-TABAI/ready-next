@@ -39,57 +39,57 @@ function modelContext(overrides: Partial<ToolContext> = {}): ToolContext {
 }
 
 // ---------------------------------------------------------------------------
-// 1. Policy table matrix — M1
+// 1. Browser actions retired from the M1/M3 confirmation table
 // ---------------------------------------------------------------------------
 
-test('M1 matrix: payment final-confirm click → manual_only', () => {
+test('browser payment text no longer resolves to M1 manual-only at dispatch', () => {
   const decision = resolveConfirmationGate('browser_click_text', { text: '确认支付' })
-  assert.equal(decision.mode, 'M1')
-  assert.equal(decision.action, 'manual_only')
+  assert.equal(decision.mode, 'M4')
+  assert.equal(decision.action, 'allow')
 })
 
-test('M1 matrix: password-change final submit → manual_only', () => {
+test('browser password-change text no longer resolves to M1 manual-only at dispatch', () => {
   const decision = resolveConfirmationGate('browser_click_text', { text: '保存新密码' })
-  assert.equal(decision.mode, 'M1')
-  assert.equal(decision.action, 'manual_only')
+  assert.equal(decision.mode, 'M4')
+  assert.equal(decision.action, 'allow')
 })
 
-test('M1 matrix: typing into a captcha field → manual_only', () => {
+test('browser captcha field no longer resolves to M1 manual-only at dispatch', () => {
   const decision = resolveConfirmationGate('browser_type', { selector: '#captcha-input', text: '8244' })
-  assert.equal(decision.mode, 'M1')
-  assert.equal(decision.action, 'manual_only')
+  assert.equal(decision.mode, 'M4')
+  assert.equal(decision.action, 'allow')
 })
 
-test('M1 matrix: act-on-target click on a payment-confirm target → manual_only (no page-map bypass)', () => {
+test('browser act-on-target payment text no longer resolves to M1 manual-only at dispatch', () => {
   const decision = resolveConfirmationGate('browser_act_on_target', {
     target_id: 'pm-3:button-17',
     action: 'click',
     disambiguation: '订单页底部的「确认支付」主按钮',
   })
-  assert.equal(decision.mode, 'M1')
-  assert.equal(decision.action, 'manual_only')
+  assert.equal(decision.mode, 'M4')
+  assert.equal(decision.action, 'allow')
 })
 
-test('M1 matrix: act-on-target fill into a captcha field → manual_only', () => {
+test('browser act-on-target captcha text no longer resolves to M1 manual-only at dispatch', () => {
   const decision = resolveConfirmationGate('browser_act_on_target', {
     target_id: 'pm-3:input-4',
     action: 'fill',
     value: '8244',
     disambiguation: '验证码输入框',
   })
-  assert.equal(decision.mode, 'M1')
-  assert.equal(decision.action, 'manual_only')
+  assert.equal(decision.mode, 'M4')
+  assert.equal(decision.action, 'allow')
 })
 
-test('M3 matrix: act-on-target fill into a password field → confirm (登录已存账号)', () => {
+test('browser password fill no longer resolves to M3 at dispatch', () => {
   const decision = resolveConfirmationGate('browser_act_on_target', {
     target_id: 'pm-2:input-9',
     action: 'fill',
     value: 'hunter2',
     disambiguation: '登录表单的 password 输入框',
   })
-  assert.equal(decision.mode, 'M3')
-  assert.equal(decision.action, 'confirm')
+  assert.equal(decision.mode, 'M4')
+  assert.equal(decision.action, 'allow')
 })
 
 test('M4 matrix: a neutral act-on-target click stays allowed', () => {
@@ -146,25 +146,25 @@ test('M3 matrix: file upload → mode M3 but action is confirm (same path as M2,
   assert.equal(decision.action, 'confirm')
 })
 
-test('M3 matrix: browser_upload_scope_attachment → confirm', () => {
+test('browser upload is no longer gated by the non-browser confirmation table', () => {
   const decision = resolveConfirmationGate('browser_upload_scope_attachment', { attachmentId: 'att-1' })
-  assert.equal(decision.mode, 'M3')
-  assert.equal(decision.action, 'confirm')
+  assert.equal(decision.mode, 'M4')
+  assert.equal(decision.action, 'allow')
 })
 
-test('M3 matrix: typing into a login password field → confirm (登录已存账号)', () => {
+test('browser password type is no longer gated by the non-browser confirmation table', () => {
   const decision = resolveConfirmationGate('browser_type', { selector: '#login-password', text: 'hunter2' })
-  assert.equal(decision.mode, 'M3')
-  assert.equal(decision.action, 'confirm')
+  assert.equal(decision.mode, 'M4')
+  assert.equal(decision.action, 'allow')
 })
 
-test('M3 matrix: collection task on a high-control platform → confirm; neutral site → allow', () => {
+test('browser high-control collection no longer routes through M3 confirmation', () => {
   const risky = resolveConfirmationGate('browser_start_task', {
     kind: 'scroll_collect',
     payload: { url: 'https://www.xiaohongshu.com/explore' },
   })
-  assert.equal(risky.mode, 'M3')
-  assert.equal(risky.action, 'confirm')
+  assert.equal(risky.mode, 'M4')
+  assert.equal(risky.action, 'allow')
 
   const neutral = resolveConfirmationGate('browser_start_task', {
     kind: 'scroll_collect',
@@ -279,11 +279,10 @@ test('no-cache (dispatch level): two consecutive identical M2 dispatches are BOT
 // 5. Dispatch gate behavior through the REAL executeToolCall entry
 // ---------------------------------------------------------------------------
 
-test('dispatch: M1 click is refused with denied_manual_only and never reaches the browser domain', async () => {
+test('dispatch: browser destructive text no longer stops at the action-confirmation M1 gate', async () => {
   const output = await executeToolCall('browser_click_text', { text: '确认支付' }, modelContext())
-  assert.equal(output.data?.errorKind, 'denied_manual_only')
-  assert.equal(output.data?.mode, 'M1')
-  assert.match(output.text, /亲手|手动|亲自/, 'M1 denial must instruct the user to act manually')
+  assert.notEqual(output.data?.errorKind, 'denied_manual_only')
+  assert.notEqual(output.data?.mode, 'M1')
 })
 
 test('dispatch: M2 delete is denied pending confirmation (I3-1 placeholder) and tool does not execute', async () => {

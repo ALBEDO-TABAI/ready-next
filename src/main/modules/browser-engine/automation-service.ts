@@ -9,6 +9,7 @@ import type {
   BrowserViewportMetrics,
 } from './automation-types'
 import { filterBrowserLocalMediaUploadPaths } from '../../../shared/browser-local-media-upload'
+import type { BrowserCdpSessionService } from './cdp-session-service'
 
 interface BrowserAutomationTabRecord {
   id: string
@@ -21,6 +22,7 @@ interface BrowserAutomationHost {
   resolveTabView(tabId: string | null): { tabId: string; tab: BrowserAutomationTabRecord; view: BrowserHostView }
   createBrowserError(code: BrowserCDPErrorCode, message: string): Error
   getViewBounds(): BrowserRect
+  cdpSession?: BrowserCdpSessionService
 }
 
 export class BrowserAutomationService {
@@ -65,6 +67,9 @@ export class BrowserAutomationService {
   }
 
   async ensureDebugger(tabId: string | null): Promise<{ tabId: string }> {
+    if (this.host.cdpSession) {
+      return this.host.cdpSession.ensureAttached(tabId)
+    }
     const { tabId: resolvedTabId, view } = this.host.resolveTabView(tabId)
     try {
       if (!view.webContents.debugger.isAttached()) {
@@ -75,6 +80,19 @@ export class BrowserAutomationService {
       const message = error instanceof Error ? error.message : String(error)
       throw this.host.createBrowserError('DEBUGGER_ATTACH_FAILED', `Debugger attach failed: ${message}`)
     }
+  }
+
+  private async sendCdpCommand(
+    tabId: string | null,
+    method: string,
+    params?: Record<string, unknown>,
+  ): Promise<unknown> {
+    if (this.host.cdpSession) {
+      return this.host.cdpSession.sendCommand(tabId, method, params)
+    }
+    const { view } = this.host.resolveTabView(tabId)
+    await this.ensureDebugger(tabId)
+    return view.webContents.debugger.sendCommand(method, params)
   }
 
   async getViewportMetrics(tabId: string | null): Promise<BrowserViewportMetrics> {
@@ -123,7 +141,7 @@ export class BrowserAutomationService {
 
     await this.ensureDebugger(tabId)
     try {
-      const layout = await view.webContents.debugger.sendCommand('Page.getLayoutMetrics') as {
+      const layout = await this.sendCdpCommand(tabId, 'Page.getLayoutMetrics') as {
         layoutViewport?: { clientWidth?: number; clientHeight?: number; pageX?: number; pageY?: number }
         visualViewport?: { clientWidth?: number; clientHeight?: number; pageX?: number; pageY?: number; scale?: number }
       }
@@ -158,10 +176,8 @@ export class BrowserAutomationService {
   }
 
   async dispatchMouse(tabId: string | null, payload: BrowserMouseEventPayload): Promise<void> {
-    const { view } = this.host.resolveTabView(tabId)
-    await this.ensureDebugger(tabId)
     try {
-      await view.webContents.debugger.sendCommand('Input.dispatchMouseEvent', {
+      await this.sendCdpCommand(tabId, 'Input.dispatchMouseEvent', {
         type: payload.type,
         x: payload.x,
         y: payload.y,
@@ -179,10 +195,8 @@ export class BrowserAutomationService {
   }
 
   async dispatchKey(tabId: string | null, payload: BrowserKeyEventPayload): Promise<void> {
-    const { view } = this.host.resolveTabView(tabId)
-    await this.ensureDebugger(tabId)
     try {
-      await view.webContents.debugger.sendCommand('Input.dispatchKeyEvent', {
+      await this.sendCdpCommand(tabId, 'Input.dispatchKeyEvent', {
         type: payload.type,
         key: payload.key || '',
         code: payload.code || '',
@@ -202,13 +216,11 @@ export class BrowserAutomationService {
   }
 
   async typeTextDirectly(tabId: string | null, text: string, options?: { useShiftEnterForNewline?: boolean }): Promise<void> {
-    const { view } = this.host.resolveTabView(tabId)
-    await this.ensureDebugger(tabId)
     const useShiftEnterForNewline = options?.useShiftEnterForNewline === true
 
     try {
       if (!useShiftEnterForNewline || !text.includes('\n')) {
-        await view.webContents.debugger.sendCommand('Input.insertText', { text })
+        await this.sendCdpCommand(tabId, 'Input.insertText', { text })
         return
       }
 
@@ -216,7 +228,7 @@ export class BrowserAutomationService {
       for (let i = 0; i < segments.length; i += 1) {
         const segment = segments[i]
         if (segment.length > 0) {
-          await view.webContents.debugger.sendCommand('Input.insertText', { text: segment })
+          await this.sendCdpCommand(tabId, 'Input.insertText', { text: segment })
         }
         if (i < segments.length - 1) {
           await this.dispatchKey(tabId, { type: 'keyDown', key: 'Shift', code: 'ShiftLeft', modifiers: 8 })
@@ -243,7 +255,7 @@ export class BrowserAutomationService {
     await this.ensureDebugger(tabId)
     try {
       if (mode === 'clip' && options?.clip) {
-        const result = await view.webContents.debugger.sendCommand('Page.captureScreenshot', {
+        const result = await this.sendCdpCommand(tabId, 'Page.captureScreenshot', {
           format: 'png',
           fromSurface: true,
           captureBeyondViewport: true,
@@ -258,13 +270,13 @@ export class BrowserAutomationService {
         return String(result.data || '')
       }
 
-      const layout = await view.webContents.debugger.sendCommand('Page.getLayoutMetrics') as {
+      const layout = await this.sendCdpCommand(tabId, 'Page.getLayoutMetrics') as {
         contentSize?: { width?: number; height?: number; x?: number; y?: number }
       }
       const bounds = this.host.getViewBounds()
       const clipWidth = Math.max(1, Math.ceil(Number(layout.contentSize?.width || bounds.width)))
       const clipHeight = Math.max(1, Math.ceil(Number(layout.contentSize?.height || bounds.height)))
-      const result = await view.webContents.debugger.sendCommand('Page.captureScreenshot', {
+      const result = await this.sendCdpCommand(tabId, 'Page.captureScreenshot', {
         format: 'png',
         fromSurface: true,
         captureBeyondViewport: true,
@@ -562,9 +574,9 @@ export class BrowserAutomationService {
     }
 
     try {
-      const documentNode = await view.webContents.debugger.sendCommand('DOM.getDocument', { depth: 2, pierce: true }) as { root?: { nodeId?: number } }
+      const documentNode = await this.sendCdpCommand(tabId, 'DOM.getDocument', { depth: 2, pierce: true }) as { root?: { nodeId?: number } }
       const rootNodeId = Number(documentNode.root?.nodeId || 0)
-      const query = await view.webContents.debugger.sendCommand('DOM.querySelector', {
+      const query = await this.sendCdpCommand(tabId, 'DOM.querySelector', {
         nodeId: rootNodeId,
         selector: `[data-ready-upload-target="${marker}"]`,
       }) as { nodeId?: number }
@@ -578,7 +590,7 @@ export class BrowserAutomationService {
           assignedFileNames: [],
         }
       }
-      await view.webContents.debugger.sendCommand('DOM.setFileInputFiles', { nodeId, files })
+      await this.sendCdpCommand(tabId, 'DOM.setFileInputFiles', { nodeId, files })
       const assignmentResult = await this.executeJS(tabId, `
         (() => {
           const input = document.querySelector('[data-ready-upload-target="${marker}"]')
@@ -682,8 +694,6 @@ export class BrowserAutomationService {
     files: string[],
     point: { x?: number; y?: number },
   ): Promise<boolean> {
-    const { view } = this.host.resolveTabView(tabId)
-    await this.ensureDebugger(tabId)
     const metrics = await this.getViewportMetrics(tabId)
     const x = Number.isFinite(Number(point.x)) ? Number(point.x) : Math.round(metrics.width / 2)
     const y = Number.isFinite(Number(point.y)) ? Number(point.y) : Math.round(metrics.height / 2)
@@ -693,9 +703,9 @@ export class BrowserAutomationService {
       dragOperationsMask: 1,
     }
     try {
-      await view.webContents.debugger.sendCommand('Input.dispatchDragEvent', { type: 'dragEnter', x, y, data })
-      await view.webContents.debugger.sendCommand('Input.dispatchDragEvent', { type: 'dragOver', x, y, data })
-      await view.webContents.debugger.sendCommand('Input.dispatchDragEvent', { type: 'drop', x, y, data })
+      await this.sendCdpCommand(tabId, 'Input.dispatchDragEvent', { type: 'dragEnter', x, y, data })
+      await this.sendCdpCommand(tabId, 'Input.dispatchDragEvent', { type: 'dragOver', x, y, data })
+      await this.sendCdpCommand(tabId, 'Input.dispatchDragEvent', { type: 'drop', x, y, data })
       return true
     } catch {
       return false

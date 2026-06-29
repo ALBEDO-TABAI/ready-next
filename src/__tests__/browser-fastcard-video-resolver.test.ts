@@ -49,6 +49,45 @@ test('yt-dlp json is normalized into FastCard video metadata', () => {
   assert.equal(video.playableUrl, 'https://media.example.com/clip.mp4')
 })
 
+test('yt-dlp normalization prefers progressive formats over higher video-only formats', () => {
+  const video = normalizeYtDlpVideoInfo({
+    title: 'Short',
+    extractor_key: 'YouTube',
+    url: 'https://www.youtube.com/watch?v=vzqbgZjBsi4',
+    formats: [
+      {
+        url: 'https://rr1---sn-googlevideo.com/videoplayback?mime=video%2Fmp4&itag=137',
+        vcodec: 'avc1.640028',
+        acodec: 'none',
+        height: 1080,
+        tbr: 9000,
+      },
+      {
+        url: 'https://rr1---sn-googlevideo.com/videoplayback?mime=video%2Fmp4&itag=18',
+        vcodec: 'avc1.42001E',
+        acodec: 'mp4a.40.2',
+        height: 360,
+        tbr: 700,
+      },
+    ],
+  }, 'https://www.youtube.com/shorts/vzqbgZjBsi4')
+
+  assert.equal(video.parseStatus, 'resolved')
+  assert.equal(video.playableUrl, 'https://rr1---sn-googlevideo.com/videoplayback?mime=video%2Fmp4&itag=18')
+})
+
+test('yt-dlp normalization does not report the source page as a resolved media URL', () => {
+  const video = normalizeYtDlpVideoInfo({
+    title: 'Short',
+    extractor_key: 'YouTube',
+    url: 'https://www.youtube.com/watch?v=vzqbgZjBsi4',
+  }, 'https://www.youtube.com/shorts/vzqbgZjBsi4')
+
+  assert.equal(video.parseStatus, 'failed')
+  assert.equal(video.playableUrl, undefined)
+  assert.match(video.error || '', /未返回可用链接/)
+})
+
 test('generic URL uses yt-dlp dump json and returns only metadata links', async () => {
   const result = await resolveFastCardVideo({ target: makeTarget({ pageUrl: 'https://video.example.com/watch/2' }) }, {
     runCommand: async (file, args) => {

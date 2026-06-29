@@ -1785,6 +1785,7 @@ interface ElectronBrowserAPI {
     targetDir: string
     sourcePageUrl?: string | null
     suggestedName?: string | null
+    downloadHeaders?: Record<string, string> | null
   }) => Promise<{ success: boolean; savePath?: string; filename?: string; error?: string }>
   onDownloadUpdate: (callback: (data: BrowserDownloadUpdateEvent) => void) => () => void
   showUtilityMenu: (payload: BrowserUtilityMenuRequest) => Promise<{ success: boolean; error?: string }>

@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { BrowserAppShortcutBridgeService } from './app-shortcut-service'
 import { BrowserAutomationService } from './automation-service'
 import { BrowserCapabilityService } from './capability-service'
+import { BrowserCdpSessionService } from './cdp-session-service'
 import type {
   BrowserAggregateOptions,
   BrowserCapabilityTaskHandle,
@@ -43,6 +44,7 @@ import { BrowserContextMenuService } from './context-menu-service'
 import { findReusableCaptureTabId } from './capture-url-utils'
 import { BrowserDataService, type BrowserAdblockState } from './data-service'
 import { BrowserDownloadService, type BrowserDownloadUrlToDirectoryPayload, type BrowserDownloadUrlToDirectoryResult } from './download-service'
+import { BrowserNetworkObserverService, type BrowserNetworkObserverHandle, type BrowserNetworkObserverOptions } from './network-observer-service'
 import {
   BROWSER_DIAGNOSTICS_LOG_PATH,
   BrowserDiagnosticsService,
@@ -75,6 +77,10 @@ import { BrowserPreviewService } from './preview-service'
 import { BrowserPageBackgroundService } from './page-background-service'
 import { BrowserSessionPolicyService } from './session-policy-service'
 import { BrowserTabLifecycleService } from './tab-lifecycle-service'
+import {
+  downloadRemoteMediaDropUrls,
+  scheduleRemoteMediaDropCleanup,
+} from './remote-media-drop-cache'
 import { type BrowserTabMetaRecord, BrowserTabMetaService } from './tab-meta-service'
 import { BrowserTabShellService } from './tab-shell-service'
 import { BrowserTaskPersistenceService } from './task-persistence-service'
@@ -141,6 +147,7 @@ export class BrowserController {
   previewBounds: BrowserRect = { x: 0, y: 0, width: 800, height: 600 }
   private readonly frozenBoundsByTab = new Map<string, { bounds: BrowserRect; tokens: Set<string> }>()
   private readonly browserVisibilityState = new BrowserVisibilityCommandState()
+  private readonly localMediaDropRuns = new Map<string, number>()
   private readonly browserHostKind: BrowserHostKind
   private mainWindow: BrowserWindow
   private useMock: boolean
@@ -154,6 +161,8 @@ export class BrowserController {
   private readonly bookmarkTransferService: BrowserBookmarkTransferService
   private readonly hostLayoutService: BrowserHostLayoutService
   private readonly pageBackgroundService: BrowserPageBackgroundService
+  private readonly cdpSessionService: BrowserCdpSessionService
+  private readonly networkObserverService: BrowserNetworkObserverService
   private readonly automationService: BrowserAutomationService
   private readonly collectionConsentStore = new BrowserCollectionConsentStore()
   private readonly capabilityService: BrowserCapabilityService
@@ -211,6 +220,11 @@ export class BrowserController {
       getBookmarks: () => this.dataService.getBookmarks(),
       sendToRenderer: (channel, data) => this.sendToRenderer(channel, data),
     })
+    this.cdpSessionService = new BrowserCdpSessionService({
+      resolveTabView: (tabId) => this.resolveTabView(tabId),
+      createBrowserError: (code, message) => this.createBrowserError(code, message),
+    })
+    this.networkObserverService = new BrowserNetworkObserverService(this.cdpSessionService)
     this.previewService = new BrowserPreviewService({
       useMock: this.useMock,
       browserUserAgent: this.browserUserAgent,
@@ -238,6 +252,7 @@ export class BrowserController {
       resolveTabView: (tabId) => this.resolveTabView(tabId),
       createBrowserError: (code, message) => this.createBrowserError(code, message),
       getViewBounds: () => this.viewBounds,
+      cdpSession: this.cdpSessionService,
     })
     this.capabilityService = new BrowserCapabilityService({
       openForCaptureTarget: (url) => this.openForCaptureTarget(url),
@@ -490,48 +505,94 @@ export class BrowserController {
     }
   }
 
+  private isDuplicateLocalMediaDrop(signature: string): boolean {
+    const now = Date.now()
+    for (const [key, startedAt] of this.localMediaDropRuns) {
+      if (now - startedAt > 2500) this.localMediaDropRuns.delete(key)
+    }
+    const startedAt = this.localMediaDropRuns.get(signature)
+    if (startedAt && now - startedAt <= 2500) return true
+    this.localMediaDropRuns.set(signature, now)
+    return false
+  }
+
   private handleLocalMediaDropNavigation(tabId: string, url: string): boolean {
     const request = parseBrowserLocalMediaDropUrl(url)
     if (!request) return false
-    this.logBrowserDiag(`[browser-v3][local-media-drop][tab:${tabId}] received ${request.paths.length} file(s)`)
-    this.sendToRenderer('browser:localMediaUploadStatus', {
-      tabId,
-      status: {
-        kind: 'uploading',
-        message: request.paths.length > 1 ? `正在上传 ${request.paths.length} 个素材...` : '正在上传素材...',
-      },
-    })
-    void this.uploadLocalMediaFiles(tabId, {
-      files: request.paths,
-      x: request.x,
-      y: request.y,
-    }).then((result) => {
-      if (result.success) {
+    const remoteUrls = request.urls || []
+    const dropSignature = JSON.stringify({ tabId, paths: request.paths, urls: remoteUrls })
+    if (this.isDuplicateLocalMediaDrop(dropSignature)) {
+      this.logBrowserDiag(`[browser-v3][local-media-drop][tab:${tabId}] ignored duplicate local=${request.paths.length} remote=${remoteUrls.length}`)
+      return true
+    }
+    this.logBrowserDiag(`[browser-v3][local-media-drop][tab:${tabId}] received local=${request.paths.length} remote=${remoteUrls.length}`)
+    void (async () => {
+      let remoteFiles: string[] = []
+      try {
+        if (remoteUrls.length > 0) {
+          this.sendToRenderer('browser:localMediaUploadStatus', {
+            tabId,
+            status: {
+              kind: 'uploading',
+              message: remoteUrls.length > 1 ? `正在准备 ${remoteUrls.length} 张网页图片...` : '正在准备网页图片...',
+            },
+          })
+          const downloaded = await downloadRemoteMediaDropUrls(remoteUrls)
+          remoteFiles = downloaded.files
+          if (remoteFiles.length === 0 && request.paths.length === 0) {
+            const firstError = downloaded.failed[0]?.error
+            this.sendToRenderer('browser:localMediaUploadStatus', {
+              tabId,
+              status: {
+                kind: 'error',
+                message: firstError ? `网页图片下载失败：${firstError}` : '网页图片下载失败',
+              },
+            })
+            return
+          }
+        }
+        const files = [...request.paths, ...remoteFiles]
         this.sendToRenderer('browser:localMediaUploadStatus', {
           tabId,
           status: {
-            kind: 'success',
-            message: result.method === 'drop' ? '已把素材拖入网页' : '已把素材交给网页上传',
+            kind: 'uploading',
+            message: files.length > 1 ? `正在上传 ${files.length} 个素材...` : '正在上传素材...',
           },
         })
-        return
+        const result = await this.uploadLocalMediaFiles(tabId, {
+          files,
+          x: request.x,
+          y: request.y,
+        })
+        if (result.success) {
+          this.sendToRenderer('browser:localMediaUploadStatus', {
+            tabId,
+            status: {
+              kind: 'success',
+              message: result.method === 'drop' ? '已把素材拖入网页' : '已把素材交给网页上传',
+            },
+          })
+          return
+        }
+        this.sendToRenderer('browser:localMediaUploadStatus', {
+          tabId,
+          status: {
+            kind: 'error',
+            message: result.error || '网页没有接住这个素材',
+          },
+        })
+      } catch (error) {
+        this.sendToRenderer('browser:localMediaUploadStatus', {
+          tabId,
+          status: {
+            kind: 'error',
+            message: error instanceof Error ? error.message : '素材上传失败',
+          },
+        })
+      } finally {
+        scheduleRemoteMediaDropCleanup(remoteFiles)
       }
-      this.sendToRenderer('browser:localMediaUploadStatus', {
-        tabId,
-        status: {
-          kind: 'error',
-          message: result.error || '网页没有接住这个素材',
-        },
-      })
-    }).catch((error) => {
-      this.sendToRenderer('browser:localMediaUploadStatus', {
-        tabId,
-        status: {
-          kind: 'error',
-          message: error instanceof Error ? error.message : '素材上传失败',
-        },
-      })
-    })
+    })()
     return true
   }
 
@@ -2156,6 +2217,21 @@ export class BrowserController {
     payload: BrowserDownloadUrlToDirectoryPayload,
   ): Promise<BrowserDownloadUrlToDirectoryResult> {
     return this.downloadService.downloadUrlToDirectory(session.fromPartition('persist:browser'), payload)
+  }
+
+  async startNetworkObserver(
+    tabId: string,
+    options?: BrowserNetworkObserverOptions,
+  ): Promise<BrowserNetworkObserverHandle> {
+    return this.networkObserverService.start(tabId, options)
+  }
+
+  async sendCdpCommand(
+    tabId: string | null,
+    method: string,
+    params?: Record<string, unknown>,
+  ): Promise<unknown> {
+    return this.cdpSessionService.sendCommand(tabId, method, params)
   }
 
   confirmCollectionConsent(payload: {

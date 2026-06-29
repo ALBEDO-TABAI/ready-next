@@ -324,6 +324,29 @@ function extractMarkdownText(children: ReactNode): string {
   return ''
 }
 
+async function copyTextToClipboard(value: string): Promise<boolean> {
+  try {
+    if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(value)
+      return true
+    }
+
+    if (typeof document === 'undefined') return false
+    const textarea = document.createElement('textarea')
+    textarea.value = value
+    textarea.style.position = 'fixed'
+    textarea.style.opacity = '0'
+    document.body.appendChild(textarea)
+    textarea.focus()
+    textarea.select()
+    const copied = document.execCommand('copy')
+    document.body.removeChild(textarea)
+    return copied
+  } catch {
+    return false
+  }
+}
+
 function isMermaidLanguage(className: string | undefined): boolean {
   return /\blanguage-mermaid\b/.test(className || '')
 }
@@ -440,6 +463,48 @@ function shouldRenderMarkdownCodeAsDocument(code: string): boolean {
   ))
 }
 
+function CodeBlockWithCopy({
+  children,
+  code,
+}: {
+  children?: ReactNode
+  code: string
+}) {
+  const [copied, setCopied] = useState(false)
+
+  useEffect(() => {
+    if (!copied) return
+    const timer = window.setTimeout(() => setCopied(false), 1200)
+    return () => window.clearTimeout(timer)
+  }, [copied])
+
+  const handleCopy = useCallback(async () => {
+    const didCopy = await copyTextToClipboard(code)
+    if (didCopy) setCopied(true)
+  }, [code])
+
+  return (
+    <div className="note-preview-code-block">
+      <button
+        type="button"
+        className="note-preview-code-copy-button"
+        aria-label={copied ? '已复制代码块' : '复制代码块'}
+        title={copied ? '已复制' : '复制代码'}
+        data-ready-code-copy-button="true"
+        data-ready-code-copied={copied ? 'true' : undefined}
+        onClick={() => { void handleCopy() }}
+      >
+        {copied ? (
+          <Check style={{ width: 14, height: 14 }} strokeWidth={2} />
+        ) : (
+          <Copy style={{ width: 14, height: 14 }} strokeWidth={2} />
+        )}
+      </button>
+      <pre className="note-preview-markdown-pre">{children}</pre>
+    </div>
+  )
+}
+
 function MarkdownSourceBlock({ code }: { code: string }) {
   return (
     <div className="note-preview-markdown-source-rendered" data-ready-markdown-source-rendered="true">
@@ -472,7 +537,7 @@ function MarkdownSourceBlock({ code }: { code: string }) {
             ) {
               return <MarkdownSourceBlock code={codeChild.code} />
             }
-            return <pre className="note-preview-markdown-pre">{children}</pre>
+            return <CodeBlockWithCopy code={codeChild?.code ?? extractMarkdownText(children)}>{children}</CodeBlockWithCopy>
           },
           code: ({ children, className, ...props }) => (
             <code className={className ? `${className} note-preview-markdown-code` : 'note-preview-markdown-code'} {...props}>
@@ -595,7 +660,7 @@ function NotePreview({
         ) {
           return <MarkdownSourceBlock code={codeChild.code} />
         }
-        return <pre className="note-preview-markdown-pre">{children}</pre>
+        return <CodeBlockWithCopy code={codeChild?.code ?? extractMarkdownText(children)}>{children}</CodeBlockWithCopy>
       })()
     ),
     code: ({ children, className, ...props }: { children?: ReactNode; className?: string }) => {

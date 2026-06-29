@@ -293,6 +293,21 @@ export const BROWSER_TOOL_ERROR_KINDS = {
     noMetric: true,
     description: 'Browser tool returned a legacy or unclassified failure that must be surfaced as structured data.',
   },
+  browserPowerGrantRequired: {
+    code: 'grant_required',
+    noMetric: true,
+    description: 'Browser Power action requires a matching user grant before execution.',
+  },
+  browserPowerGrantMismatch: {
+    code: 'grant_mismatch',
+    noMetric: true,
+    description: 'Browser Power grant exists but does not match the requested effect, scope, URL, tab, or destination.',
+  },
+  browserPowerBlockedByPolicy: {
+    code: 'blocked_by_policy',
+    noMetric: true,
+    description: 'Browser Power action is blocked by the code-owned policy boundary.',
+  },
 } as const satisfies Record<string, ErrorKindMeta>
 
 export type BrowserToolErrorKindKey = keyof typeof BROWSER_TOOL_ERROR_KINDS

@@ -62,6 +62,80 @@ function urlIncludes(url: string, needles: string[]): boolean {
   return needles.some((needle) => lower.includes(needle))
 }
 
+function isSameUrl(left: string, right: string): boolean {
+  try {
+    return new URL(left).href === new URL(right).href
+  } catch {
+    return left === right
+  }
+}
+
+function isYouTubePageUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url)
+    const host = parsed.hostname.replace(/^www\./, '').toLowerCase()
+    return (host === 'youtube.com' || host === 'youtu.be' || host.endsWith('.youtube.com'))
+      && !host.includes('googlevideo.com')
+  } catch {
+    return false
+  }
+}
+
+function usableYtDlpMediaUrl(value: unknown, sourceUrl: string): string | undefined {
+  const url = String(value || '').trim()
+  if (!/^https?:\/\//i.test(url)) return undefined
+  if (isSameUrl(url, sourceUrl)) return undefined
+  if (isYouTubePageUrl(url)) return undefined
+  return url
+}
+
+function ytDlpFormatHasVideo(format: Record<string, unknown>): boolean {
+  const vcodec = String(format.vcodec || '').toLowerCase()
+  return (vcodec && vcodec !== 'none')
+    || Boolean(format.width)
+    || Boolean(format.height)
+    || String(format.resolution || '').toLowerCase().includes('x')
+}
+
+function ytDlpFormatHasAudio(format: Record<string, unknown>): boolean {
+  const acodec = String(format.acodec || '').toLowerCase()
+  return (acodec && acodec !== 'none')
+    || Number(format.abr || 0) > 0
+    || Number(format.asr || 0) > 0
+}
+
+function ytDlpFormatScore(format: Record<string, unknown>): number {
+  const height = Number(format.height || 0)
+  const tbr = Number(format.tbr || format.bitrate || 0)
+  if (ytDlpFormatHasVideo(format) && ytDlpFormatHasAudio(format)) return 300_000_000 + height * 1_000 + tbr
+  if (ytDlpFormatHasVideo(format)) return 200_000_000 + height * 1_000 + tbr
+  if (ytDlpFormatHasAudio(format)) return 100_000_000 + tbr
+  return tbr
+}
+
+function bestYtDlpFormatUrl(formats: Array<Record<string, unknown>>, sourceUrl: string): string | undefined {
+  return [...formats]
+    .filter((format) => usableYtDlpMediaUrl(format.url, sourceUrl))
+    .filter((format) => ytDlpFormatHasVideo(format))
+    .sort((a, b) => ytDlpFormatScore(b) - ytDlpFormatScore(a))
+    .map((format) => usableYtDlpMediaUrl(format.url, sourceUrl))
+    .find(Boolean)
+}
+
+function ytDlpRecords(records: unknown): Array<Record<string, unknown>> {
+  return Array.isArray(records)
+    ? records.filter((record): record is Record<string, unknown> => Boolean(record) && typeof record === 'object')
+    : []
+}
+
+function firstYtDlpRecordUrl(records: unknown, sourceUrl: string): string | undefined {
+  for (const record of ytDlpRecords(records)) {
+    const url = usableYtDlpMediaUrl(record.url, sourceUrl)
+    if (url) return url
+  }
+  return undefined
+}
+
 function platformFromUrl(url: string): string | undefined {
   if (urlIncludes(url, ['douyin.com', 'iesdouyin.com'])) return 'douyin'
   if (urlIncludes(url, ['xiaohongshu.com', 'xhslink.com'])) return 'xiaohongshu'
@@ -89,14 +163,12 @@ export function resolveDirectFastCardVideo(target: BrowserFastCardVideoTarget): 
 }
 
 export function normalizeYtDlpVideoInfo(info: Record<string, unknown>, sourceUrl: string): FastCardVideoMeta {
-  const requested = Array.isArray(info.requested_downloads) ? info.requested_downloads[0] as Record<string, unknown> | undefined : undefined
   const formats = Array.isArray(info.formats) ? info.formats as Array<Record<string, unknown>> : []
-  const formatWithUrl = formats.find((format) => typeof format.url === 'string' && format.url)
   const playableUrl = firstNonEmpty(
-    requested?.url as string | undefined,
-    info.url as string | undefined,
-    formatWithUrl?.url as string | undefined,
-    sourceUrl,
+    firstYtDlpRecordUrl(info.requested_downloads, sourceUrl),
+    bestYtDlpFormatUrl(ytDlpRecords(info.requested_formats), sourceUrl),
+    usableYtDlpMediaUrl(info.url, sourceUrl),
+    bestYtDlpFormatUrl(formats, sourceUrl),
   )
   return {
     originalUrl: sourceUrl,

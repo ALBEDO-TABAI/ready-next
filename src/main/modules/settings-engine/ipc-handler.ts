@@ -22,6 +22,8 @@ import {
   writeAgentSessionPrerouteMode,
   type AgentSessionPrerouteMode,
 } from './agent-session-preroute-setting'
+import { BROWSER_POWER_MODE_SETTING_KEY } from '../../../shared/browser-power'
+import { setBrowserPowerGlobalModeReader } from '../browser-engine/browser-power-policy'
 
 interface SettingsIPCResponse<T = unknown> {
   success: boolean
@@ -37,6 +39,7 @@ function logSettings(msg: string) {
 export function setupSettingsIPC(): void {
   const repository = new AppSettingsRepository()
   const externalServices = new ExternalServiceStore(repository)
+  setBrowserPowerGlobalModeReader(() => repository.getSetting(BROWSER_POWER_MODE_SETTING_KEY) === 'true')
 
   // Get a single setting by key
   ipcMain.handle('settings:get', (_, key: string): SettingsIPCResponse<string | null> => {

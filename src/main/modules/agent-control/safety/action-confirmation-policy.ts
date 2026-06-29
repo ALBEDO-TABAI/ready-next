@@ -32,7 +32,6 @@
  *     to that one frozen call — never across calls or objects.
  */
 
-import { isHighControlPlatformText } from '../../../../shared/browser-collection-intent'
 import { consumeAuthorizationFact, type AuthActionCategory } from './authorization-fact-store'
 
 export type ConfirmationMode = 'M1' | 'M2' | 'M3' | 'M4'
@@ -65,18 +64,16 @@ interface ConfirmationRule {
 // click/type tools (textual cues come from value/disambiguation, the same
 // trust level as click_text's text argument).
 const CLICK_TOOLS = ['browser_click', 'browser_click_text', 'browser_click_at', 'browser_act_on_target'] as const
-// Browser interaction tools that can fill inputs on a page.
-const TYPE_TOOLS = ['browser_type', 'browser_type_smart', 'browser_type_at', 'browser_act_on_target'] as const
 
-// M1 — final payment confirmation (tight final-step wording only; navigating
-// to a checkout page goes through browser_navigate, which is unlisted).
+// Browser destructive target patterns. The browser execution layer uses them
+// as code-owned destructive anchors and returns grant_required unless a future
+// Power grant matches the target.
 const PAYMENT_FINAL_PATTERN =
   /确认支付|立即支付|确认付款|立即付款|提交订单|确认下单|确认转账|pay\s*now|confirm\s*(payment|purchase|order)|place\s*order/i
-// M1 — final submit of a password change.
+// Final submit of a password/credential change.
 const PASSWORD_CHANGE_FINAL_PATTERN =
   /确认修改密码|保存新密码|确认新密码|提交新密码|(confirm|save|submit)\s*new\s*password|update\s*password/i
-// M1 — captcha / human-verification interaction (typing a code or clicking
-// through a security interstitial both count as 绕过验证码/安全拦截页).
+// Captcha / human-verification interaction.
 const CAPTCHA_PATTERN =
   /验证码|滑块|人机验证|安全验证|captcha|recaptcha|hcaptcha|verification\s*code/i
 // M4 carve-out — cookie consent clicks.
@@ -85,12 +82,11 @@ const COOKIE_CONSENT_PATTERN =
 // M2 feature — outbound content that looks like credentials / identity data.
 const SENSITIVE_CONTENT_PATTERN =
   /密码|口令|私钥|身份证|银行卡|信用卡|passwords?|passwd|api[_-]?key|secret|token|credential|credit\s*card|cvv|passport/i
-// M3 — typing into a password field (登录已存账号). Ordered AFTER the M1
-// password-change rule so the final-submit wording stays M1.
+// Password-field cue detection for browser execution-layer password fills.
 const PASSWORD_FIELD_PATTERN = /password|passwd|密码/i
 
 const FIRST_BATCH_RULES: readonly ConfirmationRule[] = [
-  // --- M4 carve-outs (must precede the M1 click rules) -------------------
+  // --- M4 carve-outs ------------------------------------------------------
   {
     id: 'm4-cookie-consent',
     designRef: '05 §3.1 M4 — Cookie 同意',
@@ -99,31 +95,6 @@ const FIRST_BATCH_RULES: readonly ConfirmationRule[] = [
     when: (_args, text) =>
       COOKIE_CONSENT_PATTERN.test(text) && !PAYMENT_FINAL_PATTERN.test(text),
     reason: 'Cookie 同意属常规页面疏通操作',
-  },
-  // --- M1 — agent 引导但绝不代操作 ----------------------------------------
-  {
-    id: 'm1-payment-final',
-    designRef: '05 §3.1 M1 — 支付最终确认',
-    mode: 'M1',
-    tools: new Set(CLICK_TOOLS),
-    when: (_args, text) => PAYMENT_FINAL_PATTERN.test(text),
-    reason: '支付最终确认必须由用户亲手完成',
-  },
-  {
-    id: 'm1-password-change-final',
-    designRef: '05 §3.1 M1 — 改密码最终提交',
-    mode: 'M1',
-    tools: new Set([...CLICK_TOOLS, ...TYPE_TOOLS]),
-    when: (_args, text) => PASSWORD_CHANGE_FINAL_PATTERN.test(text),
-    reason: '修改密码的最终提交必须由用户亲手完成',
-  },
-  {
-    id: 'm1-captcha-bypass',
-    designRef: '05 §3.1 M1 — 绕过验证码/安全拦截页',
-    mode: 'M1',
-    tools: new Set([...CLICK_TOOLS, ...TYPE_TOOLS]),
-    when: (_args, text) => CAPTCHA_PATTERN.test(text),
-    reason: '验证码与安全拦截页必须由用户亲手处理，agent 不绕过',
   },
   // --- M2 — 每次执行前确认，预批准无效 -------------------------------------
   {
@@ -160,18 +131,10 @@ const FIRST_BATCH_RULES: readonly ConfirmationRule[] = [
   },
   // --- M3 — 预批准有效（阶段一无 I-auth，一律降级走确认卡） -----------------
   {
-    id: 'm3-login-existing-account',
-    designRef: '05 §3.1 M3 — 登录已存账号',
-    mode: 'M3',
-    tools: new Set(TYPE_TOOLS),
-    when: (_args, text) => PASSWORD_FIELD_PATTERN.test(text),
-    reason: '向密码框输入凭据属登录动作',
-  },
-  {
     id: 'm3-upload-file',
     designRef: '05 §3.1 M3 — 上传指定文件',
     mode: 'M3',
-    tools: new Set(['feishu_file_upload', 'browser_upload_scope_attachment']),
+    tools: new Set(['feishu_file_upload']),
     reason: '把本地文件上传到外部系统',
   },
   {
@@ -180,14 +143,6 @@ const FIRST_BATCH_RULES: readonly ConfirmationRule[] = [
     mode: 'M3',
     tools: new Set(['feishu_message_send', 'feishu_message_reply']),
     reason: '对外发送消息会即时送达他人',
-  },
-  {
-    id: 'm3-risky-site-collection',
-    designRef: '05 §3.1 M3 — 有风险站点的采集',
-    mode: 'M3',
-    tools: new Set(['browser_start_task']),
-    when: (_args, text) => isHighControlPlatformText(text),
-    reason: '高风控平台上的采集任务有封号/拦截风险',
   },
   // --- M4 — 永远放行（显式列出设计条目；其余工具走默认放行） ----------------
   {
@@ -205,49 +160,44 @@ const FIRST_BATCH_RULES: readonly ConfirmationRule[] = [
 ]
 
 // ---------------------------------------------------------------------------
-// Live-target enforcement (Codex review follow-up). The dispatch gate above
-// can only see the ARGUMENTS; the preferred browser channels (page-map
-// target_id, CSS selector, viewport coordinates) legally carry no semantic
-// text, so a payment/captcha/password-submit control could be hit with clean
-// args and classify M4. The browser execution layer therefore re-checks the
-// SAME M1 patterns against the REAL element text/label at the moment it is
-// known (live probe / click script / point probe) and refuses manual-only
-// targets there. M1 is never confirmable, so this second net needs no
-// release plumbing — it always refuses.
+// Browser live-target destructive anchors. The dispatch gate above can only
+// see ARGUMENTS; page-map target_id / CSS selector / coordinates may carry no
+// semantic text. Browser execution re-checks these patterns against the REAL
+// element text/label and reports grant_required when a Power grant is needed.
 // ---------------------------------------------------------------------------
 
-export interface ManualOnlyTargetMatch {
+export interface BrowserDestructiveTargetMatch {
   ruleId: string
   designRef: string
   reason: string
 }
 
-const MANUAL_ONLY_TARGET_RULES: ReadonlyArray<{ pattern: RegExp } & ManualOnlyTargetMatch> = [
+const BROWSER_DESTRUCTIVE_TARGET_RULES: ReadonlyArray<{ pattern: RegExp } & BrowserDestructiveTargetMatch> = [
   {
     pattern: PAYMENT_FINAL_PATTERN,
-    ruleId: 'm1-payment-final',
-    designRef: '05 §3.1 M1 — 支付最终确认',
-    reason: '支付最终确认必须由用户亲手完成',
+    ruleId: 'browser-power-payment-final',
+    designRef: 'Power Browser destructive — 支付最终确认',
+    reason: '支付/下单确认属于代码枚举的破坏性浏览器动作',
   },
   {
     pattern: PASSWORD_CHANGE_FINAL_PATTERN,
-    ruleId: 'm1-password-change-final',
-    designRef: '05 §3.1 M1 — 改密码最终提交',
-    reason: '修改密码的最终提交必须由用户亲手完成',
+    ruleId: 'browser-power-password-change-final',
+    designRef: 'Power Browser destructive — 改凭据最终提交',
+    reason: '修改密码/凭据属于代码枚举的破坏性浏览器动作',
   },
   {
     pattern: CAPTCHA_PATTERN,
-    ruleId: 'm1-captcha-bypass',
-    designRef: '05 §3.1 M1 — 绕过验证码/安全拦截页',
-    reason: '验证码与安全拦截页必须由用户亲手处理，agent 不绕过',
+    ruleId: 'browser-power-access-control-interaction',
+    designRef: 'Power Browser destructive — 访问控制/安全检查交互',
+    reason: '验证码/安全检查/访问控制交互需要单独授权与审计',
   },
 ]
 
-/** Match the REAL element text/label against the M1 manual-only semantics. */
-export function matchManualOnlyBrowserTarget(targetText: string | null | undefined): ManualOnlyTargetMatch | null {
+/** Match the REAL element text/label against the browser destructive target list. */
+export function matchBrowserDestructiveTarget(targetText: string | null | undefined): BrowserDestructiveTargetMatch | null {
   const text = String(targetText || '')
   if (!text) return null
-  for (const rule of MANUAL_ONLY_TARGET_RULES) {
+  for (const rule of BROWSER_DESTRUCTIVE_TARGET_RULES) {
     if (rule.pattern.test(text)) {
       const { pattern: _pattern, ...match } = rule
       return match
@@ -257,12 +207,12 @@ export function matchManualOnlyBrowserTarget(targetText: string | null | undefin
 }
 
 /**
- * Regex sources for embedding the same M1 semantics into in-page scripts
+ * Regex sources for embedding the same destructive target semantics into in-page scripts
  * (browser_click's single-roundtrip click script). Single pattern source —
  * the in-page copy is generated from these, never hand-written.
  */
-export const MANUAL_ONLY_TARGET_REGEX_SOURCES: readonly string[] =
-  MANUAL_ONLY_TARGET_RULES.map((rule) => rule.pattern.source)
+export const BROWSER_DESTRUCTIVE_TARGET_REGEX_SOURCES: readonly string[] =
+  BROWSER_DESTRUCTIVE_TARGET_RULES.map((rule) => rule.pattern.source)
 
 /**
  * True when the call's own arguments already carry a password cue — meaning

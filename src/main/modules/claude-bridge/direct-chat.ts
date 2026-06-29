@@ -204,7 +204,8 @@ const TOOL_SYSTEM_PROMPT = `
 浏览页面时，默认先用 browser_read_page_map 获取页面地图，再用 browser_probe_readonly 做必要的只读结构探针，然后用 browser_act_on_target 对 fresh target_id 执行动作；动作后必须读取页面证据复查。browser_read_page 只作为正文补充，browser_click/browser_click_text/browser_type/browser_type_smart/browser_click_at/browser_type_at/browser_send_keys/browser_compose_message 只作为 fallback，不要绕开 target_id + generation 校验成为首选路径。
 不要把平台错误页、空正文或 "content not found" 直接判成目标不存在；先复查 URL、站内生成链接、动态渲染、隐藏 DOM、iframe/Shadow DOM 线索和当前页面状态。若同一路径失败，不要反复重试同一个搜索、导航或点击，换一种证据路径或明确停止原因。
 当用户需要网页操作时，主动使用这些工具。搜索信息时，优先用 browser_search（支持多引擎回退）；如果是多步骤复杂任务，优先用 browser_run_workflow 一次执行多个步骤。
-当任务是“读网页结构化内容”“滚动采集整页”“批量下载”“长时间后台任务”时，优先用 browser_extract_structured、browser_scroll_collect、browser_wait_for_condition、browser_start_task、browser_get_task，而不是把所有逻辑都塞进 browser_execute_js 或 browser_run_workflow。
+当任务是“读网页结构化内容”“滚动采集整页”“批量下载”“长时间后台任务”时，优先用 browser_extract_structured、browser_scroll_collect、browser_wait_for_condition、browser_start_task、browser_get_task；需要临场脚本/网络/播放器诊断时，用 browser_power_eval、browser_power_cdp、browser_power_network_trace、browser_power_resource_forensics，不要因为旧 execute_js 被 Safe Mode 拒绝就宣告做不到。
+当任务是“下载/保存网页里的视频、音频或隐藏资源”时，按证据推进：先用 browser_inspect_resources 或 browser_power_resource_forensics 观察当前页/目标 URL；若没有候选，先读页面地图/正文确认当前页，尝试播放、展开、滚动或等待懒加载后重新观察。拿到候选后，优先用 browser_media_download_advanced 保存并验证；只有明确零散 URL 才用 browser_download_urls。不要只找到一个 URL 就宣告完成。
 如果任务本质上是“整页图集/画板下载”，优先用 browser_download_gallery；如果任务本质上是“围绕一个主题跨网页研究”，优先用 browser_research_topic。
 当 selector 不稳定或你不确定 DOM 结构时，先重新读取 page map 或使用 browser_probe_readonly；仍无法建立 target_id 时，才把 browser_click_text / browser_type_smart 作为 fallback。
 在聊天类网页中，优先验证“是否真实提交并出现响应内容”，不要只把文本写入输入框就结束。

@@ -1,6 +1,7 @@
 import type { BrowserAggregateOptions, BrowserCapabilityTaskHandle, BrowserExtractStructuredOptions, BrowserExtractStructuredResult, BrowserStructuredItem } from './capability-types'
 import type { BrowserTabContextData, BrowserUploadTarget, BrowserViewportMetrics } from './automation-types'
 import type { BrowserController } from './ipc-handler'
+import type { BrowserNetworkObserverHandle, BrowserNetworkObserverOptions } from './network-observer-service'
 
 export interface BrowserAgentRuntime {
   getActiveTab(): {
@@ -26,6 +27,7 @@ export interface BrowserAgentRuntime {
   cancelTask(taskId: string): Promise<BrowserCapabilityTaskHandle | null>
   extractStructured(tabId: string | null, options: BrowserExtractStructuredOptions): Promise<BrowserExtractStructuredResult>
   aggregateResults(items: BrowserStructuredItem[], options?: BrowserAggregateOptions): BrowserStructuredItem[]
+  startNetworkObserver?(tabId: string, options?: BrowserNetworkObserverOptions): Promise<BrowserNetworkObserverHandle>
 }
 
 export class BrowserAgentRuntimeAdapter implements BrowserAgentRuntime {
@@ -105,5 +107,9 @@ export class BrowserAgentRuntimeAdapter implements BrowserAgentRuntime {
 
   aggregateResults(items: BrowserStructuredItem[], options?: BrowserAggregateOptions): BrowserStructuredItem[] {
     return this.controller.aggregateResults(items, options)
+  }
+
+  async startNetworkObserver(tabId: string, options?: BrowserNetworkObserverOptions): Promise<BrowserNetworkObserverHandle> {
+    return this.controller.startNetworkObserver(tabId, options)
   }
 }

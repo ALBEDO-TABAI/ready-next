@@ -7,11 +7,18 @@ import {
 import { BROWSER_INTERACTION_SCHEMAS } from './schemas/browser-interaction-schemas'
 import { BROWSER_CONTENT_SCHEMAS } from './schemas/browser-content-schemas'
 import { zodObjectToParamList } from './zod-param-derivation'
+import type { BrowserPowerEffect } from '../../../shared/browser-power'
 
 export type BrowserToolDef = {
   name: string
   description: string
   params: ToolParamSchemaSpec[]
+  effectProfile?: {
+    effects: BrowserPowerEffect[]
+    destructive?: boolean
+    deprecated?: boolean
+    replacement?: string
+  }
 }
 
 export const BROWSER_INTERACTION_TOOL_NAMES = [
@@ -49,6 +56,7 @@ export const BROWSER_CONTENT_TASK_TOOL_NAMES = [
   'browser_collect_images',
   'browser_download_urls',
   'browser_download_collected_media',
+  'browser_inspect_resources',
   'browser_resolve_video',
   'browser_extract_structured',
   'browser_scroll_collect',
@@ -61,6 +69,13 @@ export const BROWSER_CONTENT_TASK_TOOL_NAMES = [
   'browser_research_topic',
   'browser_run_workflow',
   'browser_execute_js',
+  'browser_power_eval',
+  'browser_power_cdp',
+  'browser_power_network_trace',
+  'browser_power_resource_forensics',
+  'browser_power_script_run',
+  'browser_media_download_advanced',
+  'browser_stage_site_strategy',
   'browser_visible_collect',
   'browser_collect_notes',
   'browser_confirm_collection_consent',
@@ -178,6 +193,11 @@ export const BROWSER_TOOLS: BrowserToolDef[] = [
     params: zodObjectToParamList(BROWSER_CONTENT_SCHEMAS.browser_download_collected_media) as ToolParamSchemaSpec[],
   },
   {
+    name: 'browser_inspect_resources',
+    description: '观察当前页或指定 URL 的 DOM、performance 和网络资源候选，返回可下载媒体/图片/文档候选、证据和安全下载头；若无候选，应先播放/展开/滚动/等待后重试，不要直接跳外部下载站。不执行自由脚本，不返回 cookie 或完整响应体。',
+    params: zodObjectToParamList(BROWSER_CONTENT_SCHEMAS.browser_inspect_resources) as ToolParamSchemaSpec[],
+  },
+  {
     name: 'browser_resolve_video',
     description: '解析当前页面或指定页面里的视频直链。小红书会复用内嵌 Video Expert Analyzer 的小红书解析器；下载仍交给 browser_download_urls。',
     params: zodObjectToParamList(BROWSER_CONTENT_SCHEMAS.browser_resolve_video) as ToolParamSchemaSpec[],
@@ -269,13 +289,57 @@ export const BROWSER_TOOLS: BrowserToolDef[] = [
   },
   {
     name: 'browser_run_workflow',
-    description: '批量执行多步骤浏览器任务（导航/搜索/点击/坐标点击/输入/坐标输入/滚动/按键/compose/等待/读取），适合复杂任务减少来回调用。',
+    description: '兼容入口：批量执行声明式浏览器任务。包含 execute_js 的旧工作流在 Power Mode 下迁移到 browser_power_script_run。',
     params: zodObjectToParamList(BROWSER_CONTENT_SCHEMAS.browser_run_workflow) as ToolParamSchemaSpec[],
+    effectProfile: { effects: ['page_mutation'], deprecated: true, replacement: 'browser_power_script_run' },
   },
   {
     name: 'browser_execute_js',
-    description: '在页面中执行任意 JavaScript 代码并返回结果。代码运行在页面沙箱中，与 Node.js 隔离。',
+    description: '兼容入口：Safe Mode 只允许命名只读模板；Power Mode 有授权时转发到 browser_power_eval。',
     params: zodObjectToParamList(BROWSER_CONTENT_SCHEMAS.browser_execute_js) as ToolParamSchemaSpec[],
+    effectProfile: { effects: ['page_mutation'], deprecated: true, replacement: 'browser_power_eval' },
+  },
+  {
+    name: 'browser_power_eval',
+    description: 'Power Mode：在页面上下文执行自由 JavaScript。必须说明 purpose；非破坏性可由用户原话授权，破坏性效果必须有单独 grant；调用会写审计记录。',
+    params: zodObjectToParamList(BROWSER_CONTENT_SCHEMAS.browser_power_eval) as ToolParamSchemaSpec[],
+    effectProfile: { effects: ['observe', 'page_mutation'] },
+  },
+  {
+    name: 'browser_power_cdp',
+    description: 'Power Mode：调用 Chrome DevTools Protocol 方法，用于 Runtime/Network/Page 等高级网页自动化和诊断；调用会校验 grant 并审计。',
+    params: zodObjectToParamList(BROWSER_CONTENT_SCHEMAS.browser_power_cdp) as ToolParamSchemaSpec[],
+    effectProfile: { effects: ['observe', 'page_mutation'] },
+  },
+  {
+    name: 'browser_power_network_trace',
+    description: 'Power Mode：监听当前页或目标页网络请求，返回 bounded trace、响应摘要和资源线索；可用于视频/音频/隐藏资源嗅探。',
+    params: zodObjectToParamList(BROWSER_CONTENT_SCHEMAS.browser_power_network_trace) as ToolParamSchemaSpec[],
+    effectProfile: { effects: ['observe', 'navigate'] },
+  },
+  {
+    name: 'browser_power_resource_forensics',
+    description: 'Power Mode：综合 DOM/performance/CDP network/response body 做资源 forensics，发现视频、音频、m3u8/mpd、分片、blob/MSE 线索。',
+    params: zodObjectToParamList(BROWSER_CONTENT_SCHEMAS.browser_power_resource_forensics) as ToolParamSchemaSpec[],
+    effectProfile: { effects: ['observe', 'navigate', 'download'] },
+  },
+  {
+    name: 'browser_power_script_run',
+    description: 'Power Mode：执行多步骤浏览器脚本工作流，替代 browser_run_workflow 里的 execute_js 旧入口；整段脚本按声明效果授权和审计。',
+    params: zodObjectToParamList(BROWSER_CONTENT_SCHEMAS.browser_power_script_run) as ToolParamSchemaSpec[],
+    effectProfile: { effects: ['page_mutation'] },
+  },
+  {
+    name: 'browser_media_download_advanced',
+    description: '下载并校验媒体资源。可接收 resource forensics 候选，也可先侦测当前页；支持 referer/header 继承、m3u8/mpd/分片线索和 ffprobe 校验。',
+    params: zodObjectToParamList(BROWSER_CONTENT_SCHEMAS.browser_media_download_advanced) as ToolParamSchemaSpec[],
+    effectProfile: { effects: ['download'] },
+  },
+  {
+    name: 'browser_stage_site_strategy',
+    description: '把成功的网页提取/下载/操作方法沉淀为 staged 站点策略卡；不会直接激活，等待用户后续确认。',
+    params: zodObjectToParamList(BROWSER_CONTENT_SCHEMAS.browser_stage_site_strategy) as ToolParamSchemaSpec[],
+    effectProfile: { effects: ['observe'] },
   },
   {
     name: 'browser_visible_collect',

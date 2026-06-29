@@ -7,12 +7,12 @@
  * with clean args and classify M4. These tests pin the second net at the
  * browser execution layer, where the REAL element label is known:
  *
- *   - target_id-only act_on_target on an M1 control → denied_manual_only
+ *   - target_id-only act_on_target on an destructive control → grant_required
  *   - act_on_target fill into a password field without an args cue →
  *     denied_pending_confirmation (reroute); with a cue → proceeds
- *   - CSS-selector click on an M1 control → denied_manual_only (in-script
+ *   - CSS-selector click on an destructive control → grant_required (in-script
  *     check generated from the policy patterns — single source)
- *   - coordinate click: labeled M1 target refused; unresolvable label
+ *   - coordinate click: labeled destructive target refused; unresolvable label
  *     proceeds (the visual channel must keep working)
  *   - opaque-selector typing into a password field → reroute
  */
@@ -23,7 +23,7 @@ import test from 'node:test'
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 import { executeToolCall, type ToolContext } from '../main/modules/tools/tool-executor'
 import { __resetBrowserAgentPageMapForTests } from '../main/modules/tools/browser-tools'
-import { matchManualOnlyBrowserTarget } from '../main/modules/agent-control/safety/action-confirmation-policy'
+import { matchBrowserDestructiveTarget } from '../main/modules/agent-control/safety/action-confirmation-policy'
 import { buildExplicitNoSkillAuthorization } from '../main/modules/agent-control/skills/skill-tool-authorization'
 import type { BrowserController } from '../main/modules/browser-engine/ipc-handler'
 import { BrowserWriteLeaseService } from '../main/modules/browser-engine/browser-write-lease'
@@ -87,7 +87,7 @@ test.beforeEach(() => {
 // 1. target_id-only act_on_target
 // ---------------------------------------------------------------------------
 
-test('act_on_target: bare target_id click on a payment-confirm control → denied_manual_only', async () => {
+test('act_on_target: bare target_id click on a payment-confirm control → grant_required', async () => {
   const controller = makeController((source) => {
     if (source.includes('__READY_AGENT_PAGE_MAP__')) {
       return {
@@ -106,10 +106,10 @@ test('act_on_target: bare target_id click on a payment-confirm control → denie
   await executeToolCall('browser_read_page_map', {}, context)
   // Args carry NO semantic cue — the dispatch gate classified this M4.
   const output = await executeToolCall('browser_act_on_target', { target_id: '1:0:1', action: 'click' }, context)
-  assert.equal(output.data?.errorKind, 'denied_manual_only')
+  assert.equal(output.data?.errorKind, 'grant_required')
   assert.equal(output.envelope?.kind, 'denied_by_policy')
   assert.ok(!controller.calls.scripts.some((s) => s.includes('__READY_AGENT_ACT_ON_TARGET__')),
-    'the act script must never run against a manual-only target')
+    'the act script must never run against a destructive-grant target')
 })
 
 test('act_on_target: fill into a live password field without an args cue → reroute to confirmation', async () => {
@@ -178,7 +178,7 @@ test('act_on_target: password fill WITH an args cue proceeds (gate upstream owne
 
 test('act_on_target: fill into an editable field whose VALUE contains a trigger word is NOT blocked (P2 parity)', async () => {
   // The probe reports the field's current value (提交订单草稿); for a fill the
-  // value is content, not a control caption — it must not trip manual-only.
+  // value is content, not a control caption — it must not trip destructive-grant.
   const controller = makeController((source) => {
     if (source.includes('__READY_AGENT_PAGE_MAP__')) {
       return {
@@ -203,7 +203,7 @@ test('act_on_target: fill into an editable field whose VALUE contains a trigger 
     action: 'fill',
     value: '加急处理',
   }, context)
-  assert.notEqual(output.data?.errorKind, 'denied_manual_only', 'field value must not enter the manual-only decision for fill')
+  assert.notEqual(output.data?.errorKind, 'grant_required', 'field value must not enter the destructive-grant decision for fill')
   assert.ok(controller.calls.scripts.some((s) => s.includes('__READY_AGENT_ACT_ON_TARGET__')),
     'a benign editable fill must execute')
 })
@@ -212,18 +212,18 @@ test('act_on_target: fill into an editable field whose VALUE contains a trigger 
 // 2. CSS-selector click
 // ---------------------------------------------------------------------------
 
-test('browser_click: in-script M1 check refuses without clicking; patterns are policy-generated', async () => {
+test('browser_click: in-script destructive check refuses without clicking; patterns are policy-generated', async () => {
   const controller = makeController((source) => {
-    if (source.includes('__READY_MANUAL_ONLY_CHECK__')) {
-      return { __readyManualOnlyBlocked: true, label: '确认支付' }
+    if (source.includes('__READY_DESTRUCTIVE_TARGET_CHECK__')) {
+      return { __readyDestructiveTargetBlocked: true, label: '确认支付' }
     }
     return null
   })
   const output = await executeToolCall('browser_click', { selector: '#btn-3' }, modelContext(controller))
-  assert.equal(output.data?.errorKind, 'denied_manual_only')
+  assert.equal(output.data?.errorKind, 'grant_required')
   assert.equal(output.envelope?.kind, 'denied_by_policy')
-  const clickScript = controller.calls.scripts.find((s) => s.includes('__READY_MANUAL_ONLY_CHECK__'))
-  assert.ok(clickScript, 'click script must embed the manual-only check')
+  const clickScript = controller.calls.scripts.find((s) => s.includes('__READY_DESTRUCTIVE_TARGET_CHECK__'))
+  assert.ok(clickScript, 'click script must embed the destructive-grant check')
   assert.ok(clickScript!.includes('确认支付'), 'embedded patterns must come from the policy source')
   // selector 命中按钮里的 icon/span 时 label 在父级——脚本必须爬 owner。
   assert.ok(clickScript!.includes('readyClickableOwner'), 'selector click must judge the clickable owner, not the bare child')
@@ -231,7 +231,7 @@ test('browser_click: in-script M1 check refuses without clicking; patterns are p
   assert.ok(clickScript!.includes('aria-labelledby'), 'click label must resolve aria-labelledby')
 })
 
-test('browser_click_text: generic text resolving to a payment button → denied_manual_only before mouse event', async () => {
+test('browser_click_text: generic text resolving to a payment button → grant_required before mouse event', async () => {
   const controller = makeController((source) => {
     if (source.includes('const target = "确认"')) {
       return { ok: true, text: '确认支付', clickedDirect: false, cssX: 500, cssY: 500, width: 1000, height: 800 }
@@ -242,7 +242,7 @@ test('browser_click_text: generic text resolving to a payment button → denied_
     return null
   })
   const output = await executeToolCall('browser_click_text', { text: '确认' }, modelContext(controller))
-  assert.equal(output.data?.errorKind, 'denied_manual_only')
+  assert.equal(output.data?.errorKind, 'grant_required')
   assert.equal(controller.calls.mouse.length, 0, 'the resolved payment button must not receive a mouse event')
 })
 
@@ -250,7 +250,7 @@ test('browser_click_text: generic text resolving to a payment button → denied_
 // 3. Coordinate click
 // ---------------------------------------------------------------------------
 
-test('browser_click_at: labeled M1 target under the point is refused before any mouse event', async () => {
+test('browser_click_at: labeled destructive target under the point is refused before any mouse event', async () => {
   const controller = makeController((source) => {
     if (source.includes('__READY_CLICK_POINT_LABEL_PROBE__')) {
       return { label: '立即支付' }
@@ -258,7 +258,7 @@ test('browser_click_at: labeled M1 target under the point is refused before any 
     return null
   })
   const output = await executeToolCall('browser_click_at', { x: 500, y: 500 }, modelContext(controller))
-  assert.equal(output.data?.errorKind, 'denied_manual_only')
+  assert.equal(output.data?.errorKind, 'grant_required')
   assert.equal(controller.calls.mouse.length, 0, 'no mouse event may fire on a refused target')
   // Parent-bubble proof: clicks bubble, so hitting an icon/span inside a
   // 「确认支付」 button still presses the button — the probe must climb to
@@ -293,15 +293,15 @@ test('browser_type: opaque selector resolving to a password field → reroute to
   assert.ok(typeScript!.includes('!false'), 'no args cue → in-page allow flag must be false')
 })
 
-test('browser_type: opaque selector resolving to a captcha field → denied_manual_only (代填验证码被拦)', async () => {
+test('browser_type: opaque selector resolving to a captcha field → grant_required (代填验证码被拦)', async () => {
   const controller = makeController((source) => {
     if (source.includes('__READY_LIVE_TARGET_GUARD__')) {
-      return { __readyManualOnlyBlocked: true, label: '验证码' }
+      return { __readyDestructiveTargetBlocked: true, label: '验证码' }
     }
     return null
   })
   const output = await executeToolCall('browser_type', { selector: '#input-3', text: '8244' }, modelContext(controller))
-  assert.equal(output.data?.errorKind, 'denied_manual_only')
+  assert.equal(output.data?.errorKind, 'grant_required')
   assert.equal(output.envelope?.kind, 'denied_by_policy')
   const typeScript = controller.calls.scripts.find((s) => s.includes('__READY_LIVE_TARGET_GUARD__'))
   assert.ok(typeScript!.includes('验证码'), 'in-page guard must embed the policy captcha pattern')
@@ -326,7 +326,7 @@ test('browser_type_at: password field under the point without an args cue → re
   assert.equal(controller.calls.mouse.length, 0, 'the focusing click must not fire either')
 })
 
-test('browser_type_at: captcha INPUT field under the point → denied_manual_only (editable branch, field semantics)', async () => {
+test('browser_type_at: captcha INPUT field under the point → grant_required (editable branch, field semantics)', async () => {
   const controller = makeController((source) => {
     if (source.includes('__READY_CLICK_POINT_LABEL_PROBE__')) {
       return { label: '', inputLabel: '请输入验证码', password: false, editable: true }
@@ -334,13 +334,13 @@ test('browser_type_at: captcha INPUT field under the point → denied_manual_onl
     return null
   })
   const output = await executeToolCall('browser_type_at', { x: 500, y: 500, text: '8244' }, modelContext(controller))
-  assert.equal(output.data?.errorKind, 'denied_manual_only')
+  assert.equal(output.data?.errorKind, 'grant_required')
   assert.deepEqual(controller.calls.typed, [])
 })
 
 test('browser_type_at: editable field whose CURRENT VALUE contains a trigger word is NOT blocked (P2 false-positive fix)', async () => {
   // A normal text field already holding "提交订单草稿" must stay typable —
-  // the value must never enter the manual-only decision (only field
+  // the value must never enter the destructive-grant decision (only field
   // semantics do, and those exclude value).
   const controller = makeController((source) => {
     if (source.includes('__READY_CLICK_POINT_LABEL_PROBE__')) {
@@ -380,7 +380,7 @@ test('browser_type_smart: scorer resolving a password field without an args cue 
 //     fires before any typing — pressing a payment button is already the act)
 // ---------------------------------------------------------------------------
 
-test('browser_type_at: payment button under the point → denied_manual_only BEFORE the focusing click', async () => {
+test('browser_type_at: payment button under the point → grant_required BEFORE the focusing click', async () => {
   const controller = makeController((source) => {
     if (source.includes('__READY_CLICK_POINT_LABEL_PROBE__')) {
       return { label: '确认支付', inputLabel: '', password: false }
@@ -388,7 +388,7 @@ test('browser_type_at: payment button under the point → denied_manual_only BEF
     return null
   })
   const output = await executeToolCall('browser_type_at', { x: 500, y: 500, text: '随便' }, modelContext(controller))
-  assert.equal(output.data?.errorKind, 'denied_manual_only')
+  assert.equal(output.data?.errorKind, 'grant_required')
   assert.equal(controller.calls.mouse.length, 0, 'the focusing click must never fire')
   assert.deepEqual(controller.calls.typed, [])
 })
@@ -398,7 +398,7 @@ test('browser_type_at: payment button under the point → denied_manual_only BEF
 //     sendKeyStroke, the single enforcement entry)
 // ---------------------------------------------------------------------------
 
-test('browser_send_keys: printable key while a captcha field is focused → denied_manual_only', async () => {
+test('browser_send_keys: printable key while a captcha field is focused → grant_required', async () => {
   const controller = makeController((source) => {
     if (source.includes('__READY_FOCUSED_FIELD_PROBE__')) {
       return { inputLabel: '请输入验证码', password: false }
@@ -406,7 +406,7 @@ test('browser_send_keys: printable key while a captcha field is focused → deni
     return null
   })
   const output = await executeToolCall('browser_send_keys', { key: 'a' }, modelContext(controller))
-  assert.equal(output.data?.errorKind, 'denied_manual_only')
+  assert.equal(output.data?.errorKind, 'grant_required')
   assert.deepEqual(controller.calls.keys, [], 'no key event may reach a captcha field')
 })
 
@@ -480,20 +480,20 @@ test('browser_send_keys: Ctrl+a (select-all shortcut) skips the probe and passes
 //     (the workflow tool is NOT in the dispatch confirmation policy)
 // ---------------------------------------------------------------------------
 
-test('workflow click: selector hitting a payment button → denied_manual_only, not clicked', async () => {
+test('workflow click: selector hitting a payment button → grant_required, not clicked', async () => {
   const controller = makeController((source) => {
-    if (source.includes('__READY_MANUAL_ONLY_CHECK__')) {
-      return { __readyManualOnlyBlocked: true, label: '确认支付' }
+    if (source.includes('__READY_DESTRUCTIVE_TARGET_CHECK__')) {
+      return { __readyDestructiveTargetBlocked: true, label: '确认支付' }
     }
     return null
   })
   const output = await executeToolCall('browser_run_workflow', {
     steps: [{ action: 'click', selector: '#pay' }],
   }, modelContext(controller))
-  assert.equal(output.data?.errorKind, 'denied_manual_only')
+  assert.equal(output.data?.errorKind, 'grant_required')
 })
 
-test('workflow click_at: payment button under the point → denied_manual_only, no mouse event', async () => {
+test('workflow click_at: payment button under the point → grant_required, no mouse event', async () => {
   const controller = makeController((source) => {
     if (source.includes('__READY_CLICK_POINT_LABEL_PROBE__')) {
       return { label: '立即支付', inputLabel: '', password: false, editable: false }
@@ -503,7 +503,7 @@ test('workflow click_at: payment button under the point → denied_manual_only, 
   const output = await executeToolCall('browser_run_workflow', {
     steps: [{ action: 'click_at', x: 500, y: 500 }],
   }, modelContext(controller))
-  assert.equal(output.data?.errorKind, 'denied_manual_only')
+  assert.equal(output.data?.errorKind, 'grant_required')
   assert.equal(controller.calls.mouse.length, 0)
 })
 
@@ -520,7 +520,7 @@ test('workflow type: selector resolving to a password field → reroute (workflo
   assert.equal(output.data?.errorKind, 'denied_pending_confirmation')
 })
 
-test('workflow type_at: captcha input under the point → denied_manual_only', async () => {
+test('workflow type_at: captcha input under the point → grant_required', async () => {
   const controller = makeController((source) => {
     if (source.includes('__READY_CLICK_POINT_LABEL_PROBE__')) {
       return { label: '', inputLabel: '验证码', password: false, editable: true }
@@ -530,32 +530,32 @@ test('workflow type_at: captcha input under the point → denied_manual_only', a
   const output = await executeToolCall('browser_run_workflow', {
     steps: [{ action: 'type_at', x: 400, y: 400, text: '1234' }],
   }, modelContext(controller))
-  assert.equal(output.data?.errorKind, 'denied_manual_only')
+  assert.equal(output.data?.errorKind, 'grant_required')
   assert.deepEqual(controller.calls.typed, [])
 })
 
-test('workflow click_text: generic text resolving to a payment button → denied_manual_only', async () => {
+test('workflow click_text: generic text resolving to a payment button → grant_required', async () => {
   const controller = makeController((source) => {
     if (source.includes('readyClickSemanticsLabel') || source.includes('Element by text')) {
-      return { __readyManualOnlyBlocked: true, label: '确认支付' }
+      return { __readyDestructiveTargetBlocked: true, label: '确认支付' }
     }
     return null
   })
   const output = await executeToolCall('browser_run_workflow', {
     steps: [{ action: 'click_text', text: '确认' }],
   }, modelContext(controller))
-  assert.equal(output.data?.errorKind, 'denied_manual_only')
+  assert.equal(output.data?.errorKind, 'grant_required')
 })
 
-test('workflow click_text: text arg itself naming a manual-only action → denied before locating', async () => {
+test('workflow click_text: text arg itself naming a destructive-grant action → denied before locating', async () => {
   const controller = makeController(() => null)
   const output = await executeToolCall('browser_run_workflow', {
     steps: [{ action: 'click_text', text: '确认支付' }],
   }, modelContext(controller))
-  assert.equal(output.data?.errorKind, 'denied_manual_only')
+  assert.equal(output.data?.errorKind, 'grant_required')
   assert.ok(
     !controller.calls.scripts.some((s) => s.includes('Element by text')),
-    'a manual-only text arg must be refused before the locate script runs',
+    'a destructive-grant text arg must be refused before the locate script runs',
   )
 })
 
@@ -563,10 +563,10 @@ test('workflow click_text: text arg itself naming a manual-only action → denie
 // 5. Matcher unit — the single pattern source behind all the nets
 // ---------------------------------------------------------------------------
 
-test('matchManualOnlyBrowserTarget: payment / password-change / captcha labels hit; neutral labels do not', () => {
-  assert.equal(matchManualOnlyBrowserTarget('确认支付')?.ruleId, 'm1-payment-final')
-  assert.equal(matchManualOnlyBrowserTarget('保存新密码')?.ruleId, 'm1-password-change-final')
-  assert.equal(matchManualOnlyBrowserTarget('请输入验证码')?.ruleId, 'm1-captcha-bypass')
-  assert.equal(matchManualOnlyBrowserTarget('下一页'), null)
-  assert.equal(matchManualOnlyBrowserTarget(''), null)
+test('matchBrowserDestructiveTarget: payment / password-change / captcha labels hit; neutral labels do not', () => {
+  assert.equal(matchBrowserDestructiveTarget('确认支付')?.ruleId, 'browser-power-payment-final')
+  assert.equal(matchBrowserDestructiveTarget('保存新密码')?.ruleId, 'browser-power-password-change-final')
+  assert.equal(matchBrowserDestructiveTarget('请输入验证码')?.ruleId, 'browser-power-access-control-interaction')
+  assert.equal(matchBrowserDestructiveTarget('下一页'), null)
+  assert.equal(matchBrowserDestructiveTarget(''), null)
 })

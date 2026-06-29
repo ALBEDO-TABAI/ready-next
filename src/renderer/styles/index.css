@@ -2195,6 +2195,11 @@ html[data-skin='liquid-glass']:is([data-glass-variant='solid-green'], [data-glas
   background: color-mix(in srgb, var(--surface-card-bg) 82%, white 18%);
 }
 
+.note-preview-code-block {
+  position: relative;
+  margin: 0 0 14px;
+}
+
 .note-preview-markdown-pre {
   margin: 0 0 14px;
   padding: 14px 16px;
@@ -2202,6 +2207,52 @@ html[data-skin='liquid-glass']:is([data-glass-variant='solid-green'], [data-glas
   border-radius: 12px;
   background: color-mix(in srgb, var(--bg-canvas) 88%, white 12%);
   overflow-x: auto;
+}
+
+.note-preview-code-block .note-preview-markdown-pre {
+  margin: 0;
+  padding-right: 52px;
+}
+
+.note-preview-code-copy-button {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid color-mix(in srgb, var(--border-default) 62%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-card-bg) 86%, white 14%);
+  color: var(--text-muted);
+  cursor: pointer;
+  box-shadow: 0 6px 14px rgba(15, 23, 42, 0.08);
+  transition:
+    background 160ms ease,
+    border-color 160ms ease,
+    color 160ms ease,
+    transform 160ms ease;
+}
+
+.note-preview-code-copy-button:hover {
+  border-color: color-mix(in srgb, var(--color-blue) 42%, var(--border-default) 58%);
+  background: color-mix(in srgb, var(--color-blue-light) 54%, var(--surface-card-bg) 46%);
+  color: var(--color-blue);
+  transform: translateY(-1px);
+}
+
+.note-preview-code-copy-button:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--color-blue) 68%, transparent);
+  outline-offset: 2px;
+}
+
+.note-preview-code-copy-button[data-ready-code-copied='true'] {
+  border-color: color-mix(in srgb, var(--color-green) 42%, var(--border-default) 58%);
+  background: color-mix(in srgb, var(--color-green) 14%, var(--surface-card-bg) 86%);
+  color: var(--color-green);
 }
 
 .note-preview-markdown-source-rendered {

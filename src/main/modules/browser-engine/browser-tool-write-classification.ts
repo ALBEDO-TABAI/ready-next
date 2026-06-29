@@ -65,6 +65,12 @@ const ALWAYS_WRITE = new Set<string>([
   'browser_download_gallery', // starts a scroll_collect task
   'browser_research_topic', // starts a navigating research task
   'browser_execute_js', // arbitrary code — undecidable, never a false read-only promise
+  'browser_power_eval', // arbitrary code — Power Mode still mutates/executes in page context
+  'browser_power_cdp', // CDP method effect is undecidable from the tool name; fail closed as write
+  'browser_power_network_trace', // may navigate to url and attaches debugger/network domains
+  'browser_power_resource_forensics', // may navigate/trace/play resource discovery
+  'browser_power_script_run', // multi-step Power workflow
+  'browser_media_download_advanced', // may run resource forensics and filesystem writes
   'browser_act_on_target',
   'browser_visible_collect',
   'browser_collect_notes', // ensures a background agent tab + launches page-mutating collection
@@ -79,6 +85,9 @@ const CONDITIONAL: Record<string, (args: Record<string, unknown>) => BrowserTool
   // Reads the current page by default; opening/navigating a `url` makes it a write.
   browser_extract_structured: (args) =>
     typeof args.url === 'string' && args.url.trim().length > 0 ? 'write' : 'read',
+  browser_inspect_resources: (args) =>
+    typeof args.url === 'string' && args.url.trim().length > 0 ? 'write' : 'read',
+  browser_stage_site_strategy: () => 'read',
   // Pure waiting is a read, but condition=custom_js runs page JS — that path is
   // a write under the same "any JS-executing call is a write" rule as execute_js.
   browser_wait_for_condition: (args) =>

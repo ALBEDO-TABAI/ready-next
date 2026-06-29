@@ -77,9 +77,11 @@ class FakeDownloadItem extends EventEmitter {
 
 class FakeSession extends EventEmitter {
   downloadedUrl: string | null = null
+  downloadOptions: unknown = null
 
-  downloadURL(url: string): void {
+  downloadURL(url: string, options?: unknown): void {
     this.downloadedUrl = url
+    this.downloadOptions = options || null
   }
 }
 
@@ -145,6 +147,51 @@ test('downloadUrlToDirectory appends an inferred extension to extensionless sugg
     assert.equal(result.success, true)
     assert.equal(result.savePath, join(dir, 'image-1.webp'))
     assert.equal(result.filename, 'image-1.webp')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('downloadUrlToDirectory passes only allowed identity headers to the browser session', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'ready-download-'))
+  try {
+    const service = createDownloadService()
+    const session = new FakeSession()
+    const promise = service.downloadUrlToDirectory(session as never, {
+      url: 'https://v.douyinvod.com/video/tos/cn/tos-cn-ve-15/example',
+      targetDir: dir,
+      sourcePageUrl: 'https://www.douyin.com/video/7650355790565395731',
+      suggestedName: 'douyin-video',
+      downloadHeaders: {
+        Referer: 'https://www.douyin.com/video/7650355790565395731',
+        'User-Agent': 'Mozilla/5.0 Ready Test',
+        'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+        Accept: 'video/webm,video/ogg,video/*;q=0.9,*/*;q=0.8',
+        Cookie: 'secret=must-not-pass',
+        'X-Test': 'must-not-pass',
+      },
+    })
+
+    assert.deepStrictEqual(session.downloadOptions, {
+      headers: {
+        Referer: 'https://www.douyin.com/video/7650355790565395731',
+        'User-Agent': 'Mozilla/5.0 Ready Test',
+        'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+        Accept: 'video/webm,video/ogg,video/*;q=0.9,*/*;q=0.8',
+      },
+    })
+    const item = new FakeDownloadItem(
+      'https://v.douyinvod.com/video/tos/cn/tos-cn-ve-15/example',
+      'example',
+      'video/mp4',
+    )
+    session.emit('will-download', {}, item)
+    assert.equal(item.getSavePath(), join(dir, 'douyin-video.mp4'))
+    item.finish('completed')
+
+    const result = await promise
+    assert.equal(result.success, true)
+    assert.equal(result.filename, 'douyin-video.mp4')
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }

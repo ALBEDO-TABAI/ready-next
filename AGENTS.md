@@ -37,7 +37,7 @@
 - 会话 scope 按“来源频道 + 线程/本地 conversation + agent”隔离；工具日志只留前台运行态或胶囊层，不混入正文消息。
 - 飞书/远程图片和文件先进入会话资源层，不自动触发 agent；后续任务必须显式选择附件资源。
 - Browser Agent 走“理解 -> 计划 -> 分步执行 -> 复核”；链接是资源，不是立即执行指令。
-- 浏览器脚本类工具普通站点只接受命名只读模板（`browser-readonly-script-templates.ts`）；自由 `code` / `custom_js` / `custom_script` / workflow `execute_js` / start_task 脚本 payload 一律结构化拒绝为 `freeform_script_denied`，高风控平台 `script_blocked` guard 仍先命中。
+- 浏览器脚本合同分 Safe Mode 与 Power Mode：Safe Mode 只接受命名只读模板（`browser-readonly-script-templates.ts`）并以 `freeform_script_denied` / `script_blocked` 拒绝自由脚本；Power Mode 走 `browser_power_eval` / `browser_power_cdp` / `browser_power_network_trace` / `browser_power_resource_forensics`，按代码侧 effect/grant/audit 执行，不按站点静态封锁。
 - AI provider 能力必须从共享能力层判断；不要把“OpenAI 兼容”当成原生 tools/vision/video 一定可用。
 - 工具错误由 dispatch 层转成结构化 `ToolExecutionOutput` 回灌模型；只有 Abort 或 host 不可用这类基础设施错误可以冒泡。
 - 主进程启动、日志轮转、SQLite native gate 和 `better-sqlite3` 真实加载都是验收边界；SQLite 路径不能用 host Node skip 当通过。
@@ -49,7 +49,7 @@
 - 采集终态判决唯一来自 `browser-engine/collection-verdict.ts` 的 `resolveCollectionVerdict()`：0 条永不 completed；部分进展永不清断点；整任务重试只重试失败项。
 - 聊天输入框液态玻璃以真实 Electron dev 为验收面；`#/liquid-test` 只用于调参。生产输入框不得加外部暗色阴影、不得用静态镜像/截图贴片冒充实时折射，消息列表底部必须保留由输入框浮层高度测出的空白尾巴，避免最后一条消息被压住。
 - 稳定性合同回归入口：`npm run verify:stability`（终止合同/事件桥/判定矩阵/意图分类/会话快照全链焦点测试 + 三个 gate）。
-- 高危工具调用走行动确认闸门：M1-M4 静态策略表（`agent-control/safety/action-confirmation-policy.ts`）在 `tool-executor` authorization 之后裁决——M1 拒绝并引导用户亲手做；M2/M3 冻结原始参数、确认后经 `frozen-call-store.release(id, token)` 在原 run 内逐字节放行，token 只跳过再次确认、注册/authorization/工具策略照常重跑（确认 ≠ 提权）；阶段一禁止确认缓存与意图预批准（I-auth 前 M3 一律降级 M2）。浏览器执行层在拿到页面真实目标文本处做第二道 M1 拦截（target_id/CSS selector/坐标点击不带语义也拦得住）；密码框填充无 args 线索一律拒绝改道确认。
+- 非浏览器高危工具仍走行动确认闸门：M1-M4 静态策略表（`agent-control/safety/action-confirmation-policy.ts`）在 `tool-executor` authorization 之后裁决。浏览器侧 supersede 为 Power Browser 合同：破坏性浏览器效果由 `src/shared/browser-power.ts` 代码枚举，live target 命中支付/改凭据/访问控制等语义时返回 `grant_required`；自由 eval 的 scope 内副作用残差以授权、限时、审计和脱敏收口，不再用 M1 manual-only 表示“工具没有能力”。
 - 信念卡 staged 状态不得进入 prompt 注入：`BeliefCardStore` 读 API 默认排除 staged（真实注入接线属 K3）。
 - Reflection 产物不得直接写入 prompt 可见的 `resident_user` / `scope_memory` 常驻记忆；用户偏好只能经 user-picture CAS 或后续明确 staged 路径进入，reflection 必须发 `reflection_outcome` 可观测账本。
 - Agent 进化阶段一合同回归入口：`npm run verify:evolution-p1`（全部焦点测试 + `verify:native`）。

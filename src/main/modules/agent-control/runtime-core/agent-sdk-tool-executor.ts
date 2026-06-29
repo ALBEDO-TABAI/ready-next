@@ -186,7 +186,11 @@ export class AgentSdkToolExecutor {
     /** Request envelope — used to read the canonical user instruction. */
     requestEnvelope?: unknown
   }): ToolDefinition[] {
-    const browserDecisionMode = resolveBrowserDecisionMode(params.message, params.browserHostAvailable)
+    const browserDecisionMode = resolveBrowserDecisionMode(
+      params.message,
+      params.browserHostAvailable,
+      params.requestEnvelope,
+    )
     const sdkIntentSurface = resolveSdkDefaultIntentSurface({
       message: params.message,
       requestEnvelope: params.requestEnvelope,
@@ -311,7 +315,9 @@ export class AgentSdkToolExecutor {
       ? Array.from(new Set([...resolvedSkillAllowedTools, ...allowedPrimitiveNames]))
       : resolvedSkillAllowedTools
     if (activeSkillAllowedTools) {
-      definitions = filterSelectedSkillToolSurface(definitions, activeSkillAllowedTools)
+      definitions = filterSelectedSkillToolSurface(definitions, activeSkillAllowedTools, {
+        preserveToolName: collectionExposure ? isBrowserCollectionSubsetTool : undefined,
+      })
     }
     return filterToolsByVisionCapability(
       definitions as unknown as Array<Record<string, unknown>>,

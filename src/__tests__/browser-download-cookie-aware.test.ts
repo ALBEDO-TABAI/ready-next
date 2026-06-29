@@ -23,6 +23,16 @@ afterEach(() => {
   while (dirs.length) rmSync(dirs.pop()!, { recursive: true, force: true })
 })
 
+function parseToolOutput(out: unknown): Record<string, unknown> {
+  if (typeof out === 'string') return JSON.parse(out) as Record<string, unknown>
+  if (out && typeof out === 'object') {
+    const value = out as { data?: unknown; text?: unknown }
+    if (value.data !== undefined && value.data !== null) return value.data as Record<string, unknown>
+    if (typeof value.text === 'string') return JSON.parse(value.text) as Record<string, unknown>
+  }
+  return JSON.parse(String(out)) as Record<string, unknown>
+}
+
 describe('browser_download_urls cookie-aware routing (WP4)', () => {
   it('routes downloads through the browser session (cookie+Referer), not fetch, when available', async () => {
     const calls: Array<{ url: string; sourcePageUrl?: string | null }> = []
@@ -41,12 +51,42 @@ describe('browser_download_urls cookie-aware routing (WP4)', () => {
       { urls: ['https://sns-img.xhscdn.com/a.jpg'], directory: dir },
       controller,
     )
-    const parsed = JSON.parse(out)
+    const parsed = parseToolOutput(out)
+    const results = parsed.results as Array<Record<string, unknown>>
     assert.equal(calls.length, 1, 'must call the cookie-aware session download path')
     assert.equal(calls[0].url, 'https://sns-img.xhscdn.com/a.jpg')
     assert.equal(calls[0].sourcePageUrl, 'https://www.xiaohongshu.com/x', 'carries the source page as Referer')
     assert.equal(parsed.success, 1)
-    assert.equal(parsed.results[0].via, 'browser_session')
+    assert.equal(results[0].via, 'browser_session')
+  })
+
+  it('adds a media Accept header for browser-session video downloads', async () => {
+    const calls: Array<{ url: string; downloadHeaders?: Record<string, string> | null }> = []
+    const dir = tempDir()
+    const controller: BrowserController = {
+      getActiveTab: () => ({ id: 'tab-1', url: 'https://www.douyin.com/video/7650355790565395731', title: 'T', active: true }) as never,
+      executeJS: async () => 'https://www.douyin.com/video/7650355790565395731',
+      downloadUrlToDirectory: async (payload: {
+        url: string
+        downloadHeaders?: Record<string, string> | null
+      }) => {
+        calls.push({ url: payload.url, downloadHeaders: payload.downloadHeaders })
+        return { success: true, savePath: `${dir}/video.mp4`, filename: 'video.mp4' }
+      },
+    } as unknown as BrowserController
+
+    const out = await executeBrowserTool(
+      'browser_download_urls',
+      { urls: ['https://v.douyinvod.com/video/tos/cn/example?mime_type=video_mp4'], directory: dir },
+      controller,
+    )
+    const parsed = parseToolOutput(out)
+    assert.equal(parsed.success, 1)
+    assert.equal(calls.length, 1)
+    assert.equal(
+      calls[0].downloadHeaders?.Accept,
+      'video/webm,video/ogg,video/*;q=0.9,audio/*;q=0.8,*/*;q=0.8',
+    )
   })
 
   it('falls back to fetch (structured) when the session download path reports failure', async () => {
@@ -62,10 +102,11 @@ describe('browser_download_urls cookie-aware routing (WP4)', () => {
       { urls: ['https://no-such-host.invalid/a.jpg'], directory: dir },
       controller,
     )
-    const parsed = JSON.parse(out)
+    const parsed = parseToolOutput(out)
     // Session path failed → fell back to fetch → structured failure (not silent).
-    assert.equal(parsed.results[0].via, 'fetch')
-    assert.equal(parsed.results[0].success, false)
-    assert.ok(parsed.failed >= 1)
+    const results = parsed.results as Array<Record<string, unknown>>
+    assert.equal(results[0].via, 'fetch')
+    assert.equal(results[0].success, false)
+    assert.ok(Number(parsed.failed) >= 1)
   })
 })

@@ -40,6 +40,12 @@ describe('browser tool write classification', () => {
     assert.equal(classifyBrowserToolCall('browser_extract_structured', { url: 'https://example.com' }), 'write')
   })
 
+  it('classifies browser_inspect_resources by THIS call: url present => write, absent => read', () => {
+    assert.equal(classifyBrowserToolCall('browser_inspect_resources', {}), 'read')
+    assert.equal(classifyBrowserToolCall('browser_inspect_resources', { tab_id: 'tab-1' }), 'read')
+    assert.equal(classifyBrowserToolCall('browser_inspect_resources', { url: 'https://example.com' }), 'write')
+  })
+
   it('treats browser_scroll_collect as always write (it scrolls the page)', () => {
     assert.equal(classifyBrowserToolCall('browser_scroll_collect', {}), 'write')
   })

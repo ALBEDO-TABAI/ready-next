@@ -672,6 +672,7 @@ const browserAPI = {
     targetDir: string
     sourcePageUrl?: string | null
     suggestedName?: string | null
+    downloadHeaders?: Record<string, string> | null
   }) => ipcRenderer.invoke('browser:downloadUrlToDirectory', payload),
   onDownloadUpdate: (callback: (data: unknown) => void) => {
     const handler = (_: unknown, data: unknown): void => callback(data)

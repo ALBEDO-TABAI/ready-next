@@ -87,7 +87,7 @@ interface BrowserTabLifecycleHost {
   useMock: boolean
 }
 
-function buildLocalMediaDropBridgeScript(): string {
+export function buildLocalMediaDropBridgeScript(): string {
   const mediaExts = JSON.stringify(Array.from(BROWSER_LOCAL_MEDIA_UPLOAD_EXTENSIONS))
   const dropScheme = JSON.stringify(READY_LOCAL_MEDIA_DROP_SCHEME)
   return `
@@ -105,9 +105,35 @@ function buildLocalMediaDropBridgeScript(): string {
         'application/x-ready-document-tab',
         'application/x-ready-workspace-item',
       ];
+      let lastDropSignature = '';
+      let lastDropAt = 0;
       const cleanExt = (value) => String(value || '').trim().toLowerCase().replace(/^\\./, '');
-      const extForPath = (path) => cleanExt(String(path || '').split(/[\\\\/]/).pop().split('.').pop());
+      const extForPath = (path) => {
+        try {
+          const parsed = new URL(String(path || ''), window.location.href);
+          return cleanExt(parsed.pathname.split(/[\\\\/]/).pop().split('.').pop());
+        } catch {
+          return cleanExt(String(path || '').split(/[\\\\/]/).pop().split('.').pop());
+        }
+      };
       const isMediaPath = (path) => Boolean(path) && mediaExts.has(extForPath(path));
+      const isLikelyRemoteMediaUrl = (value) => {
+        try {
+          const url = new URL(String(value || ''), window.location.href);
+          return (url.protocol === 'http:' || url.protocol === 'https:') && isMediaPath(url.href);
+        } catch {
+          return false;
+        }
+      };
+      const pushRemoteUrl = (urls, value) => {
+        const raw = String(value || '').trim();
+        if (!raw || urls.length >= 1) return;
+        try {
+          const url = new URL(raw, window.location.href);
+          if (url.protocol !== 'http:' && url.protocol !== 'https:') return;
+          if (!urls.includes(url.href)) urls.push(url.href);
+        } catch {}
+      };
       const fileUrlToPath = (value) => {
         try {
           const url = new URL(value);
@@ -151,9 +177,61 @@ function buildLocalMediaDropBridgeScript(): string {
         for (const line of text.split(/\\r?\\n/)) pushPath(paths, line);
         return paths;
       };
+      const collectRemoteUrlsFromHtml = (html, urls) => {
+        if (!html || urls.length > 0) return;
+        try {
+          const doc = new DOMParser().parseFromString(html, 'text/html');
+          const image = doc.querySelector('img[src], img[srcset], source[srcset]');
+          if (image) {
+            const srcset = image.getAttribute('srcset') || '';
+            const srcsetCandidates = srcset.split(',').map((candidate) => candidate.trim().split(/\\s+/)[0]).filter(Boolean);
+            pushRemoteUrl(urls, srcsetCandidates[srcsetCandidates.length - 1] || image.getAttribute('src') || '');
+          }
+          if (urls.length === 0) {
+            const link = Array.from(doc.querySelectorAll('a[href]'))
+              .map((node) => node.getAttribute('href') || '')
+              .find(isLikelyRemoteMediaUrl);
+            pushRemoteUrl(urls, link || '');
+          }
+        } catch {
+          const srcLike = /(?:src|href)=["']([^"']+)["']/gi;
+          let match;
+          while (urls.length === 0 && (match = srcLike.exec(html))) pushRemoteUrl(urls, match[1]);
+        }
+      };
+      const collectRemoteUrls = (dataTransfer) => {
+        const urls = [];
+        if (!dataTransfer) return urls;
+        const uriList = dataTransfer.getData('text/uri-list') || '';
+        for (const line of uriList.split(/\\r?\\n/)) {
+          const trimmed = line.trim();
+          if (!trimmed || trimmed.startsWith('#')) continue;
+          if (isLikelyRemoteMediaUrl(trimmed)) pushRemoteUrl(urls, trimmed);
+        }
+        const text = dataTransfer.getData('text/plain') || '';
+        for (const line of text.split(/\\r?\\n/)) {
+          if (urls.length > 0) break;
+          if (isLikelyRemoteMediaUrl(line)) pushRemoteUrl(urls, line);
+        }
+        collectRemoteUrlsFromHtml(dataTransfer.getData('text/html') || '', urls);
+        return urls;
+      };
+      const isDuplicateDrop = (paths, urls) => {
+        const signature = JSON.stringify({ paths, urls });
+        const now = Date.now();
+        if (signature === lastDropSignature && now - lastDropAt < 2500) return true;
+        lastDropSignature = signature;
+        lastDropAt = now;
+        return false;
+      };
       const hasReadyLocalDragType = (dataTransfer) => {
         const types = Array.from(dataTransfer?.types || []);
-        return types.some((type) => mimeTypes.includes(type) || type === 'text/uri-list');
+        return types.some((type) => (
+          mimeTypes.includes(type) ||
+          type === 'text/uri-list' ||
+          type === 'text/html' ||
+          type === 'text/plain'
+        ));
       };
       document.addEventListener('dragover', (event) => {
         if (!hasReadyLocalDragType(event.dataTransfer)) return;
@@ -163,11 +241,18 @@ function buildLocalMediaDropBridgeScript(): string {
       }, true);
       document.addEventListener('drop', (event) => {
         const paths = collectPaths(event.dataTransfer);
-        if (paths.length === 0) return;
+        const urls = collectRemoteUrls(event.dataTransfer);
+        if (paths.length === 0 && urls.length === 0) return;
+        if (isDuplicateDrop(paths, urls)) {
+          event.preventDefault();
+          event.stopPropagation();
+          return;
+        }
         event.preventDefault();
         event.stopPropagation();
         const payload = encodeURIComponent(JSON.stringify({
           paths,
+          urls,
           x: Math.round(Number(event.clientX) || 0),
           y: Math.round(Number(event.clientY) || 0),
         }));

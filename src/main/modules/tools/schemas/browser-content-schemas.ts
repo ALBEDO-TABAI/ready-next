@@ -12,8 +12,10 @@
  */
 
 import { z } from 'zod'
+import { BROWSER_POWER_EFFECTS } from '../../../../shared/browser-power'
 
 const TabIdOptional = z.string().optional().describe('标签页 ID，留空则使用当前活跃标签页')
+const BrowserPowerEffectSchema = z.enum(BROWSER_POWER_EFFECTS)
 
 export const BrowserCollectImagesSchema = z.object({
   keyword: z.string().optional().describe('可选关键词，按图片 URL/alt/title 过滤'),
@@ -50,6 +52,14 @@ export const BrowserResolveVideoSchema = z.object({
   tab_id: z.string().optional().describe('可选标签页 ID，用于补充当前页面 URL/标题'),
 })
 
+export const BrowserInspectResourcesSchema = z.object({
+  tab_id: TabIdOptional,
+  url: z.string().optional().describe('可选：先导航到该 URL 再观察资源；留空则观察当前页'),
+  kinds: z.array(z.enum(['video', 'audio', 'image', 'document', 'json', 'stream', 'unknown'])).optional().describe('可选：只返回这些资源类型'),
+  wait_ms: z.number().optional().describe('观察等待毫秒数，默认 1500，最大 15000'),
+  max_candidates: z.number().optional().describe('最多返回候选数，默认 24，最大 80'),
+})
+
 export const BrowserExtractStructuredSchema = z.object({
   template: z
     .enum(['article_list', 'image_gallery', 'link_list', 'card_list', 'custom'])
@@ -71,6 +81,8 @@ export const BrowserExtractStructuredSchema = z.object({
   selector: z.string().optional().describe('script_template 需要选择器时使用'),
   attr: z.string().optional().describe('script_template=read_attr 时读取的属性名'),
   name: z.string().optional().describe('script_template=read_meta 时读取 title/href/readyState 或 meta name/property'),
+  grant_id: z.string().optional().describe('Power Mode 迁移字段：custom_script 使用的已确认 grant id'),
+  expected_effects: z.array(BrowserPowerEffectSchema).optional().describe('Power Mode 迁移字段：custom_script 的预期效果'),
 })
 
 export const BrowserScrollCollectSchema = z.object({
@@ -91,6 +103,8 @@ export const BrowserScrollCollectSchema = z.object({
   selector: z.string().optional().describe('script_template 需要选择器时使用'),
   attr: z.string().optional().describe('script_template=read_attr 时读取的属性名'),
   name: z.string().optional().describe('script_template=read_meta 时读取 title/href/readyState 或 meta name/property'),
+  grant_id: z.string().optional().describe('Power Mode 迁移字段：custom_script 使用的已确认 grant id'),
+  expected_effects: z.array(BrowserPowerEffectSchema).optional().describe('Power Mode 迁移字段：custom_script 的预期效果'),
 })
 
 export const BrowserStartTaskSchema = z.object({
@@ -101,6 +115,8 @@ export const BrowserStartTaskSchema = z.object({
     .record(z.string(), z.unknown())
     .describe('任务参数对象')
     .meta({ additionalProperties: true }),
+  grant_id: z.string().optional().describe('Power Mode 迁移字段：payload 内自定义脚本使用的已确认 grant id'),
+  expected_effects: z.array(BrowserPowerEffectSchema).optional().describe('Power Mode 迁移字段：payload 内自定义脚本的预期效果'),
 })
 
 export const BrowserVisibleCollectSchema = z.object({
@@ -172,10 +188,12 @@ export const BrowserRunWorkflowSchema = z.object({
     .boolean()
     .optional()
     .describe('遇错是否继续执行后续步骤，默认 false'),
+  grant_id: z.string().optional().describe('Power Mode 迁移字段：execute_js 步骤使用的已确认 grant id'),
+  expected_effects: z.array(BrowserPowerEffectSchema).optional().describe('Power Mode 迁移字段：execute_js 步骤的预期效果'),
 })
 
 export const BrowserExecuteJsSchema = z.object({
-  code: z.string().optional().describe('旧自由 JavaScript 入口；P3c 后普通站点会拒绝自由脚本，请改用命名只读模板'),
+  code: z.string().optional().describe('旧自由 JavaScript 入口；Safe Mode 只允许命名只读模板，Power Mode 会转发到 browser_power_eval'),
   template: z
     .enum(['read_text', 'read_attr', 'read_all_text', 'count_selector', 'exists_selector', 'read_rect', 'read_meta'])
     .optional()
@@ -188,6 +206,78 @@ export const BrowserExecuteJsSchema = z.object({
   attr: z.string().optional().describe('read_attr 模板读取的属性名'),
   name: z.string().optional().describe('read_meta 模板读取 title/href/readyState 或 meta name/property'),
   tab_id: TabIdOptional,
+  grant_id: z.string().optional().describe('Power Mode 迁移字段：自由 code 使用的已确认 grant id'),
+  expected_effects: z.array(BrowserPowerEffectSchema).optional().describe('Power Mode 迁移字段：自由 code 的预期效果'),
+})
+
+export const BrowserPowerEvalSchema = z.object({
+  code: z.string().describe('要在当前页面上下文执行的 JavaScript。Power Mode 专用；必须说明 purpose。'),
+  purpose: z.string().describe('本次 eval 的用户可理解目的，用于授权和审计。'),
+  expected_effects: z.array(BrowserPowerEffectSchema).optional().describe('本次调用预期产生的效果；未传默认 observe。破坏性效果必须有单独 grant。'),
+  tab_id: TabIdOptional,
+  timeout_ms: z.number().optional().describe('执行超时，默认 5000，最大 30000'),
+  max_result_bytes: z.number().optional().describe('返回结果最大字节数，默认 20000，最大 200000'),
+  grant_id: z.string().optional().describe('可选：已由用户确认的 Power grant id；模型不能自行伪造 grant。'),
+})
+
+export const BrowserPowerCdpSchema = z.object({
+  method: z.string().describe('DevTools Protocol 方法名，例如 Runtime.evaluate 或 Network.enable'),
+  params: z.record(z.string(), z.unknown()).optional().describe('CDP 参数对象'),
+  purpose: z.string().describe('本次 CDP 调用的用户可理解目的，用于授权和审计。'),
+  expected_effects: z.array(BrowserPowerEffectSchema).optional().describe('预期效果；未传会按方法名推断 observe/page_mutation。'),
+  tab_id: TabIdOptional,
+  grant_id: z.string().optional().describe('可选：已由用户确认的 Power grant id。'),
+})
+
+export const BrowserPowerNetworkTraceSchema = z.object({
+  tab_id: TabIdOptional,
+  url: z.string().optional().describe('可选：先导航到该 URL 再追踪网络'),
+  duration_ms: z.number().optional().describe('追踪时长，默认 3000，最大 30000'),
+  max_events: z.number().optional().describe('最多记录事件数，默认 120，最大 500'),
+  include_response_bodies: z.boolean().optional().describe('是否尝试读取响应体摘要；默认 false'),
+  body_max_bytes: z.number().optional().describe('每个响应体摘要最大字节数，默认 4096，最大 65536'),
+  purpose: z.string().optional().describe('追踪目的；默认用于资源侦测'),
+  grant_id: z.string().optional().describe('可选：已由用户确认的 Power grant id。'),
+})
+
+export const BrowserPowerResourceForensicsSchema = z.object({
+  tab_id: TabIdOptional,
+  url: z.string().optional().describe('可选：先导航到该 URL 再做资源 forensics'),
+  kinds: z.array(z.enum(['video', 'audio', 'image', 'document', 'json', 'stream', 'unknown'])).optional().describe('候选资源类型'),
+  wait_ms: z.number().optional().describe('页面观察等待毫秒，默认 1500'),
+  trace_ms: z.number().optional().describe('CDP 网络追踪毫秒，默认 3000'),
+  include_response_bodies: z.boolean().optional().describe('是否读取响应体摘要以发现播放器配置/m3u8/mpd；默认 true'),
+  max_candidates: z.number().optional().describe('最多返回候选，默认 40，最大 120'),
+  purpose: z.string().optional().describe('资源侦测目的'),
+  grant_id: z.string().optional().describe('可选：已由用户确认的 Power grant id。'),
+})
+
+export const BrowserPowerScriptRunSchema = z.object({
+  steps: z.array(z.record(z.string(), z.unknown()).meta({ additionalProperties: true })).describe('Power 脚本步骤；execute_js 步骤会逐步审计。'),
+  purpose: z.string().describe('整段脚本的用户可理解目的。'),
+  expected_effects: z.array(BrowserPowerEffectSchema).optional().describe('整段脚本预期效果；未传默认 page_mutation。'),
+  tab_id: TabIdOptional,
+  continue_on_error: z.boolean().optional().describe('遇错是否继续，默认 false'),
+  grant_id: z.string().optional().describe('可选：已由用户确认的 Power grant id。'),
+})
+
+export const BrowserMediaDownloadAdvancedSchema = z.object({
+  candidates: z.array(z.record(z.string(), z.unknown()).meta({ additionalProperties: true })).optional().describe('资源候选；未传时会先对当前页做 forensics'),
+  directory: z.string().describe('目标目录，必须来自用户指定的本地文件夹'),
+  filename_prefix: z.string().optional().describe('文件名前缀'),
+  tab_id: TabIdOptional,
+  page_url: z.string().optional().describe('来源页面 URL，用于 Referer 和补充侦测'),
+  overwrite: z.boolean().optional().describe('是否覆盖同名文件，默认 false'),
+  verify_media: z.boolean().optional().describe('是否用 ffprobe 校验媒体，默认 true'),
+  grant_id: z.string().optional().describe('可选：已由用户确认的 Power grant id。'),
+})
+
+export const BrowserStageSiteStrategySchema = z.object({
+  domain: z.string().describe('站点域名'),
+  task_kind: z.string().describe('策略适用任务类型，例如 media_download/resource_forensics/form_submit'),
+  summary: z.string().describe('策略摘要'),
+  evidence: z.array(z.string()).optional().describe('证据或产物路径'),
+  strategy: z.record(z.string(), z.unknown()).describe('结构化策略内容').meta({ additionalProperties: true }),
 })
 
 export const BrowserCollectNotesSchema = z.object({
@@ -225,6 +315,7 @@ export type BrowserContentToolName =
   | 'browser_collect_images'
   | 'browser_download_urls'
   | 'browser_download_collected_media'
+  | 'browser_inspect_resources'
   | 'browser_resolve_video'
   | 'browser_extract_structured'
   | 'browser_scroll_collect'
@@ -237,6 +328,13 @@ export type BrowserContentToolName =
   | 'browser_research_topic'
   | 'browser_run_workflow'
   | 'browser_execute_js'
+  | 'browser_power_eval'
+  | 'browser_power_cdp'
+  | 'browser_power_network_trace'
+  | 'browser_power_resource_forensics'
+  | 'browser_power_script_run'
+  | 'browser_media_download_advanced'
+  | 'browser_stage_site_strategy'
   | 'browser_visible_collect'
   | 'browser_collect_notes'
   | 'browser_confirm_collection_consent'
@@ -248,6 +346,7 @@ export const BROWSER_CONTENT_SCHEMAS: Record<
   browser_collect_images: BrowserCollectImagesSchema,
   browser_download_urls: BrowserDownloadUrlsSchema,
   browser_download_collected_media: BrowserDownloadCollectedMediaSchema,
+  browser_inspect_resources: BrowserInspectResourcesSchema,
   browser_resolve_video: BrowserResolveVideoSchema,
   browser_extract_structured: BrowserExtractStructuredSchema,
   browser_scroll_collect: BrowserScrollCollectSchema,
@@ -260,6 +359,13 @@ export const BROWSER_CONTENT_SCHEMAS: Record<
   browser_research_topic: BrowserResearchTopicSchema,
   browser_run_workflow: BrowserRunWorkflowSchema,
   browser_execute_js: BrowserExecuteJsSchema,
+  browser_power_eval: BrowserPowerEvalSchema,
+  browser_power_cdp: BrowserPowerCdpSchema,
+  browser_power_network_trace: BrowserPowerNetworkTraceSchema,
+  browser_power_resource_forensics: BrowserPowerResourceForensicsSchema,
+  browser_power_script_run: BrowserPowerScriptRunSchema,
+  browser_media_download_advanced: BrowserMediaDownloadAdvancedSchema,
+  browser_stage_site_strategy: BrowserStageSiteStrategySchema,
   browser_visible_collect: BrowserVisibleCollectSchema,
   browser_collect_notes: BrowserCollectNotesSchema,
   browser_confirm_collection_consent: BrowserConfirmCollectionConsentSchema,

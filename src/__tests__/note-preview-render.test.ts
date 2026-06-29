@@ -1,10 +1,71 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import React from 'react'
+import React, { act } from 'react'
+import { createRoot, type Root } from 'react-dom/client'
 import { renderToStaticMarkup } from 'react-dom/server'
+import { JSDOM } from 'jsdom'
 
 import NotePreview from '../renderer/components/document/NotePreview'
 import { EBOOK_INLINE_IMAGE_TITLE, EBOOK_MARKDOWN_MARKER } from '../shared/ebook'
+
+function installNotePreviewDom(writeText: (value: string) => Promise<void> | void): {
+  dom: JSDOM
+  restore: () => void
+} {
+  const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>', {
+    url: 'http://localhost',
+    pretendToBeVisual: true,
+  })
+  Object.defineProperty(dom.window.navigator, 'clipboard', {
+    value: { writeText },
+    configurable: true,
+  })
+
+  const previous = {
+    window: globalThis.window,
+    document: globalThis.document,
+    HTMLElement: (globalThis as { HTMLElement?: typeof HTMLElement }).HTMLElement,
+    Node: (globalThis as { Node?: typeof Node }).Node,
+    Event: (globalThis as { Event?: typeof Event }).Event,
+    MouseEvent: (globalThis as { MouseEvent?: typeof MouseEvent }).MouseEvent,
+    Element: (globalThis as { Element?: typeof Element }).Element,
+    navigator: (globalThis as { navigator?: Navigator }).navigator,
+    IS_REACT_ACT_ENVIRONMENT: (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT,
+  }
+
+  function setGlobal<K extends keyof typeof previous>(key: K, value: unknown) {
+    Object.defineProperty(globalThis, key, { value, configurable: true, writable: true })
+  }
+
+  setGlobal('window', dom.window)
+  setGlobal('document', dom.window.document)
+  setGlobal('HTMLElement', dom.window.HTMLElement)
+  setGlobal('Node', dom.window.Node)
+  setGlobal('Event', dom.window.Event)
+  setGlobal('MouseEvent', dom.window.MouseEvent)
+  setGlobal('Element', dom.window.Element)
+  setGlobal('navigator', dom.window.navigator)
+  setGlobal('IS_REACT_ACT_ENVIRONMENT', true)
+
+  return {
+    dom,
+    restore: () => {
+      for (const key of Object.keys(previous) as Array<keyof typeof previous>) {
+        const previousValue = previous[key]
+        if (previousValue === undefined) {
+          delete (globalThis as unknown as Record<string, unknown>)[key]
+        } else {
+          Object.defineProperty(globalThis, key, {
+            value: previousValue,
+            configurable: true,
+            writable: true,
+          })
+        }
+      }
+      try { dom.window.close() } catch { /* silent-catch: jsdom close best-effort */ }
+    },
+  }
+}
 
 test('NotePreview renders markdown tables with a dedicated preview shell', () => {
   const markdown = [
@@ -71,7 +132,78 @@ test('NotePreview renders mermaid fences through a dedicated diagram block', () 
   assert.match(html, /data-ready-heading-title="图表"/)
   assert.match(html, /data-ready-mermaid="true"/)
   assert.match(html, /note-preview-mermaid/)
+  assert.doesNotMatch(html, /data-ready-code-copy-button="true"/)
   assert.doesNotMatch(html, /<pre class="note-preview-markdown-pre"><div class="note-preview-mermaid/)
+})
+
+test('NotePreview renders a copy button for ordinary fenced code blocks', () => {
+  const markdown = [
+    '```ts',
+    'const answer = 42',
+    'console.log(answer)',
+    '```',
+  ].join('\n')
+
+  const html = renderToStaticMarkup(
+    React.createElement(NotePreview, {
+      content: markdown,
+      notePath: '/tmp/code.md',
+    }),
+  )
+
+  assert.match(html, /note-preview-code-block/)
+  assert.match(html, /data-ready-code-copy-button="true"/)
+  assert.match(html, /aria-label="复制代码块"/)
+  assert.match(html, /const answer = 42/)
+})
+
+test('NotePreview code copy button writes the rendered block text to clipboard', async () => {
+  const copiedValues: string[] = []
+  const { dom, restore } = installNotePreviewDom(async (value) => {
+    copiedValues.push(value)
+  })
+  let root: Root | null = null
+
+  try {
+    const host = document.getElementById('root')
+    assert.ok(host)
+    root = createRoot(host)
+
+    await act(async () => {
+      root?.render(React.createElement(NotePreview, {
+        content: [
+          '```ts',
+          'const answer = 42',
+          'console.log(answer)',
+          '```',
+        ].join('\n'),
+        notePath: '/tmp/code-copy.md',
+      }))
+    })
+
+    const codeElement = document.querySelector('.note-preview-markdown-code')
+    const copyButton = document.querySelector('[data-ready-code-copy-button="true"]')
+    assert.ok(codeElement)
+    assert.ok(copyButton instanceof dom.window.HTMLButtonElement)
+
+    await act(async () => {
+      copyButton.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true, cancelable: true }))
+      await Promise.resolve()
+    })
+
+    assert.equal(copiedValues.length, 1)
+    assert.equal(copiedValues[0], codeElement.textContent)
+    assert.match(copiedValues[0], /const answer = 42/)
+    assert.doesNotMatch(copiedValues[0], /```/)
+    assert.equal(copyButton.getAttribute('data-ready-code-copied'), 'true')
+  } finally {
+    if (root) {
+      await act(async () => {
+        root?.unmount()
+      })
+    }
+    restore()
+  }
 })
 
 test('NotePreview keeps fenced markdown blocks with blank lines intact', () => {

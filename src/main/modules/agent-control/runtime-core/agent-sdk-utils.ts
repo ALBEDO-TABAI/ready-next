@@ -178,9 +178,15 @@ function hasDanglingNativeTextToolMarker(text: string): boolean {
 export function filterSelectedSkillToolSurface(
   definitions: ToolDefinition[],
   allowedTools: ReadonlyArray<string> | null | undefined,
+  options: {
+    preserveToolName?: (name: string) => boolean
+  } = {},
 ): ToolDefinition[] {
   if (!allowedTools || allowedTools.length === 0) return definitions
-  const filtered = filterToolsByAllowedTools(definitions, allowedTools)
+  const filtered = options.preserveToolName
+    ? definitions.filter((definition) =>
+      allowedTools.includes(definition.name) || options.preserveToolName?.(definition.name) === true)
+    : filterToolsByAllowedTools(definitions, allowedTools)
   if (filtered.length > 0) return filtered
 
   const fallback = definitions.filter((definition) => definition.groupId !== 'skills' && definition.domain !== 'skill')
@@ -767,16 +773,23 @@ export function parseEnvelopeResourceReferences(envelope: unknown): {
 
 export function skillAuthorizationTextCandidates(message: RunMessage, envelope: unknown): string[] {
   const record = asRecord(envelope)
+  const rawUserText = stringField(record, 'rawUserText')
+  const rawExplicitMention =
+    rawUserText
+    && /@\[[^\]]+\]/.test(rawUserText)
+    && !SDK_CONTEXT_MARKERS.some((marker) => rawUserText.includes(marker))
+      ? rawUserText.trim()
+      : ''
   const envelopeCandidates = [
     parseEnvelopeResourceReferences(envelope).primaryInstruction,
     stringField(record, 'primaryInstruction'),
     stringField(record, 'pureUserText'),
+    rawExplicitMention,
   ]
     .map((item) => String(item || '').trim())
     .filter(Boolean)
   if (envelopeCandidates.length > 0) return Array.from(new Set(envelopeCandidates))
 
-  const rawUserText = stringField(record, 'rawUserText')
   if (rawUserText && !SDK_CONTEXT_MARKERS.some((marker) => rawUserText.includes(marker))) {
     return [rawUserText.trim()]
   }
@@ -1596,28 +1609,34 @@ export function isLocalDocumentToolDefinition(definition: ToolDefinition): boole
   return definition.domain === 'document' || definition.domain === 'file'
 }
 
-function shouldExposeResearchTools(message: RunMessage): boolean {
-  const text = primaryInstructionText(message)
+function shouldExposeResearchTools(text: string): boolean {
   return /(?:搜索|查找|查一下|检索|研究|资料|来源|引用|最新|今天|新闻|天气|股价|汇率|比分|赛程|官网|公告|价格|source|citation|research|search|latest|today|news)/i.test(text)
+}
+
+function shouldPreferBrowserCollectionToolLoop(text: string): boolean {
+  if (!resolveBrowserCollectionIntent(text)) return false
+  return /(?:采集|抓取|爬取|爬|收集|下载|保存|整理|批量|扒|存档|归档|落到|放到|存到|文件夹|download|save)/i.test(text)
 }
 
 export function resolveBrowserDecisionMode(
   message: RunMessage,
   browserHostAvailable: boolean,
+  requestEnvelope?: unknown,
 ): import('../../../../shared/browser-agent-task').BrowserTaskDecisionMode {
   if (!browserHostAvailable) return 'free_tool_loop'
-  const text = primaryInstructionText(message)
+  const text = parseEnvelopeResourceReferences(requestEnvelope).primaryInstruction || primaryInstructionText(message)
   const hasExplicitBrowserSurface =
     /(?:网页|浏览器|网站|当前页|页面|链接|url|https?:\/\/|www\.|browser|website|web page|current page|click|download)/i.test(text)
   const hasDocumentSurface =
     /(?:文档|文稿|原文|文章|段落|章节|markdown|\.md\b|@\[.*?\.(?:md|txt|docx?)\]|widget|show-widget|图表|趋势图|人物关系图|卡片|信息卡|表格|保存|写入|追加|替换|编辑|改写|润色|排版|格式)/i.test(text)
+  if (shouldPreferBrowserCollectionToolLoop(text)) return 'free_tool_loop'
   const hasBrowserUploadIntent =
     hasExplicitBrowserSurface &&
     /(?:上传|提交|发布|发送|选择).{0,30}(?:附件|文件|图片|图像|视频|upload|attach|file|image|video)|(?:附件|文件|图片|图像|视频|file|image|video).{0,30}(?:上传|提交|发布|发送|upload|attach)|(?:upload|attach).{0,30}(?:file|image|video)/i.test(text)
   if (hasBrowserUploadIntent) return 'browser_upload_workflow'
   if (hasDocumentSurface && !hasExplicitBrowserSurface) return 'free_tool_loop'
   if (
-    shouldExposeResearchTools(message)
+    shouldExposeResearchTools(text)
     || hasExplicitBrowserSurface
     || /(?:打开|点击|输入|下载)/i.test(text)
   ) {

@@ -387,6 +387,71 @@ test('P9C checks the live SDK default tool list exposes only the collection subs
   assert.equal(toolNames.includes('browser_type'), false)
 })
 
+test('P9C exposes browser resource tools for webpage video download requests', () => {
+  const userText = '看看能不能把网页的视频下载到@[整蛊广告]'
+  const toolNames = listLiveSdkDefaultToolNames({
+    userText,
+    requestEnvelope: buildRequestEnvelope({ userText }),
+  })
+
+  assert.ok(toolNames.includes('browser_inspect_resources'))
+  assert.ok(toolNames.includes('browser_resolve_video'))
+  assert.ok(toolNames.includes('browser_download_urls'))
+  assert.equal(toolNames.includes('browser_type'), false)
+  assert.equal(toolNames.includes('browser_execute_js'), false)
+})
+
+test('P9C keeps browser resource tools when a reference skill is selected', () => {
+  const userText = '看看能不能把网页的视频下载到@[整蛊广告]'
+  const authorization = buildSelectedSkillToolAuthorization({
+    skillId: 'obsidian-web-clip',
+    allowedTypedActions: [],
+    allowedPrimitives: ['skill_read_artifact', 'skill_write_artifact', 'skill_export_artifact'],
+    source: 'active_task',
+    reason: 'reference_hint',
+  })
+  const toolNames = listLiveSdkDefaultToolNames({
+    userText,
+    requestEnvelope: buildRequestEnvelope({ userText }),
+    authorization,
+  })
+
+  assert.ok(toolNames.includes('skill_read_artifact'))
+  assert.ok(toolNames.includes('skill_write_artifact'))
+  assert.ok(toolNames.includes('skill_export_artifact'))
+  assert.ok(toolNames.includes('browser_inspect_resources'))
+  assert.ok(toolNames.includes('browser_resolve_video'))
+  assert.ok(toolNames.includes('browser_download_urls'))
+  assert.equal(toolNames.includes('browser_type'), false)
+  assert.equal(toolNames.includes('browser_execute_js'), false)
+})
+
+test('P9C bare retry keeps resource tools despite upload words in recalled context', () => {
+  const userText = [
+    '## 环境信息',
+    '文件管理已授权目录：/Users/user/实验田/测试/lib-a',
+    '',
+    '## 最近会话摘要',
+    '今日已完结：浏览器上传流程 failed',
+    '上一轮用户要：看看能不能把网页的视频下载到@[整蛊广告]',
+    '',
+    '用户: 再试一次',
+  ].join('\n')
+  const requestEnvelope = {
+    primaryInstruction: '再试一次',
+    rawUserText: userText,
+    resources: [],
+  }
+  const toolNames = listLiveSdkDefaultToolNames({ userText, requestEnvelope })
+
+  assert.ok(toolNames.includes('browser_inspect_resources'))
+  assert.ok(toolNames.includes('browser_resolve_video'))
+  assert.ok(toolNames.includes('browser_download_urls'))
+  assert.equal(toolNames.includes('browser_list_upload_targets'), false)
+  assert.equal(toolNames.includes('browser_upload_scope_attachment'), false)
+  assert.equal(toolNames.includes('browser_click'), false)
+})
+
 test('selected reference-skill authorization exposes export artifact for target-folder delivery', () => {
   const userText = '@[hfp-space-design]生成一版洞穴风门店设计方案，输出到@[hfp空间方案]，文件名 ready-hfp-regression-洞穴风.md。不要追问，直接保存完整文档。'
   const requestEnvelope = buildRequestEnvelope({ userText })

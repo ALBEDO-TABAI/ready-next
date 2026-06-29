@@ -17,21 +17,26 @@
 /**
  * The collection subset exposed when browser tools are surfaced by collection
  * intent (NOT by a browser_workflow decision). Navigation / read / collect /
- * download / task-control only. Deliberately excludes execute_js, run_workflow,
- * and form-write/transmit tools (type/compose/send/upload) — those stay gated
- * behind the deterministic workflow path. (plan §4.0)
+ * download / task-control / Power resource forensics only. Legacy execute_js
+ * and form-write/transmit tools stay out of this subset; Power tools still go
+ * through effect/grant/audit policy at execution time.
  */
 export const BROWSER_COLLECTION_SUBSET_TOOL_NAMES: readonly string[] = [
   'browser_navigate',
   'browser_search',
   'browser_get_tabs',
   'browser_read_page',
+  'browser_read_page_map',
   'browser_capture_viewport',
   'browser_scroll_at',
   'browser_click_text',
   'browser_wait',
   'browser_wait_for_condition',
   'browser_collect_images',
+  'browser_inspect_resources',
+  'browser_power_network_trace',
+  'browser_power_resource_forensics',
+  'browser_media_download_advanced',
   'browser_resolve_video',
   'browser_extract_structured',
   'browser_scroll_collect',

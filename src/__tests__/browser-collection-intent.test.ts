@@ -22,6 +22,7 @@ describe('resolveBrowserCollectionIntent — positive (expose browser collection
     '帮我爬一下抖音这个号的视频封面',                               // platform + collection
     '把这个页面的评论都收集下来',                                   // explicit browser surface + collection
     '下载微博这个博主相册里的图片',                                 // platform + collection
+    '看看能不能把网页的视频下载到@[整蛊广告]',                       // webpage resource download to a folder
     '再找找相关的图片存档同一个文件夹里，并且插入到文档里的相关位置', // research follow-up: web image archive + document insertion
     '帮我找几张世界杯视觉设计参考图保存到同一个文件夹',              // image discovery + local archive target
   ]
@@ -103,7 +104,7 @@ describe('document signal priority', () => {
 
 describe('collection subset white-list', () => {
   it('includes navigation/read/collect/download/task tools', () => {
-    for (const name of ['browser_navigate', 'browser_read_page', 'browser_visible_collect', 'browser_resolve_video', 'browser_download_urls', 'browser_download_collected_media', 'browser_get_task']) {
+    for (const name of ['browser_navigate', 'browser_read_page', 'browser_read_page_map', 'browser_visible_collect', 'browser_inspect_resources', 'browser_resolve_video', 'browser_download_urls', 'browser_download_collected_media', 'browser_get_task']) {
       assert.equal(isBrowserCollectionSubsetTool(name), true, `${name} should be in subset`)
     }
   })

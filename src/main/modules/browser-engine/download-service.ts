@@ -13,6 +13,7 @@ export interface BrowserDownloadUrlToDirectoryPayload {
   targetDir: string
   sourcePageUrl?: string | null
   suggestedName?: string | null
+  downloadHeaders?: Record<string, string> | null
 }
 
 export interface BrowserDownloadUrlToDirectoryResult {
@@ -31,6 +32,19 @@ interface PendingTargetedDownload {
 }
 
 const TARGETED_DOWNLOAD_START_TIMEOUT_MS = 30_000
+const DOWNLOAD_HEADER_MAX_LENGTH: Record<string, number> = {
+  Referer: 2_048,
+  'User-Agent': 512,
+  'Accept-Language': 256,
+  Accept: 512,
+}
+const DOWNLOAD_HEADER_NAME_MAP = new Map<string, keyof typeof DOWNLOAD_HEADER_MAX_LENGTH>([
+  ['referer', 'Referer'],
+  ['referrer', 'Referer'],
+  ['user-agent', 'User-Agent'],
+  ['accept-language', 'Accept-Language'],
+  ['accept', 'Accept'],
+])
 
 // C0 control-character range (U+0000-U+001F) plus the cross-platform reserved
 // filename chars. Built via String.fromCharCode so the regex source contains
@@ -62,6 +76,46 @@ function filenameFromUrl(url: string): string {
   }
 }
 
+function safeHeaderValue(value: unknown, maxLength: number): string | null {
+  const text = String(value || '').trim()
+  if (!text || text.length > maxLength) return null
+  if (/[\r\n]/.test(text)) return null
+  return text
+}
+
+function isHttpUrl(value: string): boolean {
+  try {
+    const parsed = new URL(value)
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:'
+  } catch {
+    return false
+  }
+}
+
+function buildDownloadHeaders(payload: BrowserDownloadUrlToDirectoryPayload): Record<string, string> {
+  const headers: Record<string, string> = {}
+  const input = payload.downloadHeaders && typeof payload.downloadHeaders === 'object'
+    ? payload.downloadHeaders
+    : {}
+  for (const [rawName, rawValue] of Object.entries(input)) {
+    const name = DOWNLOAD_HEADER_NAME_MAP.get(rawName.trim().toLowerCase())
+    if (!name) continue
+    const value = safeHeaderValue(rawValue, DOWNLOAD_HEADER_MAX_LENGTH[name])
+    if (!value) continue
+    if (name === 'Referer' && !isHttpUrl(value)) continue
+    headers[name] = value
+  }
+
+  if (!headers.Referer) {
+    const referrer = safeHeaderValue(payload.sourcePageUrl, DOWNLOAD_HEADER_MAX_LENGTH.Referer)
+    if (referrer && isHttpUrl(referrer)) {
+      headers.Referer = referrer
+    }
+  }
+
+  return headers
+}
+
 function extensionFromMimeType(mimeType: string | null | undefined): string {
   const normalized = (String(mimeType || '').toLowerCase().split(';')[0] || '').trim()
   const table: Record<string, string> = {
@@ -72,6 +126,20 @@ function extensionFromMimeType(mimeType: string | null | undefined): string {
     'image/gif': '.gif',
     'image/avif': '.avif',
     'image/svg+xml': '.svg',
+    'video/mp4': '.mp4',
+    'video/webm': '.webm',
+    'video/ogg': '.ogv',
+    'video/quicktime': '.mov',
+    'video/x-matroska': '.mkv',
+    'application/vnd.apple.mpegurl': '.m3u8',
+    'application/x-mpegurl': '.m3u8',
+    'audio/mpeg': '.mp3',
+    'audio/mp4': '.m4a',
+    'audio/aac': '.aac',
+    'audio/webm': '.webm',
+    'audio/ogg': '.ogg',
+    'audio/wav': '.wav',
+    'application/pdf': '.pdf',
   }
   return table[normalized] || ''
 }
@@ -140,18 +208,7 @@ export class BrowserDownloadService {
       const queue = this.pendingTargetedDownloads.get(url) ?? []
       queue.push(pending)
       this.pendingTargetedDownloads.set(url, queue)
-      const headers: Record<string, string> = {}
-      const referrer = String(payload.sourcePageUrl || '').trim()
-      if (referrer) {
-        try {
-          const parsedReferrer = new URL(referrer)
-          if (parsedReferrer.protocol === 'http:' || parsedReferrer.protocol === 'https:') {
-            headers.Referer = referrer
-          }
-        } catch {
-          // ignore invalid referrer
-        }
-      }
+      const headers = buildDownloadHeaders(payload)
       try {
         targetSession.downloadURL(url, Object.keys(headers).length > 0 ? { headers } : undefined)
       } catch (error) {

@@ -67,13 +67,12 @@ test('red line 3: M3 hit allows without confirmation; no fact / expired / cross-
   assert.equal(expired.action, 'confirm')
 })
 
-test('red line 4: M1 never consults the store — facts cannot unlock manual-only actions', () => {
+test('red line 4: browser destructive actions are no longer unlocked by action-confirmation facts', () => {
   __clearAuthorizationFactsForTests()
-  // clicking a final payment confirmation is M1 territory regardless of grants
   recordVerbatimGrant({ scopeId: 'scope-a', actionCategory: 'login', objectRef: 'xiaohongshu.com', verbatim: 'x' })
   const decision = resolveConfirmationGate('browser_click', { selector: '#pay', text: '确认支付 999 元' }, { scopeId: 'scope-a' })
-  assert.equal(decision.mode, 'M1')
-  assert.equal(decision.action, 'manual_only')
+  assert.equal(decision.mode, 'M4')
+  assert.equal(decision.action, 'allow')
 })
 
 test('red line 5: negation revokes the whole category; consumption returns to confirm', () => {

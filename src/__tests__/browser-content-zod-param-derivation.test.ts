@@ -21,6 +21,13 @@ const TAB_ID_OPTIONAL: SkillParamDefinition = {
 }
 const TEMPLATE_ENUM = ['article_list', 'image_gallery', 'link_list', 'card_list', 'custom']
 const SCRIPT_TEMPLATE_ENUM = ['read_text', 'read_attr', 'read_all_text', 'count_selector', 'exists_selector', 'read_rect', 'read_meta']
+const POWER_EXPECTED_EFFECTS_PARAM: SkillParamDefinition = {
+  name: 'expected_effects',
+  type: 'array',
+  description: 'Power Mode 迁移字段：custom_script 的预期效果',
+  required: false,
+  items: { type: 'string' },
+}
 
 test('browser_collect_images', () => {
   assert.deepEqual(zodObjectToParamList(BROWSER_CONTENT_SCHEMAS.browser_collect_images), [
@@ -57,6 +64,22 @@ test('browser_download_collected_media', () => {
     { name: 'overwrite', type: 'boolean', description: '同名是否覆盖，默认 false', required: false },
     { name: 'expected_total', type: 'number', description: '可选：页面声称的图片总数；若已发现数不足，结果会标记 partial 并给出剩余数——不要在 partial 时宣告完成', required: false },
     { name: 'allow_partial', type: 'boolean', description: '仅当用户已确认允许只下载当前已发现图片时传 true；发现未完整时仍需要浏览器采集确认记录', required: false },
+  ])
+})
+
+test('browser_inspect_resources', () => {
+  assert.deepEqual(zodObjectToParamList(BROWSER_CONTENT_SCHEMAS.browser_inspect_resources), [
+    TAB_ID_OPTIONAL,
+    { name: 'url', type: 'string', description: '可选：先导航到该 URL 再观察资源；留空则观察当前页', required: false },
+    {
+      name: 'kinds',
+      type: 'array',
+      description: '可选：只返回这些资源类型',
+      required: false,
+      items: { type: 'string' },
+    },
+    { name: 'wait_ms', type: 'number', description: '观察等待毫秒数，默认 1500，最大 15000', required: false },
+    { name: 'max_candidates', type: 'number', description: '最多返回候选数，默认 24，最大 80', required: false },
   ])
 })
 
@@ -109,6 +132,8 @@ test('browser_extract_structured (fields has additionalProperties:true items)', 
     { name: 'selector', type: 'string', description: 'script_template 需要选择器时使用', required: false },
     { name: 'attr', type: 'string', description: 'script_template=read_attr 时读取的属性名', required: false },
     { name: 'name', type: 'string', description: 'script_template=read_meta 时读取 title/href/readyState 或 meta name/property', required: false },
+    { name: 'grant_id', type: 'string', description: 'Power Mode 迁移字段：custom_script 使用的已确认 grant id', required: false },
+    POWER_EXPECTED_EFFECTS_PARAM,
   ])
 })
 
@@ -138,6 +163,8 @@ test('browser_scroll_collect', () => {
     { name: 'selector', type: 'string', description: 'script_template 需要选择器时使用', required: false },
     { name: 'attr', type: 'string', description: 'script_template=read_attr 时读取的属性名', required: false },
     { name: 'name', type: 'string', description: 'script_template=read_meta 时读取 title/href/readyState 或 meta name/property', required: false },
+    { name: 'grant_id', type: 'string', description: 'Power Mode 迁移字段：custom_script 使用的已确认 grant id', required: false },
+    POWER_EXPECTED_EFFECTS_PARAM,
   ])
 })
 
@@ -156,6 +183,14 @@ test('browser_start_task (payload has additionalProperties:true at field level)'
       description: '任务参数对象',
       required: true,
       additionalProperties: true,
+    },
+    { name: 'grant_id', type: 'string', description: 'Power Mode 迁移字段：payload 内自定义脚本使用的已确认 grant id', required: false },
+    {
+      name: 'expected_effects',
+      type: 'array',
+      description: 'Power Mode 迁移字段：payload 内自定义脚本的预期效果',
+      required: false,
+      items: { type: 'string' },
     },
   ])
 })
@@ -243,12 +278,20 @@ test('browser_run_workflow (steps has additionalProperties:true objects)', () =>
       description: '遇错是否继续执行后续步骤，默认 false',
       required: false,
     },
+    { name: 'grant_id', type: 'string', description: 'Power Mode 迁移字段：execute_js 步骤使用的已确认 grant id', required: false },
+    {
+      name: 'expected_effects',
+      type: 'array',
+      description: 'Power Mode 迁移字段：execute_js 步骤的预期效果',
+      required: false,
+      items: { type: 'string' },
+    },
   ])
 })
 
 test('browser_execute_js', () => {
   assert.deepEqual(zodObjectToParamList(BROWSER_CONTENT_SCHEMAS.browser_execute_js), [
-    { name: 'code', type: 'string', description: '旧自由 JavaScript 入口；P3c 后普通站点会拒绝自由脚本，请改用命名只读模板', required: false },
+    { name: 'code', type: 'string', description: '旧自由 JavaScript 入口；Safe Mode 只允许命名只读模板，Power Mode 会转发到 browser_power_eval', required: false },
     {
       name: 'template',
       type: 'string',
@@ -267,5 +310,13 @@ test('browser_execute_js', () => {
     { name: 'attr', type: 'string', description: 'read_attr 模板读取的属性名', required: false },
     { name: 'name', type: 'string', description: 'read_meta 模板读取 title/href/readyState 或 meta name/property', required: false },
     { name: 'tab_id', type: 'string', description: '标签页 ID，留空则使用当前活跃标签页', required: false },
+    { name: 'grant_id', type: 'string', description: 'Power Mode 迁移字段：自由 code 使用的已确认 grant id', required: false },
+    {
+      name: 'expected_effects',
+      type: 'array',
+      description: 'Power Mode 迁移字段：自由 code 的预期效果',
+      required: false,
+      items: { type: 'string' },
+    },
   ])
 })

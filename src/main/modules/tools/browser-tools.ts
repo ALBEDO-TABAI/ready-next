@@ -40,15 +40,24 @@ import {
 import { agentBrowserError, isAgentBrowserError, type AgentBrowserStructuredError } from '../browser-engine/agent-browser-errors'
 import { ToolDomainError } from './tool-errors'
 import {
-  MANUAL_ONLY_TARGET_REGEX_SOURCES,
+  BROWSER_DESTRUCTIVE_TARGET_REGEX_SOURCES,
   argsCarryPasswordCue,
-  matchManualOnlyBrowserTarget,
+  matchBrowserDestructiveTarget,
 } from '../agent-control/safety/action-confirmation-policy'
 import { ACTION_CONFIRMATION_ERROR_KINDS } from '../agent-control/contracts/error-kinds'
 import { buildPageMap, parseTargetId, type PageMap, type RawAxNode } from '../browser-engine/agent-browser-page-map'
 import { gateActOnTarget, type AgentBrowserAction, type AgentBrowserReadBack } from '../browser-engine/agent-browser-act'
 import { normalizeCollectionTargets, targetsFromTask, type BrowserCollectionTarget } from '../browser-engine/collection-targets'
 import { buildCollectionHandoffPlanFromTask, buildCollectionPlanNotes } from '../browser-engine/collection-handoff'
+import { inspectBrowserResources, type BrowserResourceKind } from '../browser-engine/resource-sniffer'
+import {
+  browserPowerGrantRequiredPayload,
+  browserPowerModeEnabled,
+  inferBrowserPowerEffects,
+  recordBrowserPowerAuditEvent,
+  resolveBrowserPowerAuthorization,
+  type BrowserPowerDecision,
+} from '../browser-engine/browser-power-policy'
 import {
   BrowserCollectionConsentStore,
   type BrowserCollectionConsentRecord,
@@ -62,6 +71,7 @@ import {
   createToolExecutionOutput,
   type ToolExecutionOutput,
 } from '../agent-control/tools-runtime/tool-result-types'
+import type { BrowserPowerEffect } from '../../../shared/browser-power'
 import {
   createBrowserStructuredJsonText as browserStructuredJsonText,
   createBrowserStructuredOutput as browserStructuredOutput,
@@ -340,11 +350,12 @@ function buildBrowserTargetProbeJs(nodeId: string): string {
  *     「确认支付」button still presses the button) and reads its
  *     text/aria-label/aria-labelledby/value/title.
  *
- * The M1 patterns are generated from the policy module (single source).
+ * Destructive browser-target patterns are generated from the policy module
+ * (single source).
  */
 function buildTargetSemanticsLibraryJs(): string {
   return `
-    const READY_MANUAL_ONLY_PATTERNS = [${MANUAL_ONLY_TARGET_REGEX_SOURCES.map((src) => `new RegExp(${JSON.stringify(src)}, 'i')`).join(', ')}];
+    const READY_DESTRUCTIVE_TARGET_PATTERNS = [${BROWSER_DESTRUCTIVE_TARGET_REGEX_SOURCES.map((src) => `new RegExp(${JSON.stringify(src)}, 'i')`).join(', ')}];
     function readyAriaLabelledbyText(el) {
       try {
         const ref = el && el.getAttribute ? el.getAttribute('aria-labelledby') : null;
@@ -414,8 +425,8 @@ function buildInputGuardSnippetJs(allowPasswordFill: boolean): string {
     ${buildTargetSemanticsLibraryJs()}
     function readyInputGuard(el) {
       const label = readyInputSemanticsLabel(el);
-      if (label && READY_MANUAL_ONLY_PATTERNS.some((p) => p.test(label))) {
-        return { __readyManualOnlyBlocked: true, label: label.slice(0, 80) };
+      if (label && READY_DESTRUCTIVE_TARGET_PATTERNS.some((p) => p.test(label))) {
+        return { __readyDestructiveTargetBlocked: true, label: label.slice(0, 80) };
       }
       if (readyIsPasswordField(el) && !${JSON.stringify(allowPasswordFill)}) {
         return { __readyPasswordFillBlocked: true };
@@ -428,9 +439,9 @@ function buildInputGuardSnippetJs(allowPasswordFill: boolean): string {
 /**
  * EP1-I3 live-target net — best-effort target probe for coordinate actions
  * (click_at / type_at). Returns `{ label, inputLabel, password }` for the
- * clickable owner under the CSS point. Callers refuse M1 /
+ * clickable owner under the CSS point. Callers refuse destructive-grant /
  * unconfirmed-password targets and proceed on empty probes. Probe exceptions
- * fail closed because the M1 target guard did not actually run.
+ * fail closed because the target guard did not actually run.
  */
 function buildClickPointLabelProbeJs(cssX: number, cssY: number): string {
   return `(() => {
@@ -499,12 +510,12 @@ function buildFocusedFieldProbeJs(): string {
  */
 function throwIfLiveTargetGuardBlocked(result: unknown, detail: Record<string, unknown>): void {
   if (!result || typeof result !== 'object') return
-  const marker = result as { __readyManualOnlyBlocked?: unknown; __readyPasswordFillBlocked?: unknown; label?: unknown }
-  if (marker.__readyManualOnlyBlocked === true) {
+  const marker = result as { __readyDestructiveTargetBlocked?: unknown; __readyPasswordFillBlocked?: unknown; label?: unknown }
+  if (marker.__readyDestructiveTargetBlocked === true) {
     const label = String(marker.label || '')
     throw new ToolDomainError(
-      ACTION_CONFIRMATION_ERROR_KINDS.deniedManualOnly.code,
-      `目标「${label.slice(0, 80)}」命中 M1 规则（支付确认/改密提交/验证码必须由用户亲手完成）。请引导用户亲自完成这一步，不要代替执行或绕过。`,
+      'grant_required',
+      `目标「${label.slice(0, 80)}」命中浏览器破坏性动作清单，需要用户授予该目标的 Power grant 后才能执行。`,
       { ...detail, label },
     )
   }
@@ -1452,6 +1463,126 @@ function truncate(s: string, max = MAX_RESULT_LENGTH): string {
   return s.slice(0, max) + `\n... (truncated, ${s.length} total chars)`
 }
 
+function clampNumber(value: unknown, fallback: number, min: number, max: number): number {
+  const next = Number(value)
+  if (!Number.isFinite(next)) return fallback
+  return Math.max(min, Math.min(max, Math.floor(next)))
+}
+
+function activeBrowserToolUrl(controller: BrowserController, tabId: string | null): string | null {
+  const tabs = controller.getTabList?.() || []
+  const tab = (tabId ? tabs.find((item) => item.id === tabId) : null)
+    || tabs.find((item) => item.active)
+    || controller.getActiveTab?.()
+    || null
+  return typeof tab?.url === 'string' ? tab.url : null
+}
+
+function summarizeCodeForAudit(code: string): string {
+  return code.replace(/\s+/g, ' ').trim().slice(0, 240)
+}
+
+function truncateJsonValue(value: unknown, maxBytes: number): { value: unknown; truncated: boolean; bytes: number } {
+  let text: string
+  try {
+    text = JSON.stringify(value)
+  } catch {
+    text = String(value)
+  }
+  const bytes = Buffer.byteLength(text)
+  if (bytes <= maxBytes) return { value, truncated: false, bytes }
+  return {
+    value: `${text.slice(0, maxBytes)}... (truncated, ${bytes} bytes)`,
+    truncated: true,
+    bytes,
+  }
+}
+
+function redactHeaders(headers: Record<string, string> | undefined): Record<string, string> | undefined {
+  if (!headers) return undefined
+  const out: Record<string, string> = {}
+  for (const [key, value] of Object.entries(headers)) {
+    if (/cookie|authorization|token|secret|set-cookie/i.test(key)) {
+      out[key] = '[redacted]'
+    } else {
+      out[key] = value
+    }
+  }
+  return out
+}
+
+function browserPowerDeniedOutput(decision: BrowserPowerDecision, extra?: Record<string, unknown>): ToolExecutionOutput {
+  return browserStructuredOutput(browserPowerGrantRequiredPayload(decision, extra))
+}
+
+function resolvePowerDecisionForTool(params: {
+  toolName: string
+  args: Record<string, unknown>
+  controller: BrowserController
+  currentUserText?: string
+  sessionId?: string
+  tabId?: string | null
+  url?: string | null
+  destination?: string | null
+  fallbackEffects?: BrowserPowerEffect[]
+}): BrowserPowerDecision {
+  const tabId = params.tabId ?? (typeof params.args.tab_id === 'string' ? params.args.tab_id : null)
+  const url = params.url ?? activeBrowserToolUrl(params.controller, tabId)
+  return resolveBrowserPowerAuthorization({
+    toolName: params.toolName,
+    args: params.args,
+    effects: inferBrowserPowerEffects({
+      toolName: params.toolName,
+      args: params.args,
+      fallback: params.fallbackEffects,
+    }),
+    grantId: typeof params.args.grant_id === 'string' ? params.args.grant_id : null,
+    scopeId: params.sessionId || null,
+    tabId,
+    url,
+    destination: params.destination || null,
+    currentUserText: params.currentUserText || null,
+  })
+}
+
+function canUsePowerScriptPath(params: {
+  toolName: string
+  args: Record<string, unknown>
+  controller: BrowserController
+  currentUserText?: string
+  sessionId?: string
+}): { ok: true; decision: BrowserPowerDecision } | { ok: false; output?: ToolExecutionOutput } {
+  if (!browserPowerModeEnabled(params.currentUserText) && typeof params.args.grant_id !== 'string') {
+    return { ok: false }
+  }
+  const decision = resolvePowerDecisionForTool({
+    toolName: params.toolName,
+    args: params.args,
+    controller: params.controller,
+    currentUserText: params.currentUserText,
+    sessionId: params.sessionId,
+    fallbackEffects: ['page_mutation'],
+  })
+  if (decision.action !== 'allow') {
+    return { ok: false, output: browserPowerDeniedOutput(decision, { tool: params.toolName }) }
+  }
+  return { ok: true, decision }
+}
+
+function legacyToolHasFreeformScript(toolName: string, args: Record<string, unknown>): boolean {
+  if (toolName === 'browser_execute_js') return stringValue(args.code).length > 0
+  if (toolName === 'browser_wait_for_condition') return stringValue(args.custom_js).length > 0 || args.condition === 'custom_js'
+  if (toolName === 'browser_extract_structured' || toolName === 'browser_scroll_collect') return stringValue(args.custom_script).length > 0
+  if (toolName === 'browser_run_workflow') {
+    return Array.isArray(args.steps) && args.steps.some((step) =>
+      step && typeof step === 'object'
+      && String((step as Record<string, unknown>).action || '').trim().toLowerCase() === 'execute_js'
+      && stringValue((step as Record<string, unknown>).code).length > 0)
+  }
+  if (toolName === 'browser_start_task') return startTaskPayloadHasScript(args)
+  return false
+}
+
 function searchUrl(engine: SearchEngine, query: string): string {
   const q = encodeURIComponent(query)
   switch (engine) {
@@ -1731,6 +1862,33 @@ function imageBoardHarvestUrlCount(urls: string[]): number {
   return count
 }
 
+function looksLikeMediaDownloadUrl(url: string): boolean {
+  const lower = url.toLowerCase()
+  if (/\.(mp4|webm|mov|m4v|mkv|ogv|mp3|m4a|aac|ogg|wav|m3u8)(?:[?#]|$)/.test(lower)) return true
+  return lower.includes('mime_type=video')
+    || lower.includes('/video/')
+    || lower.includes('douyinvod.com')
+    || lower.includes('v26-web.douyinvod.com')
+}
+
+function downloadHeadersForTarget(url: string): Record<string, string> | null {
+  if (!looksLikeMediaDownloadUrl(url)) return null
+  return {
+    Accept: 'video/webm,video/ogg,video/*;q=0.9,audio/*;q=0.8,*/*;q=0.8',
+  }
+}
+
+function normalizeResourceKinds(value: unknown): BrowserResourceKind[] {
+  const allowed = new Set<BrowserResourceKind>(['video', 'audio', 'image', 'document', 'json', 'stream', 'unknown'])
+  if (!Array.isArray(value)) return []
+  const kinds: BrowserResourceKind[] = []
+  for (const item of value) {
+    const kind = String(item || '').trim() as BrowserResourceKind
+    if (allowed.has(kind) && !kinds.includes(kind)) kinds.push(kind)
+  }
+  return kinds
+}
+
 async function downloadUrlsToDirectory(
   controller: BrowserController,
   params: {
@@ -1787,6 +1945,7 @@ async function downloadUrlsToDirectory(
           targetDir: directory,
           sourcePageUrl: referer || null,
           suggestedName: filenamePrefix ? `${filenamePrefix}-${index + 1}` : null,
+          downloadHeaders: downloadHeadersForTarget(url),
         })
         if (sessionResult.success) {
           downloadedViaSession = true
@@ -1810,6 +1969,7 @@ async function downloadUrlsToDirectory(
       const fetchOnce = (target: string) => fetch(target, {
         headers: {
           'User-Agent': 'Mozilla/5.0 (Ready Browser Agent)',
+          ...(downloadHeadersForTarget(target) || {}),
           ...(referer ? { Referer: referer } : {}),
         },
       })
@@ -2091,7 +2251,7 @@ async function dispatchClickAt(
 // semantics the gate can see — they MUST re-check at the execution layer).
 
 /** Guarded CSS-selector click: judges the clickable owner's label (the click
- * bubbles), refuses M1 manual-only targets without clicking. */
+ * bubbles), refuses destructive-grant targets without clicking. */
 async function runGuardedSelectorClick(
   controller: BrowserController,
   tabId: string | null,
@@ -2099,14 +2259,14 @@ async function runGuardedSelectorClick(
 ): Promise<string> {
   const clickJs = `
     (function() {
-      const __READY_MANUAL_ONLY_CHECK__ = true;
+      const __READY_DESTRUCTIVE_TARGET_CHECK__ = true;
       ${buildTargetSemanticsLibraryJs()}
       const el = document.querySelector(${JSON.stringify(selector)});
       if (!el) return ${JSON.stringify(`Element not found: ${selector}`)};
       const owner = readyClickableOwner(el);
       const label = readyIsEditableField(owner) ? '' : readyClickSemanticsLabel(el);
-      if (label && READY_MANUAL_ONLY_PATTERNS.some((p) => p.test(label))) {
-        return { __readyManualOnlyBlocked: true, label: label.slice(0, 80) };
+      if (label && READY_DESTRUCTIVE_TARGET_PATTERNS.some((p) => p.test(label))) {
+        return { __readyDestructiveTargetBlocked: true, label: label.slice(0, 80) };
       }
       el.click();
       return 'Clicked: ' + (el.tagName || '') + (el.textContent ? ' "' + el.textContent.slice(0, 50) + '"' : '');
@@ -2118,8 +2278,9 @@ async function runGuardedSelectorClick(
 }
 
 /** Guarded coordinate click: probes the target under the point. Clicking a
- * non-editable target (button/link) is an action → M1 manual-only refused;
- * clicking an editable field just focuses it → allowed (value never judged). */
+ * non-editable target (button/link) is an action requiring a grant when it
+ * matches the destructive list; clicking an editable field just focuses it
+ * and is allowed (value never judged). */
 async function runGuardedCoordinateClick(
   controller: BrowserController,
   tabId: string | null,
@@ -2134,12 +2295,12 @@ async function runGuardedCoordinateClick(
   if (probe && typeof probe === 'object') {
     const p = probe as { label?: unknown; editable?: unknown }
     if (p.editable !== true) {
-      const manualHit = matchManualOnlyBrowserTarget(String(p.label || ''))
-      if (manualHit) {
+      const destructiveHit = matchBrowserDestructiveTarget(String(p.label || ''))
+      if (destructiveHit) {
         throw new ToolDomainError(
-          ACTION_CONFIRMATION_ERROR_KINDS.deniedManualOnly.code,
-          `坐标点击目标「${String(p.label || '').slice(0, 80)}」命中 M1 规则（${manualHit.reason}）。请引导用户亲自完成这一步。`,
-          { x, y, ruleId: manualHit.ruleId },
+          'grant_required',
+          `坐标点击目标「${String(p.label || '').slice(0, 80)}」命中浏览器破坏性动作清单（${destructiveHit.reason}），需要用户授予该目标的 Power grant 后才能执行。`,
+          { x, y, ruleId: destructiveHit.ruleId },
         )
       }
     }
@@ -2150,7 +2311,7 @@ async function runGuardedCoordinateClick(
 }
 
 /** Guarded CSS-selector type: in-page field-semantics guard (no value),
- * refuses M1 fields and unconfirmed password fields. */
+ * refuses destructive-grant fields and unconfirmed password fields. */
 async function runGuardedSelectorType(
   controller: BrowserController,
   tabId: string | null,
@@ -2189,8 +2350,9 @@ async function runGuardedSelectorType(
 }
 
 /** Guarded coordinate type: probes the field under the point. Non-editable
- * target → the focusing click is itself an action (M1 by click label);
- * editable field → judge by field semantics (no value) + password. */
+ * target → the focusing click is itself an action checked against the
+ * destructive target list; editable field → judge by field semantics
+ * (no value) + password. */
 async function runGuardedCoordinateType(
   controller: BrowserController,
   tabId: string | null,
@@ -2212,11 +2374,11 @@ async function runGuardedCoordinateType(
     if (!editable) {
       // The focusing click lands on a button/link → the click is the action.
       const clickLabel = String(p.label || '')
-      const clickHit = matchManualOnlyBrowserTarget(clickLabel)
+      const clickHit = matchBrowserDestructiveTarget(clickLabel)
       if (clickHit) {
         throw new ToolDomainError(
-          ACTION_CONFIRMATION_ERROR_KINDS.deniedManualOnly.code,
-          `坐标输入会先点击目标「${clickLabel.slice(0, 80)}」，命中 M1 规则（${clickHit.reason}）。请引导用户亲自完成这一步。`,
+          'grant_required',
+          `坐标输入会先点击目标「${clickLabel.slice(0, 80)}」，命中浏览器破坏性动作清单（${clickHit.reason}），需要用户授予该目标的 Power grant 后才能执行。`,
           { x, y, ruleId: clickHit.ruleId },
         )
       }
@@ -2224,11 +2386,11 @@ async function runGuardedCoordinateType(
       // Editable field: judge by field semantics (NOT its current value — a
       // draft containing「提交订单」must not false-trip), then password.
       const inputLabel = String(p.inputLabel || '')
-      const fieldHit = matchManualOnlyBrowserTarget(inputLabel)
+      const fieldHit = matchBrowserDestructiveTarget(inputLabel)
       if (fieldHit) {
         throw new ToolDomainError(
-          ACTION_CONFIRMATION_ERROR_KINDS.deniedManualOnly.code,
-          `坐标输入目标「${inputLabel.slice(0, 80)}」命中 M1 规则（${fieldHit.reason}）。请引导用户亲自完成这一步。`,
+          'grant_required',
+          `坐标输入目标「${inputLabel.slice(0, 80)}」命中浏览器破坏性动作清单（${fieldHit.reason}），需要用户授予该目标的 Power grant 后才能执行。`,
           { x, y, ruleId: fieldHit.ruleId },
         )
       }
@@ -2282,12 +2444,12 @@ async function sendKeyStroke(
     if (focusedProbe && typeof focusedProbe === 'object') {
       const probed = focusedProbe as { inputLabel?: unknown; password?: unknown }
       const inputLabel = String(probed.inputLabel || '')
-      const manualHit = matchManualOnlyBrowserTarget(inputLabel)
-      if (manualHit) {
+      const destructiveHit = matchBrowserDestructiveTarget(inputLabel)
+      if (destructiveHit) {
         throw new ToolDomainError(
-          ACTION_CONFIRMATION_ERROR_KINDS.deniedManualOnly.code,
-          `当前焦点字段「${inputLabel.slice(0, 80)}」命中 M1 规则（${manualHit.reason}）。请引导用户亲自完成这一步，不要逐键代输。`,
-          { key: keyLabel, ruleId: manualHit.ruleId },
+          'grant_required',
+          `当前焦点字段「${inputLabel.slice(0, 80)}」命中浏览器破坏性动作清单（${destructiveHit.reason}），需要用户授予该目标的 Power grant 后才能逐键输入。`,
+          { key: keyLabel, ruleId: destructiveHit.ruleId },
         )
       }
       if (probed.password === true) {
@@ -3204,8 +3366,8 @@ function buildClickByTextJs(text: string, exact: boolean): string {
       // EP1-I3 live-target net — the located element's clickable owner may be
       // a payment/captcha/改密 control even when the search text was generic.
       const __readyOwnerLabel = readyClickSemanticsLabel(matched)
-      if (__readyOwnerLabel && READY_MANUAL_ONLY_PATTERNS.some((p) => p.test(__readyOwnerLabel))) {
-        return { __readyManualOnlyBlocked: true, label: __readyOwnerLabel.slice(0, 80) }
+      if (__readyOwnerLabel && READY_DESTRUCTIVE_TARGET_PATTERNS.some((p) => p.test(__readyOwnerLabel))) {
+        return { __readyDestructiveTargetBlocked: true, label: __readyOwnerLabel.slice(0, 80) }
       }
       matched.scrollIntoView({ block: 'center', behavior: 'instant' })
       matched.dispatchEvent(new MouseEvent('mousemove', { bubbles: true }))
@@ -3617,11 +3779,11 @@ async function runWorkflowStep(
     // The text arg itself is the semantic the model chose to click — guard
     // it directly, and the located-element owner label is re-checked inside
     // buildClickByTextJs before the click fires.
-    const textHit = matchManualOnlyBrowserTarget(text)
+    const textHit = matchBrowserDestructiveTarget(text)
     if (textHit) {
       throw new ToolDomainError(
-        ACTION_CONFIRMATION_ERROR_KINDS.deniedManualOnly.code,
-        `workflow click_text 目标文本「${text.slice(0, 80)}」命中 M1 规则（${textHit.reason}）。请引导用户亲自完成这一步。`,
+        'grant_required',
+        `workflow click_text 目标文本「${text.slice(0, 80)}」命中浏览器破坏性动作清单（${textHit.reason}），需要用户授予该目标的 Power grant 后才能执行。`,
         { text, ruleId: textHit.ruleId },
       )
     }
@@ -4907,23 +5069,85 @@ export async function executeBrowserTool(
 ): Promise<string | ToolExecutionOutput> {
   log(`executeBrowserTool: ${toolName} args=${JSON.stringify(args).slice(0, 200)}`)
 
+  const legacyPowerScript = legacyToolHasFreeformScript(toolName, args)
+  let legacyPowerDecision: BrowserPowerDecision | null = null
+  if (legacyPowerScript) {
+    const power = canUsePowerScriptPath({ toolName, args, controller, currentUserText, sessionId })
+    if (!power.ok) {
+      if (power.output) return power.output
+    } else {
+      legacyPowerDecision = power.decision
+      if (toolName === 'browser_execute_js') {
+        return executeBrowserTool(
+          'browser_power_eval',
+          {
+            code: String(args.code || ''),
+            purpose: String(args.purpose || 'legacy browser_execute_js compatibility'),
+            expected_effects: power.decision.effects,
+            tab_id: args.tab_id,
+            grant_id: args.grant_id,
+          },
+          controller,
+          abortSignal,
+          sessionId,
+          leaseGate,
+          currentUserText,
+          runtime,
+        )
+      }
+      if (toolName === 'browser_run_workflow') {
+        return executeBrowserTool(
+          'browser_power_script_run',
+          {
+            steps: args.steps,
+            purpose: String(args.purpose || 'legacy browser_run_workflow execute_js compatibility'),
+            expected_effects: power.decision.effects,
+            tab_id: args.tab_id,
+            continue_on_error: args.continue_on_error,
+            grant_id: args.grant_id,
+          },
+          controller,
+          abortSignal,
+          sessionId,
+          leaseGate,
+          currentUserText,
+          runtime,
+        )
+      }
+    }
+  }
+
   // WP3 — high-control platform script blacklist: on 小红书/抖音/微博/… do not
   // run script-hard tools / script params; only visible/DOM collection is
   // allowed (plan §4.4). Checked against the active tab's URL, before the lease
   // gate so a rejected tool never opens an action window.
   const candidateTargetUrls = resolveCandidateTargetUrls(args, controller)
-  const highControlDenied = highControlScriptGuard(toolName, args, candidateTargetUrls)
-  if (highControlDenied) {
-    log(`Browser tool high-control-denied: ${toolName}`)
-    return highControlDenied
-  }
+  if (!legacyPowerDecision) {
+    const highControlDenied = highControlScriptGuard(toolName, args, candidateTargetUrls)
+    if (highControlDenied) {
+      log(`Browser tool high-control-denied: ${toolName}`)
+      return highControlDenied
+    }
 
-  const scriptReadOnlyVerdict = resolveScriptReadOnlyVerdict(toolName, args)
-  if (scriptReadOnlyVerdict.output) {
-    log(`Browser tool freeform-script-denied: ${toolName}`)
-    return scriptReadOnlyVerdict.output
+    const scriptReadOnlyVerdict = resolveScriptReadOnlyVerdict(toolName, args)
+    if (scriptReadOnlyVerdict.output) {
+      log(`Browser tool freeform-script-denied: ${toolName}`)
+      return scriptReadOnlyVerdict.output
+    }
+    args = scriptReadOnlyVerdict.args
+  } else {
+    recordBrowserPowerAuditEvent({
+      toolName,
+      grantId: legacyPowerDecision.grantId,
+      tabId: typeof args.tab_id === 'string' ? args.tab_id : null,
+      url: activeBrowserToolUrl(controller, typeof args.tab_id === 'string' ? args.tab_id : null),
+      effects: legacyPowerDecision.effects,
+      purpose: String(args.purpose || 'legacy freeform script path'),
+      codeSummary: summarizeCodeForAudit(String(args.code || args.custom_js || args.custom_script || '')),
+      paramsSummary: { legacyPowerPath: true },
+      resultSummary: null,
+    })
   }
-  args = scriptReadOnlyVerdict.args
 
   const gate = beginLeaseGate(leaseGate, toolName, args)
   if (gate.deniedMessage !== null) {
@@ -5139,9 +5363,10 @@ export async function executeBrowserTool(
         }
         // EP1-I3 live-target net — the dispatch gate only saw the args; a
         // bare target_id legally carries no semantics. Re-check the REAL
-        // element label against the M1 manual-only rules here, where the
-        // live probe just resolved it. M1 is never confirmable → throw the
-        // structured domain error (browser catch rethrows ToolDomainError).
+        // element label against the destructive browser-target rules here,
+        // where the live probe just resolved it. Matching targets require a
+        // Power grant, so throw the structured domain error (browser catch
+        // rethrows ToolDomainError).
         // For a fill/choose into an editable target the probe's `value` is the
         // field's CURRENT CONTENT — a draft holding「提交订单」must not
         // false-trip, so judge by name/role only; for click/expand/hover the
@@ -5151,12 +5376,12 @@ export async function executeBrowserTool(
           ? [targetRecord?.name, targetRecord?.role]
           : [targetRecord?.name, targetRecord?.value, targetRecord?.role]
         ).filter(Boolean).join(' ')
-        const manualOnlyHit = matchManualOnlyBrowserTarget(liveLabel)
-        if (manualOnlyHit) {
+        const destructiveHit = matchBrowserDestructiveTarget(liveLabel)
+        if (destructiveHit) {
           throw new ToolDomainError(
-            ACTION_CONFIRMATION_ERROR_KINDS.deniedManualOnly.code,
-            `目标「${liveLabel.slice(0, 80)}」命中 M1 规则（${manualOnlyHit.reason}）。请引导用户亲自完成这一步，不要代替执行或绕过。`,
-            { targetId, ruleId: manualOnlyHit.ruleId },
+            'grant_required',
+            `目标「${liveLabel.slice(0, 80)}」命中浏览器破坏性动作清单（${destructiveHit.reason}），需要用户授予该目标的 Power grant 后才能执行。`,
+            { targetId, ruleId: destructiveHit.ruleId },
           )
         }
         // Password-field fill without a password cue in the args means the
@@ -5210,7 +5435,8 @@ export async function executeBrowserTool(
         tabId = (await resolveHighControlAgentTab(controller, args, { signal: abortSignal })).tabId
         // EP1-I3 live-target net — a CSS selector carries no semantics the
         // dispatch gate could classify; the shared guarded entry judges the
-        // real clickable owner and refuses M1 targets without clicking.
+        // real clickable owner and refuses destructive-grant targets without
+        // clicking.
         return await runGuardedSelectorClick(controller, tabId, selector)
       }
 
@@ -5250,8 +5476,8 @@ export async function executeBrowserTool(
         tabId = (await resolveHighControlAgentTab(controller, args, { signal: abortSignal })).tabId
         // EP1-I3 live-target net — an opaque selector can resolve to a
         // password or captcha field with no cue in the args. The shared
-        // guarded entry checks the REAL field semantics (no value): M1 hits
-        // refuse outright; unconfirmed password fills reroute — a re-issued
+        // guarded entry checks the REAL field semantics (no value): destructive
+        // hits require a grant; unconfirmed password fills reroute — a re-issued
         // call naming the password field carries the cue and passes.
         return await runGuardedSelectorType(controller, tabId, selector, text, {
           clearFirst,
@@ -6085,6 +6311,24 @@ export async function executeBrowserTool(
         }, null, 2)
       }
 
+      case 'browser_inspect_resources': {
+        const url = String(args.url || '').trim()
+        let tabId = (args.tab_id as string) || null
+        tabId = (await resolveHighControlAgentTab(controller, args, {
+          navigateToTarget: false,
+          signal: abortSignal,
+        })).tabId
+        const result = await inspectBrowserResources(controller, {
+          tabId,
+          url: url || null,
+          kinds: normalizeResourceKinds(args.kinds),
+          waitMs: typeof args.wait_ms === 'number' ? args.wait_ms : undefined,
+          maxCandidates: typeof args.max_candidates === 'number' ? args.max_candidates : undefined,
+          signal: abortSignal,
+        })
+        return stringifyBrowserJsonOrFailure({ ...result })
+      }
+
       case 'browser_resolve_video': {
         let tabId = (args.tab_id as string) || null
         tabId = (await resolveHighControlAgentTab(controller, args, { signal: abortSignal })).tabId
@@ -6104,6 +6348,39 @@ export async function executeBrowserTool(
 
         if (!pageUrl && !videoUrl && sources.length === 0) {
           return 'Error: page_url, video_url or sources is required'
+        }
+
+        if (!videoUrl && sources.length === 0 && effectiveTabId) {
+          const activeUrl = tab?.url || ''
+          const canInspectCurrentTab = !pageUrl || activePageLikelyMatchesTarget(activeUrl, pageUrl)
+          if (canInspectCurrentTab) {
+            const inspected = await inspectBrowserResources(controller, {
+              tabId: effectiveTabId,
+              kinds: ['video', 'stream'],
+              waitMs: 300,
+              maxCandidates: 5,
+              signal: abortSignal,
+            }).catch(() => null)
+            const candidate = inspected?.candidates.find((item) => item.kind === 'video' || item.kind === 'stream')
+            if (candidate) {
+              const video = {
+                originalUrl: pageUrl || candidate.sourcePageUrl || candidate.url,
+                pageUrl: pageUrl || candidate.sourcePageUrl,
+                playableUrl: candidate.url,
+                downloadUrl: candidate.url,
+                title: title || tab?.title || undefined,
+                platform: safeHostname(pageUrl || candidate.sourcePageUrl || candidate.url),
+                parseStatus: 'resolved' as const,
+              }
+              return stringifyBrowserJsonOrFailure({
+                ok: true,
+                candidateId: candidate.id,
+                source: candidate.source,
+                evidence: candidate.evidence,
+                video,
+              })
+            }
+          }
         }
 
         const video = (await resolveFastCardVideo({
@@ -6356,9 +6633,9 @@ export async function executeBrowserTool(
         let tabId = (args.tab_id as string) || null
         tabId = (await resolveHighControlAgentTab(controller, args, { signal: abortSignal })).tabId
         // EP1-I3 live-target net — shared guarded entry probes the target
-        // under the point; clicking a non-editable M1 target is refused
-        // before any mouse event, focusing an editable field is allowed,
-        // and an unresolvable probe proceeds (visual channel stays usable).
+        // under the point; clicking a non-editable destructive-grant target is
+        // refused before any mouse event, focusing an editable field is
+        // allowed, and an unresolvable probe proceeds (visual channel stays usable).
         const point = await runGuardedCoordinateClick(controller, tabId, x, y, abortSignal)
         return JSON.stringify({
           ok: true,
@@ -6379,9 +6656,10 @@ export async function executeBrowserTool(
         const pressEnter = args.press_enter !== false
         const clearBeforeTyping = args.clear_before_typing !== false
         const useShiftEnter = args.use_shift_enter_for_newline === true
-        // EP1-I3 live-target net — shared guarded entry: non-editable M1
-        // target → the focusing click is itself refused; editable field →
-        // judged by field semantics (NOT its current value) + password cue.
+        // EP1-I3 live-target net — shared guarded entry: non-editable
+        // destructive-grant target → the focusing click is itself refused;
+        // editable field → judged by field semantics (NOT its current value)
+        // + password cue.
         const point = await runGuardedCoordinateType(controller, tabId, x, y, text, {
           clearBefore: clearBeforeTyping,
           pressEnter,
@@ -6673,6 +6951,413 @@ export async function executeBrowserTool(
         const result = await controller.executeJS(tabId, code)
         const resultStr = typeof result === 'string' ? result : JSON.stringify(result, null, 2)
         return truncate(resultStr ?? 'undefined')
+      }
+
+      case 'browser_power_eval': {
+        const code = String(args.code || '')
+        if (!code.trim()) return 'Error: code is required'
+        const purpose = String(args.purpose || '').trim()
+        if (!purpose) return 'Error: purpose is required'
+        const tabId = (args.tab_id as string) || null
+        const maxResultBytes = clampNumber(args.max_result_bytes, 20_000, 1024, 200_000)
+        const timeoutMs = clampNumber(args.timeout_ms, 5000, 250, 30_000)
+        const decision = resolvePowerDecisionForTool({
+          toolName,
+          args,
+          controller,
+          currentUserText,
+          sessionId,
+          tabId,
+          fallbackEffects: ['observe'],
+        })
+        if (decision.action !== 'allow') {
+          return browserPowerDeniedOutput(decision, { tool: toolName, purpose })
+        }
+        const url = activeBrowserToolUrl(controller, tabId)
+        const run = controller.executeJS(tabId, code)
+        const result = await Promise.race([
+          run,
+          sleepWithAbort(timeoutMs, abortSignal).then(() => {
+            throw new Error(`browser_power_eval timed out after ${timeoutMs}ms`)
+          }),
+        ])
+        const limited = truncateJsonValue(result, maxResultBytes)
+        const audit = recordBrowserPowerAuditEvent({
+          toolName,
+          grantId: decision.grantId,
+          tabId,
+          url,
+          effects: decision.effects,
+          purpose,
+          codeSummary: summarizeCodeForAudit(code),
+          paramsSummary: { timeoutMs, maxResultBytes },
+          resultSummary: { bytes: limited.bytes, truncated: limited.truncated },
+        })
+        return JSON.stringify({
+          ok: true,
+          tool: toolName,
+          powerMode: true,
+          grantId: decision.grantId,
+          auditId: audit.id,
+          effects: decision.effects,
+          residualRisk: 'free_eval_scope_is_audit_only_for_side_effects',
+          result: limited.value,
+          resultTruncated: limited.truncated,
+          resultBytes: limited.bytes,
+        }, null, 2)
+      }
+
+      case 'browser_power_cdp': {
+        const method = String(args.method || '').trim()
+        if (!method) return 'Error: method is required'
+        const purpose = String(args.purpose || '').trim()
+        if (!purpose) return 'Error: purpose is required'
+        const tabId = (args.tab_id as string) || null
+        const params = args.params && typeof args.params === 'object' ? args.params as Record<string, unknown> : {}
+        const decision = resolvePowerDecisionForTool({
+          toolName,
+          args,
+          controller,
+          currentUserText,
+          sessionId,
+          tabId,
+        })
+        if (decision.action !== 'allow') {
+          return browserPowerDeniedOutput(decision, { tool: toolName, purpose, method })
+        }
+        const sendCdpCommand = (controller as {
+          sendCdpCommand?: (tabId: string | null, method: string, params?: Record<string, unknown>) => Promise<unknown>
+        }).sendCdpCommand
+        if (typeof sendCdpCommand !== 'function') {
+          return browserStructuredOutput({
+            ok: false,
+            errorKind: 'browser_power_cdp_unavailable',
+            message: '当前 BrowserController 未暴露 CDP command 通道。',
+            method,
+          })
+        }
+        const result = await sendCdpCommand.call(controller, tabId, method, params)
+        const limited = truncateJsonValue(result, 80_000)
+        const audit = recordBrowserPowerAuditEvent({
+          toolName,
+          grantId: decision.grantId,
+          tabId,
+          url: activeBrowserToolUrl(controller, tabId),
+          effects: decision.effects,
+          purpose,
+          paramsSummary: { method, paramKeys: Object.keys(params).slice(0, 20) },
+          resultSummary: { bytes: limited.bytes, truncated: limited.truncated },
+        })
+        return JSON.stringify({
+          ok: true,
+          tool: toolName,
+          grantId: decision.grantId,
+          auditId: audit.id,
+          method,
+          effects: decision.effects,
+          result: limited.value,
+          resultTruncated: limited.truncated,
+        }, null, 2)
+      }
+
+      case 'browser_power_network_trace': {
+        let tabId = (args.tab_id as string) || null
+        const url = String(args.url || '').trim()
+        const durationMs = clampNumber(args.duration_ms, 3000, 250, 30_000)
+        const maxEvents = clampNumber(args.max_events, 120, 1, 500)
+        const includeBodies = args.include_response_bodies === true
+        const bodyMaxBytes = clampNumber(args.body_max_bytes, 4096, 256, 65_536)
+        const purpose = String(args.purpose || 'resource/network trace').trim()
+        const decision = resolvePowerDecisionForTool({
+          toolName,
+          args,
+          controller,
+          currentUserText,
+          sessionId,
+          tabId,
+          url: url || undefined,
+          fallbackEffects: url ? ['observe', 'navigate'] : ['observe'],
+        })
+        if (decision.action !== 'allow') {
+          return browserPowerDeniedOutput(decision, { tool: toolName, purpose })
+        }
+        const active = controller.getActiveTab?.()
+        tabId = tabId || active?.id || null
+        if (!tabId) return 'Error: no active tab for network trace'
+        if (typeof controller.startNetworkObserver !== 'function') {
+          return browserStructuredOutput({
+            ok: false,
+            errorKind: 'browser_power_trace_unavailable',
+            message: '当前 BrowserController 未暴露 network observer。',
+          })
+        }
+        const observer = await controller.startNetworkObserver(tabId, { maxEvents })
+        try {
+          if (url) {
+            const nav = await controller.navigate(tabId, url)
+            if (!nav.success) return `Error: ${nav.error || 'failed to navigate target url'}`
+          }
+          await sleepWithAbort(durationMs, abortSignal)
+          const events = observer.events().map((event) => ({
+            ...event,
+            responseHeaders: redactHeaders(event.responseHeaders),
+          }))
+          const bodies: Array<Record<string, unknown>> = []
+          if (includeBodies) {
+            for (const event of events.slice(0, 40)) {
+              if (!event.requestId || event.failed) continue
+              try {
+                const body = await observer.getResponseBody(event.requestId)
+                const limited = truncateJsonValue(body.body, bodyMaxBytes)
+                bodies.push({
+                  requestId: event.requestId,
+                  url: event.url,
+                  mimeType: event.mimeType,
+                  base64Encoded: body.base64Encoded,
+                  body: limited.value,
+                  truncated: limited.truncated,
+                  bytes: limited.bytes,
+                })
+              } catch {
+                // Some response bodies are unavailable after redirects/cors/cache; trace still succeeds.
+              }
+            }
+          }
+          const audit = recordBrowserPowerAuditEvent({
+            toolName,
+            grantId: decision.grantId,
+            tabId,
+            url: url || activeBrowserToolUrl(controller, tabId),
+            effects: decision.effects,
+            purpose,
+            paramsSummary: { durationMs, maxEvents, includeBodies },
+            resultSummary: { eventCount: events.length, bodyCount: bodies.length },
+          })
+          return JSON.stringify({
+            ok: true,
+            tool: toolName,
+            grantId: decision.grantId,
+            auditId: audit.id,
+            durationMs,
+            eventCount: events.length,
+            events,
+            bodies,
+          }, null, 2)
+        } finally {
+          await observer.stop().catch(() => undefined)
+        }
+      }
+
+      case 'browser_power_resource_forensics': {
+        const url = String(args.url || '').trim()
+        const tabId = (args.tab_id as string) || null
+        const purpose = String(args.purpose || 'resource forensics').trim()
+        const decision = resolvePowerDecisionForTool({
+          toolName,
+          args,
+          controller,
+          currentUserText,
+          sessionId,
+          tabId,
+          url: url || undefined,
+          fallbackEffects: url ? ['observe', 'navigate', 'download'] : ['observe', 'download'],
+        })
+        if (decision.action !== 'allow') {
+          return browserPowerDeniedOutput(decision, { tool: toolName, purpose })
+        }
+        const result = await inspectBrowserResources(controller, {
+          tabId,
+          url: url || null,
+          kinds: normalizeResourceKinds(args.kinds),
+          waitMs: typeof args.wait_ms === 'number' ? args.wait_ms : (typeof args.trace_ms === 'number' ? args.trace_ms : undefined),
+          maxCandidates: typeof args.max_candidates === 'number' ? args.max_candidates : 40,
+          signal: abortSignal,
+        })
+        const audit = recordBrowserPowerAuditEvent({
+          toolName,
+          grantId: decision.grantId,
+          tabId,
+          url: url || activeBrowserToolUrl(controller, tabId),
+          effects: decision.effects,
+          purpose,
+          paramsSummary: { kinds: args.kinds || null },
+	          resultSummary: { candidateCount: result.candidates.length },
+        })
+        return stringifyBrowserJsonOrFailure({
+          ...result,
+          tool: toolName,
+          powerMode: true,
+          grantId: decision.grantId,
+          auditId: audit.id,
+        })
+      }
+
+      case 'browser_media_download_advanced': {
+        const directory = String(args.directory || '').trim()
+        if (!directory) return 'Error: directory is required'
+        const tabId = (args.tab_id as string) || null
+        const pageUrl = String(args.page_url || '').trim()
+        const decision = resolvePowerDecisionForTool({
+          toolName,
+          args,
+          controller,
+          currentUserText,
+          sessionId,
+          tabId,
+          url: pageUrl || undefined,
+          destination: directory,
+          fallbackEffects: ['download'],
+        })
+        if (decision.action !== 'allow') {
+          return browserPowerDeniedOutput(decision, { tool: toolName, directory })
+        }
+        let candidates = Array.isArray(args.candidates) ? args.candidates as Array<Record<string, unknown>> : []
+        if (candidates.length === 0) {
+          const inspected = await inspectBrowserResources(controller, {
+            tabId,
+            url: pageUrl || null,
+            kinds: ['video', 'audio', 'stream'],
+            waitMs: 1200,
+            maxCandidates: 12,
+            signal: abortSignal,
+          })
+	          candidates = Array.isArray(inspected.candidates)
+	            ? inspected.candidates.map((candidate) => candidate as unknown as Record<string, unknown>)
+	            : []
+        }
+        const urls = candidates
+          .map((item) => String(item.url || item.downloadUrl || '').trim())
+          .filter((item, index, arr) => /^https?:\/\//i.test(item) && arr.indexOf(item) === index)
+          .slice(0, 20)
+        if (urls.length === 0) {
+          return browserStructuredOutput({
+            ok: false,
+            errorKind: 'media_candidates_missing',
+            message: '未找到可下载媒体候选；请先 browser_power_resource_forensics 或播放/滚动/等待后重试。',
+            candidateCount: candidates.length,
+          })
+        }
+        const output = await downloadUrlsToDirectory(controller, {
+          urls,
+          directory,
+          filenamePrefix: String(args.filename_prefix || 'media'),
+          overwrite: args.overwrite === true,
+          tabId,
+          referer: pageUrl || null,
+        })
+        const text = typeof output === 'string' ? output : output.text
+        const parsed = (() => {
+          try { return JSON.parse(text) as Record<string, unknown> } catch { return { ok: false, raw: text } }
+        })()
+        const success = Number(parsed.success || 0)
+        const failed = Number(parsed.failed || 0)
+        const audit = recordBrowserPowerAuditEvent({
+          toolName,
+          grantId: decision.grantId,
+          tabId,
+          url: pageUrl || activeBrowserToolUrl(controller, tabId),
+          effects: decision.effects,
+          purpose: 'advanced media download',
+          paramsSummary: { candidateCount: candidates.length, urlCount: urls.length, directory },
+          resultSummary: { success, failed },
+        })
+        const payload = {
+          ok: success > 0 && failed === 0,
+          tool: toolName,
+          grantId: decision.grantId,
+          auditId: audit.id,
+          candidateCount: candidates.length,
+          attemptedUrlCount: urls.length,
+          verification: {
+            ok: success > 0 && failed === 0,
+            method: 'download_result',
+            note: args.verify_media === false
+              ? 'ffprobe verification disabled by caller'
+              : 'download completed; ffprobe integration can promote this to codec/duration proof when runtime is available',
+          },
+          ...parsed,
+        }
+        if (typeof output === 'string') return JSON.stringify(payload, null, 2)
+        return createToolExecutionOutput(JSON.stringify(payload, null, 2), {
+          shape: 'json',
+          data: payload,
+          projectionPatch: output.projectionPatch,
+          contextModifier: output.contextModifier,
+        })
+      }
+
+      case 'browser_power_script_run': {
+        const stepsRaw = args.steps
+        if (!Array.isArray(stepsRaw)) return 'Error: steps must be an array'
+        const purpose = String(args.purpose || '').trim()
+        if (!purpose) return 'Error: purpose is required'
+        const tabId = (args.tab_id as string) || null
+        const decision = resolvePowerDecisionForTool({
+          toolName,
+          args,
+          controller,
+          currentUserText,
+          sessionId,
+          tabId,
+          fallbackEffects: ['page_mutation'],
+        })
+        if (decision.action !== 'allow') {
+          return browserPowerDeniedOutput(decision, { tool: toolName, purpose })
+        }
+        const continueOnError = args.continue_on_error === true
+        const lines: string[] = []
+        for (let index = 0; index < stepsRaw.length; index += 1) {
+          const step = stepsRaw[index]
+          if (!step || typeof step !== 'object') {
+            lines.push(`Step ${index + 1}: Error: invalid step`)
+            if (!continueOnError) break
+            continue
+          }
+          const result = await runWorkflowStep(controller, step as Record<string, unknown>, tabId, abortSignal)
+          lines.push(`Step ${index + 1}: ${result}`)
+          if (!continueOnError && result.startsWith('Error:')) break
+        }
+        const audit = recordBrowserPowerAuditEvent({
+          toolName,
+          grantId: decision.grantId,
+          tabId,
+          url: activeBrowserToolUrl(controller, tabId),
+          effects: decision.effects,
+          purpose,
+          paramsSummary: { stepCount: stepsRaw.length },
+          resultSummary: { lineCount: lines.length },
+        })
+        return truncate(JSON.stringify({
+          ok: true,
+          tool: toolName,
+          grantId: decision.grantId,
+          auditId: audit.id,
+          output: lines,
+        }, null, 2))
+      }
+
+      case 'browser_stage_site_strategy': {
+        const domain = String(args.domain || '').trim().toLowerCase()
+        const taskKind = String(args.task_kind || '').trim()
+        const summary = String(args.summary || '').trim()
+        if (!domain || !taskKind || !summary) return 'Error: domain, task_kind and summary are required'
+        const dir = join(homedir(), 'Documents', 'Ready站点策略草稿')
+        await mkdir(dir, { recursive: true })
+        const filePath = join(dir, `${sanitizeFilename(domain)}-${sanitizeFilename(taskKind)}-${Date.now()}.json`)
+        const payload = {
+          ok: true,
+          staged: true,
+          domain,
+          taskKind,
+          summary,
+          evidence: Array.isArray(args.evidence) ? args.evidence.map((item) => String(item || '')).filter(Boolean) : [],
+          strategy: args.strategy && typeof args.strategy === 'object' ? args.strategy : {},
+          createdAt: new Date().toISOString(),
+          note: 'staged only; not active until user confirms in site knowledge settings',
+        }
+        await writeFile(filePath, JSON.stringify(payload, null, 2), 'utf8')
+        try { broadcastDirectoryChanged([dir]) } catch { /* never break staged strategy output */ }
+        return JSON.stringify({ ...payload, path: filePath }, null, 2)
       }
 
       case 'browser_visible_collect': {

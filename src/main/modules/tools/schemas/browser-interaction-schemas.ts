@@ -14,8 +14,10 @@
  */
 
 import { z } from 'zod'
+import { BROWSER_POWER_EFFECTS } from '../../../../shared/browser-power'
 
 const TabIdOptional = z.string().optional().describe('标签页 ID，留空则使用当前活跃标签页')
+const BrowserPowerEffectSchema = z.enum(BROWSER_POWER_EFFECTS)
 
 export const BrowserNavigateSchema = z.object({
   url: z.string().describe('要导航到的完整 URL (http/https)'),
@@ -248,6 +250,8 @@ export const BrowserWaitForConditionSchema = z.object({
     .optional()
     .describe('network_idle/content_stable 需要连续稳定次数'),
   tab_id: TabIdOptional,
+  grant_id: z.string().optional().describe('Power Mode 迁移字段：已确认 grant id'),
+  expected_effects: z.array(BrowserPowerEffectSchema).optional().describe('Power Mode 迁移字段：自定义 JS 的预期效果'),
 })
 
 export const BrowserGoBackSchema = z.object({
