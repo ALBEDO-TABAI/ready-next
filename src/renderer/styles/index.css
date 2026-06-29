@@ -3081,7 +3081,6 @@ html[data-skin='liquid-glass'] .ready-glass-button {
 html[data-skin='liquid-glass'] .browser-header-surface,
 html[data-skin='liquid-glass'] .workbench-tabs-surface,
 html[data-skin='liquid-glass'] .document-path-bar,
-html[data-skin='liquid-glass'] .document-preview-surface,
 html[data-skin='liquid-glass'] .rss-preview-surface {
   background: var(--workbench-module-surface-bg) !important;
   backdrop-filter: blur(24px) saturate(0%) !important;
@@ -3089,12 +3088,16 @@ html[data-skin='liquid-glass'] .rss-preview-surface {
 }
 
 html[data-skin='liquid-glass'] .document-content-frame {
-  background: var(--bg-editor) !important;
-  backdrop-filter: none !important;
-  -webkit-backdrop-filter: none !important;
+  background: var(--workbench-module-surface-bg) !important;
+  backdrop-filter: blur(24px) saturate(0%) !important;
+  -webkit-backdrop-filter: blur(24px) saturate(0%) !important;
+  border-radius: var(--workbench-canvas-radius) !important;
+  overflow: hidden;
+  background-clip: padding-box;
 }
 
 html[data-skin='liquid-glass'] .document-editor-surface,
+html[data-skin='liquid-glass'] .document-preview-surface,
 html[data-skin='liquid-glass'] .rss-workbench-surface,
 html[data-skin='liquid-glass'] .rss-feed-toolbar,
 html[data-skin='liquid-glass'] .rss-feed-list,
@@ -4811,6 +4814,24 @@ html[data-skin='liquid-glass'] .workbench-mode-root {
 html[data-skin='liquid-glass'] .workbench-canvas-shell {
   border-color: transparent !important;
   box-shadow: none !important;
+}
+
+html[data-skin='liquid-glass'] .document-workbench-canvas-shell {
+  background: var(--workbench-module-surface-bg) !important;
+  border-radius: var(--workbench-canvas-radius) !important;
+  overflow: hidden;
+  background-clip: padding-box;
+}
+
+html[data-skin='liquid-glass'] .document-workbench-body {
+  background: var(--workbench-module-surface-bg) !important;
+  backdrop-filter: blur(24px) saturate(0%) !important;
+  -webkit-backdrop-filter: blur(24px) saturate(0%) !important;
+}
+
+html[data-skin='liquid-glass'] .document-workbench-body .document-vertical-tab-rail {
+  background: transparent !important;
+  border-right-color: transparent !important;
 }
 
 html[data-skin='liquid-glass'] .rss-mode-shell .workbench-canvas-shell {

@@ -863,7 +863,7 @@ export default function DocumentMode({
           padding: `${WORKBENCH_CANVAS_OUTER_PADDING_TOP}px ${WORKBENCH_CANVAS_OUTER_PADDING_X}px ${WORKBENCH_CANVAS_OUTER_PADDING_BOTTOM}px`,
         }}
       >
-        <div className="workbench-canvas-shell flex min-h-0 h-full flex-col">
+        <div className="workbench-canvas-shell document-workbench-canvas-shell flex min-h-0 h-full flex-col">
           {/* Top bar: file path (moved up from the old second row) + panel/mode actions */}
           <div
             className="document-path-bar workbench-tabs-surface glass-surface-panel flex-shrink-0 flex items-center no-drag"
@@ -896,7 +896,7 @@ export default function DocumentMode({
             </div>
           </div>
 
-          <div className="flex min-h-0 flex-1">
+          <div className="document-workbench-body flex min-h-0 flex-1">
             <DocumentVerticalTabRail
               tabs={tabs.map((tab) => {
                 const isPrimary = tab.id === activeTabId

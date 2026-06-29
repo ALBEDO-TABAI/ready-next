@@ -16,6 +16,7 @@ import type {
   VerticalRailOverlaySnapshot,
   VerticalRailOverlayTab,
 } from '../../../shared/browser-vertical-rail-overlay'
+import { resolveVerticalRailFlyoutHeight } from '../../../shared/vertical-rail-flyout-layout'
 
 export const BROWSER_VERTICAL_RAIL_WIDTH = 52
 const RAIL_WIDTH = BROWSER_VERTICAL_RAIL_WIDTH
@@ -58,6 +59,7 @@ export default function VerticalTabRail({
   onToggleBookmarkForTab,
 }: VerticalTabRailProps) {
   const rootRef = useRef<HTMLDivElement>(null)
+  const railListRef = useRef<HTMLDivElement>(null)
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null)
   const [draggingTabId, setDraggingTabId] = useState<string | null>(null)
   const dragIndexRef = useRef<number | null>(null)
@@ -98,18 +100,15 @@ export default function VerticalTabRail({
       required: tab.required,
       bookmarked: marks.includes(tab.url),
     }))
-    // Fit the overlay to its rows (tabs + new-tab) so it reads as labels next to the icons,
-    // not a full-height sidebar. Mirrors the overlay's PAD_Y(6)/ROW_H(38)/ROW_GAP(4).
-    const rows = overlayTabs.length + 1
-    const desiredHeight = 12 + rows * 38 + (rows - 1) * 4
     return {
       tabs: overlayTabs,
       bounds: {
         left: Math.round(rect.left),
         top: Math.round(rect.top),
         width: RAIL_WIDTH,
-        height: Math.min(Math.round(rect.height), desiredHeight),
+        height: resolveVerticalRailFlyoutHeight(overlayTabs.length, rect.height),
       },
+      scrollTop: Math.round(railListRef.current?.scrollTop ?? 0),
     }
   }, [])
 
@@ -297,7 +296,12 @@ export default function VerticalTabRail({
       onMouseEnter={handleRailEnter}
       onMouseLeave={handleRailLeave}
     >
-      <div className="flex min-h-0 flex-1 flex-col items-center overflow-y-auto overflow-x-hidden py-[6px]" style={{ gap: 4 }}>
+      <div
+        ref={railListRef}
+        className="flex min-h-0 flex-1 flex-col items-center overflow-y-auto overflow-x-hidden py-[6px]"
+        onScroll={() => pushSnapshot()}
+        style={{ gap: 4 }}
+      >
         {orderedTabs.map(({ tab, sourceIndex }, displayIndex) => {
           const isPrimaryActive = tab.id === activeTabId
           const isSplitActive = tab.id === splitTabId && !isPrimaryActive

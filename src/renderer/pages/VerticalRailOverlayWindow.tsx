@@ -4,11 +4,18 @@ import type {
   VerticalRailOverlayCommand,
   VerticalRailOverlaySnapshot,
 } from '../../shared/browser-vertical-rail-overlay'
-
-// Must match VerticalTabRail's icon column rhythm so each label lines up with its rail icon.
-const PAD_Y = 6
-const ROW_H = 38
-const ROW_GAP = 4
+import {
+  resolveVerticalRailFlyoutScrollOffset,
+  VERTICAL_RAIL_FLYOUT_PAD_Y,
+  VERTICAL_RAIL_FLYOUT_RADIUS,
+  VERTICAL_RAIL_FLYOUT_ROW_GAP,
+  VERTICAL_RAIL_FLYOUT_ROW_HEIGHT,
+  VERTICAL_RAIL_FLYOUT_ROW_RADIUS,
+  VERTICAL_RAIL_FLYOUT_SURFACE_BACKDROP,
+  VERTICAL_RAIL_FLYOUT_SURFACE_BACKGROUND,
+  VERTICAL_RAIL_FLYOUT_SURFACE_BORDER,
+  VERTICAL_RAIL_FLYOUT_SURFACE_SHADOW,
+} from '../../shared/vertical-rail-flyout-layout'
 
 function send(command: VerticalRailOverlayCommand): void {
   void window.electronAPI?.browser?.sendVerticalRailOverlayCommand?.(command)
@@ -35,6 +42,9 @@ export default function VerticalRailOverlayWindow() {
   }, [])
 
   const tabs = snapshot?.tabs ?? []
+  const flyoutScrollOffset = snapshot
+    ? resolveVerticalRailFlyoutScrollOffset(snapshot.scrollTop, tabs.length, snapshot.bounds.height)
+    : 0
 
   return (
     <div
@@ -42,18 +52,25 @@ export default function VerticalRailOverlayWindow() {
       onMouseEnter={() => send({ type: 'hover-enter' })}
       onMouseLeave={() => send({ type: 'hover-leave' })}
       style={{
-        paddingTop: PAD_Y,
-        paddingBottom: PAD_Y,
-        // Near-opaque so page content behind doesn't bleed into the labels. The base chrome
-        // color is ~0.94 alpha; the inset layer stacks it to effectively opaque, theme-safe.
-        background: 'var(--workbench-liquid-chrome-bg, var(--bg-content))',
-        boxShadow: 'inset 0 0 0 2000px color-mix(in srgb, var(--workbench-liquid-chrome-bg, var(--bg-content)) 80%, transparent), 14px 0 36px -16px color-mix(in srgb, var(--text-title) 38%, transparent)',
-        borderTopRightRadius: 14,
-        borderBottomRightRadius: 14,
-        borderRight: '1px solid color-mix(in srgb, var(--text-title) 10%, transparent)',
+        paddingTop: VERTICAL_RAIL_FLYOUT_PAD_Y,
+        paddingBottom: VERTICAL_RAIL_FLYOUT_PAD_Y,
+        background: VERTICAL_RAIL_FLYOUT_SURFACE_BACKGROUND,
+        boxShadow: VERTICAL_RAIL_FLYOUT_SURFACE_SHADOW,
+        backdropFilter: VERTICAL_RAIL_FLYOUT_SURFACE_BACKDROP,
+        WebkitBackdropFilter: VERTICAL_RAIL_FLYOUT_SURFACE_BACKDROP,
+        borderRadius: VERTICAL_RAIL_FLYOUT_RADIUS,
+        border: VERTICAL_RAIL_FLYOUT_SURFACE_BORDER,
+        boxSizing: 'border-box',
+        backgroundClip: 'padding-box',
       }}
     >
-      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto" style={{ gap: ROW_GAP }}>
+      <div
+        className="flex flex-col"
+        style={{
+          gap: VERTICAL_RAIL_FLYOUT_ROW_GAP,
+          transform: flyoutScrollOffset > 0 ? `translateY(-${flyoutScrollOffset}px)` : undefined,
+        }}
+      >
         {tabs.map((tab) => {
           const isActive = tab.active || tab.split
           return (
@@ -64,7 +81,7 @@ export default function VerticalRailOverlayWindow() {
               onAuxClick={(event) => { if (event.button === 1) { event.preventDefault(); send({ type: 'close', tabId: tab.id }) } }}
               onContextMenu={(event) => { event.preventDefault(); send({ type: 'reference', tabId: tab.id }) }}
               style={{
-                height: ROW_H,
+                height: VERTICAL_RAIL_FLYOUT_ROW_HEIGHT,
                 paddingLeft: 10,
                 background: isActive
                   ? 'var(--files-panel-state-active-bg)'
@@ -72,8 +89,7 @@ export default function VerticalRailOverlayWindow() {
                     ? 'color-mix(in srgb, var(--surface-card-bg) 40%, transparent)'
                     : 'transparent',
                 boxShadow: isActive ? 'var(--files-panel-state-active-shadow)' : 'none',
-                borderTopRightRadius: 10,
-                borderBottomRightRadius: 10,
+                borderRadius: VERTICAL_RAIL_FLYOUT_ROW_RADIUS,
               }}
             >
               <span className="flex min-w-0 flex-1 flex-col justify-center">
@@ -100,7 +116,7 @@ export default function VerticalRailOverlayWindow() {
           role="button"
           onClick={() => send({ type: 'new-tab' })}
           className="flex flex-shrink-0 cursor-pointer items-center gap-[8px] text-[12px] transition-colors hover:bg-[var(--bg-hover)]"
-          style={{ height: ROW_H, paddingLeft: 10, color: 'var(--text-muted)', borderTopRightRadius: 10, borderBottomRightRadius: 10 }}
+          style={{ height: VERTICAL_RAIL_FLYOUT_ROW_HEIGHT, paddingLeft: 10, color: 'var(--text-muted)', borderRadius: VERTICAL_RAIL_FLYOUT_ROW_RADIUS }}
           title="新标签页"
         >
           <Plus style={{ width: 16, height: 16 }} strokeWidth={2} />

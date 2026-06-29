@@ -1,6 +1,7 @@
 import { BrowserWindow, screen } from 'electron'
 import { is } from '@electron-toolkit/utils'
 import type { VerticalRailOverlaySnapshot } from '../../../shared/browser-vertical-rail-overlay'
+import { VERTICAL_RAIL_FLYOUT_MIN_HEIGHT } from '../../../shared/vertical-rail-flyout-layout'
 
 interface VerticalRailOverlayWindowOptions {
   mainWindow: BrowserWindow
@@ -145,7 +146,7 @@ export class VerticalRailOverlayWindow {
     const mainBounds = this.options.mainWindow.getContentBounds()
     const display = screen.getDisplayMatching(mainBounds)
     const width = OVERLAY_WIDTH
-    const height = Math.max(60, Math.round(snapshot.bounds.height))
+    const height = Math.max(VERTICAL_RAIL_FLYOUT_MIN_HEIGHT, Math.round(snapshot.bounds.height))
     // Sit flush to the RIGHT of the icon rail (bounds.left + rail width). The rail icons stay
     // visible in the main window; the overlay extends each icon's label outward.
     const x = mainBounds.x + Math.round(snapshot.bounds.left + snapshot.bounds.width)

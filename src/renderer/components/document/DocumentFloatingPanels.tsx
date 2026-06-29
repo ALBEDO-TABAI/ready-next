@@ -437,11 +437,11 @@ export default function DocumentFloatingPanels({
             className="ready-liquid-popover__lens ready-app-liquid-panel__lens"
             radius={12}
             withProjection={false}
-            blur={8}
+            blur={3}
             frost={0}
-            saturation={1.16}
-            brightness={1.06}
-            contrast={0.82}
+            saturation={1.06}
+            brightness={1.12}
+            contrast={0.68}
           />
           <header className="document-floating-panel__header">
             <div>
@@ -491,11 +491,11 @@ export default function DocumentFloatingPanels({
             className="ready-liquid-popover__lens ready-app-liquid-panel__lens"
             radius={12}
             withProjection={false}
-            blur={8}
+            blur={3}
             frost={0}
-            saturation={1.16}
-            brightness={1.06}
-            contrast={0.82}
+            saturation={1.06}
+            brightness={1.12}
+            contrast={0.68}
           />
           <header className="document-floating-panel__header">
             <div>

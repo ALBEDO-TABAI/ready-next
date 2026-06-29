@@ -29,6 +29,7 @@ export interface VerticalRailOverlayBounds {
 export interface VerticalRailOverlaySnapshot {
   tabs: VerticalRailOverlayTab[]
   bounds: VerticalRailOverlayBounds
+  scrollTop: number
 }
 
 export type VerticalRailOverlayCommand =

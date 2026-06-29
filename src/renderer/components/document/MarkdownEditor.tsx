@@ -823,7 +823,7 @@ export default function MarkdownEditor({
       ) : null}
 
       {/* ── Content area ──────────────────────────────────── */}
-      <div className="flex-1 overflow-hidden flex" style={{ background: 'var(--workbench-module-surface-bg)' }}>
+      <div className="flex-1 overflow-hidden flex" style={{ background: 'transparent' }}>
         <>
           {/* ── Edit pane: TiptapEditor ── */}
           {viewMode === 'edit' && (
@@ -879,7 +879,7 @@ export default function MarkdownEditor({
             <div
               ref={previewSurfaceRef}
               className="panel-hover-scrollbar document-preview-surface flex-1 overflow-auto"
-              style={{ background: 'var(--workbench-module-surface-bg)' }}
+              style={{ background: 'transparent' }}
               onContextMenu={handleContextMenu}
               onPointerDownCapture={handleSurfacePointerDown}
               onScroll={handlePreviewSurfaceScroll}

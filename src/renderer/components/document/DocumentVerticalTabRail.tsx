@@ -2,6 +2,19 @@ import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type
 import { createPortal } from 'react-dom'
 import { FileText, Plus, X } from 'lucide-react'
 import { getActiveTabPairOrder } from '../../modules/workbench/active-tab-pair-order'
+import {
+  resolveVerticalRailFlyoutHeight,
+  resolveVerticalRailFlyoutScrollOffset,
+  VERTICAL_RAIL_FLYOUT_PAD_Y,
+  VERTICAL_RAIL_FLYOUT_RADIUS,
+  VERTICAL_RAIL_FLYOUT_ROW_GAP,
+  VERTICAL_RAIL_FLYOUT_ROW_HEIGHT,
+  VERTICAL_RAIL_FLYOUT_ROW_RADIUS,
+  VERTICAL_RAIL_FLYOUT_SURFACE_BACKDROP,
+  VERTICAL_RAIL_FLYOUT_SURFACE_BACKGROUND,
+  VERTICAL_RAIL_FLYOUT_SURFACE_BORDER,
+  VERTICAL_RAIL_FLYOUT_SURFACE_SHADOW,
+} from '../../../shared/vertical-rail-flyout-layout'
 
 export const DOCUMENT_VERTICAL_RAIL_WIDTH = 52
 const RAIL_WIDTH = DOCUMENT_VERTICAL_RAIL_WIDTH
@@ -55,9 +68,11 @@ export default function DocumentVerticalTabRail({
   onTabContextMenu,
 }: DocumentVerticalTabRailProps) {
   const rootRef = useRef<HTMLDivElement>(null)
+  const railListRef = useRef<HTMLDivElement>(null)
   const [expanded, setExpanded] = useState(false)
   const [anchorRect, setAnchorRect] = useState<DOMRect | null>(null)
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null)
+  const [railScrollTop, setRailScrollTop] = useState(0)
   const railHoveredRef = useRef(false)
   const flyoutHoveredRef = useRef(false)
   const openTimerRef = useRef<number | null>(null)
@@ -116,6 +131,10 @@ export default function DocumentVerticalTabRail({
     () => getActiveTabPairOrder(tabs, primaryTabId, secondaryTabId),
     [primaryTabId, secondaryTabId, tabs],
   )
+  const flyoutHeight = anchorRect
+    ? resolveVerticalRailFlyoutHeight(orderedTabs.length, anchorRect.height)
+    : 0
+  const flyoutScrollOffset = resolveVerticalRailFlyoutScrollOffset(railScrollTop, orderedTabs.length, flyoutHeight)
 
   return (
     <div
@@ -123,13 +142,22 @@ export default function DocumentVerticalTabRail({
       className="document-vertical-tab-rail relative flex flex-shrink-0 flex-col"
       style={{
         width: RAIL_WIDTH,
-        background: 'var(--workbench-liquid-chrome-bg, var(--bg-content))',
+        background: 'var(--workbench-module-surface-bg, var(--workbench-liquid-chrome-bg, var(--bg-content)))',
         borderRight: '1px solid color-mix(in srgb, var(--text-title) 8%, transparent)',
       }}
       onMouseEnter={handleRailEnter}
       onMouseLeave={handleRailLeave}
     >
-      <div className="flex min-h-0 flex-1 flex-col items-center overflow-y-auto overflow-x-hidden py-[6px]" style={{ gap: 4 }}>
+      <div
+        ref={railListRef}
+        className="flex min-h-0 flex-1 flex-col items-center overflow-y-auto overflow-x-hidden"
+        onScroll={(event) => setRailScrollTop(event.currentTarget.scrollTop)}
+        style={{
+          gap: VERTICAL_RAIL_FLYOUT_ROW_GAP,
+          paddingTop: VERTICAL_RAIL_FLYOUT_PAD_Y,
+          paddingBottom: VERTICAL_RAIL_FLYOUT_PAD_Y,
+        }}
+      >
         {orderedTabs.map(({ tab, sourceIndex }, displayIndex) => {
           const isActive = Boolean(tab.active)
           const isSplit = Boolean(tab.secondaryActive) && !isActive
@@ -160,8 +188,8 @@ export default function DocumentVerticalTabRail({
                 className="relative flex items-center justify-center rounded-[10px] transition-[background-color,box-shadow]"
                 title={tab.title || tab.label}
                 style={{
-                  width: 38,
-                  height: 38,
+                  width: VERTICAL_RAIL_FLYOUT_ROW_HEIGHT,
+                  height: VERTICAL_RAIL_FLYOUT_ROW_HEIGHT,
                   background: isHighlighted
                     ? 'var(--files-panel-state-active-bg)'
                     : isDragOver
@@ -200,7 +228,7 @@ export default function DocumentVerticalTabRail({
             type="button"
             onClick={() => void onNewTab()}
             className="flex items-center justify-center rounded-[10px] transition-colors hover:bg-[var(--bg-hover)]"
-            style={{ width: 38, height: 38 }}
+            style={{ width: VERTICAL_RAIL_FLYOUT_ROW_HEIGHT, height: VERTICAL_RAIL_FLYOUT_ROW_HEIGHT }}
             title="新建"
           >
             <Plus style={{ width: 16, height: 16 }} className="text-[var(--text-muted)]" strokeWidth={2} />
@@ -216,20 +244,29 @@ export default function DocumentVerticalTabRail({
             zIndex: 60,
             left: anchorRect.right,
             top: anchorRect.top,
-            height: anchorRect.height,
+            height: flyoutHeight,
             width: FLYOUT_WIDTH,
-            paddingTop: 6,
-            paddingBottom: 6,
-            background: 'var(--workbench-liquid-chrome-bg, var(--bg-content))',
-            boxShadow: 'inset 0 0 0 2000px color-mix(in srgb, var(--workbench-liquid-chrome-bg, var(--bg-content)) 80%, transparent), 14px 0 36px -16px color-mix(in srgb, var(--text-title) 38%, transparent)',
-            borderTopRightRadius: 14,
-            borderBottomRightRadius: 14,
-            borderRight: '1px solid color-mix(in srgb, var(--text-title) 10%, transparent)',
+            paddingTop: VERTICAL_RAIL_FLYOUT_PAD_Y,
+            paddingBottom: VERTICAL_RAIL_FLYOUT_PAD_Y,
+            background: VERTICAL_RAIL_FLYOUT_SURFACE_BACKGROUND,
+            boxShadow: VERTICAL_RAIL_FLYOUT_SURFACE_SHADOW,
+            backdropFilter: VERTICAL_RAIL_FLYOUT_SURFACE_BACKDROP,
+            WebkitBackdropFilter: VERTICAL_RAIL_FLYOUT_SURFACE_BACKDROP,
+            borderRadius: VERTICAL_RAIL_FLYOUT_RADIUS,
+            border: VERTICAL_RAIL_FLYOUT_SURFACE_BORDER,
+            boxSizing: 'border-box',
+            backgroundClip: 'padding-box',
           }}
           onMouseEnter={() => { flyoutHoveredRef.current = true; cancelClose() }}
           onMouseLeave={() => { flyoutHoveredRef.current = false; scheduleClose() }}
         >
-          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto" style={{ gap: 4 }}>
+          <div
+            className="flex flex-col"
+            style={{
+              gap: VERTICAL_RAIL_FLYOUT_ROW_GAP,
+              transform: flyoutScrollOffset > 0 ? `translateY(-${flyoutScrollOffset}px)` : undefined,
+            }}
+          >
             {orderedTabs.map(({ tab, sourceIndex }) => {
               const isActive = Boolean(tab.active)
               const isSplit = Boolean(tab.secondaryActive) && !isActive
@@ -246,22 +283,20 @@ export default function DocumentVerticalTabRail({
                   onClick={(event) => { onTabClick(tab.id, event); closeNow() }}
                   onContextMenu={onTabContextMenu ? (event) => onTabContextMenu(event, tab.id) : undefined}
                   style={{
-                    height: 42,
+                    height: VERTICAL_RAIL_FLYOUT_ROW_HEIGHT,
                     gap: 9,
                     paddingLeft: 10,
                     background: isHighlighted
                       ? 'var(--files-panel-state-active-bg)'
                       : 'transparent',
                     boxShadow: isHighlighted ? 'var(--files-panel-state-active-shadow)' : 'none',
-                    borderTopRightRadius: 10,
-                    borderBottomRightRadius: 10,
+                    borderRadius: VERTICAL_RAIL_FLYOUT_ROW_RADIUS,
                   }}
                 >
                   {iconNode(tab, 15)}
                   <span className="flex min-w-0 flex-1 flex-col justify-center">
                     <span className="truncate text-[12px] font-medium" style={{ color: isHighlighted ? 'var(--text-title)' : 'var(--text-body)', lineHeight: 1.3 }}>
                       {tab.label}
-                      {tab.dirty ? <span className="ml-1" style={{ color: 'var(--text-light)' }}>●</span> : null}
                     </span>
                     {tab.pathLabel && (
                       <span className="truncate text-[10px]" style={{ color: 'var(--text-light)', lineHeight: 1.25 }}>{tab.pathLabel}</span>
@@ -283,7 +318,7 @@ export default function DocumentVerticalTabRail({
               role="button"
               onClick={() => { void onNewTab(); closeNow() }}
               className="flex flex-shrink-0 cursor-pointer items-center gap-[9px] text-[12px] transition-colors hover:bg-[var(--bg-hover)]"
-              style={{ height: 42, paddingLeft: 10, color: 'var(--text-muted)', borderTopRightRadius: 10, borderBottomRightRadius: 10 }}
+              style={{ height: VERTICAL_RAIL_FLYOUT_ROW_HEIGHT, paddingLeft: 10, color: 'var(--text-muted)', borderRadius: VERTICAL_RAIL_FLYOUT_ROW_RADIUS }}
               title="新建"
             >
               <Plus style={{ width: 15, height: 15 }} strokeWidth={2} />
