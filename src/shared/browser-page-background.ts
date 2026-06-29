@@ -76,6 +76,17 @@ function chooseViewportBackground(candidates: string[]): string | null {
   return best?.color || null
 }
 
+function isDarkBackground(color: string): boolean {
+  const match = color.match(/^#([0-9a-f]{6})$/i)
+  if (!match) return false
+  const hex = match[1] || ''
+  const red = Number.parseInt(hex.slice(0, 2), 16)
+  const green = Number.parseInt(hex.slice(2, 4), 16)
+  const blue = Number.parseInt(hex.slice(4, 6), 16)
+  const luma = 0.2126 * red + 0.7152 * green + 0.0722 * blue
+  return luma < 96
+}
+
 function fallbackFromColorScheme(probe: BrowserPageBackgroundProbe): string {
   const scheme = typeof probe.colorScheme === 'string' ? probe.colorScheme.toLowerCase() : ''
   const prefersDark = probe.prefersDark === true
@@ -90,6 +101,6 @@ export function resolveBrowserPageBackground(probe: unknown): string {
   const documentBackground = normalizedCandidates(data.document)[0]
   if (documentBackground) return documentBackground
   const viewportBackground = chooseViewportBackground(normalizedCandidates(data.viewport))
-  if (viewportBackground) return viewportBackground
+  if (viewportBackground && isDarkBackground(viewportBackground)) return viewportBackground
   return fallbackFromColorScheme(data)
 }

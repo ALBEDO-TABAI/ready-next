@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useRef, useState, type DragEvent, type MouseEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { FileText, Plus, X } from 'lucide-react'
+import { getActiveTabPairOrder } from '../../modules/workbench/active-tab-pair-order'
 
 export const DOCUMENT_VERTICAL_RAIL_WIDTH = 52
 const RAIL_WIDTH = DOCUMENT_VERTICAL_RAIL_WIDTH
@@ -32,9 +33,10 @@ interface DocumentVerticalTabRailProps {
 }
 
 function iconNode(tab: DocumentVerticalTabItem, size: number) {
+  const isHighlighted = Boolean(tab.active || tab.secondaryActive)
   return (
     <FileText
-      style={{ width: size, height: size, color: tab.dotColor || 'var(--text-gray)' }}
+      style={{ width: size, height: size, color: isHighlighted ? tab.dotColor || 'var(--ready-document-tab-doc-dot, var(--color-ready-orange))' : 'var(--text-gray)' }}
       strokeWidth={2}
       className="flex-shrink-0"
     />
@@ -105,6 +107,16 @@ export default function DocumentVerticalTabRail({
     setExpanded(false)
   }, [clearTimers])
 
+  const primaryTabId = useMemo(() => tabs.find((tab) => tab.active)?.id ?? null, [tabs])
+  const secondaryTabId = useMemo(
+    () => tabs.find((tab) => tab.secondaryActive && tab.id !== primaryTabId)?.id ?? null,
+    [primaryTabId, tabs],
+  )
+  const orderedTabs = useMemo(
+    () => getActiveTabPairOrder(tabs, primaryTabId, secondaryTabId),
+    [primaryTabId, secondaryTabId, tabs],
+  )
+
   return (
     <div
       ref={rootRef}
@@ -118,20 +130,29 @@ export default function DocumentVerticalTabRail({
       onMouseLeave={handleRailLeave}
     >
       <div className="flex min-h-0 flex-1 flex-col items-center overflow-y-auto overflow-x-hidden py-[6px]" style={{ gap: 4 }}>
-        {tabs.map((tab, index) => {
+        {orderedTabs.map(({ tab, sourceIndex }, displayIndex) => {
           const isActive = Boolean(tab.active)
           const isSplit = Boolean(tab.secondaryActive) && !isActive
-          const isDragOver = dragOverIndex === index
+          const isHighlighted = isActive || isSplit
+          const isActivePair = Boolean(primaryTabId && secondaryTabId && primaryTabId !== secondaryTabId)
+          const isDragOver = dragOverIndex === displayIndex
           return (
             <div
               key={tab.id}
-              className="relative flex w-full flex-shrink-0 items-center justify-center"
+              className="group relative flex w-full flex-shrink-0 items-center justify-center"
               draggable={Boolean(onTabDragStart)}
               onDragStart={onTabDragStart ? (event) => onTabDragStart(event, tab.id) : undefined}
               onDragEnd={(event) => { setDragOverIndex(null); onTabDragEnd?.(event) }}
-              onDragOver={onTabDragOver ? (event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; setDragOverIndex(index); onTabDragOver(event, index) } : undefined}
-              onDrop={onTabDrop ? (event) => { event.preventDefault(); setDragOverIndex(null); onTabDrop(event, index) } : undefined}
+              onDragOver={onTabDragOver ? (event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; setDragOverIndex(displayIndex); onTabDragOver(event, sourceIndex) } : undefined}
+              onDrop={onTabDrop ? (event) => { event.preventDefault(); setDragOverIndex(null); onTabDrop(event, sourceIndex) } : undefined}
             >
+              {isActive && isActivePair && (
+                <span
+                  aria-hidden
+                  className="pointer-events-none absolute left-1/2 top-[32px] z-0 h-[14px] w-[18px] -translate-x-1/2"
+                  style={{ background: 'var(--files-panel-state-active-bg)' }}
+                />
+              )}
               <button
                 type="button"
                 onClick={(event) => onTabClick(tab.id, event)}
@@ -141,27 +162,34 @@ export default function DocumentVerticalTabRail({
                 style={{
                   width: 38,
                   height: 38,
-                  background: isActive
+                  background: isHighlighted
                     ? 'var(--files-panel-state-active-bg)'
                     : isDragOver
                       ? 'color-mix(in srgb, var(--color-blue) 10%, transparent)'
-                      : isSplit
-                        ? 'color-mix(in srgb, var(--surface-card-bg) 30%, transparent)'
-                        : 'transparent',
+                      : 'transparent',
                   boxShadow: isDragOver
                     ? '0 0 0 1px var(--color-blue)'
-                    : isActive
+                    : isHighlighted
                       ? 'var(--files-panel-state-active-shadow)'
                       : 'none',
                 }}
               >
                 {iconNode(tab, 18)}
-                {tab.dirty && (
-                  <span
-                    className="absolute right-[4px] top-[4px] rounded-full"
-                    style={{ width: 6, height: 6, background: 'var(--text-light)', boxShadow: '0 0 0 1.5px var(--workbench-liquid-chrome-bg, var(--bg-content))' }}
-                  />
-                )}
+              </button>
+              <button
+                type="button"
+                aria-label={`关闭 ${tab.title || tab.label}`}
+                title="关闭"
+                draggable={false}
+                onMouseDown={(event) => event.stopPropagation()}
+                onClick={(event) => { event.stopPropagation(); onTabClose(tab.id, event) }}
+                className="pointer-events-none absolute right-[4px] top-[1px] z-20 flex h-[16px] w-[16px] items-center justify-center rounded-full opacity-0 transition-[background-color,opacity] hover:bg-[var(--bg-hover)] group-hover:pointer-events-auto group-hover:opacity-100 focus-visible:pointer-events-auto focus-visible:opacity-100"
+                style={{
+                  background: 'color-mix(in srgb, var(--surface-floating-bg) 86%, transparent)',
+                  boxShadow: '0 0 0 1px color-mix(in srgb, var(--text-title) 8%, transparent)',
+                }}
+              >
+                <X style={{ width: 10, height: 10 }} strokeWidth={2.2} className="text-[var(--text-gray)]" />
               </button>
             </div>
           )
@@ -202,9 +230,10 @@ export default function DocumentVerticalTabRail({
           onMouseLeave={() => { flyoutHoveredRef.current = false; scheduleClose() }}
         >
           <div className="flex min-h-0 flex-1 flex-col overflow-y-auto" style={{ gap: 4 }}>
-            {tabs.map((tab, index) => {
+            {orderedTabs.map(({ tab, sourceIndex }) => {
               const isActive = Boolean(tab.active)
               const isSplit = Boolean(tab.secondaryActive) && !isActive
+              const isHighlighted = isActive || isSplit
               return (
                 <div
                   key={tab.id}
@@ -212,27 +241,25 @@ export default function DocumentVerticalTabRail({
                   draggable={Boolean(onTabDragStart)}
                   onDragStart={onTabDragStart ? (event) => onTabDragStart(event, tab.id) : undefined}
                   onDragEnd={onTabDragEnd}
-                  onDragOver={onTabDragOver ? (event) => { event.preventDefault(); onTabDragOver(event, index) } : undefined}
-                  onDrop={onTabDrop ? (event) => { event.preventDefault(); onTabDrop(event, index) } : undefined}
+                  onDragOver={onTabDragOver ? (event) => { event.preventDefault(); onTabDragOver(event, sourceIndex) } : undefined}
+                  onDrop={onTabDrop ? (event) => { event.preventDefault(); onTabDrop(event, sourceIndex) } : undefined}
                   onClick={(event) => { onTabClick(tab.id, event); closeNow() }}
                   onContextMenu={onTabContextMenu ? (event) => onTabContextMenu(event, tab.id) : undefined}
                   style={{
                     height: 42,
                     gap: 9,
                     paddingLeft: 10,
-                    background: isActive
+                    background: isHighlighted
                       ? 'var(--files-panel-state-active-bg)'
-                      : isSplit
-                        ? 'color-mix(in srgb, var(--surface-card-bg) 40%, transparent)'
-                        : 'transparent',
-                    boxShadow: isActive ? 'var(--files-panel-state-active-shadow)' : 'none',
+                      : 'transparent',
+                    boxShadow: isHighlighted ? 'var(--files-panel-state-active-shadow)' : 'none',
                     borderTopRightRadius: 10,
                     borderBottomRightRadius: 10,
                   }}
                 >
                   {iconNode(tab, 15)}
                   <span className="flex min-w-0 flex-1 flex-col justify-center">
-                    <span className="truncate text-[12px] font-medium" style={{ color: isActive ? 'var(--text-title)' : 'var(--text-body)', lineHeight: 1.3 }}>
+                    <span className="truncate text-[12px] font-medium" style={{ color: isHighlighted ? 'var(--text-title)' : 'var(--text-body)', lineHeight: 1.3 }}>
                       {tab.label}
                       {tab.dirty ? <span className="ml-1" style={{ color: 'var(--text-light)' }}>●</span> : null}
                     </span>

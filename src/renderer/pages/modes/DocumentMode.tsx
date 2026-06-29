@@ -931,8 +931,11 @@ export default function DocumentMode({
           {/* Content Area — rounded on all four corners so the editor reads as an inset card
               like the browser content viewport. */}
           <div
-            className="relative flex-1 min-h-0 overflow-hidden"
-            style={{ borderRadius: 'var(--workbench-canvas-radius)' }}
+            className="document-content-frame relative flex-1 min-h-0 overflow-hidden"
+            style={{
+              borderRadius: 'var(--workbench-canvas-radius)',
+              background: 'var(--workbench-module-surface-bg)',
+            }}
           >
             {splitTab && activeTab ? (
               <div className="h-full flex min-w-0 overflow-hidden" ref={splitContainerRef} style={{ gap: 0 }}>

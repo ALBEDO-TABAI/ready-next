@@ -14,6 +14,7 @@ interface BrowserShellLayoutProps {
   onRetry: () => void | Promise<void>
   mediaDropActive?: boolean
   mediaUploadStatus?: { kind: 'uploading' | 'success' | 'error'; message: string } | null
+  fillBottomLeftCorner?: boolean
 }
 
 export default function BrowserShellLayout({
@@ -26,6 +27,7 @@ export default function BrowserShellLayout({
   onRetry,
   mediaDropActive = false,
   mediaUploadStatus = null,
+  fillBottomLeftCorner = true,
 }: BrowserShellLayoutProps) {
   const showReadyBlankPage = activeTab ? isReadyBrowserBlankUrl(activeTab.url) && !activeTab.error : false
   const showBrowserViewCornerFill = isElectron && Boolean(activeTab) && !showReadyBlankPage && !activeTab?.error
@@ -89,20 +91,22 @@ export default function BrowserShellLayout({
                     zIndex: 2,
                   }}
                 />
-                <div
-                  className="browser-shell-corner-fill-bottom-left"
-                  style={{
-                    position: 'absolute',
-                    left: 0,
-                    bottom: 0,
-                    width: 'var(--workbench-canvas-radius)',
-                    height: 'var(--workbench-canvas-radius)',
-                    borderTopRightRadius: 'var(--workbench-canvas-radius)',
-                    background: 'var(--workbench-liquid-chrome-bg, var(--bg-content))',
-                    pointerEvents: 'none',
-                    zIndex: 2,
-                  }}
-                />
+                {fillBottomLeftCorner && (
+                  <div
+                    className="browser-shell-corner-fill-bottom-left"
+                    style={{
+                      position: 'absolute',
+                      left: 0,
+                      bottom: 0,
+                      width: 'var(--workbench-canvas-radius)',
+                      height: 'var(--workbench-canvas-radius)',
+                      borderTopRightRadius: 'var(--workbench-canvas-radius)',
+                      background: 'var(--workbench-liquid-chrome-bg, var(--bg-content))',
+                      pointerEvents: 'none',
+                      zIndex: 2,
+                    }}
+                  />
+                )}
               </>
             )}
 

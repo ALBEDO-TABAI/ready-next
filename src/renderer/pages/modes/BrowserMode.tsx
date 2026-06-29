@@ -5,6 +5,7 @@ import { AgentBrowserSupervisionPanel } from '../../components/browser/AgentBrow
 import BrowserTopBar from '../../components/browser/BrowserTopBar'
 import VerticalTabRail, { BROWSER_VERTICAL_RAIL_WIDTH } from '../../components/browser/VerticalTabRail'
 import BrowserShellLayout from '../../components/browser/BrowserShellLayout'
+import { nextIntentId } from '../../../shared/browser-view-intent'
 import { isBrowserSupervisionVisibleTaskStatus } from '../../../shared/browser-task-status'
 import { appendToAgentInput } from '../../modules/agent/chat-input-bridge'
 import { useBrowserDiagnosticsState } from '../../modules/browser/useBrowserDiagnosticsState'
@@ -13,6 +14,7 @@ import { useBrowserResizeFreeze } from '../../modules/browser/useBrowserResizeFr
 import { useBrowserRuntimeEffects } from '../../modules/browser/useBrowserRuntimeEffects'
 import { useAgentBrowserSupervision } from '../../modules/browser/useAgentBrowserSupervision'
 import { resolveBrowserOwnershipStatus } from '../../modules/browser/browserOwnershipStatus'
+import { resolveBrowserTabClickIntent } from '../../modules/browser/browserTabClickIntent'
 import { useBrowserTabActions } from '../../modules/browser/useBrowserTabActions'
 import { getBrowserTabFitKey, isFitted, markFitted } from '../../modules/browser/browserTabFitRegistry'
 import { planBrowserHostPresentation } from '../../modules/browser/browserHostPresentation'
@@ -426,12 +428,42 @@ export default function BrowserMode({
   })
 
   const handleHeaderTabClick = useCallback((id: string, event: { shiftKey: boolean }) => {
-    if (event.shiftKey && id !== activeTabId) {
-      setSplitTabId(id)
+    const intent = resolveBrowserTabClickIntent({
+      clickedTabId: id,
+      shiftKey: event.shiftKey,
+      activeTabId,
+      splitTabId,
+    })
+
+    if (intent.nextSplitTabId) {
+      setSplitTabId(intent.nextSplitTabId)
       return
     }
-    void handleSwitchTab(id)
-  }, [activeTabId, handleSwitchTab, setSplitTabId])
+
+    if (splitTabId && intent.nextSplitTabId === null) {
+      setSplitTabId(null)
+    }
+
+    if (intent.collapseSplitTabId) {
+      window.electronAPI?.browser?.sendIntent?.({
+        kind: 'hide',
+        intentId: nextIntentId(),
+        tabId: intent.collapseSplitTabId,
+        reason: 'split-collapse',
+      })
+    }
+
+    if (intent.activateTabId) {
+      void handleSwitchTab(intent.activateTabId)
+      return
+    }
+
+    if (intent.forceBoundsSync) {
+      requestAnimationFrame(() => {
+        void sendBoundsImmediate({ forceExact: true })
+      })
+    }
+  }, [activeTabId, handleSwitchTab, sendBoundsImmediate, setSplitTabId, splitTabId])
 
   const handleSplitResize = useCallback((delta: number) => {
     if (!splitContainerRef.current) return
@@ -1223,6 +1255,7 @@ export default function BrowserMode({
                       onDrop={(event) => handleContentDrop(event, visibleSplitTab.id)}
                       onRetry={() => void handleRetry(visibleSplitTab.id)}
                       mediaUploadStatus={localMediaUploadStatus}
+                      fillBottomLeftCorner={false}
                     />
                     {isAgentSplitVisible && (
                       <div

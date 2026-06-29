@@ -55,7 +55,7 @@ export default function VerticalRailOverlayWindow() {
     >
       <div className="flex min-h-0 flex-1 flex-col overflow-y-auto" style={{ gap: ROW_GAP }}>
         {tabs.map((tab) => {
-          const isActive = tab.active
+          const isActive = tab.active || tab.split
           return (
             <div
               key={tab.id}

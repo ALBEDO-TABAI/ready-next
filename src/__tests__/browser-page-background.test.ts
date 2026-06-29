@@ -44,6 +44,22 @@ test('browser page background falls back to viewport majority when the document 
   }), '#111827')
 })
 
+test('browser page background ignores light viewport samples when the document canvas is transparent', () => {
+  assert.equal(resolveBrowserPageBackground({
+    document: [
+      { color: 'transparent' },
+      { color: 'rgba(255, 255, 255, 0)' },
+    ],
+    viewport: [
+      { color: 'rgb(221, 214, 190)' },
+      { color: 'rgb(221, 214, 190)' },
+      { color: 'rgb(255, 255, 255)' },
+    ],
+    colorScheme: 'light dark',
+    prefersDark: false,
+  }), DEFAULT_BROWSER_PAGE_BACKGROUND)
+})
+
 test('browser page background uses normal browser white when no page color is proven', () => {
   assert.equal(resolveBrowserPageBackground({
     document: [{ color: 'transparent' }],

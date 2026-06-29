@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { Globe, Loader2, Lock, Plus } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Globe, Loader2, Lock, Plus, X } from 'lucide-react'
 import {
   beginBrowserTabDragSession,
   endBrowserTabDragSession,
@@ -9,6 +9,7 @@ import {
   showBrowserTabContextMenu,
 } from '../../modules/agent/chat-input-bridge'
 import { extractBrowserDomain } from '../../modules/browser/url-utils'
+import { getActiveTabPairOrder } from '../../modules/workbench/active-tab-pair-order'
 import type { BrowserTab } from '../../stores/useBrowserTabs'
 import type {
   VerticalRailOverlayCommand,
@@ -72,19 +73,24 @@ export default function VerticalTabRail({
   const latestRef = useRef({ tabs, activeTabId, splitTabId, bookmarkedUrls })
   latestRef.current = { tabs, activeTabId, splitTabId, bookmarkedUrls }
 
+  const orderedTabs = useMemo(
+    () => getActiveTabPairOrder(tabs, activeTabId, splitTabId),
+    [activeTabId, splitTabId, tabs],
+  )
+
   const buildSnapshot = useCallback((): VerticalRailOverlaySnapshot | null => {
     const root = rootRef.current
     if (!root) return null
     const rect = root.getBoundingClientRect()
     if (rect.height <= 0) return null
     const { tabs: t, activeTabId: aId, splitTabId: sId, bookmarkedUrls: marks } = latestRef.current
-    const overlayTabs: VerticalRailOverlayTab[] = t.map((tab) => ({
+    const overlayTabs: VerticalRailOverlayTab[] = getActiveTabPairOrder(t, aId, sId).map(({ tab }) => ({
       id: tab.id,
       title: tab.title || 'New Tab',
       domain: tab.domain || extractBrowserDomain(tab.url || ''),
       url: tab.url,
       favicon: tab.favicon,
-      active: tab.id === aId,
+      active: tab.id === aId || (tab.id === sId && tab.id !== aId),
       split: tab.id === sId && tab.id !== aId,
       loading: Boolean(tab.loading),
       owner: tab.owner,
@@ -292,21 +298,30 @@ export default function VerticalTabRail({
       onMouseLeave={handleRailLeave}
     >
       <div className="flex min-h-0 flex-1 flex-col items-center overflow-y-auto overflow-x-hidden py-[6px]" style={{ gap: 4 }}>
-        {tabs.map((tab, index) => {
-          const isTabActive = tab.id === activeTabId
-          const isSplit = tab.id === splitTabId && !isTabActive
-          const isDragOver = dragOverIndex === index
+        {orderedTabs.map(({ tab, sourceIndex }, displayIndex) => {
+          const isPrimaryActive = tab.id === activeTabId
+          const isSplitActive = tab.id === splitTabId && !isPrimaryActive
+          const isTabActive = isPrimaryActive || isSplitActive
+          const isActivePair = Boolean(activeTabId && splitTabId && activeTabId !== splitTabId)
+          const isDragOver = dragOverIndex === displayIndex
           const isDragging = draggingTabId === tab.id
           return (
             <div
               key={tab.id}
-              className="relative flex w-full flex-shrink-0 items-center justify-center"
+              className="group relative flex w-full flex-shrink-0 items-center justify-center"
               draggable
-              onDragStart={(event) => handleDragStart(event, index, tab)}
+              onDragStart={(event) => handleDragStart(event, sourceIndex, tab)}
               onDragEnd={clearDragState}
-              onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; setDragOverIndex(index) }}
-              onDrop={(event) => { event.preventDefault(); handleReorderDrop(index) }}
+              onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; setDragOverIndex(displayIndex) }}
+              onDrop={(event) => { event.preventDefault(); handleReorderDrop(sourceIndex) }}
             >
+              {isPrimaryActive && isActivePair && (
+                <span
+                  aria-hidden
+                  className="pointer-events-none absolute left-1/2 top-[32px] z-0 h-[14px] w-[18px] -translate-x-1/2"
+                  style={{ background: 'var(--files-panel-state-active-bg)' }}
+                />
+              )}
               <button
                 type="button"
                 onClick={(event) => void onTabClick(tab.id, { shiftKey: event.shiftKey })}
@@ -322,9 +337,7 @@ export default function VerticalTabRail({
                     ? 'var(--files-panel-state-active-bg)'
                     : isDragOver
                       ? 'color-mix(in srgb, var(--color-blue) 10%, transparent)'
-                      : isSplit
-                        ? 'color-mix(in srgb, var(--surface-card-bg) 30%, transparent)'
-                        : 'transparent',
+                      : 'transparent',
                   boxShadow: isDragOver
                     ? '0 0 0 1px var(--color-blue)'
                     : isTabActive
@@ -343,6 +356,21 @@ export default function VerticalTabRail({
                   />
                 )}
                 {tab.required && <Lock className="absolute bottom-[2px] left-[2px] text-[var(--text-light)]" style={{ width: 8, height: 8 }} strokeWidth={2.5} />}
+              </button>
+              <button
+                type="button"
+                aria-label={`关闭 ${tab.title || 'New Tab'}`}
+                title="关闭标签页"
+                draggable={false}
+                onMouseDown={(event) => event.stopPropagation()}
+                onClick={(event) => { event.stopPropagation(); void onTabClose(tab.id) }}
+                className="pointer-events-none absolute right-[4px] top-[1px] z-20 flex h-[16px] w-[16px] items-center justify-center rounded-full opacity-0 transition-[background-color,opacity] hover:bg-[var(--bg-hover)] group-hover:pointer-events-auto group-hover:opacity-100 focus-visible:pointer-events-auto focus-visible:opacity-100"
+                style={{
+                  background: 'color-mix(in srgb, var(--surface-floating-bg) 86%, transparent)',
+                  boxShadow: '0 0 0 1px color-mix(in srgb, var(--text-title) 8%, transparent)',
+                }}
+              >
+                <X style={{ width: 10, height: 10 }} className="text-[var(--text-gray)]" strokeWidth={2.2} />
               </button>
             </div>
           )
