@@ -109,10 +109,10 @@ test('reconcileAfterBrowserDecision re-resolves browser capabilities without reb
 
   assert.ok(!prepared.capabilityResolution.visibleCapabilityGroupIds.includes('browser_interaction'))
   assert.ok(reconciled.capabilityResolution.visibleCapabilityGroupIds.includes('browser_interaction'))
-  assert.ok(!reconciled.capabilityResolution.visibleCapabilityGroupIds.includes('browser_content_tasks'))
-  assert.equal(reconciled.capabilityResolution.groupStates.browser_content_tasks.reason, 'run_intent_suppressed')
+  assert.ok(reconciled.capabilityResolution.visibleCapabilityGroupIds.includes('browser_content_tasks'))
+  assert.equal(reconciled.capabilityResolution.groupStates.browser_content_tasks.reason, 'enabled')
   assert.ok(reconciled.allowedToolNames.includes('browser_click'))
-  assert.ok(!reconciled.allowedToolNames.includes('browser_extract_structured'))
+  assert.ok(reconciled.allowedToolNames.includes('browser_power_eval'))
 })
 
 test('prepareInitialRun opens research tools for location-heavy comparison requests', () => {

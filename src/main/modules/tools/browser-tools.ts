@@ -39,6 +39,14 @@ import {
 } from '../../../shared/browser-readonly-probe'
 import { agentBrowserError, isAgentBrowserError, type AgentBrowserStructuredError } from '../browser-engine/agent-browser-errors'
 import { ToolDomainError } from './tool-errors'
+import { resolveBrowserWorkflowIntent } from '../../../shared/browser-workflow-intent'
+import {
+  buildBrowserActionSessionProgress,
+  createBrowserTransactionConfirmation,
+  noteBrowserActionSession,
+  type BrowserActionSessionProgress,
+  type BrowserTransactionConfirmation,
+} from '../browser-engine/browser-action-session'
 import {
   BROWSER_DESTRUCTIVE_TARGET_REGEX_SOURCES,
   argsCarryPasswordCue,
@@ -95,6 +103,23 @@ let collectionConsentStore = new BrowserCollectionConsentStore()
 const browserPageMapGenerationByTab = new Map<string, number>()
 const browserPageMapAmbiguityByTab = new Map<string, Map<string, { role: string; name: string; targetIds: string[] }>>()
 
+interface BrowserToolTabSnapshot {
+  id: string
+  title: string
+  url: string
+  active: boolean
+}
+
+interface BrowserActionFollowedTab {
+  tabId: string
+  title: string
+  url: string
+  reason: 'new_tab' | 'active_tab_changed'
+  sourceTabId: string | null
+  ready?: boolean
+  elapsedMs?: number
+}
+
 export function __setBrowserCollectionConsentStoreForTests(store: BrowserCollectionConsentStore | null): void {
   collectionConsentStore = store || new BrowserCollectionConsentStore()
 }
@@ -139,6 +164,84 @@ function currentBrowserPageMapAmbiguity(
   targetId: string,
 ): { role: string; name: string; targetIds: string[] } | null {
   return browserPageMapAmbiguityByTab.get(resolveBrowserToolTabKey(controller, tabId))?.get(targetId) || null
+}
+
+function snapshotBrowserTabs(controller: BrowserController): BrowserToolTabSnapshot[] {
+  try {
+    return (controller.getTabList?.() || [])
+      .map((tab) => ({
+        id: String(tab.id || ''),
+        title: String(tab.title || ''),
+        url: String(tab.url || ''),
+        active: tab.active === true,
+      }))
+      .filter((tab) => tab.id.length > 0)
+  } catch {
+    return []
+  }
+}
+
+function pickFollowedBrowserTab(
+  before: BrowserToolTabSnapshot[],
+  after: BrowserToolTabSnapshot[],
+  sourceTabId: string | null,
+): BrowserActionFollowedTab | null {
+  if (before.length === 0 || after.length === 0) return null
+  const beforeIds = new Set(before.map((tab) => tab.id))
+  const sourceId = sourceTabId || before.find((tab) => tab.active)?.id || null
+  const newTabs = after.filter((tab) => !beforeIds.has(tab.id))
+  const activeAfter = after.find((tab) => tab.active) || null
+  const activeNewTab = activeAfter && !beforeIds.has(activeAfter.id) ? activeAfter : null
+  const createdTab = activeNewTab || (newTabs.length === 1 ? newTabs[0] : null)
+  if (createdTab) {
+    return {
+      tabId: createdTab.id,
+      title: createdTab.title,
+      url: createdTab.url,
+      reason: 'new_tab',
+      sourceTabId: sourceId,
+    }
+  }
+  if (activeAfter && sourceId && activeAfter.id !== sourceId) {
+    return {
+      tabId: activeAfter.id,
+      title: activeAfter.title,
+      url: activeAfter.url,
+      reason: 'active_tab_changed',
+      sourceTabId: sourceId,
+    }
+  }
+  return null
+}
+
+async function waitForActionFollowedTab(
+  controller: BrowserController,
+  sourceTabId: string | null,
+  beforeTabs: BrowserToolTabSnapshot[],
+  signal?: AbortSignal,
+  timeoutMs = 2600,
+): Promise<BrowserActionFollowedTab | null> {
+  if (beforeTabs.length === 0) return null
+  const started = Date.now()
+  while (Date.now() - started < timeoutMs) {
+    throwIfAborted(signal)
+    const followed = pickFollowedBrowserTab(beforeTabs, snapshotBrowserTabs(controller), sourceTabId)
+    if (followed) {
+      try {
+        if (typeof controller.switchTab === 'function') controller.switchTab(followed.tabId)
+      } catch {
+        // The tab may already be active or the controller may not expose switching in tests.
+      }
+      try {
+        const ready = await waitForReady(controller, followed.tabId, 3500, undefined, signal)
+        return { ...followed, ready: ready.ready, elapsedMs: Date.now() - started }
+      } catch {
+        return { ...followed, elapsedMs: Date.now() - started }
+      }
+    }
+    await sleepWithAbort(150, signal)
+  }
+  return null
 }
 
 function buildBrowserDomTargetLibraryJs(): string {
@@ -1476,6 +1579,222 @@ function activeBrowserToolUrl(controller: BrowserController, tabId: string | nul
     || controller.getActiveTab?.()
     || null
   return typeof tab?.url === 'string' ? tab.url : null
+}
+
+function activeBrowserToolTitle(controller: BrowserController, tabId: string | null): string | null {
+  const tabs = controller.getTabList?.() || []
+  const tab = (tabId ? tabs.find((item) => item.id === tabId) : null)
+    || tabs.find((item) => item.active)
+    || controller.getActiveTab?.()
+    || null
+  return typeof tab?.title === 'string' ? tab.title : null
+}
+
+function isBrowserTransactionTurn(currentUserText?: string | null): boolean {
+  return resolveBrowserWorkflowIntent(currentUserText || '').kind === 'transaction'
+}
+
+function browserTransactionResourceIdFromUrl(url: string): string | null {
+  try {
+    const parsed = new URL(url)
+    const candidates = parsed.pathname.split('/').filter(Boolean).reverse()
+    return candidates.find((segment) => /^[A-Za-z0-9_-]{8,}$/.test(segment)) || null
+  } catch {
+    return null
+  }
+}
+
+function looksLikeEditorUrl(url: string | null | undefined): boolean {
+  const value = String(url || '')
+  return /(?:draft|edit|editor|compose|create|publish|upload|creator|post\/edit|note\/edit)/i.test(value)
+}
+
+function normalizeTransactionText(value: unknown): string {
+  return String(value || '').replace(/\s+/g, ' ').trim()
+}
+
+function detectTransactionConfirmationFromPageState(pageState: {
+  url?: string | null
+  title?: string | null
+  text?: string | null
+}): BrowserTransactionConfirmation | null {
+  const text = normalizeTransactionText([pageState.title, pageState.text].filter(Boolean).join(' '))
+  const successText = text.match(/(?:发布成功|提交成功|发送成功|已发布|发布完成|提交完成|posted|published|success(?:fully)?)/i)?.[0] || null
+  if (successText && !/(?:草稿|draft|自动保存|autosave|保存成功)/i.test(text)) {
+    return createBrowserTransactionConfirmation({
+      source: 'page_text',
+      signal: successText,
+      url: pageState.url || null,
+      text,
+    })
+  }
+  const url = String(pageState.url || '')
+  const resourceId = browserTransactionResourceIdFromUrl(url)
+  if (url && resourceId && !looksLikeEditorUrl(url)) {
+    return createBrowserTransactionConfirmation({
+      source: 'public_url',
+      signal: 'public_resource_url',
+      url,
+      resourceId,
+    })
+  }
+  return null
+}
+
+async function detectBrowserPageTransactionConfirmation(
+  controller: BrowserController,
+  tabId: string | null,
+): Promise<BrowserTransactionConfirmation | null> {
+  const url = activeBrowserToolUrl(controller, tabId)
+  const title = activeBrowserToolTitle(controller, tabId)
+  try {
+    const page = await controller.executeJS(tabId, `
+      (() => ({
+        url: String(location.href || ''),
+        title: String(document.title || ''),
+        text: String(document.body?.innerText || '').slice(0, 4000)
+      }))()
+    `) as { url?: string; title?: string; text?: string } | null
+    return detectTransactionConfirmationFromPageState({
+      url: page?.url || url,
+      title: page?.title || title,
+      text: page?.text || '',
+    })
+  } catch {
+    return detectTransactionConfirmationFromPageState({ url, title, text: '' })
+  }
+}
+
+function detectNetworkTransactionConfirmation(
+  events: ReadonlyArray<Record<string, unknown>>,
+  bodies: ReadonlyArray<Record<string, unknown>>,
+): BrowserTransactionConfirmation | null {
+  const bodyByRequestId = new Map<string, Record<string, unknown>>()
+  for (const body of bodies) {
+    const requestId = typeof body.requestId === 'string' ? body.requestId : ''
+    if (requestId) bodyByRequestId.set(requestId, body)
+  }
+  for (const event of events) {
+    const method = String(event.method || event.requestMethod || '').toUpperCase()
+    if (!['POST', 'PUT', 'PATCH'].includes(method)) continue
+    const status = Number(event.status || event.statusCode || 0)
+    if (!Number.isFinite(status) || status < 200 || status >= 300) continue
+    const url = String(event.url || '')
+    if (/(?:autosave|auto-save|draft|preflight|log|track|metric|analytics|beacon|heartbeat|ping)/i.test(url)) continue
+    const requestId = typeof event.requestId === 'string' ? event.requestId : ''
+    const body = bodyByRequestId.get(requestId)
+    const bodyText = normalizeTransactionText(body?.body)
+    if (!bodyText || /(?:draft|autosave|草稿|自动保存)/i.test(bodyText)) continue
+    const successSemantic = /(?:"success"\s*:\s*true|"code"\s*:\s*0\b|"ok"\s*:\s*true|发布成功|提交成功|已发布)/i.test(bodyText)
+    const idMatch = bodyText.match(/(?:"(?:note|post|article|item)?_?id"\s*:\s*"([A-Za-z0-9_-]{6,})"|"(?:noteId|postId|articleId)"\s*:\s*"([A-Za-z0-9_-]{6,})")/i)
+    if (!successSemantic && !idMatch) continue
+    return createBrowserTransactionConfirmation({
+      source: 'network',
+      signal: successSemantic ? 'success_response' : 'resource_id_response',
+      url,
+      resourceId: idMatch?.[1] || idMatch?.[2] || null,
+      statusCode: status,
+      text: bodyText.slice(0, 1000),
+    })
+  }
+  return null
+}
+
+function browserActionSessionPatch(params: {
+  toolName: string
+  args: Record<string, unknown>
+  controller: BrowserController
+  sessionId?: string
+  currentUserText?: string
+  tabId?: string | null
+  followedTab?: BrowserActionFollowedTab | null
+  confirmation?: BrowserTransactionConfirmation | null
+  nextSuggestedAction?: string | null
+  frameId?: string | null
+}): { projectionPatch: Record<string, unknown>; session: BrowserActionSessionProgress } | null {
+  if (!params.sessionId || !isBrowserTransactionTurn(params.currentUserText)) return null
+  const targetTabId = params.followedTab?.tabId
+    || params.tabId
+    || (typeof params.args.tab_id === 'string' ? params.args.tab_id : null)
+    || params.controller.getActiveTab?.()?.id
+    || null
+  const currentUrl = params.followedTab?.url || activeBrowserToolUrl(params.controller, targetTabId)
+  const frameId = params.frameId || (typeof params.args.frame_id === 'string' ? params.args.frame_id : null)
+  const frameUrl = typeof params.args.frame_url === 'string' ? params.args.frame_url : null
+  const session = noteBrowserActionSession(params.sessionId, {
+    targetTabId,
+    targetFrameId: frameId,
+    frameUrl,
+    currentUrl,
+    lastAction: params.toolName,
+    lastFollowedTab: params.followedTab
+      ? {
+        tabId: params.followedTab.tabId,
+        url: params.followedTab.url || null,
+        title: params.followedTab.title || null,
+        reason: params.followedTab.reason || null,
+      }
+      : null,
+    confirmation: params.confirmation || null,
+    nextSuggestedAction: params.nextSuggestedAction || null,
+  })
+  if (!session) return null
+  return {
+    session,
+    projectionPatch: {
+      taskType: 'browser_transaction',
+      module: 'browser',
+      progress: buildBrowserActionSessionProgress(session),
+    },
+  }
+}
+
+function attachBrowserActionSessionOutput(
+  result: string | ToolExecutionOutput,
+  params: {
+    toolName: string
+    args: Record<string, unknown>
+    controller: BrowserController
+    sessionId?: string
+    currentUserText?: string
+    tabId?: string | null
+    followedTab?: BrowserActionFollowedTab | null
+    confirmation?: BrowserTransactionConfirmation | null
+    nextSuggestedAction?: string | null
+    frameId?: string | null
+  },
+): string | ToolExecutionOutput {
+  const patch = browserActionSessionPatch(params)
+  if (!patch) return result
+  const data: Record<string, unknown> = typeof result === 'string'
+    ? (() => {
+      try {
+        const parsed = JSON.parse(result) as unknown
+        return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : { result }
+      } catch {
+        return { result }
+      }
+    })()
+    : { ...(result.data || {}) }
+  if (params.confirmation) {
+    data.transactionConfirmed = params.confirmation
+  }
+  data.browserActionSession = patch.session
+  const mergedProjectionPatch = typeof result === 'string'
+    ? patch.projectionPatch
+    : { ...(result.projectionPatch || {}), ...patch.projectionPatch }
+  return createToolExecutionOutput(
+    JSON.stringify(data, null, 2),
+    {
+      shape: 'json',
+      data,
+      projectionPatch: mergedProjectionPatch,
+      interactionHint: typeof result === 'string' ? null : result.interactionHint,
+      framePatch: typeof result === 'string' ? null : result.framePatch,
+      contextModifier: typeof result === 'string' ? null : result.contextModifier,
+      envelope: typeof result === 'string' ? null : result.envelope,
+    },
+  )
 }
 
 function summarizeCodeForAudit(code: string): string {
@@ -5184,7 +5503,20 @@ export async function executeBrowserTool(
         await sleepWithAbort(1500, abortSignal)
         const tabs = controller.getTabList()
         const target = navTabId ? tabs.find((t) => t.id === navTabId) : tabs.find((t) => t.active)
-        return `Navigated to ${url}\nCurrent page: ${target?.title || 'Loading...'} (${target?.url || url})`
+        const confirmation = await detectBrowserPageTransactionConfirmation(controller, target?.id || navTabId)
+        return attachBrowserActionSessionOutput(
+          `Navigated to ${url}\nCurrent page: ${target?.title || 'Loading...'} (${target?.url || url})`,
+          {
+            toolName,
+            args,
+            controller,
+            sessionId,
+            currentUserText,
+            tabId: target?.id || navTabId,
+            confirmation,
+            nextSuggestedAction: confirmation ? 'finish with transaction proof' : 'read map again',
+          },
+        )
       }
 
       case 'browser_search': {
@@ -5259,7 +5591,24 @@ export async function executeBrowserTool(
         tabId = (await resolveHighControlAgentTab(controller, args, { signal: abortSignal })).tabId
         const maxBytes = typeof args.max_bytes === 'number' ? Math.max(1024, Math.min(65_536, args.max_bytes)) : undefined
         const payload = await captureAgentPageMap(controller, tabId, maxBytes)
-        return JSON.stringify(payload, null, 2)
+        const pageMapRecord = payload.pageMap && typeof payload.pageMap === 'object'
+          ? payload.pageMap as Record<string, unknown>
+          : null
+        const structureHints = pageMapRecord?.structureHints && typeof pageMapRecord.structureHints === 'object'
+          ? pageMapRecord.structureHints as Record<string, unknown>
+          : null
+        const iframeCount = Array.isArray(structureHints?.iframes) ? structureHints.iframes.length : 0
+        return attachBrowserActionSessionOutput(JSON.stringify(payload, null, 2), {
+          toolName,
+          args,
+          controller,
+          sessionId,
+          currentUserText,
+          tabId,
+          nextSuggestedAction: iframeCount > 0
+            ? 'use browser_power_cdp Page.getFrameTree or browser_power_eval with frame_id for iframe content'
+            : 'act on target or continue reading map',
+        })
       }
 
       case 'browser_probe_readonly': {
@@ -5400,9 +5749,11 @@ export async function executeBrowserTool(
             { targetId, ruleId: 'm3-login-existing-account' },
           )
         }
+        const beforeTabs = snapshotBrowserTabs(controller)
         const before = readBack === 'none' ? null : await readBrowserActionDeltaBestEffort(controller, tabId, 'before')
         const actionResult = await controller.executeJS(tabId, buildBrowserActOnTargetJs(parsed.node, action, value))
         await settleAfterAction(controller, tabId, abortSignal)
+        const followedTab = await waitForActionFollowedTab(controller, tabId, beforeTabs, abortSignal)
         const after = readBack === 'map'
           ? await captureAgentPageMap(controller, tabId)
           : readBack === 'none'
@@ -5422,10 +5773,29 @@ export async function executeBrowserTool(
           result: actionResult,
           after,
           changed: didBrowserActionChange(before, after),
+          followedTab,
           failureKind,
-          nextSuggestedAction: actionFailed ? 'read map again' : 'read map again',
+          nextSuggestedAction: followedTab ? `read map again on tab ${followedTab.tabId}` : 'read map again',
         }
-        return actionFailed ? browserStructuredOutput(payload) : JSON.stringify(payload, null, 2)
+        const confirmation = actionFailed
+          ? null
+          : await detectBrowserPageTransactionConfirmation(controller, followedTab?.tabId || tabId)
+        return attachBrowserActionSessionOutput(
+          actionFailed ? browserStructuredOutput(payload) : JSON.stringify(payload, null, 2),
+          {
+            toolName,
+            args,
+            controller,
+            sessionId,
+            currentUserText,
+            tabId,
+            followedTab,
+            confirmation,
+            nextSuggestedAction: confirmation
+              ? 'finish with transaction proof'
+              : (followedTab ? `read map again on tab ${followedTab.tabId}` : 'read map again'),
+          },
+        )
       }
 
       case 'browser_click': {
@@ -5437,7 +5807,32 @@ export async function executeBrowserTool(
         // dispatch gate could classify; the shared guarded entry judges the
         // real clickable owner and refuses destructive-grant targets without
         // clicking.
-        return await runGuardedSelectorClick(controller, tabId, selector)
+        const beforeTabs = snapshotBrowserTabs(controller)
+        const result = await runGuardedSelectorClick(controller, tabId, selector)
+        await settleAfterAction(controller, tabId, abortSignal)
+        const followedTab = await waitForActionFollowedTab(controller, tabId, beforeTabs, abortSignal)
+        const confirmation = await detectBrowserPageTransactionConfirmation(controller, followedTab?.tabId || tabId)
+        const output = followedTab
+          ? JSON.stringify({
+            ok: true,
+            result,
+            followedTab,
+            nextSuggestedAction: `read map again on tab ${followedTab.tabId}`,
+          }, null, 2)
+          : result
+        return attachBrowserActionSessionOutput(output, {
+          toolName,
+          args,
+          controller,
+          sessionId,
+          currentUserText,
+          tabId,
+          followedTab,
+          confirmation,
+          nextSuggestedAction: confirmation
+            ? 'finish with transaction proof'
+            : (followedTab ? `read map again on tab ${followedTab.tabId}` : 'read map again'),
+        })
       }
 
       case 'browser_click_text': {
@@ -5455,16 +5850,32 @@ export async function executeBrowserTool(
         const height = Number(result.height || 1) || 1
         const x = Math.round((Number(result.cssX || 0) / width) * 1000)
         const y = Math.round((Number(result.cssY || 0) / height) * 1000)
+        const beforeTabs = snapshotBrowserTabs(controller)
         const point = await runGuardedCoordinateClick(controller, tabId, x, y, abortSignal)
-        await settleAfterAction(controller, tabId, abortSignal)
-        return JSON.stringify({
+        const followedTab = await waitForActionFollowedTab(controller, tabId, beforeTabs, abortSignal)
+        const confirmation = await detectBrowserPageTransactionConfirmation(controller, followedTab?.tabId || tabId)
+        return attachBrowserActionSessionOutput(JSON.stringify({
           ok: true,
           text: result.text || text,
           href: result.href || undefined,
           clickedDirect: false,
           normalized: { x: point.nx, y: point.ny },
           css: { x: point.cssX, y: point.cssY },
-        }, null, 2)
+          followedTab,
+          nextSuggestedAction: followedTab ? `read map again on tab ${followedTab.tabId}` : 'read map again',
+        }, null, 2), {
+          toolName,
+          args,
+          controller,
+          sessionId,
+          currentUserText,
+          tabId,
+          followedTab,
+          confirmation,
+          nextSuggestedAction: confirmation
+            ? 'finish with transaction proof'
+            : (followedTab ? `read map again on tab ${followedTab.tabId}` : 'read map again'),
+        })
       }
 
       case 'browser_type': {
@@ -5479,9 +5890,18 @@ export async function executeBrowserTool(
         // guarded entry checks the REAL field semantics (no value): destructive
         // hits require a grant; unconfirmed password fills reroute — a re-issued
         // call naming the password field carries the cue and passes.
-        return await runGuardedSelectorType(controller, tabId, selector, text, {
+        const result = await runGuardedSelectorType(controller, tabId, selector, text, {
           clearFirst,
           allowPasswordFill: argsCarryPasswordCue(JSON.stringify(args)),
+        })
+        return attachBrowserActionSessionOutput(result, {
+          toolName,
+          args,
+          controller,
+          sessionId,
+          currentUserText,
+          tabId,
+          nextSuggestedAction: 'read map again',
         })
       }
 
@@ -5505,9 +5925,32 @@ export async function executeBrowserTool(
         if (shouldGuardSubmit) {
           const attempted: string[] = ['type_smart_submit_guard']
           const submitState = await ensureGeminiSubmitted(controller, tabId, text, attempted, abortSignal)
-          return `${result}\n[chat-submit-guard] submitted=${submitState.submitted} method=${submitState.method}`
+          const confirmation = submitState.submitted ? await detectBrowserPageTransactionConfirmation(controller, tabId) : null
+          return attachBrowserActionSessionOutput(
+            `${result}\n[chat-submit-guard] submitted=${submitState.submitted} method=${submitState.method}`,
+            {
+              toolName,
+              args,
+              controller,
+              sessionId,
+              currentUserText,
+              tabId,
+              confirmation,
+              nextSuggestedAction: confirmation ? 'finish with transaction proof' : 'read map again',
+            },
+          )
         }
-        return result
+        const confirmation = submit ? await detectBrowserPageTransactionConfirmation(controller, tabId) : null
+        return attachBrowserActionSessionOutput(result, {
+          toolName,
+          args,
+          controller,
+          sessionId,
+          currentUserText,
+          tabId,
+          confirmation,
+          nextSuggestedAction: confirmation ? 'finish with transaction proof' : 'read map again',
+        })
       }
 
       case 'browser_compose_message': {
@@ -5530,9 +5973,32 @@ export async function executeBrowserTool(
         if (shouldGuardSubmit) {
           const attempted: string[] = ['compose_submit_guard']
           const submitState = await ensureGeminiSubmitted(controller, tabId, text, attempted, abortSignal)
-          return `${result}\n[chat-submit-guard] submitted=${submitState.submitted} method=${submitState.method}`
+          const confirmation = submitState.submitted ? await detectBrowserPageTransactionConfirmation(controller, tabId) : null
+          return attachBrowserActionSessionOutput(
+            `${result}\n[chat-submit-guard] submitted=${submitState.submitted} method=${submitState.method}`,
+            {
+              toolName,
+              args,
+              controller,
+              sessionId,
+              currentUserText,
+              tabId,
+              confirmation,
+              nextSuggestedAction: confirmation ? 'finish with transaction proof' : 'read map again',
+            },
+          )
         }
-        return result
+        const confirmation = submit ? await detectBrowserPageTransactionConfirmation(controller, tabId) : null
+        return attachBrowserActionSessionOutput(result, {
+          toolName,
+          args,
+          controller,
+          sessionId,
+          currentUserText,
+          tabId,
+          confirmation,
+          nextSuggestedAction: confirmation ? 'finish with transaction proof' : 'read map again',
+        })
       }
 
       case 'browser_capture_viewport': {
@@ -5550,12 +6016,19 @@ export async function executeBrowserTool(
           : undefined
         const base64 = await controller.screenshotAdvanced(tabId, { mode, clip })
         const metrics = await controller.getViewportMetrics(tabId)
+        const width = Math.round(metrics.width)
+        const height = Math.round(metrics.height)
+        const viewportZero = width <= 0 || height <= 0
         const imageId = cacheScreenshot(base64, Math.round(metrics.width), Math.round(metrics.height))
         return JSON.stringify({
           image_id: imageId,
-          width: Math.round(metrics.width),
-          height: Math.round(metrics.height),
+          width,
+          height,
           mode,
+          ...(viewportZero ? {
+            warning: 'viewport_zero_or_hidden',
+            nextSuggestedAction: 'Use browser_get_tabs to confirm active tab, then use browser_power_eval or browser_power_cdp(Page.getFrameTree / Runtime.evaluate) for iframe/OOPIF page structure instead of repeating viewport capture.',
+          } : {}),
         }, null, 2)
       }
 
@@ -6636,13 +7109,30 @@ export async function executeBrowserTool(
         // under the point; clicking a non-editable destructive-grant target is
         // refused before any mouse event, focusing an editable field is
         // allowed, and an unresolvable probe proceeds (visual channel stays usable).
+        const beforeTabs = snapshotBrowserTabs(controller)
         const point = await runGuardedCoordinateClick(controller, tabId, x, y, abortSignal)
-        return JSON.stringify({
+        const followedTab = await waitForActionFollowedTab(controller, tabId, beforeTabs, abortSignal)
+        const confirmation = await detectBrowserPageTransactionConfirmation(controller, followedTab?.tabId || tabId)
+        return attachBrowserActionSessionOutput(JSON.stringify({
           ok: true,
           normalized: { x: point.nx, y: point.ny },
           css: { x: point.cssX, y: point.cssY },
           viewport: { width: point.width, height: point.height },
-        }, null, 2)
+          followedTab,
+          nextSuggestedAction: followedTab ? `read map again on tab ${followedTab.tabId}` : 'read map again',
+        }, null, 2), {
+          toolName,
+          args,
+          controller,
+          sessionId,
+          currentUserText,
+          tabId,
+          followedTab,
+          confirmation,
+          nextSuggestedAction: confirmation
+            ? 'finish with transaction proof'
+            : (followedTab ? `read map again on tab ${followedTab.tabId}` : 'read map again'),
+        })
       }
 
       case 'browser_type_at': {
@@ -6666,13 +7156,23 @@ export async function executeBrowserTool(
           useShiftEnter,
           allowPasswordFill: argsCarryPasswordCue(JSON.stringify(args)),
         }, abortSignal)
-        return JSON.stringify({
+        const confirmation = pressEnter ? await detectBrowserPageTransactionConfirmation(controller, tabId) : null
+        return attachBrowserActionSessionOutput(JSON.stringify({
           ok: true,
           normalized: { x: point.nx, y: point.ny },
           css: { x: point.cssX, y: point.cssY },
           submitted: pressEnter,
           text_length: text.length,
-        }, null, 2)
+        }, null, 2), {
+          toolName,
+          args,
+          controller,
+          sessionId,
+          currentUserText,
+          tabId,
+          confirmation,
+          nextSuggestedAction: confirmation ? 'finish with transaction proof' : 'read map again',
+        })
       }
 
       case 'browser_scroll_at': {
@@ -6705,7 +7205,19 @@ export async function executeBrowserTool(
         const key = String(args.key || '').trim()
         if (!key) return 'Error: key is required'
         await sendKeyStroke(controller, tabId, key, args.modifiers)
-        return `Sent key: ${key}`
+        const confirmation = /^(Enter|Return)$/i.test(key)
+          ? await detectBrowserPageTransactionConfirmation(controller, tabId)
+          : null
+        return attachBrowserActionSessionOutput(`Sent key: ${key}`, {
+          toolName,
+          args,
+          controller,
+          sessionId,
+          currentUserText,
+          tabId,
+          confirmation,
+          nextSuggestedAction: confirmation ? 'finish with transaction proof' : 'read map again',
+        })
       }
 
       case 'browser_ask_user_takeover': {
@@ -6959,6 +7471,7 @@ export async function executeBrowserTool(
         const purpose = String(args.purpose || '').trim()
         if (!purpose) return 'Error: purpose is required'
         const tabId = (args.tab_id as string) || null
+        const frameId = String(args.frame_id || '').trim() || null
         const maxResultBytes = clampNumber(args.max_result_bytes, 20_000, 1024, 200_000)
         const timeoutMs = clampNumber(args.timeout_ms, 5000, 250, 30_000)
         const decision = resolvePowerDecisionForTool({
@@ -6974,7 +7487,37 @@ export async function executeBrowserTool(
           return browserPowerDeniedOutput(decision, { tool: toolName, purpose })
         }
         const url = activeBrowserToolUrl(controller, tabId)
-        const run = controller.executeJS(tabId, code)
+        const run = (async () => {
+          if (!frameId) return controller.executeJS(tabId, code)
+          const sendCdpCommand = (controller as {
+            sendCdpCommand?: (tabId: string | null, method: string, params?: Record<string, unknown>) => Promise<unknown>
+          }).sendCdpCommand
+          if (typeof sendCdpCommand !== 'function') {
+            throw new Error('browser_power_frame_eval_unavailable')
+          }
+          const world = await sendCdpCommand.call(controller, tabId, 'Page.createIsolatedWorld', {
+            frameId,
+            worldName: 'ready_power_eval',
+            grantUniveralAccess: true,
+          }) as Record<string, unknown>
+          const contextId = Number(world.executionContextId)
+          if (!Number.isFinite(contextId)) {
+            throw new Error('browser_power_frame_context_unavailable')
+          }
+          const evaluated = await sendCdpCommand.call(controller, tabId, 'Runtime.evaluate', {
+            expression: code,
+            contextId,
+            awaitPromise: true,
+            returnByValue: true,
+          }) as Record<string, unknown>
+          const resultObject = evaluated.result && typeof evaluated.result === 'object'
+            ? evaluated.result as Record<string, unknown>
+            : null
+          if (evaluated.exceptionDetails) {
+            throw new Error(JSON.stringify(evaluated.exceptionDetails).slice(0, 500))
+          }
+          return resultObject && 'value' in resultObject ? resultObject.value : resultObject
+        })()
         const result = await Promise.race([
           run,
           sleepWithAbort(timeoutMs, abortSignal).then(() => {
@@ -6990,10 +7533,11 @@ export async function executeBrowserTool(
           effects: decision.effects,
           purpose,
           codeSummary: summarizeCodeForAudit(code),
-          paramsSummary: { timeoutMs, maxResultBytes },
+          paramsSummary: { timeoutMs, maxResultBytes, frameId },
           resultSummary: { bytes: limited.bytes, truncated: limited.truncated },
         })
-        return JSON.stringify({
+        const confirmation = await detectBrowserPageTransactionConfirmation(controller, tabId)
+        return attachBrowserActionSessionOutput(JSON.stringify({
           ok: true,
           tool: toolName,
           powerMode: true,
@@ -7004,7 +7548,18 @@ export async function executeBrowserTool(
           result: limited.value,
           resultTruncated: limited.truncated,
           resultBytes: limited.bytes,
-        }, null, 2)
+          frameId,
+        }, null, 2), {
+          toolName,
+          args,
+          controller,
+          sessionId,
+          currentUserText,
+          tabId,
+          frameId,
+          confirmation,
+          nextSuggestedAction: confirmation ? 'finish with transaction proof' : 'read map again',
+        })
       }
 
       case 'browser_power_cdp': {
@@ -7013,6 +7568,7 @@ export async function executeBrowserTool(
         const purpose = String(args.purpose || '').trim()
         if (!purpose) return 'Error: purpose is required'
         const tabId = (args.tab_id as string) || null
+        const frameId = String(args.frame_id || '').trim() || null
         const params = args.params && typeof args.params === 'object' ? args.params as Record<string, unknown> : {}
         const decision = resolvePowerDecisionForTool({
           toolName,
@@ -7045,10 +7601,11 @@ export async function executeBrowserTool(
           url: activeBrowserToolUrl(controller, tabId),
           effects: decision.effects,
           purpose,
-          paramsSummary: { method, paramKeys: Object.keys(params).slice(0, 20) },
+          paramsSummary: { method, frameId, paramKeys: Object.keys(params).slice(0, 20) },
           resultSummary: { bytes: limited.bytes, truncated: limited.truncated },
         })
-        return JSON.stringify({
+        const confirmation = await detectBrowserPageTransactionConfirmation(controller, tabId)
+        return attachBrowserActionSessionOutput(JSON.stringify({
           ok: true,
           tool: toolName,
           grantId: decision.grantId,
@@ -7057,7 +7614,18 @@ export async function executeBrowserTool(
           effects: decision.effects,
           result: limited.value,
           resultTruncated: limited.truncated,
-        }, null, 2)
+          frameId,
+        }, null, 2), {
+          toolName,
+          args,
+          controller,
+          sessionId,
+          currentUserText,
+          tabId,
+          frameId,
+          confirmation,
+          nextSuggestedAction: confirmation ? 'finish with transaction proof' : 'read map again',
+        })
       }
 
       case 'browser_power_network_trace': {
@@ -7133,7 +7701,9 @@ export async function executeBrowserTool(
             paramsSummary: { durationMs, maxEvents, includeBodies },
             resultSummary: { eventCount: events.length, bodyCount: bodies.length },
           })
-          return JSON.stringify({
+          const confirmation = detectNetworkTransactionConfirmation(events, bodies)
+            || await detectBrowserPageTransactionConfirmation(controller, tabId)
+          return attachBrowserActionSessionOutput(JSON.stringify({
             ok: true,
             tool: toolName,
             grantId: decision.grantId,
@@ -7142,7 +7712,17 @@ export async function executeBrowserTool(
             eventCount: events.length,
             events,
             bodies,
-          }, null, 2)
+            transactionConfirmed: confirmation || undefined,
+          }, null, 2), {
+            toolName,
+            args,
+            controller,
+            sessionId,
+            currentUserText,
+            tabId,
+            confirmation,
+            nextSuggestedAction: confirmation ? 'finish with transaction proof' : 'read map again',
+          })
         } finally {
           await observer.stop().catch(() => undefined)
         }

@@ -28,6 +28,7 @@ const DEFAULT_CONFLICTS: Record<ReminderTopic, ReadonlyArray<ReminderTopic>> = {
   'background-task-terminal': [],
   // S4-3 — active plan step re-injection; no conflicts.
   'active-plan-step': [],
+  'browser-action-session': [],
 }
 
 export function composeSystemReminder(

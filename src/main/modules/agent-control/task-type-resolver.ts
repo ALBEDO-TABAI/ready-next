@@ -1,5 +1,6 @@
 import type { CapabilityRuntimeSnapshot } from '../../../shared/ai-capability-runtime'
 import { resolveBrowserBatchCollectionIntent } from '../../../shared/browser-collection-intent'
+import { resolveBrowserWorkflowIntent } from '../../../shared/browser-workflow-intent'
 import type { IntentClassification } from './intent-classifier'
 import type { RequestEnvelope } from './contracts/request-envelope'
 import type { TaskTypeResolution } from './contracts/run-contracts'
@@ -26,6 +27,7 @@ export function resolveTaskType(params: {
   const browserAvailable = params.capabilities.environment.browserHostAvailable
   const feishuConnected = params.capabilities.environment.feishuConnected
   const hasBrowserBatchCollection = resolveBrowserBatchCollectionIntent(userText)
+  const browserWorkflowIntent = resolveBrowserWorkflowIntent(userText)
   const hasConcreteBrowserWork =
     params.intent.actionSignals.length > 0
     || params.envelope.environmentHints.hasAttachments
@@ -66,6 +68,14 @@ export function resolveTaskType(params: {
         executionChain: 'direct',
         requiresPlanner: false,
         preferredExecutor: 'none',
+      }
+    }
+    if (browserWorkflowIntent.kind === 'transaction') {
+      return {
+        taskType: 'browser_transaction',
+        executionChain: 'tool_loop',
+        requiresPlanner: false,
+        preferredExecutor: 'browser',
       }
     }
     const looksLikeMediaTask = params.envelope.environmentHints.hasAttachments

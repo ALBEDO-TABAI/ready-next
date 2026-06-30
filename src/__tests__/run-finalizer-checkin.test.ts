@@ -18,7 +18,12 @@ import { finalizeRunOutcome, type RunOutcome } from '../main/modules/agent-contr
 import { projectionPatchFromChildClose } from '../main/modules/agent-control/runtime-core/agent-sdk-runtime'
 import { adjudicateTerminalOutcome, appendCheckIns, type CheckInRecord } from '../main/modules/agent-control/quality/task-adjudicator'
 import { resolveCriteria } from '../main/modules/agent-control/quality/criteria-templates'
-import { collectArtifactProof, collectToolOutputProofs, collectToolResultProof } from '../main/modules/agent-control/quality/proof-collector'
+import {
+  collectArtifactProof,
+  collectToolOutputProofs,
+  collectToolResultProof,
+  collectTransactionConfirmedProof,
+} from '../main/modules/agent-control/quality/proof-collector'
 import { createToolExecutionOutput } from '../main/modules/agent-control/tools-runtime/tool-result-types'
 import type { TaskProjectionRecord } from '../main/modules/agent-control/contracts/run-contracts'
 import { __setMetricSinkForTests, type AgentMetricEvent } from '../main/modules/agent-control/metrics'
@@ -59,6 +64,18 @@ function outcomeOf(kind: RunOutcome['kind'], taskId: string): RunOutcome {
   if (kind === 'done') return { kind, ...base, finalText: '最终回复' }
   if (kind === 'checkpoint') return { kind, ...base, continuationHandle: '/tmp/run_state.json', terminalReason: 'checkpoint', finalText: '断点说明' }
   return { kind, ...base, terminalReason: `${kind}_reason` } as RunOutcome
+}
+
+function budgetRuntime(taskType: TaskProjectionRecord['taskType']) {
+  return {
+    taskType,
+    budget: { maxIterations: 8, maxToolCalls: 8 },
+    usage: { iterationsUsed: 0, toolCallsUsed: 0 },
+    stepBudget: null,
+    warningLevel: 'none' as const,
+    frozen: false,
+    bootstrapBudget: false,
+  }
 }
 
 test('every RunOutcome.kind produces a CheckIn through the real funnel (enumerated, no hardcoded count)', async () => {
@@ -109,6 +126,108 @@ test('zero-proof done: verdict reject + divergence metric + terminal state downg
   } finally {
     __setMetricSinkForTests(null)
   }
+})
+
+test('browser_transaction without transaction_confirmed proof cannot finish as completed', async () => {
+  const store = fakeStore({
+    taskId: 'task-browser-transaction-missing',
+    taskType: 'browser_transaction' as never,
+    module: 'browser',
+    proofRefs: [collectToolResultProof('browser_click', 'clicked publish', NOW)],
+  })
+  const runMeta = new Map<string, Record<string, unknown>>()
+  const finalized = await finalizeRunOutcome({
+    kind: 'done',
+    runId: 'run-browser-transaction-missing',
+    taskId: 'task-browser-transaction-missing',
+    scopeId: 's1',
+    durationMs: 10,
+    toolCallsUsed: 1,
+    initiator: 'done',
+    finalText: '已发布',
+  }, {
+    writeRunCloseMetric: () => {},
+    runMetaRepository: {
+      get: (runId) => runMeta.get(runId) ?? null,
+      create: (input) => { runMeta.set(String(input.runId), input); return input },
+      update: (runId, patch) => { runMeta.set(runId, { ...runMeta.get(runId), ...patch }); return patch },
+    },
+    taskProjectionStore: store,
+    now: () => NOW,
+  })
+
+  const checkins = store.rows.get('task-browser-transaction-missing')!.checkins as CheckInRecord[]
+  assert.equal(checkins.at(-1)!.verdict, 'degraded')
+  assert.ok(checkins.at(-1)!.blockers.includes('criteria_unsatisfied:t1'))
+  assert.equal(finalized.status, 'error')
+  assert.equal(finalized.terminalReason, 'browser_transaction_unconfirmed')
+  assert.equal(runMeta.get('run-browser-transaction-missing')!.terminalReason, 'browser_transaction_unconfirmed')
+})
+
+test('browser_transaction with transaction_confirmed proof can complete', async () => {
+  const store = fakeStore({
+    taskId: 'task-browser-transaction-ok',
+    taskType: 'browser_transaction' as never,
+    module: 'browser',
+    proofRefs: [
+      collectToolResultProof('browser_power_network_trace', 'ok', NOW),
+      collectTransactionConfirmedProof('browser_power_network_trace:network:success_response', 'network success', NOW),
+    ],
+  })
+  const finalized = await finalizeRunOutcome({
+    kind: 'done',
+    runId: 'run-browser-transaction-ok',
+    taskId: 'task-browser-transaction-ok',
+    scopeId: 's1',
+    durationMs: 10,
+    toolCallsUsed: 1,
+    initiator: 'done',
+    finalText: '已发布',
+  }, {
+    writeRunCloseMetric: () => {},
+    taskProjectionStore: store,
+    now: () => NOW,
+  })
+
+  const checkins = store.rows.get('task-browser-transaction-ok')!.checkins as CheckInRecord[]
+  assert.equal(checkins.at(-1)!.verdict, 'accept')
+  assert.equal(finalized.status, 'done')
+  assert.equal(finalized.terminalReason, 'done')
+})
+
+test('browser_transaction adjudication unavailable does not silently complete; direct_answer remains tolerant', async () => {
+  const transaction = await finalizeRunOutcome({
+    kind: 'done',
+    runId: 'run-browser-transaction-no-store',
+    taskId: 'task-browser-transaction-no-store',
+    scopeId: 's1',
+    durationMs: 10,
+    toolCallsUsed: 1,
+    initiator: 'done',
+    finalText: '已发布',
+    taskBudgetRuntime: budgetRuntime('browser_transaction' as never),
+  }, {
+    writeRunCloseMetric: () => {},
+    now: () => NOW,
+  })
+  assert.equal(transaction.status, 'error')
+  assert.equal(transaction.terminalReason, 'browser_transaction_unconfirmed')
+
+  const direct = await finalizeRunOutcome({
+    kind: 'done',
+    runId: 'run-direct-no-store',
+    taskId: 'task-direct-no-store',
+    scopeId: 's1',
+    durationMs: 10,
+    toolCallsUsed: 0,
+    initiator: 'done',
+    finalText: '直接回答',
+    taskBudgetRuntime: budgetRuntime('direct_answer' as never),
+  }, {
+    writeRunCloseMetric: () => {},
+    now: () => NOW,
+  })
+  assert.equal(direct.status, 'done')
 })
 
 function skillRunDeps(runMeta: Map<string, Record<string, unknown>>, verifyRunStateTerminal: (p: string) => boolean) {

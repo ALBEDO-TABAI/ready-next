@@ -426,6 +426,11 @@ function resolveTerminalResumableActions(
     return ['continue', 'cancel']
   }
   if (reason === 'blocked_tool_error') return ['retry', 'cancel']
+  if (reason === 'browser_transaction_unconfirmed') {
+    return summary.taskContinuation || previous?.continuationRef
+      ? ['continue', 'retry', 'cancel']
+      : ['retry', 'cancel']
+  }
   if (reason === 'manual_suspend') {
     return summary.taskContinuation || previous?.continuationRef
       ? ['continue', 'cancel']
@@ -488,6 +493,7 @@ function resolveTerminalBlockedReason(reason?: ScopeRunSummary['terminalReason']
   if (reason === 'blocked_config') return '当前模型或配置不支持这次请求，请切换模型、修复设置或移除不支持的附件后重新发送。'
   if (reason === 'blocked_external') return '等待外部条件'
   if (reason === 'blocked_tool_error') return '工具执行遇到问题'
+  if (reason === 'browser_transaction_unconfirmed') return '网页操作还没有成功证据，可以继续这项任务。'
   if (reason === 'context_overflow') return '上下文已超限'
   if (reason === 'adjudication_degraded') return '已生成结果，仍有待确认项'
   if (reason === 'delivery_failed') return '发送没有完成'

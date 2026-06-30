@@ -180,7 +180,13 @@ interface EffectiveTaskFacts {
   skillExecutionForm: SkillExecutionForm | null
 }
 
-type TerminalFailureReason = 'delivery_failed' | 'tool_unavailable' | 'no_artifact' | 'proof_gap' | 'adjudication_degraded'
+type TerminalFailureReason =
+  | 'delivery_failed'
+  | 'tool_unavailable'
+  | 'no_artifact'
+  | 'proof_gap'
+  | 'adjudication_degraded'
+  | 'browser_transaction_unconfirmed'
 
 type EnforceMode = 'enforce' | 'degraded_visible'
 
@@ -200,7 +206,9 @@ interface TerminalAdjudicationDecision {
 function canKeepProofBearingDegradedVisible(
   adjudication: TerminalAdjudicationDecision,
   projectionPatch: Record<string, unknown> | null | undefined,
+  facts?: EffectiveTaskFacts | null,
 ): boolean {
+  if (isBrowserTransactionTask(facts)) return false
   if (adjudication.verdict !== 'degraded') return false
   if (adjudication.proofCount <= 0) return false
   if (adjudication.blockers.some((blocker) => blocker === 'criteria_unsatisfied:s1')) return false
@@ -218,7 +226,12 @@ const TERMINAL_FAILURE_REASONS = new Set<TerminalFailureReason>([
   'no_artifact',
   'proof_gap',
   'adjudication_degraded',
+  'browser_transaction_unconfirmed',
 ])
+
+function isBrowserTransactionTask(facts?: EffectiveTaskFacts | null): boolean {
+  return facts?.taskType === 'browser_transaction'
+}
 
 export function buildTerminalProjectionPatch(params: {
   nextTaskId: string
@@ -396,7 +409,9 @@ function resolveEffectiveTaskFacts(
     } catch { /* facts degrade to patch-only */ }
   }
   return {
-    taskType: (typeof patch?.taskType === 'string' && patch.taskType ? patch.taskType : rowTaskType),
+    taskType: (typeof patch?.taskType === 'string' && patch.taskType
+      ? patch.taskType
+      : rowTaskType || outcome.taskBudgetRuntime?.taskType || null),
     module: (typeof patch?.module === 'string' && patch.module ? patch.module : rowModule),
     skillExecutionForm: normalizeSkillExecutionForm(patch?.skillExecutionForm),
   }
@@ -412,19 +427,26 @@ async function writeTerminalOutcome(
   const adjudication = recordTerminalAdjudication(outcome, deps, status, terminalReason, facts)
   let effectiveStatus: RunMetaTerminalStatus = status
   let effectiveTerminalReason = terminalReason
+  if (status === 'done' && !adjudication && isBrowserTransactionTask(facts)) {
+    effectiveStatus = 'error'
+    effectiveTerminalReason = 'browser_transaction_unconfirmed'
+  }
   if (status === 'done' && adjudication && adjudication.verdict !== 'accept') {
     const taskContinuation = continuationFromProjectionPatch(outcome.projectionPatch)
-    if (canResumeAsUserPoint(taskContinuation)) {
+    if (isBrowserTransactionTask(facts)) {
+      effectiveStatus = 'error'
+      effectiveTerminalReason = resolveTerminalFailureReason(outcome.projectionPatch, adjudication, facts)
+    } else if (canResumeAsUserPoint(taskContinuation)) {
       effectiveStatus = 'checkpoint'
       effectiveTerminalReason = 'checkpoint_budget'
-    } else if (canKeepProofBearingDegradedVisible(adjudication, outcome.projectionPatch)) {
+    } else if (canKeepProofBearingDegradedVisible(adjudication, outcome.projectionPatch, facts)) {
       // P1: a run that DID produce proofs but has unsatisfied criteria stays
       // 'done' with a visible degraded reason — does not force-fail the run.
       // Only zero-proof rejects are hard-converted in this mode.
       effectiveTerminalReason = 'adjudication_degraded'
     } else {
       effectiveStatus = 'error'
-      effectiveTerminalReason = resolveTerminalFailureReason(outcome.projectionPatch, adjudication)
+      effectiveTerminalReason = resolveTerminalFailureReason(outcome.projectionPatch, adjudication, facts)
     }
   }
   writeRunMetaOutcome(outcome, deps, effectiveStatus, effectiveTerminalReason)
@@ -444,6 +466,7 @@ function readTerminalFailureReason(value: unknown): TerminalFailureReason | null
 function resolveTerminalFailureReason(
   projectionPatch: Record<string, unknown> | null | undefined,
   adjudication: TerminalAdjudicationDecision,
+  facts?: EffectiveTaskFacts | null,
 ): TerminalFailureReason {
   const directReason = readTerminalFailureReason(projectionPatch?.terminalFailureReason)
   if (directReason) return directReason
@@ -460,7 +483,11 @@ function resolveTerminalFailureReason(
   // Conflating both as proof_gap hid the real cause (a degraded run looks like
   // "no evidence" when it actually had evidence but unmet criteria).
   if (adjudication.blockers.includes('zero_proof_done') || adjudication.proofCount === 0) {
+    if (isBrowserTransactionTask(facts)) return 'browser_transaction_unconfirmed'
     return 'proof_gap'
+  }
+  if (isBrowserTransactionTask(facts) || adjudication.blockers.includes('criteria_unsatisfied:t1')) {
+    return 'browser_transaction_unconfirmed'
   }
   return 'adjudication_degraded'
 }

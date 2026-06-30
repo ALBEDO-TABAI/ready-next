@@ -44,6 +44,14 @@ test('module overlays append on top of the base — never replace it', () => {
   assert.ok(overlaid.items.some((item) => item.text.includes('项数达标') || item.text.includes('空结果')))
 })
 
+test('browser_transaction uses transaction confirmation criteria, not browser collection overlay', () => {
+  const resolved = resolveCriteria('browser_transaction', 'browser')
+  assert.deepEqual(resolved.items.map((item) => item.id), ['t1'])
+  assert.equal(resolved.items[0].kind, 'transaction_confirmed')
+  assert.equal(resolved.items.some((item) => item.kind === 'collection_verdict'), false)
+  assert.equal(resolved.items.some((item) => item.kind === 'result_parseable'), false)
+})
+
 test('direct_answer: assistant_response digest is the proof expectation, with the action-declaration escape hatch sealed', () => {
   const resolved = resolveCriteria('direct_answer', 'system')
   assert.equal(resolved.proofExpectation, 'assistant_response_digest')

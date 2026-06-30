@@ -79,7 +79,8 @@ export function resolveCapabilityResolution(params: {
   const defaultIntentModes: Partial<Record<CapabilityGroupId, boolean>> = {
     browser_interaction:
       params.browserDecisionMode === 'browser_workflow' || params.browserDecisionMode === 'browser_upload_workflow',
-    browser_content_tasks: params.browserDecisionMode === 'browser_workflow',
+    browser_content_tasks:
+      params.browserDecisionMode === 'browser_workflow' || params.browserDecisionMode === 'browser_upload_workflow',
   }
 
   const mergedIntentModes = {

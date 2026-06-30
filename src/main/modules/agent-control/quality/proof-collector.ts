@@ -23,7 +23,7 @@ import {
   type ToolExecutionOutput,
 } from '../tools-runtime/tool-result-types'
 
-export const PROOF_KINDS = ['tool_result', 'artifact', 'task_event', 'run_state', 'assistant_response'] as const
+export const PROOF_KINDS = ['tool_result', 'artifact', 'task_event', 'run_state', 'assistant_response', 'transaction_confirmed'] as const
 export type ProofKind = (typeof PROOF_KINDS)[number]
 
 export interface ProofRef {
@@ -63,6 +63,10 @@ export function collectTaskEventProof(payload: { taskId: string; status: string 
 
 export function collectRunStateProof(runStateRef: string, now: Date): ProofRef {
   return proof('run_state', runStateRef, runStateRef, now)
+}
+
+export function collectTransactionConfirmedProof(ref: string, digestSource: string, now: Date): ProofRef {
+  return proof('transaction_confirmed', ref, digestSource, now)
 }
 
 /** sha256 + truncated excerpt, never the full reply. Empty reply → null
@@ -164,6 +168,34 @@ function collectPathCandidatesFromText(text: string, paths: Set<string>): void {
   }
 }
 
+function transactionConfirmationFromRecord(record: Record<string, unknown> | null): Record<string, unknown> | null {
+  if (!record) return null
+  const direct = record.transactionConfirmed && typeof record.transactionConfirmed === 'object' && !Array.isArray(record.transactionConfirmed)
+    ? record.transactionConfirmed as Record<string, unknown>
+    : null
+  if (direct?.confirmed === true) return direct
+  const progress = record.progress && typeof record.progress === 'object' && !Array.isArray(record.progress)
+    ? record.progress as Record<string, unknown>
+    : null
+  const session = progress?.browserActionSession && typeof progress.browserActionSession === 'object' && !Array.isArray(progress.browserActionSession)
+    ? progress.browserActionSession as Record<string, unknown>
+    : null
+  const confirmation = session?.confirmation && typeof session.confirmation === 'object' && !Array.isArray(session.confirmation)
+    ? session.confirmation as Record<string, unknown>
+    : null
+  return confirmation?.confirmed === true ? confirmation : null
+}
+
+function transactionConfirmationRef(toolName: string, confirmation: Record<string, unknown>): string {
+  const source = typeof confirmation.source === 'string' && confirmation.source.trim()
+    ? confirmation.source.trim()
+    : 'unknown'
+  const signal = typeof confirmation.signal === 'string' && confirmation.signal.trim()
+    ? confirmation.signal.trim()
+    : 'confirmed'
+  return `${toolName}:${source}:${signal}`.slice(0, 200)
+}
+
 export function collectToolOutputProofs(toolName: string, output: ToolExecutionOutput, now: Date): ProofRef[] {
   const normalized = normalizeToolExecutionOutput(output)
   if (isFailedToolOutput(normalized)) return []
@@ -172,6 +204,9 @@ export function collectToolOutputProofs(toolName: string, output: ToolExecutionO
   const proofs: ProofRef[] = []
   const paths = new Set<string>()
   const dataRecord = recordValue(normalized.data)
+  const transactionConfirmation =
+    transactionConfirmationFromRecord(dataRecord)
+    || transactionConfirmationFromRecord(recordValue(normalized.projectionPatch))
   if (toolName === 'document_save_tab') {
     collectVerifiedDocumentSavePaths(toolName, dataRecord, paths)
   } else {
@@ -185,6 +220,13 @@ export function collectToolOutputProofs(toolName: string, output: ToolExecutionO
     : collectToolResultProof(toolName, summary.slice(0, 500), now))
   for (const path of paths) {
     proofs.push(collectArtifactProof(path, now))
+  }
+  if (transactionConfirmation) {
+    proofs.push(collectTransactionConfirmedProof(
+      transactionConfirmationRef(toolName, transactionConfirmation),
+      JSON.stringify(transactionConfirmation),
+      now,
+    ))
   }
   // NOTE: a bare `runStatePath` is NOT minted as a `run_state` proof here — a
   // skill child emits its runStatePath at START (still running). The `run_state`

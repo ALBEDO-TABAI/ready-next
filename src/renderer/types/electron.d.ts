@@ -474,6 +474,7 @@ interface ScopeRunSkillProgressData {
   activityUpdatedAt?: string | null
   handoff?: ScopeRunSkillHandoffData | null
   browserCollectionConsent?: BrowserCollectionConsentProgressData | null
+  browserActionSession?: BrowserActionSessionProgressData | null
 }
 
 interface BrowserCollectionConsentProgressData {
@@ -484,6 +485,35 @@ interface BrowserCollectionConsentProgressData {
   warningText?: string | null
   message?: string | null
   createdAt?: string | null
+}
+
+interface BrowserActionSessionProgressData {
+  targetTabId: string | null
+  targetFrameId: string | null
+  frameUrl: string | null
+  frameOrigin: string | null
+  currentUrl: string | null
+  origin: string | null
+  lastAction: string | null
+  lastFollowedTab: {
+    tabId: string
+    url: string | null
+    title: string | null
+    reason: string | null
+  } | null
+  transactionStatus: 'active' | 'confirmed'
+  confirmation: {
+    confirmed: true
+    source: 'page_text' | 'public_url' | 'network' | 'site_strategy'
+    signal: string
+    urlHash?: string | null
+    resourceIdHash?: string | null
+    statusCode?: number | null
+    textHash?: string | null
+    observedAt: string
+  } | null
+  nextSuggestedAction: string | null
+  updatedAt: string
 }
 
 interface ScopeRunSkillHandoffData {
@@ -813,6 +843,7 @@ type ScopeRunTerminalReasonData =
   | 'no_artifact'
   | 'proof_gap'
   | 'adjudication_degraded'
+  | 'browser_transaction_unconfirmed'
   | 'failed_skill'
   | 'resume_launch_failed'
   | 'persistence_failed'

@@ -15,6 +15,7 @@ export type TurnTerminalReason =
   | 'context_overflow'
   | 'blocked_tool_error'
   | 'adjudication_degraded'
+  | 'browser_transaction_unconfirmed'
   | 'delivery_failed'
   | 'tool_unavailable'
   | 'no_artifact'
@@ -310,6 +311,7 @@ const TURN_TERMINAL_REASON_RANK: Record<TurnTerminalReason, number> = {
   context_overflow: 65,
   blocked_tool_error: 60,
   adjudication_degraded: 60,
+  browser_transaction_unconfirmed: 60,
   delivery_failed: 60,
   tool_unavailable: 60,
   no_artifact: 60,

@@ -288,6 +288,7 @@ export interface ScopeRunSkillProgress {
   activityUpdatedAt?: string | null
   handoff?: ScopeRunSkillHandoff | null
   browserCollectionConsent?: BrowserCollectionConsentProgress | null
+  browserActionSession?: BrowserActionSessionProgress | null
 }
 
 export interface BrowserCollectionConsentProgress {
@@ -298,6 +299,35 @@ export interface BrowserCollectionConsentProgress {
   warningText?: string | null
   message?: string | null
   createdAt?: string | null
+}
+
+export interface BrowserActionSessionProgress {
+  targetTabId: string | null
+  targetFrameId: string | null
+  frameUrl: string | null
+  frameOrigin: string | null
+  currentUrl: string | null
+  origin: string | null
+  lastAction: string | null
+  lastFollowedTab: {
+    tabId: string
+    url: string | null
+    title: string | null
+    reason: string | null
+  } | null
+  transactionStatus: 'active' | 'confirmed'
+  confirmation: {
+    confirmed: true
+    source: 'page_text' | 'public_url' | 'network' | 'site_strategy'
+    signal: string
+    urlHash?: string | null
+    resourceIdHash?: string | null
+    statusCode?: number | null
+    textHash?: string | null
+    observedAt: string
+  } | null
+  nextSuggestedAction: string | null
+  updatedAt: string
 }
 
 export interface ScopeRunSkillHandoff {

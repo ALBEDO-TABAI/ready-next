@@ -215,6 +215,7 @@ export const BrowserPowerEvalSchema = z.object({
   purpose: z.string().describe('本次 eval 的用户可理解目的，用于授权和审计。'),
   expected_effects: z.array(BrowserPowerEffectSchema).optional().describe('本次调用预期产生的效果；未传默认 observe。破坏性效果必须有单独 grant。'),
   tab_id: TabIdOptional,
+  frame_id: z.string().optional().describe('可选：CDP frameId；传入时在该 frame 的 isolated world 中执行。'),
   timeout_ms: z.number().optional().describe('执行超时，默认 5000，最大 30000'),
   max_result_bytes: z.number().optional().describe('返回结果最大字节数，默认 20000，最大 200000'),
   grant_id: z.string().optional().describe('可选：已由用户确认的 Power grant id；模型不能自行伪造 grant。'),
@@ -226,6 +227,7 @@ export const BrowserPowerCdpSchema = z.object({
   purpose: z.string().describe('本次 CDP 调用的用户可理解目的，用于授权和审计。'),
   expected_effects: z.array(BrowserPowerEffectSchema).optional().describe('预期效果；未传会按方法名推断 observe/page_mutation。'),
   tab_id: TabIdOptional,
+  frame_id: z.string().optional().describe('可选：用于记录/定位目标 frame，CDP params 仍由 method 自行决定。'),
   grant_id: z.string().optional().describe('可选：已由用户确认的 Power grant id。'),
 })
 

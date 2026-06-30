@@ -266,7 +266,7 @@ const parityCases: CapabilityCase[] = [
     },
   },
   {
-    name: 'browser upload workflow exposes interaction but suppresses content tasks',
+    name: 'browser upload workflow exposes interaction and power/content tasks',
     userText: '去网页上传这张图片',
     browserDecisionMode: 'browser_upload_workflow',
     expectedToolPolicy: {
@@ -424,6 +424,41 @@ test('P9C keeps browser resource tools when a reference skill is selected', () =
   assert.ok(toolNames.includes('browser_download_urls'))
   assert.equal(toolNames.includes('browser_type'), false)
   assert.equal(toolNames.includes('browser_execute_js'), false)
+})
+
+test('P9C keeps full browser tools for publish continuations with a reference skill selected', () => {
+  const userText = [
+    '## 最近会话摘要',
+    '上一轮用户要：在小红书网页发布一篇笔记。',
+    '',
+    '### 浏览页面引用',
+    '标题: 小红书创作服务平台',
+    'URL: https://creator.xiaohongshu.com/publish/publish',
+    '',
+    '用户: 继续',
+  ].join('\n')
+  const requestEnvelope = {
+    primaryInstruction: '继续',
+    rawUserText: userText,
+    resources: [],
+  }
+  const authorization = buildSelectedSkillToolAuthorization({
+    skillId: 'extract',
+    allowedTypedActions: [],
+    allowedPrimitives: ['skill_read_artifact', 'skill_write_artifact', 'skill_export_artifact'],
+    source: 'active_task',
+    reason: 'reference_hint',
+  })
+  const toolNames = listLiveSdkDefaultToolNames({ userText, requestEnvelope, authorization })
+
+  assert.ok(toolNames.includes('skill_read_artifact'))
+  assert.ok(toolNames.includes('skill_write_artifact'))
+  assert.ok(toolNames.includes('browser_navigate'))
+  assert.ok(toolNames.includes('browser_click'))
+  assert.ok(toolNames.includes('browser_type'))
+  assert.ok(toolNames.includes('browser_capture_viewport'))
+  assert.ok(toolNames.includes('browser_power_eval'))
+  assert.ok(toolNames.includes('browser_power_cdp'))
 })
 
 test('P9C bare retry keeps resource tools despite upload words in recalled context', () => {
@@ -748,5 +783,6 @@ test('P6e keeps reconcileAfterBrowserDecision parity for late browser upload dec
   assertCapabilityResolutionParity('late browser upload reconciliation', reconciled.capabilityResolution, sdkUpload)
   assert.equal(reconciled.toolPolicy.allowBrowserTools, true)
   assert.ok(reconciled.allowedToolNames.includes('browser_click'))
-  assert.ok(!reconciled.allowedToolNames.includes('browser_extract_structured'))
+  assert.ok(reconciled.allowedToolNames.includes('browser_extract_structured'))
+  assert.ok(reconciled.allowedToolNames.includes('browser_power_eval'))
 })

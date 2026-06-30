@@ -76,6 +76,31 @@ test('tool output proofs include successful tool results and saved artifact path
   assert.deepEqual(failed, [])
 })
 
+test('tool output proofs mint transaction_confirmed only from explicit confirmation signal', () => {
+  const proofs = collectToolOutputProofs('browser_power_network_trace', createToolExecutionOutput('发布 API 成功', {
+    shape: 'json',
+    data: {
+      ok: true,
+      transactionConfirmed: {
+        confirmed: true,
+        source: 'network',
+        signal: 'success_response',
+        statusCode: 200,
+        observedAt: NOW.toISOString(),
+      },
+    },
+  }), NOW)
+
+  assert.ok(proofs.some((row) => row.kind === 'tool_result'))
+  assert.ok(proofs.some((row) => row.kind === 'transaction_confirmed'))
+
+  const ordinary = collectToolOutputProofs('browser_power_network_trace', createToolExecutionOutput('普通 2xx', {
+    shape: 'json',
+    data: { ok: true, statusCode: 200 },
+  }), NOW)
+  assert.equal(ordinary.some((row) => row.kind === 'transaction_confirmed'), false)
+})
+
 test('unsaved document mutations do not mint artifact delivery proof from documentPath', () => {
   const proofs = collectToolOutputProofs('document_set_content', createToolExecutionOutput('已写入内容，尚未保存', {
     shape: 'json',

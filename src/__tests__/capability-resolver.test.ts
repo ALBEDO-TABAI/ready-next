@@ -99,8 +99,8 @@ test('resolver differentiates browser interaction and browser content task visib
   })
 
   assert.ok(uploadResolution.visibleCapabilityGroupIds.includes('browser_interaction'))
-  assert.ok(!uploadResolution.visibleCapabilityGroupIds.includes('browser_content_tasks'))
-  assert.equal(uploadResolution.groupStates.browser_content_tasks.reason, 'run_intent_suppressed')
+  assert.ok(uploadResolution.visibleCapabilityGroupIds.includes('browser_content_tasks'))
+  assert.equal(uploadResolution.groupStates.browser_content_tasks.reason, 'enabled')
 
   assert.ok(researchResolution.visibleCapabilityGroupIds.includes('browser_interaction'))
   assert.ok(researchResolution.visibleCapabilityGroupIds.includes('browser_content_tasks'))

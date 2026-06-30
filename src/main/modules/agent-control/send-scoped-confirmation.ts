@@ -11,6 +11,7 @@ export type SendScopedErrorKind =
   | 'context_overflow'
   | 'blocked_tool_error'
   | 'adjudication_degraded'
+  | 'browser_transaction_unconfirmed'
   | 'delivery_failed'
   | 'tool_unavailable'
   | 'no_artifact'
@@ -198,6 +199,7 @@ const SEND_SCOPED_ERROR_KINDS = new Set<SendScopedErrorKind>([
   'context_overflow',
   'blocked_tool_error',
   'adjudication_degraded',
+  'browser_transaction_unconfirmed',
   'delivery_failed',
   'tool_unavailable',
   'no_artifact',

@@ -261,7 +261,12 @@ export interface AgentSdkRuntimeDeps {
   getScopeTaskRefs?: (scopeId: string) => FollowupTaskRef[]
 }
 
-export type TerminalFailureReason = 'delivery_failed' | 'tool_unavailable' | 'no_artifact' | 'proof_gap'
+export type TerminalFailureReason =
+  | 'delivery_failed'
+  | 'tool_unavailable'
+  | 'no_artifact'
+  | 'proof_gap'
+  | 'browser_transaction_unconfirmed'
 
 /** One tool result inside a native-SDK tool-bridge turn (name + args + structured output). */
 export interface ToolBridgeResultItem {

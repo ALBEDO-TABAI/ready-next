@@ -45,6 +45,7 @@ const CRITERIA_PROOF_MAP: Record<CriteriaKind, ReadonlyArray<ProofRef['kind']>> 
   skill_run_state: ['run_state'],
   document_diff: ['artifact', 'tool_result'],
   scope_compliance: ['tool_result', 'artifact'],
+  transaction_confirmed: ['transaction_confirmed'],
 }
 
 export interface AdjudicationInput {

@@ -34,6 +34,7 @@ export type ReminderTopic =
   | 'background-task-terminal'
   // S4-3 — active plan current-step re-injection (verify=weak). No conflicts.
   | 'active-plan-step'
+  | 'browser-action-session'
 
 export interface ReminderEntry {
   readonly topic: ReminderTopic

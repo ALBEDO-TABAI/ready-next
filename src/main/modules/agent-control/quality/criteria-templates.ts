@@ -27,6 +27,7 @@ export type CriteriaKind =
   | 'skill_run_state'
   | 'document_diff'
   | 'scope_compliance'
+  | 'transaction_confirmed'
 
 export interface CriteriaItem {
   id: string
@@ -75,6 +76,9 @@ const BASE_TEMPLATES: Record<TaskType, CriteriaItem[]> = {
   media_task: [
     item('c1', 'media_file', '媒体产物文件存在且可打开'),
   ],
+  browser_transaction: [
+    item('t1', 'transaction_confirmed', '网页事务已由代码侧成功信号确认'),
+  ],
 }
 
 const OVERLAY_TEMPLATES: Record<string, CriteriaItem[]> = {
@@ -113,7 +117,9 @@ export function resolveCriteria(
   },
 ): ResolvedCriteria {
   const base = BASE_TEMPLATES[taskType] ?? BASE_TEMPLATES.short_task
-  const overlay = OVERLAY_TEMPLATES[module] ?? []
+  const overlay = taskType === 'browser_transaction' && module === 'browser'
+    ? []
+    : OVERLAY_TEMPLATES[module] ?? []
   const items = [...base, ...overlay].map((entry) => ({ ...entry }))
   // `s1`/skill_run_state can ONLY be satisfied by a `run_state` proof, minted
   // only when a child run actually produced run_state.json (done) +

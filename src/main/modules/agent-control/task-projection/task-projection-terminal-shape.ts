@@ -10,6 +10,7 @@ export function resolveTerminalProjectionInteractionState(
   }
   if (
     reason === 'blocked_tool_error'
+    || reason === 'browser_transaction_unconfirmed'
     || reason === 'checkpoint_budget'
     || reason === 'checkpoint_background'
     || reason === 'manual_suspend'
