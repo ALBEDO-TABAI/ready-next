@@ -393,7 +393,11 @@ export default function DocumentMode({
     }
   }, [documentSplitRatio])
 
-  // Open the file selected in SidePanel
+  // Open the file selected in SidePanel. This must react only to a *new selection*
+  // (selectedFile / hasActivated), never to ongoing tab state — otherwise switching
+  // tabs or browsing another image re-fires the effect and snaps the active tab back
+  // to the selected file, locking the document view. Tab state and workspace roots are
+  // therefore read live at execution time, not through the dependency array.
   useEffect(() => {
     if (!hasActivated || !selectedFile) return undefined
 
@@ -408,7 +412,8 @@ export default function DocumentMode({
       const isDirectory = result?.data?.isDirectory ?? result?.stat?.isDirectory ?? false
       if (!disposed && result?.success && !isDirectory && !isLocalHtmlFilePath(selectedFile)) {
         setEditorMode('preview')
-        const activeTab = tabs.find((tab) => tab.id === activeTabId)
+        const { tabs: currentTabs, activeTabId: currentActiveTabId } = useDocTabs.getState()
+        const activeTab = currentTabs.find((tab) => tab.id === currentActiveTabId)
         const keepBoardActive = isReadyBoardFile(activeTab?.path) && !isReadyBoardFile(selectedFile)
         if (isImagePreviewPath(selectedFile)) {
           openImageTab(selectedFile, { activate: !keepBoardActive })
@@ -421,7 +426,7 @@ export default function DocumentMode({
           path: selectedFile,
           eventType: 'open',
           source: 'document_mode',
-          workspaceRoots: documentWorkspaceRoots,
+          workspaceRoots: documentWorkspaceRootsRef.current,
         })
       }
     })()
@@ -429,7 +434,7 @@ export default function DocumentMode({
     return () => {
       disposed = true
     }
-  }, [activeTabId, documentWorkspaceRoots, ensureTabForPath, hasActivated, openImageTab, openTab, selectedFile, tabs])
+  }, [ensureTabForPath, hasActivated, openImageTab, openTab, selectedFile])
 
   useEffect(() => {
     const handler = () => {
