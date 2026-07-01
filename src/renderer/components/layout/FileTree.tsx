@@ -29,6 +29,13 @@ import {
 } from '@tabler/icons-react'
 import Modal from '../ui/Modal'
 import { computeDesiredRoots, useWorkspace, type FileItem } from '../../stores/useWorkspace'
+import {
+  FILE_APPEARANCE_COLORS,
+  getFileAppearanceColorValue,
+  normalizeFileAppearanceIcon,
+  type FileAppearance,
+  type FileAppearanceColor,
+} from '../../stores/fileAppearance'
 import { addReadyContextReferenceToAgentInput } from '../../modules/agent/chat-input-bridge'
 import { isImagePreviewPath, useDocTabs } from '../../stores/useDocTabs'
 import type { WorkbenchMode } from '../../stores/useMode'
@@ -198,22 +205,73 @@ function formatSize(bytes: number): string {
   return `${(bytes / 1048576).toFixed(1)}MB`
 }
 
-function fileIcon(item: FileItem, _expanded = false) {
+function FileAppearanceColorDot({
+  appearance,
+  size = 7,
+  style,
+}: {
+  appearance?: FileAppearance
+  size?: number
+  style?: React.CSSProperties
+}) {
+  const color = getFileAppearanceColorValue(appearance?.color)
+  if (!color) return null
+  return (
+    <span
+      aria-hidden
+      style={{
+        display: 'block',
+        width: size,
+        height: size,
+        borderRadius: '50%',
+        background: color,
+        border: '1px solid rgba(255,255,255,0.82)',
+        boxShadow: '0 1px 3px rgba(0,0,0,0.18)',
+        ...style,
+      }}
+    />
+  )
+}
+
+function CustomFileIcon({ icon, size }: { icon: string; size: number }) {
+  return (
+    <span
+      aria-hidden
+      style={{
+        width: size,
+        height: size,
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        fontSize: Math.max(11, Math.round(size * 0.9)),
+        lineHeight: 1,
+        color: 'var(--text-title)',
+      }}
+    >
+      {icon}
+    </span>
+  )
+}
+
+function fileIcon(item: FileItem, _expanded = false, appearance?: FileAppearance, iconSize = 14) {
+  const customIcon = appearance?.icon
+  if (customIcon) return <CustomFileIcon icon={customIcon} size={iconSize} />
+
   // 文件夹始终用 Folder。展开/折叠状态已由 chevron 表达，避免 Folder ↔ FolderOpen
   // 在小尺寸（14px）下因笔触差异让顶层与子层视觉不一致。
-  const iconStyle = { color: 'var(--text-muted)' }
+  const iconStyle = { color: 'var(--text-muted)', width: iconSize, height: iconSize }
   const iconStroke = 1.75
   if (item.isDirectory) {
-    return <Folder className="w-[14px] h-[14px]" style={iconStyle} strokeWidth={iconStroke} />
+    return <Folder style={iconStyle} strokeWidth={iconStroke} />
   }
   const kind = getFileKind(item)
-  if (kind === 'image') return <Image className="w-[14px] h-[14px]" style={iconStyle} strokeWidth={iconStroke} />
-  if (kind === 'video') return <Film className="w-[14px] h-[14px]" style={iconStyle} strokeWidth={iconStroke} />
-  if (kind === 'audio') return <Music2 className="w-[14px] h-[14px]" style={iconStyle} strokeWidth={iconStroke} />
-  if (kind === 'spreadsheet') return <FileSpreadsheet className="w-[14px] h-[14px]" style={iconStyle} strokeWidth={iconStroke} />
-  if (isEbookExtension(getFileExt(item))) return <BookOpen className="w-[14px] h-[14px]" style={iconStyle} strokeWidth={iconStroke} />
-  if (kind === 'design') return <Pen className="w-[14px] h-[14px]" style={iconStyle} strokeWidth={iconStroke} />
-  return <FileText className="w-[14px] h-[14px]" style={iconStyle} strokeWidth={iconStroke} />
+  if (kind === 'image') return <Image style={iconStyle} strokeWidth={iconStroke} />
+  if (kind === 'video') return <Film style={iconStyle} strokeWidth={iconStroke} />
+  if (kind === 'audio') return <Music2 style={iconStyle} strokeWidth={iconStroke} />
+  if (kind === 'spreadsheet') return <FileSpreadsheet style={iconStyle} strokeWidth={iconStroke} />
+  if (isEbookExtension(getFileExt(item))) return <BookOpen style={iconStyle} strokeWidth={iconStroke} />
+  if (kind === 'design') return <Pen style={iconStyle} strokeWidth={iconStroke} />
+  return <FileText style={iconStyle} strokeWidth={iconStroke} />
 }
 
 interface FileTreeExternalDropMenuState {
@@ -221,6 +279,12 @@ interface FileTreeExternalDropMenuState {
   y: number
   payload: FileTreeExternalDropPayload
   target: FileTreeDropTarget
+}
+
+interface FileAppearanceColorMenuState {
+  x: number
+  y: number
+  item: FileItem
 }
 
 interface PutDragDataOptions {
@@ -380,6 +444,7 @@ function FileTreeItem({
   draggableEnabled,
   dragMovable,
   dragItems,
+  appearance,
   depth,
   onToggleDir,
   onOpenFile,
@@ -404,6 +469,7 @@ function FileTreeItem({
   draggableEnabled?: boolean
   dragMovable?: boolean
   dragItems?: FileItem[]
+  appearance?: FileAppearance
   depth: number
   onToggleDir: () => void
   onOpenFile: () => void
@@ -535,7 +601,22 @@ function FileTreeItem({
         <span className="w-3 flex-shrink-0" />
       )}
 
-      <span className="flex-shrink-0">{fileIcon(item, isExpanded)}</span>
+      <span
+        className="relative flex-shrink-0"
+        style={{
+          width: 14,
+          height: 14,
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        {fileIcon(item, isExpanded, appearance)}
+        <FileAppearanceColorDot
+          appearance={appearance}
+          style={{ position: 'absolute', right: -3, bottom: -3 }}
+        />
+      </span>
 
       <div className="flex-1 min-w-0">
         {isRenaming ? (
@@ -605,6 +686,7 @@ function GridItemCard({
   folderChildrenLoaded,
   dragMovable,
   dragItems,
+  appearance,
   onOpen,
   onSelect,
   onDoubleClick,
@@ -624,6 +706,7 @@ function GridItemCard({
   folderChildrenLoaded?: boolean
   dragMovable?: boolean
   dragItems?: FileItem[]
+  appearance?: FileAppearance
   onOpen: () => void
   onSelect: (e: React.MouseEvent) => void
   onDoubleClick?: () => void
@@ -639,6 +722,8 @@ function GridItemCard({
   const previewHeight = Math.max(52, Math.round(thumbnailSize * 0.62))
   const folderPreviewLoaded = item.isDirectory ? (folderChildrenLoaded ?? false) : true
   const isDropAccent = isDropTarget || Boolean(browserDropLine)
+  const appearanceColor = getFileAppearanceColorValue(appearance?.color)
+  const customIcon = appearance?.icon
 
   return (
     <button
@@ -668,11 +753,16 @@ function GridItemCard({
       style={{
         position: 'relative',
         padding: '8px 8px 10px',
-        borderColor: isDropAccent ? 'var(--color-blue)' : isActive ? 'var(--files-panel-state-active-border)' : 'var(--border-default)',
+        borderColor: isDropAccent ? 'var(--color-blue)' : isActive ? 'var(--files-panel-state-active-border)' : appearanceColor ?? 'var(--border-default)',
         background: isDropTarget ? 'var(--color-blue-light)' : isActive ? 'var(--files-panel-state-active-bg)' : 'var(--bg-primary)',
         boxShadow: isActive ? 'var(--files-panel-state-active-shadow)' : undefined,
       }}
     >
+      <FileAppearanceColorDot
+        appearance={appearance}
+        size={9}
+        style={{ position: 'absolute', top: 7, right: 7, zIndex: 4 }}
+      />
       {browserDropLine && (
         <>
           <span
@@ -711,7 +801,9 @@ function GridItemCard({
         className="rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-content)] flex items-center justify-center overflow-hidden"
         style={{ height: previewHeight }}
       >
-        {item.isDirectory ? (
+        {customIcon ? (
+          <CustomFileIcon icon={customIcon} size={Math.max(28, Math.min(46, Math.round(previewHeight * 0.5)))} />
+        ) : item.isDirectory ? (
           <FolderPreview
             childrenItems={folderChildren ?? []}
             previewHeight={previewHeight}
@@ -720,7 +812,7 @@ function GridItemCard({
         ) : canPreviewImage ? (
           <img src={toLocalFileUrl(item.path)} alt={item.name} className="max-h-full max-w-full object-cover" />
         ) : (
-          fileIcon(item, false)
+          fileIcon(item, false, appearance, 18)
         )}
       </div>
       <p className="mt-2 text-[11px] text-[var(--text-title)] truncate px-1" title={item.name}>{item.name}</p>
@@ -1050,6 +1142,7 @@ function FileTreeRecursive({
   orderedPaths,
   expandedDirs,
   dirChildren,
+  fileAppearances,
   renamingPath,
   creatingType,
   creatingPath,
@@ -1083,6 +1176,7 @@ function FileTreeRecursive({
   orderedPaths: readonly string[]
   expandedDirs: Set<string>
   dirChildren: Map<string, FileItem[]>
+  fileAppearances: Record<string, FileAppearance>
   renamingPath: string | null
   creatingType: 'file' | 'folder' | null
   creatingPath: string | null
@@ -1167,6 +1261,7 @@ function FileTreeRecursive({
               browserDropLine={browserDropLine}
               isFlashing={flashingPath === item.path}
               dragItems={dragItemsByPath.get(item.path)}
+              appearance={fileAppearances[item.path]}
               depth={depth}
               onToggleDir={() => onToggleDir(item.path)}
               onOpenFile={() => onOpenFile(item)}
@@ -1191,6 +1286,7 @@ function FileTreeRecursive({
                 orderedPaths={orderedPaths}
                 expandedDirs={expandedDirs}
                 dirChildren={dirChildren}
+                fileAppearances={fileAppearances}
                 renamingPath={renamingPath}
                 creatingType={creatingType}
                 creatingPath={creatingPath}
@@ -1236,6 +1332,7 @@ export default function FileTree({
   const {
     files,
     selectedFile,
+    fileAppearances,
     expandedDirs,
     dirChildren,
     renamingPath,
@@ -1254,6 +1351,8 @@ export default function FileTree({
     openFolderDialog,
     addPinnedFolder,
     moveItem,
+    setFileColor,
+    setFileIcon,
     loadDirChildren,
     refreshFiles,
     deleteItem,
@@ -1265,6 +1364,8 @@ export default function FileTree({
   const { openTab } = useDocTabs()
 
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; item: FileItem | null } | null>(null)
+  const [colorMenu, setColorMenu] = useState<FileAppearanceColorMenuState | null>(null)
+  const [iconPromptItem, setIconPromptItem] = useState<FileItem | null>(null)
   const [pendingDelete, setPendingDelete] = useState<
     | { kind: 'fs'; targets: FileTreeDeleteTarget[] }
     | { kind: 'unpin'; path: string; name: string }
@@ -2323,6 +2424,7 @@ export default function FileTree({
               browserDropLine={browserDropLine}
               isFlashing={flashingTargetPath === folderPath}
               dragMovable={false}
+              appearance={fileAppearances[folderPath]}
               depth={0}
               onToggleDir={() => toggleDir(folderPath)}
               onOpenFile={() => handleOpenFile(pinnedItem)}
@@ -2351,6 +2453,7 @@ export default function FileTree({
                 orderedPaths={treeOrderedPaths}
                 expandedDirs={expandedDirs}
                 dirChildren={dirChildren}
+                fileAppearances={fileAppearances}
                 renamingPath={renamingPath}
                 creatingType={creatingType}
                 creatingPath={creatingPath}
@@ -2423,6 +2526,7 @@ export default function FileTree({
           orderedPaths={treeOrderedPaths}
           expandedDirs={expandedDirs}
           dirChildren={dirChildren}
+          fileAppearances={fileAppearances}
           renamingPath={renamingPath}
           creatingType={creatingType}
           creatingPath={creatingPath}
@@ -2756,6 +2860,7 @@ export default function FileTree({
                 folderChildrenLoaded={item.isDirectory ? dirChildren.has(item.path) : true}
                 dragMovable={!pinnedFolders.includes(item.path)}
                 dragItems={gridDragItemsByPath.get(item.path)}
+                appearance={fileAppearances[item.path]}
                 onOpen={() => {
                   if (item.isDirectory) {
                     handleOpenFile(item)
@@ -2819,6 +2924,21 @@ export default function FileTree({
           onRequestDelete={(targets) => setPendingDelete({ kind: 'fs', targets })}
           onRequestUnpin={({ path, name }) => setPendingDelete({ kind: 'unpin', path, name })}
           workspaceRoot={workspaceRoot}
+          onOpenColorMenu={(item, x, y) => setColorMenu({ item, x, y })}
+          onOpenIconPrompt={(item) => setIconPromptItem(item)}
+        />
+      )}
+
+      {colorMenu && (
+        <FileColorPalette
+          menu={colorMenu}
+          boundaryRect={treeRootRef.current?.getBoundingClientRect() ?? null}
+          selectedColor={fileAppearances[colorMenu.item.path]?.color ?? null}
+          onSetColor={(color) => {
+            setFileColor(colorMenu.item.path, color)
+            setColorMenu(null)
+          }}
+          onClose={() => setColorMenu(null)}
         />
       )}
 
@@ -2869,6 +2989,25 @@ export default function FileTree({
           setPendingDelete(null)
         }}
         onCancel={() => setPendingDelete(null)}
+      />
+
+      <Modal
+        open={iconPromptItem !== null}
+        mode="prompt"
+        dimBackdrop={false}
+        title="自定图标"
+        message="输入一个表情符号或短文字。"
+        defaultValue={iconPromptItem ? fileAppearances[iconPromptItem.path]?.icon ?? '' : ''}
+        placeholder="📁"
+        confirmLabel="应用"
+        cancelLabel="取消"
+        onConfirm={(value) => {
+          if (iconPromptItem) {
+            setFileIcon(iconPromptItem.path, normalizeFileAppearanceIcon(value) ?? null)
+          }
+          setIconPromptItem(null)
+        }}
+        onCancel={() => setIconPromptItem(null)}
       />
 
       {externalDropMenu && (
@@ -3044,6 +3183,145 @@ function FileTreeExternalDropMenu({
   return portalRoot ? createPortal(content, portalRoot) : content
 }
 
+function FileColorPalette({
+  menu,
+  boundaryRect,
+  selectedColor,
+  onSetColor,
+  onClose,
+}: {
+  menu: FileAppearanceColorMenuState
+  boundaryRect: DOMRect | null
+  selectedColor: FileAppearanceColor | null
+  onSetColor: (color: FileAppearanceColor | null) => void
+  onClose: () => void
+}) {
+  const menuRef = useRef<HTMLDivElement>(null)
+  const [adjustedPos, setAdjustedPos] = useState({ x: menu.x, y: menu.y })
+  const portalRoot = typeof document !== 'undefined' ? document.body : null
+
+  useLayoutEffect(() => {
+    if (!menuRef.current) return
+    const rect = menuRef.current.getBoundingClientRect()
+    if (!boundaryRect) {
+      const maxX = Math.max(8, window.innerWidth - rect.width - 8)
+      const maxY = Math.max(8, window.innerHeight - rect.height - 8)
+      setAdjustedPos({
+        x: Math.max(8, Math.min(menu.x, maxX)),
+        y: Math.max(8, Math.min(menu.y, maxY)),
+      })
+      return
+    }
+    setAdjustedPos(
+      clampDropMenuPositionToBoundary({
+        x: menu.x,
+        y: menu.y,
+        menuWidth: rect.width,
+        menuHeight: rect.height,
+        boundaryLeft: boundaryRect.left,
+        boundaryTop: boundaryRect.top,
+        boundaryRight: boundaryRect.right,
+        boundaryBottom: boundaryRect.bottom,
+        viewportWidth: window.innerWidth,
+        viewportHeight: window.innerHeight,
+      }),
+    )
+  }, [boundaryRect, menu.x, menu.y])
+
+  useEffect(() => {
+    const handleClick = (event: MouseEvent) => {
+      if (menuRef.current?.contains(event.target as Node)) return
+      onClose()
+    }
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose()
+    }
+
+    const timer = window.setTimeout(() => {
+      window.addEventListener('mousedown', handleClick)
+      window.addEventListener('contextmenu', handleClick)
+    }, 0)
+    window.addEventListener('keydown', handleKey)
+
+    return () => {
+      window.clearTimeout(timer)
+      window.removeEventListener('mousedown', handleClick)
+      window.removeEventListener('contextmenu', handleClick)
+      window.removeEventListener('keydown', handleKey)
+    }
+  }, [onClose])
+
+  const content = (
+    <div
+      ref={menuRef}
+      className="glass-surface-floating ready-floating-menu"
+      style={{
+        ...buildFloatingMenuSurfaceStyle(252, {
+          padding: 8,
+          zIndex: 280,
+        }),
+        position: 'fixed',
+        left: adjustedPos.x,
+        top: adjustedPos.y,
+        display: 'flex',
+        alignItems: 'center',
+        gap: 8,
+      }}
+      onMouseDown={(event) => event.stopPropagation()}
+      onContextMenu={(event) => event.stopPropagation()}
+    >
+      {FILE_APPEARANCE_COLORS.map((color) => (
+        <button
+          key={color.key}
+          type="button"
+          aria-label={color.label}
+          title={color.label}
+          onClick={() => onSetColor(color.key)}
+          style={{
+            width: 24,
+            height: 24,
+            borderRadius: '50%',
+            border: selectedColor === color.key
+              ? '2px solid var(--text-title)'
+              : '1px solid rgba(255,255,255,0.76)',
+            background: color.value,
+            boxShadow: selectedColor === color.key
+              ? '0 0 0 2px rgba(255,255,255,0.72), 0 4px 10px rgba(0,0,0,0.18)'
+              : '0 2px 6px rgba(0,0,0,0.16)',
+            cursor: 'pointer',
+            flexShrink: 0,
+          }}
+        />
+      ))}
+      <button
+        type="button"
+        aria-label="清除颜色"
+        title="清除颜色"
+        onClick={() => onSetColor(null)}
+        style={{
+          width: 24,
+          height: 24,
+          borderRadius: '50%',
+          border: '1px solid var(--border-default)',
+          background: 'var(--files-panel-state-hover-bg)',
+          color: 'var(--text-light)',
+          fontSize: 18,
+          lineHeight: '20px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          cursor: 'pointer',
+          flexShrink: 0,
+        }}
+      >
+        ×
+      </button>
+    </div>
+  )
+
+  return portalRoot ? createPortal(content, portalRoot) : content
+}
+
 function ContextMenuBridge({
   contextMenu,
   pinnedFolders,
@@ -3055,6 +3333,8 @@ function ContextMenuBridge({
   onRequestDelete,
   onRequestUnpin,
   workspaceRoot,
+  onOpenColorMenu,
+  onOpenIconPrompt,
 }: {
   contextMenu: { x: number; y: number; item: FileItem | null }
   pinnedFolders: string[]
@@ -3066,14 +3346,19 @@ function ContextMenuBridge({
   onRequestDelete: (targets: FileTreeDeleteTarget[]) => void
   onRequestUnpin: (info: { path: string; name: string }) => void
   workspaceRoot: string | null
+  onOpenColorMenu: (item: FileItem, x: number, y: number) => void
+  onOpenIconPrompt: (item: FileItem) => void
 }) {
   const {
+    fileAppearances,
     startRenaming,
     copyPathToClipboard,
     startCreating,
     showInFolder,
     refreshFiles,
     moveItem,
+    setFileIcon,
+    clearFileAppearance,
   } = useWorkspace()
   const pinnedFolderSet = useMemo(() => new Set(pinnedFolders), [pinnedFolders])
 
@@ -3152,6 +3437,8 @@ function ContextMenuBridge({
       : [{ path: item.path, name: item.name }]
     const moveTargets = getMoveTargets(item)
     const moveDisabled = !moveTargetDialogAvailable || moveTargets.some((target) => isPinnedRootMoveTarget(target.path))
+    const appearance = fileAppearances[item.path]
+    const appearanceColor = getFileAppearanceColorValue(appearance?.color)
     return [
       ...(item.isDirectory ? [] : [
         {
@@ -3199,6 +3486,48 @@ function ContextMenuBridge({
       },
       { id: 'sep2', label: '', separator: true },
       {
+        id: 'setColor',
+        label: '设置颜色...',
+        icon: (
+          <span
+            style={{
+              width: 13,
+              height: 13,
+              borderRadius: '50%',
+              background: appearanceColor ?? 'transparent',
+              border: appearanceColor ? '1px solid rgba(255,255,255,0.78)' : '1px solid var(--text-light)',
+              boxShadow: appearanceColor ? '0 1px 3px rgba(0,0,0,0.16)' : 'none',
+            }}
+          />
+        ),
+        onClick: () => onOpenColorMenu(item, contextMenu.x, contextMenu.y)
+      },
+      {
+        id: 'setCustomIcon',
+        label: '自定图标...',
+        icon: appearance?.icon
+          ? <CustomFileIcon icon={appearance.icon} size={16} />
+          : <Pen style={{ width: 16, height: 16 }} />,
+        onClick: () => onOpenIconPrompt(item)
+      },
+      ...(appearance?.icon ? [
+        {
+          id: 'clearCustomIcon',
+          label: '清除图标',
+          icon: <span style={{ width: 16, height: 16, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>×</span>,
+          onClick: () => setFileIcon(item.path, null)
+        }
+      ] : []),
+      ...(appearance?.color || appearance?.icon ? [
+        {
+          id: 'clearAppearance',
+          label: '清除颜色和图标',
+          icon: <span style={{ width: 16, height: 16, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>×</span>,
+          onClick: () => clearFileAppearance(item.path)
+        }
+      ] : []),
+      { id: 'sepAppearance', label: '', separator: true },
+      {
         id: 'newFile',
         label: '新建文件',
         icon: <FilePlus2 style={{ width: 16, height: 16 }} />,
@@ -3240,7 +3569,7 @@ function ContextMenuBridge({
         onClick: () => onRequestDelete(deleteTargets)
       }
     ]
-  }, [onOpenFile, onCreateBoard, startRenaming, copyPathToClipboard, getMoveTargets, moveTargetDialogAvailable, isPinnedRootMoveTarget, handleMoveTo, startCreating, showInFolder, refreshFiles, pinnedFolderSet, workspaceRoot, selectedDeleteTargets, onRequestDelete, onRequestUnpin])
+  }, [clearFileAppearance, contextMenu.x, contextMenu.y, fileAppearances, onOpenFile, onCreateBoard, onOpenColorMenu, onOpenIconPrompt, setFileIcon, startRenaming, copyPathToClipboard, getMoveTargets, moveTargetDialogAvailable, isPinnedRootMoveTarget, handleMoveTo, startCreating, showInFolder, refreshFiles, pinnedFolderSet, workspaceRoot, selectedDeleteTargets, onRequestDelete, onRequestUnpin])
 
   const contextItems = useMemo(() => getContextItems(contextMenu.item), [contextMenu.item, getContextItems])
 
@@ -3251,6 +3580,10 @@ function ContextMenuBridge({
       rename: '✎',
       copyPath: '⧉',
       moveTo: '↪',
+      setColor: '●',
+      setCustomIcon: '◆',
+      clearCustomIcon: '×',
+      clearAppearance: '×',
       newFile: '+',
       newFolder: '⊞',
       newBoard: '□',

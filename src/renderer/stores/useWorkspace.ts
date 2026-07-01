@@ -5,6 +5,17 @@ import {
   validateWorkspaceRoot,
   type WorkspaceValidationResult,
 } from '../../shared/workspace-validation'
+import {
+  FILE_APPEARANCE_STORAGE_KEY,
+  clearFileAppearanceForPath,
+  normalizeFileAppearanceMap,
+  remapFileAppearancePath,
+  removeFileAppearancePath,
+  withFileAppearanceColor,
+  withFileAppearanceIcon,
+  type FileAppearanceColor,
+  type FileAppearanceMap,
+} from './fileAppearance'
 
 export interface FileItem {
   name: string
@@ -39,6 +50,7 @@ interface WorkspaceState {
   currentPath: string
   files: FileItem[]
   selectedFile: string | null
+  fileAppearances: FileAppearanceMap
   expandedDirs: Set<string>
   dirChildren: Map<string, FileItem[]>
   pinnedFolders: string[]
@@ -88,6 +100,9 @@ interface WorkspaceState {
   moveItem: (src: string, dest: string) => Promise<boolean>
   showInFolder: (path: string) => Promise<void>
   copyPathToClipboard: (path: string) => void
+  setFileColor: (path: string, color: FileAppearanceColor | null) => void
+  setFileIcon: (path: string, icon: string | null) => void
+  clearFileAppearance: (path: string) => void
 
   // Inline editing state
   startRenaming: (path: string) => void
@@ -473,6 +488,10 @@ const remapPathAfterMove = (value: string | null, src: string, dest: string): st
   return value
 }
 
+const persistFileAppearances = (appearances: FileAppearanceMap): void => {
+  writeJsonStorage(FILE_APPEARANCE_STORAGE_KEY, appearances)
+}
+
 export const useWorkspace = create<WorkspaceState>((set, get) => {
   const initialVariant = loadSidePanelVariantFromStorage()
   console.log('[SidePanelVariant] Store initialized with variant:', initialVariant)
@@ -491,9 +510,14 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
         cleanedExpanded.add(dir)
       }
     })
+    const fileAppearances = removeFileAppearancePath(currentState.fileAppearances, path)
+    if (fileAppearances !== currentState.fileAppearances) {
+      persistFileAppearances(fileAppearances)
+    }
     set({
       selectedFile: currentState.selectedFile && isSameOrDescendantPath(currentState.selectedFile, path) ? null : currentState.selectedFile,
       expandedDirs: cleanedExpanded,
+      fileAppearances,
     })
     await get().loadDirChildren(parentPath)
   }
@@ -503,6 +527,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
   currentPath: '/',
   files: [],
   selectedFile: null,
+  fileAppearances: normalizeFileAppearanceMap(readJsonStorage(FILE_APPEARANCE_STORAGE_KEY, {} as FileAppearanceMap)),
   expandedDirs: new Set<string>(),
   dirChildren: new Map<string, FileItem[]>(),
   pinnedFolders: readJsonStorage('ready-pinned-folders', [] as string[]),
@@ -986,7 +1011,13 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
         if (result.success) {
           useDocTabs.getState().remapTabPaths(oldPath, newPath)
           await get().refreshFiles()
-          set({ renamingPath: null })
+          set((state) => {
+            const fileAppearances = remapFileAppearancePath(state.fileAppearances, oldPath, newPath)
+            if (fileAppearances !== state.fileAppearances) {
+              persistFileAppearances(fileAppearances)
+            }
+            return { renamingPath: null, fileAppearances }
+          })
           return true
         }
       } else {
@@ -994,8 +1025,10 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
           files: state.files.map(f =>
             f.path === oldPath ? { ...f, name: newName, path: newPath } : f
           ),
-          renamingPath: null
+          renamingPath: null,
+          fileAppearances: remapFileAppearancePath(state.fileAppearances, oldPath, newPath),
         }))
+        persistFileAppearances(get().fileAppearances)
         useDocTabs.getState().remapTabPaths(oldPath, newPath)
         return true
       }
@@ -1017,8 +1050,10 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
       } else {
         set((state) => ({
           files: state.files.filter(f => f.path !== path),
-          selectedFile: state.selectedFile === path ? null : state.selectedFile
+          selectedFile: state.selectedFile === path ? null : state.selectedFile,
+          fileAppearances: removeFileAppearancePath(state.fileAppearances, path),
         }))
+        persistFileAppearances(get().fileAppearances)
         return true
       }
     } catch (error) {
@@ -1046,8 +1081,10 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
             currentPath: remapPathAfterMove(state.currentPath, src, dest) || state.currentPath,
             expandedDirs: remappedExpanded,
             dirChildren: new Map(),
+            fileAppearances: remapFileAppearancePath(state.fileAppearances, src, dest),
           }
         })
+        persistFileAppearances(get().fileAppearances)
 
         await get().refreshFiles()
         const expanded = Array.from(get().expandedDirs)
@@ -1072,7 +1109,9 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
         }),
         selectedFile: remapPathAfterMove(state.selectedFile, src, dest),
         currentPath: remapPathAfterMove(state.currentPath, src, dest) || state.currentPath,
+        fileAppearances: remapFileAppearancePath(state.fileAppearances, src, dest),
       }))
+      persistFileAppearances(get().fileAppearances)
       return true
     } catch (error) {
       console.error('Failed to move item:', error)
@@ -1092,6 +1131,36 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
 
   copyPathToClipboard: (path) => {
     navigator.clipboard.writeText(path).catch(console.error)
+  },
+
+  setFileColor: (path, color) => {
+    set((state) => {
+      const fileAppearances = withFileAppearanceColor(state.fileAppearances, path, color)
+      if (fileAppearances !== state.fileAppearances) {
+        persistFileAppearances(fileAppearances)
+      }
+      return { fileAppearances }
+    })
+  },
+
+  setFileIcon: (path, icon) => {
+    set((state) => {
+      const fileAppearances = withFileAppearanceIcon(state.fileAppearances, path, icon)
+      if (fileAppearances !== state.fileAppearances) {
+        persistFileAppearances(fileAppearances)
+      }
+      return { fileAppearances }
+    })
+  },
+
+  clearFileAppearance: (path) => {
+    set((state) => {
+      const fileAppearances = clearFileAppearanceForPath(state.fileAppearances, path)
+      if (fileAppearances !== state.fileAppearances) {
+        persistFileAppearances(fileAppearances)
+      }
+      return { fileAppearances }
+    })
   },
 
   startRenaming: (path) => set({ renamingPath: path }),
