@@ -192,9 +192,15 @@ test('task card browser collection button invokes browser resume handler instead
     taskId: 'browser-task-visible-1',
     module: 'browser',
     interactionState: 'suspended',
-    waitingFor: 'verification',
-    resumableActions: [],
-    canResume: false,
+    waitingFor: 'none',
+    resumableActions: ['continue', 'cancel'],
+    canResume: true,
+    taskContinuation: {
+      taskId: 'browser-task-visible-1',
+      detachedTaskId: 'browser-task-card-loop-1',
+      resumeKind: 'paused',
+      action: 'browser_resume_task',
+    },
   })
   const { container, unmount } = mountTaskCard(run, {
     onResumeBrowserTask: (scopeId: string, taskId: string) => calls.push(['browser', scopeId, taskId]),
@@ -205,9 +211,9 @@ test('task card browser collection button invokes browser resume handler instead
       .find((button) => button.textContent?.trim() === '继续运行')
     assert.equal(generic, undefined)
     const button = container.querySelector('[data-ready-task-action="resume-browser-task"]')
-    assert.equal(button?.getAttribute('data-ready-task-id'), 'browser-task-visible-1')
+    assert.equal(button?.getAttribute('data-ready-task-id'), 'browser-task-card-loop-1')
     clickButton(container, '继续浏览器采集')
-    assert.deepEqual(calls, [['browser', 'conv-browser', 'browser-task-visible-1']])
+    assert.deepEqual(calls, [['browser', 'conv-browser', 'browser-task-card-loop-1']])
   } finally {
     unmount()
   }

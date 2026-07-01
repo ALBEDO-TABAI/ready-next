@@ -29,18 +29,41 @@ export function makeNoteCollectProjectionSink(activeRuntime: AgentControlRuntime
     saved?: number
     remaining?: number
     userExpectedTotal?: number
+    startedAt?: string | null
+    finishedAt?: string | null
   }): string => {
     const discovered = Math.max(0, Number(input.discovered ?? input.total ?? 0) || 0)
     const saved = Math.max(0, Number(input.saved ?? input.completed ?? 0) || 0)
     const failed = Math.max(0, Number(input.failed ?? 0) || 0)
     const remaining = Math.max(0, Number(input.remaining ?? Math.max(0, discovered - saved - failed)) || 0)
     const expected = Math.max(0, Number(input.userExpectedTotal ?? 0) || 0)
+    const startedMs = input.startedAt ? new Date(input.startedAt).getTime() : NaN
+    const finishedMs = input.finishedAt ? new Date(input.finishedAt).getTime() : Date.now()
+    const durationMinutes = Number.isFinite(startedMs) && Number.isFinite(finishedMs) && finishedMs >= startedMs
+      ? Math.max(1, Math.round((finishedMs - startedMs) / 60_000))
+      : null
     return [
       `发现 ${discovered}${expected > 0 ? `/${expected}` : ''}`,
       `保存 ${saved}`,
       failed > 0 ? `失败 ${failed}` : null,
       `剩余 ${remaining}`,
+      durationMinutes ? `后台运行约 ${durationMinutes} 分钟` : null,
     ].filter(Boolean).join(' · ')
+  }
+
+  const buildContinuationRef = (
+    input: { taskId: string; sourceTaskId?: string; canResume?: boolean },
+    projectionTaskId: string,
+  ): TaskProjectionRecord['continuationRef'] => {
+    if (input.canResume !== true) return null
+    const resumeTaskId = String(input.taskId || '').trim()
+    if (!resumeTaskId.startsWith('browser-task-')) return null
+    return {
+      taskId: projectionTaskId,
+      detachedTaskId: resumeTaskId,
+      resumeKind: 'paused',
+      action: 'browser_resume_task',
+    }
   }
 
   const updateAggregate = (input: {
@@ -132,6 +155,8 @@ export function makeNoteCollectProjectionSink(activeRuntime: AgentControlRuntime
       failedSourceIds?: string[]
       terminalDwell?: boolean
       canResume?: boolean
+      startedAt?: string | null
+      finishedAt?: string | null
     },
     status: TaskProjectionRecord['status'],
     waitingFor: 'background' | 'none' | 'verification',
@@ -172,6 +197,7 @@ export function makeNoteCollectProjectionSink(activeRuntime: AgentControlRuntime
           userExpectedTotal: aggregate.userExpectedTotal || input.userExpectedTotal,
         }),
       },
+      continuationRef: buildContinuationRef(input, projectionTaskId),
       createdAt: existing?.createdAt || now,
       updatedAt: now,
       canResume: input.canResume === true,

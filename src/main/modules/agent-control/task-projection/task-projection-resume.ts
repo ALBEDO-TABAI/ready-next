@@ -14,6 +14,12 @@ function projectionAllowsResume(record: TaskProjectionRecord): boolean {
   return hasResumeAction(record)
 }
 
+function hasBrowserResumeHandle(record: TaskProjectionRecord): boolean {
+  const ref = record.continuationRef || null
+  const detachedTaskId = ref?.detachedTaskId
+  return typeof detachedTaskId === 'string' && detachedTaskId.trim().startsWith('browser-task-')
+}
+
 /**
  * Stage Q (Stage 11) — derive `canResume` for a TaskProjectionRecord.
  *
@@ -26,7 +32,7 @@ export function deriveTaskProjectionCanResume(record: TaskProjectionRecord): Tas
   if (record.module === 'browser') {
     return {
       ...record,
-      canResume: projectionAllowsResume(record) && record.canResume === true,
+      canResume: projectionAllowsResume(record) && (record.canResume === true || hasBrowserResumeHandle(record)),
     }
   }
   const ref = record.continuationRef || null

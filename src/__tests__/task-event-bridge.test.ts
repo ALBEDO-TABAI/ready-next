@@ -202,4 +202,22 @@ describe('task event bridge', () => {
     assert.equal(rows[1].consumed, 0)
     assert.deepEqual(JSON.parse(rows[1].eventPayload), payload)
   })
+
+  it('does not enqueue auto-continue segment pauses for narration', () => {
+    __resetBackgroundTaskTerminalReminderForTests()
+    const db = new PendingTaskEventMemoryDb()
+    __setPendingTaskEventDatabaseForTests(db)
+
+    taskEventBridge.publish({
+      taskId: 'task-event-bridge-auto-continue-segment',
+      status: 'paused',
+      extra: {
+        scopeId: 'scope-task-event-bridge-auto-continue',
+        autoContinue: true,
+        summary: '单段运行保护暂停，正在继续下一段',
+      },
+    })
+
+    assert.equal(listPendingTaskEventsForTests().length, 0)
+  })
 })

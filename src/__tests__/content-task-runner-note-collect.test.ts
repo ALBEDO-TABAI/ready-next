@@ -28,6 +28,11 @@ interface FakeTask {
 
 function fakePersistence() {
   const tasks = new Map<string, FakeTask>()
+  const updates: Array<{
+    taskId: string
+    progress: Partial<FakeTask['progress']>
+    extras: Record<string, unknown>
+  }> = []
   let counter = 0
   const svc = {
     createTask(request: { kind: string; payload: Record<string, unknown> }) {
@@ -61,6 +66,7 @@ function fakePersistence() {
     updateProgress(taskId: string, progress: Partial<FakeTask['progress']>, extras?: Record<string, unknown>) {
       const t = tasks.get(taskId)
       if (!t) return null
+      updates.push({ taskId, progress, extras: extras || {} })
       t.progress = { ...t.progress, ...progress }
       if (extras) {
         if ('status' in extras) t.status = extras.status as string
@@ -71,7 +77,7 @@ function fakePersistence() {
       return { ...t }
     },
   }
-  return { svc, tasks }
+  return { svc, tasks, updates }
 }
 
 function fakeLease(opts: { acquireFails?: boolean; writeDeniedAfter?: () => boolean } = {}) {
@@ -151,6 +157,46 @@ async function runToCompletion(runner: BrowserContentTaskRunner, payload: Record
   return handle.taskId
 }
 
+async function drainAutoContinuedTask(
+  runner: BrowserContentTaskRunner,
+  taskId: string,
+  tasks: Map<string, FakeTask>,
+): Promise<void> {
+  const activeRuns = (runner as unknown as { activeRuns: Map<string, Promise<void>> }).activeRuns
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    const run = activeRuns.get(taskId)
+    if (run) await run
+    await new Promise((resolve) => setTimeout(resolve, 5))
+    const task = tasks.get(taskId)
+    const result = task?.result as { autoContinue?: boolean } | null
+    if (!activeRuns.has(taskId) && result?.autoContinue !== true) return
+  }
+  throw new Error('auto-continued browser collection did not settle')
+}
+
+function slowOkFacadeFactory(): CollectorFacadeFactory {
+  return () => {
+    const facade: NoteCollectFacade = {
+      run: async (tool) => {
+        if (tool === 'browser_collect_images') {
+          await new Promise((resolve) => setTimeout(resolve, 3))
+          return imagesJson
+        }
+        if (tool === 'browser_get_tabs') return [
+          '[tab-agent-1] 详情页',
+          '    https://www.xiaohongshu.com/note/0',
+          '    https://www.xiaohongshu.com/note/1',
+          '    https://www.xiaohongshu.com/note/2',
+        ].join('\n')
+        if (tool === 'browser_read_page') return '详情页：笔记0 笔记1 笔记2'
+        if (tool === 'browser_download_urls') return JSON.stringify({ success: 1 })
+        return JSON.stringify({ ok: true })
+      },
+    }
+    return { facade, isControlFrozen: () => false }
+  }
+}
+
 describe('note_collect background task (content-task-runner)', () => {
   it('acquires an agent-view lease, collects every note, completes, and releases the lease', async () => {
     const { svc: persistence, tasks } = fakePersistence()
@@ -222,6 +268,41 @@ describe('note_collect background task (content-task-runner)', () => {
     assert.equal(plan.notes.length, 75)
     assert.equal(plan.stopConditions?.maxNotes, undefined)
     assert.equal(plan.stopConditions?.maxConsecutiveFailures, 3)
+  })
+
+  it('auto-continues max_duration segment pauses until the note collection completes', async () => {
+    const { svc: persistence, tasks, updates } = fakePersistence()
+    const { svc: lease } = fakeLease()
+    const runner = new BrowserContentTaskRunner(
+      {} as never,
+      persistence as never,
+      lease as never,
+      slowOkFacadeFactory(),
+    )
+    const payload = {
+      ...planPayload(3),
+      scopeId: 'conv-auto-continue',
+      plan: {
+        ...planPayload(3).plan,
+        stopConditions: { maxDurationMs: 1, maxConsecutiveFailures: 3 },
+      },
+    }
+
+    const handle = await runner.startTask({ kind: 'note_collect', payload })
+    await drainAutoContinuedTask(runner, handle.taskId, tasks)
+
+    const task = tasks.get(handle.taskId)!
+    const result = task.result as { collected: string[]; stopReason: string; autoContinue?: boolean }
+    assert.equal(task.status, 'completed')
+    assert.equal(result.stopReason, 'completed')
+    assert.equal(result.collected.length, 3)
+    assert.equal(result.autoContinue, false)
+    const segmentPauses = updates
+      .map((update) => update.extras.result as { stopReason?: string; autoContinue?: boolean; resumeFromCursor?: number } | undefined)
+      .filter((resultUpdate) => resultUpdate?.stopReason === 'max_duration')
+    assert.ok(segmentPauses.length >= 1, 'at least one max_duration segment pause was persisted')
+    assert.ok(segmentPauses.every((resultUpdate) => resultUpdate?.autoContinue === true), 'max_duration pauses are marked for auto continuation')
+    assert.ok(segmentPauses.every((resultUpdate) => Number(resultUpdate?.resumeFromCursor || 0) > 0), 'auto continuation only starts after useful checkpoint progress')
   })
 
   it('allows more consecutive failures for high-control card_loop plans', () => {

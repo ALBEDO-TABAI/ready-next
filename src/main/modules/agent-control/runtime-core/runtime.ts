@@ -1134,7 +1134,7 @@ export class AgentControlRuntime extends EventEmitter {
     row: PendingTaskEventRow,
   ): Promise<{ success: boolean; error?: string | null }> {
     const event = parsePendingTaskEventPayload(row)
-    const scopeId = resolvePendingTaskEventScopeId(event)
+    const scopeId = this.resolvePendingTaskEventScopeId(event)
     if (!event || !scopeId) {
       return { success: false, error: 'Pending task event is missing a scopeId.' }
     }
@@ -1234,7 +1234,7 @@ export class AgentControlRuntime extends EventEmitter {
 
   private markNarrationContinuationFailure(row: PendingTaskEventRow, error: string | null): void {
     const event = parsePendingTaskEventPayload(row)
-    const scopeId = resolvePendingTaskEventScopeId(event)
+    const scopeId = this.resolvePendingTaskEventScopeId(event)
     if (!event || !scopeId) return
     const scope = this.getConversationScope(scopeId)
     if (!scope) return
@@ -1253,6 +1253,22 @@ export class AgentControlRuntime extends EventEmitter {
       blockedReason: error || '自动播报续跑失败，后台任务结果仍待播报。',
       timestamp: new Date().toISOString(),
     })
+  }
+
+  private resolvePendingTaskEventScopeId(payload: TaskEventBridgePayload | null): string | null {
+    const direct = resolvePendingTaskEventScopeId(payload)
+    if (direct || !payload?.taskId) return direct
+    try {
+      const rawDb = this.db.getRawDb()
+      if (!rawDb) return null
+      const row = rawDb
+        .prepare('SELECT payload_json FROM browser_tasks WHERE id = ? LIMIT 1')
+        .get<{ payload_json?: string | null }>(payload.taskId)
+      const parsed = row?.payload_json ? JSON.parse(row.payload_json) : null
+      return readScopeIdFromPendingEvent(asRecord(parsed))
+    } catch {
+      return null
+    }
   }
 
   listTaskProjections(scopeId: string): TaskProjectionRecord[] {

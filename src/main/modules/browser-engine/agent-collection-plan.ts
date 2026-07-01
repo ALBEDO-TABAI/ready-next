@@ -237,11 +237,11 @@ export function planNextNote(
   if (state.collected.length >= stops.maxNotes) {
     return { stop: 'max_notes', note: null, index: state.cursor }
   }
-  if (now - state.startedAt >= stops.maxDurationMs) {
-    return { stop: 'max_duration', note: null, index: state.cursor }
-  }
   if (state.cursor >= plan.notes.length) {
     return { stop: 'completed', note: null, index: state.cursor }
+  }
+  if (now - state.startedAt >= stops.maxDurationMs) {
+    return { stop: 'max_duration', note: null, index: state.cursor }
   }
   return { stop: null, note: plan.notes[state.cursor], index: state.cursor }
 }

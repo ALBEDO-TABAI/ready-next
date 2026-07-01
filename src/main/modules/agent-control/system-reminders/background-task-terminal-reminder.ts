@@ -131,6 +131,8 @@ export function beginBackgroundTaskTerminalReminderRun(
 export function enqueueBackgroundTaskTerminalReminderFromBridge(
   payload: TaskEventBridgePayload,
 ): void {
+  const extra = asRecord(payload.extra)
+  if (extra?.autoContinue === true) return
   const scopeId = resolveScopeId(payload)
   if (!scopeId || !activeRunCountsByScope.has(scopeId)) {
     insertPendingTaskEvent(payload)

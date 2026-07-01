@@ -124,6 +124,84 @@ describe('browser task persistence', () => {
     }
   })
 
+  it('publishes scoped sanitized pause summaries for browser collection terminal events', () => {
+    __resetBackgroundTaskTerminalReminderForTests()
+    __setPendingTaskEventDatabaseForTests(null)
+    const repository = new FakeBrowserRepository()
+    const service = new BrowserTaskPersistenceService(repository as never)
+    const taskId = 'browser-task-publish-sanitized-max-duration'
+    repository.createTask({
+      ...makeRecord(taskId),
+      payload_json: JSON.stringify({
+        scopeId: 'scope-browser-collection',
+        plan: {
+          sourceTaskId: 'browser-task-visible-source',
+          outputRootDir: '/tmp/ready-out',
+          notes: [
+            { url: 'https://www.xiaohongshu.com/explore/n1?xsec_token=secret-token', title: 'note' },
+          ],
+        },
+      }),
+    })
+    const events: TaskEventBridgePayload[] = []
+    const unregister = taskEventBridge.registerProjectionSink((payload) => {
+      if (payload.taskId === taskId) events.push(payload)
+    })
+
+    try {
+      service.updateProgress(taskId, {
+        total: 179,
+        completed: 169,
+        failed: 0,
+        currentLabel: null,
+      }, {
+        status: 'paused',
+        checkpoint: {
+          taskId,
+          stage: 'note_collect_round',
+          cursor: '169',
+          partialResults: { cursor: 169 },
+        } as never,
+        result: {
+          stopReason: 'max_duration',
+          sourceTaskId: 'browser-task-visible-source',
+          outputRootDir: '/tmp/ready-out',
+          remaining: 10,
+          resumeFromCursor: 169,
+          autoContinue: true,
+        },
+        startedAt: '2026-07-01T00:00:00.000Z',
+        finishedAt: '2026-07-01T00:20:00.000Z',
+      })
+
+      assert.equal(events.length, 1)
+      const extra = events[0].extra as Record<string, unknown>
+      assert.equal(events[0].status, 'paused')
+      assert.equal(extra.scopeId, 'scope-browser-collection')
+      assert.equal(extra.browserTaskId, taskId)
+      assert.equal(extra.sourceTaskId, 'browser-task-visible-source')
+      assert.equal(extra.stopReason, 'max_duration')
+      assert.equal(extra.autoContinue, true)
+      assert.equal(extra.canResume, true)
+      assert.equal(extra.summary, '单段运行保护暂停：已保存 169/179，剩余 10')
+      assert.deepEqual(extra.progress, {
+        total: 179,
+        completed: 169,
+        failed: 0,
+        remaining: 10,
+        currentLabel: null,
+      })
+      const serialized = JSON.stringify(extra)
+      assert.doesNotMatch(serialized, /xsec_token/)
+      assert.doesNotMatch(serialized, /secret-token/)
+      assert.doesNotMatch(serialized, /xiaohongshu\.com\/explore\/n1/)
+    } finally {
+      unregister()
+      __resetBackgroundTaskTerminalReminderForTests()
+      __setPendingTaskEventDatabaseForTests(null)
+    }
+  })
+
   it('keeps waiting_human out of startup pending tasks while visible supervision handles it separately', () => {
     const repository = new FakeBrowserRepository()
     const service = new BrowserTaskPersistenceService(repository as never)

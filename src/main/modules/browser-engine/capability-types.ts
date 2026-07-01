@@ -110,6 +110,8 @@ export interface BrowserCapabilityTaskHandle {
   result?: unknown
   error?: string | null
   createdAt?: string
+  startedAt?: string | null
+  finishedAt?: string | null
   updatedAt?: string
 }
 

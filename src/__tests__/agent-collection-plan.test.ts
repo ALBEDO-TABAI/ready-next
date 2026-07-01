@@ -85,6 +85,11 @@ describe('per-note loop', () => {
     const pDur = { ...plan, stopConditions: { maxDurationMs: 1000 } }
     const fresh = createCollectionLoopState(0)
     assert.equal(planNextNote(pDur as CollectionPlan, fresh, 2000).stop, 'max_duration')
+    const done = plan.notes.reduce(
+      (state, note) => recordNoteResult(state, note, { success: true }),
+      createCollectionLoopState(0),
+    )
+    assert.equal(planNextNote(pDur as CollectionPlan, done, 2000).stop, 'completed')
   })
 })
 

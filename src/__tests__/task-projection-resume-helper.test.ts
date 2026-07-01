@@ -95,4 +95,18 @@ test('deriveTaskProjectionCanResume trusts browser module canResume proof only',
     canResume: false,
   }))
   assert.equal(browserNoProof.canResume, false)
+
+  const browserDetachedHandle = deriveTaskProjectionCanResume(record({
+    module: 'browser',
+    status: 'recoverable_paused',
+    canResume: false,
+    resumableActions: ['continue', 'cancel'],
+    continuationRef: {
+      taskId: 'browser-task-visible-source',
+      detachedTaskId: 'browser-task-card-loop-real',
+      resumeKind: 'paused',
+      action: 'browser_resume_task',
+    },
+  }))
+  assert.equal(browserDetachedHandle.canResume, true)
 })

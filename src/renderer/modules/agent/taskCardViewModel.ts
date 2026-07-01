@@ -545,6 +545,16 @@ export function deriveTaskCardRuntimeState(run: TaskCardRunLike): TaskCardRuntim
       actionSet: gateActionsByCanResume(['continue', 'retry', 'cancel'], run.canResume),
     }
   }
+  if (run.status === 'recoverable_paused') {
+    const actions = (run.resumableActions || []).filter((action): action is TaskCardAction =>
+      action === 'continue' || action === 'retry' || action === 'open_artifact' || action === 'cancel',
+    )
+    return {
+      visualState: 'waiting_input',
+      statusLabel: projectionStatusToUserLabel(run.status) || taskCardVisualStateLabel('waiting_input'),
+      actionSet: gateActionsByCanResume(actions.length > 0 ? actions : ['continue', 'cancel'], run.canResume),
+    }
+  }
   if (run.phase === 'cancelled' || run.status === 'killed') {
     return {
       visualState: 'done',

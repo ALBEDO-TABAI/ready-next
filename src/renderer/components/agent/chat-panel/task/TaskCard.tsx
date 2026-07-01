@@ -137,9 +137,17 @@ export function TaskCard({
   const childRunId = run.taskContinuation?.childRunId || null
   const isAgentHandoff = isInternalAgentHandoffTask(run)
   const shouldShowOpenScopeButton = Boolean(compact && run.scopeId !== sessionId)
-  const browserTaskId = run.module === 'browser' && typeof run.taskId === 'string' && run.taskId.startsWith('browser-task-')
-    ? run.taskId
-    : null
+  const browserTaskId = (() => {
+    if (run.module !== 'browser') return null
+    const continuationTaskId = typeof run.taskContinuation?.detachedTaskId === 'string'
+      && run.taskContinuation.detachedTaskId.startsWith('browser-task-')
+      ? run.taskContinuation.detachedTaskId
+      : null
+    if (continuationTaskId) return continuationTaskId
+    return typeof run.taskId === 'string' && run.taskId.startsWith('browser-task-')
+      ? run.taskId
+      : null
+  })()
   const browserCollectionConsent = run.module === 'browser'
     ? run.progress?.browserCollectionConsent || null
     : null
