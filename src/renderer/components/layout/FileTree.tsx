@@ -91,6 +91,7 @@ import {
   endWorkspaceDragSession,
   getActiveWorkspaceDragPayloads,
 } from './workspaceDragSession'
+import { buildMoveBlockedNotice } from './fileTreeMoveNotice'
 import { startBrowserLocalMediaNativeFileDrag } from '../../modules/browser/localMediaDragBridge'
 import FileEmergenceSection from './FileEmergenceSection'
 import { buildFileEmergenceViewModel } from './fileEmergenceViewModel'
@@ -1398,6 +1399,8 @@ export default function FileTree({
   const [isDragOver, setIsDragOver] = useState(false)
   const [moveDropTargetDir, setMoveDropTargetDir] = useState<string | null>(null)
   const [fileTreeDropTarget, setFileTreeDropTarget] = useState<FileTreeDropTarget | null>(null)
+  const [moveNotice, setMoveNotice] = useState<string | null>(null)
+  const moveNoticeTimerRef = useRef<number | null>(null)
   const [internalGridPath, setInternalGridPath] = useState<string | null>(null)
   const treeRootRef = useRef<HTMLDivElement>(null)
   const gridPreviewLoadingRef = useRef(new Set<string>())
@@ -1549,6 +1552,10 @@ export default function FileTree({
       document.removeEventListener('visibilitychange', handleVisibilityCleanup)
     }
   }, [clearFileTreeDragState])
+
+  useEffect(() => () => {
+    if (moveNoticeTimerRef.current) window.clearTimeout(moveNoticeTimerRef.current)
+  }, [])
 
   const shouldPreserveDropHint = useCallback((event: React.DragEvent<HTMLElement>) => {
     const currentTarget = event.currentTarget
@@ -1939,14 +1946,37 @@ export default function FileTree({
     if (next.selectedPaths.size === 0) selectFile(null)
   }, [selectFile, selectedFile, selectedPaths])
 
+  const showMoveNotice = useCallback((message: string) => {
+    if (moveNoticeTimerRef.current) window.clearTimeout(moveNoticeTimerRef.current)
+    setMoveNotice(message)
+    moveNoticeTimerRef.current = window.setTimeout(() => {
+      setMoveNotice(null)
+      moveNoticeTimerRef.current = null
+    }, 4200)
+  }, [])
+
   const moveWorkspaceItems = useCallback(async (payloads: readonly WorkspaceDragPayload[], targetDir: string) => {
     if (!canMoveAllToDirectory(payloads, targetDir)) return
+    const dirName = targetDir.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || targetDir
+    const collided: string[] = []
+    const failed: string[] = []
     for (const payload of payloads) {
       const nextPath = joinPath(targetDir, payload.name)
       if (nextPath === payload.path) continue
-      await moveItem(payload.path, nextPath)
+      // Name collision at the destination: the OS-level move refuses to overwrite,
+      // and a swallowed failure looks like nothing happened. Detect it up front so we
+      // can tell the user exactly why, and never silently drop the move.
+      const existing = await window.electronAPI?.document?.stat?.(nextPath).catch(() => null)
+      if (existing?.success) {
+        collided.push(payload.name)
+        continue
+      }
+      const ok = await moveItem(payload.path, nextPath)
+      if (!ok) failed.push(payload.name)
     }
-  }, [moveItem])
+    const notice = buildMoveBlockedNotice({ dirName, collided, failed })
+    if (notice) showMoveNotice(notice)
+  }, [moveItem, showMoveNotice])
 
   const getExternalDropPayload = useCallback(
     (dataTransfer: DataTransfer): FileTreeExternalDropPayload | null => {
@@ -2935,6 +2965,22 @@ export default function FileTree({
       )}
 
       {viewMode === 'grid' ? renderGridContent() : renderTreeContent()}
+
+      {moveNotice && (
+        <div
+          className="pointer-events-none absolute inset-x-3 bottom-3 z-20 flex items-center gap-2 rounded-[10px] px-3 py-2"
+          style={{
+            background: 'color-mix(in srgb, var(--bg-primary) 88%, rgba(0,0,0,0.06))',
+            border: '1px solid color-mix(in srgb, var(--color-amber, #E9A23B) 42%, transparent)',
+            boxShadow: '0 6px 20px rgba(0,0,0,0.14)',
+            color: 'var(--text-title)',
+          }}
+          role="status"
+        >
+          <AlertTriangle className="w-[14px] h-[14px] flex-shrink-0" style={{ color: 'var(--color-amber, #E9A23B)' }} />
+          <span className="text-[12px] leading-snug">{moveNotice}</span>
+        </div>
+      )}
 
       {contextMenu && (
         <ContextMenuBridge
