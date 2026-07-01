@@ -4,6 +4,8 @@ import {
   READY_BOARD_RESOURCE_MIME,
   type ReadyBoardResourceDragPayload,
 } from '../../utils/boardTransfer'
+import { canAttemptVisualAnalysis } from '../../../shared/browser-tab-resource-classifier'
+import type { WorkspaceDragPayload } from './fileTreeDragPayload'
 
 export interface BrowserTabDragPayload {
   type: 'browser-tab'
@@ -377,6 +379,44 @@ export function resolveFileTreeDropTarget({
   }
 }
 
+export function getTargetDirFromDropTarget(target: FileTreeDropTarget): string {
+  return target.kind === 'inside-directory' ? target.dirPath : target.containerPath
+}
+
+export function canMoveToDirectory(source: WorkspaceDragPayload, targetDir: string): boolean {
+  if (!targetDir || !source.path) return false
+  if (source.movable === false) return false
+  if (source.path === targetDir) return false
+  const currentParent = source.path.replace(/[\\/][^\\/]+$/, '') || '/'
+  if (currentParent === targetDir) return false
+  if (source.isDirectory) {
+    if (targetDir.startsWith(`${source.path}/`) || targetDir.startsWith(`${source.path}\\`)) {
+      return false
+    }
+  }
+  return true
+}
+
+export function canMoveAllToDirectory(sources: readonly WorkspaceDragPayload[], targetDir: string): boolean {
+  return sources.length > 0 && sources.every((source) => canMoveToDirectory(source, targetDir))
+}
+
+/**
+ * Resolve where an *internal* file-tree drag would land for a given hovered row and
+ * pointer position, mirroring the external-drop indicator: pointer near a row edge lands
+ * in that row's containing folder, pointer over a directory body lands inside it. Returns
+ * the destination directory when the move is valid, or null when the row is not a legal
+ * target (e.g. the item's current folder, or a folder into itself) so callers can skip it.
+ */
+export function resolveInternalMoveDir(
+  sources: readonly WorkspaceDragPayload[],
+  input: ResolveFileTreeDropTargetInput,
+): string | null {
+  if (sources.length === 0) return null
+  const destDir = getTargetDirFromDropTarget(resolveFileTreeDropTarget(input))
+  return canMoveAllToDirectory(sources, destDir) ? destDir : null
+}
+
 export function clampDropMenuPositionToBoundary({
   x,
   y,
@@ -424,18 +464,6 @@ export type FileTreeExternalDropAction =
   | 'copy-analysis'
   | 'visual-analysis'
 
-const VIDEO_DROP_HOST_HINTS = [
-  'youtube.com',
-  'youtu.be',
-  'bilibili.com',
-  'b23.tv',
-  'bili2233.cn',
-  'vimeo.com',
-  'douyin.com',
-  'tiktok.com',
-]
-const VIDEO_DROP_EXTS = ['.mp4', '.mov', '.mkv', '.avi', '.webm', '.m4v', '.flv']
-
 export function isLikelyVideoDropPayload(payload: FileTreeExternalDropPayload): boolean {
   const url =
     payload.type === 'ready-board-selection'
@@ -445,20 +473,7 @@ export function isLikelyVideoDropPayload(payload: FileTreeExternalDropPayload): 
       : payload.type === 'rss-item'
         ? payload.link
         : payload.url
-  const lower = (url || '').trim().toLowerCase()
-  if (!lower) return false
-  if (VIDEO_DROP_EXTS.some((ext) => lower.endsWith(ext))) return true
-  if (lower.includes('/video/')) return true
-  try {
-    const parsed = new URL(lower)
-    return (
-      VIDEO_DROP_HOST_HINTS.some((host) => parsed.hostname.includes(host))
-      || VIDEO_DROP_EXTS.some((ext) => parsed.pathname.endsWith(ext))
-    )
-  } catch {
-    // silent-catch: URL parse fallback for video-drop hint detection; ext-only check is the legitimate fallback for raw strings.
-    return VIDEO_DROP_EXTS.some((ext) => lower.endsWith(ext))
-  }
+  return canAttemptVisualAnalysis(url)
 }
 
 export interface FileTreeExternalDropPlaceholder {

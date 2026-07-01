@@ -58,6 +58,9 @@ import {
   parseRssItemDragPayload,
   parseWebDownloadDragPayload,
   resolveFileTreeDropTarget,
+  resolveInternalMoveDir,
+  getTargetDirFromDropTarget,
+  canMoveAllToDirectory,
   shouldKeepFileTreeDropHintOnLeave,
   type FileTreeDropTarget,
   type FileTreeAnalysisPlaceholderStatus,
@@ -313,24 +316,6 @@ function splitNameForCopy(name: string): { base: string; ext: string } {
   return { base: name.slice(0, dot), ext: name.slice(dot) }
 }
 
-function canMoveToDirectory(source: WorkspaceDragPayload, targetDir: string): boolean {
-  if (!targetDir || !source.path) return false
-  if (source.movable === false) return false
-  if (source.path === targetDir) return false
-  const currentParent = source.path.replace(/[\\/][^\\/]+$/, '') || '/'
-  if (currentParent === targetDir) return false
-  if (source.isDirectory) {
-    if (targetDir.startsWith(`${source.path}/`) || targetDir.startsWith(`${source.path}\\`)) {
-      return false
-    }
-  }
-  return true
-}
-
-function canMoveAllToDirectory(sources: readonly WorkspaceDragPayload[], targetDir: string): boolean {
-  return sources.length > 0 && sources.every((source) => canMoveToDirectory(source, targetDir))
-}
-
 function buildSelectedDragItemsByPath(
   selectedPaths: ReadonlySet<string>,
   items: readonly FileItem[],
@@ -347,8 +332,16 @@ function isActiveReadyBoardTab(): boolean {
   return isReadyBoardFile(activeTab?.path)
 }
 
-function getTargetDirFromDropTarget(target: FileTreeDropTarget): string {
-  return target.kind === 'inside-directory' ? target.dirPath : target.containerPath
+function fileTreeDropTargetsEqual(a: FileTreeDropTarget | null, b: FileTreeDropTarget | null): boolean {
+  if (a === b) return true
+  if (!a || !b || a.kind !== b.kind) return false
+  if (a.kind === 'inside-directory' && b.kind === 'inside-directory') {
+    return a.dirPath === b.dirPath && a.itemPath === b.itemPath && a.containerPath === b.containerPath
+  }
+  if (a.kind !== 'inside-directory' && b.kind !== 'inside-directory') {
+    return a.anchorPath === b.anchorPath && a.containerPath === b.containerPath
+  }
+  return false
 }
 
 function hasMatchingDescendant(
@@ -2107,44 +2100,38 @@ export default function FileTree({
     setExternalDropMenu({ x, y, payload, target })
   }, [handleReadyBoardResourceDrop, handleWebDownloadDrop])
 
-  const handleDirectoryDrop = useCallback((e: React.DragEvent, dirPath: string) => {
-    const externalPayload = getExternalDropPayload(e.dataTransfer)
-    if (externalPayload) {
-      e.preventDefault()
-      e.stopPropagation()
-      setMoveDropTargetDir(null)
-      setFileTreeDropTarget(null)
-      handleResolvedExternalDrop(
-        externalPayload,
-        {
-          kind: 'inside-directory',
-          dirPath,
-          itemPath: dirPath,
-          containerPath: dirPath,
-        },
-        e.clientX,
-        e.clientY,
-      )
-      return
-    }
-
-    const payloads = parseWorkspaceDragPayloads(e.dataTransfer)
-    if (!canMoveAllToDirectory(payloads, dirPath)) return
-    e.preventDefault()
-    e.stopPropagation()
-    setMoveDropTargetDir(null)
-    setFileTreeDropTarget(null)
-    void moveWorkspaceItems(payloads, dirPath)
-  }, [getExternalDropPayload, handleResolvedExternalDrop, moveWorkspaceItems])
-
   const handleItemDragOver = useCallback((e: React.DragEvent, item: FileItem, containerPath: string) => {
     const workspacePayloads = parseWorkspaceDragPayloads(e.dataTransfer)
-    if (item.isDirectory && canMoveAllToDirectory(workspacePayloads, item.path)) {
-      e.preventDefault()
-      e.stopPropagation()
-      e.dataTransfer.dropEffect = 'move'
-      if (moveDropTargetDir !== item.path) setMoveDropTargetDir(item.path)
-      setFileTreeDropTarget(null)
+    if (workspacePayloads.length > 0) {
+      // Internal move: reuse the same precise drop indicator as external drops so the
+      // user can confirm exactly where the item lands (insert line between rows, or a
+      // highlight for "into this folder") instead of a coarse whole-directory glow.
+      const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+      const candidate = resolveFileTreeDropTarget({
+        itemPath: item.path,
+        isDirectory: item.isDirectory,
+        containerPath,
+        pointerY: e.clientY,
+        rectTop: rect.top,
+        rectHeight: rect.height,
+      })
+      if (canMoveAllToDirectory(workspacePayloads, getTargetDirFromDropTarget(candidate))) {
+        e.preventDefault()
+        e.stopPropagation()
+        e.dataTransfer.dropEffect = 'move'
+        setMoveDropTargetDir(null)
+        setFileTreeDropTarget((current) => (fileTreeDropTargetsEqual(current, candidate) ? current : candidate))
+        return
+      }
+      // Not a valid landing spot for this row (e.g. same folder, or into itself): drop the
+      // hint and let the drag bubble to the container fallback.
+      setMoveDropTargetDir(null)
+      setFileTreeDropTarget((current) => (
+        (current?.kind === 'inside-directory' && current.itemPath === item.path) ||
+        (current?.kind !== 'inside-directory' && current?.anchorPath === item.path)
+          ? null
+          : current
+      ))
       return
     }
 
@@ -2166,7 +2153,7 @@ export default function FileTree({
         }),
       )
     }
-  }, [getExternalDropPayload, moveDropTargetDir])
+  }, [getExternalDropPayload])
 
   const handleItemDragLeave = useCallback((e: React.DragEvent, item: FileItem) => {
     if (shouldPreserveDropHint(e as React.DragEvent<HTMLElement>)) return
@@ -2208,10 +2195,28 @@ export default function FileTree({
       return
     }
 
-    if (item.isDirectory) {
-      handleDirectoryDrop(e, item.path)
+    // Internal move: land the item exactly where the indicator showed. An insert line
+    // between rows moves into that row's containing folder; a folder highlight moves inside.
+    const workspacePayloads = parseWorkspaceDragPayloads(e.dataTransfer)
+    if (workspacePayloads.length > 0) {
+      const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+      const destDir = resolveInternalMoveDir(workspacePayloads, {
+        itemPath: item.path,
+        isDirectory: item.isDirectory,
+        containerPath,
+        pointerY: e.clientY,
+        rectTop: rect.top,
+        rectHeight: rect.height,
+      })
+      if (destDir) {
+        e.preventDefault()
+        e.stopPropagation()
+        setMoveDropTargetDir(null)
+        setFileTreeDropTarget(null)
+        void moveWorkspaceItems(workspacePayloads, destDir)
+      }
     }
-  }, [getExternalDropPayload, handleDirectoryDrop, handleResolvedExternalDrop])
+  }, [getExternalDropPayload, handleResolvedExternalDrop, moveWorkspaceItems])
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault()
