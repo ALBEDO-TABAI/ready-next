@@ -86,6 +86,11 @@ import {
   writeWorkspaceDragData,
   type WorkspaceDragPayload,
 } from './fileTreeDragPayload'
+import {
+  beginWorkspaceDragSession,
+  endWorkspaceDragSession,
+  getActiveWorkspaceDragPayloads,
+} from './workspaceDragSession'
 import { startBrowserLocalMediaNativeFileDrag } from '../../modules/browser/localMediaDragBridge'
 import FileEmergenceSection from './FileEmergenceSection'
 import { buildFileEmergenceViewModel } from './fileEmergenceViewModel'
@@ -301,7 +306,20 @@ function hasNativeFileDrop(dataTransfer: DataTransfer): boolean {
 function putDragData(e: React.DragEvent, item: FileItem, movable = true, options: PutDragDataOptions = {}) {
   const payload = buildWorkspaceDragTransferPayload(item, movable, options.selectedItems)
   writeWorkspaceDragData(e.dataTransfer, payload)
+  // Stash the dragged items so the hover indicator can read them during `dragover`,
+  // when `dataTransfer.getData` is blocked by the browser's protected drag store.
+  beginWorkspaceDragSession(payload.type === 'batch' ? payload.items : [payload])
   startBrowserLocalMediaNativeFileDrag(e)
+}
+
+/**
+ * Read the workspace items being dragged. `parseWorkspaceDragPayloads` works on the
+ * final `drop`, but returns nothing during `dragover` (protected drag store), so fall
+ * back to the module-level session captured at `dragstart`.
+ */
+function readWorkspaceDragPayloads(dataTransfer: DataTransfer): WorkspaceDragPayload[] {
+  const parsed = parseWorkspaceDragPayloads(dataTransfer)
+  return parsed.length > 0 ? parsed : getActiveWorkspaceDragPayloads()
 }
 
 function joinPath(dir: string, name: string): string {
@@ -1407,6 +1425,7 @@ export default function FileTree({
     setIsDragOver(false)
     setMoveDropTargetDir(null)
     setFileTreeDropTarget(null)
+    endWorkspaceDragSession()
   }, [])
 
   const requestFileTreeSurfaceRefresh = useCallback(() => {
@@ -2101,7 +2120,7 @@ export default function FileTree({
   }, [handleReadyBoardResourceDrop, handleWebDownloadDrop])
 
   const handleItemDragOver = useCallback((e: React.DragEvent, item: FileItem, containerPath: string) => {
-    const workspacePayloads = parseWorkspaceDragPayloads(e.dataTransfer)
+    const workspacePayloads = readWorkspaceDragPayloads(e.dataTransfer)
     if (workspacePayloads.length > 0) {
       // Internal move: reuse the same precise drop indicator as external drops so the
       // user can confirm exactly where the item lands (insert line between rows, or a
@@ -2197,7 +2216,7 @@ export default function FileTree({
 
     // Internal move: land the item exactly where the indicator showed. An insert line
     // between rows moves into that row's containing folder; a folder highlight moves inside.
-    const workspacePayloads = parseWorkspaceDragPayloads(e.dataTransfer)
+    const workspacePayloads = readWorkspaceDragPayloads(e.dataTransfer)
     if (workspacePayloads.length > 0) {
       const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
       const destDir = resolveInternalMoveDir(workspacePayloads, {
@@ -2221,7 +2240,7 @@ export default function FileTree({
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault()
     e.stopPropagation()
-    const payloads = parseWorkspaceDragPayloads(e.dataTransfer)
+    const payloads = readWorkspaceDragPayloads(e.dataTransfer)
     if (canMoveAllToDirectory(payloads, currentPath)) {
       e.dataTransfer.dropEffect = 'move'
       return
@@ -2265,9 +2284,9 @@ export default function FileTree({
   const handleDrop = useCallback(async (e: React.DragEvent) => {
     e.preventDefault()
     e.stopPropagation()
-    clearFileTreeDragState()
     const lastDropTarget = fileTreeDropTarget
-    const payloads = parseWorkspaceDragPayloads(e.dataTransfer)
+    const payloads = readWorkspaceDragPayloads(e.dataTransfer)
+    clearFileTreeDragState()
     if (canMoveAllToDirectory(payloads, currentPath)) {
       await moveWorkspaceItems(payloads, currentPath)
       return
