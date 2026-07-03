@@ -601,3 +601,235 @@ export async function waitForReady(
   }
   return { ready: false, matchedSelector: false, elapsedMs: Date.now() - started }
 }
+
+export function buildSmartTypeJs(options: {
+  target: string
+  text: string
+  clearFirst: boolean
+  submit: boolean
+  /** EP1-I3 live-target net — args carried a password cue (gate-confirmed). */
+  allowPasswordFill?: boolean
+}): string {
+  const normalizedTarget = options.target.trim().toLowerCase()
+  return `
+    (() => {
+      ${buildInputGuardSnippetJs(options.allowPasswordFill === true)}
+      const target = ${JSON.stringify(normalizedTarget)}
+      const text = ${JSON.stringify(options.text)}
+      const clearFirst = ${options.clearFirst ? 'true' : 'false'}
+      const submit = ${options.submit ? 'true' : 'false'}
+      const normalize = (s) => (s || '').toLowerCase().replace(/\\s+/g, ' ').trim()
+
+      const queue = [document]
+      const visited = new Set()
+      const all = []
+      while (queue.length) {
+        const root = queue.shift()
+        if (!root || visited.has(root)) continue
+        visited.add(root)
+        let nodes = []
+        try {
+          nodes = Array.from(root.querySelectorAll('*'))
+        } catch {
+          nodes = []
+        }
+        for (const node of nodes) {
+          all.push(node)
+          const shadow = node?.shadowRoot
+          if (shadow && !visited.has(shadow)) queue.push(shadow)
+        }
+      }
+
+      const visible = (el) => {
+        try {
+          const rect = el.getBoundingClientRect()
+          if (!rect || rect.width <= 0 || rect.height <= 0) return false
+          const style = window.getComputedStyle(el)
+          if (!style || style.visibility === 'hidden' || style.display === 'none' || Number(style.opacity || '1') <= 0) return false
+          return true
+        } catch {
+          return false
+        }
+      }
+
+      const blockedInputTypes = new Set(['hidden', 'button', 'submit', 'reset', 'checkbox', 'radio', 'file', 'range', 'color', 'date', 'time', 'month', 'week'])
+      const isEditable = (el) => {
+        if (!(el instanceof HTMLElement)) return false
+        const isTextInput = el instanceof HTMLInputElement && !blockedInputTypes.has((el.type || 'text').toLowerCase())
+        const isTextarea = el instanceof HTMLTextAreaElement
+        const role = (el.getAttribute('role') || '').toLowerCase()
+          const roleTextbox = role === 'textbox' || role === 'searchbox'
+        const hasContentEditableAttr = el.hasAttribute('contenteditable')
+        const editableAttr = String(el.getAttribute('contenteditable') || '').toLowerCase()
+        const isContentEditable =
+          el.isContentEditable ||
+          (hasContentEditableAttr && (editableAttr === '' || editableAttr === 'true' || editableAttr === 'plaintext-only'))
+        if (!(isTextInput || isTextarea || roleTextbox || isContentEditable)) return false
+        const tag = (el.tagName || '').toLowerCase()
+        if ((tag === 'html' || tag === 'body') && !hasContentEditableAttr) return false
+        if (el.getAttribute('aria-disabled') === 'true') return false
+        if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
+          if (el.disabled || el.readOnly) return false
+        }
+        return visible(el)
+      }
+
+      const candidates = all.filter(isEditable)
+      if (candidates.length === 0) return 'Smart target not found: no editable element'
+
+      const targetTokens = target.split(' ').filter(Boolean)
+      const textFields = (el) => {
+        const attrs = [
+          el.getAttribute('placeholder') || '',
+          el.getAttribute('aria-label') || '',
+          el.getAttribute('name') || '',
+          el.getAttribute('id') || '',
+          el.getAttribute('title') || '',
+          el.getAttribute('data-placeholder') || '',
+          el.getAttribute('data-testid') || '',
+          el.getAttribute('role') || '',
+        ]
+        const label = (() => {
+          const id = el.getAttribute('id')
+          if (id) {
+            try {
+              const l = document.querySelector('label[for="' + CSS.escape(id) + '"]')
+              if (l) return l.textContent || ''
+            } catch { /* ignore */ }
+          }
+          const p = el.closest('label')
+          return p ? (p.textContent || '') : ''
+        })()
+        attrs.push(label)
+        return normalize(attrs.join(' | '))
+      }
+
+      const score = (el) => {
+        const merged = textFields(el)
+        const rect = el.getBoundingClientRect()
+        let s = 0
+
+        if (target) {
+          if (merged === target) s += 120
+          if (merged.includes(target)) s += 70
+          let tokenHit = 0
+          for (const t of targetTokens) {
+            if (merged.includes(t)) tokenHit += 1
+          }
+          s += tokenHit * 12
+        } else {
+          s += 20
+        }
+
+        if (/search|message|ask|prompt|chat|gemini|输入|搜索|提问|发送/.test(merged)) s += 30
+        if (el instanceof HTMLTextAreaElement) s += 18
+        if (el.isContentEditable) s += 14
+        if ((el.getAttribute('role') || '').toLowerCase() === 'searchbox') s += 18
+
+        const area = Math.max(1, rect.width * rect.height)
+        s += Math.min(28, area / 18000)
+        const fromBottom = Math.max(0, window.innerHeight - rect.bottom)
+        s += Math.max(0, 10 - Math.min(10, fromBottom / 70))
+        return s
+      }
+
+      let best = null
+      let bestScore = -1
+      for (const el of candidates) {
+        const sc = score(el)
+        if (sc > bestScore) {
+          best = el
+          bestScore = sc
+        }
+      }
+
+      if (!best) return 'Smart target not found: score failed'
+
+      // EP1-I3 live-target net — the scorer may have resolved a captcha or
+      // password field the args never named.
+      const __readyGuard = readyInputGuard(best)
+      if (__readyGuard) return __readyGuard
+
+      const focusAndClick = (el) => {
+        try { el.scrollIntoView({ block: 'center', behavior: 'instant' }) } catch { /* ignore */ }
+        try { el.focus({ preventScroll: true }) } catch { /* ignore */ }
+        try { el.click?.() } catch { /* ignore */ }
+      }
+
+      const readText = (el) => {
+        if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
+          return String(el.value || '')
+        }
+        return String(el.innerText || el.textContent || '')
+      }
+
+      const setText = (el, value) => {
+        if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
+          const current = String(el.value || '')
+          if (normalize(current) === normalize(value)) return
+          if (clearFirst) el.value = ''
+          el.value = value
+          return
+        }
+        if (el.isContentEditable) {
+          const current = String(el.innerText || el.textContent || '')
+          if (normalize(current) === normalize(value)) return
+          if (clearFirst) el.textContent = ''
+          let inserted = false
+          try {
+            const selection = window.getSelection()
+            if (selection) {
+              const range = document.createRange()
+              range.selectNodeContents(el)
+              range.collapse(false)
+              selection.removeAllRanges()
+              selection.addRange(range)
+            }
+            inserted = document.execCommand('insertText', false, value)
+          } catch {
+            inserted = false
+          }
+          if (!inserted) {
+            el.textContent = (clearFirst ? '' : (el.textContent || '')) + value
+          }
+          return
+        }
+        el.textContent = value
+      }
+
+      focusAndClick(best)
+      const currentText = normalize(readText(best))
+      const normalizedText = normalize(text)
+      const alreadyHasSameText = Boolean(currentText && normalizedText && currentText === normalizedText)
+      if (!alreadyHasSameText) {
+        setText(best, text)
+        try {
+          best.dispatchEvent(new InputEvent('input', { bubbles: true, data: text, inputType: 'insertText' }))
+        } catch {
+          best.dispatchEvent(new Event('input', { bubbles: true }))
+        }
+        best.dispatchEvent(new Event('change', { bubbles: true }))
+      }
+
+      if (submit) {
+        const keyOpts = { key: 'Enter', code: 'Enter', bubbles: true, cancelable: true }
+        const down = new KeyboardEvent('keydown', keyOpts)
+        const notCanceled = best.dispatchEvent(down)
+        best.dispatchEvent(new KeyboardEvent('keypress', keyOpts))
+        best.dispatchEvent(new KeyboardEvent('keyup', keyOpts))
+        if (notCanceled) {
+          const form = best.closest('form')
+          if (form && typeof form.requestSubmit === 'function') {
+            form.requestSubmit()
+          }
+        }
+      }
+
+      const idName = best.getAttribute('name') || best.getAttribute('id') || best.getAttribute('aria-label') || best.tagName
+      if (alreadyHasSameText) {
+        return 'Smart target already has same text: ' + idName
+      }
+      return 'Typed into smart target: ' + idName + ' (score=' + bestScore.toFixed(2) + ')'
+    })()
+  `
+}
