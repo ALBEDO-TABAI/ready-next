@@ -117,9 +117,18 @@ export class RunCoordinator {
     })
     const messageWithBootstrap = this.deps.promptAssembly.applyToMessage(request.message, prepared)
 
+    // P1 fix (2026-07-03, live regression) — cross-cutting fragments
+    // (browser interaction discipline, site-experience cards) are injected
+    // context, NOT task descriptors. Using the top trigger's label made every
+    // browser task card read "浏览器交互纪律" (discipline priority 70 always
+    // won triggerHits[0]). Skip them so the placeholder falls back to the
+    // neutral "正在理解需求", which the real task title later replaces.
+    const isCrossCuttingTrigger = (id: string | undefined): boolean =>
+      typeof id === 'string' && (id === 'browser-discipline' || id.startsWith('site-card-'))
+    const titleTriggers = prepared.triggerHits.filter((trigger) => !isCrossCuttingTrigger(trigger.id))
     const primaryTrigger = prepared.intentClassification?.primaryDomain === 'skill'
-      ? prepared.triggerHits.find((trigger) => trigger.blocking)
-      : prepared.triggerHits[0]
+      ? titleTriggers.find((trigger) => trigger.blocking)
+      : titleTriggers[0]
     const planningTaskTitle = primaryTrigger?.label || '正在理解需求'
     const planningTaskSummary = primaryTrigger
       ? `准备开始 ${primaryTrigger.label}`

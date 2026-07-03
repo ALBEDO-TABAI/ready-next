@@ -449,3 +449,49 @@ test('RunCoordinator preserves typed scope run authority on failed execution', a
     currentRunId: 'req-new',
   })
 })
+
+// P1 fix (2026-07-03, live regression) — cross-cutting fragments (browser
+// interaction discipline, site-experience cards) must NOT seed the planning
+// task title; they are injected context, not task descriptors.
+function coordinatorWithTriggers(triggerHits: ScopeRunEventPayload['triggerHits']): {
+  coordinator: RunCoordinator
+  events: ScopeRunEventPayload[]
+} {
+  const events: ScopeRunEventPayload[] = []
+  const coordinator = new RunCoordinator({
+    promptAssembly: {
+      buildForScopedRun: async () => ({
+        systemPrompt: 'system prompt',
+        bootstrapMessages: [],
+        memoryRefs: [],
+        triggerHits,
+        contextBudget: { totalChars: 0, l0Chars: 0, l1Chars: 0, l2Chars: 0, droppedRefs: [] },
+      }) as never,
+      applyToMessage: () => 'hello',
+      recordRunOutcome: () => {},
+    },
+    executeAndCollect: async () => ({ success: true, finalText: 'done', cancelled: false, usedTools: [] }) as never,
+    emitScopeRunEvent: (payload) => { events.push(payload) },
+    reflectOnConversation: async () => null,
+  })
+  return { coordinator, events }
+}
+
+test('planning title skips the cross-cutting discipline fragment and uses the real task fragment', async () => {
+  const { coordinator, events } = coordinatorWithTriggers([
+    { id: 'browser-discipline', label: '浏览器交互纪律', module: 'browser', blocking: false, refs: [] },
+    { id: 'browser-upload', label: '浏览器上传流程', module: 'browser', blocking: false, refs: [] },
+  ] as never)
+  await coordinator.runScoped({ scope: createScope(), message: 'hello', requestId: 'req-title-1', coordinators: [] })
+  assert.equal(events[0]?.taskTitle, '浏览器上传流程')
+  assert.notEqual(events[0]?.taskTitle, '浏览器交互纪律')
+})
+
+test('planning title falls back to the neutral placeholder when only cross-cutting fragments matched', async () => {
+  const { coordinator, events } = coordinatorWithTriggers([
+    { id: 'browser-discipline', label: '浏览器交互纪律', module: 'browser', blocking: false, refs: [] },
+    { id: 'site-card-xiaohongshu.com', label: '站点经验 xiaohongshu.com', module: 'browser', blocking: false, refs: [] },
+  ] as never)
+  await coordinator.runScoped({ scope: createScope(), message: 'hello', requestId: 'req-title-2', coordinators: [] })
+  assert.equal(events[0]?.taskTitle, '正在理解需求')
+})

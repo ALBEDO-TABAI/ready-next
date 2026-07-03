@@ -2,14 +2,16 @@ import type { BrowserController } from '../browser-engine/ipc-handler'
 import { rememberBrowserWorkflowState } from '../agent-control/session/session-continuity'
 import { executeBrowserTool } from './browser-tools'
 import { getBrowserWriteLeaseService } from '../browser-engine/agent-browser-lease-singleton'
-import { runUnderUserViewLease } from '../browser-engine/agent-browser-lane'
+import { runUnderBrowserViewLease } from '../browser-engine/agent-browser-lane'
 import type { BrowserLeaseGate } from '../browser-engine/agent-browser-lease-gate'
 import { resolveBrowserToolSurfaceBinding } from '../browser-engine/browser-surface-binding'
+import { agentBrowserError, type AgentBrowserSurface } from '../browser-engine/agent-browser-errors'
 import { createRotatingLogger } from '../../utils/rotating-logger'
 import { BrowserAgentRuntimeAdapter } from '../browser-engine/agent-runtime-adapter'
 import { BrowserPageStateService } from '../browser-engine/page-state-service'
 import { BrowserEvidenceService } from '../browser-engine/evidence-service'
 import type { BrowserPageState, BrowserTaskProjectionPayload } from '../../../shared/browser-agent-task'
+import { isReadyBrowserBlankUrl } from '../../../shared/browser-defaults'
 
 type BrowserAgentSessionState =
   | 'queued'
@@ -283,9 +285,14 @@ export class BrowserAgentRunner {
   private readonly emitToolEvent?: (type: 'tool_use' | 'tool_result', text: string) => void
   private activePlan: BrowserTaskPlanLike | null = null
   private state: BrowserAgentSessionState = 'queued'
-  /** Lane-A user-view write lease gate, set for the duration of a run (WP1). */
+  /** Browser lane write lease gate, set for the duration of a deterministic workflow. */
   private leaseGate: BrowserLeaseGate | undefined = undefined
   private leaseHeartbeat: (() => void) | undefined = undefined
+  private boundTabId: string | null = null
+  private boundSurface: AgentBrowserSurface | null = null
+  private sourceUserTabId: string | null = null
+  private sourceUserTabUrl: string | null = null
+  private workflowRunId: string | null = null
   private readonly workflowSnapshotCache = new Map<string, { snapshot: WorkflowSnapshot; createdAt: number }>()
   private readonly visionHintCache = new Map<string, { targets: WorkflowActionTarget[]; createdAt: number }>()
   private promptAnchorLock: {
@@ -297,7 +304,7 @@ export class BrowserAgentRunner {
 
   constructor(controller: BrowserController, options?: BrowserAgentRunnerOptions) {
     this.controller = controller
-    this.runtime = new BrowserAgentRuntimeAdapter(controller)
+    this.runtime = new BrowserAgentRuntimeAdapter(controller, { defaultTabId: () => this.boundTabId })
     this.pageStateService = new BrowserPageStateService(this.runtime)
     this.evidenceService = new BrowserEvidenceService()
     this.abortSignal = options?.abortSignal
@@ -312,6 +319,71 @@ export class BrowserAgentRunner {
       error.name = 'AbortError'
       throw error
     }
+  }
+
+  private getBoundTabRecord(): ReturnType<BrowserController['getTabList']>[number] | null {
+    if (!this.boundTabId) return null
+    return this.controller.getTabList().find((tab) => tab.id === this.boundTabId) || null
+  }
+
+  private getWorkflowTabRecord(): { id: string; url: string; title: string } | null {
+    const bound = this.getBoundTabRecord()
+    if (this.boundSurface) return bound
+    return bound || this.controller.getActiveTab() || null
+  }
+
+  private getExecutionTabId(): string | null {
+    if (this.boundSurface) return this.getBoundTabRecord()?.id || null
+    return this.boundTabId || null
+  }
+
+  private getRequiredExecutionTabId(operation: string): string | null {
+    const tabId = this.getExecutionTabId()
+    if (!tabId) {
+      log(`[browser-v7][lane] execution tab unavailable for ${operation}`)
+      return null
+    }
+    return tabId
+  }
+
+  private shouldUseUserViewWorkflow(input: string, plan: BrowserTaskPlanLike): boolean {
+    if (this.getPlannedTargetUrl(plan)) return false
+    const text = String(input || '')
+    return /(当前页面|当前页|这个页面|这个网页|此页面|已打开|已经打开|草稿|弹层|选中|滚到|展开|current page|this page|selected|draft|modal|scrolled)/i.test(text)
+  }
+
+  private applyAgentLaneFallbackTarget(plan: BrowserTaskPlanLike): void {
+    if (this.boundSurface !== 'agent-view') return
+    if (this.getPlannedTargetUrl(plan)) return
+    const sourceUrl = String(this.sourceUserTabUrl || '').trim()
+    if (!sourceUrl || isReadyBrowserBlankUrl(sourceUrl)) return
+    plan.targetUrl = sourceUrl
+  }
+
+  private prepareToolArgs(toolName: string, args: Record<string, unknown>): Record<string, unknown> | null {
+    if (typeof args.tab_id === 'string' && args.tab_id.trim()) return args
+    if (this.boundSurface) {
+      if (this.boundTabId && this.getBoundTabRecord()) return { ...args, tab_id: this.boundTabId }
+      log(`[browser-v7][lane] bound tab unavailable for ${toolName}`)
+      return null
+    }
+    if (this.boundTabId && this.getBoundTabRecord()) return { ...args, tab_id: this.boundTabId }
+    log(`[browser-v7][lane] missing bound tab for ${toolName}`)
+    return null
+  }
+
+  private adoptFollowedTabFromToolResult(resultText: string): void {
+    if (this.boundSurface !== 'agent-view' || !this.workflowRunId) return
+    const payload = parseJSONText(resultText)
+    const followed = payload?.followedTab && typeof payload.followedTab === 'object'
+      ? payload.followedTab as Record<string, unknown>
+      : null
+    const followedTabId = typeof followed?.tabId === 'string' ? followed.tabId.trim() : ''
+    if (!followedTabId || followedTabId === this.boundTabId) return
+    const tab = this.controller.getTabList().find((item) => item.id === followedTabId)
+    if (tab?.owner !== 'agent') return
+    this.boundTabId = followedTabId
+    this.controller.updateForegroundBrowserWorkflowTarget(this.workflowRunId, followedTabId, 'tool_followed_tab')
   }
 
   private emitStage(stage: BrowserWorkflowStage, message: string): void {
@@ -519,7 +591,7 @@ export class BrowserAgentRunner {
     lastFailureReason?: string | null,
   ): void {
     if (!this.sessionId) return
-    const activeTab = this.controller.getActiveTab()
+    const activeTab = this.getWorkflowTabRecord()
     const recentEvidence = uniqueEvidence([
       ...snapshot.uploadState.evidence,
       ...snapshot.promptState.submitEvidence,
@@ -774,33 +846,55 @@ export class BrowserAgentRunner {
     args: Record<string, unknown>,
     options?: { silent?: boolean },
   ): Promise<string> {
+    const targetArgs = this.prepareToolArgs(toolName, args)
+    if (!targetArgs) {
+      return JSON.stringify(agentBrowserError(
+        'browser_surface_binding_violation',
+        'Bound browser workflow tool call has no target tab.',
+        { tool: toolName, surface: this.boundSurface || 'agent-view' },
+      ))
+    }
     if (!options?.silent) {
-      this.emitToolEvent?.('tool_use', `${toolName}(${JSON.stringify(args).slice(0, 160)})`)
+      this.emitToolEvent?.('tool_use', `${toolName}(${JSON.stringify(targetArgs).slice(0, 160)})`)
     }
     const surfaceBinding = resolveBrowserToolSurfaceBinding({
       toolName,
-      args,
+      args: targetArgs,
       dispatch: 'browser-agent-runner',
       hasRunnerLeaseGate: Boolean(this.leaseGate),
+      boundSurface: this.boundSurface || undefined,
+      agentTabId: this.boundTabId,
     })
     if (!surfaceBinding.ok) {
       return JSON.stringify(surfaceBinding.error)
     }
-    // Lane-A: refresh the user-view lease before each tool so a long run does
-    // not expire mid-loop, then gate the call through the lease.
+    if (
+      surfaceBinding.binding.effect === 'write' &&
+      this.boundSurface === 'agent-view' &&
+      this.controller.getAgentControlState() !== 'active'
+    ) {
+      return JSON.stringify(agentBrowserError(
+        'lease_takeover',
+        'Agent browser tab is waiting for user confirmation; workflow writes are frozen.',
+        { tool: toolName, surface: 'agent-view', controlState: this.controller.getAgentControlState() },
+      ))
+    }
+    // Refresh the lane lease before each tool so a long run does not expire
+    // mid-loop, then gate the call through the lease.
     this.leaseHeartbeat?.()
-	    const result = await executeBrowserTool(
-	      toolName,
-	      args,
-	      this.controller,
+    const result = await executeBrowserTool(
+      toolName,
+      targetArgs,
+      this.controller,
       this.abortSignal,
-	      this.sessionId,
-	      this.leaseGate,
-	    )
-	    const resultText = typeof result === 'string' ? result : result.text
-	    if (!options?.silent) {
-	      this.emitToolEvent?.('tool_result', resultText.slice(0, 220))
-	    }
+      this.sessionId,
+      this.leaseGate,
+    )
+    const resultText = typeof result === 'string' ? result : result.text
+    this.adoptFollowedTabFromToolResult(resultText)
+    if (!options?.silent) {
+      this.emitToolEvent?.('tool_result', resultText.slice(0, 220))
+    }
     if ([
       'browser_navigate',
       'browser_upload_scope_attachment',
@@ -818,8 +912,8 @@ export class BrowserAgentRunner {
     ].includes(toolName)) {
       this.invalidateWorkflowCaches()
     }
-	    return resultText
-	  }
+    return resultText
+  }
 
   private invalidateWorkflowCaches(options?: { keepVision?: boolean }): void {
     this.workflowSnapshotCache.clear()
@@ -830,7 +924,7 @@ export class BrowserAgentRunner {
   }
 
   private buildLivePageKey(): string {
-    const activeTab = this.controller.getActiveTab()
+    const activeTab = this.getWorkflowTabRecord()
     return [
       activeTab?.id || 'no-tab',
       normalizeComparableUrl(activeTab?.url || ''),
@@ -937,10 +1031,21 @@ export class BrowserAgentRunner {
   }
 
   private async probeUploadState(attachmentName?: string): Promise<UploadProbe> {
+    const tabId = this.getRequiredExecutionTabId('probeUploadState')
+    if (!tabId) {
+      return {
+        complete: false,
+        evidence: ['bound_tab_unavailable'],
+        inputHasFiles: false,
+        previewVisible: false,
+        attachmentNameMatched: false,
+        removeActionVisible: false,
+      }
+    }
     const safeName = String(attachmentName || '').trim()
     const basename = safeName.replace(/\.[a-z0-9]{1,8}$/i, '').toLowerCase()
     const result = await this.controller.executeJS(
-      null,
+      tabId,
       `(() => {
         const normalize = (value) => String(value || '').replace(/\\s+/g, ' ').trim().toLowerCase()
         const visible = (el) => {
@@ -1012,8 +1117,18 @@ export class BrowserAgentRunner {
   }
 
   private async probeDomState(): Promise<DomStateProbe> {
+    const tabId = this.getRequiredExecutionTabId('probeDomState')
+    if (!tabId) {
+      return {
+        inputCandidateCount: 0,
+        sendCandidateCount: 0,
+        uploadCandidateCount: 0,
+        modalVisible: false,
+        bodyStateText: 'bound_tab_unavailable',
+      }
+    }
     const result = await this.controller.executeJS(
-      null,
+      tabId,
       `(() => {
         const normalize = (value) => String(value || '').replace(/\\s+/g, ' ').trim().toLowerCase()
         const visible = (el) => {
@@ -1059,8 +1174,21 @@ export class BrowserAgentRunner {
   }
 
   private async probePromptSubmissionState(expectedPrompt: string): Promise<PromptSubmissionProbe> {
+    const tabId = this.getRequiredExecutionTabId('probePromptSubmissionState')
+    if (!tabId) {
+      return {
+        promptMatched: false,
+        promptFilled: false,
+        promptText: '',
+        generating: false,
+        submitEvidence: ['bound_tab_unavailable'],
+        sendButtonCount: 0,
+        sendButtonDisabled: false,
+        uploadChipVisible: false,
+      }
+    }
     const result = await this.controller.executeJS(
-      null,
+      tabId,
       `(() => {
         const expected = ${JSON.stringify(String(expectedPrompt || '').trim().toLowerCase())}
         const normalize = (value) => String(value || '').replace(/\\s+/g, ' ').trim().toLowerCase()
@@ -1306,7 +1434,7 @@ export class BrowserAgentRunner {
       if (snapshot.candidates) {
         this.rememberPromptAnchor(snapshot)
       }
-      const activeTab = this.controller.getActiveTab()
+      const activeTab = this.getWorkflowTabRecord()
       if (activeTab?.id) {
         this.controller.updateTabRuntimeState(activeTab.id, { lastAuditedAt: Date.now() })
       }
@@ -2124,6 +2252,7 @@ export class BrowserAgentRunner {
 
   private async runUploadWorkflow(input: string): Promise<BrowserAgentRunResult> {
     const plan = this.buildDefaultPlan()
+    this.applyAgentLaneFallbackTarget(plan)
     this.activePlan = plan
     const promptResolution = this.resolvePromptCandidate(input)
     const promptCandidate = promptResolution.value
@@ -2389,24 +2518,39 @@ export class BrowserAgentRunner {
       }
     }
 
-    const activeTabId = this.controller.getActiveTab()?.id || null
-    if (activeTabId) {
-      this.controller.updateTabRuntimeState(activeTabId, {
-        owner: 'agent',
-        required: true,
-        activity: 'running',
-        lastAuditedAt: Date.now(),
-      })
-    }
-
     try {
       if (decision.mode === 'browser_upload_workflow' || decision.mode === 'browser_workflow') {
-        // Lane-A: hold the user-view write lease for the whole workflow so the
-        // agent's writes are gated and a user takeover instantly suspends them.
+        const activeTab = this.controller.getActiveTab()
+        const activeTabId = activeTab?.id || null
+        const plan = this.buildDefaultPlan()
+        const lane: AgentBrowserSurface = this.shouldUseUserViewWorkflow(trimmed, plan) ? 'user-view' : 'agent-view'
         const runId = this.sessionId || `browser-run-${activeTabId || 'no-tab'}`
-        const outcome = await runUnderUserViewLease(
+        const sessionResult = await this.controller.beginForegroundBrowserWorkflowSession({
+          runId,
+          taskId: runId,
+          lane,
+        })
+        if (!sessionResult.ok) {
+          this.state = 'partial'
+          return {
+            handled: true,
+            state: this.state,
+            message: sessionResult.error.errorCode === 'lease_held'
+              ? 'Agent 浏览器窗格正被另一个任务使用，我先不抢它。'
+              : '浏览器任务没有可用的目标窗格。',
+            details: { errorCode: sessionResult.error.errorCode, detail: sessionResult.error.detail },
+          }
+        }
+
+        this.workflowRunId = runId
+        this.boundTabId = sessionResult.session.boundTabId
+        this.boundSurface = sessionResult.session.lane
+        this.sourceUserTabId = sessionResult.session.sourceUserTabId
+        this.sourceUserTabUrl = activeTab?.url || null
+
+        const outcome = await runUnderBrowserViewLease(
           getBrowserWriteLeaseService(),
-          { taskId: runId, runId, tabId: activeTabId },
+          { surface: sessionResult.session.lane, taskId: runId, runId, tabId: sessionResult.session.boundTabId },
           async (gate, heartbeat) => {
             this.leaseGate = gate
             this.leaseHeartbeat = heartbeat
@@ -2420,6 +2564,7 @@ export class BrowserAgentRunner {
         )
         if (!outcome.ok) {
           this.state = 'partial'
+          this.controller.closeForegroundBrowserWorkflowSession(runId, 'user_interrupted', outcome.blocked.errorCode)
           return {
             handled: true,
             state: this.state,
@@ -2429,14 +2574,29 @@ export class BrowserAgentRunner {
             details: { errorCode: outcome.blocked.errorCode },
           }
         }
+        this.controller.closeForegroundBrowserWorkflowSession(
+          runId,
+          outcome.value.state === 'done' ? 'workflow_completed' : outcome.value.state === 'cancelled' ? 'user_interrupted' : 'workflow_failed',
+          outcome.value.message,
+        )
         return outcome.value
       }
     } catch (error) {
       if ((error as Error).name === 'AbortError') {
         this.state = 'cancelled'
+        if (this.workflowRunId) {
+          this.controller.closeForegroundBrowserWorkflowSession(this.workflowRunId, 'user_interrupted', 'aborted')
+        }
         return { handled: true, state: this.state, message: '浏览器任务已取消。' }
       }
       this.state = 'failed'
+      if (this.workflowRunId) {
+        this.controller.closeForegroundBrowserWorkflowSession(
+          this.workflowRunId,
+          'workflow_failed',
+          error instanceof Error ? error.message : String(error),
+        )
+      }
       return {
         handled: true,
         state: this.state,
@@ -2444,14 +2604,11 @@ export class BrowserAgentRunner {
       }
     } finally {
       this.invalidateWorkflowCaches()
-      if (activeTabId) {
-        this.controller.updateTabRuntimeState(activeTabId, {
-          owner: 'manual',
-          required: false,
-          activity: 'idle',
-          lastAuditedAt: Date.now(),
-        })
-      }
+      this.boundTabId = null
+      this.boundSurface = null
+      this.sourceUserTabId = null
+      this.sourceUserTabUrl = null
+      this.workflowRunId = null
     }
 
     return { handled: false, state: 'partial', message: 'browser runner no-op' }

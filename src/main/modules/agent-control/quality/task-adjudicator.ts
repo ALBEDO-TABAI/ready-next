@@ -26,6 +26,11 @@ export interface CheckInRecord {
   proofCount: number
   blockers: string[]
   ts: string
+  /** P2-5 (2026-07-03) — observable learning decision for this terminal run:
+   *  did it produce durable, learnable evidence (learningRefs) that the
+   *  specialist task-evolution pipeline can draft a proposal from? `learned`
+   *  false = nothing to crystallize (direct answers, pure lookups). */
+  learningDecision?: { learned: boolean; refCount: number }
 }
 
 export const CHECKINS_LIMIT = 50
@@ -57,6 +62,10 @@ export interface AdjudicationInput {
   mode?: CheckInRecord['kind']
   /** Q4b admission: learning refs must exist on disk BEFORE bookkeeping. */
   learningRefsValid?: boolean
+  /** P2-5: durable learning evidence derived from the run (finalizer supplies
+   *  a subset of proofRefs). Drives checkIn.learningDecision; empty = no
+   *  crystallizable learning this run (not a failure). */
+  learningRefs?: ReadonlyArray<unknown>
   now: Date
 }
 
@@ -93,6 +102,10 @@ export function adjudicateTerminalOutcome(input: AdjudicationInput): Adjudicatio
     }
   }
 
+  const learningRefCount = Array.isArray(input.learningRefs)
+    ? input.learningRefs.filter((ref) => ref != null).length
+    : 0
+
   return {
     verdict,
     checkIn: {
@@ -105,6 +118,9 @@ export function adjudicateTerminalOutcome(input: AdjudicationInput): Adjudicatio
       proofCount: proofs.length,
       blockers,
       ts: input.now.toISOString(),
+      // P2-5 — only accepted runs that produced durable evidence carry a
+      // positive learning decision; the specialist pipeline gates on this.
+      learningDecision: { learned: verdict === 'accept' && learningRefCount > 0, refCount: learningRefCount },
     },
   }
 }

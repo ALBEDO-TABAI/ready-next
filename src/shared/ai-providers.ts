@@ -172,6 +172,7 @@ const PROVIDER_ALIASES: Record<string, AIProviderType> = {
   'anthropic': 'anthropic',
   'claude': 'anthropic',
   'openai': 'openai',
+  'deepseek': 'openai-compatible',
   'fox': 'fox',
   'foxcode': 'fox',
   'newcli': 'fox',
@@ -184,6 +185,12 @@ const PROVIDER_ALIASES: Record<string, AIProviderType> = {
   'openai_compatible': 'openai-compatible',
   'compatible': 'openai-compatible',
 }
+
+const OPENAI_COMPATIBLE_PLACEHOLDER_MODELS = new Set(
+  [...openaiCompatibleModule.def.models.map((model) => model.id), '__custom__'],
+)
+const DEEPSEEK_DEFAULT_MODEL = 'deepseek-v4-flash'
+const DEEPSEEK_DEFAULT_MODEL_IDS = [DEEPSEEK_DEFAULT_MODEL, 'deepseek-v4-pro']
 
 const BUILTIN_PROFILE_META: Record<Exclude<AIProviderCategory, 'custom'>, { id: string; name: string; provider: AIProviderType }> = {
   openai: { id: 'builtin-openai', name: 'OpenAI', provider: 'openai' },
@@ -213,6 +220,29 @@ function normalizeModelIds(model: unknown, modelIds: unknown): string[] | undefi
     if (!deduped.includes(value)) deduped.push(value)
   }
   return deduped
+}
+
+export function isDeepSeekBaseUrl(baseUrl: string | undefined | null): boolean {
+  return /\.deepseek\.(com|ai)(?:\/|$)/i.test(String(baseUrl || '').trim())
+}
+
+function normalizeDeepSeekModelDefaults(config: AIModelConfig, baseUrl: string): {
+  model: string
+  modelIds: unknown
+} {
+  const model = String(config.model || '').trim()
+  if (!isDeepSeekBaseUrl(baseUrl) || (model && !OPENAI_COMPATIBLE_PLACEHOLDER_MODELS.has(model))) {
+    return { model: config.model, modelIds: config.modelIds }
+  }
+
+  const existingModelIds = Array.isArray(config.modelIds) ? config.modelIds : []
+  return {
+    model: DEEPSEEK_DEFAULT_MODEL,
+    modelIds: [
+      ...DEEPSEEK_DEFAULT_MODEL_IDS,
+      ...existingModelIds.filter((value) => !OPENAI_COMPATIBLE_PLACEHOLDER_MODELS.has(String(value || '').trim())),
+    ],
+  }
 }
 
 export function createConfigFromProvider(providerId: AIProviderType, overrides?: Partial<AIModelConfig>): AIModelConfig {
@@ -313,6 +343,9 @@ export function normalizeProviderId(id: string | undefined | null, baseUrl?: str
   if (normalizedBaseUrl.includes('volces.com')) {
     return 'volcengine'
   }
+  if (isDeepSeekBaseUrl(normalizedBaseUrl)) {
+    return 'openai-compatible'
+  }
   if (normalizedBaseUrl.includes('moonshot.cn') || normalizedBaseUrl.includes('kimi.com')) {
     return 'moonshot'
   }
@@ -331,10 +364,14 @@ export function normalizeAIConfig<T extends AIModelConfig | null | undefined>(co
   const provider = AI_PROVIDERS.find((item) => item.id === providerId)
   const normalizedBaseUrl = String(config.baseUrl || '').trim().replace(/\/+$/, '')
   const isKimiCoding = normalizedBaseUrl.includes('api.kimi.com/coding')
-  const normalizedModelIds = normalizeModelIds(config.model, config.modelIds)
+  const modelDefaults = providerId === 'openai-compatible'
+    ? normalizeDeepSeekModelDefaults(config, normalizedBaseUrl)
+    : { model: config.model, modelIds: config.modelIds }
+  const normalizedModelIds = normalizeModelIds(modelDefaults.model, modelDefaults.modelIds)
   const nextConfig: AIModelConfig = {
     ...config,
     provider: providerId,
+    model: modelDefaults.model,
     wireApi: config.wireApi || provider?.wireApi || config.wireApi,
     reasoningEffort: config.reasoningEffort || provider?.defaultReasoningEffort || config.reasoningEffort,
     capabilityModes: normalizeCapabilityModeMap(config.capabilityModes),

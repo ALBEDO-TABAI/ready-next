@@ -5,6 +5,7 @@ import { executeToolCall, type ToolContext } from '../main/modules/tools/tool-ex
 import { BrowserWriteLeaseService } from '../main/modules/browser-engine/browser-write-lease'
 import { BrowserTurnLease } from '../main/modules/browser-engine/agent-browser-turn-lease'
 import { isAgentBrowserError } from '../main/modules/browser-engine/agent-browser-errors'
+import { noteBrowserActionSession } from '../main/modules/browser-engine/browser-action-session'
 import type { BrowserController } from '../main/modules/browser-engine/ipc-handler'
 
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
@@ -193,5 +194,85 @@ describe('free-loop browser dispatch lease gating (WP2)', () => {
     // A subsequent foreground write in the same turn is now blocked.
     const out = await executeToolCall('browser_go_back', {}, ctx(controller, turnLease))
     assert.equal(parseError(out)?.errorCode, 'lease_held', 'foreground write blocked while the bg task owns the surface')
+  })
+
+  it('inherits the browser action session target for omitted Power tab ids', async () => {
+    const service = new BrowserWriteLeaseService()
+    const turnLease = new BrowserTurnLease({ taskId: 't', runId: 'r-power-target' }, 'user-view', service)
+    const sessionId = 's-browser-target-inherit'
+    let cdpTabId: string | null = null
+    noteBrowserActionSession(sessionId, {
+      targetTabId: 'tab-bound',
+      currentUrl: 'https://example.com/publish',
+      lastAction: 'browser_click_text',
+      nextSuggestedAction: 'read map again',
+    })
+    const controller = createController({
+      getTabList: () => [
+        { id: 'tab-active', title: 'Active', url: 'https://example.com/active', active: true },
+        { id: 'tab-bound', title: 'Bound', url: 'https://example.com/publish', active: false },
+      ] as never,
+      getActiveTab: () => ({ id: 'tab-active', title: 'Active', url: 'https://example.com/active', active: true }) as never,
+      sendCdpCommand: async (tabId) => {
+        cdpTabId = tabId
+        return { result: { value: 'ok' } }
+      },
+      executeJS: async () => ({ title: 'Bound', text: '' }),
+    })
+
+    const out = await executeToolCall('browser_power_cdp', {
+      method: 'Runtime.evaluate',
+      params: { expression: 'document.title', returnByValue: true },
+      purpose: 'read title',
+      expected_effects: ['observe'],
+    }, {
+      ...ctx(controller, turnLease),
+      sessionId,
+      runId: 'r-power-target',
+      currentUserText: '用 Power Browser 帮我发小红书，继续检查发布页。',
+    })
+
+    assert.equal(parseError(out), null, `power cdp should pass: ${outputText(out)}`)
+    assert.equal(cdpTabId, 'tab-bound')
+  })
+
+  it('does not inherit the browser action session target outside transaction turns', async () => {
+    const service = new BrowserWriteLeaseService()
+    const turnLease = new BrowserTurnLease({ taskId: 't', runId: 'r-power-observe' }, 'user-view', service)
+    const sessionId = 's-browser-target-observe'
+    let cdpTabId: string | null = 'not-called'
+    noteBrowserActionSession(sessionId, {
+      targetTabId: 'tab-bound',
+      currentUrl: 'https://example.com/publish',
+      lastAction: 'browser_click_text',
+      nextSuggestedAction: 'read map again',
+    })
+    const controller = createController({
+      getTabList: () => [
+        { id: 'tab-active', title: 'Active', url: 'https://example.com/active', active: true },
+        { id: 'tab-bound', title: 'Bound', url: 'https://example.com/publish', active: false },
+      ] as never,
+      getActiveTab: () => ({ id: 'tab-active', title: 'Active', url: 'https://example.com/active', active: true }) as never,
+      sendCdpCommand: async (tabId) => {
+        cdpTabId = tabId
+        return { result: { value: 'ok' } }
+      },
+      executeJS: async () => ({ title: 'Active', text: '' }),
+    })
+
+    const out = await executeToolCall('browser_power_cdp', {
+      method: 'Runtime.evaluate',
+      params: { expression: 'document.title', returnByValue: true },
+      purpose: 'read title',
+      expected_effects: ['observe'],
+    }, {
+      ...ctx(controller, turnLease),
+      sessionId,
+      runId: 'r-power-observe',
+      currentUserText: '用 Power Browser 看一下当前网页标题。',
+    })
+
+    assert.equal(parseError(out), null, `power cdp should pass: ${outputText(out)}`)
+    assert.equal(cdpTabId, null)
   })
 })

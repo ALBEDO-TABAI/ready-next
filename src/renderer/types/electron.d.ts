@@ -3677,6 +3677,29 @@ interface ElectronMemoryCardsAPI {
   setKnowledgeSystemEnabled: (enabled: boolean) => Promise<IPCResponse<BeliefCardSettingsSnapshotData>>
 }
 
+// P0-4 (2026-07-02 P0 visibility batch) — run quality dashboard payload.
+interface RunQualityDayData {
+  date: string
+  total: number
+  done: number
+  proofGap: number
+  degraded: number
+  unconfirmed: number
+}
+
+interface RunQualityStatsData {
+  windowDays: number
+  sampleSize: number
+  days: RunQualityDayData[]
+  divergenceCount: number
+  firstDelta: { count: number; p50Ms: number | null; avgMs: number | null }
+  streamFallbacks: Record<string, number>
+}
+
+interface ElectronRunQualityAPI {
+  stats: () => Promise<IPCResponse<RunQualityStatsData>>
+}
+
 interface ElectronTriggerAPI {
   list: (filters?: TriggerFilters) => Promise<IPCResponse<TriggerDefinition[]>>
   create: (trigger: Partial<TriggerDefinition>) => Promise<IPCResponse<TriggerDefinition>>
@@ -3773,6 +3796,7 @@ interface ElectronAPI {
   agent: ElectronAgentAPI
   memory: ElectronMemoryAPI
   memoryCards: ElectronMemoryCardsAPI
+  runQuality: ElectronRunQualityAPI
   trigger: ElectronTriggerAPI
   memoryLifecycle: ElectronMemoryLifecycleAPI
   browser: ElectronBrowserAPI
@@ -3816,6 +3840,8 @@ export type {
   MemoryMaintenanceResult,
   BeliefCardSettingsItemData,
   BeliefCardSettingsSnapshotData,
+  RunQualityDayData,
+  RunQualityStatsData,
   AgentDerivationCandidateData,
   AgentDerivationConfirmData,
   AgentRegistryKnowledgeCardData,

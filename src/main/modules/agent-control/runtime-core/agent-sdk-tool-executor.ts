@@ -43,6 +43,10 @@ import {
   isBrowserCollectionSubsetTool,
 } from '../../../../shared/browser-collection-intent'
 import {
+  BROWSER_CONTENT_TASK_TOOL_NAMES,
+  BROWSER_INTERACTION_TOOL_NAMES,
+} from '../../tools/browser-tool-catalog'
+import {
   activeNegations,
 } from '../safety/negation-state'
 import {
@@ -111,6 +115,29 @@ import {
   log,
 } from './agent-sdk-provider'
 import { AgentSdkSessionManager } from './agent-sdk-session'
+
+const BROWSER_INTERACTION_TOOL_NAME_SET = new Set<string>(BROWSER_INTERACTION_TOOL_NAMES)
+const BROWSER_CONTENT_TASK_TOOL_NAME_SET = new Set<string>(BROWSER_CONTENT_TASK_TOOL_NAMES)
+
+function createVisibleBrowserToolPreserver(params: {
+  visibleCapabilityGroupIds: ReadonlyArray<string>
+  collectionExposure: boolean
+  batchCollectionExposure: boolean
+}): ((name: string) => boolean) | undefined {
+  const browserInteractionVisible = params.visibleCapabilityGroupIds.includes('browser_interaction')
+  const browserContentTasksVisible = params.visibleCapabilityGroupIds.includes('browser_content_tasks')
+  if (!browserInteractionVisible && !browserContentTasksVisible) return undefined
+
+  return (name: string): boolean => {
+    if (params.collectionExposure) {
+      return params.batchCollectionExposure
+        ? isBrowserBatchCollectionWorkflowTool(name)
+        : isBrowserCollectionSubsetTool(name)
+    }
+    return (browserInteractionVisible && BROWSER_INTERACTION_TOOL_NAME_SET.has(name))
+      || (browserContentTasksVisible && BROWSER_CONTENT_TASK_TOOL_NAME_SET.has(name))
+  }
+}
 
 export interface ToolExecutorHost {
   readonly executeToolCall: NonNullable<AgentSdkRuntimeDeps['executeToolCall']>
@@ -220,7 +247,10 @@ export class AgentSdkToolExecutor {
       || hasLocalSendImIntentForTurn(params.message, params.requestEnvelope)
     const skillResumeOrRepairContext = params.authorization.mode === 'selected' && params.authorization.source !== 'explicit'
     const explicitBrowserCollectionIntent = msgIntent || msgBatchIntent
-    const suppressBrowserContentTasks = skillResumeOrRepairContext && !explicitBrowserCollectionIntent
+    const suppressBrowserContentTasks =
+      skillResumeOrRepairContext &&
+      browserDecisionMode === 'free_tool_loop' &&
+      !explicitBrowserCollectionIntent
     const collectionExposure =
       params.browserHostAvailable &&
       browserDecisionMode === 'free_tool_loop' &&
@@ -315,8 +345,13 @@ export class AgentSdkToolExecutor {
       ? Array.from(new Set([...resolvedSkillAllowedTools, ...allowedPrimitiveNames]))
       : resolvedSkillAllowedTools
     if (activeSkillAllowedTools) {
+      const preserveVisibleBrowserTool = createVisibleBrowserToolPreserver({
+        visibleCapabilityGroupIds: capabilityResolution.visibleCapabilityGroupIds,
+        collectionExposure,
+        batchCollectionExposure,
+      })
       definitions = filterSelectedSkillToolSurface(definitions, activeSkillAllowedTools, {
-        preserveToolName: collectionExposure ? isBrowserCollectionSubsetTool : undefined,
+        preserveToolName: preserveVisibleBrowserTool,
       })
     }
     return filterToolsByVisionCapability(

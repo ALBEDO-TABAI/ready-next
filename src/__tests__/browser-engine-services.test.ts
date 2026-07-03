@@ -14,6 +14,8 @@ function createMockView(options?: {
   canGoBack?: boolean
   canGoForward?: boolean
   executeJavaScript?: (code: string) => unknown
+  bounds?: { x: number; y: number; width: number; height: number }
+  layoutMetrics?: { width: number; height: number }
 }) {
   const listeners = new Map<string, Array<(...args: unknown[]) => void>>()
   const onceListeners = new Map<string, Array<(...args: unknown[]) => void>>()
@@ -78,8 +80,8 @@ function createMockView(options?: {
           if (command === 'Page.getLayoutMetrics') {
             return {
               visualViewport: {
-                clientWidth: 1000,
-                clientHeight: 500,
+                clientWidth: options?.layoutMetrics?.width ?? 1000,
+                clientHeight: options?.layoutMetrics?.height ?? 500,
                 pageX: 0,
                 pageY: 0,
                 scale: 1,
@@ -115,6 +117,7 @@ function createMockView(options?: {
         },
       },
     },
+    getBounds: () => options?.bounds || { x: 0, y: 0, width: 0, height: 0 },
   }
 
   return { view: view as any, state }
@@ -417,6 +420,34 @@ describe('BrowserAutomationService', () => {
     const mapped = await service.normalizedToCss('tab-1', -50, 2000)
 
     assert.deepStrictEqual(mapped, { x: 0, y: 499, width: 1000, height: 500 })
+  })
+
+  it('falls back to the native view bounds when page and host viewport metrics are zero', async () => {
+    const mock = createMockView({
+      bounds: { x: 10, y: 20, width: 900, height: 700 },
+      layoutMetrics: { width: 0, height: 0 },
+      executeJavaScript: (code) => {
+        if (code.includes('window.visualViewport')) {
+          return { width: 0, height: 0, pageX: 0, pageY: 0, scale: 1 }
+        }
+        return null
+      },
+    })
+
+    const service = new BrowserAutomationService({
+      resolveTabView: () => ({
+        tabId: 'tab-1',
+        tab: { id: 'tab-1', url: 'https://example.com', title: 'Example', view: mock.view },
+        view: mock.view,
+      }),
+      createBrowserError: (_code, message) => new Error(message),
+      getViewBounds: () => ({ x: 0, y: 0, width: 0, height: 0 }),
+    })
+
+    const metrics = await service.getViewportMetrics('tab-1')
+
+    assert.equal(metrics.width, 900)
+    assert.equal(metrics.height, 700)
   })
 
   it('truncates extracted page text to the documented limit', async () => {

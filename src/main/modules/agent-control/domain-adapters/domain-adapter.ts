@@ -32,7 +32,7 @@ export interface CoordinatorPromptFragment {
   id: string
   label: string
   priority: number
-  matches: (context: { userText: string; route: TaskExecutionRoute | null }) => boolean
+  matches: (context: { userText: string; route: TaskExecutionRoute | null; activeBrowserUrl?: string | null }) => boolean
   /**
    * Fragment refs. A ref injects either by reading `path` from the memory root
    * (the legacy default), OR — when `text` is set — by injecting that string

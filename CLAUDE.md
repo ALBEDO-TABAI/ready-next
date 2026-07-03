@@ -40,6 +40,7 @@
 - 浏览器脚本合同分 Safe Mode 与 Power Mode：Safe Mode 只接受命名只读模板（`browser-readonly-script-templates.ts`）并以 `freeform_script_denied` / `script_blocked` 拒绝自由脚本；Power Mode 走 `browser_power_eval` / `browser_power_cdp` / `browser_power_network_trace` / `browser_power_resource_forensics`，按代码侧 effect/grant/audit 执行，不按站点静态封锁。
 - AI provider 能力必须从共享能力层判断；不要把“OpenAI 兼容”当成原生 tools/vision/video 一定可用。
 - 工具错误由 dispatch 层转成结构化 `ToolExecutionOutput` 回灌模型；只有 Abort 或 host 不可用这类基础设施错误可以冒泡。
+- SDK provider 模型层三条路径（openai-compatible chat/responses、anthropic）必须真 SSE 流式：文本逐段 delta，工具调用/推理内容流中累积、终局经与阻塞路径同构的整形函数交付；降级三级——`READY_SDK_TRUE_SSE=off` 总开关、非 SSE 响应伪流式交付、仅"错误体提及 stream 的 4xx"单次阻塞重试；语义性 4xx（413/401/429）必须原样冒泡以保住上游压缩/鉴权/退避语义；回归入口 `npm run verify:streaming`。
 - 主进程启动、日志轮转、SQLite native gate 和 `better-sqlite3` 真实加载都是验收边界；SQLite 路径不能用 host Node skip 当通过。
 - Windows 同步/移植不是 macOS 打包的副本：必须在 Windows 本机重装依赖并重编 `better-sqlite3`，路径使用 `app.getPath`/`process.resourcesPath`/`path.join`/`path.delimiter`，打包扩展 `electron-builder.yml` 的 win/nsis/dir 目标，不能带入 macOS `node_modules`、`.app`、`.dmg`、`.icns`、本机种子、缓存或密钥。
 - Windows 顶部 chrome 必须按 Windows 原生按钮设计：右上角保留最小化/最大化/关闭，Ready 圆点从 `ModeSlider` 右上迁到左上，中心 X 对齐 `IconRail` 槽位中心（`WORKBENCH_EDGE_RAIL_SLOT_INSET_X + WORKBENCH_EDGE_RAIL_SLOT_SIZE / 2`，当前 25px）。标题栏颜色接壤优先用 `titleBarStyle: 'hidden'` + `titleBarOverlay` 让 renderer 同层背景画到顶边；Mica 只作 Windows 11 22H2+ 增强，必须有普通背景 fallback。
@@ -148,6 +149,7 @@ npm run typecheck
 npm run test
 npm run verify
 npm run verify:stability
+npm run verify:streaming
 npm run verify:evolution-p4
 npm run build
 ```

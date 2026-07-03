@@ -33,6 +33,13 @@ describe('browser popup policy', () => {
     assert.strictEqual(decision.mode, 'open-tab')
   })
 
+  it('should pass source lane context when window-open falls back to a tab', () => {
+    const service = readWorkspaceFile('src/main/modules/browser-engine/window-open-service.ts')
+    assert.match(service, /interface WindowOpenLaneContext/)
+    assert.match(service, /openInTab: \(url: string, context: WindowOpenLaneContext\) => void/)
+    assert.match(service, /this\.openInTab\(details\.url, context\)/)
+  })
+
   it('should convert about:blank child popups to tabs when they navigate to regular websites', () => {
     const manager = readWorkspaceFile('src/main/modules/browser-engine/auth-popup-manager.ts')
     const childNavigateBlock = manager.slice(
@@ -42,9 +49,17 @@ describe('browser popup policy', () => {
 
     assert.match(childNavigateBlock, /decidePopupPolicy\(\{ url \}\)/)
     assert.match(childNavigateBlock, /decision\.mode !== 'allow-popup'/)
-    assert.match(childNavigateBlock, /this\.openInTab\(url\)/)
+    assert.match(childNavigateBlock, /this\.openInTab\(url, this\.contentContexts\.get\(contents\.id\) \?\? \{\}\)/)
     assert.match(childNavigateBlock, /BrowserWindow\.fromWebContents\(contents\)/)
     assert.match(childNavigateBlock, /owner\.close\(\)/)
+  })
+
+  it('should preserve source lane context through auth popup fallback', () => {
+    const manager = readWorkspaceFile('src/main/modules/browser-engine/auth-popup-manager.ts')
+    assert.match(manager, /interface PopupOpenInTabContext/)
+    assert.match(manager, /contentContexts = new Map/)
+    assert.match(manager, /pendingPopupFallbacks = new Map<number, \{ timer: NodeJS\.Timeout; url: string; context: PopupOpenInTabContext \}>/)
+    assert.match(manager, /this\.openInTab\(pending\.url, pending\.context\)/)
   })
 
   it('should deny unsafe protocol and route external', () => {

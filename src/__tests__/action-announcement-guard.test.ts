@@ -13,6 +13,7 @@ import {
 } from '../main/modules/agent-control/runtime-core/skill-clarification-guard'
 import { canResumeShape } from '../main/modules/agent-control/contracts/resume-handle'
 import type { ToolDefinition } from '../main/modules/agent-control/tools-runtime/tool-definition'
+import { createToolExecutionOutput } from '../main/modules/agent-control/tools-runtime/tool-result-types'
 import { ScriptedAgentRunner } from './helpers/scripted-agent-runner'
 
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
@@ -97,6 +98,24 @@ function createSkillAskUserToolDefinition(): ToolDefinition {
   }
 }
 
+function createBrowserToolDefinition(name: string = 'browser_capture_viewport'): ToolDefinition {
+  return {
+    name,
+    groupId: 'browser_interaction',
+    domain: 'browser',
+    kind: 'read',
+    concurrency: 'serialized',
+    interruptBehavior: 'abort_signal',
+    timeoutProfile: 'browser',
+    supportsTextBridge: true,
+    projectionHint: { emitsProjectionPatch: true },
+    description: 'Browser test tool.',
+    schema: { type: 'object', properties: {}, additionalProperties: false },
+    executionVisibility: 'model',
+    resultShape: 'json',
+  }
+}
+
 describe('action announcement guard', () => {
   test('steers when the current response promises action after earlier prep tools', () => {
     const decision = evaluateActionAnnouncementGuard({
@@ -109,9 +128,64 @@ describe('action announcement guard', () => {
     assert.equal(decision.kind, 'steer')
   })
 
+  test('steers when a browser workflow says it will click or switch tabs without tools', () => {
+    const decision = evaluateActionAnnouncementGuard({
+      assistantText: '页面当前在"上传视频"标签页，我需要先切换到"上传图文"。让我点击切换。',
+      toolCallsInCurrentResponse: 0,
+      hasUnfinishedTaskReference: true,
+      alreadySteered: false,
+    })
+
+    assert.equal(decision.kind, 'steer')
+  })
+
+  test('steers when a browser workflow says it will tap the next option', () => {
+    const decision = evaluateActionAnnouncementGuard({
+      assistantText: '现在页面已经切换到"上传图文"模式。我看到有"上传图片"和"文字配图"两个选项。你只需要发纯文字，我先点"文字配图"看看。',
+      toolCallsInCurrentResponse: 0,
+      hasUnfinishedTaskReference: true,
+      alreadySteered: false,
+    })
+
+    assert.equal(decision.kind, 'steer')
+  })
+
+  test('steers when a browser workflow infers the next click but does not call a tool', () => {
+    const decision = evaluateActionAnnouncementGuard({
+      assistantText: '好！页面已经切换到"上传图文"模式了。我看到有"上传图片"和"文字配图"两个选项。用户想要的是"生成图片"，应该就是点击"文字配图"按钮。',
+      toolCallsInCurrentResponse: 0,
+      hasUnfinishedTaskReference: true,
+      alreadySteered: false,
+    })
+
+    assert.equal(decision.kind, 'steer')
+  })
+
   test('checkpoints when a steered response promises to download without calling tools', () => {
     const decision = evaluateActionAnnouncementGuard({
       assistantText: '好的，已经收集到足够的图片 URL 了！现在批量下载到文件夹里。',
+      toolCallsInCurrentResponse: 0,
+      hasUnfinishedTaskReference: true,
+      alreadySteered: true,
+    })
+
+    assert.equal(decision.kind, 'checkpoint')
+  })
+
+  test('checkpoints when a steered browser workflow still only promises clicking', () => {
+    const decision = evaluateActionAnnouncementGuard({
+      assistantText: '我需要先切换到"上传图文"。让我点击切换。',
+      toolCallsInCurrentResponse: 0,
+      hasUnfinishedTaskReference: true,
+      alreadySteered: true,
+    })
+
+    assert.equal(decision.kind, 'checkpoint')
+  })
+
+  test('checkpoints when a steered browser workflow still only promises tapping', () => {
+    const decision = evaluateActionAnnouncementGuard({
+      assistantText: '我先点"文字配图"看看。',
       toolCallsInCurrentResponse: 0,
       hasUnfinishedTaskReference: true,
       alreadySteered: true,
@@ -190,6 +264,109 @@ describe('action announcement guard', () => {
     assert.equal(result.success, true)
     assert.equal(result.terminalReason, 'done')
     assert.equal(sawSteerReminder, true)
+  })
+
+  test('runtime steers a browser click/switch announcement instead of closing degraded', async () => {
+    let sawSteerReminder = false
+    let turnIndex = 0
+    const toolDefinition = createBrowserToolDefinition()
+    const { runtime } = createRuntime({
+      listToolDefinitions: () => [toolDefinition],
+      executeToolCall: async () => createToolExecutionOutput('viewport captured', {
+        shape: 'json',
+        data: { ok: true },
+      }),
+      runAgent: async ({ input, tools, onTextDelta }) => {
+        if (turnIndex === 0) {
+          const capture = tools.find((tool) => tool.name === 'browser_capture_viewport') as {
+            invoke: (context: unknown, rawInput: string) => Promise<string>
+          } | undefined
+          assert.ok(capture)
+          await capture.invoke({}, JSON.stringify({}))
+          const response = '页面当前在"上传视频"标签页，我需要先切换到"上传图文"。让我点击切换。'
+          onTextDelta(response)
+          turnIndex += 1
+          return { finalText: response }
+        }
+        sawSteerReminder = /上一轮用行动宣告结尾但没有调用工具/.test(JSON.stringify(input))
+        const response = '我没有可调用工具，无法点击切换。'
+        onTextDelta(response)
+        turnIndex += 1
+        return { finalText: response }
+      },
+    })
+    runtime.newSession('butler::scope-browser-action-steer', 'system prompt')
+
+    const result = await runtime.sendMessage(
+      'butler::scope-browser-action-steer',
+      '帮我发布小红书',
+      'run-browser-action-steer',
+      {
+        publicSessionId: 'scope-browser-action-steer',
+        taskId: 'task-browser-action-steer',
+      },
+    )
+
+    assert.equal(result.success, true)
+    assert.equal(result.terminalReason, 'done')
+    assert.equal(sawSteerReminder, true)
+  })
+
+  test('runtime allows a fresh action-announcement steer after real tool progress', async () => {
+    let sawSecondSteerReminder = false
+    let turnIndex = 0
+    const toolDefinition = createBrowserToolDefinition('browser_read_page_map')
+    const { runtime } = createRuntime({
+      listToolDefinitions: () => [toolDefinition],
+      executeToolCall: async () => createToolExecutionOutput('page map read', {
+        shape: 'json',
+        data: { ok: true },
+      }),
+      runAgent: async ({ input, tools, onTextDelta }) => {
+        if (turnIndex === 0) {
+          const readMap = tools.find((tool) => tool.name === 'browser_read_page_map') as {
+            invoke: (context: unknown, rawInput: string) => Promise<string>
+          } | undefined
+          assert.ok(readMap)
+          await readMap.invoke({}, JSON.stringify({}))
+          const response = '页面当前在"上传视频"标签页，我需要先切换到"上传图文"。让我点击"上传图文"。'
+          onTextDelta(response)
+          turnIndex += 1
+          return { finalText: response }
+        }
+        if (turnIndex === 1) {
+          const readMap = tools.find((tool) => tool.name === 'browser_read_page_map') as {
+            invoke: (context: unknown, rawInput: string) => Promise<string>
+          } | undefined
+          assert.ok(readMap)
+          await readMap.invoke({}, JSON.stringify({}))
+          const response = '现在页面已经切换到"上传图文"模式。我看到有"上传图片"和"文字配图"两个选项。你只需要发纯文字，我先点"文字配图"看看。'
+          onTextDelta(response)
+          turnIndex += 1
+          return { finalText: response }
+        }
+        sawSecondSteerReminder = /上一轮用行动宣告结尾但没有调用工具/.test(JSON.stringify(input))
+        const response = '我没有可调用工具，无法点击文字配图。'
+        onTextDelta(response)
+        turnIndex += 1
+        return { finalText: response }
+      },
+    })
+    runtime.newSession('butler::scope-browser-action-resteer', 'system prompt')
+
+    const result = await runtime.sendMessage(
+      'butler::scope-browser-action-resteer',
+      '帮我发布小红书',
+      'run-browser-action-resteer',
+      {
+        publicSessionId: 'scope-browser-action-resteer',
+        taskId: 'task-browser-action-resteer',
+      },
+    )
+
+    assert.equal(result.success, true)
+    assert.equal(result.terminalReason, 'done')
+    assert.equal(sawSecondSteerReminder, true)
   })
 
   test('checkpoints when the steered continuation still has no tool call', async () => {

@@ -84,6 +84,19 @@ function matchesBrowserPromptTrigger(text: string): boolean {
   return /(上传|发送|提交|浏览器|网页)/i.test(text)
 }
 
+/** P1 (2026-07-03) — does the active tab's host match a site-card domain
+ *  (exact host or a subdomain of it)? Malformed URLs never match. */
+function activeBrowserUrlMatchesDomain(activeBrowserUrl: string | null | undefined, cardDomain: string): boolean {
+  const url = String(activeBrowserUrl || '').trim()
+  if (!url || !cardDomain) return false
+  try {
+    const host = new URL(url).hostname.toLowerCase()
+    return host === cardDomain || host.endsWith(`.${cardDomain}`)
+  } catch {
+    return false
+  }
+}
+
 function mergeRecentEvidence(
   previous: string[],
   nextItems: Array<{ toolName: string; resultText: string }> | null | undefined,
@@ -147,13 +160,19 @@ export class BrowserDomainAdapter implements DomainAdapter {
     // authoritative store value; the card never overrides the guard.
     const siteCardFragments = this.siteCards.map((card) => {
       const needles = card.aliases.map((a) => a.toLowerCase())
+      const cardDomain = card.domain.toLowerCase()
       return {
         id: `site-card-${card.domain}`,
         label: `站点经验 ${card.domain}`,
         priority: 65,
-        matches: ({ userText }: { userText: string }) => {
+        // P1 (2026-07-03, 7/01 reliability contract D) — match by the active
+        // browser tab domain when a browser task is active, so a multi-step
+        // run keeps the site card even when the latest turn no longer repeats
+        // the site name. User-text alias matching remains the fallback.
+        matches: ({ userText, activeBrowserUrl }: { userText: string; activeBrowserUrl?: string | null }) => {
           const t = userText.toLowerCase()
-          return needles.some((n) => n && t.includes(n))
+          if (needles.some((n) => n && t.includes(n))) return true
+          return activeBrowserUrlMatchesDomain(activeBrowserUrl, cardDomain)
         },
         blocking: false,
         refs: [

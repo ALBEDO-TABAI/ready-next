@@ -34,7 +34,7 @@ import {
   SETTINGS_SUBTLE_CARD_STYLE,
   settingsListItemStyle,
 } from '../components/settings/settings-theme'
-import { MemoryListPanel, TriggerManager, MemoryStatsCard, MemoryCreator, BeliefCardsPanel } from '../components/memory'
+import { MemoryListPanel, TriggerManager, MemoryStatsCard, MemoryCreator, BeliefCardsPanel, RunQualityPanel } from '../components/memory'
 import { useBeliefCards, useMemories, useMemoryLifecycle, useMemoryStats } from '../hooks/useMemory'
 import type { MemoryQueryFilters } from '../types/electron'
 import AgentSettingsHub from '../components/agent-system/AgentSettingsHub'
@@ -256,7 +256,7 @@ const settingsData: SettingSection[] = [
     icon: Info,
     description: '应用版本信息和更新',
     settings: [
-      { id: 'version', label: '当前版本', type: 'readonly', value: 'Ready v0.1.0' },
+      { id: 'version', label: '当前版本', type: 'readonly', value: 'Ready v0.1.1' },
       { id: 'checkUpdate', label: '检查更新', description: '查看是否有新版本可用', type: 'button', buttonLabel: '检查更新', buttonVariant: 'primary' }
     ]
   }
@@ -2740,6 +2740,7 @@ function MemorySettingsSection() {
             onTransition={beliefCards.transitionCard}
             onSetKnowledgeSystemEnabled={beliefCards.setKnowledgeSystemEnabled}
           />
+          <RunQualityPanel />
           <div
             className="glass-surface-card border"
             style={{
@@ -2845,11 +2846,23 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
   const [activeSection, setActiveSection] = useState(initialSection || routeSection || 'account')
   const [settings, setSettings] = useState(settingsData)
   const [settingErrors, setSettingErrors] = useState<Record<string, string>>({})
+  const [updateStatus, setUpdateStatus] = useState<'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'not-available' | 'error'>('idle')
+  const [updateMessage, setUpdateMessage] = useState('查看是否有新版本可用')
+  const [updatePercent, setUpdatePercent] = useState<number | null>(null)
   const { theme, setTheme, skin, setSkin, accent, setAccent } = useTheme()
   const didMountRef = useRef(false)
   const settingsSurfaceRefreshTimerRef = useRef<number | null>(null)
 
   const currentSection = settings.find(s => s.id === activeSection)
+  const updateBusy = updateStatus === 'checking' || updateStatus === 'downloading'
+  const updateButtonLabel = updateStatus === 'downloaded'
+    ? '重启安装'
+    : updateBusy
+      ? '检查中'
+      : '检查更新'
+  const updateDescription = updateStatus === 'downloading' && updatePercent !== null
+    ? `${updateMessage}（${Math.round(updatePercent)}%）`
+    : updateMessage
 
   useEffect(() => {
     window.electronAPI?.browser?.sendIntent({
@@ -2914,6 +2927,46 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
   }, [activeSection, requestSettingsSurfaceRefresh])
 
   useEffect(() => {
+    const unsubscribe = window.electronAPI?.app?.onUpdateStatus?.((data) => {
+      switch (data.status) {
+        case 'checking':
+          setUpdateStatus('checking')
+          setUpdatePercent(null)
+          setUpdateMessage('正在检查更新…')
+          break
+        case 'available':
+          setUpdateStatus('available')
+          setUpdatePercent(null)
+          setUpdateMessage(data.version ? `发现新版本 ${data.version}，正在下载…` : '发现新版本，正在下载…')
+          break
+        case 'downloading':
+          setUpdateStatus('downloading')
+          setUpdatePercent(typeof data.percent === 'number' ? data.percent : null)
+          setUpdateMessage('正在下载更新')
+          break
+        case 'downloaded':
+          setUpdateStatus('downloaded')
+          setUpdatePercent(null)
+          setUpdateMessage(data.version ? `新版本 ${data.version} 已下载，点击重启安装` : '新版本已下载，点击重启安装')
+          break
+        case 'not-available':
+          setUpdateStatus('not-available')
+          setUpdatePercent(null)
+          setUpdateMessage(data.version ? `当前已是最新版本（${data.version}）` : '当前已是最新版本')
+          break
+        case 'error':
+          setUpdateStatus('error')
+          setUpdatePercent(null)
+          setUpdateMessage(`更新检查失败：${data.error || '未知错误'}`)
+          break
+        default:
+          break
+      }
+    })
+    return () => { unsubscribe?.() }
+  }, [])
+
+  useEffect(() => {
     if (typeof window === 'undefined' || !window.electronAPI?.settings?.get) return
     let cancelled = false
     void (async () => {
@@ -2945,6 +2998,34 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
         : section
     ))
   }
+
+  const handleUpdateButtonClick = useCallback(async () => {
+    const appAPI = window.electronAPI?.app
+    if (!appAPI) {
+      setUpdateStatus('error')
+      setUpdateMessage('更新 IPC 不可用')
+      return
+    }
+    if (updateStatus === 'downloaded') {
+      try {
+        await appAPI.installUpdate()
+      } catch (error) {
+        setUpdateStatus('error')
+        setUpdateMessage(`安装更新失败：${error instanceof Error ? error.message : String(error)}`)
+      }
+      return
+    }
+    if (updateBusy) return
+    setUpdateStatus('checking')
+    setUpdatePercent(null)
+    setUpdateMessage('正在检查更新…')
+    const result = await appAPI.checkUpdate()
+    if (!result.success) {
+      setUpdateStatus('error')
+      setUpdatePercent(null)
+      setUpdateMessage(`更新检查失败：${result.error || '未知错误'}`)
+    }
+  }, [updateBusy, updateStatus])
 
   const handleToggleSetting = async (sectionId: string, setting: SettingItem) => {
     const nextValue = !setting.value
@@ -3066,7 +3147,7 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
             <div className="flex items-center gap-2 px-1">
               <HardDrive className="w-3 h-3" style={{ color: 'var(--text-light)' }} />
               <span className="text-[10px]" style={{ color: 'var(--text-light)' }}>
-                Ready v0.1.0 · Electron 42
+                Ready v0.1.1 · Electron 42
               </span>
             </div>
           </div>
@@ -3246,7 +3327,9 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
 
                 {/* Settings Items (skip for dynamic sections) */}
                 {!isDynamicSection && <div className="flex flex-col gap-6">
-                  {currentSection.settings.map((setting) => (
+                  {currentSection.settings.map((setting) => {
+                    const isUpdateButton = currentSection.id === 'about' && setting.id === 'checkUpdate'
+                    return (
                     <div
                       key={setting.id}
                       className="flex items-center justify-between transition-colors"
@@ -3258,9 +3341,9 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
                         <div className="text-[13px] font-medium" style={{ color: 'var(--text-title)' }}>
                           {setting.label}
                         </div>
-                        {setting.description && (
+                        {(setting.description || isUpdateButton) && (
                           <div className="text-[12px] mt-0.5 leading-5" style={{ color: 'var(--text-light)' }}>
-                            {setting.description}
+                            {isUpdateButton ? updateDescription : setting.description}
                           </div>
                         )}
                       </div>
@@ -3349,6 +3432,11 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
                       {/* Button */}
                       {setting.type === 'button' && (
                         <button
+                          type="button"
+                          onClick={() => {
+                            if (isUpdateButton) void handleUpdateButtonClick()
+                          }}
+                          disabled={isUpdateButton && updateBusy}
                           className="flex-shrink-0 flex items-center gap-1.5 rounded-lg text-[12px] font-medium transition-[filter,transform,background-color,opacity] duration-200 hover:brightness-95 active:scale-[0.98]"
                           style={{
                             ...(setting.buttonVariant === 'primary'
@@ -3358,14 +3446,16 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
                                 : SETTINGS_SECONDARY_BUTTON_STYLE),
                             minWidth: SETTINGS_ROW_CONTROL_MIN_WIDTH,
                             justifyContent: 'center',
+                            opacity: isUpdateButton && updateBusy ? 0.68 : 1,
+                            cursor: isUpdateButton && updateBusy ? 'wait' : 'pointer',
                           }}
                         >
                           {setting.buttonVariant === 'danger' && <Trash2 className="w-3 h-3" />}
-                          {setting.buttonLabel || '执行'}
+                          {isUpdateButton ? updateButtonLabel : setting.buttonLabel || '执行'}
                         </button>
                       )}
                     </div>
-                  ))}
+                  )})}
                 </div>}
 
                 {/* About section extra info */}

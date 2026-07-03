@@ -28,6 +28,21 @@ interface BrowserAutomationHost {
 export class BrowserAutomationService {
   constructor(private readonly host: BrowserAutomationHost) {}
 
+  private resolveViewBounds(view: BrowserHostView): BrowserRect {
+    const hostBounds = this.host.getViewBounds()
+    if (hostBounds.width > 0 && hostBounds.height > 0) return hostBounds
+    try {
+      const readBounds = (view as unknown as { getBounds?: () => BrowserRect }).getBounds
+      if (typeof readBounds === 'function') {
+        const viewBounds = readBounds.call(view)
+        if (viewBounds && viewBounds.width > 0 && viewBounds.height > 0) return viewBounds
+      }
+    } catch {
+      // Fall back to host bounds below.
+    }
+    return hostBounds
+  }
+
   async getTabContext(tabId?: string | null): Promise<BrowserTabContextData> {
     const { tab } = this.host.resolveTabView(tabId || null)
     const context = await this.executeJS(
@@ -146,7 +161,7 @@ export class BrowserAutomationService {
         visualViewport?: { clientWidth?: number; clientHeight?: number; pageX?: number; pageY?: number; scale?: number }
       }
 
-      const bounds = this.host.getViewBounds()
+      const bounds = this.resolveViewBounds(view)
       return {
         width: Number(layout.visualViewport?.clientWidth || layout.layoutViewport?.clientWidth || bounds.width),
         height: Number(layout.visualViewport?.clientHeight || layout.layoutViewport?.clientHeight || bounds.height),
@@ -273,7 +288,7 @@ export class BrowserAutomationService {
       const layout = await this.sendCdpCommand(tabId, 'Page.getLayoutMetrics') as {
         contentSize?: { width?: number; height?: number; x?: number; y?: number }
       }
-      const bounds = this.host.getViewBounds()
+      const bounds = this.resolveViewBounds(view)
       const clipWidth = Math.max(1, Math.ceil(Number(layout.contentSize?.width || bounds.width)))
       const clipHeight = Math.max(1, Math.ceil(Number(layout.contentSize?.height || bounds.height)))
       const result = await this.sendCdpCommand(tabId, 'Page.captureScreenshot', {

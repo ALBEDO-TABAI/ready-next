@@ -3,17 +3,6 @@ export interface PromptHistoryMessage {
   content: string
 }
 
-export interface PromptToolTraceEntry {
-  kind: string
-  text: string
-}
-
-export interface PromptArtifactEntry {
-  label: string
-  module?: string | null
-  kind?: string | null
-}
-
 export interface PromptCompressionResult {
   text: string
   compressed: boolean
@@ -54,56 +43,6 @@ export function compressHistoryForPrompt(
 
   return {
     text: summary,
-    compressed: true,
-  }
-}
-
-export function compressToolTraceForPrompt(
-  entries: PromptToolTraceEntry[],
-  options?: { maxEntries?: number },
-): PromptCompressionResult {
-  if (entries.length === 0) {
-    return { text: '', compressed: false }
-  }
-  const maxEntries = Math.max(1, options?.maxEntries ?? 3)
-  if (entries.length <= maxEntries) {
-    return {
-      text: entries.map((item) => `[${item.kind}] ${item.text}`).join('\n'),
-      compressed: false,
-    }
-  }
-
-  const recentEntries = entries.slice(-maxEntries)
-  return {
-    text: [
-      `工具轨迹已压缩：共 ${entries.length} 条，只保留最近 ${recentEntries.length} 条`,
-      ...recentEntries.map((item) => `- [${item.kind}] ${clipLine(item.text, 120)}`),
-    ].join('\n'),
-    compressed: true,
-  }
-}
-
-export function compressArtifactsForPrompt(
-  artifacts: PromptArtifactEntry[],
-  options?: { maxEntries?: number },
-): PromptCompressionResult {
-  if (artifacts.length === 0) {
-    return { text: '', compressed: false }
-  }
-  const maxEntries = Math.max(1, options?.maxEntries ?? 3)
-  if (artifacts.length <= maxEntries) {
-    return {
-      text: artifacts.map((item) => `${item.module || 'system'}/${item.kind || 'artifact'}: ${item.label}`).join('\n'),
-      compressed: false,
-    }
-  }
-
-  const recentArtifacts = artifacts.slice(-maxEntries)
-  return {
-    text: [
-      `历史产物已压缩：共 ${artifacts.length} 项，只保留最近 ${recentArtifacts.length} 项`,
-      ...recentArtifacts.map((item) => `- ${item.module || 'system'}/${item.kind || 'artifact'}: ${clipLine(item.label, 120)}`),
-    ].join('\n'),
     compressed: true,
   }
 }

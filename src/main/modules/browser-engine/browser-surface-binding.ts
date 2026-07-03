@@ -11,6 +11,7 @@ import {
 export type BrowserSurfaceIntent =
   | 'user-view-assisted'
   | 'agent-view-background'
+  | 'agent-view-foreground'
   | 'read-only-observe'
 
 export type BrowserSurfaceDispatch =
@@ -68,6 +69,7 @@ export function resolveBrowserToolSurfaceBinding(params: {
   dispatch: BrowserSurfaceDispatch
   hasTurnLease?: boolean
   hasRunnerLeaseGate?: boolean
+  boundSurface?: AgentBrowserSurface
   scopedSurface?: AgentBrowserSurface
   agentTabId?: string | null
 }): BrowserToolSurfaceBindingResult {
@@ -104,21 +106,36 @@ export function resolveBrowserToolSurfaceBinding(params: {
   }
 
   if (params.dispatch === 'browser-agent-runner') {
+    const surface = params.boundSurface ?? 'user-view'
     if (!params.hasRunnerLeaseGate) {
       return {
         ok: false,
         error: agentBrowserError(
           'browser_surface_undeclared',
-          'Deterministic browser workflow write reached dispatch without its user-view lease gate.',
-          { tool: params.toolName, dispatch: params.dispatch, intent: 'user-view-assisted' },
+          'Deterministic browser workflow write reached dispatch without its lane lease gate.',
+          {
+            tool: params.toolName,
+            dispatch: params.dispatch,
+            intent: surface === 'agent-view' ? 'agent-view-foreground' : 'user-view-assisted',
+          },
+        ),
+      }
+    }
+    if (surface === 'agent-view' && !String(params.agentTabId || '').trim()) {
+      return {
+        ok: false,
+        error: agentBrowserError(
+          'browser_surface_binding_violation',
+          'Agent-lane browser workflow writes require a bound agent tab.',
+          { tool: params.toolName, dispatch: params.dispatch, intent: 'agent-view-foreground' },
         ),
       }
     }
     return binding({
       toolName: params.toolName,
       effect,
-      intent: 'user-view-assisted',
-      engineSurface: 'user-view',
+      intent: surface === 'agent-view' ? 'agent-view-foreground' : 'user-view-assisted',
+      engineSurface: surface,
       requiresTurnLease: true,
     })
   }

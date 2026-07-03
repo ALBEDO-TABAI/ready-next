@@ -304,13 +304,37 @@ export function setupSettingsIPC(): void {
         headers,
         signal: AbortSignal.timeout(15000),
       })
-      const latencyMs = Date.now() - startTime
 
       if (resp.ok) {
         try {
-          const json = await parseJsonResponse(resp, { requestUrl: modelsUrl }) as { data?: Array<{ id: string }> }
-          const modelList = json.data?.map(m => m.id).slice(0, 20)
-          return { success: true, data: { latencyMs, modelList } }
+          const json = await parseJsonResponse(resp, { requestUrl: modelsUrl }) as { data?: Array<{ id?: string } | string> }
+          const modelList = json.data
+            ?.map(m => typeof m === 'string' ? m : m.id)
+            .filter((id): id is string => Boolean(id))
+            .slice(0, 20)
+          const chatModel = (configToUse.model || '').trim() && configToUse.model !== '__custom__' && configToUse.model !== 'custom'
+            ? configToUse.model
+            : (modelList?.[0] || provider?.models[0]?.id || 'gpt-4o-mini')
+          const chatResp = await fetch(`${baseUrl}/chat/completions`, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({
+              model: chatModel,
+              messages: [{ role: 'user', content: 'hi' }],
+              max_tokens: 1,
+            }),
+            signal: AbortSignal.timeout(15000),
+          })
+          const chatLatency = Date.now() - startTime
+
+          if (chatResp.ok) {
+            return { success: true, data: { latencyMs: chatLatency, modelList } }
+          }
+          if (chatResp.status === 401 || chatResp.status === 403) {
+            return { success: false, error: 'API Key 无效或无权限' }
+          }
+          const body = await chatResp.text().catch(() => '')
+          return { success: false, error: `模型 ${chatModel} 不可用 (HTTP ${chatResp.status}): ${body.slice(0, 200)}` }
         } catch (error) {
           return { success: false, error: error instanceof Error ? error.message : String(error) }
         }

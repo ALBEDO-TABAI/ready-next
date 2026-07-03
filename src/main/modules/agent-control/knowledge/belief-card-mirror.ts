@@ -108,6 +108,44 @@ export function getBeliefCardMirrorByRelPath(db: MirrorDb, relPath: string): Bel
   return row ?? null
 }
 
+/**
+ * P2-4 (2026-07-03) — bump access_count (+ last_accessed_at) for the belief
+ * mirror rows that were just injected into a prompt. Without this the mirror's
+ * access_count stays 0, so decay signals (belief-decay.ts) and "is this belief
+ * ever used?" metrics can't be computed. Bounded to category='belief' rows;
+ * missing relPaths are silently ignored (file exists but not yet mirrored).
+ * Returns the number of rows updated.
+ */
+export function bumpBeliefCardAccess(db: MirrorDb, relPaths: readonly string[]): number {
+  const unique = Array.from(new Set(relPaths.map((p) => String(p || '').trim()).filter(Boolean)))
+  if (unique.length === 0) return 0
+  const stmt = db.prepare(
+    `UPDATE agent_memory_metadata
+       SET access_count = COALESCE(access_count, 0) + 1, last_accessed_at = unixepoch()
+     WHERE category = 'belief' AND file_path = ?`,
+  )
+  let updated = 0
+  for (const relPath of unique) {
+    const info = stmt.run(relPath) as { changes?: number }
+    updated += Number(info?.changes || 0)
+  }
+  return updated
+}
+
+/**
+ * P5d (2026-07-03) — read a belief card's usage stats for the decay round.
+ * access_count is bumped at injection (P2-4). was_useful_count has no mirror
+ * column yet, so it is reported as 0 (decay still works: it decays only on the
+ * conjunction stale+no-backlinks+no-access, and access_count is real).
+ */
+export function readBeliefCardAccessStats(db: MirrorDb, relPath: string): { accessCount: number; wasUsefulCount: number } | null {
+  const row = db
+    .prepare(`SELECT access_count FROM agent_memory_metadata WHERE category = 'belief' AND file_path = ? LIMIT 1`)
+    .get<{ access_count: number | null }>(relPath)
+  if (!row) return null
+  return { accessCount: Number(row.access_count || 0), wasUsefulCount: 0 }
+}
+
 /** Query a belief mirror row by slug (filename without `.md`). */
 export function getBeliefCardMirrorBySlug(db: MirrorDb, slug: string): BeliefCardMirrorRow | null {
   const row = db

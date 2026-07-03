@@ -179,3 +179,46 @@ test('rejects unknown skillId with missing_skill errorKind', async () => {
     fx.cleanup()
   }
 })
+
+// P1-a (2026-07-03) — an absolute user path outside the skill sandbox gets a
+// no_root_match that redirects to file_read_excerpt (sandbox stays intact; the
+// error is actionable so the agent doesn't loop/mis-report after a collection
+// wrote its report to the user's authorized dir).
+test('no_root_match on an absolute user path redirects to file_read_excerpt', async () => {
+  const fx = makeFixture()
+  try {
+    await assert.rejects(
+      executeReadArtifact(
+        { relativePath: '/Users/user/实验田/测试/lib-a/整蛊广告/采集报告.md' },
+        { skillId: 'test-skill', lookupSkillRoots: fx.lookup },
+      ),
+      (err: unknown) => {
+        const e = err as { errorKind?: string; message?: string }
+        assert.equal(e.errorKind, 'no_root_match')
+        assert.match(String(e.message), /file_read_excerpt/)
+        return true
+      },
+    )
+  } finally {
+    fx.cleanup()
+  }
+})
+
+test('no_root_match on a relative in-sandbox miss does NOT mention file_read_excerpt', async () => {
+  const fx = makeFixture()
+  try {
+    await assert.rejects(
+      executeReadArtifact(
+        { relativePath: '../escape.md' },
+        { skillId: 'test-skill', lookupSkillRoots: fx.lookup },
+      ),
+      (err: unknown) => {
+        const e = err as { message?: string }
+        assert.doesNotMatch(String(e.message), /file_read_excerpt/)
+        return true
+      },
+    )
+  } finally {
+    fx.cleanup()
+  }
+})

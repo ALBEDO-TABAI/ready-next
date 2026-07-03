@@ -16,7 +16,11 @@
  *    touched belief rows — K6C §6 boundary).
  */
 
+import { unlinkSync } from 'fs'
+import { join } from 'path'
 import { logAgentMetric } from '../metrics'
+import { isPossibleDuplicateOfSource } from '../knowledge/reserved-card-source'
+import type { BeliefCardStore } from '../knowledge/belief-card-store'
 
 export type BeliefConfidence = 'H' | 'M' | 'L'
 
@@ -131,4 +135,73 @@ export function runBeliefDecayRound(
     })
   }
   return report
+}
+
+/**
+ * P5d deterministic-parts migration (2026-07-03) — collect per-card decay
+ * signals from the store + belief mirror. MOVED here from maintenance-llm-round
+ * (the dark LLM round) so the live decay wiring never imports the dormant file
+ * (audit §4.3: "A2 与 A1 解耦"). `readMirror` returns access_count (bumped at
+ * injection by P2-4) + wasUsefulCount (0 until a mirror column exists).
+ */
+export function collectBeliefDecaySignals(
+  store: BeliefCardStore,
+  readMirror: (relPath: string) => { accessCount: number; wasUsefulCount: number } | null,
+  now: Date,
+): BeliefDecaySignals[] {
+  const files = store.listAllCardFilesAllScopes()
+  const incoming = new Map<string, number>()
+  for (const file of files) {
+    if (!file.card) continue
+    const matches = file.card.body.matchAll(/\[\[([^\][\n]+)\]\]/g)
+    for (const match of matches) {
+      const slug = match[1].trim()
+      const key = `${file.scopeId}|${slug}`
+      incoming.set(key, (incoming.get(key) ?? 0) + 1)
+    }
+  }
+  return files.flatMap((file) => {
+    if (!file.card) return []
+    const slug = file.relPath.replace(/^.*\//, '').replace(/\.md$/, '')
+    const mirror = readMirror(file.relPath)
+    return [{
+      relPath: file.relPath,
+      confidence: file.card.frontmatter.confidence,
+      created: file.card.frontmatter.created,
+      accessCount: mirror?.accessCount ?? 0,
+      wasUsefulCount: mirror?.wasUsefulCount ?? 0,
+      backlinksCount: incoming.get(`${file.scopeId}|${slug}`) ?? 0,
+      markedDecayed: String(file.card.frontmatter.source || '').includes('decayed'),
+      possibleDuplicate: isPossibleDuplicateOfSource(file.card.frontmatter.source),
+    }]
+  })
+}
+
+/**
+ * P5d — file-backed decay effectors (mirror crystallize-gate's pattern).
+ * setConfidence/markDecayed rewrite frontmatter via the store; deleteCard
+ * unlinks inside the memory root (idempotent, traversal-guarded). Only ever
+ * invoked by `runBeliefDecayRound` whose decisions are conservative
+ * (demote-before-delete, two-phase L deletion, duplicates never deleted).
+ */
+export function createBeliefDecayEffectors(store: BeliefCardStore): BeliefDecayEffectors {
+  return {
+    setConfidence(relPath, confidence) {
+      const card = store.readCard(relPath, { includeStaged: true })
+      if (!card) return
+      store.writeCard({ relPath, frontmatter: { ...card.frontmatter, confidence }, body: card.body })
+    },
+    markDecayed(relPath) {
+      const card = store.readCard(relPath, { includeStaged: true })
+      if (!card) return
+      const existing = String(card.frontmatter.source || '')
+      if (existing.includes('decayed')) return
+      const source = existing ? `${existing}; decayed` : 'decayed'
+      store.writeCard({ relPath, frontmatter: { ...card.frontmatter, source }, body: card.body })
+    },
+    deleteCard(relPath) {
+      if (relPath.includes('..')) return
+      try { unlinkSync(join(store.rootPath, relPath)) } catch { /* idempotent — already gone */ }
+    },
+  }
 }

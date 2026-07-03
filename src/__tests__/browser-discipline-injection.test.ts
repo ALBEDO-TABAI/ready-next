@@ -43,6 +43,49 @@ test('shipped discipline asset parses and renders within budget', () => {
   assert.deepEqual(asset.variables, [])
   const rendered = loader.render('browser/discipline')
   assert.ok(rendered.includes('交互五步配方'))
+  assert.ok(rendered.includes('Power 网页操作配方'))
+  assert.ok(rendered.includes('页面结构探测'))
+  assert.ok(rendered.includes('viewport=0'))
+  assert.ok(rendered.includes('Page.getFrameTree'))
   assert.ok(rendered.includes('riskLevel=high'))
+  assert.ok(rendered.includes('Power Mode'))
+  assert.ok(!rendered.includes('一律走视觉通道'), 'Power Mode must not be cancelled by a static high-risk-site prompt')
+  assert.ok(!rendered.includes('禁用脚本（封号风险）'), 'old high-control script ban must not re-enter the prompt')
   assert.ok(rendered.length <= 2500, 'discipline must fit the 2500-char fragment budget')
+})
+
+// ── P1 (2026-07-03, 7/01 reliability contract D) — site-card domain matching ──
+
+const XHS_CARD = { domain: 'xiaohongshu.com', aliases: ['小红书', 'xhs'], text: '小红书采集经验：xsec_token 必带' }
+
+function makeAdapterWithCard(): BrowserDomainAdapter {
+  return new BrowserDomainAdapter({} as never, DISCIPLINE, [XHS_CARD])
+}
+
+test('site card matches by user-text alias (fallback path unchanged)', () => {
+  const fragments = makeAdapterWithCard().contributePromptFragment() ?? []
+  const card = fragments.find((f) => f.id === 'site-card-xiaohongshu.com')!
+  assert.ok(card.matches({ userText: '帮我在小红书发一篇笔记', route: null }))
+  assert.ok(!card.matches({ userText: '今天天气怎么样', route: null }))
+})
+
+test('site card matches by active tab domain even when the turn does not name the site', () => {
+  const fragments = makeAdapterWithCard().contributePromptFragment() ?? []
+  const card = fragments.find((f) => f.id === 'site-card-xiaohongshu.com')!
+  // mid-run turn: user just says "继续" but the active tab is still on XHS
+  assert.ok(card.matches({
+    userText: '继续',
+    route: null,
+    activeBrowserUrl: 'https://creator.xiaohongshu.com/publish/publish?source=official',
+  }))
+  // subdomain also matches
+  assert.ok(card.matches({ userText: '下一步', route: null, activeBrowserUrl: 'https://www.xiaohongshu.com/explore/abc' }))
+})
+
+test('site card does NOT match an unrelated active tab domain', () => {
+  const fragments = makeAdapterWithCard().contributePromptFragment() ?? []
+  const card = fragments.find((f) => f.id === 'site-card-xiaohongshu.com')!
+  assert.ok(!card.matches({ userText: '继续', route: null, activeBrowserUrl: 'https://www.bilibili.com/video/BV1' }))
+  assert.ok(!card.matches({ userText: '继续', route: null, activeBrowserUrl: 'not a url' }))
+  assert.ok(!card.matches({ userText: '继续', route: null, activeBrowserUrl: null }))
 })

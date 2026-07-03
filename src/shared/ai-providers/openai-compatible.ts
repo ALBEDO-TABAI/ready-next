@@ -5,9 +5,9 @@
  * (src/shared/ai-providers.ts:266-284 prior to PR-S3).
  *
  * Carries a built-in `defaultRequestPatcher` that turns on
- * `stream_options.include_usage` and the legacy `stream_usage` mirror
- * so token attribution does not silently drop on third-party
- * OpenAI-compatible endpoints. User-supplied values are preserved
+ * `stream_options.include_usage` and the legacy `stream_usage` mirror only
+ * for streaming calls, so token attribution does not silently drop on
+ * third-party OpenAI-compatible endpoints. User-supplied values are preserved
  * (the patcher only fills in `undefined` slots).
  */
 
@@ -42,14 +42,16 @@ export const capabilityClass: ProviderCapabilityClass = {
 
 export const defaultRequestPatcher = (body: any, ctx?: any): any => {
   if (!body || typeof body !== 'object') return body
-  if (body.stream_options && typeof body.stream_options === 'object') {
-    if (body.stream_options.include_usage === undefined) {
-      body.stream_options.include_usage = true
+  if (body.stream === true) {
+    if (body.stream_options && typeof body.stream_options === 'object') {
+      if (body.stream_options.include_usage === undefined) {
+        body.stream_options.include_usage = true
+      }
+    } else {
+      body.stream_options = { include_usage: true }
     }
-  } else {
-    body.stream_options = { include_usage: true }
+    if (body.stream_usage === undefined) body.stream_usage = true
   }
-  if (body.stream_usage === undefined) body.stream_usage = true
 
   // Stage S (PR-S6 / W4.4) — reasoning_effort routing.
   //

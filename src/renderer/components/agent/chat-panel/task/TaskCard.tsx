@@ -11,6 +11,7 @@ import {
   type TaskSectionKey,
 } from '../../../../modules/agent/taskCardViewModel'
 import { formatSingleLinePreview, formatToolTracePreview } from '../../../../modules/agent/toolTracePreview'
+import { deriveToolTraceRows, type ToolTraceRow } from '../../../../modules/agent/toolTraceRows'
 import { emitRendererAgentMetric } from '../../../../modules/agent/rendererMetrics'
 import { progressPercent, memoryCaptureSourceLabel } from '../helpers/projection'
 import {
@@ -746,6 +747,32 @@ export function TaskCard({
   )
 }
 
+function ToolTraceRowLine({ row }: { row: ToolTraceRow }) {
+  return (
+    <div
+      className="flex items-start gap-2 t-meta"
+      data-typography-role="meta"
+      data-ready-tool-trace-row={row.kind}
+      style={{ color: 'var(--text-gray)' }}
+    >
+      <span
+        style={{
+          color: row.kind === 'call' ? 'var(--color-blue)' : 'var(--color-green)',
+          marginTop: 1
+        }}
+      >
+        {row.kind === 'call' ? '•' : '✓'}
+      </span>
+      <span style={{ minWidth: 0, flex: 1, wordBreak: 'break-word' }}>{row.text}</span>
+      {row.durationLabel ? (
+        <span data-ready-tool-trace-duration="true" style={{ color: 'var(--text-light)', flexShrink: 0 }}>
+          {row.durationLabel}
+        </span>
+      ) : null}
+    </div>
+  )
+}
+
 export function ToolTraceCard({
   events,
   pending = false,
@@ -760,6 +787,12 @@ export function ToolTraceCard({
   if (events.length === 0) return null
   const latestEvent = events[events.length - 1]
   const latestPreview = formatToolTracePreview(latestEvent?.text)
+  // P0-2 — running state auto-surfaces the most recent activity rows so the
+  // user sees per-tool progress without opening the card; completion falls
+  // back to the compact collapsed header (auto-collapse), manual expand
+  // still shows the full list.
+  const rows = deriveToolTraceRows(events)
+  const recentRows = pending && !expanded ? rows.slice(-3) : []
   return (
     <div
       data-ready-tool-trace-card="true"
@@ -801,7 +834,7 @@ export function ToolTraceCard({
           >
             {pending ? '进行中的工具调用' : '工具调用'}
           </div>
-          {!expanded && latestEvent ? (
+          {!expanded && recentRows.length === 0 && latestEvent ? (
             <div
               className="t-meta"
               data-typography-role="meta"
@@ -828,25 +861,17 @@ export function ToolTraceCard({
           }}
         />
       </button>
+      {!expanded && recentRows.length > 0 ? (
+        <div className="flex flex-col" style={{ gap: 4 }} data-ready-tool-trace-recent="true">
+          {recentRows.map((row) => (
+            <ToolTraceRowLine key={row.id} row={row} />
+          ))}
+        </div>
+      ) : null}
       {expanded ? (
         <div className="flex flex-col" style={{ gap: 4 }}>
-          {events.map((event) => (
-            <div
-              key={event.id}
-              className="flex items-start gap-2 t-meta"
-              data-typography-role="meta"
-              style={{ color: 'var(--text-gray)' }}
-            >
-              <span
-                style={{
-                  color: event.kind === 'call' ? 'var(--color-blue)' : 'var(--color-green)',
-                  marginTop: 1
-                }}
-              >
-                {event.kind === 'call' ? '•' : '✓'}
-              </span>
-              <span style={{ minWidth: 0, flex: 1, wordBreak: 'break-word' }}>{event.text}</span>
-            </div>
+          {rows.map((row) => (
+            <ToolTraceRowLine key={row.id} row={row} />
           ))}
         </div>
       ) : null}

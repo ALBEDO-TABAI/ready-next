@@ -184,6 +184,38 @@ describe('collection verdict matrix', () => {
     assert.equal(verdict.verdict, 'completed')
   })
 
+  it('keeps polluted navigation collections out of completed status', () => {
+    const verdict = resolveCollectionVerdict({
+      collected: 3,
+      expected: undefined,
+      stopReason: 'no_new_content',
+      failures: 0,
+      cursorValid: true,
+      targetQuality: 'suspect_navigation_pollution',
+    })
+
+    assert.equal(verdict.status, 'failed')
+    assert.equal(verdict.keepCursor, false)
+    assert.equal(verdict.labelKey, 'verdict.collection_target_polluted')
+    assert.equal(verdict.verdict, 'needs_attention')
+  })
+
+  it('reports missing structure context as needs-attention when nothing was collected', () => {
+    const verdict = resolveCollectionVerdict({
+      collected: 0,
+      expected: undefined,
+      stopReason: 'no_new_content',
+      failures: 0,
+      cursorValid: true,
+      targetQuality: 'structure_context_missing',
+    })
+
+    assert.equal(verdict.status, 'failed')
+    assert.equal(verdict.keepCursor, false)
+    assert.equal(verdict.labelKey, 'verdict.collection_structure_context_missing')
+    assert.equal(verdict.verdict, 'needs_attention')
+  })
+
   it('Q6 replays 06-06 partial collection as recoverable with cursor kept', () => {
     const verdict = resolveCollectionVerdict({
       collected: 62,
@@ -299,5 +331,48 @@ describe('collection verdict matrix', () => {
     assert.equal(result.verdict, 'needs_attention')
     assert.equal(result.emptyDiagnostics?.reason, 'login_wall')
     assert.deepEqual(result.emptyDiagnostics?.evidence, ['登录后查看内容'])
+  })
+
+  // P1-R1 (2026-07-03) — high-control platforms: a nav-shell / empty freeze is
+  // a recoverable user-takeover ("open/log into the page, then continue"), not
+  // a hard failure. Generic sites keep the hard-failure semantics.
+  it('high-control navigation pollution → recoverable paused (user takeover), not hard failed', () => {
+    const verdict = resolveCollectionVerdict({
+      collected: 3,
+      expected: undefined,
+      stopReason: 'no_new_content',
+      failures: 0,
+      cursorValid: true,
+      targetQuality: 'suspect_navigation_pollution',
+      highControl: true,
+    })
+    assert.equal(verdict.status, 'paused')
+    assert.equal(verdict.verdict, 'needs_user_takeover')
+    assert.equal(verdict.labelKey, 'verdict.collection_needs_user_takeover')
+  })
+
+  it('high-control empty collection → recoverable paused, not hard failed', () => {
+    const verdict = resolveCollectionVerdict({
+      collected: 0,
+      expected: undefined,
+      stopReason: 'no_new_content',
+      failures: 0,
+      cursorValid: false,
+      highControl: true,
+    })
+    assert.equal(verdict.status, 'paused')
+    assert.equal(verdict.verdict, 'needs_user_takeover')
+  })
+
+  it('generic-site pollution stays hard failed (takeover is high-control only)', () => {
+    const verdict = resolveCollectionVerdict({
+      collected: 3,
+      expected: undefined,
+      stopReason: 'no_new_content',
+      failures: 0,
+      cursorValid: true,
+      targetQuality: 'suspect_navigation_pollution',
+    })
+    assert.equal(verdict.status, 'failed')
   })
 })

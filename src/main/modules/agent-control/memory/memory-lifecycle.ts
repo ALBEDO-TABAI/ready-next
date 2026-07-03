@@ -26,6 +26,7 @@ const DEFAULT_CONFIG: MemoryLifecycleConfig = {
 
 export class MemoryLifecycleManager {
   private timer: NodeJS.Timeout | null = null
+  private initialTimer: NodeJS.Timeout | null = null
   private running = false
   private lastMaintenanceAt: Date | null = null
 
@@ -47,8 +48,11 @@ export class MemoryLifecycleManager {
       void this.runMaintenance()
     }, config.maintenanceIntervalMs)
 
-    // Run initial maintenance after 1 minute
-    setTimeout(() => {
+    // Run initial maintenance after 1 minute. Track the handle so stop() can
+    // cancel it — otherwise a stop() within the first minute leaves a pending
+    // timer that fires into a stopped manager and throws "not running".
+    this.initialTimer = setTimeout(() => {
+      this.initialTimer = null
       void this.runMaintenance()
     }, 60_000)
 
@@ -62,6 +66,10 @@ export class MemoryLifecycleManager {
     if (this.timer) {
       clearInterval(this.timer)
       this.timer = null
+    }
+    if (this.initialTimer) {
+      clearTimeout(this.initialTimer)
+      this.initialTimer = null
     }
 
     console.log('[MemoryLifecycleManager] Stopped')
@@ -148,6 +156,15 @@ export class MemoryLifecycleManager {
 
     let archivedCount = 0
     for (const memory of oldMemories) {
+      // P2-6 (2026-07-03) — belief-card mirror rows are written into L2
+      // (belief-card-mirror.ts: layer='l2', category='belief') and their
+      // access_count stays 0 until usage-counting lands, so the generic
+      // low-access sweep would archive a perfectly valid belief card at
+      // l2ExpiryDays and silently drop it from the active mirror. Belief cards
+      // have their OWN decay lifecycle (belief-decay.ts); exclude them here.
+      // (belief mirror rows are written with category='belief' via raw SQL in
+      // belief-card-mirror.ts, outside the MemoryCategory union — compare as string.)
+      if (String(memory.category) === 'belief') continue
       const lastAccess = memory.lastAccessedAt || memory.createdAt
       const shouldArchive = lastAccess < cutoffTime && memory.accessCount < minAccessCount
 

@@ -331,7 +331,7 @@ export const BROWSER_TOOLS: BrowserToolDef[] = [
   },
   {
     name: 'browser_media_download_advanced',
-    description: '下载并校验媒体资源。可接收 resource forensics 候选，也可先侦测当前页；支持 referer/header 继承、m3u8/mpd/分片线索和 ffprobe 校验。',
+    description: '下载并校验媒体资源。可接收 resource forensics 候选，也可先侦测当前页；支持 referer/header 继承、m3u8/mpd/分片线索；下载后按“文件存在且非空字节”校验（拿到 URL 不等于下载完成）。',
     params: zodObjectToParamList(BROWSER_CONTENT_SCHEMAS.browser_media_download_advanced) as ToolParamSchemaSpec[],
     effectProfile: { effects: ['download'] },
   },

@@ -125,13 +125,16 @@ function normalizeStructuredItems(sourceUrl: string, raw: unknown): BrowserStruc
     const dedupeKey = link || `${title || ''}|${summary || ''}|${media.join('|')}`
     if (!dedupeKey || seen.has(dedupeKey)) continue
     seen.add(dedupeKey)
+    const nestedRawFields = record.rawFields && typeof record.rawFields === 'object'
+      ? record.rawFields as Record<string, unknown>
+      : null
     items.push({
       sourceUrl: String(record.sourceUrl || sourceUrl || ''),
       title,
       link,
       summary,
       media,
-      rawFields: record,
+      rawFields: nestedRawFields ? { ...record, ...nestedRawFields } : record,
     })
   }
   return items
@@ -180,6 +183,24 @@ function buildStructuredExtractionScript(options: BrowserExtractStructuredOption
         if (attr === 'src' && target instanceof HTMLImageElement) return normalize(target.currentSrc || target.src || '')
         return normalize(target.getAttribute(attr || '') || '')
       }
+      const structureFor = (node) => {
+        const el = node instanceof Element ? node : null
+        if (!el) return null
+        const nearest = el.closest('nav,aside,header,main,article,section,[role]')
+        const containerClass = nearest instanceof HTMLElement
+          ? normalize(String(nearest.className || '')).slice(0, 120)
+          : ''
+        return {
+          inNavigationRegion: Boolean(el.closest('nav,[role="navigation"]')),
+          inSidebarRegion: Boolean(el.closest('aside,[role="complementary"],[class*="sidebar" i],[class*="side-bar" i],[class*="side_nav" i],[class*="side-nav" i]')),
+          inHeaderRegion: Boolean(el.closest('header,[role="banner"]')),
+          inMainContentRegion: Boolean(el.closest('main,article,[role="main"]')) && !Boolean(el.closest('nav,aside,header,[role="navigation"],[role="banner"],[role="complementary"]')),
+          nearestTagName: nearest instanceof Element ? nearest.tagName.toLowerCase() : '',
+          nearestRole: nearest instanceof Element ? normalize(nearest.getAttribute('role') || '') : '',
+          nearestAriaLabel: nearest instanceof Element ? normalize(nearest.getAttribute('aria-label') || nearest.getAttribute('data-testid') || '') : '',
+          containerClass,
+        }
+      }
       const candidates = itemSelector
         ? Array.from(document.querySelectorAll(itemSelector))
         : Array.from(document.querySelectorAll('article, [role="article"], section, li, .card, [class*="card"], [class*="post"], [class*="feed"], [data-testid*="card" i]'))
@@ -207,6 +228,7 @@ function buildStructuredExtractionScript(options: BrowserExtractStructuredOption
             link: normalize(node.closest('a')?.href || node.currentSrc || node.src || ''),
             summary: '',
             media: [normalize(node.currentSrc || node.src || '')].filter(Boolean),
+            rawFields: { structure: structureFor(node) },
           })
           if (rows.length >= limit) break
         }
@@ -222,7 +244,7 @@ function buildStructuredExtractionScript(options: BrowserExtractStructuredOption
           const title = normalize(node.textContent || node.getAttribute('title') || node.getAttribute('aria-label') || '')
           const link = normalize(node.href || '')
           if (!link) continue
-          pushRow({ sourceUrl: location.href, title, link, summary: '' })
+          pushRow({ sourceUrl: location.href, title, link, summary: '', rawFields: { structure: structureFor(node) } })
           if (rows.length >= limit) break
         }
         return rows
@@ -260,10 +282,10 @@ function buildStructuredExtractionScript(options: BrowserExtractStructuredOption
           link,
           summary,
           media,
-          rawFields: {},
+          rawFields: { structure: structureFor(node) },
         }
         if (__READY_EXTRACT_TEMPLATE__ === 'custom') {
-          const rawFields = {}
+          const rawFields = { structure: structureFor(node) }
           for (const field of customFields) {
             const fieldName = normalize(field.name)
             if (!fieldName) continue

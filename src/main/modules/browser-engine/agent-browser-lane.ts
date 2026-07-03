@@ -18,6 +18,7 @@
  */
 
 import { isAgentBrowserError, type AgentBrowserStructuredError } from './agent-browser-errors'
+import type { AgentBrowserSurface } from './agent-browser-errors'
 import type { BrowserWriteLeaseService } from './browser-write-lease'
 import type { BrowserLeaseGate } from './agent-browser-lease-gate'
 
@@ -30,8 +31,22 @@ export async function runUnderUserViewLease<T>(
   params: { taskId: string; runId: string; tabId?: string | null; ttlMs?: number },
   fn: (gate: BrowserLeaseGate, heartbeat: () => void) => Promise<T>,
 ): Promise<LaneRunOutcome<T>> {
+  return runUnderBrowserViewLease(service, { ...params, surface: 'user-view' }, fn)
+}
+
+export async function runUnderBrowserViewLease<T>(
+  service: BrowserWriteLeaseService,
+  params: {
+    surface: AgentBrowserSurface
+    taskId: string
+    runId: string
+    tabId?: string | null
+    ttlMs?: number
+  },
+  fn: (gate: BrowserLeaseGate, heartbeat: () => void) => Promise<T>,
+): Promise<LaneRunOutcome<T>> {
   const lease = service.acquire({
-    surface: 'user-view',
+    surface: params.surface,
     taskId: params.taskId,
     runId: params.runId,
     tabId: params.tabId ?? null,
@@ -41,7 +56,7 @@ export async function runUnderUserViewLease<T>(
     return { ok: false, blocked: lease }
   }
 
-  const gate: BrowserLeaseGate = { service, surface: 'user-view', leaseId: lease.leaseId }
+  const gate: BrowserLeaseGate = { service, surface: params.surface, leaseId: lease.leaseId }
   const heartbeat = () => {
     service.heartbeat(lease.leaseId, params.ttlMs)
   }

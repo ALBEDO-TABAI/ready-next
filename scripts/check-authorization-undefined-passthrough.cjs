@@ -28,7 +28,6 @@
  *   - src/main/modules/agent-control/tool-policy/execution-tool-skill-filters.ts
  *   - src/main/modules/tools/index.ts
  *   - src/main/modules/agent-control/tools-runtime/tool-runtime.ts
- *   - src/main/modules/agent-control/runtime-core/execution-loop-orchestrator.ts
  *   - src/main/modules/tools/tool-executor.ts
  *
  * Forbidden patterns (line comments / block comments / string literals
@@ -64,7 +63,6 @@ const TARGET_REL_FILES = [
   'src/main/modules/agent-control/tool-policy/execution-tool-skill-filters.ts',
   'src/main/modules/tools/index.ts',
   'src/main/modules/agent-control/tools-runtime/tool-runtime.ts',
-  'src/main/modules/agent-control/runtime-core/execution-loop-orchestrator.ts',
   'src/main/modules/tools/tool-executor.ts',
 ]
 

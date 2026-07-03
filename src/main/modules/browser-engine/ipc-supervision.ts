@@ -2,6 +2,7 @@ import { ipcMain } from 'electron'
 import type { AgentBrowserSurface } from './agent-browser-errors'
 import type { BrowserLeaseState } from './browser-write-lease'
 import type { BrowserCapabilityTaskHandle } from './capability-types'
+import type { BrowserWorkflowSession } from './browser-workflow-session'
 import { isBrowserSupervisionVisibleTaskStatus } from '../../../shared/browser-task-status'
 
 /**
@@ -31,6 +32,10 @@ export interface BrowserLeaseSupervisionSnapshot {
   activeWriteSurface: AgentBrowserSurface | null
 }
 
+export type BrowserAgentSupervisionTask = Omit<BrowserCapabilityTaskHandle, 'kind'> & {
+  kind: BrowserCapabilityTaskHandle['kind'] | 'browser_workflow' | 'browser_upload_workflow'
+}
+
 export interface BrowserSupervisionIPCController {
   requestAgentInterruption(): { state: AgentControlState; pending: boolean }
   confirmAgentInterruption(): Promise<{ state: AgentControlState; frozen: boolean; takeoverTabId?: string | null }>
@@ -38,7 +43,25 @@ export interface BrowserSupervisionIPCController {
   getAgentControlState(): AgentControlState
   getAgentTabId(): string | null
   getBrowserLeaseSnapshot(): BrowserLeaseSupervisionSnapshot
-  listAgentCollectionTasks(): Promise<BrowserCapabilityTaskHandle[]>
+  listAgentCollectionTasks(): Promise<BrowserAgentSupervisionTask[]>
+  getActiveForegroundBrowserWorkflowSession?(): BrowserWorkflowSession | null
+}
+
+function foregroundWorkflowTask(session: BrowserWorkflowSession): BrowserAgentSupervisionTask {
+  return {
+    taskId: session.taskId,
+    kind: 'browser_workflow',
+    status: 'running',
+    progress: {
+      total: 1,
+      completed: 0,
+      failed: 0,
+      currentLabel: '前台浏览器任务',
+    },
+    createdAt: new Date(session.startedAt).toISOString(),
+    startedAt: new Date(session.startedAt).toISOString(),
+    updatedAt: new Date(session.updatedAt).toISOString(),
+  }
 }
 
 export function setupBrowserSupervisionIPC(controller: BrowserSupervisionIPCController): void {
@@ -68,11 +91,18 @@ export function setupBrowserSupervisionIPC(controller: BrowserSupervisionIPCCont
 
   ipcMain.handle('browser:getAgentSupervisionState', async () => {
     try {
-      const tasks = await controller.listAgentCollectionTasks()
+      const foreground = controller.getActiveForegroundBrowserWorkflowSession?.() ?? null
+      const tasks = [
+        ...(foreground?.lane === 'agent-view' ? [foregroundWorkflowTask(foreground)] : []),
+        ...(await controller.listAgentCollectionTasks()),
+      ]
       const activeTasks = tasks.filter((task) => isBrowserSupervisionVisibleTaskStatus(task.status))
+      const foregroundAgentTabId = foreground?.lane === 'agent-view' && foreground.status === 'running'
+        ? foreground.boundTabId
+        : null
       return {
         controlState: controller.getAgentControlState(),
-        agentTabId: activeTasks.length > 0 ? controller.getAgentTabId() : null,
+        agentTabId: foregroundAgentTabId || (activeTasks.length > 0 ? controller.getAgentTabId() : null),
         tasks: activeTasks,
         ...controller.getBrowserLeaseSnapshot(),
       }

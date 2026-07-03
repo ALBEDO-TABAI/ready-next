@@ -45,6 +45,17 @@ export interface BrowserStructuredItem {
   rawFields?: Record<string, unknown>
 }
 
+export interface BrowserCandidateStructureContext {
+  inNavigationRegion?: boolean
+  inSidebarRegion?: boolean
+  inHeaderRegion?: boolean
+  inMainContentRegion?: boolean
+  nearestTagName?: string
+  nearestRole?: string
+  nearestAriaLabel?: string
+  containerClass?: string
+}
+
 export interface BrowserExtractStructuredResult {
   template: BrowserStructuredTemplate
   items: BrowserStructuredItem[]

@@ -195,6 +195,44 @@ test('browser_transaction with transaction_confirmed proof can complete', async 
   assert.equal(finalized.terminalReason, 'done')
 })
 
+test('run_meta records effective browser_transaction type from terminal projection patch', async () => {
+  const store = fakeStore({
+    taskId: 'task-browser-transaction-patch-type',
+    taskType: 'short_task' as never,
+    module: 'browser',
+    proofRefs: [
+      collectTransactionConfirmedProof('browser_power_eval:page_text:success_text', 'page success', NOW),
+    ],
+  })
+  const runMeta = new Map<string, Record<string, unknown>>()
+  const finalized = await finalizeRunOutcome({
+    kind: 'done',
+    runId: 'run-browser-transaction-patch-type',
+    taskId: 'task-browser-transaction-patch-type',
+    scopeId: 's1',
+    durationMs: 10,
+    toolCallsUsed: 1,
+    initiator: 'done',
+    finalText: '已发布',
+    projectionPatch: {
+      taskType: 'browser_transaction',
+      module: 'browser',
+    },
+  }, {
+    writeRunCloseMetric: () => {},
+    runMetaRepository: {
+      get: (runId) => runMeta.get(runId) ?? null,
+      create: (input) => { runMeta.set(String(input.runId), input); return input },
+      update: (runId, patch) => { runMeta.set(runId, { ...runMeta.get(runId), ...patch }); return patch },
+    },
+    taskProjectionStore: store,
+    now: () => NOW,
+  })
+
+  assert.equal(finalized.status, 'done')
+  assert.equal(runMeta.get('run-browser-transaction-patch-type')!.taskType, 'browser_transaction')
+})
+
 test('browser_transaction adjudication unavailable does not silently complete; direct_answer remains tolerant', async () => {
   const transaction = await finalizeRunOutcome({
     kind: 'done',
@@ -228,6 +266,61 @@ test('browser_transaction adjudication unavailable does not silently complete; d
     now: () => NOW,
   })
   assert.equal(direct.status, 'done')
+})
+
+test('P1 live regression: a browser_transaction finalized DIRECTLY as error/proof_gap normalizes to browser_transaction_unconfirmed', async () => {
+  // The ledger showed run_meta rows with task_type=browser_transaction AND
+  // terminal_reason=proof_gap — the publish task surfaced as a hard 失败.
+  // A direct kind:'error' finalize skipped the done→adjudication conversion;
+  // the finalizer must normalize the generic gap to the recoverable reason.
+  const runMeta = new Map<string, Record<string, unknown>>()
+  const finalized = await finalizeRunOutcome({
+    kind: 'error',
+    runId: 'run-bt-direct-error',
+    taskId: 'task-bt-direct-error',
+    scopeId: 's1',
+    durationMs: 10,
+    toolCallsUsed: 2,
+    initiator: 'error',
+    terminalReason: 'proof_gap',
+    taskBudgetRuntime: budgetRuntime('browser_transaction' as never),
+  }, {
+    writeRunCloseMetric: () => {},
+    runMetaRepository: {
+      get: (runId) => runMeta.get(runId) ?? null,
+      create: (input) => { runMeta.set(String(input.runId), input); return input },
+      update: (runId, patch) => { runMeta.set(runId, { ...runMeta.get(runId), ...patch }); return patch },
+    },
+    now: () => NOW,
+  })
+  assert.equal(finalized.status, 'error')
+  assert.equal(finalized.terminalReason, 'browser_transaction_unconfirmed')
+  assert.equal(runMeta.get('run-bt-direct-error')!.terminalReason, 'browser_transaction_unconfirmed')
+  assert.equal(runMeta.get('run-bt-direct-error')!.taskType, 'browser_transaction')
+})
+
+test('P1: a non-browser direct error/proof_gap keeps proof_gap (normalization is browser-transaction only)', async () => {
+  const runMeta = new Map<string, Record<string, unknown>>()
+  const finalized = await finalizeRunOutcome({
+    kind: 'error',
+    runId: 'run-short-direct-error',
+    taskId: 'task-short-direct-error',
+    scopeId: 's1',
+    durationMs: 10,
+    toolCallsUsed: 0,
+    initiator: 'error',
+    terminalReason: 'proof_gap',
+    taskBudgetRuntime: budgetRuntime('short_task' as never),
+  }, {
+    writeRunCloseMetric: () => {},
+    runMetaRepository: {
+      get: (runId) => runMeta.get(runId) ?? null,
+      create: (input) => { runMeta.set(String(input.runId), input); return input },
+      update: (runId, patch) => { runMeta.set(runId, { ...runMeta.get(runId), ...patch }); return patch },
+    },
+    now: () => NOW,
+  })
+  assert.equal(finalized.terminalReason, 'proof_gap')
 })
 
 function skillRunDeps(runMeta: Map<string, Record<string, unknown>>, verifyRunStateTerminal: (p: string) => boolean) {
@@ -920,4 +1013,94 @@ test('P0-4: run_close metric carries the effective taskType for coverage account
     durationMs: 5, toolCallsUsed: 0, initiator: 'error', terminalReason: 'x',
   }, { writeRunCloseMetric: (metric) => bare.push(metric as unknown as Record<string, unknown>) })
   assert.equal(bare[0].taskType ?? null, null)
+})
+
+// ── P2-5: learningDecision + learningRefs writer ───────────────────────────
+
+test('adjudicator sets learningDecision.learned true only for accept + durable refs', () => {
+  const criteria = resolveCriteria('short_task', 'system', {}).items
+  const accepted = adjudicateTerminalOutcome({
+    terminalStatus: 'done',
+    terminalReason: 'done',
+    criteria,
+    proofs: [collectToolResultProof('t', 'ok', NOW)],
+    learningRefs: [{ kind: 'artifact', path: '/tmp/x.md' }],
+    now: NOW,
+  })
+  assert.equal(accepted.verdict, 'accept')
+  assert.equal(accepted.checkIn.learningDecision?.learned, true)
+  assert.equal(accepted.checkIn.learningDecision?.refCount, 1)
+
+  const noRefs = adjudicateTerminalOutcome({
+    terminalStatus: 'done',
+    terminalReason: 'done',
+    criteria,
+    proofs: [collectToolResultProof('t', 'ok', NOW)],
+    learningRefs: [],
+    now: NOW,
+  })
+  assert.equal(noRefs.checkIn.learningDecision?.learned, false)
+  assert.equal(noRefs.checkIn.learningDecision?.refCount, 0)
+})
+
+test('finalizer writes learningRefs to the projection for an accepted durable run', () => {
+  return (async () => {
+    const store = fakeStore({
+      taskId: 'task-learn-write',
+      taskType: 'browser_transaction' as never,
+      module: 'browser',
+      proofRefs: [
+        collectToolResultProof('browser_power_network_trace', 'ok', NOW),
+        collectTransactionConfirmedProof('browser_power_network_trace:network:success_response', 'network success', NOW),
+      ],
+    })
+    await finalizeRunOutcome({
+      kind: 'done', runId: 'run-learn-write', taskId: 'task-learn-write', scopeId: 's1',
+      durationMs: 10, toolCallsUsed: 1, initiator: 'done', finalText: '已发布',
+    }, { writeRunCloseMetric: () => {}, taskProjectionStore: store, now: () => NOW })
+
+    const learningPatch = store.patches.find((p) => 'learningRefs' in p)
+    assert.ok(learningPatch, 'a learningRefs patch must be written')
+    const refs = (learningPatch as { learningRefs?: unknown[] }).learningRefs ?? []
+    assert.ok(refs.length >= 1, 'durable transaction_confirmed proof becomes a learning ref')
+    const checkins = store.rows.get('task-learn-write')!.checkins as CheckInRecord[]
+    assert.equal(checkins.at(-1)!.learningDecision?.learned, true)
+  })()
+})
+
+test('finalizer does NOT write learningRefs when the run produced no durable evidence', () => {
+  return (async () => {
+    const store = fakeStore({
+      taskId: 'task-learn-none',
+      taskType: 'direct_answer' as never,
+      // A single non-durable tool_result proof (no path, non-durable kind).
+      proofRefs: [collectToolResultProof('lookup', 'answered inline', NOW)],
+    })
+    await finalizeRunOutcome({
+      kind: 'done', runId: 'run-learn-none', taskId: 'task-learn-none', scopeId: 's1',
+      durationMs: 10, toolCallsUsed: 1, initiator: 'done', finalText: '答案',
+    }, { writeRunCloseMetric: () => {}, taskProjectionStore: store, now: () => NOW })
+
+    const learningPatch = store.patches.find((p) => 'learningRefs' in p)
+    assert.equal(learningPatch, undefined, 'no durable evidence → no learningRefs write')
+  })()
+})
+
+test('P2-2: finalizer persists resolved criteria (items + satisfied/total) to the projection', () => {
+  return (async () => {
+    const store = fakeStore({
+      taskId: 'task-criteria-persist',
+      taskType: 'multi_step_task' as never,
+      proofRefs: [collectToolResultProof('t', 'ok', NOW)],
+    })
+    await finalizeRunOutcome({
+      kind: 'done', runId: 'run-criteria', taskId: 'task-criteria-persist', scopeId: 's1',
+      durationMs: 10, toolCallsUsed: 1, initiator: 'done', finalText: 'done',
+    }, { writeRunCloseMetric: () => {}, taskProjectionStore: store, now: () => NOW })
+
+    const criteriaPatch = store.patches.find((p) => 'criteria' in p) as { criteria?: { items?: unknown[]; totalCount?: number } } | undefined
+    assert.ok(criteriaPatch, 'criteria must be persisted')
+    assert.ok(Array.isArray(criteriaPatch!.criteria!.items) && criteriaPatch!.criteria!.items!.length >= 1)
+    assert.equal(typeof criteriaPatch!.criteria!.totalCount, 'number')
+  })()
 })

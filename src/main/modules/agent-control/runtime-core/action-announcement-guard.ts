@@ -1,7 +1,9 @@
 const ACTION_ANNOUNCEMENT_TAIL_PATTERN =
   /(?:让我|我来|我现在|我马上|接下来|现在去|I['’]ll now|let me)[\s\S]{0,120}[：:]\s*$/i
 const ACTION_ANNOUNCEMENT_PROMISE_PATTERN =
-  /(?:让我|我来|我现在|我马上|我会|接下来|现在|马上|这就)[\s\S]{0,120}(?:打开|搜索|搜集|采集|下载|保存|存档|落到|插入|写入|创建|新建|移动|整理|提取|还原|执行|处理|批量下载|open|search|collect|download|save|insert|write|create|move|extract|run)/i
+  /(?:让我|我来|我(?:先|再|继续|接着)(?:去|来)?|我现在|我马上|我会|我(?:需要|得|要)(?:先|去)?|接下来|现在|马上|这就)[\s\S]{0,120}(?:打开|搜索|搜集|采集|下载|保存|存档|落到|插入|写入|创建|新建|移动|整理|提取|还原|执行|处理|点击|点选|点|切换|选择|输入|填写|上传|发布|提交|确认|滚动|关闭|批量下载|open|search|collect|download|save|insert|write|create|move|extract|run|click|switch|select|type|upload|publish|submit|confirm|scroll|close)/i
+const ACTION_ANNOUNCEMENT_INFERRED_NEXT_STEP_PATTERN =
+  /(?:下一步|接下来|应该(?:就是)?|应当)[\s\S]{0,120}(?:打开|搜索|搜集|采集|下载|保存|存档|落到|插入|写入|创建|新建|移动|整理|提取|还原|执行|处理|点击|点选|点|切换|选择|输入|填写|上传|发布|提交|确认|滚动|关闭|批量下载|open|search|collect|download|save|insert|write|create|move|extract|run|click|switch|select|type|upload|publish|submit|confirm|scroll|close)/i
 const ACTION_ANNOUNCEMENT_START_PATTERN =
   /(?:直接)?开始(?:写入|写|创建|新建|保存|输出|生成)[\s\S]{0,80}(?:文档|方案|文件|prompt)/i
 const ACTION_ANNOUNCEMENT_SEQUENCE_PATTERN =
@@ -18,6 +20,7 @@ const BLOCKER_EXPLANATION_PATTERN =
 function matchesActionAnnouncement(segment: string): boolean {
   return ACTION_ANNOUNCEMENT_TAIL_PATTERN.test(segment)
     || ACTION_ANNOUNCEMENT_PROMISE_PATTERN.test(segment)
+    || ACTION_ANNOUNCEMENT_INFERRED_NEXT_STEP_PATTERN.test(segment)
     || ACTION_ANNOUNCEMENT_START_PATTERN.test(segment)
     || ACTION_ANNOUNCEMENT_SEQUENCE_PATTERN.test(segment)
 }

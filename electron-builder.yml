@@ -3,6 +3,11 @@ productName: Ready
 directories:
   buildResources: build
   output: exports
+publish:
+  provider: github
+  owner: ALBEDO-TABAI
+  repo: ready-releases
+  releaseType: release
 files:
   - out/**/*
   - package.json
@@ -73,6 +78,9 @@ mac:
   category: public.app-category.productivity
   target:
     - target: dmg
+      arch:
+        - arm64
+    - target: zip
       arch:
         - arm64
     - target: dir

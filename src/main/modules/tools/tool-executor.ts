@@ -46,6 +46,7 @@ import {
   type ToolInteractionHint,
 } from '../agent-control/tools-runtime/tool-result-types'
 import { executeBrowserTool } from './browser-tools'
+import { getBrowserActionSession } from '../browser-engine/browser-action-session'
 import { isAgentBrowserError } from '../browser-engine/agent-browser-errors'
 import type { BrowserLeaseGate } from '../browser-engine/agent-browser-lease-gate'
 import type { BrowserTurnLease } from '../browser-engine/agent-browser-turn-lease'
@@ -87,6 +88,7 @@ import {
   errorMessageOf,
   isTerminalInfrastructureError,
 } from './tool-errors'
+import { resolveBrowserWorkflowIntent } from '../../../shared/browser-workflow-intent'
 import { deriveEnvelopeForToolOutput } from './tool-result-envelope'
 import { validateToolInput } from './tool-input-validator'
 import {
@@ -158,6 +160,59 @@ export interface ToolContext {
    * skill_* calls — defense against `as any` bypasses.
    */
   authorization: SkillToolAuthorization
+}
+
+const BROWSER_SESSION_TARGET_INHERIT_TOOLS = new Set([
+  'browser_navigate',
+  'browser_search',
+  'browser_read_page',
+  'browser_read_page_map',
+  'browser_probe_readonly',
+  'browser_click',
+  'browser_click_text',
+  'browser_act_on_target',
+  'browser_type',
+  'browser_type_smart',
+  'browser_compose_message',
+  'browser_capture_viewport',
+  'browser_probe_workflow_state',
+  'browser_locate_action_targets',
+  'browser_locate_input_targets',
+  'browser_analyze_viewport',
+  'browser_list_upload_targets',
+  'browser_upload_scope_attachment',
+  'browser_click_at',
+  'browser_type_at',
+  'browser_scroll_at',
+  'browser_send_keys',
+  'browser_wait',
+  'browser_wait_for_condition',
+  'browser_go_back',
+  'browser_execute_js',
+  'browser_power_eval',
+  'browser_power_cdp',
+  'browser_power_network_trace',
+  'browser_power_resource_forensics',
+  'browser_power_script_run',
+  'browser_run_workflow',
+])
+
+function inheritBrowserActionSessionTarget(
+  toolName: string,
+  args: Record<string, unknown>,
+  context: ToolContext,
+): Record<string, unknown> {
+  if (!BROWSER_SESSION_TARGET_INHERIT_TOOLS.has(toolName)) return args
+  if (typeof args.tab_id === 'string' && args.tab_id.trim()) return args
+  if (!context.browserLease) return args
+  if (resolveBrowserWorkflowIntent(context.currentUserText || '').kind !== 'transaction') return args
+  const session = getBrowserActionSession(context.sessionId || context.scopeId || context.scope?.id)
+  const targetTabId = typeof session?.targetTabId === 'string' && session.targetTabId.trim()
+    ? session.targetTabId.trim()
+    : ''
+  if (!targetTabId) return args
+  const tabExists = context.browserController?.getTabList?.().some((tab) => tab.id === targetTabId)
+  return tabExists ? { ...args, tab_id: targetTabId } : args
 }
 
 function workspaceRootsFromRequestEnvelope(envelope: unknown): string[] | null {
@@ -357,6 +412,10 @@ async function executeToolCallInner(
       return outcome.output
     }
     args = outcome.data
+  }
+
+  if (definition.domain === 'browser') {
+    args = inheritBrowserActionSessionTarget(toolName, args, context)
   }
 
   // EP1-I3-1/I3-2 — action-confirmation gate (05 §3.1/§3.2). Sits AFTER

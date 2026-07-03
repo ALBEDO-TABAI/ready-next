@@ -79,6 +79,14 @@ export function buildCollectionHandoffPlanFromTask(
   const highControlCollection = isHighControlPlatformText(targetProfileUrl)
     || notes.some((note) => isHighControlPlatformText(note.url))
   const strategy = highControlCollection ? 'card_loop' : 'url_batch'
+  // P1 (2026-07-03) — carry the freeze-time target quality forward so the
+  // note_collect verdict can honor it (7/01 reliability contract C boundary).
+  const rawQuality = stringField(result?.targetQuality)
+  const targetQuality = rawQuality === 'trustworthy'
+    || rawQuality === 'suspect_navigation_pollution'
+    || rawQuality === 'structure_context_missing'
+    ? rawQuality
+    : undefined
   const plan = {
     targetProfileUrl,
     strategy,
@@ -86,6 +94,7 @@ export function buildCollectionHandoffPlanFromTask(
     expectedCount: notes.length,
     sourceTaskId: sourceTask.taskId,
     outputRootDir: resolveOutputRootDir(result),
+    ...(targetQuality ? { targetQuality } : {}),
   }
   return { strategy, notes, plan }
 }

@@ -41,7 +41,15 @@ export function formatRunDuration(ms: number): string {
 
 function runDurationLabel(run: ScopeRunState): Pick<RunDurationMeterModel, 'label' | 'glyph' | 'tone'> {
   if (LIVE_PHASES.has(run.phase)) {
-    return { label: '本轮进行中', glyph: 'running', tone: 'neutral' }
+    // P0-3 — planning-stage heartbeats ("正在理解需求…/正在调用模型…") surface
+    // here instead of the static label, so the pre-first-output window shows
+    // real progression. Raw status echoes ("状态：working") and long texts
+    // stay on the generic label.
+    const trimmed = run.phase === 'planning' && typeof run.latestText === 'string'
+      ? run.latestText.trim()
+      : ''
+    const heartbeat = trimmed && !trimmed.startsWith('状态：') && trimmed.length <= 30 ? trimmed : null
+    return { label: heartbeat || '本轮进行中', glyph: 'running', tone: 'neutral' }
   }
   if (run.phase === 'cancelled') {
     return { label: '本轮已停止', glyph: 'idle', tone: 'neutral' }

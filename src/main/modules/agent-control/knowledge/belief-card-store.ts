@@ -318,7 +318,7 @@ export class BeliefCardStore {
    * would be exceeded the remainder is dropped and reported via
    * `omittedCount` so the caller can append the "另有 N 条" footer.
    */
-  renderKnowledgeIndex(opts: { maxChars: number; ownerAgentId?: string | null; excludeRelPaths?: readonly string[] }): { text: string; renderedCount: number; omittedCount: number } {
+  renderKnowledgeIndex(opts: { maxChars: number; ownerAgentId?: string | null; excludeRelPaths?: readonly string[] }): { text: string; renderedCount: number; omittedCount: number; renderedRelPaths: string[] } {
     const rank: Record<BeliefCardFrontmatter['confidence'], number> = { H: 0, M: 1, L: 2 }
     const byConfidence = (a: BeliefCard, b: BeliefCard): number =>
       rank[a.frontmatter.confidence] - rank[b.frontmatter.confidence]
@@ -333,12 +333,14 @@ export class BeliefCardStore {
     const active = [...ownerActive, ...this.listCards().filter(isActive).sort(byConfidence)]
       .filter((card) => !excluded.has(card.relPath))
     const lines: string[] = []
+    const renderedRelPaths: string[] = []
     let used = 0
     let rendered = 0
     for (const card of active) {
       const line = `- ${card.frontmatter.title}（${card.frontmatter.confidence}）: ${card.frontmatter.description} → ${card.relPath}`
       if (used + line.length + 1 > opts.maxChars) break
       lines.push(line)
+      renderedRelPaths.push(card.relPath)
       used += line.length + 1
       rendered += 1
     }
@@ -346,6 +348,10 @@ export class BeliefCardStore {
       text: lines.join('\n'),
       renderedCount: rendered,
       omittedCount: active.length - rendered,
+      // P2-4 (2026-07-03) — which cards actually made it into the prompt, so the
+      // caller can bump their mirror access_count (was stuck at 0, making decay
+      // signals and "is this belief used?" metrics impossible to compute).
+      renderedRelPaths,
     }
   }
 

@@ -481,6 +481,82 @@ describe('browser-tools v2', () => {
     assert.ok(controller.calls.mouse.length >= 3)
   })
 
+  it('browser_click_text follows a newly opened active tab after the click', async () => {
+    let tabs = [
+      { id: 'tab-1', title: '小红书', url: 'https://www.xiaohongshu.com', active: true },
+    ]
+    let switchedTo: string | null = null
+    let controller!: BrowserController & MockedController
+    controller = createControllerMock({
+      getTabList: () => tabs as never,
+      switchTab: (tabId) => {
+        switchedTo = tabId
+        tabs = tabs.map((tab) => ({ ...tab, active: tab.id === tabId }))
+        return { success: true, activeTabId: tabId }
+      },
+      dispatchMouse: async (_tabId, payload) => {
+        controller.calls.mouse.push(payload as unknown as Record<string, unknown>)
+        if ((payload as { type?: string }).type === 'mouseReleased') {
+          tabs = [
+            { id: 'tab-1', title: '小红书', url: 'https://www.xiaohongshu.com', active: false },
+            { id: 'tab-2', title: '发布笔记', url: 'https://creator.xiaohongshu.com/publish/publish?source=official', active: true },
+          ]
+        }
+      },
+      executeJS: async (_tabId, code) => {
+        const source = String(code || '')
+        if (source.includes('const target = "发布"')) {
+          return { ok: true, text: '发布', cssX: 500, cssY: 320, width: 1000, height: 800 }
+        }
+        return null
+      },
+    })
+
+    const result = await executeBrowserTool('browser_click_text', { text: '发布' }, controller)
+    const payload = parseTool(result) as { followedTab?: { tabId: string; reason: string; url: string }; nextSuggestedAction?: string }
+
+    assert.equal(payload.followedTab?.tabId, 'tab-2')
+    assert.equal(payload.followedTab?.reason, 'new_tab')
+    assert.match(payload.followedTab?.url || '', /creator\.xiaohongshu\.com\/publish/)
+    assert.equal(payload.nextSuggestedAction, 'read map again on tab tab-2')
+    assert.equal(switchedTo, 'tab-2')
+  })
+
+  it('browser_click reports and follows a new tab opened by a CSS click', async () => {
+    let tabs = [
+      { id: 'tab-1', title: '小红书', url: 'https://www.xiaohongshu.com', active: true },
+    ]
+    let switchedTo: string | null = null
+    const controller = createControllerMock({
+      getTabList: () => tabs as never,
+      switchTab: (tabId) => {
+        switchedTo = tabId
+        tabs = tabs.map((tab) => ({ ...tab, active: tab.id === tabId }))
+        return { success: true, activeTabId: tabId }
+      },
+      executeJS: async (_tabId, code) => {
+        const source = String(code || '')
+        if (source.includes('document.querySelector("#publish")')) {
+          tabs = [
+            { id: 'tab-1', title: '小红书', url: 'https://www.xiaohongshu.com', active: false },
+            { id: 'tab-2', title: '发布笔记', url: 'https://creator.xiaohongshu.com/publish/publish?source=official', active: true },
+          ]
+          return 'Clicked: BUTTON "发布"'
+        }
+        return null
+      },
+    })
+
+    const result = await executeBrowserTool('browser_click', { selector: '#publish' }, controller)
+    const payload = parseTool(result) as { ok?: boolean; followedTab?: { tabId: string; reason: string }; nextSuggestedAction?: string }
+
+    assert.equal(payload.ok, true)
+    assert.equal(payload.followedTab?.tabId, 'tab-2')
+    assert.equal(payload.followedTab?.reason, 'new_tab')
+    assert.equal(payload.nextSuggestedAction, 'read map again on tab tab-2')
+    assert.equal(switchedTo, 'tab-2')
+  })
+
   it('browser_click_text prefers the largest visible matching href when a card link marker is provided', async () => {
     let locateCode = ''
     const controller = createControllerMock({
@@ -503,6 +579,21 @@ describe('browser-tools v2', () => {
     assert.ok(locateCode.includes('.sort((a, b) => b.area - a.area)'))
     assert.deepStrictEqual(payload.normalized, { x: 640, y: 450 })
     assert.ok(controller.calls.mouse.length >= 3)
+  })
+
+  it('browser_capture_viewport returns recovery guidance when viewport metrics are zero', async () => {
+    const controller = createControllerMock({
+      getViewportMetrics: async () => ({ width: 0, height: 0, pageX: 0, pageY: 0, scale: 1 }),
+    })
+
+    const result = await executeBrowserTool('browser_capture_viewport', {}, controller)
+    const payload = parseTool(result) as { width: number; height: number; warning?: string; nextSuggestedAction?: string }
+
+    assert.equal(payload.width, 0)
+    assert.equal(payload.height, 0)
+    assert.equal(payload.warning, 'viewport_zero_or_hidden')
+    assert.match(payload.nextSuggestedAction || '', /browser_power_cdp/)
+    assert.match(payload.nextSuggestedAction || '', /Page\.getFrameTree/)
   })
 
   it('browser_collect_images filters images that are covered by a foreground detail layer', async () => {

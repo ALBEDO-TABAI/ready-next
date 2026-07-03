@@ -38,6 +38,14 @@ export const CollectionPlanSchema = z.object({
   outputRootDir: z.string().describe('采集输出根目录（每篇一个子文件夹）'),
   expectedCount: z.number().int().positive().optional().describe('上游冻结清单的预期数量'),
   sourceTaskId: z.string().optional().describe('生成本清单的可见采集任务 ID'),
+  // P1 (2026-07-03, 7/01 reliability contract C boundary) — the freeze-time
+  // target quality from the upstream visible_collect. Threaded here so the
+  // note_collect verdict can reject a polluted/nav-heavy list even when
+  // note_collect is invoked directly (resume / hand-built plan), not only at
+  // the visible_collect gate.
+  targetQuality: z.enum(['trustworthy', 'suspect_navigation_pollution', 'structure_context_missing'])
+    .optional()
+    .describe('上游冻结清单的目标质量判定'),
 })
 
 export type CollectionNote = z.infer<typeof CollectionNoteSchema>

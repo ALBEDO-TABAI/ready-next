@@ -486,6 +486,11 @@ export class ReadyAgentOrchestrator extends EventEmitter {
     return this.domainAdapterEngine.hasBrowserController()
   }
 
+  /** P1 (2026-07-03) — active browser tab URL for site-card domain matching. */
+  getActiveBrowserUrl(): string | null {
+    return this.domainAdapterEngine.getActiveBrowserUrl()
+  }
+
   getDomainAdapters(): ReadonlyArray<DomainAdapter> {
     return this.domainAdapterEngine.getDomainAdapters()
   }

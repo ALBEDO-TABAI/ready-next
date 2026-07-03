@@ -221,24 +221,6 @@ test('negative: extended scope — `as any` in tool-executor.ts fails', () => {
   )
 })
 
-test('negative: extended scope — `as any` in execution-loop-orchestrator.ts fails', () => {
-  withFixture(
-    {
-      'src/main/modules/agent-control/runtime-core/execution-loop-orchestrator.ts': [
-        'function f(authorization) {',
-        '  return doSomething(authorization as any)',
-        '}',
-        '',
-      ].join('\n'),
-    },
-    (root) => {
-      const result = run(['--root', root])
-      assert.equal(result.status, 1)
-      assert.match(result.stderr, /as any/)
-    },
-  )
-})
-
 test('negative: skill filter helper optional authorization parameter fails', () => {
   withFixture(
     {

@@ -1,6 +1,5 @@
 // Stage U U5.1b barrel re-export. New imports may use this subdir entry; existing deep imports remain valid.
 export * from './agent-sdk-runtime'
-export * from './execution-loop-orchestrator'
 export * from './orchestrator'
 export * from './parallel-branch-orchestrator'
 export * from './runtime'

@@ -1,0 +1,126 @@
+'use strict'
+
+const test = require('node:test')
+const assert = require('node:assert/strict')
+const fs = require('node:fs')
+const os = require('node:os')
+const path = require('node:path')
+
+const { check } = require('../check-mandated-capability-is-live.cjs')
+
+const RUNTIME_REL = 'src/main/modules/agent-control/runtime-core/runtime.ts'
+const LIFECYCLE_REL = 'src/main/modules/agent-control/memory/memory-lifecycle.ts'
+const DECAY_REL = 'src/main/modules/agent-control/memory/belief-decay.ts'
+const CRYSTALLIZE_REL = 'src/main/modules/agent-control/maintenance/crystallize-gate.ts'
+const CRITERIA_REL = 'src/main/modules/agent-control/quality/criteria-templates.ts'
+const FEEDBACK_REL = 'src/main/modules/agent-control/task-projection/run-feedback-repository.ts'
+const REGISTER_REL = 'docs/superpowers/plans/2026-07-03-deferred-work-register.md'
+
+function makeRoot(t) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'mandated-capability-gate-'))
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }))
+  return root
+}
+
+function write(root, rel, text) {
+  const abs = path.join(root, rel)
+  fs.mkdirSync(path.dirname(abs), { recursive: true })
+  fs.writeFileSync(abs, text)
+}
+
+const WIRED_RUNTIME = `
+import { runBeliefDecayRound } from '../memory/belief-decay'
+import { CrystallizeScheduler } from '../maintenance/crystallize-gate'
+const scheduler = new CrystallizeScheduler(() => {})
+logAgentMetric('crystallize_round_fired', {})
+runBeliefDecayRound([], effectors, now)
+logAgentMetric('belief_decay_round_fired', {})
+`
+
+function writeBaseline(root) {
+  write(root, LIFECYCLE_REL, `
+for (const row of rows) {
+  if (row.category === 'belief') continue
+}
+`)
+  write(root, RUNTIME_REL, WIRED_RUNTIME)
+  write(root, DECAY_REL, 'export function runBeliefDecayRound() {}\n')
+  write(root, CRYSTALLIZE_REL, 'export class CrystallizeScheduler {}\n')
+  write(root, CRITERIA_REL, 'export function appendModelCriteria(\n) {}\n')
+  write(root, FEEDBACK_REL, 'export class RunFeedbackRepository {}\n')
+  write(root, REGISTER_REL, '# 登记\nappendModelCriteria 工单\nRunFeedbackRepository 工单\n')
+}
+
+test('gate passes on a fully-consistent baseline (also exercises deferred handshake against real unwired lists)', (t) => {
+  const root = makeRoot(t)
+  writeBaseline(root)
+  const result = check({ root })
+  assert.equal(result.ok, true, result.errors.join('\n'))
+})
+
+test('gate passes on the real repository', () => {
+  const result = check({})
+  assert.equal(result.ok, true, result.errors.join('\n'))
+})
+
+test('排除即托付：exclusion present but belief-decay unwired fails', (t) => {
+  const root = makeRoot(t)
+  writeBaseline(root)
+  write(root, RUNTIME_REL, `
+import { CrystallizeScheduler } from '../maintenance/crystallize-gate'
+const scheduler = new CrystallizeScheduler(() => {})
+logAgentMetric('crystallize_round_fired', {})
+`)
+  const result = check({ root })
+  assert.equal(result.ok, false)
+  assert.ok(result.errors.some((e) => e.includes('[belief-decay]') && e.includes('排除即托付')))
+})
+
+test('live-required wired without fired ledger fails', (t) => {
+  const root = makeRoot(t)
+  writeBaseline(root)
+  write(root, RUNTIME_REL, WIRED_RUNTIME.replace("logAgentMetric('belief_decay_round_fired', {})", ''))
+  const result = check({ root })
+  assert.equal(result.ok, false)
+  assert.ok(result.errors.some((e) => e.includes('[belief-decay]') && e.includes('belief_decay_round_fired')))
+})
+
+test('live file carrying a stale unwired marker fails', (t) => {
+  const root = makeRoot(t)
+  writeBaseline(root)
+  write(root, DECAY_REL, '// P5d/C26 unwired — not in production driver path\nexport function runBeliefDecayRound() {}\n')
+  const result = check({ root })
+  assert.equal(result.ok, false)
+  assert.ok(result.errors.some((e) => e.includes('[belief-decay]') && e.includes('unwired 标记')))
+})
+
+test('live-required capability without delegation missing wiring fails (crystallize)', (t) => {
+  const root = makeRoot(t)
+  writeBaseline(root)
+  write(root, RUNTIME_REL, `
+import { runBeliefDecayRound } from '../memory/belief-decay'
+runBeliefDecayRound([], effectors, now)
+logAgentMetric('belief_decay_round_fired', {})
+`)
+  const result = check({ root })
+  assert.equal(result.ok, false)
+  assert.ok(result.errors.some((e) => e.includes('[crystallize-round]') && e.includes('缺失接线证据')))
+})
+
+test('dark-defect anchor symbol disappearing fails', (t) => {
+  const root = makeRoot(t)
+  writeBaseline(root)
+  write(root, CRITERIA_REL, 'export function somethingElse() {}\n')
+  const result = check({ root })
+  assert.equal(result.ok, false)
+  assert.ok(result.errors.some((e) => e.includes('[appendModelCriteria]') && e.includes('锚点符号已消失')))
+})
+
+test('dark-defect without a register mention fails', (t) => {
+  const root = makeRoot(t)
+  writeBaseline(root)
+  write(root, REGISTER_REL, '# 登记\nappendModelCriteria 工单\n')
+  const result = check({ root })
+  assert.equal(result.ok, false)
+  assert.ok(result.errors.some((e) => e.includes('[RunFeedbackRepository]') && e.includes('必须挂工单')))
+})

@@ -97,15 +97,24 @@ export interface PromptAssemblyDeps {
   getScopeTaskIndexEntries?: (scopeId: string) => TaskIndexEntry[] | Promise<TaskIndexEntry[]>
   /** EP2-K3: belief card store for the L1.5 knowledge index (active cards only). */
 	  getBeliefCardStore?: () => {
-	    renderKnowledgeIndex(opts: { maxChars: number; ownerAgentId?: string | null; excludeRelPaths?: readonly string[] }): { text: string; renderedCount: number; omittedCount: number }
+	    renderKnowledgeIndex(opts: { maxChars: number; ownerAgentId?: string | null; excludeRelPaths?: readonly string[] }): { text: string; renderedCount: number; omittedCount: number; renderedRelPaths: string[] }
 	    /** EP3-A3: active routing-fix cards for the main-session routing index. */
 	    listRoutingCards?(): Array<{ relPath: string; title: string; description: string; targetAgentId: string }>
 	    listRoutingCardInventory?(agents: ReadonlyArray<{ id: string; status: AgentSystemStudioAgentStatus }>): Array<{ relPath: string; targetStatus: string }>
 	  } | null
+	  /** P2-4 (2026-07-03): record that these belief cards were injected into the
+	   *  prompt so their mirror access_count is bumped (unblocks decay signals +
+	   *  usefulness metrics). Wired to bumpBeliefCardAccess in the runtime; absent
+	   *  in tests/headless → counting is simply skipped. */
+	  recordBeliefInjection?: (relPaths: readonly string[]) => void
   /** EP3-A3: agents-table roster for the main-session charter/routing index. */
   getAgentRoster?: () => Array<{ id: string; name: string; charter: string | null; status: string; personaRef?: string | null }>
   /** EP2-K6: rollback switch — false stops RULES/index injection entirely. */
   isKnowledgeSystemEnabled?: () => boolean
+  /** P1 (2026-07-03, 7/01 reliability contract D) — active browser tab URL so
+   *  site-card fragments can match by current domain, not only user-text
+   *  aliases. Absent/null → user-text matching only (prior behavior). */
+  getActiveBrowserUrl?: () => string | null
   /** EP3-C4: injectable memory-content accessor (agent_knowledge value by
    *  contentKey) so the DB-first loadUSER path is provable in tests; absent
    *  → the global database accessor, behavior unchanged. */
@@ -871,8 +880,9 @@ export class PromptAssemblyService {
       }
     }
 
+    const activeBrowserUrl = this.deps.getActiveBrowserUrl?.() ?? null
     for (const { adapter, fragment } of collectCoordinatorTriggerCandidates(coordinators)) {
-      if (!fragment.matches({ userText: text, route: null })) continue
+      if (!fragment.matches({ userText: text, route: null, activeBrowserUrl })) continue
       const trigger: TriggerDefinition = {
         id: fragment.id,
         label: fragment.label,
@@ -1129,6 +1139,10 @@ export class PromptAssemblyService {
         knowledgeIndexText = index.omittedCount > 0
           ? `${index.text}\n（另有 ${index.omittedCount} 条低置信度条目）`
           : index.text
+        // P2-4 — count this injection so decay/usefulness metrics have signal.
+        if (index.renderedRelPaths.length > 0) {
+          try { this.deps.recordBeliefInjection?.(index.renderedRelPaths) } catch { /* counting never breaks assembly */ }
+        }
       }
     } catch (error) {
       console.error('[PromptAssembly] knowledge index render failed:', error)
@@ -1251,6 +1265,9 @@ export class PromptAssemblyService {
       memoryRefs,
       triggerHits,
       contextBudget: budget,
+      // toolTrace/artifact 两个 flag 恒为 false 是结构事实，不是待接线：本组装
+      // 路径没有 tool-trace/artifact 数据源（工具日志按合同不入正文消息），
+      // live 工具轨迹压缩发生在 SDK 侧 compactAgentInputItems。
       compression: buildCompressionReport({
         historyCompressed: l1.historyCompressed,
         toolTraceCompressed: false,

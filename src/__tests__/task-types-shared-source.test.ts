@@ -12,12 +12,12 @@ import assert from 'node:assert/strict'
 import { TASK_TYPES, isTaskType } from '../shared/task-types'
 import { toAgentModule } from '../renderer/modules/agent/scopeRunState'
 
-test('TASK_TYPES is a 6-element list', () => {
-  assert.equal(TASK_TYPES.length, 6)
+test('TASK_TYPES is a 7-element list', () => {
+  assert.equal(TASK_TYPES.length, 7)
   // Order doesn't matter for membership but matters for the contract:
-  // direct_answer / short_task / multi_step_task / media_task / continuation / research
+  // direct_answer / short_task / multi_step_task / media_task / browser_transaction / continuation / research
   const set = new Set(TASK_TYPES as readonly string[])
-  for (const t of ['direct_answer', 'short_task', 'multi_step_task', 'media_task', 'continuation', 'research']) {
+  for (const t of ['direct_answer', 'short_task', 'multi_step_task', 'media_task', 'browser_transaction', 'continuation', 'research']) {
     assert.ok(set.has(t), `TASK_TYPES must include ${t}`)
   }
 })

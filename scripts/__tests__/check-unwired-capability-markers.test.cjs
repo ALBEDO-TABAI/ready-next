@@ -65,12 +65,22 @@ test('fails when a maintenance or emergence dormant file lacks disabled markers'
   assert.ok(result.errors.some((error) => error.includes('candidate-maintenance.ts') && error.includes('P5d/C26')))
 })
 
-test('fails when production imports a dormant maintenance module', () => {
+test('fails when production imports a dormant maintenance/emergence module', () => {
   const root = makeRoot()
-  write(root, 'src/main/modules/agent-control/runtime-core/runtime.ts', 'import { runUserPictureCasMerge } from "../maintenance/cas-merge"\nimport { decideCrystallizeRun } from "../maintenance/crystallize-gate"\nrunUserPictureCasMerge(); decideCrystallizeRun()\n')
+  // crystallize-gate was migrated live (P5d deterministic-parts, 2026-07-03);
+  // emergence-cards stays dormant, so it is the import that must still fail.
+  write(root, 'src/main/modules/agent-control/runtime-core/runtime.ts', 'import { runUserPictureCasMerge } from "../maintenance/cas-merge"\nimport { assembleEmergenceFeed } from "../emergence/emergence-cards"\nrunUserPictureCasMerge(); assembleEmergenceFeed()\n')
   const result = check({ root })
   assert.equal(result.ok, false)
-  assert.ok(result.errors.some((error) => error.includes('runtime.ts') && error.includes('crystallize-gate.ts')))
+  assert.ok(result.errors.some((error) => error.includes('runtime.ts') && error.includes('emergence-cards.ts')))
+})
+
+test('allows production to import the now-live crystallize-gate (P5d deterministic migration)', () => {
+  const root = makeRoot()
+  write(root, 'src/main/modules/agent-control/maintenance/crystallize-gate.ts', 'export function decideCrystallizeRun() {}\nexport function runCrystallizeRound() {}\n')
+  write(root, 'src/main/modules/agent-control/runtime-core/runtime.ts', 'import { runUserPictureCasMerge } from "../maintenance/cas-merge"\nimport { runCrystallizeRound } from "../maintenance/crystallize-gate"\nrunUserPictureCasMerge(); runCrystallizeRound()\n')
+  const result = check({ root })
+  assert.ok(!result.errors.some((error) => error.includes('crystallize-gate.ts')), 'importing live crystallize-gate must not error')
 })
 
 test('fails when production references the dormant maintenance LLM round driver', () => {

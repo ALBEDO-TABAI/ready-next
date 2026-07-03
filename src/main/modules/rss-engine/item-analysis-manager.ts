@@ -16,6 +16,11 @@ import {
 import { getChildRunRetryPolicy } from '../agent-control/child-run/child-run-retry-policy'
 import { extractWebContentToFile } from './content-extractor'
 import { rssSubagentRunner } from './subagent-runner'
+import {
+  BROWSER_VIDEO_FILE_EXTENSIONS,
+  canAttemptVisualAnalysis,
+  hasLikelyVideoResource,
+} from '../../../shared/browser-tab-resource-classifier'
 
 export interface StartRSSItemAnalysisPayload {
   itemId: string
@@ -42,19 +47,6 @@ export interface RSSItemAnalysisProgress {
   updatedAt: string
 }
 
-const VIDEO_HOST_HINTS = [
-  'youtube.com',
-  'youtu.be',
-  'bilibili.com',
-  'b23.tv',
-  'bili2233.cn',
-  'vimeo.com',
-  'douyin.com',
-  'tiktok.com',
-]
-
-const VIDEO_EXTS = ['.mp4', '.mov', '.mkv', '.avi', '.webm', '.m4v', '.flv']
-
 function sanitizeName(input: string): string {
   const cleaned = input
     .replace(/[\\/:*?"<>|]+/g, '')
@@ -65,18 +57,7 @@ function sanitizeName(input: string): string {
 }
 
 export function isLikelyVideoLink(url: string): boolean {
-  const lower = (url || '').trim().toLowerCase()
-  if (!lower) return false
-  if (VIDEO_EXTS.some((ext) => lower.endsWith(ext))) return true
-  if (lower.includes('/video/')) return true
-  try {
-    const parsed = new URL(lower)
-    if (VIDEO_HOST_HINTS.some((host) => parsed.hostname.includes(host))) return true
-    if (VIDEO_EXTS.some((ext) => parsed.pathname.endsWith(ext))) return true
-  } catch {
-    return VIDEO_EXTS.some((ext) => lower.endsWith(ext))
-  }
-  return false
+  return hasLikelyVideoResource(url)
 }
 
 function safeJson(input: unknown): string {
@@ -112,7 +93,7 @@ function stripKnownTranscriptSuffix(filePath: string): string {
 function stripKnownVideoSuffix(filePath: string): string {
   const name = basename(filePath)
   const lower = name.toLowerCase()
-  const ext = VIDEO_EXTS.find((item) => lower.endsWith(item))
+  const ext = BROWSER_VIDEO_FILE_EXTENSIONS.find((item) => lower.endsWith(item))
   return ext ? name.slice(0, -ext.length) : name
 }
 
@@ -204,7 +185,7 @@ function isGeneratedVideoDerivativePath(filePath: string): boolean {
 
 async function isUsableVideoFile(filePath: string): Promise<boolean> {
   const lower = basename(filePath).toLowerCase()
-  if (!VIDEO_EXTS.some((ext) => lower.endsWith(ext))) return false
+  if (!BROWSER_VIDEO_FILE_EXTENSIONS.some((ext) => lower.endsWith(ext))) return false
   if (isGeneratedVideoDerivativePath(filePath)) return false
   const fileStat = await stat(filePath).catch(() => null)
   return Boolean(fileStat?.isFile() && fileStat.size > 0)
@@ -936,7 +917,7 @@ export class RSSItemAnalysisManager {
     rootDir: string,
     outputDir: string,
   ): Promise<void> {
-    if (!isLikelyVideoLink(payload.link)) {
+    if (!canAttemptVisualAnalysis(payload.link)) {
       throw new Error('视觉分析仅支持视频链接')
     }
 

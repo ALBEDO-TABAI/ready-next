@@ -15,6 +15,9 @@ import { basename, extname, join } from 'path'
 import { homedir } from 'os'
 import { analyzeViewportWithVision } from './browser-vision'
 import { compileBrowserReadonlyScriptTemplate } from './browser-readonly-script-templates'
+import { classifyBrowserPowerFailure, browserToolOriginFromUrl } from './browser-power-failure'
+import { verifyDownloadedMedia } from '../browser-engine/media-verification'
+import { captureBrowserActionReceipt, type BrowserActionReceipt } from '../browser-engine/browser-action-receipt'
 import { domainsLikelyMatch } from '../agent-control/domain-adapters/browser-action-heuristics'
 import { AgentRepository } from '../repositories/agent-repository'
 import { createRotatingLogger } from '../../utils/rotating-logger'
@@ -85,6 +88,18 @@ import {
   createBrowserStructuredOutput as browserStructuredOutput,
   stringifyBrowserJsonOrFailure,
 } from './browser-failure-output'
+
+import {
+  buildBrowserPageMapProbeJs,
+  buildBrowserTargetProbeJs,
+  buildTargetSemanticsLibraryJs,
+  buildInputGuardSnippetJs,
+  probeCoordinateTargetOrThrow,
+  buildFocusedFieldProbeJs,
+  throwIfLiveTargetGuardBlocked,
+  buildBrowserActOnTargetJs,
+  buildBrowserActionDeltaJs,
+} from './browser-probe'
 
 const logger = createRotatingLogger('ready-tools.log')
 function log(msg: string) {
@@ -242,449 +257,6 @@ async function waitForActionFollowedTab(
     await sleepWithAbort(150, signal)
   }
   return null
-}
-
-function buildBrowserDomTargetLibraryJs(): string {
-  return `
-    const READY_AGENT_TARGET_SELECTOR = [
-      'a[href]',
-      'button',
-      'input',
-      'textarea',
-      'select',
-      '[role]',
-      'summary',
-      '[contenteditable="true"]',
-      '[contenteditable=""]',
-      'h1',
-      'h2',
-      'h3',
-      'h4',
-      'h5',
-      'h6'
-    ].join(',');
-    function readyCleanText(value) {
-      return String(value || '').replace(/\\s+/g, ' ').trim();
-    }
-    function readyLabelFor(el) {
-      const aria = readyCleanText(el.getAttribute('aria-label'));
-      if (aria) return aria;
-      const labelledBy = readyCleanText(el.getAttribute('aria-labelledby'));
-      if (labelledBy) {
-        const text = labelledBy.split(/\\s+/).map((id) => readyCleanText(document.getElementById(id)?.innerText)).filter(Boolean).join(' ');
-        if (text) return text;
-      }
-      const id = el.getAttribute('id');
-      if (id) {
-        const label = document.querySelector('label[for="' + CSS.escape(id) + '"]');
-        const labelText = readyCleanText(label?.innerText || label?.textContent);
-        if (labelText) return labelText;
-      }
-      const ownText = readyCleanText(el.innerText || el.textContent);
-      if (ownText) return ownText.slice(0, 160);
-      const title = readyCleanText(el.getAttribute('title'));
-      if (title) return title;
-      const placeholder = readyCleanText(el.getAttribute('placeholder'));
-      if (placeholder) return placeholder;
-      const alt = readyCleanText(el.getAttribute('alt'));
-      if (alt) return alt;
-      const name = readyCleanText(el.getAttribute('name'));
-      if (name) return name;
-      if (el instanceof HTMLInputElement && el.type === 'file') return 'file input';
-      return '';
-    }
-    function readyRoleFor(el) {
-      const explicit = readyCleanText(el.getAttribute('role'));
-      if (explicit) return explicit;
-      const tag = el.tagName.toLowerCase();
-      if (tag === 'a') return 'link';
-      if (tag === 'button' || tag === 'summary') return 'button';
-      if (tag === 'textarea') return 'textbox';
-      if (tag === 'select') return 'combobox';
-      if (tag === 'h1' || tag === 'h2' || tag === 'h3' || tag === 'h4' || tag === 'h5' || tag === 'h6') return 'heading';
-      if (tag === 'input') {
-        const type = String(el.getAttribute('type') || 'text').toLowerCase();
-        if (type === 'checkbox') return 'checkbox';
-        if (type === 'radio') return 'radio';
-        if (type === 'range') return 'slider';
-        if (type === 'search') return 'searchbox';
-        if (type === 'file') return 'button';
-        return 'textbox';
-      }
-      if (el.isContentEditable) return 'textbox';
-      return 'generic';
-    }
-    function readyStatesFor(el) {
-      const states = {};
-      if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement || el instanceof HTMLButtonElement) {
-        if (el.disabled) states.disabled = true;
-      }
-      const expanded = el.getAttribute('aria-expanded');
-      if (expanded) states.expanded = expanded;
-      const checked = el.getAttribute('aria-checked');
-      if (checked) states.checked = checked;
-      if (el instanceof HTMLInputElement && (el.type === 'checkbox' || el.type === 'radio') && el.checked) states.checked = true;
-      const selected = el.getAttribute('aria-selected');
-      if (selected) states.selected = selected;
-      if (el instanceof HTMLInputElement && el.type === 'password') states.password = true;
-      return states;
-    }
-    function readyTargetElements() {
-      return Array.from(document.querySelectorAll(READY_AGENT_TARGET_SELECTOR));
-    }
-    function readyTargetRecord(el, index) {
-      const rect = el.getBoundingClientRect();
-      const box = rect && Number.isFinite(rect.width) && Number.isFinite(rect.height)
-        ? { x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width), height: Math.round(rect.height) }
-        : undefined;
-      return {
-        role: readyRoleFor(el),
-        name: readyLabelFor(el),
-        value: el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement ? readyCleanText(el.value).slice(0, 160) : undefined,
-        states: Object.assign(
-          readyStatesFor(el),
-          el instanceof HTMLInputElement && el.type === 'file' ? { fileInput: true } : {}
-        ),
-        backendDOMNodeId: index + 1,
-        frameId: '0',
-        box
-      };
-    }
-  `
-}
-
-function buildBrowserPageMapProbeJs(): string {
-  return `(() => {
-    const __READY_AGENT_PAGE_MAP__ = true;
-    ${buildBrowserDomTargetLibraryJs()}
-    const elements = readyTargetElements();
-    const rawTargets = elements.map((el, index) => readyTargetRecord(el, index));
-    const clean = (value) => String(value || '').replace(/\\s+/g, ' ').trim();
-    const visible = (el) => {
-      if (!(el instanceof Element)) return false;
-      const rect = el.getBoundingClientRect();
-      if (rect.width <= 0 || rect.height <= 0) return false;
-      const style = getComputedStyle(el);
-      return style.display !== 'none' && style.visibility !== 'hidden' && Number(style.opacity || '1') > 0;
-    };
-    const externalLinks = Array.from(document.querySelectorAll('a[href]')).filter((a) => {
-      try { return new URL(a.href, location.href).origin !== location.origin; } catch { return false; }
-    }).length;
-    const iframes = Array.from(document.querySelectorAll('iframe,frame')).slice(0, 20).map((frame, index) => {
-      let readable = false;
-      let reason = 'cross_origin_or_unavailable';
-      try {
-        const doc = frame.contentDocument;
-        readable = Boolean(doc);
-        reason = doc ? 'same_origin_readable' : 'cross_origin_or_unavailable';
-      } catch {
-        readable = false;
-        reason = 'cross_origin_unreadable';
-      }
-      return {
-        index,
-        title: clean(frame.getAttribute('title') || frame.getAttribute('aria-label') || ''),
-        src: String(frame.getAttribute('src') || ''),
-        readable,
-        reason,
-        hidden: !visible(frame)
-      };
-    });
-    const shadowRoots = Array.from(document.querySelectorAll('*')).filter((el) => Boolean(el.shadowRoot)).slice(0, 20).map((el, index) => ({
-      index,
-      host: String(el.tagName || '').toLowerCase(),
-      label: clean(el.getAttribute('aria-label') || el.getAttribute('title') || el.id || ''),
-      childCount: el.shadowRoot ? el.shadowRoot.childElementCount : 0,
-      hidden: !visible(el)
-    }));
-    const hiddenLoaded = Array.from(document.querySelectorAll('button,a,input,textarea,select,[role],section,article,dialog,[hidden],[aria-hidden="true"]'))
-      .filter((el) => !visible(el) && clean(el.textContent || el.getAttribute('aria-label') || el.getAttribute('title') || el.getAttribute('placeholder')).length > 0)
-      .slice(0, 20)
-      .map((el, index) => ({
-        index,
-        role: readyRoleFor(el),
-        label: readyLabelFor(el).slice(0, 160),
-        reason: el.hasAttribute('hidden') ? 'hidden_attribute' : el.getAttribute('aria-hidden') === 'true' ? 'aria_hidden' : 'css_hidden'
-      }));
-    return {
-      identity: { url: String(location.href || ''), title: String(document.title || '') },
-      viewport: { width: Math.round(window.innerWidth || 0), height: Math.round(window.innerHeight || 0) },
-      bodyText: String(document.body?.innerText || '').slice(0, 4000),
-      rawRoots: [{ role: 'generic', name: '', children: rawTargets }],
-      structureHints: { iframes, shadowRoots, hiddenLoaded },
-      riskFlags: {
-        fileInputCount: document.querySelectorAll('input[type="file"]').length,
-        passwordInputCount: document.querySelectorAll('input[type="password"]').length,
-        externalLinkCount: externalLinks,
-        iframeCount: document.querySelectorAll('iframe').length,
-        shadowHostCount: Array.from(document.querySelectorAll('*')).filter((el) => Boolean(el.shadowRoot)).length
-      }
-    };
-  })()`
-}
-
-function buildBrowserTargetProbeJs(nodeId: string): string {
-  return `(() => {
-    const __READY_AGENT_TARGET_PROBE__ = true;
-    ${buildBrowserDomTargetLibraryJs()}
-    const nodeId = ${JSON.stringify(nodeId)};
-    const nodeIndex = /^\\d+$/.test(nodeId) ? Number(nodeId) - 1 : -1;
-    const elements = readyTargetElements();
-    const el = nodeIndex >= 0 ? elements[nodeIndex] : null;
-    if (!el) return { matchCount: 0 };
-    const record = readyTargetRecord(el, nodeIndex);
-    const disabled = Boolean(record.states && record.states.disabled === true);
-    return { matchCount: 1, disabled, target: record };
-  })()`
-}
-
-/**
- * EP1-I3 live-target net — ONE in-page semantics library shared by every
- * enforcement point (selector click, coordinate click/type, selector type,
- * smart type, focused-field key guard). Defines:
- *
- *   readyAriaLabelledbyText(el) — resolves aria-labelledby references
- *   readyInputSemanticsLabel(el) — what the FIELD IS: placeholder /
- *     aria-label / aria-labelledby / name / id / title / associated <label>.
- *     Deliberately NOT value/textContent — a chat draft mentioning「验证码」
- *     must not trip the net.
- *   readyClickSemanticsLabel(el) — what the CLICK will press: climbs to the
- *     nearest clickable owner (clicks bubble — an icon/span inside a
- *     「确认支付」button still presses the button) and reads its
- *     text/aria-label/aria-labelledby/value/title.
- *
- * Destructive browser-target patterns are generated from the policy module
- * (single source).
- */
-function buildTargetSemanticsLibraryJs(): string {
-  return `
-    const READY_DESTRUCTIVE_TARGET_PATTERNS = [${BROWSER_DESTRUCTIVE_TARGET_REGEX_SOURCES.map((src) => `new RegExp(${JSON.stringify(src)}, 'i')`).join(', ')}];
-    function readyAriaLabelledbyText(el) {
-      try {
-        const ref = el && el.getAttribute ? el.getAttribute('aria-labelledby') : null;
-        if (!ref) return '';
-        const parts = [];
-        for (const id of ref.split(/\\s+/)) {
-          const node = document.getElementById(id);
-          if (node) parts.push(node.textContent);
-        }
-        return parts.filter(Boolean).join(' ');
-      } catch { return ''; }
-    }
-    function readyInputSemanticsLabel(el) {
-      if (!el || !el.getAttribute) return '';
-      const parts = [
-        el.getAttribute('placeholder'), el.getAttribute('aria-label'), readyAriaLabelledbyText(el),
-        el.getAttribute('name'), el.getAttribute('id'), el.getAttribute('title'), el.getAttribute('data-placeholder'),
-      ];
-      try {
-        const id = el.getAttribute('id');
-        if (id) {
-          const owner = document.querySelector('label[for="' + CSS.escape(id) + '"]');
-          if (owner) parts.push(owner.textContent);
-        }
-        const wrap = el.closest && el.closest('label');
-        if (wrap) parts.push(wrap.textContent);
-      } catch { /* label association is best-effort */ }
-      return parts.filter(Boolean).join(' ').replace(/\\s+/g, ' ').trim().slice(0, 200);
-    }
-    function readyClickableOwner(el) {
-      if (!el) return el;
-      return (el.closest && el.closest('button, a, [role="button"], [role="link"], input, textarea, select, summary, [onclick], label')) || el;
-    }
-    function readyClickSemanticsLabel(el) {
-      if (!el) return '';
-      const owner = readyClickableOwner(el);
-      const parts = [owner.textContent, owner.getAttribute && owner.getAttribute('aria-label'), readyAriaLabelledbyText(owner), owner.value, owner.title];
-      if (owner !== el && el.getAttribute) {
-        parts.push(el.getAttribute('aria-label'));
-        parts.push(readyAriaLabelledbyText(el));
-      }
-      return parts.filter(Boolean).join(' ').replace(/\\s+/g, ' ').trim().slice(0, 200);
-    }
-    function readyIsPasswordField(el) {
-      return el instanceof HTMLInputElement && el.type === 'password';
-    }
-    function readyIsEditableField(el) {
-      if (el instanceof HTMLInputElement) {
-        const t = (el.type || 'text').toLowerCase();
-        return !['button','submit','reset','checkbox','radio','file','range','color','image','hidden'].includes(t);
-      }
-      if (el instanceof HTMLTextAreaElement) return true;
-      if (el.isContentEditable) return true;
-      const role = (el.getAttribute && (el.getAttribute('role') || '').toLowerCase()) || '';
-      return role === 'textbox' || role === 'searchbox' || role === 'combobox';
-    }
-  `
-}
-
-/**
- * In-page guard for typing scripts (browser_type / browser_type_smart /
- * browser_compose_message). Returns a blocked-marker object or null.
- */
-function buildInputGuardSnippetJs(allowPasswordFill: boolean): string {
-  return `
-    const __READY_LIVE_TARGET_GUARD__ = true;
-    ${buildTargetSemanticsLibraryJs()}
-    function readyInputGuard(el) {
-      const label = readyInputSemanticsLabel(el);
-      if (label && READY_DESTRUCTIVE_TARGET_PATTERNS.some((p) => p.test(label))) {
-        return { __readyDestructiveTargetBlocked: true, label: label.slice(0, 80) };
-      }
-      if (readyIsPasswordField(el) && !${JSON.stringify(allowPasswordFill)}) {
-        return { __readyPasswordFillBlocked: true };
-      }
-      return null;
-    }
-  `
-}
-
-/**
- * EP1-I3 live-target net — best-effort target probe for coordinate actions
- * (click_at / type_at). Returns `{ label, inputLabel, password }` for the
- * clickable owner under the CSS point. Callers refuse destructive-grant /
- * unconfirmed-password targets and proceed on empty probes. Probe exceptions
- * fail closed because the target guard did not actually run.
- */
-function buildClickPointLabelProbeJs(cssX: number, cssY: number): string {
-  return `(() => {
-    const __READY_CLICK_POINT_LABEL_PROBE__ = true;
-    ${buildTargetSemanticsLibraryJs()}
-    const start = document.elementFromPoint(${JSON.stringify(Math.round(cssX))}, ${JSON.stringify(Math.round(cssY))});
-    if (!start) return { label: '', inputLabel: '', password: false, editable: false };
-    const owner = readyClickableOwner(start);
-    return {
-      label: readyClickSemanticsLabel(start),
-      inputLabel: readyInputSemanticsLabel(owner),
-      password: readyIsPasswordField(owner),
-      // editable → the click only FOCUSES a field (judge by field semantics,
-      // which exclude the current value); non-editable → the click is an
-      // action (judge by the click/caption label, value included).
-      editable: readyIsEditableField(owner),
-    };
-  })()`
-}
-
-async function probeCoordinateTargetOrThrow(
-  controller: BrowserController,
-  tabId: string | null,
-  point: { cssX: number; cssY: number },
-  detail: { x: number; y: number; action: 'click' | 'type' },
-): Promise<unknown> {
-  try {
-    return await controller.executeJS(tabId, buildClickPointLabelProbeJs(point.cssX, point.cssY))
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    const actionLabel = detail.action === 'click' ? '点击' : '输入'
-    throw new ToolDomainError(
-      ACTION_CONFIRMATION_ERROR_KINDS.deniedPendingConfirmation.code,
-      `无法确认坐标${actionLabel}目标是否安全，已拒绝执行。请改用明确 selector/target_id，或引导用户亲自完成。`,
-      {
-        x: detail.x,
-        y: detail.y,
-        reason: 'coordinate_target_probe_failed',
-        probeError: message,
-      },
-    )
-  }
-}
-
-/**
- * EP1-I3 live-target net — probe of the currently FOCUSED field, used by the
- * send-keys guard: printable keystrokes land in whatever already has focus,
- * which can be a captcha/password field no argument ever named.
- */
-function buildFocusedFieldProbeJs(): string {
-  return `(() => {
-    const __READY_FOCUSED_FIELD_PROBE__ = true;
-    ${buildTargetSemanticsLibraryJs()}
-    const el = document.activeElement;
-    if (!el || el === document.body) return { inputLabel: '', password: false };
-    return {
-      inputLabel: readyInputSemanticsLabel(el),
-      password: readyIsPasswordField(el),
-    };
-  })()`
-}
-
-/**
- * Convert an in-page guard marker into the structured domain refusal
- * (ToolDomainError flows through the browser catch to the dispatcher).
- */
-function throwIfLiveTargetGuardBlocked(result: unknown, detail: Record<string, unknown>): void {
-  if (!result || typeof result !== 'object') return
-  const marker = result as { __readyDestructiveTargetBlocked?: unknown; __readyPasswordFillBlocked?: unknown; label?: unknown }
-  if (marker.__readyDestructiveTargetBlocked === true) {
-    const label = String(marker.label || '')
-    throw new ToolDomainError(
-      'grant_required',
-      `目标「${label.slice(0, 80)}」命中浏览器破坏性动作清单，需要用户授予该目标的 Power grant 后才能执行。`,
-      { ...detail, label },
-    )
-  }
-  if (marker.__readyPasswordFillBlocked === true) {
-    throw new ToolDomainError(
-      ACTION_CONFIRMATION_ERROR_KINDS.deniedPendingConfirmation.code,
-      '目标是密码输入框。请在调用参数中说明目标（如「登录密码输入框」），经用户确认后执行。',
-      { ...detail, ruleId: 'm3-login-existing-account' },
-    )
-  }
-}
-
-function buildBrowserActOnTargetJs(nodeId: string, action: AgentBrowserAction, value?: string): string {
-  return `(() => {
-    const __READY_AGENT_ACT_ON_TARGET__ = true;
-    ${buildBrowserDomTargetLibraryJs()}
-    const nodeId = ${JSON.stringify(nodeId)};
-    const action = ${JSON.stringify(action)};
-    const value = ${JSON.stringify(value ?? '')};
-    const nodeIndex = /^\\d+$/.test(nodeId) ? Number(nodeId) - 1 : -1;
-    const elements = readyTargetElements();
-    const el = nodeIndex >= 0 ? elements[nodeIndex] : null;
-    if (!el) return { ok: false, errorCode: 'target_not_found', message: 'Target no longer resolves to an element.' };
-    const record = readyTargetRecord(el, nodeIndex);
-    if (record.states && record.states.disabled === true) {
-      return { ok: false, errorCode: 'target_not_found', message: 'Target is disabled.', target: record };
-    }
-    if (action === 'fill') {
-      if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
-        el.focus();
-        el.value = value;
-        el.dispatchEvent(new Event('input', { bubbles: true }));
-        el.dispatchEvent(new Event('change', { bubbles: true }));
-      } else if (el.isContentEditable) {
-        el.focus();
-        el.textContent = value;
-        el.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: value }));
-      } else {
-        return { ok: false, errorCode: 'target_not_found', message: 'Target is not fillable.', target: record };
-      }
-    } else if (action === 'choose') {
-      if (el instanceof HTMLSelectElement) {
-        const option = Array.from(el.options).find((opt) => opt.value === value || readyCleanText(opt.textContent) === value);
-        if (!option) return { ok: false, errorCode: 'target_not_found', message: 'Option not found.', target: record };
-        el.value = option.value;
-        el.dispatchEvent(new Event('input', { bubbles: true }));
-        el.dispatchEvent(new Event('change', { bubbles: true }));
-      } else {
-        el.click();
-      }
-    } else if (action === 'hover') {
-      el.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, view: window }));
-      el.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true, view: window }));
-    } else {
-      el.click();
-    }
-    return { ok: true, action, target: record, url: String(location.href || ''), title: String(document.title || '') };
-  })()`
-}
-
-function buildBrowserActionDeltaJs(): string {
-  return `(() => ({
-    url: String(location.href || ''),
-    title: String(document.title || ''),
-    bodyText: String(document.body?.innerText || '').replace(/\\s+/g, ' ').trim().slice(0, 1000)
-  }))()`
 }
 
 function buildPageMapAmbiguityGroups(targets: PageMap['targets']): Array<{ role: string; name: string; targetIds: string[] }> {
@@ -1762,10 +1334,12 @@ function attachBrowserActionSessionOutput(
     confirmation?: BrowserTransactionConfirmation | null
     nextSuggestedAction?: string | null
     frameId?: string | null
+    /** P1-E5 — post-action change receipt (url/focus/toast delta). */
+    changeReceipt?: BrowserActionReceipt | null
   },
 ): string | ToolExecutionOutput {
   const patch = browserActionSessionPatch(params)
-  if (!patch) return result
+  if (!patch && !params.changeReceipt) return result
   const data: Record<string, unknown> = typeof result === 'string'
     ? (() => {
       try {
@@ -1778,6 +1352,22 @@ function attachBrowserActionSessionOutput(
     : { ...(result.data || {}) }
   if (params.confirmation) {
     data.transactionConfirmed = params.confirmation
+  }
+  // P1-E5 — attach the change receipt so the model sees what changed without
+  // a follow-up read_page. Session patch may be absent (early live target).
+  if (params.changeReceipt) {
+    data.changeReceipt = params.changeReceipt
+  }
+  if (!patch) {
+    return createToolExecutionOutput(JSON.stringify(data, null, 2), {
+      shape: 'json',
+      data,
+      projectionPatch: typeof result === 'string' ? undefined : result.projectionPatch,
+      interactionHint: typeof result === 'string' ? null : result.interactionHint,
+      framePatch: typeof result === 'string' ? null : result.framePatch,
+      contextModifier: typeof result === 'string' ? null : result.contextModifier,
+      envelope: typeof result === 'string' ? null : result.envelope,
+    })
   }
   data.browserActionSession = patch.session
   const mergedProjectionPatch = typeof result === 'string'
@@ -5808,10 +5398,14 @@ export async function executeBrowserTool(
         // real clickable owner and refuses destructive-grant targets without
         // clicking.
         const beforeTabs = snapshotBrowserTabs(controller)
+        const clickBeforeUrl = activeBrowserToolUrl(controller, tabId)
         const result = await runGuardedSelectorClick(controller, tabId, selector)
         await settleAfterAction(controller, tabId, abortSignal)
         const followedTab = await waitForActionFollowedTab(controller, tabId, beforeTabs, abortSignal)
         const confirmation = await detectBrowserPageTransactionConfirmation(controller, followedTab?.tabId || tabId)
+        // P1-E5 — deterministic post-action change receipt so the model can skip
+        // a follow-up browser_read_page; never fails the click if the probe errors.
+        const changeReceipt = await captureBrowserActionReceipt(controller, followedTab?.tabId || tabId, clickBeforeUrl)
         const output = followedTab
           ? JSON.stringify({
             ok: true,
@@ -5829,6 +5423,7 @@ export async function executeBrowserTool(
           tabId,
           followedTab,
           confirmation,
+          changeReceipt,
           nextSuggestedAction: confirmation
             ? 'finish with transaction proof'
             : (followedTab ? `read map again on tab ${followedTab.tabId}` : 'read map again'),
@@ -5851,9 +5446,11 @@ export async function executeBrowserTool(
         const x = Math.round((Number(result.cssX || 0) / width) * 1000)
         const y = Math.round((Number(result.cssY || 0) / height) * 1000)
         const beforeTabs = snapshotBrowserTabs(controller)
+        const clickTextBeforeUrl = activeBrowserToolUrl(controller, tabId)
         const point = await runGuardedCoordinateClick(controller, tabId, x, y, abortSignal)
         const followedTab = await waitForActionFollowedTab(controller, tabId, beforeTabs, abortSignal)
         const confirmation = await detectBrowserPageTransactionConfirmation(controller, followedTab?.tabId || tabId)
+        const clickTextReceipt = await captureBrowserActionReceipt(controller, followedTab?.tabId || tabId, clickTextBeforeUrl)
         return attachBrowserActionSessionOutput(JSON.stringify({
           ok: true,
           text: result.text || text,
@@ -5872,6 +5469,7 @@ export async function executeBrowserTool(
           tabId,
           followedTab,
           confirmation,
+          changeReceipt: clickTextReceipt,
           nextSuggestedAction: confirmation
             ? 'finish with transaction proof'
             : (followedTab ? `read map again on tab ${followedTab.tabId}` : 'read map again'),
@@ -5890,10 +5488,13 @@ export async function executeBrowserTool(
         // guarded entry checks the REAL field semantics (no value): destructive
         // hits require a grant; unconfirmed password fills reroute — a re-issued
         // call naming the password field carries the cue and passes.
+        const typeBeforeUrl = activeBrowserToolUrl(controller, tabId)
         const result = await runGuardedSelectorType(controller, tabId, selector, text, {
           clearFirst,
           allowPasswordFill: argsCarryPasswordCue(JSON.stringify(args)),
         })
+        // P1-E5 — change receipt after typing (focus/toast/validation signal).
+        const typeReceipt = await captureBrowserActionReceipt(controller, tabId, typeBeforeUrl)
         return attachBrowserActionSessionOutput(result, {
           toolName,
           args,
@@ -5901,6 +5502,7 @@ export async function executeBrowserTool(
           sessionId,
           currentUserText,
           tabId,
+          changeReceipt: typeReceipt,
           nextSuggestedAction: 'read map again',
         })
       }
@@ -7487,79 +7089,124 @@ export async function executeBrowserTool(
           return browserPowerDeniedOutput(decision, { tool: toolName, purpose })
         }
         const url = activeBrowserToolUrl(controller, tabId)
-        const run = (async () => {
-          if (!frameId) return controller.executeJS(tabId, code)
-          const sendCdpCommand = (controller as {
-            sendCdpCommand?: (tabId: string | null, method: string, params?: Record<string, unknown>) => Promise<unknown>
-          }).sendCdpCommand
-          if (typeof sendCdpCommand !== 'function') {
-            throw new Error('browser_power_frame_eval_unavailable')
-          }
-          const world = await sendCdpCommand.call(controller, tabId, 'Page.createIsolatedWorld', {
+        try {
+          const run = (async () => {
+            if (!frameId) return controller.executeJS(tabId, code)
+            const sendCdpCommand = (controller as {
+              sendCdpCommand?: (tabId: string | null, method: string, params?: Record<string, unknown>) => Promise<unknown>
+            }).sendCdpCommand
+            if (typeof sendCdpCommand !== 'function') {
+              throw new Error('browser_power_frame_eval_unavailable')
+            }
+            const world = await sendCdpCommand.call(controller, tabId, 'Page.createIsolatedWorld', {
+              frameId,
+              worldName: 'ready_power_eval',
+              grantUniveralAccess: true,
+            }) as Record<string, unknown>
+            const contextId = Number(world.executionContextId)
+            if (!Number.isFinite(contextId)) {
+              throw new Error('browser_power_frame_context_unavailable')
+            }
+            const evaluated = await sendCdpCommand.call(controller, tabId, 'Runtime.evaluate', {
+              expression: code,
+              contextId,
+              awaitPromise: true,
+              returnByValue: true,
+            }) as Record<string, unknown>
+            const resultObject = evaluated.result && typeof evaluated.result === 'object'
+              ? evaluated.result as Record<string, unknown>
+              : null
+            if (evaluated.exceptionDetails) {
+              throw new Error(JSON.stringify(evaluated.exceptionDetails).slice(0, 500))
+            }
+            return resultObject && 'value' in resultObject ? resultObject.value : resultObject
+          })()
+          const result = await Promise.race([
+            run,
+            sleepWithAbort(timeoutMs, abortSignal).then(() => {
+              throw new Error(`browser_power_eval timed out after ${timeoutMs}ms`)
+            }),
+          ])
+          const limited = truncateJsonValue(result, maxResultBytes)
+          const audit = recordBrowserPowerAuditEvent({
+            toolName,
+            grantId: decision.grantId,
+            tabId,
+            url,
+            effects: decision.effects,
+            purpose,
+            codeSummary: summarizeCodeForAudit(code),
+            paramsSummary: { timeoutMs, maxResultBytes, frameId },
+            resultSummary: { bytes: limited.bytes, truncated: limited.truncated },
+          })
+          const confirmation = await detectBrowserPageTransactionConfirmation(controller, tabId)
+          return attachBrowserActionSessionOutput(JSON.stringify({
+            ok: true,
+            tool: toolName,
+            powerMode: true,
+            grantId: decision.grantId,
+            auditId: audit.id,
+            effects: decision.effects,
+            residualRisk: 'free_eval_scope_is_audit_only_for_side_effects',
+            result: limited.value,
+            resultTruncated: limited.truncated,
+            resultBytes: limited.bytes,
             frameId,
-            worldName: 'ready_power_eval',
-            grantUniveralAccess: true,
-          }) as Record<string, unknown>
-          const contextId = Number(world.executionContextId)
-          if (!Number.isFinite(contextId)) {
-            throw new Error('browser_power_frame_context_unavailable')
-          }
-          const evaluated = await sendCdpCommand.call(controller, tabId, 'Runtime.evaluate', {
-            expression: code,
-            contextId,
-            awaitPromise: true,
-            returnByValue: true,
-          }) as Record<string, unknown>
-          const resultObject = evaluated.result && typeof evaluated.result === 'object'
-            ? evaluated.result as Record<string, unknown>
-            : null
-          if (evaluated.exceptionDetails) {
-            throw new Error(JSON.stringify(evaluated.exceptionDetails).slice(0, 500))
-          }
-          return resultObject && 'value' in resultObject ? resultObject.value : resultObject
-        })()
-        const result = await Promise.race([
-          run,
-          sleepWithAbort(timeoutMs, abortSignal).then(() => {
-            throw new Error(`browser_power_eval timed out after ${timeoutMs}ms`)
-          }),
-        ])
-        const limited = truncateJsonValue(result, maxResultBytes)
-        const audit = recordBrowserPowerAuditEvent({
-          toolName,
-          grantId: decision.grantId,
-          tabId,
-          url,
-          effects: decision.effects,
-          purpose,
-          codeSummary: summarizeCodeForAudit(code),
-          paramsSummary: { timeoutMs, maxResultBytes, frameId },
-          resultSummary: { bytes: limited.bytes, truncated: limited.truncated },
-        })
-        const confirmation = await detectBrowserPageTransactionConfirmation(controller, tabId)
-        return attachBrowserActionSessionOutput(JSON.stringify({
-          ok: true,
-          tool: toolName,
-          powerMode: true,
-          grantId: decision.grantId,
-          auditId: audit.id,
-          effects: decision.effects,
-          residualRisk: 'free_eval_scope_is_audit_only_for_side_effects',
-          result: limited.value,
-          resultTruncated: limited.truncated,
-          resultBytes: limited.bytes,
-          frameId,
-        }, null, 2), {
-          toolName,
-          args,
-          controller,
-          sessionId,
-          currentUserText,
-          tabId,
-          frameId,
-          confirmation,
-          nextSuggestedAction: confirmation ? 'finish with transaction proof' : 'read map again',
-        })
+          }, null, 2), {
+            toolName,
+            args,
+            controller,
+            sessionId,
+            currentUserText,
+            tabId,
+            frameId,
+            confirmation,
+            nextSuggestedAction: confirmation ? 'finish with transaction proof' : 'read map again',
+          })
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error)
+          // P1-A1 — differentiated recovery advice + full target identity on
+          // every Power failure (tabId/origin were missing before; the hint
+          // was a static "read map again").
+          const advice = classifyBrowserPowerFailure(message)
+          const audit = recordBrowserPowerAuditEvent({
+            toolName,
+            grantId: decision.grantId,
+            tabId,
+            url,
+            effects: decision.effects,
+            purpose,
+            codeSummary: summarizeCodeForAudit(code),
+            paramsSummary: { timeoutMs, maxResultBytes, frameId },
+            resultSummary: { failed: true, error: message.slice(0, 500) },
+          })
+          return attachBrowserActionSessionOutput(JSON.stringify({
+            ok: false,
+            tool: toolName,
+            powerMode: true,
+            grantId: decision.grantId,
+            auditId: audit.id,
+            effects: decision.effects,
+            errorKind: 'browser_power_eval_failed',
+            failureClass: advice.failureClass,
+            errorMessage: message,
+            codeSummary: summarizeCodeForAudit(code),
+            tabId,
+            frameId,
+            currentUrl: url,
+            origin: browserToolOriginFromUrl(url),
+            nextSuggestedAction: advice.nextSuggestedAction,
+          }, null, 2), {
+            toolName,
+            args,
+            controller,
+            sessionId,
+            currentUserText,
+            tabId,
+            frameId,
+            nextSuggestedAction: advice.nextSuggestedAction,
+          })
+        }
       }
 
       case 'browser_power_cdp': {
@@ -7592,40 +7239,85 @@ export async function executeBrowserTool(
             method,
           })
         }
-        const result = await sendCdpCommand.call(controller, tabId, method, params)
-        const limited = truncateJsonValue(result, 80_000)
-        const audit = recordBrowserPowerAuditEvent({
-          toolName,
-          grantId: decision.grantId,
-          tabId,
-          url: activeBrowserToolUrl(controller, tabId),
-          effects: decision.effects,
-          purpose,
-          paramsSummary: { method, frameId, paramKeys: Object.keys(params).slice(0, 20) },
-          resultSummary: { bytes: limited.bytes, truncated: limited.truncated },
-        })
-        const confirmation = await detectBrowserPageTransactionConfirmation(controller, tabId)
-        return attachBrowserActionSessionOutput(JSON.stringify({
-          ok: true,
-          tool: toolName,
-          grantId: decision.grantId,
-          auditId: audit.id,
-          method,
-          effects: decision.effects,
-          result: limited.value,
-          resultTruncated: limited.truncated,
-          frameId,
-        }, null, 2), {
-          toolName,
-          args,
-          controller,
-          sessionId,
-          currentUserText,
-          tabId,
-          frameId,
-          confirmation,
-          nextSuggestedAction: confirmation ? 'finish with transaction proof' : 'read map again',
-        })
+        // P1-A1 — a failing CDP command previously threw into the generic
+        // outer catch ("Error executing browser_power_cdp: …") and lost the
+        // target/session state the model needs to recover.
+        try {
+          const result = await sendCdpCommand.call(controller, tabId, method, params)
+          const limited = truncateJsonValue(result, 80_000)
+          const audit = recordBrowserPowerAuditEvent({
+            toolName,
+            grantId: decision.grantId,
+            tabId,
+            url: activeBrowserToolUrl(controller, tabId),
+            effects: decision.effects,
+            purpose,
+            paramsSummary: { method, frameId, paramKeys: Object.keys(params).slice(0, 20) },
+            resultSummary: { bytes: limited.bytes, truncated: limited.truncated },
+          })
+          const confirmation = await detectBrowserPageTransactionConfirmation(controller, tabId)
+          return attachBrowserActionSessionOutput(JSON.stringify({
+            ok: true,
+            tool: toolName,
+            grantId: decision.grantId,
+            auditId: audit.id,
+            method,
+            effects: decision.effects,
+            result: limited.value,
+            resultTruncated: limited.truncated,
+            frameId,
+          }, null, 2), {
+            toolName,
+            args,
+            controller,
+            sessionId,
+            currentUserText,
+            tabId,
+            frameId,
+            confirmation,
+            nextSuggestedAction: confirmation ? 'finish with transaction proof' : 'read map again',
+          })
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error)
+          const advice = classifyBrowserPowerFailure(message)
+          const currentUrl = activeBrowserToolUrl(controller, tabId)
+          const audit = recordBrowserPowerAuditEvent({
+            toolName,
+            grantId: decision.grantId,
+            tabId,
+            url: currentUrl,
+            effects: decision.effects,
+            purpose,
+            paramsSummary: { method, frameId, paramKeys: Object.keys(params).slice(0, 20) },
+            resultSummary: { failed: true, error: message.slice(0, 500) },
+          })
+          return attachBrowserActionSessionOutput(JSON.stringify({
+            ok: false,
+            tool: toolName,
+            powerMode: true,
+            grantId: decision.grantId,
+            auditId: audit.id,
+            effects: decision.effects,
+            errorKind: 'browser_power_cdp_failed',
+            failureClass: advice.failureClass,
+            errorMessage: message,
+            method,
+            tabId,
+            frameId,
+            currentUrl,
+            origin: browserToolOriginFromUrl(currentUrl),
+            nextSuggestedAction: advice.nextSuggestedAction,
+          }, null, 2), {
+            toolName,
+            args,
+            controller,
+            sessionId,
+            currentUserText,
+            tabId,
+            frameId,
+            nextSuggestedAction: advice.nextSuggestedAction,
+          })
+        }
       }
 
       case 'browser_power_network_trace': {
@@ -7663,7 +7355,33 @@ export async function executeBrowserTool(
         try {
           if (url) {
             const nav = await controller.navigate(tabId, url)
-            if (!nav.success) return `Error: ${nav.error || 'failed to navigate target url'}`
+            if (!nav.success) {
+              // P1-A1 — a navigate failure is structured, not a bare string.
+              const advice = classifyBrowserPowerFailure(nav.error || 'target_stale navigation failed')
+              const currentUrl = activeBrowserToolUrl(controller, tabId)
+              return attachBrowserActionSessionOutput(JSON.stringify({
+                ok: false,
+                tool: toolName,
+                powerMode: true,
+                grantId: decision.grantId,
+                errorKind: 'browser_power_trace_failed',
+                failureClass: advice.failureClass,
+                errorMessage: nav.error || 'failed to navigate target url',
+                tabId,
+                targetUrl: url,
+                currentUrl,
+                origin: browserToolOriginFromUrl(url || currentUrl),
+                nextSuggestedAction: advice.nextSuggestedAction,
+              }, null, 2), {
+                toolName,
+                args,
+                controller,
+                sessionId,
+                currentUserText,
+                tabId,
+                nextSuggestedAction: advice.nextSuggestedAction,
+              })
+            }
           }
           await sleepWithAbort(durationMs, abortSignal)
           const events = observer.events().map((event) => ({
@@ -7723,6 +7441,32 @@ export async function executeBrowserTool(
             confirmation,
             nextSuggestedAction: confirmation ? 'finish with transaction proof' : 'read map again',
           })
+        } catch (error) {
+          // P1-A1 — observer / body-retrieval failures stay structured.
+          const message = error instanceof Error ? error.message : String(error)
+          const advice = classifyBrowserPowerFailure(message)
+          const currentUrl = url || activeBrowserToolUrl(controller, tabId)
+          return attachBrowserActionSessionOutput(JSON.stringify({
+            ok: false,
+            tool: toolName,
+            powerMode: true,
+            grantId: decision.grantId,
+            errorKind: 'browser_power_trace_failed',
+            failureClass: advice.failureClass,
+            errorMessage: message,
+            tabId,
+            currentUrl,
+            origin: browserToolOriginFromUrl(currentUrl),
+            nextSuggestedAction: advice.nextSuggestedAction,
+          }, null, 2), {
+            toolName,
+            args,
+            controller,
+            sessionId,
+            currentUserText,
+            tabId,
+            nextSuggestedAction: advice.nextSuggestedAction,
+          })
         } finally {
           await observer.stop().catch(() => undefined)
         }
@@ -7745,31 +7489,60 @@ export async function executeBrowserTool(
         if (decision.action !== 'allow') {
           return browserPowerDeniedOutput(decision, { tool: toolName, purpose })
         }
-        const result = await inspectBrowserResources(controller, {
-          tabId,
-          url: url || null,
-          kinds: normalizeResourceKinds(args.kinds),
-          waitMs: typeof args.wait_ms === 'number' ? args.wait_ms : (typeof args.trace_ms === 'number' ? args.trace_ms : undefined),
-          maxCandidates: typeof args.max_candidates === 'number' ? args.max_candidates : 40,
-          signal: abortSignal,
-        })
-        const audit = recordBrowserPowerAuditEvent({
-          toolName,
-          grantId: decision.grantId,
-          tabId,
-          url: url || activeBrowserToolUrl(controller, tabId),
-          effects: decision.effects,
-          purpose,
-          paramsSummary: { kinds: args.kinds || null },
-	          resultSummary: { candidateCount: result.candidates.length },
-        })
-        return stringifyBrowserJsonOrFailure({
-          ...result,
-          tool: toolName,
-          powerMode: true,
-          grantId: decision.grantId,
-          auditId: audit.id,
-        })
+        // P1-A1 — resource inspection failures stay structured with target
+        // identity + differentiated recovery advice.
+        try {
+          const result = await inspectBrowserResources(controller, {
+            tabId,
+            url: url || null,
+            kinds: normalizeResourceKinds(args.kinds),
+            waitMs: typeof args.wait_ms === 'number' ? args.wait_ms : (typeof args.trace_ms === 'number' ? args.trace_ms : undefined),
+            maxCandidates: typeof args.max_candidates === 'number' ? args.max_candidates : 40,
+            signal: abortSignal,
+          })
+          const audit = recordBrowserPowerAuditEvent({
+            toolName,
+            grantId: decision.grantId,
+            tabId,
+            url: url || activeBrowserToolUrl(controller, tabId),
+            effects: decision.effects,
+            purpose,
+            paramsSummary: { kinds: args.kinds || null },
+            resultSummary: { candidateCount: result.candidates.length },
+          })
+          return stringifyBrowserJsonOrFailure({
+            ...result,
+            tool: toolName,
+            powerMode: true,
+            grantId: decision.grantId,
+            auditId: audit.id,
+          })
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error)
+          const advice = classifyBrowserPowerFailure(message)
+          const currentUrl = url || activeBrowserToolUrl(controller, tabId)
+          return attachBrowserActionSessionOutput(JSON.stringify({
+            ok: false,
+            tool: toolName,
+            powerMode: true,
+            grantId: decision.grantId,
+            errorKind: 'browser_power_forensics_failed',
+            failureClass: advice.failureClass,
+            errorMessage: message,
+            tabId,
+            currentUrl,
+            origin: browserToolOriginFromUrl(currentUrl),
+            nextSuggestedAction: advice.nextSuggestedAction,
+          }, null, 2), {
+            toolName,
+            args,
+            controller,
+            sessionId,
+            currentUserText,
+            tabId,
+            nextSuggestedAction: advice.nextSuggestedAction,
+          })
+        }
       }
 
       case 'browser_media_download_advanced': {
@@ -7831,6 +7604,12 @@ export async function executeBrowserTool(
         })()
         const success = Number(parsed.success || 0)
         const failed = Number(parsed.failed || 0)
+        // P1-W5 — real, honest verification: each claimed-success file must
+        // exist on disk with non-zero bytes. No ffprobe claim (none runs).
+        const downloadResults = Array.isArray(parsed.results)
+          ? parsed.results as Array<Record<string, unknown>>
+          : []
+        const mediaVerification = verifyDownloadedMedia(downloadResults)
         const audit = recordBrowserPowerAuditEvent({
           toolName,
           grantId: decision.grantId,
@@ -7839,21 +7618,25 @@ export async function executeBrowserTool(
           effects: decision.effects,
           purpose: 'advanced media download',
           paramsSummary: { candidateCount: candidates.length, urlCount: urls.length, directory },
-          resultSummary: { success, failed },
+          resultSummary: { success, failed, verifiedBytes: mediaVerification.nonZero, invalid: mediaVerification.invalidPaths.length },
         })
         const payload = {
-          ok: success > 0 && failed === 0,
+          // Completion now requires the saved bytes to verify, not just a 200.
+          ok: success > 0 && failed === 0 && mediaVerification.ok,
           tool: toolName,
           grantId: decision.grantId,
           auditId: audit.id,
           candidateCount: candidates.length,
           attemptedUrlCount: urls.length,
           verification: {
-            ok: success > 0 && failed === 0,
-            method: 'download_result',
-            note: args.verify_media === false
-              ? 'ffprobe verification disabled by caller'
-              : 'download completed; ffprobe integration can promote this to codec/duration proof when runtime is available',
+            ok: mediaVerification.ok,
+            method: mediaVerification.method,
+            checked: mediaVerification.checked,
+            nonZero: mediaVerification.nonZero,
+            invalidPaths: mediaVerification.invalidPaths,
+            note: mediaVerification.invalidPaths.length > 0
+              ? '部分文件缺失或为空字节，未通过下载校验'
+              : '已校验保存文件存在且非空字节',
           },
           ...parsed,
         }

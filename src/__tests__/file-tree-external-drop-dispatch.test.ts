@@ -228,7 +228,7 @@ test('web download drops extract downloadable media URLs and reject ordinary pag
   assert.match(blobImage?.unsupportedReason || '', /临时网页资源/)
 })
 
-test('video-only drop actions do not treat generic Xiaohongshu pages as videos', () => {
+test('video-only drop actions treat Xiaohongshu notes but not generic account pages as visual resources', () => {
   assert.equal(
     isLikelyVideoDropPayload({
       ...browserTab,
@@ -241,7 +241,7 @@ test('video-only drop actions do not treat generic Xiaohongshu pages as videos',
       ...browserTab,
       url: 'https://www.xiaohongshu.com/user/profile/5e31b693000000000100bb06/6a0ae7700000000035038e72',
     }),
-    false,
+    true,
   )
   assert.equal(
     isLikelyVideoDropPayload({
@@ -249,6 +249,13 @@ test('video-only drop actions do not treat generic Xiaohongshu pages as videos',
       url: 'https://xhslink.com/a/abc123',
     }),
     false,
+  )
+  assert.equal(
+    isLikelyVideoDropPayload({
+      ...browserTab,
+      url: 'https://www.xiaohongshu.com/explore/665f5a23000000001e03a123?xsec_token=abc&xsec_source=pc_user',
+    }),
+    true,
   )
   assert.equal(isLikelyVideoDropPayload({ ...browserTab, url: 'https://www.bilibili.com/video/BV1h9Ln6DEJE/' }), true)
   assert.equal(isLikelyVideoDropPayload({ ...browserTab, url: 'https://example.com/video/foo' }), true)

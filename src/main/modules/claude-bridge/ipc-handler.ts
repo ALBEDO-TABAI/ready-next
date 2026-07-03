@@ -56,6 +56,7 @@ import { agentSystemStudioGroup } from './ipc/agent-system-studio-group'
 import { agentSpecialistBlueprintGroup } from './ipc/agent-specialist-blueprint-group'
 import { sessionPrerouteGroup } from './ipc/session-preroute-group'
 import { beliefCardGroup } from './ipc/belief-card-group'
+import { runQualityGroup } from './ipc/run-quality-group'
 import { conversationGroup } from './ipc/conversation-group'
 import { taskProjectionGroup } from './ipc/task-projection-group'
 import { recallGroup } from './ipc/recall-group'
@@ -271,6 +272,7 @@ let sessionPrerouteGroupDispose: IpcDisposeHandle | null = null
 
 /** EP4 settings surface — belief-card truth-source review/confirmation. */
 let beliefCardGroupDispose: IpcDisposeHandle | null = null
+let runQualityGroupDispose: IpcDisposeHandle | null = null
 
 /**
  * Stage V V2.1e — dispose handle returned by `conversationGroup.register`.
@@ -537,6 +539,10 @@ export async function cleanupAgentRuntime(): Promise<void> {
   if (beliefCardGroupDispose) {
     try { beliefCardGroupDispose.dispose() } catch { /* ignore */ }
     beliefCardGroupDispose = null
+  }
+  if (runQualityGroupDispose) {
+    try { runQualityGroupDispose.dispose() } catch { /* ignore */ }
+    runQualityGroupDispose = null
   }
   // Stage V V2.1e — symmetric release of the 8 conversation-scope + attachment
   // channel handlers (listConversationScopes / listScopeRuns /
@@ -1006,6 +1012,13 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
     },
     getMaintenanceRoundStatus: () => getLastMaintenanceRoundStatus(),
   })
+
+  // P0-4 (2026-07-02 P0 visibility batch) — read-only run quality stats.
+  if (runQualityGroupDispose) {
+    try { runQualityGroupDispose.dispose() } catch { /* ignore — handlers may already be gone */ }
+    runQualityGroupDispose = null
+  }
+  runQualityGroupDispose = runQualityGroup.register(ipcMain, {})
 
   // Stage V V2.1e — conversation-scope + attachment channels lifted into
   // `conversationGroup`. The group pre-clears internally; we hold the dispose

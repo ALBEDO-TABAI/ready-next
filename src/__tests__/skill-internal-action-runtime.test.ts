@@ -2,8 +2,7 @@ import assert from 'node:assert/strict'
 import test, { beforeEach } from 'node:test'
 
 import { ToolGateway } from '../main/modules/agent-control/tools-runtime/tool-gateway'
-import { ToolRuntime } from '../main/modules/agent-control/tools-runtime/tool-runtime'
-import { resolveToolInputSchemaForExecution } from '../main/modules/agent-control/tools-runtime/tool-registry'
+import { defaultToolRegistry, resolveToolInputSchemaForExecution } from '../main/modules/agent-control/tools-runtime/tool-registry'
 import {
   buildExplicitNoSkillAuthorization,
   buildSelectedSkillToolAuthorization,
@@ -100,100 +99,6 @@ test('resume hint exposes only the current skill internal actions', () => {
   )
 })
 
-test('ToolRuntime does not reject an allowed VEA typed action as unregistered', async () => {
-  const runtime = new ToolRuntime({
-    log: () => {},
-    executeToolCall: async () => 'vea:ok',
-  })
-
-  const result = await runtime.executeBatch({
-    toolCalls: [
-      { id: 'vea-1', name: 'skill_video_expert_pipeline', input: {} },
-    ],
-    context: {
-      allowedToolNames: new Set(['skill_video_expert_pipeline']),
-      authorization: buildSelectedSkillToolAuthorization({
-        skillId: 'video-expert-analyzer',
-        allowedTypedActions: ['skill_video_expert_pipeline'],
-        allowedPrimitives: STANDARD_PRIMITIVES,
-        source: 'explicit',
-        reason: 'test_setup',
-      }),
-    },
-  })
-
-  assert.equal(result.results[0]?.result.data?.reason, undefined)
-  assert.equal(result.results[0]?.result.text, 'vea:ok')
-})
-
-test('ToolRuntime preflight bypasses skill_* allowedToolNames check (W3a — executor admission is canonical)', async () => {
-  // Pre-W3a: this test pinned ToolRuntime's own allowedToolNames preflight
-  // for `skill_*` tools, expecting `tool_restricted_this_turn` from runtime.
-  // W3a moved the canonical denial signal for skill_* to tool-executor's
-  // admission (`authorization_denied` for unauthorized model calls,
-  // `tool_restricted_this_turn` from executor's own allowedToolNames gate
-  // for back-compat). ToolRuntime preflight now passes skill_* through to
-  // the executor — verified here by injecting a fake executor and
-  // observing it's actually called even when the runtime's allowedToolNames
-  // is empty.
-  let executorCalls = 0
-  const runtime = new ToolRuntime({
-    log: () => {},
-    executeToolCall: async () => {
-      executorCalls += 1
-      return 'vea:ok'
-    },
-  })
-
-  const result = await runtime.executeBatch({
-    toolCalls: [
-      { id: 'vea-1', name: 'skill_video_expert_pipeline', input: {} },
-    ],
-    context: {
-      authorization: buildSelectedSkillToolAuthorization({
-        skillId: 'video-expert-analyzer',
-        allowedTypedActions: ['skill_video_expert_pipeline'],
-        allowedPrimitives: STANDARD_PRIMITIVES,
-        source: 'explicit',
-        reason: 'test_setup',
-      }),
-    },
-  })
-
-  assert.equal(executorCalls, 1, 'runtime preflight must NOT pre-reject skill_* — executor admission is the canonical gate')
-  assert.equal(result.results[0]?.result.text, 'vea:ok')
-  assert.equal(result.results[0]?.result.data?.reason, undefined)
-})
-
-test('ToolRuntime preflight still rejects non-skill tools missing from allowedToolNames', async () => {
-  // The W3a preflight bypass is scoped to `skill_*` tools — non-skill
-  // tools continue to receive `tool_restricted_this_turn` from runtime
-  // preflight. Pinned here so a future refactor can't accidentally widen
-  // the bypass and silently change errorKind for browser_/document_/etc.
-  let executorCalls = 0
-  const runtime = new ToolRuntime({
-    log: () => {},
-    executeToolCall: async () => {
-      executorCalls += 1
-      return 'doc:ok'
-    },
-  })
-
-  const result = await runtime.executeBatch({
-    toolCalls: [
-      { id: 'doc-1', name: 'document_open_tab', input: { url: 'https://example.test' } },
-    ],
-    context: {
-      allowedToolNames: new Set<string>(),
-      authorization: buildExplicitNoSkillAuthorization('no_skill_signal'),
-    },
-  })
-
-  assert.equal(executorCalls, 0, 'runtime preflight must reject non-skill tool BEFORE the executor is invoked')
-  assert.equal(result.results[0]?.result.data?.errorKind, 'tool_restricted_this_turn')
-  assert.equal(result.results[0]?.result.data?.reason, undefined)
-})
-
 test('tool executor admits frame-scoped internal VEA actions after explicit allowlist', async () => {
   const abortController = new AbortController()
   abortController.abort()
@@ -243,34 +148,10 @@ test('tool executor rejects internal VEA actions when the active frame belongs t
   assert.equal(result.data?.reason, 'tool_not_in_allowed_typed_actions')
 })
 
-test('ToolRuntime uses the VEA typed action timeout instead of the generic skill timeout', async () => {
-  let resolvedTimeoutMs: number | undefined
-  const runtime = new ToolRuntime({
-    log: () => {},
-    executeToolCall: async () => 'vea:ok',
-    resolveTimeoutMs: (definition) => {
-      resolvedTimeoutMs = (definition as { executionTimeoutMs?: number } | null)?.executionTimeoutMs
-      return resolvedTimeoutMs || 1
-    },
-  })
+test('VEA typed action definition carries the long pipeline timeout instead of the generic skill timeout', () => {
+  const definition = defaultToolRegistry.getToolDefinitionForExecution('skill_video_expert_pipeline')
 
-  await runtime.executeBatch({
-    toolCalls: [
-      { id: 'vea-1', name: 'skill_video_expert_pipeline', input: {} },
-    ],
-    context: {
-      allowedToolNames: new Set(['skill_video_expert_pipeline']),
-      authorization: buildSelectedSkillToolAuthorization({
-        skillId: 'video-expert-analyzer',
-        allowedTypedActions: ['skill_video_expert_pipeline'],
-        allowedPrimitives: STANDARD_PRIMITIVES,
-        source: 'explicit',
-        reason: 'test_setup',
-      }),
-    },
-  })
-
-  assert.equal(resolvedTimeoutMs, 3 * 60 * 60 * 1000)
+  assert.equal(definition?.executionTimeoutMs, 3 * 60 * 60 * 1000)
 })
 
 test('skill action timeout falls back to host default action timeout', () => {

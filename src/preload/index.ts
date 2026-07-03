@@ -412,6 +412,11 @@ const memoryCardsAPI = {
     ipcRenderer.invoke('agent:beliefCards:setKnowledgeSystemEnabled', { enabled }),
 }
 
+// P0-4 (2026-07-02 P0 visibility batch) — read-only run quality stats.
+const runQualityAPI = {
+  stats: () => ipcRenderer.invoke('agent:runQuality:stats'),
+}
+
 // Trigger API
 const triggerAPI = {
   list: (filters?: unknown) => ipcRenderer.invoke('agent:trigger:list', filters),
@@ -1359,6 +1364,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   agent: agentAPI,
   memory: memoryAPI,
   memoryCards: memoryCardsAPI,
+  runQuality: runQualityAPI,
   trigger: triggerAPI,
   memoryLifecycle: memoryLifecycleAPI,
   browser: browserAPI,
@@ -1392,6 +1398,7 @@ declare global {
       agent: typeof agentAPI
       memory: typeof memoryAPI
       memoryCards: typeof memoryCardsAPI
+      runQuality: typeof runQualityAPI
       trigger: typeof triggerAPI
       memoryLifecycle: typeof memoryLifecycleAPI
       browser: typeof browserAPI

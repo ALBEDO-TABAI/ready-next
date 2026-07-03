@@ -176,6 +176,7 @@ export const defaultRunFinalizerDeps: RunFinalizerDeps = {
 
 interface EffectiveTaskFacts {
   taskType: string | null
+  taskTypeSource: 'projection_patch' | 'projection_row' | 'budget_runtime' | 'missing'
   module: string | null
   skillExecutionForm: SkillExecutionForm | null
 }
@@ -370,6 +371,29 @@ function hasProofKind(proofRefs: ReadonlyArray<unknown>, kinds: ReadonlySet<stri
   return proofRefs.some((row) => row && typeof row === 'object' && kinds.has(String((row as Record<string, unknown>).kind || '')))
 }
 
+/** Durable proof kinds that constitute crystallizable "learning" evidence — a
+ *  run's persistent outcomes (artifacts on disk, confirmed transactions,
+ *  run-state / task-event completions), as opposed to transient chatter. */
+const LEARNING_PROOF_KINDS: ReadonlySet<string> = new Set([
+  'artifact', 'transaction_confirmed', 'run_state', 'task_event',
+])
+
+/**
+ * P2-5 — deterministically derive the learning refs the specialist evolution
+ * pipeline reads, as the durable subset of the (already existence-verified)
+ * proof set. Pure/repeatable transform → code, not model (CLAUDE.md §0).
+ */
+function deriveLearningRefs(proofRefs: ReadonlyArray<unknown>): unknown[] {
+  return proofRefs.filter((row) => {
+    if (!row || typeof row !== 'object') return false
+    const record = row as Record<string, unknown>
+    if (LEARNING_PROOF_KINDS.has(String(record.kind || ''))) return true
+    // A ref that points at a concrete on-disk path is durable evidence too.
+    const path = record.path ?? record.relPath
+    return typeof path === 'string' && path.trim().length > 0
+  })
+}
+
 function hasDocumentDeliveryProof(proofRefs: ReadonlyArray<unknown>): boolean {
   const deliveredDocumentPaths = new Set<string>()
   const artifactPaths = new Set<string>()
@@ -408,10 +432,19 @@ function resolveEffectiveTaskFacts(
       rowModule = row?.module ?? null
     } catch { /* facts degrade to patch-only */ }
   }
+  const patchTaskType = typeof patch?.taskType === 'string' && patch.taskType ? patch.taskType : null
+  const budgetTaskType = outcome.taskBudgetRuntime?.taskType || null
+  const taskType = patchTaskType || rowTaskType || budgetTaskType || null
+  const taskTypeSource = patchTaskType
+    ? 'projection_patch'
+    : rowTaskType
+      ? 'projection_row'
+      : budgetTaskType
+        ? 'budget_runtime'
+        : 'missing'
   return {
-    taskType: (typeof patch?.taskType === 'string' && patch.taskType
-      ? patch.taskType
-      : rowTaskType || outcome.taskBudgetRuntime?.taskType || null),
+    taskType,
+    taskTypeSource,
     module: (typeof patch?.module === 'string' && patch.module ? patch.module : rowModule),
     skillExecutionForm: normalizeSkillExecutionForm(patch?.skillExecutionForm),
   }
@@ -449,7 +482,22 @@ async function writeTerminalOutcome(
       effectiveTerminalReason = resolveTerminalFailureReason(outcome.projectionPatch, adjudication, facts)
     }
   }
-  writeRunMetaOutcome(outcome, deps, effectiveStatus, effectiveTerminalReason)
+  // P1 fix (2026-07-03, live regression) — a browser_transaction run that is
+  // finalized DIRECTLY as kind:'error' (not via the done→adjudication path
+  // above) previously kept a generic `proof_gap`/`adjudication_degraded`
+  // reason, so the publish task surfaced as a hard "失败" instead of the
+  // recoverable "网页操作还没有成功证据，可以继续". The ledger showed
+  // browser_transaction + proof_gap rows for exactly this path. Normalize any
+  // generic completion-evidence gap on a browser transaction to the
+  // recoverable unconfirmed reason, regardless of which path set it.
+  if (
+    isBrowserTransactionTask(facts)
+    && effectiveStatus === 'error'
+    && (effectiveTerminalReason === 'proof_gap' || effectiveTerminalReason === 'adjudication_degraded')
+  ) {
+    effectiveTerminalReason = 'browser_transaction_unconfirmed'
+  }
+  writeRunMetaOutcome(outcome, deps, effectiveStatus, effectiveTerminalReason, facts)
   if (deps.writeProjectionTerminalPatch) {
     await deps.writeProjectionTerminalPatch(outcome.projectionPatch || null, effectiveTerminalReason, effectiveStatus)
   }
@@ -579,19 +627,36 @@ function recordTerminalAdjudication(
       hasStepCompletionProof: hasProofKind(proofRefs, new Set(['run_state', 'task_event'])),
       hasDocumentDeliveryProof: hasDocumentDeliveryProof(proofRefs),
     })
+    // P2-5 — derive durable LEARNING refs from the verified proof set. These
+    // are the run's persistent evidence (artifacts on disk, confirmed
+    // transactions, run-state/task-event outcomes) that the specialist
+    // task-evolution pipeline drafts proposals from. It was previously never
+    // written, so `projection.learningRefs` stayed empty and every proposal
+    // skipped `missing_learning_refs` — the growth loop never fired.
+    const learningRefs = deriveLearningRefs(proofRefs)
     const { verdict, checkIn } = adjudicateTerminalOutcome({
       terminalStatus: status,
       terminalReason,
       criteria: criteria.items,
       proofs: proofRefs,
+      learningRefs,
       mode: 'enforce',
       now,
     })
 
-    // ③ CheckIn + proofs land on the projection — lifecycle fields untouched
+    // ③ CheckIn + proofs + learning refs land on the projection — lifecycle
+    //    fields untouched. Only write learningRefs when the run actually learned
+    //    (accept + durable evidence); otherwise leave the column null so a
+    //    downstream degrade/retry doesn't inherit stale learning evidence.
     store.update(taskId, {
       proofRefs,
       checkins: appendCheckIns(projection.checkins ?? [], checkIn),
+      // P2-2 — persist the resolved acceptance criteria (previously computed for
+      // adjudication + logged in the divergence metric, but never stored). This
+      // makes the criteria the run was judged against observable on the
+      // projection and gives the daily-task-index criteriaProgress a data source.
+      criteria: { items: criteria.items, satisfiedCount: checkIn.satisfiedCount, totalCount: checkIn.totalCount },
+      ...(checkIn.learningDecision?.learned ? { learningRefs } : {}),
     }, { silent: true, reasonHint: 'terminal_adjudication' })
 
     if (deps.learnFromCheckIn) {
@@ -637,6 +702,7 @@ function writeRunMetaOutcome(
   deps: RunFinalizerDeps,
   status: RunMetaTerminalStatus,
   terminalReason: string,
+  facts?: EffectiveTaskFacts | null,
 ): void {
   if (!isRunMetaTerminalStatus(status)) {
     throw new Error(`Invalid terminal run_meta status: ${status}`)
@@ -655,8 +721,10 @@ function writeRunMetaOutcome(
     initiator: outcome.initiator,
     durationMs: outcome.durationMs,
   }
+  if (facts || taskBudgetRuntime) {
+    patch.taskType = facts?.taskType || taskBudgetRuntime?.taskType || null
+  }
   if (taskBudgetRuntime) {
-    patch.taskType = taskBudgetRuntime.taskType || null
     patch.budget = {
       ...taskBudgetRuntime.budget,
       ...taskBudgetRuntime.usage,

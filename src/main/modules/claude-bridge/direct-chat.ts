@@ -508,6 +508,18 @@ export class DirectChatEngine {
     return Boolean(this.browserController)
   }
 
+  /** P1 (2026-07-03, 7/01 reliability contract D) — the active browser tab
+   *  URL, so site-card prompt fragments can match the current domain instead
+   *  of only user-text aliases (a mid-run turn may not repeat "小红书"). */
+  getActiveBrowserUrl(): string | null {
+    try {
+      const url = this.browserController?.getActiveTab()?.url
+      return typeof url === 'string' && url.trim() ? url : null
+    } catch {
+      return null
+    }
+  }
+
   setSidecarManager(manager: SidecarManager): void {
     this.sidecarManager = manager
     log('SidecarManager set on DirectChatEngine')

@@ -48,6 +48,8 @@ import { selectScopeTaskIndexEntries } from '../session/daily-task-index-builder
 import { selectFollowupTaskRefs } from '../intent-state-first'
 import { BeliefCardStore } from '../knowledge/belief-card-store'
 import type { MirrorDb } from '../knowledge/belief-card-mirror'
+import { bumpBeliefCardAccess, readBeliefCardAccessStats } from '../knowledge/belief-card-mirror'
+import { runBeliefDecayRound, collectBeliefDecaySignals, createBeliefDecayEffectors } from '../memory/belief-decay'
 import {
   getSpecialistContentEditProposalStore,
 } from '../agents/specialist-content-edit-runtime'
@@ -129,6 +131,7 @@ import { SessionRecallService } from '../session/session-recall-service'
 import { SidecarManager } from '../sidecar-manager'
 import { MemoryRepository } from '../../repositories/memory-repository'
 import { MemoryLifecycleManager } from '../memory/memory-lifecycle'
+import { CrystallizeScheduler, createCrystallizeEffectors, runCrystallizeRound, type CrystallizeSignals } from '../maintenance/crystallize-gate'
 import { ReflectionService } from '../reflection-service'
 import { runUserPictureCasMerge } from '../maintenance/cas-merge'
 import { UserProfileRepository } from '../../repositories/user-profile-repository'
@@ -399,6 +402,13 @@ export class AgentControlRuntime extends EventEmitter {
   private readonly toolGateway = new ToolGateway()
   private readonly memoryRepository = new MemoryRepository()
   private readonly memoryLifecycle = new MemoryLifecycleManager(this.memoryRepository)
+  // P2-1 (2026-07-03) — the deterministic crystallize round (backlink rewrite /
+  // staged-expiry / duplicate marking / index rebuild) existed but was never
+  // instantiated. Wire it to the same 6h rhythm as memory lifecycle. The gate
+  // (decideCrystallizeRun) still decides run/skip each tick and always leaves a
+  // maintenance_audit metric, so skips are observable.
+  private lastCrystallizeRunAt: Date | null = null
+  private readonly crystallizeScheduler = new CrystallizeScheduler(() => this.runCrystallizeRoundOnce(false))
   private readonly userProfileRepository = new UserProfileRepository()
   private readonly agentPersonalityRepository = new AgentPersonalityRepository()
   private readonly externalMemoryProviderSlot = new ExternalMemoryProviderSlot()
@@ -484,11 +494,20 @@ export class AgentControlRuntime extends EventEmitter {
       selectScopeTaskIndexEntries(this.taskProjectionStore, scopeId),
     // EP2-K3: lazy for the same declaration-order reason.
     getBeliefCardStore: () => this.getBeliefCardStore(),
+    // P2-4: bump mirror access_count for the cards that got injected this turn.
+    recordBeliefInjection: (relPaths) => {
+      const db = this.getBeliefCardMirrorDb()
+      if (!db) return
+      try { bumpBeliefCardAccess(db, relPaths) } catch { /* metrics never break assembly */ }
+    },
     // EP3-A3: agents-table roster for the main-session charter/routing
     // index (registry declared above; empty/dead table degrades to []).
     getAgentRoster: () => this.agentRegistry.list(),
     // EP2-K6: rollback switch (single read entry in the knowledge module).
     isKnowledgeSystemEnabled: () => isKnowledgeSystemEnabled(this.db),
+    // P1 (2026-07-03, 7/01 reliability contract D) — active browser tab URL
+    // so site cards match the current domain mid-run, not only user text.
+    getActiveBrowserUrl: () => this.orchestrator.getActiveBrowserUrl(),
     enableDatabaseMemory: true
   })
   private readonly agentManager: AgentManager
@@ -707,6 +726,56 @@ export class AgentControlRuntime extends EventEmitter {
     return this.db.getRawDb?.() as MirrorDb | null
   }
 
+  /**
+   * P2-1 — run one deterministic crystallize round. The gate decides run/skip;
+   * we only advance `lastCrystallizeRunAt` when it actually ran, so the 6h
+   * interval math stays honest. Guarded by the knowledge-system switch and a
+   * live belief store. Never throws into the scheduler (round logs its own
+   * maintenance_audit; unexpected errors are swallowed by the scheduler).
+   */
+  async runCrystallizeRoundOnce(forced: boolean): Promise<void> {
+    if (!isKnowledgeSystemEnabled(this.db)) return
+    const store = this.getBeliefCardStore()
+    if (!store) return
+    const now = new Date()
+    const signals: CrystallizeSignals = {
+      lastRunAt: this.lastCrystallizeRunAt ? this.lastCrystallizeRunAt.toISOString() : null,
+      newCheckInsWithLearning: 0,
+      newConversationTurns: 0,
+      cardWritesSinceLast: 0,
+      memoryFileMtimeChanged: false,
+      forced,
+    }
+    const result = await runCrystallizeRound({
+      signals,
+      now,
+      store,
+      effectors: createCrystallizeEffectors(store),
+    })
+    if (result.decision === 'run') {
+      this.lastCrystallizeRunAt = now
+      // P5d fired ledger (positive gate signal): crystallize actually ran live.
+      logAgentMetric('crystallize_round_fired', { report: result.report ?? null })
+      // P5d — belief-decay piggybacks the same deterministic tick (decoupled
+      // from the dormant LLM round). Closes the "belief rows excluded from L2
+      // archival but never decayed" leak (audit §2.1). Conservative decisions
+      // (demote-before-delete, two-phase L, duplicates never deleted); must
+      // never break the crystallize tick.
+      try {
+        const mirrorDb = this.getBeliefCardMirrorDb()
+        const readMirror = (relPath: string) => (mirrorDb ? readBeliefCardAccessStats(mirrorDb, relPath) : null)
+        const decayReport = runBeliefDecayRound(
+          collectBeliefDecaySignals(store, readMirror, now),
+          createBeliefDecayEffectors(store),
+          now,
+        )
+        logAgentMetric('belief_decay_round_fired', { report: decayReport })
+      } catch (error) {
+        logAgentMetric('belief_decay_round_failed', { reason: error instanceof Error ? error.message : String(error) })
+      }
+    }
+  }
+
   private getDomainAdapters(): ReadonlyArray<DomainAdapter> {
     return this.orchestrator.getDomainAdapters()
   }
@@ -721,6 +790,11 @@ export class AgentControlRuntime extends EventEmitter {
 
     // Start memory lifecycle manager
     this.memoryLifecycle.start()
+    // P2-1 — deterministic crystallize round on the same 6h rhythm + a startup
+    // pass (deferred 90s so it trails first-run belief sync / seeding above the
+    // memory lifecycle's own 60s initial tick).
+    this.crystallizeScheduler.start()
+    setTimeout(() => { void this.runCrystallizeRoundOnce(false) }, 90_000)
     this.autoNarrationContinuationRunner.trigger()
 
     // EP2-Q3 — additive bridge listener: terminal task events become
@@ -785,6 +859,7 @@ export class AgentControlRuntime extends EventEmitter {
 
     // Stop memory lifecycle manager
     this.memoryLifecycle.stop()
+    this.crystallizeScheduler.stop()
     this.knowledgeWatcher?.stop()
     await this.externalMemoryProviderSlot.shutdown()
 

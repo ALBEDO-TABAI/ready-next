@@ -26,8 +26,6 @@ test('registry exposes documented tool-error metric keys', () => {
     'childRunCircuitBreak',
     'childRunLogGc',
     'childRunnerLifecycleWriteFailed',
-    'compactionCircuitBreak',
-    'compactionL2Failed',
     'confirmationGateDenied',
     'directToolCallTextBlocked',
     'domainToolNarrowingApplied',
@@ -60,6 +58,7 @@ test('registry exposes documented tool-error metric keys', () => {
     'toolLoopRepetitionDetected',
     'toolSnapshotMismatch',
     'unknownSurfaced',
+    'userNegationDenied',
     'widgetBoundaryViolation',
     'xmlToolCallsRecoveredFromNative',
   ])

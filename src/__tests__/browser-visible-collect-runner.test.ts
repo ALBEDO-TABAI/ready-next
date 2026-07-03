@@ -364,6 +364,85 @@ describe('visible_collect task runner', () => {
     assert.equal(result.suggestedNextTool?.args.expected_count, 1)
   })
 
+  it('accepts Xiaohongshu account-page note-item links as collection targets', async () => {
+    const persistence = new FakePersistence()
+    const sourceUrl = 'https://www.xiaohongshu.com/user/profile/5d32b406000000001102ac8f'
+    const capability = {
+      navigateTargetTab: async (tabId: string, url: string) => ({ success: true, tabId, reused: true, url }),
+      extractStructured: async () => ({
+        template: 'card_list' as const,
+        items: [
+          {
+            sourceUrl,
+            title: '日常的一点静物',
+            link: 'https://www.xiaohongshu.com/user/profile/5d32b406000000001102ac8f/6928017e000000001e0334f4?xsec_token=token-a&xsec_source=pc_user',
+            media: ['https://sns-webpic-qc.xhscdn.com/a.webp'],
+            rawFields: {
+              structure: {
+                inNavigationRegion: false,
+                inSidebarRegion: true,
+                inHeaderRegion: false,
+                inMainContentRegion: false,
+                nearestTagName: 'section',
+                containerClass: 'note-item',
+              },
+            },
+          },
+          {
+            sourceUrl,
+            title: '静物｜固发液',
+            link: 'https://www.xiaohongshu.com/user/profile/5d32b406000000001102ac8f/6a3e596f00000000210088e4?xsec_token=token-b&xsec_source=pc_user',
+            media: ['https://sns-webpic-qc.xhscdn.com/b.webp'],
+            rawFields: {
+              structure: {
+                inNavigationRegion: false,
+                inSidebarRegion: true,
+                inHeaderRegion: false,
+                inMainContentRegion: false,
+                nearestTagName: 'section',
+                containerClass: 'note-item',
+              },
+            },
+          },
+          {
+            sourceUrl,
+            title: 'RED',
+            link: 'https://www.xiaohongshu.com/red_video',
+            rawFields: {
+              structure: {
+                inSidebarRegion: true,
+              },
+            },
+          },
+        ],
+        sourceUrl,
+      }),
+      scrollViewportOnce: async () => ({ scrollY: 0, atBottom: true }),
+    } as unknown as BrowserCapabilityService
+    const runner = new BrowserContentTaskRunner(capability, persistence as never, new BrowserWriteLeaseService())
+
+    const handle = await runner.startTask({
+      kind: 'visible_collect',
+      payload: {
+        url: sourceUrl,
+        tabId: 'agent-tab-1',
+        surface: 'agent-view',
+        template: 'card_list',
+        outputRootDir: '/tmp/ahui',
+      },
+    })
+    const done = await waitForStatus(persistence, handle.taskId, ['completed'], 6_000)
+    const result = done.result as { discoveryStatus?: string; noteCandidates: Array<{ url: string; openUrl: string; sourceId?: string }>; targetQuality?: string; suggestedNextTool?: { name: string; args: { expected_count?: number } } }
+
+    assert.equal(result.discoveryStatus, 'complete')
+    assert.equal(result.targetQuality, 'trustworthy')
+    assert.equal(result.noteCandidates.length, 2)
+    assert.equal(result.noteCandidates[0].sourceId, '6928017e000000001e0334f4')
+    assert.match(result.noteCandidates[0].openUrl, /xsec_token=token-a/)
+    assert.equal(result.suggestedNextTool?.name, 'browser_collect_notes')
+    assert.equal(result.suggestedNextTool?.args.expected_count, 2)
+  })
+
   it('marks discovery incomplete when frozen count is below userExpectedTotal', async () => {
     const persistence = new FakePersistence()
     const capability = createCapability([

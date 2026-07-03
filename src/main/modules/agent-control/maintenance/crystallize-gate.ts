@@ -1,5 +1,8 @@
 /**
- * P5d/C26 unwired: not in production driver path.
+ * LIVE (P5d cluster deterministic-parts migration, 2026-07-03): wired into
+ * production via runtime.ts `CrystallizeScheduler` (startup + 6h), emitting a
+ * `crystallize_round_fired` ledger. The LLM maintenance round + emergence feed
+ * stay deferred; only the deterministic crystallize + belief-decay rounds are live.
  *
  * EP2-C2 — deterministic crystallize gate + v1 round runner (03 §3.2/§6).
  *

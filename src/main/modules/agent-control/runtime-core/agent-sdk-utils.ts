@@ -847,7 +847,21 @@ export function resolveSkillHintRelevanceForTurn(params: {
   }
   const referenceHint = resolveReferenceHintSnapshot(params.orchestrator, params.sessionId)
   if (!referenceHint) return { relevant: false, reason: 'no_reference_hint' }
-  if (params.taskRefs && hasContinuableTaskRef(params.taskRefs)) {
+  // P1 fix (2026-07-03, live regression) — a continuable task keeps the reduced
+  // skill/collection continuation surface warm UNLESS the new turn starts its
+  // OWN concrete browser action (a publish/upload/submit transaction or a
+  // collection/download). Before, ANY turn with a reference hint + continuable
+  // task hit continuable_task, so a fresh "把这条视频下载到X" after a paused
+  // collection got the 12-tool skill set and lost
+  // browser_media_download_advanced / browser_power_eval / resolve_video — the
+  // agent then reported it "lacked the tools". A skill-resume follow-up with no
+  // browser intent (e.g. "跑 finalize") still keeps the skill surface; genuine
+  // resumes also come through the continuationIntent branch above.
+  const startsFreshBrowserWork = userTextCandidates.some((text) => {
+    const kind = resolveBrowserWorkflowIntent(text).kind
+    return kind === 'transaction' || kind === 'collection'
+  })
+  if (params.taskRefs && hasContinuableTaskRef(params.taskRefs) && !startsFreshBrowserWork) {
     return { relevant: true, reason: 'continuable_task' }
   }
   for (const text of userTextCandidates) {

@@ -134,10 +134,21 @@ export async function executeReadArtifact(
         relativePath: args.relativePath,
         attemptedRoots: candidateRoots,
       })
-      throw new ToolDomainError(error.reason, error.message, {
+      // P1-a (2026-07-03) — a no_root_match on an ABSOLUTE user path (e.g. a
+      // collection report the browser engine wrote to the user's authorized
+      // dir) is not the skill's file to read: redirect to file_read_excerpt,
+      // which honors the user's authorized roots. Keeps the sandbox intact
+      // while turning a dead error into an actionable one so the agent doesn't
+      // loop or mis-report a completed collection.
+      const looksAbsoluteUserPath = typeof args.relativePath === 'string' && /^\/|^[A-Za-z]:[\\/]/.test(args.relativePath.trim())
+      const hint = error.reason === 'no_root_match' && looksAbsoluteUserPath
+        ? `${error.message}。该路径不在技能沙箱内；若是用户授权目录里的文件（如采集产物、报告），请改用 file_read_excerpt 读取，而不是 skill_read_artifact。`
+        : error.message
+      throw new ToolDomainError(error.reason, hint, {
         relativePath: args.relativePath,
         artifactRoot: roots.artifactRoot,
         attemptedRoots: candidateRoots,
+        ...(error.reason === 'no_root_match' && looksAbsoluteUserPath ? { suggestedTool: 'file_read_excerpt' } : {}),
       })
     }
     throw error

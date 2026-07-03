@@ -10,23 +10,15 @@ const PROMPT_ASSEMBLY_REL = 'src/main/modules/agent-control/prompt-assembly.ts'
 const MAIN_ROOT_REL = 'src/main'
 
 const SDK_FORBIDDEN_IMPORTS = [
-  'layered-compactor',
-  'layered-compactor-l2-stub',
   'context-compression',
 ]
 
-const DORMANT_LAYERED_ALLOWED = new Set([
-  'src/main/modules/agent-control/compaction/index.ts',
-])
-
 const CONTEXT_COMPRESSION_ALLOWED = new Set([
   'src/main/modules/agent-control/prompt-assembly.ts',
-  'src/main/modules/agent-control/compaction/index.ts',
 ])
 
 const DORMANT_COMPRESS_CONTEXT_CHANNEL_RELS = [
   'src/main/modules/agent-control/contracts/run-contracts.ts',
-  'src/main/modules/agent-control/runtime-core/execution-loop-orchestrator.ts',
   'src/main/modules/claude-bridge/direct-chat.ts',
 ]
 
@@ -127,9 +119,6 @@ function check({ root = ROOT } = {}) {
       const rel = relposix(file, root)
       if (rel.includes('/__tests__/')) continue
       const imports = importedSpecifiers(fs.readFileSync(file, 'utf8'))
-      if (imports.some((spec) => spec.includes('layered-compactor')) && !DORMANT_LAYERED_ALLOWED.has(rel)) {
-        errors.push(`unexpected_layered_compactor_import:${rel}`)
-      }
       if (imports.some((spec) => spec.includes('context-compression')) && !CONTEXT_COMPRESSION_ALLOWED.has(rel)) {
         errors.push(`unexpected_context_compression_import:${rel}`)
       }

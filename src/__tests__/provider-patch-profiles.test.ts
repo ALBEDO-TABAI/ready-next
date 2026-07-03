@@ -210,8 +210,15 @@ describe('Stage S (PR-S4) — vllm patch profile', () => {
     })
   }
 
-  it('requestPatcher forces stream_options.include_usage and stream_usage', () => {
+  it('requestPatcher leaves non-stream requests untouched', () => {
     const body: any = { model: 'vllm/qwen-7b', messages: [] }
+    const result = vllmProfile.requestPatcher!(body, {})
+    assert.equal('stream_options' in result, false)
+    assert.equal('stream_usage' in result, false)
+  })
+
+  it('requestPatcher forces stream_options.include_usage and stream_usage for streams', () => {
+    const body: any = { model: 'vllm/qwen-7b', messages: [], stream: true }
     const result = vllmProfile.requestPatcher!(body, {})
     assert.equal(result.stream_options.include_usage, true)
     assert.equal(result.stream_usage, true)
@@ -221,6 +228,7 @@ describe('Stage S (PR-S4) — vllm patch profile', () => {
     const body: any = {
       model: 'vllm/qwen-7b',
       messages: [],
+      stream: true,
       stream_options: { include_usage: false },
     }
     const result = vllmProfile.requestPatcher!(body, {})
@@ -231,6 +239,7 @@ describe('Stage S (PR-S4) — vllm patch profile', () => {
     const body: any = {
       model: 'vllm/qwen-7b',
       messages: [],
+      stream: true,
       stream_usage: false,
     }
     const result = vllmProfile.requestPatcher!(body, {})
@@ -256,7 +265,7 @@ describe('Stage S (PR-S4) — resolveProviderPatchProfile', () => {
 })
 
 describe('Stage S (PR-S4) — patcher priority (provider default before profile)', () => {
-  it('openai-compatible defaultRequestPatcher fills stream_usage; vllm profile cannot overwrite false', () => {
+  it('openai-compatible defaultRequestPatcher preserves non-stream stream_usage; vllm profile cannot overwrite false', () => {
     // Simulate a caller that already set stream_usage = false. The
     // provider default must NOT clobber, and the profile must NOT
     // clobber either.
@@ -266,8 +275,16 @@ describe('Stage S (PR-S4) — patcher priority (provider default before profile)
     assert.equal(body.stream_usage, false)
   })
 
-  it('without user value, both default and profile end at stream_usage = true', () => {
+  it('without user value, both default and profile leave non-stream usage fields empty', () => {
     const body: any = { model: 'vllm/qwen-7b' }
+    openAIDefaultRequestPatcher(body)
+    vllmProfile.requestPatcher!(body, {})
+    assert.equal('stream_usage' in body, false)
+    assert.equal('stream_options' in body, false)
+  })
+
+  it('without user value, both default and profile end at stream_usage = true for streams', () => {
+    const body: any = { model: 'vllm/qwen-7b', stream: true }
     openAIDefaultRequestPatcher(body)
     vllmProfile.requestPatcher!(body, {})
     assert.equal(body.stream_usage, true)

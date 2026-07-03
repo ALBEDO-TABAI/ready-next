@@ -48,7 +48,7 @@ describe('Stage S (PR-S4) — execution-client patch wiring', () => {
     assert.equal(ctx.profile?.profileId, 'vllm')
     assert.equal(typeof ctx.providerDefaultRequestPatcher, 'function')
 
-    const body: any = {}
+    const body: any = { stream: true }
     applyProviderRequestPatch(body, ctx)
     assert.equal(body.stream_usage, true)
     assert.equal(body.stream_options.include_usage, true)
@@ -68,7 +68,7 @@ describe('Stage S (PR-S4) — execution-client patch wiring', () => {
     assert.deepEqual(body, { messages: [] })
   })
 
-  it('deepseek profile: reasoning_content preserved, stream_usage filled by openai-compatible default', () => {
+  it('deepseek profile: reasoning_content preserved without non-stream usage fields', () => {
     const ctx = buildCtx({
       config: { provider: 'openai-compatible' },
       baseUrl: 'https://api.deepseek.com/v1',
@@ -83,8 +83,8 @@ describe('Stage S (PR-S4) — execution-client patch wiring', () => {
     }
     applyProviderRequestPatch(body, ctx)
     assert.equal(body.messages[0].reasoning_content, 'r1')
-    assert.equal(body.stream_usage, true)
-    assert.equal(body.stream_options.include_usage, true)
+    assert.equal('stream_usage' in body, false)
+    assert.equal('stream_options' in body, false)
   })
 
   it('minimax response patch: reasoning_details mapped to additional_kwargs.reasoning_content', () => {

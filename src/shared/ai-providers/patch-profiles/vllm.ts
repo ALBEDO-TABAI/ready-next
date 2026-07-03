@@ -20,9 +20,10 @@
  *      `/llm-|qwen-|baichuan-|chatglm-|deepseek-r1/i`.
  *
  * Why this exists: many vLLM deployments expose an OpenAI-compatible
- * surface but only stream usage when both `stream_options.include_usage
- * = true` and the legacy `stream_usage = true` mirror are present.
- * The patcher fills both fields when the caller has not set them.
+ * surface but only stream usage when streaming requests carry both
+ * `stream_options.include_usage = true` and the legacy `stream_usage = true`
+ * mirror. The patcher fills both fields on streaming calls when the caller
+ * has not set them.
  *
  * Priority: profile patcher runs *after* provider-default, so user
  * config (merged into `body` by the caller before patching) is still
@@ -67,6 +68,7 @@ export const matchPredicate = (
 
 export const requestPatcher = (body: any, _ctx: any): any => {
   if (!body || typeof body !== 'object') return body
+  if (body.stream !== true) return body
   // Force include_usage when missing; preserve user-supplied falsy values.
   if (body.stream_options && typeof body.stream_options === 'object') {
     if (body.stream_options.include_usage === undefined) {

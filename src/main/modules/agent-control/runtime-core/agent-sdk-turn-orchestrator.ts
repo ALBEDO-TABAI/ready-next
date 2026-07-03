@@ -528,9 +528,37 @@ export class AgentSdkTurnOrchestrator {
         projectionPatch: projectionPatch || null,
       })
     }
+    // P0-1 (2026-07-02 P0 visibility batch) — response-boundary release for
+    // hold-until-final turns. A native tool execution proves the response
+    // that produced the buffered narration cannot become the run-final
+    // clarification text (the guard only converts run-final text), so the
+    // buffer flushes right before each tool row. Armed per model call and
+    // disarmed the moment runAgent settles: post-run tool executions
+    // (leaked-call recovery) must never flush the guard-pending final text.
+    const nativeTextToolBoundaryFlush: { current: (() => void) | null } = { current: null }
     const emitOutput = (chunk: string, type: string, projectionPatch?: Record<string, unknown> | null): void => {
       if (!isCurrentRun()) return
+      if (type === 'tool_use') nativeTextToolBoundaryFlush.current?.()
       emitOutputForRun(chunk, type, projectionPatch)
+    }
+    // P0-3 (2026-07-02 P0 visibility batch) — pre-first-event heartbeats.
+    // Phase stays 'planning' (no new enum value) and only latestText
+    // progresses; publishScopeRunEvent reuses the runtime's recorded
+    // scope-run channel, so this adds zero IPC surface. isCurrentRun keeps a
+    // superseded run's late heartbeat away from the newer run's visible
+    // state (run-continuity contract).
+    const emitHeartbeat = (text: string): void => {
+      if (!isCurrentRun() || !sessionId) return
+      this.host.runtime?.publishScopeRunEvent?.({
+        type: 'updated',
+        scopeId: sessionId,
+        agent: name,
+        runId,
+        ...(taskId ? { taskId } : {}),
+        phase: 'planning',
+        latestText: text,
+        timestamp: new Date().toISOString(),
+      })
     }
     const emitStatusForRun = (status: string, terminalReason?: TurnTerminalReason | null): void => {
       runMetaStatus = status
@@ -672,6 +700,7 @@ export class AgentSdkTurnOrchestrator {
     }
 
     emitStatus('working')
+    emitHeartbeat('正在理解需求…')
 
     try {
       const configDetail = this.host.loadAIConfig()
@@ -1564,6 +1593,12 @@ export class AgentSdkTurnOrchestrator {
             if (reminderText) {
               nextInput = prependSystemReminderInput(nextInput, reminderText)
             }
+            // P0-3 — the model call is the longest pre-output stage; say so.
+            emitHeartbeat(contextCompressedForBridgeTurn ? '上下文较长，压缩后重新调用模型…' : '正在调用模型…')
+            // P0-1 — arm the response-boundary release for hold turns only.
+            nativeTextToolBoundaryFlush.current = holdNativeTextUntilFinal
+              ? () => { flushNativeTextBuffer(true) }
+              : null
             runResult = await this.host.runAgent({
               agentName: name,
               runId,
@@ -1591,6 +1626,7 @@ export class AgentSdkTurnOrchestrator {
                 }
               },
             })
+            nativeTextToolBoundaryFlush.current = null
             clearNativeTextFlushTimer()
             if (runResult.usage) {
               session.lastUsageTokens = runResult.usage.totalTokens
@@ -1598,6 +1634,7 @@ export class AgentSdkTurnOrchestrator {
             }
             break
           } catch (error) {
+            nativeTextToolBoundaryFlush.current = null
             clearNativeTextFlushTimer()
             if (
               classifySdkRuntimeError(error).terminalReason === 'context_overflow'

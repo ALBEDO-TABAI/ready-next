@@ -1720,12 +1720,20 @@ test('agent sdk runtime emits tool trace truth and registers run cleanup', async
       .map((entry) => entry.type),
     ['tool_use', 'tool_result'],
   )
+  // P0-3 (2026-07-02): planning heartbeats now share this channel; they must
+  // carry NO toolEvent and precede the tool trace without disturbing it.
+  const heartbeatEvents = scopeEvents
+    .filter((entry) => (entry.payload as { phase?: string }).phase === 'planning')
+  assert.ok(heartbeatEvents.length >= 2, 'planning heartbeats published before the model call')
+  assert.ok(heartbeatEvents.every((entry) => (entry.payload as { toolEvent?: unknown }).toolEvent === undefined))
+  const toolScopeEvents = scopeEvents
+    .filter((entry) => (entry.payload as { phase?: string }).phase !== 'planning')
   assert.deepEqual(
-    scopeEvents.map((entry) => (entry.payload as { phase?: string; toolEvent?: { kind?: string } }).toolEvent?.kind),
+    toolScopeEvents.map((entry) => (entry.payload as { phase?: string; toolEvent?: { kind?: string } }).toolEvent?.kind),
     ['call', 'result'],
   )
   assert.deepEqual(
-    scopeEvents.map((entry) => (entry.payload as { phase?: string }).phase),
+    toolScopeEvents.map((entry) => (entry.payload as { phase?: string }).phase),
     ['tool_running', 'responding'],
   )
 })
@@ -1869,10 +1877,13 @@ test('agent sdk runtime uses Ready OpenAI-compatible adapter and provider patche
   assert.deepEqual(result.usedTools, ['web_search'])
   assert.equal(requests.length, 2)
   assert.equal(requests[0].url, 'https://compat.example/v1/chat/completions')
-  assert.equal((requests[0].body as { stream_usage?: boolean }).stream_usage, true)
-  assert.deepEqual((requests[0].body as { stream_options?: Record<string, unknown> }).stream_options, {
-    include_usage: true,
-  })
+  // P0-0 true SSE (2026-07-02): the wire request now legitimately streams,
+  // so the openai-compatible provider-default patcher (openai-compatible.ts
+  // stream_usage default) fires exactly as it always did on the streaming
+  // execution clients — include_usage + the legacy stream_usage mirror.
+  assert.equal((requests[0].body as Record<string, unknown>).stream, true)
+  assert.deepEqual((requests[0].body as Record<string, unknown>).stream_options, { include_usage: true })
+  assert.equal((requests[0].body as Record<string, unknown>).stream_usage, true)
   const secondCompatibleMessages = JSON.stringify((requests[1].body as { messages?: unknown[] }).messages)
   assert.match(secondCompatibleMessages, /function_call_result|found result|tool/)
   assert.doesNotMatch(secondCompatibleMessages, /C:\\Users\\alice/)
@@ -4409,7 +4420,9 @@ test('agent sdk runtime honors Ready OpenAI-compatible responses wire API', asyn
   assert.equal(result.finalText, 'responses 完成')
   assert.equal(requests.length, 1)
   assert.equal(requests[0].url, 'https://code.newcli.com/codex/v1/responses')
-  assert.equal((requests[0].body as { stream?: boolean }).stream, false)
+  // P0-0 true SSE (2026-07-02): the responses wire streams by default; this
+  // fake returns plain JSON so rung-1 degrade keeps the blocking parse path.
+  assert.equal((requests[0].body as { stream?: boolean }).stream, true)
   const responsesInput = JSON.stringify((requests[0].body as { input?: unknown[] }).input)
   assert.doesNotMatch(responsesInput, /\/Users\/alice/)
   assert.match(responsesInput, /\/Users\/<redacted>\/Ready\/run_state\.json/)
@@ -5103,6 +5116,66 @@ test('agent sdk runtime exposes authorized skill tools for explicit skill turns'
   } finally {
     __setSkillActionToolDefsForTests(null)
     clearLastReferenceSkill('scope-skill-tools')
+  }
+})
+
+test('agent sdk runtime preserves browser tools when an explicit reference skill joins a browser workflow', async () => {
+  const seenToolNames: string[] = []
+  let seenInstructions = ''
+  const prompt = '打开小红书网页，帮我发布一篇笔记'
+  const runtime = createRuntime({
+    skillContextOrchestrator: {
+      findExplicitlyRequestedSkills: () => [{ id: 'extract', name: 'extract' }],
+      buildPreferredSkillToolNames: () => ['skill_ask_user', 'skill_inspect_run_state'],
+      rememberExplicitReferenceSkillHint: () => {
+        rememberLastReferenceSkill('scope-browser-reference-skill-tools', {
+          id: 'extract',
+          name: 'extract',
+        })
+        return true
+      },
+    },
+    runAgent: async ({ tools, instructions, onTextDelta }) => {
+      seenToolNames.push(...tools.map((item) => item.name))
+      seenInstructions = instructions
+      onTextDelta('浏览器工具面已加载')
+      return { finalText: '浏览器工具面已加载' }
+    },
+  })
+  runtime.setBrowserController({} as never)
+  runtime.newSession('butler::scope-browser-reference-skill-tools', 'system prompt')
+
+  try {
+    const result = await runtime.sendMessage(
+      'butler::scope-browser-reference-skill-tools',
+      prompt,
+      'run-browser-reference-skill-tools',
+      {
+        publicSessionId: 'scope-browser-reference-skill-tools',
+        taskId: 'task-browser-reference-skill-tools',
+        requestEnvelope: buildRequestEnvelope({ userText: prompt }),
+      },
+    )
+
+    assert.equal(result.success, true)
+    assert.equal(seenToolNames.includes('skill_ask_user'), true)
+    for (const expected of [
+      'browser_navigate',
+      'browser_click',
+      'browser_type',
+      'browser_power_eval',
+      'browser_power_cdp',
+    ]) {
+      assert.equal(seenToolNames.includes(expected), true, `${expected} should remain visible`)
+    }
+    assert.match(seenInstructions, /Power 网页操作配方/)
+    assert.match(seenInstructions, /页面结构探测/)
+    assert.match(seenInstructions, /读回验证/)
+    assert.match(seenInstructions, /viewport=0/)
+    assert.match(seenInstructions, /Page\.getFrameTree/)
+    assert.doesNotMatch(seenInstructions, /一律走视觉通道|禁用脚本（封号风险）/)
+  } finally {
+    clearLastReferenceSkill('scope-browser-reference-skill-tools')
   }
 })
 
@@ -5946,4 +6019,164 @@ test('G1: resolveToolFailurePageUrl prefers the targeted tab, falls back to acti
   assert.equal(resolveToolFailurePageUrl(controller, { tab_id: 'tab-gone' }), null)
   // no controller → null
   assert.equal(resolveToolFailurePageUrl(null, { tab_id: 'tab-6' }), null)
+})
+
+// ============================================================================
+// P0-1 (2026-07-02 P0 visibility batch) — hold-until-final response-boundary
+// release. T1/T3 pin the pre-existing no-leak contract (must be green before
+// AND after the change); T2 asserts the new boundary-release behavior.
+// Fixture mirrors the proven browser+explicit-skill shape (see the
+// "preserves browser tools when an explicit reference skill joins" test):
+// that combination surfaces the skills capability group, so skill_ask_user
+// lands in allowedToolNames and holdNativeTextUntilFinal turns ON.
+// ============================================================================
+
+function createSkillHoldRuntime(
+  runAgent: NonNullable<AgentSdkRuntimeDeps['runAgent']>,
+): AgentSdkRuntime {
+  const runtime = createRuntime({
+    skillContextOrchestrator: {
+      findExplicitlyRequestedSkills: () => [{ id: 'extract', name: 'extract' }],
+      buildPreferredSkillToolNames: () => ['skill_ask_user', 'skill_inspect_run_state'],
+      rememberExplicitReferenceSkillHint: () => true,
+    },
+    executeToolCall: async () => createToolExecutionOutput('查到了页面状态', {
+      shape: 'json',
+      data: { ok: true },
+    }),
+    runAgent,
+  })
+  runtime.setBrowserController({} as never)
+  return runtime
+}
+
+function joinedTextOutputs(events: Array<Record<string, unknown>>): string {
+  return events
+    .filter((event) => event.type === 'text')
+    .map((event) => String(event.chunk || ''))
+    .join('\n')
+}
+
+const HOLD_PROMPT = '打开小红书网页，用 extract 技能整理并发布一篇笔记'
+
+test('P0-1 pin: clarification-shaped final text on a skill turn never leaks into text output (steer path)', async () => {
+  let runAgentCalls = 0
+  const runtime = createSkillHoldRuntime(async ({ tools, onTextDelta }) => {
+    runAgentCalls += 1
+    if (runAgentCalls === 1) {
+      assert.ok(
+        tools.some((item) => (item as { name?: string }).name === 'skill_ask_user'),
+        'fixture must produce a hold turn (skill_ask_user exposed)',
+      )
+      onTextDelta('需要你确认预算')
+      onTextDelta('是多少，才能继续。')
+      return { finalText: '需要你确认预算是多少，才能继续。' }
+    }
+    onTextDelta('好的，我按默认预算继续整理。')
+    return { finalText: '好的，我按默认预算继续整理。' }
+  })
+  const events: Array<Record<string, unknown>> = []
+  runtime.on('output', (event) => events.push(event as Record<string, unknown>))
+  runtime.newSession('butler::scope-hold-steer', 'system prompt')
+
+  const result = await runtime.sendMessage('butler::scope-hold-steer', HOLD_PROMPT, 'run-hold-steer', {
+    publicSessionId: 'scope-hold-steer',
+    taskId: 'task-hold-steer',
+  })
+
+  assert.equal(result.success, true)
+  assert.equal(runAgentCalls, 2, 'clarification guard should steer once and re-run the model')
+  const visible = joinedTextOutputs(events)
+  assert.ok(!visible.includes('才能继续'), `steered clarification text must never surface: ${visible}`)
+  assert.ok(visible.includes('好的，我按默认预算继续整理。'))
+})
+
+test('P0-1: hold turn flushes buffered narration at the native tool boundary (text before tool_use, no dup/loss)', async () => {
+  const runtime = createSkillHoldRuntime(async ({ tools, onTextDelta }) => {
+    onTextDelta('我先查一下页面状态。')
+    const anyTool = tools.find((item) => {
+      const name = (item as { name?: string }).name || ''
+      return name.startsWith('browser_') || name === 'web_search'
+    }) as { invoke: (context: unknown, input: string) => Promise<unknown> } | undefined
+    assert.ok(anyTool, 'a native tool should be exposed to the run')
+    await anyTool.invoke({}, JSON.stringify({}))
+    onTextDelta('查完了，继续执行。')
+    return { finalText: '查完了，继续执行。' }
+  })
+  const events: Array<Record<string, unknown>> = []
+  runtime.on('output', (event) => events.push(event as Record<string, unknown>))
+  runtime.newSession('butler::scope-hold-boundary', 'system prompt')
+
+  const result = await runtime.sendMessage('butler::scope-hold-boundary', HOLD_PROMPT, 'run-hold-boundary', {
+    publicSessionId: 'scope-hold-boundary',
+    taskId: 'task-hold-boundary',
+  })
+
+  assert.equal(result.success, true)
+  const firstNarrationIndex = events.findIndex((event) => event.type === 'text' && String(event.chunk || '').includes('我先查一下页面状态。'))
+  const firstToolUseIndex = events.findIndex((event) => event.type === 'tool_use')
+  assert.ok(firstNarrationIndex >= 0, 'narration before the tool call must become visible')
+  assert.ok(firstToolUseIndex >= 0, 'tool_use trace event must exist')
+  assert.ok(firstNarrationIndex < firstToolUseIndex, `narration must flush BEFORE the tool row (${firstNarrationIndex} vs ${firstToolUseIndex})`)
+  const visible = joinedTextOutputs(events)
+  assert.equal(countOccurrences(visible, '我先查一下页面状态。'), 1, `narration must appear exactly once: ${visible}`)
+  assert.equal(countOccurrences(visible, '查完了，继续执行。'), 1, `tail text must appear exactly once: ${visible}`)
+})
+
+test('P0-1 pin: checkpoint after repeated clarification emits preserved text exactly once (no dup with hold)', async () => {
+  let runAgentCalls = 0
+  const runtime = createSkillHoldRuntime(async ({ onTextDelta }) => {
+    runAgentCalls += 1
+    if (runAgentCalls === 1) {
+      onTextDelta('需要你确认预算是多少，才能继续。')
+      return { finalText: '需要你确认预算是多少，才能继续。' }
+    }
+    onTextDelta('请提供门店面积和预算，才能继续。')
+    return { finalText: '请提供门店面积和预算，才能继续。' }
+  })
+  const events: Array<Record<string, unknown>> = []
+  runtime.on('output', (event) => events.push(event as Record<string, unknown>))
+  runtime.newSession('butler::scope-hold-checkpoint', 'system prompt')
+
+  const result = await runtime.sendMessage('butler::scope-hold-checkpoint', HOLD_PROMPT, 'run-hold-checkpoint', {
+    publicSessionId: 'scope-hold-checkpoint',
+    taskId: 'task-hold-checkpoint',
+  })
+
+  assert.equal(result.success, true)
+  assert.equal(runAgentCalls, 2)
+  const visible = joinedTextOutputs(events)
+  assert.equal(countOccurrences(visible, '请提供门店面积和预算，才能继续。'), 1, `checkpoint text must appear exactly once: ${visible}`)
+  assert.match(String(result.finalText || ''), /我先暂停在这里/)
+})
+
+test('P0-3: planning heartbeats surface before the first visible output', async () => {
+  const seq: string[] = []
+  const runtime = createRuntime({
+    runAgent: async ({ onTextDelta }) => {
+      onTextDelta('好的，这就开始。')
+      return { finalText: '好的，这就开始。' }
+    },
+  })
+  runtime.setRuntime({
+    publishScopeRunEvent: (payload: Record<string, unknown>) => {
+      seq.push(`hb:${String(payload.phase)}:${String(payload.latestText || '')}`)
+    },
+  } as never)
+  runtime.on('output', (event) => seq.push(`out:${String((event as Record<string, unknown>).type)}`))
+  runtime.newSession('butler::scope-heartbeat', 'system prompt')
+
+  const result = await runtime.sendMessage('butler::scope-heartbeat', '随便聊聊今天的安排', 'run-heartbeat', {
+    publicSessionId: 'scope-heartbeat',
+    taskId: 'task-heartbeat',
+  })
+
+  assert.equal(result.success, true)
+  const firstOutputIndex = seq.findIndex((entry) => entry.startsWith('out:'))
+  const heartbeatsBeforeOutput = seq.slice(0, firstOutputIndex === -1 ? seq.length : firstOutputIndex)
+    .filter((entry) => entry.startsWith('hb:planning:'))
+  assert.ok(firstOutputIndex >= 0, `run must produce visible output: ${seq.join(' | ')}`)
+  assert.ok(heartbeatsBeforeOutput.length >= 2, `>=2 planning heartbeats before first output: ${seq.join(' | ')}`)
+  assert.ok(heartbeatsBeforeOutput.some((entry) => entry.includes('正在理解需求')))
+  assert.ok(heartbeatsBeforeOutput.some((entry) => entry.includes('正在调用模型')))
 })

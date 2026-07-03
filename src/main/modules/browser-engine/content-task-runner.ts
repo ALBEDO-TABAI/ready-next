@@ -36,7 +36,11 @@ import { runBrowserCollection } from './browser-collector-engine'
 import type { NoteCollectFacade } from './browser-collector-actions'
 import { isHighControlPlatformText } from '../../../shared/browser-collection-intent'
 import { isBrowserSupervisionVisibleTaskStatus } from '../../../shared/browser-task-status'
-import { deriveCollectionTargets, type BrowserCollectionTarget } from './collection-targets'
+import {
+  assessCollectionTargets,
+  deriveCollectionTargets,
+  type BrowserCollectionTarget,
+} from './collection-targets'
 import { resolveCollectionVerdict } from './collection-verdict'
 import type { BrowserAgentRuntime } from './agent-runtime-adapter'
 import { BrowserPageStateService, normalizeEmptyPageDiagnostic, type BrowserEmptyPageDiagnostic } from './page-state-service'
@@ -273,6 +277,7 @@ function mediaCandidatesFromVisibleItems(items: BrowserStructuredItem[]): string
 
 function visibleCollectResult(taskId: string, items: BrowserStructuredItem[], rounds: number, stopReason: string, targetUrl: string, outputRootDir: unknown, userExpectedTotal?: number, template = 'card_list') {
   const noteCandidates = deriveCollectionTargets(items)
+  const targetAssessment = assessCollectionTargets(items, noteCandidates)
   const mediaCandidates = template === 'image_gallery' ? mediaCandidatesFromVisibleItems(items) : []
   const frozenCount = visibleCollectFrozenCount(items, template)
   const rawDiscoveryStatus = discoveryStatusFor(stopReason)
@@ -293,6 +298,9 @@ function visibleCollectResult(taskId: string, items: BrowserStructuredItem[], ro
     frozenCount,
     noteCandidates,
     candidateCount: noteCandidates.length,
+    targetQuality: targetAssessment.quality,
+    targetQualityReasons: targetAssessment.reasons,
+    targetAssessment,
     ...(template === 'image_gallery'
       ? {
           mediaCandidates,
@@ -312,7 +320,7 @@ function visibleCollectResult(taskId: string, items: BrowserStructuredItem[], ro
           },
         }
       : {}),
-    ...(canStartNoteCollect && noteCandidates.length > 0
+    ...(canStartNoteCollect && noteCandidates.length > 0 && targetAssessment.quality !== 'suspect_navigation_pollution'
       ? {
           suggestedNextTool: {
             name: 'browser_collect_notes',
@@ -1337,6 +1345,10 @@ export class BrowserContentTaskRunner {
       stopReason,
       failures: 0,
       cursorValid: round > 0,
+      targetQuality: finalResult.targetQuality,
+      // P1-R1 — high-control pages that served only a nav shell become a
+      // recoverable user-takeover, not a hard failure.
+      highControl: isHighControlPlatformText(targetUrl),
     })
     const finalStatus = stopReason === 'cancelled'
       ? 'cancelled'
@@ -1350,7 +1362,7 @@ export class BrowserContentTaskRunner {
     const emptyDiagnostics = (
       stopReason !== 'cancelled' &&
       stopReason !== 'lease_lost' &&
-      collectionVerdict.verdict === 'needs_attention'
+      (collectionVerdict.verdict === 'needs_attention' || collectionVerdict.verdict === 'needs_user_takeover')
     )
       ? await probeVisibleCollectEmptyDiagnostics(this.capabilityService, { targetUrl, itemSelector, template })
       : null
@@ -1559,8 +1571,19 @@ export class BrowserContentTaskRunner {
         stopReason: result.stopReason || 'unknown',
         failures: failedItems.length,
         cursorValid: Number.isFinite(result.state.cursor),
+        // P1 — honor the upstream freeze-time quality so a polluted list can
+        // never be marked completed even on the direct note_collect path.
+        targetQuality: plan.targetQuality,
+        // P1-R1 — high-control (XHS/…) empty/polluted → recoverable takeover.
+        highControl: isHighControlPlatformText(plan.targetProfileUrl)
+          || plan.notes.some((n) => isHighControlPlatformText(n.url)),
       })
-      const completedByTerminalNoteRule = incompleteError === null && result.collected.length > 0
+      // P1 — a nav-polluted freeze list must never satisfy the terminal
+      // note rule: defer to the verdict (which returns a non-completed status
+      // for suspect_navigation_pollution).
+      const completedByTerminalNoteRule = incompleteError === null
+        && result.collected.length > 0
+        && plan.targetQuality !== 'suspect_navigation_pollution'
       const finalStatus: BrowserCapabilityTaskHandle['status'] = result.stopReason === 'needs_verification'
         ? 'waiting_human'
         : result.stopReason === 'cancelled'

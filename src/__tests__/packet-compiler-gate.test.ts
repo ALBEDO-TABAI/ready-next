@@ -24,6 +24,7 @@ test('threshold matrix: only multi_step_task/research with ≥2 targets compile;
     direct_answer: false,
     short_task: false,
     media_task: false,
+    browser_transaction: false,
     continuation: false,
   }
   assert.deepEqual(Object.keys(expectations).sort(), [...TASK_TYPES].sort(), 'matrix covers every task type')

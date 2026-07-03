@@ -86,11 +86,39 @@ test('browser-agent-runner declares user-view-assisted workflow binding', () => 
     toolName: 'browser_run_workflow',
     dispatch: 'browser-agent-runner',
     hasRunnerLeaseGate: true,
+    boundSurface: 'user-view',
   })
   assert.equal(result.ok, true)
   if (!result.ok) return
   assert.equal(result.binding.intent, 'user-view-assisted')
   assert.equal(result.binding.engineSurface, 'user-view')
+})
+
+test('browser-agent-runner declares agent-view foreground workflow binding', () => {
+  const result = resolveBrowserToolSurfaceBinding({
+    toolName: 'browser_click_at',
+    dispatch: 'browser-agent-runner',
+    hasRunnerLeaseGate: true,
+    boundSurface: 'agent-view',
+    agentTabId: 'agent-tab-1',
+  })
+  assert.equal(result.ok, true)
+  if (!result.ok) return
+  assert.equal(result.binding.intent, 'agent-view-foreground')
+  assert.equal(result.binding.engineSurface, 'agent-view')
+  assert.equal(result.binding.requiresTurnLease, true)
+})
+
+test('browser-agent-runner agent-view writes require a bound agent tab', () => {
+  const result = resolveBrowserToolSurfaceBinding({
+    toolName: 'browser_click_at',
+    dispatch: 'browser-agent-runner',
+    hasRunnerLeaseGate: true,
+    boundSurface: 'agent-view',
+  })
+  assert.equal(result.ok, false)
+  if (result.ok) return
+  assert.equal(result.error.errorCode, 'browser_surface_binding_violation')
 })
 
 test('browser-agent-runner writes require the runner lease gate at each tool call', () => {

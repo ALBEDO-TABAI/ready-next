@@ -31,6 +31,7 @@ export class BrowserHostLayoutService {
         partition,
         spellcheck: true,
         webSecurity: true,
+        backgroundThrottling: false,
       }),
     }
     const view = this.browserHostKind === 'webContentsView'

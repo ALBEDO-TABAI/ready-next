@@ -29,6 +29,9 @@ test('risk level comes from the code authority, not the card (high-control = hig
   assert.ok(xhs)
   assert.equal(xhs!.riskLevel, 'high') // isHighControlPlatformText('xiaohongshu.com') → high
   assert.ok(xhs!.body.includes('反爬'))
+  assert.ok(xhs!.body.includes('发布后台'))
+  assert.ok(xhs!.body.includes('iframe/OOPIF'))
+  assert.ok(!xhs!.body.includes('禁用脚本通道'))
 })
 
 test('a non-high-control domain resolves to low even if card says otherwise', () => {

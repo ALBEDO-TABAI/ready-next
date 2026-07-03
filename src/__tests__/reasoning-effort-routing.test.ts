@@ -76,7 +76,7 @@ test('openai-compatible patcher preserves reasoning_effort on the empty body pat
   })
   const body: any = { messages: [] }
   applyProviderRequestPatch(body, ctx)
-  // The default patcher still runs (stream_usage / stream_options).
-  assert.equal(body.stream_usage, true)
+  assert.equal('stream_usage' in body, false)
+  assert.equal('stream_options' in body, false)
   assert.equal('reasoning_effort' in body, false)
 })

@@ -166,6 +166,37 @@ describe('AI provider workspace', () => {
     assert.deepEqual(config.modelIds, ['gpt-5.4', 'gpt-4o'])
   })
 
+  it('normalizes DeepSeek endpoints away from generic placeholder models', () => {
+    const config = normalizeAIConfig({
+      provider: 'deepseek',
+      baseUrl: 'https://api.deepseek.com',
+      apiKey: 'sk-test',
+      model: 'newcli-codex',
+      modelIds: ['newcli-codex'],
+    } as unknown as AIModelConfig)
+
+    assert.equal(config.provider, 'openai-compatible')
+    assert.equal(config.model, 'deepseek-v4-flash')
+    assert.deepEqual(config.modelIds, ['deepseek-v4-flash', 'deepseek-v4-pro'])
+
+    const capabilities = resolveAIConfigCapabilities(config)
+    assert.equal(capabilities?.agentProtocol, 'openai')
+    assert.equal(capabilities?.wireApi, 'chat/completions')
+  })
+
+  it('keeps explicit DeepSeek model choices', () => {
+    const config = normalizeAIConfig({
+      provider: 'openai-compatible',
+      baseUrl: 'https://api.deepseek.com',
+      apiKey: 'sk-test',
+      model: 'deepseek-v4-pro',
+      modelIds: ['deepseek-v4-pro', 'deepseek-v4-flash'],
+    })
+
+    assert.equal(config.model, 'deepseek-v4-pro')
+    assert.deepEqual(config.modelIds, ['deepseek-v4-pro', 'deepseek-v4-flash'])
+  })
+
   it('preserves context window overrides through workspace normalization and legacy export', () => {
     const customProfile = createCustomAIProviderProfile({
       provider: 'openai-compatible',

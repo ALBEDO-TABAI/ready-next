@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { runUnderUserViewLease } from '../main/modules/browser-engine/agent-browser-lane'
+import { runUnderBrowserViewLease, runUnderUserViewLease } from '../main/modules/browser-engine/agent-browser-lane'
 import { BrowserWriteLeaseService } from '../main/modules/browser-engine/browser-write-lease'
 
 describe('lane-A runUnderUserViewLease', () => {
@@ -93,5 +93,22 @@ describe('lane-A runUnderUserViewLease', () => {
       },
     )
     assert.equal(outcome.ok, true)
+  })
+
+  it('can run the same lifecycle on the agent-view surface', async () => {
+    const service = new BrowserWriteLeaseService()
+    const outcome = await runUnderBrowserViewLease(
+      service,
+      { surface: 'agent-view', taskId: 'foreground-browser', runId: 'run-1', tabId: 'agent-tab-1' },
+      async (gate) => {
+        assert.equal(gate.surface, 'agent-view')
+        assert.equal(service.getState('agent-view'), 'held')
+        assert.equal(service.checkWrite({ surface: 'agent-view', leaseId: gate.leaseId }), null)
+        assert.equal(service.getState('user-view'), 'idle')
+        return 'agent-done'
+      },
+    )
+    assert.deepEqual(outcome, { ok: true, value: 'agent-done' })
+    assert.equal(service.getState('agent-view'), 'idle')
   })
 })

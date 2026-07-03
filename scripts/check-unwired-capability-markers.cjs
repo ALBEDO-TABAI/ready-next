@@ -10,8 +10,12 @@ const UNWIRED_PACKET_FILES = Object.freeze([
   'src/main/modules/agent-control/quality/packet-failure.ts',
 ])
 
+// P5d cluster — deterministic-parts migration (2026-07-03): crystallize-gate.ts
+// was migrated to live (runtime.ts CrystallizeScheduler + belief-decay round);
+// it is now a live-required capability with a `crystallize_round_fired` ledger,
+// so it is removed from the unwired set. candidate-maintenance / emergence-cards
+// stay deferred (LLM/UI parts not yet wired).
 const UNWIRED_MAINTENANCE_FILES = Object.freeze([
-  'src/main/modules/agent-control/maintenance/crystallize-gate.ts',
   'src/main/modules/agent-control/emergence/candidate-maintenance.ts',
   'src/main/modules/agent-control/emergence/emergence-cards.ts',
 ])
@@ -35,10 +39,6 @@ const INTRA_CLUSTER_ALLOW = Object.freeze([
   [
     'src/main/modules/agent-control/quality/packet-dispatch.ts',
     'src/main/modules/agent-control/quality/packet-compiler.ts',
-  ],
-  [
-    'src/main/modules/agent-control/maintenance/maintenance-llm-round.ts',
-    'src/main/modules/agent-control/maintenance/crystallize-gate.ts',
   ],
 ])
 

@@ -33,13 +33,6 @@ export class TurnEngine {}
   write(root, 'src/main/modules/agent-control/contracts/run-contracts.ts', `
 export interface TurnEngineHost {}
 `)
-  write(root, 'src/main/modules/agent-control/runtime-core/execution-loop-orchestrator.ts', `
-export class ExecutionLoopOrchestrator {}
-`)
-  write(root, 'src/main/modules/agent-control/compaction/index.ts', `
-export * from './layered-compactor'
-export * from './context-compression'
-`)
   write(root, 'src/main/modules/claude-bridge/direct-chat.ts', `
 export class DirectChatEngine {}
 `)
@@ -62,17 +55,6 @@ import { compressHistoryForPrompt } from '../compaction/context-compression'
   const result = check({ root })
   assert.equal(result.ok, false)
   assert.ok(result.errors.some((error) => error.includes('sdk_runtime_imports_dormant_compaction:context-compression')))
-})
-
-test('gate fails for a new non-dormant layered compactor import', (t) => {
-  const root = makeRoot(t)
-  writeBaseline(root)
-  write(root, 'src/main/modules/agent-control/runtime-core/new-live-path.ts', `
-import { createLayeredCompactor } from '../compaction/layered-compactor'
-`)
-  const result = check({ root })
-  assert.equal(result.ok, false)
-  assert.ok(result.errors.some((error) => error.includes('unexpected_layered_compactor_import')))
 })
 
 test('gate fails when dormant TurnEngine imports context compression', (t) => {
@@ -100,36 +82,11 @@ export async function loadCompression() {
   assert.ok(result.errors.some((error) => error.includes('unexpected_context_compression_import:src/main/modules/agent-control/turn-engine.ts')))
 })
 
-test('gate fails when dormant TurnEngine imports layered compactor', (t) => {
-  const root = makeRoot(t)
-  writeBaseline(root)
-  write(root, 'src/main/modules/agent-control/turn-engine.ts', `
-import { createLayeredCompactor } from './compaction/layered-compactor'
-export class TurnEngine {}
-`)
-  const result = check({ root })
-  assert.equal(result.ok, false)
-  assert.ok(result.errors.some((error) => error.includes('unexpected_layered_compactor_import:src/main/modules/agent-control/turn-engine.ts')))
-})
-
-test('gate fails when dormant TurnEngine dynamically imports layered compactor', (t) => {
-  const root = makeRoot(t)
-  writeBaseline(root)
-  write(root, 'src/main/modules/agent-control/turn-engine.ts', `
-export async function loadLayeredCompactor() {
-  return import('./compaction/layered-compactor')
-}
-`)
-  const result = check({ root })
-  assert.equal(result.ok, false)
-  assert.ok(result.errors.some((error) => error.includes('unexpected_layered_compactor_import:src/main/modules/agent-control/turn-engine.ts')))
-})
-
 test('gate fails when dormant TurnEngine imports compaction barrel', (t) => {
   const root = makeRoot(t)
   writeBaseline(root)
   write(root, 'src/main/modules/agent-control/turn-engine.ts', `
-import { createLayeredCompactor } from './compaction'
+import { compressHistoryForPrompt } from './compaction'
 export class TurnEngine {}
 `)
   const result = check({ root })
@@ -172,21 +129,6 @@ export interface TurnEngineHost {
   const result = check({ root })
   assert.equal(result.ok, false)
   assert.ok(result.errors.some((error) => error.includes('unexpected_dormant_compress_context_channel:src/main/modules/agent-control/contracts/run-contracts.ts')))
-})
-
-test('gate fails when execution loop exposes dormant compressContext channel', (t) => {
-  const root = makeRoot(t)
-  writeBaseline(root)
-  write(root, 'src/main/modules/agent-control/runtime-core/execution-loop-orchestrator.ts', `
-export class ExecutionLoopOrchestrator {
-  requestToolLoopResponse(params: { compressContext?: () => boolean }) {
-    return params.compressContext?.()
-  }
-}
-`)
-  const result = check({ root })
-  assert.equal(result.ok, false)
-  assert.ok(result.errors.some((error) => error.includes('unexpected_dormant_compress_context_channel:src/main/modules/agent-control/runtime-core/execution-loop-orchestrator.ts')))
 })
 
 test('gate fails when direct chat forwards dormant compressContext channel', (t) => {

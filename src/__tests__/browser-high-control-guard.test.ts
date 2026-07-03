@@ -3,6 +3,7 @@ import { describe, it, test } from 'node:test'
 
 import { executeBrowserTool } from '../main/modules/tools/browser-tools'
 import { isAgentBrowserError } from '../main/modules/browser-engine/agent-browser-errors'
+import { __clearBrowserPowerPolicyForTests } from '../main/modules/browser-engine/browser-power-policy'
 import type { BrowserController } from '../main/modules/browser-engine/ipc-handler'
 
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
@@ -39,10 +40,30 @@ function parseError(out: string | { data?: unknown }): { errorCode?: string } | 
 const XHS = 'https://www.xiaohongshu.com/user/profile/abc'
 const GENERIC = 'https://example.com/page'
 
+test.beforeEach(() => {
+  __clearBrowserPowerPolicyForTests()
+})
+
 describe('high-control platform script blacklist (WP3)', () => {
   it('blocks browser_execute_js on 小红书 with script_blocked', async () => {
     const out = await executeBrowserTool('browser_execute_js', { code: 'document.title' }, controllerOn(XHS))
     assert.equal(parseError(out)?.errorCode, 'script_blocked')
+  })
+
+  it('allows browser_power_eval on 小红书 when Power Mode is authorized', async () => {
+    const out = await executeBrowserTool(
+      'browser_power_eval',
+      { code: 'document.title', purpose: 'inspect high-control page structure' },
+      controllerOn(XHS, { executeJS: async () => 'XHS Title' }),
+      undefined,
+      'session-1',
+      undefined,
+      '用 Power Browser 操作小红书页面',
+    )
+    assert.equal(parseError(out), null)
+    const parsed = typeof out === 'string' ? JSON.parse(out) as Record<string, unknown> : out.data as Record<string, unknown>
+    assert.equal(parsed.ok, true)
+    assert.equal(parsed.result, 'XHS Title')
   })
 
   it('blocks browser_run_workflow on 小红书', async () => {

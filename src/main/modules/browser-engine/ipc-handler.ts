@@ -22,7 +22,7 @@ import { ScopedBrowserFacade } from './scoped-browser-facade'
 import type { BrowserCollectionTarget } from './collection-targets'
 import { AgentTabControlGate } from './agent-tab-control-gate'
 import { getBrowserWriteLeaseService } from './agent-browser-lease-singleton'
-import { isAgentBrowserError, type AgentBrowserSurface } from './agent-browser-errors'
+import { agentBrowserError, isAgentBrowserError, type AgentBrowserStructuredError, type AgentBrowserSurface } from './agent-browser-errors'
 import {
   isUserViewKeyboardTakeoverInput,
   recordUserViewTakeoverSignal,
@@ -96,6 +96,10 @@ import {
   toOAuthCompatibleUserAgent,
 } from './popup-policy'
 import { BrowserVisibilityCommandState } from './visibility-command-state'
+import {
+  BrowserWorkflowSessionStore,
+  type BrowserWorkflowSession,
+} from './browser-workflow-session'
 import type { BrowserUtilityMenuRequest } from '../../../shared/browser-utility-menu'
 import { READY_BROWSER_BLANK_URL } from '../../../shared/browser-defaults'
 import { parseBrowserLocalMediaDropUrl } from '../../../shared/browser-local-media-drop'
@@ -171,6 +175,9 @@ export class BrowserController {
   private readonly agentTabControlGate = new AgentTabControlGate()
   /** The dedicated background tab the collector sub-agent drives (plan §3.5/§3.9). */
   private agentTabId: string | null = null
+  private foregroundAgentTabId: string | null = null
+  private readonly workflowSessionStore = new BrowserWorkflowSessionStore()
+  private releaseForegroundWorkflowBoundsLock: (() => void) | null = null
   private readonly tabLifecycleService: BrowserTabLifecycleService
   private readonly tabMetaService: BrowserTabMetaService<Tab>
   private readonly tabShellService: BrowserTabShellService
@@ -322,7 +329,13 @@ export class BrowserController {
       sendToRenderer: (channel, data) => this.sendToRenderer(channel, data),
       emitTabMeta: (tabId) => this.emitTabMeta(tabId),
       logBrowserDiag: (message) => this.logBrowserDiag(message),
-      bindPopup: (webContents) => this.popupManager.bindWindow(webContents),
+      bindPopup: (webContents) => {
+        const sourceTabId = this.getTabIdForWebContents(webContents.id)
+        this.popupManager.bindWindow(webContents, {
+          sourceTabId,
+          sourceOwner: sourceTabId ? this.tabs.get(sourceTabId)?.owner ?? null : null,
+        })
+      },
       bindAppShortcutBridge: (webContents) => this.bindAppShortcutBridge(webContents),
       installContextMenu: (webContents) => this.contextMenuService.install(webContents),
       handleWindowOpen: (details, source, sourceContentsId) => this.handleWindowOpen(details, source, sourceContentsId),
@@ -409,7 +422,7 @@ export class BrowserController {
     this.sessionPolicyService.setupBrowserSessionPolicies()
     this.windowOpenService = new BrowserWindowOpenService({
       popupManager: this.popupManager,
-      openInTab: (url) => this.openPopupInTab(url),
+      openInTab: (url, context) => this.openPopupInTab(url, context),
       logBrowserDiag: (message) => this.logBrowserDiag(message),
       openExternal: (url) => {
         shell.openExternal(url)
@@ -466,6 +479,16 @@ export class BrowserController {
       if (tab.view?.webContents.id === webContentsId) return tab.id
     }
     return null
+  }
+
+  private syncPopupContextForTab(tabId: string): void {
+    const tab = this.tabs.get(tabId)
+    const webContents = tab?.view?.webContents
+    if (!tab || !webContents) return
+    this.popupManager.bindWindow(webContents, {
+      sourceTabId: tab.id,
+      sourceOwner: tab.owner,
+    })
   }
 
   private emitTabMeta(tabId: string): void {
@@ -596,8 +619,12 @@ export class BrowserController {
     return true
   }
 
-  private openPopupInTab(url: string): void {
-    void this.createTab(url)
+  private openPopupInTab(
+    url: string,
+    context: { sourceTabId?: string | null; sourceOwner?: BrowserTabOwner | null } = {},
+  ): void {
+    const agentOwned = context.sourceOwner === 'agent'
+    void this.createTab(url, agentOwned ? { background: true } : undefined)
       .then((result) => {
         if (!result.success || !result.tabId) {
           this.logBrowserDiag(`[browser-v3][popup] create tab failed: ${result.error || 'unknown error'}`)
@@ -609,6 +636,18 @@ export class BrowserController {
         if (!tab) {
           this.logBrowserDiag(`[browser-v3][popup] created tab missing metadata tab=${result.tabId}`)
           return
+        }
+
+        if (agentOwned) {
+          this.updateTabRuntimeState(result.tabId, {
+            owner: 'agent',
+            required: true,
+            activity: 'running',
+            lastAuditedAt: Date.now(),
+          })
+          this.syncPopupContextForTab(result.tabId)
+          this.attachAgentTabSupervision(result.tabId)
+          this.adoptForegroundWorkflowPopup(context.sourceTabId || null, result.tabId)
         }
 
         this.sendToRenderer('browser:tabOpened', this.tabMetaService.buildTabPayload(tab))
@@ -1077,11 +1116,168 @@ export class BrowserController {
     this.agentTabId = created.tabId
     this.agentTabControlGate.reset()
     this.updateTabRuntimeState(created.tabId, { owner: 'agent', activity: 'running' })
+    this.syncPopupContextForTab(created.tabId)
     if (previousActive && this.activeTabId === created.tabId && this.tabs.has(previousActive)) {
       this.switchTab(previousActive)
     }
     this.attachAgentTabSupervision(created.tabId)
     return created.tabId
+  }
+
+  private async ensureForegroundAgentTab(): Promise<string> {
+    if (this.foregroundAgentTabId) {
+      const foregroundTab = this.tabs.get(this.foregroundAgentTabId)
+      if (foregroundTab?.owner === 'agent') {
+        this.agentTabControlGate.reset()
+        this.updateTabRuntimeState(this.foregroundAgentTabId, {
+          required: true,
+          activity: 'running',
+          lastAuditedAt: Date.now(),
+        })
+        this.syncPopupContextForTab(this.foregroundAgentTabId)
+        this.attachAgentTabSupervision(this.foregroundAgentTabId)
+        return this.foregroundAgentTabId
+      }
+    }
+
+    const previousActive = this.activeTabId
+    const created = await this.createTab(READY_BROWSER_BLANK_URL, { background: true })
+    if (!created.success || !created.tabId) {
+      throw new Error(created.error || 'failed to create foreground agent tab')
+    }
+    this.foregroundAgentTabId = created.tabId
+    this.agentTabControlGate.reset()
+    this.updateTabRuntimeState(created.tabId, {
+      owner: 'agent',
+      required: true,
+      activity: 'running',
+      lastAuditedAt: Date.now(),
+    })
+    this.syncPopupContextForTab(created.tabId)
+    if (previousActive && this.activeTabId === created.tabId && this.tabs.has(previousActive)) {
+      this.switchTab(previousActive)
+    }
+    this.attachAgentTabSupervision(created.tabId)
+    return created.tabId
+  }
+
+  private getForegroundAgentLaneStartBlocker(runId: string): AgentBrowserStructuredError | null {
+    const leaseService = getBrowserWriteLeaseService()
+    const state = leaseService.getState('agent-view')
+    const lease = leaseService.getLease('agent-view')
+    if (state === 'held' && lease?.runId !== runId) {
+      return agentBrowserError(
+        'lease_held',
+        `Surface agent-view is already locked by task ${lease?.taskId || 'unknown'}.`,
+        { surface: 'agent-view', heldBy: lease?.taskId ?? null, leaseId: lease?.leaseId ?? null },
+      )
+    }
+    if (state === 'takeover') {
+      return agentBrowserError(
+        'lease_takeover',
+        'Surface agent-view is under user takeover; foreground workflow is blocked.',
+        { surface: 'agent-view' },
+      )
+    }
+    return null
+  }
+
+  async beginForegroundBrowserWorkflowSession(params: {
+    runId: string
+    taskId?: string
+    lane?: AgentBrowserSurface
+  }): Promise<{ ok: true; session: BrowserWorkflowSession } | { ok: false; error: AgentBrowserStructuredError }> {
+    const lane = params.lane ?? 'agent-view'
+    const sourceUserTabId = this.activeTabId
+    if (lane === 'agent-view') {
+      const blocker = this.getForegroundAgentLaneStartBlocker(params.runId)
+      if (blocker) return { ok: false, error: blocker }
+    }
+    const boundTabId = lane === 'agent-view'
+      ? await this.ensureForegroundAgentTab()
+      : sourceUserTabId
+    if (!boundTabId) {
+      return {
+        ok: false,
+        error: {
+          ok: false,
+          errorCode: 'browser_surface_binding_violation',
+          message: 'Browser workflow has no tab to bind.',
+          detail: { surface: lane },
+        },
+      }
+    }
+
+    const result = this.workflowSessionStore.startForeground({
+      runId: params.runId,
+      taskId: params.taskId || params.runId,
+      lane,
+      boundTabId,
+      sourceUserTabId,
+      frameUrl: this.tabs.get(sourceUserTabId || '')?.url || null,
+    })
+    if (result.ok) {
+      if (lane === 'agent-view') {
+        this.releaseForegroundWorkflowBoundsLock?.()
+        this.releaseForegroundWorkflowBoundsLock = this.acquireTabBoundsLock(boundTabId, `foreground-workflow:${params.runId}`)
+      }
+      this.notifyBrowserLeaseChanged()
+      this.sendToRenderer('browser:agentControlChanged', { state: this.agentTabControlGate.getState() })
+    }
+    return result
+  }
+
+  updateForegroundBrowserWorkflowTarget(runId: string, boundTabId: string, reason?: string): BrowserWorkflowSession | null {
+    const updated = this.workflowSessionStore.updateBoundTab(runId, boundTabId, reason)
+    if (updated?.lane === 'agent-view') {
+      this.foregroundAgentTabId = boundTabId
+      this.updateTabRuntimeState(boundTabId, {
+        owner: 'agent',
+        required: true,
+        activity: 'running',
+        lastAuditedAt: Date.now(),
+      })
+      this.syncPopupContextForTab(boundTabId)
+      this.attachAgentTabSupervision(boundTabId)
+      this.sendToRenderer('browser:agentControlChanged', { state: this.agentTabControlGate.getState() })
+    }
+    return updated
+  }
+
+  closeForegroundBrowserWorkflowSession(
+    runId: string,
+    closeKind: 'workflow_completed' | 'workflow_failed' | 'user_interrupted',
+    reason?: string,
+  ): BrowserWorkflowSession | null {
+    const session = this.workflowSessionStore.close(runId, reason || closeKind)
+    if (!session) return null
+    if (session.lane === 'agent-view') {
+      this.updateTabRuntimeState(session.boundTabId, {
+        required: false,
+        activity: closeKind === 'user_interrupted' ? 'attention' : 'idle',
+        lastAuditedAt: Date.now(),
+      })
+      this.releaseForegroundWorkflowBoundsLock?.()
+      this.releaseForegroundWorkflowBoundsLock = null
+    }
+    this.notifyBrowserLeaseChanged()
+    this.sendToRenderer('browser:agentControlChanged', { state: this.agentTabControlGate.getState() })
+    return session
+  }
+
+  getActiveForegroundBrowserWorkflowSession(): BrowserWorkflowSession | null {
+    return this.workflowSessionStore.getActiveForeground()
+  }
+
+  private adoptForegroundWorkflowPopup(sourceTabId: string | null, nextTabId: string): void {
+    const activeSession = this.workflowSessionStore.getActiveForeground()
+    if (!activeSession || activeSession.boundTabId !== sourceTabId) return
+    this.updateTabRuntimeState(activeSession.boundTabId, {
+      required: false,
+      activity: 'idle',
+      lastAuditedAt: Date.now(),
+    })
+    this.updateForegroundBrowserWorkflowTarget(activeSession.runId, nextTabId, 'agent_popup_followed')
   }
 
   /**
@@ -1262,10 +1458,19 @@ export class BrowserController {
           && (task.status === 'queued' || task.status === 'running' || task.status === 'paused')
       })
       await Promise.all(tasks.map((task) => this.contentTaskRunner.cancelTask(task.taskId)))
-      const takeoverTabId = this.agentTabId
+      const foreground = this.workflowSessionStore.getActiveForeground()
+      const takeoverTabId = foreground?.boundTabId || this.agentTabId
       if (takeoverTabId && this.tabs.has(takeoverTabId)) {
         this.updateTabRuntimeState(takeoverTabId, { owner: 'manual', activity: 'attention' })
-        this.agentTabId = null
+        this.syncPopupContextForTab(takeoverTabId)
+        if (takeoverTabId === this.agentTabId) this.agentTabId = null
+        if (takeoverTabId === this.foregroundAgentTabId) this.foregroundAgentTabId = null
+      }
+      if (foreground) {
+        this.workflowSessionStore.close(foreground.runId, 'user_takeover_confirmed')
+        this.releaseForegroundWorkflowBoundsLock?.()
+        this.releaseForegroundWorkflowBoundsLock = null
+        this.notifyBrowserLeaseChanged()
       }
       this.notifyAgentControlChanged()
       return { state: this.agentTabControlGate.getState(), frozen, takeoverTabId }
@@ -1487,10 +1692,12 @@ export class BrowserController {
     overrideBrowserWindowOptions?: Electron.BrowserWindowConstructorOptions
   } {
     const referrerUrl = details.referrer?.url || this.resolveUrlForWebContentsId(sourceContentsId)
+    const sourceTabId = this.getTabIdForWebContents(sourceContentsId)
+    const sourceOwner = sourceTabId ? this.tabs.get(sourceTabId)?.owner ?? null : null
     return this.windowOpenService.handle({
       ...details,
       referrer: referrerUrl ? { url: referrerUrl } : details.referrer,
-    }, source, sourceContentsId)
+    }, source, sourceContentsId, { sourceTabId, sourceOwner })
   }
 
   async importBookmarksFromDialog(): Promise<{

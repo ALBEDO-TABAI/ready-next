@@ -235,42 +235,7 @@ export async function runMaintenanceLlmRound(deps: MaintenanceRoundDeps): Promis
   return report
 }
 
-/** Real decay signals: graph backlinks (C1 plan) + mirror access counts.
- *  EP4-K-mirror — every scope participates, and backlinks resolve PER
- *  SCOPE: the same slug owned by two agents never feeds each other's
- *  in-degree. */
-export function collectBeliefDecaySignals(
-  store: BeliefCardStore,
-  readMirror: (relPath: string) => { accessCount: number; wasUsefulCount: number } | null,
-  now: Date,
-): BeliefDecaySignals[] {
-  const files = store.listAllCardFilesAllScopes()
-  // backlinks = incoming forward edges (same scan discipline as the C1 plan:
-  // authored [[links]] only — generated blocks were already stripped by C1
-  // before they could pollute bodies). Keyed by (scope, slug).
-  const incoming = new Map<string, number>()
-  for (const file of files) {
-    if (!file.card) continue
-    const matches = file.card.body.matchAll(/\[\[([^\][\n]+)\]\]/g)
-    for (const match of matches) {
-      const slug = match[1].trim()
-      const key = `${file.scopeId}|${slug}`
-      incoming.set(key, (incoming.get(key) ?? 0) + 1)
-    }
-  }
-  return files.flatMap((file) => {
-    if (!file.card) return []
-    const slug = file.relPath.replace(/^.*\//, '').replace(/\.md$/, '')
-    const mirror = readMirror(file.relPath)
-    return [{
-      relPath: file.relPath,
-      confidence: file.card.frontmatter.confidence,
-      created: file.card.frontmatter.created,
-      accessCount: mirror?.accessCount ?? 0,
-      wasUsefulCount: mirror?.wasUsefulCount ?? 0,
-      backlinksCount: incoming.get(`${file.scopeId}|${slug}`) ?? 0,
-      markedDecayed: String(file.card.frontmatter.source || '').includes('decayed'),
-      possibleDuplicate: isPossibleDuplicateOfSource(file.card.frontmatter.source),
-    }]
-  })
-}
+// collectBeliefDecaySignals MOVED to memory/belief-decay.ts (P5d deterministic
+// migration, 2026-07-03) so the LIVE decay wiring never imports this dormant
+// LLM-round file. Re-exported here for existing importers.
+export { collectBeliefDecaySignals } from '../memory/belief-decay'

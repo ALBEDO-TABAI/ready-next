@@ -1,5 +1,7 @@
 # Dependencies
 node_modules/
+# worktree 布局下 node_modules 是指向主仓的符号链接，尾斜杠模式匹配不到
+node_modules
 .pnp
 .pnp.js
 
