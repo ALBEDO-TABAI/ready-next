@@ -300,6 +300,13 @@ function buildPageMapAmbiguityGroups(targets: PageMap['targets']): Array<{ role:
   return Array.from(groups.values()).filter((group) => group.targetIds.length > 1)
 }
 
+/**
+ * 2026-07-03 真机回归 R1 根因修复：page_map 默认体量预算。此前 model 不传
+ * max_bytes 时 map 不限量——小红书发布编辑器单次 ~27k token，触发 presend
+ * 单结果截断后模型信息真空。32KB（钳制区间内）≈8-11k token，留足两次读。
+ */
+const DEFAULT_AGENT_PAGE_MAP_MAX_BYTES = 32_768
+
 async function captureAgentPageMap(
   controller: BrowserController,
   tabId: string | null,
@@ -4176,7 +4183,9 @@ export async function executeBrowserTool(
       case 'browser_read_page_map': {
         let tabId = (args.tab_id as string) || null
         tabId = (await resolveHighControlAgentTab(controller, args, { signal: abortSignal })).tabId
-        const maxBytes = typeof args.max_bytes === 'number' ? Math.max(1024, Math.min(65_536, args.max_bytes)) : undefined
+        const maxBytes = typeof args.max_bytes === 'number'
+          ? Math.max(1024, Math.min(65_536, args.max_bytes))
+          : DEFAULT_AGENT_PAGE_MAP_MAX_BYTES
         const payload = await captureAgentPageMap(controller, tabId, maxBytes)
         const pageMapRecord = payload.pageMap && typeof payload.pageMap === 'object'
           ? payload.pageMap as Record<string, unknown>
@@ -4342,7 +4351,7 @@ export async function executeBrowserTool(
         await settleAfterAction(controller, tabId, abortSignal)
         const followedTab = await waitForActionFollowedTab(controller, tabId, beforeTabs, abortSignal)
         const after = readBack === 'map'
-          ? await captureAgentPageMap(controller, tabId)
+          ? await captureAgentPageMap(controller, tabId, DEFAULT_AGENT_PAGE_MAP_MAX_BYTES)
           : readBack === 'none'
             ? null
             : await readBrowserActionDeltaBestEffort(controller, tabId, 'after')

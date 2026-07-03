@@ -126,6 +126,23 @@ preload `runFeedback` API + electron.d.ts 类型 + 行为测试
 
 ---
 
+# D8 — browser_transaction_unconfirmed 的 checkpoint 语义（R1 呈现的结构修，登记于 2026-07-03 夜）
+
+**现状**：finalizer 对交易类 done→degraded 一律 `effectiveStatus='error'`（run-finalizer.ts:469-471），**不检查 continuation 可续性**（非交易分支 :472 有 canResumeAsUserPoint→checkpoint）。R1 修复已把 error 文案改为可读+下一步（run-collector userFacingTerminalErrorText），但语义上"停在编辑器可继续"的 run 更应是 checkpoint（部分进展+断点）。
+
+**待做**：交易分支同样尊重 canResumeAsUserPoint → checkpoint；牵动 p6d（run_meta 终态谓词/status alias）、check-run-finalize-funnel、sdkStatusFromTerminalReason 映射与 renderer 卡呈现，需合同先行 + 在场。
+
+# D9 — R3 采集期间的同 scope 任务混线与 tab 保护（登记于 2026-07-03 夜）
+
+**实锚（metrics/tools.log）**：R1/R3 在同一会话连跑；15:04 run 采集中途 `navigate creator.xiaohongshu.com/publish/publish`，15:06 run `visible_collect` 启动后模型在同 tab `click_text "写长文"`——历史发布任务的上下文让模型在采集等待间隙"续做"发布，夺走采集页面。且两个 visible_collect 任务（54ebcae8/6563f6e2）在 browser.log 与 metrics **零运行/终态痕迹**（可观测缺口）。
+
+**待做（三件，独立 slice）**：
+1. **采集 tab 写保护闸**：活跃 visible-collect 任务绑定的 tab 上，click/type/navigate 等写动作返回结构化 busy（附 wait/get_task/cancel_task 出口）——代码闸，需任务注册表按 tab 查询面；
+2. **browser task 终态可观测**：visible_collect 任务 start/close 进 metrics 账本（fired 文化对齐）；
+3. **同 scope 任务锚定**（行为层，最后）：上一 run 非终局（unconfirmed/checkpoint）时新指令的任务边界提醒，防上下文串味。
+
+**前置**：可监控会话；1/2 可先行。
+
 # 汇总
 | 项 | 已完成 | 待做 | 高危点 | 前置 |
 |----|--------|------|--------|------|

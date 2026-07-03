@@ -72,20 +72,37 @@ test('dropped tool calls remove immediately preceding reasoning items', async ()
   assert.equal(result.items.some((item) => getType(item) === 'function_call'), false)
 })
 
-test('oversized tool results are truncated without breaking their call/result pair', async () => {
+test('oversized tool results are truncated without breaking their call/result pair (under real pressure)', async () => {
   const result = await compactAgentInputItems([
     functionCall('big-call'),
     functionResult('big-call', 'x'.repeat(2_000)),
   ], {
-    windowTokens: 100_000,
+    // 2026-07-03 R1 合同修正：截断只在超过软线后发生 —— 这里把窗口压小到
+    // 让 2000 字符结果真实越线，截断语义（保 call/result 对）保持不变。
+    windowTokens: 600,
     maxToolResultTokens: 100,
   })
 
   assert.equal(result.compacted, true)
   assert.equal(result.report.truncatedToolResults, 1)
-  assert.equal(result.report.summarized, false)
   assert.deepEqual(itemTypes(result.items), ['function_call', 'function_call_result'])
   assert.match(String((result.items[1] as { output?: unknown }).output), /tool-result-truncated/)
+})
+
+test('R1 回归：低于软线时超限工具结果原样保留（动作后的读回执不得被无压力截断）', async () => {
+  const bigMapResult = 'x'.repeat(2_000)
+  const result = await compactAgentInputItems([
+    functionCall('map-read'),
+    functionResult('map-read', bigMapResult),
+  ], {
+    // 2000 字符 ≈ 数百 token，远低于 100k 窗口的 0.8 软线 —— 必须原样通过。
+    windowTokens: 100_000,
+    maxToolResultTokens: 100,
+  })
+
+  assert.equal(result.compacted, false)
+  assert.equal(result.report.truncatedToolResults, 0)
+  assert.equal(String((result.items[1] as { output?: unknown }).output), bigMapResult)
 })
 
 test('compactAgentInputItems keeps the latest user request with retained tail context', async () => {

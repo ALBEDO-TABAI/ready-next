@@ -50,9 +50,12 @@ export function compactAgentInputItems(
     DEFAULT_MAX_TOOL_RESULT_TOKENS,
   )
   const beforeTokens = estimateInputItemTokens(items)
-  const truncated = truncateOversizedToolResults(items, maxToolResultTokens)
 
-  if (!options.force && beforeTokens <= windowTokens * CONTEXT_SOFT_RATIO && truncated.truncatedToolResults === 0) {
+  // 2026-07-03 真机回归 R1 根因修复：单结果超限截断只允许在真实上下文压力
+  // 下发生。此前无条件执行——59k/200k（远低于 0.8 软线）时也把两个 ~27k 的
+  // page_map 读回执整体替换成占位符，模型在关键动作后拿到信息真空，直接
+  // 盲宣告完成。低于软线时原样放行；到达软线（或 force）才进入截断+压缩。
+  if (!options.force && beforeTokens <= windowTokens * CONTEXT_SOFT_RATIO) {
     return {
       items,
       compacted: false,
@@ -65,6 +68,8 @@ export function compactAgentInputItems(
       },
     }
   }
+
+  const truncated = truncateOversizedToolResults(items, maxToolResultTokens)
 
   const workingItems = truncated.items
   const afterTruncateTokens = estimateInputItemTokens(workingItems)

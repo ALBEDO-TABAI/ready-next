@@ -107,6 +107,16 @@ grep -c 'criteria_self_check_injected' $T/ready-agent-metrics.log
 
 ---
 
+# 第一轮结果与根因（2026-07-03 夜，日志实锚诊断）
+
+- **R2 ✅**；R4/R5 未跑。
+- **R1 ❌（13.5s，run uzzrkn）根因三连锁，已修前两环+呈现**：
+  1. 发布页 `read_page_map` 无默认体量预算（单次 ~27k token）→ 已修：`DEFAULT_AGENT_PAGE_MAP_MAX_BYTES=32KB`（read_page_map 与 act_on_target read_back=map 两处）；
+  2. presend 压缩把 >16k 的工具结果**无条件**换占位符（59k≪160k 软线也砍，truncatedToolResults=2）→ 模型在点击后信息真空、盲宣告完成 → 已修：截断只在越过 0.8 软线后发生（compact-agent-input + 回归测试）；
+  3. 裁决器正确拦截（degraded→unconfirmed，**机制工作**✅），但 renderer 收到泛化 "Agent execution failed" → 已修：error 终态带 reason 专属可读文案（run-collector `userFacingTerminalErrorText`，unconfirmed/proof_gap/no_artifact）；
+  4. 结构层（可续时应 checkpoint 而非 error）→ **D8 工单**（牵 p6d/funnel 合同，在场做）。
+- **R3 ❌ 根因=同 scope 任务混线，非"老任务劫持"**：R1 发布上下文残留同一会话，模型在采集等待间隙跳回发布流程（15:04 navigate 发布页；15:06 采集启动后 click "写长文"抢走采集 tab）；且两个采集任务零终态痕迹（可观测缺口）→ **D9 工单**（tab 写保护闸 + 任务终态账本 + 任务锚定）。**复测建议：R1 与 R3 用不同会话跑。**
+
 # 关账动作
 
 五项结果记录填完 → 回贴给我。我会：把结果写进本文件与 route 文档、判定分支分叉时机（R 全绿=合并信心）、失败项按"站点变化→分类器规则更新，机制缺陷→立 slice"分流。

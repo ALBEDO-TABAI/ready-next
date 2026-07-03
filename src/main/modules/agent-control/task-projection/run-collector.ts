@@ -42,6 +42,25 @@ export interface SendAndCollectResult {
   terminalReason?: import('../runtime-core/turn-frame').TurnTerminalReason | null
 }
 
+/**
+ * 2026-07-03 真机回归 R1 — error 终态的用户可读原因（E2：终态四选一里
+ * blocked/degraded 必须带原因与下一步）。只登记已证实会以 error status 收口
+ * 且此前呈现为泛化"Agent execution failed"的 reason；未知 reason 回 null
+ * 走兜底文案。
+ */
+export function userFacingTerminalErrorText(terminalReason: string | null): string | null {
+  switch (terminalReason) {
+    case 'browser_transaction_unconfirmed':
+      return '网页操作还没有拿到成功确认：任务停在当前页面，可以继续操作，或让我重试并确认结果。'
+    case 'proof_gap':
+      return '本次运行缺少完成证据，已按未完成收口；可以让我重试，或补充完成判定所需的材料。'
+    case 'no_artifact':
+      return '本次运行没有产出可验证的成果文件，已按未完成收口；可以让我重试。'
+    default:
+      return null
+  }
+}
+
 function matchesScope(match: ScopedRunMatch, payload: { agent: string; sessionId?: string; runId?: string }): boolean {
   if (payload.agent !== match.agent) return false
   if ((payload.sessionId || undefined) !== (match.sessionId || undefined)) return false
@@ -103,7 +122,11 @@ export function createScopedRunCollector(match: ScopedRunMatch) {
           finalText: finalChunks.join(''),
           cancelled: false,
           usedTools: Array.from(usedTools),
-          error: runtimeError || 'Agent execution failed',
+          // 2026-07-03 真机回归 R1：error 终态必须携带 terminalReason 对应的
+          // 用户可读原因（E2：失败有出路），泛化文案只作最终兜底。
+          error: runtimeError
+            || userFacingTerminalErrorText(payload.terminalReason ?? null)
+            || 'Agent execution failed',
           terminalReason: payload.terminalReason ?? null,
         })
         return
