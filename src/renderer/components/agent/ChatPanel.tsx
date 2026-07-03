@@ -79,7 +79,6 @@ import { useAttachmentIntake } from './chat-panel/drag-drop/use-attachment-intak
 import { useTaskRunMerge } from './chat-panel/task-merge/use-task-run-merge'
 import { ChatPanelBody } from './chat-panel/ChatPanelBody'
 import { formatTime } from './chat-panel/format-time'
-import { EmergenceFeedSection } from '../ready/EmergenceFeedSection'
 // Stage V V1.9c — 15 task interaction useCallbacks (continue / submit /
 // suspend / resume / cancel / retry / open artifact / memory capture) +
 // the two internal helpers (`patchScopeRun`, `buildRunContinuationIntent`)
@@ -1090,17 +1089,7 @@ export default function ChatPanel({
           <ChatPanelMotionLayer
             key="expanded-chat-panel"
             header={expandedPanelHeader}
-            body={(
-              <>
-                {/* 梯队三 — 涌现 feed（workbench 主挂载点；空 feed 渲染 null，
-                    自限高不侵占消息区）。出口：任务卡→切会话；知识卡→设置页。 */}
-                <EmergenceFeedSection
-                  onOpenScope={(scopeId) => { void handleLoadConversation(scopeId) }}
-                  onOpenSettings={() => { window.location.hash = '#/settings' }}
-                />
-                {expandedPanelBody}
-              </>
-            )}
+            body={expandedPanelBody}
           />
         ) : null}
       </AnimatePresence>

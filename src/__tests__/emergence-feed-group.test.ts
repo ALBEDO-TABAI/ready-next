@@ -75,6 +75,19 @@ test('knowledge cards (crystallize/candidate) carry null scopeId — their exit 
   }
 })
 
+test('same-titled retries collapse to one card (dedupe by type+title, newest projection first)', () => {
+  const entries = assembleFeedEntries({
+    ...EMPTY_DEPS,
+    listRecentProjections: () => [
+      projection({ taskId: 'task-new', scopeId: 'scope-new', status: 'recoverable_paused', canResume: true, taskTitle: '浏览器逐张点开采集' }),
+      projection({ taskId: 'task-old', scopeId: 'scope-old', status: 'recoverable_paused', canResume: true, taskTitle: '浏览器逐张点开采集' }),
+    ],
+  })
+  const resume = entries.filter((entry) => entry.card.type === 'resume')
+  assert.equal(resume.length, 1, '同名重试只留一张卡')
+  assert.equal(resume[0]?.scopeId, 'scope-new', '保留最近的投影（列表序在前者）')
+})
+
 test('feed controls apply: per-type cap and confidence ordering survive the group layer', () => {
   const projections = Array.from({ length: 6 }, (_, index) =>
     projection({ taskId: `task-${index}`, scopeId: `scope-${index}`, status: 'blocked', canResume: true, taskTitle: `任务 ${index}` }))

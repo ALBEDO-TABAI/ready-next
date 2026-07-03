@@ -67,4 +67,13 @@ purpose: >
 1. **涌现段未出现 = 落点错误（已修）**：初版只挂 `/ready` 路由的 TaskPanel，用户在 workbench（`emergence_feed_assembled` 账本 0 次实锤 UI 从未拉取）。已改为**主挂载 ChatPanel body 顶部**（MotionLayer body 是 flex 列、ChatPanelBody 自带 flex:1 minHeight:0，直插兄弟节点零包装；组件自限高 220 内滚；空 feed 渲染 null 不改变现有树）。设置跳转走 HashRouter hash。
 2. **D2 无法确认 = 缺可观测账本（已补）**：注入原无日志痕迹；现 `registerCriteriaSelfCheckReminder` 注入成功打 `criteria_self_check_injected`（metrics log）。当日三 run 的 taskType=short_task/direct_answer/browser_transaction——前两个按设计跳过，第三个（用户评分的那个，15 工具成功）应已注入且 run 正常，与设计一致。
 3. **"agent 拿不到浏览器工具"（14:00 run）= 既有意图门控行为，非本次回归**：`tool_capability` 显示该轮被分类 short_task/local_chat，browser 组被能力裁决抑制（26 工具）；同会话 14:07 消息命中 browser_workflow 后 96 工具全量暴露。本次 diff 零触碰 execution-intent-resolver / run-capability-controller / tool_capability 路径。属"实时信息应进浏览器工作流"的意图分类漏判类既有问题（CLAUDE.md §4 方向），建议后续专项。
-4. **video-expert-analyzer 中途失败 = 被 14:01 应用重启切断，与本次 diff 无机制关联**：时间线 `skill_child_driver_registered`(14:00:59) → startup reconciler(14:01:00) → setupAgentIPC(14:01:11)；browser.log 窗口与系统 DiagnosticReports 均无崩溃痕迹（dev 重载或手动重启皆可能）。本次代码两次会话均正常启动，其后 130s/15 工具的重负载 run 成功。若复现，按 ready-debug 技能排查 child run 日志。
+4. **video-expert-analyzer 中途失败 = ct-punc 标点模型包未下载（第二轮用户补充"没有标点"提示后定位）**：`model-pack-registry.ts` 的"标点恢复 · ct-punc (中文)"是瘦装包按需下载模型（readyguy pre-release 设计），本机未装 → 技能在标点恢复步骤失败。**与本次 diff 无关**；修复=设置页模型包管理下载 ct-punc（必要时含 paraformer ASR）。14:01 的应用重启是伴随现象非根因。
+
+# 8. 真机反馈处理记录（第二轮：产品方向修正）
+
+用户核心反馈：**能力涌现的主体应是后台自动积累知识/经验，而非前台占空间的按钮面**——"前台 feed 让 agent 显得需要人工代劳"。且截图暴露同名任务重复卡、resume 功能与任务卡自带按钮重复。
+
+处置（同日完成）：
+1. **feed 从 ChatPanel 撤出**，唯一前台面=ReadyMode 仪表盘 TaskPanel（不占聊天空间）；registry wiring 增加 TaskPanel 挂载断言（幸存面消失=gate 红，防回黑）。
+2. **同名重试去重**：`dedupeByTypeAndTitle`（保留最近投影），group 测试补断言。
+3. **方向确认**：后台积累链路本就是 live 主体（crystallize 轮/belief 衰减/learningRefs/站点卡学习全自动，staged 卡设置页静默待确认）；feed 只是可选检视窗。下一块真正的后台成长件=D7 LLM 维护回合（专门会话）。resume/follow_up 类卡与任务卡功能重叠的问题记录在案——若后续验证 ReadyMode 面也无价值，收敛为"知识类卡只进设置页 + 任务类卡退场"是合法方向（届时按 gate-flip 更新 registry 证据）。

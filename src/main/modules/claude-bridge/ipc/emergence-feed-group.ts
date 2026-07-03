@@ -48,6 +48,23 @@ export interface EmergenceFeedGroupDeps {
 const CHANNELS = ['agent:emergence:feed'] as const
 const PROJECTION_SCAN_LIMIT = 50
 
+/**
+ * 真机反馈（2026-07-03）：同名任务多次尝试会产生多个 taskId 不同、标题相同
+ * 的可续跑投影，feed 里全量展示是纯噪声。按 (type + title) 去重，保留
+ * 提取顺序里最先出现的一张（投影列表按 recent 排序，先出现者最新）。
+ */
+function dedupeByTypeAndTitle(cards: ReadonlyArray<EmergenceCard>): EmergenceCard[] {
+  const seen = new Set<string>()
+  const out: EmergenceCard[] = []
+  for (const card of cards) {
+    const key = `${card.type}|${card.title}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(card)
+  }
+  return out
+}
+
 export function assembleFeedEntries(deps: EmergenceFeedGroupDeps): EmergenceFeedEntry[] {
   const projections = deps.listRecentProjections(PROJECTION_SCAN_LIMIT)
   const scopeByTaskId = new Map<string, string>()
@@ -55,12 +72,12 @@ export function assembleFeedEntries(deps: EmergenceFeedGroupDeps): EmergenceFeed
     if (record.taskId && record.scopeId) scopeByTaskId.set(String(record.taskId), String(record.scopeId))
   }
 
-  const cards = assembleEmergenceFeed([
+  const cards = assembleEmergenceFeed(dedupeByTypeAndTitle([
     ...extractResumeCards(projections),
     ...extractFollowUpCards(projections),
     ...extractCrystallizeCards(deps.listCrystallizeSignals()),
     ...extractAgentCandidateCards(deps.listCandidateSignals()),
-  ])
+  ]))
 
   const entries = cards.map((card) => ({
     card,

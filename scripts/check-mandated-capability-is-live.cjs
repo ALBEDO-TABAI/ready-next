@@ -95,6 +95,13 @@ const REGISTRY = Object.freeze([
         file: 'src/renderer/components/ready/EmergenceFeedSection.tsx',
         pattern: /data-ready-emergence-feed/,
       },
+      {
+        // 真机反馈（2026-07-03）：feed 从聊天面板撤出，唯一前台面=ReadyMode
+        // 仪表盘。该挂载点消失=能力回黑，正向 gate 必须能看见。
+        name: 'ReadyMode TaskPanel mounts the feed section',
+        file: 'src/renderer/components/ready/TaskPanel.tsx',
+        pattern: /<EmergenceFeedSection/,
+      },
     ],
     firedLedger: {
       file: 'src/main/modules/claude-bridge/ipc/emergence-feed-group.ts',

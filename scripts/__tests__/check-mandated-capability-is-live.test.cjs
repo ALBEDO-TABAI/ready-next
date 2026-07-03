@@ -61,6 +61,7 @@ for (const row of rows) {
   write(root, EMERGENCE_CARDS_REL, 'export function assembleEmergenceFeed() {}\n')
   write(root, EMERGENCE_GROUP_REL, "const cards = assembleEmergenceFeed([])\nlogAgentMetric('emergence_feed_assembled', {})\n")
   write(root, EMERGENCE_SECTION_REL, 'export const marker = "data-ready-emergence-feed"\n')
+  write(root, 'src/renderer/components/ready/TaskPanel.tsx', 'export const panel = <EmergenceFeedSection onOpenScope={open} onOpenSettings={openSettings} />\n')
 }
 
 test('gate passes on a fully-consistent baseline (also exercises deferred handshake against real unwired lists)', (t) => {
