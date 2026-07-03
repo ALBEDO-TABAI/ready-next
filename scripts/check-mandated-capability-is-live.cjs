@@ -78,9 +78,32 @@ const REGISTRY = Object.freeze([
   },
   {
     capability: 'emergence-cards',
-    status: 'deferred-by-design',
-    files: ['src/main/modules/agent-control/emergence/emergence-cards.ts'],
-    unwiredList: 'UNWIRED_MAINTENANCE_FILES',
+    status: 'live-required',
+    wiring: [
+      {
+        name: 'ipc-handler registers emergenceFeedGroup',
+        file: 'src/main/modules/claude-bridge/ipc-handler.ts',
+        pattern: /emergenceFeedGroup\.register\(/,
+      },
+      {
+        name: 'feed group assembles from emergence-cards',
+        file: 'src/main/modules/claude-bridge/ipc/emergence-feed-group.ts',
+        pattern: /assembleEmergenceFeed\(/,
+      },
+      {
+        name: 'renderer feed section renders entries',
+        file: 'src/renderer/components/ready/EmergenceFeedSection.tsx',
+        pattern: /data-ready-emergence-feed/,
+      },
+    ],
+    firedLedger: {
+      file: 'src/main/modules/claude-bridge/ipc/emergence-feed-group.ts',
+      event: 'emergence_feed_assembled',
+    },
+    noStaleMarker: {
+      file: 'src/main/modules/agent-control/emergence/emergence-cards.ts',
+      pattern: /P5d\/C26 unwired|not in production driver path/i,
+    },
   },
   {
     capability: 'packet-trio (compiler/dispatch/failure)',
@@ -109,12 +132,28 @@ const REGISTRY = Object.freeze([
   },
   {
     capability: 'RunFeedbackRepository',
-    status: 'dark-defect',
-    anchor: {
-      file: 'src/main/modules/agent-control/task-projection/run-feedback-repository.ts',
-      pattern: /RunFeedbackRepository/,
+    status: 'live-required',
+    wiring: [
+      {
+        name: 'ipc-handler registers runFeedbackGroup',
+        file: 'src/main/modules/claude-bridge/ipc-handler.ts',
+        pattern: /runFeedbackGroup\.register\(/,
+      },
+      {
+        name: 'preload exposes runFeedback invoke channels',
+        file: 'src/preload/index.ts',
+        pattern: /agent:runFeedback:submit/,
+      },
+      {
+        name: 'renderer rating control submits feedback',
+        file: 'src/renderer/components/agent/chat-panel/task/RunFeedbackStars.tsx',
+        pattern: /\.submit\(\{ taskId/,
+      },
+    ],
+    firedLedger: {
+      file: 'src/main/modules/claude-bridge/ipc/run-feedback-group.ts',
+      event: 'run_feedback_submitted',
     },
-    register: { file: DEFER_REGISTER_REL, mention: 'RunFeedbackRepository' },
   },
 ])
 

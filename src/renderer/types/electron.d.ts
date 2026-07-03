@@ -3700,6 +3700,66 @@ interface ElectronRunQualityAPI {
   stats: () => Promise<IPCResponse<RunQualityStatsData>>
 }
 
+// D5 后端切片 (2026-07-03) — per-run 用户反馈记录（run_feedback 表投影）。
+interface RunFeedbackRecordData {
+  feedbackId: string
+  runId: string
+  taskId: string | null
+  rating: 1 | 2 | 3 | 4 | 5 | null
+  signal: string | null
+  comment: string | null
+  createdAt: number
+  updatedAt: number
+}
+
+interface ElectronRunFeedbackAPI {
+  submit: (payload: {
+    /** runId 与 taskId 至少给一个；只给 taskId 时由 main 解析权威 runId。 */
+    runId?: string
+    taskId?: string | null
+    feedbackId?: string
+    rating?: 1 | 2 | 3 | 4 | 5 | null
+    signal?: string | null
+    comment?: string | null
+  }) => Promise<IPCResponse<RunFeedbackRecordData>>
+  list: (options?: {
+    runId?: string
+    taskId?: string
+    limit?: number
+  }) => Promise<IPCResponse<RunFeedbackRecordData[]>>
+}
+
+// 梯队三 (2026-07-03) — emergence feed 卡（确定性提取，带证据链与行动出口）。
+interface EmergenceCardData {
+  id: string
+  type: 'resume' | 'follow_up' | 'crystallize' | 'prepare' | 'harvest' | 'forming'
+  title: string
+  evidence: Array<{ fact: string; ref: string }>
+  confidence: number
+  action: {
+    kind:
+      | 'resume_task'
+      | 'adjudicate_task'
+      | 'supply_input'
+      | 'adopt_candidate'
+      | 'review_duplicate'
+      | 'open_project'
+      | 'open_artifact'
+      | 'open_project_group'
+    ref: string
+  }
+  requiresExplicitConfirm: boolean
+}
+
+interface EmergenceFeedEntryData {
+  card: EmergenceCardData
+  scopeId: string | null
+}
+
+interface ElectronEmergenceAPI {
+  feed: () => Promise<IPCResponse<EmergenceFeedEntryData[]>>
+}
+
 interface ElectronTriggerAPI {
   list: (filters?: TriggerFilters) => Promise<IPCResponse<TriggerDefinition[]>>
   create: (trigger: Partial<TriggerDefinition>) => Promise<IPCResponse<TriggerDefinition>>
@@ -3797,6 +3857,8 @@ interface ElectronAPI {
   memory: ElectronMemoryAPI
   memoryCards: ElectronMemoryCardsAPI
   runQuality: ElectronRunQualityAPI
+  runFeedback: ElectronRunFeedbackAPI
+  emergence: ElectronEmergenceAPI
   trigger: ElectronTriggerAPI
   memoryLifecycle: ElectronMemoryLifecycleAPI
   browser: ElectronBrowserAPI
@@ -3842,6 +3904,9 @@ export type {
   BeliefCardSettingsSnapshotData,
   RunQualityDayData,
   RunQualityStatsData,
+  RunFeedbackRecordData,
+  EmergenceCardData,
+  EmergenceFeedEntryData,
   AgentDerivationCandidateData,
   AgentDerivationConfirmData,
   AgentRegistryKnowledgeCardData,

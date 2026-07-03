@@ -30,6 +30,8 @@ note: >
 
 # D2 — criteria 前置注入模型面（P2-2 剩余半）
 
+> **2026-07-03 已完成（梯队三，可监控会话）**：走方案 B——`system-reminders/criteria-self-check-reminder.ts` 注册 `criteria-self-check` topic，`agent-sdk-turn-orchestrator` 每次模型调用前注入（与 active-plan-step/browser-action-session 同一组装缝）。只对结果型任务注入（multi_step/research/media/browser_transaction）；taskType 取 `liveTaskBudgetRuntime?.taskType || inferredSdkTaskType`；module 保守映射（browser_transaction→browser，余者 system 基线）；括号尾注截断脱内部术语。测试 `criteria-self-check-reminder.test.ts` 5/5（含与终态裁决同源断言）。以下为历史记录。
+
 **已完成的半**：criteria 落库——finalizer 已把解析后的验收 criteria（items + satisfied/total）写入 projection（`run-finalizer.ts` 的 terminal `store.update`）。数据侧就绪，daily-task-index criteriaProgress 有数据源。
 
 **未完成的半**：把 criteria 注入模型可见面，让 agent **事中自检**（"裁决从事后打回变事中自检"）。
@@ -88,19 +90,27 @@ note: >
 
 **修法（未实施）**：与 D2 合并设计最佳——D2 把 criteria 注入模型面做"事中自检"时，同一通道天然是模型声明补充标准的回传口；届时 `appendModelCriteria` 在 `resolveCriteria` 后调用并随 P2-2 落库。
 
-**前置**：D2 实施（可监控会话）；实施时把 `check-mandated-capability-is-live.cjs` 的 dark-defect 条目翻成 live-required。
+**2026-07-03 梯队三补充勘察**：D2 已实施（注入=main→model 单向），但回传通道仍缺——projection steps 由 `projectionPatch`（域适配器/frame patch）产生，**不存在模型可见的 plan 工具**可加 `acceptanceCriteria` 字段。真实工作量=新建模型可见工具面（schema/registry/gateway/policy/authorization）或设计受控回传协议，再 + finalizer merge + 漂移监控。维持缓办。
+
+**前置**：声明通道设计决策（新工具 vs 协议）；实施时把 `check-mandated-capability-is-live.cjs` 的 dark-defect 条目翻成 live-required。
 
 ---
 
 # D5 — RunFeedbackRepository 全栈接线（梯队三，登记于 2026-07-03）
 
-**现状（本轮复验确认）**：`task-projection/run-feedback-repository.ts` + migration 036 `run_feedback` 表已存在，主进程零实例化、无 IPC、无 UI。
+**后端切片已完成（2026-07-03 梯队三无人值守部分）**：`run-feedback-group.ts`
+（`agent:runFeedback:submit/list`，代码侧校验：rating 1-5 整数 / signal≤120 /
+comment≤2000 / 空反馈拒绝 / 缺省反馈槽 `fb_<runId>` upsert 复交）+ ipc-handler
+注册（repository 按需从 rawDb 构造，SQLite 不可用回 `sqlite_unavailable`）+
+preload `runFeedback` API + electron.d.ts 类型 + 行为测试
+`run-feedback-group.test.ts`（6 用例）。顺修 repo 构造器类型对齐项目惯例
+（`Database.Database` → `DatabaseConnection`，dark 期间遗留的未暴露失配）。
 
-**待做**（handoff §5 梯队三原文）：实例化 + IPC `agent:runFeedback:submit/list` + preload/electron.d.ts + renderer 评分控件。
+**仅剩待做**：renderer 评分控件（任务卡/质量面板挂 `window.electronAPI.runFeedback`）
++ 真机回归。完成前能力仍非 live（无用户入口），
+`check-mandated-capability-is-live.cjs` 条目保持 dark-defect；UI 落地时翻条目。
 
-**为何缓办**：需 renderer UI + 真机验证，属梯队三"需 UI + 监控"，无人值守不宜。
-
-**前置**：可监控会话；实施时翻 `check-mandated-capability-is-live.cjs` 条目。
+**前置**：可监控会话（renderer UI 白屏高危 + 真机验证）。
 
 ---
 
@@ -120,8 +130,9 @@ note: >
 | 项 | 已完成 | 待做 | 高危点 | 前置 |
 |----|--------|------|--------|------|
 | D1 P1-b | 根因确认 | 发 tabOpened(activate:false)+renderer 不抢焦点 | renderer 焦点回归 | 可监控会话 |
-| D2 P2-2 | criteria 落库 | taskType→prompt/reminder 注入自检 | 中枢文件 | 可监控会话 |
+| D2 P2-2 | **全部完成（梯队三）**：criteria 落库 + criteria-self-check reminder | — | — | — |
 | D3 P2-6 | **全部完成（P5d）** | — | — | — |
-| D4 appendModelCriteria | 复验+挂号 | 声明通道设计（并 D2）+ finalizer merge | 模型可见面 + 裁决漂移 | D2 实施 |
-| D5 RunFeedbackRepository | 复验+挂号 | 实例化+IPC+preload+UI | renderer/真机 | 可监控会话 |
+| D4 appendModelCriteria | 复验+挂号+通道勘察 | 声明通道设计（新工具 vs 协议）+ finalizer merge | 模型可见面 + 裁决漂移 | 通道设计决策 |
+| D5 RunFeedbackRepository | **全部完成（梯队三）**：后端+评分控件+registry live-required | 真机回归确认 | — | — |
 | D6 sdk 三测试 vs 宣告闸 | 根因确认 | 语义仲裁后改 fixture 或闸豁免 | 文档/浏览器道语义 | 可监控会话 |
+| D7 LLM 维护回合 | 评估完成（见 tier3 closeout §4） | 生产驱动决策+LLM 预算+staged 写监控+符号禁令 gate-flip | 真实 LLM 花费 + 维护写卡 | 专门监控会话 |

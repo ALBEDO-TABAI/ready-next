@@ -29,6 +29,8 @@ const DEFAULT_CONFLICTS: Record<ReminderTopic, ReadonlyArray<ReminderTopic>> = {
   // S4-3 — active plan step re-injection; no conflicts.
   'active-plan-step': [],
   'browser-action-session': [],
+  // D2 — 验收标准事中自检（每 run 首次模型调用注入一次）；no conflicts.
+  'criteria-self-check': [],
 }
 
 export function composeSystemReminder(

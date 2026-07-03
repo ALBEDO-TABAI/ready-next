@@ -23,6 +23,7 @@ import {
 import type { TaskCardRun } from '../../task-card-from-projection'
 import { AgentStatusDot } from '../../../ui/dot-matrix/AgentStatusDot'
 import { LiquidSurfaceLayer } from '../../../ui/liquid-glass/LiquidFloatingPanel'
+import { RunFeedbackStars } from './RunFeedbackStars'
 
 // ---------------------------------------------------------------------------
 // Stage V V1.6 — `TaskCard` + `ToolTraceCard` extracted from ChatPanel.tsx.
@@ -742,6 +743,10 @@ export function TaskCard({
             )}
           </div>
         )}
+      {/* D5 — 终态 run 的用户反馈入口（runId 由 main 侧按 taskId 解析）。 */}
+      {hasTerminalTaskStatus && !compact && !isDetachedTask && run.taskId ? (
+        <RunFeedbackStars taskId={run.taskId} />
+      ) : null}
       </div>
     </div>
   )

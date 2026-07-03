@@ -1,8 +1,11 @@
 /**
- * P5d/C26 unwired: not in production driver path.
- *
  * EP2-E1 — emergence kernel v1 (10 篇 §3): three intent-density card types
  * extracted from structured task/knowledge signals. Deterministic, zero LLM.
+ *
+ * 2026-07-03 梯队三通电：由 `claude-bridge/ipc/emergence-feed-group.ts` 组装
+ * （fired 账本 `emergence_feed_assembled`），正向 gate 见
+ * `check-mandated-capability-is-live.cjs`。prepare/harvest/forming 三类的
+ * 信号采集（日历联动/产物打开跟踪/文件聚类）尚无数据源，提取器保留出口。
  *
  * Triplet rule: every projected card carries evidence chain + confidence +
  * an action exit. A card without an exit never reaches the feed (纯信息归

@@ -82,7 +82,9 @@ Ready agent 模块（~519 文件/~153k 行）**骨架是对的，不重写**；�
 > 梯队一复验修正：①删死债实际范围含 package.json 3 处 verify 链、1 个 gate 退役、2 个 gate 收缩、6 个测试文件（handoff 低估）；②compressToolTrace"廉价接线"不成立（buildForScopedRun 无 tool-trace/artifact 数据源），按深审 A5 备选项改为删除两死函数。
 > 梯队二产物：`check-mandated-capability-is-live.cjs`（三态注册表正向 gate，与 unwired gate 导出表握手强制 gate-flip；替换退役的 check-belief-decay-live 进 p3 链）；appendModelCriteria 复验后判"捕获通道不存在"→挂 D4 缓办（与 D2 合并设计）。
 > **验证方法勘误**：`npm run X | tail && echo OK` 的管道会掩蔽退出码，链验证必须 `>log; echo EXIT=$?`。真实链状态：typecheck/stability/p3/p4 全 0；p6o=1 是 base 自带 D6（sdk 三用例 vs 行动宣告闸，可监控会话修）。
-> 下一步=梯队三（需 UI + 监控：D5 RunFeedback、emergence feed、D2+D4 合并设计），勿无人值守。
+> 梯队三无人值守切片已完成（`2026-07-03-tier3-unattended-slice-closeout.md`）：D5 run-feedback 后端全通道；repo 构造器类型失配顺修。
+> **梯队三已全部收口（2026-07-03 用户在场监控会话，`2026-07-03-tier3-monitored-completion-closeout.md`）**：D5 评分控件 UI + registry 翻 live-required；emergence feed 全链通电（gate-flip 出 UNWIRED，4/7 类卡接现存信号源，prepare/harvest/forming 待新数据采集）；D2 criteria 事中自检 reminder（每 run 首调注入一次，与终态裁决同模板源）。D4（声明回传通道不存在）与 D7（LLM 维护回合：符号禁令 gate-flip+LLM 预算+staged 监控）维持缓办，工单已更。真实链状态：typecheck/stability/p3/p4=0；p6o=1 仅 D6；ipc-contract=base 26 条无新增。
+> 剩余：D1（标签 tabOpened）、D4、D6、D7 + ipc-contract 26 条清理；梯队四（run-timeline 单源/turn-engine 退役/god-object 拆分）合同先行。
 
 用户已认可思路，下一步做**梯队一**（安全、可无人值守）：
 1. 先跑 `npm run typecheck:node && npm run verify:stability && node scripts/check-unwired-capability-markers.cjs && node scripts/check-mandated-capability-is-live.cjs`，确认继承的工作树是绿的基线。（原 `check-belief-decay-live.cjs` 已于梯队二泛化为 `check-mandated-capability-is-live.cjs` 并退役。）

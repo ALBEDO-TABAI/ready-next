@@ -10,7 +10,7 @@
  * `updated_at` advances. CI gate `check-feedback-upsert-shape.cjs` pins
  * the `INSERT … ON CONFLICT(feedback_id) DO UPDATE` shape.
  */
-import type Database from 'better-sqlite3'
+import type { DatabaseConnection } from '../../database'
 
 export type RunFeedbackRating = 1 | 2 | 3 | 4 | 5
 
@@ -65,7 +65,7 @@ function rowToRecord(row: RunFeedbackRow): RunFeedbackRecord {
 }
 
 export class RunFeedbackRepository {
-  constructor(private readonly db: Database.Database) {}
+  constructor(private readonly db: DatabaseConnection) {}
 
   /**
    * Upsert by `feedback_id`. On INSERT, `created_at` and `updated_at` both

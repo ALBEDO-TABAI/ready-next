@@ -21,8 +21,10 @@ import {
 } from '../../modules/agent/task-status-vocabulary'
 import { isForegroundBusyScopeRunState } from '../../modules/agent/scopeRunState'
 import { createDebouncedFetch } from '../../modules/agent/debouncedFetch'
+import { useNavigate } from 'react-router-dom'
 import AgentSelector from './AgentSelector'
 import AgentTagRow from './AgentTagRow'
+import { EmergenceFeedSection } from './EmergenceFeedSection'
 
 interface Task {
   id: string
@@ -298,9 +300,11 @@ export default function TaskPanel() {
     currentScopeId,
     scopeRunStates,
     setComposerDraft,
+    setCurrentScope,
     setInputValue,
     sendMessage
   } = useAgent()
+  const navigate = useNavigate()
 
   const [taskProjections, setTaskProjections] = useState<TaskProjectionRecordData[]>([])
   const currentScopeIdRef = useRef<string | null>(currentScopeId || null)
@@ -529,6 +533,12 @@ export default function TaskPanel() {
       <div style={{ padding: '8px 6px', borderBottom: '1px solid var(--border-default)' }}>
         <AgentSelector />
       </div>
+
+      {/* 梯队三 — emergence feed（空 feed 自动隐藏；出口=打开 scope / 跳设置确认面）。 */}
+      <EmergenceFeedSection
+        onOpenScope={(scopeId) => { void setCurrentScope(scopeId) }}
+        onOpenSettings={() => navigate('/settings')}
+      />
 
       <div
         className="flex items-center justify-between"

@@ -141,6 +141,9 @@ import {
   registerBrowserActionSessionReminder,
 } from '../system-reminders/browser-action-session-reminder'
 import {
+  registerCriteriaSelfCheckReminder,
+} from '../system-reminders/criteria-self-check-reminder'
+import {
   loadScopeSessionSnapshot,
   writeScopeSessionSnapshot,
 } from '../session/scope-session-snapshot'
@@ -408,6 +411,8 @@ export class AgentSdkTurnOrchestrator {
     let hasSuccessfulToolProgress = false
     let lastDocumentSaveSuccessText: string | null = null
     let actionAnnouncementSteered = false
+    // D2 — 验收标准自检每 run 只注入一次（首个模型调用）。
+    let criteriaSelfCheckInjected = false
     let skillClarificationSteered = false
     let runMetaStatus: string = 'running'
     let runMetaTerminalReason: TurnTerminalReason | null = null
@@ -1589,6 +1594,16 @@ export class AgentSdkTurnOrchestrator {
               })
             }
             registerBrowserActionSessionReminder(registry, sessionId)
+            // D2 — 结果型任务的验收标准（事中自检），与终态裁决同一模板源。
+            // 每 run 只注入一次（首个模型调用）：criteria 是 run 级静态清单，
+            // 重复注入既费 token 也会改变后续迭代（如 text-bridge 回喂）的
+            // 输入形状。非结果型任务在 builder 内跳过。
+            if (!criteriaSelfCheckInjected) {
+              criteriaSelfCheckInjected = registerCriteriaSelfCheckReminder(
+                registry,
+                liveTaskBudgetRuntime?.taskType || inferredSdkTaskType || null,
+              )
+            }
             const reminderText = registry.compose()
             if (reminderText) {
               nextInput = prependSystemReminderInput(nextInput, reminderText)

@@ -35,6 +35,10 @@ export type ReminderTopic =
   // S4-3 — active plan current-step re-injection (verify=weak). No conflicts.
   | 'active-plan-step'
   | 'browser-action-session'
+  // D2 (2026-07-03) — per-model-call acceptance-criteria self-check for
+  // outcome-bearing task types (multi_step/research/media/browser_transaction).
+  // Same template source as terminal adjudication (resolveCriteria). No conflicts.
+  | 'criteria-self-check'
 
 export interface ReminderEntry {
   readonly topic: ReminderTopic

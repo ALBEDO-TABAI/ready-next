@@ -12,12 +12,12 @@ const UNWIRED_PACKET_FILES = Object.freeze([
 
 // P5d cluster — deterministic-parts migration (2026-07-03): crystallize-gate.ts
 // was migrated to live (runtime.ts CrystallizeScheduler + belief-decay round);
-// it is now a live-required capability with a `crystallize_round_fired` ledger,
-// so it is removed from the unwired set. candidate-maintenance / emergence-cards
-// stay deferred (LLM/UI parts not yet wired).
+// emergence-cards.ts was migrated to live on the same day (梯队三：
+// emergence-feed-group 组装 + fired 账本 + TaskPanel feed 面；见
+// check-mandated-capability-is-live 的 live-required 条目)。
+// candidate-maintenance stays deferred (LLM 维护回合部分未接).
 const UNWIRED_MAINTENANCE_FILES = Object.freeze([
   'src/main/modules/agent-control/emergence/candidate-maintenance.ts',
-  'src/main/modules/agent-control/emergence/emergence-cards.ts',
 ])
 
 const LIVE_PACKET_FIELDS_REL = 'src/main/modules/agent-control/quality/packet-fields.ts'

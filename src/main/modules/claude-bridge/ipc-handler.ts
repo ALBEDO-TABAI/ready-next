@@ -57,6 +57,10 @@ import { agentSpecialistBlueprintGroup } from './ipc/agent-specialist-blueprint-
 import { sessionPrerouteGroup } from './ipc/session-preroute-group'
 import { beliefCardGroup } from './ipc/belief-card-group'
 import { runQualityGroup } from './ipc/run-quality-group'
+import { runFeedbackGroup } from './ipc/run-feedback-group'
+import { RunFeedbackRepository } from '../agent-control/task-projection/run-feedback-repository'
+import { emergenceFeedGroup } from './ipc/emergence-feed-group'
+import { listDerivationCandidates } from './ipc/agent-derivation-group'
 import { conversationGroup } from './ipc/conversation-group'
 import { taskProjectionGroup } from './ipc/task-projection-group'
 import { recallGroup } from './ipc/recall-group'
@@ -273,6 +277,10 @@ let sessionPrerouteGroupDispose: IpcDisposeHandle | null = null
 /** EP4 settings surface — belief-card truth-source review/confirmation. */
 let beliefCardGroupDispose: IpcDisposeHandle | null = null
 let runQualityGroupDispose: IpcDisposeHandle | null = null
+/** D5 后端切片 — per-run 用户反馈通道（renderer 评分控件属 D5 待做）。 */
+let runFeedbackGroupDispose: IpcDisposeHandle | null = null
+/** 梯队三 — emergence feed 组装通道（拉取式，fired 账本随组装打点）。 */
+let emergenceFeedGroupDispose: IpcDisposeHandle | null = null
 
 /**
  * Stage V V2.1e — dispose handle returned by `conversationGroup.register`.
@@ -543,6 +551,14 @@ export async function cleanupAgentRuntime(): Promise<void> {
   if (runQualityGroupDispose) {
     try { runQualityGroupDispose.dispose() } catch { /* ignore */ }
     runQualityGroupDispose = null
+  }
+  if (runFeedbackGroupDispose) {
+    try { runFeedbackGroupDispose.dispose() } catch { /* ignore */ }
+    runFeedbackGroupDispose = null
+  }
+  if (emergenceFeedGroupDispose) {
+    try { emergenceFeedGroupDispose.dispose() } catch { /* ignore */ }
+    emergenceFeedGroupDispose = null
   }
   // Stage V V2.1e — symmetric release of the 8 conversation-scope + attachment
   // channel handlers (listConversationScopes / listScopeRuns /
@@ -1019,6 +1035,58 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
     runQualityGroupDispose = null
   }
   runQualityGroupDispose = runQualityGroup.register(ipcMain, {})
+
+  // D5 后端切片 — per-run 用户反馈（submit/list）。repository 按需从 rawDb
+  // 构造；SQLite 不可用时通道回结构化 sqlite_unavailable，而非静默丢失。
+  if (runFeedbackGroupDispose) {
+    try { runFeedbackGroupDispose.dispose() } catch { /* ignore — handlers may already be gone */ }
+    runFeedbackGroupDispose = null
+  }
+  runFeedbackGroupDispose = runFeedbackGroup.register(ipcMain, {
+    getRepository: () => {
+      const rawDb = getDatabase().getRawDb()
+      return rawDb ? new RunFeedbackRepository(rawDb) : null
+    },
+    resolveRunIdForTask: (taskId) => {
+      const projection = runtime!.getTaskProjection(taskId)
+      return projection && typeof projection.runId === 'string' && projection.runId.length > 0
+        ? projection.runId
+        : null
+    },
+  })
+
+  // 梯队三 — emergence feed 组装。信号源三路：跨 scope 最近投影（resume/
+  // follow_up）、belief 卡（crystallize：staged aspire + 疑似重复）、涌现候选
+  // （复用 derivation 的 stage=candidate + 证据≥3 投影）。
+  if (emergenceFeedGroupDispose) {
+    try { emergenceFeedGroupDispose.dispose() } catch { /* ignore — handlers may already be gone */ }
+    emergenceFeedGroupDispose = null
+  }
+  emergenceFeedGroupDispose = emergenceFeedGroup.register(ipcMain, {
+    listRecentProjections: (limit) => runtime!.listRecentTaskProjections(limit),
+    listCrystallizeSignals: () => {
+      const store = runtime?.getBeliefCardStore() ?? null
+      if (!store) return []
+      return store.listCards({ includeStaged: true }).map((card) => ({
+        relPath: card.relPath,
+        title: card.frontmatter.title,
+        tag: card.frontmatter.tag,
+        status: card.frontmatter.status,
+        source: card.frontmatter.source ?? null,
+        stage: card.frontmatter.stage ?? null,
+      }))
+    },
+    listCandidateSignals: () => {
+      const store = runtime?.getBeliefCardStore() ?? null
+      if (!store) return []
+      return listDerivationCandidates(store).map((candidate) => ({
+        relPath: candidate.candidateRelPath,
+        title: candidate.title,
+        stage: 'candidate',
+        evidenceDates: candidate.evidenceDates,
+      }))
+    },
+  })
 
   // Stage V V2.1e — conversation-scope + attachment channels lifted into
   // `conversationGroup`. The group pre-clears internally; we hold the dispose

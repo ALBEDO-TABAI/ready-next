@@ -417,6 +417,17 @@ const runQualityAPI = {
   stats: () => ipcRenderer.invoke('agent:runQuality:stats'),
 }
 
+// D5 后端切片 (2026-07-03) — per-run 用户反馈（评分/信号/评论）。
+const runFeedbackAPI = {
+  submit: (payload: unknown) => ipcRenderer.invoke('agent:runFeedback:submit', payload),
+  list: (options?: unknown) => ipcRenderer.invoke('agent:runFeedback:list', options),
+}
+
+// 梯队三 (2026-07-03) — emergence feed（拉取式组装，四类卡）。
+const emergenceAPI = {
+  feed: () => ipcRenderer.invoke('agent:emergence:feed'),
+}
+
 // Trigger API
 const triggerAPI = {
   list: (filters?: unknown) => ipcRenderer.invoke('agent:trigger:list', filters),
@@ -1365,6 +1376,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   memory: memoryAPI,
   memoryCards: memoryCardsAPI,
   runQuality: runQualityAPI,
+  runFeedback: runFeedbackAPI,
+  emergence: emergenceAPI,
   trigger: triggerAPI,
   memoryLifecycle: memoryLifecycleAPI,
   browser: browserAPI,

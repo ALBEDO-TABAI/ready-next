@@ -24,7 +24,6 @@ function makeRoot() {
   write(root, 'src/main/modules/agent-control/maintenance/crystallize-gate.ts', '/** P5d/C26 unwired: not in production driver path. */\nexport function decideCrystallizeRun() {}\n')
   write(root, 'src/main/modules/agent-control/maintenance/maintenance-llm-round.ts', 'import { decideCrystallizeRun } from "./crystallize-gate"\nexport function getLastMaintenanceRoundStatus() { return null }\n/** P5d/C26 unwired: not in production driver path. */\nexport async function runMaintenanceLlmRound() { return decideCrystallizeRun() }\n')
   write(root, 'src/main/modules/agent-control/emergence/candidate-maintenance.ts', '/** P5d/C26 unwired: not in production driver path. */\nexport function maintainAgentCandidates() {}\n')
-  write(root, 'src/main/modules/agent-control/emergence/emergence-cards.ts', '/** P5d/C26 unwired: not in production driver path. */\nexport function assembleEmergenceFeed() {}\n')
   write(root, 'src/main/modules/agent-control/runtime-core/runtime.ts', 'import { runUserPictureCasMerge } from "../maintenance/cas-merge"\nrunUserPictureCasMerge()\n')
   write(root, 'src/main/modules/claude-bridge/ipc-handler.ts', 'import { getLastMaintenanceRoundStatus } from "../agent-control/maintenance/maintenance-llm-round"\ngetLastMaintenanceRoundStatus()\n')
   write(root, 'src/main/modules/claude-bridge/ipc/belief-card-group.ts', 'export const payload = { llmRound: null }\n')
@@ -67,12 +66,12 @@ test('fails when a maintenance or emergence dormant file lacks disabled markers'
 
 test('fails when production imports a dormant maintenance/emergence module', () => {
   const root = makeRoot()
-  // crystallize-gate was migrated live (P5d deterministic-parts, 2026-07-03);
-  // emergence-cards stays dormant, so it is the import that must still fail.
-  write(root, 'src/main/modules/agent-control/runtime-core/runtime.ts', 'import { runUserPictureCasMerge } from "../maintenance/cas-merge"\nimport { assembleEmergenceFeed } from "../emergence/emergence-cards"\nrunUserPictureCasMerge(); assembleEmergenceFeed()\n')
+  // crystallize-gate + emergence-cards were migrated live (2026-07-03);
+  // candidate-maintenance stays dormant, so it is the import that must still fail.
+  write(root, 'src/main/modules/agent-control/runtime-core/runtime.ts', 'import { runUserPictureCasMerge } from "../maintenance/cas-merge"\nimport { maintainAgentCandidates } from "../emergence/candidate-maintenance"\nrunUserPictureCasMerge(); maintainAgentCandidates()\n')
   const result = check({ root })
   assert.equal(result.ok, false)
-  assert.ok(result.errors.some((error) => error.includes('runtime.ts') && error.includes('emergence-cards.ts')))
+  assert.ok(result.errors.some((error) => error.includes('runtime.ts') && error.includes('candidate-maintenance.ts')))
 })
 
 test('allows production to import the now-live crystallize-gate (P5d deterministic migration)', () => {

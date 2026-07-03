@@ -1346,6 +1346,14 @@ export class AgentControlRuntime extends EventEmitter {
     }
   }
 
+  /**
+   * 梯队三 emergence feed — 跨 scope 最近任务投影（resume/follow_up 卡信号源）。
+   * 只读，复用 preroute 的仓储入口；不做 reconcile（feed 是提示面，不是裁决面）。
+   */
+  listRecentTaskProjections(limit = 50): TaskProjectionRecord[] {
+    return this.taskProjectionStore.listRecentTasksForPreroute(limit) as TaskProjectionRecord[]
+  }
+
   listTaskProjections(scopeId: string): TaskProjectionRecord[] {
     const normalizedScopeId = String(scopeId || '').trim()
     if (!normalizedScopeId) return []
