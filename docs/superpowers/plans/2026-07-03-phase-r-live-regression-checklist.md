@@ -117,6 +117,21 @@ grep -c 'criteria_self_check_injected' $T/ready-agent-metrics.log
   4. 结构层（可续时应 checkpoint 而非 error）→ **D8 工单**（牵 p6d/funnel 合同，在场做）。
 - **R3 ❌ 根因=同 scope 任务混线，非"老任务劫持"**：R1 发布上下文残留同一会话，模型在采集等待间隙跳回发布流程（15:04 navigate 发布页；15:06 采集启动后 click "写长文"抢走采集 tab）；且两个采集任务零终态痕迹（可观测缺口）→ **D9 工单**（tab 写保护闸 + 任务终态账本 + 任务锚定）。**复测建议：R1 与 R3 用不同会话跑。**
 
+# 第二轮结果与根因（2026-07-04 凌晨，DB 原话 + 日志实锚，视野拉宽后的定案）
+
+**第二轮现象**：R1 76s/20 工具 unconfirmed（新文案已生效）；R3 19.9s 前台假 done、后台任务孤儿（发现 11 保存 0）、卡面出现"finish with transaction proof 1/1"假判据。
+
+**终极根（已修，commit 见下）——意图/交易判定输入被注入文本污染**：
+- DB 取真原话复现：采集句在词表下**正确判 collection**、发布句正确判 publish——词表无罪；
+- 但 orchestrator 用 `messageToText(content)`（**bootstrap 注入后**的完整消息）做 `resolveTaskTypeFromBrowserWorkflowText` 与 `currentUserText`——注入的站点卡（"小红书写长文发布流程"/creator.xiaohongshu.com）命中 PUBLISH_RE → **采集 run 被判 browser_transaction**：错判据模板上卡、前台 19s 假 done、后台采集无人推进、全部 browser 工具把该轮当交易轮（act_on_target 因此做交易确认检测并产出 'finish with transaction proof' 建议——卡面"假判据"其实是回执建议文案被投影渲染）。
+- 修复：`resolvePureUserTextForClassification`（envelope.pureUserText→primaryInstruction→回退），orchestrator 的分类输入、currentUserText、5 处 checkpoint lastUserMessage 全部换纯文本；污染场景回归测试 3/3（污染文本仍可复现旧缺陷形态，纯文本不误判，真发布不误伤）。
+
+**次级根与新证（工单化）**：
+1. **R1 76s 真卡点=创作页"写长文"在 iframe，点击链不穿 frame**（click_text/eval/CDP/坐标四路全无效，模型自查 frame tree）；且**学习系统昨晚已产出 `xiaohongshu-selector_missing` 站点卡但 staged 未确认被跳过注入**（`site_card_user_override_skipped`×2）——agent 带着已学到但未生效的知识原地重摔（E4 反例）→ **D10**。
+2. **20 工具=预算上限耗尽**，本应 checkpoint 续跑，被 finalizer 交易分支硬改 unconfirmed error（**D8 伤害第二次实证**）。
+3. 工具回执 `nextSuggestedAction` 被投影成任务卡步骤/判据进度（"read map again on tab tab-1 0/1"/"finish with transaction proof 1/1"）——呈现语义伪装 → **D11**。
+4. 两张无 run_close 的"正在理解需求 失败"卡与后台任务零日志：可观测缺口（并入 D9-2）。
+
 # 关账动作
 
 五项结果记录填完 → 回贴给我。我会：把结果写进本文件与 route 文档、判定分支分叉时机（R 全绿=合并信心）、失败项按"站点变化→分类器规则更新，机制缺陷→立 slice"分流。

@@ -143,6 +143,16 @@ preload `runFeedback` API + electron.d.ts 类型 + 行为测试
 
 **前置**：可监控会话；1/2 可先行。
 
+# D10 — 创作页 iframe 穿透 + staged 站点卡不生效（R 第二轮实锚，2026-07-04）
+
+**实锚**：R1 76s/20 工具全耗在"写长文"tab（iframe 内，click_text/eval/CDP/坐标四路全无效，模型自查 frame tree）；启动日志 `site_card_user_override_skipped: www.xiaohongshu.com-selector_missing`×2——**学习系统已产出修正站点卡但 staged 未确认被跳过注入**，agent 带着学到的知识原地重摔（E4 反例）。
+
+**待做**：①click/act 工具链 frame 感知（遍历 frames 或 CDP DOM.querySelector 跨 frame）；②staged 站点卡的确认可见性——会话内提示"已学到 X 待确认"或设置页角标，打通 E4"不进 Settings 也能确认"路径。
+
+# D11 — 工具回执 nextSuggestedAction 被投影成任务卡步骤/判据（2026-07-04）
+
+**实锚**：卡面"read map again on tab tab-1 · 0/1 0%"与"finish with transaction proof · 1/1 100%"实为 act_on_target 回执的 nextSuggestedAction 文案（browser-tools :3318/:3055），经 browserActionSessionPatch 流入 projection 后被任务卡渲染成步骤/判据进度——呈现语义伪装，且"假判据 100%"严重误导。**待做**：回执建议只进 narration/meta，不得进 steps/criteria 形状的投影字段；补投影形状测试。
+
 # 汇总
 | 项 | 已完成 | 待做 | 高危点 | 前置 |
 |----|--------|------|--------|------|

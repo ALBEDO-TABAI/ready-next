@@ -610,6 +610,12 @@
       "owner": "stage5-bulk-import"
     },
     {
+      "path": "src/__tests__/pure-user-text-classification.test.ts",
+      "reason": "only exercises pure text helpers (resolvePureUserTextForClassification / resolveTaskTypeFromBrowserWorkflowText); transitive value-import of agent-sdk-utils reaches a nativeBackedModule but no test path loads sqlite; verified passing on host-Node as of 2026-07-04",
+      "since": "2026-07-04",
+      "owner": "phase-r-round2-classification-pollution"
+    },
+    {
       "path": "src/__tests__/turn-engine-contract.test.ts",
       "reason": "transitive value-import reaches a nativeBackedModule via wrapper modules but never triggers native sqlite load in any test path (all sqlite-touching call sites use fakes/stubs); verified passing on host-Node test runs as of 2026-05-06",
       "since": "2026-05-06",

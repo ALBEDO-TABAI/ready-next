@@ -215,6 +215,7 @@ import {
   resolveAgentSdkMaxTurns,
   resolveAgentSdkProviderDiagnostics,
   resolveAgentSdkTaskBudgetRuntime,
+  resolvePureUserTextForClassification,
   resolveTaskTypeFromBrowserWorkflowText,
   resolveConfiguredModelDef,
   resolveDocumentTargetGuard,
@@ -501,6 +502,14 @@ export class AgentSdkTurnOrchestrator {
         taskBudgetRuntime: checkpointRestore.taskBudgetRuntime,
       }
       : executionOptions
+    // 2026-07-04 — 意图/交易判定与 checkpoint 的 lastUserMessage 只认用户话语：
+    // content 已被 bootstrap 注入（站点卡/纪律含发布类词，会把采集轮判成
+    // browser_transaction），分类文本一律从 envelope 取纯文本，无 envelope
+    // 时回退旧行为。
+    const pureUserTurnText = resolvePureUserTextForClassification(
+      effectiveExecutionOptions?.requestEnvelope,
+      messageToText(content as RunMessage),
+    )
     if (checkpointRestore) {
       const restoredSession = new MemorySession({
         sessionId: name,
@@ -684,7 +693,7 @@ export class AgentSdkTurnOrchestrator {
         usedTools,
         requiredCapabilityGroups: checkpointRequiredCapabilityGroups,
         requiredToolNames: checkpointRequiredToolNames,
-        lastUserMessage: messageToText(content as RunMessage),
+        lastUserMessage: pureUserTurnText,
         terminalReason: 'checkpoint_budget',
         resumeKind: 'paused',
       })
@@ -977,7 +986,7 @@ export class AgentSdkTurnOrchestrator {
       checkpointRequiredToolNames = allowedToolNames
       const taskProofStore = this.host.runtime?.getTaskProjectionStoreForFinalize?.() ?? null
       const taskProofSink = taskProofStore ? createTaskProofSink(taskProofStore) : null
-      const inferredSdkTaskType = resolveTaskTypeFromBrowserWorkflowText(messageToText(content as RunMessage))
+      const inferredSdkTaskType = resolveTaskTypeFromBrowserWorkflowText(pureUserTurnText)
         || resolveTaskTypeFromToolDefinitions(toolDefinitions)
       let liveTaskBudgetRuntime = resolveAgentSdkTaskBudgetRuntime({
         options: effectiveExecutionOptions,
@@ -996,7 +1005,7 @@ export class AgentSdkTurnOrchestrator {
         runId,
         taskId,
         sessionId,
-        currentUserText: messageToText(content as RunMessage),
+        currentUserText: pureUserTurnText,
         sourceMessageId: sourceMessageProvenance.sourceMessageId,
         sourceMessageUnavailableReason: sourceMessageProvenance.sourceMessageUnavailableReason,
         requestEnvelope: effectiveExecutionOptions?.requestEnvelope,
@@ -1160,7 +1169,7 @@ export class AgentSdkTurnOrchestrator {
           usedTools,
           requiredCapabilityGroups,
           requiredToolNames: allowedToolNames,
-          lastUserMessage: messageToText(content as RunMessage),
+          lastUserMessage: pureUserTurnText,
           resumeKind: 'paused',
         })
         runMetaContinuationRef = checkpoint.projectionPatch.taskContinuation && typeof checkpoint.projectionPatch.taskContinuation === 'object'
@@ -1238,7 +1247,7 @@ export class AgentSdkTurnOrchestrator {
           usedTools,
           requiredCapabilityGroups,
           requiredToolNames: allowedToolNames,
-          lastUserMessage: messageToText(content as RunMessage),
+          lastUserMessage: pureUserTurnText,
           terminalReason: 'checkpoint_steered',
           blockerType: 'skill_clarification_not_card',
           pauseReason: 'skill_clarification_not_card',
@@ -1329,7 +1338,7 @@ export class AgentSdkTurnOrchestrator {
           usedTools,
           requiredCapabilityGroups,
           requiredToolNames: allowedToolNames,
-          lastUserMessage: messageToText(content as RunMessage),
+          lastUserMessage: pureUserTurnText,
           terminalReason: 'checkpoint_steered',
           blockerType: 'action_announcement_steered',
           pauseReason: 'action_announcement_steered',
@@ -1564,7 +1573,7 @@ export class AgentSdkTurnOrchestrator {
                   usedTools,
                   requiredCapabilityGroups,
                   requiredToolNames: allowedToolNames,
-                  lastUserMessage: messageToText(content as RunMessage),
+                  lastUserMessage: pureUserTurnText,
                   resumeKind: 'snapshot',
                 })
                 runMetaContinuationRef = rolling.projectionPatch.taskContinuation

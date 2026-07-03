@@ -422,6 +422,34 @@ export function resolveTaskTypeFromBrowserWorkflowText(text: string | null | und
   return resolveBrowserWorkflowIntent(text).kind === 'transaction' ? 'browser_transaction' : null
 }
 
+/**
+ * 2026-07-04 真机回归第二轮根因修复 — 意图/交易判定的输入必须是**用户话语**，
+ * 不是注入后的完整消息。
+ *
+ * 实锚：采集原话「采集@[...]头 5 个笔记的图片到@[cos]」在词表下正确判
+ * collection，但 orchestrator 用 `messageToText(content)`（bootstrap 注入后
+ * 文本）做判定——注入的站点卡/纪律含「发布/长文笔记/creator.xiaohongshu.com」
+ * 等词命中 PUBLISH_RE → 采集 run 被判 browser_transaction（错误判据模板、
+ * 前台 19s 假 done、后台任务孤儿化）。同一污染流进 currentUserText，让全部
+ * browser 工具把该轮当交易轮（act_on_target 的交易确认检测/建议由此而来）。
+ *
+ * 取纯文本优先级：envelope.pureUserText → envelope.primaryInstruction →
+ * 调用方提供的回退（无 envelope 的旧路径保持原行为）。
+ */
+export function resolvePureUserTextForClassification(
+  requestEnvelope: unknown,
+  fallback: string,
+): string {
+  if (requestEnvelope && typeof requestEnvelope === 'object') {
+    const envelope = requestEnvelope as { pureUserText?: unknown; primaryInstruction?: unknown }
+    const pure = typeof envelope.pureUserText === 'string' ? envelope.pureUserText.trim() : ''
+    if (pure) return pure
+    const primary = typeof envelope.primaryInstruction === 'string' ? envelope.primaryInstruction.trim() : ''
+    if (primary) return primary
+  }
+  return fallback
+}
+
 export function resolveAgentSdkTaskBudgetRuntime(params: {
   options?: AgentSdkExecutionOptions
   inferredTaskType?: import('../contracts/run-contracts').TaskType | null

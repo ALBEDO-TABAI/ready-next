@@ -21,6 +21,11 @@ const { resolve } = require('node:path')
 
 const HELPER_FILE = 'src/main/modules/agent-control/domain-adapters/message-capability-filter.ts'
 const SDK_FILE = 'src/main/modules/agent-control/runtime-core/agent-sdk-runtime.ts'
+// V3 phase 5 拆分（2026-07 上旬）：SDK 入口 assert 随 sendMessage 抽进
+// turn-orchestrator；三个 model build 站点的 sanitize 随 provider 抽出。
+// gate 目标跟进拆分现实（2026-07-04），不变量不变：两条路径都必须接线。
+const SDK_ORCHESTRATOR_FILE = 'src/main/modules/agent-control/runtime-core/agent-sdk-turn-orchestrator.ts'
+const SDK_PROVIDER_FILE = 'src/main/modules/agent-control/runtime-core/agent-sdk-provider.ts'
 const OPENAI_CLIENT_FILE = 'src/main/modules/claude-bridge/openai-execution-client.ts'
 const ANTHROPIC_CLIENT_FILE = 'src/main/modules/claude-bridge/anthropic-execution-client.ts'
 
@@ -58,38 +63,42 @@ function main() {
 
   // --- SDK runtime ---
   const sdkSrcRaw = read(SDK_FILE)
+  const sdkOrchestratorRaw = read(SDK_ORCHESTRATOR_FILE)
   if (!sdkSrcRaw) {
     violations.push({ file: SDK_FILE, reason: 'missing file' })
+  } else if (!sdkOrchestratorRaw) {
+    violations.push({ file: SDK_ORCHESTRATOR_FILE, reason: 'missing file' })
   } else {
-    const sdkSrc = stripComments(sdkSrcRaw)
-    // Stage U/V module reshuffle moved message-capability-filter into
-    // `agent-control/domain-adapters/`. SDK runtime now lives in
-    // `agent-control/runtime-core/`, so the relative import is
-    // `../domain-adapters/message-capability-filter`. Accept either form.
+    // V3 phase 5-B: sendMessage（含入口 assert）在 turn-orchestrator；
+    // runtime 仍须保留 filter import（对外重导/类型面）。两文件合并扫描。
+    const sdkSrc = stripComments(sdkSrcRaw) + '\n' + stripComments(sdkOrchestratorRaw)
     if (
       !/from\s+['"](?:\.\/message-capability-filter|\.\.\/domain-adapters\/message-capability-filter)['"]/.test(
         sdkSrc,
       )
     ) {
       violations.push({
-        file: SDK_FILE,
+        file: SDK_ORCHESTRATOR_FILE,
         reason: "must import from ./message-capability-filter or ../domain-adapters/message-capability-filter",
       })
     }
     if (!/assertCurrentMessageCapability\s*\(/.test(sdkSrc)) {
       violations.push({
-        file: SDK_FILE,
+        file: SDK_ORCHESTRATOR_FILE,
         reason: 'must call assertCurrentMessageCapability(...) at SDK entry (first segment)',
       })
     }
-    // Each of the 3 builder sites must pass its message array through the
-    // sanitize wrapper. We assert by name presence; tests cover the actual
-    // behavior. The wrapper name `sanitizeMessagesForModelClient` is local
-    // to agent-sdk-runtime.ts.
-    const sanitizeCalls = countMatches(sdkSrc, /sanitizeMessagesForModelClient\s*\(/g)
+  }
+  // V3 phase 5: 三个 model build 站点（chat/responses/anthropic）在 provider。
+  const sdkProviderRaw = read(SDK_PROVIDER_FILE)
+  if (!sdkProviderRaw) {
+    violations.push({ file: SDK_PROVIDER_FILE, reason: 'missing file' })
+  } else {
+    const providerSrc = stripComments(sdkProviderRaw)
+    const sanitizeCalls = countMatches(providerSrc, /sanitizeMessagesForModelClient\s*\(/g)
     if (sanitizeCalls < 3) {
       violations.push({
-        file: SDK_FILE,
+        file: SDK_PROVIDER_FILE,
         reason: `sanitizeMessagesForModelClient must be invoked at all 3 model build sites (chat/responses/anthropic); found ${sanitizeCalls}`,
       })
     }
