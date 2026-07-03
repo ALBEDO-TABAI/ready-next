@@ -85,6 +85,7 @@ Ready agent 模块（~519 文件/~153k 行）**骨架是对的，不重写**；�
 > 梯队三无人值守切片已完成（`2026-07-03-tier3-unattended-slice-closeout.md`）：D5 run-feedback 后端全通道；repo 构造器类型失配顺修。
 > **梯队三已全部收口（2026-07-03 用户在场监控会话，`2026-07-03-tier3-monitored-completion-closeout.md`）**：D5 评分控件 UI + registry 翻 live-required；emergence feed 全链通电（gate-flip 出 UNWIRED，4/7 类卡接现存信号源，prepare/harvest/forming 待新数据采集）；D2 criteria 事中自检 reminder（每 run 首调注入一次，与终态裁决同模板源）。D4（声明回传通道不存在）与 D7（LLM 维护回合：符号禁令 gate-flip+LLM 预算+staged 监控）维持缓办，工单已更。真实链状态：typecheck/stability/p3/p4=0；p6o=1 仅 D6；ipc-contract=base 26 条无新增。
 > 剩余：D1（标签 tabOpened）、D4、D6、D7 + ipc-contract 26 条清理；梯队四（run-timeline 单源/turn-engine 退役/god-object 拆分）合同先行。
+> **主线回归排期（2026-07-03 晚定稿）**：见 `2026-07-03-agent-mainline-p3-route.md` —— Phase R 真机关账 → A0+B 并行（turn-engine 盘点 + browser-tools 拆分，无人值守）→ A 契约外科（在场）→ C（DirectChat 迁移）→ D（事件单源），伴随线含债务包/意图门控专项/D7。本 handoff 使命完成，后续以 route 文档为主线入口。
 
 用户已认可思路，下一步做**梯队一**（安全、可无人值守）：
 1. 先跑 `npm run typecheck:node && npm run verify:stability && node scripts/check-unwired-capability-markers.cjs && node scripts/check-mandated-capability-is-live.cjs`，确认继承的工作树是绿的基线。（原 `check-belief-decay-live.cjs` 已于梯队二泛化为 `check-mandated-capability-is-live.cjs` 并退役。）
