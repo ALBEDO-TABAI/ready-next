@@ -5,11 +5,14 @@ status: done
 enforce: true
 parent: 2026-07-03-agent-mainline-p3-route.md
 result: >
-  A0：17 导出全 prod=0 证据表定稿（本文 §A0），HCD 随 Phase A 同死；A1 核查
-  清单排定。B1：browser-media-download.ts（468 行）纯移动落地，browser-tools
-  8053→7615；typecheck=0、焦点 137+72/0 fail、verify:stability=0、
-  verify:browser-reliability 113/0、silent-catch 浏览器违规 23→18（搬移
-  catch 按 silent-catch: 约定补注释，主文件既有漂移 18 条不属本批）。
+  A0：17 导出全 prod=0 证据表定稿（本文 §A0），HCD 随 Phase A 同死。
+  A1：六组全部 dead-with-engine（本文 §A1 表），A2 测试手术图定稿，三个
+  live 缺口观察记录。B1：browser-media-download.ts（468 行）纯移动，
+  browser-tools 8053→7615。B2：browser-input-actions.ts（603 行，含
+  waitForReady/计时常量随簇走）纯移动，browser-tools 7615→7049。
+  验证（真实退出码）：typecheck=0、焦点 137+72+88/0 fail、
+  verify:stability=0、verify:browser-reliability 113/0、silent-catch
+  浏览器违规 23→18 持平（搬移 catch 按 silent-catch: 约定补注释）。
 ---
 
 # A0 — turn-engine 全导出引用判定（非破坏，本文即产出）
@@ -33,7 +36,19 @@ result: >
 
 **HostCapabilityDispatcher 归宿**：构造者仅 `host-capability-dispatcher.test.ts`；turn-engine 经结构化 `HostCapabilityDispatcherLike` 使用（不 import）；其余引用=domain-adapters barrel 再导出 + 边界 gate 禁令。**随 Phase A 同死**（删类+专属测试+barrel 行，boundary gate 断言同步转型）。
 
-**A1（下一批，无人值守可做）**：上表 6 项"查 live 等价"逐一核验：live 有等价实现→测试删/重指 live；无等价且行为需保→抽 `agent-control/shared/` 窄模块。A1 全绿后 A2/A3（契约外科）留在场会话。
+**A1 核验结果（2026-07-03 深夜，同批完成）——六组全部 dead-with-engine，无一需抽取**：
+
+| 组 | live 等价核验 | 判决 |
+|---|---|---|
+| tool-loop 四件（countToolRepetitions 等） | `toolLoopRepetitionDetected` 全仓零 live 发射者——live SDK 无循环重复检测 | 随引擎死；metric 注册表死值 A2 一并清 + registry 测试同步 |
+| buildBudgetWarningMessage | live 有自有文案 `buildBudgetWarningSteering`（agent-sdk-utils:511-519，两级通用文案） | 死重复。⚠️ 观察：live 版缺长技能"保持推进"分支（Phase 3.3 防 VEA 自杀细腻度未迁移） |
+| statusFromTerminalReason | live 等价 `sdkStatusFromTerminalReason`（agent-sdk-utils:2121） | 死重复 |
+| computeChildContinuationDecision | e2e 测试 T5 块自述"engine 专属纯 helper"；live 续跑由 child-loop-terminal-funnel/SDK 测试覆盖 | 随引擎死；A2 只摘 e2e 文件的 T5 块（文件其余是 live 覆盖，不整删） |
+| applyChildResumeFreshContractFields | live 的 `freshContractFields` 三处全 `: null`（skill-child-runner），从不填充 | 随引擎死。⚠️ 观察：fresh-contract-on-resume 在 live 未实现（若合同仍被期望属 live 缺口） |
+| detectAllowedPreferredMismatch / shouldResumeContinuationForTurn | `turn_frame_summary` 零 live 发射者 | 随引擎死（dormant 专属诊断） |
+
+**A2 测试手术图（据 A1 定稿）**：整删 turn-engine-route(5117 行)/turn-engine-projection/turn-engine-force-tool-dispatch/tool-loop-dedup/turn-frame-summary-log/resume-fresh-contract-fields；外科修剪 skill-child-run-end-to-end（仅 T5 块）与 phase-3-output-safety-net（仅 buildBudgetWarningMessage 部分，其余 live 守卫保留）；A3 转型 turn-engine-contract + host-contract 253 断言（在场）。metric 死值清理：toolLoopRepetitionDetected（+registry 测试）。
+**三个 live 缺口观察**（不阻塞退役，已记 route 伴随线候选）：循环重复检测缺失、预算文案长技能分支缺失、freshContractFields 恒 null。
 
 # B1 — browser-tools 媒体下载簇拆分（纯移动）
 
