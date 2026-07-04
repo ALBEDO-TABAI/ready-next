@@ -22,7 +22,7 @@ import test from 'node:test'
 
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 import { executeToolCall, type ToolContext } from '../main/modules/tools/tool-executor'
-import { __resetBrowserAgentPageMapForTests } from '../main/modules/tools/browser-tools'
+import { __resetBrowserAgentPageMapForTests } from '../main/modules/tools/browser-observe-tools'
 import { matchBrowserDestructiveTarget } from '../main/modules/agent-control/safety/action-confirmation-policy'
 import { buildExplicitNoSkillAuthorization } from '../main/modules/agent-control/skills/skill-tool-authorization'
 import type { BrowserController } from '../main/modules/browser-engine/ipc-handler'

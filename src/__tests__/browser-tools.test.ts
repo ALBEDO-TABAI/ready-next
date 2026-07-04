@@ -4,10 +4,8 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { JSDOM } from 'jsdom'
-import {
-  __resetBrowserAgentPageMapForTests,
-  executeBrowserTool,
-} from '../main/modules/tools/browser-tools'
+import { executeBrowserTool } from '../main/modules/tools/browser-tools'
+import { __resetBrowserAgentPageMapForTests } from '../main/modules/tools/browser-observe-tools'
 import { __setBrowserCollectionConsentStoreForTests } from '../main/modules/tools/browser-collection-tools'
 import { BrowserTaskPlanner } from '../main/modules/agent-control/domain-adapters/browser-task-planner'
 import {

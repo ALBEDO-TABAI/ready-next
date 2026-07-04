@@ -11,11 +11,15 @@ const browserPowerToolsPath = path.join(root, 'src/main/modules/tools/browser-po
 // browser_start_task 等采集 case 实现体拆至 browser-collection-tools.ts，
 // 自由脚本直通禁则同样覆盖拆出文件。
 const browserCollectionToolsPath = path.join(root, 'src/main/modules/tools/browser-collection-tools.ts')
+// B6（2026-07-05）—— browser_wait_for_condition 等观察 case 实现体拆至
+// browser-observe-tools.ts，自由脚本直通禁则同样覆盖拆出文件。
+const browserObserveToolsPath = path.join(root, 'src/main/modules/tools/browser-observe-tools.ts')
 const registryPath = path.join(root, 'src/main/modules/tools/browser-readonly-script-templates.ts')
 
 const source = fs.readFileSync(browserToolsPath, 'utf8')
 const powerSource = fs.readFileSync(browserPowerToolsPath, 'utf8')
 const collectionSource = fs.readFileSync(browserCollectionToolsPath, 'utf8')
+const observeSource = fs.readFileSync(browserObserveToolsPath, 'utf8')
 let failed = false
 
 function fail(message) {
@@ -57,6 +61,7 @@ for (const [pattern, message] of forbidden) {
   if (pattern.test(source)) fail(message)
   if (pattern.test(powerSource)) fail(`${message} (browser-power-tools.ts)`)
   if (pattern.test(collectionSource)) fail(`${message} (browser-collection-tools.ts)`)
+  if (pattern.test(observeSource)) fail(`${message} (browser-observe-tools.ts)`)
 }
 
 if (failed) process.exit(1)

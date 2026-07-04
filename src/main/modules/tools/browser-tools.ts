@@ -4,10 +4,6 @@
  */
 
 import { BrowserController } from '../browser-engine/ipc-handler'
-import { BrowserAgentRuntimeAdapter } from '../browser-engine/agent-runtime-adapter'
-import { BrowserPageStateService } from '../browser-engine/page-state-service'
-import { BrowserEvidenceService } from '../browser-engine/evidence-service'
-import { randomUUID } from 'crypto'
 import { existsSync } from 'fs'
 import { basename, extname, join } from 'path'
 import { analyzeViewportWithVision } from './browser-vision'
@@ -26,11 +22,7 @@ import {
 } from './browser-tool-catalog'
 import { beginLeaseGate, type BrowserLeaseGate } from '../browser-engine/agent-browser-lease-gate'
 import { isHighControlPlatformText } from '../../../shared/browser-collection-intent'
-import {
-  buildBrowserReadonlyProbeJs,
-  normalizeBrowserReadonlyProbeRequest,
-} from '../../../shared/browser-readonly-probe'
-import { agentBrowserError, isAgentBrowserError, type AgentBrowserStructuredError } from '../browser-engine/agent-browser-errors'
+import { agentBrowserError, isAgentBrowserError } from '../browser-engine/agent-browser-errors'
 import { ToolDomainError } from './tool-errors'
 import { resolveBrowserWorkflowIntent } from '../../../shared/browser-workflow-intent'
 import {
@@ -45,7 +37,7 @@ import {
   matchBrowserDestructiveTarget,
 } from '../agent-control/safety/action-confirmation-policy'
 import { ACTION_CONFIRMATION_ERROR_KINDS } from '../agent-control/contracts/error-kinds'
-import { buildPageMap, parseTargetId, type PageMap, type RawAxNode } from '../browser-engine/agent-browser-page-map'
+import { parseTargetId } from '../browser-engine/agent-browser-page-map'
 import { gateActOnTarget, type AgentBrowserAction, type AgentBrowserReadBack } from '../browser-engine/agent-browser-act'
 import {
   browserPowerModeEnabled,
@@ -64,7 +56,6 @@ import {
 } from './browser-failure-output'
 
 import {
-  buildBrowserPageMapProbeJs,
   buildBrowserTargetProbeJs,
   buildTargetSemanticsLibraryJs,
   buildInputGuardSnippetJs,
@@ -97,7 +88,6 @@ import {
 import {
   ensureGeminiSubmitted,
   isLikelyChatPage,
-  runGeminiQuery,
 } from './browser-gemini'
 import {
   browserPowerDeniedOutput,
@@ -107,28 +97,31 @@ import {
 } from './browser-power-tools'
 import { executeBrowserCollectionTool } from './browser-collection-tools'
 import {
+  captureAgentPageMap,
+  currentBrowserPageMapAmbiguity,
+  currentBrowserPageMapGeneration,
+  DEFAULT_AGENT_PAGE_MAP_MAX_BYTES,
+  executeBrowserObserveTool,
+} from './browser-observe-tools'
+import {
   activeBrowserToolUrl,
   activePageLikelyMatchesTarget,
+  browserStructuredErrorOutput,
   detectBrowserPageTransactionConfirmation,
+  getPageIdentity,
+  listSubframesSafe,
+  locateActionTargets,
   resolveHighControlAgentTab,
+  resolveToolContextMeta,
   truncate,
+  uniqueStrings,
+  type ActionTargetCandidate,
 } from './browser-tool-shared'
 
 const logger = createRotatingLogger('ready-tools.log')
 function log(msg: string) {
   try { logger.append(`[${new Date().toISOString()}] ${msg}\n`) } catch { /* */ }
 }
-
-export const __breaksInvariants = [
-  'test-only browser page-map singleton reset mutates shared browser tool state',
-]
-
-function browserStructuredErrorOutput(error: AgentBrowserStructuredError): ToolExecutionOutput {
-  return browserStructuredOutput(error as unknown as Record<string, unknown>)
-}
-
-const browserPageMapGenerationByTab = new Map<string, number>()
-const browserPageMapAmbiguityByTab = new Map<string, Map<string, { role: string; name: string; targetIds: string[] }>>()
 
 interface BrowserToolTabSnapshot {
   id: string
@@ -145,48 +138,6 @@ interface BrowserActionFollowedTab {
   sourceTabId: string | null
   ready?: boolean
   elapsedMs?: number
-}
-
-export function __resetBrowserAgentPageMapForTests(): void {
-  browserPageMapGenerationByTab.clear()
-  browserPageMapAmbiguityByTab.clear()
-}
-
-function resolveBrowserToolTabKey(controller: BrowserController, tabId: string | null): string {
-  return tabId || controller.getActiveTab?.()?.id || '__active__'
-}
-
-function nextBrowserPageMapGeneration(controller: BrowserController, tabId: string | null): number {
-  const key = resolveBrowserToolTabKey(controller, tabId)
-  const next = (browserPageMapGenerationByTab.get(key) || 0) + 1
-  browserPageMapGenerationByTab.set(key, next)
-  return next
-}
-
-function currentBrowserPageMapGeneration(controller: BrowserController, tabId: string | null): number | null {
-  return browserPageMapGenerationByTab.get(resolveBrowserToolTabKey(controller, tabId)) ?? null
-}
-
-function rememberBrowserPageMapAmbiguity(
-  controller: BrowserController,
-  tabId: string | null,
-  groups: Array<{ role: string; name: string; targetIds: string[] }>,
-): void {
-  const byTarget = new Map<string, { role: string; name: string; targetIds: string[] }>()
-  for (const group of groups) {
-    for (const targetId of group.targetIds) {
-      byTarget.set(targetId, group)
-    }
-  }
-  browserPageMapAmbiguityByTab.set(resolveBrowserToolTabKey(controller, tabId), byTarget)
-}
-
-function currentBrowserPageMapAmbiguity(
-  controller: BrowserController,
-  tabId: string | null,
-  targetId: string,
-): { role: string; name: string; targetIds: string[] } | null {
-  return browserPageMapAmbiguityByTab.get(resolveBrowserToolTabKey(controller, tabId))?.get(targetId) || null
 }
 
 function snapshotBrowserTabs(controller: BrowserController): BrowserToolTabSnapshot[] {
@@ -269,100 +220,6 @@ async function waitForActionFollowedTab(
   return null
 }
 
-function buildPageMapAmbiguityGroups(targets: PageMap['targets']): Array<{ role: string; name: string; targetIds: string[] }> {
-  const groups = new Map<string, { role: string; name: string; targetIds: string[] }>()
-  for (const target of targets) {
-    const name = String(target.name || '').trim()
-    if (!name) continue
-    const key = `${target.role}::${name.toLowerCase()}`
-    const group = groups.get(key) || { role: target.role, name, targetIds: [] }
-    group.targetIds.push(target.targetId)
-    groups.set(key, group)
-  }
-  return Array.from(groups.values()).filter((group) => group.targetIds.length > 1)
-}
-
-/**
- * 2026-07-03 真机回归 R1 根因修复：page_map 默认体量预算。此前 model 不传
- * max_bytes 时 map 不限量——小红书发布编辑器单次 ~27k token，触发 presend
- * 单结果截断后模型信息真空。32KB（钳制区间内）≈8-11k token，留足两次读。
- */
-const DEFAULT_AGENT_PAGE_MAP_MAX_BYTES = 32_768
-
-async function captureAgentPageMap(
-  controller: BrowserController,
-  tabId: string | null,
-  maxBytes?: number,
-): Promise<Record<string, unknown>> {
-  const raw = await controller.executeJS(tabId, buildBrowserPageMapProbeJs()) as {
-    identity?: { url?: string; title?: string }
-    viewport?: { width?: number; height?: number }
-    bodyText?: string
-    rawRoots?: RawAxNode[]
-    riskFlags?: Record<string, unknown>
-    structureHints?: Record<string, unknown>
-  } | null
-  const generation = nextBrowserPageMapGeneration(controller, tabId)
-  const viewport = {
-    width: Number(raw?.viewport?.width || 0) || 0,
-    height: Number(raw?.viewport?.height || 0) || 0,
-  }
-  // D10 frame 穿透：主帧 probe 后逐子帧补采，目标打上 frameKey（进 targetId
-  // 的 frameId 槽位，act 侧按它路由回同一帧执行）。单帧失败不阻断整图。
-  const rawRoots: RawAxNode[] = Array.isArray(raw?.rawRoots) ? raw.rawRoots : []
-  const mappedFrames: Array<{ frameKey: string; url: string; targetCount: number }> = []
-  if (typeof controller.executeJSInFrame === 'function') {
-    for (const frame of listSubframesSafe(controller, tabId)) {
-      try {
-        const frameRaw = await controller.executeJSInFrame(tabId, frame.frameKey, buildBrowserPageMapProbeJs()) as {
-          rawRoots?: RawAxNode[]
-        } | null
-        const children = Array.isArray(frameRaw?.rawRoots?.[0]?.children) ? frameRaw.rawRoots[0].children : []
-        if (children.length === 0) continue
-        for (const child of children) child.frameId = frame.frameKey
-        rawRoots.push({ role: 'iframe', name: frame.url.slice(0, 120), frameId: frame.frameKey, children })
-        mappedFrames.push({ frameKey: frame.frameKey, url: frame.url.slice(0, 200), targetCount: children.length })
-      } catch (error) {
-        log(`page map subframe probe failed (${frame.frameKey}): ${error instanceof Error ? error.message : String(error)}`)
-      }
-    }
-  }
-  const map = buildPageMap(rawRoots, {
-    generation,
-    viewport,
-    ...(maxBytes ? { maxBytes } : {}),
-  })
-  const ambiguityGroups = buildPageMapAmbiguityGroups(map.targets)
-  rememberBrowserPageMapAmbiguity(controller, tabId, ambiguityGroups)
-  return {
-    pageIdentity: {
-      url: String(raw?.identity?.url || ''),
-      title: String(raw?.identity?.title || ''),
-      generation,
-      capturedAt: new Date().toISOString(),
-    },
-    summary: {
-      bodyText: String(raw?.bodyText || '').slice(0, 1000),
-      targetCount: map.targets.length,
-      truncated: map.truncated,
-    },
-    pageMap: {
-      ...map,
-      structureHints: raw?.structureHints || { iframes: [], shadowRoots: [], hiddenLoaded: [] },
-    },
-    ambiguityGroups,
-    riskFlags: raw?.riskFlags || {},
-    evidence: {
-      generation,
-      targetSource: 'dom-target-library',
-      targetCount: map.targets.length,
-      truncated: map.truncated,
-      ...(mappedFrames.length > 0 ? { frames: mappedFrames } : {}),
-    },
-    nextAllowedActions: ['read map again', 'act on target', 'wait', 'stop with reason'],
-  }
-}
-
 function didBrowserActionChange(before: unknown, after: unknown): boolean {
   if (before === null || after === null || before === undefined || after === undefined) return false
   try {
@@ -384,17 +241,6 @@ async function readBrowserActionDeltaBestEffort(
     log(`browser action delta ${phase} readback failed: ${error instanceof Error ? error.message : String(error)}`)
     return null
   }
-}
-
-function createBrowserAgentHelpers(controller: BrowserController) {
-  const runtime = new BrowserAgentRuntimeAdapter(controller)
-  const pageStateService = new BrowserPageStateService(runtime)
-  const evidenceService = new BrowserEvidenceService()
-  return { runtime, pageStateService, evidenceService }
-}
-
-function uniqueStrings(values: string[]): string[] {
-  return Array.from(new Set(values.filter(Boolean)))
 }
 
 /**
@@ -642,34 +488,6 @@ export function getOpenAITools(): Array<Record<string, unknown>> {
 
 // ── Browser Tool Executor ───────────────────────────────────────────
 
-const TOOL_CONTROLLER_ID = 'primary-browser-controller'
-
-const screenshotCache = new Map<string, { base64: string; width: number; height: number; createdAt: number }>()
-const SCREENSHOT_CACHE_MAX = 30
-
-function resolveToolContextMeta(
-  controller: BrowserController,
-  tabId: string | null,
-): { controllerId: string; tabRole: 'current' | 'owned' | 'required' | 'background' | 'unknown' } {
-  const tabs = controller.getTabList()
-  const resolved = tabId
-    ? tabs.find((tab) => tab.id === tabId) || tabs.find((tab) => tab.active)
-    : tabs.find((tab) => tab.active)
-  if (!resolved) {
-    return { controllerId: TOOL_CONTROLLER_ID, tabRole: 'unknown' }
-  }
-  if (resolved.required) {
-    return { controllerId: TOOL_CONTROLLER_ID, tabRole: 'required' }
-  }
-  if (resolved.owner === 'agent') {
-    return { controllerId: TOOL_CONTROLLER_ID, tabRole: 'owned' }
-  }
-  if (resolved.active) {
-    return { controllerId: TOOL_CONTROLLER_ID, tabRole: 'current' }
-  }
-  return { controllerId: TOOL_CONTROLLER_ID, tabRole: 'background' }
-}
-
 function isBrowserTransactionTurn(currentUserText?: string | null): boolean {
   return resolveBrowserWorkflowIntent(currentUserText || '').kind === 'transaction'
 }
@@ -852,18 +670,6 @@ function searchUrl(engine: SearchEngine, query: string): string {
 }
 
 
-function cacheScreenshot(base64: string, width: number, height: number): string {
-  const id = `browser-shot-${randomUUID()}`
-  screenshotCache.set(id, { base64, width, height, createdAt: Date.now() })
-  if (screenshotCache.size > SCREENSHOT_CACHE_MAX) {
-    const stale = Array.from(screenshotCache.entries())
-      .sort((a, b) => a[1].createdAt - b[1].createdAt)
-      .slice(0, screenshotCache.size - SCREENSHOT_CACHE_MAX)
-    stale.forEach(([key]) => screenshotCache.delete(key))
-  }
-  return id
-}
-
 async function extractSearchResults(
   controller: BrowserController,
   tabId: string | null,
@@ -1025,24 +831,6 @@ function buildClickByTextJs(text: string, exact: boolean): string {
 // 渲染在 iframe/OOPIF 内，click_text/read_page_map 永远看不见。这里给
 // 定位器一条"主帧 miss 后逐子帧尝试"的通道；坐标类动作不走此路（子帧
 // 内坐标系与顶层视口不同构）。
-
-const AGENT_PAGE_MAP_MAX_SUBFRAMES = 8
-
-function listSubframesSafe(
-  controller: BrowserController,
-  tabId: string | null,
-): Array<{ frameKey: string; url: string }> {
-  if (typeof controller.listContentFrames !== 'function') return []
-  try {
-    return controller.listContentFrames(tabId)
-      .filter((frame) => !frame.main && frame.url && frame.url !== 'about:blank')
-      .slice(0, AGENT_PAGE_MAP_MAX_SUBFRAMES)
-      .map((frame) => ({ frameKey: frame.frameKey, url: frame.url }))
-  } catch {
-    // silent-catch: 帧枚举失败按无子帧处理，主帧行为不受影响。
-    return []
-  }
-}
 
 function isClickByTextMiss(result: unknown): boolean {
   return typeof result === 'string' && result.startsWith('Element by text not found')
@@ -1392,25 +1180,6 @@ interface ScopeAttachmentCandidate {
   createdAt: string
 }
 
-interface ActionTargetCandidate {
-  kind: 'input' | 'launcher' | 'dropzone' | 'text_button' | 'icon_button' | 'send_button' | 'close_button' | 'back_button' | 'prompt_input'
-  label: string
-  selectorHint?: string
-  x?: number
-  y?: number
-  confidence: number
-  evidence: string[]
-  associatedInputSelector?: string
-  hidden?: boolean
-  accepts?: string
-  multiple?: boolean
-  focused?: boolean
-  textLength?: number
-  valuePreview?: string
-  nearActiveInput?: boolean
-  distanceToActiveInput?: number
-}
-
 interface ScopeUploadMemory {
   attachmentId: string
   attachmentPath: string
@@ -1467,314 +1236,6 @@ function selectScopeAttachment(
   return { ambiguous: attachments.slice(0, 6) }
 }
 
-async function getPageIdentity(
-  controller: BrowserController,
-  tabId: string | null,
-): Promise<{ title: string; url: string; activeElement: string }> {
-  const result = await controller.executeJS(
-    tabId,
-    `(() => ({
-      title: document.title || '',
-      url: location.href || '',
-      activeElement:
-        String(document.activeElement?.tagName || '').toLowerCase() +
-        ':' +
-        String(
-          document.activeElement?.getAttribute?.('aria-label') ||
-          document.activeElement?.getAttribute?.('placeholder') ||
-          document.activeElement?.id ||
-          ''
-        ),
-    }))()`,
-  ) as { title?: string; url?: string; activeElement?: string } | null
-  return {
-    title: String(result?.title || ''),
-    url: String(result?.url || ''),
-    activeElement: String(result?.activeElement || ''),
-  }
-}
-
-interface WorkflowUploadProbe {
-  complete: boolean
-  evidence: string[]
-  inputHasFiles: boolean
-  previewVisible: boolean
-  attachmentNameMatched: boolean
-  removeActionVisible: boolean
-}
-
-interface WorkflowDomStateProbe {
-  inputCandidateCount: number
-  sendCandidateCount: number
-  uploadCandidateCount: number
-  modalVisible: boolean
-  bodyStateText: string
-}
-
-interface WorkflowPromptSubmissionProbe {
-  promptMatched: boolean
-  promptFilled: boolean
-  promptText: string
-  generating: boolean
-  submitEvidence: string[]
-  sendButtonCount: number
-  sendButtonDisabled: boolean
-  uploadChipVisible: boolean
-}
-
-async function probeWorkflowUploadState(
-  controller: BrowserController,
-  tabId: string | null,
-  attachmentName?: string,
-): Promise<WorkflowUploadProbe> {
-  const safeName = String(attachmentName || '').trim()
-  const basename = safeName.replace(/\.[a-z0-9]{1,8}$/i, '').toLowerCase()
-  const result = await controller.executeJS(
-    tabId,
-    `(() => {
-      const normalize = (value) => String(value || '').replace(/\\s+/g, ' ').trim().toLowerCase()
-      const visible = (el) => {
-        if (!(el instanceof HTMLElement)) return false
-        const rect = el.getBoundingClientRect()
-        if (rect.width < 12 || rect.height < 12) return false
-        const style = getComputedStyle(el)
-        if (!style || style.display === 'none' || style.visibility === 'hidden') return false
-        return Number(style.opacity || '1') > 0
-      }
-      const attachmentNeedle = ${JSON.stringify(basename)}
-      const bodyText = normalize(document.body?.innerText || '')
-      const fileInputs = Array.from(document.querySelectorAll('input[type="file"]'))
-        .filter((node) => node instanceof HTMLInputElement)
-      const inputHasFiles = fileInputs.some((node) => node.files && node.files.length > 0)
-      const viewportW = Math.max(1, window.innerWidth || 0)
-      const viewportH = Math.max(1, window.innerHeight || 0)
-      const previewNodes = Array.from(document.querySelectorAll('img,video,[role="img"],canvas,.thumbnail,[class*="thumb"],[class*="preview"],[data-testid*="upload" i],[data-testid*="preview" i]'))
-        .filter((node) => visible(node))
-      const removeNodes = Array.from(document.querySelectorAll('button,[role="button"],span,div,a'))
-        .filter((node) => visible(node))
-        .map((node) => normalize(node.textContent || node.getAttribute?.('aria-label') || node.getAttribute?.('title') || ''))
-        .filter((text) => /remove|delete|clear|close|移除|删除|清除|取消|×|x/.test(text))
-      const uploadMarkers = /upload|uploaded|preview|thumbnail|附件|参考图|素材|已上传|原图|参考/.test(bodyText)
-      const attachmentNameMatched = Boolean(attachmentNeedle && bodyText.includes(attachmentNeedle))
-      const previewVisible = previewNodes.some((node) => {
-        if (!(node instanceof HTMLElement)) return false
-        const rect = node.getBoundingClientRect()
-        const meta = normalize([
-          node.getAttribute?.('aria-label'),
-          node.getAttribute?.('title'),
-          node.getAttribute?.('data-testid'),
-          node.getAttribute?.('class'),
-          node.textContent,
-        ].filter(Boolean).join(' '))
-        const looksLikeNamedPreview = !attachmentNeedle || meta.includes(attachmentNeedle) || /preview|thumbnail|附件|已上传|upload|参考图|素材/.test(meta)
-        const smallPreviewCluster =
-          rect.width >= 24 &&
-          rect.height >= 24 &&
-          rect.width <= Math.min(220, viewportW * 0.28) &&
-          rect.height <= Math.min(220, viewportH * 0.28) &&
-          rect.top >= viewportH * 0.55
-        return looksLikeNamedPreview || smallPreviewCluster || uploadMarkers || removeNodes.length > 0
-      })
-      const evidence = []
-      if (inputHasFiles) evidence.push('file_input_has_files')
-      if (attachmentNameMatched) evidence.push('attachment_name_visible')
-      if (previewVisible) evidence.push('preview_or_chip_visible')
-      if (removeNodes.length > 0) evidence.push('remove_action_visible')
-      return {
-        complete: Boolean(inputHasFiles || attachmentNameMatched || previewVisible),
-        evidence,
-        inputHasFiles,
-        previewVisible,
-        attachmentNameMatched,
-        removeActionVisible: removeNodes.length > 0,
-      }
-    })()`,
-  ) as WorkflowUploadProbe | null
-
-  return {
-    complete: Boolean(result?.complete),
-    evidence: Array.isArray(result?.evidence) ? result.evidence : [],
-    inputHasFiles: Boolean(result?.inputHasFiles),
-    previewVisible: Boolean(result?.previewVisible),
-    attachmentNameMatched: Boolean(result?.attachmentNameMatched),
-    removeActionVisible: Boolean(result?.removeActionVisible),
-  }
-}
-
-async function probeWorkflowDomState(
-  controller: BrowserController,
-  tabId: string | null,
-): Promise<WorkflowDomStateProbe> {
-  const result = await controller.executeJS(
-    tabId,
-    `(() => {
-      const normalize = (value) => String(value || '').replace(/\\s+/g, ' ').trim().toLowerCase()
-      const visible = (el) => {
-        if (!(el instanceof HTMLElement)) return false
-        const rect = el.getBoundingClientRect()
-        if (rect.width < 10 || rect.height < 10) return false
-        const style = getComputedStyle(el)
-        if (!style || style.display === 'none' || style.visibility === 'hidden') return false
-        return Number(style.opacity || '1') > 0
-      }
-      const editables = Array.from(document.querySelectorAll('textarea,input,[contenteditable="true"],[contenteditable=""],[role="textbox"],[role="combobox"],[role="searchbox"]'))
-        .filter((node) => visible(node))
-      const buttons = Array.from(document.querySelectorAll('button,[role="button"],input[type="submit"],input[type="button"],label,[tabindex]'))
-        .filter((node) => visible(node))
-      const sendCandidateCount = buttons.filter((node) => {
-        const meta = normalize(node.textContent || node.getAttribute?.('aria-label') || node.getAttribute?.('title') || node.getAttribute?.('data-testid') || node.getAttribute?.('class') || '')
-        return /send|提交|发送|继续|generate|生成|创作|run|go|发布/.test(meta)
-      }).length
-      const uploadCandidateCount = buttons.filter((node) => {
-        const meta = normalize(node.textContent || node.getAttribute?.('aria-label') || node.getAttribute?.('title') || node.getAttribute?.('data-testid') || node.getAttribute?.('class') || '')
-        return /upload|上传|附件|图片|素材|参考图|file|image|plus|add|导入|拖拽/.test(meta)
-      }).length
-      const modalVisible = Array.from(document.querySelectorAll('[role="dialog"],[aria-modal="true"],dialog,.modal,.drawer,.popup'))
-        .some((node) => visible(node))
-      const bodyStateText = normalize(document.body?.innerText || '').slice(0, 1200)
-      return {
-        inputCandidateCount: editables.length,
-        sendCandidateCount,
-        uploadCandidateCount,
-        modalVisible,
-        bodyStateText,
-      }
-    })()`,
-  ) as WorkflowDomStateProbe | null
-
-  return {
-    inputCandidateCount: Number(result?.inputCandidateCount || 0),
-    sendCandidateCount: Number(result?.sendCandidateCount || 0),
-    uploadCandidateCount: Number(result?.uploadCandidateCount || 0),
-    modalVisible: Boolean(result?.modalVisible),
-    bodyStateText: String(result?.bodyStateText || ''),
-  }
-}
-
-async function probeWorkflowPromptSubmissionState(
-  controller: BrowserController,
-  tabId: string | null,
-  expectedPrompt: string,
-): Promise<WorkflowPromptSubmissionProbe> {
-  const result = await controller.executeJS(
-    tabId,
-    `(() => {
-      const expected = ${JSON.stringify(String(expectedPrompt || '').trim().toLowerCase())}
-      const normalize = (value) => String(value || '').replace(/\\s+/g, ' ').trim().toLowerCase()
-      const visible = (el) => {
-        if (!(el instanceof HTMLElement)) return false
-        const rect = el.getBoundingClientRect()
-        if (!rect || rect.width <= 0 || rect.height <= 0) return false
-        const style = getComputedStyle(el)
-        if (!style || style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity || '1') <= 0) return false
-        return true
-      }
-      const blockedInputTypes = new Set(['hidden', 'button', 'submit', 'reset', 'checkbox', 'radio', 'file', 'range', 'color', 'date', 'time', 'month', 'week'])
-      const isEditable = (el) => {
-        if (!(el instanceof HTMLElement)) return false
-        const isTextInput = el instanceof HTMLInputElement && !blockedInputTypes.has((el.type || 'text').toLowerCase())
-        const isTextarea = el instanceof HTMLTextAreaElement
-        const role = (el.getAttribute('role') || '').toLowerCase()
-        const roleTextbox = role === 'textbox' || role === 'searchbox'
-        const hasContentEditableAttr = el.hasAttribute('contenteditable')
-        const editableAttr = String(el.getAttribute('contenteditable') || '').toLowerCase()
-        const isContentEditable =
-          el.isContentEditable ||
-          (hasContentEditableAttr && (editableAttr === '' || editableAttr === 'true' || editableAttr === 'plaintext-only'))
-        if (!(isTextInput || isTextarea || roleTextbox || isContentEditable)) return false
-        if (el.getAttribute('aria-disabled') === 'true') return false
-        if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
-          if (el.disabled || el.readOnly) return false
-        }
-        return visible(el)
-      }
-      const editableText = (el) => {
-        if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) return String(el.value || '')
-        return String(el.innerText || el.textContent || '')
-      }
-      const editables = Array.from(document.querySelectorAll('textarea,input,[contenteditable="true"],[contenteditable=""],[role="textbox"],[role="searchbox"]'))
-        .filter(isEditable)
-      const promptCandidate = editables
-        .map((el) => {
-          const meta = normalize([
-            el.getAttribute('placeholder'),
-            el.getAttribute('aria-label'),
-            el.getAttribute('name'),
-            el.getAttribute('id'),
-            el.getAttribute('title'),
-            el.getAttribute('data-testid'),
-            el.getAttribute('class'),
-          ].filter(Boolean).join(' '))
-          const rect = el.getBoundingClientRect()
-          let score = 0
-          if (/prompt|提示|文案|描述|输入|message|chat|ask|生成|创作|内容/.test(meta)) score += 12
-          if (el.tagName.toLowerCase() === 'textarea') score += 4
-          if ((el instanceof HTMLElement) && el.isContentEditable) score += 3
-          if (rect.bottom > window.innerHeight * 0.45) score += 3
-          if (rect.width > window.innerWidth * 0.25) score += 2
-          if (/时间|生成类型|操作类型|筛选|排序|search|搜索/.test(meta)) score -= 14
-          if (rect.top < window.innerHeight * 0.38) score -= 8
-          return { text: editableText(el), score }
-        })
-        .filter((item) => item.score >= 2)
-        .sort((a, b) => b.score - a.score || b.text.length - a.text.length)[0]
-
-      const promptText = normalize(promptCandidate?.text || '')
-      const promptMatched =
-        Boolean(expected) &&
-        promptText.length >= Math.min(Math.max(12, Math.floor(expected.length * 0.4)), expected.length) &&
-        (promptText === expected || promptText.includes(expected) || expected.includes(promptText))
-      const promptFilled = Boolean(promptText)
-      const buttons = Array.from(document.querySelectorAll('button,[role="button"],input[type="button"],input[type="submit"]'))
-        .filter(visible)
-        .map((el) => {
-          const meta = normalize([
-            el.textContent,
-            el.getAttribute('aria-label'),
-            el.getAttribute('title'),
-            el.getAttribute('data-testid'),
-            el.getAttribute('class'),
-          ].filter(Boolean).join(' '))
-          const disabled =
-            (el instanceof HTMLButtonElement && el.disabled) ||
-            (el instanceof HTMLInputElement && el.disabled) ||
-            el.getAttribute('aria-disabled') === 'true'
-          return { meta, disabled }
-        })
-      const sendButtons = buttons.filter((item) => /send|发送|提交|发布|继续|go|run|submit|generate|generating|生成|创作|开始/.test(item.meta))
-      const sendButtonCount = sendButtons.length
-      const sendButtonDisabled = sendButtons.length > 0 && sendButtons.every((item) => item.disabled)
-      const bodyText = normalize(document.body?.innerText || '')
-      const uploadChipVisible = /已上传|upload|preview|thumbnail|附件/.test(bodyText) && /remove|delete|移除|删除|清除/.test(bodyText)
-      const submitEvidence = []
-      if (/thinking|正在思考|思考中|生成中|creating|generating|uploading|上传中|处理中|responding|排队中/.test(bodyText)) {
-        submitEvidence.push('page_processing_state')
-      }
-      return {
-        promptMatched,
-        promptFilled,
-        promptText,
-        generating: submitEvidence.length > 0,
-        submitEvidence,
-        sendButtonCount,
-        sendButtonDisabled,
-        uploadChipVisible,
-      }
-    })()`,
-  ) as WorkflowPromptSubmissionProbe | null
-
-  return {
-    promptMatched: Boolean(result?.promptMatched),
-    promptFilled: Boolean(result?.promptFilled),
-    promptText: String(result?.promptText || ''),
-    generating: Boolean(result?.generating),
-    submitEvidence: Array.isArray(result?.submitEvidence) ? result.submitEvidence : [],
-    sendButtonCount: Number(result?.sendButtonCount || 0),
-    sendButtonDisabled: Boolean(result?.sendButtonDisabled),
-    uploadChipVisible: Boolean(result?.uploadChipVisible),
-  }
-}
-
 function buildScopeUploadKey(sessionId: string | undefined, pageIdentity: { title: string; url: string }): string {
   let normalizedPage = pageIdentity.title || 'unknown'
   try {
@@ -1784,342 +1245,6 @@ function buildScopeUploadKey(sessionId: string | undefined, pageIdentity: { titl
     normalizedPage = pageIdentity.url || normalizedPage
   }
   return `${sessionId || 'global'}::${normalizedPage}`
-}
-
-async function locateActionTargets(
-  controller: BrowserController,
-  tabId: string | null,
-  action: 'upload' | 'send' | 'close' | 'back' | 'input',
-): Promise<ActionTargetCandidate[]> {
-  if (action === 'upload') {
-    const targets = await controller.findUploadTargets(tabId)
-    return targets.map((item) => ({
-      kind: item.kind,
-      label: item.label,
-      selectorHint: item.selectorHint,
-      x: item.x,
-      y: item.y,
-      confidence: Number(item.confidence || 0),
-      evidence: Array.isArray(item.evidence) ? item.evidence : [],
-      associatedInputSelector: item.associatedInputSelector,
-      hidden: item.hidden,
-      accepts: item.accepts,
-      multiple: item.multiple,
-    }))
-  }
-
-  if (action === 'input') {
-    const targets = await controller.executeJS(
-      tabId,
-      `
-        (() => {
-          const normalize = (s) => String(s || '').replace(/\\s+/g, ' ').trim()
-          const visible = (el) => {
-            if (!(el instanceof HTMLElement)) return false
-            const rect = el.getBoundingClientRect()
-            if (!rect || rect.width < 10 || rect.height < 10) return false
-            const style = getComputedStyle(el)
-            if (!style || style.display === 'none' || style.visibility === 'hidden') return false
-            if (Number(style.opacity || '1') <= 0) return false
-            return true
-          }
-          const blockedInputTypes = new Set(['hidden', 'button', 'submit', 'reset', 'checkbox', 'radio', 'file', 'range', 'color', 'date', 'time', 'month', 'week'])
-          const isEditable = (el) => {
-            if (!(el instanceof HTMLElement)) return false
-            const isTextInput = el instanceof HTMLInputElement && !blockedInputTypes.has((el.type || 'text').toLowerCase())
-            const isTextarea = el instanceof HTMLTextAreaElement
-            const role = (el.getAttribute('role') || '').toLowerCase()
-            const roleTextbox = role === 'textbox' || role === 'combobox' || role === 'searchbox'
-            const hasContentEditableAttr = el.hasAttribute('contenteditable')
-            const editableAttr = String(el.getAttribute('contenteditable') || '').toLowerCase()
-            const isContentEditable =
-              el.isContentEditable ||
-              (hasContentEditableAttr && (editableAttr === '' || editableAttr === 'true' || editableAttr === 'plaintext-only'))
-            if (!(isTextInput || isTextarea || roleTextbox || isContentEditable)) return false
-            if (el.getAttribute('aria-disabled') === 'true') return false
-            if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
-              if (el.disabled || el.readOnly) return false
-            }
-            return visible(el)
-          }
-          const extractLabel = (el) => {
-            const attrs = [
-              el.getAttribute('placeholder'),
-              el.getAttribute('aria-label'),
-              el.getAttribute('name'),
-              el.getAttribute('id'),
-              el.getAttribute('title'),
-              el.getAttribute('data-testid'),
-              el.getAttribute('class'),
-            ].filter(Boolean)
-            const id = el.getAttribute('id')
-            if (id) {
-              try {
-                const linked = document.querySelector('label[for="' + CSS.escape(id) + '"]')
-                if (linked?.textContent) attrs.push(linked.textContent)
-              } catch {
-                // ignore
-              }
-            }
-            const parentLabel = el.closest('label')
-            if (parentLabel?.textContent) attrs.push(parentLabel.textContent)
-            return normalize(attrs.join(' '))
-          }
-          const active = document.activeElement instanceof HTMLElement && isEditable(document.activeElement)
-            ? document.activeElement
-            : null
-          const readValue = (el) => {
-            if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
-              return String(el.value || '')
-            }
-            return String(el.innerText || el.textContent || '')
-          }
-          const nodes = Array.from(document.querySelectorAll('textarea,input,[role="textbox"],[role="combobox"],[role="searchbox"],[contenteditable]'))
-            .filter((node) => node instanceof HTMLElement)
-            .filter((node) => isEditable(node))
-          const out = nodes.map((node) => {
-            const rect = node.getBoundingClientRect()
-            const label = extractLabel(node)
-            const value = normalize(readValue(node))
-            const focused = !!active && active === node
-            let score = 0
-            if (/prompt|提示|描述|文案|内容|输入|message|chat|ask|search|搜索|生成|创作|正文/.test(label)) score += 14
-            if (node.tagName.toLowerCase() === 'textarea') score += 6
-            if ((node instanceof HTMLElement) && node.isContentEditable) score += 5
-            if (rect.bottom > window.innerHeight * 0.4) score += 4
-            if (rect.width > window.innerWidth * 0.22) score += 4
-            if (rect.height >= 32) score += 2
-            if (focused) score += 18
-            if (value.length > 0) score += Math.min(6, value.length / 24)
-            if (/时间|生成类型|操作类型|筛选|排序/.test(label)) score -= 16
-            if (rect.top < window.innerHeight * 0.38) score -= 8
-            return {
-              kind: 'prompt_input',
-              label,
-              selectorHint: node.id ? ('#' + CSS.escape(node.id)) : String(node.tagName || '').toLowerCase(),
-              x: Math.max(0, Math.min(999, Math.round(((rect.left + rect.width / 2) / Math.max(1, window.innerWidth)) * 999))),
-              y: Math.max(0, Math.min(999, Math.round(((rect.top + rect.height / 2) / Math.max(1, window.innerHeight)) * 999))),
-              confidence: Math.min(0.99, 0.35 + score / 22),
-              evidence: [label ? 'editable_label_match' : 'editable_visible', focused ? 'active_input' : '', value.length > 0 ? 'has_text' : ''].filter(Boolean),
-              focused,
-              textLength: value.length,
-              valuePreview: value.slice(0, 80),
-            }
-          })
-          return out
-            .sort((a, b) => Number(b.confidence || 0) - Number(a.confidence || 0))
-            .slice(0, 10)
-        })()
-      `,
-    ) as ActionTargetCandidate[] | null
-
-    return Array.isArray(targets) ? targets : []
-  }
-
-  const keywordMap: Record<'upload' | 'send' | 'close' | 'back', string[]> = {
-    upload: ['upload'],
-    send: ['send', '发送', '提交', '发布', '继续', '生成', 'go', 'ask', 'submit'],
-    close: ['close', '关闭', '取消', '退出', 'dismiss', '×', 'x'],
-    back: ['back', '返回', '上一步', '撤销', 'go back', '返回上一页'],
-  }
-
-  const targets = await controller.executeJS(
-    tabId,
-    `
-      (() => {
-        const action = ${JSON.stringify(action)}
-        const keywords = ${JSON.stringify(keywordMap[action])}
-        const normalize = (s) => String(s || '').replace(/\\s+/g, ' ').trim()
-        const visible = (el) => {
-          if (!(el instanceof HTMLElement)) return false
-          const rect = el.getBoundingClientRect()
-          if (rect.width < 8 || rect.height < 8) return false
-          const style = getComputedStyle(el)
-          if (!style) return false
-          if (style.display === 'none' || style.visibility === 'hidden') return false
-          if (Number(style.opacity || '1') <= 0) return false
-          return true
-        }
-        const isClickable = (el) => {
-          const tag = String(el.tagName || '').toLowerCase()
-          if (['button', 'a', 'summary'].includes(tag)) return true
-          const role = (el.getAttribute('role') || '').toLowerCase()
-          if (['button', 'link', 'tab', 'menuitem'].includes(role)) return true
-          if (el instanceof HTMLInputElement && ['button', 'submit'].includes((el.type || '').toLowerCase())) return true
-          return el.hasAttribute('onclick') || typeof el.onclick === 'function'
-        }
-        const blockedInputTypes = new Set(['hidden', 'button', 'submit', 'reset', 'checkbox', 'radio', 'file', 'range', 'color', 'date', 'time', 'month', 'week'])
-        const isEditable = (el) => {
-          if (!(el instanceof HTMLElement)) return false
-          const isTextInput = el instanceof HTMLInputElement && !blockedInputTypes.has((el.type || 'text').toLowerCase())
-          const isTextarea = el instanceof HTMLTextAreaElement
-          const role = (el.getAttribute('role') || '').toLowerCase()
-          const roleTextbox = role === 'textbox' || role === 'combobox' || role === 'searchbox'
-          const editableAttr = String(el.getAttribute('contenteditable') || '').toLowerCase()
-          const isContentEditable =
-            el.isContentEditable ||
-            (el.hasAttribute('contenteditable') && (editableAttr === '' || editableAttr === 'true' || editableAttr === 'plaintext-only'))
-          if (!(isTextInput || isTextarea || roleTextbox || isContentEditable)) return false
-          if (el.getAttribute('aria-disabled') === 'true') return false
-          if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
-            if (el.disabled || el.readOnly) return false
-          }
-          return visible(el)
-        }
-        const activeInput = action === 'send' && document.activeElement instanceof HTMLElement && isEditable(document.activeElement)
-          ? document.activeElement
-          : null
-        const activeRect = activeInput ? activeInput.getBoundingClientRect() : null
-        const activeForm = activeInput ? activeInput.closest('form') : null
-        const out = []
-        for (const node of Array.from(document.querySelectorAll('button,a,[role="button"],[role="link"],summary,input[type="submit"],div,span'))) {
-          if (!(node instanceof HTMLElement) || !visible(node)) continue
-          const rect = node.getBoundingClientRect()
-          const centerX = rect.left + rect.width / 2
-          const centerY = rect.top + rect.height / 2
-          const explicitClickable = isClickable(node)
-          const meta = normalize([
-            node.textContent,
-            node.getAttribute('aria-label'),
-            node.getAttribute('title'),
-            node.getAttribute('data-testid'),
-            node.getAttribute('class'),
-          ].filter(Boolean).join(' ')).toLowerCase()
-          if (!explicitClickable && !meta) continue
-          const distanceToActiveInput = activeRect
-            ? Math.round(Math.hypot(
-              centerX - (activeRect.left + activeRect.width / 2),
-              centerY - (activeRect.top + activeRect.height / 2),
-            ))
-            : undefined
-          const nearActiveInput = action === 'send' && !!activeRect
-            ? (
-              (centerX >= activeRect.left - 160 && centerX <= activeRect.right + 260 && centerY >= activeRect.top - 90 && centerY <= activeRect.bottom + 220) ||
-              Number(distanceToActiveInput || 0) <= Math.max(240, Math.min(window.innerWidth * 0.28, 360))
-            )
-            : false
-          const sameFormAsActiveInput = action === 'send' && !!activeForm && activeForm.contains(node)
-          const inNavigationLikeRegion = !!node.closest('nav,aside,[role="navigation"],header,[data-testid*="nav" i],[class*="sidebar" i],[class*="sider" i]')
-          if (action === 'send') {
-            const hugeSurface = rect.width > window.innerWidth * 0.42 || rect.height > window.innerHeight * 0.14
-            const hugeText = meta.length > 42
-            if (hugeSurface || hugeText) continue
-            const likelyLeftNav = rect.left < window.innerWidth * 0.18 && rect.top < window.innerHeight * 0.72
-            const weakGenerateOnly = /^生成$/.test(meta) || /(^|\\s)生成(\\s|$)/.test(meta)
-            if (likelyLeftNav && weakGenerateOnly) continue
-            const browserChromeLike = rect.top < window.innerHeight * 0.14 && rect.height <= 72
-            if (browserChromeLike) continue
-          }
-          let score = 0
-          let keywordHits = 0
-          for (const keyword of keywords) {
-            if (meta.includes(String(keyword).toLowerCase())) {
-              score += 10
-              keywordHits += 1
-            }
-          }
-          if (!score && !explicitClickable) continue
-          if (action === 'send') {
-            if (rect.right > window.innerWidth * 0.68) score += 4
-            if (rect.bottom > window.innerHeight * 0.62) score += 4
-            if (rect.width <= 88 && rect.height <= 88) score += 3
-            if (nearActiveInput) score += 18
-            else if (activeRect) score -= 10
-            if (sameFormAsActiveInput) score += 12
-            if (inNavigationLikeRegion && !nearActiveInput) score -= 16
-            if (/(灵感|资产|画布|会员|首页|模板|导航)/.test(meta)) score -= 12
-            if (/(重新生成|再次生成|再试一次|try again|retry|历史|history)/.test(meta)) score -= 18
-            if (rect.left < window.innerWidth * 0.2) score -= 10
-            if (rect.top < window.innerHeight * 0.48 && rect.left < window.innerWidth * 0.35) score -= 10
-            if (activeRect && rect.top < activeRect.top - 120) score -= 8
-            if (activeRect && rect.left < activeRect.left - 220) score -= 6
-            if (rect.bottom < window.innerHeight * 0.45 && !/(send|发送|提交|发布|go|run|submit)/.test(meta)) score -= 8
-            if (!keywordHits && !nearActiveInput && !sameFormAsActiveInput) score -= 6
-          }
-          if (action === 'close') {
-            const topRight = rect.right > window.innerWidth * 0.62 && rect.top < window.innerHeight * 0.35
-            const explicitClose = /(close|关闭|取消|退出|dismiss|×|\bx\b)/.test(meta)
-            if ((!topRight && !explicitClose) || rect.width > 120 || rect.height > 120) continue
-          }
-          if (action === 'send' && rect.bottom > window.innerHeight * 0.55) score += 4
-          if (action === 'close' && rect.top < window.innerHeight * 0.35) score += 4
-          if (action === 'back' && rect.left < window.innerWidth * 0.35) score += 4
-          if (/icon|arrow|chevron|close|send|upload|attach|paperclip|plus|返回|关闭|发送|上传/.test(meta)) score += 2
-          if (score <= 0) continue
-          out.push({
-            kind: action === 'send' ? 'send_button' : action === 'close' ? 'close_button' : action === 'back' ? 'back_button' : 'icon_button',
-            label: normalize(node.textContent || node.getAttribute('aria-label') || node.getAttribute('title') || ''),
-            selectorHint: node.id ? ('#' + CSS.escape(node.id)) : String(node.tagName || '').toLowerCase(),
-            x: Math.max(0, Math.min(999, Math.round((centerX / Math.max(1, window.innerWidth)) * 999))),
-            y: Math.max(0, Math.min(999, Math.round((centerY / Math.max(1, window.innerHeight)) * 999))),
-            confidence: Math.min(0.98, 0.28 + Math.max(0, score) / 28),
-            evidence: [
-              keywordHits > 0 ? 'keyword_match' : '',
-              explicitClickable ? 'explicit_clickable' : '',
-              nearActiveInput ? 'near_active_input' : '',
-              sameFormAsActiveInput ? 'same_form_as_active_input' : '',
-            ].filter(Boolean),
-            nearActiveInput: nearActiveInput || undefined,
-            distanceToActiveInput,
-          })
-        }
-        return out
-          .sort((a, b) =>
-            Number(Boolean(b.nearActiveInput)) - Number(Boolean(a.nearActiveInput)) ||
-            Number(b.confidence || 0) - Number(a.confidence || 0) ||
-            Number(a.distanceToActiveInput ?? Number.POSITIVE_INFINITY) - Number(b.distanceToActiveInput ?? Number.POSITIVE_INFINITY)
-          )
-          .slice(0, 12)
-      })()
-    `,
-  ) as ActionTargetCandidate[] | null
-
-  return Array.isArray(targets) ? targets : []
-}
-
-function pickActiveInputTarget(targets: ActionTargetCandidate[]): ActionTargetCandidate | null {
-  const focusedTargets = targets.filter((item) => item.focused)
-  if (focusedTargets.length === 0) return null
-  return [...focusedTargets].sort((a, b) =>
-    Number(b.confidence || 0) - Number(a.confidence || 0) ||
-    Number(b.textLength || 0) - Number(a.textLength || 0)
-  )[0] || null
-}
-
-function rankTargetsNearAnchor(
-  targets: ActionTargetCandidate[],
-  anchor: ActionTargetCandidate | null,
-): ActionTargetCandidate[] {
-  const anchorX = Number(anchor?.x)
-  const anchorY = Number(anchor?.y)
-  if (!Number.isFinite(anchorX) || !Number.isFinite(anchorY)) {
-    return [...targets].sort((a, b) => Number(b.confidence || 0) - Number(a.confidence || 0))
-  }
-
-  return [...targets]
-    .filter((item) => Number.isFinite(item.x) && Number.isFinite(item.y))
-    .map((item) => {
-      const dx = Number(item.x) - anchorX
-      const dy = Number(item.y) - anchorY
-      const distance = Math.round(Math.hypot(dx, dy))
-      const nearAnchor =
-        Boolean(item.nearActiveInput) ||
-        (dx >= -140 && dx <= 260 && dy >= -80 && dy <= 220) ||
-        distance <= 280 ||
-        (Number(item.x) >= 760 && Number(item.y) >= 700)
-      return {
-        ...item,
-        nearActiveInput: nearAnchor,
-        distanceToActiveInput: Number.isFinite(item.distanceToActiveInput)
-          ? Number(item.distanceToActiveInput)
-          : distance,
-      }
-    })
-    .sort((a, b) =>
-      Number(Boolean(b.nearActiveInput)) - Number(Boolean(a.nearActiveInput)) ||
-      Number(b.confidence || 0) - Number(a.confidence || 0) ||
-      Number(a.distanceToActiveInput ?? Number.POSITIVE_INFINITY) - Number(b.distanceToActiveInput ?? Number.POSITIVE_INFINITY)
-    )
 }
 
 function pickBestActionTarget(
@@ -2512,103 +1637,30 @@ export async function executeBrowserTool(
         return `Search failed for "${query}". Tried: ${uniq.join(', ')}.\n${errors.join('\n')}`
       }
 
-      case 'browser_get_tabs': {
-        const tabs = controller.getTabList()
-        if (tabs.length === 0) return 'No tabs open.'
-        return tabs.map(t =>
-          `${t.active ? '▶ ' : '  '}[${t.id}] ${t.title}\n    ${t.url}`
-        ).join('\n')
-      }
-
-      case 'browser_read_page': {
-        let tabId = (args.tab_id as string) || null
-        tabId = (await resolveHighControlAgentTab(controller, args, { signal: abortSignal })).tabId
-        const content = await controller.getPageContent(tabId)
-        if (!content || content.trim().length === 0) {
-          return 'Page content is empty or still loading.'
-        }
-        return truncate(content)
-      }
-
-      case 'browser_read_page_map': {
-        let tabId = (args.tab_id as string) || null
-        tabId = (await resolveHighControlAgentTab(controller, args, { signal: abortSignal })).tabId
-        const maxBytes = typeof args.max_bytes === 'number'
-          ? Math.max(1024, Math.min(65_536, args.max_bytes))
-          : DEFAULT_AGENT_PAGE_MAP_MAX_BYTES
-        let payload = await captureAgentPageMap(controller, tabId, maxBytes)
-        // D12（真机第五轮实锚）：navigate 后立即 read map 常撞上 SPA 未渲染完
-        // （目标数异常少），弱模型会因此直接放弃。工具层兜一次 settle 重试，
-        // 把"先等再读"的纪律下沉为工具合同。重试后必须返回最新捕获——
-        // generation 已递增，返回旧图会让后续 act 全部撞 stale_page_map。
-        const firstTargetCount = Array.isArray((payload.pageMap as { targets?: unknown[] } | undefined)?.targets)
-          ? ((payload.pageMap as { targets: unknown[] }).targets.length)
-          : 0
-        if (firstTargetCount < 5) {
-          await waitForReady(controller, tabId, 3000, undefined, abortSignal)
-          payload = await captureAgentPageMap(controller, tabId, maxBytes)
-          payload.evidence = {
-            ...(payload.evidence as Record<string, unknown>),
-            settleRetried: true,
-            firstAttemptTargetCount: firstTargetCount,
-          }
-        }
-        {
-          // 观测锚：map 结果概要落日志——真机诊断两轮都因看不到工具返回
-          // 内容而只能排除法推根因，这一行让下一轮直接读到感知面实况。
-          const mapSummary = payload.pageMap as { targets?: unknown[]; truncated?: boolean } | undefined
-          const evidenceSummary = payload.evidence as { frames?: unknown[]; settleRetried?: boolean } | undefined
-          log(`read_page_map result: targets=${Array.isArray(mapSummary?.targets) ? mapSummary.targets.length : 0} truncated=${mapSummary?.truncated === true} frames=${Array.isArray(evidenceSummary?.frames) ? evidenceSummary.frames.length : 0} settleRetried=${evidenceSummary?.settleRetried === true} maxBytes=${maxBytes}`)
-        }
-        return attachBrowserActionSessionOutput(JSON.stringify(payload, null, 2), {
-          toolName,
-          args,
+      case 'browser_get_tabs':
+      case 'browser_read_page':
+      case 'browser_read_page_map':
+      case 'browser_probe_readonly':
+      case 'browser_capture_viewport':
+      case 'browser_probe_workflow_state':
+      case 'browser_locate_action_targets':
+      case 'browser_locate_input_targets':
+      case 'browser_analyze_viewport':
+      case 'browser_wait':
+      case 'browser_wait_for_condition':
+      case 'browser_query_gemini':
+        // B6 —— 观察/感知组实现体整体搬至 browser-observe-tools.ts；页面地图
+        // generation/ambiguity 单例随组迁移，留守 browser_act_on_target 经
+        // import 回读；attachBrowserActionSessionOutput（排空合同红线）留在
+        // 本文件经 ctx 注入。此处必须 `return await`，让拒绝仍走本函数的
+        // catch（Abort 重抛/ToolDomainError/错误拍扁）。
+        return await executeBrowserObserveTool(toolName, args, {
           controller,
+          abortSignal,
           sessionId,
           currentUserText,
-          tabId,
-          // D10-c 后 iframe 内容已直接并入本图（evidence.frames），不再
-          // 引导 Power CDP 探测——那条建议曾被投影成任务卡假步骤（D11）
-          // 且把模型带进被拒的 power 通道。
-          nextSuggestedAction: 'act on target or continue reading map',
+          attachBrowserActionSessionOutput,
         })
-      }
-
-      case 'browser_probe_readonly': {
-        let tabId = (args.tab_id as string) || null
-        tabId = (await resolveHighControlAgentTab(controller, args, { signal: abortSignal })).tabId
-        const requestedGeneration = Number(args.generation)
-        const currentGeneration = currentBrowserPageMapGeneration(controller, tabId)
-        if (!Number.isFinite(requestedGeneration) || requestedGeneration <= 0) {
-          return browserStructuredErrorOutput(agentBrowserError(
-            'stale_page_map',
-            'generation is required. Call browser_read_page_map first and pass its pageIdentity.generation.',
-          ))
-        }
-        if (currentGeneration === null || currentGeneration !== requestedGeneration) {
-          return browserStructuredErrorOutput(agentBrowserError(
-            'stale_page_map',
-            'Readonly probe requires a fresh page map generation. Call browser_read_page_map again.',
-            { currentGeneration, requestedGeneration },
-          ))
-        }
-        const activeUrl = tabId
-          ? controller.getTabList?.().find((tab) => tab.id === tabId)?.url
-          : controller.getActiveTab?.()?.url
-        const riskDecision = isHighControlPlatformText(activeUrl)
-          ? 'fixed_scope_only'
-          : 'allowed'
-        const request = normalizeBrowserReadonlyProbeRequest({
-          generation: requestedGeneration,
-          query: args.query,
-          scope: args.scope,
-          maxNodes: args.max_nodes,
-          includeHidden: args.include_hidden,
-          riskDecision,
-        })
-        const result = await controller.executeJS(tabId, buildBrowserReadonlyProbeJs(request))
-        return JSON.stringify(result, null, 2)
-      }
 
       case 'browser_act_on_target': {
         const targetId = String(args.target_id || args.targetId || '').trim()
@@ -3101,268 +2153,6 @@ export async function executeBrowserTool(
         })
       }
 
-      case 'browser_capture_viewport': {
-        let tabId = (args.tab_id as string) || null
-        tabId = (await resolveHighControlAgentTab(controller, args, { signal: abortSignal })).tabId
-        const mode = String(args.mode || 'viewport') as 'viewport' | 'clip' | 'full_page'
-        const clipRaw = args.clip
-        const clip = clipRaw && typeof clipRaw === 'object'
-          ? {
-            x: Number((clipRaw as Record<string, unknown>).x || 0),
-            y: Number((clipRaw as Record<string, unknown>).y || 0),
-            width: Number((clipRaw as Record<string, unknown>).width || 0),
-            height: Number((clipRaw as Record<string, unknown>).height || 0),
-          }
-          : undefined
-        const base64 = await controller.screenshotAdvanced(tabId, { mode, clip })
-        const metrics = await controller.getViewportMetrics(tabId)
-        const width = Math.round(metrics.width)
-        const height = Math.round(metrics.height)
-        const viewportZero = width <= 0 || height <= 0
-        const imageId = cacheScreenshot(base64, Math.round(metrics.width), Math.round(metrics.height))
-        return JSON.stringify({
-          image_id: imageId,
-          width,
-          height,
-          mode,
-          ...(viewportZero ? {
-            warning: 'viewport_zero_or_hidden',
-            nextSuggestedAction: 'Use browser_get_tabs to confirm active tab, then use browser_power_eval or browser_power_cdp(Page.getFrameTree / Runtime.evaluate) for iframe/OOPIF page structure instead of repeating viewport capture.',
-          } : {}),
-        }, null, 2)
-      }
-
-      case 'browser_probe_workflow_state': {
-        const startedAt = Date.now()
-        const tabId = (args.tab_id as string) || null
-        const prompt = String(args.prompt || '')
-        const attachmentName = String(args.attachment_name || '')
-        const includeCandidates = args.include_candidates !== false
-        const visionAction = String(args.vision_action || '').trim() as '' | 'upload' | 'input' | 'send'
-        const toolMeta = resolveToolContextMeta(controller, tabId)
-        const { pageStateService } = createBrowserAgentHelpers(controller)
-        const [identity, uploadState, promptState, domState] = await Promise.all([
-          getPageIdentity(controller, tabId),
-          probeWorkflowUploadState(controller, tabId, attachmentName),
-          probeWorkflowPromptSubmissionState(controller, tabId, prompt),
-          probeWorkflowDomState(controller, tabId),
-        ])
-
-        const base64 = await controller.screenshotAdvanced(tabId, { mode: 'viewport' })
-        const metrics = await controller.getViewportMetrics(tabId)
-        const imageId = cacheScreenshot(base64, Math.round(metrics.width), Math.round(metrics.height))
-
-        let uploadTargets: ActionTargetCandidate[] = []
-        let inputTargets: ActionTargetCandidate[] = []
-        let sendTargets: ActionTargetCandidate[] = []
-        let activeInputTarget: ActionTargetCandidate | null = null
-        let nearbySendTargets: ActionTargetCandidate[] = []
-
-        if (includeCandidates) {
-          ;[uploadTargets, inputTargets] = await Promise.all([
-            locateActionTargets(controller, tabId, 'upload'),
-            locateActionTargets(controller, tabId, 'input'),
-          ])
-          activeInputTarget = pickActiveInputTarget(inputTargets)
-          if (activeInputTarget) {
-            sendTargets = rankTargetsNearAnchor(await locateActionTargets(controller, tabId, 'send'), activeInputTarget)
-            nearbySendTargets = sendTargets.some((item) => Boolean(item.nearActiveInput))
-              ? sendTargets.filter((item) => Boolean(item.nearActiveInput)).slice(0, 4)
-              : sendTargets.slice(0, 2)
-          } else {
-            sendTargets = await locateActionTargets(controller, tabId, 'send')
-          }
-        }
-
-        let visionCandidates: ActionTargetCandidate[] = []
-        if (
-          visionAction &&
-          ['upload', 'input', 'send'].includes(visionAction) &&
-          (
-            (visionAction === 'upload' && !uploadState.complete && uploadTargets.length === 0) ||
-            (visionAction === 'input' && !promptState.promptFilled && inputTargets.length === 0) ||
-            (visionAction === 'send' && !promptState.generating && sendTargets.length === 0)
-          )
-        ) {
-          const domCandidates =
-            visionAction === 'upload'
-              ? uploadTargets
-              : visionAction === 'input'
-                ? inputTargets
-                : sendTargets
-          const analysis = await analyzeViewportWithVision({
-            action: visionAction,
-            title: identity.title,
-            url: identity.url,
-            screenshotBase64: base64,
-            domCandidates,
-          })
-          visionCandidates = Array.isArray(analysis.analysis?.targets)
-            ? analysis.analysis.targets
-                .filter((target) => Number.isFinite(target.x) && Number.isFinite(target.y))
-                .map((target) => ({
-                  kind: target.kind === 'upload_launcher' ? 'launcher' : target.kind === 'prompt_input' ? 'prompt_input' : 'icon_button',
-                  label: target.label,
-                  x: target.x,
-                  y: target.y,
-                  confidence: target.confidence,
-                  evidence: [target.reason || 'vision_candidate'],
-                }))
-            : []
-        }
-
-        const pageState = pageStateService.composePageState({
-          page: {
-            url: identity.url,
-            title: identity.title,
-            domain: '',
-            activeElement: identity.activeElement,
-          },
-          promptCandidate: prompt,
-          attachmentName,
-          upload: uploadState,
-          prompt: promptState,
-          dom: domState,
-          candidates: includeCandidates
-            ? {
-              uploadTargets,
-              inputTargets,
-              activeInputTarget,
-              nearbySendTargets,
-              sendTargets,
-            }
-            : undefined,
-        })
-
-        return JSON.stringify({
-          ok: true,
-          ...toolMeta,
-          latencyMs: Date.now() - startedAt,
-          screenshot: {
-            image_id: imageId,
-            width: Math.round(metrics.width),
-            height: Math.round(metrics.height),
-            mode: 'viewport',
-          },
-          page: pageState.page,
-          uploadState: pageState.upload,
-          promptState: pageState.prompt,
-          domState: pageState.dom,
-          candidates: includeCandidates
-            ? {
-                uploadTargets: pageState.candidates.uploadTargets.slice(0, 6),
-                inputTargets: pageState.candidates.inputTargets.slice(0, 6),
-                activeInputTarget: pageState.candidates.activeInputTarget,
-                nearbySendTargets: pageState.candidates.nearbySendTargets,
-                sendTargets: pageState.candidates.sendTargets.slice(0, 6),
-              }
-            : undefined,
-          visionCandidates,
-          evidenceIds: uniqueStrings([
-            ...uploadState.evidence,
-            ...promptState.submitEvidence,
-            ...(domState.bodyStateText ? ['body_state_observed'] : []),
-            ...visionCandidates.flatMap((item) => item.evidence || []),
-          ]),
-        }, null, 2)
-      }
-
-      case 'browser_locate_action_targets': {
-        const startedAt = Date.now()
-        const tabId = (args.tab_id as string) || null
-        const action = String(args.action || '').trim() as 'upload' | 'send' | 'close' | 'back'
-        if (!['upload', 'send', 'close', 'back'].includes(action)) {
-          return browserStructuredOutput({ ok: false, reason: 'invalid_action' })
-        }
-        const targets = await locateActionTargets(controller, tabId, action)
-        const toolMeta = resolveToolContextMeta(controller, tabId)
-        return JSON.stringify({
-          ok: true,
-          ...toolMeta,
-          action,
-          latencyMs: Date.now() - startedAt,
-          count: targets.length,
-          targets,
-          evidenceIds: uniqueStrings(targets.flatMap((item) => item.evidence || [])),
-        }, null, 2)
-      }
-
-      case 'browser_locate_input_targets': {
-        const startedAt = Date.now()
-        const tabId = (args.tab_id as string) || null
-        const target = String(args.target || '').trim().toLowerCase()
-        const ranked = await locateActionTargets(controller, tabId, 'input')
-        const targets = target
-          ? [...ranked].sort((a, b) => {
-            const aMatch = String(a.label || '').toLowerCase().includes(target) ? 1 : 0
-            const bMatch = String(b.label || '').toLowerCase().includes(target) ? 1 : 0
-            if (aMatch !== bMatch) return bMatch - aMatch
-            return Number(b.confidence || 0) - Number(a.confidence || 0)
-          })
-          : ranked
-        const activeTarget = pickActiveInputTarget(targets) || pickActiveInputTarget(ranked)
-        const anchorTarget = activeTarget || targets[0] || null
-        const rankedSendTargets = anchorTarget
-          ? rankTargetsNearAnchor(await locateActionTargets(controller, tabId, 'send'), anchorTarget)
-          : []
-        const nearbySendTargets = rankedSendTargets.some((item) => Boolean(item.nearActiveInput))
-          ? rankedSendTargets.filter((item) => Boolean(item.nearActiveInput)).slice(0, 4)
-          : rankedSendTargets.slice(0, 2)
-        const toolMeta = resolveToolContextMeta(controller, tabId)
-        return JSON.stringify({
-          ok: true,
-          ...toolMeta,
-          latencyMs: Date.now() - startedAt,
-          count: targets.length,
-          targets,
-          active_target: activeTarget,
-          nearby_send_targets: nearbySendTargets,
-          evidenceIds: uniqueStrings([
-            ...targets.flatMap((item) => item.evidence || []),
-            ...nearbySendTargets.flatMap((item) => item.evidence || []),
-          ]),
-        }, null, 2)
-      }
-
-      case 'browser_analyze_viewport': {
-        const startedAt = Date.now()
-        const tabId = (args.tab_id as string) || null
-        const action = String(args.action || '').trim() as 'upload' | 'send' | 'close' | 'back' | 'input'
-        if (!['upload', 'send', 'close', 'back', 'input'].includes(action)) {
-          return browserStructuredOutput({ ok: false, reason: 'invalid_action' })
-        }
-        const includeDomCandidates = args.include_dom_candidates !== false
-        const domCandidates = includeDomCandidates
-          ? await locateActionTargets(controller, tabId, action)
-          : []
-        const screenshot = await controller.screenshotAdvanced(tabId, { mode: 'viewport' })
-        const identity = await getPageIdentity(controller, tabId)
-        const analysis = await analyzeViewportWithVision({
-          action,
-          title: identity.title,
-          url: identity.url,
-          screenshotBase64: screenshot,
-          domCandidates,
-        })
-        const toolMeta = resolveToolContextMeta(controller, tabId)
-        const payload = {
-          ok: analysis.ok,
-          ...toolMeta,
-          ...(!analysis.ok ? { errorCode: 'viewport_analysis_failed' } : {}),
-          action,
-          latencyMs: Date.now() - startedAt,
-          reason: analysis.reason,
-          ...(analysis.remediation ? { remediation: analysis.remediation } : {}),
-          analysis: analysis.analysis || null,
-          domCandidates,
-          evidenceIds: uniqueStrings([
-            ...domCandidates.flatMap((item) => item.evidence || []),
-            ...((analysis.analysis?.targets || []).map((item) => String(item.reason || ''))),
-          ]),
-        }
-        return stringifyBrowserJsonOrFailure(payload)
-      }
-
       case 'browser_list_upload_targets': {
         const tabId = (args.tab_id as string) || null
         const targets = await controller.findUploadTargets(tabId)
@@ -3703,38 +2493,6 @@ export async function executeBrowserTool(
           timeout_sec: timeoutSec,
           next_step: 'wait for user takeover result: submitted|skipped|timeout',
         }, null, 2)
-      }
-
-      case 'browser_query_gemini': {
-        const text = String(args.text || '').trim()
-        if (!text) return 'Error: text is required'
-        const tabId = (args.tab_id as string) || null
-        const waitResponseMs = Math.max(6000, Math.min(120_000, Number(args.wait_response_ms || 35_000)))
-        return await runGeminiQuery(controller, text, tabId, waitResponseMs, abortSignal)
-      }
-
-      case 'browser_wait': {
-        const timeoutMs = Number(args.timeout_ms || 8000)
-        const selector = typeof args.selector === 'string' ? args.selector : undefined
-        let tabId = (args.tab_id as string) || null
-        tabId = (await resolveHighControlAgentTab(controller, args, { signal: abortSignal })).tabId
-        const ready = await waitForReady(controller, tabId, Math.max(500, Math.min(timeoutMs, 30_000)), selector, abortSignal)
-        return `Wait result: ready=${ready.ready}, selectorMatched=${ready.matchedSelector}, elapsed=${ready.elapsedMs}ms`
-      }
-
-      case 'browser_wait_for_condition': {
-        let tabId = (args.tab_id as string) || null
-        tabId = (await resolveHighControlAgentTab(controller, args, { signal: abortSignal })).tabId
-        const customJs = typeof args.custom_js === 'string' ? args.custom_js : undefined
-        const result = await controller.waitForCondition(tabId, {
-          condition: String(args.condition || 'page_readable') as never,
-          selector: typeof args.selector === 'string' ? args.selector : undefined,
-          customJs,
-          timeoutMs: Number(args.timeout_ms || 0) || undefined,
-          checkIntervalMs: Number(args.check_interval_ms || 0) || undefined,
-          stableIterations: Number(args.stable_iterations || 0) || undefined,
-        })
-        return JSON.stringify(result, null, 2)
       }
 
       case 'browser_execute_js':
