@@ -17,10 +17,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
-import {
-  __setBrowserCollectionConsentStoreForTests,
-  executeBrowserTool,
-} from '../main/modules/tools/browser-tools'
+import { executeBrowserTool } from '../main/modules/tools/browser-tools'
+import { __setBrowserCollectionConsentStoreForTests } from '../main/modules/tools/browser-collection-tools'
 import { __setWebContentsProviderForTests, broadcastDirectoryChanged } from '../main/modules/document-engine/ipc/directory-change-broadcast'
 import type { ToolExecutionOutput } from '../main/modules/agent-control/tools-runtime/tool-result-types'
 

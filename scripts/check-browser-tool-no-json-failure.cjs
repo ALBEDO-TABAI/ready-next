@@ -7,9 +7,11 @@ const path = require('node:path')
 const ROOT = process.cwd()
 // B4（2026-07-04）—— Power 工具组拆至 browser-power-tools.ts 后，拆出实现体
 // 同样受"浏览器失败必须走 ToolExecutionOutput、不得裸 JSON 字符串"合同约束。
+// B5（2026-07-05）—— 采集/内容任务组拆至 browser-collection-tools.ts，同上。
 const TARGETS = [
   'src/main/modules/tools/browser-tools.ts',
   'src/main/modules/tools/browser-power-tools.ts',
+  'src/main/modules/tools/browser-collection-tools.ts',
 ]
 
 function stripComments(source) {

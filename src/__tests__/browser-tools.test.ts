@@ -6,9 +6,9 @@ import { join } from 'node:path'
 import { JSDOM } from 'jsdom'
 import {
   __resetBrowserAgentPageMapForTests,
-  __setBrowserCollectionConsentStoreForTests,
   executeBrowserTool,
 } from '../main/modules/tools/browser-tools'
+import { __setBrowserCollectionConsentStoreForTests } from '../main/modules/tools/browser-collection-tools'
 import { BrowserTaskPlanner } from '../main/modules/agent-control/domain-adapters/browser-task-planner'
 import {
   __resetSessionContinuityForTests,

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { executeToolCall, type ToolContext } from '../main/modules/tools/tool-executor'
-import { __setBrowserCollectionConsentStoreForTests } from '../main/modules/tools/browser-tools'
+import { __setBrowserCollectionConsentStoreForTests } from '../main/modules/tools/browser-collection-tools'
 import { createBrowserStructuredOutput } from '../main/modules/tools/browser-failure-output'
 import { BrowserTurnLease } from '../main/modules/browser-engine/agent-browser-turn-lease'
 import { BrowserWriteLeaseService } from '../main/modules/browser-engine/browser-write-lease'
