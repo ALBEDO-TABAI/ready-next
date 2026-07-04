@@ -14,12 +14,16 @@ const browserCollectionToolsPath = path.join(root, 'src/main/modules/tools/brows
 // B6（2026-07-05）—— browser_wait_for_condition 等观察 case 实现体拆至
 // browser-observe-tools.ts，自由脚本直通禁则同样覆盖拆出文件。
 const browserObserveToolsPath = path.join(root, 'src/main/modules/tools/browser-observe-tools.ts')
+// B7（2026-07-05）—— browser_run_workflow 的 runWorkflowStep 守卫执行层随
+// 行动/导航组拆至 browser-act-tools.ts，自由脚本直通禁则同样覆盖拆出文件。
+const browserActToolsPath = path.join(root, 'src/main/modules/tools/browser-act-tools.ts')
 const registryPath = path.join(root, 'src/main/modules/tools/browser-readonly-script-templates.ts')
 
 const source = fs.readFileSync(browserToolsPath, 'utf8')
 const powerSource = fs.readFileSync(browserPowerToolsPath, 'utf8')
 const collectionSource = fs.readFileSync(browserCollectionToolsPath, 'utf8')
 const observeSource = fs.readFileSync(browserObserveToolsPath, 'utf8')
+const actSource = fs.readFileSync(browserActToolsPath, 'utf8')
 let failed = false
 
 function fail(message) {
@@ -62,6 +66,7 @@ for (const [pattern, message] of forbidden) {
   if (pattern.test(powerSource)) fail(`${message} (browser-power-tools.ts)`)
   if (pattern.test(collectionSource)) fail(`${message} (browser-collection-tools.ts)`)
   if (pattern.test(observeSource)) fail(`${message} (browser-observe-tools.ts)`)
+  if (pattern.test(actSource)) fail(`${message} (browser-act-tools.ts)`)
 }
 
 if (failed) process.exit(1)

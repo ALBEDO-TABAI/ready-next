@@ -15,6 +15,10 @@
  * browser-observe-tools.ts 后，被两侧同时引用的 browserStructuredErrorOutput /
  * uniqueStrings / resolveToolContextMeta / listSubframesSafe / getPageIdentity /
  * locateActionTargets（含 ActionTargetCandidate 类型）同法落此。行为零变更。
+ *
+ * P3 Phase B7（2026-07-05，纯移动拆分）追加：行动/导航组拆出
+ * browser-act-tools.ts 后，被 facade attach 签名与行动组同时引用的
+ * BrowserActionFollowedTab 类型同法落此。行为零变更。
  */
 import type { BrowserController } from '../browser-engine/ipc-handler'
 import type { AgentBrowserStructuredError } from '../browser-engine/agent-browser-errors'
@@ -597,4 +601,14 @@ export async function locateActionTargets(
   ) as ActionTargetCandidate[] | null
 
   return Array.isArray(targets) ? targets : []
+}
+
+export interface BrowserActionFollowedTab {
+  tabId: string
+  title: string
+  url: string
+  reason: 'new_tab' | 'active_tab_changed'
+  sourceTabId: string | null
+  ready?: boolean
+  elapsedMs?: number
 }
