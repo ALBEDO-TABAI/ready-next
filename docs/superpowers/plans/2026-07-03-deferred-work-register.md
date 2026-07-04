@@ -194,6 +194,14 @@ preload `runFeedback` API + electron.d.ts 类型 + 行为测试
 
 **残留观察**：本机今天更早的"偶发沙箱失败"归因 fd 爬坡为高置信假设（当前 100% 失败=fd 耗尽是实测结论）；D15 后若偶发仍现再开环境线。fd 余量可观测（boot 打点）暂未加，若复发补。
 
+# D16 — agent 点击触发原生文件选择器悬挂工具环（真机第十一轮实锚，2026-07-04 深夜，待做）
+
+**实锚**：D15 修复后 R1 重测，链路史上最远——`xhs-publish-btn` 以尾部保留位 #40 进图（D14-c 实证）、act 点击 ok:true（3.5s 内含行动确认闸"风险请求"用户点允许=**发布类外发动作过闸按合同工作**）、进入长文最终 composer（文章渲染成图片卡）、坐标点底部「发布」后预算耗尽 unconfirmed 收口。期间 agent 某次点击命中「+ 添加图片」瓦片，**弹出原生文件选择器**：主进程模态对话框，工具环无法感知/关闭，只能人工取消——任何带上传控件的站点都可能让 agent 死等。
+
+**设计**：agent 持租约的 tab 经 CDP `Page.setInterceptFileChooserDialog(enabled:true)` 拦截（cdp-session-service 已有会话面）；chooser 打开且无 pending 的 `browser_upload_scope_attachment` 时自动取消 + 给模型结构化回执（`file_chooser_intercepted`，提示走 upload 工具链：list_upload_targets → upload_scope_attachment）；有 pending 上传时按现有 upload 合同喂 `DOM.setFileInputFiles`。租约释放时关拦截，用户手动操作不受影响。
+
+**顺带观察**：本轮模型三次重填标题、两次重贴正文（read_back 纠偏在工作，未误报成功）；「发布」点击后 25s 思考间隙疑似 chooser 弹出时刻之一。成功证据读取（发布成功信号→proof）仍是 R1 关账的最后一环（并 D9 proof 铸造）。
+
 # 汇总
 | 项 | 已完成 | 待做 | 高危点 | 前置 |
 |----|--------|------|--------|------|
