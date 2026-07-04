@@ -132,6 +132,13 @@ grep -c 'criteria_self_check_injected' $T/ready-agent-metrics.log
 3. 工具回执 `nextSuggestedAction` 被投影成任务卡步骤/判据进度（"read map again on tab tab-1 0/1"/"finish with transaction proof 1/1"）——呈现语义伪装 → **D11**。
 4. 两张无 run_close 的"正在理解需求 失败"卡与后台任务零日志：可观测缺口（并入 D9-2）。
 
+# 第三轮结果（2026-07-04 02:2x，污染修复后复测）
+
+- **R3 ✅ 用户视角成功**——分类污染修复生效（采集正确走 multi_step_task，24 工具 65s 采到内容）。⚠️ 观察：run 终态却是 proof_gap/failed（采集成果未铸 proof，用户感知成功 vs 系统判缺证=E2 divergence）+ 后台任务行 18:26:44 被 killed——**采集证据链与后台任务收口**记入 D9 扩展。
+- **R1 卡在"写长文" = 符合 D10 预期**（iframe 点击不穿透，修复前必卡）。且行为面全对：browser_transaction 判定 ✓、10.8s 快速收口（不再 76s 磨预算）、新可读文案 ✓、criteria 自检注入 ✓。
+- **第三根（本轮新修）**：发布 run 的任务卡顶着"浏览器逐篇采集"标题+假进度步骤。根因两个正交缺陷：① `browser-collect-notes` 片段的 matches 用了 `resolveBrowserCollectionIntent`（"提到平台即 true"的暴露面判定）→ 发布消息被注入采集流程知识；② run-coordinator 把注入片段 label 当任务标题（"浏览器上传流程" hit_count=35——**长期以来大量浏览器任务卡标题张冠李戴**）。修复：片段 matches 换词表真采集判定；collect-notes/upload 加入标题排除表（指导片段≠任务名），三个测试文件同步。
+- 顺带真机确认：`crystallize_round_fired`/`belief_decay_round_fired` 在启动后如期打点（P5d 迁移真机首证）。
+
 # 关账动作
 
 五项结果记录填完 → 回贴给我。我会：把结果写进本文件与 route 文档、判定分支分叉时机（R 全绿=合并信心）、失败项按"站点变化→分类器规则更新，机制缺陷→立 slice"分流。

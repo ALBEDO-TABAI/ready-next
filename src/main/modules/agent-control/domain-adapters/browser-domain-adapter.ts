@@ -1,6 +1,7 @@
 import type { BrowserExecutionPreparation, BrowserToolLoopState } from './browser-domain-orchestrator'
 import type { DomainAdapter, DomainAdapterApplyResult, DomainAdapterDispatchResult, DomainAdapterPrepareResult } from './domain-adapter'
 import { resolveBrowserCollectionIntent } from '../../../../shared/browser-collection-intent'
+import { resolveBrowserWorkflowIntent } from '../../../../shared/browser-workflow-intent'
 
 interface BrowserDomainOrchestratorLike {
   prepareBrowserExecution: (params: Record<string, unknown>) => Promise<BrowserExecutionPreparation>
@@ -221,7 +222,11 @@ export class BrowserDomainAdapter implements DomainAdapter {
         id: 'browser-collect-notes',
         label: '浏览器逐篇采集',
         priority: 60,
-        matches: ({ userText }) => resolveBrowserCollectionIntent(userText),
+        // 2026-07-04 真机回归：resolveBrowserCollectionIntent 是"平台面暴露"
+        // 判定（提到小红书即 true），拿它做采集知识注入会让发布消息也命中
+        // （发布 run 被贴上采集标题+注入采集流程）。这里要的是真采集意图，
+        // 用词表判定（采集句 collection / 发布句 transaction 已有回归钉死）。
+        matches: ({ userText }) => resolveBrowserWorkflowIntent(userText).kind === 'collection',
         blocking: false,
         refs: [
           {

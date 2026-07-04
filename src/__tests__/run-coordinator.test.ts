@@ -184,9 +184,11 @@ test('RunCoordinator assembles prompt, executes host, and emits planning metadat
 
   assert.deepEqual(result, { success: true })
   assert.equal(events[0]?.phase, 'planning')
-  assert.equal(events[0]?.module, 'browser')
-  assert.equal(events[0]?.taskTitle, '浏览器上传流程')
-  assert.match(events[0]?.taskSummary || '', /准备开始/)
+  // 2026-07-04 语义更新：browser-upload 是流程知识片段，不再充当任务名/模块
+  // ——planning 卡回中性占位，真实标题由 run 中的 projection 回填。
+  assert.equal(events[0]?.module, undefined)
+  assert.equal(events[0]?.taskTitle, '正在理解需求')
+  assert.match(events[0]?.taskSummary || '', /正在整理任务边界/)
   assert.equal(
     events[0]?.executionDiagnostics?.budget?.maxIterations,
     executionBudget?.maxIterations
@@ -477,13 +479,13 @@ function coordinatorWithTriggers(triggerHits: ScopeRunEventPayload['triggerHits'
   return { coordinator, events }
 }
 
-test('planning title skips the cross-cutting discipline fragment and uses the real task fragment', async () => {
+test('planning title skips cross-cutting fragments and uses the real task fragment', async () => {
   const { coordinator, events } = coordinatorWithTriggers([
     { id: 'browser-discipline', label: '浏览器交互纪律', module: 'browser', blocking: false, refs: [] },
-    { id: 'browser-upload', label: '浏览器上传流程', module: 'browser', blocking: false, refs: [] },
+    { id: 'rss-analysis', label: 'RSS 分析操作', module: 'rss', blocking: false, refs: [] },
   ] as never)
   await coordinator.runScoped({ scope: createScope(), message: 'hello', requestId: 'req-title-1', coordinators: [] })
-  assert.equal(events[0]?.taskTitle, '浏览器上传流程')
+  assert.equal(events[0]?.taskTitle, 'RSS 分析操作')
   assert.notEqual(events[0]?.taskTitle, '浏览器交互纪律')
 })
 
@@ -493,5 +495,17 @@ test('planning title falls back to the neutral placeholder when only cross-cutti
     { id: 'site-card-xiaohongshu.com', label: '站点经验 xiaohongshu.com', module: 'browser', blocking: false, refs: [] },
   ] as never)
   await coordinator.runScoped({ scope: createScope(), message: 'hello', requestId: 'req-title-2', coordinators: [] })
+  assert.equal(events[0]?.taskTitle, '正在理解需求')
+})
+
+test('真机回归 2026-07-04：流程知识片段（逐篇采集/上传流程）不做任务标题', async () => {
+  // 此前发布 run 顶着"浏览器逐篇采集"标题、大量浏览器任务卡长期显示
+  // "浏览器上传流程"（注入指导 ≠ 任务名）。两者与 discipline/site-card
+  // 同类，标题一律回中性占位，等真实任务标题回填。
+  const { coordinator, events } = coordinatorWithTriggers([
+    { id: 'browser-collect-notes', label: '浏览器逐篇采集', module: 'browser', blocking: false, refs: [] },
+    { id: 'browser-upload', label: '浏览器上传流程', module: 'browser', blocking: false, refs: [] },
+  ] as never)
+  await coordinator.runScoped({ scope: createScope(), message: '帮我发一条小红书长文笔记', requestId: 'req-title-3', coordinators: [] })
   assert.equal(events[0]?.taskTitle, '正在理解需求')
 })

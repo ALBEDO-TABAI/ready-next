@@ -123,8 +123,18 @@ export class RunCoordinator {
     // browser task card read "浏览器交互纪律" (discipline priority 70 always
     // won triggerHits[0]). Skip them so the placeholder falls back to the
     // neutral "正在理解需求", which the real task title later replaces.
+    //
+    // 2026-07-04 真机回归第三轮追加：browser-collect-notes / browser-upload
+    // 同为流程知识片段（注入指导≠任务名）——此前发布 run 被贴"浏览器逐篇
+    // 采集"标题、大量浏览器任务卡长期顶着"浏览器上传流程"（hit_count=35），
+    // 语义同病，一并排除出标题选择。
     const isCrossCuttingTrigger = (id: string | undefined): boolean =>
-      typeof id === 'string' && (id === 'browser-discipline' || id.startsWith('site-card-'))
+      typeof id === 'string' && (
+        id === 'browser-discipline'
+        || id === 'browser-collect-notes'
+        || id === 'browser-upload'
+        || id.startsWith('site-card-')
+      )
     const titleTriggers = prepared.triggerHits.filter((trigger) => !isCrossCuttingTrigger(trigger.id))
     const primaryTrigger = prepared.intentClassification?.primaryDomain === 'skill'
       ? titleTriggers.find((trigger) => trigger.blocking)

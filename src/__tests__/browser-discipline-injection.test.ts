@@ -36,6 +36,18 @@ test('no discipline fragment when text is empty (asset failed to load)', () => {
   assert.ok(fragments.some((f) => f.id === 'browser-collect-notes'))
 })
 
+test('真机回归 2026-07-04：采集流程片段只在真采集意图时命中，发布消息不再中招', () => {
+  const fragments = makeAdapter(DISCIPLINE).contributePromptFragment() ?? []
+  const collect = fragments.find((f) => f.id === 'browser-collect-notes')!
+  // 真采集意图（词表判 collection）→ 命中
+  assert.ok(collect.matches({ userText: '采集@[夜空中的孤岛 - 小红书]头 5 个笔记的图片到@[cos]', route: null }))
+  // 发布意图（词表判 transaction）→ 不得命中：此前 hasPlatform（提到小红书）
+  // 即 true，发布 run 被注入采集流程并贴上"浏览器逐篇采集"标题
+  assert.ok(!collect.matches({ userText: '帮我发一条小红书长文笔记，内容就一句话 今天天气不错', route: null }))
+  // 纯观察类浏览器请求同样不注入采集流程
+  assert.ok(!collect.matches({ userText: '打开小红书看看首页有什么', route: null }))
+})
+
 test('shipped discipline asset parses and renders within budget', () => {
   const loader = new PromptAssetLoader({ roots: [join(process.cwd(), 'assets', 'prompts')] })
   const asset = loader.load('browser/discipline')
