@@ -75,6 +75,20 @@ describe('agent-browser page map', () => {
     assert.ok(!map.text.includes('<'), 'must not contain HTML angle brackets')
   })
 
+  it('clickable role（cursor:pointer 委托型控件）进入目标列表且带 frameKey（D10-c）', () => {
+    const map = buildPageMap([
+      { role: 'generic', children: [
+        { role: 'clickable', name: '写长文', backendDOMNodeId: 3, frameId: '0' },
+        { role: 'clickable', name: '', backendDOMNodeId: 4, frameId: '0' },
+      ] },
+    ], { generation: 5, viewport })
+    const target = map.targets.find((t) => t.name === '写长文')
+    assert.ok(target, 'cursor:pointer 控件必须成为可行动目标')
+    assert.equal(target!.targetId, '5:0:3')
+    assert.equal(map.targets.length, 1, '无名 clickable 不进目标')
+    assert.match(map.text, /- clickable "写长文"/)
+  })
+
   it('parseTargetId round-trips and rejects malformed ids', () => {
     assert.deepEqual(parseTargetId('7:0:42'), { generation: 7, frameId: '0', node: '42' })
     assert.deepEqual(parseTargetId('2:0:p1.3'), { generation: 2, frameId: '0', node: 'p1.3' })

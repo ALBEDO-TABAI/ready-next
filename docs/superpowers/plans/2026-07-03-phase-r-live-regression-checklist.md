@@ -143,6 +143,13 @@ grep -c 'criteria_self_check_injected' $T/ready-agent-metrics.log
 
 R1 的功能闸门 D10 已修：①click/act/map 三链 frame 穿透（"写长文"在 iframe 内可被 read_page_map 看见、act_on_target/click_text 可点到）；②staged 站点卡（已学到的 selector_missing 修正卡）进入涌现 feed 待确认，确认后下轮注入生效。**复测 R1 前建议先到 ReadyMode 涌现段或 Settings→记忆→信念卡确认，把 xiaohongshu 的 staged 站点卡确认为 active。**
 
+# 第四轮结果与根因修正（2026-07-04 午，新构建确认在跑）
+
+- 现象：新构建（12:28 重启 > 12:15 提交 ✓）新会话，map 调 2 次仍无"写长文"目标，模型退化到 power 探测/scroll_at 挣扎，卡 1:51+。
+- **根因修正（Chrome 真实 creator 页实证）：不是 iframe！**页面唯一 iframe 是空 src 隐藏辅助帧；"写长文"在主文档 `span.title < div.creator-tab`——**零语义标记（无 role/onclick/非 button），React 根委托监听**。整页语义元素仅 2 个，所以 map 近乎空白、click_text 的 isClickable 过滤全 miss、act 的裸 el.click() 对委托监听是 no-op。round-2"在 iframe"是模型叙事被误采信；frame 穿透修复保留（架构正确）但不是本病灶。
+- 修复（D10-c，原则"cursor:pointer 视觉可点击=可点击"）：map 增 pointer 收集级（真实页实证：9 目标含写长文/上传视频/发布笔记全操作面）；click_text/locate 文本叶子→pointer owner 回退；act/click 升级完整指针事件序列（真实页实证：事件触发 `from=tab_switch` 路由跳转）。
+- 模型行为评价：power 探测/scroll 是被"map 上没有可点目标"逼出来的合理挣扎，非模型缺陷。
+
 # 关账动作
 
 五项结果记录填完 → 回贴给我。我会：把结果写进本文件与 route 文档、判定分支分叉时机（R 全绿=合并信心）、失败项按"站点变化→分类器规则更新，机制缺陷→立 slice"分流。

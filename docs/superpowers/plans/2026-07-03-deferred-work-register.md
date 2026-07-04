@@ -154,7 +154,7 @@ preload `runFeedback` API + electron.d.ts 类型 + 行为测试
 - ② staged 卡可见性：确认链路本已存在（BeliefCardsPanel + `agent:beliefCards:transition`），缺口只是可发现性。`extractCrystallizeCards` 增分支：status=staged 且 source 命中站点卡学习三种前缀（failure-learning:/possible-update-of:/possible-risk-update-of:）→ crystallize 待确认卡（adopt_candidate→"去确认"跳 Settings，requiresExplicitConfirm=true）；其他 staged 信念卡不投影。
 - 残余（不阻塞复测）：feed"去确认"跳 Settings 页但未锚定到信念卡面板；子帧内坐标类动作仍主帧限定。
 
-# D11 — 工具回执 nextSuggestedAction 被投影成任务卡步骤/判据（2026-07-04）
+**D10-c 根因修正（2026-07-04 第四轮，Chrome 真实页面实证）**：第四轮复测新构建仍卡——上真实 creator 页取证发现**"写长文"根本不在 iframe**（页面唯一 iframe 是空 src 隐藏辅助帧；round-2"在 iframe"是模型叙事，被误采信）。真根因=**定位启发式与现代 React 站点形态不匹配**：创作页语义元素仅 2 个，整页控件是零标记 span/div（无 role/onclick/非 button，React 根委托监听），click_text 的 isClickable、map 的 READY_AGENT_TARGET_SELECTOR、act 的裸 el.click() 三层全部失明/失效。修复（原则：cursor:pointer 视觉可点击=可点击）：①readyRoleFor 增 'clickable' 角色 + readyPointerClickableElements 收集级（pointer 边界收敛/可见/短文本/cap 40）→ map 首次看见委托型控件（真实页实证收到 9 个含全部 tab）；②buildClickByTextJs/buildLocateTextTargetJs 文本叶子→cursor:pointer owner 回退（locate 返回 owner 坐标走可信坐标点击）；③act click 分支升级 pointerdown→mousedown→pointerup→mouseup→el.click() 序列（真实页实证触发 from=tab_switch）；④TARGET_ROLES 收 'clickable'。frame 穿透保留（架构正确，另一半根因）。 — 工具回执 nextSuggestedAction 被投影成任务卡步骤/判据（2026-07-04）
 
 **实锚**：卡面"read map again on tab tab-1 · 0/1 0%"与"finish with transaction proof · 1/1 100%"实为 act_on_target 回执的 nextSuggestedAction 文案（browser-tools :3318/:3055），经 browserActionSessionPatch 流入 projection 后被任务卡渲染成步骤/判据进度——呈现语义伪装，且"假判据 100%"严重误导。**待做**：回执建议只进 narration/meta，不得进 steps/criteria 形状的投影字段；补投影形状测试。
 

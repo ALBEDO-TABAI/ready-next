@@ -78,6 +78,13 @@ function buildBrowserDomTargetLibraryJs(): string {
         return 'textbox';
       }
       if (el.isContentEditable) return 'textbox';
+      // D10-c（2026-07-04 真机实锚，XHS creator "写长文"）：React 委托型
+      // 控件是零语义标记的 span/div，唯一可观测信号是 cursor:pointer。
+      // 给它专属 role 'clickable'，避免落进 'generic' 被 page-map 去噪层
+      // 当 wrapper 抬走。
+      try {
+        if (window.getComputedStyle(el).cursor === 'pointer') return 'clickable';
+      } catch {}
       return 'generic';
     }
     function readyStatesFor(el) {
@@ -96,7 +103,37 @@ function buildBrowserDomTargetLibraryJs(): string {
       return states;
     }
     function readyTargetElements() {
-      return Array.from(document.querySelectorAll(READY_AGENT_TARGET_SELECTOR));
+      const semantic = Array.from(document.querySelectorAll(READY_AGENT_TARGET_SELECTOR));
+      return semantic.concat(readyPointerClickableElements(new Set(semantic)));
+    }
+    // D10-c：cursor:pointer 视觉可点击收集级——语义选择器漏掉的委托型控件
+    // （span/div tab、卡片按钮）。只收 pointer 边界元素（父级非 pointer，
+    // 一个控件收敛成一个目标）、可见、短文本、未被语义集覆盖；上限 40 个
+    // 防 map 膨胀。枚举顺序确定（文档序），probe/act 按 index 重定位一致。
+    function readyPointerClickableElements(semanticSet) {
+      const out = [];
+      let scanned = 0;
+      for (const el of document.querySelectorAll('div,span,li,p,img,svg')) {
+        if (out.length >= 40 || scanned >= 8000) break;
+        scanned += 1;
+        if (semanticSet.has(el)) continue;
+        let style;
+        try { style = window.getComputedStyle(el); } catch { continue; }
+        if (!style || style.cursor !== 'pointer') continue;
+        const parent = el.parentElement;
+        if (parent) {
+          try { if (window.getComputedStyle(parent).cursor === 'pointer') continue; } catch {}
+        }
+        const rect = el.getBoundingClientRect();
+        if (!(rect.width >= 8 && rect.height >= 8)) continue;
+        if (rect.width * rect.height > Math.max(1, (window.innerWidth || 1) * (window.innerHeight || 1)) * 0.5) continue;
+        if (style.display === 'none' || style.visibility === 'hidden') continue;
+        const text = readyCleanText(el.innerText || el.textContent || el.getAttribute('aria-label') || '');
+        if (!text || text.length > 40) continue;
+        if (el.closest && el.closest(READY_AGENT_TARGET_SELECTOR)) continue;
+        out.push(el);
+      }
+      return out;
     }
     function readyTargetRecord(el, index) {
       const rect = el.getBoundingClientRect();
@@ -439,6 +476,15 @@ export function buildBrowserActOnTargetJs(nodeId: string, action: AgentBrowserAc
       el.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, view: window }));
       el.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true, view: window }));
     } else {
+      // D10-c：React 委托型控件监听 pointerdown/mousedown，裸 el.click()
+      // 对它们是 no-op。先派发指针序列，再 el.click() 保留原生激活语义
+      // （anchor 导航/checkbox 默认行为）；对原生控件多出的前奏无害。
+      const rect = el.getBoundingClientRect();
+      const opts = { bubbles: true, cancelable: true, view: window, clientX: rect.left + rect.width / 2, clientY: rect.top + rect.height / 2 };
+      el.dispatchEvent(new PointerEvent('pointerdown', opts));
+      el.dispatchEvent(new MouseEvent('mousedown', opts));
+      el.dispatchEvent(new PointerEvent('pointerup', opts));
+      el.dispatchEvent(new MouseEvent('mouseup', opts));
       el.click();
     }
     return { ok: true, action, target: record, url: String(location.href || ''), title: String(document.title || '') };

@@ -1699,6 +1699,25 @@ function buildClickByTextJs(text: string, exact: boolean): string {
           break
         }
       }
+      let viaPointerOwner = false
+      if (!matched) {
+        // D10-c（真机实锚：XHS creator "写长文" 是零语义标记的 span，React
+        // 根委托监听）：文本命中的可见叶子向上爬 cursor:pointer owner。
+        for (const el of all) {
+          if (!(el instanceof HTMLElement) || el.children.length > 0 || !visible(el)) continue
+          const txt = normalize(el.textContent || '')
+          if (!txt) continue
+          if (!((exact && txt === target) || (!exact && txt.includes(target)))) continue
+          let owner = el
+          for (let i = 0; i < 8 && owner; i++) {
+            let cursor = ''
+            try { cursor = window.getComputedStyle(owner).cursor } catch { cursor = '' }
+            if (cursor === 'pointer') { matched = owner; viaPointerOwner = true; break }
+            owner = owner.parentElement
+          }
+          if (matched) break
+        }
+      }
       if (!matched) return 'Element by text not found: ' + target
       // EP1-I3 live-target net — the located element's clickable owner may be
       // a payment/captcha/改密 control even when the search text was generic.
@@ -1708,8 +1727,16 @@ function buildClickByTextJs(text: string, exact: boolean): string {
       }
       matched.scrollIntoView({ block: 'center', behavior: 'instant' })
       matched.dispatchEvent(new MouseEvent('mousemove', { bubbles: true }))
+      // D10-c：委托型控件监听 pointerdown/mousedown，先派发指针序列再
+      // el.click() 保留原生激活语义；对原生控件多出的前奏无害。
+      const __readyRect = matched.getBoundingClientRect()
+      const __readyOpts = { bubbles: true, cancelable: true, view: window, clientX: __readyRect.left + __readyRect.width / 2, clientY: __readyRect.top + __readyRect.height / 2 }
+      matched.dispatchEvent(new PointerEvent('pointerdown', __readyOpts))
+      matched.dispatchEvent(new MouseEvent('mousedown', __readyOpts))
+      matched.dispatchEvent(new PointerEvent('pointerup', __readyOpts))
+      matched.dispatchEvent(new MouseEvent('mouseup', __readyOpts))
       matched.click()
-      return 'Clicked by text: ' + normalize(matched.textContent || matched.getAttribute('aria-label') || matched.getAttribute('title') || matched.tagName)
+      return 'Clicked by text' + (viaPointerOwner ? ' (pointer-owner)' : '') + ': ' + normalize(matched.textContent || matched.getAttribute('aria-label') || matched.getAttribute('title') || matched.tagName)
     })()
   `
 }
@@ -1859,6 +1886,24 @@ function buildLocateTextTargetJs(text: string, exact: boolean, hrefContains = ''
         }
       }
       if (!matched && !hrefContains) matched = fallback[0] || null
+      if (!matched && !hrefContains) {
+        // D10-c：委托型控件回退——文本命中的可见叶子向上爬 cursor:pointer
+        // owner，返回其中心坐标交给可信坐标点击（比 JS 派发更真实）。
+        for (const el of all) {
+          if (!(el instanceof HTMLElement) || el.children.length > 0 || !visible(el)) continue
+          const txt = normalize(el.textContent || '')
+          if (!txt) continue
+          if (!((exact && txt === target) || (!exact && txt.includes(target)))) continue
+          let owner = el
+          for (let i = 0; i < 8 && owner; i++) {
+            let cursor = ''
+            try { cursor = window.getComputedStyle(owner).cursor } catch { cursor = '' }
+            if (cursor === 'pointer') { matched = owner; break }
+            owner = owner.parentElement
+          }
+          if (matched) break
+        }
+      }
       if (!matched) return { ok: false, error: 'Element by text not found: ' + target }
       if (hrefContains) {
         const anchor = matched.closest ? matched.closest('a[href]') : null
