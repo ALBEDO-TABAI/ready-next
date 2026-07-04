@@ -123,7 +123,7 @@ P1 的验收欠账 + 本轮新件的真机确认，一次跑完：
 
 - **R1 第十二轮根因链修净（代码侧完备，待真机复测关账）**：D18 act 可信指针升级 + changed 假信号修复 + 站点权限 agent 自动拒绝（9a3993b3）；D16 文件选择器 CDP 拦截（c8f182a4）；控制闸 pending_confirm 45s TTL（66d6f501）；D9 证据链核验完整（transactionConfirmed→proof→adjudicator→finalizer，无需新码）。剩余唯一未知=真机跑通「发布点击落地→成功证据铸造」全链。
 - **Phase A 完成**：turn-engine.ts(4827)+HCD 删除，12 引擎专属测试整删、12 存活文件外科（live 断言保留），boundary gate 转存在性合同，4 引擎 gate 退役、6 gate 摘引擎项，metric 死值清理，package.json 全链摘除（505e2ea2）。−15.7k 行。
-- **Phase B4 完成**（子代理执行）：Power 组七 case 抽出 browser-power-tools.ts(849)+browser-tool-shared.ts(111)，browser-tools 6285→5461，diff 逐字节一致（48c0b06a）；两个动手前已红的 gate（abort-rethrow/policy-deny-errorkind）按"合同随实现同步"重锚扫描目标修绿。后续组（collection/observe/act）排队。
+- **Phase B 收官（B4-B7 全部完成，子代理串行执行）**：browser-tools.ts **6285→713**（薄门面达标，远低于 <2k 目标）。B4 Power 组（849 行，48c0b06a）→ B5 采集/内容任务组（1683 行，27212da9）→ B6 观察组（979 行 + map 状态单例迁移，95321758）→ B7 行动/导航组（1967 行含 act_on_target/D18 块逐字节搬移，978c1dfe）。共享叶子沉淀 browser-tool-shared.ts（614）。最终 facade 只剩必须留守的共享合同：Safe Mode 脚本合同预备段、attachBrowserActionSessionOutput（sitePermissionNotices 排空红线）、legacy Power 前置、catalog 导出、dispatch 骨架（lease gate + 四组委托 + catch/finally）。每组移动块对 HEAD 逐字节 cmp 证明；四 browser gate 扫描列表随组同步；主会话独立终验 typecheck/四 gate/76 测试全绿。
 - **债务包完成**：chat-panel-baseline 两层崩溃修复（CSS 上移 main.tsx + harness 补 MutationObserver）；ipc-contract 归绿（十条 non_literal_push 重锚 + 六个身份通道按两表拆分登记 allowlist）（8839ff62）。
 - **意图门控漏判分析定稿**：live-info 词表缺事件/活动类主题 + 无漏判账本——登记 D19（改判定需漂移评估，专门会话）。
 - **分支既有红清单（HEAD 基线证实，非本批引入）**：direct-chat emitRuntimeError×2、Phase 4.4 detached taxonomy、shared-enum-drift 的 tool-runtime TOOL_ADMISSION 违规、browser-engine-services popup context、chat-panel-waterfall 单测、D6 三测试（已登记）。

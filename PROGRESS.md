@@ -10,7 +10,7 @@
   - 接管闸修复：pending_confirm 45s 惰性 TTL——擦碰 agent 页不再永久冻结写入+横幅常驻。
   - D9 核验：发布成功证据链（transactionConfirmed→proof-collector→adjudicator→finalizer）已完整，此前只差点击落地。
   - **Phase A 完成**：turn-engine.ts(4827 行)+HostCapabilityDispatcher 退役删除；12 个引擎专属测试整删、12 个存活文件外科摘除引擎断言（live 断言保留）；dormant 边界 gate 转"文件不存在"存在性合同；4 个引擎 gate 退役、6 个 gate 摘引擎项；net −15.7k 行。
-  - **Phase B4 完成**（子代理）：browser-tools 6285→5461，Power 七 case 纯移动抽出 browser-power-tools.ts，diff 逐字节一致。
+  - **Phase B 收官（B4-B7）**：browser-tools.ts **6285→713 薄门面**——Power(849)/采集(1683)/观察(979，含页面地图状态迁移)/行动导航(1967，含 D18 块逐字节搬移) 四组纯移动抽出 + 共享叶子 browser-tool-shared(614)；每组移动块对 HEAD 逐字节 cmp 证明，四 gate 扫描列表随组同步。
   - 债务包：chat-panel-baseline 两层崩溃修复（vertical-tabs 的 CSS-in-tsx + MutationObserver harness 缺失）；ipc-contract 归绿（non_literal_push 重锚 + 六个 agent 身份通道登记）。
   - 验证：typecheck 0 错；改动 gate 全绿；外科后套件全绿（既有红经 HEAD 基线逐项定界，见 route 文档 §5.1）；意图门控漏判分析登记 D19。
   - commits：9a3993b3 / c8f182a4 / 66d6f501 / 505e2ea2 / 48c0b06a / 8839ff62。
