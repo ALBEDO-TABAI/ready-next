@@ -19,6 +19,12 @@ const RUNTIME_PATH = new URL('../main/modules/agent-control/runtime-core/runtime
 // The hook-chain assertions below follow the bodies; the runtime-side
 // assertions pin the delegate wiring so the chain cannot silently detach.
 const REFERENCE_HINT_SERVICE_PATH = new URL('../main/modules/agent-control/runtime-core/reference-hint-service.ts', import.meta.url)
+// B8-D R4 — the ensureChannelScope body moved from runtime.ts into the
+// delegated ConversationScopeStore; the runtime keeps a one-line private
+// delegate and binds the ReferenceHintService replay hook through the store's
+// deps. The body assertion follows the body; the runtime-side assertions pin
+// the delegate + deps wiring so the replay chain cannot silently detach.
+const CONVERSATION_SCOPE_STORE_PATH = new URL('../main/modules/agent-control/runtime-core/conversation-scope-store.ts', import.meta.url)
 const IPC_HANDLER_PATH = new URL('../main/modules/claude-bridge/ipc-handler.ts', import.meta.url)
 const CHAT_PERSISTENCE_GROUP_PATH = new URL('../main/modules/claude-bridge/ipc/chat-persistence-group.ts', import.meta.url)
 const RUNTIME_MANAGER_PATH = new URL('../main/modules/skills-runtime/runtime-manager.ts', import.meta.url)
@@ -96,13 +102,30 @@ test('Phase 1.1 — chat:saveMessage IPC invokes the hook after persisting the r
 })
 
 test('Phase 1.2 — ensureChannelScope restores reference hint from meta_json before the message reaches orchestrator', () => {
-  const source = readSource(RUNTIME_PATH)
-  const blockMatch = source.match(/private ensureChannelScope[\s\S]*?\n\s{2}\}/)
-  assert.ok(blockMatch, 'ensureChannelScope block exists')
+  const runtimeSource = readSource(RUNTIME_PATH)
+  const storeSource = readSource(CONVERSATION_SCOPE_STORE_PATH)
+
+  // Body home (B8-D R4): the replay hook fires inside the store's
+  // ensureChannelScope, through the injected ReferenceHintService callback.
+  const blockMatch = storeSource.match(/ensureChannelScope\([\s\S]*?\n\s{2}\}/)
+  assert.ok(blockMatch, 'ensureChannelScope block exists in ConversationScopeStore')
   assert.match(
     blockMatch![0],
-    /this\.referenceHints\.restoreReferenceHintFromScope\(scope,\s*scope\.id\)/,
+    /this\.deps\.restoreReferenceHintFromScope\(scope,\s*scope\.id\)/,
     'ensureChannelScope replays persisted hint into in-memory map',
+  )
+
+  // Runtime wiring: the private delegate keeps remote-channel call sites on
+  // the store body, and the store deps bind the ReferenceHintService hook.
+  assert.match(
+    runtimeSource,
+    /private ensureChannelScope[^}]*this\.conversationScopes\.ensureChannelScope\(/,
+    'runtime ensureChannelScope delegates to ConversationScopeStore',
+  )
+  assert.match(
+    runtimeSource,
+    /restoreReferenceHintFromScope:\s*\(scope,\s*scopeId\)\s*=>\s*\n?\s*this\.referenceHints\.restoreReferenceHintFromScope\(scope,\s*scopeId\)/,
+    'store deps bind the ReferenceHintService replay hook',
   )
 })
 

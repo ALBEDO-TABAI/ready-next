@@ -79,11 +79,20 @@ test('task run control actions are exposed through runtime, IPC, preload, render
 
 test('chat conversation deletion is routed through runtime cleanup before removing persisted records', () => {
   const runtime = readWorkspaceFile('src/main/modules/agent-control/runtime-core/runtime.ts')
+  // B8-D R4 — the deleteConversation body moved from runtime.ts into the
+  // delegated ConversationScopeStore (runtime keeps a one-line public
+  // delegate; the store receives the runtime-owned scopeRunSummaries map by
+  // reference). The cleanup-step assertions follow the body; the runtime-side
+  // assertion pins the delegate so the IPC → runtime → store chain holds.
+  const scopeStore = readWorkspaceFile(
+    'src/main/modules/agent-control/runtime-core/conversation-scope-store.ts'
+  )
   const ipcHandler = readWorkspaceFile('src/main/modules/claude-bridge/ipc-handler.ts')
 
   assert.match(runtime, /deleteConversation\(scopeId: string\): void/)
-  assert.match(runtime, /this\.scopeRunSummaries\.delete\(scopeId\)/)
-  assert.match(runtime, /forgetSession\(scopeId\)/)
+  assert.match(runtime, /this\.conversationScopes\.deleteConversation\(scopeId\)/)
+  assert.match(scopeStore, /this\.deps\.scopeRunSummaries\.delete\(scopeId\)/)
+  assert.match(scopeStore, /forgetSession\(scopeId\)/)
   assert.match(ipcHandler, /runtime!\.deleteConversation\(conversationId\)/)
   assert.doesNotMatch(ipcHandler, /chatRepository\.deleteConversation\(conversationId\)/)
 })

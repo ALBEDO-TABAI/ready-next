@@ -26,7 +26,6 @@ import {
   getDatabase,
   type AgentChannelType,
   type ChatConversationRecord,
-  type ChatMessageRecord,
   type ConversationSourceKind,
   type UpsertConversationScopeMode,
 } from '../../database'
@@ -79,6 +78,8 @@ import { ReferenceHintService } from './reference-hint-service'
 import { ScheduleService } from './schedule-service'
 import { ChannelConfigService } from './channel-config-service'
 import { ScopeAttachmentService } from './scope-attachment-service'
+import { SidecarPollService } from './sidecar-poll-service'
+import { ConversationScopeStore } from './conversation-scope-store'
 import { reconcileTaskProjections } from '../task-projection/task-projection-reconciler'
 import { canResumeAsUserPoint, type ResumePointHandle } from '../contracts/resume-handle'
 import { deriveTaskProjectionCanResume } from '../task-projection/task-projection-resume'
@@ -95,8 +96,6 @@ import { registerPendingTaskEventListener } from '../system-reminders/background
 import { taskEventBridge } from '../../browser-engine/task-event-bridge'
 import { createTaskEventProofListener, createTaskProofSink } from '../quality/proof-collector'
 import { isKnowledgeSystemEnabled, runStartupBeliefSync, KnowledgeWatcher } from '../knowledge/knowledge-truth-source'
-import { BrowserCollectionConsentStore } from '../../browser-engine/browser-collection-consent'
-import { forgetSession } from '../session/session-continuity'
 import { isRetryOnlyTurn } from '../skills/skill-detection-inputs'
 import { logAgentMetric } from '../metrics'
 import { TOOL_ERROR_METRICS } from '../tools-runtime/tool-error-metrics'
@@ -131,7 +130,6 @@ import type { DetachedSkillTaskRecord } from '../detached-skill-task-tracker'
 import type {
   AgentChannelConfig,
   AgentRuntimeStatus,
-  ChannelAdapterType,
   ChannelAttachment,
   ConversationAttachment,
   ConversationEventPayload,
@@ -148,7 +146,6 @@ import type { SessionRecallCapsule, SessionRecallHit } from '../../../../shared/
 import {
   parseRecordJson,
   parseArrayJson,
-  tryParseJson,
   stringFromUnknown,
   progressFromUnknown,
   artifactMetaString,
@@ -318,14 +315,13 @@ export class AgentControlRuntime extends EventEmitter {
     string,
     PendingInboundChannel
   >()
-  private pollTimer: NodeJS.Timeout | null = null
   private readonly scopeRunSummaries = new Map<string, ScopeRunSummary>()
-  private lastSidecarRestartAttemptAt = 0
   // Channel connected/error counts are fetched from the sidecar over HTTP, which is too slow
   // to do on every getRuntimeStatus() call (it is on the Settings render path). Cache the last
-  // values and refresh them from the 3s poll loop instead.
-  private channelStateCache = { connected: 0, errors: 0 }
-  private readonly lastAdapterRestartAttemptAt = new Map<string, number>()
+  // values and refresh them from the 3s poll loop instead. B8-D R4: the poll
+  // loop lives in SidecarPollService, which holds this object by reference
+  // and mutates it in place — `readonly` pins the shared identity.
+  private readonly channelStateCache = { connected: 0, errors: 0 }
   private heartbeat: HeartbeatSnapshot = {
     sidecar: { status: 'stopped' },
     adapters: [],
@@ -357,6 +353,44 @@ export class AgentControlRuntime extends EventEmitter {
     heartbeat: this.heartbeat,
   })
   private readonly scopeAttachments = new ScopeAttachmentService({ db: this.db })
+  // B8-D R4 — the sidecar-poll / conversation-scope clusters live in delegated
+  // sub-services; same one-line-delegate pattern as R1–R3. Declared AFTER
+  // `heartbeat` / `channelStateCache` / `scopeRunSummaries` /
+  // `taskProjectionStore` so the deps capture initialized object references
+  // (all are mutated in place, never reassigned). Every function dep is a
+  // lazy closure, so constructor-assigned hubs (`projectionSync`) and the
+  // remote-channel cluster methods (`handleInboundChannel`,
+  // `getScopedRemoteThreadKey`, `getRemoteChannelSessionSettingKey` — that
+  // cluster migrates in the next batch and these callbacks re-bind through
+  // the runtime automatically) are safe to reference here.
+  private readonly sidecarPoll = new SidecarPollService({
+    db: this.db,
+    sidecar: this.sidecar,
+    heartbeat: this.heartbeat,
+    channelStateCache: this.channelStateCache,
+    startSidecar: () => this.startSidecar(),
+    getSettingBool: (key, fallback) => this.getSettingBool(key, fallback),
+    listChannels: () => this.listChannels(),
+    listSchedules: () => this.listSchedules(),
+    executeSchedule: (schedule, triggerSource) =>
+      this.schedules.executeSchedule(schedule, triggerSource),
+    handleInboundChannel: (payload) => this.handleInboundChannel(payload),
+  })
+  private readonly conversationScopes = new ConversationScopeStore({
+    db: this.db,
+    scopeRunSummaries: this.scopeRunSummaries,
+    taskProjectionStore: this.taskProjectionStore,
+    emitConversationEvent: (payload) => this.projectionSync.emitConversationEvent(payload),
+    mapChannelRow: (row) => this.channelConfig.mapChannelRow(row),
+    getScopedRemoteThreadKey: (channelId, remoteThread, agent) =>
+      this.getScopedRemoteThreadKey(channelId, remoteThread, agent),
+    getRemoteChannelSessionSettingKey: (channelId, remoteThread, agent) =>
+      this.getRemoteChannelSessionSettingKey(channelId, remoteThread, agent),
+    restoreReferenceHintFromScope: (scope, scopeId) =>
+      this.referenceHints.restoreReferenceHintFromScope(scope, scopeId),
+    persistReferenceHintToScope: (scopeId) =>
+      this.referenceHints.persistReferenceHintToScope(scopeId),
+  })
   constructor(agentManager: AgentManager, browserController?: BrowserController) {
     super()
     this.agentManager = agentManager
@@ -668,10 +702,7 @@ export class AgentControlRuntime extends EventEmitter {
       await this.orchestrator.closeSession(session.agent, session.sessionId || undefined)
     }
 
-    if (this.pollTimer) {
-      clearInterval(this.pollTimer)
-      this.pollTimer = null
-    }
+    this.sidecarPoll.stopPollLoop()
 
     // Stop memory lifecycle manager
     this.memoryLifecycle.stop()
@@ -693,7 +724,7 @@ export class AgentControlRuntime extends EventEmitter {
     }
     if (status.state === 'running') {
       await this.syncDatabaseToSidecar()
-      this.ensurePollLoop()
+      this.sidecarPoll.ensurePollLoop()
     }
   }
 
@@ -797,7 +828,7 @@ export class AgentControlRuntime extends EventEmitter {
   }
 
   listConversationScopes(agent?: string): ConversationScope[] {
-    return this.db.listConversationScopes(agent).map((row) => this.mapConversationRow(row))
+    return this.conversationScopes.listConversationScopes(agent)
   }
 
   listScopeRuns(payload?: {
@@ -1101,24 +1132,15 @@ export class AgentControlRuntime extends EventEmitter {
   }
 
   getConversationScope(scopeId: string): ConversationScope | null {
-    const row = this.db.getConversationScope(scopeId)
-    return row ? this.mapConversationRow(row) : null
+    return this.conversationScopes.getConversationScope(scopeId)
   }
 
   getConversationScopeMessages(scopeId: string): ConversationScopeMessage[] {
-    return this.db.getChatMessages(scopeId).map((row) => this.mapMessageRow(row))
+    return this.conversationScopes.getConversationScopeMessages(scopeId)
   }
 
   deleteConversation(scopeId: string): void {
-    this.scopeRunSummaries.delete(scopeId)
-    forgetSession(scopeId)
-    this.taskProjectionStore.deleteByScope(scopeId)
-    try {
-      new BrowserCollectionConsentStore().deleteByScope(scopeId)
-    } catch (error) {
-      console.warn('[Runtime] Failed to clear browser collection consent scope:', error)
-    }
-    this.db.deleteConversation(scopeId)
+    this.conversationScopes.deleteConversation(scopeId)
   }
 
   listScopeAttachments(scopeId: string): ConversationAttachment[] {
@@ -1147,37 +1169,14 @@ export class AgentControlRuntime extends EventEmitter {
   }
 
   createLocalScope(agent: string, id?: string): ConversationScope {
-    return this.createLocalScopeWithMode(agent, id).scope
+    return this.conversationScopes.createLocalScope(agent, id)
   }
 
-  /**
-   * Same as createLocalScope but exposes whether the underlying upsert
-   * inserted a new chat_conversations row or reused an existing one
-   * (matched either by id or by the unique (source_kind, source_id,
-   * thread_key, agent) tuple).
-   *
-   * The IPC handler uses this to log mode; renderer callers stay on the
-   * legacy scope-only signature.
-   */
   createLocalScopeWithMode(
     agent: string,
     id?: string,
   ): { scope: ConversationScope; mode: UpsertConversationScopeMode } {
-    const scopeId = typeof id === 'string' && id.trim() ? id.trim() : `conv-${randomUUID()}`
-    const { row, mode } = this.db.upsertConversationScope({
-      id: scopeId,
-      agent,
-      userId: 'default-user',
-      title: '新对话',
-      sourceKind: 'local',
-      sourceId: 'app',
-      threadKey: scopeId,
-      meta: { sourceLabel: '应用内', createdBy: 'app' }
-    })
-    const scope = this.mapConversationRow(row)
-    logAgentMetric('local_scope_upsert', { scopeId: scope.id, agent, mode })
-    this.emitConversationEvent({ type: 'scope_created', scope })
-    return { scope, mode }
+    return this.conversationScopes.createLocalScopeWithMode(agent, id)
   }
 
   async sendScoped(payload: {
@@ -1712,125 +1711,7 @@ export class AgentControlRuntime extends EventEmitter {
   }
 
   async syncDatabaseToSidecar(): Promise<void> {
-    if (!this.sidecar.isRunning()) return
-    const channels = this.listChannels()
-    for (const channel of channels) {
-      await this.sidecar.upsertChannel({
-        id: channel.id,
-        type: channel.type,
-        name: channel.name,
-        enabled: channel.enabled,
-        config: channel.config
-      })
-      if (channel.enabled) {
-        await this.sidecar.startChannel(channel.id).catch(() => undefined)
-      } else {
-        await this.sidecar.stopChannel(channel.id).catch(() => undefined)
-      }
-    }
-    const schedules = this.listSchedules()
-    for (const schedule of schedules) {
-      await this.sidecar.upsertSchedule({
-        id: schedule.id,
-        name: schedule.name,
-        cronExpr: schedule.cronExpr,
-        prompt: schedule.prompt,
-        channelId: schedule.channelId,
-        enabled: schedule.enabled,
-        payload: schedule.payload || {}
-      })
-    }
-  }
-
-  private ensurePollLoop(): void {
-    if (this.pollTimer) return
-    this.pollTimer = setInterval(() => {
-      void this.pollSidecarEvents()
-    }, 3_000)
-  }
-
-  private async pollSidecarEvents(): Promise<void> {
-    if (!this.sidecar.isRunning()) {
-      const sidecarEnabled = this.getSettingBool('remote_channels_enabled', true)
-      const autostart = this.getSettingBool('sidecar_autostart', true)
-      const now = Date.now()
-      if (sidecarEnabled && autostart && now - this.lastSidecarRestartAttemptAt > 30_000) {
-        this.lastSidecarRestartAttemptAt = now
-        await this.startSidecar()
-      }
-      return
-    }
-    try {
-      const heart = await this.sidecar.heartbeat()
-      this.heartbeat.sidecar.lastBeatAt = new Date().toISOString()
-      this.heartbeat.sidecar.status = 'running'
-      const adapters = Array.isArray((heart as { adapters?: unknown[] }).adapters)
-        ? ((heart as { adapters?: unknown[] }).adapters as Array<Record<string, unknown>>)
-        : []
-      this.heartbeat.adapters = adapters.map((item) => ({
-        id: String(item.id || ''),
-        type: String(item.type || 'local-debug') as ChannelAdapterType,
-        healthy: Boolean(item.healthy),
-        status:
-          typeof item.status === 'string'
-            ? (item.status as 'starting' | 'running' | 'stopped' | 'error')
-            : undefined,
-        lastBeatAt: typeof item.lastBeatAt === 'string' ? item.lastBeatAt : undefined,
-        error: typeof item.error === 'string' ? item.error : undefined
-      }))
-      await this.reviveErroredAdapters()
-
-      const channelState = await this.sidecar.getChannelState().catch(() => null)
-      if (channelState) {
-        this.channelStateCache = {
-          connected: Number((channelState as { connected?: number }).connected || 0),
-          errors: Number((channelState as { errors?: number }).errors || 0)
-        }
-      }
-
-      const events = await this.sidecar.pullEvents(24)
-      for (const evt of events) {
-        const evtType = String(evt.type || '')
-        if (evtType === 'schedule.trigger') {
-          const payload = (evt.payload || {}) as Record<string, unknown>
-          const scheduleId = String(payload.scheduleId || '')
-          if (!scheduleId) continue
-          const schedule = this.db.getAgentSchedule(scheduleId)
-          if (!schedule || schedule.enabled === 0) continue
-          await this.schedules.executeSchedule(schedule, 'cron')
-          continue
-        }
-        if (evtType === 'channel.inbound') {
-          const payload = (evt.payload || {}) as Record<string, unknown>
-          await this.handleInboundChannel(payload)
-        }
-      }
-    } catch (error) {
-      this.heartbeat.sidecar.status = 'error'
-      this.heartbeat.sidecar.error = error instanceof Error ? error.message : String(error)
-    }
-  }
-
-  private async reviveErroredAdapters(): Promise<void> {
-    const enabledChannelIds = new Set(
-      this.listChannels()
-        .filter((item) => item.enabled)
-        .map((item) => item.id)
-    )
-    const now = Date.now()
-    for (const adapter of this.heartbeat.adapters) {
-      if (!adapter.id || !enabledChannelIds.has(adapter.id)) continue
-      const shouldRestart =
-        adapter.status === 'error' ||
-        adapter.status === 'stopped' ||
-        (adapter.healthy === false && adapter.status !== 'starting')
-      if (!shouldRestart) continue
-      const lastAttempt = this.lastAdapterRestartAttemptAt.get(adapter.id) || 0
-      if (now - lastAttempt < 15_000) continue
-      this.lastAdapterRestartAttemptAt.set(adapter.id, now)
-      await this.sidecar.stopChannel(adapter.id).catch(() => undefined)
-      await this.sidecar.startChannel(adapter.id).catch(() => undefined)
-    }
+    return this.sidecarPoll.syncDatabaseToSidecar()
   }
 
   private async handleInboundChannel(payload: Record<string, unknown>): Promise<void> {
@@ -2471,78 +2352,20 @@ export class AgentControlRuntime extends EventEmitter {
   private mapConversationRow(
     row: ChatConversationRecord & { last_message_at?: string | null }
   ): ConversationScope {
-    return {
-      id: row.id,
-      agent: row.agent,
-      userId: row.user_id || undefined,
-      title: row.title,
-      parentConversationId: row.parent_conversation_id ?? null,
-      lineageRootId: row.lineage_root_id || row.id,
-      resumeTitle: row.resume_title || row.title,
-      sourceKind: row.source_kind,
-      sourceId: row.source_id,
-      threadKey: row.thread_key,
-      meta: tryParseJson<Record<string, unknown>>(row.meta_json || '{}', {}),
-      createdAt: row.created_at,
-      updatedAt: row.updated_at,
-      lastMessageAt: row.last_message_at ?? null
-    }
+    return this.conversationScopes.mapConversationRow(row)
   }
 
-  private mapMessageRow(row: ChatMessageRecord): ConversationScopeMessage {
-    return {
-      id: row.id,
-      conversationId: row.conversation_id,
-      role: row.role,
-      content: row.content,
-      timestamp: row.timestamp,
-      meta: tryParseJson<Record<string, unknown>>(row.meta_json || '{}', {})
-    }
-  }
-
+  // B8-D R4 — body lives in ConversationScopeStore (deps bind
+  // `referenceHints.restoreReferenceHintFromScope` for the Phase 1.2 hint
+  // replay); this delegate keeps the remote-channel cluster call sites and
+  // the R2/R3 service injection closures stable.
   private ensureChannelScope(
     channelId: string,
     remoteThread: string,
     agent: string,
     sender: string
   ): ConversationScope {
-    const channel = this.db.getAgentChannel(channelId)
-    const channelMeta = channel ? this.channelConfig.mapChannelRow(channel) : null
-    const scopedThreadKey = this.getScopedRemoteThreadKey(channelId, remoteThread, agent)
-    const existing = this.db.findConversationScope('channel', channelId, scopedThreadKey, agent)
-    const { row } = this.db.upsertConversationScope({
-      id: existing?.id || `conv-${randomUUID()}`,
-      agent,
-      title: existing?.title || sender || channelMeta?.name || '远程会话',
-      sourceKind: 'channel',
-      sourceId: channelId,
-      threadKey: scopedThreadKey,
-      meta: {
-        ...(existing
-          ? tryParseJson<Record<string, unknown>>(existing.meta_json || '{}', {})
-          : {}),
-        sourceLabel: channelMeta?.name || '远程 IM',
-        channelType: channelMeta?.type || 'generic-webhook',
-        sender,
-        remoteThread,
-        channelSessionToken: this.db.getSetting(
-          this.getRemoteChannelSessionSettingKey(channelId, remoteThread, agent)
-        ) || null
-      }
-    })
-    const scope = this.mapConversationRow(row)
-    // Phase 1.2 — recover any persisted lastReferenceSkill into the in-memory
-    // map before the inbound message hits the orchestrator. Without this, a
-    // Ready restart loses the hint until the user manually re-arms it; the
-    // first remote IM turn after restart goes out with `referenceSkillHintArmed=false`
-    // and the model loses access to typed skill actions. Idempotent: replay
-    // checks TTL and same-value short-circuits.
-    this.referenceHints.restoreReferenceHintFromScope(scope, scope.id)
-    this.emitConversationEvent({
-      type: existing ? 'scope_updated' : 'scope_created',
-      scope
-    })
-    return scope
+    return this.conversationScopes.ensureChannelScope(channelId, remoteThread, agent, sender)
   }
 
   private getRemoteChannelSessionSettingKey(
@@ -2566,9 +2389,7 @@ export class AgentControlRuntime extends EventEmitter {
   }
 
   private refreshScope(scopeId: string): ConversationScope {
-    const row = this.db.getConversationScope(scopeId)
-    if (!row) throw new Error(`Conversation scope not found: ${scopeId}`)
-    return this.mapConversationRow(row)
+    return this.conversationScopes.refreshScope(scopeId)
   }
 
   private createConversationMessage(
@@ -2579,38 +2400,11 @@ export class AgentControlRuntime extends EventEmitter {
       meta?: Record<string, unknown>
     }
   ): ConversationScopeMessage {
-    const messageId = `msg-${randomUUID()}`
-    const timestamp = new Date().toISOString()
-    this.db.addChatMessage(
-      messageId,
-      scopeId,
-      payload.role,
-      payload.content,
-      timestamp,
-      payload.meta
-    )
-    // skill-resume A1: snapshot reference-skill hint after each assistant
-    // message and persist it to the conversation's meta_json so a Ready
-    // restart can re-arm the in-memory hint on session resume.
-    if (payload.role === 'assistant') {
-      this.referenceHints.persistReferenceHintToScope(scopeId)
-    }
-    return this.mapMessageRow(this.db.getChatMessages(scopeId).find((row) => row.id === messageId)!)
+    return this.conversationScopes.createConversationMessage(scopeId, payload)
   }
 
   private extractTextFromMessage(message: string | MultimodalBlock[]): string {
-    if (typeof message === 'string') return message
-    if (!Array.isArray(message)) return ''
-    return message
-      .map((block) => {
-        if (!block || typeof block !== 'object') return ''
-        if (typeof (block as { text?: unknown }).text === 'string') {
-          return (block as { text?: string }).text || ''
-        }
-        return ''
-      })
-      .filter(Boolean)
-      .join(' ')
+    return this.conversationScopes.extractTextFromMessage(message)
   }
 
   private emitConversationEvent(payload: ConversationEventPayload): void {
