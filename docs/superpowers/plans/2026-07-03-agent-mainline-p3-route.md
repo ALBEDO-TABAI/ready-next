@@ -123,4 +123,4 @@ P1 的验收欠账 + 本轮新件的真机确认，一次跑完：
 - **Phase B**：B1-B3 完成，browser-tools 8484→~6100（净拆 + 真机修复回填）。
 - **A0/A1**：证据定稿，A2 手术图就绪（在场做）。
 - **新追加主线**：Phase I（微信 IM 远程完全体）+ Phase M（MCP 生态扩展），见上文两节——规划调研可与 A/B 并行，实施在 R 关账与分支决策后排队。
-- dev 环境事故定案：swap 耗尽（重启机器解决）+ 盖章破签名（sync-dev-icon 自愈已内置），不占用主线工单。
+- dev 环境事故定案（07-04 深夜二次复核推翻旧结论）：swap 说被"重启后原样复现"证伪；真根因=tab 创建空白 primer 双导航把偶发 renderer seatbelt 初始化失败升级成 Chromium 早期 RFH 交换裸 CHECK（breakpad 符号化定位 `~RenderFrameHostImpl`）。已修：tab-lifecycle-service 删 primer 改单导航+原生涂底，真机 120s 存活验证（标签恢复+真实站点加载）。残留环境项（不占主线工单）：本机 macOS 27 beta 在并发派生下 renderer 沙箱初始化偶发失败（个别标签悲伤页可重载，主进程已免疫）；候选缓解=Electron 42.3.0→42.6.0 补丁位升级。盖章破签名为独立隐患，sync-dev-icon 自愈已内置。

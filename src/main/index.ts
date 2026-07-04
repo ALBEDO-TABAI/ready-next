@@ -78,6 +78,33 @@ if (READY_USER_DATA_DIR) {
   app.setPath('userData', READY_USER_DATA_DIR)
 }
 
+// Crash forensics (opt-in via READY_PROC_DIAG=1): synchronous stderr timeline
+// of webContents creation / main-frame navigation starts / renderer deaths.
+// Synchronous on purpose — when the main process dies mid-crash, async logs
+// vanish with it; this is the tool that pinned the 2026-07-04 startup crash.
+if (process.env.READY_PROC_DIAG === '1') {
+  const diagT0 = Date.now()
+  const diagWrite = (line: string) => {
+    try {
+      appendFileSync('/dev/fd/2', `[proc-diag +${((Date.now() - diagT0) / 1000).toFixed(2)}s] ${line}\n`)
+    } catch {
+      // stderr gone — nothing left to report to
+    }
+  }
+  app.on('web-contents-created', (_event, wc) => {
+    const id = wc.id
+    diagWrite(`wc#${id} created type=${wc.getType()}`)
+    wc.on('did-start-navigation', ((event: { isMainFrame?: boolean; url?: string }) => {
+      if (event && event.isMainFrame === false) return
+      diagWrite(`wc#${id} nav-start url=${String(event?.url ?? '').slice(0, 100)}`)
+    }) as never)
+    wc.on('render-process-gone', (_ev, details) => {
+      diagWrite(`wc#${id} RENDER-GONE ${JSON.stringify(details)} lastURL=${wc.getURL().slice(0, 100)}`)
+    })
+    wc.on('destroyed', () => diagWrite(`wc#${id} destroyed`))
+  })
+}
+
 function ensureRegularDockApp(): void {
   if (process.platform !== 'darwin') return
   app.setActivationPolicy('regular')

@@ -535,10 +535,13 @@ describe('BrowserTabLifecycleService', () => {
     assert.deepStrictEqual(result, { success: true, tabId: 'tab-1' })
     assert.strictEqual(activeTabId, 'tab-1')
     assert.strictEqual(next.state.lastLoadedUrl, 'https://example.com')
-    assert.deepStrictEqual(next.state.loadedUrls, [READY_BROWSER_BLANK_URL, 'https://example.com'])
+    // Single navigation straight to the target URL — no blank primer. The
+    // primer double-navigation escalated flaky renderer spawns into a fatal
+    // main-process CHECK during multi-tab restore (2026-07-04 startup crash).
+    assert.deepStrictEqual(next.state.loadedUrls, ['https://example.com'])
     assert.deepStrictEqual(events, ['apply', 'detach-previous', 'show:960x640'])
     next.state.emit('did-stop-loading')
-    assert.strictEqual(next.state.clearHistoryCalls, 1)
+    assert.strictEqual(next.state.clearHistoryCalls, 0)
   })
 
   it('ignores subresource did-fail-load events when updating tab error state', async () => {

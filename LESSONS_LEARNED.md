@@ -398,14 +398,18 @@ Stage 4 W3 引入 `SkillToolAuthorization` 三层分离时，留了一个显式�
   - 任何“兜底透明”规则都要检查空态，避免无内容时直接漏出宿主黑底。
 
 ### 6.9 死亡时刻反复出现的消息永远先当第一证词
-- dev 闪退排查中，`Failed to initialize sandbox` 在每次崩溃现场都出现，却被连续两次降级处理（先当 kill 噪音、再当外部 chromium 警告），绕了缓存/签名/终端三层假根因后才回头验它——它一直是真死因（V8 沙箱虚拟内存保留失败）的第一现场证词。
+- dev 闪退排查中，`Failed to initialize sandbox` 在每次崩溃现场都出现，却被连续两次降级处理（先当 kill 噪音、再当外部 chromium 警告），绕了缓存/签名/终端多层假根因后才回头验它——它一直是第一现场证词（后经符号化定名：renderer 存根 `electron_main_mac.cc` FatalError 的无换行输出，seatbelt 初始化失败）。
 - 规则：与死亡时刻**时序强相关且反复出现**的日志消息，必须先证伪才能降级；"这消息平时也有"不构成证伪（要看它平时出现的时刻是否同样致命）。
 
 ### 6.10 存活验证必须锚定在崩溃相关事件之后（三个假阳性的代价）
 - 同一天三次"修好了"误报，各有一个验证缺陷：①固定墙钟采样（缓存重建拖慢启动，崩溃点后移到采样窗口之外）；②`pgrep -f 'node_modules/electron'` 误匹配 electron-vite 监视进程（存活≠应用存活）；③macOS 崩溃报告落盘延迟约一分钟，`find -newermt` 短窗口会漏。
 - 正确形态：先从历史崩溃找到**崩溃相关锚事件**（本例=恢复活动标签的 set-bounds 日志行），验证=等到锚事件出现后再观察一段（≥崩溃延迟上限），同时用精确进程匹配+放宽崩溃报告时间窗。
 
-### 6.11 "换代码无效的启动崩溃"先查系统资源和签名，再查代码
-- swap 耗尽（17.2/18GB）让每次 dev 启动死于渲染器批量派生时刻，表现酷似代码回归；机器多日未重启+全天十几次 Electron 启杀是典型诱因。
-- 附带真隐患：dev 品牌化盖章（改 Electron.app 内 icon/plist）会破坏代码签名封印，macOS 重新强校验时同样表现为渲染器 sandbox abort——盖章后必须自检签名并 ad-hoc 自愈重签（scripts/sync-dev-icon.mjs 已内置）。
-- 排查顺位：`sysctl vm.swapusage` / 崩溃报告的 responsibleProc 与 ASI / `codesign -v` / 回退代码对照，四步都便宜，先做完再进代码。
+### 6.11 "换代码无效的启动崩溃"：环境检查只能排除，定案必须有指令级证据（四个假根因的代价）
+- 本次 dev 闪退连出四个假根因——缓存损坏、签名封印、终端沙箱继承、swap 耗尽——每个都有"貌似成立"的环境层证据，swap 版本还一度写进文档定案；重启清空 swap 后崩溃原样复现（同址 SIGTRAP 六帧偏移逐字节一致），全部证伪。共同缺陷：证据停在环境层，从未触达崩溃指令本身。
+- 定案三件套（下次直接从这里开始）：
+  - **breakpad 符号化**：Electron 每个 release 附带 `*-symbols.zip`，把 .ips 的 imageOffset 解成真函数+文件行。本例主进程死于 `~RenderFrameHostImpl` 内的裸 CHECK（release 版 CHECK 零日志直接 trap，所以 stderr 永远安静），调用链 `WebContents::LoadURL → PerformEarlyRenderFrameHostSwapIfNeeded → CommitPending`。
+  - **env 门控同步 stderr 时间线**：`READY_PROC_DIAG=1` 打开 web-contents-created / nav-start / render-process-gone 的毫秒级打点（必须同步写——主进程死亡时异步日志跟着消失）。
+  - **最小复现对照**：同一 Electron 二进制跑最小 app（含 partition/https/3 并发矩阵）全绿 → 二进制与机器洗清，嫌疑收敛到本应用行为差异。
+- 真根因=tab 创建的空白 primer 双导航（tab-lifecycle-service）：本机（macOS 27 beta）在标签恢复的并发派生下 renderer seatbelt 初始化偶发失败，primer 已提交 + 真实导航的 speculative 进程死亡组合恰好走进 Chromium 早期 RFH 交换的裸 CHECK，单标签故障升级为整机崩溃。修复=删 primer（单导航 + `resetPageBackground` 原生涂底防白闪），renderer 失败退化为该标签的悲伤页，主进程免疫。
+- 环境层便宜检查（swapusage / codesign / responsibleProc）仍然先跑——但它们的产出只配叫"排除项"，不配叫"根因"。

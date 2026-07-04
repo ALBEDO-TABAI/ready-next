@@ -32,11 +32,12 @@ if (existsSync(targetPlist)) {
   }
 }
 
-// 2026-07-04 真机启动崩溃根因：盖章改写 bundle 内容会破坏代码签名封印，
-// macOS 一旦重新校验（签名缓存失效/安全数据更新）就拒绝渲染进程沙箱
-// 初始化——三个 Renderer helper 启动即 abort("Failed to initialize
-// sandbox")、主进程随之 SIGTRAP，表现为"dev 一打开就闪退"。盖章后自检
-// 签名，破损即 ad-hoc 重签自愈；封印完好（重复盖同样内容）则零开销。
+// 盖章改写 bundle 内容会破坏代码签名封印。封印破损是独立隐患（Gatekeeper
+// 重新评估时可能拒载），但注意：它不是 2026-07-04 dev 闪退的根因——那次是
+// tab-lifecycle 的空白 primer 双导航把偶发 renderer 沙箱初始化失败升级成
+// Chromium 早期 RFH 交换路径的主进程 CHECK 崩溃（重签后的 Electron 跑最小
+// app 全绿即可证明二进制无辜）。盖章后自检签名，破损即 ad-hoc 重签自愈；
+// 封印完好（重复盖同样内容）则零开销。
 const appBundle = resolve(root, 'node_modules/electron/dist/Electron.app')
 try {
   execFileSync('/usr/bin/codesign', ['-v', appBundle], { stdio: 'ignore' })

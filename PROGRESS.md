@@ -648,7 +648,7 @@
 - 岔路收口（梯队一二三，f8682671/44802786/59936854）：死债删除 ~1.4k 行；`check-mandated-capability-is-live.cjs` 三态能力注册正向 gate；D5 run 评分全栈、emergence feed 通电、D2 criteria 事中自检。
 - P3 路线定稿 + A0/A1 证据（turn-engine 17 导出 prod=0 全部 dead-with-engine，A2 手术图就绪）；Phase B 拆分 B1-B3：browser-tools 8484→5996（media-download/input-actions/gemini 三簇纯移动）。
 - 真机回归 Phase R 七轮根因链（每轮换位置且前移）：①执行层（map 无预算/无条件截断/泛化文案，dc83eb86）→②判定层（分类输入被 bootstrap 注入污染，79e22fc8——路由输入必须是用户话语）→③注入呈现层（采集片段误注入+指导片段冒充任务标题，7ffcc8c5）→④感知层（React 委托控件三层失明，cursor:pointer 修复，15de28d2；frame 穿透基建 36ddb9b8）→⑤纪律知识层（map settle 重试下沉工具层+一键排版流程知识，f670c6e9）→⑥⑦尾部偏置与容器误杀（保头保尾+中段截断 8a8d2e36；[role] 祖先误杀 163d048e）。R2/R3 已过，R1 待「发布」按钮进图复验，R4/R5 未跑。
-- dev 启动闪退定案：真根因=swap 耗尽（V8 沙箱保留失败）；独立真隐患=盖章破坏签名封印（sync-dev-icon 已加自愈重签，1b2a7cec）。方法论教训入 LESSONS §3.8-3.10/§6.9-6.11。
+- dev 启动闪退定案（2026-07-04 二次复核推翻 swap 结论）：重启清空 swap 后崩溃原样复现，swap/签名/终端三说全部证伪；breakpad 符号化 + READY_PROC_DIAG 时间线定罪——tab 创建的空白 primer 双导航把偶发 renderer seatbelt 初始化失败升级成 Chromium 早期 RFH 交换裸 CHECK（`~RenderFrameHostImpl`，主进程同址 SIGTRAP）。修复=删 primer 改 `resetPageBackground` 原生涂底（tab-lifecycle-service 单导航合同）；独立真隐患=盖章破签名封印（sync-dev-icon 自愈重签保留，1b2a7cec）。教训入 LESSONS §6.9-6.11（§6.11 按证伪重写）。
 - 后续追加主线（2026-07-04 用户定向）：MCP 生态扩展 + 微信 IM 远程完全体，见 route 文档 Phase M/I（合同先行，专门会话）。
 
 ## 最近一次有效校验

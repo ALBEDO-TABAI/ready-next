@@ -1,6 +1,6 @@
 import type { Session, WebContents } from 'electron'
 import type { BrowserHostView, BrowserRect } from './host-types'
-import { READY_BROWSER_BLANK_URL, isReadyBrowserBlankUrl } from '../../../shared/browser-defaults'
+import { isReadyBrowserBlankUrl } from '../../../shared/browser-defaults'
 import {
   BROWSER_LOCAL_MEDIA_UPLOAD_EXTENSIONS,
 } from '../../../shared/browser-local-media-upload'
@@ -308,14 +308,15 @@ export class BrowserTabLifecycleService {
     }
 
     this.host.applyBounds(view)
-    const primesWithReadyBlank = !isReadyBrowserBlankUrl(url)
-    if (primesWithReadyBlank) {
-      try {
-        await view.webContents.loadURL(READY_BROWSER_BLANK_URL)
-      } catch {
-        // If the local blank primer ever fails, continue with the requested page.
-      }
-    }
+    // No primer navigation before the real URL. The old data:-blank primer made
+    // every tab a double navigation; when the real URL's speculative renderer
+    // died at spawn (flaky seatbelt init under concurrent restore bursts), the
+    // committed-primer + dead-speculative combination walked Chromium's early
+    // RenderFrameHost swap into a bare CHECK in ~RenderFrameHostImpl and took
+    // the whole main process down (2026-07-04 startup crash). A single
+    // navigation keeps renderer spawn failures contained to their own tab.
+    // White-flash protection is native paint instead of a navigated page.
+    this.host.resetPageBackground(view)
 
     const tab: BrowserLifecycleTabRecord = {
       id: tabId,
@@ -361,9 +362,6 @@ export class BrowserTabLifecycleService {
     }
 
     view.webContents.once('did-stop-loading', () => {
-      if (primesWithReadyBlank) {
-        view.webContents.navigationHistory.clear()
-      }
       finalizeSwap(true)
     })
     view.webContents.once('did-fail-load', () => {
