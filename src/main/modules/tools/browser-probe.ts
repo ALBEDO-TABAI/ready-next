@@ -29,6 +29,31 @@ function buildBrowserDomTargetLibraryJs(): string {
       'h5',
       'h6'
     ].join(',');
+    // D13-b：pointer 收集的"祖先已覆盖"判断只能看真正可交互的语义祖先。
+    // 拿整张 READY_AGENT_TARGET_SELECTOR 判会把 [role] 容器（微前端页面
+    // 通篇 role=main/region/dialog/tabpanel）下的全部 pointer 按钮误杀——
+    // 真机第七轮「发布」不可见的根因。
+    const READY_INTERACTIVE_ANCESTOR_SELECTOR = [
+      'a[href]',
+      'button',
+      'input',
+      'textarea',
+      'select',
+      'summary',
+      '[contenteditable="true"]',
+      '[contenteditable=""]',
+      '[role="button"]',
+      '[role="link"]',
+      '[role="menuitem"]',
+      '[role="option"]',
+      '[role="tab"]',
+      '[role="checkbox"]',
+      '[role="radio"]',
+      '[role="switch"]',
+      '[role="combobox"]',
+      '[role="listbox"]',
+      '[role="slider"]'
+    ].join(',');
     function readyCleanText(value) {
       return String(value || '').replace(/\\s+/g, ' ').trim();
     }
@@ -130,7 +155,7 @@ function buildBrowserDomTargetLibraryJs(): string {
         if (style.display === 'none' || style.visibility === 'hidden') continue;
         const text = readyCleanText(el.innerText || el.textContent || el.getAttribute('aria-label') || '');
         if (!text || text.length > 40) continue;
-        if (el.closest && el.closest(READY_AGENT_TARGET_SELECTOR)) continue;
+        if (el.closest && el.closest(READY_INTERACTIVE_ANCESTOR_SELECTOR)) continue;
         out.push(el);
       }
       // D13（真机第六轮实锚，XHS 发布设置页）：主行动按钮（发布/发送）

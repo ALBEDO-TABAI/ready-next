@@ -172,6 +172,8 @@ preload `runFeedback` API + electron.d.ts 类型 + 行为测试
 
 **遗留观察**：13:03 起挂到 16:33 的"等待确认——确认后中断 Agent 浏览器控制"横幅从未过期——接管确认卡缺 TTL/上下文结束自动撤（并入 D8 等待呈现语义）。
 
+**D13-b（第七轮实锚，2026-07-04 傍晚，已完成）**：D13 构建下 20KB map ×3 仍不见「发布」，模型 power_eval 连环自查（含 querySelectorAll('button')+disabled 检查）后仍无果被用户手停。排除法定根因：非原生 button（模型自己的 button 枚举已排除）、非尾部截断（D13 已修）→ **pointer 收集的"祖先已覆盖"跳过用了整张语义选择器表（含 `[role]`）——微前端设置页通篇 role=main/region/dialog 容器，全部 pointer 按钮被误杀**。修复：新增 READY_INTERACTIVE_ANCESTOR_SELECTOR（仅真可交互祖先：a[href]/button/input/…/role=button|link|tab 等），预登录页回归对照零丢失。站点卡补逃生口："map 找不到明确看到过的按钮→直接 browser_click_text 精确文本点击（自带 pointer-owner+跨帧回退），不要多轮 Power eval 自查"。mimo 定性：轨迹已全对（等待→map→click_text→map），45s/6 工具诚实收口——纪律/知识/感知已工程兜底，剩余是模型续航（多步坚持度），无工程杠杆可再卸。
+
 # 汇总
 | 项 | 已完成 | 待做 | 高危点 | 前置 |
 |----|--------|------|--------|------|
