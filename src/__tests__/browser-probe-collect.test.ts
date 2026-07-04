@@ -119,16 +119,47 @@ test('custom-element host with rendered text enters targets as clickable', () =>
   assert.strictEqual(stash?.role, 'button')
 })
 
-test('noise custom hosts are excluded: empty text, interactive ancestor, oversized', () => {
-  const emptyHost = new FakeElement('xhs-empty-widget')
+test('noise custom hosts are excluded: interactive ancestor, oversized', () => {
   const coveredHost = new FakeElement('xhs-inner-btn', { text: '确认', hasInteractiveAncestor: true })
   const giantHost = new FakeElement('xhs-layout-shell', { text: '发布', width: 1200, height: 900 })
   const targets = runProbe({
     semantic: [],
     pointer: [],
-    all: [emptyHost, coveredHost, giantHost],
+    all: [coveredHost, giantHost],
   })
   assert.deepStrictEqual(targets, [])
+})
+
+test('empty-text custom host is kept with tagName as its map name (closed shadow)', () => {
+  const mute = new FakeElement('xhs-publish-btn')
+  const targets = runProbe({ semantic: [], pointer: [], all: [mute] })
+  assert.strictEqual(targets.length, 1)
+  assert.strictEqual(targets[0]?.role, 'clickable')
+  assert.strictEqual(targets[0]?.name, 'xhs-publish-btn')
+})
+
+test('custom host at the DOM tail of a huge page is still collected (D13 tail law)', () => {
+  // D14-c 回归钉：首版 scanned>=6000 文档序配额让 publish 页前部烧光预算，
+  // 尾部的发布按钮永远轮不到。7000 个非 custom 填充元素 + 尾部 host。
+  const fillers = Array.from({ length: 7000 }, () => new FakeElement('div'))
+  const publishHost = new FakeElement('xhs-publish-btn', { text: '发布' })
+  const targets = runProbe({
+    semantic: [],
+    pointer: [],
+    all: [...fillers, publishHost],
+  })
+  const publish = targets.find((t) => t.name === '发布')
+  assert.ok(publish, 'tail custom host must survive any scan budget')
+  assert.strictEqual(publish?.role, 'clickable')
+})
+
+test('over-16 custom hosts keep head 10 + tail 6 (primary CTA lives at the tail)', () => {
+  const hosts = Array.from({ length: 20 }, (_, i) => new FakeElement('x-item', { text: `c${i + 1}` }))
+  const targets = runProbe({ semantic: [], pointer: [], all: hosts })
+  const names = targets.map((t) => t.name)
+  assert.strictEqual(names.length, 16)
+  assert.deepStrictEqual(names.slice(0, 10), ['c1', 'c2', 'c3', 'c4', 'c5', 'c6', 'c7', 'c8', 'c9', 'c10'])
+  assert.deepStrictEqual(names.slice(10), ['c15', 'c16', 'c17', 'c18', 'c19', 'c20'])
 })
 
 test('pointer-cursor collection still works alongside custom hosts, order deterministic', () => {

@@ -82,6 +82,9 @@ function buildBrowserDomTargetLibraryJs(): string {
       const name = readyCleanText(el.getAttribute('name'));
       if (name) return name;
       if (el instanceof HTMLInputElement && el.type === 'file') return 'file input';
+      // D14-c：自定义元素 host 在 closed shadow 下可能读不到任何渲染文本，
+      // 标签名是模型唯一可用的把手（如 xhs-publish-btn）。
+      if (el.tagName && el.tagName.indexOf('-') !== -1) return el.tagName.toLowerCase();
       return '';
     }
     function readyRoleFor(el) {
@@ -141,28 +144,37 @@ function buildBrowserDomTargetLibraryJs(): string {
     // D14（2026-07-04 R1 真机实锚，XHS 发布按钮 <xhs-publish-btn>）：Web
     // Component host 在 light DOM 可枚举，但语义选择器不认、pointer 扫描的
     // 标签清单不含自定义标签、cursor 信号又在影子内侧——三层全盲。host 自身
-    // 就是可点击表面（rect 有效，Chrome 的 innerText 含 shadow 渲染文本），
-    // 收集可见、带短文本、未被语义集覆盖的自定义元素。上限 16 个（真实页面
-    // 自定义控件稀少，超限即噪声页）。
+    // 就是可点击表面（rect 有效，Chrome 的 innerText 含 shadow 渲染文本）。
+    // D14-c（第九轮实锚）：首版用 scanned>=6000 文档序扫描配额，publish 页
+    // 前部烧光预算、DOM 尾部的发布按钮永远轮不到——复犯 D13 尾部偏置定律。
+    // 现在便宜的 dash 标签判断走完整棵树（O(1) 字符串查），贵检查只对
+    // custom 候选做（超 200 时头尾各 100），产出超 16 时保头 10 + 尾 6。
     function readyCustomElementHosts(semanticSet) {
+      const nodes = document.querySelectorAll('*');
+      const hosts = [];
+      for (let i = 0; i < nodes.length; i++) {
+        const el = nodes[i];
+        if (el.tagName && el.tagName.indexOf('-') !== -1 && !semanticSet.has(el)) hosts.push(el);
+      }
+      const candidates = hosts.length > 200
+        ? hosts.slice(0, 100).concat(hosts.slice(hosts.length - 100))
+        : hosts;
       const out = [];
-      let scanned = 0;
-      for (const el of document.querySelectorAll('*')) {
-        if (out.length >= 16 || scanned >= 6000) break;
-        scanned += 1;
-        if (!el.tagName || el.tagName.indexOf('-') === -1) continue;
-        if (semanticSet.has(el)) continue;
+      for (const el of candidates) {
         let style;
         try { style = window.getComputedStyle(el); } catch { continue; }
         if (!style || style.display === 'none' || style.visibility === 'hidden') continue;
         const rect = el.getBoundingClientRect();
         if (!(rect.width >= 8 && rect.height >= 8)) continue;
         if (rect.width * rect.height > Math.max(1, (window.innerWidth || 1) * (window.innerHeight || 1)) * 0.5) continue;
-        const text = readyCleanText(el.innerText || el.textContent || el.getAttribute('aria-label') || '');
-        if (!text || text.length > 40) continue;
+        // 空文本不再淘汰：closed shadow root 的 host 从 light 侧可能读不到
+        // 渲染文本，名字由 readyLabelFor 的自定义标签回退兜底。
+        const text = readyCleanText(el.innerText || el.textContent || el.getAttribute('aria-label') || el.getAttribute('title') || '');
+        if (text.length > 40) continue;
         if (el.closest && el.closest(READY_INTERACTIVE_ANCESTOR_SELECTOR)) continue;
         out.push(el);
       }
+      if (out.length > 16) return out.slice(0, 10).concat(out.slice(out.length - 6));
       return out;
     }
     // D10-c：cursor:pointer 视觉可点击收集级——语义选择器漏掉的委托型控件

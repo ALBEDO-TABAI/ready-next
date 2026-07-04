@@ -184,6 +184,8 @@ preload `runFeedback` API + electron.d.ts 类型 + 行为测试
 
 **D14-b（同晚追加）**：用户实际选的是 gpt-5.5（有视觉），被判无视觉的机制=openai-compatible 中转的 S5 保守默认（红线刻意行为，设置页「网页视觉」三态开关可覆盖且卡片描述已显示判定结果）——真缺口是失败时刻零引导：模型只拿到裸 reason 码，原地挣扎、用户不知有开关。已修：`analyzeViewportWithVision` 拒绝时携带 `remediation` 指引（区分显式关闭 vs 中转保守默认，指明设置路径 + 「改用非视觉通道、不要重试」），`browser_analyze_viewport` 载荷透传；行为测试 browser-vision-remediation.test.ts 钉两分支。
 
+**D14-c（第九轮实锚，2026-07-04 深夜，已完成）**：用户开启视觉+重启 dev 后重测，模型走得更远（空白恢复标签自愈导航、一键排版坐标点击进最终发布页 target=article），但最后 39 目标 map 仍无「发布」——**D14 首版 readyCustomElementHosts 的 `scanned>=6000` 文档序扫描配额在 publish 页前部烧光，尾部 host 永远轮不到，复犯 D13 尾部偏置定律**；vm 测试假页面只有几个元素测不出配额问题。修：便宜 dash 标签判断走完整棵树、贵检查只对 custom 候选做（>200 头尾各 100）、产出 >16 保头 10+尾 6；空文本 host 不再淘汰（closed shadow 读不到渲染文本），readyLabelFor 给自定义标签 tagName 名字回退。回归钉：7000 填充元素尾部 host 存活测试 + 头尾配额测试 + tagName 回退测试。教训：**任何新的文档序扫描/配额代码默认自带尾部保护；行为测试的假页面必须大到能触发配额**。本轮另证：前三张 targets=2 的 map 是恢复期空白渲染器（沙箱偶发失败残留），模型重导航自愈，非采集器回归。
+
 # 汇总
 | 项 | 已完成 | 待做 | 高危点 | 前置 |
 |----|--------|------|--------|------|
