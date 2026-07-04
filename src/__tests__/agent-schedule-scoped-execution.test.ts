@@ -139,15 +139,26 @@ test('executeSchedule falls back to the legacy direct send only when no scope is
 })
 
 test('runScheduleNow does not call sidecar.runScheduleNow and queue a duplicate trigger', async () => {
+  // B8-D R3 — the schedule cluster moved from runtime.ts into the delegated
+  // ScheduleService; the manual-trigger contract is pinned on the service
+  // body, and the runtime one-line delegate keeps the IPC→runtime→service
+  // chain intact.
   const source = await readFile(
-    resolve('src/main/modules/agent-control/runtime-core/runtime.ts'),
+    resolve('src/main/modules/agent-control/runtime-core/schedule-service.ts'),
     'utf8',
   )
   const start = source.indexOf('async runScheduleNow(')
-  const end = source.indexOf('async syncDatabaseToSidecar', start)
+  const end = source.indexOf('async executeSchedule(', start)
   assert.notEqual(start, -1)
   assert.notEqual(end, -1)
   const methodBody = source.slice(start, end)
   assert.doesNotMatch(methodBody, /sidecar\.runScheduleNow/)
   assert.match(methodBody, /executeSchedule\(schedule,\s*'manual'\)/)
+
+  const runtimeSource = await readFile(
+    resolve('src/main/modules/agent-control/runtime-core/runtime.ts'),
+    'utf8',
+  )
+  assert.match(runtimeSource, /return this\.schedules\.runScheduleNow\(id\)/)
+  assert.doesNotMatch(runtimeSource, /sidecar\.runScheduleNow/)
 })

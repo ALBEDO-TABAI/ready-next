@@ -102,6 +102,18 @@ export type PendingInboundChannel = {
   timer: NodeJS.Timeout | null
 }
 
+// B8-D R3 — demoted from a `this`-free private method on AgentControlRuntime
+// (surgery-map P-level static-helper demotion): shared by the runtime's
+// conversation-scope mappers and the extracted Schedule/ChannelConfig
+// services.
+export function tryParseJson<T>(raw: string, fallback: T): T {
+  try {
+    return JSON.parse(raw) as T
+  } catch {
+    return fallback
+  }
+}
+
 export function parseRecordJson(value: string | null | undefined): Record<string, unknown> | null {
   if (!value) return null
   try {

@@ -352,12 +352,19 @@ test('remote IM outbound attachments are limited to WeChat and explicit artifact
 })
 
 test('remote IM probe treats sidecar body errors as failures', () => {
-  // eslint-disable-next-line ready/no-source-grep-test -- private runtime guard: connection tests must not treat {success:false} body responses as success.
-  const source = readFileSync(new URL('../main/modules/agent-control/runtime-core/runtime.ts', import.meta.url), 'utf8')
+  // B8-D R3 — sendChannelProbe moved from runtime.ts into the delegated
+  // ChannelConfigService; the probe contract is pinned on the service body,
+  // and the runtime one-line delegate keeps the IPC→runtime→service chain.
+  // eslint-disable-next-line ready/no-source-grep-test -- private service guard: connection tests must not treat {success:false} body responses as success.
+  const source = readFileSync(new URL('../main/modules/agent-control/runtime-core/channel-config-service.ts', import.meta.url), 'utf8')
   const probeBlock = source.match(/async sendChannelProbe[\s\S]*?\n\s{2}\}/)?.[0] || ''
 
   assert.match(probeBlock, /normalizeChannelDeliveryResult\(response,\s*'远程 IM 连接测试发送失败'\)/)
   assert.match(probeBlock, /recordChannelDeliveryResult\(id,\s*result\)/)
+
+  // eslint-disable-next-line ready/no-source-grep-test -- delegate wiring pin: the runtime public face must route probes through the extracted service.
+  const runtimeSource = readFileSync(new URL('../main/modules/agent-control/runtime-core/runtime.ts', import.meta.url), 'utf8')
+  assert.match(runtimeSource, /return this\.channelConfig\.sendChannelProbe\(id,\s*text\)/)
 })
 
 test('remote IM runtime status counts persisted outbound delivery errors', () => {

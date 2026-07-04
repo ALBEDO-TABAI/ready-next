@@ -11,7 +11,7 @@ import {
   type RemoteChannelMessage,
 } from '../../../../shared/calendar-remote-channel'
 import { hasRemoteFileDeliveryIntent } from '../../../../shared/remote-im-file-intent'
-import { existsSync, readFileSync, readdirSync, rmSync, statSync } from 'fs'
+import { existsSync, readFileSync, statSync } from 'fs'
 import { basename, extname, isAbsolute, join } from 'path'
 import {
   getDefaultConfig,
@@ -24,9 +24,7 @@ import type { AgentManager } from '../../claude-bridge/agent-manager'
 import type { MultimodalBlock } from '../../claude-bridge/direct-chat'
 import {
   getDatabase,
-  type AgentChannelRecord,
   type AgentChannelType,
-  type AgentScheduleRecord,
   type ChatConversationRecord,
   type ChatMessageRecord,
   type ConversationSourceKind,
@@ -55,7 +53,6 @@ import {
 } from '../agents/specialist-content-edit-runtime'
 import type { SpecialistContentEditProposalStore } from '../agents/specialist-content-edit-proposals'
 import { RunCoordinator } from '../task-projection/run-coordinator'
-import { executeAgentSchedule, type ScheduleTriggerSource } from './schedule-execution'
 import type { DomainAdapter } from '../domain-adapters/domain-adapter'
 import { getSkillsRuntimeManager } from '../../skills-runtime/runtime-manager'
 import { SkillTaskRunRepository } from '../../repositories/skill-task-run-repository'
@@ -79,6 +76,9 @@ import { DetachedSkillService } from './detached-skill-service'
 import { SessionRecallFacade } from './session-recall-facade'
 import { NarrationContinuationService } from './narration-continuation-service'
 import { ReferenceHintService } from './reference-hint-service'
+import { ScheduleService } from './schedule-service'
+import { ChannelConfigService } from './channel-config-service'
+import { ScopeAttachmentService } from './scope-attachment-service'
 import { reconcileTaskProjections } from '../task-projection/task-projection-reconciler'
 import { canResumeAsUserPoint, type ResumePointHandle } from '../contracts/resume-handle'
 import { deriveTaskProjectionCanResume } from '../task-projection/task-projection-resume'
@@ -121,14 +121,12 @@ import type { PrerouteResult } from '../agents/session-preroute'
 import type { CapabilityRuntimeSnapshot } from '../../../../shared/ai-capability-runtime'
 import type { AgentSystemStudioPrerouteTrace, AgentSystemStudioRoutingSimulation } from '../../../../shared/agent-system-studio'
 import { ExternalMemoryProviderSlot } from '../memory/external-memory-provider-slot'
-import { decryptChannelConfig, encryptChannelConfig } from '../memory/secret-storage'
 import { ToolGateway } from '../tools-runtime/tool-gateway'
 import { buildCapabilityRuntimeSnapshot } from '../domain-adapters/capability-runtime-snapshot'
 import { TaskProjectionRepository } from '../../repositories/task-projection-repository'
 import { AgentRegistryRepository } from '../../repositories/agent-registry-repository'
 import { reconcileAgentIdentityAssets, seedBuiltinAgentAssets } from '../agents/agent-identity-assets'
 import { RunMetaRepository } from '../task-projection/run-meta-repository'
-import { appendToolCapabilityLog } from '../../tools/tool-event-log'
 import type { DetachedSkillTaskRecord } from '../detached-skill-task-tracker'
 import type {
   AgentChannelConfig,
@@ -150,6 +148,7 @@ import type { SessionRecallCapsule, SessionRecallHit } from '../../../../shared/
 import {
   parseRecordJson,
   parseArrayJson,
+  tryParseJson,
   stringFromUnknown,
   progressFromUnknown,
   artifactMetaString,
@@ -337,6 +336,27 @@ export class AgentControlRuntime extends EventEmitter {
       lastBeatAt: new Date().toISOString()
     }
   }
+  // B8-D R3 — the schedule / channel-config / scope-attachment clusters live
+  // in delegated sub-services; same one-line-delegate pattern as R1/R2.
+  // Declared AFTER `heartbeat` so the ChannelConfigService deps capture an
+  // initialized snapshot reference (field initializers run in declaration
+  // order; the heartbeat object is mutated in place, never reassigned). The
+  // sendScoped/sendUnscoped/startSidecar callbacks are lazy closures, so the
+  // constructor-assigned `orchestrator` is safe to reference here.
+  private readonly schedules = new ScheduleService({
+    db: this.db,
+    sidecar: this.sidecar,
+    sendScoped: (payload) => this.sendScoped(payload),
+    sendUnscoped: (agent, message, requestId) =>
+      this.orchestrator.send(agent, message, undefined, requestId),
+  })
+  private readonly channelConfig = new ChannelConfigService({
+    db: this.db,
+    sidecar: this.sidecar,
+    startSidecar: () => this.startSidecar(),
+    heartbeat: this.heartbeat,
+  })
+  private readonly scopeAttachments = new ScopeAttachmentService({ db: this.db })
   constructor(agentManager: AgentManager, browserController?: BrowserController) {
     super()
     this.agentManager = agentManager
@@ -769,23 +789,11 @@ export class AgentControlRuntime extends EventEmitter {
   }
 
   listChannels(): AgentChannelConfig[] {
-    const rows = this.db.listAgentChannels()
-    return rows.map((row) => this.mapChannelRow(row))
+    return this.channelConfig.listChannels()
   }
 
   isChannelTypeAvailable(type: AgentChannelType): boolean {
-    const hasEnabledChannel = this.listChannels().some(
-      (channel) => channel.type === type && channel.enabled
-    )
-    if (!hasEnabledChannel) return false
-
-    const heartbeatAdapter = this.heartbeat.adapters.find((adapter) => adapter.type === type)
-    if (!heartbeatAdapter) return true
-    return (
-      heartbeatAdapter.healthy &&
-      heartbeatAdapter.status !== 'error' &&
-      heartbeatAdapter.status !== 'stopped'
-    )
+    return this.channelConfig.isChannelTypeAvailable(type)
   }
 
   listConversationScopes(agent?: string): ConversationScope[] {
@@ -1114,33 +1122,11 @@ export class AgentControlRuntime extends EventEmitter {
   }
 
   listScopeAttachments(scopeId: string): ConversationAttachment[] {
-    return this.db
-      .listConversationAttachments(scopeId)
-      .filter((item) => item.path && existsSync(item.path))
-      .map((item) => ({
-        attachmentId: item.attachment_id,
-        scopeId: item.conversation_id,
-        sourceMessageId: item.source_message_id,
-        name: item.name,
-        path: item.path,
-        type: ['image', 'video', 'text', 'spreadsheet', 'other'].includes(String(item.type))
-          ? (item.type as ConversationAttachment['type'])
-          : 'other',
-        size: item.size,
-        ext: item.ext,
-        url: item.url,
-        mimeType: item.mime_type,
-        remoteId: item.remote_id,
-        channelId: item.channel_id,
-        threadKey: item.thread_key,
-        createdAt: item.created_at
-      }))
+    return this.scopeAttachments.listScopeAttachments(scopeId)
   }
 
   getScopeAttachment(scopeId: string, attachmentId: string): ConversationAttachment | null {
-    return (
-      this.listScopeAttachments(scopeId).find((item) => item.attachmentId === attachmentId) || null
-    )
+    return this.scopeAttachments.getScopeAttachment(scopeId, attachmentId)
   }
 
   getRemoteAttachmentCacheStats(channelId?: string): {
@@ -1149,47 +1135,7 @@ export class AgentControlRuntime extends EventEmitter {
     targetPath: string
     channels: Array<{ channelId: string; files: number; bytes: number }>
   } {
-    const basePath = join(app.getPath('userData'), 'agent-sidecar-runtime', 'channel-attachments')
-    const targetPath = channelId ? join(basePath, channelId) : basePath
-    let totalFiles = 0
-    let totalBytes = 0
-    const byChannel = new Map<string, { files: number; bytes: number }>()
-
-    const walk = (currentPath: string, currentChannelId?: string): void => {
-      if (!existsSync(currentPath)) return
-      const stat = statSync(currentPath)
-      if (stat.isFile()) {
-        totalFiles += 1
-        totalBytes += stat.size
-        if (currentChannelId) {
-          const current = byChannel.get(currentChannelId) || { files: 0, bytes: 0 }
-          current.files += 1
-          current.bytes += stat.size
-          byChannel.set(currentChannelId, current)
-        }
-        return
-      }
-      if (!stat.isDirectory()) return
-      for (const entry of readdirSync(currentPath)) {
-        const nextPath = join(currentPath, entry)
-        const nextChannelId =
-          currentChannelId || (!channelId && currentPath === basePath ? entry : currentChannelId)
-        walk(nextPath, nextChannelId)
-      }
-    }
-
-    walk(targetPath, channelId || undefined)
-
-    return {
-      totalFiles,
-      totalBytes,
-      targetPath,
-      channels: Array.from(byChannel.entries()).map(([itemChannelId, value]) => ({
-        channelId: itemChannelId,
-        files: value.files,
-        bytes: value.bytes
-      }))
-    }
+    return this.scopeAttachments.getRemoteAttachmentCacheStats(channelId)
   }
 
   clearRemoteAttachmentCache(channelId?: string): {
@@ -1197,28 +1143,7 @@ export class AgentControlRuntime extends EventEmitter {
     removedBytes: number
     targetPath: string
   } {
-    const basePath = join(app.getPath('userData'), 'agent-sidecar-runtime', 'channel-attachments')
-    const targetPath = channelId ? join(basePath, channelId) : basePath
-    let removedFiles = 0
-    let removedBytes = 0
-
-    const walk = (currentPath: string): void => {
-      if (!existsSync(currentPath)) return
-      const stat = statSync(currentPath)
-      if (stat.isFile()) {
-        removedFiles += 1
-        removedBytes += stat.size
-        return
-      }
-      if (!stat.isDirectory()) return
-      for (const entry of readdirSync(currentPath)) {
-        walk(join(currentPath, entry))
-      }
-    }
-
-    walk(targetPath)
-    rmSync(targetPath, { recursive: true, force: true })
-    return { removedFiles, removedBytes, targetPath }
+    return this.scopeAttachments.clearRemoteAttachmentCache(channelId)
   }
 
   createLocalScope(agent: string, id?: string): ConversationScope {
@@ -1721,217 +1646,69 @@ export class AgentControlRuntime extends EventEmitter {
   }
 
   async upsertChannel(payload: UpsertChannelPayload): Promise<AgentChannelConfig> {
-    const id = payload.id || `channel-${randomUUID()}`
-    const encryptedConfig = encryptChannelConfig(payload.config || {})
-    const row = this.db.upsertAgentChannel({
-      id,
-      type: payload.type as AgentChannelType,
-      name: payload.name.trim() || id,
-      enabled: payload.enabled ?? true,
-      configJson: JSON.stringify(encryptedConfig)
-    })
-
-    if (this.sidecar.isRunning()) {
-      await this.sidecar.upsertChannel({
-        id,
-        type: row.type,
-        name: row.name,
-        enabled: Boolean(row.enabled),
-        config: decryptChannelConfig(encryptedConfig)
-      })
-      if (row.enabled) {
-        await this.sidecar.startChannel(id).catch(() => undefined)
-      } else {
-        await this.sidecar.stopChannel(id).catch(() => undefined)
-      }
-    }
-    return this.mapChannelRow(row)
+    return this.channelConfig.upsertChannel(payload)
   }
 
   async deleteChannel(id: string): Promise<boolean> {
-    if (this.sidecar.isRunning()) {
-      await this.sidecar.stopChannel(id).catch(() => undefined)
-      await this.sidecar.deleteChannel(id).catch(() => undefined)
-    }
-    return this.db.deleteAgentChannel(id)
+    return this.channelConfig.deleteChannel(id)
   }
 
   async setChannelEnabled(id: string, enabled: boolean): Promise<AgentChannelConfig | null> {
-    const row = this.db.setAgentChannelEnabled(id, enabled)
-    if (!row) return null
-    if (this.sidecar.isRunning()) {
-      await this.sidecar.upsertChannel({
-        id: row.id,
-        type: row.type,
-        name: row.name,
-        enabled: Boolean(row.enabled),
-        config: decryptChannelConfig(
-          this.tryParseJson<Record<string, unknown>>(row.config_json, {})
-        )
-      })
-      if (enabled) {
-        await this.sidecar.startChannel(id).catch(() => undefined)
-      } else {
-        await this.sidecar.stopChannel(id).catch(() => undefined)
-      }
-    }
-    return this.mapChannelRow(row)
+    return this.channelConfig.setChannelEnabled(id, enabled)
   }
 
   async sendChannelProbe(id: string, text: string): Promise<{ success: boolean; error?: string }> {
-    if (!this.sidecar.isRunning()) {
-      await this.startSidecar()
-    }
-    const channel = this.db.getAgentChannel(id)
-    if (!channel) return { success: false, error: `Channel not found: ${id}` }
-    try {
-      const response = await this.sidecar.sendChannel({
-        id,
-        text: text.trim() || 'Ready 连接测试成功'
-      })
-      const result = normalizeChannelDeliveryResult(response, '远程 IM 连接测试发送失败')
-      this.recordChannelDeliveryResult(id, result)
-      return result
-    } catch (error) {
-      // silent-catch: probe errors are returned to the caller and persisted on the channel row.
-      const result = { success: false, error: error instanceof Error ? error.message : String(error) }
-      this.recordChannelDeliveryResult(id, result)
-      return result
-    }
+    return this.channelConfig.sendChannelProbe(id, text)
   }
 
   recordChannelDeliveryResult(
     channelId: string,
     result: { success: boolean; error?: string }
   ): void {
-    if (!this.db.getAgentChannel(channelId)) return
-    if (result.success) {
-      this.db.setAgentChannelError(channelId, null)
-      this.db.markAgentChannelSeen(channelId)
-      return
-    }
-    this.db.setAgentChannelError(channelId, result.error || '远程 IM 发送失败')
+    this.channelConfig.recordChannelDeliveryResult(channelId, result)
   }
 
   async testChannel(payload: UpsertChannelPayload): Promise<{ success: boolean; error?: string }> {
-    if (!this.sidecar.isRunning()) {
-      await this.startSidecar()
-    }
-    try {
-      const response = await this.sidecar.testChannel({
-        id: payload.id || `temp-${randomUUID()}`,
-        type: payload.type,
-        name: payload.name,
-        enabled: payload.enabled ?? true,
-        config: payload.config || {}
-      })
-      if (response.success === false) {
-        return { success: false, error: String(response.error || 'channel test failed') }
-      }
-      return { success: true }
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : String(error) }
-    }
+    return this.channelConfig.testChannel(payload)
   }
 
   async startWechatLogin(payload: {
     id?: string
     force?: boolean
   }): Promise<Record<string, unknown>> {
-    if (!this.sidecar.isRunning()) {
-      await this.startSidecar()
-    }
-    const id = payload.id || 'channel-wechat-openclaw-default'
-    const existing = this.db.getAgentChannel(id)
-    const existingConfig = existing
-      ? decryptChannelConfig(this.tryParseJson<Record<string, unknown>>(existing.config_json, {}))
-      : {}
-    const config: Record<string, unknown> = {
-      ...existingConfig,
-    }
-    delete config.defaultTarget
-    await this.sidecar.upsertChannel({
-      id,
-      type: 'wechat-openclaw',
-      name: existing?.name || '微信',
-      enabled: false,
-      config,
-    })
-    return this.sidecar.startWechatLogin(id, payload.force ?? true)
+    return this.channelConfig.startWechatLogin(payload)
   }
 
   async getWechatLoginStatus(channelId: string, sessionKey: string): Promise<Record<string, unknown>> {
-    if (!this.sidecar.isRunning()) {
-      await this.startSidecar()
-    }
-    return this.sidecar.getWechatLoginStatus(channelId, sessionKey)
+    return this.channelConfig.getWechatLoginStatus(channelId, sessionKey)
   }
 
   async submitWechatLoginVerifyCode(channelId: string, sessionKey: string, code: string): Promise<Record<string, unknown>> {
-    if (!this.sidecar.isRunning()) {
-      await this.startSidecar()
-    }
-    return this.sidecar.submitWechatLoginVerifyCode(channelId, sessionKey, code)
+    return this.channelConfig.submitWechatLoginVerifyCode(channelId, sessionKey, code)
   }
 
   listSchedules(): CronTask[] {
-    const rows = this.db.listAgentSchedules()
-    return rows.map((row) => this.mapScheduleRow(row))
+    return this.schedules.listSchedules()
   }
 
   async upsertSchedule(payload: UpsertSchedulePayload): Promise<CronTask> {
-    const id = payload.id || `cron-${randomUUID()}`
-    const row = this.db.upsertAgentSchedule({
-      id,
-      name: payload.name.trim() || id,
-      cronExpr: payload.cronExpr,
-      prompt: payload.prompt,
-      channelId: payload.channelId ?? null,
-      enabled: payload.enabled ?? true,
-      payloadJson: payload.payload ? JSON.stringify(payload.payload) : null
-    })
-
-    if (this.sidecar.isRunning()) {
-      await this.sidecar.upsertSchedule({
-        id,
-        name: row.name,
-        cronExpr: row.cron_expr,
-        prompt: row.prompt,
-        channelId: row.channel_id,
-        enabled: Boolean(row.enabled),
-        payload: payload.payload || {}
-      })
-    }
-    return this.mapScheduleRow(row)
+    return this.schedules.upsertSchedule(payload)
   }
 
   async pauseSchedule(id: string): Promise<CronTask | null> {
-    if (this.sidecar.isRunning()) {
-      await this.sidecar.pauseSchedule(id)
-    }
-    const row = this.db.setAgentScheduleEnabled(id, false)
-    return row ? this.mapScheduleRow(row) : null
+    return this.schedules.pauseSchedule(id)
   }
 
   async resumeSchedule(id: string): Promise<CronTask | null> {
-    if (this.sidecar.isRunning()) {
-      await this.sidecar.resumeSchedule(id)
-    }
-    const row = this.db.setAgentScheduleEnabled(id, true)
-    return row ? this.mapScheduleRow(row) : null
+    return this.schedules.resumeSchedule(id)
   }
 
   async deleteSchedule(id: string): Promise<boolean> {
-    if (this.sidecar.isRunning()) {
-      await this.sidecar.deleteSchedule(id)
-    }
-    return this.db.deleteAgentSchedule(id)
+    return this.schedules.deleteSchedule(id)
   }
 
   async runScheduleNow(id: string): Promise<{ success: boolean; error?: string }> {
-    const schedule = this.db.getAgentSchedule(id)
-    if (!schedule) return { success: false, error: `Schedule not found: ${id}` }
-    return await this.executeSchedule(schedule, 'manual')
+    return this.schedules.runScheduleNow(id)
   }
 
   async syncDatabaseToSidecar(): Promise<void> {
@@ -2020,7 +1797,7 @@ export class AgentControlRuntime extends EventEmitter {
           if (!scheduleId) continue
           const schedule = this.db.getAgentSchedule(scheduleId)
           if (!schedule || schedule.enabled === 0) continue
-          await this.executeSchedule(schedule, 'cron')
+          await this.schedules.executeSchedule(schedule, 'cron')
           continue
         }
         if (evtType === 'channel.inbound') {
@@ -2054,20 +1831,6 @@ export class AgentControlRuntime extends EventEmitter {
       await this.sidecar.stopChannel(adapter.id).catch(() => undefined)
       await this.sidecar.startChannel(adapter.id).catch(() => undefined)
     }
-  }
-
-  private async executeSchedule(
-    schedule: AgentScheduleRecord,
-    triggerSource: ScheduleTriggerSource = 'cron'
-  ): Promise<{ success: boolean; error?: string }> {
-    return executeAgentSchedule(schedule, {
-      parseJson: (value, fallback) => this.tryParseJson<Record<string, unknown>>(value, fallback),
-      sendScoped: (payload) => this.sendScoped(payload),
-      sendUnscoped: (agent, message, requestId) =>
-        this.orchestrator.send(agent, message, undefined, requestId),
-      markRun: (scheduleId) => this.db.markAgentScheduleRun(scheduleId),
-      appendLog: appendToolCapabilityLog,
-    }, triggerSource)
   }
 
   private async handleInboundChannel(payload: Record<string, unknown>): Promise<void> {
@@ -2705,36 +2468,6 @@ export class AgentControlRuntime extends EventEmitter {
     return name ? `${name}（${config.provider}/${model}）` : `${config.provider}/${model}`
   }
 
-  private mapChannelRow(row: AgentChannelRecord): AgentChannelConfig {
-    return {
-      id: row.id,
-      type: row.type as ChannelAdapterType,
-      name: row.name,
-      enabled: Boolean(row.enabled),
-      config: decryptChannelConfig(this.tryParseJson<Record<string, unknown>>(row.config_json, {})),
-      lastError: row.last_error,
-      lastSeenAt: row.last_seen_at,
-      createdAt: row.created_at,
-      updatedAt: row.updated_at
-    }
-  }
-
-  private mapScheduleRow(row: AgentScheduleRecord): CronTask {
-    return {
-      id: row.id,
-      name: row.name,
-      cronExpr: row.cron_expr,
-      prompt: row.prompt,
-      channelId: row.channel_id,
-      enabled: Boolean(row.enabled),
-      payload: this.tryParseJson<Record<string, unknown>>(row.payload_json || '{}', {}),
-      lastRunAt: row.last_run_at,
-      nextRunAt: row.next_run_at,
-      createdAt: row.created_at,
-      updatedAt: row.updated_at
-    }
-  }
-
   private mapConversationRow(
     row: ChatConversationRecord & { last_message_at?: string | null }
   ): ConversationScope {
@@ -2749,7 +2482,7 @@ export class AgentControlRuntime extends EventEmitter {
       sourceKind: row.source_kind,
       sourceId: row.source_id,
       threadKey: row.thread_key,
-      meta: this.tryParseJson<Record<string, unknown>>(row.meta_json || '{}', {}),
+      meta: tryParseJson<Record<string, unknown>>(row.meta_json || '{}', {}),
       createdAt: row.created_at,
       updatedAt: row.updated_at,
       lastMessageAt: row.last_message_at ?? null
@@ -2763,7 +2496,7 @@ export class AgentControlRuntime extends EventEmitter {
       role: row.role,
       content: row.content,
       timestamp: row.timestamp,
-      meta: this.tryParseJson<Record<string, unknown>>(row.meta_json || '{}', {})
+      meta: tryParseJson<Record<string, unknown>>(row.meta_json || '{}', {})
     }
   }
 
@@ -2774,7 +2507,7 @@ export class AgentControlRuntime extends EventEmitter {
     sender: string
   ): ConversationScope {
     const channel = this.db.getAgentChannel(channelId)
-    const channelMeta = channel ? this.mapChannelRow(channel) : null
+    const channelMeta = channel ? this.channelConfig.mapChannelRow(channel) : null
     const scopedThreadKey = this.getScopedRemoteThreadKey(channelId, remoteThread, agent)
     const existing = this.db.findConversationScope('channel', channelId, scopedThreadKey, agent)
     const { row } = this.db.upsertConversationScope({
@@ -2786,7 +2519,7 @@ export class AgentControlRuntime extends EventEmitter {
       threadKey: scopedThreadKey,
       meta: {
         ...(existing
-          ? this.tryParseJson<Record<string, unknown>>(existing.meta_json || '{}', {})
+          ? tryParseJson<Record<string, unknown>>(existing.meta_json || '{}', {})
           : {}),
         sourceLabel: channelMeta?.name || '远程 IM',
         channelType: channelMeta?.type || 'generic-webhook',
@@ -3304,14 +3037,6 @@ export class AgentControlRuntime extends EventEmitter {
       }
     }
     return { success: true }
-  }
-
-  private tryParseJson<T>(raw: string, fallback: T): T {
-    try {
-      return JSON.parse(raw) as T
-    } catch {
-      return fallback
-    }
   }
 
   private getSettingBool(key: string, fallback: boolean): boolean {
