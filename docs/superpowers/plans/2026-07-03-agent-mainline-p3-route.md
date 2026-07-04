@@ -62,7 +62,10 @@ P1 的验收欠账 + 本轮新件的真机确认，一次跑完：
 
 - 按能力缝抽组：collection / power / media / navigation / observe 各一模块，`browser-tools.ts` 保薄门面 re-export；每抽一组 typecheck+focused 绿。纯移动零行为变更（probe 抽取已验证此法）。
 - 目标：主文件 <2k；每步独立可提交。
-- B 完成后按同法排队：runtime.ts 4327（能力缝：crystallize/decay 调度、projection 接口、host 装配）、runtime-manager 3800、Settings.tsx 3486（renderer，需在场）、useAgent 2983（renderer，需在场）。**触碰 >2k 文件的工单默认附带"顺路拆出所改区域"**（roadmap §4.5 长期规则）。
+- B 完成后按同法排队：runtime.ts 4327（能力缝：crystallize/decay 调度、projection 接口、host 装配）、runtime-manager 3800、Settings.tsx 3486（renderer，需在场）、useAgent（src/renderer/stores/useAgent.ts，renderer，需在场）。**触碰 >2k 文件的工单默认附带"顺路拆出所改区域"**（roadmap §4.5 长期规则）。
+- **B7 收官后的预埋缝（2026-07-05 定稿，触线即用的手术图，不主动拆）**：两个贴线模块现在内聚良好、不主动再拆，任何工单把它们推过 2k 时按此缝顺路拆——
+  - `browser-act-tools.ts`（1967，距线 33 行）：缝 A=坐标输入四件套（click_at/type_at/scroll_at/send_keys，本就主要委托 browser-input-actions）；缝 B=navigate/search 对。共享守卫入口与 settle/followedTab 逻辑跟行动主体走，不进 shared。
+  - `browser-collection-tools.ts`（1683）：缝=「后台任务生命周期」（start/get/resume/cancel/aggregate）vs「媒体采集下载」（collect_images/download_*）；采集共识 store 单例跟采集侧走，不可跨模块分裂。
 
 ## Phase C — DirectChat 职责迁移退役（合同先行 + 在场）
 
