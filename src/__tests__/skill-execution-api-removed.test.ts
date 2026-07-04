@@ -149,7 +149,9 @@ test('shared skill-execution-types drops the workflow-only types', () => {
 })
 
 test('SkillRunResult no longer exposes the workflow mode / execution / blocker fields', () => {
-  const main = readWorkspaceFile('src/main/modules/skills-runtime/runtime-manager.ts')
+  // B8-P（2026-07-05）：SkillRunResult 类型声明随顶层纯块迁至
+  // runtime-manager-types.ts，钉点跟随（不变量不变：禁 workflow/execution/blocker 字段）。
+  const main = readWorkspaceFile('src/main/modules/skills-runtime/runtime-manager-types.ts')
   const renderer = readWorkspaceFile('src/renderer/types/electron.d.ts')
 
   // Strip `// …` comments before assertions so documentation of the
@@ -162,7 +164,7 @@ test('SkillRunResult no longer exposes the workflow mode / execution / blocker f
   }
 
   const mainResultBlock = main.match(/export interface SkillRunResult \{[\s\S]*?\n\}/)
-  assert.ok(mainResultBlock, 'SkillRunResult declaration must be present in runtime-manager.ts')
+  assert.ok(mainResultBlock, 'SkillRunResult declaration must be present in runtime-manager-types.ts')
   const mainStripped = stripLineComments(mainResultBlock![0])
   assert.doesNotMatch(mainStripped, /'workflow'/)
   assert.doesNotMatch(mainStripped, /\bexecution\?:\s*SkillExecutionDetail/)
