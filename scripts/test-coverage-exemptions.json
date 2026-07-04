@@ -304,12 +304,6 @@
       "owner": "stage5-bulk-import"
     },
     {
-      "path": "src/__tests__/phase-3-output-safety-net.test.ts",
-      "reason": "transitive value-import reaches a nativeBackedModule via wrapper modules but never triggers native sqlite load in any test path (all sqlite-touching call sites use fakes/stubs); verified passing on host-Node test runs as of 2026-05-06",
-      "since": "2026-05-06",
-      "owner": "stage5-bulk-import"
-    },
-    {
       "path": "src/__tests__/prompt-assembly-recall-capsule-inline.test.ts",
       "reason": "transitive value-import reaches a nativeBackedModule via wrapper modules but never triggers native sqlite load in any test path (all sqlite-touching call sites use fakes/stubs); verified passing on host-Node test runs as of 2026-05-06",
       "since": "2026-05-06",
@@ -323,12 +317,6 @@
     },
     {
       "path": "src/__tests__/re-audit-fixes.test.ts",
-      "reason": "transitive value-import reaches a nativeBackedModule via wrapper modules but never triggers native sqlite load in any test path (all sqlite-touching call sites use fakes/stubs); verified passing on host-Node test runs as of 2026-05-06",
-      "since": "2026-05-06",
-      "owner": "stage5-bulk-import"
-    },
-    {
-      "path": "src/__tests__/resume-fresh-contract-fields.test.ts",
       "reason": "transitive value-import reaches a nativeBackedModule via wrapper modules but never triggers native sqlite load in any test path (all sqlite-touching call sites use fakes/stubs); verified passing on host-Node test runs as of 2026-05-06",
       "since": "2026-05-06",
       "owner": "stage5-bulk-import"
@@ -592,12 +580,6 @@
       "owner": "stage5-bulk-import"
     },
     {
-      "path": "src/__tests__/tool-loop-dedup.test.ts",
-      "reason": "transitive value-import reaches a nativeBackedModule via wrapper modules but never triggers native sqlite load in any test path (all sqlite-touching call sites use fakes/stubs); verified passing on host-Node test runs as of 2026-05-06",
-      "since": "2026-05-06",
-      "owner": "stage5-bulk-import"
-    },
-    {
       "path": "src/__tests__/tool-policy-authorization.test.ts",
       "reason": "transitive value-import reaches a nativeBackedModule via wrapper modules but never triggers native sqlite load in any test path (all sqlite-touching call sites use fakes/stubs); verified passing on host-Node test runs as of 2026-05-06",
       "since": "2026-05-06",
@@ -614,30 +596,6 @@
       "reason": "only exercises pure text helpers (resolvePureUserTextForClassification / resolveTaskTypeFromBrowserWorkflowText); transitive value-import of agent-sdk-utils reaches a nativeBackedModule but no test path loads sqlite; verified passing on host-Node as of 2026-07-04",
       "since": "2026-07-04",
       "owner": "phase-r-round2-classification-pollution"
-    },
-    {
-      "path": "src/__tests__/turn-engine-contract.test.ts",
-      "reason": "transitive value-import reaches a nativeBackedModule via wrapper modules but never triggers native sqlite load in any test path (all sqlite-touching call sites use fakes/stubs); verified passing on host-Node test runs as of 2026-05-06",
-      "since": "2026-05-06",
-      "owner": "stage5-bulk-import"
-    },
-    {
-      "path": "src/__tests__/turn-engine-force-tool-dispatch.test.ts",
-      "reason": "transitive value-import reaches a nativeBackedModule via wrapper modules but never triggers native sqlite load in any test path (all sqlite-touching call sites use fakes/stubs); verified passing on host-Node test runs as of 2026-05-06",
-      "since": "2026-05-06",
-      "owner": "stage5-bulk-import"
-    },
-    {
-      "path": "src/__tests__/turn-engine-projection.test.ts",
-      "reason": "transitive value-import reaches a nativeBackedModule via wrapper modules but never triggers native sqlite load in any test path (all sqlite-touching call sites use fakes/stubs); verified passing on host-Node test runs as of 2026-05-06",
-      "since": "2026-05-06",
-      "owner": "stage5-bulk-import"
-    },
-    {
-      "path": "src/__tests__/turn-engine-route.test.ts",
-      "reason": "transitive value-import reaches a nativeBackedModule via wrapper modules but never triggers native sqlite load in any test path (all sqlite-touching call sites use fakes/stubs); verified passing on host-Node test runs as of 2026-05-06",
-      "since": "2026-05-06",
-      "owner": "stage5-bulk-import"
     },
     {
       "path": "src/__tests__/turn-feature-flags.test.ts",
@@ -659,12 +617,6 @@
     },
     {
       "path": "src/__tests__/turn-frame-steering.test.ts",
-      "reason": "transitive value-import reaches a nativeBackedModule via wrapper modules but never triggers native sqlite load in any test path (all sqlite-touching call sites use fakes/stubs); verified passing on host-Node test runs as of 2026-05-06",
-      "since": "2026-05-06",
-      "owner": "stage5-bulk-import"
-    },
-    {
-      "path": "src/__tests__/turn-frame-summary-log.test.ts",
       "reason": "transitive value-import reaches a nativeBackedModule via wrapper modules but never triggers native sqlite load in any test path (all sqlite-touching call sites use fakes/stubs); verified passing on host-Node test runs as of 2026-05-06",
       "since": "2026-05-06",
       "owner": "stage5-bulk-import"
