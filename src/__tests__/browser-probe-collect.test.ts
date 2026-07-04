@@ -252,7 +252,7 @@ test('act click returns the click point for trusted-pointer escalation', () => {
   })
   assert.strictEqual(result.ok, true)
   // rect: left 10 top 10, 120x40 → center (70, 30)；视口 1200x900
-  assert.deepStrictEqual(result.clickPoint, { x: 70, y: 30, vw: 1200, vh: 900 })
+  assert.deepStrictEqual(result.clickPoint, { x: 70, y: 30, vw: 1200, vh: 900, hostShadow: 'closed_or_none' })
 })
 
 test('act fill carries no click point', () => {
@@ -266,4 +266,23 @@ test('act fill carries no click point', () => {
   })
   assert.strictEqual(result.ok, true)
   assert.strictEqual(result.clickPoint, null)
+})
+
+test('act click reports hostShadow accessibility for custom hosts', () => {
+  const stashButton = new FakeElement('button', { text: '暂存离开' })
+  const publishHost = new FakeElement('xhs-publish-btn', { text: '发布' })
+  const result = runAct('2', 'click', {
+    semantic: [stashButton],
+    pointer: [],
+    all: [stashButton, publishHost],
+  }) as unknown as { clickPoint: { hostShadow: string | null } }
+  // FakeElement.shadowRoot === null → closed_or_none（closed shadow 与无 shadow 同判）
+  assert.strictEqual(result.clickPoint.hostShadow, 'closed_or_none')
+
+  const plain = runAct('1', 'click', {
+    semantic: [stashButton],
+    pointer: [],
+    all: [stashButton],
+  }) as unknown as { clickPoint: { hostShadow: string | null } }
+  assert.strictEqual(plain.clickPoint.hostShadow, null)
 })

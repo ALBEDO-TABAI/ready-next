@@ -19,6 +19,8 @@ variables: []
 
 ## Power 网页操作配方
 - 发布/上传/提交/填表等复杂页面：Power 工具可用时先用 browser_power_eval 做页面结构探测（URL、form/input/textarea/button/file input、rect、disabled/aria 状态），再执行最少 click/type/upload/坐标动作，每步读回验证；失败后换 DOM、坐标或用户接管路径，不要重复同一路径。
+- **power_eval 只用于读，严禁给表单赋值**：`el.value = ...`、innerText/innerHTML 赋值会被 React/ProseMirror 受控组件吞掉——DOM 显示已填、框架状态仍为空，提交校验静默失败，且页面会进入"人点按钮也无效"的坏状态。写入一律走 browser_act_on_target fill / browser_type_smart / browser_type_at（原生 setter + 真实输入事件）。
+- **坐标工具的 x/y 是 0-1000 归一化，不是 CSS 像素**：用 power_eval 量到的 rect 像素必须换算 `round(px / 视口宽高 * 1000)` 再传给 click_at/type_at；结果里的 pointTarget.label 显示实际点到的元素，label 为空说明点偏了。
 - DOM/正文为空、viewport=0、页面主体疑似 iframe/OOPIF：不要反复截图/等待；改用 browser_power_eval 探测 frames/activeElement，或 browser_power_cdp(Page.getFrameTree/Runtime.evaluate) 读结构。
 
 ## 定位器优先级（从稳到弱）

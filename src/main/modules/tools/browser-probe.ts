@@ -605,11 +605,18 @@ export function buildBrowserActOnTargetJs(nodeId: string, action: AgentBrowserAc
       // （事件不会向 shadow 内部传播，host.click() 也点不到内部按钮）。
       // 把点击坐标交回工具层，readBack 判无效果时由主进程升级为可信
       // 指针输入（与 browser_click_at 同通道，走真实命中测试）。
+      // D18-b：回传 host 的 shadow 可达性。closed/无 shadowRoot 的自定义
+      // host（dash tag）合成点击必然是 no-op——工具层对这类目标无条件升级，
+      // 不再被动态页面（轮播/占位符轮换）造成的 changed:true 假信号压制
+      // （真机第十三轮实锚：发布按钮 act ok 但升级被 changed 假信号跳过）。
       clickPoint = {
         x: cx,
         y: cy,
         vw: Number(window.innerWidth || 0),
         vh: Number(window.innerHeight || 0),
+        hostShadow: (el.tagName && el.tagName.indexOf('-') !== -1)
+          ? (el.shadowRoot ? 'open' : 'closed_or_none')
+          : null,
       };
     }
     return { ok: true, action, target: record, url: String(location.href || ''), title: String(document.title || ''), clickPoint };

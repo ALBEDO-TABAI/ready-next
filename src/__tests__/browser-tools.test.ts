@@ -500,6 +500,64 @@ describe('browser-tools v2', () => {
     assert.deepStrictEqual(controller.calls.normalized?.[0], { x: 500, y: 975 })
   })
 
+  // D18-b（第十三轮实锚）：动态页面（占位符轮换/轮播）让 delta 恒变，
+  // changed:true 假信号压制升级。合同：closed/无 shadowRoot 的自定义 host
+  // 无条件升级（合成点击对它必然 no-op，双击风险不存在）。
+  it('browser_act_on_target force-escalates a closed-shadow host even when the page delta changed', async () => {
+    let deltaCalls = 0
+    const controller = createControllerMock({
+      executeJS: async (_tabId, code) => {
+        const source = String(code || '')
+        if (source.includes('__READY_AGENT_PAGE_MAP__')) {
+          return {
+            identity: { url: 'https://example.com/publish', title: 'Publish' },
+            viewport: { width: 1000, height: 800 },
+            rawRoots: [{
+              role: 'generic',
+              children: [
+                { role: 'clickable', name: '发布', backendDOMNodeId: 1, frameId: '0' },
+                { role: 'button', name: 'Filler A', backendDOMNodeId: 2, frameId: '0' },
+                { role: 'button', name: 'Filler B', backendDOMNodeId: 3, frameId: '0' },
+                { role: 'button', name: 'Filler C', backendDOMNodeId: 4, frameId: '0' },
+                { role: 'button', name: 'Filler D', backendDOMNodeId: 5, frameId: '0' },
+              ],
+            }],
+            riskFlags: {},
+          }
+        }
+        if (source.includes('__READY_AGENT_TARGET_PROBE__')) {
+          return { matchCount: 1, disabled: false, target: { role: 'clickable', name: '发布' } }
+        }
+        if (source.includes('__READY_AGENT_ACT_ON_TARGET__')) {
+          return {
+            ok: true,
+            action: 'click',
+            target: { role: 'clickable', name: '发布' },
+            clickPoint: { x: 500, y: 780, vw: 1000, vh: 800, hostShadow: 'closed_or_none' },
+          }
+        }
+        if (source.includes('bodyText: String(document.body')) {
+          deltaCalls += 1
+          // 每次 delta 都不同——模拟占位符轮换的动态页面
+          return { url: 'https://example.com/publish', title: 'Publish', bodyText: `dyn-${deltaCalls}` }
+        }
+        return null
+      },
+    })
+
+    await executeBrowserTool('browser_read_page_map', {}, controller)
+    const result = await executeBrowserTool('browser_act_on_target', { target_id: '1:0:1', action: 'click' }, controller)
+    const payload = parseTool(result) as {
+      ok: boolean
+      escalation?: { attempted?: boolean; reason?: string }
+    }
+
+    assert.strictEqual(payload.ok, true)
+    assert.strictEqual(payload.escalation?.attempted, true)
+    assert.strictEqual(payload.escalation?.reason, 'closed_shadow_host')
+    assert.ok(controller.calls.mouse.length >= 3, 'closed-shadow host must always get the trusted pointer click')
+  })
+
   it('browser_act_on_target does not escalate when the synthetic click already changed the page', async () => {
     let deltaCalls = 0
     const controller = createControllerMock({

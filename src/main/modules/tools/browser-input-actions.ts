@@ -260,13 +260,25 @@ export async function runGuardedCoordinateClick(
   x: number,
   y: number,
   abortSignal?: AbortSignal,
-): Promise<{ nx: number; ny: number; cssX: number; cssY: number; width: number; height: number }> {
+): Promise<{
+  nx: number
+  ny: number
+  cssX: number
+  cssY: number
+  width: number
+  height: number
+  /** D18-b：点下真实元素的语义标签（第十三轮实锚：模型把 CSS 像素当归一
+   * 化坐标传给 click_at，点偏后自己看不出来——把"点到了什么"回给它闭环自纠）。 */
+  pointTarget: { label: string; editable: boolean } | null
+}> {
   const probePoint = await resolveCoordinateProbePointOrThrow(controller, tabId, x, y, 'click')
   const probe = probePoint
     ? await probeCoordinateTargetOrThrow(controller, tabId, probePoint, { x, y, action: 'click' })
     : null
+  let pointTarget: { label: string; editable: boolean } | null = null
   if (probe && typeof probe === 'object') {
     const p = probe as { label?: unknown; editable?: unknown }
+    pointTarget = { label: String(p.label || '').slice(0, 120), editable: p.editable === true }
     if (p.editable !== true) {
       const destructiveHit = matchBrowserDestructiveTarget(String(p.label || ''))
       if (destructiveHit) {
@@ -280,7 +292,7 @@ export async function runGuardedCoordinateClick(
   }
   const point = await dispatchClickAt(controller, tabId, x, y)
   await settleAfterAction(controller, tabId, abortSignal)
-  return point
+  return { ...point, pointTarget }
 }
 
 /** Guarded CSS-selector type: in-page field-semantics guard (no value),

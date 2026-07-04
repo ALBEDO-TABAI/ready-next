@@ -1283,7 +1283,7 @@ export async function executeBrowserActTool(
         // rect 坐标系与视口不同构。
         let escalation: Record<string, unknown> | null = null
         const rawClickPoint = !actionFailed && action === 'click' && actionResult && typeof actionResult === 'object'
-          ? (actionResult as { clickPoint?: { x?: unknown; y?: unknown; vw?: unknown; vh?: unknown } | null }).clickPoint
+          ? (actionResult as { clickPoint?: { x?: unknown; y?: unknown; vw?: unknown; vh?: unknown; hostShadow?: unknown } | null }).clickPoint
           : null
         const cpx = Number(rawClickPoint?.x)
         const cpy = Number(rawClickPoint?.y)
@@ -1291,13 +1291,22 @@ export async function executeBrowserActTool(
         const cph = Number(rawClickPoint?.vh)
         const clickPointValid = Number.isFinite(cpx) && Number.isFinite(cpy)
           && cpw > 0 && cph > 0 && cpx >= 0 && cpx <= cpw && cpy >= 0 && cpy <= cph
-        if (
-          action === 'click' && !actionFailed && readBack !== 'none'
-          && !changed && !followedTab && targetFrameKey === '0' && clickPointValid
-        ) {
+        // D18-b：closed/无 shadowRoot 的自定义 host 合成点击必然 no-op——
+        // 无条件升级，不受动态页面 changed:true 假信号压制（第十三轮实锚：
+        // XHS 发布页占位符/轮播轮换让 delta 恒变，升级被跳过）。
+        const closedShadowHost = rawClickPoint?.hostShadow === 'closed_or_none'
+        const shouldEscalate = action === 'click' && !actionFailed && readBack !== 'none'
+          && !followedTab && targetFrameKey === '0' && clickPointValid
+          && (closedShadowHost || !changed)
+        if (action === 'click' && !actionFailed) {
+          log(`act click outcome target=${targetId} changed=${changed} hostShadow=${String(rawClickPoint?.hostShadow ?? 'n/a')} escalate=${shouldEscalate}${clickPointValid ? '' : ' clickPoint=invalid'}`)
+        }
+        if (shouldEscalate) {
+          const escalationReason = closedShadowHost ? 'closed_shadow_host' : 'no_change_after_synthetic_click'
           const nx = Math.max(0, Math.min(999, Math.round((cpx / cpw) * 1000)))
           const ny = Math.max(0, Math.min(999, Math.round((cpy / cph) * 1000)))
           try {
+            log(`act escalation firing target=${targetId} reason=${escalationReason} css=(${Math.round(cpx)},${Math.round(cpy)}) normalized=(${nx},${ny})`)
             await runGuardedCoordinateClick(controller, tabId, nx, ny, abortSignal)
             const escalatedFollowedTab = await waitForActionFollowedTab(controller, tabId, beforeTabs, abortSignal)
             afterDelta = await readBrowserActionDeltaBestEffort(controller, tabId, 'after')
@@ -1305,11 +1314,12 @@ export async function executeBrowserActTool(
             escalation = {
               attempted: true,
               mode: 'trusted_pointer',
-              reason: 'no_change_after_synthetic_click',
+              reason: escalationReason,
               changed: escalatedChanged,
             }
             changed = changed || escalatedChanged
             if (escalatedFollowedTab) followedTab = escalatedFollowedTab
+            log(`act escalation done target=${targetId} escalatedChanged=${escalatedChanged}`)
           } catch (error) {
             // 闸门（grant_required / 待确认拒绝）保持响亮——升级点击与
             // browser_click_at 的安全语义必须同构，不能因为是兜底就静默。
@@ -1317,9 +1327,10 @@ export async function executeBrowserActTool(
             escalation = {
               attempted: true,
               mode: 'trusted_pointer',
-              reason: 'no_change_after_synthetic_click',
+              reason: escalationReason,
               error: error instanceof Error ? error.message : String(error),
             }
+            log(`act escalation error target=${targetId} error=${error instanceof Error ? error.message : String(error)}`)
           }
         }
         const after = readBack === 'map'
@@ -1831,11 +1842,19 @@ export async function executeBrowserActTool(
         const point = await runGuardedCoordinateClick(controller, tabId, x, y, abortSignal)
         const followedTab = await waitForActionFollowedTab(controller, tabId, beforeTabs, abortSignal)
         const confirmation = await detectBrowserPageTransactionConfirmation(controller, followedTab?.tabId || tabId)
+        // D18-b：把"点到了什么"回给模型闭环自纠（第十三轮实锚：模型把
+        // power_eval 量出的 CSS 像素直接当归一化坐标传，点偏 ~20% 却毫无
+        // 感知）。label 为空≈点到了空白/容器——附坐标系提醒。
+        log(`click_at resolved input=(${x},${y}) normalized=(${point.nx},${point.ny}) css=(${Math.round(point.cssX)},${Math.round(point.cssY)}) pointTarget=${JSON.stringify(point.pointTarget?.label ?? null)}`)
         return attachBrowserActionSessionOutput(JSON.stringify({
           ok: true,
           normalized: { x: point.nx, y: point.ny },
           css: { x: point.cssX, y: point.cssY },
           viewport: { width: point.width, height: point.height },
+          pointTarget: point.pointTarget,
+          ...(point.pointTarget && !point.pointTarget.label
+            ? { coordinateHint: '点下未探到带语义的元素——注意 x/y 是 0-1000 归一化坐标（不是 CSS 像素）；若你用 getBoundingClientRect 量到像素 px，请换算 round(px / 视口宽高 * 1000) 再调用。' }
+            : {}),
           followedTab,
           nextSuggestedAction: followedTab ? `read map again on tab ${followedTab.tabId}` : 'read map again',
         }, null, 2), {

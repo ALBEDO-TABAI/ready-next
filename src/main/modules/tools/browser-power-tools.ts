@@ -284,6 +284,15 @@ export async function executeBrowserPowerTool(
             resultSummary: { bytes: limited.bytes, truncated: limited.truncated },
           })
           const confirmation = await detectBrowserPageTransactionConfirmation(controller, tabId)
+          // D18-b（第十三轮实锚）：模型反复用 power_eval 直写表单值
+          // （`el.value = ...` / innerText 赋值），React/ProseMirror 受控组件
+          // 会吞掉这种写入——DOM 有字、框架状态为空，发布校验静默失败且
+          // 人点也救不回来。检测到该模式时附劝阻注记（不拦截，Power 合同
+          // 语义不变），引导回原生 setter 的 fill/type 工具。
+          const formWritePattern = /\.(value|innerText|innerHTML|textContent)\s*=(?!=)/
+          const formWriteAdvisory = formWritePattern.test(code)
+            ? '检测到对 value/innerText/innerHTML 的直接赋值：React/ProseMirror 受控组件会吞掉这种写入（DOM 显示已填、框架状态仍为空，表单校验静默失败，页面会进入人点也无效的坏状态）。请改用 browser_act_on_target 的 fill 或 browser_type_smart / browser_type_at（原生 setter + 真实输入事件）。'
+            : undefined
           return attachBrowserActionSessionOutput(JSON.stringify({
             ok: true,
             tool: toolName,
@@ -295,6 +304,7 @@ export async function executeBrowserPowerTool(
             result: limited.value,
             resultTruncated: limited.truncated,
             resultBytes: limited.bytes,
+            ...(formWriteAdvisory ? { formWriteAdvisory } : {}),
             frameId,
           }, null, 2), {
             toolName,

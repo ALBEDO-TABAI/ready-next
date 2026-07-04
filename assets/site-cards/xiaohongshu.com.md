@@ -19,3 +19,5 @@ site: xiaohongshu.com
 - 选择器：feed 卡片为 data-v 动态属性，优先用角色+可访问名或截图坐标，不要依赖类名。
 - 限速：连续翻页/快速滚动易触发验证，放慢节奏、分批采集。
 - 轮播：图文笔记常为多图轮播，逐帧采集并按 URL 去重。
+- **严禁用 power_eval 给标题/正文赋值**（第十三轮实锚）：`el.value=`/innerText 直写会被 React/ProseMirror 吞掉，页面进入"发布按钮点了没反应、人点也无效"的坏状态且不可恢复（只能新开 tab 重来）。标题用 act fill，正文用 type_at/type_smart；填完用 read map 或 power_eval **只读**校验即可，读到不一致就用键盘全选删除后重打，绝不直写。
+- click_at/type_at 坐标是 0-1000 归一化：power_eval 量出的像素要除以视口宽高再乘 1000；点完看结果里的 pointTarget.label 是否是你要的按钮。
