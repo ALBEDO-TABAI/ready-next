@@ -1,6 +1,5 @@
 import type { CSSProperties, ElementType } from 'react'
 import { MotionConfig, motion, useReducedMotion } from 'framer-motion'
-import '../../styles/workbench-sliders.css'
 import { LiquidLens } from '../ui/liquid-glass/LiquidLens'
 import {
   REDUCED_MOTION_TRANSITION,

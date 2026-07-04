@@ -60,6 +60,7 @@ function installDomGlobals(): { dom: JSDOM; restore: () => void } {
     getComputedStyle: globalThis.getComputedStyle,
     navigator: (globalThis as { navigator?: Navigator }).navigator,
     localStorage: (globalThis as { localStorage?: Storage }).localStorage,
+    MutationObserver: (globalThis as { MutationObserver?: unknown }).MutationObserver,
   }
 
   function setGlobal<K extends keyof typeof previous>(key: K, value: unknown) {
@@ -91,6 +92,9 @@ function installDomGlobals(): { dom: JSDOM; restore: () => void } {
     dispatchEvent: () => true,
   }))
   setGlobal('getComputedStyle', dom.window.getComputedStyle.bind(dom.window))
+  // LiquidBackdropProjection（vertical-tabs 液态玻璃）挂载时观察 DOM 变更；
+  // jsdom 自带实现，暴露成全局即可（ResizeObserver 组件侧已有 typeof 防护）。
+  setGlobal('MutationObserver', dom.window.MutationObserver)
   setGlobal('navigator', dom.window.navigator)
   setGlobal('localStorage', dom.window.localStorage)
 

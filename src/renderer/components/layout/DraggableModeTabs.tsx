@@ -1,7 +1,6 @@
 import { useRef, useState, useCallback, useEffect, useMemo } from 'react'
 import { Globe, FileText, Rss, Calendar } from 'lucide-react'
 import type { WorkbenchMode } from '../../stores/useMode'
-import '../../styles/workbench-sliders.css'
 import { LiquidLens } from '../ui/liquid-glass/LiquidLens'
 import { LiquidBackdropProjection } from '../ui/liquid-glass/LiquidBackdropProjection'
 import { WORKBENCH_MODE_ORDER } from '../../modules/workbench/mode-split'
