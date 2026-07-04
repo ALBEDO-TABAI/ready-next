@@ -82,4 +82,42 @@ describe('AgentTabControlGate (freeze-then-confirm, §3.6)', () => {
     assert.equal(gate.isWriteBlocked(), false)
     assert.equal(gate.isFrozen(), false)
   })
+
+  // D8（真机反复实锚）：用户擦碰 agent 页后走开，pending_confirm 无人
+  // 确认也无人取消 → 横幅常驻 + agent 写入永久冻结。合同：超时惰性回落
+  // 视同 dismiss；确认过的 frozen 不受 TTL 影响；回落后可再次 request。
+  it('stale pending_confirm lazily expires back to active (banner TTL)', () => {
+    let clock = 1_000
+    const gate = new AgentTabControlGate({ pendingConfirmTtlMs: 45_000, now: () => clock })
+    gate.requestInterruption()
+    assert.equal(gate.getState(), 'pending_confirm')
+
+    clock += 44_000
+    assert.equal(gate.getState(), 'pending_confirm', 'within TTL stays pending')
+    assert.equal(gate.isWriteBlocked(), true)
+
+    clock += 2_000
+    assert.equal(gate.getState(), 'active', 'stale pending expires like a dismiss')
+    assert.equal(gate.isWriteBlocked(), false)
+    assert.equal(gate.requestInterruption(), true, 'a fresh interruption can start after expiry')
+  })
+
+  it('confirmed frozen state never expires by TTL', () => {
+    let clock = 1_000
+    const gate = new AgentTabControlGate({ pendingConfirmTtlMs: 45_000, now: () => clock })
+    gate.requestInterruption()
+    gate.confirmInterruption()
+    clock += 10 * 60_000
+    assert.equal(gate.getState(), 'frozen')
+    assert.equal(gate.isFrozen(), true)
+  })
+
+  it('expiry cannot race a confirm: confirm after TTL is a no-op', () => {
+    let clock = 1_000
+    const gate = new AgentTabControlGate({ pendingConfirmTtlMs: 45_000, now: () => clock })
+    gate.requestInterruption()
+    clock += 46_000
+    assert.equal(gate.confirmInterruption(), false, 'stale confirm must not freeze a resumed agent')
+    assert.equal(gate.getState(), 'active')
+  })
 })
