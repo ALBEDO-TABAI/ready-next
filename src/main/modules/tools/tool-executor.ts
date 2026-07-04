@@ -586,6 +586,20 @@ async function executeToolCallInner(
                 return browserFailureOutput(ensured as unknown as Record<string, unknown>)
               }
               browserLeaseGate = ensured
+              // D16 — agent 以写租约驱动该 tab 期间，武装原生文件选择器
+              // 拦截（幂等、best-effort，失败不阻塞工具调用）；租约离开
+              // held 时引擎侧统一解除。
+              try {
+                const armGuard = (context.browserController as {
+                  armAgentFileChooserGuard?: (tabId: string | null) => Promise<void>
+                }).armAgentFileChooserGuard
+                if (typeof armGuard === 'function') {
+                  void armGuard.call(context.browserController, typeof args.tab_id === 'string' ? args.tab_id : null)
+                    .catch(() => { /* best-effort：attach 冲突等直接降级 */ })
+                }
+              } catch {
+                // silent-catch: 文件选择器护栏武装失败不得影响工具执行。
+              }
             }
           }
           const browserResult = await executeBrowserTool(

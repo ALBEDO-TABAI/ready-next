@@ -22,6 +22,7 @@ import { ScopedBrowserFacade } from './scoped-browser-facade'
 import type { BrowserCollectionTarget } from './collection-targets'
 import { AgentTabControlGate } from './agent-tab-control-gate'
 import { getBrowserWriteLeaseService } from './agent-browser-lease-singleton'
+import { BrowserFileChooserGuard } from './file-chooser-guard'
 import { agentBrowserError, isAgentBrowserError, type AgentBrowserStructuredError, type AgentBrowserSurface } from './agent-browser-errors'
 import {
   isUserViewKeyboardTakeoverInput,
@@ -166,6 +167,7 @@ export class BrowserController {
   private readonly hostLayoutService: BrowserHostLayoutService
   private readonly pageBackgroundService: BrowserPageBackgroundService
   private readonly cdpSessionService: BrowserCdpSessionService
+  private readonly fileChooserGuard: BrowserFileChooserGuard
   private readonly networkObserverService: BrowserNetworkObserverService
   private readonly automationService: BrowserAutomationService
   private readonly collectionConsentStore = new BrowserCollectionConsentStore()
@@ -230,6 +232,17 @@ export class BrowserController {
     this.cdpSessionService = new BrowserCdpSessionService({
       resolveTabView: (tabId) => this.resolveTabView(tabId),
       createBrowserError: (code, message) => this.createBrowserError(code, message),
+    })
+    this.fileChooserGuard = new BrowserFileChooserGuard({
+      cdp: this.cdpSessionService,
+      resolveTabUrl: (tabId) => {
+        try {
+          return this.resolveTabView(tabId).view.webContents.getURL()
+        } catch {
+          return ''
+        }
+      },
+      log: (message) => this.logBrowserDiag(message),
     })
     this.networkObserverService = new BrowserNetworkObserverService(this.cdpSessionService)
     this.previewService = new BrowserPreviewService({
@@ -433,8 +446,13 @@ export class BrowserController {
         shell.openExternal(url)
       },
     })
-    getBrowserWriteLeaseService().onTransition(() => {
+    getBrowserWriteLeaseService().onTransition((transition) => {
       this.notifyBrowserLeaseChanged()
+      // D16 — 写租约离开 held（释放/接管/过期）即解除文件选择器拦截，
+      // 用户随后的原生选择器行为不受 agent 遗留影响。
+      if (transition.previousState === 'held' && transition.state !== 'held') {
+        void this.fileChooserGuard.disarmAll()
+      }
     })
     void this.contentTaskRunner.resumePendingTasks()
   }
@@ -2454,6 +2472,14 @@ export class BrowserController {
     params?: Record<string, unknown>,
   ): Promise<unknown> {
     return this.cdpSessionService.sendCommand(tabId, method, params)
+  }
+
+  /**
+   * D16 — tool-executor 在 agent 写租约生效的写动作前调用，武装该 tab 的
+   * 文件选择器拦截（幂等、best-effort）。解除由租约转移监听统一处理。
+   */
+  async armAgentFileChooserGuard(tabId: string | null): Promise<void> {
+    await this.fileChooserGuard.arm(tabId)
   }
 
   confirmCollectionConsent(payload: {

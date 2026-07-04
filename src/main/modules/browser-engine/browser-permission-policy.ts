@@ -15,7 +15,7 @@ import {
 } from './popup-policy'
 
 export interface BrowserSitePermissionNotice {
-  kind: 'site_permission_auto_denied'
+  kind: 'site_permission_auto_denied' | 'file_chooser_intercepted'
   permission: string
   origin: string
   at: string
@@ -23,27 +23,41 @@ export interface BrowserSitePermissionNotice {
 }
 
 /**
- * Agent 驾驶期间被自动拒绝的站点权限请求，等下一次浏览器工具输出时带给
- * 模型（attachBrowserActionSessionOutput 排空）。自动拒绝让站点立即拿到
- * PERMISSION_DENIED 继续走，同时模型和审计都看得见这次拒绝。
+ * Agent 驾驶期间的站点事件注记（权限自动拒绝 / 文件选择器拦截），等下一次
+ * 浏览器工具输出时带给模型（attachBrowserActionSessionOutput 排空）。
  */
 const pendingSitePermissionNotices: BrowserSitePermissionNotice[] = []
+
+function pushSiteNotice(notice: BrowserSitePermissionNotice): void {
+  pendingSitePermissionNotices.push(notice)
+  if (pendingSitePermissionNotices.length > 8) {
+    pendingSitePermissionNotices.splice(0, pendingSitePermissionNotices.length - 8)
+  }
+}
 
 export function consumePendingBrowserSitePermissionNotices(): BrowserSitePermissionNotice[] {
   return pendingSitePermissionNotices.splice(0, pendingSitePermissionNotices.length)
 }
 
 export function recordAgentAutoDeniedSitePermission(permission: string, origin: string): void {
-  pendingSitePermissionNotices.push({
+  pushSiteNotice({
     kind: 'site_permission_auto_denied',
     permission: String(permission || ''),
     origin,
     at: new Date().toISOString(),
     guidance: 'Agent 驾驶期间站点权限请求已自动拒绝（站点会拿到 PERMISSION_DENIED 并继续）。若任务确实需要该权限，请告知用户在场时手动允许后重试。',
   })
-  if (pendingSitePermissionNotices.length > 8) {
-    pendingSitePermissionNotices.splice(0, pendingSitePermissionNotices.length - 8)
-  }
+}
+
+/** D16 — 原生文件选择器被拦截时给模型的改道注记。 */
+export function recordFileChooserInterceptedNotice(tabId: string, url: string): void {
+  pushSiteNotice({
+    kind: 'file_chooser_intercepted',
+    permission: '',
+    origin: url || tabId,
+    at: new Date().toISOString(),
+    guidance: '页面尝试打开原生文件选择器，已被拦截（agent 模式下原生对话框会挂起工具环）。请用 browser_list_upload_targets 定位上传点，再用 browser_upload_scope_attachment 完成文件上传；站点会在文件注入后继续原流程。',
+  })
 }
 
 export type BrowserPermissionPath =
