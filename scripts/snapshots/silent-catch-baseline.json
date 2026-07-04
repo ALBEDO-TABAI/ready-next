@@ -183,8 +183,8 @@
       "snippetHash": "fa4339e2ed1b1e86"
     },
     {
-      "file": "src/main/modules/agent-control/runtime-core/runtime.ts",
-      "line": 1870,
+      "file": "src/main/modules/agent-control/runtime-core/remote-channel-service.ts",
+      "line": 349,
       "snippetHash": "87af50ef53afd6f0"
     },
     {

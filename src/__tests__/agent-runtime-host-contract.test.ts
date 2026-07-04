@@ -162,7 +162,18 @@ test('runtime host is split into run coordinator, run projection, and execution 
   assert.match(runtime, /private readonly runCoordinator: RunCoordinator/)
   assert.match(runtime, /private readonly runProjection: RunProjection/)
   assert.match(runtime, /(?:return|const\s+\w+\s*=\s*await|\w+\s*=\s*await)\s+this\.runCoordinator\.runScoped\(/)
-  assert.match(runtime, /(?:return\s+|const\s+\w+\s*=\s*)?await\s+this\.runCoordinator\.runInboundChannel\(/)
+  // B8-D R5 — the inbound-channel dispatch moved into RemoteChannelService;
+  // the runtime wires a narrowed `runCoordinator` face into the service, and
+  // the service awaits the coordinator through that injected dep. Both sides
+  // are pinned so the host chain cannot silently detach.
+  const remoteChannelService = readWorkspaceFile(
+    'src/main/modules/agent-control/runtime-core/remote-channel-service.ts',
+  )
+  assert.match(
+    runtime,
+    /runCoordinator:\s*\{\s*\n?\s*runInboundChannel:\s*\(request,\s*hooks\)\s*=>\s*this\.runCoordinator\.runInboundChannel\(request,\s*hooks\)/,
+  )
+  assert.match(remoteChannelService, /(?:return\s+|const\s+\w+\s*=\s*)?await\s+this\.deps\.runCoordinator\.runInboundChannel\(/)
   // B8-D R1 — projection event recording is delegated through the
   // ProjectionSyncCoordinator, which owns the single RunProjection.recordEvent
   // call site; the runtime wires its RunProjection instance into it.

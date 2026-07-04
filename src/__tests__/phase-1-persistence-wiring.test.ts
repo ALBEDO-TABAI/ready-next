@@ -20,10 +20,11 @@ const RUNTIME_PATH = new URL('../main/modules/agent-control/runtime-core/runtime
 // assertions pin the delegate wiring so the chain cannot silently detach.
 const REFERENCE_HINT_SERVICE_PATH = new URL('../main/modules/agent-control/runtime-core/reference-hint-service.ts', import.meta.url)
 // B8-D R4 — the ensureChannelScope body moved from runtime.ts into the
-// delegated ConversationScopeStore; the runtime keeps a one-line private
-// delegate and binds the ReferenceHintService replay hook through the store's
-// deps. The body assertion follows the body; the runtime-side assertions pin
-// the delegate + deps wiring so the replay chain cannot silently detach.
+// delegated ConversationScopeStore. B8-D R5 — the remote-channel cluster (its
+// only caller) moved into RemoteChannelService, whose deps bind the store's
+// public face directly; the old runtime private delegate is gone. The body
+// assertion follows the body; the runtime-side assertions pin the deps wiring
+// so the replay chain cannot silently detach.
 const CONVERSATION_SCOPE_STORE_PATH = new URL('../main/modules/agent-control/runtime-core/conversation-scope-store.ts', import.meta.url)
 const IPC_HANDLER_PATH = new URL('../main/modules/claude-bridge/ipc-handler.ts', import.meta.url)
 const CHAT_PERSISTENCE_GROUP_PATH = new URL('../main/modules/claude-bridge/ipc/chat-persistence-group.ts', import.meta.url)
@@ -115,12 +116,14 @@ test('Phase 1.2 — ensureChannelScope restores reference hint from meta_json be
     'ensureChannelScope replays persisted hint into in-memory map',
   )
 
-  // Runtime wiring: the private delegate keeps remote-channel call sites on
-  // the store body, and the store deps bind the ReferenceHintService hook.
+  // Runtime wiring (B8-D R5): the remote-channel cluster moved into
+  // RemoteChannelService and the old private delegate is gone; the service's
+  // `ensureChannelScope` dep MUST stay bound to the store body so the hint
+  // replay keeps firing on every channel-scope creation.
   assert.match(
     runtimeSource,
-    /private ensureChannelScope[^}]*this\.conversationScopes\.ensureChannelScope\(/,
-    'runtime ensureChannelScope delegates to ConversationScopeStore',
+    /ensureChannelScope:\s*\(channelId,\s*remoteThread,\s*agent,\s*sender\)\s*=>\s*\n?\s*this\.conversationScopes\.ensureChannelScope\(/,
+    'RemoteChannelService deps bind ensureChannelScope to ConversationScopeStore',
   )
   assert.match(
     runtimeSource,

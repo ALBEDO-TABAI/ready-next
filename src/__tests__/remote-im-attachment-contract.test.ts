@@ -70,8 +70,10 @@ test('remote-im-attachment-contract declares transitive sqlite ABI guard', (t) =
 })
 
 test('remote IM attachment-only inbound messages continue into the agent payload', () => {
-  // eslint-disable-next-line ready/no-source-grep-test -- private runtime guard: full AgentControlRuntime construction needs Electron/DB wiring; this locks the regression-prone early return.
-  const source = readFileSync(new URL('../main/modules/agent-control/runtime-core/runtime.ts', import.meta.url), 'utf8')
+  // B8-D R5 — the inbound-channel cluster moved from runtime.ts into the
+  // delegated RemoteChannelService; the pins below re-anchor onto the service.
+  // eslint-disable-next-line ready/no-source-grep-test -- private service guard: full AgentControlRuntime construction needs Electron/DB wiring; this locks the regression-prone early return.
+  const source = readFileSync(new URL('../main/modules/agent-control/runtime-core/remote-channel-service.ts', import.meta.url), 'utf8')
   const calendarMarker = 'this.maybeEmitRemoteCalendarSuggestions(pending, inboundText)'
   const payloadMarker = 'const promptPayload = this.buildInboundChannelPayload(inboundText, pending.attachments)'
   const calendarIndex = source.indexOf(calendarMarker)
@@ -85,8 +87,8 @@ test('remote IM attachment-only inbound messages continue into the agent payload
 })
 
 test('remote IM outbound file delivery uses projection artifact proofs', () => {
-  // eslint-disable-next-line ready/no-source-grep-test -- contract pins safe source of outbound files to task projection proofs, not final-text path scraping.
-  const source = readFileSync(new URL('../main/modules/agent-control/runtime-core/runtime.ts', import.meta.url), 'utf8')
+  // eslint-disable-next-line ready/no-source-grep-test -- contract pins safe source of outbound files to task projection proofs, not final-text path scraping. B8-D R5: cluster lives in RemoteChannelService.
+  const source = readFileSync(new URL('../main/modules/agent-control/runtime-core/remote-channel-service.ts', import.meta.url), 'utf8')
 
   assert.match(source, /collectOutboundChannelAttachments/)
   assert.match(source, /record\.kind !== 'artifact'/)
@@ -322,8 +324,8 @@ test('send-im skill only exposes the direct file send tool and no recipient opti
 })
 
 test('remote IM outbound file delivery is gated by explicit inbound send intent', () => {
-  // eslint-disable-next-line ready/no-source-grep-test -- private runtime guard: attachment sending must be driven by the remote user's request, not a generic "已整理好" model reply.
-  const source = readFileSync(new URL('../main/modules/agent-control/runtime-core/runtime.ts', import.meta.url), 'utf8')
+  // eslint-disable-next-line ready/no-source-grep-test -- private service guard: attachment sending must be driven by the remote user's request, not a generic "已整理好" model reply. B8-D R5: cluster lives in RemoteChannelService.
+  const source = readFileSync(new URL('../main/modules/agent-control/runtime-core/remote-channel-service.ts', import.meta.url), 'utf8')
   // eslint-disable-next-line ready/no-source-grep-test -- intent keyword coverage is a static shared-module contract.
   const intentSource = readFileSync(new URL('../shared/remote-im-file-intent.ts', import.meta.url), 'utf8')
 
@@ -341,8 +343,8 @@ test('remote IM outbound file delivery is gated by explicit inbound send intent'
 })
 
 test('remote IM outbound attachments are limited to WeChat and explicit artifact proofs', () => {
-  // eslint-disable-next-line ready/no-source-grep-test -- private runtime guard: non-WeChat adapters drop attachments, so runtime must not attach files for them.
-  const source = readFileSync(new URL('../main/modules/agent-control/runtime-core/runtime.ts', import.meta.url), 'utf8')
+  // eslint-disable-next-line ready/no-source-grep-test -- private service guard: non-WeChat adapters drop attachments, so the service must not attach files for them. B8-D R5: cluster lives in RemoteChannelService.
+  const source = readFileSync(new URL('../main/modules/agent-control/runtime-core/remote-channel-service.ts', import.meta.url), 'utf8')
   const collectBlock = source.match(/private collectOutboundChannelAttachments[\s\S]*?\n\s{2}\}/)?.[0] || ''
 
   assert.match(source, /channelSupportsOutboundAttachments\(channelId\)/)
@@ -377,17 +379,19 @@ test('remote IM runtime status counts persisted outbound delivery errors', () =>
 })
 
 test('remote IM delayed progress uses native typing state instead of a chat message', () => {
-  // eslint-disable-next-line ready/no-source-grep-test -- private runtime guard: prevents regressing to a visible "处理中…" upstream message.
-  const runtimeSource = readFileSync(new URL('../main/modules/agent-control/runtime-core/runtime.ts', import.meta.url), 'utf8')
+  // B8-D R5 — the flush pipeline (typing indicator included) lives in the
+  // delegated RemoteChannelService now, so the guard pins the service body.
+  // eslint-disable-next-line ready/no-source-grep-test -- private service guard: prevents regressing to a visible "处理中…" upstream message.
+  const serviceSource = readFileSync(new URL('../main/modules/agent-control/runtime-core/remote-channel-service.ts', import.meta.url), 'utf8')
   // eslint-disable-next-line ready/no-source-grep-test -- sidecar typing bridge is a static channel contract.
   const sidecarSource = readFileSync(new URL('../main/modules/agent-control/sidecar-manager.ts', import.meta.url), 'utf8')
 
   assert.match(sidecarSource, /sendChannelTyping/)
-  assert.match(runtimeSource, /sendChannelTyping/)
-  assert.match(runtimeSource, /typing:\s*true/)
-  assert.match(runtimeSource, /typing:\s*false/)
-  assert.doesNotMatch(runtimeSource, /text:\s*'处理中…'/)
-  assert.doesNotMatch(runtimeSource, /delayedStatusSent/)
+  assert.match(serviceSource, /sendChannelTyping/)
+  assert.match(serviceSource, /typing:\s*true/)
+  assert.match(serviceSource, /typing:\s*false/)
+  assert.doesNotMatch(serviceSource, /text:\s*'处理中…'/)
+  assert.doesNotMatch(serviceSource, /delayedStatusSent/)
 })
 
 test('WeChat settings preserves OpenClaw routing config before login', () => {
@@ -403,11 +407,15 @@ test('WeChat settings preserves OpenClaw routing config before login', () => {
 })
 
 test('remote IM slash commands are handled before agent execution', () => {
-  // eslint-disable-next-line ready/no-source-grep-test -- private runtime guard: command-only messages must not enter the Agent loop.
-  const source = readFileSync(new URL('../main/modules/agent-control/runtime-core/runtime.ts', import.meta.url), 'utf8')
+  // B8-D R5 — flush/command pipeline lives in RemoteChannelService; the
+  // conversation-store and run-coordinator hub calls became injected deps
+  // (`this.deps.createConversationMessage` / `this.deps.runCoordinator`),
+  // so the ordering markers re-anchor onto the service body verbatim.
+  // eslint-disable-next-line ready/no-source-grep-test -- private service guard: command-only messages must not enter the Agent loop.
+  const source = readFileSync(new URL('../main/modules/agent-control/runtime-core/remote-channel-service.ts', import.meta.url), 'utf8')
   const commandMarker = 'const commandHandled = await this.handleInboundChannelCommand(pending, inboundText, agent)'
-  const userMessageMarker = 'const inboundMessage = this.createConversationMessage(scope.id, {'
-  const agentMarker = 'const result = await this.runCoordinator.runInboundChannel('
+  const userMessageMarker = 'const inboundMessage = this.deps.createConversationMessage(scope.id, {'
+  const agentMarker = 'const result = await this.deps.runCoordinator.runInboundChannel('
   const commandIndex = source.indexOf(commandMarker)
   const userMessageIndex = source.indexOf(userMessageMarker)
   const agentIndex = source.indexOf(agentMarker)
@@ -423,8 +431,8 @@ test('remote IM slash commands are handled before agent execution', () => {
 })
 
 test('remote IM new-session command preserves old conversation history', () => {
-  // eslint-disable-next-line ready/no-source-grep-test -- private runtime guard: /new should switch the channel session pointer, not delete or truncate history.
-  const source = readFileSync(new URL('../main/modules/agent-control/runtime-core/runtime.ts', import.meta.url), 'utf8')
+  // eslint-disable-next-line ready/no-source-grep-test -- private service guard: /new should switch the channel session pointer, not delete or truncate history. B8-D R5: cluster lives in RemoteChannelService.
+  const source = readFileSync(new URL('../main/modules/agent-control/runtime-core/remote-channel-service.ts', import.meta.url), 'utf8')
   const newSessionBlock = source.match(/private startNewRemoteChannelSession[\s\S]*?\n\s{2}\}/)?.[0] || ''
 
   assert.match(newSessionBlock, /setSetting\(/)
@@ -434,8 +442,8 @@ test('remote IM new-session command preserves old conversation history', () => {
 })
 
 test('remote IM model command is read-only until model scope is explicit', () => {
-  // eslint-disable-next-line ready/no-source-grep-test -- private runtime guard: WeChat commands must not silently mutate the global model config.
-  const source = readFileSync(new URL('../main/modules/agent-control/runtime-core/runtime.ts', import.meta.url), 'utf8')
+  // eslint-disable-next-line ready/no-source-grep-test -- private service guard: WeChat commands must not silently mutate the global model config. B8-D R5: cluster lives in RemoteChannelService.
+  const source = readFileSync(new URL('../main/modules/agent-control/runtime-core/remote-channel-service.ts', import.meta.url), 'utf8')
   const modelBlock = source.match(/private formatRemoteModelCommand[\s\S]*?\n\s{2}\}/)?.[0] || ''
 
   assert.match(modelBlock, /当前模型/)

@@ -35,6 +35,22 @@ function findMethodBody(source, name) {
       }
       continue
     }
+    // B8-D R5 hardening — skip comments OUTSIDE strings. Apostrophes inside
+    // `//` doc comments (e.g. "lifecycle's") used to flip the quote state
+    // machine, so brace matching only closed by downstream parity luck and
+    // any unrelated edit later in the file could turn this gate red.
+    if (char === '/' && source[index + 1] === '/') {
+      const lineEnd = source.indexOf('\n', index)
+      if (lineEnd < 0) break
+      index = lineEnd
+      continue
+    }
+    if (char === '/' && source[index + 1] === '*') {
+      const blockEnd = source.indexOf('*/', index + 2)
+      if (blockEnd < 0) break
+      index = blockEnd + 1
+      continue
+    }
     if (char === '"' || char === "'" || char === '`') {
       quote = char
       continue
