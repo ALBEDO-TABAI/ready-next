@@ -186,6 +186,14 @@ preload `runFeedback` API + electron.d.ts 类型 + 行为测试
 
 **D14-c（第九轮实锚，2026-07-04 深夜，已完成）**：用户开启视觉+重启 dev 后重测，模型走得更远（空白恢复标签自愈导航、一键排版坐标点击进最终发布页 target=article），但最后 39 目标 map 仍无「发布」——**D14 首版 readyCustomElementHosts 的 `scanned>=6000` 文档序扫描配额在 publish 页前部烧光，尾部 host 永远轮不到，复犯 D13 尾部偏置定律**；vm 测试假页面只有几个元素测不出配额问题。修：便宜 dash 标签判断走完整棵树、贵检查只对 custom 候选做（>200 头尾各 100）、产出 >16 保头 10+尾 6；空文本 host 不再淘汰（closed shadow 读不到渲染文本），readyLabelFor 给自定义标签 tagName 名字回退。回归钉：7000 填充元素尾部 host 存活测试 + 头尾配额测试 + tagName 回退测试。教训：**任何新的文档序扫描/配额代码默认自带尾部保护；行为测试的假页面必须大到能触发配额**。本轮另证：前三张 targets=2 的 map 是恢复期空白渲染器（沙箱偶发失败残留），模型重导航自愈，非采集器回归。
 
+# D15 — 主进程 fd 耗尽：chokidar v5 在 macOS 每文件一个 kqueue fd（真机第十轮实锚，2026-07-04 深夜，已完成）
+
+**实锚**："任何页面都载入不了"（全部 ERR_FAILED -2）+ render_process_gone crashed exitCode:6 每次 spawn 必死。判别链：崩溃签名=同一 renderer 存根 seatbelt abort → 同一时刻同一二进制 mini 探针全绿（机器/二进制清白）→ 单实例 → **lsof 实测主进程 10572 个 fd，全是笔记库文件读句柄** → ready-search.log 九个 watcher 根（lib-a 5836 文件 + Google Drive 云目录等）→ chokidar v5 源码裸 `fs_watch(path)`（v4 起弃 fsevents，macOS 退化为每文件一 kqueue fd）。**对照实验定罪：同一棵 lib-a 树，chokidar v5 fd 增量=5836（与文件数分毫不差），原生 recursive fs.watch 增量=0。** 机制：B7（4/25）埋雷，库随采集增长，Jul 1 首次越线发病；fd 爬坡期偶发 spawn 失败（=今天全天"偶发沙箱失败"的高概率真身，含引爆 primer CHECK 崩溃的初始 renderer 死亡），满限后全灭。
+
+**已修**：file-watcher.ts 增 `createDarwinRecursiveWatcher`（原生 `fs.watch(root, {recursive:true})`，libuv 走 FSEvents 每根 1 fd；'rename' 按存在性判 add/unlink、目录事件过滤、错误/ready 语义对齐 ChokidarLike），darwin 默认工厂切换，linux/win 仍走 chokidar；注入缝 chokidarFactory 保留。行为测试：真实 fs 的 add/change/unlink 全链 + 目录过滤（file-watcher 套件 19/19）。
+
+**残留观察**：本机今天更早的"偶发沙箱失败"归因 fd 爬坡为高置信假设（当前 100% 失败=fd 耗尽是实测结论）；D15 后若偶发仍现再开环境线。fd 余量可观测（boot 打点）暂未加，若复发补。
+
 # 汇总
 | 项 | 已完成 | 待做 | 高危点 | 前置 |
 |----|--------|------|--------|------|

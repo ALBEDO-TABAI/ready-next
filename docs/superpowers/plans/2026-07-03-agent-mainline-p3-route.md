@@ -123,4 +123,4 @@ P1 的验收欠账 + 本轮新件的真机确认，一次跑完：
 - **Phase B**：B1-B3 完成，browser-tools 8484→~6100（净拆 + 真机修复回填）。
 - **A0/A1**：证据定稿，A2 手术图就绪（在场做）。
 - **新追加主线**：Phase I（微信 IM 远程完全体）+ Phase M（MCP 生态扩展），见上文两节——规划调研可与 A/B 并行，实施在 R 关账与分支决策后排队。
-- dev 环境事故定案（07-04 深夜二次复核推翻旧结论）：swap 说被"重启后原样复现"证伪；真根因=tab 创建空白 primer 双导航把偶发 renderer seatbelt 初始化失败升级成 Chromium 早期 RFH 交换裸 CHECK（breakpad 符号化定位 `~RenderFrameHostImpl`）。已修：tab-lifecycle-service 删 primer 改单导航+原生涂底，真机 120s 存活验证（标签恢复+真实站点加载）。残留环境项（不占主线工单）：本机 macOS 27 beta 在并发派生下 renderer 沙箱初始化偶发失败（个别标签悲伤页可重载，主进程已免疫）；候选缓解=Electron 42.3.0→42.6.0 补丁位升级。盖章破签名为独立隐患，sync-dev-icon 自愈已内置。
+- dev 环境事故定案（07-04 深夜二次复核推翻旧结论）：swap 说被"重启后原样复现"证伪；真根因=tab 创建空白 primer 双导航把偶发 renderer seatbelt 初始化失败升级成 Chromium 早期 RFH 交换裸 CHECK（breakpad 符号化定位 `~RenderFrameHostImpl`）。已修：tab-lifecycle-service 删 primer 改单导航+原生涂底，真机 120s 存活验证（标签恢复+真实站点加载）。"偶发沙箱失败"已由 D15 定罪并修复：chokidar v5 在 macOS 每文件一 kqueue fd，九个工作区 watcher 灌满主进程 fd 表（实测 10572），spawn 的沙箱 socketpair 必败——file-watcher darwin 已切原生 recursive fs.watch（每根 1 fd，对照实验 5836→0）。Electron 42.3.0→42.6.0 仍作独立补丁位升级候选（非本病根治项）。盖章破签名为独立隐患，sync-dev-icon 自愈已内置。

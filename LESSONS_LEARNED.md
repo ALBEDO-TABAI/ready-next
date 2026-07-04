@@ -411,5 +411,5 @@ Stage 4 W3 引入 `SkillToolAuthorization` 三层分离时，留了一个显式�
   - **breakpad 符号化**：Electron 每个 release 附带 `*-symbols.zip`，把 .ips 的 imageOffset 解成真函数+文件行。本例主进程死于 `~RenderFrameHostImpl` 内的裸 CHECK（release 版 CHECK 零日志直接 trap，所以 stderr 永远安静），调用链 `WebContents::LoadURL → PerformEarlyRenderFrameHostSwapIfNeeded → CommitPending`。
   - **env 门控同步 stderr 时间线**：`READY_PROC_DIAG=1` 打开 web-contents-created / nav-start / render-process-gone 的毫秒级打点（必须同步写——主进程死亡时异步日志跟着消失）。
   - **最小复现对照**：同一 Electron 二进制跑最小 app（含 partition/https/3 并发矩阵）全绿 → 二进制与机器洗清，嫌疑收敛到本应用行为差异。
-- 真根因=tab 创建的空白 primer 双导航（tab-lifecycle-service）：本机（macOS 27 beta）在标签恢复的并发派生下 renderer seatbelt 初始化偶发失败，primer 已提交 + 真实导航的 speculative 进程死亡组合恰好走进 Chromium 早期 RFH 交换的裸 CHECK，单标签故障升级为整机崩溃。修复=删 primer（单导航 + `resetPageBackground` 原生涂底防白闪），renderer 失败退化为该标签的悲伤页，主进程免疫。
+- 真根因=tab 创建的空白 primer 双导航（tab-lifecycle-service）：标签恢复的并发派生下 renderer seatbelt 初始化偶发失败（当晚 D15 定罪：chokidar v5 在 macOS 每文件一个 kqueue fd，九个工作区 watcher 把主进程 fd 表灌向上限，spawn 的沙箱 socketpair 建不出来——"偶发"是 fd 爬坡的不同阶段），primer 已提交 + 真实导航的 speculative 进程死亡组合恰好走进 Chromium 早期 RFH 交换的裸 CHECK，单标签故障升级为整机崩溃。修复=删 primer（单导航 + `resetPageBackground` 原生涂底防白闪），renderer 失败退化为该标签的悲伤页，主进程免疫。
 - 环境层便宜检查（swapusage / codesign / responsibleProc）仍然先跑——但它们的产出只配叫"排除项"，不配叫"根因"。

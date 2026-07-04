@@ -446,3 +446,46 @@ test('onChange throw is swallowed and watcher keeps running', async () => {
 
   if (!('kind' in handle)) await handle.close()
 })
+
+// D15：darwin 原生 recursive watcher（每根 1 个 FSEvents fd，替代 chokidar
+// v5 的 kqueue 每文件一 fd——后者把主进程 fd 表灌满后所有子进程 spawn 必死）。
+// 真实 fs 行为测试：add/change/unlink 全链 + 目录事件被过滤。
+test('darwin native recursive watcher emits add/change/unlink from real fs events', { skip: process.platform !== 'darwin' }, async () => {
+  const { mkdtempSync, writeFileSync, appendFileSync, rmSync, mkdirSync } = await import('node:fs')
+  const { tmpdir } = await import('node:os')
+  const { join: joinPath, basename } = await import('node:path')
+  const { createDarwinRecursiveWatcher } = await import('../main/modules/search-engine/file-watcher')
+
+  const root = mkdtempSync(joinPath(tmpdir(), 'fw-darwin-'))
+  const events: string[] = []
+  const watcher = createDarwinRecursiveWatcher(root)
+  watcher.on('add', (p) => events.push(`add:${basename(p)}`))
+  watcher.on('change', (p) => events.push(`change:${basename(p)}`))
+  watcher.on('unlink', (p) => events.push(`unlink:${basename(p)}`))
+
+  const waitFor = async (predicate: () => boolean, label: string): Promise<void> => {
+    const deadline = Date.now() + 5000
+    while (Date.now() < deadline) {
+      if (predicate()) return
+      await new Promise<void>((resolve) => setTimeout(resolve, 50))
+    }
+    assert.fail(`timeout waiting for ${label}; events=${JSON.stringify(events)}`)
+  }
+
+  // FSEvents 需要短暂预热，先让 watcher 挂稳。
+  await new Promise<void>((resolve) => setTimeout(resolve, 250))
+
+  mkdirSync(joinPath(root, 'sub'))
+  writeFileSync(joinPath(root, 'sub', 'a.md'), 'x')
+  await waitFor(() => events.includes('add:a.md'), 'add:a.md')
+  assert.ok(!events.includes('add:sub'), 'directory events must be filtered')
+
+  appendFileSync(joinPath(root, 'sub', 'a.md'), 'y')
+  await waitFor(() => events.some((e) => e === 'change:a.md' || e === 'add:a.md'), 'change:a.md')
+
+  rmSync(joinPath(root, 'sub', 'a.md'))
+  await waitFor(() => events.includes('unlink:a.md'), 'unlink:a.md')
+
+  await watcher.close()
+  rmSync(root, { recursive: true, force: true })
+})

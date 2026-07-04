@@ -29,6 +29,8 @@
  */
 
 import chokidar, { type ChokidarOptions } from 'chokidar'
+import { watch as fsWatchNative, existsSync, statSync, type FSWatcher } from 'fs'
+import { join } from 'path'
 import { randomBytes } from 'crypto'
 
 import { createRotatingLogger } from '../../utils/rotating-logger'
@@ -143,6 +145,76 @@ function buildChokidarOptions(): ChokidarOptions {
   }
 }
 
+/**
+ * D15（2026-07-04 真机实锚，"任何页面都载入不了"）：chokidar v4 起在 macOS
+ * 放弃 fsevents，退化为每个被 watch 的文件/目录一个 kqueue fd。九个工作区
+ * 根（lib-a 5836 文件 + Google Drive 云目录等）一开机就把主进程 fd 表灌到
+ * ~10240 上限——之后每个子进程 spawn 的沙箱策略 socketpair 创建必败，
+ * renderer 存根齐刷刷 "Failed to initialize sandbox" abort，表现为全部页面
+ * ERR_FAILED。今天全天"偶发沙箱失败"实为 fd 爬坡的不同阶段。
+ *
+ * macOS 用原生 fs.watch(root, { recursive: true })（libuv 走 FSEvents，
+ * 每根恒定 1 个 fd）替代 chokidar；linux/win 仍走 chokidar（inotify/RDCW
+ * 无此形态）。事件映射：'change'→change；'rename' 按存在性判 add/unlink；
+ * 目录事件过滤（消费方只关心文件）。
+ */
+export function createDarwinRecursiveWatcher(root: string): ChokidarLike {
+  const fileListeners = {
+    add: [] as Array<(p: string) => void>,
+    change: [] as Array<(p: string) => void>,
+    unlink: [] as Array<(p: string) => void>,
+  }
+  const errorListeners: Array<(e: Error) => void> = []
+  const readyListeners: Array<() => void> = []
+
+  const emit = (eventType: string, filename: string | Buffer | null): void => {
+    if (!filename) return
+    const abs = join(root, String(filename))
+    if (isPathIgnored(abs)) return
+    if (eventType === 'change') {
+      try {
+        if (!statSync(abs).isFile()) return
+      } catch {
+        return
+      }
+      for (const cb of fileListeners.change) cb(abs)
+      return
+    }
+    // 'rename' covers create / delete / move-in / move-out.
+    if (existsSync(abs)) {
+      try {
+        if (!statSync(abs).isFile()) return
+      } catch {
+        return
+      }
+      for (const cb of fileListeners.add) cb(abs)
+    } else {
+      for (const cb of fileListeners.unlink) cb(abs)
+    }
+  }
+
+  const watcher: FSWatcher = fsWatchNative(root, { recursive: true, persistent: true }, emit)
+  watcher.on('error', (error) => {
+    for (const cb of errorListeners) cb(error)
+  })
+  queueMicrotask(() => {
+    for (const cb of readyListeners) cb()
+  })
+
+  const like = {
+    on(event: 'add' | 'change' | 'unlink' | 'error' | 'ready', cb: unknown) {
+      if (event === 'error') errorListeners.push(cb as (e: Error) => void)
+      else if (event === 'ready') readyListeners.push(cb as () => void)
+      else fileListeners[event].push(cb as (p: string) => void)
+      return like
+    },
+    async close() {
+      watcher.close()
+    },
+  }
+  return like as unknown as ChokidarLike
+}
+
 /** Apply the same blocklist as the indexer walker. */
 export function isPathIgnored(filePath: string): boolean {
   if (!filePath) return false
@@ -180,8 +252,12 @@ export async function createFileWatcher(
     }
   }
 
+  // D15：macOS 默认走原生 recursive fs.watch（FSEvents，每根 1 fd），
+  // 避免 chokidar v5 的 kqueue 每文件一 fd 灌满进程 fd 表。
   const factory: ChokidarFactory = options.chokidarFactory
-    ?? ((p, opts) => chokidar.watch(p, opts) as unknown as ChokidarLike)
+    ?? (process.platform === 'darwin'
+      ? ((p) => createDarwinRecursiveWatcher(Array.isArray(p) ? p[0] : p))
+      : ((p, opts) => chokidar.watch(p, opts) as unknown as ChokidarLike))
   const debounceMs = options.debounceMs ?? 1000
 
   let watcher: ChokidarLike
