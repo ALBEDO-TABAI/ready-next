@@ -158,6 +158,12 @@ preload `runFeedback` API + electron.d.ts 类型 + 行为测试
 
 **实锚**：卡面"read map again on tab tab-1 · 0/1 0%"与"finish with transaction proof · 1/1 100%"实为 act_on_target 回执的 nextSuggestedAction 文案（browser-tools :3318/:3055），经 browserActionSessionPatch 流入 projection 后被任务卡渲染成步骤/判据进度——呈现语义伪装，且"假判据 100%"严重误导。**待做**：回执建议只进 narration/meta，不得进 steps/criteria 形状的投影字段；补投影形状测试。
 
+# D12 — read_page_map settle 重试 + 站点流程知识（真机第五轮实锚，2026-07-04 午，已完成）
+
+**实锚**：D10-c 新构建下双模型复测——mimo 19s/30s 快败：navigate 后 0 等待立即 map（SPA 未渲染完→图近乎空→放弃）；gpt-5.5 走通切 tab/填标题/填正文（新定位链实证生效），但在"找发布/发送按钮"上兜转——**XHS 长文编辑器没有直接发布按钮，必须先点「一键排版」进预览才有「发送」**（站点流程知识缺口，非感知/智力缺口）。另：13:03 的 lease_required 是用户操作浏览器触发 user_signal 接管的**正确让位**，非缺陷（等待呈现粗糙并入 D8/D11）。
+
+**已完成**：①read_page_map 目标数 <5 时工具层 waitForReady(3s)+重采一次（返回最新 generation 捕获防 stale 合同破坏，evidence.settleRetried 可观测）——把"先等再读"纪律从模型素养下沉为工具合同；②bundled 站点卡改写：④ 步骤改为「一键排版→预览→发送」真实流程、删除"转 Power CDP 读 frame tree"坏建议（正是把模型带进被拒 power 通道的推手）、补"目标少=未渲染完先等"指引；③read_page_map 的 nextSuggestedAction 铲掉 power_cdp 引导文案（D11 假步骤源头之一）。
+
 # 汇总
 | 项 | 已完成 | 待做 | 高危点 | 前置 |
 |----|--------|------|--------|------|

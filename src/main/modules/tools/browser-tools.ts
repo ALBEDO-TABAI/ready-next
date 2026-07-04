@@ -3256,14 +3256,23 @@ export async function executeBrowserTool(
         const maxBytes = typeof args.max_bytes === 'number'
           ? Math.max(1024, Math.min(65_536, args.max_bytes))
           : DEFAULT_AGENT_PAGE_MAP_MAX_BYTES
-        const payload = await captureAgentPageMap(controller, tabId, maxBytes)
-        const pageMapRecord = payload.pageMap && typeof payload.pageMap === 'object'
-          ? payload.pageMap as Record<string, unknown>
-          : null
-        const structureHints = pageMapRecord?.structureHints && typeof pageMapRecord.structureHints === 'object'
-          ? pageMapRecord.structureHints as Record<string, unknown>
-          : null
-        const iframeCount = Array.isArray(structureHints?.iframes) ? structureHints.iframes.length : 0
+        let payload = await captureAgentPageMap(controller, tabId, maxBytes)
+        // D12（真机第五轮实锚）：navigate 后立即 read map 常撞上 SPA 未渲染完
+        // （目标数异常少），弱模型会因此直接放弃。工具层兜一次 settle 重试，
+        // 把"先等再读"的纪律下沉为工具合同。重试后必须返回最新捕获——
+        // generation 已递增，返回旧图会让后续 act 全部撞 stale_page_map。
+        const firstTargetCount = Array.isArray((payload.pageMap as { targets?: unknown[] } | undefined)?.targets)
+          ? ((payload.pageMap as { targets: unknown[] }).targets.length)
+          : 0
+        if (firstTargetCount < 5) {
+          await waitForReady(controller, tabId, 3000, undefined, abortSignal)
+          payload = await captureAgentPageMap(controller, tabId, maxBytes)
+          payload.evidence = {
+            ...(payload.evidence as Record<string, unknown>),
+            settleRetried: true,
+            firstAttemptTargetCount: firstTargetCount,
+          }
+        }
         return attachBrowserActionSessionOutput(JSON.stringify(payload, null, 2), {
           toolName,
           args,
@@ -3271,9 +3280,10 @@ export async function executeBrowserTool(
           sessionId,
           currentUserText,
           tabId,
-          nextSuggestedAction: iframeCount > 0
-            ? 'use browser_power_cdp Page.getFrameTree or browser_power_eval with frame_id for iframe content'
-            : 'act on target or continue reading map',
+          // D10-c 后 iframe 内容已直接并入本图（evidence.frames），不再
+          // 引导 Power CDP 探测——那条建议曾被投影成任务卡假步骤（D11）
+          // 且把模型带进被拒的 power 通道。
+          nextSuggestedAction: 'act on target or continue reading map',
         })
       }
 

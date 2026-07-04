@@ -176,9 +176,12 @@ test('browser_read_page_map 合并子帧目标：targetId 带 frameKey，图上�
   assert.ok(frameTarget, '子帧内目标必须进入 map')
   assert.match(frameTarget.targetId, /^\d+:7-21:1$/)
   assert.match(pageMap.text, /- iframe "https:\/\/example\.com\/embed"/)
-  const evidence = parsed.evidence as { frames?: Array<{ frameKey: string; targetCount: number }> }
+  const evidence = parsed.evidence as { frames?: Array<{ frameKey: string; targetCount: number }>; settleRetried?: boolean; firstAttemptTargetCount?: number }
   assert.equal(evidence.frames?.[0]?.frameKey, '7-21')
   assert.equal(evidence.frames?.[0]?.targetCount, 1)
+  // D12：目标数 <5 触发工具层 settle 重试，账目可观测（返回最新 generation 捕获）
+  assert.equal(evidence.settleRetried, true)
+  assert.equal(typeof evidence.firstAttemptTargetCount, 'number')
 })
 
 test('browser_act_on_target 按 targetId 的 frameKey 把 probe 与 act 路由回子帧', async () => {
