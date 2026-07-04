@@ -103,6 +103,10 @@ function buildBrowserDomTargetLibraryJs(): string {
         return 'textbox';
       }
       if (el.isContentEditable) return 'textbox';
+      // D14（2026-07-04 R1 真机实锚，XHS <xhs-publish-btn>）：Web Component
+      // host 的真实控件藏在 shadow root 里，语义/cursor 信号都在影子内侧，
+      // host 自身全无标记。自定义元素（标签名带 '-'）按可点击 widget 对待。
+      if (tag.indexOf('-') !== -1) return 'clickable';
       // D10-c（2026-07-04 真机实锚，XHS creator "写长文"）：React 委托型
       // 控件是零语义标记的 span/div，唯一可观测信号是 cursor:pointer。
       // 给它专属 role 'clickable'，避免落进 'generic' 被 page-map 去噪层
@@ -129,7 +133,37 @@ function buildBrowserDomTargetLibraryJs(): string {
     }
     function readyTargetElements() {
       const semantic = Array.from(document.querySelectorAll(READY_AGENT_TARGET_SELECTOR));
-      return semantic.concat(readyPointerClickableElements(new Set(semantic)));
+      const semanticSet = new Set(semantic);
+      return semantic
+        .concat(readyPointerClickableElements(semanticSet))
+        .concat(readyCustomElementHosts(semanticSet));
+    }
+    // D14（2026-07-04 R1 真机实锚，XHS 发布按钮 <xhs-publish-btn>）：Web
+    // Component host 在 light DOM 可枚举，但语义选择器不认、pointer 扫描的
+    // 标签清单不含自定义标签、cursor 信号又在影子内侧——三层全盲。host 自身
+    // 就是可点击表面（rect 有效，Chrome 的 innerText 含 shadow 渲染文本），
+    // 收集可见、带短文本、未被语义集覆盖的自定义元素。上限 16 个（真实页面
+    // 自定义控件稀少，超限即噪声页）。
+    function readyCustomElementHosts(semanticSet) {
+      const out = [];
+      let scanned = 0;
+      for (const el of document.querySelectorAll('*')) {
+        if (out.length >= 16 || scanned >= 6000) break;
+        scanned += 1;
+        if (!el.tagName || el.tagName.indexOf('-') === -1) continue;
+        if (semanticSet.has(el)) continue;
+        let style;
+        try { style = window.getComputedStyle(el); } catch { continue; }
+        if (!style || style.display === 'none' || style.visibility === 'hidden') continue;
+        const rect = el.getBoundingClientRect();
+        if (!(rect.width >= 8 && rect.height >= 8)) continue;
+        if (rect.width * rect.height > Math.max(1, (window.innerWidth || 1) * (window.innerHeight || 1)) * 0.5) continue;
+        const text = readyCleanText(el.innerText || el.textContent || el.getAttribute('aria-label') || '');
+        if (!text || text.length > 40) continue;
+        if (el.closest && el.closest(READY_INTERACTIVE_ANCESTOR_SELECTOR)) continue;
+        out.push(el);
+      }
+      return out;
     }
     // D10-c：cursor:pointer 视觉可点击收集级——语义选择器漏掉的委托型控件
     // （span/div tab、卡片按钮）。只收 pointer 边界元素（父级非 pointer，
@@ -509,15 +543,44 @@ export function buildBrowserActOnTargetJs(nodeId: string, action: AgentBrowserAc
       el.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true, view: window }));
     } else {
       // D10-c：React 委托型控件监听 pointerdown/mousedown，裸 el.click()
-      // 对它们是 no-op。先派发指针序列，再 el.click() 保留原生激活语义
+      // 对它们是 no-op。先派发指针序列，再 click() 保留原生激活语义
       // （anchor 导航/checkbox 默认行为）；对原生控件多出的前奏无害。
+      // D14：Web Component 的真实按钮在 shadow root 内，host 上的合成事件
+      // 到不了内部监听器。沿 elementFromPoint 逐层穿透 open shadow root，
+      // 把事件派发到命中节点（composed 事件会经重定向冒泡回 host，两侧
+      // 监听器各触发一次）；命中节点不属于 el 时保持原行为。
       const rect = el.getBoundingClientRect();
-      const opts = { bubbles: true, cancelable: true, view: window, clientX: rect.left + rect.width / 2, clientY: rect.top + rect.height / 2 };
-      el.dispatchEvent(new PointerEvent('pointerdown', opts));
-      el.dispatchEvent(new MouseEvent('mousedown', opts));
-      el.dispatchEvent(new PointerEvent('pointerup', opts));
-      el.dispatchEvent(new MouseEvent('mouseup', opts));
-      el.click();
+      const cx = rect.left + rect.width / 2;
+      const cy = rect.top + rect.height / 2;
+      let dispatchTarget = el;
+      try {
+        let hit = document.elementFromPoint(cx, cy);
+        let guard = 0;
+        while (hit && hit.shadowRoot && typeof hit.shadowRoot.elementFromPoint === 'function' && guard < 5) {
+          const inner = hit.shadowRoot.elementFromPoint(cx, cy);
+          if (!inner || inner === hit) break;
+          hit = inner;
+          guard += 1;
+        }
+        const belongsToEl = (node) => {
+          let n = node;
+          for (let i = 0; n && i < 12; i++) {
+            if (n === el) return true;
+            if (n.parentElement) { n = n.parentElement; continue; }
+            const root = n.getRootNode ? n.getRootNode() : null;
+            n = root && root.host ? root.host : null;
+          }
+          return false;
+        };
+        if (hit && hit !== el && belongsToEl(hit)) dispatchTarget = hit;
+      } catch {}
+      const opts = { bubbles: true, cancelable: true, composed: true, view: window, clientX: cx, clientY: cy };
+      dispatchTarget.dispatchEvent(new PointerEvent('pointerdown', opts));
+      dispatchTarget.dispatchEvent(new MouseEvent('mousedown', opts));
+      dispatchTarget.dispatchEvent(new PointerEvent('pointerup', opts));
+      dispatchTarget.dispatchEvent(new MouseEvent('mouseup', opts));
+      if (typeof dispatchTarget.click === 'function') dispatchTarget.click();
+      else el.click();
     }
     return { ok: true, action, target: record, url: String(location.href || ''), title: String(document.title || '') };
   })()`

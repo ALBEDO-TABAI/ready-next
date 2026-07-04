@@ -174,6 +174,14 @@ preload `runFeedback` API + electron.d.ts 类型 + 行为测试
 
 **D13-b（第七轮实锚，2026-07-04 傍晚，已完成）**：D13 构建下 20KB map ×3 仍不见「发布」，模型 power_eval 连环自查（含 querySelectorAll('button')+disabled 检查）后仍无果被用户手停。排除法定根因：非原生 button（模型自己的 button 枚举已排除）、非尾部截断（D13 已修）→ **pointer 收集的"祖先已覆盖"跳过用了整张语义选择器表（含 `[role]`）——微前端设置页通篇 role=main/region/dialog 容器，全部 pointer 按钮被误杀**。修复：新增 READY_INTERACTIVE_ANCESTOR_SELECTOR（仅真可交互祖先：a[href]/button/input/…/role=button|link|tab 等），预登录页回归对照零丢失。站点卡补逃生口："map 找不到明确看到过的按钮→直接 browser_click_text 精确文本点击（自带 pointer-owner+跨帧回退），不要多轮 Power eval 自查"。mimo 定性：轨迹已全对（等待→map→click_text→map），45s/6 工具诚实收口——纪律/知识/感知已工程兜底，剩余是模型续航（多步坚持度），无工程杠杆可再卸。
 
+# D14 — Web Component 失明：发布按钮是 <xhs-publish-btn> 自定义元素（真机第八轮实锚，2026-07-04 晚，已完成）
+
+**实锚**：dev 修复后 R1 重测（无视觉模型驱动），行为全对（进发布页/填标题/贴正文全成，targets=39 truncated=false——D13 双端修复实证生效），随后 4 分钟“找发布按钮”挣扎：7 连发 power_eval 枚举、analyze_viewport 撞 no_vision 结构化失败、最终模型自己发现 `document.querySelector('xhs-publish-btn')`——**「发布」是 Web Component，真实按钮藏在 shadow root 里**。三层全盲：语义选择器不认自定义标签、pointer 扫描清单（div/span/li/p/img/svg）不含它、cursor 信号在影子内侧。次级观察：模型全程未用站点卡逃生口 browser_click_text（知识采纳缺口）；用户 11:17 手停。
+
+**已完成**：①map 采集新增 readyCustomElementHosts 收集级（light DOM 可枚举的自定义元素 host：可见/短文本/非交互祖先覆盖，cap 16），readyRoleFor 对带 '-' 标签直接判 'clickable'——「发布」以 clickable 进图；②act click 分支升级：elementFromPoint 逐层穿透 open shadow root，事件派发到命中节点（composed:true 冒泡回 host），命中不属于目标时保持原行为；③click_text/locate 的 pointer-owner 爬升跨 shadow 边界跳 host（这两个定位器本就穿透 open shadow root 枚举）；④站点卡记录 `<xhs-publish-btn>` 事实 + 升级链（act 无变化→browser_click_at 按 box 中心可信坐标）。行为测试：browser-probe-collect.test.ts 在 node:vm 执行真实注入 JS 断言采集合同（收录/降噪/顺序确定）。顺手清偿：D12 落地时未同步的 4 个罐头 map 测试（<5 目标误触发 settle 重采）按新合同补齐 ≥5 目标夹具，browser-tools 套件回绿。
+
+**残留**：closed shadow root 下合成事件仍到不了内部监听器（升级链=click_at 可信坐标，已写进站点卡）；「模型不采纳站点卡逃生口」是知识注入呈现问题（候选：把逃生口写进 map 的 nextSuggestedAction 而非只在站点卡），并入后续观察。接管确认横幅无 TTL 本轮再现（并 D8）。
+
 # 汇总
 | 项 | 已完成 | 待做 | 高危点 | 前置 |
 |----|--------|------|--------|------|

@@ -236,10 +236,14 @@ describe('browser-tools v2', () => {
             rawRoots: [
               {
                 role: 'generic',
+                // ≥5 目标：低于 5 会触发 D12 settle 重采（generation +1），
+                // 本测试钉的是首采 generation/歧义组合同，不测重采。
                 children: [
                   { role: 'button', name: 'Search', backendDOMNodeId: 1, frameId: '0' },
                   { role: 'button', name: 'Search', backendDOMNodeId: 2, frameId: '0' },
                   { role: 'textbox', name: 'Query', backendDOMNodeId: 3, frameId: '0' },
+                  { role: 'button', name: 'Filler A', backendDOMNodeId: 4, frameId: '0' },
+                  { role: 'button', name: 'Filler B', backendDOMNodeId: 5, frameId: '0' },
                 ],
               },
             ],
@@ -264,7 +268,7 @@ describe('browser-tools v2', () => {
 
     assert.strictEqual(payload.pageIdentity.generation, 1)
     assert.strictEqual(payload.pageIdentity.title, 'Example Form')
-    assert.strictEqual(payload.pageMap.targets.length, 3)
+    assert.strictEqual(payload.pageMap.targets.length, 5)
     assert.strictEqual(payload.pageMap.targets[0]?.targetId, '1:0:1')
     assert.deepStrictEqual(payload.pageMap.structureHints, { iframes: [], shadowRoots: [], hiddenLoaded: [] })
     assert.strictEqual(payload.ambiguityGroups.length, 1)
@@ -274,7 +278,7 @@ describe('browser-tools v2', () => {
     assert.deepStrictEqual(payload.evidence, {
       generation: 1,
       targetSource: 'dom-target-library',
-      targetCount: 3,
+      targetCount: 5,
       truncated: false,
     })
   })
@@ -287,7 +291,16 @@ describe('browser-tools v2', () => {
           return {
             identity: { url: 'https://example.com/form', title: 'Example Form' },
             viewport: { width: 1000, height: 800 },
-            rawRoots: [{ role: 'generic', children: [{ role: 'textbox', name: 'Query', backendDOMNodeId: 1, frameId: '0' }] }],
+            rawRoots: [{
+              role: 'generic',
+              children: [
+                { role: 'textbox', name: 'Query', backendDOMNodeId: 1, frameId: '0' },
+                { role: 'button', name: 'Filler A', backendDOMNodeId: 2, frameId: '0' },
+                { role: 'button', name: 'Filler B', backendDOMNodeId: 3, frameId: '0' },
+                { role: 'button', name: 'Filler C', backendDOMNodeId: 4, frameId: '0' },
+                { role: 'button', name: 'Filler D', backendDOMNodeId: 5, frameId: '0' },
+              ],
+            }],
             riskFlags: {},
           }
         }
@@ -346,6 +359,9 @@ describe('browser-tools v2', () => {
                 children: [
                   { role: 'button', name: 'Search', backendDOMNodeId: 1, frameId: '0' },
                   { role: 'button', name: 'Search', backendDOMNodeId: 2, frameId: '0' },
+                  { role: 'button', name: 'Filler A', backendDOMNodeId: 3, frameId: '0' },
+                  { role: 'button', name: 'Filler B', backendDOMNodeId: 4, frameId: '0' },
+                  { role: 'button', name: 'Filler C', backendDOMNodeId: 5, frameId: '0' },
                 ],
               },
             ],
@@ -378,7 +394,16 @@ describe('browser-tools v2', () => {
           return {
             identity: { url: 'https://example.com/form', title: 'Example Form' },
             viewport: { width: 1000, height: 800 },
-            rawRoots: [{ role: 'generic', children: [{ role: 'textbox', name: 'Query', backendDOMNodeId: 1, frameId: '0' }] }],
+            rawRoots: [{
+              role: 'generic',
+              children: [
+                { role: 'textbox', name: 'Query', backendDOMNodeId: 1, frameId: '0' },
+                { role: 'button', name: 'Filler A', backendDOMNodeId: 2, frameId: '0' },
+                { role: 'button', name: 'Filler B', backendDOMNodeId: 3, frameId: '0' },
+                { role: 'button', name: 'Filler C', backendDOMNodeId: 4, frameId: '0' },
+                { role: 'button', name: 'Filler D', backendDOMNodeId: 5, frameId: '0' },
+              ],
+            }],
             riskFlags: {},
           }
         }

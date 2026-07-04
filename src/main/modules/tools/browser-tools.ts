@@ -1713,7 +1713,9 @@ function buildClickByTextJs(text: string, exact: boolean): string {
             let cursor = ''
             try { cursor = window.getComputedStyle(owner).cursor } catch { cursor = '' }
             if (cursor === 'pointer') { matched = owner; viaPointerOwner = true; break }
-            owner = owner.parentElement
+            // D14：爬到 shadow root 顶端时跨界跳到 host 继续——Web Component
+            // 的 pointer 信号可能只标在 host（light 侧）上。
+            owner = owner.parentElement || ((owner.getRootNode && owner.getRootNode().host) || null)
           }
           if (matched) break
         }
@@ -1899,7 +1901,8 @@ function buildLocateTextTargetJs(text: string, exact: boolean, hrefContains = ''
             let cursor = ''
             try { cursor = window.getComputedStyle(owner).cursor } catch { cursor = '' }
             if (cursor === 'pointer') { matched = owner; break }
-            owner = owner.parentElement
+            // D14：跨 shadow 边界跳 host，同 buildClickByTextJs。
+            owner = owner.parentElement || ((owner.getRootNode && owner.getRootNode().host) || null)
           }
           if (matched) break
         }
