@@ -438,6 +438,174 @@ describe('browser-tools v2', () => {
     assert.ok(calls.some((source) => source.includes('__READY_AGENT_ACT_ON_TARGET__')))
   })
 
+  // D18（真机第十二轮实锚，XHS 发布按钮 closed shadow root）：合成点击对
+  // closed shadow 内部监听器不可达且回读 changed 恒真（delta vs map 形状
+  // 必不同）。合同：click 判无效果 → 同一次调用内自动升级可信指针点击
+  // （dispatchMouse 通道），升级点击与 browser_click_at 的破坏性闸门同构。
+  it('browser_act_on_target escalates an ineffective click to a trusted pointer click', async () => {
+    let deltaCalls = 0
+    const controller = createControllerMock({
+      executeJS: async (_tabId, code) => {
+        const source = String(code || '')
+        if (source.includes('__READY_AGENT_PAGE_MAP__')) {
+          return {
+            identity: { url: 'https://example.com/publish', title: 'Publish' },
+            viewport: { width: 1000, height: 800 },
+            rawRoots: [{
+              role: 'generic',
+              children: [
+                { role: 'clickable', name: '发布', backendDOMNodeId: 1, frameId: '0' },
+                { role: 'button', name: 'Filler A', backendDOMNodeId: 2, frameId: '0' },
+                { role: 'button', name: 'Filler B', backendDOMNodeId: 3, frameId: '0' },
+                { role: 'button', name: 'Filler C', backendDOMNodeId: 4, frameId: '0' },
+                { role: 'button', name: 'Filler D', backendDOMNodeId: 5, frameId: '0' },
+              ],
+            }],
+            riskFlags: {},
+          }
+        }
+        if (source.includes('__READY_AGENT_TARGET_PROBE__')) {
+          return { matchCount: 1, disabled: false, target: { role: 'clickable', name: '发布' } }
+        }
+        if (source.includes('__READY_AGENT_ACT_ON_TARGET__')) {
+          return {
+            ok: true,
+            action: 'click',
+            target: { role: 'clickable', name: '发布' },
+            clickPoint: { x: 500, y: 780, vw: 1000, vh: 800 },
+          }
+        }
+        if (source.includes('bodyText: String(document.body')) {
+          deltaCalls += 1
+          return deltaCalls <= 2
+            ? { url: 'https://example.com/publish', title: 'Publish', bodyText: 'form' }
+            : { url: 'https://example.com/success', title: 'Done', bodyText: 'published' }
+        }
+        return null
+      },
+    })
+
+    await executeBrowserTool('browser_read_page_map', {}, controller)
+    const result = await executeBrowserTool('browser_act_on_target', { target_id: '1:0:1', action: 'click' }, controller)
+    const payload = parseTool(result) as {
+      ok: boolean
+      changed: boolean
+      escalation?: { attempted?: boolean; mode?: string; changed?: boolean }
+    }
+
+    assert.strictEqual(payload.ok, true)
+    assert.strictEqual(payload.changed, true)
+    assert.strictEqual(payload.escalation?.attempted, true)
+    assert.strictEqual(payload.escalation?.mode, 'trusted_pointer')
+    assert.strictEqual(payload.escalation?.changed, true)
+    assert.ok(controller.calls.mouse.length >= 3, 'trusted pointer input must go through dispatchMouse')
+    assert.deepStrictEqual(controller.calls.normalized?.[0], { x: 500, y: 975 })
+  })
+
+  it('browser_act_on_target does not escalate when the synthetic click already changed the page', async () => {
+    let deltaCalls = 0
+    const controller = createControllerMock({
+      executeJS: async (_tabId, code) => {
+        const source = String(code || '')
+        if (source.includes('__READY_AGENT_PAGE_MAP__')) {
+          return {
+            identity: { url: 'https://example.com/publish', title: 'Publish' },
+            viewport: { width: 1000, height: 800 },
+            rawRoots: [{
+              role: 'generic',
+              children: [
+                { role: 'button', name: '发布', backendDOMNodeId: 1, frameId: '0' },
+                { role: 'button', name: 'Filler A', backendDOMNodeId: 2, frameId: '0' },
+                { role: 'button', name: 'Filler B', backendDOMNodeId: 3, frameId: '0' },
+                { role: 'button', name: 'Filler C', backendDOMNodeId: 4, frameId: '0' },
+                { role: 'button', name: 'Filler D', backendDOMNodeId: 5, frameId: '0' },
+              ],
+            }],
+            riskFlags: {},
+          }
+        }
+        if (source.includes('__READY_AGENT_TARGET_PROBE__')) {
+          return { matchCount: 1, disabled: false, target: { role: 'button', name: '发布' } }
+        }
+        if (source.includes('__READY_AGENT_ACT_ON_TARGET__')) {
+          return {
+            ok: true,
+            action: 'click',
+            target: { role: 'button', name: '发布' },
+            clickPoint: { x: 500, y: 780, vw: 1000, vh: 800 },
+          }
+        }
+        if (source.includes('bodyText: String(document.body')) {
+          deltaCalls += 1
+          return deltaCalls === 1
+            ? { url: 'https://example.com/publish', title: 'Publish', bodyText: 'form' }
+            : { url: 'https://example.com/success', title: 'Done', bodyText: 'published' }
+        }
+        return null
+      },
+    })
+
+    await executeBrowserTool('browser_read_page_map', {}, controller)
+    const result = await executeBrowserTool('browser_act_on_target', { target_id: '1:0:1', action: 'click' }, controller)
+    const payload = parseTool(result) as { ok: boolean; changed: boolean; escalation?: unknown }
+
+    assert.strictEqual(payload.ok, true)
+    assert.strictEqual(payload.changed, true)
+    assert.strictEqual(payload.escalation, undefined)
+    assert.strictEqual(controller.calls.mouse.length, 0)
+  })
+
+  it('browser_act_on_target escalation keeps the destructive-target gate loud', async () => {
+    const controller = createControllerMock({
+      executeJS: async (_tabId, code) => {
+        const source = String(code || '')
+        if (source.includes('__READY_AGENT_PAGE_MAP__')) {
+          return {
+            identity: { url: 'https://example.com/checkout', title: 'Checkout' },
+            viewport: { width: 1000, height: 800 },
+            rawRoots: [{
+              role: 'generic',
+              children: [
+                { role: 'clickable', name: '继续', backendDOMNodeId: 1, frameId: '0' },
+                { role: 'button', name: 'Filler A', backendDOMNodeId: 2, frameId: '0' },
+                { role: 'button', name: 'Filler B', backendDOMNodeId: 3, frameId: '0' },
+                { role: 'button', name: 'Filler C', backendDOMNodeId: 4, frameId: '0' },
+                { role: 'button', name: 'Filler D', backendDOMNodeId: 5, frameId: '0' },
+              ],
+            }],
+            riskFlags: {},
+          }
+        }
+        if (source.includes('__READY_AGENT_TARGET_PROBE__')) {
+          return { matchCount: 1, disabled: false, target: { role: 'clickable', name: '继续' } }
+        }
+        if (source.includes('__READY_AGENT_ACT_ON_TARGET__')) {
+          return {
+            ok: true,
+            action: 'click',
+            target: { role: 'clickable', name: '继续' },
+            clickPoint: { x: 500, y: 780, vw: 1000, vh: 800 },
+          }
+        }
+        // 升级点击的坐标探针发现点下真实覆盖着支付确认控件 → 闸门必须响。
+        if (source.includes('__READY_CLICK_POINT_LABEL_PROBE__')) {
+          return { label: '确认支付', inputLabel: '', password: false, editable: false }
+        }
+        if (source.includes('bodyText: String(document.body')) {
+          return { url: 'https://example.com/checkout', title: 'Checkout', bodyText: 'form' }
+        }
+        return null
+      },
+    })
+
+    await executeBrowserTool('browser_read_page_map', {}, controller)
+    await assert.rejects(
+      executeBrowserTool('browser_act_on_target', { target_id: '1:0:1', action: 'click' }, controller),
+      (error: unknown) => (error as { errorKind?: string }).errorKind === 'grant_required',
+    )
+    assert.strictEqual(controller.calls.mouse.length, 0, 'gated escalation must not dispatch mouse input')
+  })
+
   it('browser_click_at should clamp normalized coordinates', async () => {
     const controller = createControllerMock()
     const result = await executeBrowserTool('browser_click_at', { x: -20, y: 1800 }, controller)

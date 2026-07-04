@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import vm from 'node:vm'
 
-import { buildBrowserPageMapProbeJs } from '../main/modules/tools/browser-probe'
+import { buildBrowserActOnTargetJs, buildBrowserPageMapProbeJs } from '../main/modules/tools/browser-probe'
 
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 
@@ -62,6 +62,18 @@ class FakeElement {
 
   closest(_selector: string): FakeElement | null {
     return this.hasInteractiveAncestor ? new FakeElement('button') : null
+  }
+
+  dispatchEvent(_event: unknown): boolean {
+    return true
+  }
+
+  click(): void {
+    // synthetic activation sink for the act-JS click branch
+  }
+
+  focus(): void {
+    // focus sink for the act-JS fill branch
   }
 }
 
@@ -179,4 +191,79 @@ test('pointer-cursor collection still works alongside custom hosts, order determ
       { role: 'clickable', name: '发布', id: 3 },
     ],
   )
+})
+
+// D18：act click 分支必须把点击坐标（视口 CSS px + 视口尺寸）交回工具层，
+// 供 closed-shadow 无效果时升级可信指针点击。fill 等非 click 动作不带。
+function runAct(nodeId: string, action: 'click' | 'fill', elements: {
+  semantic: FakeElement[]
+  pointer: FakeElement[]
+  all: FakeElement[]
+}): { ok: boolean; clickPoint: { x: number; y: number; vw: number; vh: number } | null } {
+  const querySelectorAll = (selector: string): FakeElement[] => {
+    if (selector === '*') return elements.all
+    if (selector === 'div,span,li,p,img,svg') return elements.pointer
+    if (selector.includes('a[href]') && selector.includes('h6')) return elements.semantic
+    return []
+  }
+  const getComputedStyle = (el: FakeElement) => el.style
+  class FakeEvent {
+    constructor(public type: string, public opts?: unknown) {}
+  }
+  const sandbox = {
+    document: {
+      querySelectorAll,
+      querySelector: () => null,
+      getElementById: () => null,
+      title: 'fake',
+      body: { innerText: '' },
+      // elementFromPoint 缺省：act JS 的穿透块 try/catch 吞掉后按原目标派发
+    },
+    window: { getComputedStyle, innerWidth: 1200, innerHeight: 900 },
+    getComputedStyle,
+    location: { href: 'https://fake.example/page', origin: 'https://fake.example' },
+    Element: FakeElement,
+    HTMLInputElement: class {},
+    HTMLTextAreaElement: class {},
+    HTMLSelectElement: class {},
+    HTMLButtonElement: class {},
+    PointerEvent: FakeEvent,
+    MouseEvent: FakeEvent,
+    Event: FakeEvent,
+    InputEvent: FakeEvent,
+    CSS: { escape: (s: string) => s },
+    URL: class {
+      origin = 'https://fake.example'
+    },
+  }
+  return JSON.parse(JSON.stringify(vm.runInNewContext(buildBrowserActOnTargetJs(nodeId, action, 'v'), sandbox))) as {
+    ok: boolean
+    clickPoint: { x: number; y: number; vw: number; vh: number } | null
+  }
+}
+
+test('act click returns the click point for trusted-pointer escalation', () => {
+  const stashButton = new FakeElement('button', { text: '暂存离开' })
+  const publishHost = new FakeElement('xhs-publish-btn', { text: '发布' })
+  const result = runAct('2', 'click', {
+    semantic: [stashButton],
+    pointer: [],
+    all: [stashButton, publishHost],
+  })
+  assert.strictEqual(result.ok, true)
+  // rect: left 10 top 10, 120x40 → center (70, 30)；视口 1200x900
+  assert.deepStrictEqual(result.clickPoint, { x: 70, y: 30, vw: 1200, vh: 900 })
+})
+
+test('act fill carries no click point', () => {
+  const editable = new FakeElement('div', { text: '' })
+  editable.isContentEditable = true
+  const stashButton = new FakeElement('button', { text: '暂存离开' })
+  const result = runAct('2', 'fill', {
+    semantic: [stashButton, editable],
+    pointer: [],
+    all: [stashButton, editable],
+  })
+  assert.strictEqual(result.ok, true)
+  assert.strictEqual(result.clickPoint, null)
 })

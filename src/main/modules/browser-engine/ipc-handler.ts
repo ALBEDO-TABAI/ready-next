@@ -381,6 +381,11 @@ export class BrowserController {
       resolveOriginDomain: (webContentsId) => this.resolveOriginDomainForWebContentsId(webContentsId),
       isPreviewWebContentsId: (webContentsId) => this.previewService.matchesWebContentsId(webContentsId),
       getMainWindow: () => (this.mainWindow && !this.mainWindow.isDestroyed() ? this.mainWindow : null),
+      isAgentDriveActive: () => {
+        const leaseService = getBrowserWriteLeaseService()
+        return leaseService.getLease('user-view') !== null || leaseService.getLease('agent-view') !== null
+      },
+      logDiagnostics: (message) => this.diagnosticsService.log(message),
     })
     this.utilityMenuService = new BrowserUtilityMenuService({
       mainWindow,

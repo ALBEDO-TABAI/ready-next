@@ -527,6 +527,7 @@ export function buildBrowserActOnTargetJs(nodeId: string, action: AgentBrowserAc
     if (record.states && record.states.disabled === true) {
       return { ok: false, errorCode: 'target_not_found', message: 'Target is disabled.', target: record };
     }
+    let clickPoint = null;
     if (action === 'fill') {
       if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
         el.focus();
@@ -600,8 +601,18 @@ export function buildBrowserActOnTargetJs(nodeId: string, action: AgentBrowserAc
       dispatchTarget.dispatchEvent(new MouseEvent('mouseup', opts));
       if (typeof dispatchTarget.click === 'function') dispatchTarget.click();
       else el.click();
+      // D18：closed shadow root 内的监听器对上面整套合成事件仍然不可达
+      // （事件不会向 shadow 内部传播，host.click() 也点不到内部按钮）。
+      // 把点击坐标交回工具层，readBack 判无效果时由主进程升级为可信
+      // 指针输入（与 browser_click_at 同通道，走真实命中测试）。
+      clickPoint = {
+        x: cx,
+        y: cy,
+        vw: Number(window.innerWidth || 0),
+        vh: Number(window.innerHeight || 0),
+      };
     }
-    return { ok: true, action, target: record, url: String(location.href || ''), title: String(document.title || '') };
+    return { ok: true, action, target: record, url: String(location.href || ''), title: String(document.title || ''), clickPoint };
   })()`
 }
 

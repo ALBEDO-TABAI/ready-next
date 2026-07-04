@@ -93,7 +93,7 @@ test('act_on_target: bare target_id click on a payment-confirm control → grant
       return {
         identity: { url: 'https://example.com/checkout', title: 'Checkout' },
         viewport: { width: 1000, height: 800 },
-        rawRoots: [{ role: 'generic', children: [{ role: 'button', name: '确认支付', backendDOMNodeId: 1, frameId: '0' }] }],
+        rawRoots: [{ role: 'generic', children: [{ role: 'button', name: '确认支付', backendDOMNodeId: 1, frameId: '0' }, { role: 'button', name: 'Filler A', backendDOMNodeId: 91, frameId: '0' }, { role: 'button', name: 'Filler B', backendDOMNodeId: 92, frameId: '0' }, { role: 'button', name: 'Filler C', backendDOMNodeId: 93, frameId: '0' }, { role: 'button', name: 'Filler D', backendDOMNodeId: 94, frameId: '0' }] }],
         riskFlags: {},
       }
     }
@@ -118,7 +118,7 @@ test('act_on_target: fill into a live password field without an args cue → rer
       return {
         identity: { url: 'https://example.com/login', title: 'Login' },
         viewport: { width: 1000, height: 800 },
-        rawRoots: [{ role: 'generic', children: [{ role: 'textbox', name: '口令', backendDOMNodeId: 1, frameId: '0' }] }],
+        rawRoots: [{ role: 'generic', children: [{ role: 'textbox', name: '口令', backendDOMNodeId: 1, frameId: '0' }, { role: 'button', name: 'Filler A', backendDOMNodeId: 91, frameId: '0' }, { role: 'button', name: 'Filler B', backendDOMNodeId: 92, frameId: '0' }, { role: 'button', name: 'Filler C', backendDOMNodeId: 93, frameId: '0' }, { role: 'button', name: 'Filler D', backendDOMNodeId: 94, frameId: '0' }] }],
         riskFlags: {},
       }
     }
@@ -148,7 +148,7 @@ test('act_on_target: password fill WITH an args cue proceeds (gate upstream owne
       return {
         identity: { url: 'https://example.com/login', title: 'Login' },
         viewport: { width: 1000, height: 800 },
-        rawRoots: [{ role: 'generic', children: [{ role: 'textbox', name: '口令', backendDOMNodeId: 1, frameId: '0' }] }],
+        rawRoots: [{ role: 'generic', children: [{ role: 'textbox', name: '口令', backendDOMNodeId: 1, frameId: '0' }, { role: 'button', name: 'Filler A', backendDOMNodeId: 91, frameId: '0' }, { role: 'button', name: 'Filler B', backendDOMNodeId: 92, frameId: '0' }, { role: 'button', name: 'Filler C', backendDOMNodeId: 93, frameId: '0' }, { role: 'button', name: 'Filler D', backendDOMNodeId: 94, frameId: '0' }] }],
         riskFlags: {},
       }
     }
@@ -184,7 +184,7 @@ test('act_on_target: fill into an editable field whose VALUE contains a trigger 
       return {
         identity: { url: 'https://example.com/form', title: 'Form' },
         viewport: { width: 1000, height: 800 },
-        rawRoots: [{ role: 'generic', children: [{ role: 'textbox', name: '订单备注', backendDOMNodeId: 1, frameId: '0' }] }],
+        rawRoots: [{ role: 'generic', children: [{ role: 'textbox', name: '订单备注', backendDOMNodeId: 1, frameId: '0' }, { role: 'button', name: 'Filler A', backendDOMNodeId: 91, frameId: '0' }, { role: 'button', name: 'Filler B', backendDOMNodeId: 92, frameId: '0' }, { role: 'button', name: 'Filler C', backendDOMNodeId: 93, frameId: '0' }, { role: 'button', name: 'Filler D', backendDOMNodeId: 94, frameId: '0' }] }],
         riskFlags: {},
       }
     }

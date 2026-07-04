@@ -147,7 +147,13 @@ test('browser_act_on_target action failure returns an error envelope, not ok tex
       if (script.includes('__READY_AGENT_PAGE_MAP__')) {
         return {
           viewport: { width: 800, height: 600 },
-          rawRoots: [{ role: 'button', name: 'Open', backendDOMNodeId: 42, frameId: '0' }],
+          rawRoots: [
+            { role: 'button', name: 'Open', backendDOMNodeId: 42, frameId: '0' },
+            { role: 'button', name: 'Filler A', backendDOMNodeId: 91, frameId: '0' },
+            { role: 'button', name: 'Filler B', backendDOMNodeId: 92, frameId: '0' },
+            { role: 'button', name: 'Filler C', backendDOMNodeId: 93, frameId: '0' },
+            { role: 'button', name: 'Filler D', backendDOMNodeId: 94, frameId: '0' },
+          ],
         }
       }
       if (script.includes('__READY_AGENT_TARGET_PROBE__')) {

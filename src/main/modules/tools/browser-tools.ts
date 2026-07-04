@@ -18,6 +18,7 @@ import { compileBrowserReadonlyScriptTemplate } from './browser-readonly-script-
 import { classifyBrowserPowerFailure, browserToolOriginFromUrl } from './browser-power-failure'
 import { verifyDownloadedMedia } from '../browser-engine/media-verification'
 import { captureBrowserActionReceipt, type BrowserActionReceipt } from '../browser-engine/browser-action-receipt'
+import { consumePendingBrowserSitePermissionNotices } from '../browser-engine/browser-permission-policy'
 import { domainsLikelyMatch } from '../agent-control/domain-adapters/browser-action-heuristics'
 import { AgentRepository } from '../repositories/agent-repository'
 import { createRotatingLogger } from '../../utils/rotating-logger'
@@ -1403,7 +1404,9 @@ function attachBrowserActionSessionOutput(
   },
 ): string | ToolExecutionOutput {
   const patch = browserActionSessionPatch(params)
-  if (!patch && !params.changeReceipt) return result
+  // Drain 必须先于 early-return：注记一旦取出就必须随本次输出交付。
+  const sitePermissionNotices = consumePendingBrowserSitePermissionNotices()
+  if (!patch && !params.changeReceipt && sitePermissionNotices.length === 0) return result
   const data: Record<string, unknown> = typeof result === 'string'
     ? (() => {
       try {
@@ -1422,6 +1425,11 @@ function attachBrowserActionSessionOutput(
   // a follow-up read_page. Session patch may be absent (early live target).
   if (params.changeReceipt) {
     data.changeReceipt = params.changeReceipt
+  }
+  // Agent 驾驶期间被自动拒绝的站点权限请求随下一次浏览器动作输出带给模型
+  //（drain 语义，权限判决本身已在 session-policy-service 落日志）。
+  if (sitePermissionNotices.length > 0) {
+    data.sitePermissionNotices = sitePermissionNotices
   }
   if (!patch) {
     return createToolExecutionOutput(JSON.stringify(data, null, 2), {
@@ -3476,16 +3484,67 @@ export async function executeBrowserTool(
           throw error
         }
         await settleAfterAction(controller, tabId, abortSignal)
-        const followedTab = await waitForActionFollowedTab(controller, tabId, beforeTabs, abortSignal)
-        const after = readBack === 'map'
-          ? await captureAgentPageMap(controller, tabId, DEFAULT_AGENT_PAGE_MAP_MAX_BYTES)
-          : readBack === 'none'
-            ? null
-            : await readBrowserActionDeltaBestEffort(controller, tabId, 'after')
+        let followedTab = await waitForActionFollowedTab(controller, tabId, beforeTabs, abortSignal)
         const actionFailed = typeof actionResult === 'object' && actionResult !== null && (actionResult as { ok?: unknown }).ok === false
         const failureKind = actionFailed
           ? String((actionResult as { errorCode?: unknown }).errorCode || 'action_failed')
           : null
+        // 变更信号统一用前后 delta（url/title/bodyText）比较——旧实现在
+        // readBack='map' 时拿动作前 delta 对比整张 map，形状必不同，changed
+        // 恒为 true 是假信号（真机第十二轮实锚：发布按钮点了无反应，回读
+        // 却报 changed:true，模型因此不升级）。
+        let afterDelta = readBack === 'none' ? null : await readBrowserActionDeltaBestEffort(controller, tabId, 'after')
+        let changed = didBrowserActionChange(before, afterDelta)
+        // D18 升级通道：合成点击（含 open-shadow 穿透）对 closed shadow root
+        // 内部监听器不可达（事件不向 shadow 内传播，host.click() 也点不到内部
+        // 按钮）。click 判无效果（delta 未变且未开新 tab）时，在同一次调用内
+        // 用可信指针输入（与 browser_click_at 同一 dispatchMouse 通道，含破坏
+        // 性目标闸门）在原点击坐标补真实命中测试点击。只处理主帧：iframe 的
+        // rect 坐标系与视口不同构。
+        let escalation: Record<string, unknown> | null = null
+        const rawClickPoint = !actionFailed && action === 'click' && actionResult && typeof actionResult === 'object'
+          ? (actionResult as { clickPoint?: { x?: unknown; y?: unknown; vw?: unknown; vh?: unknown } | null }).clickPoint
+          : null
+        const cpx = Number(rawClickPoint?.x)
+        const cpy = Number(rawClickPoint?.y)
+        const cpw = Number(rawClickPoint?.vw)
+        const cph = Number(rawClickPoint?.vh)
+        const clickPointValid = Number.isFinite(cpx) && Number.isFinite(cpy)
+          && cpw > 0 && cph > 0 && cpx >= 0 && cpx <= cpw && cpy >= 0 && cpy <= cph
+        if (
+          action === 'click' && !actionFailed && readBack !== 'none'
+          && !changed && !followedTab && targetFrameKey === '0' && clickPointValid
+        ) {
+          const nx = Math.max(0, Math.min(999, Math.round((cpx / cpw) * 1000)))
+          const ny = Math.max(0, Math.min(999, Math.round((cpy / cph) * 1000)))
+          try {
+            await runGuardedCoordinateClick(controller, tabId, nx, ny, abortSignal)
+            const escalatedFollowedTab = await waitForActionFollowedTab(controller, tabId, beforeTabs, abortSignal)
+            afterDelta = await readBrowserActionDeltaBestEffort(controller, tabId, 'after')
+            const escalatedChanged = didBrowserActionChange(before, afterDelta) || Boolean(escalatedFollowedTab)
+            escalation = {
+              attempted: true,
+              mode: 'trusted_pointer',
+              reason: 'no_change_after_synthetic_click',
+              changed: escalatedChanged,
+            }
+            changed = changed || escalatedChanged
+            if (escalatedFollowedTab) followedTab = escalatedFollowedTab
+          } catch (error) {
+            // 闸门（grant_required / 待确认拒绝）保持响亮——升级点击与
+            // browser_click_at 的安全语义必须同构，不能因为是兜底就静默。
+            if (error instanceof ToolDomainError) throw error
+            escalation = {
+              attempted: true,
+              mode: 'trusted_pointer',
+              reason: 'no_change_after_synthetic_click',
+              error: error instanceof Error ? error.message : String(error),
+            }
+          }
+        }
+        const after = readBack === 'map'
+          ? await captureAgentPageMap(controller, tabId, DEFAULT_AGENT_PAGE_MAP_MAX_BYTES)
+          : afterDelta
         const payload = {
           ok: !actionFailed,
           targetId,
@@ -3495,7 +3554,8 @@ export async function executeBrowserTool(
           before,
           result: actionResult,
           after,
-          changed: didBrowserActionChange(before, after),
+          changed,
+          ...(escalation ? { escalation } : {}),
           followedTab,
           failureKind,
           nextSuggestedAction: followedTab ? `read map again on tab ${followedTab.tabId}` : 'read map again',

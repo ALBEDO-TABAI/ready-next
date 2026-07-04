@@ -2,7 +2,10 @@ import { BrowserWindow, dialog, session, type MessageBoxOptions } from 'electron
 
 import { BrowserDataService, normalizeDomainToken, type BrowserAdblockState } from './data-service'
 import {
-  requiresUserApprovalBrowserPermission,
+  recordAgentAutoDeniedSitePermission,
+  resolveBrowserPermissionPath,
+} from './browser-permission-policy'
+import {
   shouldAllowBrowserPermission,
   supportsBrowserPermissionRequest,
 } from './popup-policy'
@@ -44,7 +47,12 @@ interface BrowserSessionPolicyDeps {
   resolveOriginDomain: (webContentsId?: number) => string
   isPreviewWebContentsId: (webContentsId?: number) => boolean
   getMainWindow: () => BrowserWindow | null
+  /** True while an agent run holds a browser write lease（无人值守判定）。 */
+  isAgentDriveActive?: () => boolean
+  /** 权限请求/判决落 ready-browser.log（真机第十二轮观测盲区）。 */
+  logDiagnostics?: (message: string) => void
 }
+
 
 export class BrowserSessionPolicyService {
   private adblockState: BrowserAdblockState
@@ -107,33 +115,41 @@ export class BrowserSessionPolicyService {
 
       targetSession.setPermissionRequestHandler((webContents, permission, callback) => {
         const requestingUrl = webContents.getURL()
-        if (!supportsBrowserPermissionRequest(permission)) {
-          callback(false)
-          return
-        }
-        if (shouldAllowBrowserPermission(permission, requestingUrl)) {
-          callback(true)
-          return
-        }
-        if (!requiresUserApprovalBrowserPermission(permission)) {
-          callback(false)
-          return
-        }
-
         const decisionKey = this.getPermissionDecisionKey(permission, requestingUrl)
-        const existingDecision = this.permissionDecisions.get(decisionKey)
-        if (existingDecision !== undefined) {
-          callback(existingDecision)
-          return
-        }
-
-        void this.promptForPermission(permission, requestingUrl).then((allowed) => {
-          this.permissionDecisions.set(decisionKey, allowed)
-          callback(allowed)
-        }).catch(() => {
-          this.permissionDecisions.set(decisionKey, false)
-          callback(false)
+        const path = resolveBrowserPermissionPath({
+          permission,
+          requestingUrl,
+          cachedDecision: this.permissionDecisions.get(decisionKey),
+          agentDriveActive: this.deps.isAgentDriveActive?.() === true,
         })
+        this.logPermissionEvent(`request path=${path}`, permission, requestingUrl)
+        switch (path) {
+          case 'auto_allow':
+          case 'cached_allow':
+            callback(true)
+            return
+          case 'unsupported_deny':
+          case 'policy_deny':
+          case 'cached_deny':
+            callback(false)
+            return
+          case 'agent_auto_deny': {
+            // 不缓存判决：用户在场后仍可对同一 origin 弹窗决定。
+            recordAgentAutoDeniedSitePermission(permission, this.formatRequestingHost(requestingUrl))
+            callback(false)
+            return
+          }
+          case 'prompt':
+            void this.promptForPermission(permission, requestingUrl).then((allowed) => {
+              this.logPermissionEvent(`decision=${allowed ? 'allow' : 'deny'}`, permission, requestingUrl)
+              this.permissionDecisions.set(decisionKey, allowed)
+              callback(allowed)
+            }).catch(() => {
+              this.logPermissionEvent('decision=deny reason=prompt_failed', permission, requestingUrl)
+              this.permissionDecisions.set(decisionKey, false)
+              callback(false)
+            })
+        }
       })
 
       if (!marker.__readyBrowserAdblockApplied) {
@@ -232,6 +248,16 @@ export class BrowserSessionPolicyService {
       return `${parsed.origin}::${String(permission || '').toLowerCase()}`
     } catch {
       return `${String(requestingUrl || '')}::${String(permission || '').toLowerCase()}`
+    }
+  }
+
+  private logPermissionEvent(event: string, permission: string, requestingUrl?: string): void {
+    try {
+      this.deps.logDiagnostics?.(
+        `[browser-v3][permission] ${event} permission=${String(permission || '').toLowerCase()} origin=${this.formatRequestingHost(requestingUrl)}`,
+      )
+    } catch {
+      // silent-catch: 诊断日志失败不得影响权限判决回调。
     }
   }
 
