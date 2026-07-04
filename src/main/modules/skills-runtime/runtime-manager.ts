@@ -1,8 +1,8 @@
-import { spawn, type ChildProcessWithoutNullStreams } from 'child_process'
+import type { ChildProcessWithoutNullStreams } from 'child_process'
 import { randomUUID } from 'crypto'
 import { createRequire } from 'module'
 import { join, delimiter } from 'path'
-import { appendFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'fs'
+import { appendFileSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'fs'
 
 // See database.ts for the full rationale. Electron's Node entry is a CJS
 // string-export, so ESM `import { app } from 'electron'` breaks tsx/ESM tests
@@ -15,7 +15,7 @@ const electronModule = (() => {
   try { return createRequire(import.meta.url)('electron') as typeof import('electron') }
   catch { return {} as typeof import('electron') }
 })()
-const { app, session } = electronModule
+const { app } = electronModule
 import { getDatabase } from '../database'
 import { atomicWriteJson } from '../agent-control/atomic-write'
 import { getWhichCommand } from '../../utils/platform'
@@ -32,7 +32,6 @@ import {
   type RegisteredCustomSkill,
   getManagedCustomSkill,
   importCustomSkillFolder,
-  listManagedCustomSkills,
   loadCustomSkillManifestFromFolder,
   removeManagedCustomSkill,
   updateManagedCustomSkillDescription,
@@ -42,16 +41,10 @@ import { scanSkillDirectory } from './skill-security-scanner'
 // Phase 4: ExecutionStateStore / ExecutionCoordinator retired along with the
 // skill_executions state machine. The imports (and the files) are removed in
 // PR1-E.
-import { sweepExpiredReferenceSkillHints } from '../agent-control/skills/skill-reference-hints'
 import { logAgentMetric } from '../agent-control/metrics'
-import {
-  sweepChildRunLogs,
-  sweepOutputDirs,
-} from './output-dir-sweep'
-import {
-  getSkillHostController,
-  type SkillHostController,
-  type SpawnContextHandle,
+import type {
+  SkillHostController,
+  SpawnContextHandle,
 } from './skill-host-controller'
 import { spawnWithTreeKill, type SpawnWithTreeKillError } from '../process-cleanup/spawn-with-tree-kill'
 import {
@@ -88,26 +81,13 @@ import { ExternalServiceStore } from '../settings-engine/external-service-store'
 import { SkillConfigurationStore } from './skill-configuration-store'
 import type { SkillConfigurationUpdateInput, SkillConfigurationView } from '../../../shared/skill-configuration'
 import {
-  MODEL_PACK_IDS,
-  createDefaultModelPackDownloadStatus,
   detectMissingRuntimeDependency,
   type ModelPackDownloadRequest,
   type ModelPackDownloadStatus,
   type ModelPackId,
-  type ModelPackSelfTestEntry,
   type ModelPackSelfTestReport,
-  type ModelPackSourceProbe,
   type ModelPackStatus,
 } from '../../../shared/model-pack-types'
-import {
-  buildModelPackDownloadScript,
-  getModelPackDescriptor,
-  reduceDownloadProgressChunk,
-  resolveExplicitModelProvider,
-  resolveModelProvider,
-  resolvedProviderEndpoint,
-  type ResolvedModelProvider,
-} from './model-pack-registry'
 import {
   assessSkillSourceRisk,
   createDefaultSkillInstallStatus,
@@ -146,13 +126,19 @@ import {
   SCHEDULER_INTERVAL_MS,
   normalizeSkillRunStatus,
   mergeSkillRunStatus,
-  envNumber,
-  RETIRED_EMBEDDED_SKILL_IDS,
   hashDirectoryContents,
   truncateOutput,
   getInstallStatePath,
   requirementsDigest,
 } from './runtime-manager-helpers'
+// B8-D M1 (2026-07-05) — delegated sub-services extracted from this class
+// (surgery map §2.3 D 表, 风险低组). Method bodies moved verbatim; this class
+// keeps one-line delegates so the external call face (IPC / tools / tests) is
+// unchanged. None of these files import runtime-manager (防环).
+import { ModelPackManager } from './model-pack-manager'
+import { MaintenanceSweeps } from './maintenance-sweeps'
+import { ExternalEnvResolver } from './external-env-resolver'
+import { SkillHostPrep } from './skill-host-prep'
 import type {
   SkillDeploySpawn,
   SkillTriggerType,
@@ -208,7 +194,6 @@ export class SkillsRuntimeManager {
   private readonly packagedRuntimeRoot: string | null
   private readonly packagedRuntimeManifest: PackagedSkillRuntimeManifest | null
   private readonly embeddedSkillsRootOverride?: string
-  private readonly hostControllerOverride?: SkillHostController
   private readonly externalServiceStore = new ExternalServiceStore()
   private readonly skillConfigurationStore = new SkillConfigurationStore()
   private readonly retiredEmbeddedSkillIdsOverride?: ReadonlySet<string>
@@ -216,13 +201,11 @@ export class SkillsRuntimeManager {
   private runtimeProvisioner: RuntimeProvisioner | null = null
   private installLocks = new Map<SkillId, Promise<SkillInstallResult>>()
   private schedulerTimer: NodeJS.Timeout | null = null
-  private referenceHintBootTimer: NodeJS.Timeout | null = null
-  private referenceHintIntervalTimer: NodeJS.Timeout | null = null
-  private outputDirSweepBootTimer: NodeJS.Timeout | null = null
-  private outputDirSweepIntervalTimer: NodeJS.Timeout | null = null
   private runningScheduleIds = new Set<string>()
-  private orphanCleanupRan = false
   // One in-flight download per pack so packs download independently.
+  // B8-D M1: the Maps stay declared here (model-pack-manager.test.ts pokes the
+  // manager instance's properties directly) and are shared by reference with
+  // the ModelPackManager sub-service, which owns all reads/writes.
   private modelPackDownloads = new Map<ModelPackId, ChildProcessWithoutNullStreams>()
   private modelPackDownloadStatuses = new Map<ModelPackId, ModelPackDownloadStatus>()
   // Remote skill installs, keyed by an opaque requestId so multiple installs run
@@ -240,8 +223,17 @@ export class SkillsRuntimeManager {
   // Phase 4: reference-skill hint TTL sweep runs independently of the retired
   // skill_executions state machine. Boot delay prevents blocking startup; the
   // hourly cadence matches the previous combined sweep.
+  // B8-D M1: the constants stay declared here (tool-error-metrics-contract
+  // pins this assignment text) and are injected by value into MaintenanceSweeps.
   private static readonly REFERENCE_HINT_BOOT_DELAY_MS = 30_000
   private static readonly REFERENCE_HINT_SWEEP_INTERVAL_MS = 60 * 60_000
+
+  // B8-D M1 — delegated sub-services (constructed in the constructor after the
+  // path fields they capture are assigned).
+  private readonly modelPack: ModelPackManager
+  private readonly maintenanceSweeps: MaintenanceSweeps
+  private readonly externalEnv: ExternalEnvResolver
+  private readonly skillHostPrep: SkillHostPrep
 
   constructor(options: SkillsRuntimeManagerOptions = {}) {
     this.runtimeRoot = options.runtimeRoot || join(app.getPath('userData'), 'skill-runtime')
@@ -262,8 +254,45 @@ export class SkillsRuntimeManager {
       ? readPackagedSkillRuntimeManifest(this.packagedRuntimeRoot)
       : null
     this.embeddedSkillsRootOverride = options.embeddedSkillsRoot
-    this.hostControllerOverride = options.hostController
     this.retiredEmbeddedSkillIdsOverride = options.retiredEmbeddedSkillIds
+    // B8-D M1 — wire the delegated sub-services. Cross-service dependencies go
+    // through `this.*` delegate closures (lazy), so construction order among
+    // the services does not matter; they only need the path fields above.
+    this.modelPack = new ModelPackManager({
+      runtimeRoot: this.runtimeRoot,
+      cacheRoot: this.cacheRoot,
+      modelPackDownloads: this.modelPackDownloads,
+      modelPackDownloadStatuses: this.modelPackDownloadStatuses,
+      ensureRuntimeDirs: () => this.ensureRuntimeDirs(),
+      ensureSkillInstalled: (skillId) => this.ensureSkillInstalled(skillId),
+      ensurePythonVenv: () => this.ensurePythonVenv(),
+      getBaseEnv: () => this.getBaseEnv(),
+    })
+    this.externalEnv = new ExternalEnvResolver({
+      runtimeRoot: this.runtimeRoot,
+      packagedRuntimeRoot: this.packagedRuntimeRoot,
+      externalServiceStore: this.externalServiceStore,
+      skillConfigurationStore: this.skillConfigurationStore,
+      buildFunasrNanoRuntimeEnv: () => this.buildFunasrNanoRuntimeEnv(),
+      buildFunasrFallbackModelEnv: (funasrOptions) => this.buildFunasrFallbackModelEnv(funasrOptions),
+    })
+    this.skillHostPrep = new SkillHostPrep({
+      runtimeRoot: this.runtimeRoot,
+      hostControllerOverride: options.hostController,
+      ensureRuntimeDirs: () => this.ensureRuntimeDirs(),
+      ensurePythonVenv: () => this.ensurePythonVenv(),
+      getBaseEnv: () => this.getBaseEnv(),
+    })
+    this.maintenanceSweeps = new MaintenanceSweeps({
+      runtimeRoot: this.runtimeRoot,
+      skillsRoot: this.skillsRoot,
+      customSkillsRoot: this.customSkillsRoot,
+      bootDelayMs: SkillsRuntimeManager.REFERENCE_HINT_BOOT_DELAY_MS,
+      sweepIntervalMs: SkillsRuntimeManager.REFERENCE_HINT_SWEEP_INTERVAL_MS,
+      retiredEmbeddedSkillIds: this.retiredEmbeddedSkillIdsOverride,
+      ensureRuntimeDirs: () => this.ensureRuntimeDirs(),
+      getHostController: () => this.getHostController(),
+    })
     if (options.startBackgroundTasks !== false) {
       this.startScheduler()
       this.startReferenceHintSweep()
@@ -277,94 +306,29 @@ export class SkillsRuntimeManager {
     }
   }
 
+  // B8-D M1 — delegate to SkillHostPrep (body in skill-host-prep.ts).
   private getHostController(): SkillHostController {
-    return this.hostControllerOverride ?? getSkillHostController()
+    return this.skillHostPrep.getHostController()
   }
 
-  /**
-   * Phase 4 — prune idle reference-skill hints on an independent cadence now
-   * that the skill_executions state machine (and its TTL sweep) is retired.
-   * Runs once 30s after boot to avoid blocking startup, then hourly.
-   * Best-effort; a failure logs to stderr and the next tick retries. The
-   * metric name changed from `skill_executions_ttl_swept` to
-   * `skill_reference_hint_ttl_swept` — see CHANGELOG.md.
-   */
+  // B8-D M1 — delegates to MaintenanceSweeps (bodies + timer fields in
+  // maintenance-sweeps.ts; start/stop pairing unchanged). The private
+  // startReferenceHintSweep() / startOutputDirSweep() delegates keep the
+  // constructor call sites and the sweep-independence tests unchanged.
   private startReferenceHintSweep(): void {
-    if (this.referenceHintBootTimer || this.referenceHintIntervalTimer) {
-      console.warn('[SkillsRuntimeManager] reference-hint sweep already running; start skipped')
-      return
-    }
-    const sweep = (): void => {
-      try {
-        sweepExpiredReferenceSkillHints()
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error)
-        console.error('[SkillsRuntimeManager] reference-hint sweep failed:', message)
-      }
-    }
-    this.referenceHintBootTimer = setTimeout(
-      sweep,
-      SkillsRuntimeManager.REFERENCE_HINT_BOOT_DELAY_MS,
-    )
-    this.referenceHintIntervalTimer = setInterval(
-      sweep,
-      SkillsRuntimeManager.REFERENCE_HINT_SWEEP_INTERVAL_MS,
-    )
+    this.maintenanceSweeps.startReferenceHintSweep()
   }
 
   stopReferenceHintSweep(): void {
-    if (this.referenceHintBootTimer) {
-      clearTimeout(this.referenceHintBootTimer)
-      this.referenceHintBootTimer = null
-    }
-    if (this.referenceHintIntervalTimer) {
-      clearInterval(this.referenceHintIntervalTimer)
-      this.referenceHintIntervalTimer = null
-    }
+    this.maintenanceSweeps.stopReferenceHintSweep()
   }
 
   private startOutputDirSweep(): void {
-    if (this.outputDirSweepBootTimer || this.outputDirSweepIntervalTimer) {
-      console.warn('[SkillsRuntimeManager] outputDir sweep already running; start skipped')
-      return
-    }
-    const sweep = (): void => {
-      void (async () => {
-        try {
-          await sweepOutputDirs({
-            runtimeRoot: this.runtimeRoot,
-            retentionDays: envNumber('READY_OUTPUT_DIR_RETENTION_DAYS', 7),
-            legacyGraceDays: envNumber('READY_OUTPUT_DIR_LEGACY_GRACE_DAYS', 30),
-          })
-          await sweepChildRunLogs({
-            runtimeRoot: this.runtimeRoot,
-            retentionDays: envNumber('READY_CHILD_RUN_LOG_RETENTION_DAYS', 30),
-          })
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error)
-          console.error('[SkillsRuntimeManager] outputDir sweep failed:', message)
-        }
-      })()
-    }
-    this.outputDirSweepBootTimer = setTimeout(
-      sweep,
-      SkillsRuntimeManager.REFERENCE_HINT_BOOT_DELAY_MS,
-    )
-    this.outputDirSweepIntervalTimer = setInterval(
-      sweep,
-      SkillsRuntimeManager.REFERENCE_HINT_SWEEP_INTERVAL_MS,
-    )
+    this.maintenanceSweeps.startOutputDirSweep()
   }
 
   stopOutputDirSweep(): void {
-    if (this.outputDirSweepBootTimer) {
-      clearTimeout(this.outputDirSweepBootTimer)
-      this.outputDirSweepBootTimer = null
-    }
-    if (this.outputDirSweepIntervalTimer) {
-      clearInterval(this.outputDirSweepIntervalTimer)
-      this.outputDirSweepIntervalTimer = null
-    }
+    this.maintenanceSweeps.stopOutputDirSweep()
   }
 
   private getSkillLoader(): SkillLoader {
@@ -437,245 +401,35 @@ export class SkillsRuntimeManager {
     }
   }
 
+  // B8-D M1 — model-pack surface delegates to ModelPackManager (bodies in
+  // model-pack-manager.ts; the download Maps stay declared on this class and
+  // are shared by reference).
   getModelPackStatus(id: ModelPackId): ModelPackStatus {
-    this.ensureRuntimeDirs()
-    const descriptor = getModelPackDescriptor(id)
-    const targetDir = this.getModelPackTargetDir(id)
-    const missingFiles = this.getMissingModelPackFiles(id, targetDir)
-    return {
-      id,
-      displayName: descriptor.displayName,
-      sizeEstimate: descriptor.sizeEstimate,
-      targetDir,
-      available: missingFiles.length === 0,
-      missingFiles,
-      download: { ...this.getModelPackDownloadState(id) },
-    }
+    return this.modelPack.getModelPackStatus(id)
   }
 
   listModelPacks(): ModelPackStatus[] {
-    return MODEL_PACK_IDS.map((id) => this.getModelPackStatus(id))
+    return this.modelPack.listModelPacks()
   }
 
   async startModelPackDownload(
     request: ModelPackDownloadRequest,
     onUpdate?: (status: ModelPackStatus) => void,
   ): Promise<ModelPackStatus> {
-    this.ensureRuntimeDirs()
-    const { id } = request
-    const descriptor = getModelPackDescriptor(id)
-    if (this.modelPackDownloads.has(id)) {
-      return this.getModelPackStatus(id)
-    }
-
-    const source = request.source ?? 'auto'
-    const targetDir = this.getModelPackTargetDir(id)
-    const partialDir = this.getModelPackPartialDir(id)
-
-    if (this.getMissingModelPackFiles(id, targetDir).length === 0) {
-      const now = new Date().toISOString()
-      this.modelPackDownloadStatuses.set(id, {
-        ...createDefaultModelPackDownloadStatus(),
-        source,
-        targetDir,
-        startedAt: now,
-        updatedAt: now,
-        completedAt: now,
-        lastMessage: '模型已存在',
-        progressPercent: 100,
-      })
-      return this.getModelPackStatus(id)
-    }
-
-    const publish = (): void => {
-      onUpdate?.(this.getModelPackStatus(id))
-    }
-    const patch = (next: Partial<ModelPackDownloadStatus>): void => {
-      this.modelPackDownloadStatuses.set(id, { ...this.getModelPackDownloadState(id), ...next })
-    }
-
-    // Publish an optimistic running status immediately so the click registers in
-    // the UI before the (possibly slow) runtime install + venv build + source
-    // probe run; otherwise the row sits idle for seconds and feels unresponsive.
-    const startedAt = new Date().toISOString()
-    this.modelPackDownloadStatuses.set(id, {
-      ...createDefaultModelPackDownloadStatus(),
-      running: true,
-      source,
-      targetDir,
-      startedAt,
-      updatedAt: startedAt,
-      lastMessage: '正在准备运行时…',
-    })
-    publish()
-
-    let resolved: ResolvedModelProvider
-    let python: string
-    try {
-      const install = await this.ensureSkillInstalled('video-expert-analyzer')
-      if (!install.success) {
-        throw new Error(install.error || '无法准备视频分析运行时')
-      }
-      python = await this.ensurePythonVenv()
-      patch({ updatedAt: new Date().toISOString(), lastMessage: '正在选择下载来源…' })
-      publish()
-      resolved = await resolveModelProvider(descriptor, source, (url) => this.probeEndpointLatency(url))
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      patch({
-        running: false,
-        updatedAt: new Date().toISOString(),
-        completedAt: null,
-        error: message,
-        lastMessage: message,
-      })
-      publish()
-      throw error instanceof Error ? error : new Error(message)
-    }
-
-    mkdirSync(partialDir, { recursive: true })
-    patch({
-      resolvedProvider: resolved.provider,
-      updatedAt: new Date().toISOString(),
-      lastMessage: `开始下载 ${descriptor.displayName}（来源：${this.describeModelProvider(resolved)}）`,
-    })
-
-    const script = buildModelPackDownloadScript(resolved.provider, resolved.repoId)
-    const env = this.buildModelPackDownloadEnv(resolved)
-    const child = spawn(python, ['-c', script, partialDir], { cwd: this.runtimeRoot, env })
-    this.modelPackDownloads.set(id, child)
-
-    // tqdm emits in-place bar frames separated by carriage returns; reduce each
-    // chunk to the latest frame + a monotonic headline percent so progress moves
-    // smoothly instead of looking frozen on stale frames (see reducer comment).
-    let sawAggregateBar = false
-    const ingest = (chunk: Buffer): void => {
-      const current = this.getModelPackDownloadState(id)
-      const frame = reduceDownloadProgressChunk(chunk.toString('utf8'), {
-        percent: current.progressPercent,
-        sawAggregateBar,
-      })
-      sawAggregateBar = frame.sawAggregateBar
-      if (frame.message === null) return
-      patch({
-        updatedAt: new Date().toISOString(),
-        lastMessage: frame.message,
-        progressPercent: frame.percent,
-      })
-      publish()
-    }
-
-    child.stdout.on('data', ingest)
-    child.stderr.on('data', ingest)
-    child.on('error', (error) => {
-      this.modelPackDownloads.delete(id)
-      patch({
-        running: false,
-        updatedAt: new Date().toISOString(),
-        completedAt: null,
-        error: error.message,
-        lastMessage: error.message,
-      })
-      publish()
-    })
-    child.on('close', (code) => {
-      this.modelPackDownloads.delete(id)
-      const completedAt = new Date().toISOString()
-      const installError = this.finalizeModelPackDownload(id, code)
-      const success = installError === null
-      patch({
-        running: false,
-        updatedAt: completedAt,
-        completedAt,
-        error: installError,
-        lastMessage: installError || `${descriptor.displayName} 已准备好`,
-        progressPercent: success ? 100 : this.getModelPackDownloadState(id).progressPercent,
-      })
-      publish()
-    })
-
-    publish()
-    return this.getModelPackStatus(id)
+    return this.modelPack.startModelPackDownload(request, onUpdate)
   }
 
   cancelModelPackDownload(id: ModelPackId): ModelPackStatus {
-    const child = this.modelPackDownloads.get(id)
-    if (child) {
-      child.kill()
-      this.modelPackDownloads.delete(id)
-      this.modelPackDownloadStatuses.set(id, {
-        ...this.getModelPackDownloadState(id),
-        running: false,
-        updatedAt: new Date().toISOString(),
-        lastMessage: '已取消下载（已保留断点，可继续）',
-      })
-    }
-    return this.getModelPackStatus(id)
+    return this.modelPack.cancelModelPackDownload(id)
   }
 
-  // Lightweight diagnostic for the Settings supplementary-download feature: per
-  // pack × per source it resolves the provider coordinates, probes the endpoint
-  // for reachability/latency, and confirms the download script builds — proving
-  // the 国内/国外 auto-switch is wired correctly WITHOUT pulling any weights. It
-  // also exercises the resume-preserve + atomic-install path on a scratch dir
-  // (never touching real packs). The latency probe is injected so the test is
-  // network-free; endpoint URLs are de-duplicated within a run.
+  // Diagnostic for the Settings supplementary-download feature — body (and
+  // rationale comment) in model-pack-manager.ts. The optional-probe signature
+  // preserves the injected-probe seam used by the network-free tests.
   async selfTestModelPacks(
-    probe: (url: string) => Promise<number | null> = (url) => this.probeEndpointLatency(url),
+    probe?: (url: string) => Promise<number | null>,
   ): Promise<ModelPackSelfTestReport> {
-    this.ensureRuntimeDirs()
-    const startedAt = new Date().toISOString()
-    const latencyByUrl = new Map<string, number | null>()
-    const probeOnce = async (url: string): Promise<number | null> => {
-      if (latencyByUrl.has(url)) return latencyByUrl.get(url) ?? null
-      const latency = await probe(url)
-      latencyByUrl.set(url, latency)
-      return latency
-    }
-
-    const entries: ModelPackSelfTestEntry[] = []
-    for (const id of MODEL_PACK_IDS) {
-      const descriptor = getModelPackDescriptor(id)
-      const probes: ModelPackSourceProbe[] = []
-      for (const source of ['domestic', 'overseas'] as const) {
-        let coordinatesOk = false
-        let endpoint = ''
-        let provider: ModelPackSourceProbe['provider'] = 'modelscope'
-        let latencyMs: number | null = null
-        try {
-          const resolved = resolveExplicitModelProvider(descriptor, source)
-          provider = resolved.provider
-          endpoint = resolvedProviderEndpoint(resolved)
-          const script = buildModelPackDownloadScript(resolved.provider, resolved.repoId)
-          coordinatesOk = resolved.repoId.length > 0 && script.includes(resolved.repoId)
-          latencyMs = await probeOnce(endpoint)
-        } catch {
-          // silent-catch: a source with no provider or a script-build failure is
-          // a self-test finding, captured as coordinatesOk=false on this probe
-          // row; it must not abort the rest of the report.
-          coordinatesOk = false
-        }
-        probes.push({
-          source,
-          provider,
-          endpoint,
-          reachable: latencyMs !== null,
-          latencyMs,
-          coordinatesOk,
-        })
-      }
-      const integrity = this.runModelPackIntegrityScratchCheck(descriptor.requiredFiles)
-      entries.push({
-        id,
-        displayName: descriptor.displayName,
-        probes,
-        anyReachable: probes.some((p) => p.reachable),
-        integrityOk: integrity.ok,
-        integrityDetail: integrity.detail,
-      })
-    }
-
-    return { startedAt, finishedAt: new Date().toISOString(), entries }
+    return this.modelPack.selfTestModelPacks(probe)
   }
 
   // Diagnostic twin of selfTestModelPacks for the skill-source pipeline: proves
@@ -756,338 +510,46 @@ export class SkillsRuntimeManager {
     }
   }
 
-  // Proves the resume-preserve + atomic-install filesystem path works in this
-  // environment, on a throwaway scratch dir under models/ — mirroring
-  // finalizeModelPackDownload's semantics (incomplete partial is detected and
-  // kept; a complete partial renames into place and the partial disappears)
-  // without ever touching a real pack dir.
-  private runModelPackIntegrityScratchCheck(
-    requiredFiles: readonly string[],
-  ): { ok: boolean; detail: string } {
-    const base = join(this.runtimeRoot, 'models', `.selftest-${randomUUID()}`)
-    const partial = `${join(base, 'pack')}.partial`
-    const target = join(base, 'pack')
-    const missingIn = (dir: string): string[] =>
-      requiredFiles.filter((file) => {
-        try {
-          return !statSync(join(dir, file)).isFile()
-        } catch {
-          // silent-catch: an absent path is exactly a missing required file.
-          return true
-        }
-      })
-    try {
-      mkdirSync(partial, { recursive: true })
-      // Resume-preserve: an incomplete partial must be detected as missing files
-      // and the partial dir kept (so a re-invocation resumes), never installed.
-      if (requiredFiles.length > 0) {
-        writeFileSync(join(partial, requiredFiles[0]), 'selftest')
-      }
-      if (missingIn(partial).length === 0 && requiredFiles.length > 1) {
-        return { ok: false, detail: '完整性自检异常：不完整下载未被识别为缺失' }
-      }
-      if (!existsSync(partial)) {
-        return { ok: false, detail: '断点续传自检失败：未完成的下载目录被提前删除' }
-      }
-      // Atomic install: a complete partial renames into place; partial disappears.
-      for (const file of requiredFiles) writeFileSync(join(partial, file), 'selftest')
-      if (existsSync(target)) rmSync(target, { recursive: true, force: true })
-      renameSync(partial, target)
-      const installedMissing = missingIn(target)
-      if (installedMissing.length > 0) {
-        return { ok: false, detail: `原子安装自检失败：安装目录缺少 ${installedMissing.join('、')}` }
-      }
-      if (existsSync(partial)) {
-        return { ok: false, detail: '原子安装自检失败：安装后仍残留未完成目录' }
-      }
-      return { ok: true, detail: '断点续传与原子安装路径正常' }
-    } catch (error) {
-      // silent-catch: a filesystem failure during the scratch check IS the finding —
-      // it is surfaced to the caller as integrityOk=false with this message in the
-      // self-test report (not swallowed), and one pack's failure must not abort the
-      // rest of the report; the finally still removes the throwaway scratch dir.
-      return { ok: false, detail: error instanceof Error ? error.message : String(error) }
-    } finally {
-      rmSync(base, { recursive: true, force: true })
-    }
-  }
-
-  private getModelPackTargetDir(id: ModelPackId): string {
-    return join(this.runtimeRoot, 'models', getModelPackDescriptor(id).targetSubdir)
-  }
-
-  private getModelPackPartialDir(id: ModelPackId): string {
-    return `${this.getModelPackTargetDir(id)}.partial`
-  }
-
-  private getModelPackDownloadState(id: ModelPackId): ModelPackDownloadStatus {
-    return this.modelPackDownloadStatuses.get(id) ?? createDefaultModelPackDownloadStatus()
-  }
-
-  private getMissingModelPackFiles(id: ModelPackId, targetDir: string): string[] {
-    return getModelPackDescriptor(id).requiredFiles.filter((file) => {
-      try {
-        return !statSync(join(targetDir, file)).isFile()
-      } catch {
-        // silent-catch: statSync throws (ENOENT) when the path is absent; an absent path is exactly a missing required model file, so report it as missing.
-        return true
-      }
-    })
-  }
-
-  // Atomic install on a clean download: verify the partial dir holds every
-  // required file, then swap it into place. A non-zero exit keeps the partial
-  // dir so a re-invocation of snapshot_download resumes. Returns an error string
-  // on failure, or null on a successful install.
+  // B8-D M1 — private model-pack delegates. These four stay as manager-level
+  // methods because they are referenced from outside the extracted cluster:
+  // finalizeModelPackDownload is bind()-driven by model-pack-manager.test.ts;
+  // probeEndpointLatency feeds selfTestSkillSources / installSkillFromSource /
+  // getRuntimeProvisioner; the FunASR env builders feed getBaseEnv and the
+  // ExternalEnvResolver injection. Bodies live in model-pack-manager.ts.
   private finalizeModelPackDownload(id: ModelPackId, code: number | null): string | null {
-    const targetDir = this.getModelPackTargetDir(id)
-    const partialDir = this.getModelPackPartialDir(id)
-    if (code !== 0) {
-      return `下载进程以退出码 ${code ?? 'null'} 结束（已保留断点，可继续）`
-    }
-    const missing = this.getMissingModelPackFiles(id, partialDir)
-    if (missing.length > 0) {
-      return `下载已结束但缺少必要文件：${missing.join('、')}`
-    }
-    try {
-      if (existsSync(targetDir)) rmSync(targetDir, { recursive: true, force: true })
-      renameSync(partialDir, targetDir)
-      return null
-    } catch (error) {
-      // silent-catch: a rename/cleanup failure is surfaced to the caller as the
-      // returned error string (which becomes the pack's download error in status/UI),
-      // and the partial dir is intentionally left in place so a re-invocation resumes.
-      return error instanceof Error ? error.message : String(error)
-    }
+    return this.modelPack.finalizeModelPackDownload(id, code)
   }
 
-  private describeModelProvider(resolved: ResolvedModelProvider): string {
-    if (resolved.provider === 'modelscope') return 'ModelScope（国内）'
-    return resolved.mirrorEndpoint ? 'HuggingFace 镜像（国内）' : 'HuggingFace（国外）'
-  }
-
-  // Reachability/latency probe used by 'auto' source resolution. A HEAD request
-  // with a short deadline; failures (timeout/DNS/offline) resolve to null so the
-  // provider resolver treats the endpoint as unreachable and tries the next one.
   private async probeEndpointLatency(url: string): Promise<number | null> {
-    const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), 2500)
-    const start = Date.now()
-    try {
-      await fetch(url, { method: 'HEAD', signal: controller.signal })
-      return Date.now() - start
-    } catch {
-      // silent-catch: a probe miss just means this endpoint is not a viable 'auto' source; resolveModelProvider treats null as unreachable and falls back to the next candidate. There is no user-facing state to surface for a single probe failure.
-      return null
-    } finally {
-      clearTimeout(timer)
-    }
+    return this.modelPack.probeEndpointLatency(url)
   }
 
-  // Nano runtime env (registry-derived). The model id always points the Python
-  // loader at the right repo; the absolute dir is injected only when the pack is
-  // actually installed so offline mode resolves the local weights, while dev
-  // mode (pack absent) can still fall through to its own resolution.
   private buildFunasrNanoRuntimeEnv(): Record<string, string> {
-    const descriptor = getModelPackDescriptor('funasr-nano')
-    const repoId = descriptor.providers.find((p) => p.provider === 'huggingface')?.repoId
-      ?? descriptor.providers[0].repoId
-    const env: Record<string, string> = {
-      READY_FUNASR_NANO_MODEL_ID: repoId,
-      READY_FUNASR_NANO_AUTO_DOWNLOAD: '0',
-    }
-    const modelDir = this.getModelPackTargetDir('funasr-nano')
-    if (this.getMissingModelPackFiles('funasr-nano', modelDir).length === 0) {
-      env.READY_FUNASR_NANO_MODEL_DIR = modelDir
-    }
-    return env
+    return this.modelPack.buildFunasrNanoRuntimeEnv()
   }
 
-  // Fallback ASR + punctuation env. Mirrors the Nano bridge: model ids are
-  // always exported (so the Python defaults stay in sync with the registry),
-  // absolute dirs only when each pack is installed. In packaged mode we also set
-  // REQUIRE_LOCAL_MODELS so the Python side emits a structured missing-pack
-  // signal instead of silently reaching for the network shorthands.
   private buildFunasrFallbackModelEnv(options: { packaged: boolean }): Record<string, string> {
-    const asr = getModelPackDescriptor('funasr-fallback-asr')
-    const punc = getModelPackDescriptor('funasr-punc-ctc')
-    const env: Record<string, string> = {
-      READY_FUNASR_ASR_MODEL_ID: asr.providers[0].repoId,
-      READY_FUNASR_PUNC_MODEL_ID: punc.providers[0].repoId,
-    }
-    const asrDir = this.getModelPackTargetDir('funasr-fallback-asr')
-    if (this.getMissingModelPackFiles('funasr-fallback-asr', asrDir).length === 0) {
-      env.READY_FUNASR_ASR_MODEL_DIR = asrDir
-    }
-    const puncDir = this.getModelPackTargetDir('funasr-punc-ctc')
-    if (this.getMissingModelPackFiles('funasr-punc-ctc', puncDir).length === 0) {
-      env.READY_FUNASR_PUNC_MODEL_DIR = puncDir
-    }
-    if (options.packaged) {
-      env.READY_FUNASR_REQUIRE_LOCAL_MODELS = '1'
-    }
-    return env
+    return this.modelPack.buildFunasrFallbackModelEnv(options)
   }
 
-  // Online download env for a resolved provider: start from the base env, drop
-  // every offline flag, point caches at the writable runtime cache, and route
-  // HuggingFace through the mirror endpoint when the domestic HF route is chosen.
-  private buildModelPackDownloadEnv(resolved: ResolvedModelProvider): NodeJS.ProcessEnv {
-    const env: NodeJS.ProcessEnv = {
-      ...this.getBaseEnv(),
-      HF_HOME: join(this.cacheRoot, 'huggingface'),
-      XDG_CACHE_HOME: this.cacheRoot,
-      MODELSCOPE_CACHE: join(this.cacheRoot, 'modelscope'),
-    }
-    delete env.HF_HUB_OFFLINE
-    delete env.TRANSFORMERS_OFFLINE
-    delete env.MODELSCOPE_OFFLINE
-    delete env.PIP_NO_INDEX
-    if (resolved.provider === 'huggingface' && resolved.mirrorEndpoint) {
-      env.HF_ENDPOINT = resolved.mirrorEndpoint
-    }
-    return env
-  }
-
+  // B8-D M1 — external-env delegates to ExternalEnvResolver (bodies, plus the
+  // in-cluster-only requiresExternalEnv / exportBrowserVideoCookies helpers,
+  // in external-env-resolver.ts).
   private resolveConfiguredAgentContext(definition: SkillDefinition): AgentSpawnContext | null {
-    if (definition.id !== 'video-expert-analyzer') return null
-    const values = this.skillConfigurationStore.getValues(definition)
-    const serviceId = values.serviceBindings.visionModel || 'vision-model-default'
-    return this.externalServiceStore.buildVisionAgentContext(serviceId)
-  }
-
-  private requiresExternalEnv(definition: SkillDefinition): boolean {
-    return definition.id === 'lets-go-rss'
-      || definition.id === 'video-copy-analyzer'
-      || definition.id === 'video-expert-analyzer'
-      || Boolean(definition.configuration?.serviceBindings?.length)
+    return this.externalEnv.resolveConfiguredAgentContext(definition)
   }
 
   private async resolveExternalEnv(definition: SkillDefinition): Promise<Record<string, string>> {
-    if (!this.requiresExternalEnv(definition)) return {}
-    // U0.2 — fail-fast: previously these catches swallowed config-load failures
-    // and let the sub-agent start with a partial / empty env, which consumed
-    // VEA / RSS budget before crashing deep in the long task. Throwing here
-    // makes the failure surface immediately as a blocked task projection.
-    let env: Record<string, string>
-    try {
-      env = this.externalServiceStore.getSkillExternalEnv(definition.id)
-    } catch (err) {
-      logAgentMetric('runtime.config.load_failed', {
-        skillId: definition.id,
-        source: 'external_service_store',
-      })
-      throw new Error(
-        `SkillRuntimeConfigError(external_service_unavailable): cannot resolve external env for ${definition.id} — ${err instanceof Error ? err.message : String(err)}`,
-      )
-    }
-    if (
-      definition.id !== 'lets-go-rss'
-      && definition.id !== 'video-copy-analyzer'
-      && definition.id !== 'video-expert-analyzer'
-    ) {
-      return env
-    }
-
-    let values
-    try {
-      values = this.skillConfigurationStore.getValues(definition)
-    } catch (err) {
-      logAgentMetric('runtime.config.load_failed', {
-        skillId: definition.id,
-        source: 'skill_configuration_store',
-      })
-      throw new Error(
-        `SkillRuntimeConfigError(skill_configuration_corrupt): cannot read skill configuration for ${definition.id} — ${err instanceof Error ? err.message : String(err)}`,
-      )
-    }
-
-    if (definition.id === 'lets-go-rss') {
-      const serviceId = values.serviceBindings.rsshub || 'rsshub-default'
-      const rsshub = this.externalServiceStore.getRuntimeService(serviceId)
-      if (rsshub?.enabled && rsshub.baseUrl) {
-        env.RSSHUB_BASE_URL = rsshub.baseUrl.replace(/\/+$/, '')
-      }
-    }
-
-    if (definition.id === 'video-copy-analyzer' || definition.id === 'video-expert-analyzer') {
-      const serviceId = values.serviceBindings.bilibili || 'bilibili-default'
-      const bilibili = this.externalServiceStore.getRuntimeService(serviceId)
-      if (bilibili?.enabled) {
-        if (bilibili.secrets.sessdata) env.BILIBILI_SESSDATA = bilibili.secrets.sessdata
-        if (bilibili.secrets.biliJct) env.BILIBILI_BILI_JCT = bilibili.secrets.biliJct
-        const cookieFile = bilibili.options.cookieFile
-        if (typeof cookieFile === 'string' && cookieFile.trim()) env.BILIBILI_COOKIE_FILE = cookieFile.trim()
-      }
-      const videoCookieFile = await this.exportBrowserVideoCookies()
-      if (videoCookieFile) {
-        env.READY_VIDEO_COOKIE_FILE = videoCookieFile
-        env.VIDEO_COOKIE_FILE = videoCookieFile
-        env.YOUTUBE_COOKIE_FILE = videoCookieFile
-      }
-      Object.assign(
-        env,
-        this.buildFunasrNanoRuntimeEnv(),
-        this.buildFunasrFallbackModelEnv({ packaged: !!this.packagedRuntimeRoot }),
-      )
-    }
-
-    return env
-  }
-
-  private async exportBrowserVideoCookies(): Promise<string | null> {
-    if (!session?.fromPartition) return null
-    try {
-      const browserSession = session.fromPartition('persist:browser')
-      const cookies = await browserSession.cookies.get({})
-      if (cookies.length === 0) return null
-      const cookiePath = join(this.runtimeRoot, `.ready-video-cookies-${randomUUID()}.txt`)
-      const lines = [
-        '# Netscape HTTP Cookie File',
-        ...cookies.map((cookie) => {
-          const domain = String(cookie.domain || '')
-          const includeSubdomains = domain.startsWith('.') ? 'TRUE' : 'FALSE'
-          const path = cookie.path || '/'
-          const secure = cookie.secure ? 'TRUE' : 'FALSE'
-          const expires = typeof cookie.expirationDate === 'number' && Number.isFinite(cookie.expirationDate)
-            ? Math.floor(cookie.expirationDate)
-            : 0
-          return [
-            domain,
-            includeSubdomains,
-            path,
-            secure,
-            String(expires),
-            cookie.name,
-            cookie.value,
-          ].join('\t')
-        }),
-      ]
-      writeFileSync(cookiePath, `${lines.join('\n')}\n`, { encoding: 'utf-8', mode: 0o600 })
-      return cookiePath
-    } catch (error) {
-      logAgentMetric('runtime.video_cookie_export_failed', {
-        message: error instanceof Error ? error.message : String(error),
-      })
-      return null
-    }
+    return this.externalEnv.resolveExternalEnv(definition)
   }
 
   private cleanupExportedVideoCookieFile(cookiePath: string | undefined): void {
-    if (
-      !cookiePath
-      || !cookiePath.startsWith(this.runtimeRoot)
-      || (!cookiePath.includes('.ready-video-cookies-') && !cookiePath.includes('.ready-youtube-cookies-'))
-    ) return
-    try {
-      rmSync(cookiePath, { force: true })
-    } catch {
-      // silent-catch: best-effort cleanup for a per-run temporary cookie export.
-    }
+    this.externalEnv.cleanupExportedVideoCookieFile(cookiePath)
   }
 
+  // B8-D M1 — delegate to SkillHostPrep (body in skill-host-prep.ts).
   private shouldPrepareSkillHost(requirements: import('../../../shared/skill-host-contract').SkillHostRequirements | null): boolean {
-    return Boolean(requirements?.spawn_context || requirements?.concurrency)
+    return this.skillHostPrep.shouldPrepareSkillHost(requirements)
   }
 
   /**
@@ -1132,6 +594,7 @@ export class SkillsRuntimeManager {
   // subprocess) or tryInlineReferenceSkillDoc (SKILL.md load). Progress
   // tracking moves to the in-memory SkillTaskTracker in PR2.
 
+  // B8-D M1 — delegate to SkillHostPrep (body in skill-host-prep.ts).
   async runEmbeddedPython(params: {
     code?: string
     scriptPath?: string
@@ -1139,43 +602,7 @@ export class SkillsRuntimeManager {
     cwd?: string
     timeoutMs?: number
   }): Promise<{ success: boolean; stdout: string; stderr: string; command: string[]; error?: string }> {
-    this.ensureRuntimeDirs()
-    const venvPython = await this.ensurePythonVenv()
-    let scriptPath = params.scriptPath || ''
-    if (!scriptPath) {
-      const code = String(params.code || '').trim()
-      if (!code) {
-        return { success: false, stdout: '', stderr: '', command: [], error: 'Missing code or scriptPath' }
-      }
-      const scriptDir = join(this.runtimeRoot, 'tmp-python')
-      mkdirSync(scriptDir, { recursive: true })
-      scriptPath = join(scriptDir, `ready-embedded-${randomUUID()}.py`)
-      writeFileSync(scriptPath, `${code}\n`, 'utf-8')
-    }
-    const command = [venvPython, scriptPath, ...((params.args || []).map((item) => String(item)))]
-    try {
-      const { stdout, stderr } = await execFileAsync(venvPython, [scriptPath, ...((params.args || []).map((item) => String(item)))], {
-        cwd: params.cwd || this.runtimeRoot,
-        timeout: Math.max(1_000, params.timeoutMs || DEFAULT_TIMEOUT_MS),
-        maxBuffer: MAX_COMMAND_BUFFER,
-        env: this.getBaseEnv(),
-      })
-      return {
-        success: true,
-        stdout: truncateOutput(stdout || ''),
-        stderr: truncateOutput(stderr || ''),
-        command,
-      }
-    } catch (error) {
-      const err = error as Error & { stdout?: string; stderr?: string }
-      return {
-        success: false,
-        stdout: truncateOutput(err.stdout || ''),
-        stderr: truncateOutput(err.stderr || ''),
-        command,
-        error: err.message,
-      }
-    }
+    return this.skillHostPrep.runEmbeddedPython(params)
   }
 
   // ===========================================================================
@@ -3226,83 +2653,11 @@ export class SkillsRuntimeManager {
     return outputDir
   }
 
-  /**
-   * B-arch-4 — one-shot orphan-skill artifact cleanup. Scans the runtime
-   * skills directory for sub-folders that are NOT in the current embedded
-   * manifest list AND NOT registered in the custom-skill registry. Each
-   * candidate is then gated against `RETIRED_EMBEDDED_SKILL_IDS` (a small
-   * explicit allowlist of ids we know used to ship embedded but no longer do)
-   * before invoking `controller.cleanupSkillArtifacts`. This avoids
-   * accidentally rm'ing a custom skill the user is actively using or an
-   * embedded skill we're about to re-add.
-   *
-   * Logs every action — including no-ops — so a curious operator can verify
-   * the sweep ran. Idempotent: only runs once per process. Marked `public` so
-   * tests can invoke it deterministically without relying on the constructor
-   * side-effect; production callers should not invoke it directly (the
-   * constructor handles it under `startBackgroundTasks !== false`).
-   */
+  // B8-D M1 — delegate to MaintenanceSweeps (body, rationale doc and the
+  // one-shot `orphanCleanupRan` latch live in maintenance-sweeps.ts). Stays
+  // public so tests keep invoking it deterministically.
   async cleanupOrphanedSkillArtifactsOnce(): Promise<void> {
-    if (this.orphanCleanupRan) return
-    this.orphanCleanupRan = true
-    this.ensureRuntimeDirs()
-    const controller = this.getHostController()
-    const customIds = new Set<string>(
-      listManagedCustomSkills(this.customSkillsRoot).map((skill) => skill.id),
-    )
-
-    let dirNames: string[]
-    try {
-      dirNames = readdirSync(this.skillsRoot)
-    } catch (error) {
-      console.warn('[SkillsRuntimeManager] orphan cleanup: failed to scan skills root:', error instanceof Error ? error.message : String(error))
-      return
-    }
-
-    const candidates: string[] = []
-    for (const name of dirNames) {
-      if (EMBEDDED_SKILL_IDS.has(name as EmbeddedSkillId)) continue
-      if (customIds.has(name)) continue
-      try {
-        if (!statSync(join(this.skillsRoot, name)).isDirectory()) continue
-      } catch {
-        continue
-      }
-      candidates.push(name)
-    }
-
-    if (candidates.length === 0) {
-      console.log('[SkillsRuntimeManager] orphan cleanup: no candidates found')
-      return
-    }
-
-    const retiredIds = this.retiredEmbeddedSkillIdsOverride ?? RETIRED_EMBEDDED_SKILL_IDS
-    for (const skillId of candidates) {
-      const isRetired = retiredIds.has(skillId)
-      if (!isRetired) {
-        console.log('[SkillsRuntimeManager] orphan cleanup: skipping', skillId, '(not in RETIRED_EMBEDDED_SKILL_IDS)')
-        continue
-      }
-      const skillAssetRoot = join(this.skillsRoot, skillId)
-      try {
-        const result = await controller.cleanupSkillArtifacts(skillId, skillId, skillAssetRoot, null)
-        console.log(
-          '[SkillsRuntimeManager] orphan cleanup: ran cleanupSkillArtifacts for',
-          skillId,
-          '— removed:',
-          result.removedPaths.length,
-          'errors:',
-          result.errors.length,
-        )
-      } catch (error) {
-        console.warn(
-          '[SkillsRuntimeManager] orphan cleanup: cleanupSkillArtifacts threw for',
-          skillId,
-          ':',
-          error instanceof Error ? error.message : String(error),
-        )
-      }
-    }
+    return this.maintenanceSweeps.cleanupOrphanedSkillArtifactsOnce()
   }
 
   private async runPythonScript(
