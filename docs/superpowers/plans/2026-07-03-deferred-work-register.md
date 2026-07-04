@@ -194,13 +194,15 @@ preload `runFeedback` API + electron.d.ts 类型 + 行为测试
 
 **残留观察**：本机今天更早的"偶发沙箱失败"归因 fd 爬坡为高置信假设（当前 100% 失败=fd 耗尽是实测结论）；D15 后若偶发仍现再开环境线。fd 余量可观测（boot 打点）暂未加，若复发补。
 
-# D16 — agent 点击触发原生文件选择器悬挂工具环（真机第十一轮实锚，2026-07-04 深夜，待做）
+# D16 — agent 点击触发原生文件选择器悬挂工具环（真机第十一轮实锚，2026-07-04 深夜，已完成）
 
 **实锚**：D15 修复后 R1 重测，链路史上最远——`xhs-publish-btn` 以尾部保留位 #40 进图（D14-c 实证）、act 点击 ok:true（3.5s 内含行动确认闸"风险请求"用户点允许=**发布类外发动作过闸按合同工作**）、进入长文最终 composer（文章渲染成图片卡）、坐标点底部「发布」后预算耗尽 unconfirmed 收口。期间 agent 某次点击命中「+ 添加图片」瓦片，**弹出原生文件选择器**：主进程模态对话框，工具环无法感知/关闭，只能人工取消——任何带上传控件的站点都可能让 agent 死等。
 
 **设计**：agent 持租约的 tab 经 CDP `Page.setInterceptFileChooserDialog(enabled:true)` 拦截（cdp-session-service 已有会话面）；chooser 打开且无 pending 的 `browser_upload_scope_attachment` 时自动取消 + 给模型结构化回执（`file_chooser_intercepted`，提示走 upload 工具链：list_upload_targets → upload_scope_attachment）；有 pending 上传时按现有 upload 合同喂 `DOM.setFileInputFiles`。租约释放时关拦截，用户手动操作不受影响。
 
 **顺带观察**：本轮模型三次重填标题、两次重贴正文（read_back 纠偏在工作，未误报成功）；「发布」点击后 25s 思考间隙疑似 chooser 弹出时刻之一。成功证据读取（发布成功信号→proof）仍是 R1 关账的最后一环（并 D9 proof 铸造）。
+
+**实施（2026-07-04 深夜，c8f182a4）**：BrowserFileChooserGuard（electron-free，注入 BrowserCdpSessionService）；武装点=tool-executor 浏览器写动作过写租约闸后 best-effort（读工具不武装，防纯阅读会话把用户选择器永久打死）；`Page.fileChooserOpened` → `file_chooser_intercepted` 注记随下一次浏览器动作输出交付（与 D18 权限注记同队列）；解除点=写租约离开 held 时引擎统一 disarmAll。行为测试：真 CDP 会话服务 + 假 debugger 宿主四合同。与设计的差异：未做"自动取消"（CDP 拦截下站点只是等待文件，模型按注记走 upload 工具链注入即可继续，无需取消语义）。
 
 **D16-b（同晚伴生修复，已完成）**：用户实证"agent 操作过的 tab 里发布按钮人点也无反应，新开 tab 手动全流程可发"——tab 级页面状态被写坏。头号根因=React 受控输入失同步：act fill / buildTypeJs / type_smart setText 三处直接 `el.value=` 赋值被 React 实例上的 valueTracker 吞掉，DOM 有字、框架状态为空，表单校验静默失败。修=三处全部改原型链原生 setter（`Object.getOwnPropertyDescriptor(HTML*Element.prototype,'value').set.call(el, v)`）再派发 input/change。
 
@@ -216,6 +218,26 @@ preload `runFeedback` API + electron.d.ts 类型 + 行为测试
 - 设置页暴露总开关（默认开启原话预授权；用户可改回"每次都问"）。
 
 **验收**：R1 无人值守全链（含发布点击）零人工介入跑通；支付类模拟目标仍被闸拦；grant 账本可查。
+
+**2026-07-04 第十二轮 rescope**：用户两轮看到的「风险请求」弹窗经截图核实是**站点定位权限 modal**（`creator.xiaohongshu.com 想要使用定位`），不是行动确认闸——该类闸已由 D18 的 agent 驾驶期自动拒绝根治。第十二轮 act 发布点击全程无行动闸停顿（破坏性清单只有支付/改凭据/验证码，发布不在内）。D17 的 grant 机制暂缓实施：待下一次真机出现 `denied_pending_confirmation` / 确认卡真实拦住无人值守发布的证据再启动（先合同后代码，不为幻影前提建机制）。
+
+# D18 — act 点击可信指针升级 + 站点权限 agent 自动拒绝（真机第十二轮实锚，2026-07-04 深夜，已完成）
+
+**实锚**：D16-b 后重启复测，两轮 run 全部止步最终发布设置页：act 连点「发布」目标 ok:true 但按钮从未激活，run 以 browser_transaction_unconfirmed 诚实收口。三层根因：① closed shadow root 内部监听器对合成事件不可达（事件不向 shadow 内传播，host.click() 点不到内部按钮），且模型不采站点卡的 click_at 逃生口；② `readBack='map'` 时 `changed` 恒真（动作前 delta 对比整张 map，形状必不同）——模型拿不到「点击无效」信号；③ 发布设置页弹站点定位权限 modal sheet（无超时、无日志、挡住整个窗口），无人值守必挂。
+
+**修复（9a3993b3）**：① act JS 回传点击坐标，工具层判无效果（前后 delta 未变且未开新 tab）时同一次调用内自动升级可信指针点击（与 browser_click_at 同 dispatchMouse 通道、破坏性闸门同构、grant_required 保持响亮），payload 带 `escalation` 审计；② changed 改用独立前后 delta 比较；③ 权限判决核心抽 electron-free `browser-permission-policy.ts`（纯函数），agent 持写租约期间需人工批准的权限自动拒绝（不弹窗、不缓存、注记随下一次工具输出交付），用户在场的运行期判决优先，权限请求/判决全量落 ready-browser.log。伴生（66d6f501）：AgentTabControlGate pending_confirm 45s 惰性 TTL——用户擦碰 agent 页后走开不再永久冻结 agent 写入+横幅常驻（真接管有租约级 takeover 兜底）。
+
+**D9 证据链核验（无代码）**：transactionConfirmed → proof-collector → adjudicator t1 → run-finalizer 全链已建成，R1 此前拿不到成功证据纯因点击未落地；真机复测即验证。
+
+**残项**：escalation 只处理主帧（iframe rect 坐标系不同构，stale_page_map 引导重读）；readBack='none' 不升级（无信号）。
+
+# D19 — 意图门控漏判：事件/活动类实时问题判 local_chat（分析定稿待实施，2026-07-04）
+
+**实锚**：真机 14:00 事件类消息应进浏览器工作流被判 local_chat → browser 组被抑制（audit 记录）。
+
+**分析（2026-07-04）**：`live-info-intent.ts` 主题词表覆盖 weather/air/news/finance/sports/transport 六类；**事件/活动/场所类缺席**（演出、展览、活动、演唱会、门票、开售、场次、预约、排队、营业时间）——该类查询若再缺 LOOKUP 动词或 FRESHNESS 词，needsLiveInfo=false 直接落 local_chat。上游输入面已在第二轮修复（resolvePureUserTextForClassification 用纯用户话语判定，注入污染已排除），本项是词表覆盖缺口而非输入面缺口。
+
+**提案（改判定需评估漂移，专门会话）**：① 增补 EVENT_PATTERNS 主题类 + 对应 fixture 矩阵（防已修案例回归）；② 漏判账本：run 被判 local_chat 但模型随后请求 browser 组/明确要开网页时发 `intent_gating_miss` metric 带纯文本摘要，让词表从证据演化而不是拍脑袋；③ 词表变更跑意图分类 fixture 全量 + 采集/发布误判回归（第二轮的教训：一词多域）。
 
 # 汇总
 | 项 | 已完成 | 待做 | 高危点 | 前置 |

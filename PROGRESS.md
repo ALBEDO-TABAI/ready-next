@@ -1,8 +1,20 @@
 # Ready 开发进展
 
-> 更新时间: 2026-06-22
+> 更新时间: 2026-07-05
 
 ## 当前真值摘要
+
+- `2026-07-05` **深夜自主推进批：R1 根因链修净 + turn-engine 退役 + Power 组抽出 + 债务归绿**（用户授权无人值守，逐项待真机复测）：
+  - R1 第十二轮双根因修净：act_on_target 合成点击对 closed-shadow 发布按钮无效时**同一次调用内自动升级可信指针点击**（与 click_at 同 dispatchMouse 通道、破坏性闸门同构），顺修 readBack='map' 下 `changed` 恒真的假信号；站点权限请求（发布页定位 modal）在 agent 持写租约期间**自动拒绝不弹窗**（不缓存判决、注记随下一次工具输出带给模型、全量落 ready-browser.log），用户在场的运行期判决优先。
+  - D16 完成：原生文件选择器经 CDP `Page.setInterceptFileChooserDialog` 拦截（写租约武装/释放解除），`file_chooser_intercepted` 注记引导 upload 工具链。
+  - 接管闸修复：pending_confirm 45s 惰性 TTL——擦碰 agent 页不再永久冻结写入+横幅常驻。
+  - D9 核验：发布成功证据链（transactionConfirmed→proof-collector→adjudicator→finalizer）已完整，此前只差点击落地。
+  - **Phase A 完成**：turn-engine.ts(4827 行)+HostCapabilityDispatcher 退役删除；12 个引擎专属测试整删、12 个存活文件外科摘除引擎断言（live 断言保留）；dormant 边界 gate 转"文件不存在"存在性合同；4 个引擎 gate 退役、6 个 gate 摘引擎项；net −15.7k 行。
+  - **Phase B4 完成**（子代理）：browser-tools 6285→5461，Power 七 case 纯移动抽出 browser-power-tools.ts，diff 逐字节一致。
+  - 债务包：chat-panel-baseline 两层崩溃修复（vertical-tabs 的 CSS-in-tsx + MutationObserver harness 缺失）；ipc-contract 归绿（non_literal_push 重锚 + 六个 agent 身份通道登记）。
+  - 验证：typecheck 0 错；改动 gate 全绿；外科后套件全绿（既有红经 HEAD 基线逐项定界，见 route 文档 §5.1）；意图门控漏判分析登记 D19。
+  - commits：9a3993b3 / c8f182a4 / 66d6f501 / 505e2ea2 / 48c0b06a / 8839ff62。
+
 
 - `2026-06-22` **远程 IM / Send IM / 视频技能近端问题收口并准备打包**：
   - Remote IM 真实日志中出现 `ret=-3 (ilink/bot/sendmessage)`，已与 `ret=-2` 一起归为微信出站发送会话失效；用户侧说明会指向“从微信给 Ready 发一条新消息刷新会话 / 必要时重新绑定”，不再误导为附件大小或临时失败。

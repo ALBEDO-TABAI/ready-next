@@ -85,8 +85,8 @@
 - `run-capability-controller.resolveRunCapabilities` 是工具策略冲突的唯一裁决点；不要在上游重复加挡板。
 
 ## 5. DomainAdapter 与系统提醒
-- 每个产品域通过 `DomainAdapter` 注册行为；`turn-engine.ts` 只调度，不写产品分支，也不比较具体 adapter id。
-- 系统提醒必须通过 `SystemReminderRegistry` 注册和组装；不要在 `turn-engine.ts` 或 steering 里内联写提醒文案。
+- 每个产品域通过 `DomainAdapter` 注册行为；调度层（live 为 `agent-sdk-turn-orchestrator`）只调度，不写产品分支，也不比较具体 adapter id。`turn-engine.ts` 已于 2026-07-04 Phase A 退役删除，复活由 `check-directchat-turnengine-dormant-boundary` 存在性合同拦截。
+- 系统提醒必须通过 `SystemReminderRegistry` 注册和组装；不要在调度层或 steering 里内联写提醒文案。
 - compaction、hook、reminder 都是独立抽象；hook 不能当 logging 替代品，handler 失败不得中断 turn 主流程。
 - `ask_user_questions` 是主 agent 的结构化反问工具，独立于 skill 域；每 turn 最多一次，同一 session 只允许一个 pending 卡。
 
