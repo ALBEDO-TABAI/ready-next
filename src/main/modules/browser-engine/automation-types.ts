@@ -13,6 +13,14 @@ export type BrowserCDPErrorCode =
   | 'TAB_NOT_FOUND'
   | 'DEBUGGER_ATTACH_FAILED'
   | 'CDP_COMMAND_FAILED'
+  | 'FRAME_NOT_FOUND'
+
+export interface BrowserContentFrameInfo {
+  /** '0' = 主帧；子帧为 `${processId}-${routingId}`（随帧实例存亡，可嵌入 targetId）。 */
+  frameKey: string
+  url: string
+  main: boolean
+}
 
 export interface BrowserViewportMetrics {
   width: number

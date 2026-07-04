@@ -139,6 +139,10 @@ grep -c 'criteria_self_check_injected' $T/ready-agent-metrics.log
 - **第三根（本轮新修）**：发布 run 的任务卡顶着"浏览器逐篇采集"标题+假进度步骤。根因两个正交缺陷：① `browser-collect-notes` 片段的 matches 用了 `resolveBrowserCollectionIntent`（"提到平台即 true"的暴露面判定）→ 发布消息被注入采集流程知识；② run-coordinator 把注入片段 label 当任务标题（"浏览器上传流程" hit_count=35——**长期以来大量浏览器任务卡标题张冠李戴**）。修复：片段 matches 换词表真采集判定；collect-notes/upload 加入标题排除表（指导片段≠任务名），三个测试文件同步。
 - 顺带真机确认：`crystallize_round_fired`/`belief_decay_round_fired` 在启动后如期打点（P5d 迁移真机首证）。
 
+# 第四轮前置（2026-07-04，D10 修复落地）
+
+R1 的功能闸门 D10 已修：①click/act/map 三链 frame 穿透（"写长文"在 iframe 内可被 read_page_map 看见、act_on_target/click_text 可点到）；②staged 站点卡（已学到的 selector_missing 修正卡）进入涌现 feed 待确认，确认后下轮注入生效。**复测 R1 前建议先到 ReadyMode 涌现段或 Settings→记忆→信念卡确认，把 xiaohongshu 的 staged 站点卡确认为 active。**
+
 # 关账动作
 
 五项结果记录填完 → 回贴给我。我会：把结果写进本文件与 route 文档、判定分支分叉时机（R 全绿=合并信心）、失败项按"站点变化→分类器规则更新，机制缺陷→立 slice"分流。

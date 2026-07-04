@@ -158,9 +158,36 @@ export function extractCrystallizeCards(cards: ReadonlyArray<CrystallizeSignalCa
         action: { kind: 'adopt_candidate', ref: card.relPath },
         requiresExplicitConfirm: true,
       })
+      continue
+    }
+    // D10-b（2026-07-04 真机实锚）：浏览器失败学习产出的 staged 站点卡
+    // （新卡/旁卡/风险建议）此前在 feed 完全不可见——agent 带着已学到但
+    // 未确认的知识原地重摔（site_card_user_override_skipped）。这里只投影
+    // 站点卡学习的三种 source 前缀，不把其他 staged 信念卡拉进 feed；
+    // 确认动作仍走 Settings 信念卡面板（后台积累 + 设置页确认的产品观）。
+    if (card.status === 'staged' && isSiteCardLearningSource(card.source)) {
+      const risky = String(card.source).startsWith('possible-risk-update-of:')
+      out.push({
+        id: `crystallize:site:${card.relPath}`,
+        type: 'crystallize',
+        title: risky
+          ? `浏览器发现「${card.title}」有风险提示待你处理`
+          : `浏览器学到了「${card.title}」，确认后下次生效`,
+        evidence: [{ fact: `staged 站点卡 source=${card.source}`, ref: card.relPath }],
+        confidence: 0.7,
+        action: { kind: 'adopt_candidate', ref: card.relPath },
+        requiresExplicitConfirm: true,
+      })
     }
   }
   return out
+}
+
+const SITE_CARD_LEARNING_SOURCE_PREFIXES = ['failure-learning:', 'possible-update-of:', 'possible-risk-update-of:'] as const
+
+function isSiteCardLearningSource(source: string | null): boolean {
+  if (!source) return false
+  return SITE_CARD_LEARNING_SOURCE_PREFIXES.some((prefix) => source.startsWith(prefix))
 }
 
 export interface AgentCandidateFeedSignal {

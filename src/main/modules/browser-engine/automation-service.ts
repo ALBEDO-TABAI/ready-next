@@ -1,6 +1,7 @@
 import type { BrowserHostView, BrowserRect } from './host-types'
 import type {
   BrowserCDPErrorCode,
+  BrowserContentFrameInfo,
   BrowserKeyEventPayload,
   BrowserMouseEventPayload,
   BrowserScreenshotOptions,
@@ -313,6 +314,50 @@ export class BrowserAutomationService {
   async executeJS(tabId: string | null, code: string): Promise<unknown> {
     const { view } = this.host.resolveTabView(tabId)
     return view.webContents.executeJavaScript(code, true)
+  }
+
+  /**
+   * D10 frame 穿透（2026-07-04）：executeJavaScript 只达主帧，创作类页面
+   * （如 XHS creator）把交互 UI 渲染在 iframe/OOPIF 里，定位器永远看不见。
+   * frameKey='0' 指主帧；子帧用 `${processId}-${routingId}`（随帧实例存亡，
+   * 帧导航/移除后 key 失效，天然让引用它的 page-map targetId 过期）。
+   */
+  listContentFrames(tabId: string | null): BrowserContentFrameInfo[] {
+    const { view } = this.host.resolveTabView(tabId)
+    const mainFrame = view.webContents.mainFrame
+    const frames: BrowserContentFrameInfo[] = []
+    for (const frame of mainFrame.framesInSubtree) {
+      try {
+        const main = frame === mainFrame
+        frames.push({
+          frameKey: main ? '0' : `${frame.processId}-${frame.routingId}`,
+          url: String(frame.url || ''),
+          main,
+        })
+      } catch {
+        // silent-catch: 帧可能在枚举间隙被销毁，跳过该帧继续。
+        continue
+      }
+    }
+    return frames
+  }
+
+  async executeJSInFrame(tabId: string | null, frameKey: string, code: string): Promise<unknown> {
+    if (!frameKey || frameKey === '0') return this.executeJS(tabId, code)
+    const { view } = this.host.resolveTabView(tabId)
+    const mainFrame = view.webContents.mainFrame
+    const frame = mainFrame.framesInSubtree.find((candidate) => {
+      try {
+        return candidate !== mainFrame && `${candidate.processId}-${candidate.routingId}` === frameKey
+      } catch {
+        // silent-catch: 被销毁帧读属性会抛，按不匹配处理。
+        return false
+      }
+    })
+    if (!frame) {
+      throw this.host.createBrowserError('FRAME_NOT_FOUND', `Frame ${frameKey} is no longer present on this page`)
+    }
+    return frame.executeJavaScript(code, true)
   }
 
   async getPageContent(tabId: string | null): Promise<string> {

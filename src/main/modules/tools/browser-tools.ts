@@ -333,7 +333,27 @@ async function captureAgentPageMap(
     width: Number(raw?.viewport?.width || 0) || 0,
     height: Number(raw?.viewport?.height || 0) || 0,
   }
-  const map = buildPageMap(Array.isArray(raw?.rawRoots) ? raw.rawRoots : [], {
+  // D10 frame 穿透：主帧 probe 后逐子帧补采，目标打上 frameKey（进 targetId
+  // 的 frameId 槽位，act 侧按它路由回同一帧执行）。单帧失败不阻断整图。
+  const rawRoots: RawAxNode[] = Array.isArray(raw?.rawRoots) ? raw.rawRoots : []
+  const mappedFrames: Array<{ frameKey: string; url: string; targetCount: number }> = []
+  if (typeof controller.executeJSInFrame === 'function') {
+    for (const frame of listSubframesSafe(controller, tabId)) {
+      try {
+        const frameRaw = await controller.executeJSInFrame(tabId, frame.frameKey, buildBrowserPageMapProbeJs()) as {
+          rawRoots?: RawAxNode[]
+        } | null
+        const children = Array.isArray(frameRaw?.rawRoots?.[0]?.children) ? frameRaw.rawRoots[0].children : []
+        if (children.length === 0) continue
+        for (const child of children) child.frameId = frame.frameKey
+        rawRoots.push({ role: 'iframe', name: frame.url.slice(0, 120), frameId: frame.frameKey, children })
+        mappedFrames.push({ frameKey: frame.frameKey, url: frame.url.slice(0, 200), targetCount: children.length })
+      } catch (error) {
+        log(`page map subframe probe failed (${frame.frameKey}): ${error instanceof Error ? error.message : String(error)}`)
+      }
+    }
+  }
+  const map = buildPageMap(rawRoots, {
     generation,
     viewport,
     ...(maxBytes ? { maxBytes } : {}),
@@ -363,6 +383,7 @@ async function captureAgentPageMap(
       targetSource: 'dom-target-library',
       targetCount: map.targets.length,
       truncated: map.truncated,
+      ...(mappedFrames.length > 0 ? { frames: mappedFrames } : {}),
     },
     nextAllowedActions: ['read map again', 'act on target', 'wait', 'stop with reason'],
   }
@@ -1693,6 +1714,66 @@ function buildClickByTextJs(text: string, exact: boolean): string {
   `
 }
 
+// --- D10 frame 穿透（2026-07-04）---------------------------------------
+// 定位器 JS 经 executeJS 只达主帧；创作类页面（XHS creator 等）把交互 UI
+// 渲染在 iframe/OOPIF 内，click_text/read_page_map 永远看不见。这里给
+// 定位器一条"主帧 miss 后逐子帧尝试"的通道；坐标类动作不走此路（子帧
+// 内坐标系与顶层视口不同构）。
+
+const AGENT_PAGE_MAP_MAX_SUBFRAMES = 8
+
+function listSubframesSafe(
+  controller: BrowserController,
+  tabId: string | null,
+): Array<{ frameKey: string; url: string }> {
+  if (typeof controller.listContentFrames !== 'function') return []
+  try {
+    return controller.listContentFrames(tabId)
+      .filter((frame) => !frame.main && frame.url && frame.url !== 'about:blank')
+      .slice(0, AGENT_PAGE_MAP_MAX_SUBFRAMES)
+      .map((frame) => ({ frameKey: frame.frameKey, url: frame.url }))
+  } catch {
+    // silent-catch: 帧枚举失败按无子帧处理，主帧行为不受影响。
+    return []
+  }
+}
+
+function isClickByTextMiss(result: unknown): boolean {
+  return typeof result === 'string' && result.startsWith('Element by text not found')
+}
+
+/**
+ * 主帧 miss 后逐子帧重试 buildClickByTextJs。命中即停（click JS 只在命中
+ * 时产生副作用，未命中帧无副作用，顺序尝试安全）；破坏性目标 owner 复查
+ * 由 click JS 自身携带，命中封锁对象由调用方统一 throwIfLiveTargetGuardBlocked。
+ */
+async function clickByTextAcrossFrames(
+  controller: BrowserController,
+  tabId: string | null,
+  text: string,
+  exact: boolean,
+): Promise<{ result: unknown; frameKey: string | null; framesSearched: number }> {
+  const js = buildClickByTextJs(text, exact)
+  const mainResult = await controller.executeJS(tabId, js)
+  if (!isClickByTextMiss(mainResult)) return { result: mainResult, frameKey: null, framesSearched: 0 }
+  const frames = listSubframesSafe(controller, tabId)
+  if (typeof controller.executeJSInFrame === 'function') {
+    for (const frame of frames) {
+      try {
+        const result = await controller.executeJSInFrame(tabId, frame.frameKey, js)
+        if (!isClickByTextMiss(result)) return { result, frameKey: frame.frameKey, framesSearched: frames.length }
+      } catch {
+        // silent-catch: 单帧执行失败（帧销毁/导航中）不阻断其余帧尝试。
+        continue
+      }
+    }
+  }
+  const missText = typeof mainResult === 'string'
+    ? `${mainResult}（已搜索主帧与 ${frames.length} 个子帧）`
+    : mainResult
+  return { result: missText, frameKey: null, framesSearched: frames.length }
+}
+
 function buildLocateTextTargetJs(text: string, exact: boolean, hrefContains = ''): string {
   return `
     (() => {
@@ -1871,9 +1952,9 @@ async function runWorkflowStep(
         { text, ruleId: textHit.ruleId },
       )
     }
-    const located = await controller.executeJS(tabId, buildClickByTextJs(text, exact))
-    throwIfLiveTargetGuardBlocked(located, { text, via: 'workflow_click_text' })
-    return String(located)
+    const located = await clickByTextAcrossFrames(controller, tabId, text, exact)
+    throwIfLiveTargetGuardBlocked(located.result, { text, via: 'workflow_click_text' })
+    return located.frameKey ? `${String(located.result)} [frame ${located.frameKey}]` : String(located.result)
   }
 
   if (action === 'click_at') {
@@ -3211,11 +3292,36 @@ export async function executeBrowserTool(
             { targetGeneration: parsed.generation },
           ))
         }
-        const liveProbe = await controller.executeJS(tabId, buildBrowserTargetProbeJs(parsed.node)) as {
-          matchCount?: number
-          disabled?: boolean
-          target?: unknown
-        } | null
+        // D10 frame 穿透：targetId 的 frameId 槽位路由回 map 索引该目标的
+        // 帧（act 靠帧内元素重枚举定位，跨帧索引不通用）。帧已消失按
+        // stale_page_map 收口，提示重读 map。
+        const targetFrameKey = parsed.frameId || '0'
+        const runInTargetFrame = async (code: string): Promise<unknown> => {
+          if (targetFrameKey === '0') return controller.executeJS(tabId, code)
+          if (typeof controller.executeJSInFrame !== 'function') {
+            throw Object.assign(new Error(`Frame ${targetFrameKey} is not reachable on this controller`), { code: 'FRAME_NOT_FOUND' })
+          }
+          return controller.executeJSInFrame(tabId, targetFrameKey, code)
+        }
+        const isFrameGoneError = (error: unknown): boolean =>
+          Boolean(error && typeof error === 'object' && (error as { code?: unknown }).code === 'FRAME_NOT_FOUND')
+        let liveProbe: { matchCount?: number; disabled?: boolean; target?: unknown } | null
+        try {
+          liveProbe = await runInTargetFrame(buildBrowserTargetProbeJs(parsed.node)) as {
+            matchCount?: number
+            disabled?: boolean
+            target?: unknown
+          } | null
+        } catch (error) {
+          if (isFrameGoneError(error)) {
+            return browserStructuredErrorOutput(agentBrowserError(
+              'stale_page_map',
+              `Target ${targetId} belongs to frame ${targetFrameKey}, which is no longer present. Call browser_read_page_map again.`,
+              { targetId, frameKey: targetFrameKey },
+            ))
+          }
+          throw error
+        }
         const gated = gateActOnTarget(
           { targetId, action, value, disambiguation, readBack },
           {
@@ -3291,7 +3397,19 @@ export async function executeBrowserTool(
         }
         const beforeTabs = snapshotBrowserTabs(controller)
         const before = readBack === 'none' ? null : await readBrowserActionDeltaBestEffort(controller, tabId, 'before')
-        const actionResult = await controller.executeJS(tabId, buildBrowserActOnTargetJs(parsed.node, action, value))
+        let actionResult: unknown
+        try {
+          actionResult = await runInTargetFrame(buildBrowserActOnTargetJs(parsed.node, action, value))
+        } catch (error) {
+          if (isFrameGoneError(error)) {
+            return browserStructuredErrorOutput(agentBrowserError(
+              'stale_page_map',
+              `Target ${targetId} belongs to frame ${targetFrameKey}, which disappeared before the action ran. Call browser_read_page_map again.`,
+              { targetId, frameKey: targetFrameKey },
+            ))
+          }
+          throw error
+        }
         await settleAfterAction(controller, tabId, abortSignal)
         const followedTab = await waitForActionFollowedTab(controller, tabId, beforeTabs, abortSignal)
         const after = readBack === 'map'
@@ -3390,7 +3508,43 @@ export async function executeBrowserTool(
         const located = await controller.executeJS(tabId, buildLocateTextTargetJs(text, exact, hrefContains))
         if (!located || typeof located !== 'object') return String(located)
         const result = located as { ok?: boolean; error?: string; text?: string; href?: string; cssX?: number; cssY?: number; width?: number; height?: number }
-        if (result.ok !== true) return result.error || `Element by text not found: ${text}`
+        if (result.ok !== true) {
+          // D10 frame 穿透：主帧定位 miss → 逐帧 JS click 回退（子帧坐标系
+          // 与顶层视口不同构，不能换算成坐标点击）。快照先于点击副作用。
+          const frameBeforeTabs = snapshotBrowserTabs(controller)
+          const frameBeforeUrl = activeBrowserToolUrl(controller, tabId)
+          const frameClick = await clickByTextAcrossFrames(controller, tabId, text, exact)
+          if (isClickByTextMiss(frameClick.result)) {
+            const missBase = result.error || `Element by text not found: ${text}`
+            return `${missBase}（已搜索主帧与 ${frameClick.framesSearched} 个子帧）`
+          }
+          throwIfLiveTargetGuardBlocked(frameClick.result, { text, via: 'browser_click_text_frame' })
+          const frameFollowedTab = await waitForActionFollowedTab(controller, tabId, frameBeforeTabs, abortSignal)
+          const frameConfirmation = await detectBrowserPageTransactionConfirmation(controller, frameFollowedTab?.tabId || tabId)
+          const frameReceipt = await captureBrowserActionReceipt(controller, frameFollowedTab?.tabId || tabId, frameBeforeUrl)
+          return attachBrowserActionSessionOutput(JSON.stringify({
+            ok: true,
+            text,
+            clickedDirect: true,
+            frame: frameClick.frameKey,
+            detail: String(frameClick.result),
+            followedTab: frameFollowedTab,
+            nextSuggestedAction: frameFollowedTab ? `read map again on tab ${frameFollowedTab.tabId}` : 'read map again',
+          }, null, 2), {
+            toolName,
+            args,
+            controller,
+            sessionId,
+            currentUserText,
+            tabId,
+            followedTab: frameFollowedTab,
+            confirmation: frameConfirmation,
+            changeReceipt: frameReceipt,
+            nextSuggestedAction: frameConfirmation
+              ? 'finish with transaction proof'
+              : (frameFollowedTab ? `read map again on tab ${frameFollowedTab.tabId}` : 'read map again'),
+          })
+        }
         const width = Number(result.width || 1) || 1
         const height = Number(result.height || 1) || 1
         const x = Math.round((Number(result.cssX || 0) / width) * 1000)

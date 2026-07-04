@@ -1880,6 +1880,16 @@ export class BrowserController {
     return this.automationService.executeJS(tabId, code)
   }
 
+  /** D10 frame 穿透：列出主帧+子帧（frameKey '0'=主帧，子帧 pid-rid）。 */
+  listContentFrames(tabId: string | null) {
+    return this.automationService.listContentFrames(tabId)
+  }
+
+  /** D10 frame 穿透：在指定 frameKey 的帧内执行 JS（'0' 回落主帧路径）。 */
+  async executeJSInFrame(tabId: string | null, frameKey: string, code: string): Promise<unknown> {
+    return this.automationService.executeJSInFrame(tabId, frameKey, code)
+  }
+
   /**
    * Get the plain text content of a page (document.body.innerText), truncated to 30K chars.
    */

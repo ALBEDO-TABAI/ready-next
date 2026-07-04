@@ -69,6 +69,29 @@ test('crystallize extractor: candidate and duplicate cards use observation wordi
   assert.ok(dup && dup.evidence.some((item) => item.fact.includes('possible-duplicate-of')))
 })
 
+test('crystallize extractor: staged 站点卡学习产物投影为待确认卡，其他 staged 卡不投影（D10-b）', () => {
+  const cards = extractCrystallizeCards([
+    // 三种站点卡学习 source 前缀 → 投影
+    { relPath: 'knowledge/sites/xiaohongshu.com.md', title: 'xiaohongshu.com 站点经验', tag: 'knowledge', status: 'staged', source: 'failure-learning: selector_missing 写长文' },
+    { relPath: 'knowledge/sites/bilibili.com.md', title: 'bilibili.com 站点经验修正', tag: 'knowledge', status: 'staged', source: 'possible-update-of: [[sites/bilibili.com]]' },
+    { relPath: 'knowledge/sites/taobao.com.md', title: 'taobao.com 风险建议', tag: 'knowledge', status: 'staged', source: 'possible-risk-update-of: [[sites/taobao.com]]' },
+    // 普通 staged 信念卡（无站点学习 source）→ 不投影，避免 feed 炸锅
+    { relPath: 'knowledge/pref.md', title: '偏好观察', tag: 'knowledge', status: 'staged', source: null },
+    // active 站点卡 → 不投影（无需确认）
+    { relPath: 'knowledge/sites/zhihu.com.md', title: 'zhihu.com 站点经验', tag: 'knowledge', status: 'active', source: 'failure-learning: old' },
+  ])
+  assert.equal(cards.length, 3)
+  for (const card of cards) {
+    assert.equal(card.type, 'crystallize')
+    assert.equal(card.action.kind, 'adopt_candidate', '确认动作走 Settings 信念卡面板')
+    assert.equal(card.requiresExplicitConfirm, true, 'staged 站点卡永不一键采纳')
+  }
+  const risky = cards.find((card) => card.id.includes('taobao'))
+  assert.ok(risky && /风险提示/.test(risky.title))
+  const learned = cards.find((card) => card.id.includes('xiaohongshu'))
+  assert.ok(learned && /确认后下次生效/.test(learned.title))
+})
+
 test('feed assembly: confidence floor, per-type ≤3, global ≤8, exit-less cards dropped', () => {
   const mk = (i: number, type: EmergenceCard['type'], confidence: number, action: EmergenceCard['action'] | null): EmergenceCard => ({
     id: `${type}-${i}`, type, title: `card ${i}`, confidence,

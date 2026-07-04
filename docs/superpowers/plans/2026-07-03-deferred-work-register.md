@@ -149,6 +149,11 @@ preload `runFeedback` API + electron.d.ts 类型 + 行为测试
 
 **待做**：①click/act 工具链 frame 感知（遍历 frames 或 CDP DOM.querySelector 跨 frame）；②staged 站点卡的确认可见性——会话内提示"已学到 X 待确认"或设置页角标，打通 E4"不进 Settings 也能确认"路径。
 
+**已完成（2026-07-04，用户在场）**：
+- ① frame 穿透：automation-service 增 `listContentFrames`/`executeJSInFrame`（frameKey='0' 主帧、子帧 `pid-rid`，WebFrameMain.framesInSubtree）；`read_page_map` 逐子帧补采、目标打 frameKey（targetId 的 frameId 槽位首次填真值，图上出现 `- iframe "url"` 分组 + evidence.frames）；`act_on_target` 的 probe 与 act 按 frameKey 路由回同一帧（act 靠帧内元素重枚举定位，跨帧索引不通用），帧消失收 `stale_page_map`；`browser_click_text`（工具 case + workflow step）主帧 miss 后逐子帧 JS click（子帧坐标系与顶层视口不同构，不走坐标路径），miss 文案标注已搜帧数。行为测试 `browser-frame-penetration.test.ts`。
+- ② staged 卡可见性：确认链路本已存在（BeliefCardsPanel + `agent:beliefCards:transition`），缺口只是可发现性。`extractCrystallizeCards` 增分支：status=staged 且 source 命中站点卡学习三种前缀（failure-learning:/possible-update-of:/possible-risk-update-of:）→ crystallize 待确认卡（adopt_candidate→"去确认"跳 Settings，requiresExplicitConfirm=true）；其他 staged 信念卡不投影。
+- 残余（不阻塞复测）：feed"去确认"跳 Settings 页但未锚定到信念卡面板；子帧内坐标类动作仍主帧限定。
+
 # D11 — 工具回执 nextSuggestedAction 被投影成任务卡步骤/判据（2026-07-04）
 
 **实锚**：卡面"read map again on tab tab-1 · 0/1 0%"与"finish with transaction proof · 1/1 100%"实为 act_on_target 回执的 nextSuggestedAction 文案（browser-tools :3318/:3055），经 browserActionSessionPatch 流入 projection 后被任务卡渲染成步骤/判据进度——呈现语义伪装，且"假判据 100%"严重误导。**待做**：回执建议只进 narration/meta，不得进 steps/criteria 形状的投影字段；补投影形状测试。
