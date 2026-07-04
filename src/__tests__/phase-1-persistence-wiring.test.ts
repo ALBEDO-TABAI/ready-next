@@ -22,6 +22,12 @@ const REFERENCE_HINT_SERVICE_PATH = new URL('../main/modules/agent-control/runti
 const IPC_HANDLER_PATH = new URL('../main/modules/claude-bridge/ipc-handler.ts', import.meta.url)
 const CHAT_PERSISTENCE_GROUP_PATH = new URL('../main/modules/claude-bridge/ipc/chat-persistence-group.ts', import.meta.url)
 const RUNTIME_MANAGER_PATH = new URL('../main/modules/skills-runtime/runtime-manager.ts', import.meta.url)
+// B8-D M2 — the python-runtime bodies (ensurePythonVenv rebuild branch and the
+// ensurePythonRuntimeReady wrapper) moved verbatim from runtime-manager.ts into
+// the delegated PythonRuntimeProvisioner; the manager keeps same-name one-line
+// delegates. The body-level assertions below follow the bodies; the manager-side
+// assertion pins the public delegate face.
+const PYTHON_RUNTIME_PROVISIONER_PATH = new URL('../main/modules/skills-runtime/python-runtime-provisioner.ts', import.meta.url)
 const TOOL_ERROR_METRICS_PATH = new URL('../main/modules/agent-control/tools-runtime/tool-error-metrics.ts', import.meta.url)
 
 function readSource(url: URL): string {
@@ -134,8 +140,8 @@ test('Phase 1.4 — meta_parse_corrupted is registered in TOOL_ERROR_METRICS', (
 })
 
 test('Phase 1.3 — ensurePythonVenv emits python_runtime_rebuilt only when an unsupported venv was replaced', () => {
-  const source = readSource(RUNTIME_MANAGER_PATH)
-  const blockMatch = source.match(/private async ensurePythonVenv[\s\S]*?\n {2}\}\n/)
+  const source = readSource(PYTHON_RUNTIME_PROVISIONER_PATH)
+  const blockMatch = source.match(/async ensurePythonVenv[\s\S]*?\n {2}\}\n/)
   assert.ok(blockMatch, 'ensurePythonVenv block exists')
   const block = blockMatch![0]
 
@@ -169,8 +175,9 @@ test('Phase 1.3 — ensurePythonRuntimeReady is the public startup hook with str
     /async ensurePythonRuntimeReady\(\)\s*:\s*Promise<\{/,
     'public method exists with structured result type',
   )
-  // Must not throw — boot must not block.
-  const blockMatch = source.match(/async ensurePythonRuntimeReady[\s\S]*?\n {2}\}\n/)
+  // Must not throw — boot must not block. The wrapper body followed the
+  // python-runtime cluster into PythonRuntimeProvisioner (B8-D M2).
+  const blockMatch = readSource(PYTHON_RUNTIME_PROVISIONER_PATH).match(/async ensurePythonRuntimeReady[\s\S]*?\n {2}\}\n/)
   assert.ok(blockMatch)
   assert.match(
     blockMatch![0],

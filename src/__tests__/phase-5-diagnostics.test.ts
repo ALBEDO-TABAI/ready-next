@@ -18,7 +18,10 @@ import {
 
 // Phase 5 — diagnostics behavior tests + wiring contracts.
 
-const RUNTIME_MANAGER_PATH = new URL('../main/modules/skills-runtime/runtime-manager.ts', import.meta.url)
+// B8-D M2 — the python-runtime bodies (ensurePythonVenv / ensurePythonRuntimeReady)
+// moved verbatim from runtime-manager.ts into the delegated PythonRuntimeProvisioner;
+// the Phase 5.2 metric emission pins follow the bodies.
+const PYTHON_RUNTIME_PROVISIONER_PATH = new URL('../main/modules/skills-runtime/python-runtime-provisioner.ts', import.meta.url)
 const CONTINUATION_STATE_PATH = new URL('../main/modules/agent-control/contracts/continuation-state.ts', import.meta.url)
 const IPC_HANDLER_PATH = new URL('../main/modules/claude-bridge/ipc-handler.ts', import.meta.url)
 const PRELOAD_PATH = new URL('../preload/index.ts', import.meta.url)
@@ -220,7 +223,7 @@ test('Phase 5.1 wiring — primitive registered in static name list and tool def
 })
 
 test('Phase 5.2 wiring — ensurePythonRuntimeReady emits both ready and not_ready metrics', () => {
-  const source = readSource(RUNTIME_MANAGER_PATH)
+  const source = readSource(PYTHON_RUNTIME_PROVISIONER_PATH)
   assert.match(source, /logAgentMetric\('python_runtime_ready'/)
   assert.match(source, /logAgentMetric\('python_runtime_not_ready'/)
   // python_runtime_rebuilt was added in Phase 1.3 — pin it stays in the

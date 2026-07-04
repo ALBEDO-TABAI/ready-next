@@ -33,13 +33,16 @@ function readWorkspaceFile(path: string): string {
   return readFileSync(resolve(process.cwd(), path), 'utf8')
 }
 
-test('runtime-manager reference branch uses mode="reference" and empty command', () => {
-  const source = readWorkspaceFile('src/main/modules/skills-runtime/runtime-manager.ts')
+test('skill execution engine reference branch uses mode="reference" and empty command', () => {
+  // B8-D M2 — the reference branch (runDefinitionActionDirect) moved verbatim
+  // from runtime-manager.ts into the delegated SkillExecutionEngine; the pin
+  // follows the body.
+  const source = readWorkspaceFile('src/main/modules/skills-runtime/skill-execution-engine.ts')
 
   // Locate the reference-branch start and slice enough lines to cover the
   // try/catch body. Cheaper than a brittle balanced-brace regex.
   const startIdx = source.indexOf("if (action.runtime === 'reference') {")
-  assert.notEqual(startIdx, -1, 'reference-mode branch must exist in runtime-manager.ts')
+  assert.notEqual(startIdx, -1, 'reference-mode branch must exist in skill-execution-engine.ts')
   const branch = source.slice(startIdx, startIdx + 1500)
 
   // Strip // and /* */ comments so the forensic explanation in the code
@@ -59,7 +62,10 @@ test('runtime-manager reference branch uses mode="reference" and empty command',
 })
 
 test('SkillRunResult.mode type includes "reference" (Phase 4: workflow mode retired)', () => {
-  const source = readWorkspaceFile('src/main/modules/skills-runtime/runtime-manager.ts')
+  // B8-P moved the SkillRunResult declaration to runtime-manager-types.ts —
+  // the pin follows the declaration (same re-anchor as
+  // skill-execution-api-removed.test.ts, invariant unchanged).
+  const source = readWorkspaceFile('src/main/modules/skills-runtime/runtime-manager-types.ts')
 
   // Phase 4: 'workflow' mode retired along with the skill_executions state
   // machine. The union is now just 'direct' | 'reference'.

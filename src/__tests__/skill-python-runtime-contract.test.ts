@@ -49,9 +49,14 @@ test('Ready Python candidates prefer configured and PYTHON3 before supported min
 test('skill runtime rebuild contract is pinned to stale venv state identity', () => {
   // eslint-disable-next-line ready/no-source-grep-test -- reviewed hard contract: stale venv rebuild and venvId binding live inside private runtime-manager branches
   const source = readFileSync(new URL('../main/modules/skills-runtime/runtime-manager.ts', import.meta.url), 'utf8')
+  // B8-D M2 — the rebuild branch (rmSync + runtime-state identity file) moved
+  // verbatim into the delegated PythonRuntimeProvisioner; the venvId
+  // install-state binding stays in runtime-manager's installSkillInternal.
+  // eslint-disable-next-line ready/no-source-grep-test -- reviewed hard contract: rebuild body followed the python-runtime cluster split (B8-D M2)
+  const provisioner = readFileSync(new URL('../main/modules/skills-runtime/python-runtime-provisioner.ts', import.meta.url), 'utf8')
 
-  assert.match(source, /rmSync\(this\.venvRoot,\s*\{\s*recursive:\s*true,\s*force:\s*true\s*\}\)/)
-  assert.match(source, /PYTHON_RUNTIME_STATE_FILENAME/)
+  assert.match(provisioner, /rmSync\(this\.deps\.venvRoot,\s*\{\s*recursive:\s*true,\s*force:\s*true\s*\}\)/)
+  assert.match(provisioner, /PYTHON_RUNTIME_STATE_FILENAME/)
   assert.match(source, /venvId\?: string/)
   assert.match(source, /state\.venvId\s*&&\s*state\.venvId === venvState\?\.venvId/)
 })
@@ -117,6 +122,8 @@ test('release packaging is pinned to a shared offline skill runtime', () => {
   const packer = readFileSync(new URL('../../Packer/pack-clean-release.mjs', import.meta.url), 'utf8')
   // eslint-disable-next-line ready/no-source-grep-test -- runtime-manager private install branch must skip pip for covered embedded skills when packaged runtime exists
   const runtimeManager = readFileSync(new URL('../main/modules/skills-runtime/runtime-manager.ts', import.meta.url), 'utf8')
+  // eslint-disable-next-line ready/no-source-grep-test -- python-runtime bodies moved to the delegated provisioner (B8-D M2); packaged-env pins follow the bodies
+  const pythonProvisioner = readFileSync(new URL('../main/modules/skills-runtime/python-runtime-provisioner.ts', import.meta.url), 'utf8')
   // eslint-disable-next-line ready/no-source-grep-test -- shared packaged-runtime helper owns runtime env isolation for skills and sidecar
   const packagedRuntime = readFileSync(new URL('../main/modules/skills-runtime/packaged-runtime.ts', import.meta.url), 'utf8')
   // eslint-disable-next-line ready/no-source-grep-test -- sidecar private branch must share the same packaged Python runtime
@@ -206,13 +213,13 @@ test('release packaging is pinned to a shared offline skill runtime', () => {
   assert.match(runtimeManager, /ensurePythonVenv\(\{ allowPackaged: false \}\)/)
   assert.match(runtimeManager, /installRequirements\(venvPython, requirementsPath, \{ allowPackaged: false \}\)/)
   assert.match(runtimeManager, /ensureRuntimeToolchain\(\{ allowPackaged: false \}\)/)
-  assert.match(runtimeManager, /getBaseEnv\(\{ allowPackaged \}\)/)
+  assert.match(pythonProvisioner, /getBaseEnv\(\{ allowPackaged \}\)/)
   assert.match(runtimeManager, /getRuntimeEnv\(options: \{ allowPackaged\?: boolean \} = \{\}\)/)
   assert.match(runtimeManager, /getPackagedSkillRuntimeToolCandidates/)
-  assert.match(runtimeManager, /buildPackagedSkillRuntimeEnv/)
-  assert.match(runtimeManager, /const runtimeEnv = this\.getBaseEnv\(\{ allowPackaged: true \}\)/)
-  assert.match(runtimeManager, /getPythonVersion\(pythonPath, runtimeEnv\)/)
-  assert.match(runtimeManager, /getPythonSslVersionText\(pythonPath, runtimeEnv\)/)
+  assert.match(pythonProvisioner, /buildPackagedSkillRuntimeEnv/)
+  assert.match(pythonProvisioner, /const runtimeEnv = this\.getBaseEnv\(\{ allowPackaged: true \}\)/)
+  assert.match(pythonProvisioner, /getPythonVersion\(pythonPath, runtimeEnv\)/)
+  assert.match(pythonProvisioner, /getPythonSslVersionText\(pythonPath, runtimeEnv\)/)
   assert.match(packagedRuntime, /PIP_NO_INDEX:\s*'1'/)
   assert.match(packagedRuntime, /PYTHONNOUSERSITE:\s*'1'/)
   assert.match(packagedRuntime, /HF_HUB_OFFLINE:\s*'1'/)
