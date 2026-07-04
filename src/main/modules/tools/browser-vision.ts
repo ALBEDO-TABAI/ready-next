@@ -35,6 +35,18 @@ function supportsVision(config: AIModelConfig | null): boolean {
   return !!capabilities?.supportsVision
 }
 
+// D14 后续（2026-07-04 R1 实锚）：gpt-5.5 走 openai-compatible 中转被保守
+// 默认判成无视觉，模型拿到裸 reason 码后原地挣扎 4 分钟、用户全程不知道
+// 设置页有开关。拒绝时必须给出可执行的救济指引：说清是显式关闭还是中转
+// 保守默认，指到设置页的开关。
+export function buildNoVisionRemediation(config: AIModelConfig | null): string {
+  const model = config?.model || '当前模型'
+  if (config?.visionMode === 'off') {
+    return `当前配置（${model}）在设置里显式关闭了「网页视觉」。视觉分析不可用是预期行为；请改用 read_page_map / click_text 等非视觉通道完成任务，不要重试本工具。如需视觉，请用户在 设置 → AI 模型 → 该配置 → 网页视觉 改为「强制开启」。`
+  }
+  return `当前配置（${model}）经 openai-compatible 中转接入，能力层保守默认不假定中转透传图片，视觉被判定为关闭。请改用 read_page_map / click_text 等非视觉通道完成任务，不要重试本工具；若用户确认该中转支持图像输入，可在 设置 → AI 模型 → 该配置 → 网页视觉 改为「强制开启」。`
+}
+
 function extractOpenAIText(payload: unknown): string {
   if (!payload || typeof payload !== 'object') return ''
   const choices = (payload as { choices?: Array<{ message?: { content?: unknown } }> }).choices
@@ -264,10 +276,14 @@ export async function analyzeViewportWithVision(options: {
   url?: string
   screenshotBase64: string
   domCandidates?: unknown[]
-}): Promise<{ ok: boolean; analysis?: BrowserViewportAnalysis; reason?: string; rawText?: string }> {
+}): Promise<{ ok: boolean; analysis?: BrowserViewportAnalysis; reason?: string; rawText?: string; remediation?: string }> {
   const config = await readAIConfig()
   if (!supportsVision(config)) {
-    return { ok: false, reason: 'current_provider_has_no_vision_support' }
+    return {
+      ok: false,
+      reason: 'current_provider_has_no_vision_support',
+      remediation: buildNoVisionRemediation(config),
+    }
   }
 
   const prompt = [

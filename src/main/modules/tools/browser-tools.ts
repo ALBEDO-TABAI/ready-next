@@ -4023,6 +4023,7 @@ export async function executeBrowserTool(
           action,
           latencyMs: Date.now() - startedAt,
           reason: analysis.reason,
+          ...(analysis.remediation ? { remediation: analysis.remediation } : {}),
           analysis: analysis.analysis || null,
           domCandidates,
           evidenceIds: uniqueStrings([

@@ -182,6 +182,8 @@ preload `runFeedback` API + electron.d.ts 类型 + 行为测试
 
 **残留**：closed shadow root 下合成事件仍到不了内部监听器（升级链=click_at 可信坐标，已写进站点卡）；「模型不采纳站点卡逃生口」是知识注入呈现问题（候选：把逃生口写进 map 的 nextSuggestedAction 而非只在站点卡），并入后续观察。接管确认横幅无 TTL 本轮再现（并 D8）。
 
+**D14-b（同晚追加）**：用户实际选的是 gpt-5.5（有视觉），被判无视觉的机制=openai-compatible 中转的 S5 保守默认（红线刻意行为，设置页「网页视觉」三态开关可覆盖且卡片描述已显示判定结果）——真缺口是失败时刻零引导：模型只拿到裸 reason 码，原地挣扎、用户不知有开关。已修：`analyzeViewportWithVision` 拒绝时携带 `remediation` 指引（区分显式关闭 vs 中转保守默认，指明设置路径 + 「改用非视觉通道、不要重试」），`browser_analyze_viewport` 载荷透传；行为测试 browser-vision-remediation.test.ts 钉两分支。
+
 # 汇总
 | 项 | 已完成 | 待做 | 高危点 | 前置 |
 |----|--------|------|--------|------|
