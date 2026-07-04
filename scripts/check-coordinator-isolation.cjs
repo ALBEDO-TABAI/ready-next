@@ -7,8 +7,6 @@ const ts = require('typescript')
 
 const PRODUCT_IDS = new Set(['browser', 'document', 'skill', 'rss', 'calendar', 'feishu'])
 const PRODUCT_TRIGGER_MODULES = new Set(['browser', 'document', 'skill', 'rss', 'calendar', 'feishu'])
-const FORBIDDEN_TURN_ENGINE_IMPORT_RE = /(?:^|\/)(?:tools\/browser-tools|document-domain-helpers|document-task-pipeline(?:-executor)?|skills-tools)$/
-const TURN_ENGINE_PATH = 'src/main/modules/agent-control/turn-engine.ts'
 const PROMPT_ASSEMBLY_PATH = 'src/main/modules/agent-control/prompt-assembly.ts'
 
 main()
@@ -27,45 +25,8 @@ function main() {
 
 function checkCoordinatorIsolation({ root = resolve(__dirname, '..') } = {}) {
   const errors = []
-  checkTurnEngine({ root, errors })
   checkPromptAssembly({ root, errors })
   return { ok: errors.length === 0, errors }
-}
-
-function checkTurnEngine({ root, errors }) {
-  const filePath = TURN_ENGINE_PATH
-  const abs = resolve(root, filePath)
-  if (!existsSync(abs)) {
-    errors.push(`${filePath}: missing file`)
-    return
-  }
-  const sourceText = readFileSync(abs, 'utf8')
-  const sourceFile = createSourceFile(filePath, sourceText)
-  visit(sourceFile)
-
-  function visit(node) {
-    if (ts.isImportDeclaration(node) && isStringLiteralLike(node.moduleSpecifier)) {
-      const specifier = node.moduleSpecifier.text
-      const normalized = normalizeImportSpecifier(filePath, specifier)
-      if (FORBIDDEN_TURN_ENGINE_IMPORT_RE.test(normalized)) {
-        errors.push(formatNodeError(sourceFile, node.moduleSpecifier, `forbidden import "${specifier}"`))
-      }
-    }
-    if (
-      ts.isBinaryExpression(node)
-      && (node.operatorToken.kind === ts.SyntaxKind.EqualsEqualsEqualsToken
-        || node.operatorToken.kind === ts.SyntaxKind.ExclamationEqualsEqualsToken)
-    ) {
-      const leftId = getComparedAdapterId(node.left)
-      const rightId = getComparedProductId(node.right)
-      const rightAdapterId = getComparedAdapterId(node.right)
-      const leftProductId = getComparedProductId(node.left)
-      if ((leftId && rightId) || (rightAdapterId && leftProductId)) {
-        errors.push(formatNodeError(sourceFile, node, 'adapter id comparison leaked into turn-engine'))
-      }
-    }
-    ts.forEachChild(node, visit)
-  }
 }
 
 function checkPromptAssembly({ root, errors }) {

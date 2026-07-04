@@ -47,16 +47,6 @@ test('direct-chat outer catch suppresses red transcript line for recoverable', (
   assert.match(source, /emitRuntimeError\(error\)/)
 })
 
-test('turn-engine catch gates emitOutput on recoverable and passes Error to transcript', () => {
-  const source = readWorkspaceFile('src/main/modules/agent-control/turn-engine.ts')
-  assert.match(source, /from ['"]\.\.\/claude-bridge\/error-contract['"]/)
-  assert.match(
-    source,
-    /const\s+contract\s*=\s*deriveAgentErrorContract\(error\)[\s\S]*if\s*\(!contract\.recoverable\)[\s\S]*API 请求失败/,
-  )
-  assert.match(source, /transcript\.emitRuntimeError\(error\)/)
-})
-
 test('ipc-handler agent:scopeRunEvent error payload carries errorKind/recoverable/toolName', () => {
   const source = readWorkspaceFile('src/main/modules/claude-bridge/ipc-handler.ts')
   // Inside orchestrator.on('error', ...) the scopeRunEvent payload now forwards

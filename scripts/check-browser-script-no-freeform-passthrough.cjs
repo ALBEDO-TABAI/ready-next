@@ -4,9 +4,13 @@ const path = require('path')
 
 const root = process.cwd()
 const browserToolsPath = path.join(root, 'src/main/modules/tools/browser-tools.ts')
+// B4（2026-07-04）—— browser_execute_js 等 Power case 实现体拆至
+// browser-power-tools.ts，自由脚本直通禁则同样覆盖拆出文件。
+const browserPowerToolsPath = path.join(root, 'src/main/modules/tools/browser-power-tools.ts')
 const registryPath = path.join(root, 'src/main/modules/tools/browser-readonly-script-templates.ts')
 
 const source = fs.readFileSync(browserToolsPath, 'utf8')
+const powerSource = fs.readFileSync(browserPowerToolsPath, 'utf8')
 let failed = false
 
 function fail(message) {
@@ -46,6 +50,7 @@ const forbidden = [
 
 for (const [pattern, message] of forbidden) {
   if (pattern.test(source)) fail(message)
+  if (pattern.test(powerSource)) fail(`${message} (browser-power-tools.ts)`)
 }
 
 if (failed) process.exit(1)

@@ -11,7 +11,6 @@ function readWorkspaceFile(path: string): string {
 test('tool executor rejects tool calls outside the current allowlist', () => {
   const executor = readWorkspaceFile('src/main/modules/tools/tool-executor.ts')
   const builder = readWorkspaceFile('src/main/modules/agent-control/tools-runtime/tool-runtime-context-builder.ts')
-  const turnEngine = readWorkspaceFile('src/main/modules/agent-control/turn-engine.ts')
 
   assert.match(executor, /allowedToolNames\?: Set<string> \| string\[\] \| null/)
   // R3: definition check MUST come before the allowlist check so the model
@@ -25,15 +24,4 @@ test('tool executor rejects tool calls outside the current allowlist', () => {
   assert.match(executor, /buildToolNotAllowedMessage\(toolName, allowedToolNames\)/)
   assert.match(builder, /allowedToolNames\?: Set<string> \| string\[\] \| null/)
   assert.match(builder, /allowedToolNames:\s*params\.allowedToolNames \|\| null/)
-  assert.match(turnEngine, /const preparedToolContext = buildHostToolContext\(preparedRunCapabilities\.allowedToolNames\)/)
-  // `15a29c5 fix(agent): refresh skill tool policy after frame patches`
-  // changed `const` → `let` so the policy refresh path can rebind
-  // routedAllowedToolNames after a TurnFrame patch. Accept both forms —
-  // what we actually pin is the right-hand source (selectedDomain
-  // fallback to reconciledRunCapabilities), not the binding kind.
-  assert.match(turnEngine, /(?:const|let) routedAllowedToolNames = selectedDomainPrepareResult\?\.allowedToolNames \|\| reconciledRunCapabilities\.allowedToolNames/)
-  assert.match(turnEngine, /const hostToolContext = buildHostToolContext\(routedAllowedToolNames\)/)
-  assert.match(turnEngine, /const toolContext = buildHostToolContext\(routedAllowedToolNames, scope\)/)
-  assert.doesNotMatch(turnEngine, /const allowedToolNamesForPolicy = new Set\(/)
-  assert.doesNotMatch(turnEngine, /allowedToolNames:\s*\['system_run_openclaw'\]/)
 })

@@ -28,7 +28,6 @@ const PROVIDER_ERROR_KIND_TARGETS = [
 ]
 
 const PAUSED_PREDICATE_TARGETS = [
-  'src/main/modules/agent-control/turn-engine.ts',
   'src/main/modules/agent-control/contracts/run-contracts.ts',
   'src/main/modules/agent-control/runtime-core/turn-frame-resolver.ts',
 ]

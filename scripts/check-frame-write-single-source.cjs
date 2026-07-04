@@ -40,7 +40,6 @@ const REPO = process.env.READY_FRAME_GATE_ROOT
   ? path.resolve(process.env.READY_FRAME_GATE_ROOT)
   : path.resolve(__dirname, '..')
 
-const SCOPE_B_FILE = path.join(REPO, 'src/main/modules/agent-control/turn-engine.ts')
 
 const SCOPE_A_DIR = path.join(REPO, 'src/main/modules/tools')
 const LIVE_TOOL_RUNTIME_DIR = path.join(REPO, 'src/main/modules/agent-control/tools-runtime')
@@ -59,17 +58,6 @@ const FORBIDDEN_PATTERNS_ALL = [
   /\bturnFrame\.skill\.runContract\.\w+\s*=/,
   /\bObject\.assign\s*\(\s*turnFrame\.skill\.runContract\b/,
   /\bObject\.assign\s*\(\s*turnFrame\.\w+/,
-]
-
-// Patterns that fail ONLY in Scope B (turn-engine.ts). The `contract.<field>
-// = ...` form in Scope A is a legitimate pattern: tool code constructs a
-// LOCAL `SkillRunContract` (via `loadSkillRunContract`) and fills in fields
-// before passing it to `buildContractFramePatch`. That assembly is not
-// touching a live TurnFrame. Codex v3 review explicitly called this out as
-// a false-positive risk. Only the turn-engine sites — where `contract` is
-// always an alias for `turnFrame.skill.runContract` — get the alias check.
-const FORBIDDEN_PATTERNS_SCOPE_B = [
-  /\bcontract\.(childCloseEvent|childStatus|parentNextHint)\s*=/,
 ]
 
 function stripComments(line) {
@@ -181,11 +169,6 @@ function scanLiveActiveFrameWriters(file) {
 
 function main() {
   let allViolations = []
-
-  // Scope B: turn-engine.ts only — full pattern set.
-  allViolations = allViolations.concat(
-    scanFile(SCOPE_B_FILE, [...FORBIDDEN_PATTERNS_ALL, ...FORBIDDEN_PATTERNS_SCOPE_B]),
-  )
 
   // Scope A: src/main/modules/tools/** (excluding __tests__) — turnFrame-only
   // patterns. The `contract.X = ...` form is legitimate local SkillRunContract

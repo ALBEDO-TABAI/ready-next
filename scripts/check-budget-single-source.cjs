@@ -29,7 +29,6 @@ const path = require('node:path')
 
 const REPO = path.resolve(__dirname, '..')
 const STEERING_FILE = path.join(REPO, 'src/main/modules/agent-control/runtime-core/turn-frame-steering.ts')
-const TURN_ENGINE_FILE = path.join(REPO, 'src/main/modules/agent-control/turn-engine.ts')
 const LEASE_CONTROLLER_FILE = path.join(REPO, 'src/main/modules/agent-control/skills/skill-budget-lease-controller.ts')
 
 function stripComments(line) {
@@ -61,56 +60,6 @@ function checkSteeringReadsFrameBudgetOnly() {
         code: lines[i].trim(),
         why: 'steering must read frame.budget.{leaseEndIteration,hardCapIteration} only',
       })
-    }
-  }
-  return violations
-}
-
-// ─── Sub-check 2 ────────────────────────────────────────────────────────────
-// Every lease-affecting mutation in turn-engine.ts must be followed by a
-// produceBudgetPatch call within a small text window. Score/fingerprint
-// mutations are exempt.
-function checkLeaseMutationsFollowedByProducer() {
-  const violations = []
-  const src = readSource(TURN_ENGINE_FILE)
-  const lines = src.split('\n')
-  const PROXIMITY_WINDOW = 50 // lines
-
-  // Match: skillBudgetLeaseState = createSkillBudgetLeaseState(...) or
-  //        skillBudgetLeaseState = evaluation.state
-  //        skillBudgetLeaseState.currentLeaseEndIteration = ...
-  //        skillBudgetLeaseState.hardCapIteration = ...
-  const MUTATION_PATTERNS = [
-    /\bskillBudgetLeaseState\s*=\s*createSkillBudgetLeaseState\b/,
-    /\bskillBudgetLeaseState\s*=\s*evaluation\.state\b/,
-    /\bskillBudgetLeaseState\.currentLeaseEndIteration\s*=/,
-    /\bskillBudgetLeaseState\.hardCapIteration\s*=/,
-  ]
-
-  for (let i = 0; i < lines.length; i++) {
-    const stripped = stripComments(lines[i])
-    for (const pattern of MUTATION_PATTERNS) {
-      if (pattern.test(stripped)) {
-        // Look ahead `PROXIMITY_WINDOW` lines for `produceBudgetPatch(` or
-        // for the wrapper helper `syncBudgetPatchToFrame(`.
-        const windowEnd = Math.min(lines.length, i + PROXIMITY_WINDOW)
-        let foundProducer = false
-        for (let j = i; j < windowEnd; j++) {
-          const win = stripComments(lines[j])
-          if (/\bproduceBudgetPatch\s*\(/.test(win) || /\bsyncBudgetPatchToFrame\s*\(/.test(win)) {
-            foundProducer = true
-            break
-          }
-        }
-        if (!foundProducer) {
-          violations.push({
-            file: TURN_ENGINE_FILE,
-            line: i + 1,
-            code: lines[i].trim(),
-            why: 'lease mutation must be followed by produceBudgetPatch (or syncBudgetPatchToFrame helper)',
-          })
-        }
-      }
     }
   }
   return violations
@@ -160,7 +109,6 @@ function checkProducerLocality() {
 function main() {
   const violations = [
     ...checkSteeringReadsFrameBudgetOnly(),
-    ...checkLeaseMutationsFollowedByProducer(),
     ...checkProducerLocality(),
   ]
   if (violations.length === 0) {

@@ -47,11 +47,6 @@ export class DirectChatEngine {
   getSkillContextOrchestrator() { return {} }
 }
 `)
-  write(root, 'src/main/modules/agent-control/turn-engine.ts', `
-export class TurnEngine {
-  async execute() { return { success: true } }
-}
-`)
 }
 
 test('gate passes for sdk live execution and DirectChat provider shell', (t) => {
@@ -985,4 +980,22 @@ export class ReadyAgentOrchestrator {
   const result = check({ root })
   assert.equal(result.ok, false)
   assert.ok(result.errors.some((error) => error.includes('orchestrator_binds_domain_adapter_events')))
+})
+
+test('gate fails when a retired engine file is resurrected (Phase A existence contract)', (t) => {
+  const root = makeRoot(t)
+  writePassingHarness(root)
+  write(root, 'src/main/modules/agent-control/turn-engine.ts', 'export function ok() {}\n')
+  const result = check({ root })
+  assert.equal(result.ok, false)
+  assert.ok(result.errors.some((error) => error.includes('retired_file_resurrected:src/main/modules/agent-control/turn-engine.ts')))
+})
+
+test('gate fails when the retired host-capability-dispatcher is resurrected', (t) => {
+  const root = makeRoot(t)
+  writePassingHarness(root)
+  write(root, 'src/main/modules/agent-control/domain-adapters/host-capability-dispatcher.ts', 'export class HostCapabilityDispatcher {}\n')
+  const result = check({ root })
+  assert.equal(result.ok, false)
+  assert.ok(result.errors.some((error) => error.includes('retired_file_resurrected:src/main/modules/agent-control/domain-adapters/host-capability-dispatcher.ts')))
 })

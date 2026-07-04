@@ -420,8 +420,21 @@ function pushDirectChatAstMemberErrors(errors, source, expectedNames, kind) {
   visit(sourceFile)
 }
 
+// Phase A（2026-07-04）：turn-engine.ts 与 host-capability-dispatcher.ts 已
+// 退役删除。dormant 边界升级为存在性合同——文件复活即违规；下方原有的
+// import/构造/typed-instance 负面检查保留，防止任何 src/main 文件重新引用。
+const RETIRED_FILES_REL = [
+  'src/main/modules/agent-control/turn-engine.ts',
+  'src/main/modules/agent-control/domain-adapters/host-capability-dispatcher.ts',
+]
+
 function check({ root = ROOT } = {}) {
   const errors = []
+  for (const rel of RETIRED_FILES_REL) {
+    if (fs.existsSync(path.join(root, rel))) {
+      errors.push(`retired_file_resurrected:${rel}`)
+    }
+  }
   const orchestratorPath = path.join(root, ORCHESTRATOR_REL)
   const directChatPath = path.join(root, DIRECT_CHAT_REL)
 

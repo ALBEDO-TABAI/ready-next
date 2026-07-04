@@ -5,7 +5,6 @@ import { describe, it } from 'node:test'
 
 const DRIVER_PATH = resolve(process.cwd(), 'src/renderer/modules/agent/runtimeDriver.ts')
 const PRELOAD_PATH = resolve(process.cwd(), 'src/preload/index.ts')
-const TURN_ENGINE_PATH = resolve(process.cwd(), 'src/main/modules/agent-control/turn-engine.ts')
 const DIRECT_CHAT_PATH = resolve(process.cwd(), 'src/main/modules/claude-bridge/direct-chat.ts')
 const AGENT_SDK_RUNTIME_PATH = resolve(process.cwd(), 'src/main/modules/agent-control/runtime-core/agent-sdk-runtime.ts')
 const CAPABILITY_CONTROLLER_PATH = resolve(
@@ -71,12 +70,9 @@ describe('G-Z12 runtimeDriver 事件接入 ready-tools.log', () => {
   })
 
   it('主进程能力裁决同步写入 ready-tools.log', () => {
-    const turnEngineSource = readFileSync(TURN_ENGINE_PATH, 'utf8')
     const capabilityControllerSource = readFileSync(CAPABILITY_CONTROLLER_PATH, 'utf8')
     const helperSource = readFileSync(LOG_HELPER_PATH, 'utf8')
     assert.match(helperSource, /appendToolCapabilityLog/)
-    assert.match(turnEngineSource, /appendToolCapabilityLog\(preparedCapabilityLogLine\)/)
-    assert.match(turnEngineSource, /appendToolCapabilityLog\(effectiveCapabilityLogLine\)/)
     const directChatSource = readFileSync(DIRECT_CHAT_PATH, 'utf8')
     assert.doesNotMatch(directChatSource, /stage=direct_chat_tool_loop/)
     assert.doesNotMatch(directChatSource, /appendToolCapabilityLog/)

@@ -7,7 +7,6 @@ const ts = require('typescript')
 
 const DEFAULT_SOURCE_DIR = 'src/main/modules/agent-control'
 const CANONICAL_TYPES_FILE = 'src/main/modules/agent-control/skills/skill-child-run-types.ts'
-const TURN_ENGINE_FILE = 'src/main/modules/agent-control/turn-engine.ts'
 const CLOSE_STATUS_LITERALS = new Set([
   'completed',
   'failed',
@@ -158,22 +157,6 @@ function visitSourceFile({ sourceFile, relativeFile, violations }) {
       })
     }
 
-    if (
-      relativeFile === TURN_ENGINE_FILE
-      && ts.isBinaryExpression(node)
-      && isChildCloseEventAssignment(node)
-      && !isNullLiteral(node.right)
-      && isInsideResumeBranch(node)
-    ) {
-      addViolation({
-        sourceFile,
-        relativeFile,
-        node,
-        violations,
-        message: 'forbidden resume childCloseEvent assignment; apply resumed.freshContractFields wholesale',
-      })
-    }
-
     ts.forEachChild(node, visit)
   }
   visit(sourceFile)
@@ -250,12 +233,6 @@ function isCloseStatusLiteral(node) {
 }
 
 function isW0WhitelistedStatusDecision(node, relativeFile) {
-  if (relativeFile === 'src/main/modules/agent-control/turn-engine.ts') {
-    const functionName = enclosingFunctionName(node)
-    if (functionName && W0_WHITELIST_FUNCTIONS.has(functionName)) return true
-    return isInsideVariableNamed(node, 'turnTerminalReason')
-  }
-
   if (relativeFile === 'src/main/modules/agent-control/skills/skill-child-sub-agent.ts') {
     return enclosingFunctionName(node) === 'subAgentReasonForChildClose'
   }

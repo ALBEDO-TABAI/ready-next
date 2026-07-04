@@ -63,8 +63,9 @@ test('check-frame-write-single-source: passes on the current Stage M codebase', 
   assert.match(result.output, /\[check-frame-write-single-source\] OK/)
 })
 
-test('check-frame-write-single-source: catches direct turnFrame.terminalReason = ... in turn-engine.ts (negative test would fire)', () => {
-  // We can't actually mutate turn-engine.ts here, but we document the
+test('check-frame-write-single-source: documents the forbidden direct turnFrame mutation patterns (Scope A)', () => {
+  // Phase A retired turn-engine.ts (Scope B); tools (Scope A) keep the ban.
+  // We document the
   // expected pattern. The frame-budget-roundtrip + frame-terminal-priority
   // tests cover the positive path (apply via patch).
   const forbiddenPatterns = [
@@ -82,7 +83,6 @@ test('check-frame-write-single-source: catches direct turnFrame.terminalReason =
 test('check-frame-write-single-source: catches live activeFrame writes outside applyContextModifier', (t) => {
   const root = mkdtempSync(join(tmpdir(), 'frame-write-gate-'))
   t.after(() => rmSync(root, { recursive: true, force: true }))
-  write(root, 'src/main/modules/agent-control/turn-engine.ts', 'export function ok() {}\n')
   write(root, 'src/main/modules/tools/noop.ts', 'export function ok() {}\n')
   write(root, 'src/main/modules/agent-control/tools-runtime/tool-runtime.ts', `
 export function applyContextModifier(context, output) {

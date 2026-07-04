@@ -55,7 +55,6 @@ test('registry exposes documented tool-error metric keys', () => {
     'surfaced',
     'systemReminderSuppressedByConflict',
     'toolCallTextIntercepted',
-    'toolLoopRepetitionDetected',
     'toolSnapshotMismatch',
     'unknownSurfaced',
     'userNegationDenied',
@@ -92,8 +91,6 @@ test('historical metric strings are preserved (log-compat contract)', () => {
   assert.equal(TOOL_ERROR_METRICS.skillPrimitiveRejected, 'skill_primitive_rejected')
   // Domain adapter prefix narrowing (post-Phase 4 telemetry)
   assert.equal(TOOL_ERROR_METRICS.domainToolNarrowingApplied, 'domain_tool_narrowing_applied')
-  // Tool-loop repetition guardrail (skill-resume work)
-  assert.equal(TOOL_ERROR_METRICS.toolLoopRepetitionDetected, 'tool_loop_repetition_detected')
   // skill-resume E1 — auto-attach historical recall capsules on retry intent
   assert.equal(TOOL_ERROR_METRICS.sessionRecallAutoAttached, 'session_recall_auto_attached')
   // skill-resume G4 — last-recourse hint recovery from auto-attached capsule text

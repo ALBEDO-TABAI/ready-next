@@ -6,7 +6,13 @@ const root = process.cwd()
 const file = path.join(root, 'src/main/modules/tools/browser-tools.ts')
 const source = fs.readFileSync(file, 'utf8')
 
-if (!/function isBrowserAbortError\(/.test(source)) {
+// P3-B2（2026-07-03）把 isBrowserAbortError 分类器拆到 browser-input-actions.ts；
+// browser-tools 经 import 使用，catch 侧断言仍在下方针对 browser-tools 本体。
+const inputActionsSource = fs.readFileSync(
+  path.join(root, 'src/main/modules/tools/browser-input-actions.ts'),
+  'utf8',
+)
+if (!/export function isBrowserAbortError\(/.test(inputActionsSource)) {
   console.error('[check-browser-abort-rethrow] FAIL — missing browser AbortError classifier.')
   process.exit(1)
 }

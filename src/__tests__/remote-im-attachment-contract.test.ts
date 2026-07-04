@@ -256,16 +256,6 @@ test('renderer keeps a parseable local path next to image and video attachment b
   assert.match(source, /blocks\.push\(\{ type: 'video'/)
 })
 
-test('send-im host tool context receives the current request envelope', () => {
-  // eslint-disable-next-line ready/no-source-grep-test -- private turn-engine guard: direct skill tools must see request resources/recent artifacts from the same turn.
-  const source = readFileSync(new URL('../main/modules/agent-control/turn-engine.ts', import.meta.url), 'utf8')
-
-  assert.match(source, /currentUserText:\s*toolContextCurrentUserText/)
-  assert.match(source, /requestEnvelope:\s*toolContextRequestEnvelope/)
-  assert.match(source, /toolContextCurrentUserText\s*=\s*requestEnvelope\.primaryInstruction \|\| requestEnvelope\.pureUserText \|\| userText/)
-  assert.match(source, /toolContextRequestEnvelope\s*=\s*requestEnvelope/)
-})
-
 test('remote IM channel delivery treats sidecar body errors as failures', () => {
   assert.deepEqual(
     normalizeChannelDeliveryResult({ success: false, error: 'upload failed' }, 'fallback'),

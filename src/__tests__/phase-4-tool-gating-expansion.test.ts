@@ -23,7 +23,6 @@ import {
 //   C4 — `continuation` task type fixed at 24 iter regardless of original
 //        task's natural ceiling.
 
-const TURN_ENGINE_PATH = new URL('../main/modules/agent-control/turn-engine.ts', import.meta.url)
 const SKILLS_TOOLS_PATH = new URL('../main/modules/tools/skills-tools.ts', import.meta.url)
 
 function readSource(url: URL): string {
@@ -103,46 +102,6 @@ test('Phase 4.3 — filterSkillPrimitivesBySession honors the projection signal'
 })
 
 // --- Wiring checks ----------------------------------------------------------
-
-test('Phase 4.1 wiring — turn-engine drops the !continuationTaskId AND on long-skill budget', () => {
-  const source = readSource(TURN_ENGINE_PATH)
-
-  // Old shape: `isLongSkillResumeTurn && !continuationTaskId`
-  // New shape: `isLongSkillResumeTurn || (Boolean(continuationTaskId) && hasLongTypedSkillAction(...))`
-  assert.doesNotMatch(
-    source,
-    /shouldUseLongSkillResumeBudget\s*=\s*isLongSkillResumeTurn\s*&&\s*!continuationTaskId/,
-    'old AND form must be gone',
-  )
-  assert.match(
-    source,
-    /shouldUseLongSkillResumeBudget\s*=[\s\S]*?isLongSkillResumeTurn[\s\S]*?\|\|[\s\S]*?Boolean\(continuationTaskId\)\s*&&\s*hasLongTypedSkillAction/,
-    'new OR form (resume turn OR continuation+long-typed) must be present',
-  )
-})
-
-test('Phase 4.2 wiring — long-task continuation gets createContinuationRunBudgetSeed override', () => {
-  const source = readSource(TURN_ENGINE_PATH)
-  // SCREENSHOT-BUG follow-up: the override is now gated on the projection's
-  // ORIGINAL taskType being multi_step / media. Don't bump short_task
-  // continuations whose saved budget was deliberately small (regression
-  // caught by `turn-engine-route.test.ts` which saves a 12-iter budget).
-  assert.match(source, /createContinuationRunBudgetSeed\(continuationProjection\.taskType\)/)
-  assert.match(
-    source,
-    /continuationProjection\?\.taskType\s*===\s*'multi_step_task'\s*\n?\s*\|\|\s*continuationProjection\?\.taskType\s*===\s*'media_task'/,
-    'gate on original long taskType, not all continuations',
-  )
-  assert.match(
-    source,
-    /inheritedSeed\.maxIterations\s*>\s*\(previousMaxIterations\s*\?\?\s*0\)/,
-    'guard must be present so the override never shrinks the budget',
-  )
-  assert.match(source, /logAgentMetric\('continuation_budget_inherited'/)
-  assert.match(source, /from\s+'\.\/task-projection\/run-budget-policy'/, 'imports the helper')
-  // The import line must include the new helper.
-  assert.match(source, /createContinuationRunBudgetSeed,/)
-})
 
 test('Phase 4.3 wiring — getSkillToolDefs passes hasActiveSkillTaskProjection to the gate', () => {
   const source = readSource(SKILLS_TOOLS_PATH)

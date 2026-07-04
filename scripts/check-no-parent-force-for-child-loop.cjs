@@ -36,7 +36,6 @@ const path = require('node:path')
 
 const REPO = path.resolve(__dirname, '..')
 
-const DEFAULT_TURN_ENGINE_FILE = path.join(REPO, 'src/main/modules/agent-control/turn-engine.ts')
 const DEFAULT_TURN_FRAME_STEERING_FILE = path.join(REPO, 'src/main/modules/agent-control/runtime-core/turn-frame-steering.ts')
 const DEFAULT_EMBEDDED_DIR = path.join(REPO, 'assets/embedded-skills')
 
@@ -103,66 +102,7 @@ function checkDefaultResumeTable(steeringFile, childLoopActionsBySkill) {
   return { ok: true }
 }
 
-function checkSynthesisFence(turnEngineFile) {
-  const text = fs.readFileSync(turnEngineFile, 'utf8')
-  const lines = text.split('\n')
-  const anchor = lines.findIndex((line) => /\bchildOwnedByContract\b/.test(line))
-  if (anchor < 0) {
-    return {
-      ok: false,
-      reason: 'synthesis fence missing manifest predicate (childOwnedByContract anchor not found)',
-    }
-  }
-  const start = Math.max(0, anchor - 5)
-  const end = Math.min(lines.length, anchor + 30)
-  const window = lines.slice(start, end).join('\n')
-  if (!window.includes('shouldParentForceLongSkillTool')) {
-    return {
-      ok: false,
-      reason: 'synthesis fence missing contract predicate (shouldParentForceLongSkillTool not in surrounding window)',
-    }
-  }
-  if (!window.includes('isParentForceForbiddenByManifest')) {
-    return {
-      ok: false,
-      reason: 'synthesis fence missing manifest predicate (isParentForceForbiddenByManifest not in surrounding window)',
-    }
-  }
-  return { ok: true }
-}
-
-function checkGuardWriteBelt(turnEngineFile) {
-  const text = fs.readFileSync(turnEngineFile, 'utf8')
-  const lines = text.split('\n')
-  const guardLines = lines.reduce((acc, line, idx) => {
-    if (/\bguardPatch:\s*TurnFramePatch\b/.test(line) || /\bconst\s+guardPatch:\s*TurnFramePatch\b/.test(line)) {
-      acc.push(idx)
-    }
-    return acc
-  }, [])
-  if (guardLines.length === 0) {
-    return { ok: false, reason: 'guardPatch write site not found in turn-engine.ts' }
-  }
-  if (guardLines.length > 1) {
-    return {
-      ok: false,
-      reason: `guardPatch write site is ambiguous (${guardLines.length} matches); regex assumes uniqueness`,
-    }
-  }
-  const guardLine = guardLines[0]
-  const start = Math.max(0, guardLine - 100)
-  const window = lines.slice(start, guardLine).join('\n')
-  if (!window.includes('isParentForceForbiddenByManifest')) {
-    return {
-      ok: false,
-      reason: 'guardPatch write site missing invariant belt (isParentForceForbiddenByManifest not in preceding 100 lines)',
-    }
-  }
-  return { ok: true }
-}
-
 function checkNoParentForceForChildLoop(options = {}) {
-  const turnEngineFile = options.turnEngineFile || DEFAULT_TURN_ENGINE_FILE
   const turnFrameSteeringFile = options.turnFrameSteeringFile || DEFAULT_TURN_FRAME_STEERING_FILE
   const embeddedDir = options.embeddedDir || DEFAULT_EMBEDDED_DIR
   const childLoopActionsBySkill = loadEmbeddedChildLoopActions(embeddedDir)
@@ -171,11 +111,6 @@ function checkNoParentForceForChildLoop(options = {}) {
 
   const r1 = checkDefaultResumeTable(turnFrameSteeringFile, childLoopActionsBySkill)
   if (!r1.ok) errors.push(`#1: ${r1.reason}`)
-  const r2 = checkSynthesisFence(turnEngineFile)
-  if (!r2.ok) errors.push(`#2: ${r2.reason}`)
-  const r3 = checkGuardWriteBelt(turnEngineFile)
-  if (!r3.ok) errors.push(`#3: ${r3.reason}`)
-
   return { ok: errors.length === 0, errors }
 }
 
@@ -196,6 +131,4 @@ if (require.main === module) {
 module.exports = {
   checkNoParentForceForChildLoop,
   checkDefaultResumeTable,
-  checkSynthesisFence,
-  checkGuardWriteBelt,
 }

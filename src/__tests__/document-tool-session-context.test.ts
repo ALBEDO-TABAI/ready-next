@@ -10,21 +10,7 @@ describe('document tool session context', () => {
       resolve(process.cwd(), 'src/main/modules/claude-bridge/direct-chat.ts'),
       'utf8',
     )
-    // eslint-disable-next-line ready/no-source-grep-test -- reviewed hard contract: persistence trigger lives inside TurnEngine execute flow and needs full host-loop harness
-    const turnEngineSource = readFileSync(
-      resolve(process.cwd(), 'src/main/modules/agent-control/turn-engine.ts'),
-      'utf8',
-    )
-
     assert.match(directChatSource, /lastDocumentContextInput\?: string \| null/)
-    // The read pattern (feeding session state into the turn engine) now lives on turn-engine.
-    assert.match(turnEngineSource, /lastDocumentContextInput:\s*session\.lastDocumentContextInput/)
-    // Assignment also lives on the turn engine: lease-sticky or forceDocumentTool both persist.
-    assert.match(turnEngineSource, /session\.lastDocumentContextInput = contextualUserInput/)
-    assert.match(
-      turnEngineSource,
-      /executionIntentContext\.hasWidgetTargetContext/,
-    )
   })
 
   it('keeps tool guidance scoped to the current run instead of mutating the session prompt', () => {
@@ -33,23 +19,9 @@ describe('document tool session context', () => {
       resolve(process.cwd(), 'src/main/modules/claude-bridge/direct-chat.ts'),
       'utf8',
     )
-    // eslint-disable-next-line ready/no-source-grep-test -- reviewed hard contract: tool guidance copy-on-write happens inside the model-loop session wrapper
-    const turnEngineSource = readFileSync(
-      resolve(process.cwd(), 'src/main/modules/agent-control/turn-engine.ts'),
-      'utf8',
-    )
-
     assert.doesNotMatch(
       directChatSource,
       /session\.systemPrompt\s*=\s*`\$\{session\.systemPrompt\}\\n\\n\$\{toolGuidance\}`/,
-    )
-    assert.doesNotMatch(
-      turnEngineSource,
-      /session\.systemPrompt\s*=\s*`\$\{session\.systemPrompt\}\\n\\n\$\{toolGuidance\}`/,
-    )
-    assert.match(
-      turnEngineSource,
-      /const toolLoopSession = toolGuidance\s*\?\s*\{\s*\.\.\.session,\s*systemPrompt:\s*`\$\{session\.systemPrompt\}\\n\\n\$\{toolGuidance\}`,\s*\}\s*:\s*session/,
     )
   })
 })

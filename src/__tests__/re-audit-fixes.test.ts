@@ -21,7 +21,6 @@ import {
 //   3.2 — false-positive trade-off documented
 //   bonus — _resetLastReferenceSkillHintsForTests now also clears emitter
 
-const TURN_ENGINE_PATH = new URL('../main/modules/agent-control/turn-engine.ts', import.meta.url)
 const SKILLS_TOOLS_PATH = new URL('../main/modules/tools/skills-tools.ts', import.meta.url)
 const SKILL_CONTEXT_ORCHESTRATOR_PATH = new URL('../main/modules/agent-control/skills/skill-context-orchestrator.ts', import.meta.url)
 const IPC_HANDLER_PATH = new URL('../main/modules/claude-bridge/ipc-handler.ts', import.meta.url)
@@ -199,29 +198,6 @@ test('FIX 5.4 — cleanupAgentRuntime calls setReferenceHintChangeEmitter(null)'
     /setReferenceHintChangeEmitter\(null\)/,
     'emitter must be released so window closure can be GC-ed',
   )
-})
-
-// ---------------------------------------------------------------------------
-// FIX 4.2 — restored continuation budget also gets inheritance pass
-// ---------------------------------------------------------------------------
-
-test('FIX 4.2 — continuation override no longer gates on absent budgetRuntime', () => {
-  const source = readSource(TURN_ENGINE_PATH)
-  // The OLD condition was `chain === 'continuation' && !taskExecutionRoute.continuation?.budgetRuntime`.
-  // The NEW condition is just `chain === 'continuation'` — restored runtimes
-  // also get the inheritance pass when their saved maxIter is below what the
-  // original taskType would justify.
-  assert.doesNotMatch(
-    source,
-    /taskExecutionRoute\.chain\s*===\s*'continuation'\s*\n?\s*&&\s*!\s*taskExecutionRoute\.continuation\?\.budgetRuntime/,
-    'old "no saved runtime" gate must be gone',
-  )
-  // The override condition stays guarded by `inheritedSeed.maxIterations >
-  // (previousMaxIterations ?? 0)` so this is not unconditionally larger.
-  assert.match(source, /inheritedSeed\.maxIterations\s*>\s*\(previousMaxIterations\s*\?\?\s*0\)/)
-  // The metric now also reports whether we saw a restored runtime (so dashboards
-  // can split the asymmetric vs symmetric inheritance cases).
-  assert.match(source, /hadRestoredRuntime:\s*Boolean\(taskExecutionRoute\.continuation\?\.budgetRuntime\)/)
 })
 
 // ---------------------------------------------------------------------------

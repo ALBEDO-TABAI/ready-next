@@ -94,13 +94,6 @@ export const TOOL_ERROR_METRICS = {
    */
   domainToolNarrowingApplied: 'domain_tool_narrowing_applied',
   /**
-   * Turn-engine 检测到模型在主工具循环里以相同参数连续调用同一个工具达到阈值
-   * （默认：最近 5 次里出现 ≥3 次）。emit 时附 `{ tool, repetitions, sessionId }`，
-   * 同时往 session.messages 注入一段系统提醒，引导模型改用 skill_ask_user 或换路径。
-   * 触发后 ring buffer 会被清空，避免每一轮都重复 emit / 重复注入提醒。
-   */
-  toolLoopRepetitionDetected: 'tool_loop_repetition_detected',
-  /**
    * skill-resume E1 — runtime 在用户发起 bare retry intent（"继续 / 接着 ..."）且
    * 当前 scope 没有手动附加的 sessionRecallContext 时，自动按 lineage_root 回挂
    * top-N 历史 capsule。emit 时附 `{ scopeId, attachedCount, attachedConversationIds }`，
