@@ -3273,6 +3273,13 @@ export async function executeBrowserTool(
             firstAttemptTargetCount: firstTargetCount,
           }
         }
+        {
+          // 观测锚：map 结果概要落日志——真机诊断两轮都因看不到工具返回
+          // 内容而只能排除法推根因，这一行让下一轮直接读到感知面实况。
+          const mapSummary = payload.pageMap as { targets?: unknown[]; truncated?: boolean } | undefined
+          const evidenceSummary = payload.evidence as { frames?: unknown[]; settleRetried?: boolean } | undefined
+          log(`read_page_map result: targets=${Array.isArray(mapSummary?.targets) ? mapSummary.targets.length : 0} truncated=${mapSummary?.truncated === true} frames=${Array.isArray(evidenceSummary?.frames) ? evidenceSummary.frames.length : 0} settleRetried=${evidenceSummary?.settleRetried === true} maxBytes=${maxBytes}`)
+        }
         return attachBrowserActionSessionOutput(JSON.stringify(payload, null, 2), {
           toolName,
           args,
