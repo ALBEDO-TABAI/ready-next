@@ -14,6 +14,11 @@ import { TOOL_ERROR_METRICS } from '../main/modules/agent-control/tools-runtime/
 // to catch a future refactor that drops one of these hooks.
 
 const RUNTIME_PATH = new URL('../main/modules/agent-control/runtime-core/runtime.ts', import.meta.url)
+// B8-D R2 — the reference-hint method bodies moved from runtime.ts into the
+// delegated ReferenceHintService; the runtime keeps one-line public delegates.
+// The hook-chain assertions below follow the bodies; the runtime-side
+// assertions pin the delegate wiring so the chain cannot silently detach.
+const REFERENCE_HINT_SERVICE_PATH = new URL('../main/modules/agent-control/runtime-core/reference-hint-service.ts', import.meta.url)
 const IPC_HANDLER_PATH = new URL('../main/modules/claude-bridge/ipc-handler.ts', import.meta.url)
 const CHAT_PERSISTENCE_GROUP_PATH = new URL('../main/modules/claude-bridge/ipc/chat-persistence-group.ts', import.meta.url)
 const RUNTIME_MANAGER_PATH = new URL('../main/modules/skills-runtime/runtime-manager.ts', import.meta.url)
@@ -24,24 +29,32 @@ function readSource(url: URL): string {
 }
 
 test('Phase 1.1 — runtime exposes persistReferenceHintAfterAssistantMessage and routes assistants through persistReferenceHintToScope', () => {
-  const source = readSource(RUNTIME_PATH)
+  const runtimeSource = readSource(RUNTIME_PATH)
+  const serviceSource = readSource(REFERENCE_HINT_SERVICE_PATH)
 
   assert.match(
-    source,
+    runtimeSource,
     /persistReferenceHintAfterAssistantMessage\s*\(scopeId:\s*string,\s*role:\s*string\)\s*:\s*void/,
     'public hook signature is part of the runtime contract',
+  )
+  // B8-D R2 — the runtime hook MUST stay a delegate into ReferenceHintService
+  // so the IPC → runtime → service chain cannot silently detach.
+  assert.match(
+    runtimeSource,
+    /persistReferenceHintAfterAssistantMessage[^}]*this\.referenceHints\.persistReferenceHintAfterAssistantMessage\(/,
+    'runtime hook delegates to ReferenceHintService',
   )
   // The hook MUST be a no-op for non-assistant roles to avoid wasted DB writes
   // when the chat panel saves a user message.
   assert.match(
-    source,
+    serviceSource,
     /persistReferenceHintAfterAssistantMessage[^}]*if\s*\(role\s*!==\s*'assistant'\)\s*return/,
     'hook short-circuits non-assistant roles',
   )
-  // The hook MUST delegate to the existing private persist helper rather than
+  // The hook MUST delegate to the existing persist helper rather than
   // re-implementing snapshot logic.
   assert.match(
-    source,
+    serviceSource,
     /persistReferenceHintAfterAssistantMessage[^}]*this\.persistReferenceHintToScope\(/,
     'hook delegates to persistReferenceHintToScope',
   )
@@ -82,13 +95,13 @@ test('Phase 1.2 — ensureChannelScope restores reference hint from meta_json be
   assert.ok(blockMatch, 'ensureChannelScope block exists')
   assert.match(
     blockMatch![0],
-    /this\.restoreReferenceHintFromScope\(scope,\s*scope\.id\)/,
+    /this\.referenceHints\.restoreReferenceHintFromScope\(scope,\s*scope\.id\)/,
     'ensureChannelScope replays persisted hint into in-memory map',
   )
 })
 
 test('Phase 1.4 — parseScopeMeta emits meta_parse_corrupted instead of silently swallowing JSON errors', () => {
-  const source = readSource(RUNTIME_PATH)
+  const source = readSource(REFERENCE_HINT_SERVICE_PATH)
   const blockMatch = source.match(/private parseScopeMeta[\s\S]*?\n\s{2}\}/)
   assert.ok(blockMatch, 'parseScopeMeta block exists')
 
