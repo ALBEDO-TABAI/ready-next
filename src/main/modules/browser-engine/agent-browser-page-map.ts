@@ -198,11 +198,29 @@ export function buildPageMap(rawRoots: RawAxNode[], options: BuildPageMapOptions
   let truncated = false
   if (Buffer.byteLength(text, 'utf8') > maxBytes) {
     truncated = true
-    // Truncate on a line boundary so we never emit a half-rendered node.
-    while (lines.length > 0 && Buffer.byteLength(lines.join('\n'), 'utf8') > maxBytes) {
-      lines.pop()
+    // D13（2026-07-04 真机实锚）：砍尾式截断会把 DOM 尾部的主行动按钮
+    // （发布/发送/提交——几乎总在页面底部）砍成第一个牺牲品。改为中段
+    // 截断：头部 ~75% 预算 + 尾部 ~20% 预算，行边界切割，永不半行。
+    const marker = '… (truncated middle) …'
+    const tailBudget = Math.max(256, Math.floor(maxBytes * 0.2))
+    const headBudget = Math.max(256, maxBytes - tailBudget - Buffer.byteLength(marker, 'utf8') - 2)
+    const head: string[] = []
+    let headBytes = 0
+    for (const line of lines) {
+      const cost = Buffer.byteLength(line, 'utf8') + 1
+      if (headBytes + cost > headBudget) break
+      head.push(line)
+      headBytes += cost
     }
-    text = lines.join('\n') + '\n… (truncated)'
+    const tail: string[] = []
+    let tailBytes = 0
+    for (let i = lines.length - 1; i > head.length - 1; i--) {
+      const cost = Buffer.byteLength(lines[i], 'utf8') + 1
+      if (tailBytes + cost > tailBudget) break
+      tail.unshift(lines[i])
+      tailBytes += cost
+    }
+    text = [...head, marker, ...tail].join('\n')
   }
 
   return {

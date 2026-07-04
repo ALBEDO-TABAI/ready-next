@@ -71,8 +71,24 @@ describe('agent-browser page map', () => {
     const map = buildPageMap([{ role: 'generic', children }], { generation: 1, viewport, maxBytes: 2_000 })
     assert.equal(map.truncated, true)
     assert.ok(Buffer.byteLength(map.text, 'utf8') <= 2_100)
-    assert.ok(map.text.includes('… (truncated)'))
+    assert.ok(map.text.includes('… (truncated middle) …'))
     assert.ok(!map.text.includes('<'), 'must not contain HTML angle brackets')
+  })
+
+  it('中段截断保住 DOM 尾部主行动按钮（D13：发布/发送在页面底部）', () => {
+    const children: RawAxNode[] = [
+      ...Array.from({ length: 400 }, (_, i) => ({
+        role: 'button',
+        name: `设置项 ${i} 的很长很长的说明文字用来撑爆预算撑爆预算`,
+        backendDOMNodeId: 100 + i,
+      })),
+      { role: 'clickable', name: '发布', backendDOMNodeId: 9999 },
+    ]
+    const map = buildPageMap([{ role: 'generic', children }], { generation: 1, viewport, maxBytes: 4_000 })
+    assert.equal(map.truncated, true)
+    assert.match(map.text, /- clickable "发布"/, '尾部 CTA 必须活过截断')
+    assert.match(map.text, /设置项 0/, '头部内容保留')
+    assert.ok(map.targets.some((t) => t.name === '发布'), 'targets 数组不受文本截断影响')
   })
 
   it('clickable role（cursor:pointer 委托型控件）进入目标列表且带 frameKey（D10-c）', () => {

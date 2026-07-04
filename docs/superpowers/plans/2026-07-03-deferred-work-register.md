@@ -164,6 +164,14 @@ preload `runFeedback` API + electron.d.ts 类型 + 行为测试
 
 **已完成**：①read_page_map 目标数 <5 时工具层 waitForReady(3s)+重采一次（返回最新 generation 捕获防 stale 合同破坏，evidence.settleRetried 可观测）——把"先等再读"纪律从模型素养下沉为工具合同；②bundled 站点卡改写：④ 步骤改为「一键排版→预览→发送」真实流程、删除"转 Power CDP 读 frame tree"坏建议（正是把模型带进被拒 power 通道的推手）、补"目标少=未渲染完先等"指引；③read_page_map 的 nextSuggestedAction 铲掉 power_cdp 引导文案（D11 假步骤源头之一）。
 
+# D13 — map 双端尾部偏置：主行动按钮死在 DOM 尾部（真机第六轮实锚，2026-07-04 午后，已完成）
+
+**实锚**：第六轮 38 工具/7 分 20 秒，行为全对（切 tab/一键排版/Power 探测/填充/读回全走通），最后卡在"找不到发布按钮"——而截图里页面底部红色「发布」赫然在目。两个尾部偏置叠加：①XHS 按钮是 `div.btn-wrapper`（pointer 收集级），文档序 cap 40 被超长设置页前部的 pointer 行吃光，DOM 尾部的「发布」进不了目标列表；②map 文本砍尾式截断（model 传 max_bytes:12000），主 CTA 在页面底部=DOM 尾部=第一个牺牲品。
+
+**已完成**：①pointer 收集 cap 40→120 扫描上限内全收，超 40 时保头 28+尾 12（头部导航/tab 与底部 CTA 双端都在，规则确定性保 probe/act 重枚举索引一致）；②buildPageMap 改中段截断（头 ~75%+尾 ~20% 预算，`… (truncated middle) …` 标记，行边界切割），纯测试钉住"尾部 CTA 活过截断"。
+
+**遗留观察**：13:03 起挂到 16:33 的"等待确认——确认后中断 Agent 浏览器控制"横幅从未过期——接管确认卡缺 TTL/上下文结束自动撤（并入 D8 等待呈现语义）。
+
 # 汇总
 | 项 | 已完成 | 待做 | 高危点 | 前置 |
 |----|--------|------|--------|------|

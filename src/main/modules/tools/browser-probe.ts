@@ -114,7 +114,7 @@ function buildBrowserDomTargetLibraryJs(): string {
       const out = [];
       let scanned = 0;
       for (const el of document.querySelectorAll('div,span,li,p,img,svg')) {
-        if (out.length >= 40 || scanned >= 8000) break;
+        if (out.length >= 120 || scanned >= 8000) break;
         scanned += 1;
         if (semanticSet.has(el)) continue;
         let style;
@@ -132,6 +132,13 @@ function buildBrowserDomTargetLibraryJs(): string {
         if (!text || text.length > 40) continue;
         if (el.closest && el.closest(READY_AGENT_TARGET_SELECTOR)) continue;
         out.push(el);
+      }
+      // D13（真机第六轮实锚，XHS 发布设置页）：主行动按钮（发布/发送）
+      // 几乎总在 DOM 尾部，纯文档序 cap 会被页面前部的 pointer 设置行
+      // 吃光名额。超过 40 个时保留头 28 + 尾 12——头部导航/tab 与底部
+      // CTA 双端都在。规则确定性（probe/act 重枚举索引一致）。
+      if (out.length > 40) {
+        return out.slice(0, 28).concat(out.slice(out.length - 12));
       }
       return out;
     }
