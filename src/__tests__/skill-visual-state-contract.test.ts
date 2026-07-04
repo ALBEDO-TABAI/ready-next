@@ -17,7 +17,10 @@ test('reference skill hint is exposed from main process to the chat panel', () =
   const chatPanelBody = readWorkspaceFile('src/renderer/components/agent/chat-panel/ChatPanelBody.tsx')
 
   assert.match(runtime, /getReferenceSkillHint\(scopeId: string\)/)
-  assert.match(runtime, /REFERENCE_SKILL_HINT_TTL_MS/)
+  // B8-D R2：TTL 逻辑随簇入 reference-hint-service（runtime 留一行委托）。
+  const referenceHintService = readWorkspaceFile('src/main/modules/agent-control/runtime-core/reference-hint-service.ts')
+  assert.match(referenceHintService, /REFERENCE_SKILL_HINT_TTL_MS/)
+  assert.match(runtime, /this\.referenceHints\.getReferenceSkillHint\(/)
   assert.match(recallGroup, /agent:getReferenceSkillHint/)
   assert.match(preload, /getReferenceSkillHint:/)
   assert.match(electronTypes, /interface ReferenceSkillHintData/)
@@ -72,7 +75,9 @@ test('skill action spawn receives the current turn agent context', () => {
     /executeSkillTool\(toolName, args, context\.sessionId, context\.registerRunCleanup, context\.abortSignal, context\.agentContext, \{\s*scopeId:/,
   )
   assert.match(skillsTools, /agentContext\?: AgentSpawnContext \| null/)
-  assert.match(runtimeManager, /agentContext\?: AgentSpawnContext \| null/)
+  // B8-P：SkillRunRequest 类型随顶层块入 runtime-manager-types.ts。
+  const runtimeManagerTypes = readWorkspaceFile('src/main/modules/skills-runtime/runtime-manager-types.ts')
+  assert.match(runtimeManagerTypes, /agentContext\?: AgentSpawnContext \| null/)
   assert.match(hostController, /agentContext \?\? await this\.readAgentContext\(\)/)
 })
 
@@ -86,7 +91,10 @@ test('detached skill tasks have IPC and renderer API contracts', () => {
   assert.match(runtime, /startDetachedSkillAction/)
   assert.match(runtime, /inspectDetachedSkillTask/)
   assert.match(runtime, /cancelDetachedSkillTask/)
-  assert.match(runtime, /task\.scopeId !== normalizedScopeId && task\.sessionId !== normalizedScopeId/)
+  // B8-D R1：scope 归属校验体随簇入 detached-skill-service（runtime 留委托）。
+  const detachedService = readWorkspaceFile('src/main/modules/agent-control/runtime-core/detached-skill-service.ts')
+  assert.match(detachedService, /task\.scopeId !== normalizedScopeId && task\.sessionId !== normalizedScopeId/)
+  assert.match(runtime, /this\.detachedSkills\.inspectDetachedSkillTask\(/)
   assert.match(detachedGroup, /agent:startDetachedSkillAction/)
   assert.match(detachedGroup, /agent:inspectDetachedSkillTask/)
   assert.match(detachedGroup, /agent:cancelDetachedSkillTask/)

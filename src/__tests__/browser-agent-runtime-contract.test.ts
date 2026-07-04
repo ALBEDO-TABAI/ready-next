@@ -84,9 +84,11 @@ test('browser agent runtime is split into planner, runtime adapter, page-state s
   assert.match(browserRunner, /private readonly pageStateService: BrowserPageStateService/)
   assert.match(browserRunner, /private readonly evidenceService: BrowserEvidenceService/)
 
-  assert.match(browserTools, /import \{ BrowserAgentRuntimeAdapter \} from '\.\.\/browser-engine\/agent-runtime-adapter'/)
-  assert.match(browserTools, /import \{ BrowserPageStateService \} from '\.\.\/browser-engine\/page-state-service'/)
-  assert.match(browserTools, /import \{ BrowserEvidenceService \} from '\.\.\/browser-engine\/evidence-service'/)
+  // B6 观察组抽出后，adapter 的工具侧消费点在 browser-observe-tools。
+  const browserObserveTools = readWorkspaceFile('src/main/modules/tools/browser-observe-tools.ts')
+  assert.match(browserObserveTools, /import \{ BrowserAgentRuntimeAdapter \} from '\.\.\/browser-engine\/agent-runtime-adapter'/)
+  assert.match(browserObserveTools, /import \{ BrowserPageStateService \} from '\.\.\/browser-engine\/page-state-service'/)
+  assert.match(browserObserveTools, /import \{ BrowserEvidenceService \} from '\.\.\/browser-engine\/evidence-service'/)
 
   assert.doesNotMatch(ipcHandler, /const parseStructuredScopeProjection = \(text: string\): Record<string, unknown> \| null =>/)
   assert.match(ipcHandler, /const structured = data\.projectionPatch && typeof data\.projectionPatch === 'object'/)
