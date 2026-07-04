@@ -85,12 +85,9 @@ import { assertStageNChildLoopInvariants } from '../stage-n-boot-assertion'
 import { defaultToolRegistry } from '../tools-runtime/tool-registry'
 import { ToolNameCollisionError } from '../tools-runtime/tool-registry-errors'
 import { RunProjection } from '../task-projection/run-projection'
-import { syncTaskProjection } from '../task-projection/task-projection-sync'
-import {
-  drainPendingProjectionSyncs,
-  isTerminalProjectionSyncPayload,
-  PendingProjectionSyncRepository,
-} from '../task-projection/projection-terminal-retry-ledger'
+import { ProjectionSyncCoordinator } from './projection-sync-coordinator'
+import { SessionPrerouteService } from './session-preroute-service'
+import { DetachedSkillService } from './detached-skill-service'
 import { reconcileTaskProjections } from '../task-projection/task-projection-reconciler'
 import { canResumeAsUserPoint, type ResumePointHandle } from '../contracts/resume-handle'
 import { deriveTaskProjectionCanResume } from '../task-projection/task-projection-resume'
@@ -137,9 +134,7 @@ import { UserProfileRepository } from '../../repositories/user-profile-repositor
 import { AgentPersonalityRepository } from '../../repositories/agent-personality-repository'
 import { AppSettingsRepository } from '../../repositories/app-settings-repository'
 import { readAgentAutoNarrationContinuationSetting } from '../../settings-engine/agent-auto-narration-setting'
-import { readAgentSessionPrerouteMode } from '../../settings-engine/agent-session-preroute-setting'
-import { decideSessionPreroute, type PrerouteResult } from '../agents/session-preroute'
-import { buildSessionPrerouteTrace, pushSessionPrerouteTraceSafely, SessionPrerouteTraceRingBuffer } from '../agents/session-preroute-trace'
+import type { PrerouteResult } from '../agents/session-preroute'
 import type { CapabilityRuntimeSnapshot } from '../../../../shared/ai-capability-runtime'
 import type { AgentSystemStudioPrerouteTrace, AgentSystemStudioRoutingSimulation } from '../../../../shared/agent-system-studio'
 import { ExternalMemoryProviderSlot } from '../memory/external-memory-provider-slot'
@@ -151,11 +146,7 @@ import { AgentRegistryRepository } from '../../repositories/agent-registry-repos
 import { reconcileAgentIdentityAssets, seedBuiltinAgentAssets } from '../agents/agent-identity-assets'
 import { RunMetaRepository } from '../task-projection/run-meta-repository'
 import { appendToolCapabilityLog } from '../../tools/tool-event-log'
-import {
-  DetachedSkillTaskTracker,
-  registerDetachedSkillTaskTracker,
-  type DetachedSkillTaskRecord,
-} from '../detached-skill-task-tracker'
+import type { DetachedSkillTaskRecord } from '../detached-skill-task-tracker'
 import type {
   AgentChannelConfig,
   AgentRuntimeStatus,
@@ -174,7 +165,6 @@ import type {
 import type { SessionRecallCapsule, SessionRecallHit } from '../../../../shared/session-recall'
 
 import {
-  buildStudioPrerouteActions,
   parseRecordJson,
   parseArrayJson,
   asRecord,
@@ -320,12 +310,19 @@ export class AgentControlRuntime extends EventEmitter {
   private readonly runCoordinator: RunCoordinator
   private readonly runProjection: RunProjection
   private readonly taskProjectionStore = new TaskProjectionRepository(this.db)
-  private readonly pendingProjectionSyncs = new PendingProjectionSyncRepository(this.db)
-  private readonly sessionPrerouteTraces = new SessionPrerouteTraceRingBuffer()
+  // B8-D R1 — projection-sync/preroute/detached-skill clusters live in
+  // delegated sub-services; the runtime keeps one-line public delegates.
+  private readonly projectionSync: ProjectionSyncCoordinator
+  private readonly sessionPreroute = new SessionPrerouteService({
+    settingsRepository: this.settingsRepository,
+    agentRegistry: this.agentRegistry,
+    taskProjectionStore: this.taskProjectionStore,
+    getBeliefCardStore: () => this.getBeliefCardStore(),
+  })
   private knowledgeWatcher: KnowledgeWatcher | null = null
   private beliefCardStore: BeliefCardStore | null = null
   private readonly skillTaskRunRepository = new SkillTaskRunRepository(this.db)
-  private readonly detachedSkillTasks: DetachedSkillTaskTracker
+  private readonly detachedSkills: DetachedSkillService
   private readonly autoNarrationContinuationRunner = new AutoNarrationContinuationRunner({
     getOldestPendingTaskEvent,
     markPendingTaskEventConsumed,
@@ -356,10 +353,6 @@ export class AgentControlRuntime extends EventEmitter {
       lastBeatAt: new Date().toISOString()
     }
   }
-  private projectionSyncRetryDrainInFlight: Promise<void> | null = null
-  private projectionSyncRetryTimer: NodeJS.Timeout | null = null
-  private projectionSyncRetryTimerDueAt = 0
-
   constructor(agentManager: AgentManager, browserController?: BrowserController) {
     super()
     this.agentManager = agentManager
@@ -394,7 +387,7 @@ export class AgentControlRuntime extends EventEmitter {
     this.runCoordinator = new RunCoordinator({
       promptAssembly: this.promptAssembly,
       executeAndCollect: (request) => this.orchestrator.executeAndCollect(request),
-      emitScopeRunEvent: (payload, projectionTruth) => this.emitScopeRunEvent(payload, projectionTruth),
+      emitScopeRunEvent: (payload, projectionTruth) => this.projectionSync.emitScopeRunEvent(payload, projectionTruth),
       reflectOnConversation: (scope, usedTools) => this.reflectOnConversation(scope, usedTools),
       // EP3-A4 — handoff adoption moves the scope's owner; next turn's
       // injection follows it (A2 channel).
@@ -409,12 +402,17 @@ export class AgentControlRuntime extends EventEmitter {
       },
       toChannelKey: (scope) => this.toChannelKey(scope)
     })
-    this.detachedSkillTasks = new DetachedSkillTaskTracker({
-      storagePath: join(app.getPath('userData'), 'skill-runtime', 'detached-tasks.json'),
-      runSkill: (request) => getSkillsRuntimeManager().runSkill(request),
-      onUpdate: (record) => this.publishDetachedSkillTaskUpdate(record),
+    this.projectionSync = new ProjectionSyncCoordinator({
+      db: this.db,
+      taskProjectionStore: this.taskProjectionStore,
+      runProjection: this.runProjection,
+      emit: (event, payload) => {
+        this.emit(event, payload)
+      },
     })
-    registerDetachedSkillTaskTracker(this.detachedSkillTasks)
+    this.detachedSkills = new DetachedSkillService({
+      publishScopeRunEvent: (payload) => this.projectionSync.publishScopeRunEvent(payload),
+    })
 
     // Phase 5 — wire the skill child runner. The runner stays as a
     // module-level singleton so `skills-tools.ts` (Team 6) can call
@@ -427,7 +425,7 @@ export class AgentControlRuntime extends EventEmitter {
         runtimeManager: getSkillsRuntimeManager(),
         repository: this.skillTaskRunRepository,
         taskProjectionStore: this.taskProjectionStore,
-        publishScopeRunEvent: (payload) => this.publishScopeRunEvent(payload),
+        publishScopeRunEvent: (payload) => this.projectionSync.publishScopeRunEvent(payload),
       })
       this.orchestrator.setChildLivenessProvider(childRunner)
     } catch (error) {
@@ -592,7 +590,7 @@ export class AgentControlRuntime extends EventEmitter {
 
   async start(): Promise<void> {
     this.cleanupLegacyCopawSettings()
-    this.publishRestoredDetachedSkillTasks()
+    this.detachedSkills.publishRestoredDetachedSkillTasks()
 
     // Start memory lifecycle manager
     this.memoryLifecycle.start()
@@ -608,7 +606,7 @@ export class AgentControlRuntime extends EventEmitter {
     taskEventBridge.registerProjectionSink(
       createTaskEventProofListener(createTaskProofSink(this.taskProjectionStore)),
     )
-    this.scheduleTerminalProjectionSyncRetryDrain('startup')
+    this.projectionSync.scheduleTerminalProjectionSyncRetryDrain('startup')
 
     // EP2-K6 — truth-source boundary: startup full sync (K2 handover) +
     // hand-edit watcher, both behind the rollback switch. Files are never
@@ -859,143 +857,18 @@ export class AgentControlRuntime extends EventEmitter {
     this.knowledgeWatcher.start()
   }
 
-  /** EP4-A5 — session-creation preroute (pure table+classifier router fed
-   *  with projection facts, active routing cards, and registry status). */
+  /** EP4-A5 — session-creation preroute; delegated to SessionPrerouteService. */
   evaluateSessionPreroute(firstMessage: string): PrerouteResult {
-    const mode = readAgentSessionPrerouteMode(this.settingsRepository)
-    if (mode === 'off') {
-      return decideSessionPreroute({
-        firstMessage,
-        recentOwnedTasks: [],
-        routingCards: [],
-        isAgentActive: () => false,
-        mode,
-      })
-    }
-    const agents = this.agentRegistry.list()
-    const recentOwnedTasks = this.taskProjectionStore.listRecentTasksForPreroute(10).map((record) => ({
-      taskId: record.taskId,
-      status: String(record.status),
-      interactionState: record.interactionState ?? null,
-      summary: record.taskSummary ?? null,
-      blockerCategory: record.blockedReason ?? null,
-      ownerAgentId: record.ownerAgentId ?? null,
-    }))
-    const store = this.getBeliefCardStore()
-    const routingCards = (store?.listRoutingCards() ?? []).map((card) => ({
-      relPath: card.relPath,
-      targetAgentId: card.targetAgentId,
-      triggers: card.triggers,
-    }))
-    const result = decideSessionPreroute({
-      firstMessage,
-      recentOwnedTasks,
-      routingCards,
-      isAgentActive: (agentId) => this.agentRegistry.get(agentId)?.status === 'active',
-      mode,
-    })
-    pushSessionPrerouteTraceSafely({
-      sink: this.sessionPrerouteTraces,
-      id: `preroute-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      now: new Date(),
-      firstMessage,
-      mode,
-      result,
-      recentOwnedTasks,
-      getRoutingInventory: () => store?.listRoutingCardInventory(agents) ?? [],
-      isAgentActive: (agentId) => this.agentRegistry.get(agentId)?.status === 'active',
-    })
-    return result
+    return this.sessionPreroute.evaluateSessionPreroute(firstMessage)
   }
 
-  /** P8g-8a — read-only Studio simulation. It reuses the preroute rules but
-   * deliberately does not push a trace, so typed samples never pollute the
-   * real recent-routing history. */
+  /** P8g-8a — read-only Studio routing simulation; delegated to SessionPrerouteService. */
   simulateSessionPrerouteForStudio(firstMessage: string): AgentSystemStudioRoutingSimulation {
-    const sample = String(firstMessage || '').trim()
-    const mode = readAgentSessionPrerouteMode(this.settingsRepository)
-    if (mode === 'off') {
-      const result = decideSessionPreroute({
-        firstMessage: sample,
-        recentOwnedTasks: [],
-        routingCards: [],
-        isAgentActive: () => false,
-        mode,
-      })
-      const targetStatus = 'missing'
-      return {
-        sample,
-        mode,
-        effect: result.effect,
-        decisionTier: result.decision.tier,
-        targetAgentId: result.decision.targetAgentId,
-        targetAgentName: null,
-        targetStatus,
-        matchedKeywords: [],
-        cardRelPath: null,
-        fallbackReason: result.decision.tier === 'fallback' ? result.decision.reason : null,
-        conflicts: result.decision.tier === 'fallback' ? (result.decision.conflicts ?? []) : [],
-        reasons: ['routing_off'],
-        actions: buildStudioPrerouteActions({ result, targetName: null, targetStatus }),
-      }
-    }
-    const agents = this.agentRegistry.list()
-    const recentOwnedTasks = this.taskProjectionStore.listRecentTasksForPreroute(10).map((record) => ({
-      taskId: record.taskId,
-      status: String(record.status),
-      interactionState: record.interactionState ?? null,
-      summary: record.taskSummary ?? null,
-      blockerCategory: record.blockedReason ?? null,
-      ownerAgentId: record.ownerAgentId ?? null,
-    }))
-    const store = this.getBeliefCardStore()
-    const routingCards = (store?.listRoutingCards() ?? []).map((card) => ({
-      relPath: card.relPath,
-      targetAgentId: card.targetAgentId,
-      triggers: card.triggers,
-    }))
-    const result = decideSessionPreroute({
-      firstMessage: sample,
-      recentOwnedTasks,
-      routingCards,
-      isAgentActive: (agentId) => this.agentRegistry.get(agentId)?.status === 'active',
-      mode,
-    })
-    const trace = buildSessionPrerouteTrace({
-      id: 'studio-routing-simulation',
-      now: new Date(),
-      firstMessage: sample,
-      mode,
-      result,
-      recentOwnedTasks,
-      routingInventory: store?.listRoutingCardInventory(agents) ?? [],
-      isAgentActive: (agentId) => this.agentRegistry.get(agentId)?.status === 'active',
-    })
-    const target = this.agentRegistry.get(result.decision.targetAgentId)
-    const targetStatus = target?.status ?? 'missing'
-    const matchedKeywords = result.decision.tier === 'precedent' ? result.decision.matchedKeywords : []
-    const cardRelPath = result.decision.tier === 'precedent' ? result.decision.cardRelPath : null
-    const fallbackReason = result.decision.tier === 'fallback' ? result.decision.reason : null
-    const conflicts = result.decision.tier === 'fallback' ? (result.decision.conflicts ?? []) : []
-    return {
-      sample,
-      mode,
-      effect: result.effect,
-      decisionTier: result.decision.tier,
-      targetAgentId: result.decision.targetAgentId,
-      targetAgentName: target?.name ?? null,
-      targetStatus,
-      matchedKeywords,
-      cardRelPath,
-      fallbackReason,
-      conflicts,
-      reasons: trace.reasons,
-      actions: buildStudioPrerouteActions({ result, targetName: target?.name ?? null, targetStatus }),
-    }
+    return this.sessionPreroute.simulateSessionPrerouteForStudio(firstMessage)
   }
 
   listRecentSessionPrerouteTraces(limit = 10): AgentSystemStudioPrerouteTrace[] {
-    return this.sessionPrerouteTraces.listRecent(limit)
+    return this.sessionPreroute.listRecentSessionPrerouteTraces(limit)
   }
 
   private hasActiveNarrationContinuationRun(): boolean {
@@ -1304,27 +1177,19 @@ export class AgentControlRuntime extends EventEmitter {
     action: string
     params?: Record<string, unknown>
   }): DetachedSkillTaskRecord {
-    return this.detachedSkillTasks.start(payload)
+    return this.detachedSkills.startDetachedSkillAction(payload)
   }
 
   inspectDetachedSkillTask(taskId: string, scopeId?: string | null): DetachedSkillTaskRecord | null {
-    const task = this.detachedSkillTasks.inspect(taskId)
-    if (!task) return null
-    const normalizedScopeId = String(scopeId || '').trim()
-    if (normalizedScopeId && task.scopeId !== normalizedScopeId && task.sessionId !== normalizedScopeId) return null
-    return task
+    return this.detachedSkills.inspectDetachedSkillTask(taskId, scopeId)
   }
 
   listDetachedSkillTasks(payload?: { scopeId?: string | null }): DetachedSkillTaskRecord[] {
-    return this.detachedSkillTasks.list(payload)
+    return this.detachedSkills.listDetachedSkillTasks(payload)
   }
 
   cancelDetachedSkillTask(taskId: string, scopeId?: string | null): DetachedSkillTaskRecord | null {
-    const normalizedScopeId = String(scopeId || '').trim()
-    const task = this.detachedSkillTasks.inspect(taskId)
-    if (!task) return null
-    if (normalizedScopeId && task.scopeId !== normalizedScopeId && task.sessionId !== normalizedScopeId) return null
-    return this.detachedSkillTasks.cancel(taskId)
+    return this.detachedSkills.cancelDetachedSkillTask(taskId, scopeId)
   }
 
   listActiveChildRuns(): ActiveChildRunSummaryForRuntime[] {
@@ -3393,242 +3258,20 @@ export class AgentControlRuntime extends EventEmitter {
     }
   }
 
-  private publishRestoredDetachedSkillTasks(): void {
-    for (const record of this.detachedSkillTasks.list()) {
-      if (record.status === 'blocked' || record.status === 'running') {
-        this.publishDetachedSkillTaskUpdate(record)
-      }
-    }
-  }
-
-  private buildDetachedSkillArtifacts(record: DetachedSkillTaskRecord): NonNullable<ScopeRunEventPayload['artifactRefs']> {
-    const nowIso = record.updatedAt
-    const entries: Array<{ key: string; path?: string | null; label: string; kind: string }> = [
-      { key: 'outputDir', path: record.outputDir, label: '技能输出目录', kind: 'directory' },
-      { key: 'runStatePath', path: record.runStatePath, label: 'run_state.json', kind: 'artifact' },
-      { key: 'sceneScoresPath', path: record.sceneScoresPath, label: 'scene_scores.json', kind: 'artifact' },
-      { key: 'deliveryReportPath', path: record.deliveryReportPath, label: '交付报告', kind: 'artifact' },
-    ]
-    const seen = new Set<string>()
-    return entries
-      .filter((entry) => {
-        const path = String(entry.path || '').trim()
-        if (!path || seen.has(path)) return false
-        seen.add(path)
-        return true
-      })
-      .map((entry) => ({
-        id: `${record.id}:${entry.key}`,
-        module: 'skill',
-        kind: entry.kind,
-        label: entry.label,
-        path: entry.path || null,
-        createdAt: nowIso,
-        meta: {
-          detachedTaskId: record.id,
-          skillId: record.skillId,
-          action: record.action,
-          outputKey: entry.key,
-        },
-      }))
-  }
-
-  private publishDetachedSkillTaskUpdate(record: DetachedSkillTaskRecord): void {
-    const scopeId = record.scopeId || record.sessionId
-    if (!scopeId) return
-    const phase: ScopeRunEventPayload['phase'] =
-      record.status === 'running' ? 'tool_running'
-        : record.status === 'done' ? 'done'
-          : record.status === 'cancelled' ? 'cancelled'
-            : record.status === 'blocked' ? 'checkpoint'
-              : 'error'
-    const stepStatus =
-      record.status === 'running' ? 'running'
-        : record.status === 'done' ? 'done'
-          : record.status === 'blocked' ? 'blocked'
-            : 'error'
-    const artifacts = this.buildDetachedSkillArtifacts(record)
-    const taskId = `detached:${record.id}`
-    const summary =
-      record.status === 'running' ? '后台技能任务正在执行'
-        : record.status === 'done' ? '后台技能任务已完成'
-          : record.status === 'blocked' ? (record.error || '后台技能任务需要继续')
-            : record.status === 'cancelled' ? '后台技能任务已取消'
-              : (record.error || '后台技能任务失败')
-    this.publishScopeRunEvent({
-      type: record.status === 'running' ? 'started' : record.status === 'blocked' ? 'updated' : 'finished',
-      scopeId,
-      agent: record.agent || 'assistant',
-      runId: record.id,
-      taskId,
-      taskProjectionId: taskId,
-      phase,
-      module: 'skill',
-      executionKind: 'job',
-      jobId: record.id,
-      taskTitle: `后台技能任务 · ${record.skillId}`,
-      taskSummary: summary,
-      steps: [{
-        id: record.action,
-        title: record.action,
-        status: stepStatus,
-        detail: record.error || record.outputDir || null,
-        updatedAt: record.updatedAt,
-      }],
-      currentStepId: record.action,
-      waitingFor: record.status === 'running' || record.status === 'blocked' ? 'background' : 'none',
-      resumableActions: record.status === 'running'
-        ? ['cancel']
-        : record.status === 'blocked'
-          ? ['continue', 'cancel']
-          : artifacts.length > 0
-            ? ['open_artifact']
-            : ['none'],
-      recentArtifacts: artifacts,
-      artifactRefs: artifacts,
-      blockedReason: record.status === 'blocked' ? record.error || '后台任务需要继续' : null,
-      error: record.status === 'failed' ? record.error || '后台技能任务失败' : undefined,
-      timestamp: record.updatedAt,
-    })
-  }
-
   private emitConversationEvent(payload: ConversationEventPayload): void {
-    this.emit('conversationEvent', payload)
+    this.projectionSync.emitConversationEvent(payload)
   }
 
   private emitScopeRunEvent(payload: ScopeRunEventPayload, projectionTruth?: ProjectionTruthSnapshot | null): void {
-    this.recordScopeRunEvent(payload, projectionTruth)
-    this.emit('scopeRunEvent', payload)
+    this.projectionSync.emitScopeRunEvent(payload, projectionTruth)
   }
 
   publishScopeRunEvent(payload: ScopeRunEventPayload, projectionTruth?: ProjectionTruthSnapshot | null): void {
-    this.emitScopeRunEvent(payload, projectionTruth)
+    this.projectionSync.publishScopeRunEvent(payload, projectionTruth)
   }
 
   recordScopeRunEvent(payload: ScopeRunEventPayload, projectionTruth?: ProjectionTruthSnapshot | null): ScopeRunSummary | null {
-    const summary = this.recordRunProjectionEvent(payload, projectionTruth)
-    if (summary) {
-      // Stage U PR U2.1 — projection sync is still fire-and-forget (the
-      // ScopeRunEvent acknowledgement path must not block on disk I/O),
-      // but failures now surface through a metric + an IPC event so the
-      // renderer can show a diagnostic instead of pretending sync went
-      // through. See plan §3 U2.1 / audit §3.3 fire-and-forget remediation.
-      void syncTaskProjection(this.taskProjectionStore, summary, payload, projectionTruth).catch((error) => {
-        this.handleProjectionSyncFailure(summary, payload, projectionTruth, error)
-      })
-    }
-    return summary
-  }
-
-  private handleProjectionSyncFailure(
-    summary: ScopeRunSummary,
-    payload: ScopeRunEventPayload,
-    projectionTruth: ProjectionTruthSnapshot | null | undefined,
-    error: unknown,
-  ): void {
-    const reason = error instanceof Error ? error.message : String(error)
-    const failurePayload = {
-      scopeId: summary.scopeId,
-      taskId: payload.taskId || summary.taskId || null,
-      reason,
-      timestamp: new Date().toISOString(),
-    }
-    console.error('[AgentControlRuntime] Failed to sync task projection:', error)
-    logAgentMetric('projection.sync_failed', failurePayload)
-    // Emit on the runtime EventEmitter so claude-bridge/ipc-handler.ts
-    // can forward it to the renderer alongside scopeRunEvent. The emit is
-    // wrapped because this path already runs inside a fire-and-forget catch.
-    try {
-      this.emit('projectionSyncFailed', failurePayload)
-    } catch (emitErr) {
-      // silent-catch: emit failure is purely an observability degradation; the runtime must keep running.
-      console.error('[AgentControlRuntime] projectionSyncFailed emit failed:', emitErr)
-    }
-    if (!isTerminalProjectionSyncPayload(summary)) return
-    try {
-      this.pendingProjectionSyncs.upsertPending({
-        summary,
-        eventPayload: payload,
-        projectionTruth,
-        error,
-      })
-      this.scheduleTerminalProjectionSyncRetryDrain('terminal_sync_failed')
-    } catch (enqueueErr) {
-      logAgentMetric('projection.sync_retry_enqueue_failed', {
-        scopeId: summary.scopeId,
-        taskId: payload.taskId || summary.taskId || null,
-        reason: enqueueErr instanceof Error ? enqueueErr.message : String(enqueueErr),
-      })
-      console.error('[AgentControlRuntime] Failed to enqueue terminal projection sync retry:', enqueueErr)
-    }
-  }
-
-  private clearProjectionSyncRetryTimer(): void {
-    if (this.projectionSyncRetryTimer) {
-      clearTimeout(this.projectionSyncRetryTimer)
-      this.projectionSyncRetryTimer = null
-      this.projectionSyncRetryTimerDueAt = 0
-    }
-  }
-
-  private scheduleTerminalProjectionSyncRetryDrain(reason: string, delayMs = 0): void {
-    if (delayMs > 0) {
-      const dueAt = Date.now() + delayMs
-      if (this.projectionSyncRetryTimer && this.projectionSyncRetryTimerDueAt <= dueAt) return
-      this.clearProjectionSyncRetryTimer()
-      this.projectionSyncRetryTimerDueAt = dueAt
-      this.projectionSyncRetryTimer = setTimeout(() => {
-        this.projectionSyncRetryTimer = null
-        this.projectionSyncRetryTimerDueAt = 0
-        this.scheduleTerminalProjectionSyncRetryDrain(`${reason}:timer`)
-      }, delayMs)
-      this.projectionSyncRetryTimer.unref?.()
-      return
-    }
-    if (this.projectionSyncRetryDrainInFlight) return
-    this.clearProjectionSyncRetryTimer()
-    this.projectionSyncRetryDrainInFlight = this.drainTerminalProjectionSyncRetries(reason)
-      .catch((error) => {
-        logAgentMetric('projection.sync_retry_drain_failed', {
-          reason: error instanceof Error ? error.message : String(error),
-          source: reason,
-        })
-        console.error('[AgentControlRuntime] terminal projection sync retry drain failed:', error)
-      })
-      .finally(() => {
-        this.projectionSyncRetryDrainInFlight = null
-      })
-  }
-
-  private async drainTerminalProjectionSyncRetries(reason: string): Promise<void> {
-    const result = await drainPendingProjectionSyncs({
-      repository: this.pendingProjectionSyncs,
-      sync: async (entry) => {
-        await syncTaskProjection(
-          this.taskProjectionStore,
-          entry.summary,
-          entry.eventPayload,
-          entry.projectionTruth,
-        )
-      },
-      onMetric: (metric) => {
-        logAgentMetric(metric.name, {
-          ...metric.payload,
-          source: reason,
-        })
-      },
-    })
-    const nextAttemptAt = result.nextAttemptAt ? Date.parse(result.nextAttemptAt) : NaN
-    if (Number.isFinite(nextAttemptAt)) {
-      this.scheduleTerminalProjectionSyncRetryDrain(
-        'terminal_sync_retry_backoff',
-        Math.max(0, nextAttemptAt - Date.now()),
-      )
-    }
-  }
-
-  private recordRunProjectionEvent(payload: ScopeRunEventPayload, projectionTruth?: ProjectionTruthSnapshot | null): ScopeRunSummary | null {
-    return this.runProjection.recordEvent(payload, projectionTruth)
+    return this.projectionSync.recordScopeRunEvent(payload, projectionTruth)
   }
 
   /**

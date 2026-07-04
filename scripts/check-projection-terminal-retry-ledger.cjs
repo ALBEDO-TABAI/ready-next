@@ -6,6 +6,11 @@ const path = require('node:path')
 
 const ROOT = process.cwd()
 const RUNTIME = 'src/main/modules/agent-control/runtime-core/runtime.ts'
+// B8-D R1 — the projection-sync cluster (recordScopeRunEvent body, failure
+// handling, retry drain) moved from runtime.ts into the delegated
+// ProjectionSyncCoordinator; the contract now validates the coordinator
+// source plus the runtime wiring (construction + startup drain delegation).
+const COORDINATOR = 'src/main/modules/agent-control/runtime-core/projection-sync-coordinator.ts'
 const LEDGER = 'src/main/modules/agent-control/task-projection/projection-terminal-retry-ledger.ts'
 const MIGRATIONS = 'src/main/modules/migrations.ts'
 
@@ -43,19 +48,26 @@ function findMethodBody(source, name) {
   return null
 }
 
-function validateProjectionTerminalRetrySources({ runtime, ledger, migrations }) {
+function validateProjectionTerminalRetrySources({ runtime, coordinator, ledger, migrations }) {
   const errors = []
-  const recordBody = findMethodBody(runtime, 'recordScopeRunEvent') || ''
-  const failureBody = findMethodBody(runtime, 'handleProjectionSyncFailure') || ''
-  const scheduleBody = findMethodBody(runtime, 'scheduleTerminalProjectionSyncRetryDrain') || ''
-  const drainBody = findMethodBody(runtime, 'drainTerminalProjectionSyncRetries') || ''
+  const recordBody = findMethodBody(coordinator, 'recordScopeRunEvent') || ''
+  const failureBody = findMethodBody(coordinator, 'handleProjectionSyncFailure') || ''
+  const scheduleBody = findMethodBody(coordinator, 'scheduleTerminalProjectionSyncRetryDrain') || ''
+  const drainBody = findMethodBody(coordinator, 'drainTerminalProjectionSyncRetries') || ''
   const startBody = findMethodBody(runtime, 'start') || ''
 
-  if (!runtime.includes('PendingProjectionSyncRepository')) {
-    errors.push('runtime must import/use PendingProjectionSyncRepository')
+  if (!coordinator.includes('PendingProjectionSyncRepository')) {
+    errors.push('coordinator must import/use PendingProjectionSyncRepository')
   }
-  if (!runtime.includes('private readonly pendingProjectionSyncs = new PendingProjectionSyncRepository(this.db)')) {
-    errors.push('runtime must own pendingProjectionSyncs repository')
+  if (!coordinator.includes('this.pendingProjectionSyncs = new PendingProjectionSyncRepository(deps.db)')) {
+    errors.push('coordinator must own pendingProjectionSyncs repository')
+  }
+  if (!runtime.includes('new ProjectionSyncCoordinator(')) {
+    errors.push('runtime must construct the ProjectionSyncCoordinator')
+  }
+  const runtimeRecordBody = findMethodBody(runtime, 'recordScopeRunEvent') || ''
+  if (!runtimeRecordBody.includes('this.projectionSync.recordScopeRunEvent(')) {
+    errors.push('runtime recordScopeRunEvent must delegate to the ProjectionSyncCoordinator')
   }
   if (!recordBody.includes('syncTaskProjection(') || !recordBody.includes('handleProjectionSyncFailure(')) {
     errors.push('recordScopeRunEvent catch must delegate sync failures to handleProjectionSyncFailure')
@@ -117,6 +129,7 @@ function validateProjectionTerminalRetrySources({ runtime, ledger, migrations })
 function main() {
   const sources = {
     runtime: fs.readFileSync(path.join(ROOT, RUNTIME), 'utf8'),
+    coordinator: fs.readFileSync(path.join(ROOT, COORDINATOR), 'utf8'),
     ledger: fs.readFileSync(path.join(ROOT, LEDGER), 'utf8'),
     migrations: fs.readFileSync(path.join(ROOT, MIGRATIONS), 'utf8'),
   }

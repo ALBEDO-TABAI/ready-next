@@ -163,7 +163,14 @@ test('runtime host is split into run coordinator, run projection, and execution 
   assert.match(runtime, /private readonly runProjection: RunProjection/)
   assert.match(runtime, /(?:return|const\s+\w+\s*=\s*await|\w+\s*=\s*await)\s+this\.runCoordinator\.runScoped\(/)
   assert.match(runtime, /(?:return\s+|const\s+\w+\s*=\s*)?await\s+this\.runCoordinator\.runInboundChannel\(/)
-  assert.match(runtime, /return this\.runProjection\.recordEvent\(/)
+  // B8-D R1 — projection event recording is delegated through the
+  // ProjectionSyncCoordinator, which owns the single RunProjection.recordEvent
+  // call site; the runtime wires its RunProjection instance into it.
+  const projectionSyncCoordinator = readWorkspaceFile(
+    'src/main/modules/agent-control/runtime-core/projection-sync-coordinator.ts',
+  )
+  assert.match(runtime, /new ProjectionSyncCoordinator\(\{[\s\S]*?runProjection: this\.runProjection/)
+  assert.match(projectionSyncCoordinator, /return this\.deps\.runProjection\.recordEvent\(/)
   assert.doesNotMatch(runtime, /const promptAssembly = await this\.promptAssembly\.buildForScopedRun\(/)
   assert.doesNotMatch(runtime, /const result = await this\.orchestrator\.sendAndCollect\(agent, promptPayload, scope\.id, requestId\)/)
 

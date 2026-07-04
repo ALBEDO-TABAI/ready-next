@@ -14,7 +14,10 @@ const files = {
   followup: 'src/shared/agent-followup-intent.ts',
   preroute: 'src/main/modules/agent-control/agents/session-preroute.ts',
   trace: 'src/main/modules/agent-control/agents/session-preroute-trace.ts',
-  runtime: 'src/main/modules/agent-control/runtime-core/runtime.ts',
+  // B8-D R1 — the preroute method bodies moved from runtime.ts into the
+  // delegated SessionPrerouteService; the off-mode short-circuit contract
+  // is validated against the service source.
+  prerouteService: 'src/main/modules/agent-control/runtime-core/session-preroute-service.ts',
 }
 
 for (const [label, rel] of Object.entries(files)) {
@@ -66,7 +69,7 @@ if (failures.length === 0) {
     }
   }
 
-  const runtime = read(files.runtime)
+  const runtime = read(files.prerouteService)
   const segment = (name, endMarker) => {
     const start = runtime.indexOf(name)
     const end = runtime.indexOf(endMarker, start)
