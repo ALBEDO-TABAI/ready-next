@@ -4,6 +4,13 @@
 
 ## 当前真值摘要
 
+- `2026-07-05` **B8-D runtime 双文件完全拆分收官 + R1 第十三轮修复**（两泳道八批并行子代理，用户授权不间断）：
+  - runtime.ts 4327→2029（12 服务出壳，X 级枢纽留守），runtime-manager.ts 3800→1113（8 服务出壳）；23 个 D 级子服务全部落地，Phase C 的 typed 落点（ConversationScopeStore/ProjectionSyncCoordinator）就位。
+  - R1 十三轮：升级 changed 假信号（closed-shadow 无条件升级+日志）、click_at pointTarget 回读（坐标系误用闭环）、power_eval 表单直写劝阻；权限自动拒真机首验通过。
+  - 方法学沉淀：双泳道并行 + pathspec 提交协议（共享 index 防裹挟）+ 隔离 worktree 复验（并行染红时）+ 归一化 diff 零残差 + 合同随实现同步重锚。
+  - 验证：每批真实退出码全绿；verify:stability 绿；全量 6.5k 套件对照批前基线，4 处漏网钉点补锚后终封。
+
+
 - `2026-07-05` **深夜自主推进批：R1 根因链修净 + turn-engine 退役 + Power 组抽出 + 债务归绿**（用户授权无人值守，逐项待真机复测）：
   - R1 第十二轮双根因修净：act_on_target 合成点击对 closed-shadow 发布按钮无效时**同一次调用内自动升级可信指针点击**（与 click_at 同 dispatchMouse 通道、破坏性闸门同构），顺修 readBack='map' 下 `changed` 恒真的假信号；站点权限请求（发布页定位 modal）在 agent 持写租约期间**自动拒绝不弹窗**（不缓存判决、注记随下一次工具输出带给模型、全量落 ready-browser.log），用户在场的运行期判决优先。
   - D16 完成：原生文件选择器经 CDP `Page.setInterceptFileChooserDialog` 拦截（写租约武装/释放解除），`file_chooser_intercepted` 注记引导 upload 工具链。

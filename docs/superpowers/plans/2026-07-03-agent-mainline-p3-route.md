@@ -126,6 +126,17 @@ P1 的验收欠账 + 本轮新件的真机确认，一次跑完：
 
 ### 5.1.1 续批（07-05 凌晨，B8 + I/M 调研）
 
+### 5.1.2 B8-D 战役收官（07-05 凌晨-上午，用户授权不间断）
+
+- **R1 第十三轮修复包**（d9073471）：升级点击的 changed 假信号压制修净（closed-shadow host 无条件升级 + 全程日志）、click_at 结果带 pointTarget 闭环坐标系误用、power_eval 表单直写劝阻注记 + 纪律/站点卡铁则。D18 权限自动拒真机首验通过（18:44:25 geolocation agent_auto_deny 无弹窗）。
+- **B8-D 两泳道八批全部落地**（M1-M3 + R1-R5，两泳道并行、pathspec 提交协议、隔离 worktree 复验技法）：
+  - runtime-manager.ts **3800 → 1113**：ModelPackManager(486)/MaintenanceSweeps(206)/ExternalEnvResolver(178)/SkillHostPrep(85)/SkillExecutionEngine(702)/PythonRuntimeProvisioner(377)/SkillInstallPipeline(748)/SkillJobScheduler(281)；留守=装配/委托/被安全合同硬钉的三小簇。
+  - runtime.ts **4327 → 2029**：ProjectionSyncCoordinator(188)/SessionPreroute(176)/DetachedSkill(169)/SessionRecallFacade(140)/NarrationContinuation(226)/ReferenceHint(212)/Schedule(126)/ChannelConfig(225)/ScopeAttachment(129)/SidecarPoll(192)/ConversationScopeStore(254)/RemoteChannelService(1022)；终态=X 级枢纽（sendScoped/lifecycle/装配/~60 一行委托与 IPC 组一一对应）。
+  - **Phase C 落点就位**：ConversationScopeStore + ProjectionSyncCoordinator 已是 typed 服务，DirectChat 会话生命周期/projection 两职责迁移有明确对接面。
+  - 合同随实现同步：各批 source-grep 钉点/gate 逐处重锚（提交正文各有清单）；终封全量套件甄别出 4 处漏网钉点已补锚（含委托接线断言）。
+  - 验证：每批簇套件+宽面+gate 真实退出码全绿；R5 附 verify:stability 136 tests 绿；主会话独立终验 typecheck/stability 0。
+
+
 - **B8 手术图定稿**（`2026-07-05-B8-runtime-split-surgery-map.md`）：runtime.ts=hub-and-spoke（X 枢纽 ~1160 + 12 D 簇 ~2700 + P ~300）；runtime-manager=子系统工具箱（11 自足子系统，D ~2980，更好拆）；强证据=runtime 公有面与 IPC 组一一对应；Phase C 先拆后迁结论（ConversationScopeStore + ProjectionSyncCoordinator 是 C 的 typed 落点）。
 - **B8-P 纯移动刀完成**：runtime.ts 4327→4133、runtime-manager 3800→3385（新 runtime-helpers/runtime-manager-types/runtime-manager-helpers/start-skill-child-run-and-wait 四文件，逐字节 cmp，778af160 + 95a3ac03）。D 级（ProjectionSyncCoordinator/ModelPackManager 打头）待在场监督。
 - **Phase I 调研定稿**（`2026-07-05-phase-I-wechat-remote-parity-survey.md`）：`remote_channel` profile 是死配置（远程 run 实跑 local_chat 全量能力）；P0=远程确认链路（M2/M3/反问在微信侧静默挂死，是进度/文件回投的公共底座）；P1 进度投影+续跑、P2 ret=-3/在线语义、P3 附件双向、P4 能力面接线殿后。
