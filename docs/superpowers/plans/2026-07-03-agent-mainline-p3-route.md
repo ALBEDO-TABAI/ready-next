@@ -124,6 +124,15 @@ P1 的验收欠账 + 本轮新件的真机确认，一次跑完：
 
 ## 5.1 深夜自主推进批（2026-07-04 深夜 → 07-05 凌晨，用户授权无人值守）
 
+### 5.1.1 续批（07-05 凌晨，B8 + I/M 调研）
+
+- **B8 手术图定稿**（`2026-07-05-B8-runtime-split-surgery-map.md`）：runtime.ts=hub-and-spoke（X 枢纽 ~1160 + 12 D 簇 ~2700 + P ~300）；runtime-manager=子系统工具箱（11 自足子系统，D ~2980，更好拆）；强证据=runtime 公有面与 IPC 组一一对应；Phase C 先拆后迁结论（ConversationScopeStore + ProjectionSyncCoordinator 是 C 的 typed 落点）。
+- **B8-P 纯移动刀完成**：runtime.ts 4327→4133、runtime-manager 3800→3385（新 runtime-helpers/runtime-manager-types/runtime-manager-helpers/start-skill-child-run-and-wait 四文件，逐字节 cmp，778af160 + 95a3ac03）。D 级（ProjectionSyncCoordinator/ModelPackManager 打头）待在场监督。
+- **Phase I 调研定稿**（`2026-07-05-phase-I-wechat-remote-parity-survey.md`）：`remote_channel` profile 是死配置（远程 run 实跑 local_chat 全量能力）；P0=远程确认链路（M2/M3/反问在微信侧静默挂死，是进度/文件回投的公共底座）；P1 进度投影+续跑、P2 ret=-3/在线语义、P3 附件双向、P4 能力面接线殿后。
+- **Phase M 调研定稿**（`2026-07-05-phase-M-mcp-ecosystem-survey.md`）：合同骨架+四 gate 齐、零通电（transport stub/discovery not_implemented/注册零调用/OAuth throw）；治理缺口=外部工具破坏性动作全落 M4 放行，实施前必补动态映射；最小落地=官方 stdio server-filesystem 免 OAuth 先通主链。
+- **browser-act-tools/browser-collection-tools 预埋缝**已入 §Phase B 节（触线即用，不主动拆）。
+
+
 - **R1 第十二轮根因链修净（代码侧完备，待真机复测关账）**：D18 act 可信指针升级 + changed 假信号修复 + 站点权限 agent 自动拒绝（9a3993b3）；D16 文件选择器 CDP 拦截（c8f182a4）；控制闸 pending_confirm 45s TTL（66d6f501）；D9 证据链核验完整（transactionConfirmed→proof→adjudicator→finalizer，无需新码）。剩余唯一未知=真机跑通「发布点击落地→成功证据铸造」全链。
 - **Phase A 完成**：turn-engine.ts(4827)+HCD 删除，12 引擎专属测试整删、12 存活文件外科（live 断言保留），boundary gate 转存在性合同，4 引擎 gate 退役、6 gate 摘引擎项，metric 死值清理，package.json 全链摘除（505e2ea2）。−15.7k 行。
 - **Phase B 收官（B4-B7 全部完成，子代理串行执行）**：browser-tools.ts **6285→713**（薄门面达标，远低于 <2k 目标）。B4 Power 组（849 行，48c0b06a）→ B5 采集/内容任务组（1683 行，27212da9）→ B6 观察组（979 行 + map 状态单例迁移，95321758）→ B7 行动/导航组（1967 行含 act_on_target/D18 块逐字节搬移，978c1dfe）。共享叶子沉淀 browser-tool-shared.ts（614）。最终 facade 只剩必须留守的共享合同：Safe Mode 脚本合同预备段、attachBrowserActionSessionOutput（sitePermissionNotices 排空红线）、legacy Power 前置、catalog 导出、dispatch 骨架（lease gate + 四组委托 + catch/finally）。每组移动块对 HEAD 逐字节 cmp 证明；四 browser gate 扫描列表随组同步；主会话独立终验 typecheck/四 gate/76 测试全绿。
