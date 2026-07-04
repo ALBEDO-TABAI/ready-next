@@ -47,18 +47,20 @@ test('Ready Python candidates prefer configured and PYTHON3 before supported min
 })
 
 test('skill runtime rebuild contract is pinned to stale venv state identity', () => {
-  // eslint-disable-next-line ready/no-source-grep-test -- reviewed hard contract: stale venv rebuild and venvId binding live inside private runtime-manager branches
-  const source = readFileSync(new URL('../main/modules/skills-runtime/runtime-manager.ts', import.meta.url), 'utf8')
   // B8-D M2 — the rebuild branch (rmSync + runtime-state identity file) moved
-  // verbatim into the delegated PythonRuntimeProvisioner; the venvId
-  // install-state binding stays in runtime-manager's installSkillInternal.
+  // verbatim into the delegated PythonRuntimeProvisioner.
   // eslint-disable-next-line ready/no-source-grep-test -- reviewed hard contract: rebuild body followed the python-runtime cluster split (B8-D M2)
   const provisioner = readFileSync(new URL('../main/modules/skills-runtime/python-runtime-provisioner.ts', import.meta.url), 'utf8')
+  // B8-D M3 — the venvId install-state binding (installSkillInternal +
+  // peekCustomSkillVenv) moved verbatim into the delegated SkillInstallPipeline;
+  // the pins follow the bodies (invariants unchanged).
+  // eslint-disable-next-line ready/no-source-grep-test -- reviewed hard contract: venvId binding followed the install-pipeline cluster split (B8-D M3)
+  const installPipeline = readFileSync(new URL('../main/modules/skills-runtime/skill-install-pipeline.ts', import.meta.url), 'utf8')
 
   assert.match(provisioner, /rmSync\(this\.deps\.venvRoot,\s*\{\s*recursive:\s*true,\s*force:\s*true\s*\}\)/)
   assert.match(provisioner, /PYTHON_RUNTIME_STATE_FILENAME/)
-  assert.match(source, /venvId\?: string/)
-  assert.match(source, /state\.venvId\s*&&\s*state\.venvId === venvState\?\.venvId/)
+  assert.match(installPipeline, /venvId\?: string/)
+  assert.match(installPipeline, /state\.venvId\s*&&\s*state\.venvId === venvState\?\.venvId/)
 })
 
 test('agent sidecar is pinned to the shared Python version gate', () => {
@@ -120,8 +122,10 @@ test('packaged skill runtime env strips host Python state and stays offline', ()
 test('release packaging is pinned to a shared offline skill runtime', () => {
   // eslint-disable-next-line ready/no-source-grep-test -- release packaging contract: clean packer must fail closed unless a shared runtime is supplied
   const packer = readFileSync(new URL('../../Packer/pack-clean-release.mjs', import.meta.url), 'utf8')
-  // eslint-disable-next-line ready/no-source-grep-test -- runtime-manager private install branch must skip pip for covered embedded skills when packaged runtime exists
+  // eslint-disable-next-line ready/no-source-grep-test -- runtime-manager keeps the packaged-toolchain gate and the runtime-env public face
   const runtimeManager = readFileSync(new URL('../main/modules/skills-runtime/runtime-manager.ts', import.meta.url), 'utf8')
+  // eslint-disable-next-line ready/no-source-grep-test -- install branch must skip pip for covered embedded skills when packaged runtime exists; body followed the install-pipeline split (B8-D M3)
+  const installPipeline = readFileSync(new URL('../main/modules/skills-runtime/skill-install-pipeline.ts', import.meta.url), 'utf8')
   // eslint-disable-next-line ready/no-source-grep-test -- python-runtime bodies moved to the delegated provisioner (B8-D M2); packaged-env pins follow the bodies
   const pythonProvisioner = readFileSync(new URL('../main/modules/skills-runtime/python-runtime-provisioner.ts', import.meta.url), 'utf8')
   // eslint-disable-next-line ready/no-source-grep-test -- shared packaged-runtime helper owns runtime env isolation for skills and sidecar
@@ -210,9 +214,11 @@ test('release packaging is pinned to a shared offline skill runtime', () => {
   assert.match(packer, /speech_seaco_paraformer_large_asr_nat-zh-cn-16k-common-vocab8404-pytorch/)
   assert.match(packer, /punc_ct-transformer_cn-en-common-vocab471067-large/)
   assert.match(runtimeManager, /assertPackagedRuntimeCoversEmbeddedSkill/)
+  assert.match(installPipeline, /assertPackagedRuntimeCoversEmbeddedSkill/)
   assert.match(runtimeManager, /ensurePythonVenv\(\{ allowPackaged: false \}\)/)
-  assert.match(runtimeManager, /installRequirements\(venvPython, requirementsPath, \{ allowPackaged: false \}\)/)
-  assert.match(runtimeManager, /ensureRuntimeToolchain\(\{ allowPackaged: false \}\)/)
+  assert.match(installPipeline, /ensurePythonVenv\(\{ allowPackaged: false \}\)/)
+  assert.match(installPipeline, /installRequirements\(venvPython, requirementsPath, \{ allowPackaged: false \}\)/)
+  assert.match(installPipeline, /ensureRuntimeToolchain\(\{ allowPackaged: false \}\)/)
   assert.match(pythonProvisioner, /getBaseEnv\(\{ allowPackaged \}\)/)
   assert.match(runtimeManager, /getRuntimeEnv\(options: \{ allowPackaged\?: boolean \} = \{\}\)/)
   assert.match(runtimeManager, /getPackagedSkillRuntimeToolCandidates/)

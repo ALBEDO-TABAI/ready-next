@@ -18,7 +18,7 @@ const electronModule = (() => {
 const { app } = electronModule
 import { getDatabase } from '../database'
 import { atomicWriteJson } from '../agent-control/atomic-write'
-import { EMBEDDED_SKILLS, EMBEDDED_SKILL_IDS, type EmbeddedSkillId, type EmbeddedSkillManifest, getEmbeddedSkillManifest } from './manifest'
+import { EMBEDDED_SKILLS, type EmbeddedSkillId, type EmbeddedSkillManifest, getEmbeddedSkillManifest } from './manifest'
 import type {
   SkillDefinition,
   SkillInputValue,
@@ -26,9 +26,7 @@ import type {
 } from '../../../shared/skill-execution-types'
 import {
   type RegisteredCustomSkill,
-  getManagedCustomSkill,
   importCustomSkillFolder,
-  loadCustomSkillManifestFromFolder,
   removeManagedCustomSkill,
   updateManagedCustomSkillDescription,
 } from './custom-skill-registry'
@@ -71,14 +69,8 @@ import {
   type ModelPackStatus,
 } from '../../../shared/model-pack-types'
 import {
-  assessSkillSourceRisk,
-  createDefaultSkillInstallStatus,
-  parseSkillSourceInput,
-  type ModelSource,
-  type SkillInstallProvenance,
   type SkillInstallRequest,
   type SkillInstallStatus,
-  type SkillSource as SkillInstallSource,
   type SkillSourceProbe,
   type SkillSourceResolution,
   type SkillSourceSelfTestReport,
@@ -86,26 +78,17 @@ import {
 import {
   DEFAULT_DOMESTIC_GITHUB_MIRROR_PREFIX,
   OVERSEAS_GITHUB_CODELOAD,
-  extractCandidateSkillNames,
-  extractCandidateSourcesFromDoc,
-  fetchGithubRepoMetadata,
   resolveGithubRefToSha,
-  resolveSkillTarballUrl,
   type FetchLike,
   type LatencyProbe,
 } from './skill-source-registry'
-import { fetchSkillToStaging } from './skill-source-fetcher'
 
 import {
   execFileAsync,
   EMBEDDED_SYNC_STATE_FILENAME,
-  CUSTOM_VENV_MARKER,
-  DOMESTIC_PIP_INDEX_URL,
   MAX_COMMAND_BUFFER,
-  SCHEDULER_INTERVAL_MS,
   hashDirectoryContents,
   getInstallStatePath,
-  requirementsDigest,
 } from './runtime-manager-helpers'
 // B8-D M1 (2026-07-05) — delegated sub-services extracted from this class
 // (surgery map §2.3 D 表, 风险低组). Method bodies moved verbatim; this class
@@ -119,19 +102,22 @@ import { SkillHostPrep } from './skill-host-prep'
 // runtime provisioning extracted as constructor-injected delegate classes.
 import { SkillExecutionEngine } from './skill-execution-engine'
 import { PythonRuntimeProvisioner } from './python-runtime-provisioner'
+// B8-D M3 (2026-07-05) — final batch: remote-install pipeline (AbortController
+// Maps + per-skill install lock migrate as exclusive state) and job scheduler
+// (timer + running-schedule Set migrate as exclusive state).
+import { SkillInstallPipeline } from './skill-install-pipeline'
+import { SkillJobScheduler } from './skill-job-scheduler'
 import type {
   SkillDeploySpawn,
   SkillTriggerType,
   SkillId,
   SkillState,
   SkillsRuntimeInfo,
-  SkillInstallState,
   PythonRuntimeState,
   SkillsRuntimeManagerOptions,
   SkillInstallResult,
   SkillRunResult,
   SkillRunRequest,
-  SkillJobRow,
   SkillScheduleRow,
   DatabaseConnection,
   SkillJobRecord,
@@ -179,22 +165,18 @@ export class SkillsRuntimeManager {
   private readonly retiredEmbeddedSkillIdsOverride?: ReadonlySet<string>
   private loader: SkillLoader | null = null
   private runtimeProvisioner: RuntimeProvisioner | null = null
-  private installLocks = new Map<SkillId, Promise<SkillInstallResult>>()
-  private schedulerTimer: NodeJS.Timeout | null = null
-  private runningScheduleIds = new Set<string>()
   // One in-flight download per pack so packs download independently.
   // B8-D M1: the Maps stay declared here (model-pack-manager.test.ts pokes the
   // manager instance's properties directly) and are shared by reference with
   // the ModelPackManager sub-service, which owns all reads/writes.
+  // B8-D M3: the skill-install AbortController Maps, the install lock Map and
+  // the scheduler timer/running-Set had no such test pokes, so they migrated
+  // into SkillInstallPipeline / SkillJobScheduler as exclusive state.
   private modelPackDownloads = new Map<ModelPackId, ChildProcessWithoutNullStreams>()
   private modelPackDownloadStatuses = new Map<ModelPackId, ModelPackDownloadStatus>()
-  // Remote skill installs, keyed by an opaque requestId so multiple installs run
-  // and cancel independently (the AbortController is the cancel handle, mirroring
-  // the model-pack download Maps above).
-  private skillInstalls = new Map<string, AbortController>()
-  private skillInstallStatuses = new Map<string, SkillInstallStatus>()
-  // Production dependency-deploy subprocess seam (venv + pip). Tests override via
-  // installSkillFromSource's `inject.deploySpawn`.
+  // Production dependency-deploy subprocess seam (venv + pip). Injected by value
+  // into SkillInstallPipeline; tests override via installSkillFromSource's
+  // `inject.deploySpawn`.
   private readonly defaultDeploySpawn: SkillDeploySpawn = async (file, args, options) => {
     const { stdout, stderr } = await execFileAsync(file, args, { ...options, maxBuffer: MAX_COMMAND_BUFFER })
     return { stdout: String(stdout), stderr: String(stderr) }
@@ -217,6 +199,9 @@ export class SkillsRuntimeManager {
   // B8-D M2 — second-batch delegated sub-services.
   private readonly executionEngine: SkillExecutionEngine
   private readonly pythonRuntime: PythonRuntimeProvisioner
+  // B8-D M3 — final-batch delegated sub-services.
+  private readonly installPipeline: SkillInstallPipeline
+  private readonly jobScheduler: SkillJobScheduler
 
   constructor(options: SkillsRuntimeManagerOptions = {}) {
     this.runtimeRoot = options.runtimeRoot || join(app.getPath('userData'), 'skill-runtime')
@@ -310,6 +295,39 @@ export class SkillsRuntimeManager {
       recordJobStart: (params) => this.recordJobStart(params),
       recordJobFinish: (jobId, result) => this.recordJobFinish(jobId, result),
       parseJson: (raw, fallback) => this.parseJson(raw, fallback),
+    })
+    // B8-D M3 — install pipeline + job scheduler. Same lazy `this.*` closure
+    // rule as M1/M2: the callbacks resolve through the manager's same-name
+    // delegates at call time, so construction order among services does not
+    // matter, and test monkey-patches on the manager instance
+    // (getRawDatabase / listSkills / runSkill in skill-schedule-tick-outcome)
+    // keep intercepting the injected paths.
+    this.installPipeline = new SkillInstallPipeline({
+      cacheRoot: this.cacheRoot,
+      customSkillsRoot: this.customSkillsRoot,
+      customVenvsRoot: this.customVenvsRoot,
+      packagedRuntimeRoot: this.packagedRuntimeRoot,
+      defaultDeploySpawn: this.defaultDeploySpawn,
+      ensureRuntimeDirs: () => this.ensureRuntimeDirs(),
+      probeEndpointLatency: (url) => this.probeEndpointLatency(url),
+      importCustomSkill: (sourcePath) => this.importCustomSkill(sourcePath),
+      removeCustomSkill: (skillId) => this.removeCustomSkill(skillId),
+      getBaseEnv: (envOptions) => this.getBaseEnv(envOptions),
+      resolvePackagedPythonPath: () => this.resolvePackagedPythonPath(),
+      findPythonExecutable: () => this.findPythonExecutable(),
+      ensurePythonVenv: (venvOptions) => this.ensurePythonVenv(venvOptions),
+      readPythonRuntimeState: (stateOptions) => this.readPythonRuntimeState(stateOptions),
+      ensureRuntimeToolchain: (toolchainOptions) => this.ensureRuntimeToolchain(toolchainOptions),
+      installRequirements: (venvPython, requirementsPath, reqOptions) =>
+        this.installRequirements(venvPython, requirementsPath, reqOptions),
+      syncEmbeddedSkill: (manifest) => this.syncEmbeddedSkill(manifest),
+      assertPackagedRuntimeCoversEmbeddedSkill: (skillId) => this.assertPackagedRuntimeCoversEmbeddedSkill(skillId),
+    })
+    this.jobScheduler = new SkillJobScheduler({
+      getRawDatabase: () => this.getRawDatabase(),
+      parseJson: (raw, fallback) => this.parseJson(raw, fallback),
+      runSkill: (request) => this.runSkill(request),
+      listSkills: () => this.listSkills(),
     })
     if (options.startBackgroundTasks !== false) {
       this.startScheduler()
@@ -623,134 +641,24 @@ export class SkillsRuntimeManager {
     return this.skillHostPrep.runEmbeddedPython(params)
   }
 
-  // ===========================================================================
-  // Remote skill install (GitHub / tarball) — one read-only resolver feeding a
-  // single installer gated by a trustAck choke-point. Clones the model-pack
-  // download lifecycle (optimistic publish → source auto-switch → streamed
-  // progress → try/catch reset → finally cleanup). The resolver performs any
-  // intermediate install-doc fetch as DATA only: it regex-mines candidate
-  // download addresses and NEVER feeds the doc's prose back as instructions, and
-  // it NEVER installs. Both front doors (the SkillsCenterPanel URL input and the
-  // agent install_skill tool) funnel through installSkillFromSource.
-  // ===========================================================================
+  // B8-D M3 — remote skill install (GitHub / tarball) delegates to
+  // SkillInstallPipeline (bodies, the trustAck/staging/rollback lifecycle
+  // rationale, the AbortController Maps, the per-skill install lock and the
+  // custom-venv dependency-deploy cluster live in skill-install-pipeline.ts).
+  // Both front doors (SkillsCenterPanel URL input and the agent install_skill
+  // tool) keep funnelling through these manager methods unchanged.
 
   getSkillInstallStatus(requestId: string): SkillInstallStatus {
-    return this.skillInstallStatuses.get(requestId) ?? createDefaultSkillInstallStatus(requestId)
+    return this.installPipeline.getSkillInstallStatus(requestId)
   }
 
-  // Read-only resolve: parse freeform input → candidate source, pin a GitHub ref
-  // to an immutable commit SHA (provenance), and classify a trust tier + concrete
-  // risk reasons. NEVER installs. When the input is a URL that is not itself a
-  // skill source, it is treated as an install doc / store page: fetched as
-  // untrusted DATA and regex-mined for candidate sources (viaInstallDoc=true), so
-  // the redskill/口令 shape surfaces look-alike-domain + typosquat reasons.
   async resolveSkillSource(
     input: string,
     options: { requestId?: string; fetchImpl?: FetchLike } = {},
   ): Promise<SkillSourceResolution> {
-    const requestId = options.requestId ?? randomUUID()
-    const fetchImpl: FetchLike = options.fetchImpl ?? ((url, init) => fetch(url, init))
-    const trimmed = (input ?? '').trim()
-    const bundledSkillIds = [...EMBEDDED_SKILL_IDS]
-    const candidateNames = new Set<string>(extractCandidateSkillNames(trimmed))
-
-    const direct = parseSkillSourceInput(trimmed)
-    let source: SkillInstallSource | null = direct.ok ? direct.source : null
-    let candidates: SkillInstallSource[] = source ? [source] : []
-    let viaInstallDoc = false
-    let docHost: string | null = null
-
-    if (!source && /^https?:\/\//i.test(trimmed)) {
-      try {
-        docHost = new URL(trimmed).hostname.toLowerCase()
-      } catch {
-        // silent-catch: an unparseable URL just leaves docHost null; the risk
-        // assessment then skips the look-alike-domain check for this input.
-        docHost = null
-      }
-      const docText = await this.fetchInstallDocText(trimmed, fetchImpl)
-      for (const name of extractCandidateSkillNames(docText)) candidateNames.add(name)
-      candidates = extractCandidateSourcesFromDoc(docText)
-      source = candidates[0] ?? null
-      viaInstallDoc = true
-    }
-
-    if (!source) {
-      return {
-        requestId,
-        input: trimmed,
-        source: null,
-        provenance: null,
-        risk: assessSkillSourceRisk({
-          host: docHost,
-          viaInstallDoc,
-          candidateSkillNames: [...candidateNames],
-          bundledSkillIds,
-        }),
-        requiresPython: null,
-        license: null,
-        installable: false,
-        reason: direct.ok ? '未能从该来源解析出可安装的技能地址' : direct.reason,
-        viaInstallDoc,
-        candidates,
-      }
-    }
-
-    let provenance: SkillInstallProvenance | null = null
-    let license: string | null = null
-    let hasCommitPin = false
-    if (source.kind === 'github') {
-      try {
-        const pin = await resolveGithubRefToSha(source.owner, source.repo, source.ref, fetchImpl)
-        source = { ...source, ref: pin.sha }
-        provenance = { commitSha: pin.sha }
-        hasCommitPin = true
-      } catch {
-        // silent-catch: an unpinnable ref becomes a no-commit-pin risk reason
-        // (community tier) rather than a hard failure, so the user can still decide.
-        hasCommitPin = false
-      }
-      const meta = await fetchGithubRepoMetadata(source.owner, source.repo, fetchImpl)
-      license = meta.licenseSpdx
-      candidateNames.add(source.repo)
-    } else if (source.kind === 'tarball') {
-      hasCommitPin = Boolean(source.sha256)
-      provenance = source.sha256 ? { sha256: source.sha256 } : null
-    }
-
-    const installable = source.kind !== 'registry'
-    const risk = assessSkillSourceRisk({
-      source,
-      host: docHost,
-      viaInstallDoc,
-      hasCommitPin,
-      license,
-      candidateSkillNames: [...candidateNames],
-      bundledSkillIds,
-    })
-
-    return {
-      requestId,
-      input: trimmed,
-      source,
-      provenance,
-      risk,
-      requiresPython: null,
-      license,
-      installable,
-      reason: installable ? null : 'registry 来源暂不支持（Phase 2）',
-      viaInstallDoc,
-      candidates: candidates.length ? candidates : [source],
-    }
+    return this.installPipeline.resolveSkillSource(input, options)
   }
 
-  // The single installer. REQUIRES request.trustAck === true — neither front door
-  // can install without an explicit user trust acknowledgement. Resolves the
-  // concrete tarball URL (国内/国外 auto-switch), streams the download into a
-  // staging dir under the writable cacheRoot, then hands the located skill folder
-  // to importCustomSkill (the existing scan→copy→register gate). Python-dependency
-  // skills are detected from the staged folder BEFORE registering so a failed dep
-  // deploy never leaves a half-registered skill. Staging is always cleaned up.
   async installSkillFromSource(
     request: SkillInstallRequest,
     onUpdate?: (status: SkillInstallStatus) => void,
@@ -761,379 +669,11 @@ export class SkillsRuntimeManager {
       deployBasePython?: () => Promise<string>
     } = {},
   ): Promise<SkillInstallStatus> {
-    this.ensureRuntimeDirs()
-    const { requestId } = request
-    if (request.trustAck !== true) {
-      throw new Error('安装未确认：缺少用户授权（trustAck）')
-    }
-    if (request.source.kind === 'registry') {
-      throw new Error('registry 来源暂不支持（Phase 2）')
-    }
-    if (this.skillInstalls.has(requestId)) {
-      return this.getSkillInstallStatus(requestId)
-    }
-
-    const controller = new AbortController()
-    this.skillInstalls.set(requestId, controller)
-    const downloadSource: ModelSource = request.downloadSource ?? 'auto'
-    const probeLatency: LatencyProbe = inject.probeLatency ?? ((url) => this.probeEndpointLatency(url))
-
-    const publish = (): void => {
-      onUpdate?.(this.getSkillInstallStatus(requestId))
-    }
-    const patch = (next: Partial<SkillInstallStatus>): void => {
-      this.skillInstallStatuses.set(requestId, {
-        ...this.getSkillInstallStatus(requestId),
-        ...next,
-        updatedAt: new Date().toISOString(),
-      })
-    }
-
-    const startedAt = new Date().toISOString()
-    this.skillInstallStatuses.set(requestId, {
-      ...createDefaultSkillInstallStatus(requestId),
-      phase: 'resolving',
-      source: request.source,
-      downloadSource,
-      provenance: request.provenance ?? null,
-      startedAt,
-      updatedAt: startedAt,
-      lastMessage: '正在准备安装…',
-    })
-    publish()
-
-    let stagingRoot: string | null = null
-    try {
-      const resolvedTarball = await resolveSkillTarballUrl(request.source, downloadSource, probeLatency)
-      patch({
-        phase: 'downloading',
-        lastMessage: `开始下载（来源：${this.describeSkillMirror(resolvedTarball.mirror)}）`,
-      })
-      publish()
-
-      const stripComponents = request.source.kind === 'github' ? 1 : 0
-      const subdir = request.source.kind === 'github' ? request.source.subdir : undefined
-      const expectedSha256 = request.source.kind === 'tarball'
-        ? request.source.sha256 ?? request.provenance?.sha256 ?? undefined
-        : undefined
-
-      const fetched = await fetchSkillToStaging({
-        url: resolvedTarball.url,
-        requestId,
-        cacheRoot: this.cacheRoot,
-        subdir,
-        stripComponents,
-        expectedSha256,
-        signal: controller.signal,
-        fetchImpl: inject.fetchImpl,
-        onProgress: (progress) => {
-          patch({
-            phase: 'downloading',
-            downloadedBytes: progress.downloadedBytes,
-            totalBytes: progress.totalBytes,
-            progressPercent: progress.percent,
-          })
-          publish()
-        },
-      })
-      stagingRoot = fetched.stagingRoot
-
-      // Detect Python-dependency skills from the STAGED folder before we copy +
-      // register, so a deps-deploy failure cannot leave a half-registered skill.
-      const requiresPython = this.stagedSkillRequiresPython(fetched.skillDir)
-
-      patch({
-        phase: 'scanning',
-        license: fetched.license,
-        requiresPython,
-        provenance: { commitSha: request.provenance?.commitSha ?? null, sha256: fetched.sha256 },
-        lastMessage: '正在安全扫描…',
-      })
-      publish()
-
-      patch({ phase: 'installing', lastMessage: '正在安装…' })
-      publish()
-      const skill = this.importCustomSkill(fetched.skillDir)
-
-      // Python-dependency skills: deploy deps into a per-skill bundled-Python
-      // overlay venv (online pip; offline fences dropped). A deploy failure rolls
-      // back the just-registered skill so we never half-install a Python skill
-      // whose dependencies are absent.
-      if (requiresPython) {
-        patch({ phase: 'deploying-deps', lastMessage: '正在部署 Python 依赖…' })
-        publish()
-        try {
-          await this.deploySkillRequirements(
-            {
-              skillId: skill.id,
-              mirror: resolvedTarball.mirror,
-              signal: controller.signal,
-              onPhase: (message) => {
-                patch({ phase: 'deploying-deps', lastMessage: message })
-                publish()
-              },
-            },
-            inject.deploySpawn ?? this.defaultDeploySpawn,
-            inject.deployBasePython ?? (() => this.resolveCustomVenvBasePython()),
-          )
-        } catch (depError) {
-          try {
-            this.removeCustomSkill(skill.id)
-          } catch {
-            // silent-catch: a rollback cleanup failure must not mask the deploy
-            // error that triggered it; the original depError is rethrown below.
-          }
-          throw depError instanceof Error ? depError : new Error(String(depError))
-        }
-      }
-
-      const completedAt = new Date().toISOString()
-      patch({
-        phase: 'done',
-        skillId: skill.id,
-        progressPercent: 100,
-        completedAt,
-        lastMessage: `已安装：${skill.name}`,
-      })
-      publish()
-      return this.getSkillInstallStatus(requestId)
-    } catch (error) {
-      const aborted = controller.signal.aborted || (error instanceof Error && error.name === 'AbortError')
-      const message = error instanceof Error ? error.message : String(error)
-      patch({
-        phase: aborted ? 'cancelled' : 'error',
-        error: aborted ? null : message,
-        completedAt: new Date().toISOString(),
-        lastMessage: aborted ? '已取消安装' : message,
-      })
-      publish()
-      if (aborted) return this.getSkillInstallStatus(requestId)
-      throw error instanceof Error ? error : new Error(message)
-    } finally {
-      this.skillInstalls.delete(requestId)
-      if (stagingRoot) {
-        try {
-          rmSync(stagingRoot, { recursive: true, force: true })
-        } catch {
-          // silent-catch: staging lives under the writable cacheRoot; a cleanup
-          // failure leaves a tmp dir but must not mask the install result.
-        }
-      }
-    }
+    return this.installPipeline.installSkillFromSource(request, onUpdate, inject)
   }
 
   cancelSkillInstall(requestId: string): SkillInstallStatus {
-    const controller = this.skillInstalls.get(requestId)
-    if (controller) {
-      controller.abort()
-      this.skillInstalls.delete(requestId)
-      const now = new Date().toISOString()
-      this.skillInstallStatuses.set(requestId, {
-        ...this.getSkillInstallStatus(requestId),
-        phase: 'cancelled',
-        updatedAt: now,
-        completedAt: now,
-        lastMessage: '已取消安装',
-      })
-    }
-    return this.getSkillInstallStatus(requestId)
-  }
-
-  private describeSkillMirror(mirror: 'domestic' | 'overseas' | 'direct'): string {
-    if (mirror === 'domestic') return '国内镜像'
-    if (mirror === 'overseas') return 'GitHub（国外）'
-    return '直链'
-  }
-
-  // Best-effort: does the staged skill folder declare a Python runtime (skill- or
-  // action-level) or carry a requirements file? Read-only manifest inspection of
-  // the staged folder, no copy. A malformed manifest resolves to false (the
-  // security scan in importCustomSkill remains the hard gate).
-  private stagedSkillRequiresPython(skillDir: string): boolean {
-    try {
-      const manifest = loadCustomSkillManifestFromFolder(skillDir)
-      if (manifest.runtime === 'python') return true
-      if (manifest.requirementsFile) return true
-      return manifest.actions.some((action) => action.runtime === 'python')
-    } catch {
-      // silent-catch: an unreadable staged manifest defaults to requiresPython=false
-      // (the importCustomSkill security scan stays the hard gate either way).
-      return false
-    }
-  }
-
-  // Fetch an intermediate install doc / store page as DATA only, bounded so a
-  // hostile page cannot exhaust memory. Any failure resolves to an empty string
-  // (the caller then surfaces "no installable address found"). The returned text
-  // is ONLY regex-mined for candidate URLs; its prose is never executed.
-  private async fetchInstallDocText(url: string, fetchImpl: FetchLike): Promise<string> {
-    try {
-      const res = await fetchImpl(url, {})
-      if (!res.ok) return ''
-      const text = await res.text()
-      return text.slice(0, 256 * 1024)
-    } catch {
-      // silent-catch: a failed doc fetch resolves to empty text; the caller then
-      // surfaces "no installable address found" rather than throwing.
-      return ''
-    }
-  }
-
-  // ── Bundled-Python overlay-venv dependency deploy (Q2) ─────────────────────
-  // A source-installed Python skill gets its requirements deployed into a
-  // per-skill venv built from the bundled interpreter with --system-site-packages
-  // (so only the *delta* deps download; the bundled ML stack is reused, immutable).
-  // Online pip is an explicit user-initiated action: the packaged runtime's
-  // offline fences are dropped for the install, mirroring buildModelPackDownloadEnv.
-  // The SAME overlay venv is what the run path resolves (installSkillInternal →
-  // peekCustomSkillVenv), so install-time and run-time interpreters are coherent.
-
-  private getCustomSkillVenvDir(skillId: SkillId): string {
-    return join(this.customVenvsRoot, skillId)
-  }
-
-  private getCustomVenvPython(venvDir: string): string {
-    return process.platform === 'win32'
-      ? join(venvDir, 'Scripts', 'python.exe')
-      : join(venvDir, 'bin', 'python')
-  }
-
-  // Read-only: return a skill's overlay venv (python + venvId) iff it is fully
-  // built (interpreter present + marker readable). Null otherwise — the caller
-  // then falls back to the shared host venv (existing local-import skills).
-  private peekCustomSkillVenv(skillId: SkillId): { venvPython: string; venvId: string } | null {
-    const venvDir = this.getCustomSkillVenvDir(skillId)
-    const venvPython = this.getCustomVenvPython(venvDir)
-    const markerPath = join(venvDir, CUSTOM_VENV_MARKER)
-    if (!existsSync(venvPython) || !existsSync(markerPath)) return null
-    try {
-      const marker = JSON.parse(readFileSync(markerPath, 'utf-8')) as { venvId?: string }
-      if (!marker.venvId) return null
-      return { venvPython, venvId: marker.venvId }
-    } catch {
-      return null
-    }
-  }
-
-  // Prefer the bundled interpreter; fall back to host Python when no packaged
-  // runtime is present (dev). The venv created from it inherits --system-site-
-  // packages so only the delta deps download.
-  private async resolveCustomVenvBasePython(): Promise<string> {
-    let basePython: string | null = null
-    try {
-      basePython = await this.resolvePackagedPythonPath()
-    } catch {
-      // silent-catch: no packaged runtime (dev) just falls through to the host
-      // Python resolution below; it is not an error in unpackaged environments.
-      basePython = null
-    }
-    if (!basePython) basePython = await this.findPythonExecutable()
-    return basePython
-  }
-
-  // Build (idempotently) a per-skill overlay venv from the resolved base Python.
-  // Writes a marker carrying a fresh venvId so the install-state can pin to this
-  // build. The base-Python resolver is injectable so tests stay hermetic.
-  private async ensureCustomSkillVenv(
-    skillId: SkillId,
-    spawn: SkillDeploySpawn,
-    resolveBasePython: () => Promise<string>,
-  ): Promise<{ venvPython: string; venvId: string }> {
-    const existing = this.peekCustomSkillVenv(skillId)
-    if (existing) return existing
-
-    const venvDir = this.getCustomSkillVenvDir(skillId)
-    rmSync(venvDir, { recursive: true, force: true })
-    mkdirSync(venvDir, { recursive: true })
-
-    const basePython = await resolveBasePython()
-    await spawn(
-      basePython,
-      ['-m', 'venv', '--system-site-packages', venvDir],
-      { env: this.getBaseEnv({ allowPackaged: true }), timeout: 180_000 },
-    )
-
-    const venvPython = this.getCustomVenvPython(venvDir)
-    const venvId = randomUUID()
-    atomicWriteJson(join(venvDir, CUSTOM_VENV_MARKER), {
-      venvId,
-      basePython,
-      createdAt: new Date().toISOString(),
-    })
-    return { venvPython, venvId }
-  }
-
-  // Online pip env: clone the (packaged) base env, drop the offline fences, and
-  // apply the 国内/国外 switch to the pip index (consistent with the tarball mirror).
-  private buildCustomSkillDeployEnv(mirror: 'domestic' | 'overseas' | 'direct'): NodeJS.ProcessEnv {
-    const env: NodeJS.ProcessEnv = { ...this.getBaseEnv({ allowPackaged: true }) }
-    delete env.PIP_NO_INDEX
-    delete env.HF_HUB_OFFLINE
-    delete env.TRANSFORMERS_OFFLINE
-    delete env.MODELSCOPE_OFFLINE
-    if (mirror === 'domestic') {
-      env.PIP_INDEX_URL = DOMESTIC_PIP_INDEX_URL
-      env.PIP_EXTRA_INDEX_URL = 'https://pypi.org/simple'
-    }
-    return env
-  }
-
-  // Deploy a registered Python skill's requirements into its overlay venv, then
-  // record the install-state so the offline-by-default run path treats the deps
-  // as installed (and reuses the overlay interpreter) without re-running pip.
-  private async deploySkillRequirements(
-    params: {
-      skillId: string
-      mirror: 'domestic' | 'overseas' | 'direct'
-      signal?: AbortSignal
-      onPhase: (message: string) => void
-    },
-    spawn: SkillDeploySpawn,
-    resolveBasePython: () => Promise<string>,
-  ): Promise<void> {
-    const customSkill = getManagedCustomSkill(this.customSkillsRoot, params.skillId)
-    if (!customSkill) {
-      throw new Error('技能安装记录缺失，无法部署 Python 依赖')
-    }
-    const requirementsPath = customSkill.requirementsFile
-      ? join(customSkill.managedPath, customSkill.requirementsFile)
-      : ''
-
-    params.onPhase('正在准备 Python 运行环境…')
-    if (params.signal?.aborted) throw this.skillInstallAbortError()
-    const overlay = await this.ensureCustomSkillVenv(customSkill.id, spawn, resolveBasePython)
-
-    if (customSkill.requirementsFile && existsSync(requirementsPath)) {
-      params.onPhase('正在在线安装依赖…')
-      if (params.signal?.aborted) throw this.skillInstallAbortError()
-      const env = this.buildCustomSkillDeployEnv(params.mirror)
-      try {
-        await spawn(
-          overlay.venvPython,
-          ['-m', 'pip', 'install', '--disable-pip-version-check', '-r', requirementsPath],
-          { env, signal: params.signal, timeout: 3_600_000 },
-        )
-      } catch (error) {
-        if (error instanceof Error && error.name === 'AbortError') throw error
-        const detail = error instanceof Error ? error.message : String(error)
-        throw new Error(`Python 依赖在线安装失败（请检查网络后重试）：${detail}`)
-      }
-    }
-
-    const statePath = getInstallStatePath(customSkill.managedPath)
-    const digest = customSkill.requirementsFile ? requirementsDigest(requirementsPath) : 'none'
-    atomicWriteJson(statePath, {
-      version: customSkill.version,
-      requirementsDigest: digest,
-      installedAt: new Date().toISOString(),
-      venvId: overlay.venvId,
-    } satisfies SkillInstallState)
-  }
-
-  private skillInstallAbortError(): Error {
-    const error = new Error('安装已取消')
-    error.name = 'AbortError'
-    return error
+    return this.installPipeline.cancelSkillInstall(requestId)
   }
 
   importCustomSkill(sourcePath: string): SkillState {
@@ -1199,18 +739,12 @@ export class SkillsRuntimeManager {
     })
   }
 
+  // B8-D M3 — cross-cluster install entry. The per-skill lock Map and the
+  // embedded/custom installSkillInternal body live in skill-install-pipeline.ts;
+  // the M1/M2 services' injected `ensureSkillInstalled` callbacks keep resolving
+  // through this same-name delegate (M2 getBaseEnv 同款续接).
   async ensureSkillInstalled(skillId: SkillId, force = false): Promise<SkillInstallResult> {
-    if (!force) {
-      const ongoing = this.installLocks.get(skillId)
-      if (ongoing) return ongoing
-    }
-
-    const installTask = this.installSkillInternal(skillId, force)
-      .finally(() => {
-        this.installLocks.delete(skillId)
-      })
-    this.installLocks.set(skillId, installTask)
-    return installTask
+    return this.installPipeline.ensureSkillInstalled(skillId, force)
   }
 
   /**
@@ -1317,82 +851,30 @@ export class SkillsRuntimeManager {
     return this.executionEngine.toDirectRunResult(skillId, actionName, executed)
   }
 
+  // B8-D M3 — jobs/schedules surface delegates to SkillJobScheduler (bodies,
+  // the timer + running-schedule Set and the tick/retry semantics live in
+  // skill-job-scheduler.ts). getRawDatabase and parseJson keep their bodies
+  // here: skill-schedule-tick-outcome.test.ts monkey-patches them (and
+  // listSkills / runSkill) as manager instance properties, and the scheduler's
+  // injected lazy closures resolve through the patched members at call time.
   listJobs(limit = 80): SkillJobRecord[] {
-    const db = this.getRawDatabase()
-    if (!db) return []
-    const safeLimit = Math.max(1, Math.min(500, Math.floor(limit)))
-    const rows = db.prepare('SELECT * FROM skills_jobs ORDER BY created_at DESC LIMIT ?').all<SkillJobRow>(safeLimit)
-    return rows.map((row) => this.mapJobRow(row))
+    return this.jobScheduler.listJobs(limit)
   }
 
   listSchedules(): SkillScheduleRecord[] {
-    const db = this.getRawDatabase()
-    if (!db) return []
-    const rows = db.prepare('SELECT * FROM skills_schedules ORDER BY created_at DESC').all<SkillScheduleRow>()
-    return rows.map((row) => this.mapScheduleRow(row))
+    return this.jobScheduler.listSchedules()
   }
 
   createSchedule(request: CreateSkillScheduleRequest): SkillScheduleRecord {
-    const skill = this.listSkills().find((item) => item.id === request.skillId)
-    if (!skill) {
-      throw new Error(`Unknown skill: ${request.skillId}`)
-    }
-    const knownAction = skill.actions.some((action) => action.name === request.action)
-    if (!knownAction) {
-      throw new Error(`Unknown action: ${request.action}`)
-    }
-
-    const db = this.getRawDatabase()
-    if (!db) {
-      throw new Error('Database not available')
-    }
-
-    const intervalMinutes = Math.max(1, Math.floor(request.intervalMinutes))
-    const nowIso = new Date().toISOString()
-    const parsedStart = request.startAt ? new Date(request.startAt).getTime() : Number.NaN
-    const firstRunIso = Number.isFinite(parsedStart)
-      ? new Date(parsedStart).toISOString()
-      : new Date(Date.now() + intervalMinutes * 60_000).toISOString()
-    const id = randomUUID()
-    db.prepare(`
-      INSERT INTO skills_schedules (
-        id, skill_id, action, params_json, interval_minutes, next_run_at, last_run_at, enabled, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, NULL, 1, ?, ?)
-    `).run(
-      id,
-      request.skillId,
-      request.action,
-      JSON.stringify(request.params || {}),
-      intervalMinutes,
-      firstRunIso,
-      nowIso,
-      nowIso,
-    )
-    this.runSchedulerTickSoon()
-    const created = db.prepare('SELECT * FROM skills_schedules WHERE id = ?').all<SkillScheduleRow>(id)[0]
-    if (!created) {
-      throw new Error('Failed to create schedule')
-    }
-    return this.mapScheduleRow(created)
+    return this.jobScheduler.createSchedule(request)
   }
 
   updateScheduleEnabled(scheduleId: string, enabled: boolean): SkillScheduleRecord | null {
-    const db = this.getRawDatabase()
-    if (!db) return null
-    db.prepare('UPDATE skills_schedules SET enabled = ?, updated_at = ? WHERE id = ?')
-      .run(enabled ? 1 : 0, new Date().toISOString(), scheduleId)
-    const row = db.prepare('SELECT * FROM skills_schedules WHERE id = ?').all<SkillScheduleRow>(scheduleId)[0]
-    if (!row) return null
-    this.runSchedulerTickSoon()
-    return this.mapScheduleRow(row)
+    return this.jobScheduler.updateScheduleEnabled(scheduleId, enabled)
   }
 
   deleteSchedule(scheduleId: string): boolean {
-    const db = this.getRawDatabase()
-    if (!db) return false
-    db.prepare('DELETE FROM skills_schedules WHERE id = ?').run(scheduleId)
-    this.runningScheduleIds.delete(scheduleId)
-    return true
+    return this.jobScheduler.deleteSchedule(scheduleId)
   }
 
   private getRawDatabase(): DatabaseConnection | null {
@@ -1400,41 +882,6 @@ export class SkillsRuntimeManager {
       return getDatabase().getDatabase() as DatabaseConnection | null
     } catch {
       return null
-    }
-  }
-
-  private mapJobRow(row: SkillJobRow): SkillJobRecord {
-    return {
-      id: row.id,
-      skillId: row.skill_id,
-      action: row.action,
-      status: row.status,
-      triggerType: row.trigger_type,
-      scheduleId: row.schedule_id,
-      createdAt: row.created_at,
-      startedAt: row.started_at,
-      finishedAt: row.finished_at,
-      durationMs: row.duration_ms,
-      stdout: row.stdout || '',
-      stderr: row.stderr || '',
-      outputDir: row.output_dir,
-      error: row.error,
-      command: row.command_json ? this.parseJson<string[]>(row.command_json, []) : [],
-    }
-  }
-
-  private mapScheduleRow(row: SkillScheduleRow): SkillScheduleRecord {
-    return {
-      id: row.id,
-      skillId: row.skill_id,
-      action: row.action,
-      params: this.parseJson<Record<string, unknown>>(row.params_json || '{}', {}),
-      intervalMinutes: row.interval_minutes,
-      nextRunAt: row.next_run_at,
-      lastRunAt: row.last_run_at,
-      enabled: row.enabled === 1,
-      createdAt: row.created_at,
-      updatedAt: row.updated_at,
     }
   }
 
@@ -1446,6 +893,12 @@ export class SkillsRuntimeManager {
     }
   }
 
+  // B8-D M3 — private job-bookkeeping delegates. They stay as manager-level
+  // methods because the M2 SkillExecutionEngine injection
+  // (`recordJobStart/recordJobFinish` closures in the constructor above)
+  // resolves through them, and runScheduledTask is invoked directly on the
+  // manager instance by skill-schedule-tick-outcome.test.ts (M1
+  // finalizeModelPackDownload 同款处理). Bodies live in skill-job-scheduler.ts.
   private recordJobStart(params: {
     skillId: SkillId
     action: string
@@ -1453,246 +906,19 @@ export class SkillsRuntimeManager {
     triggerType: SkillTriggerType
     scheduleId: string | null
   }): string {
-    const db = this.getRawDatabase()
-    if (!db) return randomUUID()
-    const id = randomUUID()
-    const now = new Date().toISOString()
-    db.prepare(`
-      INSERT INTO skills_jobs (
-        id, skill_id, action, params_json, status, trigger_type, schedule_id, created_at, started_at
-      ) VALUES (?, ?, ?, ?, 'running', ?, ?, ?, ?)
-    `).run(
-      id,
-      params.skillId,
-      params.action,
-      JSON.stringify(params.params || {}),
-      params.triggerType,
-      params.scheduleId,
-      now,
-      now,
-    )
-    return id
+    return this.jobScheduler.recordJobStart(params)
   }
 
   private recordJobFinish(jobId: string, result: SkillRunResult): void {
-    const db = this.getRawDatabase()
-    if (!db) return
-    const now = new Date().toISOString()
-    const started = db.prepare('SELECT started_at FROM skills_jobs WHERE id = ?').all<{ started_at: string | null }>(jobId)[0]
-    const durationMs = started?.started_at ? Math.max(0, Date.now() - new Date(started.started_at).getTime()) : null
-    db.prepare(`
-      UPDATE skills_jobs
-      SET
-        status = ?,
-        finished_at = ?,
-        duration_ms = ?,
-        stdout = ?,
-        stderr = ?,
-        output_dir = ?,
-        error = ?,
-        command_json = ?
-      WHERE id = ?
-    `).run(
-      result.success ? 'success' : 'failed',
-      now,
-      durationMs,
-      result.stdout,
-      result.stderr,
-      result.outputDir || null,
-      result.error || null,
-      JSON.stringify(result.command || []),
-      jobId,
-    )
+    this.jobScheduler.recordJobFinish(jobId, result)
   }
 
   private startScheduler(): void {
-    if (this.schedulerTimer) return
-    this.schedulerTimer = setInterval(() => {
-      void this.tickSchedules()
-    }, SCHEDULER_INTERVAL_MS)
-    this.runSchedulerTickSoon()
-  }
-
-  private runSchedulerTickSoon(): void {
-    setTimeout(() => {
-      void this.tickSchedules()
-    }, 300)
-  }
-
-  private async tickSchedules(): Promise<void> {
-    const db = this.getRawDatabase()
-    if (!db) return
-    const nowIso = new Date().toISOString()
-    const due = db.prepare(`
-      SELECT * FROM skills_schedules
-      WHERE enabled = 1 AND next_run_at <= ?
-      ORDER BY next_run_at ASC
-      LIMIT 20
-    `).all<SkillScheduleRow>(nowIso)
-    for (const schedule of due) {
-      if (this.runningScheduleIds.has(schedule.id)) continue
-      this.runningScheduleIds.add(schedule.id)
-      void this.runScheduledTask(schedule)
-    }
+    this.jobScheduler.startScheduler()
   }
 
   private async runScheduledTask(schedule: SkillScheduleRow): Promise<void> {
-    try {
-      const params = this.parseJson<Record<string, unknown>>(schedule.params_json || '{}', {})
-      const result = await this.runSkill({
-        skillId: schedule.skill_id,
-        action: schedule.action,
-        params,
-        triggerType: 'schedule',
-        scheduleId: schedule.id,
-      })
-      const db = this.getRawDatabase()
-      if (!db) return
-      const now = Date.now()
-      if (!result.success) {
-        const retryRunAt = new Date(now + 5 * 60_000).toISOString()
-        db.prepare('UPDATE skills_schedules SET next_run_at = ?, updated_at = ? WHERE id = ?')
-          .run(retryRunAt, new Date(now).toISOString(), schedule.id)
-        return
-      }
-      const nextRunAt = new Date(now + Math.max(1, schedule.interval_minutes) * 60_000).toISOString()
-      db.prepare(`
-        UPDATE skills_schedules
-        SET last_run_at = ?, next_run_at = ?, updated_at = ?
-        WHERE id = ?
-      `).run(new Date(now).toISOString(), nextRunAt, new Date(now).toISOString(), schedule.id)
-    } catch {
-      // Keep scheduler resilient. Failure details are recorded in skills_jobs.
-      const db = this.getRawDatabase()
-      if (!db) return
-      const retryRunAt = new Date(Date.now() + 5 * 60_000).toISOString()
-      db.prepare('UPDATE skills_schedules SET next_run_at = ?, updated_at = ? WHERE id = ?')
-        .run(retryRunAt, new Date().toISOString(), schedule.id)
-    } finally {
-      this.runningScheduleIds.delete(schedule.id)
-    }
-  }
-
-  private async installSkillInternal(skillId: SkillId, force: boolean): Promise<SkillInstallResult> {
-    const manifest = getEmbeddedSkillManifest(skillId)
-    if (manifest) {
-      this.ensureRuntimeDirs()
-      const skillPath = this.syncEmbeddedSkill(manifest)
-      const statePath = getInstallStatePath(skillPath)
-      const requirementsPath = join(skillPath, manifest.requirementsFile)
-      const digest = requirementsDigest(requirementsPath)
-      const venvPython = await this.ensurePythonVenv()
-      const venvState = this.readPythonRuntimeState()
-
-      if (!force && existsSync(statePath)) {
-        try {
-          const state = JSON.parse(readFileSync(statePath, 'utf-8')) as SkillInstallState
-          if (
-            state.version === manifest.version
-            && state.requirementsDigest === digest
-            && state.venvId
-            && state.venvId === venvState?.venvId
-          ) {
-            return { success: true, skillId: manifest.id, skillPath, venvPython }
-          }
-        } catch {
-          // Invalid state file, continue to reinstall.
-        }
-      }
-
-      try {
-        if (this.packagedRuntimeRoot) {
-          this.assertPackagedRuntimeCoversEmbeddedSkill(manifest.id)
-        } else {
-          await this.ensureRuntimeToolchain()
-          if (existsSync(requirementsPath)) {
-            await this.installRequirements(venvPython, requirementsPath)
-          }
-        }
-        const state: SkillInstallState = {
-          version: manifest.version,
-          requirementsDigest: digest,
-          installedAt: new Date().toISOString(),
-          venvId: venvState?.venvId,
-        }
-        atomicWriteJson(statePath, state)
-        return { success: true, skillId: manifest.id, skillPath, venvPython }
-      } catch (error) {
-        return {
-          success: false,
-          skillId: manifest.id,
-          skillPath,
-          error: error instanceof Error ? error.message : String(error),
-        }
-      }
-    }
-
-    const customSkill = getManagedCustomSkill(this.customSkillsRoot, skillId)
-    if (!customSkill) {
-      return { success: false, skillId, error: `Unknown skill: ${skillId}` }
-    }
-
-    const statePath = getInstallStatePath(customSkill.managedPath)
-    const requiresPython = customSkill.runtime === 'python' || customSkill.actions.some((action) => action.runtime === 'python')
-    const requirementsPath = customSkill.requirementsFile ? join(customSkill.managedPath, customSkill.requirementsFile) : ''
-    const digest = customSkill.requirementsFile ? requirementsDigest(requirementsPath) : 'none'
-    // Interpreter precedence: a per-skill overlay venv (bundled-Python derived,
-    // deps deployed online at install-from-source time) wins; skills imported
-    // before overlay deploy existed fall back to the shared host venv. The SAME
-    // venvPython feeds the run-time spawn (runDefinitionActionDirect), so resolving
-    // it here keeps install and run coherent — no second interpreter source.
-    const overlayVenv = requiresPython ? this.peekCustomSkillVenv(customSkill.id) : null
-    const venvPython = requiresPython
-      ? (overlayVenv?.venvPython ?? await this.ensurePythonVenv({ allowPackaged: false }))
-      : undefined
-    const venvId = requiresPython
-      ? (overlayVenv?.venvId ?? this.readPythonRuntimeState({ allowPackaged: false })?.venvId)
-      : undefined
-
-    if (!force && existsSync(statePath)) {
-      try {
-        const state = JSON.parse(readFileSync(statePath, 'utf-8')) as SkillInstallState
-        if (
-          state.version === customSkill.version
-          && state.requirementsDigest === digest
-          && (!requiresPython || (state.venvId && state.venvId === venvId))
-        ) {
-          return { success: true, skillId: customSkill.id, skillPath: customSkill.managedPath, venvPython }
-        }
-      } catch {
-        // continue to reinstall
-      }
-    }
-
-    try {
-      // Overlay-venv skills had their deps deployed online at install time (and
-      // the run path is offline-by-default), so only the host-venv fallback runs
-      // pip here. An overlay venv with stale deps refreshes via a fresh install.
-      if (requiresPython && !overlayVenv) {
-        if (!venvPython) {
-          throw new Error('Python skill runtime is unavailable')
-        }
-        await this.ensureRuntimeToolchain({ allowPackaged: false })
-        if (customSkill.requirementsFile && existsSync(requirementsPath)) {
-          await this.installRequirements(venvPython, requirementsPath, { allowPackaged: false })
-        }
-      }
-      const state: SkillInstallState = {
-        version: customSkill.version,
-        requirementsDigest: digest,
-        installedAt: new Date().toISOString(),
-        venvId,
-      }
-      atomicWriteJson(statePath, state)
-      return { success: true, skillId: customSkill.id, skillPath: customSkill.managedPath, venvPython }
-    } catch (error) {
-      return {
-        success: false,
-        skillId: customSkill.id,
-        skillPath: customSkill.managedPath,
-        error: error instanceof Error ? error.message : String(error),
-      }
-    }
+    return this.jobScheduler.runScheduledTask(schedule)
   }
 
   private ensureRuntimeDirs(): void {

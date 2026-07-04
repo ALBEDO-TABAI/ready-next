@@ -4,7 +4,12 @@
 const fs = require('node:fs')
 const path = require('node:path')
 
-const TARGET = 'src/main/modules/skills-runtime/runtime-manager.ts'
+// B8-D M3 (2026-07-05) — the jobs/schedules cluster moved verbatim from
+// runtime-manager.ts into the delegated SkillJobScheduler; the funnel pins
+// follow the bodies (invariants unchanged: createSchedule validates the action
+// before INSERT, runScheduledTask branches on runSkill success before the
+// normal interval advance). runSkill is injected there, hence `this.deps.`.
+const TARGET = 'src/main/modules/skills-runtime/skill-job-scheduler.ts'
 
 function stripComments(source) {
   return source
@@ -69,13 +74,13 @@ function validateScheduleOutcomeSource(source) {
   if (!runBody) {
     errors.push('runScheduledTask method not found')
   } else {
-    if (!/const\s+\w+\s*=\s*await\s+this\.runSkill\s*\(/.test(runBody)) {
+    if (!/const\s+\w+\s*=\s*await\s+this\.deps\.runSkill\s*\(/.test(runBody)) {
       errors.push('runScheduledTask must store the runSkill result')
     }
     if (!/if\s*\(\s*!\s*\w+\.success\s*\)/.test(runBody)) {
       errors.push('runScheduledTask must branch on !result.success')
     }
-    const runSkillIndex = runBody.indexOf('this.runSkill')
+    const runSkillIndex = runBody.indexOf('this.deps.runSkill')
     const successIndex = runBody.search(/!\s*\w+\.success/)
     const normalAdvanceIndex = runBody.indexOf('interval_minutes')
     if (runSkillIndex >= 0 && normalAdvanceIndex >= 0 && (successIndex < 0 || successIndex > normalAdvanceIndex)) {
