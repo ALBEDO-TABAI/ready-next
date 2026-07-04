@@ -301,8 +301,14 @@ export async function runGuardedSelectorType(
       if (guard) return guard;
       el.focus();
       if ('value' in el) {
-        ${opts.clearFirst ? 'el.value = "";' : ''}
-        el.value = ${JSON.stringify(text)};
+        // D16-b：React 受控输入必须走原型原生 setter，绕过实例 valueTracker，
+        // 否则 DOM 有字而框架状态为空、校验静默失败。
+        const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype
+          : el instanceof HTMLInputElement ? HTMLInputElement.prototype : null;
+        const nativeSet = proto ? (Object.getOwnPropertyDescriptor(proto, 'value') || {}).set : null;
+        ${opts.clearFirst ? 'if (nativeSet) nativeSet.call(el, ""); else el.value = "";' : ''}
+        if (nativeSet) nativeSet.call(el, ${JSON.stringify(text)});
+        else el.value = ${JSON.stringify(text)};
       } else {
         ${opts.clearFirst ? 'el.textContent = "";' : ''}
         el.textContent = ${JSON.stringify(text)};
@@ -767,8 +773,12 @@ export function buildSmartTypeJs(options: {
         if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
           const current = String(el.value || '')
           if (normalize(current) === normalize(value)) return
-          if (clearFirst) el.value = ''
-          el.value = value
+          // D16-b：原生 setter 绕过 React valueTracker（同 buildTypeJs）。
+          const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype
+          const nativeSet = (Object.getOwnPropertyDescriptor(proto, 'value') || {}).set
+          if (clearFirst) { if (nativeSet) nativeSet.call(el, ''); else el.value = '' }
+          if (nativeSet) nativeSet.call(el, value)
+          else el.value = value
           return
         }
         if (el.isContentEditable) {

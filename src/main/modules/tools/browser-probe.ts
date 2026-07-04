@@ -530,7 +530,14 @@ export function buildBrowserActOnTargetJs(nodeId: string, action: AgentBrowserAc
     if (action === 'fill') {
       if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
         el.focus();
-        el.value = value;
+        // D16-b（真机第十一轮实锚）：React 受控组件在实例上装 valueTracker，
+        // 直接 el.value 赋值会被吞——DOM 有字、框架状态为空，表单校验静默
+        // 失败（发布按钮人点也无反应）。走原型链原生 setter 绕过 tracker，
+        // 再派发 input 让 React 读到真实变更。
+        const __readyProto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+        const __readyNativeSet = (Object.getOwnPropertyDescriptor(__readyProto, 'value') || {}).set;
+        if (__readyNativeSet) __readyNativeSet.call(el, value);
+        else el.value = value;
         el.dispatchEvent(new Event('input', { bubbles: true }));
         el.dispatchEvent(new Event('change', { bubbles: true }));
       } else if (el.isContentEditable) {

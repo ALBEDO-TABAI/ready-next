@@ -202,6 +202,21 @@ preload `runFeedback` API + electron.d.ts 类型 + 行为测试
 
 **顺带观察**：本轮模型三次重填标题、两次重贴正文（read_back 纠偏在工作，未误报成功）；「发布」点击后 25s 思考间隙疑似 chooser 弹出时刻之一。成功证据读取（发布成功信号→proof）仍是 R1 关账的最后一环（并 D9 proof 铸造）。
 
+**D16-b（同晚伴生修复，已完成）**：用户实证"agent 操作过的 tab 里发布按钮人点也无反应，新开 tab 手动全流程可发"——tab 级页面状态被写坏。头号根因=React 受控输入失同步：act fill / buildTypeJs / type_smart setText 三处直接 `el.value=` 赋值被 React 实例上的 valueTracker 吞掉，DOM 有字、框架状态为空，表单校验静默失败。修=三处全部改原型链原生 setter（`Object.getOwnPropertyDescriptor(HTML*Element.prototype,'value').set.call(el, v)`）再派发 input/change。
+
+# D17 — 外发动作预授权：用户原话即授权（设计定稿待实施，2026-07-04）
+
+**动机（用户定向）**：无人值守场景（"帮我发小红书，我出门了"）不能卡在发布点击的行动确认闸上。当前行为：发布类外发点击每次弹"风险请求"等人点允许——有人在场是安全带，没人在场是死锁。
+
+**设计（先合同后代码）**：
+- 授权源=用户逐字请求（最小传话铁律的 userRequestVerbatim）：run 启动时若用户原话明确命令外发动作（发布/发送/投递语义，经意图分类非提示词注入），为该 run 铸造 **scoped transaction grant**（作用域=本 run + 目标站点 + 该动作语义类；落审计账本 grant_minted）。
+- act/click 命中发布类 live target 时先查 grant：命中→放行并审计 grant_consumed；未命中→照旧弹闸。
+- **永不预授权**：支付/转账/改凭据/访问控制/删除类（browser-power.ts 破坏性枚举），无论原话怎么说都过闸。
+- 闸弹出且无人响应时不得无限挂：超时（如 10min）按 checkpoint 收口（可续跑），不算失败——并入 D8 等待语义。
+- 设置页暴露总开关（默认开启原话预授权；用户可改回"每次都问"）。
+
+**验收**：R1 无人值守全链（含发布点击）零人工介入跑通；支付类模拟目标仍被闸拦；grant 账本可查。
+
 # 汇总
 | 项 | 已完成 | 待做 | 高危点 | 前置 |
 |----|--------|------|--------|------|
