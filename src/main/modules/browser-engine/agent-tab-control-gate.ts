@@ -117,4 +117,10 @@ export class AgentTabControlGate {
     this.state = 'active'
     this.pendingSince = null
   }
+
+  /** R18：惰性 TTL 回落不会主动通知任何人——调用方按此值安排过期后的
+   * 状态推送（renderer 胶囊否则永远停在 pending 显示上）。 */
+  getPendingConfirmTtlMs(): number {
+    return this.pendingConfirmTtlMs
+  }
 }

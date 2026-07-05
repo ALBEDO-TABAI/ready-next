@@ -178,6 +178,9 @@ export class BrowserController {
   private readonly agentTabControlGate = new AgentTabControlGate()
   /** D18-d：agent 自注入输入直通登记（automation-service 派发前登记，两个 before-*-event 守卫凭此放行自家输入） */
   readonly agentInputPassthrough = new AgentInputPassthroughRegistry()
+  /** R18：监督 listener 去重（重复 ensure 曾按次叠挂）+ pending 胶囊 TTL 过期推送定时器 */
+  private readonly supervisedAgentTabWebContentsIds = new Set<number>()
+  private pendingConfirmExpiryTimer: NodeJS.Timeout | null = null
   /** The dedicated background tab the collector sub-agent drives (plan §3.5/§3.9). */
   private agentTabId: string | null = null
   private foregroundAgentTabId: string | null = null
@@ -1317,21 +1320,35 @@ export class BrowserController {
    * raise the interruption (→ pending_confirm), notify the renderer, and BLOCK
    * the keystroke until the user explicitly confirms (the second confirmation).
    * Once frozen (confirmed), input passes through — the user has control.
+   *
+   * R18（真机第十七轮实锚）两处收口：
+   * 1. 监督只在 agent 真正驱动该 tab 时生效——listener 挂上后永不摘除，
+   *    run 结束后用户亲手点页面（如「发布」）曾被无差别 preventDefault +
+   *    弹「等待确认」，用户视角就是"按钮点不动"。驱动判据取
+   *    isAgentActivelyDrivingTab（bounds-lock 令牌 + 活跃前台 workflow 会话）。
+   * 2. 重复 ensure 不再叠挂 listener（supervisedAgentTabWebContentsIds 去重）。
    */
   private attachAgentTabSupervision(tabId: string): void {
     const webContents = this.tabs.get(tabId)?.view?.webContents
-    if (!webContents) return
+    if (!webContents || this.supervisedAgentTabWebContentsIds.has(webContents.id)) return
+    this.supervisedAgentTabWebContentsIds.add(webContents.id)
+    webContents.once('destroyed', () => {
+      this.supervisedAgentTabWebContentsIds.delete(webContents.id)
+    })
     const blockUserInputUntilConfirmed = (event: { preventDefault: () => void }): void => {
       const state = this.agentTabControlGate.getState()
       if (state === 'frozen') return // user has taken over — allow input through
       if (state === 'active') {
-        this.agentTabControlGate.requestInterruption()
+        if (this.agentTabControlGate.requestInterruption()) {
+          this.schedulePendingConfirmExpiryPush()
+        }
         this.notifyAgentControlChanged()
       }
       event.preventDefault() // agent still controls until the 2nd confirmation
     }
     webContents.on('before-input-event', (event, input) => {
       if (input.type !== 'keyDown' && input.type !== 'keyUp' && input.type !== 'char') return
+      if (!this.isAgentActivelyDrivingTab(tabId)) return
       if (this.agentInputPassthrough.matchKey(input.key || '')) return
       blockUserInputUntilConfirmed(event)
     })
@@ -1344,9 +1361,42 @@ export class BrowserController {
       ) {
         return
       }
+      if (!this.isAgentActivelyDrivingTab(tabId)) return
       if (this.agentInputPassthrough.matchMouse()) return
       blockUserInputUntilConfirmed(event)
     })
+  }
+
+  /**
+   * R18：某 tab 当前是否被 agent 主动驱动。唯一真源是驱动生命周期本身：
+   * bounds-lock 令牌（foreground-workflow: 与 collection: 前缀，随驱动同取
+   * 同放）或状态为 running 的前台 workflow 会话绑定。run 结束两者皆释放，
+   * 监督闸随之松手，用户在 agent 遗留页面上的输入不再被吞。
+   */
+  private isAgentActivelyDrivingTab(tabId: string): boolean {
+    const locked = this.frozenBoundsByTab.get(tabId)
+    if (locked) {
+      for (const token of locked.tokens) {
+        if (token.startsWith('foreground-workflow:') || token.startsWith('collection:')) return true
+      }
+    }
+    const foreground = this.workflowSessionStore.getActiveForeground()
+    return Boolean(foreground && foreground.boundTabId === tabId)
+  }
+
+  /**
+   * R18：pending_confirm 的 45s TTL 是惰性回落（只在 getState 读取时发生），
+   * renderer 胶囊只吃 agentControlChanged 推送——不安排过期推送的话，主进程
+   * 早已自愈而屏上「等待确认」永远挂着（第十七轮截图实锚）。
+   */
+  private schedulePendingConfirmExpiryPush(): void {
+    if (this.pendingConfirmExpiryTimer) clearTimeout(this.pendingConfirmExpiryTimer)
+    this.pendingConfirmExpiryTimer = setTimeout(() => {
+      this.pendingConfirmExpiryTimer = null
+      // getState() 内部 reconcile：TTL 已过则 pending→active，推送即修正显示
+      this.notifyAgentControlChanged()
+    }, this.agentTabControlGate.getPendingConfirmTtlMs() + 1_000)
+    this.pendingConfirmExpiryTimer.unref?.()
   }
 
   private notifyAgentControlChanged(): void {
@@ -1471,6 +1521,7 @@ export class BrowserController {
   /** Supervision (plan §3.6): two-step interrupt of the agent's browser control. */
   requestAgentInterruption(): { state: ReturnType<AgentTabControlGate['getState']>; pending: boolean } {
     const pending = this.agentTabControlGate.requestInterruption()
+    if (pending) this.schedulePendingConfirmExpiryPush()
     this.notifyAgentControlChanged()
     return { state: this.agentTabControlGate.getState(), pending }
   }

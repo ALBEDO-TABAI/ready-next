@@ -271,20 +271,43 @@ export async function runGuardedCoordinateClick(
   height: number
   /** D18-b：点下真实元素的语义标签（第十三轮实锚：模型把 CSS 像素当归一
    * 化坐标传给 click_at，点偏后自己看不出来——把"点到了什么"回给它闭环自纠）。
-   * D18-c 补 tag：空 label 的命中可能是无名编辑器而非脱靶。 */
-  pointTarget: { label: string; editable: boolean; tag: string } | null
+   * D18-c 补 tag：空 label 的命中可能是无名编辑器而非脱靶。
+   * R18 补 rect：dash-tag host 命中时调用方对 host rect 做组合树扫描。 */
+  pointTarget: {
+    label: string
+    editable: boolean
+    tag: string
+    rect?: { left: number; top: number; width: number; height: number } | null
+  } | null
 }> {
   const probePoint = await resolveCoordinateProbePointOrThrow(controller, tabId, x, y, 'click')
   const probe = probePoint
     ? await probeCoordinateTargetOrThrow(controller, tabId, probePoint, { x, y, action: 'click' })
     : null
-  let pointTarget: { label: string; editable: boolean; tag: string } | null = null
+  let pointTarget: {
+    label: string
+    editable: boolean
+    tag: string
+    rect?: { left: number; top: number; width: number; height: number } | null
+  } | null = null
   if (probe && typeof probe === 'object') {
-    const p = probe as { label?: unknown; editable?: unknown; tag?: unknown }
+    const p = probe as {
+      label?: unknown
+      editable?: unknown
+      tag?: unknown
+      rect?: { left?: unknown; top?: unknown; width?: unknown; height?: unknown } | null
+    }
+    const rectLeft = Number(p.rect?.left)
+    const rectTop = Number(p.rect?.top)
+    const rectWidth = Number(p.rect?.width)
+    const rectHeight = Number(p.rect?.height)
     pointTarget = {
       label: String(p.label || '').slice(0, 120),
       editable: p.editable === true,
       tag: String(p.tag || '').slice(0, 32),
+      rect: Number.isFinite(rectLeft) && Number.isFinite(rectTop) && rectWidth > 0 && rectHeight > 0
+        ? { left: rectLeft, top: rectTop, width: rectWidth, height: rectHeight }
+        : null,
     }
     if (p.editable !== true) {
       const destructiveHit = matchBrowserDestructiveTarget(String(p.label || ''))

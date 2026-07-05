@@ -48,6 +48,7 @@ import {
   buildFocusedEditableProbeJs,
   buildBrowserTargetProbeJs,
   buildTargetSemanticsLibraryJs,
+  buildTransientNoticeProbeJs,
   throwIfLiveTargetGuardBlocked,
   buildBrowserActOnTargetJs,
   buildBrowserActionDeltaJs,
@@ -67,7 +68,11 @@ import {
   throwIfAborted,
   waitForReady,
 } from './browser-input-actions'
-import { scanClosedShadowHostForClickPoint } from './browser-shadow-hit-test'
+import {
+  describeComposedPointTarget,
+  invokeShadowNodeClick,
+  scanClosedShadowHostForClickPoint,
+} from './browser-shadow-hit-test'
 import {
   ensureGeminiSubmitted,
   isLikelyChatPage,
@@ -206,6 +211,26 @@ async function readBrowserActionDeltaBestEffort(
   } catch (error) {
     log(`browser action delta ${phase} readback failed: ${error instanceof Error ? error.message : String(error)}`)
     return null
+  }
+}
+
+/**
+ * R18（真机第十七轮实锚）：delta bodyText 只取前 1000 字符，body 末尾的
+ * 瞬时校验 toast 完全不可见——"点了没变化"里可能藏着页面已给出的拒绝理由。
+ * 点击判无效后补读一次可见提示层，机械采集，失败按无提示处理。
+ */
+async function readTransientPageNotices(
+  controller: BrowserController,
+  tabId: string | null,
+): Promise<string[]> {
+  try {
+    const result = await controller.executeJS(tabId, buildTransientNoticeProbeJs())
+    return Array.isArray(result)
+      ? result.map((item) => String(item || '').trim()).filter(Boolean).slice(0, 5)
+      : []
+  } catch {
+    // silent-catch: 提示嗅探是增值回读，失败按无提示处理不影响点击主流程
+    return []
   }
 }
 
@@ -1328,8 +1353,17 @@ export async function executeBrowserActTool(
           // 交回模型自行 click_at。
           let escalationCss = { x: cpx, y: cpy }
           let escalationVia = 'rect_center'
-          let scanCandidatePayload: Array<{ text: string; tag: string; normalized: { x: number; y: number } }> | null = null
+          let scanCandidatePayload: Array<{
+            text: string
+            tag: string
+            normalized: { x: number; y: number }
+            disabled?: boolean
+            cover?: string
+          }> | null = null
           let escalationSkipped: string | null = null
+          // R18（第十七轮实锚）：坐标全对、点击可信但按钮不响应——差的是内部
+          // 状态。扫描命中的目标状态（disabled/遮挡）进决策与回传。
+          let scanMatchedState: { text: string; tag: string; disabled: boolean; cover: string } | null = null
           const rawRect = (rawClickPoint as { rect?: { left?: unknown; top?: unknown; width?: unknown; height?: unknown } | null } | null)?.rect
           const rectLeft = Number(rawRect?.left)
           const rectTop = Number(rawRect?.top)
@@ -1351,24 +1385,47 @@ export async function executeBrowserActTool(
                 text: c.text,
                 tag: c.tag,
                 normalized: toNormalized(c.cssX, c.cssY),
+                ...(c.disabled ? { disabled: true } : {}),
+                ...(c.cover ? { cover: c.cover } : {}),
               }))
-              log(`act escalation scan target=${targetId} candidates=${JSON.stringify(scan.candidates.map((c) => c.text))} via=${scan.via ?? 'none'} matched=${JSON.stringify(scan.matchedText)} skipped=${scan.skippedReason ?? 'none'}`)
+              log(`act escalation scan target=${targetId} candidates=${JSON.stringify(scan.candidates.map((c) => `${c.text}${c.disabled ? '[disabled]' : ''}${c.cover ? `[cover:${c.cover}]` : ''}`))} via=${scan.via ?? 'none'} matched=${JSON.stringify(scan.matchedText)} skipped=${scan.skippedReason ?? 'none'}`)
               if (scan.point) {
-                escalationCss = { x: scan.point.cssX, y: scan.point.cssY }
-                escalationVia = `scan_${scan.via}`
+                const matched = scan.matchedText
+                  ? scan.candidates.find((c) => c.text === scan.matchedText) ?? null
+                  : null
+                if (matched) {
+                  scanMatchedState = {
+                    text: matched.text,
+                    tag: matched.tag,
+                    disabled: matched.disabled,
+                    cover: matched.cover,
+                  }
+                }
+                if (matched?.disabled) {
+                  // 按钮 disabled：可信点击必然无效，盲点是烧轮次。机械拒绝
+                  // 并把状态交回模型（"只报不拒"对模型循环无效——第十六轮教训）。
+                  escalationSkipped = 'target_disabled'
+                } else {
+                  escalationCss = { x: scan.point.cssX, y: scan.point.cssY }
+                  escalationVia = `scan_${scan.via}`
+                }
               } else if (scan.candidates.length >= 2) {
                 escalationSkipped = 'ambiguous_shadow_candidates'
               }
             }
           }
           if (escalationSkipped) {
+            const skipHint = escalationSkipped === 'target_disabled'
+              ? `扫描确认目标按钮「${scanMatchedState?.text ?? ''}」当前为 disabled（页面校验未通过），任何点击都不会生效。先检查并补齐页面必填项（标题/正文描述/封面等），确认按钮变为可用后再点；不要重复盲点。`
+              : 'shadow root 内发现多个可点按钮，无法唯一判定目标。从 candidates 里选出意图按钮，用 browser_click_at 按其 normalized 坐标直接点击。'
             escalation = {
               attempted: false,
               mode: 'trusted_pointer',
               reason: escalationReason,
               skipped: escalationSkipped,
               candidates: scanCandidatePayload,
-              hint: 'shadow root 内发现多个可点按钮，无法唯一判定目标。从 candidates 里选出意图按钮，用 browser_click_at 按其 normalized 坐标直接点击。',
+              ...(scanMatchedState ? { matchedTarget: scanMatchedState } : {}),
+              hint: skipHint,
             }
             log(`act escalation skipped target=${targetId} reason=${escalationSkipped} candidates=${JSON.stringify((scanCandidatePayload || []).map((c) => c.text))}`)
           } else {
@@ -1378,7 +1435,41 @@ export async function executeBrowserActTool(
               const escalatedPoint = await runGuardedCoordinateClick(controller, tabId, nx, ny, abortSignal)
               const escalatedFollowedTab = await waitForActionFollowedTab(controller, tabId, beforeTabs, abortSignal)
               afterDelta = await readBrowserActionDeltaBestEffort(controller, tabId, 'after')
-              const escalatedChanged = didBrowserActionChange(before, afterDelta) || Boolean(escalatedFollowedTab)
+              let escalatedChanged = didBrowserActionChange(before, afterDelta) || Boolean(escalatedFollowedTab)
+              if (escalatedFollowedTab) followedTab = escalatedFollowedTab
+              // R18：可信指针（坐标正确、事件可信）仍无变化 → 组合树直接
+              // invoke 是最后一级机械升级；结果只以 delta/新 tab 复核，不自我
+              // 宣告成功（合成 click isTrusted=false，站点可拒）。
+              let directInvoke: Record<string, unknown> | null = null
+              if (!escalatedChanged && escalationVia.startsWith('scan_')) {
+                const invoked = await invokeShadowNodeClick(
+                  controller,
+                  tabId,
+                  { cssX: escalationCss.x, cssY: escalationCss.y },
+                ).catch(() => null)
+                if (invoked) {
+                  await settleAfterAction(controller, tabId, abortSignal)
+                  const invokeFollowedTab = await waitForActionFollowedTab(controller, tabId, beforeTabs, abortSignal)
+                  afterDelta = await readBrowserActionDeltaBestEffort(controller, tabId, 'after')
+                  const changedAfterInvoke = didBrowserActionChange(before, afterDelta) || Boolean(invokeFollowedTab)
+                  directInvoke = {
+                    clicked: invoked.clicked,
+                    tag: invoked.tag,
+                    text: invoked.text,
+                    changed: changedAfterInvoke,
+                  }
+                  if (invokeFollowedTab) followedTab = invokeFollowedTab
+                  escalatedChanged = escalatedChanged || changedAfterInvoke
+                }
+              }
+              // R18：仍无变化时补读瞬时提示层——delta bodyText 前 1000 字符
+              // 看不见 body 末尾的校验 toast，页面可能早已说明了拒绝理由。
+              const pageNotices = escalatedChanged ? [] : await readTransientPageNotices(controller, tabId)
+              const stuckHint = pageNotices.length > 0
+                ? `点击后页面弹出提示：${pageNotices.map((n) => `「${n}」`).join(' ')}——按提示补齐后重试。`
+                : (!escalatedChanged && directInvoke
+                  ? '可信指针点击与组合树直接 invoke 均未引起页面变化：按钮很可能被站点内部校验拦截（常见：必填项为空、内容未就绪）。先检查页面必填项（如正文描述、封面），补齐后再点。'
+                  : null)
               escalation = {
                 attempted: true,
                 mode: 'trusted_pointer',
@@ -1387,11 +1478,14 @@ export async function executeBrowserActTool(
                 clickNormalized: { x: nx, y: ny },
                 pointTarget: escalatedPoint.pointTarget,
                 ...(scanCandidatePayload && scanCandidatePayload.length > 0 ? { candidates: scanCandidatePayload } : {}),
+                ...(scanMatchedState ? { matchedTarget: scanMatchedState } : {}),
+                ...(directInvoke ? { directInvoke } : {}),
+                ...(pageNotices.length > 0 ? { pageNotices } : {}),
+                ...(stuckHint ? { hint: stuckHint } : {}),
                 changed: escalatedChanged,
               }
               changed = changed || escalatedChanged
-              if (escalatedFollowedTab) followedTab = escalatedFollowedTab
-              log(`act escalation done target=${targetId} via=${escalationVia} pointTarget=${JSON.stringify(escalatedPoint.pointTarget?.label ?? null)} escalatedChanged=${escalatedChanged}`)
+              log(`act escalation done target=${targetId} via=${escalationVia} pointTarget=${JSON.stringify(escalatedPoint.pointTarget?.label ?? null)} escalatedChanged=${escalatedChanged}${directInvoke ? ` directInvoke=${JSON.stringify(directInvoke)}` : ''}${pageNotices.length > 0 ? ` notices=${JSON.stringify(pageNotices)}` : ''}`)
             } catch (error) {
               // 闸门（grant_required / 待确认拒绝）保持响亮——升级点击与
               // browser_click_at 的安全语义必须同构，不能因为是兜底就静默。
@@ -1919,16 +2013,69 @@ export async function executeBrowserActTool(
         // D18-b：把"点到了什么"回给模型闭环自纠（第十三轮实锚：模型把
         // power_eval 量出的 CSS 像素直接当归一化坐标传，点偏 ~20% 却毫无
         // 感知）。label 为空≈点到了空白/容器——附坐标系提醒。
-        log(`click_at resolved input=(${x},${y}) normalized=(${point.nx},${point.ny}) css=(${Math.round(point.cssX)},${Math.round(point.cssY)}) pointTarget=${JSON.stringify(point.pointTarget?.label ?? null)}`)
+        // R18（第十七轮实锚）：dash-tag host 命中时 elementFromPoint 永远只
+        // 报 host（label 空），坐标点击成了黑洞。组合树回读把"这个点真正
+        // 命中了什么（含 disabled/遮挡）"、host 内候选和瞬时提示交回模型。
+        const clickHostTag = String(point.pointTarget?.tag || '')
+        let composedTarget: Record<string, unknown> | null = null
+        let shadowCandidates: Array<Record<string, unknown>> | null = null
+        let clickPageNotices: string[] = []
+        if (clickHostTag.includes('-') && !followedTab) {
+          const described = await describeComposedPointTarget(
+            controller,
+            tabId,
+            { cssX: point.cssX, cssY: point.cssY },
+          ).catch(() => null)
+          if (described && described.interactive && !described.isHost) {
+            composedTarget = {
+              text: described.text,
+              tag: described.tag,
+              ...(described.disabled ? { disabled: true } : {}),
+              ...(described.cover ? { cover: described.cover } : {}),
+            }
+          } else if (point.pointTarget?.rect) {
+            const scan = await scanClosedShadowHostForClickPoint(
+              controller,
+              tabId,
+              point.pointTarget.rect,
+              { vw: point.width, vh: point.height },
+              { targetName: '', disambiguation: '' },
+            ).catch(() => null)
+            if (scan && scan.candidates.length > 0) {
+              shadowCandidates = scan.candidates.map((c) => ({
+                text: c.text,
+                tag: c.tag,
+                normalized: {
+                  x: Math.max(0, Math.min(999, Math.round((c.cssX / Math.max(1, point.width)) * 1000))),
+                  y: Math.max(0, Math.min(999, Math.round((c.cssY / Math.max(1, point.height)) * 1000))),
+                },
+                ...(c.disabled ? { disabled: true } : {}),
+                ...(c.cover ? { cover: c.cover } : {}),
+              }))
+            }
+          }
+          clickPageNotices = await readTransientPageNotices(controller, tabId)
+        }
+        const composedHint = composedTarget
+          ? `点击穿透 <${clickHostTag}> 命中「${String(composedTarget.text || '')}」<${String(composedTarget.tag || '')}>${composedTarget.disabled ? '——该按钮当前为 disabled（页面校验未通过），点击不会生效，先补齐页面必填项' : ''}${composedTarget.cover ? `——按钮中心被 ${String(composedTarget.cover)} 遮挡` : ''}。`
+          : shadowCandidates
+            ? `点击落在关闭 shadow 宿主 <${clickHostTag}> 的空白处，未命中内部按钮。内部候选见 shadowCandidates，选中意图按钮后按其 normalized 坐标重点。`
+            : null
+        log(`click_at resolved input=(${x},${y}) normalized=(${point.nx},${point.ny}) css=(${Math.round(point.cssX)},${Math.round(point.cssY)}) pointTarget=${JSON.stringify(point.pointTarget?.label ?? null)}${composedTarget ? ` composed=${JSON.stringify(composedTarget)}` : ''}${shadowCandidates ? ` shadowCandidates=${JSON.stringify(shadowCandidates.map((c) => c.text))}` : ''}${clickPageNotices.length > 0 ? ` notices=${JSON.stringify(clickPageNotices)}` : ''}`)
         return attachBrowserActionSessionOutput(JSON.stringify({
           ok: true,
           normalized: { x: point.nx, y: point.ny },
           css: { x: point.cssX, y: point.cssY },
           viewport: { width: point.width, height: point.height },
           pointTarget: point.pointTarget,
-          ...(point.pointTarget && !point.pointTarget.label && !point.pointTarget.editable
-            ? { coordinateHint: `点下命中 <${point.pointTarget.tag || 'unknown'}>，无语义标签也不可编辑——很可能点到了空白/容器。注意 x/y 是 0-1000 归一化坐标（不是 CSS 像素）；若你用 getBoundingClientRect 量到像素 px，请换算 round(px / 视口宽高 * 1000) 再调用。` }
-            : {}),
+          ...(composedTarget ? { composedTarget } : {}),
+          ...(shadowCandidates ? { shadowCandidates } : {}),
+          ...(clickPageNotices.length > 0 ? { pageNotices: clickPageNotices } : {}),
+          ...(composedHint
+            ? { coordinateHint: composedHint }
+            : point.pointTarget && !point.pointTarget.label && !point.pointTarget.editable
+              ? { coordinateHint: `点下命中 <${point.pointTarget.tag || 'unknown'}>，无语义标签也不可编辑——很可能点到了空白/容器。注意 x/y 是 0-1000 归一化坐标（不是 CSS 像素）；若你用 getBoundingClientRect 量到像素 px，请换算 round(px / 视口宽高 * 1000) 再调用。` }
+              : {}),
           followedTab,
           nextSuggestedAction: followedTab ? `read map again on tab ${followedTab.tabId}` : 'read map again',
         }, null, 2), {

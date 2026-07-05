@@ -120,4 +120,11 @@ describe('AgentTabControlGate (freeze-then-confirm, §3.6)', () => {
     assert.equal(gate.confirmInterruption(), false, 'stale confirm must not freeze a resumed agent')
     assert.equal(gate.getState(), 'active')
   })
+
+  // R18：惰性 TTL 回落不通知任何人——ipc 层按此值安排过期后的状态推送，
+  // 否则 renderer 的「等待确认」胶囊在主进程自愈后仍永远挂着（第十七轮实锚）。
+  it('exposes the pending-confirm TTL so callers can schedule an expiry push', () => {
+    assert.equal(new AgentTabControlGate({ pendingConfirmTtlMs: 32_000 }).getPendingConfirmTtlMs(), 32_000)
+    assert.equal(new AgentTabControlGate().getPendingConfirmTtlMs(), 45_000)
+  })
 })

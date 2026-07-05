@@ -283,6 +283,9 @@ export interface ActionTargetCandidate {
   valuePreview?: string
   nearActiveInput?: boolean
   distanceToActiveInput?: number
+  /** R18：closed-shadow 扫描出的候选可带 disabled 状态（页面校验未过时
+   * 点击必然无效，模型据此先补必填项而不是盲点） */
+  disabled?: boolean
 }
 
 export async function getPageIdentity(
@@ -600,7 +603,104 @@ export async function locateActionTargets(
     `,
   ) as ActionTargetCandidate[] | null
 
-  return Array.isArray(targets) ? targets : []
+  const inPageTargets = Array.isArray(targets) ? targets : []
+  if (action !== 'send') return inPageTargets
+  return enrichSendTargetsWithClosedShadowHosts(controller, tabId, inPageTargets, keywordMap.send)
+}
+
+/**
+ * R18（真机第十七轮实锚）：locate 的 in-page 扫描只见 light DOM——
+ * `<xhs-publish-btn>` 这类 closed shadow 宿主既不匹配 tag 列表、内部按钮
+ * 也不可遍历，真正的「发布」按钮对 locate 完全隐形（第十七轮 locate(send)
+ * 返回 11 个目标，第一名竟是「添加商品」）。此处对视口内 dash-tag 宿主做
+ * CDP 组合树扫描，把内部真实按钮（含 disabled 状态）并入候选：命中 send
+ * 关键词且未 disabled 的排最前。扫描失败按无增补处理，永不比现状更差。
+ */
+async function enrichSendTargetsWithClosedShadowHosts(
+  controller: BrowserController,
+  tabId: string | null,
+  inPageTargets: ActionTargetCandidate[],
+  sendKeywords: string[],
+): Promise<ActionTargetCandidate[]> {
+  try {
+    const probe = await controller.executeJS(
+      tabId,
+      `(() => {
+        const out = [];
+        const all = document.body ? document.body.getElementsByTagName('*') : [];
+        for (const el of all) {
+          const tag = String(el.tagName || '').toLowerCase();
+          if (tag.indexOf('-') === -1) continue;
+          let rect = null;
+          try { rect = el.getBoundingClientRect(); } catch (e) { continue; }
+          if (!rect || rect.width < 40 || rect.height < 16 || rect.height > 220) continue;
+          if (rect.bottom <= 0 || rect.right <= 0 || rect.top >= innerHeight || rect.left >= innerWidth) continue;
+          let cs = null;
+          try { cs = getComputedStyle(el); } catch (e) { continue; }
+          if (!cs || cs.display === 'none' || cs.visibility === 'hidden') continue;
+          out.push({ tag, left: rect.left, top: rect.top, width: rect.width, height: rect.height });
+          if (out.length >= 40) break;
+        }
+        // 动作栏几乎总在页面下部：按 top 降序优先扫底部宿主
+        out.sort((a, b) => b.top - a.top);
+        return { vw: innerWidth, vh: innerHeight, hosts: out.slice(0, 3) };
+      })()`,
+    ) as { vw?: unknown; vh?: unknown; hosts?: Array<{ tag?: unknown; left?: unknown; top?: unknown; width?: unknown; height?: unknown }> } | null
+    const vw = Number(probe?.vw)
+    const vh = Number(probe?.vh)
+    const hosts = Array.isArray(probe?.hosts) ? probe.hosts : []
+    if (!(vw > 0) || !(vh > 0) || hosts.length === 0) return inPageTargets
+    const { scanClosedShadowHostForClickPoint } = await import('./browser-shadow-hit-test')
+    const keywordRegexps = sendKeywords.map((k) => String(k).toLowerCase())
+    const extraKeywords = ['publish', 'post', '确认', '完成']
+    const shadowFront: ActionTargetCandidate[] = []
+    const shadowBack: ActionTargetCandidate[] = []
+    const seenLabels = new Set(inPageTargets.map((t) => `${t.label}`))
+    for (const host of hosts) {
+      const left = Number(host.left)
+      const top = Number(host.top)
+      const width = Number(host.width)
+      const height = Number(host.height)
+      const hostTag = String(host.tag || '')
+      if (!Number.isFinite(left) || !Number.isFinite(top) || !(width > 0) || !(height > 0)) continue
+      const scan = await scanClosedShadowHostForClickPoint(
+        controller,
+        tabId,
+        { left, top, width, height },
+        { vw, vh },
+        { targetName: '', disambiguation: '' },
+      ).catch(() => null)
+      if (!scan) continue
+      for (const c of scan.candidates) {
+        if (!c.text || seenLabels.has(c.text)) continue
+        seenLabels.add(c.text)
+        const lower = c.text.toLowerCase()
+        const keywordHit = keywordRegexps.some((k) => lower.includes(k)) || extraKeywords.some((k) => lower.includes(k))
+        const candidate: ActionTargetCandidate = {
+          kind: keywordHit ? 'send_button' : 'text_button',
+          label: c.text,
+          selectorHint: `closed-shadow:${hostTag}`,
+          x: Math.max(0, Math.min(999, Math.round((c.cssX / Math.max(1, vw)) * 999))),
+          y: Math.max(0, Math.min(999, Math.round((c.cssY / Math.max(1, vh)) * 999))),
+          confidence: keywordHit ? (c.disabled ? 0.5 : 0.92) : 0.4,
+          evidence: [
+            'closed_shadow_scan',
+            `host:${hostTag}`,
+            keywordHit ? 'keyword_match' : '',
+            c.disabled ? 'disabled' : '',
+          ].filter(Boolean),
+          ...(c.disabled ? { disabled: true } : {}),
+        }
+        if (keywordHit && !c.disabled) shadowFront.push(candidate)
+        else shadowBack.push(candidate)
+      }
+    }
+    if (shadowFront.length === 0 && shadowBack.length === 0) return inPageTargets
+    return [...shadowFront, ...inPageTargets, ...shadowBack].slice(0, 12)
+  } catch {
+    // silent-catch: closed-shadow 增补失败按无增补处理，in-page 结果原样返回
+    return inPageTargets
+  }
 }
 
 export interface BrowserActionFollowedTab {

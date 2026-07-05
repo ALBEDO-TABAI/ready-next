@@ -452,7 +452,52 @@ function buildClickPointLabelProbeJs(cssX: number, cssY: number): string {
       // 回传命中元素 tag 供闭环自纠（第十四轮实锚：click_at 命中 tiptap
       // 编辑器返回空 label，模型误判脱靶反复重点）。
       tag: String((start.tagName || '')).toLowerCase(),
+      // R18（第十七轮实锚）：dash-tag host 命中时调用方要对 host rect 做
+      // 组合树扫描，把 rect 一并回传省一次探测。
+      rect: (() => {
+        try {
+          const r = start.getBoundingClientRect();
+          return r && r.width > 0 && r.height > 0
+            ? { left: r.left, top: r.top, width: r.width, height: r.height }
+            : null;
+        } catch (e) { return null; }
+      })(),
     };
+  })()`
+}
+
+/**
+ * R18（真机第十七轮实锚）：点击"生效但无 map 变化"的第三种真相是页面弹了
+ * 瞬时校验 toast——delta 的 bodyText 只取前 1000 字符，挂在 body 末尾的
+ * toast 完全落在窗口外，changed=false 掩盖了页面已给出的拒绝理由。此探针
+ * 收集当前可见的 toast/alert 类轻量提示文本（fixed/absolute 定位 + 短文本
+ * + 非零尺寸），机械采集不判断语义。
+ */
+export function buildTransientNoticeProbeJs(): string {
+  return `(() => {
+    const out = [];
+    const seen = new Set();
+    const selector = '[class*="toast" i],[class*="notice" i],[class*="alert" i],[class*="tips" i],[class*="tip-" i],[role="alert"],[role="status"],[aria-live="polite"],[aria-live="assertive"]';
+    let nodes = [];
+    try { nodes = Array.from(document.querySelectorAll(selector)); } catch (e) {}
+    for (const el of nodes) {
+      if (!(el instanceof HTMLElement)) continue;
+      let cs = null;
+      try { cs = getComputedStyle(el); } catch (e) { continue; }
+      if (!cs || cs.display === 'none' || cs.visibility === 'hidden' || Number(cs.opacity || '1') <= 0.02) continue;
+      const pos = cs.position;
+      // toast 层几乎总是 fixed；absolute 需要高 z-index 才算（避免误收正文区块）
+      if (pos !== 'fixed' && !(pos === 'absolute' && Number(cs.zIndex) >= 100)) continue;
+      const r = el.getBoundingClientRect();
+      if (r.width <= 0 || r.height <= 0 || r.height > 220) continue;
+      const t = String(el.innerText || '').replace(/\\s+/g, ' ').trim();
+      if (!t || t.length < 2 || t.length > 140) continue;
+      if (seen.has(t)) continue;
+      seen.add(t);
+      out.push(t);
+      if (out.length >= 5) break;
+    }
+    return out;
   })()`
 }
 

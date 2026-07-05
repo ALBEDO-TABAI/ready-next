@@ -25,6 +25,7 @@ variables: []
 - **空的正文/富文本编辑器在 map 里以占位符命名**（如「输入文字，内容将自动保存」，role=textbox）：填正文优先 act fill 这个 target；type_smart/compose 会自动避开装不下文本的 maxlength 字段并偏向 contenteditable。
 - **send_keys 结果带焦点回读**（`Sent key: X (focus: …)`）：发 Cmd+A/Backspace 这类破坏性组合键前后核对焦点是否目标字段——全选删除落错框会清掉不该清的内容。
 - **act 点击结果里的 escalation 要读**：closed shadow 按钮工具会自动扫描内部真实按钮补可信点击（escalation.via / escalation.pointTarget 可见点到了什么）；返回 `skipped=ambiguous_shadow_candidates` 时，从 candidates 里选意图按钮、按其 normalized 坐标直接 browser_click_at，不要重复 act 同一 target 空转。
+- **"点了没反应"先读三个事实再决定下一步**：① `escalation.skipped=target_disabled` / `matchedTarget.disabled=true` = 按钮被页面校验禁用，点击永远无效——去补必填项，禁止原地重点；② `escalation.pageNotices` / click_at 结果的 `pageNotices` = 页面弹过的瞬时校验提示原文（页面已经说了缺什么，照办）；③ click_at 打在自定义宿主（tag 带 `-`）上时读 `composedTarget`（组合树真实命中的内部按钮及其 disabled/遮挡状态）或 `shadowCandidates`（内部候选连坐标，选中后按其 normalized 坐标重点）。同一坐标反复盲点而不读这些字段是纪律违规。
 - DOM/正文为空、viewport=0、页面主体疑似 iframe/OOPIF：不要反复截图/等待；改用 browser_power_eval 探测 frames/activeElement，或 browser_power_cdp(Page.getFrameTree/Runtime.evaluate) 读结构。
 
 ## 定位器优先级（从稳到弱）

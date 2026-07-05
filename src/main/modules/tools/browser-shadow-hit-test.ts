@@ -27,6 +27,14 @@ export interface ShadowHitCandidate {
   interactive: boolean
   /** 命中节点就是自定义 host（dash tag）——等于没穿进去 */
   isHost: boolean
+  /** R18（真机第十七轮实锚）：坐标全对、点击可信但按钮不响应——差的是
+   * 内部状态。disabled 含 attr/property/aria 三源。 */
+  disabled: boolean
+  /** 控件真实包围盒（viewport CSS 坐标）；点击点优先取其中心而非采样均值 */
+  rect: { left: number; top: number; width: number; height: number } | null
+  /** 控件中心被同 root 内其他元素覆盖时的遮挡者描述（'' = 无遮挡；
+   * 'outside_root' = root.elementFromPoint 拿不到，遮挡者可能在 root 外） */
+  cover: string
 }
 
 export interface ShadowHitScanResult {
@@ -66,12 +74,40 @@ const HIT_NODE_DESCRIBE_FN = `function() {
   }
   const pick = interactive || el;
   const tag = String(pick.tagName || '').toLowerCase();
+  let disabled = false;
+  try {
+    disabled = pick.disabled === true
+      || (pick.hasAttribute && pick.hasAttribute('disabled'))
+      || (pick.getAttribute && pick.getAttribute('aria-disabled') === 'true');
+  } catch (e) {}
+  let rect = null;
+  try {
+    const r = pick.getBoundingClientRect();
+    if (r && r.width > 0 && r.height > 0) rect = { left: r.left, top: r.top, width: r.width, height: r.height };
+  } catch (e) {}
+  let cover = '';
+  try {
+    if (rect) {
+      const root = pick.getRootNode ? pick.getRootNode() : null;
+      if (root && typeof root.elementFromPoint === 'function') {
+        const top = root.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+        if (!top) cover = 'outside_root';
+        else if (top !== pick && !pick.contains(top) && !top.contains(pick)) {
+          cover = String(top.tagName || '').toLowerCase()
+            + (top.className ? '.' + String(top.className).replace(/\\s+/g, '.').slice(0, 40) : '');
+        }
+      }
+    }
+  } catch (e) {}
   return {
     tag,
     role: (pick.getAttribute && pick.getAttribute('role')) || '',
     text: String(pick.innerText || pick.textContent || '').replace(/\\s+/g, ' ').trim().slice(0, 60),
     interactive: Boolean(interactive),
     isHost: tag.indexOf('-') !== -1,
+    disabled: disabled === true,
+    rect,
+    cover,
   };
 }`
 
@@ -101,13 +137,32 @@ async function describeNodeAtPoint(
     }) as { result?: { value?: unknown } } | null
     const value = evaluated?.result?.value
     if (!value || typeof value !== 'object') return null
-    const v = value as { tag?: unknown; role?: unknown; text?: unknown; interactive?: unknown; isHost?: unknown }
+    const v = value as {
+      tag?: unknown
+      role?: unknown
+      text?: unknown
+      interactive?: unknown
+      isHost?: unknown
+      disabled?: unknown
+      rect?: { left?: unknown; top?: unknown; width?: unknown; height?: unknown } | null
+      cover?: unknown
+    }
+    const rectLeft = Number(v.rect?.left)
+    const rectTop = Number(v.rect?.top)
+    const rectWidth = Number(v.rect?.width)
+    const rectHeight = Number(v.rect?.height)
+    const rect = Number.isFinite(rectLeft) && Number.isFinite(rectTop) && rectWidth > 0 && rectHeight > 0
+      ? { left: rectLeft, top: rectTop, width: rectWidth, height: rectHeight }
+      : null
     return {
       tag: String(v.tag || ''),
       role: String(v.role || ''),
       text: String(v.text || ''),
       interactive: v.interactive === true,
       isHost: v.isHost === true,
+      disabled: v.disabled === true,
+      rect,
+      cover: String(v.cover || ''),
     }
   } finally {
     void send(tabId, 'Runtime.releaseObject', { objectId }).catch(() => undefined)
@@ -147,10 +202,11 @@ export async function scanClosedShadowHostForClickPoint(
         const described = await describeNodeAtPoint(send, tabId, p.cssX, p.cssY)
         if (described) hits.push({ ...described, cssX: p.cssX, cssY: p.cssY })
       } catch {
-        // 单点失败继续扫（页面滚动/节点回收等瞬态）
+        // silent-catch: 单点失败继续扫（页面滚动/节点回收等瞬态）
       }
     }
   } catch {
+    // silent-catch: CDP 域不可用时以 scan_failed 结构化回传，调用方回退 rect 中心
     return { point: null, via: null, matchedText: null, candidates: [], skippedReason: 'scan_failed' }
   } finally {
     void send(tabId, 'DOM.disable', {}).catch(() => undefined)
@@ -174,26 +230,148 @@ export async function scanClosedShadowHostForClickPoint(
   }
   // 匹配必须唯一才选点：disambiguation 可能同时提到两个候选（"暂存离开
   // 旁边的发布按钮"），非唯一命中一律交回模型裁决，绝不按采样序赌。
+  // R18：点击点优先取控件真实 rect 中心（采样均值会被 host rect 的采样
+  // 分布拉偏），rect 不可用时回退采样点。
+  const clickPointFor = (c: ShadowHitCandidate): { cssX: number; cssY: number } => {
+    if (c.rect) {
+      const cx = c.rect.left + c.rect.width / 2
+      const cy = c.rect.top + c.rect.height / 2
+      if (cx >= 0 && cx < viewport.vw && cy >= 0 && cy < viewport.vh) return { cssX: cx, cssY: cy }
+    }
+    return { cssX: c.cssX, cssY: c.cssY }
+  }
   const targetName = expect.targetName.trim()
   const disambiguation = expect.disambiguation.trim()
   const nameMatches = candidates.filter((c) => c.text && targetName && c.text === targetName)
   if (nameMatches.length === 1) {
     const m = nameMatches[0]
-    return { point: { cssX: m.cssX, cssY: m.cssY }, via: 'name_match', matchedText: m.text, candidates }
+    return { point: clickPointFor(m), via: 'name_match', matchedText: m.text, candidates }
   }
   const disambiguationMatches = candidates.filter((c) => c.text && c.text.length >= 1 && c.text.length <= 40
     && disambiguation.includes(c.text))
   if (disambiguationMatches.length === 1) {
     const m = disambiguationMatches[0]
-    return { point: { cssX: m.cssX, cssY: m.cssY }, via: 'disambiguation_match', matchedText: m.text, candidates }
+    return { point: clickPointFor(m), via: 'disambiguation_match', matchedText: m.text, candidates }
   }
   if (candidates.length === 1) {
     return {
-      point: { cssX: candidates[0].cssX, cssY: candidates[0].cssY },
+      point: clickPointFor(candidates[0]),
       via: 'single_interactive',
       matchedText: candidates[0].text || null,
       candidates,
     }
   }
   return { point: null, via: null, matchedText: null, candidates }
+}
+
+/**
+ * R18（真机第十七轮实锚）：组合树命中点单点描述——click_at 打在 dash-tag
+ * host 上时，把"这个坐标在组合树里真正命中了什么（含 disabled/遮挡）"回给
+ * 模型。失败返回 null（调用方按无信息处理，不降级主流程）。
+ */
+export async function describeComposedPointTarget(
+  controller: BrowserController,
+  tabId: string | null,
+  point: { cssX: number; cssY: number },
+): Promise<ShadowHitCandidate | null> {
+  const send = resolveCdpSend(controller)
+  if (!send) return null
+  try {
+    await send(tabId, 'DOM.enable', {})
+    await send(tabId, 'DOM.getDocument', { depth: 0 })
+    const described = await describeNodeAtPoint(send, tabId, point.cssX, point.cssY)
+    return described ? { ...described, cssX: point.cssX, cssY: point.cssY } : null
+  } catch {
+    // silent-catch: 组合树回读是增值信息，CDP 失败按无信息处理不影响点击主流程
+    return null
+  } finally {
+    void send(tabId, 'DOM.disable', {}).catch(() => undefined)
+  }
+}
+
+/** 命中点最近可交互控件上直接 el.click()（closed root 内经直接引用有效）。 */
+const HIT_NODE_INVOKE_FN = `function() {
+  let el = this;
+  if (el && el.nodeType === 3) el = el.parentElement;
+  if (!el || el.nodeType !== 1) return null;
+  let cur = el;
+  for (let i = 0; cur && i < 6; i += 1) {
+    const tag = String(cur.tagName || '').toLowerCase();
+    const role = (cur.getAttribute && cur.getAttribute('role')) || '';
+    let pointer = false;
+    try { pointer = getComputedStyle(cur).cursor === 'pointer'; } catch (e) {}
+    if (tag === 'button' || tag === 'a' || role === 'button' || pointer) {
+      const text = String(cur.innerText || cur.textContent || '').replace(/\\s+/g, ' ').trim().slice(0, 40);
+      try { cur.click(); } catch (e) { return { clicked: false, tag: tag, text: text }; }
+      return { clicked: true, tag: tag, text: text };
+    }
+    if (cur.parentElement) { cur = cur.parentElement; continue; }
+    const root = cur.getRootNode ? cur.getRootNode() : null;
+    cur = root && root.host ? root.host : null;
+  }
+  if (el && typeof el.click === 'function') {
+    try { el.click(); return { clicked: true, tag: String(el.tagName || '').toLowerCase(), text: '', fallback: true }; } catch (e) {}
+  }
+  return { clicked: false, tag: String(el.tagName || '').toLowerCase(), text: '' };
+}`
+
+export interface ShadowNodeInvokeResult {
+  clicked: boolean
+  tag: string
+  text: string
+  fallback?: boolean
+}
+
+/**
+ * R18：可信指针点击（坐标正确、事件可信）仍无页面变化时的最后一级机械
+ * 升级——解析组合树命中节点的直接引用，在最近可交互控件上调用 el.click()。
+ * 绕过坐标/遮挡问题；合成事件 isTrusted=false，站点若校验则无效（结果由
+ * 调用方用 delta 复核，不在此处宣告成功）。
+ */
+export async function invokeShadowNodeClick(
+  controller: BrowserController,
+  tabId: string | null,
+  point: { cssX: number; cssY: number },
+): Promise<ShadowNodeInvokeResult | null> {
+  const send = resolveCdpSend(controller)
+  if (!send) return null
+  try {
+    await send(tabId, 'DOM.enable', {})
+    await send(tabId, 'DOM.getDocument', { depth: 0 })
+    const located = await send(tabId, 'DOM.getNodeForLocation', {
+      x: Math.round(point.cssX),
+      y: Math.round(point.cssY),
+      includeUserAgentShadowDOM: false,
+    }) as { backendNodeId?: number } | null
+    const backendNodeId = Number(located?.backendNodeId)
+    if (!Number.isFinite(backendNodeId) || backendNodeId <= 0) return null
+    const resolved = await send(tabId, 'DOM.resolveNode', { backendNodeId }) as {
+      object?: { objectId?: string }
+    } | null
+    const objectId = resolved?.object?.objectId
+    if (!objectId) return null
+    try {
+      const evaluated = await send(tabId, 'Runtime.callFunctionOn', {
+        objectId,
+        functionDeclaration: HIT_NODE_INVOKE_FN,
+        returnByValue: true,
+      }) as { result?: { value?: unknown } } | null
+      const value = evaluated?.result?.value
+      if (!value || typeof value !== 'object') return null
+      const v = value as { clicked?: unknown; tag?: unknown; text?: unknown; fallback?: unknown }
+      return {
+        clicked: v.clicked === true,
+        tag: String(v.tag || ''),
+        text: String(v.text || ''),
+        ...(v.fallback === true ? { fallback: true } : {}),
+      }
+    } finally {
+      void send(tabId, 'Runtime.releaseObject', { objectId }).catch(() => undefined)
+    }
+  } catch {
+    // silent-catch: 直接 invoke 是最后一级兜底，CDP 失败返回 null 由调用方以 delta 复核收口
+    return null
+  } finally {
+    void send(tabId, 'DOM.disable', {}).catch(() => undefined)
+  }
 }
