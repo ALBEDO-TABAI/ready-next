@@ -9,7 +9,11 @@ function readWorkspaceFile(path: string): string {
 }
 
 test('file tree right-click menu keeps remove-from-list available for top-level folders', () => {
-  const source = readWorkspaceFile('src/renderer/components/layout/FileTree.tsx')
+  // 2026-07-06 拆分随迁：ContextMenuBridge 实现从 FileTree 门面移到 floating-menus.tsx。
+  const source = [
+    readWorkspaceFile('src/renderer/components/layout/FileTree.tsx'),
+    readWorkspaceFile('src/renderer/components/layout/file-tree/floating-menus.tsx'),
+  ].join('\n')
   assert.match(source, /workspaceRoot=\{workspaceRoot\}/)
   assert.match(source, /\(pinnedFolderSet\.has\(item\.path\) \|\| item\.path === workspaceRoot \?/)
   assert.match(source, /label: '从列表中移除'/)
@@ -17,7 +21,11 @@ test('file tree right-click menu keeps remove-from-list available for top-level 
 })
 
 test('file tree keeps direct delete and removes trash affordances', () => {
-  const source = readWorkspaceFile('src/renderer/components/layout/FileTree.tsx')
+  // 2026-07-06 拆分随迁：ContextMenuBridge 实现从 FileTree 门面移到 floating-menus.tsx。
+  const source = [
+    readWorkspaceFile('src/renderer/components/layout/FileTree.tsx'),
+    readWorkspaceFile('src/renderer/components/layout/file-tree/floating-menus.tsx'),
+  ].join('\n')
   assert.match(source, /label: deleteTargets\.length > 1 \? `删除 \$\{deleteTargets\.length\} 项` : '删除'/)
   assert.match(source, /onRequestDelete\(deleteTargets\)/)
   assert.doesNotMatch(source, /aria-label="打开回收站"/)
@@ -29,7 +37,11 @@ test('file tree keeps direct delete and removes trash affordances', () => {
 })
 
 test('file tree delete action receives selected targets for bulk deletion', () => {
-  const source = readWorkspaceFile('src/renderer/components/layout/FileTree.tsx')
+  // 2026-07-06 拆分随迁：ContextMenuBridge 实现从 FileTree 门面移到 floating-menus.tsx。
+  const source = [
+    readWorkspaceFile('src/renderer/components/layout/FileTree.tsx'),
+    readWorkspaceFile('src/renderer/components/layout/file-tree/floating-menus.tsx'),
+  ].join('\n')
   assert.match(source, /selectedDeleteTargets=\{selectedDeleteTargets\}/)
   assert.match(source, /selectedDeleteTargets\.length > 1 && selectedDeleteTargetSet\.has\(item\.path\)/)
   assert.match(source, /for \(const target of targets\)/)
@@ -37,7 +49,11 @@ test('file tree delete action receives selected targets for bulk deletion', () =
 })
 
 test('file tree right-click menu moves selected items through the folder picker', () => {
-  const source = readWorkspaceFile('src/renderer/components/layout/FileTree.tsx')
+  // 2026-07-06 拆分随迁：ContextMenuBridge 实现从 FileTree 门面移到 floating-menus.tsx。
+  const source = [
+    readWorkspaceFile('src/renderer/components/layout/FileTree.tsx'),
+    readWorkspaceFile('src/renderer/components/layout/file-tree/floating-menus.tsx'),
+  ].join('\n')
   assert.match(source, /selectedMoveItems=\{selectedMoveItems\}/)
   assert.match(source, /selectedMoveItems\.length > 1 && selectedMoveItemSet\.has\(item\.path\)/)
   assert.match(source, /label: '移动到'/)
@@ -48,7 +64,11 @@ test('file tree right-click menu moves selected items through the folder picker'
 })
 
 test('file tree internal native drags can drop without a system Files dataTransfer type', () => {
-  const source = readWorkspaceFile('src/renderer/components/layout/FileTree.tsx')
+  // 2026-07-06 拆分随迁：拖拽读取 helper 从 FileTree 门面移到 drag-utils.ts。
+  const source = [
+    readWorkspaceFile('src/renderer/components/layout/FileTree.tsx'),
+    readWorkspaceFile('src/renderer/components/layout/file-tree/drag-utils.ts'),
+  ].join('\n')
   // da4c25cc fix(files): make in-tree move indicators actually appear during drag — 直接 parse 改为 readWorkspaceDragPayloads（dragover protected drag store 用 dragstart 会话兜底），移动前置守卫收敛进 moveWorkspaceItems(targetDir)
   assert.match(
     source,

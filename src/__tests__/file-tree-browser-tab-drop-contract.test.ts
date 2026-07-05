@@ -8,7 +8,8 @@ function readWorkspaceFile(path: string): string {
 }
 
 test('file tree offers a browser-style placeholder action menu for dropped browser tabs', () => {
-  const source = readWorkspaceFile('src/renderer/components/layout/FileTree.tsx')
+  // 2026-07-06 拆分随迁：外部拖放菜单实现从 FileTree 门面移到 floating-menus.tsx。
+  const source = readWorkspaceFile('src/renderer/components/layout/file-tree/floating-menus.tsx')
   const dispatcher = readWorkspaceFile('src/renderer/components/layout/fileTreeExternalDrop.ts')
 
   assert.match(dispatcher, /type:\s*'browser-tab'/)
@@ -21,7 +22,8 @@ test('file tree offers a browser-style placeholder action menu for dropped brows
 })
 
 test('browser tab drop menu clamps to the file panel boundary without resetting back to raw pointer coordinates', () => {
-  const source = readWorkspaceFile('src/renderer/components/layout/FileTree.tsx')
+  // 2026-07-06 拆分随迁：外部拖放菜单实现从 FileTree 门面移到 floating-menus.tsx。
+  const source = readWorkspaceFile('src/renderer/components/layout/file-tree/floating-menus.tsx')
 
   assert.match(source, /clampDropMenuPositionToBoundary\(/)
   assert.doesNotMatch(
@@ -31,7 +33,11 @@ test('browser tab drop menu clamps to the file panel boundary without resetting 
 })
 
 test('completed web clip placeholders can be dismissed instead of sticking in the file tree', () => {
-  const source = readWorkspaceFile('src/renderer/components/layout/FileTree.tsx')
+  // 2026-07-06 拆分随迁：占位行实现从 FileTree 门面移到 pending-placeholders.tsx，调度仍在门面。
+  const source = [
+    readWorkspaceFile('src/renderer/components/layout/FileTree.tsx'),
+    readWorkspaceFile('src/renderer/components/layout/file-tree/pending-placeholders.tsx'),
+  ].join('\n')
 
   assert.match(source, /onDismissPendingClip/)
   assert.match(source, /点击清除提示/)
@@ -40,7 +46,8 @@ test('completed web clip placeholders can be dismissed instead of sticking in th
 })
 
 test('selected file rows use a brighter active surface instead of the generic hover darkening', () => {
-  const source = readWorkspaceFile('src/renderer/components/layout/FileTree.tsx')
+  // 2026-07-06 拆分随迁：文件行实现从 FileTree 门面移到 FileTreeItem.tsx。
+  const source = readWorkspaceFile('src/renderer/components/layout/file-tree/FileTreeItem.tsx')
 
   assert.doesNotMatch(source, /isActive \? \{ background: 'var\(--bg-hover\)' \} : \{\}/)
   // 8ab48cd7 style(ui): checkpoint liquid glass polish — 行内 rgba(255,255,255,0.36) 收敛为共享 files-panel active 状态 token（含配套 shadow）
@@ -51,7 +58,8 @@ test('selected file rows use a brighter active surface instead of the generic ho
 })
 
 test('hovering unselected rows uses the intermediate bright state instead of the old dark hover wash', () => {
-  const source = readWorkspaceFile('src/renderer/components/layout/FileTree.tsx')
+  // 2026-07-06 拆分随迁：文件行实现从 FileTree 门面移到 FileTreeItem.tsx。
+  const source = readWorkspaceFile('src/renderer/components/layout/file-tree/FileTreeItem.tsx')
 
   assert.doesNotMatch(source, /hover:bg-black\/5/)
   assert.match(source, /const \[isHovered,\s*setIsHovered\] = useState\(false\)/)
@@ -63,7 +71,8 @@ test('hovering unselected rows uses the intermediate bright state instead of the
 })
 
 test('browser tab drag affordances brighten the target row and render a thicker glowing insertion marker', () => {
-  const source = readWorkspaceFile('src/renderer/components/layout/FileTree.tsx')
+  // 2026-07-06 拆分随迁：文件行实现从 FileTree 门面移到 FileTreeItem.tsx。
+  const source = readWorkspaceFile('src/renderer/components/layout/file-tree/FileTreeItem.tsx')
 
   assert.match(source, /const isBrowserDropAccent = isBrowserDropInside \|\| Boolean\(browserDropLine\)/)
   assert.match(source, /background: 'color-mix\(in srgb, rgba\(255,\s*255,\s*255,\s*0\.28\) 62%, var\(--color-blue-light\) 38%\)'/)

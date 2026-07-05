@@ -1,0 +1,86 @@
+import {
+  IconBook2 as BookOpen,
+  IconFileSpreadsheet as FileSpreadsheet,
+  IconFileText as FileText,
+  IconFolder as Folder,
+  IconMovie as Film,
+  IconMusic as Music2,
+  IconPencil as Pen,
+  IconPhoto as Image,
+} from '@tabler/icons-react'
+import type { FileItem } from '../../../stores/useWorkspace'
+import {
+  getFileAppearanceColorValue,
+  type FileAppearance,
+} from '../../../stores/fileAppearance'
+import { isEbookExtension } from '../../../../shared/ebook'
+import { getFileExt, getFileKind } from './file-kinds'
+
+export function FileAppearanceColorDot({
+  appearance,
+  size = 7,
+  style,
+}: {
+  appearance?: FileAppearance
+  size?: number
+  style?: React.CSSProperties
+}) {
+  const color = getFileAppearanceColorValue(appearance?.color)
+  if (!color) return null
+  return (
+    <span
+      aria-hidden
+      style={{
+        display: 'block',
+        width: size,
+        height: size,
+        borderRadius: '50%',
+        background: color,
+        border: '1px solid rgba(255,255,255,0.82)',
+        boxShadow: '0 1px 3px rgba(0,0,0,0.18)',
+        ...style,
+      }}
+    />
+  )
+}
+
+export function CustomFileIcon({ icon, size }: { icon: string; size: number }) {
+  return (
+    <span
+      aria-hidden
+      style={{
+        width: size,
+        height: size,
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        fontSize: Math.max(11, Math.round(size * 0.9)),
+        lineHeight: 1,
+        color: 'var(--text-title)',
+      }}
+    >
+      {icon}
+    </span>
+  )
+}
+
+export function fileIcon(item: FileItem, _expanded = false, appearance?: FileAppearance, iconSize = 14) {
+  const customIcon = appearance?.icon
+  if (customIcon) return <CustomFileIcon icon={customIcon} size={iconSize} />
+
+  // 文件夹始终用 Folder。展开/折叠状态已由 chevron 表达，避免 Folder ↔ FolderOpen
+  // 在小尺寸（14px）下因笔触差异让顶层与子层视觉不一致。
+  const iconStyle = { color: 'var(--text-muted)', width: iconSize, height: iconSize }
+  const iconStroke = 1.75
+  if (item.isDirectory) {
+    return <Folder style={iconStyle} strokeWidth={iconStroke} />
+  }
+  const kind = getFileKind(item)
+  if (kind === 'image') return <Image style={iconStyle} strokeWidth={iconStroke} />
+  if (kind === 'video') return <Film style={iconStyle} strokeWidth={iconStroke} />
+  if (kind === 'audio') return <Music2 style={iconStyle} strokeWidth={iconStroke} />
+  if (kind === 'spreadsheet') return <FileSpreadsheet style={iconStyle} strokeWidth={iconStroke} />
+  if (isEbookExtension(getFileExt(item))) return <BookOpen style={iconStyle} strokeWidth={iconStroke} />
+  if (kind === 'design') return <Pen style={iconStyle} strokeWidth={iconStroke} />
+  return <FileText style={iconStyle} strokeWidth={iconStroke} />
+}

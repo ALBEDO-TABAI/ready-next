@@ -41,7 +41,11 @@ test('files panel dropdown menus stay within the sidebar and do not hide browser
 
 test('file tree context menus use a native popup above BrowserView without hiding browser content', () => {
   const contextMenu = readWorkspaceFile('src/renderer/components/layout/ContextMenu.tsx')
-  const fileTree = readWorkspaceFile('src/renderer/components/layout/FileTree.tsx')
+  // 2026-07-06 拆分随迁：ContextMenuBridge 实现从 FileTree 门面移到 floating-menus.tsx。
+  const fileTree = [
+    readWorkspaceFile('src/renderer/components/layout/FileTree.tsx'),
+    readWorkspaceFile('src/renderer/components/layout/file-tree/floating-menus.tsx'),
+  ].join('\n')
   const editorContextMenu = readWorkspaceFile('src/renderer/components/document/EditorContextMenu.tsx')
   const skillsCenter = readWorkspaceFile('src/renderer/components/layout/SkillsCenterPanel.tsx')
   const chatPanelBody = readWorkspaceFile('src/renderer/components/agent/chat-panel/ChatPanelBody.tsx')
