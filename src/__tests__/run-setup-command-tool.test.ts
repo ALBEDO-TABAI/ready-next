@@ -105,3 +105,60 @@ test('spawn error and timeout are structured refusals', async () => {
     (e: unknown) => e instanceof ToolDomainError && e.errorKind === 'setup_command_timed_out',
   )
 })
+
+// ── 2026-07-06 真机回测（飞书 CLI B5）抓获的卡死修复合同 ──────────────────
+// lark-cli config init 类交互式命令曾把工具挂死：stdin 管道敞开等输入 +
+// 超时只杀 npx 不杀孙进程 + settle 在 'close'（被孙进程握住的管道永不排空）。
+// 以下用真实 spawn 直驱 defaultRunProcess（不注 runProcess）钉死修复语义。
+
+test('交互式命令因 stdin 立即 EOF 而快速退出，不等到超时', async () => {
+  const startedAt = Date.now()
+  const output = await executeRunSetupCommand({
+    confirmAck: true,
+    command: process.execPath,
+    // 模拟交互式 CLI：打印提示后等 stdin——EOF 应让它立刻走 end 分支退出
+    args: ['-e', "process.stdout.write('? App ID: '); process.stdin.on('data', () => {}); process.stdin.on('end', () => { console.error('eof-no-tty'); process.exit(2) }); setTimeout(() => process.exit(3), 8000)"],
+    timeoutMs: 10_000,
+  })
+  const elapsed = Date.now() - startedAt
+  assert.ok(elapsed < 6_000, `stdin EOF 应秒退（实际 ${elapsed}ms）`)
+  assert.equal((output.data as Record<string, unknown>).ok, false)
+  assert.match(output.text, /退出码 2/)
+  assert.match(output.text, /eof-no-tty/)
+})
+
+test('超时杀进程树且 Promise 及时归来（孙进程握管道不再悬死），错误带输出尾巴', async () => {
+  const startedAt = Date.now()
+  await assert.rejects(
+    executeRunSetupCommand({
+      confirmAck: true,
+      command: process.execPath,
+      // 包装器形态：父进程 spawn 一个继承 stdio 的长命孙进程后自己悬住——
+      // 旧实现超时 SIGKILL 父进程后 'close' 永不触发，Promise 悬死。
+      args: ['-e', "const { spawn } = require('child_process'); process.stdout.write('wrapper-started'); spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'inherit' }); setInterval(() => {}, 1000)"],
+      timeoutMs: 5_000,
+    }),
+    (e: unknown) => e instanceof ToolDomainError
+      && e.errorKind === 'setup_command_timed_out'
+      && /wrapper-started/.test(e.message),
+  )
+  const elapsed = Date.now() - startedAt
+  assert.ok(elapsed < 9_000, `超时后必须及时归来（实际 ${elapsed}ms）`)
+})
+
+test('用户中断（abortSignal）立即终止并以 AbortError 冒泡', async () => {
+  const controller = new AbortController()
+  setTimeout(() => controller.abort(), 300)
+  const startedAt = Date.now()
+  await assert.rejects(
+    executeRunSetupCommand({
+      confirmAck: true,
+      command: process.execPath,
+      args: ['-e', 'setInterval(() => {}, 1000)'],
+      timeoutMs: 30_000,
+    }, { abortSignal: controller.signal }),
+    (e: unknown) => e instanceof Error && e.name === 'AbortError',
+  )
+  const elapsed = Date.now() - startedAt
+  assert.ok(elapsed < 5_000, `中断应即时生效（实际 ${elapsed}ms）`)
+})

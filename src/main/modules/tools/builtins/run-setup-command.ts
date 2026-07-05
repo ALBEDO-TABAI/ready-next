@@ -44,7 +44,7 @@ export interface SetupCommandDescriptor {
 
 export interface RunSetupCommandDeps {
   /** 测试注入：替换真实 spawn 执行。 */
-  runProcess?: (descriptor: Required<Pick<SetupCommandDescriptor, 'command' | 'args' | 'cwd'>>, timeoutMs: number) => Promise<{
+  runProcess?: (descriptor: Required<Pick<SetupCommandDescriptor, 'command' | 'args' | 'cwd'>>, timeoutMs: number, abortSignal?: AbortSignal) => Promise<{
     code: number | null
     signal: string | null
     stdout: string
@@ -52,6 +52,8 @@ export interface RunSetupCommandDeps {
     spawnError?: string
     timedOut?: boolean
   }>
+  /** 执行器传入：用户停止 run 时必须连带杀掉命令进程树。 */
+  abortSignal?: AbortSignal
 }
 
 function validateCommandName(command: string): string {
@@ -114,8 +116,9 @@ function commandLineOf(descriptor: SetupCommandDescriptor): string {
 async function defaultRunProcess(
   descriptor: Required<Pick<SetupCommandDescriptor, 'command' | 'args' | 'cwd'>>,
   timeoutMs: number,
+  abortSignal?: AbortSignal,
 ): Promise<{ code: number | null; signal: string | null; stdout: string; stderr: string; spawnError?: string; timedOut?: boolean }> {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     let stdout = ''
     let stderr = ''
     let timedOut = false
@@ -123,12 +126,41 @@ async function defaultRunProcess(
     const child = spawn(descriptor.command, descriptor.args, {
       cwd: descriptor.cwd,
       env: process.env,
-      // 关键：不经 shell。数组式参数直接传子进程，元字符不被解释。
+      // 关键 1：不经 shell。数组式参数直接传子进程，元字符不被解释。
       shell: false,
+      // 关键 2：stdin 立即 EOF。交互式命令（config init 之类等键盘输入的）
+      // 读到 EOF 会立刻退出/报错，而不是挂在提示符上等到超时——Ready 的
+      // 产品边界是「识别交互式命令并让用户去终端」，不是模拟终端。
+      stdio: ['ignore', 'pipe', 'pipe'],
+      // 关键 3：独立进程组。npx/包装器会再 spawn 真正的 CLI 孙进程，只杀
+      // 直接子进程会留下孤儿（副作用继续跑、还握着 stdout 管道）。
+      detached: process.platform !== 'win32',
     })
+    const killTree = (signal: NodeJS.Signals): void => {
+      // 组信号覆盖孙进程；组杀不可用（win32/已退出）降级单杀。
+      try {
+        if (process.platform !== 'win32' && child.pid) process.kill(-child.pid, signal)
+        else child.kill(signal)
+      } catch {
+        try { child.kill(signal) } catch { /* silent-catch: 进程已自退，ESRCH 无害 */ }
+      }
+    }
+    const onAbort = (): void => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      killTree('SIGKILL')
+      const error = new Error('setup command aborted by user')
+      error.name = 'AbortError'
+      reject(error)
+    }
+    if (abortSignal) {
+      if (abortSignal.aborted) { onAbort(); return }
+      abortSignal.addEventListener('abort', onAbort, { once: true })
+    }
     const timer = setTimeout(() => {
       timedOut = true
-      try { child.kill('SIGKILL') } catch { /* silent-catch: 进程刚好自退，kill 抛 ESRCH 无害 */ }
+      killTree('SIGKILL')
     }, timeoutMs)
     child.stdout?.on('data', (chunk: Buffer) => {
       if (stdout.length < OUTPUT_CAP_BYTES) stdout += chunk.toString('utf8')
@@ -140,12 +172,18 @@ async function defaultRunProcess(
       if (settled) return
       settled = true
       clearTimeout(timer)
+      abortSignal?.removeEventListener('abort', onAbort)
       resolve({ code: null, signal: null, stdout, stderr, spawnError: error instanceof Error ? error.message : String(error) })
     })
-    child.on('close', (code, signal) => {
+    // 关键 4：settle 在 'exit' 而不是 'close'。'close' 要等 stdio 排空——
+    // 存活的孙进程握着管道时它永远不来，超时杀掉直接子进程后 Promise 依然
+    // 悬死（真机复测抓到的卡死形态）。'exit' 在进程终止即触发；此刻已捕获
+    // 的 stdout/stderr 足够诊断。
+    child.on('exit', (code, signal) => {
       if (settled) return
       settled = true
       clearTimeout(timer)
+      abortSignal?.removeEventListener('abort', onAbort)
       resolve({
         code,
         signal: signal ? String(signal) : null,
@@ -169,7 +207,7 @@ export async function executeRunSetupCommand(
       Math.max(5_000, Number(rawArgs.timeoutMs) || DEFAULT_TIMEOUT_MS),
     )
     const run = deps.runProcess ?? defaultRunProcess
-    const result = await run({ command: descriptor.command, args: descriptor.args, cwd: descriptor.cwd! }, timeoutMs)
+    const result = await run({ command: descriptor.command, args: descriptor.args, cwd: descriptor.cwd! }, timeoutMs, deps.abortSignal)
     if (result.spawnError) {
       throw new ToolDomainError(
         SETUP_COMMAND_ERROR_KINDS.executionFailed.code,
@@ -178,10 +216,17 @@ export async function executeRunSetupCommand(
       )
     }
     if (result.timedOut) {
+      // 带上已捕获的输出尾巴：模型必须能看见命令死前在干什么（比如停在
+      // 交互提示符上），才能给用户「去终端执行」这类正确建议。
+      const tailOf = (text: string): string => text.trim().slice(-600)
+      const outputHint = [
+        tailOf(result.stdout) ? `stdout 尾部：${tailOf(result.stdout)}` : '',
+        tailOf(result.stderr) ? `stderr 尾部：${tailOf(result.stderr)}` : '',
+      ].filter(Boolean).join('\n') || '（超时前无任何输出）'
       throw new ToolDomainError(
         SETUP_COMMAND_ERROR_KINDS.timedOut.code,
-        `命令执行超时（>${Math.round(timeoutMs / 1000)}s）已终止：${commandLineOf(descriptor)}。如属正常的长时间安装，可让用户在终端手动执行。`,
-        { command: descriptor.command },
+        `命令执行超时（>${Math.round(timeoutMs / 1000)}s）已终止进程树：${commandLineOf(descriptor)}。\n${outputHint}\n若输出停在提问/提示符上=交互式命令，请让用户在终端自行执行；如属正常的长时间安装，可加大 timeoutMs 重试一次。`,
+        { command: descriptor.command, stdoutTail: tailOf(result.stdout), stderrTail: tailOf(result.stderr) },
       )
     }
     const ok = result.code === 0
