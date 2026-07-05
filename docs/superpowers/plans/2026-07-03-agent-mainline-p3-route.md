@@ -65,6 +65,7 @@ P1 的验收欠账 + 本轮新件的真机确认，一次跑完：
 - 按能力缝抽组：collection / power / media / navigation / observe 各一模块，`browser-tools.ts` 保薄门面 re-export；每抽一组 typecheck+focused 绿。纯移动零行为变更（probe 抽取已验证此法）。
 - 目标：主文件 <2k；每步独立可提交。
 - B 完成后按同法排队：runtime.ts 4327（能力缝：crystallize/decay 调度、projection 接口、host 装配）、runtime-manager 3800、Settings.tsx 3486（renderer，需在场）、useAgent（src/renderer/stores/useAgent.ts，renderer，需在场）。**触碰 >2k 文件的工单默认附带"顺路拆出所改区域"**（roadmap §4.5 长期规则）。
+- **UI 巨文件审查（2026-07-06，用户点名的 UI 治理专项）**：拆分施工计划已成文交 Codex 执行 → `2026-07-06-ui-giant-files-split-implementation.md`（P1 documentActions 六缝 / P2 FileTree 七步 / P3 Studio / P4 CalendarMode 仅探察；含 silent-catch 重锚与 grep 合同随迁两雷的拆弹手册）。
 - **UI 巨文件审查（2026-07-06，用户点名的 UI 治理专项）**：
   - ✅ **index.css 6434→15 行**：按十个领域段序保拆分（theme-tokens/base-chrome/liquid-composer/chat-utilities/markdown/electron-shell/workbench-surfaces/mode-switch/flat-chrome/glass-overrides），@import 顺序=原段落顺序；**打包 CSS 产物逐字节一致**（stash 前后双构建 cmp 证明）；36 个样式合同测试经 `read-renderer-styles` 展平读取器迁移（语料与拆分前同构，断言零改写），135/135 绿。新规则落对应领域文件，勿回填 index.css。
   - **FileTree.tsx 3738（renderer 头号，需在场）**：单文件塞了 ~20 个顶层组件（FileTreeItem/GridItemCard/PendingClipRow/InlineInput/InlineCreateRow/CustomFileIcon…）。缝=叶组件逐个抽到 `components/layout/file-tree/`，FileTree 保门面 re-export；注意多份 file-tree 合同 grep 此文件，拆时同步重锚。
