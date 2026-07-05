@@ -10,6 +10,8 @@
   "scripts": {
     "rebuild:native": "node scripts/patch-better-sqlite3-electron42.cjs && electron-builder install-app-deps",
     "native:check": "node scripts/check-better-sqlite3-electron-abi.cjs",
+    "experience:baseline": "node scripts/experience-baseline.cjs",
+    "verify:experience-baseline": "node --test scripts/__tests__/experience-baseline.test.cjs",
     "probe:html-in-canvas": "electron scripts/probe-html-in-canvas.cjs",
     "probe:liquid-glass-residue": "electron scripts/probe-liquid-glass-residue.cjs",
     "verify:html-in-canvas": "READY_HTML_IN_CANVAS_WEBPREF=1 READY_HTML_IN_CANVAS_REQUIRE=1 electron scripts/probe-html-in-canvas.cjs",

@@ -36,6 +36,18 @@ source:
 | E4 | 学习可见可控 | 每次知识写入在会话流有一次性提示；staged→active 有一条不进 Settings 也能走完的确认路径 |
 | E5 | 观察一次就够 | 浏览器每个动作后返回结构化"变化回执"；同一页面连续 read_page ≥3 次视为回执缺陷（可从 tools.log 回归统计） |
 
+### 1.1 E1-E5 首次基线（2026-07-05，`scripts/experience-baseline.cjs`，样本=456 工具行 / 579 metric 事件）
+
+Phase R §4.1 的度量脚本落地并跑出首个基线（`npm run experience:baseline`；`--assert` 对硬线返回退出码；行为测试 `npm run verify:experience-baseline` 5✓）：
+
+- **E1**：首 delta 样本 11，真流式(ms=0)占比 **0.727**，延迟 min/中位/max = 0/0/1ms（provider 真 SSE 成效）；基础设施超时兜底触发 38（多为 dev 反复重启期，非静默缺陷）。
+- **E2**：run_close 17 次，终态分布 `{done:6, cancelled_user:5, browser_transaction_unconfirmed:4, blocked_external:2}`——**四选一无泛化失败终态**；裁决分歧信号 8（硬线代理，属 shadow/enforce 对照期，非生产泛化失败卡）。
+- **E3**：本样本期无采集/重试类信号（n/a，非缺陷）。
+- **E4**：学习写入 fired 信号 **66**（belief_startup_sync 17 / crystallize 12 / belief_decay 12 / skill_reference_inlined 14 / reflection_outcome 11）——学习回路全程可见。
+- **E5**：read 连读段 55，**最长连读 1，同页连读≥3 的回执缺陷段 = 0**——P1 动作回执把"观察一次就够"落到了实测硬线上。
+
+脚本是度量非 gate；`--assert` 仅对 E2 泛化失败与 E5 回执缺陷两条硬线把关，供后续趋势对照防体验静默回退。
+
 ## 2. 目标架构
 
 ### 2.1 总图（增量件加 ★，其余为已有）
