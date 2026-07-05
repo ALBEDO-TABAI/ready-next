@@ -5,10 +5,9 @@ import { ReadyAgentOrchestrator } from '../main/modules/agent-control/runtime-co
 
 test('renderer infrastructure timeout only stops the active matching request id', () => {
   const orchestrator = new ReadyAgentOrchestrator()
+  // 合同随实现同步（Phase C C3，2026-07-05）：引擎停线随退役删除，
+  // 停发面收敛为 sdkEngine 单引擎。
   const stops: Array<{ engine: string; key: string; initiator: string }> = []
-  ;(orchestrator as any).domainAdapterEngine.stopGeneration = (key: string, initiator: string) => {
-    stops.push({ engine: 'domain', key, initiator })
-  }
   ;(orchestrator as any).sdkEngine.stopGeneration = (key: string, initiator: string) => {
     stops.push({ engine: 'sdk', key, initiator })
   }
@@ -35,7 +34,6 @@ test('renderer infrastructure timeout only stops the active matching request id'
   assert.equal(cancelled.state, 'cancel_requested')
   assert.equal(cancelled.runId, 'req-A')
   assert.deepEqual(stops, [
-    { engine: 'domain', key: 'butler::scope-A', initiator: 'process_exit' },
     { engine: 'sdk', key: 'butler::scope-A', initiator: 'process_exit' },
   ])
   assert.equal((orchestrator as any).activeRunIds.get('butler::scope-A'), undefined)

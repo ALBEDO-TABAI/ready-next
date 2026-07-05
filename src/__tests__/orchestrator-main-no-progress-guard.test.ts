@@ -32,10 +32,10 @@ function createHarness() {
       ;(handle as FakeTimer).cleared = true
     },
   })
+  // 合同随实现同步（Phase C C3，2026-07-05）：DirectChatEngine 停线随
+  // 引擎退役删除（其 stopGeneration 活效应为零——abortController 从未被
+  // 赋活值），guard 的停发面收敛为 sdkEngine 单引擎。
   const stops: Array<{ engine: string; key: string; initiator: string }> = []
-  ;(orchestrator as any).domainAdapterEngine.stopGeneration = (key: string, initiator: string) => {
-    stops.push({ engine: 'domain', key, initiator })
-  }
   ;(orchestrator as any).sdkEngine.stopGeneration = (key: string, initiator: string) => {
     stops.push({ engine: 'sdk', key, initiator })
   }
@@ -114,7 +114,6 @@ test('main no-progress guard stops the active run with timeout initiator', () =>
   ;(orchestrator as any).handleRunNoProgressTimeout('butler::scope-A', 'req-A')
 
   assert.deepEqual(stops, [
-    { engine: 'domain', key: 'butler::scope-A', initiator: 'timeout' },
     { engine: 'sdk', key: 'butler::scope-A', initiator: 'timeout' },
   ])
   assert.equal((orchestrator as any).activeRunIds.get('butler::scope-A'), undefined)
@@ -152,7 +151,7 @@ test('B3 step3: an explicit per-run timeout shortens the guard', () => {
   setNow(200)
   ;(orchestrator as any).handleRunNoProgressTimeout('butler::scope-A', 'req-A')
 
-  assert.deepEqual(stops.map((s) => s.initiator), ['timeout', 'timeout'], 'quick run is stopped at its own short timeout')
+  assert.deepEqual(stops.map((s) => s.initiator), ['timeout'], 'quick run is stopped at its own short timeout')
 })
 
 test('B3 step3: a non-positive / omitted per-run timeout falls back to the long global default', () => {
@@ -186,7 +185,7 @@ test('B3 step3: a quick run does NOT shorten a coexisting long run (no false-kil
   ;(orchestrator as any).handleRunNoProgressTimeout('butler::scope-A', 'req-A')
   ;(orchestrator as any).handleRunNoProgressTimeout('butler::scope-B', 'req-B')
 
-  assert.deepEqual(stops.map((s) => s.key), ['butler::scope-A', 'butler::scope-A'],
+  assert.deepEqual(stops.map((s) => s.key), ['butler::scope-A'],
     'only the quick run stopped; the long run survives its short-lived neighbor')
   assert.equal((orchestrator as any).activeRunIds.get('butler::scope-B'), 'req-B', 'long run still active')
 })
@@ -234,7 +233,7 @@ test('main no-progress guard does not let stale pending ask_user shield a newer 
   setNow(1000)
   ;(orchestrator as any).handleRunNoProgressTimeout('butler::scope-A', 'req-new')
 
-  assert.deepEqual(stops.map((item) => item.initiator), ['timeout', 'timeout'])
+  assert.deepEqual(stops.map((item) => item.initiator), ['timeout'])
   assert.equal((orchestrator as any).activeRunIds.get('butler::scope-A'), undefined)
   clearTimeout(timeoutHandle)
 })
@@ -261,6 +260,6 @@ test('main no-progress guard does not extend explicit short-timeout runs for ask
   setNow(200)
   ;(orchestrator as any).handleRunNoProgressTimeout('butler::scope-A', 'req-A')
 
-  assert.deepEqual(stops.map((item) => item.initiator), ['timeout', 'timeout'])
+  assert.deepEqual(stops.map((item) => item.initiator), ['timeout'])
   clearTimeout(timeoutHandle)
 })

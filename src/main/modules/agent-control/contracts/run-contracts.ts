@@ -97,6 +97,18 @@ export interface RunMessageBlock {
 
 export type RunMessage = string | RunMessageBlock[]
 
+/**
+ * Phase C C3a（2026-07-05）：自 claude-bridge/direct-chat.ts 原样迁入。
+ * IPC 入站消息的窄块联合（RunMessageBlock 是宽型内部形状，二者语义不同，
+ * 不得合并）。引擎退役（C4）后本处是唯一权威定义。
+ */
+export interface MultimodalBlock {
+  type: 'text' | 'image' | 'video'
+  text?: string
+  base64?: string
+  mimeType?: string
+}
+
 export interface TurnEngineSessionMessage {
   role: 'user' | 'assistant' | 'system' | 'tool'
   content: string | Array<Record<string, unknown>>

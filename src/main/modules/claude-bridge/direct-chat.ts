@@ -118,6 +118,7 @@ import { DEFAULT_API_REQUEST_TIMEOUT_MS } from './request-timeout-policy'
 import { ChatRepository } from '../repositories/chat-repository'
 import type { ConversationScope } from '../agent-control/contracts/types'
 import { resolveExecutionIntentContext } from '../agent-control/execution-intent-resolver'
+import type { MultimodalBlock } from '../agent-control/contracts/run-contracts'
 import type { IntentClassification } from '../agent-control/intent-classifier'
 import { classifyIntent } from '../agent-control/intent-classifier'
 import { detectGenericInteractionState } from '../agent-control/interaction-state-detector'
@@ -192,12 +193,9 @@ interface APIResponse {
   toolSnapshots?: import('../agent-control/contracts/run-contracts').ToolSnapshot[]
 }
 
-export interface MultimodalBlock {
-  type: 'text' | 'image' | 'video'
-  text?: string
-  base64?: string
-  mimeType?: string
-}
+// Phase C C3a：MultimodalBlock 权威定义已迁 contracts/run-contracts.ts；
+// 共存期从新家 re-export 保住旧导入面（C4 随本文件一起消亡）。
+export type { MultimodalBlock } from '../agent-control/contracts/run-contracts'
 
 const TOOL_SYSTEM_PROMPT = `
 你可以使用浏览器工具来帮助用户：导航网页、搜索信息、阅读页面内容、点击元素、输入文字和执行JavaScript。

@@ -9,7 +9,7 @@ import {
 import type { BrowserController } from '../../browser-engine/ipc-handler'
 import { resumeWaitingHumanBrowserTaskFromBridge } from '../../browser-engine/task-event-bridge'
 import type { AgentManager } from '../../claude-bridge/agent-manager'
-import type { MultimodalBlock } from '../../claude-bridge/direct-chat'
+import type { MultimodalBlock } from '../contracts/run-contracts'
 import {
   getDatabase,
   type AgentChannelType,

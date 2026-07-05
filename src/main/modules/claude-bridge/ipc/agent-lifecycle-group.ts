@@ -27,7 +27,7 @@
 // surfaces stay on the per-group interface where they belong. The same
 // rationale applies to `ToolEventGroup` (see file header there).
 import type { IpcMain } from 'electron'
-import type { MultimodalBlock } from '../direct-chat'
+import type { MultimodalBlock } from '../../agent-control/contracts/run-contracts'
 import type { ReadyAgentOrchestrator } from '../../agent-control/runtime-core/orchestrator'
 import type { SendScopedUserMessage } from '../../agent-control/send-scoped-confirmation'
 import type { IpcChannelGroup, IpcDisposeHandle } from './types'

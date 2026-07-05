@@ -26,7 +26,7 @@ import type {
   DatabaseManager,
   UpsertConversationScopeMode,
 } from '../../database'
-import type { MultimodalBlock } from '../../claude-bridge/direct-chat'
+import type { MultimodalBlock } from '../contracts/run-contracts'
 import type { TaskProjectionRepository } from '../../repositories/task-projection-repository'
 import type {
   AgentChannelConfig,

@@ -43,7 +43,7 @@ import {
   normalizeAIConfig,
   type AIModelConfig
 } from '../../../../shared/ai-providers'
-import type { MultimodalBlock } from '../../claude-bridge/direct-chat'
+import type { MultimodalBlock } from '../contracts/run-contracts'
 import type { DatabaseManager } from '../../database'
 import { normalizeChannelDeliveryResult } from './channel-delivery-result'
 import { logAgentMetric } from '../metrics'

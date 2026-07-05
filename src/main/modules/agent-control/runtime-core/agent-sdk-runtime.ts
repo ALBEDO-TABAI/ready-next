@@ -55,7 +55,7 @@ import {
   isKilledChildCloseStatus,
   type SkillChildCloseEvent,
 } from '../skills/skill-child-run-types'
-import type { MultimodalBlock } from '../../claude-bridge/direct-chat'
+import type { MultimodalBlock } from '../contracts/run-contracts'
 import {
   buildTextToolBridgePrompt,
   buildTextToolResultMessage,

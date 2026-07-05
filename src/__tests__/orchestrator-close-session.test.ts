@@ -213,8 +213,10 @@ test('V3.1 orchestrator source declares closeSession with correct cleanup sequen
   )
 
   // Cleanup sequence presence.
-  assert.match(source, /this\.domainAdapterEngine\.stopGeneration\(internalKey\)/, 'must stop domain adapter engine generation')
-  assert.match(source, /this\.sdkEngine\.stopGeneration\(internalKey\)/, 'must stop sdk engine generation')
+  // 合同随实现同步（Phase C C3，2026-07-05）：域引擎停线随退役删除；
+  // sdk 钉修到带 initiator 的真实调用形态（此钉在 HEAD 就因 initiator
+  // 签名演进而红——本次一并归位，不变量=关会话必须停 SDK 活跑）。
+  assert.match(source, /this\.sdkEngine\.stopGeneration\(internalKey, 'process_exit'\)/, 'must stop sdk engine generation on close')
   assert.match(source, /this\.descriptors\.delete\(internalKey\)/, 'must drop descriptor cache entry')
   assert.match(source, /this\.sessions\.setState\(taskKey,\s*'closed'\)/, 'must mark session state closed')
 

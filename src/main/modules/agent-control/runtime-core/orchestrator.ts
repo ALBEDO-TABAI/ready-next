@@ -1,7 +1,8 @@
 import { EventEmitter } from 'events'
 import { randomUUID } from 'node:crypto'
 import { MAX_AGENT_SESSIONS } from '../../../../shared/agent-session-limits'
-import { DirectChatEngine, type MultimodalBlock } from '../../claude-bridge/direct-chat'
+import { DomainAdapterHost } from '../domain-adapters/domain-adapter-host'
+import type { MultimodalBlock } from '../contracts/run-contracts'
 import type { BrowserController } from '../../browser-engine/ipc-handler'
 import type { SidecarManager } from '../sidecar-manager'
 import type { AgentControlRuntime } from './runtime'
@@ -131,7 +132,7 @@ export class ReadyAgentOrchestrator extends EventEmitter {
    * `src/shared/agent-session-limits.ts` + `agent-session-limit-parity.test.ts`.
    */
   private static readonly MAX_CONCURRENT_SESSIONS = MAX_AGENT_SESSIONS
-  private readonly domainAdapterEngine: DirectChatEngine
+  private readonly domainAdapterHost: DomainAdapterHost
   private readonly sdkEngine: AgentSdkRuntime
   private readonly sessions: AgentSessionManager
   private readonly descriptors = new Map<string, SessionDescriptor>()
@@ -155,31 +156,23 @@ export class ReadyAgentOrchestrator extends EventEmitter {
     this.clearNoProgressCheck = options?.clearNoProgressCheck || ((handle) => {
       clearTimeout(handle as ReturnType<typeof setTimeout>)
     })
-    this.domainAdapterEngine = new DirectChatEngine()
+    this.domainAdapterHost = new DomainAdapterHost()
     this.sdkEngine = new AgentSdkRuntime({
-      domainAdapters: this.domainAdapterEngine.getDomainAdapters(),
-      skillContextOrchestrator: this.domainAdapterEngine.getSkillContextOrchestrator(),
+      domainAdapters: this.domainAdapterHost.getDomainAdapters(),
+      skillContextOrchestrator: this.domainAdapterHost.getSkillContextOrchestrator(),
       ...options?.agentSdkRuntimeDeps,
     })
     this.sessions = new AgentSessionManager()
-    this.domainAdapterEngine.setRunCleanupRegistry({
-      registerRunCleanup: (runId, cleanup) => {
-        this.registerRunCleanup(runId, cleanup)
-      },
-    })
     this.sdkEngine.setRunCleanupRegistry({
       registerRunCleanup: (runId, cleanup) => {
         this.registerRunCleanup(runId, cleanup)
       },
     })
 
-    // Stage U PR U1.3 + P6f — DirectChatEngine no longer participates in
-    // renderer-facing event emission or production turn execution. It still
-    // survives as the DomainAdapter / SkillContextOrchestrator and dependency
-    // host for now. Binding its former EventEmitter here used to mean any code
-    // path that touched the legacy engine could surface events on `agent:stream` /
-    // `agent:status` / `agent:error` alongside the SDK runtime. SDK runtime is
-    // the single emission producer and live turn executor now.
+    // Stage U PR U1.3 + P6f + Phase C C3 — the legacy engine is fully out of
+    // this loop: DomainAdapterHost now carries the adapter assembly /
+    // SkillContextOrchestrator / dependency wiring, and the SDK runtime is
+    // the single renderer-facing emission producer and live turn executor.
     this.bindEngineEvents(this.sdkEngine)
 
     if (options?.browserController) {
@@ -478,30 +471,29 @@ export class ReadyAgentOrchestrator extends EventEmitter {
   }
 
   setBrowserController(controller: BrowserController): void {
-    this.domainAdapterEngine.setBrowserController(controller)
+    this.domainAdapterHost.setBrowserController(controller)
     this.sdkEngine.setBrowserController(controller)
   }
 
   hasBrowserController(): boolean {
-    return this.domainAdapterEngine.hasBrowserController()
+    return this.domainAdapterHost.hasBrowserController()
   }
 
   /** P1 (2026-07-03) — active browser tab URL for site-card domain matching. */
   getActiveBrowserUrl(): string | null {
-    return this.domainAdapterEngine.getActiveBrowserUrl()
+    return this.domainAdapterHost.getActiveBrowserUrl()
   }
 
   getDomainAdapters(): ReadonlyArray<DomainAdapter> {
-    return this.domainAdapterEngine.getDomainAdapters()
+    return this.domainAdapterHost.getDomainAdapters()
   }
 
   setSidecarManager(manager: SidecarManager): void {
-    this.domainAdapterEngine.setSidecarManager(manager)
     this.sdkEngine.setSidecarManager(manager)
   }
 
   setRuntime(runtime: AgentControlRuntime): void {
-    this.domainAdapterEngine.setRuntime(runtime)
+    this.domainAdapterHost.setRuntime(runtime)
     this.sdkEngine.setRuntime(runtime)
   }
 
@@ -821,7 +813,7 @@ export class ReadyAgentOrchestrator extends EventEmitter {
     }
     const internalKey = this.toInternalSessionKey(agent, sessionId)
     this.descriptors.set(internalKey, { agent, sessionId })
-    this.domainAdapterEngine.newSession(internalKey)
+    this.domainAdapterHost.resetSession(internalKey)
     this.sdkEngine.newSession(internalKey)
     this.sessions.setState(this.toTaskKey(agent, sessionId), 'done')
   }
@@ -846,7 +838,6 @@ export class ReadyAgentOrchestrator extends EventEmitter {
     const taskKey = this.toTaskKey(agent, sessionId)
     const runId = this.activeRunIds.get(taskKey) || null
     const internalKey = this.toInternalSessionKey(agent, sessionId)
-    this.domainAdapterEngine.stopGeneration(internalKey, initiator)
     this.sdkEngine.stopGeneration(internalKey, initiator)
     if (runId) {
       this.clearActiveRunIfMatches(taskKey, runId)
@@ -963,18 +954,10 @@ export class ReadyAgentOrchestrator extends EventEmitter {
     // *this* call performed the close, not whether the session exists.
     const wasLive = !!prior && prior.state !== 'closed'
 
-    // 1 — stop in-flight generation on both runtimes so an active turn
-    // cannot survive the close. The engine pool entry itself stays
-    // (engines own their session Maps and expose no public removal
-    // hook in V3.1); a subsequent `newSession(internalKey)` will
-    // replace it, and `stopGeneration` has already nulled
-    // `abortController` + bumped `generation` so the inert entry
-    // cannot resume on its own.
-    try {
-      this.domainAdapterEngine.stopGeneration(internalKey, 'process_exit')
-    } catch (error) {
-      console.warn('[ReadyAgentOrchestrator] closeSession: domainAdapterEngine.stopGeneration failed:', error)
-    }
+    // 1 — stop in-flight generation on the SDK runtime so an active turn
+    // cannot survive the close (Phase C C3: DirectChatEngine wire removed —
+    // its stopGeneration had zero live effect, abortController was never
+    // assigned since the legacy execution path died).
     try {
       this.sdkEngine.stopGeneration(internalKey, 'process_exit')
     } catch (error) {
