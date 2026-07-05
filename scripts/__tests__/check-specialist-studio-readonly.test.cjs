@@ -26,8 +26,10 @@ function seedMinimum(root, overrides = {}) {
   const files = {
     'src/main/modules/claude-bridge/ipc/agent-system-studio-group.ts': "const CHANNELS = ['agent:systemStudio:getSnapshot', 'agent:systemStudio:simulateRouting', 'agent:systemStudio:stageContentEdit', 'agent:systemStudio:confirmContentEdit', 'agent:systemStudio:rejectContentEdit']\n",
     'src/preload/index.ts': "getSystemStudioSnapshot: () => ipcRenderer.invoke('agent:systemStudio:getSnapshot')\nsimulateSystemStudioRouting: () => ipcRenderer.invoke('agent:systemStudio:simulateRouting')\nstageSystemStudioContentEdit: () => ipcRenderer.invoke('agent:systemStudio:stageContentEdit')\nconfirmSystemStudioContentEdit: () => ipcRenderer.invoke('agent:systemStudio:confirmContentEdit')\nrejectSystemStudioContentEdit: () => ipcRenderer.invoke('agent:systemStudio:rejectContentEdit')\n",
-    'src/renderer/components/agent-system/AgentSystemStudio.tsx': 'window.electronAPI.agent.getSystemStudioSnapshot()\nwindow.electronAPI.agent.simulateSystemStudioRouting()\nwindow.electronAPI.agent.stageSystemStudioContentEdit()\nwindow.electronAPI.agent.confirmSystemStudioContentEdit()\nwindow.electronAPI.agent.rejectSystemStudioContentEdit()\n',
-    'src/renderer/pages/Settings.tsx': "id: 'agent-system'\n<AgentSystemStudio />\n",
+    'src/renderer/components/agent-system/AgentSystemStudio.tsx': "export { default } from './studio/AgentSystemStudioView'\n",
+    'src/renderer/components/agent-system/studio/AgentSystemStudioView.tsx': 'window.electronAPI.agent.getSystemStudioSnapshot()\nwindow.electronAPI.agent.simulateSystemStudioRouting()\nwindow.electronAPI.agent.stageSystemStudioContentEdit()\nwindow.electronAPI.agent.confirmSystemStudioContentEdit()\nwindow.electronAPI.agent.rejectSystemStudioContentEdit()\n',
+    'src/renderer/components/agent-system/AgentSettingsHub.tsx': '<AgentSystemStudio />\n',
+    'src/renderer/pages/Settings.tsx': '<AgentSettingsHub />\n',
     ...overrides,
   }
   for (const [rel, body] of Object.entries(files)) writeFile(root, rel, body)

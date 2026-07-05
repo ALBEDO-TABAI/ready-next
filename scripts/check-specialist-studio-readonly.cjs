@@ -64,7 +64,10 @@ for (const required of [
   if (!preload.includes(required)) fail(`preload must expose ${required}`)
 }
 
-const component = read('src/renderer/components/agent-system/AgentSystemStudio.tsx')
+const component = [
+  read('src/renderer/components/agent-system/AgentSystemStudio.tsx'),
+  read('src/renderer/components/agent-system/studio/AgentSystemStudioView.tsx'),
+].join('\n')
 for (const forbidden of [
   'confirmDerivation',
   'rejectDerivation',
@@ -91,11 +94,12 @@ for (const required of [
 }
 
 const settings = read('src/renderer/pages/Settings.tsx')
-if (!settings.includes("id: 'agent-system'")) {
-  fail('Settings must expose an independent agent-system section')
+const hub = read('src/renderer/components/agent-system/AgentSettingsHub.tsx')
+if (!settings.includes('<AgentSettingsHub />')) {
+  fail('Settings must render the agent settings hub')
 }
-if (!settings.includes('<AgentSystemStudio />')) {
-  fail('Settings must render AgentSystemStudio in the agent-system section')
+if (!hub.includes('<AgentSystemStudio />')) {
+  fail('AgentSettingsHub must render AgentSystemStudio')
 }
 
 console.log('[check-specialist-studio-readonly] OK')
