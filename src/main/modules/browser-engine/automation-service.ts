@@ -24,6 +24,11 @@ interface BrowserAutomationHost {
   createBrowserError(code: BrowserCDPErrorCode, message: string): Error
   getViewBounds(): BrowserRect
   cdpSession?: BrowserCdpSessionService
+  /** D18-d：agent 自注入输入直通登记——派发前登记身份，接管闸凭此放行自家输入 */
+  agentInputPassthrough?: {
+    beginKeys(labels: readonly string[], windowMs?: number): void
+    beginMouse(windowMs?: number): void
+  }
 }
 
 export class BrowserAutomationService {
@@ -192,6 +197,9 @@ export class BrowserAutomationService {
   }
 
   async dispatchMouse(tabId: string | null, payload: BrowserMouseEventPayload): Promise<void> {
+    // D18-d：CDP 注入的鼠标事件会触发 before-mouse-event（旧假设不成立），
+    // 先登记直通窗口，接管闸凭此区分 agent 自身输入与真实用户接管。
+    this.host.agentInputPassthrough?.beginMouse()
     try {
       await this.sendCdpCommand(tabId, 'Input.dispatchMouseEvent', {
         type: payload.type,
@@ -211,6 +219,13 @@ export class BrowserAutomationService {
   }
 
   async dispatchKey(tabId: string | null, payload: BrowserKeyEventPayload): Promise<void> {
+    // D18-d：同 dispatchMouse——键标签登记直通（含修饰键；char 事件的
+    // input.key 是字符本身，text/unmodifiedText 一并登记）。
+    this.host.agentInputPassthrough?.beginKeys([
+      payload.key || '',
+      payload.text || '',
+      payload.unmodifiedText || '',
+    ].filter(Boolean))
     try {
       await this.sendCdpCommand(tabId, 'Input.dispatchKeyEvent', {
         type: payload.type,

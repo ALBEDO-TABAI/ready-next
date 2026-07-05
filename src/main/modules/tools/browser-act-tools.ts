@@ -45,6 +45,7 @@ import {
   stringifyBrowserJsonOrFailure,
 } from './browser-failure-output'
 import {
+  buildFocusedEditableProbeJs,
   buildBrowserTargetProbeJs,
   buildTargetSemanticsLibraryJs,
   throwIfLiveTargetGuardBlocked,
@@ -667,7 +668,12 @@ export async function runWorkflowStep(
       allowPasswordFill: false,
     }, signal)
     if (!point.typed) {
-      return `Error: workflow type_at click landed on a non-editable target (focus=${point.focusTarget?.tag || 'none'}${point.focusTarget?.label ? ` "${point.focusTarget.label}"` : ''}); typing refused to avoid feeding the wrong field`
+      const why = point.skipReason === 'text_exceeds_field_capacity'
+        ? `field capacity ${point.focusTarget?.maxLength} < text length`
+        : point.skipReason === 'multiline_into_single_line'
+          ? 'multiline text into single-line input'
+          : 'non-editable target'
+      return `Error: workflow type_at refused (${why}; focus=${point.focusTarget?.tag || 'none'}${point.focusTarget?.label ? ` "${point.focusTarget.label}"` : ''})`
     }
     const typedIntoNote = point.typedInto?.label ? ` into "${point.typedInto.label}"` : ''
     return `Typed at normalized(${point.nx},${point.ny}) css(${point.cssX},${point.cssY})${typedIntoNote}`
@@ -1966,13 +1972,29 @@ export async function executeBrowserActTool(
         // 也回读 typedInto（打进了哪个框、框里现在是什么）供同轮自纠。
         log(`type_at resolved input=(${x},${y}) normalized=(${point.nx},${point.ny}) css=(${Math.round(point.cssX)},${Math.round(point.cssY)}) typed=${point.typed} focus=${JSON.stringify(point.focusTarget?.label ?? point.focusTarget?.kind ?? null)} typedInto=${JSON.stringify(point.typedInto?.label ?? null)}`)
         if (!point.typed) {
+          // D18-d：三类机械拒因分档回话——焦点不可编辑 / 字段容量装不下 /
+          // 单行框收多段文本（后两类=第十六轮"正文灌标题"循环的硬闸）。
+          const refusal = point.skipReason === 'text_exceeds_field_capacity'
+            ? {
+              errorKind: 'type_field_capacity_exceeded',
+              message: `焦点字段「${point.focusTarget?.label || point.focusTarget?.tag || '未知'}」上限 ${point.focusTarget?.maxLength} 字，本次文本 ${text.length} 字——这是标题/短字段，不是正文编辑器。已拒绝打字。请改用 act fill 正文 contenteditable target（read map 或 browser_probe_readonly(scope=forms) 可见），不要再微调坐标重试。`,
+            }
+            : point.skipReason === 'multiline_into_single_line'
+              ? {
+                errorKind: 'type_multiline_into_single_line',
+                message: `焦点是单行输入框「${point.focusTarget?.label || 'input'}」，本次文本含换行/多段。已拒绝打字。请定位正文编辑器（contenteditable）后用 act fill。`,
+              }
+              : {
+                errorKind: 'type_target_not_editable',
+                message: '坐标点击后焦点不在可编辑控件上，已拒绝打字（避免文字灌进错误的框）。注意 x/y 是 0-1000 归一化坐标；用 browser_locate_input_targets 或 read map 拿准输入框位置，或直接 act fill 编辑器 target。',
+              }
           return attachBrowserActionSessionOutput(browserStructuredOutput({
             ok: false,
-            errorKind: 'type_target_not_editable',
+            errorKind: refusal.errorKind,
             normalized: { x: point.nx, y: point.ny },
             css: { x: point.cssX, y: point.cssY },
             focusTarget: point.focusTarget,
-            message: '坐标点击后焦点不在可编辑控件上，已拒绝打字（避免文字灌进错误的框）。注意 x/y 是 0-1000 归一化坐标；用 browser_locate_input_targets 或 read map 拿准输入框位置，或直接 act fill 编辑器 target。',
+            message: refusal.message,
           }), {
             toolName,
             args,
@@ -2035,10 +2057,20 @@ export async function executeBrowserActTool(
         const key = String(args.key || '').trim()
         if (!key) return 'Error: key is required'
         await sendKeyStroke(controller, tabId, key, args.modifiers)
+        // D18-d：回报按键落点焦点——Cmd+A/Backspace 这类组合落错焦点是
+        // 第十六轮正文被整段清空的元凶，落点必须当轮可见。
+        const keyFocusProbe = await controller.executeJS(tabId, buildFocusedEditableProbeJs()).catch(() => null)
+        const keyFocus = keyFocusProbe && typeof keyFocusProbe === 'object'
+          ? (() => {
+            const f = keyFocusProbe as { tag?: unknown; label?: unknown; kind?: unknown }
+            const label = String(f.label || '').slice(0, 80)
+            return ` (focus: ${label || String(f.kind || 'unknown')}<${String(f.tag || '?')}>)`
+          })()
+          : ''
         const confirmation = /^(Enter|Return)$/i.test(key)
           ? await detectBrowserPageTransactionConfirmation(controller, tabId)
           : null
-        return attachBrowserActionSessionOutput(`Sent key: ${key}`, {
+        return attachBrowserActionSessionOutput(`Sent key: ${key}${keyFocus}`, {
           toolName,
           args,
           controller,

@@ -360,9 +360,14 @@ export interface GuardedCoordinateTypeResult {
   height: number
   /** false = 聚焦点击后焦点不在可编辑控件上，已拒绝打字（响亮失败，不静默误灌） */
   typed: boolean
-  skipReason: 'focus_not_editable' | null
+  skipReason: 'focus_not_editable' | 'text_exceeds_field_capacity' | 'multiline_into_single_line' | null
   /** 聚焦点击后的真实焦点身份（frame = 跨帧编辑器，无法验证，放行） */
-  focusTarget: { kind: 'editable' | 'non_editable' | 'none' | 'frame' | 'unknown'; tag: string; label: string } | null
+  focusTarget: {
+    kind: 'editable' | 'non_editable' | 'none' | 'frame' | 'unknown'
+    tag: string
+    label: string
+    maxLength: number | null
+  } | null
   /** 打完字的落点回读（密码框不回显内容；probe 失败为 null） */
   typedInto: { tag: string; label: string; textHead: string; textLength: number } | null
 }
@@ -424,15 +429,32 @@ export async function runGuardedCoordinateType(
   // 跨帧（iframe 编辑器）无法验证 → 放行但标注 kind=frame。
   const focusProbe = await controller.executeJS(tabId, buildFocusedEditableProbeJs()).catch(() => null)
   let focusTarget: GuardedCoordinateTypeResult['focusTarget'] = null
+  let focusSingleLine = false
   if (focusProbe && typeof focusProbe === 'object') {
-    const f = focusProbe as { kind?: unknown; tag?: unknown; label?: unknown }
+    const f = focusProbe as { kind?: unknown; tag?: unknown; label?: unknown; maxLength?: unknown; singleLine?: unknown }
     const kind = ['editable', 'non_editable', 'none', 'frame'].includes(String(f.kind))
       ? String(f.kind) as 'editable' | 'non_editable' | 'none' | 'frame'
       : 'unknown'
-    focusTarget = { kind, tag: String(f.tag || '').slice(0, 32), label: String(f.label || '').slice(0, 120) }
+    const maxLength = Number(f.maxLength)
+    focusTarget = {
+      kind,
+      tag: String(f.tag || '').slice(0, 32),
+      label: String(f.label || '').slice(0, 120),
+      maxLength: Number.isFinite(maxLength) && maxLength > 0 ? maxLength : null,
+    }
+    focusSingleLine = f.singleLine === true
   }
   if (focusTarget && (focusTarget.kind === 'none' || focusTarget.kind === 'non_editable')) {
     return { ...point, typed: false, skipReason: 'focus_not_editable', focusTarget, typedInto: null }
+  }
+  // D18-d（第十六轮实锚）：容量硬拒——64 字上限的标题框装不下 500 字正文，
+  // 打进去必然是错框；单行 input 也装不下多段文本。只报不拒已被证明救不了
+  // 模型的坐标微调循环，这里必须机械拒绝。
+  if (focusTarget?.maxLength != null && text.length > focusTarget.maxLength) {
+    return { ...point, typed: false, skipReason: 'text_exceeds_field_capacity', focusTarget, typedInto: null }
+  }
+  if (focusSingleLine && text.includes('\n')) {
+    return { ...point, typed: false, skipReason: 'multiline_into_single_line', focusTarget, typedInto: null }
   }
   if (opts.clearBefore) {
     await clearFocusedInput(controller, tabId)
@@ -689,6 +711,14 @@ export function buildSmartTypeJs(options: {
       const clearFirst = ${options.clearFirst ? 'true' : 'false'}
       const submit = ${options.submit ? 'true' : 'false'}
       const normalize = (s) => (s || '').toLowerCase().replace(/\\s+/g, ' ').trim()
+      // D18-d：富文本可编辑判定用属性而非 isContentEditable——语义等价
+      // （attr 决定可编辑性），且 jsdom 等无渲染环境可测。
+      const isRichEditable = (el) => {
+        if (!el || !el.getAttribute) return false
+        if (el.isContentEditable === true) return true
+        const v = el.getAttribute('contenteditable')
+        return v === '' || String(v || '').toLowerCase() === 'true'
+      }
 
       const queue = [document]
       const visited = new Set()
@@ -779,6 +809,16 @@ export function buildSmartTypeJs(options: {
         const rect = el.getBoundingClientRect()
         let s = 0
 
+        // D18-d（真机第十六轮实锚）：容量与形态匹配。上一轮评分器把
+        // maxlength=64 的标题 textarea（52.19 分）排在正文 contenteditable
+        // 前面，500 字三段正文灌进标题。装不下的字段直接出局；多段长文
+        // 强偏向富文本编辑器。
+        const capacity = (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) ? Number(el.maxLength) : -1;
+        if (capacity > 0 && text.length > capacity) return -1000;
+        if (el instanceof HTMLInputElement && text.includes('\\n')) return -1000;
+        const isMultiParagraph = text.includes('\\n') || text.length > 120;
+        if (isMultiParagraph && isRichEditable(el)) s += 40;
+
         if (target) {
           if (merged === target) s += 120
           if (merged.includes(target)) s += 70
@@ -793,7 +833,7 @@ export function buildSmartTypeJs(options: {
 
         if (/search|message|ask|prompt|chat|gemini|输入|搜索|提问|发送/.test(merged)) s += 30
         if (el instanceof HTMLTextAreaElement) s += 18
-        if (el.isContentEditable) s += 14
+        if (isRichEditable(el)) s += 14
         if ((el.getAttribute('role') || '').toLowerCase() === 'searchbox') s += 18
 
         const area = Math.max(1, rect.width * rect.height)
@@ -845,7 +885,7 @@ export function buildSmartTypeJs(options: {
           else el.value = value
           return
         }
-        if (el.isContentEditable) {
+        if (isRichEditable(el)) {
           const current = String(el.innerText || el.textContent || '')
           if (normalize(current) === normalize(value)) return
           if (clearFirst) el.textContent = ''

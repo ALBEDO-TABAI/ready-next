@@ -1262,6 +1262,85 @@ describe('browser-tools v2', () => {
     assert.ok(controller.calls.mouse.length >= 3, 'the focusing click itself already happened')
   })
 
+  // D18-d（真机第十六轮实锚）：typedInto 只报不拒救不了模型的坐标微调循环
+  // ——64 字上限的标题框收 500 字正文必须机械拒绝。
+  it('browser_type_at refuses to feed long text into a capacity-limited field', async () => {
+    const controller = createControllerMock({
+      executeJS: async (_tabId, code) => {
+        const source = String(code || '')
+        if (source.includes('__READY_CLICK_POINT_LABEL_PROBE__')) {
+          return { label: '', inputLabel: '输入标题', password: false, editable: true, tag: 'textarea' }
+        }
+        if (source.includes('__READY_FOCUSED_EDITABLE_PROBE__')) {
+          return { kind: 'editable', tag: 'textarea', label: '输入标题', password: false, maxLength: 64, singleLine: false }
+        }
+        return null
+      },
+    })
+    const longBody = '今天天气不错，' .repeat(40)
+    const result = await executeBrowserTool('browser_type_at', { x: 500, y: 300, text: longBody }, controller)
+    const payload = parseTool(result) as { ok: boolean; errorKind?: string; focusTarget?: { maxLength?: number }; message?: string }
+    assert.strictEqual(payload.ok, false)
+    assert.strictEqual(payload.errorKind, 'type_field_capacity_exceeded')
+    assert.strictEqual(payload.focusTarget?.maxLength, 64)
+    assert.match(String(payload.message || ''), /act fill/)
+    assert.strictEqual(controller.calls.typed.length, 0, 'capacity refusal must not type')
+  })
+
+  it('browser_type_at refuses multiline text when focus is a single-line input', async () => {
+    const controller = createControllerMock({
+      executeJS: async (_tabId, code) => {
+        const source = String(code || '')
+        if (source.includes('__READY_CLICK_POINT_LABEL_PROBE__')) {
+          return { label: '', inputLabel: '搜索', password: false, editable: true, tag: 'input' }
+        }
+        if (source.includes('__READY_FOCUSED_EDITABLE_PROBE__')) {
+          return { kind: 'editable', tag: 'input', label: '搜索', password: false, maxLength: null, singleLine: true }
+        }
+        return null
+      },
+    })
+    const result = await executeBrowserTool('browser_type_at', { x: 500, y: 300, text: '第一段\n\n第二段' }, controller)
+    const payload = parseTool(result) as { ok: boolean; errorKind?: string }
+    assert.strictEqual(payload.ok, false)
+    assert.strictEqual(payload.errorKind, 'type_multiline_into_single_line')
+    assert.strictEqual(controller.calls.typed.length, 0)
+  })
+
+  // D18-d：smart 评分器容量出局——上一轮它把 maxlength=64 的标题 textarea
+  // (52.19 分) 排在正文 contenteditable 前，500 字正文灌进标题。JSDOM 真跑
+  // 注入 JS 验证多段长文必须落 contenteditable。
+  it('browser_type_smart routes multi-paragraph text past a capacity-limited textarea into the contenteditable editor', async () => {
+    const dom = new JSDOM(`
+      <div>
+        <textarea placeholder="输入标题" maxlength="64"></textarea>
+        <div id="editor" contenteditable="true" data-placeholder="输入文字，内容将自动保存"></div>
+      </div>
+    `, { url: 'https://creator.xiaohongshu.com/publish/publish' })
+    try {
+      for (const el of Array.from(dom.window.document.querySelectorAll('textarea, #editor'))) {
+        ;(el as unknown as { getBoundingClientRect: () => unknown }).getBoundingClientRect = () => ({
+          left: 100, top: el.tagName === 'TEXTAREA' ? 100 : 200, right: 700, bottom: el.tagName === 'TEXTAREA' ? 160 : 600,
+          width: 600, height: el.tagName === 'TEXTAREA' ? 60 : 400, x: 100, y: el.tagName === 'TEXTAREA' ? 100 : 200,
+          toJSON: () => ({}),
+        })
+      }
+      const controller = createControllerMock({
+        executeJS: async (_tabId, code) => dom.window.Function('code', 'with (this) { return eval(code) }').call(dom.window, String(code || '')),
+      })
+      const body = '今天天气不错，风也刚好。\n\n中午云很干净。\n\n傍晚想散步。'
+      const result = await executeBrowserTool('browser_type_smart', { target: '正文', text: body, press_enter: false }, controller)
+      const text = toolText(result)
+      assert.match(text, /Typed into smart target/)
+      const editor = dom.window.document.querySelector('#editor') as { textContent?: string | null }
+      const title = dom.window.document.querySelector('textarea') as HTMLTextAreaElement
+      assert.ok(String(editor.textContent || '').includes('今天天气不错'), 'body must land in contenteditable')
+      assert.strictEqual(String(title.value || ''), '', 'capacity-limited title textarea must stay untouched')
+    } finally {
+      dom.window.close()
+    }
+  })
+
   it('browser_type_at reports where the text actually landed (typedInto readback)', async () => {
     const controller = createControllerMock({
       executeJS: async (_tabId, code) => {

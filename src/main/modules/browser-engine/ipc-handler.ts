@@ -20,6 +20,7 @@ import { BrowserContentTaskRunner, type BrowserSiteCardLearningSink, type Browse
 import { registerWaitingHumanBrowserTaskResumePort } from './task-event-bridge'
 import { ScopedBrowserFacade } from './scoped-browser-facade'
 import type { BrowserCollectionTarget } from './collection-targets'
+import { AgentInputPassthroughRegistry } from './agent-input-passthrough'
 import { AgentTabControlGate } from './agent-tab-control-gate'
 import { getBrowserWriteLeaseService } from './agent-browser-lease-singleton'
 import { BrowserFileChooserGuard } from './file-chooser-guard'
@@ -175,6 +176,8 @@ export class BrowserController {
   private readonly contentTaskRunner: BrowserContentTaskRunner
   /** Freeze-then-confirm supervision gate for the background agent tab (plan §3.6). */
   private readonly agentTabControlGate = new AgentTabControlGate()
+  /** D18-d：agent 自注入输入直通登记（automation-service 派发前登记，两个 before-*-event 守卫凭此放行自家输入） */
+  readonly agentInputPassthrough = new AgentInputPassthroughRegistry()
   /** The dedicated background tab the collector sub-agent drives (plan §3.5/§3.9). */
   private agentTabId: string | null = null
   private foregroundAgentTabId: string | null = null
@@ -1305,9 +1308,12 @@ export class BrowserController {
 
   /**
    * Wire real user interaction with the agent tab to the freeze-confirm flow
-   * (Codex result-review #2). before-input-event fires only for genuine user
-   * keyboard input — the agent's own writes go through CDP/executeJS/loadURL and
-   * never trigger it. So a keypress here means the user is trying to take over:
+   * (Codex result-review #2). D18-d 修正（真机第十六轮实锚）：旧假设
+   * "agent 的 CDP 写入不触发 before-input-event"不成立——Input.dispatchKey/
+   * MouseEvent 注入的事件同样进这里，曾把 agent 自己的键击当用户接管
+   * （凭空 pending_confirm + 吞键致模型修复静默失效 + 被吞 Meta 组合键
+   * 落穿应用菜单触发窗口缩放）。现经 agentInputPassthrough 登记直通：
+   * 命中登记的输入是 agent 自己的，放行；未命中的才是真实用户接管：
    * raise the interruption (→ pending_confirm), notify the renderer, and BLOCK
    * the keystroke until the user explicitly confirms (the second confirmation).
    * Once frozen (confirmed), input passes through — the user has control.
@@ -1326,6 +1332,7 @@ export class BrowserController {
     }
     webContents.on('before-input-event', (event, input) => {
       if (input.type !== 'keyDown' && input.type !== 'keyUp' && input.type !== 'char') return
+      if (this.agentInputPassthrough.matchKey(input.key || '')) return
       blockUserInputUntilConfirmed(event)
     })
     webContents.on('before-mouse-event', (event, mouse) => {
@@ -1337,6 +1344,7 @@ export class BrowserController {
       ) {
         return
       }
+      if (this.agentInputPassthrough.matchMouse()) return
       blockUserInputUntilConfirmed(event)
     })
   }
@@ -1355,6 +1363,8 @@ export class BrowserController {
     this.userViewTakeoverWebContentsIds.add(webContents.id)
     webContents.on('before-input-event', (_event, input) => {
       if (!isUserViewKeyboardTakeoverInput(input)) return
+      // D18-d：agent 自注入键不算用户接管信号
+      if (this.agentInputPassthrough.matchKey(input.key || '')) return
       const tab = this.tabs.get(tabId)
       if (!tab || tab.owner === 'agent') return
       recordUserViewTakeoverSignal({

@@ -636,6 +636,18 @@ async function createWindow(): Promise<void> {
     finishStartupSplashAndShowMainWindow()
   })
 
+  // D18-d 观测线（真机第十六轮：窗口在 agent 运行中出现缩放开关，两次
+  // 与 CDP Cmd+A 派发毫秒级对齐）。窗级几何事件全部落主日志，下次任何
+  // 窗口尺寸异动都有一手时间戳可对账。
+  for (const geometryEvent of ['resized', 'maximize', 'unmaximize', 'enter-full-screen', 'leave-full-screen'] as const) {
+    mainWindow.on(geometryEvent as never, () => {
+      try {
+        const bounds = mainWindow?.getBounds()
+        console.log(`[main-window][geometry] ${geometryEvent} bounds=${JSON.stringify(bounds)} maximized=${mainWindow?.isMaximized()} fullscreen=${mainWindow?.isFullScreen()}`)
+      } catch { /* observability only */ }
+    })
+  }
+
   mainWindow.webContents.setWindowOpenHandler((details) => {
     shell.openExternal(details.url)
     return { action: 'deny' }

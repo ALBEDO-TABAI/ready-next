@@ -77,11 +77,17 @@ function buildBrowserDomTargetLibraryJs(): string {
       if (title) return title;
       const placeholder = readyCleanText(el.getAttribute('placeholder'));
       if (placeholder) return placeholder;
+      // D18-d：富文本编辑器（tiptap/ProseMirror）用 data-placeholder 而非
+      // placeholder 属性——空编辑器此前名字为空串，模型在 map 里认不出
+      // "正文该填哪"（第十六轮实锚：模型只反复 fill 有名字的标题 target）。
+      const dataPlaceholder = readyCleanText(el.getAttribute('data-placeholder') || el.getAttribute('aria-placeholder'));
+      if (dataPlaceholder) return dataPlaceholder;
       const alt = readyCleanText(el.getAttribute('alt'));
       if (alt) return alt;
       const name = readyCleanText(el.getAttribute('name'));
       if (name) return name;
       if (el instanceof HTMLInputElement && el.type === 'file') return 'file input';
+      if (el.isContentEditable) return 'contenteditable 编辑区';
       // D14-c：自定义元素 host 在 closed shadow 下可能读不到任何渲染文本，
       // 标签名是模型唯一可用的把手（如 xhs-publish-btn）。
       if (el.tagName && el.tagName.indexOf('-') !== -1) return el.tagName.toLowerCase();
@@ -512,11 +518,17 @@ export function buildFocusedEditableProbeJs(): string {
       return { kind: 'frame', tag, label: '', password: false };
     }
     const editable = readyIsEditableField(el);
+    // D18-d：容量与形态信号——maxLength 装不下长文本的字段（标题框）与
+    // 单行 input 必须能被工具层机械识别并拒打（第十六轮实锚：typedInto
+    // 如实报告"输入标题"三次，模型三次无视继续灌——只报不拒救不了循环）。
+    const rawMax = (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) ? Number(el.maxLength) : -1;
     return {
       kind: editable ? 'editable' : 'non_editable',
       tag,
       label: editable ? readyInputSemanticsLabel(el) : readyClickSemanticsLabel(el),
       password: readyIsPasswordField(el),
+      maxLength: rawMax > 0 ? rawMax : null,
+      singleLine: el instanceof HTMLInputElement,
     };
   })()`
 }

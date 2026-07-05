@@ -20,6 +20,6 @@ site: xiaohongshu.com
 - 限速：连续翻页/快速滚动易触发验证，放慢节奏、分批采集。
 - 轮播：图文笔记常为多图轮播，逐帧采集并按 URL 去重。
 - **严禁用 power_eval 给标题/正文赋值**（第十三轮实锚）：`el.value=`/innerText 直写会被 React/ProseMirror 吞掉，页面进入"发布按钮点了没反应、人点也无效"的坏状态且不可恢复（只能新开 tab 重来）。
-- **标题和正文都优先 act fill 对应 target**（第十四轮实锚：act fill 正文 contenteditable 编辑器 target 一次成功，坐标打字盲试了 4 分钟）：标题 target 是「输入标题」textarea，正文 target 用 read map 或 browser_probe_readonly(scope=forms) 拿 contenteditable/.tiptap 编辑器条目。type_at 只作兜底：结果 typedInto（label+textHead）显示文字真实落点，落点不对立即全选删除、改 act fill；返回 `type_target_not_editable` 说明坐标点在死区，别原地重试。
+- **标题和正文都优先 act fill 对应 target**（第十四/十六轮实锚）：标题 target=「输入标题」textarea（**上限 64 字**）；正文 target=**「输入文字，内容将自动保存」**（tiptap contenteditable，map 里 role=textbox 以此占位符命名）。正文绝不塞标题：收到 `type_field_capacity_exceeded` 即打错框，立刻 act fill 正文 target，不要微调坐标重试。type_at 只作兜底：typedInto 显示真实落点；`type_target_not_editable` 说明点在死区。全选删除（Cmd+A+Backspace）前必看 send_keys 结果的 focus 回读，落错框会清掉正文。
 - **标题 textarea 会随内容自动增高**：标题一旦多行，正文编辑器整体下移，之前量的坐标全部过期——填写期间不要复用旧坐标，改用 target 定位。
 - click_at/type_at 坐标是 0-1000 归一化：power_eval 量出的像素要除以视口宽高再乘 1000；点完看结果里的 pointTarget（label/tag/editable）是否是你要的目标。

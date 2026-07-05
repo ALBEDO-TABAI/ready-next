@@ -264,6 +264,20 @@ test('act click returns the click point for trusted-pointer escalation', () => {
   })
 })
 
+test('map names an empty contenteditable editor from data-placeholder (D18-d)', () => {
+  // 真机第十六轮实锚：空 tiptap 编辑器无 aria/文本/placeholder，旧命名链
+  // 得空串，模型在 map 里认不出"正文该填哪"，只反复 fill 有名字的标题。
+  const editor = new FakeElement('div', {
+    attrs: { contenteditable: 'true', 'data-placeholder': '输入文字，内容将自动保存' },
+  })
+  editor.isContentEditable = true
+  const filler = [1, 2, 3, 4].map((i) => new FakeElement('button', { text: `F${i}` }))
+  const targets = runProbe({ semantic: [editor, ...filler], pointer: [], all: [editor, ...filler] })
+  const editorTarget = targets.find((t) => t.role === 'textbox')
+  assert.ok(editorTarget, 'contenteditable must be collected as a textbox target')
+  assert.strictEqual(editorTarget!.name, '输入文字，内容将自动保存')
+})
+
 test('act fill carries no click point', () => {
   const editable = new FakeElement('div', { text: '' })
   editable.isContentEditable = true
