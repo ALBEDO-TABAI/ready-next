@@ -29,6 +29,8 @@ purpose: >
 岔路的净收益归位主线：正向 gate 注册表（防"建了没接"复发）、gate-flip 纪律、
 真实退出码验证纪律、~1.4k 死债清除——这些都是 P3 手术的安全设施。
 
+> **⚠️ gate 现状（2026-07-05 实测 77069252）**：`verify:stability` 绿；但**完整 `npm run verify` 现红**——`check-silent-catch` 报 **166 处未覆盖**。关键：`verify:stability` 链**不含**此 gate（只在完整 `verify`/`verify:e` 里），所以此前多轮「stability 绿」从未覆盖它。根因=Phase B/C/D 文件手术把 catch 搬到新文件、`file:snippetHash` 键失配、baseline 未随迁全——**不是 166 条新静默债**（72 处 hash 可证字节级搬迁 + 94 novel-hash 待眼校）。**下个会话先重锚 baseline 关红**，详 §6.3 / §7.1。
+
 # 1. 用户记忆三大项的核对结论
 
 | 记忆 | 核对 | 修正 |
@@ -101,9 +103,9 @@ P1 的验收欠账 + 本轮新件的真机确认，一次跑完：
 
 | 项 | 内容 | 值守 |
 |---|---|---|
-| 债务清理包 | ipc-contract 26 条既有违规（allowlist 重锚 + 6 个 handled-only 补调用或登记）；chat-panel-baseline 的 CSS-in-tsx 崩溃修复（vertical-tabs 引入）；silent-catch ~150 条基线收敛策略（分批补 metric/注释，不一次豁免） | 可无人值守 |
+| 债务清理包 | chat-panel-baseline CSS-in-tsx 崩溃修复 ✅（8839ff62）；ipc-contract 26 条部分归绿 ✅、残项登记；**silent-catch gate 现红（166 未覆盖，refactor 搬迁致 baseline 失配，须先重锚再分批清偿——详 §6.3）** | 重锚需决策，清偿可无人值守 |
 | 意图门控漏判专项 | 真机 14:00 事件类：应进浏览器工作流的消息被判 local_chat → 浏览器组被抑制。改进 `resolveTaskTypeFromBrowserWorkflowText`/意图分类信号面 + 漏判账本 | 分析可无人值守，改判定需评估漂移 |
-| D-register 残项 | D1 标签 tabOpened（renderer 焦点，在场）；D4 声明通道设计（决策：新工具 vs 协议）；D6 三测试语义仲裁（宣告闸 vs fixture）；**D7 LLM 维护回合**（专门会话：符号禁令 gate-flip + LLM 预算 + staged 监控——用户"后台自动积累"产品观的下一主件） | 各异，见工单 |
+| D-register 残项 | D1 标签 tabOpened（renderer 焦点，在场，**⚠️ 勿与已完成的 Phase D 内部步骤「D1 RunTimelineStamp」混淆**）；D4 声明通道设计（决策：新工具 vs 协议）；D6 三测试语义仲裁（宣告闸 vs fixture，属分支既有红）；**D7 LLM 维护回合**（专门会话：符号禁令 gate-flip + LLM 预算 + staged 监控——用户"后台自动积累"产品观的下一主件）；D19 意图门控改判定（分析定稿待实施）；涌现数据源第二批（与 D7 合并规划）。**逐项现状见 §6.2** | 各异，见工单 |
 | 涌现数据源第二批 | prepare/harvest/forming 的信号采集（日历联动/产物打开跟踪/文件聚类）；与 D7 同属"后台成长"，合并规划，避免再造前台面（feedback 记忆：后台积累优先） | 设计先行 |
 
 # 3. 分支策略（✅ 2026-07-05 已落定并执行）
@@ -113,7 +115,9 @@ P1 的验收欠账 + 本轮新件的真机确认，一次跑完：
 - **环境注记（✅ 2026-07-05 已解决）**：main-fix worktree 原 node_modules 是自有旧副本，缺 `@tabler/icons-react`/`pdf2json` 等后加依赖（8 个 `Cannot find module` typecheck error 源于此，非合并缺陷）。已按 newtab 同款约定把 main-fix 的 node_modules 改为 symlink → `ready-cowork/node_modules`（已构建好的完整树，避免 better-sqlite3 原生重编风险），旧副本移除。验证：main-fix `npm run typecheck` EXIT=0（8 error 清零）、`npm run native:check` EXIT=0（Electron 42.3.0 ABI 146 加载 better-sqlite3）。
 - **后续开发（主线已切 main-fix）**：`ready-cowork-main-fix` 现为主线开发 worktree（分支 `main`，HEAD 与 vertical-tabs 同步）；后续提交直接进 main。注意 main-fix、newtab 两 worktree 共享 `ready-cowork/node_modules`（symlink），在 main-fix 内 `npm install <新依赖>` 会写入共享树——若要 main-fix 完全独立，届时在其内 `npm install` 替换该 symlink 即可。vertical-tabs 的 4 个 source-grep 合同残项 + D1 标签可见性仍登记未清。
 
-# 4. 推荐启动顺序（下一个会话即可开工）
+# 4. 推荐启动顺序（07-03 原排期，已大半落地 → 见 §7）
+
+> **⚠️ 本节为 07-03 原始排期，已过时**：Phase A/B/C/D + Phase I P0 + Phase M stdio 均已于 07-05 落地（见 §5.1.x），E1-E5 基线也已写掉。**现行下一会话顺序见 §7**，剩余活集中在 §6 台账。本节保留作历史。
 
 1. **Phase R**（用户在场，半天）：三回归 + E 基线 + 新件确认 → 关 P1 账。
 2. 并行开 **A0 盘点** + **Phase B 第一组抽取**（无人值守安全，产出证据与纯移动 diff）。
@@ -181,9 +185,64 @@ P1 的验收欠账 + 本轮新件的真机确认，一次跑完：
 - **Phase I P0 远程确认链路（7d4fd467，合同 `2026-07-05-phase-I-p0-remote-confirmation-implementation.md`）**：卡→渠道（emitter 双出口 + agent_channel_threads 反查 + 纯文本序列化）；答案→卡（入站拦截：编号/原文/前缀解析、取消词、失败回格式指引；复用唯一 submit/cancel core）。codec 7✓ + service 5✓；frozen-call login-fill 超时经 HEAD 隔离 worktree 定性为既有红。**待真微信往返验收。**
 - **Phase M 第一阶段 stdio 先行（合同 `2026-07-05-phase-M-stdio-first-implementation.md`）**：stdio JSON-RPC 实装（换 stub，websocket 诚实失败）+ tools/list 发现（canonical 命名+目录）+ 启动装配（settings `mcp_servers_json`）+ **确认闸动态映射**（外部工具 readOnlyHint 才放行，其余 M2——关键治理缺口关闭）+ 每 server 24 上限可观测裁剪 + 真 schema 直出。真 spawn fixture e2e 7✓ + 家族回归 85✓ + 四 MCP gate 绿。**待真机 server-filesystem 接入验收。**
 
+### 5.1.7 远程观察面 + MCP/CLI 安装 + E1-E5 基线 + 主线切换（07-05 下午→晚，用户授权不间断）
+
+- **install_mcp_server 两阶段确认工具（fe3245c6，本地二进制补丁 729efe15）**：agent 代装 MCP server（用户可能只会说「帮我装 X」）。三形态源：npm 包 / `uvx:` / **本机可执行绝对路径**（Pencil.app 型自带 `mcp-server-darwin-arm64`，此前被 npx/uvx 白名单拒）。本地二进制机械准入（绝对/存在/常规/可执行 mode&0o111）+ 解释器黑名单（sh/bash/zsh/python/node/deno/env… 拒——它们等价运行任意脚本会架空确认卡）；phase2 confirmAck 回显描述符再校验；不收 env。
+- **远程 run 观察面对齐 + 发送慢根治（0b42411a + 729efe15）**：16:30 真微信日志钉死三点——①路径拒绝烧 2.5min（模型给 `~/…`/`$HOME/…` 被「必须绝对路径」拒两次）→ `channel_send_file` 机械展开家目录；②本地看不到工具调用/任务卡（渠道 run 缺 `sourceMessageId`，本地 run 一直有）→ 补齐，任务卡挂载与本地同构；③回复本地显两条（渠道 assistant 持久化双属主：main onSuccess + renderer 流式）→ 渠道 scope 唯一属主定 main、renderer 只展示不落库、瞬影段被真值行收编。新工具 `channel_send_file`（domain channel/group channel_outbound，ret=-3 响亮 `channel_delivery_failed`）+ MCP 设置页真管理面（换掉 not-shipped 占位）。
+- **run_setup_command 一次性安装/配置命令（257b607e，用户授权「任意命令+用户确认」）**：飞书/即梦 CLI 类跑完即退命令（≠常驻 MCP server，另一维度）。两阶段确认，**命令不经 shell**（数组式 spawn `shell:false`，元字符不被解释=根消注入），命令名元字符拒、超时（默认 180s/上限 600s）、输出 8KB 上限、非零退出转 warning 不炸 run。测试用 `npx @larksuite/cli@latest install` 锚定。
+- **E1-E5 体验基线脚本（f959281d）**：`scripts/experience-baseline.cjs` 从 tools/metrics 日志产五维数字，`--assert` 对 E2 泛化失败/E5 同页连读≥3 两条硬线把关。首基线：真流式 0.727、E5 回执缺陷 0、E4 信号 66。挂 `experience:baseline` / `verify:experience-baseline`（Phase R §4.1 度量落地）。
+- **分支合并 + 主线切换（4119ad23 + 77069252）**：feature/vertical-tabs 零冲突 FF 并入 main（详 §3）；主开发 worktree 切至 `ready-cowork-main-fix`，其 node_modules 改 symlink→`ready-cowork/node_modules`（避免 better-sqlite3 原生重编），typecheck/native:check 双 EXIT=0（详 §3）。
+- 各件行为测试随实现：channel-send-file 5✓（含 `expandChannelFilePath`）、mcp-install 8✓（含本地二进制）、run-setup-command 6✓、experience-baseline 5✓；typecheck/verify:stability EXIT=0。**注**：完整 `verify` 的 silent-catch gate 现红（166 未覆盖，refactor 搬迁历史欠账，非本批引入——详 §6.3）。
+
 
 - **Phase R 七轮真机回归**：R2/R3 已过；R1 六层根因逐轮修净（执行→判定→注入呈现→感知→纪律知识→尾部偏置/容器误杀，commits 见 PROGRESS 与 checklist 文档），待重启复验「发布」进图与全链闭环；R4/R5 未跑。D 工单扩至 D1-D13。
 - **Phase B**：B1-B3 完成，browser-tools 8484→~6100（净拆 + 真机修复回填）。
 - **A0/A1**：证据定稿，A2 手术图就绪（在场做）。
 - **新追加主线**：Phase I（微信 IM 远程完全体）+ Phase M（MCP 生态扩展），见上文两节——规划调研可与 A/B 并行，实施在 R 关账与分支决策后排队。
 - dev 环境事故定案（07-04 深夜二次复核推翻旧结论）：swap 说被"重启后原样复现"证伪；真根因=tab 创建空白 primer 双导航把偶发 renderer seatbelt 初始化失败升级成 Chromium 早期 RFH 交换裸 CHECK（breakpad 符号化定位 `~RenderFrameHostImpl`）。已修：tab-lifecycle-service 删 primer 改单导航+原生涂底，真机 120s 存活验证（标签恢复+真实站点加载）。"偶发沙箱失败"已由 D15 定罪并修复：chokidar v5 在 macOS 每文件一 kqueue fd，九个工作区 watcher 灌满主进程 fd 表（实测 10572），spawn 的沙箱 socketpair 必败——file-watcher darwin 已切原生 recursive fs.watch（每根 1 fd，对照实验 5836→0）。Electron 42.3.0→42.6.0 仍作独立补丁位升级候选（非本病根治项）。盖章破签名为独立隐患，sync-dev-icon 自愈已内置。
+
+# 6. 剩余工作台账（handoff，2026-07-05 关批后）
+
+> P3 主体（Phase A turn-engine 退役 / Phase B 巨文件手术 / Phase C DirectChat 退役 / Phase D 事件单源）+ Phase I P0 远程确认 + Phase M stdio 先行 + 本轮三安装工具 + E1-E5 基线**均已落地并入 main**（见 §5.1.x）。本节把「仍未关」的活集中一处，供下个会话（在 `ready-cowork-main-fix` worktree、分支 `main`）直接接手。每项标注：值守需求 / 是否阻塞 `verify` / 动工入口。
+
+## 6.1 真机复测欠账（需用户在场，多为「码完待验」）
+
+| 项 | 状态 | 关账判据 |
+|---|---|---|
+| R1 发布全链（R18 三盲区收口） | 码净（7d20a06a），待真机复测（曾称 R19 通过，需再确认全链闭环） | 「发布」点击落地→成功证据铸造一次通过 |
+| XHS 拖拽出视觉分析 / 账号采集冻结（R4/R5） | 未跑 | 各一次通过，或失败定位为站点/登录态并登记 |
+| Phase I P0 远程确认（真微信往返） | 码净（7d4fd467），待真微信 | 卡→微信→答复→卡 一次闭环 + 失败路径可读播报 |
+| Phase M server-filesystem 接入 | 码净（3e4611a2 stdio 先行），待真机 | settings 配一个 stdio server，跨 server 组合任务全程工具日志/授权/预算可观测 |
+| MCP 本地二进制（Pencil.app 型） | 码净（fe3245c6+729efe15），待真机 | agent 装一个本地二进制 server 成功 |
+| 飞书 CLI 安装（run_setup_command） | 码净（257b607e），待真机 | `npx @larksuite/cli@latest install` 经确认卡跑通 |
+
+## 6.2 D-register 残项 + 后台成长（各异，见工单）
+
+- **D7 LLM 维护回合（剩余最重，专门会话）**：符号禁令 gate-flip + LLM 预算门控 + staged 写卡监控。用户「后台自动积累产品观」的下一主件；与「涌现数据源第二批」合并规划（feedback 纪律：后台积累优先，勿再造前台按钮面）。合同先行、在场。
+- **D1 标签 tabOpened（renderer 焦点，在场）**：`tab-lifecycle-service.createTab` 建 agent/background tab 时不发 `browser:tabOpened`（现只 popup 路径发），致 agent 建的标签不显示。**⚠️ 命名撞车**：Phase D 内部步骤「D1 RunTimelineStamp 信封」已完成（b933a763），与本 D-register「D1 标签」是两回事，勿误判已关。
+- **D4 声明通道（决策题）**：`appendModelCriteria` 接裁决——新工具 vs 协议二选一，梯队二复验后缓办。
+- **D6 三测试语义仲裁（已知红，登记在案）**：agent-sdk-runtime 三测试与行动宣告闸的合同碰撞（宣告闸 vs fixture 谁对）。属分支既有红，非本轮新引入。
+- **D19 意图门控改判定（专门会话，需漂移评估）**：事件/活动类实时问题被判 local_chat → 浏览器组被抑制。分析已定稿（live-info 词表缺事件/活动类主题 + 无漏判账本），改判定动作未做。
+- **涌现数据源第二批（设计先行）**：prepare/harvest/forming 信号采集（日历联动/产物打开跟踪/文件聚类），与 D7 同属「后台成长」，合并规划。
+
+## 6.3 债务收敛（silent-catch 需先决策，其余多可无人值守）
+
+- **silent-catch：gate 现红（main HEAD 77069252 实测）**——`npm run verify` 在 `check-silent-catch` 失败。**注意 `verify:stability` 链不含此 gate**（只在完整 `verify`/`verify:e`），故此前多轮「stability 绿」从未覆盖它。实测：当前 **472 处 catch**，baseline 350 条（293 live / 57 stale，其中 11 指向已删文件如 turn-engine/DirectChatEngine），**166 处未覆盖 → 红**。根因=Phase B/C/D 文件手术把 catch 搬到新文件、`file:snippetHash` 键失配、baseline 未随迁全，**非 166 条新静默债**。
+  - **166 拆分**：**72 处 hash 可证字节级搬迁**（snippetHash 在 baseline 里存在，只是换了文件——安全重锚）；**94 处 novel-hash**（搬迁中重排 或 真新债，需逐个眼校，集中在 `agent-control/*` 近期拆分文件，多为每文件 1 处）。
+  - **先决（关红）**：重锚 baseline——72 直接续锚；94 逐校，**重排搬迁的续锚、真新债补 metric/log/throw，不得盲跑 `--update` 把新债一起 bless**（违「净不增」纪律）。→ gate 回绿。
+  - **后续（清偿）**：才谈用户说的「分批清偿」——把 baseline 里真静默的 catch 逐批补可观测、缩减 350→…。「净不增/微还债」纪律指的是这一步，**目前未开始**。
+- **C5-b 失联簇逐个裁决（禁 bulk 删）**：DirectChatEngine 删除暴露 8 组零消费符号，须逐个对照路线裁决「删 vs 待接线」——`error-contract.ts`(deriveAgentErrorContract)、`resolveRecentSkillTaskRun`（skill 恢复 DB 兜底，SDK live 无 provider）、`resolveExecutionIntentContext`、run-capability-controller 的 `prepareInitialRun/reconcileAfterBrowserDecision`、`applyRunBudgetHint`（预算记账「接线进行中」，倾向待接线）、execution-tool-config `buildToolGuidance` 系、`DesignToolLoopOrchestrator`、`VideoFallbackService`。
+- **ipc-contract 残项**：26 条既有违规已部分归绿（8839ff62），残项登记。
+- **vertical-tabs 自身残项**：4 个 source-grep 合同待改 + 浮层跨窗拖拽未接（HTML5 DnD 跨不了窗，需 Electron 原生 startDrag）。其「D1 标签可见性」与 §6.2 的 D1 同源。
+
+## 6.4 Phase I/M 深化（合同先行 + 专门会话）
+
+- **Phase I P1-P4**：P1 远程进度投影 + 续跑入口（checkpoint/恢复按钮的 IM 等价物）；P2 ret=-3 出站失效检测与自愈/降级播报 + 「已连接≠在线」语义；P3 附件双向（IM→资源层→任务 / 产物→IM 回投）；P4 能力面接线（`remote_channel` profile 现为死配置，远程 run 实跑 local_chat 全量能力，盘活后按 scope 精调）。
+- **Phase M 第二阶段**：OAuth / websocket 传输（现诚实 `transport_not_implemented`）、consent UI、健康检查/断线语义、外部工具面预算策略深化、设置页审计面。
+
+# 7. 下一会话推荐顺序（取代 §4，在 main-fix / 分支 main）
+
+1. **先关 `verify` 红**（§6.3，半天，可无人值守起步）：silent-catch 重锚——72 直接续锚 + 94 眼校（重排续锚 / 真新债修）。否则 main 上每次 `npm run verify` 都红，掩盖后续真回归。
+2. **真机复测批**（§6.1，用户在场，半天）：R1 全链 + Phase I P0 微信往返 + Phase M server-filesystem + MCP 本地二进制 + 飞书 CLI，一次跑完关账；顺带 XHS 拖拽/采集（R4/R5）。
+3. **D7 + 涌现数据源第二批**（§6.2，专门会话，合同先行）：剩余最重的产品件（后台自动积累产品观）。
+4. **穿插**（多可无人值守或短在场）：D19 意图门控改判定、C5-b 逐个裁决、D4 声明通道、D6 三测试仲裁、vertical-tabs source-grep 合同；Phase I/M 深化按 §6.4 各自开会话排期。
