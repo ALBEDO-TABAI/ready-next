@@ -4,6 +4,12 @@
 
 ## 当前真值摘要
 
+- `2026-07-05` **R1 十八轮：发布点击无效三层根治**（7d20a06a，第十七轮真机日志+截图几何反推定案）：
+  - 死区理论对十七轮不成立：逃生扫描已命中「发布」且补点坐标(671,851)/模型手瞄(641,849)均在实测按钮范围内、事件可信，页面仍无变化。三个盲区收口：①扫描器带 disabled/真实 rect/遮挡状态，act 命中 disabled 目标机械拒绝（target_disabled），可信指针无效后升级组合树直接 el.click()；②delta bodyText 前 1000 字符看不见 body 末尾校验 toast——新增瞬时提示嗅探，act/click_at 失效路径回传 pageNotices；③locate(send) 对 closed shadow 全盲（十七轮第一名竟是「添加商品」）——dash-tag 宿主组合树扫描增补候选，「发布」以 send_button 进列表。
+  - click_at 黑洞收口：打在 dash-tag 宿主上回传 composedTarget/shadowCandidates/pageNotices。
+  - 监督闸另一半真相：listener 永不摘除，run 结束后用户亲手点「发布」也被吞+弹「等待确认」；改为仅 agent 驱动期生效（bounds-lock 令牌+活跃前台会话判据），pending 胶囊 TTL 过期补推送，listener 去重。
+  - silent-catch 账本净还 2（HEAD 168→166）；shadow-hit-test 新测试 5✓+守卫 skip；typecheck/verify:stability/build 全绿。待第十九轮真机复测。
+
 - `2026-07-05` **R1 十六轮 + 两裁决 + Phase D 完成**：
   - R1 十六轮根治"接管闸吞自家输入"（CDP 注入会触发 before-input-event 的旧假设证伪；直通登记后模型键击真实生效、窗口缩放开关消失）+ 字段容量硬拒（正文永远进不了 64 字标题框）+ 评分器容量出局 + map 给空编辑器占位符名。
   - 裁决①复原任务卡进度 message 保真（c8e566a4 通杀回退，6/26 既有红归绿）；裁决②recall 钉随菜单合并演化重锚+死肢摘除。
