@@ -113,7 +113,7 @@ P1 的验收欠账 + 本轮新件的真机确认，一次跑完：
 原悬点：主线全部工作堆在 `feature/vertical-tabs`。**2026-07-05 用户拍板合并回主线，已执行**：因 `main` 相对 merge-base ahead=0，`feature/vertical-tabs` 纯线性领先 403 提交，走**零冲突 fast-forward**（`05c2d5a1..f959281d`），main worktree（`ready-cowork-main-fix`）合并前后均干净。合并后 `main == feature/vertical-tabs == f959281d`，分叉归零。
 
 - **环境注记（✅ 2026-07-05 已解决）**：main-fix worktree 原 node_modules 是自有旧副本，缺 `@tabler/icons-react`/`pdf2json` 等后加依赖（8 个 `Cannot find module` typecheck error 源于此，非合并缺陷）。已按 newtab 同款约定把 main-fix 的 node_modules 改为 symlink → `ready-cowork/node_modules`（已构建好的完整树，避免 better-sqlite3 原生重编风险），旧副本移除。验证：main-fix `npm run typecheck` EXIT=0（8 error 清零）、`npm run native:check` EXIT=0（Electron 42.3.0 ABI 146 加载 better-sqlite3）。
-- **后续开发（主线已切 main-fix）**：`ready-cowork-main-fix` 现为主线开发 worktree（分支 `main`，HEAD 与 vertical-tabs 同步）；后续提交直接进 main。注意 main-fix、newtab 两 worktree 共享 `ready-cowork/node_modules`（symlink），在 main-fix 内 `npm install <新依赖>` 会写入共享树——若要 main-fix 完全独立，届时在其内 `npm install` 替换该 symlink 即可。vertical-tabs 的 4 个 source-grep 合同残项 + D1 标签可见性仍登记未清。
+- **后续开发（✅ 2026-07-05 晚 topology 收敛，取代上条 main-fix 过渡方案）**：因 `main == feature/vertical-tabs`（主线无支线未含的新增），**弃用独立 main-fix worktree**——已 `git worktree remove` 掉 `ready-cowork-main-fix`，把本会话所在 worktree（目录仍名 `ready-cowork-newtab`，可 `git worktree move … ready-cowork-main` 改名）`git checkout main`，并删除已全合并的 `feature/vertical-tabs` 分支。现 mainline 开发唯一 worktree = 该目录（分支 `main`，node_modules 仍 symlink→`ready-cowork/node_modules`，native:check/typecheck 已 EXIT=0 复验）；后续提交直接进 main。**heads-up**：本地 `main` 上游被配成 `origin/codex/readyguy`（非 origin/main），裸 `git push` 会推错远程，推前先确认。vertical-tabs 的 4 个 source-grep 合同残项仍登记未清（见 §6.3）。
 
 # 4. 推荐启动顺序（07-03 原排期，已大半落地 → 见 §7）
 
@@ -191,7 +191,7 @@ P1 的验收欠账 + 本轮新件的真机确认，一次跑完：
 - **远程 run 观察面对齐 + 发送慢根治（0b42411a + 729efe15）**：16:30 真微信日志钉死三点——①路径拒绝烧 2.5min（模型给 `~/…`/`$HOME/…` 被「必须绝对路径」拒两次）→ `channel_send_file` 机械展开家目录；②本地看不到工具调用/任务卡（渠道 run 缺 `sourceMessageId`，本地 run 一直有）→ 补齐，任务卡挂载与本地同构；③回复本地显两条（渠道 assistant 持久化双属主：main onSuccess + renderer 流式）→ 渠道 scope 唯一属主定 main、renderer 只展示不落库、瞬影段被真值行收编。新工具 `channel_send_file`（domain channel/group channel_outbound，ret=-3 响亮 `channel_delivery_failed`）+ MCP 设置页真管理面（换掉 not-shipped 占位）。
 - **run_setup_command 一次性安装/配置命令（257b607e，用户授权「任意命令+用户确认」）**：飞书/即梦 CLI 类跑完即退命令（≠常驻 MCP server，另一维度）。两阶段确认，**命令不经 shell**（数组式 spawn `shell:false`，元字符不被解释=根消注入），命令名元字符拒、超时（默认 180s/上限 600s）、输出 8KB 上限、非零退出转 warning 不炸 run。测试用 `npx @larksuite/cli@latest install` 锚定。
 - **E1-E5 体验基线脚本（f959281d）**：`scripts/experience-baseline.cjs` 从 tools/metrics 日志产五维数字，`--assert` 对 E2 泛化失败/E5 同页连读≥3 两条硬线把关。首基线：真流式 0.727、E5 回执缺陷 0、E4 信号 66。挂 `experience:baseline` / `verify:experience-baseline`（Phase R §4.1 度量落地）。
-- **分支合并 + 主线切换（4119ad23 + 77069252）**：feature/vertical-tabs 零冲突 FF 并入 main（详 §3）；主开发 worktree 切至 `ready-cowork-main-fix`，其 node_modules 改 symlink→`ready-cowork/node_modules`（避免 better-sqlite3 原生重编），typecheck/native:check 双 EXIT=0（详 §3）。
+- **分支合并 + 主线切换（4119ad23 + 77069252）**：feature/vertical-tabs 零冲突 FF 并入 main（详 §3）；主开发 worktree 切至 `ready-cowork-main-fix`（**当日晚即弃用移除、mainline 收敛到 newtab worktree，见 §3 末**），node_modules symlink→`ready-cowork/node_modules`（避免 better-sqlite3 原生重编），typecheck/native:check 双 EXIT=0（详 §3）。
 - 各件行为测试随实现：channel-send-file 5✓（含 `expandChannelFilePath`）、mcp-install 8✓（含本地二进制）、run-setup-command 6✓、experience-baseline 5✓；typecheck/verify:stability EXIT=0。**注**：完整 `verify` 的 silent-catch gate 现红（166 未覆盖，refactor 搬迁历史欠账，非本批引入——详 §6.3）。
 
 
@@ -203,7 +203,7 @@ P1 的验收欠账 + 本轮新件的真机确认，一次跑完：
 
 # 6. 剩余工作台账（handoff，2026-07-05 关批后）
 
-> P3 主体（Phase A turn-engine 退役 / Phase B 巨文件手术 / Phase C DirectChat 退役 / Phase D 事件单源）+ Phase I P0 远程确认 + Phase M stdio 先行 + 本轮三安装工具 + E1-E5 基线**均已落地并入 main**（见 §5.1.x）。本节把「仍未关」的活集中一处，供下个会话（在 `ready-cowork-main-fix` worktree、分支 `main`）直接接手。每项标注：值守需求 / 是否阻塞 `verify` / 动工入口。
+> P3 主体（Phase A turn-engine 退役 / Phase B 巨文件手术 / Phase C DirectChat 退役 / Phase D 事件单源）+ Phase I P0 远程确认 + Phase M stdio 先行 + 本轮三安装工具 + E1-E5 基线**均已落地并入 main**（见 §5.1.x）。本节把「仍未关」的活集中一处，供下个会话（在 mainline worktree，目录 `ready-cowork-newtab`、分支 `main`）直接接手。每项标注：值守需求 / 是否阻塞 `verify` / 动工入口。
 
 ## 6.1 真机复测欠账（需用户在场，多为「码完待验」）
 
@@ -240,7 +240,7 @@ P1 的验收欠账 + 本轮新件的真机确认，一次跑完：
 - **Phase I P1-P4**：P1 远程进度投影 + 续跑入口（checkpoint/恢复按钮的 IM 等价物）；P2 ret=-3 出站失效检测与自愈/降级播报 + 「已连接≠在线」语义；P3 附件双向（IM→资源层→任务 / 产物→IM 回投）；P4 能力面接线（`remote_channel` profile 现为死配置，远程 run 实跑 local_chat 全量能力，盘活后按 scope 精调）。
 - **Phase M 第二阶段**：OAuth / websocket 传输（现诚实 `transport_not_implemented`）、consent UI、健康检查/断线语义、外部工具面预算策略深化、设置页审计面。
 
-# 7. 下一会话推荐顺序（取代 §4，在 main-fix / 分支 main）
+# 7. 下一会话推荐顺序（取代 §4，在 mainline worktree / 分支 main）
 
 1. **先关 `verify` 红**（§6.3，半天，可无人值守起步）：silent-catch 重锚——72 直接续锚 + 94 眼校（重排续锚 / 真新债修）。否则 main 上每次 `npm run verify` 都红，掩盖后续真回归。
 2. **真机复测批**（§6.1，用户在场，半天）：R1 全链 + Phase I P0 微信往返 + Phase M server-filesystem + MCP 本地二进制 + 飞书 CLI，一次跑完关账；顺带 XHS 拖拽/采集（R4/R5）。
