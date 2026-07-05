@@ -50,6 +50,7 @@
 - `depth={37}`
 - `ior={1.34}`
 - `dome={5}`
+- `profile="squircle"`（2026-07-06：超椭圆-4 边缘滚落，折弯集中最外缘；回退='circular'）
 - `strength={6.4}`
 - `blur={3.5}`
 - `frost={0}`
@@ -81,7 +82,16 @@
 
 优先顺序：
 
-1. 继续改 `refraction-map.ts` 的边缘位移曲线，让左右弧边出现更自然的压弯感。
+1. ~~继续改 `refraction-map.ts` 的边缘位移曲线，让左右弧边出现更自然的压弯感。~~
+   **已落地（2026-07-06）**：`profile: 'circular' | 'squircle'` 曲线族——squircle 为
+   超椭圆-4 滚落 `H = depth·(1−(1−t)⁴)^¼`（斜率闭式与 glass.outpacestudios.com 的
+   物理模型同型），生产输入框已切 squircle，`#/liquid-test` 有「边缘曲线」切换可 A/B。
+   贴图物理性质由 liquid-glass-refraction-map.test.ts 曲线族用例钉死（rim 集中/内侧
+   回平/默认曲线逐字节零漂移）。
+1b. **色散（aberration）定案不启用**：参考案例的 chromatic fringe 依赖不透明背景；
+   本输入框在半透明 vibrancy 之上，分通道重组无法保持预乘 alpha，>0 即亮度塌到
+   ~1/3（LiquidLens 注释在案）。仅 `#/liquid-test` 可玩；若未来出现不透明背板的
+   玻璃面（如实心玻璃变体上的浮层），可在那里评估。
 2. 保持单一实时投影层，不新增边缘镜像 DOM 层。
 3. 如果需要 Swift 原生那种“贴弧边反射”，先在位移图里做采样方向实验，而不是叠一个视觉贴片。
 4. 如果后续 Electron/Chromium 修复了透明窗口 blur 限制，可以重新评估是否减少投影层 blur/filter 负担。

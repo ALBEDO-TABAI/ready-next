@@ -10,6 +10,7 @@ import { LiquidLens, type LiquidLensProps } from './components/ui/liquid-glass/L
  */
 
 interface LensConfig {
+  profile: 'circular' | 'squircle'
   width: number
   height: number
   radius: number
@@ -34,6 +35,7 @@ const DEFAULT_CONFIG: LensConfig = {
   height: 120,
   radius: 28,
   bevel: 24,
+  profile: 'squircle',
   depth: 12,
   ior: 1.5,
   dome: 8,
@@ -50,9 +52,9 @@ const DEFAULT_CONFIG: LensConfig = {
 }
 
 const PRESETS: Record<string, Partial<LensConfig>> = {
-  composer: { radius: 18, bevel: 10, depth: 37, ior: 1.29, dome: 0, strength: 2.05, blur: 13, frost: 0, blurBeforeRefraction: true, saturation: 1.18, brightness: 1.05, contrast: 0.84, aberration: 0, engine: 'backdrop' },
-  demo: { radius: 32, bevel: 30, depth: 16, ior: 1.6, dome: 12, strength: 4, blur: 0.8, frost: 10, saturation: 1.4, brightness: 1.02, contrast: 1, aberration: 3 },
-  extreme: { radius: 40, bevel: 48, depth: 28, ior: 1.9, dome: 20, strength: 6, blur: 0, frost: 30, saturation: 1.5, brightness: 1.05, contrast: 1.05, aberration: 8 },
+  composer: { profile: 'squircle', radius: 18, bevel: 10, depth: 37, ior: 1.29, dome: 0, strength: 2.05, blur: 13, frost: 0, blurBeforeRefraction: true, saturation: 1.18, brightness: 1.05, contrast: 0.84, aberration: 0, engine: 'backdrop' },
+  demo: { profile: 'squircle', radius: 32, bevel: 30, depth: 16, ior: 1.6, dome: 12, strength: 4, blur: 0.8, frost: 10, saturation: 1.4, brightness: 1.02, contrast: 1, aberration: 3 },
+  extreme: { profile: 'circular', radius: 40, bevel: 48, depth: 28, ior: 1.9, dome: 20, strength: 6, blur: 0, frost: 30, saturation: 1.5, brightness: 1.05, contrast: 1.05, aberration: 8 },
 }
 
 interface SliderSpec {
@@ -208,6 +210,7 @@ export default function LiquidTest() {
           depth={config.depth}
           ior={config.ior}
           dome={config.dome}
+          profile={config.profile}
           strength={config.strength}
           blur={config.blur}
           frost={config.frost}
@@ -286,6 +289,21 @@ export default function LiquidTest() {
                 onClick={() => setScene(key)}
               >
                 {label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="lab-panel__row">
+          <span className="lab-panel__caption">边缘曲线</span>
+          <div className="lab-panel__toggle-group">
+            {(['squircle', 'circular'] as const).map((profile) => (
+              <button
+                key={profile}
+                className={config.profile === profile ? 'is-active' : ''}
+                onClick={() => update('profile', profile)}
+              >
+                {profile}
               </button>
             ))}
           </div>

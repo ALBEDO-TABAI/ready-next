@@ -6,7 +6,7 @@ import {
   type CSSProperties,
   type ReactNode,
 } from 'react'
-import { buildRefractionMap } from './refraction-map'
+import { buildRefractionMap, type RefractionEdgeProfile } from './refraction-map'
 
 /**
  * Real refractive liquid-glass surface.
@@ -35,6 +35,11 @@ export interface LiquidLensProps {
    * the "thick glass" feel.
    */
   dome?: number
+  /**
+   * Edge rolloff shape（见 refraction-map.ts）：'squircle' 把折弯集中到最外缘、
+   * 内侧更快回平；'circular' 为历史默认曲线。
+   */
+  profile?: RefractionEdgeProfile
   /** Extra multiplier on the physical displacement, 1 = physical. */
   strength?: number
   /** Backdrop blur in px, applied after refraction. */
@@ -93,6 +98,7 @@ export function LiquidLens({
   bevel = 20,
   depth = 10,
   ior = 1.5,
+  profile = 'circular',
   dome = 0,
   strength = 1,
   blur = 2,
@@ -136,7 +142,7 @@ export function LiquidLens({
       lastKey = key
 
       const resolution = Math.min(Math.max(window.devicePixelRatio || 1, 1), 2)
-      const built = buildRefractionMap({ width, height, radius, bevel, depth, ior, dome, resolution })
+      const built = buildRefractionMap({ width, height, radius, bevel, depth, ior, dome, profile, resolution })
       const canvas = document.createElement('canvas')
       canvas.width = built.pixelWidth
       canvas.height = built.pixelHeight
@@ -171,7 +177,7 @@ export function LiquidLens({
       observer?.disconnect()
       if (frame && cancelFrame) cancelFrame(frame)
     }
-  }, [radius, bevel, depth, ior, dome])
+  }, [radius, bevel, depth, ior, dome, profile])
 
   // Chromium never re-renders a bound backdrop reference filter when its
   // primitives mutate in place — every graph-affecting param must be part of

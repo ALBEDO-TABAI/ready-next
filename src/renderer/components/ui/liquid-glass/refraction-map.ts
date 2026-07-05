@@ -17,6 +17,16 @@
  * Pure math, no DOM — keep it that way so it stays trivially testable.
  */
 
+/**
+ * Edge height profile of the bevel band.
+ * - 'circular'（旧默认）：四分之一圆弧 H = depth·√(t(2−t))。
+ * - 'squircle'：超椭圆-4 滚落 H = depth·(1−(1−t)⁴)^¼ —— 折弯更集中在最外缘、
+ *   内侧更快回平（规格 §6.1 追求的「弧边压弯感」；斜率闭式
+ *   dH/dt = depth·(1−t)³/(1−(1−t)⁴)^¾，与 glass.outpacestudios.com 的
+ *   实测最优曲线同型）。
+ */
+export type RefractionEdgeProfile = 'circular' | 'squircle'
+
 export interface RefractionGeometry {
   /** Element size in CSS px. */
   width: number
@@ -35,6 +45,8 @@ export interface RefractionGeometry {
    * staying optically flat. 0 = flat slab (only the bevel band refracts).
    */
   dome?: number
+  /** Edge rolloff shape; default 'circular'（与历史贴图逐字节一致）. */
+  profile?: RefractionEdgeProfile
   /** Bitmap pixels per CSS px (devicePixelRatio), default 1. */
   resolution?: number
 }
@@ -100,15 +112,23 @@ export function buildRefractionMap(geometry: RefractionGeometry): RefractionMap 
         continue // outside the glass, or a fully flat slab: neutral
       }
 
-      // Circular bevel: height 0 at the rim, `depth` where it meets the top.
+      // Bevel band: height 0 at the rim, `depth` where it meets the top.
       // gx/gy accumulate -∇H (the outward tilt of the surface normal).
       let heightField = depth
       let gx = 0
       let gy = 0
       if (depth > 0 && inside < bevel) {
         const t = inside / bevel
-        heightField = depth * Math.sqrt(t * (2 - t))
-        const slope = (depth * (1 - t)) / (bevel * Math.sqrt(t * (2 - t)))
+        let slope: number
+        if (geometry.profile === 'squircle') {
+          const u = 1 - t
+          const base = 1 - u * u * u * u
+          heightField = depth * base ** 0.25
+          slope = (depth * u * u * u) / (bevel * base ** 0.75)
+        } else {
+          heightField = depth * Math.sqrt(t * (2 - t))
+          slope = (depth * (1 - t)) / (bevel * Math.sqrt(t * (2 - t)))
+        }
         gx = slope * outX
         gy = slope * outY
       }

@@ -95,3 +95,37 @@ test('resolution scales the bitmap but keeps displacement in css px', () => {
   // Same optics ⇒ same normalization (sampling grid differs slightly).
   assert.ok(Math.abs(retina.maxDisplacement - base.maxDisplacement) < 0.2)
 })
+
+// ── 2026-07-06 边缘曲线族（规格 §6.1 / glass.outpacestudios.com 同型模型）──
+
+test('profile 缺省与 circular 逐字节一致（历史贴图零漂移守卫）', () => {
+  const legacy = buildRefractionMap(GEOMETRY)
+  const explicit = buildRefractionMap({ ...GEOMETRY, profile: 'circular' })
+  assert.equal(explicit.maxDisplacement, legacy.maxDisplacement)
+  assert.deepEqual(Array.from(explicit.data), Array.from(legacy.data))
+})
+
+test('squircle 把折弯集中到最外缘：rim 处更强、带内侧更平', () => {
+  const circular = buildRefractionMap({ ...GEOMETRY, profile: 'circular' })
+  const squircle = buildRefractionMap({ ...GEOMETRY, profile: 'squircle' })
+  // 以绝对位移（CSS px）比较，消掉各自归一化增益
+  const shiftAt = (map: ReturnType<typeof buildRefractionMap>, x: number, y: number) => {
+    const { r } = channelAt(map, x, y)
+    return Math.abs(r - 128) / 127 * map.maxDisplacement
+  }
+  const midY = Math.floor(GEOMETRY.height / 2)
+  const rimX = GEOMETRY.width - 3            // bevel 带最外缘（t≈0.1）
+  const innerX = GEOMETRY.width - Math.round(GEOMETRY.bevel * 0.8) // 带内侧（t≈0.8）
+  assert.ok(
+    shiftAt(squircle, rimX, midY) > shiftAt(circular, rimX, midY),
+    'squircle 在最外缘的横向位移应大于 circular（折弯更集中）',
+  )
+  assert.ok(
+    shiftAt(squircle, innerX, midY) < shiftAt(circular, innerX, midY),
+    'squircle 在带内侧应更快回平（位移小于 circular）',
+  )
+  // 内部平面区仍然中性（两种曲线共享的硬性质）
+  const center = channelAt(squircle, Math.floor(GEOMETRY.width / 2), midY)
+  assert.equal(center.r, 128)
+  assert.equal(center.g, 128)
+})
