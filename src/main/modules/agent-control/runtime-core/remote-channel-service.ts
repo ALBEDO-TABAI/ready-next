@@ -24,7 +24,9 @@
 // ConversationScopeStore injection closures re-bind through it automatically)
 // and for `sendLongTextToChannel` (called from the stay-behind `sendScoped`
 // channel ack path).
-import { BrowserWindow } from 'electron'
+// Phase I P0 —— electron 只在日历建议推送一处使用：惰性 createRequire 解析
+// （database.ts 同款先例），让本模块可被纯 Node 行为测试直接导入。
+import { createRequire } from 'module'
 import { createHash, randomUUID } from 'crypto'
 // L5-C-Universal: channel-agnostic remote-message → calendar-event detector.
 // Imported here so the inbound-channel pipeline can opportunistically push
@@ -60,6 +62,17 @@ import type {
   ConversationScopeMessage,
 } from '../contracts/types'
 import type { PendingInboundChannel } from './runtime-helpers'
+import {
+  cancelAskUserQuestionsCardCore,
+  submitAskUserQuestionsAnswersCore,
+  type AskUserQuestionsCardEvent,
+} from '../../tools/builtins/ask-user-questions'
+import { getAskUserQuestionsStore } from '../../tools/builtins/ask-user-questions-store'
+import {
+  formatAskCardAnswerReceipt,
+  formatAskUserQuestionsCardForChannel,
+  parseChannelAskCardReply,
+} from './remote-confirmation-codec'
 
 export interface RemoteChannelServiceDeps {
   db: DatabaseManager
@@ -90,6 +103,9 @@ export interface RemoteChannelServiceDeps {
     agent: string,
     sender: string
   ) => ConversationScope
+  /** Phase I P0 —— 渠道答案提交成功后与本地 IPC submit 同构地刷新 run 进度
+   *  （懒闭包绑定 orchestrator，可选：缺席只影响任务卡进度时序，不影响答案落地）。 */
+  refreshActiveRunProgress?: (agent: string, scopeId: string | undefined, requestId: string) => void
   createConversationMessage: (
     scopeId: string,
     payload: {
@@ -361,6 +377,7 @@ export class RemoteChannelService {
       }
       const suggestions = detectRemoteChannelEventSuggestions(message, { autoDetectOverride })
       if (suggestions.length === 0) return
+      const { BrowserWindow } = createRequire(import.meta.url)('electron') as typeof import('electron')
       const mainWin = BrowserWindow.getAllWindows().find((w) => !w.isDestroyed())
       if (!mainWin) return
       for (const suggestion of suggestions) {
@@ -421,6 +438,16 @@ export class RemoteChannelService {
       scope: this.deps.refreshScope(scope.id),
       message: inboundMessage
     })
+
+    // Phase I P0 —— 远程确认答案拦截（合同条款 3）：scope 内有 pending
+    // ask/confirm 卡时，这条入站消息是对卡的回应——run 正被卡阻塞，"当新
+    // 任务跑"是伪并发。提交/取消/格式指引三选一，全部回渠道回执，不派发
+    // 新 run；无 pending 卡时行为与现状一致。
+    const askCardHandled = await this.tryResolvePendingAskCardFromInbound(scope.id, inboundText, pending)
+    if (askCardHandled) {
+      this.markInboundChannelEvents(pending.eventIds, pending.channelId, 'done', null)
+      return
+    }
 
     // L5-C-Universal: opportunistically detect calendar events in this
     // inbound message. Channel-agnostic — works for any
@@ -936,6 +963,116 @@ export class RemoteChannelService {
       '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
     }
     return table[ext] || fallback
+  }
+
+  /**
+   * Phase I P0 —— ask/confirm 卡渠道转投（合同条款 1）：卡的 scope 命中
+   * agent_channel_threads 反查时，序列化成纯文本发往 (channelId, remoteThread)。
+   * 本地 renderer push 由注册点保留（双出口）；非渠道 scope 返回 false 零
+   * 行为变化；反查/发送失败只记 metric，不影响本地卡可答性（条款 5）。
+   */
+  async maybeForwardAskCardToChannel(event: AskUserQuestionsCardEvent): Promise<boolean> {
+    const scopeKey = String(event.scopeId || event.sessionId || '').trim()
+    if (!scopeKey) return false
+    let thread: { channel_id: string; remote_thread: string } | null = null
+    try {
+      thread = this.deps.db.getAgentChannelThreadBySession(scopeKey)
+    } catch {
+      // silent-catch: 反查失败视同非渠道 scope，本地卡照常可答
+      thread = null
+    }
+    if (!thread || !thread.channel_id) return false
+    const text = formatAskUserQuestionsCardForChannel(event.questions)
+    const delivery = await this.sendChannelReply(
+      thread.channel_id,
+      thread.remote_thread || 'default',
+      text
+    )
+    logAgentMetric('remote_ask_card_forwarded', {
+      cardId: event.cardId,
+      scopeId: scopeKey,
+      channelId: thread.channel_id,
+      success: delivery.success,
+      ...(delivery.success ? {} : { error: String(delivery.error || '').slice(0, 200) })
+    })
+    return delivery.success
+  }
+
+  /**
+   * Phase I P0 —— 入站消息 → pending 卡答案（合同条款 3/4）。返回 true 表示
+   * 本条消息已被答案路径消费（不再派发新 run）。答案落地复用与本地 IPC /
+   * frozen-call respond 完全相同的 submit/cancel core（唯一决策机）。
+   * 生产唯一调用方是 flushInboundChannel；公开仅为行为测试直测该合同。
+   */
+  async tryResolvePendingAskCardFromInbound(
+    scopeId: string,
+    inboundText: string,
+    pending: PendingInboundChannel
+  ): Promise<boolean> {
+    const store = getAskUserQuestionsStore()
+    const card = store.findPendingForScope(scopeId)
+    if (!card) return false
+    const parsed = parseChannelAskCardReply(inboundText, card.questions)
+    if (parsed.kind === 'cancel') {
+      const result = cancelAskUserQuestionsCardCore(card.cardId, 'user_cancelled', {
+        store,
+        db: this.deps.db,
+        logMetric: (name, payload) => logAgentMetric(name, payload)
+      })
+      logAgentMetric('remote_ask_card_answered', {
+        cardId: card.cardId,
+        scopeId,
+        outcome: 'cancel',
+        success: result.success
+      })
+      await this.sendChannelReply(
+        pending.channelId,
+        pending.thread,
+        result.success
+          ? '已取消本次确认，任务将按未确认继续处理。'
+          : `取消没有生效（${'error' in result ? result.error : '未知原因'}）。`
+      ).catch(() => undefined)
+      return true
+    }
+    if (parsed.kind === 'error') {
+      logAgentMetric('remote_ask_card_reply_unparsed', { cardId: card.cardId, scopeId })
+      await this.sendChannelReply(pending.channelId, pending.thread, parsed.guidance)
+        .catch(() => undefined)
+      return true
+    }
+    const result = submitAskUserQuestionsAnswersCore(card.cardId, parsed.answers, {
+      store,
+      db: this.deps.db,
+      logMetric: (name, payload) => logAgentMetric(name, payload)
+    })
+    logAgentMetric('remote_ask_card_answered', {
+      cardId: card.cardId,
+      scopeId,
+      outcome: 'submit',
+      success: result.success,
+      ...(result.success ? {} : { errorKind: result.errorKind })
+    })
+    if (result.success) {
+      if (card.agent && card.requestId) {
+        this.deps.refreshActiveRunProgress?.(
+          card.agent,
+          card.scopeId || card.sessionId || undefined,
+          card.requestId
+        )
+      }
+      await this.sendChannelReply(
+        pending.channelId,
+        pending.thread,
+        formatAskCardAnswerReceipt(card.questions, parsed.answers)
+      ).catch(() => undefined)
+    } else {
+      await this.sendChannelReply(
+        pending.channelId,
+        pending.thread,
+        `这次确认没有生效（${result.error}）。若原任务已超时结束，请直接重新发起。`
+      ).catch(() => undefined)
+    }
+    return true
   }
 
   private splitLongText(text: string, maxChars = 1800): string[] {

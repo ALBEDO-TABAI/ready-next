@@ -8,6 +8,7 @@ import {
 } from '../../../../shared/ai-providers'
 import type { BrowserController } from '../../browser-engine/ipc-handler'
 import { resumeWaitingHumanBrowserTaskFromBridge } from '../../browser-engine/task-event-bridge'
+import type { AskUserQuestionsCardEvent } from '../../tools/builtins/ask-user-questions'
 import type { AgentManager } from '../../claude-bridge/agent-manager'
 import type { MultimodalBlock } from '../contracts/run-contracts'
 import {
@@ -402,6 +403,11 @@ export class AgentControlRuntime extends EventEmitter {
     createConversationMessage: (scopeId, payload) =>
       this.conversationScopes.createConversationMessage(scopeId, payload),
     refreshScope: (scopeId) => this.conversationScopes.refreshScope(scopeId),
+    // Phase I P0 —— 渠道答案提交后与本地 IPC submit 同构刷新 run 进度
+    // （懒闭包：orchestrator 在构造函数中才赋值，调用发生在答案时刻）。
+    refreshActiveRunProgress: (agent, scopeId, requestId) => {
+      this.orchestrator.refreshActiveRunProgress(agent, scopeId, requestId)
+    },
   })
   constructor(agentManager: AgentManager, browserController?: BrowserController) {
     super()
@@ -1731,6 +1737,14 @@ export class AgentControlRuntime extends EventEmitter {
   // bound through the runtime, exactly like the R4 wiring promised.
   private async handleInboundChannel(payload: Record<string, unknown>): Promise<void> {
     return this.remoteChannel.handleInboundChannel(payload)
+  }
+
+  /**
+   * Phase I P0 —— ask/confirm 卡渠道转投公开口（claude-bridge 的 emitter
+   * 注册点在本地 push 之外追加调用；非渠道 scope 内部零动作）。
+   */
+  async forwardAskUserCardToRemoteChannel(event: AskUserQuestionsCardEvent): Promise<boolean> {
+    return this.remoteChannel.maybeForwardAskCardToChannel(event)
   }
 
   private mapConversationRow(

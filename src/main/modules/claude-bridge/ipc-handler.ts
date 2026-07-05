@@ -731,8 +731,13 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
     askUserQuestionsSweepRanForBoot = true
   }
   registerAskUserQuestionsCardEmitter((event) => {
-    if (mainWindow.isDestroyed()) return
-    mainWindow.webContents.send('agent:askUserQuestions:push', event)
+    if (!mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('agent:askUserQuestions:push', event)
+    }
+    // Phase I P0 —— 远程 scope 的卡同时转投微信线程（本地 push 保持原样，
+    // 双出口）。非渠道 scope 在 runtime 内零动作；转投失败只记 metric，
+    // 本地卡照常可答（合同条款 1/5）。
+    void runtime?.forwardAskUserCardToRemoteChannel(event).catch(() => undefined)
   })
   registerAskUserQuestionsCardPersistor((args) => persistAskUserQuestionsCardPending(args))
   // EP1-I3-2 — frozen-call confirmation store (M2/M3 action-confirmation

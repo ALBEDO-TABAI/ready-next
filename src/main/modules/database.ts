@@ -2837,6 +2837,19 @@ export class DatabaseManager {
     return row ?? null
   }
 
+  /**
+   * Phase I P0 — scope → 渠道线程反查：远程 run 中产生的 ask/confirm 卡带
+   * scopeId，转投微信需要还原 (channelId, remoteThread)。取最近更新的一条
+   * （同 scope 理论上唯一，upsert 以 channel+thread 为键）。
+   */
+  getAgentChannelThreadBySession(sessionId: string): AgentChannelThreadRecord | null {
+    if (!this.db || !sessionId) return null
+    const row = this.db.prepare(
+      'SELECT * FROM agent_channel_threads WHERE session_id = ? ORDER BY updated_at DESC LIMIT 1'
+    ).get<AgentChannelThreadRecord>(sessionId)
+    return row ?? null
+  }
+
   upsertAgentChannelThread(payload: {
     channelId: string
     remoteThread: string

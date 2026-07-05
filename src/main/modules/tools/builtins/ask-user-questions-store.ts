@@ -118,6 +118,19 @@ export class AskUserQuestionsStore {
     return null
   }
 
+  /**
+   * Phase I P0 — 远程入站答案拦截按 scope 找 pending 卡。渠道 run 的卡
+   * scopeId 与 sessionId 同值别名（现行模型），两个字段都匹配以免登记侧
+   * 只填了其一。
+   */
+  findPendingForScope(scopeKey: string | null): AskUserQuestionsCardRecord | null {
+    if (!scopeKey) return null
+    for (const record of this.records.values()) {
+      if (record.scopeId === scopeKey || record.sessionId === scopeKey) return record
+    }
+    return null
+  }
+
   hasPendingForRun(agent: string, sessionId: string | null | undefined, requestId: string): boolean {
     if (!agent || !sessionId || !requestId) return false
     for (const record of this.records.values()) {
