@@ -126,6 +126,15 @@ P1 的验收欠账 + 本轮新件的真机确认，一次跑完：
 
 ### 5.1.1 续批（07-05 凌晨，B8 + I/M 调研）
 
+### 5.1.3 R1 第十五轮（07-05 上午，第十四轮真机日志定案后）
+
+- **第十四轮观测链首次全程可见**，日志钉死两根因（`6c04ee6d` 修复）：
+  1. **升级点击点空**：escalation 两次触发（reason=closed_shadow_host ✓）、可信指针两次落 css=(569,851)、escalatedChanged=false ×2——换算视口 1026×896 后，该点在「暂存离开」与「发布」之间的**死区**：`xhs-publish-btn` host 包围盒横跨整个按钮组，rect 中心不在红按钮上。修复=升级前经 CDP 组合树命中测试（`DOM.getNodeForLocation` 穿透 closed root + `Runtime.callFunctionOn` 直接引用读文本）在 host rect 内水平扫描，与 map 目标名/disambiguation **唯一**匹配才点；多候选不盲点（误点「暂存离开」会毁流程），候选连 normalized 坐标回给模型直接 click_at。新模块 `browser-shadow-hit-test.ts`。
+  2. **正文灌进标题**：02:46:59 type_at 落点死区/标题区，焦点滞留刚 fill 完的标题框，正文全文打进标题，模型盲试 4 分钟（02:51:10 改 act fill 编辑器 target 一次成功）。修复=type_at 打字前验 activeElement 可编辑性（buildFocusedEditableProbeJs），不可编辑响亮拒绝 `type_target_not_editable`；打完回读 `typedInto`（label+textHead）同轮可见落点；跨帧编辑器（kind=frame）放行不误伤。
+  - 配套：clickPoint 带 host rect、pointTarget 带 tag（空 label 编辑器不再误判脱靶）、escalation 结果/日志全程含 via/pointTarget/candidates；discipline 与 XHS 站点卡填写策略翻转（**标题正文均优先 act fill target**，type_at 仅兜底且必看 typedInto；标题 textarea 自增高告诫）。
+  - 合同随实现同步：probe-collect clickPoint 钉点补 rect；site-card-alignment 旧锚 `iframe/OOPIF` 重锚 `frame tree`（第十三轮卡改写遗留，HEAD 已红）。测试：三套件 77✓（新增 5 行为测试）；typecheck/verify:stability 0。
+  - 下一轮复测观测点：`act escalation scan ... candidates=[...] matched=...`、`act escalation firing via=scan_name_match|scan_disambiguation_match|rect_center`、`type_at resolved ... typed=... typedInto=...`。
+
 ### 5.1.2 B8-D 战役收官（07-05 凌晨-上午，用户授权不间断）
 
 - **R1 第十三轮修复包**（d9073471）：升级点击的 changed 假信号压制修净（closed-shadow host 无条件升级 + 全程日志）、click_at 结果带 pointTarget 闭环坐标系误用、power_eval 表单直写劝阻注记 + 纪律/站点卡铁则。D18 权限自动拒真机首验通过（18:44:25 geolocation agent_auto_deny 无弹窗）。

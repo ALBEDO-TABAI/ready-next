@@ -4,6 +4,11 @@
 
 ## 当前真值摘要
 
+- `2026-07-05` **R1 第十五轮：shadow host 死区扫描 + type_at 焦点护栏**（6c04ee6d，第十四轮真机日志定案）：
+  - 第十四轮观测链首次全程可见：升级点击确已触发但点在 `xhs-publish-btn` host 包围盒中心——该盒横跨「暂存离开+发布」按钮组，中心是死区。新增 CDP 组合树命中扫描（穿透 closed shadow root）唯一匹配真按钮才点；多候选不盲点、候选连坐标回给模型。
+  - type_at 焦点护栏：点击后焦点不可编辑响亮拒打（第十四轮正文灌进标题盲试 4 分钟）；打完回读 typedInto 落点。discipline/站点卡填写策略翻转为标题正文均优先 act fill target。
+  - 三套件 77✓（新增 5 行为测试）；typecheck/verify:stability 0。
+
 - `2026-07-05` **B8-D runtime 双文件完全拆分收官 + R1 第十三轮修复**（两泳道八批并行子代理，用户授权不间断）：
   - runtime.ts 4327→2029（12 服务出壳，X 级枢纽留守），runtime-manager.ts 3800→1113（8 服务出壳）；23 个 D 级子服务全部落地，Phase C 的 typed 落点（ConversationScopeStore/ProjectionSyncCoordinator）就位。
   - R1 十三轮：升级 changed 假信号（closed-shadow 无条件升级+日志）、click_at pointTarget 回读（坐标系误用闭环）、power_eval 表单直写劝阻；权限自动拒真机首验通过。
