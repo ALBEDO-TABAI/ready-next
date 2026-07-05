@@ -29,7 +29,7 @@ purpose: >
 岔路的净收益归位主线：正向 gate 注册表（防"建了没接"复发）、gate-flip 纪律、
 真实退出码验证纪律、~1.4k 死债清除——这些都是 P3 手术的安全设施。
 
-> **⚠️ gate 现状（2026-07-05 实测 77069252）**：`verify:stability` 绿；但**完整 `npm run verify` 现红**——`check-silent-catch` 报 **166 处未覆盖**。关键：`verify:stability` 链**不含**此 gate（只在完整 `verify`/`verify:e` 里），所以此前多轮「stability 绿」从未覆盖它。根因=Phase B/C/D 文件手术把 catch 搬到新文件、`file:snippetHash` 键失配、baseline 未随迁全——**不是 166 条新静默债**（72 处 hash 可证字节级搬迁 + 94 novel-hash 待眼校）。**下个会话先重锚 baseline 关红**，详 §6.3 / §7.1。
+> **✅ silent-catch 已回绿（2026-07-05 完成，72628891）**：重锚 + 第一批清偿落地——`check-silent-catch` EXIT=0（166→0），baseline 350→355（293 live + 62 重锚键，57 stale 移除），94 novel 逐块眼校后全部注释自证清偿（0 入 baseline / 0 补 log）。**但完整 `npm run verify` 仍未全绿**——silent-catch 红揭开后暴露两个既有拦点（均 stash/HEAD~1 基线复验与本次无关，此前被掩蔽）：`verify:ipc-contract` **19 条**（18 条 browser-engine/ipc-handler.ts + 1 条 claude-bridge/run-timeline-emitter.ts:27）+ `npm run test` **73 fail/6610**（HEAD~1 基线 75 fail、零新增）——详 §6.3。
 
 # 1. 用户记忆三大项的核对结论
 
@@ -103,7 +103,7 @@ P1 的验收欠账 + 本轮新件的真机确认，一次跑完：
 
 | 项 | 内容 | 值守 |
 |---|---|---|
-| 债务清理包 | chat-panel-baseline CSS-in-tsx 崩溃修复 ✅（8839ff62）；ipc-contract 26 条部分归绿 ✅、残项登记；**silent-catch gate 现红（166 未覆盖，refactor 搬迁致 baseline 失配，须先重锚再分批清偿——详 §6.3）** | 重锚需决策，清偿可无人值守 |
+| 债务清理包 | chat-panel-baseline CSS-in-tsx 崩溃修复 ✅（8839ff62）；ipc-contract 26 条部分归绿 ✅、残 19 条实测在案（详 §6.3）；silent-catch 重锚 + 第一批清偿 ✅（72628891，166→0 gate 回绿——详 §6.3） | 后续批次清偿可无人值守 |
 | 意图门控漏判专项 | 真机 14:00 事件类：应进浏览器工作流的消息被判 local_chat → 浏览器组被抑制。改进 `resolveTaskTypeFromBrowserWorkflowText`/意图分类信号面 + 漏判账本 | 分析可无人值守，改判定需评估漂移 |
 | D-register 残项 | D1 标签 tabOpened（renderer 焦点，在场，**⚠️ 勿与已完成的 Phase D 内部步骤「D1 RunTimelineStamp」混淆**）；D4 声明通道设计（决策：新工具 vs 协议）；D6 三测试语义仲裁（宣告闸 vs fixture，属分支既有红）；**D7 LLM 维护回合**（专门会话：符号禁令 gate-flip + LLM 预算 + staged 监控——用户"后台自动积累"产品观的下一主件）；D19 意图门控改判定（分析定稿待实施）；涌现数据源第二批（与 D7 合并规划）。**逐项现状见 §6.2** | 各异，见工单 |
 | 涌现数据源第二批 | prepare/harvest/forming 的信号采集（日历联动/产物打开跟踪/文件聚类）；与 D7 同属"后台成长"，合并规划，避免再造前台面（feedback 记忆：后台积累优先） | 设计先行 |
@@ -227,12 +227,11 @@ P1 的验收欠账 + 本轮新件的真机确认，一次跑完：
 
 ## 6.3 债务收敛（silent-catch 需先决策，其余多可无人值守）
 
-- **silent-catch：gate 现红（main HEAD 77069252 实测）**——`npm run verify` 在 `check-silent-catch` 失败。**注意 `verify:stability` 链不含此 gate**（只在完整 `verify`/`verify:e`），故此前多轮「stability 绿」从未覆盖它。实测：当前 **472 处 catch**，baseline 350 条（293 live / 57 stale，其中 11 指向已删文件如 turn-engine/DirectChatEngine），**166 处未覆盖 → 红**。根因=Phase B/C/D 文件手术把 catch 搬到新文件、`file:snippetHash` 键失配、baseline 未随迁全，**非 166 条新静默债**。
-  - **166 拆分**：**72 处 hash 可证字节级搬迁**（snippetHash 在 baseline 里存在，只是换了文件——安全重锚）；**94 处 novel-hash**（搬迁中重排 或 真新债，需逐个眼校，集中在 `agent-control/*` 近期拆分文件，多为每文件 1 处）。
-  - **先决（关红）**：重锚 baseline——72 直接续锚；94 逐校，**重排搬迁的续锚、真新债补 metric/log/throw，不得盲跑 `--update` 把新债一起 bless**（违「净不增」纪律）。→ gate 回绿。
-  - **后续（清偿）**：才谈用户说的「分批清偿」——把 baseline 里真静默的 catch 逐批补可观测、缩减 350→…。「净不增/微还债」纪律指的是这一步，**目前未开始**。
+- **silent-catch：✅ gate 已回绿（2026-07-05，72628891）**——重锚 + 第一批清偿完成：72 relocated 实例（62 个 file:hash 键）续锚新位置、57 stale 移除（含 11 指向已删文件），baseline 350→355；94 novel 逐块眼校后**全部注释自证清偿**（45 处前缀补标既有理由注释 / 46 处新增注释行 / 3 处行内注释；0 入 baseline、0 补 log——均为结构化降级/错误回传或已注释的 intentional swallow，无一真哑吞）。未用盲 `--update`。验证：gate/typecheck/verify:stability/move-only 全 EXIT=0。
+  - **后续（分批清偿）**：baseline 剩 355 条真静默 catch 逐批补可观测、缩减 355→…。候选起点：browser-discipline-asset 载入失败降级空纪律片段（prompt-assets 家族惯例静默 fallback，已注释自证；若要失败响亮再补 warn）。「净不增/微还债」纪律作用于这一步。
 - **C5-b 失联簇逐个裁决（禁 bulk 删）**：DirectChatEngine 删除暴露 8 组零消费符号，须逐个对照路线裁决「删 vs 待接线」——`error-contract.ts`(deriveAgentErrorContract)、`resolveRecentSkillTaskRun`（skill 恢复 DB 兜底，SDK live 无 provider）、`resolveExecutionIntentContext`、run-capability-controller 的 `prepareInitialRun/reconcileAfterBrowserDecision`、`applyRunBudgetHint`（预算记账「接线进行中」，倾向待接线）、execution-tool-config `buildToolGuidance` 系、`DesignToolLoopOrchestrator`、`VideoFallbackService`。
-- **ipc-contract 残项**：26 条既有违规已部分归绿（8839ff62），残项登记。
+- **ipc-contract 残项**：26 条既有违规已部分归绿（8839ff62）。**07-05 实测（silent-catch 回绿后暴露）**：干净 HEAD 上 `verify:ipc-contract` 红，**19 条**——18 条集中 `browser-engine/ipc-handler.ts`（9 个 sendToRenderer 站点被两条规则各报一次：NON_LITERAL_PUSH 无 allowlist + non_literal_push 无匹配 call site）+ 1 条 `claude-bridge/run-timeline-emitter.ts:27`。它是完整 `verify` 链现在的**第一拦点**（silent-catch 之后），此前被 silent-catch 红掩蔽。
+- **npm test 既有红（07-05 实测，第二拦点）**：链尾 `npm run test` **73 fail / 6610**（HEAD 72628891），HEAD~1 基线对比 **75 fail、零新增**（差 2 条为计时敏感 flaky：note-collection auto-continue 对、direct-summary redact）。失败面主要是 UI source-grep 合同断言过时（FileTree 行背景 rgba 值、glass/motion 结构等）+ discipline 资产超 2500 预算 + 若干行为测试；与 silent-catch 清偿无关（注释不改运行时）。完整 `verify` 回全绿需清这两账。
 - **vertical-tabs 自身残项**：4 个 source-grep 合同待改 + 浮层跨窗拖拽未接（HTML5 DnD 跨不了窗，需 Electron 原生 startDrag）。其「D1 标签可见性」与 §6.2 的 D1 同源。
 
 ## 6.4 Phase I/M 深化（合同先行 + 专门会话）
@@ -242,7 +241,7 @@ P1 的验收欠账 + 本轮新件的真机确认，一次跑完：
 
 # 7. 下一会话推荐顺序（取代 §4，在 mainline worktree / 分支 main）
 
-1. **先关 `verify` 红**（§6.3，半天，可无人值守起步）：silent-catch 重锚——72 直接续锚 + 94 眼校（重排续锚 / 真新债修）。否则 main 上每次 `npm run verify` 都红，掩盖后续真回归。
+1. ~~先关 `verify` 红：silent-catch 重锚~~ ✅ **已完成（07-05，72628891，gate 回绿 166→0）**。完整 `verify` 剩两个既有拦点（§6.3）：ipc-contract 19 条（browser-engine 集中 18 条，可无人值守裁决 allowlist vs 改字面量）+ npm test 73 fail（UI source-grep 合同过时为主，需逐类裁决「改断言 vs 改样式」，部分可无人值守）。
 2. **真机复测批**（§6.1，用户在场，半天）：R1 全链 + Phase I P0 微信往返 + Phase M server-filesystem + MCP 本地二进制 + 飞书 CLI，一次跑完关账；顺带 XHS 拖拽/采集（R4/R5）。
 3. **D7 + 涌现数据源第二批**（§6.2，专门会话，合同先行）：剩余最重的产品件（后台自动积累产品观）。
 4. **穿插**（多可无人值守或短在场）：D19 意图门控改判定、C5-b 逐个裁决、D4 声明通道、D6 三测试仲裁、vertical-tabs source-grep 合同；Phase I/M 深化按 §6.4 各自开会话排期。

@@ -10,6 +10,8 @@ source:
 
 # 0. 一句话
 
+> **✅ §2.1 silent-catch 重锚已完成（2026-07-05，72628891）**：gate 回绿 166→0，94 novel 全部注释自证清偿（0 入 baseline / 0 补 log），baseline 350→355。本文 §3 playbook 已履约，留作历史。新发现：verify 链仍有两个**既有**拦点此前被 silent-catch 红掩蔽——`verify:ipc-contract` 19 条 + `npm run test` 73 fail（HEAD~1 基线对比零新增，归因铁证）——见 route §6.3。剩余项按 §2 顺序 2-4 继续。
+
 上一会话把 worktree topology 收敛完（mainline = `ready-cowork-newtab` on `main`），并把剩余工作台账写进路线文档 **§6（剩余项逐条）+ §7（执行顺序）**。正要动手 §7.1 **silent-catch 重锚**（`npm run verify` 现红）时上下文过重，转交。**新会话：先读本文 §1-§3，再按 §2 顺序推进。** 本文只补「怎么动手」的细节，全量台账仍看 route §6/§7。
 
 # 1. 立刻上手（环境 & 现状 & 授权）
