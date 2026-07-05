@@ -29,7 +29,12 @@ status: in-progress
 
 ## 1.3 曝光决策
 
-与 D2 criteria-self-check reminder 同门槛：结果型任务（multi_step/research/media/browser_transaction）曝光；direct_answer/short_task 不曝光（省 token 面，门槛是代码不是模型）。
+> **实施修正（2026-07-05）**：原定按 taskType 门槛曝光；实测工具曝光按
+> capability group 粒度（无 per-tool taskType 机制），为此新造机制违「简单
+> 优先」。定案：挂 `agent_interaction` 组（ask_user_questions 同族主 agent
+> 结构化工具面），何时使用由工具描述 +（D2）criteria-self-check reminder
+> 引导；taskType 相关性天然由 finalizer 侧承载——非结果型任务本就不跑
+> criteria 裁决，声明落库但无消费，无害且可观测。
 
 # 2. D7 — LLM 维护回合生产接线
 

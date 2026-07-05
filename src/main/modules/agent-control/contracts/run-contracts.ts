@@ -374,6 +374,9 @@ export interface TaskProjectionRecord {
   /** EP3-A1 — task owner agent (migration 056). Write value comes ONLY from
    *  the A4 handoff adoption; everything else reads. */
   ownerAgentId?: string | null
+  /** D4 — 模型经 declare_completion_criteria 声明的补充验收标准。写值唯一
+   *  来自该工具（整组替换）；finalizer 终态经 appendModelCriteria 并入裁决。 */
+  modelCriteria?: string[] | null
   /** EP3-PK1 — packet marker (09 §2): 'parent' | 'child' | null. The ONLY
    *  packet discriminator across UI/stats/adapters/tests. */
   packetRole?: 'parent' | 'child' | null

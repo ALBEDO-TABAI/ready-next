@@ -5,7 +5,7 @@ import { logAgentMetric } from '../metrics'
 import { collectResponseDigestProof, collectRunStateProof, collectArtifactProof, appendProofRefs } from '../quality/proof-collector'
 import { parseRunStateJson } from '../task-projection/run-state-schema'
 import { adjudicateTerminalOutcome, appendCheckIns, type CheckInRecord } from '../quality/task-adjudicator'
-import { resolveCriteria, type SkillExecutionForm } from '../quality/criteria-templates'
+import { appendModelCriteria, resolveCriteria, type SkillExecutionForm } from '../quality/criteria-templates'
 import type { TaskType } from '../../../../shared/task-types'
 import {
   isRunMetaTerminalStatus,
@@ -627,6 +627,21 @@ function recordTerminalAdjudication(
       hasStepCompletionProof: hasProofKind(proofRefs, new Set(['run_state', 'task_event'])),
       hasDocumentDeliveryProof: hasDocumentDeliveryProof(proofRefs),
     })
+    // D4 — 模型经 declare_completion_criteria 声明的补充标准并入裁决：
+    // m1/m2 命名空间追加在模板项之后，模板不可被覆盖（appendModelCriteria 合同）。
+    const declaredModelCriteria = Array.isArray(projection.modelCriteria)
+      ? projection.modelCriteria.filter((text): text is string => typeof text === 'string' && text.trim().length > 0)
+      : []
+    const criteriaItems = declaredModelCriteria.length > 0
+      ? appendModelCriteria(criteria.items, declaredModelCriteria.map((text) => ({ text })))
+      : criteria.items
+    if (declaredModelCriteria.length > 0) {
+      logAgentMetric('model_criteria_merged', {
+        taskId: outcome.taskId,
+        templateCount: criteria.items.length,
+        modelCount: declaredModelCriteria.length,
+      })
+    }
     // P2-5 — derive durable LEARNING refs from the verified proof set. These
     // are the run's persistent evidence (artifacts on disk, confirmed
     // transactions, run-state/task-event outcomes) that the specialist
@@ -637,7 +652,7 @@ function recordTerminalAdjudication(
     const { verdict, checkIn } = adjudicateTerminalOutcome({
       terminalStatus: status,
       terminalReason,
-      criteria: criteria.items,
+      criteria: criteriaItems,
       proofs: proofRefs,
       learningRefs,
       mode: 'enforce',

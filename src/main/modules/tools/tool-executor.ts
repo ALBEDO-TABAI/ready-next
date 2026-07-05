@@ -59,6 +59,7 @@ import { executeDocumentTool } from './document-tools'
 import { executeGeneralResearchTool } from './general-research-tools'
 import { executeMapTool } from './map-tools'
 import { executeAskUserQuestions } from './builtins/ask-user-questions'
+import { executeDeclareCompletionCriteria } from './builtins/declare-completion-criteria'
 import { executeConfirmSpecialistBlueprint } from './builtins/confirm-specialist-blueprint'
 import { executeProposeHandoff } from './builtins/propose-handoff'
 import { executeProposeSpecialistBlueprint } from './builtins/propose-specialist-blueprint'
@@ -812,6 +813,23 @@ async function executeToolCallInner(
           })
 
         case 'agent_interaction':
+          // D4 — 声明验收标准：校验在 builtin 内代码强制，落 projection 行
+          // modelCriteria（整组替换），finalizer 终态合并裁决。
+          if (toolName === 'declare_completion_criteria') {
+            const runtime = context.runtime
+            const store = runtime?.getTaskProjectionStoreForFinalize?.()
+            if (!runtime || !store) {
+              return createToolExecutionOutput('验收标准未登记：runtime 不可用。', {
+                shape: 'json',
+                data: { errorKind: 'runtime_unavailable', toolName },
+              })
+            }
+            return executeDeclareCompletionCriteria(args, {
+              taskId: context.taskId ?? null,
+              sessionId: context.sessionId ?? null,
+              updateTaskModelCriteria: (taskId, criteria) => store.update(taskId, { modelCriteria: criteria }),
+            })
+          }
           const semanticJudge = toolName === 'confirm_specialist_blueprint' || toolName === 'propose_specialist_blueprint'
             ? resolveSpecialistFoundationSemanticJudge()
             : null

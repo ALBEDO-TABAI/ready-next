@@ -90,6 +90,14 @@ note: >
 
 # D4 — appendModelCriteria 接裁决（梯队二复验后缓办，2026-07-03）
 
+> **2026-07-05 已完成**：通道裁决为**新工具** `declare_completion_criteria`
+> （协议方案因散文解析=隐式状态机被否，违「模型只做判断题」）。落
+> projection.modelCriteria（整组替换、代码侧校验 1-8 条/≤120 字符）；
+> finalizer 终态 appendModelCriteria 并入裁决（模板不可覆盖）；
+> model_criteria_declared/merged 双账本；mandated gate 条目
+> dark-defect→live-required（wiring 三锚 + firedLedger）。合同
+> 2026-07-05-p3-backlog-closeout §1。以下为历史记录。
+
 **现状（本轮复验确认）**：`appendModelCriteria`（`criteria-templates.ts:179`）纯函数已存在（模板项后追加模型声明标准，m1/m2 命名空间，不可覆盖模板），零调用者。裁决 live 路径 = `run-finalizer.ts:623 resolveCriteria → adjudicateTerminalOutcome`，criteria 已落库（P2-2 前半）。
 
 **为何缓办（比 handoff 预估重）**：**捕获通道不存在**——全仓无任何字段/工具入参/解析点承载"模型规划期声明的验收标准"（grep acceptanceCriteria/modelCriteria/declaredCriteria 零命中；steps/packet 均非验收标准语义，混用会造成裁决漂移）。接线的真实工作 = 设计模型可见的声明通道（规划工具 schema 加字段或 D2 的 reminder 方案捎带）+ 落库 + finalizer merge + 裁决漂移监控。改模型可见面 + 动裁决脊柱，无人值守不宜。

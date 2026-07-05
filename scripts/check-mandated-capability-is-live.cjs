@@ -150,13 +150,32 @@ const REGISTRY = Object.freeze([
     },
   },
   {
+    // D4 gate-flip (2026-07-05)：声明通道裁决为新工具 declare_completion_criteria
+    // （agent_interaction 组），落 projection.modelCriteria（整组替换），
+    // finalizer 终态 appendModelCriteria 并入裁决 + model_criteria_merged 账本。
     capability: 'appendModelCriteria',
-    status: 'dark-defect',
-    anchor: {
-      file: 'src/main/modules/agent-control/quality/criteria-templates.ts',
-      pattern: /export function appendModelCriteria\(/,
+    status: 'live-required',
+    wiring: [
+      {
+        name: 'declare tool registered on the agent_interaction surface',
+        file: 'src/main/modules/tools/agent-interaction-tool-defs.ts',
+        pattern: /'declare_completion_criteria'/,
+      },
+      {
+        name: 'tool executor dispatches the declare builtin',
+        file: 'src/main/modules/tools/tool-executor.ts',
+        pattern: /executeDeclareCompletionCriteria\(/,
+      },
+      {
+        name: 'finalizer merges declared criteria into adjudication',
+        file: 'src/main/modules/agent-control/runtime-core/run-finalizer.ts',
+        pattern: /appendModelCriteria\(criteria\.items/,
+      },
+    ],
+    firedLedger: {
+      file: 'src/main/modules/agent-control/runtime-core/run-finalizer.ts',
+      event: 'model_criteria_merged',
     },
-    register: { file: DEFER_REGISTER_REL, mention: 'appendModelCriteria' },
   },
   {
     capability: 'RunFeedbackRepository',
@@ -198,7 +217,8 @@ function readOrNull(root, rel) {
   }
 }
 
-function check({ root = REPO_ROOT } = {}) {
+// registry 仅测试态可注入（机制覆盖用合成条目）；生产恒用本表。
+function check({ root = REPO_ROOT, registry = REGISTRY } = {}) {
   const errors = []
   // D7 gate-flip: MIXED_MAINTENANCE_ROUND_REL 已 live，不再计入 unwired 约束面。
   const allUnwired = new Set([
@@ -206,7 +226,7 @@ function check({ root = REPO_ROOT } = {}) {
     ...UNWIRED_MAINTENANCE_FILES,
   ])
 
-  for (const entry of REGISTRY) {
+  for (const entry of registry) {
     const tag = `[${entry.capability}]`
 
     if (entry.status === 'live-required') {

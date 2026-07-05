@@ -23,7 +23,39 @@ export const AGENT_INTERACTION_TOOL_NAMES: readonly string[] = [
   'propose_specialist_blueprint',
   'confirm_specialist_blueprint',
   'rename_specialist_agent',
+  'declare_completion_criteria',
 ] as const
+
+const DECLARE_COMPLETION_CRITERIA_DESCRIPTION = [
+  '在规划或执行早期，把你对「这个任务做到什么程度才算完成」的具体判断登记为补充验收标准（1-8 条，每条 ≤120 字符的可验证陈述）。终态裁决时这些标准会与系统模板标准合并核对——你声明了什么，收尾时就会被按什么检查。',
+  '',
+  '何时使用：结果型任务（多步/研究/媒体/浏览器交易）在开工时就能写出比通用模板更具体的完成判据（如「产物落到 outputs 目录并给出路径」「三个来源交叉验证过再下结论」）。',
+  '',
+  '使用约束：',
+  '- 重复调用是整组替换，不是追加；一次把当前认知下的完整标准列全。',
+  '- 每条必须是可验证的一句话，不写抱负式空话（「做到最好」不合格）。',
+  '- 系统模板标准不可被覆盖或降低；你的声明只能补充。',
+  '',
+  '不要使用的场景：direct_answer / 闲聊类回合；标准与系统模板完全重合时（不必重复声明）。',
+].join('\n')
+
+const DECLARE_COMPLETION_CRITERIA_INPUT_SCHEMA = {
+  type: 'object',
+  properties: {
+    criteria: {
+      type: 'array',
+      minItems: 1,
+      maxItems: 8,
+      items: {
+        type: 'string',
+        description: '一条可验证的完成标准（≤120 字符），如「产物文件已写入并回报绝对路径」。',
+      },
+      description: '本任务的补充验收标准，整组替换式登记。',
+    },
+  },
+  required: ['criteria'],
+  additionalProperties: false,
+} as const
 
 const ASK_USER_QUESTIONS_DESCRIPTION = [
   '向用户弹出一张「结构化问题卡」，最多 5 道题，用户答完后答案会作为 tool result 回灌给你。两种典型触发场景：',
@@ -432,6 +464,11 @@ export function getAgentInteractionAnthropicTools(): Array<Record<string, unknow
       description: RENAME_SPECIALIST_AGENT_DESCRIPTION,
       input_schema: RENAME_SPECIALIST_AGENT_INPUT_SCHEMA,
     }),
+    normalizeAnthropicToolSchema({
+      name: 'declare_completion_criteria',
+      description: DECLARE_COMPLETION_CRITERIA_DESCRIPTION,
+      input_schema: DECLARE_COMPLETION_CRITERIA_INPUT_SCHEMA,
+    }),
   ]
 }
 
@@ -475,6 +512,14 @@ export function getAgentInteractionOpenAITools(): Array<Record<string, unknown>>
         name: 'rename_specialist_agent',
         description: RENAME_SPECIALIST_AGENT_DESCRIPTION,
         parameters: RENAME_SPECIALIST_AGENT_INPUT_SCHEMA,
+      },
+    }),
+    normalizeOpenAIToolSchema({
+      type: 'function',
+      function: {
+        name: 'declare_completion_criteria',
+        description: DECLARE_COMPLETION_CRITERIA_DESCRIPTION,
+        parameters: DECLARE_COMPLETION_CRITERIA_INPUT_SCHEMA,
       },
     }),
   ]

@@ -71,6 +71,10 @@ for (const row of rows) {
   write(root, 'src/renderer/components/ready/TaskPanel.tsx', 'export const panel = <EmergenceFeedSection onOpenScope={open} onOpenSettings={openSettings} />\n')
   write(root, MAINTENANCE_DRIVER_REL, 'import { runMaintenanceLlmRound } from "./maintenance-llm-round"\nexport async function runMaintenanceLlmRoundTick(deps) { return runMaintenanceLlmRound({}) }\n')
   write(root, MAINTENANCE_ROUND_REL, "export async function runMaintenanceLlmRound(deps) { logAgentMetric('maintenance_audit', {}) }\n")
+  // D4 gate-flip fixture: declare tool + executor dispatch + finalizer merge/ledger
+  write(root, 'src/main/modules/tools/agent-interaction-tool-defs.ts', "export const AGENT_INTERACTION_TOOL_NAMES = ['ask_user_questions', 'declare_completion_criteria']\n")
+  write(root, 'src/main/modules/tools/tool-executor.ts', 'import { executeDeclareCompletionCriteria } from "./builtins/declare-completion-criteria"\nexport const dispatch = () => executeDeclareCompletionCriteria({}, {})\n')
+  write(root, 'src/main/modules/agent-control/runtime-core/run-finalizer.ts', "const criteriaItems = appendModelCriteria(criteria.items, declared)\nlogAgentMetric('model_criteria_merged', {})\n")
 }
 
 test('gate passes on a fully-consistent baseline (also exercises deferred handshake against real unwired lists)', (t) => {
@@ -129,22 +133,31 @@ logAgentMetric('belief_decay_round_fired', {})
   assert.ok(result.errors.some((e) => e.includes('[crystallize-round]') && e.includes('缺失接线证据')))
 })
 
+// appendModelCriteria 已 gate-flip 为 live-required（D4）；dark-defect 机制
+// 改用合成 registry 条目保持分支覆盖。
+const SYNTHETIC_DARK_REGISTRY = [{
+  capability: 'synthetic-dark',
+  status: 'dark-defect',
+  anchor: { file: CRITERIA_REL, pattern: /export function appendModelCriteria\(/ },
+  register: { file: REGISTER_REL, mention: 'appendModelCriteria' },
+}]
+
 test('dark-defect anchor symbol disappearing fails', (t) => {
   const root = makeRoot(t)
   writeBaseline(root)
   write(root, CRITERIA_REL, 'export function somethingElse() {}\n')
-  const result = check({ root })
+  const result = check({ root, registry: SYNTHETIC_DARK_REGISTRY })
   assert.equal(result.ok, false)
-  assert.ok(result.errors.some((e) => e.includes('[appendModelCriteria]') && e.includes('锚点符号已消失')))
+  assert.ok(result.errors.some((e) => e.includes('[synthetic-dark]') && e.includes('锚点符号已消失')))
 })
 
 test('dark-defect without a register mention fails', (t) => {
   const root = makeRoot(t)
   writeBaseline(root)
   write(root, REGISTER_REL, '# 登记\n（空）\n')
-  const result = check({ root })
+  const result = check({ root, registry: SYNTHETIC_DARK_REGISTRY })
   assert.equal(result.ok, false)
-  assert.ok(result.errors.some((e) => e.includes('[appendModelCriteria]') && e.includes('必须挂工单')))
+  assert.ok(result.errors.some((e) => e.includes('[synthetic-dark]') && e.includes('必须挂工单')))
 })
 
 test('gate-flipped run-feedback fails when the renderer call site disappears', (t) => {
