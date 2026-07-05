@@ -135,6 +135,15 @@ P1 的验收欠账 + 本轮新件的真机确认，一次跑完：
   - 合同随实现同步：probe-collect clickPoint 钉点补 rect；site-card-alignment 旧锚 `iframe/OOPIF` 重锚 `frame tree`（第十三轮卡改写遗留，HEAD 已红）。测试：三套件 77✓（新增 5 行为测试）；typecheck/verify:stability 0。
   - 下一轮复测观测点：`act escalation scan ... candidates=[...] matched=...`、`act escalation firing via=scan_name_match|scan_disambiguation_match|rect_center`、`type_at resolved ... typed=... typedInto=...`。
 
+### 5.1.4 renderer 双拆分 + Phase C 全程收官（07-05 午后，用户授权不间断）
+
+- **Settings.tsx 3486 → 878**（六面板 + shared 出壳至 `src/renderer/pages/settings/`，re-export 保口，14 片段零残差证明 + silent-catch snippetHash 内容级旁证；5 合同测试重锚 + silent-catch/eslint baseline 随迁）；**useAgent.ts 2983 → 2119**（agent-store-types 253 + agent-store-helpers 714，32 处 export 前缀为唯一字节差；pendingSend coalescing/agentRuntimeDriver 等引 store 簇按铁律留守；导出面 38 符号零增减）。两泳道并行子代理 + pathspec 协议，各自 HEAD 基线证明零新增失败。
+- **Phase C 当日全程完成（DirectChatEngine 退役）**：C1 合同+调用面终审（ce8076b6，六职责解剖：sidecar/runCleanupRegistry/abort 机器/sessions 全暗线实锚）→ C2 DomainAdapterHost 活面平移 + parity 合同（3a0fa67a）→ C3 orchestrator 切换 + MultimodalBlock 迁 contracts 八导入方（49fb76fc）→ C4 引擎删除 + boundary gate 转存在性合同 → C5 19 处钉点三分法外科裁决（72920dc8，A 改锚 host/tool-catalog/ipc-handler/document-schemas、B 摘引擎私有约百余条、C 摘清单；document-tool-session-context 整文件删）。验证链：typecheck/boundary+三 gate/verify:stability/p6f 全绿；裁决套件 65/66。
+- **升级裁决项（既有红，非本批引入，隔离 worktree 背书）**：① memory-capture 行为红——根因 `c8e566a4`（06-26）`projectionSummaryForEvent` 对非 projectionOnly 事件返回 `titleForTool()` 丢弃 `event.message`，修复需生产语义裁决（改 tracker vs 改期望）；② chat-session-recall 的 renderer 钉 `visibleSessionRecallResults` 漂移（ChatPanel.tsx:954 已无 visible 过滤），renderer 在场队列。
+- **C5-b 登记（引擎删除暴露的失联簇，须逐个对照路线裁决"删 vs 待接线"，禁止bulk 删）**：`error-contract.ts`（deriveAgentErrorContract，类型+函数全零消费）、`resolveRecentSkillTaskRun`（skill 恢复 DB 兜底在 SDK live 无 provider）、`resolveExecutionIntentContext`、run-capability-controller 的 `prepareInitialRun/reconcileAfterBrowserDecision`、`applyRunBudgetHint`（预算记账"接线进行中"在案，倾向待接线）、execution-tool-config `buildToolGuidance` 系、`DesignToolLoopOrchestrator`、`VideoFallbackService`。
+- **Phase D 勘察合同骨架落笔**（`2026-07-05-D-run-timeline-event-single-source-survey.md`，enforce:false）：双通道证据（agent:stream 唯一发射点 ipc-handler:1472 / publishScopeRunEvent 23 处）、D1-D3 骨架、红线（finalizeRunOutcome 不动、run-continuity 仲裁进信封）；**实施需在场**（renderer 全域、白屏高危）。
+- silent-catch 账：引擎 5 条 catch 平移为 host 5 条（该 gate HEAD 即红的注册债，净零新增）；p6d 两违规（tool-runtime TOOL_ADMISSION + browser-tools ACTION_CONFIRMATION）均验证为既档/B7 拆分遗留。
+
 ### 5.1.2 B8-D 战役收官（07-05 凌晨-上午，用户授权不间断）
 
 - **R1 第十三轮修复包**（d9073471）：升级点击的 changed 假信号压制修净（closed-shadow host 无条件升级 + 全程日志）、click_at 结果带 pointTarget 闭环坐标系误用、power_eval 表单直写劝阻注记 + 纪律/站点卡铁则。D18 权限自动拒真机首验通过（18:44:25 geolocation agent_auto_deny 无弹窗）。

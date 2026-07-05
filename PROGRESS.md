@@ -4,6 +4,12 @@
 
 ## 当前真值摘要
 
+- `2026-07-05` **renderer 双拆分 + DirectChatEngine 全程退役（Phase C 完成）**：
+  - Settings.tsx 3486→878（六面板出壳 `pages/settings/`）、useAgent.ts 2983→2119（types/helpers 出壳）——双泳道并行子代理，字节级纯移证明，零新增失败。
+  - Phase C 当日五步走完：解剖合同（暗线实锚：sidecar/runCleanup/abort/sessions 全是只写不读死线）→ DomainAdapterHost 活面平移 → orchestrator 切换 → 引擎删除+存在性合同 → 19 处钉点三分法外科裁决。全仓不再有 DirectChatEngine。
+  - 升级裁决项（既有红）：memory-capture 行为红（根因 c8e566a4 丢 event.message）+ recall 合同 renderer 钉漂移；C5-b 失联簇登记（error-contract/DesignToolLoop/VideoFallback/预算 hint 等，须逐个裁决删 vs 接线）。
+  - Phase D 勘察合同骨架落笔（实施需在场）。commits：ce8076b6/3a0fa67a/49fb76fc/32a06ae6/72920dc8 + Settings 拆分。
+
 - `2026-07-05` **R1 第十五轮：shadow host 死区扫描 + type_at 焦点护栏**（6c04ee6d，第十四轮真机日志定案）：
   - 第十四轮观测链首次全程可见：升级点击确已触发但点在 `xhs-publish-btn` host 包围盒中心——该盒横跨「暂存离开+发布」按钮组，中心是死区。新增 CDP 组合树命中扫描（穿透 closed shadow root）唯一匹配真按钮才点；多候选不盲点、候选连坐标回给模型。
   - type_at 焦点护栏：点击后焦点不可编辑响亮拒打（第十四轮正文灌进标题盲试 4 分钟）；打完回读 typedInto 落点。discipline/站点卡填写策略翻转为标题正文均优先 act fill target。
