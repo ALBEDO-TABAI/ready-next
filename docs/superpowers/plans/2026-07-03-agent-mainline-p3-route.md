@@ -106,12 +106,12 @@ P1 的验收欠账 + 本轮新件的真机确认，一次跑完：
 | D-register 残项 | D1 标签 tabOpened（renderer 焦点，在场）；D4 声明通道设计（决策：新工具 vs 协议）；D6 三测试语义仲裁（宣告闸 vs fixture）；**D7 LLM 维护回合**（专门会话：符号禁令 gate-flip + LLM 预算 + staged 监控——用户"后台自动积累"产品观的下一主件） | 各异，见工单 |
 | 涌现数据源第二批 | prepare/harvest/forming 的信号采集（日历联动/产物打开跟踪/文件聚类）；与 D7 同属"后台成长"，合并规划，避免再造前台面（feedback 记忆：后台积累优先） | 设计先行 |
 
-# 3. 分支策略（需用户决策的唯一悬点）
+# 3. 分支策略（✅ 2026-07-05 已落定并执行）
 
-主线的全部工作现堆在 `feature/vertical-tabs`（含竖向标签栏自身未完成项：4 个 source-grep 合同待改 + D1 标签可见性）。选项：
-- **a）继续在本分支推进 P3，vertical-tabs 完成后一起合 main**（现状惯性，风险=分支越来越大）；
-- **b）把 agent 主线工作 cherry-pick/合回 main 或新开 agent-p3 分支，vertical-tabs 归位纯 UI 分支**（干净，但要一次分叉手术）。
-建议 b，在 Phase R 关账后做（回归通过=合并信心）。
+原悬点：主线全部工作堆在 `feature/vertical-tabs`。**2026-07-05 用户拍板合并回主线，已执行**：因 `main` 相对 merge-base ahead=0，`feature/vertical-tabs` 纯线性领先 403 提交，走**零冲突 fast-forward**（`05c2d5a1..f959281d`），main worktree（`ready-cowork-main-fix`）合并前后均干净。合并后 `main == feature/vertical-tabs == f959281d`，分叉归零。
+
+- **环境注记**：main-fix worktree 的 node_modules 是自有旧副本，缺 `@tabler/icons-react`/`pdf2json` 等后加依赖（8 个 `Cannot find module` typecheck error 源于此，非合并缺陷——newtab worktree 经 symlink 有完整依赖，同一提交 typecheck 0）。若要在 main-fix worktree 开发，先在其内 `npm install` 补齐。
+- **后续开发**：main 现为最新主线；后续提交进 main（或继续在 newtab worktree 的分支上提交后 fast-forward 同步 main，两者当前同步）。vertical-tabs 的 4 个 source-grep 合同残项 + D1 标签可见性仍登记未清。
 
 # 4. 推荐启动顺序（下一个会话即可开工）
 

@@ -4,6 +4,12 @@
 
 ## 当前真值摘要
 
+- `2026-07-05` **feature/vertical-tabs 合并回 main + E1-E5 基线 + 三类安装工具 + 远程观察面**：
+  - **分支合并（路线 §3 唯一悬点落定）**：main 相对 merge-base ahead=0，vertical-tabs 纯线性领先 403 提交，零冲突 fast-forward（`05c2d5a1..f959281d`）。合并后 main==vertical-tabs 分叉归零。main-fix worktree 的 8 个 typecheck error 全是它自有 node_modules 缺 @tabler/icons-react/pdf2json（环境非合并缺陷；newtab worktree 同提交 typecheck 0），要在 main-fix 开发先 npm install。
+  - **E1-E5 体验基线脚本**（experience-baseline.cjs + verify:experience-baseline）：真流式占比 0.727、E5 同页连读≥3 回执缺陷=0、E4 学习信号 66；--assert 对 E2/E5 硬线把关，首基线落 roadmap §1.1。
+  - **agent 三类安装能力**：install_mcp_server（npx/uvx + 本地二进制，Pencil.app 实锚）、run_setup_command（飞书/即梦 CLI 一次性命令，不经 shell 两阶段确认）、channel_send_file（远程文件直达，~/$HOME 展开）。
+  - **远程 run 观察面对齐**：渠道 run 补 sourceMessageId（任务卡挂载）、双回复根治（渠道 assistant 唯一属主 main、renderer 只展示）、路径归一（16:30 实锚 4 分钟里 2.5 分钟烧在路径被拒）。
+
 - `2026-07-05` **agent 代装 MCP 能力（install_mcp_server）**：非专业用户对 agent 说"帮我装个 XX 的 MCP"即可——两阶段合同镜像 install_skill：阶段 1 只读解析（npx/uvx 白名单+包名正则+shell 元字符拒绝，绝不落盘）→ ask 卡确认命令与风险 → 阶段 2 confirmAck 回传 pendingConfig 重新全量校验后写配置+重连+回报工具清单；附 list/remove；不收 env（密钥不走对话）。mcp-install-tool 6✓、四 MCP gate 绿。
 
 - `2026-07-05` **R1 十九轮通过收官 + 远程文件直达回传 + MCP 管理面**（0b42411a）：
