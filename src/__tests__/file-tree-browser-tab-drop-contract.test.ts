@@ -43,7 +43,11 @@ test('selected file rows use a brighter active surface instead of the generic ho
   const source = readWorkspaceFile('src/renderer/components/layout/FileTree.tsx')
 
   assert.doesNotMatch(source, /isActive \? \{ background: 'var\(--bg-hover\)' \} : \{\}/)
-  assert.match(source, /background: 'rgba\(255,\s*255,\s*255,\s*0\.36\)'/)
+  // 8ab48cd7 style(ui): checkpoint liquid glass polish — 行内 rgba(255,255,255,0.36) 收敛为共享 files-panel active 状态 token（含配套 shadow）
+  assert.match(
+    source,
+    /background: 'var\(--files-panel-state-active-bg\)',\s+boxShadow: 'var\(--files-panel-state-active-shadow\)',/,
+  )
 })
 
 test('hovering unselected rows uses the intermediate bright state instead of the old dark hover wash', () => {
@@ -51,7 +55,11 @@ test('hovering unselected rows uses the intermediate bright state instead of the
 
   assert.doesNotMatch(source, /hover:bg-black\/5/)
   assert.match(source, /const \[isHovered,\s*setIsHovered\] = useState\(false\)/)
-  assert.match(source, /background: 'rgba\(255,\s*255,\s*255,\s*0\.28\)'/)
+  // 8ab48cd7 style(ui): checkpoint liquid glass polish — hover 亮面 rgba(255,255,255,0.28) 收敛为 files-panel hover 状态 token（含配套 shadow）
+  assert.match(
+    source,
+    /background: 'var\(--files-panel-state-hover-bg\)',\s+boxShadow: 'var\(--files-panel-state-hover-shadow\)',/,
+  )
 })
 
 test('browser tab drag affordances brighten the target row and render a thicker glowing insertion marker', () => {

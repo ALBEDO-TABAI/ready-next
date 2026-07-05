@@ -39,6 +39,7 @@ import {
   isRunStateDoneStatus,
   isRunStateFailedOrCancelledStatus,
   isRunStateReadyToFinalizeStatus,
+  isRunStateRecoverablePausedStatus,
   parseRunStateJson,
 } from './task-projection/run-state-schema'
 import {
@@ -615,8 +616,19 @@ class VideoExpertChildDriver implements SkillChildDriver {
       return makeAiAnalyzePlan(state, parsed, artifactProgress, input)
     }
 
-    // Terminal: blocked / awaiting input.
-    if (parsed?.status && isRunStateBlockedStatus(parsed.status)) {
+    // Terminal: blocked / awaiting input. A machine-resumable pause
+    // (recoverable_paused / budget_paused) is NOT a terminal human blocker:
+    // VEA writes it between stages precisely so the driver can continue.
+    // The pre-p9c local BLOCKED_STATUSES set excluded recoverable_paused;
+    // b429b71a's switch to the shared schema predicate (which folds paused
+    // variants into 'blocked') silently made these closes terminal. Skip the
+    // close here so post-score stages fall through to the ai_analyze
+    // continuation below (or to the recoverable-pause closes further down).
+    if (
+      parsed?.status
+      && isRunStateBlockedStatus(parsed.status)
+      && !isRunStateRecoverablePausedStatus(parsed.status)
+    ) {
       if (isRecoverableVideoDownloadError(parsed)) {
         return makeDownloadUnavailableClose(state, parsed, artifactProgress, parsed.lastError)
       }

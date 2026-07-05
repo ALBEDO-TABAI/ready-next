@@ -87,21 +87,22 @@ test('executeToolCall wraps handler throws into structured ToolExecutionOutput',
   assert.match(source, /errorKind:\s*kind/)
 })
 
-test('tool-runtime no longer rethrows on unknown-kind errors', () => {
-  const source = readWorkspaceFile('src/main/modules/agent-control/tools-runtime/tool-runtime.ts')
+test('unknown-kind errors surface as structured output in tool-executor; the dead ToolRuntime dispatch loop stays deleted', () => {
+  // f8682671 (梯队一 死债删除) removed the dormant ToolRuntime batch dispatch
+  // class — tool-runtime.ts now only carries the runtime-context types and
+  // applyContextModifier. The dispatch error contract (terminal infra rethrow
+  // + structured surfacing of everything else) lives solely in
+  // tool-executor.ts, the single live dispatch path.
+  const toolRuntime = readWorkspaceFile('src/main/modules/agent-control/tools-runtime/tool-runtime.ts')
+  assert.doesNotMatch(toolRuntime, /export class ToolRuntime/, 'dead ToolRuntime class must not be revived')
+  assert.doesNotMatch(toolRuntime, /isTerminalInfrastructureError/, 'no shadow dispatch/rethrow path in tool-runtime.ts')
 
-  // Terminal infra guard exists.
-  assert.match(source, /if \(isTerminalInfrastructureError\(error\)\) \{\s*throw error\s*\}/)
-
-  // The legacy `throw error` tail after the classifier is gone.
-  assert.doesNotMatch(source, /\n\s{8}throw error\n\s{6}\} finally \{/)
-
-  // Unknown-kind errors log a metric before being surfaced. Phase 4 swapped
-  // the hardcoded string for TOOL_ERROR_METRICS.unknownSurfaced.
-  assert.match(source, /logAgentMetric\((?:'tool_error_unknown_surfaced'|TOOL_ERROR_METRICS\.unknownSurfaced)/)
-
-  // Import added.
-  assert.match(source, /from ['"]\.\.\/\.\.\/tools\/tool-errors['"]/)
+  const executor = readWorkspaceFile('src/main/modules/tools/tool-executor.ts')
+  // Terminal infra guard is the ONLY rethrow; unknown kinds become structured
+  // output with a surfaced metric carrying errorKind.
+  assert.match(executor, /if \(isTerminalInfrastructureError\(error\)\) \{\s*throw error\s*\}/)
+  assert.match(executor, /logAgentMetric\((?:'tool_error_surfaced'|TOOL_ERROR_METRICS\.surfaced)/)
+  assert.match(executor, /errorKind:\s*kind/)
 })
 
 test('tool-executor runs Zod validator for every tool domain via the unified registry', () => {
@@ -178,13 +179,15 @@ test('Stage U U1.1: tool-executor returns errorKind:tool_not_registered (top-lev
   )
 })
 
-test('Stage 4 W0: tool-runtime preflight rejects unallowed tools as tool_restricted_this_turn — W3 will skip skill_* but keep this for non-skill', () => {
-   
-  const source = readWorkspaceFile('src/main/modules/agent-control/tools-runtime/tool-runtime.ts')
+test('Stage 4 W0: dispatch preflight rejects unallowed tools as tool_restricted_this_turn — W3 will skip skill_* but keep this for non-skill', () => {
+  // Re-anchored from tool-runtime.ts to tool-executor.ts after f8682671
+  // deleted the dormant ToolRuntime dispatch loop; the allowlist preflight
+  // (and its intent_gating_miss ledger, dc1ccf73) lives in the executor now.
+  const source = readWorkspaceFile('src/main/modules/tools/tool-executor.ts')
   assert.match(
     source,
     /errorKind:\s*TOOL_ADMISSION_ERROR_KINDS\.toolRestrictedThisTurn\.code/,
-    'tool-runtime preflight must keep top-level tool_restricted_this_turn for non-skill tools after W3',
+    'dispatch preflight must keep top-level tool_restricted_this_turn for non-skill tools after W3',
   )
   assert.match(
     source,

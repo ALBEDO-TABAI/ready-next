@@ -21,8 +21,6 @@ browser_cookie3>=0.19
 #
 #   本地 ASR（FunASR，约数 GB 含 torch）:
 #     pip install funasr>=1.0 modelscope>=1.9 torch>=2.0
-#   Apple Silicon 本地 ASR:
-#     pip install mlx-whisper>=0.1
 #   烧录字幕 OCR:
 #     pip install rapidocr-onnxruntime>=1.3
 #

@@ -53,11 +53,15 @@ const DOCUMENT_CONTEXT_CONTINUATION_PATTERN =
   /(这篇|这份|这个|上面|前面|刚才|继续|再|确认|整理|分段|合并|子标题|小标题|标题|补上|附上|加上|改一下|改成|保存|写入|替换)/i
 
 function hasWritableDocumentContext(envelope: RequestEnvelope): boolean {
+  // Widget targets are hardcoded canWrite:true in the envelope, but a widget
+  // update context is NOT a document environment — that state has its own
+  // flag (hasWidgetTargetContext). The canWrite clause (e75e4050) is meant
+  // for writable document resources (document_context / writable attachments).
   return envelope.environmentHints.hasDocumentContext
     || envelope.resources.some((resource) => (
       resource.kind === 'document_context'
       || resource.source === 'current_document'
-      || resource.canWrite
+      || (resource.kind !== 'widget_target' && resource.canWrite)
     ))
 }
 
@@ -246,7 +250,11 @@ export function resolveIntentCapabilityGroupModes(params: {
     params.hasWidgetTargetContext ||
     Boolean(params.documentWidgetTaskKind) ||
     shouldForceDocumentToolCall(params.contextualUserInput) ||
-    hasExplicitDocumentSurface ||
+    // NOTE: no standalone hasExplicitDocumentSurface clause here. Since
+    // e75e4050 unified both regexes it became identical to hasDocumentKeyword,
+    // and as an ungated clause it made the `!isPetDominantIntent` suppression
+    // above dead code (pet-sticky-tool-contract). Pet-dominant turns must not
+    // expose document tools on surface keywords alone.
     hasDocumentIntent ||
     (hasMapIntent && mapSecondarySignals.has('document_output'))
   )

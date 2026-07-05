@@ -11,8 +11,11 @@ test('document mode uses a browser-style document tab rail with hover hints and 
   const documentMode = readWorkspaceFile('src/renderer/pages/modes/DocumentMode.tsx')
   const documentTabRail = readWorkspaceFile('src/renderer/components/document/DocumentTabRail.tsx')
 
-  assert.match(documentMode, /import DocumentTabRail from ['"]\.\.\/\.\.\/components\/document\/DocumentTabRail['"]/)
-  assert.match(documentMode, /<DocumentTabRail/)
+  // 4b06df2b feat(document): vertical tab rail — 文档模式标签从横向 DocumentTabRail 切换为
+  // Edge 式竖向 DocumentVerticalTabRail（hover 浮层承载完整标签列表与固定新建按钮）。
+  // 下方 DocumentTabRail.tsx 内部断言钉的是仍在仓库中的横向 rail 组件本体。
+  assert.match(documentMode, /import DocumentVerticalTabRail from ['"]\.\.\/\.\.\/components\/document\/DocumentVerticalTabRail['"]/)
+  assert.match(documentMode, /<DocumentVerticalTabRail/)
   assert.doesNotMatch(documentMode, /<WorkbenchProjectTabs/)
 
   assert.match(documentTabRail, /getTabRailLayoutMetrics/)

@@ -248,7 +248,7 @@ const EXPLICIT_KIND_MAP = {
   [WEB_RESEARCH_ERROR_KINDS.webFetchFailed.code]: 'upstream_error',
 }
 `)
-  writeFile(root, 'src/main/modules/tools/browser-tools.ts', `
+  writeFile(root, 'src/main/modules/tools/browser-act-tools.ts', `
 import { ACTION_CONFIRMATION_ERROR_KINDS } from '../agent-control/contracts/error-kinds'
 export const manualOnly = ACTION_CONFIRMATION_ERROR_KINDS.deniedManualOnly.code
 export const pendingConfirmation = ACTION_CONFIRMATION_ERROR_KINDS.deniedPendingConfirmation.code
@@ -288,7 +288,9 @@ const TERMINAL_RUN_META_STATUSES = ['done', 'error', 'cancelled']
 
 test('shared enum drift gate fails on inline paused predicates', (t) => {
   const root = makeHarnessRoot(t)
-  writeFile(root, 'src/main/modules/agent-control/turn-engine.ts', `
+  // turn-engine.ts 已于 2026-07-04 Phase A 退役删除，扫描面随之收敛——
+  // 注入点重锚到现役 PAUSED_PREDICATE_TARGETS 成员。
+  writeFile(root, 'src/main/modules/agent-control/runtime-core/turn-frame-resolver.ts', `
 export function bad(status) { return status === 'recoverable_paused' || status === 'budget_paused' }
 `)
   const result = runIn(root)
@@ -485,9 +487,9 @@ export const output = { data: { errorKind: 'authorization_denied' } }
   assert.match(result.stderr, /local_error_kind_literal/)
 })
 
-test('shared enum drift gate fails when tool-runtime copies a tool admission literal', (t) => {
+test('shared enum drift gate fails when tool-registry copies a tool admission literal', (t) => {
   const root = makeHarnessRoot(t)
-  writeFile(root, 'src/main/modules/agent-control/tools-runtime/tool-runtime.ts', `
+  writeFile(root, 'src/main/modules/agent-control/tools-runtime/tool-registry.ts', `
 import { TOOL_ADMISSION_ERROR_KINDS } from '../contracts/error-kinds'
 export const output = { data: { errorKind: 'tool_restricted_this_turn' } }
 `)
@@ -593,7 +595,7 @@ export function bad(deniedOutput) { return deniedOutput('confirmation_expired', 
 
 test('shared enum drift gate fails when browser tools copy action-confirmation literals', (t) => {
   const root = makeHarnessRoot(t)
-  writeFile(root, 'src/main/modules/tools/browser-tools.ts', `
+  writeFile(root, 'src/main/modules/tools/browser-act-tools.ts', `
 import { ACTION_CONFIRMATION_ERROR_KINDS } from '../agent-control/contracts/error-kinds'
 export function manual(ToolDomainError) { throw new ToolDomainError('denied_manual_only', 'manual') }
 export function password(ToolDomainError) { throw new ToolDomainError('denied_pending_confirmation', 'password') }
@@ -616,7 +618,7 @@ export const map = { denied_manual_only: 'denied_by_policy' }
 
 test('shared enum drift gate fails when action-confirmation target misses registry import', (t) => {
   const root = makeHarnessRoot(t)
-  writeFile(root, 'src/main/modules/tools/browser-tools.ts', `
+  writeFile(root, 'src/main/modules/tools/browser-act-tools.ts', `
 export const value = 'no action confirmation constants here'
 `)
   const result = runIn(root)
@@ -626,7 +628,7 @@ export const value = 'no action confirmation constants here'
 
 test('shared enum drift gate fails when action-confirmation target uses the registry without importing it', (t) => {
   const root = makeHarnessRoot(t)
-  writeFile(root, 'src/main/modules/tools/browser-tools.ts', `
+  writeFile(root, 'src/main/modules/tools/browser-act-tools.ts', `
 export const manualOnly = ACTION_CONFIRMATION_ERROR_KINDS.deniedManualOnly.code
 `)
   const result = runIn(root)

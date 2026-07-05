@@ -213,7 +213,7 @@ def _get_ffmpeg_encoder_names() -> set[str]:
     except FileNotFoundError:
         print(
             "⚠️ 未找到 ffmpeg 可执行文件，硬件编码器探测跳过；"
-            "请安装 ffmpeg（macOS: `brew install ffmpeg`；Windows: 从 https://www.gyan.dev/ffmpeg/builds/ 下载并加入 PATH）。"
+            "Ready 发行运行时缺少 ffmpeg，请通过 Ready 报告此打包缺口。"
         )
         _FFMPEG_ENCODER_CACHE = set()
     except subprocess.CalledProcessError as exc:
@@ -557,8 +557,7 @@ def _run_ffmpeg_trim(
         except FileNotFoundError as exc:
             raise RuntimeError(
                 f"未找到 ffmpeg 可执行文件（{ffmpeg_binary}）；"
-                "请安装 ffmpeg 并确保它在 PATH 中（macOS: `brew install ffmpeg`；"
-                "Windows: 从 https://www.gyan.dev/ffmpeg/builds/ 下载并加入 PATH）。"
+                "Ready 发行运行时缺少 ffmpeg，属于打包运行时缺口，请通过 Ready 反馈。"
             ) from exc
         if result.returncode == 0:
             return {
@@ -1129,6 +1128,7 @@ class VideoAnalysisPipeline:
             completed=completed,
             scores_path=str(self.scores_path),
             video_dir=str(self.video_output_dir),
+            active_output_dir=str(self.video_output_dir),
             **extra,
         )
 
@@ -1318,7 +1318,7 @@ class VideoAnalysisPipeline:
             except FileNotFoundError as exc:
                 raise RuntimeError(
                     "未找到 yt-dlp 可执行文件，且 `python -m yt_dlp` 也不可用；"
-                    "请运行 `pip install yt-dlp` 或确保 yt-dlp 在 PATH 中。"
+                    "Ready 发行运行时缺少 yt-dlp，属于打包运行时缺口，请通过 Ready 反馈。"
                 ) from exc
             except subprocess.CalledProcessError as exc:
                 last_error = (exc.stderr or exc.stdout or "").strip()

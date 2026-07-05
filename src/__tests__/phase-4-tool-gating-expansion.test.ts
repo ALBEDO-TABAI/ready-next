@@ -130,15 +130,24 @@ test('Phase 4.4 wiring — detached errorKind taxonomy split into 4 specific kin
   const dataReturns = source.match(/errorKind:\s*'detached_task_action_not_allowed'/g) || []
   assert.equal(dataReturns.length, 0, 'old detached_task_action_not_allowed must be gone from emit sites')
 
-  // All four new errorKinds must be present.
-  for (const kind of [
-    'detached_task_skill_not_loaded',
-    'detached_task_skill_action_unknown',
-    'detached_task_hint_required',
-    'detached_task_visibility_internal',
+  // All four kinds must be present. 73ba5299 (audit roadmap closures, P6d
+  // errorKind 登记 + drift gate) replaced the string literals with the
+  // DETACHED_TASK_ERROR_KINDS registry — emit sites now reference
+  // `DETACHED_TASK_ERROR_KINDS.<key>.code`, never a re-hardcoded string.
+  for (const key of [
+    'skillNotLoaded',
+    'skillActionUnknown',
+    'hintRequired',
+    'visibilityInternal',
   ]) {
-    assert.match(source, new RegExp(`errorKind:\\s*'${kind}'`), `missing errorKind ${kind}`)
+    assert.match(
+      source,
+      new RegExp(`errorKind:\\s*DETACHED_TASK_ERROR_KINDS\\.${key}\\.code`),
+      `missing errorKind DETACHED_TASK_ERROR_KINDS.${key}.code`,
+    )
   }
+  // Hardcoded detached_task_* literals must not return to emit sites.
+  assert.doesNotMatch(source, /errorKind:\s*'detached_task_/)
 })
 
 test('Phase 4.4 — every detached errorKind variant carries skillId + action + referenceHintSkillId for diagnosis', () => {

@@ -30,7 +30,7 @@
 - **Zero Sampling** — Every scene is analyzed. No skipping, no guessing on unseen frames.
 - **OpenClaw Orchestration** — Serial relay mode: one main controller + one current-batch worker. Dispatch packets generated automatically.
 - **Audiovisual Analysis with Agent Handoff** — Long-form audiovisual reports are written by the hosting agent via structured task packets (`body` → `diagram`/`overview` → `illustrate`), with machine validation on word counts, section coverage, and screenshot references.
-- **Smart Subtitle Extraction** — 4-tier fallback: Bilibili API → Embedded subtitles → RapidOCR → FunASR/mlx-whisper.
+- **Smart Subtitle Extraction** — 4-tier fallback: Bilibili API → Embedded subtitles → RapidOCR → FunASR Nano.
 - **Multi-language Final Reports** — Processing always runs in Chinese; final deliverables are rewritten to the user's chosen language post-finalize.
 - **Delivery Verification** — Completion is determined by `delivery_report.json` and actual output files, not by oral summary.
 
@@ -339,7 +339,7 @@ video-expert-analyzer-vnext/
 | **Video processing** | yt-dlp, scenedetect, ffmpeg-python |
 | **AI API clients** | openai, anthropic |
 | **Imaging & signal** | Pillow, numpy |
-| **Optional `[asr]`** | funasr, modelscope, torch, mlx-whisper (subtitle fallback tier 4) |
+| **Optional `[asr]`** | funasr, modelscope, torch (subtitle fallback tier 4) |
 | **Optional `[ocr]`** | rapidocr-onnxruntime (subtitle fallback tier 3) |
 | **Network** | requests, browser_cookie3 |
 
@@ -358,7 +358,6 @@ A shot with genuine emotion but slight camera shake is always preferred over a t
 - [PySceneDetect](https://github.com/Breakthrough/PySceneDetect) — Scene detection
 - [FFmpeg](https://ffmpeg.org/) — Media processing
 - [RapidOCR](https://github.com/RapidAI/RapidOCR) — Burned subtitle OCR
-- [mlx-whisper](https://github.com/ml-explore/mlx-examples) — Apple Silicon accelerated ASR
 
 ---
 
@@ -387,7 +386,7 @@ A shot with genuine emotion but slight camera shake is always preferred over a t
 - **零抽样** — 每个场景都会被分析，不跳过、不猜测。
 - **OpenClaw 编排** — 串行接力模式：一个主控 + 一个当前批次 worker，自动生成派单包。
 - **视听剖析 Agent 接力** — 长文视听报告由宿主 agent 通过结构化任务包完成（`body` → `diagram`/`overview` → `illustrate`），带字数、章节覆盖和截图引用的机器校验。
-- **智能字幕提取** — 四级降级：B站API → 内嵌字幕 → RapidOCR → FunASR/mlx-whisper。
+- **智能字幕提取** — 四级降级：B站API → 内嵌字幕 → RapidOCR → FunASR Nano。
 - **多语言最终报告** — 处理过程始终中文；最终交付物在 finalize 后重写为用户选择的语言。
 - **交付验证** — 是否完成以 `delivery_report.json` 和实际输出文件为准，不以口头汇报为准。
 
@@ -592,7 +591,7 @@ python3 scripts/orchestrate_vnext.py /path/to/scene_scores.json --dispatch-json
 | **视频处理** | yt-dlp, scenedetect, ffmpeg-python |
 | **AI API 客户端** | openai, anthropic |
 | **图像与信号** | Pillow, numpy |
-| **可选 `[asr]`** | funasr, modelscope, torch, mlx-whisper（字幕降级链第 4 级） |
+| **可选 `[asr]`** | funasr, modelscope, torch（字幕降级链第 4 级） |
 | **可选 `[ocr]`** | rapidocr-onnxruntime（字幕降级链第 3 级） |
 | **网络** | requests, browser_cookie3 |
 
@@ -611,7 +610,6 @@ python3 scripts/orchestrate_vnext.py /path/to/scene_scores.json --dispatch-json
 - [PySceneDetect](https://github.com/Breakthrough/PySceneDetect) — 场景检测
 - [FFmpeg](https://ffmpeg.org/) — 媒体处理
 - [RapidOCR](https://github.com/RapidAI/RapidOCR) — 烧录字幕识别
-- [mlx-whisper](https://github.com/ml-explore/mlx-examples) — Apple Silicon 加速语音识别
 
 ---
 

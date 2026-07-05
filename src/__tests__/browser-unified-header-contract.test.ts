@@ -7,12 +7,15 @@ function readWorkspaceFile(path: string): string {
   return readFileSync(resolve(process.cwd(), path), 'utf8')
 }
 
-test('browser mode delegates top-level browser chrome to BrowserHeader', () => {
+test('browser mode delegates top-level browser chrome to BrowserTopBar (vertical tabs, 74cab2a7)', () => {
   const browserMode = readWorkspaceFile('src/renderer/pages/modes/BrowserMode.tsx')
   const emptyState = readWorkspaceFile('src/renderer/components/browser/BrowserModeEmptyState.tsx')
 
-  assert.match(browserMode, /import BrowserHeader from ['"]\.\.\/\.\.\/components\/browser\/BrowserHeader['"]/)
-  assert.match(browserMode, /<BrowserHeader/)
+  // Edge 式竖向标签栏重设计（74cab2a7）：主 chrome 由 BrowserTopBar 承担，
+  // BrowserHeader 仅保留在空态页委托链上。
+  assert.match(browserMode, /import BrowserTopBar from ['"]\.\.\/\.\.\/components\/browser\/BrowserTopBar['"]/)
+  assert.match(browserMode, /<BrowserTopBar[\s\S]*?isActive=\{isActive\}/)
+  assert.doesNotMatch(browserMode, /import BrowserHeader from/)
   assert.doesNotMatch(browserMode, /import BrowserTabBar from/)
   assert.doesNotMatch(browserMode, /import BrowserAddressBar from/)
   assert.doesNotMatch(browserMode, /<BrowserTabBar/)

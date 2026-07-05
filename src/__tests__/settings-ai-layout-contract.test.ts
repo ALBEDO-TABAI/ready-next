@@ -40,9 +40,12 @@ test('ai settings panel separates the model list from the second-level editor', 
   assert.match(settingsPage, /自定义服务缺少明确上下文窗口/)
   assert.doesNotMatch(settingsPage, /模型与上下文/)
   assert.doesNotMatch(settingsPage, /对话发送/)
-  assert.match(settingsPage, /maxWidth: isAiSection \? 1220 : 1040/)
+  // 2026-07 设置页收敛：容器统一 1040/32px 内边距，AI 区加宽职责移入
+  // AISettingsPanel 自身（profileDetailOpen ? 760 : 1120），isAiSection 分支退场。
+  assert.match(settingsPage, /maxWidth: 1040/)
+  assert.doesNotMatch(settingsPage, /isAiSection/)
   assert.match(settingsPage, /maxWidth: profileDetailOpen \? 760 : 1120/)
-  assert.match(settingsPage, /padding: isAiSection \? '34px 46px 72px' : '30px 34px 64px'/)
+  assert.match(settingsPage, /padding: '32px 40px 64px'/)
   assert.match(settingsPage, /gridTemplateColumns: 'minmax\(360px,1\.6fr\) minmax\(160px,\.55fr\) 120px 88px'/)
   assert.doesNotMatch(settingsPage, /isCustomModelInput/)
   assert.doesNotMatch(settingsPage, /模型 ID，如 gpt-5\.4/)

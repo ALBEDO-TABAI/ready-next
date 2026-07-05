@@ -16,8 +16,18 @@ test('file_locate falls back to a workspace file when the search index has not c
   )
   assert.match(fileManagementTools, /resolveFileLocateCandidate\(requestedPath, engine\)/)
   assert.match(fileManagementTools, /resolveIndexedDocumentCandidateFromDb\(db, candidate\)/)
-  assert.match(fileManagementTools, /else \{[\s\S]*assertInsideWorkspace\(path, engine\)/)
-  assert.match(fileManagementTools, /else \{[\s\S]*engine\.indexDocument\(guard\.root, path\)/)
+  // Fallback shape re-anchored: f8ea13a6 added the explicit workspace-roots
+  // third argument (honor file manager roots) — behavior unchanged: a path
+  // missing from the index still falls back to the workspace guard and gets
+  // indexed on demand instead of erroring out.
+  assert.match(
+    fileManagementTools,
+    /if \(!row\) \{[\s\S]{0,200}?assertInsideWorkspace\(path, engine, context\?\.workspaceRoots\)/,
+  )
+  assert.match(
+    fileManagementTools,
+    /if \(!row\) \{[\s\S]{0,400}?engine\.indexDocument\(guard\.root, path\)/,
+  )
 })
 
 test('file_locate normalizes user-facing file mention wrappers before lookup', () => {

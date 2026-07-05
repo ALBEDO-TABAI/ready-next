@@ -113,7 +113,8 @@ test('theme transitions route through the ritual overlay and the per-selector tr
   assert.match(styles, /:root\s*\{[\s\S]*--workbench-mode-bg-light:\s*#F6F1E7/)
   assert.match(styles, /:root\s*\{[\s\S]*--workbench-mode-bg-dark:\s*#192131/)
   assert.match(styles, /:root\s*\{[\s\S]*--ritual-overlay-bg:\s*var\(--workbench-mode-bg\)/)
-  assert.match(styles, /html\[data-skin='liquid-glass'\]\s*\{[\s\S]*--workbench-mode-bg:\s*var\(--workbench-mode-bg-light\)/)
+  // [^{]* 容忍选择器列表（fastcard overlay 窗口与主窗共享此规则块）
+  assert.match(styles, /html\[data-skin='liquid-glass'\][^{]*\{[\s\S]*?--workbench-mode-bg:\s*var\(--workbench-mode-bg-light\)/)
   assert.match(styles, /html\[data-theme='dark'\]\[data-skin='liquid-glass'\]\s*\{[\s\S]*--workbench-mode-bg:\s*var\(--workbench-mode-bg-dark\)/)
   // color-scheme hint is present so native form controls/scrollbars render in the right scheme from the first frame.
   assert.match(styles, /:root\s*\{[\s\S]*color-scheme:\s*light dark/)
@@ -139,7 +140,9 @@ test('theme transitions route through the ritual overlay and the per-selector tr
   // The rail settings menu disables the theme toggle while the theme ritual is running.
   assert.match(iconRail, /useRitualOverlayStore/)
   assert.match(iconRail, /state\.session\?\.stage === 'theme-transition'/)
-  assert.match(iconRail, /disabled=\{isThemeRitualRunning\}/)
+  // 守卫形态演进：disabled prop → 条件调用 + enabled 标志（仪式期间禁切主题的语义不变）
+  assert.match(iconRail, /if \(!isThemeRitualRunning\) toggleTheme\(\)/)
+  assert.match(iconRail, /enabled: !isThemeRitualRunning/)
 })
 
 test('Stage 3 — will-change is scoped to ritual phase only, not in base .ready-app-content rule', () => {

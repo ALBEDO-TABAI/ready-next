@@ -986,7 +986,7 @@ def call_vision_api(
     try:
         from openai import OpenAI
     except ImportError:
-        print("   ⚠️  需要安装 openai 库: pip install openai")
+        print("   ⚠️  Ready 发行运行时缺少 openai 客户端库")
         return None
 
     if not api_key:
@@ -1300,6 +1300,7 @@ def auto_score_scenes(
             can_finalize=not readiness_problems,
             scores_path=str(scores_path),
             video_dir=str(video_analysis_dir),
+            active_output_dir=str(video_analysis_dir),
             last_error="; ".join(readiness_problems) if readiness_problems else "",
             verification=build_verification_payload(
                 video_analysis_dir,
@@ -1401,6 +1402,7 @@ def auto_score_scenes(
             can_finalize=can_finalize,
             scores_path=str(scores_path),
             video_dir=str(video_analysis_dir),
+            active_output_dir=str(video_analysis_dir),
             last_error=last_error,
             verification=build_verification_payload(
                 video_analysis_dir,
@@ -1660,6 +1662,7 @@ def mark_blocked_state(
         can_finalize=False,
         scores_path=str(scores_path),
         video_dir=str(video_dir),
+        active_output_dir=str(video_dir),
         last_error="; ".join(problems),
         verification=build_verification_payload(
             video_dir,
@@ -1691,6 +1694,7 @@ def mark_completed_state(
         can_finalize=True,
         scores_path=str(scores_path),
         video_dir=str(video_dir),
+        active_output_dir=str(video_dir),
         last_error="",
         verification=build_verification_payload(
             video_dir,
@@ -1793,6 +1797,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                     status="blocked",
                     scores_path=str(scores_path_local),
                     video_dir=str(scores_path_local.parent),
+                    active_output_dir=str(scores_path_local.parent),
                     last_error=message,
                 )
         except Exception as save_exc:
@@ -1824,6 +1829,7 @@ def _main_impl(argv: Optional[List[str]] = None) -> int:
                 status="running",
                 scores_path=str(scores_path),
                 video_dir=str(video_dir),
+                active_output_dir=str(video_dir),
                 last_error="",
             )
             print("🔓 run_state 已从 blocked 重置为 running")

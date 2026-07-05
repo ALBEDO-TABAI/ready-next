@@ -49,8 +49,19 @@ test('file tree right-click menu moves selected items through the folder picker'
 
 test('file tree internal native drags can drop without a system Files dataTransfer type', () => {
   const source = readWorkspaceFile('src/renderer/components/layout/FileTree.tsx')
-  assert.match(source, /const payloads = parseWorkspaceDragPayloads\(e\.dataTransfer\)\s+if \(!canMoveAllToDirectory\(payloads, dirPath\)\) return/)
-  assert.match(source, /const payloads = parseWorkspaceDragPayloads\(e\.dataTransfer\)\s+if \(canMoveAllToDirectory\(payloads, currentPath\)\) \{\s+await moveWorkspaceItems\(payloads, currentPath\)/)
+  // da4c25cc fix(files): make in-tree move indicators actually appear during drag — 直接 parse 改为 readWorkspaceDragPayloads（dragover protected drag store 用 dragstart 会话兜底），移动前置守卫收敛进 moveWorkspaceItems(targetDir)
+  assert.match(
+    source,
+    /function readWorkspaceDragPayloads\(dataTransfer: DataTransfer\): WorkspaceDragPayload\[\] \{\s+const parsed = parseWorkspaceDragPayloads\(dataTransfer\)\s+return parsed\.length > 0 \? parsed : getActiveWorkspaceDragPayloads\(\)/,
+  )
+  assert.match(
+    source,
+    /const moveWorkspaceItems = useCallback\(async \(payloads: readonly WorkspaceDragPayload\[\], targetDir: string\) => \{\s+if \(!canMoveAllToDirectory\(payloads, targetDir\)\) return/,
+  )
+  assert.match(
+    source,
+    /const payloads = readWorkspaceDragPayloads\(e\.dataTransfer\)\s+clearFileTreeDragState\(\)\s+if \(canMoveAllToDirectory\(payloads, currentPath\)\) \{\s+await moveWorkspaceItems\(payloads, currentPath\)/,
+  )
   assert.doesNotMatch(source, /nativePayload && hasNativeFileDrop\(e\.dataTransfer\) && canMoveToDirectory\(nativePayload, dirPath\)/)
   assert.doesNotMatch(source, /nativePayload && hasNativeFileDrop\(e\.dataTransfer\) && canMoveToDirectory\(nativePayload, currentPath\)/)
 })

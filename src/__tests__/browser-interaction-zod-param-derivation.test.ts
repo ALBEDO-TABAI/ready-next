@@ -309,6 +309,18 @@ test('browser_wait', () => {
 })
 
 test('browser_wait_for_condition', () => {
+  // Safe Mode readonly script templates (template/script_template/attr/name)
+  // landed in 73ba5299; Power Mode migration fields (grant_id/expected_effects)
+  // landed in 696bd508 (authorized Power Browser tools).
+  const READONLY_TEMPLATE_ENUM = [
+    'read_text',
+    'read_attr',
+    'read_all_text',
+    'count_selector',
+    'exists_selector',
+    'read_rect',
+    'read_meta',
+  ]
   assert.deepEqual(
     zodObjectToParamList(BROWSER_INTERACTION_SCHEMAS.browser_wait_for_condition),
     [
@@ -321,10 +333,34 @@ test('browser_wait_for_condition', () => {
       },
       { name: 'selector', type: 'string', description: 'condition=selector 时使用', required: false },
       { name: 'custom_js', type: 'string', description: 'condition=custom_js 时返回 truthy 视为满足', required: false },
+      {
+        name: 'template',
+        type: 'string',
+        description: '命名只读脚本模板，由代码侧拼装固定只读 JS',
+        required: false,
+        enum: READONLY_TEMPLATE_ENUM,
+      },
+      {
+        name: 'script_template',
+        type: 'string',
+        description: '命名只读脚本模板别名，优先于 template',
+        required: false,
+        enum: READONLY_TEMPLATE_ENUM,
+      },
+      { name: 'attr', type: 'string', description: 'read_attr 模板读取的属性名', required: false },
+      { name: 'name', type: 'string', description: 'read_meta 模板读取 title/href/readyState 或 meta name/property', required: false },
       { name: 'timeout_ms', type: 'number', description: '超时时间，默认 8000ms', required: false },
       { name: 'check_interval_ms', type: 'number', description: '轮询间隔，默认 250ms', required: false },
       { name: 'stable_iterations', type: 'number', description: 'network_idle/content_stable 需要连续稳定次数', required: false },
       TAB_ID,
+      { name: 'grant_id', type: 'string', description: 'Power Mode 迁移字段：已确认 grant id', required: false },
+      {
+        name: 'expected_effects',
+        type: 'array',
+        description: 'Power Mode 迁移字段：自定义 JS 的预期效果',
+        required: false,
+        items: { type: 'string' },
+      },
     ],
   )
 })

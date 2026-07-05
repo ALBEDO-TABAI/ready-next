@@ -338,18 +338,34 @@ test('user denial feeds a structured confirmation_denied_by_user back to the mod
 // 5b. Sensitive params — full bytes only in memory; DB/card/metrics redacted
 // ---------------------------------------------------------------------------
 
-test('login fill: secret never reaches the DB row or the confirmation card; release stays byte-identical', async (t) => {
+test('sensitive outbound send: secret never reaches the DB row or the confirmation card; frozen bytes stay intact', async (t) => {
   const db = createFakeDb()
   const store = new FrozenCallStore(db)
   registerFrozenCallStore(store)
   t.after(() => _resetFrozenCallBridgeForTests())
 
   const sessionId = nextSessionId()
-  const originalArgs = { selector: '#login-password', text: 'hunter2-secret' }
-  // browser_type into a password field → m3-login-existing-account (sensitive
-  // rule). No browserController is needed: we deny at the card, so dispatch
-  // never reaches the browser domain.
-  const pending = executeToolCall('browser_type', originalArgs, modelContext(sessionId))
+  // 696bd508 (authorized Power Browser tools) removed the browser-side
+  // m3-login-existing-account rule from the static table — password fills are
+  // now adjudicated by the browser execution layer's live-target net /
+  // Power-grant contract, not by the freeze gate. The remaining
+  // sensitive-params freeze rule is m2-send-sensitive: outbound content that
+  // looks like credentials (SENSITIVE_CONTENT_PATTERN → mask ALL free-text
+  // values in the audit copy).
+  // NOTE: keys are declared in FeishuMessageSendSchema order — dispatch
+  // replaces args with the Zod-parsed object (args = outcome.data), so the
+  // frozen serialization (and its sha256 fingerprint) follows schema key
+  // order, not the caller's literal order.
+  const originalArgs = {
+    channel_id: 'feishu-main',
+    chat_id: 'oc-demo-chat',
+    content: { text: '这是登录密码：hunter2-secret' },
+    msg_type: 'text',
+  }
+  // feishu_message_send with credential-looking text → m2-send-sensitive.
+  // No sidecar is needed: we deny at the card, so dispatch never reaches the
+  // feishu domain.
+  const pending = executeToolCall('feishu_message_send', originalArgs, modelContext(sessionId))
 
   await waitFor(() => getAskUserQuestionsStore().findPendingForSession(sessionId))
   const card = getAskUserQuestionsStore().findPendingForSession(sessionId)

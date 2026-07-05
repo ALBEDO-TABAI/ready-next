@@ -94,7 +94,8 @@ test('browser mode surface readiness uses captureStableFrame and hides chrome ja
   assert.match(browserMode, /surfaceRef:\s*contentRef/)
   assert.doesNotMatch(browserMode, /surfaceRef:\s*shellRef/)
   assert.match(browserMode, /<div ref=\{modeRootRef\} className="workbench-mode-root relative">/)
-  assert.match(browserMode, /<BrowserHeader/)
+  // vertical-tabs（74cab2a7）：主 chrome 委托 BrowserTopBar
+  assert.match(browserMode, /<BrowserTopBar/)
   assert.match(browserMode, /activeTabId,/)
   assert.match(browserMode, /const surfaceReadyTimerRef = useRef<number \| null>\(null\)/)
   assert.match(browserMode, /const clearSurfaceReadyTimer = useCallback\(\(\) => \{/)
@@ -103,7 +104,10 @@ test('browser mode surface readiness uses captureStableFrame and hides chrome ja
   assert.match(browserMode, /const hostHasVisibleFrame = await captureStableFrame\(\)/)
   assert.match(browserMode, /if \(hostHasVisibleFrame\) \{[\s\S]*setIsBrowserSurfaceReady\(true\)/)
   assert.doesNotMatch(browserMode, /const BROWSER_SURFACE_READY_DELAY_MS = 16/)
-  assert.match(browserMode, /return \(\) => \{\s*clearPostActivationHostResyncTimer\(\)\s*clearCaptureTokenExpiryTimer\(\)\s*clearSurfaceReadyTimer\(\)\s*\}/)
+  assert.match(browserMode, /return \(\) => \{\s*clearPostActivationHostResyncTimer\(\)\s*\}/)
+  // timer 清理拆进各自 effect（hook 卫生重构）——三个 clear 各自在场即可
+  assert.match(browserMode, /clearCaptureTokenExpiryTimer\(\)/)
+  assert.match(browserMode, /clearSurfaceReadyTimer\(\)/)
   // Ritual overlay supersedes per-mode freeze frames for mode transitions.
   assert.doesNotMatch(browserMode, /browser-resize-shell-freeze/)
   assert.doesNotMatch(browserMode, /shouldShowFreezeFrame/)

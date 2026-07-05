@@ -229,7 +229,8 @@ test('calendar month view uses neutral grid line variables instead of default bl
   // real events, so it must NOT carry a border — otherwise empty slots render as gray outlined boxes.
   assert.doesNotMatch(scheduleCss, /\.sx__month-grid-cell \{[^}]*border:/)
   assert.match(scheduleCss, /\.sx__month-grid-day \{[\s\S]*border-bottom:\s*none !important;/)
-  assert.match(scheduleCss, /\.sx__month-grid-day__header-date--is-today,\s*\.sx__month-grid-day__header-date\.sx__is-today \{[\s\S]*background:\s*var\(--color-red\) !important;/)
+  // a948f82d style(ui): polish Ready glass theme surfaces — 今日徽标底色改走皮肤可覆写 token（红色为回退值）
+  assert.match(scheduleCss, /\.sx__month-grid-day__header-date--is-today,\s*\.sx__month-grid-day__header-date\.sx__is-today \{[\s\S]*background:\s*var\(--ready-calendar-today-bg, var\(--color-red\)\) !important;/)
   assert.doesNotMatch(scheduleCss, /\.sx__month-grid(?:-[^{]+)?[^{]*\{[\s\S]*var\(--border-default\)/)
   // A top band is reserved on the wrapper; the first week keeps a top border that becomes the
   // full-width line below the weekday names, and the names are lifted up into the band (absolute,

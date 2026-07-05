@@ -31,7 +31,8 @@ test('browser startup gates chrome until host restoration completes and main pro
   // Verify startup/transition masks stay below the DOM header so the tab rail is never hidden on first entry.
   assert.match(browserMode, /position:\s*'absolute'/)
   assert.match(browserMode, /top:\s*WORKBENCH_TAB_ROW_HEIGHT/)
-  assert.match(browserMode, /left:\s*0/)
+  // vertical-tabs：遮罩从竖栏右缘起，52px 图标栏在启动/过渡期保持可见
+  assert.match(browserMode, /left:\s*BROWSER_VERTICAL_RAIL_WIDTH/)
   assert.match(browserMode, /right:\s*0/)
   assert.match(browserMode, /bottom:\s*0/)
   assert.match(browserMode, /zIndex:\s*50/)
@@ -60,12 +61,12 @@ test('browser startup gates chrome until host restoration completes and main pro
   assert.match(browserMode, /useEffect\(\(\) => \{[\s\S]*if \(!isElectron\) return[\s\S]*if \(!shouldPresentBrowserHost \|\| !shouldRevealBrowserHost\) return/)
   assert.match(browserMode, /const presentationPlan = planBrowserHostPresentation\(\{[\s\S]*hostAlreadyPresented: hostPresentedRef\.current/)
   assert.match(browserMode, /if \(presentationPlan\.action === 'hide'\) \{[\s\S]*await syncBrowserVisibility\('hidden'\)/)
-  assert.match(browserMode, /await fitBrowserTabIfNeeded\(presentationPlan\.fitActiveTabId\)[\s\S]*if \(presentationPlan\.action === 'sync-bounds'\) \{[\s\S]*await syncBrowserVisibility\('visible', \{ forceExact: true \}\)[\s\S]*hostPresentedRef\.current = true[\s\S]*return/)
+  assert.match(browserMode, /await fitBrowserTabIfNeeded\(presentationPlan\.fitActiveTabId\)[\s\S]*?if \(presentationPlan\.action === 'sync-bounds'\) \{[\s\S]*?await syncBrowserVisibility\('visible', \{ forceExact: true, forceBoundsSync: true \}\)[\s\S]*?hostPresentedRef\.current = true[\s\S]*?return/)
   assert.doesNotMatch(browserMode, /if \(presentationPlan\.action === 'sync-bounds'\) \{\s*await sendBoundsImmediate\(\{ forceExact: true \}\)\s*return\s*\}/)
   assert.match(browserMode, /await fitBrowserTabIfNeeded\(activeTabId\)/)
   // Trailing resync is now driven reactively by layoutPhase === 'idle' instead of a 180ms setTimeout chain.
   assert.doesNotMatch(browserMode, /startupHostResyncTimerRef/)
-  assert.match(browserMode, /if \(layoutPhase !== 'idle'\) return\s*void syncBrowserVisibility\(\{ forceExact: true \}\)/)
+  assert.match(browserMode, /if \(layoutPhase !== 'idle'\) return\s*void syncBrowserVisibility\(\{ forceExact: true, forceBoundsSync: true \}\)/)
   assert.match(browserMode, /const hostVisibleRef = useRef\(false\)/)
   assert.match(browserMode, /hostVisibleRef\.current = browserRuntimeReady && tabs\.length > 0/)
   assert.match(browserMode, /if \(!browserRuntimeReady \|\| tabs\.length === 0\)/)
@@ -98,7 +99,7 @@ test('browser startup gates chrome until host restoration completes and main pro
   assert.match(mainIndex, /nativeTheme\.themeSource = resolveStoredThemeSource\(\)/)
   assert.match(mainIndex, /const MAIN_WINDOW_RENDERER_RETRY_DELAY_MS = 500/)
   assert.match(mainIndex, /async function loadMainWindowRenderer\(window: BrowserWindow\): Promise<void>/)
-  assert.match(mainIndex, /await window\.loadURL\(devRendererUrl\)[\s\S]*renderer load failed; retrying once/)
+  assert.match(mainIndex, /const baseUrl = devRendererUrl\.endsWith\('\/'\)[\s\S]*?await window\.loadURL\([\s\S]*?renderer load failed; retrying once/)
   assert.match(mainIndex, /void loadMainWindowRenderer\(mainWindow\)\.catch/)
   assert.doesNotMatch(mainIndex, /void mainWindow\.loadURL\(process\.env\['ELECTRON_RENDERER_URL'\]\)/)
   assert.match(mainIndex, /getDatabase\(\)\.setSetting\(THEME_SETTING_KEY, nextTheme\)/)

@@ -12,9 +12,16 @@ function readWorkspaceFile(path: string): string {
 test('button-triggered dropdown menus opt into the shared frosted submenu treatment', () => {
   const filesPanel = readWorkspaceFile('src/renderer/components/layout/FilesPanel.tsx')
 
-  assert.match(filesPanel, /glass-surface-floating ready-floating-menu/)
+  // 8ab48cd7 style(ui): checkpoint liquid glass polish — 下拉面从字面 class 组合改为共享 LiquidFloatingPanel；
+  // glass-surface-floating / ready-floating-menu 由面板内部拼类注入（见 LiquidFloatingPanel.tsx classes 数组）。
+  const floatingPanel = readWorkspaceFile('src/renderer/components/ui/liquid-glass/LiquidFloatingPanel.tsx')
+  assert.match(filesPanel, /import \{ LiquidFloatingPanel \} from '\.\.\/ui\/liquid-glass\/LiquidFloatingPanel'/)
+  assert.match(filesPanel, /<LiquidFloatingPanel/)
+  assert.match(
+    floatingPanel,
+    /const classes = \['glass-surface-floating', 'ready-floating-menu', 'ready-liquid-popover', className\]/,
+  )
   assert.match(filesPanel, /ready-floating-menu-item/)
-  assert.match(filesPanel, /className="glass-surface-floating ready-floating-menu"/)
   assert.match(filesPanel, /position:\s*'fixed'/)
 })
 

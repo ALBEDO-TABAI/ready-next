@@ -333,6 +333,11 @@ test('acceptance 04: SDK widget update prefers existing target over duplicate cr
       data: {
         widgets: toolName === 'document_list_widgets' ? [{ id: 'widget-7' }] : undefined,
         updatedWidgetId: args.widgetId,
+        // 文档变更追踪要求写类工具回传文档身份（tabId+title），否则
+        // orchestrator 以「无法自动保存」拒绝完成——对齐真实 widget 工具输出。
+        document: toolName === 'document_update_widget'
+          ? { tabId: 'tab-1', title: '目标文档', path: '/tmp/target.md', saveState: 'saved' }
+          : undefined,
       },
       projectionPatch: {
         taskTitle: 'Widget update',

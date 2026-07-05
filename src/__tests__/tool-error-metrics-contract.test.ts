@@ -33,11 +33,14 @@ test('tool-executor.ts imports TOOL_ERROR_METRICS and uses .inputValidation + .s
   assert.doesNotMatch(source, /logAgentMetric\(['"]tool_error_surfaced['"]/)
 })
 
-test('tool-runtime.ts uses TOOL_ERROR_METRICS.unknownSurfaced', () => {
+test('tool-runtime.ts carries no metric emit sites after the dead dispatch loop deletion', () => {
+  // f8682671 (梯队一 死债删除) deleted the dormant ToolRuntime dispatch loop —
+  // the unknownSurfaced emit site went with it. tool-runtime.ts is now a
+  // types + applyContextModifier module; the only live error-surfacing metric
+  // is TOOL_ERROR_METRICS.surfaced in tool-executor.ts (pinned above). Pin
+  // that no metric emit site (enum or hardcoded) sneaks back into this module.
   const source = readWorkspaceFile('src/main/modules/agent-control/tools-runtime/tool-runtime.ts')
-  assert.match(source, /from ['"]\.\/tool-error-metrics['"]/)
-  assert.match(source, /logAgentMetric\(TOOL_ERROR_METRICS\.unknownSurfaced/)
-  assert.doesNotMatch(source, /logAgentMetric\(['"]tool_error_unknown_surfaced['"]/)
+  assert.doesNotMatch(source, /logAgentMetric\(/, 'no metric emit sites may return to tool-runtime.ts')
 })
 
 test('skill-reference-hints.ts emits skillReferenceHintTtlSwept on sweep', () => {

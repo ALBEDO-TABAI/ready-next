@@ -31,8 +31,11 @@ test('ipc-handler agent:scopeRunEvent error payload carries errorKind/recoverabl
   const source = readWorkspaceFile('src/main/modules/claude-bridge/ipc-handler.ts')
   // Inside orchestrator.on('error', ...) the scopeRunEvent payload now forwards
   // the three new fields from the orchestrator data.
-  const onErrorBlock = source.match(/orchestrator\.on\(['"]error['"],[\s\S]*?mainWindow\.webContents\.send\(['"]agent:scopeRunEvent['"][^)]*\)/)
-  assert.ok(onErrorBlock, 'expected to find orchestrator.on("error") → agent:scopeRunEvent block')
+  // 重锚 b933a763 Phase D D1：裸 mainWindow.webContents.send 全部改经
+  // run-timeline-emitter 漏斗（emitRunTimelineEvent 盖戳后恰一 send）；
+  // 三字段不变量不变，仅发射调用面换名。
+  const onErrorBlock = source.match(/orchestrator\.on\(['"]error['"],[\s\S]*?emitRunTimelineEvent\(mainWindow,\s*['"]agent:scopeRunEvent['"][^)]*\)/)
+  assert.ok(onErrorBlock, 'expected to find orchestrator.on("error") → agent:scopeRunEvent emit block')
   const body = onErrorBlock![0]
   assert.match(body, /errorKind:\s*data\.errorKind/)
   assert.match(body, /recoverable:\s*data\.recoverable/)

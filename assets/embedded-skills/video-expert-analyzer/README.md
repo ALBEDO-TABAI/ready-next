@@ -38,7 +38,7 @@
 | ⚡ **Parallel Batch Scoring** | Frames sent to AI providers in parallel batches, with auto-retry and stale detection |
 | 🔄 **Resumable Pipeline** | Crash-safe staged execution — automatically picks up where it left off |
 | 🎯 **19-Type Video Classifier** | Dual-axis routing (Visual Source × Audio Dominance) maps to specialized analysis templates |
-| 🎤 **Smart Subtitle Extraction** | 4-tier fallback: Platform API → Embedded → RapidOCR → FunASR/mlx-whisper |
+| 🎤 **Smart Subtitle Extraction** | 4-tier fallback: Platform API → Embedded → RapidOCR → FunASR Nano |
 | 🎵 **Measured Audio Signal** | ffmpeg + numpy extract BPM, onset density, loudness arc, and per-cut beat alignment (±80ms) — audio-axis routing and rhythm analysis run on measured data, not title heuristics |
 | 📖 **Reader-First 导读** | Every audiovisual report opens with a plain-language TL;DR answering the route's value question, with highlight cards pointing at scene timestamps |
 | ⭐ **Best Shots** | Auto-select highlight clips (score ≥ 7.5; falls back to top in-video percentile when a harsh scorer leaves none) |
@@ -347,7 +347,6 @@ A shot with genuine emotion but slight shake is better than a perfect but empty 
 | [PySceneDetect](https://github.com/Breakthrough/PySceneDetect) | Scene detection |
 | [FFmpeg](https://ffmpeg.org/) | Media processing |
 | [FunASR](https://github.com/modelscope/FunASR) | Chinese speech recognition |
-| [mlx-whisper](https://github.com/ml-explore/mlx-examples) | Local ASR (Apple Silicon) |
 | [RapidOCR](https://github.com/RapidAI/RapidOCR) | Burned subtitle OCR |
 
 ## 📖 References
@@ -402,7 +401,7 @@ A shot with genuine emotion but slight shake is better than a perfect but empty 
 | ⚡ **并行批次评分** | 画面帧并行发送到 AI 供应商，自动重试和超时检测 |
 | 🔄 **可续跑流水线** | 崩溃安全的分段执行 — 自动从上次中断处继续 |
 | 🎯 **19 类视频分类器** | 双轴路由（视觉来源 × 听觉主导）映射到专属分析模板 |
-| 🎤 **智能字幕提取** | 四级降级：平台 API → 内嵌字幕 → RapidOCR → FunASR/mlx-whisper |
+| 🎤 **智能字幕提取** | 四级降级：平台 API → 内嵌字幕 → RapidOCR → FunASR Nano |
 | 🎵 **真实音频信号** | ffmpeg + numpy 实测 BPM、onset 密度、响度弧线、逐切点卡拍判定（±80ms）——音频轴路由和节奏分析基于测量数据而非标题猜测 |
 | 📖 **导读优先** | 视听报告开头是面向普通观众的白话速读：回答该类型的价值问题 + 带时间码的亮点卡片 |
 | ⭐ **精选镜头** | 自动筛选高分片段（≥7.5；遇严苛打分模型时按视频内百分位兜底） |
@@ -711,7 +710,6 @@ VNext 对每个视频沿两个轴进行分类，然后选择对应的专属分�
 | [PySceneDetect](https://github.com/Breakthrough/PySceneDetect) | 场景检测 |
 | [FFmpeg](https://ffmpeg.org/) | 媒体处理 |
 | [FunASR](https://github.com/modelscope/FunASR) | 中文语音识别 |
-| [mlx-whisper](https://github.com/ml-explore/mlx-examples) | 本地 ASR（Apple Silicon） |
 | [RapidOCR](https://github.com/RapidAI/RapidOCR) | 烧录字幕 OCR |
 
 ## 📖 参考文献

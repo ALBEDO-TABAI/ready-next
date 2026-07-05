@@ -721,8 +721,14 @@ function writeRunMetaOutcome(
     initiator: outcome.initiator,
     durationMs: outcome.durationMs,
   }
-  if (facts || taskBudgetRuntime) {
-    patch.taskType = facts?.taskType || taskBudgetRuntime?.taskType || null
+  // run_meta 行内 task_type 必须与同行写入的 budget 同源——两者都来自实际
+  // 管辖本 run 的 budget runtime（显式传入或 checkpoint 续跑恢复），否则
+  // research 档预算配 direct_answer 类型的自相矛盾行会落库；facts 的推断
+  // patch 只在没有 budget runtime 时兜底。taskTypeSource:'missing' 一律
+  // 降级为不写（EP2-T1 07 §1.3）：stamping null 会经 spread-merge 清掉旧值。
+  const closeoutTaskType = taskBudgetRuntime?.taskType || facts?.taskType || null
+  if (closeoutTaskType) {
+    patch.taskType = closeoutTaskType
   }
   if (taskBudgetRuntime) {
     patch.budget = {

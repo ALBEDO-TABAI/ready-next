@@ -158,6 +158,20 @@ const EXPLICIT_KIND_MAP: Record<string, ToolEnvelopeKind> = {
   primitive_no_skill_context: 'internal_error',
   card_resolver_missed: 'internal_error',
   [BROWSER_TOOL_ERROR_KINDS.browserToolFailed.code]: 'internal_error',
+  // Phase I/M（2026-07-05 p6d drift 补登）— channel 回传 / MCP 代装 / setup 代跑
+  channel_file_invalid: 'arg_error',
+  channel_scope_unbound: 'denied_by_policy',
+  channel_delivery_failed: 'upstream_error',
+  mcp_install_invalid_source: 'arg_error',
+  mcp_install_command_not_allowed: 'denied_by_policy',
+  mcp_install_duplicate_server: 'arg_error',
+  mcp_install_config_unreadable: 'upstream_error',
+  mcp_install_server_not_found: 'not_found',
+  mcp_install_apply_failed: 'upstream_error',
+  setup_command_invalid: 'arg_error',
+  setup_command_not_confirmed: 'denied_by_policy',
+  setup_command_execution_failed: 'upstream_error',
+  setup_command_timed_out: 'network_error',
 }
 
 /** Pattern fallback for kinds not in the explicit table (future tools). */

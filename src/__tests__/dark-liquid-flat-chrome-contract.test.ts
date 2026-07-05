@@ -40,21 +40,24 @@ test('the four-mode switch track kills the old top sheen through shared dark liq
   const styles = readWorkspaceFile('src/renderer/styles/workbench-sliders.css')
 
   assert.doesNotMatch(themeStyles, /--lg-surface-elevated\s*:/)
+  // 8ab48cd7 style(ui): checkpoint liquid glass polish — ::before 覆层从 rail-slot-overlay token 改为自带双向侧光渐变
   assert.match(
     styles,
-    /\.draggable-mode-tabs::before\s*\{[\s\S]*?background:\s*var\(--workbench-rail-slot-overlay\)/,
+    /\.draggable-mode-tabs::before\s*\{[\s\S]*?background:\s*linear-gradient\(90deg, rgba\(255, 255, 255, 0\.14\), transparent 18%, transparent 82%, rgba\(71, 13, 3, 0\.06\)\),\s*linear-gradient\(180deg, rgba\(255, 255, 255, 0\.10\), transparent 42%\)/,
   )
   assert.match(
     themeStyles,
     /html\[data-theme='dark'\]\[data-skin='liquid-glass'\]\s*\{[\s\S]*?--workbench-rail-slot-overlay:\s*none;/,
   )
+  // 079189aa Add browser FastCard context actions — liquid-glass 皮肤块与 fastcard overlay 窗口共用选择器组
   assert.match(
     themeStyles,
-    /html\[data-skin='liquid-glass'\]\s*\{[\s\S]*?--workbench-rail-slot-bg:\s*rgba\(222,\s*222,\s*220,\s*0\.64\);/,
+    /html\[data-skin='liquid-glass'\],\s*html\[data-fastcard-overlay-window='true'\]\s*\{[\s\S]*?--workbench-rail-slot-bg:\s*rgba\(222,\s*222,\s*220,\s*0\.64\);/,
   )
+  // c17b8883 Polish liquid glass workbench controls — 槽位内阴影 0.11 → 0.10
   assert.match(
     themeStyles,
-    /html\[data-skin='liquid-glass'\]\s*\{[\s\S]*?--workbench-rail-slot-border:\s*transparent;[\s\S]*?--workbench-rail-slot-shadow:\s*[\s\S]*?inset 0 1\.5px 3px rgba\(24,\s*39,\s*77,\s*0\.10\)/,
+    /html\[data-skin='liquid-glass'\],\s*html\[data-fastcard-overlay-window='true'\]\s*\{[\s\S]*?--workbench-rail-slot-border:\s*transparent;[\s\S]*?--workbench-rail-slot-shadow:\s*[\s\S]*?inset 0 1\.5px 3px rgba\(24,\s*39,\s*77,\s*0\.10\)/,
   )
   assert.match(
     themeStyles,
@@ -64,22 +67,31 @@ test('the four-mode switch track kills the old top sheen through shared dark liq
     themeStyles,
     /html\[data-theme='dark'\]\[data-skin='liquid-glass'\]\s*\{[\s\S]*?--workbench-rail-slot-shadow:\s*[\s\S]*?inset 0 1\.5px 3px rgba\(0,\s*0,\s*0,\s*0\.36\)/,
   )
+  // 8ab48cd7 — track 覆层退役为 transparent（sheen 由 ::before/thumb 自绘承担）
   assert.match(
     styles,
-    /\.icon-rail-slider__track\s*\{[\s\S]*?background:\s*var\(--workbench-rail-slot-overlay\)/,
+    /\.icon-rail-slider__track\s*\{[\s\S]*?background:\s*transparent;/,
+  )
+  // 8ab48cd7 — icon rail 槽改中性实底凹槽（无 backdrop 模糊）
+  assert.match(
+    styles,
+    /html\[data-skin='liquid-glass'\] \.icon-rail-slider\s*\{[\s\S]*?background:\s*rgba\(214, 214, 211, 0\.84\);[\s\S]*?backdrop-filter:\s*none;/,
+  )
+  // 8ab48cd7 — 四模式槽改 Ready 橙渐变轨道（无 backdrop 模糊）
+  assert.match(
+    styles,
+    /html\[data-skin='liquid-glass'\] \.draggable-mode-tabs\s*\{[\s\S]*?background:\s*linear-gradient\(180deg, color-mix\(in srgb, var\(--color-ready-orange, #ff4b2b\) 82%, white\) 0%[\s\S]*?backdrop-filter:\s*none;/,
+  )
+  // 8ab48cd7 — 暗色两槽拆分为独立块并自带材质：icon rail 深灰实底、四模式深橙渐变，均无 backdrop
+  assert.match(
+    styles,
+    /html\[data-theme='dark'\]\[data-skin='liquid-glass'\] \.icon-rail-slider\s*\{[\s\S]*?border-color:\s*rgba\(235, 235, 230, 0\.08\);[\s\S]*?background:\s*rgba\(58, 59, 57, 0\.74\);[\s\S]*?backdrop-filter:\s*none;/,
   )
   assert.match(
     styles,
-    /html\[data-skin='liquid-glass'\] \.icon-rail-slider\s*\{[\s\S]*?background:\s*color-mix\(in srgb, var\(--workbench-rail-slot-bg\) 86%, rgba\(255, 255, 255, 0\.34\)\);[\s\S]*?backdrop-filter:\s*blur\(calc\(var\(--lg-blur-soft\) \* 0\.18\)\) saturate\(calc\(var\(--surface-saturate\) - 18%\)\);/,
+    /html\[data-theme='dark'\]\[data-skin='liquid-glass'\] \.draggable-mode-tabs\s*\{[\s\S]*?linear-gradient\(180deg, color-mix\(in srgb, var\(--color-ready-orange, #ff6345\) 72%, #2a0b04\) 0%[\s\S]*?backdrop-filter:\s*none;/,
   )
-  assert.match(
-    styles,
-    /html\[data-skin='liquid-glass'\] \.draggable-mode-tabs\s*\{[\s\S]*?background:\s*color-mix\(in srgb, var\(--workbench-rail-slot-bg\) 86%, rgba\(255, 255, 255, 0\.34\)\);[\s\S]*?backdrop-filter:\s*blur\(calc\(var\(--lg-blur-soft\) \* 0\.18\)\) saturate\(calc\(var\(--surface-saturate\) - 18%\)\);/,
-  )
-  assert.match(
-    styles,
-    /html\[data-theme='dark'\]\[data-skin='liquid-glass'\] \.icon-rail-slider,[\s\S]*?html\[data-theme='dark'\]\[data-skin='liquid-glass'\] \.draggable-mode-tabs\s*\{[\s\S]*?border-color:\s*transparent;[\s\S]*?background:\s*var\(--workbench-rail-slot-bg\);[\s\S]*?backdrop-filter:\s*blur\(calc\(var\(--lg-blur-soft\) \* 0\.18\)\) saturate\(100%\);/,
-  )
-  assert.match(styles, /html\[data-theme='dark'\]\[data-skin='liquid-glass'\] \.icon-rail-slider__thumb,[\s\S]*?rgba\(235, 235, 230, 0\.16\)/)
+  // 8ab48cd7 — 暗色 thumb 改暖灰实体渐变 + 亮描边
+  assert.match(styles, /html\[data-theme='dark'\]\[data-skin='liquid-glass'\] \.icon-rail-slider__thumb,[\s\S]*?linear-gradient\(180deg, rgba\(225, 225, 218, 0\.90\) 0%, rgba\(176, 178, 171, 0\.86\) 100%\)[\s\S]*?border-color:\s*rgba\(235, 235, 230, 0\.22\);/)
   assert.doesNotMatch(styles, /html\[data-theme='dark'\]\[data-skin='liquid-glass'\] \.icon-rail-slider__thumb,[\s\S]*?rgba\(232, 240, 255/)
 })

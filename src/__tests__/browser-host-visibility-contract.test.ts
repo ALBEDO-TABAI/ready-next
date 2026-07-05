@@ -95,7 +95,8 @@ test('browser host visibility is explicitly gated and browser bounds keep Browse
   assert.match(browserMode, /topInset:\s*0/)
   assert.match(browserMode, /interface BrowserModeProps \{[\s\S]*isActive\?: boolean[\s\S]*isMotionSettled\?: boolean[\s\S]*layoutPhase\?: BrowserHostLayoutPhase[\s\S]*\}/)
   assert.match(browserMode, /export default function BrowserMode\(\{[\s\S]*isActive = true,[\s\S]*isMotionSettled = true,[\s\S]*\}: BrowserModeProps\)/)
-  assert.match(browserMode, /<BrowserHeader[\s\S]*isActive=\{isActive\}/)
+  // vertical-tabs（74cab2a7）：主 chrome 委托 BrowserTopBar；BrowserHeader 留在空态链。
+  assert.match(browserMode, /<BrowserTopBar[\s\S]*?isActive=\{isActive\}/)
   assert.match(browserHeader, /<TabRail[\s\S]*isActive=\{isActive\}/)
   assert.match(browserHeader, /interface BrowserHeaderProps \{[\s\S]*isActive: boolean/)
   assert.match(browserHeader, /useBrowserHeaderInteraction\(isActive,\s*dismissAddressEditing\)/)

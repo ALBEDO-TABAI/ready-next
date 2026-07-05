@@ -614,8 +614,7 @@ def check_burned_subtitle(frame_path: str) -> bool:
             return text_count >= 2
         return False
     except ImportError:
-        print("⚠️ RapidOCR 未安装，跳过烧录字幕检测")
-        print("   安装命令: pip install rapidocr-onnxruntime")
+        print("⚠️ Ready 发行运行时缺少 RapidOCR，跳过烧录字幕检测")
         return False
     except Exception as e:
         print(f"⚠️ OCR 检测失败: {e}")
@@ -767,101 +766,6 @@ def _split_text_by_punctuation(text: str, timestamps: list) -> list:
     return sentences
 
 
-def _guess_language_candidates(title: str = "", url: str = "") -> list[str | None]:
-    haystack = f"{title} {url}"
-    candidates: list[str | None] = [None]
-    if re.search(r"[\u3040-\u30ff]", haystack):
-        candidates.append("ja")
-    if re.search(r"[\u4e00-\u9fff]", haystack):
-        candidates.append("zh")
-    candidates.append("en")
-    ordered: list[str | None] = []
-    for candidate in candidates:
-        if candidate not in ordered:
-            ordered.append(candidate)
-    return ordered
-
-
-def _write_segments_to_srt(segments: list[dict], output_srt: str) -> int:
-    subtitle_count = 0
-    with open(output_srt, "w", encoding="utf-8") as f:
-        for segment in segments:
-            text = str(segment.get("text", "")).strip()
-            if not text:
-                continue
-            subtitle_count += 1
-            start = format_timestamp(float(segment.get("start", 0.0)))
-            end = format_timestamp(float(segment.get("end", 0.0)))
-            f.write(f"{subtitle_count}\n{start} --> {end}\n{text}\n\n")
-    return subtitle_count
-
-
-def extract_with_whisper_mlx(video_path: str, output_srt: str, *, title: str = "", url: str = "") -> bool:
-    """
-    使用 MLX Whisper 进行语音转录 (macOS 专用)
-    使用 whisper-large-v3-turbo-q4 量化模型
-
-    模型特点:
-    - 模型大小: 约 500MB (量化版本)
-    - Apple Silicon 优化: 使用 Metal 加速
-    - 速度快: 针对 M1/M2/M3 优化
-    - 内存占用低: 量化模型
-    """
-    try:
-        import mlx_whisper
-
-        print("🎤 使用 MLX Whisper 进行语音转录...")
-        print("   ASR 模型: whisper-large-v3-turbo-q4 (Apple Silicon 优化)")
-        print("   框架: MLX (Metal 加速)")
-        print("   ⚠️ 首次运行需下载约 500MB 模型文件，请耐心等待")
-
-        # 提取音频
-        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
-            audio_path = tmp.name
-
-        if not extract_audio(video_path, audio_path):
-            return False
-
-        print("   开始转录...")
-        best_segments = []
-        for candidate in _guess_language_candidates(title, url):
-            result = mlx_whisper.transcribe(
-                audio_path,
-                path_or_hf_repo="mlx-community/whisper-large-v3-turbo-q4",
-                language=candidate,
-                word_timestamps=True,
-            )
-            segments = result.get("segments", [])
-            if segments and not transcript_quality_is_poor(segments):
-                best_segments = segments
-                break
-            if not best_segments:
-                best_segments = segments
-
-        if transcript_quality_is_poor(best_segments):
-            print("❌ MLX Whisper 转录质量过低，放弃写入主字幕")
-            os.unlink(audio_path)
-            return False
-
-        subtitle_count = _write_segments_to_srt(best_segments, output_srt)
-
-        # 清理临时文件
-        os.unlink(audio_path)
-
-        print(f"✅ MLX Whisper 转录完成: {subtitle_count} 条字幕")
-        return subtitle_count > 0
-
-    except ImportError:
-        print("❌ MLX Whisper 未安装")
-        print("   安装命令: pip install mlx-whisper")
-        return False
-    except Exception as e:
-        print(f"❌ MLX Whisper 转录失败: {e}")
-        import traceback
-        traceback.print_exc()
-        return False
-
-
 def extract_with_funasr(video_path: str, output_srt: str) -> bool:
     """
     使用 FunASR 进行语音转录 (Windows/Linux)
@@ -876,8 +780,8 @@ def extract_with_funasr(video_path: str, output_srt: str) -> bool:
     """
     try:
         print("🎤 使用 FunASR 进行语音转录...")
-        print("   ASR 模型: Fun-ASR-Nano-2512 (新一代高性能模型)")
-        print("   ⚠️ 首次运行需下载约 2GB 模型文件，请耐心等待")
+        print("   ASR 模型: 优先使用本地 Fun-ASR-Nano-2512；未准备则回退到 paraformer-zh")
+        print("   Nano 权重不随应用内置，可在 Ready Skill 配置中下载或指定本地目录")
 
         # 提取音频
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
@@ -943,8 +847,7 @@ def extract_with_funasr(video_path: str, output_srt: str) -> bool:
         return subtitle_count > 0
 
     except ImportError:
-        print("❌ FunASR 未安装")
-        print("   安装命令: pip install funasr modelscope")
+        print("❌ Ready 发行运行时缺少 FunASR / ModelScope")
         return False
     except Exception as e:
         print(f"❌ FunASR 转录失败: {e}")
@@ -956,26 +859,10 @@ def extract_with_funasr(video_path: str, output_srt: str) -> bool:
 def extract_with_smart_asr(video_path: str, output_srt: str, *, title: str = "", url: str = "") -> bool:
     """
     智能选择 ASR 引擎
-    - macOS: 使用 MLX Whisper (Apple Silicon 优化)
-    - Windows/Linux: 使用 FunASR (通用高性能)
+    Ready 内置版本统一使用 FunASR Nano，避免平台分叉和旧本地 ASR 运行时体积。
     """
-    system = platform.system()
-
-    print(f"检测到系统: {system}")
-
-    if system == "Darwin":  # macOS
-        print("→ 使用 MLX Whisper (Apple Silicon 优化)")
-        success = extract_with_whisper_mlx(video_path, output_srt, title=title, url=url)
-        if success:
-            return True
-
-        # 如果 MLX Whisper 失败，回退到 FunASR
-        print("\n⚠️  MLX Whisper 不可用，回退到 FunASR...")
-        return extract_with_funasr(video_path, output_srt)
-
-    else:  # Windows, Linux, etc.
-        print("→ 使用 FunASR (通用高性能)")
-        return extract_with_funasr(video_path, output_srt)
+    print("→ 使用 FunASR Nano")
+    return extract_with_funasr(video_path, output_srt)
 
 
 # ============================================================
@@ -1046,9 +933,7 @@ def smart_subtitle_extraction(video_path: str, output_srt: str, video_url: str =
             if has_burned:
                 print("✅ 检测到画面文字，额外写入 onscreen_text 轨道...")
                 extract_burned_subtitle_ocr(video_path, onscreen_srt)
-        system = platform.system()
-        mode = "mlx_whisper" if system == "Darwin" else "funasr"
-        return _return_success(mode)
+        return _return_success("funasr")
 
     if strategy != "music_first":
         print("\n步骤 5/5: ASR 失败，尝试回退到平台/内嵌字幕...")

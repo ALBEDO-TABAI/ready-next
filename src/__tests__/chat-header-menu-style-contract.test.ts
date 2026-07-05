@@ -40,8 +40,17 @@ test('chat header menus opt into the same layered glass treatment as browser flo
   const chatHeader = readFileSync(resolve(process.cwd(), 'src/renderer/components/agent/ChatHeader.tsx'), 'utf8')
   const styles = readFileSync(resolve(process.cwd(), 'src/renderer/styles/index.css'), 'utf8')
 
-  assert.match(chatHeader, /glass-surface-floating chat-header-floating-menu/)
-  assert.match(chatHeader, /chat-header-floating-menu ready-floating-menu/)
+  // 8ab48cd7 style(ui): checkpoint liquid glass polish + 23d6ec9a feat(chat): merge session source history menu —
+  // 菜单面从字面 class 组合改为共享 LiquidFloatingPanel；glass-surface-floating / ready-floating-menu 由面板内部拼类注入。
+  const floatingPanel = readFileSync(
+    resolve(process.cwd(), 'src/renderer/components/ui/liquid-glass/LiquidFloatingPanel.tsx'),
+    'utf8',
+  )
+  assert.match(chatHeader, /<LiquidFloatingPanel[\s\S]{0,120}?className="chat-header-floating-menu"/)
+  assert.match(
+    floatingPanel,
+    /const classes = \['glass-surface-floating', 'ready-floating-menu', 'ready-liquid-popover', className\]/,
+  )
   assert.match(chatHeader, /chat-header-floating-menu-item ready-floating-menu-item/)
   assert.match(styles, /\.ready-floating-menu,\s*\.chat-header-floating-menu\s*\{/)
   assert.match(styles, /backdrop-filter:\s*blur\(calc\(var\(--lg-blur-strong\) \* 1\.28\)\)/)

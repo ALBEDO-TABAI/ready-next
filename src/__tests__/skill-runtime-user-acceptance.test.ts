@@ -145,6 +145,13 @@ function setupSchema(db: SqliteDatabase): void {
       continuation_ref_json TEXT,
       progress_json TEXT,
       recent_artifacts_json TEXT,
+      criteria_json TEXT,
+      checkins_json TEXT,
+      proof_refs_json TEXT,
+      learning_refs_json TEXT,
+      owner_agent_id TEXT,
+      packet_role TEXT,
+      context_refs_json TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );

@@ -79,7 +79,7 @@ test('dark liquid composer dims only the material while preserving semantic cont
   )
   assert.match(
     styles,
-    /html\[data-theme='dark'\]\[data-skin='liquid-glass'\] \.ready-liquid-composer \[data-ready-agent-send='true'\] \{[\s\S]*background:\s*rgba\(232, 232, 232, 0\.12\) !important;/,
+    /html\[data-theme='dark'\]\[data-skin='liquid-glass'\] \.ready-liquid-composer \[data-ready-agent-send='true'\] \{[\s\S]*?background:\s*rgba\(255, 255, 255, 0\.96\) !important;/,
   )
   assert.doesNotMatch(darkComposerBlock[1], /--color-blue:/)
   assert.doesNotMatch(darkComposerBlock[1], /--color-green:/)

@@ -159,6 +159,27 @@ const EXPECTED_ANTHROPIC = [
       required: ['path', 'destDir'],
     },
   },
+  // Golden re-recorded for file_copy — added intentionally in ab524cc0
+  // (skill delivery adjudication: controlled same-root egress for artifacts),
+  // together with its schema, tool defs, and file-management-copy-contract.test.ts.
+  {
+    name: 'file_copy',
+    description:
+      '把文件复制到另一个目录，可选同时改名。源路径与目标目录都必须在同一 workspace 根内；默认不覆盖已有文件。',
+    input_schema: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: '原文件绝对路径' },
+        destDir: { type: 'string', description: '目标目录绝对路径' },
+        newName: { type: 'string', description: '可选：新文件名' },
+        overwrite: {
+          type: 'boolean',
+          description: '可选：目标存在时是否覆盖（默认 false）',
+        },
+      },
+      required: ['path', 'destDir'],
+    },
+  },
   {
     name: 'file_inventory',
     description:

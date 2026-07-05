@@ -70,6 +70,20 @@ export function resolveTaskType(params: {
         preferredExecutor: 'none',
       }
     }
+    // Host availability degrades ALL concrete browser work — including
+    // transaction workflows. The transaction branch (6e99f0e6) originally sat
+    // above this check and returned preferredExecutor:'browser' with no
+    // browser host, breaking the degradation contract shared by every other
+    // browser path.
+    if (!browserAvailable) {
+      return {
+        taskType: 'direct_answer',
+        executionChain: 'direct',
+        degradationReason: 'browser_host_unavailable',
+        requiresPlanner: false,
+        preferredExecutor: 'none',
+      }
+    }
     if (browserWorkflowIntent.kind === 'transaction') {
       return {
         taskType: 'browser_transaction',
@@ -80,15 +94,6 @@ export function resolveTaskType(params: {
     }
     const looksLikeMediaTask = params.envelope.environmentHints.hasAttachments
       || /(上传|图片|图像|提交)/.test(userText)
-    if (!browserAvailable) {
-      return {
-        taskType: 'direct_answer',
-        executionChain: 'direct',
-        degradationReason: 'browser_host_unavailable',
-        requiresPlanner: false,
-        preferredExecutor: 'none',
-      }
-    }
     if (looksLikeMediaTask) {
       return {
         taskType: 'media_task',

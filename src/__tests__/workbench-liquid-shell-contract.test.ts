@@ -168,8 +168,12 @@ test('Stage 1 — theme:setSkin IPC handler exists and persists skin to DB', () 
   const mainIndex = readWorkspaceFile('src/main/index.ts')
 
   assert.match(mainIndex, /ipcMain\.handle\('theme:setSkin'/)
-  // skin 输入必须校验为 'liquid-glass' | 'ready-glass'，非法值 fall back 到 'liquid-glass'
-  assert.match(mainIndex, /skin === 'ready-glass' \? 'ready-glass' : 'liquid-glass'/)
+  // skin 输入必须校验为 'liquid-glass' | 'ready-glass' | 'solid-green-glass' | 'solid-blue-glass'，非法值 fall back 到 'liquid-glass'
+  // a948f82d style(ui): polish Ready glass theme surfaces（新增 solid-green-glass）+ 26a3ce1c style(ui): add solid blue glass theme（新增 solid-blue-glass）
+  assert.match(
+    mainIndex,
+    /skin === 'ready-glass' \|\| skin === 'solid-green-glass' \|\| skin === 'solid-blue-glass' \? skin : 'liquid-glass'/,
+  )
   // 持久化到 DB 后必须调 sync (刷新材料) + broadcastThemeChanged (通知 renderer)
   assert.match(mainIndex, /THEME_SKIN_SETTING_KEY/)
 })
@@ -320,16 +324,30 @@ test('liquid glass sliders preserve the groove and use lens-backed convex thumbs
   const darkAppModeTabsGroove = findCssBlock(appModeTabsSection, "html[data-theme='dark'][data-skin='liquid-glass'] .draggable-mode-tabs")
   const darkAppModeTabsThumb = findCssBlock(appModeTabsSection, "html[data-theme='dark'][data-skin='liquid-glass'] .draggable-mode-tabs__thumb")
 
-  assert.match(iconRailGroove, /--ready-workbench-slider-thumb-scale:\s*1\.1;/)
-  assert.match(modeTabsGroove, /--ready-workbench-slider-thumb-scale:\s*1\.1;/)
-  for (const grooveBlock of [iconRailGroove, modeTabsGroove]) {
-    assert.match(grooveBlock, /border-color:\s*transparent;/)
-    assert.match(grooveBlock, /background:\s*color-mix\(in srgb, var\(--workbench-rail-slot-bg\) 86%, rgba\(255, 255, 255, 0\.34\)\);/)
-    assert.match(grooveBlock, /box-shadow:\s*var\(--workbench-rail-slot-shadow\);/)
-    assert.match(grooveBlock, /blur\(calc\(var\(--lg-blur-soft\) \* 0\.18\)\)/)
-    assert.doesNotMatch(grooveBlock, /0\.045/)
-  }
-  assert.match(documentSwitchGroove, /--ready-document-switch-thumb-scale:\s*1\.1;/)
+  // 8ab48cd7 style(ui): checkpoint liquid glass polish — icon rail 槽改为中性实底凹槽：
+  // thumb 不再放大（1），边线亮描边，实体底色，双 inset 塑形，去掉 backdrop 模糊。
+  assert.match(iconRailGroove, /--ready-workbench-slider-thumb-scale:\s*1;/)
+  assert.match(iconRailGroove, /border-color:\s*rgba\(255, 255, 255, 0\.42\);/)
+  assert.match(iconRailGroove, /background:\s*rgba\(214, 214, 211, 0\.84\);/)
+  assert.match(
+    iconRailGroove,
+    /inset 0 1px 0 rgba\(255, 255, 255, 0\.46\),\s*inset 0 -1px 0 rgba\(42, 45, 48, 0\.045\)/,
+  )
+  assert.match(iconRailGroove, /backdrop-filter:\s*none;/)
+  // 8ab48cd7 — 工作台四模式槽改为 Ready 橙渐变轨道（thumb 1.04，实体投影，无 backdrop 模糊）。
+  assert.match(modeTabsGroove, /--ready-workbench-slider-thumb-scale:\s*1\.04;/)
+  assert.match(
+    modeTabsGroove,
+    /border-color:\s*color-mix\(in srgb, var\(--color-ready-orange\) 42%, rgba\(92, 26, 10, 0\.32\)\);/,
+  )
+  assert.match(
+    modeTabsGroove,
+    /linear-gradient\(180deg, color-mix\(in srgb, var\(--color-ready-orange, #ff4b2b\) 82%, white\) 0%, var\(--color-ready-orange, #ff4b2b\) 54%, color-mix\(in srgb, var\(--color-ready-orange, #ff4b2b\) 88%, black\) 100%\)/,
+  )
+  assert.match(modeTabsGroove, /inset 0 1px 0 rgba\(255, 255, 255, 0\.22\)/)
+  assert.match(modeTabsGroove, /backdrop-filter:\s*none;/)
+  // 8ab48cd7 — 文档切换槽 thumb 放大退役（1.1 → 1）。
+  assert.match(documentSwitchGroove, /--ready-document-switch-thumb-scale:\s*1;/)
   assert.match(documentSwitchGroove, /border-color:\s*transparent;/)
   assert.match(documentSwitchGroove, /background:\s*color-mix\(in srgb, var\(--workbench-rail-slot-bg\) 86%, rgba\(255, 255, 255, 0\.34\)\);/)
   assert.match(documentSwitchGroove, /box-shadow:\s*var\(--workbench-rail-slot-shadow\);/)
@@ -337,13 +355,14 @@ test('liquid glass sliders preserve the groove and use lens-backed convex thumbs
   assert.doesNotMatch(documentSwitchGroove, /0\.045/)
   assert.match(appStyles, /html\[data-skin='liquid-glass'\] \.draggable-mode-switch::before\s*\{[\s\S]*?display:\s*none;/)
   assert.match(chatModeDock, /margin-bottom:\s*-12px;/)
-  assert.match(chatModeDockGroove, /--ready-workbench-slider-thumb-scale:\s*1\.18;/)
-  assert.match(chatModeDockGroove, /border-color:\s*transparent;/)
-  assert.match(chatModeDockGroove, /background:\s*transparent;/)
-  assert.match(chatModeDockGroove, /box-shadow:\s*none;/)
+  // 8ab48cd7 style(ui): checkpoint liquid glass polish — 聊天 dock 槽从全透明改为自带薄雾底 + 触地投影（thumb 1.08）。
+  assert.match(chatModeDockGroove, /--ready-workbench-slider-thumb-scale:\s*1\.08;/)
+  assert.match(chatModeDockGroove, /border-color:\s*rgba\(255, 255, 255, 0\.56\);/)
+  assert.match(chatModeDockGroove, /background:\s*rgba\(248, 250, 252, 0\.14\);/)
+  assert.match(chatModeDockGroove, /0 5px 14px rgba\(31, 36, 46, 0\.055\)/)
   assert.match(chatModeDockGroove, /backdrop-filter:\s*none;/)
-  assert.match(chatModeDockSurface, /background:\s*rgba\(248,\s*250,\s*252,\s*0\.44\);/)
-  assert.match(chatModeDockSurface, /inset 0 1px 0 rgba\(255,\s*255,\s*255,\s*0\.42\)/)
+  assert.match(chatModeDockSurface, /background:\s*rgba\(248,\s*250,\s*252,\s*0\.56\);/)
+  assert.match(chatModeDockSurface, /inset 0 1px 0 rgba\(255,\s*255,\s*255,\s*0\.52\)/)
   assert.match(chatModeDockProjection, /filter:\s*blur\(0\.875px\) saturate\(1\.28\) contrast\(0\.82\) brightness\(1\.08\);/)
 
   for (const darkGrooveBlock of [darkDocumentSwitchGroove, darkAppModeTabsGroove]) {
@@ -352,14 +371,15 @@ test('liquid glass sliders preserve the groove and use lens-backed convex thumbs
     assert.match(darkGrooveBlock, /box-shadow:\s*var\(--workbench-rail-slot-shadow\);/)
     assert.match(darkGrooveBlock, /saturate\(100%\)/)
   }
-  assert.match(darkChatModeDockGroove, /border-color:\s*transparent;/)
-  assert.match(darkChatModeDockGroove, /background:\s*transparent;/)
-  assert.match(darkChatModeDockGroove, /box-shadow:\s*none;/)
+  // 8ab48cd7 — 暗色聊天 dock 槽同步换为自带底色 + 投影（不再全透明）。
+  assert.match(darkChatModeDockGroove, /border-color:\s*rgba\(232, 232, 232, 0\.14\);/)
+  assert.match(darkChatModeDockGroove, /background:\s*rgba\(26, 26, 26, 0\.24\);/)
+  assert.match(darkChatModeDockGroove, /0 5px 14px rgba\(0, 0, 0, 0\.18\)/)
   assert.match(darkChatModeDockSurface, /background:\s*rgba\(26,\s*26,\s*26,\s*0\.62\);/)
   assert.match(darkChatModeDockSurface, /inset 0 1px 0 rgba\(232,\s*232,\s*232,\s*0\.14\)/)
   assert.match(darkChatModeDockProjection, /filter:\s*blur\(0\.875px\) saturate\(0\) contrast\(0\.78\) brightness\(0\.78\);/)
 
-  for (const thumbBlock of [iconRailThumb, modeTabsThumb, documentSwitchThumb, appModeTabsThumb]) {
+  for (const thumbBlock of [iconRailThumb, appModeTabsThumb]) {
     assert.match(thumbBlock, /radial-gradient\(ellipse 110% 62% at 50% -12%/)
     assert.match(thumbBlock, /inset 0 -2px 4px/)
     assert.match(thumbBlock, /inset 2px 0 4px/)
@@ -367,11 +387,31 @@ test('liquid glass sliders preserve the groove and use lens-backed convex thumbs
     assert.doesNotMatch(thumbBlock, /rgba\(233, 229, 221/)
     assert.doesNotMatch(thumbBlock, /0 6px 20px rgba\(0, 0, 0/)
   }
-  for (const darkThumbBlock of [darkDocumentSwitchThumb, darkAppModeTabsThumb]) {
-    assert.match(darkThumbBlock, /rgba\(235, 235, 230, 0\.16\)/)
-    assert.match(darkThumbBlock, /inset 0 -2px 4px rgba\(0, 0, 0, 0\.20\)/)
-    assert.doesNotMatch(darkThumbBlock, /rgba\(232, 240, 255/)
-  }
+  // 8ab48cd7 style(ui): checkpoint liquid glass polish — 四模式 thumb（sliders.css 侧）改为暖白实体渐变 + 细 inset 描边。
+  assert.match(modeTabsThumb, /radial-gradient\(ellipse 118% 72% at 42% -8%/)
+  assert.match(
+    modeTabsThumb,
+    /linear-gradient\(180deg, rgba\(248, 248, 244, 0\.96\) 0%, rgba\(209, 211, 205, 0\.94\) 100%\)/,
+  )
+  assert.match(modeTabsThumb, /inset 0 1px 0 rgba\(255, 255, 255, 0\.76\)/)
+  assert.match(modeTabsThumb, /border-color:\s*rgba\(255, 255, 255, 0\.66\);/)
+  assert.doesNotMatch(modeTabsThumb, /rgba\(244, 242, 237/)
+  assert.doesNotMatch(modeTabsThumb, /rgba\(233, 229, 221/)
+  assert.doesNotMatch(modeTabsThumb, /0 6px 20px rgba\(0, 0, 0/)
+  // 8ab48cd7 — 文档模式切换 thumb 改为 Ready 橙实体（#ff5032 → #ff4b2b）。
+  assert.match(documentSwitchThumb, /linear-gradient\(180deg, #ff5032 0%, #ff4b2b 100%\)/)
+  assert.match(documentSwitchThumb, /inset 0 0 0 1px rgba\(255, 255, 255, 0\.14\)/)
+  assert.match(documentSwitchThumb, /border-color:\s*rgba\(255, 255, 255, 0\.20\);/)
+  assert.doesNotMatch(documentSwitchThumb, /rgba\(244, 242, 237/)
+  assert.doesNotMatch(documentSwitchThumb, /rgba\(233, 229, 221/)
+  assert.doesNotMatch(documentSwitchThumb, /0 6px 20px rgba\(0, 0, 0/)
+  assert.match(darkAppModeTabsThumb, /rgba\(235, 235, 230, 0\.16\)/)
+  assert.match(darkAppModeTabsThumb, /inset 0 -2px 4px rgba\(0, 0, 0, 0\.20\)/)
+  assert.doesNotMatch(darkAppModeTabsThumb, /rgba\(232, 240, 255/)
+  // 8ab48cd7 — 暗色文档切换 thumb 同步 Ready 橙实体（#ff5d40 → #ff5638）。
+  assert.match(darkDocumentSwitchThumb, /linear-gradient\(180deg, #ff5d40 0%, #ff5638 100%\)/)
+  assert.match(darkDocumentSwitchThumb, /inset 0 0 0 1px rgba\(255, 255, 255, 0\.13\)/)
+  assert.doesNotMatch(darkDocumentSwitchThumb, /rgba\(232, 240, 255/)
 
   assert.match(iconRail, /<LiquidLens[\s\S]*className="ready-slider-thumb-lens"[\s\S]*bevel=\{4\}[\s\S]*depth=\{8\}[\s\S]*ior=\{1\.22\}[\s\S]*dome=\{0\.7\}[\s\S]*strength=\{1\.05\}[\s\S]*blur=\{0\}/)
   assert.match(modeTabs, /from '..\/ui\/liquid-glass\/LiquidBackdropProjection'/)

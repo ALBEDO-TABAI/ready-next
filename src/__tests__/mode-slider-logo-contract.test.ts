@@ -7,12 +7,18 @@ function readWorkspaceFile(path: string): string {
   return readFileSync(resolve(process.cwd(), path), 'utf8')
 }
 
-test('frozen mode slider uses the provided ready wordmark asset instead of plain text for the Ready side', () => {
+test('frozen mode slider renders the Ready brand dot instead of the wordmark image or plain text', () => {
   const modeSlider = readWorkspaceFile('src/renderer/components/layout/ModeSlider.tsx')
 
+  // 8ab48cd7 style(ui): checkpoint liquid glass polish — Ready 侧从 wordmark 图片改为 14px 品牌圆点
+  //（背景走 --ready-brand-accent token，随皮肤换色；wordmark 资产保留在仓库但不再被 ModeSlider 引用）。
   assert.ok(existsSync(resolve(process.cwd(), 'src/renderer/assets/ready-wordmark.png')))
-  assert.match(modeSlider, /import readyWordmark from '\.\.\/\.\.\/assets\/ready-wordmark\.png'/)
-  assert.match(modeSlider, /<img[\s\S]*src=\{readyWordmark\}/)
+  assert.doesNotMatch(modeSlider, /import readyWordmark/)
+  assert.doesNotMatch(modeSlider, /<img/)
+  assert.match(modeSlider, /role="img"/)
+  assert.match(modeSlider, /aria-label="Ready"/)
+  assert.match(modeSlider, /width: 14,\s+height: 14,\s+borderRadius: 999,/)
+  assert.match(modeSlider, /background: 'var\(--ready-brand-accent, var\(--color-ready-orange\)\)'/)
   assert.doesNotMatch(modeSlider, /motion\.button/)
   assert.doesNotMatch(modeSlider, /opacity-50/)
   assert.doesNotMatch(modeSlider, /cursor-not-allowed/)
@@ -24,7 +30,4 @@ test('frozen mode slider uses the provided ready wordmark asset instead of plain
   assert.match(modeSlider, /justify-end/)
   assert.doesNotMatch(modeSlider, /paddingLeft/)
   assert.match(modeSlider, /marginRight:\s*-1/)
-  assert.match(modeSlider, /width:\s*69/)
-  assert.match(modeSlider, /transform:\s*'scale\(1\.0725\)'/)
-  assert.match(modeSlider, /transformOrigin:\s*'right top'/)
 })

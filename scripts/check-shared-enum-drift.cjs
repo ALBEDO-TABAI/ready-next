@@ -52,7 +52,8 @@ const BROWSER_TOOL_ERROR_KIND_TARGETS = [
 
 const TOOL_ADMISSION_ERROR_KIND_TARGETS = [
   'src/main/modules/tools/tool-executor.ts',
-  'src/main/modules/agent-control/tools-runtime/tool-runtime.ts',
+  // B7 拆分后 tool-runtime.ts 是门面、admission 语义随拆分移出（2026-07-05
+  // 重锚）；tools-runtime 内的真消费者是 tool-registry.ts（下一行）。
   'src/main/modules/agent-control/tools-runtime/tool-registry.ts',
   'src/main/modules/agent-control/runtime-core/agent-sdk-runtime.ts',
   'src/main/modules/tools/tool-result-envelope.ts',
@@ -65,7 +66,8 @@ const MCP_TOOL_ERROR_KIND_TARGETS = [
 
 const ACTION_CONFIRMATION_ERROR_KIND_TARGETS = [
   'src/main/modules/tools/tool-executor.ts',
-  'src/main/modules/tools/browser-tools.ts',
+  // B7 拆分后确认闸消费点随行动主体迁入 browser-act-tools.ts（2026-07-05 重锚）。
+  'src/main/modules/tools/browser-act-tools.ts',
   'src/main/modules/tools/tool-result-envelope.ts',
 ]
 

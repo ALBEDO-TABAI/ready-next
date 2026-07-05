@@ -951,6 +951,9 @@ describe('BrowserWindowOpenService', () => {
         url: 'https://example.com/popup',
         mode: 'open-tab',
         reason: 'default',
+        // popup 来源追踪（agentOwned popup 收养链）：通知携带来源 tab 上下文，
+        // 本 fixture 无来源 tab → 双 null。
+        context: { sourceOwner: null, sourceTabId: null },
       },
     ])
   })

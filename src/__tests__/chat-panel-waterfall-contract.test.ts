@@ -22,7 +22,10 @@ test('chat panel collapse uses the new single-layer motion handoff instead of th
   assert.match(chatPanel, /type ChatPanelState = 'expanding' \| 'expanded' \| 'collapsing' \| 'collapsed'/)
   assert.match(chatPanel, /interface ChatPanelProps \{[\s\S]*shellWidth: number[\s\S]*panelState: ChatPanelState[\s\S]*\}/)
   assert.match(chatPanel, /AnimatePresence initial=\{false\} mode="wait"/)
-  assert.match(motionLayer, /willChange: reduceMotion \? 'auto' : 'transform, opacity'/)
+  // c26faf3f feat(ui): add liquid glass composer lens — willChange 只在动画进行中挂 compositing 提示（isAnimating 门控），静止态回 'auto'
+  assert.match(motionLayer, /willChange: !reduceMotion && isAnimating \? 'transform, opacity' : 'auto'/)
+  assert.match(motionLayer, /onAnimationStart=\{\(\) => setIsAnimating\(true\)\}/)
+  assert.match(motionLayer, /onAnimationComplete=\{\(\) => setIsAnimating\(false\)\}/)
   assert.match(motionLayer, /initial=\{reduceMotion \? false : \{ x: WORKBENCH_PANEL_MOTION_OFFSET_PX, opacity: 0\.01 \}\}/)
   assert.match(motionLayer, /animate=\{\{\s*x: 0,\s*opacity: 1,/)
   assert.match(motionLayer, /exit=\{\s*reduceMotion[\s\S]*x: WORKBENCH_PANEL_MOTION_OFFSET_PX,\s*opacity: 0\.01,/)

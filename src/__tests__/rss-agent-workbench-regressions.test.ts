@@ -18,7 +18,8 @@ test('rss feed keeps compact toolbar controls while article rows stay on the sha
   assert.match(rssFeed, /className="rss-toolbar-actions flex items-center"/)
   assert.match(rssFeed, /className="rss-toolbar-select appearance-none cursor-pointer transition-colors duration-150"/)
   assert.match(rssFeed, /className="rss-toolbar-select appearance-none cursor-pointer/)
-  assert.match(rssFeed, /className="glass-surface-floating ready-floating-menu overflow-hidden rounded-\[14px\] border"/)
+  // 浮层升级为专属液态面板类（rss-source-menu-panel，样式在 index.css 玻璃带）
+  assert.match(rssFeed, /className="rss-source-menu-panel overflow-hidden rounded-\[12px\]"/)
   assert.match(rssFeed, /ready-floating-menu-item/)
   assert.match(rssFeed, /className="rss-toolbar-icon-button"/)
   assert.match(rssFeed, /<ListTodo className="h-\[14px\] w-\[14px\]"/)
@@ -69,7 +70,8 @@ test('rss analysis task menu uses a solid floating surface with relaxed status r
   const rssFeed = readWorkspaceFile('src/renderer/components/rss/RSSFeed.tsx')
 
   assert.match(rssFeed, /className="rss-feed-surface content-surface-panel rss-workbench-surface relative/)
-  assert.match(rssFeed, /className="glass-surface-floating overflow-hidden rounded-\[18px\] border"/)
+  // 任务菜单同波升级为 rss-task-menu-panel 专属液态面板
+  assert.match(rssFeed, /className="rss-task-menu-panel overflow-hidden rounded-\[18px\]"/)
   assert.match(rssFeed, /position: 'absolute'/)
   assert.match(rssFeed, /top: 'calc\(100% \+ 10px\)'/)
   assert.match(rssFeed, /right: 0/)
@@ -79,8 +81,10 @@ test('rss analysis task menu uses a solid floating surface with relaxed status r
   assert.match(rssFeed, /data-tooltip=\{taskMenuOpen \? undefined : '任务'\}/)
   assert.match(rssFeed, /\{taskMenuPanel\}/)
   assert.doesNotMatch(rssFeed, /\{taskMenuPanel\}\s*\n\s*\{\/\* Item List \*\/\}/)
-  assert.match(rssFeed, /var\(--surface-floating-bg\) 92%/)
-  assert.match(rssFeed, /backdropFilter: 'blur\(var\(--surface-blur\)\) saturate\(var\(--surface-saturate\)\)'/)
+  assert.match(rssFeed, /var\(--surface-floating-bg\) 96%/)
+  // 玻璃/背景滤镜职责移交共享 LiquidFloatingPanel（液态玻璃系统组件），面板不再内联 backdropFilter
+  assert.match(rssFeed, /<LiquidFloatingPanel/)
+  assert.match(rssFeed, /import \{ LiquidFloatingPanel \} from '\.\.\/ui\/liquid-glass\/LiquidFloatingPanel'/)
   assert.match(rssFeed, /function taskStageTone/)
   assert.match(rssFeed, /function taskDetailText/)
   assert.match(rssFeed, /if \(!message \|\| job\.status === 'success'\) return ''/)
@@ -91,7 +95,7 @@ test('rss analysis task menu uses a solid floating surface with relaxed status r
   assert.match(rssFeed, /className="rss-feed-scroll"/)
   assert.match(rssFeed, /gap:\s*8/)
   assert.match(rssFeed, /padding: '12px 11px 14px'/)
-  assert.match(rssFeed, /className="group rounded-\[16px\] transition-colors hover:bg-\[var\(--bg-hover\)\]"/)
+  assert.match(rssFeed, /className="rss-task-menu-row group rounded-\[16px\] transition-colors hover:bg-\[var\(--bg-hover\)\]"/)
   assert.match(rssFeed, /minHeight: 62/)
   assert.match(rssFeed, /padding: '10px 12px'/)
   assert.match(rssFeed, /className="flex h-6 items-center justify-center"/)

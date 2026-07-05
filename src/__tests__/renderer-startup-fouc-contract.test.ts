@@ -63,7 +63,7 @@ test('Stage 1 — reconcileStartupTheme syncs four <html> attrs from main snapsh
   // data-skin 永远是 'liquid-glass'（与 useTheme.applySkin 行为一致，兼容 CSS selector）
   assert.match(rendererMain, /setAttribute\(['"]data-skin['"],\s*['"]liquid-glass['"]\)/)
   // data-glass-backdrop = 'ready' 或 'native'（按 skin 派生）
-  assert.match(rendererMain, /setAttribute\(['"]data-glass-backdrop['"]/)
+  assert.match(rendererMain, /setAttribute\(\s*['"]data-glass-backdrop['"]/)
   // data-native-fullscreen 仅在 isNativeFullscreen=true 时设置；否则 removeAttribute
   assert.match(rendererMain, /setAttribute\(['"]data-native-fullscreen['"]/)
   assert.match(rendererMain, /removeAttribute\(['"]data-native-fullscreen['"]\)/)

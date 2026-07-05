@@ -38,7 +38,8 @@ test('document mode toggle follows refined iOS Segmented Control style', () => {
   assert.match(styles, /\.draggable-mode-switch__thumb\s*\{[\s\S]*?top:\s*2px/)
   assert.match(styles, /\.draggable-mode-switch__thumb\s*\{[\s\S]*?left:\s*2px/)
   assert.match(modeSwitch, /scale\(var\(--ready-document-switch-thumb-scale, 1\)\)/)
-  assert.match(styles, /html\[data-skin='liquid-glass'\] \.draggable-mode-switch\s*\{[\s\S]*?--ready-document-switch-thumb-scale:\s*1\.1;/)
+  // 8ab48cd7 style(ui): checkpoint liquid glass polish — 文档切换 thumb 放大退役（1.1 → 1）
+  assert.match(styles, /html\[data-skin='liquid-glass'\] \.draggable-mode-switch\s*\{[\s\S]*?--ready-document-switch-thumb-scale:\s*1;/)
   // 滑块边缘高光
   assert.match(styles, /\.draggable-mode-switch__thumb::before\s*\{[\s\S]*?border:/)
   assert.match(styles, /\.draggable-mode-switch__thumb::after\s*\{[\s\S]*?background:\s*linear-gradient/)

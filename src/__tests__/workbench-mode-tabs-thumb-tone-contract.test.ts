@@ -25,7 +25,8 @@ function findCssBlock(source: string, selector: string): string {
 }
 
 test('workbench mode tabs thumb base stays only slightly darker than the edge highlight', () => {
-  const styles = readWorkspaceFile('src/renderer/styles/workbench-sliders.css')
+  // thumb 规则已从 workbench-sliders.css 归并进 index.css（滑块样式泛化整合）
+  const styles = readWorkspaceFile('src/renderer/styles/index.css')
   const liquidThumb = findCssBlock(styles, "html[data-skin='liquid-glass'] .draggable-mode-tabs__thumb")
 
   assert.match(

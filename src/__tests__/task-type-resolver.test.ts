@@ -35,17 +35,20 @@ test('task type resolver keeps generic low-signal prompts on the direct answer p
   assert.equal(result.preferredExecutor, 'none')
 })
 
-test('task type resolver routes browser upload intents into media tasks only when browser host is available', () => {
+test('task type resolver routes browser upload+submit intents into browser transactions only when browser host is available', () => {
   const envelope = buildRequestEnvelope({ userText: '帮我把这张图上传到网页里并提交' })
   const intent = classifyIntent(envelope)
 
+  // 6e99f0e6 (transaction success proof): 上传+提交 wording is a browser
+  // transaction workflow (resolveBrowserWorkflowIntent), superseding the
+  // former media_task classification for this text.
   const available = resolveTaskType({
     intent,
     envelope,
     capabilities: createCapabilities({ browserHostAvailable: true }),
   })
-  assert.equal(available.taskType, 'media_task')
-  assert.equal(available.executionChain, 'domain_executor')
+  assert.equal(available.taskType, 'browser_transaction')
+  assert.equal(available.executionChain, 'tool_loop')
   assert.equal(available.preferredExecutor, 'browser')
 
   const degraded = resolveTaskType({

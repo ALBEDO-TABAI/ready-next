@@ -55,7 +55,12 @@ test('settings page keeps the main workbench transparent shell structure', () =>
 test('settings navigation items keep the main workbench transparent glass backdrop', () => {
   const settingsTheme = readWorkspaceFile('src/renderer/components/settings/settings-theme.ts')
 
-  assert.match(settingsTheme, /background:\s*'transparent'/)
+  // 331cacf4 refactor(settings): unify settings UI with workbench design language —
+  // 导航项从 inline background: 'transparent' 改为「不写 background」让 :hover 类生效；透明底靠默认值保持。
+  assert.match(
+    settingsTheme,
+    /export function settingsListItemStyle\(active: boolean\): CSSProperties \{\s+return \{\s+padding: '14px 8px',\s+borderRadius: 16,\s+\/\/ 不写 background，让 hover 类生效（inline 样式会盖掉 :hover）。\s+border: '1px solid transparent',\s+boxShadow: 'none',/,
+  )
   assert.doesNotMatch(settingsTheme, /--settings-list-item-bg/)
   assert.match(settingsTheme, /backdropFilter:\s*'none'/)
   assert.match(settingsTheme, /WebkitBackdropFilter:\s*'none'/)
@@ -84,11 +89,15 @@ test('workbench side and chat panels stay transparent while slots use the shared
   const chatPanel = readWorkspaceFile('src/renderer/components/agent/ChatPanel.tsx')
 
   assert.match(styles, /\.workbench-panel-frame\[data-side-panel-variant='files'\]\s*\{[\s\S]*?background:\s*var\(--workbench-side-panel-bg\)/)
-  assert.match(styles, /html\[data-skin='liquid-glass'\]\s*\{[\s\S]*?--workbench-side-panel-bg:\s*transparent;/)
-  assert.match(styles, /html\[data-skin='liquid-glass'\]\s*\{[\s\S]*?--workbench-rail-slot-bg:\s*rgba\(222,\s*222,\s*220,\s*0\.64\);/)
-  assert.match(styles, /html\[data-skin='liquid-glass'\]\s*\{[\s\S]*?--workbench-rail-slot-shadow:\s*[\s\S]*?inset 0 1\.5px 3px rgba\(24,\s*39,\s*77,\s*0\.11\)/)
-  assert.match(sliderStyles, /html\[data-skin='liquid-glass'\] \.icon-rail-slider\s*\{[\s\S]*?background:\s*var\(--workbench-rail-slot-bg\)/)
-  assert.match(sliderStyles, /html\[data-skin='liquid-glass'\] \.draggable-mode-tabs\s*\{[\s\S]*?background:\s*var\(--workbench-rail-slot-bg\)/)
+  // 079189aa Add browser FastCard context actions — liquid-glass 皮肤块与 fastcard overlay 窗口共用同一选择器组
+  assert.match(styles, /html\[data-skin='liquid-glass'\],\s*html\[data-fastcard-overlay-window='true'\]\s*\{[\s\S]*?--workbench-side-panel-bg:\s*transparent;/)
+  assert.match(styles, /html\[data-skin='liquid-glass'\],\s*html\[data-fastcard-overlay-window='true'\]\s*\{[\s\S]*?--workbench-rail-slot-bg:\s*rgba\(222,\s*222,\s*220,\s*0\.64\);/)
+  // c17b8883 Polish liquid glass workbench controls — 槽位内阴影收敛 0.11 → 0.10
+  assert.match(styles, /html\[data-skin='liquid-glass'\],\s*html\[data-fastcard-overlay-window='true'\]\s*\{[\s\S]*?--workbench-rail-slot-shadow:\s*[\s\S]*?inset 0 1\.5px 3px rgba\(24,\s*39,\s*77,\s*0\.10\)/)
+  // 8ab48cd7 style(ui): checkpoint liquid glass polish — 槽位不再引用共享 rail-slot token：
+  // icon rail 改中性实底凹槽，四模式槽改 Ready 橙渐变轨道（真值详钉在 workbench-liquid-shell-contract）。
+  assert.match(sliderStyles, /html\[data-skin='liquid-glass'\] \.icon-rail-slider\s*\{[\s\S]*?background:\s*rgba\(214, 214, 211, 0\.84\)/)
+  assert.match(sliderStyles, /html\[data-skin='liquid-glass'\] \.draggable-mode-tabs\s*\{[\s\S]*?background:\s*linear-gradient\(180deg, color-mix\(in srgb, var\(--color-ready-orange, #ff4b2b\) 82%, white\) 0%/)
   assert.match(sidePanel, /background:\s*'transparent'/)
   assert.match(chatPanel, /background:\s*'transparent'/)
   assert.doesNotMatch(styles, /html\[data-skin='liquid-glass'\] \[data-liquid-shell='chat-panel'\],[\s\S]*?\[data-liquid-shell='side-panel'\]:not\(\[data-side-panel-variant='hidden'\]\)\s*\{[\s\S]*?background:/)
@@ -117,15 +126,29 @@ test('shared liquid glass surfaces remain real backdrop blur instead of flat pai
 
 test('compact utility settings opt into short control slots so labels do not collapse into vertical stacks', () => {
   const settingsPage = readWorkspaceFile('src/renderer/pages/Settings.tsx')
+  const settingsShared = readWorkspaceFile('src/renderer/pages/settings/settings-shared.tsx')
 
   // Note: storage section (cacheSize / clearCache) is rendered via the dynamic
   // StorageSettingsPanel since D1; it manages its own layout and no longer
   // participates in the legacy slotWidth contract.
-  assert.match(settingsPage, /id: 'newTask'[\s\S]*slotWidth: 'short'/)
-  assert.match(settingsPage, /id: 'sendMessage'[\s\S]*slotWidth: 'short'/)
-  assert.match(settingsPage, /id: 'search'[\s\S]*slotWidth: 'short'/)
-  assert.match(settingsPage, /id: 'toggleSidebar'[\s\S]*slotWidth: 'short'/)
-  assert.match(settingsPage, /id: 'switchMode'[\s\S]*slotWidth: 'short'/)
-  assert.match(settingsPage, /id: 'version'[\s\S]*slotWidth: 'short'/)
-  assert.match(settingsPage, /id: 'checkUpdate'[\s\S]*slotWidth: 'short'/)
+  // 331cacf4 refactor(settings): unify settings UI with workbench design language —
+  // 逐项 slotWidth: 'short' 退役，统一为共享 SETTINGS_ROW_CONTROL_MIN_WIDTH 短槽；
+  // 快捷键/版本行走 readonly 渲染分支，检查更新走 button 分支，两者都吃同一 minWidth。
+  assert.doesNotMatch(settingsPage, /slotWidth/)
+  assert.match(settingsShared, /export const SETTINGS_ROW_CONTROL_MIN_WIDTH = 136/)
+  assert.match(
+    settingsPage,
+    /setting\.type === 'readonly' && \([\s\S]*?\.\.\.SETTINGS_READONLY_STYLE,[\s\S]*?width: 'auto',\s+minWidth: SETTINGS_ROW_CONTROL_MIN_WIDTH,/,
+  )
+  assert.match(
+    settingsPage,
+    /setting\.type === 'button' && \([\s\S]*?minWidth: SETTINGS_ROW_CONTROL_MIN_WIDTH,\s+justifyContent: 'center',/,
+  )
+  assert.match(settingsPage, /id: 'newTask'[\s\S]*?type: 'readonly'/)
+  assert.match(settingsPage, /id: 'sendMessage'[\s\S]*?type: 'readonly'/)
+  assert.match(settingsPage, /id: 'search'[\s\S]*?type: 'readonly'/)
+  assert.match(settingsPage, /id: 'toggleSidebar'[\s\S]*?type: 'readonly'/)
+  assert.match(settingsPage, /id: 'switchMode'[\s\S]*?type: 'readonly'/)
+  assert.match(settingsPage, /id: 'version'[\s\S]*?type: 'readonly'/)
+  assert.match(settingsPage, /id: 'checkUpdate'[\s\S]*?type: 'button'/)
 })

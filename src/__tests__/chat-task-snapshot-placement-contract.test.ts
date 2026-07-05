@@ -36,10 +36,13 @@ test('task and tool cards stay collapsed by default and only reveal the latest l
 
   assert.match(taskCard, /const summaryPreview = formatSingleLinePreview\(vm\.summary\)/)
   assert.match(taskCard, /\{summaryPreview\}/)
-  assert.match(taskCard, /!expanded && latestEvent/)
+  // f8682671 checkpoint(agent): P0-P5d 体验修复 — 折叠态优先展示 recentRows 近几行，无近行时才回退 latestEvent 单行预览
+  assert.match(taskCard, /!expanded && recentRows\.length === 0 && latestEvent/)
+  assert.match(taskCard, /!expanded && recentRows\.length > 0/)
   assert.match(taskCard, /const latestPreview = formatToolTracePreview\(latestEvent\?\.text\)/)
   assert.match(taskCard, /expanded && vm\.currentStep/)
-  assert.match(taskCard, /\{events\.map\(\(event\) =>/)
+  // f8682671 — 展开态工具轨迹从裸 events.map 改为结构化 rows.map + ToolTraceRowLine 行组件
+  assert.match(taskCard, /expanded \? \(\s*<div className="flex flex-col" style=\{\{ gap: 4 \}\}>\s*\{rows\.map\(\(row\) => \(\s*<ToolTraceRowLine key=\{row\.id\} row=\{row\} \/>/)
   assert.doesNotMatch(taskCard, /最近一步：/)
   assert.match(taskCard, /whiteSpace:\s*'nowrap'/)
   assert.match(taskCard, /flexShrink:\s*0/)

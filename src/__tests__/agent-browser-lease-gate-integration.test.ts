@@ -27,9 +27,13 @@ function createController(overrides?: Partial<BrowserController>): BrowserContro
   return mock as BrowserController
 }
 
-function parseError(result: string) {
+// 73ba5299（audit roadmap closures）：拒绝路径从裸 JSON 字符串演进为结构化
+// ToolExecutionOutput（CLAUDE.md「工具错误由 dispatch 层转成结构化
+// ToolExecutionOutput」合同）；.text 仍携带同一 JSON 负载，语义字段不变。
+function parseError(result: string | { text?: string }) {
+  const text = typeof result === 'string' ? result : String(result?.text ?? '')
   try {
-    const parsed = JSON.parse(result)
+    const parsed = JSON.parse(text)
     return isAgentBrowserError(parsed) ? parsed : null
   } catch {
     return null
@@ -79,14 +83,18 @@ describe('lease gate integration on executeBrowserTool', () => {
     assert.equal(err?.errorCode, 'lease_required')
   })
 
-  it('always gates browser_execute_js (undecidable => write), even read-looking code', async () => {
+  it('always denies ungated browser_execute_js (undecidable => write), even read-looking code', async () => {
     const service = new BrowserWriteLeaseService()
     const gate: BrowserLeaseGate = { service, surface: 'user-view', leaseId: null }
     const controller = createController()
     const out = await executeBrowserTool('browser_execute_js', { code: 'document.title' }, controller, undefined, undefined, gate)
     const err = parseError(out)
     assert.ok(err)
-    assert.equal(err?.errorCode, 'lease_required')
+    // 73ba5299 起 Safe Mode 自由脚本裁决先于 lease 闸执行：无 Power 授权的
+    // browser_execute_js 在到达 lease 闸之前就以 freeform_script_denied 拒绝
+    // （拒绝更早、更严——安全侧语义）。分类表仍钉 execute_js ⇒ write
+    // （browser-tool-write-classification 合同测试），undecidable=write 不变。
+    assert.equal(err?.errorCode, 'freeform_script_denied')
   })
 
   it('permits a write once a valid lease is held, then blocks it with lease_takeover after user takeover', async () => {

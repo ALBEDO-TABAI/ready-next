@@ -391,7 +391,7 @@ describe('note_collect background task (content-task-runner)', () => {
     assert.equal(task.status, 'paused', 'a lease takeover is a recoverable pause, not a successful completion')
   })
 
-  it('marks an incomplete collection as failed instead of completed', async () => {
+  it('marks an incomplete high-control collection as user-takeover paused — never completed', async () => {
     const { svc: persistence, tasks } = fakePersistence()
     const { svc: lease } = fakeLease()
     const failingFactory: CollectorFacadeFactory = () => ({
@@ -406,8 +406,15 @@ describe('note_collect background task (content-task-runner)', () => {
     const runner = new BrowserContentTaskRunner({} as never, persistence as never, lease as never, failingFactory)
     const taskId = await runToCompletion(runner, planPayload(10))
     const task = tasks.get(taskId)!
-    const result = task.result as { stopReason: string; collected: string[]; failed: unknown[] }
-    assert.equal(task.status, 'failed')
+    const result = task.result as { stopReason: string; collected: string[]; failed: unknown[]; verdict?: string }
+    // Red line (CLAUDE.md 采集判定): 0 collected must NEVER surface as completed.
+    assert.notEqual(task.status, 'completed', 'an empty collection must never be reported as completed')
+    // P1-R1 (f8682671, rescope doc §7): on a HIGH-CONTROL platform (this plan is
+    // XHS) an empty/blocked collection is a recoverable user-takeover pause, not
+    // a hard failure. Generic sites keep 'failed' — pinned by
+    // collection-verdict-matrix.test.ts Q1 / "generic-site pollution stays hard failed".
+    assert.equal(task.status, 'paused')
+    assert.equal(result.verdict, 'needs_user_takeover')
     assert.equal(result.stopReason, 'too_many_failures')
     assert.equal(result.collected.length, 0)
     assert.equal(result.failed.length, 3, 'high-control collections clamp the consecutive failure budget')

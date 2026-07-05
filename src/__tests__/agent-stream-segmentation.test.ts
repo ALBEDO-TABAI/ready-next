@@ -35,9 +35,16 @@ if (typeof (globalThis as any).window === 'undefined') {
 const { useAgent } = await import('../renderer/stores/useAgent')
 const { collapseAdjacentDuplicateAssistantTail } = await import('../renderer/modules/agent/runtimeDriver')
 
+// b933a763 Phase D D2（2026-07-05）：runtimeDriver 单枢纽内注册了两个
+// onScopeRunEvent 订阅（主 run-state 处理在前、会话路由终态转移在后）。
+// preload 走 ipcRenderer.on 多播，两个订阅都收事件；mock 必须扇出到全部
+// 回调——旧的单槽 mock 会让后注册的路由订阅覆盖掉主订阅。
+const scopeRunEventCallbacks: Array<(data: unknown) => void> = []
+
 describe('agent stream segmentation', () => {
   beforeEach(() => {
     storage.clear()
+    scopeRunEventCallbacks.length = 0
     ;(globalThis as any).window.electronAPI = undefined
     useAgent.setState({
       agents: [
@@ -97,8 +104,15 @@ describe('agent stream segmentation', () => {
           return () => { listeners.onToolAction = undefined }
         },
         onScopeRunEvent: (cb: (data: unknown) => void) => {
-          listeners.onScopeRunEvent = cb
-          return () => { listeners.onScopeRunEvent = undefined }
+          scopeRunEventCallbacks.push(cb)
+          listeners.onScopeRunEvent = (data: unknown) => {
+            for (const fn of [...scopeRunEventCallbacks]) fn(data)
+          }
+          return () => {
+            const index = scopeRunEventCallbacks.indexOf(cb)
+            if (index >= 0) scopeRunEventCallbacks.splice(index, 1)
+            if (scopeRunEventCallbacks.length === 0) listeners.onScopeRunEvent = undefined
+          }
         },
         onConversationEvent: (cb: (data: unknown) => void) => {
           listeners.onConversationEvent = cb
@@ -233,8 +247,15 @@ describe('agent stream segmentation', () => {
           return () => { listeners.onToolAction = undefined }
         },
         onScopeRunEvent: (cb: (data: unknown) => void) => {
-          listeners.onScopeRunEvent = cb
-          return () => { listeners.onScopeRunEvent = undefined }
+          scopeRunEventCallbacks.push(cb)
+          listeners.onScopeRunEvent = (data: unknown) => {
+            for (const fn of [...scopeRunEventCallbacks]) fn(data)
+          }
+          return () => {
+            const index = scopeRunEventCallbacks.indexOf(cb)
+            if (index >= 0) scopeRunEventCallbacks.splice(index, 1)
+            if (scopeRunEventCallbacks.length === 0) listeners.onScopeRunEvent = undefined
+          }
         },
         onConversationEvent: (cb: (data: unknown) => void) => {
           listeners.onConversationEvent = cb
@@ -398,8 +419,15 @@ describe('agent stream segmentation', () => {
           return () => { listeners.onToolAction = undefined }
         },
         onScopeRunEvent: (cb: (data: unknown) => void) => {
-          listeners.onScopeRunEvent = cb
-          return () => { listeners.onScopeRunEvent = undefined }
+          scopeRunEventCallbacks.push(cb)
+          listeners.onScopeRunEvent = (data: unknown) => {
+            for (const fn of [...scopeRunEventCallbacks]) fn(data)
+          }
+          return () => {
+            const index = scopeRunEventCallbacks.indexOf(cb)
+            if (index >= 0) scopeRunEventCallbacks.splice(index, 1)
+            if (scopeRunEventCallbacks.length === 0) listeners.onScopeRunEvent = undefined
+          }
         },
         onConversationEvent: (cb: (data: unknown) => void) => {
           listeners.onConversationEvent = cb
@@ -539,8 +567,15 @@ describe('agent stream segmentation', () => {
           return () => { listeners.onToolAction = undefined }
         },
         onScopeRunEvent: (cb: (data: unknown) => void) => {
-          listeners.onScopeRunEvent = cb
-          return () => { listeners.onScopeRunEvent = undefined }
+          scopeRunEventCallbacks.push(cb)
+          listeners.onScopeRunEvent = (data: unknown) => {
+            for (const fn of [...scopeRunEventCallbacks]) fn(data)
+          }
+          return () => {
+            const index = scopeRunEventCallbacks.indexOf(cb)
+            if (index >= 0) scopeRunEventCallbacks.splice(index, 1)
+            if (scopeRunEventCallbacks.length === 0) listeners.onScopeRunEvent = undefined
+          }
         },
         onConversationEvent: (cb: (data: unknown) => void) => {
           listeners.onConversationEvent = cb
