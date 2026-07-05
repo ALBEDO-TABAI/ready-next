@@ -2,7 +2,7 @@
 /**
  * Stage R W1.6 gate.
  *
- * direct-chat.ts `domainAdapters` array must:
+ * domain-adapter-host.ts `domainAdapters` array must:
  *   1. import ResearchDomainAdapter
  *   2. instantiate it with `new ResearchDomainAdapter()`
  *   3. place it FIRST in the adapters array (so research intents are routed
@@ -14,7 +14,7 @@ const fs = require('node:fs')
 const path = require('node:path')
 
 const ROOT = process.cwd()
-const FILE = path.join(ROOT, 'src/main/modules/claude-bridge/direct-chat.ts')
+const FILE = path.join(ROOT, 'src/main/modules/agent-control/domain-adapters/domain-adapter-host.ts')
 
 let src
 try {

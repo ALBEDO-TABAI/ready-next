@@ -24,7 +24,11 @@ test('run cleanup registry drains registered callbacks exactly once', async () =
 
 test('orchestrator cancellation path and tool contexts are wired to the run cleanup registry', () => {
   const orchestrator = readWorkspaceFile('src/main/modules/agent-control/runtime-core/orchestrator.ts')
-  const directChat = readWorkspaceFile('src/main/modules/claude-bridge/direct-chat.ts')
+  // 合同随实现同步（Phase C C4/C5，2026-07-05）：DirectChatEngine 退役，
+  // cleanup registry 的接收端锚点移至 agent-sdk-runtime.ts（setRunCleanupRegistry）
+  // 与 agent-sdk-tool-executor.ts（tool context 的 registerRunCleanup 闭包）。
+  const sdkRuntime = readWorkspaceFile('src/main/modules/agent-control/runtime-core/agent-sdk-runtime.ts')
+  const sdkToolExecutor = readWorkspaceFile('src/main/modules/agent-control/runtime-core/agent-sdk-tool-executor.ts')
   const toolContextBuilder = readWorkspaceFile('src/main/modules/agent-control/tools-runtime/tool-runtime-context-builder.ts')
   const toolExecutor = readWorkspaceFile('src/main/modules/tools/tool-executor.ts')
   const skillTools = readWorkspaceFile('src/main/modules/tools/skills-tools.ts')
@@ -32,11 +36,10 @@ test('orchestrator cancellation path and tool contexts are wired to the run clea
   assert.match(orchestrator, /private readonly runCleanupRegistry = new RunCleanupRegistry\(\)/)
   assert.match(orchestrator, /registerRunCleanup\(runId: string, cleanup: RunCleanupCallback\)/)
   assert.match(orchestrator, /void this\.drainRunCleanup\(runId\)/)
-  assert.match(directChat, /setRunCleanupRegistry\(/)
-  // Production now annotates the cleanup parameter type inline; both shapes
-  // (with and without the annotation) are accepted to make this gate
-  // resilient against the upcoming type-only refactor.
-  assert.match(directChat, /registerRunCleanup: \(cleanup(?:\s*:\s*\(\)\s*=>\s*void\s*\|\s*Promise<void>)?\) => \{/)
+  assert.match(orchestrator, /this\.sdkEngine\.setRunCleanupRegistry\(\{/)
+  assert.match(sdkRuntime, /setRunCleanupRegistry\(registry: \{/)
+  assert.match(sdkToolExecutor, /registerRunCleanup: \(cleanup\) => \{/)
+  assert.match(sdkToolExecutor, /runCleanupRegistry\?\.registerRunCleanup\(runtimeContext\.runId, cleanup\)/)
   assert.match(toolContextBuilder, /registerRunCleanup\?: \(cleanup: \(\) => void \| Promise<void>\) => void/)
   // executeSkillTool now also threads abortSignal + agentContext (extra
   // trailing args). Pin the registerRunCleanup arg position rather than the

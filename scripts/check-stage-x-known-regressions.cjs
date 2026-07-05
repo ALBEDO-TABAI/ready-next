@@ -71,7 +71,7 @@ const RETIRED_SUBGATES = [
   // Y0.1.4 via path-(a-reorder) + re-arm in verify:r (per Y plan §6.4,
   // overlap-fixture-first investigation classified the conflict as APPARENT;
   // ResearchDomainAdapter swapped to the first position in
-  // `src/main/modules/claude-bridge/direct-chat.ts` domainAdapters[];
+  // `src/main/modules/agent-control/domain-adapters/domain-adapter-host.ts` domainAdapters[];
   // overlap fixtures at `src/__tests__/research-vs-map-overlap-fixtures.test.ts`
   // prove the swap is behaviorally equivalent for the 4 representative
   // queries). Per Y plan §6.5 "Row went green via path (a)" rule, the row is

@@ -9,7 +9,10 @@ function readWorkspaceFile(path: string): string {
 }
 
 test('browser agent runtime is split into planner, runtime adapter, page-state service, and evidence service', () => {
-  const directChat = readWorkspaceFile('src/main/modules/claude-bridge/direct-chat.ts')
+  // 合同随实现同步（Phase C C4/C5，2026-07-05）：DirectChatEngine 退役，planner
+  // 装配锚点移至 domain-adapter-host.ts；planner 类型消费锚点移至
+  // browser-task-planner.ts 本体。
+  const host = readWorkspaceFile('src/main/modules/agent-control/domain-adapters/domain-adapter-host.ts')
   const browserRunner = readWorkspaceFile('src/main/modules/tools/browser-agent-runner.ts')
   const browserTools = readWorkspaceFile('src/main/modules/tools/browser-tools.ts')
   const ipcHandler = readWorkspaceFile('src/main/modules/claude-bridge/ipc-handler.ts')
@@ -65,17 +68,17 @@ test('browser agent runtime is split into planner, runtime adapter, page-state s
   assert.match(planner, /buildClarifyMessage\(/)
   assert.match(planner, /getRecommendedMaxToolIterations\(/)
 
-  assert.match(directChat, /import \{ BrowserTaskPlanner \} from '\.\.\/agent-control\/domain-adapters\/browser-task-planner'/)
-  assert.match(directChat, /import type \{[\s\S]*BrowserTaskDecision[\s\S]*BrowserTaskPlan[\s\S]*BrowserTaskPlanContinuity[\s\S]*\} from '\.\.\/\.\.\/\.\.\/shared\/browser-agent-task'/)
-  assert.doesNotMatch(directChat, /interface BrowserTaskDecision \{/)
-  assert.doesNotMatch(directChat, /private async buildBrowserTaskContinuityContext\(/)
-  assert.doesNotMatch(directChat, /private applyBrowserContinuityToDecision\(/)
-  assert.doesNotMatch(directChat, /private decideBrowserTask\(/)
-  assert.doesNotMatch(directChat, /private buildBrowserContinuityInstruction\(/)
-  assert.doesNotMatch(directChat, /## 浏览器任务执行计划/)
-  assert.doesNotMatch(directChat, /private parseBrowserPromptDraft\(/)
-  assert.doesNotMatch(directChat, /private buildBrowserPromptDraft\(/)
-  assert.doesNotMatch(directChat, /private getEffectiveMaxToolIterations\(/)
+  // 装配壳（host）消费 planner 而不重新内联决策逻辑。
+  assert.match(host, /import \{ BrowserTaskPlanner \} from '\.\/browser-task-planner'/)
+  assert.match(host, /new BrowserTaskPlanner\(\{/)
+  assert.doesNotMatch(host, /interface BrowserTaskDecision \{/)
+  // planner 类型唯一来自 shared 合同模块（不在装配壳里重声明）。
+  const plannerSource = readWorkspaceFile('src/main/modules/agent-control/domain-adapters/browser-task-planner.ts')
+  assert.match(plannerSource, /import type \{[\s\S]*?BrowserTaskDecision[\s\S]*?BrowserTaskPlan[\s\S]*?BrowserTaskPlanContinuity[\s\S]*?\} from '\.\.\/\.\.\/\.\.\/\.\.\/shared\/browser-agent-task'/)
+  // 该组负向断言随引擎退役摘除（P6f dormant 边界 + Phase C C4，2026-07-05）：
+  // "引擎不得重新内联 private decideBrowserTask/buildBrowserPromptDraft 等"冻结的
+  // 是已删除文件的抽取历史；复活由 check-directchat-turnengine-dormant-boundary
+  // 存在性合同拦截。
 
   assert.match(browserRunner, /import \{ BrowserAgentRuntimeAdapter \} from '\.\.\/browser-engine\/agent-runtime-adapter'/)
   assert.match(browserRunner, /import \{ BrowserPageStateService \} from '\.\.\/browser-engine\/page-state-service'/)

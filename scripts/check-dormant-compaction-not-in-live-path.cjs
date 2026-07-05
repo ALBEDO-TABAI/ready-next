@@ -19,7 +19,6 @@ const CONTEXT_COMPRESSION_ALLOWED = new Set([
 
 const DORMANT_COMPRESS_CONTEXT_CHANNEL_RELS = [
   'src/main/modules/agent-control/contracts/run-contracts.ts',
-  'src/main/modules/claude-bridge/direct-chat.ts',
 ]
 
 function relposix(abs, root = ROOT) {

@@ -218,10 +218,9 @@ describe('document widget renderer contract', () => {
   })
 
   it('documents local inline interactivity in document widget guidance', () => {
-    const directChatSource = readFileSync(
-      resolve(process.cwd(), 'src/main/modules/claude-bridge/direct-chat.ts'),
-      'utf8',
-    )
+    // 合同随实现同步（Phase C C4/C5，2026-07-05）：DirectChatEngine 退役，其内嵌
+    // widget 指引随文件消亡。"允许本地内联事件"的 live 锚点 = 模型可见的工具
+    // 描述面（document-tools.ts + schemas/document-schemas.ts）。
     // Phase 2.5 PR 7: widget tool descriptions moved from inline hand-rolled
     // params in document-tools.ts to zod schemas in schemas/document-schemas.ts.
     // Read both files so the guidance-string contract stays valid regardless
@@ -236,9 +235,12 @@ describe('document widget renderer contract', () => {
     )
     const widgetGuidanceSurface = `${documentToolsSource}\n${documentSchemasSource}`
 
-    assert.match(directChatSource, /内联事件|oninput|onclick/)
-    assert.match(directChatSource, /readyWidgetSendMessage|data-ready-agent-message/)
+    assert.match(widgetGuidanceSurface, /内联事件|oninput|onclick/)
     assert.match(widgetGuidanceSurface, /HTML\/SVG\/本地交互脚本|HTML\/SVG\/脚本/)
+    // 缺位注记（随引擎退役摘除，Phase C C4）：模型侧"readyWidgetSendMessage /
+    // data-ready-agent-message 消息桥"提示词在 SDK 路径暂无现役等价物（renderer
+    // 运行时桥仍由下方 'bridges widget interactions back into the agent input
+    // pipeline' 用例钉住）；待 SDK 侧 prompt 资产补齐后再恢复模型侧锚点。
   })
 
   it('does not keep an edit-mode placeholder that blocks scripted widget previews', () => {

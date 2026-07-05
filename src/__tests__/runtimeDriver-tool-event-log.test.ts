@@ -5,7 +5,6 @@ import { describe, it } from 'node:test'
 
 const DRIVER_PATH = resolve(process.cwd(), 'src/renderer/modules/agent/runtimeDriver.ts')
 const PRELOAD_PATH = resolve(process.cwd(), 'src/preload/index.ts')
-const DIRECT_CHAT_PATH = resolve(process.cwd(), 'src/main/modules/claude-bridge/direct-chat.ts')
 const AGENT_SDK_RUNTIME_PATH = resolve(process.cwd(), 'src/main/modules/agent-control/runtime-core/agent-sdk-runtime.ts')
 const CAPABILITY_CONTROLLER_PATH = resolve(
   process.cwd(),
@@ -73,9 +72,9 @@ describe('G-Z12 runtimeDriver 事件接入 ready-tools.log', () => {
     const capabilityControllerSource = readFileSync(CAPABILITY_CONTROLLER_PATH, 'utf8')
     const helperSource = readFileSync(LOG_HELPER_PATH, 'utf8')
     assert.match(helperSource, /appendToolCapabilityLog/)
-    const directChatSource = readFileSync(DIRECT_CHAT_PATH, 'utf8')
-    assert.doesNotMatch(directChatSource, /stage=direct_chat_tool_loop/)
-    assert.doesNotMatch(directChatSource, /appendToolCapabilityLog/)
+    // 该合同随引擎退役（P6f dormant 边界 + Phase C C4，2026-07-05）：direct-chat.ts
+    // 已删除，"引擎不得重复打能力日志"的负向哨兵随之摘除；live 能力日志唯一
+    // 出口由下方 agent-sdk-tool-executor 的 stage=sdk_runtime_default_tools 断言钉住。
     // listDefaultToolDefinitionsForTurn (which emits the default-tools capability
     // log line) was extracted to agent-sdk-tool-executor.ts (V3 Phase 5-A).
     const toolExecutorSource = readFileSync(

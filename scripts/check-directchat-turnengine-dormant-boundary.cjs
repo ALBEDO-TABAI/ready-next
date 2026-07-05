@@ -306,7 +306,6 @@ function pushInstanceCallErrors(errors, rel, text, names, method, kind) {
 }
 
 function pushNonSdkSendMessageErrors(errors, rel, text) {
-  if (rel === DIRECT_CHAT_REL) return
   const patterns = [
     /\.sendMessage\s*(?:\?\.\s*)?\(/g,
     /\[\s*['"]sendMessage['"]\s*\]\s*(?:\?\.\s*)?\(/g,
@@ -354,35 +353,6 @@ function isThisPropertyAssignment(node, expected) {
 function isThisSendMessageAssignment(node) {
   return isThisPropertyAssignment(node, 'sendMessage')
 }
-
-function pushDirectChatAstSendMessageErrors(errors, source) {
-  const sourceFile = ts.createSourceFile(DIRECT_CHAT_REL, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
-  const pushAt = (kind, node) => {
-    const line = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line + 1
-    errors.push(`${kind}:${DIRECT_CHAT_REL}:${line}`)
-  }
-  const visit = (node) => {
-    if (ts.isClassDeclaration(node) && node.name?.text === 'DirectChatEngine') {
-      for (const member of node.members) {
-        if ('name' in member && isLiteralName(member.name, 'sendMessage')) {
-          pushAt('direct_chat_declares_sendMessage', member)
-        }
-        if (ts.isConstructorDeclaration(member)) {
-          const visitConstructor = (child) => {
-            if (isThisSendMessageAssignment(child)) {
-              pushAt('direct_chat_declares_sendMessage', child)
-            }
-            ts.forEachChild(child, visitConstructor)
-          }
-          ts.forEachChild(member, visitConstructor)
-        }
-      }
-    }
-    ts.forEachChild(node, visit)
-  }
-  visit(sourceFile)
-}
-
 function pushDirectChatAstMemberErrors(errors, source, expectedNames, kind) {
   const sourceFile = ts.createSourceFile(DIRECT_CHAT_REL, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
   const expected = new Set(expectedNames)
@@ -426,6 +396,8 @@ function pushDirectChatAstMemberErrors(errors, source, expectedNames, kind) {
 const RETIRED_FILES_REL = [
   'src/main/modules/agent-control/turn-engine.ts',
   'src/main/modules/agent-control/domain-adapters/host-capability-dispatcher.ts',
+  // Phase C C4（2026-07-05）：DirectChatEngine 退役——活面已迁 DomainAdapterHost。
+  'src/main/modules/claude-bridge/direct-chat.ts',
 ]
 
 function check({ root = ROOT } = {}) {
@@ -436,7 +408,6 @@ function check({ root = ROOT } = {}) {
     }
   }
   const orchestratorPath = path.join(root, ORCHESTRATOR_REL)
-  const directChatPath = path.join(root, DIRECT_CHAT_REL)
 
   if (!fs.existsSync(orchestratorPath)) {
     errors.push(`missing_orchestrator:${ORCHESTRATOR_REL}`)
@@ -475,193 +446,9 @@ function check({ root = ROOT } = {}) {
     )
   }
 
-  if (!fs.existsSync(directChatPath)) {
-    errors.push(`missing_direct_chat:${DIRECT_CHAT_REL}`)
-  } else {
-    const source = stripComments(read(root, DIRECT_CHAT_REL))
-    pushMatches(
-      errors,
-      DIRECT_CHAT_REL,
-      source,
-      /import\s+[\s\S]*?\s+from\s+['"](?:node:)?events['"]/,
-      'direct_chat_imports_events_module',
-    )
-    pushMatches(
-      errors,
-      DIRECT_CHAT_REL,
-      source,
-      /class\s+DirectChatEngine\s+extends\s+(?:[A-Za-z_$][\w$]*\.)?EventEmitter\b/,
-      'direct_chat_extends_event_emitter',
-    )
-    pushMatches(
-      errors,
-      DIRECT_CHAT_REL,
-      source,
-      /\bthis\.emit\s*\(\s*['"](?:output|status|error|toolAction)['"]/,
-      'direct_chat_emits_renderer_event',
-    )
-    const turnEngineImports = findImports(source, 'turn-engine')
-    const turnEngineRuntimeDynamicImports = findRuntimeDynamicImports(source, 'turn-engine')
-    if (turnEngineImports.length > 0) {
-      pushImportErrors(errors, DIRECT_CHAT_REL, source, turnEngineImports, 'direct_chat_imports_turn_engine_class')
-    }
-    if (turnEngineRuntimeDynamicImports.length > 0) {
-      pushImportErrors(
-        errors,
-        DIRECT_CHAT_REL,
-        source,
-        turnEngineRuntimeDynamicImports,
-        'direct_chat_dynamic_imports_turn_engine_module',
-      )
-    }
-    pushDirectChatAstSendMessageErrors(errors, source)
-    pushMatches(
-      errors,
-      DIRECT_CHAT_REL,
-      source,
-      /private\s+readonly\s+turnEngine\b/,
-      'direct_chat_declares_turn_engine_member',
-    )
-    pushMatches(
-      errors,
-      DIRECT_CHAT_REL,
-      source,
-      /\bthis\.turnEngine\b/,
-      'direct_chat_references_turn_engine_member',
-    )
-    pushMatches(
-      errors,
-      DIRECT_CHAT_REL,
-      source,
-      /\b(?:async\s+)?sendMessage\s*(?:<[^>{}]+>)?\s*\(/,
-      'direct_chat_declares_sendMessage',
-    )
-    pushMatches(
-      errors,
-      DIRECT_CHAT_REL,
-      source,
-      /\[\s*['"]sendMessage['"]\s*\]\s*(?:<[^>{}]+>)?\s*\(/,
-      'direct_chat_declares_sendMessage',
-    )
-    pushMatches(
-      errors,
-      DIRECT_CHAT_REL,
-      source,
-      /\bsendMessage\s*(?::[\s\S]{0,240}?)?=\s*(?:async\s*)?/,
-      'direct_chat_declares_sendMessage',
-    )
-    pushMatches(
-      errors,
-      DIRECT_CHAT_REL,
-      source,
-      /\bfunction\s+sendMessage\s*(?:<[^>{}]+>)?\s*\(/,
-      'direct_chat_declares_sendMessage',
-    )
-    pushMatches(
-      errors,
-      DIRECT_CHAT_REL,
-      source,
-      /\[\s*['"]sendMessage['"]\s*\]\s*(?::[\s\S]{0,240}?)?=\s*(?:async\s*)?/,
-      'direct_chat_declares_sendMessage',
-    )
-    pushMatches(
-      errors,
-      DIRECT_CHAT_REL,
-      source,
-      /\bthis\s*\[\s*['"]sendMessage['"]\s*\]\s*=\s*(?:async\s*)?/,
-      'direct_chat_declares_sendMessage',
-    )
-    pushMatches(
-      errors,
-      DIRECT_CHAT_REL,
-      source,
-      /\bnew\s+TurnEngine\s*\(/,
-      'direct_chat_constructs_turn_engine',
-    )
-    if (/this\.turnEngine\.execute\s*\(/.test(source)) {
-      errors.push(`direct_chat_calls_turn_engine_execute:${DIRECT_CHAT_REL}`)
-    }
-    const executionLoopImports = findImports(source, 'execution-loop-orchestrator')
-    const executionLoopRuntimeDynamicImports = findRuntimeDynamicImports(source, 'execution-loop-orchestrator')
-    if (executionLoopImports.length > 0) {
-      pushImportErrors(errors, DIRECT_CHAT_REL, source, executionLoopImports, 'direct_chat_imports_execution_loop_orchestrator')
-    }
-    if (executionLoopRuntimeDynamicImports.length > 0) {
-      pushImportErrors(
-        errors,
-        DIRECT_CHAT_REL,
-        source,
-        executionLoopRuntimeDynamicImports,
-        'direct_chat_dynamic_imports_execution_loop_orchestrator',
-      )
-    }
-    const hostCapabilityImports = findImports(source, 'host-capability-dispatcher')
-    const hostCapabilityRuntimeDynamicImports = findRuntimeDynamicImports(source, 'host-capability-dispatcher')
-    if (hostCapabilityImports.length > 0) {
-      pushImportErrors(errors, DIRECT_CHAT_REL, source, hostCapabilityImports, 'direct_chat_imports_host_capability_dispatcher')
-    }
-    if (hostCapabilityRuntimeDynamicImports.length > 0) {
-      pushImportErrors(
-        errors,
-        DIRECT_CHAT_REL,
-        source,
-        hostCapabilityRuntimeDynamicImports,
-        'direct_chat_dynamic_imports_host_capability_dispatcher',
-      )
-    }
-    pushMatches(
-      errors,
-      DIRECT_CHAT_REL,
-      source,
-      /\bnew\s+(?:ExecutionLoopOrchestrator|[A-Za-z_$][\w$]*\.ExecutionLoopOrchestrator)\s*\(/,
-      'direct_chat_constructs_execution_loop_orchestrator',
-    )
-    pushMatches(
-      errors,
-      DIRECT_CHAT_REL,
-      source,
-      /\bnew\s+(?:HostCapabilityDispatcher|[A-Za-z_$][\w$]*\.HostCapabilityDispatcher)\s*\(/,
-      'direct_chat_constructs_host_capability_dispatcher',
-    )
-    pushDirectChatAstMemberErrors(
-      errors,
-      source,
-      ['executionLoopOrchestrator'],
-      'direct_chat_declares_execution_loop_orchestrator_member',
-    )
-    pushDirectChatAstMemberErrors(
-      errors,
-      source,
-      ['hostCapabilityDispatcher'],
-      'direct_chat_declares_host_capability_dispatcher_member',
-    )
-    pushDirectChatAstMemberErrors(
-      errors,
-      source,
-      ['requestSimpleText'],
-      'direct_chat_declares_requestSimpleText',
-    )
-    pushDirectChatAstMemberErrors(
-      errors,
-      source,
-      ['requestToolLoopResponse'],
-      'direct_chat_declares_requestToolLoopResponse',
-    )
-    pushMatches(
-      errors,
-      DIRECT_CHAT_REL,
-      source,
-      /\bthis\.executionLoopOrchestrator(?:\?\.|\.)requestToolLoopResponse\s*(?:\?\.\s*)?\(/,
-      'direct_chat_calls_execution_loop_orchestrator_requestToolLoopResponse',
-    )
-    pushMatches(
-      errors,
-      DIRECT_CHAT_REL,
-      source,
-      /\bthis\.hostCapabilityDispatcher(?:\?\.|\.)dispatch\s*(?:\?\.\s*)?\(/,
-      'direct_chat_calls_host_capability_dispatcher_dispatch',
-    )
-  }
+  // Phase C C4：direct-chat.ts 已退役删除——存在期逐条扫描随之退场，
+  // 复活由 RETIRED_FILES_REL 存在性合同拦截（retired_file_resurrected）。
+
 
   const mainRoot = path.join(root, MAIN_ROOT_REL)
   if (fs.existsSync(mainRoot)) {

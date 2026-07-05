@@ -33,7 +33,6 @@ import {
 import type { TaskProjectionRecord } from '../main/modules/agent-control/contracts/run-contracts'
 import { shouldExposeSkillAction } from '../main/modules/tools/skills-tools'
 
-const DIRECT_CHAT_PATH = new URL('../main/modules/claude-bridge/direct-chat.ts', import.meta.url)
 const SKILL_TURN_IDENTITY_PATH = new URL('../main/modules/agent-control/skills/skill-turn-identity.ts', import.meta.url)
 
 // skill-resume F1 — narrative integration test that walks the full chain a
@@ -152,10 +151,14 @@ describe('skill-resume end-to-end (F1)', () => {
       assert.match(skillTurnIdentitySource, /getLatestSkillRun\(\s*ctx\.sessionId\s*\)/)
       assert.match(skillTurnIdentitySource, /reference_skill_rearmed_from_skill_history/)
 
-      const directChatSource = readFileSync(DIRECT_CHAT_PATH, 'utf8')
-      assert.match(directChatSource, /resolveRecentSkillTaskRun/)
-      assert.match(directChatSource, /resolveRecentSkillRunFromTaskRuns/)
-      assert.match(directChatSource, /getLatestRecoverableSkillTaskRun/)
+      // 该合同随引擎退役（P6f dormant 边界 + Phase C C4，2026-07-05）：direct-chat.ts
+      // 已删除，"引擎把 resolveRecentSkillTaskRun 接到 skill-task-tracker 的
+      // resolveRecentSkillRunFromTaskRuns / getLatestRecoverableSkillTaskRun"的
+      // 源钉随之摘除（该钉在本分支 HEAD 即已失配）。缺位注记：SDK live 路径当前
+      // 没有任何 provider 给 skill-turn-identity 的可选依赖 resolveRecentSkillTaskRun
+      // 注入 task-run DB 兜底（durable task-run 恢复链路处于 built-but-dark），
+      // 现役恢复仅靠 session-continuity（上方行为断言）与 task projection 链路；
+      // 待 SDK 侧接线补齐后应恢复对应行为合同。
     } finally {
       __resetSessionContinuityForTests()
       __setSessionContinuityStoragePathForTests(null)

@@ -2,13 +2,9 @@
  * Phase 3 — agent:error IPC contract (source-level).
  *
  * We can't import the main-process modules directly (electron pulls through
- * ipc-handler / direct-chat), so these assertions scan the source for the
+ * ipc-handler), so these assertions scan the source for the
  * shape of the wiring. They lock in:
  *
- *   - direct-chat.ts's emitRuntimeError derives AgentErrorContract and spreads
- *     it onto the emit('error', ...) payload.
- *   - turn-engine.ts's catch skips the red "API 请求失败" transcript line when
- *     the error is recoverable (to avoid duplicating the capsule).
  *   - ipc-handler.ts's scopeRunEvent error payload carries errorKind /
  *     recoverable / toolName for the renderer state-machine replay.
  *   - runtimeDriver.ts routes aborted early-return, recoverable → softError-only,
@@ -26,26 +22,10 @@ function readWorkspaceFile(path: string): string {
   return readFileSync(resolve(process.cwd(), path), 'utf8')
 }
 
-test('direct-chat.emitRuntimeError derives contract and spreads to emit', () => {
-  const source = readWorkspaceFile('src/main/modules/claude-bridge/direct-chat.ts')
-  assert.match(source, /from ['"]\.\/error-contract['"]/)
-  assert.match(source, /deriveAgentErrorContract/)
-  // Widened signature + spread into emit.
-  assert.match(source, /emitRuntimeError\s*=\s*\(error:\s*unknown,\s*options\?:/)
-  assert.match(source, /const\s+contract\s*=\s*deriveAgentErrorContract\(error,\s*options\)/)
-  assert.match(source, /this\.emit\(['"]error['"],\s*\{[\s\S]*\.\.\.contract/)
-})
-
-test('direct-chat outer catch suppresses red transcript line for recoverable', () => {
-  const source = readWorkspaceFile('src/main/modules/claude-bridge/direct-chat.ts')
-  // Catch block computes contract and gates emitOutput('API 请求失败', 'error').
-  assert.match(
-    source,
-    /const\s+contract\s*=\s*deriveAgentErrorContract\(error\)[\s\S]*if\s*\(!contract\.recoverable\)[\s\S]*API 请求失败/,
-  )
-  // Emits the raw Error to emitRuntimeError (not the stringified message).
-  assert.match(source, /emitRuntimeError\(error\)/)
-})
+// 该合同随引擎退役（P6f dormant 边界 + Phase C C4，2026-07-05）：direct-chat.ts 已
+// 删除，emitRuntimeError / outer-catch 两条引擎错误合同随之摘除（两条在本分支
+// HEAD 即为既有红，随退役关账）。renderer 可见错误语义由下方 ipc-handler /
+// runtimeDriver / scopeRunState / ChatPanel 断言继续钉住。
 
 test('ipc-handler agent:scopeRunEvent error payload carries errorKind/recoverable/toolName', () => {
   const source = readWorkspaceFile('src/main/modules/claude-bridge/ipc-handler.ts')

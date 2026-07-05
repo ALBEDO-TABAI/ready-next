@@ -122,8 +122,7 @@ test('retired execution-control tool names are not dispatchable skill tools', as
 
 test('source — general skill prompts do not recommend retired execution-control tools', () => {
   const sources = [
-    // eslint-disable-next-line ready/no-source-grep-test -- reviewed hard contract: prompt text is assembled in multiple UI/main modules with no exported builder surface to exercise directly.
-    readFileSync(resolve(process.cwd(), 'src/main/modules/claude-bridge/direct-chat.ts'), 'utf-8'),
+    // Phase C C4/C5（2026-07-05）：direct-chat.ts 已退役删除，从负向扫描清单摘除。
     // eslint-disable-next-line ready/no-source-grep-test -- reviewed hard contract: prompt text is assembled in multiple UI/main modules with no exported builder surface to exercise directly.
     readFileSync(resolve(process.cwd(), 'src/renderer/modules/agent/messageComposer.ts'), 'utf-8'),
     // eslint-disable-next-line ready/no-source-grep-test -- reviewed hard contract: prompt text is assembled in multiple UI/main modules with no exported builder surface to exercise directly.

@@ -11,7 +11,7 @@ test('active workbench and runtime guidance no longer advertise removed design a
   const modeStore = readWorkspaceFile('src/renderer/stores/useMode.ts')
   const promptAssembly = readWorkspaceFile('src/main/modules/agent-control/prompt-assembly.ts')
   const toolGateway = readWorkspaceFile('src/main/modules/agent-control/tools-runtime/tool-gateway.ts')
-  const directChat = readWorkspaceFile('src/main/modules/claude-bridge/direct-chat.ts')
+  // Phase C C4/C5（2026-07-05）：direct-chat.ts 已退役删除，从负向扫描清单摘除。
 
   assert.match(modeStore, /export type WorkbenchMode = 'browser' \| 'document' \| 'rss' \| 'calendar'/)
   assert.doesNotMatch(promptAssembly, /browser\/document\/design\/video\/rss\/calendar\/system/)
@@ -19,8 +19,6 @@ test('active workbench and runtime guidance no longer advertise removed design a
   assert.doesNotMatch(promptAssembly, /video-render/)
   assert.doesNotMatch(toolGateway, /group: 'design'/)
   assert.doesNotMatch(toolGateway, /group: 'video'/)
-  assert.doesNotMatch(directChat, /design_update_selected/)
-  assert.doesNotMatch(directChat, /design_run_task_controller/)
 })
 
 test('collaboration docs only describe the four live workbench modules', () => {

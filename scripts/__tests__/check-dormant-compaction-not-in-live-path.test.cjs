@@ -131,17 +131,6 @@ export interface TurnEngineHost {
   assert.ok(result.errors.some((error) => error.includes('unexpected_dormant_compress_context_channel:src/main/modules/agent-control/contracts/run-contracts.ts')))
 })
 
-test('gate fails when direct chat forwards dormant compressContext channel', (t) => {
-  const root = makeRoot(t)
-  writeBaseline(root)
-  write(root, 'src/main/modules/claude-bridge/direct-chat.ts', `
-export class DirectChatEngine {
-  requestToolLoopResponse(params: { compressContext?: () => boolean }) {
-    return params.compressContext?.()
-  }
-}
-`)
-  const result = check({ root })
-  assert.equal(result.ok, false)
-  assert.ok(result.errors.some((error) => error.includes('unexpected_dormant_compress_context_channel:src/main/modules/claude-bridge/direct-chat.ts')))
-})
+// 该用例随引擎退役摘除（P6f dormant 边界 + Phase C C4，2026-07-05）：direct-chat.ts
+// 已删除并移出 DORMANT_COMPRESS_CONTEXT_CHANNEL_RELS 清单；同一扫描路径由上方
+// run-contracts fixture 用例继续覆盖。

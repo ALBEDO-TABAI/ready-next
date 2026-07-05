@@ -43,6 +43,14 @@ direct-chat-attachment-metrics）均为注释或类型语境，无运行时依�
 
 ## 2. 步骤与机器可验证合同
 
+> 进度（2026-07-05 当日）：C1 ✅（§4 判决表）；C2 ✅（3a0fa67a，host + parity 合同 4✓）；
+> C3 ✅（49fb76fc，orchestrator 切换 + MultimodalBlock 迁 contracts + 4 钉重锚，
+> boundary/typecheck/stability/p6f 四绿）；C4 执行中（引擎已删、gate 已转存在性合同、
+> turn-orchestrator 第 8 处 MultimodalBlock 导入已换址）；C5 钉点清扫进行中
+> （19 处失败 14 文件，三分法裁决委派执行，主会话终验收口）。
+> silent-catch 账：引擎 5 条 catch 随平移变 host 5 条（该 gate 为 HEAD 即红的
+> 注册债，本阶段义务=净零新增，终封做集合对账）。
+
 每步一提交（pathspec 协议），每步合同先写测试再动码：
 
 - **C1 调用面终审**（无代码）：对 `getAIConfig*`、`setSystemPrompt`、`DirectChatSession` 类型导出、

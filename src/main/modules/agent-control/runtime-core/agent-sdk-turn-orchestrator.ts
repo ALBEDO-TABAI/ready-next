@@ -27,7 +27,7 @@ import type {
 } from './turn-frame'
 import type {
   MultimodalBlock,
-} from '../../claude-bridge/direct-chat'
+} from '../contracts/run-contracts'
 import {
   buildTextToolBridgePrompt,
   buildTextToolResultMessage,

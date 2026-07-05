@@ -34,7 +34,6 @@ const MODEL_VISIBLE_FILES = [
 
 const RAW_SERIALIZER_FORBIDDEN_FILES = [
   ...MODEL_VISIBLE_FILES.map((item) => item.file),
-  'src/main/modules/claude-bridge/direct-chat.ts',
 ]
 
 function relposix(root, file) {

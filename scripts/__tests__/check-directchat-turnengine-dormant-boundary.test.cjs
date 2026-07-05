@@ -40,303 +40,28 @@ export class ReadyAgentOrchestrator {
   }
 }
 `)
-  write(root, 'src/main/modules/claude-bridge/direct-chat.ts', `
-export class DirectChatEngine {
-  stopGeneration() {}
-  getDomainAdapters() { return [] }
-  getSkillContextOrchestrator() { return {} }
-}
-`)
+  // Phase C C4/C5（2026-07-05）：direct-chat.ts 已退役删除——passing harness 不再
+  // 铺设引擎文件；该文件存在本身即违规（retired_file_resurrected）。原先 20 个
+  // "DirectChat 内容形态"fixture 用例（dormant TurnEngine sender / legacy host
+  // callback owners / sendMessage 各种拼写 / EventEmitter / renderer 事件）随
+  // 引擎内容扫描一并退场，复活防护收敛为下方存在性用例 + 全 src/main
+  // import/构造/调用扫描用例。
 }
 
-test('gate passes for sdk live execution and DirectChat provider shell', (t) => {
+test('gate passes for sdk live execution with the DirectChat engine retired', (t) => {
   const root = makeRoot(t)
   const result = check({ root })
   assert.equal(result.ok, true, result.errors.join('\n'))
 })
 
-test('gate fails when DirectChat keeps a dormant TurnEngine sender', (t) => {
+test('gate fails when the retired direct-chat engine file is resurrected', (t) => {
   const root = makeRoot(t)
   write(root, 'src/main/modules/claude-bridge/direct-chat.ts', `
-import { TurnEngine } from '../agent-control/turn-engine'
-export class DirectChatEngine {
-  private readonly turnEngine: TurnEngine
-  constructor() { this.turnEngine = new TurnEngine() }
-  async sendMessage() {
-    return await this.turnEngine.execute({})
-  }
-}
-`)
-  const result = check({ root })
-  assert.equal(result.ok, false)
-  assert.ok(result.errors.some((error) => error.includes('direct_chat_imports_turn_engine_class')))
-  assert.ok(result.errors.some((error) => error.includes('direct_chat_declares_turn_engine_member')))
-  assert.ok(result.errors.some((error) => error.includes('direct_chat_declares_sendMessage')))
-  assert.ok(result.errors.some((error) => error.includes('direct_chat_calls_turn_engine_execute')))
-})
-
-test('gate fails when DirectChat imports and constructs legacy host callback owners', (t) => {
-  const root = makeRoot(t)
-  write(root, 'src/main/modules/claude-bridge/direct-chat.ts', `
-import { ExecutionLoopOrchestrator } from '../agent-control/runtime-core/execution-loop-orchestrator'
-import { HostCapabilityDispatcher } from '../agent-control/domain-adapters/host-capability-dispatcher'
-export class DirectChatEngine {
-  private readonly executionLoopOrchestrator: ExecutionLoopOrchestrator
-  private readonly hostCapabilityDispatcher: HostCapabilityDispatcher
-  constructor() {
-    this.executionLoopOrchestrator = new ExecutionLoopOrchestrator({ log: () => {} })
-    this.hostCapabilityDispatcher = new HostCapabilityDispatcher({ executeHostTool: async () => ({ text: '' }) })
-  }
-}
-`)
-  const result = check({ root })
-  assert.equal(result.ok, false)
-  assert.ok(result.errors.some((error) => error.includes('direct_chat_imports_execution_loop_orchestrator')))
-  assert.ok(result.errors.some((error) => error.includes('direct_chat_constructs_execution_loop_orchestrator')))
-  assert.ok(result.errors.some((error) => error.includes('direct_chat_declares_execution_loop_orchestrator_member')))
-  assert.ok(result.errors.some((error) => error.includes('direct_chat_imports_host_capability_dispatcher')))
-  assert.ok(result.errors.some((error) => error.includes('direct_chat_constructs_host_capability_dispatcher')))
-  assert.ok(result.errors.some((error) => error.includes('direct_chat_declares_host_capability_dispatcher_member')))
-})
-
-test('gate fails when DirectChat aliases legacy host callback owner imports', (t) => {
-  const root = makeRoot(t)
-  write(root, 'src/main/modules/claude-bridge/direct-chat.ts', `
-import { ExecutionLoopOrchestrator as LegacyLoop } from '../agent-control/runtime-core/execution-loop-orchestrator'
-import * as HostModule from '../agent-control/domain-adapters/host-capability-dispatcher'
-export class DirectChatEngine {
-  constructor() {
-    new LegacyLoop({ log: () => {} })
-    new HostModule.HostCapabilityDispatcher({ executeHostTool: async () => ({ text: '' }) })
-  }
-}
-`)
-  const result = check({ root })
-  assert.equal(result.ok, false)
-  assert.ok(result.errors.some((error) => error.includes('direct_chat_imports_execution_loop_orchestrator')))
-  assert.ok(result.errors.some((error) => error.includes('direct_chat_imports_host_capability_dispatcher')))
-  assert.ok(result.errors.some((error) => error.includes('direct_chat_constructs_host_capability_dispatcher')))
-})
-
-test('gate fails when DirectChat side-effect imports legacy host callback owners', (t) => {
-  const root = makeRoot(t)
-  write(root, 'src/main/modules/claude-bridge/direct-chat.ts', `
-import '../agent-control/runtime-core/execution-loop-orchestrator'
-import '../agent-control/domain-adapters/host-capability-dispatcher'
 export class DirectChatEngine {}
 `)
   const result = check({ root })
   assert.equal(result.ok, false)
-  assert.ok(result.errors.some((error) => error.includes('direct_chat_imports_execution_loop_orchestrator')))
-  assert.ok(result.errors.some((error) => error.includes('direct_chat_imports_host_capability_dispatcher')))
-})
-
-test('gate fails when DirectChat dynamically imports legacy host callback owners', (t) => {
-  const root = makeRoot(t)
-  write(root, 'src/main/modules/claude-bridge/direct-chat.ts', `
-export class DirectChatEngine {
-  async load() {
-    const loop = await import('../agent-control/runtime-core/execution-loop-orchestrator')
-    const host = await import('../agent-control/domain-adapters/host-capability-dispatcher')
-    return { loop, host }
-  }
-}
-`)
-  const result = check({ root })
-  assert.equal(result.ok, false)
-  assert.ok(result.errors.some((error) => error.includes('direct_chat_dynamic_imports_execution_loop_orchestrator')))
-  assert.ok(result.errors.some((error) => error.includes('direct_chat_dynamic_imports_host_capability_dispatcher')))
-})
-
-test('gate fails when DirectChat returns or batches dynamic legacy host callback imports', (t) => {
-  const root = makeRoot(t)
-  write(root, 'src/main/modules/claude-bridge/direct-chat.ts', `
-export class DirectChatEngine {
-  loadLoop() {
-    return import('../agent-control/runtime-core/execution-loop-orchestrator')
-  }
-  loadBoth() {
-    return Promise.all([
-      import('../agent-control/runtime-core/execution-loop-orchestrator'),
-      import('../agent-control/domain-adapters/host-capability-dispatcher'),
-    ])
-  }
-}
-`)
-  const result = check({ root })
-  assert.equal(result.ok, false)
-  assert.ok(result.errors.some((error) => error.includes('direct_chat_dynamic_imports_execution_loop_orchestrator')))
-  assert.ok(result.errors.some((error) => error.includes('direct_chat_dynamic_imports_host_capability_dispatcher')))
-})
-
-test('gate fails when DirectChat calls legacy host callback owner members', (t) => {
-  const root = makeRoot(t)
-  write(root, 'src/main/modules/claude-bridge/direct-chat.ts', `
-export class DirectChatEngine {
-  private readonly executionLoopOrchestrator
-  private readonly hostCapabilityDispatcher
-  async run() {
-    await this.executionLoopOrchestrator.requestToolLoopResponse({})
-    await this.hostCapabilityDispatcher.dispatch({})
-  }
-}
-`)
-  const result = check({ root })
-  assert.equal(result.ok, false)
-  assert.ok(result.errors.some((error) => error.includes('direct_chat_declares_execution_loop_orchestrator_member')))
-  assert.ok(result.errors.some((error) => error.includes('direct_chat_calls_execution_loop_orchestrator_requestToolLoopResponse')))
-  assert.ok(result.errors.some((error) => error.includes('direct_chat_declares_host_capability_dispatcher_member')))
-  assert.ok(result.errors.some((error) => error.includes('direct_chat_calls_host_capability_dispatcher_dispatch')))
-})
-
-test('gate fails when DirectChat declares requestSimpleText in method or property forms', (t) => {
-  const root = makeRoot(t)
-  write(root, 'src/main/modules/claude-bridge/direct-chat.ts', `
-export class DirectChatEngine {
-  async requestSimpleText() { return { text: '' } }
-  requestToolLoopResponse = async () => ({ text: '' })
-}
-`)
-  const result = check({ root })
-  assert.equal(result.ok, false)
-  assert.ok(result.errors.some((error) => error.includes('direct_chat_declares_requestSimpleText')))
-  assert.ok(result.errors.some((error) => error.includes('direct_chat_declares_requestToolLoopResponse')))
-})
-
-test('gate fails when DirectChat declares legacy callbacks in computed or constructor-assigned forms', (t) => {
-  const root = makeRoot(t)
-  write(root, 'src/main/modules/claude-bridge/direct-chat.ts', `
-export class DirectChatEngine {
-  ['requestSimpleText']() { return { text: '' } }
-  constructor() {
-    this['requestToolLoopResponse'] = async () => ({ text: '' })
-  }
-}
-`)
-  const result = check({ root })
-  assert.equal(result.ok, false)
-  assert.ok(result.errors.some((error) => error.includes('direct_chat_declares_requestSimpleText')))
-  assert.ok(result.errors.some((error) => error.includes('direct_chat_declares_requestToolLoopResponse')))
-})
-
-test('gate fails when DirectChat declares sendMessage without TurnEngine spelling', (t) => {
-  const root = makeRoot(t)
-  write(root, 'src/main/modules/claude-bridge/direct-chat.ts', `
-export class DirectChatEngine {
-  async sendMessage() {
-    return { success: false }
-  }
-}
-`)
-  const result = check({ root })
-  assert.equal(result.ok, false)
-  assert.ok(result.errors.some((error) => error.includes('direct_chat_declares_sendMessage')))
-})
-
-test('gate fails when DirectChat declares a non-async sendMessage method', (t) => {
-  const root = makeRoot(t)
-  write(root, 'src/main/modules/claude-bridge/direct-chat.ts', `
-export class DirectChatEngine {
-  sendMessage() {
-    return Promise.resolve({ success: false })
-  }
-}
-`)
-  const result = check({ root })
-  assert.equal(result.ok, false)
-  assert.ok(result.errors.some((error) => error.includes('direct_chat_declares_sendMessage')))
-})
-
-test('gate fails when DirectChat declares computed sendMessage method', (t) => {
-  const root = makeRoot(t)
-  write(root, 'src/main/modules/claude-bridge/direct-chat.ts', `
-export class DirectChatEngine {
-  ['sendMessage']() {
-    return Promise.resolve({ success: false })
-  }
-}
-`)
-  const result = check({ root })
-  assert.equal(result.ok, false)
-  assert.ok(result.errors.some((error) => error.includes('direct_chat_declares_sendMessage')))
-})
-
-test('gate fails when DirectChat declares spaced computed sendMessage method', (t) => {
-  const root = makeRoot(t)
-  write(root, 'src/main/modules/claude-bridge/direct-chat.ts', `
-export class DirectChatEngine {
-  [ 'sendMessage' ]() {
-    return Promise.resolve({ success: false })
-  }
-}
-`)
-  const result = check({ root })
-  assert.equal(result.ok, false)
-  assert.ok(result.errors.some((error) => error.includes('direct_chat_declares_sendMessage')))
-})
-
-test('gate fails when DirectChat declares typed sendMessage arrow property', (t) => {
-  const root = makeRoot(t)
-  write(root, 'src/main/modules/claude-bridge/direct-chat.ts', `
-export class DirectChatEngine {
-  sendMessage: () => Promise<unknown> = async () => ({ success: false })
-}
-`)
-  const result = check({ root })
-  assert.equal(result.ok, false)
-  assert.ok(result.errors.some((error) => error.includes('direct_chat_declares_sendMessage')))
-})
-
-test('gate fails when DirectChat declares multiline typed sendMessage arrow property', (t) => {
-  const root = makeRoot(t)
-  write(root, 'src/main/modules/claude-bridge/direct-chat.ts', `
-export class DirectChatEngine {
-  sendMessage:
-    () => Promise<unknown> = async () => ({ success: false })
-}
-`)
-  const result = check({ root })
-  assert.equal(result.ok, false)
-  assert.ok(result.errors.some((error) => error.includes('direct_chat_declares_sendMessage')))
-})
-
-test('gate fails when DirectChat declares computed sendMessage arrow property', (t) => {
-  const root = makeRoot(t)
-  write(root, 'src/main/modules/claude-bridge/direct-chat.ts', `
-export class DirectChatEngine {
-  ['sendMessage'] = async () => ({ success: false })
-}
-`)
-  const result = check({ root })
-  assert.equal(result.ok, false)
-  assert.ok(result.errors.some((error) => error.includes('direct_chat_declares_sendMessage')))
-})
-
-test('gate fails when DirectChat declares multiline computed sendMessage arrow property', (t) => {
-  const root = makeRoot(t)
-  write(root, 'src/main/modules/claude-bridge/direct-chat.ts', `
-export class DirectChatEngine {
-  ['sendMessage']:
-    () => Promise<unknown> = async () => ({ success: false })
-}
-`)
-  const result = check({ root })
-  assert.equal(result.ok, false)
-  assert.ok(result.errors.some((error) => error.includes('direct_chat_declares_sendMessage')))
-})
-
-test('gate fails when DirectChat assigns this computed sendMessage in constructor', (t) => {
-  const root = makeRoot(t)
-  write(root, 'src/main/modules/claude-bridge/direct-chat.ts', `
-export class DirectChatEngine {
-  constructor() {
-    this['sendMessage'] = async () => ({ success: false })
-  }
-}
-`)
-  const result = check({ root })
-  assert.equal(result.ok, false)
-  assert.ok(result.errors.some((error) => error.includes('direct_chat_declares_sendMessage')))
+  assert.ok(result.errors.some((error) => error.includes('retired_file_resurrected:src/main/modules/claude-bridge/direct-chat.ts')))
 })
 
 test('gate fails when orchestrator sends through DirectChat/domainAdapterEngine', (t) => {
@@ -391,41 +116,6 @@ export class ReadyAgentOrchestrator {
   assert.equal(result.ok, false)
   assert.ok(result.errors.some((error) => error.includes('orchestrator_forwards_renderer_tool_action_requester_to_direct_chat')))
   assert.ok(result.errors.some((error) => error.includes('orchestrator_forwards_tool_action_canceller_to_direct_chat')))
-})
-
-test('gate fails when DirectChat extends EventEmitter', (t) => {
-  const root = makeRoot(t)
-  write(root, 'src/main/modules/claude-bridge/direct-chat.ts', `
-import { EventEmitter } from 'events'
-export class DirectChatEngine extends EventEmitter {
-  stopGeneration() {}
-  getDomainAdapters() { return [] }
-  getSkillContextOrchestrator() { return {} }
-}
-`)
-  const result = check({ root })
-  assert.equal(result.ok, false)
-  assert.ok(result.errors.some((error) => error.includes('direct_chat_imports_events_module')))
-  assert.ok(result.errors.some((error) => error.includes('direct_chat_extends_event_emitter')))
-})
-
-test('gate fails when DirectChat emits renderer-facing events', (t) => {
-  const root = makeRoot(t)
-  write(root, 'src/main/modules/claude-bridge/direct-chat.ts', `
-export class DirectChatEngine {
-  emit() {}
-  stopGeneration() {}
-  getDomainAdapters() { return [] }
-  getSkillContextOrchestrator() { return {} }
-  announce(payload) {
-    this.emit('output', payload)
-    this.emit('toolAction', payload)
-  }
-}
-`)
-  const result = check({ root })
-  assert.equal(result.ok, false)
-  assert.ok(result.errors.some((error) => error.includes('direct_chat_emits_renderer_event')))
 })
 
 test('gate fails when production code imports the TurnEngine class outside DirectChat', (t) => {

@@ -48,10 +48,8 @@ const modelVisibleText = redactModelVisibleToolText(result.text)
 params.emitOutput(modelVisibleText.slice(0, 600), 'tool_result')
 this.extractSkillReferenceContent(modelVisibleText)
 `)
-  write(root, 'src/main/modules/claude-bridge/direct-chat.ts', `
-import { createToolExecutionOutput } from '../agent-control/tools-runtime/tool-result-types'
-createToolExecutionOutput('ok')
-`)
+  // Phase C C4/C5（2026-07-05）：direct-chat.ts 已退役删除并移出
+  // RAW_SERIALIZER_FORBIDDEN_FILES，baseline 不再铺设该文件。
 }
 
 test('gate passes for current model-visible funnel shape', (t) => {
@@ -62,14 +60,19 @@ test('gate passes for current model-visible funnel shape', (t) => {
 })
 
 test('gate fails when a model-visible file imports raw serializeToolExecutionOutput', (t) => {
+  // 合同随实现同步（Phase C C4/C5，2026-07-05）：direct-chat.ts 退役并移出禁用
+  // 清单，fixture 改锚仍在 RAW_SERIALIZER_FORBIDDEN_FILES 里的 tool-bridge.ts。
   const root = makeRoot(t)
   writeBaseline(root)
-  write(root, 'src/main/modules/claude-bridge/direct-chat.ts', `
+  write(root, 'src/main/modules/claude-bridge/tool-bridge.ts', `
+import { serializeToolExecutionOutputForModel } from '../agent-control/tools-runtime/model-visible-tool-output'
 import { serializeToolExecutionOutput } from '../agent-control/tools-runtime/tool-result-types'
+serializeToolExecutionOutputForModel(result)
+serializeToolExecutionOutput(result)
 `)
   const result = check({ root })
   assert.equal(result.ok, false)
-  assert.ok(result.errors.some((error) => error.includes('raw_tool_output_serializer_in_model_visible_file:src/main/modules/claude-bridge/direct-chat.ts')))
+  assert.ok(result.errors.some((error) => error.includes('raw_tool_output_serializer_in_model_visible_file:src/main/modules/claude-bridge/tool-bridge.ts')))
 })
 
 test('gate allows serializeToolExecutionOutputForModel', (t) => {

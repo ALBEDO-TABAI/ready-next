@@ -6,27 +6,29 @@ import { describe, it } from 'node:test'
 // NOTE: Behavior tests cannot import DocumentTaskPipelineExecutor directly because the
 // module graph pulls in `document-engine/ipc-handler` which imports from `electron`.
 // We assert the contract by static-source inspection of the executor surface plus
-// regression sentinels against direct-chat. A future refactor that splits the
+// regression sentinels against the assembly shell. A future refactor that splits the
 // electron-free helpers into their own module would let us upgrade these to true
 // runtime tests.
+// 合同随实现同步（Phase C C4/C5，2026-07-05）：DirectChatEngine 退役，装配壳与
+// session 生命周期接线锚点移至 domain-adapter-host.ts。
 
 const EXECUTOR_PATH = resolve(
   process.cwd(),
   'src/main/modules/document-engine/pipeline/document-task-pipeline-executor.ts',
 )
-const DIRECT_CHAT_PATH = resolve(
+const HOST_PATH = resolve(
   process.cwd(),
-  'src/main/modules/claude-bridge/direct-chat.ts',
+  'src/main/modules/agent-control/domain-adapters/domain-adapter-host.ts',
 )
 
 describe('document insight shared cache host contract', () => {
-  it('keeps direct chat free of the legacy session-local cache arrays', () => {
-    const directChat = readFileSync(DIRECT_CHAT_PATH, 'utf8')
+  it('keeps the domain adapter host free of the legacy session-local cache arrays', () => {
+    const host = readFileSync(HOST_PATH, 'utf8')
 
-    assert.doesNotMatch(directChat, /documentInsightCache: Array</)
-    assert.doesNotMatch(directChat, /documentWidgetDraftCache: Array</)
-    assert.doesNotMatch(directChat, /session\.documentInsightCache/)
-    assert.doesNotMatch(directChat, /session\.documentWidgetDraftCache/)
+    assert.doesNotMatch(host, /documentInsightCache: Array</)
+    assert.doesNotMatch(host, /documentWidgetDraftCache: Array</)
+    assert.doesNotMatch(host, /session\.documentInsightCache/)
+    assert.doesNotMatch(host, /session\.documentWidgetDraftCache/)
   })
 
   it('declares per-session cache containers as Maps owned by the executor', () => {
@@ -55,9 +57,9 @@ describe('document insight shared cache host contract', () => {
     assert.match(clearMatch![0], /this\.sessionWidgetDraftCaches\.delete\(sessionId\)/)
   })
 
-  it('keeps direct-chat wiring the executor into the session lifecycle events', () => {
-    const directChat = readFileSync(DIRECT_CHAT_PATH, 'utf8')
+  it('keeps the domain adapter host wiring the executor into the session lifecycle events', () => {
+    const host = readFileSync(HOST_PATH, 'utf8')
 
-    assert.match(directChat, /this\.documentTaskPipelineExecutor\.clearSessionCache\(name\)/)
+    assert.match(host, /this\.documentTaskPipelineExecutor\.clearSessionCache\(name\)/)
   })
 })

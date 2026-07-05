@@ -44,7 +44,11 @@ test('runtime host is split into run coordinator, run projection, and execution 
   const kimiCodingClient = readWorkspaceFile('src/main/modules/claude-bridge/kimi-coding-client.ts')
   const openAIExecutionClient = readWorkspaceFile('src/main/modules/claude-bridge/openai-execution-client.ts')
   const documentToolFlow = readWorkspaceFile('src/main/modules/claude-bridge/document-tool-flow.ts')
-  const directChat = readWorkspaceFile('src/main/modules/claude-bridge/direct-chat.ts')
+  // 合同随实现同步（Phase C C4/C5，2026-07-05）：DirectChatEngine 退役，
+  // provider/编排器装配壳锚点移至 domain-adapter-host.ts；工具上下文构造的
+  // live 消费点移至 agent-sdk-tool-executor.ts。
+  const host = readWorkspaceFile('src/main/modules/agent-control/domain-adapters/domain-adapter-host.ts')
+  const sdkToolExecutor = readWorkspaceFile('src/main/modules/agent-control/runtime-core/agent-sdk-tool-executor.ts')
   const toolConfig = readWorkspaceFile('src/main/modules/agent-control/tool-policy/execution-tool-config.ts')
   const toolPolicy = readWorkspaceFile('src/main/modules/agent-control/tool-policy/execution-tool-policy.ts')
 
@@ -149,7 +153,7 @@ test('runtime host is split into run coordinator, run projection, and execution 
   assert.match(documentToolFlow, /export function shouldPreferDocumentInspectionResult\(/)
   assert.match(documentToolFlow, /export function inspectDocumentToolCall\(/)
   assert.doesNotMatch(contracts, /\bcompressContext\b/)
-  assert.doesNotMatch(directChat, /\bcompressContext\b/)
+  assert.doesNotMatch(host, /\bcompressContext\b/)
   assert.match(toolConfig, /export interface ToolPolicy/)
   assert.match(toolConfig, /export function buildToolGuidance\(/)
   assert.match(toolConfig, /export function getPolicyAnthropicTools\(/)
@@ -190,123 +194,43 @@ test('runtime host is split into run coordinator, run projection, and execution 
 
   assert.match(toolPolicy, /export function buildToolVisibilityPlan\(/)
   assert.match(toolPolicy, /export function buildToolDispatchDecision\(/)
-  assert.match(directChat, /import \{ OpenAIExecutionClient \} from '\.\/openai-execution-client'/)
-  assert.match(directChat, /import \{ resolveExecutionIntentContext \} from '\.\.\/agent-control\/execution-intent-resolver'/)
-  assert.match(directChat, /import \{[\s\S]*prepareInitialRun[\s\S]*reconcileAfterBrowserDecision[\s\S]*\} from '\.\.\/agent-control\/domain-adapters\/run-capability-controller'/)
-  assert.match(directChat, /import \{ SkillContextOrchestrator \} from '\.\.\/agent-control\/skills\/skill-context-orchestrator'/)
-  assert.match(directChat, /import \{ buildToolRuntimeContext \} from '\.\.\/agent-control\/tools-runtime\/tool-runtime-context-builder'/)
-  assert.match(directChat, /import \{[\s\S]*applyRunBudgetHint[\s\S]*\} from '\.\.\/agent-control\/task-projection\/run-budget-policy'/)
-  assert.match(directChat, /import \{ AnthropicExecutionClient \} from '\.\/anthropic-execution-client'/)
-  assert.match(directChat, /import \{ KimiCodingClient \} from '\.\/kimi-coding-client'/)
-  assert.match(directChat, /import \{[\s\S]*OpenAIExecutionClient[\s\S]*\} from '\.\/openai-execution-client'/)
-  assert.match(directChat, /import \{ BrowserDomainOrchestrator \} from '\.\.\/agent-control\/domain-adapters\/browser-domain-orchestrator'/)
-  assert.match(directChat, /import \{ DesignToolLoopOrchestrator \} from '\.\.\/agent-control\/design-tool-loop-orchestrator'/)
-  assert.match(directChat, /import \{ DocumentToolLoopOrchestrator \} from '\.\.\/document-engine\/pipeline\/document-tool-loop-orchestrator'/)
-  assert.match(directChat, /import \{ DocumentDomainOrchestrator \} from '\.\.\/agent-control\/domain-adapters\/document-domain-orchestrator'/)
-  assert.match(directChat, /private readonly browserDomainOrchestrator: BrowserDomainOrchestrator/)
-  assert.match(directChat, /private readonly skillContextOrchestrator: SkillContextOrchestrator/)
-  assert.match(directChat, /private readonly anthropicExecutionClient: AnthropicExecutionClient/)
-  assert.match(directChat, /private readonly kimiCodingClient: KimiCodingClient/)
-  assert.match(directChat, /private readonly openAIExecutionClient: OpenAIExecutionClient/)
-  assert.match(directChat, /private readonly designToolLoopOrchestrator: DesignToolLoopOrchestrator/)
-  assert.match(directChat, /private readonly documentToolLoopOrchestrator: DocumentToolLoopOrchestrator/)
-  assert.match(directChat, /private readonly documentDomainOrchestrator: DocumentDomainOrchestrator/)
-  assert.match(directChat, /private readonly documentTaskPipelineExecutor: DocumentTaskPipelineExecutor/)
-  assert.doesNotMatch(directChat, /\bExecutionLoopOrchestrator\b/)
-  assert.doesNotMatch(directChat, /\bHostCapabilityDispatcher\b/)
-  assert.doesNotMatch(directChat, /\bVideoFallbackService\b/)
-  assert.doesNotMatch(directChat, /\bexecutionLoopOrchestrator\b/)
-  assert.doesNotMatch(directChat, /\bhostCapabilityDispatcher\b/)
-  assert.doesNotMatch(directChat, /\brequestSimpleText\s*\(/)
-  assert.doesNotMatch(directChat, /\brequestToolLoopResponse\s*\(/)
-  assert.doesNotMatch(directChat, /import \{ TurnEngine \} from '\.\.\/agent-control\/turn-engine'/)
-  assert.doesNotMatch(directChat, /private readonly turnEngine: TurnEngine/)
-  assert.doesNotMatch(directChat, /async sendMessage\(/)
-  assert.doesNotMatch(directChat, /this\.turnEngine\.execute\(/)
-  assert.doesNotMatch(directChat, /private async maybeRunDocumentTaskPlanShortcut\(/)
-  assert.doesNotMatch(directChat, /private async maybeRunDocumentWidgetPipelineShortcut\(/)
-  assert.doesNotMatch(directChat, /private readonly documentInsightCache = new DocumentInsightCache\(\)/)
-  assert.match(directChat, /import \{[\s\S]*buildTextToolBridgeCorrectionMessage[\s\S]*buildToolGuidance[\s\S]*\} from '\.\.\/agent-control\/tool-policy\/execution-tool-config'/)
-  assert.doesNotMatch(directChat, /import \{ buildToolVisibilityPlan \} from '\.\.\/agent-control\/tool-policy\/execution-tool-policy'/)
-  assert.doesNotMatch(directChat, /await this\.browserTaskPlanner\.buildContinuityContext\(/)
-  assert.doesNotMatch(directChat, /interface ToolPolicy \{/)
-  assert.doesNotMatch(directChat, /private getPolicyAnthropicTools\(/)
-  assert.doesNotMatch(directChat, /private getPolicyOpenAITools\(/)
-  assert.doesNotMatch(directChat, /private buildTextToolBridgeSystemPrompt\(/)
-  assert.doesNotMatch(directChat, /private async tryDeterministicSectionFormatFlow\(/)
-  assert.doesNotMatch(directChat, /private async tryDeterministicSectionRewriteFlow\(/)
-  assert.doesNotMatch(directChat, /private parseSectionRewritePlan\(/)
-  assert.doesNotMatch(directChat, /private async applyFormatSectionByPath\(/)
-  assert.doesNotMatch(directChat, /private async applyRewriteSectionByPath\(/)
-  assert.doesNotMatch(directChat, /private async buildSectionRewriteDraft\(/)
-  assert.doesNotMatch(directChat, /function shouldPreferDocumentInspectionResult\(/)
-  assert.doesNotMatch(directChat, /const CONTENT_MUTATING_DOCUMENT_TOOL_NAMES = new Set\(/)
-  assert.doesNotMatch(directChat, /const DOCUMENT_INSPECTION_TOOL_NAMES = new Set\(/)
-  assert.doesNotMatch(directChat, /function parseSectionRewritePlan\(/)
-  assert.doesNotMatch(directChat, /function stripCodeFence\(/)
-  assert.doesNotMatch(directChat, /async function applyFormatSectionByPath\(/)
-  assert.doesNotMatch(directChat, /async function applyRewriteSectionByPath\(/)
-  assert.doesNotMatch(directChat, /async function buildSectionRewriteDraft\(/)
-  assert.doesNotMatch(directChat, /\[系统检查点\] 当前进度：/)
-  assert.doesNotMatch(directChat, /private async maybeRefineBrowserDecision\(/)
-  assert.doesNotMatch(directChat, /new BrowserAgentRunner\(/)
-  assert.doesNotMatch(directChat, /private shouldUseTextToolBridge\(/)
-  assert.doesNotMatch(directChat, /private shouldRetryWithTextToolBridge\(/)
-  assert.doesNotMatch(directChat, /private resolveOpenAIWireApi\(/)
-  assert.doesNotMatch(directChat, /private resolveReasoningEffort\(/)
-  assert.doesNotMatch(directChat, /private findExplicitlyRequestedSkills\(/)
-  assert.doesNotMatch(directChat, /private extractSkillReferenceContent\(/)
-  assert.doesNotMatch(directChat, /private async maybeInjectExplicitSkillContext\(/)
-  assert.doesNotMatch(directChat, /private hasActiveSkillExecution\(/)
-  assert.doesNotMatch(directChat, /private shouldKeepToolsWithVideo\(/)
-  assert.doesNotMatch(directChat, /private buildPreferredSkillToolNames\(/)
-  assert.doesNotMatch(directChat, /const openclawCommand = this\.extractOpenclawPairingCommand\(userText\)/)
-  assert.doesNotMatch(directChat, /toolPolicy\.forceDocumentTool &&[\s\S]*toolPolicy\.preferFormatOnly/)
-  assert.doesNotMatch(directChat, /private applyDesignSourceInput\(/)
-  assert.doesNotMatch(directChat, /private buildActualDesignCompletionText\(/)
-  assert.doesNotMatch(directChat, /private isPrimaryDesignArtifactTool\(/)
-  assert.doesNotMatch(directChat, /private filterSingleArtifactDesignToolCalls\(/)
-  assert.doesNotMatch(directChat, /const toolContext = \{/)
-  assert.doesNotMatch(directChat, /const deterministicDocumentToolContext = \{/)
-  assert.doesNotMatch(directChat, /private extractOpenAIMessageText\(/)
-  assert.doesNotMatch(directChat, /private serializeMessagesForResponses\(/)
-  assert.doesNotMatch(directChat, /private convertOpenAIToolsToResponses\(/)
-  assert.doesNotMatch(directChat, /private extractResponsesText\(/)
-  assert.doesNotMatch(directChat, /private extractResponsesToolCalls\(/)
-  assert.doesNotMatch(directChat, /private getResponsesContinuationState\(/)
-  assert.doesNotMatch(directChat, /private repairOpenAIToolMessageHistory\(/)
-  assert.doesNotMatch(directChat, /private async callOpenAISimple\(/)
-  assert.doesNotMatch(directChat, /private async callOpenAIWithTextToolBridge\(/)
-  assert.doesNotMatch(directChat, /private async callOpenAIWithTools\(/)
-  assert.doesNotMatch(directChat, /private resolveAnthropicLikeModel\(/)
-  assert.doesNotMatch(directChat, /private buildAnthropicLikeHeaders\(/)
-  assert.doesNotMatch(directChat, /private async callAnthropicSimple\(/)
-  assert.doesNotMatch(directChat, /private async callAnthropicWithTools\(/)
-  assert.doesNotMatch(directChat, /private async callKimiCodingSimple\(/)
-  assert.doesNotMatch(directChat, /fallback to Anthropic-compatible path/)
-  assert.doesNotMatch(directChat, /private async serializeMessagesForKimiCoding\(/)
-  assert.doesNotMatch(directChat, /private async uploadVideoToKimiFiles\(/)
-  assert.doesNotMatch(directChat, /private async getFfmpegPath\(/)
-  assert.doesNotMatch(directChat, /private async buildVideoFrameFallbackMessages\(/)
-  assert.doesNotMatch(directChat, /private async extractFramesFromVideoBase64\(/)
-  assert.doesNotMatch(directChat, /private shouldRetryWithVideoFallback\(/)
-  assert.doesNotMatch(directChat, /private extensionFromVideoMediaType\(/)
-  assert.doesNotMatch(directChat, /response = await this\.callAnthropicWithTools\(/)
-  assert.doesNotMatch(directChat, /response = await this\.callOpenAIWithTools\(/)
+  // 合同随实现同步（Phase C C4/C5，2026-07-05）：装配壳的"消费抽取模块而非内联"
+  // 正向断言从 direct-chat.ts 改锚 domain-adapter-host.ts。
+  assert.match(host, /import \{ OpenAIExecutionClient \} from '\.\.\/\.\.\/claude-bridge\/openai-execution-client'/)
+  assert.match(host, /import \{ SkillContextOrchestrator \} from '\.\.\/skills\/skill-context-orchestrator'/)
+  assert.match(host, /import \{ AnthropicExecutionClient \} from '\.\.\/\.\.\/claude-bridge\/anthropic-execution-client'/)
+  assert.match(host, /import \{ KimiCodingClient \} from '\.\.\/\.\.\/claude-bridge\/kimi-coding-client'/)
+  assert.match(host, /import \{ BrowserDomainOrchestrator \} from '\.\/browser-domain-orchestrator'/)
+  assert.match(host, /import \{ DocumentToolLoopOrchestrator \} from '\.\.\/\.\.\/document-engine\/pipeline\/document-tool-loop-orchestrator'/)
+  assert.match(host, /import \{ DocumentDomainOrchestrator \} from '\.\/document-domain-orchestrator'/)
+  assert.match(host, /private readonly browserDomainOrchestrator: BrowserDomainOrchestrator/)
+  assert.match(host, /private readonly skillContextOrchestrator: SkillContextOrchestrator/)
+  assert.match(host, /private readonly anthropicExecutionClient: AnthropicExecutionClient/)
+  assert.match(host, /private readonly kimiCodingClient: KimiCodingClient/)
+  assert.match(host, /private readonly openAIExecutionClient: OpenAIExecutionClient/)
+  assert.match(host, /private readonly documentToolLoopOrchestrator: DocumentToolLoopOrchestrator/)
+  assert.match(host, /private readonly documentDomainOrchestrator: DocumentDomainOrchestrator/)
+  assert.match(host, /private readonly documentTaskPipelineExecutor: DocumentTaskPipelineExecutor/)
+  // 工具上下文构造的 live 消费点在 SDK 工具执行器（V3 Phase 5-A 提取面）。
+  assert.match(sdkToolExecutor, /buildToolRuntimeContext/)
+  // 该组引擎私有断言随退役摘除（P6f dormant 边界 + Phase C C4，2026-07-05）：
+  // - direct-chat 对 resolveExecutionIntentContext / prepareInitialRun /
+  //   reconcileAfterBrowserDecision / applyRunBudgetHint / execution-tool-config /
+  //   DesignToolLoopOrchestrator 的 import 钉：这些抽取模块随引擎退役失去了唯一
+  //   消费方（模块导出面仍由上方断言钉住），SDK 路径尚无等价接线。
+  // - 数十条 "引擎不得重新内联 callOpenAIWithTools / 文档捷径 / 设计过滤器 等"
+  //   负向断言：冻结的是已删除文件的抽取历史；复活由
+  //   check-directchat-turnengine-dormant-boundary 存在性合同拦截。
 })
 
-test('P6-F1 removes DirectChat-owned host callbacks (engine retired in Phase A)', () => {
-  const directChat = readWorkspaceFile('src/main/modules/claude-bridge/direct-chat.ts')
+// P6-F1 测试随引擎退役摘除（P6f dormant 边界 + Phase C C4，2026-07-05）：
+// "DirectChat 不得保留 host callbacks" 的负向断言在 direct-chat.ts 删除后失去
+// 对象；requestSimpleText / ExecutionLoopOrchestrator / HostCapabilityDispatcher
+// 的复活由 check-directchat-turnengine-dormant-boundary 的存在性合同与全 src/main
+// import/构造扫描拦截。
 
-  assert.doesNotMatch(directChat, /\brequestSimpleText\s*\(/)
-  assert.doesNotMatch(directChat, /\brequestToolLoopResponse\s*\(/)
-  assert.doesNotMatch(directChat, /\bExecutionLoopOrchestrator\b/)
-  assert.doesNotMatch(directChat, /\bHostCapabilityDispatcher\b/)
-})
-
-test('P6t keeps runtime ownership split with SDK as live sender and DirectChat as provider shell', () => {
+test('P6t keeps runtime ownership split with SDK as live sender and DomainAdapterHost as provider shell', () => {
   const orchestrator = readWorkspaceFile('src/main/modules/agent-control/runtime-core/orchestrator.ts')
-  const directChat = readWorkspaceFile('src/main/modules/claude-bridge/direct-chat.ts')
   const contracts = readWorkspaceFile('src/main/modules/agent-control/contracts/run-contracts.ts')
 
   assertMatchesAll(contracts, [
@@ -316,10 +240,22 @@ test('P6t keeps runtime ownership split with SDK as live sender and DirectChat a
     },
   ])
 
-  assert.doesNotMatch(directChat, /import \{ TurnEngine \} from '\.\.\/agent-control\/turn-engine'/)
-  assert.doesNotMatch(directChat, /private readonly turnEngine: TurnEngine/)
-  assert.doesNotMatch(directChat, /async sendMessage\(/)
-  assert.doesNotMatch(directChat, /this\.turnEngine\.execute\(/)
+  // 合同随实现同步（Phase C C4/C5，2026-07-05）：provider shell 从 DirectChatEngine
+  // 换为 DomainAdapterHost——orchestrator 构造 host 并把 adapter 装配面注入 SDK 引擎。
+  assertMatchesAll(orchestrator, [
+    {
+      label: 'orchestrator should own the DomainAdapterHost provider shell',
+      pattern: /this\.domainAdapterHost = new DomainAdapterHost\(\)/,
+    },
+    {
+      label: 'orchestrator should feed host adapters into the SDK engine',
+      pattern: /domainAdapters: this\.domainAdapterHost\.getDomainAdapters\(\)/,
+    },
+    {
+      label: 'orchestrator should feed host skill context orchestrator into the SDK engine',
+      pattern: /skillContextOrchestrator: this\.domainAdapterHost\.getSkillContextOrchestrator\(\)/,
+    },
+  ])
 
   assertMatchesAll(orchestrator, [
     {

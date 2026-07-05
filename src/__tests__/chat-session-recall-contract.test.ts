@@ -14,7 +14,10 @@ test('chat panel wires session recall search and attach APIs into the inline cha
   const recallHook = readWorkspaceFile('src/renderer/components/agent/chat-panel/recall-state/use-channel-session-recall.ts')
   const preload = readWorkspaceFile('src/preload/index.ts')
   const electronTypes = readWorkspaceFile('src/renderer/types/electron.d.ts')
-  const directChat = readWorkspaceFile('src/main/modules/claude-bridge/direct-chat.ts')
+  // 合同随实现同步（Phase C C4/C5，2026-07-05）：DirectChatEngine 退役，
+  // 主进程侧 session recall 接线锚点移至 ipc-handler.ts（runtime facade →
+  // session-recall-facade.ts）。
+  const ipcHandler = readWorkspaceFile('src/main/modules/claude-bridge/ipc-handler.ts')
 
   assert.match(recallHook, /searchSessionRecall/)
   assert.match(recallHook, /listAttachedSessionRecallContexts/)
@@ -40,8 +43,8 @@ test('chat panel wires session recall search and attach APIs into the inline cha
   assert.match(electronTypes, /attachSessionRecallContext:/)
   assert.match(electronTypes, /detachSessionRecallContext:/)
 
-  assert.match(directChat, /searchSessionRecall:\s*\(payload/)
-  assert.match(directChat, /listRecentSessions:\s*\(payload/)
-  assert.match(directChat, /getMemoryRepository:\s*\(\)/)
-  assert.match(directChat, /getPromptAssembly:\s*\(\)/)
+  assert.match(ipcHandler, /searchSessionRecall:\s*\(payload/)
+  assert.match(ipcHandler, /listRecentSessions:\s*\(payload/)
+  assert.match(ipcHandler, /getMemoryRepository:\s*\(\)/)
+  assert.match(ipcHandler, /getPromptAssembly:\s*\(\)/)
 })
