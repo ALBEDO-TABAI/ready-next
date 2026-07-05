@@ -167,3 +167,40 @@ node scripts/check-silent-catch.cjs; echo EXIT=$?
 - [ ] P4 探察文档产出；
 - [ ] 在本文档末尾追加「施工记录」段：每缝的提交 hash + 验证 EXIT 值；
 - [ ] 真机走查项（文件树交互全套 / 文档 widget 写入链 / agent studio 面板）追加进 `2026-07-05-user-retest-checklist.md` C 段，留用户执行。
+
+## 6. 施工记录（Codex，2026-07-06）
+
+### P1 documentActions
+
+- 提交：`58f1331d refactor(ui): split document actions module`
+- 落地：`documentActions.ts` 改为 30 行门面；实现拆到 `document-actions/types.ts` / `text-utils.ts` / `visual-validation.ts` / `mutation-classify.ts` / `write-locks.ts` / `target-resolve.ts` / `execute.ts`。
+- silent-catch：8 条旧 hash 迁移到新文件，baseline 条目数 `355 -> 355`。
+- 验证：`npm run typecheck` EXIT=0；`node scripts/check-silent-catch.cjs` EXIT=0；documentActions 7 个盯防测试 EXIT=0。
+
+### P2 FileTree
+
+- 提交：`2cebd56a refactor(ui): split file tree components`
+- 补提交：`c3dc93bb refactor(ui): trim file tree facade imports`
+- 落地：`FileTree.tsx` 保留主状态/调度和公开门面；叶组件与 helper 拆到 `file-tree/`。
+- grep 合同：`file-tree-browser-tab-drop-contract` / `file-tree-delete-menu-contract` / `floating-submenu-style-contract` 按 2026-07-06 拆分随迁到新实现文件，断言正则未放松。
+- 验证：`npm run typecheck` EXIT=0；`node scripts/check-silent-catch.cjs` EXIT=0；FileTree 7 个盯防合同 EXIT=0。
+
+### P3 AgentSystemStudio
+
+- 提交：`92a71706 refactor(ui): split agent system studio`
+- 落地：`AgentSystemStudio.tsx` 改为 1 行门面；主实现移到 `studio/AgentSystemStudioView.tsx`，展示小件拆到 `studio/primitives.tsx`，列表/路由选择拆到 `studio/agent-list.tsx`。
+- gate 同步：`check-specialist-studio-readonly.cjs` 改读 Settings -> AgentSettingsHub -> AgentSystemStudioView 的当前真实链路。
+- 验证：`npm run typecheck` EXIT=0；agent-system/specialist 测试族 EXIT=0；`node scripts/check-specialist-studio-readonly.cjs` EXIT=0；对应 gate 单测 EXIT=0；`node scripts/check-silent-catch.cjs` EXIT=0。
+
+### P4 CalendarMode
+
+- 提交：`38c48a03 docs(ui): survey calendar mode split seams`
+- 落地：未拆 `CalendarMode.tsx`；新增 `docs/superpowers/plans/2026-07-06-calendar-mode-split-survey.md`，列出 hook 依赖、候选缝、需要提升的状态和风险评级。
+- 回测清单：`docs/superpowers/plans/2026-07-05-user-retest-checklist.md` C 段新增文件树 / 文档 widget / Agent 系统面板真机走查项。
+
+### 最终收官
+
+- `npm run test` EXIT=0。
+- `npx electron-vite build` EXIT=0。
+- `node scripts/check-silent-catch.cjs` EXIT=0，baseline 条目数 `355`。
+- 入口行数：`documentActions.ts` 30；`FileTree.tsx` 1860；`AgentSystemStudio.tsx` 1；`CalendarMode.tsx` 1394（本轮按计划只探察不拆）。
