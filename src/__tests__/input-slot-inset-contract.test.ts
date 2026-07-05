@@ -2,13 +2,14 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import test from 'node:test'
+import { readRendererStyles } from './utils/read-renderer-styles'
 
 function readWorkspaceFile(path: string): string {
   return readFileSync(resolve(process.cwd(), path), 'utf8')
 }
 
 test('shared inset slot tokens drive input shells across the workbench', () => {
-  const styles = readWorkspaceFile('src/renderer/styles/index.css')
+  const styles = readRendererStyles()
   const filesPanel = readWorkspaceFile('src/renderer/components/layout/FilesPanel.tsx')
   const globalSearch = readWorkspaceFile('src/renderer/components/layout/GlobalSearchPanel.tsx')
   const browserSurface = readWorkspaceFile('src/renderer/components/browser/ActiveTabSurface.tsx')
@@ -31,7 +32,7 @@ test('shared inset slot tokens drive input shells across the workbench', () => {
 })
 
 test('inactive input slots blend into their panel surface and rely on a faint outline', () => {
-  const styles = readWorkspaceFile('src/renderer/styles/index.css')
+  const styles = readRendererStyles()
 
   assert.match(styles, /--input-slot-bg:\s*var\(--surface-panel-bg\);/)
   assert.match(styles, /--input-slot-shadow:\s*inset 0 0 0 0\.5px/)
@@ -61,7 +62,7 @@ test('chat composer delegates its material to the liquid lens instead of the ins
 })
 
 test('dark liquid composer dims only the material while preserving semantic controls', () => {
-  const styles = readWorkspaceFile('src/renderer/styles/index.css')
+  const styles = readRendererStyles()
   const darkComposerBlock = styles.match(/html\[data-theme='dark'\]\[data-skin='liquid-glass'\] \.ready-liquid-composer \{([\s\S]*?)\n\}/)
   assert.ok(darkComposerBlock, 'dark liquid composer block should exist')
 

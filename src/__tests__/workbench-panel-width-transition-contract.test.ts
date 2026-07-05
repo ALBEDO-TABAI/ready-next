@@ -2,13 +2,14 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import test from 'node:test'
+import { readRendererStyles } from './utils/read-renderer-styles'
 
 function readWorkspaceFile(path: string): string {
   return readFileSync(resolve(process.cwd(), path), 'utf8')
 }
 
 test('workbench side/chat shells interpolate width via CSS transition', () => {
-  const indexCss = readWorkspaceFile('src/renderer/styles/index.css')
+  const indexCss = readRendererStyles()
   const workbenchMode = readWorkspaceFile('src/renderer/pages/WorkbenchMode.tsx')
   const sidePanel = readWorkspaceFile('src/renderer/components/layout/SidePanel.tsx')
   const chatPanel = readWorkspaceFile('src/renderer/components/agent/ChatPanel.tsx')
@@ -54,7 +55,7 @@ test('workbench panel drag updates live shell width and commits store width only
 })
 
 test('document split disables side chat width tweening without changing browser-only behavior', () => {
-  const indexCss = readWorkspaceFile('src/renderer/styles/index.css')
+  const indexCss = readRendererStyles()
   const workbenchMode = readWorkspaceFile('src/renderer/pages/WorkbenchMode.tsx')
 
   assert.match(workbenchMode, /const documentSplitTabId = useDocTabs\(s => s\.splitTabId\)/)

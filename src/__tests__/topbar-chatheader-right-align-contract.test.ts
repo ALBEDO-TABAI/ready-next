@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import test from 'node:test'
+import { readRendererStyles } from './utils/read-renderer-styles'
 
 function readWorkspaceFile(path: string): string {
   return readFileSync(resolve(process.cwd(), path), 'utf8')
@@ -25,7 +26,7 @@ test('TopBar right padding collapses to the shared 14px constant so it shares th
 })
 
 test('TopBar no longer participates in the panel-width transition tree, leaving only side-panel + chat-panel in the resizing + reduced-motion selectors', () => {
-  const css = readWorkspaceFile('src/renderer/styles/index.css')
+  const css = readRendererStyles()
 
   assert.doesNotMatch(
     css,

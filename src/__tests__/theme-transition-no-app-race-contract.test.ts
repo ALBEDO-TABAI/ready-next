@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import test from 'node:test'
+import { readRendererStyles } from './utils/read-renderer-styles'
 
 function readWorkspaceFile(path: string): string {
   return readFileSync(resolve(process.cwd(), path), 'utf8')
@@ -16,7 +17,7 @@ function readWorkspaceFile(path: string): string {
 // UI fades out" ritual so we never reintroduce a separate solid transition shell.
 test('App.tsx does not race the theme ritual and the glass-state content fade is wired', () => {
   const app = readWorkspaceFile('src/renderer/App.tsx')
-  const styles = readWorkspaceFile('src/renderer/styles/index.css')
+  const styles = readRendererStyles()
   const overlayComponent = readWorkspaceFile('src/renderer/components/overlay/RitualOverlay.tsx')
   const overlayCss = readWorkspaceFile('src/renderer/styles/ritual-overlay.css')
 

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import test from 'node:test'
+import { readRendererStyles } from '../utils/read-renderer-styles'
 
 function readWorkspaceFile(path: string): string {
   return readFileSync(resolve(process.cwd(), path), 'utf8')
@@ -42,7 +43,7 @@ test('browser rss and calendar shells align their left edge with the shared work
   const calendarShell = readWorkspaceFile('src/renderer/components/calendar/CalendarWorkbenchShell.tsx')
   const workbenchTabs = readWorkspaceFile('src/renderer/components/workbench/WorkbenchProjectTabs.tsx')
   const scheduleCss = readWorkspaceFile('src/renderer/styles/schedule-x.css')
-  const styles = readWorkspaceFile('src/renderer/styles/index.css')
+  const styles = readRendererStyles()
 
   assert.match(browserHeader, /className="browser-header-surface glass-surface-panel flex-shrink-0"/)
   assert.match(browserHeader, /paddingLeft: WORKBENCH_HEADER_EDGE_X/)
@@ -107,7 +108,7 @@ test('browser visibility handoff cancels stale re-show work and rss shell stays 
   const tabShell = readWorkspaceFile('src/main/modules/browser-engine/tab-shell-service.ts')
   const hostLayout = readWorkspaceFile('src/main/modules/browser-engine/host-layout-service.ts')
   const boundsHook = readWorkspaceFile('src/renderer/modules/browser/useBrowserViewBounds.ts')
-  const styles = readWorkspaceFile('src/renderer/styles/index.css')
+  const styles = readRendererStyles()
 
   assert.doesNotMatch(browserRuntimeEffects, /window\.electronAPI\?\.browser\?\.hideAll\(\)/)
   assert.doesNotMatch(browserRuntimeEffects, /window\.electronAPI\?\.browser\?\.showActive\(\)/)

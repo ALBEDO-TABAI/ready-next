@@ -2,13 +2,14 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import test from 'node:test'
+import { readRendererStyles } from './utils/read-renderer-styles'
 
 function readWorkspaceFile(path: string): string {
   return readFileSync(resolve(process.cwd(), path), 'utf8')
 }
 
 test('document canvas and rss canvas share one module surface background token', () => {
-  const styles = readWorkspaceFile('src/renderer/styles/index.css')
+  const styles = readRendererStyles()
   const documentMode = readWorkspaceFile('src/renderer/pages/modes/DocumentMode.tsx')
   const markdownEditor = readWorkspaceFile('src/renderer/components/document/MarkdownEditor.tsx')
   const documentPanels = readWorkspaceFile('src/renderer/components/document/DocumentFloatingPanels.tsx')

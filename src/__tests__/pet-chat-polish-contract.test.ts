@@ -8,6 +8,7 @@ import {
   filterUserVisibleToolTraceEvents,
   sanitizeInternalAgentDisplayText,
 } from '../renderer/modules/agent/toolTraceVisibility'
+import { readRendererStyles } from './utils/read-renderer-styles'
 
 function readWorkspaceFile(path: string): string {
   return readFileSync(resolve(process.cwd(), path), 'utf8')
@@ -120,7 +121,7 @@ test('pet sticky notes preserve longer content and can expand inside the floatin
   const schema = readWorkspaceFile('src/main/modules/tools/schemas/pet-schemas.ts')
   const manager = readWorkspaceFile('src/main/modules/pet/pet-window-manager.ts')
   const petWindow = readWorkspaceFile('src/renderer/pages/PetWindow.tsx')
-  const styles = readWorkspaceFile('src/renderer/styles/index.css')
+  const styles = readRendererStyles()
 
   assert.match(schema, /body:\s*z\.string\(\)\.min\(1\)\.max\(1200\)/)
   assert.match(manager, /STICKY_BODY_MAX_LENGTH\s*=\s*1200/)

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import test from 'node:test'
+import { readRendererStyles } from './utils/read-renderer-styles'
 
 function readWorkspaceFile(path: string): string {
   return readFileSync(resolve(process.cwd(), path), 'utf8')
@@ -41,7 +42,7 @@ test('workbench shell exposes dedicated liquid glass hooks on primary chrome sur
 })
 
 test('liquid glass skin defines shell-level fresnel, noise, and atmosphere contract', () => {
-  const styles = readWorkspaceFile('src/renderer/styles/index.css')
+  const styles = readRendererStyles()
   const scene = readWorkspaceFile('src/renderer/components/ui/LiquidGlassScene.tsx')
 
   assert.match(styles, /--lg-noise-opacity:/)
@@ -297,7 +298,7 @@ test('Stage 2 — will-leave-full-screen handler is a deliberate no-op (do not e
 
 test('liquid glass sliders preserve the groove and use lens-backed convex thumbs', () => {
   const sliderStyles = readWorkspaceFile('src/renderer/styles/workbench-sliders.css')
-  const appStyles = readWorkspaceFile('src/renderer/styles/index.css')
+  const appStyles = readRendererStyles()
   const iconRail = readWorkspaceFile('src/renderer/components/motion/MorphIconRailGroup.tsx')
   const modeTabs = readWorkspaceFile('src/renderer/components/layout/DraggableModeTabs.tsx')
   const modeSwitch = readWorkspaceFile('src/renderer/components/document/DraggableModeSwitch.tsx')

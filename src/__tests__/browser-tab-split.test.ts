@@ -6,6 +6,7 @@ import test from 'node:test'
 import { BrowserTabShellService, type BrowserShellTabRecord } from '../main/modules/browser-engine/tab-shell-service'
 import { useBrowserTabs, type BrowserTab } from '../renderer/stores/useBrowserTabs'
 import type { BrowserRect } from '../main/modules/browser-engine/host-types'
+import { readRendererStyles } from './utils/read-renderer-styles'
 
 function readWorkspaceFile(path: string): string {
   return readFileSync(resolve(process.cwd(), path), 'utf8')
@@ -97,7 +98,7 @@ test('browser tabs keep a secondary split tab while switching the primary tab', 
 
 test('browser split divider fades within the rounded browser canvas and does not grow on hover', () => {
   const browserMode = readWorkspaceFile('src/renderer/pages/modes/BrowserMode.tsx')
-  const styles = readWorkspaceFile('src/renderer/styles/index.css')
+  const styles = readRendererStyles()
 
   assert.match(browserMode, /className="browser-split-resize-handle"/)
   assert.match(browserMode, /className="browser-split-resize-handle__grip"/)

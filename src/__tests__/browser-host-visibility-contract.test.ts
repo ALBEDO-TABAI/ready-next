@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import test from 'node:test'
+import { readRendererStyles } from './utils/read-renderer-styles'
 
 function readWorkspaceFile(path: string): string {
   return readFileSync(resolve(process.cwd(), path), 'utf8')
@@ -26,7 +27,7 @@ test('browser host visibility is explicitly gated and browser bounds keep Browse
   const hostLayout = readWorkspaceFile('src/main/modules/browser-engine/host-layout-service.ts')
   const sidePanel = readWorkspaceFile('src/renderer/components/layout/SidePanel.tsx')
   const chatPanel = readWorkspaceFile('src/renderer/components/agent/ChatPanel.tsx')
-  const styles = readWorkspaceFile('src/renderer/styles/index.css')
+  const styles = readRendererStyles()
 
   // Stage X4 PR-shell-1 — visibility goes through the single
   // BrowserViewIntent boundary on `browser:intent`. The legacy

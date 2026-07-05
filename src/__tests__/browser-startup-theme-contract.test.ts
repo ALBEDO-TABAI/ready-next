@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import test from 'node:test'
+import { readRendererStyles } from './utils/read-renderer-styles'
 
 function readWorkspaceFile(path: string): string {
   return readFileSync(resolve(process.cwd(), path), 'utf8')
@@ -15,7 +16,7 @@ test('browser startup gates chrome until host restoration completes and main pro
   const rendererMain = readWorkspaceFile('src/renderer/main.tsx')
   const preload = readWorkspaceFile('src/preload/index.ts')
   const electronTypes = readWorkspaceFile('src/renderer/types/electron.d.ts')
-  const styles = readWorkspaceFile('src/renderer/styles/index.css')
+  const styles = readRendererStyles()
   const themeStore = readWorkspaceFile('src/renderer/stores/useTheme.ts')
 
   assert.match(browserMode, /const shouldShowStartupPlaceholder =\s*!activeTab\?\.error &&\s*\(!browserRuntimeReady \|\| !isBrowserSurfaceReady\)/)

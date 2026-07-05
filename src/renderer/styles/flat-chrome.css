@@ -1,0 +1,1275 @@
+/* ═══ flat-chrome.css — 扁平化 chrome 带（隐藏横向边框/统一表面 token/非液态皮肤对齐）；由 index.css 序保拆分（2026-07-06），在 index.css 中按原段落顺序 @import，勿改导入次序。 ═══ */
+/* ============================================
+   UI OPTIMIZATION: Clean Visual Hierarchy
+   ============================================ */
+
+/* Hide all horizontal borders (border-bottom) */
+[style*="border-bottom"],
+[class*="border-bottom"],
+.workbench-toolbar-row,
+.glass-surface-panel,
+.workbench-panel,
+.drag-region {
+  border-bottom-color: var(--border-horizontal) !important;
+}
+
+/* Make vertical borders subtle (border-right, border-left) */
+[style*="border-right"],
+[style*="border-left"],
+[class*="border-right"],
+[class*="border-left"] {
+  border-right-color: var(--border-vertical) !important;
+  border-left-color: var(--border-vertical) !important;
+}
+
+.resize-handle::before {
+  background: var(--border-vertical) !important;
+}
+
+/* Override surface tokens for unified look */
+html:not([data-skin='liquid-glass']) {
+  --surface-toolbar-bg: var(--panel-unified-bg);
+  --surface-panel-bg: var(--panel-unified-bg);
+  --lg-content-bg: var(--panel-unified-bg);
+  --lg-content-card-bg: var(--panel-unified-bg);
+}
+
+/* Keep main content areas aligned with the shared light-beige module surface for non-liquid skins */
+html:not([data-skin='liquid-glass']) .workbench-content,
+html:not([data-skin='liquid-glass']) .workbench-mode-root,
+html:not([data-skin='liquid-glass']) [class*="content-area"],
+html:not([data-skin='liquid-glass']) [class*="editor-area"] {
+  background: var(--bg-content) !important;
+}
+
+.workbench-canvas-shell {
+  min-height: 0;
+  border-radius: var(--workbench-canvas-radius);
+  overflow: hidden;
+  background: var(--surface-panel-bg);
+  border: 1px solid var(--workbench-canvas-border);
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.03);
+}
+
+html[data-skin='liquid-glass'] .workbench-canvas-shell,
+html[data-skin='liquid-glass'] .workbench-content,
+html[data-skin='liquid-glass'] .workbench-mode-root {
+  background: transparent !important;
+}
+
+html[data-skin='liquid-glass'] .workbench-canvas-shell {
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+
+html[data-skin='liquid-glass'] .document-workbench-canvas-shell {
+  background: var(--workbench-module-surface-bg) !important;
+  border-radius: var(--workbench-canvas-radius) !important;
+  overflow: hidden;
+  background-clip: padding-box;
+}
+
+html[data-skin='liquid-glass'] .document-workbench-body {
+  background: var(--workbench-module-surface-bg) !important;
+  backdrop-filter: blur(24px) saturate(0%) !important;
+  -webkit-backdrop-filter: blur(24px) saturate(0%) !important;
+}
+
+html[data-skin='liquid-glass'] .document-workbench-body .document-vertical-tab-rail {
+  background: transparent !important;
+  border-right-color: transparent !important;
+}
+
+html[data-skin='liquid-glass'] .rss-mode-shell .workbench-canvas-shell {
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+
+html[data-skin='liquid-glass'] [style*="border-right"],
+html[data-skin='liquid-glass'] [style*="border-left"],
+html[data-skin='liquid-glass'] [class*="border-right"],
+html[data-skin='liquid-glass'] [class*="border-left"] {
+  border-right-color: transparent !important;
+  border-left-color: transparent !important;
+}
+
+.workbench-canvas-shell > * {
+  min-height: 0;
+}
+
+[data-workbench-transition-role='entering'] .workbench-canvas-shell,
+[data-workbench-transition-role='leaving'] .workbench-canvas-shell {
+  box-shadow: none !important;
+  border-color: transparent !important;
+}
+
+.workbench-panel-frame {
+  border-radius: var(--workbench-canvas-radius);
+  overflow: hidden;
+  border: 1px solid transparent;
+}
+
+[data-liquid-shell='side-panel'],
+[data-liquid-shell='chat-panel'] {
+  transition:
+    width 180ms cubic-bezier(0.22, 1, 0.36, 1),
+    min-width 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+[data-panel-width-transition='instant'] [data-liquid-shell='side-panel'],
+[data-panel-width-transition='instant'] [data-liquid-shell='chat-panel'] {
+  transition: none;
+}
+
+body.resizing [data-liquid-shell='side-panel'],
+body.resizing [data-liquid-shell='chat-panel'] {
+  transition: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-liquid-shell='side-panel'],
+  [data-liquid-shell='chat-panel'] {
+    transition-duration: 80ms;
+  }
+}
+
+.workbench-panel-frame[data-side-panel-variant='files'] {
+  background: var(--workbench-side-panel-bg);
+  border-color: var(--workbench-side-panel-border);
+  box-shadow: var(--workbench-side-panel-shadow);
+}
+
+html[data-skin='liquid-glass'] .calendar-mode-shell .workbench-canvas-shell {
+  background: var(--calendar-canvas-bg) !important;
+  border: 1px solid var(--calendar-canvas-border) !important;
+  box-shadow: none !important;
+}
+
+html[data-theme='dark'][data-skin='liquid-glass'] .calendar-mode-shell .workbench-canvas-shell {
+  background: var(--calendar-canvas-bg) !important;
+  border-color: var(--calendar-canvas-border) !important;
+  box-shadow: none !important;
+}
+
+.calendar-timezone-dock {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid color-mix(in srgb, var(--surface-border) 54%, transparent);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.calendar-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  -webkit-app-region: no-drag;
+}
+
+.calendar-create-button,
+.calendar-toolbar-button,
+.calendar-icon-button {
+  height: 28px;
+  border: 0;
+  background: transparent;
+  color: var(--text-body);
+  cursor: pointer;
+  transition:
+    background 160ms ease,
+    color 160ms ease,
+    opacity 160ms ease,
+    transform 160ms ease;
+  -webkit-app-region: no-drag;
+}
+
+.calendar-create-button:hover,
+.calendar-toolbar-button:hover,
+.calendar-icon-button:hover {
+  background: var(--calendar-control-bg-hover);
+  color: var(--text-title);
+  transform: translateY(-1px);
+}
+
+.calendar-create-button:active,
+.calendar-toolbar-button:active,
+.calendar-icon-button:active {
+  transform: translateY(0);
+}
+
+.calendar-create-button:focus-visible,
+.calendar-toolbar-button:focus-visible,
+.calendar-icon-button:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-blue) 18%, transparent);
+}
+
+.calendar-create-button {
+  width: 28px;
+  padding: 0;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.calendar-toolbar-button {
+  padding: 0 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.calendar-icon-button {
+  width: 28px;
+  padding: 0;
+  border-radius: 8px;
+  color: var(--text-light);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.calendar-assistant-toggle.is-active,
+.calendar-view-segment button.is-active {
+  background: var(--calendar-control-bg-active);
+  color: var(--color-blue);
+}
+
+.calendar-view-segment {
+  display: inline-flex;
+  align-items: center;
+  height: 28px;
+  padding: 2px;
+  border-radius: 8px;
+  border: 0;
+  background: color-mix(in srgb, var(--calendar-control-bg) 76%, transparent);
+  -webkit-app-region: no-drag;
+}
+
+.calendar-view-segment button {
+  width: 30px;
+  height: 22px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background 160ms ease,
+    color 160ms ease;
+  -webkit-app-region: no-drag;
+}
+
+.calendar-view-segment button:hover {
+  background: var(--calendar-control-bg-hover);
+  color: var(--text-title);
+}
+
+.calendar-timezone-dock > .calendar-timezone-selector > button {
+  width: 100%;
+  justify-content: flex-start;
+  background: var(--calendar-control-bg) !important;
+  border-color: var(--calendar-control-border) !important;
+  border-radius: 8px !important;
+  max-width: none !important;
+  -webkit-app-region: no-drag;
+}
+
+.calendar-assistant-drawer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 34;
+  width: min(360px, calc(100% - 96px));
+  min-width: 320px;
+  display: flex;
+  flex-direction: column;
+  opacity: 0;
+  transform: translateX(12px);
+  pointer-events: none;
+  transition:
+    opacity 240ms cubic-bezier(0.22, 0.61, 0.36, 1),
+    transform 240ms cubic-bezier(0.22, 0.61, 0.36, 1);
+  will-change: opacity, transform;
+  -webkit-app-region: no-drag;
+}
+
+.calendar-assistant-drawer.is-entered {
+  opacity: 1;
+  transform: translateX(0);
+  pointer-events: auto;
+}
+
+.calendar-assistant-surface {
+  background: var(--calendar-assistant-bg) !important;
+  border-left: 1px solid var(--calendar-assistant-card-border) !important;
+  border-radius: var(--workbench-canvas-radius) 0 0 var(--workbench-canvas-radius);
+  box-shadow: -18px 0 44px -18px rgba(8, 12, 22, 0.28) !important;
+  overflow: hidden;
+}
+
+.calendar-assistant-header {
+  height: 40px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 0 12px 0 16px;
+  border-bottom: 1px solid var(--calendar-assistant-card-border);
+}
+
+.calendar-assistant-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-title);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.calendar-assistant-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 12px;
+}
+
+.calendar-assistant-card {
+  border: 1px solid var(--calendar-assistant-card-border);
+  border-radius: 8px;
+  background: var(--calendar-assistant-card-bg);
+  padding: 12px;
+  margin-bottom: 10px;
+}
+
+.calendar-assistant-section-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+  color: var(--text-title);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.calendar-assistant-event-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.calendar-assistant-event {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 42px;
+  padding: 8px;
+  border-radius: 8px;
+  background: var(--calendar-event-chip-bg);
+}
+
+.calendar-assistant-event-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+
+.calendar-assistant-event-main {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.calendar-assistant-event-title,
+.calendar-assistant-next-title {
+  color: var(--text-title);
+  font-size: 12px;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.calendar-assistant-event-time,
+.calendar-assistant-next-time,
+.calendar-assistant-empty {
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.calendar-assistant-event-source {
+  max-width: 74px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-blue);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.calendar-assistant-next {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.calendar-assistant-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.calendar-assistant-metrics div {
+  min-width: 0;
+  text-align: center;
+  padding: 4px 0;
+}
+
+.calendar-assistant-metrics strong {
+  display: block;
+  color: var(--text-title);
+  font-size: 16px;
+  line-height: 1.2;
+}
+
+.calendar-assistant-metrics span {
+  display: block;
+  margin-top: 3px;
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.calendar-assistant-suggestions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.calendar-assistant-chip {
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 8px;
+  border: 1px solid var(--calendar-assistant-card-border);
+  background: var(--calendar-event-chip-bg);
+  color: var(--text-body);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background 160ms ease,
+    color 160ms ease;
+}
+
+.calendar-assistant-chip:hover {
+  background: var(--calendar-control-bg-hover);
+  color: var(--text-title);
+}
+
+.calendar-assistant-composer {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px 12px;
+  border-top: 1px solid var(--calendar-assistant-card-border);
+}
+
+.calendar-assistant-composer input {
+  flex: 1;
+  min-width: 0;
+  height: 36px;
+  border-radius: 8px;
+  border: 1px solid var(--input-slot-border);
+  background: var(--input-slot-bg);
+  color: var(--text-body);
+  outline: none;
+  padding: 0 11px;
+  font-size: 12px;
+}
+
+.calendar-assistant-send {
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--color-blue) 38%, transparent);
+  background: color-mix(in srgb, var(--color-blue) 82%, var(--surface-card-bg) 18%);
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .calendar-assistant-drawer {
+    transition-duration: 80ms;
+  }
+}
+
+html:not([data-skin='liquid-glass']) .rss-mode-shell .workbench-canvas-shell,
+html:not([data-skin='liquid-glass']) .rss-mode-shell .content-surface-panel,
+html:not([data-skin='liquid-glass']) .rss-mode-shell .content-surface-card {
+  background: var(--bg-content) !important;
+}
+
+html:not([data-skin='liquid-glass']) .rss-mode-shell,
+html:not([data-skin='liquid-glass']) .rss-mode-shell .workbench-mode-root,
+html:not([data-skin='liquid-glass']) .rss-mode-shell .workbench-content,
+html:not([data-skin='liquid-glass']) .rss-mode-shell [class*="content-area"],
+html:not([data-skin='liquid-glass']) .rss-mode-shell [class*="editor-area"] {
+  background: var(--bg-content) !important;
+}
+
+.rss-mode-shell .rss-feed-sheet {
+  --rss-settings-bg: color-mix(in srgb, var(--workbench-module-surface-bg) 94%, var(--bg-content) 6%);
+  --rss-settings-card-bg: color-mix(in srgb, var(--surface-card-bg) 42%, transparent);
+  --rss-settings-card-border: color-mix(in srgb, var(--surface-border) 78%, transparent);
+  --rss-settings-chip-bg: color-mix(in srgb, var(--surface-card-bg) 34%, transparent);
+  background: var(--workbench-module-surface-bg) !important;
+  box-shadow: none !important;
+  backdrop-filter: blur(24px) saturate(0%) !important;
+  -webkit-backdrop-filter: blur(24px) saturate(0%) !important;
+}
+
+.rss-mode-shell .rss-feed-surface,
+.rss-mode-shell .rss-feed-scroll {
+  background: transparent !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.rss-toolbar-actions {
+  flex-shrink: 0;
+}
+
+.rss-toolbar-select:hover {
+  background: color-mix(in srgb, var(--surface-card-bg) 40%, transparent) !important;
+  border-color: color-mix(in srgb, var(--text-gray) 28%, var(--border-input) 72%) !important;
+}
+
+.rss-toolbar-select:focus {
+  outline: none;
+}
+
+.rss-toolbar-select:focus-visible {
+  outline: none;
+  border-color: color-mix(in srgb, var(--color-blue) 45%, var(--border-input) 55%) !important;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-blue) 16%, transparent);
+}
+
+.rss-toolbar-icon-button {
+  position: relative;
+  display: inline-flex;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-light);
+  cursor: pointer;
+  transition: background-color 150ms ease, color 150ms ease, transform 150ms ease;
+}
+
+.rss-toolbar-icon-button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--text-muted) 10%, transparent);
+  color: var(--text-title);
+  transform: translateY(-1px);
+}
+
+.rss-toolbar-icon-button.is-active {
+  background: color-mix(in srgb, var(--color-blue) 16%, transparent);
+  color: var(--color-blue);
+}
+
+.rss-toolbar-icon-button:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.rss-toolbar-icon-button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.rss-toolbar-icon-button[data-tooltip]::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 50%;
+  z-index: 30;
+  padding: 4px 8px;
+  border: 1px solid color-mix(in srgb, var(--border-default) 70%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-floating-bg) 94%, rgba(255, 255, 255, 0.2));
+  color: var(--text-secondary);
+  box-shadow: var(--shadow-sm);
+  font-size: 11px;
+  line-height: 1.2;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(-50%) translateY(-2px);
+  transition: opacity 120ms ease, transform 120ms ease;
+  white-space: nowrap;
+}
+
+.rss-toolbar-icon-button[data-tooltip]:hover::after,
+.rss-toolbar-icon-button[data-tooltip]:focus-visible::after {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+.rss-toolbar-active-dot {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--color-blue);
+  box-shadow: 0 0 0 2px var(--workbench-module-surface-bg);
+}
+
+.rss-item-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 128px;
+  gap: 12px;
+  align-items: start;
+}
+
+.rss-item-main,
+.rss-item-text-stack {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.rss-item-line-fade {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: clip;
+  -webkit-mask-image: linear-gradient(90deg, #000 0, #000 calc(100% - 36px), transparent 100%);
+  mask-image: linear-gradient(90deg, #000 0, #000 calc(100% - 36px), transparent 100%);
+}
+
+.rss-item-actions {
+  width: 128px;
+  min-width: 128px;
+  flex-wrap: nowrap;
+}
+
+.rss-settings-drawer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 34;
+  width: min(382px, calc(100% - 72px));
+  min-width: min(320px, calc(100% - 72px));
+  display: flex;
+  flex-direction: column;
+  opacity: 0;
+  transform: translateX(12px);
+  pointer-events: none;
+  transition:
+    opacity 240ms cubic-bezier(0.22, 0.61, 0.36, 1),
+    transform 240ms cubic-bezier(0.22, 0.61, 0.36, 1);
+  will-change: opacity, transform;
+  -webkit-app-region: no-drag;
+}
+
+.rss-settings-drawer.is-entered {
+  opacity: 1;
+  transform: translateX(0);
+  pointer-events: auto;
+}
+
+.rss-settings-surface {
+  background: var(--rss-settings-bg) !important;
+  border-left: 1px solid var(--rss-settings-card-border) !important;
+  border-radius: var(--workbench-canvas-radius) 0 0 var(--workbench-canvas-radius);
+  box-shadow: -18px 0 44px -18px rgba(8, 12, 22, 0.28) !important;
+  overflow: hidden;
+}
+
+.rss-add-source-modal {
+  overflow: hidden;
+  background: color-mix(in srgb, var(--bg-primary) 97%, white 3%);
+  border: 1px solid color-mix(in srgb, var(--border-default) 70%, rgba(255, 255, 255, 0.58));
+  box-shadow: 0 18px 42px rgba(15, 23, 42, 0.12), 0 6px 14px rgba(15, 23, 42, 0.06);
+}
+
+html[data-skin='liquid-glass'] .rss-add-source-modal {
+  background: transparent;
+}
+
+html[data-skin='liquid-glass'] .rss-add-source-modal__header {
+  background: var(--ready-app-panel-glass-band-bg);
+}
+
+html[data-skin='liquid-glass'] .rss-add-source-modal__preset {
+  box-shadow: var(--ready-app-panel-glass-card-shadow);
+}
+
+.rss-settings-header {
+  height: 42px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 0 12px 0 16px;
+  border-bottom: 1px solid var(--rss-settings-card-border);
+}
+
+.rss-settings-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-title);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.rss-settings-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 12px;
+}
+
+.rss-settings-card {
+  border: 1px solid var(--rss-settings-card-border);
+  border-radius: 8px;
+  background: var(--rss-settings-card-bg);
+  padding: 12px;
+  margin-bottom: 10px;
+}
+
+.rss-settings-section-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+  color: var(--text-title);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.rss-settings-section-note {
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.rss-settings-choice-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.rss-settings-choice {
+  min-width: 0;
+  min-height: 50px;
+  border: 1px solid var(--rss-settings-card-border);
+  border-radius: 8px;
+  background: var(--rss-settings-chip-bg);
+  color: var(--text-body);
+  cursor: pointer;
+  text-align: left;
+  padding: 8px 9px;
+  transition:
+    background 160ms ease,
+    border-color 160ms ease,
+    color 160ms ease;
+}
+
+.rss-settings-choice:hover {
+  background: color-mix(in srgb, var(--surface-card-bg) 48%, transparent);
+  color: var(--text-title);
+}
+
+.rss-settings-choice.is-active {
+  border-color: color-mix(in srgb, var(--color-blue) 42%, var(--rss-settings-card-border));
+  background: color-mix(in srgb, var(--color-blue) 12%, var(--rss-settings-chip-bg));
+  color: var(--color-blue);
+}
+
+.rss-settings-choice span {
+  display: block;
+  overflow: hidden;
+  color: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rss-settings-choice small {
+  display: block;
+  margin-top: 4px;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 10px;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rss-settings-warning {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  gap: 8px;
+  margin-top: 10px;
+  padding: 9px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-card-bg) 30%, transparent);
+  color: var(--text-muted);
+}
+
+.rss-settings-warning.is-danger {
+  background: color-mix(in srgb, var(--color-red) 11%, transparent);
+  color: var(--color-red);
+}
+
+.rss-settings-warning.is-warning {
+  background: color-mix(in srgb, var(--color-orange) 12%, transparent);
+  color: var(--color-orange);
+}
+
+.rss-settings-warning.is-notice {
+  background: color-mix(in srgb, var(--color-blue) 10%, transparent);
+  color: var(--color-blue);
+}
+
+.rss-settings-warning strong,
+.rss-settings-warning span {
+  display: block;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.rss-settings-warning strong {
+  color: currentColor;
+  font-weight: 700;
+}
+
+.rss-settings-warning span {
+  color: var(--text-muted);
+}
+
+.rss-settings-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.rss-settings-button,
+.rss-settings-icon-button {
+  border: 1px solid var(--rss-settings-card-border);
+  background: var(--rss-settings-chip-bg);
+  color: var(--text-body);
+  cursor: pointer;
+  transition:
+    background 160ms ease,
+    color 160ms ease,
+    opacity 160ms ease,
+    transform 160ms ease;
+}
+
+.rss-settings-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 30px;
+  border-radius: 8px;
+  padding: 0 10px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.rss-settings-icon-button {
+  display: inline-flex;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border-radius: 8px;
+}
+
+.rss-settings-button:hover:not(:disabled),
+.rss-settings-icon-button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--surface-card-bg) 54%, transparent);
+  color: var(--text-title);
+  transform: translateY(-1px);
+}
+
+.rss-settings-button:disabled,
+.rss-settings-icon-button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.rss-settings-button.is-primary {
+  border-color: color-mix(in srgb, var(--color-blue) 40%, transparent);
+  background: color-mix(in srgb, var(--color-blue) 78%, var(--surface-card-bg) 22%);
+  color: #fff;
+}
+
+.rss-settings-icon-button.is-danger {
+  color: var(--color-red);
+}
+
+.rss-settings-runtime-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.rss-settings-runtime-grid div {
+  min-width: 0;
+  padding: 8px;
+  border-radius: 8px;
+  background: var(--rss-settings-chip-bg);
+}
+
+.rss-settings-runtime-grid span,
+.rss-settings-runtime-grid strong {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rss-settings-runtime-grid span {
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.rss-settings-runtime-grid strong {
+  margin-top: 4px;
+  color: var(--text-title);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.rss-settings-status-line {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  margin-top: 9px;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.rss-settings-status-line > span:last-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rss-settings-status-pill {
+  display: inline-flex;
+  max-width: 96px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  padding: 2px 7px;
+  background: color-mix(in srgb, var(--text-muted) 10%, transparent);
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.35;
+  white-space: nowrap;
+}
+
+.rss-settings-status-pill.is-success {
+  background: color-mix(in srgb, var(--color-green) 12%, transparent);
+  color: var(--color-green);
+}
+
+.rss-settings-status-pill.is-info {
+  background: color-mix(in srgb, var(--color-blue) 12%, transparent);
+  color: var(--color-blue);
+}
+
+.rss-settings-status-pill.is-warning {
+  background: color-mix(in srgb, var(--color-orange) 12%, transparent);
+  color: var(--color-orange);
+}
+
+.rss-settings-status-pill.is-danger {
+  background: color-mix(in srgb, var(--color-red) 12%, transparent);
+  color: var(--color-red);
+}
+
+.rss-settings-source-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.rss-settings-source-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 112px;
+  gap: 10px;
+  align-items: start;
+  padding: 9px;
+  border-radius: 8px;
+  background: var(--rss-settings-chip-bg);
+}
+
+.rss-settings-source-main {
+  min-width: 0;
+}
+
+.rss-settings-source-title,
+.rss-settings-source-meta,
+.rss-settings-source-error,
+.rss-settings-source-counts {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rss-settings-source-title {
+  color: var(--text-title);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.rss-settings-source-meta,
+.rss-settings-source-counts {
+  margin-top: 4px;
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.rss-settings-source-error {
+  margin-top: 5px;
+  color: var(--color-red);
+  font-size: 10px;
+}
+
+.rss-settings-source-side {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+
+.rss-settings-source-actions {
+  display: flex;
+  gap: 5px;
+}
+
+.rss-settings-empty {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.rss-settings-notice {
+  flex-shrink: 0;
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  padding: 10px 12px 12px;
+  border-top: 1px solid var(--rss-settings-card-border);
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.rss-settings-notice span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rss-settings-notice.is-success {
+  color: var(--color-green);
+}
+
+.rss-settings-notice.is-error {
+  color: var(--color-red);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rss-settings-drawer {
+    transition-duration: 80ms;
+  }
+}
+
+@media (max-width: 720px) {
+  .rss-settings-drawer {
+    width: min(360px, calc(100% - 44px));
+    min-width: min(300px, calc(100% - 44px));
+  }
+
+  .rss-settings-choice-grid,
+  .rss-settings-runtime-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+html[data-skin='liquid-glass'],
+html[data-fastcard-overlay-window='true'] {
+  --ready-app-panel-glass-bg: var(--chat-menu-frost-bg);
+  --ready-app-panel-glass-band-bg: transparent;
+  --ready-app-panel-glass-card-bg: rgba(255, 255, 255, 0.07);
+  --ready-app-panel-glass-control-bg: rgba(255, 255, 255, 0.10);
+  --ready-app-panel-glass-hover-bg: rgba(255, 255, 255, 0.22);
+  --ready-app-panel-glass-border: rgba(255, 255, 255, 0.66);
+  --ready-app-panel-glass-inner-border: rgba(255, 255, 255, 0.28);
+  --ready-app-panel-glass-shadow: var(--chat-menu-shadow);
+  --ready-app-panel-glass-card-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.20);
+}
+
+html[data-theme='dark'][data-skin='liquid-glass'],
+html[data-theme='dark'][data-fastcard-overlay-window='true'] {
+  --ready-app-panel-glass-bg: var(--chat-menu-frost-bg);
+  --ready-app-panel-glass-band-bg: transparent;
+  --ready-app-panel-glass-card-bg: rgba(255, 255, 255, 0.045);
+  --ready-app-panel-glass-control-bg: rgba(255, 255, 255, 0.065);
+  --ready-app-panel-glass-hover-bg: rgba(255, 255, 255, 0.11);
+  --ready-app-panel-glass-border: rgba(255, 255, 255, 0.18);
+  --ready-app-panel-glass-inner-border: rgba(255, 255, 255, 0.10);
+  --ready-app-panel-glass-shadow: var(--chat-menu-shadow);
+  --ready-app-panel-glass-card-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07);
+}
+
+html[data-skin='liquid-glass'] .ready-app-liquid-panel,
+html[data-fastcard-overlay-window='true'] .ready-app-liquid-panel {
+  isolation: isolate;
+  overflow: hidden;
+  background: transparent !important;
+  border: 0.5px solid var(--ready-app-panel-glass-border) !important;
+  box-shadow: var(--ready-app-panel-glass-shadow) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+html[data-skin='liquid-glass'] .ready-app-liquid-panel__lens,
+html[data-fastcard-overlay-window='true'] .ready-app-liquid-panel__lens {
+  z-index: 0;
+}
+
+html[data-skin='liquid-glass'] .ready-app-liquid-panel > :not(.ready-app-liquid-panel__lens),
+html[data-fastcard-overlay-window='true'] .ready-app-liquid-panel > :not(.ready-app-liquid-panel__lens) {
+  position: relative;
+  z-index: 2;
+}
+
+html[data-skin='liquid-glass'] .browser-fastcard-header,
+html[data-fastcard-overlay-window='true'] .browser-fastcard-header,
+html[data-skin='liquid-glass'] .browser-fastcard-footer,
+html[data-fastcard-overlay-window='true'] .browser-fastcard-footer,
+html[data-skin='liquid-glass'] .rss-settings-header,
+html[data-skin='liquid-glass'] .rss-settings-notice,
+html[data-skin='liquid-glass'] .calendar-assistant-header,
+html[data-skin='liquid-glass'] .calendar-assistant-composer,
+html[data-skin='liquid-glass'] .rss-task-menu-panel .ready-liquid-popover__content > div:first-child {
+  background: var(--ready-app-panel-glass-band-bg) !important;
+  border-color: transparent !important;
+}
+
+html[data-skin='liquid-glass'] .browser-fastcard-item,
+html[data-fastcard-overlay-window='true'] .browser-fastcard-item,
+html[data-skin='liquid-glass'] .browser-fastcard-result-body section,
+html[data-fastcard-overlay-window='true'] .browser-fastcard-result-body section,
+html[data-skin='liquid-glass'] .browser-fastcard-field select,
+html[data-fastcard-overlay-window='true'] .browser-fastcard-field select,
+html[data-skin='liquid-glass'] .browser-fastcard-action,
+html[data-fastcard-overlay-window='true'] .browser-fastcard-action,
+html[data-skin='liquid-glass'] .rss-settings-card,
+html[data-skin='liquid-glass'] .rss-settings-choice,
+html[data-skin='liquid-glass'] .rss-settings-warning,
+html[data-skin='liquid-glass'] .rss-settings-button,
+html[data-skin='liquid-glass'] .rss-settings-icon-button,
+html[data-skin='liquid-glass'] .rss-settings-runtime-grid div,
+html[data-skin='liquid-glass'] .rss-settings-source-row,
+html[data-skin='liquid-glass'] .calendar-assistant-card,
+html[data-skin='liquid-glass'] .calendar-assistant-event,
+html[data-skin='liquid-glass'] .calendar-assistant-chip,
+html[data-skin='liquid-glass'] .calendar-assistant-composer input,
+html[data-skin='liquid-glass'] .rss-task-menu-row,
+html[data-skin='liquid-glass'] .calendar-timezone-menu input {
+  background: var(--ready-app-panel-glass-card-bg) !important;
+  border-color: var(--ready-app-panel-glass-inner-border) !important;
+  box-shadow: var(--ready-app-panel-glass-card-shadow);
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+html[data-skin='liquid-glass'] .ready-app-liquid-panel .browser-fastcard-item,
+html[data-fastcard-overlay-window='true'] .ready-app-liquid-panel .browser-fastcard-item,
+html[data-skin='liquid-glass'] .ready-app-liquid-panel .browser-fastcard-result-body section,
+html[data-fastcard-overlay-window='true'] .ready-app-liquid-panel .browser-fastcard-result-body section,
+html[data-skin='liquid-glass'] .ready-app-liquid-panel .rss-settings-card,
+html[data-skin='liquid-glass'] .ready-app-liquid-panel .calendar-assistant-card,
+html[data-skin='liquid-glass'] .ready-app-liquid-panel .calendar-assistant-event,
+html[data-skin='liquid-glass'] .ready-app-liquid-panel .rss-settings-source-row {
+  background: transparent !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+
+html[data-skin='liquid-glass'] .ready-app-liquid-panel .rss-settings-choice,
+html[data-skin='liquid-glass'] .ready-app-liquid-panel .rss-settings-button,
+html[data-skin='liquid-glass'] .ready-app-liquid-panel .rss-settings-icon-button,
+html[data-skin='liquid-glass'] .ready-app-liquid-panel .rss-settings-runtime-grid div,
+html[data-skin='liquid-glass'] .ready-app-liquid-panel .calendar-assistant-chip,
+html[data-skin='liquid-glass'] .ready-app-liquid-panel .calendar-assistant-composer input,
+html[data-skin='liquid-glass'] .ready-app-liquid-panel .browser-fastcard-field select,
+html[data-fastcard-overlay-window='true'] .ready-app-liquid-panel .browser-fastcard-field select,
+html[data-skin='liquid-glass'] .ready-app-liquid-panel .browser-fastcard-action,
+html[data-fastcard-overlay-window='true'] .ready-app-liquid-panel .browser-fastcard-action {
+  background: var(--ready-app-panel-glass-control-bg) !important;
+  box-shadow: var(--ready-app-panel-glass-card-shadow) !important;
+}
+
+html[data-skin='liquid-glass'] .rss-settings-choice:hover,
+html[data-skin='liquid-glass'] .rss-settings-button:hover:not(:disabled),
+html[data-skin='liquid-glass'] .rss-settings-icon-button:hover:not(:disabled),
+html[data-skin='liquid-glass'] .calendar-assistant-chip:hover,
+html[data-skin='liquid-glass'] .browser-fastcard-action:hover:not(:disabled),
+html[data-fastcard-overlay-window='true'] .browser-fastcard-action:hover:not(:disabled),
+html[data-skin='liquid-glass'] .rss-task-menu-row:hover {
+  background: var(--ready-app-panel-glass-hover-bg) !important;
+}
+
+html[data-skin='liquid-glass'] .rss-settings-choice.is-active {
+  background: color-mix(in srgb, var(--color-blue) 12%, var(--ready-app-panel-glass-card-bg)) !important;
+}

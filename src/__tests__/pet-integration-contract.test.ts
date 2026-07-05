@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import test from 'node:test'
 import { PET_ANIMATION_FRAME_COUNTS } from '../shared/pet'
+import { readRendererStyles } from './utils/read-renderer-styles'
 
 function readWorkspaceFile(path: string): string {
   return readFileSync(resolve(process.cwd(), path), 'utf8')
@@ -36,7 +37,7 @@ test('desktop pet IPC is wired through main, preload, renderer types, and settin
 test('desktop pet window avoids macOS chrome and sprite blank frames', () => {
   const petWindowManager = readWorkspaceFile('src/main/modules/pet/pet-window-manager.ts')
   const petWindow = readWorkspaceFile('src/renderer/pages/PetWindow.tsx')
-  const rendererStyles = readWorkspaceFile('src/renderer/styles/index.css')
+  const rendererStyles = readRendererStyles()
 
   assert.match(petWindowManager, /trafficLightPosition:\s*\{\s*x:\s*-\d+,\s*y:\s*-\d+\s*\}/)
   assert.match(petWindowManager, /setWindowButtonVisibility\(false\)/)
@@ -111,7 +112,7 @@ test('desktop pet bubble follows Ready theme updates from the main process', () 
 })
 
 test('desktop pet bubble has compact layout guards for long activity text', () => {
-  const styles = readWorkspaceFile('src/renderer/styles/index.css')
+  const styles = readRendererStyles()
 
   assert.match(styles, /\.pet-bubble\s*\{[^}]*max-height:/s)
   assert.match(styles, /\.pet-bubble-copy span\s*\{[^}]*-webkit-line-clamp:/s)
@@ -126,7 +127,7 @@ test('desktop pet supports independent sticky notes above the agent bubble', () 
   const preload = readWorkspaceFile('src/preload/index.ts')
   const electronTypes = readWorkspaceFile('src/renderer/types/electron.d.ts')
   const petWindow = readWorkspaceFile('src/renderer/pages/PetWindow.tsx')
-  const styles = readWorkspaceFile('src/renderer/styles/index.css')
+  const styles = readRendererStyles()
 
   assert.match(sharedPet, /interface PetStickyNote/)
   assert.match(sharedPet, /stickyNotes:\s*PetStickyNote\[\]/)

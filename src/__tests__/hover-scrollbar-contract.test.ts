@@ -2,13 +2,14 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import test from 'node:test'
+import { readRendererStyles } from './utils/read-renderer-styles'
 
 function readWorkspaceFile(path: string): string {
   return readFileSync(resolve(process.cwd(), path), 'utf8')
 }
 
 test('workbench panel scroll areas hide scrollbar thumbs until the user hovers the panel', () => {
-  const styles = readWorkspaceFile('src/renderer/styles/index.css')
+  const styles = readRendererStyles()
   const scheduleStyles = readWorkspaceFile('src/renderer/styles/schedule-x.css')
   const fileTree = readWorkspaceFile('src/renderer/components/layout/FileTree.tsx')
   const chatMessages = readWorkspaceFile('src/renderer/components/agent/ChatMessages.tsx')

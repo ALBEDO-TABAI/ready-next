@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import test from 'node:test'
+import { readRendererStyles } from './utils/read-renderer-styles'
 
 function readWorkspaceFile(path: string): string {
   return readFileSync(resolve(process.cwd(), path), 'utf8')
@@ -10,7 +11,7 @@ function readWorkspaceFile(path: string): string {
 test('document mode toggle follows refined iOS Segmented Control style', () => {
   const documentMode = readWorkspaceFile('src/renderer/pages/modes/DocumentMode.tsx')
   const modeSwitch = readWorkspaceFile('src/renderer/components/document/DraggableModeSwitch.tsx')
-  const styles = readWorkspaceFile('src/renderer/styles/index.css')
+  const styles = readRendererStyles()
   const previewLabelIndex = modeSwitch.indexOf("handleLabelClick('preview', e)")
   const editLabelIndex = modeSwitch.indexOf("handleLabelClick('edit', e)")
 

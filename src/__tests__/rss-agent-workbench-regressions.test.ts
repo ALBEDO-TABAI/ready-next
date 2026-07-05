@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import test from 'node:test'
+import { readRendererStyles } from './utils/read-renderer-styles'
 
 function readWorkspaceFile(path: string): string {
   // eslint-disable-next-line ready/no-source-grep-test -- reviewed hard contract: RSS agent workbench regression pins cross-mode source wiring
@@ -11,7 +12,7 @@ function readWorkspaceFile(path: string): string {
 test('rss feed keeps compact toolbar controls while article rows stay on the shared glass sheet', () => {
   const rssFeed = readWorkspaceFile('src/renderer/components/rss/RSSFeed.tsx')
   const rssMode = readWorkspaceFile('src/renderer/pages/modes/RSSMode.tsx')
-  const styles = readWorkspaceFile('src/renderer/styles/index.css')
+  const styles = readRendererStyles()
 
   assert.match(rssFeed, /const calendarPillButtonStyle = \{/)
   assert.match(rssFeed, /className="rss-feed-surface content-surface-panel/)

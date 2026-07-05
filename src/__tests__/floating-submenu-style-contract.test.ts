@@ -4,6 +4,7 @@ import { resolve } from 'node:path'
 import test from 'node:test'
 
 import { buildFloatingMenuCheckStyle } from '../renderer/components/ui/floatingMenuStyles'
+import { readRendererStyles } from './utils/read-renderer-styles'
 
 function readWorkspaceFile(path: string): string {
   return readFileSync(resolve(process.cwd(), path), 'utf8')
@@ -71,7 +72,7 @@ test('file tree context menus use a native popup above BrowserView without hidin
 
 test('shared submenu styles use the denser browser-like frosted background and hover treatment', () => {
   const styles = readWorkspaceFile('src/renderer/components/layout/filesPanelFloatingMenu.css')
-  const themeStyles = readWorkspaceFile('src/renderer/styles/index.css')
+  const themeStyles = readRendererStyles()
   const menuHelpers = readWorkspaceFile('src/renderer/components/ui/floatingMenuStyles.ts')
 
   assert.match(styles, /\.ready-floating-menu\s*\{/)

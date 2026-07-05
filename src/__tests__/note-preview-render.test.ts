@@ -7,6 +7,7 @@ import { JSDOM } from 'jsdom'
 
 import NotePreview from '../renderer/components/document/NotePreview'
 import { EBOOK_INLINE_IMAGE_TITLE, EBOOK_MARKDOWN_MARKER } from '../shared/ebook'
+import { readRendererStyles } from './utils/read-renderer-styles'
 
 function installNotePreviewDom(writeText: (value: string) => Promise<void> | void): {
   dom: JSDOM
@@ -463,9 +464,7 @@ test('NotePreview does not double-encode imported ebook inline image paths', () 
 })
 
 test('ebook reading CSS covers body text and non-indented block elements', async () => {
-  const css = await import('node:fs/promises').then(({ readFile }) => (
-    readFile(new URL('../renderer/styles/index.css', import.meta.url), 'utf-8')
-  ))
+  const css = readRendererStyles()
   assert.match(css, /\.note-preview-shell--ebook \.note-preview-markdown-p/)
   assert.match(css, /\.note-preview-shell--ebook \.note-preview-markdown-ul/)
   assert.match(css, /\.note-preview-shell--ebook \.note-preview-markdown-ol/)

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { test } from 'node:test'
+import { readRendererStyles } from './utils/read-renderer-styles'
 
 const repoRoot = path.resolve(import.meta.dirname, '../..')
 
@@ -15,7 +16,7 @@ async function readRepoFile(relativePath: string): Promise<string> {
 // discipline cannot silently regress.
 
 test('typography tokens are a single deduplicated source in @theme', async () => {
-  const css = await readRepoFile('src/renderer/styles/index.css')
+  const css = readRendererStyles()
 
   // Font roles: CJK-preserving stack, head/numeric defined by reference (one source).
   assert.match(css, /--font-ui:[^;]*PingFang SC[^;]*Inter[^;]*sans-serif;/)
@@ -40,7 +41,7 @@ test('typography tokens are a single deduplicated source in @theme', async () =>
 })
 
 test('typography roles are global utilities with a mono label signature', async () => {
-  const css = await readRepoFile('src/renderer/styles/index.css')
+  const css = readRendererStyles()
 
   // Roles are plain global utility classes — not gated behind a fake skin-scoped pilot.
   assert.match(css, /\.t-body\s*\{/)

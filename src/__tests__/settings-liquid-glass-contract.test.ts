@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import test from 'node:test'
+import { readRendererStyles } from './utils/read-renderer-styles'
 
 function readWorkspaceFile(path: string): string {
   return readFileSync(resolve(process.cwd(), path), 'utf8')
@@ -32,7 +33,7 @@ test('settings page keeps the main workbench transparent shell structure', () =>
   assert.match(settingsPage, /className="settings-ai-panel/)
   assert.match(settingsPage, /settings-ai-light-card/)
 
-  const styles = readWorkspaceFile('src/renderer/styles/index.css')
+  const styles = readRendererStyles()
   assert.doesNotMatch(styles, /--settings-list-item-bg\s*:/)
   assert.match(styles, /\.settings-page-shell\s*\{[\s\S]*?isolation:\s*isolate;[\s\S]*?background:\s*transparent;/)
   assert.doesNotMatch(styles, /--settings-page-clear-bg\s*:/)
@@ -69,7 +70,7 @@ test('settings navigation items keep the main workbench transparent glass backdr
 test('file tree scroll root opts into the Chromium 148 liquid glass repaint guard', () => {
   const fileTree = readWorkspaceFile('src/renderer/components/layout/FileTree.tsx')
   const chatMessages = readWorkspaceFile('src/renderer/components/agent/ChatMessages.tsx')
-  const styles = readWorkspaceFile('src/renderer/styles/index.css')
+  const styles = readRendererStyles()
 
   assert.match(fileTree, /data-liquid-scroll-root="file-tree"/)
   assert.match(fileTree, /requestFileTreeSurfaceRefresh/)
@@ -83,7 +84,7 @@ test('file tree scroll root opts into the Chromium 148 liquid glass repaint guar
 })
 
 test('workbench side and chat panels stay transparent while slots use the shared neutral glass tokens', () => {
-  const styles = readWorkspaceFile('src/renderer/styles/index.css')
+  const styles = readRendererStyles()
   const sliderStyles = readWorkspaceFile('src/renderer/styles/workbench-sliders.css')
   const sidePanel = readWorkspaceFile('src/renderer/components/layout/SidePanel.tsx')
   const chatPanel = readWorkspaceFile('src/renderer/components/agent/ChatPanel.tsx')
@@ -117,7 +118,7 @@ test('shared settings theme keeps glass on outer cards while dense controls stay
 })
 
 test('shared liquid glass surfaces remain real backdrop blur instead of flat paint', () => {
-  const styles = readWorkspaceFile('src/renderer/styles/index.css')
+  const styles = readRendererStyles()
 
   assert.match(styles, /\.glass-surface-panel,[\s\S]*?\.glass-surface-card,[\s\S]*?\.glass-surface-floating\s*\{[\s\S]*?backdrop-filter:\s*blur\(var\(--lg-blur-medium\)\) saturate\(var\(--surface-saturate\)\)/)
   assert.match(styles, /\.glass-surface-card\s*\{[\s\S]*?background:\s*color-mix\(in srgb, var\(--lg-material-card\) 58%, transparent\)[\s\S]*?backdrop-filter:\s*blur\(var\(--lg-blur-soft\)\) saturate\(var\(--surface-saturate\)\)/)

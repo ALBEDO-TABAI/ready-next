@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import test from 'node:test'
+import { readRendererStyles } from './utils/read-renderer-styles'
 
 function readWorkspaceFile(path: string): string {
   return readFileSync(resolve(process.cwd(), path), 'utf8')
@@ -9,7 +10,7 @@ function readWorkspaceFile(path: string): string {
 
 test('theme transitions route through the ritual overlay and the per-selector transition whitelist is gone', () => {
   const themeStore = readWorkspaceFile('src/renderer/stores/useTheme.ts')
-  const styles = readWorkspaceFile('src/renderer/styles/index.css')
+  const styles = readRendererStyles()
   const ritualCss = readWorkspaceFile('src/renderer/styles/ritual-overlay.css')
   const app = readWorkspaceFile('src/renderer/App.tsx')
   const iconRail = readWorkspaceFile('src/renderer/components/layout/IconRail.tsx')

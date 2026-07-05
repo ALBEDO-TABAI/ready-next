@@ -65,6 +65,13 @@ P1 的验收欠账 + 本轮新件的真机确认，一次跑完：
 - 按能力缝抽组：collection / power / media / navigation / observe 各一模块，`browser-tools.ts` 保薄门面 re-export；每抽一组 typecheck+focused 绿。纯移动零行为变更（probe 抽取已验证此法）。
 - 目标：主文件 <2k；每步独立可提交。
 - B 完成后按同法排队：runtime.ts 4327（能力缝：crystallize/decay 调度、projection 接口、host 装配）、runtime-manager 3800、Settings.tsx 3486（renderer，需在场）、useAgent（src/renderer/stores/useAgent.ts，renderer，需在场）。**触碰 >2k 文件的工单默认附带"顺路拆出所改区域"**（roadmap §4.5 长期规则）。
+- **UI 巨文件审查（2026-07-06，用户点名的 UI 治理专项）**：
+  - ✅ **index.css 6434→15 行**：按十个领域段序保拆分（theme-tokens/base-chrome/liquid-composer/chat-utilities/markdown/electron-shell/workbench-surfaces/mode-switch/flat-chrome/glass-overrides），@import 顺序=原段落顺序；**打包 CSS 产物逐字节一致**（stash 前后双构建 cmp 证明）；36 个样式合同测试经 `read-renderer-styles` 展平读取器迁移（语料与拆分前同构，断言零改写），135/135 绿。新规则落对应领域文件，勿回填 index.css。
+  - **FileTree.tsx 3738（renderer 头号，需在场）**：单文件塞了 ~20 个顶层组件（FileTreeItem/GridItemCard/PendingClipRow/InlineInput/InlineCreateRow/CustomFileIcon…）。缝=叶组件逐个抽到 `components/layout/file-tree/`，FileTree 保门面 re-export；注意多份 file-tree 合同 grep 此文件，拆时同步重锚。
+  - **documentActions.ts 2344（可无人值守）**：六个函数族清晰可分（widget 写取消 / 变更结果分类 / 精确替换 / 活动文档上下文 / 失败归类 / tool→action 映射），纯逻辑无视觉面，行为测试在册——下个无人值守会话的首选。
+  - **AgentSystemStudio.tsx 1706（低风险在场）**：10 个叶组件同 FileTree 模式，设置域影响面小。
+  - **CalendarMode.tsx 1394（最难，缓）**：单体组件零现成缝，需先做内部 hook/子组件抽取设计再动。
+  - electron.d.ts 3952 为类型声明聚合，低害不动；useAgent 2091/runtimeDriver 1909 已有 V3 拆分路线在案。
 - **B7 收官后的预埋缝（2026-07-05 定稿，触线即用的手术图，不主动拆）**：两个贴线模块现在内聚良好、不主动再拆，任何工单把它们推过 2k 时按此缝顺路拆——
   - `browser-act-tools.ts`（1967，距线 33 行）：缝 A=坐标输入四件套（click_at/type_at/scroll_at/send_keys，本就主要委托 browser-input-actions）；缝 B=navigate/search 对。共享守卫入口与 settle/followedTab 逻辑跟行动主体走，不进 shared。
   - `browser-collection-tools.ts`（1683）：缝=「后台任务生命周期」（start/get/resume/cancel/aggregate）vs「媒体采集下载」（collect_images/download_*）；采集共识 store 单例跟采集侧走，不可跨模块分裂。

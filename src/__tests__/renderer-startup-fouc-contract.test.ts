@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import test from 'node:test'
+import { readRendererStyles } from './utils/read-renderer-styles'
 
 function readWorkspaceFile(path: string): string {
   return readFileSync(resolve(process.cwd(), path), 'utf8')
@@ -132,7 +133,7 @@ test('Stage 1 — theme:get IPC response shape includes skin and isNativeFullscr
 })
 
 test('验证 2 — fullscreen backing is handled by DOM .ready-app-bg, not BrowserWindow.setBackgroundColor', () => {
-  const styles = readWorkspaceFile('src/renderer/styles/index.css')
+  const styles = readRendererStyles()
 
   // 验证 2：BrowserWindow 的 bg 在 darwin 上永远透明（'#00000000'），
   // fullscreen backing 改由 DOM 层 `.ready-app-bg` 通过 `--app-bg-overlay-opacity` 控制。

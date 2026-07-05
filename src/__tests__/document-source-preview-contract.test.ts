@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import test from 'node:test'
+import { readRendererStyles } from './utils/read-renderer-styles'
 
 function readWorkspaceFile(path: string): string {
   return readFileSync(resolve(process.cwd(), path), 'utf8')
@@ -58,7 +59,7 @@ test('document widget-only state changes enter shared tab content so clean markd
 
 test('document source editor soft-wraps long markdown lines inside narrow split panes', () => {
   const markdownEditor = readWorkspaceFile('src/renderer/components/document/MarkdownEditor.tsx')
-  const styles = readWorkspaceFile('src/renderer/styles/index.css')
+  const styles = readRendererStyles()
 
   assert.match(markdownEditor, /className="document-source-textarea /)
   assert.match(markdownEditor, /whiteSpace:\s*'pre-wrap'/)
@@ -151,7 +152,7 @@ test('document widget update policy keeps text replacement tools out of widget-u
 
 test('document split divider keeps a transparent drag target with a hairline visual', () => {
   const documentMode = readWorkspaceFile('src/renderer/pages/modes/DocumentMode.tsx')
-  const styles = readWorkspaceFile('src/renderer/styles/index.css')
+  const styles = readRendererStyles()
 
   assert.match(documentMode, /className="document-split-resize-handle"/)
   assert.match(documentMode, /className="document-split-resize-handle__grip"/)

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import test from 'node:test'
+import { readRendererStyles } from './utils/read-renderer-styles'
 
 function readWorkspaceFile(path: string): string {
   return readFileSync(resolve(process.cwd(), path), 'utf8')
@@ -26,7 +27,7 @@ function findCssBlock(source: string, selector: string): string {
 
 test('workbench mode tabs thumb base stays only slightly darker than the edge highlight', () => {
   // thumb 规则已从 workbench-sliders.css 归并进 index.css（滑块样式泛化整合）
-  const styles = readWorkspaceFile('src/renderer/styles/index.css')
+  const styles = readRendererStyles()
   const liquidThumb = findCssBlock(styles, "html[data-skin='liquid-glass'] .draggable-mode-tabs__thumb")
 
   assert.match(

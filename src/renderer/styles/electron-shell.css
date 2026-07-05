@@ -1,0 +1,504 @@
+/* ═══ electron-shell.css — Electron 窗口拖拽区 / 面板 resize 把手 / resize 期间过渡抑制；由 index.css 序保拆分（2026-07-06），在 index.css 中按原段落顺序 @import，勿改导入次序。 ═══ */
+/* Electron window drag regions */
+.drag-region {
+  -webkit-app-region: drag;
+}
+
+.no-drag {
+  -webkit-app-region: no-drag;
+}
+
+/* Panel resize handle */
+.resize-handle {
+  width: 6px;
+  cursor: col-resize;
+  position: relative;
+  flex-shrink: 0;
+  z-index: 10;
+  transition: opacity 0.15s;
+}
+
+.resize-handle::before {
+  content: '';
+  position: absolute;
+  top: 24%;
+  bottom: 24%;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 3px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text-gray) 28%, transparent);
+  box-shadow:
+    inset 1px 0 0 color-mix(in srgb, rgba(255, 255, 255, 0.28) 65%, transparent),
+    inset -1px 0 0 color-mix(in srgb, rgba(15, 23, 42, 0.18) 65%, transparent);
+  transition: background 0.15s, opacity 0.15s;
+  opacity: 0;
+}
+
+.resize-handle::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -3px;
+  right: -3px;
+}
+
+.resize-handle:hover::before,
+.resize-handle.active::before {
+  background: color-mix(in srgb, var(--text-gray) 38%, transparent);
+  opacity: 0.94;
+}
+
+.workbench-split-resize-handle {
+  width: 3.5px;
+  flex: 0 0 3.5px;
+  cursor: col-resize;
+  position: relative;
+  align-self: stretch;
+  z-index: 12;
+  background: transparent;
+}
+
+.workbench-split-resize-handle::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -10px;
+  right: -10px;
+}
+
+.workbench-split-resize-handle__grip {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  display: grid;
+  grid-template-columns: repeat(2, 2px);
+  grid-auto-rows: 2px;
+  gap: 4px 3px;
+  transform: translate(-50%, -50%);
+  opacity: 0.28;
+  transition: opacity 0.15s, transform 0.15s;
+}
+
+.workbench-split-resize-handle__grip span {
+  width: 2px;
+  height: 2px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text-gray) 46%, transparent);
+}
+
+.workbench-split-resize-handle:hover .workbench-split-resize-handle__grip,
+body.resizing .workbench-split-resize-handle__grip {
+  opacity: 0.48;
+  transform: translate(-50%, -50%) scale(1.08);
+}
+
+.document-split-resize-handle {
+  width: 12px;
+  flex: 0 0 12px;
+  margin: 0 -6px;
+  cursor: col-resize;
+  position: relative;
+  align-self: stretch;
+  z-index: 12;
+  background: transparent;
+}
+
+.document-split-resize-handle::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  transform: translateX(-50%);
+  background: color-mix(in srgb, var(--text-gray) 22%, transparent);
+  opacity: 0.62;
+  transition: background 0.15s, opacity 0.15s;
+}
+
+.document-split-resize-handle__grip {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 2px;
+  height: 18px;
+  transform: translate(-50%, -50%);
+  opacity: 0;
+  background-image: radial-gradient(circle, color-mix(in srgb, var(--text-gray) 34%, transparent) 0 1px, transparent 1.2px);
+  background-repeat: repeat-y;
+  background-position: center;
+  background-size: 2px 7px;
+  transition: opacity 0.15s;
+}
+
+.document-split-resize-handle:hover::before {
+  background: color-mix(in srgb, var(--text-gray) 30%, transparent);
+  opacity: 0.78;
+}
+
+.document-split-resize-handle:hover .document-split-resize-handle__grip {
+  opacity: 0.46;
+}
+
+.document-pane-drop-target {
+  position: relative;
+}
+
+.document-pane-drop-target::after {
+  content: '';
+  position: absolute;
+  inset: 8px;
+  z-index: 9;
+  pointer-events: none;
+  border: 1px solid color-mix(in srgb, var(--color-blue) 72%, rgba(255,255,255,0.38));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--color-blue-light) 38%, transparent);
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, rgba(255,255,255,0.72) 58%, transparent),
+    0 10px 28px rgba(59,130,246,0.12);
+  opacity: 0;
+  transition: opacity 0.12s ease-out;
+}
+
+.document-pane-drop-target.is-document-pane-drop-target::after {
+  opacity: 1;
+}
+
+.browser-split-resize-handle {
+  width: 3px;
+  flex: 0 0 3px;
+  cursor: col-resize;
+  position: relative;
+  align-self: stretch;
+  z-index: 12;
+  background: transparent;
+}
+
+.browser-split-resize-handle::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    180deg,
+    var(--workbench-liquid-chrome-bg, var(--surface-panel-bg)) 0,
+    var(--workbench-liquid-chrome-bg, var(--surface-panel-bg)) var(--workbench-canvas-radius),
+    color-mix(in srgb, var(--workbench-liquid-chrome-bg, var(--surface-panel-bg)) 74%, transparent) 42%,
+    transparent calc(100% - var(--workbench-canvas-radius)),
+    transparent 100%
+  );
+}
+
+.browser-split-resize-handle__grip {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 1px;
+  height: 22px;
+  transform: translate(-50%, -50%);
+  opacity: 0;
+  background: color-mix(in srgb, var(--text-gray) 56%, transparent);
+  border-radius: 999px;
+  transition: opacity 0.15s;
+  display: none;
+}
+
+.browser-split-resize-handle:hover,
+body.resizing .browser-split-resize-handle {
+  background: transparent;
+}
+
+.browser-split-resize-handle:hover .browser-split-resize-handle__grip,
+body.resizing .browser-split-resize-handle__grip {
+  opacity: 0;
+}
+
+.browser-fastcard-drawer {
+  flex: 0 0 min(372px, 42vw);
+  width: min(372px, 42vw);
+  min-width: min(320px, 42vw);
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  opacity: 0;
+  transform: translateX(12px);
+  pointer-events: none;
+  transition:
+    opacity 240ms cubic-bezier(0.22, 0.61, 0.36, 1),
+    transform 240ms cubic-bezier(0.22, 0.61, 0.36, 1);
+  will-change: opacity, transform;
+  -webkit-app-region: no-drag;
+}
+
+.browser-fastcard-drawer.is-entered {
+  opacity: 1;
+  transform: translateX(0);
+  pointer-events: auto;
+}
+
+.browser-fastcard-surface {
+  background: var(--bg-content) !important;
+  border-left: 1px solid color-mix(in srgb, var(--text-gray) 16%, transparent) !important;
+  border-radius: var(--workbench-canvas-radius) 0 0 var(--workbench-canvas-radius);
+  box-shadow: -18px 0 44px -20px rgba(8, 12, 22, 0.24) !important;
+  overflow: hidden;
+}
+
+.browser-fastcard-header {
+  min-height: 58px;
+  padding: 14px 14px 12px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid color-mix(in srgb, var(--text-gray) 12%, transparent);
+}
+
+.browser-fastcard-header h2 {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 14px;
+  line-height: 1.25;
+  font-weight: 600;
+}
+
+.browser-fastcard-kicker {
+  margin-bottom: 3px;
+  color: var(--text-light);
+  font-size: 11px;
+  line-height: 1;
+}
+
+.browser-fastcard-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.browser-fastcard-icon-button {
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-gray);
+  background: transparent;
+  transition: background 150ms ease, color 150ms ease;
+}
+
+.browser-fastcard-icon-button:hover {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--text-gray) 10%, transparent);
+}
+
+.browser-fastcard-list,
+.browser-fastcard-result-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 12px;
+}
+
+.browser-fastcard-list::-webkit-scrollbar,
+.browser-fastcard-result-body::-webkit-scrollbar {
+  width: 8px;
+}
+
+.browser-fastcard-list::-webkit-scrollbar-thumb,
+.browser-fastcard-result-body::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text-gray) 18%, transparent);
+}
+
+.browser-fastcard-empty {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-light);
+  font-size: 13px;
+}
+
+.browser-fastcard-item {
+  border: 1px solid color-mix(in srgb, var(--text-gray) 12%, transparent);
+  border-radius: 8px;
+  padding: 10px;
+  background: color-mix(in srgb, var(--bg-secondary) 72%, transparent);
+}
+
+.browser-fastcard-item + .browser-fastcard-item {
+  margin-top: 10px;
+}
+
+.browser-fastcard-item-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.browser-fastcard-item-kind {
+  width: 22px;
+  height: 22px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-gray);
+  background: color-mix(in srgb, var(--text-gray) 8%, transparent);
+}
+
+.browser-fastcard-item-title {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.browser-fastcard-item p,
+.browser-fastcard-result-body p {
+  margin: 8px 0 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.browser-fastcard-source {
+  display: block;
+  margin-top: 8px;
+  color: var(--text-light);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.browser-fastcard-result-body section {
+  border: 1px solid color-mix(in srgb, var(--text-gray) 12%, transparent);
+  border-radius: 8px;
+  padding: 10px;
+  background: color-mix(in srgb, var(--bg-secondary) 72%, transparent);
+}
+
+.browser-fastcard-result-body section + section,
+.browser-fastcard-result-body .browser-fastcard-field + section {
+  margin-top: 10px;
+}
+
+.browser-fastcard-result-body section.is-error p {
+  color: var(--color-red);
+}
+
+.browser-fastcard-result-body h3 {
+  margin: 0;
+  color: var(--text-light);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.browser-fastcard-field {
+  display: grid;
+  gap: 6px;
+  color: var(--text-light);
+  font-size: 11px;
+}
+
+.browser-fastcard-field select {
+  height: 30px;
+  border: 1px solid color-mix(in srgb, var(--text-gray) 14%, transparent);
+  border-radius: 8px;
+  padding: 0 8px;
+  color: var(--text-primary);
+  background: var(--bg-secondary);
+  outline: none;
+}
+
+.browser-fastcard-footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px;
+  border-top: 1px solid color-mix(in srgb, var(--text-gray) 12%, transparent);
+}
+
+.browser-fastcard-action {
+  min-height: 30px;
+  border: 1px solid color-mix(in srgb, var(--text-gray) 14%, transparent);
+  border-radius: 8px;
+  padding: 0 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--bg-secondary) 86%, transparent);
+  font-size: 12px;
+  transition: background 150ms ease, border-color 150ms ease, color 150ms ease;
+}
+
+.browser-fastcard-action:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--text-gray) 22%, transparent);
+  background: color-mix(in srgb, var(--bg-secondary) 100%, transparent);
+}
+
+.browser-fastcard-action.subtle {
+  color: var(--text-gray);
+}
+
+.browser-fastcard-action:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.browser-fastcard-overlay-root {
+  width: 100vw;
+  height: 100vh;
+  display: flex;
+  overflow: hidden;
+  background: transparent;
+}
+
+html[data-fastcard-overlay-window='true'],
+html[data-fastcard-overlay-window='true'] body,
+html[data-fastcard-overlay-window='true'] #root {
+  background: transparent !important;
+}
+
+.browser-fastcard-overlay-root .browser-fastcard-drawer {
+  width: 100%;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.browser-fastcard-overlay-root .browser-fastcard-surface {
+  border-radius: var(--workbench-canvas-radius);
+  border: 1px solid color-mix(in srgb, var(--text-gray) 14%, transparent) !important;
+}
+
+/* Disable layout-related transitions during panel resize drag.
+   Scoped to panel/canvas/glass shells + BrowserView hosts so unrelated
+   hover/tooltip transitions elsewhere are not collateral damage. */
+body.resizing .workbench-panel-frame,
+body.resizing .workbench-canvas-shell,
+body.resizing .glass-surface-panel,
+body.resizing .glass-surface-floating,
+body.resizing [data-liquid-shell],
+body.resizing [data-browser-surface] {
+  transition: none !important;
+}
+
+body.resizing .document-source-textarea {
+  white-space: pre !important;
+  overflow-wrap: normal !important;
+  word-break: normal !important;
+}

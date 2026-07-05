@@ -2,13 +2,14 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import test from 'node:test'
+import { readRendererStyles } from './utils/read-renderer-styles'
 
 function readWorkspaceFile(path: string): string {
   return readFileSync(resolve(process.cwd(), path), 'utf8')
 }
 
 test('workbench resize handle stays hidden by default and only reveals a short recessed dark groove on hover', () => {
-  const styles = readWorkspaceFile('src/renderer/styles/index.css')
+  const styles = readRendererStyles()
 
   assert.match(styles, /\.resize-handle\s*\{[\s\S]*width:\s*6px;/)
   assert.match(styles, /\.resize-handle::before\s*\{[\s\S]*top:\s*24%;/)

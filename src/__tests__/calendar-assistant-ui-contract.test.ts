@@ -8,6 +8,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import CalendarAssistantPanel, { type CalendarAssistantSummary } from '../renderer/components/calendar/CalendarAssistantPanel'
 import CalendarTimezoneSelector from '../renderer/components/calendar/CalendarTimezoneSelector'
 import CalendarWorkbenchShell from '../renderer/components/calendar/CalendarWorkbenchShell'
+import { readRendererStyles } from './utils/read-renderer-styles'
 
 function readWorkspaceFile(path: string): string {
   return readFileSync(resolve(process.cwd(), path), 'utf8')
@@ -93,7 +94,7 @@ test('calendar shell exposes assistant drawer and keeps timezone in the sidebar'
 })
 
 test('calendar assistant uses rss-style right drawer motion without transition-all', () => {
-  const styles = readWorkspaceFile('src/renderer/styles/index.css')
+  const styles = readRendererStyles()
   const summary: CalendarAssistantSummary = {
     todayEvents: [],
     weekEvents: [],
@@ -120,7 +121,7 @@ test('calendar assistant uses rss-style right drawer motion without transition-a
 })
 
 test('calendar theme variables cover transparent and stable glass combinations', () => {
-  const styles = readWorkspaceFile('src/renderer/styles/index.css')
+  const styles = readRendererStyles()
   const scheduleCss = readWorkspaceFile('src/renderer/styles/schedule-x.css')
 
   assert.match(styles, /html\[data-skin='liquid-glass'\]\[data-glass-backdrop='native'\] \.calendar-mode-shell \{/)

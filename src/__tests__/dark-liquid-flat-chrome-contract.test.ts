@@ -2,13 +2,14 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import test from 'node:test'
+import { readRendererStyles } from './utils/read-renderer-styles'
 
 function readWorkspaceFile(path: string): string {
   return readFileSync(resolve(process.cwd(), path), 'utf8')
 }
 
 test('dark liquid chrome removes the old top-edge glow from shared panel surfaces', () => {
-  const styles = readWorkspaceFile('src/renderer/styles/index.css')
+  const styles = readRendererStyles()
   const panelBlock = styles.match(/html\[data-theme='dark'\]\[data-skin='liquid-glass'\] \.glass-surface-panel\s*\{([\s\S]*?)\n\}/)
   const cardBlock = styles.match(/html\[data-theme='dark'\]\[data-skin='liquid-glass'\] \.glass-surface-card\s*\{([\s\S]*?)\n\}/)
 
@@ -22,7 +23,7 @@ test('dark liquid chrome removes the old top-edge glow from shared panel surface
 
 test('files side panel advertises its variant and stays fused with surrounding dark liquid chrome via shared shell tokens', () => {
   const sidePanel = readWorkspaceFile('src/renderer/components/layout/SidePanel.tsx')
-  const styles = readWorkspaceFile('src/renderer/styles/index.css')
+  const styles = readRendererStyles()
 
   assert.match(sidePanel, /data-side-panel-variant=\{panelWidth > 0 \? variant : 'hidden'\}/)
   assert.match(
@@ -36,7 +37,7 @@ test('files side panel advertises its variant and stays fused with surrounding d
 })
 
 test('the four-mode switch track kills the old top sheen through shared dark liquid slot tokens', () => {
-  const themeStyles = readWorkspaceFile('src/renderer/styles/index.css')
+  const themeStyles = readRendererStyles()
   const styles = readWorkspaceFile('src/renderer/styles/workbench-sliders.css')
 
   assert.doesNotMatch(themeStyles, /--lg-surface-elevated\s*:/)

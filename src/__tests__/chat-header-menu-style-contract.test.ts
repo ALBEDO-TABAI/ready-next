@@ -10,6 +10,7 @@ import {
   buildChatHeaderFloatingMenuStyle,
   buildChatHeaderMenuItemStyle,
 } from '../renderer/components/agent/chatHeaderMenuStyles'
+import { readRendererStyles } from './utils/read-renderer-styles'
 
 test('chat header dropdown menus use the lighter browser-like floating treatment', () => {
   const surfaceStyle = buildChatHeaderFloatingMenuStyle(300)
@@ -38,7 +39,7 @@ test('chat header dropdown menus use the lighter browser-like floating treatment
 
 test('chat header menus opt into the same layered glass treatment as browser floating surfaces', () => {
   const chatHeader = readFileSync(resolve(process.cwd(), 'src/renderer/components/agent/ChatHeader.tsx'), 'utf8')
-  const styles = readFileSync(resolve(process.cwd(), 'src/renderer/styles/index.css'), 'utf8')
+  const styles = readRendererStyles()
 
   // 8ab48cd7 style(ui): checkpoint liquid glass polish + 23d6ec9a feat(chat): merge session source history menu —
   // 菜单面从字面 class 组合改为共享 LiquidFloatingPanel；glass-surface-floating / ready-floating-menu 由面板内部拼类注入。

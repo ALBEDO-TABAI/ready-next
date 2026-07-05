@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import test from 'node:test'
+import { readRendererStyles } from './utils/read-renderer-styles'
 
 function workspacePath(path: string): string {
   return resolve(process.cwd(), path)
@@ -22,7 +23,7 @@ test('dead liquid-glass ui artifacts are removed and active token sources declar
 
   const chrome = readWorkspaceFile('src/renderer/modules/workbench/chrome.ts')
   const panelTokens = readWorkspaceFile('src/renderer/components/layout/panelTokens.ts')
-  const cssTokens = readWorkspaceFile('src/renderer/styles/index.css')
+  const cssTokens = readRendererStyles()
 
   assert.match(chrome, /Geometry source of truth for workbench chrome/)
   assert.match(panelTokens, /FILES_PANEL_DIMENSIONS/)

@@ -1,0 +1,489 @@
+/* ═══ base-chrome.css — 基础样式：body/标签排印/点阵图标/主题硬切换 chrome/滚动条/选区/焦点；由 index.css 序保拆分（2026-07-06），在 index.css 中按原段落顺序 @import，勿改导入次序。 ═══ */
+/* Base styles */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+}
+
+body {
+  font-family: var(--font-ui);
+  font-size: var(--text-md);
+  line-height: var(--leading-normal);
+  letter-spacing: var(--tracking-normal);
+  color: var(--text-body);
+  background: var(--bg-primary);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Theme switching now happens behind the shared ritual overlay (see ritual-overlay.css),
+   so the per-selector transition whitelist has been removed. A minimal body-level
+   safety is kept for reduce-motion users who bypass the overlay. */
+body {
+  transition: background-color 140ms ease, color 140ms ease;
+}
+
+.t-display {
+  font-family: var(--font-head);
+  font-size: var(--text-5xl);
+  line-height: var(--leading-none);
+  font-weight: var(--fw-semibold);
+  letter-spacing: var(--tracking-tight);
+}
+
+.t-title-lg {
+  font-family: var(--font-head);
+  font-size: var(--text-2xl);
+  line-height: var(--leading-tight);
+  font-weight: var(--fw-semibold);
+  letter-spacing: var(--tracking-tight);
+}
+
+.t-title {
+  font-family: var(--font-head);
+  font-size: var(--text-xl);
+  line-height: var(--leading-snug);
+  font-weight: var(--fw-semibold);
+  letter-spacing: var(--tracking-tight);
+}
+
+.t-subtitle {
+  font-family: var(--font-ui);
+  font-size: var(--text-lg);
+  line-height: var(--leading-snug);
+  font-weight: var(--fw-semibold);
+  letter-spacing: var(--tracking-normal);
+}
+
+.t-body {
+  font-family: var(--font-ui);
+  font-size: var(--text-md);
+  line-height: var(--leading-normal);
+  font-weight: var(--fw-regular);
+  letter-spacing: var(--tracking-normal);
+}
+
+.t-body-sm {
+  font-family: var(--font-ui);
+  font-size: var(--text-base);
+  line-height: var(--leading-normal);
+  font-weight: var(--fw-regular);
+  letter-spacing: var(--tracking-normal);
+}
+
+.t-ui {
+  font-family: var(--font-ui);
+  font-size: var(--text-base);
+  line-height: var(--leading-dense);
+  font-weight: var(--fw-medium);
+  letter-spacing: var(--tracking-normal);
+}
+
+.t-meta {
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+  line-height: var(--leading-dense);
+  font-weight: var(--fw-regular);
+  letter-spacing: var(--tracking-normal);
+}
+
+/* Labels: mono + uppercase + wide tracking is the signature. The mono stack carries
+   no CJK glyphs, so Chinese labels gracefully fall back to the system CJK face while
+   Latin/numeric labels get the full instrument-panel treatment (uppercase is a no-op
+   on CJK by design). */
+.t-label {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: var(--leading-tight);
+  font-weight: var(--fw-medium);
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+}
+
+.t-label-sm {
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  line-height: var(--leading-tight);
+  font-weight: var(--fw-medium);
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+}
+
+.t-data {
+  font-family: var(--font-numeric);
+  font-size: var(--text-sm);
+  line-height: var(--leading-tight);
+  font-weight: var(--fw-medium);
+  letter-spacing: var(--tracking-normal);
+  font-variant-numeric: tabular-nums;
+}
+
+.t-numeral {
+  font-family: var(--font-numeric);
+  font-size: var(--text-xl);
+  line-height: var(--leading-none);
+  font-weight: var(--fw-semibold);
+  letter-spacing: var(--tracking-tight);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Dot-matrix glyph (9×9 round-dot icon language). Cells are a CSS grid; lit cells
+   are complete circles, scaled via --dot-glyph-size without distorting spacing.
+   Neutral tone inherits currentColor; the signal tone is reserved for genuine
+   signals (needs-input / error / over-budget) and uses the established alert red. */
+.dot-glyph {
+  display: inline-grid;
+  grid-template-columns: repeat(9, 1fr);
+  grid-auto-rows: 1fr;
+  gap: calc(var(--dot-glyph-size, 14px) / 18);
+  width: var(--dot-glyph-size, 14px);
+  height: var(--dot-glyph-size, 14px);
+  flex: none;
+  vertical-align: middle;
+  line-height: 0;
+}
+
+.dot-glyph i {
+  aspect-ratio: 1;
+}
+
+.dot-glyph i.on {
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.dot-glyph[data-dot-glyph-tone='signal'] {
+  color: var(--color-red);
+}
+
+.dot-glyph--pulse i.on {
+  animation: dot-glyph-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes dot-glyph-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dot-glyph--pulse i.on {
+    animation: none;
+  }
+}
+
+html[data-skin='liquid-glass'],
+html[data-skin='liquid-glass'] body,
+html[data-skin='liquid-glass'] #root,
+html[data-skin='liquid-glass'] .ready-app-shell {
+  background: transparent !important;
+}
+
+/*
+ * 注：原 `html[data-native-fullscreen='true'][...]  .ready-app-shell` 双保险规则已删除。
+ *
+ * 历史背景：Stage 1 加这条规则是为了"防 IPC 延迟"——main 进程 setBackgroundColor 与 renderer
+ * 收到 fullscreen IPC 之间会有 ms 级延迟，那段时间 .ready-app-shell 透明 + main 还没切到
+ * backing 色 = 露出 OS fallback 灰。所以 DOM 层加一道不透明 backing 兜底。
+ *
+ * 但 Stage 2.4 把 vibrancy 改成在 liquid-glass 期间始终 'under-window' 后，main 的
+ * setBackgroundColor 是同步生效的；IPC 延迟也只影响 `data-native-fullscreen` attr 是否准时
+ * 设置——而 attr 不再被 CSS 用到。在 fullscreen 中切主题时，这条 CSS 规则 + `.ready-app-shell`
+ * 的 isolation:isolate compositor 层在 Chromium 上有时不会按 CSS 变量级联及时重绘 bg color，
+ * 导致 .ready-app-shell 视觉卡在旧 backing 色 = 用户报的"实色全屏切液态玻璃后没法换主题"。
+ *
+ * 删除这条规则后：main 进程 bg 是 backing 色的唯一来源，DOM 层 `.ready-app-shell` 永远透明，
+ * main 的 setBackgroundColor 直接被用户看到，避免了 CSS 层的潜在 repaint 卡死。
+ */
+
+.ready-app-shell {
+  position: relative;
+  isolation: isolate;
+}
+
+.ready-app-content {
+  position: relative;
+  z-index: 2;
+}
+
+.settings-page-shell {
+  position: relative;
+  isolation: isolate;
+  background: transparent;
+}
+
+html[data-skin='liquid-glass'] [data-liquid-shell='settings-sidebar'],
+html[data-skin='liquid-glass'] [data-liquid-shell='settings-content'],
+html[data-skin='liquid-glass'] [data-liquid-scroll-root] {
+  contain: paint;
+  isolation: isolate;
+  transform: translateZ(0);
+  backface-visibility: hidden;
+}
+
+.settings-ai-provider-tab {
+  border-top-color: transparent !important;
+}
+
+.ready-theme-ritual-tint {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  opacity: 0;
+  background-color: transparent;
+  transition:
+    opacity 60ms cubic-bezier(0.4, 0, 0.6, 1),
+    background-color calc(var(--ritual-hold-duration, 320ms) - 80ms) cubic-bezier(0.4, 0, 0.6, 1);
+}
+
+/* Hard-swap chrome colors under the ritual's blur+tint. Chrome elements with their own
+   `transition-colors` (Tailwind 150ms) or custom color transitions (icon-rail 320ms) would
+   otherwise keep animating into/past the leave reveal, producing the "tabs finishing color
+   after animation ends" feel. Suppressing transitions on content descendants during the
+   ritual forces the color swap to happen instantly at the data-theme flip, fully hidden
+   under the overlay. The ritual-owned layers (tint, content, bg) keep their own
+   transitions because they are selected directly and not via the descendant rule. */
+html[data-theme-ritual-phase] .ready-app-content *,
+html[data-theme-ritual-phase] .ready-app-content *::before,
+html[data-theme-ritual-phase] .ready-app-content *::after {
+  transition: none !important;
+}
+
+.ready-app-bg {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: var(--app-bg-overlay-opacity, 0);
+  transition: opacity 260ms ease;
+}
+
+.ready-app-bg::before,
+.ready-app-bg::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  transition: opacity calc(var(--ritual-hold-duration, 320ms) - 40ms) cubic-bezier(0.4, 0, 0.6, 1);
+}
+
+.ready-app-bg::before {
+  background:
+    radial-gradient(1240px 700px at 8% 6%, rgba(238, 236, 230, 0.14), transparent 66%),
+    radial-gradient(920px 540px at 82% 10%, rgba(241, 239, 234, 0.12), transparent 66%),
+    radial-gradient(760px 480px at 52% 90%, rgba(246, 242, 235, 0.09), transparent 72%),
+    linear-gradient(142deg, #fafaf8 0%, #fcfbf8 52%, #fafaf8 100%);
+  opacity: 1;
+}
+
+.ready-app-bg::after {
+  background:
+    radial-gradient(1080px 640px at 10% 6%, rgba(72, 100, 164, 0.24), transparent 66%),
+    radial-gradient(860px 520px at 84% 10%, rgba(52, 96, 132, 0.18), transparent 68%),
+    radial-gradient(700px 500px at 52% 90%, rgba(66, 74, 112, 0.16), transparent 72%),
+    linear-gradient(145deg, #101724 0%, #111a27 52%, #121b2a 100%);
+  opacity: 0;
+}
+
+html[data-theme='dark'] .ready-app-bg::before {
+  opacity: 0;
+}
+
+html[data-theme='dark'] .ready-app-bg::after {
+  opacity: 1;
+}
+
+/* Scrollbar styles */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-default);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--border-input);
+}
+
+/* RSS feed immersive scrollbar: hidden by default, visible on hover */
+.rss-feed-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+
+.panel-hover-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+
+.panel-hover-scrollbar:hover {
+  scrollbar-color: color-mix(in srgb, var(--text-muted) 22%, transparent) transparent;
+}
+
+.panel-hover-scrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.panel-hover-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.panel-hover-scrollbar::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 999px;
+}
+
+.panel-hover-scrollbar:hover::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--text-muted) 22%, transparent);
+}
+
+.panel-hover-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--text-muted) 36%, transparent);
+}
+
+.document-tab-rail-scroll {
+  scrollbar-width: none;
+}
+
+.document-tab-rail-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+.browser-tab-rail-scroll {
+  scrollbar-width: none;
+}
+
+.browser-tab-rail-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+.rss-feed-scroll::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.rss-feed-scroll::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 999px;
+}
+
+.rss-feed-scroll:hover::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--text-muted) 22%, transparent);
+}
+
+.rss-feed-scroll::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--text-muted) 36%, transparent);
+}
+
+/* Selection */
+::selection {
+  background: var(--color-blue-light);
+  color: var(--color-blue);
+}
+
+/* Focus styles */
+:focus-visible {
+  outline: 2px solid var(--color-blue);
+  outline-offset: 2px;
+}
+
+.browser-address-shell:focus-within {
+  outline: none;
+  box-shadow: none;
+}
+
+.browser-address-shell .browser-address-input:focus,
+.browser-address-shell .browser-address-input:focus-visible {
+  outline: none !important;
+  box-shadow: none !important;
+}
+
+.ready-input-shell {
+  background: var(--input-slot-bg);
+  border: 1px solid var(--input-slot-border);
+  box-shadow: var(--input-slot-shadow);
+  transition:
+    background 160ms ease,
+    border-color 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.ready-input-shell:focus-within {
+  border-color: var(--input-slot-focus-border);
+  box-shadow: var(--input-slot-shadow-focus);
+}
+
+.ready-input-slot-control {
+  background: var(--input-slot-bg) !important;
+  border-color: var(--input-slot-border) !important;
+  box-shadow: var(--input-slot-shadow) !important;
+  transition:
+    background 160ms ease,
+    border-color 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.ready-app-shell input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']):not([type='color']):not([type='hidden']):not([type='submit']):not([type='button']):not([type='reset']):not([type='image']):not(.ready-input-slot-inner),
+.ready-app-shell textarea:not(.ready-input-slot-inner),
+.ready-app-shell select:not(.ready-input-slot-inner) {
+  background: var(--input-slot-bg) !important;
+  border-color: var(--input-slot-border) !important;
+  box-shadow: var(--input-slot-shadow) !important;
+  transition:
+    background 160ms ease,
+    border-color 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.ready-input-slot-control:focus {
+  border-color: var(--input-slot-focus-border) !important;
+  box-shadow: var(--input-slot-shadow-focus) !important;
+  outline: none !important;
+}
+
+.ready-app-shell input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']):not([type='color']):not([type='hidden']):not([type='submit']):not([type='button']):not([type='reset']):not([type='image']):not(.ready-input-slot-inner):focus,
+.ready-app-shell textarea:not(.ready-input-slot-inner):focus,
+.ready-app-shell select:not(.ready-input-slot-inner):focus {
+  border-color: var(--input-slot-focus-border) !important;
+  box-shadow: var(--input-slot-shadow-focus) !important;
+  outline: none !important;
+}
+
+.ready-input-slot-inner {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+
+.ready-input-slot-inner:focus,
+.ready-input-slot-inner:focus-visible {
+  outline: none !important;
+  box-shadow: none !important;
+}
+
+.ready-input-slot-inner::placeholder {
+  color: var(--text-placeholder);
+}
+
+.ready-liquid-composer {
+  position: relative;
+  background: transparent !important;
+  border-color: transparent !important;
+  box-shadow: none;
+}

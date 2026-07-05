@@ -2,13 +2,14 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import test from 'node:test'
+import { readRendererStyles } from './utils/read-renderer-styles'
 
 function readWorkspaceFile(path: string): string {
   return readFileSync(resolve(process.cwd(), path), 'utf8')
 }
 
 test('theme transition whitelist no longer animates backdrop-filter', () => {
-  const indexCss = readWorkspaceFile('src/renderer/styles/index.css')
+  const indexCss = readRendererStyles()
 
   // The per-selector transition whitelist was removed in favor of the shared ritual overlay.
   // The invariant "no animated backdrop-filter / -webkit-backdrop-filter during theme swap"
