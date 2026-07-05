@@ -135,6 +135,12 @@ P1 的验收欠账 + 本轮新件的真机确认，一次跑完：
   - 合同随实现同步：probe-collect clickPoint 钉点补 rect；site-card-alignment 旧锚 `iframe/OOPIF` 重锚 `frame tree`（第十三轮卡改写遗留，HEAD 已红）。测试：三套件 77✓（新增 5 行为测试）；typecheck/verify:stability 0。
   - 下一轮复测观测点：`act escalation scan ... candidates=[...] matched=...`、`act escalation firing via=scan_name_match|scan_disambiguation_match|rect_center`、`type_at resolved ... typed=... typedInto=...`。
 
+### 5.1.5 R1 十六轮 + 两裁决 + Phase D 收官（07-05 下午，用户授权不间断）
+
+- **R1 第十六轮（8b1d6bb2）**：三根因毫秒级实锚——①接管闸旧假设不成立（CDP 注入会触发 before-input-event）：agent 自己的 send_keys 触发自家 pending_confirm、键被吞（模型 Cmd+A/Backspace 修复静默失效→标题区死循环）、被吞 Meta 键落穿应用菜单（两次 Cmd+A 与两次窗口缩放动画时间戳对齐）→ AgentInputPassthroughRegistry 直通登记（真实用户接管语义原样）；②R15 焦点护栏只报不拒被模型三次无视 → 容量硬拒（maxLength<文本长/单行收多段=机械拒绝）；③compose 评分器把 maxlength=64 标题排在正文编辑器前 → 容量出局+多段偏向 contenteditable+富文本判定属性化。配套：map 命名链补 data-placeholder（空 tiptap 编辑器首次有名）、send_keys 焦点回读、主窗几何观测日志。passthrough 5✓+browser-tools 71✓+probe-collect 10✓。
+- **两项授权裁决（1ffba155）**：①修生产码——c8e566a4 的 projectionSummaryForEvent 通杀丢 event.message，复原 message 优先（任务卡进度保真；6/26 起的既有红归绿，追踪器邻域 72✓ 零涟漪）；②重锚测试——recall 可见性过滤已随 23d6ec9a 菜单合并下沉为 ChatHeader 逐频道过滤（语义更强），钉点随迁+hook 零消费死肢 visibleResults 摘除。
+- **Phase D 当日实施完毕（b933a763）**：D1 RunTimelineStamp 信封+run-timeline-emitter 唯一发射漏斗（ipc-handler 10 处裸 send 全收编）；D2 useAgent 并行 scopeRunEvent 订阅迁入 runtimeDriver 单枢纽（今晨拆分铺平无环引用）；D3 check-run-timeline-single-source gate 挂 verify:stability 链首+行为测试三条。typecheck/gate/stability/renderer 行为网 54✓/npm run build 全绿。残余登记：reduce 级全派生纯化为后续增量项。
+
 ### 5.1.4 renderer 双拆分 + Phase C 全程收官（07-05 午后，用户授权不间断）
 
 - **Settings.tsx 3486 → 878**（六面板 + shared 出壳至 `src/renderer/pages/settings/`，re-export 保口，14 片段零残差证明 + silent-catch snippetHash 内容级旁证；5 合同测试重锚 + silent-catch/eslint baseline 随迁）；**useAgent.ts 2983 → 2119**（agent-store-types 253 + agent-store-helpers 714，32 处 export 前缀为唯一字节差；pendingSend coalescing/agentRuntimeDriver 等引 store 簇按铁律留守；导出面 38 符号零增减）。两泳道并行子代理 + pathspec 协议，各自 HEAD 基线证明零新增失败。

@@ -4,6 +4,11 @@
 
 ## 当前真值摘要
 
+- `2026-07-05` **R1 十六轮 + 两裁决 + Phase D 完成**：
+  - R1 十六轮根治"接管闸吞自家输入"（CDP 注入会触发 before-input-event 的旧假设证伪；直通登记后模型键击真实生效、窗口缩放开关消失）+ 字段容量硬拒（正文永远进不了 64 字标题框）+ 评分器容量出局 + map 给空编辑器占位符名。
+  - 裁决①复原任务卡进度 message 保真（c8e566a4 通杀回退，6/26 既有红归绿）；裁决②recall 钉随菜单合并演化重锚+死肢摘除。
+  - Phase D 单源合同落地：五通道唯一发射漏斗（信封戳）+ renderer 唯一订阅枢纽 + 双端 gate 入 verify:stability；build 全绿。commits：8b1d6bb2/1ffba155/b933a763。
+
 - `2026-07-05` **renderer 双拆分 + DirectChatEngine 全程退役（Phase C 完成）**：
   - Settings.tsx 3486→878（六面板出壳 `pages/settings/`）、useAgent.ts 2983→2119（types/helpers 出壳）——双泳道并行子代理，字节级纯移证明，零新增失败。
   - Phase C 当日五步走完：解剖合同（暗线实锚：sidecar/runCleanup/abort/sessions 全是只写不读死线）→ DomainAdapterHost 活面平移 → orchestrator 切换 → 引擎删除+存在性合同 → 19 处钉点三分法外科裁决。全仓不再有 DirectChatEngine。
