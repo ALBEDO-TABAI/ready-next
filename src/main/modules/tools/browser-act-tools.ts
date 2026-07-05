@@ -57,6 +57,7 @@ import {
   resolveCssPoint,
   runGuardedCoordinateClick,
   runGuardedCoordinateType,
+  type GuardedCoordinateTypeResult,
   runGuardedSelectorClick,
   runGuardedSelectorType,
   sendKeyStroke,
@@ -65,6 +66,7 @@ import {
   throwIfAborted,
   waitForReady,
 } from './browser-input-actions'
+import { scanClosedShadowHostForClickPoint } from './browser-shadow-hit-test'
 import {
   ensureGeminiSubmitted,
   isLikelyChatPage,
@@ -658,13 +660,17 @@ export async function runWorkflowStep(
     const clearBefore = step.clear_before_typing !== false
     const pressEnter = step.press_enter !== false
     const useShiftEnter = step.use_shift_enter_for_newline === true
-    const point = await runGuardedCoordinateType(controller, tabId, x, y, text, {
+    const point: GuardedCoordinateTypeResult = await runGuardedCoordinateType(controller, tabId, x, y, text, {
       clearBefore,
       pressEnter,
       useShiftEnter,
       allowPasswordFill: false,
     }, signal)
-    return `Typed at normalized(${point.nx},${point.ny}) css(${point.cssX},${point.cssY})`
+    if (!point.typed) {
+      return `Error: workflow type_at click landed on a non-editable target (focus=${point.focusTarget?.tag || 'none'}${point.focusTarget?.label ? ` "${point.focusTarget.label}"` : ''}); typing refused to avoid feeding the wrong field`
+    }
+    const typedIntoNote = point.typedInto?.label ? ` into "${point.typedInto.label}"` : ''
+    return `Typed at normalized(${point.nx},${point.ny}) css(${point.cssX},${point.cssY})${typedIntoNote}`
   }
 
   if (action === 'scroll_at') {
@@ -1303,34 +1309,96 @@ export async function executeBrowserActTool(
         }
         if (shouldEscalate) {
           const escalationReason = closedShadowHost ? 'closed_shadow_host' : 'no_change_after_synthetic_click'
-          const nx = Math.max(0, Math.min(999, Math.round((cpx / cpw) * 1000)))
-          const ny = Math.max(0, Math.min(999, Math.round((cpy / cph) * 1000)))
-          try {
-            log(`act escalation firing target=${targetId} reason=${escalationReason} css=(${Math.round(cpx)},${Math.round(cpy)}) normalized=(${nx},${ny})`)
-            await runGuardedCoordinateClick(controller, tabId, nx, ny, abortSignal)
-            const escalatedFollowedTab = await waitForActionFollowedTab(controller, tabId, beforeTabs, abortSignal)
-            afterDelta = await readBrowserActionDeltaBestEffort(controller, tabId, 'after')
-            const escalatedChanged = didBrowserActionChange(before, afterDelta) || Boolean(escalatedFollowedTab)
+          const toNormalized = (cssX: number, cssY: number) => ({
+            x: Math.max(0, Math.min(999, Math.round((cssX / cpw) * 1000))),
+            y: Math.max(0, Math.min(999, Math.round((cssY / cph) * 1000))),
+          })
+          // D18-c（真机第十四轮实锚）：closed shadow host 的包围盒可能横跨
+          // 整个按钮组（xhs-publish-btn 盖住「暂存离开」+「发布」），rect
+          // 中心 css=(569,851) 落在两按钮之间死区，可信点击点空。升级前先
+          // 经 CDP 组合树命中测试在 host rect 内扫描，找到与 map 目标名/
+          // disambiguation 唯一匹配的真实内部按钮；多候选无法唯一判定时
+          // 不盲点（点到「暂存离开」会毁掉整个发布流程），把候选连坐标
+          // 交回模型自行 click_at。
+          let escalationCss = { x: cpx, y: cpy }
+          let escalationVia = 'rect_center'
+          let scanCandidatePayload: Array<{ text: string; tag: string; normalized: { x: number; y: number } }> | null = null
+          let escalationSkipped: string | null = null
+          const rawRect = (rawClickPoint as { rect?: { left?: unknown; top?: unknown; width?: unknown; height?: unknown } | null } | null)?.rect
+          const rectLeft = Number(rawRect?.left)
+          const rectTop = Number(rawRect?.top)
+          const rectWidth = Number(rawRect?.width)
+          const rectHeight = Number(rawRect?.height)
+          if (closedShadowHost && Number.isFinite(rectLeft) && Number.isFinite(rectTop) && rectWidth > 0 && rectHeight > 0) {
+            const scan = await scanClosedShadowHostForClickPoint(
+              controller,
+              tabId,
+              { left: rectLeft, top: rectTop, width: rectWidth, height: rectHeight },
+              { vw: cpw, vh: cph },
+              { targetName: String(targetRecord?.name || ''), disambiguation: String(disambiguation || '') },
+            ).catch((error) => {
+              log(`act escalation scan error target=${targetId} error=${error instanceof Error ? error.message : String(error)}`)
+              return null
+            })
+            if (scan) {
+              scanCandidatePayload = scan.candidates.map((c) => ({
+                text: c.text,
+                tag: c.tag,
+                normalized: toNormalized(c.cssX, c.cssY),
+              }))
+              log(`act escalation scan target=${targetId} candidates=${JSON.stringify(scan.candidates.map((c) => c.text))} via=${scan.via ?? 'none'} matched=${JSON.stringify(scan.matchedText)} skipped=${scan.skippedReason ?? 'none'}`)
+              if (scan.point) {
+                escalationCss = { x: scan.point.cssX, y: scan.point.cssY }
+                escalationVia = `scan_${scan.via}`
+              } else if (scan.candidates.length >= 2) {
+                escalationSkipped = 'ambiguous_shadow_candidates'
+              }
+            }
+          }
+          if (escalationSkipped) {
             escalation = {
-              attempted: true,
+              attempted: false,
               mode: 'trusted_pointer',
               reason: escalationReason,
-              changed: escalatedChanged,
+              skipped: escalationSkipped,
+              candidates: scanCandidatePayload,
+              hint: 'shadow root 内发现多个可点按钮，无法唯一判定目标。从 candidates 里选出意图按钮，用 browser_click_at 按其 normalized 坐标直接点击。',
             }
-            changed = changed || escalatedChanged
-            if (escalatedFollowedTab) followedTab = escalatedFollowedTab
-            log(`act escalation done target=${targetId} escalatedChanged=${escalatedChanged}`)
-          } catch (error) {
-            // 闸门（grant_required / 待确认拒绝）保持响亮——升级点击与
-            // browser_click_at 的安全语义必须同构，不能因为是兜底就静默。
-            if (error instanceof ToolDomainError) throw error
-            escalation = {
-              attempted: true,
-              mode: 'trusted_pointer',
-              reason: escalationReason,
-              error: error instanceof Error ? error.message : String(error),
+            log(`act escalation skipped target=${targetId} reason=${escalationSkipped} candidates=${JSON.stringify((scanCandidatePayload || []).map((c) => c.text))}`)
+          } else {
+            const { x: nx, y: ny } = toNormalized(escalationCss.x, escalationCss.y)
+            try {
+              log(`act escalation firing target=${targetId} reason=${escalationReason} via=${escalationVia} css=(${Math.round(escalationCss.x)},${Math.round(escalationCss.y)}) normalized=(${nx},${ny})`)
+              const escalatedPoint = await runGuardedCoordinateClick(controller, tabId, nx, ny, abortSignal)
+              const escalatedFollowedTab = await waitForActionFollowedTab(controller, tabId, beforeTabs, abortSignal)
+              afterDelta = await readBrowserActionDeltaBestEffort(controller, tabId, 'after')
+              const escalatedChanged = didBrowserActionChange(before, afterDelta) || Boolean(escalatedFollowedTab)
+              escalation = {
+                attempted: true,
+                mode: 'trusted_pointer',
+                reason: escalationReason,
+                via: escalationVia,
+                clickNormalized: { x: nx, y: ny },
+                pointTarget: escalatedPoint.pointTarget,
+                ...(scanCandidatePayload && scanCandidatePayload.length > 0 ? { candidates: scanCandidatePayload } : {}),
+                changed: escalatedChanged,
+              }
+              changed = changed || escalatedChanged
+              if (escalatedFollowedTab) followedTab = escalatedFollowedTab
+              log(`act escalation done target=${targetId} via=${escalationVia} pointTarget=${JSON.stringify(escalatedPoint.pointTarget?.label ?? null)} escalatedChanged=${escalatedChanged}`)
+            } catch (error) {
+              // 闸门（grant_required / 待确认拒绝）保持响亮——升级点击与
+              // browser_click_at 的安全语义必须同构，不能因为是兜底就静默。
+              if (error instanceof ToolDomainError) throw error
+              escalation = {
+                attempted: true,
+                mode: 'trusted_pointer',
+                reason: escalationReason,
+                via: escalationVia,
+                error: error instanceof Error ? error.message : String(error),
+              }
+              log(`act escalation error target=${targetId} error=${error instanceof Error ? error.message : String(error)}`)
             }
-            log(`act escalation error target=${targetId} error=${error instanceof Error ? error.message : String(error)}`)
           }
         }
         const after = readBack === 'map'
@@ -1852,8 +1920,8 @@ export async function executeBrowserActTool(
           css: { x: point.cssX, y: point.cssY },
           viewport: { width: point.width, height: point.height },
           pointTarget: point.pointTarget,
-          ...(point.pointTarget && !point.pointTarget.label
-            ? { coordinateHint: '点下未探到带语义的元素——注意 x/y 是 0-1000 归一化坐标（不是 CSS 像素）；若你用 getBoundingClientRect 量到像素 px，请换算 round(px / 视口宽高 * 1000) 再调用。' }
+          ...(point.pointTarget && !point.pointTarget.label && !point.pointTarget.editable
+            ? { coordinateHint: `点下命中 <${point.pointTarget.tag || 'unknown'}>，无语义标签也不可编辑——很可能点到了空白/容器。注意 x/y 是 0-1000 归一化坐标（不是 CSS 像素）；若你用 getBoundingClientRect 量到像素 px，请换算 round(px / 视口宽高 * 1000) 再调用。` }
             : {}),
           followedTab,
           nextSuggestedAction: followedTab ? `read map again on tab ${followedTab.tabId}` : 'read map again',
@@ -1893,6 +1961,29 @@ export async function executeBrowserActTool(
           useShiftEnter,
           allowPasswordFill: argsCarryPasswordCue(JSON.stringify(args)),
         }, abortSignal)
+        // D18-c（真机第十四轮实锚）：聚焦点击落在死区时焦点滞留上一控件，
+        // 正文全文灌进标题框、模型盲试 4 分钟。typed=false 响亮失败；成功
+        // 也回读 typedInto（打进了哪个框、框里现在是什么）供同轮自纠。
+        log(`type_at resolved input=(${x},${y}) normalized=(${point.nx},${point.ny}) css=(${Math.round(point.cssX)},${Math.round(point.cssY)}) typed=${point.typed} focus=${JSON.stringify(point.focusTarget?.label ?? point.focusTarget?.kind ?? null)} typedInto=${JSON.stringify(point.typedInto?.label ?? null)}`)
+        if (!point.typed) {
+          return attachBrowserActionSessionOutput(browserStructuredOutput({
+            ok: false,
+            errorKind: 'type_target_not_editable',
+            normalized: { x: point.nx, y: point.ny },
+            css: { x: point.cssX, y: point.cssY },
+            focusTarget: point.focusTarget,
+            message: '坐标点击后焦点不在可编辑控件上，已拒绝打字（避免文字灌进错误的框）。注意 x/y 是 0-1000 归一化坐标；用 browser_locate_input_targets 或 read map 拿准输入框位置，或直接 act fill 编辑器 target。',
+          }), {
+            toolName,
+            args,
+            controller,
+            sessionId,
+            currentUserText,
+            tabId,
+            confirmation: null,
+            nextSuggestedAction: 'locate input targets, then retype',
+          })
+        }
         const confirmation = pressEnter ? await detectBrowserPageTransactionConfirmation(controller, tabId) : null
         return attachBrowserActionSessionOutput(JSON.stringify({
           ok: true,
@@ -1900,6 +1991,8 @@ export async function executeBrowserActTool(
           css: { x: point.cssX, y: point.cssY },
           submitted: pressEnter,
           text_length: text.length,
+          focusTarget: point.focusTarget,
+          typedInto: point.typedInto,
         }, null, 2), {
           toolName,
           args,

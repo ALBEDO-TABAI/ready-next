@@ -662,6 +662,166 @@ describe('browser-tools v2', () => {
     assert.strictEqual(controller.calls.mouse.length, 0, 'gated escalation must not dispatch mouse input')
   })
 
+  // D18-c（真机第十四轮实锚）：closed shadow host 的包围盒横跨整个按钮组
+  // （xhs-publish-btn 盖住「暂存离开」+「发布」），rect 中心落在两按钮之间
+  // 死区，可信升级点击点空（css=(569,851) escalatedChanged=false）。合同：
+  // 升级前经 CDP 组合树命中测试在 host rect 内扫描真实内部按钮，与 map
+  // 目标名唯一匹配 → 点匹配按钮的坐标而不是 rect 中心。
+  function createShadowScanControllerMock(opts: {
+    targetName: string
+    deltaAfterEscalation?: boolean
+  }): ReturnType<typeof createControllerMock> {
+    let deltaCalls = 0
+    const cdpCalls: Array<{ method: string; params?: Record<string, unknown> }> = []
+    // host rect [400, 740]：左半是「暂存离开」按钮 [400,500)，中间 [500,570)
+    // 是 host 空隙（rect 中心 570 恰在死区边缘），右侧 [570,740) 是「发布」。
+    const zoneOf = (x: number): { id: number; text: string; tag: string; interactive: boolean; isHost: boolean } => {
+      if (x < 500) return { id: 11, text: '暂存离开', tag: 'button', interactive: true, isHost: false }
+      if (x < 570) return { id: 12, text: '', tag: 'xhs-publish-btn', interactive: false, isHost: true }
+      return { id: 13, text: '发布', tag: 'button', interactive: true, isHost: false }
+    }
+    const describeByObject = new Map<string, Record<string, unknown>>()
+    const controller = createControllerMock({
+      sendCdpCommand: async (_tabId, method, params) => {
+        cdpCalls.push({ method, params })
+        if (method === 'DOM.getNodeForLocation') {
+          const zone = zoneOf(Number(params?.x))
+          describeByObject.set(`obj-${zone.id}-${params?.x}`, {
+            tag: zone.tag, role: '', text: zone.text, interactive: zone.interactive, isHost: zone.isHost,
+          })
+          return { backendNodeId: zone.id * 1000 + Number(params?.x) }
+        }
+        if (method === 'DOM.resolveNode') {
+          const backendNodeId = Number(params?.backendNodeId)
+          const x = backendNodeId % 1000
+          const id = Math.floor(backendNodeId / 1000)
+          return { object: { objectId: `obj-${id}-${x}` } }
+        }
+        if (method === 'Runtime.callFunctionOn') {
+          return { result: { value: describeByObject.get(String(params?.objectId)) ?? null } }
+        }
+        return {}
+      },
+      executeJS: async (_tabId, code) => {
+        const source = String(code || '')
+        if (source.includes('__READY_AGENT_PAGE_MAP__')) {
+          return {
+            identity: { url: 'https://example.com/publish', title: 'Publish' },
+            viewport: { width: 1000, height: 896 },
+            rawRoots: [{
+              role: 'generic',
+              children: [
+                { role: 'clickable', name: opts.targetName, backendDOMNodeId: 1, frameId: '0' },
+                { role: 'button', name: 'Filler A', backendDOMNodeId: 2, frameId: '0' },
+                { role: 'button', name: 'Filler B', backendDOMNodeId: 3, frameId: '0' },
+                { role: 'button', name: 'Filler C', backendDOMNodeId: 4, frameId: '0' },
+                { role: 'button', name: 'Filler D', backendDOMNodeId: 5, frameId: '0' },
+              ],
+            }],
+            riskFlags: {},
+          }
+        }
+        if (source.includes('__READY_AGENT_TARGET_PROBE__')) {
+          return { matchCount: 1, disabled: false, target: { role: 'clickable', name: opts.targetName } }
+        }
+        if (source.includes('__READY_AGENT_ACT_ON_TARGET__')) {
+          return {
+            ok: true,
+            action: 'click',
+            target: { role: 'clickable', name: opts.targetName },
+            clickPoint: {
+              x: 570, y: 862, vw: 1000, vh: 896,
+              hostShadow: 'closed_or_none',
+              rect: { left: 400, top: 840, width: 340, height: 44 },
+            },
+          }
+        }
+        if (source.includes('bodyText: String(document.body')) {
+          deltaCalls += 1
+          if (opts.deltaAfterEscalation !== false && deltaCalls >= 3) {
+            return { url: 'https://example.com/success', title: 'Done', bodyText: 'published' }
+          }
+          return { url: 'https://example.com/publish', title: 'Publish', bodyText: 'form' }
+        }
+        return null
+      },
+    })
+    ;(controller as unknown as { cdpCalls: typeof cdpCalls }).cdpCalls = cdpCalls
+    return controller
+  }
+
+  it('browser_act_on_target escalation scans the closed-shadow host and clicks the name-matched inner button', async () => {
+    const controller = createShadowScanControllerMock({ targetName: '发布' })
+    await executeBrowserTool('browser_read_page_map', {}, controller)
+    const result = await executeBrowserTool('browser_act_on_target', { target_id: '1:0:1', action: 'click' }, controller)
+    const payload = parseTool(result) as {
+      ok: boolean
+      changed: boolean
+      escalation?: {
+        attempted?: boolean
+        via?: string
+        clickNormalized?: { x: number; y: number }
+        candidates?: Array<{ text: string }>
+        changed?: boolean
+      }
+    }
+    assert.strictEqual(payload.ok, true)
+    assert.strictEqual(payload.escalation?.attempted, true)
+    assert.strictEqual(payload.escalation?.via, 'scan_name_match')
+    assert.strictEqual(payload.escalation?.changed, true)
+    assert.strictEqual(payload.changed, true)
+    // 点击点必须落在「发布」按钮区 [570,740)，而不是 rect 中心 570 左侧的死区/暂存离开
+    assert.ok((payload.escalation?.clickNormalized?.x ?? 0) >= 580,
+      `escalated click must land inside the 发布 zone, got ${JSON.stringify(payload.escalation?.clickNormalized)}`)
+    assert.ok(controller.calls.mouse.length >= 3, 'trusted pointer input must go through dispatchMouse')
+    const lastNormalized = controller.calls.normalized?.at(-1)
+    assert.ok((lastNormalized?.x ?? 0) >= 580, `dispatch must use the scanned point, got ${JSON.stringify(lastNormalized)}`)
+  })
+
+  it('browser_act_on_target escalation refuses a blind click when shadow candidates are ambiguous', async () => {
+    // 真机第十四轮实态：map 名是 tag 回退 'xhs-publish-btn'（closed root 文本
+    // 不可见），两个内部按钮都无法唯一匹配 → 宁可不点（点到「暂存离开」会
+    // 毁掉发布流程），把候选连坐标交回模型。
+    const controller = createShadowScanControllerMock({ targetName: 'xhs-publish-btn', deltaAfterEscalation: false })
+    await executeBrowserTool('browser_read_page_map', {}, controller)
+    const result = await executeBrowserTool('browser_act_on_target', { target_id: '1:0:1', action: 'click' }, controller)
+    const payload = parseTool(result) as {
+      ok: boolean
+      escalation?: {
+        attempted?: boolean
+        skipped?: string
+        candidates?: Array<{ text: string; normalized?: { x: number; y: number } }>
+        hint?: string
+      }
+    }
+    assert.strictEqual(payload.ok, true)
+    assert.strictEqual(payload.escalation?.attempted, false)
+    assert.strictEqual(payload.escalation?.skipped, 'ambiguous_shadow_candidates')
+    const texts = (payload.escalation?.candidates || []).map((c) => c.text).sort()
+    assert.deepStrictEqual(texts, ['发布', '暂存离开'].sort())
+    assert.ok(payload.escalation?.candidates?.every((c) => Number.isFinite(c.normalized?.x)))
+    assert.ok(String(payload.escalation?.hint || '').includes('browser_click_at'))
+    assert.strictEqual(controller.calls.mouse.length, 0, 'ambiguous scan must not dispatch a blind click')
+  })
+
+  it('browser_act_on_target escalation resolves ambiguity via the disambiguation text', async () => {
+    const controller = createShadowScanControllerMock({ targetName: 'xhs-publish-btn' })
+    await executeBrowserTool('browser_read_page_map', {}, controller)
+    const result = await executeBrowserTool(
+      'browser_act_on_target',
+      { target_id: '1:0:1', action: 'click', disambiguation: '页面底部的发布按钮，最终提交' },
+      controller,
+    )
+    const payload = parseTool(result) as {
+      ok: boolean
+      escalation?: { attempted?: boolean; via?: string; clickNormalized?: { x: number } }
+    }
+    assert.strictEqual(payload.ok, true)
+    assert.strictEqual(payload.escalation?.attempted, true)
+    assert.strictEqual(payload.escalation?.via, 'scan_disambiguation_match')
+    assert.ok((payload.escalation?.clickNormalized?.x ?? 0) >= 580)
+  })
+
   it('browser_click_at should clamp normalized coordinates', async () => {
     const controller = createControllerMock()
     const result = await executeBrowserTool('browser_click_at', { x: -20, y: 1800 }, controller)
@@ -1069,6 +1229,66 @@ describe('browser-tools v2', () => {
     assert.ok(controller.calls.typed.some((item) => item.text === '今晚吃什么'))
     assert.ok(controller.calls.key.some((item) => String(item.key || '').toLowerCase() === 'backspace'))
     assert.ok(controller.calls.key.some((item) => String(item.key || '').toLowerCase() === 'enter'))
+  })
+
+  // D18-c（真机第十四轮实锚）：type_at 的聚焦点击落在死区时焦点滞留上一个
+  // 控件/回落 body，旧实现照打不误——正文全文灌进 XHS 标题框，模型盲试
+  // 4 分钟。合同：点击后焦点不可编辑 → 拒绝打字、响亮报告点到了什么。
+  it('browser_type_at refuses to type when the focusing click lands on a non-editable spot', async () => {
+    const controller = createControllerMock({
+      executeJS: async (_tabId, code) => {
+        const source = String(code || '')
+        if (source.includes('__READY_CLICK_POINT_LABEL_PROBE__')) {
+          return { label: '', inputLabel: '', password: false, editable: false, tag: 'div' }
+        }
+        if (source.includes('__READY_FOCUSED_EDITABLE_PROBE__')) {
+          return { kind: 'none', tag: 'body', label: '', password: false }
+        }
+        return null
+      },
+    })
+    const result = await executeBrowserTool('browser_type_at', { x: 525, y: 302, text: '今天天气不错' }, controller)
+    const payload = parseTool(result) as {
+      ok: boolean
+      errorKind?: string
+      focusTarget?: { kind?: string }
+      message?: string
+    }
+    assert.strictEqual(payload.ok, false)
+    assert.strictEqual(payload.errorKind, 'type_target_not_editable')
+    assert.strictEqual(payload.focusTarget?.kind, 'none')
+    assert.match(String(payload.message || ''), /归一化坐标/)
+    assert.strictEqual(controller.calls.typed.length, 0, 'must not feed text into a stale-focus field')
+    assert.ok(controller.calls.mouse.length >= 3, 'the focusing click itself already happened')
+  })
+
+  it('browser_type_at reports where the text actually landed (typedInto readback)', async () => {
+    const controller = createControllerMock({
+      executeJS: async (_tabId, code) => {
+        const source = String(code || '')
+        if (source.includes('__READY_CLICK_POINT_LABEL_PROBE__')) {
+          return { label: '', inputLabel: '输入标题', password: false, editable: true, tag: 'textarea' }
+        }
+        if (source.includes('__READY_FOCUSED_EDITABLE_PROBE__')) {
+          return { kind: 'editable', tag: 'textarea', label: '输入标题', password: false }
+        }
+        if (source.includes('__READY_TYPED_INTO_PROBE__')) {
+          return { tag: 'textarea', label: '输入标题', password: false, textHead: '今天天气不错', textLength: 6 }
+        }
+        return null
+      },
+    })
+    const result = await executeBrowserTool('browser_type_at', { x: 500, y: 300, text: '今天天气不错', press_enter: false }, controller)
+    const payload = parseTool(result) as {
+      ok: boolean
+      focusTarget?: { kind?: string; label?: string }
+      typedInto?: { label?: string; textHead?: string }
+    }
+    assert.strictEqual(payload.ok, true)
+    assert.strictEqual(payload.focusTarget?.kind, 'editable')
+    assert.strictEqual(payload.typedInto?.label, '输入标题')
+    assert.strictEqual(payload.typedInto?.textHead, '今天天气不错')
+    assert.ok(controller.calls.typed.some((item) => item.text === '今天天气不错'))
   })
 
   it('browser_type_at fails closed when coordinate target probe throws', async () => {

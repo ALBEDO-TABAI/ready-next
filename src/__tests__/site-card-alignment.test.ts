@@ -30,7 +30,9 @@ test('risk level comes from the code authority, not the card (high-control = hig
   assert.equal(xhs!.riskLevel, 'high') // isHighControlPlatformText('xiaohongshu.com') → high
   assert.ok(xhs!.body.includes('反爬'))
   assert.ok(xhs!.body.includes('发布后台'))
-  assert.ok(xhs!.body.includes('iframe/OOPIF'))
+  // 合同随实现同步：卡面 frame 指引在第十三轮改写为"不要转 Power CDP 猜
+  // frame tree"（旧锚 'iframe/OOPIF' 随行文消失，指引本体仍在）。
+  assert.ok(xhs!.body.includes('frame tree'))
   assert.ok(!xhs!.body.includes('禁用脚本通道'))
 })
 

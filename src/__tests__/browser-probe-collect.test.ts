@@ -251,8 +251,17 @@ test('act click returns the click point for trusted-pointer escalation', () => {
     all: [stashButton, publishHost],
   })
   assert.strictEqual(result.ok, true)
-  // rect: left 10 top 10, 120x40 → center (70, 30)；视口 1200x900
-  assert.deepStrictEqual(result.clickPoint, { x: 70, y: 30, vw: 1200, vh: 900, hostShadow: 'closed_or_none' })
+  // rect: left 10 top 10, 120x40 → center (70, 30)；视口 1200x900。
+  // D18-c 起 clickPoint 还带完整 host rect——升级路径用它做 shadow 内部
+  // 命中扫描（host 包围盒可能横跨按钮组，中心点是死区）。
+  assert.deepStrictEqual(result.clickPoint, {
+    x: 70,
+    y: 30,
+    vw: 1200,
+    vh: 900,
+    hostShadow: 'closed_or_none',
+    rect: { left: 10, top: 10, width: 120, height: 40 },
+  })
 })
 
 test('act fill carries no click point', () => {

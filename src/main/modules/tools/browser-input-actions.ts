@@ -11,9 +11,11 @@ import { ToolDomainError } from './tool-errors'
 import { ACTION_CONFIRMATION_ERROR_KINDS } from '../agent-control/contracts/error-kinds'
 import { matchBrowserDestructiveTarget } from '../agent-control/safety/action-confirmation-policy'
 import {
+  buildFocusedEditableProbeJs,
   buildFocusedFieldProbeJs,
   buildInputGuardSnippetJs,
   buildTargetSemanticsLibraryJs,
+  buildTypedIntoProbeJs,
   probeCoordinateTargetOrThrow,
   throwIfLiveTargetGuardBlocked,
 } from './browser-probe'
@@ -268,17 +270,22 @@ export async function runGuardedCoordinateClick(
   width: number
   height: number
   /** D18-b：点下真实元素的语义标签（第十三轮实锚：模型把 CSS 像素当归一
-   * 化坐标传给 click_at，点偏后自己看不出来——把"点到了什么"回给它闭环自纠）。 */
-  pointTarget: { label: string; editable: boolean } | null
+   * 化坐标传给 click_at，点偏后自己看不出来——把"点到了什么"回给它闭环自纠）。
+   * D18-c 补 tag：空 label 的命中可能是无名编辑器而非脱靶。 */
+  pointTarget: { label: string; editable: boolean; tag: string } | null
 }> {
   const probePoint = await resolveCoordinateProbePointOrThrow(controller, tabId, x, y, 'click')
   const probe = probePoint
     ? await probeCoordinateTargetOrThrow(controller, tabId, probePoint, { x, y, action: 'click' })
     : null
-  let pointTarget: { label: string; editable: boolean } | null = null
+  let pointTarget: { label: string; editable: boolean; tag: string } | null = null
   if (probe && typeof probe === 'object') {
-    const p = probe as { label?: unknown; editable?: unknown }
-    pointTarget = { label: String(p.label || '').slice(0, 120), editable: p.editable === true }
+    const p = probe as { label?: unknown; editable?: unknown; tag?: unknown }
+    pointTarget = {
+      label: String(p.label || '').slice(0, 120),
+      editable: p.editable === true,
+      tag: String(p.tag || '').slice(0, 32),
+    }
     if (p.editable !== true) {
       const destructiveHit = matchBrowserDestructiveTarget(String(p.label || ''))
       if (destructiveHit) {
@@ -344,6 +351,22 @@ export async function runGuardedSelectorType(
  * target → the focusing click is itself an action checked against the
  * destructive target list; editable field → judge by field semantics
  * (no value) + password. */
+export interface GuardedCoordinateTypeResult {
+  nx: number
+  ny: number
+  cssX: number
+  cssY: number
+  width: number
+  height: number
+  /** false = 聚焦点击后焦点不在可编辑控件上，已拒绝打字（响亮失败，不静默误灌） */
+  typed: boolean
+  skipReason: 'focus_not_editable' | null
+  /** 聚焦点击后的真实焦点身份（frame = 跨帧编辑器，无法验证，放行） */
+  focusTarget: { kind: 'editable' | 'non_editable' | 'none' | 'frame' | 'unknown'; tag: string; label: string } | null
+  /** 打完字的落点回读（密码框不回显内容；probe 失败为 null） */
+  typedInto: { tag: string; label: string; textHead: string; textLength: number } | null
+}
+
 export async function runGuardedCoordinateType(
   controller: BrowserController,
   tabId: string | null,
@@ -352,7 +375,7 @@ export async function runGuardedCoordinateType(
   text: string,
   opts: { clearBefore: boolean; pressEnter: boolean; useShiftEnter: boolean; allowPasswordFill: boolean },
   abortSignal?: AbortSignal,
-): Promise<{ nx: number; ny: number; cssX: number; cssY: number; width: number; height: number }> {
+): Promise<GuardedCoordinateTypeResult> {
   const probePoint = await resolveCoordinateProbePointOrThrow(controller, tabId, x, y, 'type')
   const probe = probePoint
     ? await probeCoordinateTargetOrThrow(controller, tabId, probePoint, { x, y, action: 'type' })
@@ -395,6 +418,22 @@ export async function runGuardedCoordinateType(
     }
   }
   const point = await dispatchClickAt(controller, tabId, x, y)
+  // D18-c（真机第十四轮实锚）：聚焦点击落在死区/不可聚焦位置时，焦点滞留
+  // 上一个控件或回落 body——旧实现照打不误，正文全文灌进 XHS 标题框且模型
+  // 毫无感知。打字前验真实焦点：不可编辑 → 拒绝打字并回报点到了什么；
+  // 跨帧（iframe 编辑器）无法验证 → 放行但标注 kind=frame。
+  const focusProbe = await controller.executeJS(tabId, buildFocusedEditableProbeJs()).catch(() => null)
+  let focusTarget: GuardedCoordinateTypeResult['focusTarget'] = null
+  if (focusProbe && typeof focusProbe === 'object') {
+    const f = focusProbe as { kind?: unknown; tag?: unknown; label?: unknown }
+    const kind = ['editable', 'non_editable', 'none', 'frame'].includes(String(f.kind))
+      ? String(f.kind) as 'editable' | 'non_editable' | 'none' | 'frame'
+      : 'unknown'
+    focusTarget = { kind, tag: String(f.tag || '').slice(0, 32), label: String(f.label || '').slice(0, 120) }
+  }
+  if (focusTarget && (focusTarget.kind === 'none' || focusTarget.kind === 'non_editable')) {
+    return { ...point, typed: false, skipReason: 'focus_not_editable', focusTarget, typedInto: null }
+  }
   if (opts.clearBefore) {
     await clearFocusedInput(controller, tabId)
   }
@@ -403,7 +442,20 @@ export async function runGuardedCoordinateType(
     await sendKeyStroke(controller, tabId, 'Enter')
   }
   await settleAfterAction(controller, tabId, abortSignal)
-  return point
+  // D18-c：回读文本真实落点——"打进了哪个框、现在框里是什么"在同一次
+  // 工具结果里可见，错灌一目了然（第十四轮：正文进标题烧了 4 分钟盲试）。
+  const typedProbe = await controller.executeJS(tabId, buildTypedIntoProbeJs()).catch(() => null)
+  let typedInto: GuardedCoordinateTypeResult['typedInto'] = null
+  if (typedProbe && typeof typedProbe === 'object') {
+    const t = typedProbe as { tag?: unknown; label?: unknown; textHead?: unknown; textLength?: unknown }
+    typedInto = {
+      tag: String(t.tag || '').slice(0, 32),
+      label: String(t.label || '').slice(0, 120),
+      textHead: String(t.textHead || ''),
+      textLength: Number(t.textLength) || 0,
+    }
+  }
+  return { ...point, typed: true, skipReason: null, focusTarget, typedInto }
 }
 
 export async function sendKeyStroke(

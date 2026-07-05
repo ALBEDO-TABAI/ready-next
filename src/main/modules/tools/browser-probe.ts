@@ -432,7 +432,7 @@ function buildClickPointLabelProbeJs(cssX: number, cssY: number): string {
     const __READY_CLICK_POINT_LABEL_PROBE__ = true;
     ${buildTargetSemanticsLibraryJs()}
     const start = document.elementFromPoint(${JSON.stringify(Math.round(cssX))}, ${JSON.stringify(Math.round(cssY))});
-    if (!start) return { label: '', inputLabel: '', password: false, editable: false };
+    if (!start) return { label: '', inputLabel: '', password: false, editable: false, tag: '' };
     const owner = readyClickableOwner(start);
     return {
       label: readyClickSemanticsLabel(start),
@@ -442,6 +442,10 @@ function buildClickPointLabelProbeJs(cssX: number, cssY: number): string {
       // which exclude the current value); non-editable → the click is an
       // action (judge by the click/caption label, value included).
       editable: readyIsEditableField(owner),
+      // D18-c：label 为空时模型分不清"点到空白容器"和"点到无名编辑器"——
+      // 回传命中元素 tag 供闭环自纠（第十四轮实锚：click_at 命中 tiptap
+      // 编辑器返回空 label，模型误判脱靶反复重点）。
+      tag: String((start.tagName || '')).toLowerCase(),
     };
   })()`
 }
@@ -484,6 +488,62 @@ export function buildFocusedFieldProbeJs(): string {
     return {
       inputLabel: readyInputSemanticsLabel(el),
       password: readyIsPasswordField(el),
+    };
+  })()`
+}
+
+/**
+ * D18-c（真机第十四轮实锚）：type_at 的聚焦点击落在不可聚焦位置时，焦点
+ * 滞留在上一个控件（XHS 标题框），正文全文打进标题、模型毫无感知烧掉
+ * 4 分钟。打字前探测点击后的真实焦点：kind=none（焦点回落 body）必须
+ * 响亮拒绝打字；kind=frame（跨帧编辑器）无法验证放行；kind=editable /
+ * non_editable 按可编辑性裁决。
+ */
+export function buildFocusedEditableProbeJs(): string {
+  return `(() => {
+    const __READY_FOCUSED_EDITABLE_PROBE__ = true;
+    ${buildTargetSemanticsLibraryJs()}
+    const el = document.activeElement;
+    if (!el || el === document.body || el === document.documentElement) {
+      return { kind: 'none', tag: el === document.body ? 'body' : 'html', label: '', password: false };
+    }
+    const tag = String(el.tagName || '').toLowerCase();
+    if (tag === 'iframe' || tag === 'frame' || tag === 'webview' || tag === 'object' || tag === 'embed') {
+      return { kind: 'frame', tag, label: '', password: false };
+    }
+    const editable = readyIsEditableField(el);
+    return {
+      kind: editable ? 'editable' : 'non_editable',
+      tag,
+      label: editable ? readyInputSemanticsLabel(el) : readyClickSemanticsLabel(el),
+      password: readyIsPasswordField(el),
+    };
+  })()`
+}
+
+/**
+ * D18-c：打完字回读文本真实落点（焦点元素身份 + 内容头部），让"打进了
+ * 哪个框"在同一次工具结果里可见。密码框不回显内容。
+ */
+export function buildTypedIntoProbeJs(): string {
+  return `(() => {
+    const __READY_TYPED_INTO_PROBE__ = true;
+    ${buildTargetSemanticsLibraryJs()}
+    const el = document.activeElement;
+    if (!el || el === document.body || el === document.documentElement) return null;
+    const tag = String(el.tagName || '').toLowerCase();
+    const password = readyIsPasswordField(el);
+    let text = '';
+    if (!password) {
+      if ('value' in el && typeof el.value === 'string') text = el.value;
+      else text = String(el.innerText || el.textContent || '');
+    }
+    return {
+      tag,
+      label: readyInputSemanticsLabel(el),
+      password,
+      textHead: password ? '' : text.replace(/\\s+/g, ' ').trim().slice(0, 80),
+      textLength: password ? 0 : text.length,
     };
   })()`
 }
@@ -617,6 +677,11 @@ export function buildBrowserActOnTargetJs(nodeId: string, action: AgentBrowserAc
         hostShadow: (el.tagName && el.tagName.indexOf('-') !== -1)
           ? (el.shadowRoot ? 'open' : 'closed_or_none')
           : null,
+        // D18-c：host 包围盒可能横跨整个按钮组（真机第十四轮实锚：
+        // xhs-publish-btn 的 rect 中心落在「暂存离开/发布」之间的死区，
+        // 可信升级点击点空）。把完整 rect 交回工具层，升级前先经 CDP
+        // 组合树命中测试在 rect 内扫描真实内部按钮。
+        rect: { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
       };
     }
     return { ok: true, action, target: record, url: String(location.href || ''), title: String(document.title || ''), clickPoint };
