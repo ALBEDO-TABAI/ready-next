@@ -4,6 +4,12 @@
 
 ## 当前真值摘要
 
+- `2026-07-05` **R1 十九轮通过收官 + 远程文件直达回传 + MCP 管理面**（0b42411a）：
+  - R1 十九轮真机通过：模型未传 disambiguation → 扫描按合同拒绝盲点回候选 → 模型按候选坐标点「发布」成功。逃生链全程按设计工作；补两观测项（locate 结果日志、click_at 取证 URL 同页闸）。
+  - 远程文件直达：新工具 channel_send_file（channel 域/channel_outbound 组，仅渠道绑定 scope 可见，目标锁死当前线程）——真机实锚"把报告发我"时模型无发送工具只能道歉；入站非媒体附件摘要带本机路径（用户发来的文档 agent 首次可读）。
+  - MCP 设置页占位退役：真管理面（状态/配置编辑/保存并重连，mcp-group IPC 五件套），labeling 测试重锚为通电钉。
+  - 待真机：微信文件往返、设置页配 server-filesystem。
+
 - `2026-07-05` **Phase I P0 远程确认链路 + Phase M stdio 先行完成**（7d4fd467 + 本批，均待真机验收）：
   - Phase I P0：ask/confirm 卡微信往返打通——卡经 agent_channel_threads 反查转投微信线程（纯文本编号选项）；入站消息命中 pending 卡走答案路径（编号/原文/前缀/取消词解析，失败回格式指引），复用与本地 IPC/frozen-call respond 唯一的 submit/cancel core。codec 7✓+service 5✓；观测点 remote_ask_card_forwarded/answered/reply_unparsed。
   - Phase M stdio：真 JSON-RPC stdio transport（换掉 Stage T stub，websocket 诚实失败）+ tools/list 发现（canonical mcp_<server>_<action> + schema/annotations 目录）+ settings `mcp_servers_json` 启动装配 + **确认闸动态映射**（外部工具声明 readOnlyHint 才 M4 放行，其余一律 M2——"外部破坏性动作无条件放行"治理缺口关闭）+ 每 server 24 工具上限可观测裁剪。真 spawn fixture e2e 7✓、MCP 家族回归 85✓、四 gate 绿。
