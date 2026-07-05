@@ -1,58 +1,21 @@
 import { useMemo, useState, useRef, useEffect, useCallback, useLayoutEffect } from 'react'
-import { createPortal } from 'react-dom'
 import {
   IconAlertTriangle as AlertTriangle,
-  IconArtboard,
-  IconAt as AtSign,
-  IconBook2 as BookOpen,
-  IconCheck as Check,
-  IconChevronDown as ChevronDown,
-  IconChevronRight as ChevronRight,
-  IconCopy as Copy,
-  IconFilePlus as FilePlus2,
-  IconFileSpreadsheet as FileSpreadsheet,
   IconFileText as FileText,
   IconFolder as Folder,
   IconFolderOpen as FolderOpen,
-  IconFolderPlus as FolderPlus,
-  IconListDetails as ListMinus,
-  IconLoader2 as Loader2,
   IconMinus as Minus,
-  IconMovie as Film,
-  IconMusic as Music2,
-  IconPencil as Pen,
   IconPhoto as Image,
   IconPlus as Plus,
-  IconRefresh as RefreshCw,
-  IconTrash as Trash2,
-  IconWorld as Globe,
 } from '@tabler/icons-react'
 import Modal from '../ui/Modal'
 import { computeDesiredRoots, useWorkspace, type FileItem } from '../../stores/useWorkspace'
-import {
-  FILE_APPEARANCE_COLORS,
-  getFileAppearanceColorValue,
-  normalizeFileAppearanceIcon,
-  type FileAppearance,
-  type FileAppearanceColor,
-} from '../../stores/fileAppearance'
-import { addReadyContextReferenceToAgentInput } from '../../modules/agent/chat-input-bridge'
+import { normalizeFileAppearanceIcon } from '../../stores/fileAppearance'
 import { isImagePreviewPath, useDocTabs } from '../../stores/useDocTabs'
 import type { WorkbenchMode } from '../../stores/useMode'
-import { toLocalFileUrl } from '../../utils/dragDrop'
-import ContextMenu, { type ContextMenuItem } from './ContextMenu'
-import type { NativeContextMenuItem } from '../../../shared/native-context-menu'
-import { FolderPreview } from './FolderPreview'
-import { describeFolderPreview } from './folderPreviewModel'
 import {
-  buildFloatingMenuItemStyle,
-  buildFloatingMenuSurfaceStyle,
-} from '../ui/floatingMenuStyles'
-import {
-  clampDropMenuPositionToBoundary,
   dispatchFileTreeExternalDropAction,
   getActiveRssItemDragPayload,
-  isLikelyVideoDropPayload,
   parseBrowserTabDragPayload,
   parseReadyBoardFileTreeDropPayload,
   parseRssItemDragPayload,
@@ -63,13 +26,11 @@ import {
   canMoveAllToDirectory,
   shouldKeepFileTreeDropHintOnLeave,
   type FileTreeDropTarget,
-  type FileTreeAnalysisPlaceholderStatus,
   type FileTreeExternalDropAction,
   type FileTreeExternalDropPayload,
   type WebDownloadDragPayload,
 } from './fileTreeExternalDrop'
 import { getActiveBrowserTabDragPayload } from '../../modules/browser/browserTabDragSession'
-import { EBOOK_EXTENSIONS, isEbookExtension } from '../../../shared/ebook'
 import { isReadyBoardFile } from '../../../shared/ready-board'
 import { isLocalHtmlFilePath, openLocalHtmlFileInBrowser } from '../../modules/browser/localHtmlFileOpen'
 import { applyWorkbenchModeOpenDecision, requestWorkbenchModeChange } from '../../modules/workbench/mode-transition'
@@ -80,19 +41,12 @@ import {
   type FileTreeDeleteTarget,
 } from './fileTreeSelection'
 import {
-  buildWorkspaceDragPayload,
-  buildWorkspaceDragTransferPayload,
-  parseWorkspaceDragPayloads,
-  writeWorkspaceDragData,
   type WorkspaceDragPayload,
 } from './fileTreeDragPayload'
 import {
-  beginWorkspaceDragSession,
   endWorkspaceDragSession,
-  getActiveWorkspaceDragPayloads,
 } from './workspaceDragSession'
 import { buildMoveBlockedNotice } from './fileTreeMoveNotice'
-import { startBrowserLocalMediaNativeFileDrag } from '../../modules/browser/localMediaDragBridge'
 import FileEmergenceSection from './FileEmergenceSection'
 import { buildFileEmergenceViewModel } from './fileEmergenceViewModel'
 import { recordFileEmergenceActivity, readFileEmergenceEnabled } from '../../modules/file-emergence/fileEmergenceClient'
