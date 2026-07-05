@@ -1148,46 +1148,6 @@
       "snippetHash": "db9b37ba01f2bc38"
     },
     {
-      "file": "src/renderer/modules/agent/documentActions.ts",
-      "line": 181,
-      "snippetHash": "6f2c2a3d84d09093"
-    },
-    {
-      "file": "src/renderer/modules/agent/documentActions.ts",
-      "line": 224,
-      "snippetHash": "ca37de6e283c879d"
-    },
-    {
-      "file": "src/renderer/modules/agent/documentActions.ts",
-      "line": 421,
-      "snippetHash": "966a011736baef1f"
-    },
-    {
-      "file": "src/renderer/modules/agent/documentActions.ts",
-      "line": 1172,
-      "snippetHash": "bcae4c6e6e586e36"
-    },
-    {
-      "file": "src/renderer/modules/agent/documentActions.ts",
-      "line": 1323,
-      "snippetHash": "ecd63ddbbaaf6ff0"
-    },
-    {
-      "file": "src/renderer/modules/agent/documentActions.ts",
-      "line": 1401,
-      "snippetHash": "cbb8fd6864566873"
-    },
-    {
-      "file": "src/renderer/modules/agent/documentActions.ts",
-      "line": 1525,
-      "snippetHash": "f96a3c9b5db9969c"
-    },
-    {
-      "file": "src/renderer/modules/agent/documentActions.ts",
-      "line": 1556,
-      "snippetHash": "a6b5bfe635de111d"
-    },
-    {
       "file": "src/renderer/modules/agent/messageComposer.ts",
       "line": 71,
       "snippetHash": "989ace113dbe863e"
@@ -1776,6 +1736,46 @@
       "file": "src/renderer/utils/dragDrop.ts",
       "line": 59,
       "snippetHash": "7fa34d6c8a4e3b62"
+    },
+    {
+      "file": "src/renderer/modules/agent/document-actions/execute.ts",
+      "line": 134,
+      "snippetHash": "966a011736baef1f"
+    },
+    {
+      "file": "src/renderer/modules/agent/document-actions/execute.ts",
+      "line": 1064,
+      "snippetHash": "bcae4c6e6e586e36"
+    },
+    {
+      "file": "src/renderer/modules/agent/document-actions/execute.ts",
+      "line": 1163,
+      "snippetHash": "ecd63ddbbaaf6ff0"
+    },
+    {
+      "file": "src/renderer/modules/agent/document-actions/execute.ts",
+      "line": 1252,
+      "snippetHash": "cbb8fd6864566873"
+    },
+    {
+      "file": "src/renderer/modules/agent/document-actions/execute.ts",
+      "line": 1382,
+      "snippetHash": "f96a3c9b5db9969c"
+    },
+    {
+      "file": "src/renderer/modules/agent/document-actions/execute.ts",
+      "line": 1413,
+      "snippetHash": "a6b5bfe635de111d"
+    },
+    {
+      "file": "src/renderer/modules/agent/document-actions/mutation-classify.ts",
+      "line": 55,
+      "snippetHash": "6f2c2a3d84d09093"
+    },
+    {
+      "file": "src/renderer/modules/agent/document-actions/visual-validation.ts",
+      "line": 47,
+      "snippetHash": "ca37de6e283c879d"
     }
   ]
 }

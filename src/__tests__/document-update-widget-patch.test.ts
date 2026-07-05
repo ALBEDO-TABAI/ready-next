@@ -88,7 +88,8 @@ const PIPELINE_PATH = resolve(
 )
 const ACTIONS_PATH = resolve(
   process.cwd(),
-  'src/renderer/modules/agent/documentActions.ts',
+  // 2026-07-06 拆分随迁：patch 执行实现从 documentActions 门面移到 execute.ts。
+  'src/renderer/modules/agent/document-actions/execute.ts',
 )
 
 test('DocumentWidgetDraft schema 新增 componentSpecPatch 字段', () => {
