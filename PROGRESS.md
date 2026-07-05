@@ -4,6 +4,8 @@
 
 ## 当前真值摘要
 
+- `2026-07-05` **agent 代装 MCP 能力（install_mcp_server）**：非专业用户对 agent 说"帮我装个 XX 的 MCP"即可——两阶段合同镜像 install_skill：阶段 1 只读解析（npx/uvx 白名单+包名正则+shell 元字符拒绝，绝不落盘）→ ask 卡确认命令与风险 → 阶段 2 confirmAck 回传 pendingConfig 重新全量校验后写配置+重连+回报工具清单；附 list/remove；不收 env（密钥不走对话）。mcp-install-tool 6✓、四 MCP gate 绿。
+
 - `2026-07-05` **R1 十九轮通过收官 + 远程文件直达回传 + MCP 管理面**（0b42411a）：
   - R1 十九轮真机通过：模型未传 disambiguation → 扫描按合同拒绝盲点回候选 → 模型按候选坐标点「发布」成功。逃生链全程按设计工作；补两观测项（locate 结果日志、click_at 取证 URL 同页闸）。
   - 远程文件直达：新工具 channel_send_file（channel 域/channel_outbound 组，仅渠道绑定 scope 可见，目标锁死当前线程）——真机实锚"把报告发我"时模型无发送工具只能道歉；入站非媒体附件摘要带本机路径（用户发来的文档 agent 首次可读）。

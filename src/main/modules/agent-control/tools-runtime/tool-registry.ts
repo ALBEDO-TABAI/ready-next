@@ -42,6 +42,11 @@ import {
   getChannelOutboundOpenAITools,
 } from '../../tools/builtins/channel-send-file'
 import {
+  MCP_INSTALL_TOOL_NAMES,
+  getMcpInstallAnthropicTools,
+  getMcpInstallOpenAITools,
+} from '../../tools/mcp-install-tool-defs'
+import {
   BROWSER_CONTENT_TASK_TOOL_NAMES,
   BROWSER_INTERACTION_TOOL_NAMES,
   getBrowserAnthropicTools,
@@ -888,6 +893,29 @@ const GROUP_TOOL_PROVIDERS: Record<CapabilityGroupId, ToolRegistryProvider> = {
         // silent-catch: a tool-def build failure must still expose the capability —
         // fall back to the static schema so install_skill never silently vanishes.
         return SKILL_INSTALL_TOOL_NAMES.map((name) => createStaticFallbackSchema(name, 'openai'))
+      }
+    },
+  },
+  // Phase M（2026-07-05）—— agent 代装 MCP server 的两阶段前门。命名同
+  // install_skill 策略（无 mcp_/skill_ 前缀）；确认在工具内经
+  // ask_user_questions 完成（install_skill 同款范式）。
+  mcp_install: {
+    staticToolNames: MCP_INSTALL_TOOL_NAMES,
+    getToolDefinitions: () => buildToolDefinitions('mcp_install', MCP_INSTALL_TOOL_NAMES),
+    getAnthropicTools: () => {
+      try {
+        return getMcpInstallAnthropicTools()
+      } catch {
+        // silent-catch: schema build failure must not hide the capability
+        return MCP_INSTALL_TOOL_NAMES.map((name) => createStaticFallbackSchema(name, 'anthropic'))
+      }
+    },
+    getOpenAITools: () => {
+      try {
+        return getMcpInstallOpenAITools()
+      } catch {
+        // silent-catch: schema build failure must not hide the capability
+        return MCP_INSTALL_TOOL_NAMES.map((name) => createStaticFallbackSchema(name, 'openai'))
       }
     },
   },

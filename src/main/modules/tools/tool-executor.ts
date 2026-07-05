@@ -66,6 +66,7 @@ import { executeRenameSpecialistAgent } from './builtins/rename-specialist-agent
 import { resolveSpecialistFoundationSemanticJudge } from '../agent-control/agents/specialist-foundation-semantic-judge-provider'
 import { executeInstallSkill } from './builtins/install-skill'
 import { executeChannelSendFile } from './builtins/channel-send-file'
+import { executeInstallMcpServer } from './builtins/install-mcp-server'
 import {
   getAskUserQuestionsCardEmitter,
   getAskUserQuestionsCardPersistor,
@@ -99,6 +100,7 @@ import {
 } from './tool-not-allowed-message'
 import { STATIC_SKILL_ACTIONS_BY_TOOL_NAME } from './skills-tools-static'
 import { ExternalServiceStore } from '../settings-engine/external-service-store'
+import { getDatabase } from '../database'
 import { createBrowserStructuredOutput as browserFailureOutput } from './browser-failure-output'
 
 export interface ToolContext {
@@ -924,6 +926,14 @@ async function executeToolCallInner(
           return executeChannelSendFile(args as Record<string, unknown>, {
             scopeId: context.scopeId,
             sessionId: context.sessionId,
+          })
+
+        case 'mcp_install':
+          // Phase M —— agent 代装 MCP server：两阶段确认合同在工具内执行
+          // （install_skill 同款范式）；命令白名单/包名校验由代码强制。
+          return executeInstallMcpServer(args as Record<string, unknown>, {
+            getSetting: (key) => getDatabase().getSetting(key),
+            setSetting: (key, value) => getDatabase().setSetting(key, value),
           })
 
         default:

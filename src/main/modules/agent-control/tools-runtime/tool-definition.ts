@@ -19,6 +19,7 @@ export type ToolDomain =
   | 'agent_interaction'
   | 'skill_install'
   | 'channel'
+  | 'mcp_install'
 
 export type ToolKind = 'read' | 'write' | 'interactive' | 'job'
 export type ToolConcurrency = 'parallel_read_safe' | 'serialized'

@@ -401,6 +401,45 @@ export type ChannelOutboundErrorKindKey = keyof typeof CHANNEL_OUTBOUND_ERROR_KI
 export type ChannelOutboundErrorKind =
   (typeof CHANNEL_OUTBOUND_ERROR_KINDS)[ChannelOutboundErrorKindKey]['code']
 
+// ---------- MCP server install (Phase M agent 前门) ----------
+
+export const MCP_INSTALL_ERROR_KINDS = {
+  invalidSource: {
+    code: 'mcp_install_invalid_source',
+    noMetric: true,
+    description: 'The requested MCP server source could not be resolved to a valid npx/uvx package.',
+  },
+  commandNotAllowed: {
+    code: 'mcp_install_command_not_allowed',
+    noMetric: true,
+    description: 'Agent-driven MCP install only accepts the npx/uvx command allowlist; other commands must be added manually in settings.',
+  },
+  duplicateServer: {
+    code: 'mcp_install_duplicate_server',
+    noMetric: true,
+    description: 'A server with the same id already exists in mcp_servers_json.',
+  },
+  configUnreadable: {
+    code: 'mcp_install_config_unreadable',
+    noMetric: true,
+    description: 'Existing mcp_servers_json is not a parseable JSON array; refusing to rewrite it (fix in settings first).',
+  },
+  serverNotFound: {
+    code: 'mcp_install_server_not_found',
+    noMetric: true,
+    description: 'Remove was requested for a server id that does not exist in the config.',
+  },
+  applyFailed: {
+    code: 'mcp_install_apply_failed',
+    noMetric: true,
+    description: 'Persisting the config or reloading the MCP servers failed.',
+  },
+} as const satisfies Record<string, ErrorKindMeta>
+
+export type McpInstallErrorKindKey = keyof typeof MCP_INSTALL_ERROR_KINDS
+export type McpInstallErrorKind =
+  (typeof MCP_INSTALL_ERROR_KINDS)[McpInstallErrorKindKey]['code']
+
 // ---------- action confirmation/control ----------
 
 export const ACTION_CONFIRMATION_ERROR_KINDS = {

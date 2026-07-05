@@ -2601,6 +2601,7 @@ export function scopeRunModuleForTool(definition: ToolDefinition): import('../co
     || definition.domain === 'agent_interaction'
     || definition.domain === 'skill_install'
     || definition.domain === 'channel'
+    || definition.domain === 'mcp_install'
   ) {
     return 'system'
   }

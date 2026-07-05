@@ -18,6 +18,7 @@ export type CapabilityGroupId =
   | 'agent_interaction'
   | 'skill_install'
   | 'channel_outbound'
+  | 'mcp_install'
 
 export type CapabilityProfileId =
   | 'local_chat'
@@ -233,6 +234,18 @@ export const CAPABILITY_GROUPS: CapabilityGroupDefinition[] = [
     id: 'skill_install',
     label: '安装技能',
     description: '识别用户的技能安装意图，先只读解析出真实下载地址 + 风险分级（不安装），由用户通过反问卡确认后再交由宿主下载、扫描并安装。仅 local_chat。',
+    exposure: 'model_visible',
+    availability: 'active',
+    defaultMode: 'on',
+    defaultProfiles: ['local_chat'],
+    executionKinds: ['interactive'],
+    settingsVisible: false,
+  },
+  {
+    id: 'mcp_install',
+    label: '安装 MCP server',
+    description:
+      'Phase M（2026-07-05）：非专业用户让 agent 代为接入外部 MCP server 的两阶段安装工具（install_mcp_server）。阶段 1 只读解析出 npx/uvx 包与将写入的配置（绝不安装），经 ask_user_questions 用户确认后阶段 2 才写配置并重连；命令白名单 npx/uvx 由代码强制。',
     exposure: 'model_visible',
     availability: 'active',
     defaultMode: 'on',

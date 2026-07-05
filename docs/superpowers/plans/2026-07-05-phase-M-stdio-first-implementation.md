@@ -61,9 +61,28 @@ enforce: true
    （远程 scope 时经 Phase I P0 链路到微信）。
 4. 第二个第三方只读 stdio server（fetch/time 类）同法接入，凑"≥2 server"出口判据。
 
+## 同日追加（用户定向）
+
+- **设置页真管理面已落地**（同日第二批）：`McpSettingsPanel` 占位退役——
+  server 状态卡（连接/工具数/工具名/错误）+ 配置 JSON 编辑（主进程同一
+  parser 校验，坏条目原因逐条回显）+ 保存并重连；`mcp-group` IPC
+  （status/saveConfig/reload）+ preload/类型五件套；labeling 测试重锚为
+  "管理面已通电钉"（not-shipped 字样全仓禁）。
+- **agent 代装能力已落地**（同日第三批，用户定向"非专业用户只会说帮忙装"）：
+  `install_mcp_server` 两阶段工具（`mcp_install` 组/域，镜像 install_skill
+  的 trustAck 范式）——阶段 1 只读解析出 npx/uvx 包与 pendingConfig
+  （绝不落盘），模型必须经 `ask_user_questions` 让用户确认命令+风险；
+  阶段 2 `confirmAck:true` 回传 pendingConfig，**重新全量校验**（命令白名单
+  npx/uvx、包名正则、args 无 shell 元字符、id 去重、现有配置不可解析即拒改）
+  后写 `mcp_servers_json` 并复用设置页同一 reload 通道，回报发现的工具清单；
+  连接失败如实报告且配置保留（设置页可修）。附 action=list/remove。
+  不接受 env（密钥不走对话明文，安装后引导用户在设置页补）。
+  行为测试 `mcp-install-tool.test.ts` 6✓（两阶段/白名单/元字符/重复 id/
+  坏配置拒改/失败如实/移除清单）。
+
 ## 登记（第二阶段）
 
 - OAuth 实装（loopback + token 持久化）、consent 记录/deferred 驱动接线、
-  设置页真管理面（`McpSettingsPanel` 占位标签"暂未发布 MCP transport"已与
-  stdio 现状不符，随管理面一起重写并重锚 labeling 测试）、websocket/
-  streamable-http、健康检查与"已连接≠在线"。
+  websocket/streamable-http、健康检查与"已连接≠在线"、
+  install_mcp_server 的包名→官方实现核验辅助（当前靠模型判断+用户确认，
+  可加 npm registry 元数据只读预检）。
