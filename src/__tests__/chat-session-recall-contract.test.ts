@@ -25,12 +25,21 @@ test('chat panel wires session recall search and attach APIs into the inline cha
   assert.match(recallHook, /detachSessionRecallContext/)
   assert.match(recallHook, /sessionRecallResults/)
   assert.match(recallHook, /attachedSessionRecallCapsules/)
-  assert.match(chatPanel, /sessionRecallResults=\{visibleSessionRecallResults\}/)
+  // 合同随实现同步（裁决项②，2026-07-05）：23d6ec9a 会话来源历史菜单合并
+  // 把"可见性过滤"从 ChatPanel 的单一当前频道过滤下沉进 ChatHeader 的
+  // **逐频道**过滤（语义更强）；ChatPanel 改传原始结果。不变量本体
+  // （recall 命中必须按频道 scope 过滤后展示）改钉 ChatHeader。
+  assert.match(chatPanel, /sessionRecallResults=\{sessionRecallResults\}/)
+  assert.match(
+    chatHeader,
+    /sessionRecallResults\.filter\(\s*\(item\) => item\.sourceKind === channel\.sourceKind && item\.sourceId === channel\.sourceId,?\s*\)/,
+  )
   assert.match(chatPanel, /attachedSessionRecallConversationIds=/)
   assert.doesNotMatch(chatPanel, /搜索旧会话/)
 
   assert.match(chatHeader, /placeholder="搜旧会话标题、消息、任务摘要或附件名"/)
-  assert.match(chatHeader, /sessionRecallResults\.map/)
+  // 同上：map 面从原始列表移至逐频道 channelResults。
+  assert.match(chatHeader, /channelResults\.map|channelResults\s*\.map/)
   assert.match(chatHeader, /onAttachSessionRecall/)
 
   assert.match(preload, /searchSessionRecall:/)

@@ -204,7 +204,12 @@ function projectionTitleForEvent(event: SkillTaskEvent): string {
 }
 
 function projectionSummaryForEvent(event: SkillTaskEvent): string {
-  if (!event.projectionOnly) return titleForTool(event.toolName)
+  // 裁决修复（2026-07-05，授权裁决项①）：c8e566a4 为 projectionOnly 事件
+  // 引入策展文案时，把非 projectionOnly 分支顺手写成 titleForTool 通杀，
+  // 丢掉了 event.message——技能管线的实时进度（"正在评分第 3 批镜头"）
+  // 从任务卡消失，且 6/26 起压着同名回归测试红。复原改动前的
+  // message 优先语义（投影保真：任务卡是用户唯一进度面）。
+  if (!event.projectionOnly) return String(event.message || '').trim() || titleForTool(event.toolName)
   if (event.status === 'error') return event.toolName === 'skill_export_artifact'
     ? '保存没有完成，正在调整'
     : '处理没有完成，正在调整'

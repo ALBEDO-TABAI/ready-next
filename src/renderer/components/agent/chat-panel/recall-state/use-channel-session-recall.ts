@@ -58,7 +58,6 @@ export interface RecallStateHandle {
   query: string
   setQuery: Dispatch<SetStateAction<string>>
   results: SessionRecallHit[]
-  visibleResults: SessionRecallHit[]
   searching: boolean
   error: string | null
   setResults: Dispatch<SetStateAction<SessionRecallHit[]>>
@@ -193,12 +192,6 @@ export function useChannelSessionRecall(
       })
   }, [getScopeChannelKey, scopes, selectedChannelKey])
 
-  const visibleSessionRecallResults = useMemo(() => {
-    return sessionRecallResults.filter((item) => {
-      return item.sourceKind === currentChannel.sourceKind && item.sourceId === currentChannel.sourceId
-    })
-  }, [currentChannel.sourceId, currentChannel.sourceKind, sessionRecallResults])
-
   const attachedSessionRecallConversationIds = useMemo(
     () => attachedSessionRecallCapsules.map((capsule) => capsule.conversationId),
     [attachedSessionRecallCapsules]
@@ -326,7 +319,6 @@ export function useChannelSessionRecall(
     query: sessionRecallQuery,
     setQuery: setSessionRecallQuery,
     results: sessionRecallResults,
-    visibleResults: visibleSessionRecallResults,
     searching: sessionRecallSearching,
     error: sessionRecallError,
     setResults: setSessionRecallResults,
