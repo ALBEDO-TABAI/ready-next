@@ -12,6 +12,9 @@
  *   - 不接受 env（密钥不走对话明文）；现有配置解析不动就拒绝改写。
  */
 
+import { existsSync, statSync } from 'fs'
+import { basename as pathBasename, isAbsolute } from 'path'
+
 import { ToolDomainError } from '../tool-errors'
 import { MCP_INSTALL_ERROR_KINDS } from '../../agent-control/contracts/error-kinds'
 import {
@@ -29,11 +32,52 @@ import { listMcpServerRegistrations } from '../../mcp/registry'
 const NPM_PACKAGE_RE = /^(?:@[a-z0-9-~][a-z0-9-._~]*\/)?[a-z0-9-~][a-z0-9-._~]*$/
 const PYPI_PACKAGE_RE = /^[A-Za-z0-9]([A-Za-z0-9._-]*[A-Za-z0-9])?$/
 const SERVER_ID_RE = /^[a-z0-9][a-z0-9-]{0,47}$/
+/**
+ * 本地二进制安装（2026-07-05 真机实锚：Pencil.app 自带的
+ * mcp-server-darwin-arm64 被白名单拒绝，用户被迫手工编辑配置）——通用
+ * 解释器/壳被排除：它们把"运行这个二进制"变成"运行任意脚本"，
+ * 用户确认卡上看到的命令与实际能力就不再一致。
+ */
+const BLOCKED_LOCAL_INTERPRETERS = new Set([
+  'sh', 'bash', 'zsh', 'dash', 'fish', 'csh', 'tcsh', 'ksh',
+  'python', 'python3', 'node', 'deno', 'bun', 'osascript', 'perl', 'ruby', 'env',
+])
 
 export interface McpInstallPendingConfig {
   id: string
-  command: 'npx' | 'uvx'
+  /** 'npx' | 'uvx' | 本地可执行文件绝对路径（三者之外机械拒绝）。 */
+  command: string
   args: string[]
+}
+
+/** 本地二进制的机械准入：绝对路径、存在、常规文件、可执行、非通用解释器。 */
+function assertLocalBinaryAllowed(command: string): void {
+  if (!isAbsolute(command)) {
+    throw new ToolDomainError(
+      MCP_INSTALL_ERROR_KINDS.commandNotAllowed.code,
+      `命令「${command.slice(0, 80)}」不在白名单：只接受 npx / uvx / 本地可执行文件的绝对路径。`,
+    )
+  }
+  const name = pathBasename(command).toLowerCase()
+  if (BLOCKED_LOCAL_INTERPRETERS.has(name)) {
+    throw new ToolDomainError(
+      MCP_INSTALL_ERROR_KINDS.commandNotAllowed.code,
+      `不接受通用解释器/壳（${name}）作为 MCP server 命令——它等价于运行任意脚本，确认卡将失去意义。请指向该 MCP server 自己的可执行文件。`,
+    )
+  }
+  if (!existsSync(command)) {
+    throw new ToolDomainError(
+      MCP_INSTALL_ERROR_KINDS.invalidSource.code,
+      `本地可执行文件不存在：${command.slice(0, 200)}。确认应用已安装、路径无拼写错误。`,
+    )
+  }
+  const stat = statSync(command)
+  if (!stat.isFile() || (stat.mode & 0o111) === 0) {
+    throw new ToolDomainError(
+      MCP_INSTALL_ERROR_KINDS.invalidSource.code,
+      `不是可执行的常规文件：${command.slice(0, 200)}。`,
+    )
+  }
 }
 
 export interface InstallMcpServerDeps {
@@ -79,24 +123,50 @@ function existingIds(entries: Array<Record<string, unknown>>): Set<string> {
   return new Set(entries.map((entry) => String(entry.id || '').trim()).filter(Boolean))
 }
 
-/** 阶段 1：source → 白名单命令 + 校验后的 pendingConfig（纯函数，可单测）。 */
+/** 阶段 1：source → 白名单命令 + 校验后的 pendingConfig（纯函数+文件系统探测，可单测）。 */
 export function resolveMcpInstallSource(input: {
   source: string
   serverId?: string
   extraArgs?: string[]
-}): { pendingConfig: McpInstallPendingConfig; packageName: string; runner: 'npx' | 'uvx' } {
+}): { pendingConfig: McpInstallPendingConfig; packageName: string; runner: 'npx' | 'uvx' | 'local' } {
   const raw = String(input.source || '').trim()
   if (!raw) {
     throw new ToolDomainError(
       MCP_INSTALL_ERROR_KINDS.invalidSource.code,
-      '安装阶段 1 需要 source：npm 包名（如 @modelcontextprotocol/server-filesystem）或 uvx:<PyPI 包名>。',
+      '安装阶段 1 需要 source：npm 包名（如 @modelcontextprotocol/server-filesystem）、uvx:<PyPI 包名>，或本地可执行文件的绝对路径。',
     )
   }
   if (/^(https?:|git@)/i.test(raw)) {
     throw new ToolDomainError(
       MCP_INSTALL_ERROR_KINDS.invalidSource.code,
-      'agent 安装只接受已发布的包（npm / uvx:PyPI），不接受 URL/仓库地址。请先确认该 server 发布的包名；确实只有源码时，让用户在 设置 → MCP 手工配置。',
+      'agent 安装只接受已发布的包（npm / uvx:PyPI）或本地可执行文件绝对路径，不接受 URL/仓库地址。请先确认该 server 发布的包名；确实只有源码时，让用户在 设置 → MCP 手工配置。',
     )
+  }
+  const extraArgs = (input.extraArgs || []).map((value) => String(value)).filter((value) => value.length > 0)
+  for (const value of extraArgs) {
+    if (/[;&|`$<>\n\r]/.test(value)) {
+      throw new ToolDomainError(
+        MCP_INSTALL_ERROR_KINDS.invalidSource.code,
+        `args 含不允许的 shell 元字符：${value.slice(0, 60)}（参数按原样传给 server 进程，不经 shell——不需要也不允许这些字符）。`,
+      )
+    }
+  }
+  // 本地二进制分支（Pencil.app 这类应用自带 MCP server）：绝对路径即入口，
+  // 机械准入（存在/常规/可执行/非解释器）在此与阶段 2 各跑一次。
+  if (isAbsolute(raw)) {
+    assertLocalBinaryAllowed(raw)
+    const id = String(input.serverId || '').trim() || deriveServerId(pathBasename(raw))
+    if (!SERVER_ID_RE.test(id)) {
+      throw new ToolDomainError(
+        MCP_INSTALL_ERROR_KINDS.invalidSource.code,
+        `serverId「${id.slice(0, 60)}」不合法：小写字母数字与连字符，≤48 字符。`,
+      )
+    }
+    return {
+      runner: 'local',
+      packageName: raw,
+      pendingConfig: { id, command: raw, args: extraArgs },
+    }
   }
   let runner: 'npx' | 'uvx' = 'npx'
   let packageName = raw
@@ -110,18 +180,9 @@ export function resolveMcpInstallSource(input: {
   if (!packageOk) {
     throw new ToolDomainError(
       MCP_INSTALL_ERROR_KINDS.invalidSource.code,
-      `「${packageName.slice(0, 80)}」不是合法的${runner === 'npx' ? ' npm' : ' PyPI'} 包名。确认真实包名后重试。`,
+      `「${packageName.slice(0, 80)}」不是合法的${runner === 'npx' ? ' npm' : ' PyPI'} 包名。确认真实包名后重试；本地二进制请直接传它的绝对路径。`,
       { source: raw.slice(0, 120) },
     )
-  }
-  const extraArgs = (input.extraArgs || []).map((value) => String(value)).filter((value) => value.length > 0)
-  for (const value of extraArgs) {
-    if (/[;&|`$<>\n\r]/.test(value)) {
-      throw new ToolDomainError(
-        MCP_INSTALL_ERROR_KINDS.invalidSource.code,
-        `args 含不允许的 shell 元字符：${value.slice(0, 60)}（参数按原样传给 server 进程，不经 shell——不需要也不允许这些字符）。`,
-      )
-    }
   }
   const id = String(input.serverId || '').trim() || deriveServerId(packageName)
   if (!SERVER_ID_RE.test(id)) {
@@ -147,8 +208,10 @@ function normalizePendingConfig(raw: unknown): McpInstallPendingConfig | null {
   const id = String(value.id || '').trim()
   const command = String(value.command || '').trim()
   if (!SERVER_ID_RE.test(id)) return null
-  if (command !== 'npx' && command !== 'uvx') return null
-  if (!Array.isArray(value.args) || value.args.length === 0) return null
+  if (!command) return null
+  // npx/uvx 必须携带包名参数；本地二进制允许空 args
+  if (!Array.isArray(value.args)) return null
+  if ((command === 'npx' || command === 'uvx') && value.args.length === 0) return null
   const args = value.args.map((item) => String(item))
   return { id, command, args }
 }
@@ -215,23 +278,22 @@ export async function executeInstallMcpServer(
         '带 confirmAck 的安装阶段缺少有效的 pendingConfig；先用阶段 1（只传 source）解析，把返回的 pendingConfig 原样回传。',
       )
     }
-    // 阶段 2 重新全量校验（防模型改写回传内容）：白名单 + 包名 + 元字符。
-    if (pending.command !== 'npx' && pending.command !== 'uvx') {
-      throw new ToolDomainError(
-        MCP_INSTALL_ERROR_KINDS.commandNotAllowed.code,
-        `命令「${String(pending.command).slice(0, 40)}」不在白名单（npx/uvx）。需要其他命令时让用户在 设置 → MCP 手工配置。`,
-      )
-    }
-    const packageIndex = pending.command === 'npx' ? pending.args.indexOf('-y') + 1 : 0
-    const packageName = String(pending.args[packageIndex] || '')
-    const packageOk = pending.command === 'npx'
-      ? pending.args[0] === '-y' && NPM_PACKAGE_RE.test(packageName)
-      : PYPI_PACKAGE_RE.test(packageName)
-    if (!packageOk) {
-      throw new ToolDomainError(
-        MCP_INSTALL_ERROR_KINDS.invalidSource.code,
-        'pendingConfig 的 args 不符合阶段 1 的产出形状（npx 必须 [-y, 包名, …]；uvx 必须 [包名, …]）。请重新走阶段 1。',
-      )
+    // 阶段 2 重新全量校验（防模型改写回传内容）：白名单 + 包名/本地二进制 + 元字符。
+    if (pending.command === 'npx' || pending.command === 'uvx') {
+      const packageIndex = pending.command === 'npx' ? pending.args.indexOf('-y') + 1 : 0
+      const packageName = String(pending.args[packageIndex] || '')
+      const packageOk = pending.command === 'npx'
+        ? pending.args[0] === '-y' && NPM_PACKAGE_RE.test(packageName)
+        : PYPI_PACKAGE_RE.test(packageName)
+      if (!packageOk) {
+        throw new ToolDomainError(
+          MCP_INSTALL_ERROR_KINDS.invalidSource.code,
+          'pendingConfig 的 args 不符合阶段 1 的产出形状（npx 必须 [-y, 包名, …]；uvx 必须 [包名, …]）。请重新走阶段 1。',
+        )
+      }
+    } else {
+      // 本地二进制：绝对路径 + 存在/常规/可执行/非解释器，与阶段 1 同规
+      assertLocalBinaryAllowed(pending.command)
     }
     for (const value of pending.args) {
       if (/[;&|`$<>\n\r]/.test(value)) {
@@ -307,10 +369,15 @@ export async function executeInstallMcpServer(
       `已存在 id 为「${resolved.pendingConfig.id}」的 server。传入不同的 serverId，或先 action=remove。`,
     )
   }
-  const commandLine = `${resolved.pendingConfig.command} ${resolved.pendingConfig.args.join(' ')}`
+  const commandLine = `${resolved.pendingConfig.command} ${resolved.pendingConfig.args.join(' ')}`.trim()
+  const isLocal = resolved.runner === 'local'
   const riskNotes = [
-    `将以本地子进程运行第三方包：${commandLine}（首次运行会从 ${resolved.runner === 'npx' ? 'npm' : 'PyPI'} 下载）。`,
-    '包名是否是你要的官方实现，需要用户确认（存在同名仿冒包的可能）。',
+    isLocal
+      ? `将以本地子进程运行本机可执行文件：${commandLine}。`
+      : `将以本地子进程运行第三方包：${commandLine}（首次运行会从 ${resolved.runner === 'npx' ? 'npm' : 'PyPI'} 下载）。`,
+    isLocal
+      ? '这个可执行文件属于已安装的本机应用，需要用户确认它确实是所指应用自带的 MCP server。'
+      : '包名是否是你要的官方实现，需要用户确认（存在同名仿冒包的可能）。',
     ...(resolved.pendingConfig.args.some((value) => value.startsWith('/'))
       ? [`args 里的路径将对该 server 完全开放：${resolved.pendingConfig.args.filter((value) => value.startsWith('/')).join('、')}`]
       : []),

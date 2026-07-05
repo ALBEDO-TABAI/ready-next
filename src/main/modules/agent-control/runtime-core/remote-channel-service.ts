@@ -505,6 +505,10 @@ export class RemoteChannelService {
           | string
           | Array<{ type: string; text?: string; base64?: string; mimeType?: string }>,
         requestId,
+        // 渠道 run 观察面对齐（2026-07-05 真机实锚）：本地 run 经 sendScoped
+        // 传 userMessage.id，渠道 run 此前缺失——任务投影与本地面板的挂载
+        // 语义因此与本地不同构。补上入站用户消息 id。
+        sourceMessageId: inboundMessage.id,
         coordinators: this.deps.getDomainAdapters()
       },
       {

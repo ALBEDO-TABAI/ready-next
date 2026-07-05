@@ -758,10 +758,21 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
     modeStore.setReadySubMode(mode)
   }
 
+  /**
+   * 渠道 scope 的 assistant 持久化唯一属主是 main（remote-channel-service
+   * onSuccess）——renderer 再写就是 DB 双行（2026-07-05 真机实锚：微信
+   * 回复本地显示两条）。renderer 对渠道 run 只做展示（瞬影段随
+   * message_added 去重收敛）。
+   */
+  function isChannelSourcedScope(scope: ConversationScope | null): boolean {
+    return Boolean(scope && (scope as { sourceKind?: string }).sourceKind === 'channel')
+  }
+
   async function persistAssistantMessageForRun(scopeId: string, runState: ScopeRunState | null): Promise<void> {
     if (!runState?.responseMessageId) return
     const state = store.getState()
     const currentScope = (state.scopes.find((item: ConversationScope) => item.id === scopeId) || state.currentScope || null) as ConversationScope | null
+    if (isChannelSourcedScope(currentScope)) return
     const currentMessage = state.messages.find((item: AgentMessage) => item.id === runState.responseMessageId)
     const content = currentMessage?.content || runState.responseBuffer || ''
     const snapshotMeta = buildResponseSegmentMeta(scopeId, currentScope, runState)
@@ -789,6 +800,7 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
     if (!runState?.responseMessageId) return
     const state = store.getState()
     const currentScope = (state.scopes.find((item: ConversationScope) => item.id === scopeId) || state.currentScope || null) as ConversationScope | null
+    if (isChannelSourcedScope(currentScope)) return
     const currentMessage = state.messages.find((item: AgentMessage) => item.id === runState.responseMessageId)
     const content = currentMessage?.content || runState.responseBuffer || ''
     if (!content.trim()) return
@@ -1824,32 +1836,44 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
         if (event.type === 'message_added' && event.message) {
           // EP2 P0-2 — a persisted message supersedes its live-cache twin for
           // ANY scope (the DB row is what the next loadScope returns).
+          // 2026-07-05 渠道双回复修复：main 持久化的 assistant 消息同时收编
+          // renderer 流出来的瞬影段（不同 id、相同内容、meta.transient）——
+          // 渠道 run 的 renderer 不再持久化，瞬影只在此处被真值行替换。
+          const incomingContent = String(event.message.content || '').trim()
+          const supersedesTransientTwin = (item: AgentMessage): boolean => Boolean(
+            event.message!.role === 'assistant'
+            && item.type === 'agent'
+            && (item.meta as { transient?: boolean } | undefined)?.transient
+            && String(item.content || '').trim() === incomingContent,
+          )
           const live = state.scopeLiveMessages?.[event.scope.id]
-          if (live && live.some((item: AgentMessage) => item.id === event.message!.id)) {
+          if (live && live.some((item: AgentMessage) => item.id === event.message!.id || supersedesTransientTwin(item))) {
             nextState.scopeLiveMessages = {
               ...state.scopeLiveMessages,
-              [event.scope.id]: live.filter((item: AgentMessage) => item.id !== event.message!.id),
+              [event.scope.id]: live.filter((item: AgentMessage) =>
+                item.id !== event.message!.id && !supersedesTransientTwin(item)),
             }
           }
-        }
-        if (event.type === 'message_added' && event.message && state.currentScopeId === event.scope.id) {
-          const nextMessage: AgentMessage = {
-            id: event.message.id,
-            agent: event.scope.agent,
-            content: event.message.content,
-            type: event.message.role === 'user' ? 'user' : event.message.role === 'assistant' ? 'agent' : 'system',
-            timestamp: new Date(event.message.timestamp),
-            attachments: extractAttachmentsFromMeta(event.message.meta),
-            meta: event.message.meta || {},
+          if (state.currentScopeId === event.scope.id) {
+            const nextMessage: AgentMessage = {
+              id: event.message.id,
+              agent: event.scope.agent,
+              content: event.message.content,
+              type: event.message.role === 'user' ? 'user' : event.message.role === 'assistant' ? 'agent' : 'system',
+              timestamp: new Date(event.message.timestamp),
+              attachments: extractAttachmentsFromMeta(event.message.meta),
+              meta: event.message.meta || {},
+            }
+            const baseMessages = state.messages.filter((item: AgentMessage) => !supersedesTransientTwin(item))
+            const hasMessage = baseMessages.some((message: AgentMessage) => message.id === nextMessage.id)
+            Object.assign(
+              nextState,
+              withActiveSessionMessagesMirror(
+                state,
+                hasMessage ? baseMessages : [...baseMessages, nextMessage],
+              ),
+            )
           }
-          const hasMessage = state.messages.some((message: AgentMessage) => message.id === nextMessage.id)
-          Object.assign(
-            nextState,
-            withActiveSessionMessagesMirror(
-              state,
-              hasMessage ? state.messages : [...state.messages, nextMessage],
-            ),
-          )
         }
 
         return nextState

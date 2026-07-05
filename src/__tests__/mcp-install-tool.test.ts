@@ -11,6 +11,9 @@
  */
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { mkdtempSync, writeFileSync, chmodSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 import {
   executeInstallMcpServer,
@@ -113,6 +116,42 @@ test('phase 2 requires confirmAck + pendingConfig, revalidates, writes config an
     (e: unknown) => e instanceof ToolDomainError && e.errorKind === 'mcp_install_invalid_source',
   )
   __resetMcpRegistryForTests()
+})
+
+test('local binary source (Pencil.app-style): absolute path to an executable is accepted; interpreters/missing are refused', async () => {
+  const { deps, settings, reloads } = makeDeps()
+  // 造一个真实存在、可执行、非解释器名的"本地 server 二进制"
+  const dir = mkdtempSync(join(tmpdir(), 'ready-mcp-local-'))
+  const localBin = join(dir, 'mcp-server-darwin-arm64')
+  writeFileSync(localBin, '#!/bin/sh\necho stub\n')
+  chmodSync(localBin, 0o755)
+  try {
+    const resolved = resolveMcpInstallSource({ source: localBin, serverId: 'pencil', extraArgs: ['--app', 'desktop'] })
+    assert.equal(resolved.runner, 'local')
+    assert.deepEqual(resolved.pendingConfig, { id: 'pencil', command: localBin, args: ['--app', 'desktop'] })
+
+    const output = await executeInstallMcpServer({ source: localBin, serverId: 'pencil', args: ['--app', 'desktop'] }, deps)
+    assert.match(output.text, /本机可执行文件/)
+    assert.equal(settings.has(MCP_SERVERS_SETTING_KEY), false, 'phase 1 stays read-only for local binaries too')
+    assert.equal(reloads.length, 0)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+
+  // 通用解释器（bash/python/node basename）→ commandNotAllowed
+  assert.throws(() => resolveMcpInstallSource({ source: '/bin/bash' }),
+    (e: unknown) => e instanceof ToolDomainError && e.errorKind === 'mcp_install_command_not_allowed')
+  // 不存在的绝对路径 → invalidSource
+  assert.throws(() => resolveMcpInstallSource({ source: '/nonexistent/mcp-server-x' }),
+    (e: unknown) => e instanceof ToolDomainError && e.errorKind === 'mcp_install_invalid_source')
+})
+
+test('phase 2 revalidates local binary configs the same way (interpreter smuggled back is rejected)', async () => {
+  const { deps } = makeDeps()
+  await assert.rejects(
+    executeInstallMcpServer({ confirmAck: true, pendingConfig: { id: 'evil', command: '/bin/zsh', args: ['-c', 'x'] } }, deps),
+    (e: unknown) => e instanceof ToolDomainError && e.errorKind === 'mcp_install_command_not_allowed',
+  )
 })
 
 test('duplicate id and unreadable existing config are structured refusals', async () => {

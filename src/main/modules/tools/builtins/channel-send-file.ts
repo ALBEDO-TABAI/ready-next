@@ -14,7 +14,8 @@
  */
 
 import { existsSync, statSync } from 'fs'
-import { basename, isAbsolute } from 'path'
+import { homedir } from 'os'
+import { basename, isAbsolute, join } from 'path'
 
 import { ToolDomainError } from '../tool-errors'
 import { CHANNEL_OUTBOUND_ERROR_KINDS } from '../../agent-control/contracts/error-kinds'
@@ -28,6 +29,20 @@ export const CHANNEL_OUTBOUND_TOOL_NAMES = ['channel_send_file'] as const
 
 const MAX_CHANNEL_FILE_BYTES = 100 * 1024 * 1024
 const BLOCKED_BASENAMES = new Set(['run_state.json', 'delivery_report.json'])
+
+/**
+ * 真机实锚（2026-07-05 16:30 微信 run）：模型先后传 `~/…` 与 `$HOME/…`
+ * 被"必须绝对路径"拒绝两次，4 分钟 run 里约 2.5 分钟烧在这上——这两种
+ * 是模型/人类自然会给的家目录写法，机械展开而不是拒绝。
+ */
+export function expandChannelFilePath(raw: string): string {
+  const trimmed = String(raw || '').trim()
+  if (trimmed === '~') return homedir()
+  if (trimmed.startsWith('~/')) return join(homedir(), trimmed.slice(2))
+  if (trimmed === '$HOME') return homedir()
+  if (trimmed.startsWith('$HOME/')) return join(homedir(), trimmed.slice('$HOME/'.length))
+  return trimmed
+}
 
 const CHANNEL_SEND_FILE_DESCRIPTION =
   '把本机文件作为附件直接发送到当前远程 IM 会话线程（即正在对话的这个微信/渠道线程）。'
@@ -86,12 +101,12 @@ export async function executeChannelSendFile(
       { scopeId: scopeId || null },
     )
   }
-  const path = String(args.path || '').trim()
+  const path = expandChannelFilePath(String(args.path || ''))
   const caption = typeof args.caption === 'string' ? args.caption.trim().slice(0, 500) : ''
   if (!path || !isAbsolute(path)) {
     throw new ToolDomainError(
       CHANNEL_OUTBOUND_ERROR_KINDS.fileInvalid.code,
-      `path 必须是本机绝对路径（收到：${path.slice(0, 120) || '空'}）。`,
+      `path 必须是本机绝对路径（收到：${path.slice(0, 120) || '空'}）。~/ 与 $HOME/ 前缀会自动展开；其余请直接使用 file_search/file_locate 返回的完整 /Users/... 路径。`,
       { path: path.slice(0, 200) },
     )
   }

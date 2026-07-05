@@ -22,7 +22,7 @@ import {
   registerChannelOutboundSender,
   _resetChannelOutboundBridgeForTests,
 } from '../main/modules/agent-control/channel-outbound-bridge'
-import { executeChannelSendFile } from '../main/modules/tools/builtins/channel-send-file'
+import { executeChannelSendFile, expandChannelFilePath } from '../main/modules/tools/builtins/channel-send-file'
 import { ToolDomainError } from '../main/modules/tools/tool-errors'
 import { RemoteChannelService } from '../main/modules/agent-control/runtime-core/remote-channel-service'
 import type { RemoteChannelServiceDeps } from '../main/modules/agent-control/runtime-core/remote-channel-service'
@@ -157,6 +157,16 @@ test('sendFileToScopeThread resolves the bound thread and ships the attachment t
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
+})
+
+test('home-style paths are mechanically expanded instead of refused (16:30 真机实锚：~与$HOME 烧掉 2.5 分钟)', () => {
+  const home = process.env.HOME || ''
+  assert.ok(home.length > 0)
+  assert.equal(expandChannelFilePath('~/实验田/a.pdf'), `${home}/实验田/a.pdf`)
+  assert.equal(expandChannelFilePath('$HOME/实验田/a.pdf'), `${home}/实验田/a.pdf`)
+  assert.equal(expandChannelFilePath('~'), home)
+  assert.equal(expandChannelFilePath('/Users/x/a.pdf'), '/Users/x/a.pdf')
+  assert.equal(expandChannelFilePath('  ~/b.pdf '), `${home}/b.pdf`)
 })
 
 test('the real-world trigger phrase hits the outbound delivery intent (collector consent stays valid)', () => {
