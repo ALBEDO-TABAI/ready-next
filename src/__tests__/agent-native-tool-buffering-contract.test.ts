@@ -3,6 +3,8 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import test from 'node:test'
 
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
+
 import {
   NATIVE_TEXT_BUFFER_SAFE_FLUSH_CHARS,
   splitNativeTextBufferForSafeFlush,
@@ -12,13 +14,15 @@ import {
 // AgentSdkTurnOrchestrator (V3 Phase 5-B).
 const turnOrchestratorSource = () => readFileSync(join(process.cwd(), 'src/main/modules/agent-control/runtime-core/agent-sdk-turn-orchestrator.ts'), 'utf-8')
 
-test('native tool text buffering applies whenever native tools are exposed, including OpenAI providers', () => {
+test('native tool text buffering applies whenever native tools are exposed, including OpenAI providers', (t) => {
+  skipIfSqliteUnavailable(t, 'native-tool-buffering transitive sqlite load')
   const text = turnOrchestratorSource()
   assert.match(text, /const bufferNativeTextUntilParsed =\n\s*!useTextToolBridge\n\s*&& toolDefinitions\.length > 0/)
   assert.doesNotMatch(text, /normalizedConfig\.provider !== 'openai'/)
 })
 
-test('native tool text buffering has a safe flush cap for ordinary non-XML text', () => {
+test('native tool text buffering has a safe flush cap for ordinary non-XML text', (t) => {
+  skipIfSqliteUnavailable(t, 'native-tool-buffering transitive sqlite load')
   // 重锚 a15a8eb3（refactor: split AgentSdkRuntime god-file, V3 phases 1-2）：
   // cap 常量与 flush 判定从 agent-sdk-runtime.ts 内联块迁至 agent-sdk-utils 的
   // splitNativeTextBufferForSafeFlush（默认 hardLimit = NATIVE_TEXT_BUFFER_

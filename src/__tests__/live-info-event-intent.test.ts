@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
+
 import { detectLiveInfoIntent } from '../main/modules/agent-control/live-info-intent'
 import { __setMetricSinkForTests } from '../main/modules/agent-control/metrics'
 import { executeToolCall } from '../main/modules/tools/tool-executor'
@@ -10,7 +12,8 @@ import { buildExplicitNoSkillAuthorization } from '../main/modules/agent-control
 // browser 组被抑制（2026-07-04 真机实锚）。fixture 矩阵钉住新增类目与
 // 一词多域防回归（第二轮教训：附件/方案类文本里的领域词不得翻转路由）。
 
-test('event-class live queries fire needsLiveInfo', () => {
+test('event-class live queries fire needsLiveInfo', (t) => {
+  skipIfSqliteUnavailable(t, 'live-info-event-intent transitive sqlite load')
   const positives = [
     '这周末有什么演出',
     '看看附近有什么活动',
@@ -26,7 +29,8 @@ test('event-class live queries fire needsLiveInfo', () => {
   }
 })
 
-test('event-word documents/plans stay local (一词多域防回归)', () => {
+test('event-word documents/plans stay local (一词多域防回归)', (t) => {
+  skipIfSqliteUnavailable(t, 'live-info-event-intent transitive sqlite load')
   const negatives = [
     '帮我写一篇演唱会回顾文档',
     '整理一份活动方案',
@@ -39,7 +43,8 @@ test('event-word documents/plans stay local (一词多域防回归)', () => {
   }
 })
 
-test('pre-existing topics keep their behavior after the word-table change', () => {
+test('pre-existing topics keep their behavior after the word-table change', (t) => {
+  skipIfSqliteUnavailable(t, 'live-info-event-intent transitive sqlite load')
   assert.equal(detectLiveInfoIntent('明天上海天气怎么样').needsLiveInfo, true, 'weather fires on topic alone')
   assert.equal(detectLiveInfoIntent('查一下湖人比分').needsLiveInfo, true, 'sports + lookup verb fires')
   assert.equal(detectLiveInfoIntent('采集这个页面的图片').needsLiveInfo, false, 'collection wording stays out of live-info')
@@ -50,7 +55,8 @@ test('pre-existing topics keep their behavior after the word-table change', () =
 // D19-②: 漏判账本 —— 模型在浏览器组被压掉的回合请求 browser_* 工具时，
 // 发 intent_gating_miss 指标（带纯文本摘要），词表从证据演化而非拍脑袋。
 
-test('model asking for a gated browser tool records intent_gating_miss with user text', async () => {
+test('model asking for a gated browser tool records intent_gating_miss with user text', async (t) => {
+  skipIfSqliteUnavailable(t, 'live-info-event-intent transitive sqlite load')
   const events: Array<Record<string, unknown>> = []
   __setMetricSinkForTests((event) => { events.push(event as unknown as Record<string, unknown>) })
   try {
@@ -72,7 +78,8 @@ test('model asking for a gated browser tool records intent_gating_miss with user
   }
 })
 
-test('partial browser exposure is recorded with a nonzero allowed count', async () => {
+test('partial browser exposure is recorded with a nonzero allowed count', async (t) => {
+  skipIfSqliteUnavailable(t, 'live-info-event-intent transitive sqlite load')
   const events: Array<Record<string, unknown>> = []
   __setMetricSinkForTests((event) => { events.push(event as unknown as Record<string, unknown>) })
   try {
@@ -90,7 +97,8 @@ test('partial browser exposure is recorded with a nonzero allowed count', async 
   }
 })
 
-test('gated non-browser tools do not pollute the ledger', async () => {
+test('gated non-browser tools do not pollute the ledger', async (t) => {
+  skipIfSqliteUnavailable(t, 'live-info-event-intent transitive sqlite load')
   const events: Array<Record<string, unknown>> = []
   __setMetricSinkForTests((event) => { events.push(event as unknown as Record<string, unknown>) })
   try {
