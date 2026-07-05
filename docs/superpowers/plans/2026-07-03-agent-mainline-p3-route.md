@@ -175,6 +175,12 @@ P1 的验收欠账 + 本轮新件的真机确认，一次跑完：
 - **意图门控漏判分析定稿**：live-info 词表缺事件/活动类主题 + 无漏判账本——登记 D19（改判定需漂移评估，专门会话）。
 - **分支既有红清单（HEAD 基线证实，非本批引入）**：direct-chat emitRuntimeError×2、Phase 4.4 detached taxonomy、shared-enum-drift 的 tool-runtime TOOL_ADMISSION 违规、browser-engine-services popup context、chat-panel-waterfall 单测、D6 三测试（已登记）。
 
+### 5.1.6 R18 + Phase I P0 + Phase M stdio 先行（07-05 下午，用户授权不间断）
+
+- **R1 第十八轮（7d20a06a）**：十七轮铁证推翻死区理论——逃生扫描已命中「发布」、坐标在按钮内、事件可信仍无变化。三盲区收口：①扫描器带 disabled/真实 rect/遮挡，act 命中 disabled 机械拒绝（target_disabled），指针无效升级组合树直接 el.click()；②delta bodyText 前 1000 字符看不见 body 末尾校验 toast——瞬时提示嗅探回传 pageNotices；③locate(send) 对 closed shadow 全盲（第一名竟是「添加商品」）——dash-tag 宿主组合树增补，「发布」进 send_button 列表（带 disabled）。click_at 回传 composedTarget/shadowCandidates/pageNotices。监督闸另一半真相：run 结束后仍吞用户点击+弹「等待确认」→ 仅 agent 驱动期生效（bounds-lock 令牌判据）+ pending 胶囊 TTL 过期补推送 + listener 去重。silent-catch 净还 2（168→166）。**待 R19 真机复测。**
+- **Phase I P0 远程确认链路（7d4fd467，合同 `2026-07-05-phase-I-p0-remote-confirmation-implementation.md`）**：卡→渠道（emitter 双出口 + agent_channel_threads 反查 + 纯文本序列化）；答案→卡（入站拦截：编号/原文/前缀解析、取消词、失败回格式指引；复用唯一 submit/cancel core）。codec 7✓ + service 5✓；frozen-call login-fill 超时经 HEAD 隔离 worktree 定性为既有红。**待真微信往返验收。**
+- **Phase M 第一阶段 stdio 先行（合同 `2026-07-05-phase-M-stdio-first-implementation.md`）**：stdio JSON-RPC 实装（换 stub，websocket 诚实失败）+ tools/list 发现（canonical 命名+目录）+ 启动装配（settings `mcp_servers_json`）+ **确认闸动态映射**（外部工具 readOnlyHint 才放行，其余 M2——关键治理缺口关闭）+ 每 server 24 上限可观测裁剪 + 真 schema 直出。真 spawn fixture e2e 7✓ + 家族回归 85✓ + 四 MCP gate 绿。**待真机 server-filesystem 接入验收。**
+
 
 - **Phase R 七轮真机回归**：R2/R3 已过；R1 六层根因逐轮修净（执行→判定→注入呈现→感知→纪律知识→尾部偏置/容器误杀，commits 见 PROGRESS 与 checklist 文档），待重启复验「发布」进图与全链闭环；R4/R5 未跑。D 工单扩至 D1-D13。
 - **Phase B**：B1-B3 完成，browser-tools 8484→~6100（净拆 + 真机修复回填）。

@@ -223,6 +223,8 @@ let currentAskUserClearedOff: (() => void) | null = null
  * re-trigger the sweep.
  */
 let askUserQuestionsSweepRanForBoot = false
+// Phase M —— MCP 启动装配一次性闸（dev reload 不得重复 spawn stdio 子进程）。
+let mcpBootstrapRanForBoot = false
 
 /**
  * Stage V V2.1a — dispose handle returned by `askUserGroup.register`. The 5
@@ -740,6 +742,19 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
     void runtime?.forwardAskUserCardToRemoteChannel(event).catch(() => undefined)
   })
   registerAskUserQuestionsCardPersistor((args) => persistAskUserQuestionsCardPending(args))
+  // Phase M（2026-07-05）—— MCP 启动装配：settings `mcp_servers_json` →
+  // stdio client 连接 + tools/list 发现 + 注册。一次性（dev reload 不重复
+  // spawn 子进程）；逐 server 容错，永不阻塞 agent IPC 启动。
+  if (!mcpBootstrapRanForBoot) {
+    mcpBootstrapRanForBoot = true
+    void import('../mcp/bootstrap').then(({ bootstrapMcpServersFromSettings }) =>
+      bootstrapMcpServersFromSettings({
+        getSetting: (key) => getDatabase().getSetting(key),
+        log: (line) => log(line),
+      })).catch((bootstrapErr) => {
+      log(`mcp bootstrap failed: ${bootstrapErr instanceof Error ? bootstrapErr.message : String(bootstrapErr)}`)
+    })
+  }
   // EP1-I3-2 — frozen-call confirmation store (M2/M3 action-confirmation
   // gate). Register once per main-process lifetime: a dev reload must not
   // replace a store that may hold live pending waiters. The constructor's

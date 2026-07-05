@@ -33,6 +33,9 @@
  */
 
 import { consumeAuthorizationFact, type AuthActionCategory } from './authorization-fact-store'
+// Phase M（2026-07-05）—— 外部 MCP 工具的动态确认映射读口（静态表枚举不了
+// 外部工具名；mcp/registry 无反向依赖，导入方向安全）。
+import { getMcpToolAnnotations } from '../../mcp/registry'
 
 export type ConfirmationMode = 'M1' | 'M2' | 'M3' | 'M4'
 
@@ -332,6 +335,32 @@ export function resolveConfirmationGate(
       ruleId: rule.id,
       designRef: rule.designRef,
       reason: rule.reason,
+    }
+  }
+  // Phase M（2026-07-05，调研切面 2 关键治理缺口）—— 外部 MCP 工具的动态
+  // 映射：静态表天然枚举不了外部工具名，此前一律落 default-M4 无条件放行。
+  // 规则：server 声明 readOnlyHint 才免确认；未声明只读的一律 M2 保守确认
+  // （destructiveHint 只影响文案不影响档位）；带 mcp_ 前缀但注册表查无此名
+  // 同样 M2（防御纵深——执行层会再拒 unregistered，但闸门不赌执行层）。
+  if (toolName.startsWith('mcp_')) {
+    const annotations = getMcpToolAnnotations(toolName)
+    if (annotations?.readOnlyHint === true) {
+      return {
+        mode: 'M4',
+        action: 'allow',
+        ruleId: 'mcp-readonly-declared',
+        designRef: 'Phase M §块4 — 外部工具 readOnlyHint 声明只读',
+        reason: '外部 MCP 工具声明只读（readOnlyHint），按 M4 放行',
+      }
+    }
+    return {
+      mode: 'M2',
+      action: 'confirm',
+      ruleId: 'mcp-external-write-default',
+      designRef: 'Phase M §块4 — 外部工具未声明只读默认保守确认',
+      reason: annotations?.destructiveHint === true
+        ? '外部 MCP 工具声明具有破坏性（destructiveHint），执行前需确认'
+        : '外部 MCP 工具未声明只读，按 M2 保守确认',
     }
   }
   return {

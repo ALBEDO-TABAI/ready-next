@@ -303,6 +303,21 @@ function createStaticFallbackSchema(toolName: string, format: ToolSchemaFormat):
   }
 }
 
+// Phase M（2026-07-05）—— MCP 工具 schema：discovery 目录里有真实
+// inputSchema 时直出给模型（模型才知道该传什么参数），否则回退静态空壳。
+function createMcpToolSchema(toolName: string, format: ToolSchemaFormat): Record<string, unknown> {
+  const entry = mcpRegistry.getMcpToolCatalogEntry(toolName)
+  if (!entry?.inputSchema) return createStaticFallbackSchema(toolName, format)
+  const description = entry.description || `${toolName} (external MCP tool)`
+  if (format === 'anthropic') {
+    return { name: toolName, description, input_schema: entry.inputSchema }
+  }
+  return {
+    type: 'function',
+    function: { name: toolName, description, parameters: entry.inputSchema },
+  }
+}
+
 function parsePositiveTimeout(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : undefined
 }
@@ -816,10 +831,12 @@ const GROUP_TOOL_PROVIDERS: Record<CapabilityGroupId, ToolRegistryProvider> = {
     },
     getToolDefinitions: () =>
       buildToolDefinitions('mcp', mcpRegistry.listMcpToolNames()),
+    // Phase M —— discovery 目录里有真实 inputSchema 时给模型真参数；
+    // 无目录（手工注册的裸名）回退静态空壳。
     getAnthropicTools: () =>
-      mcpRegistry.listMcpToolNames().map((name) => createStaticFallbackSchema(name, 'anthropic')),
+      mcpRegistry.listMcpToolNames().map((name) => createMcpToolSchema(name, 'anthropic')),
     getOpenAITools: () =>
-      mcpRegistry.listMcpToolNames().map((name) => createStaticFallbackSchema(name, 'openai')),
+      mcpRegistry.listMcpToolNames().map((name) => createMcpToolSchema(name, 'openai')),
   },
   // agent_interaction — main-agent reflection tool. Outside the skill
   // domain on purpose: name has no `skill_` prefix so

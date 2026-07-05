@@ -4,6 +4,11 @@
 
 ## 当前真值摘要
 
+- `2026-07-05` **Phase I P0 远程确认链路 + Phase M stdio 先行完成**（7d4fd467 + 本批，均待真机验收）：
+  - Phase I P0：ask/confirm 卡微信往返打通——卡经 agent_channel_threads 反查转投微信线程（纯文本编号选项）；入站消息命中 pending 卡走答案路径（编号/原文/前缀/取消词解析，失败回格式指引），复用与本地 IPC/frozen-call respond 唯一的 submit/cancel core。codec 7✓+service 5✓；观测点 remote_ask_card_forwarded/answered/reply_unparsed。
+  - Phase M stdio：真 JSON-RPC stdio transport（换掉 Stage T stub，websocket 诚实失败）+ tools/list 发现（canonical mcp_<server>_<action> + schema/annotations 目录）+ settings `mcp_servers_json` 启动装配 + **确认闸动态映射**（外部工具声明 readOnlyHint 才 M4 放行，其余一律 M2——"外部破坏性动作无条件放行"治理缺口关闭）+ 每 server 24 工具上限可观测裁剪。真 spawn fixture e2e 7✓、MCP 家族回归 85✓、四 gate 绿。
+  - 真机验收路径见两份 implementation 合同文末（微信确认往返 / server-filesystem 接入）。
+
 - `2026-07-05` **R1 十八轮：发布点击无效三层根治**（7d20a06a，第十七轮真机日志+截图几何反推定案）：
   - 死区理论对十七轮不成立：逃生扫描已命中「发布」且补点坐标(671,851)/模型手瞄(641,849)均在实测按钮范围内、事件可信，页面仍无变化。三个盲区收口：①扫描器带 disabled/真实 rect/遮挡状态，act 命中 disabled 目标机械拒绝（target_disabled），可信指针无效后升级组合树直接 el.click()；②delta bodyText 前 1000 字符看不见 body 末尾校验 toast——新增瞬时提示嗅探，act/click_at 失效路径回传 pageNotices；③locate(send) 对 closed shadow 全盲（十七轮第一名竟是「添加商品」）——dash-tag 宿主组合树扫描增补候选，「发布」以 send_button 进列表。
   - click_at 黑洞收口：打在 dash-tag 宿主上回传 composedTarget/shadowCandidates/pageNotices。
