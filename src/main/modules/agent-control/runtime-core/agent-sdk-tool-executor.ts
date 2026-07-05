@@ -203,6 +203,8 @@ export class AgentSdkToolExecutor {
     config: AIModelConfig
     browserHostAvailable: boolean
     feishuConnected: boolean
+    /** Phase I —— scope 绑定远程渠道线程时暴露 channel_outbound（channel_send_file）。 */
+    channelScopeBound?: boolean
     authorization: SkillToolAuthorization
     /** Continuity: a recent explicit local Send IM turn can be retried directly. */
     localSendImIntent?: boolean
@@ -291,6 +293,7 @@ export class AgentSdkToolExecutor {
       runtimeAvailability: {
         browserHostAvailable: params.browserHostAvailable,
         feishuConnected: params.feishuConnected,
+        channelScopeBound: params.channelScopeBound === true,
       },
       intentGroupModes,
     })

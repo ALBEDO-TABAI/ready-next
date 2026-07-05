@@ -3879,9 +3879,42 @@ interface ElectronAPI {
   tools?: ElectronToolsAPI
   ui?: ElectronUIAPI
   agentInteraction?: ElectronAgentInteractionAPI
+  mcp?: ElectronMcpAPI
   platform: string
   startNativeFileDrag: (paths: string[]) => void
   getFilePathFromDrop: (file: File) => string
+}
+
+// Phase M 管理面（2026-07-05）—— MCP 设置页 IPC 面
+export interface ElectronMcpServerStatus {
+  serverId: string
+  toolCount: number
+  toolNames: string[]
+  requiresAuthorization: boolean
+  clientConnected: boolean
+  lastError?: string
+}
+
+export interface ElectronMcpStatus {
+  rawConfig: string
+  configuredCount: number
+  skipped: Array<{ reason: string }>
+  servers: ElectronMcpServerStatus[]
+}
+
+export interface ElectronMcpAPI {
+  getStatus: () => Promise<ElectronMcpStatus>
+  saveConfig: (json: string) => Promise<{
+    success: boolean
+    error?: string
+    configuredCount?: number
+    skipped?: Array<{ reason: string }>
+  }>
+  reload: () => Promise<{
+    success: boolean
+    error?: string
+    outcomes?: Array<{ serverId: string; ok: boolean; toolCount: number; dropped: string[]; error?: string }>
+  }>
 }
 
 declare global {

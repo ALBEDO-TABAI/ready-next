@@ -65,6 +65,7 @@ import { executeProposeSpecialistBlueprint } from './builtins/propose-specialist
 import { executeRenameSpecialistAgent } from './builtins/rename-specialist-agent'
 import { resolveSpecialistFoundationSemanticJudge } from '../agent-control/agents/specialist-foundation-semantic-judge-provider'
 import { executeInstallSkill } from './builtins/install-skill'
+import { executeChannelSendFile } from './builtins/channel-send-file'
 import {
   getAskUserQuestionsCardEmitter,
   getAskUserQuestionsCardPersistor,
@@ -915,6 +916,14 @@ async function executeToolCallInner(
           // ask_user_questions. The manager enforces the trustAck invariant.
           return executeInstallSkill(args as Parameters<typeof executeInstallSkill>[0], {
             manager: getSkillsRuntimeManager(),
+          })
+
+        case 'channel':
+          // Phase I（2026-07-05）—— 远程会话回传：目标锁死当前 scope 绑定的
+          // 渠道线程（无收件人寻址），文件校验与发送在工具内完成。
+          return executeChannelSendFile(args as Record<string, unknown>, {
+            scopeId: context.scopeId,
+            sessionId: context.sessionId,
           })
 
         default:

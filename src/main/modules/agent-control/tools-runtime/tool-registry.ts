@@ -37,6 +37,11 @@ import {
   getSkillInstallOpenAITools,
 } from '../../tools/skill-install-tool-defs'
 import {
+  CHANNEL_OUTBOUND_TOOL_NAMES,
+  getChannelOutboundAnthropicTools,
+  getChannelOutboundOpenAITools,
+} from '../../tools/builtins/channel-send-file'
+import {
   BROWSER_CONTENT_TASK_TOOL_NAMES,
   BROWSER_INTERACTION_TOOL_NAMES,
   getBrowserAnthropicTools,
@@ -883,6 +888,29 @@ const GROUP_TOOL_PROVIDERS: Record<CapabilityGroupId, ToolRegistryProvider> = {
         // silent-catch: a tool-def build failure must still expose the capability —
         // fall back to the static schema so install_skill never silently vanishes.
         return SKILL_INSTALL_TOOL_NAMES.map((name) => createStaticFallbackSchema(name, 'openai'))
+      }
+    },
+  },
+  // Phase I（2026-07-05）—— 远程会话回传：channel_send_file 把本机文件直接
+  // 发回当前渠道线程。可见性由 capability-resolver 的 channelScopeBound
+  // 环境判据裁决（scope 未绑定渠道线程时整组 environment_unavailable）。
+  channel_outbound: {
+    staticToolNames: CHANNEL_OUTBOUND_TOOL_NAMES,
+    getToolDefinitions: () => buildToolDefinitions('channel_outbound', CHANNEL_OUTBOUND_TOOL_NAMES),
+    getAnthropicTools: () => {
+      try {
+        return getChannelOutboundAnthropicTools()
+      } catch {
+        // silent-catch: schema build failure must not hide the capability
+        return CHANNEL_OUTBOUND_TOOL_NAMES.map((name) => createStaticFallbackSchema(name, 'anthropic'))
+      }
+    },
+    getOpenAITools: () => {
+      try {
+        return getChannelOutboundOpenAITools()
+      } catch {
+        // silent-catch: schema build failure must not hide the capability
+        return CHANNEL_OUTBOUND_TOOL_NAMES.map((name) => createStaticFallbackSchema(name, 'openai'))
       }
     },
   },

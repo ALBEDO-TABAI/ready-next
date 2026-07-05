@@ -854,6 +854,10 @@ export async function executeBrowserObserveTool(
         }
         const targets = await locateActionTargets(controller, tabId, action)
         const toolMeta = resolveToolContextMeta(controller, tabId)
+        // R19 观测补缺：结果概要落日志——真机上无法验证 closed-shadow 增补
+        // 是否生效（R17 第一名「添加商品」只能靠截图倒推）。
+        const shadowCount = targets.filter((item) => (item.evidence || []).includes('closed_shadow_scan')).length
+        log(`locate_action_targets action=${action} count=${targets.length} shadow=${shadowCount} top=${JSON.stringify(targets.slice(0, 3).map((item) => `${item.label}${item.disabled ? '[disabled]' : ''}`))}`)
         return JSON.stringify({
           ok: true,
           ...toolMeta,

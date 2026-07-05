@@ -56,6 +56,9 @@ export interface CapabilityResolution {
 export interface CapabilityRuntimeAvailability {
   browserHostAvailable: boolean
   feishuConnected: boolean
+  /** Phase I（2026-07-05）—— 当前 run 的 scope 是否绑定了远程渠道线程
+   * （agent_channel_threads 命中）。channel_outbound 组仅在绑定时可见。 */
+  channelScopeBound?: boolean
 }
 
 export function resolveCapabilityResolution(params: {
@@ -123,6 +126,10 @@ export function resolveCapabilityResolution(params: {
       }
       if (group.id === 'channel_feishu') {
         return params.runtimeAvailability.feishuConnected
+      }
+      if (group.id === 'channel_outbound') {
+        // Phase I —— 仅在 scope 绑定远程渠道线程时可见（本地会话零暴露）
+        return params.runtimeAvailability.channelScopeBound === true
       }
       return true
     })()

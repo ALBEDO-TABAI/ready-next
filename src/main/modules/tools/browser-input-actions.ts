@@ -278,6 +278,8 @@ export async function runGuardedCoordinateClick(
     editable: boolean
     tag: string
     rect?: { left: number; top: number; width: number; height: number } | null
+    /** R19：点击前页面 URL（取证层同页判据）。 */
+    url?: string
   } | null
 }> {
   const probePoint = await resolveCoordinateProbePointOrThrow(controller, tabId, x, y, 'click')
@@ -289,6 +291,7 @@ export async function runGuardedCoordinateClick(
     editable: boolean
     tag: string
     rect?: { left: number; top: number; width: number; height: number } | null
+    url?: string
   } | null = null
   if (probe && typeof probe === 'object') {
     const p = probe as {
@@ -296,6 +299,7 @@ export async function runGuardedCoordinateClick(
       editable?: unknown
       tag?: unknown
       rect?: { left?: unknown; top?: unknown; width?: unknown; height?: unknown } | null
+      url?: unknown
     }
     const rectLeft = Number(p.rect?.left)
     const rectTop = Number(p.rect?.top)
@@ -308,6 +312,7 @@ export async function runGuardedCoordinateClick(
       rect: Number.isFinite(rectLeft) && Number.isFinite(rectTop) && rectWidth > 0 && rectHeight > 0
         ? { left: rectLeft, top: rectTop, width: rectWidth, height: rectHeight }
         : null,
+      ...(typeof p.url === 'string' && p.url ? { url: p.url } : {}),
     }
     if (p.editable !== true) {
       const destructiveHit = matchBrowserDestructiveTarget(String(p.label || ''))

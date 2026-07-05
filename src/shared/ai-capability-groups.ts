@@ -17,6 +17,7 @@ export type CapabilityGroupId =
   | 'mcp'
   | 'agent_interaction'
   | 'skill_install'
+  | 'channel_outbound'
 
 export type CapabilityProfileId =
   | 'local_chat'
@@ -237,6 +238,18 @@ export const CAPABILITY_GROUPS: CapabilityGroupDefinition[] = [
     defaultMode: 'on',
     defaultProfiles: ['local_chat'],
     executionKinds: ['interactive'],
+    settingsVisible: false,
+  },
+  {
+    id: 'channel_outbound',
+    label: '远程会话回传',
+    description:
+      'Phase I（2026-07-05）：远程 IM 会话中把本机文件直接发送回当前对话线程（channel_send_file）。发送目标锁死为当前线程、无跨线程寻址；仅当 run 的 scope 绑定了远程渠道线程（agent_channel_threads 命中）时可见——真机实锚：用户在微信里说"把报告发我"，模型有文件定位工具却没有任何发送工具，只能口头道歉。',
+    exposure: 'model_visible',
+    availability: 'active',
+    defaultMode: 'auto',
+    defaultProfiles: ['local_chat', 'remote_channel'],
+    executionKinds: ['deterministic'],
     settingsVisible: false,
   },
 ]

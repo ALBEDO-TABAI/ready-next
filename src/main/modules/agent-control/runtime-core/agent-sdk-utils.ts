@@ -2600,6 +2600,7 @@ export function scopeRunModuleForTool(definition: ToolDefinition): import('../co
     || definition.domain === 'pet'
     || definition.domain === 'agent_interaction'
     || definition.domain === 'skill_install'
+    || definition.domain === 'channel'
   ) {
     return 'system'
   }

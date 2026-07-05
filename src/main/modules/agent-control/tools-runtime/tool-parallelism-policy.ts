@@ -57,7 +57,7 @@ export interface ParallelToolGroup {
 }
 
 export interface ToolResourceTag {
-  domain: 'browser' | 'document' | 'file' | 'rss' | 'calendar' | 'feishu' | 'skill' | 'memory' | 'session' | 'pet' | 'system' | 'general_research' | 'map' | 'mcp' | 'agent_interaction' | 'skill_install'
+  domain: 'browser' | 'document' | 'file' | 'rss' | 'calendar' | 'feishu' | 'skill' | 'memory' | 'session' | 'pet' | 'system' | 'general_research' | 'map' | 'mcp' | 'agent_interaction' | 'skill_install' | 'channel'
   accessMode: 'read' | 'write' | 'interactive'
 }
 
@@ -122,6 +122,10 @@ export function getToolResourceTag(toolName: string): ToolResourceTag {
 
   if (normalized.startsWith('browser_')) {
     return { domain: 'browser', accessMode: 'interactive' }
+  }
+  // Phase I（2026-07-05）—— 远程会话回传（channel_send_file 等）：外发写动作，串行
+  if (normalized.startsWith('channel_')) {
+    return { domain: 'channel', accessMode: 'write' }
   }
   if (normalized.startsWith('document_')) {
     return {

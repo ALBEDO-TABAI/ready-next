@@ -9,6 +9,7 @@ import {
 import type { BrowserController } from '../../browser-engine/ipc-handler'
 import { resumeWaitingHumanBrowserTaskFromBridge } from '../../browser-engine/task-event-bridge'
 import type { AskUserQuestionsCardEvent } from '../../tools/builtins/ask-user-questions'
+import { registerChannelOutboundSender } from '../channel-outbound-bridge'
 import type { AgentManager } from '../../claude-bridge/agent-manager'
 import type { MultimodalBlock } from '../contracts/run-contracts'
 import {
@@ -423,6 +424,10 @@ export class AgentControlRuntime extends EventEmitter {
     // both conditions diverge, throw early so the user sees the error
     // at startup rather than mid-session.
     this.maybeAssertSkillTaskRunInvariant()
+    // Phase I —— channel_send_file 工具的发送面：线程反查 + sidecar 发送由
+    // RemoteChannelService 承担（工具侧只校验参数并消费结构化结果）。
+    registerChannelOutboundSender((scopeId, file) =>
+      this.remoteChannel.sendFileToScopeThread(scopeId, file))
     this.orchestrator = new ReadyAgentOrchestrator({
       browserController,
       sidecarManager: this.sidecar,
@@ -830,7 +835,9 @@ export class AgentControlRuntime extends EventEmitter {
       browserDecisionMode: 'free_tool_loop',
       runtimeAvailability: {
         browserHostAvailable: this.orchestrator.hasBrowserController(),
-        feishuConnected
+        feishuConnected,
+        // 设备级快照无 scope 语义；channel_outbound 只在具体 run 的 scope 判据下可见
+        channelScopeBound: false
       },
       enabledChannelTypes,
       connectedChannelTypes
@@ -839,6 +846,18 @@ export class AgentControlRuntime extends EventEmitter {
 
   listChannels(): AgentChannelConfig[] {
     return this.channelConfig.listChannels()
+  }
+
+  /** Phase I —— channel_outbound 可见性判据：scope 是否绑定远程渠道线程。 */
+  isScopeChannelBound(scopeId: string | undefined): boolean {
+    const key = String(scopeId || '').trim()
+    if (!key) return false
+    try {
+      return Boolean(this.db.getAgentChannelThreadBySession(key))
+    } catch {
+      // silent-catch: 判据读取失败按未绑定处理（工具隐藏，不炸 turn 准备）
+      return false
+    }
   }
 
   isChannelTypeAvailable(type: AgentChannelType): boolean {

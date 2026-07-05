@@ -759,6 +759,8 @@ export interface TurnEngineHost<TSession extends TurnEngineSession = TurnEngineS
   sidecarManager?: unknown | null
   runtime?: {
     isChannelTypeAvailable?: (channelType: string) => boolean
+    /** Phase I —— scope 是否绑定远程渠道线程（channel_outbound 组可见性判据）。 */
+    isScopeChannelBound?: (scopeId: string | undefined) => boolean
     getConversationScope?: (sessionId: string) => unknown
   } | null
   requestModuleToolAction?: ((tool: string, args: Record<string, unknown>) => Promise<Record<string, unknown>>) | undefined

@@ -837,6 +837,10 @@ export class RemoteChannelService {
 
   private formatChannelAttachmentSummary(attachments: ChannelAttachment[]): string {
     if (attachments.length === 0) return ''
+    // Phase I（2026-07-05，调研切面 5 入站差距）：非媒体文件此前只给文件名
+    // ——文件明明已落本地盘（attachment.path），agent 却无从读取内容。带上
+    // 本机路径与读取提示，file_read_excerpt/file_extract_text 即可处理用户
+    // 发来的文档（envelope.resource 正式化仍登记在案，此为文本层最小闭环）。
     const lines = attachments.map((attachment) => {
       const kind =
         attachment.type === 'image'
@@ -846,7 +850,10 @@ export class RemoteChannelService {
             : attachment.type === 'text'
               ? '文件'
               : '附件'
-      return `- ${kind}: ${attachment.name}`
+      const localPath = typeof attachment.path === 'string' && attachment.path && existsSync(attachment.path)
+        ? `（本机路径：${attachment.path}，可用 file_read_excerpt / file_extract_text 读取内容）`
+        : ''
+      return `- ${kind}: ${attachment.name}${localPath}`
     })
     return ['[附件]', ...lines].join('\n')
   }
@@ -963,6 +970,63 @@ export class RemoteChannelService {
       '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
     }
     return table[ext] || fallback
+  }
+
+  /**
+   * Phase I（2026-07-05）—— channel_send_file 的发送面：scope 反查渠道线程，
+   * 文件打包成 ChannelAttachment 直发当前线程。真机实锚：微信里"把报告发我"
+   * 时模型没有任何发送工具，run 收口收集器又要求 present_file 证据——现在
+   * 模型有显式、即时、可回读的直达路径。目标锁死当前线程（无寻址参数）。
+   */
+  async sendFileToScopeThread(
+    scopeId: string,
+    file: { path: string; caption?: string },
+  ): Promise<{ success: boolean; error?: string; channelId?: string; attachmentName?: string }> {
+    let thread: { channel_id: string; remote_thread: string } | null = null
+    try {
+      thread = this.deps.db.getAgentChannelThreadBySession(String(scopeId || '').trim())
+    } catch {
+      // silent-catch: 反查失败按未绑定处理，工具侧收到明确失败原因
+      thread = null
+    }
+    if (!thread || !thread.channel_id) {
+      return { success: false, error: '当前会话没有绑定远程渠道线程' }
+    }
+    if (!this.channelSupportsOutboundAttachments(thread.channel_id)) {
+      return { success: false, error: '当前渠道类型暂不支持出站附件（现仅微信）', channelId: thread.channel_id }
+    }
+    const name = basename(file.path)
+    const ext = extname(file.path).toLowerCase()
+    const stat = statSync(file.path)
+    const mimeType = this.mimeTypeFromExt(ext, 'application/octet-stream')
+    const attachment: ChannelAttachment = {
+      name,
+      path: file.path,
+      ext,
+      size: stat.size,
+      mimeType,
+      type: this.channelAttachmentTypeFromPath(file.path, mimeType),
+    }
+    const delivery = await this.sendChannelReply(
+      thread.channel_id,
+      thread.remote_thread || 'default',
+      String(file.caption || '').trim(),
+      [attachment],
+    )
+    logAgentMetric('remote_channel_direct_send', {
+      scopeId,
+      channelId: thread.channel_id,
+      name,
+      size: stat.size,
+      success: delivery.success,
+      ...(delivery.success ? {} : { error: String(delivery.error || '').slice(0, 200) }),
+    })
+    return {
+      success: delivery.success,
+      ...(delivery.error ? { error: delivery.error } : {}),
+      channelId: thread.channel_id,
+      attachmentName: name,
+    }
   }
 
   /**

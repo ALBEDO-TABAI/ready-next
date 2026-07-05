@@ -51,6 +51,7 @@ import { askUserGroup } from './ipc/ask-user-group'
 import { toolEventGroup } from './ipc/tool-event-group'
 import { agentLifecycleGroup } from './ipc/agent-lifecycle-group'
 import { agentRuntimeGroup } from './ipc/agent-runtime-group'
+import { mcpGroup, runMcpBoot } from './ipc/mcp-group'
 import { agentRegistryGroup } from './ipc/agent-registry-group'
 import { agentDerivationGroup } from './ipc/agent-derivation-group'
 import { agentSystemStudioGroup } from './ipc/agent-system-studio-group'
@@ -225,6 +226,7 @@ let currentAskUserClearedOff: (() => void) | null = null
 let askUserQuestionsSweepRanForBoot = false
 // Phase M —— MCP 启动装配一次性闸（dev reload 不得重复 spawn stdio 子进程）。
 let mcpBootstrapRanForBoot = false
+let mcpGroupDispose: IpcDisposeHandle | null = null
 
 /**
  * Stage V V2.1a — dispose handle returned by `askUserGroup.register`. The 5
@@ -742,16 +744,23 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
     void runtime?.forwardAskUserCardToRemoteChannel(event).catch(() => undefined)
   })
   registerAskUserQuestionsCardPersistor((args) => persistAskUserQuestionsCardPending(args))
-  // Phase M（2026-07-05）—— MCP 启动装配：settings `mcp_servers_json` →
-  // stdio client 连接 + tools/list 发现 + 注册。一次性（dev reload 不重复
-  // spawn 子进程）；逐 server 容错，永不阻塞 agent IPC 启动。
+  // Phase M（2026-07-05）—— MCP 管理面 IPC group（status/saveConfig/reload）+
+  // 一次性启动装配（dev reload 不重复 spawn stdio 子进程；逐 server 容错，
+  // 永不阻塞 agent IPC 启动）。
+  if (mcpGroupDispose) {
+    try { mcpGroupDispose.dispose() } catch { /* ignore */ }
+    mcpGroupDispose = null
+  }
+  mcpGroupDispose = mcpGroup.register(ipcMain, {
+    getDatabase: () => getDatabase(),
+    log: (line) => log(line),
+  })
   if (!mcpBootstrapRanForBoot) {
     mcpBootstrapRanForBoot = true
-    void import('../mcp/bootstrap').then(({ bootstrapMcpServersFromSettings }) =>
-      bootstrapMcpServersFromSettings({
-        getSetting: (key) => getDatabase().getSetting(key),
-        log: (line) => log(line),
-      })).catch((bootstrapErr) => {
+    void runMcpBoot({
+      getDatabase: () => getDatabase(),
+      log: (line) => log(line),
+    }).catch((bootstrapErr) => {
       log(`mcp bootstrap failed: ${bootstrapErr instanceof Error ? bootstrapErr.message : String(bootstrapErr)}`)
     })
   }

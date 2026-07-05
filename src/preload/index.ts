@@ -1371,6 +1371,13 @@ const agentInteractionAPI = {
 }
 
 // Expose APIs to renderer
+// Phase M 管理面（2026-07-05）—— MCP 设置页：状态 / 保存配置 / 重连
+const mcpAPI = {
+  getStatus: () => ipcRenderer.invoke('mcp:status'),
+  saveConfig: (json: string) => ipcRenderer.invoke('mcp:saveConfig', { json }),
+  reload: () => ipcRenderer.invoke('mcp:reload'),
+}
+
 contextBridge.exposeInMainWorld('electronAPI', {
   agent: agentAPI,
   memory: memoryAPI,
@@ -1398,6 +1405,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   tools: toolsAPI,
   ui: uiAPI,
   agentInteraction: agentInteractionAPI,
+  mcp: mcpAPI,
   platform: process.platform,
   startNativeFileDrag: (paths: string[]) => ipcRenderer.send('app:startNativeFileDrag', paths),
   // Utility for drag-and-drop: get real file path from File object
@@ -1409,6 +1417,7 @@ declare global {
   interface Window {
     electronAPI: {
       agent: typeof agentAPI
+      mcp: typeof mcpAPI
       memory: typeof memoryAPI
       memoryCards: typeof memoryCardsAPI
       runQuality: typeof runQualityAPI

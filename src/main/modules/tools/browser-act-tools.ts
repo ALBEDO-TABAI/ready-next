@@ -2021,40 +2021,50 @@ export async function executeBrowserActTool(
         let shadowCandidates: Array<Record<string, unknown>> | null = null
         let clickPageNotices: string[] = []
         if (clickHostTag.includes('-') && !followedTab) {
-          const described = await describeComposedPointTarget(
-            controller,
-            tabId,
-            { cssX: point.cssX, cssY: point.cssY },
-          ).catch(() => null)
-          if (described && described.interactive && !described.isHost) {
-            composedTarget = {
-              text: described.text,
-              tag: described.tag,
-              ...(described.disabled ? { disabled: true } : {}),
-              ...(described.cover ? { cover: described.cover } : {}),
-            }
-          } else if (point.pointTarget?.rect) {
-            const scan = await scanClosedShadowHostForClickPoint(
+          // R19 收窄：点击已把同 tab 带去新页面（如「发布」成功跳转）时，
+          // 旧 host rect 全是陈迹——取证纯属浪费。以点击前后 URL 对比为
+          // 同页判据（pre-click 探针带 url），URL 变了整块跳过。
+          const beforeUrl = String(point.pointTarget?.url || '')
+          const afterUrl = beforeUrl
+            ? String(await controller.executeJS(tabId, '(() => String(location.href || ""))()').catch(() => '') || '')
+            : ''
+          const samePageWorld = !beforeUrl || !afterUrl || beforeUrl === afterUrl
+          if (samePageWorld) {
+            const described = await describeComposedPointTarget(
               controller,
               tabId,
-              point.pointTarget.rect,
-              { vw: point.width, vh: point.height },
-              { targetName: '', disambiguation: '' },
+              { cssX: point.cssX, cssY: point.cssY },
             ).catch(() => null)
-            if (scan && scan.candidates.length > 0) {
-              shadowCandidates = scan.candidates.map((c) => ({
-                text: c.text,
-                tag: c.tag,
-                normalized: {
-                  x: Math.max(0, Math.min(999, Math.round((c.cssX / Math.max(1, point.width)) * 1000))),
-                  y: Math.max(0, Math.min(999, Math.round((c.cssY / Math.max(1, point.height)) * 1000))),
-                },
-                ...(c.disabled ? { disabled: true } : {}),
-                ...(c.cover ? { cover: c.cover } : {}),
-              }))
+            if (described && described.interactive && !described.isHost) {
+              composedTarget = {
+                text: described.text,
+                tag: described.tag,
+                ...(described.disabled ? { disabled: true } : {}),
+                ...(described.cover ? { cover: described.cover } : {}),
+              }
+            } else if (point.pointTarget?.rect) {
+              const scan = await scanClosedShadowHostForClickPoint(
+                controller,
+                tabId,
+                point.pointTarget.rect,
+                { vw: point.width, vh: point.height },
+                { targetName: '', disambiguation: '' },
+              ).catch(() => null)
+              if (scan && scan.candidates.length > 0) {
+                shadowCandidates = scan.candidates.map((c) => ({
+                  text: c.text,
+                  tag: c.tag,
+                  normalized: {
+                    x: Math.max(0, Math.min(999, Math.round((c.cssX / Math.max(1, point.width)) * 1000))),
+                    y: Math.max(0, Math.min(999, Math.round((c.cssY / Math.max(1, point.height)) * 1000))),
+                  },
+                  ...(c.disabled ? { disabled: true } : {}),
+                  ...(c.cover ? { cover: c.cover } : {}),
+                }))
+              }
             }
+            clickPageNotices = await readTransientPageNotices(controller, tabId)
           }
-          clickPageNotices = await readTransientPageNotices(controller, tabId)
         }
         const composedHint = composedTarget
           ? `点击穿透 <${clickHostTag}> 命中「${String(composedTarget.text || '')}」<${String(composedTarget.tag || '')}>${composedTarget.disabled ? '——该按钮当前为 disabled（页面校验未通过），点击不会生效，先补齐页面必填项' : ''}${composedTarget.cover ? `——按钮中心被 ${String(composedTarget.cover)} 遮挡` : ''}。`

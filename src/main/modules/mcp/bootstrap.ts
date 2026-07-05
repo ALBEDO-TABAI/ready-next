@@ -14,7 +14,15 @@
  */
 
 import { McpClient } from './client'
-import { registerMcpClient } from './client'
+import {
+  listMcpClients,
+  registerMcpClient,
+  resetMcpClientRegistryForReload,
+} from './client'
+import {
+  listMcpServerRegistrations,
+  resetMcpServerRegistryForReload,
+} from './registry'
 import { applyDiscoveryResult, discoverToolsFromServer } from './tool-discovery'
 
 export interface McpServerConfig {
@@ -136,6 +144,13 @@ async function defaultConnectAndDiscover(config: McpServerConfig): Promise<{ too
   return { tools: discovery.tools.length, dropped: discovery.dropped ?? [] }
 }
 
+/** 最近一次装配/重载的逐 server 结果（设置页状态面读口）。 */
+let lastBootstrapOutcomes: McpBootstrapServerOutcome[] = []
+
+export function getLastMcpBootstrapOutcomes(): McpBootstrapServerOutcome[] {
+  return lastBootstrapOutcomes
+}
+
 /**
  * 启动装配入口（setupAgentIPC 一次性调用；幂等由调用方 module flag 保证）。
  * 永不 throw：逐 server 结果收集返回，失败/裁剪都可观测。
@@ -176,5 +191,75 @@ export async function bootstrapMcpServersFromSettings(
       outcomes.push({ serverId: config.id, ok: false, toolCount: 0, dropped: [], error: message })
     }
   }
+  lastBootstrapOutcomes = outcomes
   return outcomes
+}
+
+/**
+ * 设置页驱动的重载（Phase M 管理面）：关闭全部 stdio 客户端、清空注册表、
+ * 按当前 settings 重新装配。这是"mid-session 不重置"不变量的**唯一受控
+ * 例外**——由用户在设置页显式点击触发，工具面变化对下一个 run 生效。
+ */
+export async function reloadMcpServersFromSettings(
+  deps: McpBootstrapDeps,
+): Promise<McpBootstrapServerOutcome[]> {
+  const log = deps.log ?? (() => {})
+  for (const client of listMcpClients()) {
+    await client.close().catch((error) => {
+      log(`mcp reload: close ${client.serverId} failed: ${error instanceof Error ? error.message : String(error)}`)
+    })
+  }
+  resetMcpClientRegistryForReload()
+  resetMcpServerRegistryForReload()
+  return bootstrapMcpServersFromSettings(deps)
+}
+
+export interface McpRuntimeServerStatus {
+  serverId: string
+  toolCount: number
+  toolNames: string[]
+  requiresAuthorization: boolean
+  clientConnected: boolean
+  lastError?: string
+}
+
+export interface McpRuntimeStatus {
+  rawConfig: string
+  configuredCount: number
+  skipped: Array<{ reason: string }>
+  servers: McpRuntimeServerStatus[]
+}
+
+/** 设置页状态读口：配置 + 注册表 + 最近装配结果三源合一。 */
+export function getMcpRuntimeStatus(getSetting: (key: string) => string | null | undefined): McpRuntimeStatus {
+  let raw = ''
+  try {
+    raw = String(getSetting(MCP_SERVERS_SETTING_KEY) || '')
+  } catch {
+    // silent-catch: settings 读取失败按空配置展示，状态面仍可用
+    raw = ''
+  }
+  const { configs, skipped } = parseMcpServersConfig(raw)
+  const registrations = new Map(listMcpServerRegistrations().map((item) => [item.serverId, item]))
+  const clients = new Set(listMcpClients().map((client) => client.serverId))
+  const outcomes = new Map(lastBootstrapOutcomes.map((item) => [item.serverId, item]))
+  const servers: McpRuntimeServerStatus[] = configs.map((config) => {
+    const registration = registrations.get(config.id)
+    const outcome = outcomes.get(config.id)
+    return {
+      serverId: config.id,
+      toolCount: registration?.toolNames.length ?? 0,
+      toolNames: (registration?.toolNames ?? []).slice(0, 6),
+      requiresAuthorization: registration?.requiresAuthorization ?? config.requiresAuthorization,
+      clientConnected: clients.has(config.id),
+      ...(outcome && !outcome.ok && outcome.error ? { lastError: outcome.error } : {}),
+      ...(config.enabled ? {} : { lastError: '已禁用（enabled=false）' }),
+    }
+  })
+  return {
+    rawConfig: raw,
+    configuredCount: configs.length,
+    skipped: skipped.map((item) => ({ reason: item.reason })),
+    servers,
+  }
 }

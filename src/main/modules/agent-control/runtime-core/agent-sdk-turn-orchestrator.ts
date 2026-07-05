@@ -879,6 +879,8 @@ export class AgentSdkTurnOrchestrator {
         config: configDetail.config,
         browserHostAvailable: this.host.hasBrowserController(),
         feishuConnected: this.host.runtime?.isChannelTypeAvailable?.('feishu-app') ?? false,
+        // Phase I —— 渠道回传组仅对绑定了远程线程的 scope 暴露
+        channelScopeBound: this.host.runtime?.isScopeChannelBound?.(sessionId) ?? false,
         authorization,
         recentCollectionIntent,
         recentBatchCollectionIntent,

@@ -462,6 +462,9 @@ function buildClickPointLabelProbeJs(cssX: number, cssY: number): string {
             : null;
         } catch (e) { return null; }
       })(),
+      // R19：点击前 URL——取证层以"点击后 URL 未变"为同页判据，成功跳转
+      // （如发布成功页）不再对陈旧 rect 做无谓扫描。
+      url: String(location.href || ''),
     };
   })()`
 }

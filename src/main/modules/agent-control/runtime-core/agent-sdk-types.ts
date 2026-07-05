@@ -235,6 +235,8 @@ export interface AgentSdkRuntimeDeps {
     config: AIModelConfig
     browserHostAvailable: boolean
     feishuConnected: boolean
+    /** Phase I —— scope 绑定远程渠道线程时暴露 channel_outbound。 */
+    channelScopeBound?: boolean
     authorization: SkillToolAuthorization
     localSendImIntent?: boolean
     recentCollectionIntent?: boolean

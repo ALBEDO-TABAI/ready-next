@@ -82,7 +82,7 @@ const settingsData: SettingSection[] = [
     id: 'mcp',
     title: 'MCP',
     icon: Plug2,
-    description: '本版本暂未发布 MCP transport / MCP not shipped in this release',
+    description: '接入外部 MCP server（stdio），扩展 Agent 可调用的工具',
     settings: [] // Rendered dynamically via McpSettingsPanel — Y0.7 §11.0b labeling branch
   },
   {

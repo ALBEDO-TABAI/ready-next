@@ -157,6 +157,15 @@ export const __breaksInvariants = [
   'singleton.mcp-server-registry.never-reset-mid-session',
 ] as const
 
+/**
+ * Phase M 管理面 —— "never-reset-mid-session" 不变量的唯一受控例外：
+ * 用户在设置页显式触发的重载路径专用（见 bootstrap.reloadMcpServersFromSettings）。
+ */
+export function resetMcpServerRegistryForReload(): void {
+  servers.clear()
+  serverByTool.clear()
+}
+
 /** Test helper. */
 export function __resetMcpRegistryForTests(): void {
   servers.clear()

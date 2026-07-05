@@ -377,6 +377,30 @@ export type McpToolErrorKindKey = keyof typeof MCP_TOOL_ERROR_KINDS
 export type McpToolErrorKind =
   (typeof MCP_TOOL_ERROR_KINDS)[McpToolErrorKindKey]['code']
 
+// ---------- channel outbound (Phase I 远程会话回传) ----------
+
+export const CHANNEL_OUTBOUND_ERROR_KINDS = {
+  scopeUnbound: {
+    code: 'channel_scope_unbound',
+    noMetric: true,
+    description: 'channel_send_file was invoked in a scope that has no bound remote channel thread (or the outbound bridge is not registered).',
+  },
+  fileInvalid: {
+    code: 'channel_file_invalid',
+    noMetric: true,
+    description: 'The requested file path is not an existing regular file within the allowed size for channel delivery.',
+  },
+  deliveryFailed: {
+    code: 'channel_delivery_failed',
+    noMetric: true,
+    description: 'The sidecar delivery of the outbound channel attachment reported failure (e.g. wechat ret=-3 session invalid).',
+  },
+} as const satisfies Record<string, ErrorKindMeta>
+
+export type ChannelOutboundErrorKindKey = keyof typeof CHANNEL_OUTBOUND_ERROR_KINDS
+export type ChannelOutboundErrorKind =
+  (typeof CHANNEL_OUTBOUND_ERROR_KINDS)[ChannelOutboundErrorKindKey]['code']
+
 // ---------- action confirmation/control ----------
 
 export const ACTION_CONFIRMATION_ERROR_KINDS = {
