@@ -1,5 +1,6 @@
 import type { Session, WebContents } from 'electron'
 import type { BrowserHostView, BrowserRect } from './host-types'
+import type { BrowserTabMetaPayload } from './tab-meta-service'
 import { isReadyBrowserBlankUrl } from '../../../shared/browser-defaults'
 import {
   BROWSER_LOCAL_MEDIA_UPLOAD_EXTENSIONS,
@@ -69,6 +70,7 @@ interface BrowserTabLifecycleHost {
   detachHost(view: BrowserHostView): void
   showHost(view: BrowserHostView, bounds: BrowserRect): void
   sendToRenderer(channel: string, data: unknown): void
+  buildTabPayload(tab: BrowserLifecycleTabRecord): BrowserTabMetaPayload
   emitTabMeta(tabId: string): void
   logBrowserDiag(message: string): void
   bindPopup(webContents: WebContents): void
@@ -297,6 +299,7 @@ export class BrowserTabLifecycleService {
       }
       this.host.tabs.set(tabId, tab)
       if (!background) this.host.setActiveTabId(tabId)
+      this.emitBackgroundTabOpened(tab, background)
       return { success: true, tabId }
     }
 
@@ -382,7 +385,24 @@ export class BrowserTabLifecycleService {
     view.webContents.loadURL(url).catch(() => {
       // handled by did-fail-load
     })
+    this.emitBackgroundTabOpened(tab, background)
     return { success: true, tabId }
+  }
+
+  /**
+   * D1 (P1-b): background tabs (agent collection tabs and other main-created
+   * background tabs) never reached the renderer tab strip — only the popup path
+   * emitted browser:tabOpened, so these tabs stayed invisible until the next
+   * switchTab-triggered list refresh. Emit with activate:false so the renderer
+   * lists the tab WITHOUT preempting the user's active tab. Foreground creates
+   * keep today's semantics (renderer-initiated ones update their store locally).
+   */
+  private emitBackgroundTabOpened(tab: BrowserLifecycleTabRecord, background: boolean): void {
+    if (!background) return
+    this.host.sendToRenderer('browser:tabOpened', {
+      ...this.host.buildTabPayload(tab),
+      activate: false,
+    })
   }
 
   private bindTabEvents(tabId: string, tab: BrowserLifecycleTabRecord, view: BrowserHostView): void {

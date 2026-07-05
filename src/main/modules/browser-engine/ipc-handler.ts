@@ -346,6 +346,7 @@ export class BrowserController {
       detachHost: (view) => this.detachHost(view),
       showHost: (view, bounds) => this.showHost(view, bounds),
       sendToRenderer: (channel, data) => this.sendToRenderer(channel, data),
+      buildTabPayload: (tab) => this.tabMetaService.buildTabPayload(tab),
       emitTabMeta: (tabId) => this.emitTabMeta(tabId),
       logBrowserDiag: (message) => this.logBrowserDiag(message),
       bindPopup: (webContents) => {

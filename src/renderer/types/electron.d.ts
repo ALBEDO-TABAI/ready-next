@@ -1367,7 +1367,8 @@ interface BrowserTabUpdateEvent {
   error?: string
 }
 
-type BrowserTabOpenedEvent = BrowserTabInfo
+/** activate:false = background/agent tab — list it in the strip without stealing focus (D1). Absent keeps legacy activate-on-open. */
+type BrowserTabOpenedEvent = BrowserTabInfo & { activate?: boolean }
 
 interface BrowserBookmarkData {
   id: string

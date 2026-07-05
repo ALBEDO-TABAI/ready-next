@@ -27,6 +27,8 @@ interface BrowserTabOpenedEvent {
   canGoBack?: boolean
   canGoForward?: boolean
   error?: string | null
+  /** false = background/agent tab: list it without preempting focus (D1). */
+  activate?: boolean
 }
 
 export function useBrowserRuntimeEffects({
@@ -271,6 +273,9 @@ export function useBrowserRuntimeEffects({
       } else {
         store.addTab(openedTab)
       }
+      // D1: background/agent tabs are listed but must never preempt the user's
+      // active tab or address bar (activate:false comes from tab-lifecycle-service).
+      if (tab.activate === false) return
       browserTabActivationSequencer.invalidate()
       store.setActiveTabId(openedTab.id)
       store.setUrlInput(openedTab.url === DEFAULT_BROWSER_URL ? '' : openedTab.url)
