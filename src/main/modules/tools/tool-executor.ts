@@ -365,16 +365,17 @@ async function executeToolCallInner(
     })
   }
 
-  // D19-② 漏判账本：本轮浏览器组被意图门控压掉，模型却请求 browser_* 工具。
+  // D19-② 漏判账本：本轮浏览器组被意图门控压掉，模型却请求浏览器域工具。
   // 只记账不改行为——词表（live-info-intent 等）从这份证据演化而非拍脑袋。
+  // browser-ness 取注册表 definition.domain（本文件合同禁名字前缀分支）。
   // allowedBrowserToolCount>0 说明是部分曝光（如 content_tasks 单独被压），
   // =0 才是整组被判 local_chat 的漏判候选；宿主不可用等环境因素由读方结合
   // [tool_capability] 日志区分。
   const recordIntentGatingMissIfBrowserTool = (): void => {
-    if (invoker !== 'model' || !toolName.startsWith('browser_')) return
+    if (invoker !== 'model' || definition.domain !== 'browser') return
     let allowedBrowserToolCount = 0
     for (const name of allowedToolNames || []) {
-      if (name.startsWith('browser_')) allowedBrowserToolCount += 1
+      if (defaultToolRegistry.getToolDefinitionForExecution(name)?.domain === 'browser') allowedBrowserToolCount += 1
     }
     logAgentMetric('intent_gating_miss', {
       toolName,
