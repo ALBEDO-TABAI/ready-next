@@ -373,6 +373,7 @@ export class AnthropicStreamAccumulator {
             try {
               input = JSON.parse(slot.partialJson)
             } catch {
+              // silent-catch: truncated partial tool JSON finalizes as empty input
               input = {}
             }
           }

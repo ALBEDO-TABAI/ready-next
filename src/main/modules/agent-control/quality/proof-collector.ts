@@ -266,7 +266,7 @@ export function appendProofRefs(
   if (merged.length <= limit) return merged
   const overflow = merged.slice(0, merged.length - limit)
   if (overflow.length > 0 && opts.archive) {
-    try { opts.archive(overflow) } catch { /* archive failure must not lose the write */ }
+    try { opts.archive(overflow) } catch { /* silent-catch: archive failure must not lose the write */ }
   }
   return merged.slice(merged.length - limit)
 }

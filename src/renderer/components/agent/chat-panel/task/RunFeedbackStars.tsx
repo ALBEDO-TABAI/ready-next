@@ -59,6 +59,7 @@ export function RunFeedbackStars({ taskId }: { taskId: string }) {
         setFailed(true)
       }
     } catch {
+      // silent-catch: submit failure surfaces as the failed UI state
       if (mountedRef.current) setFailed(true)
     } finally {
       if (mountedRef.current) setSubmitting(false)

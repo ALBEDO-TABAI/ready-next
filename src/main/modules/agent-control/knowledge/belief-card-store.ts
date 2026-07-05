@@ -463,7 +463,7 @@ export class BeliefCardStore {
     for (const name of readdirSync(agentsAbs)) {
       if (!isSafeAgentScopeId(name)) continue
       let isDir = false
-      try { isDir = statSync(join(agentsAbs, name)).isDirectory() } catch { /* race-deleted */ }
+      try { isDir = statSync(join(agentsAbs, name)).isDirectory() } catch { /* silent-catch: race-deleted */ }
       if (!isDir) continue
       const dir = `agents/${name}/knowledge`
       const absDir = this.absInRoot(dir)

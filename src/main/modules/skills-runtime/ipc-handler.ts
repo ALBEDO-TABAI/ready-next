@@ -209,7 +209,7 @@ export function setupSkillsIPC(): void {
       })
       return { success: true, data }
     } catch (error) {
-      // Carry the structured kind so the renderer can branch (unreachable → offer
+      // silent-catch: Carry the structured kind so the renderer can branch (unreachable → offer
       //   mirror config; integrity → do not).
       const kind = error instanceof RuntimeProvisionError ? error.kind : undefined
       return { success: false, error: error instanceof Error ? error.message : String(error), data: kind ? { kind } : undefined }

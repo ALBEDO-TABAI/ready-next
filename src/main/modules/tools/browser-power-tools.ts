@@ -319,7 +319,7 @@ export async function executeBrowserPowerTool(
           })
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error)
-          // P1-A1 — differentiated recovery advice + full target identity on
+          // silent-catch: P1-A1 — differentiated recovery advice + full target identity on
           // every Power failure (tabId/origin were missing before; the hint
           // was a static "read map again").
           const advice = classifyBrowserPowerFailure(message)
@@ -432,6 +432,7 @@ export async function executeBrowserPowerTool(
             nextSuggestedAction: confirmation ? 'finish with transaction proof' : 'read map again',
           })
         } catch (error) {
+          // silent-catch: failure returns structured audit-backed error output with recovery advice
           const message = error instanceof Error ? error.message : String(error)
           const advice = classifyBrowserPowerFailure(message)
           const currentUrl = activeBrowserToolUrl(controller, tabId)
@@ -559,7 +560,7 @@ export async function executeBrowserPowerTool(
                   bytes: limited.bytes,
                 })
               } catch {
-                // Some response bodies are unavailable after redirects/cors/cache; trace still succeeds.
+                // silent-catch: Some response bodies are unavailable after redirects/cors/cache; trace still succeeds.
               }
             }
           }
@@ -596,7 +597,7 @@ export async function executeBrowserPowerTool(
             nextSuggestedAction: confirmation ? 'finish with transaction proof' : 'read map again',
           })
         } catch (error) {
-          // P1-A1 — observer / body-retrieval failures stay structured.
+          // silent-catch: P1-A1 — observer / body-retrieval failures stay structured.
           const message = error instanceof Error ? error.message : String(error)
           const advice = classifyBrowserPowerFailure(message)
           const currentUrl = url || activeBrowserToolUrl(controller, tabId)
@@ -672,6 +673,7 @@ export async function executeBrowserPowerTool(
             auditId: audit.id,
           })
         } catch (error) {
+          // silent-catch: failure returns structured error output with recovery advice
           const message = error instanceof Error ? error.message : String(error)
           const advice = classifyBrowserPowerFailure(message)
           const currentUrl = url || activeBrowserToolUrl(controller, tabId)
@@ -754,7 +756,7 @@ export async function executeBrowserPowerTool(
         })
         const text = typeof output === 'string' ? output : output.text
         const parsed = (() => {
-          try { return JSON.parse(text) as Record<string, unknown> } catch { return { ok: false, raw: text } }
+          try { return JSON.parse(text) as Record<string, unknown> } catch { /* silent-catch: non-JSON downloader output degrades to raw-text failure */ return { ok: false, raw: text } }
         })()
         const success = Number(parsed.success || 0)
         const failed = Number(parsed.failed || 0)

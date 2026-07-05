@@ -2582,6 +2582,7 @@ export class BrowserAgentRunner {
         return outcome.value
       }
     } catch (error) {
+      // silent-catch: failure closes the workflow session and returns the structured failed outcome
       if ((error as Error).name === 'AbortError') {
         this.state = 'cancelled'
         if (this.workflowRunId) {

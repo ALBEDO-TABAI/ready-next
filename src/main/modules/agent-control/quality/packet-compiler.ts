@@ -90,6 +90,7 @@ export function parseCompiledPacketTree(raw: string): PacketTreeParseResult {
     const trimmed = String(raw || '').trim().replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '')
     parsed = JSON.parse(trimmed)
   } catch {
+    // silent-catch: non-JSON compiler output returns the structured not_json rejection
     return { ok: false, reason: 'not_json' }
   }
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
@@ -118,6 +119,7 @@ export function parseCompiledPacketTree(raw: string): PacketTreeParseResult {
     try {
       validatePacketFields({ packetRole: 'child', contextRefs })
     } catch (error) {
+      // silent-catch: invalid child refs reject the whole tree with a structured reason
       return { ok: false, reason: `child_refs_invalid:${title}: ${error instanceof Error ? error.message : String(error)}` }
     }
     children.push({ title, deliverable, contextRefs })
@@ -135,6 +137,7 @@ export function parseCompiledPacketTree(raw: string): PacketTreeParseResult {
       )
     })
   } catch (error) {
+    // silent-catch: depth violation rejects the whole tree with a structured reason
     return { ok: false, reason: `depth_invalid: ${error instanceof Error ? error.message : String(error)}` }
   }
   return { ok: true, tree: { parentTitle, children } }
@@ -158,6 +161,7 @@ export function buildCompilePacketsPrompt(input: { request: string; knowledgeInd
     })
     body = loader.load('dispatch/compile-packets').body
   } catch {
+    // silent-catch: asset load failure falls back to the inline compile prompt
     body = COMPILE_PROMPT_FALLBACK
   }
   return body

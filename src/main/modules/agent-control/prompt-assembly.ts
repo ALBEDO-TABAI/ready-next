@@ -1141,7 +1141,7 @@ export class PromptAssemblyService {
           : index.text
         // P2-4 — count this injection so decay/usefulness metrics have signal.
         if (index.renderedRelPaths.length > 0) {
-          try { this.deps.recordBeliefInjection?.(index.renderedRelPaths) } catch { /* counting never breaks assembly */ }
+          try { this.deps.recordBeliefInjection?.(index.renderedRelPaths) } catch { /* silent-catch: counting never breaks assembly */ }
         }
       }
     } catch (error) {

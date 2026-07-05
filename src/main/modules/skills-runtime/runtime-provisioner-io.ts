@@ -103,7 +103,7 @@ export async function extractRuntimeArchive(params: {
     mkdirSync(params.destDir, { recursive: true })
     await execFileAsync('tar', ['-xf', tmp, '-C', params.destDir], { maxBuffer: 128 * 1024 * 1024 })
   } finally {
-    try { rmSync(tmp, { force: true }) } catch { /* temp cleanup best-effort */ }
+    try { rmSync(tmp, { force: true }) } catch { /* silent-catch: temp cleanup best-effort */ }
   }
 }
 
@@ -117,8 +117,8 @@ export function placeRuntimeExecutable(srcPath: string, destPath: string): void 
   // De-quarantine AFTER rename, synchronously, on the final path (running it on
   //   the pre-rename temp would target a path that no longer exists).
   if (process.platform === 'darwin') {
-    try { execFileSync('xattr', ['-dr', 'com.apple.quarantine', destPath], { stdio: 'ignore' }) } catch { /* attr/xattr may be absent — best-effort */ }
-    try { execFileSync('codesign', ['-s', '-', destPath], { stdio: 'ignore' }) } catch { /* unsigned static binaries may still run — probe decides */ }
+    try { execFileSync('xattr', ['-dr', 'com.apple.quarantine', destPath], { stdio: 'ignore' }) } catch { /* silent-catch: attr/xattr may be absent — best-effort */ }
+    try { execFileSync('codesign', ['-s', '-', destPath], { stdio: 'ignore' }) } catch { /* silent-catch: unsigned static binaries may still run — probe decides */ }
   }
 }
 
@@ -143,10 +143,11 @@ export async function probeRuntimeBinary(
         const f = await execFileAsync('file', [path], { timeout: 10_000 })
         const wantsArm = expectedArch === 'arm64'
         archOk = wantsArm ? /arm64/.test(f.stdout) : /x86_64/.test(f.stdout)
-      } catch { archOk = undefined }
+      } catch { /* silent-catch: arch probe is best-effort — unknown leaves archOk undefined */ archOk = undefined }
     }
     return { ok: true, version: `${ver.stdout}`.split('\n')[0]?.trim(), archOk }
   } catch (error) {
+    // silent-catch: probe failure returns the structured {ok:false, detail} result
     return { ok: false, detail: error instanceof Error ? error.message : String(error) }
   }
 }

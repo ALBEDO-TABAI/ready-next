@@ -52,7 +52,7 @@ export function createBrowserStructuredJsonText(text: string): ToolExecutionOutp
       return createBrowserStructuredOutput(parsed as Record<string, unknown>)
     }
   } catch {
-    // Fall through to a structured wrapper around the original text.
+    // silent-catch: Fall through to a structured wrapper around the original text.
   }
   return createBrowserFailureOutput({
     errorKind: BROWSER_TOOL_ERROR_KINDS.browserToolFailed.code,

@@ -605,6 +605,7 @@ export class SkillExecutionEngine {
         stderrArtifactError: result.stderrOverflowed && !stderrWritten ? (stderrWriteError ?? undefined) : undefined,
       }
     } catch (error) {
+      // silent-catch: spawn failure is converted into the structured failure result below
       const err = error as SpawnWithTreeKillError
       const structuredResult = resultPath && existsSync(resultPath)
         ? this.deps.parseJson<SkillActionResult>(readFileSync(resultPath, 'utf-8'), undefined as never)

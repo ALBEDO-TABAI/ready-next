@@ -236,6 +236,7 @@ export class RuntimeProvisioner {
         deps.fs.mkdirp(extractDir)
         await deps.extractArchive({ buffer, archiveKind: archive.archiveKind, destDir: extractDir, sizeCap: Math.floor(archive.expectedUncompressedBytes * SIZE_CAP_SAFETY) })
       } catch (error) {
+        // silent-catch: extract failure is recorded as a structured attempt before trying the next source
         attempts.push({ url, ok: false, failureKind: 'integrity', reason: `解包失败：${errMsg(error)}` })
         continue
       }
@@ -243,6 +244,7 @@ export class RuntimeProvisioner {
         onProgress({ assetId: asset.id, phase: 'connect' })
         await this.connectArchiveOutputs(archive, extractDir)
       } catch (error) {
+        // silent-catch: connect failure is recorded as a structured attempt before trying the next source
         attempts.push({ url, ok: false, failureKind: 'integrity', reason: `接通失败：${errMsg(error)}` })
         continue
       }

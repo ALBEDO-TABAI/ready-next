@@ -255,7 +255,7 @@ export class AgentControlRuntime extends EventEmitter {
     recordBeliefInjection: (relPaths) => {
       const db = this.getBeliefCardMirrorDb()
       if (!db) return
-      try { bumpBeliefCardAccess(db, relPaths) } catch { /* metrics never break assembly */ }
+      try { bumpBeliefCardAccess(db, relPaths) } catch { /* silent-catch: metrics never break assembly */ }
     },
     // EP3-A3: agents-table roster for the main-session charter/routing
     // index (registry declared above; empty/dead table degrades to []).

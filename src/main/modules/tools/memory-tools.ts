@@ -165,7 +165,7 @@ function filterCardTools(defs: typeof MEMORY_TOOLS): typeof MEMORY_TOOLS {
   let enabled = true
   try {
     enabled = isKnowledgeSystemEnabled(new AppSettingsRepository())
-  } catch { enabled = true }
+  } catch { /* silent-catch: unreadable setting keeps the default-ON rollback semantics */ enabled = true }
   return enabled ? defs : defs.filter((def) => !CARD_TOOL_NAMES.has(def.name))
 }
 

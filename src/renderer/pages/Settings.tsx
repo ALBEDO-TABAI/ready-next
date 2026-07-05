@@ -402,6 +402,7 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
       try {
         await appAPI.installUpdate()
       } catch (error) {
+        // silent-catch: failure surfaces as the update error status + message
         setUpdateStatus('error')
         setUpdateMessage(`安装更新失败：${error instanceof Error ? error.message : String(error)}`)
       }

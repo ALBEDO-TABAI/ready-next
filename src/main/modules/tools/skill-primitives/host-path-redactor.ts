@@ -47,7 +47,7 @@ function redactStaticRoot(text: string, root: string, replacement: string): stri
   try {
     roots.add(realpathSync.native(root))
   } catch {
-    // Some static roots are virtual in tests or absent in unpackaged dev runs.
+    // silent-catch: Some static roots are virtual in tests or absent in unpackaged dev runs.
   }
   for (const candidateRoot of roots) {
     out = redactLiteralRoot(out, candidateRoot, replacement)

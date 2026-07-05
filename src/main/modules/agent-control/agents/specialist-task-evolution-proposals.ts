@@ -71,6 +71,7 @@ function summarizeRef(value: unknown): string {
   try {
     return JSON.stringify(record).slice(0, 220)
   } catch {
+    // silent-catch: unserializable ref degrades to the fixed placeholder
     return '[unserializable learning ref]'
   }
 }

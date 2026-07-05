@@ -148,7 +148,7 @@ export function readMetricsLogTailLines(options: { maxBytes?: number } = {}): st
       const text = readFileTail(path, maxBytes)
       if (text) lines.push(...text.split('\n'))
     } catch {
-      // 读取失败按空日志处理：看板显示空数据，绝不打断设置页。
+      // silent-catch: 读取失败按空日志处理：看板显示空数据，绝不打断设置页。
     }
   }
   return lines

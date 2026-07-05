@@ -549,6 +549,7 @@ export class BrowserDomainOrchestrator {
         taskKind: decision.plan?.taskKind,
       })
     } catch {
+      // silent-catch: hints are optional enrichment — lookup failure degrades to none
       hints = []
     }
     if (hints.length === 0) return base

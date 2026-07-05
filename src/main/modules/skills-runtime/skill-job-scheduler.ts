@@ -268,7 +268,7 @@ export class SkillJobScheduler {
         WHERE id = ?
       `).run(new Date(now).toISOString(), nextRunAt, new Date(now).toISOString(), schedule.id)
     } catch {
-      // Keep scheduler resilient. Failure details are recorded in skills_jobs.
+      // silent-catch: Keep scheduler resilient. Failure details are recorded in skills_jobs.
       const db = this.deps.getRawDatabase()
       if (!db) return
       const retryRunAt = new Date(Date.now() + 5 * 60_000).toISOString()

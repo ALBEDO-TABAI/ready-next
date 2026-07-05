@@ -67,6 +67,7 @@ export function parseMaintenanceOps(raw: string): { ops: MaintenanceCardOp[]; re
     const trimmed = String(raw || '').trim().replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '')
     parsed = JSON.parse(trimmed)
   } catch {
+    // silent-catch: non-JSON output is rejected-and-counted, never partially applied
     return { ops: [], rejected: 1 }
   }
   if (!Array.isArray(parsed)) return { ops: [], rejected: 1 }
@@ -138,6 +139,7 @@ function defaultPrompt(): string {
     })
     return loader.load('maintenance/round').body
   } catch {
+    // silent-catch: asset load failure falls back to the inline default prompt
     return '输出 JSON 数组的 memory_write_card 操作；无内容输出 []。\n\n{{signals}}'
   }
 }
@@ -222,7 +224,7 @@ export async function runMaintenanceLlmRound(deps: MaintenanceRoundDeps): Promis
       }
     }
   } catch (error) {
-    // runner failures become breadcrumbs, never escalate (容器决策④)
+    // silent-catch: runner failures become breadcrumbs, never escalate (容器决策④)
     terminal = `runner_error:${error instanceof Error ? error.message : String(error)}`
   }
 

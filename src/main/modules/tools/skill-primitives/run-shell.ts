@@ -137,6 +137,7 @@ function canonicalRoot(path: string): string {
   try {
     return realpathSync.native(path)
   } catch {
+    // silent-catch: nonexistent path canonicalizes lexically via resolve()
     return resolve(path)
   }
 }

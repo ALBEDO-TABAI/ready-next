@@ -32,7 +32,7 @@ export function wrapRunMetaRepositoryWithCloseoutSnapshot(
         budget: projection.budget ?? null,
       }
     } catch {
-      return input // snapshot failure degrades to the unenriched write — never blocks finalize
+      return input // silent-catch: snapshot failure degrades to the unenriched write — never blocks finalize
     }
   }
   return {

@@ -500,7 +500,7 @@ export function restoreCheckpointToolSurface(params: {
         if (!byName.has(definition.name)) byName.set(definition.name, definition)
       }
     } catch {
-      // Missing groups are reported below as missing required tool names.
+      // silent-catch: Missing groups are reported below as missing required tool names.
     }
   }
   const requiredToolNames = restore.requiredToolNames.length > 0
@@ -1441,6 +1441,7 @@ export async function inspectDocumentTargetContent(
       try {
         parsed = JSON.parse(raw)
       } catch {
+        // silent-catch: broken widget JSON returns the structured validation message
         return '目标文档里的 show-widget JSON 不完整或无法解析'
       }
       const record = parsed && typeof parsed === 'object' && !Array.isArray(parsed)
@@ -1857,6 +1858,7 @@ export function extractToolCallFromStreamEvent(event: RunStreamEvent): {
         : {},
     }
   } catch {
+    // silent-catch: unparseable tool arguments degrade to empty args, same as the non-string branch above
     return { name: record.name, args: {} }
   }
 }

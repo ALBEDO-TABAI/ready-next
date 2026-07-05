@@ -88,7 +88,7 @@ export function createCrystallizeEffectors(store: BeliefCardStore): CrystallizeE
       // staged-expiry only; the path came from the store listing, but guard
       // against traversal anyway by resolving inside the root.
       if (relPath.includes('..')) return
-      try { unlinkSync(join(store.rootPath, relPath)) } catch { /* already gone — expiry is idempotent */ }
+      try { unlinkSync(join(store.rootPath, relPath)) } catch { /* silent-catch: already gone — expiry is idempotent */ }
     },
     writeIndexFile(markdown) {
       // index.md lives at the memory root (01 §7b DEFAULT_FILES contract).

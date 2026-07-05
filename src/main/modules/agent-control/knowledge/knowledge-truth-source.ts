@@ -33,6 +33,7 @@ export function isKnowledgeSystemEnabled(
   try {
     return repository.getSetting(KNOWLEDGE_SYSTEM_SETTING_KEY) !== 'false'
   } catch {
+    // silent-catch: unreadable setting keeps the documented default-ON rollback semantics
     return true
   }
 }
@@ -52,7 +53,7 @@ export function listKnowledgeWatchDirs(store: BeliefCardStore): string[] {
     if (existsSync(abs)) {
       try {
         if (statSync(abs).isDirectory()) dirs.push(relPath)
-      } catch { /* race-deleted */ }
+      } catch { /* silent-catch: race-deleted */ }
     }
   }
   add('knowledge')
@@ -64,7 +65,7 @@ export function listKnowledgeWatchDirs(store: BeliefCardStore): string[] {
     if (!isSafeAgentScopeId(name)) continue
     const agentAbs = join(agentsAbs, name)
     let isDir = false
-    try { isDir = statSync(agentAbs).isDirectory() } catch { /* race-deleted */ }
+    try { isDir = statSync(agentAbs).isDirectory() } catch { /* silent-catch: race-deleted */ }
     if (!isDir) continue
     add(`agents/${name}`)
     add(`agents/${name}/knowledge`)
@@ -155,7 +156,7 @@ export class KnowledgeWatcher {
         })
         watcher.on('error', () => { /* watcher death degrades to startup/maintenance sync */ })
         this.watchers.set(dir, watcher)
-      } catch { /* missing dir / EPERM — startup sync still covers */ }
+      } catch { /* silent-catch: missing dir / EPERM — startup sync still covers */ }
     }
   }
 
@@ -178,6 +179,7 @@ export class KnowledgeWatcher {
       try {
         return syncBeliefCardFile(this.deps.db, this.deps.store, relPath)
       } catch {
+        // silent-catch: per-file sync failure is counted as 'skipped' in the onFlush results
         return 'skipped' as FileSyncResult
       }
     })
@@ -187,7 +189,7 @@ export class KnowledgeWatcher {
   stop(): void {
     if (this.timer) { clearTimeout(this.timer); this.timer = null }
     for (const watcher of this.watchers.values()) {
-      try { watcher.close() } catch { /* already closed */ }
+      try { watcher.close() } catch { /* silent-catch: already closed */ }
     }
     this.watchers.clear()
   }

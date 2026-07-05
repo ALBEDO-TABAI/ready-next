@@ -356,7 +356,7 @@ function writeFileEmergenceUiState(state: FileEmergenceUiState) {
     }
     window.localStorage.setItem(EMERGENCE_UI_STATE_STORAGE_KEY, JSON.stringify(persisted))
   } catch {
-    // best-effort UI preference; storage failures should not break file navigation.
+    // silent-catch: best-effort UI preference; storage failures should not break file navigation.
   }
 }
 

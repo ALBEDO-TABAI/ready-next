@@ -70,6 +70,7 @@ export function buildAuditSummary(
   try {
     json = JSON.stringify(redactParamsForAudit(params, opts)) ?? '{}'
   } catch {
+    // silent-catch: unserializable params degrade to the '{}' audit summary
     json = '{}'
   }
   return json.length > AUDIT_SUMMARY_MAX_CHARS ? `${json.slice(0, AUDIT_SUMMARY_MAX_CHARS)}…` : json
@@ -201,7 +202,7 @@ export class FrozenCallStore {
           .prepare("UPDATE pending_confirmations SET status = 'expired' WHERE status = 'pending'")
           .run()
       } catch {
-        // Sweep failure is non-fatal — rows stay pending in DB only; the
+        // silent-catch: Sweep failure is non-fatal — rows stay pending in DB only; the
         // in-memory authority starts empty either way.
       }
     }
@@ -259,6 +260,7 @@ export class FrozenCallStore {
             'pending',
           )
       } catch {
+        // silent-catch: insert failure returns the structured store_unavailable result
         return { ok: false, reason: 'store_unavailable' }
       }
     }
@@ -350,7 +352,7 @@ export class FrozenCallStore {
           .prepare('UPDATE pending_confirmations SET status = ?, released_at = ? WHERE id = ?')
           .run(status, record.releasedAt ? new Date(record.releasedAt).toISOString() : null, record.id)
       } catch {
-        // Audit-row drift is observable via the boot sweep; the in-memory
+        // silent-catch: Audit-row drift is observable via the boot sweep; the in-memory
         // authority has already transitioned, so execution semantics hold.
       }
     }

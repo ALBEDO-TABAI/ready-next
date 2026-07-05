@@ -2119,6 +2119,7 @@ export default function FileTree({
         flashCompletedPath(flashPath)
         schedulePlaceholderRemoval(taskId, 1800)
       } catch (error) {
+        // silent-catch: failure surfaces on the clip row as failed status with the message
         setPendingClips((prev) =>
           prev.map((item) =>
             item.taskId === taskId

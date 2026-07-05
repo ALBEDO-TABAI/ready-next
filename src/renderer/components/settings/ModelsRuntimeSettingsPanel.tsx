@@ -71,7 +71,7 @@ function RuntimeEnvironmentCard() {
       const res = await window.electronAPI.skills.getSkillRuntimeStatus()
       if (res.success && res.data) setStatus(res.data)
     } catch {
-      // status probe failure is non-fatal; the card just shows unknown.
+      // silent-catch: status probe failure is non-fatal; the card just shows unknown.
     }
   }, [])
 
@@ -137,6 +137,7 @@ function RuntimeEnvironmentCard() {
       setMirrorNotice(trimmed ? '自定义镜像已保存' : '自定义镜像已清空')
       return true
     } catch (err) {
+      // silent-catch: failure surfaces as the mirror error notice
       setMirrorNoticeKind('error')
       setMirrorNotice(err instanceof Error ? err.message : String(err))
       return false

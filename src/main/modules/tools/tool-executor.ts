@@ -528,7 +528,7 @@ async function executeToolCallInner(
             const store = context.runtime?.getTaskProjectionStoreForFinalize?.()
             if (!store) return
             createTaskProofSink(store).append(taskId, [collectTaskEventProof({ taskId: ref, status: 'confirmation' }, new Date())])
-          } catch { /* proof append must never break the confirmation path */ }
+          } catch { /* silent-catch: proof append must never break the confirmation path */ }
         },
       })
       switch (outcome.kind) {

@@ -42,6 +42,7 @@ function readContentFile(store: BeliefCardStore, relPath: string): AgentSystemSt
       contentHash: hashSpecialistStudioContent(content),
     }
   } catch {
+    // silent-catch: unreadable file degrades to exists-without-content in the read model
     return { relPath, exists: true, preview: null, content: null, contentHash: null }
   }
 }

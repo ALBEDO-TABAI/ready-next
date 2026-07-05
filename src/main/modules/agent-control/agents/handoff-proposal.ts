@@ -103,6 +103,7 @@ export async function runHandoffProposal(
   try {
     validatePacketFields({ contextRefs })
   } catch (error) {
+    // silent-catch: contract violation returns a structured invalid outcome to the model
     return { kind: 'invalid', reason: error instanceof Error ? error.message : String(error) }
   }
   const target = deps.getAgent(String(input.targetAgentId || '').trim())

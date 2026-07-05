@@ -263,7 +263,7 @@ export function runUserPictureCasMerge(deps: CasMergeDeps): CasMergeReport {
       }
       deps.db.exec('COMMIT')
     } catch (error) {
-      try { deps.db.exec('ROLLBACK') } catch { /* already closed */ }
+      try { deps.db.exec('ROLLBACK') } catch { /* silent-catch: already closed */ }
       throw error
     }
 
@@ -285,7 +285,7 @@ export function runUserPictureCasMerge(deps: CasMergeDeps): CasMergeReport {
       addedCount: merged.addedCount, droppedCount: merged.droppedCount, mirrorSynced,
     }
   } catch (error) {
-    // maintenance must not crash the caller — audit and exit-0.
+    // silent-catch: maintenance must not crash the caller — audit and exit-0.
     report = {
       decision: 'error',
       reason: `db_error:${error instanceof Error ? error.message : String(error)}`,

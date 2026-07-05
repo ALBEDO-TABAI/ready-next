@@ -281,7 +281,7 @@ function folderReferencePathsFromRequestEnvelope(envelope: unknown): string[] {
     try {
       if (existsSync(path) && statSync(path).isDirectory()) paths.push(path)
     } catch {
-      // Ignore transient filesystem errors; executeExportArtifact performs the
+      // silent-catch: Ignore transient filesystem errors; executeExportArtifact performs the
       // final path validation before writing.
     }
   }
@@ -393,7 +393,7 @@ function folderReferenceTargetFromEnvelope(text: string, envelope: unknown): str
     try {
       if (existsSync(resourcePath) && statSync(resourcePath).isDirectory()) return resourcePath
     } catch {
-      // Ignore and continue to workspace-root fallback.
+      // silent-catch: Ignore and continue to workspace-root fallback.
     }
   }
   return null
@@ -412,7 +412,7 @@ function mentionedWorkspaceRootForArtifactExport(text: string, roots: string[] |
         try {
           if (statSync(candidate).isDirectory()) return candidate
         } catch {
-          // Fall through to the broader mention check below.
+          // silent-catch: Fall through to the broader mention check below.
         }
       }
     }
@@ -429,7 +429,7 @@ function mentionedWorkspaceRootForArtifactExport(text: string, roots: string[] |
       try {
         if (statSync(candidate).isDirectory()) return candidate
       } catch {
-        // Ignore races with the file system; the explicit export tool still
+        // silent-catch: Ignore races with the file system; the explicit export tool still
         // performs the authoritative writable-root validation.
       }
     }
@@ -2030,6 +2030,7 @@ export async function executeSkillTool(
           livenessHint: 'running_process',
         })
       } catch (error) {
+        // silent-catch: start failure returns the structured startFailed error output
         return createToolExecutionOutput('Detached skill task failed to start.', {
           shape: 'json',
           data: {

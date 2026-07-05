@@ -163,6 +163,7 @@ export class SidecarPollService {
         }
       }
     } catch (error) {
+      // silent-catch: poll failure lands on heartbeat.sidecar status/error for the health surface
       this.deps.heartbeat.sidecar.status = 'error'
       this.deps.heartbeat.sidecar.error = error instanceof Error ? error.message : String(error)
     }

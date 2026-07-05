@@ -107,7 +107,7 @@ export class EphemeralExecutionStore {
       try {
         listener(event)
       } catch {
-        /* listener failure must not break ask_user lifecycle */
+        /* silent-catch: listener failure must not break ask_user lifecycle */
       }
     }
   }

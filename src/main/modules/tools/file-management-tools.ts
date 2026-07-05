@@ -403,6 +403,7 @@ async function runFileSearch(
   try {
     result = await getWorkerDbBridge().searchDocuments({ query, limit, sources, workspaceRoot, workspaceRoots: workspaceRoots ?? undefined })
   } catch {
+    // silent-catch: worker failure falls back to the in-process engine (perf-rescue B1 above)
     result = await engine.search(query, { limit, sources, workspaceRoot, workspaceRoots: workspaceRoots ?? undefined })
   }
   return toJsonString({

@@ -457,6 +457,7 @@ function decodeLocalReference(input: string): string {
   try {
     return decodeURIComponent(input)
   } catch {
+    // silent-catch: malformed percent-encoding keeps the raw reference
     return input
   }
 }

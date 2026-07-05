@@ -43,6 +43,7 @@ export function EmergenceFeedSection({
       const result = await api.feed()
       setEntries(result.success && Array.isArray(result.data) ? result.data : [])
     } catch {
+      // silent-catch: feed probe failure renders the empty ambient feed
       setEntries([])
     } finally {
       setRefreshing(false)

@@ -48,6 +48,7 @@ function resultRecord(value: unknown): Record<string, unknown> | null {
       const parsed = JSON.parse(value)
       return parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : null
     } catch {
+      // silent-catch: non-JSON result text falls back to the Error-prefix heuristic
       return value.startsWith('Error:') ? { ok: false } : null
     }
   }

@@ -18,6 +18,7 @@ export function loadBrowserDisciplineText(): string {
     const text = loader.render('browser/discipline')
     cached = text.length > MAX_DISCIPLINE_CHARS ? text.slice(0, MAX_DISCIPLINE_CHARS) : text
   } catch {
+    // silent-catch: bundled-asset load failure degrades to an empty discipline fragment; prompt assembly must not block on it
     cached = ''
   }
   return cached

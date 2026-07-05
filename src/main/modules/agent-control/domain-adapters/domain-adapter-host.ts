@@ -132,6 +132,7 @@ export class DomainAdapterHost {
     try {
       browserSiteExperienceStore = new BrowserSiteExperienceStore()
     } catch {
+      // silent-catch: store construction failure disables site-experience hints for this session
       browserSiteExperienceStore = null
     }
     this.browserDomainOrchestrator = new BrowserDomainOrchestrator(browserTaskPlanner, browserSiteExperienceStore)
@@ -371,6 +372,7 @@ export class DomainAdapterHost {
         try {
           if (!existsSync(item.path)) continue
         } catch (error) {
+          // silent-catch: surfaced via throttled fs_error emit + structured {ok:false} return
           const message = error instanceof Error ? error.message : String(error)
           this.attachmentLoadFailureThrottle.maybeEmit(sessionId, 'fs_error', {
             message: message.slice(0, 200),
@@ -391,7 +393,7 @@ export class DomainAdapterHost {
       }
       return { ok: true, resources }
     } catch (error) {
-      // Stage 2.2: previously this catch silently returned `[]`, making DB
+      // silent-catch: Stage 2.2: previously this catch silently returned `[]`, making DB
       // load failures indistinguishable from "user has no attachments" for
       // operators. The legacy array API still returns `[]` on failure, while
       // BrowserTaskPlanner now consumes this detailed result so upload turns

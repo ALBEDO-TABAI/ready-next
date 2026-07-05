@@ -183,7 +183,7 @@ function parseReadyDragPaths(dataTransfer: DataTransfer): string[] {
       }
       if (parsed.path && !parsed.isDirectory && parsed.type !== 'folder') pushUniquePath(paths, parsed.path)
     } catch {
-      // Ignore malformed drag payloads; other dataTransfer slots may still carry a path.
+      // silent-catch: Ignore malformed drag payloads; other dataTransfer slots may still carry a path.
     }
   }
   const uriList = dataTransfer.getData('text/uri-list')

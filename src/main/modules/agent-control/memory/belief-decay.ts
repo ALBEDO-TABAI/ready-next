@@ -201,7 +201,7 @@ export function createBeliefDecayEffectors(store: BeliefCardStore): BeliefDecayE
     },
     deleteCard(relPath) {
       if (relPath.includes('..')) return
-      try { unlinkSync(join(store.rootPath, relPath)) } catch { /* idempotent — already gone */ }
+      try { unlinkSync(join(store.rootPath, relPath)) } catch { /* silent-catch: idempotent — already gone */ }
     },
   }
 }

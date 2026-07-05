@@ -2557,6 +2557,7 @@ export class AgentSdkTurnOrchestrator {
     try {
       repository = (this.host.runtime?.getRunMetaRepository?.() || null) as RunMetaRepositoryLike | null
     } catch {
+      // silent-catch: missing repository skips the best-effort run-meta snapshot
       repository = null
     }
     if (!repository) return
@@ -2588,7 +2589,7 @@ export class AgentSdkTurnOrchestrator {
         }
       }
     } catch {
-      // best effort — a read failure must not block the snapshot write
+      // silent-catch: best effort — a read failure must not block the snapshot write
     }
     const input = {
       runId: params.runId,

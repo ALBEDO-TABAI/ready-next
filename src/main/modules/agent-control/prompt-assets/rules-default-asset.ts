@@ -29,6 +29,7 @@ export function loadRulesDefaultBody(): string {
     })
     cached = loader.load('rules-defaults/RULES.global').body
   } catch {
+    // silent-catch: asset load failure falls back to the inline FALLBACK body
     cached = FALLBACK
   }
   return cached

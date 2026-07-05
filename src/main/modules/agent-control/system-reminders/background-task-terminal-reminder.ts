@@ -393,7 +393,7 @@ function notifyPendingTaskEventListeners(): void {
     try {
       listener()
     } catch {
-      // Listener failures must not break task-event publication.
+      // silent-catch: Listener failures must not break task-event publication.
     }
   }
 }

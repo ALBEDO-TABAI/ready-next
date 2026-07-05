@@ -56,6 +56,7 @@ export function writeScopeSessionSnapshot(
     renameSync(tmpPath, path)
     return { ok: true, path }
   } catch (error) {
+    // silent-catch: write failure returns a structured {ok:false} with the message
     return { ok: false, path, error: error instanceof Error ? error.message : String(error) }
   }
 }
@@ -66,6 +67,7 @@ export function loadScopeSessionSnapshot(scope: string, rootOverride?: string): 
   try {
     raw = readFileSync(path, 'utf8')
   } catch {
+    // silent-catch: unreadable snapshot returns the structured 'missing' result
     return { ok: false, reason: 'missing' }
   }
   try {
@@ -76,6 +78,7 @@ export function loadScopeSessionSnapshot(scope: string, rootOverride?: string): 
     }
     return { ok: true, items: parsed.items, updatedAt: String(parsed.updatedAt || '') }
   } catch {
+    // silent-catch: corrupt snapshot is cleared and returned as the structured 'corrupt' result
     clearScopeSessionSnapshot(scope, rootOverride)
     return { ok: false, reason: 'corrupt' }
   }
@@ -85,6 +88,6 @@ export function clearScopeSessionSnapshot(scope: string, rootOverride?: string):
   try {
     rmSync(join(scopeSessionSnapshotPath(scope, rootOverride), '..'), { recursive: true, force: true })
   } catch {
-    // best-effort cleanup; the loader treats unreadable as missing
+    // silent-catch: best-effort cleanup; the loader treats unreadable as missing
   }
 }

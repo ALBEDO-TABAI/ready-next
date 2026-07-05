@@ -430,7 +430,7 @@ function resolveEffectiveTaskFacts(
       const row = deps.taskProjectionStore.get(outcome.taskId)
       rowTaskType = row?.taskType ?? null
       rowModule = row?.module ?? null
-    } catch { /* facts degrade to patch-only */ }
+    } catch { /* silent-catch: facts degrade to patch-only */ }
   }
   const patchTaskType = typeof patch?.taskType === 'string' && patch.taskType ? patch.taskType : null
   const budgetTaskType = outcome.taskBudgetRuntime?.taskType || null

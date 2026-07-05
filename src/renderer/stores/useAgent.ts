@@ -450,6 +450,7 @@ export const useAgent = create<AgentState>((set, get) => ({
         registryAgents = result.data
       }
     } catch {
+      // silent-catch: registry IPC failure degrades to an empty list until the next registry-changed reload
       registryAgents = []
     }
 
@@ -1980,7 +1981,7 @@ export function initAgentListeners(): () => void {
   try {
     window.addEventListener('ready:agent-registry-changed', onAgentRegistryChanged)
   } catch {
-    // ignore — tests may install a minimal global window.
+    // silent-catch: ignore — tests may install a minimal global window.
   }
   const offRuntime = agentRuntimeDriver.initAgentListeners()
   const offAgentInteraction = initAgentInteractionListeners()

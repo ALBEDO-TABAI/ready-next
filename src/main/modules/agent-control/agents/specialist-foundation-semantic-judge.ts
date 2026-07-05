@@ -112,6 +112,7 @@ function normalizeRawReview(
   try {
     parsed = parseRawOutput(raw)
   } catch {
+    // silent-catch: unparseable judge output degrades to the structured invalid_json review
     return unavailable(contentHash, 'invalid_json', now)
   }
   if (!parsed || !Array.isArray(parsed.issues)) {
@@ -184,6 +185,7 @@ export async function runSpecialistFoundationSemanticReview(
       review: normalizeRawReview(raw, contentHash, now),
     }
   } catch (error) {
+    // silent-catch: judge failure degrades to the structured unavailable review carrying the reason
     controller.abort()
     return {
       blueprint: canonical,

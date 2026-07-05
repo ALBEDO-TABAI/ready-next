@@ -1370,7 +1370,7 @@ export async function executeBrowserCollectionTool(
           note: 'staged only; not active until user confirms in site knowledge settings',
         }
         await writeFile(filePath, JSON.stringify(payload, null, 2), 'utf8')
-        try { broadcastDirectoryChanged([dir]) } catch { /* never break staged strategy output */ }
+        try { broadcastDirectoryChanged([dir]) } catch { /* silent-catch: never break staged strategy output */ }
         return JSON.stringify({ ...payload, path: filePath }, null, 2)
       }
 
