@@ -220,7 +220,7 @@ P1 的验收欠账 + 本轮新件的真机确认，一次跑完：
 
 - **D7 LLM 维护回合 ✅（2026-07-05 fb4b1b98）**：crystallize tick 捎带驱动 + 三层预算闸（专项开关 / durable lastRunAt 进 EP2-C2 / 空信号跳过）+ 符号禁令与 mandated 双 gate 翻面（live-required + 旁路直调禁令）。合同 2026-07-05-p3-backlog-closeout §2；真机观察首轮 staged 产卡在回测清单。
 - **D1 标签 tabOpened ✅（2026-07-05 f034778f）**：createTab background 补发 tabOpened(activate:false)，renderer 不抢焦点；行为测试×2+结构合同×1；真机焦点视觉验证在回测清单。**⚠️ 命名撞车**：Phase D 内部步骤「D1 RunTimelineStamp 信封」已完成（b933a763），与本 D-register「D1 标签」是两回事，勿误判已关。
-- **D4 声明通道（决策题）**：`appendModelCriteria` 接裁决——新工具 vs 协议二选一，梯队二复验后缓办。
+- **D4 声明通道 ✅（2026-07-05 5dba2c3d）**：裁决为新工具 declare_completion_criteria（agent_interaction 组）；projection.modelCriteria 整组替换 + finalizer appendModelCriteria 合流 + 双漂移账本 + mandated gate dark-defect→live-required。
 - **D6 三测试语义仲裁 ✅（2026-07-05 a2fa0666）**：三根因逐一裁决（闸对 fixture 错 / 闸让位自动保存兜底 / upload 曝光 content_tasks 是唯一裁决点有意策略）；verify:evolution-p6o 回绿。
 - **D19 意图门控改判定 ✅（2026-07-05 dc1ccf73+38d2a5ab）**：EVENT_PATTERNS+周末类 freshness 词入表；intent_gating_miss 漏判账本（按注册表 domain 判定）；fixture 矩阵六用例含一词多域负例。
 - **涌现数据源第二批：设计已定稿（2026-07-05-p3-backlog-closeout §3）**：三确定性采集器（日历 72h 窗 prepare / 产物打开计数 harvest / 目录聚集 forming），只写证据账本不铸卡、candidate-maintenance 维持 dormant、零前台新面。实施留待监控会话（涉日历/文件读面）。
@@ -236,7 +236,7 @@ P1 的验收欠账 + 本轮新件的真机确认，一次跑完：
   - `deriveAgentErrorContract` → **留-dormant**：provider-thinking-echo-gate（活跃 provider 合同）以其为 oracle；SDK 路径终局错误由 error-classifier 承担，若要统一先证语义差；随 claude-bridge 相关退役包（C31-b 族）裁决。注意 claude-bridge 整体非休眠（live 路径引用 tool-bridge/error-classifier/recovery-router 等 7+ 模块），不得按模块整删。
   - `buildToolGuidance` 系、`DesignToolLoopOrchestrator`、`VideoFallbackService` → **留-dormant**：分别为 TurnEngine 工具引导面 / DirectChat 设计循环 / 视频降级（SDK 侧由共享能力层承担）；各自合同测试钉形状，随 C29/C30/C31-b 关账一并处置。
 - **ipc-contract 残项**：26 条既有违规已部分归绿（8839ff62）。**07-05 实测（silent-catch 回绿后暴露）**：干净 HEAD 上 `verify:ipc-contract` 红，**19 条**——18 条集中 `browser-engine/ipc-handler.ts`（9 个 sendToRenderer 站点被两条规则各报一次：NON_LITERAL_PUSH 无 allowlist + non_literal_push 无匹配 call site）+ 1 条 `claude-bridge/run-timeline-emitter.ts:27`。它是完整 `verify` 链现在的**第一拦点**（silent-catch 之后），此前被 silent-catch 红掩蔽。
-- **npm test 既有红（07-05 实测，第二拦点）**：链尾 `npm run test` **73 fail / 6610**（HEAD 72628891），HEAD~1 基线对比 **75 fail、零新增**（差 2 条为计时敏感 flaky：note-collection auto-continue 对、direct-summary redact）。失败面主要是 UI source-grep 合同断言过时（FileTree 行背景 rgba 值、glass/motion 结构等）+ discipline 资产超 2500 预算 + 若干行为测试；与 silent-catch 清偿无关（注释不改运行时）。完整 `verify` 回全绿需清这两账。
+- **npm test：✅ 已清零（2026-07-05 2bb00a0e，73→0，全量 6624 用例 0 fail）**。战役构成：4 个生产根修（run_meta task_type 与 budget 同源 / task-type-resolver 宿主降级挪序 / execution-intent-resolver widget_target 与 pet 抑制 / VEA 驱动 recoverable_paused 谓词回归）+ p6d drift gate 抓获的 13 个 Phase I/M errorKind 信封映射补登 + drift gate 目标表按 B7 拆分重锚 + discipline 资产语义保全压缩回 2500 预算（超额部分此前被 loader 静默截断——R18/D18 规则根本没进模型）+ UI/结构合同批量重锚（每处注出处）。p6d 链同轮回绿（47/47）。
 - **vertical-tabs 自身残项**：4 个 source-grep 合同待改 + 浮层跨窗拖拽未接（HTML5 DnD 跨不了窗，需 Electron 原生 startDrag）。其「D1 标签可见性」与 §6.2 的 D1 同源。
 
 ## 6.4 Phase I/M 深化（合同先行 + 专门会话）
@@ -246,7 +246,7 @@ P1 的验收欠账 + 本轮新件的真机确认，一次跑完：
 
 # 7. 下一会话推荐顺序（取代 §4，在 mainline worktree / 分支 main）
 
-1. ~~先关 `verify` 红：silent-catch 重锚~~ ✅ **已完成（07-05，72628891，gate 回绿 166→0）**。完整 `verify` 剩两个既有拦点（§6.3）：ipc-contract 19 条（browser-engine 集中 18 条，可无人值守裁决 allowlist vs 改字面量）+ npm test 73 fail（UI source-grep 合同过时为主，需逐类裁决「改断言 vs 改样式」，部分可无人值守）。
+1. ~~先关 `verify` 红~~ ✅ **全链关账（07-05）**：silent-catch 166→0（72628891）、ipc-contract 19→0（097eaca4）、npm test 73→0（2bb00a0e）——完整 `npm run verify` 六环节首次全绿在望（终验见 closeout 文档）。
 2. **真机复测批**（§6.1，用户在场，半天）：R1 全链 + Phase I P0 微信往返 + Phase M server-filesystem + MCP 本地二进制 + 飞书 CLI，一次跑完关账；顺带 XHS 拖拽/采集（R4/R5）。
 3. **D7 + 涌现数据源第二批**（§6.2，专门会话，合同先行）：剩余最重的产品件（后台自动积累产品观）。
 4. **穿插**（多可无人值守或短在场）：D19 意图门控改判定、C5-b 逐个裁决、D4 声明通道、D6 三测试仲裁、vertical-tabs source-grep 合同；Phase I/M 深化按 §6.4 各自开会话排期。

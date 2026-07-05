@@ -10,7 +10,7 @@ source:
 
 # 0. 一句话
 
-> **✅ §2.1 silent-catch 重锚已完成（2026-07-05，72628891）**：gate 回绿 166→0，94 novel 全部注释自证清偿（0 入 baseline / 0 补 log），baseline 350→355。本文 §3 playbook 已履约，留作历史。新发现：verify 链仍有两个**既有**拦点此前被 silent-catch 红掩蔽——`verify:ipc-contract` 19 条 + `npm run test` 73 fail（HEAD~1 基线对比零新增，归因铁证）——见 route §6.3。剩余项按 §2 顺序 2-4 继续。
+> **✅ 本 handoff 全部履约（2026-07-05）**：§2.1 silent-catch（72628891）、§2.3 D7（fb4b1b98）、§2.4 全部穿插项（D19 dc1ccf73 / C5-b 021593fd / D4 5dba2c3d / D6 a2fa0666 / D1 f034778f）均完成；途中暴露的 ipc-contract 19 条（097eaca4）与 npm test 73 fail（2bb00a0e）也已清零。§2.2 真机复测批收敛为《2026-07-05-user-retest-checklist.md》待用户执行。本文全文留作历史。
 
 上一会话把 worktree topology 收敛完（mainline = `ready-cowork-newtab` on `main`），并把剩余工作台账写进路线文档 **§6（剩余项逐条）+ §7（执行顺序）**。正要动手 §7.1 **silent-catch 重锚**（`npm run verify` 现红）时上下文过重，转交。**新会话：先读本文 §1-§3，再按 §2 顺序推进。** 本文只补「怎么动手」的细节，全量台账仍看 route §6/§7。
 
