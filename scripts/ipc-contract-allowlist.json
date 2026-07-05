@@ -52,7 +52,7 @@
   "methods_typed_only": [],
   "non_literal_push": [
     {
-      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:201",
+      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:207",
       "variable": "channel",
       "channels": [
         "browser:downloadUpdate"
@@ -62,7 +62,7 @@
       "expiry": "2026-08-21"
     },
     {
-      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:207",
+      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:213",
       "variable": "channel",
       "channels": [
         "app:shortcut"
@@ -72,7 +72,7 @@
       "expiry": "2026-08-21"
     },
     {
-      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:221",
+      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:227",
       "variable": "channel",
       "channels": [
         "browser:fastCardContextAction"
@@ -82,7 +82,7 @@
       "expiry": "2026-08-21"
     },
     {
-      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:230",
+      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:236",
       "variable": "channel",
       "channels": [
         "browser:bookmarksChanged"
@@ -92,7 +92,7 @@
       "expiry": "2026-08-21"
     },
     {
-      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:262",
+      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:268",
       "variable": "channel",
       "channels": [
         "browser:previewUpdate"
@@ -102,7 +102,7 @@
       "expiry": "2026-08-21"
     },
     {
-      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:323",
+      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:329",
       "variable": "channel",
       "channels": [
         "browser:tabUpdate"
@@ -112,17 +112,18 @@
       "expiry": "2026-08-21"
     },
     {
-      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:342",
+      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:348",
       "variable": "channel",
       "channels": [
-        "browser:tabUpdate"
+        "browser:tabUpdate",
+        "browser:tabOpened"
       ],
-      "reason": "Forwarder lambda passed to BrowserTabLifecycleService; the service emits literal 'browser:tabUpdate' across tab-lifecycle-service.ts:194,237,246,255,270 (all covered by literal scan). Stage Y Y1.4 re-verified; removing this entry requires forwarder-pattern refactor — out of Y1.4 reduction-only scope.",
+      "reason": "Forwarder lambda passed to BrowserTabLifecycleService; the service emits literal 'browser:tabUpdate' across tab-lifecycle-service.ts:194,237,246,255,270 (all covered by literal scan). Stage Y Y1.4 re-verified; removing this entry requires forwarder-pattern refactor — out of Y1.4 reduction-only scope. 2026-07-05 D1: the lifecycle service now also emits browser:tabOpened (activate:false background-tab announcement) through this forwarder — literal at tab-lifecycle-service.ts emitBackgroundTabOpened, behavior-tested in browser-tab-lifecycle-tabopened.test.ts.",
       "owner": "stage-v-bootstrap",
       "expiry": "2026-08-21"
     },
     {
-      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:393",
+      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:400",
       "variable": "channel",
       "channels": [
         "browser:adblockUpdate"
@@ -132,7 +133,7 @@
       "expiry": "2026-08-21"
     },
     {
-      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:438",
+      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:445",
       "variable": "channel",
       "channels": [
         "browser:bookmarksChanged",
@@ -143,7 +144,7 @@
       "expiry": "2026-08-21"
     },
     {
-      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:550",
+      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:557",
       "variable": "channel",
       "channels": [
         "browser:adblockUpdate",
@@ -171,6 +172,20 @@
       "reason": "Spy wrapper used by the content-study runner to capture clip lifecycle events before forwarding to the real controller.sendToRenderer. Only clip background/content-study channels flow through this path; both are literal-emitted upstream by clip-dragged-tab-runner.ts:304 and content-study-runner.ts:409. Stage Y Y1.4 re-verified the upstream literals; the spy wrapper is intrinsic to the runner's phase-1 completion detection logic and cannot be removed without restructuring the content-study runner — out of Y1.4 reduction-only scope.",
       "owner": "stage-v-bootstrap",
       "expiry": "2026-08-21"
+    },
+    {
+      "callsite": "src/main/modules/claude-bridge/run-timeline-emitter.ts:27",
+      "variable": "channel",
+      "channels": [
+        "agent:stream",
+        "agent:status",
+        "agent:error",
+        "agent:scopeRunEvent",
+        "agent:conversationEvent"
+      ],
+      "reason": "Phase D D1 run-timeline single-source envelope emitter: the run-family five channels are code-enumerated as the RunTimelineChannel union (run-timeline-contracts.ts RUN_TIMELINE_CHANNELS) and every caller passes a literal member; this emitter is the single stamped dispatch point (v/channel/at envelope) replacing ten bare webContents.send sites, so the variable channel here is the union parameter, not an open fan-out.",
+      "owner": "phase-d-run-timeline",
+      "expiry": "2026-08-31"
     }
   ]
 }
