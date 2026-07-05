@@ -1306,6 +1306,10 @@ export class AgentSdkTurnOrchestrator {
       const maybeHandleActionAnnouncementGuard = async (
         assistantText: string,
       ): Promise<ExecutionTurnResult | 'continue' | null> => {
+        // D6 仲裁：新文档未保存的义务由退出循环后的自动保存兜底确定性兑现
+        // （见下方 newDocumentNeedsSave 块），零工具的「我会保存」不属于
+        // 未兑现宣告——闸让位，否则 steer/checkpoint 会挡住兜底保存。
+        if (newDocumentNeedsSave) return null
         const decision = evaluateActionAnnouncementGuard({
           assistantText,
           // This guard runs only after a model response that did not launch a

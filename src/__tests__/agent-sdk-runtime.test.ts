@@ -2139,7 +2139,9 @@ test('agent sdk runtime keeps browser tools hidden for local document attachment
         id: 'msg-doc-tools-2',
         role: 'assistant',
         type: 'message',
-        content: [{ type: 'text', text: '我会按文档处理。' }],
+        // 完成陈述而非行动承诺：零工具收尾若用「我会…处理」会被行动宣告闸
+        // 正当拦截（steer→checkpoint），那是闸的合同而非本测试的主题。
+        content: [{ type: 'text', text: '已根据文档梳理完成人物关系。' }],
         stop_reason: 'end_turn',
         usage: { input_tokens: 10, output_tokens: 4 },
       }), { status: 200 })
@@ -2165,7 +2167,7 @@ test('agent sdk runtime keeps browser tools hidden for local document attachment
   )
 
   assert.equal(result.success, true)
-  assert.equal(result.finalText, '我会按文档处理。')
+  assert.equal(result.finalText, '已根据文档梳理完成人物关系。')
   assert.equal(requests.length, 2)
 })
 
@@ -5821,7 +5823,10 @@ test('agent sdk runtime exposes upload browser tools for upload workflow intent'
   assert.equal(result.success, true)
   assert.ok(seenToolNames.includes('browser_list_upload_targets'))
   assert.ok(seenToolNames.includes('browser_upload_scope_attachment'))
-  assert.equal(seenToolNames.includes('browser_start_task'), false)
+  // 6e99f0e6（交易成功证明）起，唯一裁决点 capability-resolver 对
+  // browser_upload_workflow 同步开放 browser_content_tasks（Power 证明工具
+  // 所在组），browser_start_task 随组曝光——与 capability-resolver.test.ts 同源。
+  assert.equal(seenToolNames.includes('browser_start_task'), true)
 })
 
 test('agent sdk runtime records tool and artifact proofs before final adjudication', async () => {
