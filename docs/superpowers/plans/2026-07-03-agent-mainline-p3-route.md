@@ -110,8 +110,8 @@ P1 的验收欠账 + 本轮新件的真机确认，一次跑完：
 
 原悬点：主线全部工作堆在 `feature/vertical-tabs`。**2026-07-05 用户拍板合并回主线，已执行**：因 `main` 相对 merge-base ahead=0，`feature/vertical-tabs` 纯线性领先 403 提交，走**零冲突 fast-forward**（`05c2d5a1..f959281d`），main worktree（`ready-cowork-main-fix`）合并前后均干净。合并后 `main == feature/vertical-tabs == f959281d`，分叉归零。
 
-- **环境注记**：main-fix worktree 的 node_modules 是自有旧副本，缺 `@tabler/icons-react`/`pdf2json` 等后加依赖（8 个 `Cannot find module` typecheck error 源于此，非合并缺陷——newtab worktree 经 symlink 有完整依赖，同一提交 typecheck 0）。若要在 main-fix worktree 开发，先在其内 `npm install` 补齐。
-- **后续开发**：main 现为最新主线；后续提交进 main（或继续在 newtab worktree 的分支上提交后 fast-forward 同步 main，两者当前同步）。vertical-tabs 的 4 个 source-grep 合同残项 + D1 标签可见性仍登记未清。
+- **环境注记（✅ 2026-07-05 已解决）**：main-fix worktree 原 node_modules 是自有旧副本，缺 `@tabler/icons-react`/`pdf2json` 等后加依赖（8 个 `Cannot find module` typecheck error 源于此，非合并缺陷）。已按 newtab 同款约定把 main-fix 的 node_modules 改为 symlink → `ready-cowork/node_modules`（已构建好的完整树，避免 better-sqlite3 原生重编风险），旧副本移除。验证：main-fix `npm run typecheck` EXIT=0（8 error 清零）、`npm run native:check` EXIT=0（Electron 42.3.0 ABI 146 加载 better-sqlite3）。
+- **后续开发（主线已切 main-fix）**：`ready-cowork-main-fix` 现为主线开发 worktree（分支 `main`，HEAD 与 vertical-tabs 同步）；后续提交直接进 main。注意 main-fix、newtab 两 worktree 共享 `ready-cowork/node_modules`（symlink），在 main-fix 内 `npm install <新依赖>` 会写入共享树——若要 main-fix 完全独立，届时在其内 `npm install` 替换该 symlink 即可。vertical-tabs 的 4 个 source-grep 合同残项 + D1 标签可见性仍登记未清。
 
 # 4. 推荐启动顺序（下一个会话即可开工）
 
