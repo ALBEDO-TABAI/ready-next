@@ -2602,6 +2602,7 @@ export function scopeRunModuleForTool(definition: ToolDefinition): import('../co
     || definition.domain === 'skill_install'
     || definition.domain === 'channel'
     || definition.domain === 'mcp_install'
+    || definition.domain === 'command_exec'
   ) {
     return 'system'
   }

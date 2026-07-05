@@ -47,6 +47,11 @@ import {
   getMcpInstallOpenAITools,
 } from '../../tools/mcp-install-tool-defs'
 import {
+  SETUP_COMMAND_TOOL_NAMES,
+  getSetupCommandAnthropicTools,
+  getSetupCommandOpenAITools,
+} from '../../tools/setup-command-tool-defs'
+import {
   BROWSER_CONTENT_TASK_TOOL_NAMES,
   BROWSER_INTERACTION_TOOL_NAMES,
   getBrowserAnthropicTools,
@@ -893,6 +898,28 @@ const GROUP_TOOL_PROVIDERS: Record<CapabilityGroupId, ToolRegistryProvider> = {
         // silent-catch: a tool-def build failure must still expose the capability —
         // fall back to the static schema so install_skill never silently vanishes.
         return SKILL_INSTALL_TOOL_NAMES.map((name) => createStaticFallbackSchema(name, 'openai'))
+      }
+    },
+  },
+  // Phase M+（2026-07-05）—— agent 代跑一次性安装/配置命令（飞书/即梦 CLI）。
+  // 命令不经 shell，两阶段确认在工具内经 ask_user_questions 完成。
+  command_exec: {
+    staticToolNames: SETUP_COMMAND_TOOL_NAMES,
+    getToolDefinitions: () => buildToolDefinitions('command_exec', SETUP_COMMAND_TOOL_NAMES),
+    getAnthropicTools: () => {
+      try {
+        return getSetupCommandAnthropicTools()
+      } catch {
+        // silent-catch: schema build failure must not hide the capability
+        return SETUP_COMMAND_TOOL_NAMES.map((name) => createStaticFallbackSchema(name, 'anthropic'))
+      }
+    },
+    getOpenAITools: () => {
+      try {
+        return getSetupCommandOpenAITools()
+      } catch {
+        // silent-catch: schema build failure must not hide the capability
+        return SETUP_COMMAND_TOOL_NAMES.map((name) => createStaticFallbackSchema(name, 'openai'))
       }
     },
   },

@@ -440,6 +440,35 @@ export type McpInstallErrorKindKey = keyof typeof MCP_INSTALL_ERROR_KINDS
 export type McpInstallErrorKind =
   (typeof MCP_INSTALL_ERROR_KINDS)[McpInstallErrorKindKey]['code']
 
+// ---------- setup command execution (Phase M+ agent 代跑安装命令) ----------
+
+export const SETUP_COMMAND_ERROR_KINDS = {
+  invalidCommand: {
+    code: 'setup_command_invalid',
+    noMetric: true,
+    description: 'The requested setup command is empty, contains shell metacharacters, or is otherwise malformed.',
+  },
+  notConfirmed: {
+    code: 'setup_command_not_confirmed',
+    noMetric: true,
+    description: 'Phase 2 execution was requested without a matching confirmed command descriptor (confirmAck + echoed command).',
+  },
+  executionFailed: {
+    code: 'setup_command_execution_failed',
+    noMetric: true,
+    description: 'The setup command process could not be spawned (binary missing, permission denied, spawn error).',
+  },
+  timedOut: {
+    code: 'setup_command_timed_out',
+    noMetric: true,
+    description: 'The setup command exceeded the execution timeout and was killed.',
+  },
+} as const satisfies Record<string, ErrorKindMeta>
+
+export type SetupCommandErrorKindKey = keyof typeof SETUP_COMMAND_ERROR_KINDS
+export type SetupCommandErrorKind =
+  (typeof SETUP_COMMAND_ERROR_KINDS)[SetupCommandErrorKindKey]['code']
+
 // ---------- action confirmation/control ----------
 
 export const ACTION_CONFIRMATION_ERROR_KINDS = {

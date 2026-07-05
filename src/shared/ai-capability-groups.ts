@@ -19,6 +19,7 @@ export type CapabilityGroupId =
   | 'skill_install'
   | 'channel_outbound'
   | 'mcp_install'
+  | 'command_exec'
 
 export type CapabilityProfileId =
   | 'local_chat'
@@ -234,6 +235,18 @@ export const CAPABILITY_GROUPS: CapabilityGroupDefinition[] = [
     id: 'skill_install',
     label: '安装技能',
     description: '识别用户的技能安装意图，先只读解析出真实下载地址 + 风险分级（不安装），由用户通过反问卡确认后再交由宿主下载、扫描并安装。仅 local_chat。',
+    exposure: 'model_visible',
+    availability: 'active',
+    defaultMode: 'on',
+    defaultProfiles: ['local_chat'],
+    executionKinds: ['interactive'],
+    settingsVisible: false,
+  },
+  {
+    id: 'command_exec',
+    label: '运行安装/配置命令',
+    description:
+      'Phase M+（2026-07-05）：用户要求 agent 代跑一次性安装/配置命令行工具（如 npx @larksuite/cli@latest install、即梦 CLI 等）时的两阶段确认执行工具（run_setup_command）。区别于 MCP server（常驻 stdio）与技能安装：这是跑完即退的一次性命令。命令不经 shell（数组式 execFile，杜绝注入），阶段 1 只展示完整命令+风险绝不执行，经 ask_user_questions 用户确认后阶段 2 才执行并回报 stdout/stderr/退出码。仅 local_chat。',
     exposure: 'model_visible',
     availability: 'active',
     defaultMode: 'on',

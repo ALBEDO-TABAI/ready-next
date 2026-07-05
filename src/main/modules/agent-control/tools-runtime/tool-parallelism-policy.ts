@@ -57,7 +57,7 @@ export interface ParallelToolGroup {
 }
 
 export interface ToolResourceTag {
-  domain: 'browser' | 'document' | 'file' | 'rss' | 'calendar' | 'feishu' | 'skill' | 'memory' | 'session' | 'pet' | 'system' | 'general_research' | 'map' | 'mcp' | 'agent_interaction' | 'skill_install' | 'channel' | 'mcp_install'
+  domain: 'browser' | 'document' | 'file' | 'rss' | 'calendar' | 'feishu' | 'skill' | 'memory' | 'session' | 'pet' | 'system' | 'general_research' | 'map' | 'mcp' | 'agent_interaction' | 'skill_install' | 'channel' | 'mcp_install' | 'command_exec'
   accessMode: 'read' | 'write' | 'interactive'
 }
 
@@ -218,6 +218,7 @@ export function getToolResourceTag(toolName: string): ToolResourceTag {
   // mcp_install group — MCP server 两阶段安装前门，同 install_skill 命名策略
   // （无 mcp_ 前缀：mcp_ 是外部 MCP 工具的 dispatch/确认闸保留前缀）。
   if (normalized === 'install_mcp_server') return { domain: 'mcp_install', accessMode: 'interactive' }
+  if (normalized === 'run_setup_command') return { domain: 'command_exec', accessMode: 'interactive' }
   return { domain: 'system', accessMode: 'interactive' }
 }
 

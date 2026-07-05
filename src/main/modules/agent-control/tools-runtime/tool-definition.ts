@@ -20,6 +20,7 @@ export type ToolDomain =
   | 'skill_install'
   | 'channel'
   | 'mcp_install'
+  | 'command_exec'
 
 export type ToolKind = 'read' | 'write' | 'interactive' | 'job'
 export type ToolConcurrency = 'parallel_read_safe' | 'serialized'

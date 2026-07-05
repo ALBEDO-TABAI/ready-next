@@ -40,6 +40,8 @@ test('capability groups define required reserved and host-only entries', () => {
     'mcp',
     'agent_interaction',
     'skill_install',
+    // Phase M+（2026-07-05）—— agent 代跑一次性安装/配置命令（飞书/即梦 CLI）。
+    'command_exec',
     // Phase M（2026-07-05）—— agent 代装 MCP server 两阶段前门。
     'mcp_install',
     // Phase I（2026-07-05）—— 远程会话回传（channel_send_file）：仅
