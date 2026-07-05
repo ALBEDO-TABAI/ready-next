@@ -7,13 +7,11 @@ import {
   normalizeTerminalReason,
   phaseToToolTraceStatus,
 } from '../modules/agent/scopeRunState'
-import type { TaskDisclosureState, TaskSectionKey } from '../modules/agent/taskCardViewModel'
 import { runDocCommand as executeDocCommand } from '../modules/agent/documentActions'
 import { runSkillCommand as executeSkillCommand } from '../modules/agent/commandHandlers'
 import {
   buildComposedAgentInputWithDiagnostics,
   filterAttachmentsForComposedAgentInput,
-  extractAttachmentsFromMeta as extractPersistedAttachments,
   persistMessage as persistChatMessage,
   serializePersistedAttachments as serializeAttachments,
 } from '../modules/agent/messageComposer'
@@ -23,46 +21,8 @@ import { boundedCancelWithFallback } from '../modules/agent/boundedCancelWithFal
 import { createAgentRuntimeDriver, syncActiveScopeRunAliases } from '../modules/agent/runtimeDriver'
 import { installAgentPanelTestHarness } from '../modules/agent/agentPanelTestHarness'
 import { computeDesiredRoots, useWorkspace } from './useWorkspace'
-import {
-  ScopeCreatePersistenceMetricThrottle,
-  type ScopeCreatePersistenceSite,
-} from '../modules/agent/scope-create-persistence-metrics'
-import { defaultAgentEmoji } from '../../shared/agent-identity'
 import { MAX_AGENT_SESSIONS } from '../../shared/agent-session-limits'
 
-/**
- * Stage 3 W4 — observability-only throttle for createLocalScope IPC failures
- * across newSession + 4 sendMessage bootstrap sites. The retry chain at
- * sendMessage's "Conversation scope not found" handler still drives behavior;
- * this throttle adds a renderer-channel metric so operators can see when
- * scope persistence is failing without changing user-visible UI.
- */
-const scopeCreatePersistenceMetricThrottle = new ScopeCreatePersistenceMetricThrottle(
-  5 * 60_000,
-  () => Date.now(),
-  (payload) => {
-    emitRendererAgentMetric('scope_create_persistence_failed', { ...payload })
-  },
-)
-
-async function callCreateLocalScopeWithMetric(
-  agent: string,
-  scopeId: string | null,
-  site: ScopeCreatePersistenceSite,
-  invoke: () => Promise<{ success: boolean; data?: unknown } | null | undefined>,
-): Promise<{ success: boolean; data?: unknown } | null> {
-  try {
-    const result = await invoke()
-    if (!result || !result.success || result.data == null) {
-      scopeCreatePersistenceMetricThrottle.maybeEmit(site, 'result_failure', scopeId, agent)
-      return result ?? null
-    }
-    return result
-  } catch {
-    scopeCreatePersistenceMetricThrottle.maybeEmit(site, 'ipc_rejected', scopeId, agent)
-    return null
-  }
-}
 import type {
   Agent,
   AgentMessage,
@@ -74,6 +34,40 @@ import type {
   ScopeRunState,
   ToolTraceEvent,
 } from '../modules/agent/types'
+import type { AgentSendResult, AgentState, SessionSlice } from './agent-store-types'
+import type { AgentPersonalityListItem, AgentRegistryListItem } from './agent-store-helpers'
+import {
+  activeSessionKey,
+  callCreateLocalScopeWithMetric,
+  cloneFallbackAgents,
+  DEFAULT_SEND_COALESCE_WINDOW_MS,
+  generateId,
+  generateSessionId,
+  getScopeRunStateForScope,
+  isLiveSession,
+  isSameAttachmentPoolEntry,
+  makeEmptySessionSlice,
+  mapPersonalitiesToAgents,
+  mapRegistryToAgents,
+  mapScopeRunPhaseToSessionState,
+  mapScopeToConversation,
+  mirrorFromSessionSlice,
+  normalizeSessionSlice,
+  persistLocalConversationScope,
+  rebuildAgentMessageFromRow,
+  recordCardFallback,
+  recordOrphanedCard,
+  removeFromFilePool,
+  routeCardToSession,
+  scopeCreatePersistenceMetricThrottle,
+  sessionKeyForScopeId,
+  shouldKeepInFilePool,
+  shouldPreserveContinuationIntent,
+  withActiveSessionConversationMirror,
+  withActiveSessionMessagesMirror,
+  withSessionSlice,
+  withSessionSliceAndActiveMirror,
+} from './agent-store-helpers'
 
 export type {
   Agent,
@@ -88,375 +82,38 @@ export type {
   ToolTraceEvent,
 } from '../modules/agent/types'
 
-export interface PendingContinuationIntent {
-  taskId: string
-  executionId?: string
-  stepId?: string
-  blockedReason?: string
-  responseText?: string
-  todoId?: string
-  todoTitle?: string
-  pauseReason?: string
-  detachedTaskId?: string
-  taskRunId?: string
-  jobId?: string
-  skillId?: string
-  action?: string
-  runStatePath?: string
-  outputDir?: string
-  progressFingerprint?: string
-  childRunId?: string
-}
-
-interface AgentSendResult {
-  success: boolean
-  error?: string | null
-  errorKind?: string | null
-  responseText?: string | null
-  persistence?: {
-    scope?: string | null
-    message?: string | null
-    attachments?: string | null
-  } | null
-}
-
-const FALLBACK_AGENTS: readonly Agent[] = [
-  { name: 'butler', displayName: '管家', avatar: '🤖', status: 'idle', selected: true },
-  { name: 'copywriter', displayName: '文案', avatar: '✍️', status: 'idle', selected: false },
-  { name: 'video-editor', displayName: '剪辑', avatar: '🎬', status: 'idle', selected: false },
-  { name: 'analyst', displayName: '分析', avatar: '📊', status: 'idle', selected: false },
-]
-
-interface AgentPersonalityListItem {
-  agentName: string
-  displayName?: string
-  metaJson?: Record<string, unknown>
-}
-
-interface AgentRegistryListItem {
-  id: string
-  name: string
-  status: 'active' | 'disabled' | 'retired' | 'merged'
-}
-
-function cloneFallbackAgents(): Agent[] {
-  return FALLBACK_AGENTS.map((agent) => ({ ...agent }))
-}
-
-function readPersonalityEmoji(metaJson?: Record<string, unknown>): string {
-  const emoji = metaJson?.emoji
-  return typeof emoji === 'string' && emoji.trim() ? emoji : '🤖'
-}
-
-function mapPersonalitiesToAgents(
-  personalities: AgentPersonalityListItem[],
-  previousAgents: Agent[],
-  currentAgent: string,
-): { agents: Agent[]; currentAgent: string } {
-  const source = personalities.length > 0 ? personalities : cloneFallbackAgents().map((agent) => ({
-    agentName: agent.name,
-    displayName: agent.displayName,
-    metaJson: { emoji: agent.avatar },
-  }))
-  const nextCurrentAgent = source.some((item) => item.agentName === currentAgent)
-    ? currentAgent
-    : source[0].agentName
-  const agents = source.map((item) => {
-    const previous = previousAgents.find((agent) => agent.name === item.agentName)
-    return {
-      name: item.agentName,
-      displayName: item.displayName || item.agentName,
-      avatar: readPersonalityEmoji(item.metaJson),
-      status: 'idle' as const,
-      selected: previous?.selected ?? item.agentName === nextCurrentAgent,
-    }
-  })
-  return { agents, currentAgent: nextCurrentAgent }
-}
-
-function mapRegistryToAgents(
-  registryAgents: AgentRegistryListItem[],
-  previousAgents: Agent[],
-  currentAgent: string,
-): { agents: Agent[]; currentAgent: string } {
-  const active = registryAgents.filter((agent) => agent.status === 'active')
-  const source = active.length > 0 ? active : cloneFallbackAgents().map((agent) => ({
-    id: agent.name,
-    name: agent.displayName,
-    status: 'active' as const,
-  }))
-  const nextCurrentAgent = source.some((item) => item.id === currentAgent)
-    ? currentAgent
-    : source[0].id
-  const agents = source.map((item) => {
-    const previous = previousAgents.find((agent) => agent.name === item.id)
-    return {
-      name: item.id,
-      displayName: item.name || item.id,
-      avatar: previous?.avatar || defaultAgentEmoji(item.id),
-      status: 'idle' as const,
-      selected: previous?.selected ?? item.id === nextCurrentAgent,
-    }
-  })
-  return { agents, currentAgent: nextCurrentAgent }
-}
-
-export interface SendMessageResult {
-  success: boolean
-  shouldClearInput: boolean
-  preserveInput: boolean
-  errorKind?: string | null
-}
-
-/**
- * Stage V V3.3a bootstrap half-step (delivered alongside V3.3c).
- *
- * Per-session slice of state. V3.3b.1 moved the composer draft (`inputValue`),
- * V3.3b.2 moved visible messages, and the V3.3b.2 commit also landed the
- * mirror helpers `withSessionSliceAndActiveMirror` and `mirrorFromSessionSlice`
- * that project the streaming flags (`isStreaming` / `foregroundBusy` /
- * `composerLocked` / `streamingMessageId` / `streamingRequestId`),
- * `scopeRunStates`, and `taskDisclosureState` onto the active session's slice
- * and back out to the top-level fields. Top-level fields are kept as
- * read-through mirrors so existing ChatPanel/ChatInput selectors and the
- * agent-panel test harness keep working without per-consumer migration.
- *
- * Stage W W4.2-W4.4 (V3.3b.3-5) did NOT add new fields here — the slice
- * already owned them. Those commits added falsifiable behavior tests
- * (`useAgent-session-slice-migration.test.ts`) that pin the mirror invariant
- * so a future refactor cannot regress it silently. See
- * `docs/superpowers/audits/2026-05-22-w4-useagent-ownership-map/`.
- *
- * V3.3d adds `state` + `conversationId` so the listener-side direct-setState
- * routing path (`routeCardToSession`) can validate a pushed card's
- * `sessionId` is still live, and fall back via conversationId when the
- * push payload's sessionId is null / stale / unknown.
- */
-export type SessionSliceState = 'live' | 'done' | 'error' | 'cancelled' | 'closed'
-
-const TERMINAL_SESSION_STATES: ReadonlySet<SessionSliceState> = new Set([
-  'done',
-  'error',
-  'cancelled',
-  'closed',
-])
+// 纯移动拆分接线（2026-07-05）：以下符号已整块搬至 ./agent-store-types 与
+// ./agent-store-helpers，此处显式转出以保持 useAgent 的对外导出面零变化。
+export type {
+  PendingContinuationIntent,
+  SendMessageResult,
+  SessionSlice,
+  SessionSliceState,
+} from './agent-store-types'
+export type { CardRoutingDecision } from './agent-store-helpers'
+export {
+  __getCardRoutingMetricsForTesting,
+  __resetCardRoutingMetricsForTesting,
+  getSessionSlice,
+  isLiveSession,
+  lookupSessionByConversation,
+  routeCardToSession,
+  selectActiveScopeRunStates,
+  selectActiveSessionSlice,
+  selectAgents,
+  selectAttachments,
+  selectConversations,
+  selectFilePool,
+  selectPendingSendForActive,
+  selectScopes,
+  selectSessionOrder,
+} from './agent-store-helpers'
 
 // Concurrent-live session cap. Single source of truth lives in
 // `src/shared/agent-session-limits.ts` so the renderer "+" disable and the main
 // orchestrator's admission guard never diverge (a 5-vs-3 split let sessions look
 // creatable but get rejected on send). Re-exported for the existing call sites.
 export { MAX_AGENT_SESSIONS }
-
-export interface SessionSlice {
-  messages: AgentMessage[]
-  pendingSendCount: number
-  pendingSendFlushAt: number | null
-  isStreaming: boolean
-  foregroundBusy: boolean
-  composerLocked: boolean
-  streamingMessageId: string | null
-  streamingRequestId: string | null
-  scopeRunStates: Record<string, ScopeRunState>
-  taskDisclosureState: Record<string, TaskDisclosureState>
-  /** V3.3d — terminal exclusion set drives `isLiveSession`. */
-  state: SessionSliceState
-  /** V3.3d — backing field for `lookupSessionByConversation`. */
-  conversationId: string | null
-  /**
-   * V3.3b.1 — per-session composer draft. The top-level `inputValue` field
-   * is a read-through mirror of `sessions[activeSessionId].inputValue`.
-   */
-  inputValue: string
-}
-
-function makeEmptySessionSlice(conversationId: string | null = null): SessionSlice {
-  return {
-    messages: [],
-    pendingSendCount: 0,
-    pendingSendFlushAt: null,
-    isStreaming: false,
-    foregroundBusy: false,
-    composerLocked: false,
-    streamingMessageId: null,
-    streamingRequestId: null,
-    scopeRunStates: {},
-    taskDisclosureState: {},
-    state: 'live',
-    conversationId,
-    inputValue: '',
-  }
-}
-
-interface AgentState {
-  agents: Agent[]
-  messages: AgentMessage[]
-  /** EP2 P0-2 — per-scope live transient cache (scope-keyed, OUTSIDE session
-   *  slices): in-flight assistant segments survive scope switches and merge
-   *  back on loadScope instead of being DB-overwritten. */
-  scopeLiveMessages: Record<string, AgentMessage[]>
-  appendScopeLiveMessage: (scopeId: string, message: AgentMessage) => void
-  appendToScopeLiveMessage: (scopeId: string, messageId: string, chunk: string) => void
-  pruneScopeLiveMessages: (scopeId: string, persistedIds: ReadonlyArray<string>) => void
-  currentAgent: string
-  inputValue: string
-  pendingContinuationIntent: PendingContinuationIntent | null
-  pendingContinuationDraftAnchor: string | null
-  isStreaming: boolean
-  foregroundBusy: boolean
-  composerLocked: boolean
-  streamingMessageId: string | null
-  streamingRequestId: string | null
-  sessionId: string
-  conversationId: string | null
-  conversations: ChatConversation[]
-  currentScopeId: string | null
-  currentScope: ConversationScope | null
-  scopes: ConversationScope[]
-  scopeRunStates: Record<string, ScopeRunState>
-  toolTrace: ToolTraceEvent[]
-  toolTraceStatus: 'idle' | 'running' | 'done' | 'error' | 'cancelled'
-  attachments: ChatAttachment[]
-  filePool: ChatAttachment[]
-  activeAttachmentPreview: AttachmentPreviewState | null
-  sendCoalescingEnabled: boolean
-  sendCoalescingWindowMs: number
-  /**
-   * V3.3c — top-level mirror of `sessions[activeSessionId].pendingSendCount`.
-   * Source of truth lives in `sessions[id]`; the top-level value is rewritten
-   * alongside every slice write so existing ChatPanel/ChatInput selectors and
-   * the agent-panel test harness keep observing the active-session value.
-   */
-  pendingSendCount: number
-  /** V3.3c — top-level mirror of `sessions[activeSessionId].pendingSendFlushAt`. */
-  pendingSendFlushAt: number | null
-  /** V3.3a bootstrap — per-sessionId slice store. */
-  sessions: Record<string, SessionSlice>
-  /** V3.3a bootstrap — active sessionId selector; nullable until first write. */
-  activeSessionId: string | null
-  /**
-   * V3.4a — render-order list for session tabs. Source of truth for tab
-   * ordering and the renderer-side ≤3 hard limit. Entries appear here in
-   * the order they were created via `createNewSession`; `closeSession`
-   * removes the matching id. The list is empty in the cold-start state so
-   * the SessionTabs strip renders nothing (V6 fixture-compatible).
-   */
-  sessionOrder: string[]
-  taskDisclosureState: Record<string, TaskDisclosureState>
-
-  setAgents: (agents: Agent[]) => void
-  reloadAgents: () => Promise<void>
-  selectAgent: (name: string) => void
-  toggleAgentSelection: (name: string) => void
-  addMessage: (message: AgentMessage) => void
-  appendToMessage: (id: string, chunk: string) => void
-  setInputValue: (value: string, options?: { preserveContinuationIntent?: boolean }) => void
-  setComposerDraft: (value: string, continuationIntent?: PendingContinuationIntent | null) => void
-  clearPendingContinuationIntent: () => void
-  setIsStreaming: (streaming: boolean) => void
-  sendMessage: (content: string) => Promise<SendMessageResult>
-  stopStreaming: () => void
-  undoLastMessage: () => void
-  /**
-   * Stage X2.3 contract (b) — INTERNAL bootstrap path. Creates a fresh
-   * local conversation scope and swaps the currently-active session
-   * slice IN PLACE without growing `sessionOrder`. Used by:
-   *   - `deleteConversation` (post-delete recovery for the active scope)
-   *   - the `sendMessage` no-scope bootstrap (synchronizing a scope
-   *     before the first IPC).
-   *   - `undoLastMessage` (resets the active scope after undo).
-   *
-   * NOT to be called from UI controls — those go through
-   * `createNewSession()` (the visible tab API). Wiring UI to this method
-   * leaves the user with an "invisible" session (no chip in
-   * `SessionTabs`), which is exactly the W5 item 3 failure mode.
-   */
-  newSession: () => void
-  loadScopes: () => Promise<void>
-  loadScope: (scopeId: string) => Promise<void>
-  setCurrentScope: (scopeId: string) => Promise<void>
-  sendMessageToScope: (scopeId: string, content: string) => Promise<void>
-  clearToolTrace: () => void
-  /** Phase 3: dismiss the soft-failure capsule for a given scope. */
-  dismissSoftError: (scopeId: string) => void
-  loadConversations: () => Promise<void>
-  loadConversation: (convId: string) => Promise<void>
-  deleteConversation: (convId: string) => Promise<void>
-  /**
-   * Rename a conversation. Awaits the persisting IPC (so a failure leaves the
-   * old title visibly intact rather than silently diverging), then mirrors the
-   * new title onto any open scope. Trims input; a blank title is a no-op.
-   */
-  renameConversation: (convId: string, title: string) => Promise<void>
-  addAttachments: (files: ChatAttachment[]) => void
-  removeAttachment: (id: string) => void
-  clearAttachments: () => void
-  setActiveAttachmentPreview: (preview: AttachmentPreviewState | null) => void
-  loadSendPreferences: () => Promise<void>
-  setSendCoalescingEnabled: (enabled: boolean) => Promise<void>
-  setSendCoalescingWindowMs: (windowMs: number) => Promise<void>
-  pickFiles: () => Promise<void>
-  setTaskSectionExpanded: (taskKey: string, sectionKey: TaskSectionKey, expanded: boolean) => void
-  toggleTaskSection: (taskKey: string, sectionKey: TaskSectionKey) => void
-  /**
-   * V3.4a — set the active session and mirror the per-session draft
-   * (`inputValue`) onto the top-level field so existing ChatInput selectors
-   * keep observing the active session's value. No-op if `id` is not present
-   * in `sessionOrder` (defensive: prevents activating a closed session).
-   */
-  setActiveSessionId: (id: string) => void
-  /**
-   * V3.4a — create a fresh session slice, append its id to `sessionOrder`,
-   * and switch the active session to it. Rejected (no-op) when the
-   * renderer-side cap is reached (MAX_AGENT_SESSIONS *live* sessions; terminal
-   * ones are pruned and never count); the caller surfaces this as a disabled
-   * "+" by re-reading the live-session count.
-   * Returns the newly created session id, or `null` if rejected.
-   *
-   * Stage X2.3 contract (b) — VISIBLE TAB API. ALL UI-reachable session
-   * creation paths route through this method:
-   *   - SessionTabs "+ 新建" button.
-   *   - ChatPanel header `handleNewSession`.
-   *   - ChatPanel `handleChannelSelect` when landing on an empty local
-   *     channel.
-   *   - ChatPanel boot effect when `scopes.length === 0`.
-   *
-   * Two notes vs the legacy `newSession()`:
-   *   1. This appends to `sessionOrder` — the new tab is immediately
-   *      visible in `SessionTabs` (whereas `newSession()` swaps in place).
-   *   2. This respects the shared MAX_AGENT_SESSIONS cap (live sessions only);
-   *      `newSession()` does not.
-   */
-  createNewSession: () => string | null
-  /**
-   * V3.4a — drop a session from the tab strip. Removes the entry from
-   * `sessions` and `sessionOrder`; when `id === activeSessionId`, switches
-   * the active session to the first remaining tab (or `null` if none).
-   * No-op if `id` is not present.
-   */
-  closeSession: (id: string) => void
-}
-
-function generateSessionId(): string {
-  return `session-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-}
-
-function generateId(prefix: string): string {
-  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-}
-
-function mapScopeToConversation(scope: ConversationScope): ChatConversation {
-  return {
-    id: scope.id,
-    agent: scope.agent,
-    title: scope.title,
-    created_at: scope.createdAt,
-    updated_at: scope.updatedAt,
-  }
-}
-
-const DEFAULT_SEND_COALESCE_WINDOW_MS = 1200
-const CONTINUATION_DRAFT_PATTERN =
-  /^(?:请|请你|麻烦你)?(?:(?:继续(?:当前|这个|刚才|上次|任务|处理|执行|完成|一下)?|接着(?:来|做|处理|执行|完成)?|恢复(?:上次|刚才|当前)?|重试(?:一次|一下)?|重试刚才的任务|再试(?:一次|一下)?|再来(?:一次|一下)?|重新(?:跑|执行|做|开始)(?:一次|一下|一轮|一遍)?|从头(?:跑|来|做|开始|重新)(?:一次|一下|一轮|一遍)?|确认继续|暂不继续|我已完成|人工步骤已完成|请重试刚才的任务)(?:$|[\s，。,.!?！？])|继续后台任务(?:$|\s)|(?:continue|retry|resume)(?:$|\s))/i
 
 /**
  * Stage V V3.3c — replace per-module `let` globals with per-sessionId Maps so
@@ -476,371 +133,6 @@ const pendingSendBuffers = new Map<
   }
 >()
 let bypassCoalescingOnce = false
-
-/** Sentinel key when the store has no `sessionId` yet (very early bootstrap). */
-const PRIMARY_SESSION_KEY = '__primary__'
-
-function activeSessionKey(state: AgentState | null | undefined): string {
-  if (!state) return PRIMARY_SESSION_KEY
-  return state.activeSessionId || state.sessionId || PRIMARY_SESSION_KEY
-}
-
-/**
- * V3.3a read-side selector. Falls back to the active session, then primary,
- * then a zero slice so consumers never observe `undefined` during bootstrap
- * (e.g. before the store has finished initialising on first render).
- */
-export function getSessionSlice(state: AgentState, sessionId?: string | null): SessionSlice {
-  const id = sessionId ?? state.activeSessionId ?? state.sessionId ?? PRIMARY_SESSION_KEY
-  return normalizeSessionSlice(state.sessions[id])
-}
-
-// =============================================================================
-// W4.5 per-area selectors — declared narrow read paths per ownership area.
-// Each selector returns a referentially-stable narrow slice when the upstream
-// state has not changed; pinned by useAgent-area-selector-contract.test.ts.
-// =============================================================================
-
-/** W4.5 area S — direct field read for the active session's slice. */
-export function selectActiveSessionSlice(state: AgentState): SessionSlice {
-  return getSessionSlice(state)
-}
-
-/** W4.5 area S — direct field read for `sessionOrder`. */
-export function selectSessionOrder(state: AgentState): readonly string[] {
-  return state.sessionOrder
-}
-
-/** W4.5 area P — direct field read for the active session's coalescing counters. */
-export function selectPendingSendForActive(state: AgentState): {
-  count: number
-  flushAt: number | null
-} {
-  // Read the top-level mirror (the per-session source of truth is mirrored
-  // here on every coalescing write; see `withSessionSliceAndActiveMirror`).
-  // Returning a fresh object on every call is intentional: shallow-stability
-  // contract uses the upstream `pendingSendCount` / `pendingSendFlushAt`
-  // primitives as the equality check rather than the wrapper identity.
-  return { count: state.pendingSendCount, flushAt: state.pendingSendFlushAt }
-}
-
-/** W4.5 area J — direct field read for the active session's scopeRunStates map. */
-export function selectActiveScopeRunStates(state: AgentState): Record<string, ScopeRunState> {
-  return state.scopeRunStates
-}
-
-/** W4.5 area U — direct field read for the agents list. */
-export function selectAgents(state: AgentState): readonly Agent[] {
-  return state.agents
-}
-
-/** W4.5 area U — direct field read for the attachments list. */
-export function selectAttachments(state: AgentState): readonly ChatAttachment[] {
-  return state.attachments
-}
-
-/** W4.5 area U — direct field read for the file pool. */
-export function selectFilePool(state: AgentState): readonly ChatAttachment[] {
-  return state.filePool
-}
-
-/** W4.5 area D — direct field read for the conversations list. */
-export function selectConversations(state: AgentState): readonly ChatConversation[] {
-  return state.conversations
-}
-
-/** W4.5 area D — direct field read for the scopes list. */
-export function selectScopes(state: AgentState): readonly ConversationScope[] {
-  return state.scopes
-}
-
-/** V3.3a write-side helper used by the coalescing path. */
-function withSessionSlice(
-  state: AgentState,
-  sessionId: string,
-  patch: Partial<SessionSlice>,
-): Pick<AgentState, 'sessions'> {
-  const current = normalizeSessionSlice(state.sessions[sessionId])
-  return {
-    sessions: {
-      ...state.sessions,
-      [sessionId]: { ...current, ...patch },
-    },
-  }
-}
-
-function normalizeSessionSlice(slice: Partial<SessionSlice> | null | undefined): SessionSlice {
-  const fallback = makeEmptySessionSlice(slice?.conversationId ?? null)
-  return {
-    ...fallback,
-    ...slice,
-    messages: slice?.messages ?? fallback.messages,
-    scopeRunStates: slice?.scopeRunStates ?? fallback.scopeRunStates,
-    taskDisclosureState: slice?.taskDisclosureState ?? fallback.taskDisclosureState,
-  }
-}
-
-function mirrorFromSessionSlice(
-  state: AgentState,
-  sliceInput: Partial<SessionSlice> | null | undefined,
-): Pick<
-  AgentState,
-  | 'messages'
-  | 'inputValue'
-  | 'pendingSendCount'
-  | 'pendingSendFlushAt'
-  | 'isStreaming'
-  | 'foregroundBusy'
-  | 'composerLocked'
-  | 'streamingMessageId'
-  | 'streamingRequestId'
-  | 'conversationId'
-  | 'currentScopeId'
-  | 'currentScope'
-  | 'scopeRunStates'
-  | 'toolTrace'
-  | 'toolTraceStatus'
-  | 'taskDisclosureState'
-> {
-  const slice = normalizeSessionSlice(sliceInput)
-  const currentScopeId = slice.conversationId
-  const currentScope = currentScopeId
-    ? state.scopes.find((item) => item.id === currentScopeId)
-      || (state.currentScope?.id === currentScopeId ? state.currentScope : null)
-    : null
-  const aliases = syncActiveScopeRunAliases({
-    currentScopeId,
-    scopeRunStates: slice.scopeRunStates,
-  })
-  return {
-    messages: slice.messages,
-    inputValue: slice.inputValue,
-    pendingSendCount: slice.pendingSendCount,
-    pendingSendFlushAt: slice.pendingSendFlushAt,
-    isStreaming: slice.isStreaming || aliases.isStreaming,
-    foregroundBusy: slice.foregroundBusy || aliases.foregroundBusy,
-    composerLocked: slice.composerLocked || aliases.composerLocked,
-    streamingMessageId: slice.streamingMessageId,
-    streamingRequestId: slice.streamingRequestId,
-    conversationId: currentScopeId,
-    currentScopeId,
-    currentScope,
-    scopeRunStates: slice.scopeRunStates,
-    toolTrace: aliases.toolTrace,
-    toolTraceStatus: aliases.toolTraceStatus,
-    taskDisclosureState: slice.taskDisclosureState,
-  }
-}
-
-function withSessionSliceAndActiveMirror(
-  state: AgentState,
-  sessionId: string,
-  patch: Partial<SessionSlice>,
-): Pick<AgentState, 'sessions'> | (Pick<AgentState, 'sessions'> & ReturnType<typeof mirrorFromSessionSlice>) {
-  const current = normalizeSessionSlice(state.sessions[sessionId])
-  const nextSlice = { ...current, ...patch }
-  const sessionsPatch = {
-    sessions: {
-      ...state.sessions,
-      [sessionId]: nextSlice,
-    },
-  }
-  if (activeSessionKey(state) !== sessionId) return sessionsPatch
-  return {
-    ...sessionsPatch,
-    ...mirrorFromSessionSlice(state, nextSlice),
-  }
-}
-
-function sessionKeyForScopeId(state: AgentState, scopeId: string | null | undefined): string {
-  if (scopeId) {
-    for (const [sessionId, sliceInput] of Object.entries(state.sessions)) {
-      const slice = normalizeSessionSlice(sliceInput)
-      if (slice.conversationId === scopeId) return sessionId
-    }
-  }
-  return activeSessionKey(state)
-}
-
-function getScopeRunStateForScope(state: AgentState, scopeId: string | null | undefined): ScopeRunState | null {
-  if (!scopeId) return null
-  const sessionKey = sessionKeyForScopeId(state, scopeId)
-  const slice = normalizeSessionSlice(state.sessions[sessionKey])
-  return slice.scopeRunStates[scopeId] || state.scopeRunStates[scopeId] || null
-}
-
-function withSessionMessagesMirror(
-  state: AgentState,
-  sessionId: string,
-  messages: AgentMessage[],
-): Pick<AgentState, 'messages' | 'sessions'> {
-  return {
-    ...withSessionSlice(state, sessionId, { messages }),
-    messages,
-  }
-}
-
-function withActiveSessionMessagesMirror(
-  state: AgentState,
-  messages: AgentMessage[],
-): Pick<AgentState, 'messages' | 'sessions'> {
-  return withSessionMessagesMirror(state, activeSessionKey(state), messages)
-}
-
-function withActiveSessionConversationMirror(
-  state: AgentState,
-  conversationId: string | null,
-): Pick<AgentState, 'sessions'> {
-  return withSessionSlice(state, activeSessionKey(state), { conversationId })
-}
-
-// =============================================================================
-// V3.3d listener-side direct-setState routing helpers
-// =============================================================================
-
-/**
- * Returns true iff `id` resolves to a session slice that exists and is not
- * in a terminal state (`done` / `error` / `cancelled` / `closed`).
- *
- * `lookupSessionByConversation` uses the same exclusion set so a terminated
- * session never re-enters via the conversationId fallback (v8 codex round-7).
- */
-export function isLiveSession(
-  state: AgentState,
-  id: string | null | undefined,
-): id is string {
-  if (!id) return false
-  const slice = state.sessions[id]
-  return !!slice && !TERMINAL_SESSION_STATES.has(slice.state)
-}
-
-/**
- * Returns the id of the most-recent live session whose `slice.conversationId`
- * matches the given conversationId. When multiple live sessions match, the
- * one whose id equals `state.activeSessionId` is preferred; otherwise the
- * first encountered is returned. Returns `null` when no live match exists.
- */
-export function lookupSessionByConversation(
-  state: AgentState,
-  conversationId: string | null | undefined,
-): string | null {
-  if (!conversationId) return null
-  const matches: string[] = []
-  for (const [id, slice] of Object.entries(state.sessions)) {
-    if (slice.conversationId !== conversationId) continue
-    if (TERMINAL_SESSION_STATES.has(slice.state)) continue
-    matches.push(id)
-  }
-  if (matches.length === 0) return null
-  const preferred = matches.find((id) => id === state.activeSessionId)
-  return preferred ?? matches[0]
-}
-
-/**
- * V3.3d metric stubs. Today they emit a `console.warn` in non-test
- * environments and bump a module-level counter exported for behavior tests.
- * Wiring to the real renderer metrics infra is a deliberate follow-up so
- * this PR remains a pure routing change.
- */
-interface CardRoutingMetricsState {
-  orphaned: Array<{ cardId: string; reason: string; at: number }>
-  fallback: Array<{ cardId: string; reason: string; at: number }>
-}
-
-const cardRoutingMetrics: CardRoutingMetricsState = {
-  orphaned: [],
-  fallback: [],
-}
-
-function recordOrphanedCard(cardId: string, reason: string): void {
-  cardRoutingMetrics.orphaned.push({ cardId, reason, at: Date.now() })
-}
-
-function recordCardFallback(cardId: string, reason: string): void {
-  cardRoutingMetrics.fallback.push({ cardId, reason, at: Date.now() })
-}
-
-/** V3.3d test introspection — read-only snapshot of the routing metrics. */
-export function __getCardRoutingMetricsForTesting(): {
-  orphaned: ReadonlyArray<{ cardId: string; reason: string; at: number }>
-  fallback: ReadonlyArray<{ cardId: string; reason: string; at: number }>
-} {
-  return {
-    orphaned: cardRoutingMetrics.orphaned.slice(),
-    fallback: cardRoutingMetrics.fallback.slice(),
-  }
-}
-
-/** V3.3d test introspection — reset between behavior test cases. */
-export function __resetCardRoutingMetricsForTesting(): void {
-  cardRoutingMetrics.orphaned.length = 0
-  cardRoutingMetrics.fallback.length = 0
-}
-
-export interface CardRoutingDecision {
-  targetSessionId: string | null
-  metric: string | null
-}
-
-/**
- * Three-level fallback chain used by `initAgentInteractionListeners` to route
- * a pushed ask_user_questions card to the right session slice:
- *
- *   1. `event.sessionId` — accepted only when `isLiveSession` is true
- *   2. `lookupSessionByConversation(event.conversationId)` — terminated
- *      sessions are filtered out by the same exclusion set
- *   3. `state.activeSessionId` — last-resort so a live card still renders
- *
- * Returns `targetSessionId = null` only when all three resolve to null —
- * i.e. there is no live session and no active session to surface into. The
- * caller drops the card and records an orphan metric in that case.
- *
- * When `targetSessionId !== event.sessionId` we annotate the metric with
- * the reason the original `event.sessionId` was rejected: `null-sessionId`,
- * `unknown-session`, or `stale-or-terminated-session`.
- */
-export function routeCardToSession(
-  state: AgentState,
-  event: { sessionId: string | null; conversationId: string | null; cardId: string },
-): CardRoutingDecision {
-  const validSessionId = isLiveSession(state, event.sessionId) ? event.sessionId : null
-  const byConversation = lookupSessionByConversation(state, event.conversationId)
-  const targetSessionId = validSessionId ?? byConversation ?? state.activeSessionId
-
-  if (!targetSessionId) {
-    return { targetSessionId: null, metric: 'no-active-session-and-keys-null' }
-  }
-  if (targetSessionId !== event.sessionId) {
-    const reason =
-      !event.sessionId
-        ? 'null-sessionId'
-        : !state.sessions[event.sessionId]
-          ? 'unknown-session'
-          : 'stale-or-terminated-session'
-    return { targetSessionId, metric: reason }
-  }
-  return { targetSessionId, metric: null }
-}
-
-/**
- * Map agent runtime `ScopeRunEventData['phase']` → `SessionSliceState`.
- * Only terminal phases produce a transition; non-terminal phases keep the
- * slice in `'live'` so the routing helpers continue to accept it.
- */
-function mapScopeRunPhaseToSessionState(
-  phase: string,
-): SessionSliceState | null {
-  switch (phase) {
-    case 'done':
-      return 'done'
-    case 'error':
-      return 'error'
-    case 'cancelled':
-      return 'cancelled'
-    default:
-      return null
-  }
-}
 
 /**
  * Pure cleanup routine shared by the Vite HMR dispose hook and the V3.3c
@@ -877,106 +169,6 @@ if (typeof import.meta !== 'undefined' && (import.meta as unknown as { hot?: { d
   ;(import.meta as unknown as { hot: { dispose: (cb: () => void) => void } }).hot.dispose(() => {
     __disposePendingSendCoalescingForHMR()
   })
-}
-
-function normalizeContinuationDraftText(value: string): string {
-  return String(value || '').trim().replace(/\s+/g, '')
-}
-
-function shouldPreserveContinuationIntent(params: {
-  preserveRequested?: boolean
-  pendingIntent: PendingContinuationIntent | null
-  draftAnchor: string | null
-  nextValue: string
-}): boolean {
-  if (!params.preserveRequested || !params.pendingIntent) return false
-  const next = normalizeContinuationDraftText(params.nextValue)
-  if (!next) return true
-
-  const anchor = normalizeContinuationDraftText(params.draftAnchor || '')
-  if (anchor && (next.startsWith(anchor) || anchor.startsWith(next))) return true
-
-  return CONTINUATION_DRAFT_PATTERN.test(params.nextValue.trim())
-}
-
-async function persistLocalConversationScope(scope: ConversationScope | null): Promise<void> {
-  if (!scope || scope.sourceKind !== 'local') return
-  if (typeof window === 'undefined' || !window.electronAPI?.chat?.createConversation) return
-  await window.electronAPI.chat.createConversation({
-    id: scope.id,
-    agent: scope.agent,
-    title: scope.title || '新对话',
-  }).catch(() => undefined)
-}
-
-interface ChatRowFromIPC {
-  id: string
-  role: string
-  content: string
-  timestamp: string
-  meta?: Record<string, unknown>
-}
-
-function extractAskUserCardState(
-  meta: Record<string, unknown>,
-  fallbackCardId: string,
-  fallbackAskedAtIso: string,
-): AskUserQuestionsCardState | null {
-  const aug = meta.askUserQuestions
-  if (!aug || typeof aug !== 'object') return null
-  const augRecord = aug as Record<string, unknown>
-  const rawStatus = augRecord.status
-  const status: AskUserQuestionsCardState['status'] =
-    rawStatus === 'pending' || rawStatus === 'submitted' || rawStatus === 'cancelled' || rawStatus === 'timeout'
-      ? rawStatus
-      : 'cancelled'
-  const rawQuestions = Array.isArray(augRecord.questions) ? augRecord.questions : []
-  const questions: AskUserQuestionsCardState['questions'] = rawQuestions
-    .filter((q): q is Record<string, unknown> => Boolean(q) && typeof q === 'object')
-    .map((q) => {
-      const kindRaw = q.kind
-      const kind: AskUserQuestionsCardState['questions'][number]['kind'] =
-        kindRaw === 'single_choice' || kindRaw === 'multi_choice' || kindRaw === 'free_text'
-          ? kindRaw
-          : 'free_text'
-      return {
-        id: typeof q.id === 'string' ? q.id : '',
-        question: typeof q.question === 'string' ? q.question : '',
-        kind,
-        options: Array.isArray(q.options) ? q.options.filter((o): o is string => typeof o === 'string') : null,
-        placeholder: typeof q.placeholder === 'string' ? q.placeholder : null,
-        required: typeof q.required === 'boolean' ? q.required : true,
-      }
-    })
-    .filter((q) => q.id && q.question)
-  const rawAnswers = Array.isArray(augRecord.answers) ? augRecord.answers : null
-  let answers: AskUserQuestionsCardState['answers']
-  if (rawAnswers) {
-    const collected: Array<{ id: string; answer: string | string[] }> = []
-    for (const a of rawAnswers) {
-      if (!a || typeof a !== 'object') continue
-      const record = a as Record<string, unknown>
-      const id = typeof record.id === 'string' ? record.id : ''
-      if (!id) continue
-      const value = record.answer
-      if (typeof value === 'string') {
-        collected.push({ id, answer: value })
-      } else if (Array.isArray(value)) {
-        collected.push({ id, answer: value.filter((v): v is string => typeof v === 'string') })
-      }
-    }
-    answers = collected
-  }
-  return {
-    cardId: typeof augRecord.cardId === 'string' ? augRecord.cardId : fallbackCardId,
-    status,
-    questions,
-    askedAt: typeof augRecord.askedAt === 'number' ? augRecord.askedAt : Date.parse(fallbackAskedAtIso),
-    answers,
-    answeredAt: typeof augRecord.answeredAt === 'number' ? augRecord.answeredAt : undefined,
-    cancelReason: typeof augRecord.cancelReason === 'string' ? augRecord.cancelReason : undefined,
-    cancelledAt: typeof augRecord.cancelledAt === 'number' ? augRecord.cancelledAt : undefined,
-  }
 }
 
 /**
@@ -1105,34 +297,6 @@ async function cancelPendingAskUserQuestionsForCurrentScope(
   return { kind: 'error', cardId }
 }
 
-function rebuildAgentMessageFromRow(row: ChatRowFromIPC, agent: string): AgentMessage {
-  const meta = (row.meta || {}) as Record<string, unknown>
-  const cardState = row.role === 'agent_card'
-    ? extractAskUserCardState(meta, row.id, row.timestamp)
-    : null
-  const isAskUserCard = cardState !== null
-  const type: AgentMessage['type'] = isAskUserCard
-    ? 'ask_user_questions'
-    : row.role === 'user'
-      ? 'user'
-      : row.role === 'assistant'
-        ? 'agent'
-        : 'system'
-  const message: AgentMessage = {
-    id: row.id,
-    agent,
-    content: row.content,
-    type,
-    timestamp: new Date(row.timestamp),
-    attachments: extractPersistedAttachments(meta),
-    meta,
-  }
-  if (cardState) {
-    message.askUserQuestions = cardState
-  }
-  return message
-}
-
 function clearPendingSendBufferState(sessionId?: string | null) {
   let storeStateForKey: AgentState | null = null
   try {
@@ -1167,34 +331,6 @@ function clearPendingSendBufferState(sessionId?: string | null) {
   } catch {
     /* silent-catch: setState may be unavailable during bootstrap; timer cleanup already completed */
   }
-}
-
-function isSameAttachmentPoolEntry(a: ChatAttachment, b: ChatAttachment): boolean {
-  if (a.source === 'document-quote' || b.source === 'document-quote' || a.source === 'document-widget-target' || b.source === 'document-widget-target') {
-    return (
-      a.source === b.source &&
-      a.path === b.path &&
-      a.widgetTitle === b.widgetTitle &&
-      a.lineStart === b.lineStart &&
-      a.lineEnd === b.lineEnd &&
-      (a.selection || '') === (b.selection || '')
-    )
-  }
-  return a.path === b.path
-}
-
-function shouldKeepInFilePool(attachment: ChatAttachment): boolean {
-  return attachment.source !== 'document-widget-target'
-}
-
-function removeFromFilePool(
-  filePool: ChatAttachment[],
-  removedAttachment: ChatAttachment,
-  remainingAttachments: ChatAttachment[],
-): ChatAttachment[] {
-  const stillReferenced = remainingAttachments.some((attachment) => isSameAttachmentPoolEntry(attachment, removedAttachment))
-  if (stillReferenced) return filePool
-  return filePool.filter((attachment) => !isSameAttachmentPoolEntry(attachment, removedAttachment))
 }
 
 async function flushPendingSendBuffer(sessionId?: string | null) {
