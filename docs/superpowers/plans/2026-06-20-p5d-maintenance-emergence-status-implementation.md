@@ -11,11 +11,17 @@ scope: P5d / C26
 
 维护回合 / 涌现候选未启用。
 
+> **边界演进（2026-07-05 D7 gate-flip）**：上句在本文成文时同时覆盖两者；现
+> `runMaintenanceLlmRound` 已经 `maintenance-llm-driver` 挂上 crystallize tick
+> 生产驱动（mandated 表 live-required 条目 + 三层预算闸），**「未启用」自
+> 07-05 起仅指涌现候选（candidate-maintenance）**。合同见
+> `2026-07-05-p3-backlog-closeout-implementation.md` §2。
+
 This slice closes the stale C26 assumption without connecting dormant lifecycle code to production. It makes the current boundary explicit:
 
 - `cas-merge.ts` is live and stays live.
 - `getLastMaintenanceRoundStatus` is a live settings status surface and stays wired.
-- `runMaintenanceLlmRound`, crystallize runner/scheduler, candidate maintenance, and emergence feed helpers have no production driver in this slice.
+- `runMaintenanceLlmRound`, crystallize runner/scheduler, candidate maintenance, and emergence feed helpers have no production driver in this slice. (2026-07-05 起 `runMaintenanceLlmRound` 除外，见上注。)
 
 ## Implementation
 

@@ -123,10 +123,31 @@ const REGISTRY = Object.freeze([
     unwiredList: 'UNWIRED_PACKET_FILES',
   },
   {
+    // D7 gate-flip (2026-07-05)：crystallize tick 捎带驱动，三层预算闸在
+    // maintenance-llm-driver（专项开关 / durable lastRunAt 进 EP2-C2 门控 /
+    // 空信号跳过），LLM 写卡强制 staged。
     capability: 'maintenance-llm-round (runMaintenanceLlmRound)',
-    status: 'deferred-by-design',
-    files: ['src/main/modules/agent-control/maintenance/maintenance-llm-round.ts'],
-    unwiredList: 'MIXED_MAINTENANCE_ROUND_REL',
+    status: 'live-required',
+    wiring: [
+      {
+        name: 'runtime crystallize tick drives the llm round',
+        file: RUNTIME_REL,
+        pattern: /runMaintenanceLlmRoundTick\s*\(/,
+      },
+      {
+        name: 'driver invokes the pinned maintenance round',
+        file: 'src/main/modules/agent-control/maintenance/maintenance-llm-driver.ts',
+        pattern: /runMaintenanceLlmRound\s*\(\{/,
+      },
+    ],
+    firedLedger: {
+      file: MIXED_MAINTENANCE_ROUND_REL,
+      event: 'maintenance_audit',
+    },
+    noStaleMarker: {
+      file: MIXED_MAINTENANCE_ROUND_REL,
+      pattern: /P5d\/C26 unwired|not in production driver path/i,
+    },
   },
   {
     capability: 'appendModelCriteria',
@@ -167,7 +188,6 @@ const REGISTRY = Object.freeze([
 const UNWIRED_LISTS = Object.freeze({
   UNWIRED_PACKET_FILES: new Set(UNWIRED_PACKET_FILES),
   UNWIRED_MAINTENANCE_FILES: new Set(UNWIRED_MAINTENANCE_FILES),
-  MIXED_MAINTENANCE_ROUND_REL: new Set([MIXED_MAINTENANCE_ROUND_REL]),
 })
 
 function readOrNull(root, rel) {
@@ -180,10 +200,10 @@ function readOrNull(root, rel) {
 
 function check({ root = REPO_ROOT } = {}) {
   const errors = []
+  // D7 gate-flip: MIXED_MAINTENANCE_ROUND_REL 已 live，不再计入 unwired 约束面。
   const allUnwired = new Set([
     ...UNWIRED_PACKET_FILES,
     ...UNWIRED_MAINTENANCE_FILES,
-    MIXED_MAINTENANCE_ROUND_REL,
   ])
 
   for (const entry of REGISTRY) {

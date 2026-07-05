@@ -101,6 +101,8 @@ import { SidecarManager } from '../sidecar-manager'
 import { MemoryRepository } from '../../repositories/memory-repository'
 import { MemoryLifecycleManager } from '../memory/memory-lifecycle'
 import { CrystallizeScheduler, createCrystallizeEffectors, runCrystallizeRound, type CrystallizeSignals } from '../maintenance/crystallize-gate'
+import { runMaintenanceLlmRoundTick } from '../maintenance/maintenance-llm-driver'
+import { readAIConfigDetailed } from '../../claude-bridge/direct-chat-ai-config'
 import { ReflectionService } from '../reflection-service'
 import { runUserPictureCasMerge } from '../maintenance/cas-merge'
 import { UserProfileRepository } from '../../repositories/user-profile-repository'
@@ -646,6 +648,20 @@ export class AgentControlRuntime extends EventEmitter {
       } catch (error) {
         logAgentMetric('belief_decay_round_failed', { reason: error instanceof Error ? error.message : String(error) })
       }
+    }
+    // D7 —— LLM 维护回合捎带同一确定性 tick（合同 2026-07-05-p3-backlog-closeout §2）。
+    // 驱动自带三层预算闸：专项开关 / durable lastRunAt 进 EP2-C2 门控（6h 内
+    // skip=零调用）/ 空信号跳过；单轮单调用、强制 staged 写。失败面包屑化，
+    // 绝不破坏 crystallize tick。
+    try {
+      const aiSettings = new AppSettingsRepository()
+      await runMaintenanceLlmRoundTick({
+        settings: this.db,
+        store,
+        loadAIConfig: () => readAIConfigDetailed(() => aiSettings.getSetting('ai_model_config')),
+      })
+    } catch (error) {
+      logAgentMetric('maintenance_llm_round_failed', { reason: error instanceof Error ? error.message : String(error) })
     }
   }
 

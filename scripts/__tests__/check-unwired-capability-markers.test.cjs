@@ -22,7 +22,7 @@ function makeRoot() {
   write(root, 'src/main/modules/agent-control/quality/packet-failure.ts', '/** P5c/C22 unwired: not in production path. */\nimport { compiler } from "./packet-compiler"\nexport const failure = compiler\n')
   write(root, 'src/main/modules/agent-control/maintenance/cas-merge.ts', 'export function runUserPictureCasMerge() {}\n')
   write(root, 'src/main/modules/agent-control/maintenance/crystallize-gate.ts', '/** P5d/C26 unwired: not in production driver path. */\nexport function decideCrystallizeRun() {}\n')
-  write(root, 'src/main/modules/agent-control/maintenance/maintenance-llm-round.ts', 'import { decideCrystallizeRun } from "./crystallize-gate"\nexport function getLastMaintenanceRoundStatus() { return null }\n/** P5d/C26 unwired: not in production driver path. */\nexport async function runMaintenanceLlmRound() { return decideCrystallizeRun() }\n')
+  write(root, 'src/main/modules/agent-control/maintenance/maintenance-llm-round.ts', 'import { decideCrystallizeRun } from "./crystallize-gate"\nexport function getLastMaintenanceRoundStatus() { return null }\n/** D7 live: driven via maintenance-llm-driver. */\nexport async function runMaintenanceLlmRound() { return decideCrystallizeRun() }\n')
   write(root, 'src/main/modules/agent-control/emergence/candidate-maintenance.ts', '/** P5d/C26 unwired: not in production driver path. */\nexport function maintainAgentCandidates() {}\n')
   write(root, 'src/main/modules/agent-control/runtime-core/runtime.ts', 'import { runUserPictureCasMerge } from "../maintenance/cas-merge"\nrunUserPictureCasMerge()\n')
   write(root, 'src/main/modules/claude-bridge/ipc-handler.ts', 'import { getLastMaintenanceRoundStatus } from "../agent-control/maintenance/maintenance-llm-round"\ngetLastMaintenanceRoundStatus()\n')
@@ -82,12 +82,19 @@ test('allows production to import the now-live crystallize-gate (P5d determinist
   assert.ok(!result.errors.some((error) => error.includes('crystallize-gate.ts')), 'importing live crystallize-gate must not error')
 })
 
-test('fails when production references the dormant maintenance LLM round driver', () => {
+test('fails when production bypasses maintenance-llm-driver and calls the round directly (D7 budget gates)', () => {
   const root = makeRoot()
   write(root, 'src/main/modules/agent-control/runtime-core/runtime.ts', 'import { runUserPictureCasMerge } from "../maintenance/cas-merge"\nimport { runMaintenanceLlmRound } from "../maintenance/maintenance-llm-round"\nrunUserPictureCasMerge(); runMaintenanceLlmRound()\n')
   const result = check({ root })
   assert.equal(result.ok, false)
-  assert.ok(result.errors.some((error) => error.includes('runMaintenanceLlmRound')))
+  assert.ok(result.errors.some((error) => error.includes('runMaintenanceLlmRound') && error.includes('maintenance-llm-driver')))
+})
+
+test('allows the maintenance-llm-driver itself to invoke the round (D7 wired path)', () => {
+  const root = makeRoot()
+  write(root, 'src/main/modules/agent-control/maintenance/maintenance-llm-driver.ts', 'import { runMaintenanceLlmRound } from "./maintenance-llm-round"\nexport async function runMaintenanceLlmRoundTick() { return runMaintenanceLlmRound() }\n')
+  const result = check({ root })
+  assert.ok(!result.errors.some((error) => error.includes('maintenance-llm-driver.ts')), 'driver is the sanctioned call site')
 })
 
 test('fails when live packet-fields is marked unwired', () => {

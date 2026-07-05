@@ -23,6 +23,7 @@ const UNWIRED_MAINTENANCE_FILES = Object.freeze([
 const LIVE_PACKET_FIELDS_REL = 'src/main/modules/agent-control/quality/packet-fields.ts'
 const LIVE_CAS_MERGE_REL = 'src/main/modules/agent-control/maintenance/cas-merge.ts'
 const MIXED_MAINTENANCE_ROUND_REL = 'src/main/modules/agent-control/maintenance/maintenance-llm-round.ts'
+const MAINTENANCE_LLM_DRIVER_REL = 'src/main/modules/agent-control/maintenance/maintenance-llm-driver.ts'
 const RUNTIME_REL = 'src/main/modules/agent-control/runtime-core/runtime.ts'
 const IPC_HANDLER_REL = 'src/main/modules/claude-bridge/ipc-handler.ts'
 const BELIEF_CARD_GROUP_REL = 'src/main/modules/claude-bridge/ipc/belief-card-group.ts'
@@ -158,15 +159,15 @@ function check({ root = REPO_ROOT } = {}) {
     }
   }
 
+  // D7 gate-flip (2026-07-05): runMaintenanceLlmRound is live — driven from the
+  // crystallize tick via maintenance-llm-driver. The file must no longer carry
+  // dormant markers; wiring/fired evidence moved to check-mandated-capability-is-live.
   const mixedMaintenanceAbs = path.join(root, MIXED_MAINTENANCE_ROUND_REL)
   if (fs.existsSync(mixedMaintenanceAbs)) {
     const mixedMaintenance = fs.readFileSync(mixedMaintenanceAbs, 'utf8')
-    if (!/runMaintenanceLlmRound[\s\S]{0,220}unwired/i.test(mixedMaintenance)
-      && !/unwired[\s\S]{0,220}runMaintenanceLlmRound/i.test(mixedMaintenance)) {
-      errors.push(`${MIXED_MAINTENANCE_ROUND_REL} must mark runMaintenanceLlmRound as P5d/C26 unwired without marking the whole file.`)
-    } else if (!/runMaintenanceLlmRound[\s\S]{0,260}not in production driver path/i.test(mixedMaintenance)
-      && !/not in production driver path[\s\S]{0,260}runMaintenanceLlmRound/i.test(mixedMaintenance)) {
-      errors.push(`${MIXED_MAINTENANCE_ROUND_REL} must mark runMaintenanceLlmRound as not in production driver path.`)
+    if (/P5d\/C26 unwired/i.test(mixedMaintenance)
+      || /not in production driver path/i.test(mixedMaintenance)) {
+      errors.push(`${MIXED_MAINTENANCE_ROUND_REL} is live (D7 wired via maintenance-llm-driver); it must not carry P5d/C26 unwired markers.`)
     }
   }
 
@@ -221,8 +222,15 @@ function check({ root = REPO_ROOT } = {}) {
       if (isAllowedIntraCluster(fromRel, targetRel)) continue
       errors.push(`${fromRel} must not import unwired module ${targetRel}.`)
     }
-    if (fromRel !== MIXED_MAINTENANCE_ROUND_REL && /\brunMaintenanceLlmRound\b/.test(source)) {
-      errors.push(`${fromRel} must not reference dormant runMaintenanceLlmRound; it has no production driver in P5d.`)
+    // D7 gate-flip：符号禁令从「全仓不得引用（dormant）」翻为「生产驱动唯一
+    // 经 maintenance-llm-driver（预算闸所在）」——旁路直调仍然违规。
+    // （runMaintenanceLlmRoundTick 因 \b 边界不命中本正则，runtime 捎带合法。）
+    if (
+      fromRel !== MIXED_MAINTENANCE_ROUND_REL
+      && fromRel !== MAINTENANCE_LLM_DRIVER_REL
+      && /\brunMaintenanceLlmRound\b/.test(source)
+    ) {
+      errors.push(`${fromRel} must not call runMaintenanceLlmRound directly; production drive goes through maintenance-llm-driver (D7 budget gates).`)
     }
   }
 

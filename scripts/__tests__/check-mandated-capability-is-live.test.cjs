@@ -37,11 +37,18 @@ function write(root, rel, text) {
 const WIRED_RUNTIME = `
 import { runBeliefDecayRound } from '../memory/belief-decay'
 import { CrystallizeScheduler } from '../maintenance/crystallize-gate'
+import { runMaintenanceLlmRoundTick } from '../maintenance/maintenance-llm-driver'
 const scheduler = new CrystallizeScheduler(() => {})
 logAgentMetric('crystallize_round_fired', {})
 runBeliefDecayRound([], effectors, now)
 logAgentMetric('belief_decay_round_fired', {})
+await runMaintenanceLlmRoundTick({ settings, store, loadAIConfig })
 `
+
+// D7 gate-flip fixture: the driver invokes the pinned round and the round
+// carries the maintenance_audit fired ledger (no dormant markers).
+const MAINTENANCE_DRIVER_REL = 'src/main/modules/agent-control/maintenance/maintenance-llm-driver.ts'
+const MAINTENANCE_ROUND_REL = 'src/main/modules/agent-control/maintenance/maintenance-llm-round.ts'
 
 function writeBaseline(root) {
   write(root, LIFECYCLE_REL, `
@@ -62,6 +69,8 @@ for (const row of rows) {
   write(root, EMERGENCE_GROUP_REL, "const cards = assembleEmergenceFeed([])\nlogAgentMetric('emergence_feed_assembled', {})\n")
   write(root, EMERGENCE_SECTION_REL, 'export const marker = "data-ready-emergence-feed"\n')
   write(root, 'src/renderer/components/ready/TaskPanel.tsx', 'export const panel = <EmergenceFeedSection onOpenScope={open} onOpenSettings={openSettings} />\n')
+  write(root, MAINTENANCE_DRIVER_REL, 'import { runMaintenanceLlmRound } from "./maintenance-llm-round"\nexport async function runMaintenanceLlmRoundTick(deps) { return runMaintenanceLlmRound({}) }\n')
+  write(root, MAINTENANCE_ROUND_REL, "export async function runMaintenanceLlmRound(deps) { logAgentMetric('maintenance_audit', {}) }\n")
 }
 
 test('gate passes on a fully-consistent baseline (also exercises deferred handshake against real unwired lists)', (t) => {

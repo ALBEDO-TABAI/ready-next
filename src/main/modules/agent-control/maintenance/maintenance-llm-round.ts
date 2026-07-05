@@ -145,7 +145,8 @@ function defaultPrompt(): string {
 }
 
 /**
- * P5d/C26 unwired: runMaintenanceLlmRound is not in production driver path.
+ * D7 live (2026-07-05): driven from the crystallize tick via
+ * maintenance-llm-driver.runMaintenanceLlmRoundTick（三层预算闸在驱动侧）。
  * Drive one maintenance round through the PINNED runSubAgent container.
  */
 export async function runMaintenanceLlmRound(deps: MaintenanceRoundDeps): Promise<MaintenanceRoundReport> {
