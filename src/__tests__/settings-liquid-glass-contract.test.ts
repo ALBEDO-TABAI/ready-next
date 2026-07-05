@@ -8,7 +8,12 @@ function readWorkspaceFile(path: string): string {
 }
 
 test('settings page keeps the main workbench transparent shell structure', () => {
-  const settingsPage = readWorkspaceFile('src/renderer/pages/Settings.tsx')
+  // 合同随实现同步：2026-07-05 Settings.tsx 面板拆分，settings-ai-panel / settings-ai-light-card 锚点移至 settings/AISettingsPanel.tsx 与 settings/settings-shared.tsx（三文件都扫，断言不变量不动）。
+  const settingsPage = [
+    readWorkspaceFile('src/renderer/pages/Settings.tsx'),
+    readWorkspaceFile('src/renderer/pages/settings/AISettingsPanel.tsx'),
+    readWorkspaceFile('src/renderer/pages/settings/settings-shared.tsx'),
+  ].join('\n')
 
   assert.match(settingsPage, /data-liquid-shell="settings-header"/)
   assert.match(settingsPage, /data-liquid-shell="settings-sidebar"/)

@@ -19,7 +19,11 @@ test('rss mode clears only inbox items while preserving starred entries and supp
 })
 
 test('settings exposes an rss draft-store management section with reset controls', () => {
-  const settings = readWorkspaceFile('src/renderer/pages/Settings.tsx')
+  // 合同随实现同步：2026-07-05 Settings.tsx 面板拆分，RSS 底稿面板锚点移至 settings/RSSDraftStoreSettingsPanel.tsx（双文件都扫，断言不变量不动）。
+  const settings = [
+    readWorkspaceFile('src/renderer/pages/Settings.tsx'),
+    readWorkspaceFile('src/renderer/pages/settings/RSSDraftStoreSettingsPanel.tsx'),
+  ].join('\n')
   const preload = readWorkspaceFile('src/preload/index.ts')
 
   assert.match(settings, /id:\s*'rss-storage'/)

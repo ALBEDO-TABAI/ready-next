@@ -8,7 +8,12 @@ function readWorkspaceFile(path: string): string {
 }
 
 test('ai settings panel separates the model list from the second-level editor', () => {
-  const settingsPage = readWorkspaceFile('src/renderer/pages/Settings.tsx')
+  // 合同随实现同步：2026-07-05 Settings.tsx 面板拆分，AI 面板锚点移至 settings/AISettingsPanel.tsx 与 settings/settings-shared.tsx（三文件都扫，断言不变量不动）。
+  const settingsPage = [
+    readWorkspaceFile('src/renderer/pages/Settings.tsx'),
+    readWorkspaceFile('src/renderer/pages/settings/AISettingsPanel.tsx'),
+    readWorkspaceFile('src/renderer/pages/settings/settings-shared.tsx'),
+  ].join('\n')
 
   assert.match(settingsPage, /OpenAI/)
   assert.match(settingsPage, /Anthropic/)

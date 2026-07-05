@@ -9,7 +9,11 @@ function readWorkspaceFile(path: string): string {
 }
 
 test('settings capability status is sourced from a main-process runtime snapshot instead of renderer inference', () => {
-  const settingsPage = readWorkspaceFile('src/renderer/pages/Settings.tsx')
+  // 合同随实现同步：2026-07-05 Settings.tsx 面板拆分，能力快照锚点移至 settings/AISettingsPanel.tsx（双文件都扫，断言不变量不动）。
+  const settingsPage = [
+    readWorkspaceFile('src/renderer/pages/Settings.tsx'),
+    readWorkspaceFile('src/renderer/pages/settings/AISettingsPanel.tsx'),
+  ].join('\n')
   const preload = readWorkspaceFile('src/preload/index.ts')
   const rendererTypes = readWorkspaceFile('src/renderer/types/electron.d.ts')
   const agentIPC = readWorkspaceFile('src/main/modules/claude-bridge/ipc/agent-runtime-group.ts')
@@ -36,7 +40,11 @@ test('settings capability status is sourced from a main-process runtime snapshot
 })
 
 test('settings runtime panel does not expose the retired Claude SDK label', () => {
-  const settingsPage = readWorkspaceFile('src/renderer/pages/Settings.tsx')
+  // 合同随实现同步：2026-07-05 Settings.tsx 面板拆分，运行时面板内容移至 settings/AISettingsPanel.tsx（双文件都扫，doesNotMatch 不变量覆盖拆分面）。
+  const settingsPage = [
+    readWorkspaceFile('src/renderer/pages/Settings.tsx'),
+    readWorkspaceFile('src/renderer/pages/settings/AISettingsPanel.tsx'),
+  ].join('\n')
   const rendererTypes = readWorkspaceFile('src/renderer/types/electron.d.ts')
   const runtime = readWorkspaceFile('src/main/modules/agent-control/runtime-core/runtime.ts')
 

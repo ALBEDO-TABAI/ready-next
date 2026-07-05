@@ -1568,28 +1568,28 @@
       "snippetHash": "62426a2dfa778325"
     },
     {
-      "file": "src/renderer/pages/Settings.tsx",
-      "line": 1726,
+      "file": "src/renderer/pages/settings/StorageSettingsPanel.tsx",
+      "line": 141,
       "snippetHash": "3dcadc0202090355"
     },
     {
-      "file": "src/renderer/pages/Settings.tsx",
-      "line": 2153,
+      "file": "src/renderer/pages/settings/ExternalServicesSettingsPanel.tsx",
+      "line": 216,
       "snippetHash": "17d4f91420616110"
     },
     {
-      "file": "src/renderer/pages/Settings.tsx",
-      "line": 2228,
+      "file": "src/renderer/pages/settings/ExternalServicesSettingsPanel.tsx",
+      "line": 321,
       "snippetHash": "065a916027235893"
     },
     {
-      "file": "src/renderer/pages/Settings.tsx",
-      "line": 2248,
+      "file": "src/renderer/pages/settings/ExternalServicesSettingsPanel.tsx",
+      "line": 342,
       "snippetHash": "065a916027235893"
     },
     {
-      "file": "src/renderer/pages/Settings.tsx",
-      "line": 2267,
+      "file": "src/renderer/pages/settings/ExternalServicesSettingsPanel.tsx",
+      "line": 361,
       "snippetHash": "065a916027235893"
     },
     {

@@ -9,7 +9,11 @@ function readWorkspaceFile(path: string): string {
 }
 
 test('settings mcp section registers "not shipped" label and inert Stage T plumbing reference', () => {
-  const settingsPage = readWorkspaceFile('src/renderer/pages/Settings.tsx')
+  // 合同随实现同步：2026-07-05 Settings.tsx 面板拆分，McpSettingsPanel 锚点移至 settings/McpSettingsPanel.tsx（双文件都扫，断言不变量不动）。
+  const settingsPage = [
+    readWorkspaceFile('src/renderer/pages/Settings.tsx'),
+    readWorkspaceFile('src/renderer/pages/settings/McpSettingsPanel.tsx'),
+  ].join('\n')
 
   // Section is registered in settingsData with id "mcp" + Plug2 icon
   assert.match(settingsPage, /id: 'mcp'/)
@@ -37,7 +41,11 @@ test('settings mcp section registers "not shipped" label and inert Stage T plumb
 })
 
 test('settings mcp install + configure controls are visibly disabled (no actionable install path)', () => {
-  const settingsPage = readWorkspaceFile('src/renderer/pages/Settings.tsx')
+  // 合同随实现同步：2026-07-05 Settings.tsx 面板拆分，McpSettingsPanel 锚点移至 settings/McpSettingsPanel.tsx（双文件都扫，断言不变量不动）。
+  const settingsPage = [
+    readWorkspaceFile('src/renderer/pages/Settings.tsx'),
+    readWorkspaceFile('src/renderer/pages/settings/McpSettingsPanel.tsx'),
+  ].join('\n')
 
   // The disabled placeholder card is rendered with aria-disabled and pointer-events: none
   assert.match(settingsPage, /aria-labelledby="mcp-install-disabled-heading"/)
