@@ -1965,41 +1965,12 @@ export function initAgentInteractionListeners(): () => void {
     })
   })
 
-  // V3.3d — keep `sessions[sessionId].state` in sync with the runtime
-  // scopeRunEvent stream so `isLiveSession` / `lookupSessionByConversation`
-  // see terminal sessions and stop routing pushed cards into them. Only
-  // terminal phases (done / error / cancelled) trigger a transition;
-  // non-terminal phases keep the slice in `live`. Sessions are lazily
-  // created when an event arrives ahead of any other slice write so the
-  // routing helpers can immediately classify them.
-  const agentApi = typeof window !== 'undefined' ? window.electronAPI?.agent : null
-  const unsubscribeScopeRunEvent = agentApi && typeof agentApi.onScopeRunEvent === 'function'
-    ? agentApi.onScopeRunEvent((event) => {
-      const sessionId = (event as { sessionId?: string | null }).sessionId
-      if (!sessionId) return
-      const nextState = mapScopeRunPhaseToSessionState(event.phase)
-      if (!nextState) return
-      useAgent.setState((prev) => {
-        const existing = prev.sessions[sessionId]
-        // Skip lazy creation only for non-terminal phases — terminal ones
-        // must always be recorded so a late `done` for an unseen session
-        // doesn't leave routing accepting it.
-        const nextSlice: SessionSlice = existing
-          ? { ...existing, state: nextState }
-          : { ...makeEmptySessionSlice(), state: nextState }
-        return {
-          sessions: {
-            ...prev.sessions,
-            [sessionId]: nextSlice,
-          },
-        }
-      })
-    })
-    : () => { /* ignore — older preview stubs do not surface onScopeRunEvent */ }
+  // Phase D D2（2026-07-05）：scopeRunEvent 的会话路由终态转移已迁入
+  // runtimeDriver 单枢纽（renderer 每个 run 通道只允许一个订阅文件），
+  // 本处不再并行订阅——双真相源收敛，行为逐字保留在枢纽侧。
 
   return () => {
     try { unsubscribePush() } catch { /* ignore */ }
-    try { unsubscribeScopeRunEvent() } catch { /* ignore */ }
   }
 }
 

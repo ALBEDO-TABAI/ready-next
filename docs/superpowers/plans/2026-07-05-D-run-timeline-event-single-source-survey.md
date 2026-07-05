@@ -1,15 +1,32 @@
 ---
-title: Phase D — run-timeline 事件单源（勘察 + 合同骨架，实施留在场会话）
+title: Phase D — run-timeline 事件单源（已实施：单发射漏斗 + 单订阅枢纽 + gate）
 date: 2026-07-05
-status: survey
-enforce: false
+status: implemented
+enforce: true
 ---
 
-# Phase D 勘察与合同骨架
+# Phase D 实施合同（2026-07-05 当日实施完毕，用户随后真机复测）
 
-> 路线文档定性：renderer 全域改动、白屏高危、合同先行 + 在场。本文档是无人值守窗口内
-> 能安全完成的部分：现状证据 + 合同骨架 + 实施红线。**实施必须在场**（真机 renderer
-> 回归是验收面），本文档 enforce: false，实施日转正式 implementation 合同。
+> 实施勘察修正：run 家族实为五通道（stream/status/error/scopeRunEvent/conversationEvent），
+> 主进程发射点全部集中在 claude-bridge/ipc-handler 单区块（10 处），renderer 扇入已高度
+> 收敛于 runtimeDriver（唯一旁路=useAgent 的并行 onScopeRunEvent 订阅）。据此 D1-D3 按
+> "发射漏斗 + 订阅枢纽 + 双端 gate"落地：
+>
+> - **D1**：`contracts/run-timeline-contracts.ts`（RunTimelineStamp v/channel/at 信封）+
+>   `claude-bridge/run-timeline-emitter.ts` 唯一发射漏斗；ipc-handler 10 处裸 send 全部
+>   改经漏斗，负载盖 timeline 戳（纯增量字段，renderer 现有读取零影响）。
+> - **D2**：useAgent 的并行 scopeRunEvent 订阅（会话路由终态转移）整体迁入 runtimeDriver
+>   单枢纽（今晨 useAgent 拆分使 mapScopeRunPhaseToSessionState 可无环引用）；renderer
+>   全域每个 run 通道只剩 runtimeDriver 一个订阅文件。
+> - **D3**：`scripts/check-run-timeline-single-source.cjs`（主进程发射面只许漏斗、漏斗必须
+>   盖戳且 send 恰一处、renderer 订阅面只许枢纽）挂入 `verify:stability` 链首；行为测试
+>   `run-timeline-single-source.test.ts`（信封透传/销毁窗静默/枢纽单源）随链。
+> - 验证：typecheck 0；gate OK；verify:stability（含新 gate+新测试）0；renderer 行为网
+>   54✓（listener-routing/session-toast/multi-session/scope-live-cache/driver 系）；
+>   `npm run build` 全绿（白屏防护边界未触碰）。
+>
+> 残余（登记不阻塞）：reduce 级全派生纯化（把枢纽内手写状态机改 reduce(RunTimelineEvent[])）
+> 是后续增量项，本轮单源合同已立、通道形状已可版本化演进。以下为原勘察记录。
 
 ## 1. 现状证据（2026-07-05 实测）
 

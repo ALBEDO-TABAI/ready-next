@@ -7,6 +7,7 @@ import { useMode } from '../../stores/useMode'
 import { extractSkillCommandFromText, runSkillCommand } from './commandHandlers'
 import { mapBackendErrorToFriendly } from './error-message-mapping'
 import { emitRendererAgentMetric } from './rendererMetrics'
+import { mapScopeRunPhaseToSessionState } from '../../stores/agent-store-helpers'
 
 interface AgentStoreLike {
   getState: () => any
@@ -1760,6 +1761,34 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
       })
       : () => { /* older test stubs */ }
 
+    // Phase D D2（2026-07-05）：会话路由的 scopeRunEvent 终态转移原是
+    // useAgent.initAgentInteractionListeners 里的并行旁路订阅（双真相源），
+    // 迁入本枢纽成为第二订阅——注册序与旧结构一致（枢纽主订阅在前），
+    // renderer 全域每个 run 通道只剩 runtimeDriver 一个订阅文件（D3 gate 钉）。
+    const cleanupScopeRunRouting = window.electronAPI.agent.onScopeRunEvent
+      ? window.electronAPI.agent.onScopeRunEvent((event: any) => {
+        const sessionId = (event as { sessionId?: string | null }).sessionId
+        if (!sessionId) return
+        const nextState = mapScopeRunPhaseToSessionState(event.phase)
+        if (!nextState) return
+        store.setState((prev: any) => {
+          const existing = prev.sessions[sessionId]
+          // Skip lazy creation only for non-terminal phases — terminal ones
+          // must always be recorded so a late `done` for an unseen session
+          // doesn't leave routing accepting it.
+          const nextSlice = existing
+            ? { ...existing, state: nextState }
+            : { ...makeEmptySessionSlice(), state: nextState }
+          return {
+            sessions: {
+              ...prev.sessions,
+              [sessionId]: nextSlice,
+            },
+          }
+        })
+      })
+      : () => { /* older preview stubs do not surface onScopeRunEvent */ }
+
     const cleanupConversationEvent = window.electronAPI.agent.onConversationEvent((data) => {
       const event = data as {
         type: 'scope_created' | 'scope_updated' | 'message_added'
@@ -1836,6 +1865,7 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
       cleanupToolActionRequest()
       cleanupCancelToolActionRequest()
       cleanupScopeRunEvent()
+      cleanupScopeRunRouting()
       cleanupConversationEvent()
     }
   }

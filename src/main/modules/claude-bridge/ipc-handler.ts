@@ -1,3 +1,4 @@
+import { emitRunTimelineEvent } from './run-timeline-emitter'
 import { ipcMain, BrowserWindow, dialog } from 'electron'
 import { randomUUID } from 'crypto'
 import { AgentManager } from './agent-manager'
@@ -1469,7 +1470,7 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
       // Stage V V3.2 — normalize undefined sessionId to null so the
       // push payload type is `string | null` (not optional). Orchestrator
       // sets sessionId from descriptor.sessionId which is `string | undefined`.
-      mainWindow.webContents.send('agent:stream', {
+      emitRunTimelineEvent(mainWindow, 'agent:stream', {
         ...data,
         sessionId: data.sessionId ?? null,
       })
@@ -1543,7 +1544,7 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
               }
               : null,
           )
-          mainWindow.webContents.send('agent:scopeRunEvent', payload)
+          emitRunTimelineEvent(mainWindow, 'agent:scopeRunEvent', payload)
         } else if (data.type === 'done') {
           const structured = data.projectionPatch && typeof data.projectionPatch === 'object'
             ? data.projectionPatch as Record<string, unknown>
@@ -1592,7 +1593,7 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
               }
               : null,
           )
-          mainWindow.webContents.send('agent:scopeRunEvent', payload)
+          emitRunTimelineEvent(mainWindow, 'agent:scopeRunEvent', payload)
         } else if (data.type === 'text') {
           const payload = {
             type: 'updated',
@@ -1605,7 +1606,7 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
             timestamp,
           } as const
           runtime?.recordScopeRunEvent(payload)
-          mainWindow.webContents.send('agent:scopeRunEvent', payload)
+          emitRunTimelineEvent(mainWindow, 'agent:scopeRunEvent', payload)
         }
       }
     }
@@ -1614,7 +1615,7 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
   orchestrator.on('status', (data) => {
     if (!mainWindow.isDestroyed()) {
       // Stage V V3.2 — normalize undefined sessionId to null on the push.
-      mainWindow.webContents.send('agent:status', {
+      emitRunTimelineEvent(mainWindow, 'agent:status', {
         ...data,
         sessionId: data.sessionId ?? null,
       })
@@ -1638,7 +1639,7 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
         runtime?.recordScopeRunEvent(payload)
         // Stage V V3.2 — mirror scopeId to sessionId on the wire so renderer
         // listeners can route per-session without aliasing knowledge.
-        mainWindow.webContents.send('agent:scopeRunEvent', {
+        emitRunTimelineEvent(mainWindow, 'agent:scopeRunEvent', {
           ...payload,
           sessionId: data.sessionId,
         })
@@ -1652,7 +1653,7 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
       // via orchestrator spread — forward as-is so the renderer can route
       // recoverable errors to the soft-failure capsule.
       // Stage V V3.2 — normalize undefined sessionId to null on the push.
-      mainWindow.webContents.send('agent:error', {
+      emitRunTimelineEvent(mainWindow, 'agent:error', {
         ...data,
         sessionId: data.sessionId ?? null,
       })
@@ -1672,7 +1673,7 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
           toolName: data.toolName,
         } as const
         runtime?.recordScopeRunEvent(payload)
-        mainWindow.webContents.send('agent:scopeRunEvent', payload)
+        emitRunTimelineEvent(mainWindow, 'agent:scopeRunEvent', payload)
       }
     }
   })
@@ -1696,7 +1697,7 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
       const sessionId = data && typeof data === 'object' && data.scope && typeof data.scope.id === 'string'
         ? data.scope.id
         : null
-      mainWindow.webContents.send('agent:conversationEvent', {
+      emitRunTimelineEvent(mainWindow, 'agent:conversationEvent', {
         ...data,
         sessionId,
       })
@@ -1709,7 +1710,7 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
       const sessionId = data && typeof data === 'object' && typeof data.scopeId === 'string'
         ? data.scopeId
         : null
-      mainWindow.webContents.send('agent:scopeRunEvent', {
+      emitRunTimelineEvent(mainWindow, 'agent:scopeRunEvent', {
         ...data,
         sessionId,
       })
