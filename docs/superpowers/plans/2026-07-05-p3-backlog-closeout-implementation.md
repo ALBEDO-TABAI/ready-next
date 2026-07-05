@@ -57,7 +57,28 @@ status: in-progress
 - gate：两个 gate 脚本翻面后 `verify:evolution-*` 相关链绿。
 - 设置页快照：接线后 `getLastMaintenanceRoundStatus()` 非空。
 
-# 3. 验证与记账
+# 3. 涌现数据源第二批（设计定稿，实施留待监控会话）
+
+> route §6.2 要求「设计先行、与 D7 合并规划、后台积累优先勿造前台面」。本节
+> 是设计定稿；实施是独立监控会话的事（涉及日历/文件系统读面）。
+
+## 3.1 三个信号源（全部确定性采集，采集期零 LLM）
+
+| 源 | 喂养的卡类型 | 采集器（确定性） | 证据形状 |
+|---|---|---|---|
+| 日历联动 | prepare（准备类） | 未来 72h 内日历事件扫描（已有 calendar 仓读面），命中「会议/截止/出行」类别时落证据行 | `{eventId, title 摘要, startAt, kind}` |
+| 产物打开跟踪 | harvest（收割类） | 任务产物（outputDir/文档）被用户重复打开 ≥3 次的计数账本（挂现有文件打开 IPC 缝，只计数不读内容） | `{artifactPath 脱敏, openCount, lastOpenAt}` |
+| 文件聚类 | forming（成形类） | 工作区新增文件的目录聚集检测（滑动 7 天窗口内同目录新文件 ≥5 个），复用 FileEmergence 已有扫描节奏 | `{dirPath 脱敏, newFileCount, windowDays}` |
+
+## 3.2 合同（实施时机器可验证）
+
+1. 采集器只写 emergence 证据账本 + `emergence_signal_collected` metric，**不直接铸卡**；卡生成仍走既有涌现管线（stage=candidate 且证据 ≥3 的硬约束不变）。
+2. 受保护路径只落「产物已生成（受保护路径）」占位，隐私路径/内容不进证据行（既有红线沿用）。
+3. 零前台新面：证据与卡只在设置页确认面可见（feedback 纪律：后台自动积累 + 设置页确认）。
+4. `candidate-maintenance.ts` 维持 dormant——本批不翻它的 gate；其 gate-flip 属后续独立工单（届时按 D7 同款三层预算闸复制）。
+5. 三采集器各配行为测试（信号落账/阈值不满足不落/受保护路径脱敏）。
+
+# 4. 验证与记账
 
 - 每件独立 pathspec 提交，真实退出码（`>log; echo EXIT=$?`）。
 - D4/D7 完成后：`npm run typecheck`、相关焦点测试、`node scripts/check-mandated-capability-is-live.cjs`、`node scripts/check-unwired-capability-markers.cjs`、`node scripts/check-silent-catch.cjs` 全 EXIT=0。

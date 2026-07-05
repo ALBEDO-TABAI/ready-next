@@ -10,6 +10,12 @@ note: >
 
 # D1 — 标签不显示（P1-b）
 
+> **2026-07-05 已完成（f034778f）**：createTab 在 background===true 时经
+> host.buildTabPayload 补发 browser:tabOpened + activate:false；renderer
+> onTabOpened 在 activate===false 时只 addTab/updateTab 即返回不抢焦点。
+> 行为测试 ×2 + renderer 门控结构合同 ×1；真机焦点视觉验证在回测清单。
+> 以下为历史记录。
+
 **现象**：agent 新建的浏览器标签不进标签条，要切换/新建才出现。
 
 **根因（已用探针 + 代码确认）**：
@@ -115,6 +121,12 @@ preload `runFeedback` API + electron.d.ts 类型 + 行为测试
 ---
 
 # D6 — agent-sdk-runtime 三测试与行动宣告闸的合同碰撞（已知红，登记于 2026-07-03）
+
+> **2026-07-05 已仲裁完成（a2fa0666）**：三个失败实为三根因——①闸对 fixture
+> 错（承诺文案改完成陈述）；②闸让位文档道自动保存兜底（newDocumentNeedsSave
+> 时不拦，义务由 runtime 确定性兑现）；③upload workflow 曝光 content_tasks 是
+> 6e99f0e6 有意策略（唯一裁决点），fixture 断言翻真值。verify:evolution-p6o
+> 全链回绿。以下为历史记录。
 
 **现象**：`verify:evolution-p6o` 红，`agent-sdk-runtime.test.ts` 三个用例失败：keeps browser tools hidden for local document attachment tasks / repairs new document turns that mutate without saving / exposes upload browser tools for upload workflow intent。
 
@@ -233,6 +245,12 @@ preload `runFeedback` API + electron.d.ts 类型 + 行为测试
 
 # D19 — 意图门控漏判：事件/活动类实时问题判 local_chat（分析定稿待实施，2026-07-04）
 
+> **2026-07-05 已实施（dc1ccf73 + 38d2a5ab）**：①EVENT_PATTERNS 主题类 +
+> FRESHNESS 周末/今晚/这周/下周；②intent_gating_miss 漏判账本（tool-executor
+> restricted 分支，按注册表 domain 判浏览器域，带 allowedBrowserToolCount 与
+> 纯文本摘要）；③fixture 矩阵六用例（事件正例/一词多域负例/既有主题不变/
+> 账本三态）。以下为历史记录。
+
 **实锚**：真机 14:00 事件类消息应进浏览器工作流被判 local_chat → browser 组被抑制（audit 记录）。
 
 **分析（2026-07-04）**：`live-info-intent.ts` 主题词表覆盖 weather/air/news/finance/sports/transport 六类；**事件/活动/场所类缺席**（演出、展览、活动、演唱会、门票、开售、场次、预约、排队、营业时间）——该类查询若再缺 LOOKUP 动词或 FRESHNESS 词，needsLiveInfo=false 直接落 local_chat。上游输入面已在第二轮修复（resolvePureUserTextForClassification 用纯用户话语判定，注入污染已排除），本项是词表覆盖缺口而非输入面缺口。
@@ -248,4 +266,4 @@ preload `runFeedback` API + electron.d.ts 类型 + 行为测试
 | D4 appendModelCriteria | 复验+挂号+通道勘察 | 声明通道设计（新工具 vs 协议）+ finalizer merge | 模型可见面 + 裁决漂移 | 通道设计决策 |
 | D5 RunFeedbackRepository | **全部完成（梯队三）**：后端+评分控件+registry live-required | 真机回归确认 | — | — |
 | D6 sdk 三测试 vs 宣告闸 | 根因确认 | 语义仲裁后改 fixture 或闸豁免 | 文档/浏览器道语义 | 可监控会话 |
-| D7 LLM 维护回合 | 评估完成（见 tier3 closeout §4） | 生产驱动决策+LLM 预算+staged 写监控+符号禁令 gate-flip | 真实 LLM 花费 + 维护写卡 | 专门监控会话 |
+| D7 LLM 维护回合 | **全部完成（2026-07-05 fb4b1b98）**：crystallize tick 捎带驱动 + 三层预算闸（专项开关/durable lastRunAt 进 EP2-C2/空信号跳过）+ 双 gate 翻面（live-required + 旁路直调禁令）；合同见 2026-07-05-p3-backlog-closeout §2 | 真机观察首轮 staged 产卡（回测清单） | — | — |

@@ -218,12 +218,12 @@ P1 的验收欠账 + 本轮新件的真机确认，一次跑完：
 
 ## 6.2 D-register 残项 + 后台成长（各异，见工单）
 
-- **D7 LLM 维护回合（剩余最重，专门会话）**：符号禁令 gate-flip + LLM 预算门控 + staged 写卡监控。用户「后台自动积累产品观」的下一主件；与「涌现数据源第二批」合并规划（feedback 纪律：后台积累优先，勿再造前台按钮面）。合同先行、在场。
-- **D1 标签 tabOpened（renderer 焦点，在场）**：`tab-lifecycle-service.createTab` 建 agent/background tab 时不发 `browser:tabOpened`（现只 popup 路径发），致 agent 建的标签不显示。**⚠️ 命名撞车**：Phase D 内部步骤「D1 RunTimelineStamp 信封」已完成（b933a763），与本 D-register「D1 标签」是两回事，勿误判已关。
+- **D7 LLM 维护回合 ✅（2026-07-05 fb4b1b98）**：crystallize tick 捎带驱动 + 三层预算闸（专项开关 / durable lastRunAt 进 EP2-C2 / 空信号跳过）+ 符号禁令与 mandated 双 gate 翻面（live-required + 旁路直调禁令）。合同 2026-07-05-p3-backlog-closeout §2；真机观察首轮 staged 产卡在回测清单。
+- **D1 标签 tabOpened ✅（2026-07-05 f034778f）**：createTab background 补发 tabOpened(activate:false)，renderer 不抢焦点；行为测试×2+结构合同×1；真机焦点视觉验证在回测清单。**⚠️ 命名撞车**：Phase D 内部步骤「D1 RunTimelineStamp 信封」已完成（b933a763），与本 D-register「D1 标签」是两回事，勿误判已关。
 - **D4 声明通道（决策题）**：`appendModelCriteria` 接裁决——新工具 vs 协议二选一，梯队二复验后缓办。
-- **D6 三测试语义仲裁（已知红，登记在案）**：agent-sdk-runtime 三测试与行动宣告闸的合同碰撞（宣告闸 vs fixture 谁对）。属分支既有红，非本轮新引入。
-- **D19 意图门控改判定（专门会话，需漂移评估）**：事件/活动类实时问题被判 local_chat → 浏览器组被抑制。分析已定稿（live-info 词表缺事件/活动类主题 + 无漏判账本），改判定动作未做。
-- **涌现数据源第二批（设计先行）**：prepare/harvest/forming 信号采集（日历联动/产物打开跟踪/文件聚类），与 D7 同属「后台成长」，合并规划。
+- **D6 三测试语义仲裁 ✅（2026-07-05 a2fa0666）**：三根因逐一裁决（闸对 fixture 错 / 闸让位自动保存兜底 / upload 曝光 content_tasks 是唯一裁决点有意策略）；verify:evolution-p6o 回绿。
+- **D19 意图门控改判定 ✅（2026-07-05 dc1ccf73+38d2a5ab）**：EVENT_PATTERNS+周末类 freshness 词入表；intent_gating_miss 漏判账本（按注册表 domain 判定）；fixture 矩阵六用例含一词多域负例。
+- **涌现数据源第二批：设计已定稿（2026-07-05-p3-backlog-closeout §3）**：三确定性采集器（日历 72h 窗 prepare / 产物打开计数 harvest / 目录聚集 forming），只写证据账本不铸卡、candidate-maintenance 维持 dormant、零前台新面。实施留待监控会话（涉日历/文件读面）。
 
 ## 6.3 债务收敛（silent-catch 需先决策，其余多可无人值守）
 
