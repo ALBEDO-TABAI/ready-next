@@ -131,6 +131,10 @@ import {
   registerActionAnnouncementSteerReminder,
 } from '../system-reminders/action-announcement-steer-reminder'
 import {
+  registerSkillCatalogReminder,
+} from '../system-reminders/skill-catalog-reminder'
+import { getSkillsRuntimeManager } from '../../skills-runtime/runtime-manager'
+import {
   beginBackgroundTaskTerminalReminderRun,
   drainBackgroundTaskTerminalReminders,
   prependSystemReminderInput,
@@ -1526,6 +1530,19 @@ export class AgentSdkTurnOrchestrator {
         }
       }
       let nextInput = toSdkInput(providerContent)
+      // P2-1 (T4)：L1 技能目录常驻注入——每轮把技能清单（name+description，预算裁剪）经 registry 组装后
+      //   前置到本轮首个模型输入，让模型能按描述自选技能。安全语义不变：目录只是清单，激活才开原语。
+      try {
+        const catalogEntries = getSkillsRuntimeManager().listSkills()
+          .filter((skill) => skill && skill.id && skill.name && skill.manifestValid !== false)
+          .map((skill) => ({ id: String(skill.id), name: String(skill.name), description: String(skill.description || '') }))
+        const catalogRegistry = createSystemReminderRegistry()
+        registerSkillCatalogReminder(catalogRegistry, catalogEntries)
+        const catalogText = catalogRegistry.compose()
+        if (catalogText) nextInput = prependSystemReminderInput(nextInput, catalogText)
+      } catch {
+        // silent-catch: 技能运行时未初始化（如非原生测试进程）→ 空目录不注入，安全降级不影响本轮
+      }
       const agentSdkMaxTurns = resolveAgentSdkMaxTurns({
         message: providerContent,
         requestEnvelope: effectiveExecutionOptions?.requestEnvelope,

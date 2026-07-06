@@ -31,6 +31,8 @@ const DEFAULT_CONFLICTS: Record<ReminderTopic, ReadonlyArray<ReminderTopic>> = {
   'browser-action-session': [],
   // D2 — 验收标准事中自检（每 run 首次模型调用注入一次）；no conflicts.
   'criteria-self-check': [],
+  // P2-1 — L1 技能目录；纯清单，no conflicts。
+  'skill-catalog': [],
 }
 
 export function composeSystemReminder(

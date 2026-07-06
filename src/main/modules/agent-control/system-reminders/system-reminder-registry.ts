@@ -39,6 +39,9 @@ export type ReminderTopic =
   // outcome-bearing task types (multi_step/research/media/browser_transaction).
   // Same template source as terminal adjudication (resolveCriteria). No conflicts.
   | 'criteria-self-check'
+  // P2-1 (T4) — L1 技能目录：全部技能 name+description 常驻注入（预算裁剪），让模型按描述自选。
+  // 纯清单，不开原语（激活才开）。priority 80（低于 current-date 90）。No conflicts.
+  | 'skill-catalog'
 
 export interface ReminderEntry {
   readonly topic: ReminderTopic
