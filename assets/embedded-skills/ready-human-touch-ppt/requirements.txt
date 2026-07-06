@@ -1,0 +1,4 @@
+# advisory skill — 无 python 依赖
+# 核心（模板 + 设计方法论 + 版式骨架 + 图片槽位协议）纯 HTML/文档，零依赖。
+# 可选的渲染/校验脚本需 Node + playwright-core + 系统 Edge/Chrome（见 SKILL.md）；
+# 无 Node 环境时降级为浏览器直接预览单文件 HTML。

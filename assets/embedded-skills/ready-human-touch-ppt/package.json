@@ -1,0 +1,15 @@
+{
+  "name": "ready-human-touch-ppt-skill",
+  "version": "1.0.0",
+  "private": true,
+  "description": "双风格（Ready 点阵理性 / Human Touch 温感人文）单文件网页 PPT 生成 skill",
+  "type": "module",
+  "scripts": {
+    "render": "node scripts/render-deck.mjs",
+    "validate": "node scripts/validate-deck.mjs",
+    "slots": "node scripts/list-image-slots.mjs"
+  },
+  "dependencies": {
+    "playwright-core": "^1.55.0"
+  }
+}

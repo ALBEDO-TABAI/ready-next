@@ -1,0 +1,580 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-style="human-touch">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>[必填] 替换为 PPT 标题 · Human Touch Deck</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;500;600&family=Noto+Sans+SC:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+/* ================================================================
+   风格 H · Human Touch 温感人文 —— 单文件横向翻页 deck 种子
+   token 来源：温感人文视觉体系（见 references/style-human-touch.md）
+   ================================================================ */
+
+/* ==== 1. 设计令牌 ==== */
+:root{
+  --paper:#F4F3ED;          /* 蛋壳白 */
+  --card:#FFFFFF;
+  --inset:#FAF9F5;
+  --ink:#141414;            /* 炭黑=真实 */
+  --ink-body:#141414;
+  --ink-2:#6B6B6B;
+  --ink-3:#A8A8A8;
+  --hair:#E0DFD9;
+  --red:#EF3E08;            /* 温情红：一页 ≤1 处 */
+  --red-soft:#FDEBE4;
+  --amber:#C85B1E;
+  --amber-deep:#9C4323;
+  --amber-bright:#E48421;
+  --amber-soft:#FDF0E4;
+  --cream:#FAE8B1;
+  --ok:#2D6A4F;
+  /* 图表（蛋壳白/白/炭黑三面均已过校验） */
+  --dc-on:#C85B1E;
+  --dc-off:#CDC8BC;
+  --dc-rest:#E7E3D8;
+  /* 字：双声部 */
+  --serif:"ShuiMu MingTi","水木明体","Noto Serif SC","Songti SC","STSong","SimSun",serif;
+  --sans:"Founder YouHei","方正悠黑","PingFang SC","Noto Sans SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  /* 几何：直角、无阴影 */
+  --sp-1:4px; --sp-2:8px; --sp-3:12px; --sp-4:16px; --sp-5:24px;
+  --sp-6:32px; --sp-7:48px; --sp-8:64px; --sp-9:80px;
+  --nav-safe:8vh;
+}
+
+/* ==== 2. reset / 基底 ==== */
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{height:100%;overflow:hidden}
+body{
+  font-family:var(--sans);
+  background:var(--paper);
+  color:var(--ink-body);
+  font-size:max(16px,1.05vw);
+  line-height:1.75;
+  -webkit-font-smoothing:antialiased;
+}
+img{display:block;max-width:100%}
+figure{margin:0}
+
+/* ==== 3. deck / slide ==== */
+#deck{
+  position:fixed;inset:0;height:100vh;width:10000vw;
+  display:flex;flex-wrap:nowrap;
+  transition:transform .9s cubic-bezier(.65,0,.25,1);
+  z-index:10;will-change:transform;
+}
+.slide{
+  width:100vw;height:100vh;flex:0 0 100vw;
+  position:relative;overflow:hidden;
+  padding:7vh 7vw calc(var(--nav-safe) + 1vh) 7vw;
+  display:flex;flex-direction:column;
+  background:var(--paper);color:var(--ink-body);
+}
+.slide.white{background:var(--card)}         /* 蛋壳白 ↔ 白 交替色带做章节呼吸 */
+.slide.dark{
+  background:#141414;color:#F4F3ED;
+  --ink:#F4F3ED; --ink-body:#F4F3ED; --ink-2:#A8A8A8; --ink-3:#7C7C78;
+  --card:#1F1F1F; --inset:#1B1B1A;
+  --hair:rgba(244,243,237,.16);
+  --dc-off:#4A4844; --dc-rest:#2A2927;
+}
+.slide.amber{                                 /* 琥珀渐变带：一份 deck ≤1 页 */
+  background:linear-gradient(135deg,#9C4323 0%,#E48421 100%);
+  color:#FFF6EA;
+  --ink:#FFF6EA; --ink-body:#FFF6EA; --ink-2:rgba(255,246,234,.78); --ink-3:rgba(255,246,234,.55);
+  --hair:rgba(255,246,234,.28);
+  --dc-on:#FFF6EA; --dc-off:rgba(255,246,234,.4); --dc-rest:rgba(255,246,234,.18);
+}
+.slide.center{justify-content:center}
+/* 纸纹（静态、极淡；要用就整页给 .grain） */
+.slide.grain::after{
+  content:"";position:absolute;inset:0;pointer-events:none;opacity:.045;z-index:0;
+  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' seed='7'/></filter><rect width='160' height='160' filter='url(%23n)' opacity='1'/></svg>");
+  background-size:160px 160px;
+}
+.slide>*{position:relative;z-index:1}
+
+/* ==== 4. 页眉 / 页脚（安静的 sans 小字） ==== */
+.chrome{
+  display:flex;justify-content:space-between;align-items:baseline;
+  font-size:max(12px,.76vw);letter-spacing:.08em;color:var(--ink-2);
+  font-weight:500;margin-bottom:5vh;
+}
+.foot{
+  margin-top:auto;padding-top:2.5vh;
+  display:flex;justify-content:space-between;align-items:center;
+  font-size:max(11px,.7vw);letter-spacing:.06em;color:var(--ink-3);
+}
+.foot .mark{font-family:var(--serif);letter-spacing:.12em;color:var(--ink-2)}
+
+/* ==== 5. 排版层级（明体的温度 × 悠黑的清晰） ==== */
+.h-display{font-family:var(--serif);font-size:min(6.2vw,10.6vh);font-weight:400;letter-spacing:.04em;line-height:1.22;color:var(--ink)}
+.h-display-sm{font-family:var(--serif);font-size:min(4.6vw,8vh);font-weight:400;letter-spacing:.04em;line-height:1.3;color:var(--ink)}
+.h-xl{font-family:var(--serif);font-size:min(3.2vw,5.5vh);font-weight:400;letter-spacing:.03em;line-height:1.4;color:var(--ink)}
+.h-md{font-size:min(1.9vw,3.2vh);font-weight:500;letter-spacing:.01em;line-height:1.4;color:var(--ink)}
+.h-sub{font-size:max(15px,1.1vw);font-weight:500;color:var(--ink)}
+.lead{font-size:max(18px,1.3vw);font-weight:400;line-height:1.8;color:var(--ink-body);max-width:38em}
+.body{font-size:max(16px,1.05vw);line-height:1.75;color:var(--ink-body)}
+.body-sm{font-size:max(14px,.92vw);line-height:1.7;color:var(--ink-2)}
+.kicker{font-size:max(13px,.82vw);font-weight:500;letter-spacing:.14em;color:var(--amber)}
+.kicker.red{color:var(--red)}
+.t-meta{font-size:max(12px,.74vw);color:var(--ink-3);letter-spacing:.05em}
+.stat-num{font-weight:300;font-size:min(6vw,10.2vh);line-height:1.08;letter-spacing:-.01em;color:var(--ink);font-variant-numeric:tabular-nums}
+.stat-num .stat-unit{font-size:.3em;font-weight:400;color:var(--ink-2);letter-spacing:.02em}
+.serif{font-family:var(--serif)}
+.amber-text{color:var(--amber)}
+.red-text{color:var(--red)}
+.max-w-36{max-width:36em}.max-w-28{max-width:28em}
+/* 竖排 kicker（诗集书脊；一页 ≤1 处） */
+.v-kicker{
+  writing-mode:vertical-rl;font-family:var(--serif);
+  font-size:max(14px,.95vw);letter-spacing:.32em;color:var(--ink-2);
+  border-left:1px solid var(--hair);padding-left:14px;
+}
+
+/* ==== 6. 结构件（直角、平面、1px 边） ==== */
+.card{background:var(--card);border:1px solid var(--hair);padding:var(--sp-6)}
+.card-inset{background:var(--inset);border:1px solid var(--hair);padding:var(--sp-5) var(--sp-6)}
+.rule{height:1px;background:var(--hair);border:0}
+.rule-strong{height:1px;background:var(--ink);border:0}
+.rule-amber{height:2px;background:var(--amber);border:0;width:56px}
+.ing-tag{display:inline-block;border:1px solid var(--ink);padding:6px 16px;font-size:max(13px,.8vw);color:var(--ink);background:var(--card);font-weight:400}
+.label{display:inline-block;background:var(--amber-soft);color:var(--amber);padding:5px 12px;font-size:max(12px,.74vw);font-weight:500}
+.label.red{background:var(--red-soft);color:var(--red)}
+.label.plain{background:var(--paper);color:var(--ink);border:1px solid var(--hair)}
+/* 手记清单式行 */
+.ledger{display:flex;flex-direction:column}
+.ledger-row{
+  display:grid;grid-template-columns:auto 1fr auto;gap:var(--sp-5);
+  align-items:baseline;padding:2.3vh 0;border-bottom:1px solid var(--hair);
+}
+.ledger-row:first-child{border-top:1px solid var(--hair)}
+.ledger-no{font-family:var(--serif);font-size:max(15px,1vw);color:var(--ink-3)}
+.ledger-title{font-family:var(--serif);font-size:max(19px,1.35vw);color:var(--ink);letter-spacing:.02em}
+.ledger-desc{font-size:max(14px,.9vw);color:var(--ink-2);line-height:1.7;margin-top:4px;font-family:var(--sans)}
+.ledger-meta{font-size:max(13px,.8vw);color:var(--ink-2);text-align:right}
+
+/* ==== 7. 网格 ==== */
+.grid-2-7-5{display:grid;grid-template-columns:7fr 5fr;gap:var(--sp-9)}
+.grid-2-6-6{display:grid;grid-template-columns:6fr 6fr;gap:var(--sp-9)}
+.grid-2-5-7{display:grid;grid-template-columns:5fr 7fr;gap:var(--sp-9)}
+.grid-3{display:grid;grid-template-columns:repeat(3,1fr);gap:var(--sp-6)}
+.grid-2{display:grid;grid-template-columns:repeat(2,1fr);gap:var(--sp-6)}
+.cols{display:flex;gap:var(--sp-6)}
+.stack{display:flex;flex-direction:column}
+.gap-2{gap:var(--sp-2)}.gap-3{gap:var(--sp-3)}.gap-4{gap:var(--sp-4)}
+.gap-5{gap:var(--sp-5)}.gap-6{gap:var(--sp-6)}.gap-7{gap:var(--sp-7)}.gap-8{gap:var(--sp-8)}
+
+/* ==== 8. 点阵图表（琥珀，安静版） ==== */
+.dot-chart{--dc-dot:11px;--dc-gap:5px}
+.dot-chart .dc-dot{width:var(--dc-dot);height:var(--dc-dot);border-radius:50%;flex:none}
+.dot-chart .dc-dot.on{background:var(--dc-on)}
+.dot-chart .dc-dot.off{background:var(--dc-off)}
+.dot-chart .dc-dot.rest{background:var(--dc-rest)}
+.dot-chart .dc-val{font-weight:300;font-size:max(15px,1vw);color:var(--ink);font-variant-numeric:tabular-nums}
+.dot-chart .dc-lab{font-size:max(12px,.78vw);color:var(--ink-2)}
+.dot-chart .dc-legend{font-size:max(12px,.74vw);color:var(--ink-3);margin-top:var(--sp-4)}
+.dot-chart .dc-legend .dc-dot{display:inline-block;vertical-align:-1px;margin-right:6px}
+.dc-bar-wrap{display:flex;align-items:flex-end;gap:calc(var(--dc-dot)*2)}
+.dc-bar-col{display:flex;flex-direction:column;align-items:center;gap:10px}
+.dc-bar-dots{display:flex;flex-direction:column-reverse;gap:var(--dc-gap)}
+.dc-hbar-row{display:grid;grid-template-columns:minmax(72px,auto) 1fr auto;gap:var(--sp-4);align-items:center;padding:1.2vh 0}
+.dc-hbar-dots{display:flex;gap:var(--dc-gap)}
+.dc-waffle{display:grid;grid-template-columns:repeat(10,var(--dc-dot));gap:var(--dc-gap)}
+.dc-line svg{display:block;overflow:visible}
+.dc-line .dc-path{fill:none;stroke:var(--dc-on);stroke-width:2px;stroke-linejoin:round;stroke-linecap:round}
+.dc-line .dc-grid{stroke:var(--hair);stroke-width:1px}
+.dc-line .dc-pt{fill:var(--dc-on);stroke:var(--card);stroke-width:2px}
+.dc-line text{font-family:var(--sans)}
+
+/* ==== 9. 图片槽位系统（直角版；协议见 references/image-slots.md） ==== */
+.img-slot{position:relative;overflow:hidden;background:var(--inset);width:100%}
+.img-slot>img{width:100%;height:100%;object-fit:cover;object-position:center 50%}
+.img-slot.fit-contain>img{object-fit:contain}
+.img-slot.r-21x9{aspect-ratio:21/9;max-height:54vh}
+.img-slot.r-16x9{aspect-ratio:16/9;max-height:62vh}
+.img-slot.r-16x10{aspect-ratio:16/10;max-height:56vh}
+.img-slot.r-4x3{aspect-ratio:4/3;max-height:56vh}
+.img-slot.r-3x2{aspect-ratio:3/2;max-height:46vh}
+.img-slot.r-1x1{aspect-ratio:1/1;max-height:50vh}
+.img-slot.r-3x4{aspect-ratio:3/4;max-height:60vh}
+.img-slot.is-empty{border:1px solid var(--hair)}
+.img-slot.is-empty::before{
+  content:attr(data-image-slot);
+  position:absolute;left:50%;top:50%;transform:translate(-50%,-64%);
+  font-size:max(13px,.85vw);font-weight:500;letter-spacing:.06em;color:var(--ink-2);
+  background:var(--card);border:1px solid var(--hair);padding:8px 18px;white-space:nowrap;
+}
+.img-slot.is-empty::after{
+  content:attr(data-slot-ratio) "  ·  " attr(data-slot-desc);
+  position:absolute;left:50%;top:50%;transform:translate(-50%,90%);
+  font-size:max(11px,.7vw);color:var(--ink-3);letter-spacing:.05em;white-space:nowrap;
+}
+.img-cap{font-size:max(12px,.74vw);color:var(--ink-2);letter-spacing:.03em;margin-top:12px;line-height:1.6}
+.img-cap .cap-serif{font-family:var(--serif);color:var(--ink)}
+
+/* ==== 10. 步骤 / 时间线（衬线步题） ==== */
+.steps-v{display:flex;flex-direction:column}
+.step-row{display:grid;grid-template-columns:64px 1fr;gap:var(--sp-5);padding:2.6vh 0;border-bottom:1px solid var(--hair);align-items:baseline}
+.step-row:first-child{border-top:1px solid var(--hair)}
+.step-no{font-family:var(--serif);font-size:max(22px,1.7vw);color:var(--amber)}
+.step-title{font-family:var(--serif);font-size:max(19px,1.35vw);color:var(--ink)}
+.step-desc{font-size:max(14px,.92vw);color:var(--ink-2);line-height:1.7;margin-top:4px}
+
+/* ==== 11. 导航 / 提示 / 索引 ==== */
+#nav{position:fixed;bottom:3vh;left:50%;transform:translateX(-50%);display:flex;gap:10px;z-index:60}
+#nav .dot{width:6px;height:6px;border-radius:50%;border:0;padding:0;background:#D6D3C9;cursor:pointer;transition:background .25s,transform .25s}
+#nav .dot.active{background:var(--amber);transform:scale(1.3)}
+body.dark-bg #nav .dot{background:#3C3B38}
+body.dark-bg #nav .dot.active{background:#E48421}
+#hint{position:fixed;right:2.2vw;bottom:2.6vh;z-index:60;font-size:11px;letter-spacing:.1em;color:var(--ink-3);opacity:.8}
+body.dark-bg #hint{color:#7C7C78}
+#overview{position:fixed;inset:0;z-index:100;background:rgba(244,243,237,.97);display:none;overflow-y:auto;padding:4vh 4vw}
+#overview [data-anim]{opacity:1!important;transform:none!important}
+#overview .slide *{animation:none!important;transition:none!important}
+
+/* ==== 12. 动效（近乎无：只有柔和淡入；无 JS 时全部可见） ==== */
+[data-anim]{opacity:1}
+body.motion-ready [data-anim]{opacity:0}
+body.low-power #deck{transition:none!important}
+body.low-power *,body.low-power *::before,body.low-power *::after{animation:none!important;transition:none!important}
+body.low-power [data-anim]{opacity:1!important;transform:none!important}
+
+/* ==== 13. 响应式兜底 ==== */
+@media (max-width:900px){
+  .h-display{font-size:min(9.6vw,11vh)}
+  .grid-2-7-5,.grid-2-6-6,.grid-2-5-7{grid-template-columns:1fr;gap:var(--sp-6)}
+  .grid-3{grid-template-columns:1fr}
+}
+</style>
+</head>
+<body class="">
+
+<script>
+/* ==== 早引导：低功耗模式（B 键）+ prefers-reduced-motion ==== */
+(function(){
+  const KEY='human-touch-deck-low-power';
+  const reduced=matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const stored=localStorage.getItem(KEY);
+  window.__lowPowerMode = stored==='1' || (stored===null && reduced);
+  function updateHint(){
+    const h=document.getElementById('hint');
+    if(h) h.textContent=`← → 翻页 · B ${window.__lowPowerMode?'动态':'静态'} · ESC 索引`;
+  }
+  window.__setLowPowerMode=function(on,opts={}){
+    window.__lowPowerMode=!!on;
+    document.body.classList.toggle('low-power',window.__lowPowerMode);
+    if(opts.persist!==false) localStorage.setItem(KEY,window.__lowPowerMode?'1':'0');
+    if(window.__lowPowerMode&&document.getAnimations){document.getAnimations().forEach(a=>a.cancel());}
+    updateHint();
+    dispatchEvent(new CustomEvent('rh-low-power-change',{detail:{on:window.__lowPowerMode}}));
+    if(window.__playSlide) window.__playSlide(window.__currentSlideIndex||0);
+  };
+  document.body.classList.toggle('low-power',window.__lowPowerMode);
+  addEventListener('DOMContentLoaded',updateHint,{once:true});
+})();
+</script>
+
+<div id="hint">← → 翻页 · B 静态 · ESC 索引</div>
+
+<div id="deck">
+
+  <!-- ============ 示例 1 · H01 封面（明体 + 竖排 kicker） ============ -->
+  <section class="slide grain" data-layout="H01" data-animate="statement">
+    <div class="chrome"><div>[必填] 场合</div><div>[必填] 2026.MM.DD</div></div>
+    <div class="grid-2-7-5" style="flex:1;align-items:center">
+      <div class="stack gap-6">
+        <hr class="rule-amber" data-anim="up">
+        <h1 class="h-display" data-anim="up">[必填] 主标题<br>每行不超过八字</h1>
+        <p class="lead" data-anim="up">[必填] 一句副题：温和地说明这场分享的来意。</p>
+        <div class="cols gap-4" data-anim="up">
+          <span class="ing-tag">[必填] 讲者</span>
+          <span class="ing-tag">[必填] 组织</span>
+        </div>
+      </div>
+      <div style="display:flex;justify-content:flex-end;align-self:stretch;align-items:center">
+        <div class="v-kicker" data-anim="up">[必填] 一句引导语，竖排而立</div>
+      </div>
+    </div>
+    <div class="foot"><div class="mark">human-touch deck</div><div>01 / NN</div></div>
+  </section>
+
+  <!-- ============ 示例 2 · H07 数据页（琥珀点图 + sans 300 大数） ============ -->
+  <section class="slide white" data-layout="H07" data-animate="chart">
+    <div class="chrome"><div>[必填] 章节 · 实证</div><div>02 / NN</div></div>
+    <div class="grid-2-5-7" style="flex:1;align-items:center">
+      <div class="stack gap-6">
+        <div class="kicker" data-anim="up">[必填] KICKER</div>
+        <h2 class="h-xl" data-anim="up">[必填] 数据要说的<br>那一句话</h2>
+        <div data-anim="up">
+          <div class="stat-num">-30.9<span class="stat-unit">%</span></div>
+          <p class="body-sm" style="margin-top:8px">[必填] 指标名 · 样本与周期</p>
+        </div>
+        <p class="t-meta" data-anim="up">来源 · [必填]（真实数据，不许编造）</p>
+      </div>
+      <div class="dot-chart" data-type="hbar"
+           data-values="14,10,7,4" data-labels="配方 A,配方 B,配方 C,对照"
+           data-unit="1" data-unit-label="" data-hot="0" data-dot="12" data-anim="chart"></div>
+    </div>
+    <div class="foot"><div class="mark">human-touch deck</div><div>02 / NN</div></div>
+  </section>
+
+  <!-- ============ 示例 3 · H12 收尾（炭黑 + 明体） ============ -->
+  <section class="slide dark" data-layout="H12" data-animate="statement">
+    <div class="stack gap-7" style="align-items:center;text-align:center;margin:auto 0 0;align-self:center">
+      <hr class="rule-amber" data-anim="up" style="width:56px">
+      <p class="h-display-sm" data-anim="up" style="text-align:center">[必填] 一句收束的话，<br>安静地放在这里。</p>
+      <p class="t-meta" data-anim="up">[必填] 署名 · 联系方式</p>
+    </div>
+    <div class="foot" style="align-self:stretch"><div class="mark">human-touch deck</div><div>NN / NN</div></div>
+  </section>
+
+  <!-- SLIDES_HERE：在此按 references/layouts-human-touch.md 的骨架继续加页 -->
+
+</div>
+
+<div id="nav"></div>
+
+<script>
+/* ================================================================
+   图表库（与 Ready 版同一 API，琥珀主题由 CSS 变量决定）
+   ================================================================ */
+(function(){
+  function nums(s){return (s||'').split(',').map(v=>parseFloat(v.trim())).filter(v=>!isNaN(v))}
+  function labs(s){return (s||'').split(',').map(v=>v.trim())}
+  function fmtVal(v){return Number.isInteger(v)?String(v):v.toFixed(1)}
+  let DI=0;
+  function dotSpan(cls){return `<span class="dc-dot ${cls}" style="--di:${DI++}"></span>`}
+  function unitLegend(el,unit){
+    const ul=el.dataset.unitLabel||'';
+    return `<div class="dc-legend"><span class="dc-dot on"></span>= ${fmtVal(unit)}${ul}</div>`;
+  }
+  function bar(el){
+    const vs=nums(el.dataset.values), ls=labs(el.dataset.labels);
+    const unit=parseFloat(el.dataset.unit||1);
+    const hot=el.dataset.hot!==undefined?parseInt(el.dataset.hot):-1;
+    DI=0;
+    el.innerHTML=`<div class="dc-bar-wrap">`+vs.map((v,i)=>{
+      const n=Math.max(1,Math.round(v/unit));
+      let dots='';for(let k=0;k<n;k++)dots+=dotSpan(hot<0||i===hot?'on':'off');
+      return `<div class="dc-bar-col"><div class="dc-val">${fmtVal(v)}</div>
+        <div class="dc-bar-dots">${dots}</div><div class="dc-lab">${ls[i]??''}</div></div>`;
+    }).join('')+`</div>`+unitLegend(el,unit);
+  }
+  function hbar(el){
+    const vs=nums(el.dataset.values), ls=labs(el.dataset.labels);
+    const unit=parseFloat(el.dataset.unit||1);
+    const hot=el.dataset.hot!==undefined?parseInt(el.dataset.hot):-1;
+    DI=0;
+    el.innerHTML=vs.map((v,i)=>{
+      const n=Math.max(1,Math.round(v/unit));
+      let dots='';for(let k=0;k<n;k++)dots+=dotSpan(hot<0||i===hot?'on':'off');
+      return `<div class="dc-hbar-row"><div class="dc-lab" style="text-align:right">${ls[i]??''}</div>
+        <div class="dc-hbar-dots">${dots}</div><div class="dc-val">${fmtVal(v)}</div></div>`;
+    }).join('')+unitLegend(el,unit);
+  }
+  function waffle(el){
+    const pct=Math.round(parseFloat(el.dataset.percent||0));
+    const label=el.dataset.label||'';
+    DI=0;let cells='';
+    for(let r=0;r<10;r++)for(let c=0;c<10;c++){
+      const idx=(9-r)*10+c;
+      cells+=idx<pct?dotSpan('on'):`<span class="dc-dot rest"></span>`;
+    }
+    el.innerHTML=`<div class="dc-waffle">${cells}</div>
+      <div class="dc-legend"><span class="dc-val" style="font-size:1.3em">${pct}%</span>　${label}</div>`;
+  }
+  function line(el){
+    const vs=nums(el.dataset.values), ls=labs(el.dataset.labels);
+    const w=parseFloat(el.dataset.w||620), h=parseFloat(el.dataset.h||240);
+    const dot=parseFloat(el.dataset.dot||10);
+    const pad=28, max=Math.max(...vs)*1.18;
+    const X=i=>pad+i*(w-2*pad)/(vs.length-1), Y=v=>h-pad-(v/max)*(h-2*pad);
+    const pts=vs.map((v,i)=>[X(i),Y(v)]);
+    const path=pts.map((p,i)=>(i?'L':'M')+p[0].toFixed(1)+' '+p[1].toFixed(1)).join(' ');
+    const grid=[.33,.66,1].map(f=>`<line class="dc-grid" x1="${pad}" x2="${w-pad}" y1="${Y(max*f).toFixed(1)}" y2="${Y(max*f).toFixed(1)}"/>`).join('');
+    el.classList.add('dc-line');
+    el.innerHTML=`<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">
+      ${grid}<path class="dc-path" d="${path}"/>
+      ${pts.map((p,i)=>`<circle class="dc-pt" cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="${dot/2}" data-i="${i}"/>`).join('')}
+      <text x="${pts[pts.length-1][0].toFixed(1)}" y="${(pts[pts.length-1][1]-16).toFixed(1)}" text-anchor="middle"
+        style="font-size:15px;font-weight:400;fill:var(--ink)">${fmtVal(vs[vs.length-1])}</text>
+      ${ls.map((t,i)=>`<text x="${X(i).toFixed(1)}" y="${h-6}" text-anchor="middle" style="font-size:12px;fill:var(--ink-3)">${t}</text>`).join('')}
+    </svg>`;
+  }
+  function renderChart(el){
+    const type=el.dataset.type||'bar';
+    if(el.dataset.dot) el.style.setProperty('--dc-dot',parseFloat(el.dataset.dot)+'px');
+    if(el.dataset.gap) el.style.setProperty('--dc-gap',parseFloat(el.dataset.gap)+'px');
+    ({bar,hbar,waffle,line})[type]?.(el);
+  }
+  function mountAll(){
+    document.querySelectorAll('.dot-chart[data-type]').forEach(renderChart);
+    window.__dotlibReady=true;
+    dispatchEvent(new CustomEvent('rh-dotlib-ready'));
+  }
+  if(document.readyState!=='loading')mountAll();
+  else addEventListener('DOMContentLoaded',mountAll,{once:true});
+})();
+</script>
+
+<script>
+/* ================================================================
+   引擎 · 翻页 / 键鼠触屏 / ESC 索引（与 Ready 版同一契约）
+   ================================================================ */
+(function(){
+  const deck=document.getElementById('deck');
+  const slides=deck.querySelectorAll('.slide');
+  const nav=document.getElementById('nav');
+  let idx=0,total=slides.length,lock=false;
+  deck.style.width=(total*100)+'vw';
+  slides.forEach((s,i)=>{
+    const b=document.createElement('button');
+    b.className='dot';b.setAttribute('aria-label','Page '+(i+1));
+    b.onclick=()=>go(i);nav.appendChild(b);
+  });
+  function go(n){
+    if(lock)return;
+    idx=Math.max(0,Math.min(total-1,n));
+    window.__currentSlideIndex=idx;
+    deck.style.transform=`translateX(${-idx*100}vw)`;
+    nav.querySelectorAll('.dot').forEach((d,i)=>d.classList.toggle('active',i===idx));
+    const el=slides[idx];
+    document.body.classList.toggle('dark-bg',el.classList.contains('dark')||el.classList.contains('amber'));
+    if(window.__playSlide)setTimeout(()=>window.__playSlide(idx),450);
+    lock=true;setTimeout(()=>lock=false,700);
+  }
+  window.__go=function(n){lock=false;go(n)};   /* 外部调用（渲染脚本等）绕过翻页锁 */
+
+  let overviewOn=false;
+  const ov=document.createElement('div');ov.id='overview';document.body.appendChild(ov);
+  function buildOverview(){
+    ov.innerHTML='';
+    const grid=document.createElement('div');
+    grid.style.cssText='display:grid;grid-template-columns:repeat(4,1fr);gap:2vh 1.6vw;max-width:92vw;margin:0 auto';
+    slides.forEach((s,i)=>{
+      const card=document.createElement('div');
+      card.style.cssText='cursor:pointer;overflow:hidden;border:1px solid '+(i===idx?'var(--amber)':'rgba(20,20,20,.14)')+';transition:border-color .2s;background:#fff';
+      const wrap=document.createElement('div');
+      wrap.style.cssText='width:100%;aspect-ratio:16/9;overflow:hidden;position:relative;pointer-events:none;background:'+(s.classList.contains('dark')?'#141414':'var(--paper)');
+      const clone=s.cloneNode(true);
+      clone.style.cssText='width:100vw;height:100vh;transform:scale('+(1/4.5)+');transform-origin:top left;position:absolute;top:0;left:0;pointer-events:none';
+      wrap.appendChild(clone);
+      const label=document.createElement('div');
+      label.style.cssText='padding:6px 10px;font-size:12px;letter-spacing:.08em;color:var(--ink-2)';
+      label.textContent=(i+1)+' / '+total+'  ·  '+(s.dataset.layout||'—');
+      card.appendChild(wrap);card.appendChild(label);
+      card.onclick=()=>{toggleOverview();go(i)};
+      grid.appendChild(card);
+    });
+    ov.appendChild(grid);
+  }
+  function toggleOverview(){
+    overviewOn=!overviewOn;
+    if(overviewOn){buildOverview();ov.style.display='block';}else ov.style.display='none';
+  }
+  addEventListener('keydown',e=>{
+    if(e.key==='Escape'){e.preventDefault();toggleOverview();return;}
+    if(e.key&&e.key.toLowerCase()==='b'&&!e.metaKey&&!e.ctrlKey&&!e.altKey){
+      e.preventDefault();window.__setLowPowerMode(!window.__lowPowerMode);return;
+    }
+    if(overviewOn)return;
+    if(e.key==='ArrowRight'||e.key==='PageDown'||e.key===' '||e.key==='ArrowDown'){go(idx+1);return;}
+    if(e.key==='ArrowLeft'||e.key==='PageUp'||e.key==='ArrowUp')go(idx-1);
+    if(e.key==='Home')go(0);
+    if(e.key==='End')go(total-1);
+  });
+  let wheelTO=null,wheelAcc=0;
+  addEventListener('wheel',e=>{
+    wheelAcc+=e.deltaY+e.deltaX;
+    if(Math.abs(wheelAcc)>50){go(idx+(wheelAcc>0?1:-1));wheelAcc=0;}
+    clearTimeout(wheelTO);wheelTO=setTimeout(()=>wheelAcc=0,150);
+  },{passive:true});
+  let tx=0,ty=0;
+  addEventListener('touchstart',e=>{tx=e.touches[0].clientX;ty=e.touches[0].clientY},{passive:true});
+  addEventListener('touchend',e=>{
+    const dx=e.changedTouches[0].clientX-tx,dy=e.changedTouches[0].clientY-ty;
+    if(Math.abs(dx)>50&&Math.abs(dx)>Math.abs(dy))go(idx+(dx<0?1:-1));
+  },{passive:true});
+  const p=new URLSearchParams(location.search).get('slide');
+  const init=p?Number(p)-1:0;
+  go(Number.isFinite(init)?init:0);
+})();
+</script>
+
+<script>
+/* ================================================================
+   动效 · 柔和淡入（Human Touch 尺度：不抢不燥；静态不损失气质）
+   ================================================================ */
+(function(){
+  const slides=document.querySelectorAll('#deck .slide');
+  const EASE='cubic-bezier(.22,.61,.36,1)';
+  const anim=(el,kf,o)=>el&&el.animate(kf,{fill:'both',easing:EASE,...o});
+  const fade=(el,{y=10,dur=640,delay=0}={})=>anim(el,{opacity:[0,1],transform:[`translateY(${y}px)`,'translateY(0)']},{duration:dur,delay});
+
+  if(!window.__lowPowerMode)document.body.classList.add('motion-ready');
+  addEventListener('rh-low-power-change',e=>{
+    document.body.classList.toggle('motion-ready',!e.detail.on);
+  });
+
+  function revealStatic(slide){
+    slide.querySelectorAll('[data-anim]').forEach(el=>{el.style.opacity='1';el.style.transform='none';});
+    slide.querySelectorAll('.dc-dot,.dc-pt,.dc-path').forEach(el=>{
+      el.getAnimations&&el.getAnimations().forEach(a=>a.cancel());
+    });
+  }
+  function playChart(scope,baseDelay=0){
+    scope.querySelectorAll('.dc-dot[style*="--di"]').forEach(d=>{
+      const di=parseInt(getComputedStyle(d).getPropertyValue('--di'))||0;
+      anim(d,{opacity:[0,1]},{duration:420,delay:baseDelay+di*18});
+    });
+    scope.querySelectorAll('.dc-path').forEach(p=>{
+      const len=p.getTotalLength?p.getTotalLength():600;
+      p.style.strokeDasharray=len;p.style.strokeDashoffset=len;
+      anim(p,{strokeDashoffset:[len,0]},{duration:1100,delay:baseDelay+140});
+    });
+    scope.querySelectorAll('.dc-pt').forEach((pt,i)=>{
+      anim(pt,{opacity:[0,1]},{duration:380,delay:baseDelay+320+i*110});
+    });
+  }
+  const RECIPES={
+    'statement'(slide,all){ all.forEach((el,i)=>fade(el,{y:12,dur:700,delay:i*140})); },
+    'chart'(slide,all){
+      slide.querySelectorAll('[data-anim="up"]').forEach((el,i)=>fade(el,{delay:i*120}));
+      const c=slide.querySelector('[data-anim="chart"]');
+      if(c){c.style.opacity='1';playChart(c,420);}
+    },
+    'rows'(slide,all){
+      slide.querySelectorAll('[data-anim="up"]').forEach((el,i)=>fade(el,{delay:i*110}));
+      slide.querySelectorAll('.ledger-row,.step-row').forEach((el,i)=>fade(el,{y:8,dur:520,delay:280+i*110}));
+    },
+    'image-hero'(slide,all){
+      const img=slide.querySelector('.img-slot img');
+      if(img)anim(img,{opacity:[0,1],transform:['scale(1.03)','scale(1)']},{duration:1200,delay:60});
+      slide.querySelectorAll('.img-slot.is-empty').forEach(s=>fade(s,{y:0,dur:700}));
+      slide.querySelectorAll('[data-anim="up"]').forEach((el,i)=>fade(el,{delay:420+i*150}));
+    },
+    'duo'(slide,all){
+      slide.querySelectorAll('[data-anim="up"]').forEach((el,i)=>fade(el,{delay:i*110}));
+      slide.querySelectorAll('[data-anim="left"],[data-anim="right"]').forEach((el,i)=>fade(el,{y:10,dur:640,delay:260+i*120}));
+    },
+  };
+  function playSlide(i){
+    const slide=slides[i];if(!slide)return;
+    if(window.__lowPowerMode){revealStatic(slide);return;}
+    slide.querySelectorAll('[data-anim]').forEach(el=>{el.style.opacity='1';el.style.transform='none';});
+    const all=[...slide.querySelectorAll('[data-anim]')];
+    const fn=RECIPES[slide.dataset.animate];
+    if(fn){fn(slide,all);return;}
+    if(all.length)all.forEach((el,i2)=>fade(el,{delay:i2*100}));
+  }
+  window.__playSlide=playSlide;
+  const boot=()=>playSlide(window.__currentSlideIndex||0);
+  if(window.__dotlibReady)boot();else addEventListener('rh-dotlib-ready',boot,{once:true});
+})();
+</script>
+
+</body>
+</html>

@@ -1,0 +1,15 @@
+{
+  "id": "ready-human-touch-ppt",
+  "name": "ready-human-touch-ppt",
+  "displayName": "网页 PPT · 双风格",
+  "description": "生成横向翻页网页 PPT（单 HTML）：Ready 点阵理性 / Human Touch 温感人文 双风格，含点阵图表与图片槽位协议",
+  "version": "2026.07.06",
+  "runtime": "reference",
+  "execution": { "mode": "advisory" },
+  "actions": {
+    "read_skill": {
+      "runtime": "reference",
+      "visibility": "internal"
+    }
+  }
+}

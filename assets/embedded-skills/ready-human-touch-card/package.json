@@ -1,0 +1,15 @@
+{
+  "name": "ready-human-touch-card-skill",
+  "version": "1.0.0",
+  "private": true,
+  "description": "双风格（Ready 点阵理性 / Human Touch 温感人文）社交信息卡生成 skill",
+  "type": "module",
+  "scripts": {
+    "render": "node scripts/render-cards.mjs",
+    "validate": "node scripts/validate-cards.mjs",
+    "slots": "node scripts/list-image-slots.mjs"
+  },
+  "dependencies": {
+    "playwright-core": "^1.55.0"
+  }
+}

@@ -36,7 +36,10 @@ const NEW_SKILL_IDS = [
   'okf-bundle',
   'okf-library',
   'script-expert-ready',
+  'ready-human-touch-ppt',
+  'ready-human-touch-card',
 ] as const
+const HUMAN_TOUCH_SKILL_IDS = ['ready-human-touch-ppt', 'ready-human-touch-card'] as const
 
 test('skill-fac skills are registered in EMBEDDED_SKILLS[]', () => {
   for (const id of NEW_SKILL_IDS) {
@@ -86,5 +89,18 @@ test('each fac skill fits within Ready 12K inline cap', () => {
       raw.length <= REFERENCE_SKILL_INLINE_CAP_CHARS,
       `${id}/SKILL.md (${raw.length} chars) exceeds 12K inline cap`,
     )
+  }
+})
+
+test('human-touch skills describe the Ready artifact workflow instead of blocked shell recipes', () => {
+  for (const id of HUMAN_TOUCH_SKILL_IDS) {
+    const raw = readFileSync(join(SKILLS_ROOT, id, 'SKILL.md'), 'utf8')
+    assert.match(raw, /skill_read_artifact/, `${id} should read templates through Ready artifacts`)
+    assert.match(raw, /skill_write_artifact/, `${id} should write generated HTML through Ready artifacts`)
+    assert.match(raw, /skill_export_artifact/, `${id} should export generated artifacts to requested folders`)
+    assert.match(raw, /\$CLAUDE_SKILL_DIR/, `${id} should call bundled scripts via CLAUDE_SKILL_DIR`)
+    assert.doesNotMatch(raw, /<SKILL_ROOT>/, `${id} should not mention obsolete SKILL_ROOT placeholders`)
+    assert.doesNotMatch(raw, /\bcp\s+/, `${id} should not tell Ready agents to copy files with shell cp`)
+    assert.doesNotMatch(raw, /npm\s+(?:i|install)\b/, `${id} should not tell Ready agents to install packages`)
   }
 })

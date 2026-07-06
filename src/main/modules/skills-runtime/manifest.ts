@@ -19,6 +19,8 @@ export type EmbeddedSkillId =
   | 'okf-library'
   | 'script-expert-ready'
   | 'send-im'
+  | 'ready-human-touch-ppt'
+  | 'ready-human-touch-card'
 
 export interface EmbeddedSkillManifest {
   id: EmbeddedSkillId
@@ -167,6 +169,20 @@ export const EMBEDDED_SKILLS: EmbeddedSkillManifest[] = [
     name: 'Send IM',
     description: '把 Ready 本地文件直接发送到已连接的远程 IM，微信固定发送到已绑定账号本人。',
     version: '0.1.0',
+    requirementsFile: 'requirements.txt',
+  },
+  {
+    id: 'ready-human-touch-ppt',
+    name: '网页 PPT · 双风格',
+    description: '横向翻页网页 PPT（单 HTML）：Ready 点阵 / Human Touch 温感双风格 + 点阵图表 + 图片槽位协议',
+    version: '2026.07.06',
+    requirementsFile: 'requirements.txt',
+  },
+  {
+    id: 'ready-human-touch-card',
+    name: '社交信息卡 · 双风格',
+    description: '小红书 3:4 图组 + 微信 21:9/1:1 封面对：Ready 点阵 / Human Touch 温感双风格 + 点阵图表 + 图片槽位协议',
+    version: '2026.07.06',
     requirementsFile: 'requirements.txt',
   },
 ]
