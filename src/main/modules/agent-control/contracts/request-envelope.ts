@@ -472,12 +472,13 @@ export function buildRequestEnvelope(params: {
     .map((block, index) => buildResourceFromBlock(block, index))
     .filter(Boolean) as RequestEnvelopeResource[]
 
-  // P1-1 — 每个 @[token] 若没有被解析成任何既有资源（附件/文档/文件夹/widget/浏览器…），
-  //   追加一条 skill_reference 资源。envelope 保持哑数据：不做技能存在性校验（校验在授权层）。
-  //   token 提取正则与 buildReferencedResources / agent-sdk-utils mention 语法一致。
+  // P1-1 — 当前轮用户文本（pureUserText，已剥离装配上下文/bootstrap）里每个 @[token]，若没有被
+  //   解析成任何既有资源（附件/文档/文件夹/widget/浏览器…），追加一条 skill_reference 资源。
+  //   只扫 pureUserText 而非 rawUserText：装配上下文里的 stale @[技能] 提及不得升级成本轮结构化引用
+  //   （与授权层文本兜底的 staleness 纪律同构）。envelope 保持哑数据：不做技能存在性校验（校验在授权层）。
   const resolvedResourceNames = new Set(resources.map((resource) => resource.name))
   const seenSkillReferenceTokens = new Set<string>()
-  for (const match of rawUserText.matchAll(/@\[([^\]]+)\]/g)) {
+  for (const match of pureUserText.matchAll(/@\[([^\]]+)\]/g)) {
     const token = String(match[1] || '').trim()
     if (!token) continue
     if (resolvedResourceNames.has(token) || seenSkillReferenceTokens.has(token)) continue

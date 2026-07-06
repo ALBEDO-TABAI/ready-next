@@ -997,3 +997,126 @@ test('P6e keeps reconcileAfterBrowserDecision parity for late browser upload dec
   assert.ok(reconciled.allowedToolNames.includes('browser_extract_structured'))
   assert.ok(reconciled.allowedToolNames.includes('browser_power_eval'))
 })
+
+// P1-2 — typed envelope skill_reference 是授权第一信源；正则文本候选降为兜底。
+function buildTypedRefRuntime(skillRoot: string) {
+  return new AgentSdkRuntime({
+    loadAIConfig: () => ({ ok: true, config: BASE_CONFIG, reason: 'present' }),
+    domainAdapters: [],
+    skillContextOrchestrator: {
+      findExplicitlyRequestedSkills: (text: string) =>
+        text.includes('ready-human-touch-ppt')
+          ? [{ id: 'ready-human-touch-ppt', name: 'ready-human-touch-ppt', managedPath: skillRoot }]
+          : [],
+      buildPreferredSkillToolNames: (text: string) =>
+        text.includes('ready-human-touch-ppt')
+          ? ['skill_run_shell', 'skill_write_artifact', 'skill_read_artifact', 'skill_export_artifact']
+          : [],
+      rememberExplicitReferenceSkillHint: (text: string, sid?: string) => {
+        if (!text.includes('ready-human-touch-ppt')) return false
+        rememberLastReferenceSkill(sid, { id: 'ready-human-touch-ppt', name: 'ready-human-touch-ppt' })
+        return true
+      },
+      getCurrentReferenceSkillHint: (sid?: string) => {
+        const hint = getLastReferenceSkill(sid)
+        return hint ? { id: hint.id, name: hint.name } : null
+      },
+    } as any,
+  })
+}
+
+function typedRefPrivate(runtime: AgentSdkRuntime) {
+  return runtime as unknown as {
+    resolveSkillAuthorizationForTurn: (message: string, sessionId?: string, requestEnvelope?: unknown) => SkillToolAuthorization
+  }
+}
+
+test('SDK authorization consumes a typed skill_reference before text heuristics (P1-2)', () => {
+  const sessionId = 'scope-p1-2-typed-ref'
+  const skillRoot = join(process.cwd(), 'assets', 'embedded-skills', 'ready-human-touch-ppt')
+  clearLastReferenceSkill(sessionId)
+  // rawUserText carries NO @[mention] — the skill signal lives ONLY in the typed envelope resource.
+  const requestEnvelope = {
+    rawUserText: '根据文档生成一个人文感风格 ppt',
+    pureUserText: '根据文档生成一个人文感风格 ppt',
+    primaryInstruction: '根据文档生成一个人文感风格 ppt',
+    resources: [{
+      id: 'skill_reference-0-ready-human-touch-ppt',
+      kind: 'skill_reference',
+      source: 'explicit_reference',
+      name: 'ready-human-touch-ppt',
+      path: null,
+      text: '',
+      summary: null,
+      order: 0,
+      canRead: false,
+      canWrite: false,
+    }],
+  }
+  try {
+    const authorization = typedRefPrivate(buildTypedRefRuntime(skillRoot))
+      .resolveSkillAuthorizationForTurn('根据文档生成一个人文感风格 ppt', sessionId, requestEnvelope)
+    assert.equal(authorization.mode, 'selected')
+    assert.equal(authorization.skillId, 'ready-human-touch-ppt')
+    assert.ok(
+      authorization.mode === 'selected' && authorization.reason.startsWith('typed_ref:'),
+      `reason should start with typed_ref:, got ${authorization.mode === 'selected' ? authorization.reason : 'none'}`,
+    )
+  } finally {
+    clearLastReferenceSkill(sessionId)
+  }
+})
+
+test('SDK authorization still selects via text mention when envelope has no skill_reference (P1-2 regression)', () => {
+  const sessionId = 'scope-p1-2-text-fallback'
+  const skillRoot = join(process.cwd(), 'assets', 'embedded-skills', 'ready-human-touch-ppt')
+  clearLastReferenceSkill(sessionId)
+  const requestEnvelope = {
+    rawUserText: '用@[ready-human-touch-ppt]生成 ppt',
+    pureUserText: '用@[ready-human-touch-ppt]生成 ppt',
+    primaryInstruction: '用@[ready-human-touch-ppt]生成 ppt',
+    resources: [],
+  }
+  try {
+    const authorization = typedRefPrivate(buildTypedRefRuntime(skillRoot))
+      .resolveSkillAuthorizationForTurn('用@[ready-human-touch-ppt]生成 ppt', sessionId, requestEnvelope)
+    assert.equal(authorization.mode, 'selected')
+    assert.equal(authorization.skillId, 'ready-human-touch-ppt')
+    assert.ok(
+      authorization.mode === 'selected' && !authorization.reason.startsWith('typed_ref:'),
+      'text-mention path must NOT be labeled typed_ref',
+    )
+  } finally {
+    clearLastReferenceSkill(sessionId)
+  }
+})
+
+test('SDK authorization stays none when a typed skill_reference names an unknown skill (P1-2)', () => {
+  const sessionId = 'scope-p1-2-unknown'
+  const skillRoot = join(process.cwd(), 'assets', 'embedded-skills', 'ready-human-touch-ppt')
+  clearLastReferenceSkill(sessionId)
+  const requestEnvelope = {
+    rawUserText: '根据文档生成一个 ppt',
+    pureUserText: '根据文档生成一个 ppt',
+    primaryInstruction: '根据文档生成一个 ppt',
+    resources: [{
+      id: 'skill_reference-0-no-such-skill',
+      kind: 'skill_reference',
+      source: 'explicit_reference',
+      name: 'no-such-skill',
+      path: null,
+      text: '',
+      summary: null,
+      order: 0,
+      canRead: false,
+      canWrite: false,
+    }],
+  }
+  try {
+    const authorization = typedRefPrivate(buildTypedRefRuntime(skillRoot))
+      .resolveSkillAuthorizationForTurn('根据文档生成一个 ppt', sessionId, requestEnvelope)
+    assert.equal(authorization.mode, 'none')
+  } finally {
+    clearLastReferenceSkill(sessionId)
+  }
+})

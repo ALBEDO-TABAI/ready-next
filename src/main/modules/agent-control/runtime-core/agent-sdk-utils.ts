@@ -888,6 +888,26 @@ export function skillAuthorizationTextCandidates(message: RunMessage, envelope: 
   return fallback ? [fallback] : []
 }
 
+/**
+ * P1-2 — 从 envelope 读 typed `skill_reference` 资源的 name（去重、去空）。
+ * envelope 保持哑数据：这里只提取，技能存在性由授权层的 findExplicitlyRequestedSkills 裁决。
+ */
+export function readSkillReferenceNames(envelope: unknown): string[] {
+  const record = asRecord(envelope)
+  const rawResources = record && Array.isArray(record.resources) ? record.resources : []
+  const names: string[] = []
+  const seen = new Set<string>()
+  for (const resource of rawResources) {
+    const entry = asRecord(resource)
+    if (!entry || entry.kind !== 'skill_reference') continue
+    const name = String(entry.name || '').trim()
+    if (!name || seen.has(name)) continue
+    seen.add(name)
+    names.push(name)
+  }
+  return names
+}
+
 interface SkillHintRelevanceDecision {
   relevant: boolean
   reason: string

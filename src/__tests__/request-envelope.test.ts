@@ -172,3 +172,16 @@ test('request envelope does not double-count a resolved attachment mention as sk
   })
   assert.equal(envelope.resources.filter((r) => r.kind === 'skill_reference').length, 0)
 })
+
+test('request envelope does not turn a stale @[skill] mention in assembled context into a skill_reference (P1-1 staleness)', () => {
+  const envelope = buildRequestEnvelope({
+    userText: [
+      '## L1 会话上下文',
+      '### 旧任务',
+      '上一轮用户曾说 用@[ready-human-touch-ppt]生成 ppt',
+      '',
+      '帮我讲讲今天的天气怎么描述比较好',
+    ].join('\n'),
+  })
+  assert.equal(envelope.resources.filter((r) => r.kind === 'skill_reference').length, 0)
+})

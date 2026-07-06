@@ -315,6 +315,7 @@ import {
   publicAgentName,
   raceWithTimeout,
   readDocumentToolTarget,
+  readSkillReferenceNames,
   readStructuredResultRecord,
   readTextField,
   recoverLooseXmlToolCallText,
@@ -986,6 +987,50 @@ export class AgentSdkRuntime extends EventEmitter {
         : buildExplicitNoSkillAuthorization('no_skill_signal')
     }
     const userTextCandidates = skillAuthorizationTextCandidates(message, requestEnvelope)
+    // P1-2 — typed envelope skill_reference 是授权第一信源：命中即以 typed_ref 直接构造 selected 授权，
+    //   正则文本候选降为兜底。localSendImIntent 轮不走此快路（保留既有 send-im 合成）。
+    //   最小传话铁律不受影响：typed ref 只把"技能识别"从正则扫文本换成结构化 refs；工具面/交付意图
+    //   推导仍吃全量用户文本（userTextCandidates），因此不丢失 target-folder delivery 等语义。
+    if (!localSendImIntent) {
+      // typed ref 是本轮显式结构化引用，不消费任何 stale reference hint（后者仍由文本兜底路径按
+      //   skillHintRelevantForTurn 裁决）；因此这里绝不 eager 调 getCurrentReferenceSkillHint。
+      for (const skillName of readSkillReferenceNames(requestEnvelope)) {
+        const syntheticMention = `@[${skillName}]`
+        const matchedSkill = (orchestrator.findExplicitlyRequestedSkills?.(syntheticMention) || [])
+          .find((skill) => skill && (skill.id || skill.skillId))
+        const typedRefSkillId = matchedSkill?.id || matchedSkill?.skillId
+        if (!matchedSkill || !typedRefSkillId) continue
+        try {
+          orchestrator.rememberExplicitReferenceSkillHint?.(syntheticMention, sessionId)
+        } catch (error) {
+          log(`rememberExplicitReferenceSkillHint failed: ${errorMessage(error)}`)
+        }
+        const typedRefPreferredTexts = [...userTextCandidates, syntheticMention]
+        const typedRefActionNames = new Set(
+          typedRefPreferredTexts
+            .flatMap((text) => orchestrator.buildPreferredSkillToolNames?.(text, sessionId) || [])
+            .filter((toolName) => toolName.startsWith('skill_') && !PRIMITIVE_TOOL_NAME_SET.has(toolName)),
+        )
+        if (typedRefSkillId === 'video-expert-analyzer') {
+          typedRefActionNames.add('skill_video_expert_pipeline')
+          typedRefActionNames.add('skill_video_expert_ai_analyze')
+        }
+        const typedRefActions = Array.from(typedRefActionNames)
+        const typedRefAllowRunShell = explicitReferenceSkillHasScripts(matchedSkill, typedRefActions)
+        const typedRefAllowAskUser = !shouldSuppressSkillAskUserForArtifactDelivery(typedRefPreferredTexts)
+        log(`[skill_authorization] source=typed_ref skill=${typedRefSkillId}`)
+        return buildSelectedSkillToolAuthorization({
+          skillId: typedRefSkillId,
+          allowedTypedActions: typedRefActions,
+          allowedPrimitives: allowedPrimitiveToolsForSdkSkillTurn({
+            allowRunShell: typedRefAllowRunShell,
+            allowAskUser: typedRefAllowAskUser,
+          }),
+          source: 'explicit',
+          reason: 'typed_ref:explicit_user_mention',
+        })
+      }
+    }
     if (userTextCandidates.length === 0) return buildExplicitNoSkillAuthorization('no_skill_signal')
     const explicitSkillMatches: Array<{
       text: string
@@ -1034,6 +1079,8 @@ export class AgentSdkRuntime extends EventEmitter {
     const allowRunShell = explicitReferenceSkillHasScripts(explicitSkill, typedActions)
     const allowAskUser = !shouldSuppressSkillAskUserForArtifactDelivery(userTextCandidates)
 
+    // P1-2 — 文本候选（正则启发式）是兜底信源；typed ref 未命中才走到这里。
+    log(`[skill_authorization] source=text_fallback skill=${skillId}`)
     return buildSelectedSkillToolAuthorization({
       skillId,
       allowedTypedActions: typedActions,
