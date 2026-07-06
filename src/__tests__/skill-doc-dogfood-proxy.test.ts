@@ -1,13 +1,15 @@
 /**
- * P0-4（自动化代理）—— 复现 2026-07-06 真机失败轮的工具面解析全链：
- *   executor 默认面（含 P0-3 文档读取地板保留）
- *   → orchestrator 本地文档收窄（P0-2：保留 isLocalDocument ∪ skillFloor）
- *   → orchestrator 空面回退（P0-2 T2）
+ * P0-4（自动化代理）—— 复现 2026-07-06 真机失败轮的工具面解析：
+ *   真实 executor 默认面 listDefaultToolDefinitionsForTurn（含 D1 授权 + D3 文档读取地板保留）
+ *   → 调用与 orchestrator 同一个 narrowToolSurfaceForLocalDocument（P0-2 本地文档收窄）
+ *   → recoverEmptyToolSurface（P0-2 T2 空面回退）
  * 断言 P0-4 验收 bar：toolCount≥7、tools 同时含 skill_read_artifact+skill_run_shell+
- * file_read_excerpt、且不触发空面回退。
+ * file_read_excerpt、且不触发空面回退；并用注入 browser 工具的负载用例证明收窄确实做减法。
  *
- * 说明：交互式真机 dogfood（npm run dev + 真模型回合真正写出 HTML）需用户执行，
- * 步骤见交付的测试文档；本代理只在代码层证明工具面机制已通。
+ * 覆盖边界（诚实声明）：本代理调用真实 executor 与真实的 narrow/recover 函数，但不驱动
+ * orchestrator.sendMessage，故不覆盖 status_query / documentTargetGuard / checkpoint 的收窄顺序
+ * （那部分由 skill-doc-toolset-floor 的单测 + orchestrator 内联的顺序保证）。交互式真机 dogfood
+ * （npm run dev + 真模型回合真正写出 HTML）需用户执行，步骤见交付的测试文档。
  * 母合同：2026-07-06 skill-envelope §5 P0-4。
  */
 import assert from 'node:assert/strict'
@@ -23,9 +25,8 @@ import {
   rememberLastReferenceSkill,
 } from '../main/modules/agent-control/skills/skill-reference-hints'
 import {
-  isLocalDocumentToolDefinition,
+  narrowToolSurfaceForLocalDocument,
   recoverEmptyToolSurface,
-  selectedSkillFloorToolNames,
 } from '../main/modules/agent-control/runtime-core/agent-sdk-utils'
 
 const BASE_CONFIG: AIModelConfig = {
@@ -130,13 +131,11 @@ test('P0-4 proxy: failing-round tool surface resolves to a non-empty skill+docum
     })
     const preNarrowing = executorDefinitions
 
-    // Orchestrator local-document narrowing (P0-2): keep local-document tools ∪ skill floor.
-    const skillFloor = selectedSkillFloorToolNames(authorization)
-    const narrowed = executorDefinitions.filter((definition) =>
-      isLocalDocumentToolDefinition(definition as never) || skillFloor.has(definition.name))
-
-    // Orchestrator empty-surface recovery (P0-2 T2).
-    const recovery = recoverEmptyToolSurface(narrowed, preNarrowing)
+    // Local-document narrowing via the SAME function the orchestrator calls (P0-2), then the
+    // P0-2 T2 empty-surface recovery. No re-implementation — a regression to the real narrowing
+    // or recovery fails this test.
+    const narrowed = narrowToolSurfaceForLocalDocument(executorDefinitions as never, authorization)
+    const recovery = recoverEmptyToolSurface(narrowed, preNarrowing as never)
     const finalNames = recovery.definitions.map((definition) => (definition as { name: string }).name)
     const surfaceDump = `executor=${executorDefinitions.map((d) => `${d.name}[${d.domain}]`).join(',')} | final=${finalNames.join(',')}`
 
@@ -145,6 +144,15 @@ test('P0-4 proxy: failing-round tool surface resolves to a non-empty skill+docum
     for (const required of ['skill_read_artifact', 'skill_run_shell', 'file_read_excerpt']) {
       assert.ok(finalNames.includes(required), `P0-4 bar: ${required} must be present. ${surfaceDump}`)
     }
+
+    // Load-bearing check: inject a write-classified browser tool into the real surface and confirm
+    // the narrowing actually DROPS it while keeping the skill+document floor — so the >=7 assertion
+    // above is carried by a narrowing that does real subtraction, not an identity no-op.
+    const surfaceWithBrowser = [...executorDefinitions, { name: 'browser_visible_collect', domain: 'browser' }]
+    const narrowedNames = narrowToolSurfaceForLocalDocument(surfaceWithBrowser as never, authorization)
+      .map((definition) => (definition as { name: string }).name)
+    assert.equal(narrowedNames.includes('browser_visible_collect'), false, 'local-document narrowing must drop the injected browser tool')
+    assert.ok(narrowedNames.includes('skill_read_artifact') && narrowedNames.includes('file_read_excerpt'), 'floor must survive alongside the drop')
   } finally {
     clearLastReferenceSkill(sessionId)
   }

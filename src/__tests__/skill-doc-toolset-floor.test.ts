@@ -8,6 +8,7 @@ import {
   selectedSkillFloorToolNames,
   recoverEmptyToolSurface,
   isLocalDocumentToolDefinition,
+  narrowToolSurfaceForLocalDocument,
 } from '../main/modules/agent-control/runtime-core/agent-sdk-utils'
 import { buildSelectedSkillToolAuthorization } from '../main/modules/agent-control/skills/skill-tool-authorization'
 
@@ -48,4 +49,63 @@ test('recoverEmptyToolSurface restores pre-narrowing surface only when narrowed 
   const kept = [def('skill_read_artifact', 'skill')]
   assert.deepEqual(recoverEmptyToolSurface(kept, pre), { definitions: kept, recovered: false })
   assert.deepEqual(recoverEmptyToolSurface([], []), { definitions: [], recovered: false })
+})
+
+// The following tests drive the REAL narrowToolSurfaceForLocalDocument — the exact function
+// the orchestrator calls — with load-bearing fixtures (a browser tool that MUST be dropped,
+// an empty-inducing surface that MUST trigger recovery). A regression to the narrowing logic
+// (dropping the skill floor) or to the recovery would fail these, unlike a re-implementation.
+
+test('narrowToolSurfaceForLocalDocument drops non-floor non-document tools and keeps skill floor + document tools (load-bearing)', () => {
+  const selected = buildSelectedSkillToolAuthorization({
+    skillId: 'ready-human-touch-ppt',
+    allowedTypedActions: [],
+    allowedPrimitives: ['skill_read_artifact', 'skill_write_artifact'],
+    source: 'explicit',
+    reason: 'test',
+  })
+  const surface = [
+    def('skill_read_artifact', 'skill'),
+    def('skill_write_artifact', 'skill'),
+    def('file_read_excerpt', 'file'),
+    def('browser_navigate', 'browser'), // must be dropped: non-floor, non-document
+    def('browser_visible_collect', 'browser'), // must be dropped: write-classified collection tool
+  ]
+  const narrowed = narrowToolSurfaceForLocalDocument(surface as never, selected).map((d: { name: string }) => d.name)
+  assert.deepEqual(narrowed, ['skill_read_artifact', 'skill_write_artifact', 'file_read_excerpt'])
+  assert.equal(narrowed.includes('browser_navigate'), false)
+  assert.equal(narrowed.includes('browser_visible_collect'), false)
+})
+
+test('narrowToolSurfaceForLocalDocument on a none-mode turn keeps only document tools, never skill/browser (no primitive leak)', () => {
+  const narrowed = narrowToolSurfaceForLocalDocument(
+    [
+      def('skill_read_artifact', 'skill'),
+      def('browser_navigate', 'browser'),
+      def('file_read_excerpt', 'file'),
+      def('document_read_section', 'document'),
+    ] as never,
+    { mode: 'none', reason: 'no_skill_signal' },
+  ).map((d: { name: string }) => d.name)
+  assert.deepEqual(narrowed, ['file_read_excerpt', 'document_read_section'])
+})
+
+test('narrowToolSurfaceForLocalDocument emptying a pure-browser surface triggers recovery (recovered=true)', () => {
+  const selected = buildSelectedSkillToolAuthorization({
+    skillId: 'ready-human-touch-ppt',
+    allowedTypedActions: [],
+    allowedPrimitives: ['skill_read_artifact'],
+    source: 'explicit',
+    reason: 'test',
+  })
+  // A pure-browser surface carries neither a document tool nor the skill floor member → narrows to empty.
+  const pre = [def('browser_navigate', 'browser'), def('browser_visible_collect', 'browser')]
+  const narrowed = narrowToolSurfaceForLocalDocument(pre as never, selected)
+  assert.equal(narrowed.length, 0, 'pure-browser surface narrows to empty under local-document narrowing')
+  const recovery = recoverEmptyToolSurface(narrowed, pre)
+  assert.equal(recovery.recovered, true)
+  assert.deepEqual(
+    recovery.definitions.map((d) => (d as { name: string }).name),
+    ['browser_navigate', 'browser_visible_collect'],
+  )
 })

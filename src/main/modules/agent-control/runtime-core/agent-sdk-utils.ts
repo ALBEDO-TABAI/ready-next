@@ -225,6 +225,19 @@ export function selectedSkillFloorToolNames(authorization: SkillToolAuthorizatio
   return new Set([...authorization.allowedTypedActions, ...authorization.allowedPrimitives])
 }
 
+/**
+ * P0-2(D2) — 本地文档收窄的唯一实现：只保留本地文档工具（domain document|file）∪ 技能地板。
+ * orchestrator 调用此纯函数（而非内联 filter），使收窄行为可被单测按真实代码路径覆盖。
+ */
+export function narrowToolSurfaceForLocalDocument(
+  toolDefinitions: ToolDefinition[],
+  authorization: SkillToolAuthorization,
+): ToolDefinition[] {
+  const skillFloor = selectedSkillFloorToolNames(authorization)
+  return toolDefinitions.filter((definition) =>
+    isLocalDocumentToolDefinition(definition) || skillFloor.has(definition.name))
+}
+
 /** P0-2 — 收窄管线末端防空：窄化后为空且窄化前非空 → 回退窄化前全量面。 */
 export function recoverEmptyToolSurface<T>(
   narrowed: readonly T[],
