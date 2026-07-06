@@ -135,3 +135,40 @@ test('request envelope records calendar event references as structured resources
   assert.equal(envelope.primaryInstruction, '帮我看看这个日程前后要准备什么')
   assert.ok(envelope.chunks.some((chunk) => chunk.source === 'ui_resource_ref'))
 })
+
+test('request envelope carries an unresolved @[skill] mention as a skill_reference resource (P1-1)', () => {
+  const envelope = buildRequestEnvelope({
+    userText: [
+      '用@[ready-human-touch-ppt]根据@[analysis.md]生成一个人文感风格 ppt',
+      '',
+      '--- 附件: analysis.md ---',
+      '- 路径: /tmp/analysis.md',
+    ].join('\n'),
+  })
+  const skillRefs = envelope.resources.filter((r) => r.kind === 'skill_reference')
+  assert.equal(skillRefs.length, 1)
+  assert.equal(skillRefs[0].name, 'ready-human-touch-ppt')
+  assert.equal(skillRefs[0].source, 'explicit_reference')
+  assert.equal(skillRefs[0].canRead, false)
+  assert.equal(skillRefs[0].canWrite, false)
+  const mdResource = envelope.resources.find((r) => r.name === 'analysis.md')
+  assert.ok(mdResource)
+  assert.equal(mdResource?.kind, 'attachment')
+})
+
+test('request envelope produces no skill_reference when there is no @[mention] (P1-1)', () => {
+  const envelope = buildRequestEnvelope({ userText: '帮我在文档里生成一张信息卡' })
+  assert.equal(envelope.resources.filter((r) => r.kind === 'skill_reference').length, 0)
+})
+
+test('request envelope does not double-count a resolved attachment mention as skill_reference (P1-1)', () => {
+  const envelope = buildRequestEnvelope({
+    userText: [
+      '根据@[普通文件.md]整理要点',
+      '',
+      '--- 附件: 普通文件.md ---',
+      '- 路径: /tmp/普通文件.md',
+    ].join('\n'),
+  })
+  assert.equal(envelope.resources.filter((r) => r.kind === 'skill_reference').length, 0)
+})

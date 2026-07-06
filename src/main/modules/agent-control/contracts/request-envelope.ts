@@ -30,6 +30,8 @@ export type RequestEnvelopeResourceKind =
   | 'calendar_event'
   | 'folder_reference'
   | 'widget_target'
+  // P1-1 — 显式 @[技能] 引用：未被解析成任何既有资源的 @[token]。envelope 不校验技能存在性（授权层校验）。
+  | 'skill_reference'
 
 export type RequestEnvelopeResourceSource =
   | 'user_attachment'
@@ -469,6 +471,31 @@ export function buildRequestEnvelope(params: {
   const resources = structuredBlocks
     .map((block, index) => buildResourceFromBlock(block, index))
     .filter(Boolean) as RequestEnvelopeResource[]
+
+  // P1-1 — 每个 @[token] 若没有被解析成任何既有资源（附件/文档/文件夹/widget/浏览器…），
+  //   追加一条 skill_reference 资源。envelope 保持哑数据：不做技能存在性校验（校验在授权层）。
+  //   token 提取正则与 buildReferencedResources / agent-sdk-utils mention 语法一致。
+  const resolvedResourceNames = new Set(resources.map((resource) => resource.name))
+  const seenSkillReferenceTokens = new Set<string>()
+  for (const match of rawUserText.matchAll(/@\[([^\]]+)\]/g)) {
+    const token = String(match[1] || '').trim()
+    if (!token) continue
+    if (resolvedResourceNames.has(token) || seenSkillReferenceTokens.has(token)) continue
+    seenSkillReferenceTokens.add(token)
+    const order = resources.length
+    resources.push({
+      id: `skill_reference-${order}-${token}`,
+      kind: 'skill_reference',
+      source: 'explicit_reference',
+      name: token,
+      path: null,
+      text: '',
+      summary: null,
+      order,
+      canRead: false,
+      canWrite: false,
+    })
+  }
 
   const countsBySource = {
     user_message: 0,
