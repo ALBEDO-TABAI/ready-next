@@ -1,5 +1,5 @@
 ---
-status: approved — 白 2026-07-07 批准全案文档化；本篇为 P1 执行书（P0 四单全部收口后才可开工）
+status: done 2026-07-07 — 五单全部收口（typed refs / floors 进裁决面 / controller parity / gate + 指引同步）；对抗性审查修复循环通过。本篇为 P1 执行书（P0 四单全部收口后才可开工）
 revision_history:
   - v1 (2026-07-07): 初稿。母合同 §4 T1/T2/T3；把 P0 的临时 preserve/守卫收编成结构化地板。
 owner: 白

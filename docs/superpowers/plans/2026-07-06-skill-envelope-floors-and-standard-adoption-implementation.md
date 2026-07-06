@@ -117,6 +117,9 @@ LLM 参与权限判定；不做 marketplace/评分；不动浏览器纪律与行
 
 ## 5. 工单分解
 
+> 进度：P0 done 2026-07-07（四单 + 对抗性审查修复循环；见 2026-07-07-skill-envelope-p0-closeout.md）。
+> P1 done 2026-07-07（五单 + 对抗性审查修复循环：typed refs / floors 进裁决面 / controller parity / gate + 指引同步）。
+
 ### P0 — 解阻断（两个设计 skill 端到端可用）
 - **P0-1** 提交工作区已验证的 D1 修复 + parity 测试（14/14 绿）与两技能注册/资产（fac 6/6 绿）。
 - **P0-2** D2：`:890` 过滤器 floor-respecting（保留技能 allowed tools）+ 末端非空守卫

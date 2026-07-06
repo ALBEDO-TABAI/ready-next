@@ -20,6 +20,7 @@ const path = require('node:path')
 
 const REPO_DEFAULT = path.resolve(__dirname, '..')
 const TARGET_REL = 'src/main/modules/agent-control/domain-adapters/run-capability-controller.ts'
+const EXECUTOR_REL = 'src/main/modules/agent-control/runtime-core/agent-sdk-tool-executor.ts'
 
 function checkCapabilityGateEnforcedInArbitration({ root = REPO_DEFAULT } = {}) {
   const errors = []
@@ -38,6 +39,18 @@ function checkCapabilityGateEnforcedInArbitration({ root = REPO_DEFAULT } = {}) 
   const branchPattern = /capabilityResolution\.supportsVision\s*[!=]==?\s*(true|false)/
   if (!branchPattern.test(src)) {
     errors.push(`${TARGET_REL}: \`capabilityResolution.supportsVision\` must be branched on (=== true / !== true)`)
+  }
+
+  // P1-5 — capability floors must be computed on BOTH arbitration paths from the same function:
+  // the controller (authoritative point) and the SDK executor (consumes the same computeCapabilityFloors).
+  if (!/\bcomputeCapabilityFloors\s*\(/.test(src)) {
+    errors.push(`${TARGET_REL}: missing \`computeCapabilityFloors(\` — capability floors not computed at the arbitration point`)
+  }
+  const executorAbs = path.join(root, EXECUTOR_REL)
+  if (!fs.existsSync(executorAbs)) {
+    errors.push(`Missing target: ${EXECUTOR_REL}`)
+  } else if (!/\bcomputeCapabilityFloors\s*\(/.test(fs.readFileSync(executorAbs, 'utf8'))) {
+    errors.push(`${EXECUTOR_REL}: missing \`computeCapabilityFloors(\` — SDK path must consume the same floors function`)
   }
 
   return { ok: errors.length === 0, errors }
