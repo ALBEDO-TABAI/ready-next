@@ -33,6 +33,9 @@ import {
   resolveCapabilityResolution,
 } from '../domain-adapters/capability-resolver'
 import {
+  computeCapabilityFloors,
+} from '../domain-adapters/capability-floors'
+import {
   resolveActiveSkillAllowedTools,
 } from '../domain-adapters/run-capability-controller'
 import {
@@ -88,7 +91,6 @@ import type { SidecarManager } from '../sidecar-manager'
 import type { AgentControlRuntime } from './runtime'
 import {
   DOCUMENT_TARGET_MUTATION_TOOL_NAMES,
-  LOCAL_DOCUMENT_FLOOR_TOOL_NAMES,
   appendBudgetWarningSteering,
   authorizedPrimitiveToolNames,
   documentToolMutatedContent,
@@ -96,6 +98,7 @@ import {
   filterSelectedSkillToolSurface,
   formatToolCallTrace,
   formatToolResultTrace,
+  hasCurrentDocumentContextResource,
   hasLocalDocumentResource,
   hasLocalSendImIntentForTurn,
   isDocumentToolFailure,
@@ -349,19 +352,36 @@ export class AgentSdkToolExecutor {
     const activeSkillAllowedTools = resolvedSkillAllowedTools && allowedPrimitiveNames.length > 0
       ? Array.from(new Set([...resolvedSkillAllowedTools, ...allowedPrimitiveNames]))
       : resolvedSkillAllowedTools
+    // P1-3：能力地板在唯一裁决面（executor）计算一次；技能收窄只做减法、不移除地板项，
+    //   管线末端再按地板硬补回缺席项（组不可见/意图压制也不能吃掉地板）。
+    const capabilityFloors = computeCapabilityFloors({
+      authorization: params.authorization,
+      hasLocalDocumentResource: hasLocalDocumentResource(params.message, params.requestEnvelope),
+      hasCurrentDocumentContext: hasCurrentDocumentContextResource(params.requestEnvelope),
+    })
     if (activeSkillAllowedTools) {
       const preserveVisibleBrowserTool = createVisibleBrowserToolPreserver({
         visibleCapabilityGroupIds: capabilityResolution.visibleCapabilityGroupIds,
         collectionExposure,
         batchCollectionExposure,
       })
-      // P0-3(D3)：skill+本地文档同轮时，文档读取工具是地板，不随技能收窄丢弃。
-      const preserveLocalDocumentFloor = hasLocalDocumentResource(params.message, params.requestEnvelope)
       definitions = filterSelectedSkillToolSurface(definitions, activeSkillAllowedTools, {
         preserveToolName: (name) =>
           preserveVisibleBrowserTool?.(name) === true
-          || (preserveLocalDocumentFloor && LOCAL_DOCUMENT_FLOOR_TOOL_NAMES.includes(name)),
+          || capabilityFloors.toolNames.has(name),
       })
+    }
+    // P1-3 硬地板：地板工具即便被组不可见/意图压制而缺席，也从注册表补回（取不到则记 reason 跳过）。
+    const presentFloorToolNames = new Set(definitions.map((definition) => definition.name))
+    for (const floorName of capabilityFloors.toolNames) {
+      if (presentFloorToolNames.has(floorName)) continue
+      const floorDefinition = defaultToolRegistry.getToolDefinitionForExecution(floorName)
+      if (!floorDefinition) {
+        appendToolCapabilityLog(['[tool_capability]', 'stage=sdk_runtime_floor_tool_unavailable', `tool=${floorName}`].join(' '))
+        continue
+      }
+      definitions = [...definitions, floorDefinition]
+      presentFloorToolNames.add(floorName)
     }
     return filterToolsByVisionCapability(
       definitions as unknown as Array<Record<string, unknown>>,

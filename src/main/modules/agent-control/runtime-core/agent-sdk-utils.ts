@@ -1609,7 +1609,7 @@ export function hasLocalDocumentResource(message: RunMessage, requestEnvelope?: 
   return references.length > 0
 }
 
-function hasCurrentDocumentContextResource(requestEnvelope?: unknown): boolean {
+export function hasCurrentDocumentContextResource(requestEnvelope?: unknown): boolean {
   return parseEnvelopeResourceReferences(requestEnvelope).resources.some((reference) =>
     reference.kind === 'document_context' || reference.source === 'current_document'
   )

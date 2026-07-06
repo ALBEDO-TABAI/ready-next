@@ -47,6 +47,10 @@ import {
   assertCurrentMessageCapability,
 } from '../domain-adapters/message-capability-filter'
 import {
+  computeCapabilityFloors,
+  enforceCapabilityFloors,
+} from '../domain-adapters/capability-floors'
+import {
   logAgentMetric,
 } from '../metrics'
 import {
@@ -186,6 +190,8 @@ import {
   extractLongSkillCheckpoint,
   extractSdkMissingToolName,
   finalTextIndicatesIncompleteDocument,
+  hasCurrentDocumentContextResource,
+  hasLocalDocumentResource,
   hasLocalSendImIntentForTurn,
   hasRecalledTaskContext,
   hydrateDocumentTargetPreservation,
@@ -982,6 +988,22 @@ export class AgentSdkTurnOrchestrator {
           providerDiagnostics: runMetaProviderDiagnostics,
         })
       }
+      // P1-3 不变量：管线末端 surface ⊇ floors。任何收窄掏空地板项 → 响亮回退并从收窄前面补回；
+      //   floors 只含 skill/文档读取工具（永不含 browser），故补回不会撤销 S4-2 等安全收窄。
+      const turnCapabilityFloors = computeCapabilityFloors({
+        authorization,
+        hasLocalDocumentResource: hasLocalDocumentResource(content as RunMessage, effectiveExecutionOptions?.requestEnvelope),
+        hasCurrentDocumentContext: hasCurrentDocumentContextResource(effectiveExecutionOptions?.requestEnvelope),
+      })
+      const floorEnforcement = enforceCapabilityFloors(toolDefinitions, turnCapabilityFloors, preNarrowingToolDefinitions)
+      if (floorEnforcement.missing.length > 0) {
+        appendToolCapabilityLog([
+          '[tool_capability]',
+          'stage=tool_surface_floor_violation',
+          `missing=${floorEnforcement.missing.join('|')}`,
+        ].join(' '))
+      }
+      toolDefinitions = floorEnforcement.definitions
       const hasVeaPipelineTool = toolDefinitions.some((definition) => definition.name === 'skill_video_expert_pipeline')
       const hasMapAmbiguityQuestionTools = toolDefinitions.some((definition) => definition.name === 'map_plan_route')
       const hasBrowserTools = toolDefinitions.some((definition) => definition.name.startsWith('browser_'))
@@ -995,6 +1017,7 @@ export class AgentSdkTurnOrchestrator {
         `toolCount=${allowedToolNames.length}`,
         `tools=${allowedToolNames.join('|') || 'none'}`,
         `skillHintRelevant=${skillHintRelevanceForTurn.relevant}:${skillHintRelevanceForTurn.reason}`,
+        `floors=${turnCapabilityFloors.reasons.join(',') || 'none'}`,
       ].join(' '))
       const definitionByName = new Map(toolDefinitions.map((definition) => [definition.name, definition]))
       const requiredCapabilityGroups = Array.from(new Set(toolDefinitions.map((definition) => definition.groupId)))

@@ -1120,3 +1120,36 @@ test('SDK authorization stays none when a typed skill_reference names an unknown
     clearLastReferenceSkill(sessionId)
   }
 })
+
+test('P1-3 floors-based preserve keeps file read tools through skill narrowing on a selected local-document turn', () => {
+  // A selected-skill turn narrows the surface to the skill allowed-tools; without the floors-based
+  // preserve predicate the local document read tools would be stripped. The P1-3 executor computes
+  // capability floors once and preserves them, so file_locate/file_read_excerpt survive the narrowing
+  // alongside the skill primitives. (Removing `|| capabilityFloors.toolNames.has(name)` turns this red.)
+  const authorization = buildSelectedSkillToolAuthorization({
+    skillId: 'ready-human-touch-ppt',
+    allowedTypedActions: [],
+    allowedPrimitives: ['skill_read_artifact', 'skill_run_shell', 'skill_write_artifact', 'skill_export_artifact'],
+    source: 'explicit',
+    reason: 'test',
+  })
+  const requestEnvelope = {
+    rawUserText: '随便处理一下这个',
+    pureUserText: '随便处理一下这个',
+    primaryInstruction: '随便处理一下这个',
+    resources: [{
+      id: 'attach-notes', kind: 'attachment', source: 'user_attachment',
+      name: 'notes.md', path: '/tmp/notes.md', text: '', summary: null,
+      order: 0, canRead: true, canWrite: true,
+    }],
+  }
+  const names = new Set(listLiveSdkDefaultToolNames({
+    userText: '随便处理一下这个',
+    sessionId: 'scope-p1-3-floor-preserve',
+    requestEnvelope,
+    authorization,
+  }))
+  assert.ok(names.has('file_read_excerpt'), `floors preserve must keep file_read_excerpt; got ${[...names].join('|')}`)
+  assert.ok(names.has('file_locate'), `floors preserve must keep file_locate; got ${[...names].join('|')}`)
+  assert.ok(names.has('skill_read_artifact') && names.has('skill_run_shell'), 'skill floor must stay')
+})
