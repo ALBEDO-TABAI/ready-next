@@ -684,7 +684,7 @@ export function allowedPrimitiveToolsForSdkSkillTurn(options: {
 
 export function shouldSuppressSkillAskUserForArtifactDelivery(textCandidates: string[]): boolean {
   const joined = textCandidates.join('\n')
-  if (!/(?:输出到|保存到|写入|写到|导出到|存到|落到|文件名|output\s+to|save\s+to|write\s+to|export\s+to)/i.test(joined)) {
+  if (!/(?:输出到|保存到|写入|写到|导出到|存到|落到|文件名|(?:相同|同一|当前|这个|该)?目录下|文件夹下|output\s+to|save\s+to|write\s+to|export\s+to|same\s+(?:dir|directory|folder))/i.test(joined)) {
     return false
   }
   if (/(?:不要|不用|无需|不必|别|禁止).{0,8}(?:追问|问我|询问|提问|澄清|确认)|(?:直接|立刻|马上).{0,12}(?:生成|输出|保存|写入|完成)/i.test(joined)) {
@@ -816,15 +816,23 @@ export function parseEnvelopeResourceReferences(envelope: unknown): {
   return { primaryInstruction, resources }
 }
 
+function extractRawExplicitMentionCandidate(rawUserText: string | null): string {
+  if (!rawUserText || !/@\[[^\]]+\]/.test(rawUserText)) return ''
+  const primary = primaryInstructionText(rawUserText).trim()
+  if (/@\[[^\]]+\]/.test(primary)) return primary
+  const mentionLine = rawUserText
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find((line) =>
+      /@\[[^\]]+\]/.test(line)
+      && !SDK_CONTEXT_MARKERS.some((marker) => line.includes(marker)))
+  return mentionLine || ''
+}
+
 export function skillAuthorizationTextCandidates(message: RunMessage, envelope: unknown): string[] {
   const record = asRecord(envelope)
   const rawUserText = stringField(record, 'rawUserText')
-  const rawExplicitMention =
-    rawUserText
-    && /@\[[^\]]+\]/.test(rawUserText)
-    && !SDK_CONTEXT_MARKERS.some((marker) => rawUserText.includes(marker))
-      ? rawUserText.trim()
-      : ''
+  const rawExplicitMention = extractRawExplicitMentionCandidate(rawUserText)
   const envelopeCandidates = [
     parseEnvelopeResourceReferences(envelope).primaryInstruction,
     stringField(record, 'primaryInstruction'),
