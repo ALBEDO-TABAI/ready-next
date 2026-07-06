@@ -779,6 +779,113 @@ test('SDK authorization keeps raw skill mention when attachment context strips r
   }
 })
 
+test('explicit skill turn with local document attachment keeps document-read floor tools', () => {
+  const rawUserText = [
+    '用@[BV1vs411e7QF_audiovisual_analysis.md]的内容来生成一个人文感风格 ppt 在相同目录下@[ready-human-touch-ppt]',
+    '',
+    '--- 附件: BV1vs411e7QF_audiovisual_analysis.md ---',
+    '- 路径: /tmp/BV1vs411e7QF_audiovisual_analysis.md',
+  ].join('\n')
+  const primaryInstruction = '用 BV1vs411e7QF_audiovisual_analysis.md 的内容来生成一个人文感风格 ppt 在相同目录下'
+  const sessionId = 'scope-ready-human-touch-doc-read-floor'
+  const skillRoot = join(process.cwd(), 'assets', 'embedded-skills', 'ready-human-touch-ppt')
+  clearLastReferenceSkill(sessionId)
+  const requestEnvelope = {
+    rawUserText,
+    pureUserText: primaryInstruction,
+    primaryInstruction,
+    resources: [{
+      id: 'attach-analysis',
+      kind: 'file_reference',
+      source: 'attachment',
+      name: 'BV1vs411e7QF_audiovisual_analysis.md',
+      path: '/tmp/BV1vs411e7QF_audiovisual_analysis.md',
+      text: '',
+      summary: null,
+      order: 0,
+      canRead: true,
+      canWrite: true,
+    }],
+  }
+  const runtime = new AgentSdkRuntime({
+    loadAIConfig: () => ({ ok: true, config: BASE_CONFIG, reason: 'present' }),
+    domainAdapters: [],
+    skillContextOrchestrator: {
+      findExplicitlyRequestedSkills: (text: string) =>
+        text.includes('@[ready-human-touch-ppt]') || text.includes('ready-human-touch-ppt')
+          ? [{ id: 'ready-human-touch-ppt', name: 'ready-human-touch-ppt', managedPath: skillRoot }]
+          : [],
+      buildPreferredSkillToolNames: (text: string) =>
+        text.includes('@[ready-human-touch-ppt]') || text.includes('ready-human-touch-ppt')
+          ? ['skill_ask_user', 'skill_run_shell', 'skill_write_artifact', 'skill_read_artifact', 'skill_export_artifact']
+          : [],
+      rememberExplicitReferenceSkillHint: (text: string, sid?: string) => {
+        if (!text.includes('ready-human-touch-ppt')) return false
+        rememberLastReferenceSkill(sid, { id: 'ready-human-touch-ppt', name: 'ready-human-touch-ppt' })
+        return true
+      },
+      getCurrentReferenceSkillHint: (sid?: string) => {
+        const hint = getLastReferenceSkill(sid)
+        return hint ? { id: hint.id, name: hint.name } : null
+      },
+    } as any,
+  })
+  const privateRuntime = runtime as unknown as {
+    resolveSkillAuthorizationForTurn: (
+      message: string,
+      sessionId?: string,
+      requestEnvelope?: unknown,
+      forceLocalSendImIntent?: boolean,
+    ) => SkillToolAuthorization
+    toolExecutor: {
+      listDefaultToolDefinitionsForTurn: (params: {
+        message: string
+        sessionId?: string
+        scopeId?: string
+        config: AIModelConfig
+        browserHostAvailable: boolean
+        feishuConnected: boolean
+        authorization: SkillToolAuthorization
+        requestEnvelope?: unknown
+      }) => Array<{ name: string }>
+    }
+  }
+
+  try {
+    const authorization = privateRuntime.resolveSkillAuthorizationForTurn(
+      primaryInstruction,
+      sessionId,
+      requestEnvelope,
+    )
+    assert.equal(authorization.mode, 'selected')
+    assert.equal(authorization.skillId, 'ready-human-touch-ppt')
+    assert.equal(authorization.allowedPrimitives.has('skill_run_shell'), true)
+    assert.equal(authorization.allowedPrimitives.has('skill_ask_user'), false)
+
+    const toolNames = privateRuntime.toolExecutor.listDefaultToolDefinitionsForTurn({
+      message: primaryInstruction,
+      sessionId,
+      scopeId: sessionId,
+      config: BASE_CONFIG,
+      browserHostAvailable: true,
+      feishuConnected: false,
+      authorization,
+      requestEnvelope,
+    }).map((definition) => definition.name)
+    assert.ok(toolNames.includes('skill_run_shell'))
+    assert.ok(toolNames.includes('skill_read_artifact'))
+    assert.ok(toolNames.includes('skill_write_artifact'))
+    assert.ok(toolNames.includes('skill_export_artifact'))
+    assert.equal(toolNames.includes('skill_ask_user'), false)
+    const names = new Set(toolNames)
+    assert.ok(names.has('file_read_excerpt'), 'doc-read floor: file_read_excerpt must survive skill narrowing')
+    assert.ok(names.has('file_locate'), 'doc-read floor: file_locate must survive skill narrowing')
+    assert.ok(names.has('skill_read_artifact') && names.has('skill_run_shell'), 'skill tools must stay')
+  } finally {
+    clearLastReferenceSkill(sessionId)
+  }
+})
+
 test('document-context continuation keeps document write tools available for short follow-up turns', () => {
   const userText = [
     '再整理一下这篇',

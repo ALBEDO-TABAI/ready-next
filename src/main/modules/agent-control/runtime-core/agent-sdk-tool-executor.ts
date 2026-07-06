@@ -88,6 +88,7 @@ import type { SidecarManager } from '../sidecar-manager'
 import type { AgentControlRuntime } from './runtime'
 import {
   DOCUMENT_TARGET_MUTATION_TOOL_NAMES,
+  LOCAL_DOCUMENT_FLOOR_TOOL_NAMES,
   appendBudgetWarningSteering,
   authorizedPrimitiveToolNames,
   documentToolMutatedContent,
@@ -95,6 +96,7 @@ import {
   filterSelectedSkillToolSurface,
   formatToolCallTrace,
   formatToolResultTrace,
+  hasLocalDocumentResource,
   hasLocalSendImIntentForTurn,
   isDocumentToolFailure,
   isDocumentToolFailureText,
@@ -353,8 +355,12 @@ export class AgentSdkToolExecutor {
         collectionExposure,
         batchCollectionExposure,
       })
+      // P0-3(D3)：skill+本地文档同轮时，文档读取工具是地板，不随技能收窄丢弃。
+      const preserveLocalDocumentFloor = hasLocalDocumentResource(params.message, params.requestEnvelope)
       definitions = filterSelectedSkillToolSurface(definitions, activeSkillAllowedTools, {
-        preserveToolName: preserveVisibleBrowserTool,
+        preserveToolName: (name) =>
+          preserveVisibleBrowserTool?.(name) === true
+          || (preserveLocalDocumentFloor && LOCAL_DOCUMENT_FLOOR_TOOL_NAMES.includes(name)),
       })
     }
     return filterToolsByVisionCapability(

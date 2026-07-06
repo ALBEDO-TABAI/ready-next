@@ -212,6 +212,13 @@ export function authorizedPrimitiveToolNames(authorization: SkillToolAuthorizati
     .filter((name) => authorization.allowedPrimitives.has(name))
 }
 
+/** P0-3(D3) — 技能选中轮的文档读取地板：本轮携带本地文档资源时这些工具不得被技能收窄丢弃。 */
+export const LOCAL_DOCUMENT_FLOOR_TOOL_NAMES: ReadonlyArray<string> = [
+  'file_locate',
+  'file_read_excerpt',
+  'document_read_section',
+]
+
 /** P0-2 — 技能选中轮的地板工具名（typed actions ∪ primitives）；none 轮为空集。 */
 export function selectedSkillFloorToolNames(authorization: SkillToolAuthorization): ReadonlySet<string> {
   if (authorization.mode !== 'selected') return new Set()
@@ -1564,7 +1571,7 @@ export function shouldSuppressVisibleTextOnToolCall(text: string): boolean {
   return /^(?:now|let me|good,|okay,|ok,|i will|i'll|i need|next,|然后|接下来|现在|我先|我会|让我|好的)[\s\S]{0,240}$/i.test(normalized)
 }
 
-function hasLocalDocumentResource(message: RunMessage, requestEnvelope?: unknown): boolean {
+export function hasLocalDocumentResource(message: RunMessage, requestEnvelope?: unknown): boolean {
   const references = collectLocalDocumentReferences(message, requestEnvelope)
   return references.length > 0
 }
