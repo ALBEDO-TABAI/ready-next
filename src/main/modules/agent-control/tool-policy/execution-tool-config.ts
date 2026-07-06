@@ -97,8 +97,11 @@ export interface ToolPolicy {
   activeSkillAllowedTools?: ReadonlyArray<string> | null
   /**
    * P1-4 — 能力地板：显式技能引用 / 本地文档资源产生的"必在"工具集，与 SDK executor 消费同一
-   * `computeCapabilityFloors`。bundle 把地板并入 `activeSkillAllowedTools` 过滤集，保证技能收窄
-   * 不移除地板项。唯一裁决点仍是 `resolveRunCapabilities`——这里是其权威计算结果的载体。
+   * `computeCapabilityFloors`。bundle 把地板并入 `activeSkillAllowedTools` 过滤集，保证技能收窄不
+   * 移除地板项。诚实注记：当前 live 工具面权威计算点是 SDK executor（`listDefaultToolDefinitionsForTurn`）；
+   * `resolveRunCapabilities`/controller 路径为 dormant parity（无生产调用方），其地板信号为 envelope-only
+   * （`envelopeHasLocalDocumentResource`），与 executor 的 message∪envelope 信号在 path-present 资源上一致，
+   * path-null-only 资源为已知 latent 分歧，controller 复活前需统一 doc-detection。
    */
   capabilityFloors?: CapabilityFloors | null
 }

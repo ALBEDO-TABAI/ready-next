@@ -5,7 +5,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { computeCapabilityFloors, enforceCapabilityFloors } from '../main/modules/agent-control/domain-adapters/capability-floors'
+import { computeCapabilityFloors, enforceCapabilityFloors, recoverAbsentFloorsFromRegistry } from '../main/modules/agent-control/domain-adapters/capability-floors'
 import { buildSelectedSkillToolAuthorization, buildExplicitNoSkillAuthorization } from '../main/modules/agent-control/skills/skill-tool-authorization'
 
 const selected = buildSelectedSkillToolAuthorization({
@@ -91,4 +91,34 @@ test('enforceCapabilityFloors still reports a floor tool that cannot be recovere
   const result = enforceCapabilityFloors([{ name: 'file_locate' }], floors, []) // file_read_excerpt not in recoverFrom
   assert.deepEqual(result.missing, ['file_read_excerpt'])
   assert.deepEqual(result.definitions.map((d) => d.name), ['file_locate'])
+})
+
+// recoverAbsentFloorsFromRegistry isolates the executor hard-floor loop: recovering a floor tool that
+// is ABSENT from the surface (group-invisible / intent-suppressed) — the unique job the preserve
+// predicate cannot do. A live registry always exposes file_management, so this is only testable here.
+test('recoverAbsentFloorsFromRegistry adds an absent floor tool from the registry', () => {
+  const floors = computeCapabilityFloors({ authorization: none, hasLocalDocumentResource: true, hasCurrentDocumentContext: false })
+  const surface = [{ name: 'browser_navigate' }] // file floor tools absent (group suppressed)
+  const registry: Record<string, { name: string }> = { file_locate: { name: 'file_locate' }, file_read_excerpt: { name: 'file_read_excerpt' } }
+  const result = recoverAbsentFloorsFromRegistry(surface, floors, (n) => registry[n] ?? null)
+  assert.deepEqual(result.definitions.map((d) => d.name).sort(), ['browser_navigate', 'file_locate', 'file_read_excerpt'])
+  assert.deepEqual(result.unavailable, [])
+})
+
+test('recoverAbsentFloorsFromRegistry reports a floor tool the registry cannot resolve and does not add it', () => {
+  const floors = computeCapabilityFloors({ authorization: none, hasLocalDocumentResource: true, hasCurrentDocumentContext: false })
+  const surface = [{ name: 'file_locate' }] // file_read_excerpt absent, registry returns null for it
+  const result = recoverAbsentFloorsFromRegistry(surface, floors, (n) => (n === 'file_locate' ? { name: n } : null))
+  assert.deepEqual(result.definitions.map((d) => d.name), ['file_locate'])
+  assert.deepEqual(result.unavailable, ['file_read_excerpt'])
+})
+
+test('recoverAbsentFloorsFromRegistry is a no-op when floor tools are already present', () => {
+  const floors = computeCapabilityFloors({ authorization: none, hasLocalDocumentResource: true, hasCurrentDocumentContext: false })
+  const surface = [{ name: 'file_locate' }, { name: 'file_read_excerpt' }, { name: 'browser_navigate' }]
+  let resolveCalls = 0
+  const result = recoverAbsentFloorsFromRegistry(surface, floors, (n) => { resolveCalls += 1; return { name: n } })
+  assert.equal(resolveCalls, 0)
+  assert.deepEqual(result.definitions.map((d) => d.name), ['file_locate', 'file_read_excerpt', 'browser_navigate'])
+  assert.deepEqual(result.unavailable, [])
 })

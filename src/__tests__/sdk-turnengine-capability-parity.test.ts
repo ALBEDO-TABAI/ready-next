@@ -6,11 +6,11 @@ import type { AIModelConfig } from '../shared/ai-providers'
 import type { BrowserTaskDecisionMode } from '../shared/browser-agent-task'
 import type { CapabilityResolution } from '../main/modules/agent-control/domain-adapters/capability-resolver'
 import { classifyIntent } from '../main/modules/agent-control/intent-classifier'
+import { buildRequestEnvelope } from '../main/modules/agent-control/contracts/request-envelope'
 import {
-  buildRequestEnvelope,
-  envelopeHasCurrentDocumentContext,
-  envelopeHasLocalDocumentResource,
-} from '../main/modules/agent-control/contracts/request-envelope'
+  hasCurrentDocumentContextResource,
+  hasLocalDocumentResource,
+} from '../main/modules/agent-control/runtime-core/agent-sdk-utils'
 import { computeCapabilityFloors } from '../main/modules/agent-control/domain-adapters/capability-floors'
 import { getPolicyOpenAIToolBundle, type ToolPolicy } from '../main/modules/agent-control/tool-policy/execution-tool-config'
 import {
@@ -1128,10 +1128,11 @@ test('SDK authorization stays none when a typed skill_reference names an unknown
 })
 
 test('P1-3 floors-based preserve keeps file read tools through skill narrowing on a selected local-document turn', () => {
-  // A selected-skill turn narrows the surface to the skill allowed-tools; without the floors-based
-  // preserve predicate the local document read tools would be stripped. The P1-3 executor computes
-  // capability floors once and preserves them, so file_locate/file_read_excerpt survive the narrowing
-  // alongside the skill primitives. (Removing `|| capabilityFloors.toolNames.has(name)` turns this red.)
+  // A selected-skill turn narrows the surface to the skill allowed-tools; the P1-3 executor computes
+  // capability floors once and keeps them so file_locate/file_read_excerpt survive alongside the skill
+  // primitives. The preserve predicate and the registry hard-floor add-back are REDUNDANT backstops in
+  // this fixture (the tools are present pre-narrowing), so this only turns RED when BOTH are disabled;
+  // the hard-floor loop's unique group-suppression job is isolated in capability-floors.test.ts.
   const authorization = buildSelectedSkillToolAuthorization({
     skillId: 'ready-human-touch-ppt',
     allowedTypedActions: [],
@@ -1178,16 +1179,29 @@ test('P1-4 run-capability-controller attaches the same capability floors the SDK
   })
   const controllerFloors = controller.toolPolicy.capabilityFloors
   assert.ok(controllerFloors, 'controller toolPolicy must carry capabilityFloors')
-  // SDK path derives floors from the same authorization + the same envelope signals.
+  // Honest parity: compare the controller floors against the floors the LIVE executor path computes
+  // (hasLocalDocumentResource(message, envelope) / hasCurrentDocumentContextResource), NOT the
+  // controller's own envelope-only signal. They agree for a path-present resource (the common case);
+  // a path-null-only resource is a documented latent divergence while the controller path is dormant.
   const requestEnvelope = buildRequestEnvelope({ userText })
-  const sdkFloors = computeCapabilityFloors({
+  const executorFloors = computeCapabilityFloors({
     authorization: skillAuthorization,
-    hasLocalDocumentResource: envelopeHasLocalDocumentResource(requestEnvelope),
-    hasCurrentDocumentContext: envelopeHasCurrentDocumentContext(requestEnvelope),
+    hasLocalDocumentResource: hasLocalDocumentResource(userText, requestEnvelope),
+    hasCurrentDocumentContext: hasCurrentDocumentContextResource(requestEnvelope),
   })
-  assert.deepEqual([...controllerFloors!.toolNames].sort(), [...sdkFloors.toolNames].sort())
+  assert.deepEqual([...controllerFloors!.toolNames].sort(), [...executorFloors.toolNames].sort())
   assert.ok(controllerFloors!.toolNames.has('file_read_excerpt'), 'floor must include file_read_excerpt for a local-document turn')
   assert.ok(controllerFloors!.toolNames.has('skill_read_artifact'), 'floor must include the selected skill primitives')
+  // Every controller-declared floor must actually be surfaced by the REAL SDK executor path.
+  const sdkSurface = new Set(listLiveSdkDefaultToolNames({
+    userText,
+    sessionId: 'scope-p1-4-parity',
+    requestEnvelope,
+    authorization: skillAuthorization,
+  }))
+  for (const floorTool of controllerFloors!.toolNames) {
+    assert.ok(sdkSurface.has(floorTool), `controller-declared floor ${floorTool} must be surfaced by the SDK executor path`)
+  }
 })
 
 test('P1-4 policy bundle preserves floor tools through an active skill allowed-tools filter', () => {
@@ -1211,4 +1225,53 @@ test('P1-4 policy bundle preserves floor tools through an active skill allowed-t
   assert.ok(names.has('file_locate'), 'the allowed tool stays')
   // A non-floor, non-allowed tool from the same group must still be filtered out.
   assert.equal(names.has('file_move'), false)
+})
+
+test('typed skill_reference for an unknown skill does not hijack selection away from a resolvable text mention (P1-2)', () => {
+  const sessionId = 'scope-p1-2-no-hijack'
+  const skillRoot = join(process.cwd(), 'assets', 'embedded-skills', 'ready-human-touch-ppt')
+  clearLastReferenceSkill(sessionId)
+  // Typed ref names an UNKNOWN skill; the text carries a RESOLVABLE @[known] mention. The typed-ref
+  // branch must `continue` past the unknown ref and let the text fallback select the known skill —
+  // isolating the typed-ref branch (a wrong short-circuit would yield the unknown id or none).
+  const requestEnvelope = {
+    rawUserText: '用@[ready-human-touch-ppt]生成 ppt',
+    pureUserText: '用@[ready-human-touch-ppt]生成 ppt',
+    primaryInstruction: '用@[ready-human-touch-ppt]生成 ppt',
+    resources: [{
+      id: 'skill_reference-0-no-such-skill', kind: 'skill_reference', source: 'explicit_reference',
+      name: 'no-such-skill', path: null, text: '', summary: null, order: 0, canRead: false, canWrite: false,
+    }],
+  }
+  try {
+    const authorization = typedRefPrivate(buildTypedRefRuntime(skillRoot))
+      .resolveSkillAuthorizationForTurn('用@[ready-human-touch-ppt]生成 ppt', sessionId, requestEnvelope)
+    assert.equal(authorization.mode, 'selected')
+    assert.equal(authorization.skillId, 'ready-human-touch-ppt') // text fallback wins; typed unknown ref did not hijack
+    assert.ok(
+      authorization.mode === 'selected' && !authorization.reason.startsWith('typed_ref:'),
+      'unknown typed ref must not label the turn typed_ref (it fell through to text fallback)',
+    )
+  } finally {
+    clearLastReferenceSkill(sessionId)
+  }
+})
+
+test('a none-mode turn carrying a typed skill_reference surfaces no authorized skill primitives (executor no-leak)', () => {
+  const requestEnvelope = {
+    rawUserText: '随便聊两句', pureUserText: '随便聊两句', primaryInstruction: '随便聊两句',
+    resources: [{
+      id: 'skill_reference-0-ready-human-touch-ppt', kind: 'skill_reference', source: 'explicit_reference',
+      name: 'ready-human-touch-ppt', path: null, text: '', summary: null, order: 0, canRead: false, canWrite: false,
+    }],
+  }
+  const names = listLiveSdkDefaultToolNames({
+    userText: '随便聊两句',
+    sessionId: 'scope-none-leak',
+    requestEnvelope,
+    authorization: buildExplicitNoSkillAuthorization('no_skill_signal'),
+  })
+  for (const primitive of ['skill_read_artifact', 'skill_write_artifact', 'skill_run_shell', 'skill_export_artifact']) {
+    assert.equal(names.includes(primitive), false, `none-mode turn leaked ${primitive}; surface=${names.join('|')}`)
+  }
 })

@@ -6185,3 +6185,52 @@ test('P0-3: planning heartbeats surface before the first visible output', async 
   assert.ok(heartbeatsBeforeOutput.some((entry) => entry.includes('正在理解需求')))
   assert.ok(heartbeatsBeforeOutput.some((entry) => entry.includes('正在调用模型')))
 })
+
+test('agent sdk runtime surfaces capability floor tools to the model end-to-end for a local-document skill turn (P1-3 wiring)', async () => {
+  // Drives the REAL orchestrator sendMessage + executor: the capability floor (skill primitives +
+  // document read tools) must survive the whole narrowing pipeline and reach the model. Guards the
+  // 母合同 §4 "管线末端 surface ⊇ floors" claim end-to-end (executor floors + orchestrator preserve).
+  const seenToolNames: string[] = []
+  const skillRoot = join(process.cwd(), 'assets', 'embedded-skills', 'ready-human-touch-ppt')
+  const runtime = createRuntime({
+    skillContextOrchestrator: {
+      findExplicitlyRequestedSkills: (t: string) =>
+        t.includes('ready-human-touch-ppt')
+          ? [{ id: 'ready-human-touch-ppt', name: 'ready-human-touch-ppt', managedPath: skillRoot }]
+          : [],
+      buildPreferredSkillToolNames: (t: string) =>
+        t.includes('ready-human-touch-ppt')
+          ? ['skill_run_shell', 'skill_write_artifact', 'skill_read_artifact', 'skill_export_artifact']
+          : [],
+      rememberExplicitReferenceSkillHint: () => true,
+    },
+    runAgent: async ({ tools, onTextDelta }: { tools: Array<{ name: string }>; onTextDelta: (t: string) => void }) => {
+      seenToolNames.push(...tools.map((item) => item.name))
+      onTextDelta('done')
+      return { finalText: 'done' }
+    },
+  })
+  runtime.newSession('butler::scope-floor-wiring', 'system prompt')
+  try {
+    const result = await runtime.sendMessage(
+      'butler::scope-floor-wiring',
+      '用@[ready-human-touch-ppt]根据@[notes.md]生成一个人文感 ppt',
+      'run-floor-wiring',
+      {
+        publicSessionId: 'scope-floor-wiring',
+        requestEnvelope: {
+          primaryInstruction: '用@[ready-human-touch-ppt]根据@[notes.md]生成一个人文感 ppt',
+          resources: [{ name: 'notes.md', path: '/tmp/notes.md', text: '' }],
+        },
+      },
+    )
+    // runAgent captured the tool surface at model-call time (before any post-turn doc-read enforcement),
+    // so we assert on the captured floor tools, not the turn's terminal outcome.
+    void result
+    assert.ok(seenToolNames.includes('skill_read_artifact'), `skill floor skill_read_artifact must reach model; got ${seenToolNames.join('|')}`)
+    assert.ok(seenToolNames.includes('skill_run_shell'), `skill floor skill_run_shell must reach model; got ${seenToolNames.join('|')}`)
+    assert.ok(seenToolNames.includes('file_read_excerpt'), `document read floor file_read_excerpt must reach model; got ${seenToolNames.join('|')}`)
+  } finally {
+    clearLastReferenceSkill('scope-floor-wiring')
+  }
+})

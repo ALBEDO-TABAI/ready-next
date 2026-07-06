@@ -34,6 +34,7 @@ import {
 } from '../domain-adapters/capability-resolver'
 import {
   computeCapabilityFloors,
+  recoverAbsentFloorsFromRegistry,
 } from '../domain-adapters/capability-floors'
 import {
   resolveActiveSkillAllowedTools,
@@ -372,17 +373,15 @@ export class AgentSdkToolExecutor {
       })
     }
     // P1-3 硬地板：地板工具即便被组不可见/意图压制而缺席，也从注册表补回（取不到则记 reason 跳过）。
-    const presentFloorToolNames = new Set(definitions.map((definition) => definition.name))
-    for (const floorName of capabilityFloors.toolNames) {
-      if (presentFloorToolNames.has(floorName)) continue
-      const floorDefinition = defaultToolRegistry.getToolDefinitionForExecution(floorName)
-      if (!floorDefinition) {
-        appendToolCapabilityLog(['[tool_capability]', 'stage=sdk_runtime_floor_tool_unavailable', `tool=${floorName}`].join(' '))
-        continue
-      }
-      definitions = [...definitions, floorDefinition]
-      presentFloorToolNames.add(floorName)
+    const floorRecovery = recoverAbsentFloorsFromRegistry(
+      definitions,
+      capabilityFloors,
+      (name) => defaultToolRegistry.getToolDefinitionForExecution(name) ?? null,
+    )
+    for (const unavailableName of floorRecovery.unavailable) {
+      appendToolCapabilityLog(['[tool_capability]', 'stage=sdk_runtime_floor_tool_unavailable', `tool=${unavailableName}`].join(' '))
     }
+    definitions = floorRecovery.definitions
     return filterToolsByVisionCapability(
       definitions as unknown as Array<Record<string, unknown>>,
       { supportsVision: capabilityResolution.supportsVision === true },

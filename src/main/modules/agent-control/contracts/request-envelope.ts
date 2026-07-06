@@ -432,9 +432,12 @@ function normalizeWorkspaceRoots(rawRoots: unknown): string[] {
 }
 
 /**
- * P1-4 — 裁决面（controller）侧计算能力地板所需的两个布尔信号，直接从 envelope 结构化资源派生。
+ * P1-4 — dormant controller 侧计算能力地板所需的两个布尔信号，直接从 envelope 结构化资源派生（envelope-only）。
  *   放在 contracts 层，供 domain-adapters 与 runtime-core 两条路径共用而不成环。
  *   skill_reference（name 可能形如 foo.md）不算本地文档资源。
+ *   与 runtime-core `hasLocalDocumentResource(message, envelope)` 在 path-present 资源上一致；path-null-only
+ *   资源上分歧（本函数按 path||name 命中，那侧 parseEnvelopeResourceReferences 要求 name+path）——controller
+ *   复活为 live 前需统一到同一 doc-detection。
  */
 export function envelopeHasLocalDocumentResource(envelope: RequestEnvelope): boolean {
   return envelope.resources.some((resource) =>

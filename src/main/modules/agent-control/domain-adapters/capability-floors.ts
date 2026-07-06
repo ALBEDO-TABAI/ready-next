@@ -63,3 +63,28 @@ export function enforceCapabilityFloors<T extends { name: string }>(
   }
   return { definitions, missing }
 }
+
+/**
+ * P1-3 硬地板：地板工具即便被组不可见/意图压制而缺席（不在 definitions 里），也从注册表 resolve 补回。
+ * resolve 取不到 → 记入 unavailable（调用方落 sdk_runtime_floor_tool_unavailable 日志）。纯函数（resolve 由调用方注入）。
+ */
+export function recoverAbsentFloorsFromRegistry<T extends { name: string }>(
+  definitions: readonly T[],
+  floors: CapabilityFloors,
+  resolveDefinition: (name: string) => T | null,
+): { definitions: T[]; unavailable: string[] } {
+  const present = new Set(definitions.map((definition) => definition.name))
+  const result = [...definitions]
+  const unavailable: string[] = []
+  for (const name of floors.toolNames) {
+    if (present.has(name)) continue
+    const resolved = resolveDefinition(name)
+    if (!resolved) {
+      unavailable.push(name)
+      continue
+    }
+    result.push(resolved)
+    present.add(name)
+  }
+  return { definitions: result, unavailable }
+}
