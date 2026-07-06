@@ -5,6 +5,7 @@ import {
   type ToolGroupResolutionEntry,
 } from '../tools-runtime/tool-gateway'
 import { normalizeOpenAIToolSchema } from '../../tools/tool-schema'
+import type { CapabilityFloors } from '../domain-adapters/capability-floors'
 import { buildTextToolBridgePrompt } from '../../claude-bridge/tool-bridge'
 import { type DocumentWidgetTaskKind } from '../../claude-bridge/tool-policy-heuristics'
 import {
@@ -94,6 +95,12 @@ export interface ToolPolicy {
    * declared toolset. `null` / `undefined` / empty → identity filter.
    */
   activeSkillAllowedTools?: ReadonlyArray<string> | null
+  /**
+   * P1-4 — 能力地板：显式技能引用 / 本地文档资源产生的"必在"工具集，与 SDK executor 消费同一
+   * `computeCapabilityFloors`。bundle 把地板并入 `activeSkillAllowedTools` 过滤集，保证技能收窄
+   * 不移除地板项。唯一裁决点仍是 `resolveRunCapabilities`——这里是其权威计算结果的载体。
+   */
+  capabilityFloors?: CapabilityFloors | null
 }
 
 export interface PolicyOpenAIToolBundle {
@@ -287,6 +294,18 @@ export function buildToolGuidance(policy: ToolPolicy): string {
   return guidance.join('\n\n')
 }
 
+/**
+ * P1-4 — 应用 skill allowed-tools 过滤前，把能力地板并入允许集：技能收窄只做减法、不移除地板项。
+ * activeSkillAllowedTools 为空 → filterToolsByAllowedTools 本就是恒等，地板无需保护。
+ */
+function allowedToolNamesWithFloors(policy?: ToolPolicy): ReadonlyArray<string> | null {
+  const allowed = policy?.activeSkillAllowedTools ?? null
+  if (!allowed || allowed.length === 0) return allowed
+  const floors = policy?.capabilityFloors?.toolNames
+  if (!floors || floors.size === 0) return allowed
+  return Array.from(new Set([...allowed, ...floors]))
+}
+
 export function getPolicyAnthropicTools(policy?: ToolPolicy): Array<Record<string, unknown>> {
   const visibleGroupIds = resolveVisibleGroupIds(policy)
 
@@ -350,7 +369,7 @@ export function getPolicyAnthropicTools(policy?: ToolPolicy): Array<Record<strin
   // a `mode:'selected'` authorization picked a skill whose manifest
   // declares `allowed_tools`, restrict the model-visible list to that
   // set. Empty / null → identity (no extra filtering on top of policy).
-  tools = filterToolsByAllowedTools(tools, policy?.activeSkillAllowedTools ?? null)
+  tools = filterToolsByAllowedTools(tools, allowedToolNamesWithFloors(policy))
   return tools
 }
 
@@ -417,7 +436,7 @@ export function getPolicyOpenAIToolBundle(policy?: ToolPolicy): PolicyOpenAITool
     { supportsVision: policy?.capabilityResolution?.supportsVision === true },
   )
   // Stage S round 2 (Issue 5) — active-skill manifest allowlist filter.
-  tools = filterToolsByAllowedTools(tools, policy?.activeSkillAllowedTools ?? null)
+  tools = filterToolsByAllowedTools(tools, allowedToolNamesWithFloors(policy))
   const normalizedTools = tools.map((tool) => normalizeOpenAIToolSchema(tool))
   const toolNames = collectToolNames(normalizedTools, 'openai')
   return {

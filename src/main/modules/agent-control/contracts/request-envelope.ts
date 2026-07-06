@@ -431,6 +431,21 @@ function normalizeWorkspaceRoots(rawRoots: unknown): string[] {
   return roots
 }
 
+/**
+ * P1-4 — 裁决面（controller）侧计算能力地板所需的两个布尔信号，直接从 envelope 结构化资源派生。
+ *   放在 contracts 层，供 domain-adapters 与 runtime-core 两条路径共用而不成环。
+ *   skill_reference（name 可能形如 foo.md）不算本地文档资源。
+ */
+export function envelopeHasLocalDocumentResource(envelope: RequestEnvelope): boolean {
+  return envelope.resources.some((resource) =>
+    resource.kind !== 'skill_reference'
+    && /\.(?:md|markdown|txt|docx?)$/i.test(resource.path || resource.name || ''))
+}
+export function envelopeHasCurrentDocumentContext(envelope: RequestEnvelope): boolean {
+  return envelope.resources.some((resource) =>
+    resource.kind === 'document_context' || resource.source === 'current_document')
+}
+
 export function buildRequestEnvelope(params: {
   userText: string
   /**

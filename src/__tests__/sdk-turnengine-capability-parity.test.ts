@@ -6,7 +6,13 @@ import type { AIModelConfig } from '../shared/ai-providers'
 import type { BrowserTaskDecisionMode } from '../shared/browser-agent-task'
 import type { CapabilityResolution } from '../main/modules/agent-control/domain-adapters/capability-resolver'
 import { classifyIntent } from '../main/modules/agent-control/intent-classifier'
-import { buildRequestEnvelope } from '../main/modules/agent-control/contracts/request-envelope'
+import {
+  buildRequestEnvelope,
+  envelopeHasCurrentDocumentContext,
+  envelopeHasLocalDocumentResource,
+} from '../main/modules/agent-control/contracts/request-envelope'
+import { computeCapabilityFloors } from '../main/modules/agent-control/domain-adapters/capability-floors'
+import { getPolicyOpenAIToolBundle, type ToolPolicy } from '../main/modules/agent-control/tool-policy/execution-tool-config'
 import {
   prepareInitialRun,
   reconcileAfterBrowserDecision,
@@ -1152,4 +1158,57 @@ test('P1-3 floors-based preserve keeps file read tools through skill narrowing o
   assert.ok(names.has('file_read_excerpt'), `floors preserve must keep file_read_excerpt; got ${[...names].join('|')}`)
   assert.ok(names.has('file_locate'), `floors preserve must keep file_locate; got ${[...names].join('|')}`)
   assert.ok(names.has('skill_read_artifact') && names.has('skill_run_shell'), 'skill floor must stay')
+})
+
+test('P1-4 run-capability-controller attaches the same capability floors the SDK path computes (parity)', () => {
+  const skillAuthorization = buildSelectedSkillToolAuthorization({
+    skillId: 'ready-human-touch-ppt',
+    allowedTypedActions: [],
+    allowedPrimitives: ['skill_read_artifact', 'skill_run_shell', 'skill_write_artifact', 'skill_export_artifact'],
+    source: 'explicit',
+    reason: 'test',
+  })
+  const userText = ['用文档生成一个人文感 ppt', '', '--- 附件: notes.md ---', '- 路径: /tmp/notes.md'].join('\n')
+  const controller = buildControllerResolution({
+    name: 'p1-4-floor-parity',
+    userText,
+    browserDecisionMode: 'chat',
+    authorization: skillAuthorization,
+    preferredSkillToolNames: ['skill_read_artifact', 'skill_run_shell', 'skill_write_artifact', 'skill_export_artifact'],
+  })
+  const controllerFloors = controller.toolPolicy.capabilityFloors
+  assert.ok(controllerFloors, 'controller toolPolicy must carry capabilityFloors')
+  // SDK path derives floors from the same authorization + the same envelope signals.
+  const requestEnvelope = buildRequestEnvelope({ userText })
+  const sdkFloors = computeCapabilityFloors({
+    authorization: skillAuthorization,
+    hasLocalDocumentResource: envelopeHasLocalDocumentResource(requestEnvelope),
+    hasCurrentDocumentContext: envelopeHasCurrentDocumentContext(requestEnvelope),
+  })
+  assert.deepEqual([...controllerFloors!.toolNames].sort(), [...sdkFloors.toolNames].sort())
+  assert.ok(controllerFloors!.toolNames.has('file_read_excerpt'), 'floor must include file_read_excerpt for a local-document turn')
+  assert.ok(controllerFloors!.toolNames.has('skill_read_artifact'), 'floor must include the selected skill primitives')
+})
+
+test('P1-4 policy bundle preserves floor tools through an active skill allowed-tools filter', () => {
+  // A restrictive allowed-tools filter that would strip file_read_excerpt; the capability floor keeps it.
+  const policy: ToolPolicy = {
+    forceDocumentTool: false,
+    allowDocumentTools: true,
+    forceDesignTool: false,
+    preferredDesignTool: null,
+    primaryDesignInstruction: null,
+    allowMultipleDesignArtifacts: false,
+    preferSectionRewrite: false,
+    preferFormatOnly: false,
+    allowBrowserTools: false,
+    visibleCapabilityGroupIds: ['file_management'],
+    activeSkillAllowedTools: ['file_locate'], // restrictive: without the floor only file_locate survives
+    capabilityFloors: { toolNames: new Set(['file_read_excerpt']), reasons: ['local_document_resource'] },
+  }
+  const names = new Set(getPolicyOpenAIToolBundle(policy).toolNames)
+  assert.ok(names.has('file_read_excerpt'), 'floor keeps file_read_excerpt despite the restrictive allowed-tools filter')
+  assert.ok(names.has('file_locate'), 'the allowed tool stays')
+  // A non-floor, non-allowed tool from the same group must still be filtered out.
+  assert.equal(names.has('file_move'), false)
 })

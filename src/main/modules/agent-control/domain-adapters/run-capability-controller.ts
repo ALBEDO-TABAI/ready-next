@@ -9,6 +9,8 @@ import type { ToolVisibilityPlan } from '../contracts/run-contracts'
 import type { CapabilityResolution, CapabilityRuntimeAvailability } from './capability-resolver'
 import { buildCapabilityRuntimeSnapshot } from './capability-runtime-snapshot'
 import { buildExecutionToolState, type ExecutionIntentContext } from '../execution-intent-resolver'
+import { computeCapabilityFloors } from './capability-floors'
+import { envelopeHasCurrentDocumentContext, envelopeHasLocalDocumentResource } from '../contracts/request-envelope'
 import { logAgentMetric } from '../metrics'
 import {
   MAX_ARBITRATION_RECURSION,
@@ -391,6 +393,14 @@ function resolveRunCapabilities(
   // skill-runtime crashes (e.g. host startup race) cannot fault the
   // tool bundle path. `null` / empty → identity (no filtering).
   toolPolicy.activeSkillAllowedTools = resolveActiveSkillAllowedTools(baseParams.authorization)
+
+  // P1-4 — 唯一裁决点计算能力地板并挂到 toolPolicy；SDK executor 消费同一 computeCapabilityFloors。
+  //   bundle 侧把地板并入 activeSkillAllowedTools 过滤集，保证技能收窄不移除地板项（parity）。
+  toolPolicy.capabilityFloors = computeCapabilityFloors({
+    authorization: baseParams.authorization,
+    hasLocalDocumentResource: envelopeHasLocalDocumentResource(baseParams.executionIntentContext.requestEnvelope),
+    hasCurrentDocumentContext: envelopeHasCurrentDocumentContext(baseParams.executionIntentContext.requestEnvelope),
+  })
 
   const visionCapable = capabilityResolution.supportsVision === true
   if (!visionCapable) {
