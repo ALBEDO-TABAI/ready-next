@@ -209,6 +209,7 @@ import {
   readDocumentToolTarget,
   readTextField,
   readStructuredResultRecord,
+  recoverEmptyToolSurface,
   recoverLooseXmlToolCallText,
   releaseBudgetCheckpointFlight,
   removeAlreadyEmittedNativeText,
@@ -223,6 +224,7 @@ import {
   resolveSourceMessageProvenance,
   resolveTaskTypeFromToolDefinitions,
   restoreCheckpointToolSurface,
+  selectedSkillFloorToolNames,
   shouldPreferCurrentDocumentRead,
   shouldRecoverLongSkillCheckpoint,
   shouldRequireLocalDocumentExcerpt,
@@ -887,8 +889,12 @@ export class AgentSdkTurnOrchestrator {
         localSendImIntent: localSendImTurn,
         requestEnvelope: effectiveExecutionOptions?.requestEnvelope,
       })
+      const preNarrowingToolDefinitions = toolDefinitions
       if (shouldUseLocalDocumentToolSet(content as RunMessage, effectiveExecutionOptions?.requestEnvelope)) {
-        toolDefinitions = toolDefinitions.filter(isLocalDocumentToolDefinition)
+        // P0-2(D2)：本地文档收窄不得吞掉技能选中轮的地板工具（否则 skill+doc 轮交集为空）。
+        const skillFloor = selectedSkillFloorToolNames(authorization)
+        toolDefinitions = toolDefinitions.filter((definition) =>
+          isLocalDocumentToolDefinition(definition) || skillFloor.has(definition.name))
       }
       // S4-2: a status question ("怎么样了 / 还在跑吗") must report state, never
       // restart work. The guard is the tool surface itself (code-owned): browser
@@ -967,6 +973,16 @@ export class AgentSdkTurnOrchestrator {
           taskBudgetRuntime: runMetaBudgetRuntime,
           providerDiagnostics: runMetaProviderDiagnostics,
         })
+      }
+      // P0-2(T2)：工具面非空不变量——多层收窄串联出空集时响亮回退，禁止零工具开跑。
+      const surfaceRecovery = recoverEmptyToolSurface(toolDefinitions, preNarrowingToolDefinitions)
+      if (surfaceRecovery.recovered) {
+        appendToolCapabilityLog([
+          '[tool_capability]',
+          'stage=sdk_runtime_empty_surface_recovered',
+          `restoredCount=${surfaceRecovery.definitions.length}`,
+        ].join(' '))
+        toolDefinitions = [...surfaceRecovery.definitions]
       }
       const hasVeaPipelineTool = toolDefinitions.some((definition) => definition.name === 'skill_video_expert_pipeline')
       const hasMapAmbiguityQuestionTools = toolDefinitions.some((definition) => definition.name === 'map_plan_route')

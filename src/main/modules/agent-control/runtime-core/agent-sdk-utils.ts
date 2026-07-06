@@ -212,6 +212,23 @@ export function authorizedPrimitiveToolNames(authorization: SkillToolAuthorizati
     .filter((name) => authorization.allowedPrimitives.has(name))
 }
 
+/** P0-2 — 技能选中轮的地板工具名（typed actions ∪ primitives）；none 轮为空集。 */
+export function selectedSkillFloorToolNames(authorization: SkillToolAuthorization): ReadonlySet<string> {
+  if (authorization.mode !== 'selected') return new Set()
+  return new Set([...authorization.allowedTypedActions, ...authorization.allowedPrimitives])
+}
+
+/** P0-2 — 收窄管线末端防空：窄化后为空且窄化前非空 → 回退窄化前全量面。 */
+export function recoverEmptyToolSurface<T>(
+  narrowed: readonly T[],
+  preNarrowing: readonly T[],
+): { definitions: readonly T[]; recovered: boolean } {
+  if (narrowed.length === 0 && preNarrowing.length > 0) {
+    return { definitions: preNarrowing, recovered: true }
+  }
+  return { definitions: narrowed, recovered: false }
+}
+
 export function supplementAuthorizedSkillPrimitiveDefinitions(
   definitions: ToolDefinition[],
   authorization: SkillToolAuthorization,
