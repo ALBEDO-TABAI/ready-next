@@ -8,6 +8,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "skills:lint": "node scripts/lint-skill.cjs",
     "rebuild:native": "node scripts/patch-better-sqlite3-electron42.cjs && electron-builder install-app-deps",
     "native:check": "node scripts/check-better-sqlite3-electron-abi.cjs",
     "experience:baseline": "node scripts/experience-baseline.cjs",

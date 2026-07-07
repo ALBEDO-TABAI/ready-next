@@ -1,4 +1,5 @@
 import { basename, join } from 'path'
+import { createRequire } from 'module'
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync } from 'fs'
 import { atomicWriteJson } from '../agent-control/atomic-write'
 import type {
@@ -11,7 +12,6 @@ import type {
 } from '../../../shared/skill-execution-types'
 import { normalizeReadSkillVisibility } from './read-skill-visibility'
 import { parseSkillFrontmatter } from './skill-frontmatter'
-import { REFERENCE_SKILL_INLINE_CAP_CHARS } from './reference-skill-doc'
 
 export interface CustomSkillExecutionConfig {
   mode: Exclude<SkillExecutionMode, 'direct'>
@@ -411,6 +411,49 @@ function hasAllowedToolsKey(record: Record<string, unknown>): boolean {
   return Object.keys(record).some((key) => key.toLowerCase().replace(/[^a-z0-9]/g, '') === 'allowedtools')
 }
 
+const requireCjs = createRequire(import.meta.url)
+
+/**
+ * P3-3 — lint a source skill folder against the shared agentskills-spec rules (scripts/lint-skill-core.cjs).
+ * Best-effort: the rule engine lives under scripts/ (present in dev/test/CI, may be absent in a packaged
+ * build) — if it can't be loaded, returns no findings rather than blocking the import. `enforceIdMatchesDir`
+ * is FALSE here: imported folders have arbitrary staging names, identity comes from the manifest/frontmatter.
+ */
+export function lintCustomSkillFolder(sourcePath: string): { errors: string[]; warnings: string[] } {
+  let core: { lintSkillInputs: (i: Record<string, unknown>) => { errors: string[]; warnings: string[] } } | null = null
+  try {
+    core = requireCjs(join(process.cwd(), 'scripts', 'lint-skill-core.cjs'))
+  } catch {
+    return { errors: [], warnings: [] }
+  }
+  if (!core || typeof core.lintSkillInputs !== 'function') return { errors: [], warnings: [] }
+  let json: unknown = null
+  const manifestPath = resolveSourceManifestPath(sourcePath)
+  if (manifestPath) {
+    try {
+      json = readJson(manifestPath)
+    } catch {
+      json = null
+    }
+  }
+  let skillMd: string | null = null
+  const documentEntry = detectDocumentEntry(sourcePath)
+  if (documentEntry) {
+    try {
+      skillMd = readFileSync(join(sourcePath, documentEntry), 'utf-8')
+    } catch {
+      skillMd = null
+    }
+  }
+  return core.lintSkillInputs({
+    dirName: basename(sourcePath),
+    json,
+    skillMd,
+    hasScripts: existsSync(join(sourcePath, 'scripts')),
+    enforceIdMatchesDir: false,
+  })
+}
+
 /**
  * P2-4 + P2-5 — non-blocking import metadata surfaced to the skills center. Reads the SOURCE
  * folder (independent of the copy): records `allowed-tools` as ignored (security policy) and warns
@@ -418,32 +461,31 @@ function hasAllowedToolsKey(record: Record<string, unknown>): boolean {
  */
 export function collectCustomSkillImportMetadata(sourcePath: string): { ignoredFields: string[]; warnings: string[] } {
   const ignoredFields: string[] = []
-  const warnings: string[] = []
 
+  // allowed-tools policy (SKILL.md frontmatter + json manifest) → recorded as IGNORED, never honored.
   const documentEntry = detectDocumentEntry(sourcePath)
   if (documentEntry) {
     try {
-      const text = readFileSync(join(sourcePath, documentEntry), 'utf-8')
-      if (hasAllowedToolsKey(parseSkillFrontmatter(text).metadata)) ignoredFields.push('allowed-tools')
-      if (text.length > REFERENCE_SKILL_INLINE_CAP_CHARS) {
-        warnings.push(`${documentEntry} 超过 ${REFERENCE_SKILL_INLINE_CAP_CHARS} 字符，激活时将被截断内联；建议把细节移入 references/ 由 L3 读取`)
+      if (hasAllowedToolsKey(parseSkillFrontmatter(readFileSync(join(sourcePath, documentEntry), 'utf-8')).metadata)) {
+        ignoredFields.push('allowed-tools')
       }
     } catch {
       // best-effort: an unreadable document just yields no metadata.
     }
   }
-
   const manifestPath = resolveSourceManifestPath(sourcePath)
   if (manifestPath) {
     try {
       const obj = asObject(readJson(manifestPath))
-      if (obj && hasAllowedToolsKey(obj) && !ignoredFields.includes('allowed-tools')) {
-        ignoredFields.push('allowed-tools')
-      }
+      if (obj && hasAllowedToolsKey(obj) && !ignoredFields.includes('allowed-tools')) ignoredFields.push('allowed-tools')
     } catch {
       // best-effort: an unreadable manifest is handled by loadCustomSkillManifestFromFolder.
     }
   }
+
+  // P3-3 — author WARN set from the shared lint (oversized SKILL.md incl. the L2 cap, >500 lines,
+  // scripts/ without $CLAUDE_SKILL_DIR). allowed-tools is already surfaced above as an ignoredField.
+  const warnings = lintCustomSkillFolder(sourcePath).warnings.filter((line) => !/allowed-tools/.test(line))
 
   return { ignoredFields, warnings }
 }
@@ -453,6 +495,12 @@ export function importCustomSkillFolder(sourcePath: string, customSkillsRoot: st
     throw new Error(`Skill 目录不存在：${sourcePath}`)
   }
 
+  // P3-3 note — the strict agentskills-spec ERROR set is enforced by the CLI (scripts/lint-skill.cjs)
+  // and the embedded-skills invariant test, NOT here: Ready's import is deliberately lenient (it derives
+  // id via safeSlug and description via guessDescriptionFromMarkdown when the frontmatter omits them), and
+  // blocking on recoverable spec ERRORs would reject skills Ready is designed to accept. Safety is still
+  // guarded by the manifest-presence check below + the manager's scanSkillDirectory security scan; lint
+  // findings surface as advisory WARNINGS through collectCustomSkillImportMetadata.
   const manifest = loadCustomSkillManifestFromFolder(sourcePath)
   const managedPath = join(customSkillsRoot, manifest.id)
   rmSync(managedPath, { recursive: true, force: true })
