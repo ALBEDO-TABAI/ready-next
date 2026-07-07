@@ -10,6 +10,7 @@ import type {
   SkillSource,
 } from '../../../shared/skill-execution-types'
 import { normalizeReadSkillVisibility } from './read-skill-visibility'
+import { parseSkillFrontmatter } from './skill-frontmatter'
 
 export interface CustomSkillExecutionConfig {
   mode: Exclude<SkillExecutionMode, 'direct'>
@@ -102,30 +103,6 @@ function coerceTimeout(value: unknown): number | undefined {
   return Math.max(1000, Math.round(parsed))
 }
 
-function parseMarkdownFrontmatter(text: string): { body: string; metadata: Record<string, string> } {
-  const normalized = text.replace(/^\uFEFF/, '')
-  const match = normalized.match(/^---\s*\r?\n([\s\S]*?)\r?\n---\s*(?:\r?\n|$)/)
-  if (!match) {
-    return {
-      body: normalized,
-      metadata: {},
-    }
-  }
-
-  const metadata: Record<string, string> = {}
-  for (const rawLine of match[1].split(/\r?\n/)) {
-    const line = rawLine.trim()
-    if (!line) continue
-    const entry = line.match(/^([A-Za-z0-9_-]+)\s*:\s*(.+)$/)
-    if (!entry) continue
-    metadata[entry[1].toLowerCase()] = entry[2].trim().replace(/^['"]|['"]$/g, '')
-  }
-
-  return {
-    body: normalized.slice(match[0].length),
-    metadata,
-  }
-}
 
 function normalizeDescriptionText(value: string): string {
   return value.replace(/\s+/g, ' ').trim().slice(0, 200)
@@ -148,7 +125,7 @@ function isWeakDescription(value: unknown, fallbackName?: string, fallbackId?: s
 function guessDescriptionFromMarkdown(path: string, fallbackName?: string, fallbackId?: string): string {
   try {
     const text = readFileSync(path, 'utf-8')
-    const { body, metadata } = parseMarkdownFrontmatter(text)
+    const { body, metadata } = parseSkillFrontmatter(text)
     const frontmatterDescription = normalizeDescriptionText(metadata.description || '')
     if (!isWeakDescription(frontmatterDescription, fallbackName, fallbackId)) {
       return frontmatterDescription
@@ -338,7 +315,7 @@ export function loadCustomSkillManifestFromFolder(folderPath: string): CustomSki
     const documentPath = join(folderPath, documentEntry)
     let frontmatter: Record<string, string> = {}
     try {
-      frontmatter = parseMarkdownFrontmatter(readFileSync(documentPath, 'utf-8')).metadata
+      frontmatter = parseSkillFrontmatter(readFileSync(documentPath, 'utf-8')).metadata
     } catch {
       // silent-catch: an unreadable SKILL.md just means no frontmatter id/name;
       // we fall back to the folder basename below, same as before this fix.
