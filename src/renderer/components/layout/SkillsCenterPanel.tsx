@@ -151,12 +151,23 @@ function putSkillDragData(
   e.dataTransfer.effectAllowed = 'copy'
 }
 
+// P3-1 — discovered external skill candidate (mirrors main-side ExternalSkillCandidate).
+type ExternalSkillCandidateView = {
+  path: string
+  name: string
+  description: string
+  source: 'user_agents_dir'
+  alreadyImported: boolean
+}
+
 export default function SkillsCenterPanel({ children }: SkillsCenterPanelProps) {
   const [skills, setSkills] = useState<SkillState[]>([])
   const [runtimeInfo, setRuntimeInfo] = useState<SkillsRuntimeInfo | null>(null)
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState('')
   const [importDropActive, setImportDropActive] = useState(false)
+  // P3-1 — discovered ~/.agents/skills candidates (suggest-import; rendered only when non-empty).
+  const [externalCandidates, setExternalCandidates] = useState<ExternalSkillCandidateView[]>([])
   const [selectedCardId, setSelectedCardId] = useState<string | null>(null)
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; target: SkillCardContextTarget } | null>(null)
   const [editingSkill, setEditingSkill] = useState<SkillState | null>(null)
@@ -192,6 +203,13 @@ export default function SkillsCenterPanel({ children }: SkillsCenterPanelProps) 
       }
       if (runtimeRes.success && runtimeRes.data) {
         setRuntimeInfo(runtimeRes.data as SkillsRuntimeInfo)
+      }
+      // P3-1 — read-only discovery; failures are silent (the section just stays hidden).
+      try {
+        const candidatesRes = await window.electronAPI.skills.listExternalCandidates?.()
+        setExternalCandidates(candidatesRes?.success && candidatesRes.data ? candidatesRes.data : [])
+      } catch {
+        setExternalCandidates([])
       }
     } finally {
       setLoading(false)
@@ -720,6 +738,60 @@ export default function SkillsCenterPanel({ children }: SkillsCenterPanelProps) 
                       </div>
                     )
                   })}
+                </div>
+              )}
+
+              {/* P3-1 — discovered ~/.agents/skills candidates (suggest-import; only when non-empty). */}
+              {externalCandidates.length > 0 && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <p className="shrink-0 text-[12px] font-semibold" style={{ color: PANEL_COLORS.sectionTitle, marginTop: 4 }}>
+                    发现的技能（~/.agents/skills）
+                  </p>
+                  {externalCandidates.map((candidate) => (
+                    <div
+                      key={candidate.path}
+                      className="rounded-[8px] border transition-colors duration-150 hover:bg-[var(--bg-hover)]"
+                      style={{ borderRadius: 8, border: '1px solid transparent', padding: '10px 12px' }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <Folder className="shrink-0" style={{ width: 14, height: 14, color: PANEL_COLORS.iconAccent }} />
+                        <p className="truncate" style={{ fontSize: 12, fontWeight: 500, lineHeight: 1.25, color: PANEL_COLORS.text }}>
+                          {candidate.name}
+                        </p>
+                        {candidate.alreadyImported ? (
+                          <span style={{ marginLeft: 'auto', fontSize: 10, color: PANEL_COLORS.mutedStrong }}>已导入</span>
+                        ) : (
+                          <button
+                            type="button"
+                            style={{ marginLeft: 'auto', fontSize: 10, fontWeight: 600, color: PANEL_COLORS.blue }}
+                            onClick={() => void (async () => {
+                              const result = await importFolders([candidate.path])
+                              pushMessage(result.imported > 0 ? `已导入 ${candidate.name}` : `导入 ${candidate.name} 失败`)
+                              for (const warning of result.warnings) pushMessage(warning)
+                            })()}
+                          >
+                            导入
+                          </button>
+                        )}
+                      </div>
+                      <p
+                        style={{
+                          marginTop: 4, fontSize: 11, fontWeight: 500, lineHeight: 1.45, color: PANEL_COLORS.muted,
+                          display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden',
+                        }}
+                      >
+                        {candidate.description}
+                      </p>
+                      <p
+                        style={{
+                          marginTop: 4, fontSize: 10, lineHeight: 1.4, color: PANEL_COLORS.mutedStrong,
+                          display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', wordBreak: 'break-all',
+                        }}
+                      >
+                        {candidate.path}
+                      </p>
+                    </div>
+                  ))}
                 </div>
               )}
             </div>

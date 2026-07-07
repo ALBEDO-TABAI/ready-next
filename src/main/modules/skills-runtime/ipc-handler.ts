@@ -29,6 +29,15 @@ export function setupSkillsIPC(): void {
     }
   })
 
+  // P3-1 — read-only discovery of ~/.agents/skills candidates (suggest-import; never auto-imports).
+  ipcMain.handle('skills:listExternalCandidates', (): SkillsIPCResponse => {
+    try {
+      return { success: true, data: manager.listExternalSkillCandidates() }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+
   ipcMain.handle('skills:importCustomSkill', (_, payload: { path: string }): SkillsIPCResponse => {
     try {
       if (!payload?.path) return { success: false, error: 'Missing path' }

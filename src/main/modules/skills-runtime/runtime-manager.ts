@@ -2,7 +2,7 @@ import type { ChildProcessWithoutNullStreams } from 'child_process'
 import { randomUUID } from 'crypto'
 import { createRequire } from 'module'
 import { join } from 'path'
-import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs'
+import { cpSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'fs'
 
 // See database.ts for the full rationale. Electron's Node entry is a CJS
 // string-export, so ESM `import { app } from 'electron'` breaks tsx/ESM tests
@@ -31,6 +31,7 @@ import {
   removeManagedCustomSkill,
   updateManagedCustomSkillDescription,
 } from './custom-skill-registry'
+import { listExternalSkillCandidates, type ExternalSkillCandidate } from './external-skill-discovery'
 import { SkillLoader } from './skill-loader'
 import { scanSkillDirectory } from './skill-security-scanner'
 // Phase 4: ExecutionStateStore / ExecutionCoordinator retired along with the
@@ -722,6 +723,22 @@ export class SkillsRuntimeManager {
   removeCustomSkill(skillId: string): { removed: boolean } {
     this.ensureRuntimeDirs()
     return { removed: removeManagedCustomSkill(this.customSkillsRoot, skillId) }
+  }
+
+  /** P3-1 — read-only discovery of importable skills under ~/.agents/skills (suggest-import). */
+  listExternalSkillCandidates(): ExternalSkillCandidate[] {
+    const skills = this.listSkills()
+    const existingSkillIds = new Set(skills.map((skill) => skill.id))
+    const existingManagedRealPaths = new Set<string>()
+    for (const skill of skills) {
+      if (!skill.managedPath) continue
+      try {
+        existingManagedRealPaths.add(realpathSync(skill.managedPath))
+      } catch {
+        // an unresolved managed path just means it can't collide with a candidate realpath.
+      }
+    }
+    return listExternalSkillCandidates({ existingSkillIds, existingManagedRealPaths })
   }
 
   updateCustomSkillDescription(skillId: string, description: string, name?: string): SkillState {

@@ -3048,6 +3048,7 @@ interface SkillReferenceInlinedEvent {
 interface ElectronSkillsAPI {
   list: () => Promise<IPCResponse<SkillState[]>>
   runtimeInfo: () => Promise<IPCResponse<SkillsRuntimeInfo>>
+  listExternalCandidates: () => Promise<IPCResponse<Array<{ path: string; name: string; description: string; source: 'user_agents_dir'; alreadyImported: boolean }>>>
   importCustomSkill: (payload: { path: string }) => Promise<IPCResponse<{ skill: SkillState; ignoredFields: string[]; warnings: string[] }>>
   removeCustomSkill: (payload: { skillId: string }) => Promise<IPCResponse<{ removed: boolean }>>
   updateCustomSkillDescription: (payload: {

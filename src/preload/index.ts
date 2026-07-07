@@ -981,6 +981,7 @@ const calendarAPI = {
 const skillsAPI = {
   list: () => ipcRenderer.invoke('skills:list'),
   runtimeInfo: () => ipcRenderer.invoke('skills:runtimeInfo'),
+  listExternalCandidates: () => ipcRenderer.invoke('skills:listExternalCandidates'),
   importCustomSkill: (payload: { path: string }) => ipcRenderer.invoke('skills:importCustomSkill', payload),
   removeCustomSkill: (payload: { skillId: string }) => ipcRenderer.invoke('skills:removeCustomSkill', payload),
   updateCustomSkillDescription: (payload: { skillId: string; description: string; name?: string }) =>
