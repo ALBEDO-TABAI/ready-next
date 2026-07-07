@@ -17,6 +17,7 @@ export type CapabilityGroupId =
   | 'mcp'
   | 'agent_interaction'
   | 'skill_install'
+  | 'skill_activation'
   | 'channel_outbound'
   | 'mcp_install'
   | 'command_exec'
@@ -235,6 +236,22 @@ export const CAPABILITY_GROUPS: CapabilityGroupDefinition[] = [
     id: 'skill_install',
     label: '安装技能',
     description: '识别用户的技能安装意图，先只读解析出真实下载地址 + 风险分级（不安装），由用户通过反问卡确认后再交由宿主下载、扫描并安装。仅 local_chat。',
+    exposure: 'model_visible',
+    availability: 'active',
+    defaultMode: 'on',
+    defaultProfiles: ['local_chat'],
+    executionKinds: ['interactive'],
+    settingsVisible: false,
+  },
+  {
+    // P2-2 — L1 skill-catalog activation. `use_skill` lets the model self-select a
+    // catalogued skill by description. defaultMode:'on' so the provider (with schema)
+    // flows through the normal enrichment path; the SDK executor SUPPRESSES it via
+    // intentGroupModes unless the turn is mode:'none' with a non-empty catalog, so it
+    // never leaks into selected turns (no recursive activation) or legacy callers.
+    id: 'skill_activation',
+    label: '激活技能',
+    description: '按「可用技能」目录激活一个技能（use_skill）：返回其 SKILL.md 方法论并在下一轮解锁该技能工具。仅 local_chat；仅在无显式技能引用的轮次曝光。',
     exposure: 'model_visible',
     availability: 'active',
     defaultMode: 'on',

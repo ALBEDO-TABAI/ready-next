@@ -18,7 +18,10 @@ export interface SkillCatalogEntry {
   description: string
 }
 
-const CATALOG_HEADER = '可用技能（引用 @[技能id] 或调用 use_skill 激活；激活前技能工具不可用）：'
+// The model's activation path is `use_skill`（typed refs come only from user input, never model output）；
+// `@[技能id]` is how the USER references a skill. Keep both accurate so the catalog never advertises a
+// path the model cannot take (P2-2 review fix).
+const CATALOG_HEADER = '可用技能（用 use_skill 激活后其工具才可用；用户也可 @[技能id] 引用）：'
 
 function normalizeDescription(description: string): string {
   const text = String(description || '').replace(/\s+/g, ' ').trim()

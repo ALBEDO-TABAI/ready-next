@@ -40,6 +40,9 @@ test('capability groups define required reserved and host-only entries', () => {
     'mcp',
     'agent_interaction',
     'skill_install',
+    // P2-2 —— L1 技能目录激活组（use_skill）。defaultMode:'on'，曝光由 SDK executor 的
+    // intentGroupModes 按 mode:'none'+目录非空 收口（此处直调 resolver 不施加该 gate）。
+    'skill_activation',
     // Phase M+（2026-07-05）—— agent 代跑一次性安装/配置命令（飞书/即梦 CLI）。
     'command_exec',
     // Phase M（2026-07-05）—— agent 代装 MCP server 两阶段前门。
@@ -60,6 +63,11 @@ test('capability groups define required reserved and host-only entries', () => {
   assert.equal(getCapabilityGroup('skill_install')?.defaultMode, 'on')
   assert.equal(getCapabilityGroup('skill_install')?.settingsVisible, false)
   assert.deepEqual(getCapabilityGroup('skill_install')?.defaultProfiles, ['local_chat'])
+  // P2-2 — skill_activation (use_skill): model_visible + on by default; executor gates real exposure.
+  assert.equal(getCapabilityGroup('skill_activation')?.exposure, 'model_visible')
+  assert.equal(getCapabilityGroup('skill_activation')?.defaultMode, 'on')
+  assert.equal(getCapabilityGroup('skill_activation')?.settingsVisible, false)
+  assert.deepEqual(getCapabilityGroup('skill_activation')?.defaultProfiles, ['local_chat'])
 })
 
 test('resolver suppresses all model-visible groups when provider tool calling is disabled', () => {

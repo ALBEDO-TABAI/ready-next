@@ -897,6 +897,15 @@ export class AgentSdkTurnOrchestrator {
         recentBatchCollectionIntent,
         localSendImIntent: localSendImTurn,
         requestEnvelope: effectiveExecutionOptions?.requestEnvelope,
+        // P2-2 — gate use_skill exposure on a non-empty L1 catalog (same source as the catalog reminder).
+        skillCatalogAvailable: (() => {
+          try {
+            return getSkillsRuntimeManager().listSkills().some((skill) => skill && skill.id && skill.manifestValid !== false)
+          } catch {
+            // silent-catch: skills runtime not initialized (e.g. non-native test) → no catalog, no use_skill.
+            return false
+          }
+        })(),
       })
       const preNarrowingToolDefinitions = toolDefinitions
       if (shouldUseLocalDocumentToolSet(content as RunMessage, effectiveExecutionOptions?.requestEnvelope)) {

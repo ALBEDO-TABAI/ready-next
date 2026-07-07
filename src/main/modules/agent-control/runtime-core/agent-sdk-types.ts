@@ -242,6 +242,8 @@ export interface AgentSdkRuntimeDeps {
     recentCollectionIntent?: boolean
     recentBatchCollectionIntent?: boolean
     requestEnvelope?: unknown
+    /** P2-2 — the L1 skill catalog is non-empty this turn (gates use_skill exposure). */
+    skillCatalogAvailable?: boolean
   }) => ToolDefinition[]
   executeToolCall?: (
     toolName: string,

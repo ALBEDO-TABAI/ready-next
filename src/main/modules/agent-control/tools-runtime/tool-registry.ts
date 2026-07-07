@@ -37,6 +37,11 @@ import {
   getSkillInstallOpenAITools,
 } from '../../tools/skill-install-tool-defs'
 import {
+  USE_SKILL_TOOL_NAMES,
+  getUseSkillAnthropicTools,
+  getUseSkillOpenAITools,
+} from '../../tools/use-skill-tool-defs'
+import {
   CHANNEL_OUTBOUND_TOOL_NAMES,
   getChannelOutboundAnthropicTools,
   getChannelOutboundOpenAITools,
@@ -898,6 +903,29 @@ const GROUP_TOOL_PROVIDERS: Record<CapabilityGroupId, ToolRegistryProvider> = {
         // silent-catch: a tool-def build failure must still expose the capability —
         // fall back to the static schema so install_skill never silently vanishes.
         return SKILL_INSTALL_TOOL_NAMES.map((name) => createStaticFallbackSchema(name, 'openai'))
+      }
+    },
+  },
+  // P2-2 — skill_activation exposes `use_skill` (L1 catalog activation). Same naming
+  // strategy as skill_install (no skill_ prefix → survives filterToolsByAuthorization).
+  // The SDK executor gates exposure via intentGroupModes; the provider just supplies the schema.
+  skill_activation: {
+    staticToolNames: USE_SKILL_TOOL_NAMES,
+    getToolDefinitions: () => buildToolDefinitions('skill_activation', USE_SKILL_TOOL_NAMES),
+    getAnthropicTools: () => {
+      try {
+        return getUseSkillAnthropicTools()
+      } catch {
+        // silent-catch: keep use_skill exposed via the static schema on a build failure.
+        return USE_SKILL_TOOL_NAMES.map((name) => createStaticFallbackSchema(name, 'anthropic'))
+      }
+    },
+    getOpenAITools: () => {
+      try {
+        return getUseSkillOpenAITools()
+      } catch {
+        // silent-catch: keep use_skill exposed via the static schema on a build failure.
+        return USE_SKILL_TOOL_NAMES.map((name) => createStaticFallbackSchema(name, 'openai'))
       }
     },
   },

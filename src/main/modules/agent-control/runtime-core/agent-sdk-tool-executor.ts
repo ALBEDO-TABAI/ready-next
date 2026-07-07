@@ -220,6 +220,8 @@ export class AgentSdkToolExecutor {
     recentBatchCollectionIntent?: boolean
     /** Request envelope — used to read the canonical user instruction. */
     requestEnvelope?: unknown
+    /** P2-2 — the L1 skill catalog is non-empty this turn (gates use_skill exposure). */
+    skillCatalogAvailable?: boolean
   }): ToolDefinition[] {
     const browserDecisionMode = resolveBrowserDecisionMode(
       params.message,
@@ -283,6 +285,12 @@ export class AgentSdkToolExecutor {
     const browserConflictGroupModes = policyConflict.demotedBrowserDecisionMode
       ? { browser_interaction: false, browser_content_tasks: false }
       : {}
+    // P2-2 — use_skill (skill_activation group) is defaultMode:'on' so the provider supplies its
+    // schema through the normal enrichment path. Exposure is CODE-controlled here: expose it ONLY on
+    // a mode:'none' turn with a non-empty catalog; suppress it otherwise (selected turns → no recursive
+    // activation; legacy callers without the flag → explicit false → zero perturbation).
+    const exposeSkillActivation =
+      params.authorization.mode === 'none' && params.skillCatalogAvailable === true
     const intentGroupModes = {
       ...sdkIntentSurface.intentGroupModes,
       ...(collectionExposure
@@ -291,6 +299,7 @@ export class AgentSdkToolExecutor {
           ? { browser_content_tasks: false }
           : {}),
       ...browserConflictGroupModes,
+      skill_activation: exposeSkillActivation,
     }
     const capabilityResolution = resolveCapabilityResolution({
       config: params.config,

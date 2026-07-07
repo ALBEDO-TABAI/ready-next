@@ -18,6 +18,7 @@ export type ToolDomain =
   | 'mcp'
   | 'agent_interaction'
   | 'skill_install'
+  | 'skill_activation'
   | 'channel'
   | 'mcp_install'
   | 'command_exec'

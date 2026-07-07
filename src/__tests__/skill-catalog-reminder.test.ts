@@ -21,7 +21,7 @@ test('buildSkillCatalogText: empty entries → empty string', () => {
 
 test('buildSkillCatalogText: header + one line per entry with the @[id]｜name｜description format', () => {
   const text = buildSkillCatalogText([entry('ready-human-touch-ppt', 'Human Touch PPT', '人文感风格幻灯片')])
-  assert.ok(text.startsWith('可用技能（引用 @[技能id] 或调用 use_skill 激活；激活前技能工具不可用）：\n'))
+  assert.ok(text.startsWith('可用技能（用 use_skill 激活后其工具才可用；用户也可 @[技能id] 引用）：\n'))
   assert.ok(text.includes('- @[ready-human-touch-ppt]｜Human Touch PPT｜人文感风格幻灯片'))
 })
 
@@ -58,7 +58,7 @@ test('buildSkillCatalogText: no drop when everything fits under budget → no co
 
 test('buildSkillCatalogText: exactly-at-budget line is kept (boundary)', () => {
   // Craft a single entry whose line makes used === budget exactly (used + 1 + line.length === budget).
-  const header = '可用技能（引用 @[技能id] 或调用 use_skill 激活；激活前技能工具不可用）：'
+  const header = '可用技能（用 use_skill 激活后其工具才可用；用户也可 @[技能id] 引用）：'
   const prefix = '- @[s]｜n｜'
   const budget = header.length + 1 + prefix.length + 5 // description of length 5 → exact fit
   const text = buildSkillCatalogText([entry('s', 'n', 'abcde')], budget)

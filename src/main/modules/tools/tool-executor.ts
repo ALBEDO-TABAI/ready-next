@@ -66,6 +66,7 @@ import { executeProposeSpecialistBlueprint } from './builtins/propose-specialist
 import { executeRenameSpecialistAgent } from './builtins/rename-specialist-agent'
 import { resolveSpecialistFoundationSemanticJudge } from '../agent-control/agents/specialist-foundation-semantic-judge-provider'
 import { executeInstallSkill } from './builtins/install-skill'
+import { executeUseSkill } from './builtins/use-skill'
 import { executeChannelSendFile } from './builtins/channel-send-file'
 import { executeInstallMcpServer } from './builtins/install-mcp-server'
 import { executeRunSetupCommand } from './builtins/run-setup-command'
@@ -86,6 +87,8 @@ import {
   getSpecialistBlueprintStore,
 } from '../agent-control/agents/specialist-blueprint-runtime'
 import { getSkillsRuntimeManager } from '../skills-runtime/runtime-manager'
+import { readReferenceSkillDocCapped } from '../skills-runtime/reference-skill-doc'
+import { rememberLastReferenceSkill } from '../agent-control/skills/skill-reference-hints'
 import {
   ToolDomainError,
   errorKindFor,
@@ -958,6 +961,17 @@ async function executeToolCallInner(
           // ask_user_questions. The manager enforces the trustAck invariant.
           return executeInstallSkill(args as Parameters<typeof executeInstallSkill>[0], {
             manager: getSkillsRuntimeManager(),
+          })
+
+        case 'skill_activation':
+          // P2-2 — use_skill: model-side L1 catalog activation. Validates the id, returns
+          // the capped SKILL.md methodology, and arms the reference-skill hint so the NEXT
+          // turn resolves `selected` for this skill (reusing the hint→selected auth path).
+          return executeUseSkill(args as Parameters<typeof executeUseSkill>[0], {
+            sessionId: context.sessionId || context.scopeId || context.scope?.id,
+            listSkills: () => getSkillsRuntimeManager().listSkills(),
+            readSkillDoc: (managedPath) => readReferenceSkillDocCapped(managedPath),
+            rememberReferenceSkill: rememberLastReferenceSkill,
           })
 
         case 'channel':

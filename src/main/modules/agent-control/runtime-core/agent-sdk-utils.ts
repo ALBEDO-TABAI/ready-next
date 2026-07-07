@@ -2667,6 +2667,7 @@ export function scopeRunModuleForTool(definition: ToolDefinition): import('../co
     || definition.domain === 'pet'
     || definition.domain === 'agent_interaction'
     || definition.domain === 'skill_install'
+    || definition.domain === 'skill_activation'
     || definition.domain === 'channel'
     || definition.domain === 'mcp_install'
     || definition.domain === 'command_exec'
