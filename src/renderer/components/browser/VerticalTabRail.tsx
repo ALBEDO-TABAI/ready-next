@@ -423,13 +423,18 @@ export default function VerticalTabRail({
         onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropTarget(null) }}
         style={{ gap: VERTICAL_RAIL_FLYOUT_ROW_GAP }}
       >
-        {tabRows.map((row) => {
+        {tabRows.map((row, index) => {
           const tab = tabById.get(row.id)
           if (!tab) return null
           const isPrimaryActive = tab.id === activeTabId
           const isSplitActive = tab.id === splitTabId && !isPrimaryActive
           const isTabActive = isPrimaryActive || isSplitActive
-          const isActivePair = Boolean(activeTabId && splitTabId && activeTabId !== splitTabId)
+          // The split-pair connector nub bridges the active icon down to the split icon,
+          // so only draw it when the split is ACTUALLY the next row. The run-local hoist
+          // keeps the split adjacent to the active only within one run (I-DISPLAY); when
+          // they straddle runs (e.g. active grouped, split ungrouped) they aren't adjacent
+          // and a nub would falsely pair the active with whatever icon sits below it.
+          const splitIsNextRow = Boolean(splitTabId) && splitTabId !== activeTabId && tabRows[index + 1]?.id === splitTabId
           const group = row.groupId ? groupById.get(row.groupId) : undefined
           const isDragging = draggingTabId === tab.id
           const isDropOnto = dropTarget?.id === tab.id && dropTarget.intent === 'onto'
@@ -450,7 +455,7 @@ export default function VerticalTabRail({
               )}
               {isDropBefore && <span aria-hidden className="pointer-events-none absolute left-[6px] right-[6px] top-0 h-[2px] rounded" style={{ background: 'var(--color-blue)' }} />}
               {isDropAfter && <span aria-hidden className="pointer-events-none absolute left-[6px] right-[6px] bottom-0 h-[2px] rounded" style={{ background: 'var(--color-blue)' }} />}
-              {isPrimaryActive && isActivePair && (
+              {isPrimaryActive && splitIsNextRow && (
                 <span
                   aria-hidden
                   className="pointer-events-none absolute left-1/2 top-[32px] z-0 h-[14px] w-[18px] -translate-x-1/2"

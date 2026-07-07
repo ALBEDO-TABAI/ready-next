@@ -325,6 +325,17 @@ function GroupInlineEditor({
   const [name, setName] = useState(group.name)
   const rootRef = useRef<HTMLDivElement>(null)
   useEffect(() => { rootRef.current?.scrollIntoView({ block: 'nearest' }) }, [])
+  // Commit a pending rename on UNMOUNT (⋯ toggle / action click / group-switch / vanish).
+  // On macOS, clicking a <button> does not blur the input, so onBlur alone loses the edit
+  // when an editor button unmounts the field first — the ref-based unmount-commit is the
+  // reliable path (mirrors the P2 doc rail GroupEditPopup). Keyed by g.id in the parent, so
+  // switching groups commits against the OLD group's original name, never the wrong group.
+  const originalName = group.name
+  const nameRef = useRef(name)
+  nameRef.current = name
+  const renameRef = useRef(onRename)
+  renameRef.current = onRename
+  useEffect(() => () => { if (nameRef.current !== originalName) renameRef.current(nameRef.current) }, [originalName])
   const commitName = () => { if (name !== group.name) onRename(name) }
   return (
     <div
