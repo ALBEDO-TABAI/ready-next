@@ -496,6 +496,10 @@ export default function DocumentVerticalTabRail({
 
       {editingGroup && groupById.get(editingGroup.id) && createPortal(
         <GroupEditPopup
+          // key remounts on group switch so useState re-inits with the new group's
+          // name AND the old instance's unmount-commit runs against the OLD group —
+          // without it, switching groups renames the wrong group (stale name commit).
+          key={editingGroup.id}
           anchor={editingGroup.rect}
           group={groupById.get(editingGroup.id) as TabGroup}
           onRename={(nextName) => onRenameGroup?.(editingGroup.id, nextName)}

@@ -253,3 +253,45 @@ test('group options open a PORTALED edit popup whose action buttons are reachabl
     handle.restore()
   }
 })
+
+test('switching between group edit popups shows the new group and never renames the wrong group', async () => {
+  const handle = installDom()
+  try {
+    const tabs: DocumentVerticalTabItem[] = [
+      { id: 'a', label: 'A', active: true, groupId: 'g1' },
+      { id: 'b', label: 'B', groupId: 'g2' },
+    ]
+    const groups = [
+      { id: 'g1', name: 'Alpha', color: 'blue' as const, collapsed: false },
+      { id: 'g2', name: 'Beta', color: 'green' as const, collapsed: false },
+    ]
+    const renameCalls: Array<{ id: string; name: string }> = []
+    await act(async () => {
+      handle.root.render(createElement(DocumentVerticalTabRail, {
+        tabs, groups,
+        onTabClick: () => undefined, onTabClose: () => undefined, onNewTab: () => undefined,
+        onReorderToRank: () => undefined, onCreateGroup: () => undefined,
+        onRenameGroup: (id, name) => { renameCalls.push({ id, name }) },
+        onDisbandGroup: () => undefined,
+      }))
+    })
+    const flyout = await openFlyout(handle)
+    const optionsBtns = Array.from(flyout.querySelectorAll('button')).filter((b) => b.getAttribute('title') === '群组选项')
+    assert.equal(optionsBtns.length, 2, 'two group headers present')
+    const doc = handle.dom.window.document
+    // Open g1's popup, then switch to g2's WITHOUT closing.
+    await act(async () => { optionsBtns[0].dispatchEvent(new handle.dom.window.MouseEvent('click', { bubbles: true })) })
+    await act(async () => { optionsBtns[1].dispatchEvent(new handle.dom.window.MouseEvent('click', { bubbles: true })) })
+    const input = doc.querySelector('input') as HTMLInputElement | null
+    assert.ok(input)
+    assert.equal(input.value, 'Beta', 'popup remounts with the newly-selected group name (not the stale one)')
+    // Close the popup (disband) — the unmount-commit must NOT rename g2 to a stale value.
+    const disbandBtn = Array.from(doc.querySelectorAll('button')).find((b) => b.textContent === '取消群组')
+    assert.ok(disbandBtn)
+    await act(async () => { disbandBtn.dispatchEvent(new handle.dom.window.MouseEvent('click', { bubbles: true })) })
+    assert.deepEqual(renameCalls, [], 'no spurious rename of the wrong group on close')
+  } finally {
+    await act(async () => { handle.root.unmount() })
+    handle.restore()
+  }
+})
