@@ -50,6 +50,18 @@ export interface SkillState {
   configuration?: import('../../../shared/skill-configuration').SkillConfigurationDefinition
 }
 
+/**
+ * P2-4 + P2-5 — result of importing a custom skill folder: the registered skill plus
+ * non-blocking import metadata surfaced to the skills center. `ignoredFields` lists spec
+ * fields Ready deliberately did not honor (e.g. `allowed-tools` — downloaded skills carry no
+ * tool authorization); `warnings` are author advisories (e.g. an oversized SKILL.md).
+ */
+export interface SkillImportResult {
+  skill: SkillState
+  ignoredFields: string[]
+  warnings: string[]
+}
+
 export interface SkillsRuntimeInfo {
   runtimeRoot: string
   skillsRoot: string

@@ -46,7 +46,7 @@ test('manager rename surfaces the new name in the returned state and in listSkil
     mkdirSync(source, { recursive: true })
     writeFileSync(join(source, 'SKILL.md'), ['---', 'name: extract', '---', '# extract', 'advisory'].join('\n'), 'utf-8')
 
-    const installed = manager.importCustomSkill(source)
+    const { skill: installed } = manager.importCustomSkill(source)
     assert.equal(installed.id, 'extract')
     assert.equal(installed.name, 'extract', 'precondition: imported name is "extract"')
 

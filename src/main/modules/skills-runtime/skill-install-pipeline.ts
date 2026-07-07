@@ -44,6 +44,7 @@ import type {
   PythonRuntimeState,
   SkillDeploySpawn,
   SkillId,
+  SkillImportResult,
   SkillInstallResult,
   SkillInstallState,
   SkillState,
@@ -70,7 +71,7 @@ export interface SkillInstallPipelineDeps {
   defaultDeploySpawn: SkillDeploySpawn
   ensureRuntimeDirs: () => void
   probeEndpointLatency: (url: string) => Promise<number | null>
-  importCustomSkill: (sourcePath: string) => SkillState
+  importCustomSkill: (sourcePath: string) => SkillImportResult
   removeCustomSkill: (skillId: string) => { removed: boolean }
   getBaseEnv: (options?: { allowPackaged?: boolean }) => NodeJS.ProcessEnv
   resolvePackagedPythonPath: () => Promise<string | null>
@@ -327,7 +328,7 @@ export class SkillInstallPipeline {
 
       patch({ phase: 'installing', lastMessage: '正在安装…' })
       publish()
-      const skill = this.deps.importCustomSkill(fetched.skillDir)
+      const { skill } = this.deps.importCustomSkill(fetched.skillDir)
 
       // Python-dependency skills: deploy deps into a per-skill bundled-Python
       // overlay venv (online pip; offline fences dropped). A deploy failure rolls

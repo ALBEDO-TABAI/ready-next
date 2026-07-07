@@ -27,6 +27,7 @@ import type {
 import {
   type RegisteredCustomSkill,
   importCustomSkillFolder,
+  collectCustomSkillImportMetadata,
   removeManagedCustomSkill,
   updateManagedCustomSkillDescription,
 } from './custom-skill-registry'
@@ -112,6 +113,7 @@ import type {
   SkillTriggerType,
   SkillId,
   SkillState,
+  SkillImportResult,
   SkillsRuntimeInfo,
   PythonRuntimeState,
   SkillsRuntimeManagerOptions,
@@ -133,6 +135,7 @@ export type {
   SkillDeploySpawn,
   SkillId,
   SkillState,
+  SkillImportResult,
   SkillsRuntimeInfo,
   SkillsRuntimeManagerOptions,
   SkillInstallResult,
@@ -676,7 +679,7 @@ export class SkillsRuntimeManager {
     return this.installPipeline.cancelSkillInstall(requestId)
   }
 
-  importCustomSkill(sourcePath: string): SkillState {
+  importCustomSkill(sourcePath: string): SkillImportResult {
     this.ensureRuntimeDirs()
     // Stage S W11.2 — security scan BEFORE we copy the user's skill folder
     // into the managed customSkillsRoot. Critical issues (rm -rf /, curl|sh,
@@ -694,7 +697,7 @@ export class SkillsRuntimeManager {
     }
     const record = importCustomSkillFolder(sourcePath, this.customSkillsRoot)
     const definition = this.getSkillLoader().loadSkill(record.id, record.managedPath)
-    return this.toSkillState(definition || {
+    const skill = this.toSkillState(definition || {
       id: record.id,
       name: record.name,
       description: record.description,
@@ -710,6 +713,10 @@ export class SkillsRuntimeManager {
       workflow: undefined,
       manifestValid: true,
     })
+    // P2-4/P2-5 — read the source folder for non-blocking import metadata (ignored allowed-tools,
+    // oversized SKILL.md). The source is still present (import copies, not moves).
+    const { ignoredFields, warnings } = collectCustomSkillImportMetadata(sourcePath)
+    return { skill, ignoredFields, warnings }
   }
 
   removeCustomSkill(skillId: string): { removed: boolean } {

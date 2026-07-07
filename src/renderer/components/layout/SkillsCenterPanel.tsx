@@ -203,16 +203,21 @@ export default function SkillsCenterPanel({ children }: SkillsCenterPanelProps) 
   }, [refreshSkills])
 
   const importFolders = useCallback(async (paths: string[]) => {
-    if (typeof window === 'undefined' || !window.electronAPI?.skills?.importCustomSkill) return { imported: 0, failed: paths }
+    if (typeof window === 'undefined' || !window.electronAPI?.skills?.importCustomSkill) return { imported: 0, failed: paths, warnings: [], ignoredFields: [] }
     const uniquePaths = Array.from(new Set(paths.map((path) => path.trim()).filter(Boolean)))
     let imported = 0
     const failed: string[] = []
+    // P2-4/P2-5 — non-blocking import metadata surfaced to the user (ignored allowed-tools / oversized SKILL.md).
+    const warnings: string[] = []
+    const ignoredFields: string[] = []
 
     for (const path of uniquePaths) {
       try {
         const res = await window.electronAPI.skills.importCustomSkill({ path })
         if (res.success && res.data) {
           imported += 1
+          for (const warning of res.data.warnings || []) warnings.push(warning)
+          for (const field of res.data.ignoredFields || []) if (!ignoredFields.includes(field)) ignoredFields.push(field)
         } else {
           failed.push(path)
         }
@@ -224,7 +229,7 @@ export default function SkillsCenterPanel({ children }: SkillsCenterPanelProps) 
     if (imported > 0) {
       await refreshSkills()
     }
-    return { imported, failed }
+    return { imported, failed, warnings, ignoredFields }
   }, [refreshSkills])
 
   useEffect(() => {
@@ -359,6 +364,12 @@ export default function SkillsCenterPanel({ children }: SkillsCenterPanelProps) 
             ? `，但有 ${unreadablePaths.length} 个路径无法读取`
             : ''
         pushMessage(`已导入 ${result.imported} 个 skill${warningSuffix}`)
+        // P2-4 — imported skills never bring their own tool authorization; say so plainly.
+        if (result.ignoredFields.includes('allowed-tools')) {
+          pushMessage('已忽略技能自带的 allowed-tools：工具授权只由 Ready 决定，导入技能不会自带工具权限。')
+        }
+        // P2-5 — author advisory for an oversized SKILL.md (activation-time truncation).
+        for (const warning of result.warnings) pushMessage(warning)
       } else {
         pushMessage('没有成功导入任何 skill，请检查目录内容')
       }

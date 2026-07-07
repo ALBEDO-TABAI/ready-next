@@ -11,6 +11,7 @@ import type {
 } from '../../../shared/skill-execution-types'
 import { normalizeReadSkillVisibility } from './read-skill-visibility'
 import { parseSkillFrontmatter } from './skill-frontmatter'
+import { REFERENCE_SKILL_INLINE_CAP_CHARS } from './reference-skill-doc'
 
 export interface CustomSkillExecutionConfig {
   mode: Exclude<SkillExecutionMode, 'direct'>
@@ -402,6 +403,49 @@ export function writeManagedCustomSkillManifest(managedPath: string, manifest: C
     managedPath,
     manifestPath,
   }
+}
+
+/** P2-4 — spec `allowed-tools` (any case/separator variant) is a downloaded-skill tool-authorization
+ *  claim Ready deliberately does not honor; the tool surface is decided only by Ready's auth layer. */
+function hasAllowedToolsKey(record: Record<string, unknown>): boolean {
+  return Object.keys(record).some((key) => key.toLowerCase().replace(/[^a-z0-9]/g, '') === 'allowedtools')
+}
+
+/**
+ * P2-4 + P2-5 — non-blocking import metadata surfaced to the skills center. Reads the SOURCE
+ * folder (independent of the copy): records `allowed-tools` as ignored (security policy) and warns
+ * when a SKILL.md exceeds the L2 inline cap (activation-time truncation). Best-effort, never throws.
+ */
+export function collectCustomSkillImportMetadata(sourcePath: string): { ignoredFields: string[]; warnings: string[] } {
+  const ignoredFields: string[] = []
+  const warnings: string[] = []
+
+  const documentEntry = detectDocumentEntry(sourcePath)
+  if (documentEntry) {
+    try {
+      const text = readFileSync(join(sourcePath, documentEntry), 'utf-8')
+      if (hasAllowedToolsKey(parseSkillFrontmatter(text).metadata)) ignoredFields.push('allowed-tools')
+      if (text.length > REFERENCE_SKILL_INLINE_CAP_CHARS) {
+        warnings.push(`${documentEntry} 超过 ${REFERENCE_SKILL_INLINE_CAP_CHARS} 字符，激活时将被截断内联；建议把细节移入 references/ 由 L3 读取`)
+      }
+    } catch {
+      // best-effort: an unreadable document just yields no metadata.
+    }
+  }
+
+  const manifestPath = resolveSourceManifestPath(sourcePath)
+  if (manifestPath) {
+    try {
+      const obj = asObject(readJson(manifestPath))
+      if (obj && hasAllowedToolsKey(obj) && !ignoredFields.includes('allowed-tools')) {
+        ignoredFields.push('allowed-tools')
+      }
+    } catch {
+      // best-effort: an unreadable manifest is handled by loadCustomSkillManifestFromFolder.
+    }
+  }
+
+  return { ignoredFields, warnings }
 }
 
 export function importCustomSkillFolder(sourcePath: string, customSkillsRoot: string): RegisteredCustomSkill {
