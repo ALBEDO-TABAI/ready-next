@@ -128,6 +128,12 @@ revision_note: >
 ### 风险
 - 放宽 max_tokens 抬 token 成本；须限定长产出轮，附成本对照。
 
+### 调查结论（P3，2026-07-07，代码侧取证）✅ 机制高置信；修复=模型相关决策
+- **max_tokens 确为生成侧硬顶**：live SDK anthropic-wire 路径 `agent-sdk-provider.ts:777` = `max_tokens: request.modelSettings.maxTokens || 4096`，Ready **全局未设** `modelSettings.maxTokens`（主 agent `new Agent({name,instructions,model,tools})` 无 modelSettings，`runner.run` 也不传；全仓仅此一处读，其余 maxTokens 皆是别的 runner：rss-subagent 2400/3200、skill-handoff 16000 等）→ 主 agent 深读轮**有效硬顶=4096**。**关键（对抗复核加固）：anthropic wire 是唯一封顶 output 的 wire**——openai-compatible（chat/responses）**完全不设 output 上限**（Anthropic Messages API 必填 max_tokens、OpenAI wire 选填），故截断是 **Claude-path 专有现象，切勿到 openai wire 上"修"**。claude-bridge `anthropic-execution-client.ts:118/212` 亦硬编 4096。装配侧已排除（同类消息达 26199 字节无库上限）。CJK 实际 tokenization 常 >1 token/字，故估算的 4435>4096 已是保守下限，封顶更铁。
+- **与事故量级吻合**：深读末条 4435 CJK 字≈4435 tokens（CJK≈1 token/字）>4096 → **length 截断（max_tokens）是最高置信机制**；`finish_reason`/`stop_reason` 在 SSE accumulator 有捕获（`provider-sse.ts:186/355`）但**未落 metric**，故事故台账无法直证，结论由代码+字数推得。
+- **修复是真·模型相关决策（不可盲改，故本轮不落码）**：单纯把 `|| 4096` 抬到 8192+ **会在旧模型上被 API 拒**并打断 agent——Claude 3 上限 4096、Claude 3.5 需 beta header 才 8192、仅 3.7/4.x 更高。安全修复须**按模型真实 max-output（+ beta header）动态定**（`AIModelDef` **当前无 maxOutputTokens 字段**，需新增+按模型填值+provider 接线），错填=全量请求被拒。故 R-GEN 修复走"调查后定"的**决策档**，见测试清单/决策汇总，本轮只落调查结论、不改 provider 热路径。
+- **备选**：`mode:'append'` 分段续写已支持长文档补尾（编排层可在检出 length 截断后驱动续写），属另一条不动 provider 上限的路径。
+
 ---
 
 ## R-XREAD · 链式技能读根覆盖（工效，可选，P4）
@@ -193,6 +199,11 @@ revision_note: >
 - 行为测：bootstrap short_task 起、rebind 到 multi_step/40/used24、终态 `taskBudgetRuntime` 缺失 → 断言 `run_meta.budget_json` 回写为 40/used24（非停在 24/used0）、`taskType==task_type==run_close.taskType`。
 - `check-run-budget-tasktype-parity.cjs`：断言三源 taskType 收敛、`run_meta.budget_json` 忠实等于运行时真值（**不**断言"单调不缩"——那是 clamp 语义，已删）。
 
+### 调查结论（P3，2026-07-07）⚠️ 原 premise 被证伪——修复点错，本轮**延后**（D-LEDGER：无因果、可延后）
+- **`if(taskBudgetRuntime)` gate 不是缺陷点**：live 已有 close-out 收口——`run-meta-snapshot.ts` 的 `wrapRunMetaRepositoryWithCloseoutSnapshot` 在 `agent-sdk-runtime.ts:668-681` **已 live 接线**（turn-orchestrator 每个 `finalizeRunOutcome` 调用点都用它），每次终态 create/update **无条件**把 `run_meta.taskType/budget` enrich 为 `projection.taskType/projection.budget`（`:29-33`，last-write-wins spread 覆盖分支所写；`RunMetaRepository.update` 是全行 `{...existing,...patch}` 后 `budget_json=jsonOrNull(merged.budget)`）。故"在 writeRunMetaOutcome 补 budget 侧兜底"**与既有 wrapper 无条件冗余**（不止 desync 情形——enrich 在 taskBudgetRuntime 缺席、分支根本不跑时**也**已用 projection.budget 兜底），属修症状。
+- **真因重定位（对抗复核加固）**：① `budget:null` enrich **确实覆盖**（全行 spread + `jsonOrNull(null)=null`，非 COALESCE no-op）→ "projection.budget=null 留住 24 种子"**已证伪**（那会显示 null 不是 24）。② `rebindTaskBudgetRuntime`（`run-budget-policy.ts:329-351`）**原子**——`createTaskBudgetRuntime(taskType,{budget:createRunBudgetSeed(taskType)})` 按 taskType 重播种预算，故带 `type=multi_step` 的 taskBudgetRuntime **不可能**配 24 的 short_task 预算 → `if(taskBudgetRuntime)` 分支**不可能**是 multi_step+24 的来源。③ 因 enrich 从**同一** projection 快照同时写 taskType+budget，终态 multi_step+24 意味着**那份快照自身**就是 multi_step-type 配 short_task-budget——`task-projection-sync.ts:851` taskType 与 `resolveTaskBudget` 是**两个独立解析器**、type 可 rebind 而 budget 滞后 → **projection 内字段级 type/budget desync**。此为推断非实证（未读事故日志），但**延后决定不依赖精确定位**：计划里那个 fallback 既冗余（enrich 覆盖）又无效（读同一 projection.budget，若=24 兜底也写 24），无论如何都修不好事故。
+- **决策=延后（D-LEDGER）**：R-LEDGER 无运行时因果，premise 证伪 + 真因需 live 复检，本轮**不落码**、留调查留痕；`check-run-budget-tasktype-parity.cjs` 不建（不为错 premise 立 gate）。后续若做，方向是"统一 `getTaskProjection` 的 enrich 源到 rebind 后权威行"，非动 `writeRunMetaOutcome`。
+
 ---
 
 ## 6. 分阶段落地 + 验收
@@ -202,7 +213,7 @@ revision_note: >
 | **P0** ✅ **已关闭** | **D-CRIT 已定=方案 b**（裁决器 per-step 已交付覆盖计数替换 c1）——2026-07-07 用户拍板 | ✓ 决策成文；红线已同步放开（限 skill-primitive 覆盖计数一条路径，§0/§7） | — |
 | **P1** ✅ **已落地（consumer + 单调默认；producer=cross-phase）** | R-CRIT（消费侧+单调无 fail-open）+ R-WRITE（并列）。经对抗评审 round-1（9 findings 全修：dup/greedy/loose/vacuous matcher 四项 + fail-open 单调化 + output_path export 隔离 + gate/test 加固） | **P1 硬门只含①②**：①`check-skill-primitive-criteria-coverage.cjs`（含**欠交付回归**：模拟"多中间 artifact/仅 1 交付"必不 accept）+`check-skill-artifact-write-corrective.cjs`（red-first）绿；②确定性单测绿（R-WRITE 归一/纠正、R-CRIT 覆盖判据+dedup+最大匹配）。**注**：live catch 欠交付待 producer（cross-phase）；P1 为单调（有 target 计数、无 target 保持 pre-P1 非 accept） | `verify:skill-envelope-write`（绿） |
 | P2 | R-CTX 调查（加 instrumentation，不改行为） | `check-provider-request-bill-sections.cjs`：`provider_request_bill` 分来源字段存在可读；主构成结论回填诊断 §5.3 | 并入上链只读断言 |
-| P3 | R-GEN（调查后定）；R-LEDGER parity | R-GEN `finish_reason` 结论成文；`check-run-budget-tasktype-parity.cjs` 绿 | 并入 verify 链 |
+| **P3** ✅ **调查完成（两项均"投查后定"→修复=决策/延后，无落码）** | R-GEN：机制高置信=anthropic-wire `max_tokens\|\|4096` 硬顶截断（模型相关，修复走决策档）；R-LEDGER：原 premise 证伪（close-out wrapper 已 live 覆盖），延后（D-LEDGER，无因果） | R-GEN 结论成文（max_tokens=4096 + 模型相关修复决策）；R-LEDGER 结论成文（premise 证伪 + 真因重定位）；两项修复均决策/延后，**不建 gate**（不为错 premise/未决策立 gate） | 无（调查档；决策见测试清单/§8） |
 | P4 | R-CTX 阶段二 + R-XREAD（若评审采纳） | 对照测（产物结构不劣化）+ 跨技能读根 gate（名 `check-skill-crossref-read-root.cjs`，仅 R-XREAD 采纳时立） | 同上 |
 | **跨阶段（P1+P3+P4 落地后）** | **run 级 e2e**（非 P1 单独硬门） | 真机复跑本任务：第二份文档落 V **且** `run_close terminalReason=done`——**依赖 R-CRIT+R-WRITE+R-GEN(+R-CTX)+模型重试**，若 R-GEN 截断是确定性 max_tokens 则须待 P3，故不作 P1 准入 | — |
 
