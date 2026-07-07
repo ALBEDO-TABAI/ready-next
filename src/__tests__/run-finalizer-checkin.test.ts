@@ -470,6 +470,44 @@ test('P0-2: a primitive-only skill run (NO run_state handle) exempts s1 → stay
 })
 
 
+test('R-CRIT: finalizer emits adjudicator_criteria_resolved coverage_count + fails a declared-target under-delivery end-to-end', async () => {
+  // Drives the LIVE glue: deriveCoverageTargets(steps_json expectedOutputs) →
+  // resolveCriteria(delivery_coverage) → adjudicator counting → the metric.
+  const events: AgentMetricEvent[] = []
+  __setMetricSinkForTests((event) => events.push(event))
+  try {
+    const store = fakeStore({
+      taskId: 'task-skill-coverage',
+      taskType: 'multi_step_task' as never,
+      module: 'skill',
+      steps: [
+        { id: 'step-1', description: 'reverse-describe', expectedOutputs: ['/Users/user/V/描述.md'] },
+        { id: 'step-2', description: 'deep-read', expectedOutputs: ['/Users/user/V/深读.md'] },
+      ] as never,
+      proofRefs: [collectArtifactProof('/Users/user/V/描述.md', NOW)], // only 1 of 2 declared docs delivered
+    })
+    await finalizeRunOutcome({
+      kind: 'done', runId: 'run-skill-cov', taskId: 'task-skill-coverage', scopeId: 's1',
+      durationMs: 10, toolCallsUsed: 2, initiator: 'done', finalText: '完成',
+    } as RunOutcome, {
+      writeRunCloseMetric: () => {},
+      taskProjectionStore: store,
+      now: () => NOW,
+    })
+    const metric = events.find((event) => event.metric === 'adjudicator_criteria_resolved') as
+      unknown as { mode: string; delivered: number; expected: number; item: string } | undefined
+    assert.ok(metric, 'adjudicator_criteria_resolved must fire for a declared-target skill run')
+    assert.equal(metric!.mode, 'coverage_count')
+    assert.equal(metric!.delivered, 1)
+    assert.equal(metric!.expected, 2)
+    const last = (store.rows.get('task-skill-coverage')!.checkins as CheckInRecord[]).at(-1)!
+    assert.notEqual(last.verdict, 'accept', 'under-delivery (1 of 2) must not accept end-to-end')
+    assert.ok(last.blockers.includes('criteria_unsatisfied:c1'))
+  } finally {
+    __setMetricSinkForTests(null)
+  }
+})
+
 test('P0-2 control: a skill run with an unverified run_state handle still owes s1', async () => {
   const store = fakeStore({
     taskId: 'task-skill-handle-unverified', taskType: 'short_task' as never, module: 'skill',

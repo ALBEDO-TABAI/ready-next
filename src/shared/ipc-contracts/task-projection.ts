@@ -75,6 +75,11 @@ export interface TaskStep {
   budget?: number
   dependsOn?: string[]
   childTasks?: TaskStepChildTask[]
+  /** R-CRIT (方案 b) — delivery targets this step promises to produce; the
+   *  terminal adjudicator counts delivered-artifact coverage against them.
+   *  Renderer-facing serialization superset — kept in sync with the runtime
+   *  `run-contracts.ts` TaskStep. */
+  expectedOutputs?: string[]
 }
 
 export interface StepBudgetState {

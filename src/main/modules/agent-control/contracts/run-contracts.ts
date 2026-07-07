@@ -171,6 +171,12 @@ export interface TaskStep {
   budget?: number
   dependsOn?: string[]
   childTasks?: TaskStepChildTask[]
+  /** R-CRIT (方案 b) — delivery targets this step promises to produce (a path,
+   *  directory, or filename token). The terminal adjudicator counts, one-to-one,
+   *  how many are backed by a delivered artifact proof; under-coverage fails a
+   *  skill-primitive multi_step run instead of the old c1 proof-kind
+   *  false-negative. Empty/absent → coverage not enforced for this step. */
+  expectedOutputs?: string[]
 }
 
 export interface TaskStepChildTask {

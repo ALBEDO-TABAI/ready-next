@@ -44,9 +44,9 @@ export const SKILL_PRIMITIVE_SCHEMAS = {
   }),
   skill_write_artifact: z.object({
     relativePath: TRIMMED_STRING.describe(
-      '相对 artifact 根目录的路径；也接受 artifact 根目录内、由工具结果返回的绝对路径。禁止根外绝对路径、~/、..、SKILL.md / ready-skill.json / skill.workflow.json 等保留文件。',
+      '【必填·字符串】相对 artifact 根目录的路径，如 "报告.md" 或 "子目录/报告.md"；也接受 artifact 根目录内、由工具结果返回的绝对路径。禁止根外绝对路径、~/、..、SKILL.md / ready-skill.json / skill.workflow.json 等保留文件。要落到用户目录请先写此路径、再用 skill_export_artifact 导出。',
     ),
-    content: z.string().describe('写入内容（utf-8 默认；若是二进制请用 base64 编码并设置 encoding）'),
+    content: z.string().describe('【必填·字符串】要写入文件的完整正文；缺省或传非字符串会以 invalid_type 被拒。utf-8 默认；二进制请 base64 编码并设置 encoding。'),
     encoding: z
       .enum(['utf-8', 'base64'])
       .optional()

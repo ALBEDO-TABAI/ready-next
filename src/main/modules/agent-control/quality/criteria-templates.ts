@@ -28,6 +28,12 @@ export type CriteriaKind =
   | 'document_diff'
   | 'scope_compliance'
   | 'transaction_confirmed'
+  // R-CRIT (方案 b) — count how many declared delivery targets are backed by a
+  // delivered artifact proof (one-to-one). Replaces c1(steps_complete) ONLY for
+  // skill-primitive multi_step/continuation runs that declared expected outputs,
+  // so complete delivery is no longer a proof-kind false-negative AND
+  // under-delivery still fails (a single artifact can't satisfy two targets).
+  | 'delivery_coverage'
 
 export interface CriteriaItem {
   id: string
@@ -35,6 +41,9 @@ export interface CriteriaItem {
   kind: CriteriaKind
   source: 'template' | 'model'
   notApplicable?: { reason: string }
+  /** R-CRIT (方案 b) — only set on `delivery_coverage` items: the declared
+   *  delivery targets the adjudicator counts delivered-artifact coverage over. */
+  expected?: string[]
 }
 
 export type SkillExecutionForm = 'direct' | 'child_loop' | 'python'
@@ -51,6 +60,29 @@ export interface ResolvedCriteria {
 
 function item(id: string, kind: CriteriaKind, text: string): CriteriaItem {
   return { id, kind, text, source: 'template' }
+}
+
+/** R-CRIT (方案 b) — normalize a declared delivery target (or a delivered path)
+ *  for coverage comparison: strip wrapping quotes/whitespace, unify separators,
+ *  drop trailing slashes. Shared by the criteria producer-filter here and the
+ *  adjudicator counter (task-adjudicator imports this) so BOTH sides agree on
+ *  which targets are real — a target that normalizes empty (e.g. "/") must
+ *  never create a delivery_coverage item the adjudicator then can't count.
+ *
+ *  IDEMPOTENT by construction (fixpoint loop): stripping a trailing slash can
+ *  expose a trailing quote (and vice-versa), so a single ordered pass is NOT
+ *  idempotent (`/"/` → `/"` on pass 1, then `""` on pass 2). The producer stores
+ *  the result and the adjudicator re-normalizes it; a non-idempotent normalizer
+ *  makes the two sites disagree on whether a token is real. Looping to a fixpoint
+ *  guarantees normalize(normalize(x)) === normalize(x). */
+export function normalizeDeliveryTarget(value: unknown): string {
+  let text = String(value ?? '').replace(/\\/g, '/')
+  let previous: string
+  do {
+    previous = text
+    text = text.trim().replace(/^["'`]+|["'`]+$/g, '').replace(/\/+$/g, '')
+  } while (text !== previous)
+  return text
 }
 
 const BASE_TEMPLATES: Record<TaskType, CriteriaItem[]> = {
@@ -114,6 +146,10 @@ export function resolveCriteria(
     hasPlannedSteps?: boolean
     hasStepCompletionProof?: boolean
     hasDocumentDeliveryProof?: boolean
+    /** R-CRIT (方案 b) — flattened delivery targets declared by the run's
+     *  planned steps (steps_json expectedOutputs). Non-empty → c1 becomes a
+     *  delivery_coverage criterion for skill-primitive runs. */
+    coverageTargets?: string[]
   },
 ): ResolvedCriteria {
   const base = BASE_TEMPLATES[taskType] ?? BASE_TEMPLATES.short_task
@@ -148,11 +184,47 @@ export function resolveCriteria(
         : 'primitive skill 执行无 child run_state 句柄，artifact/tool_result 即终态证据')
       : entry)
     : items
-  const resolvedItems = stepsStructurallyUnavailable
-    ? skillResolvedItems.map((entry) => entry.id === 'c1' && entry.kind === 'steps_complete'
-      ? markNotApplicable(entry, '本轮无计划步骤/子任务状态来源，文档保存已由 document/artifact proof 证明')
+  // R-CRIT (方案 b) — a skill-primitive multi_step/continuation run that DECLARED
+  // planned steps never mints run_state/task_event, so c1(steps_complete) is a
+  // structural false-negative (rejects even a complete delivery). Do NOT loosen
+  // to a proof-kind any artifact can satisfy — that would re-mask under-delivery
+  // (a single artifact would satisfy it while a second doc is missing).
+  //
+  // MONOTONIC boundary (P1 adversarial-review fix): only convert c1 when the run
+  // DECLARED expected outputs — then c1 becomes a COUNTING delivery_coverage
+  // criterion (one-to-one target↔artifact; under-coverage still fails, complete
+  // delivery accepts). When NO targets are declared we DELIBERATELY leave c1
+  // unchanged (its pre-existing steps_complete verdict), NOT NA: marking it NA
+  // would drop it from the applicable set and let a single c2 artifact ACCEPT an
+  // unverifiable delivery — a fail-open regression that would silently accept the
+  // exact under-delivery incident this fix exists to catch. So P1 only ever
+  // IMPROVES (adds discrimination when targets exist) and never regresses the
+  // no-target default. Live activation awaits the deferred producer that
+  // populates steps_json expectedOutputs (cross-phase per the plan).
+  // Runs carrying a real run_state/task_event proof keep c1 as-is (not weakened).
+  const skillPrimitiveStepsCoverable =
+    module === 'skill' && !skillHasChildRunState
+    && (taskType === 'multi_step_task' || taskType === 'continuation')
+    && options?.hasPlannedSteps === true
+    && options?.hasStepCompletionProof !== true
+  const coverageTargets = Array.isArray(options?.coverageTargets)
+    ? options!.coverageTargets.map(normalizeDeliveryTarget).filter(Boolean)
+    : []
+  const skillCoverageItems = skillPrimitiveStepsCoverable && coverageTargets.length > 0
+    ? skillResolvedItems.map((entry) => (entry.id === 'c1' && entry.kind === 'steps_complete')
+      ? {
+        ...entry,
+        kind: 'delivery_coverage' as CriteriaKind,
+        text: `计划内每份预期产出都有对应的已交付 artifact（预期 ${coverageTargets.length} 份，逐一配对）`,
+        expected: coverageTargets,
+      }
       : entry)
     : skillResolvedItems
+  const resolvedItems = stepsStructurallyUnavailable
+    ? skillCoverageItems.map((entry) => entry.id === 'c1' && entry.kind === 'steps_complete'
+      ? markNotApplicable(entry, '本轮无计划步骤/子任务状态来源，文档保存已由 document/artifact proof 证明')
+      : entry)
+    : skillCoverageItems
   return {
     taskType,
     module,

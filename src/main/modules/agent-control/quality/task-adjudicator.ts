@@ -15,6 +15,7 @@
 import type { ProofRef } from './proof-collector'
 import { isValidProofRef } from './proof-collector'
 import type { CriteriaItem, CriteriaKind } from './criteria-templates'
+import { normalizeDeliveryTarget } from './criteria-templates'
 
 export interface CheckInRecord {
   kind: 'shadow' | 'enforce'
@@ -51,6 +52,11 @@ const CRITERIA_PROOF_MAP: Record<CriteriaKind, ReadonlyArray<ProofRef['kind']>> 
   document_diff: ['artifact', 'tool_result'],
   scope_compliance: ['tool_result', 'artifact'],
   transaction_confirmed: ['transaction_confirmed'],
+  // R-CRIT (方案 b) — artifact is the proof SOURCE, but delivery_coverage is NOT
+  // satisfied by bare presence: it is counted one-to-one against declared
+  // targets (see resolveDeliveryCoverage). This map entry only documents the
+  // source kind; the counting path bypasses the presentKinds membership test.
+  delivery_coverage: ['artifact'],
 }
 
 export interface AdjudicationInput {
@@ -69,17 +75,138 @@ export interface AdjudicationInput {
   now: Date
 }
 
+export interface CriteriaResolution {
+  id: string
+  kind: CriteriaKind
+  satisfied: boolean
+  /** Only on delivery_coverage items — how many declared targets were backed
+   *  by a delivered artifact (one-to-one), and how many were declared. */
+  coverage?: { delivered: number; expected: number }
+}
+
 export interface AdjudicationResult {
   verdict: CheckInRecord['verdict']
   checkIn: CheckInRecord
+  /** R-CRIT — per-criterion resolution detail for observability (the finalizer
+   *  logs delivery_coverage/na as `adjudicator_criteria_resolved`). Not persisted. */
+  criteriaResolutions: CriteriaResolution[]
+}
+
+// Coverage tokens are normalized by the SHARED normalizeDeliveryTarget (defined
+// in criteria-templates) so the producer-filter and this counter agree exactly
+// on which targets are real (review finding: filter mismatch).
+const normalizeCoverageToken = normalizeDeliveryTarget
+
+function coverageBasename(pathToken: string): string {
+  const index = pathToken.lastIndexOf('/')
+  return index >= 0 ? pathToken.slice(index + 1) : pathToken
+}
+
+/** Does a delivered artifact path satisfy an expected delivery target? Matching
+ *  is PATH-ANCHORED: exact, a directory the artifact sits under, or a path
+ *  suffix. A bare basename match is allowed ONLY when the declared target has
+ *  no directory part (the user named just a file) — otherwise an intermediate
+ *  write elsewhere with a colliding basename would wrongly satisfy a full-path
+ *  target (review finding: loose basename matching). */
+function deliveredSatisfiesTarget(deliveredPath: string, expectedTarget: string): boolean {
+  const delivered = normalizeCoverageToken(deliveredPath)
+  const expected = normalizeCoverageToken(expectedTarget)
+  if (!delivered || !expected) return false
+  if (delivered === expected) return true
+  if (delivered.startsWith(`${expected}/`)) return true          // expected = directory containing delivered
+  if (delivered.endsWith(`/${expected}`)) return true            // expected = path suffix (anchored; incl bare filename)
+  if (!expected.includes('/') && coverageBasename(delivered) === expected) return true // expected = bare filename
+  return false
+}
+
+/**
+ * R-CRIT (方案 b) — count, ONE-TO-ONE over DISTINCT real deliveries, how many
+ * declared delivery targets are backed by a delivered artifact. A single real
+ * file (even if proof-collected multiple times) can cover at most one target,
+ * so N declared outputs genuinely need N distinct deliveries — that is what
+ * makes "delivered 1 of 2" fail while the old proof-kind test (single artifact
+ * satisfies) could not.
+ *
+ * Two correctness guards from the P1 adversarial review:
+ *   • DEDUP delivered paths first — N proof copies of one path must NOT cover N
+ *     targets (the proof collector mints duplicate artifact proofs for a path
+ *     re-mentioned across a multi-step run).
+ *   • MAXIMUM bipartite matching (Kuhn) rather than greedy first-match — a
+ *     permissive target must not consume the only artifact a restrictive target
+ *     needs and starve it (which would false-reject a COMPLETE delivery). N is
+ *     tiny (declared outputs), so the O(V·E) augmenting-path search is trivial.
+ *
+ * Caveat (tracked with the deferred producer): the delivered set is every
+ * artifact proof, which includes auxiliary paths (run_state/report) the
+ * collector harvests; the producer should emit specific file/path targets
+ * (not bare directories) so an auxiliary write in the target dir can't satisfy
+ * a directory target. Directory targets remain supported but carry this caveat.
+ */
+export function resolveDeliveryCoverage(
+  expectedTargets: ReadonlyArray<string>,
+  deliveredArtifactPaths: ReadonlyArray<string>,
+): { delivered: number; expected: number } {
+  // ASYMMETRY (deliberate): delivered paths ARE deduped (N proof copies of one
+  // real file must cover ≤1 target); expected targets are NOT — the incident is
+  // "2 docs to the SAME directory V/", i.e. expected=[V, V], and deduping that to
+  // [V] would collapse expected to 1 → a single delivered doc would falsely count
+  // as complete (2/2), silently accepting the under-delivery. So N declared
+  // outputs stay N even when identical. Producer contract (deferred): emit one
+  // DISTINCT target per deliverable; duplicate identical FULL-FILE targets are a
+  // producer bug and fail-closed here (a complete delivery under-counts), which
+  // is the safe direction — never a silent false-accept.
+  const expected = expectedTargets.map(normalizeCoverageToken).filter(Boolean)
+  const delivered = [...new Set(deliveredArtifactPaths.map(normalizeCoverageToken).filter(Boolean))]
+  // adjacency: for each declared target, the distinct delivered paths that satisfy it
+  const candidates = expected.map((target) => {
+    const indices: number[] = []
+    delivered.forEach((path, index) => { if (deliveredSatisfiesTarget(path, target)) indices.push(index) })
+    return indices
+  })
+  // Kuhn's augmenting-path maximum bipartite matching (targets ← deliveries).
+  const matchedDeliveryToTarget = new Array<number>(delivered.length).fill(-1)
+  const augment = (targetIndex: number, visited: boolean[]): boolean => {
+    for (const deliveryIndex of candidates[targetIndex]) {
+      if (visited[deliveryIndex]) continue
+      visited[deliveryIndex] = true
+      if (matchedDeliveryToTarget[deliveryIndex] === -1
+        || augment(matchedDeliveryToTarget[deliveryIndex], visited)) {
+        matchedDeliveryToTarget[deliveryIndex] = targetIndex
+        return true
+      }
+    }
+    return false
+  }
+  let deliveredCount = 0
+  for (let targetIndex = 0; targetIndex < expected.length; targetIndex += 1) {
+    if (augment(targetIndex, new Array<boolean>(delivered.length).fill(false))) deliveredCount += 1
+  }
+  return { delivered: deliveredCount, expected: expected.length }
 }
 
 export function adjudicateTerminalOutcome(input: AdjudicationInput): AdjudicationResult {
   const proofs = input.proofs.filter(isValidProofRef)
   const presentKinds = new Set(proofs.map((proof) => proof.kind))
+  const deliveredArtifactPaths = proofs
+    .filter((proof) => proof.kind === 'artifact')
+    .map((proof) => proof.ref)
   const applicable = input.criteria.filter((item) => !item.notApplicable)
-  const satisfied = applicable.filter((item) =>
-    (CRITERIA_PROOF_MAP[item.kind] ?? []).some((kind) => presentKinds.has(kind)))
+  const resolutions: CriteriaResolution[] = applicable.map((item) => {
+    if (item.kind === 'delivery_coverage') {
+      // R-CRIT (方案 b) — counted, NOT proof-kind membership. resolveCriteria
+      // only emits this kind with ≥1 declared target; if every declared target
+      // normalizes to empty (a producer contract violation, e.g. all separators/
+      // quotes) expected===0 — do NOT vacuously pass (review finding), treat the
+      // unresolvable declaration as UNSATISFIED so the problem surfaces.
+      const expectedTargets = Array.isArray(item.expected) ? item.expected : []
+      const coverage = resolveDeliveryCoverage(expectedTargets, deliveredArtifactPaths)
+      const isSatisfied = coverage.expected > 0 && coverage.delivered >= coverage.expected
+      return { id: item.id, kind: item.kind, satisfied: isSatisfied, coverage }
+    }
+    const isSatisfied = (CRITERIA_PROOF_MAP[item.kind] ?? []).some((kind) => presentKinds.has(kind))
+    return { id: item.id, kind: item.kind, satisfied: isSatisfied }
+  })
+  const satisfied = applicable.filter((item, index) => resolutions[index].satisfied)
 
   const blockers: string[] = []
   let verdict: CheckInRecord['verdict'] = 'accept'
@@ -122,6 +249,7 @@ export function adjudicateTerminalOutcome(input: AdjudicationInput): Adjudicatio
       // positive learning decision; the specialist pipeline gates on this.
       learningDecision: { learned: verdict === 'accept' && learningRefCount > 0, refCount: learningRefCount },
     },
+    criteriaResolutions: resolutions,
   }
 }
 

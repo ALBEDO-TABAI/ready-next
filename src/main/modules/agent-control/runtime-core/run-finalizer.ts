@@ -394,6 +394,43 @@ function deriveLearningRefs(proofRefs: ReadonlyArray<unknown>): unknown[] {
   })
 }
 
+/**
+ * R-CRIT (方案 b) — flatten the delivery targets declared by the run's planned
+ * steps (steps_json expectedOutputs). Steps are deduped by id with the terminal
+ * projectionPatch winning over the stored row (same P0-3 precedence as the task
+ * facts), then each step's expectedOutputs are appended in step order. Empty →
+ * coverage not enforced (the criterion falls back to NA upstream).
+ */
+export function deriveCoverageTargets(
+  projection: TaskProjectionRecord,
+  projectionPatch?: Record<string, unknown> | null,
+): string[] {
+  const byId = new Map<string, Record<string, unknown>>()
+  const order: string[] = []
+  const absorb = (steps: unknown): void => {
+    if (!Array.isArray(steps)) return
+    for (const step of steps) {
+      if (!step || typeof step !== 'object') continue
+      const id = String((step as { id?: unknown }).id || '')
+      if (!id) continue
+      if (!byId.has(id)) order.push(id)
+      byId.set(id, step as Record<string, unknown>) // patch (absorbed second) wins
+    }
+  }
+  absorb(projection.steps)
+  absorb(projectionPatch?.steps)
+  const targets: string[] = []
+  for (const id of order) {
+    const expectedOutputs = byId.get(id)?.expectedOutputs
+    if (!Array.isArray(expectedOutputs)) continue
+    for (const raw of expectedOutputs) {
+      const target = String(raw || '').trim()
+      if (target) targets.push(target)
+    }
+  }
+  return targets
+}
+
 function hasDocumentDeliveryProof(proofRefs: ReadonlyArray<unknown>): boolean {
   const deliveredDocumentPaths = new Set<string>()
   const artifactPaths = new Set<string>()
@@ -626,6 +663,7 @@ function recordTerminalAdjudication(
       hasPlannedSteps: hasPlannedStepsRequiringProof(projection, outcome.projectionPatch),
       hasStepCompletionProof: hasProofKind(proofRefs, new Set(['run_state', 'task_event'])),
       hasDocumentDeliveryProof: hasDocumentDeliveryProof(proofRefs),
+      coverageTargets: deriveCoverageTargets(projection, outcome.projectionPatch),
     })
     // D4 — 模型经 declare_completion_criteria 声明的补充标准并入裁决：
     // m1/m2 命名空间追加在模板项之后，模板不可被覆盖（appendModelCriteria 合同）。
@@ -649,7 +687,7 @@ function recordTerminalAdjudication(
     // written, so `projection.learningRefs` stayed empty and every proposal
     // skipped `missing_learning_refs` — the growth loop never fired.
     const learningRefs = deriveLearningRefs(proofRefs)
-    const { verdict, checkIn } = adjudicateTerminalOutcome({
+    const { verdict, checkIn, criteriaResolutions } = adjudicateTerminalOutcome({
       terminalStatus: status,
       terminalReason,
       criteria: criteriaItems,
@@ -658,6 +696,33 @@ function recordTerminalAdjudication(
       mode: 'enforce',
       now,
     })
+    // R-CRIT (方案 b) — surface how the skill-primitive completion criterion
+    // resolved: coverage_count (delivered/expected) when targets were declared,
+    // else na when c1 was exempted for lack of a run_state handle + targets.
+    if (effectiveModule === 'skill') {
+      const coverageResolution = criteriaResolutions.find((resolution) => resolution.kind === 'delivery_coverage')
+      const c1Item = criteria.items.find((item) => item.id === 'c1')
+      if (coverageResolution) {
+        logAgentMetric('adjudicator_criteria_resolved', {
+          runId: outcome.runId,
+          taskId,
+          item: coverageResolution.id,
+          module: 'skill',
+          mode: 'coverage_count',
+          delivered: coverageResolution.coverage?.delivered ?? 0,
+          expected: coverageResolution.coverage?.expected ?? 0,
+          satisfied: coverageResolution.satisfied,
+        })
+      } else if (c1Item?.notApplicable) {
+        logAgentMetric('adjudicator_criteria_resolved', {
+          runId: outcome.runId,
+          taskId,
+          item: 'c1',
+          module: 'skill',
+          mode: 'na',
+        })
+      }
+    }
 
     // ③ CheckIn + proofs + learning refs land on the projection — lifecycle
     //    fields untouched. Only write learningRefs when the run actually learned

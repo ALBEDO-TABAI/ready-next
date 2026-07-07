@@ -36,6 +36,7 @@
     "typecheck:clean": "rm -rf node_modules/.cache/tsc",
     "lint": "eslint . --ext .js,.jsx,.cjs,.mjs,.ts,.tsx,.cts,.mts --fix",
     "lint:check": "eslint . --ext .js,.jsx,.cjs,.mjs,.ts,.tsx,.cts,.mts",
+    "verify:skill-envelope-write": "node scripts/check-skill-primitive-criteria-coverage.cjs && node scripts/check-skill-artifact-write-corrective.cjs && npx tsx@^4.19.2 --test --test-concurrency=1 src/__tests__/skill-primitive-criteria-coverage.test.ts src/__tests__/tool-input-validator.test.ts src/__tests__/criteria-template-matrix.test.ts src/__tests__/run-finalizer-checkin.test.ts",
     "verify:lint-budget": "node scripts/check-lint-warning-budget.cjs",
     "verify:meta-paths": "node scripts/check-verify-script-paths-current.cjs",
     "verify:stage-x-known-regressions": "node scripts/check-stage-x-known-regressions.cjs",
