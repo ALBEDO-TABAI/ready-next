@@ -53,6 +53,7 @@ import { buildProviderHttpError } from '../../claude-bridge/provider-terminal-er
 import { resolveOpenAIProviderRuntime } from '../provider-runtime-resolver'
 import { assertManualThinkingModeProviderSafe } from '../thinking-compatibility'
 import { logAgentMetric } from '../metrics'
+import { billProviderRequestSections } from '../../../../shared/context-budget-types'
 import {
   compactAgentInputItems,
 } from '../compaction/compact-agent-input'
@@ -123,6 +124,21 @@ export async function runWithOpenAIAgentsSdk(
     session: params.session,
     maxTurns: params.maxTurns,
     callModelInputFilter: async ({ modelData }) => {
+      // R-CTX (P2) — attribute EVERY provider request's tokens to sections before
+      // compaction, so the 565–633K bloat is diagnosable (e.g. is the same image
+      // re-sent each turn?). Instrumentation only — never mutates modelData.
+      const bill = billProviderRequestSections(modelData.input)
+      logAgentMetric('provider_request_bill', {
+        agentName: params.agentName,
+        sessionId: params.sessionId || null,
+        runId: params.runId,
+        taskId: params.taskId,
+        contextWindowTokens: params.contextWindowTokens,
+        totalTokens: bill.totalTokens,
+        itemCount: bill.itemCount,
+        visionItems: bill.visionItems,
+        sections: bill.sections,
+      })
       const result = await compactAgentInputItems(modelData.input, {
         windowTokens: params.contextWindowTokens,
       })

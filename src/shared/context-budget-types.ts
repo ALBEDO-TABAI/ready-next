@@ -110,6 +110,103 @@ function jsonFallbackTokens(value: unknown): number {
   }
 }
 
+// ── R-CTX (P2) — provider-request section bill (instrumentation only) ─────────
+// Attribute each provider request's estimated tokens to a source SECTION so the
+// 565–633K bloat can be diagnosed (is the same image re-sent every turn? is it
+// history accumulation? tool_results?). Pure classification; no behavior change.
+export interface ProviderRequestBill {
+  totalTokens: number
+  itemCount: number
+  visionItems: number
+  sections: {
+    vision: number
+    history: number
+    tool_results: number
+    skill_inline: number
+    reminders: number
+    other: number
+  }
+}
+
+const TOOL_TRACE_ITEM_TYPES = new Set([
+  'function_call', 'computer_call', 'shell_call', 'apply_patch_call', 'tool_search_call',
+  'function_call_result', 'computer_call_result', 'shell_call_output', 'apply_patch_call_output', 'tool_search_output',
+])
+
+function itemContainsImageRef(value: unknown, keyHint = ''): boolean {
+  if (!value || typeof value !== 'object' || value instanceof Uint8Array) return false
+  if (Array.isArray(value)) return value.some((child) => itemContainsImageRef(child, keyHint))
+  const record = value as Record<string, unknown>
+  const type = typeof record.type === 'string' ? record.type : ''
+  const marker = `${type} ${keyHint}`.toLowerCase()
+  // Canonical @openai/agents InputImage the app actually sends (toSdkInput):
+  // { type:'input_image', image: <data-url string | {id}> }. The key is `image`.
+  if (type === 'input_image' && 'image' in record) return true
+  // Computer/browser screenshot payloads: { type:'computer_screenshot', data:… }.
+  if (type === 'computer_screenshot') return true
+  // Opaque media references (id/url/fileId/image_url) in an image/screenshot slot.
+  const hasRef = typeof record.id === 'string' || typeof record.url === 'string'
+    || typeof record.fileId === 'string' || 'image_url' in record
+  if (hasRef && (marker.includes('image') || marker.includes('screenshot'))) return true
+  return Object.entries(record).some(([key, child]) => itemContainsImageRef(child, key))
+}
+
+function itemPlainText(item: AgentInputItem): string {
+  if (!item || typeof item !== 'object') return ''
+  const content = (item as Record<string, unknown>).content
+  if (typeof content === 'string') return content
+  if (Array.isArray(content)) {
+    return content
+      .map((part) => (typeof part === 'string'
+        ? part
+        : part && typeof part === 'object' && typeof (part as Record<string, unknown>).text === 'string'
+          ? (part as Record<string, unknown>).text as string
+          : ''))
+      .join(' ')
+  }
+  return ''
+}
+
+/**
+ * Attribute a provider request's estimated tokens to disjoint sections. Each item
+ * lands in exactly one section, so the sections sum to totalTokens. Classification
+ * is best-effort (vision/tool_results are precise from item type; reminders/
+ * skill_inline are marker-based) — enough to answer the attribution question.
+ */
+export function billProviderRequestSections(items: AgentInputItem[]): ProviderRequestBill {
+  const sections = { vision: 0, history: 0, tool_results: 0, skill_inline: 0, reminders: 0, other: 0 }
+  let visionItems = 0
+  for (const item of items) {
+    const tokens = estimateInputItemTokens([item])
+    // Total-safe: a null/non-object item must never throw here (the caller runs
+    // inside callModelInputFilter with no try/catch — a throw breaks the provider
+    // call). estimateInputItemTokens already tolerates it; classification must too.
+    const record = (item && typeof item === 'object' ? item : {}) as Record<string, unknown>
+    const type = typeof record.type === 'string' ? record.type : ''
+    const role = typeof record.role === 'string' ? record.role : ''
+    if (itemContainsImageRef(item)) {
+      sections.vision += tokens
+      visionItems += 1
+    } else if (TOOL_TRACE_ITEM_TYPES.has(type)) {
+      sections.tool_results += tokens
+    } else {
+      const text = itemPlainText(item)
+      if (role === 'system' || text.includes('<system-reminder>')) {
+        sections.reminders += tokens
+      } else if (text.includes('SKILL.md') || text.includes('skill-runtime') || /(?:^|\n)---\n[\s\S]*?\nname:/.test(text)) {
+        sections.skill_inline += tokens
+      } else if (role === 'user' || role === 'assistant' || type === 'message') {
+        sections.history += tokens
+      } else {
+        sections.other += tokens
+      }
+    }
+  }
+  const totalTokens = sections.vision + sections.history + sections.tool_results
+    + sections.skill_inline + sections.reminders + sections.other
+  return { totalTokens, itemCount: items.length, visionItems, sections }
+}
+
 function isOpaqueMediaReference(value: unknown): boolean {
   if (!value || typeof value !== 'object' || value instanceof Uint8Array || Array.isArray(value)) return false
   const record = value as Record<string, unknown>
