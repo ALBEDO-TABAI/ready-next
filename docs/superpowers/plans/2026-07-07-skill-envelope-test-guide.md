@@ -126,6 +126,11 @@ npx tsx --test src/__tests__/skill-catalog-reminder.test.ts   # 预期 EXIT=0，
 
 ## 5. 未完成范围（P2-2 … P3）—— 诚实交代
 
+> ⚠️ 更新 2026-07-07：下列 P2-2 … P3 **均已实现并收口**（见母合同 §5 进度、P2/P3 执行书 status=done、提交序 65ac1054→990aa352）。
+> 每项红测先行 + 全链 test:parallel + typecheck 绿；新增自动化测试：`use-skill-activation`、`embedded-manifest-scan`、
+> `custom-skill-import-metadata`、`external-skill-discovery`、`skill-shell-consent`、`lint-skill`。真机 dogfood（目录段/use_skill
+> 激活/drop-in 目录/`~/.agents/skills` 发现导入/脚本同意开关）待用户执行。本节以下原文保留为当时的范围勘察记录。
+
 本轮收口了 **P0 全量 + P1 全量 + P2-1**（skill 信封的核心：真机报的 `toolCount=0` bug 已修 + 地板架构已落）。
 以下为**尚未实现**，每项都是深集成多文件特性，建议新开上下文按执行书逐项做（每项：红测→实现→验证→单独 commit，
 每阶段起对抗性审查修复循环）：

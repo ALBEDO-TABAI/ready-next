@@ -4,6 +4,13 @@
 
 ## 当前真值摘要
 
+- `2026-07-07` **Skill 信封地板 + Agent Skills 开放标准采纳（P0-P3 全案收口）**（分支 feature/skill-envelope-floors，母合同 2026-07-06-skill-envelope-floors-and-standard-adoption）：
+  - **P0/P1（前轮）**：真机 `@[技能]+@[*.md]→toolCount=0` 死因三层修复（授权提取误杀 / 排他过滤空集 / 跨资源饥饿）；`capability-floors.ts` 能力地板进 SDK executor+orchestrator 唯一裁决面，typed envelope `skill_reference` 为权限第一信源，正则文本降兜底。
+  - **P1 独立对抗性复审补修（本轮）**：`check-capability-gate-enforced-in-arbitration.cjs` 之前只 grep 计算点、漏掉 orchestrator **live 强制点**——扩断言 `enforceCapabilityFloors` 落地 + 回写 + `tool_surface_floor_violation` 日志（验证：删块即红）；CLAUDE/AGENTS "floors 权威点在 resolveRunCapabilities" 表述纠偏（该路径 dormant，executor/orchestrator 才是 live 权威）。
+  - **P2（本轮）**：L1 技能目录常驻注入（`skill-catalog-reminder`，预算裁剪）；`use_skill` 模型侧激活工具（新 `skill_activation` 组，无 `skill_` 前缀免被剥，`intentGroupModes` 按 none∧目录非空 曝光，注册 gate）；embedded 注册改**启动目录扫描**（`buildEmbeddedSkillManifests`，`EmbeddedSkillId` union 退役，drop-in），parity gate 反转；frontmatter 容忍 + 外来 `allowed-tools` 一律忽略（记 `ignoredFields`）+ 超 12K SKILL.md 导入告警。
+  - **P3（本轮）**：`~/.agents/skills` 只读发现=建议导入制（`external-skill-discovery`，workspace 侧因无统一 root accessor 而 deferred）；custom/导入技能 `skill_run_shell` 默认关、按技能同意（`skill_shell_consent` 设置 + 设置页开关 + selected 轮 reminder；embedded 默认放行）；`scripts/lint-skill-core.cjs` 单一 agentskills 规则引擎 + `npm run skills:lint` CLI（import 保持宽松、lint ERROR 是作者/CI 闸不阻断导入、import 只透传 WARN）。
+  - **验证**：每单红测先行 + 全链 `npm run test:parallel` + `npm run typecheck` 绿；新增/改动 gate（capability-arbitration 扩强制点、embedded parity 反转、skill-activation 注册）均验证会咬。真机 dogfood（目录段/use_skill 激活/drop-in/发现导入/脚本同意）待用户执行。提交序 65ac1054→990aa352（8 提交）。
+
 - `2026-07-05` **feature/vertical-tabs 合并回 main + E1-E5 基线 + 三类安装工具 + 远程观察面**：
   - **分支合并（路线 §3 唯一悬点落定）**：main 相对 merge-base ahead=0，vertical-tabs 纯线性领先 403 提交，零冲突 fast-forward（`05c2d5a1..f959281d`）。合并后 main==vertical-tabs 分叉归零。main-fix worktree 的 8 个 typecheck error 全是它自有 node_modules 缺 @tabler/icons-react/pdf2json（环境非合并缺陷；newtab worktree 同提交 typecheck 0），要在 main-fix 开发先 npm install。
   - **E1-E5 体验基线脚本**（experience-baseline.cjs + verify:experience-baseline）：真流式占比 0.727、E5 同页连读≥3 回执缺陷=0、E4 学习信号 66；--assert 对 E2/E5 硬线把关，首基线落 roadmap §1.1。

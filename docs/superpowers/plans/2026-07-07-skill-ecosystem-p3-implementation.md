@@ -1,5 +1,5 @@
 ---
-status: approved — 白 2026-07-07 批准全案文档化；本篇为 P3 执行书（P2 收口后开工）
+status: done 2026-07-07 — 四单收口（P3-1 ~/.agents/skills 建议导入发现 / P3-2 按技能 shell 同意 + reminder + 设置开关 / P3-3 agentskills lint 单一规则引擎 + CLI + import WARN 透传 / P3-4 收尾同步）；红测先行 + 全链 test:parallel + typecheck 绿。偏差如实记录：P3-1 workspace 侧 .agents/skills 因无统一 workspace-root accessor 而 deferred（只做 home）；P3-3 lint ERROR 不阻断 import（Ready 宽松导入兜底派生 id/description），改由 CLI/CI 闸 + import WARN 透传。真机三验待用户执行。本篇为 P3 执行书（P2 收口后开工）
 revision_history:
   - v1 (2026-07-07): 初稿。母合同 §4 T6 + §5 P3：中立目录发现、脚本执行按技能同意、作者 lint。
 owner: 白
