@@ -29,6 +29,8 @@ interface BrowserTabOpenedEvent {
   error?: string | null
   /** false = background/agent tab: list it without preempting focus (D1). */
   activate?: boolean
+  /** The tab that opened this one (P4): list the new tab after its opener + inherit group. */
+  openerTabId?: string | null
 }
 
 export function useBrowserRuntimeEffects({
@@ -277,9 +279,13 @@ export function useBrowserRuntimeEffects({
       const store = useBrowserTabs.getState()
       const existing = store.tabs.some((item) => item.id === openedTab.id)
       if (existing) {
+        // Dedup: an already-listed id (e.g. a renderer-initiated tab echoed back)
+        // updates in place — never a second row (Doc B §14).
         store.updateTab(openedTab.id, openedTab)
       } else {
-        store.addTab(openedTab)
+        // P4: list the new tab right after its opener and inherit the opener's group;
+        // appends when there's no opener (or it isn't listed).
+        store.addTabAfterOpener(openedTab, tab.openerTabId ?? null)
       }
       // D1: background/agent tabs are listed but must never preempt the user's
       // active tab or address bar (activate:false comes from tab-lifecycle-service).

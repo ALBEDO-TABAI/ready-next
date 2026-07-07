@@ -12,6 +12,9 @@ export interface BrowserTabMetaRecord {
   canGoBack: boolean
   canGoForward: boolean
   error: string | null
+  // The tab that opened this one (Phase 4). Renderer positions the new tab after its
+  // opener and inherits the opener's group. Transient hint — not persisted on the tab.
+  openerTabId?: string | null
 }
 
 export interface BrowserTabMetaPayload {
@@ -29,6 +32,7 @@ export interface BrowserTabMetaPayload {
   canGoBack: boolean
   canGoForward: boolean
   error: string | null
+  openerTabId: string | null
 }
 
 interface BrowserTabMetaServiceDeps<TTab extends BrowserTabMetaRecord> {
@@ -56,6 +60,7 @@ export class BrowserTabMetaService<TTab extends BrowserTabMetaRecord> {
       canGoBack: tab.canGoBack,
       canGoForward: tab.canGoForward,
       error: tab.error,
+      openerTabId: tab.openerTabId ?? null,
     }
   }
 

@@ -21,7 +21,7 @@ import {
 interface BrowserContextMenuHost {
   mainWindow: BrowserWindow
   isAllowedUrl(url: string): boolean
-  createTab(url: string, options?: { background?: boolean }): Promise<{ success: boolean; tabId?: string; error?: string }>
+  createTab(url: string, options?: { background?: boolean; openerTabId?: string | null }): Promise<{ success: boolean; tabId?: string; error?: string }>
   addImageToActiveBoard(url: string): Promise<unknown>
   getTabIdForWebContents(webContents: WebContents): string | null
   sendToRenderer(channel: string, data: unknown): void
@@ -114,7 +114,7 @@ export class BrowserContextMenuService {
         {
           label: '在新标签页打开链接',
           click: () => {
-            void this.host.createTab(linkUrl, { background: true }).catch((error) => {
+            void this.host.createTab(linkUrl, { background: true, openerTabId: this.host.getTabIdForWebContents(webContents) }).catch((error) => {
               this.host.logBrowserDiag(`[browser-v3][context] open link in tab failed: ${String(error)}`)
             })
           },
@@ -166,7 +166,7 @@ export class BrowserContextMenuService {
         {
           label: '在新标签页打开图片',
           click: () => {
-            void this.host.createTab(imageUrl, { background: true }).catch((error) => {
+            void this.host.createTab(imageUrl, { background: true, openerTabId: this.host.getTabIdForWebContents(webContents) }).catch((error) => {
               this.host.logBrowserDiag(`[browser-v3][context] open image in tab failed: ${String(error)}`)
             })
           },

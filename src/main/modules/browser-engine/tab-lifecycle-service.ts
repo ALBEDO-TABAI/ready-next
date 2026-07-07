@@ -38,6 +38,7 @@ export interface BrowserLifecycleTabRecord {
   canGoBack: boolean
   canGoForward: boolean
   error: string | null
+  openerTabId?: string | null
   view?: BrowserHostView
 }
 
@@ -270,7 +271,7 @@ export class BrowserTabLifecycleService {
 
   async createTab(
     url: string,
-    options?: { background?: boolean },
+    options?: { background?: boolean; openerTabId?: string | null },
   ): Promise<{ success: boolean; tabId?: string; error?: string }> {
     if (!this.host.isAllowedUrl(url)) {
       return { success: false, error: 'Blocked URL protocol. Only http:, https:, and local HTML files are allowed.' }
@@ -296,6 +297,7 @@ export class BrowserTabLifecycleService {
         canGoBack: false,
         canGoForward: false,
         error: null,
+        openerTabId: options?.openerTabId ?? null,
       }
       this.host.tabs.set(tabId, tab)
       if (!background) this.host.setActiveTabId(tabId)
@@ -335,6 +337,7 @@ export class BrowserTabLifecycleService {
       canGoBack: false,
       canGoForward: false,
       error: null,
+      openerTabId: options?.openerTabId ?? null,
       view,
     }
     this.host.tabs.set(tabId, tab)

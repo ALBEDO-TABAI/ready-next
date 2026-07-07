@@ -46,6 +46,7 @@ interface BrowserTabsState {
   setBrowserSplitRatio: (ratio: number) => void
   setUrlInput: (input: string) => void
   addTab: (tab: BrowserTab) => void
+  addTabAfterOpener: (tab: BrowserTab, openerTabId: string | null) => void
   removeTab: (id: string) => void
   updateTab: (id: string, updates: Partial<BrowserTab>) => void
   reorderTabs: (fromIndex: number, toIndex: number) => void
@@ -291,6 +292,21 @@ export const useBrowserTabs = create<BrowserTabsState>((set) => {
 
     addTab: (tab) =>
       set((state) => commit(state, { tabs: [...state.tabs, tab], tabGroups: state.tabGroups })),
+
+    // Insert a newly-opened tab right after its opener, inheriting the opener's group
+    // (Phase 4). Appends when the opener is absent. commit() re-normalizes so the group
+    // stays contiguous (the new tab lands adjacent to its opener inside the run).
+    addTabAfterOpener: (tab, openerTabId) =>
+      set((state) => {
+        const openerIndex = openerTabId ? state.tabs.findIndex((item) => item.id === openerTabId) : -1
+        if (openerIndex === -1) {
+          return commit(state, { tabs: [...state.tabs, tab], tabGroups: state.tabGroups })
+        }
+        const opener = state.tabs[openerIndex]
+        const inserted = [...state.tabs]
+        inserted.splice(openerIndex + 1, 0, { ...tab, groupId: opener.groupId ?? null })
+        return commit(state, { tabs: inserted, tabGroups: state.tabGroups })
+      }),
 
     removeTab: (id) =>
       set((state) => {

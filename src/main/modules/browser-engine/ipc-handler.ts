@@ -654,7 +654,7 @@ export class BrowserController {
     context: { sourceTabId?: string | null; sourceOwner?: BrowserTabOwner | null } = {},
   ): void {
     const agentOwned = context.sourceOwner === 'agent'
-    void this.createTab(url, agentOwned ? { background: true } : undefined)
+    void this.createTab(url, { background: agentOwned, openerTabId: context.sourceTabId ?? null })
       .then((result) => {
         if (!result.success || !result.tabId) {
           this.logBrowserDiag(`[browser-v3][popup] create tab failed: ${result.error || 'unknown error'}`)
@@ -1853,7 +1853,7 @@ export class BrowserController {
    */
   async createTab(
     url: string,
-    options?: { background?: boolean },
+    options?: { background?: boolean; openerTabId?: string | null },
   ): Promise<{ success: boolean; tabId?: string; error?: string }> {
     if (!options?.background) this.clearSplitTabHost()
     const result = await this.tabLifecycleService.createTab(url, options)
