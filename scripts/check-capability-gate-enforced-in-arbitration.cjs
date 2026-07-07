@@ -21,6 +21,7 @@ const path = require('node:path')
 const REPO_DEFAULT = path.resolve(__dirname, '..')
 const TARGET_REL = 'src/main/modules/agent-control/domain-adapters/run-capability-controller.ts'
 const EXECUTOR_REL = 'src/main/modules/agent-control/runtime-core/agent-sdk-tool-executor.ts'
+const ORCHESTRATOR_REL = 'src/main/modules/agent-control/runtime-core/agent-sdk-turn-orchestrator.ts'
 
 function checkCapabilityGateEnforcedInArbitration({ root = REPO_DEFAULT } = {}) {
   const errors = []
@@ -51,6 +52,31 @@ function checkCapabilityGateEnforcedInArbitration({ root = REPO_DEFAULT } = {}) 
     errors.push(`Missing target: ${EXECUTOR_REL}`)
   } else if (!/\bcomputeCapabilityFloors\s*\(/.test(fs.readFileSync(executorAbs, 'utf8'))) {
     errors.push(`${EXECUTOR_REL}: missing \`computeCapabilityFloors(\` — SDK path must consume the same floors function`)
+  }
+
+  // Review-fix (2026-07-07) — the LIVE authoritative enforcement point is the turn-orchestrator's
+  // end-of-pipeline invariant, NOT the (dormant) controller. `computeCapabilityFloors(` alone is
+  // computed-and-discarded unless the surface is actually reconciled against it after the LAST
+  // narrowing filter. Assert the orchestrator (a) recomputes floors, (b) calls `enforceCapabilityFloors(`,
+  // (c) assigns the result back to `toolDefinitions` (so the recovery is not dropped), and (d) emits the
+  // `tool_surface_floor_violation` observability breadcrumb. Deleting the block now turns the gate RED.
+  const orchestratorAbs = path.join(root, ORCHESTRATOR_REL)
+  if (!fs.existsSync(orchestratorAbs)) {
+    errors.push(`Missing target: ${ORCHESTRATOR_REL}`)
+  } else {
+    const orchestratorSrc = fs.readFileSync(orchestratorAbs, 'utf8')
+    if (!/\bcomputeCapabilityFloors\s*\(/.test(orchestratorSrc)) {
+      errors.push(`${ORCHESTRATOR_REL}: missing \`computeCapabilityFloors(\` — live turn must recompute floors at the arbitration surface`)
+    }
+    if (!/\benforceCapabilityFloors\s*\(/.test(orchestratorSrc)) {
+      errors.push(`${ORCHESTRATOR_REL}: missing \`enforceCapabilityFloors(\` — live pipeline end must enforce \`surface ⊇ floors\``)
+    }
+    if (!/toolDefinitions\s*=\s*\w+\.definitions\b/.test(orchestratorSrc)) {
+      errors.push(`${ORCHESTRATOR_REL}: floor enforcement result must be assigned back to \`toolDefinitions\` (else recovery is discarded)`)
+    }
+    if (!/tool_surface_floor_violation/.test(orchestratorSrc)) {
+      errors.push(`${ORCHESTRATOR_REL}: missing \`tool_surface_floor_violation\` — floor breaches must be observable`)
+    }
   }
 
   return { ok: errors.length === 0, errors }
