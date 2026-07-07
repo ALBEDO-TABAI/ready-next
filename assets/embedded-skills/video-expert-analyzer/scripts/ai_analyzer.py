@@ -1810,6 +1810,20 @@ def _main_impl(argv: Optional[List[str]] = None) -> int:
     scores_path = Path(args.scene_scores)
     video_dir = scores_path.parent
     storyboard_formats = parse_storyboard_formats(args.storyboard_formats)
+    # PDF 导出（视听剖析 / 分镜表）依赖 reportlab。运行时缺失该库时，降级为仅 Markdown 交付，
+    # 避免一个可选导出库把已经完成的整份分析判死（requirements.txt 已声明 reportlab；这里是配置
+    # 不全时的安全网）。降级只发生在真正缺库时，正常安装的环境行为不变。
+    if "pdf" in storyboard_formats:
+        import importlib.util as _importlib_util
+
+        if _importlib_util.find_spec("reportlab") is None:
+            print(
+                "⚠️ reportlab 未安装，视听剖析 / 分镜表降级为仅 Markdown（跳过 PDF 导出）；"
+                "如需 PDF，请在技能运行时安装 reportlab 后重跑 finalize。"
+            )
+            storyboard_formats = [fmt for fmt in storyboard_formats if fmt != "pdf"]
+            if "md" not in storyboard_formats:
+                storyboard_formats.append("md")
     mode = resolve_stage(args.mode, scores_path)
     state_path = run_state_path_for(scores_path)
 

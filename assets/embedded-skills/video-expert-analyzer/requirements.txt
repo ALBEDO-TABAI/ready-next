@@ -16,6 +16,10 @@ numpy>=1.24
 requests>=2.31
 browser_cookie3>=0.19
 
+# Report export（视听剖析 / 分镜表 PDF 导出；缺失会在 finalize 阶段报 No module named 'reportlab'。
+# ai_analyzer 已加安全网：缺 reportlab 时降级为仅 Markdown，但正常交付需要它。）
+reportlab>=4.2
+
 # ---------------------------------------------------------------------------
 # 可选依赖（仅字幕降级链的第 3/4 级需要；缺失时脚本自动跳过对应级别）：
 #
