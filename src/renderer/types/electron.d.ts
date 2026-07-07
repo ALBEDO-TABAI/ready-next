@@ -1443,7 +1443,8 @@ interface BrowserAdblockStateData {
 
 interface ElectronBrowserAPI {
   createTab: (
-    url: string
+    url: string,
+    options?: { background?: boolean }
   ) => Promise<{ success: boolean; tabId?: string; title?: string; error?: string; mock?: boolean }>
   openForCaptureTarget: (
     url: string

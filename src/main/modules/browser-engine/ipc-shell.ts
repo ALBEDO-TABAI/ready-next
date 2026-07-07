@@ -38,7 +38,7 @@ interface BrowserShellIPCController {
   tabs: Map<string, BrowserShellTab>
   activeTabId: string | null
   viewBounds: { x: number; y: number; width: number; height: number }
-  createTab(url: string): Promise<{ success: boolean; tabId?: string; error?: string }>
+  createTab(url: string, options?: { background?: boolean }): Promise<{ success: boolean; tabId?: string; error?: string }>
   openForCaptureTarget(url: string): Promise<{ success: boolean; tabId?: string; reused?: boolean; error?: string }>
   navigate(tabId: string | null, url: string): Promise<{ success: boolean; error?: string }>
   reorderTabs(tabIds: string[]): { success: boolean; error?: string }
@@ -97,9 +97,9 @@ interface BrowserShellIPCController {
 }
 
 export function setupBrowserShellIPC(controller: BrowserShellIPCController): void {
-  ipcMain.handle('browser:createTab', async (_, url: string) => {
+  ipcMain.handle('browser:createTab', async (_, url: string, options?: { background?: boolean }) => {
     try {
-      const result = await controller.createTab(url)
+      const result = await controller.createTab(url, options)
       if (!result.success) return result
       const tab = controller.tabs.get(result.tabId!)
       return { success: true, tabId: result.tabId, title: tab?.title || 'Loading...' }

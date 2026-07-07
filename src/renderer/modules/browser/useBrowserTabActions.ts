@@ -8,6 +8,18 @@ import { browserTabActivationSequencer } from './browserTabActivationSequencer'
 import { createBrowserTabSwitchExecutor } from './browserTabSwitchExecutor'
 import { DEFAULT_BROWSER_URL, extractBrowserDomain, isSupportedBrowserNavigationUrl } from './url-utils'
 
+// A background tab (created with { background: true }) lands in the store asynchronously
+// via the browser:tabOpened push (onTabOpened → addTab). Poll until it lists so a
+// follow-up group op (which no-ops on an unknown tab id) sequences after it.
+async function waitForTabListed(tabId: string, timeoutMs = 1500): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs
+  while (!useBrowserTabs.getState().tabs.some((tab) => tab.id === tabId)) {
+    if (Date.now() >= deadline) return false
+    await new Promise((resolve) => setTimeout(resolve, 40))
+  }
+  return true
+}
+
 interface UseBrowserTabActionsParams {
   isElectron: boolean
   activeTab: BrowserTab | null
@@ -367,6 +379,74 @@ export function useBrowserTabActions({
     })()
   }, [reorderTabs])
 
+  // ---- Tab groups (renderer-only) ----
+  // Groups never cross to the main process. But every group op that changes the FLAT
+  // order (create/add/remove/reorder) writes the resulting order back to the backend so
+  // getTabs() stays in sync (C-ORDER); the merge helper then preserves groupId across
+  // reconciles. rename/recolor/collapse/disband don't touch flat order and are wired
+  // straight to the store in BrowserMode.
+  const writeBackFlatOrder = useCallback(async () => {
+    const flatIds = useBrowserTabs.getState().tabs.map((tab) => tab.id)
+    await window.electronAPI?.browser?.reorderTabs(flatIds)
+  }, [])
+
+  const handleCreateGroup = useCallback((draggedId: string, targetId: string) => {
+    useBrowserTabs.getState().createTabGroupFromDrop(draggedId, targetId)
+    void writeBackFlatOrder()
+  }, [writeBackFlatOrder])
+
+  const handleAddToGroup = useCallback((tabId: string, groupId: string) => {
+    useBrowserTabs.getState().addTabToGroup(tabId, groupId)
+    void writeBackFlatOrder()
+  }, [writeBackFlatOrder])
+
+  const handleRemoveFromGroup = useCallback((tabId: string) => {
+    useBrowserTabs.getState().removeTabFromGroup(tabId)
+    void writeBackFlatOrder()
+  }, [writeBackFlatOrder])
+
+  const handleReorderToRank = useCallback((movedId: string, toRank: number, intoGroupId: string | null) => {
+    useBrowserTabs.getState().reorderTabToRank(movedId, toRank, intoGroupId)
+    void writeBackFlatOrder()
+  }, [writeBackFlatOrder])
+
+  // delete-group closes every member tab. Store-layer orchestration (crosses the id
+  // layer + IPC), NOT the pure model. Never-empty: if the group holds every tab, a
+  // survivor is created FIRST — backend closeTab has no last-tab replacement.
+  const handleDeleteGroup = useCallback(async (groupId: string) => {
+    if (!isElectron) return
+    const { tabs: currentTabs } = useBrowserTabs.getState()
+    const members = currentTabs.filter((tab) => (tab.groupId ?? null) === groupId)
+    if (members.length === 0) return
+    const remaining = currentTabs.filter((tab) => (tab.groupId ?? null) !== groupId)
+    if (remaining.length === 0) {
+      await sendBoundsImmediate({ forceExact: true })
+      const created = await window.electronAPI?.browser?.createTab(DEFAULT_BROWSER_URL) as { success: boolean; tabId?: string } | undefined
+      if (!created?.success || !created.tabId) return
+    }
+    for (const member of members) {
+      await window.electronAPI?.browser?.closeTab(member.id)
+    }
+    // Backend reselects active; the merge helper drops the closed members and
+    // sanitizeSnapshot's normalize drops the now-orphaned group (I3).
+    await syncTabsFromBackend()
+    requestAnimationFrame(() => sendBoundsImmediate({ forceExact: true }))
+  }, [isElectron, sendBoundsImmediate, syncTabsFromBackend])
+
+  // new-tab-in-group creates a BACKGROUND tab (no focus steal, mirrors Phase 0), waits
+  // for it to list, then moves it into the group and writes the flat order back.
+  const handleNewTabInGroup = useCallback(async (groupId: string) => {
+    if (!isElectron) return
+    await sendBoundsImmediate({ forceExact: true })
+    const created = await window.electronAPI?.browser?.createTab(DEFAULT_BROWSER_URL, { background: true }) as { success: boolean; tabId?: string } | undefined
+    if (!created?.success || !created.tabId) return
+    const listed = await waitForTabListed(created.tabId)
+    if (!listed) return
+    useBrowserTabs.getState().addTabToGroup(created.tabId, groupId)
+    await writeBackFlatOrder()
+    requestAnimationFrame(() => sendBoundsImmediate({ forceExact: true }))
+  }, [isElectron, sendBoundsImmediate, writeBackFlatOrder])
+
   const handlePrint = useCallback(async () => {
     if (!isElectron || !activeTabId) return
     await window.electronAPI?.browser?.print(activeTabId)
@@ -387,6 +467,12 @@ export function useBrowserTabActions({
     handleUrlBlur,
     handleOpenExternal,
     handleReorder,
+    handleReorderToRank,
+    handleCreateGroup,
+    handleAddToGroup,
+    handleRemoveFromGroup,
+    handleDeleteGroup,
+    handleNewTabInGroup,
     handlePrint,
   }
 }

@@ -153,10 +153,11 @@ export default function BrowserMode({
 }: BrowserModeProps) {
   // Persistent browser tab state — survives mode switches
   const {
-    tabs, activeTabId, splitTabId, browserSplitRatio, urlInput,
+    tabs, tabGroups, activeTabId, splitTabId, browserSplitRatio, urlInput,
     setTabs, setActiveTabId, setUrlInput,
     setSplitTabId, setBrowserSplitRatio,
     addTab, updateTab, reorderTabs,
+    renameTabGroup, recolorTabGroup, setTabGroupCollapsed, disbandTabGroup,
   } = useBrowserTabs()
   const [isBrowserSurfaceReady, setIsBrowserSurfaceReady] = useState(false)
   const isAddressEditingRef = useRef(false)
@@ -411,7 +412,12 @@ export default function BrowserMode({
     handleRetry,
     handleUrlFocus,
     handleUrlBlur,
-    handleReorder,
+    handleReorderToRank,
+    handleCreateGroup,
+    handleAddToGroup,
+    handleRemoveFromGroup,
+    handleDeleteGroup,
+    handleNewTabInGroup,
   } = useBrowserTabActions({
     isElectron,
     activeTab,
@@ -1148,13 +1154,23 @@ export default function BrowserMode({
             <VerticalTabRail
               isActive={isActive}
               tabs={tabs}
+              tabGroups={tabGroups}
               activeTabId={activeTabId}
               splitTabId={visibleSplitTab?.id || null}
               bookmarkedUrls={bookmarks.map((item) => item.url)}
               onTabClick={handleHeaderTabClick}
               onTabClose={handleCloseTab}
               onNewTab={handleNewTab}
-              onReorder={handleReorder}
+              onReorderToRank={handleReorderToRank}
+              onCreateGroup={handleCreateGroup}
+              onAddToGroup={handleAddToGroup}
+              onRemoveFromGroup={handleRemoveFromGroup}
+              onRenameGroup={renameTabGroup}
+              onRecolorGroup={recolorTabGroup}
+              onSetGroupCollapsed={setTabGroupCollapsed}
+              onDisbandGroup={disbandTabGroup}
+              onDeleteGroup={handleDeleteGroup}
+              onNewTabInGroup={handleNewTabInGroup}
               onToggleBookmarkForTab={handleToggleBookmarkForTab}
             />
 

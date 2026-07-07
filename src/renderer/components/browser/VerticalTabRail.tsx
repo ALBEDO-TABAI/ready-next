@@ -8,31 +8,48 @@ import {
   addReadyContextReferenceToAgentInput,
   showBrowserTabContextMenu,
 } from '../../modules/agent/chat-input-bridge'
-import { extractBrowserDomain } from '../../modules/browser/url-utils'
-import { getActiveTabPairOrder } from '../../modules/workbench/active-tab-pair-order'
 import type { BrowserTab } from '../../stores/useBrowserTabs'
+import type { TabGroup, TabGroupColor } from '../../../shared/tab-groups'
 import type {
   VerticalRailOverlayCommand,
   VerticalRailOverlaySnapshot,
-  VerticalRailOverlayTab,
 } from '../../../shared/browser-vertical-rail-overlay'
-import { resolveVerticalRailFlyoutHeight } from '../../../shared/vertical-rail-flyout-layout'
+import {
+  resolveGroupedFlyoutContentHeight,
+  VERTICAL_RAIL_FLYOUT_MIN_HEIGHT,
+  VERTICAL_RAIL_FLYOUT_ROW_GAP,
+} from '../../../shared/vertical-rail-flyout-layout'
+import { buildTabRailRows, resolveReorderDrop } from '../tabs/tab-rail-display-model'
+import { resolveTabDropIntent, tabGroupColorVar, tabGroupColorSoft, type TabDropIntent } from '../tabs/tab-group-visuals'
+import { buildOverlaySnapshotTabs } from './vertical-rail-overlay-snapshot'
 
 export const BROWSER_VERTICAL_RAIL_WIDTH = 52
 const RAIL_WIDTH = BROWSER_VERTICAL_RAIL_WIDTH
 const HOVER_OPEN_DELAY = 140
 const HOVER_CLOSE_DELAY = 180
+const STRIP_ICON = 38
 
 interface VerticalTabRailProps {
   isActive: boolean
   tabs: BrowserTab[]
+  tabGroups: TabGroup[]
   activeTabId: string | null
   splitTabId: string | null
   bookmarkedUrls: string[]
   onTabClick: (id: string, event: { shiftKey: boolean }) => void | Promise<void>
   onTabClose: (id: string) => void | Promise<void>
   onNewTab: () => void | Promise<void>
-  onReorder: (fromIndex: number, toIndex: number) => void
+  // id-based reorder (D-CMD): toRank is a flat rank; intoGroupId (re)assigns the group.
+  onReorderToRank: (movedId: string, toRank: number, intoGroupId: string | null) => void
+  onCreateGroup: (draggedId: string, targetId: string) => void
+  onAddToGroup: (tabId: string, groupId: string) => void
+  onRemoveFromGroup: (tabId: string) => void
+  onRenameGroup: (groupId: string, name: string) => void
+  onRecolorGroup: (groupId: string, color: TabGroupColor) => void
+  onSetGroupCollapsed: (groupId: string, collapsed: boolean) => void
+  onDisbandGroup: (groupId: string) => void
+  onDeleteGroup: (groupId: string) => void
+  onNewTabInGroup: (groupId: string) => void
   onToggleBookmarkForTab: (tab: BrowserTab) => void
 }
 
@@ -49,20 +66,31 @@ function tabIconNode(tab: BrowserTab, size: number) {
 export default function VerticalTabRail({
   isActive,
   tabs,
+  tabGroups,
   activeTabId,
   splitTabId,
   bookmarkedUrls,
   onTabClick,
   onTabClose,
   onNewTab,
-  onReorder,
+  onReorderToRank,
+  onCreateGroup,
+  onAddToGroup,
+  onRemoveFromGroup,
+  onRenameGroup,
+  onRecolorGroup,
+  onSetGroupCollapsed,
+  onDisbandGroup,
+  onDeleteGroup,
+  onNewTabInGroup,
   onToggleBookmarkForTab,
 }: VerticalTabRailProps) {
   const rootRef = useRef<HTMLDivElement>(null)
   const railListRef = useRef<HTMLDivElement>(null)
-  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null)
+  // id-based drag state (two-intent): the dragged id + the current drop target + intent.
+  const draggingIdRef = useRef<string | null>(null)
   const [draggingTabId, setDraggingTabId] = useState<string | null>(null)
-  const dragIndexRef = useRef<number | null>(null)
+  const [dropTarget, setDropTarget] = useState<{ id: string; intent: TabDropIntent } | null>(null)
 
   // Native-overlay hover flyout state (cross-window dual-hover arbitration).
   const railHoveredRef = useRef(false)
@@ -71,43 +99,58 @@ export default function VerticalTabRail({
   const openTimerRef = useRef<number | null>(null)
   const closeTimerRef = useRef<number | null>(null)
 
-  // Keep latest props reachable from the IPC command handler without re-subscribing.
-  const latestRef = useRef({ tabs, activeTabId, splitTabId, bookmarkedUrls })
-  latestRef.current = { tabs, activeTabId, splitTabId, bookmarkedUrls }
+  // Keep latest props (state + all callbacks) reachable from the IPC command handler
+  // without re-subscribing the overlay command listener each render.
+  const latestRef = useRef({
+    tabs, tabGroups, activeTabId, splitTabId, bookmarkedUrls,
+    onTabClick, onTabClose, onNewTab, onReorderToRank, onCreateGroup, onAddToGroup,
+    onRemoveFromGroup, onRenameGroup, onRecolorGroup, onSetGroupCollapsed,
+    onDisbandGroup, onDeleteGroup, onNewTabInGroup, onToggleBookmarkForTab,
+  })
+  latestRef.current = {
+    tabs, tabGroups, activeTabId, splitTabId, bookmarkedUrls,
+    onTabClick, onTabClose, onNewTab, onReorderToRank, onCreateGroup, onAddToGroup,
+    onRemoveFromGroup, onRenameGroup, onRecolorGroup, onSetGroupCollapsed,
+    onDisbandGroup, onDeleteGroup, onNewTabInGroup, onToggleBookmarkForTab,
+  }
 
-  const orderedTabs = useMemo(
-    () => getActiveTabPairOrder(tabs, activeTabId, splitTabId),
-    [activeTabId, splitTabId, tabs],
+  const groupOf = useMemo(
+    () => Object.fromEntries(tabs.map((tab) => [tab.id, tab.groupId ?? null])),
+    [tabs],
   )
+  const { rows, flatOrder } = useMemo(
+    () => buildTabRailRows(tabs.map((tab) => tab.id), groupOf, tabGroups, activeTabId, splitTabId),
+    [tabs, groupOf, tabGroups, activeTabId, splitTabId],
+  )
+  const tabRows = useMemo(
+    () => rows.filter((row): row is Extract<typeof rows[number], { kind: 'tab' }> => row.kind === 'tab'),
+    [rows],
+  )
+  const tabById = useMemo(() => new Map(tabs.map((tab) => [tab.id, tab])), [tabs])
+  const groupById = useMemo(() => new Map(tabGroups.map((group) => [group.id, group])), [tabGroups])
 
+  // D-SNAPSHOT: emit the RAW FLAT tab order + per-tab groupId + the group list. The
+  // overlay window does its own run-local split hoist; a reorder command's toRank is
+  // resolved against this flat array. Never wrap the overlay tabs in a global display
+  // hoist (getActiveTabPairOrder) — that would put toRank in display space (drift gate
+  // check-overlay-snapshot-flat-order).
   const buildSnapshot = useCallback((): VerticalRailOverlaySnapshot | null => {
     const root = rootRef.current
     if (!root) return null
     const rect = root.getBoundingClientRect()
     if (rect.height <= 0) return null
-    const { tabs: t, activeTabId: aId, splitTabId: sId, bookmarkedUrls: marks } = latestRef.current
-    const overlayTabs: VerticalRailOverlayTab[] = getActiveTabPairOrder(t, aId, sId).map(({ tab }) => ({
-      id: tab.id,
-      title: tab.title || 'New Tab',
-      domain: tab.domain || extractBrowserDomain(tab.url || ''),
-      url: tab.url,
-      favicon: tab.favicon,
-      active: tab.id === aId || (tab.id === sId && tab.id !== aId),
-      split: tab.id === sId && tab.id !== aId,
-      loading: Boolean(tab.loading),
-      owner: tab.owner,
-      activity: tab.activity,
-      required: tab.required,
-      bookmarked: marks.includes(tab.url),
-    }))
+    const { tabs: t, tabGroups: g, activeTabId: aId, splitTabId: sId, bookmarkedUrls: marks } = latestRef.current
+    const overlayTabs = buildOverlaySnapshotTabs(t, aId, sId, marks)
+    const collapsedGroupIds = new Set(g.filter((group) => group.collapsed).map((group) => group.id))
+    const visibleTabRows = t.filter((tab) => !(tab.groupId && collapsedGroupIds.has(tab.groupId))).length
+    const height = Math.min(
+      Math.max(VERTICAL_RAIL_FLYOUT_MIN_HEIGHT, Math.round(rect.height)),
+      resolveGroupedFlyoutContentHeight(visibleTabRows, g.length),
+    )
     return {
       tabs: overlayTabs,
-      bounds: {
-        left: Math.round(rect.left),
-        top: Math.round(rect.top),
-        width: RAIL_WIDTH,
-        height: resolveVerticalRailFlyoutHeight(overlayTabs.length, rect.height),
-      },
+      groups: g,
+      bounds: { left: Math.round(rect.left), top: Math.round(rect.top), width: RAIL_WIDTH, height },
       scrollTop: Math.round(railListRef.current?.scrollTop ?? 0),
     }
   }, [])
@@ -132,6 +175,7 @@ export default function VerticalTabRail({
     if (closeTimerRef.current !== null) return
     closeTimerRef.current = window.setTimeout(() => {
       closeTimerRef.current = null
+      if (draggingIdRef.current) return // never self-close mid-drag
       if (!railHoveredRef.current && !overlayHoveredRef.current) hideOverlay()
     }, HOVER_CLOSE_DELAY)
   }, [hideOverlay])
@@ -161,9 +205,12 @@ export default function VerticalTabRail({
     scheduleClose()
   }, [scheduleClose])
 
-  // Dispatch commands coming back from the overlay window.
+  // Dispatch commands coming back from the overlay window. Reads all handlers off
+  // latestRef so the subscription stays stable across renders.
   useEffect(() => {
     const off = window.electronAPI?.browser?.onVerticalRailOverlayCommand?.((command: VerticalRailOverlayCommand) => {
+      const h = latestRef.current
+      const later = () => setTimeout(pushSnapshot, 0)
       switch (command.type) {
         case 'hover-enter':
           overlayHoveredRef.current = true
@@ -174,30 +221,66 @@ export default function VerticalTabRail({
           scheduleClose()
           break
         case 'switch':
-          void onTabClick(command.tabId, { shiftKey: Boolean(command.shiftKey) })
+          void h.onTabClick(command.tabId, { shiftKey: Boolean(command.shiftKey) })
           overlayHoveredRef.current = false
           hideOverlay()
           break
         case 'close':
-          void Promise.resolve(onTabClose(command.tabId)).then(() => setTimeout(pushSnapshot, 0))
+          void Promise.resolve(h.onTabClose(command.tabId)).then(later)
           break
         case 'new-tab':
-          void onNewTab()
+          void h.onNewTab()
           overlayHoveredRef.current = false
           hideOverlay()
           break
         case 'reorder':
-          onReorder(command.fromIndex, command.toIndex)
-          setTimeout(pushSnapshot, 0)
+          h.onReorderToRank(command.movedTabId, command.toRank, command.intoGroupId)
+          later()
+          break
+        case 'create-group':
+          h.onCreateGroup(command.draggedTabId, command.targetTabId)
+          later()
+          break
+        case 'add-to-group':
+          h.onAddToGroup(command.tabId, command.groupId)
+          later()
+          break
+        case 'remove-from-group':
+          h.onRemoveFromGroup(command.tabId)
+          later()
+          break
+        case 'rename-group':
+          h.onRenameGroup(command.groupId, command.name)
+          later()
+          break
+        case 'recolor-group':
+          h.onRecolorGroup(command.groupId, command.color)
+          later()
+          break
+        case 'set-group-collapsed':
+          h.onSetGroupCollapsed(command.groupId, command.collapsed)
+          later()
+          break
+        case 'disband-group':
+          h.onDisbandGroup(command.groupId)
+          later()
+          break
+        case 'delete-group':
+          h.onDeleteGroup(command.groupId)
+          later()
+          break
+        case 'new-tab-in-group':
+          h.onNewTabInGroup(command.groupId)
+          later()
           break
         case 'toggle-bookmark': {
-          const tab = latestRef.current.tabs.find((item) => item.id === command.tabId)
-          if (tab) onToggleBookmarkForTab(tab)
-          setTimeout(pushSnapshot, 0)
+          const tab = h.tabs.find((item) => item.id === command.tabId)
+          if (tab) h.onToggleBookmarkForTab(tab)
+          later()
           break
         }
         case 'reference': {
-          const tab = latestRef.current.tabs.find((item) => item.id === command.tabId)
+          const tab = h.tabs.find((item) => item.id === command.tabId)
           if (tab) {
             void addReadyContextReferenceToAgentInput({
               type: 'browser-tab',
@@ -212,10 +295,10 @@ export default function VerticalTabRail({
       }
     })
     return off
-  }, [cancelClose, hideOverlay, onNewTab, onReorder, onTabClick, onTabClose, onToggleBookmarkForTab, pushSnapshot, scheduleClose])
+  }, [cancelClose, hideOverlay, pushSnapshot, scheduleClose])
 
-  // Keep the overlay in sync with tab/active changes while it is open.
-  useEffect(() => { pushSnapshot() }, [tabs, activeTabId, splitTabId, bookmarkedUrls, pushSnapshot])
+  // Keep the overlay in sync with tab/group/active changes while it is open.
+  useEffect(() => { pushSnapshot() }, [tabs, tabGroups, activeTabId, splitTabId, bookmarkedUrls, pushSnapshot])
 
   // Collapse the overlay whenever the rail leaves the active browser mode, and on unmount.
   useEffect(() => {
@@ -227,17 +310,17 @@ export default function VerticalTabRail({
     endBrowserTabDragSession()
   }, [clearTimers, hideOverlay])
 
+  // ---- strip drag (two-intent: onto → group, before/after → reorder) ----
   const clearDragState = useCallback(() => {
-    dragIndexRef.current = null
-    setDragOverIndex(null)
+    draggingIdRef.current = null
+    setDropTarget(null)
     setDraggingTabId(null)
     endBrowserTabDragSession()
   }, [])
 
-  const handleDragStart = useCallback((event: React.DragEvent, index: number, tab: BrowserTab) => {
-    dragIndexRef.current = index
+  const handleDragStart = useCallback((event: React.DragEvent, tab: BrowserTab) => {
+    draggingIdRef.current = tab.id
     event.dataTransfer.effectAllowed = 'copyMove'
-    event.dataTransfer.setData('text/plain', String(index))
     const payload = {
       type: 'browser-tab' as const,
       name: tab.title || 'New Tab',
@@ -249,14 +332,51 @@ export default function VerticalTabRail({
     }
     beginBrowserTabDragSession(payload)
     event.dataTransfer.setData('application/x-ready-drag', JSON.stringify(payload))
+    event.dataTransfer.setData('text/plain', tab.url || tab.title || '')
     setDraggingTabId(tab.id)
   }, [])
 
-  const handleReorderDrop = useCallback((toIndex: number) => {
-    const fromIndex = dragIndexRef.current
-    if (fromIndex !== null && fromIndex !== toIndex) onReorder(fromIndex, toIndex)
+  const handleRowDragOver = useCallback((event: React.DragEvent, targetId: string) => {
+    if (!draggingIdRef.current || draggingIdRef.current === targetId) return
+    event.preventDefault()
+    event.dataTransfer.dropEffect = 'move'
+    const rect = event.currentTarget.getBoundingClientRect()
+    const intent = resolveTabDropIntent(event.clientY - rect.top, rect.height)
+    setDropTarget((prev) => (prev && prev.id === targetId && prev.intent === intent ? prev : { id: targetId, intent }))
+  }, [])
+
+  const handleRowDrop = useCallback((event: React.DragEvent, targetId: string) => {
+    event.preventDefault()
+    const movedId = draggingIdRef.current
+    const target = dropTarget
     clearDragState()
-  }, [clearDragState, onReorder])
+    if (!movedId || movedId === targetId || !target || target.id !== targetId) return
+    const targetGroupId = groupOf[targetId] ?? null
+    if (target.intent === 'onto') {
+      if (targetGroupId) onAddToGroup(movedId, targetGroupId)
+      else onCreateGroup(movedId, targetId)
+      return
+    }
+    const { toRank, intoGroupId } = resolveReorderDrop(flatOrder, groupOf, movedId, targetId, target.intent)
+    onReorderToRank(movedId, toRank, intoGroupId)
+  }, [clearDragState, dropTarget, flatOrder, groupOf, onAddToGroup, onCreateGroup, onReorderToRank])
+
+  // Clear a stale drop highlight when the drag ends ANYWHERE (Escape, drop off-rail).
+  useEffect(() => {
+    const reset = () => clearDragState()
+    window.addEventListener('dragend', reset)
+    window.addEventListener('drop', reset)
+    return () => { window.removeEventListener('dragend', reset); window.removeEventListener('drop', reset) }
+  }, [clearDragState])
+
+  const activateTab = useCallback((id: string, shiftKey: boolean, groupId: string | null) => {
+    // D-COLLAPSE: activating a tab inside a collapsed group auto-expands the group.
+    if (groupId) {
+      const g = groupById.get(groupId)
+      if (g?.collapsed) onSetGroupCollapsed(groupId, false)
+    }
+    void onTabClick(id, { shiftKey })
+  }, [groupById, onSetGroupCollapsed, onTabClick])
 
   const handleContextMenu = useCallback((event: React.MouseEvent, tab: BrowserTab) => {
     event.preventDefault()
@@ -300,25 +420,36 @@ export default function VerticalTabRail({
         ref={railListRef}
         className="flex min-h-0 flex-1 flex-col items-center overflow-y-auto overflow-x-hidden py-[6px]"
         onScroll={() => pushSnapshot()}
-        style={{ gap: 4 }}
+        onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropTarget(null) }}
+        style={{ gap: VERTICAL_RAIL_FLYOUT_ROW_GAP }}
       >
-        {orderedTabs.map(({ tab, sourceIndex }, displayIndex) => {
+        {tabRows.map((row) => {
+          const tab = tabById.get(row.id)
+          if (!tab) return null
           const isPrimaryActive = tab.id === activeTabId
           const isSplitActive = tab.id === splitTabId && !isPrimaryActive
           const isTabActive = isPrimaryActive || isSplitActive
           const isActivePair = Boolean(activeTabId && splitTabId && activeTabId !== splitTabId)
-          const isDragOver = dragOverIndex === displayIndex
+          const group = row.groupId ? groupById.get(row.groupId) : undefined
           const isDragging = draggingTabId === tab.id
+          const isDropOnto = dropTarget?.id === tab.id && dropTarget.intent === 'onto'
+          const isDropBefore = dropTarget?.id === tab.id && dropTarget.intent === 'before'
+          const isDropAfter = dropTarget?.id === tab.id && dropTarget.intent === 'after'
           return (
             <div
               key={tab.id}
               className="group relative flex w-full flex-shrink-0 items-center justify-center"
               draggable
-              onDragStart={(event) => handleDragStart(event, sourceIndex, tab)}
+              onDragStart={(event) => handleDragStart(event, tab)}
               onDragEnd={clearDragState}
-              onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; setDragOverIndex(displayIndex) }}
-              onDrop={(event) => { event.preventDefault(); handleReorderDrop(sourceIndex) }}
+              onDragOver={(event) => handleRowDragOver(event, tab.id)}
+              onDrop={(event) => handleRowDrop(event, tab.id)}
             >
+              {group && (
+                <span aria-hidden className="pointer-events-none absolute left-0 top-1/2 h-[22px] w-[3px] -translate-y-1/2 rounded-r" style={{ background: tabGroupColorVar(group.color) }} />
+              )}
+              {isDropBefore && <span aria-hidden className="pointer-events-none absolute left-[6px] right-[6px] top-0 h-[2px] rounded" style={{ background: 'var(--color-blue)' }} />}
+              {isDropAfter && <span aria-hidden className="pointer-events-none absolute left-[6px] right-[6px] bottom-0 h-[2px] rounded" style={{ background: 'var(--color-blue)' }} />}
               {isPrimaryActive && isActivePair && (
                 <span
                   aria-hidden
@@ -328,22 +459,22 @@ export default function VerticalTabRail({
               )}
               <button
                 type="button"
-                onClick={(event) => void onTabClick(tab.id, { shiftKey: event.shiftKey })}
+                onClick={(event) => activateTab(tab.id, event.shiftKey, row.groupId)}
                 onAuxClick={(event) => handleAuxClick(event, tab.id)}
                 onContextMenu={(event) => handleContextMenu(event, tab)}
                 className="relative flex items-center justify-center rounded-[10px] transition-[background-color,box-shadow]"
                 title={tab.title || 'New Tab'}
                 style={{
-                  width: 38,
-                  height: 38,
+                  width: STRIP_ICON,
+                  height: STRIP_ICON,
                   opacity: isDragging ? 0.5 : 1,
-                  background: isTabActive
-                    ? 'var(--files-panel-state-active-bg)'
-                    : isDragOver
-                      ? 'color-mix(in srgb, var(--color-blue) 10%, transparent)'
+                  background: isDropOnto
+                    ? (group ? tabGroupColorSoft(group.color, 22) : 'color-mix(in srgb, var(--color-blue) 16%, transparent)')
+                    : isTabActive
+                      ? 'var(--files-panel-state-active-bg)'
                       : 'transparent',
-                  boxShadow: isDragOver
-                    ? '0 0 0 1px var(--color-blue)'
+                  boxShadow: isDropOnto
+                    ? `0 0 0 1px ${group ? tabGroupColorVar(group.color) : 'var(--color-blue)'}`
                     : isTabActive
                       ? 'var(--files-panel-state-active-shadow)'
                       : 'none',
@@ -386,7 +517,7 @@ export default function VerticalTabRail({
             type="button"
             onClick={() => void onNewTab()}
             className="flex items-center justify-center rounded-[10px] transition-colors hover:bg-[var(--bg-hover)]"
-            style={{ width: 38, height: 38 }}
+            style={{ width: STRIP_ICON, height: STRIP_ICON }}
             title="新标签页"
           >
             <Plus style={{ width: 16, height: 16 }} className="text-[var(--text-muted)]" strokeWidth={2} />
