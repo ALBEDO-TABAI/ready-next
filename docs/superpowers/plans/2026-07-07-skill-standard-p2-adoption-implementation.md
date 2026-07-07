@@ -1,5 +1,5 @@
 ---
-status: approved — 白 2026-07-07 批准全案文档化；本篇为 P2 执行书（P1 收口后开工）
+status: in-progress — P2-1（L1 技能目录 reminder）done 2026-07-07（module 9 测 + 真机 dogfood 待跑）；P2-2…P2-5 待做。本篇为 P2 执行书（P1 收口后开工）。use_skill 集成勘察见测试指南 §5。
 revision_history:
   - v1 (2026-07-07): 初稿。母合同 §4 T4/T5：L1 目录渐进披露 + use_skill 激活 + SKILL.md-only 全域一等公民 + union 退役。
 owner: 白
