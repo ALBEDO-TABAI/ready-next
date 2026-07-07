@@ -399,7 +399,8 @@ function deriveLearningRefs(proofRefs: ReadonlyArray<unknown>): unknown[] {
  * steps (steps_json expectedOutputs). Steps are deduped by id with the terminal
  * projectionPatch winning over the stored row (same P0-3 precedence as the task
  * facts), then each step's expectedOutputs are appended in step order. Empty →
- * coverage not enforced (the criterion falls back to NA upstream).
+ * c1 is left UNCHANGED (its pre-P1 steps_complete verdict), NOT converted and NOT
+ * marked NA (the monotonic boundary — NA would fail-open; see resolveCriteria).
  */
 export function deriveCoverageTargets(
   projection: TaskProjectionRecord,
