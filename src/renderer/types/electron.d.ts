@@ -3049,6 +3049,8 @@ interface ElectronSkillsAPI {
   list: () => Promise<IPCResponse<SkillState[]>>
   runtimeInfo: () => Promise<IPCResponse<SkillsRuntimeInfo>>
   listExternalCandidates: () => Promise<IPCResponse<Array<{ path: string; name: string; description: string; source: 'user_agents_dir'; alreadyImported: boolean }>>>
+  listShellConsent: () => Promise<IPCResponse<Record<string, { hasScripts: boolean; consent: boolean }>>>
+  setShellConsent: (payload: { skillId: string; granted: boolean }) => Promise<IPCResponse<{ skillId: string; granted: boolean }>>
   importCustomSkill: (payload: { path: string }) => Promise<IPCResponse<{ skill: SkillState; ignoredFields: string[]; warnings: string[] }>>
   removeCustomSkill: (payload: { skillId: string }) => Promise<IPCResponse<{ removed: boolean }>>
   updateCustomSkillDescription: (payload: {

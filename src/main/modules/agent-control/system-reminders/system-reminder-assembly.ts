@@ -33,6 +33,8 @@ const DEFAULT_CONFLICTS: Record<ReminderTopic, ReadonlyArray<ReminderTopic>> = {
   'criteria-self-check': [],
   // P2-1 — L1 技能目录；纯清单，no conflicts。
   'skill-catalog': [],
+  // P3-2 — 脚本执行同意缺失提醒；selected 轮独立文案，no conflicts。
+  'skill-shell-consent': [],
 }
 
 export function composeSystemReminder(

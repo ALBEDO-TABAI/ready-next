@@ -133,6 +133,8 @@ import {
 import {
   registerSkillCatalogReminder,
 } from '../system-reminders/skill-catalog-reminder'
+import { registerSkillShellConsentReminder } from '../system-reminders/skill-shell-consent-reminder'
+import { getSkillShellConsent, isEmbeddedSkill, skillDirHasScripts } from '../../skills-runtime/skill-shell-consent'
 import { getSkillsRuntimeManager } from '../../skills-runtime/runtime-manager'
 import {
   beginBackgroundTaskTerminalReminderRun,
@@ -1547,6 +1549,18 @@ export class AgentSdkTurnOrchestrator {
           .map((skill) => ({ id: String(skill.id), name: String(skill.name), description: String(skill.description || '') }))
         const catalogRegistry = createSystemReminderRegistry()
         registerSkillCatalogReminder(catalogRegistry, catalogEntries)
+        // P3-2 — selected 轮：若激活技能带脚本但未获脚本执行授权，提醒模型走只读方法论、别伪造脚本结果。
+        if (authorization.mode === 'selected') {
+          const activeSkill = getSkillsRuntimeManager().listSkills().find((skill) => skill.id === authorization.skillId)
+          if (activeSkill) {
+            registerSkillShellConsentReminder(catalogRegistry, {
+              skillName: String(activeSkill.name || authorization.skillId),
+              hasScripts: skillDirHasScripts(activeSkill.managedPath),
+              isEmbedded: isEmbeddedSkill(authorization.skillId),
+              hasConsent: getSkillShellConsent(authorization.skillId),
+            })
+          }
+        }
         const catalogText = catalogRegistry.compose()
         if (catalogText) nextInput = prependSystemReminderInput(nextInput, catalogText)
       } catch {

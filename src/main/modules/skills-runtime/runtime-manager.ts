@@ -32,6 +32,7 @@ import {
   updateManagedCustomSkillDescription,
 } from './custom-skill-registry'
 import { listExternalSkillCandidates, type ExternalSkillCandidate } from './external-skill-discovery'
+import { getSkillShellConsent, setSkillShellConsent, skillDirHasScripts } from './skill-shell-consent'
 import { SkillLoader } from './skill-loader'
 import { scanSkillDirectory } from './skill-security-scanner'
 // Phase 4: ExecutionStateStore / ExecutionCoordinator retired along with the
@@ -723,6 +724,21 @@ export class SkillsRuntimeManager {
   removeCustomSkill(skillId: string): { removed: boolean } {
     this.ensureRuntimeDirs()
     return { removed: removeManagedCustomSkill(this.customSkillsRoot, skillId) }
+  }
+
+  /** P3-2 — per-custom-skill shell-execution consent info for the skills center toggle. */
+  listCustomSkillShellConsent(): Record<string, { hasScripts: boolean; consent: boolean }> {
+    const info: Record<string, { hasScripts: boolean; consent: boolean }> = {}
+    for (const skill of this.listSkills()) {
+      if (skill.source !== 'custom') continue
+      info[skill.id] = { hasScripts: skillDirHasScripts(skill.managedPath), consent: getSkillShellConsent(skill.id) }
+    }
+    return info
+  }
+
+  /** P3-2 — grant/revoke shell-execution consent for a custom skill. */
+  setSkillShellConsent(skillId: string, granted: boolean): void {
+    setSkillShellConsent(skillId, granted)
   }
 
   /** P3-1 — read-only discovery of importable skills under ~/.agents/skills (suggest-import). */

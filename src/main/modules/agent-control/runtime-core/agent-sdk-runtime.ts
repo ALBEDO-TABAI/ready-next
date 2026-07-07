@@ -162,6 +162,7 @@ import {
 } from '../tools-runtime/tool-runtime'
 import { snapshotTurnFeatureFlags } from './turn-feature-flags'
 import { buildAgentSpawnContextFromAIConfig } from '../../skills-runtime/agent-context-source'
+import { resolveSkillShellAllowed, isEmbeddedSkill, getSkillShellConsent } from '../../skills-runtime/skill-shell-consent'
 import { executeToolCall as executeReadyToolCall } from '../../tools'
 import { appendToolCapabilityLog } from '../../tools/tool-event-log'
 import { PRIMITIVE_TOOL_DEFS, PRIMITIVE_TOOL_NAME_SET } from '../../tools/skill-primitives/tool-defs'
@@ -1016,7 +1017,12 @@ export class AgentSdkRuntime extends EventEmitter {
           typedRefActionNames.add('skill_video_expert_ai_analyze')
         }
         const typedRefActions = Array.from(typedRefActionNames)
-        const typedRefAllowRunShell = explicitReferenceSkillHasScripts(matchedSkill, typedRefActions)
+        // P3-2 — shell only when the skill has scripts AND (embedded OR user-consented).
+        const typedRefAllowRunShell = resolveSkillShellAllowed({
+          hasScripts: explicitReferenceSkillHasScripts(matchedSkill, typedRefActions),
+          isEmbedded: isEmbeddedSkill(typedRefSkillId),
+          hasConsent: getSkillShellConsent(typedRefSkillId),
+        })
         const typedRefAllowAskUser = !shouldSuppressSkillAskUserForArtifactDelivery(typedRefPreferredTexts)
         log(`[skill_authorization] source=typed_ref skill=${typedRefSkillId}`)
         return buildSelectedSkillToolAuthorization({
@@ -1076,7 +1082,12 @@ export class AgentSdkRuntime extends EventEmitter {
     const typedActions = Array.from(typedActionNames)
     const skillId = explicitSkillId || (skillHintRelevantForTurn ? referenceHint?.id || null : null)
     if (!skillId) return buildExplicitNoSkillAuthorization('no_skill_signal')
-    const allowRunShell = explicitReferenceSkillHasScripts(explicitSkill, typedActions)
+    // P3-2 — shell only when the skill has scripts AND (embedded OR user-consented).
+    const allowRunShell = resolveSkillShellAllowed({
+      hasScripts: explicitReferenceSkillHasScripts(explicitSkill, typedActions),
+      isEmbedded: isEmbeddedSkill(skillId),
+      hasConsent: getSkillShellConsent(skillId),
+    })
     const allowAskUser = !shouldSuppressSkillAskUserForArtifactDelivery(userTextCandidates)
 
     // P1-2 — 文本候选（正则启发式）是兜底信源；typed ref 未命中才走到这里。

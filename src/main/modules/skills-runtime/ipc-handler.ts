@@ -38,6 +38,25 @@ export function setupSkillsIPC(): void {
     }
   })
 
+  // P3-2 — per-custom-skill shell-execution consent (info + toggle).
+  ipcMain.handle('skills:listShellConsent', (): SkillsIPCResponse => {
+    try {
+      return { success: true, data: manager.listCustomSkillShellConsent() }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+
+  ipcMain.handle('skills:setShellConsent', (_, payload: { skillId: string; granted: boolean }): SkillsIPCResponse => {
+    try {
+      if (!payload?.skillId) return { success: false, error: 'Missing skillId' }
+      manager.setSkillShellConsent(payload.skillId, payload.granted === true)
+      return { success: true, data: { skillId: payload.skillId, granted: payload.granted === true } }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+
   ipcMain.handle('skills:importCustomSkill', (_, payload: { path: string }): SkillsIPCResponse => {
     try {
       if (!payload?.path) return { success: false, error: 'Missing path' }

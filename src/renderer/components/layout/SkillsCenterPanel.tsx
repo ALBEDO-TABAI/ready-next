@@ -168,6 +168,8 @@ export default function SkillsCenterPanel({ children }: SkillsCenterPanelProps) 
   const [importDropActive, setImportDropActive] = useState(false)
   // P3-1 — discovered ~/.agents/skills candidates (suggest-import; rendered only when non-empty).
   const [externalCandidates, setExternalCandidates] = useState<ExternalSkillCandidateView[]>([])
+  // P3-2 — per-custom-skill shell-execution consent info (toggle shown only for skills with scripts/).
+  const [shellConsentMap, setShellConsentMap] = useState<Record<string, { hasScripts: boolean; consent: boolean }>>({})
   const [selectedCardId, setSelectedCardId] = useState<string | null>(null)
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; target: SkillCardContextTarget } | null>(null)
   const [editingSkill, setEditingSkill] = useState<SkillState | null>(null)
@@ -210,6 +212,13 @@ export default function SkillsCenterPanel({ children }: SkillsCenterPanelProps) 
         setExternalCandidates(candidatesRes?.success && candidatesRes.data ? candidatesRes.data : [])
       } catch {
         setExternalCandidates([])
+      }
+      // P3-2 — shell-consent info for the toggle; silent on failure.
+      try {
+        const consentRes = await window.electronAPI.skills.listShellConsent?.()
+        setShellConsentMap(consentRes?.success && consentRes.data ? consentRes.data : {})
+      } catch {
+        setShellConsentMap({})
       }
     } finally {
       setLoading(false)
@@ -735,6 +744,34 @@ export default function SkillsCenterPanel({ children }: SkillsCenterPanelProps) 
                         >
                           {skill.sourcePath || skill.managedPath || runtimeInfo?.customSkillsRoot || ''}
                         </p>
+                        {/* P3-2 — shell-execution consent toggle; shown only for custom skills that ship a scripts/ dir. */}
+                        {shellConsentMap[skill.id]?.hasScripts && (
+                          <div
+                            style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 6 }}
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <button
+                              type="button"
+                              style={{
+                                fontSize: 10,
+                                fontWeight: 600,
+                                color: shellConsentMap[skill.id]?.consent ? PANEL_COLORS.blue : PANEL_COLORS.mutedStrong,
+                              }}
+                              onClick={() => void (async () => {
+                                const next = !shellConsentMap[skill.id]?.consent
+                                const res = await window.electronAPI?.skills?.setShellConsent?.({ skillId: skill.id, granted: next })
+                                if (res?.success) {
+                                  setShellConsentMap((prev) => ({ ...prev, [skill.id]: { hasScripts: true, consent: next } }))
+                                }
+                              })()}
+                            >
+                              {shellConsentMap[skill.id]?.consent ? '● 已允许运行脚本' : '○ 允许运行脚本'}
+                            </button>
+                            <span style={{ fontSize: 9, color: PANEL_COLORS.mutedStrong }}>
+                              开启后 agent 可运行该技能脚本，请确认来源可信
+                            </span>
+                          </div>
+                        )}
                       </div>
                     )
                   })}

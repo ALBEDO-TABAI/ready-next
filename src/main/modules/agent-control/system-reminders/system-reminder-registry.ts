@@ -42,6 +42,8 @@ export type ReminderTopic =
   // P2-1 (T4) — L1 技能目录：全部技能 name+description 常驻注入（预算裁剪），让模型按描述自选。
   // 纯清单，不开原语（激活才开）。priority 80（低于 current-date 90）。No conflicts.
   | 'skill-catalog'
+  // P3-2 — selected 轮：激活技能带脚本但未获脚本执行授权时提醒模型走只读方法论，别伪造脚本结果。priority 85。
+  | 'skill-shell-consent'
 
 export interface ReminderEntry {
   readonly topic: ReminderTopic
