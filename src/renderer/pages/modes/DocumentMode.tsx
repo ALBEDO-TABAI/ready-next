@@ -339,10 +339,12 @@ export default function DocumentMode({
 }: DocumentModeProps) {
   const { selectedFile, workspaceRoot, pinnedFolders } = useWorkspace()
   const {
-    tabs, activeTabId, splitTabId, documentSplitRatio,
+    tabs, tabGroups, activeTabId, splitTabId, documentSplitRatio,
     openTab, closeTab, setActiveTab, setSplitTab, setDocumentSplitRatio,
-    reorderTabs, updateTabContent, markTabSaved, setPendingReveal, openTabInPane,
-    openImageTab, ensureTabForPath,
+    updateTabContent, markTabSaved, setPendingReveal, openTabInPane,
+    openImageTab, ensureTabForPath, createBackgroundTab,
+    createTabGroupFromDrop, addTabToGroup, removeTabFromGroup, reorderTabToRank,
+    renameTabGroup, recolorTabGroup, setTabGroupCollapsed, disbandTabGroup,
   } = useDocTabs()
 
   const splitContainerRef = useRef<HTMLDivElement>(null)
@@ -789,23 +791,24 @@ export default function DocumentMode({
     }
   }, [tabs])
 
-  const handleDragOver = useCallback((e: React.DragEvent, index: number) => {
-    e.preventDefault()
-    e.dataTransfer.dropEffect = 'move'
-    void index
-  }, [])
-
-  const handleDrop = useCallback((e: React.DragEvent, index: number) => {
-    e.preventDefault()
-    if (dragIndexRef.current !== null && dragIndexRef.current !== index) {
-      reorderTabs(dragIndexRef.current, index)
-    }
-    dragIndexRef.current = null
-  }, [reorderTabs])
-
   const handleDragEnd = useCallback(() => {
     dragIndexRef.current = null
   }, [])
+
+  // Delete a group = close its member tabs. closeTab normalizes groups (drops the
+  // group once its last member is gone) and keeps the doc store never-empty (a blank
+  // untitled tab replaces the last one), so no manual empty-guard is needed.
+  const handleDeleteGroup = useCallback((groupId: string) => {
+    const memberIds = useDocTabs.getState().tabs.filter((tab) => tab.groupId === groupId).map((tab) => tab.id)
+    for (const id of memberIds) closeTab(id)
+  }, [closeTab])
+
+  // New tab in group = create a background (non-activating) untitled tab, then move it
+  // into the group's tail (§11.1 default background).
+  const handleNewTabInGroup = useCallback((groupId: string) => {
+    const newId = createBackgroundTab()
+    addTabToGroup(newId, groupId)
+  }, [addTabToGroup, createBackgroundTab])
 
   const handleTabContextMenu = useCallback((event: React.MouseEvent<HTMLButtonElement>, id: string) => {
     const tab = tabs.find((candidate) => candidate.id === id)
@@ -915,8 +918,10 @@ export default function DocumentMode({
                   active: isPrimary,
                   secondaryActive: isSplit && !isPrimary,
                   dirty: tab.isDirty,
+                  groupId: tab.groupId ?? null,
                 }
               })}
+              groups={tabGroups}
               onTabClick={(id, event) => handleTabClick(id, event)}
               onTabClose={(id) => closeTab(id)}
               onNewTab={() => {
@@ -927,10 +932,18 @@ export default function DocumentMode({
                 const index = tabs.findIndex((tab) => tab.id === id)
                 if (index >= 0) handleDragStart(event, index)
               }}
-              onTabDragOver={handleDragOver}
-              onTabDrop={handleDrop}
               onTabDragEnd={handleDragEnd}
               onTabContextMenu={(event, id) => handleTabContextMenu(event as React.MouseEvent<HTMLButtonElement>, id)}
+              onCreateGroup={(draggedId, targetId) => createTabGroupFromDrop(draggedId, targetId)}
+              onAddToGroup={(tabId, groupId) => addTabToGroup(tabId, groupId)}
+              onRemoveFromGroup={(tabId) => removeTabFromGroup(tabId)}
+              onReorderToRank={(movedId, toRank, intoGroupId) => reorderTabToRank(movedId, toRank, intoGroupId)}
+              onRenameGroup={(groupId, name) => renameTabGroup(groupId, name)}
+              onRecolorGroup={(groupId, color) => recolorTabGroup(groupId, color)}
+              onSetGroupCollapsed={(groupId, collapsed) => setTabGroupCollapsed(groupId, collapsed)}
+              onDisbandGroup={(groupId) => disbandTabGroup(groupId)}
+              onDeleteGroup={handleDeleteGroup}
+              onNewTabInGroup={handleNewTabInGroup}
             />
 
           {/* Content Area — rounded on all four corners so the editor reads as an inset card

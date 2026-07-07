@@ -6,6 +6,24 @@ export const VERTICAL_RAIL_FLYOUT_ROW_RADIUS = 10
 export const VERTICAL_RAIL_FLYOUT_MIN_HEIGHT =
   VERTICAL_RAIL_FLYOUT_PAD_Y * 2 + VERTICAL_RAIL_FLYOUT_ROW_HEIGHT
 
+// Group headers in the flyout are shorter than tab rows.
+export const VERTICAL_RAIL_FLYOUT_GROUP_HEADER_HEIGHT = 26
+
+// Height of the flyout content when it holds group headers + (non-collapsed) tab
+// rows + the trailing new-tab action. Headers and tab rows have different heights,
+// so the flat tabCount×ROW_HEIGHT model above cannot be reused for grouped rails.
+export function resolveGroupedFlyoutContentHeight(visibleTabRows: number, headerRows: number): number {
+  const tabRows = Math.max(0, Math.floor(visibleTabRows)) + 1 // + trailing new-tab action
+  const headers = Math.max(0, Math.floor(headerRows))
+  const totalRows = tabRows + headers
+  return (
+    VERTICAL_RAIL_FLYOUT_PAD_Y * 2 +
+    tabRows * VERTICAL_RAIL_FLYOUT_ROW_HEIGHT +
+    headers * VERTICAL_RAIL_FLYOUT_GROUP_HEADER_HEIGHT +
+    Math.max(0, totalRows - 1) * VERTICAL_RAIL_FLYOUT_ROW_GAP
+  )
+}
+
 export const VERTICAL_RAIL_FLYOUT_SURFACE_BACKGROUND =
   'var(--chat-menu-frost-bg, rgba(236, 239, 243, 0.92))'
 

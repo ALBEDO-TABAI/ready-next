@@ -9,7 +9,6 @@ import DocumentVerticalTabRail, {
 } from '../renderer/components/document/DocumentVerticalTabRail'
 import {
   resolveVerticalRailFlyoutHeight,
-  resolveVerticalRailFlyoutScrollOffset,
   VERTICAL_RAIL_FLYOUT_RADIUS,
   VERTICAL_RAIL_FLYOUT_ROW_HEIGHT,
   VERTICAL_RAIL_FLYOUT_ROW_RADIUS,
@@ -119,7 +118,7 @@ test('document vertical rail flyout shrinks to its tab rows instead of the full 
   }
 })
 
-test('document vertical rail flyout follows the icon rail scroll instead of showing its own scrollbar', async () => {
+test('document vertical rail flyout caps at the available height and scrolls itself (no rail-scroll transform)', async () => {
   const handle = installDom()
   try {
     const tabs = makeTabs(30)
@@ -134,24 +133,121 @@ test('document vertical rail flyout follows the icon rail scroll instead of show
 
     const rail = handle.dom.window.document.querySelector('.document-vertical-tab-rail') as HTMLElement | null
     assert.ok(rail)
-    const railList = rail.firstElementChild as HTMLElement | null
-    assert.ok(railList)
     await act(async () => {
-      railList.scrollTop = 120
-      railList.dispatchEvent(new handle.dom.window.Event('scroll', { bubbles: true }))
       rail.dispatchEvent(new handle.dom.window.MouseEvent('mouseover', { bubbles: true }))
       await new Promise((resolve) => setTimeout(resolve, 160))
     })
 
     const flyout = handle.dom.window.document.querySelector('.document-vertical-tab-flyout') as HTMLElement | null
     assert.ok(flyout)
+    // 30 rows overflow the 600px rail → the flyout caps at the available height, and
+    // its inner list owns the scroll (overflow-y-auto) rather than mirroring the rail
+    // via a translateY transform (which broke once group headers changed row heights).
+    assert.equal(flyout.style.height, '600px')
     const flyoutList = flyout.firstElementChild as HTMLElement | null
     assert.ok(flyoutList)
-    assert.equal(flyoutList.style.overflowY, '')
-    assert.equal(
-      flyoutList.style.transform,
-      `translateY(-${resolveVerticalRailFlyoutScrollOffset(120, tabs.length, 600)}px)`,
-    )
+    assert.equal(flyoutList.style.transform, '')
+    assert.match(flyoutList.className, /overflow-y-auto/)
+  } finally {
+    await act(async () => { handle.root.unmount() })
+    handle.restore()
+  }
+})
+
+async function openFlyout(handle: ReturnType<typeof installDom>): Promise<HTMLElement> {
+  const rail = handle.dom.window.document.querySelector('.document-vertical-tab-rail') as HTMLElement
+  await act(async () => {
+    rail.dispatchEvent(new handle.dom.window.MouseEvent('mouseover', { bubbles: true }))
+    await new Promise((resolve) => setTimeout(resolve, 160))
+  })
+  return handle.dom.window.document.querySelector('.document-vertical-tab-flyout') as HTMLElement
+}
+
+test('flyout renders a group header (name + count) with its member rows visible', async () => {
+  const handle = installDom()
+  try {
+    const tabs: DocumentVerticalTabItem[] = [
+      { id: 'tab-1', label: 'Alpha', active: true, groupId: 'g1' },
+      { id: 'tab-2', label: 'Bravo', groupId: 'g1' },
+      { id: 'tab-3', label: 'Charlie' },
+    ]
+    const groups = [{ id: 'g1', name: 'Research', color: 'green' as const, collapsed: false }]
+    await act(async () => {
+      handle.root.render(createElement(DocumentVerticalTabRail, {
+        tabs, groups,
+        onTabClick: () => undefined, onTabClose: () => undefined, onNewTab: () => undefined,
+        onReorderToRank: () => undefined, onCreateGroup: () => undefined,
+      }))
+    })
+    const flyout = await openFlyout(handle)
+    assert.ok(flyout)
+    const text = flyout.textContent ?? ''
+    assert.match(text, /Research/, 'group name shown in the header')
+    assert.match(text, /Alpha/, 'grouped member visible when expanded')
+    assert.match(text, /Bravo/, 'grouped member visible when expanded')
+    assert.match(text, /Charlie/, 'ungrouped tab visible')
+  } finally {
+    await act(async () => { handle.root.unmount() })
+    handle.restore()
+  }
+})
+
+test('a collapsed group hides its members in the flyout but keeps the header', async () => {
+  const handle = installDom()
+  try {
+    const tabs: DocumentVerticalTabItem[] = [
+      { id: 'tab-1', label: 'Alpha', groupId: 'g1' },
+      { id: 'tab-2', label: 'Bravo', groupId: 'g1' },
+      { id: 'tab-3', label: 'Charlie', active: true },
+    ]
+    const groups = [{ id: 'g1', name: 'Refs', color: 'blue' as const, collapsed: true }]
+    await act(async () => {
+      handle.root.render(createElement(DocumentVerticalTabRail, {
+        tabs, groups,
+        onTabClick: () => undefined, onTabClose: () => undefined, onNewTab: () => undefined,
+        onReorderToRank: () => undefined, onCreateGroup: () => undefined,
+      }))
+    })
+    const flyout = await openFlyout(handle)
+    assert.ok(flyout)
+    const text = flyout.textContent ?? ''
+    assert.match(text, /Refs/, 'collapsed group header still shows')
+    assert.match(text, /Charlie/, 'ungrouped tab still shows')
+    assert.doesNotMatch(text, /Bravo/, 'collapsed member is hidden in the flyout')
+  } finally {
+    await act(async () => { handle.root.unmount() })
+    handle.restore()
+  }
+})
+
+test('group options open a PORTALED edit popup whose action buttons are reachable (not clipped)', async () => {
+  const handle = installDom()
+  try {
+    const tabs: DocumentVerticalTabItem[] = [
+      { id: 'tab-1', label: 'Alpha', active: true, groupId: 'g1' },
+      { id: 'tab-2', label: 'Bravo', groupId: 'g1' },
+    ]
+    const groups = [{ id: 'g1', name: 'G', color: 'blue' as const, collapsed: false }]
+    let disbanded = false
+    await act(async () => {
+      handle.root.render(createElement(DocumentVerticalTabRail, {
+        tabs, groups,
+        onTabClick: () => undefined, onTabClose: () => undefined, onNewTab: () => undefined,
+        onReorderToRank: () => undefined, onCreateGroup: () => undefined,
+        onDisbandGroup: () => { disbanded = true },
+      }))
+    })
+    const flyout = await openFlyout(handle)
+    const optionsBtn = Array.from(flyout.querySelectorAll('button')).find((b) => b.getAttribute('title') === '群组选项')
+    assert.ok(optionsBtn, 'group options button present')
+    await act(async () => { optionsBtn.dispatchEvent(new handle.dom.window.MouseEvent('click', { bubbles: true })) })
+
+    const doc = handle.dom.window.document
+    const disbandBtn = Array.from(doc.querySelectorAll('button')).find((b) => b.textContent === '取消群组')
+    assert.ok(disbandBtn, 'disband action button rendered')
+    assert.ok(!flyout.contains(disbandBtn), 'popup is PORTALED outside the overflow-hidden flyout (escapes the clip)')
+    await act(async () => { disbandBtn.dispatchEvent(new handle.dom.window.MouseEvent('click', { bubbles: true })) })
+    assert.equal(disbanded, true, 'the (previously clipped) disband action actually fires')
   } finally {
     await act(async () => { handle.root.unmount() })
     handle.restore()
