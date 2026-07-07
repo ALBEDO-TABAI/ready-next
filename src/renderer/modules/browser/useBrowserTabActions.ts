@@ -1,7 +1,7 @@
 import { useCallback, useMemo } from 'react'
 
 import type { BrowserTab } from '../../stores/useBrowserTabs'
-import { useBrowserTabs } from '../../stores/useBrowserTabs'
+import { mergeBackendTabsPreservingGroups, useBrowserTabs } from '../../stores/useBrowserTabs'
 import { getDroppedFilesFromDataTransfer, toFileUrl } from '../../utils/dragDrop'
 import { filterBrowserLocalMediaUploadPaths } from '../../../shared/browser-local-media-upload'
 import { browserTabActivationSequencer } from './browserTabActivationSequencer'
@@ -60,7 +60,9 @@ export function useBrowserTabActions({
       error: tab.error || undefined,
     }))
 
-    setTabs(hydratedTabs)
+    // Preserve renderer-only grouping across the backend reconcile (main is
+    // authoritative for the member set + metadata, renderer for order + groupId).
+    setTabs(mergeBackendTabsPreservingGroups(useBrowserTabs.getState().tabs, hydratedTabs))
     const activeTab = backendTabs.find((tab) => tab.active) || backendTabs[backendTabs.length - 1]
     browserTabActivationSequencer.invalidate()
     setActiveTabId(activeTab?.id || hydratedTabs[hydratedTabs.length - 1]?.id || null)

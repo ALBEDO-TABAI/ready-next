@@ -1,6 +1,19 @@
 import { create } from 'zustand'
 import { createJSONStorage, persist } from 'zustand/middleware'
 import { getFilename } from '../utils/path'
+import { isTabGroupColor, pickNextGroupColor, type TabGroup, type TabGroupColor } from '../../shared/tab-groups'
+import {
+    addToGroup,
+    createGroupFromDrop,
+    disbandGroup,
+    type GroupModelState,
+    normalizeGroupState,
+    recolorGroup,
+    removeFromGroup,
+    renameGroup,
+    reorderTab,
+    setGroupCollapsed,
+} from '../../shared/tab-group-model'
 
 export interface DocTab {
     id: string
@@ -8,6 +21,8 @@ export interface DocTab {
     title: string
     content: string
     isDirty: boolean
+    // Renderer-only grouping (mirrors the browser rail). null/absent = ungrouped.
+    groupId?: string | null
 }
 
 export interface PendingDocReveal {
@@ -23,6 +38,7 @@ export type DocumentPaneTarget = 'primary' | 'split'
 
 interface DocTabsState {
     tabs: DocTab[]
+    tabGroups: TabGroup[]
     activeTabId: string
     splitTabId: string | null
     documentSplitRatio: number
@@ -46,6 +62,18 @@ interface DocTabsState {
     setDocumentSplitRatio: (ratio: number) => void
     setPendingReveal: (reveal: PendingDocReveal | null) => void
     remapTabPaths: (fromPath: string, toPath: string) => void
+
+    // Group ops — delegate to the pure tab-group-model (single source) and land
+    // through the normalize choke. delete-group / new-tab-in-group are orchestrated
+    // at the UI layer (they close/create tabs).
+    createTabGroupFromDrop: (draggedId: string, targetId: string) => void
+    addTabToGroup: (tabId: string, groupId: string) => void
+    removeTabFromGroup: (tabId: string) => void
+    reorderTabToRank: (movedId: string, toRank: number, intoGroupId: string | null) => void
+    renameTabGroup: (groupId: string, name: string) => void
+    recolorTabGroup: (groupId: string, color: TabGroupColor) => void
+    setTabGroupCollapsed: (groupId: string, collapsed: boolean) => void
+    disbandTabGroup: (groupId: string) => void
 }
 
 let tabCounter = 0
@@ -53,6 +81,59 @@ const makeId = () => `doc-${++tabCounter}`
 
 const STORAGE_KEY = 'ready-doc-tabs-v2'
 const IMAGE_PREVIEW_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp', 'ico'])
+
+let docGroupCounter = 0
+function syncDocGroupCounter(groups: TabGroup[]): void {
+    for (const group of groups) {
+        const match = /^grp-(\d+)$/.exec(group.id)
+        if (match) docGroupCounter = Math.max(docGroupCounter, Number(match[1]))
+    }
+}
+function nextDocGroupId(): string {
+    return `grp-${++docGroupCounter}`
+}
+
+function sanitizeDocTabGroup(group: TabGroup): TabGroup | null {
+    const id = String(group?.id || '')
+    if (!id) return null
+    return {
+        id,
+        name: typeof group.name === 'string' ? group.name : '',
+        color: isTabGroupColor(group.color) ? group.color : 'blue',
+        collapsed: Boolean(group.collapsed),
+    }
+}
+
+function toDocGroupModel(tabs: DocTab[], tabGroups: TabGroup[]): GroupModelState {
+    const groupOf: Record<string, string | null> = {}
+    for (const tab of tabs) groupOf[tab.id] = tab.groupId ?? null
+    return { order: tabs.map((tab) => tab.id), groupOf, groups: tabGroups }
+}
+
+function applyDocGroupModel(tabs: DocTab[], model: GroupModelState): { tabs: DocTab[]; tabGroups: TabGroup[] } {
+    const byId = new Map(tabs.map((tab) => [tab.id, tab]))
+    const nextTabs: DocTab[] = []
+    for (const id of model.order) {
+        const tab = byId.get(id)
+        if (tab) nextTabs.push({ ...tab, groupId: model.groupOf[id] ?? null })
+    }
+    return { tabs: nextTabs, tabGroups: model.groups }
+}
+
+// Normalize {tabs, tabGroups} against the group invariants (I1–I3). The doc store's
+// mutators use raw set(), so any mutator that changes membership / order / groupId
+// must route its result through this choke — otherwise e.g. closing a group's last
+// member leaves an orphan group until reload. Idempotent.
+function normalizeDocGroups(tabs: DocTab[], tabGroups: TabGroup[]): { tabs: DocTab[]; tabGroups: TabGroup[] } {
+    const groups = tabGroups.map(sanitizeDocTabGroup).filter((group): group is TabGroup => group !== null)
+    const applied = applyDocGroupModel(tabs, normalizeGroupState(toDocGroupModel(tabs, groups)))
+    syncDocGroupCounter(applied.tabGroups)
+    return applied
+}
+
+function applyDocGroupOp(state: DocTabsState, model: GroupModelState): Pick<DocTabsState, 'tabs' | 'tabGroups'> {
+    return applyDocGroupModel(state.tabs, model)
+}
 
 export function normalizeDocTabPathKey(path: string | null | undefined): string | null {
     if (!path) return null
@@ -154,15 +235,19 @@ function ensureImagePreviewTabForPath(tabs: DocTab[], path: string): { tabs: Doc
     return ensureDocumentTabForPath(tabs, path)
 }
 
-function ensureTabsState(state: Pick<DocTabsState, 'tabs' | 'activeTabId' | 'splitTabId' | 'documentSplitRatio'>) {
-    const tabs = state.tabs.length > 0
+function ensureTabsState(
+    state: Pick<DocTabsState, 'tabs' | 'activeTabId' | 'splitTabId' | 'documentSplitRatio'> & { tabGroups?: TabGroup[] },
+) {
+    const rawTabs = state.tabs.length > 0
         ? state.tabs
         : [{ id: 'doc-1', path: null, title: '新文档', content: '', isDirty: false }]
-    syncTabCounterFromTabs(tabs)
+    syncTabCounterFromTabs(rawTabs)
+    const { tabs, tabGroups } = normalizeDocGroups(rawTabs, Array.isArray(state.tabGroups) ? state.tabGroups : [])
     const activeTabId = tabs.some((tab) => tab.id === state.activeTabId) ? state.activeTabId : tabs[0].id
     const splitTabId = state.splitTabId && tabs.some((tab) => tab.id === state.splitTabId) ? state.splitTabId : null
     return {
         tabs,
+        tabGroups,
         activeTabId,
         splitTabId,
         documentSplitRatio: Math.max(20, Math.min(80, state.documentSplitRatio || 50)),
@@ -185,6 +270,7 @@ export const useDocTabs = create<DocTabsState>()(persist((set, get) => ({
             isDirty: false,
         }
     ],
+    tabGroups: [],
     activeTabId: 'doc-1',
     splitTabId: null,
     documentSplitRatio: 50,
@@ -296,21 +382,25 @@ export const useDocTabs = create<DocTabsState>()(persist((set, get) => ({
     },
 
     closeTab: (id: string) => {
-        const { tabs, activeTabId, splitTabId } = get()
-        const newTabs = tabs.filter(t => t.id !== id)
+        const { tabs, tabGroups, activeTabId, splitTabId } = get()
+        const remaining = tabs.filter(t => t.id !== id)
 
-        // If no tabs left, create a new blank one
-        if (newTabs.length === 0) {
+        // If no tabs left, create a new blank one (and clear groups).
+        if (remaining.length === 0) {
             const newId = makeId()
             set({
                 tabs: [{ id: newId, path: null, title: '新文档', content: '', isDirty: false }],
+                tabGroups: [],
                 activeTabId: newId,
                 splitTabId: null,
             })
             return
         }
 
-        const updates: Partial<DocTabsState> = { tabs: newTabs }
+        // Normalize so closing a group's last member drops the now-orphaned group
+        // immediately (no reload needed) and any group stays contiguous.
+        const normalized = normalizeDocGroups(remaining, tabGroups)
+        const updates: Partial<DocTabsState> = { tabs: normalized.tabs, tabGroups: normalized.tabGroups }
 
         // If closed tab was the split tab, clear split
         if (splitTabId === id) {
@@ -320,7 +410,7 @@ export const useDocTabs = create<DocTabsState>()(persist((set, get) => ({
         // If closed tab was active, switch to neighbor
         if (activeTabId === id) {
             const oldIndex = tabs.findIndex(t => t.id === id)
-            const newActive = newTabs[Math.min(oldIndex, newTabs.length - 1)]
+            const newActive = remaining[Math.min(oldIndex, remaining.length - 1)]
             updates.activeTabId = newActive.id
         }
 
@@ -381,10 +471,12 @@ export const useDocTabs = create<DocTabsState>()(persist((set, get) => ({
     },
 
     reorderTabs: (fromIndex: number, toIndex: number) => {
-        const tabs = [...get().tabs]
+        const { tabs: current, tabGroups } = get()
+        const tabs = [...current]
         const [moved] = tabs.splice(fromIndex, 1)
         tabs.splice(toIndex, 0, moved)
-        set({ tabs })
+        const normalized = normalizeDocGroups(tabs, tabGroups)
+        set({ tabs: normalized.tabs, tabGroups: normalized.tabGroups })
     },
 
     setSplitTab: (id: string | null) => {
@@ -412,9 +504,51 @@ export const useDocTabs = create<DocTabsState>()(persist((set, get) => ({
             }),
         })
     },
+
+    createTabGroupFromDrop: (draggedId, targetId) => {
+        const state = get()
+        const color = pickNextGroupColor(state.tabGroups.map((group) => group.color))
+        const group: TabGroup = { id: nextDocGroupId(), name: '', color, collapsed: false }
+        set(applyDocGroupOp(state, createGroupFromDrop(toDocGroupModel(state.tabs, state.tabGroups), draggedId, targetId, group)))
+    },
+
+    addTabToGroup: (tabId, groupId) => {
+        const state = get()
+        set(applyDocGroupOp(state, addToGroup(toDocGroupModel(state.tabs, state.tabGroups), tabId, groupId)))
+    },
+
+    removeTabFromGroup: (tabId) => {
+        const state = get()
+        set(applyDocGroupOp(state, removeFromGroup(toDocGroupModel(state.tabs, state.tabGroups), tabId)))
+    },
+
+    reorderTabToRank: (movedId, toRank, intoGroupId) => {
+        const state = get()
+        set(applyDocGroupOp(state, reorderTab(toDocGroupModel(state.tabs, state.tabGroups), movedId, toRank, intoGroupId)))
+    },
+
+    renameTabGroup: (groupId, name) => {
+        const state = get()
+        set(applyDocGroupOp(state, renameGroup(toDocGroupModel(state.tabs, state.tabGroups), groupId, name)))
+    },
+
+    recolorTabGroup: (groupId, color) => {
+        const state = get()
+        set(applyDocGroupOp(state, recolorGroup(toDocGroupModel(state.tabs, state.tabGroups), groupId, color)))
+    },
+
+    setTabGroupCollapsed: (groupId, collapsed) => {
+        const state = get()
+        set(applyDocGroupOp(state, setGroupCollapsed(toDocGroupModel(state.tabs, state.tabGroups), groupId, collapsed)))
+    },
+
+    disbandTabGroup: (groupId) => {
+        const state = get()
+        set(applyDocGroupOp(state, disbandGroup(toDocGroupModel(state.tabs, state.tabGroups), groupId)))
+    },
 }), {
     name: STORAGE_KEY,
-    version: 2,
+    version: 3,
     storage: createJSONStorage(() => (typeof localStorage !== 'undefined' ? localStorage : fallbackStorage)),
     partialize: (state) => {
         const tabs = state.tabs.map((tab) => {
@@ -425,6 +559,7 @@ export const useDocTabs = create<DocTabsState>()(persist((set, get) => ({
         })
         return {
             tabs,
+            tabGroups: state.tabGroups,
             activeTabId: state.activeTabId,
             splitTabId: state.splitTabId,
             documentSplitRatio: state.documentSplitRatio,
@@ -434,11 +569,13 @@ export const useDocTabs = create<DocTabsState>()(persist((set, get) => ({
       if (!state) return
       const next = ensureTabsState({
         tabs: state.tabs,
+        tabGroups: state.tabGroups,
         activeTabId: state.activeTabId,
         splitTabId: state.splitTabId,
         documentSplitRatio: state.documentSplitRatio,
       })
       state.tabs = next.tabs
+      state.tabGroups = next.tabGroups
       state.activeTabId = next.activeTabId
       state.splitTabId = next.splitTabId
       state.documentSplitRatio = next.documentSplitRatio
@@ -451,8 +588,11 @@ export const useDocTabs = create<DocTabsState>()(persist((set, get) => ({
         : typeof state.splitRatio === 'number'
           ? state.splitRatio
           : 50
+      // v2 → v3 adds tab groups (renderer-only). Older snapshots have no tabGroups
+      // and no tab.groupId → they normalize to "no groups", a clean additive upgrade.
       const next = ensureTabsState({
         tabs: Array.isArray(state.tabs) ? state.tabs : [],
+        tabGroups: Array.isArray(state.tabGroups) ? state.tabGroups : [],
         activeTabId: typeof state.activeTabId === 'string' ? state.activeTabId : '',
         splitTabId: typeof state.splitTabId === 'string' ? state.splitTabId : null,
         documentSplitRatio: legacyDocumentSplitRatio,

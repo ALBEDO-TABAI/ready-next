@@ -4,7 +4,7 @@ import type { TabUpdateEvent } from './types'
 import { browserTabActivationSequencer } from './browserTabActivationSequencer'
 import { clearFitted, shouldClearFittedForTabUpdate } from './browserTabFitRegistry'
 import { DEFAULT_BROWSER_URL, extractBrowserDomain } from './url-utils'
-import { useBrowserTabs, type BrowserTab } from '../../stores/useBrowserTabs'
+import { mergeBackendTabsPreservingGroups, useBrowserTabs, type BrowserTab } from '../../stores/useBrowserTabs'
 
 interface UseBrowserRuntimeEffectsParams {
   isElectron: boolean
@@ -72,6 +72,11 @@ export function useBrowserRuntimeEffects({
     if (recoveredTabs.length === 0) return false
 
     const nextActiveTabId = recoveredActiveTabId || recoveredTabs[recoveredTabs.length - 1]?.id || null
+    // Group preservation here rides on the `{ ...tab }` spread above: the backend
+    // ids are freshly minted on restart, so the id-matching merge helper does NOT
+    // apply — instead each recovered tab keeps the persisted tab's groupId (a stable
+    // grp-* id), and store.tabGroups (hydrated from localStorage) still matches. The
+    // group definitions survive the restart via setTabs preserving state.tabGroups.
     store.setTabs(recoveredTabs)
     browserTabActivationSequencer.invalidate()
     store.setActiveTabId(nextActiveTabId)
@@ -115,7 +120,10 @@ export function useBrowserRuntimeEffects({
     }))
 
     const activeTab = existingTabs.find((tab) => tab.active) || existingTabs[existingTabs.length - 1]
-    store.setTabs(hydratedTabs)
+    // Preserve renderer-only grouping across this reconcile. Backend ids match the
+    // local store ids here (same session — e.g. split-toggle remounts BrowserMode
+    // while the native BrowserViews stay alive), so merge by id keeps local groupId.
+    store.setTabs(mergeBackendTabsPreservingGroups(store.tabs, hydratedTabs))
     browserTabActivationSequencer.invalidate()
     store.setActiveTabId(activeTab?.id || hydratedTabs[hydratedTabs.length - 1]?.id || null)
     store.setUrlInput(activeTab?.url === DEFAULT_BROWSER_URL ? '' : activeTab?.url || '')

@@ -17,7 +17,9 @@ test('browser runtime restores tab truth from the main process and rebuilds nati
   assert.match(runtimeHook, /window\.electronAPI\?\.browser\?\.switchTab\(nextActiveTabId\)/)
   assert.match(runtimeHook, /const rebuilt = await rebuildRuntimeFromPersistedTabs\(store\)/)
   assert.match(runtimeHook, /if \(rebuilt\) return true/)
-  assert.match(runtimeHook, /store\.setTabs\(hydratedTabs\)/)
+  // restoreExistingTabs reconciles through the group-preserving merge (P1 §6): the
+  // backend member set + metadata win, renderer-only order + groupId are preserved.
+  assert.match(runtimeHook, /store\.setTabs\(mergeBackendTabsPreservingGroups\(store\.tabs, hydratedTabs\)\)/)
   assert.match(runtimeHook, /store\.setActiveTabId\(activeTab\?\.id \|\| hydratedTabs\[hydratedTabs\.length - 1\]\?\.id \|\| null\)/)
   assert.match(runtimeHook, /store\.setUrlInput\(activeTab\?\.url === DEFAULT_BROWSER_URL \? '' : activeTab\?\.url \|\| ''\)/)
   assert.doesNotMatch(runtimeHook, /prehydratedTabsExist/)
