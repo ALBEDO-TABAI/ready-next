@@ -423,6 +423,25 @@ export function useBrowserTabActions({
       await sendBoundsImmediate({ forceExact: true })
       const created = await window.electronAPI?.browser?.createTab(DEFAULT_BROWSER_URL) as { success: boolean; tabId?: string } | undefined
       if (!created?.success || !created.tabId) return
+      // Seed the survivor locally BEFORE closing members so the renderer store never
+      // transiently hits 0 tabs — which would unmount the rail (→ empty state) and close
+      // the overlay flyout mid-interaction (mirrors handleCloseTab's last-tab path).
+      const survivor: BrowserTab = {
+        id: created.tabId,
+        url: DEFAULT_BROWSER_URL,
+        title: 'New Tab',
+        loading: true,
+        canGoBack: false,
+        canGoForward: false,
+        domain: extractBrowserDomain(DEFAULT_BROWSER_URL),
+        owner: 'manual',
+        required: false,
+        activity: 'idle',
+      }
+      browserTabActivationSequencer.invalidate()
+      addTab(survivor)
+      setActiveTabId(created.tabId)
+      setUrlInput('')
     }
     for (const member of members) {
       await window.electronAPI?.browser?.closeTab(member.id)
@@ -431,7 +450,7 @@ export function useBrowserTabActions({
     // sanitizeSnapshot's normalize drops the now-orphaned group (I3).
     await syncTabsFromBackend()
     requestAnimationFrame(() => sendBoundsImmediate({ forceExact: true }))
-  }, [isElectron, sendBoundsImmediate, syncTabsFromBackend])
+  }, [addTab, isElectron, sendBoundsImmediate, setActiveTabId, setUrlInput, syncTabsFromBackend])
 
   // new-tab-in-group creates a BACKGROUND tab (no focus steal, mirrors Phase 0), waits
   // for it to list, then moves it into the group and writes the flat order back.

@@ -357,9 +357,9 @@ export default function VerticalTabRail({
       else onCreateGroup(movedId, targetId)
       return
     }
-    const { toRank, intoGroupId } = resolveReorderDrop(flatOrder, groupOf, movedId, targetId, target.intent)
+    const { toRank, intoGroupId } = resolveReorderDrop(tabRows.map((r) => r.id), flatOrder, groupOf, movedId, targetId, target.intent, splitTabId)
     onReorderToRank(movedId, toRank, intoGroupId)
-  }, [clearDragState, dropTarget, flatOrder, groupOf, onAddToGroup, onCreateGroup, onReorderToRank])
+  }, [clearDragState, dropTarget, flatOrder, groupOf, onAddToGroup, onCreateGroup, onReorderToRank, splitTabId, tabRows])
 
   // Clear a stale drop highlight when the drag ends ANYWHERE (Escape, drop off-rail).
   useEffect(() => {

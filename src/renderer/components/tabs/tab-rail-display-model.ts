@@ -58,27 +58,50 @@ export function buildTabRailRows(
   return { rows, flatOrder }
 }
 
-// Resolve, from a drop target's flat rank + intent + neighbours, the destination rank
-// and group. Shared reorder-geometry so both rails compute drops identically.
+// Resolve a drop into a flat destination rank + group. The user drags against the VISUAL
+// (hoisted) row order, but reorderTab operates on the FLAT tabs[] order — and the two differ
+// whenever the split-hoist has relocated the split tab (D-SPLIT). Resolving purely against
+// flatOrder therefore lands the drop in the wrong slot/group in split view. So: derive the
+// group from the visual neighbours straddling the insertion point, and derive toRank by
+// anchoring to the nearest visual predecessor whose FLAT index is reliable — skipping the
+// moved tab and a DISPLACED split tab (the only row the hoist moves). Shared by both rails.
 export function resolveReorderDrop(
+  visualOrder: string[],
   flatOrder: string[],
   groupOf: Record<string, string | null>,
   movedId: string,
   targetId: string,
   intent: 'before' | 'after',
+  splitId: string | null = null,
 ): { toRank: number; intoGroupId: string | null } {
-  const targetRank = flatOrder.indexOf(targetId)
-  const movedRank = flatOrder.indexOf(movedId)
-  let toRank = intent === 'before' ? targetRank : targetRank + 1
-  if (movedRank !== -1 && movedRank < toRank) toRank -= 1
-  // Inherit the target's group only when the insertion point is strictly inside that
-  // group's run (the neighbour on the insertion side is in the same group).
-  const targetGroup = groupOf[targetId] ?? null
-  let intoGroupId: string | null = null
-  if (targetGroup) {
-    const neighbourId = intent === 'before' ? flatOrder[targetRank - 1] : flatOrder[targetRank + 1]
-    const neighbourGroup = neighbourId ? groupOf[neighbourId] ?? null : null
-    if (neighbourGroup === targetGroup) intoGroupId = targetGroup
+  const targetVisualIdx = visualOrder.indexOf(targetId)
+  if (targetVisualIdx === -1) return { toRank: flatOrder.length, intoGroupId: null }
+  const insertionIdx = intent === 'before' ? targetVisualIdx : targetVisualIdx + 1
+
+  // Group inheritance from the visual rows on either side of the insertion point (skip only
+  // the moved tab; group membership is position-independent so a hoisted split is fine here).
+  const neighbourGroup = (from: number, step: number): string | null => {
+    for (let i = from; i >= 0 && i < visualOrder.length; i += step) {
+      if (visualOrder[i] !== movedId) return groupOf[visualOrder[i]] ?? null
+    }
+    return null
   }
+  const beforeGroup = neighbourGroup(insertionIdx - 1, -1)
+  const afterGroup = neighbourGroup(insertionIdx, 1)
+  const intoGroupId = beforeGroup !== null && beforeGroup === afterGroup ? beforeGroup : null
+
+  // Flat toRank: the hoist relocates ONLY the split tab, so its flat index ≠ visual index
+  // once hoisted; anchoring to it would misplace the drop. Skip it (and the moved tab).
+  const splitDisplaced = splitId !== null && visualOrder.indexOf(splitId) !== flatOrder.indexOf(splitId)
+  let anchorId: string | null = null
+  for (let i = insertionIdx - 1; i >= 0; i -= 1) {
+    const id = visualOrder[i]
+    if (id === movedId) continue
+    if (splitDisplaced && id === splitId) continue
+    anchorId = id
+    break
+  }
+  const withoutMoved = flatOrder.filter((id) => id !== movedId)
+  const toRank = anchorId === null ? 0 : withoutMoved.indexOf(anchorId) + 1
   return { toRank, intoGroupId }
 }

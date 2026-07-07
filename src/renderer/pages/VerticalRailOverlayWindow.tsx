@@ -113,6 +113,11 @@ export default function VerticalRailOverlayWindow() {
   const { rows, flatOrder } = useMemo(() => buildOverlayRows(tabs, groups, activeId, splitId), [tabs, groups, activeId, splitId])
   const groupOf = useMemo(() => Object.fromEntries(tabs.map((t) => [t.id, t.groupId ?? null])), [tabs])
   const groupById = useMemo(() => new Map(groups.map((g) => [g.id, g])), [groups])
+  // The hoisted visual tab order — drops resolve against this, not the flat order (D-SPLIT).
+  const visualTabIds = useMemo(
+    () => rows.filter((r): r is Extract<OverlayRow, { kind: 'tab' }> => r.kind === 'tab').map((r) => r.item.id),
+    [rows],
+  )
 
   // Drop the editor if its group vanished from the snapshot (deleted / disbanded elsewhere).
   useEffect(() => {
@@ -146,9 +151,9 @@ export default function VerticalRailOverlayWindow() {
       else send({ type: 'create-group', draggedTabId: movedId, targetTabId: targetId })
       return
     }
-    const { toRank, intoGroupId } = resolveReorderDrop(flatOrder, groupOf, movedId, targetId, target.intent)
+    const { toRank, intoGroupId } = resolveReorderDrop(visualTabIds, flatOrder, groupOf, movedId, targetId, target.intent, splitId)
     send({ type: 'reorder', movedTabId: movedId, toRank, intoGroupId })
-  }, [dropTarget, finishDrag, flatOrder, groupOf])
+  }, [dropTarget, finishDrag, flatOrder, groupOf, splitId, visualTabIds])
 
   const switchTab = useCallback((tab: VerticalRailOverlayTab, event: { shiftKey: boolean }) => {
     // D-COLLAPSE: activating a member of a collapsed group auto-expands it first. (In the

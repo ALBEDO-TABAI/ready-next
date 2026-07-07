@@ -200,6 +200,11 @@ export default function DocumentVerticalTabRail({
     () => buildDisplayRows(tabs, groups, activeId, splitId),
     [tabs, groups, activeId, splitId],
   )
+  // The hoisted visual tab order — drops resolve against this, not the flat order (D-SPLIT).
+  const visualTabIds = useMemo(
+    () => rows.filter((r): r is Extract<DisplayRow, { kind: 'tab' }> => r.kind === 'tab').map((r) => r.item.id),
+    [rows],
+  )
   const groupById = useMemo(() => new Map(groups.map((g) => [g.id, g])), [groups])
   // Size the flyout to the rows it ACTUALLY renders: group headers (26px) + visible
   // (non-collapsed) tab rows (38px) + the trailing action, capped at the available
@@ -249,9 +254,9 @@ export default function DocumentVerticalTabRail({
       return
     }
     const groupOf = Object.fromEntries(tabs.map((t) => [t.id, t.groupId ?? null]))
-    const { toRank, intoGroupId } = resolveReorderDrop(flatOrder, groupOf, movedId, targetId, target.intent)
+    const { toRank, intoGroupId } = resolveReorderDrop(visualTabIds, flatOrder, groupOf, movedId, targetId, target.intent, splitId)
     onReorderToRank?.(movedId, toRank, intoGroupId)
-  }, [dropTarget, finishDrag, flatOrder, groupsEnabled, onAddToGroup, onCreateGroup, onReorderToRank, tabs])
+  }, [dropTarget, finishDrag, flatOrder, groupsEnabled, onAddToGroup, onCreateGroup, onReorderToRank, splitId, tabs, visualTabIds])
 
   const handleDragEndAll = useCallback((event: DragEvent) => {
     finishDrag()
