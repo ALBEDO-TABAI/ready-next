@@ -111,9 +111,11 @@ describe('D1 renderer contract: activate:false must not steal focus', () => {
     // and can't rebind to a downstream duplicate.
     const handlerStart = source.indexOf('onTabOpened(')
     const block = source.slice(handlerStart, source.indexOf('return () => { cleanup?.() }', handlerStart))
-    const addTab = block.indexOf('store.addTab(openedTab)')
+    // P4: a NEW tab is listed via addTabAfterOpener (inserts after its opener + inherits
+    // its group; appends when there's no opener) — still the "list it in the strip" step.
+    const addTab = block.indexOf('store.addTabAfterOpener(openedTab')
     const gate = block.indexOf('if (tab.activate === false) return')
-    assert.ok(addTab > -1, 'tab must still be added to the strip store')
+    assert.ok(addTab > -1, 'tab must still be listed in the strip store (addTabAfterOpener)')
     assert.ok(gate > -1, 'the activate:false early return must exist')
     assert.ok(addTab < gate, 'the tab must be listed BEFORE the gate (background tabs still appear in the strip)')
 
