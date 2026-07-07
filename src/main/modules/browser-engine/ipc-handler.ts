@@ -221,7 +221,7 @@ export class BrowserController {
     this.contextMenuService = new BrowserContextMenuService({
       mainWindow,
       isAllowedUrl: (url) => isAllowedBrowserURL(url),
-      createTab: (url) => this.createTab(url),
+      createTab: (url, options) => this.createTab(url, options),
       addImageToActiveBoard: (url) => getReadyBoardService().addRemoteImageToActiveBoard(url),
       getTabIdForWebContents: (webContents) => this.getTabIdForWebContents(webContents.id),
       sendToRenderer: (channel, data) => this.sendToRenderer(channel, data),

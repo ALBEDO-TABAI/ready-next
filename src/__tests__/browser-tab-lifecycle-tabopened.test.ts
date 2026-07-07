@@ -94,21 +94,41 @@ describe('D1 (P1-b): createTab announces background tabs to the renderer tab str
 
 describe('D1 renderer contract: activate:false must not steal focus', () => {
   // Structure contract (justified): the renderer hook wires zustand + RAF +
-  // window listeners that have no headless behavior harness in this repo; the
-  // ordering below is the load-bearing property (list the tab, bail before any
-  // activation side effect). Real focus behavior is verified on-machine (回测清单).
-  it('useBrowserRuntimeEffects lists the tab, then returns before activation side effects', () => {
+  // window listeners that have no headless behavior harness in this repo. The
+  // load-bearing property is that the activate:false gate precedes EVERY
+  // activation/address-bar side effect — not just setActiveTabId. Guarding only
+  // one preempt would let a regression hoist e.g. the address-bar write above the
+  // gate (reintroducing the §2.6 address-bar/active split symptom) while this test
+  // stays green. Real focus behavior is also verified on-machine (回测清单).
+  it('useBrowserRuntimeEffects lists the tab, then bails before EVERY activation/address-bar side effect', () => {
     const source = readFileSync(
       resolve(process.cwd(), 'src/renderer/modules/browser/useBrowserRuntimeEffects.ts'),
       'utf8',
     )
-    const block = source.slice(source.indexOf('onTabOpened('))
+    // Bound the slice to the onTabOpened handler body (it ends at the effect's
+    // cleanup return) so anchors like setBrowserRuntimeReady — which recurs in
+    // later effects further down the file — resolve to their in-handler position
+    // and can't rebind to a downstream duplicate.
+    const handlerStart = source.indexOf('onTabOpened(')
+    const block = source.slice(handlerStart, source.indexOf('return () => { cleanup?.() }', handlerStart))
     const addTab = block.indexOf('store.addTab(openedTab)')
     const gate = block.indexOf('if (tab.activate === false) return')
-    const activate = block.indexOf('store.setActiveTabId(openedTab.id)')
     assert.ok(addTab > -1, 'tab must still be added to the strip store')
     assert.ok(gate > -1, 'the activate:false early return must exist')
-    assert.ok(activate > -1, 'legacy activation path must remain for popup-opened tabs')
-    assert.ok(addTab < gate && gate < activate, 'gate must sit after listing and before activation')
+    assert.ok(addTab < gate, 'the tab must be listed BEFORE the gate (background tabs still appear in the strip)')
+
+    // Every side effect that would preempt the user's active tab / address bar.
+    // Each MUST sit after the gate so an activate:false tab skips all of them —
+    // this is what keeps the address bar and active highlight on the user's tab.
+    const preempts = {
+      'setActiveTabId (active tab)': block.indexOf('store.setActiveTabId(openedTab.id)'),
+      'setUrlInput (address bar)': block.indexOf('store.setUrlInput('),
+      'activation sequencer invalidate': block.indexOf('browserTabActivationSequencer.invalidate()'),
+      'setBrowserRuntimeReady': block.indexOf('setBrowserRuntimeReady(true)'),
+    }
+    for (const [name, at] of Object.entries(preempts)) {
+      assert.ok(at > -1, `preempt "${name}" must exist in the handler (anchor drift?)`)
+      assert.ok(gate < at, `gate must precede the "${name}" preempt, else activate:false tabs would trigger it`)
+    }
   })
 })
