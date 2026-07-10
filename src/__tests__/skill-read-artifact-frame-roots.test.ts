@@ -178,11 +178,15 @@ test('Stage M (M4+M5): source-level proof — skill_read_artifact dispatch reads
   const branchEnd = readArtifactRegion.indexOf("if (tool.name === 'skill_inspect_run_state')")
   const branch = branchEnd > 0 ? readArtifactRegion.slice(0, branchEnd) : readArtifactRegion
 
-  // The dispatch must consult runtimeContext.activeFrame.activeArtifactRoots.
+  // The dispatch must source its additional read roots from the active frame.
+  // R-XREAD — this now flows through `collectSkillReadArtifactRoots`, which
+  // unions the write-eligible `activeArtifactRoots` with the read-only
+  // `activeReadOnlyRoots` (sibling assets + prior outputs) without ever
+  // exposing the latter to the write/handoff path.
   assert.match(
     branch,
-    /runtimeContext\?\.activeFrame\?\.activeArtifactRoots/,
-    'skill_read_artifact dispatch must read runtimeContext.activeFrame.activeArtifactRoots',
+    /collectSkillReadArtifactRoots\(runtimeContext\?\.activeFrame\)/,
+    'skill_read_artifact dispatch must source roots from runtimeContext.activeFrame via collectSkillReadArtifactRoots',
   )
   // Stage M (M4+M5) — the legacy fallback is REMOVED. The TODO marker is
   // also gone. Re-introducing either is a regression — see plan §3.2 and

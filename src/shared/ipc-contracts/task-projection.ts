@@ -176,6 +176,8 @@ export interface TaskProjectionRecord {
   /** D4 — 模型经 declare_completion_criteria 声明的补充验收标准（整组替换写入；
    *  finalizer 终态经 appendModelCriteria 并入裁决，renderer 只读不派生）。 */
   modelCriteria?: string[] | null
+  /** R-CRIT-P — 模型声明的最终文件目标（整组替换）；代码在终态按交付证据计数。 */
+  expectedOutputs?: string[] | null
   /** EP3-PK1 — packet marker (parent|child|null) + reference list. */
   packetRole?: 'parent' | 'child' | null
   contextRefs?: string[] | null

@@ -47,6 +47,7 @@ export function buildCriteriaSelfCheckText(taskType: TaskType | null | undefined
   return [
     '本轮任务的验收标准（宣布完成前逐条自检）：',
     ...lines,
+    '任务承诺多份文件交付时，先用 declare_completion_criteria.expected_outputs 声明每份最终文件路径。',
     '暂时无法满足的项，说明原因并继续推进或如实汇报，不要在未满足时宣称完成。',
   ].join('\n')
 }

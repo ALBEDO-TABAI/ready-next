@@ -137,7 +137,10 @@ export function buildBrowserActionSessionProgress(
     })),
     updatedAt: session.updatedAt,
     lastError: null,
-    detail: session.nextSuggestedAction,
+    // D11 — suggestions are narration/session metadata, never task-progress
+    // detail. Renderer formats progress.detail as a visible step label, which
+    // made "read map again" look like a 0/1 criterion and later a fake 100%.
+    detail: null,
     browserActionSession: session,
   }
 }

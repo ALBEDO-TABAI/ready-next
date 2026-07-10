@@ -32,6 +32,14 @@ import type { ToolExecutionOutput } from './tool-result-types'
  */
 export interface ToolRuntimeActiveFrameContext {
   activeArtifactRoots: string[]
+  /**
+   * R-XREAD — read-only chained roots (typed sibling `skill_reference` asset
+   * roots + same-task prior output dirs). Unioned into `skill_read_artifact`'s
+   * allowed roots, but intentionally kept OUT of `activeArtifactRoots` so the
+   * write / export / handoff-target resolvers (which read `activeArtifactRoots`
+   * only) can never turn a read-only sibling root into a writable target.
+   */
+  activeReadOnlyRoots?: string[]
   runContract: SkillRunContract | null
   discoveredHandles: Record<string, unknown>[]
 }
@@ -83,9 +91,35 @@ export interface ToolRuntimeContext {
 export function createEmptyActiveFrameContext(): ToolRuntimeActiveFrameContext {
   return {
     activeArtifactRoots: [],
+    activeReadOnlyRoots: [],
     runContract: null,
     discoveredHandles: [],
   }
+}
+
+/**
+ * R-XREAD — resolve the additional read roots `skill_read_artifact` may consult
+ * this turn: write-eligible `activeArtifactRoots` unioned (deduped, order
+ * preserved) with read-only `activeReadOnlyRoots` (typed sibling assets +
+ * same-task prior outputs). The write / export / handoff-target resolvers read
+ * `activeArtifactRoots` only, so anything seeded into `activeReadOnlyRoots`
+ * is readable but can never be turned into a writable target.
+ */
+export function collectSkillReadArtifactRoots(
+  frame: { activeArtifactRoots?: string[] | null; activeReadOnlyRoots?: string[] | null } | null | undefined,
+): string[] {
+  const roots: string[] = []
+  const seen = new Set<string>()
+  const push = (path: unknown): void => {
+    if (typeof path !== 'string') return
+    const trimmed = path.trim()
+    if (!trimmed || seen.has(trimmed)) return
+    seen.add(trimmed)
+    roots.push(trimmed)
+  }
+  for (const root of frame?.activeArtifactRoots || []) push(root)
+  for (const root of frame?.activeReadOnlyRoots || []) push(root)
+  return roots
 }
 
 /**

@@ -145,7 +145,7 @@ test('Agent SDK scoped run writes long-task run_meta fields on close', async () 
     maxToolCalls: 60,
     maxParallelToolGroups: 5,
     reservedToolCalls: 0,
-    iterationsUsed: 0,
+    iterationsUsed: 1,
     toolCallsUsed: 0,
     parallelToolGroupsUsed: 0,
   })

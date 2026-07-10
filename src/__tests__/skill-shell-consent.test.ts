@@ -17,6 +17,11 @@ import {
   registerSkillShellConsentReminder,
 } from '../main/modules/agent-control/system-reminders/skill-shell-consent-reminder'
 import { createSystemReminderRegistry } from '../main/modules/agent-control/system-reminders/system-reminder-registry'
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
+
+test('skill-shell-consent declares transitive sqlite coverage', (t) => {
+  skipIfSqliteUnavailable(t, 'skill-shell-consent transitive sqlite guard')
+})
 
 test('parseShellConsentMap: valid map keeps only true values; bad/absent JSON → {}', () => {
   assert.deepEqual(parseShellConsentMap('{"a":true,"b":false,"c":true}'), { a: true, c: true })

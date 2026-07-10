@@ -2721,6 +2721,15 @@ const migrations: Migration[] = [
       `)
       db.exec("UPDATE agents SET status = 'disabled' WHERE status = 'retired'")
     }
+  },
+  {
+    // R-CRIT-P — task-level model declarations must survive restart so the
+    // terminal finalizer can enforce the same criteria and delivery targets.
+    name: '065_task_projection_completion_declarations',
+    up: (db) => {
+      db.exec('ALTER TABLE task_projections ADD COLUMN model_criteria_json TEXT')
+      db.exec('ALTER TABLE task_projections ADD COLUMN expected_outputs_json TEXT')
+    }
   }
 ]
 

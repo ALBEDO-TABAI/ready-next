@@ -21,7 +21,7 @@ const EXEMPTIONS_PATH = path.join(ROOT, 'scripts/test-coverage-exemptions.json')
 
 const TEST_EXTENSIONS = [
   'src/__tests__/**/*.test.ts',
-  'src/__tests__/**/*.e2e.ts',
+  'src/__tests__/**/*.e2e.ts'
   // eslint-rules / scripts test dirs do not import better-sqlite3 today; if
   // they ever do, extend this list.
 ]
@@ -32,14 +32,14 @@ const DISK_EXCLUDE_PREFIXES = [
   '.claude/worktrees/',
   'out/',
   'dist/',
-  'build/',
+  'build/'
 ]
 
 const SQLITE_LOAD_FORMS = [
   /\brequire\(\s*['"]better-sqlite3['"]\s*\)/,
   /\bawait\s+import\(\s*['"]better-sqlite3['"]\s*\)/,
   // side-effect import — `import 'better-sqlite3'` (no `from`)
-  /^\s*import\s+['"]better-sqlite3['"]/m,
+  /^\s*import\s+['"]better-sqlite3['"]/m
 ]
 
 // Stage U moved db-worker.ts to database/worker.ts; the NATIVE_GREP_DIRS
@@ -61,7 +61,7 @@ function main() {
   const result = checkSqliteSkipPattern()
   if (result.ok) {
     console.log(
-      `sqlite skip pattern: ok (tested=${result.testedCount}, native-backed=${result.nativeCount}, c4Exempt=${result.exemptCount})`,
+      `sqlite skip pattern: ok (tested=${result.testedCount}, native-backed=${result.nativeCount}, c4Exempt=${result.exemptCount})`
     )
     return
   }
@@ -71,9 +71,9 @@ function main() {
   }
   console.error(
     `\nFix by importing skipIfSqliteUnavailable from src/__tests__/utils/sqlite-skip.ts and\n` +
-    `calling it at the start of every outer test() block. For C4 false positives where\n` +
-    `the test only injects a fake DB and never lets the module load sqlite, register the\n` +
-    `file in scripts/test-coverage-exemptions.json under c4Exempt[] with a reason.\n`,
+      `calling it at the start of every outer test() block. For C4 false positives where\n` +
+      `the test only injects a fake DB and never lets the module load sqlite, register the\n` +
+      `file in scripts/test-coverage-exemptions.json under c4Exempt[] with a reason.\n`
   )
   process.exit(1)
 }
@@ -142,7 +142,7 @@ function checkSqliteSkipPattern({ root = ROOT } = {}) {
       violations.push({
         kind: 'stale_c4_exempt',
         reason: 'no_longer_C4_transitive',
-        path: rel,
+        path: rel
       })
     }
   }
@@ -152,7 +152,7 @@ function checkSqliteSkipPattern({ root = ROOT } = {}) {
     violations,
     testedCount: testFiles.length,
     nativeCount,
-    exemptCount: c4ExemptSet.size,
+    exemptCount: c4ExemptSet.size
   }
 }
 
@@ -161,7 +161,8 @@ function loadC4Exempt(filePath) {
   const data = JSON.parse(readFileSync(filePath, 'utf8'))
   const list = Array.isArray(data?.c4Exempt) ? data.c4Exempt : []
   for (const entry of list) {
-    if (typeof entry?.path !== 'string') throw new Error(`c4Exempt entry missing path: ${JSON.stringify(entry)}`)
+    if (typeof entry?.path !== 'string')
+      throw new Error(`c4Exempt entry missing path: ${JSON.stringify(entry)}`)
     if (typeof entry?.reason !== 'string' || entry.reason.trim().length < 10) {
       throw new Error(`c4Exempt entry "${entry.path}" needs reason ≥ 10 chars`)
     }
@@ -188,7 +189,11 @@ function buildNativeBackedModules(root) {
 
 function grepDirForLiteral(dir, literal, out) {
   let entries
-  try { entries = readdirSync(dir, { withFileTypes: true }) } catch { return }
+  try {
+    entries = readdirSync(dir, { withFileTypes: true })
+  } catch {
+    return
+  }
   for (const e of entries) {
     if (e.name === 'node_modules' || e.name === '.git') continue
     const full = path.join(dir, e.name)
@@ -199,7 +204,11 @@ function grepDirForLiteral(dir, literal, out) {
     if (!e.isFile()) continue
     if (!/\.(ts|tsx|cts|mts|js|cjs|mjs)$/.test(e.name)) continue
     let content
-    try { content = readFileSync(full, 'utf8') } catch { continue }
+    try {
+      content = readFileSync(full, 'utf8')
+    } catch {
+      continue
+    }
     if (content.includes(literal)) out.add(realPathSafe(full))
   }
 }
@@ -245,7 +254,11 @@ function reachesNativeBackedModule(testAbs, root, nativeBackedModules) {
       seen.add(canon)
       if (depth > 0 && nativeBackedModules.has(canon)) return true
       let src
-      try { src = readFileSync(cur, 'utf8') } catch { continue }
+      try {
+        src = readFileSync(cur, 'utf8')
+      } catch {
+        continue
+      }
       for (const spec of extractValueRelativeImports(src, cur)) {
         const resolved = resolveLocalImport(spec, cur, root)
         if (resolved) next.push(resolved)
@@ -298,7 +311,7 @@ function resolveLocalImport(spec, fromFile, _root) {
     path.resolve(dir, spec) + '.mts',
     path.resolve(dir, spec) + '.cts',
     path.resolve(dir, spec, 'index.ts'),
-    path.resolve(dir, spec, 'index.tsx'),
+    path.resolve(dir, spec, 'index.tsx')
   ]
   for (const c of candidates) {
     if (existsSync(c) && statSync(c).isFile()) return c
@@ -307,7 +320,61 @@ function resolveLocalImport(spec, fromFile, _root) {
 }
 
 function hasSkipHelperImport(src) {
-  return /from\s+['"][^'"]*\/utils\/sqlite-skip['"]/.test(src) && /\bskipIfSqliteUnavailable\s*\(/.test(src)
+  const executable = stripComments(src)
+  if (!/from\s+['"][^'"]*\/utils\/sqlite-skip['"]/.test(executable)) return false
+  const lines = executable.split(/\r?\n/)
+  const callOpen = /^\s*(?:test|it)(?:\.\w+)*\s*\(/
+  for (let index = 0; index < lines.length; index += 1) {
+    if (!callOpen.test(lines[index])) continue
+    const guardWindow = lines.slice(index, Math.min(index + 20, lines.length)).join('\n')
+    if (/\bskipIfSqliteUnavailable\s*\(/.test(guardWindow)) return true
+  }
+  return false
+}
+
+function stripComments(src) {
+  let out = ''
+  let inBlock = false
+  for (const line of src.split(/\r?\n/)) {
+    let next = ''
+    let index = 0
+    let quote = null
+    while (index < line.length) {
+      const ch = line[index]
+      const following = line[index + 1] || ''
+      if (inBlock) {
+        if (ch === '*' && following === '/') {
+          inBlock = false
+          index += 2
+        } else {
+          index += 1
+        }
+        continue
+      }
+      if (quote) {
+        next += ch
+        if (ch === quote && line[index - 1] !== '\\') quote = null
+        index += 1
+        continue
+      }
+      if (ch === "'" || ch === '"' || ch === '`') {
+        quote = ch
+        next += ch
+        index += 1
+        continue
+      }
+      if (ch === '/' && following === '/') break
+      if (ch === '/' && following === '*') {
+        inBlock = true
+        index += 2
+        continue
+      }
+      next += ch
+      index += 1
+    }
+    out += `${next}\n`
+  }
+  return out
 }
 
 function findUnguardedTestBlocks(src) {
@@ -339,23 +406,50 @@ function findUnguardedTestBlocks(src) {
       titleAnchorLine = afterArgs.line
       const curriedEnd = matchClosingParen(lines, afterArgs.line, afterArgs.col)
       if (!curriedEnd) continue
-      const curriedSrc = sliceRange(lines, afterArgs.line, afterArgs.col, curriedEnd.line, curriedEnd.col + 1)
+      const curriedSrc = sliceRange(
+        lines,
+        afterArgs.line,
+        afterArgs.col,
+        curriedEnd.line,
+        curriedEnd.col + 1
+      )
       if (!/['"`]/.test(curriedSrc)) continue
     } else {
       // direct form — title is the first argument; require a quote inside the
       // first args group.
-      const directSrc = sliceRange(lines, argsStart.line, argsStart.col, argsEnd.line, argsEnd.col + 1)
+      const directSrc = sliceRange(
+        lines,
+        argsStart.line,
+        argsStart.col,
+        argsEnd.line,
+        argsEnd.col + 1
+      )
       if (!/['"`]/.test(directSrc)) continue
     }
 
-    // Helper guard scan: from the title anchor line through the call body's
-    // closing brace. We allow up to 20 lines past the title; the helper guard
-    // is virtually always the FIRST statement of the body so this is plenty.
-    const guardWindow = lines.slice(titleAnchorLine, Math.min(titleAnchorLine + 20, lines.length)).join('\n')
-    if (/\bskipIfSqliteUnavailable\s*\(/.test(guardWindow)) continue
+    const callEnd = afterArgs && afterArgs.ch === '('
+      ? matchClosingParen(lines, afterArgs.line, afterArgs.col)
+      : argsEnd
+    if (!callEnd) continue
+    const callSource = sliceRange(
+      lines,
+      titleAnchorLine,
+      titleAnchorLine === argsStart.line ? argsStart.col : afterArgs.col,
+      callEnd.line,
+      callEnd.col + 1
+    )
+    const callbackBody = callbackBodyAfterOpeningBrace(callSource)
+    const firstStatement = callbackBody === null ? '' : stripComments(callbackBody).trimStart()
+    if (/^(?:if\s*\(\s*)?skipIfSqliteUnavailable\s*\(/.test(firstStatement)) continue
     out.push({ line: i + 1 })
   }
   return out
+}
+
+function callbackBodyAfterOpeningBrace(callSource) {
+  const callbackOpen = /(?:async\s*)?(?:(?:\([^)]*\)|[A-Za-z_$][\w$]*)\s*=>|function(?:\s+[A-Za-z_$][\w$]*)?\s*\([^)]*\))\s*\{/g
+  const match = callbackOpen.exec(callSource)
+  return match ? callSource.slice(match.index + match[0].length) : null
 }
 
 function locateArgsStart(lines, fromLine) {
@@ -388,10 +482,42 @@ function matchClosingParen(lines, openLine, openCol) {
   let prevSig = '' // last significant (non-ws/non-comment) char seen
   let prevWord = '' // last identifier-like word collected (Codex r8 v7)
   let curWord = ''
-  const REGEX_PRECEDES_CHARS = new Set(['(', '[', '{', ',', ';', '=', ':', '?', '!', '&', '|', '+', '-', '*', '~', '^', '<', '>', '%', '/'])
+  const REGEX_PRECEDES_CHARS = new Set([
+    '(',
+    '[',
+    '{',
+    ',',
+    ';',
+    '=',
+    ':',
+    '?',
+    '!',
+    '&',
+    '|',
+    '+',
+    '-',
+    '*',
+    '~',
+    '^',
+    '<',
+    '>',
+    '%',
+    '/'
+  ])
   const REGEX_PRECEDES_KEYWORDS = new Set([
-    'return', 'throw', 'yield', 'await', 'typeof', 'void', 'delete',
-    'in', 'of', 'instanceof', 'new', 'do', 'else',
+    'return',
+    'throw',
+    'yield',
+    'await',
+    'typeof',
+    'void',
+    'delete',
+    'in',
+    'of',
+    'instanceof',
+    'new',
+    'do',
+    'else'
   ])
 
   function flushWord() {
@@ -417,25 +543,43 @@ function matchClosingParen(lines, openLine, openCol) {
 
       if (inLineComment) continue
       if (inBlockComment) {
-        if (ch === '*' && next === '/') { inBlockComment = false; ci++ }
+        if (ch === '*' && next === '/') {
+          inBlockComment = false
+          ci++
+        }
         continue
       }
       // String close: like regex close, treat the string as a value — clear
       // prevWord and set prevSig to a non-regex-preceding char.
       if (inSingle) {
-        if (ch === "'" && !isEscaped(line, ci)) { inSingle = false; prevWord = ''; prevSig = 'A' }
+        if (ch === "'" && !isEscaped(line, ci)) {
+          inSingle = false
+          prevWord = ''
+          prevSig = 'A'
+        }
         continue
       }
       if (inDouble) {
-        if (ch === '"' && !isEscaped(line, ci)) { inDouble = false; prevWord = ''; prevSig = 'A' }
+        if (ch === '"' && !isEscaped(line, ci)) {
+          inDouble = false
+          prevWord = ''
+          prevSig = 'A'
+        }
         continue
       }
       if (inTpl) {
-        if (ch === '`' && !isEscaped(line, ci)) { inTpl = false; prevWord = ''; prevSig = 'A' }
+        if (ch === '`' && !isEscaped(line, ci)) {
+          inTpl = false
+          prevWord = ''
+          prevSig = 'A'
+        }
         continue
       }
       if (inRegex) {
-        if (ch === '\\') { ci++; continue } // skip escaped char
+        if (ch === '\\') {
+          ci++
+          continue
+        } // skip escaped char
         if (ch === '[') inRegexClass = true
         else if (ch === ']') inRegexClass = false
         else if (ch === '/' && !inRegexClass && !isEscaped(line, ci)) {
@@ -450,8 +594,18 @@ function matchClosingParen(lines, openLine, openCol) {
         continue
       }
 
-      if (ch === '/' && next === '/') { inLineComment = true; ci++; flushWord(); continue }
-      if (ch === '/' && next === '*') { inBlockComment = true; ci++; flushWord(); continue }
+      if (ch === '/' && next === '/') {
+        inLineComment = true
+        ci++
+        flushWord()
+        continue
+      }
+      if (ch === '/' && next === '*') {
+        inBlockComment = true
+        ci++
+        flushWord()
+        continue
+      }
       if (ch === '/') {
         const wordPrefix = curWord || prevWord
         const isKwRegex = wordPrefix && REGEX_PRECEDES_KEYWORDS.has(wordPrefix)
@@ -473,10 +627,34 @@ function matchClosingParen(lines, openLine, openCol) {
         continue
       }
 
-      if (ch === "'") { inSingle = true; flushWord(); prevWord = ''; prevSig = ch; continue }
-      if (ch === '"') { inDouble = true; flushWord(); prevWord = ''; prevSig = ch; continue }
-      if (ch === '`') { inTpl = true; flushWord(); prevWord = ''; prevSig = ch; continue }
-      if (ch === '(') { depth++; flushWord(); prevWord = ''; prevSig = ch; continue }
+      if (ch === "'") {
+        inSingle = true
+        flushWord()
+        prevWord = ''
+        prevSig = ch
+        continue
+      }
+      if (ch === '"') {
+        inDouble = true
+        flushWord()
+        prevWord = ''
+        prevSig = ch
+        continue
+      }
+      if (ch === '`') {
+        inTpl = true
+        flushWord()
+        prevWord = ''
+        prevSig = ch
+        continue
+      }
+      if (ch === '(') {
+        depth++
+        flushWord()
+        prevWord = ''
+        prevSig = ch
+        continue
+      }
       if (ch === ')') {
         depth--
         if (depth === 0) return { line: li, col: ci }
@@ -505,7 +683,10 @@ function matchClosingParen(lines, openLine, openCol) {
 function isEscaped(line, idx) {
   let n = 0
   let k = idx - 1
-  while (k >= 0 && line[k] === '\\') { n++; k-- }
+  while (k >= 0 && line[k] === '\\') {
+    n++
+    k--
+  }
   return n % 2 === 1
 }
 
@@ -534,7 +715,11 @@ function sliceRange(lines, startLine, startCol, endLine, endCol) {
 }
 
 function realPathSafe(p) {
-  try { return realpathSync(p) } catch { return p }
+  try {
+    return realpathSync(p)
+  } catch {
+    return p
+  }
 }
 
 module.exports = {
@@ -547,6 +732,6 @@ module.exports = {
     findUnguardedTestBlocks,
     extractValueRelativeImports,
     buildNativeBackedModules,
-    reachesNativeBackedModule,
-  },
+    reachesNativeBackedModule
+  }
 }

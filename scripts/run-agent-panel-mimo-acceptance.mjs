@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 
@@ -12,6 +12,11 @@ const options = parseArgs(process.argv.slice(2))
 const outDir = resolve(options.outDir || DEFAULT_OUT_DIR)
 mkdirSync(outDir, { recursive: true })
 const fixtureRoot = resolve(options.fixtureRoot || DEFAULT_FIXTURE_ROOT)
+const artifactDir = resolve(
+  options.artifactDir || join(tmpdir(), `ready-skill-review-${Date.now()}`)
+)
+mkdirSync(artifactDir, { recursive: true })
+const imagePath = resolve(options.imagePath || 'src/renderer/assets/ready-wordmark.png')
 prepareFixture(fixtureRoot)
 
 const target = await findReadyTarget(options.port)
@@ -29,6 +34,9 @@ try {
   report.outDir = outDir
   if (options.suite === 'surface20-agent-interaction') {
     augmentSurface20LogEvidence(report)
+  }
+  if (options.suite === 'skill-two-docs') {
+    verifyTwoDocumentArtifacts(report, artifactDir)
   }
   report.ok = report.cases.every((item) => item.ok)
   const reportPath = join(outDir, 'agent-panel-mimo-acceptance.json')
@@ -60,6 +68,8 @@ function parseArgs(argv) {
     outDir: DEFAULT_OUT_DIR,
     fixtureRoot: DEFAULT_FIXTURE_ROOT,
     suite: DEFAULT_SUITE,
+    artifactDir: null,
+    imagePath: null,
   }
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index]
@@ -71,6 +81,10 @@ function parseArgs(argv) {
       parsed.fixtureRoot = argv[++index] || parsed.fixtureRoot
     } else if (arg === '--suite') {
       parsed.suite = argv[++index] || parsed.suite
+    } else if (arg === '--artifact-dir') {
+      parsed.artifactDir = argv[++index] || null
+    } else if (arg === '--image-path') {
+      parsed.imagePath = argv[++index] || null
     } else {
       throw new Error(`Unknown argument: ${arg}`)
     }
@@ -160,8 +174,36 @@ async function waitForHarness(client) {
 }
 
 async function runHarnessCases(client, fixtureRoot) {
-  const source = `(${pageRunner.toString()})(${JSON.stringify({ fixtureRoot, suite: options.suite })})`
+  const source = `(${pageRunner.toString()})(${JSON.stringify({
+    fixtureRoot,
+    suite: options.suite,
+    artifactDir,
+    imagePath,
+  })})`
   return evaluate(client, source)
+}
+
+function verifyTwoDocumentArtifacts(report, root) {
+  const item = report.cases[0]
+  if (!item) return
+  const paths = [join(root, 'reverse-report.md'), join(root, 'deep-report.md')]
+  const artifacts = paths.map((path) => {
+    const exists = existsSync(path)
+    const bytes = exists ? statSync(path).size : 0
+    return { path, exists, bytes }
+  })
+  item.extra = { ...(item.extra || {}), artifacts }
+  for (const artifact of artifacts) {
+    if (artifact.exists && artifact.bytes > 200) continue
+    item.diagnostics.push({
+      id: 'skill_two_doc_artifact_missing',
+      severity: 'error',
+      layer: 'runtime',
+      message: `双技能文档未真实落盘或内容为空：${artifact.path}`,
+      evidence: artifact,
+    })
+  }
+  item.ok = item.diagnostics.every((diagnostic) => diagnostic.severity !== 'error')
 }
 
 async function evaluate(client, expression) {
@@ -270,6 +312,45 @@ async function pageRunner(input) {
     }
     : null
   const cases = []
+
+  if (input.suite === 'skill-two-docs') {
+    const folderName = String(input.artifactDir || '').split(/[\\/]/).filter(Boolean).pop()
+    cases.push(await runCase({
+      id: 'skill-two-docs-live-electron',
+      text: [
+        '请严格按顺序使用 @[image-reverse-describe] 和 @[image-deep-read] 两个显式引用的技能分析附件图片。',
+        `先用 declare_completion_criteria 声明两份预期输出，再把结果保存到 @[${folderName}]。`,
+        '两份文件基名固定为 reverse-report 和 deep-report，写入工具调用时补上 Markdown 扩展名。',
+        '第一份必须是完整的结构化反推与长描述；第二份必须是完整的意图、功能、判断和存疑清单。',
+        '两份都必须真实写入文件且非空；逐一核对保存结果后再结束，不要只把正文发在聊天里。',
+        '核对内容时只读取技能自有产物，导出目录的真实落盘由系统验收；不要用 skill_read_artifact 读取导出目录的绝对路径。',
+      ].join('\n'),
+      options: {
+        mode: 'dom',
+        timeoutMs: 600000,
+        attachments: [
+          { path: input.imagePath, type: 'image', source: 'file' },
+          {
+            path: input.artifactDir,
+            type: 'other',
+            source: 'file',
+            isDirectory: true,
+          },
+        ],
+        expectedToolNames: ['declare_completion_criteria', 'skill_write_artifact'],
+      },
+      assertions: [
+        (summary) => summary.observedToolNames.filter((name) => name === 'skill_write_artifact').length >= 1
+          ? null
+          : '没有观察到技能文档写入调用',
+        (summary) => summary.result.after.runtime.activeRun?.terminalReason === 'done'
+          ? null
+          : '真实任务没有以完成状态收口',
+      ],
+      extra: { artifactDir: input.artifactDir, imagePath: input.imagePath },
+    }))
+    return { ok: cases.every((item) => item.ok), config, cases, events: harness.events() }
+  }
 
   if (input.suite === 'surface12-map') {
     cases.push(await runCase({
@@ -924,6 +1005,13 @@ async function pageRunner(input) {
       extra: {
         ...(definition.extra || {}),
         askUserAnswer,
+        terminalTaskCards: result.after.taskCards.map((card) => ({
+          scopeId: card.scopeId,
+          taskId: card.taskId,
+          status: card.status,
+          terminalReason: card.terminalReason,
+          recentArtifacts: card.recentArtifacts,
+        })),
       },
     }
   }

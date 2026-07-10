@@ -5,6 +5,7 @@ import type { AgentInputItem } from '@openai/agents'
 import {
   CONTEXT_SOFT_RATIO,
   DEFAULT_CONTEXT_WINDOW,
+  IMAGE_EST_TOKENS,
   MAX_CONTEXT_WINDOW,
   computeContextBudget,
   estimateInputItemTokens,
@@ -40,7 +41,7 @@ test('CJK text estimates higher than same-length English text', () => {
   assert.ok(chinese > english * 2, `expected CJK estimate ${chinese} to be more than double English ${english}`)
 })
 
-test('opaque media references are estimated as high-cost objects', () => {
+test('R-CTX: opaque image references collapse to the tile constant while file references stay high-cost', () => {
   const imageReference = estimateInputItemTokens([
     {
       role: 'user',
@@ -54,7 +55,13 @@ test('opaque media references are estimated as high-cost objects', () => {
     } as AgentInputItem,
   ])
 
-  assert.ok(imageReference >= 32_000)
+  // R-CTX — opaque image refs are tiled (no longer the retired 85K high-cost),
+  // so eviction is never justified by a phantom per-image estimate.
+  assert.ok(
+    imageReference <= IMAGE_EST_TOKENS + 100,
+    `opaque image ref should be tile-cost (~${IMAGE_EST_TOKENS}), got ${imageReference}`,
+  )
+  // Non-image file references are untouched by R-CTX and remain high-cost.
   assert.ok(fileReference >= 64_000)
 })
 

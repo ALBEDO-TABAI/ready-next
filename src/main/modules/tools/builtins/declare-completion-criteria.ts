@@ -12,11 +12,36 @@ import { logAgentMetric } from '../../agent-control/metrics'
 
 export const DECLARE_CRITERIA_MAX_ITEMS = 8
 export const DECLARE_CRITERIA_MAX_ITEM_CHARS = 120
+export const DECLARE_EXPECTED_OUTPUT_MAX_ITEM_CHARS = 200
+
+export interface CompletionDeclarationPatch {
+  modelCriteria: string[]
+  expectedOutputs: string[]
+}
 
 export interface DeclareCompletionCriteriaDeps {
   taskId: string | null
   sessionId?: string | null
-  updateTaskModelCriteria: (taskId: string, criteria: string[]) => void
+  updateTaskCompletionDeclaration: (taskId: string, patch: CompletionDeclarationPatch) => void
+}
+
+function normalizeExpectedOutputs(value: unknown): { ok: true; value: string[] } | { ok: false; message: string } {
+  if (value === undefined) return { ok: true, value: [] }
+  if (!Array.isArray(value) || value.length === 0 || value.length > DECLARE_CRITERIA_MAX_ITEMS) {
+    return { ok: false, message: `未登记：expected_outputs 必须是 1-${DECLARE_CRITERIA_MAX_ITEMS} 个具体文件目标。` }
+  }
+  const outputs: string[] = []
+  for (const item of value) {
+    const target = String(item ?? '').trim()
+    if (!target || target.length > DECLARE_EXPECTED_OUTPUT_MAX_ITEM_CHARS) {
+      return { ok: false, message: `未登记：expected_outputs 每项必须非空且不超过 ${DECLARE_EXPECTED_OUTPUT_MAX_ITEM_CHARS} 字符。` }
+    }
+    if (/[\\/]$/.test(target) || target === '.' || target === '..') {
+      return { ok: false, message: '未登记：expected_outputs 必须指向具体文件，不能只给目录。' }
+    }
+    outputs.push(target)
+  }
+  return { ok: true, value: outputs }
 }
 
 export function executeDeclareCompletionCriteria(
@@ -62,17 +87,33 @@ export function executeDeclareCompletionCriteria(
     })
   }
 
-  deps.updateTaskModelCriteria(deps.taskId, criteria)
+  const expectedOutputsResult = normalizeExpectedOutputs(args.expected_outputs)
+  if (!expectedOutputsResult.ok) {
+    return createToolExecutionOutput(expectedOutputsResult.message, {
+      shape: 'json',
+      data: { errorKind: 'input_validation', toolName: 'declare_completion_criteria' },
+    })
+  }
+
+  deps.updateTaskCompletionDeclaration(deps.taskId, {
+    modelCriteria: criteria,
+    expectedOutputs: expectedOutputsResult.value,
+  })
   logAgentMetric('model_criteria_declared', {
     taskId: deps.taskId,
     sessionId: deps.sessionId || null,
     count: criteria.length,
   })
+  logAgentMetric('expected_outputs_declared', {
+    taskId: deps.taskId,
+    sessionId: deps.sessionId || null,
+    count: expectedOutputsResult.value.length,
+  })
   return createToolExecutionOutput(
     `已登记 ${criteria.length} 条补充验收标准（整组替换）。终态裁决时会与系统模板标准合并核对；模板标准不可被覆盖。`,
     {
       shape: 'json',
-      data: { ok: true, count: criteria.length, criteria },
+      data: { ok: true, count: criteria.length, criteria, expectedOutputs: expectedOutputsResult.value },
     },
   )
 }

@@ -847,6 +847,7 @@ describe('BrowserTabMetaService', () => {
         canGoBack: true,
         canGoForward: false,
         error: 'temporary failure',
+        openerTabId: null,
       },
     ])
     assert.deepStrictEqual(emitted, [
@@ -869,6 +870,7 @@ describe('BrowserTabMetaService', () => {
           canGoBack: true,
           canGoForward: false,
           error: 'temporary failure',
+          openerTabId: null,
         },
       },
     ])

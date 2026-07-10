@@ -21,7 +21,8 @@ const path = require('node:path')
 const REPO_DEFAULT = path.resolve(__dirname, '..')
 const TARGET_REL = 'src/main/modules/agent-control/domain-adapters/run-capability-controller.ts'
 const EXECUTOR_REL = 'src/main/modules/agent-control/runtime-core/agent-sdk-tool-executor.ts'
-const ORCHESTRATOR_REL = 'src/main/modules/agent-control/runtime-core/agent-sdk-turn-orchestrator.ts'
+const ORCHESTRATOR_REL =
+  'src/main/modules/agent-control/runtime-core/agent-sdk-turn-orchestrator.ts'
 
 function checkCapabilityGateEnforcedInArbitration({ root = REPO_DEFAULT } = {}) {
   const errors = []
@@ -33,25 +34,33 @@ function checkCapabilityGateEnforcedInArbitration({ root = REPO_DEFAULT } = {}) 
   const src = fs.readFileSync(targetAbs, 'utf8')
 
   if (!/capabilityResolution\.supportsVision\b/.test(src)) {
-    errors.push(`${TARGET_REL}: missing literal reference to \`capabilityResolution.supportsVision\``)
+    errors.push(
+      `${TARGET_REL}: missing literal reference to \`capabilityResolution.supportsVision\``
+    )
   }
 
   // Confirm the gating decision has a branch (not just a passive comment).
   const branchPattern = /capabilityResolution\.supportsVision\s*[!=]==?\s*(true|false)/
   if (!branchPattern.test(src)) {
-    errors.push(`${TARGET_REL}: \`capabilityResolution.supportsVision\` must be branched on (=== true / !== true)`)
+    errors.push(
+      `${TARGET_REL}: \`capabilityResolution.supportsVision\` must be branched on (=== true / !== true)`
+    )
   }
 
   // P1-5 — capability floors must be computed on BOTH arbitration paths from the same function:
   // the controller (authoritative point) and the SDK executor (consumes the same computeCapabilityFloors).
   if (!/\bcomputeCapabilityFloors\s*\(/.test(src)) {
-    errors.push(`${TARGET_REL}: missing \`computeCapabilityFloors(\` — capability floors not computed at the arbitration point`)
+    errors.push(
+      `${TARGET_REL}: missing \`computeCapabilityFloors(\` — capability floors not computed at the arbitration point`
+    )
   }
   const executorAbs = path.join(root, EXECUTOR_REL)
   if (!fs.existsSync(executorAbs)) {
     errors.push(`Missing target: ${EXECUTOR_REL}`)
   } else if (!/\bcomputeCapabilityFloors\s*\(/.test(fs.readFileSync(executorAbs, 'utf8'))) {
-    errors.push(`${EXECUTOR_REL}: missing \`computeCapabilityFloors(\` — SDK path must consume the same floors function`)
+    errors.push(
+      `${EXECUTOR_REL}: missing \`computeCapabilityFloors(\` — SDK path must consume the same floors function`
+    )
   }
 
   // Review-fix (2026-07-07) — the LIVE authoritative enforcement point is the turn-orchestrator's
@@ -66,16 +75,43 @@ function checkCapabilityGateEnforcedInArbitration({ root = REPO_DEFAULT } = {}) 
   } else {
     const orchestratorSrc = fs.readFileSync(orchestratorAbs, 'utf8')
     if (!/\bcomputeCapabilityFloors\s*\(/.test(orchestratorSrc)) {
-      errors.push(`${ORCHESTRATOR_REL}: missing \`computeCapabilityFloors(\` — live turn must recompute floors at the arbitration surface`)
+      errors.push(
+        `${ORCHESTRATOR_REL}: missing \`computeCapabilityFloors(\` — live turn must recompute floors at the arbitration surface`
+      )
     }
     if (!/\benforceCapabilityFloors\s*\(/.test(orchestratorSrc)) {
-      errors.push(`${ORCHESTRATOR_REL}: missing \`enforceCapabilityFloors(\` — live pipeline end must enforce \`surface ⊇ floors\``)
+      errors.push(
+        `${ORCHESTRATOR_REL}: missing \`enforceCapabilityFloors(\` — live pipeline end must enforce \`surface ⊇ floors\``
+      )
     }
     if (!/toolDefinitions\s*=\s*\w+\.definitions\b/.test(orchestratorSrc)) {
-      errors.push(`${ORCHESTRATOR_REL}: floor enforcement result must be assigned back to \`toolDefinitions\` (else recovery is discarded)`)
+      errors.push(
+        `${ORCHESTRATOR_REL}: floor enforcement result must be assigned back to \`toolDefinitions\` (else recovery is discarded)`
+      )
     }
     if (!/tool_surface_floor_violation/.test(orchestratorSrc)) {
-      errors.push(`${ORCHESTRATOR_REL}: missing \`tool_surface_floor_violation\` — floor breaches must be observable`)
+      errors.push(
+        `${ORCHESTRATOR_REL}: missing \`tool_surface_floor_violation\` — floor breaches must be observable`
+      )
+    }
+    const enforcementAssignment = orchestratorSrc.search(/toolDefinitions\s*=\s*\w+\.definitions\b/)
+    const executionHandoff = orchestratorSrc.indexOf(
+      'const executionResult = await executeAgentSdkPreparedTurn',
+      enforcementAssignment
+    )
+    if (enforcementAssignment < 0 || executionHandoff < 0) {
+      errors.push(
+        `${ORCHESTRATOR_REL}: floor-enforced surface must flow directly into executeAgentSdkPreparedTurn`
+      )
+    } else {
+      const tail = orchestratorSrc.slice(enforcementAssignment, executionHandoff)
+      const laterAssignment = tail.slice(tail.indexOf('\n') + 1).match(/\btoolDefinitions\s*=/)
+      const laterMutation = /\btoolDefinitions\.(?:splice|pop|shift|filter|length\s*=)/.test(tail)
+      if (laterAssignment || laterMutation) {
+        errors.push(
+          `${ORCHESTRATOR_REL}: toolDefinitions must not be narrowed or replaced after floor enforcement`
+        )
+      }
     }
   }
 

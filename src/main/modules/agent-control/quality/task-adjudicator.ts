@@ -12,6 +12,8 @@
  * finalizer callers may enforce the verdict at the terminal funnel.
  */
 
+import { existsSync, realpathSync } from 'node:fs'
+import { dirname, isAbsolute, join, parse } from 'node:path'
 import type { ProofRef } from './proof-collector'
 import { isValidProofRef } from './proof-collector'
 import type { CriteriaItem, CriteriaKind } from './criteria-templates'
@@ -95,7 +97,25 @@ export interface AdjudicationResult {
 // Coverage tokens are normalized by the SHARED normalizeDeliveryTarget (defined
 // in criteria-templates) so the producer-filter and this counter agree exactly
 // on which targets are real (review finding: filter mismatch).
-const normalizeCoverageToken = normalizeDeliveryTarget
+function canonicalizeCoveragePath(pathToken: string): string {
+  if (!isAbsolute(pathToken)) return pathToken
+  let current = pathToken
+  const missingSegments: string[] = []
+  const root = parse(pathToken).root
+  while (current !== root && !existsSync(current)) {
+    missingSegments.unshift(current.slice(dirname(current).length).replace(/^[/\\]+/, ''))
+    current = dirname(current)
+  }
+  try {
+    return join(realpathSync.native(current), ...missingSegments).replace(/\\/g, '/')
+  } catch {
+    // silent-catch: canonicalization is best-effort; retain the normalized path when realpath is unavailable.
+    return pathToken
+  }
+}
+
+const normalizeCoverageToken = (value: unknown): string =>
+  canonicalizeCoveragePath(normalizeDeliveryTarget(value))
 
 function coverageBasename(pathToken: string): string {
   const index = pathToken.lastIndexOf('/')

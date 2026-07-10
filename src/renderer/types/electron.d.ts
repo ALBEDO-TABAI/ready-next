@@ -378,6 +378,8 @@ interface ScopeRunTraceItemData {
   kind: 'call' | 'result'
   text: string
   timestamp: string
+  toolName?: string
+  detail?: string
 }
 
 interface ScopeRunMemoryRefData {
@@ -3281,6 +3283,7 @@ interface AIModelConfigData {
   nativeVideoMode?: 'auto' | 'on' | 'off'
   capabilityModes?: Record<string, 'auto' | 'on' | 'off'>
   contextWindowOverride?: number
+  maxOutputTokensOverride?: number
   endpointId?: string
 }
 

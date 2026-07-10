@@ -47,7 +47,7 @@ export function computeContextBudget(params: {
 }
 
 const textEncoder = new TextEncoder()
-const OPAQUE_IMAGE_REF_TOKENS = 85_000
+export const IMAGE_EST_TOKENS = 1_600
 const OPAQUE_FILE_REF_TOKENS = 120_000
 const OPAQUE_AUDIO_REF_TOKENS = 120_000
 
@@ -71,6 +71,7 @@ export function estimateInputItemTokens(items: AgentInputItem[]): number {
 
 function estimateUnknownTokens(value: unknown, keyHint = ''): number {
   if (typeof value === 'string') {
+    if (/^data:image\//i.test(value)) return IMAGE_EST_TOKENS
     if (/^(?:data:|[A-Za-z0-9+/]{200,}={0,2}$)/.test(value)) {
       return Math.max(value.length, estimateTextTokens(value))
     }
@@ -83,13 +84,17 @@ function estimateUnknownTokens(value: unknown, keyHint = ''): number {
     return Math.ceil(value.byteLength * 4 / 3)
   }
   if (Array.isArray(value)) {
-    return jsonFallbackTokens(value) + value.reduce((total, item) => total + estimateUnknownTokens(item, keyHint), 0)
+    const semanticTokens = value.reduce((total, item) => total + estimateUnknownTokens(item, keyHint), 0)
+    return itemContainsImageRef(value)
+      ? semanticTokens
+      : jsonFallbackTokens(value) + semanticTokens
   }
   if (typeof value !== 'object') return 1
 
   const record = value as Record<string, unknown>
-  let semanticTokens = 0
   const type = typeof record.type === 'string' ? record.type : ''
+  if (type === 'input_image' || type === 'computer_screenshot') return IMAGE_EST_TOKENS
+  let semanticTokens = 0
   for (const [key, child] of Object.entries(record)) {
     semanticTokens += estimateUnknownTokens(child, key)
     if (isOpaqueMediaReference(child)) {
@@ -99,7 +104,9 @@ function estimateUnknownTokens(value: unknown, keyHint = ''): number {
   if (isOpaqueMediaReference(record)) {
     semanticTokens += opaqueMediaReferenceTokens(type, keyHint)
   }
-  return Math.max(jsonFallbackTokens(value), semanticTokens)
+  return itemContainsImageRef(value, keyHint)
+    ? semanticTokens
+    : Math.max(jsonFallbackTokens(value), semanticTokens)
 }
 
 function jsonFallbackTokens(value: unknown): number {
@@ -118,14 +125,20 @@ export interface ProviderRequestBill {
   totalTokens: number
   itemCount: number
   visionItems: number
+  toolSchemaCount: number
   sections: {
     vision: number
     history: number
     tool_results: number
+    tool_schema: number
     skill_inline: number
     reminders: number
     other: number
   }
+}
+
+export interface ProviderRequestBillOptions {
+  toolSchemas?: unknown[]
 }
 
 const TOOL_TRACE_ITEM_TYPES = new Set([
@@ -173,8 +186,19 @@ function itemPlainText(item: AgentInputItem): string {
  * is best-effort (vision/tool_results are precise from item type; reminders/
  * skill_inline are marker-based) — enough to answer the attribution question.
  */
-export function billProviderRequestSections(items: AgentInputItem[]): ProviderRequestBill {
-  const sections = { vision: 0, history: 0, tool_results: 0, skill_inline: 0, reminders: 0, other: 0 }
+export function billProviderRequestSections(
+  items: AgentInputItem[],
+  options: ProviderRequestBillOptions = {},
+): ProviderRequestBill {
+  const sections = {
+    vision: 0,
+    history: 0,
+    tool_results: 0,
+    tool_schema: 0,
+    skill_inline: 0,
+    reminders: 0,
+    other: 0,
+  }
   let visionItems = 0
   for (const item of items) {
     const tokens = estimateInputItemTokens([item])
@@ -202,9 +226,26 @@ export function billProviderRequestSections(items: AgentInputItem[]): ProviderRe
       }
     }
   }
+  const toolSchemas = options.toolSchemas || []
+  for (const tool of toolSchemas) {
+    if (!tool || typeof tool !== 'object') continue
+    const record = tool as Record<string, unknown>
+    sections.tool_schema += estimateUnknownTokens({
+      type: 'function',
+      name: record.name,
+      description: record.description,
+      parameters: record.parameters,
+    })
+  }
   const totalTokens = sections.vision + sections.history + sections.tool_results
-    + sections.skill_inline + sections.reminders + sections.other
-  return { totalTokens, itemCount: items.length, visionItems, sections }
+    + sections.tool_schema + sections.skill_inline + sections.reminders + sections.other
+  return {
+    totalTokens,
+    itemCount: items.length,
+    visionItems,
+    toolSchemaCount: toolSchemas.length,
+    sections,
+  }
 }
 
 function isOpaqueMediaReference(value: unknown): boolean {
@@ -219,6 +260,6 @@ function opaqueMediaReferenceTokens(type: string, key: string): number {
   const marker = `${type} ${key}`.toLowerCase()
   if (marker.includes('audio')) return OPAQUE_AUDIO_REF_TOKENS
   if (marker.includes('file')) return OPAQUE_FILE_REF_TOKENS
-  if (marker.includes('image') || marker.includes('screenshot')) return OPAQUE_IMAGE_REF_TOKENS
+  if (marker.includes('image') || marker.includes('screenshot')) return IMAGE_EST_TOKENS
   return 0
 }

@@ -60,8 +60,70 @@ test('integration: live repo passes the sqlite skip-pattern gate', () => {
   const result = target.checkSqliteSkipPattern()
   assert.ok(
     result.ok,
-    `live repo should be sqlite-skip-clean; got: ${JSON.stringify(result.violations, null, 2)}`,
+    `live repo should be sqlite-skip-clean; got: ${JSON.stringify(result.violations, null, 2)}`
   )
   assert.ok(result.testedCount > 0, 'must scan at least one test file')
   assert.ok(result.nativeCount > 0, 'must classify at least one test as native-backed')
+})
+
+function writeHarnessTest(t, source) {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'sqlite-skip-gate-'))
+  const testDir = path.join(root, 'src/__tests__')
+  mkdirSync(testDir, { recursive: true })
+  writeFileSync(path.join(testDir, 'mutant.test.ts'), source)
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  return target.checkSqliteSkipPattern({ root })
+}
+
+test('sqlite gate rejects a helper call that exists only in a comment', (t) => {
+  const result = writeHarnessTest(
+    t,
+    `import Sqlite from 'better-sqlite3'
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
+// skipIfSqliteUnavailable(t, 'comment only')
+test('loads sqlite', () => { new Sqlite(':memory:') })`
+  )
+  assert.equal(result.ok, false)
+  assert.match(JSON.stringify(result.violations), /missing_helper/)
+})
+
+test('sqlite gate rejects a helper call hidden in dead code outside a test', (t) => {
+  const result = writeHarnessTest(
+    t,
+    `import Sqlite from 'better-sqlite3'
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
+function neverCalled(t: any) { skipIfSqliteUnavailable(t, 'dead') }
+test('loads sqlite', () => { new Sqlite(':memory:') })`
+  )
+  assert.equal(result.ok, false)
+  assert.match(JSON.stringify(result.violations), /missing_helper/)
+})
+
+test('sqlite gate does not borrow a guard from the next test', (t) => {
+  const result = writeHarnessTest(
+    t,
+    `import Sqlite from 'better-sqlite3'
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
+test('unguarded sqlite', () => { new Sqlite(':memory:') })
+test('guarded dummy', (t) => {
+  if (skipIfSqliteUnavailable(t, 'dummy')) return
+})`
+  )
+  assert.equal(result.ok, false)
+  assert.match(JSON.stringify(result.violations), /unguarded_block/)
+})
+
+test('sqlite gate rejects a guard after an unconditional return', (t) => {
+  const result = writeHarnessTest(
+    t,
+    `import Sqlite from 'better-sqlite3'
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
+test('dead guard', (t) => {
+  return
+  skipIfSqliteUnavailable(t, 'dead')
+  new Sqlite(':memory:')
+})`
+  )
+  assert.equal(result.ok, false)
+  assert.match(JSON.stringify(result.violations), /unguarded_block/)
 })

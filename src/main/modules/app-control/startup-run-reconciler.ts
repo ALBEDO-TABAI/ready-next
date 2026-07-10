@@ -5,7 +5,7 @@ import { logAgentMetric } from '../agent-control/metrics'
 import { isRunMetaTerminalStatus } from '../../../shared/run-meta-terminal-status'
 import {
   SkillTaskRunRepository,
-  type SkillTaskRunStartupReconciliationResult,
+  type SkillTaskRunStartupReconciliationResult
 } from '../repositories/skill-task-run-repository'
 
 interface StartupRunReconcilerDb {
@@ -59,7 +59,7 @@ function parseJsonRecord(raw: string | null | undefined): Record<string, unknown
   try {
     const parsed = JSON.parse(raw) as unknown
     return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-      ? parsed as Record<string, unknown>
+      ? (parsed as Record<string, unknown>)
       : null
   } catch {
     return null
@@ -75,7 +75,11 @@ function resultWithRerunMarker(raw: string | null): string {
 }
 
 function reconcileRunMeta(db: StartupRunReconcilerDb, nowMs: number): number {
-  return changed(db.prepare(`
+  // run-finalizer-exempt: startup-recovery-only working->interrupted
+  return changed(
+    db
+      .prepare(
+        `
     UPDATE run_meta
     SET
       status = 'interrupted',
@@ -83,7 +87,10 @@ function reconcileRunMeta(db: StartupRunReconcilerDb, nowMs: number): number {
       terminal_reason = 'main_process_restarted',
       updated_at = ?
     WHERE status = 'working'
-  `).run(nowMs))
+  `
+      )
+      .run(nowMs)
+  )
 }
 
 function terminalProjectionTarget(row: TaskProjectionStartupRow): {
@@ -99,15 +106,19 @@ function terminalProjectionTarget(row: TaskProjectionStartupRow): {
       status: 'completed',
       actions: [],
       degradationReason: null,
-      blockedReason: null,
+      blockedReason: null
     }
   }
-  if (row.run_status === 'cancelled' || row.run_status === 'killed' || reason.startsWith('cancelled_')) {
+  if (
+    row.run_status === 'cancelled' ||
+    row.run_status === 'killed' ||
+    reason.startsWith('cancelled_')
+  ) {
     return {
       status: 'killed',
       actions: ['none'],
       degradationReason: reason || row.run_status,
-      blockedReason: '任务已停止。',
+      blockedReason: '任务已停止。'
     }
   }
   if (reason === 'blocked_config') {
@@ -115,7 +126,8 @@ function terminalProjectionTarget(row: TaskProjectionStartupRow): {
       status: 'failed',
       actions: [],
       degradationReason: reason,
-      blockedReason: '当前模型或配置不支持这次请求，请切换模型、修复设置或移除不支持的附件后重新发送。',
+      blockedReason:
+        '当前模型或配置不支持这次请求，请切换模型、修复设置或移除不支持的附件后重新发送。'
     }
   }
   if (reason === 'blocked_external') {
@@ -123,19 +135,21 @@ function terminalProjectionTarget(row: TaskProjectionStartupRow): {
       status: 'failed',
       actions: ['none'],
       degradationReason: reason,
-      blockedReason: '这次请求已中断，Ready 已恢复；请重新发送。',
+      blockedReason: '这次请求已中断，Ready 已恢复；请重新发送。'
     }
   }
   return {
     status: 'failed',
     actions: ['none'],
     degradationReason: reason || row.run_status,
-    blockedReason: '任务已结束，但没有可续跑句柄；请重新发送。',
+    blockedReason: '任务已结束，但没有可续跑句柄；请重新发送。'
   }
 }
 
 function reconcileTaskProjections(db: StartupRunReconcilerDb, nowIso: string): number {
-  const rows = db.prepare(`
+  const rows = db
+    .prepare(
+      `
     SELECT
       p.task_id,
       p.continuation_ref_json,
@@ -145,7 +159,9 @@ function reconcileTaskProjections(db: StartupRunReconcilerDb, nowIso: string): n
     LEFT JOIN run_meta rm ON rm.run_id = p.run_id
     WHERE p.status IN ('queued', 'running', 'blocked', 'budget_paused')
     ORDER BY p.updated_at ASC
-  `).all<TaskProjectionStartupRow>()
+  `
+    )
+    .all<TaskProjectionStartupRow>()
 
   const recoverable = db.prepare(`
     UPDATE task_projections
@@ -195,33 +211,41 @@ function reconcileTaskProjections(db: StartupRunReconcilerDb, nowIso: string): n
     }
     const terminalTarget = terminalProjectionTarget(row)
     if (terminalTarget) {
-      count += changed(terminal.run(
-        terminalTarget.status,
-        JSON.stringify(terminalTarget.actions),
-        terminalTarget.degradationReason,
-        terminalTarget.blockedReason,
-        nowIso,
-        row.task_id,
-      ))
+      count += changed(
+        terminal.run(
+          terminalTarget.status,
+          JSON.stringify(terminalTarget.actions),
+          terminalTarget.degradationReason,
+          terminalTarget.blockedReason,
+          nowIso,
+          row.task_id
+        )
+      )
       continue
     }
-    count += changed(interrupted.run(
-      JSON.stringify(['none']),
-      'Ready restarted before this task saved a continuation handle.',
-      nowIso,
-      row.task_id,
-    ))
+    count += changed(
+      interrupted.run(
+        JSON.stringify(['none']),
+        'Ready restarted before this task saved a continuation handle.',
+        nowIso,
+        row.task_id
+      )
+    )
   }
   return count
 }
 
 function reconcileBrowserTasks(db: StartupRunReconcilerDb, nowIso: string): number {
-  const rows = db.prepare(`
+  const rows = db
+    .prepare(
+      `
     SELECT id, checkpoint_json, result_json
     FROM browser_tasks
     WHERE status = 'running'
     ORDER BY updated_at ASC
-  `).all<BrowserTaskStartupRow>()
+  `
+    )
+    .all<BrowserTaskStartupRow>()
 
   // B3 — every running browser task pauses (never silent cancel) WITH a rerun
   // marker. The marker is a "resumable floor": canResumeTask is guaranteed true.
@@ -253,24 +277,25 @@ function reconcileBrowserTasks(db: StartupRunReconcilerDb, nowIso: string): numb
 function reconcileSkillRuns(
   repository: Pick<SkillTaskRunRepository, 'reconcileRunningRowsOnStartup'>,
   now: Date,
-  staleAfterMs: number | undefined,
+  staleAfterMs: number | undefined
 ): { count: number; result: SkillTaskRunStartupReconciliationResult } {
   const result = repository.reconcileRunningRowsOnStartup({ now, staleAfterMs })
   return {
     count: result.recoverablePaused + result.failedWithoutHandle,
-    result,
+    result
   }
 }
 
 export function reconcileStartupRunsOnStartup(
-  options: StartupRunReconcilerOptions = {},
+  options: StartupRunReconcilerOptions = {}
 ): StartupRunReconcileResult {
   const now = options.now || new Date()
   const db = options.db || getDatabase().getRawDb()
   if (!db) throw new Error('Database not available')
 
-  const skillTaskRunRepository = options.skillTaskRunRepository
-    || new SkillTaskRunRepository({ getRawDb: () => db as DatabaseConnection })
+  const skillTaskRunRepository =
+    options.skillTaskRunRepository ||
+    new SkillTaskRunRepository({ getRawDb: () => db as DatabaseConnection })
   const runMeta = reconcileRunMeta(db, now.getTime())
   const taskProjections = reconcileTaskProjections(db, now.toISOString())
   const browserTasks = reconcileBrowserTasks(db, now.toISOString())
@@ -279,17 +304,17 @@ export function reconcileStartupRunsOnStartup(
     runMeta,
     taskProjections,
     browserTasks,
-    skillRuns: skillRuns.count,
+    skillRuns: skillRuns.count
   }
 
   const emitMetric = options.logMetric || logAgentMetric
   emitMetric('startup_run_reconciler.reconciled', {
     reconcileCount,
-    skillRunDetails: skillRuns.result,
+    skillRunDetails: skillRuns.result
   })
 
   return {
     reconcileCount,
-    skillRuns: skillRuns.result,
+    skillRuns: skillRuns.result
   }
 }

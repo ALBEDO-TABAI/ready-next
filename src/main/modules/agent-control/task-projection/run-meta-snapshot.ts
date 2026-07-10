@@ -26,10 +26,12 @@ export function wrapRunMetaRepositoryWithCloseoutSnapshot(
     try {
       const projection = getProjection(taskId)
       if (!projection) return input
+      const hasExplicitTaskType = Object.prototype.hasOwnProperty.call(input, 'taskType')
+      const hasExplicitBudget = Object.prototype.hasOwnProperty.call(input, 'budget')
       return {
         ...input,
-        taskType: projection.taskType,
-        budget: projection.budget ?? null,
+        taskType: hasExplicitTaskType ? input.taskType : projection.taskType,
+        budget: hasExplicitBudget ? input.budget : projection.budget ?? null,
       }
     } catch {
       return input // silent-catch: snapshot failure degrades to the unenriched write — never blocks finalize

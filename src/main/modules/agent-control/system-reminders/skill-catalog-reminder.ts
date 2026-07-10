@@ -21,10 +21,14 @@ export interface SkillCatalogEntry {
 // The model's activation path is `use_skill`（typed refs come only from user input, never model output）；
 // `@[技能id]` is how the USER references a skill. Keep both accurate so the catalog never advertises a
 // path the model cannot take (P2-2 review fix).
-const CATALOG_HEADER = '可用技能（用 use_skill 激活后其工具才可用；用户也可 @[技能id] 引用）：'
+export const CATALOG_HEADER =
+  '可用技能（用 use_skill 激活后其工具才可用；用户也可 @[技能id] 引用）：'
+export const SKILL_CATALOG_REMINDER_MARKER = '<!-- ready:system-reminder:skill-catalog -->'
 
 function normalizeDescription(description: string): string {
-  const text = String(description || '').replace(/\s+/g, ' ').trim()
+  const text = String(description || '')
+    .replace(/\s+/g, ' ')
+    .trim()
   if (text.length <= SKILL_CATALOG_DESC_CAP) return text
   return `${text.slice(0, 117)}…`
 }
@@ -38,11 +42,11 @@ function normalizeDescription(description: string): string {
  */
 export function buildSkillCatalogText(
   entries: ReadonlyArray<SkillCatalogEntry>,
-  budget: number = SKILL_CATALOG_CHAR_BUDGET,
+  budget: number = SKILL_CATALOG_CHAR_BUDGET
 ): string {
   if (entries.length === 0) return ''
-  const lines: string[] = [CATALOG_HEADER]
-  let used = CATALOG_HEADER.length
+  const lines: string[] = [SKILL_CATALOG_REMINDER_MARKER, CATALOG_HEADER]
+  let used = SKILL_CATALOG_REMINDER_MARKER.length + 1 + CATALOG_HEADER.length
   let dropped = 0
   for (let index = 0; index < entries.length; index += 1) {
     const entry = entries[index]
@@ -67,13 +71,13 @@ export function buildSkillCatalogText(
  */
 export function registerSkillCatalogReminder(
   registry: SystemReminderRegistry,
-  entries: ReadonlyArray<SkillCatalogEntry>,
+  entries: ReadonlyArray<SkillCatalogEntry>
 ): void {
   const text = buildSkillCatalogText(entries)
   if (!text) return
   registry.register({
     topic: 'skill-catalog',
     priority: 80,
-    text,
+    text
   })
 }

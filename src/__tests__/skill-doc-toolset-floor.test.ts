@@ -11,6 +11,11 @@ import {
   narrowToolSurfaceForLocalDocument,
 } from '../main/modules/agent-control/runtime-core/agent-sdk-utils'
 import { buildSelectedSkillToolAuthorization } from '../main/modules/agent-control/skills/skill-tool-authorization'
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
+
+test('skill-doc-toolset-floor declares transitive sqlite coverage', (t) => {
+  skipIfSqliteUnavailable(t, 'skill-doc-toolset-floor transitive sqlite guard')
+})
 
 const def = (name: string, domain: string) => ({ name, domain }) as never
 

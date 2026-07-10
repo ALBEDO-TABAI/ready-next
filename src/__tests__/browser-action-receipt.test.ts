@@ -9,6 +9,10 @@ import {
   buildBrowserActionReceipt,
   captureBrowserActionReceipt,
 } from '../main/modules/browser-engine/browser-action-receipt'
+import {
+  buildBrowserActionSessionProgress,
+  noteBrowserActionSession,
+} from '../main/modules/browser-engine/browser-action-session'
 import { executeBrowserTool } from '../main/modules/tools/browser-tools'
 import { __clearBrowserPowerPolicyForTests } from '../main/modules/browser-engine/browser-power-policy'
 import type { BrowserController } from '../main/modules/browser-engine/ipc-handler'
@@ -93,4 +97,18 @@ test('browser_type output carries a change receipt (integration)', async () => {
   assert.equal(receipt!.captured, true)
   assert.equal(receipt!.activeElement, 'textarea:正文')
   assert.equal(receipt!.visibleSignal, '已保存草稿')
+})
+
+test('nextSuggestedAction stays in session metadata and never becomes a task step or criterion', () => {
+  const session = noteBrowserActionSession('scope-d11', {
+    targetTabId: 'tab-1',
+    transactionStatus: 'confirmed',
+    nextSuggestedAction: 'finish with transaction proof',
+  })
+  assert.ok(session)
+  const progress = buildBrowserActionSessionProgress(session!) as Record<string, unknown>
+  assert.equal(progress.detail, null)
+  assert.equal((progress.browserActionSession as { nextSuggestedAction?: string }).nextSuggestedAction, 'finish with transaction proof')
+  assert.equal('steps' in progress, false)
+  assert.equal('criteria' in progress, false)
 })

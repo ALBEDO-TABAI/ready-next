@@ -203,28 +203,28 @@ test('local send-im file intent accepts referenced files or recent media with di
 test('local send-im attached media turns bypass model vision input and browser collection exposure', () => {
   // eslint-disable-next-line ready/no-source-grep-test -- private SDK runtime guard: this pins the regression where image-send turns were blocked as vision input or exposed collection tools.
   const source = readFileSync(new URL('../main/modules/agent-control/runtime-core/agent-sdk-runtime.ts', import.meta.url), 'utf8')
-  // The send-im intent/strip helpers were extracted to agent-sdk-utils.ts (V3 Phase 1 split); their wiring stays in the runtime class.
-  const utilsSource = readFileSync(new URL('../main/modules/agent-control/runtime-core/agent-sdk-utils.ts', import.meta.url), 'utf8')
+  // The send-im intent/strip helpers were extracted to agent-sdk-utils.ts (V3 Phase 1 split)
+  // and then relocated to agent-sdk-foundation-utils.ts (O2 file split); their wiring stays in the runtime class.
+  const foundationUtilsSource = readFileSync(new URL('../main/modules/agent-control/runtime-core/agent-sdk-foundation-utils.ts', import.meta.url), 'utf8')
   // Per-session intent TTL state was extracted to AgentSdkIntentTracker (V3 Phase 2 split).
   const intentTrackerSource = readFileSync(new URL('../main/modules/agent-control/runtime-core/agent-sdk-intent-tracker.ts', import.meta.url), 'utf8')
   // Default tool-surface selection (incl. the send-im collection-intent suppression)
   // was extracted to AgentSdkToolExecutor (V3 Phase 5-A).
   const toolExecutorSource = readFileSync(new URL('../main/modules/agent-control/runtime-core/agent-sdk-tool-executor.ts', import.meta.url), 'utf8')
-  // The sendMessage turn loop (incl. the send-im strip/intent wiring) was extracted to
-  // AgentSdkTurnOrchestrator (V3 Phase 5-B); collaborators are reached via this.host.
-  const turnOrchestratorSource = readFileSync(new URL('../main/modules/agent-control/runtime-core/agent-sdk-turn-orchestrator.ts', import.meta.url), 'utf8')
+  const turnPreparationSource = readFileSync(new URL('../main/modules/agent-control/runtime-core/agent-sdk-turn-preparation.ts', import.meta.url), 'utf8')
+  const turnInputSource = readFileSync(new URL('../main/modules/agent-control/runtime-core/agent-sdk-turn-input-assembly.ts', import.meta.url), 'utf8')
 
-  assert.match(utilsSource, /function hasLocalSendImIntentForTurn/)
-  assert.match(utilsSource, /function stripMediaBlocksForLocalSendIm/)
+  assert.match(foundationUtilsSource, /function hasLocalSendImIntentForTurn/)
+  assert.match(foundationUtilsSource, /function stripMediaBlocksForLocalSendIm/)
   assert.match(source, /typedActionNames\.add\('skill_send_im_file'\)/)
   assert.match(toolExecutorSource, /!localSendImIntent\s*&&\s*\(\s*msgIntent \|\| params\.recentCollectionIntent === true\s*\)/)
-  // On a local-send-im turn the orchestrator resets collection intent via the tracker,
+  // On a local-send-im turn preparation resets collection intent via the tracker,
   // which clears BOTH the collection and batch-collection TTL maps.
-  assert.match(turnOrchestratorSource, /this\.host\.intentTracker\.resetCollectionIntents\(sessionId\)/)
+  assert.match(turnPreparationSource, /host\.intentTracker\.resetCollectionIntents\(sessionId\)/)
   assert.match(intentTrackerSource, /this\.collectionIntentTtl\.delete\(sessionId\)/)
   assert.match(intentTrackerSource, /this\.batchCollectionIntentTtl\.delete\(sessionId\)/)
-  assert.match(turnOrchestratorSource, /const providerContent = stripMediaBlocksForLocalSendIm/)
-  assert.match(turnOrchestratorSource, /let nextInput = toSdkInput\(providerContent\)/)
+  assert.match(turnPreparationSource, /const providerContent = stripMediaBlocksForLocalSendIm/)
+  assert.match(turnInputSource, /let nextInput = toSdkInput\(providerContent\)/)
 })
 
 test('local send-im collection wording removes browser tools from the runtime tool surface', () => {

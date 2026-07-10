@@ -26,6 +26,11 @@ import {
 import { executeUseSkill } from '../main/modules/tools/builtins/use-skill'
 import { USE_SKILL_TOOL_NAMES } from '../main/modules/tools/use-skill-tool-defs'
 import { readReferenceSkillDocCapped, REFERENCE_SKILL_INLINE_CAP_CHARS } from '../main/modules/skills-runtime/reference-skill-doc'
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
+
+test('use-skill-activation declares transitive sqlite coverage', (t) => {
+  skipIfSqliteUnavailable(t, 'use-skill-activation transitive sqlite guard')
+})
 
 const BASE_CONFIG: AIModelConfig = {
   provider: 'openai',

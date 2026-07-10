@@ -10,14 +10,13 @@ import {
   splitNativeTextBufferForSafeFlush,
 } from '../main/modules/agent-control/runtime-core/agent-sdk-utils'
 
-// The sendMessage turn loop (incl. native-text buffering) was extracted to
-// AgentSdkTurnOrchestrator (V3 Phase 5-B).
-const turnOrchestratorSource = () => readFileSync(join(process.cwd(), 'src/main/modules/agent-control/runtime-core/agent-sdk-turn-orchestrator.ts'), 'utf-8')
+// The model/tool loop owns native-text buffering after the orchestrator split.
+const turnModelLoopSource = () => readFileSync(join(process.cwd(), 'src/main/modules/agent-control/runtime-core/agent-sdk-turn-model-loop.ts'), 'utf-8')
 
 test('native tool text buffering applies whenever native tools are exposed, including OpenAI providers', (t) => {
   skipIfSqliteUnavailable(t, 'native-tool-buffering transitive sqlite load')
-  const text = turnOrchestratorSource()
-  assert.match(text, /const bufferNativeTextUntilParsed =\n\s*!useTextToolBridge\n\s*&& toolDefinitions\.length > 0/)
+  const text = turnModelLoopSource()
+  assert.match(text, /const bufferNativeTextUntilParsed =\s*!useTextToolBridge\s*&& toolDefinitions\.length > 0/)
   assert.doesNotMatch(text, /normalizedConfig\.provider !== 'openai'/)
 })
 
@@ -52,6 +51,6 @@ test('native tool text buffering has a safe flush cap for ordinary non-XML text'
   assert.ok(split.remainingText.startsWith('<tool_call'))
 
   // Wiring: the turn loop's flush path routes through the shared splitter.
-  const orchestrator = turnOrchestratorSource()
-  assert.match(orchestrator, /splitNativeTextBufferForSafeFlush\(nativeTextBuffer,\s*\{ flushWithoutMarker \}\)/)
+  const modelLoop = turnModelLoopSource()
+  assert.match(modelLoop, /splitNativeTextBufferForSafeFlush\(nativeTextBuffer,\s*\{ flushWithoutMarker \}\)/)
 })

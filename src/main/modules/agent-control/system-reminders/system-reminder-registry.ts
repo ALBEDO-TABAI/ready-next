@@ -32,7 +32,7 @@ export type ReminderTopic =
   // call (previously registered via an `as ReminderTopic` cast; now part of
   // the honest vocabulary). No conflicts.
   | 'background-task-terminal'
-  // S4-3 — active plan current-step re-injection (verify=weak). No conflicts.
+  // S4-5 — active plan current-step re-injection with evidence-backed advancement. No conflicts.
   | 'active-plan-step'
   | 'browser-action-session'
   // D2 (2026-07-03) — per-model-call acceptance-criteria self-check for

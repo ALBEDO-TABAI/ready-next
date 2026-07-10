@@ -15,6 +15,11 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { join } from 'node:path'
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
+
+test('skill-doc-dogfood-proxy declares transitive sqlite coverage', (t) => {
+  skipIfSqliteUnavailable(t, 'skill-doc-dogfood-proxy transitive sqlite guard')
+})
 
 import type { AIModelConfig } from '../shared/ai-providers'
 import { AgentSdkRuntime } from '../main/modules/agent-control/runtime-core/agent-sdk-runtime'

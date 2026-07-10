@@ -102,14 +102,10 @@ test('L-f4/L-f5: run_meta budget carries the live taskType and rolling checkpoin
     runAgent: async ({ tools }) => {
       const search = (tools as Array<{ name: string; invoke: (ctx: unknown, raw: string) => Promise<string> }>)
         .find((toolItem) => toolItem.name === 'web_search')!
-      // 5 tool calls within ONE runAgent turn, then the runtime regains
-      // control at the next loop boundary where the rolling check runs —
-      // simulate by throwing a transient once so the loop re-enters.
+      // Five tool calls within one SDK run cross the rolling checkpoint
+      // interval. The completed provider boundary persists the snapshot
+      // without replaying already completed tool effects.
       for (let i = 0; i < 5; i++) await search.invoke({}, JSON.stringify({}))
-      if (!('retried' in (globalThis as Record<string, unknown>))) {
-        ;(globalThis as Record<string, unknown>).retried = true
-        throw new Error('HTTP 503 Service Unavailable')
-      }
       return { finalText: '完成。', toolTrace: [{ name: 'web_search' }] }
     },
   } as Partial<AgentSdkRuntimeDeps> as AgentSdkRuntimeDeps)
@@ -119,7 +115,6 @@ test('L-f4/L-f5: run_meta budget carries the live taskType and rolling checkpoin
     taskId: 'task-rolling',
     taskBudgetRuntime: createTaskBudgetRuntime('research'),
   })
-  delete (globalThis as Record<string, unknown>).retried
   assert.equal(result.success, true)
   assert.equal(result.executionDiagnostics?.taskBudgetRuntime?.taskType, 'research', 'live runtime taskType flows to diagnostics (run_meta source)')
   const runStatePath = join(tmpdir(), 'ready-agent-continuations', 'task-rolling', 'run-rolling-1', 'run_state.json')

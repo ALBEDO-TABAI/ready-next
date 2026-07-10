@@ -5,7 +5,7 @@ import type {
   RunBudgetSeed,
   RunBudgetUsage,
   RunMessage,
-  TaskBudgetRuntime,
+  TaskBudgetRuntime
 } from '../contracts/run-contracts'
 import type { ToolDefinition } from '../tools-runtime/tool-definition'
 import type { ToolExecutionOutput } from '../tools-runtime/tool-result-types'
@@ -19,14 +19,12 @@ import type { BrowserTurnLease } from '../../browser-engine/agent-browser-turn-l
 import type { DomainAdapter } from '../domain-adapters/domain-adapter'
 import type {
   resumeSkillChildRun as defaultResumeSkillChildRun,
-  waitForSkillChildRunClose as defaultWaitForSkillChildRunClose,
+  waitForSkillChildRunClose as defaultWaitForSkillChildRunClose
 } from '../skills/skill-child-runner'
 import type { toToolExecutorContext } from '../tools-runtime/tool-runtime-context-builder'
 import type { ContinuationIntent, ContinuationState } from '../contracts/continuation-state'
 import type { FollowupTaskRef } from '../../../../shared/agent-followup-intent'
-import type {
-  SpecialistBlueprintSourceMessageUnavailableReason,
-} from '../../../../shared/agent-specialist-blueprint'
+import type { SpecialistBlueprintSourceMessageUnavailableReason } from '../../../../shared/agent-specialist-blueprint'
 import type { CompactResult } from '../compaction/compact-agent-input'
 import type { AgentInputItem, ModelProvider } from '@openai/agents'
 import { type Tool as AgentSdkTool } from '@openai/agents'
@@ -64,8 +62,19 @@ export type CompactSessionResult =
   | { status: 'not_found' | 'superseded'; message: string }
 
 export type BeginRunResult =
-  | { ok: true; session: AgentSdkSession; runHandle: RunHandle; abortController: AbortController; runGeneration: number }
-  | { ok: false; reason: 'superseded' | 'orphan_limit'; message: string; currentRunId?: string | null }
+  | {
+      ok: true
+      session: AgentSdkSession
+      runHandle: RunHandle
+      abortController: AbortController
+      runGeneration: number
+    }
+  | {
+      ok: false
+      reason: 'superseded' | 'orphan_limit'
+      message: string
+      currentRunId?: string | null
+    }
 
 export interface ReadyAgentSdkRunParams {
   agentName: string
@@ -81,11 +90,13 @@ export interface ReadyAgentSdkRunParams {
   signal: AbortSignal
   maxTurns: number
   contextWindowTokens: number
+  maxOutputTokens: number
   onTextDelta: (delta: string) => void
 }
 
 export interface ReadyAgentSdkRunResult {
   finalText: string
+  iterationsUsed?: number
   usage?: {
     inputTokens: number
     outputTokens: number
@@ -117,7 +128,11 @@ export interface ToolBridgeRuntimeContext {
   activeFrame: ToolRuntimeActiveFrameContext
   agentContext?: AgentSpawnContext | null
   documentTargetGuard?: DocumentTargetGuard | null
-  emitOutput: (chunk: string, type: string, projectionPatch?: Record<string, unknown> | null) => void
+  emitOutput: (
+    chunk: string,
+    type: string,
+    projectionPatch?: Record<string, unknown> | null
+  ) => void
   emitToolAction: (toolName: string, args: Record<string, unknown>) => void
   recordToolResult: (toolName: string, output: ToolExecutionOutput) => void
   nativeMapCriticalClose?: MapToolFailureClose | null
@@ -152,6 +167,22 @@ export interface AgentSdkBudgetCheckpointRestore {
   usedToolNames: string[]
   runStatePath: string
 }
+
+export type AgentSdkBudgetCheckpointLoadResult =
+  | { status: 'absent' }
+  | {
+      status: 'invalid'
+      runStatePath: string
+      reason:
+        | 'unreadable'
+        | 'corrupt'
+        | 'wrong_kind'
+        | 'wrong_resume_kind'
+        | 'task_mismatch'
+        | 'scope_mismatch'
+        | 'invalid_budget'
+    }
+  | { status: 'loaded'; restore: AgentSdkBudgetCheckpointRestore }
 
 export interface AgentSdkProviderDiagnostics {
   provider: string | null
@@ -248,14 +279,14 @@ export interface AgentSdkRuntimeDeps {
   executeToolCall?: (
     toolName: string,
     args: Record<string, unknown>,
-    context: ReturnType<typeof toToolExecutorContext>,
+    context: ReturnType<typeof toToolExecutorContext>
   ) => Promise<ToolExecutionOutput>
   fetchWithTimeout?: (
     url: string,
     init: RequestInit,
     signal: AbortSignal,
     label: string,
-    timeoutMs?: number,
+    timeoutMs?: number
   ) => Promise<Response>
   skillContextOrchestrator?: SkillContextOrchestratorLike | null
   resumeSkillChildRun?: typeof defaultResumeSkillChildRun

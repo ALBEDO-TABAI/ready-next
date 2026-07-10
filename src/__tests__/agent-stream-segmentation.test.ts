@@ -388,6 +388,200 @@ describe('agent stream segmentation', () => {
     cleanup()
   })
 
+  // 2026-07-10 activity-capsule L3 — 富工具事件（toolName/detail）经 store
+  // 落到持久化快照的往返合同：逐消息段快照携带两个字段；整轮 taskSnapshot
+  // 只保留 toolName、刻意剥离 detail（消息 meta 体积控制）。
+  it('carries structured tool detail into the segment snapshot and strips it from the run-level snapshot', async () => {
+    const listeners: {
+      onStream?: (data: { agent: string; sessionId?: string; runId?: string; chunk: string; type: string }) => void
+      onStatusChange?: (data: unknown) => void
+      onError?: (data: unknown) => void
+      onToolAction?: (data: unknown) => void
+      onScopeRunEvent?: (data: unknown) => void
+      onConversationEvent?: (data: unknown) => void
+    } = {}
+    const savedMessages: Array<Record<string, unknown>> = []
+
+    const testWindow = globalThis as typeof globalThis & { window: { electronAPI?: unknown } }
+    testWindow.window.electronAPI = {
+      agent: {
+        onStream: (cb: (data: { agent: string; sessionId?: string; runId?: string; chunk: string; type: string }) => void) => {
+          listeners.onStream = cb
+          return () => { listeners.onStream = undefined }
+        },
+        onStatusChange: (cb: (data: unknown) => void) => {
+          listeners.onStatusChange = cb
+          return () => { listeners.onStatusChange = undefined }
+        },
+        onError: (cb: (data: unknown) => void) => {
+          listeners.onError = cb
+          return () => { listeners.onError = undefined }
+        },
+        onToolAction: (cb: (data: unknown) => void) => {
+          listeners.onToolAction = cb
+          return () => { listeners.onToolAction = undefined }
+        },
+        onScopeRunEvent: (cb: (data: unknown) => void) => {
+          scopeRunEventCallbacks.push(cb)
+          listeners.onScopeRunEvent = (data: unknown) => {
+            for (const fn of [...scopeRunEventCallbacks]) fn(data)
+          }
+          return () => {
+            const index = scopeRunEventCallbacks.indexOf(cb)
+            if (index >= 0) scopeRunEventCallbacks.splice(index, 1)
+            if (scopeRunEventCallbacks.length === 0) listeners.onScopeRunEvent = undefined
+          }
+        },
+        onConversationEvent: (cb: (data: unknown) => void) => {
+          listeners.onConversationEvent = cb
+          return () => { listeners.onConversationEvent = undefined }
+        },
+      },
+      chat: {
+        saveMessage: async (payload: Record<string, unknown>) => {
+          savedMessages.push(payload)
+          return { success: true }
+        },
+      },
+      settings: {
+        get: async () => ({ success: false }),
+      },
+    }
+
+    const { initAgentListeners } = await import('../renderer/stores/useAgent')
+    const cleanup = initAgentListeners()
+
+    useAgent.setState({
+      currentScopeId: 'scope-detail',
+      currentScope: {
+        id: 'scope-detail',
+        agent: 'butler',
+        title: 'Scope Detail',
+        sourceKind: 'local',
+        sourceId: 'app',
+        threadKey: 'scope-detail',
+        meta: {},
+        createdAt: '2026-03-07T09:00:00.000Z',
+        updatedAt: '2026-03-07T09:00:00.000Z',
+      },
+      scopes: [
+        {
+          id: 'scope-detail',
+          agent: 'butler',
+          title: 'Scope Detail',
+          sourceKind: 'local',
+          sourceId: 'app',
+          threadKey: 'scope-detail',
+          meta: {},
+          createdAt: '2026-03-07T09:00:00.000Z',
+          updatedAt: '2026-03-07T09:00:00.000Z',
+        },
+      ],
+      messages: [
+        {
+          id: 'msg-detail',
+          agent: 'butler',
+          content: '开始处理',
+          type: 'agent',
+          timestamp: new Date('2026-03-07T09:00:01.000Z'),
+          meta: {},
+        },
+      ],
+      scopeRunStates: {
+        'scope-detail': {
+          scopeId: 'scope-detail',
+          agent: 'butler',
+          requestId: 'req-detail',
+          phase: 'responding',
+          toolTrace: [],
+          startedAt: '2026-03-07T09:00:00.000Z',
+          updatedAt: '2026-03-07T09:00:01.000Z',
+          latestText: '开始处理',
+          blockedReason: null,
+          controllerId: null,
+          ownerTabId: null,
+          checkpointExpiresAt: null,
+          responseMessageId: 'msg-detail',
+          responseBuffer: '开始处理',
+          responseSegmentBreakPending: false,
+          responseSegmentToolTraceStart: 0,
+          stepMetrics: { toolCalls: 0, toolResults: 0, lastToolAt: null },
+          taskTitle: '整理参考',
+          taskSummary: '读取技能资产',
+          steps: [],
+          currentStepId: null,
+          waitingFor: 'none',
+          resumableActions: [],
+          recentArtifacts: [],
+          taskContinuation: null,
+          memoryCapture: null,
+          error: null,
+        },
+      },
+    })
+
+    listeners.onScopeRunEvent?.({
+      scopeId: 'scope-detail',
+      agent: 'butler',
+      runId: 'req-detail',
+      phase: 'tool_running',
+      timestamp: '2026-03-07T09:00:02.000Z',
+      toolEvent: {
+        id: 'tool-rich-call',
+        kind: 'call',
+        text: 'skill_read_artifact(relativePath)',
+        timestamp: '2026-03-07T09:00:02.000Z',
+        toolName: 'skill_read_artifact',
+        detail: '{\n  "relativePath": "参考/mapping.md"\n}',
+      },
+    })
+
+    const traceAfterAppend = useAgent.getState().scopeRunStates['scope-detail']?.toolTrace || []
+    assert.strictEqual(traceAfterAppend.length, 1)
+    assert.strictEqual(traceAfterAppend[0]?.toolName, 'skill_read_artifact')
+    assert.match(traceAfterAppend[0]?.detail || '', /mapping\.md/)
+
+    listeners.onStream?.({
+      agent: 'butler',
+      sessionId: 'scope-detail',
+      runId: 'req-detail',
+      chunk: '',
+      type: 'done',
+    })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    listeners.onScopeRunEvent?.({
+      scopeId: 'scope-detail',
+      agent: 'butler',
+      runId: 'req-detail',
+      phase: 'done',
+      taskTitle: '整理参考',
+      taskSummary: '已读取技能资产',
+      waitingFor: 'none',
+      resumableActions: [],
+      timestamp: '2026-03-07T09:00:03.000Z',
+    })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    const lastSaved = savedMessages.at(-1) as {
+      meta?: {
+        taskSnapshot?: { toolTrace?: Array<Record<string, unknown>> }
+        toolTraceSnapshot?: Array<Record<string, unknown>>
+      }
+    } | undefined
+    const segmentItems = lastSaved?.meta?.toolTraceSnapshot || []
+    assert.ok(segmentItems.length >= 1, 'segment snapshot persisted')
+    assert.strictEqual(segmentItems[0]?.toolName, 'skill_read_artifact')
+    assert.match(String(segmentItems[0]?.detail || ''), /mapping\.md/)
+
+    const runLevelItems = lastSaved?.meta?.taskSnapshot?.toolTrace || []
+    assert.ok(runLevelItems.length >= 1, 'run-level snapshot persisted')
+    assert.strictEqual(runLevelItems[0]?.toolName, 'skill_read_artifact')
+    assert.strictEqual(runLevelItems[0]?.detail, undefined, 'run-level snapshot deliberately strips detail')
+
+    cleanup()
+  })
+
   it('clears streaming state when stream done arrives before the final scope event', async () => {
     const listeners: {
       onStream?: (data: { agent: string; sessionId?: string; runId?: string; chunk: string; type: string }) => void

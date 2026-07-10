@@ -3,8 +3,8 @@
  * EP2-I-auth — closed write-surface gate (approved design 05 §3.4.3).
  *
  * The two authorization-fact write entries may be CALLED from exactly the
- * whitelisted files: the classifier consumption chain (agent-sdk-runtime /
- * agent-sdk-turn-orchestrator) and the frozen-call confirmation release path. Any call from tool
+ * whitelisted files: the classifier consumption chain (turn preparation) and
+ * the frozen-call confirmation release path. Any call from tool
  * dispatch / tool-result processing paths means third-party content could
  * mint permissions — instant red.
  */
@@ -21,6 +21,7 @@ const WHITELIST = new Set([
   'src/main/modules/agent-control/safety/authorization-fact-store.ts',
   'src/main/modules/agent-control/runtime-core/agent-sdk-runtime.ts',
   'src/main/modules/agent-control/runtime-core/agent-sdk-turn-orchestrator.ts',
+  'src/main/modules/agent-control/runtime-core/agent-sdk-turn-preparation.ts',
   'src/main/modules/agent-control/safety/frozen-call-confirmation.ts',
   'src/__tests__/authorization-fact.test.ts',
 ])

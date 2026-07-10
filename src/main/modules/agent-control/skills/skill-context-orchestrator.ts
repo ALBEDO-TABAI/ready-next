@@ -463,7 +463,7 @@ export class SkillContextOrchestrator {
     const longTaskGuidance = childLoopToolNames.length > 0
       ? `本技能的长任务已由 Ready child-loop 接管；启动或续跑时优先直接调用 ${childLoopToolNames.join(' / ')}，不要用 skill_start_detached 包一层。`
       : '如需执行脚本或观察产物状态，只使用本轮已开放的技能工具；不要假设存在后台 detached 启动工具。'
-    const header = `已加载技能「${skill.name}」。请直接按此方法论输出结果。如需向用户追问、确认或选择才能继续，单个问题调用 skill_ask_user；需要同时询问多个问题 / 多个维度时调用 ask_user_questions，让反问以逐题分页卡片出现并一次性提交；不要把“需要补充的信息 / 请选择 / 请确认”写成普通正文，也不要把多个问题塞进 skill_ask_user.options。任务已经完成、文件已经保存或产物已经输出后，不要再调用反问工具询问“完成/调整/生成效果图”等可选后续，只在普通总结里简短问用户是否需要调整。如需执行脚本或读写技能产物，用 skill_run_shell / skill_write_artifact / skill_read_artifact；如果用户要求输出/保存到指定本地路径或文件夹，先用 skill_write_artifact 写入相对路径，再用 skill_export_artifact 导出到目标绝对路径；不要把用户目标文件夹的绝对路径传给 skill_write_artifact。长文档如只缺尾部章节，必须对同一 relativePath 使用 mode="append" 追加补齐，不要用 overwrite 重写已有草稿。${longTaskGuidance}`
+    const header = `已加载技能「${skill.name}」。请直接按此方法论输出结果。任务承诺多份文件交付时，先用 declare_completion_criteria.expected_outputs 声明每份最终文件路径。如需向用户追问、确认或选择才能继续，单个问题调用 skill_ask_user；需要同时询问多个问题 / 多个维度时调用 ask_user_questions，让反问以逐题分页卡片出现并一次性提交；不要把“需要补充的信息 / 请选择 / 请确认”写成普通正文，也不要把多个问题塞进 skill_ask_user.options。任务已经完成、文件已经保存或产物已经输出后，不要再调用反问工具询问“完成/调整/生成效果图”等可选后续，只在普通总结里简短问用户是否需要调整。如需执行脚本或读写技能产物，用 skill_run_shell / skill_write_artifact / skill_read_artifact；如果用户要求输出/保存到指定本地路径或文件夹，先用 skill_write_artifact 写入相对路径，再用 skill_export_artifact 导出到目标绝对路径；不要把用户目标文件夹的绝对路径传给 skill_write_artifact。长文档如只缺尾部章节，必须对同一 relativePath 使用 mode="append" 追加补齐，不要用 overwrite 重写已有草稿。${longTaskGuidance}`
     const goal = skill.description ? `技能目标：${skill.description}` : ''
     return [header, goal, '技能说明正文：', docText].filter(Boolean).join('\n')
   }

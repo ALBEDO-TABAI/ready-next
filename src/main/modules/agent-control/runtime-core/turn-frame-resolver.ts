@@ -1,4 +1,5 @@
-import { dirname } from 'node:path'
+import { realpathSync, statSync } from 'node:fs'
+import { dirname, isAbsolute, relative, resolve } from 'node:path'
 
 import type { ReferenceSkillHint } from '../skills/skill-reference-hints'
 import {
@@ -32,6 +33,7 @@ import type { TurnFrame, TurnFrameLiveness, TurnFrameMode, TurnUserIntent } from
 export function deriveSeedArtifactRoots(args: {
   context: ActiveSkillContext | null
   runContract: SkillRunContract | null
+  additionalReadRoots?: string[]
 }): string[] {
   const seen = new Set<string>()
   const roots: string[] = []
@@ -57,6 +59,85 @@ export function deriveSeedArtifactRoots(args: {
     }
     if (args.runContract.artifactPaths?.deliveryReportPath) {
       push(dirname(args.runContract.artifactPaths.deliveryReportPath))
+    }
+  }
+  for (const root of args.additionalReadRoots || []) push(root)
+  return roots
+}
+
+export type ChainedSkillReadRootKind = 'sibling_asset' | 'sibling_output'
+
+export interface ChainedSkillDefinition {
+  id: string
+  name?: string | null
+  managedPath?: string | null
+  sourcePath?: string | null
+  executionMode?: string | null
+  runtime?: string | null
+  actions?: Array<{ runtime?: string | null }>
+}
+
+function resolveExistingDirectoryWithinRoot(root: string, candidate: string): string | null {
+  try {
+    const canonicalRoot = realpathSync.native(resolve(root))
+    const canonicalCandidate = realpathSync.native(resolve(candidate))
+    if (!statSync(canonicalRoot).isDirectory() || !statSync(canonicalCandidate).isDirectory()) return null
+    const rel = relative(canonicalRoot, canonicalCandidate)
+    return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel)) ? canonicalCandidate : null
+  } catch {
+    return null // silent-catch: missing/unreadable roots are never authorized.
+  }
+}
+
+function isReferenceKindSkill(skill: ChainedSkillDefinition): boolean {
+  return skill.executionMode === 'advisory'
+    || skill.runtime === 'reference'
+    || Boolean(skill.actions?.some((action) => action.runtime === 'reference'))
+}
+
+/** R-XREAD — seed only explicitly referenced sibling skill assets and output
+ * directories proven to belong to this task and the managed outputs root. */
+export function deriveChainedSkillReadRoots(args: {
+  selectedSkillId: string | null
+  referencedSkillNames: string[]
+  skills: ChainedSkillDefinition[]
+  outputsRoot: string
+  taskProjection?: TaskProjectionRecord | null
+}): Array<{ path: string; kind: ChainedSkillReadRootKind }> {
+  const roots: Array<{ path: string; kind: ChainedSkillReadRootKind }> = []
+  const seen = new Set<string>()
+  const push = (path: unknown, kind: ChainedSkillReadRootKind): void => {
+    const trimmed = typeof path === 'string' ? path.trim() : ''
+    if (!trimmed || seen.has(trimmed)) return
+    seen.add(trimmed)
+    roots.push({ path: trimmed, kind })
+  }
+
+  const referenced = new Set(args.referencedSkillNames.map((name) => name.trim()).filter(Boolean))
+  for (const skill of args.skills) {
+    if (skill.id === args.selectedSkillId || !isReferenceKindSkill(skill)) continue
+    if (!referenced.has(skill.id) && !referenced.has(String(skill.name || '').trim())) continue
+    push(skill.managedPath || skill.sourcePath, 'sibling_asset')
+  }
+
+  const outputsRoot = String(args.outputsRoot || '').trim()
+  if (outputsRoot) {
+    for (const artifact of args.taskProjection?.recentArtifacts || []) {
+      if (!artifact || typeof artifact !== 'object') continue
+      const meta = artifact.meta && typeof artifact.meta === 'object'
+        ? artifact.meta as Record<string, unknown>
+        : null
+      const explicitOutputDir = typeof meta?.outputDir === 'string'
+        ? meta.outputDir
+        : typeof meta?.output_dir === 'string'
+          ? meta.output_dir
+          : null
+      const artifactPath = typeof artifact.path === 'string' ? artifact.path : null
+      const candidate = explicitOutputDir || (artifactPath ? dirname(artifactPath) : null)
+      if (!candidate) continue
+      const canonicalCandidate = resolveExistingDirectoryWithinRoot(outputsRoot, candidate)
+      if (!canonicalCandidate) continue
+      push(canonicalCandidate, 'sibling_output')
     }
   }
   return roots

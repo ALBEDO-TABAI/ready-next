@@ -50,6 +50,8 @@ interface TaskProjectionRow {
   checkins_json?: string | null
   proof_refs_json?: string | null
   learning_refs_json?: string | null
+  model_criteria_json?: string | null
+  expected_outputs_json?: string | null
   owner_agent_id?: string | null
   packet_role?: string | null
   context_refs_json?: string | null
@@ -241,10 +243,10 @@ export class TaskProjectionRepository implements TaskProjectionStore {
         steps_json, current_step_id, budget_json, budget_usage_percent, budget_warning_level,
         recovery_history_json, degradation_reason, blocked_reason, resumable_actions_json,
         continuation_ref_json, progress_json, recent_artifacts_json,
-        criteria_json, checkins_json, proof_refs_json, learning_refs_json,
+        criteria_json, checkins_json, proof_refs_json, learning_refs_json, model_criteria_json, expected_outputs_json,
         owner_agent_id, packet_role, context_refs_json,
         created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       record.taskId,
       record.scopeId,
@@ -274,6 +276,8 @@ export class TaskProjectionRepository implements TaskProjectionStore {
       record.checkins ? JSON.stringify(record.checkins) : null,
       record.proofRefs ? JSON.stringify(record.proofRefs) : null,
       record.learningRefs ? JSON.stringify(record.learningRefs) : null,
+      record.modelCriteria ? JSON.stringify(record.modelCriteria) : null,
+      record.expectedOutputs ? JSON.stringify(record.expectedOutputs) : null,
       record.ownerAgentId ?? null,
       record.packetRole ?? null,
       record.contextRefs ? JSON.stringify(record.contextRefs) : null,
@@ -362,6 +366,8 @@ export class TaskProjectionRepository implements TaskProjectionStore {
     if ('checkins' in patch) assign('checkins_json', patch.checkins ? JSON.stringify(patch.checkins) : null)
     if ('proofRefs' in patch) assign('proof_refs_json', patch.proofRefs ? JSON.stringify(patch.proofRefs) : null)
     if ('learningRefs' in patch) assign('learning_refs_json', patch.learningRefs ? JSON.stringify(patch.learningRefs) : null)
+    if ('modelCriteria' in patch) assign('model_criteria_json', patch.modelCriteria ? JSON.stringify(patch.modelCriteria) : null)
+    if ('expectedOutputs' in patch) assign('expected_outputs_json', patch.expectedOutputs ? JSON.stringify(patch.expectedOutputs) : null)
     if ('ownerAgentId' in patch) assign('owner_agent_id', patch.ownerAgentId)
     if ('packetRole' in patch) assign('packet_role', patch.packetRole)
     if ('contextRefs' in patch) assign('context_refs_json', patch.contextRefs ? JSON.stringify(patch.contextRefs) : null)
@@ -613,6 +619,8 @@ export class TaskProjectionRepository implements TaskProjectionStore {
       checkins: safeParseArray(row.checkins_json),
       proofRefs: safeParseArray(row.proof_refs_json),
       learningRefs: safeParseArray(row.learning_refs_json),
+      modelCriteria: safeParseArray(row.model_criteria_json).filter((item): item is string => typeof item === 'string'),
+      expectedOutputs: safeParseArray(row.expected_outputs_json).filter((item): item is string => typeof item === 'string'),
       ownerAgentId: row.owner_agent_id ?? null,
       packetRole: (row.packet_role === 'parent' || row.packet_role === 'child') ? row.packet_role : null,
       contextRefs: safeParseArray(row.context_refs_json).filter((ref): ref is string => typeof ref === 'string'),

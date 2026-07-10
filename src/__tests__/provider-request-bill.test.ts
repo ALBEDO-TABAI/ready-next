@@ -8,17 +8,41 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { billProviderRequestSections } from '../shared/context-budget-types'
+import {
+  billProviderRequestSections,
+  estimateInputItemTokens,
+  estimateTextTokens,
+  IMAGE_EST_TOKENS
+} from '../shared/context-budget-types'
+import {
+  emitProviderEstimateReconciliation,
+  recordProviderRequestBills
+} from '../main/modules/agent-control/runtime-core/agent-sdk-provider-request-instrumentation'
+import {
+  __setMetricSinkForTests,
+  type AgentMetricEvent
+} from '../main/modules/agent-control/metrics'
 
 // REAL @openai/agents InputImage shape emitted by toSdkInput: the key is `image`
 // (a data-URL string), NOT `url`/`image_url`. Fixtures must match what the app sends.
 const bigBase64 = 'A'.repeat(80_000)
-const imageItem = () => ({ role: 'user', content: [{ type: 'input_image', image: `data:image/webp;base64,${bigBase64}`, detail: 'auto' }] })
-const screenshotResult = () => ({ type: 'computer_call_result', callId: 'c9', output: { type: 'computer_screenshot', data: `data:image/png;base64,${bigBase64}` } })
+const imageItem = () => ({
+  role: 'user',
+  content: [{ type: 'input_image', image: `data:image/webp;base64,${bigBase64}`, detail: 'auto' }]
+})
+const screenshotResult = () => ({
+  type: 'computer_call_result',
+  callId: 'c9',
+  output: { type: 'computer_screenshot', data: `data:image/png;base64,${bigBase64}` }
+})
 
-test('vision: the REAL {type:input_image, image:data-url} shape is attributed to vision and dominates tokens', () => {
-  const bill = billProviderRequestSections([imageItem(), { role: 'user', content: '一段历史文本' }] as never)
-  assert.ok(bill.sections.vision > 50_000, 'a data-URL image should dominate the bill')
+test('vision: the REAL {type:input_image, image:data-url} shape is attributed at tile cost', () => {
+  const bill = billProviderRequestSections([
+    imageItem(),
+    { role: 'user', content: '一段历史文本' }
+  ] as never)
+  assert.ok(bill.sections.vision >= IMAGE_EST_TOKENS)
+  assert.ok(bill.sections.vision < 10_000, 'base64 bytes must not inflate the estimate linearly')
   assert.equal(bill.visionItems, 1)
   assert.ok(bill.sections.history > 0)
   assert.equal(bill.sections.tool_results, 0)
@@ -26,7 +50,8 @@ test('vision: the REAL {type:input_image, image:data-url} shape is attributed to
 
 test('vision: a computer_screenshot result is attributed to vision (image cost), not tool_results', () => {
   const bill = billProviderRequestSections([screenshotResult()] as never)
-  assert.ok(bill.sections.vision > 50_000)
+  assert.ok(bill.sections.vision >= IMAGE_EST_TOKENS)
+  assert.ok(bill.sections.vision < 10_000)
   assert.equal(bill.visionItems, 1)
   assert.equal(bill.sections.tool_results, 0)
 })
@@ -34,7 +59,7 @@ test('vision: a computer_screenshot result is attributed to vision (image cost),
 test('tool_results: tool call + result items are attributed to tool_results, not vision', () => {
   const bill = billProviderRequestSections([
     { type: 'function_call', callId: 'c1', name: 'x', arguments: '{}' },
-    { type: 'function_call_result', callId: 'c1', output: 'some tool output text' },
+    { type: 'function_call_result', callId: 'c1', output: 'some tool output text' }
   ] as never)
   assert.ok(bill.sections.tool_results > 0)
   assert.equal(bill.sections.vision, 0)
@@ -43,7 +68,7 @@ test('tool_results: tool call + result items are attributed to tool_results, not
 test('reminders: system role and <system-reminder> content are attributed to reminders', () => {
   const bill = billProviderRequestSections([
     { role: 'system', content: 'you are ready' },
-    { role: 'user', content: '<system-reminder>budget low</system-reminder>' },
+    { role: 'user', content: '<system-reminder>budget low</system-reminder>' }
   ] as never)
   assert.ok(bill.sections.reminders > 0)
   assert.equal(bill.sections.history, 0)
@@ -55,7 +80,7 @@ test('partition: sections sum EXACTLY to totalTokens (disjoint, no double-count 
     { type: 'function_call_result', callId: 'c1', output: 'r' },
     { role: 'user', content: 'hello' },
     { role: 'system', content: 'sys' },
-    { role: 'user', content: 'SKILL.md 内联方法论' },
+    { role: 'user', content: 'SKILL.md 内联方法论' }
   ] as never)
   const sum = Object.values(bill.sections).reduce((a, b) => a + b, 0)
   assert.equal(sum, bill.totalTokens)
@@ -66,7 +91,11 @@ test('diagnosis question: a re-sent image reads as the SAME vision cost each tur
   const image = imageItem()
   const turn1 = billProviderRequestSections([image] as never)
   const turn2 = billProviderRequestSections([image, { role: 'assistant', content: 'ok' }] as never)
-  assert.equal(turn1.sections.vision, turn2.sections.vision, 'vision cost persists across turns → image re-sent')
+  assert.equal(
+    turn1.sections.vision,
+    turn2.sections.vision,
+    'vision cost persists across turns → image re-sent'
+  )
 })
 
 test('empty request bills to zero everywhere', () => {
@@ -78,13 +107,182 @@ test('empty request bills to zero everywhere', () => {
 
 test('total-safe: a null/garbage item never throws (the emit hot path has no try/catch)', () => {
   // A throw here would reject callModelInputFilter and break the provider call.
-  assert.doesNotThrow(() => billProviderRequestSections([null, undefined, 42, 'x', { role: 'user', content: 'ok' }] as never))
-  const bill = billProviderRequestSections([null, undefined, { role: 'user', content: 'ok' }] as never)
+  assert.doesNotThrow(() =>
+    billProviderRequestSections([
+      null,
+      undefined,
+      42,
+      'x',
+      { role: 'user', content: 'ok' }
+    ] as never)
+  )
+  const bill = billProviderRequestSections([
+    null,
+    undefined,
+    { role: 'user', content: 'ok' }
+  ] as never)
   assert.equal(bill.itemCount, 3)
 })
 
 test('partition still holds with the real image shape (sections sum to total)', () => {
-  const bill = billProviderRequestSections([imageItem(), screenshotResult(), { role: 'user', content: 'hi' }] as never)
+  const bill = billProviderRequestSections([
+    imageItem(),
+    screenshotResult(),
+    { role: 'user', content: 'hi' }
+  ] as never)
   const sum = Object.values(bill.sections).reduce((a, b) => a + b, 0)
   assert.equal(sum, bill.totalTokens)
+})
+
+test('image estimate is fixed per item for large data URLs, opaque refs, and screenshots', () => {
+  const small = { type: 'input_image', image: `data:image/png;base64,${'A'.repeat(1_000)}` }
+  const large = { type: 'input_image', image: `data:image/png;base64,${'A'.repeat(500_000)}` }
+  const opaque = { type: 'input_image', image: { id: 'image-1' } }
+  const screenshot = {
+    type: 'computer_screenshot',
+    data: `data:image/png;base64,${'A'.repeat(500_000)}`
+  }
+  assert.equal(estimateInputItemTokens([small] as never), IMAGE_EST_TOKENS)
+  assert.equal(estimateInputItemTokens([large] as never), IMAGE_EST_TOKENS)
+  assert.equal(estimateInputItemTokens([opaque] as never), IMAGE_EST_TOKENS)
+  assert.equal(estimateInputItemTokens([screenshot] as never), IMAGE_EST_TOKENS)
+})
+
+test('three large images no longer fake-trigger the 0.8 x 200K compaction threshold', () => {
+  const dataUrl = `data:image/webp;base64,${'A'.repeat(500_000)}`
+  const items = [
+    { role: 'user', content: [{ type: 'input_image', image: dataUrl }] },
+    { role: 'user', content: [{ type: 'input_image', image: dataUrl }] },
+    { role: 'user', content: [{ type: 'input_image', image: dataUrl }] },
+    { role: 'user', content: '请比较三张图并写一份完整分析' }
+  ]
+  assert.ok(
+    dataUrl.length * 3 > 200_000 * 0.8,
+    'legacy byte-like estimate crossed the soft threshold'
+  )
+  assert.ok(estimateInputItemTokens(items as never) < 200_000 * 0.8)
+})
+
+test('plain-text estimation remains unchanged by image calibration', () => {
+  const text = 'hello 世界'
+  assert.equal(estimateInputItemTokens([{ role: 'user', content: text }] as never), 14)
+  assert.equal(estimateTextTokens(text), 4)
+})
+
+test('provider usage emits estimate reconciliation with ratio and vision count', () => {
+  const metrics: AgentMetricEvent[] = []
+  __setMetricSinkForTests((event) => metrics.push(event))
+  try {
+    emitProviderEstimateReconciliation({
+      agentName: 'butler',
+      sessionId: 'scope-1',
+      runId: 'run-1',
+      taskId: 'task-1',
+      requestIndex: 0,
+      estimatedTokens: 4800,
+      actualInputTokens: 3200,
+      visionItems: 3
+    })
+    const metric = metrics.find((event) => event.metric === 'provider_estimate_reconciliation')
+    assert.ok(metric)
+    assert.equal(metric.estimatedTokens, 4800)
+    assert.equal(metric.actualInputTokens, 3200)
+    assert.equal(metric.ratio, 1.5)
+    assert.equal(metric.visionItems, 3)
+    assert.equal(metric.runId, 'run-1')
+  } finally {
+    __setMetricSinkForTests(null)
+  }
+})
+
+test('compacted requests reconcile provider usage against the wire bill, not the diagnostic pre-compaction bill', () => {
+  const metrics: AgentMetricEvent[] = []
+  __setMetricSinkForTests((event) => metrics.push(event))
+  try {
+    const bills = recordProviderRequestBills({
+      agentName: 'butler',
+      sessionId: 'scope-1',
+      runId: 'run-compact',
+      taskId: 'task-compact',
+      contextWindowTokens: 200_000,
+      beforeInput: [imageItem(), { role: 'user', content: 'history '.repeat(10_000) }] as never,
+      wireInput: [{ role: 'user', content: 'compacted summary' }] as never,
+      compacted: true
+    })
+    assert.ok(bills.diagnostic.totalTokens > bills.wire.totalTokens)
+    emitProviderEstimateReconciliation({
+      agentName: 'butler',
+      sessionId: 'scope-1',
+      runId: 'run-compact',
+      taskId: 'task-compact',
+      requestIndex: 0,
+      estimatedTokens: bills.wire.totalTokens,
+      actualInputTokens: bills.wire.totalTokens,
+      visionItems: bills.wire.visionItems
+    })
+    const diagnostic = metrics.find((event) => event.metric === 'provider_request_bill')
+    const wire = metrics.find((event) => event.metric === 'provider_wire_request_bill')
+    const reconciliation = metrics.find(
+      (event) => event.metric === 'provider_estimate_reconciliation'
+    )
+    assert.equal(diagnostic?.totalTokens, bills.diagnostic.totalTokens)
+    assert.equal(wire?.totalTokens, bills.wire.totalTokens)
+    assert.equal(wire?.compacted, true)
+    assert.equal(wire?.savedTokens, bills.diagnostic.totalTokens - bills.wire.totalTokens)
+    assert.equal(reconciliation?.estimatedTokens, bills.wire.totalTokens)
+    assert.equal(reconciliation?.ratio, 1)
+  } finally {
+    __setMetricSinkForTests(null)
+  }
+})
+
+test('wire bill includes system instructions and tool schemas', () => {
+  const metrics: AgentMetricEvent[] = []
+  __setMetricSinkForTests((event) => metrics.push(event))
+  try {
+    const short = recordProviderRequestBills({
+      agentName: 'butler',
+      sessionId: 'scope-instructions',
+      runId: 'run-short',
+      taskId: 'task-short',
+      contextWindowTokens: 200_000,
+      beforeInput: [{ role: 'user', content: 'same input' }] as never,
+      wireInput: [{ role: 'user', content: 'same input' }] as never,
+      instructions: 'short',
+      tools: [{ name: 'short_tool', description: 'short', parameters: { type: 'object' } }],
+      compacted: false
+    })
+    const long = recordProviderRequestBills({
+      agentName: 'butler',
+      sessionId: 'scope-instructions',
+      runId: 'run-long',
+      taskId: 'task-long',
+      contextWindowTokens: 200_000,
+      beforeInput: [{ role: 'user', content: 'same input' }] as never,
+      wireInput: [{ role: 'user', content: 'same input' }] as never,
+      instructions: 'long system instruction '.repeat(100),
+      tools: [
+        {
+          name: 'long_tool',
+          description: 'long tool description '.repeat(100),
+          parameters: {
+            type: 'object',
+            properties: { value: { type: 'string', description: 'long field '.repeat(100) } }
+          }
+        }
+      ],
+      compacted: false
+    })
+    assert.ok(long.wire.totalTokens > short.wire.totalTokens)
+    assert.ok(long.wire.sections.tool_schema > short.wire.sections.tool_schema)
+    assert.equal(long.wire.toolSchemaCount, 1)
+    const wireMetric = metrics.find(
+      (event) => event.metric === 'provider_wire_request_bill' && event.runId === 'run-long'
+    )
+    assert.equal(wireMetric?.estimatedCoverage, 'instructions_input_and_tool_schemas')
+    assert.deepEqual(wireMetric?.omittedSections, [])
+    assert.equal(wireMetric?.toolSchemaCount, 1)
+  } finally {
+    __setMetricSinkForTests(null)
+  }
 })

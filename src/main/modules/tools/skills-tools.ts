@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, statSync } from 'node:fs'
-import { basename, dirname, join } from 'node:path'
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import type { ZodObject, ZodRawShape } from 'zod'
 import { getSkillsRuntimeManager, type SkillState } from '../skills-runtime/runtime-manager'
 import { rememberSkillRun } from '../agent-control/session/session-continuity'
@@ -62,6 +62,7 @@ import type { SkillToolAuthorization } from '../agent-control/skills/skill-tool-
 import type { TurnFeatureFlags } from '../agent-control/runtime-core/turn-feature-flags'
 import { logAgentMetric } from '../agent-control/metrics'
 import { resolvePendingSkillHandoffWriteTargets } from '../agent-control/skills/skill-agent-handoff'
+import { collectSkillReadArtifactRoots } from '../agent-control/tools-runtime/tool-runtime'
 import { isChildLoopSkillAction } from './child-loop-skill-actions'
 import { completeVideoCopyAnalyzeResult } from './video-copy-deliverable-postprocess'
 import { filterSkillPrimitivesBySession } from './skill-tool-session-gate'
@@ -125,6 +126,8 @@ interface SkillToolRuntimeContext {
    */
   activeFrame?: {
     activeArtifactRoots: string[]
+    /** R-XREAD — read-only chained roots; readable but never write-eligible. */
+    activeReadOnlyRoots?: string[]
     runContract: unknown
     discoveredHandles: Record<string, unknown>[]
   } | null
@@ -2406,18 +2409,34 @@ export async function executeSkillTool(
         //     roots without waiting for the post-batch merge.
         // After these three M5a slices landed, the legacy fallback became
         // strictly redundant. Removing it is the user-visible payoff of M.
-        const additionalRootCandidates: string[] = []
-        const seenRoots = new Set<string>()
-        const pushRoot = (path: string | null | undefined) => {
-          if (typeof path !== 'string') return
-          const trimmed = path.trim()
-          if (!trimmed || seenRoots.has(trimmed)) return
-          seenRoots.add(trimmed)
-          additionalRootCandidates.push(trimmed)
-        }
-        const liveFrameRoots = runtimeContext?.activeFrame?.activeArtifactRoots
-        if (Array.isArray(liveFrameRoots)) {
-          for (const root of liveFrameRoots) pushRoot(root)
+        // R-XREAD — read face = write-eligible artifact roots ∪ read-only
+        // chained roots. The write/handoff path below reads `activeArtifactRoots`
+        // only, so read-only roots widen reads without ever becoming writable.
+        const additionalRootCandidates = collectSkillReadArtifactRoots(runtimeContext?.activeFrame)
+        const additionalAllowedReadRootKinds: Record<string, 'sibling_asset' | 'sibling_output'> = {}
+        try {
+          const manager = getSkillsRuntimeManager()
+          const skillAssetRoots = new Set(
+            manager.listSkills()
+              .filter((skill) => skill.id !== skillId)
+              .map((skill) => String(skill.managedPath || skill.sourcePath || '').trim())
+              .filter(Boolean),
+          )
+          const outputsRoot = resolve(manager.getRuntimeInfo().outputsRoot)
+          for (const root of additionalRootCandidates) {
+            if (skillAssetRoots.has(root)) {
+              additionalAllowedReadRootKinds[root] = 'sibling_asset'
+              continue
+            }
+            const rel = relative(outputsRoot, resolve(root))
+            if (rel === '' || (!rel.startsWith('..') && !isAbsolute(rel))) {
+              additionalAllowedReadRootKinds[root] = 'sibling_output'
+            }
+          }
+        } catch {
+          // silent-catch: kind classification is best-effort observability only. The
+          // read handler defaults unknown additional roots to sibling_output, and root
+          // authorization itself is already enforced by the activeFrame roots.
         }
         const output = await executeReadArtifact(
           {
@@ -2427,6 +2446,7 @@ export async function executeSkillTool(
           {
             skillId,
             additionalAllowedReadRoots: additionalRootCandidates,
+            additionalAllowedReadRootKinds,
           },
         )
         recordPrimitive({

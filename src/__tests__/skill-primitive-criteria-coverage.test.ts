@@ -12,6 +12,9 @@
  */
 
 import assert from 'node:assert/strict'
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import test from 'node:test'
 
 import {
@@ -118,6 +121,21 @@ test('R-CRIT: a declared target that normalizes empty ("/") is NOT vacuously acc
 test('resolveDeliveryCoverage: a mix where only garbage targets normalize empty counts only the real ones', () => {
   // '/' vanishes; '报告.md' remains → expected 1, satisfied by the delivered file
   assert.deepEqual(resolveDeliveryCoverage(['报告.md', '/'], ['/V/报告.md']), { delivered: 1, expected: 1 })
+})
+
+test('resolveDeliveryCoverage canonicalizes a symlinked parent path before matching', (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'ready-delivery-coverage-'))
+  const realDir = join(root, 'real')
+  const aliasDir = join(root, 'alias')
+  mkdirSync(realDir)
+  symlinkSync(realDir, aliasDir, 'dir')
+  writeFileSync(join(realDir, 'report.md'), 'done')
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+
+  assert.deepEqual(
+    resolveDeliveryCoverage([join(aliasDir, 'report.md')], [join(realDir, 'report.md')]),
+    { delivered: 1, expected: 1 }
+  )
 })
 
 // round-2 finding #1/#4 — the shared normalizer must be idempotent, else the
@@ -279,6 +297,18 @@ test('deriveCoverageTargets: guards non-array steps and empty/whitespace outputs
   assert.deepEqual(
     deriveCoverageTargets({ steps: [{ id: 's', description: 'x', expectedOutputs: ['', '   '] }] } as never),
     [],
+  )
+})
+
+test('deriveCoverageTargets: unions normalized task declarations, terminal patch, and planned steps', () => {
+  assert.deepEqual(
+    deriveCoverageTargets({
+      expectedOutputs: ['  "/Users/user/V/描述.md"  '],
+      steps: [{ id: 's1', description: 'deep', expectedOutputs: ['/Users/user/V/深读.md'] }],
+    } as never, {
+      expectedOutputs: ['/Users/user/V/描述.md', '/Users/user/V/补充.md'],
+    }),
+    ['/Users/user/V/描述.md', '/Users/user/V/补充.md', '/Users/user/V/深读.md'],
   )
 })
 

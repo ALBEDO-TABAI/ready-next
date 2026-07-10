@@ -1776,6 +1776,126 @@
       "file": "src/renderer/modules/agent/document-actions/visual-validation.ts",
       "line": 47,
       "snippetHash": "ca37de6e283c879d"
+    },
+    {
+      "file": "src/main/modules/skills-runtime/custom-skill-registry.ts",
+      "line": 426,
+      "snippetHash": "26ec9fa37fb55809"
+    },
+    {
+      "file": "src/main/modules/skills-runtime/custom-skill-registry.ts",
+      "line": 435,
+      "snippetHash": "9d324337836ff4b7"
+    },
+    {
+      "file": "src/main/modules/skills-runtime/custom-skill-registry.ts",
+      "line": 444,
+      "snippetHash": "2a72f2d36d2daab6"
+    },
+    {
+      "file": "src/main/modules/skills-runtime/custom-skill-registry.ts",
+      "line": 472,
+      "snippetHash": "1f8f00b8be4b729e"
+    },
+    {
+      "file": "src/main/modules/skills-runtime/custom-skill-registry.ts",
+      "line": 481,
+      "snippetHash": "042d848104e8745f"
+    },
+    {
+      "file": "src/main/modules/skills-runtime/external-skill-discovery.ts",
+      "line": 47,
+      "snippetHash": "9d08a4ee6905cfda"
+    },
+    {
+      "file": "src/main/modules/skills-runtime/external-skill-discovery.ts",
+      "line": 59,
+      "snippetHash": "bf29573c5995f5dc"
+    },
+    {
+      "file": "src/main/modules/skills-runtime/external-skill-discovery.ts",
+      "line": 72,
+      "snippetHash": "bf29573c5995f5dc"
+    },
+    {
+      "file": "src/main/modules/skills-runtime/manifest.ts",
+      "line": 21,
+      "snippetHash": "93baecb1d7909af4"
+    },
+    {
+      "file": "src/main/modules/skills-runtime/manifest.ts",
+      "line": 53,
+      "snippetHash": "c95e7d6f20137cae"
+    },
+    {
+      "file": "src/main/modules/skills-runtime/manifest.ts",
+      "line": 59,
+      "snippetHash": "fca93bd5ff1858c2"
+    },
+    {
+      "file": "src/main/modules/skills-runtime/manifest.ts",
+      "line": 64,
+      "snippetHash": "a7a80a79266cbe07"
+    },
+    {
+      "file": "src/main/modules/skills-runtime/manifest.ts",
+      "line": 70,
+      "snippetHash": "3907f708fe858034"
+    },
+    {
+      "file": "src/main/modules/skills-runtime/manifest.ts",
+      "line": 89,
+      "snippetHash": "9d08a4ee6905cfda"
+    },
+    {
+      "file": "src/main/modules/skills-runtime/manifest.ts",
+      "line": 97,
+      "snippetHash": "bf29573c5995f5dc"
+    },
+    {
+      "file": "src/main/modules/skills-runtime/reference-skill-doc.ts",
+      "line": 40,
+      "snippetHash": "d3380f46d5ccf9f3"
+    },
+    {
+      "file": "src/main/modules/skills-runtime/runtime-manager.ts",
+      "line": 753,
+      "snippetHash": "e436f36717a3baea"
+    },
+    {
+      "file": "src/main/modules/skills-runtime/skill-shell-consent.ts",
+      "line": 26,
+      "snippetHash": "27bb35645e6119cb"
+    },
+    {
+      "file": "src/main/modules/skills-runtime/skill-shell-consent.ts",
+      "line": 41,
+      "snippetHash": "fd266fd0a09b6c45"
+    },
+    {
+      "file": "src/main/modules/skills-runtime/skill-shell-consent.ts",
+      "line": 64,
+      "snippetHash": "fd266fd0a09b6c45"
+    },
+    {
+      "file": "src/renderer/components/layout/SkillsCenterPanel.tsx",
+      "line": 213,
+      "snippetHash": "9c426f585b5d6283"
+    },
+    {
+      "file": "src/renderer/components/layout/SkillsCenterPanel.tsx",
+      "line": 220,
+      "snippetHash": "82443f6c37f47769"
+    },
+    {
+      "file": "src/renderer/pages/settings/BrowserPrivacySettingsPanel.tsx",
+      "line": 71,
+      "snippetHash": "71130aca429f1423"
+    },
+    {
+      "file": "src/renderer/pages/settings/BrowserPrivacySettingsPanel.tsx",
+      "line": 201,
+      "snippetHash": "5419debd7ded84d0"
     }
   ]
 }

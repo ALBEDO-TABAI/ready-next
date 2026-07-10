@@ -192,6 +192,18 @@ export function AISettingsPanel() {
     updateField('contextWindowOverride', clamped)
   }, [updateField])
 
+  const updateMaxOutputTokensOverride = useCallback((rawValue: string) => {
+    const trimmed = rawValue.trim()
+    if (!trimmed) {
+      updateField('maxOutputTokensOverride', undefined)
+      return
+    }
+    const parsed = Number(trimmed)
+    if (!Number.isFinite(parsed)) return
+    const clamped = Math.min(1_000_000, Math.max(1, Math.floor(parsed)))
+    updateField('maxOutputTokensOverride', clamped)
+  }, [updateField])
+
   const resolveCapabilityRuntimeDisplay = useCallback((groupId: CapabilityGroupId) => {
     if (capabilityRuntimeLoading) return { label: '刷新中...', tone: 'muted' as const }
     const snapshot = capabilityRuntimeSnapshotKey === capabilitySnapshotKey ? capabilityRuntimeSnapshot?.groups[groupId] : null
@@ -703,6 +715,23 @@ export function AISettingsPanel() {
                           </span>
                         )}
                       </div>
+                    )}
+                  />
+                  <AISettingsFieldCard
+                    title="单次最大输出 token"
+                    description="覆盖单次回复允许生成的 token 上限；留空则使用模型默认值。"
+                    control={(
+                      <input
+                        type="number"
+                        min={1}
+                        max={1_000_000}
+                        step={1000}
+                        value={selectedConfig.maxOutputTokensOverride ?? ''}
+                        onChange={(event) => updateMaxOutputTokensOverride(event.target.value)}
+                        placeholder="自动"
+                        className="rounded-lg border font-mono text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30"
+                        style={stackedInputStyle}
+                      />
                     )}
                   />
                   {remoteModels.length > 0 && (

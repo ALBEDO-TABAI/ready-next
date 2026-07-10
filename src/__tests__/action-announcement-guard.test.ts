@@ -4,12 +4,12 @@ import { describe, test } from 'node:test'
 
 import {
   AgentSdkRuntime,
-  type AgentSdkRuntimeDeps,
+  type AgentSdkRuntimeDeps
 } from '../main/modules/agent-control/runtime-core/agent-sdk-runtime'
 import { evaluateActionAnnouncementGuard } from '../main/modules/agent-control/runtime-core/action-announcement-guard'
 import {
   buildSkillClarificationCheckpointMessage,
-  evaluateSkillClarificationGuard,
+  evaluateSkillClarificationGuard
 } from '../main/modules/agent-control/runtime-core/skill-clarification-guard'
 import { canResumeShape } from '../main/modules/agent-control/contracts/resume-handle'
 import type { ToolDefinition } from '../main/modules/agent-control/tools-runtime/tool-definition'
@@ -26,7 +26,7 @@ const fakeConfig = {
   provider: 'openai',
   baseUrl: 'https://api.openai.com/v1',
   apiKey: 'test-key',
-  model: 'gpt-test',
+  model: 'gpt-test'
 } as const
 
 class MemoryRunMetaRepository {
@@ -58,16 +58,18 @@ function createRuntime(deps: Partial<AgentSdkRuntimeDeps>): {
     loadAIConfig: () => ({ ok: true, config: fakeConfig, reason: 'present' }),
     domainAdapters: [],
     listToolDefinitions: () => [],
-    ...deps,
+    ...deps
   })
   runtime.setRuntime({
-    getRunMetaRepository: () => repository,
+    getRunMetaRepository: () => repository
   } as never)
   const outputs: Array<{ chunk: string; type: string }> = []
-  runtime.on('output', (event) => outputs.push({
-    chunk: String(event.chunk || ''),
-    type: String(event.type || ''),
-  }))
+  runtime.on('output', (event) =>
+    outputs.push({
+      chunk: String(event.chunk || ''),
+      type: String(event.type || '')
+    })
+  )
   runtime.on('error', () => undefined)
   return { runtime, repository, outputs }
 }
@@ -88,13 +90,13 @@ function createSkillAskUserToolDefinition(): ToolDefinition {
       type: 'object',
       properties: {
         question: { type: 'string' },
-        options: { type: 'array' },
+        options: { type: 'array' }
       },
       required: ['question'],
-      additionalProperties: false,
+      additionalProperties: false
     },
     executionVisibility: 'model',
-    resultShape: 'json',
+    resultShape: 'json'
   }
 }
 
@@ -112,7 +114,7 @@ function createBrowserToolDefinition(name: string = 'browser_capture_viewport'):
     description: 'Browser test tool.',
     schema: { type: 'object', properties: {}, additionalProperties: false },
     executionVisibility: 'model',
-    resultShape: 'json',
+    resultShape: 'json'
   }
 }
 
@@ -122,7 +124,7 @@ describe('action announcement guard', () => {
       assistantText: '已有 `2026 世界杯` 文件夹。我来并行搜索各届关键视觉图片的可下载源：',
       toolCallsInCurrentResponse: 0,
       hasUnfinishedTaskReference: true,
-      alreadySteered: false,
+      alreadySteered: false
     })
 
     assert.equal(decision.kind, 'steer')
@@ -133,7 +135,7 @@ describe('action announcement guard', () => {
       assistantText: '页面当前在"上传视频"标签页，我需要先切换到"上传图文"。让我点击切换。',
       toolCallsInCurrentResponse: 0,
       hasUnfinishedTaskReference: true,
-      alreadySteered: false,
+      alreadySteered: false
     })
 
     assert.equal(decision.kind, 'steer')
@@ -141,10 +143,11 @@ describe('action announcement guard', () => {
 
   test('steers when a browser workflow says it will tap the next option', () => {
     const decision = evaluateActionAnnouncementGuard({
-      assistantText: '现在页面已经切换到"上传图文"模式。我看到有"上传图片"和"文字配图"两个选项。你只需要发纯文字，我先点"文字配图"看看。',
+      assistantText:
+        '现在页面已经切换到"上传图文"模式。我看到有"上传图片"和"文字配图"两个选项。你只需要发纯文字，我先点"文字配图"看看。',
       toolCallsInCurrentResponse: 0,
       hasUnfinishedTaskReference: true,
-      alreadySteered: false,
+      alreadySteered: false
     })
 
     assert.equal(decision.kind, 'steer')
@@ -152,10 +155,11 @@ describe('action announcement guard', () => {
 
   test('steers when a browser workflow infers the next click but does not call a tool', () => {
     const decision = evaluateActionAnnouncementGuard({
-      assistantText: '好！页面已经切换到"上传图文"模式了。我看到有"上传图片"和"文字配图"两个选项。用户想要的是"生成图片"，应该就是点击"文字配图"按钮。',
+      assistantText:
+        '好！页面已经切换到"上传图文"模式了。我看到有"上传图片"和"文字配图"两个选项。用户想要的是"生成图片"，应该就是点击"文字配图"按钮。',
       toolCallsInCurrentResponse: 0,
       hasUnfinishedTaskReference: true,
-      alreadySteered: false,
+      alreadySteered: false
     })
 
     assert.equal(decision.kind, 'steer')
@@ -166,7 +170,7 @@ describe('action announcement guard', () => {
       assistantText: '好的，已经收集到足够的图片 URL 了！现在批量下载到文件夹里。',
       toolCallsInCurrentResponse: 0,
       hasUnfinishedTaskReference: true,
-      alreadySteered: true,
+      alreadySteered: true
     })
 
     assert.equal(decision.kind, 'checkpoint')
@@ -177,7 +181,7 @@ describe('action announcement guard', () => {
       assistantText: '我需要先切换到"上传图文"。让我点击切换。',
       toolCallsInCurrentResponse: 0,
       hasUnfinishedTaskReference: true,
-      alreadySteered: true,
+      alreadySteered: true
     })
 
     assert.equal(decision.kind, 'checkpoint')
@@ -188,7 +192,7 @@ describe('action announcement guard', () => {
       assistantText: '我先点"文字配图"看看。',
       toolCallsInCurrentResponse: 0,
       hasUnfinishedTaskReference: true,
-      alreadySteered: true,
+      alreadySteered: true
     })
 
     assert.equal(decision.kind, 'checkpoint')
@@ -196,10 +200,11 @@ describe('action announcement guard', () => {
 
   test('steers when a file workflow promises to create the next document', () => {
     const decision = evaluateActionAnnouncementGuard({
-      assistantText: '好，笔记已移入新文件夹。现在创建"图片原文"文档——基于笔记内容还原小红书图片帖的逐图原文。',
+      assistantText:
+        '好，笔记已移入新文件夹。现在创建"图片原文"文档——基于笔记内容还原小红书图片帖的逐图原文。',
       toolCallsInCurrentResponse: 0,
       hasUnfinishedTaskReference: true,
-      alreadySteered: false,
+      alreadySteered: false
     })
 
     assert.equal(decision.kind, 'steer')
@@ -210,7 +215,7 @@ describe('action announcement guard', () => {
       assistantText: '好，文件夹已存在，直接开始写入。先写设计方案文档，再写效果图 Prompt 文档。',
       toolCallsInCurrentResponse: 0,
       hasUnfinishedTaskReference: true,
-      alreadySteered: false,
+      alreadySteered: false
     })
 
     assert.equal(decision.kind, 'steer')
@@ -221,7 +226,7 @@ describe('action announcement guard', () => {
       assistantText: '好，文件夹已存在，直接开始写入。先写设计方案文档，再写效果图 Prompt 文档。',
       toolCallsInCurrentResponse: 0,
       hasUnfinishedTaskReference: true,
-      alreadySteered: true,
+      alreadySteered: true
     })
 
     assert.equal(decision.kind, 'checkpoint')
@@ -232,21 +237,22 @@ describe('action announcement guard', () => {
     const scripted = new ScriptedAgentRunner({}, [
       {
         turnIndex: 0,
-        response: '让我先打开这篇笔记：',
+        response: '让我先打开这篇笔记：'
       },
       {
         turnIndex: 1,
         response: '我没有可调用工具，无法打开笔记。',
         assertions: ({ messages }) => {
-          const input = messages.find((message) =>
-            typeof message === 'object'
-            && message !== null
-            && (message as { turnIndex?: unknown }).turnIndex === 1
-            && Object.prototype.hasOwnProperty.call(message, 'input')
+          const input = messages.find(
+            (message) =>
+              typeof message === 'object' &&
+              message !== null &&
+              (message as { turnIndex?: unknown }).turnIndex === 1 &&
+              Object.prototype.hasOwnProperty.call(message, 'input')
           )
           sawSteerReminder = /上一轮用行动宣告结尾但没有调用工具/.test(JSON.stringify(input))
-        },
-      },
+        }
+      }
     ])
     const { runtime } = createRuntime(scripted.deps)
     runtime.newSession('butler::scope-action-steer', 'system prompt')
@@ -257,8 +263,8 @@ describe('action announcement guard', () => {
       'run-action-steer',
       {
         publicSessionId: 'scope-action-steer',
-        taskId: 'task-action-steer',
-      },
+        taskId: 'task-action-steer'
+      }
     )
 
     assert.equal(result.success, true)
@@ -272,15 +278,18 @@ describe('action announcement guard', () => {
     const toolDefinition = createBrowserToolDefinition()
     const { runtime } = createRuntime({
       listToolDefinitions: () => [toolDefinition],
-      executeToolCall: async () => createToolExecutionOutput('viewport captured', {
-        shape: 'json',
-        data: { ok: true },
-      }),
+      executeToolCall: async () =>
+        createToolExecutionOutput('viewport captured', {
+          shape: 'json',
+          data: { ok: true }
+        }),
       runAgent: async ({ input, tools, onTextDelta }) => {
         if (turnIndex === 0) {
-          const capture = tools.find((tool) => tool.name === 'browser_capture_viewport') as {
-            invoke: (context: unknown, rawInput: string) => Promise<string>
-          } | undefined
+          const capture = tools.find((tool) => tool.name === 'browser_capture_viewport') as
+            | {
+                invoke: (context: unknown, rawInput: string) => Promise<string>
+              }
+            | undefined
           assert.ok(capture)
           await capture.invoke({}, JSON.stringify({}))
           const response = '页面当前在"上传视频"标签页，我需要先切换到"上传图文"。让我点击切换。'
@@ -293,7 +302,7 @@ describe('action announcement guard', () => {
         onTextDelta(response)
         turnIndex += 1
         return { finalText: response }
-      },
+      }
     })
     runtime.newSession('butler::scope-browser-action-steer', 'system prompt')
 
@@ -303,8 +312,8 @@ describe('action announcement guard', () => {
       'run-browser-action-steer',
       {
         publicSessionId: 'scope-browser-action-steer',
-        taskId: 'task-browser-action-steer',
-      },
+        taskId: 'task-browser-action-steer'
+      }
     )
 
     assert.equal(result.success, true)
@@ -318,29 +327,36 @@ describe('action announcement guard', () => {
     const toolDefinition = createBrowserToolDefinition('browser_read_page_map')
     const { runtime } = createRuntime({
       listToolDefinitions: () => [toolDefinition],
-      executeToolCall: async () => createToolExecutionOutput('page map read', {
-        shape: 'json',
-        data: { ok: true },
-      }),
+      executeToolCall: async () =>
+        createToolExecutionOutput('page map read', {
+          shape: 'json',
+          data: { ok: true }
+        }),
       runAgent: async ({ input, tools, onTextDelta }) => {
         if (turnIndex === 0) {
-          const readMap = tools.find((tool) => tool.name === 'browser_read_page_map') as {
-            invoke: (context: unknown, rawInput: string) => Promise<string>
-          } | undefined
+          const readMap = tools.find((tool) => tool.name === 'browser_read_page_map') as
+            | {
+                invoke: (context: unknown, rawInput: string) => Promise<string>
+              }
+            | undefined
           assert.ok(readMap)
           await readMap.invoke({}, JSON.stringify({}))
-          const response = '页面当前在"上传视频"标签页，我需要先切换到"上传图文"。让我点击"上传图文"。'
+          const response =
+            '页面当前在"上传视频"标签页，我需要先切换到"上传图文"。让我点击"上传图文"。'
           onTextDelta(response)
           turnIndex += 1
           return { finalText: response }
         }
         if (turnIndex === 1) {
-          const readMap = tools.find((tool) => tool.name === 'browser_read_page_map') as {
-            invoke: (context: unknown, rawInput: string) => Promise<string>
-          } | undefined
+          const readMap = tools.find((tool) => tool.name === 'browser_read_page_map') as
+            | {
+                invoke: (context: unknown, rawInput: string) => Promise<string>
+              }
+            | undefined
           assert.ok(readMap)
           await readMap.invoke({}, JSON.stringify({}))
-          const response = '现在页面已经切换到"上传图文"模式。我看到有"上传图片"和"文字配图"两个选项。你只需要发纯文字，我先点"文字配图"看看。'
+          const response =
+            '现在页面已经切换到"上传图文"模式。我看到有"上传图片"和"文字配图"两个选项。你只需要发纯文字，我先点"文字配图"看看。'
           onTextDelta(response)
           turnIndex += 1
           return { finalText: response }
@@ -350,7 +366,7 @@ describe('action announcement guard', () => {
         onTextDelta(response)
         turnIndex += 1
         return { finalText: response }
-      },
+      }
     })
     runtime.newSession('butler::scope-browser-action-resteer', 'system prompt')
 
@@ -360,8 +376,8 @@ describe('action announcement guard', () => {
       'run-browser-action-resteer',
       {
         publicSessionId: 'scope-browser-action-resteer',
-        taskId: 'task-browser-action-resteer',
-      },
+        taskId: 'task-browser-action-resteer'
+      }
     )
 
     assert.equal(result.success, true)
@@ -370,17 +386,19 @@ describe('action announcement guard', () => {
   })
 
   test('checkpoints when the steered continuation still has no tool call', async () => {
-    const scripted = new ScriptedAgentRunner({}, [
-      {
-        turnIndex: 0,
-        response: '让我先打开这篇笔记：',
-      },
-      {
-        turnIndex: 1,
-        response: '接下来我马上处理：',
-      },
-    ])
-    const { runtime, repository, outputs } = createRuntime(scripted.deps)
+    let modelTurn = 0
+    const { runtime, repository, outputs } = createRuntime({
+      runAgent: async ({ onTextDelta }) => {
+        const response = modelTurn === 0 ? '让我先打开这篇笔记：' : '接下来我马上处理：'
+        const usage =
+          modelTurn === 0
+            ? { inputTokens: 11, outputTokens: 4, totalTokens: 15 }
+            : { inputTokens: 21, outputTokens: 8, totalTokens: 29 }
+        modelTurn += 1
+        onTextDelta(response)
+        return { finalText: response, usage }
+      }
+    })
     runtime.newSession('butler::scope-action-checkpoint', 'system prompt')
 
     const result = await runtime.sendMessage(
@@ -389,21 +407,24 @@ describe('action announcement guard', () => {
       'run-action-checkpoint',
       {
         publicSessionId: 'scope-action-checkpoint',
-        taskId: 'task-action-checkpoint',
-      },
+        taskId: 'task-action-checkpoint'
+      }
     )
 
     assert.equal(result.success, true)
     assert.equal(result.status, 'checkpoint')
     assert.equal(result.terminalReason, 'checkpoint_steered')
+    assert.equal(result.contextUsage?.usedInputTokens, 21)
     assert.match(result.finalText, /未能启动/)
     assert.match(result.finalText, /回复'继续'可恢复/)
     assert.ok(outputs.some((event) => event.chunk.includes('已保存断点')))
 
-    const continuation = result.projectionTruth?.projectionPatch?.taskContinuation as {
-      outputDir?: string | null
-      runStatePath?: string | null
-    } | undefined
+    const continuation = result.projectionTruth?.projectionPatch?.taskContinuation as
+      | {
+          outputDir?: string | null
+          runStatePath?: string | null
+        }
+      | undefined
     assert.equal(canResumeShape(continuation), true)
     assert.ok(continuation?.runStatePath)
     const state = JSON.parse(await readFile(continuation.runStatePath, 'utf8')) as {
@@ -414,6 +435,10 @@ describe('action announcement guard', () => {
     const row = repository.get('run-action-checkpoint')
     assert.equal(row?.status, 'checkpoint')
     assert.equal(row?.terminalReason, 'checkpoint_steered')
+    assert.deepEqual(row?.continuationRef, continuation)
+    assert.equal(row?.lastMessageText, result.finalText)
+    assert.equal(row?.inputTokens, 21)
+    assert.equal(row?.outputTokens, 8)
   })
 
   test('does not trigger for ordinary conversation without active task context', async () => {
@@ -421,15 +446,15 @@ describe('action announcement guard', () => {
     const scripted = new ScriptedAgentRunner({}, [
       {
         turnIndex: 0,
-        response: '让我先想一下：',
+        response: '让我先想一下：'
       },
       {
         turnIndex: 1,
         response: 'unexpected',
         assertions: () => {
           unexpectedContinuation = true
-        },
-      },
+        }
+      }
     ])
     const { runtime } = createRuntime(scripted.deps)
     runtime.newSession('butler::scope-action-chat', 'system prompt')
@@ -437,7 +462,7 @@ describe('action announcement guard', () => {
     const result = await runtime.sendMessage(
       'butler::scope-action-chat',
       '随便聊两句',
-      'run-action-chat',
+      'run-action-chat'
     )
 
     assert.equal(result.success, true)
@@ -460,7 +485,7 @@ describe('skill clarification guard', () => {
     '> 当前假设是 20-40m² 独立门店或商场中庭快闪。实际是哪种？',
     '',
     '③ 空间的核心目标优先级',
-    '> 当前排的是“产品识别 + 试用体验 + 低压咨询”。如果你更看重吸引进店、成交转化、用户返图传播，动线权重会不同。',
+    '> 当前排的是“产品识别 + 试用体验 + 低压咨询”。如果你更看重吸引进店、成交转化、用户返图传播，动线权重会不同。'
   ].join('\n')
 
   test('steers skill clarification lists into skill_ask_user', () => {
@@ -470,7 +495,7 @@ describe('skill clarification guard', () => {
       hasSkillAskUserTool: true,
       isSkillClarificationEligible: true,
       hasUnfinishedTaskReference: true,
-      alreadySteered: false,
+      alreadySteered: false
     })
 
     assert.equal(decision.kind, 'steer')
@@ -483,7 +508,7 @@ describe('skill clarification guard', () => {
       hasSkillAskUserTool: true,
       isSkillClarificationEligible: true,
       hasUnfinishedTaskReference: false,
-      alreadySteered: false,
+      alreadySteered: false
     })
 
     assert.equal(decision.kind, 'none')
@@ -496,7 +521,7 @@ describe('skill clarification guard', () => {
       hasSkillAskUserTool: true,
       isSkillClarificationEligible: true,
       hasUnfinishedTaskReference: false,
-      alreadySteered: false,
+      alreadySteered: false
     })
 
     assert.equal(decision.kind, 'none')
@@ -509,7 +534,7 @@ describe('skill clarification guard', () => {
       hasSkillAskUserTool: false,
       isSkillClarificationEligible: true,
       hasUnfinishedTaskReference: true,
-      alreadySteered: false,
+      alreadySteered: false
     })
 
     assert.equal(decision.kind, 'none')
@@ -522,7 +547,7 @@ describe('skill clarification guard', () => {
       hasSkillAskUserTool: true,
       isSkillClarificationEligible: true,
       hasUnfinishedTaskReference: true,
-      alreadySteered: true,
+      alreadySteered: true
     })
 
     assert.equal(decision.kind, 'checkpoint')
@@ -535,7 +560,7 @@ describe('skill clarification guard', () => {
       '1. “我”到底是谁？',
       '2. 如果今天只谈一件事，什么问题最值得停下来？',
       '',
-      '这不是需要补充信息才能推进的任务，只是一个开放对话邀请。',
+      '这不是需要补充信息才能推进的任务，只是一个开放对话邀请。'
     ].join('\n')
     const decision = evaluateSkillClarificationGuard({
       assistantText: answer,
@@ -543,7 +568,7 @@ describe('skill clarification guard', () => {
       hasSkillAskUserTool: true,
       isSkillClarificationEligible: false,
       hasUnfinishedTaskReference: true,
-      alreadySteered: false,
+      alreadySteered: false
     })
 
     assert.equal(decision.kind, 'none')
@@ -551,12 +576,13 @@ describe('skill clarification guard', () => {
 
   test('does not checkpoint negated clarification language after a steer', () => {
     const decision = evaluateSkillClarificationGuard({
-      assistantText: '不是需要补充信息才能继续；我已经给了两个切入口：1. 我是谁？2. 今天的问题是什么？',
+      assistantText:
+        '不是需要补充信息才能继续；我已经给了两个切入口：1. 我是谁？2. 今天的问题是什么？',
       toolCallsInCurrentResponse: 0,
       hasSkillAskUserTool: true,
       isSkillClarificationEligible: true,
       hasUnfinishedTaskReference: true,
-      alreadySteered: true,
+      alreadySteered: true
     })
 
     assert.equal(decision.kind, 'none')
@@ -570,7 +596,7 @@ describe('skill clarification guard', () => {
       isSkillClarificationEligible: true,
       hasUnfinishedTaskReference: true,
       alreadySteered: false,
-      taskType: 'direct_answer',
+      taskType: 'direct_answer'
     })
 
     assert.equal(decision.kind, 'none')
@@ -590,21 +616,24 @@ describe('skill clarification guard', () => {
     const scripted = new ScriptedAgentRunner({}, [
       {
         turnIndex: 0,
-        response: hfpClarificationText,
+        response: hfpClarificationText
       },
       {
         turnIndex: 1,
         response: '我已改用反问卡。',
         assertions: ({ messages }) => {
-          const input = messages.find((message) =>
-            typeof message === 'object'
-            && message !== null
-            && (message as { turnIndex?: unknown }).turnIndex === 1
-            && Object.prototype.hasOwnProperty.call(message, 'input')
+          const input = messages.find(
+            (message) =>
+              typeof message === 'object' &&
+              message !== null &&
+              (message as { turnIndex?: unknown }).turnIndex === 1 &&
+              Object.prototype.hasOwnProperty.call(message, 'input')
           )
-          sawSteerReminder = /单个问题调用 skill_ask_user；多个问题调用 ask_user_questions/.test(JSON.stringify(input))
-        },
-      },
+          sawSteerReminder = /单个问题调用 skill_ask_user；多个问题调用 ask_user_questions/.test(
+            JSON.stringify(input)
+          )
+        }
+      }
     ])
     const { runtime, outputs } = createRuntime({
       ...scripted.deps,
@@ -616,10 +645,10 @@ describe('skill clarification guard', () => {
           provider: 'openai-compatible',
           baseUrl: 'https://token-plan-sgp.xiaomimimo.com/anthropic',
           model: 'mimo-v2.5',
-          agentProtocol: 'anthropic',
-        },
+          agentProtocol: 'anthropic'
+        }
       }),
-      listToolDefinitions: () => [createSkillAskUserToolDefinition()],
+      listToolDefinitions: () => [createSkillAskUserToolDefinition()]
     })
     runtime.newSession('butler::scope-skill-clarification-steer', 'system prompt')
 
@@ -630,14 +659,17 @@ describe('skill clarification guard', () => {
       {
         publicSessionId: 'scope-skill-clarification-steer',
         taskId: 'task-skill-clarification-steer',
-        continuationIntent: { taskId: 'task-skill-clarification-steer' },
-      },
+        continuationIntent: { taskId: 'task-skill-clarification-steer' }
+      }
     )
 
     assert.equal(result.success, true)
     assert.equal(result.terminalReason, 'done')
     assert.equal(sawSteerReminder, true)
-    assert.equal(outputs.some((event) => event.chunk.includes('最能提升方案质量')), false)
+    assert.equal(
+      outputs.some((event) => event.chunk.includes('最能提升方案质量')),
+      false
+    )
     assert.ok(outputs.some((event) => event.chunk.includes('我已改用反问卡。')))
   })
 })

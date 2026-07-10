@@ -2,14 +2,28 @@ import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 
 import { logAgentMetric } from '../metrics'
-import { collectResponseDigestProof, collectRunStateProof, collectArtifactProof, appendProofRefs } from '../quality/proof-collector'
+import {
+  collectResponseDigestProof,
+  collectRunStateProof,
+  collectArtifactProof,
+  appendProofRefs
+} from '../quality/proof-collector'
 import { parseRunStateJson } from '../task-projection/run-state-schema'
-import { adjudicateTerminalOutcome, appendCheckIns, type CheckInRecord } from '../quality/task-adjudicator'
-import { appendModelCriteria, resolveCriteria, type SkillExecutionForm } from '../quality/criteria-templates'
+import {
+  adjudicateTerminalOutcome,
+  appendCheckIns,
+  type CheckInRecord
+} from '../quality/task-adjudicator'
+import {
+  appendModelCriteria,
+  normalizeDeliveryTarget,
+  resolveCriteria,
+  type SkillExecutionForm
+} from '../quality/criteria-templates'
 import type { TaskType } from '../../../../shared/task-types'
 import {
   isRunMetaTerminalStatus,
-  type RunMetaTerminalStatus,
+  type RunMetaTerminalStatus
 } from '../../../../shared/run-meta-terminal-status'
 import type { TaskBudgetRuntime, TaskProjectionRecord } from '../contracts/run-contracts'
 import { canResumeAsUserPoint } from '../contracts/resume-handle'
@@ -53,45 +67,45 @@ interface RunOutcomeUsage {
 
 export type RunOutcome =
   | ({
-    kind: 'done'
-    runId: string
-    taskId?: string | null
-    scopeId?: string | null
-    durationMs: number
-    toolCallsUsed: number
-    initiator: string
-    projectionPatch?: Record<string, unknown> | null
-    terminalReason?: string | null
-    /** EP2-Q3 — the final assistant text as emitted to the user (incl. the
-     *  default-text fallback branch). Q4a generates the response-digest
-     *  proof from this INSIDE finalizeRunOutcome, before the verdict. */
-    finalText?: string | null
-  } & RunOutcomeTaskFacts)
+      kind: 'done'
+      runId: string
+      taskId?: string | null
+      scopeId?: string | null
+      durationMs: number
+      toolCallsUsed: number
+      initiator: string
+      projectionPatch?: Record<string, unknown> | null
+      terminalReason?: string | null
+      /** EP2-Q3 — the final assistant text as emitted to the user (incl. the
+       *  default-text fallback branch). Q4a generates the response-digest
+       *  proof from this INSIDE finalizeRunOutcome, before the verdict. */
+      finalText?: string | null
+    } & RunOutcomeTaskFacts)
   | ({
-    kind: 'checkpoint'
-    runId: string
-    taskId?: string | null
-    scopeId?: string | null
-    continuationHandle: string | null
-    durationMs: number
-    toolCallsUsed: number
-    initiator: string
-    projectionPatch?: Record<string, unknown> | null
-    terminalReason?: string | null
-    /** EP2-Q3 — see the done variant. */
-    finalText?: string | null
-  } & RunOutcomeTaskFacts)
+      kind: 'checkpoint'
+      runId: string
+      taskId?: string | null
+      scopeId?: string | null
+      continuationHandle: string | null
+      durationMs: number
+      toolCallsUsed: number
+      initiator: string
+      projectionPatch?: Record<string, unknown> | null
+      terminalReason?: string | null
+      /** EP2-Q3 — see the done variant. */
+      finalText?: string | null
+    } & RunOutcomeTaskFacts)
   | ({
-    kind: 'error' | 'cancelled' | 'preempted' | 'interrupted'
-    runId: string
-    taskId?: string | null
-    scopeId?: string | null
-    durationMs: number
-    toolCallsUsed: number
-    initiator: string
-    terminalReason: string
-    projectionPatch?: Record<string, unknown> | null
-  } & RunOutcomeTaskFacts)
+      kind: 'error' | 'cancelled' | 'preempted' | 'interrupted'
+      runId: string
+      taskId?: string | null
+      scopeId?: string | null
+      durationMs: number
+      toolCallsUsed: number
+      initiator: string
+      terminalReason: string
+      projectionPatch?: Record<string, unknown> | null
+    } & RunOutcomeTaskFacts)
 
 export interface RunMetaRepositoryLike {
   get(runId: string): unknown | null
@@ -104,14 +118,18 @@ export interface RunFinalizerDeps {
   writeProjectionTerminalPatch?: (
     projectionPatch: Record<string, unknown> | null,
     terminalReason: string,
-    status: string,
+    status: string
   ) => void | Promise<void>
   writeRunCloseMetric: (metric: RunCloseMetric) => void
   /** EP2-Q4a — projection store for shadow adjudication (CheckIn + proofs).
    *  Absent = adjudication skipped (legacy callers unchanged). */
   taskProjectionStore?: {
     get(taskId: string): TaskProjectionRecord | null
-    update(taskId: string, patch: Partial<TaskProjectionRecord>, options?: { silent?: boolean; reasonHint?: string }): void
+    update(
+      taskId: string,
+      patch: Partial<TaskProjectionRecord>,
+      options?: { silent?: boolean; reasonHint?: string }
+    ): void
   } | null
   /** EP2-Q4a — injectable clock for the adjudication timestamp. */
   now?: () => Date
@@ -149,7 +167,8 @@ export function defaultVerifyRunStateTerminal(runStatePath: string): boolean {
     if (!parsed.ok || parsed.value.status !== 'done') return false
     const explicit = parsed.value.deliveryReportPath
     if (explicit && existsSync(explicit)) return true
-    const rawVideoDir = typeof parsed.value.raw?.video_dir === 'string' ? parsed.value.raw.video_dir : ''
+    const rawVideoDir =
+      typeof parsed.value.raw?.video_dir === 'string' ? parsed.value.raw.video_dir : ''
     const candidateDirs = [rawVideoDir, parsed.value.outputDir ?? '', dirname(runStatePath)]
       .map((dir) => String(dir || '').trim())
       .filter((dir) => dir.length > 0)
@@ -166,12 +185,12 @@ export function writeRunCloseMetric(metric: RunCloseMetric): void {
     initiator: metric.initiator,
     toolCallsUsed: metric.toolCallsUsed,
     durationMs: metric.durationMs,
-    taskType: metric.taskType ?? null,
+    taskType: metric.taskType ?? null
   })
 }
 
 export const defaultRunFinalizerDeps: RunFinalizerDeps = {
-  writeRunCloseMetric,
+  writeRunCloseMetric
 }
 
 interface EffectiveTaskFacts {
@@ -207,7 +226,7 @@ interface TerminalAdjudicationDecision {
 function canKeepProofBearingDegradedVisible(
   adjudication: TerminalAdjudicationDecision,
   projectionPatch: Record<string, unknown> | null | undefined,
-  facts?: EffectiveTaskFacts | null,
+  facts?: EffectiveTaskFacts | null
 ): boolean {
   if (isBrowserTransactionTask(facts)) return false
   if (adjudication.verdict !== 'degraded') return false
@@ -227,7 +246,7 @@ const TERMINAL_FAILURE_REASONS = new Set<TerminalFailureReason>([
   'no_artifact',
   'proof_gap',
   'adjudication_degraded',
-  'browser_transaction_unconfirmed',
+  'browser_transaction_unconfirmed'
 ])
 
 function isBrowserTransactionTask(facts?: EffectiveTaskFacts | null): boolean {
@@ -249,9 +268,9 @@ export function buildTerminalProjectionPatch(params: {
     resumableActions: ['none'],
     continuationRef: {
       taskId: params.nextTaskId,
-      blockerType: 'superseded',
+      blockerType: 'superseded'
     },
-    updatedAt: params.updatedAt,
+    updatedAt: params.updatedAt
   }
 }
 
@@ -272,9 +291,9 @@ export function buildSupersededChildTerminalProjectionPatch(params: {
       ...(params.baseContinuationRef || {}),
       blockerType: 'superseded',
       pauseReason: 'superseded',
-      supersededByChildRunId: params.supersededByChildRunId,
+      supersededByChildRunId: params.supersededByChildRunId
     } as TaskProjectionRecord['continuationRef'] & { supersededByChildRunId: string },
-    steps: params.steps,
+    steps: params.steps
   }
 }
 
@@ -310,17 +329,23 @@ export function buildManualSuspendProjectionPatch(params: {
     budgetUsagePercent: params.budgetUsagePercent ?? projection?.budgetUsagePercent ?? null,
     budgetWarningLevel: params.budgetWarningLevel ?? projection?.budgetWarningLevel ?? null,
     recoveryHistory: params.recoveryHistory ?? projection?.recoveryHistory ?? [],
-    updatedAt: params.updatedAt,
+    updatedAt: params.updatedAt
   }
 }
 
-export async function finalizeRunOutcome(outcome: RunOutcome, deps: RunFinalizerDeps): Promise<FinalizedRunOutcome> {
+export async function finalizeRunOutcome(
+  outcome: RunOutcome,
+  deps: RunFinalizerDeps
+): Promise<FinalizedRunOutcome> {
   if (outcome.kind === 'done') {
     return writeTerminalOutcome(outcome, deps, 'done', outcome.terminalReason || 'done')
   }
 
   if (outcome.kind === 'checkpoint') {
-    if (requiresCheckpointContinuationHandle(outcome.terminalReason) && !isValidContinuationHandle(outcome.continuationHandle)) {
+    if (
+      requiresCheckpointContinuationHandle(outcome.terminalReason) &&
+      !isValidContinuationHandle(outcome.continuationHandle)
+    ) {
       writeRunMetaOutcome(outcome, deps, 'error', 'checkpoint_degraded_error')
       deps.writeRunCloseMetric(toRunCloseMetric(outcome, 'checkpoint_degraded_error'))
       throw new Error('checkpoint outcome requires a valid continuation handle')
@@ -333,20 +358,20 @@ export async function finalizeRunOutcome(outcome: RunOutcome, deps: RunFinalizer
     outcome,
     deps,
     statusFromOutcomeKind(outcome.kind),
-    outcome.terminalReason,
+    outcome.terminalReason
   )
 }
 
-function statusFromOutcomeKind(kind: Exclude<RunOutcome['kind'], 'done' | 'checkpoint'>): RunMetaTerminalStatus {
+function statusFromOutcomeKind(
+  kind: Exclude<RunOutcome['kind'], 'done' | 'checkpoint'>
+): RunMetaTerminalStatus {
   if (kind === 'error') return 'error'
   if (kind === 'interrupted') return 'interrupted'
   return 'cancelled'
 }
 
 function normalizeSkillExecutionForm(value: unknown): SkillExecutionForm | null {
-  return value === 'direct' || value === 'child_loop' || value === 'python'
-    ? value
-    : null
+  return value === 'direct' || value === 'child_loop' || value === 'python' ? value : null
 }
 
 const DOCUMENT_PROGRESS_STEP_IDS = new Set(['document_create', 'document_write', 'document_save'])
@@ -360,7 +385,7 @@ function stepRequiresCompletionProof(step: unknown): boolean {
 
 function hasPlannedStepsRequiringProof(
   projection: TaskProjectionRecord,
-  projectionPatch?: Record<string, unknown> | null,
+  projectionPatch?: Record<string, unknown> | null
 ): boolean {
   const storedSteps = Array.isArray(projection.steps) ? projection.steps : []
   const patchSteps = Array.isArray(projectionPatch?.steps) ? projectionPatch.steps : []
@@ -368,14 +393,22 @@ function hasPlannedStepsRequiringProof(
 }
 
 function hasProofKind(proofRefs: ReadonlyArray<unknown>, kinds: ReadonlySet<string>): boolean {
-  return proofRefs.some((row) => row && typeof row === 'object' && kinds.has(String((row as Record<string, unknown>).kind || '')))
+  return proofRefs.some(
+    (row) =>
+      row &&
+      typeof row === 'object' &&
+      kinds.has(String((row as Record<string, unknown>).kind || ''))
+  )
 }
 
 /** Durable proof kinds that constitute crystallizable "learning" evidence — a
  *  run's persistent outcomes (artifacts on disk, confirmed transactions,
  *  run-state / task-event completions), as opposed to transient chatter. */
 const LEARNING_PROOF_KINDS: ReadonlySet<string> = new Set([
-  'artifact', 'transaction_confirmed', 'run_state', 'task_event',
+  'artifact',
+  'transaction_confirmed',
+  'run_state',
+  'task_event'
 ])
 
 /**
@@ -404,8 +437,22 @@ function deriveLearningRefs(proofRefs: ReadonlyArray<unknown>): unknown[] {
  */
 export function deriveCoverageTargets(
   projection: TaskProjectionRecord,
-  projectionPatch?: Record<string, unknown> | null,
+  projectionPatch?: Record<string, unknown> | null
 ): string[] {
+  const targets: string[] = []
+  const seen = new Set<string>()
+  const absorbTargets = (value: unknown): void => {
+    if (!Array.isArray(value)) return
+    for (const raw of value) {
+      const target = normalizeDeliveryTarget(raw)
+      if (!target || seen.has(target)) continue
+      seen.add(target)
+      targets.push(target)
+    }
+  }
+  absorbTargets(projection.expectedOutputs)
+  absorbTargets(projectionPatch?.expectedOutputs)
+
   const byId = new Map<string, Record<string, unknown>>()
   const order: string[] = []
   const absorb = (steps: unknown): void => {
@@ -420,14 +467,8 @@ export function deriveCoverageTargets(
   }
   absorb(projection.steps)
   absorb(projectionPatch?.steps)
-  const targets: string[] = []
   for (const id of order) {
-    const expectedOutputs = byId.get(id)?.expectedOutputs
-    if (!Array.isArray(expectedOutputs)) continue
-    for (const raw of expectedOutputs) {
-      const target = String(raw || '').trim()
-      if (target) targets.push(target)
-    }
+    absorbTargets(byId.get(id)?.expectedOutputs)
   }
   return targets
 }
@@ -454,13 +495,16 @@ function hasDocumentDeliveryProof(proofRefs: ReadonlyArray<unknown>): boolean {
  *  accounting, independent of patch-persistence timing. */
 function resolveEffectiveTaskFacts(
   outcome: RunOutcome,
-  deps: RunFinalizerDeps,
+  deps: RunFinalizerDeps
 ): EffectiveTaskFacts {
-  const patch = outcome.projectionPatch as {
-    taskType?: unknown
-    module?: unknown
-    skillExecutionForm?: unknown
-  } | null | undefined
+  const patch = outcome.projectionPatch as
+    | {
+        taskType?: unknown
+        module?: unknown
+        skillExecutionForm?: unknown
+      }
+    | null
+    | undefined
   let rowTaskType: string | null = null
   let rowModule: string | null = null
   if (deps.taskProjectionStore && outcome.taskId) {
@@ -468,23 +512,26 @@ function resolveEffectiveTaskFacts(
       const row = deps.taskProjectionStore.get(outcome.taskId)
       rowTaskType = row?.taskType ?? null
       rowModule = row?.module ?? null
-    } catch { /* silent-catch: facts degrade to patch-only */ }
+    } catch {
+      /* silent-catch: facts degrade to patch-only */
+    }
   }
-  const patchTaskType = typeof patch?.taskType === 'string' && patch.taskType ? patch.taskType : null
+  const patchTaskType =
+    typeof patch?.taskType === 'string' && patch.taskType ? patch.taskType : null
   const budgetTaskType = outcome.taskBudgetRuntime?.taskType || null
-  const taskType = patchTaskType || rowTaskType || budgetTaskType || null
-  const taskTypeSource = patchTaskType
-    ? 'projection_patch'
-    : rowTaskType
-      ? 'projection_row'
-      : budgetTaskType
-        ? 'budget_runtime'
+  const taskType = budgetTaskType || patchTaskType || rowTaskType || null
+  const taskTypeSource = budgetTaskType
+    ? 'budget_runtime'
+    : patchTaskType
+      ? 'projection_patch'
+      : rowTaskType
+        ? 'projection_row'
         : 'missing'
   return {
     taskType,
     taskTypeSource,
-    module: (typeof patch?.module === 'string' && patch.module ? patch.module : rowModule),
-    skillExecutionForm: normalizeSkillExecutionForm(patch?.skillExecutionForm),
+    module: typeof patch?.module === 'string' && patch.module ? patch.module : rowModule,
+    skillExecutionForm: normalizeSkillExecutionForm(patch?.skillExecutionForm)
   }
 }
 
@@ -492,7 +539,7 @@ async function writeTerminalOutcome(
   outcome: RunOutcome,
   deps: RunFinalizerDeps,
   status: RunMetaTerminalStatus,
-  terminalReason: string,
+  terminalReason: string
 ): Promise<FinalizedRunOutcome> {
   const facts = resolveEffectiveTaskFacts(outcome, deps)
   const adjudication = recordTerminalAdjudication(outcome, deps, status, terminalReason, facts)
@@ -506,7 +553,11 @@ async function writeTerminalOutcome(
     const taskContinuation = continuationFromProjectionPatch(outcome.projectionPatch)
     if (isBrowserTransactionTask(facts)) {
       effectiveStatus = 'error'
-      effectiveTerminalReason = resolveTerminalFailureReason(outcome.projectionPatch, adjudication, facts)
+      effectiveTerminalReason = resolveTerminalFailureReason(
+        outcome.projectionPatch,
+        adjudication,
+        facts
+      )
     } else if (canResumeAsUserPoint(taskContinuation)) {
       effectiveStatus = 'checkpoint'
       effectiveTerminalReason = 'checkpoint_budget'
@@ -517,7 +568,11 @@ async function writeTerminalOutcome(
       effectiveTerminalReason = 'adjudication_degraded'
     } else {
       effectiveStatus = 'error'
-      effectiveTerminalReason = resolveTerminalFailureReason(outcome.projectionPatch, adjudication, facts)
+      effectiveTerminalReason = resolveTerminalFailureReason(
+        outcome.projectionPatch,
+        adjudication,
+        facts
+      )
     }
   }
   // P1 fix (2026-07-03, live regression) — a browser_transaction run that is
@@ -529,37 +584,49 @@ async function writeTerminalOutcome(
   // generic completion-evidence gap on a browser transaction to the
   // recoverable unconfirmed reason, regardless of which path set it.
   if (
-    isBrowserTransactionTask(facts)
-    && effectiveStatus === 'error'
-    && (effectiveTerminalReason === 'proof_gap' || effectiveTerminalReason === 'adjudication_degraded')
+    isBrowserTransactionTask(facts) &&
+    effectiveStatus === 'error' &&
+    (effectiveTerminalReason === 'proof_gap' || effectiveTerminalReason === 'adjudication_degraded')
   ) {
     effectiveTerminalReason = 'browser_transaction_unconfirmed'
   }
   writeRunMetaOutcome(outcome, deps, effectiveStatus, effectiveTerminalReason, facts)
   if (deps.writeProjectionTerminalPatch) {
-    await deps.writeProjectionTerminalPatch(outcome.projectionPatch || null, effectiveTerminalReason, effectiveStatus)
+    const terminalProjectionPatch = facts.taskType
+      ? { ...(outcome.projectionPatch || {}), taskType: facts.taskType }
+      : outcome.projectionPatch || null
+    await deps.writeProjectionTerminalPatch(
+      terminalProjectionPatch,
+      effectiveTerminalReason,
+      effectiveStatus
+    )
   }
-  deps.writeRunCloseMetric({ ...toRunCloseMetric(outcome, effectiveTerminalReason), taskType: facts.taskType })
+  deps.writeRunCloseMetric({
+    ...toRunCloseMetric(outcome, effectiveTerminalReason),
+    taskType: facts.taskType
+  })
   return { status: effectiveStatus, terminalReason: effectiveTerminalReason }
 }
 
 function readTerminalFailureReason(value: unknown): TerminalFailureReason | null {
   return typeof value === 'string' && TERMINAL_FAILURE_REASONS.has(value as TerminalFailureReason)
-    ? value as TerminalFailureReason
+    ? (value as TerminalFailureReason)
     : null
 }
 
 function resolveTerminalFailureReason(
   projectionPatch: Record<string, unknown> | null | undefined,
   adjudication: TerminalAdjudicationDecision,
-  facts?: EffectiveTaskFacts | null,
+  facts?: EffectiveTaskFacts | null
 ): TerminalFailureReason {
   const directReason = readTerminalFailureReason(projectionPatch?.terminalFailureReason)
   if (directReason) return directReason
 
   const terminalFailure = projectionPatch?.terminalFailure
   if (terminalFailure && typeof terminalFailure === 'object') {
-    const nestedReason = readTerminalFailureReason((terminalFailure as Record<string, unknown>).reason)
+    const nestedReason = readTerminalFailureReason(
+      (terminalFailure as Record<string, unknown>).reason
+    )
     if (nestedReason) return nestedReason
   }
 
@@ -572,19 +639,24 @@ function resolveTerminalFailureReason(
     if (isBrowserTransactionTask(facts)) return 'browser_transaction_unconfirmed'
     return 'proof_gap'
   }
-  if (isBrowserTransactionTask(facts) || adjudication.blockers.includes('criteria_unsatisfied:t1')) {
+  if (
+    isBrowserTransactionTask(facts) ||
+    adjudication.blockers.includes('criteria_unsatisfied:t1')
+  ) {
     return 'browser_transaction_unconfirmed'
   }
   return 'adjudication_degraded'
 }
 
 function continuationFromProjectionPatch(
-  projectionPatch: Record<string, unknown> | null | undefined,
+  projectionPatch: Record<string, unknown> | null | undefined
 ): Record<string, unknown> | null {
   const taskContinuation = projectionPatch?.taskContinuation
-  if (taskContinuation && typeof taskContinuation === 'object') return taskContinuation as Record<string, unknown>
+  if (taskContinuation && typeof taskContinuation === 'object')
+    return taskContinuation as Record<string, unknown>
   const continuationRef = projectionPatch?.continuationRef
-  if (continuationRef && typeof continuationRef === 'object') return continuationRef as Record<string, unknown>
+  if (continuationRef && typeof continuationRef === 'object')
+    return continuationRef as Record<string, unknown>
   return null
 }
 
@@ -602,7 +674,7 @@ function recordTerminalAdjudication(
   deps: RunFinalizerDeps,
   status: string,
   terminalReason: string,
-  facts?: EffectiveTaskFacts,
+  facts?: EffectiveTaskFacts
 ): TerminalAdjudicationDecision | null {
   const store = deps.taskProjectionStore
   const taskId = outcome.taskId
@@ -618,7 +690,8 @@ function recordTerminalAdjudication(
     // completion). `skill_run_state`/`steps_complete` accept only the `run_state`
     // KIND, which no tool-output path mints; the finalizer is the sole minter and
     // it gates on run_state.json being terminally done + delivery report present.
-    const finalText = outcome.kind === 'done' || outcome.kind === 'checkpoint' ? outcome.finalText : null
+    const finalText =
+      outcome.kind === 'done' || outcome.kind === 'checkpoint' ? outcome.finalText : null
     const digestProof = collectResponseDigestProof(finalText ?? null, now)
     const continuation = continuationFromProjectionPatch(outcome.projectionPatch)
     const handleString = (key: string): string => {
@@ -642,11 +715,13 @@ function recordTerminalAdjudication(
     const seededProofs = [
       ...(digestProof ? [digestProof] : []),
       ...(runStateDone ? [collectRunStateProof(runStatePath, now)] : []),
-      ...handleArtifactPaths.map((path) => collectArtifactProof(path, now)),
+      ...handleArtifactPaths.map((path) => collectArtifactProof(path, now))
     ]
     const proofRefs = seededProofs.length
       ? appendProofRefs(projection.proofRefs ?? [], seededProofs)
-      : (Array.isArray(projection.proofRefs) ? projection.proofRefs : [])
+      : Array.isArray(projection.proofRefs)
+        ? projection.proofRefs
+        : []
 
     // ② verdict SECOND, judging the refreshed proof set with the EFFECTIVE
     // task facts (terminal patch wins over the stale row — P0-3)
@@ -655,30 +730,37 @@ function recordTerminalAdjudication(
     // A skill run is child-bearing (and so genuinely owes s1) when it carries a
     // run_state handle the finalizer can verify — runStatePath / childRunId /
     // detachedTaskId. Primitive-only runs (no handle) get s1 exempted upstream.
-    const skillHasRunStateHandle = Boolean(runStatePath)
-      || Boolean(handleString('childRunId'))
-      || Boolean(handleString('detachedTaskId'))
+    const skillHasRunStateHandle =
+      Boolean(runStatePath) ||
+      Boolean(handleString('childRunId')) ||
+      Boolean(handleString('detachedTaskId'))
     const criteria = resolveCriteria(effectiveTaskType, effectiveModule, {
       skillExecutionForm: facts?.skillExecutionForm ?? null,
       skillHasRunStateHandle,
       hasPlannedSteps: hasPlannedStepsRequiringProof(projection, outcome.projectionPatch),
       hasStepCompletionProof: hasProofKind(proofRefs, new Set(['run_state', 'task_event'])),
       hasDocumentDeliveryProof: hasDocumentDeliveryProof(proofRefs),
-      coverageTargets: deriveCoverageTargets(projection, outcome.projectionPatch),
+      coverageTargets: deriveCoverageTargets(projection, outcome.projectionPatch)
     })
     // D4 — 模型经 declare_completion_criteria 声明的补充标准并入裁决：
     // m1/m2 命名空间追加在模板项之后，模板不可被覆盖（appendModelCriteria 合同）。
     const declaredModelCriteria = Array.isArray(projection.modelCriteria)
-      ? projection.modelCriteria.filter((text): text is string => typeof text === 'string' && text.trim().length > 0)
+      ? projection.modelCriteria.filter(
+          (text): text is string => typeof text === 'string' && text.trim().length > 0
+        )
       : []
-    const criteriaItems = declaredModelCriteria.length > 0
-      ? appendModelCriteria(criteria.items, declaredModelCriteria.map((text) => ({ text })))
-      : criteria.items
+    const criteriaItems =
+      declaredModelCriteria.length > 0
+        ? appendModelCriteria(
+            criteria.items,
+            declaredModelCriteria.map((text) => ({ text }))
+          )
+        : criteria.items
     if (declaredModelCriteria.length > 0) {
       logAgentMetric('model_criteria_merged', {
         taskId: outcome.taskId,
         templateCount: criteria.items.length,
-        modelCount: declaredModelCriteria.length,
+        modelCount: declaredModelCriteria.length
       })
     }
     // P2-5 — derive durable LEARNING refs from the verified proof set. These
@@ -695,13 +777,15 @@ function recordTerminalAdjudication(
       proofs: proofRefs,
       learningRefs,
       mode: 'enforce',
-      now,
+      now
     })
     // R-CRIT (方案 b) — surface how the skill-primitive completion criterion
     // resolved: coverage_count (delivered/expected) when targets were declared,
     // else na when c1 was exempted for lack of a run_state handle + targets.
     if (effectiveModule === 'skill') {
-      const coverageResolution = criteriaResolutions.find((resolution) => resolution.kind === 'delivery_coverage')
+      const coverageResolution = criteriaResolutions.find(
+        (resolution) => resolution.kind === 'delivery_coverage'
+      )
       const c1Item = criteria.items.find((item) => item.id === 'c1')
       if (coverageResolution) {
         logAgentMetric('adjudicator_criteria_resolved', {
@@ -712,7 +796,7 @@ function recordTerminalAdjudication(
           mode: 'coverage_count',
           delivered: coverageResolution.coverage?.delivered ?? 0,
           expected: coverageResolution.coverage?.expected ?? 0,
-          satisfied: coverageResolution.satisfied,
+          satisfied: coverageResolution.satisfied
         })
       } else if (c1Item?.notApplicable) {
         logAgentMetric('adjudicator_criteria_resolved', {
@@ -720,7 +804,7 @@ function recordTerminalAdjudication(
           taskId,
           item: 'c1',
           module: 'skill',
-          mode: 'na',
+          mode: 'na'
         })
       }
     }
@@ -729,16 +813,24 @@ function recordTerminalAdjudication(
     //    fields untouched. Only write learningRefs when the run actually learned
     //    (accept + durable evidence); otherwise leave the column null so a
     //    downstream degrade/retry doesn't inherit stale learning evidence.
-    store.update(taskId, {
-      proofRefs,
-      checkins: appendCheckIns(projection.checkins ?? [], checkIn),
-      // P2-2 — persist the resolved acceptance criteria (previously computed for
-      // adjudication + logged in the divergence metric, but never stored). This
-      // makes the criteria the run was judged against observable on the
-      // projection and gives the daily-task-index criteriaProgress a data source.
-      criteria: { items: criteria.items, satisfiedCount: checkIn.satisfiedCount, totalCount: checkIn.totalCount },
-      ...(checkIn.learningDecision?.learned ? { learningRefs } : {}),
-    }, { silent: true, reasonHint: 'terminal_adjudication' })
+    store.update(
+      taskId,
+      {
+        proofRefs,
+        checkins: appendCheckIns(projection.checkins ?? [], checkIn),
+        // P2-2 — persist the resolved acceptance criteria (previously computed for
+        // adjudication + logged in the divergence metric, but never stored). This
+        // makes the criteria the run was judged against observable on the
+        // projection and gives the daily-task-index criteriaProgress a data source.
+        criteria: {
+          items: criteria.items,
+          satisfiedCount: checkIn.satisfiedCount,
+          totalCount: checkIn.totalCount
+        },
+        ...(checkIn.learningDecision?.learned ? { learningRefs } : {})
+      },
+      { silent: true, reasonHint: 'terminal_adjudication' }
+    )
 
     if (deps.learnFromCheckIn) {
       try {
@@ -747,7 +839,7 @@ function recordTerminalAdjudication(
         logAgentMetric('site_card_learning_checkin_failed', {
           runId: outcome.runId,
           taskId,
-          reason: error instanceof Error ? error.message : String(error),
+          reason: error instanceof Error ? error.message : String(error)
         })
       }
     }
@@ -757,12 +849,12 @@ function recordTerminalAdjudication(
       const divergencePayload = {
         runId: outcome.runId,
         taskId,
-        taskType: (facts?.taskType ?? projection.taskType),
+        taskType: facts?.taskType ?? projection.taskType,
         verdict,
         actualStatus: status,
         terminalReason,
         proofCount: checkIn.proofCount,
-        blockers: checkIn.blockers,
+        blockers: checkIn.blockers
       }
       logAgentMetric('adjudicator_enforce_divergence', divergencePayload)
       logAgentMetric('adjudicator_shadow_divergence', { ...divergencePayload, compatibility: true })
@@ -772,7 +864,7 @@ function recordTerminalAdjudication(
     logAgentMetric('adjudication_failed', {
       runId: outcome.runId,
       taskId,
-      reason: error instanceof Error ? error.message : String(error),
+      reason: error instanceof Error ? error.message : String(error)
     })
     return null
   }
@@ -783,7 +875,7 @@ function writeRunMetaOutcome(
   deps: RunFinalizerDeps,
   status: RunMetaTerminalStatus,
   terminalReason: string,
-  facts?: EffectiveTaskFacts | null,
+  facts?: EffectiveTaskFacts | null
 ): void {
   if (!isRunMetaTerminalStatus(status)) {
     throw new Error(`Invalid terminal run_meta status: ${status}`)
@@ -800,7 +892,7 @@ function writeRunMetaOutcome(
     status,
     terminalReason,
     initiator: outcome.initiator,
-    durationMs: outcome.durationMs,
+    durationMs: outcome.durationMs
   }
   // run_meta 行内 task_type 必须与同行写入的 budget 同源——两者都来自实际
   // 管辖本 run 的 budget runtime（显式传入或 checkpoint 续跑恢复），否则
@@ -814,7 +906,7 @@ function writeRunMetaOutcome(
   if (taskBudgetRuntime) {
     patch.budget = {
       ...taskBudgetRuntime.budget,
-      ...taskBudgetRuntime.usage,
+      ...taskBudgetRuntime.usage
     }
   }
   if (providerDiagnostics) {
@@ -835,16 +927,13 @@ function writeRunMetaOutcome(
   }
 }
 
-function toRunCloseMetric(
-  outcome: RunOutcome,
-  terminalReason: string,
-): RunCloseMetric {
+function toRunCloseMetric(outcome: RunOutcome, terminalReason: string): RunCloseMetric {
   return {
     runId: outcome.runId,
     terminalReason,
     initiator: outcome.initiator,
     toolCallsUsed: outcome.toolCallsUsed,
-    durationMs: outcome.durationMs,
+    durationMs: outcome.durationMs
   }
 }
 
@@ -853,5 +942,5 @@ function isValidContinuationHandle(handle: string | null): handle is string {
 }
 
 function requiresCheckpointContinuationHandle(terminalReason?: string | null): boolean {
-  return terminalReason !== 'checkpoint_user_input'
+  return terminalReason !== 'checkpoint_user_input' && terminalReason !== 'manual_suspend'
 }

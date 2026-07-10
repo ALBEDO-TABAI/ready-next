@@ -38,6 +38,8 @@ test('ai settings panel separates the model list from the second-level editor', 
   assert.match(settingsPage, /能力分组/)
   assert.match(settingsPage, /合并窗口/)
   assert.match(settingsPage, /自定义服务缺少明确上下文窗口/)
+  assert.match(settingsPage, /单次最大输出 token/)
+  assert.match(settingsPage, /maxOutputTokensOverride/)
   assert.doesNotMatch(settingsPage, /模型与上下文/)
   assert.doesNotMatch(settingsPage, /对话发送/)
   // 2026-07 设置页收敛：容器统一 1040/32px 内边距，AI 区加宽职责移入

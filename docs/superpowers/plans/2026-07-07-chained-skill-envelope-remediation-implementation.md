@@ -204,6 +204,8 @@ revision_note: >
 - **真因重定位（对抗复核加固）**：① `budget:null` enrich **确实覆盖**（全行 spread + `jsonOrNull(null)=null`，非 COALESCE no-op）→ "projection.budget=null 留住 24 种子"**已证伪**（那会显示 null 不是 24）。② `rebindTaskBudgetRuntime`（`run-budget-policy.ts:329-351`）**原子**——`createTaskBudgetRuntime(taskType,{budget:createRunBudgetSeed(taskType)})` 按 taskType 重播种预算，故带 `type=multi_step` 的 taskBudgetRuntime **不可能**配 24 的 short_task 预算 → `if(taskBudgetRuntime)` 分支**不可能**是 multi_step+24 的来源。③ 因 enrich 从**同一** projection 快照同时写 taskType+budget，终态 multi_step+24 意味着**那份快照自身**就是 multi_step-type 配 short_task-budget——`task-projection-sync.ts:851` taskType 与 `resolveTaskBudget` 是**两个独立解析器**、type 可 rebind 而 budget 滞后 → **projection 内字段级 type/budget desync**。此为推断非实证（未读事故日志），但**延后决定不依赖精确定位**：计划里那个 fallback 既冗余（enrich 覆盖）又无效（读同一 projection.budget，若=24 兜底也写 24），无论如何都修不好事故。
 - **决策=延后（D-LEDGER）**：R-LEDGER 无运行时因果，premise 证伪 + 真因需 live 复检，本轮**不落码**、留调查留痕；`check-run-budget-tasktype-parity.cjs` 不建（不为错 premise 立 gate）。后续若做，方向是"统一 `getTaskProjection` 的 enrich 源到 rebind 后权威行"，非动 `writeRunMetaOutcome`。
 
+**终局（2026-07-10）**：R-LEDGER 的死 premise 按 Round-2 正式关账；仅存的两处裸 repo finalize（manual_suspend / stale_without_handle）已统一改走 close-out snapshot wrapper，归入残债 O1 的观测卫生修复，不复活预算工单或新 gate。
+
 ---
 
 ## 6. 分阶段落地 + 验收

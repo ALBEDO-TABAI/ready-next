@@ -174,6 +174,14 @@ export interface ScopeRunTraceItem {
   kind: 'call' | 'result'
   text: string
   timestamp: string
+  /** 工具名（activity-capsule L3 详情标题；SDK executor 事件携带）。 */
+  toolName?: string
+  /**
+   * L3 详情：call = 过滤秘密键后的入参 JSON，result = 脱敏输出全文。由
+   * `tool-trace-detail.ts` 构建（截断/上限在构建侧强制），仅在比 `text`
+   * 预览多出信息时携带。
+   */
+  detail?: string
 }
 
 export type ScopeRunMemorySourceType =

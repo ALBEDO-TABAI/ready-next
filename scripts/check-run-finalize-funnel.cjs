@@ -16,15 +16,29 @@ const ROOT = process.cwd()
 const RUN_META_TERMINAL_STATUS_REL = 'src/shared/run-meta-terminal-status.ts'
 const RUN_FINALIZER_REL = 'src/main/modules/agent-control/runtime-core/run-finalizer.ts'
 const AGENT_SDK_RUNTIME_REL = 'src/main/modules/agent-control/runtime-core/agent-sdk-runtime.ts'
-// V3 Phase 5-B: sendMessage + its funnel-pinned finalizers (finalizeEarlyReturn /
-// buildResult / recordAdmissionRejection / persistRunMetaSnapshot) now live in the
-// turn orchestrator. The structural + C03 checks below scan THIS file.
-const AGENT_SDK_TURN_ORCHESTRATOR_REL = 'src/main/modules/agent-control/runtime-core/agent-sdk-turn-orchestrator.ts'
-const RUN_META_REPOSITORY_REL = 'src/main/modules/agent-control/task-projection/run-meta-repository.ts'
-const SCAN_DIRS = [
-  'src/main/modules/agent-control/',
-  'src/main/modules/claude-bridge/',
-]
+// V3 Phase 5-B: sendMessage owns the finalizer closures in the orchestrator;
+// deterministic preparation, input, execution and closeout sections live in
+// bounded leaf modules. C03 checks pin each contract to its live owner.
+const AGENT_SDK_TURN_ORCHESTRATOR_REL =
+  'src/main/modules/agent-control/runtime-core/agent-sdk-turn-orchestrator.ts'
+const AGENT_SDK_TURN_PREPARATION_REL =
+  'src/main/modules/agent-control/runtime-core/agent-sdk-turn-preparation.ts'
+const AGENT_SDK_TURN_INPUT_ASSEMBLY_REL =
+  'src/main/modules/agent-control/runtime-core/agent-sdk-turn-input-assembly.ts'
+const AGENT_SDK_TURN_EXECUTION_REL =
+  'src/main/modules/agent-control/runtime-core/agent-sdk-turn-execution.ts'
+const AGENT_SDK_TURN_CLOSEOUT_REL =
+  'src/main/modules/agent-control/runtime-core/agent-sdk-turn-closeout.ts'
+const AGENT_SDK_TURN_GUARDS_REL =
+  'src/main/modules/agent-control/runtime-core/agent-sdk-turn-guards.ts'
+const AGENT_SDK_TURN_COMPLETION_REL =
+  'src/main/modules/agent-control/runtime-core/agent-sdk-turn-completion.ts'
+const RUN_META_REPOSITORY_REL =
+  'src/main/modules/agent-control/task-projection/run-meta-repository.ts'
+const STARTUP_RUN_RECONCILER_REL = 'src/main/modules/app-control/startup-run-reconciler.ts'
+const STARTUP_RECONCILER_EXEMPT_MARKER =
+  'run-finalizer-exempt: startup-recovery-only working->interrupted'
+const SCAN_DIRS = ['src/main/modules/']
 
 function readConstArray(rel, name) {
   const file = path.join(ROOT, rel)
@@ -32,7 +46,9 @@ function readConstArray(rel, name) {
     throw new Error(`${rel} missing; ${name} must be the shared terminal status source`)
   }
   const text = fs.readFileSync(file, 'utf8')
-  const match = text.match(new RegExp(`export\\s+const\\s+${name}\\s*=\\s*\\[([\\s\\S]*?)\\]\\s+as\\s+const`))
+  const match = text.match(
+    new RegExp(`export\\s+const\\s+${name}\\s*=\\s*\\[([\\s\\S]*?)\\]\\s+as\\s+const`)
+  )
   if (!match) {
     throw new Error(`${rel} missing export const ${name} = [...] as const`)
   }
@@ -41,7 +57,7 @@ function readConstArray(rel, name) {
 
 const TERMINAL_RUN_META_STATUSES = readConstArray(
   RUN_META_TERMINAL_STATUS_REL,
-  'RUN_META_TERMINAL_STATUSES',
+  'RUN_META_TERMINAL_STATUSES'
 )
 const TERMINAL_STATUS_ALT = TERMINAL_RUN_META_STATUSES.join('|')
 
@@ -77,8 +93,16 @@ function lineOf(text, idx) {
   return text.slice(0, idx).split(/\r?\n/).length
 }
 
-function isAllowedRunMetaWriter(rel) {
+function isAllowedRunMetaWriter(rel, text) {
   return rel === RUN_FINALIZER_REL || rel === RUN_META_REPOSITORY_REL
+}
+
+function sourceForRunMetaRules(rel, text) {
+  if (rel !== STARTUP_RUN_RECONCILER_REL || !text.includes(STARTUP_RECONCILER_EXEMPT_MARKER)) {
+    return text
+  }
+  const startupRecoverySql = /UPDATE\s+run_meta\s+SET\s+status\s*=\s*['"]interrupted['"]\s*,\s*initiator\s*=\s*['"]process_exit['"]\s*,\s*terminal_reason\s*=\s*['"]main_process_restarted['"]\s*,\s*updated_at\s*=\s*\?\s*WHERE\s+status\s*=\s*['"]working['"]/i
+  return text.replace(startupRecoverySql, (match) => match.replace(/[^\r\n]/g, ' '))
 }
 
 function isAllowedProjectionPatchConstructor(rel) {
@@ -87,14 +111,17 @@ function isAllowedProjectionPatchConstructor(rel) {
 
 function pushRegexViolations(violations, rel, text, rules) {
   for (const rule of rules) {
-    const re = new RegExp(rule.re.source, rule.re.flags.includes('g') ? rule.re.flags : `${rule.re.flags}g`)
+    const re = new RegExp(
+      rule.re.source,
+      rule.re.flags.includes('g') ? rule.re.flags : `${rule.re.flags}g`
+    )
     let m
     while ((m = re.exec(text))) {
       violations.push({
         file: rel,
         line: lineOf(text, m.index),
         kind: rule.kind,
-        detail: rule.detail,
+        detail: rule.detail
       })
     }
   }
@@ -114,121 +141,146 @@ function pushAgentSdkC03Violations(violations, text) {
       file: rel,
       line: 1,
       kind: 'agent_sdk_c03_early_return',
-      detail: 'P1b-1b-C03 early-return families must use finalizeEarlyReturn',
+      detail: 'P1b-1b-C03 early-return families must use finalizeEarlyReturn'
+    })
+  }
+  if (!text.includes('return await handleAgentSdkTurnError({')) {
+    violations.push({
+      file: AGENT_SDK_TURN_ORCHESTRATOR_REL,
+      line: 1,
+      kind: 'agent_sdk_async_error_closeout',
+      detail: 'error closeout must be awaited before lifecycle finally persists terminal state'
     })
   }
 
   const sections = [
     {
       name: 'config_pre_model',
+      rel: AGENT_SDK_TURN_ORCHESTRATOR_REL,
       start: 'const configDetail = this.host.loadAIConfig()',
       end: 'const normalizedConfig = normalizeAIConfig',
       required: [
         "terminalReason: configDetail.reason === 'json_corrupt' ? 'blocked_config' : 'persistence_failed'",
-        "terminalReason: 'blocked_config'",
+        "terminalReason: 'blocked_config'"
       ],
       forbidden: [
         /emitStatus\('error',\s*configDetail\.reason/,
-        /emitStatus\('error',\s*'blocked_config'\)/,
-      ],
+        /emitStatus\('error',\s*'blocked_config'\)/
+      ]
     },
     {
       name: 'child_resume_close',
+      rel: AGENT_SDK_TURN_ORCHESTRATOR_REL,
       start: 'const resumeChildRunId = continuationChildRunId',
-      end: 'const currentLocalSendImTurn = hasLocalSendImIntentForTurn',
-      required: [
-        'status: outcome.status',
-        'continuationHandle: outcome.status === \'checkpoint\'',
-      ],
-      forbidden: [
-        /emitStatus\(outcome\.status,\s*outcome\.terminalReason\)/,
-      ],
+      end: 'const preparedTurn = prepareAgentSdkTurn',
+      required: ['status: outcome.status', "continuationHandle: outcome.status === 'checkpoint'"],
+      forbidden: [/emitStatus\(outcome\.status,\s*outcome\.terminalReason\)/]
     },
     {
       name: 'restored_tool_surface_missing',
+      rel: AGENT_SDK_TURN_PREPARATION_REL,
       start: 'if (restoredToolSurface.missingToolNames.length > 0)',
-      end: 'const hasVeaPipelineTool =',
-      required: [
-        "terminalReason: 'blocked_tool_error'",
-      ],
-      forbidden: [
-        /emitStatus\('error',\s*'blocked_tool_error'\)/,
-      ],
+      end: 'return {\n    terminalResult: null',
+      required: ["terminalReason: 'blocked_tool_error'"],
+      forbidden: [/emitStatus\('error',\s*'blocked_tool_error'\)/]
     },
     {
       name: 'current_message_capability_block',
+      rel: AGENT_SDK_TURN_INPUT_ASSEMBLY_REL,
       start: 'assertCurrentMessageCapability(blocksForCheck',
       end: 'let nextInput = toSdkInput',
-      required: [
-        "terminalReason: 'blocked_config'",
-      ],
-      forbidden: [
-        /emitStatus\('error',\s*'blocked_config'\)/,
-      ],
+      required: ["terminalReason: 'blocked_config'"],
+      forbidden: [/emitStatus\('error',\s*'blocked_config'\)/]
     },
     {
       name: 'budget_checkpoint_helper',
+      rel: AGENT_SDK_TURN_EXECUTION_REL,
       start: 'const finishBudgetCheckpointIfNeeded = async',
-      end: 'const hasUnfinishedActionTaskReference =',
+      end: 'const { maybeHandleSkillClarificationGuard',
       required: [
         "terminalReason: 'checkpoint_budget'",
-        'continuationHandle: checkpoint.runStatePath',
+        'continuationHandle: checkpoint.runStatePath'
       ],
-      forbidden: [
-        /emitStatus\('checkpoint',\s*'checkpoint_budget'\)/,
-      ],
+      forbidden: [/emitStatus\('checkpoint',\s*'checkpoint_budget'\)/]
     },
     {
       name: 'max_turn_saved_document_done',
-      start: 'const contentIssue = await inspectDocumentTargetContent(documentTargetGuardForRecovery',
-      end: '&& !hasSuccessfulDocumentTargetMutation',
-      required: [
-        "status: 'done'",
-        "terminalReason: 'done'",
-        'finalText: fallbackText',
-      ],
-      forbidden: [
-        /emitStatus\('done',\s*'done'\)/,
-      ],
+      rel: AGENT_SDK_TURN_CLOSEOUT_REL,
+      start:
+        'const contentIssue = await inspectDocumentTargetContent(ctx.documentTargetGuardForRecovery',
+      end: '&& !ctx.hasSuccessfulDocumentTargetMutation',
+      required: ["status: 'done'", "terminalReason: 'done'", 'finalText: fallbackText'],
+      forbidden: [/emitStatus\('done',\s*'done'\)/]
     },
+    {
+      name: 'skill_clarification_guard_checkpoint',
+      rel: AGENT_SDK_TURN_GUARDS_REL,
+      start: 'const maybeHandleSkillClarificationGuard = async',
+      end: 'const maybeHandleActionAnnouncementGuard = async',
+      funnel: 'finalizeRunOutcome(',
+      required: ["terminalReason: 'checkpoint_steered'", 'finalText: state.finalText'],
+      forbidden: []
+    },
+    {
+      name: 'action_announcement_guard_checkpoint',
+      rel: AGENT_SDK_TURN_GUARDS_REL,
+      start: 'const maybeHandleActionAnnouncementGuard = async',
+      end: 'return { maybeHandleSkillClarificationGuard',
+      funnel: 'finalizeRunOutcome(',
+      required: ["terminalReason: 'checkpoint_steered'", 'finalText: state.finalText'],
+      forbidden: []
+    },
+    {
+      name: 'prepared_turn_completion_done',
+      rel: AGENT_SDK_TURN_COMPLETION_REL,
+      start: 'const finalProjectionPatch = mergeProjectionPatches',
+      end: 'const finalizedTerminalReason =',
+      funnel: 'finalizeRunOutcome(',
+      required: ["kind: 'done'", 'finalText'],
+      forbidden: []
+    }
   ]
 
   for (const section of sections) {
-    const body = sliceBetween(text, section.start, section.end)
+    const sectionAbs = path.join(ROOT, section.rel)
+    const sectionText = fs.existsSync(sectionAbs) ? fs.readFileSync(sectionAbs, 'utf8') : ''
+    const body = sliceBetween(sectionText, section.start, section.end)
     if (!body) {
       violations.push({
-        file: rel,
+        file: section.rel,
         line: 1,
         kind: 'agent_sdk_c03_early_return',
-        detail: `P1b-1b-C03 section not found: ${section.name}`,
+        detail: `P1b-1b-C03 section not found: ${section.name}`
       })
       continue
     }
-    if (!body.includes('finalizeEarlyReturn({')) {
+    const funnel = section.funnel || 'finalizeEarlyReturn('
+    if (!body.includes(funnel)) {
       violations.push({
-        file: rel,
-        line: lineOf(text, text.indexOf(section.start)),
+        file: section.rel,
+        line: lineOf(sectionText, sectionText.indexOf(section.start)),
         kind: 'agent_sdk_c03_early_return',
-        detail: `P1b-1b-C03 ${section.name} must call finalizeEarlyReturn`,
+        detail: `P1b-1b-C03 ${section.name} must call ${funnel}`
       })
     }
+    const compactBody = body.replace(/\s+/g, ' ')
     for (const required of section.required) {
-      if (!body.includes(required)) {
+      if (!compactBody.includes(required.replace(/\s+/g, ' '))) {
         violations.push({
-          file: rel,
-          line: lineOf(text, text.indexOf(section.start)),
+          file: section.rel,
+          line: lineOf(sectionText, sectionText.indexOf(section.start)),
           kind: 'agent_sdk_c03_early_return',
-          detail: `P1b-1b-C03 ${section.name} is missing required finalizer field: ${required}`,
+          detail: `P1b-1b-C03 ${section.name} is missing required finalizer field: ${required}`
         })
       }
     }
     for (const forbidden of section.forbidden) {
       if (forbidden.test(body)) {
         violations.push({
-          file: rel,
-          line: lineOf(text, text.indexOf(section.start)),
+          file: section.rel,
+          line: lineOf(sectionText, sectionText.indexOf(section.start)),
           kind: 'agent_sdk_c03_early_return',
-          detail: `P1b-1b-C03 ${section.name} still emits terminal status before returning`,
+          detail: `P1b-1b-C03 ${section.name} still emits terminal status before returning`
         })
       }
     }
@@ -237,7 +289,10 @@ function pushAgentSdkC03Violations(violations, text) {
 
 function terminalReasonFromEmitStatusCall(callText) {
   const args = callText.slice(callText.indexOf('(') + 1, callText.lastIndexOf(')'))
-  const firstArg = args.split(',')[0]?.trim().replace(/^['"]|['"]$/g, '')
+  const firstArg = args
+    .split(',')[0]
+    ?.trim()
+    .replace(/^['"]|['"]$/g, '')
   if (TERMINAL_RUN_META_STATUSES.includes(firstArg)) return firstArg
   return null
 }
@@ -253,7 +308,10 @@ function pushAgentSdkStructuralFinalizerViolations(violations, text) {
   while ((emitMatch = emitStatusRe.exec(body))) {
     const call = emitMatch[0]
     const terminalStatus = terminalReasonFromEmitStatusCall(call)
-    const secondArgTerminal = /,\s*(?:['"](?:done|error|cancelled|checkpoint|blocked_[a-z_]+|checkpoint_[a-z_]+|persistence_failed|failed_skill|cancelled_[a-z_]+)['"]|[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)/.test(call)
+    const secondArgTerminal =
+      /,\s*(?:['"](?:done|error|cancelled|checkpoint|blocked_[a-z_]+|checkpoint_[a-z_]+|persistence_failed|failed_skill|cancelled_[a-z_]+)['"]|[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)/.test(
+        call
+      )
     if (!terminalStatus && !secondArgTerminal) continue
     const nextReturn = body.indexOf('return this.buildResult', emitMatch.index)
     if (nextReturn < 0) continue
@@ -261,15 +319,16 @@ function pushAgentSdkStructuralFinalizerViolations(violations, text) {
       ...[
         body.indexOf('finalizeEarlyReturn', emitMatch.index),
         body.indexOf('finalizeRunOutcome', emitMatch.index),
-        body.indexOf('recordAdmissionRejection', emitMatch.index),
-      ].filter((idx) => idx >= 0),
+        body.indexOf('recordAdmissionRejection', emitMatch.index)
+      ].filter((idx) => idx >= 0)
     )
     if (Number.isFinite(nextFinalize) && nextFinalize < nextReturn) continue
     violations.push({
       file: rel,
       line: bodyLineOffset + lineOf(body, emitMatch.index),
       kind: 'agent_sdk_structural_terminal_return',
-      detail: 'terminal emitStatus before return buildResult must route through finalizeEarlyReturn/finalizeRunOutcome',
+      detail:
+        'terminal emitStatus before return buildResult must route through finalizeEarlyReturn/finalizeRunOutcome'
     })
   }
 
@@ -286,7 +345,8 @@ function pushAgentSdkStructuralFinalizerViolations(violations, text) {
       file: rel,
       line: bodyLineOffset + lineOf(body, returnMatch.index),
       kind: 'agent_sdk_structural_terminal_return',
-      detail: 'return buildResult with terminalReason must be preceded by finalizeEarlyReturn/finalizeRunOutcome or the admission finalizer',
+      detail:
+        'return buildResult with terminalReason must be preceded by finalizeEarlyReturn/finalizeRunOutcome or the admission finalizer'
     })
   }
 }
@@ -304,41 +364,49 @@ function main() {
     {
       kind: 'run_meta_terminal_update',
       detail: 'terminal run_meta update must be routed through run-finalizer.ts',
-      re: new RegExp(`\\brunMeta(?:Repository|Repo)?\\.update\\s*\\([^,]+,\\s*\\{[\\s\\S]{0,900}?\\bstatus\\s*:\\s*['"](?:${TERMINAL_STATUS_ALT})['"]`, 'g'),
+      re: new RegExp(
+        `\\brunMeta(?:Repository|Repo)?\\.update\\s*\\([^,]+,\\s*\\{[\\s\\S]{0,900}?\\bstatus\\s*:\\s*['"](?:${TERMINAL_STATUS_ALT})['"]`,
+        'g'
+      )
     },
     {
       kind: 'run_meta_terminal_create',
       detail: 'terminal run_meta create must be routed through run-finalizer.ts',
-      re: new RegExp(`\\brunMeta(?:Repository|Repo)?\\.create\\s*\\(\\s*\\{[\\s\\S]{0,900}?\\bstatus\\s*:\\s*['"](?:${TERMINAL_STATUS_ALT})['"]`, 'g'),
+      re: new RegExp(
+        `\\brunMeta(?:Repository|Repo)?\\.create\\s*\\(\\s*\\{[\\s\\S]{0,900}?\\bstatus\\s*:\\s*['"](?:${TERMINAL_STATUS_ALT})['"]`,
+        'g'
+      )
     },
     {
       kind: 'run_meta_terminal_sql',
-      detail: 'direct run_meta SQL with status writes must stay behind the repository/finalizer funnel',
-      re: /\b(?:INSERT\s+INTO|UPDATE)\s+run_meta\b[\s\S]{0,700}\bstatus\b/gi,
-    },
+      detail:
+        'direct run_meta SQL with status writes must stay behind the repository/finalizer funnel',
+      re: /\b(?:INSERT\s+INTO|UPDATE)\s+run_meta\b[\s\S]{0,700}\bstatus\b/gi
+    }
   ]
 
   const projectionPatchRules = [
     {
       kind: 'terminal_projection_patch_constructor',
       detail: 'terminal projection patch constructors may only be defined in run-finalizer.ts',
-      re: /\b(?:export\s+)?function\s+buildTerminalProjectionPatch\s*\(/g,
+      re: /\b(?:export\s+)?function\s+buildTerminalProjectionPatch\s*\(/g
     },
     {
       kind: 'terminal_projection_patch_constructor',
       detail: 'terminal projection patch constructors may only be defined in run-finalizer.ts',
-      re: /\b(?:const|let|var)\s+buildTerminalProjectionPatch\s*=/g,
+      re: /\b(?:const|let|var)\s+buildTerminalProjectionPatch\s*=/g
     },
     {
       kind: 'terminal_projection_patch_literal',
-      detail: 'sibling takeover terminal projection patches must be constructed by run-finalizer.ts',
-      re: /status\s*:\s*['"]killed['"][\s\S]{0,700}?(?:taskSummary|blockedReason)\s*:\s*['"]已被新消息接管['"]/g,
+      detail:
+        'sibling takeover terminal projection patches must be constructed by run-finalizer.ts',
+      re: /status\s*:\s*['"]killed['"][\s\S]{0,700}?(?:taskSummary|blockedReason)\s*:\s*['"]已被新消息接管['"]/g
     },
     {
       kind: 'terminal_projection_patch_literal',
       detail: 'superseded continuation terminal patches must be constructed by run-finalizer.ts',
-      re: /blockerType\s*:\s*['"]superseded['"]/g,
-    },
+      re: /blockerType\s*:\s*['"]superseded['"]/g
+    }
   ]
 
   // Review batch-1 hardening: renamed-variable writes (`repository.update(...)`)
@@ -353,8 +421,8 @@ function main() {
   for (const file of files) {
     const rel = relposix(file)
     const text = fs.readFileSync(file, 'utf8')
-    if (!isAllowedRunMetaWriter(rel)) {
-      pushRegexViolations(violations, rel, text, runMetaRules)
+    if (!isAllowedRunMetaWriter(rel, text)) {
+      pushRegexViolations(violations, rel, sourceForRunMetaRules(rel, text), runMetaRules)
       if (accessRule.test(text)) {
         accessRule.lastIndex = 0
         const exemptSnapshot = text.includes(EXEMPT_MARKER) && text.includes(NO_DOWNGRADE_GUARD)
@@ -369,7 +437,8 @@ function main() {
             file: rel,
             line: 1,
             kind: 'run_meta_repository_access',
-            detail: 'getRunMetaRepository may only be used by run-finalizer.ts or a funnel-exempt (no-downgrade) snapshot writer',
+            detail:
+              'getRunMetaRepository may only be used by run-finalizer.ts or a funnel-exempt (no-downgrade) snapshot writer'
           })
         }
       }

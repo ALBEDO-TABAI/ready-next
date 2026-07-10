@@ -39,17 +39,15 @@ export class ReadyAgentOrchestrator {
   }
 }
 `)
-  writeFile(root, 'src/main/modules/agent-control/runtime-core/agent-sdk-turn-orchestrator.ts', `
-export class AgentSdkTurnOrchestrator {
-  async sendMessage() {
+  writeFile(root, 'src/main/modules/agent-control/runtime-core/agent-sdk-turn-closeout.ts', `
+export async function closeout() {
     if (abortInitiator === 'manual_suspend') {
-      return this.buildResult({
-        success: true,
+      return finalizeEarlyReturn({
+        status: 'checkpoint',
         terminalReason,
         taskBudgetRuntime,
       })
     }
-  }
 }
 `)
   writeFile(root, 'src/main/modules/agent-control/runtime-core/run-finalizer.ts', `

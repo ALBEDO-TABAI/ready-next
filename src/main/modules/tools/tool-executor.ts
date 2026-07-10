@@ -830,7 +830,7 @@ async function executeToolCallInner(
             return executeDeclareCompletionCriteria(args, {
               taskId: context.taskId ?? null,
               sessionId: context.sessionId ?? null,
-              updateTaskModelCriteria: (taskId, criteria) => store.update(taskId, { modelCriteria: criteria }),
+              updateTaskCompletionDeclaration: (taskId, patch) => store.update(taskId, patch),
             })
           }
           const semanticJudge = toolName === 'confirm_specialist_blueprint' || toolName === 'propose_specialist_blueprint'

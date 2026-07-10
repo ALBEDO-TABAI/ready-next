@@ -10,6 +10,7 @@ import test from 'node:test'
 
 import { wrapRunMetaRepositoryWithCloseoutSnapshot } from '../main/modules/agent-control/task-projection/run-meta-snapshot'
 import { finalizeRunOutcome } from '../main/modules/agent-control/runtime-core/run-finalizer'
+import { finalizeStaleWithoutHandleProjections } from '../main/modules/agent-control/runtime-core/stale-projection-finalizer'
 import type { TaskProjectionRecord } from '../main/modules/agent-control/contracts/run-contracts'
 
 function fakeRunMetaRepository() {
@@ -100,4 +101,61 @@ test('missing projection or missing taskId degrades to the unenriched write — 
     terminalReason: 'user_cancelled',
   }, { runMetaRepository: throwing, writeRunCloseMetric: () => {} })
   assert.equal(repository.rows.get('run-y')!.status, 'cancelled', 'snapshot failure never blocks the terminal write')
+})
+
+test('manual_suspend and stale-without-handle closeouts both snapshot projection budget truth', async () => {
+  const manualProjection = {
+    ...projection,
+    taskId: 'task-manual',
+    runId: 'run-manual',
+    budget: { taskType: 'multi_step_task', maxIterations: 40, maxToolCalls: 40, maxParallelToolGroups: 2 },
+  } as TaskProjectionRecord
+  const manualRepository = fakeRunMetaRepository()
+  manualRepository.create({ runId: 'run-manual', taskId: 'task-manual', status: 'working', budget: { maxToolCalls: 24 } })
+  await finalizeRunOutcome({
+    kind: 'interrupted',
+    runId: 'run-manual',
+    taskId: 'task-manual',
+    scopeId: 'scope-1',
+    durationMs: 1,
+    toolCallsUsed: 0,
+    initiator: 'manual_suspend',
+    terminalReason: 'manual_suspend',
+  }, {
+    runMetaRepository: wrapRunMetaRepositoryWithCloseoutSnapshot(manualRepository, () => manualProjection),
+    writeRunCloseMetric: () => {},
+  })
+  assert.deepEqual(manualRepository.rows.get('run-manual')?.budget, manualProjection.budget)
+
+  let staleProjection = {
+    ...projection,
+    taskId: 'task-stale-ledger',
+    runId: 'run-stale-ledger',
+    scopeId: 'scope-stale-ledger',
+    status: 'running',
+    interactionState: 'running',
+    waitingFor: 'background',
+    resumableActions: ['continue'],
+    continuationRef: null,
+    createdAt: '2026-07-10T00:00:00.000Z',
+    updatedAt: '2026-07-10T00:00:00.000Z',
+    budget: { taskType: 'research', maxIterations: 60, maxToolCalls: 60, maxParallelToolGroups: 2 },
+  } as TaskProjectionRecord
+  const staleRepository = fakeRunMetaRepository()
+  staleRepository.create({ runId: 'run-stale-ledger', taskId: 'task-stale-ledger', status: 'working', budget: { maxToolCalls: 24 } })
+  const store = {
+    get: (taskId: string) => taskId === staleProjection.taskId ? staleProjection : null,
+    update: (taskId: string, patch: Partial<TaskProjectionRecord>) => {
+      if (taskId === staleProjection.taskId) staleProjection = { ...staleProjection, ...patch }
+    },
+  }
+  await finalizeStaleWithoutHandleProjections({
+    scopeId: staleProjection.scopeId,
+    records: [staleProjection],
+    taskProjectionStore: store,
+    runMetaRepository: wrapRunMetaRepositoryWithCloseoutSnapshot(staleRepository, (taskId) => store.get(taskId)),
+    hasActiveRun: () => false,
+    now: '2026-07-10T00:40:00.000Z',
+  })
+  assert.deepEqual(staleRepository.rows.get('run-stale-ledger')?.budget, staleProjection.budget)
 })

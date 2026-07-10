@@ -27,7 +27,7 @@ export const AGENT_INTERACTION_TOOL_NAMES: readonly string[] = [
 ] as const
 
 const DECLARE_COMPLETION_CRITERIA_DESCRIPTION = [
-  '在规划或执行早期，把你对「这个任务做到什么程度才算完成」的具体判断登记为补充验收标准（1-8 条，每条 ≤120 字符的可验证陈述）。终态裁决时这些标准会与系统模板标准合并核对——你声明了什么，收尾时就会被按什么检查。',
+  '在规划或执行早期，把你对「这个任务做到什么程度才算完成」的具体判断登记为补充验收标准（1-8 条，每条 ≤120 字符的可验证陈述）。任务承诺交付文件时，同时用 expected_outputs 声明每个最终文件目标。终态裁决时会逐项核对。',
   '',
   '何时使用：结果型任务（多步/研究/媒体/浏览器交易）在开工时就能写出比通用模板更具体的完成判据（如「产物落到 outputs 目录并给出路径」「三个来源交叉验证过再下结论」）。',
   '',
@@ -51,6 +51,18 @@ const DECLARE_COMPLETION_CRITERIA_INPUT_SCHEMA = {
         description: '一条可验证的完成标准（≤120 字符），如「产物文件已写入并回报绝对路径」。',
       },
       description: '本任务的补充验收标准，整组替换式登记。',
+    },
+    expected_outputs: {
+      type: 'array',
+      minItems: 1,
+      maxItems: 8,
+      items: {
+        type: 'string',
+        minLength: 1,
+        maxLength: 200,
+        description: '一个具体最终文件目标（≤200 字符），如 /Users/user/V/深读.md；不可只给目录。',
+      },
+      description: '本任务承诺交付的最终文件目标，整组替换；未承诺文件时省略。',
     },
   },
   required: ['criteria'],

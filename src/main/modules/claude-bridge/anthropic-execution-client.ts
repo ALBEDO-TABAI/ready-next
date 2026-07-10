@@ -1,31 +1,42 @@
 import { randomUUID } from 'crypto'
 import type { AIModelConfig } from '../../../shared/ai-providers'
-import { getProviderDef } from '../../../shared/ai-providers'
+import { getProviderDef, resolveMaxOutputTokens } from '../../../shared/ai-providers'
 import { resolveAIConfigCapabilities } from '../../../shared/ai-providers'
 import {
   applyProviderRequestPatch,
   applyProviderResponsePatch,
   resolveProviderDefaultPatchers,
   resolveProviderPatchProfile,
-  type PatchContext,
+  type PatchContext
 } from '../../../shared/ai-providers/index'
 import {
   applyCapabilityFilterForRoute,
-  type MessageCapabilitySnapshot,
+  type MessageCapabilitySnapshot
 } from '../agent-control/domain-adapters/message-capability-filter'
 import { assertManualThinkingModeProviderSafe } from '../agent-control/thinking-compatibility'
-import { getPolicyAnthropicTools, collectToolNames, type ToolPolicy } from '../agent-control/tool-policy/execution-tool-config'
+import {
+  getPolicyAnthropicTools,
+  collectToolNames,
+  type ToolPolicy
+} from '../agent-control/tool-policy/execution-tool-config'
 import { logAgentMetric } from '../agent-control/metrics'
 import { TOOL_ERROR_METRICS } from '../agent-control/tools-runtime/tool-error-metrics'
 import { parseJsonResponse } from '../openai-responses'
-import { annotateFallbackResult, type ExecutionFallbackInfo, resolveFallbackPlan } from './execution-fallback-policy'
+import {
+  annotateFallbackResult,
+  type ExecutionFallbackInfo,
+  resolveFallbackPlan
+} from './execution-fallback-policy'
 import { withRetryBackoff } from './llm-resilience'
 import { buildProviderHttpError, parseRetryAfterHeader } from './provider-terminal-error'
 import { resolveApiRequestTimeoutMs } from './request-timeout-policy'
 import { parseTextToolBridgeResponse } from './tool-bridge'
 
 export interface AnthropicSessionLike {
-  messages: Array<{ role: 'user' | 'assistant' | 'system' | 'tool'; content: string | Array<Record<string, unknown>> }>
+  messages: Array<{
+    role: 'user' | 'assistant' | 'system' | 'tool'
+    content: string | Array<Record<string, unknown>>
+  }>
   systemPrompt: string
 }
 
@@ -45,20 +56,22 @@ export interface AnthropicExecutionResponse {
 }
 
 export class AnthropicExecutionClient {
-  constructor(private readonly deps: {
-    fetchWithTimeout: (
-      url: string,
-      init: RequestInit,
-      signal: AbortSignal,
-      label: string,
-      timeoutMs?: number,
-    ) => Promise<Response>
-    serializeMessages: (
-      messages: AnthropicSessionLike['messages'],
-      format: 'anthropic' | 'openai',
-    ) => Array<Record<string, unknown>>
-    log: (message: string) => void
-  }) {}
+  constructor(
+    private readonly deps: {
+      fetchWithTimeout: (
+        url: string,
+        init: RequestInit,
+        signal: AbortSignal,
+        label: string,
+        timeoutMs?: number
+      ) => Promise<Response>
+      serializeMessages: (
+        messages: AnthropicSessionLike['messages'],
+        format: 'anthropic' | 'openai'
+      ) => Array<Record<string, unknown>>
+      log: (message: string) => void
+    }
+  ) {}
 
   async requestSimple(params: {
     session: AnthropicSessionLike
@@ -78,23 +91,28 @@ export class AnthropicExecutionClient {
       const fallbackPlan = resolveFallbackPlan({
         mode: 'video_frames',
         hasVideoInputs: Boolean(params.hasVideoInputs && params.buildVideoFrameFallbackMessages),
-        error,
+        error
       })
       if (!fallbackPlan.shouldRetry || !params.buildVideoFrameFallbackMessages) {
         throw error
       }
-      this.deps.log('Anthropic simple request with video blocks failed, retrying with extracted image frames fallback')
+      this.deps.log(
+        'Anthropic simple request with video blocks failed, retrying with extracted image frames fallback'
+      )
       const fallbackMessages = await params.buildVideoFrameFallbackMessages()
       params.onFallbackApplied?.(fallbackMessages)
-      return annotateFallbackResult({
-        text: await this.requestSimpleOnce({
-          ...params,
-          messagesOverride: fallbackMessages,
-        }),
-      }, {
-        kind: 'video_frames',
-        attempts: 1,
-      })
+      return annotateFallbackResult(
+        {
+          text: await this.requestSimpleOnce({
+            ...params,
+            messagesOverride: fallbackMessages
+          })
+        },
+        {
+          kind: 'video_frames',
+          attempts: 1
+        }
+      )
     }
   }
 
@@ -115,44 +133,58 @@ export class AnthropicExecutionClient {
     // mutate it before serialization.
     const reqBody: Record<string, unknown> = {
       model,
-      max_tokens: 4096,
+      max_tokens: resolveMaxOutputTokens(params.config),
       system: params.session.systemPrompt,
       messages: this.applyCapability(
-        this.deps.serializeMessages(params.messagesOverride ?? params.session.messages, 'anthropic'),
-        params.config,
-      ),
+        this.deps.serializeMessages(
+          params.messagesOverride ?? params.session.messages,
+          'anthropic'
+        ),
+        params.config
+      )
     }
     const patchCtx = this.buildPatchContext({
       config: params.config,
       baseUrl: params.baseUrl,
-      model,
+      model
     })
     applyProviderRequestPatch(reqBody, patchCtx)
     // Stage S W8.2 — wrap fetch in withRetryBackoff so transient 408/409/425/429/5xx
     // and "server busy" responses are retried with exponential backoff before bubbling.
     const resp = await withRetryBackoff(async () => {
-      const r = await this.deps.fetchWithTimeout(url, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(reqBody),
-        signal: params.signal,
-      }, params.signal, 'anthropic simple', params.timeoutMs)
+      const r = await this.deps.fetchWithTimeout(
+        url,
+        {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(reqBody),
+          signal: params.signal
+        },
+        params.signal,
+        'anthropic simple',
+        params.timeoutMs
+      )
       if (!r.ok) {
         const errBody = await r.text().catch(() => '')
         throw buildProviderHttpError({
           httpStatus: r.status,
           errorBody: errBody,
-          retryAfterSeconds: parseRetryAfterHeader(r.headers?.get('retry-after')),
+          retryAfterSeconds: parseRetryAfterHeader(r.headers?.get('retry-after'))
         })
       }
       return r
     })
 
-    const json = await parseJsonResponse(resp, { requestUrl: url }) as {
+    const json = (await parseJsonResponse(resp, { requestUrl: url })) as {
       content?: Array<{ type: string; text?: string }>
     }
     applyProviderResponsePatch(json, patchCtx)
-    return json.content?.filter((block) => block.type === 'text').map((block) => block.text).join('') || ''
+    return (
+      json.content
+        ?.filter((block) => block.type === 'text')
+        .map((block) => block.text)
+        .join('') || ''
+    )
   }
 
   async requestWithTools(params: {
@@ -169,15 +201,17 @@ export class AnthropicExecutionClient {
     } catch (error) {
       const fallbackPlan = resolveFallbackPlan({
         mode: 'kimi_coding',
-        error,
+        error
       })
       if (!this.shouldUseKimiCodingDefaults(params.baseUrl) || !fallbackPlan.shouldRetry) {
         throw error
       }
-      this.deps.log('Anthropic tool request on kimi coding timed out or failed transiently, retrying once with shared fallback policy')
+      this.deps.log(
+        'Anthropic tool request on kimi coding timed out or failed transiently, retrying once with shared fallback policy'
+      )
       return annotateFallbackResult(await this.requestWithToolsOnce(params), {
         kind: 'kimi_coding_retry',
-        attempts: 1,
+        attempts: 1
       })
     }
   }
@@ -192,15 +226,22 @@ export class AnthropicExecutionClient {
   }): Promise<AnthropicExecutionResponse> {
     const headers = this.buildHeaders(params.config, params.baseUrl)
     const model = this.resolveModel(params.config, params.baseUrl)
-    const timeoutMs = Math.max(params.timeoutMs || 0, resolveApiRequestTimeoutMs(params.policy, {
-      baseUrl: params.baseUrl,
-    }))
+    const timeoutMs = Math.max(
+      params.timeoutMs || 0,
+      resolveApiRequestTimeoutMs(params.policy, {
+        baseUrl: params.baseUrl
+      })
+    )
     const tools = getPolicyAnthropicTools(params.policy)
     if (params.policy?.forceDocumentTool) {
-      this.deps.log(`forceDocumentTool anthropic tools=${collectToolNames(tools, 'anthropic').join(',')}`)
+      this.deps.log(
+        `forceDocumentTool anthropic tools=${collectToolNames(tools, 'anthropic').join(',')}`
+      )
     }
     if (params.policy?.forceDesignTool) {
-      this.deps.log(`forceDesignTool anthropic tools=${collectToolNames(tools, 'anthropic').join(',')}`)
+      this.deps.log(
+        `forceDesignTool anthropic tools=${collectToolNames(tools, 'anthropic').join(',')}`
+      )
     }
 
     const url = `${params.baseUrl}/v1/messages`
@@ -209,63 +250,82 @@ export class AnthropicExecutionClient {
     // mutate it before serialization.
     const reqBody: Record<string, unknown> = {
       model,
-      max_tokens: 4096,
+      max_tokens: resolveMaxOutputTokens(params.config),
       system: params.session.systemPrompt,
       messages: this.applyCapability(
         this.deps.serializeMessages(params.session.messages, 'anthropic'),
-        params.config,
+        params.config
       ),
-      tools,
+      tools
     }
     const patchCtx = this.buildPatchContext({
       config: params.config,
       baseUrl: params.baseUrl,
-      model,
+      model
     })
     applyProviderRequestPatch(reqBody, patchCtx)
     // Stage S round 2 — wrap fetch in withRetryBackoff so transient 408/409/425/429/5xx
     // and "server busy" responses are retried with exponential backoff before bubbling.
     const resp = await withRetryBackoff(async () => {
-      const r = await this.deps.fetchWithTimeout(url, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(reqBody),
-        signal: params.signal,
-      }, params.signal, 'anthropic tools', timeoutMs)
+      const r = await this.deps.fetchWithTimeout(
+        url,
+        {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(reqBody),
+          signal: params.signal
+        },
+        params.signal,
+        'anthropic tools',
+        timeoutMs
+      )
       if (!r.ok) {
         const errBody = await r.text().catch(() => '')
         throw buildProviderHttpError({
           httpStatus: r.status,
           errorBody: errBody,
-          retryAfterSeconds: parseRetryAfterHeader(r.headers?.get('retry-after')),
+          retryAfterSeconds: parseRetryAfterHeader(r.headers?.get('retry-after'))
         })
       }
       return r
     })
 
-    const json = await parseJsonResponse(resp, { requestUrl: url }) as {
-      content?: Array<{ type: string; text?: string; id?: string; name?: string; input?: Record<string, unknown> }>
+    const json = (await parseJsonResponse(resp, { requestUrl: url })) as {
+      content?: Array<{
+        type: string
+        text?: string
+        id?: string
+        name?: string
+        input?: Record<string, unknown>
+      }>
       stop_reason?: string
     }
     applyProviderResponsePatch(json, patchCtx)
     const nativeResponse: AnthropicExecutionResponse = {
-      text: json.content?.filter((block) => block.type === 'text').map((block) => block.text).join('') || '',
+      text:
+        json.content
+          ?.filter((block) => block.type === 'text')
+          .map((block) => block.text)
+          .join('') || '',
       toolCalls: (json.content || [])
         .filter((block) => block.type === 'tool_use')
         .map((block) => ({
           id: block.id || '',
           name: block.name || '',
-          input: block.input || {},
+          input: block.input || {}
         })),
       stopReason: json.stop_reason || 'end_turn',
-      toolTransport: 'native',
+      toolTransport: 'native'
     }
     return this.recoverXmlToolCallsFromNative(nativeResponse)
   }
 
-  private recoverXmlToolCallsFromNative(response: AnthropicExecutionResponse): AnthropicExecutionResponse {
+  private recoverXmlToolCallsFromNative(
+    response: AnthropicExecutionResponse
+  ): AnthropicExecutionResponse {
     if (response.toolCalls.length > 0) return response
-    if (!response.text || !/<tool_call>|<function=|<parameter=|:::tool_call/i.test(response.text)) return response
+    if (!response.text || !/<tool_call>|<function=|<parameter=|:::tool_call/i.test(response.text))
+      return response
     const parsed = parseTextToolBridgeResponse(response.text)
     if (parsed.toolCalls.length === 0) return response
     logAgentMetric(TOOL_ERROR_METRICS.xmlToolCallsRecoveredFromNative, {
@@ -274,10 +334,10 @@ export class AnthropicExecutionClient {
       recoveredCallsCount: parsed.toolCalls.length,
       recoveredToolNames: parsed.toolCalls.map((call) => call.name).slice(0, 5),
       originalTextLen: response.text.length,
-      cleanedTextLen: parsed.visibleText.length,
+      cleanedTextLen: parsed.visibleText.length
     })
     this.deps.log(
-      `[xml_recovery] anthropic_messages: model emitted ${parsed.toolCalls.length} XML tool_call(s); recovering as text-bridge so dispatch can proceed.`,
+      `[xml_recovery] anthropic_messages: model emitted ${parsed.toolCalls.length} XML tool_call(s); recovering as text-bridge so dispatch can proceed.`
     )
     return {
       ...response,
@@ -286,9 +346,9 @@ export class AnthropicExecutionClient {
       toolCalls: parsed.toolCalls.map((call) => ({
         id: `xmlrec_${randomUUID().replace(/-/g, '')}`,
         name: call.name,
-        input: call.args,
+        input: call.args
       })),
-      toolTransport: 'text',
+      toolTransport: 'text'
     }
   }
 
@@ -300,7 +360,7 @@ export class AnthropicExecutionClient {
    */
   private applyCapability(
     messages: Array<Record<string, unknown>>,
-    config: AIModelConfig,
+    config: AIModelConfig
   ): Array<Record<string, unknown>> {
     const resolved = resolveAIConfigCapabilities(config)
     const snapshot: MessageCapabilitySnapshot = {
@@ -308,7 +368,7 @@ export class AnthropicExecutionClient {
       // PR 2 review patch — Anthropic natively accepts video on capable
       // models; consult `supportsNativeVideo` so multi-turn video on
       // Anthropic doesn't lose video blocks at sanitize.
-      supportsVideo: resolved?.supportsNativeVideo === true,
+      supportsVideo: resolved?.supportsNativeVideo === true
     }
     return applyCapabilityFilterForRoute(messages, snapshot, (decision) => {
       logAgentMetric('provider_request_capability_filter', {
@@ -317,7 +377,7 @@ export class AnthropicExecutionClient {
         removedVideoBlocks: decision.removedVideoBlocks,
         replacedWithPlaceholders: decision.replacedWithPlaceholders,
         model: config.model,
-        provider: config.provider,
+        provider: config.provider
       })
     })
   }
@@ -351,16 +411,19 @@ export class AnthropicExecutionClient {
       model: params.model,
       profile,
       providerDefaultRequestPatcher: defaults.defaultRequestPatcher,
-      providerDefaultResponsePatcher: defaults.defaultResponsePatcher,
+      providerDefaultResponsePatcher: defaults.defaultResponsePatcher
     }
   }
 
   buildHeaders(config: AIModelConfig, baseUrl: string): Record<string, string> {
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
-      'anthropic-version': '2023-06-01',
+      'anthropic-version': '2023-06-01'
     }
-    if ((config.provider === 'anthropic' && !config.agentProtocol) || this.shouldUseKimiCodingDefaults(baseUrl)) {
+    if (
+      (config.provider === 'anthropic' && !config.agentProtocol) ||
+      this.shouldUseKimiCodingDefaults(baseUrl)
+    ) {
       headers['x-api-key'] = config.apiKey
       return headers
     }

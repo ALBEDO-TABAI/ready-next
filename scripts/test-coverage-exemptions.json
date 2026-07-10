@@ -82,12 +82,6 @@
       "owner": "p2-6-belief-archive-exclusion"
     },
     {
-      "path": "src/__tests__/skill-hint-relevance-fresh-action.test.ts",
-      "reason": "P1: pure resolveSkillHintRelevanceForTurn assertions with a fake orchestrator + in-memory task refs; no test path opens better-sqlite3 or reads the real DB. The agent-sdk-utils import pulls a sqlite-capable module into the transitive graph only. Host-Node coverage must stay active for the fresh-action-vs-continuation relevance assertions.",
-      "since": "2026-07-03",
-      "owner": "p1-fresh-action-relevance"
-    },
-    {
       "path": "src/__tests__/browser-power-failure.test.ts",
       "reason": "P1-A1: exercises browser_power_eval/cdp/network_trace/resource_forensics structured-failure catch branches with injected fake BrowserControllers whose executeJS/sendCdpCommand throw; no test path opens better-sqlite3 or reads the real DB. Transitive imports reach sqlite-capable browser-tools only. Host-Node coverage must stay active for the failure-classifier + target-identity assertions.",
       "since": "2026-07-03",
@@ -592,12 +586,6 @@
       "owner": "stage5-bulk-import"
     },
     {
-      "path": "src/__tests__/pure-user-text-classification.test.ts",
-      "reason": "only exercises pure text helpers (resolvePureUserTextForClassification / resolveTaskTypeFromBrowserWorkflowText); transitive value-import of agent-sdk-utils reaches a nativeBackedModule but no test path loads sqlite; verified passing on host-Node as of 2026-07-04",
-      "since": "2026-07-04",
-      "owner": "phase-r-round2-classification-pollution"
-    },
-    {
       "path": "src/__tests__/turn-feature-flags.test.ts",
       "reason": "transitive value-import reaches a nativeBackedModule via wrapper modules but never triggers native sqlite load in any test path (all sqlite-touching call sites use fakes/stubs); verified passing on host-Node test runs as of 2026-05-06",
       "since": "2026-05-06",
@@ -664,36 +652,6 @@
       "owner": "calendar-ui-assistant-verification"
     },
     {
-      "path": "src/__tests__/document-actions-precise-edit.test.ts",
-      "reason": "Stage calendar UI verification cleanup: static C4 scan reaches native-backed modules through shared wrappers, but this test exercises pure contracts or fake-injected paths and does not open better-sqlite3 under host Node.",
-      "since": "2026-05-17",
-      "owner": "calendar-ui-assistant-verification"
-    },
-    {
-      "path": "src/__tests__/document-active-snapshot.test.ts",
-      "reason": "Stage calendar UI verification cleanup: static C4 scan reaches native-backed modules through shared wrappers, but this test exercises pure contracts or fake-injected paths and does not open better-sqlite3 under host Node.",
-      "since": "2026-05-17",
-      "owner": "calendar-ui-assistant-verification"
-    },
-    {
-      "path": "src/__tests__/document-update-widget-patch.test.ts",
-      "reason": "Stage calendar UI verification cleanup: static C4 scan reaches native-backed modules through shared wrappers, but this test exercises pure contracts or fake-injected paths and does not open better-sqlite3 under host Node.",
-      "since": "2026-05-17",
-      "owner": "calendar-ui-assistant-verification"
-    },
-    {
-      "path": "src/__tests__/document-widget-authoring-openui.test.ts",
-      "reason": "Stage calendar UI verification cleanup: static C4 scan reaches native-backed modules through shared wrappers, but this test exercises pure contracts or fake-injected paths and does not open better-sqlite3 under host Node.",
-      "since": "2026-05-17",
-      "owner": "calendar-ui-assistant-verification"
-    },
-    {
-      "path": "src/__tests__/module-executor-doc-action-payload.test.ts",
-      "reason": "Stage calendar UI verification cleanup: static C4 scan reaches native-backed modules through shared wrappers, but this test exercises pure contracts or fake-injected paths and does not open better-sqlite3 under host Node.",
-      "since": "2026-05-17",
-      "owner": "calendar-ui-assistant-verification"
-    },
-    {
       "path": "src/__tests__/provider-thinking-echo-gate.test.ts",
       "reason": "Stage calendar UI verification cleanup: static C4 scan reaches native-backed modules through shared wrappers, but this test exercises pure contracts or fake-injected paths and does not open better-sqlite3 under host Node.",
       "since": "2026-05-17",
@@ -701,18 +659,6 @@
     },
     {
       "path": "src/__tests__/remote-channel-event-detector.test.ts",
-      "reason": "Stage calendar UI verification cleanup: static C4 scan reaches native-backed modules through shared wrappers, but this test exercises pure contracts or fake-injected paths and does not open better-sqlite3 under host Node.",
-      "since": "2026-05-17",
-      "owner": "calendar-ui-assistant-verification"
-    },
-    {
-      "path": "src/__tests__/ui-contracts/document-widget-authoring.test.ts",
-      "reason": "Stage calendar UI verification cleanup: static C4 scan reaches native-backed modules through shared wrappers, but this test exercises pure contracts or fake-injected paths and does not open better-sqlite3 under host Node.",
-      "since": "2026-05-17",
-      "owner": "calendar-ui-assistant-verification"
-    },
-    {
-      "path": "src/__tests__/ui-contracts/document-widget-patch-target-resolution.test.ts",
       "reason": "Stage calendar UI verification cleanup: static C4 scan reaches native-backed modules through shared wrappers, but this test exercises pure contracts or fake-injected paths and does not open better-sqlite3 under host Node.",
       "since": "2026-05-17",
       "owner": "calendar-ui-assistant-verification"

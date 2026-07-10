@@ -118,6 +118,7 @@ import { TaskProjectionRepository } from '../../repositories/task-projection-rep
 import { AgentRegistryRepository } from '../../repositories/agent-registry-repository'
 import { reconcileAgentIdentityAssets, seedBuiltinAgentAssets } from '../agents/agent-identity-assets'
 import { RunMetaRepository } from '../task-projection/run-meta-repository'
+import { wrapRunMetaRepositoryWithCloseoutSnapshot } from '../task-projection/run-meta-snapshot'
 import type { DetachedSkillTaskRecord } from '../detached-skill-task-tracker'
 import type {
   AgentChannelConfig,
@@ -917,6 +918,19 @@ export class AgentControlRuntime extends EventEmitter {
     return rawDb ? new RunMetaRepository(rawDb) : null
   }
 
+  private getRunMetaRepositoryForFinalize(): RunMetaRepositoryLike | null {
+    try {
+      const repository = this.getRunMetaRepository() as unknown as RunMetaRepositoryLike | null
+      if (!repository) return null
+      return wrapRunMetaRepositoryWithCloseoutSnapshot(
+        repository,
+        (taskId) => this.taskProjectionStore.get(taskId) as TaskProjectionRecord | null,
+      )
+    } catch {
+      return null
+    }
+  }
+
   /** EP3-A4 — agents-table registry for the handoff proposal flow. */
   getAgentRegistry(): AgentRegistryRepository {
     return this.agentRegistry
@@ -1441,7 +1455,7 @@ export class AgentControlRuntime extends EventEmitter {
       scopeId: scope.id,
       records,
       taskProjectionStore: this.getTaskProjectionStoreForFinalize(),
-      runMetaRepository: this.getRunMetaRepository() as unknown as RunMetaRepositoryLike | null,
+      runMetaRepository: this.getRunMetaRepositoryForFinalize(),
       hasActiveRun: () => this.orchestrator.isScopeLive(scope.agent, scope.id),
     })
     if (finalized > 0) {
@@ -1518,7 +1532,7 @@ export class AgentControlRuntime extends EventEmitter {
       projectionPatch,
       taskBudgetRuntime: runtime,
     }, {
-      runMetaRepository: this.getRunMetaRepository() as unknown as RunMetaRepositoryLike | null,
+      runMetaRepository: this.getRunMetaRepositoryForFinalize(),
       taskProjectionStore: this.getTaskProjectionStoreForFinalize(),
       writeProjectionTerminalPatch: async (patch) => {
         if (!patch) return

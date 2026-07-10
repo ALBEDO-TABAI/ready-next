@@ -7,6 +7,7 @@
  */
 
 import { existsSync, lstatSync, openSync, readSync, closeSync, statSync } from 'node:fs'
+import { isAbsolute, resolve } from 'node:path'
 
 import { createToolExecutionOutput, type ToolExecutionOutput } from '../../agent-control/tools-runtime/tool-result-types'
 import { ToolDomainError } from '../tool-errors'
@@ -43,10 +44,12 @@ export interface ReadArtifactHandlerDeps {
    * surface so handlers don't need to re-resolve roots themselves.
    */
   additionalAllowedReadRoots?: string[]
+  additionalAllowedReadRootKinds?: Record<string, 'sibling_asset' | 'sibling_output'>
 }
 
 interface ReadArtifactPathResolution {
   absPath: string
+  matchedRoot: string
   attemptedRoots: string[]
   attemptedPaths: string[]
 }
@@ -71,7 +74,7 @@ function resolveReadableExistingWithinAnyRoot(roots: string[], path: string): Re
       const candidate = resolveReadableWithinRoot(root, path)
       attemptedPaths.push(candidate)
       if (existsSync(candidate)) {
-        return { absPath: candidate, attemptedRoots, attemptedPaths }
+        return { absPath: candidate, matchedRoot: root, attemptedRoots, attemptedPaths }
       }
       firstMissingPath ??= candidate
     } catch (error) {
@@ -84,7 +87,7 @@ function resolveReadableExistingWithinAnyRoot(roots: string[], path: string): Re
   }
 
   if (firstMissingPath) {
-    return { absPath: firstMissingPath, attemptedRoots, attemptedPaths }
+    return { absPath: firstMissingPath, matchedRoot: attemptedRoots[0] || '', attemptedRoots, attemptedPaths }
   }
   if (attemptedRoots.length <= 1 && lastPathEscape) {
     throw lastPathEscape
@@ -179,7 +182,10 @@ export async function executeReadArtifact(
   // rejects symlinks pointing OUT of the sandbox, but a symlink that loops
   // back inside still bypasses the LLM's mental model of "I asked to read
   // file X" so we refuse it here.
-  const linkStats = lstatSync(absPath)
+  const requestedPath = isAbsolute(args.relativePath)
+    ? args.relativePath
+    : resolve(resolution.matchedRoot, args.relativePath)
+  const linkStats = lstatSync(requestedPath)
   if (linkStats.isSymbolicLink()) {
     logAgentMetric(TOOL_ERROR_METRICS.skillPrimitiveRejected, {
       primitive: 'skill_read_artifact',
@@ -219,12 +225,18 @@ export async function executeReadArtifact(
     readSync(fd, buf, 0, readLen, 0)
     const text = buf.toString('utf-8')
     const truncated = totalBytes > readLen
+    const matchedRootKind = resolution.matchedRoot === roots.artifactRoot
+      ? 'primary'
+      : resolution.matchedRoot === roots.assetRoot
+        ? 'asset'
+        : deps.additionalAllowedReadRootKinds?.[resolution.matchedRoot] || 'sibling_output'
 
     logAgentMetric(TOOL_ERROR_METRICS.skillPrimitiveUsed, {
       primitive: 'skill_read_artifact',
       skillId: roots.skillId,
       bytesRead: readLen,
       truncated,
+      matchedRootKind,
     })
 
     return createToolExecutionOutput(text, {
@@ -234,6 +246,7 @@ export async function executeReadArtifact(
         bytesRead: readLen,
         totalBytes,
         truncated,
+        matchedRootKind,
         content: text,
       },
     })

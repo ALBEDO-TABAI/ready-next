@@ -147,6 +147,23 @@ describe('settings workspace persistence', () => {
     assert.equal(profile?.config?.contextWindowOverride, 1_000_000)
   })
 
+  it('persists max output token override edits through the workspace save path', async () => {
+    const calls: AIProviderWorkspace[] = []
+    testGlobal.window.electronAPI.settings.setAIWorkspace = async (workspace) => {
+      calls.push(workspace)
+      return { success: true }
+    }
+
+    useSettings.getState().updateField('maxOutputTokensOverride', 123_456)
+    testGlobal.dispatchEvent({ type: 'beforeunload' })
+
+    await new Promise((resolve) => setTimeout(resolve, 20))
+
+    const persistedWorkspace = calls[0]
+    const profile = persistedWorkspace?.profiles?.find((item) => item.id === persistedWorkspace.activeProfileId)
+    assert.equal(profile?.config?.maxOutputTokensOverride, 123_456)
+  })
+
   it('rolls back optimistic workspace changes when persistence fails', async () => {
     const initialWorkspace = useSettings.getState().workspace
     const initialProfile = initialWorkspace.profiles.find((item) => item.id === initialWorkspace.activeProfileId)!

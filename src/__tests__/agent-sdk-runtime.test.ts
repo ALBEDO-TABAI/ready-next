@@ -10,36 +10,32 @@ import {
   resolveToolFailurePageUrl,
   sdkStatusFromTerminalReason,
   splitNativeTextBufferForSafeFlush,
-  type AgentSdkRuntimeDeps,
+  type AgentSdkRuntimeDeps
 } from '../main/modules/agent-control/runtime-core/agent-sdk-runtime'
 import { buildRequestEnvelope } from '../main/modules/agent-control/contracts/request-envelope'
 import type { ToolDefinition } from '../main/modules/agent-control/tools-runtime/tool-definition'
 import { createToolExecutionOutput } from '../main/modules/agent-control/tools-runtime/tool-result-types'
 import type { TaskProjectionRecord } from '../main/modules/agent-control/contracts/run-contracts'
 import type { CheckInRecord } from '../main/modules/agent-control/quality/task-adjudicator'
+import { createTaskBudgetRuntime } from '../main/modules/agent-control/task-projection/run-budget-policy'
 import {
   authorizeMcpToolForScope,
   registerMcpServer,
-  __resetMcpRegistryForTests,
+  __resetMcpRegistryForTests
 } from '../main/modules/mcp/registry'
-import {
-  setCachedMcpOAuthToken,
-  __resetMcpOAuthForTests,
-} from '../main/modules/mcp/oauth'
-import {
-  __resetBrowserWriteLeaseServiceForTests,
-} from '../main/modules/browser-engine/agent-browser-lease-singleton'
+import { setCachedMcpOAuthToken, __resetMcpOAuthForTests } from '../main/modules/mcp/oauth'
+import { __resetBrowserWriteLeaseServiceForTests } from '../main/modules/browser-engine/agent-browser-lease-singleton'
 import { isAgentBrowserError } from '../main/modules/browser-engine/agent-browser-errors'
 import type { BrowserTurnLease } from '../main/modules/browser-engine/agent-browser-turn-lease'
 import {
   clearLastReferenceSkill,
-  rememberLastReferenceSkill,
+  rememberLastReferenceSkill
 } from '../main/modules/agent-control/skills/skill-reference-hints'
 import { buildSelectedSkillToolAuthorization } from '../main/modules/agent-control/skills/skill-tool-authorization'
 import { __setSkillActionToolDefsForTests } from '../main/modules/tools/skills-tools'
 import {
   __setMetricSinkForTests,
-  type AgentMetricEvent,
+  type AgentMetricEvent
 } from '../main/modules/agent-control/metrics'
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 
@@ -47,7 +43,7 @@ const fakeConfig = {
   provider: 'openai',
   baseUrl: 'https://api.openai.com/v1',
   apiKey: 'test-key',
-  model: 'gpt-test',
+  model: 'gpt-test'
 } as const
 
 test('agent sdk runtime declares transitive sqlite ABI guard', (t) => {
@@ -68,18 +64,18 @@ test('agent sdk native text buffer flushes safe prefixes before tool markers', (
 test('agent sdk native text buffer time flush keeps dangling tool markers hidden', () => {
   assert.deepEqual(
     splitNativeTextBufferForSafeFlush('我先生成方案。', { flushWithoutMarker: true }),
-    { emitText: '我先生成方案。', remainingText: '' },
+    { emitText: '我先生成方案。', remainingText: '' }
   )
   assert.deepEqual(
     splitNativeTextBufferForSafeFlush('我先生成方案。<tool_', { flushWithoutMarker: true }),
-    { emitText: '', remainingText: '我先生成方案。<tool_' },
+    { emitText: '', remainingText: '我先生成方案。<tool_' }
   )
 })
 
 test('agent sdk native text buffer does not repeat already flushed visible text', () => {
   assert.equal(
     removeAlreadyEmittedNativeText('我先生成方案。\n已保存。', '我先生成方案。').trimStart(),
-    '已保存。',
+    '已保存。'
   )
 })
 
@@ -87,8 +83,27 @@ function createRuntime(deps: Partial<AgentSdkRuntimeDeps>): AgentSdkRuntime {
   return new AgentSdkRuntime({
     loadAIConfig: () => ({ ok: true, config: fakeConfig, reason: 'present' }),
     domainAdapters: [],
-    ...deps,
+    ...deps
   })
+}
+
+function attachMemoryRunMeta(runtime: AgentSdkRuntime): Map<string, Record<string, unknown>> {
+  const rows = new Map<string, Record<string, unknown>>()
+  runtime.setRuntime({
+    getRunMetaRepository: () => ({
+      get: (runId: string) => rows.get(runId) ?? null,
+      create: (input: Record<string, unknown>) => {
+        rows.set(String(input.runId), { ...input })
+        return input
+      },
+      update: (runId: string, patch: Record<string, unknown>) => {
+        const next = { ...(rows.get(runId) || {}), ...patch }
+        rows.set(runId, next)
+        return next
+      }
+    })
+  } as never)
+  return rows
 }
 
 function createToolDefinition(overrides: Partial<ToolDefinition> = {}): ToolDefinition {
@@ -106,33 +121,48 @@ function createToolDefinition(overrides: Partial<ToolDefinition> = {}): ToolDefi
     schema: {
       type: 'object',
       properties: {
-        query: { type: 'string' },
+        query: { type: 'string' }
       },
       required: ['query'],
-      additionalProperties: false,
+      additionalProperties: false
     },
     executionVisibility: 'model',
     resultShape: 'json',
-    ...overrides,
+    ...overrides
   }
 }
 
 async function seedSdkSession(
   runtime: AgentSdkRuntime,
   name: string,
-  items: AgentInputItem[],
+  items: AgentInputItem[]
 ): Promise<void> {
-  const session = (runtime as unknown as {
-    sessionManager: { get: (name: string) => { sdkSession: { addItems: (items: AgentInputItem[]) => Promise<void> } } | undefined }
-  }).sessionManager.get(name)
+  const session = (
+    runtime as unknown as {
+      sessionManager: {
+        get: (
+          name: string
+        ) => { sdkSession: { addItems: (items: AgentInputItem[]) => Promise<void> } } | undefined
+      }
+    }
+  ).sessionManager.get(name)
   assert.ok(session, `missing test session ${name}`)
   await session.sdkSession.addItems(items)
 }
 
-async function readSdkSessionItems(runtime: AgentSdkRuntime, name: string): Promise<AgentInputItem[]> {
-  const session = (runtime as unknown as {
-    sessionManager: { get: (name: string) => { sdkSession: { getItems: () => Promise<AgentInputItem[]> } } | undefined }
-  }).sessionManager.get(name)
+async function readSdkSessionItems(
+  runtime: AgentSdkRuntime,
+  name: string
+): Promise<AgentInputItem[]> {
+  const session = (
+    runtime as unknown as {
+      sessionManager: {
+        get: (
+          name: string
+        ) => { sdkSession: { getItems: () => Promise<AgentInputItem[]> } } | undefined
+      }
+    }
+  ).sessionManager.get(name)
   assert.ok(session, `missing test session ${name}`)
   return session.sdkSession.getItems()
 }
@@ -142,21 +172,26 @@ function historyTextItems(prefix: string, count: number): AgentInputItem[] {
   for (let index = 0; index < count; index += 1) {
     items.push({
       role: index % 2 === 0 ? 'user' : 'assistant',
-      content: `${prefix}-${index} ${'长上下文片段 '.repeat(80)}`,
+      content: `${prefix}-${index} ${'长上下文片段 '.repeat(80)}`
     } as AgentInputItem)
   }
   return items
 }
 
 function chatCompletionResponse(text: string): Response {
-  return new Response(JSON.stringify({
-    id: `chatcmpl-${Date.now()}`,
-    choices: [{
-      message: { content: text },
-      finish_reason: 'stop',
-    }],
-    usage: { prompt_tokens: 10, completion_tokens: 2, total_tokens: 12 },
-  }), { status: 200 })
+  return new Response(
+    JSON.stringify({
+      id: `chatcmpl-${Date.now()}`,
+      choices: [
+        {
+          message: { content: text },
+          finish_reason: 'stop'
+        }
+      ],
+      usage: { prompt_tokens: 10, completion_tokens: 2, total_tokens: 12 }
+    }),
+    { status: 200 }
+  )
 }
 
 function countOccurrences(source: string, needle: string): number {
@@ -170,7 +205,7 @@ test('agent sdk runtime streams text and closes with terminal reason', async () 
       onTextDelta('你好')
       onTextDelta('，已完成')
       return { finalText: '你好，已完成' }
-    },
+    }
   })
   runtime.on('output', (event) => events.push({ channel: 'output', ...event }))
   runtime.on('status', (event) => events.push({ channel: 'status', ...event }))
@@ -178,20 +213,18 @@ test('agent sdk runtime streams text and closes with terminal reason', async () 
 
   const result = await runtime.sendMessage('butler::scope-1', '打个招呼', 'run-1', {
     publicSessionId: 'scope-1',
-    taskId: 'task-1',
+    taskId: 'task-1'
   })
 
   assert.equal(result.success, true)
   assert.equal(result.finalText, '你好，已完成')
   assert.equal(result.terminalReason, 'done')
   assert.deepEqual(
-    events
-      .filter((event) => event.channel === 'output')
-      .map((event) => [event.type, event.chunk]),
+    events.filter((event) => event.channel === 'output').map((event) => [event.type, event.chunk]),
     [
       ['text', '你好，已完成'],
-      ['done', ''],
-    ],
+      ['done', '']
+    ]
   )
   assert.deepEqual(
     events
@@ -199,8 +232,8 @@ test('agent sdk runtime streams text and closes with terminal reason', async () 
       .map((event) => [event.status, event.terminalReason]),
     [
       ['working', undefined],
-      ['done', 'done'],
-    ],
+      ['done', 'done']
+    ]
   )
 })
 
@@ -210,17 +243,23 @@ test('agent sdk runtime soft-recovers once when SDK rejects an unregistered tool
   const runtime = createRuntime({
     runAgent: async ({ input }) => {
       calls += 1
-      if (calls === 1) throw new Error('Tool web_search not found in agent butler::scope-missing-tool')
+      if (calls === 1)
+        throw new Error('Tool web_search not found in agent butler::scope-missing-tool')
       secondInputText = JSON.stringify(input)
       return { finalText: '已换用可用路径完成' }
-    },
+    }
   })
   runtime.newSession('butler::scope-missing-tool', 'system prompt')
 
-  const result = await runtime.sendMessage('butler::scope-missing-tool', '继续查资料', 'run-missing-tool', {
-    publicSessionId: 'scope-missing-tool',
-    taskId: 'task-missing-tool',
-  })
+  const result = await runtime.sendMessage(
+    'butler::scope-missing-tool',
+    '继续查资料',
+    'run-missing-tool',
+    {
+      publicSessionId: 'scope-missing-tool',
+      taskId: 'task-missing-tool'
+    }
+  )
 
   assert.equal(calls, 2)
   assert.equal(result.success, true)
@@ -235,7 +274,7 @@ test('agent sdk runtime scales max turns for long reading resources', async () =
     runAgent: async ({ maxTurns }) => {
       assert.equal(maxTurns, 40)
       return { finalText: '长文预算已放宽' }
-    },
+    }
   })
   runtime.newSession('butler::scope-long-reading-budget', 'system prompt')
 
@@ -252,11 +291,11 @@ test('agent sdk runtime scales max turns for long reading resources', async () =
           {
             name: 'long-images-transcribed.md',
             path: '/tmp/long-images-transcribed.md',
-            text: longText,
-          },
-        ],
-      },
-    },
+            text: longText
+          }
+        ]
+      }
+    }
   )
 
   assert.equal(result.success, true)
@@ -269,7 +308,7 @@ test('agent sdk runtime exposes only background collection workflow tools for mu
     runAgent: async ({ tools }) => {
       toolNames = tools.map((tool) => tool.name)
       return { finalText: '采集工具已收窄' }
-    },
+    }
   })
   runtime.setBrowserController({} as never)
   runtime.newSession('butler::scope-browser-batch-collect-tools', 'system prompt')
@@ -283,16 +322,29 @@ test('agent sdk runtime exposes only background collection workflow tools for mu
       taskId: 'task-browser-batch-collect-tools',
       requestEnvelope: {
         primaryInstruction: '把这个博主的每篇笔记都采集下来并保存图片',
-        resources: [],
-      },
-    },
+        resources: []
+      }
+    }
   )
 
   assert.equal(result.success, true)
-  for (const name of ['browser_visible_collect', 'browser_collect_notes', 'browser_download_collected_media', 'browser_resume_task', 'browser_get_task']) {
+  for (const name of [
+    'browser_visible_collect',
+    'browser_collect_notes',
+    'browser_download_collected_media',
+    'browser_resume_task',
+    'browser_get_task'
+  ]) {
     assert.ok(toolNames.includes(name), `${name} should be exposed`)
   }
-  for (const name of ['browser_navigate', 'browser_click_text', 'browser_collect_images', 'browser_resolve_video', 'browser_download_urls', 'browser_extract_structured']) {
+  for (const name of [
+    'browser_navigate',
+    'browser_click_text',
+    'browser_collect_images',
+    'browser_resolve_video',
+    'browser_download_urls',
+    'browser_extract_structured'
+  ]) {
     assert.ok(!toolNames.includes(name), `${name} should be hidden for batch collection`)
   }
 
@@ -306,9 +358,9 @@ test('agent sdk runtime exposes only background collection workflow tools for mu
       taskId: 'task-browser-batch-collect-tools-follow-up',
       requestEnvelope: {
         primaryInstruction: '继续',
-        resources: [],
-      },
-    },
+        resources: []
+      }
+    }
   )
   assert.equal(followUp.success, true)
   assert.ok(toolNames.includes('browser_visible_collect'))
@@ -324,7 +376,7 @@ test('agent sdk runtime demotes widget edits before exposing browser tools', asy
     runAgent: async ({ tools }) => {
       toolNames = tools.map((tool) => tool.name)
       return { finalText: 'widget tools captured' }
-    },
+    }
   })
   runtime.setBrowserController({} as never)
   runtime.newSession('butler::scope-widget-tool-surface', 'system prompt')
@@ -343,23 +395,26 @@ test('agent sdk runtime demotes widget edits before exposing browser tools', asy
           hasDocumentContext: true,
           hasWidgetTargetContext: true,
           hasAttachments: false,
-          hasBootstrapContext: true,
+          hasBootstrapContext: true
         },
         resources: [
           {
             name: '天气卡',
             path: '/virtual/widget/weather-card',
             kind: 'widget_target',
-            source: 'widget_target',
-          },
-        ],
-      },
-    },
+            source: 'widget_target'
+          }
+        ]
+      }
+    }
   )
 
   assert.equal(result.success, true)
   assert.ok(toolNames.includes('document_update_widget'))
-  assert.equal(toolNames.some((name) => name.startsWith('browser_')), false)
+  assert.equal(
+    toolNames.some((name) => name.startsWith('browser_')),
+    false
+  )
 })
 
 test('agent sdk runtime exposes map tools for deterministic route intent', async () => {
@@ -368,7 +423,7 @@ test('agent sdk runtime exposes map tools for deterministic route intent', async
     runAgent: async ({ tools }) => {
       toolNames = tools.map((tool) => tool.name)
       return { finalText: 'map tools captured' }
-    },
+    }
   })
   runtime.newSession('butler::scope-map-tool-surface', 'system prompt')
 
@@ -381,9 +436,9 @@ test('agent sdk runtime exposes map tools for deterministic route intent', async
       taskId: 'task-map-tool-surface',
       requestEnvelope: {
         primaryInstruction: '从公司到虹桥机场怎么走',
-        resources: [],
-      },
-    },
+        resources: []
+      }
+    }
   )
 
   assert.equal(result.success, true)
@@ -396,7 +451,7 @@ test('agent sdk runtime applies selected skill allowed_tools to default surface'
     runAgent: async ({ tools }) => {
       toolNames = tools.map((tool) => tool.name)
       return { finalText: 'send-im tools captured' }
-    },
+    }
   })
   runtime.newSession('butler::scope-send-im-tool-surface', 'system prompt')
 
@@ -414,15 +469,15 @@ test('agent sdk runtime applies selected skill allowed_tools to default surface'
             name: '成片.png',
             path: '/tmp/ready-send-im-proof/成片.png',
             kind: 'attachment',
-            source: 'user_attachment',
-          },
-        ],
-      },
-    },
+            source: 'user_attachment'
+          }
+        ]
+      }
+    }
   )
 
   assert.equal(result.success, true)
-  assert.deepEqual(toolNames, ['skill_send_im_file'])
+  assert.deepEqual(toolNames, ['skill_send_im_file', 'declare_completion_criteria'])
 })
 
 test('agent sdk runtime preserves base tools when selected skill tools are unavailable', () => {
@@ -454,9 +509,9 @@ test('agent sdk runtime preserves base tools when selected skill tools are unava
       allowedTypedActions: ['skill_missing_runtime_action'],
       allowedPrimitives: [],
       source: 'explicit',
-      reason: 'test_missing_runtime_skill',
+      reason: 'test_missing_runtime_skill'
     }),
-    requestEnvelope: buildRequestEnvelope({ userText: '输出方案文档到这个目录里' }),
+    requestEnvelope: buildRequestEnvelope({ userText: '输出方案文档到这个目录里' })
   })
   const names = definitions.map((definition) => definition.name)
 
@@ -468,11 +523,8 @@ test('agent sdk runtime preserves base tools when selected skill tools are unava
 test('agent sdk runtime sanitizes raw tool-call text before transcript output', async () => {
   const runtime = createRuntime({
     runAgent: async () => ({
-      finalText: [
-        '我先检查目录。',
-        '<function=file_list><parameter=path>/tmp',
-      ].join('\n'),
-    }),
+      finalText: ['我先检查目录。', '<function=file_list><parameter=path>/tmp'].join('\n')
+    })
   })
   runtime.newSession('butler::scope-sanitize-sdk-text', 'system prompt')
 
@@ -483,8 +535,8 @@ test('agent sdk runtime sanitizes raw tool-call text before transcript output', 
     {
       publicSessionId: 'scope-sanitize-sdk-text',
       taskId: 'task-sanitize-sdk-text',
-      requestEnvelope: buildRequestEnvelope({ userText: '检查目录' }),
-    },
+      requestEnvelope: buildRequestEnvelope({ userText: '检查目录' })
+    }
   )
   const visibleText = (result.projectionTruth?.transcriptEvents || [])
     .filter((event) => event.kind === 'output' && event.type === 'text')
@@ -506,7 +558,7 @@ test('agent sdk runtime exposes skill_send_im_file when the file to send is refe
     runAgent: async ({ tools }) => {
       toolNames = tools.map((tool) => tool.name)
       return { finalText: 'send-im md ref captured' }
-    },
+    }
   })
   runtime.newSession('butler::scope-send-im-md-ref', 'system prompt')
 
@@ -524,15 +576,18 @@ test('agent sdk runtime exposes skill_send_im_file when the file to send is refe
             name: '2026 世界杯-1781619835060.md',
             path: '/tmp/ready-send-im-proof/2026 世界杯-1781619835060.md',
             kind: 'attachment',
-            source: 'user_attachment',
-          },
-        ],
-      },
-    },
+            source: 'user_attachment'
+          }
+        ]
+      }
+    }
   )
 
   assert.equal(result.success, true)
-  assert.ok(toolNames.includes('skill_send_im_file'), `expected skill_send_im_file, got: ${toolNames.join(',') || '(none)'}`)
+  assert.ok(
+    toolNames.includes('skill_send_im_file'),
+    `expected skill_send_im_file, got: ${toolNames.join(',') || '(none)'}`
+  )
 })
 
 test('agent sdk runtime suppresses browser task tools for active VEA skill resume after recent collection intent', async () => {
@@ -546,7 +601,7 @@ test('agent sdk runtime suppresses browser task tools for active VEA skill resum
       skillId: 'video-expert-analyzer',
       action: 'video_expert_pipeline',
       visibility: 'public',
-      params: [],
+      params: []
     },
     {
       name: 'skill_video_expert_ai_analyze',
@@ -555,27 +610,24 @@ test('agent sdk runtime suppresses browser task tools for active VEA skill resum
       skillId: 'video-expert-analyzer',
       action: 'video_expert_ai_analyze',
       visibility: 'public',
-      params: [],
-    },
+      params: []
+    }
   ])
   const runtime = createRuntime({
     skillContextOrchestrator: {
       findExplicitlyRequestedSkills: () => [],
       buildPreferredSkillToolNames: () => [],
-      peekCurrentReferenceSkillHint: () => activeSkillHint
-        ? { id: 'video-expert-analyzer', name: 'Video Expert Analyzer' }
-        : null,
-      getCurrentReferenceSkillHint: () => activeSkillHint
-        ? { id: 'video-expert-analyzer', name: 'Video Expert Analyzer' }
-        : null,
+      peekCurrentReferenceSkillHint: () =>
+        activeSkillHint ? { id: 'video-expert-analyzer', name: 'Video Expert Analyzer' } : null,
+      getCurrentReferenceSkillHint: () =>
+        activeSkillHint ? { id: 'video-expert-analyzer', name: 'Video Expert Analyzer' } : null
     },
-    getScopeTaskRefs: () => activeSkillHint
-      ? [{ taskId: 'task-vea-active', status: 'running' }]
-      : [],
+    getScopeTaskRefs: () =>
+      activeSkillHint ? [{ taskId: 'task-vea-active', status: 'running' }] : [],
     runAgent: async ({ tools }) => {
       seenToolNames.push(tools.map((tool) => tool.name))
       return { finalText: 'ok' }
-    },
+    }
   })
   runtime.setBrowserController({} as never)
   runtime.newSession('butler::scope-vea-resume-tools', 'system prompt')
@@ -590,9 +642,9 @@ test('agent sdk runtime suppresses browser task tools for active VEA skill resum
         taskId: 'task-vea-resume-tools-1',
         requestEnvelope: {
           primaryInstruction: '把这个博主的每篇笔记都采集下来并保存图片',
-          resources: [],
-        },
-      },
+          resources: []
+        }
+      }
     )
     activeSkillHint = true
     const resume = await runtime.sendMessage(
@@ -604,9 +656,9 @@ test('agent sdk runtime suppresses browser task tools for active VEA skill resum
         taskId: 'task-vea-resume-tools-2',
         requestEnvelope: {
           primaryInstruction: '跑 finalize',
-          resources: [],
-        },
-      },
+          resources: []
+        }
+      }
     )
 
     assert.equal(collect.success, true)
@@ -614,8 +666,18 @@ test('agent sdk runtime suppresses browser task tools for active VEA skill resum
     assert.ok(seenToolNames[0]?.includes('browser_resume_task'))
     assert.ok(seenToolNames[1]?.includes('skill_video_expert_pipeline'))
     assert.ok(seenToolNames[1]?.includes('skill_video_expert_ai_analyze'))
-    for (const name of ['browser_get_task', 'browser_resume_task', 'browser_visible_collect', 'browser_collect_notes', 'browser_download_collected_media']) {
-      assert.equal(seenToolNames[1]?.includes(name), false, `${name} should be hidden during active skill resume`)
+    for (const name of [
+      'browser_get_task',
+      'browser_resume_task',
+      'browser_visible_collect',
+      'browser_collect_notes',
+      'browser_download_collected_media'
+    ]) {
+      assert.equal(
+        seenToolNames[1]?.includes(name),
+        false,
+        `${name} should be hidden during active skill resume`
+      )
     }
   } finally {
     __setSkillActionToolDefsForTests(null)
@@ -628,7 +690,7 @@ test('agent sdk runtime keeps Send IM visible for a bare retry after explicit lo
     runAgent: async ({ tools }) => {
       seenToolNames.push(tools.map((tool) => tool.name))
       return { finalText: 'ok' }
-    },
+    }
   })
   runtime.setBrowserController({} as never)
   runtime.newSession('butler::scope-send-im-retry-tools', 'system prompt')
@@ -642,9 +704,9 @@ test('agent sdk runtime keeps Send IM visible for a bare retry after explicit lo
       taskId: 'task-send-im-retry-tools-1',
       requestEnvelope: {
         primaryInstruction: '@[Send IM]把这四张图发到我微信',
-        resources: [],
-      },
-    },
+        resources: []
+      }
+    }
   )
   const retry = await runtime.sendMessage(
     'butler::scope-send-im-retry-tools',
@@ -655,9 +717,9 @@ test('agent sdk runtime keeps Send IM visible for a bare retry after explicit lo
       taskId: 'task-send-im-retry-tools-2',
       requestEnvelope: {
         primaryInstruction: '重试一次',
-        resources: [],
-      },
-    },
+        resources: []
+      }
+    }
   )
 
   assert.equal(first.success, true)
@@ -675,7 +737,7 @@ test('agent sdk runtime keeps Send IM visible for an attached try-this follow-up
     runAgent: async ({ tools }) => {
       seenToolNames.push(tools.map((tool) => tool.name))
       return { finalText: 'ok' }
-    },
+    }
   })
   runtime.setBrowserController({} as never)
   runtime.newSession('butler::scope-send-im-attachment-followup', 'system prompt')
@@ -689,9 +751,9 @@ test('agent sdk runtime keeps Send IM visible for an attached try-this follow-up
       taskId: 'task-send-im-attachment-followup-1',
       requestEnvelope: {
         primaryInstruction: '@[Send IM]把这四张图发到我微信',
-        resources: [],
-      },
-    },
+        resources: []
+      }
+    }
   )
   const followUp = await runtime.sendMessage(
     'butler::scope-send-im-attachment-followup',
@@ -702,14 +764,16 @@ test('agent sdk runtime keeps Send IM visible for an attached try-this follow-up
       taskId: 'task-send-im-attachment-followup-2',
       requestEnvelope: {
         primaryInstruction: '@[BV1shJP6TEEQ.mp4]再试试这个',
-        resources: [{
-          name: 'BV1shJP6TEEQ.mp4',
-          path: '/tmp/BV1shJP6TEEQ.mp4',
-          kind: 'video',
-          source: 'attachment',
-        }],
-      },
-    },
+        resources: [
+          {
+            name: 'BV1shJP6TEEQ.mp4',
+            path: '/tmp/BV1shJP6TEEQ.mp4',
+            kind: 'video',
+            source: 'attachment'
+          }
+        ]
+      }
+    }
   )
 
   assert.equal(first.success, true)
@@ -723,28 +787,37 @@ test('agent sdk runtime keeps Send IM visible for an attached try-this follow-up
 test('agent sdk runtime preempts old run and cancels pending renderer actions', async () => {
   let cancelCount = 0
   let firstSignal: AbortSignal | null = null
+  let firstStartedResolve!: () => void
+  const firstStarted = new Promise<void>((resolve) => {
+    firstStartedResolve = resolve
+  })
   const runAgentQueue: NonNullable<AgentSdkRuntimeDeps['runAgent']>[] = [
     ({ signal }) => {
       firstSignal = signal
+      firstStartedResolve()
       return new Promise((_resolve, reject) => {
-        signal.addEventListener('abort', () => {
-          const error = new Error('process_restarted')
-          error.name = 'AbortError'
-          reject(error)
-        }, { once: true })
+        signal.addEventListener(
+          'abort',
+          () => {
+            const error = new Error('process_restarted')
+            error.name = 'AbortError'
+            reject(error)
+          },
+          { once: true }
+        )
       })
     },
     async ({ onTextDelta }) => {
       onTextDelta('第二轮完成')
       return { finalText: '第二轮完成' }
-    },
+    }
   ]
   const runtime = createRuntime({
     runAgent: (params) => {
       const next = runAgentQueue.shift()
       assert.ok(next)
       return next(params)
-    },
+    }
   })
   runtime.setCancelPendingToolActions(() => {
     cancelCount += 1
@@ -753,11 +826,12 @@ test('agent sdk runtime preempts old run and cancels pending renderer actions', 
 
   const first = runtime.sendMessage('butler::scope-2', '第一轮', 'run-old', {
     publicSessionId: 'scope-2',
-    taskId: 'task-old',
+    taskId: 'task-old'
   })
+  await firstStarted
   const second = await runtime.sendMessage('butler::scope-2', '第二轮', 'run-new', {
     publicSessionId: 'scope-2',
-    taskId: 'task-new',
+    taskId: 'task-new'
   })
   const firstResult = await first
 
@@ -767,7 +841,7 @@ test('agent sdk runtime preempts old run and cancels pending renderer actions', 
   assert.deepEqual(firstResult.scopeRunAuthority, {
     state: 'lost',
     reason: 'preempted_by_same_user',
-    currentRunId: null,
+    currentRunId: null
   })
   assert.equal(second.success, true)
   assert.equal(second.finalText, '第二轮完成')
@@ -784,19 +858,23 @@ test('agent sdk runtime does not mark user cancellation as preempted', async () 
       firstSignal = signal
       signalReadyResolve()
       return new Promise((_resolve, reject) => {
-        signal.addEventListener('abort', () => {
-          const error = new Error('cancelled_user')
-          error.name = 'AbortError'
-          reject(error)
-        }, { once: true })
+        signal.addEventListener(
+          'abort',
+          () => {
+            const error = new Error('cancelled_user')
+            error.name = 'AbortError'
+            reject(error)
+          },
+          { once: true }
+        )
       })
-    },
+    }
   })
   runtime.newSession('butler::scope-user-cancel', 'system prompt')
 
   const pending = runtime.sendMessage('butler::scope-user-cancel', '第一轮', 'run-cancelled', {
     publicSessionId: 'scope-user-cancel',
-    taskId: 'task-cancelled',
+    taskId: 'task-cancelled'
   })
   await signalReady
   runtime.stopGeneration('butler::scope-user-cancel')
@@ -819,8 +897,8 @@ test('agent sdk runtime exposes Ready tool definitions and preserves structured 
         data: { ok: true },
         projectionPatch: {
           taskTitle: 'Research',
-          taskSummary: 'Search done',
-        },
+          taskSummary: 'Search done'
+        }
       })
     },
     runAgent: async ({ tools, onTextDelta }) => {
@@ -830,13 +908,13 @@ test('agent sdk runtime exposes Ready tool definitions and preserves structured 
       assert.match(toolOutput, /"projectionPatch"/)
       onTextDelta('研究完成')
       return { finalText: '研究完成' }
-    },
+    }
   })
   runtime.newSession('butler::scope-3', 'system prompt')
 
   const result = await runtime.sendMessage('butler::scope-3', '查一下最新资料', 'run-tool', {
     publicSessionId: 'scope-3',
-    taskId: 'task-tool',
+    taskId: 'task-tool'
   })
 
   assert.deepEqual(receivedArgs, { query: 'OpenAI Agents SDK' })
@@ -844,7 +922,7 @@ test('agent sdk runtime exposes Ready tool definitions and preserves structured 
   assert.equal(result.taskType, 'research')
   assert.deepEqual(result.projectionTruth?.projectionPatch, {
     taskTitle: 'Research',
-    taskSummary: 'Search done',
+    taskSummary: 'Search done'
   })
 })
 
@@ -862,15 +940,15 @@ test('agent sdk runtime buffers native text before recovering XML tool calls', a
         provider: 'openai-compatible',
         baseUrl: 'https://token-plan-sgp.xiaomimimo.com/anthropic',
         model: 'mimo-v2.5',
-        agentProtocol: 'anthropic',
-      },
+        agentProtocol: 'anthropic'
+      }
     }),
     listToolDefinitions: () => [toolDefinition],
     executeToolCall: async (_toolName, args) => {
       calls.push(args)
       return createToolExecutionOutput('found result', {
         shape: 'json',
-        data: { ok: true },
+        data: { ok: true }
       })
     },
     runAgent: async ({ onTextDelta }) => {
@@ -882,22 +960,27 @@ test('agent sdk runtime buffers native text before recovering XML tool calls', a
           '<function=web_search>',
           '<parameter=query>OpenAI Agents SDK</parameter>',
           '</function>',
-          '</tool_call>',
+          '</tool_call>'
         ].join('\n')
         onTextDelta(leaked)
         return { finalText: leaked }
       }
       onTextDelta('研究完成')
       return { finalText: '研究完成' }
-    },
+    }
   })
   runtime.on('output', (event) => outputEvents.push(event))
   runtime.newSession('butler::scope-xml-buffer', 'system prompt')
 
-  const result = await runtime.sendMessage('butler::scope-xml-buffer', '查一下资料', 'run-xml-buffer', {
-    publicSessionId: 'scope-xml-buffer',
-    taskId: 'task-xml-buffer',
-  })
+  const result = await runtime.sendMessage(
+    'butler::scope-xml-buffer',
+    '查一下资料',
+    'run-xml-buffer',
+    {
+      publicSessionId: 'scope-xml-buffer',
+      taskId: 'task-xml-buffer'
+    }
+  )
 
   assert.equal(result.success, true)
   assert.equal(runCount, 2)
@@ -924,11 +1007,11 @@ test('agent sdk runtime asks for map place choice and retries with selected coor
         city: { type: 'string' },
         origin: {},
         destination: {},
-        transportMode: { type: 'string' },
+        transportMode: { type: 'string' }
       },
       required: ['origin', 'destination'],
-      additionalProperties: false,
-    },
+      additionalProperties: false
+    }
   })
   const askTool = createToolDefinition({
     name: 'ask_user_questions',
@@ -940,8 +1023,8 @@ test('agent sdk runtime asks for map place choice and retries with selected coor
       type: 'object',
       properties: { questions: { type: 'array' } },
       required: ['questions'],
-      additionalProperties: false,
-    },
+      additionalProperties: false
+    }
   })
   const calls: Array<{ toolName: string; args: Record<string, unknown> }> = []
   let selectedOption = ''
@@ -955,8 +1038,8 @@ test('agent sdk runtime asks for map place choice and retries with selected coor
         provider: 'openai-compatible',
         baseUrl: 'https://token-plan-sgp.xiaomimimo.com/anthropic',
         model: 'mimo-v2.5',
-        agentProtocol: 'anthropic',
-      },
+        agentProtocol: 'anthropic'
+      }
     }),
     listToolDefinitions: () => [mapTool, askTool],
     executeToolCall: async (toolName, args) => {
@@ -965,7 +1048,7 @@ test('agent sdk runtime asks for map place choice and retries with selected coor
         if (typeof args.destination === 'object' && args.destination !== null) {
           assert.deepEqual(args.destination, {
             name: '上海市闵行区上海虹桥火车站',
-            location: '121.320011,31.194416',
+            location: '121.320011,31.194416'
           })
           const routeData = {
             ok: true,
@@ -976,12 +1059,12 @@ test('agent sdk runtime asks for map place choice and retries with selected coor
               distanceM: 21000,
               durationSec: 2400,
               polyline: '',
-              steps: [],
-            },
+              steps: []
+            }
           }
           return createToolExecutionOutput(JSON.stringify(routeData), {
             shape: 'json',
-            data: routeData,
+            data: routeData
           })
         }
         const ambiguousData = {
@@ -994,20 +1077,20 @@ test('agent sdk runtime asks for map place choice and retries with selected coor
               address: '上海市闵行区上海虹桥火车站',
               location: '121.320011,31.194416',
               city: '上海市',
-              district: '闵行区',
+              district: '闵行区'
             },
             {
               name: '上海虹桥站',
               address: '上海市闵行区申贵路',
               location: '121.31881,31.19449',
               city: '上海市',
-              district: '闵行区',
-            },
-          ],
+              district: '闵行区'
+            }
+          ]
         }
         return createToolExecutionOutput(JSON.stringify(ambiguousData), {
           shape: 'json',
-          data: ambiguousData,
+          data: ambiguousData
         })
       }
       if (toolName === 'ask_user_questions') {
@@ -1025,13 +1108,15 @@ test('agent sdk runtime asks for map place choice and retries with selected coor
             cardId: 'ask-card-1',
             askedAt: Date.now(),
             answeredAt: Date.now(),
-            answers: [{
-              id: 'map_place_choice',
-              question: '请选择地点',
-              kind: 'single_choice',
-              answer: selectedOption,
-            }],
-          },
+            answers: [
+              {
+                id: 'map_place_choice',
+                question: '请选择地点',
+                kind: 'single_choice',
+                answer: selectedOption
+              }
+            ]
+          }
         })
       }
       throw new Error(`unexpected tool: ${toolName}`)
@@ -1047,10 +1132,10 @@ test('agent sdk runtime asks for map place choice and retries with selected coor
               city: '上海',
               origin: '人民广场',
               destination: '上海虹桥火车站',
-              transportMode: 'driving',
-            },
+              transportMode: 'driving'
+            }
           }),
-          ':::',
+          ':::'
         ].join('\n')
         onTextDelta(toolCall)
         return { finalText: toolCall }
@@ -1059,27 +1144,27 @@ test('agent sdk runtime asks for map place choice and retries with selected coor
       assert.match(String(input), /121\.320011,31\.194416/)
       onTextDelta('路线已经按你选择的虹桥火车站规划好。')
       return { finalText: '路线已经按你选择的虹桥火车站规划好。' }
-    },
+    }
   })
   runtime.newSession('butler::scope-map-ambiguity', 'system prompt')
 
-  const result = await runtime.sendMessage('butler::scope-map-ambiguity', '从人民广场到虹桥火车站怎么走？', 'run-map-ambiguity', {
-    publicSessionId: 'scope-map-ambiguity',
-    taskId: 'task-map-ambiguity',
-  })
+  const result = await runtime.sendMessage(
+    'butler::scope-map-ambiguity',
+    '从人民广场到虹桥火车站怎么走？',
+    'run-map-ambiguity',
+    {
+      publicSessionId: 'scope-map-ambiguity',
+      taskId: 'task-map-ambiguity'
+    }
+  )
 
   assert.equal(result.success, true)
   assert.equal(runCount, 2)
-  assert.deepEqual(calls.map((call) => call.toolName), [
-    'map_plan_route',
-    'ask_user_questions',
-    'map_plan_route',
-  ])
-  assert.deepEqual(result.usedTools, [
-    'map_plan_route',
-    'ask_user_questions',
-    'map_plan_route',
-  ])
+  assert.deepEqual(
+    calls.map((call) => call.toolName),
+    ['map_plan_route', 'ask_user_questions', 'map_plan_route']
+  )
+  assert.deepEqual(result.usedTools, ['map_plan_route', 'ask_user_questions', 'map_plan_route'])
   assert.match(result.finalText, /路线已经按你选择/)
 })
 
@@ -1095,11 +1180,11 @@ test('agent sdk runtime closes failed map retry after place disambiguation', asy
       properties: {
         city: { type: 'string' },
         origin: {},
-        destination: {},
+        destination: {}
       },
       required: ['origin', 'destination'],
-      additionalProperties: false,
-    },
+      additionalProperties: false
+    }
   })
   const askTool = createToolDefinition({
     name: 'ask_user_questions',
@@ -1111,8 +1196,8 @@ test('agent sdk runtime closes failed map retry after place disambiguation', asy
       type: 'object',
       properties: { questions: { type: 'array' } },
       required: ['questions'],
-      additionalProperties: false,
-    },
+      additionalProperties: false
+    }
   })
   const calls: Array<{ toolName: string; args: Record<string, unknown> }> = []
   let runCount = 0
@@ -1125,8 +1210,8 @@ test('agent sdk runtime closes failed map retry after place disambiguation', asy
         provider: 'openai-compatible',
         baseUrl: 'https://token-plan-sgp.xiaomimimo.com/anthropic',
         model: 'mimo-v2.5',
-        agentProtocol: 'anthropic',
-      },
+        agentProtocol: 'anthropic'
+      }
     }),
     listToolDefinitions: () => [mapTool, askTool],
     executeToolCall: async (toolName, args) => {
@@ -1136,7 +1221,7 @@ test('agent sdk runtime closes failed map retry after place disambiguation', asy
           const data = {
             ok: false,
             errorKind: 'route_not_found',
-            message: '高德地图未返回可用路线。',
+            message: '高德地图未返回可用路线。'
           }
           return createToolExecutionOutput(JSON.stringify(data), { shape: 'json', data })
         }
@@ -1150,16 +1235,16 @@ test('agent sdk runtime closes failed map retry after place disambiguation', asy
               address: '上海市闵行区上海虹桥火车站',
               location: '121.320011,31.194416',
               city: '上海市',
-              district: '闵行区',
+              district: '闵行区'
             },
             {
               name: '上海虹桥站',
               address: '上海市闵行区申贵路',
               location: '121.31881,31.19449',
               city: '上海市',
-              district: '闵行区',
-            },
-          ],
+              district: '闵行区'
+            }
+          ]
         }
         return createToolExecutionOutput(JSON.stringify(data), { shape: 'json', data })
       }
@@ -1172,13 +1257,15 @@ test('agent sdk runtime closes failed map retry after place disambiguation', asy
         return createToolExecutionOutput(`用户回答了 1/1 个问题：${selected}`, {
           shape: 'json',
           data: {
-            answers: [{
-              id: 'map_place_choice',
-              question: '请选择地点',
-              kind: 'single_choice',
-              answer: selected,
-            }],
-          },
+            answers: [
+              {
+                id: 'map_place_choice',
+                question: '请选择地点',
+                kind: 'single_choice',
+                answer: selected
+              }
+            ]
+          }
         })
       }
       throw new Error(`unexpected tool: ${toolName}`)
@@ -1186,7 +1273,9 @@ test('agent sdk runtime closes failed map retry after place disambiguation', asy
     runAgent: async ({ input, onTextDelta }) => {
       runCount += 1
       if (runCount > 1) {
-        throw new Error(`map retry failure should close before returning to the model: ${String(input)}`)
+        throw new Error(
+          `map retry failure should close before returning to the model: ${String(input)}`
+        )
       }
       const toolCall = [
         ':::tool_call',
@@ -1195,31 +1284,35 @@ test('agent sdk runtime closes failed map retry after place disambiguation', asy
           args: {
             city: '上海',
             origin: '人民广场',
-            destination: '上海虹桥火车站',
-          },
+            destination: '上海虹桥火车站'
+          }
         }),
-        ':::',
+        ':::'
       ].join('\n')
       onTextDelta(toolCall)
       return { finalText: toolCall }
-    },
+    }
   })
   runtime.newSession('butler::scope-map-retry-failure', 'system prompt')
 
-  const result = await runtime.sendMessage('butler::scope-map-retry-failure', '从人民广场到虹桥火车站怎么走？', 'run-map-retry-failure', {
-    publicSessionId: 'scope-map-retry-failure',
-    taskId: 'task-map-retry-failure',
-  })
+  const result = await runtime.sendMessage(
+    'butler::scope-map-retry-failure',
+    '从人民广场到虹桥火车站怎么走？',
+    'run-map-retry-failure',
+    {
+      publicSessionId: 'scope-map-retry-failure',
+      taskId: 'task-map-retry-failure'
+    }
+  )
 
   assert.equal(result.success, false)
   assert.equal(result.terminalReason, 'blocked_tool_error')
   assert.equal(result.error, '高德地图未返回可用路线。')
   assert.equal(runCount, 1)
-  assert.deepEqual(calls.map((call) => call.toolName), [
-    'map_plan_route',
-    'ask_user_questions',
-    'map_plan_route',
-  ])
+  assert.deepEqual(
+    calls.map((call) => call.toolName),
+    ['map_plan_route', 'ask_user_questions', 'map_plan_route']
+  )
 })
 
 test('agent sdk native tool path asks for map place choice before returning to the model', async () => {
@@ -1234,11 +1327,11 @@ test('agent sdk native tool path asks for map place choice before returning to t
       properties: {
         city: { type: 'string' },
         origin: {},
-        destination: {},
+        destination: {}
       },
       required: ['origin', 'destination'],
-      additionalProperties: false,
-    },
+      additionalProperties: false
+    }
   })
   const askTool = createToolDefinition({
     name: 'ask_user_questions',
@@ -1250,8 +1343,8 @@ test('agent sdk native tool path asks for map place choice before returning to t
       type: 'object',
       properties: { questions: { type: 'array' } },
       required: ['questions'],
-      additionalProperties: false,
-    },
+      additionalProperties: false
+    }
   })
   const calls: Array<{ toolName: string; args: Record<string, unknown> }> = []
   const runtime = createRuntime({
@@ -1264,7 +1357,13 @@ test('agent sdk native tool path asks for map place choice before returning to t
             ok: true,
             origin: { name: '人民广场', location: '121.47519,31.228833' },
             destination: args.destination,
-            selectedRoute: { transportMode: 'driving', distanceM: 18800, durationSec: 1920, polyline: '', steps: [] },
+            selectedRoute: {
+              transportMode: 'driving',
+              distanceM: 18800,
+              durationSec: 1920,
+              polyline: '',
+              steps: []
+            }
           }
           return createToolExecutionOutput(JSON.stringify(data), { shape: 'json', data })
         }
@@ -1278,16 +1377,16 @@ test('agent sdk native tool path asks for map place choice before returning to t
               address: '上海市闵行区虹桥火车站(地铁站)',
               location: '121.318910,31.193987',
               city: '上海市',
-              district: '闵行区',
+              district: '闵行区'
             },
             {
               name: '虹桥火车站P9停车场',
               address: '上海市闵行区申虹路',
               location: '121.321110,31.194220',
               city: '上海市',
-              district: '闵行区',
-            },
-          ],
+              district: '闵行区'
+            }
+          ]
         }
         return createToolExecutionOutput(JSON.stringify(data), { shape: 'json', data })
       }
@@ -1300,45 +1399,56 @@ test('agent sdk native tool path asks for map place choice before returning to t
         return createToolExecutionOutput(`用户回答了 1/1 个问题：${selected}`, {
           shape: 'json',
           data: {
-            answers: [{
-              id: 'map_place_choice',
-              question: '请选择地点',
-              kind: 'single_choice',
-              answer: selected,
-            }],
-          },
+            answers: [
+              {
+                id: 'map_place_choice',
+                question: '请选择地点',
+                kind: 'single_choice',
+                answer: selected
+              }
+            ]
+          }
         })
       }
       throw new Error(`unexpected tool: ${toolName}`)
     },
     runAgent: async ({ tools, onTextDelta }) => {
-      const mapSdkTool = tools.find((item) => item.name === 'map_plan_route') as { invoke: (context: unknown, input: string) => Promise<string> } | undefined
+      const mapSdkTool = tools.find((item) => item.name === 'map_plan_route') as
+        | { invoke: (context: unknown, input: string) => Promise<string> }
+        | undefined
       assert.ok(mapSdkTool)
-      const toolOutput = await mapSdkTool.invoke({}, JSON.stringify({
-        city: '上海',
-        origin: '人民广场',
-        destination: '虹桥火车站',
-      }))
+      const toolOutput = await mapSdkTool.invoke(
+        {},
+        JSON.stringify({
+          city: '上海',
+          origin: '人民广场',
+          destination: '虹桥火车站'
+        })
+      )
       assert.match(toolOutput, /ask_user_questions/)
       assert.match(toolOutput, /121\.318910,31\.193987/)
       assert.match(toolOutput, /"ok":true/)
       onTextDelta('已按用户选择的地点规划路线。')
       return { finalText: '已按用户选择的地点规划路线。' }
-    },
+    }
   })
   runtime.newSession('butler::scope-map-native-ambiguity', 'system prompt')
 
-  const result = await runtime.sendMessage('butler::scope-map-native-ambiguity', '从人民广场到虹桥火车站怎么走？', 'run-map-native-ambiguity', {
-    publicSessionId: 'scope-map-native-ambiguity',
-    taskId: 'task-map-native-ambiguity',
-  })
+  const result = await runtime.sendMessage(
+    'butler::scope-map-native-ambiguity',
+    '从人民广场到虹桥火车站怎么走？',
+    'run-map-native-ambiguity',
+    {
+      publicSessionId: 'scope-map-native-ambiguity',
+      taskId: 'task-map-native-ambiguity'
+    }
+  )
 
   assert.equal(result.success, true)
-  assert.deepEqual(calls.map((call) => call.toolName), [
-    'map_plan_route',
-    'ask_user_questions',
-    'map_plan_route',
-  ])
+  assert.deepEqual(
+    calls.map((call) => call.toolName),
+    ['map_plan_route', 'ask_user_questions', 'map_plan_route']
+  )
   assert.match(result.finalText, /用户选择/)
 })
 
@@ -1354,11 +1464,11 @@ test('agent sdk native tool path ignores malformed duplicate map ambiguity ask a
       properties: {
         city: { type: 'string' },
         origin: {},
-        destination: {},
+        destination: {}
       },
       required: ['origin', 'destination'],
-      additionalProperties: false,
-    },
+      additionalProperties: false
+    }
   })
   const askTool = createToolDefinition({
     name: 'ask_user_questions',
@@ -1370,8 +1480,8 @@ test('agent sdk native tool path ignores malformed duplicate map ambiguity ask a
       type: 'object',
       properties: { questions: { type: 'array' } },
       required: ['questions'],
-      additionalProperties: false,
-    },
+      additionalProperties: false
+    }
   })
   const calls: Array<{ toolName: string; args: Record<string, unknown> }> = []
   const runtime = createRuntime({
@@ -1384,7 +1494,13 @@ test('agent sdk native tool path ignores malformed duplicate map ambiguity ask a
             ok: true,
             origin: { name: '人民广场', location: '121.47519,31.228833' },
             destination: args.destination,
-            selectedRoute: { transportMode: 'driving', distanceM: 18800, durationSec: 1920, polyline: '', steps: [] },
+            selectedRoute: {
+              transportMode: 'driving',
+              distanceM: 18800,
+              durationSec: 1920,
+              polyline: '',
+              steps: []
+            }
           }
           return createToolExecutionOutput(JSON.stringify(data), { shape: 'json', data })
         }
@@ -1398,16 +1514,16 @@ test('agent sdk native tool path ignores malformed duplicate map ambiguity ask a
               address: '上海市闵行区虹桥火车站(地铁站)',
               location: '121.318910,31.193987',
               city: '上海市',
-              district: '闵行区',
+              district: '闵行区'
             },
             {
               name: '虹桥火车站P9停车场',
               address: '上海市闵行区申虹路',
               location: '121.321110,31.194220',
               city: '上海市',
-              district: '闵行区',
-            },
-          ],
+              district: '闵行区'
+            }
+          ]
         }
         return createToolExecutionOutput(JSON.stringify(data), { shape: 'json', data })
       }
@@ -1420,52 +1536,68 @@ test('agent sdk native tool path ignores malformed duplicate map ambiguity ask a
         return createToolExecutionOutput(`用户回答了 1/1 个问题：${selected}`, {
           shape: 'json',
           data: {
-            answers: [{
-              id: 'map_place_choice',
-              question: '请选择地点',
-              kind: 'single_choice',
-              answer: selected,
-            }],
-          },
+            answers: [
+              {
+                id: 'map_place_choice',
+                question: '请选择地点',
+                kind: 'single_choice',
+                answer: selected
+              }
+            ]
+          }
         })
       }
       throw new Error(`unexpected tool: ${toolName}`)
     },
     runAgent: async ({ tools, onTextDelta }) => {
-      const mapSdkTool = tools.find((item) => item.name === 'map_plan_route') as { invoke: (context: unknown, input: string) => Promise<string> } | undefined
-      const askSdkTool = tools.find((item) => item.name === 'ask_user_questions') as { invoke: (context: unknown, input: string) => Promise<string> } | undefined
+      const mapSdkTool = tools.find((item) => item.name === 'map_plan_route') as
+        | { invoke: (context: unknown, input: string) => Promise<string> }
+        | undefined
+      const askSdkTool = tools.find((item) => item.name === 'ask_user_questions') as
+        | { invoke: (context: unknown, input: string) => Promise<string> }
+        | undefined
       assert.ok(mapSdkTool)
       assert.ok(askSdkTool)
-      const routeOutput = await mapSdkTool.invoke({}, JSON.stringify({
-        city: '上海',
-        origin: '人民广场',
-        destination: '虹桥火车站',
-      }))
+      const routeOutput = await mapSdkTool.invoke(
+        {},
+        JSON.stringify({
+          city: '上海',
+          origin: '人民广场',
+          destination: '虹桥火车站'
+        })
+      )
       assert.match(routeOutput, /ask_user_questions/)
       assert.match(routeOutput, /"ok":true/)
 
-      const duplicateAskOutput = await askSdkTool.invoke({}, JSON.stringify({
-        questions: '请选择一个虹桥火车站候选项',
-      }))
+      const duplicateAskOutput = await askSdkTool.invoke(
+        {},
+        JSON.stringify({
+          questions: '请选择一个虹桥火车站候选项'
+        })
+      )
       assert.match(duplicateAskOutput, /map_ambiguity_already_resolved/)
 
       onTextDelta('已按用户选择的地点规划路线。')
       return { finalText: '已按用户选择的地点规划路线。' }
-    },
+    }
   })
   runtime.newSession('butler::scope-map-native-duplicate-ask', 'system prompt')
 
-  const result = await runtime.sendMessage('butler::scope-map-native-duplicate-ask', '从人民广场到虹桥火车站怎么走？', 'run-map-native-duplicate-ask', {
-    publicSessionId: 'scope-map-native-duplicate-ask',
-    taskId: 'task-map-native-duplicate-ask',
-  })
+  const result = await runtime.sendMessage(
+    'butler::scope-map-native-duplicate-ask',
+    '从人民广场到虹桥火车站怎么走？',
+    'run-map-native-duplicate-ask',
+    {
+      publicSessionId: 'scope-map-native-duplicate-ask',
+      taskId: 'task-map-native-duplicate-ask'
+    }
+  )
 
   assert.equal(result.success, true)
-  assert.deepEqual(calls.map((call) => call.toolName), [
-    'map_plan_route',
-    'ask_user_questions',
-    'map_plan_route',
-  ])
+  assert.deepEqual(
+    calls.map((call) => call.toolName),
+    ['map_plan_route', 'ask_user_questions', 'map_plan_route']
+  )
   assert.match(result.finalText, /用户选择/)
 })
 
@@ -1481,11 +1613,11 @@ test('agent sdk native tool path closes failed map retry after place disambiguat
       properties: {
         city: { type: 'string' },
         origin: {},
-        destination: {},
+        destination: {}
       },
       required: ['origin', 'destination'],
-      additionalProperties: false,
-    },
+      additionalProperties: false
+    }
   })
   const askTool = createToolDefinition({
     name: 'ask_user_questions',
@@ -1497,8 +1629,8 @@ test('agent sdk native tool path closes failed map retry after place disambiguat
       type: 'object',
       properties: { questions: { type: 'array' } },
       required: ['questions'],
-      additionalProperties: false,
-    },
+      additionalProperties: false
+    }
   })
   const calls: Array<{ toolName: string; args: Record<string, unknown> }> = []
   const runtime = createRuntime({
@@ -1510,7 +1642,7 @@ test('agent sdk native tool path closes failed map retry after place disambiguat
           const data = {
             ok: false,
             errorKind: 'route_not_found',
-            message: '高德地图未返回可用路线。',
+            message: '高德地图未返回可用路线。'
           }
           return createToolExecutionOutput(JSON.stringify(data), { shape: 'json', data })
         }
@@ -1524,16 +1656,16 @@ test('agent sdk native tool path closes failed map retry after place disambiguat
               address: '上海市闵行区虹桥火车站(地铁站)',
               location: '121.318910,31.193987',
               city: '上海市',
-              district: '闵行区',
+              district: '闵行区'
             },
             {
               name: '虹桥火车站P9停车场',
               address: '上海市闵行区申虹路',
               location: '121.321110,31.194220',
               city: '上海市',
-              district: '闵行区',
-            },
-          ],
+              district: '闵行区'
+            }
+          ]
         }
         return createToolExecutionOutput(JSON.stringify(data), { shape: 'json', data })
       }
@@ -1546,46 +1678,57 @@ test('agent sdk native tool path closes failed map retry after place disambiguat
         return createToolExecutionOutput(`用户回答了 1/1 个问题：${selected}`, {
           shape: 'json',
           data: {
-            answers: [{
-              id: 'map_place_choice',
-              question: '请选择地点',
-              kind: 'single_choice',
-              answer: selected,
-            }],
-          },
+            answers: [
+              {
+                id: 'map_place_choice',
+                question: '请选择地点',
+                kind: 'single_choice',
+                answer: selected
+              }
+            ]
+          }
         })
       }
       throw new Error(`unexpected tool: ${toolName}`)
     },
     runAgent: async ({ tools, onTextDelta }) => {
-      const mapSdkTool = tools.find((item) => item.name === 'map_plan_route') as { invoke: (context: unknown, input: string) => Promise<string> } | undefined
+      const mapSdkTool = tools.find((item) => item.name === 'map_plan_route') as
+        | { invoke: (context: unknown, input: string) => Promise<string> }
+        | undefined
       assert.ok(mapSdkTool)
-      const toolOutput = await mapSdkTool.invoke({}, JSON.stringify({
-        city: '上海',
-        origin: '人民广场',
-        destination: '虹桥火车站',
-      }))
+      const toolOutput = await mapSdkTool.invoke(
+        {},
+        JSON.stringify({
+          city: '上海',
+          origin: '人民广场',
+          destination: '虹桥火车站'
+        })
+      )
       assert.match(toolOutput, /ask_user_questions/)
       assert.match(toolOutput, /"ok":false/)
       onTextDelta('已按用户选择的地点规划路线。')
       return { finalText: '已按用户选择的地点规划路线。' }
-    },
+    }
   })
   runtime.newSession('butler::scope-map-native-retry-failure', 'system prompt')
 
-  const result = await runtime.sendMessage('butler::scope-map-native-retry-failure', '从人民广场到虹桥火车站怎么走？', 'run-map-native-retry-failure', {
-    publicSessionId: 'scope-map-native-retry-failure',
-    taskId: 'task-map-native-retry-failure',
-  })
+  const result = await runtime.sendMessage(
+    'butler::scope-map-native-retry-failure',
+    '从人民广场到虹桥火车站怎么走？',
+    'run-map-native-retry-failure',
+    {
+      publicSessionId: 'scope-map-native-retry-failure',
+      taskId: 'task-map-native-retry-failure'
+    }
+  )
 
   assert.equal(result.success, false)
   assert.equal(result.terminalReason, 'blocked_tool_error')
   assert.equal(result.error, '高德地图未返回可用路线。')
-  assert.deepEqual(calls.map((call) => call.toolName), [
-    'map_plan_route',
-    'ask_user_questions',
-    'map_plan_route',
-  ])
+  assert.deepEqual(
+    calls.map((call) => call.toolName),
+    ['map_plan_route', 'ask_user_questions', 'map_plan_route']
+  )
 })
 
 test('agent sdk native tool path clears stale map failure after later success', async () => {
@@ -1599,11 +1742,11 @@ test('agent sdk native tool path clears stale map failure after later success', 
       type: 'object',
       properties: {
         origin: {},
-        destination: {},
+        destination: {}
       },
       required: ['origin', 'destination'],
-      additionalProperties: false,
-    },
+      additionalProperties: false
+    }
   })
   const calls: Array<{ toolName: string; args: Record<string, unknown> }> = []
   const runtime = createRuntime({
@@ -1617,7 +1760,7 @@ test('agent sdk native tool path clears stale map failure after later success', 
         const data = {
           ok: false,
           errorKind: 'route_not_found',
-          message: '第一次路线失败。',
+          message: '第一次路线失败。'
         }
         return createToolExecutionOutput(JSON.stringify(data), { shape: 'json', data })
       }
@@ -1625,39 +1768,61 @@ test('agent sdk native tool path clears stale map failure after later success', 
         ok: true,
         origin: { name: '人民广场', location: '121.47519,31.228833' },
         destination: { name: '虹桥火车站', location: '121.31891,31.193987' },
-        selectedRoute: { transportMode: 'driving', distanceM: 18800, durationSec: 1920, polyline: '', steps: [] },
+        selectedRoute: {
+          transportMode: 'driving',
+          distanceM: 18800,
+          durationSec: 1920,
+          polyline: '',
+          steps: []
+        }
       }
       return createToolExecutionOutput(JSON.stringify(data), { shape: 'json', data })
     },
     runAgent: async ({ tools, onTextDelta }) => {
-      const mapSdkTool = tools.find((item) => item.name === 'map_plan_route') as { invoke: (context: unknown, input: string) => Promise<string> } | undefined
+      const mapSdkTool = tools.find((item) => item.name === 'map_plan_route') as
+        | { invoke: (context: unknown, input: string) => Promise<string> }
+        | undefined
       assert.ok(mapSdkTool)
-      const first = await mapSdkTool.invoke({}, JSON.stringify({
-        origin: '人民广场',
-        destination: '不存在的目的地',
-      }))
+      const first = await mapSdkTool.invoke(
+        {},
+        JSON.stringify({
+          origin: '人民广场',
+          destination: '不存在的目的地'
+        })
+      )
       assert.match(first, /route_not_found/)
-      const second = await mapSdkTool.invoke({}, JSON.stringify({
-        origin: '人民广场',
-        destination: '虹桥火车站',
-      }))
+      const second = await mapSdkTool.invoke(
+        {},
+        JSON.stringify({
+          origin: '人民广场',
+          destination: '虹桥火车站'
+        })
+      )
       assert.match(second, /"ok":true/)
       onTextDelta('第二次路线已规划好。')
       return { finalText: '第二次路线已规划好。' }
-    },
+    }
   })
   runtime.newSession('butler::scope-map-native-stale-close', 'system prompt')
 
-  const result = await runtime.sendMessage('butler::scope-map-native-stale-close', '先后尝试两条地图路线', 'run-map-native-stale-close', {
-    publicSessionId: 'scope-map-native-stale-close',
-    taskId: 'task-map-native-stale-close',
-  })
+  const result = await runtime.sendMessage(
+    'butler::scope-map-native-stale-close',
+    '先后尝试两条地图路线',
+    'run-map-native-stale-close',
+    {
+      publicSessionId: 'scope-map-native-stale-close',
+      taskId: 'task-map-native-stale-close'
+    }
+  )
 
   assert.equal(result.success, true)
   assert.equal(result.terminalReason, 'done')
   assert.equal(result.error, undefined)
   assert.equal(result.finalText, '第二次路线已规划好。')
-  assert.deepEqual(calls.map((call) => call.toolName), ['map_plan_route', 'map_plan_route'])
+  assert.deepEqual(
+    calls.map((call) => call.toolName),
+    ['map_plan_route', 'map_plan_route']
+  )
 })
 
 test('agent sdk runtime emits tool trace truth and registers run cleanup', async () => {
@@ -1674,8 +1839,8 @@ test('agent sdk runtime emits tool trace truth and registers run cleanup', async
         data: { ok: true },
         projectionPatch: {
           taskTitle: 'Research',
-          taskSummary: 'Search done',
-        },
+          taskSummary: 'Search done'
+        }
       })
     },
     runAgent: async ({ tools, onTextDelta }) => {
@@ -1683,25 +1848,25 @@ test('agent sdk runtime emits tool trace truth and registers run cleanup', async
       await sdkTool.invoke({}, JSON.stringify({ query: 'Agents SDK' }))
       onTextDelta('研究完成')
       return { finalText: '研究完成' }
-    },
+    }
   })
   runtime.setRunCleanupRegistry({
     registerRunCleanup: (runId, cleanup) => {
       cleanups.push({ runId, cleanup })
-    },
+    }
   })
   runtime.setRuntime({
     getConversationScope: () => null,
     publishScopeRunEvent: (payload: unknown, projectionTruth?: unknown) => {
       scopeEvents.push({ payload, projectionTruth })
-    },
+    }
   } as never)
   runtime.on('output', (event) => outputEvents.push(event))
   runtime.newSession('butler::scope-host', 'system prompt')
 
   const result = await runtime.sendMessage('butler::scope-host', '查一下资料', 'run-host', {
     publicSessionId: 'scope-host',
-    taskId: 'task-host',
+    taskId: 'task-host'
   })
 
   assert.equal(result.success, true)
@@ -1712,29 +1877,38 @@ test('agent sdk runtime emits tool trace truth and registers run cleanup', async
   assert.equal(cleanups[0].runId, 'run-host')
   assert.deepEqual(result.projectionTruth?.projectionPatch, {
     taskTitle: 'Research',
-    taskSummary: 'Search done',
+    taskSummary: 'Search done'
   })
   assert.deepEqual(
     outputEvents
       .filter((entry) => entry.type === 'tool_use' || entry.type === 'tool_result')
       .map((entry) => entry.type),
-    ['tool_use', 'tool_result'],
+    ['tool_use', 'tool_result']
   )
   // P0-3 (2026-07-02): planning heartbeats now share this channel; they must
   // carry NO toolEvent and precede the tool trace without disturbing it.
-  const heartbeatEvents = scopeEvents
-    .filter((entry) => (entry.payload as { phase?: string }).phase === 'planning')
+  const heartbeatEvents = scopeEvents.filter(
+    (entry) => (entry.payload as { phase?: string }).phase === 'planning'
+  )
   assert.ok(heartbeatEvents.length >= 2, 'planning heartbeats published before the model call')
-  assert.ok(heartbeatEvents.every((entry) => (entry.payload as { toolEvent?: unknown }).toolEvent === undefined))
-  const toolScopeEvents = scopeEvents
-    .filter((entry) => (entry.payload as { phase?: string }).phase !== 'planning')
+  assert.ok(
+    heartbeatEvents.every(
+      (entry) => (entry.payload as { toolEvent?: unknown }).toolEvent === undefined
+    )
+  )
+  const toolScopeEvents = scopeEvents.filter(
+    (entry) => (entry.payload as { phase?: string }).phase !== 'planning'
+  )
   assert.deepEqual(
-    toolScopeEvents.map((entry) => (entry.payload as { phase?: string; toolEvent?: { kind?: string } }).toolEvent?.kind),
-    ['call', 'result'],
+    toolScopeEvents.map(
+      (entry) =>
+        (entry.payload as { phase?: string; toolEvent?: { kind?: string } }).toolEvent?.kind
+    ),
+    ['call', 'result']
   )
   assert.deepEqual(
     toolScopeEvents.map((entry) => (entry.payload as { phase?: string }).phase),
-    ['tool_running', 'responding'],
+    ['tool_running', 'responding']
   )
 })
 
@@ -1750,47 +1924,64 @@ test('agent sdk runtime uses Ready Anthropic model adapter with SDK tool loop', 
         provider: 'anthropic',
         baseUrl: 'https://api.anthropic.com',
         model: 'claude-haiku-3-5-20241022',
-        agentProtocol: 'anthropic',
-      },
+        agentProtocol: 'anthropic'
+      }
     }),
     listToolDefinitions: () => [toolDefinition],
-    executeToolCall: async () => createToolExecutionOutput('found result at /Users/alice/Ready/out.txt', {
-      shape: 'json',
-      data: { ok: true, absolutePath: '/Users/alice/Ready/out.txt' },
-      projectionPatch: { taskTitle: 'Research', runStatePath: '/Users/alice/Ready/run_state.json' },
-    }),
+    executeToolCall: async () =>
+      createToolExecutionOutput('found result at /Users/alice/Ready/out.txt', {
+        shape: 'json',
+        data: { ok: true, absolutePath: '/Users/alice/Ready/out.txt' },
+        projectionPatch: {
+          taskTitle: 'Research',
+          runStatePath: '/Users/alice/Ready/run_state.json'
+        }
+      }),
     fetchWithTimeout: async (url, init) => {
       requests.push({
         url,
-        body: JSON.parse(String(init.body || '{}')) as Record<string, unknown>,
+        body: JSON.parse(String(init.body || '{}')) as Record<string, unknown>
       })
       if (requests.length === 1) {
-        return new Response(JSON.stringify({
-          id: 'msg-1',
-          content: [{
-            type: 'tool_use',
-            id: 'toolu-1',
-            name: 'web_search',
-            input: { query: 'Agents SDK' },
-          }],
-          stop_reason: 'tool_use',
-          usage: { input_tokens: 10, output_tokens: 3 },
-        }), { status: 200 })
+        return new Response(
+          JSON.stringify({
+            id: 'msg-1',
+            content: [
+              {
+                type: 'tool_use',
+                id: 'toolu-1',
+                name: 'web_search',
+                input: { query: 'Agents SDK' }
+              }
+            ],
+            stop_reason: 'tool_use',
+            usage: { input_tokens: 10, output_tokens: 3 }
+          }),
+          { status: 200 }
+        )
       }
-      return new Response(JSON.stringify({
-        id: 'msg-2',
-        content: [{ type: 'text', text: '研究完成' }],
-        stop_reason: 'end_turn',
-        usage: { input_tokens: 12, output_tokens: 4 },
-      }), { status: 200 })
-    },
+      return new Response(
+        JSON.stringify({
+          id: 'msg-2',
+          content: [{ type: 'text', text: '研究完成' }],
+          stop_reason: 'end_turn',
+          usage: { input_tokens: 12, output_tokens: 4 }
+        }),
+        { status: 200 }
+      )
+    }
   })
   runtime.newSession('butler::scope-anthropic', 'system prompt')
 
-  const result = await runtime.sendMessage('butler::scope-anthropic', '查一下资料', 'run-anthropic', {
-    publicSessionId: 'scope-anthropic',
-    taskId: 'task-anthropic',
-  })
+  const result = await runtime.sendMessage(
+    'butler::scope-anthropic',
+    '查一下资料',
+    'run-anthropic',
+    {
+      publicSessionId: 'scope-anthropic',
+      taskId: 'task-anthropic'
+    }
+  )
 
   assert.equal(result.success, true)
   assert.equal(result.finalText, '研究完成')
@@ -1798,13 +1989,15 @@ test('agent sdk runtime uses Ready Anthropic model adapter with SDK tool loop', 
   assert.equal(requests.length, 2)
   assert.equal(requests[0].url, 'https://api.anthropic.com/v1/messages')
   assert.ok(Array.isArray((requests[0].body as { tools?: unknown[] }).tools))
-  const secondAnthropicMessages = JSON.stringify((requests[1].body as { messages?: unknown[] }).messages)
+  const secondAnthropicMessages = JSON.stringify(
+    (requests[1].body as { messages?: unknown[] }).messages
+  )
   assert.match(secondAnthropicMessages, /function_call_result|tool_result|found result/)
   assert.doesNotMatch(secondAnthropicMessages, /\/Users\/alice/)
   assert.match(secondAnthropicMessages, /\/Users\/<redacted>\/Ready/)
   assert.deepEqual(result.projectionTruth?.projectionPatch, {
     taskTitle: 'Research',
-    runStatePath: '/Users/alice/Ready/run_state.json',
+    runStatePath: '/Users/alice/Ready/run_state.json'
   })
 })
 
@@ -1822,55 +2015,76 @@ test('agent sdk runtime uses Ready OpenAI-compatible adapter and provider patche
         model: 'compat-chat',
         agentProtocol: 'openai',
         wireApi: 'chat/completions',
-        toolUseMode: 'on',
-      },
+        toolUseMode: 'on'
+      }
     }),
     listToolDefinitions: () => [toolDefinition],
-    executeToolCall: async () => createToolExecutionOutput('found result at C:\\Users\\alice\\Ready\\out.txt', {
-      shape: 'json',
-      data: { ok: true, absolutePath: 'C:\\Users\\alice\\Ready\\out.txt' },
-      projectionPatch: { taskTitle: 'Compatible research', runStatePath: 'C:\\Users\\alice\\Ready\\run_state.json' },
-    }),
+    executeToolCall: async () =>
+      createToolExecutionOutput('found result at C:\\Users\\alice\\Ready\\out.txt', {
+        shape: 'json',
+        data: { ok: true, absolutePath: 'C:\\Users\\alice\\Ready\\out.txt' },
+        projectionPatch: {
+          taskTitle: 'Compatible research',
+          runStatePath: 'C:\\Users\\alice\\Ready\\run_state.json'
+        }
+      }),
     fetchWithTimeout: async (url, init) => {
       requests.push({
         url,
-        body: JSON.parse(String(init.body || '{}')) as Record<string, unknown>,
+        body: JSON.parse(String(init.body || '{}')) as Record<string, unknown>
       })
       if (requests.length === 1) {
-        return new Response(JSON.stringify({
-          id: 'chatcmpl-1',
-          choices: [{
-            message: {
-              tool_calls: [{
-                id: 'call-compat-1',
-                type: 'function',
-                function: {
-                  name: 'web_search',
-                  arguments: JSON.stringify({ query: 'Agents SDK' }),
+        return new Response(
+          JSON.stringify({
+            id: 'chatcmpl-1',
+            choices: [
+              {
+                message: {
+                  tool_calls: [
+                    {
+                      id: 'call-compat-1',
+                      type: 'function',
+                      function: {
+                        name: 'web_search',
+                        arguments: JSON.stringify({ query: 'Agents SDK' })
+                      }
+                    }
+                  ]
                 },
-              }],
-            },
-            finish_reason: 'tool_calls',
-          }],
-          usage: { prompt_tokens: 9, completion_tokens: 2, total_tokens: 11 },
-        }), { status: 200 })
+                finish_reason: 'tool_calls'
+              }
+            ],
+            usage: { prompt_tokens: 9, completion_tokens: 2, total_tokens: 11 }
+          }),
+          { status: 200 }
+        )
       }
-      return new Response(JSON.stringify({
-        id: 'chatcmpl-2',
-        choices: [{
-          message: { content: '兼容端完成' },
-          finish_reason: 'stop',
-        }],
-        usage: { prompt_tokens: 12, completion_tokens: 3, total_tokens: 15 },
-      }), { status: 200 })
-    },
+      return new Response(
+        JSON.stringify({
+          id: 'chatcmpl-2',
+          choices: [
+            {
+              message: { content: '兼容端完成' },
+              finish_reason: 'stop'
+            }
+          ],
+          usage: { prompt_tokens: 12, completion_tokens: 3, total_tokens: 15 }
+        }),
+        { status: 200 }
+      )
+    }
   })
   runtime.newSession('butler::scope-compatible', 'system prompt')
 
-  const result = await runtime.sendMessage('butler::scope-compatible', '查一下资料', 'run-compatible', {
-    publicSessionId: 'scope-compatible',
-    taskId: 'task-compatible',
-  })
+  const result = await runtime.sendMessage(
+    'butler::scope-compatible',
+    '查一下资料',
+    'run-compatible',
+    {
+      publicSessionId: 'scope-compatible',
+      taskId: 'task-compatible'
+    }
+  )
 
   assert.equal(result.success, true)
   assert.equal(result.finalText, '兼容端完成')
@@ -1882,16 +2096,20 @@ test('agent sdk runtime uses Ready OpenAI-compatible adapter and provider patche
   // stream_usage default) fires exactly as it always did on the streaming
   // execution clients — include_usage + the legacy stream_usage mirror.
   assert.equal((requests[0].body as Record<string, unknown>).stream, true)
-  assert.deepEqual((requests[0].body as Record<string, unknown>).stream_options, { include_usage: true })
+  assert.deepEqual((requests[0].body as Record<string, unknown>).stream_options, {
+    include_usage: true
+  })
   assert.equal((requests[0].body as Record<string, unknown>).stream_usage, true)
-  const secondCompatibleMessages = JSON.stringify((requests[1].body as { messages?: unknown[] }).messages)
+  const secondCompatibleMessages = JSON.stringify(
+    (requests[1].body as { messages?: unknown[] }).messages
+  )
   assert.match(secondCompatibleMessages, /function_call_result|found result|tool/)
   assert.doesNotMatch(secondCompatibleMessages, /C:\\Users\\alice/)
   assert.match(secondCompatibleMessages, /<redacted>/)
   assert.match(secondCompatibleMessages, /Ready/)
   assert.deepEqual(result.projectionTruth?.projectionPatch, {
     taskTitle: 'Compatible research',
-    runStatePath: 'C:\\Users\\alice\\Ready\\run_state.json',
+    runStatePath: 'C:\\Users\\alice\\Ready\\run_state.json'
   })
 })
 
@@ -1905,11 +2123,11 @@ test('agent sdk runtime carries compatible reasoning content across tool turns',
     schema: {
       type: 'object',
       properties: {
-        query: { type: 'string' },
+        query: { type: 'string' }
       },
       required: ['query'],
-      additionalProperties: false,
-    },
+      additionalProperties: false
+    }
   })
   const requests: Array<Record<string, unknown>> = []
   const runtime = new AgentSdkRuntime({
@@ -1924,60 +2142,73 @@ test('agent sdk runtime carries compatible reasoning content across tool turns',
         agentProtocol: 'openai',
         wireApi: 'chat/completions',
         toolUseMode: 'on',
-        thinkingMode: 'auto',
-      },
+        thinkingMode: 'auto'
+      }
     }),
     listToolDefinitions: () => [toolDefinition],
-    executeToolCall: async () => createToolExecutionOutput('定位失败：path_missing', {
-      shape: 'json',
-      data: { ok: false, error: 'path_missing' },
-    }),
+    executeToolCall: async () =>
+      createToolExecutionOutput('定位失败：path_missing', {
+        shape: 'json',
+        data: { ok: false, error: 'path_missing' }
+      }),
     fetchWithTimeout: async (url, init) => {
       requests.push({
         url,
-        body: JSON.parse(String(init.body || '{}')) as Record<string, unknown>,
+        body: JSON.parse(String(init.body || '{}')) as Record<string, unknown>
       })
       if (requests.length === 1) {
-        return new Response(JSON.stringify({
-          id: 'chatcmpl-mimo-1',
-          choices: [{
-            message: {
-              content: '',
-              reasoning_content: '需要先定位文件中的第 2、3 章。',
-              tool_calls: [{
-                id: 'call-mimo-1',
-                type: 'function',
-                function: {
-                  name: 'file_locate',
-                  arguments: JSON.stringify({ query: '白痴.md' }),
+        return new Response(
+          JSON.stringify({
+            id: 'chatcmpl-mimo-1',
+            choices: [
+              {
+                message: {
+                  content: '',
+                  reasoning_content: '需要先定位文件中的第 2、3 章。',
+                  tool_calls: [
+                    {
+                      id: 'call-mimo-1',
+                      type: 'function',
+                      function: {
+                        name: 'file_locate',
+                        arguments: JSON.stringify({ query: '白痴.md' })
+                      }
+                    }
+                  ]
                 },
-              }],
-            },
-            finish_reason: 'tool_calls',
-          }],
-          usage: { prompt_tokens: 10, completion_tokens: 4, total_tokens: 14 },
-        }), { status: 200 })
+                finish_reason: 'tool_calls'
+              }
+            ],
+            usage: { prompt_tokens: 10, completion_tokens: 4, total_tokens: 14 }
+          }),
+          { status: 200 }
+        )
       }
       const body = requests[1].body as { messages?: Array<Record<string, unknown>> }
-      const toolTurn = body.messages?.find((message) => (
-        message.role === 'assistant' && Array.isArray(message.tool_calls)
-      ))
+      const toolTurn = body.messages?.find(
+        (message) => message.role === 'assistant' && Array.isArray(message.tool_calls)
+      )
       assert.equal(toolTurn?.reasoning_content, '需要先定位文件中的第 2、3 章。')
-      return new Response(JSON.stringify({
-        id: 'chatcmpl-mimo-2',
-        choices: [{
-          message: { content: '我没找到该文件，请重新选择附件。' },
-          finish_reason: 'stop',
-        }],
-        usage: { prompt_tokens: 12, completion_tokens: 6, total_tokens: 18 },
-      }), { status: 200 })
-    },
+      return new Response(
+        JSON.stringify({
+          id: 'chatcmpl-mimo-2',
+          choices: [
+            {
+              message: { content: '我没找到该文件，请重新选择附件。' },
+              finish_reason: 'stop'
+            }
+          ],
+          usage: { prompt_tokens: 12, completion_tokens: 6, total_tokens: 18 }
+        }),
+        { status: 200 }
+      )
+    }
   })
   runtime.newSession('butler::scope-mimo', 'system prompt')
 
   const result = await runtime.sendMessage('butler::scope-mimo', '读取白痴.md', 'run-mimo', {
     publicSessionId: 'scope-mimo',
-    taskId: 'task-mimo',
+    taskId: 'task-mimo'
   })
 
   assert.equal(result.success, true)
@@ -1996,11 +2227,11 @@ test('agent sdk runtime carries anthropic thinking blocks across tool turns', as
     schema: {
       type: 'object',
       properties: {
-        path: { type: 'string' },
+        path: { type: 'string' }
       },
       required: ['path'],
-      additionalProperties: false,
-    },
+      additionalProperties: false
+    }
   })
   const requests: Array<Record<string, unknown>> = []
   const runtime = new AgentSdkRuntime({
@@ -2014,67 +2245,79 @@ test('agent sdk runtime carries anthropic thinking blocks across tool turns', as
         model: 'mimo-v2.5',
         agentProtocol: 'anthropic',
         toolUseMode: 'on',
-        thinkingMode: 'auto',
-      },
+        thinkingMode: 'auto'
+      }
     }),
     listToolDefinitions: () => [toolDefinition],
-    executeToolCall: async () => createToolExecutionOutput('定位失败：path_missing', {
-      shape: 'json',
-      data: { ok: false, error: 'path_missing' },
-    }),
+    executeToolCall: async () =>
+      createToolExecutionOutput('定位失败：path_missing', {
+        shape: 'json',
+        data: { ok: false, error: 'path_missing' }
+      }),
     fetchWithTimeout: async (url, init) => {
       requests.push({
         url,
-        body: JSON.parse(String(init.body || '{}')) as Record<string, unknown>,
+        body: JSON.parse(String(init.body || '{}')) as Record<string, unknown>
       })
       if (requests.length === 1) {
-        return new Response(JSON.stringify({
-          id: 'msg-mimo-anthropic-1',
-          role: 'assistant',
-          type: 'message',
-          content: [
-            {
-              type: 'thinking',
-              thinking: '需要先定位文件中的第 2、3 章。',
-              signature: 'thinking-signature-1',
-            },
-            {
-              type: 'tool_use',
-              id: 'call-mimo-anthropic-1',
-              name: 'file_locate',
-              input: { path: '白痴.md' },
-            },
-          ],
-          stop_reason: 'tool_use',
-          usage: { input_tokens: 10, output_tokens: 4 },
-        }), { status: 200 })
+        return new Response(
+          JSON.stringify({
+            id: 'msg-mimo-anthropic-1',
+            role: 'assistant',
+            type: 'message',
+            content: [
+              {
+                type: 'thinking',
+                thinking: '需要先定位文件中的第 2、3 章。',
+                signature: 'thinking-signature-1'
+              },
+              {
+                type: 'tool_use',
+                id: 'call-mimo-anthropic-1',
+                name: 'file_locate',
+                input: { path: '白痴.md' }
+              }
+            ],
+            stop_reason: 'tool_use',
+            usage: { input_tokens: 10, output_tokens: 4 }
+          }),
+          { status: 200 }
+        )
       }
       const body = requests[1].body as { messages?: Array<Record<string, unknown>> }
-      const assistantTurn = body.messages?.find((message) => (
-        message.role === 'assistant' && Array.isArray(message.content)
-      ))
+      const assistantTurn = body.messages?.find(
+        (message) => message.role === 'assistant' && Array.isArray(message.content)
+      )
       const content = assistantTurn?.content as Array<Record<string, unknown>> | undefined
       assert.equal(content?.[0]?.type, 'thinking')
       assert.equal(content?.[0]?.thinking, '需要先定位文件中的第 2、3 章。')
       assert.equal(content?.[0]?.signature, 'thinking-signature-1')
       assert.equal(content?.[1]?.type, 'tool_use')
       assert.equal(content?.[1]?.id, 'call-mimo-anthropic-1')
-      return new Response(JSON.stringify({
-        id: 'msg-mimo-anthropic-2',
-        role: 'assistant',
-        type: 'message',
-        content: [{ type: 'text', text: '我没找到该文件，请重新选择附件。' }],
-        stop_reason: 'end_turn',
-        usage: { input_tokens: 12, output_tokens: 6 },
-      }), { status: 200 })
-    },
+      return new Response(
+        JSON.stringify({
+          id: 'msg-mimo-anthropic-2',
+          role: 'assistant',
+          type: 'message',
+          content: [{ type: 'text', text: '我没找到该文件，请重新选择附件。' }],
+          stop_reason: 'end_turn',
+          usage: { input_tokens: 12, output_tokens: 6 }
+        }),
+        { status: 200 }
+      )
+    }
   })
   runtime.newSession('butler::scope-mimo-anthropic', 'system prompt')
 
-  const result = await runtime.sendMessage('butler::scope-mimo-anthropic', '读取白痴.md', 'run-mimo-anthropic', {
-    publicSessionId: 'scope-mimo-anthropic',
-    taskId: 'task-mimo-anthropic',
-  })
+  const result = await runtime.sendMessage(
+    'butler::scope-mimo-anthropic',
+    '读取白痴.md',
+    'run-mimo-anthropic',
+    {
+      publicSessionId: 'scope-mimo-anthropic',
+      taskId: 'task-mimo-anthropic'
+    }
+  )
 
   assert.equal(result.success, true)
   assert.equal(result.finalText, '我没找到该文件，请重新选择附件。')
@@ -2094,13 +2337,14 @@ test('agent sdk runtime keeps browser tools hidden for local document attachment
         baseUrl: 'https://token-plan-sgp.xiaomimimo.com/anthropic',
         model: 'mimo-v2.5',
         agentProtocol: 'anthropic',
-        toolUseMode: 'on',
-      },
+        toolUseMode: 'on'
+      }
     }),
-    executeToolCall: async (name) => createToolExecutionOutput(
-      name === 'file_read_excerpt' ? '已读取章节正文' : 'ok',
-      { shape: 'json', data: { ok: true } },
-    ),
+    executeToolCall: async (name) =>
+      createToolExecutionOutput(name === 'file_read_excerpt' ? '已读取章节正文' : 'ok', {
+        shape: 'json',
+        data: { ok: true }
+      }),
     fetchWithTimeout: async (url, init) => {
       const body = JSON.parse(String(init.body || '{}')) as Record<string, unknown>
       requests.push({ url, body })
@@ -2114,38 +2358,46 @@ test('agent sdk runtime keeps browser tools hidden for local document attachment
       assert.equal(toolNames.includes('present_file'), false)
       assert.ok(
         toolNames.includes('file_locate') ||
-          toolNames.some((name) => typeof name === 'string' && name.startsWith('document_')),
+          toolNames.some((name) => typeof name === 'string' && name.startsWith('document_'))
       )
       assert.equal(toolNames.includes('file_read_excerpt'), true)
       assert.match(String(body.system || ''), /必须先调用 file_read_excerpt/)
       assert.match(String(body.system || ''), /顺序大块读取/)
       assert.match(String(body.system || ''), /不要反复读取互相重叠/)
       if (requests.length === 1) {
-        return new Response(JSON.stringify({
-          id: 'msg-doc-tools-1',
+        return new Response(
+          JSON.stringify({
+            id: 'msg-doc-tools-1',
+            role: 'assistant',
+            type: 'message',
+            content: [
+              {
+                type: 'tool_use',
+                id: 'call-read-excerpt',
+                name: 'file_read_excerpt',
+                input: { path: '/tmp/白痴.md', anchor: '一' }
+              }
+            ],
+            stop_reason: 'tool_use',
+            usage: { input_tokens: 10, output_tokens: 4 }
+          }),
+          { status: 200 }
+        )
+      }
+      return new Response(
+        JSON.stringify({
+          id: 'msg-doc-tools-2',
           role: 'assistant',
           type: 'message',
-          content: [{
-            type: 'tool_use',
-            id: 'call-read-excerpt',
-            name: 'file_read_excerpt',
-            input: { path: '/tmp/白痴.md', anchor: '一' },
-          }],
-          stop_reason: 'tool_use',
-          usage: { input_tokens: 10, output_tokens: 4 },
-        }), { status: 200 })
-      }
-      return new Response(JSON.stringify({
-        id: 'msg-doc-tools-2',
-        role: 'assistant',
-        type: 'message',
-        // 完成陈述而非行动承诺：零工具收尾若用「我会…处理」会被行动宣告闸
-        // 正当拦截（steer→checkpoint），那是闸的合同而非本测试的主题。
-        content: [{ type: 'text', text: '已根据文档梳理完成人物关系。' }],
-        stop_reason: 'end_turn',
-        usage: { input_tokens: 10, output_tokens: 4 },
-      }), { status: 200 })
-    },
+          // 完成陈述而非行动承诺：零工具收尾若用「我会…处理」会被行动宣告闸
+          // 正当拦截（steer→checkpoint），那是闸的合同而非本测试的主题。
+          content: [{ type: 'text', text: '已根据文档梳理完成人物关系。' }],
+          stop_reason: 'end_turn',
+          usage: { input_tokens: 10, output_tokens: 4 }
+        }),
+        { status: 200 }
+      )
+    }
   })
   runtime.newSession('butler::scope-doc-no-browser', 'system prompt')
 
@@ -2157,13 +2409,13 @@ test('agent sdk runtime keeps browser tools hidden for local document attachment
       '--- 测试模式附件路径 ---',
       '以下路径来自测试 harness 注入，附件正文里的 https://example.com 或 浏览器 字样不能污染主指令路由。',
       '- 白痴.md: /tmp/白痴.md',
-      '- 新文档.md: /tmp/新文档.md',
+      '- 新文档.md: /tmp/新文档.md'
     ].join('\n'),
     'run-doc-no-browser',
     {
       publicSessionId: 'scope-doc-no-browser',
-      taskId: 'task-doc-no-browser',
-    },
+      taskId: 'task-doc-no-browser'
+    }
   )
 
   assert.equal(result.success, true)
@@ -2172,7 +2424,8 @@ test('agent sdk runtime keeps browser tools hidden for local document attachment
 })
 
 test('agent sdk runtime repairs failed workspace excerpt by reading the active document section', async () => {
-  const externalPath = '/Users/user/matrix-unpack/analysis/02-CEO主入口部门需求理解与任务分发流程规格书.md'
+  const externalPath =
+    '/Users/user/matrix-unpack/analysis/02-CEO主入口部门需求理解与任务分发流程规格书.md'
   const fileReadDefinition = createToolDefinition({
     name: 'file_read_excerpt',
     groupId: 'file_management',
@@ -2183,8 +2436,8 @@ test('agent sdk runtime repairs failed workspace excerpt by reading the active d
       type: 'object',
       properties: { path: { type: 'string' }, anchor: { type: 'string' } },
       required: ['path'],
-      additionalProperties: false,
-    },
+      additionalProperties: false
+    }
   })
   const documentReadDefinition = createToolDefinition({
     name: 'document_read_section',
@@ -2196,8 +2449,8 @@ test('agent sdk runtime repairs failed workspace excerpt by reading the active d
       type: 'object',
       properties: { tabId: { type: 'string' }, range: { type: 'string' } },
       required: [],
-      additionalProperties: false,
-    },
+      additionalProperties: false
+    }
   })
   const calls: Array<{ name: string; args: Record<string, unknown> }> = []
   let runCount = 0
@@ -2208,7 +2461,7 @@ test('agent sdk runtime repairs failed workspace excerpt by reading the active d
       if (name === 'file_read_excerpt') {
         return createToolExecutionOutput(
           `Error: path is outside any known workspace: ${externalPath}`,
-          { shape: 'json', data: { ok: false, error: 'outside_workspace' } },
+          { shape: 'json', data: { ok: false, error: 'outside_workspace' } }
         )
       }
       return createToolExecutionOutput(
@@ -2220,30 +2473,43 @@ test('agent sdk runtime repairs failed workspace excerpt by reading the active d
           '',
           '--- 文档片段开始 ---',
           '"Read the intent in the user language: what they said, what repetition or ambition implies, what outcome would help."',
-          '--- 文档片段结束 ---',
+          '--- 文档片段结束 ---'
         ].join('\n'),
-        { shape: 'json', data: { ok: true } },
+        { shape: 'json', data: { ok: true } }
       )
     },
     runAgent: async ({ tools, instructions, input }) => {
       runCount += 1
-      const byName = new Map(tools.map((tool) => [tool.name, tool as { invoke: (context: unknown, input: string) => Promise<string> }]))
+      const byName = new Map(
+        tools.map((tool) => [
+          tool.name,
+          tool as { invoke: (context: unknown, input: string) => Promise<string> }
+        ])
+      )
       assert.match(instructions, /document_read_section/)
       assert.match(instructions, /当前编辑器文档/)
       if (runCount === 1) {
-        await byName.get('file_read_excerpt')?.invoke({}, JSON.stringify({
-          path: externalPath,
-          anchor: '第三部分',
-        }))
-        return { finalText: `文件 ${externalPath} 不在当前工作区索引范围内，请把第3章内容粘贴给我。` }
+        await byName.get('file_read_excerpt')?.invoke(
+          {},
+          JSON.stringify({
+            path: externalPath,
+            anchor: '第三部分'
+          })
+        )
+        return {
+          finalText: `文件 ${externalPath} 不在当前工作区索引范围内，请把第3章内容粘贴给我。`
+        }
       }
       assert.match(JSON.stringify(input), /document_read_section/)
-      await byName.get('document_read_section')?.invoke({}, JSON.stringify({
-        tabId: 'current',
-        range: 'section:3',
-      }))
+      await byName.get('document_read_section')?.invoke(
+        {},
+        JSON.stringify({
+          tabId: 'current',
+          range: 'section:3'
+        })
+      )
       return { finalText: '已读取第3部分，并会在英文原文下补中文意思。' }
-    },
+    }
   })
   runtime.newSession('butler::scope-current-doc-section-repair', 'system prompt')
   const userText = [
@@ -2261,7 +2527,7 @@ test('agent sdk runtime repairs failed workspace excerpt by reading the active d
     '--- 文档摘要开始 ---',
     '2.2 文本通道',
     '...[文档摘要已截断]',
-    '--- 文档摘要结束 ---',
+    '--- 文档摘要结束 ---'
   ].join('\n')
   const requestEnvelope = buildRequestEnvelope({ userText })
 
@@ -2272,13 +2538,16 @@ test('agent sdk runtime repairs failed workspace excerpt by reading the active d
     {
       publicSessionId: 'scope-current-doc-section-repair',
       taskId: 'task-current-doc-section-repair',
-      requestEnvelope,
-    },
+      requestEnvelope
+    }
   )
 
   assert.equal(result.success, true)
   assert.equal(result.finalText, '已读取第3部分，并会在英文原文下补中文意思。')
-  assert.deepEqual(calls.map((call) => call.name), ['file_read_excerpt', 'document_read_section'])
+  assert.deepEqual(
+    calls.map((call) => call.name),
+    ['file_read_excerpt', 'document_read_section']
+  )
   assert.equal(calls[1]?.args.tabId, 'current')
   assert.equal(calls[1]?.args.range, 'section:3')
   assert.deepEqual(result.usedTools, ['file_read_excerpt', 'document_read_section'])
@@ -2296,8 +2565,8 @@ test('agent sdk runtime does not require source excerpts when the only local doc
       type: 'object',
       properties: { path: { type: 'string' } },
       required: ['path'],
-      additionalProperties: false,
-    },
+      additionalProperties: false
+    }
   })
   const setContentDefinition = createToolDefinition({
     name: 'document_set_content',
@@ -2311,8 +2580,8 @@ test('agent sdk runtime does not require source excerpts when the only local doc
       type: 'object',
       properties: { content: { type: 'string' } },
       required: ['content'],
-      additionalProperties: false,
-    },
+      additionalProperties: false
+    }
   })
   const saveDefinition = createToolDefinition({
     name: 'document_save_tab',
@@ -2325,8 +2594,8 @@ test('agent sdk runtime does not require source excerpts when the only local doc
     schema: {
       type: 'object',
       properties: {},
-      additionalProperties: false,
-    },
+      additionalProperties: false
+    }
   })
   const calls: Array<{ name: string; args: Record<string, unknown> }> = []
   const runtime = createRuntime({
@@ -2339,15 +2608,20 @@ test('agent sdk runtime does not require source excerpts when the only local doc
           : name === 'document_save_tab'
             ? 'saved target'
             : 'updated target',
-        { shape: 'json', data: { ok: true } },
+        { shape: 'json', data: { ok: true } }
       )
     },
     runAgent: async ({ tools, onTextDelta }) => {
-      const setContentTool = tools[0] as { invoke: (context: unknown, input: string) => Promise<string> }
-      await setContentTool.invoke({}, JSON.stringify({ content: '# B1 渠道销售图表\n\n老客复购最高，线下活动最低。' }))
+      const setContentTool = tools[0] as {
+        invoke: (context: unknown, input: string) => Promise<string>
+      }
+      await setContentTool.invoke(
+        {},
+        JSON.stringify({ content: '# B1 渠道销售图表\n\n老客复购最高，线下活动最低。' })
+      )
       onTextDelta('已根据内联数据生成图表文档。')
       return { finalText: '已根据内联数据生成图表文档。' }
-    },
+    }
   })
   runtime.newSession('butler::scope-target-only-inline-data', 'system prompt')
 
@@ -2358,26 +2632,28 @@ test('agent sdk runtime does not require source excerpts when the only local doc
       '搜索广告 128，社交广告 96，内容种草 74，自然流量 112，老客复购 153，线下活动 41。',
       '',
       '--- 附件: B1-渠道销售图表.md ---',
-      '- 路径: /tmp/B1-渠道销售图表.md',
+      '- 路径: /tmp/B1-渠道销售图表.md'
     ].join('\n'),
     'run-target-only-inline-data',
     {
       publicSessionId: 'scope-target-only-inline-data',
       taskId: 'task-target-only-inline-data',
       requestEnvelope: {
-        primaryInstruction: '根据下面这组渠道销售数据，在@[B1-渠道销售图表.md]里做一个清楚的图表，并写一段结论。',
-        resources: [
-          { name: 'B1-渠道销售图表.md', path: '/tmp/B1-渠道销售图表.md' },
-        ],
-      },
-    },
+        primaryInstruction:
+          '根据下面这组渠道销售数据，在@[B1-渠道销售图表.md]里做一个清楚的图表，并写一段结论。',
+        resources: [{ name: 'B1-渠道销售图表.md', path: '/tmp/B1-渠道销售图表.md' }]
+      }
+    }
   )
 
   assert.equal(result.success, true)
   assert.deepEqual(calls, [
     { name: 'document_open_tab', args: { path: '/tmp/B1-渠道销售图表.md' } },
-    { name: 'document_set_content', args: { content: '# B1 渠道销售图表\n\n老客复购最高，线下活动最低。' } },
-    { name: 'document_save_tab', args: {} },
+    {
+      name: 'document_set_content',
+      args: { content: '# B1 渠道销售图表\n\n老客复购最高，线下活动最低。' }
+    },
+    { name: 'document_save_tab', args: {} }
   ])
 })
 
@@ -2395,11 +2671,11 @@ test('agent sdk runtime autosaves the unique observed document target on continu
       type: 'object',
       properties: {
         target: { type: 'string' },
-        replacement: { type: 'string' },
+        replacement: { type: 'string' }
       },
       required: ['target', 'replacement'],
-      additionalProperties: false,
-    },
+      additionalProperties: false
+    }
   })
   const saveDefinition = createToolDefinition({
     name: 'document_save_tab',
@@ -2412,8 +2688,8 @@ test('agent sdk runtime autosaves the unique observed document target on continu
     schema: {
       type: 'object',
       properties: { tabId: { type: 'string' } },
-      additionalProperties: false,
-    },
+      additionalProperties: false
+    }
   })
   const calls: Array<{ name: string; args: Record<string, unknown> }> = []
   const runtime = createRuntime({
@@ -2432,9 +2708,9 @@ test('agent sdk runtime autosaves the unique observed document target on continu
               path: targetPath,
               dirty: false,
               requiresSave: false,
-              saveState: 'saved',
-            },
-          },
+              saveState: 'saved'
+            }
+          }
         })
       }
       return createToolExecutionOutput('已精准替换第 1 处目标片段（世界杯视觉设计研究.md）', {
@@ -2449,21 +2725,27 @@ test('agent sdk runtime autosaves the unique observed document target on continu
             path: targetPath,
             dirty: true,
             requiresSave: true,
-            saveState: 'dirty',
-          },
-        },
+            saveState: 'dirty'
+          }
+        }
       })
     },
     runAgent: async ({ tools, onTextDelta }) => {
-      const replaceTool = tools.find((tool) => tool.name === 'document_replace_exact') as { invoke: (context: unknown, input: string) => Promise<string> }
-      await replaceTool.invoke({}, JSON.stringify({
-        target: '文化典故（深度解读）：',
-        replacement: '文化典故（深度解读）：\n\n补充后的内容。',
-      }))
+      const replaceTool = tools.find((tool) => tool.name === 'document_replace_exact') as {
+        invoke: (context: unknown, input: string) => Promise<string>
+      }
+      await replaceTool.invoke(
+        {},
+        JSON.stringify({
+          target: '文化典故（深度解读）：',
+          replacement: '文化典故（深度解读）：\n\n补充后的内容。'
+        })
+      )
       onTextDelta('已继续补充文档。')
       return { finalText: '已继续补充文档。' }
-    },
+    }
   })
+  const runMeta = attachMemoryRunMeta(runtime)
   runtime.newSession('butler::scope-observed-doc-autosave', 'system prompt')
 
   const result = await runtime.sendMessage(
@@ -2473,8 +2755,9 @@ test('agent sdk runtime autosaves the unique observed document target on continu
     {
       publicSessionId: 'scope-observed-doc-autosave',
       taskId: 'task-observed-doc-autosave',
-      requestEnvelope: { primaryInstruction: '继续', resources: [] },
-    },
+      taskBudgetRuntime: createTaskBudgetRuntime('short_task'),
+      requestEnvelope: { primaryInstruction: '继续', resources: [] }
+    }
   )
 
   assert.equal(result.success, true)
@@ -2483,18 +2766,24 @@ test('agent sdk runtime autosaves the unique observed document target on continu
       name: 'document_replace_exact',
       args: {
         target: '文化典故（深度解读）：',
-        replacement: '文化典故（深度解读）：\n\n补充后的内容。',
-      },
+        replacement: '文化典故（深度解读）：\n\n补充后的内容。'
+      }
     },
-    { name: 'document_save_tab', args: { tabId: 'doc-world-cup' } },
+    { name: 'document_save_tab', args: { tabId: 'doc-world-cup' } }
   ])
   assert.match(result.finalText, /已保存文档/)
+  assert.equal(runMeta.get('run-observed-doc-autosave')?.lastMessageText, result.finalText)
+  assert.equal(result.executionDiagnostics?.taskBudgetRuntime?.usage.toolCallsUsed, 2)
 })
 
 test('agent sdk runtime allows rewrite tasks that preserve meaning without preserving exact old lines', async () => {
   const tmpRoot = await mkdtemp(join(tmpdir(), 'ready-agent-sdk-meaning-'))
   const targetPath = join(tmpRoot, 'E2-提案草稿.md')
-  await writeFile(targetPath, '# 草稿\n\n这个方案挺好的，但是有点乱。这个目标要重复说一下，目标是提高报名。\n', 'utf-8')
+  await writeFile(
+    targetPath,
+    '# 草稿\n\n这个方案挺好的，但是有点乱。这个目标要重复说一下，目标是提高报名。\n',
+    'utf-8'
+  )
   try {
     const openDefinition = createToolDefinition({
       name: 'document_open_tab',
@@ -2506,8 +2795,8 @@ test('agent sdk runtime allows rewrite tasks that preserve meaning without prese
         type: 'object',
         properties: { path: { type: 'string' } },
         required: ['path'],
-        additionalProperties: false,
-      },
+        additionalProperties: false
+      }
     })
     const setContentDefinition = createToolDefinition({
       name: 'document_set_content',
@@ -2521,8 +2810,8 @@ test('agent sdk runtime allows rewrite tasks that preserve meaning without prese
         type: 'object',
         properties: { content: { type: 'string' } },
         required: ['content'],
-        additionalProperties: false,
-      },
+        additionalProperties: false
+      }
     })
     const saveDefinition = createToolDefinition({
       name: 'document_save_tab',
@@ -2535,8 +2824,8 @@ test('agent sdk runtime allows rewrite tasks that preserve meaning without prese
       schema: {
         type: 'object',
         properties: {},
-        additionalProperties: false,
-      },
+        additionalProperties: false
+      }
     })
     const calls: Array<{ name: string; args: Record<string, unknown> }> = []
     const runtime = createRuntime({
@@ -2552,17 +2841,22 @@ test('agent sdk runtime allows rewrite tasks that preserve meaning without prese
             : name === 'document_save_tab'
               ? 'saved target'
               : 'updated target',
-          { shape: 'json', data: { ok: true } },
+          { shape: 'json', data: { ok: true } }
         )
       },
       runAgent: async ({ tools, onTextDelta }) => {
-        const setContentTool = tools[0] as { invoke: (context: unknown, input: string) => Promise<string> }
-        await setContentTool.invoke({}, JSON.stringify({
-          content: '# 正式提案\n\n## 目标\n\n通过更清晰的活动方案提升报名转化。',
-        }))
+        const setContentTool = tools[0] as {
+          invoke: (context: unknown, input: string) => Promise<string>
+        }
+        await setContentTool.invoke(
+          {},
+          JSON.stringify({
+            content: '# 正式提案\n\n## 目标\n\n通过更清晰的活动方案提升报名转化。'
+          })
+        )
         onTextDelta('已改写为正式提案。')
         return { finalText: '已改写为正式提案。' }
-      },
+      }
     })
     runtime.newSession('butler::scope-doc-preserve-meaning', 'system prompt')
 
@@ -2572,7 +2866,7 @@ test('agent sdk runtime allows rewrite tasks that preserve meaning without prese
         '把@[E2-提案草稿.md]改得更像正式提案，保留原意，删掉重复内容。',
         '',
         '--- 附件: E2-提案草稿.md ---',
-        `- 路径: ${targetPath}`,
+        `- 路径: ${targetPath}`
       ].join('\n'),
       'run-doc-preserve-meaning',
       {
@@ -2580,19 +2874,16 @@ test('agent sdk runtime allows rewrite tasks that preserve meaning without prese
         taskId: 'task-doc-preserve-meaning',
         requestEnvelope: {
           primaryInstruction: '把@[E2-提案草稿.md]改得更像正式提案，保留原意，删掉重复内容。',
-          resources: [
-            { name: 'E2-提案草稿.md', path: targetPath },
-          ],
-        },
-      },
+          resources: [{ name: 'E2-提案草稿.md', path: targetPath }]
+        }
+      }
     )
 
     assert.equal(result.success, true)
-    assert.deepEqual(calls.map((call) => call.name), [
-      'document_open_tab',
-      'document_set_content',
-      'document_save_tab',
-    ])
+    assert.deepEqual(
+      calls.map((call) => call.name),
+      ['document_open_tab', 'document_set_content', 'document_save_tab']
+    )
   } finally {
     await rm(tmpRoot, { recursive: true, force: true })
   }
@@ -2611,8 +2902,8 @@ test('agent sdk runtime repairs new document turns that mutate without saving', 
       type: 'object',
       properties: { title: { type: 'string' } },
       required: ['title'],
-      additionalProperties: false,
-    },
+      additionalProperties: false
+    }
   })
   const insertWidgetDefinition = createToolDefinition({
     name: 'document_insert_widget',
@@ -2627,11 +2918,11 @@ test('agent sdk runtime repairs new document turns that mutate without saving', 
       properties: {
         title: { type: 'string' },
         position: { type: 'string' },
-        widgetCode: { type: 'string' },
+        widgetCode: { type: 'string' }
       },
       required: ['title', 'widgetCode'],
-      additionalProperties: false,
-    },
+      additionalProperties: false
+    }
   })
   const saveDefinition = createToolDefinition({
     name: 'document_save_tab',
@@ -2644,8 +2935,8 @@ test('agent sdk runtime repairs new document turns that mutate without saving', 
     schema: {
       type: 'object',
       properties: {},
-      additionalProperties: false,
-    },
+      additionalProperties: false
+    }
   })
   const calls: Array<{ name: string; args: Record<string, unknown> }> = []
   const runInputs: unknown[] = []
@@ -2660,26 +2951,34 @@ test('agent sdk runtime repairs new document turns that mutate without saving', 
           : name === 'document_new_tab'
             ? '已创建文档标签：A1-人物关系图'
             : '已在文档尾部插入 widget（人物关系图）',
-        { shape: 'json', data: { ok: true } },
+        { shape: 'json', data: { ok: true } }
       )
     },
     runAgent: async ({ tools, input, onTextDelta }) => {
       runInputs.push(input)
       runCount += 1
-      const byName = new Map(tools.map((tool) => [tool.name, tool as { invoke: (context: unknown, input: string) => Promise<string> }]))
+      const byName = new Map(
+        tools.map((tool) => [
+          tool.name,
+          tool as { invoke: (context: unknown, input: string) => Promise<string> }
+        ])
+      )
       if (runCount === 1) {
         await byName.get('document_new_tab')?.invoke({}, JSON.stringify({ title: 'A1-人物关系图' }))
-        await byName.get('document_insert_widget')?.invoke({}, JSON.stringify({
-          title: '人物关系图',
-          position: 'end',
-          widgetCode: '{"type":"relationship-map"}',
-        }))
+        await byName.get('document_insert_widget')?.invoke(
+          {},
+          JSON.stringify({
+            title: '人物关系图',
+            position: 'end',
+            widgetCode: '{"type":"relationship-map"}'
+          })
+        )
         return { finalText: '' }
       }
       assert.match(String(input), /还没有调用 document_save_tab 保存/)
       onTextDelta('我会保存当前文档。')
       return { finalText: '我会保存当前文档。' }
-    },
+    }
   })
   runtime.newSession('butler::scope-new-doc-save-repair', 'system prompt')
 
@@ -2689,8 +2988,8 @@ test('agent sdk runtime repairs new document turns that mutate without saving', 
     'run-new-doc-save-repair',
     {
       publicSessionId: 'scope-new-doc-save-repair',
-      taskId: 'task-new-doc-save-repair',
-    },
+      taskId: 'task-new-doc-save-repair'
+    }
   )
 
   assert.equal(result.success, true)
@@ -2701,9 +3000,9 @@ test('agent sdk runtime repairs new document turns that mutate without saving', 
     { name: 'document_new_tab', args: { title: 'A1-人物关系图' } },
     {
       name: 'document_insert_widget',
-      args: { title: '人物关系图', position: 'end', widgetCode: '{"type":"relationship-map"}' },
+      args: { title: '人物关系图', position: 'end', widgetCode: '{"type":"relationship-map"}' }
     },
-    { name: 'document_save_tab', args: {} },
+    { name: 'document_save_tab', args: {} }
   ])
 })
 
@@ -2719,8 +3018,8 @@ test('agent sdk runtime anchors explicit target document instead of exposing new
         baseUrl: 'https://token-plan-sgp.xiaomimimo.com/anthropic',
         model: 'mimo-v2.5',
         agentProtocol: 'anthropic',
-        toolUseMode: 'on',
-      },
+        toolUseMode: 'on'
+      }
     }),
     fetchWithTimeout: async (url, init) => {
       const body = JSON.parse(String(init.body || '{}')) as Record<string, unknown>
@@ -2735,16 +3034,20 @@ test('agent sdk runtime anchors explicit target document instead of exposing new
       assert.equal(toolNames.includes('web_search'), false)
       assert.match(String(body.system || ''), /\/tmp\/新文档\.md/)
       assert.match(String(body.system || ''), /不要新建临时文档/)
-      return new Response(JSON.stringify({
-        id: 'msg-doc-target-1',
-        role: 'assistant',
-        type: 'message',
-        content: [{ type: 'text', text: '会写入目标文档。' }],
-        stop_reason: 'end_turn',
-        usage: { input_tokens: 10, output_tokens: 4 },
-      }), { status: 200 })
-    },
+      return new Response(
+        JSON.stringify({
+          id: 'msg-doc-target-1',
+          role: 'assistant',
+          type: 'message',
+          content: [{ type: 'text', text: '会写入目标文档。' }],
+          stop_reason: 'end_turn',
+          usage: { input_tokens: 10, output_tokens: 4 }
+        }),
+        { status: 200 }
+      )
+    }
   })
+  const runMeta = attachMemoryRunMeta(runtime)
   runtime.newSession('butler::scope-doc-target', 'system prompt')
 
   const result = await runtime.sendMessage(
@@ -2753,19 +3056,20 @@ test('agent sdk runtime anchors explicit target document instead of exposing new
       '在@[新文档.md]里写入一段人物关系图占位内容',
       '',
       '--- 附件: 新文档.md ---',
-      '- 路径: /tmp/新文档.md',
+      '- 路径: /tmp/新文档.md'
     ].join('\n'),
     'run-doc-target',
     {
       publicSessionId: 'scope-doc-target',
-      taskId: 'task-doc-target',
-    },
+      taskId: 'task-doc-target'
+    }
   )
 
   assert.equal(result.success, false)
   assert.equal(result.terminalReason, 'blocked_tool_error')
   assert.match(result.error || '', /目标文档/)
   assert.equal(requests.length, 2)
+  assert.equal(runMeta.get('run-doc-target')?.lastMessageText, '')
 })
 
 test('agent sdk runtime opens explicit target document before the first mutation', async () => {
@@ -2778,11 +3082,11 @@ test('agent sdk runtime opens explicit target document before the first mutation
     schema: {
       type: 'object',
       properties: {
-        path: { type: 'string' },
+        path: { type: 'string' }
       },
       required: ['path'],
-      additionalProperties: false,
-    },
+      additionalProperties: false
+    }
   })
   const setContentDefinition = createToolDefinition({
     name: 'document_set_content',
@@ -2795,11 +3099,11 @@ test('agent sdk runtime opens explicit target document before the first mutation
     schema: {
       type: 'object',
       properties: {
-        content: { type: 'string' },
+        content: { type: 'string' }
       },
       required: ['content'],
-      additionalProperties: false,
-    },
+      additionalProperties: false
+    }
   })
   const saveDefinition = createToolDefinition({
     name: 'document_save_tab',
@@ -2812,8 +3116,8 @@ test('agent sdk runtime opens explicit target document before the first mutation
     schema: {
       type: 'object',
       properties: {},
-      additionalProperties: false,
-    },
+      additionalProperties: false
+    }
   })
   const calls: Array<{ name: string; args: Record<string, unknown> }> = []
   const runtime = createRuntime({
@@ -2827,17 +3131,22 @@ test('agent sdk runtime opens explicit target document before the first mutation
             ? 'saved target'
             : 'updated target',
         {
-        shape: 'json',
-        data: { ok: true },
-        },
+          shape: 'json',
+          data: { ok: true }
+        }
       )
     },
     runAgent: async ({ tools, onTextDelta }) => {
-      const setContentTool = tools[0] as { invoke: (context: unknown, input: string) => Promise<string> }
-      await setContentTool.invoke({}, JSON.stringify({ content: '人物关系图内容', tabId: 'draft-tab' }))
+      const setContentTool = tools[0] as {
+        invoke: (context: unknown, input: string) => Promise<string>
+      }
+      await setContentTool.invoke(
+        {},
+        JSON.stringify({ content: '人物关系图内容', tabId: 'draft-tab' })
+      )
       onTextDelta('已写入目标文档')
       return { finalText: '已写入目标文档' }
-    },
+    }
   })
   runtime.newSession('butler::scope-doc-auto-open', 'system prompt')
 
@@ -2847,7 +3156,7 @@ test('agent sdk runtime opens explicit target document before the first mutation
       '在@[新文档.md]里写入一段人物关系图占位内容',
       '',
       '--- 附件: 新文档.md ---',
-      '- 路径: /tmp/新文档.md',
+      '- 路径: /tmp/新文档.md'
     ].join('\n'),
     'run-doc-auto-open',
     {
@@ -2855,18 +3164,16 @@ test('agent sdk runtime opens explicit target document before the first mutation
       taskId: 'task-doc-auto-open',
       requestEnvelope: {
         primaryInstruction: '在@[新文档.md]里写入一段人物关系图占位内容',
-        resources: [
-          { name: '新文档.md', path: '/tmp/新文档.md' },
-        ],
-      },
-    },
+        resources: [{ name: '新文档.md', path: '/tmp/新文档.md' }]
+      }
+    }
   )
 
   assert.equal(result.success, true)
   assert.deepEqual(calls, [
     { name: 'document_open_tab', args: { path: '/tmp/新文档.md' } },
     { name: 'document_set_content', args: { content: '人物关系图内容' } },
-    { name: 'document_save_tab', args: {} },
+    { name: 'document_save_tab', args: {} }
   ])
 })
 
@@ -2881,8 +3188,8 @@ test('agent sdk runtime repairs explicit target turns that finish before writing
       type: 'object',
       properties: { path: { type: 'string' } },
       required: ['path'],
-      additionalProperties: false,
-    },
+      additionalProperties: false
+    }
   })
   const setContentDefinition = createToolDefinition({
     name: 'document_set_content',
@@ -2896,8 +3203,8 @@ test('agent sdk runtime repairs explicit target turns that finish before writing
       type: 'object',
       properties: { content: { type: 'string' } },
       required: ['content'],
-      additionalProperties: false,
-    },
+      additionalProperties: false
+    }
   })
   const saveDefinition = createToolDefinition({
     name: 'document_save_tab',
@@ -2910,8 +3217,8 @@ test('agent sdk runtime repairs explicit target turns that finish before writing
     schema: {
       type: 'object',
       properties: {},
-      additionalProperties: false,
-    },
+      additionalProperties: false
+    }
   })
   const calls: Array<{ name: string; args: Record<string, unknown> }> = []
   const runInputs: unknown[] = []
@@ -2926,7 +3233,7 @@ test('agent sdk runtime repairs explicit target turns that finish before writing
           : name === 'document_save_tab'
             ? 'saved target'
             : 'updated target',
-        { shape: 'json', data: { ok: true } },
+        { shape: 'json', data: { ok: true } }
       )
     },
     runAgent: async ({ tools, input, onTextDelta }) => {
@@ -2936,11 +3243,13 @@ test('agent sdk runtime repairs explicit target turns that finish before writing
         onTextDelta('我准备写入。')
         return { finalText: '我准备写入。' }
       }
-      const setContentTool = tools[0] as { invoke: (context: unknown, input: string) => Promise<string> }
+      const setContentTool = tools[0] as {
+        invoke: (context: unknown, input: string) => Promise<string>
+      }
       await setContentTool.invoke({}, JSON.stringify({ content: '补救写入的人物关系图' }))
       onTextDelta('已写入目标文档。')
       return { finalText: '已写入目标文档。' }
-    },
+    }
   })
   runtime.newSession('butler::scope-doc-repair-write', 'system prompt')
 
@@ -2950,7 +3259,7 @@ test('agent sdk runtime repairs explicit target turns that finish before writing
       '在@[新文档.md]里写入一段人物关系图占位内容',
       '',
       '--- 附件: 新文档.md ---',
-      '- 路径: /tmp/新文档.md',
+      '- 路径: /tmp/新文档.md'
     ].join('\n'),
     'run-doc-repair-write',
     {
@@ -2958,11 +3267,9 @@ test('agent sdk runtime repairs explicit target turns that finish before writing
       taskId: 'task-doc-repair-write',
       requestEnvelope: {
         primaryInstruction: '在@[新文档.md]里写入一段人物关系图占位内容',
-        resources: [
-          { name: '新文档.md', path: '/tmp/新文档.md' },
-        ],
-      },
-    },
+        resources: [{ name: '新文档.md', path: '/tmp/新文档.md' }]
+      }
+    }
   )
 
   assert.equal(result.success, true)
@@ -2971,7 +3278,7 @@ test('agent sdk runtime repairs explicit target turns that finish before writing
   assert.deepEqual(calls, [
     { name: 'document_open_tab', args: { path: '/tmp/新文档.md' } },
     { name: 'document_set_content', args: { content: '补救写入的人物关系图' } },
-    { name: 'document_save_tab', args: {} },
+    { name: 'document_save_tab', args: {} }
   ])
 })
 
@@ -2990,8 +3297,8 @@ test('agent sdk runtime does not count no-op section rewrites as target writes',
         type: 'object',
         properties: { path: { type: 'string' } },
         required: ['path'],
-        additionalProperties: false,
-      },
+        additionalProperties: false
+      }
     })
     const rewriteDefinition = createToolDefinition({
       name: 'document_rewrite_section',
@@ -3005,11 +3312,11 @@ test('agent sdk runtime does not count no-op section rewrites as target writes',
         type: 'object',
         properties: {
           sectionTitle: { type: 'string' },
-          content: { type: 'string' },
+          content: { type: 'string' }
         },
         required: ['sectionTitle', 'content'],
-        additionalProperties: false,
-      },
+        additionalProperties: false
+      }
     })
     const setContentDefinition = createToolDefinition({
       name: 'document_set_content',
@@ -3023,8 +3330,8 @@ test('agent sdk runtime does not count no-op section rewrites as target writes',
         type: 'object',
         properties: { content: { type: 'string' } },
         required: ['content'],
-        additionalProperties: false,
-      },
+        additionalProperties: false
+      }
     })
     const saveDefinition = createToolDefinition({
       name: 'document_save_tab',
@@ -3037,14 +3344,19 @@ test('agent sdk runtime does not count no-op section rewrites as target writes',
       schema: {
         type: 'object',
         properties: {},
-        additionalProperties: false,
-      },
+        additionalProperties: false
+      }
     })
     const calls: Array<{ name: string; args: Record<string, unknown> }> = []
     const runInputs: unknown[] = []
     let runCount = 0
     const runtime = createRuntime({
-      listToolDefinitions: () => [rewriteDefinition, setContentDefinition, openDefinition, saveDefinition],
+      listToolDefinitions: () => [
+        rewriteDefinition,
+        setContentDefinition,
+        openDefinition,
+        saveDefinition
+      ],
       executeToolCall: async (name, args) => {
         calls.push({ name, args })
         if (name === 'document_set_content') {
@@ -3058,26 +3370,36 @@ test('agent sdk runtime does not count no-op section rewrites as target writes',
               : name === 'document_rewrite_section'
                 ? '未找到章节“二、人物关系图”，未做改动'
                 : 'updated target',
-          { shape: 'json', data: { ok: true } },
+          { shape: 'json', data: { ok: true } }
         )
       },
       runAgent: async ({ tools, input, onTextDelta }) => {
         runInputs.push(input)
         runCount += 1
-        const rewriteTool = tools[0] as { invoke: (context: unknown, input: string) => Promise<string> }
-        const setContentTool = tools[1] as { invoke: (context: unknown, input: string) => Promise<string> }
+        const rewriteTool = tools[0] as {
+          invoke: (context: unknown, input: string) => Promise<string>
+        }
+        const setContentTool = tools[1] as {
+          invoke: (context: unknown, input: string) => Promise<string>
+        }
         if (runCount === 1) {
-          await rewriteTool.invoke({}, JSON.stringify({
-            sectionTitle: '二、人物关系图',
-            content: '修复后的人物关系图',
-          }))
+          await rewriteTool.invoke(
+            {},
+            JSON.stringify({
+              sectionTitle: '二、人物关系图',
+              content: '修复后的人物关系图'
+            })
+          )
           onTextDelta('已完成。')
           return { finalText: '已完成。' }
         }
-        await setContentTool.invoke({}, JSON.stringify({ content: '# 二、人物关系图\n\n修复后的人物关系图' }))
+        await setContentTool.invoke(
+          {},
+          JSON.stringify({ content: '# 二、人物关系图\n\n修复后的人物关系图' })
+        )
         onTextDelta('已真正写入目标文档。')
         return { finalText: '已真正写入目标文档。' }
-      },
+      }
     })
     runtime.newSession('butler::scope-doc-noop-rewrite', 'system prompt')
 
@@ -3087,7 +3409,7 @@ test('agent sdk runtime does not count no-op section rewrites as target writes',
         '把@[人物关系.md]里的 Mermaid 段落改成可渲染版本',
         '',
         '--- 附件: 人物关系.md ---',
-        `- 路径: ${targetPath}`,
+        `- 路径: ${targetPath}`
       ].join('\n'),
       'run-doc-noop-rewrite',
       {
@@ -3095,22 +3417,18 @@ test('agent sdk runtime does not count no-op section rewrites as target writes',
         taskId: 'task-doc-noop-rewrite',
         requestEnvelope: {
           primaryInstruction: '把@[人物关系.md]里的 Mermaid 段落改成可渲染版本',
-          resources: [
-            { name: '人物关系.md', path: targetPath },
-          ],
-        },
-      },
+          resources: [{ name: '人物关系.md', path: targetPath }]
+        }
+      }
     )
 
     assert.equal(result.success, true)
     assert.equal(runCount, 2)
     assert.match(String(runInputs[1]), /目标文档尚未发生实际写入/)
-    assert.deepEqual(calls.map((call) => call.name), [
-      'document_open_tab',
-      'document_rewrite_section',
-      'document_set_content',
-      'document_save_tab',
-    ])
+    assert.deepEqual(
+      calls.map((call) => call.name),
+      ['document_open_tab', 'document_rewrite_section', 'document_set_content', 'document_save_tab']
+    )
     assert.match(await readFile(targetPath, 'utf-8'), /修复后的人物关系图/)
   } finally {
     await rm(tmpRoot, { recursive: true, force: true })
@@ -3134,7 +3452,7 @@ test('agent sdk runtime blocks explicit target replacements that drop preserved 
     '## 主题观察',
     '',
     '原有主题观察：公爵返俄后的处境值得继续记录。',
-    '',
+    ''
   ].join('\n')
   await writeFile(targetPath, initialContent, 'utf-8')
   try {
@@ -3148,8 +3466,8 @@ test('agent sdk runtime blocks explicit target replacements that drop preserved 
         type: 'object',
         properties: { path: { type: 'string' } },
         required: ['path'],
-        additionalProperties: false,
-      },
+        additionalProperties: false
+      }
     })
     const fileReadDefinition = createToolDefinition({
       name: 'file_read_excerpt',
@@ -3161,8 +3479,8 @@ test('agent sdk runtime blocks explicit target replacements that drop preserved 
         type: 'object',
         properties: { path: { type: 'string' } },
         required: ['path'],
-        additionalProperties: false,
-      },
+        additionalProperties: false
+      }
     })
     const replaceDefinition = createToolDefinition({
       name: 'document_replace_exact',
@@ -3176,11 +3494,11 @@ test('agent sdk runtime blocks explicit target replacements that drop preserved 
         type: 'object',
         properties: {
           target: { type: 'string' },
-          replacement: { type: 'string' },
+          replacement: { type: 'string' }
         },
         required: ['target', 'replacement'],
-        additionalProperties: false,
-      },
+        additionalProperties: false
+      }
     })
     const saveDefinition = createToolDefinition({
       name: 'document_save_tab',
@@ -3193,12 +3511,17 @@ test('agent sdk runtime blocks explicit target replacements that drop preserved 
       schema: {
         type: 'object',
         properties: {},
-        additionalProperties: false,
-      },
+        additionalProperties: false
+      }
     })
     const calls: Array<{ name: string; args: Record<string, unknown> }> = []
     const runtime = createRuntime({
-      listToolDefinitions: () => [fileReadDefinition, replaceDefinition, openDefinition, saveDefinition],
+      listToolDefinitions: () => [
+        fileReadDefinition,
+        replaceDefinition,
+        openDefinition,
+        saveDefinition
+      ],
       executeToolCall: async (name, args) => {
         calls.push({ name, args })
         if (name === 'document_replace_exact') {
@@ -3206,13 +3529,13 @@ test('agent sdk runtime blocks explicit target replacements that drop preserved 
           await writeFile(
             targetPath,
             current.replace(String(args.target || ''), String(args.replacement || '')),
-            'utf-8',
+            'utf-8'
           )
         }
         if (name === 'file_read_excerpt') {
           return createToolExecutionOutput(await readFile(targetPath, 'utf-8'), {
             shape: 'json',
-            data: { ok: true },
+            data: { ok: true }
           })
         }
         return createToolExecutionOutput(
@@ -3221,29 +3544,39 @@ test('agent sdk runtime blocks explicit target replacements that drop preserved 
             : name === 'document_save_tab'
               ? 'saved target'
               : 'updated target',
-          { shape: 'json', data: { ok: true } },
+          { shape: 'json', data: { ok: true } }
         )
       },
       runAgent: async ({ tools, onTextDelta }) => {
-        const fileReadTool = tools[0] as { invoke: (context: unknown, input: string) => Promise<string> }
-        const replaceTool = tools[1] as { invoke: (context: unknown, input: string) => Promise<string> }
+        const fileReadTool = tools[0] as {
+          invoke: (context: unknown, input: string) => Promise<string>
+        }
+        const replaceTool = tools[1] as {
+          invoke: (context: unknown, input: string) => Promise<string>
+        }
         await fileReadTool.invoke({}, JSON.stringify({ path: targetPath }))
-        const unsafe = await replaceTool.invoke({}, JSON.stringify({
-          target: '> 这里是原有占位说明，不要删除。',
-          replacement: '> 以下人物关系基于前三章整理。',
-        }))
+        const unsafe = await replaceTool.invoke(
+          {},
+          JSON.stringify({
+            target: '> 这里是原有占位说明，不要删除。',
+            replacement: '> 以下人物关系基于前三章整理。'
+          })
+        )
         assert.match(unsafe, /原有内容/)
-        await replaceTool.invoke({}, JSON.stringify({
-          target: '> 这里是原有占位说明，不要删除。',
-          replacement: [
-            '> 这里是原有占位说明，不要删除。',
-            '',
-            '> 以下人物关系基于前三章整理。',
-          ].join('\n'),
-        }))
+        await replaceTool.invoke(
+          {},
+          JSON.stringify({
+            target: '> 这里是原有占位说明，不要删除。',
+            replacement: [
+              '> 这里是原有占位说明，不要删除。',
+              '',
+              '> 以下人物关系基于前三章整理。'
+            ].join('\n')
+          })
+        )
         onTextDelta('已保留原文并补充内容。')
         return { finalText: '已保留原文并补充内容。' }
-      },
+      }
     })
     runtime.newSession('butler::scope-doc-preserve-replace', 'system prompt')
 
@@ -3253,19 +3586,18 @@ test('agent sdk runtime blocks explicit target replacements that drop preserved 
         '把人物关系整理到@[A2-读书笔记.md]的“人物关系”这一节下面，保留原有笔记内容，不要覆盖其他章节。',
         '',
         '--- 附件: A2-读书笔记.md ---',
-        `- 路径: ${targetPath}`,
+        `- 路径: ${targetPath}`
       ].join('\n'),
       'run-doc-preserve-replace',
       {
         publicSessionId: 'scope-doc-preserve-replace',
         taskId: 'task-doc-preserve-replace',
         requestEnvelope: {
-          primaryInstruction: '把人物关系整理到@[A2-读书笔记.md]的“人物关系”这一节下面，保留原有笔记内容，不要覆盖其他章节。',
-          resources: [
-            { name: 'A2-读书笔记.md', path: targetPath },
-          ],
-        },
-      },
+          primaryInstruction:
+            '把人物关系整理到@[A2-读书笔记.md]的“人物关系”这一节下面，保留原有笔记内容，不要覆盖其他章节。',
+          resources: [{ name: 'A2-读书笔记.md', path: targetPath }]
+        }
+      }
     )
 
     const finalContent = await readFile(targetPath, 'utf-8')
@@ -3273,12 +3605,10 @@ test('agent sdk runtime blocks explicit target replacements that drop preserved 
     assert.equal(finalContent.includes('这是一份原有笔记，请保留这一段。'), true)
     assert.equal(finalContent.includes('> 这里是原有占位说明，不要删除。'), true)
     assert.equal(finalContent.includes('原有主题观察：公爵返俄后的处境值得继续记录。'), true)
-    assert.deepEqual(calls.map((call) => call.name), [
-      'file_read_excerpt',
-      'document_open_tab',
-      'document_replace_exact',
-      'document_save_tab',
-    ])
+    assert.deepEqual(
+      calls.map((call) => call.name),
+      ['file_read_excerpt', 'document_open_tab', 'document_replace_exact', 'document_save_tab']
+    )
   } finally {
     await rm(tmpRoot, { recursive: true, force: true })
   }
@@ -3295,8 +3625,8 @@ test('agent sdk runtime continues explicit target turns that admit the document 
       type: 'object',
       properties: { path: { type: 'string' } },
       required: ['path'],
-      additionalProperties: false,
-    },
+      additionalProperties: false
+    }
   })
   const setContentDefinition = createToolDefinition({
     name: 'document_set_content',
@@ -3310,8 +3640,8 @@ test('agent sdk runtime continues explicit target turns that admit the document 
       type: 'object',
       properties: { content: { type: 'string' } },
       required: ['content'],
-      additionalProperties: false,
-    },
+      additionalProperties: false
+    }
   })
   const saveDefinition = createToolDefinition({
     name: 'document_save_tab',
@@ -3324,8 +3654,8 @@ test('agent sdk runtime continues explicit target turns that admit the document 
     schema: {
       type: 'object',
       properties: {},
-      additionalProperties: false,
-    },
+      additionalProperties: false
+    }
   })
   const calls: Array<{ name: string; args: Record<string, unknown> }> = []
   const runInputs: unknown[] = []
@@ -3340,13 +3670,15 @@ test('agent sdk runtime continues explicit target turns that admit the document 
           : name === 'document_save_tab'
             ? 'saved target'
             : 'updated target',
-        { shape: 'json', data: { ok: true } },
+        { shape: 'json', data: { ok: true } }
       )
     },
     runAgent: async ({ tools, input, onTextDelta }) => {
       runInputs.push(input)
       runCount += 1
-      const setContentTool = tools[0] as { invoke: (context: unknown, input: string) => Promise<string> }
+      const setContentTool = tools[0] as {
+        invoke: (context: unknown, input: string) => Promise<string>
+      }
       if (runCount === 1) {
         await setContentTool.invoke({}, JSON.stringify({ content: '未完成内容 ——' }))
         onTextDelta('内容被截断了，我来补完末尾部分。')
@@ -3355,7 +3687,7 @@ test('agent sdk runtime continues explicit target turns that admit the document 
       await setContentTool.invoke({}, JSON.stringify({ content: '完整内容。' }))
       onTextDelta('已补完并保存。')
       return { finalText: '已补完并保存。' }
-    },
+    }
   })
   runtime.newSession('butler::scope-doc-incomplete-continue', 'system prompt')
 
@@ -3365,7 +3697,7 @@ test('agent sdk runtime continues explicit target turns that admit the document 
       '在@[新文档.md]里写入一段人物关系图占位内容',
       '',
       '--- 附件: 新文档.md ---',
-      '- 路径: /tmp/新文档.md',
+      '- 路径: /tmp/新文档.md'
     ].join('\n'),
     'run-doc-incomplete-continue',
     {
@@ -3373,11 +3705,9 @@ test('agent sdk runtime continues explicit target turns that admit the document 
       taskId: 'task-doc-incomplete-continue',
       requestEnvelope: {
         primaryInstruction: '在@[新文档.md]里写入一段人物关系图占位内容',
-        resources: [
-          { name: '新文档.md', path: '/tmp/新文档.md' },
-        ],
-      },
-    },
+        resources: [{ name: '新文档.md', path: '/tmp/新文档.md' }]
+      }
+    }
   )
 
   assert.equal(result.success, true)
@@ -3388,7 +3718,7 @@ test('agent sdk runtime continues explicit target turns that admit the document 
     { name: 'document_set_content', args: { content: '未完成内容 ——' } },
     { name: 'document_save_tab', args: {} },
     { name: 'document_set_content', args: { content: '完整内容。' } },
-    { name: 'document_save_tab', args: {} },
+    { name: 'document_save_tab', args: {} }
   ])
 })
 
@@ -3407,8 +3737,8 @@ test('agent sdk runtime repairs damaged show-widget content before completing ta
         type: 'object',
         properties: { path: { type: 'string' } },
         required: ['path'],
-        additionalProperties: false,
-      },
+        additionalProperties: false
+      }
     })
     const setContentDefinition = createToolDefinition({
       name: 'document_set_content',
@@ -3422,8 +3752,8 @@ test('agent sdk runtime repairs damaged show-widget content before completing ta
         type: 'object',
         properties: { content: { type: 'string' } },
         required: ['content'],
-        additionalProperties: false,
-      },
+        additionalProperties: false
+      }
     })
     const saveDefinition = createToolDefinition({
       name: 'document_save_tab',
@@ -3436,8 +3766,8 @@ test('agent sdk runtime repairs damaged show-widget content before completing ta
       schema: {
         type: 'object',
         properties: {},
-        additionalProperties: false,
-      },
+        additionalProperties: false
+      }
     })
     const calls: Array<{ name: string; args: Record<string, unknown> }> = []
     const runInputs: unknown[] = []
@@ -3455,30 +3785,38 @@ test('agent sdk runtime repairs damaged show-widget content before completing ta
             : name === 'document_save_tab'
               ? 'saved target'
               : 'updated target',
-          { shape: 'json', data: { ok: true } },
+          { shape: 'json', data: { ok: true } }
         )
       },
       runAgent: async ({ tools, input, onTextDelta }) => {
         runInputs.push(input)
         runCount += 1
-        const setContentTool = tools[0] as { invoke: (context: unknown, input: string) => Promise<string> }
+        const setContentTool = tools[0] as {
+          invoke: (context: unknown, input: string) => Promise<string>
+        }
         if (runCount === 1) {
-          await setContentTool.invoke({}, JSON.stringify({
-            content: [
-              '# 人物关系图',
-              '',
-              '```show-widget',
-              JSON.stringify({ id: 'broken', widget_code: '<svg><line x1="1"' }),
-              '```',
-            ].join('\n'),
-          }))
+          await setContentTool.invoke(
+            {},
+            JSON.stringify({
+              content: [
+                '# 人物关系图',
+                '',
+                '```show-widget',
+                JSON.stringify({ id: 'broken', widget_code: '<svg><line x1="1"' }),
+                '```'
+              ].join('\n')
+            })
+          )
           onTextDelta('已完成。')
           return { finalText: '已完成。' }
         }
-        await setContentTool.invoke({}, JSON.stringify({ content: '# 人物关系图\n\n文本版关系图。' }))
+        await setContentTool.invoke(
+          {},
+          JSON.stringify({ content: '# 人物关系图\n\n文本版关系图。' })
+        )
         onTextDelta('已改成稳定版本并保存。')
         return { finalText: '已改成稳定版本并保存。' }
-      },
+      }
     })
     runtime.newSession('butler::scope-doc-widget-repair', 'system prompt')
 
@@ -3488,7 +3826,7 @@ test('agent sdk runtime repairs damaged show-widget content before completing ta
         '在@[新文档.md]里写入一段人物关系图占位内容',
         '',
         '--- 附件: 新文档.md ---',
-        `- 路径: ${targetPath}`,
+        `- 路径: ${targetPath}`
       ].join('\n'),
       'run-doc-widget-repair',
       {
@@ -3496,23 +3834,24 @@ test('agent sdk runtime repairs damaged show-widget content before completing ta
         taskId: 'task-doc-widget-repair',
         requestEnvelope: {
           primaryInstruction: '在@[新文档.md]里写入一段人物关系图占位内容',
-          resources: [
-            { name: '新文档.md', path: targetPath },
-          ],
-        },
-      },
+          resources: [{ name: '新文档.md', path: targetPath }]
+        }
+      }
     )
 
     assert.equal(result.success, true)
     assert.equal(runCount, 2)
     assert.match(String(runInputs[1]), /show-widget/)
-    assert.deepEqual(calls.map((call) => call.name), [
-      'document_open_tab',
-      'document_set_content',
-      'document_save_tab',
-      'document_set_content',
-      'document_save_tab',
-    ])
+    assert.deepEqual(
+      calls.map((call) => call.name),
+      [
+        'document_open_tab',
+        'document_set_content',
+        'document_save_tab',
+        'document_set_content',
+        'document_save_tab'
+      ]
+    )
     assert.equal((await readFile(targetPath, 'utf-8')).includes('show-widget'), false)
   } finally {
     await rm(tmpRoot, { recursive: true, force: true })
@@ -3534,8 +3873,8 @@ test('agent sdk runtime repairs exposed Mermaid source before completing target 
         type: 'object',
         properties: { path: { type: 'string' } },
         required: ['path'],
-        additionalProperties: false,
-      },
+        additionalProperties: false
+      }
     })
     const setContentDefinition = createToolDefinition({
       name: 'document_set_content',
@@ -3549,8 +3888,8 @@ test('agent sdk runtime repairs exposed Mermaid source before completing target 
         type: 'object',
         properties: { content: { type: 'string' } },
         required: ['content'],
-        additionalProperties: false,
-      },
+        additionalProperties: false
+      }
     })
     const saveDefinition = createToolDefinition({
       name: 'document_save_tab',
@@ -3563,8 +3902,8 @@ test('agent sdk runtime repairs exposed Mermaid source before completing target 
       schema: {
         type: 'object',
         properties: {},
-        additionalProperties: false,
-      },
+        additionalProperties: false
+      }
     })
     const calls: Array<{ name: string; args: Record<string, unknown> }> = []
     const runInputs: unknown[] = []
@@ -3582,46 +3921,54 @@ test('agent sdk runtime repairs exposed Mermaid source before completing target 
             : name === 'document_save_tab'
               ? 'saved target'
               : 'updated target',
-          { shape: 'json', data: { ok: true } },
+          { shape: 'json', data: { ok: true } }
         )
       },
       runAgent: async ({ tools, input, onTextDelta }) => {
         runInputs.push(input)
         runCount += 1
-        const setContentTool = tools[0] as { invoke: (context: unknown, input: string) => Promise<string> }
+        const setContentTool = tools[0] as {
+          invoke: (context: unknown, input: string) => Promise<string>
+        }
         if (runCount === 1) {
-          await setContentTool.invoke({}, JSON.stringify({
+          await setContentTool.invoke(
+            {},
+            JSON.stringify({
+              content: [
+                '# 人物关系图',
+                '',
+                '```mermaid',
+                'graph LR',
+                '公爵["梅诗金公爵"]',
+                '娜斯塔霞["娜斯塔霞"]',
+                '```',
+                '',
+                '公爵 --- "一见钟情" --> 娜斯塔霞',
+                '%% 叶班钦家族',
+                '将军["叶班钦将军"] --- "父女" --> 大姐["亚历山德拉"]'
+              ].join('\n')
+            })
+          )
+          onTextDelta('已完成。')
+          return { finalText: '已完成。' }
+        }
+        await setContentTool.invoke(
+          {},
+          JSON.stringify({
             content: [
               '# 人物关系图',
               '',
               '```mermaid',
               'graph LR',
-              '公爵["梅诗金公爵"]',
-              '娜斯塔霞["娜斯塔霞"]',
-              '```',
-              '',
-              '公爵 --- "一见钟情" --> 娜斯塔霞',
-              '%% 叶班钦家族',
-              '将军["叶班钦将军"] --- "父女" --> 大姐["亚历山德拉"]',
-            ].join('\n'),
-          }))
-          onTextDelta('已完成。')
-          return { finalText: '已完成。' }
-        }
-        await setContentTool.invoke({}, JSON.stringify({
-          content: [
-            '# 人物关系图',
-            '',
-            '```mermaid',
-            'graph LR',
-            '公爵["梅诗金公爵"] --> 娜斯塔霞["娜斯塔霞"]',
-            '将军["叶班钦将军"] --> 大姐["亚历山德拉"]',
-            '```',
-          ].join('\n'),
-        }))
+              '公爵["梅诗金公爵"] --> 娜斯塔霞["娜斯塔霞"]',
+              '将军["叶班钦将军"] --> 大姐["亚历山德拉"]',
+              '```'
+            ].join('\n')
+          })
+        )
         onTextDelta('已改成完整 Mermaid 图并保存。')
         return { finalText: '已改成完整 Mermaid 图并保存。' }
-      },
+      }
     })
     runtime.newSession('butler::scope-doc-mermaid-repair', 'system prompt')
 
@@ -3631,7 +3978,7 @@ test('agent sdk runtime repairs exposed Mermaid source before completing target 
         '在@[新文档.md]里写入一段人物关系图占位内容',
         '',
         '--- 附件: 新文档.md ---',
-        `- 路径: ${targetPath}`,
+        `- 路径: ${targetPath}`
       ].join('\n'),
       'run-doc-mermaid-repair',
       {
@@ -3639,23 +3986,24 @@ test('agent sdk runtime repairs exposed Mermaid source before completing target 
         taskId: 'task-doc-mermaid-repair',
         requestEnvelope: {
           primaryInstruction: '在@[新文档.md]里写入一段人物关系图占位内容',
-          resources: [
-            { name: '新文档.md', path: targetPath },
-          ],
-        },
-      },
+          resources: [{ name: '新文档.md', path: targetPath }]
+        }
+      }
     )
 
     assert.equal(result.success, true)
     assert.equal(runCount, 2)
     assert.match(String(runInputs[1]), /Mermaid\/关系图源码裸露/)
-    assert.deepEqual(calls.map((call) => call.name), [
-      'document_open_tab',
-      'document_set_content',
-      'document_save_tab',
-      'document_set_content',
-      'document_save_tab',
-    ])
+    assert.deepEqual(
+      calls.map((call) => call.name),
+      [
+        'document_open_tab',
+        'document_set_content',
+        'document_save_tab',
+        'document_set_content',
+        'document_save_tab'
+      ]
+    )
     const saved = await readFile(targetPath, 'utf-8')
     assert.match(saved, /```mermaid/)
     assert.doesNotMatch(saved, /\n公爵 --- "一见钟情"/)
@@ -3679,8 +4027,8 @@ test('agent sdk runtime treats a single selected document as target for section 
         type: 'object',
         properties: { path: { type: 'string' } },
         required: ['path'],
-        additionalProperties: false,
-      },
+        additionalProperties: false
+      }
     })
     const setContentDefinition = createToolDefinition({
       name: 'document_set_content',
@@ -3694,8 +4042,8 @@ test('agent sdk runtime treats a single selected document as target for section 
         type: 'object',
         properties: { content: { type: 'string' } },
         required: ['content'],
-        additionalProperties: false,
-      },
+        additionalProperties: false
+      }
     })
     const saveDefinition = createToolDefinition({
       name: 'document_save_tab',
@@ -3708,8 +4056,8 @@ test('agent sdk runtime treats a single selected document as target for section 
       schema: {
         type: 'object',
         properties: {},
-        additionalProperties: false,
-      },
+        additionalProperties: false
+      }
     })
     const calls: Array<{ name: string; args: Record<string, unknown> }> = []
     const runInputs: unknown[] = []
@@ -3727,76 +4075,82 @@ test('agent sdk runtime treats a single selected document as target for section 
             : name === 'document_save_tab'
               ? 'saved target'
               : 'updated target',
-          { shape: 'json', data: { ok: true } },
+          { shape: 'json', data: { ok: true } }
         )
       },
       runAgent: async ({ tools, input, onTextDelta }) => {
         runInputs.push(input)
         runCount += 1
-        const setContentTool = tools[0] as { invoke: (context: unknown, input: string) => Promise<string> }
+        const setContentTool = tools[0] as {
+          invoke: (context: unknown, input: string) => Promise<string>
+        }
         if (runCount === 1) {
-          await setContentTool.invoke({}, JSON.stringify({
-            content: [
-              '# 二、人物关系图',
-              '',
-              '```mermaid',
-              'graph TD',
-              'duke -- "一见钟情" --- nastasya',
-              '%% 叶班钦家族',
-              'epanchin["叶班钦将军"]',
-              '```',
-            ].join('\n'),
-          }))
+          await setContentTool.invoke(
+            {},
+            JSON.stringify({
+              content: [
+                '# 二、人物关系图',
+                '',
+                '```mermaid',
+                'graph TD',
+                'duke -- "一见钟情" --- nastasya',
+                '%% 叶班钦家族',
+                'epanchin["叶班钦将军"]',
+                '```'
+              ].join('\n')
+            })
+          )
           onTextDelta('已修复并保存。')
           return { finalText: '已修复并保存。' }
         }
-        await setContentTool.invoke({}, JSON.stringify({
-          content: [
-            '# 二、人物关系图',
-            '',
-            '| 人物 | 关系 | 对象 |',
-            '| --- | --- | --- |',
-            '| 梅诗金公爵 | 一见钟情 | 娜斯塔霞 |',
-          ].join('\n'),
-        }))
+        await setContentTool.invoke(
+          {},
+          JSON.stringify({
+            content: [
+              '# 二、人物关系图',
+              '',
+              '| 人物 | 关系 | 对象 |',
+              '| --- | --- | --- |',
+              '| 梅诗金公爵 | 一见钟情 | 娜斯塔霞 |'
+            ].join('\n')
+          })
+        )
         onTextDelta('已改成表格并保存。')
         return { finalText: '已改成表格并保存。' }
-      },
+      }
     })
     runtime.newSession('butler::scope-doc-selected-target', 'system prompt')
 
     const result = await runtime.sendMessage(
       'butler::scope-doc-selected-target',
-      [
-        '修复一下这段 mermaid',
-        '',
-        '--- 附件: 白痴-笔记.md ---',
-        `- 路径: ${targetPath}`,
-      ].join('\n'),
+      ['修复一下这段 mermaid', '', '--- 附件: 白痴-笔记.md ---', `- 路径: ${targetPath}`].join(
+        '\n'
+      ),
       'run-doc-selected-target',
       {
         publicSessionId: 'scope-doc-selected-target',
         taskId: 'task-doc-selected-target',
         requestEnvelope: {
           primaryInstruction: '修复一下这段 mermaid',
-          resources: [
-            { name: '白痴-笔记.md', path: targetPath },
-          ],
-        },
-      },
+          resources: [{ name: '白痴-笔记.md', path: targetPath }]
+        }
+      }
     )
 
     assert.equal(result.success, true)
     assert.equal(runCount, 2)
     assert.match(String(runInputs[1]), /Mermaid/)
     assert.match(String(runInputs[1]), /边标签/)
-    assert.deepEqual(calls.map((call) => call.name), [
-      'document_open_tab',
-      'document_set_content',
-      'document_save_tab',
-      'document_set_content',
-      'document_save_tab',
-    ])
+    assert.deepEqual(
+      calls.map((call) => call.name),
+      [
+        'document_open_tab',
+        'document_set_content',
+        'document_save_tab',
+        'document_set_content',
+        'document_save_tab'
+      ]
+    )
     const saved = await readFile(targetPath, 'utf-8')
     assert.match(saved, /\| 人物 \| 关系 \| 对象 \|/)
     assert.doesNotMatch(saved, /duke --/)
@@ -3820,8 +4174,8 @@ test('agent sdk runtime treats max-turn exhaustion after a valid saved target do
         type: 'object',
         properties: { path: { type: 'string' } },
         required: ['path'],
-        additionalProperties: false,
-      },
+        additionalProperties: false
+      }
     })
     const setContentDefinition = createToolDefinition({
       name: 'document_set_content',
@@ -3835,8 +4189,8 @@ test('agent sdk runtime treats max-turn exhaustion after a valid saved target do
         type: 'object',
         properties: { content: { type: 'string' } },
         required: ['content'],
-        additionalProperties: false,
-      },
+        additionalProperties: false
+      }
     })
     const saveDefinition = createToolDefinition({
       name: 'document_save_tab',
@@ -3849,8 +4203,8 @@ test('agent sdk runtime treats max-turn exhaustion after a valid saved target do
       schema: {
         type: 'object',
         properties: {},
-        additionalProperties: false,
-      },
+        additionalProperties: false
+      }
     })
     const calls: Array<{ name: string; args: Record<string, unknown> }> = []
     const runtime = createRuntime({
@@ -3866,17 +4220,23 @@ test('agent sdk runtime treats max-turn exhaustion after a valid saved target do
             : name === 'document_save_tab'
               ? 'saved target'
               : 'updated target',
-          { shape: 'json', data: { ok: true } },
+          { shape: 'json', data: { ok: true } }
         )
       },
       runAgent: async ({ tools }) => {
-        const setContentTool = tools[0] as { invoke: (context: unknown, input: string) => Promise<string> }
-        await setContentTool.invoke({}, JSON.stringify({
-          content: '# B2 运营数据多图表报告\n\n已生成 4 个图表，并保存关键结论。',
-        }))
+        const setContentTool = tools[0] as {
+          invoke: (context: unknown, input: string) => Promise<string>
+        }
+        await setContentTool.invoke(
+          {},
+          JSON.stringify({
+            content: '# B2 运营数据多图表报告\n\n已生成 4 个图表，并保存关键结论。'
+          })
+        )
         throw new Error('Max turns (16) exceeded')
-      },
+      }
     })
+    const runMeta = attachMemoryRunMeta(runtime)
     runtime.newSession('butler::scope-doc-max-turn-complete', 'system prompt')
 
     const result = await runtime.sendMessage(
@@ -3885,7 +4245,7 @@ test('agent sdk runtime treats max-turn exhaustion after a valid saved target do
         '把多组运营数据整理到@[B2-运营数据多图表报告.md]里。',
         '',
         '--- 附件: B2-运营数据多图表报告.md ---',
-        `- 路径: ${targetPath}`,
+        `- 路径: ${targetPath}`
       ].join('\n'),
       'run-doc-max-turn-complete',
       {
@@ -3893,21 +4253,19 @@ test('agent sdk runtime treats max-turn exhaustion after a valid saved target do
         taskId: 'task-doc-max-turn-complete',
         requestEnvelope: {
           primaryInstruction: '把多组运营数据整理到@[B2-运营数据多图表报告.md]里。',
-          resources: [
-            { name: 'B2-运营数据多图表报告.md', path: targetPath },
-          ],
-        },
-      },
+          resources: [{ name: 'B2-运营数据多图表报告.md', path: targetPath }]
+        }
+      }
     )
 
     assert.equal(result.success, true)
     assert.equal(result.terminalReason, 'done')
     assert.match(result.finalText, /已完成并保存/)
-    assert.deepEqual(calls.map((call) => call.name), [
-      'document_open_tab',
-      'document_set_content',
-      'document_save_tab',
-    ])
+    assert.equal(runMeta.get('run-doc-max-turn-complete')?.lastMessageText, result.finalText)
+    assert.deepEqual(
+      calls.map((call) => call.name),
+      ['document_open_tab', 'document_set_content', 'document_save_tab']
+    )
   } finally {
     await rm(tmpRoot, { recursive: true, force: true })
   }
@@ -3924,39 +4282,50 @@ test('agent sdk runtime checkpoints max-turn loops after a successful file excer
       type: 'object',
       properties: { path: { type: 'string' } },
       required: ['path'],
-      additionalProperties: false,
-    },
+      additionalProperties: false
+    }
   })
   const statuses: Array<Record<string, unknown>> = []
   const errors: Array<Record<string, unknown>> = []
   const runtime = createRuntime({
     listToolDefinitions: () => [readExcerptDefinition],
-    executeToolCall: async () => createToolExecutionOutput(JSON.stringify({
-      ok: true,
-      path: '/tmp/events/北岸夜跑.md',
-      content: '# 北岸夜跑\n\n## 预算\n北岸夜跑预算共 4.0 万元，主要用于报备、物料、安保、摄影和应急。',
-    }), {
-      shape: 'json',
-      data: {
-        ok: true,
-        path: '/tmp/events/北岸夜跑.md',
-        content: '# 北岸夜跑\n\n## 预算\n北岸夜跑预算共 4.0 万元，主要用于报备、物料、安保、摄影和应急。',
-      },
-    }),
+    executeToolCall: async () =>
+      createToolExecutionOutput(
+        JSON.stringify({
+          ok: true,
+          path: '/tmp/events/北岸夜跑.md',
+          content:
+            '# 北岸夜跑\n\n## 预算\n北岸夜跑预算共 4.0 万元，主要用于报备、物料、安保、摄影和应急。'
+        }),
+        {
+          shape: 'json',
+          data: {
+            ok: true,
+            path: '/tmp/events/北岸夜跑.md',
+            content:
+              '# 北岸夜跑\n\n## 预算\n北岸夜跑预算共 4.0 万元，主要用于报备、物料、安保、摄影和应急。'
+          }
+        }
+      ),
     runAgent: async ({ tools }) => {
       const readTool = tools[0] as { invoke: (context: unknown, input: string) => Promise<string> }
       await readTool.invoke({}, JSON.stringify({ path: '/tmp/events/北岸夜跑.md' }))
       throw new Error('Max turns (16) exceeded')
-    },
+    }
   })
   runtime.on('status', (event) => statuses.push(event as Record<string, unknown>))
   runtime.on('error', (event) => errors.push(event as Record<string, unknown>))
   runtime.newSession('butler::scope-file-max-turn', 'system prompt')
 
-  const result = await runtime.sendMessage('butler::scope-file-max-turn', '告诉我北岸夜跑预算数字', 'run-file-max-turn', {
-    publicSessionId: 'scope-file-max-turn',
-    taskId: 'task-file-max-turn',
-  })
+  const result = await runtime.sendMessage(
+    'butler::scope-file-max-turn',
+    '告诉我北岸夜跑预算数字',
+    'run-file-max-turn',
+    {
+      publicSessionId: 'scope-file-max-turn',
+      taskId: 'task-file-max-turn'
+    }
+  )
 
   assert.equal(result.success, true)
   assert.equal(result.terminalReason, 'checkpoint_budget')
@@ -3967,8 +4336,8 @@ test('agent sdk runtime checkpoints max-turn loops after a successful file excer
     statuses.map((event) => [event.status, event.terminalReason]),
     [
       ['working', undefined],
-      ['checkpoint', 'checkpoint_budget'],
-    ],
+      ['checkpoint', 'checkpoint_budget']
+    ]
   )
 })
 
@@ -3983,39 +4352,48 @@ test('agent sdk runtime checkpoints max-turn loops after generic successful tool
       type: 'object',
       properties: { path: { type: 'string' } },
       required: ['path'],
-      additionalProperties: false,
-    },
+      additionalProperties: false
+    }
   })
   const statuses: Array<Record<string, unknown>> = []
   const errors: Array<Record<string, unknown>> = []
   const runtime = createRuntime({
     listToolDefinitions: () => [readExcerptDefinition],
-    executeToolCall: async () => createToolExecutionOutput(JSON.stringify({
-      ok: true,
-      path: '/tmp/notes/long-images-transcribed.md',
-      bytesRead: 4096,
-    }), {
-      shape: 'json',
-      data: {
-        ok: true,
-        path: '/tmp/notes/long-images-transcribed.md',
-        bytesRead: 4096,
-      },
-    }),
+    executeToolCall: async () =>
+      createToolExecutionOutput(
+        JSON.stringify({
+          ok: true,
+          path: '/tmp/notes/long-images-transcribed.md',
+          bytesRead: 4096
+        }),
+        {
+          shape: 'json',
+          data: {
+            ok: true,
+            path: '/tmp/notes/long-images-transcribed.md',
+            bytesRead: 4096
+          }
+        }
+      ),
     runAgent: async ({ tools }) => {
       const readTool = tools[0] as { invoke: (context: unknown, input: string) => Promise<string> }
       await readTool.invoke({}, JSON.stringify({ path: '/tmp/notes/long-images-transcribed.md' }))
       throw new Error('Max turns (16) exceeded')
-    },
+    }
   })
   runtime.on('status', (event) => statuses.push(event as Record<string, unknown>))
   runtime.on('error', (event) => errors.push(event as Record<string, unknown>))
   runtime.newSession('butler::scope-generic-progress-max-turn', 'system prompt')
 
-  const result = await runtime.sendMessage('butler::scope-generic-progress-max-turn', '@[study-notes]带我学一下这篇文章', 'run-generic-progress-max-turn', {
-    publicSessionId: 'scope-generic-progress-max-turn',
-    taskId: 'task-generic-progress-max-turn',
-  })
+  const result = await runtime.sendMessage(
+    'butler::scope-generic-progress-max-turn',
+    '@[study-notes]带我学一下这篇文章',
+    'run-generic-progress-max-turn',
+    {
+      publicSessionId: 'scope-generic-progress-max-turn',
+      taskId: 'task-generic-progress-max-turn'
+    }
+  )
 
   assert.equal(result.success, true)
   assert.equal(result.terminalReason, 'checkpoint_budget')
@@ -4026,8 +4404,8 @@ test('agent sdk runtime checkpoints max-turn loops after generic successful tool
     statuses.map((event) => [event.status, event.terminalReason]),
     [
       ['working', undefined],
-      ['checkpoint', 'checkpoint_budget'],
-    ],
+      ['checkpoint', 'checkpoint_budget']
+    ]
   )
 })
 
@@ -4035,7 +4413,7 @@ test('agent sdk runtime does not expose source excerpts when a local document wr
   const sourceContent = [
     '# 第二部第一章',
     '',
-    'SENSITIVE_SOURCE: 动辄发怒的原文章节内容，只能作为写文档依据，不能贴回聊天。',
+    'SENSITIVE_SOURCE: 动辄发怒的原文章节内容，只能作为写文档依据，不能贴回聊天。'
   ].join('\n')
   const readExcerptDefinition = createToolDefinition({
     name: 'file_read_excerpt',
@@ -4047,8 +4425,8 @@ test('agent sdk runtime does not expose source excerpts when a local document wr
       type: 'object',
       properties: { path: { type: 'string' } },
       required: ['path'],
-      additionalProperties: false,
-    },
+      additionalProperties: false
+    }
   })
   const newTabDefinition = createToolDefinition({
     name: 'document_new_tab',
@@ -4062,8 +4440,8 @@ test('agent sdk runtime does not expose source excerpts when a local document wr
       type: 'object',
       properties: { title: { type: 'string' } },
       required: ['title'],
-      additionalProperties: false,
-    },
+      additionalProperties: false
+    }
   })
   const setContentDefinition = createToolDefinition({
     name: 'document_set_content',
@@ -4077,8 +4455,8 @@ test('agent sdk runtime does not expose source excerpts when a local document wr
       type: 'object',
       properties: { content: { type: 'string' } },
       required: ['content'],
-      additionalProperties: false,
-    },
+      additionalProperties: false
+    }
   })
   const saveDefinition = createToolDefinition({
     name: 'document_save_tab',
@@ -4091,40 +4469,58 @@ test('agent sdk runtime does not expose source excerpts when a local document wr
     schema: {
       type: 'object',
       properties: {},
-      additionalProperties: false,
-    },
+      additionalProperties: false
+    }
   })
   const statuses: Array<Record<string, unknown>> = []
   const errors: Array<Record<string, unknown>> = []
   const runtime = createRuntime({
-    listToolDefinitions: () => [readExcerptDefinition, newTabDefinition, setContentDefinition, saveDefinition],
-    executeToolCall: async () => createToolExecutionOutput(JSON.stringify({
-      ok: true,
-      path: '/tmp/library/白痴.md',
-      content: sourceContent,
-    }), {
-      shape: 'json',
-      data: {
-        ok: true,
-        path: '/tmp/library/白痴.md',
-        content: sourceContent,
-      },
-    }),
+    listToolDefinitions: () => [
+      readExcerptDefinition,
+      newTabDefinition,
+      setContentDefinition,
+      saveDefinition
+    ],
+    executeToolCall: async () =>
+      createToolExecutionOutput(
+        JSON.stringify({
+          ok: true,
+          path: '/tmp/library/白痴.md',
+          content: sourceContent
+        }),
+        {
+          shape: 'json',
+          data: {
+            ok: true,
+            path: '/tmp/library/白痴.md',
+            content: sourceContent
+          }
+        }
+      ),
     runAgent: async ({ tools, maxTurns }) => {
       assert.equal(maxTurns, 40)
-      const byName = new Map(tools.map((tool) => [tool.name, tool as { invoke: (context: unknown, input: string) => Promise<string> }]))
-      await byName.get('file_read_excerpt')?.invoke({}, JSON.stringify({
-        path: '/tmp/library/白痴.md',
-        anchor: '第二部第一章',
-      }))
+      const byName = new Map(
+        tools.map((tool) => [
+          tool.name,
+          tool as { invoke: (context: unknown, input: string) => Promise<string> }
+        ])
+      )
+      await byName.get('file_read_excerpt')?.invoke(
+        {},
+        JSON.stringify({
+          path: '/tmp/library/白痴.md',
+          anchor: '第二部第一章'
+        })
+      )
       throw new Error('Max turns (40) exceeded')
-    },
+    }
   })
   runtime.on('status', (event) => statuses.push(event as Record<string, unknown>))
   runtime.on('error', (event) => errors.push(event as Record<string, unknown>))
   runtime.newSession('butler::scope-doc-write-max-turn-source', 'system prompt')
 
-  const instruction = '@[白痴.md]看一下第二部第一章，同样新建一个文档在@[白痴笔记]目录下写章节笔记并保存好'
+  const instruction =
+    '@[白痴.md]看一下第二部第一章，同样新建一个文档在@[白痴笔记]目录下写章节笔记并保存好'
   const result = await runtime.sendMessage(
     'butler::scope-doc-write-max-turn-source',
     [
@@ -4134,7 +4530,7 @@ test('agent sdk runtime does not expose source excerpts when a local document wr
       '- 路径: /tmp/library/白痴.md',
       '',
       '--- 附件: 白痴笔记 ---',
-      '- 路径: /tmp/library/白痴笔记',
+      '- 路径: /tmp/library/白痴笔记'
     ].join('\n'),
     'run-doc-write-max-turn-source',
     {
@@ -4144,10 +4540,10 @@ test('agent sdk runtime does not expose source excerpts when a local document wr
         primaryInstruction: instruction,
         resources: [
           { name: '白痴.md', path: '/tmp/library/白痴.md' },
-          { name: '白痴笔记', path: '/tmp/library/白痴笔记' },
-        ],
-      },
-    },
+          { name: '白痴笔记', path: '/tmp/library/白痴笔记' }
+        ]
+      }
+    }
   )
 
   assert.equal(result.success, true)
@@ -4162,8 +4558,8 @@ test('agent sdk runtime does not expose source excerpts when a local document wr
     statuses.map((event) => [event.status, event.terminalReason]),
     [
       ['working', undefined],
-      ['checkpoint', 'checkpoint_budget'],
-    ],
+      ['checkpoint', 'checkpoint_budget']
+    ]
   )
 })
 
@@ -4178,45 +4574,57 @@ test('agent sdk runtime does not checkpoint max-turn loops after a failed file e
       type: 'object',
       properties: { path: { type: 'string' } },
       required: ['path'],
-      additionalProperties: false,
-    },
+      additionalProperties: false
+    }
   })
   const statuses: Array<Record<string, unknown>> = []
   const errors: Array<Record<string, unknown>> = []
   const runtime = createRuntime({
     listToolDefinitions: () => [readExcerptDefinition],
-    executeToolCall: async () => createToolExecutionOutput(JSON.stringify({
-      ok: false,
-      path: '/tmp/events/missing.md',
-      error: 'path not in index',
-    }), {
-      shape: 'json',
-      data: {
-        ok: false,
-        path: '/tmp/events/missing.md',
-        error: 'path not in index',
-      },
-    }),
+    executeToolCall: async () =>
+      createToolExecutionOutput(
+        JSON.stringify({
+          ok: false,
+          path: '/tmp/events/missing.md',
+          error: 'path not in index'
+        }),
+        {
+          shape: 'json',
+          data: {
+            ok: false,
+            path: '/tmp/events/missing.md',
+            error: 'path not in index'
+          }
+        }
+      ),
     runAgent: async ({ tools }) => {
       const readTool = tools[0] as { invoke: (context: unknown, input: string) => Promise<string> }
       await readTool.invoke({}, JSON.stringify({ path: '/tmp/events/missing.md' }))
       throw new Error('Max turns (16) exceeded')
-    },
+    }
   })
   runtime.on('status', (event) => statuses.push(event as Record<string, unknown>))
   runtime.on('error', (event) => errors.push(event as Record<string, unknown>))
   runtime.newSession('butler::scope-file-max-turn-failed-read', 'system prompt')
 
-  const result = await runtime.sendMessage('butler::scope-file-max-turn-failed-read', '告诉我缺失文件里的预算数字', 'run-file-max-turn-failed-read', {
-    publicSessionId: 'scope-file-max-turn-failed-read',
-    taskId: 'task-file-max-turn-failed-read',
-  })
+  const result = await runtime.sendMessage(
+    'butler::scope-file-max-turn-failed-read',
+    '告诉我缺失文件里的预算数字',
+    'run-file-max-turn-failed-read',
+    {
+      publicSessionId: 'scope-file-max-turn-failed-read',
+      taskId: 'task-file-max-turn-failed-read'
+    }
+  )
 
   assert.equal(result.success, false)
   assert.equal(result.terminalReason, 'blocked_external')
   assert.equal(result.finalText, '')
   assert.equal(errors.length, 1)
-  assert.equal(statuses.some((event) => event.status === 'checkpoint'), false)
+  assert.equal(
+    statuses.some((event) => event.status === 'checkpoint'),
+    false
+  )
 })
 
 test('agent sdk runtime checkpoints max-turn target document turns with no effective mutation', async () => {
@@ -4229,7 +4637,7 @@ test('agent sdk runtime checkpoints max-turn target document turns with no effec
     const runtime = createRuntime({
       runAgent: async () => {
         throw new Error('Max turns (16) exceeded')
-      },
+      }
     })
     runtime.on('status', (event) => statuses.push(event as Record<string, unknown>))
     runtime.on('error', (event) => errors.push(event as Record<string, unknown>))
@@ -4237,30 +4645,30 @@ test('agent sdk runtime checkpoints max-turn target document turns with no effec
 
     const result = await runtime.sendMessage(
       'butler::scope-doc-max-turn-no-mutation',
-      [
-        '修复@[空文档.md]里的信息卡。',
-        '',
-        '--- 附件: 空文档.md ---',
-        `- 路径: ${targetPath}`,
-      ].join('\n'),
+      ['修复@[空文档.md]里的信息卡。', '', '--- 附件: 空文档.md ---', `- 路径: ${targetPath}`].join(
+        '\n'
+      ),
       'run-doc-max-turn-no-mutation',
       {
         publicSessionId: 'scope-doc-max-turn-no-mutation',
         taskId: 'task-doc-max-turn-no-mutation',
         requestEnvelope: {
           primaryInstruction: '修复@[空文档.md]里的信息卡。',
-          resources: [
-            { name: '空文档.md', path: targetPath },
-          ],
-        },
-      },
+          resources: [{ name: '空文档.md', path: targetPath }]
+        }
+      }
     )
 
     assert.equal(result.success, true)
     assert.equal(result.terminalReason, 'checkpoint_budget')
     assert.match(result.finalText, /还没有发生有效写入/)
     assert.equal(errors.length, 0)
-    assert.equal(statuses.some((event) => event.status === 'checkpoint' && event.terminalReason === 'checkpoint_budget'), true)
+    assert.equal(
+      statuses.some(
+        (event) => event.status === 'checkpoint' && event.terminalReason === 'checkpoint_budget'
+      ),
+      true
+    )
   } finally {
     await rm(tmpRoot, { recursive: true, force: true })
   }
@@ -4277,8 +4685,8 @@ test('agent sdk runtime recovers loose XML tool calls leaked as native model tex
       type: 'object',
       properties: { path: { type: 'string' } },
       required: ['path'],
-      additionalProperties: false,
-    },
+      additionalProperties: false
+    }
   })
   const setContentDefinition = createToolDefinition({
     name: 'document_set_content',
@@ -4292,8 +4700,8 @@ test('agent sdk runtime recovers loose XML tool calls leaked as native model tex
       type: 'object',
       properties: { content: { type: 'string' } },
       required: ['content'],
-      additionalProperties: false,
-    },
+      additionalProperties: false
+    }
   })
   const saveDefinition = createToolDefinition({
     name: 'document_save_tab',
@@ -4306,8 +4714,8 @@ test('agent sdk runtime recovers loose XML tool calls leaked as native model tex
     schema: {
       type: 'object',
       properties: {},
-      additionalProperties: false,
-    },
+      additionalProperties: false
+    }
   })
   const calls: Array<{ name: string; args: Record<string, unknown> }> = []
   let runCount = 0
@@ -4321,7 +4729,7 @@ test('agent sdk runtime recovers loose XML tool calls leaked as native model tex
           : name === 'document_save_tab'
             ? 'saved target'
             : 'updated target',
-        { shape: 'json', data: { ok: true } },
+        { shape: 'json', data: { ok: true } }
       )
     },
     runAgent: async ({ onTextDelta }) => {
@@ -4331,14 +4739,14 @@ test('agent sdk runtime recovers loose XML tool calls leaked as native model tex
           '现在写入目标文档：',
           '<tool_call>',
           '<function=document_set_content>',
-          '<parameter=content>XML 恢复写入的人物关系图',
+          '<parameter=content>XML 恢复写入的人物关系图'
         ].join('\n')
         onTextDelta(leaked)
         return { finalText: leaked }
       }
       onTextDelta('已写入并保存。')
       return { finalText: '已写入并保存。' }
-    },
+    }
   })
   runtime.newSession('butler::scope-doc-xml-recovery', 'system prompt')
 
@@ -4348,7 +4756,7 @@ test('agent sdk runtime recovers loose XML tool calls leaked as native model tex
       '在@[新文档.md]里写入一段人物关系图占位内容',
       '',
       '--- 附件: 新文档.md ---',
-      '- 路径: /tmp/新文档.md',
+      '- 路径: /tmp/新文档.md'
     ].join('\n'),
     'run-doc-xml-recovery',
     {
@@ -4356,11 +4764,9 @@ test('agent sdk runtime recovers loose XML tool calls leaked as native model tex
       taskId: 'task-doc-xml-recovery',
       requestEnvelope: {
         primaryInstruction: '在@[新文档.md]里写入一段人物关系图占位内容',
-        resources: [
-          { name: '新文档.md', path: '/tmp/新文档.md' },
-        ],
-      },
-    },
+        resources: [{ name: '新文档.md', path: '/tmp/新文档.md' }]
+      }
+    }
   )
 
   assert.equal(result.success, true)
@@ -4368,7 +4774,7 @@ test('agent sdk runtime recovers loose XML tool calls leaked as native model tex
   assert.deepEqual(calls, [
     { name: 'document_open_tab', args: { path: '/tmp/新文档.md' } },
     { name: 'document_set_content', args: { content: 'XML 恢复写入的人物关系图' } },
-    { name: 'document_save_tab', args: {} },
+    { name: 'document_save_tab', args: {} }
   ])
 })
 
@@ -4384,38 +4790,43 @@ test('agent sdk runtime honors Ready OpenAI-compatible responses wire API', asyn
         baseUrl: 'https://code.newcli.com/codex/v1',
         model: 'gpt-5.4',
         agentProtocol: 'openai',
-        wireApi: 'responses',
-      },
+        wireApi: 'responses'
+      }
     }),
     fetchWithTimeout: async (url, init) => {
       requests.push({
         url,
-        body: JSON.parse(String(init.body || '{}')) as Record<string, unknown>,
+        body: JSON.parse(String(init.body || '{}')) as Record<string, unknown>
       })
-      return new Response(JSON.stringify({
-        id: 'resp-1',
-        status: 'completed',
-        output: [{
-          type: 'message',
-          role: 'assistant',
-          content: [{ type: 'output_text', text: 'responses 完成' }],
-        }],
-        usage: { input_tokens: 5, output_tokens: 2, total_tokens: 7 },
-      }), { status: 200 })
-    },
+      return new Response(
+        JSON.stringify({
+          id: 'resp-1',
+          status: 'completed',
+          output: [
+            {
+              type: 'message',
+              role: 'assistant',
+              content: [{ type: 'output_text', text: 'responses 完成' }]
+            }
+          ],
+          usage: { input_tokens: 5, output_tokens: 2, total_tokens: 7 }
+        }),
+        { status: 200 }
+      )
+    }
   })
   runtime.newSession('butler::scope-responses', 'system prompt')
   await seedSdkSession(runtime, 'butler::scope-responses', [
     {
       type: 'function_call_result',
       callId: 'call-prev-path',
-      output: 'previous run at /Users/alice/Ready/run_state.json',
-    } as AgentInputItem,
+      output: 'previous run at /Users/alice/Ready/run_state.json'
+    } as AgentInputItem
   ])
 
   const result = await runtime.sendMessage('butler::scope-responses', '你好', 'run-responses', {
     publicSessionId: 'scope-responses',
-    taskId: 'task-responses',
+    taskId: 'task-responses'
   })
 
   assert.equal(result.success, true)
@@ -4445,25 +4856,30 @@ test('agent sdk runtime compacts oversized session history before sending wire i
         model: 'compat-chat',
         agentProtocol: 'openai',
         wireApi: 'chat/completions',
-        contextWindowOverride: 900,
-      },
+        contextWindowOverride: 900
+      }
     }),
     fetchWithTimeout: async (_url, init) => {
       requests.push(JSON.parse(String(init.body || '{}')) as Record<string, unknown>)
       return chatCompletionResponse('压缩后完成')
-    },
+    }
   })
   try {
     runtime.newSession('butler::scope-presend-compact', 'system prompt')
     await seedSdkSession(runtime, 'butler::scope-presend-compact', [
       ...historyTextItems('old-hidden-context', 16),
-      { role: 'user', content: 'recent-tail-marker' } as AgentInputItem,
+      { role: 'user', content: 'recent-tail-marker' } as AgentInputItem
     ])
 
-    const result = await runtime.sendMessage('butler::scope-presend-compact', 'CURRENT_INPUT_UNIQUE', 'run-presend-compact', {
-      publicSessionId: 'scope-presend-compact',
-      taskId: 'task-presend-compact',
-    })
+    const result = await runtime.sendMessage(
+      'butler::scope-presend-compact',
+      'CURRENT_INPUT_UNIQUE',
+      'run-presend-compact',
+      {
+        publicSessionId: 'scope-presend-compact',
+        taskId: 'task-presend-compact'
+      }
+    )
 
     assert.equal(result.success, true)
     assert.equal(requests.length, 1)
@@ -4472,7 +4888,9 @@ test('agent sdk runtime compacts oversized session history before sending wire i
     assert.doesNotMatch(bodyText, /old-hidden-context-4/)
     assert.match(bodyText, /recent-tail-marker/)
     assert.equal(countOccurrences(bodyText, 'CURRENT_INPUT_UNIQUE'), 1)
-    const compactionMetric = metrics.find((event) => event.metric === 'agent_sdk_auto_context_compacted')
+    const compactionMetric = metrics.find(
+      (event) => event.metric === 'agent_sdk_auto_context_compacted'
+    )
     assert.ok(compactionMetric, 'automatic compaction must emit an observability metric')
     assert.equal(compactionMetric.runId, 'run-presend-compact')
     assert.equal(compactionMetric.taskId, 'task-presend-compact')
@@ -4498,36 +4916,51 @@ test('agent sdk runtime retries context overflow after compacting the captured s
         model: 'compat-chat',
         agentProtocol: 'openai',
         wireApi: 'chat/completions',
-        contextWindowOverride: 100_000,
-      },
+        contextWindowOverride: 100_000
+      }
     }),
     fetchWithTimeout: async (_url, init) => {
       requests.push(JSON.parse(String(init.body || '{}')) as Record<string, unknown>)
       if (requests.length === 1) {
-        return new Response(JSON.stringify({
-          error: {
-            code: 'context_length_exceeded',
-            message: 'prompt is too long',
-          },
-        }), { status: 413 })
+        return new Response(
+          JSON.stringify({
+            error: {
+              code: 'context_length_exceeded',
+              message: 'prompt is too long'
+            }
+          }),
+          { status: 413 }
+        )
       }
       return chatCompletionResponse('重试成功')
-    },
+    }
   })
   runtime.newSession('butler::scope-overflow-retry', 'system prompt')
-  await seedSdkSession(runtime, 'butler::scope-overflow-retry', historyTextItems('overflow-history', 24))
+  await seedSdkSession(
+    runtime,
+    'butler::scope-overflow-retry',
+    historyTextItems('overflow-history', 24)
+  )
 
-  const result = await runtime.sendMessage('butler::scope-overflow-retry', 'CURRENT_OVERFLOW_INPUT', 'run-overflow-retry', {
-    publicSessionId: 'scope-overflow-retry',
-    taskId: 'task-overflow-retry',
-  })
+  const result = await runtime.sendMessage(
+    'butler::scope-overflow-retry',
+    'CURRENT_OVERFLOW_INPUT',
+    'run-overflow-retry',
+    {
+      publicSessionId: 'scope-overflow-retry',
+      taskId: 'task-overflow-retry'
+    }
+  )
 
   assert.equal(result.success, true)
   assert.equal(result.finalText, '重试成功')
   assert.equal(requests.length, 2)
   const firstBody = JSON.stringify(requests[0])
   const secondBody = JSON.stringify(requests[1])
-  assert.ok(secondBody.length < firstBody.length, `expected retry body to shrink (${firstBody.length} -> ${secondBody.length})`)
+  assert.ok(
+    secondBody.length < firstBody.length,
+    `expected retry body to shrink (${firstBody.length} -> ${secondBody.length})`
+  )
   assert.match(secondBody, /ready:context-compacted/)
   assert.equal(countOccurrences(secondBody, 'CURRENT_OVERFLOW_INPUT'), 1)
 })
@@ -4539,24 +4972,35 @@ test('agent sdk runtime compact primitive compresses the run-bound captured sess
     domain: 'skill',
     kind: 'write',
     description: 'Compact context',
-    schema: { type: 'object', properties: {}, additionalProperties: false },
+    schema: { type: 'object', properties: {}, additionalProperties: false }
   })
   const runtime = createRuntime({
     listToolDefinitions: () => [compactDefinition],
     runAgent: async ({ tools }) => {
-      const compactTool = tools[0] as { invoke: (context: unknown, input: string) => Promise<string> }
+      const compactTool = tools[0] as {
+        invoke: (context: unknown, input: string) => Promise<string>
+      }
       const output = await compactTool.invoke({}, JSON.stringify({}))
       assert.match(output, /context compacted|上下文|压缩/)
       return { finalText: '已压缩' }
-    },
+    }
   })
   runtime.newSession('butler::scope-compact-primitive', 'system prompt')
-  await seedSdkSession(runtime, 'butler::scope-compact-primitive', historyTextItems('primitive-history', 20))
+  await seedSdkSession(
+    runtime,
+    'butler::scope-compact-primitive',
+    historyTextItems('primitive-history', 20)
+  )
 
-  const result = await runtime.sendMessage('butler::scope-compact-primitive', '使用 context compact 压缩当前上下文', 'run-compact-primitive', {
-    publicSessionId: 'scope-compact-primitive',
-    taskId: 'task-compact-primitive',
-  })
+  const result = await runtime.sendMessage(
+    'butler::scope-compact-primitive',
+    '使用 context compact 压缩当前上下文',
+    'run-compact-primitive',
+    {
+      publicSessionId: 'scope-compact-primitive',
+      taskId: 'task-compact-primitive'
+    }
+  )
   const items = await readSdkSessionItems(runtime, 'butler::scope-compact-primitive')
 
   assert.equal(result.success, true)
@@ -4579,15 +5023,19 @@ test('agent sdk runtime waits for idle manual compaction before starting a new r
     runAgent: async () => {
       runStarted = true
       return { finalText: 'done' }
-    },
+    }
   })
   const name = 'butler::scope-compact-lock'
   runtime.newSession(name, 'system prompt')
   await seedSdkSession(runtime, name, historyTextItems('lock-history', 20))
 
-  const session = (runtime as unknown as {
-    sessionManager: { get: (name: string) => { sdkSession: { clearSession: () => Promise<void> } } | undefined }
-  }).sessionManager.get(name)
+  const session = (
+    runtime as unknown as {
+      sessionManager: {
+        get: (name: string) => { sdkSession: { clearSession: () => Promise<void> } } | undefined
+      }
+    }
+  ).sessionManager.get(name)
   assert.ok(session, `missing test session ${name}`)
   const originalClearSession = session.sdkSession.clearSession.bind(session.sdkSession)
   session.sdkSession.clearSession = async () => {
@@ -4600,7 +5048,7 @@ test('agent sdk runtime waits for idle manual compaction before starting a new r
   await compactEnteredPromise
   const sendPromise = runtime.sendMessage(name, 'hello after compact', 'run-compact-lock', {
     publicSessionId: 'scope-compact-lock',
-    taskId: 'task-compact-lock',
+    taskId: 'task-compact-lock'
   })
 
   await new Promise((resolve) => setTimeout(resolve, 20))
@@ -4628,11 +5076,11 @@ test('agent sdk runtime forwards renderer-mediated tool requests', async () => {
       type: 'object',
       properties: {
         tabId: { type: 'string' },
-        content: { type: 'string' },
+        content: { type: 'string' }
       },
       required: ['tabId', 'content'],
-      additionalProperties: false,
-    },
+      additionalProperties: false
+    }
   })
   const saveDefinition = createToolDefinition({
     name: 'document_save_tab',
@@ -4645,8 +5093,8 @@ test('agent sdk runtime forwards renderer-mediated tool requests', async () => {
     schema: {
       type: 'object',
       properties: { tabId: { type: 'string' } },
-      additionalProperties: false,
-    },
+      additionalProperties: false
+    }
   })
   const rendererRequests: Array<Record<string, unknown>> = []
   const runtime = createRuntime({
@@ -4664,21 +5112,23 @@ test('agent sdk runtime forwards renderer-mediated tool requests', async () => {
               path: '/tmp/renderer.md',
               dirty: false,
               requiresSave: false,
-              saveState: 'saved',
-            },
-          },
+              saveState: 'saved'
+            }
+          }
         })
       }
       const requestModuleToolAction = (
         context as {
-          requestModuleToolAction?: (tool: string, args: Record<string, unknown>) => Promise<Record<string, unknown>>
+          requestModuleToolAction?: (
+            tool: string,
+            args: Record<string, unknown>
+          ) => Promise<Record<string, unknown>>
         }
       ).requestModuleToolAction
       assert.ok(requestModuleToolAction)
-      ;(context as { emitToolAction?: (tool: string, args: Record<string, unknown>) => void }).emitToolAction?.(
-        'document.setContent',
-        args,
-      )
+      ;(
+        context as { emitToolAction?: (tool: string, args: Record<string, unknown>) => void }
+      ).emitToolAction?.('document.setContent', args)
       const rendererResult = await requestModuleToolAction('document_set_content', args)
       return createToolExecutionOutput('document updated', {
         shape: 'json',
@@ -4692,22 +5142,25 @@ test('agent sdk runtime forwards renderer-mediated tool requests', async () => {
             path: '/tmp/renderer.md',
             dirty: true,
             requiresSave: true,
-            saveState: 'dirty',
-          },
+            saveState: 'dirty'
+          }
         },
-        projectionPatch: { taskTitle: 'Document update' },
+        projectionPatch: { taskTitle: 'Document update' }
       })
     },
     runAgent: async ({ tools, onTextDelta }) => {
       const sdkTool = tools[0] as { invoke: (context: unknown, input: string) => Promise<string> }
-      const toolOutput = await sdkTool.invoke({}, JSON.stringify({
-        tabId: 'tab-1',
-        content: 'hello',
-      }))
+      const toolOutput = await sdkTool.invoke(
+        {},
+        JSON.stringify({
+          tabId: 'tab-1',
+          content: 'hello'
+        })
+      )
       assert.match(toolOutput, /"rendererOk":true/)
       onTextDelta('文档已更新')
       return { finalText: '文档已更新' }
-    },
+    }
   })
   runtime.setRendererToolActionRequester(async (payload) => {
     rendererRequests.push(payload)
@@ -4717,21 +5170,23 @@ test('agent sdk runtime forwards renderer-mediated tool requests', async () => {
 
   const result = await runtime.sendMessage('butler::scope-renderer', '更新文档', 'run-renderer', {
     publicSessionId: 'scope-renderer',
-    taskId: 'task-renderer',
+    taskId: 'task-renderer'
   })
 
   assert.equal(result.success, true)
   assert.equal(result.taskType, 'multi_step_task')
-  assert.deepEqual(rendererRequests, [{
-    agent: 'butler::scope-renderer',
-    sessionId: 'scope-renderer',
-    runId: 'run-renderer',
-    tool: 'document_set_content',
-    args: {
-      tabId: 'tab-1',
-      content: 'hello',
-    },
-  }])
+  assert.deepEqual(rendererRequests, [
+    {
+      agent: 'butler::scope-renderer',
+      sessionId: 'scope-renderer',
+      runId: 'run-renderer',
+      tool: 'document_set_content',
+      args: {
+        tabId: 'tab-1',
+        content: 'hello'
+      }
+    }
+  ])
   assert.deepEqual(result.projectionTruth?.projectionPatch, { taskTitle: 'Document update' })
 })
 
@@ -4740,31 +5195,37 @@ test('agent sdk runtime preserves structured tool validation errors', async () =
     name: 'rss_fetch_updates',
     groupId: 'rss',
     domain: 'rss',
-    description: 'Fetch RSS updates',
+    description: 'Fetch RSS updates'
   })
   let toolOutput = ''
   const runtime = createRuntime({
     listToolDefinitions: () => [toolDefinition],
-    executeToolCall: async () => createToolExecutionOutput('输入参数不完整', {
-      shape: 'json',
-      data: {
-        errorKind: 'input_validation',
-        detail: 'query is required',
-      },
-    }),
+    executeToolCall: async () =>
+      createToolExecutionOutput('输入参数不完整', {
+        shape: 'json',
+        data: {
+          errorKind: 'input_validation',
+          detail: 'query is required'
+        }
+      }),
     runAgent: async ({ tools, onTextDelta }) => {
       const sdkTool = tools[0] as { invoke: (context: unknown, input: string) => Promise<string> }
       toolOutput = await sdkTool.invoke({}, JSON.stringify({}))
       onTextDelta('需要补充参数')
       return { finalText: '需要补充参数' }
-    },
+    }
   })
   runtime.newSession('butler::scope-validation', 'system prompt')
 
-  const result = await runtime.sendMessage('butler::scope-validation', '更新 RSS', 'run-validation', {
-    publicSessionId: 'scope-validation',
-    taskId: 'task-validation',
-  })
+  const result = await runtime.sendMessage(
+    'butler::scope-validation',
+    '更新 RSS',
+    'run-validation',
+    {
+      publicSessionId: 'scope-validation',
+      taskId: 'task-validation'
+    }
+  )
 
   assert.equal(result.success, true)
   assert.deepEqual(result.usedTools, ['rss_fetch_updates'])
@@ -4781,20 +5242,22 @@ test('agent sdk runtime does not turn recoverable skill path errors into termina
       label: 'sandbox path escape',
       data: {
         errorKind: 'path_escape',
-        relativePath: '/Users/example/out.md',
-      },
+        relativePath: '/Users/example/out.md'
+      }
     },
     {
       label: 'relativePath input validation',
       data: {
         errorKind: 'input_validation',
-        issues: [{
-          path: ['relativePath'],
-          code: 'invalid_type',
-          message: 'Expected string',
-        }],
-      },
-    },
+        issues: [
+          {
+            path: ['relativePath'],
+            code: 'invalid_type',
+            message: 'Expected string'
+          }
+        ]
+      }
+    }
   ]
 
   for (const item of cases) {
@@ -4802,20 +5265,24 @@ test('agent sdk runtime does not turn recoverable skill path errors into termina
       name: 'skill_write_artifact',
       groupId: 'skills',
       domain: 'skills',
-      description: 'Write skill artifact',
+      description: 'Write skill artifact'
     })
     const runtime = createRuntime({
       listToolDefinitions: () => [toolDefinition],
-      executeToolCall: async () => createToolExecutionOutput('路径参数需要修正', {
-        shape: 'json',
-        data: item.data,
-      }),
+      executeToolCall: async () =>
+        createToolExecutionOutput('路径参数需要修正', {
+          shape: 'json',
+          data: item.data
+        }),
       runAgent: async ({ tools, onTextDelta }) => {
         const sdkTool = tools[0] as { invoke: (context: unknown, input: string) => Promise<string> }
-        await sdkTool.invoke({}, JSON.stringify({ relativePath: '/Users/example/out.md', content: 'x' }))
+        await sdkTool.invoke(
+          {},
+          JSON.stringify({ relativePath: '/Users/example/out.md', content: 'x' })
+        )
         onTextDelta(`继续修正 ${item.label}`)
         return { finalText: `继续修正 ${item.label}` }
-      },
+      }
     })
     const slug = item.label.replace(/\s+/g, '-')
     const sessionId = `butler::scope-skill-path-${slug}`
@@ -4823,13 +5290,19 @@ test('agent sdk runtime does not turn recoverable skill path errors into termina
 
     const result = await runtime.sendMessage(sessionId, '写入方案', `run-skill-path-${slug}`, {
       publicSessionId: sessionId,
-      taskId: `task-skill-path-${slug}`,
+      taskId: `task-skill-path-${slug}`
     })
 
     assert.equal(result.success, true)
     assert.equal(result.projectionTruth?.projectionPatch?.terminalFailureReason, undefined)
-    assert.equal(result.projectionTruth?.projectionPatch?.terminalFailureTool, 'skill_write_artifact')
-    assert.equal(result.projectionTruth?.projectionPatch?.terminalFailureErrorKind, item.data.errorKind)
+    assert.equal(
+      result.projectionTruth?.projectionPatch?.terminalFailureTool,
+      'skill_write_artifact'
+    )
+    assert.equal(
+      result.projectionTruth?.projectionPatch?.terminalFailureErrorKind,
+      item.data.errorKind
+    )
   }
 })
 
@@ -4841,75 +5314,101 @@ test('agent sdk runtime executes representative domain tools without losing proj
   }> = [
     {
       label: 'browser',
-      tool: { name: 'browser_read_page', groupId: 'browser_interaction', domain: 'browser', kind: 'read' },
-      expectedTaskType: 'multi_step_task',
+      tool: {
+        name: 'browser_read_page',
+        groupId: 'browser_interaction',
+        domain: 'browser',
+        kind: 'read'
+      },
+      expectedTaskType: 'multi_step_task'
     },
     {
       label: 'rss',
       tool: { name: 'rss_analyze_item', groupId: 'rss', domain: 'rss', kind: 'read' },
-      expectedTaskType: 'multi_step_task',
+      expectedTaskType: 'multi_step_task'
     },
     {
       label: 'calendar',
-      tool: { name: 'calendar_create_event', groupId: 'calendar', domain: 'calendar', kind: 'write' },
-      expectedTaskType: 'multi_step_task',
+      tool: {
+        name: 'calendar_create_event',
+        groupId: 'calendar',
+        domain: 'calendar',
+        kind: 'write'
+      },
+      expectedTaskType: 'multi_step_task'
     },
     {
       label: 'feishu',
-      tool: { name: 'feishu_message_reply', groupId: 'channel_feishu', domain: 'feishu', kind: 'write' },
-      expectedTaskType: 'multi_step_task',
+      tool: {
+        name: 'feishu_message_reply',
+        groupId: 'channel_feishu',
+        domain: 'feishu',
+        kind: 'write'
+      },
+      expectedTaskType: 'multi_step_task'
     },
     {
       label: 'pet',
       tool: { name: 'pet_show_sticky_note', groupId: 'pet', domain: 'pet', kind: 'write' },
-      expectedTaskType: 'multi_step_task',
+      expectedTaskType: 'multi_step_task'
     },
     {
       label: 'file',
       tool: { name: 'file_search', groupId: 'file_management', domain: 'file', kind: 'read' },
-      expectedTaskType: 'multi_step_task',
+      expectedTaskType: 'multi_step_task'
     },
     {
       label: 'research',
-      tool: { name: 'web_fetch', groupId: 'general_research', domain: 'general_research', kind: 'read' },
-      expectedTaskType: 'research',
-    },
+      tool: {
+        name: 'web_fetch',
+        groupId: 'general_research',
+        domain: 'general_research',
+        kind: 'read'
+      },
+      expectedTaskType: 'research'
+    }
   ]
 
   for (const item of cases) {
     const toolDefinition = createToolDefinition({
       description: `${item.label} tool`,
-      ...item.tool,
+      ...item.tool
     })
     const runtime = createRuntime({
       listToolDefinitions: () => [toolDefinition],
-      executeToolCall: async () => createToolExecutionOutput(`${item.label} done`, {
-        shape: 'json',
-        projectionPatch: {
-          taskTitle: `${item.label} task`,
-          taskSummary: `${item.label} finished`,
-        },
-      }),
+      executeToolCall: async () =>
+        createToolExecutionOutput(`${item.label} done`, {
+          shape: 'json',
+          projectionPatch: {
+            taskTitle: `${item.label} task`,
+            taskSummary: `${item.label} finished`
+          }
+        }),
       runAgent: async ({ tools, onTextDelta }) => {
         const sdkTool = tools[0] as { invoke: (context: unknown, input: string) => Promise<string> }
         await sdkTool.invoke({}, JSON.stringify({ id: item.label }))
         onTextDelta(`${item.label} 完成`)
         return { finalText: `${item.label} 完成` }
-      },
+      }
     })
     runtime.newSession(`butler::scope-${item.label}`, 'system prompt')
 
-    const result = await runtime.sendMessage(`butler::scope-${item.label}`, `${item.label} task`, `run-${item.label}`, {
-      publicSessionId: `scope-${item.label}`,
-      taskId: `task-${item.label}`,
-    })
+    const result = await runtime.sendMessage(
+      `butler::scope-${item.label}`,
+      `${item.label} task`,
+      `run-${item.label}`,
+      {
+        publicSessionId: `scope-${item.label}`,
+        taskId: `task-${item.label}`
+      }
+    )
 
     assert.equal(result.success, true, `${item.label} should succeed`)
     assert.deepEqual(result.usedTools, [item.tool.name], `${item.label} used tool`)
     assert.equal(result.taskType, item.expectedTaskType, `${item.label} task type`)
     assert.deepEqual(result.projectionTruth?.projectionPatch, {
       taskTitle: `${item.label} task`,
-      taskSummary: `${item.label} finished`,
+      taskSummary: `${item.label} finished`
     })
   }
 })
@@ -4928,15 +5427,16 @@ test('agent sdk runtime uses Ready text bridge for non-native tool transports', 
         provider: 'openai-compatible',
         baseUrl: 'https://code.newcli.com/codex/v1',
         agentProtocol: 'openai',
-        wireApi: 'chat/completions',
-      },
+        wireApi: 'chat/completions'
+      }
     }),
     listToolDefinitions: () => [toolDefinition],
-    executeToolCall: async (_toolName, args) => createToolExecutionOutput('found result', {
-      shape: 'json',
-      data: { args },
-      projectionPatch: { taskTitle: 'Text bridge research' },
-    }),
+    executeToolCall: async (_toolName, args) =>
+      createToolExecutionOutput('found result', {
+        shape: 'json',
+        data: { args },
+        projectionPatch: { taskTitle: 'Text bridge research' }
+      }),
     runAgent: async ({ tools, instructions, input }) => {
       runCount += 1
       runInputs.push(input)
@@ -4948,22 +5448,27 @@ test('agent sdk runtime uses Ready text bridge for non-native tool transports', 
           finalText: [
             ':::tool_call',
             '{"tool":"web_search","args":{"query":"Agents SDK"}}',
-            ':::',
-          ].join('\n'),
+            ':::'
+          ].join('\n')
         }
       }
       assert.match(String(input), /tool_result/)
       assert.match(String(input), /found result/)
       return { finalText: '研究完成' }
-    },
+    }
   })
   runtime.on('output', (event) => outputEvents.push(event))
   runtime.newSession('butler::scope-text-bridge', 'system prompt')
 
-  const result = await runtime.sendMessage('butler::scope-text-bridge', '查一下 Agents SDK', 'run-text-bridge', {
-    publicSessionId: 'scope-text-bridge',
-    taskId: 'task-text-bridge',
-  })
+  const result = await runtime.sendMessage(
+    'butler::scope-text-bridge',
+    '查一下 Agents SDK',
+    'run-text-bridge',
+    {
+      publicSessionId: 'scope-text-bridge',
+      taskId: 'task-text-bridge'
+    }
+  )
 
   assert.equal(result.success, true)
   assert.equal(result.taskType, 'research')
@@ -4972,14 +5477,17 @@ test('agent sdk runtime uses Ready text bridge for non-native tool transports', 
   assert.deepEqual(result.usedTools, ['web_search'])
   assert.deepEqual(result.projectionTruth?.projectionPatch, { taskTitle: 'Text bridge research' })
   assert.equal(
-    outputEvents.some((event) => event.type === 'text' && /:::tool_call/.test(String(event.chunk || ''))),
-    false,
+    outputEvents.some(
+      (event) => event.type === 'text' && /:::tool_call/.test(String(event.chunk || ''))
+    ),
+    false
   )
 })
 
 test('agent sdk runtime keeps skill eligibility fixed across text-bridge iterations', async () => {
   const prompt = 'hi，今天让你跟我聊哲学的话，你会怎么开头'
-  const finalAnswer = '不是需要补充信息才能继续；我已经给了两个切入口：1. 我是谁？2. 今天的问题是什么？'
+  const finalAnswer =
+    '不是需要补充信息才能继续；我已经给了两个切入口：1. 我是谁？2. 今天的问题是什么？'
   const webTool = createToolDefinition({ name: 'web_search', description: 'Search the web' })
   const skillAskTool = createToolDefinition({
     name: 'skill_ask_user',
@@ -4990,11 +5498,11 @@ test('agent sdk runtime keeps skill eligibility fixed across text-bridge iterati
     schema: {
       type: 'object',
       properties: {
-        question: { type: 'string' },
+        question: { type: 'string' }
       },
       required: ['question'],
-      additionalProperties: false,
-    },
+      additionalProperties: false
+    }
   })
   let runCount = 0
   const outputEvents: Array<Record<string, unknown>> = []
@@ -5007,8 +5515,8 @@ test('agent sdk runtime keeps skill eligibility fixed across text-bridge iterati
         provider: 'openai-compatible',
         baseUrl: 'https://code.newcli.com/codex/v1',
         agentProtocol: 'openai',
-        wireApi: 'chat/completions',
-      },
+        wireApi: 'chat/completions'
+      }
     }),
     skillContextOrchestrator: {
       findExplicitlyRequestedSkills: () => [],
@@ -5018,10 +5526,11 @@ test('agent sdk runtime keeps skill eligibility fixed across text-bridge iterati
       },
       buildPreferredSkillToolNames: () => {
         throw new Error('unrelated chat must not expose skill primitives')
-      },
+      }
     },
     listToolDefinitions: () => [webTool, skillAskTool],
-    executeToolCall: async () => createToolExecutionOutput('found result', { shape: 'json', data: { ok: true } }),
+    executeToolCall: async () =>
+      createToolExecutionOutput('found result', { shape: 'json', data: { ok: true } }),
     runAgent: async ({ input }) => {
       runCount += 1
       if (runCount === 1) {
@@ -5029,33 +5538,41 @@ test('agent sdk runtime keeps skill eligibility fixed across text-bridge iterati
           finalText: [
             ':::tool_call',
             '{"tool":"web_search","args":{"query":"philosophy opener"}}',
-            ':::',
-          ].join('\n'),
+            ':::'
+          ].join('\n')
         }
       }
       assert.match(String(input), /found result/)
       return { finalText: finalAnswer }
-    },
+    }
   })
   runtime.on('output', (event) => outputEvents.push(event))
   runtime.newSession('butler::scope-stale-skill-text-bridge', 'system prompt')
 
-  const result = await runtime.sendMessage('butler::scope-stale-skill-text-bridge', prompt, 'run-stale-skill-text-bridge', {
-    publicSessionId: 'scope-stale-skill-text-bridge',
-    taskId: 'task-stale-skill-text-bridge',
-    requestEnvelope: {
-      primaryInstruction: prompt,
-      pureUserText: prompt,
-      rawUserText: prompt,
-      resources: [],
-    },
-  })
+  const result = await runtime.sendMessage(
+    'butler::scope-stale-skill-text-bridge',
+    prompt,
+    'run-stale-skill-text-bridge',
+    {
+      publicSessionId: 'scope-stale-skill-text-bridge',
+      taskId: 'task-stale-skill-text-bridge',
+      requestEnvelope: {
+        primaryInstruction: prompt,
+        pureUserText: prompt,
+        rawUserText: prompt,
+        resources: []
+      }
+    }
+  )
 
   assert.equal(runCount, 2)
   assert.equal(result.success, true)
   assert.equal(result.terminalReason, 'done')
   assert.equal(result.finalText, finalAnswer)
-  assert.equal(outputEvents.some((event) => String(event.chunk || '').includes('未能打开反问卡')), false)
+  assert.equal(
+    outputEvents.some((event) => String(event.chunk || '').includes('未能打开反问卡')),
+    false
+  )
 })
 
 test('agent sdk runtime exposes authorized skill tools for explicit skill turns', async () => {
@@ -5069,7 +5586,7 @@ test('agent sdk runtime exposes authorized skill tools for explicit skill turns'
       skillId: 'video-expert-analyzer',
       action: 'video_expert_pipeline',
       visibility: 'public',
-      params: [],
+      params: []
     },
     {
       name: 'skill_rss_update',
@@ -5078,35 +5595,42 @@ test('agent sdk runtime exposes authorized skill tools for explicit skill turns'
       skillId: 'lets-go-rss',
       action: 'rss_update',
       visibility: 'public',
-      params: [],
-    },
+      params: []
+    }
   ])
   const runtime = createRuntime({
     skillContextOrchestrator: {
-      findExplicitlyRequestedSkills: () => [{ id: 'video-expert-analyzer', name: 'Video Expert Analyzer' }],
+      findExplicitlyRequestedSkills: () => [
+        { id: 'video-expert-analyzer', name: 'Video Expert Analyzer' }
+      ],
       buildPreferredSkillToolNames: () => ['skill_video_expert_pipeline'],
       rememberExplicitReferenceSkillHint: () => {
         remembered = true
         rememberLastReferenceSkill('scope-skill-tools', {
           id: 'video-expert-analyzer',
-          name: 'Video Expert Analyzer',
+          name: 'Video Expert Analyzer'
         })
         return true
-      },
+      }
     },
     runAgent: async ({ tools, onTextDelta }) => {
       seenToolNames.push(...tools.map((item) => item.name))
       onTextDelta('技能工具面已加载')
       return { finalText: '技能工具面已加载' }
-    },
+    }
   })
   runtime.newSession('butler::scope-skill-tools', 'system prompt')
 
   try {
-    const result = await runtime.sendMessage('butler::scope-skill-tools', '使用 video expert analyzer 分析视频', 'run-skill-tools', {
-      publicSessionId: 'scope-skill-tools',
-      taskId: 'task-skill-tools',
-    })
+    const result = await runtime.sendMessage(
+      'butler::scope-skill-tools',
+      '使用 video expert analyzer 分析视频',
+      'run-skill-tools',
+      {
+        publicSessionId: 'scope-skill-tools',
+        taskId: 'task-skill-tools'
+      }
+    )
 
     assert.equal(result.success, true)
     assert.equal(remembered, true)
@@ -5132,17 +5656,17 @@ test('agent sdk runtime preserves browser tools when an explicit reference skill
       rememberExplicitReferenceSkillHint: () => {
         rememberLastReferenceSkill('scope-browser-reference-skill-tools', {
           id: 'extract',
-          name: 'extract',
+          name: 'extract'
         })
         return true
-      },
+      }
     },
     runAgent: async ({ tools, instructions, onTextDelta }) => {
       seenToolNames.push(...tools.map((item) => item.name))
       seenInstructions = instructions
       onTextDelta('浏览器工具面已加载')
       return { finalText: '浏览器工具面已加载' }
-    },
+    }
   })
   runtime.setBrowserController({} as never)
   runtime.newSession('butler::scope-browser-reference-skill-tools', 'system prompt')
@@ -5155,8 +5679,8 @@ test('agent sdk runtime preserves browser tools when an explicit reference skill
       {
         publicSessionId: 'scope-browser-reference-skill-tools',
         taskId: 'task-browser-reference-skill-tools',
-        requestEnvelope: buildRequestEnvelope({ userText: prompt }),
-      },
+        requestEnvelope: buildRequestEnvelope({ userText: prompt })
+      }
     )
 
     assert.equal(result.success, true)
@@ -5166,7 +5690,7 @@ test('agent sdk runtime preserves browser tools when an explicit reference skill
       'browser_click',
       'browser_type',
       'browser_power_eval',
-      'browser_power_cdp',
+      'browser_power_cdp'
     ]) {
       assert.equal(seenToolNames.includes(expected), true, `${expected} should remain visible`)
     }
@@ -5183,7 +5707,8 @@ test('agent sdk runtime preserves browser tools when an explicit reference skill
 
 test('agent sdk runtime does not expose clarification tools for unrelated chat with stale reference hint', async () => {
   const prompt = 'hi，今天让你跟我聊哲学的话，你会怎么开头'
-  const answer = '我会从一个能把球轻轻传回给你的问题开始：我到底是谁？如果今天只谈一件事，什么问题最值得停下来？'
+  const answer =
+    '我会从一个能把球轻轻传回给你的问题开始：我到底是谁？如果今天只谈一件事，什么问题最值得停下来？'
   const seenToolNames: string[] = []
   const outputEvents: Array<Record<string, unknown>> = []
   const runtime = createRuntime({
@@ -5195,35 +5720,48 @@ test('agent sdk runtime does not expose clarification tools for unrelated chat w
       },
       buildPreferredSkillToolNames: () => {
         throw new Error('stale reference hint should not expose skill primitives')
-      },
+      }
     },
     runAgent: async ({ tools, onTextDelta }) => {
       seenToolNames.push(...tools.map((item) => item.name))
       onTextDelta(answer)
       return { finalText: answer }
-    },
+    }
   })
   runtime.on('output', (event) => outputEvents.push(event))
   runtime.newSession('butler::scope-stale-skill-chat', 'system prompt')
 
-  const result = await runtime.sendMessage('butler::scope-stale-skill-chat', prompt, 'run-stale-skill-chat', {
-    publicSessionId: 'scope-stale-skill-chat',
-    taskId: 'task-stale-skill-chat',
-    requestEnvelope: {
-      primaryInstruction: prompt,
-      pureUserText: prompt,
-      rawUserText: prompt,
-      resources: [],
-    },
-  })
+  const result = await runtime.sendMessage(
+    'butler::scope-stale-skill-chat',
+    prompt,
+    'run-stale-skill-chat',
+    {
+      publicSessionId: 'scope-stale-skill-chat',
+      taskId: 'task-stale-skill-chat',
+      requestEnvelope: {
+        primaryInstruction: prompt,
+        pureUserText: prompt,
+        rawUserText: prompt,
+        resources: []
+      }
+    }
+  )
 
   assert.equal(result.success, true)
   assert.equal(result.terminalReason, 'done')
   assert.equal(result.finalText, answer)
   assert.equal(seenToolNames.includes('skill_ask_user'), false)
   assert.equal(seenToolNames.includes('ask_user_questions'), false)
-  assert.equal(outputEvents.some((event) => event.type === 'text' && String(event.chunk || '').includes(answer)), true)
-  assert.equal(outputEvents.some((event) => String(event.chunk || '').includes('未能打开反问卡')), false)
+  assert.equal(
+    outputEvents.some(
+      (event) => event.type === 'text' && String(event.chunk || '').includes(answer)
+    ),
+    true
+  )
+  assert.equal(
+    outputEvents.some((event) => String(event.chunk || '').includes('未能打开反问卡')),
+    false
+  )
 })
 
 test('agent sdk runtime ignores stale skill names in assembled context for no-tool image analysis', async () => {
@@ -5241,13 +5779,13 @@ test('agent sdk runtime ignores stale skill names in assembled context for no-to
     steps: [],
     proofRefs: [],
     createdAt: now,
-    updatedAt: now,
+    updatedAt: now
   } as TaskProjectionRecord)
   const store = {
     get: (id: string) => rows.get(id) ?? null,
     update: (id: string, patch: Partial<TaskProjectionRecord>) => {
       rows.set(id, { ...rows.get(id)!, ...patch })
-    },
+    }
   }
   const userPrompt = '那你试试按照这几层的方法来分析这张图'
   const assembledMessage = [
@@ -5256,7 +5794,7 @@ test('agent sdk runtime ignores stale skill names in assembled context for no-to
     '## 最近会话摘要',
     '上一轮使用过 hfp-space-design。',
     '',
-    userPrompt,
+    userPrompt
   ].join('\n')
   const answer = '分析已经完成了。简单总结一下：先看清楚是什么，再判断它为什么这样呈现。'
   const seenToolNames: string[] = []
@@ -5278,17 +5816,17 @@ test('agent sdk runtime ignores stale skill names in assembled context for no-to
       },
       rememberExplicitReferenceSkillHint: () => {
         throw new Error('context-only skill mention must not be remembered as explicit')
-      },
+      }
     },
     runAgent: async ({ tools, onTextDelta }) => {
       seenToolNames.push(...tools.map((item) => item.name))
       onTextDelta(answer)
       return { finalText: answer }
-    },
+    }
   })
   runtime.setRuntime({
     publishScopeRunEvent: () => {},
-    getTaskProjectionStoreForFinalize: () => store,
+    getTaskProjectionStoreForFinalize: () => store
   } as never)
   runtime.newSession('butler::scope-image-analysis-direct', 'system prompt')
 
@@ -5303,9 +5841,9 @@ test('agent sdk runtime ignores stale skill names in assembled context for no-to
         primaryInstruction: userPrompt,
         pureUserText: userPrompt,
         rawUserText: assembledMessage,
-        resources: [{ name: 'download-2.jpg', path: '/tmp/download-2.jpg', kind: 'image' }],
-      },
-    },
+        resources: [{ name: 'download-2.jpg', path: '/tmp/download-2.jpg', kind: 'image' }]
+      }
+    }
   )
 
   assert.equal(result.success, true)
@@ -5313,11 +5851,17 @@ test('agent sdk runtime ignores stale skill names in assembled context for no-to
   assert.equal(result.taskType, 'direct_answer')
   assert.equal(result.finalText, answer)
   assert.equal(seenToolNames.includes('skill_ask_user'), false)
-  assert.equal(scannedTexts.some((text) => text.includes('hfp-space-design')), false)
+  assert.equal(
+    scannedTexts.some((text) => text.includes('hfp-space-design')),
+    false
+  )
   const row = rows.get(taskId)!
   const checkins = row.checkins as CheckInRecord[]
   assert.equal(checkins[0].verdict, 'accept')
-  assert.equal((row.proofRefs as Array<{ kind: string }>).some((proof) => proof.kind === 'assistant_response'), true)
+  assert.equal(
+    (row.proofRefs as Array<{ kind: string }>).some((proof) => proof.kind === 'assistant_response'),
+    true
+  )
 })
 
 test('agent sdk runtime keeps stale reference tools for natural skill follow-ups', async () => {
@@ -5327,12 +5871,12 @@ test('agent sdk runtime keeps stale reference tools for natural skill follow-ups
       findExplicitlyRequestedSkills: () => [],
       peekCurrentReferenceSkillHint: () => ({ id: 'hfp-space-design', name: 'hfp-space-design' }),
       getCurrentReferenceSkillHint: () => ({ id: 'hfp-space-design', name: 'hfp-space-design' }),
-      buildPreferredSkillToolNames: () => ['skill_ask_user', 'skill_inspect_run_state'],
+      buildPreferredSkillToolNames: () => ['skill_ask_user', 'skill_inspect_run_state']
     },
     runAgent: async ({ tools }) => {
       seenToolNames.push(...tools.map((item) => item.name))
       return { finalText: '继续推进' }
-    },
+    }
   })
   runtime.newSession('butler::scope-natural-skill-followup', 'system prompt')
 
@@ -5345,9 +5889,9 @@ test('agent sdk runtime keeps stale reference tools for natural skill follow-ups
       taskId: 'task-natural-skill-followup',
       requestEnvelope: {
         primaryInstruction: '好的，那就按第二个方案推进，预算两万',
-        resources: [],
-      },
-    },
+        resources: []
+      }
+    }
   )
 
   assert.equal(result.success, true)
@@ -5362,13 +5906,13 @@ test('agent sdk runtime keeps reference tools for unfinished skill task facts', 
       findExplicitlyRequestedSkills: () => [],
       peekCurrentReferenceSkillHint: () => ({ id: 'hfp-space-design', name: 'hfp-space-design' }),
       getCurrentReferenceSkillHint: () => ({ id: 'hfp-space-design', name: 'hfp-space-design' }),
-      buildPreferredSkillToolNames: () => ['skill_ask_user', 'skill_inspect_run_state'],
+      buildPreferredSkillToolNames: () => ['skill_ask_user', 'skill_inspect_run_state']
     },
     getScopeTaskRefs: () => [{ taskId: 'task-hfp-active', status: 'running' }],
     runAgent: async ({ tools }) => {
       seenToolNames.push(...tools.map((item) => item.name))
       return { finalText: '继续推进' }
-    },
+    }
   })
   runtime.newSession('butler::scope-active-skill-followup', 'system prompt')
 
@@ -5381,9 +5925,9 @@ test('agent sdk runtime keeps reference tools for unfinished skill task facts', 
       taskId: 'task-active-skill-followup',
       requestEnvelope: {
         primaryInstruction: '好的，那就按第二个方案继续推进，预算两万，门店面积大概三十平',
-        resources: [],
-      },
-    },
+        resources: []
+      }
+    }
   )
 
   assert.equal(result.success, true)
@@ -5399,16 +5943,22 @@ test('agent sdk runtime exposes skill_run_shell for explicit script-backed refer
   let injected = false
   const runtime = createRuntime({
     skillContextOrchestrator: {
-      findExplicitlyRequestedSkills: () => [{
-        id: 'okf-bundle',
-        name: 'OKF Bundle',
-        managedPath: skillRoot,
-      }],
-      buildPreferredSkillToolNames: () => ['skill_run_shell', 'skill_write_artifact', 'skill_read_artifact'],
+      findExplicitlyRequestedSkills: () => [
+        {
+          id: 'okf-bundle',
+          name: 'OKF Bundle',
+          managedPath: skillRoot
+        }
+      ],
+      buildPreferredSkillToolNames: () => [
+        'skill_run_shell',
+        'skill_write_artifact',
+        'skill_read_artifact'
+      ],
       rememberExplicitReferenceSkillHint: () => {
         rememberLastReferenceSkill('scope-script-reference-tools', {
           id: 'okf-bundle',
-          name: 'OKF Bundle',
+          name: 'OKF Bundle'
         })
         return true
       },
@@ -5416,24 +5966,29 @@ test('agent sdk runtime exposes skill_run_shell for explicit script-backed refer
         injected = true
         session.messages.push({
           role: 'system',
-          content: '已加载技能「OKF Bundle」。必须实际创建知识包文件夹并写入 .md 文件。',
+          content: '已加载技能「OKF Bundle」。必须实际创建知识包文件夹并写入 .md 文件。'
         })
-      },
+      }
     },
     runAgent: async ({ tools, instructions, onTextDelta }) => {
       seenToolNames.push(...tools.map((item) => item.name))
       seenInstructions = instructions
       onTextDelta('脚本型 reference skill 工具面已加载')
       return { finalText: '脚本型 reference skill 工具面已加载' }
-    },
+    }
   })
   runtime.newSession('butler::scope-script-reference-tools', 'system prompt')
 
   try {
-    const result = await runtime.sendMessage('butler::scope-script-reference-tools', '使用 okf-bundle 提取知识包', 'run-script-reference-tools', {
-      publicSessionId: 'scope-script-reference-tools',
-      taskId: 'task-script-reference-tools',
-    })
+    const result = await runtime.sendMessage(
+      'butler::scope-script-reference-tools',
+      '使用 okf-bundle 提取知识包',
+      'run-script-reference-tools',
+      {
+        publicSessionId: 'scope-script-reference-tools',
+        taskId: 'task-script-reference-tools'
+      }
+    )
 
     assert.equal(result.success, true)
     assert.equal(injected, true)
@@ -5453,24 +6008,27 @@ test('agent sdk runtime threads selected skill authorization into tool execution
     groupId: 'skills',
     domain: 'skill',
     kind: 'job',
-    description: 'Run VEA pipeline',
+    description: 'Run VEA pipeline'
   })
   let listAuthorizationMode: string | null = null
   let executionAuthorization: Record<string, unknown> | null = null
   const runtime = createRuntime({
     skillContextOrchestrator: {
-      findExplicitlyRequestedSkills: () => [{ id: 'video-expert-analyzer', name: 'Video Expert Analyzer' }],
-      buildPreferredSkillToolNames: () => ['skill_video_expert_pipeline'],
+      findExplicitlyRequestedSkills: () => [
+        { id: 'video-expert-analyzer', name: 'Video Expert Analyzer' }
+      ],
+      buildPreferredSkillToolNames: () => ['skill_video_expert_pipeline']
     },
     listToolDefinitions: ({ authorization }) => {
       listAuthorizationMode = authorization.mode
       return [skillDefinition]
     },
     executeToolCall: async (_toolName, _args, context) => {
-      executionAuthorization = (context as unknown as { authorization?: Record<string, unknown> }).authorization || null
+      executionAuthorization =
+        (context as unknown as { authorization?: Record<string, unknown> }).authorization || null
       return createToolExecutionOutput('skill launched', {
         shape: 'json',
-        projectionPatch: { taskTitle: 'VEA' },
+        projectionPatch: { taskTitle: 'VEA' }
       })
     },
     runAgent: async ({ tools, onTextDelta }) => {
@@ -5478,14 +6036,19 @@ test('agent sdk runtime threads selected skill authorization into tool execution
       await sdkTool.invoke({}, JSON.stringify({ input: 'video.mp4' }))
       onTextDelta('技能已启动')
       return { finalText: '技能已启动' }
-    },
+    }
   })
   runtime.newSession('butler::scope-skill-auth', 'system prompt')
 
-  const result = await runtime.sendMessage('butler::scope-skill-auth', '使用 video expert analyzer', 'run-skill-auth', {
-    publicSessionId: 'scope-skill-auth',
-    taskId: 'task-skill-auth',
-  })
+  const result = await runtime.sendMessage(
+    'butler::scope-skill-auth',
+    '使用 video expert analyzer',
+    'run-skill-auth',
+    {
+      publicSessionId: 'scope-skill-auth',
+      taskId: 'task-skill-auth'
+    }
+  )
 
   assert.equal(result.success, true)
   assert.equal(result.taskType, 'multi_step_task')
@@ -5503,14 +6066,14 @@ test('agent sdk runtime redacts model-visible tool output while carrying raw act
     groupId: 'skills',
     domain: 'skill',
     kind: 'job',
-    description: 'Run VEA pipeline',
+    description: 'Run VEA pipeline'
   })
   const readArtifactDefinition = createToolDefinition({
     name: 'skill_read_artifact',
     groupId: 'skills',
     domain: 'skill',
     kind: 'read',
-    description: 'Read skill artifact',
+    description: 'Read skill artifact'
   })
   let observedRoots: string[] = []
   let pipelineToolReturn = ''
@@ -5518,49 +6081,67 @@ test('agent sdk runtime redacts model-visible tool output while carrying raw act
     listToolDefinitions: () => [pipelineDefinition, readArtifactDefinition],
     executeToolCall: async (name, _args, context) => {
       if (name === 'skill_video_expert_pipeline') {
-        return createToolExecutionOutput(JSON.stringify({
-          status: 'child_launched',
-          childRunId: 'child-active-root',
-          skillId: 'video-expert-analyzer',
-          action: 'video_expert_pipeline',
-          outputDir,
-          runStatePath: join(outputDir, 'run_state.json'),
-          parentNextHint: 'wait_for_close_event',
-        }), {
-          shape: 'json',
-          data: {
+        return createToolExecutionOutput(
+          JSON.stringify({
             status: 'child_launched',
             childRunId: 'child-active-root',
             skillId: 'video-expert-analyzer',
             action: 'video_expert_pipeline',
             outputDir,
             runStatePath: join(outputDir, 'run_state.json'),
-            parentNextHint: 'wait_for_close_event',
-          },
-          contextModifier: {
-            activeFrame: {
-              activeArtifactRoots: [outputDir],
+            parentNextHint: 'wait_for_close_event'
+          }),
+          {
+            shape: 'json',
+            data: {
+              status: 'child_launched',
+              childRunId: 'child-active-root',
+              skillId: 'video-expert-analyzer',
+              action: 'video_expert_pipeline',
+              outputDir,
+              runStatePath: join(outputDir, 'run_state.json'),
+              parentNextHint: 'wait_for_close_event'
             },
-          },
-        })
+            contextModifier: {
+              activeFrame: {
+                activeArtifactRoots: [outputDir]
+              }
+            }
+          }
+        )
       }
-      observedRoots = [...((context as { activeFrame?: { activeArtifactRoots?: string[] } }).activeFrame?.activeArtifactRoots || [])]
+      observedRoots = [
+        ...((context as { activeFrame?: { activeArtifactRoots?: string[] } }).activeFrame
+          ?.activeArtifactRoots || [])
+      ]
       return createToolExecutionOutput('artifact read', { shape: 'json', data: { ok: true } })
     },
     runAgent: async ({ tools }) => {
-      const pipelineTool = tools.find((item) => item.name === 'skill_video_expert_pipeline') as { invoke: (context: unknown, input: string) => Promise<string> }
-      const readTool = tools.find((item) => item.name === 'skill_read_artifact') as { invoke: (context: unknown, input: string) => Promise<string> }
-      pipelineToolReturn = await pipelineTool.invoke({}, JSON.stringify({ url: 'fixture.mp4', outputDir }))
+      const pipelineTool = tools.find((item) => item.name === 'skill_video_expert_pipeline') as {
+        invoke: (context: unknown, input: string) => Promise<string>
+      }
+      const readTool = tools.find((item) => item.name === 'skill_read_artifact') as {
+        invoke: (context: unknown, input: string) => Promise<string>
+      }
+      pipelineToolReturn = await pipelineTool.invoke(
+        {},
+        JSON.stringify({ url: 'fixture.mp4', outputDir })
+      )
       await readTool.invoke({}, JSON.stringify({ relativePath: 'scene_scores.json' }))
       return { finalText: '已读取产物' }
-    },
+    }
   })
   runtime.newSession('butler::scope-skill-active-root', 'system prompt')
 
-  const result = await runtime.sendMessage('butler::scope-skill-active-root', '使用 VEA 分析视频', 'run-skill-active-root', {
-    publicSessionId: 'scope-skill-active-root',
-    taskId: 'task-skill-active-root',
-  })
+  const result = await runtime.sendMessage(
+    'butler::scope-skill-active-root',
+    '使用 VEA 分析视频',
+    'run-skill-active-root',
+    {
+      publicSessionId: 'scope-skill-active-root',
+      taskId: 'task-skill-active-root'
+    }
+  )
 
   assert.equal(result.success, true)
   assert.doesNotMatch(pipelineToolReturn, /\/Users\/alice/)
@@ -5576,49 +6157,68 @@ test('agent sdk runtime recovers max-turn after long skill checkpoint instead of
     groupId: 'skills',
     domain: 'skill',
     kind: 'job',
-    description: 'Run VEA pipeline',
+    description: 'Run VEA pipeline'
   })
   const runtime = createRuntime({
     listToolDefinitions: () => [pipelineDefinition],
-    executeToolCall: async () => createToolExecutionOutput(JSON.stringify({
-      status: 'child_launched',
-      childRunId: 'child-checkpoint',
-      skillId: 'video-expert-analyzer',
-      action: 'video_expert_pipeline',
-      outputDir,
-      runStatePath: join(outputDir, 'run_state.json'),
-      parentNextHint: 'wait_for_close_event',
-    }), {
-      shape: 'json',
-      data: {
-        status: 'child_launched',
-        childRunId: 'child-checkpoint',
-        skillId: 'video-expert-analyzer',
-        action: 'video_expert_pipeline',
-        outputDir,
-        runStatePath: join(outputDir, 'run_state.json'),
-        parentNextHint: 'wait_for_close_event',
-      },
-    }),
+    executeToolCall: async () =>
+      createToolExecutionOutput(
+        JSON.stringify({
+          status: 'child_launched',
+          childRunId: 'child-checkpoint',
+          skillId: 'video-expert-analyzer',
+          action: 'video_expert_pipeline',
+          outputDir,
+          runStatePath: join(outputDir, 'run_state.json'),
+          parentNextHint: 'wait_for_close_event'
+        }),
+        {
+          shape: 'json',
+          data: {
+            status: 'child_launched',
+            childRunId: 'child-checkpoint',
+            skillId: 'video-expert-analyzer',
+            action: 'video_expert_pipeline',
+            outputDir,
+            runStatePath: join(outputDir, 'run_state.json'),
+            parentNextHint: 'wait_for_close_event'
+          }
+        }
+      ),
     runAgent: async ({ tools }) => {
-      const pipelineTool = tools[0] as { invoke: (context: unknown, input: string) => Promise<string> }
+      const pipelineTool = tools[0] as {
+        invoke: (context: unknown, input: string) => Promise<string>
+      }
       await pipelineTool.invoke({}, JSON.stringify({ url: 'fixture.mp4', outputDir }))
       throw new Error('Max turns (16) exceeded')
-    },
+    }
   })
   runtime.on('status', (event) => statuses.push(event as Record<string, unknown>))
   runtime.newSession('butler::scope-long-skill-checkpoint', 'system prompt')
 
-  const result = await runtime.sendMessage('butler::scope-long-skill-checkpoint', '使用 VEA 分析视频', 'run-long-skill-checkpoint', {
-    publicSessionId: 'scope-long-skill-checkpoint',
-    taskId: 'task-long-skill-checkpoint',
-  })
+  const result = await runtime.sendMessage(
+    'butler::scope-long-skill-checkpoint',
+    '使用 VEA 分析视频',
+    'run-long-skill-checkpoint',
+    {
+      publicSessionId: 'scope-long-skill-checkpoint',
+      taskId: 'task-long-skill-checkpoint'
+    }
+  )
 
   assert.equal(result.success, true)
   assert.equal(result.terminalReason, 'checkpoint_background')
   assert.match(result.finalText, /技能任务已启动/)
-  assert.equal(statuses.some((event) => event.status === 'error'), false)
-  assert.equal(statuses.some((event) => event.status === 'checkpoint' && event.terminalReason === 'checkpoint_background'), true)
+  assert.equal(
+    statuses.some((event) => event.status === 'error'),
+    false
+  )
+  assert.equal(
+    statuses.some(
+      (event) => event.status === 'checkpoint' && event.terminalReason === 'checkpoint_background'
+    ),
+    true
+  )
 })
 
 test('agent sdk runtime reports provider quota failures as external blockers', async () => {
@@ -5627,16 +6227,21 @@ test('agent sdk runtime reports provider quota failures as external blockers', a
   const runtime = createRuntime({
     runAgent: async () => {
       throw new Error('429 You exceeded your current quota')
-    },
+    }
   })
   runtime.on('error', (event) => errors.push(event))
   runtime.on('status', (event) => statuses.push(event))
   runtime.newSession('butler::scope-provider-error', 'system prompt')
 
-  const result = await runtime.sendMessage('butler::scope-provider-error', '你好', 'run-provider-error', {
-    publicSessionId: 'scope-provider-error',
-    taskId: 'task-provider-error',
-  })
+  const result = await runtime.sendMessage(
+    'butler::scope-provider-error',
+    '你好',
+    'run-provider-error',
+    {
+      publicSessionId: 'scope-provider-error',
+      taskId: 'task-provider-error'
+    }
+  )
 
   assert.equal(result.success, false)
   assert.equal(result.terminalReason, 'blocked_external')
@@ -5645,8 +6250,8 @@ test('agent sdk runtime reports provider quota failures as external blockers', a
     statuses.map((event) => [event.status, event.terminalReason]),
     [
       ['working', undefined],
-      ['error', 'blocked_external'],
-    ],
+      ['error', 'blocked_external']
+    ]
   )
 })
 
@@ -5657,14 +6262,19 @@ test('agent sdk runtime keeps default model-visible surface intent-scoped', asyn
       seenToolNames.push(...tools.map((item) => item.name))
       onTextDelta('工具面已加载')
       return { finalText: '工具面已加载' }
-    },
+    }
   })
   runtime.newSession('butler::scope-tools', 'system prompt')
 
-  const result = await runtime.sendMessage('butler::scope-tools', '整理这篇文档并查一下资料', 'run-tools', {
-    publicSessionId: 'scope-tools',
-    taskId: 'task-tools',
-  })
+  const result = await runtime.sendMessage(
+    'butler::scope-tools',
+    '整理这篇文档并查一下资料',
+    'run-tools',
+    {
+      publicSessionId: 'scope-tools',
+      taskId: 'task-tools'
+    }
+  )
 
   assert.equal(result.success, true)
   assert.ok(seenToolNames.includes('document_set_content'))
@@ -5674,7 +6284,10 @@ test('agent sdk runtime keeps default model-visible surface intent-scoped', asyn
   assert.equal(seenToolNames.includes('rss_fetch_updates'), false)
   assert.equal(seenToolNames.includes('calendar_list_window'), false)
   assert.equal(seenToolNames.includes('web_search'), false)
-  assert.equal(seenToolNames.some((name) => name.startsWith('browser_')), false)
+  assert.equal(
+    seenToolNames.some((name) => name.startsWith('browser_')),
+    false
+  )
 })
 
 test('agent sdk runtime exposes browser, feishu, file, pet, and research tools when runtime is available', async () => {
@@ -5684,12 +6297,12 @@ test('agent sdk runtime exposes browser, feishu, file, pet, and research tools w
       seenToolNames.push(...tools.map((item) => item.name))
       onTextDelta('工具面已加载')
       return { finalText: '工具面已加载' }
-    },
+    }
   })
   runtime.setBrowserController({} as never)
   runtime.setRuntime({
     isChannelTypeAvailable: (channelType: string) => channelType === 'feishu-app',
-    getConversationScope: () => null,
+    getConversationScope: () => null
   } as never)
   runtime.newSession('butler::scope-domain-tools', 'system prompt')
 
@@ -5699,8 +6312,8 @@ test('agent sdk runtime exposes browser, feishu, file, pet, and research tools w
     'run-domain-tools',
     {
       publicSessionId: 'scope-domain-tools',
-      taskId: 'task-domain-tools',
-    },
+      taskId: 'task-domain-tools'
+    }
   )
 
   assert.equal(result.success, true)
@@ -5715,7 +6328,7 @@ test('agent sdk runtime exposes browser, feishu, file, pet, and research tools w
     'pet_show_sticky_note',
     'web_search',
     'web_fetch',
-    'present_file',
+    'present_file'
   ]) {
     assert.ok(seenToolNames.includes(expected), `${expected} should be SDK-visible`)
   }
@@ -5734,8 +6347,8 @@ test('agent sdk runtime reuses one browser write lease across consecutive tool c
       schema: {
         type: 'object',
         properties: {},
-        additionalProperties: false,
-      },
+        additionalProperties: false
+      }
     })
     const navigateDefinition = createToolDefinition({
       name: 'browser_navigate',
@@ -5747,11 +6360,11 @@ test('agent sdk runtime reuses one browser write lease across consecutive tool c
       schema: {
         type: 'object',
         properties: {
-          url: { type: 'string' },
+          url: { type: 'string' }
         },
         required: ['url'],
-        additionalProperties: false,
-      },
+        additionalProperties: false
+      }
     })
     const leaseIds: string[] = []
     const runtime = createRuntime({
@@ -5763,24 +6376,31 @@ test('agent sdk runtime reuses one browser write lease across consecutive tool c
         if (isAgentBrowserError(gate)) {
           return createToolExecutionOutput(gate.message, {
             shape: 'json',
-            data: gate,
+            data: gate
           })
         }
         leaseIds.push(gate.leaseId)
         return createToolExecutionOutput(`${toolName} ok`, {
           shape: 'json',
-          data: { ok: true, leaseId: gate.leaseId },
+          data: { ok: true, leaseId: gate.leaseId }
         })
       },
       runAgent: async ({ tools, onTextDelta }) => {
-        const byName = new Map(tools.map((tool) => [tool.name, tool as { invoke: (context: unknown, input: string) => Promise<string> }]))
+        const byName = new Map(
+          tools.map((tool) => [
+            tool.name,
+            tool as { invoke: (context: unknown, input: string) => Promise<string> }
+          ])
+        )
         const first = await byName.get('browser_go_back')?.invoke({}, '{}')
-        const second = await byName.get('browser_navigate')?.invoke({}, JSON.stringify({ url: 'https://example.com' }))
+        const second = await byName
+          .get('browser_navigate')
+          ?.invoke({}, JSON.stringify({ url: 'https://example.com' }))
         assert.doesNotMatch(first || '', /lease_held/)
         assert.doesNotMatch(second || '', /lease_held/)
         onTextDelta('浏览器操作完成')
         return { finalText: '浏览器操作完成' }
-      },
+      }
     })
     runtime.setBrowserController({} as never)
     runtime.newSession('butler::scope-browser-lease-reuse', 'system prompt')
@@ -5791,8 +6411,8 @@ test('agent sdk runtime reuses one browser write lease across consecutive tool c
       'run-browser-lease-reuse',
       {
         publicSessionId: 'scope-browser-lease-reuse',
-        taskId: 'task-browser-lease-reuse',
-      },
+        taskId: 'task-browser-lease-reuse'
+      }
     )
 
     assert.equal(result.success, true)
@@ -5810,15 +6430,20 @@ test('agent sdk runtime exposes upload browser tools for upload workflow intent'
       seenToolNames.push(...tools.map((item) => item.name))
       onTextDelta('上传工具面已加载')
       return { finalText: '上传工具面已加载' }
-    },
+    }
   })
   runtime.setBrowserController({} as never)
   runtime.newSession('butler::scope-upload-tools', 'system prompt')
 
-  const result = await runtime.sendMessage('butler::scope-upload-tools', '把这个附件上传到当前网页并提交', 'run-upload-tools', {
-    publicSessionId: 'scope-upload-tools',
-    taskId: 'task-upload-tools',
-  })
+  const result = await runtime.sendMessage(
+    'butler::scope-upload-tools',
+    '把这个附件上传到当前网页并提交',
+    'run-upload-tools',
+    {
+      publicSessionId: 'scope-upload-tools',
+      taskId: 'task-upload-tools'
+    }
+  )
 
   assert.equal(result.success, true)
   assert.ok(seenToolNames.includes('browser_list_upload_targets'))
@@ -5844,13 +6469,13 @@ test('agent sdk runtime records tool and artifact proofs before final adjudicati
     steps: [],
     proofRefs: [],
     createdAt: now,
-    updatedAt: now,
+    updatedAt: now
   } as TaskProjectionRecord)
   const store = {
     get: (id: string) => rows.get(id) ?? null,
     update: (id: string, patch: Partial<TaskProjectionRecord>) => {
       rows.set(id, { ...rows.get(id)!, ...patch })
-    },
+    }
   }
   const runtime = createRuntime({
     listToolDefinitions: () => [
@@ -5863,38 +6488,53 @@ test('agent sdk runtime records tool and artifact proofs before final adjudicati
         schema: {
           type: 'object',
           properties: {},
-          additionalProperties: false,
-        },
-      }),
+          additionalProperties: false
+        }
+      })
     ],
-    executeToolCall: async () => createToolExecutionOutput('已保存文档：/tmp/world-cup-report.md', {
-      shape: 'json',
-      data: { documentSaved: true, path: '/tmp/world-cup-report.md' },
-    }),
+    executeToolCall: async () =>
+      createToolExecutionOutput('已保存文档：/tmp/world-cup-report.md', {
+        shape: 'json',
+        data: { documentSaved: true, path: '/tmp/world-cup-report.md' }
+      }),
     runAgent: async ({ tools, onTextDelta }) => {
-      const saveTool = tools.find((tool) => tool.name === 'document_save_tab') as { invoke: (context: unknown, input: string) => Promise<string> } | undefined
+      const saveTool = tools.find((tool) => tool.name === 'document_save_tab') as
+        | { invoke: (context: unknown, input: string) => Promise<string> }
+        | undefined
       assert.ok(saveTool)
       await saveTool.invoke({}, '{}')
       onTextDelta('文档已保存')
       return { finalText: '文档已保存' }
-    },
+    }
   })
   runtime.setRuntime({
     publishScopeRunEvent: () => {},
-    getTaskProjectionStoreForFinalize: () => store,
+    getTaskProjectionStoreForFinalize: () => store
   } as never)
   runtime.newSession('butler::scope-proof-collection', 'system prompt')
 
-  const result = await runtime.sendMessage('butler::scope-proof-collection', '保存研究报告', 'run-proof-collection', {
-    publicSessionId: 'scope-proof-collection',
-    taskId,
-  })
+  const result = await runtime.sendMessage(
+    'butler::scope-proof-collection',
+    '保存研究报告',
+    'run-proof-collection',
+    {
+      publicSessionId: 'scope-proof-collection',
+      taskId
+    }
+  )
 
   assert.equal(result.success, true)
   const row = rows.get(taskId)!
-  const proofKinds = (row.proofRefs as Array<{ kind: string; ref: string }>).map((proof) => proof.kind)
+  const proofKinds = (row.proofRefs as Array<{ kind: string; ref: string }>).map(
+    (proof) => proof.kind
+  )
   assert.equal(proofKinds.includes('tool_result'), true)
-  assert.equal((row.proofRefs as Array<{ kind: string; ref: string }>).some((proof) => proof.kind === 'artifact' && proof.ref === '/tmp/world-cup-report.md'), true)
+  assert.equal(
+    (row.proofRefs as Array<{ kind: string; ref: string }>).some(
+      (proof) => proof.kind === 'artifact' && proof.ref === '/tmp/world-cup-report.md'
+    ),
+    true
+  )
   const checkins = row.checkins as CheckInRecord[]
   assert.equal(checkins[0].verdict, 'accept')
 })
@@ -5905,34 +6545,47 @@ test('agent sdk runtime keeps MCP tools scoped to explicit OAuth authorization',
   registerMcpServer({
     serverId: 'sdk-scope',
     toolNames: ['mcp_sdk_scope_action'],
-    requiresAuthorization: true,
+    requiresAuthorization: true
   })
   setCachedMcpOAuthToken('sdk-scope', {
     accessToken: 'tok-sdk',
     expiresAt: Date.now() + 60_000,
-    scopes: ['read'],
+    scopes: ['read']
   })
   authorizeMcpToolForScope('sdk-scope', 'mcp_sdk_scope_action', 'scope-allowed', 'scope-allowed')
 
   const seenByScope = new Map<string, string[]>()
   const runtime = createRuntime({
     runAgent: async ({ tools, onTextDelta, sessionId }) => {
-      seenByScope.set(sessionId || '', tools.map((item) => item.name))
+      seenByScope.set(
+        sessionId || '',
+        tools.map((item) => item.name)
+      )
       onTextDelta('MCP 工具面已加载')
       return { finalText: 'MCP 工具面已加载' }
-    },
+    }
   })
 
   runtime.newSession('butler::scope-allowed', 'system prompt')
-  const allowed = await runtime.sendMessage('butler::scope-allowed', '使用已授权的 MCP 工具', 'run-mcp-allowed', {
-    publicSessionId: 'scope-allowed',
-    taskId: 'task-mcp-allowed',
-  })
+  const allowed = await runtime.sendMessage(
+    'butler::scope-allowed',
+    '使用已授权的 MCP 工具',
+    'run-mcp-allowed',
+    {
+      publicSessionId: 'scope-allowed',
+      taskId: 'task-mcp-allowed'
+    }
+  )
   runtime.newSession('butler::scope-denied', 'system prompt')
-  const denied = await runtime.sendMessage('butler::scope-denied', '使用未授权的 MCP 工具', 'run-mcp-denied', {
-    publicSessionId: 'scope-denied',
-    taskId: 'task-mcp-denied',
-  })
+  const denied = await runtime.sendMessage(
+    'butler::scope-denied',
+    '使用未授权的 MCP 工具',
+    'run-mcp-denied',
+    {
+      publicSessionId: 'scope-denied',
+      taskId: 'task-mcp-denied'
+    }
+  )
 
   assert.equal(allowed.success, true)
   assert.equal(denied.success, true)
@@ -5948,7 +6601,7 @@ test('agent sdk runtime gates vision tools with resolved provider capability', a
   registerMcpServer({
     serverId: 'sdk-vision',
     toolNames: ['view_image', 'mcp_plain_text_action'],
-    requiresAuthorization: false,
+    requiresAuthorization: false
   })
 
   const seenToolNames: string[] = []
@@ -5959,22 +6612,27 @@ test('agent sdk runtime gates vision tools with resolved provider capability', a
       config: {
         ...fakeConfig,
         model: 'o3-mini',
-        visionMode: 'off',
-      },
+        visionMode: 'off'
+      }
     }),
     runAgent: async ({ tools, onTextDelta }) => {
       seenToolNames.push(...tools.map((item) => item.name))
       onTextDelta('视觉工具检查完成')
       return { finalText: '视觉工具检查完成' }
-    },
+    }
   })
   runtime.newSession('butler::scope-vision-gate', 'system prompt')
 
   try {
-    const result = await runtime.sendMessage('butler::scope-vision-gate', '看一下图片并总结', 'run-vision-gate', {
-      publicSessionId: 'scope-vision-gate',
-      taskId: 'task-vision-gate',
-    })
+    const result = await runtime.sendMessage(
+      'butler::scope-vision-gate',
+      '看一下图片并总结',
+      'run-vision-gate',
+      {
+        publicSessionId: 'scope-vision-gate',
+        taskId: 'task-vision-gate'
+      }
+    )
 
     assert.equal(result.success, true)
     assert.equal(seenToolNames.includes('mcp_plain_text_action'), true)
@@ -5991,14 +6649,19 @@ test('agent sdk runtime does not leak host-only or unauthorized skill tools by d
       seenToolNames.push(...tools.map((item) => item.name))
       onTextDelta('工具检查完成')
       return { finalText: '工具检查完成' }
-    },
+    }
   })
   runtime.newSession('butler::scope-internal-tools', 'system prompt')
 
-  const result = await runtime.sendMessage('butler::scope-internal-tools', '看看可用能力', 'run-internal-tools', {
-    publicSessionId: 'scope-internal-tools',
-    taskId: 'task-internal-tools',
-  })
+  const result = await runtime.sendMessage(
+    'butler::scope-internal-tools',
+    '看看可用能力',
+    'run-internal-tools',
+    {
+      publicSessionId: 'scope-internal-tools',
+      taskId: 'task-internal-tools'
+    }
+  )
 
   assert.equal(result.success, true)
   assert.equal(seenToolNames.includes('system_run_openclaw'), false)
@@ -6007,17 +6670,19 @@ test('agent sdk runtime does not leak host-only or unauthorized skill tools by d
   assert.equal(seenToolNames.includes('skill_patch_config'), false)
 })
 
-
 test('G1: resolveToolFailurePageUrl prefers the targeted tab, falls back to active tab, never mis-attributes', () => {
   const controller = {
     getTabList: () => [
       { id: 'tab-1', url: 'https://active.example.com/a' },
-      { id: 'tab-6', url: 'https://jp.pinterest.com/u/board' },
+      { id: 'tab-6', url: 'https://jp.pinterest.com/u/board' }
     ],
-    getActiveTab: () => ({ url: 'https://active.example.com/a' }),
+    getActiveTab: () => ({ url: 'https://active.example.com/a' })
   }
   // targeted tab_id wins over the active tab (no wrong-domain attribution)
-  assert.equal(resolveToolFailurePageUrl(controller, { tab_id: 'tab-6' }), 'https://jp.pinterest.com/u/board')
+  assert.equal(
+    resolveToolFailurePageUrl(controller, { tab_id: 'tab-6' }),
+    'https://jp.pinterest.com/u/board'
+  )
   // no tab_id → active tab
   assert.equal(resolveToolFailurePageUrl(controller, {}), 'https://active.example.com/a')
   // targeted tab not found (e.g. closed) → null, NOT the active tab
@@ -6037,19 +6702,20 @@ test('G1: resolveToolFailurePageUrl prefers the targeted tab, falls back to acti
 // ============================================================================
 
 function createSkillHoldRuntime(
-  runAgent: NonNullable<AgentSdkRuntimeDeps['runAgent']>,
+  runAgent: NonNullable<AgentSdkRuntimeDeps['runAgent']>
 ): AgentSdkRuntime {
   const runtime = createRuntime({
     skillContextOrchestrator: {
       findExplicitlyRequestedSkills: () => [{ id: 'extract', name: 'extract' }],
       buildPreferredSkillToolNames: () => ['skill_ask_user', 'skill_inspect_run_state'],
-      rememberExplicitReferenceSkillHint: () => true,
+      rememberExplicitReferenceSkillHint: () => true
     },
-    executeToolCall: async () => createToolExecutionOutput('查到了页面状态', {
-      shape: 'json',
-      data: { ok: true },
-    }),
-    runAgent,
+    executeToolCall: async () =>
+      createToolExecutionOutput('查到了页面状态', {
+        shape: 'json',
+        data: { ok: true }
+      }),
+    runAgent
   })
   runtime.setBrowserController({} as never)
   return runtime
@@ -6071,7 +6737,7 @@ test('P0-1 pin: clarification-shaped final text on a skill turn never leaks into
     if (runAgentCalls === 1) {
       assert.ok(
         tools.some((item) => (item as { name?: string }).name === 'skill_ask_user'),
-        'fixture must produce a hold turn (skill_ask_user exposed)',
+        'fixture must produce a hold turn (skill_ask_user exposed)'
       )
       onTextDelta('需要你确认预算')
       onTextDelta('是多少，才能继续。')
@@ -6084,15 +6750,23 @@ test('P0-1 pin: clarification-shaped final text on a skill turn never leaks into
   runtime.on('output', (event) => events.push(event as Record<string, unknown>))
   runtime.newSession('butler::scope-hold-steer', 'system prompt')
 
-  const result = await runtime.sendMessage('butler::scope-hold-steer', HOLD_PROMPT, 'run-hold-steer', {
-    publicSessionId: 'scope-hold-steer',
-    taskId: 'task-hold-steer',
-  })
+  const result = await runtime.sendMessage(
+    'butler::scope-hold-steer',
+    HOLD_PROMPT,
+    'run-hold-steer',
+    {
+      publicSessionId: 'scope-hold-steer',
+      taskId: 'task-hold-steer'
+    }
+  )
 
   assert.equal(result.success, true)
   assert.equal(runAgentCalls, 2, 'clarification guard should steer once and re-run the model')
   const visible = joinedTextOutputs(events)
-  assert.ok(!visible.includes('才能继续'), `steered clarification text must never surface: ${visible}`)
+  assert.ok(
+    !visible.includes('才能继续'),
+    `steered clarification text must never surface: ${visible}`
+  )
   assert.ok(visible.includes('好的，我按默认预算继续整理。'))
 })
 
@@ -6112,20 +6786,38 @@ test('P0-1: hold turn flushes buffered narration at the native tool boundary (te
   runtime.on('output', (event) => events.push(event as Record<string, unknown>))
   runtime.newSession('butler::scope-hold-boundary', 'system prompt')
 
-  const result = await runtime.sendMessage('butler::scope-hold-boundary', HOLD_PROMPT, 'run-hold-boundary', {
-    publicSessionId: 'scope-hold-boundary',
-    taskId: 'task-hold-boundary',
-  })
+  const result = await runtime.sendMessage(
+    'butler::scope-hold-boundary',
+    HOLD_PROMPT,
+    'run-hold-boundary',
+    {
+      publicSessionId: 'scope-hold-boundary',
+      taskId: 'task-hold-boundary'
+    }
+  )
 
   assert.equal(result.success, true)
-  const firstNarrationIndex = events.findIndex((event) => event.type === 'text' && String(event.chunk || '').includes('我先查一下页面状态。'))
+  const firstNarrationIndex = events.findIndex(
+    (event) => event.type === 'text' && String(event.chunk || '').includes('我先查一下页面状态。')
+  )
   const firstToolUseIndex = events.findIndex((event) => event.type === 'tool_use')
   assert.ok(firstNarrationIndex >= 0, 'narration before the tool call must become visible')
   assert.ok(firstToolUseIndex >= 0, 'tool_use trace event must exist')
-  assert.ok(firstNarrationIndex < firstToolUseIndex, `narration must flush BEFORE the tool row (${firstNarrationIndex} vs ${firstToolUseIndex})`)
+  assert.ok(
+    firstNarrationIndex < firstToolUseIndex,
+    `narration must flush BEFORE the tool row (${firstNarrationIndex} vs ${firstToolUseIndex})`
+  )
   const visible = joinedTextOutputs(events)
-  assert.equal(countOccurrences(visible, '我先查一下页面状态。'), 1, `narration must appear exactly once: ${visible}`)
-  assert.equal(countOccurrences(visible, '查完了，继续执行。'), 1, `tail text must appear exactly once: ${visible}`)
+  assert.equal(
+    countOccurrences(visible, '我先查一下页面状态。'),
+    1,
+    `narration must appear exactly once: ${visible}`
+  )
+  assert.equal(
+    countOccurrences(visible, '查完了，继续执行。'),
+    1,
+    `tail text must appear exactly once: ${visible}`
+  )
 })
 
 test('P0-1 pin: checkpoint after repeated clarification emits preserved text exactly once (no dup with hold)', async () => {
@@ -6134,24 +6826,40 @@ test('P0-1 pin: checkpoint after repeated clarification emits preserved text exa
     runAgentCalls += 1
     if (runAgentCalls === 1) {
       onTextDelta('需要你确认预算是多少，才能继续。')
-      return { finalText: '需要你确认预算是多少，才能继续。' }
+      return {
+        finalText: '需要你确认预算是多少，才能继续。',
+        usage: { inputTokens: 11, outputTokens: 4, totalTokens: 15 }
+      }
     }
     onTextDelta('请提供门店面积和预算，才能继续。')
-    return { finalText: '请提供门店面积和预算，才能继续。' }
+    return {
+      finalText: '请提供门店面积和预算，才能继续。',
+      usage: { inputTokens: 21, outputTokens: 8, totalTokens: 29 }
+    }
   })
   const events: Array<Record<string, unknown>> = []
   runtime.on('output', (event) => events.push(event as Record<string, unknown>))
   runtime.newSession('butler::scope-hold-checkpoint', 'system prompt')
 
-  const result = await runtime.sendMessage('butler::scope-hold-checkpoint', HOLD_PROMPT, 'run-hold-checkpoint', {
-    publicSessionId: 'scope-hold-checkpoint',
-    taskId: 'task-hold-checkpoint',
-  })
+  const result = await runtime.sendMessage(
+    'butler::scope-hold-checkpoint',
+    HOLD_PROMPT,
+    'run-hold-checkpoint',
+    {
+      publicSessionId: 'scope-hold-checkpoint',
+      taskId: 'task-hold-checkpoint'
+    }
+  )
 
   assert.equal(result.success, true)
   assert.equal(runAgentCalls, 2)
+  assert.equal(result.contextUsage?.usedInputTokens, 21)
   const visible = joinedTextOutputs(events)
-  assert.equal(countOccurrences(visible, '请提供门店面积和预算，才能继续。'), 1, `checkpoint text must appear exactly once: ${visible}`)
+  assert.equal(
+    countOccurrences(visible, '请提供门店面积和预算，才能继续。'),
+    1,
+    `checkpoint text must appear exactly once: ${visible}`
+  )
   assert.match(String(result.finalText || ''), /我先暂停在这里/)
 })
 
@@ -6161,27 +6869,38 @@ test('P0-3: planning heartbeats surface before the first visible output', async 
     runAgent: async ({ onTextDelta }) => {
       onTextDelta('好的，这就开始。')
       return { finalText: '好的，这就开始。' }
-    },
+    }
   })
   runtime.setRuntime({
     publishScopeRunEvent: (payload: Record<string, unknown>) => {
       seq.push(`hb:${String(payload.phase)}:${String(payload.latestText || '')}`)
-    },
+    }
   } as never)
-  runtime.on('output', (event) => seq.push(`out:${String((event as Record<string, unknown>).type)}`))
+  runtime.on('output', (event) =>
+    seq.push(`out:${String((event as Record<string, unknown>).type)}`)
+  )
   runtime.newSession('butler::scope-heartbeat', 'system prompt')
 
-  const result = await runtime.sendMessage('butler::scope-heartbeat', '随便聊聊今天的安排', 'run-heartbeat', {
-    publicSessionId: 'scope-heartbeat',
-    taskId: 'task-heartbeat',
-  })
+  const result = await runtime.sendMessage(
+    'butler::scope-heartbeat',
+    '随便聊聊今天的安排',
+    'run-heartbeat',
+    {
+      publicSessionId: 'scope-heartbeat',
+      taskId: 'task-heartbeat'
+    }
+  )
 
   assert.equal(result.success, true)
   const firstOutputIndex = seq.findIndex((entry) => entry.startsWith('out:'))
-  const heartbeatsBeforeOutput = seq.slice(0, firstOutputIndex === -1 ? seq.length : firstOutputIndex)
+  const heartbeatsBeforeOutput = seq
+    .slice(0, firstOutputIndex === -1 ? seq.length : firstOutputIndex)
     .filter((entry) => entry.startsWith('hb:planning:'))
   assert.ok(firstOutputIndex >= 0, `run must produce visible output: ${seq.join(' | ')}`)
-  assert.ok(heartbeatsBeforeOutput.length >= 2, `>=2 planning heartbeats before first output: ${seq.join(' | ')}`)
+  assert.ok(
+    heartbeatsBeforeOutput.length >= 2,
+    `>=2 planning heartbeats before first output: ${seq.join(' | ')}`
+  )
   assert.ok(heartbeatsBeforeOutput.some((entry) => entry.includes('正在理解需求')))
   assert.ok(heartbeatsBeforeOutput.some((entry) => entry.includes('正在调用模型')))
 })
@@ -6200,15 +6919,26 @@ test('agent sdk runtime surfaces capability floor tools to the model end-to-end 
           : [],
       buildPreferredSkillToolNames: (t: string) =>
         t.includes('ready-human-touch-ppt')
-          ? ['skill_run_shell', 'skill_write_artifact', 'skill_read_artifact', 'skill_export_artifact']
+          ? [
+              'skill_run_shell',
+              'skill_write_artifact',
+              'skill_read_artifact',
+              'skill_export_artifact'
+            ]
           : [],
-      rememberExplicitReferenceSkillHint: () => true,
+      rememberExplicitReferenceSkillHint: () => true
     },
-    runAgent: async ({ tools, onTextDelta }: { tools: Array<{ name: string }>; onTextDelta: (t: string) => void }) => {
+    runAgent: async ({
+      tools,
+      onTextDelta
+    }: {
+      tools: Array<{ name: string }>
+      onTextDelta: (t: string) => void
+    }) => {
       seenToolNames.push(...tools.map((item) => item.name))
       onTextDelta('done')
       return { finalText: 'done' }
-    },
+    }
   })
   runtime.newSession('butler::scope-floor-wiring', 'system prompt')
   try {
@@ -6220,16 +6950,25 @@ test('agent sdk runtime surfaces capability floor tools to the model end-to-end 
         publicSessionId: 'scope-floor-wiring',
         requestEnvelope: {
           primaryInstruction: '用@[ready-human-touch-ppt]根据@[notes.md]生成一个人文感 ppt',
-          resources: [{ name: 'notes.md', path: '/tmp/notes.md', text: '' }],
-        },
-      },
+          resources: [{ name: 'notes.md', path: '/tmp/notes.md', text: '' }]
+        }
+      }
     )
     // runAgent captured the tool surface at model-call time (before any post-turn doc-read enforcement),
     // so we assert on the captured floor tools, not the turn's terminal outcome.
     void result
-    assert.ok(seenToolNames.includes('skill_read_artifact'), `skill floor skill_read_artifact must reach model; got ${seenToolNames.join('|')}`)
-    assert.ok(seenToolNames.includes('skill_run_shell'), `skill floor skill_run_shell must reach model; got ${seenToolNames.join('|')}`)
-    assert.ok(seenToolNames.includes('file_read_excerpt'), `document read floor file_read_excerpt must reach model; got ${seenToolNames.join('|')}`)
+    assert.ok(
+      seenToolNames.includes('skill_read_artifact'),
+      `skill floor skill_read_artifact must reach model; got ${seenToolNames.join('|')}`
+    )
+    assert.ok(
+      seenToolNames.includes('skill_run_shell'),
+      `skill floor skill_run_shell must reach model; got ${seenToolNames.join('|')}`
+    )
+    assert.ok(
+      seenToolNames.includes('file_read_excerpt'),
+      `document read floor file_read_excerpt must reach model; got ${seenToolNames.join('|')}`
+    )
   } finally {
     clearLastReferenceSkill('scope-floor-wiring')
   }

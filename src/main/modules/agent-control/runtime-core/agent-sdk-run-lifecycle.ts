@@ -1,45 +1,22 @@
-import {
-  mkdir,
-  readFile,
-  writeFile,
-} from 'fs/promises'
-import {
-  tmpdir,
-} from 'os'
-import {
-  join,
-} from 'path'
-import {
-  MemorySession,
-} from '@openai/agents'
-import type {
-  AgentInputItem,
-} from '@openai/agents'
-import type {
-  TaskBudgetRuntime,
-} from '../contracts/run-contracts'
-import type {
-  TurnTerminalReason,
-} from './turn-frame'
-import {
-  normalizeSessionSnapshotForSeed,
-} from '../compaction/compact-agent-input'
-import {
-  resumeBudgetRuntime,
-} from '../task-projection/run-budget-policy'
-import {
-  readResumeKind,
-} from '../contracts/resume-handle'
-import type {
-  ResumeKind,
-} from '../contracts/resume-handle'
+import { mkdir, readFile, writeFile } from 'fs/promises'
+import { tmpdir } from 'os'
+import { join } from 'path'
+import { MemorySession } from '@openai/agents'
+import type { AgentInputItem } from '@openai/agents'
+import type { TaskBudgetRuntime } from '../contracts/run-contracts'
+import type { TurnTerminalReason } from './turn-frame'
+import { normalizeSessionSnapshotForSeed } from '../compaction/compact-agent-input'
+import { restoreContinuationTaskBudgetRuntime } from '../task-projection/run-budget-policy'
+import { readResumeKind } from '../contracts/resume-handle'
+import type { ResumeKind } from '../contracts/resume-handle'
 import type {
   AgentSdkBudgetCheckpoint,
+  AgentSdkBudgetCheckpointLoadResult,
   AgentSdkBudgetCheckpointRestore,
   AgentSdkExecutionOptions,
   AgentSdkSession,
   BeginRunResult,
-  RunHandle,
+  RunHandle
 } from './agent-sdk-types'
 import {
   MAX_ORPHAN_RUNS,
@@ -50,11 +27,9 @@ import {
   nonEmptyString,
   raceWithTimeout,
   safeContinuationPathSegment,
-  stringField,
+  stringField
 } from './agent-sdk-utils'
-import {
-  log,
-} from './agent-sdk-provider'
+import { log } from './agent-sdk-provider'
 import { AgentSdkSessionManager } from './agent-sdk-session'
 import { AgentSdkCompactor } from './agent-sdk-compactor'
 import type { AbortInitiator } from '../contracts/run-contracts-internal'
@@ -69,7 +44,7 @@ export interface RunLifecycleHost {
 export function createInitiatorAbort(
   runHandle: RunHandle,
   initiator: AbortInitiator,
-  message: string,
+  message: string
 ): Error {
   runHandle.abortInitiator = initiator
   return new Error(message)
@@ -86,7 +61,6 @@ export function createInitiatorAbort(
 export class AgentSdkRunLifecycle {
   constructor(private readonly host: RunLifecycleHost) {}
 
-
   createRunHandle(params: {
     runId: string
     runGeneration: number
@@ -101,10 +75,9 @@ export class AgentSdkRunLifecycle {
       ...params,
       abortInitiator: null,
       settled,
-      resolveSettled,
+      resolveSettled
     }
   }
-
 
   async beginRun(params: {
     name: string
@@ -113,15 +86,15 @@ export class AgentSdkRunLifecycle {
   }): Promise<BeginRunResult> {
     const idleSession = this.host.sessionManager.get(params.name)
     if (
-      idleSession
-      && !idleSession.currentRun
-      && this.host.sessionManager.activeLockCount(params.name) === 0
+      idleSession &&
+      !idleSession.currentRun &&
+      this.host.sessionManager.activeLockCount(params.name) === 0
     ) {
       if (idleSession.orphanCount >= MAX_ORPHAN_RUNS) {
         return {
           ok: false,
           reason: 'orphan_limit',
-          message: '上一轮仍在取消中，请稍后重试。',
+          message: '上一轮仍在取消中，请稍后重试。'
         }
       }
       idleSession.generation += 1
@@ -130,7 +103,7 @@ export class AgentSdkRunLifecycle {
         runId: params.runId,
         runGeneration: idleSession.generation,
         abortController,
-        capturedSession: idleSession.sdkSession,
+        capturedSession: idleSession.sdkSession
       })
       idleSession.currentRun = runHandle
       return {
@@ -138,7 +111,7 @@ export class AgentSdkRunLifecycle {
         session: idleSession,
         runHandle,
         abortController,
-        runGeneration: idleSession.generation,
+        runGeneration: idleSession.generation
       }
     }
 
@@ -161,7 +134,7 @@ export class AgentSdkRunLifecycle {
           runId: params.runId,
           runGeneration: session.generation,
           abortController,
-          capturedSession: session.sdkSession,
+          capturedSession: session.sdkSession
         })
         session.currentRun = runHandle
         started = {
@@ -169,7 +142,7 @@ export class AgentSdkRunLifecycle {
           session,
           runHandle,
           abortController,
-          runGeneration: session.generation,
+          runGeneration: session.generation
         }
         return
       }
@@ -183,7 +156,9 @@ export class AgentSdkRunLifecycle {
       session.generation += 1
       myGeneration = session.generation
       if (capturedOld.abortController) {
-        capturedOld.abortController.abort(createInitiatorAbort(capturedOld, 'preempted', 'process_restarted'))
+        capturedOld.abortController.abort(
+          createInitiatorAbort(capturedOld, 'preempted', 'process_restarted')
+        )
         capturedOld.abortController = null
       }
       log(`preempted previous SDK run agent=${params.name}`)
@@ -195,7 +170,7 @@ export class AgentSdkRunLifecycle {
       return {
         ok: false,
         reason: 'orphan_limit',
-        message: '上一轮仍在取消中，请稍后重试。',
+        message: '上一轮仍在取消中，请稍后重试。'
       }
     }
 
@@ -211,7 +186,7 @@ export class AgentSdkRunLifecycle {
           ok: false,
           reason: 'superseded',
           message: '本轮已被更新的发送接管。',
-          currentRunId: session?.currentRun?.runId ?? null,
+          currentRunId: session?.currentRun?.runId ?? null
         }
       }
       if (oldRun && session.currentRun === oldRun) {
@@ -224,7 +199,7 @@ export class AgentSdkRunLifecycle {
           orphanCount: session.orphanCount + 1,
           pendingCompact: session.pendingCompact,
           contextWindowTokens: session.contextWindowTokens,
-          lastUsageTokens: session.lastUsageTokens,
+          lastUsageTokens: session.lastUsageTokens
         }
         this.host.sessionManager.set(params.name, session)
       }
@@ -233,7 +208,7 @@ export class AgentSdkRunLifecycle {
         runId: params.runId,
         runGeneration: session.generation,
         abortController,
-        capturedSession: session.sdkSession,
+        capturedSession: session.sdkSession
       })
       session.currentRun = runHandle
       return {
@@ -241,11 +216,10 @@ export class AgentSdkRunLifecycle {
         session,
         runHandle,
         abortController,
-        runGeneration: session.generation,
+        runGeneration: session.generation
       }
     })
   }
-
 
   async finalizeRun(name: string, session: AgentSdkSession, runHandle: RunHandle): Promise<void> {
     try {
@@ -264,8 +238,6 @@ export class AgentSdkRunLifecycle {
       runHandle.resolveSettled()
     }
   }
-
-
 
   async writeBudgetCheckpointState(params: {
     agentName: string
@@ -289,19 +261,19 @@ export class AgentSdkRunLifecycle {
       tmpdir(),
       'ready-agent-continuations',
       safeContinuationPathSegment(params.taskId),
-      safeContinuationPathSegment(params.runId),
+      safeContinuationPathSegment(params.runId)
     )
     await mkdir(outputDir, { recursive: true })
     const runStatePath = join(outputDir, 'run_state.json')
-    const sessionSnapshot = normalizeSessionSnapshotForSeed(await params.runHandle.capturedSession.getItems())
+    const sessionSnapshot = normalizeSessionSnapshotForSeed(
+      await params.runHandle.capturedSession.getItems()
+    )
     const now = new Date().toISOString()
     const terminalReason = params.terminalReason || 'checkpoint_budget'
     const resumeKind = params.resumeKind || 'snapshot'
-    const blockedReason = params.blockedReason || (
-      resumeKind === 'paused'
-        ? '本轮工具预算已用完，已保存续跑检查点。'
-        : '已保存内部恢复快照。'
-    )
+    const blockedReason =
+      params.blockedReason ||
+      (resumeKind === 'paused' ? '本轮工具预算已用完，已保存续跑检查点。' : '已保存内部恢复快照。')
     const defaultPauseReason = resumeKind === 'paused' ? 'budget_exhausted' : 'snapshot'
     const state = {
       version: 1,
@@ -320,7 +292,7 @@ export class AgentSdkRunLifecycle {
       requiredCapabilityGroups: [...params.requiredCapabilityGroups],
       requiredToolNames: [...params.requiredToolNames],
       createdAt: now,
-      updatedAt: now,
+      updatedAt: now
     }
     await writeFile(runStatePath, JSON.stringify(state, null, 2), 'utf8')
     return {
@@ -337,55 +309,88 @@ export class AgentSdkRunLifecycle {
           blockerType: params.blockerType || defaultPauseReason,
           pauseReason: params.pauseReason || defaultPauseReason,
           outputDir,
-          runStatePath,
-        },
-      },
+          runStatePath
+        }
+      }
     }
   }
 
-
-  async loadBudgetCheckpointState(options?: AgentSdkExecutionOptions): Promise<AgentSdkBudgetCheckpointRestore | null> {
+  async loadBudgetCheckpointState(
+    options?: AgentSdkExecutionOptions
+  ): Promise<AgentSdkBudgetCheckpointLoadResult> {
     const runStatePath = continuationRunStatePath(options)
-    if (!runStatePath) return null
+    if (!runStatePath) return { status: 'absent' }
     let raw = ''
     try {
       raw = await readFile(runStatePath, 'utf8')
     } catch {
-      return null
+      // silent-catch: unreadable durable state is returned as an explicit invalid result.
+      return { status: 'invalid', runStatePath, reason: 'unreadable' }
     }
     let parsed: unknown
     try {
       parsed = JSON.parse(raw) as unknown
     } catch {
-      return null
+      // silent-catch: corrupt durable state is returned as an explicit invalid result.
+      return { status: 'invalid', runStatePath, reason: 'corrupt' }
     }
     const record = asRecord(parsed)
-    if (readResumeKind(record?.resumeKind) !== 'paused') return null
+    if (stringField(record, 'kind') !== 'agent_sdk_budget_checkpoint') {
+      return { status: 'invalid', runStatePath, reason: 'wrong_kind' }
+    }
+    if (readResumeKind(record?.resumeKind) !== 'paused') {
+      return { status: 'invalid', runStatePath, reason: 'wrong_resume_kind' }
+    }
     const recordTaskId = stringField(record, 'taskId')
-    const requestedTaskId = nonEmptyString(options?.continuationIntent?.taskId)
-      || nonEmptyString(options?.continuationState?.taskId)
-    if (recordTaskId && requestedTaskId && recordTaskId !== requestedTaskId) return null
+    const requestedTaskIds = [
+      nonEmptyString(options?.taskId),
+      nonEmptyString(options?.continuationIntent?.taskId),
+      nonEmptyString(options?.continuationState?.taskId)
+    ].filter((value): value is string => Boolean(value))
+    if (
+      !recordTaskId ||
+      requestedTaskIds.length === 0 ||
+      requestedTaskIds.some((taskId) => taskId !== recordTaskId)
+    ) {
+      return { status: 'invalid', runStatePath, reason: 'task_mismatch' }
+    }
     const recordScopeId = stringField(record, 'scopeId')
-    const requestedScopeId = nonEmptyString(options?.continuationState?.scopeId)
-    if (recordScopeId && requestedScopeId && recordScopeId !== requestedScopeId) return null
+    const requestedScopeId =
+      nonEmptyString(options?.publicSessionId) || nonEmptyString(options?.continuationState?.scopeId)
+    if (!recordScopeId || !requestedScopeId || recordScopeId !== requestedScopeId) {
+      return { status: 'invalid', runStatePath, reason: 'scope_mismatch' }
+    }
     const budgetRuntime = asRecord(record?.budgetRuntime) as unknown as TaskBudgetRuntime | null
-    if (!budgetRuntime?.budget || !budgetRuntime.usage) return null
+    if (!budgetRuntime?.budget || !budgetRuntime.usage) {
+      return { status: 'invalid', runStatePath, reason: 'invalid_budget' }
+    }
     const rawSnapshot = Array.isArray(record?.sessionSnapshot)
-      ? record.sessionSnapshot as AgentInputItem[]
+      ? (record.sessionSnapshot as AgentInputItem[])
       : []
+    const restoredBudget = restoreContinuationTaskBudgetRuntime({
+      taskType: budgetRuntime.taskType,
+      projectionBudget: null,
+      projectionBudgetRuntime: budgetRuntime
+    }).runtime
+    if (!restoredBudget) {
+      return { status: 'invalid', runStatePath, reason: 'invalid_budget' }
+    }
     return {
-      sessionSnapshot: normalizeSessionSnapshotForSeed(rawSnapshot),
-      taskBudgetRuntime: resumeBudgetRuntime(budgetRuntime),
-      requiredCapabilityGroups: Array.isArray(record?.requiredCapabilityGroups)
-        ? record.requiredCapabilityGroups.map((item) => String(item || '').trim()).filter(Boolean)
-        : [],
-      requiredToolNames: Array.isArray(record?.requiredToolNames)
-        ? record.requiredToolNames.map((item) => String(item || '').trim()).filter(Boolean)
-        : [],
-      usedToolNames: Array.isArray(record?.usedToolNames)
-        ? record.usedToolNames.map((item) => String(item || '').trim()).filter(Boolean)
-        : [],
-      runStatePath,
+      status: 'loaded',
+      restore: {
+        sessionSnapshot: normalizeSessionSnapshotForSeed(rawSnapshot),
+        taskBudgetRuntime: { ...restoredBudget, frozen: false },
+        requiredCapabilityGroups: Array.isArray(record?.requiredCapabilityGroups)
+          ? record.requiredCapabilityGroups.map((item) => String(item || '').trim()).filter(Boolean)
+          : [],
+        requiredToolNames: Array.isArray(record?.requiredToolNames)
+          ? record.requiredToolNames.map((item) => String(item || '').trim()).filter(Boolean)
+          : [],
+        usedToolNames: Array.isArray(record?.usedToolNames)
+          ? record.usedToolNames.map((item) => String(item || '').trim()).filter(Boolean)
+          : [],
+        runStatePath
+      }
     }
   }
 }
