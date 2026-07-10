@@ -146,6 +146,24 @@ describe('browser-privacy-service', () => {
     assert.equal(session.cookies.flushCount, 1)
   })
 
+  it('removeCookie refuses ambiguous same-name cookies instead of deleting siblings', async () => {
+    const session = new FakeSession({
+      cookies: [
+        { name: 'sid', value: 'root', domain: 'example.com', path: '/', secure: true },
+        { name: 'sid', value: 'app', domain: '.example.com', path: '/app', secure: true },
+      ],
+    })
+    const { service } = makeService(session)
+
+    await assert.rejects(
+      service.removeCookie({ domain: 'example.com', path: '/app', name: 'sid', secure: true }),
+      /同名 Cookie/,
+    )
+    assert.deepEqual(session.cookies.removeCalls, [])
+    assert.equal(session.cookies.flushCount, 0)
+    assert.equal(session.cookies.store.length, 2)
+  })
+
   it('removeCookiesForDomain removes only that domain (including dot-prefixed variants)', async () => {
     const session = new FakeSession({ cookies: SAMPLE_COOKIES })
     const { service } = makeService(session)

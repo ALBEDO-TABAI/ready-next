@@ -208,15 +208,24 @@ export function BrowserPrivacySettingsPanel() {
   }, [selectedItems, rangeSeconds, refreshSummary, refreshCookies])
 
   const requestClear = useCallback(() => {
-    const labels = selectedItems.map((item) => item.label).join('、')
     const rangeLabel = TIME_RANGE_OPTIONS.find((opt) => opt.value === timeRange)?.label || ''
+    const scopeParts = rangeSeconds === null
+      ? [`全部时间的${selectedItems.map((item) => item.label).join('、')}`]
+      : [
+          selectedItems.some((item) => item.timeRanged)
+            ? `${rangeLabel}的${selectedItems.filter((item) => item.timeRanged).map((item) => item.label).join('、')}`
+            : null,
+          selectedItems.some((item) => !item.timeRanged)
+            ? `全部时间的${selectedItems.filter((item) => !item.timeRanged).map((item) => item.label).join('、')}`
+            : null,
+        ].filter((part): part is string => Boolean(part))
     setConfirm({
       title: '确认清除浏览数据',
-      message: `将清除${rangeLabel}的：${labels}。此操作不可撤销，是否继续？`,
+      message: `将清除${scopeParts.join('，并清除')}。此操作不可撤销，是否继续？`,
       confirmLabel: '确认清除',
       action: performClear,
     })
-  }, [selectedItems, timeRange, performClear])
+  }, [selectedItems, timeRange, rangeSeconds, performClear])
 
   const removeDomainCookies = useCallback(async (domain: string) => {
     if (typeof window === 'undefined' || !window.electronAPI?.browser?.removeCookiesForDomain) return

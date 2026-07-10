@@ -127,6 +127,13 @@ export class BrowserPrivacyService {
 
   async removeCookie(payload: RemoveBrowserCookiePayload): Promise<{ removed: number }> {
     const session = this.getSession()
+    const targetDomain = normalizeCookieDomain(payload.domain)
+    const sameNameCookies = (await session.cookies.get({})).filter(
+      (cookie) => normalizeCookieDomain(cookie.domain) === targetDomain && cookie.name === payload.name,
+    )
+    if (sameNameCookies.length > 1) {
+      throw new Error('该站点存在同名 Cookie，无法安全地单独删除；请删除该站点的全部 Cookie')
+    }
     const url = cookieRemovalUrl({
       domain: payload.domain,
       path: payload.path,
