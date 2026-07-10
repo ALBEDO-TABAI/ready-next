@@ -135,8 +135,12 @@ export class BrowserDataService {
     return this.repository.getHistory(limit)
   }
 
-  clearHistory(): void {
-    this.repository.clearHistory()
+  clearHistory(sinceEpochSeconds?: number): void {
+    this.repository.clearHistory(sinceEpochSeconds)
+  }
+
+  getHistoryCount(): number {
+    return this.repository.getHistoryCount()
   }
 
   searchHistory(query: string): BrowserHistoryEntry[] {
@@ -181,7 +185,11 @@ export class BrowserDataService {
     return this.repository.getDownloads()
   }
 
-  clearDownloads(): void {
-    this.repository.clearDownloads()
+  clearDownloads(sinceEpochSeconds?: number): void {
+    this.repository.clearDownloads(sinceEpochSeconds)
+  }
+
+  getDownloadCount(): number {
+    return this.repository.getDownloadCount()
   }
 }

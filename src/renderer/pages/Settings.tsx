@@ -3,7 +3,7 @@ import {
   ChevronLeft, User, Bell, Shield, Database,
   Palette, Keyboard, Globe, Info, Moon, Sun, Bot, Monitor, Droplets,
   ChevronRight, ExternalLink, HardDrive, Trash2, MessageSquare, Brain, Users, Sparkles, Cat,
-  Plug2, Boxes
+  Plug2, Boxes, Cookie
 } from 'lucide-react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useTheme, type ThemeAccent, type ThemeSkin } from '../stores/useTheme'
@@ -29,6 +29,7 @@ import { SETTINGS_ROW_CONTROL_MIN_WIDTH, SettingsSwitch, type SettingItem, type 
 import { AISettingsPanel } from './settings/AISettingsPanel'
 import { RSSDraftStoreSettingsPanel } from './settings/RSSDraftStoreSettingsPanel'
 import { StorageSettingsPanel } from './settings/StorageSettingsPanel'
+import { BrowserPrivacySettingsPanel } from './settings/BrowserPrivacySettingsPanel'
 import { ExternalServicesSettingsPanel } from './settings/ExternalServicesSettingsPanel'
 import { McpSettingsPanel } from './settings/McpSettingsPanel'
 import { MemorySettingsSection } from './settings/MemorySettingsSection'
@@ -167,6 +168,13 @@ const settingsData: SettingSection[] = [
       { id: 'analytics', label: '使用分析', description: '帮助我们改善产品体验（匿名数据）', type: 'toggle', value: false },
       { id: 'crashReports', label: '崩溃报告', description: '自动发送崩溃信息协助排查问题', type: 'toggle', value: true }
     ]
+  },
+  {
+    id: 'browser-privacy',
+    title: '浏览器数据',
+    icon: Cookie,
+    description: '清除浏览数据，管理 Cookie 与站点数据',
+    settings: [] // Rendered dynamically via BrowserPrivacySettingsPanel
   },
   {
     id: 'storage',
@@ -445,7 +453,7 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
   }
 
   const isDynamicSection = currentSection
-    ? ['ai', 'remote-im', 'external-services', 'mcp', 'memory', 'agent', 'user-profiles', 'pet', 'rss-storage', MODELS_RUNTIME_SETTINGS_SECTION, 'storage'].includes(currentSection.id)
+    ? ['ai', 'remote-im', 'external-services', 'mcp', 'memory', 'agent', 'user-profiles', 'pet', 'rss-storage', MODELS_RUNTIME_SETTINGS_SECTION, 'storage', 'browser-privacy'].includes(currentSection.id)
     : false
 
   return (
@@ -583,6 +591,7 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
                 {currentSection.id === 'rss-storage' && <RSSDraftStoreSettingsPanel />}
                 {currentSection.id === MODELS_RUNTIME_SETTINGS_SECTION && <ModelsRuntimeSettingsPanel />}
                 {currentSection.id === 'storage' && <StorageSettingsPanel />}
+                {currentSection.id === 'browser-privacy' && <BrowserPrivacySettingsPanel />}
                 {currentSection.id === 'remote-im' && <RemoteIMSettingsPanel />}
                 {currentSection.id === 'external-services' && <ExternalServicesSettingsPanel />}
                 {currentSection.id === 'mcp' && <McpSettingsPanel />}

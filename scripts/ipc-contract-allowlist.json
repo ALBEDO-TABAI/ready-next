@@ -52,7 +52,7 @@
   "methods_typed_only": [],
   "non_literal_push": [
     {
-      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:207",
+      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:209",
       "variable": "channel",
       "channels": [
         "browser:downloadUpdate"
@@ -62,7 +62,7 @@
       "expiry": "2026-08-21"
     },
     {
-      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:213",
+      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:215",
       "variable": "channel",
       "channels": [
         "app:shortcut"
@@ -72,7 +72,7 @@
       "expiry": "2026-08-21"
     },
     {
-      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:227",
+      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:229",
       "variable": "channel",
       "channels": [
         "browser:fastCardContextAction"
@@ -82,7 +82,7 @@
       "expiry": "2026-08-21"
     },
     {
-      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:236",
+      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:238",
       "variable": "channel",
       "channels": [
         "browser:bookmarksChanged"
@@ -92,7 +92,7 @@
       "expiry": "2026-08-21"
     },
     {
-      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:268",
+      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:270",
       "variable": "channel",
       "channels": [
         "browser:previewUpdate"
@@ -102,7 +102,7 @@
       "expiry": "2026-08-21"
     },
     {
-      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:329",
+      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:331",
       "variable": "channel",
       "channels": [
         "browser:tabUpdate"
@@ -112,7 +112,7 @@
       "expiry": "2026-08-21"
     },
     {
-      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:348",
+      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:350",
       "variable": "channel",
       "channels": [
         "browser:tabUpdate",
@@ -123,7 +123,7 @@
       "expiry": "2026-08-21"
     },
     {
-      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:400",
+      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:402",
       "variable": "channel",
       "channels": [
         "browser:adblockUpdate"
@@ -133,7 +133,7 @@
       "expiry": "2026-08-21"
     },
     {
-      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:445",
+      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:447",
       "variable": "channel",
       "channels": [
         "browser:bookmarksChanged",
@@ -144,7 +144,7 @@
       "expiry": "2026-08-21"
     },
     {
-      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:557",
+      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:559",
       "variable": "channel",
       "channels": [
         "browser:adblockUpdate",

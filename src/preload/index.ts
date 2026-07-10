@@ -697,6 +697,16 @@ const browserAPI = {
     return () => ipcRenderer.removeListener('browser:downloadUpdate', handler)
   },
 
+  // Privacy — clear browsing data & cookie management (persist:browser partition)
+  getPrivacySummary: () => ipcRenderer.invoke('browser:getPrivacySummary'),
+  clearBrowsingData: (payload: { dataTypes: string[]; sinceEpochSeconds?: number }) =>
+    ipcRenderer.invoke('browser:clearBrowsingData', payload),
+  listCookies: () => ipcRenderer.invoke('browser:listCookies'),
+  removeCookie: (payload: { domain: string; path: string; name: string; secure: boolean }) =>
+    ipcRenderer.invoke('browser:removeCookie', payload),
+  removeCookiesForDomain: (payload: { domain: string }) =>
+    ipcRenderer.invoke('browser:removeCookiesForDomain', payload),
+
   showUtilityMenu: (payload: BrowserUtilityMenuRequest) => ipcRenderer.invoke('browser:showUtilityMenu', payload),
 
   // Print

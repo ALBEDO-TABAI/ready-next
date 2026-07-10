@@ -1987,9 +1987,19 @@ export class DatabaseManager {
       : this.db.prepare(sql).all<BrowserHistoryEntry>()
   }
 
-  clearHistory(): void {
+  clearHistory(sinceEpochSeconds?: number): void {
     if (!this.db) throw new Error('Database not available')
-    this.db.prepare('DELETE FROM browser_history').run()
+    if (typeof sinceEpochSeconds === 'number' && Number.isFinite(sinceEpochSeconds)) {
+      this.db.prepare('DELETE FROM browser_history WHERE visited_at >= ?').run(Math.floor(sinceEpochSeconds))
+    } else {
+      this.db.prepare('DELETE FROM browser_history').run()
+    }
+  }
+
+  getHistoryCount(): number {
+    if (!this.db) return 0
+    const row = this.db.prepare('SELECT COUNT(*) AS count FROM browser_history').get<{ count: number }>()
+    return Number(row?.count || 0)
   }
 
   searchHistory(query: string): BrowserHistoryEntry[] {
@@ -2087,9 +2097,19 @@ export class DatabaseManager {
       .all<BrowserDownload>()
   }
 
-  clearDownloads(): void {
+  clearDownloads(sinceEpochSeconds?: number): void {
     if (!this.db) throw new Error('Database not available')
-    this.db.prepare('DELETE FROM browser_downloads').run()
+    if (typeof sinceEpochSeconds === 'number' && Number.isFinite(sinceEpochSeconds)) {
+      this.db.prepare('DELETE FROM browser_downloads WHERE created_at >= ?').run(Math.floor(sinceEpochSeconds))
+    } else {
+      this.db.prepare('DELETE FROM browser_downloads').run()
+    }
+  }
+
+  getDownloadCount(): number {
+    if (!this.db) return 0
+    const row = this.db.prepare('SELECT COUNT(*) AS count FROM browser_downloads').get<{ count: number }>()
+    return Number(row?.count || 0)
   }
 
   // ===================== Browser Tasks =====================

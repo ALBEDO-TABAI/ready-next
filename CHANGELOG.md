@@ -1,5 +1,13 @@
 # Ready V5 - 更新日志
 
+## [Unreleased] - 2026-07-10
+
+### 浏览器数据（清除浏览数据 / Cookie 管理）
+
+- 设置页新增「浏览器数据」选项页：Edge 式清除浏览数据（浏览历史、下载记录、Cookie 及其他站点数据、缓存，支持 1 小时 / 24 小时 / 7 天 / 4 周 / 全部时间范围）与 Cookie 管理（按站点分组查看、搜索、单条 / 整站 / 全部删除）。
+- 新增 `BrowserPrivacyService`（`browser-engine/privacy-service.ts`）：清理与枚举全部作用于真实浏览分区 `persist:browser`（此前 `app:clearCache` 只清 defaultSession，清不到浏览会话）；历史 / 下载记录按 SQLite `visited_at`/`created_at` 支持时间范围，Cookie / 缓存 / 站点存储受 Electron API 限制仅支持全量清除并在 UI 明示。
+- 新增 IPC：`browser:getPrivacySummary` / `browser:clearBrowsingData` / `browser:listCookies` / `browser:removeCookie` / `browser:removeCookiesForDomain`，wire 契约见 `src/shared/browser-privacy.ts`；行为测试 `browser-privacy-service.test.ts`（含 Electron ABI 下真 SQLite 时间边界验证）。
+
 ## [Unreleased] - 2026-06-22
 
 ### Remote IM / Send IM

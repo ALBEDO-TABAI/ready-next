@@ -59,8 +59,12 @@ export class BrowserRepository {
     return getDatabase().getHistory(limit)
   }
 
-  clearHistory(): void {
-    getDatabase().clearHistory()
+  clearHistory(sinceEpochSeconds?: number): void {
+    getDatabase().clearHistory(sinceEpochSeconds)
+  }
+
+  getHistoryCount(): number {
+    return getDatabase().getHistoryCount()
   }
 
   searchHistory(query: string): BrowserHistoryEntry[] {
@@ -105,8 +109,12 @@ export class BrowserRepository {
     return getDatabase().getDownloads()
   }
 
-  clearDownloads(): void {
-    getDatabase().clearDownloads()
+  clearDownloads(sinceEpochSeconds?: number): void {
+    getDatabase().clearDownloads(sinceEpochSeconds)
+  }
+
+  getDownloadCount(): number {
+    return getDatabase().getDownloadCount()
   }
 
   createTask(task: {

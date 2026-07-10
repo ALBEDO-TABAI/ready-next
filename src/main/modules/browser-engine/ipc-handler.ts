@@ -68,6 +68,8 @@ import { setupBrowserClipIPC } from './ipc-clip'
 import { setupBrowserClipDraggedTabIPC } from './ipc-clip-dragged-tab'
 import { setupBrowserContentStudyIPC } from './ipc-content-study-dragged-tab'
 import { setupBrowserDataIPC } from './ipc-data'
+import { setupBrowserPrivacyIPC } from './ipc-privacy'
+import { BrowserPrivacyService } from './privacy-service'
 import { setupBrowserFastCardIPC } from './ipc-fastcard'
 import { setupBrowserVerticalRailOverlayIPC } from './ipc-vertical-rail-overlay'
 import { setupBrowserLockOverlayIPC } from './ipc-browser-lock-overlay'
@@ -2583,6 +2585,10 @@ export function setupBrowserIPC(
   setupBrowserShellIPC(controller)
   setupBrowserSupervisionIPC(controller)
   setupBrowserDataIPC(controller, browserDataService)
+  setupBrowserPrivacyIPC(new BrowserPrivacyService({
+    getSession: () => session.fromPartition('persist:browser'),
+    data: browserDataService,
+  }))
   setupBrowserClipIPC({
     getActiveTab: () => {
       const active = controller.getActiveTab()

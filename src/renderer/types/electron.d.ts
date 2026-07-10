@@ -1,6 +1,12 @@
 import type { BrowserDiagnosticsData } from '../modules/browser/types'
 import type { BrowserUtilityMenuRequest } from '../../shared/browser-utility-menu'
 import type { BrowserViewIntent, BrowserViewIntentAck } from '../../shared/browser-view-intent'
+import type {
+  BrowserCookieDomainGroup,
+  BrowserPrivacySummary,
+  BrowsingDataType,
+  ClearBrowsingDataResult,
+} from '../../shared/browser-privacy'
 import type { NativeContextMenuRequest, NativeContextMenuResponse } from '../../shared/native-context-menu'
 import type { CapabilityRuntimeSnapshot } from '../../shared/ai-capability-runtime'
 import type { RendererAgentMetricName } from '../../shared/renderer-agent-metrics'
@@ -1821,6 +1827,24 @@ interface ElectronBrowserAPI {
     downloadHeaders?: Record<string, string> | null
   }) => Promise<{ success: boolean; savePath?: string; filename?: string; error?: string }>
   onDownloadUpdate: (callback: (data: BrowserDownloadUpdateEvent) => void) => () => void
+
+  // Privacy — clear browsing data & cookie management
+  getPrivacySummary: () => Promise<{ success: boolean; data?: BrowserPrivacySummary; error?: string }>
+  clearBrowsingData: (payload: {
+    dataTypes: BrowsingDataType[]
+    sinceEpochSeconds?: number
+  }) => Promise<{ success: boolean; data?: ClearBrowsingDataResult; error?: string }>
+  listCookies: () => Promise<{ success: boolean; data?: BrowserCookieDomainGroup[]; error?: string }>
+  removeCookie: (payload: {
+    domain: string
+    path: string
+    name: string
+    secure: boolean
+  }) => Promise<{ success: boolean; data?: { removed: number }; error?: string }>
+  removeCookiesForDomain: (
+    payload: { domain: string }
+  ) => Promise<{ success: boolean; data?: { removed: number }; error?: string }>
+
   showUtilityMenu: (payload: BrowserUtilityMenuRequest) => Promise<{ success: boolean; error?: string }>
 
   // Print
