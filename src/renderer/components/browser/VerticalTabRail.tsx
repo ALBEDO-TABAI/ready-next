@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Globe, Loader2, Lock, Plus, X } from 'lucide-react'
+import { ChevronDown, ChevronRight, Globe, Loader2, Lock, Plus, X } from 'lucide-react'
 import {
   beginBrowserTabDragSession,
   endBrowserTabDragSession,
@@ -16,11 +16,19 @@ import type {
 } from '../../../shared/browser-vertical-rail-overlay'
 import {
   resolveGroupedFlyoutContentHeight,
+  VERTICAL_RAIL_FLYOUT_GROUP_HEADER_HEIGHT,
   VERTICAL_RAIL_FLYOUT_MIN_HEIGHT,
+  VERTICAL_RAIL_FLYOUT_PAD_Y,
   VERTICAL_RAIL_FLYOUT_ROW_GAP,
 } from '../../../shared/vertical-rail-flyout-layout'
 import { buildTabRailRows, resolveReorderDrop } from '../tabs/tab-rail-display-model'
-import { resolveTabDropIntent, tabGroupColorVar, tabGroupColorSoft, type TabDropIntent } from '../tabs/tab-group-visuals'
+import {
+  resolveTabDropIntent,
+  tabGroupColorVar,
+  tabGroupColorSoft,
+  tabGroupPillTextColor,
+  type TabDropIntent,
+} from '../tabs/tab-group-visuals'
 import { buildOverlaySnapshotTabs } from './vertical-rail-overlay-snapshot'
 
 export const BROWSER_VERTICAL_RAIL_WIDTH = 52
@@ -98,6 +106,9 @@ export default function VerticalTabRail({
   const overlayOpenRef = useRef(false)
   const openTimerRef = useRef<number | null>(null)
   const closeTimerRef = useRef<number | null>(null)
+  // The overlay's group-edit menu floats inside the content-sized child window; while it
+  // is open the snapshot height must reserve room down to the menu's bottom edge.
+  const overlayEditorRef = useRef<{ groupId: string; bottom: number } | null>(null)
 
   // Keep latest props (state + all callbacks) reachable from the IPC command handler
   // without re-subscribing the overlay command listener each render.
@@ -128,6 +139,13 @@ export default function VerticalTabRail({
   )
   const tabById = useMemo(() => new Map(tabs.map((tab) => [tab.id, tab])), [tabs])
   const groupById = useMemo(() => new Map(tabGroups.map((group) => [group.id, group])), [tabGroups])
+  // What the 52px strip actually renders: group-header chips + tab icons, with members of
+  // a COLLAPSED group hidden (Edge semantics — the chip stands in for the group). Drop
+  // resolution keeps using the full hoisted tabRows order; hiding is render-only.
+  const stripRows = useMemo(
+    () => rows.filter((row) => row.kind === 'group-header' || !(row.groupId && groupById.get(row.groupId)?.collapsed)),
+    [rows, groupById],
+  )
 
   // D-SNAPSHOT: emit the RAW FLAT tab order + per-tab groupId + the group list. The
   // overlay window does its own run-local split hoist; a reorder command's toRank is
@@ -147,10 +165,16 @@ export default function VerticalTabRail({
       Math.max(VERTICAL_RAIL_FLYOUT_MIN_HEIGHT, Math.round(rect.height)),
       resolveGroupedFlyoutContentHeight(visibleTabRows, g.length),
     )
+    // While the overlay's group-edit menu is open, grow the window down to the menu's
+    // reported bottom edge (the menu floats inside the child window and would clip).
+    const editor = overlayEditorRef.current
+    const editorFloor = editor && g.some((group) => group.id === editor.groupId)
+      ? Math.round(editor.bottom) + VERTICAL_RAIL_FLYOUT_PAD_Y
+      : 0
     return {
       tabs: overlayTabs,
       groups: g,
-      bounds: { left: Math.round(rect.left), top: Math.round(rect.top), width: RAIL_WIDTH, height },
+      bounds: { left: Math.round(rect.left), top: Math.round(rect.top), width: RAIL_WIDTH, height: Math.max(height, editorFloor) },
       scrollTop: Math.round(railListRef.current?.scrollTop ?? 0),
     }
   }, [])
@@ -163,6 +187,7 @@ export default function VerticalTabRail({
 
   const hideOverlay = useCallback(() => {
     overlayOpenRef.current = false
+    overlayEditorRef.current = null
     void window.electronAPI?.browser?.hideVerticalRailOverlay?.()
   }, [])
 
@@ -273,6 +298,12 @@ export default function VerticalTabRail({
           h.onNewTabInGroup(command.groupId)
           later()
           break
+        case 'set-group-editor':
+          overlayEditorRef.current = command.groupId
+            ? { groupId: command.groupId, bottom: command.bottom ?? 0 }
+            : null
+          pushSnapshot()
+          break
         case 'toggle-bookmark': {
           const tab = h.tabs.find((item) => item.id === command.tabId)
           if (tab) h.onToggleBookmarkForTab(tab)
@@ -361,6 +392,23 @@ export default function VerticalTabRail({
     onReorderToRank(movedId, toRank, intoGroupId)
   }, [clearDragState, dropTarget, flatOrder, groupOf, onAddToGroup, onCreateGroup, onReorderToRank, splitTabId, tabRows])
 
+  // Dropping onto a group chip adds the dragged tab to that group (Edge behavior).
+  const handleHeaderDragOver = useCallback((event: React.DragEvent, groupId: string) => {
+    const movedId = draggingIdRef.current
+    if (!movedId || (groupOf[movedId] ?? null) === groupId) return
+    event.preventDefault()
+    event.dataTransfer.dropEffect = 'move'
+    setDropTarget((prev) => (prev && prev.id === groupId ? prev : { id: groupId, intent: 'onto' }))
+  }, [groupOf])
+
+  const handleHeaderDrop = useCallback((event: React.DragEvent, groupId: string) => {
+    event.preventDefault()
+    const movedId = draggingIdRef.current
+    clearDragState()
+    if (!movedId || (groupOf[movedId] ?? null) === groupId) return
+    onAddToGroup(movedId, groupId)
+  }, [clearDragState, groupOf, onAddToGroup])
+
   // Clear a stale drop highlight when the drag ends ANYWHERE (Escape, drop off-rail).
   useEffect(() => {
     const reset = () => clearDragState()
@@ -418,24 +466,94 @@ export default function VerticalTabRail({
     >
       <div
         ref={railListRef}
-        className="flex min-h-0 flex-1 flex-col items-center overflow-y-auto overflow-x-hidden py-[6px]"
+        className="flex min-h-0 flex-1 flex-col items-center overflow-y-auto overflow-x-hidden"
         onScroll={() => pushSnapshot()}
         onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropTarget(null) }}
-        style={{ gap: VERTICAL_RAIL_FLYOUT_ROW_GAP }}
+        // Padding via the shared constant, INLINE — the strip and the overlay flyout must
+        // start their first row at the same offset for cross-window row alignment, and a
+        // Tailwind arbitrary class (the old py-[6px]) is not reliably in the built CSS.
+        style={{ gap: VERTICAL_RAIL_FLYOUT_ROW_GAP, paddingTop: VERTICAL_RAIL_FLYOUT_PAD_Y, paddingBottom: VERTICAL_RAIL_FLYOUT_PAD_Y }}
       >
-        {tabRows.map((row, index) => {
+        {stripRows.map((row, index) => {
+          if (row.kind === 'group-header') {
+            const g = row.group
+            const GroupCaret = g.collapsed ? ChevronRight : ChevronDown
+            // With the group collapsed its member icons are hidden, so the chip carries
+            // the active state (ring) when the active/split tab lives inside it.
+            const chipShowsActive = g.collapsed && Boolean(
+              (activeTabId && row.memberIds.includes(activeTabId)) || (splitTabId && row.memberIds.includes(splitTabId)),
+            )
+            const isDropOntoChip = dropTarget?.id === g.id && dropTarget.intent === 'onto'
+            return (
+              <div
+                key={`h-${g.id}`}
+                className="relative flex w-full flex-shrink-0 items-center justify-center"
+                style={{ height: VERTICAL_RAIL_FLYOUT_GROUP_HEADER_HEIGHT }}
+                onDragOver={(event) => handleHeaderDragOver(event, g.id)}
+                onDrop={(event) => handleHeaderDrop(event, g.id)}
+              >
+                <button
+                  type="button"
+                  // Mouse clicks must not focus the chip — the global :focus-visible
+                  // outline would linger as a stray blue ring. Keyboard focus still works.
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => onSetGroupCollapsed(g.id, !g.collapsed)}
+                  title={`${g.name || '未命名群组'}（${g.collapsed ? '展开' : '折叠'}群组）`}
+                  className="flex items-center justify-center rounded-[8px] transition-[background-color,box-shadow]"
+                  style={{
+                    width: STRIP_ICON,
+                    height: VERTICAL_RAIL_FLYOUT_GROUP_HEADER_HEIGHT,
+                    background: isDropOntoChip
+                      ? tabGroupColorSoft(g.color, 22)
+                      : chipShowsActive
+                        ? 'var(--files-panel-state-active-bg)'
+                        : 'transparent',
+                    boxShadow: isDropOntoChip
+                      ? `0 0 0 1px ${tabGroupColorVar(g.color)}`
+                      : chipShowsActive
+                        ? 'var(--files-panel-state-active-shadow)'
+                        : 'none',
+                  }}
+                >
+                  {/* Same height/radius as the flyout header pill so the two blue shapes
+                      sit edge-aligned when the flyout is open next to the strip. */}
+                  <span
+                    className="flex items-center justify-center transition-[filter] hover:brightness-[1.06]"
+                    style={{
+                      width: 28,
+                      height: 20,
+                      borderRadius: 6,
+                      background: tabGroupColorVar(g.color),
+                      color: tabGroupPillTextColor(g.color),
+                      boxShadow: '0 1px 2px rgba(0, 0, 0, 0.10)',
+                    }}
+                  >
+                    <GroupCaret style={{ width: 11, height: 11 }} strokeWidth={2.75} />
+                  </span>
+                </button>
+              </div>
+            )
+          }
           const tab = tabById.get(row.id)
           if (!tab) return null
           const isPrimaryActive = tab.id === activeTabId
           const isSplitActive = tab.id === splitTabId && !isPrimaryActive
           const isTabActive = isPrimaryActive || isSplitActive
+          const prevRow = stripRows[index - 1]
+          const nextRow = stripRows[index + 1]
           // The split-pair connector nub bridges the active icon down to the split icon,
-          // so only draw it when the split is ACTUALLY the next row. The run-local hoist
-          // keeps the split adjacent to the active only within one run (I-DISPLAY); when
-          // they straddle runs (e.g. active grouped, split ungrouped) they aren't adjacent
-          // and a nub would falsely pair the active with whatever icon sits below it.
-          const splitIsNextRow = Boolean(splitTabId) && splitTabId !== activeTabId && tabRows[index + 1]?.id === splitTabId
+          // so only draw it when the split is ACTUALLY the next VISIBLE row. The run-local
+          // hoist keeps the split adjacent to the active only within one run (I-DISPLAY);
+          // when they straddle runs (e.g. active grouped, split ungrouped) they aren't
+          // adjacent — and a split hidden inside a collapsed group must never be bridged —
+          // otherwise the nub would falsely pair the active with whatever icon sits below.
+          const splitIsNextRow = Boolean(splitTabId) && splitTabId !== activeTabId && nextRow?.kind === 'tab' && nextRow.id === splitTabId
           const group = row.groupId ? groupById.get(row.groupId) : undefined
+          // Same-group neighbours in the strip: bridge the row gap so the group bar reads
+          // as one continuous line. STRIP-ONLY by 白's call (07-10) — the flyout stays
+          // line-free; here the icons have no other affiliation cue below the chip.
+          const prevSameGroup = Boolean(group) && prevRow?.kind === 'tab' && prevRow.groupId === row.groupId
+          const nextSameGroup = Boolean(group) && nextRow?.kind === 'tab' && nextRow.groupId === row.groupId
           const isDragging = draggingTabId === tab.id
           const isDropOnto = dropTarget?.id === tab.id && dropTarget.intent === 'onto'
           const isDropBefore = dropTarget?.id === tab.id && dropTarget.intent === 'before'
@@ -451,7 +569,19 @@ export default function VerticalTabRail({
               onDrop={(event) => handleRowDrop(event, tab.id)}
             >
               {group && (
-                <span aria-hidden className="pointer-events-none absolute left-0 top-1/2 h-[22px] w-[3px] -translate-y-1/2 rounded-r" style={{ background: tabGroupColorVar(group.color) }} />
+                <span
+                  aria-hidden
+                  className="pointer-events-none absolute"
+                  style={{
+                    left: 0,
+                    width: 3,
+                    background: tabGroupColorVar(group.color),
+                    top: prevSameGroup ? -VERTICAL_RAIL_FLYOUT_ROW_GAP : 8,
+                    bottom: nextSameGroup ? 0 : 8,
+                    borderTopRightRadius: prevSameGroup ? 0 : 2,
+                    borderBottomRightRadius: nextSameGroup ? 0 : 2,
+                  }}
+                />
               )}
               {isDropBefore && <span aria-hidden className="pointer-events-none absolute left-[6px] right-[6px] top-0 h-[2px] rounded" style={{ background: 'var(--color-blue)' }} />}
               {isDropAfter && <span aria-hidden className="pointer-events-none absolute left-[6px] right-[6px] bottom-0 h-[2px] rounded" style={{ background: 'var(--color-blue)' }} />}

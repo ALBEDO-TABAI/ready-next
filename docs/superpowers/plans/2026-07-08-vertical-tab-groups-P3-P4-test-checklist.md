@@ -10,6 +10,8 @@ note: >
   Vertical-tab groups: P3 (browser overlay group UI) + P4 (opener→group inheritance) are
   implemented, gated, and adversarially reviewed. Automated verification is green; the items
   below are the manual real-machine acceptance pass. Run `npm run dev` on macOS.
+  2026-07-10: §8 appended — Edge-parity restyle (P5) supersedes the P3 items that referenced
+  the old header/inline-editor/移出 UI; run §8 INSTEAD of the struck-through parts.
 ---
 
 # Vertical-tab Groups — P3 + P4 Real-Machine Test Checklist
@@ -98,3 +100,78 @@ Note the item number + what you saw. The two most subtle areas (and their guardr
 - **Groups vanishing** after split-toggle / restart — guarded by
   `check-tabs-merge-preserves-groups`; if it happens, note whether it was a split-toggle or
   a restart.
+
+---
+
+## 8. P5 (2026-07-10) — Edge-parity restyle: what changed + acceptance
+
+Uncommitted round on top of P3/P4. Both group surfaces (browser overlay flyout + document
+rail flyout) were restyled to match Edge; the store/protocol semantics are UNTOUCHED except
+one new overlay command (`set-group-editor`, height reservation for the floating menu).
+
+**Supersedes:** P3-2's header description (no more color dot / count / tinted band), P3-5
+(⋯ + inline editor → hover ✏️ + floating menu), P3-10 (移出 button removed — per-tab removal
+is drag-out only, group-level via 取消群组). Everything else in §3–§6 still applies as written.
+
+What shipped:
+
+- **Group header = Edge pill**: solid group-color rounded pill (caret + name, white text;
+  dark text on yellow), click toggles collapse, right-click opens the edit menu. Hover the
+  header row → ＋ (group new tab) and ✏️ (群组选项) appear at the right. No count badge, no
+  full-row color wash.
+- **Continuous spine**: grouped members show ONE unbroken 3px color line (flyout: from under
+  the pill to the last member, rounded bottom cap; 52px strip: bridged across row gaps per
+  group run). Replaces the per-row dashes.
+- **Edit menu = Edge menu**: floating panel (name input with group-color focus ring, 9
+  DISTINCT color swatches — cyan/yellow/pink no longer alias blue/orange/red, selected shown
+  as a donut ring, icon'd actions 群组中新建标签页 / 取消群组 / ─ / 关闭群组标签页). Doc rail
+  portals it; the overlay window grows via `set-group-editor` so the menu never clips.
+- **Opaque overlay panel**: the child-window flyout background is now layered over solid
+  `--bg-content` — the live page no longer bleeds through (a transparent BrowserWindow
+  cannot backdrop-blur what's behind it).
+- **Header is a drop target**: dropping a dragged tab onto the pill row adds it to that group.
+
+Real-machine items (browser overlay AND document rail where applicable):
+
+| # | Action | Expected |
+| --- | --- | --- |
+| P5-1 | Hover the rail with a group present | Header shows a solid color pill with the name (未命名群组 placeholder), caret inside the pill; NO dot/count/⋯; page content does NOT bleed through the panel. |
+| P5-2 | Click the pill / click again | Collapses (members hide, caret →) / expands. |
+| P5-3 | Look at the header row (07-10 revised: ALWAYS visible while the flyout is up, not hover-gated — the flyout is itself hover-summoned, so a second hover gate read as "buttons missing") | ＋ and ✏️ sit at the row's right; ＋ opens a background tab into the group; ✏️ opens the floating menu under the pill. |
+| P5-4 | Open the menu on a group near the flyout BOTTOM (few tabs) | The overlay window grows to fit the menu; nothing clips. Close (Enter/action) → window shrinks back. |
+| P5-5 | Menu: type name + Enter; type name + click an action without blurring | Both commit the rename (unmount-commit preserved). |
+| P5-6 | Menu: swatches | 9 visually DISTINCT colors; selected renders as a ring (donut); clicking recolors pill + spine + strip bars live, menu stays open. |
+| P5-7 | Grouped members | **Final (白 07-10 两轮裁定)**: FLYOUT member rows have NO vertical color line (减少隔断; grouping reads from the pill + indentation). The 52px STRIP keeps its continuous group-color bar at the icons' left (one unbroken segment per group run, bridging row gaps; hidden when collapsed). |
+| P5-8 | Drag a tab onto the PILL row | Pill shows a soft ring; drop joins the group (works for collapsed groups too). |
+| P5-9 | Right-click the pill | Opens the same edit menu (Edge behavior). Right-click a member row still sends the tab reference to chat (unchanged). |
+| P5-10 | Remove a single tab from a group | Drag it out (before/after an ungrouped neighbor). The old hover 移出 button is gone by design. |
+| P5-11 | Document mode rail | Same pill/spine/menu appearance and behaviors (menu is a portal, flips up near the viewport bottom). |
+| P5-12 | Dark theme pass | Pill text legible on every color; menu surface/borders read correctly. |
+
+**P5b — group chip in the 52px icon strip** (白 2026-07-10 follow-up: the strip needs an
+in-strip group affordance like Edge's icon rail; supersedes P3-8's "strip still shows every
+member icon" — collapsed members now HIDE in the strip and the chip stands in for them):
+
+| # | Action | Expected |
+| --- | --- | --- |
+| P5-13 | Group present → look at the 52px strip | A small solid-color group chip (rounded, caret inside) sits in the group's slot ABOVE its member icons, aligned with the flyout's pill row. |
+| P5-14 | Click the chip / click again | Group collapses: member icons disappear from the strip (and flyout), caret flips to ›. Expand restores them. Strip and flyout rows stay vertically aligned 1:1 throughout. |
+| P5-15 | Collapse a group holding the ACTIVE tab | The chip shows the active ring/slot treatment (page keeps showing that tab). Expanding again shows the active icon highlighted as before. |
+| P5-16 | Drag a tab over the chip and drop | Chip highlights (soft group fill + ring); drop joins the group — including when collapsed. |
+| P5-17 | Split view where the split tab's group is collapsed | No false connector nub bridging the active icon to whatever sits below (the hidden split must not be "paired"). |
+| P5-18 | Open the flyout with a group present; compare chip vs pill | The strip chip and the flyout pill sit EDGE-aligned (same 20px height / 6px radius, same row band). Click the chip / pill / swatches / menu items repeatedly | No lingering blue :focus-visible ring on any of them (mouse clicks no longer focus these controls; keyboard Tab still shows the ring). |
+
+**P5c (2026-07-10, second 白 follow-up) — alignment root cause + spine removal, LIVE-VERIFIED via CDP:**
+
+- The strip-vs-flyout ~6.5px vertical offset was NOT window placement (CDP probe: applyBounds
+  deltaX/deltaY = 0). Root cause: the strip list's `py-[6px]` Tailwind arbitrary class is
+  **absent from the built CSS** (padding computed 0px), so strip rows started at rail top+0
+  while flyout rows start at window top+6.5. `pr-[8px]` (flyout row right padding) was dead
+  too. Both are now INLINE styles off the shared layout constants. ⚠ Lesson for this repo:
+  single-occurrence Tailwind arbitrary classes are not reliably generated — geometry-critical
+  values in the rail/flyout files must be inline styles.
+- After the fix, measured live (real group, real hover-open): pill-vs-chip center delta =
+  **0.5px** (the flyout panel's 0.5px border; sub-pixel, invisible).
+- Group lines final split per 白: FLYOUT member line removed (减少隔断); STRIP continuous
+  bar RESTORED/kept (only affiliation cue among bare icons). Inline-styled (no arbitrary
+  Tailwind classes for geometry).

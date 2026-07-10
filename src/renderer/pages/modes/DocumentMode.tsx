@@ -343,7 +343,7 @@ export default function DocumentMode({
     openTab, closeTab, setActiveTab, setSplitTab, setDocumentSplitRatio,
     updateTabContent, markTabSaved, setPendingReveal, openTabInPane,
     openImageTab, ensureTabForPath, createBackgroundTab,
-    createTabGroupFromDrop, addTabToGroup, removeTabFromGroup, reorderTabToRank,
+    createTabGroupFromDrop, addTabToGroup, reorderTabToRank,
     renameTabGroup, recolorTabGroup, setTabGroupCollapsed, disbandTabGroup,
   } = useDocTabs()
 
@@ -936,7 +936,6 @@ export default function DocumentMode({
               onTabContextMenu={(event, id) => handleTabContextMenu(event as React.MouseEvent<HTMLButtonElement>, id)}
               onCreateGroup={(draggedId, targetId) => createTabGroupFromDrop(draggedId, targetId)}
               onAddToGroup={(tabId, groupId) => addTabToGroup(tabId, groupId)}
-              onRemoveFromGroup={(tabId) => removeTabFromGroup(tabId)}
               onReorderToRank={(movedId, toRank, intoGroupId) => reorderTabToRank(movedId, toRank, intoGroupId)}
               onRenameGroup={(groupId, name) => renameTabGroup(groupId, name)}
               onRecolorGroup={(groupId, color) => recolorTabGroup(groupId, color)}

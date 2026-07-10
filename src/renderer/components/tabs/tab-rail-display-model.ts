@@ -6,8 +6,8 @@ import type { TabGroup } from '../../../shared/tab-groups'
 // its members, or a single ungrouped tab. Group runs stay contiguous (I-DISPLAY); the
 // split tab is hoisted next to the active tab ONLY within its own run so grouping is
 // never visually broken (D-SPLIT). Collapse is a render concern — every member row is
-// emitted here regardless, so the flat strip can always show affiliation while the
-// flyout hides collapsed members.
+// emitted here regardless; the render layers hide collapsed members (both the 52px
+// strip and the flyout stand a group chip/pill in for them, Edge semantics).
 
 export type TabRailRow =
   | { kind: 'group-header'; group: TabGroup; memberIds: string[] }

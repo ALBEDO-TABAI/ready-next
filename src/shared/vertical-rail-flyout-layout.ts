@@ -6,8 +6,8 @@ export const VERTICAL_RAIL_FLYOUT_ROW_RADIUS = 10
 export const VERTICAL_RAIL_FLYOUT_MIN_HEIGHT =
   VERTICAL_RAIL_FLYOUT_PAD_Y * 2 + VERTICAL_RAIL_FLYOUT_ROW_HEIGHT
 
-// Group headers in the flyout are shorter than tab rows.
-export const VERTICAL_RAIL_FLYOUT_GROUP_HEADER_HEIGHT = 26
+// Group headers in the flyout are shorter than tab rows (Edge-style pill row).
+export const VERTICAL_RAIL_FLYOUT_GROUP_HEADER_HEIGHT = 28
 
 // Height of the flyout content when it holds group headers + (non-collapsed) tab
 // rows + the trailing new-tab action. Headers and tab rows have different heights,
@@ -26,6 +26,13 @@ export function resolveGroupedFlyoutContentHeight(visibleTabRows: number, header
 
 export const VERTICAL_RAIL_FLYOUT_SURFACE_BACKGROUND =
   'var(--chat-menu-frost-bg, rgba(236, 239, 243, 0.92))'
+
+// Opaque variant for CHILD-WINDOW surfaces (the browser rail's hover flyout): a
+// transparent BrowserWindow cannot backdrop-blur the screen behind it, so the frost
+// tint alone lets the live page bleed through the panel. Layer the tint over a solid
+// content background instead — same hue, no bleed.
+export const VERTICAL_RAIL_FLYOUT_SURFACE_BACKGROUND_OPAQUE =
+  `linear-gradient(${VERTICAL_RAIL_FLYOUT_SURFACE_BACKGROUND}, ${VERTICAL_RAIL_FLYOUT_SURFACE_BACKGROUND}), var(--bg-content)`
 
 export const VERTICAL_RAIL_FLYOUT_SURFACE_BORDER =
   '0.5px solid var(--chat-menu-frost-border, rgba(255, 255, 255, 0.42))'

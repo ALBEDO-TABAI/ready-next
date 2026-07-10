@@ -1,10 +1,9 @@
 /* ═══ base-chrome.css — 基础样式：body/标签排印/点阵图标/主题硬切换 chrome/滚动条/选区/焦点；由 index.css 序保拆分（2026-07-06），在 index.css 中按原段落顺序 @import，勿改导入次序。 ═══ */
 /* Base styles */
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
-}
+/* 全局 margin/padding/box-sizing 归 Tailwind v4 preflight（@layer base 内的等价 * reset）。
+   禁止在任何 renderer CSS 里写未分层的 * { margin/padding } reset：未分层样式会按级联层
+   规则无条件压过 @layer utilities，导致全应用 Tailwind 间距类静默失效（2026-07-10 根修）。
+   回归拦截：scripts/check-css-cascade-layer-reset.cjs */
 
 html,
 body,

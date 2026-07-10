@@ -1,22 +1,22 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from 'react'
-import { ChevronDown, ChevronRight, Globe, Loader2, MoreHorizontal, Plus, X } from 'lucide-react'
+import { Globe, Loader2, Plus, X } from 'lucide-react'
 import type {
   VerticalRailOverlayCommand,
   VerticalRailOverlaySnapshot,
   VerticalRailOverlayTab,
 } from '../../shared/browser-vertical-rail-overlay'
-import type { TabGroup, TabGroupColor } from '../../shared/tab-groups'
-import { TAB_GROUP_COLORS } from '../../shared/tab-groups'
+import type { TabGroup } from '../../shared/tab-groups'
 import { buildTabRailRows, resolveReorderDrop } from '../components/tabs/tab-rail-display-model'
-import { resolveTabDropIntent, tabGroupColorSoft, tabGroupColorVar, type TabDropIntent } from '../components/tabs/tab-group-visuals'
+import { resolveTabDropIntent, tabGroupColorSoft, type TabDropIntent } from '../components/tabs/tab-group-visuals'
+import TabGroupHeaderRow from '../components/tabs/TabGroupHeaderRow'
+import TabGroupEditMenu, { TAB_GROUP_EDIT_MENU_EST_HEIGHT, TAB_GROUP_EDIT_MENU_WIDTH } from '../components/tabs/TabGroupEditMenu'
 import {
   VERTICAL_RAIL_FLYOUT_PAD_Y,
   VERTICAL_RAIL_FLYOUT_RADIUS,
   VERTICAL_RAIL_FLYOUT_ROW_GAP,
   VERTICAL_RAIL_FLYOUT_ROW_HEIGHT,
   VERTICAL_RAIL_FLYOUT_ROW_RADIUS,
-  VERTICAL_RAIL_FLYOUT_SURFACE_BACKDROP,
-  VERTICAL_RAIL_FLYOUT_SURFACE_BACKGROUND,
+  VERTICAL_RAIL_FLYOUT_SURFACE_BACKGROUND_OPAQUE,
   VERTICAL_RAIL_FLYOUT_SURFACE_BORDER,
   VERTICAL_RAIL_FLYOUT_SURFACE_SHADOW,
 } from '../../shared/vertical-rail-flyout-layout'
@@ -64,9 +64,10 @@ export default function VerticalRailOverlayWindow() {
   const [snapshot, setSnapshot] = useState<VerticalRailOverlaySnapshot | null>(null)
   const draggingIdRef = useRef<string | null>(null)
   const [dropTarget, setDropTarget] = useState<{ id: string; intent: TabDropIntent } | null>(null)
-  // The group whose inline editor is open. Rendered inside the list (no floating popup —
-  // this is a fixed, content-sized child window that a portal cannot escape).
-  const [editingGroupId, setEditingGroupId] = useState<string | null>(null)
+  // The open group-edit menu, absolutely positioned INSIDE this content-sized child
+  // window (a portal cannot escape it). `top` is captured from the header row at open
+  // time; the rail is told via set-group-editor so the window grows to fit the menu.
+  const [editing, setEditing] = useState<{ id: string; top: number } | null>(null)
   // Whether the pointer is inside the overlay, tracked independent of drag so a drag that
   // ends outside can defer the hover-leave (mid-drag hover-leave is suppressed).
   const pointerInsideRef = useRef(false)
@@ -87,6 +88,27 @@ export default function VerticalRailOverlayWindow() {
     })
     return () => { cancelled = true; cleanup() }
   }, [])
+
+  const closeEditor = useCallback(() => {
+    setEditing((prev) => {
+      if (prev) send({ type: 'set-group-editor', groupId: null })
+      return null
+    })
+  }, [])
+
+  const openEditor = useCallback((group: TabGroup, anchor: DOMRect) => {
+    const top = Math.round(anchor.bottom) + 4
+    setEditing({ id: group.id, top })
+    send({ type: 'set-group-editor', groupId: group.id, bottom: top + TAB_GROUP_EDIT_MENU_EST_HEIGHT })
+  }, [])
+
+  // The window hides without a renderer-visible IPC signal — drop a stale menu via the
+  // page visibility flip so the next hover-open starts clean.
+  useEffect(() => {
+    const onVisibility = () => { if (document.visibilityState === 'hidden') closeEditor() }
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => document.removeEventListener('visibilitychange', onVisibility)
+  }, [closeEditor])
 
   const finishDrag = useCallback(() => {
     draggingIdRef.current = null
@@ -121,8 +143,8 @@ export default function VerticalRailOverlayWindow() {
 
   // Drop the editor if its group vanished from the snapshot (deleted / disbanded elsewhere).
   useEffect(() => {
-    if (editingGroupId && !groupById.has(editingGroupId)) setEditingGroupId(null)
-  }, [editingGroupId, groupById])
+    if (editing && !groupById.has(editing.id)) closeEditor()
+  }, [closeEditor, editing, groupById])
 
   const beginDrag = useCallback((event: DragEvent, id: string) => {
     draggingIdRef.current = id
@@ -155,6 +177,23 @@ export default function VerticalRailOverlayWindow() {
     send({ type: 'reorder', movedTabId: movedId, toRank, intoGroupId })
   }, [dropTarget, finishDrag, flatOrder, groupOf, splitId, visualTabIds])
 
+  // Dropping onto a group HEADER adds the dragged tab to that group (Edge behavior).
+  const handleHeaderDragOver = useCallback((event: DragEvent, groupId: string) => {
+    const movedId = draggingIdRef.current
+    if (!movedId || (groupOf[movedId] ?? null) === groupId) return
+    event.preventDefault()
+    event.dataTransfer.dropEffect = 'move'
+    setDropTarget((prev) => (prev && prev.id === groupId ? prev : { id: groupId, intent: 'onto' }))
+  }, [groupOf])
+
+  const handleHeaderDrop = useCallback((event: DragEvent, groupId: string) => {
+    event.preventDefault()
+    const movedId = draggingIdRef.current
+    finishDrag()
+    if (!movedId || (groupOf[movedId] ?? null) === groupId) return
+    send({ type: 'add-to-group', tabId: movedId, groupId })
+  }, [finishDrag, groupOf])
+
   const switchTab = useCallback((tab: VerticalRailOverlayTab, event: { shiftKey: boolean }) => {
     // D-COLLAPSE: activating a member of a collapsed group auto-expands it first. (In the
     // flyout collapsed members are hidden, so this only fires for the rare header-active case.)
@@ -163,18 +202,18 @@ export default function VerticalRailOverlayWindow() {
     send({ type: 'switch', tabId: tab.id, shiftKey: event.shiftKey })
   }, [groupById])
 
+  const editingGroup = editing ? groupById.get(editing.id) : undefined
+
   return (
     <div
-      className="vertical-rail-overlay-root flex h-screen w-screen flex-col overflow-hidden"
+      className="vertical-rail-overlay-root relative flex h-screen w-screen flex-col overflow-hidden"
       onMouseEnter={() => { pointerInsideRef.current = true; send({ type: 'hover-enter' }) }}
       onMouseLeave={() => { pointerInsideRef.current = false; if (!draggingIdRef.current) send({ type: 'hover-leave' }) }}
       style={{
         paddingTop: VERTICAL_RAIL_FLYOUT_PAD_Y,
         paddingBottom: VERTICAL_RAIL_FLYOUT_PAD_Y,
-        background: VERTICAL_RAIL_FLYOUT_SURFACE_BACKGROUND,
+        background: VERTICAL_RAIL_FLYOUT_SURFACE_BACKGROUND_OPAQUE,
         boxShadow: VERTICAL_RAIL_FLYOUT_SURFACE_SHADOW,
-        backdropFilter: VERTICAL_RAIL_FLYOUT_SURFACE_BACKDROP,
-        WebkitBackdropFilter: VERTICAL_RAIL_FLYOUT_SURFACE_BACKDROP,
         borderRadius: VERTICAL_RAIL_FLYOUT_RADIUS,
         border: VERTICAL_RAIL_FLYOUT_SURFACE_BORDER,
         boxSizing: 'border-box',
@@ -190,43 +229,16 @@ export default function VerticalRailOverlayWindow() {
           if (row.kind === 'group-header') {
             const g = row.group
             return (
-              <div key={`h-${g.id}`}>
-                <div
-                  className="relative flex flex-shrink-0 items-center gap-[7px] pr-[6px]"
-                  style={{ height: 26, paddingLeft: 8, borderRadius: VERTICAL_RAIL_FLYOUT_ROW_RADIUS, background: tabGroupColorSoft(g.color, 10) }}
-                >
-                  <button
-                    type="button"
-                    onClick={() => send({ type: 'set-group-collapsed', groupId: g.id, collapsed: !g.collapsed })}
-                    className="flex h-[16px] w-[16px] flex-shrink-0 items-center justify-center rounded"
-                    title={g.collapsed ? '展开群组' : '折叠群组'}
-                  >
-                    {g.collapsed ? <ChevronRight style={{ width: 13, height: 13 }} className="text-[var(--text-gray)]" /> : <ChevronDown style={{ width: 13, height: 13 }} className="text-[var(--text-gray)]" />}
-                  </button>
-                  <span className="h-[9px] w-[9px] flex-shrink-0 rounded-full" style={{ background: tabGroupColorVar(g.color) }} />
-                  <span className="min-w-0 flex-1 truncate text-[11.5px] font-semibold" style={{ color: 'var(--text-title)' }}>{g.name || '未命名群组'}</span>
-                  <span className="flex-shrink-0 text-[10px]" style={{ color: 'var(--text-light)' }}>{row.memberIds.length}</span>
-                  <button
-                    type="button"
-                    onClick={() => setEditingGroupId((prev) => (prev === g.id ? null : g.id))}
-                    className="flex h-[18px] w-[18px] flex-shrink-0 items-center justify-center rounded opacity-70 transition-opacity hover:opacity-100"
-                    title="群组选项"
-                  >
-                    <MoreHorizontal style={{ width: 14, height: 14 }} className="text-[var(--text-gray)]" />
-                  </button>
-                </div>
-                {editingGroupId === g.id && (
-                  <GroupInlineEditor
-                    key={g.id}
-                    group={g}
-                    onRename={(name) => send({ type: 'rename-group', groupId: g.id, name })}
-                    onRecolor={(color) => send({ type: 'recolor-group', groupId: g.id, color })}
-                    onNewTab={() => { send({ type: 'new-tab-in-group', groupId: g.id }); setEditingGroupId(null) }}
-                    onDisband={() => { send({ type: 'disband-group', groupId: g.id }); setEditingGroupId(null) }}
-                    onDelete={() => { send({ type: 'delete-group', groupId: g.id }); setEditingGroupId(null) }}
-                  />
-                )}
-              </div>
+              <TabGroupHeaderRow
+                key={`h-${g.id}`}
+                group={g}
+                isDropTarget={dropTarget?.id === g.id && dropTarget.intent === 'onto'}
+                onToggleCollapsed={() => send({ type: 'set-group-collapsed', groupId: g.id, collapsed: !g.collapsed })}
+                onNewTabInGroup={() => { closeEditor(); send({ type: 'new-tab-in-group', groupId: g.id }) }}
+                onEdit={(anchor) => { if (editing?.id === g.id) closeEditor(); else openEditor(g, anchor) }}
+                onDragOver={(event) => handleHeaderDragOver(event, g.id)}
+                onDrop={(event) => handleHeaderDrop(event, g.id)}
+              />
             )
           }
           if (row.collapsed) return null // members of a collapsed group are hidden in the flyout
@@ -239,7 +251,7 @@ export default function VerticalRailOverlayWindow() {
           return (
             <div
               key={tab.id}
-              className="group relative flex flex-shrink-0 cursor-pointer items-center pr-[8px]"
+              className="group relative flex flex-shrink-0 cursor-pointer items-center"
               draggable
               onDragStart={(event) => beginDrag(event, tab.id)}
               onDragEnd={finishDrag}
@@ -252,6 +264,7 @@ export default function VerticalRailOverlayWindow() {
                 height: VERTICAL_RAIL_FLYOUT_ROW_HEIGHT,
                 gap: 9,
                 paddingLeft: group ? 20 : 10,
+                paddingRight: 8,
                 background: isDropOnto
                   ? tabGroupColorSoft(group?.color ?? 'blue', 20)
                   : isActive
@@ -261,7 +274,6 @@ export default function VerticalRailOverlayWindow() {
                 borderRadius: VERTICAL_RAIL_FLYOUT_ROW_RADIUS,
               }}
             >
-              {group && <span aria-hidden className="pointer-events-none absolute left-[9px] top-0 bottom-0 w-[2px]" style={{ background: tabGroupColorVar(group.color) }} />}
               {isDropBefore && <span aria-hidden className="pointer-events-none absolute left-[8px] right-[8px] top-0 h-[2px] rounded" style={{ background: 'var(--color-blue)' }} />}
               {isDropAfter && <span aria-hidden className="pointer-events-none absolute left-[8px] right-[8px] bottom-0 h-[2px] rounded" style={{ background: 'var(--color-blue)' }} />}
               {overlayTabIcon(tab, 15)}
@@ -269,18 +281,6 @@ export default function VerticalRailOverlayWindow() {
                 <span className="truncate text-[12px] font-medium" style={{ color: isActive ? 'var(--text-title)' : 'var(--text-body)', lineHeight: 1.3 }}>{tab.title || 'New Tab'}</span>
                 {tab.domain && <span className="truncate text-[10px]" style={{ color: 'var(--text-light)', lineHeight: 1.25 }}>{tab.domain}</span>}
               </span>
-              {group && (
-                <span
-                  role="button"
-                  onMouseDown={(event) => event.stopPropagation()}
-                  onClick={(event) => { event.stopPropagation(); send({ type: 'remove-from-group', tabId: tab.id }) }}
-                  className="flex h-[20px] flex-shrink-0 items-center rounded px-[5px] text-[10px] opacity-0 transition-opacity hover:bg-[var(--bg-hover)] group-hover:opacity-70"
-                  title="移出群组"
-                  style={{ color: 'var(--text-gray)' }}
-                >
-                  移出
-                </span>
-              )}
               <span
                 role="button"
                 onMouseDown={(event) => event.stopPropagation()}
@@ -304,78 +304,35 @@ export default function VerticalRailOverlayWindow() {
           新标签页
         </div>
       </div>
-    </div>
-  )
-}
 
-// Inline group editor rendered within the flyout list (the child window is fixed-size, so a
-// floating popup cannot escape it). Rename commits on Enter / blur; recolor & actions fire
-// immediately. Text input is native to this child window (IME verified on a real machine,
-// per Doc B R-OVERLAY-INPUT).
-function GroupInlineEditor({
-  group,
-  onRename,
-  onRecolor,
-  onNewTab,
-  onDisband,
-  onDelete,
-}: {
-  group: TabGroup
-  onRename: (name: string) => void
-  onRecolor: (color: TabGroupColor) => void
-  onNewTab: () => void
-  onDisband: () => void
-  onDelete: () => void
-}) {
-  const [name, setName] = useState(group.name)
-  const rootRef = useRef<HTMLDivElement>(null)
-  useEffect(() => { rootRef.current?.scrollIntoView({ block: 'nearest' }) }, [])
-  // Commit a pending rename on UNMOUNT (⋯ toggle / action click / group-switch / vanish).
-  // On macOS, clicking a <button> does not blur the input, so onBlur alone loses the edit
-  // when an editor button unmounts the field first — the ref-based unmount-commit is the
-  // reliable path (mirrors the P2 doc rail GroupEditPopup). Keyed by g.id in the parent, so
-  // switching groups commits against the OLD group's original name, never the wrong group.
-  const originalName = group.name
-  const nameRef = useRef(name)
-  nameRef.current = name
-  const renameRef = useRef(onRename)
-  renameRef.current = onRename
-  useEffect(() => () => { if (nameRef.current !== originalName) renameRef.current(nameRef.current) }, [originalName])
-  const commitName = () => { if (name !== group.name) onRename(name) }
-  return (
-    <div
-      ref={rootRef}
-      className="mt-[3px] flex flex-col gap-[7px] p-[8px]"
-      style={{ borderRadius: VERTICAL_RAIL_FLYOUT_ROW_RADIUS, background: tabGroupColorSoft(group.color, 8), border: '0.5px solid color-mix(in srgb, var(--text-title) 8%, transparent)' }}
-      onClick={(event) => event.stopPropagation()}
-    >
-      <input
-        value={name}
-        autoFocus
-        placeholder="群组名称"
-        onChange={(event) => setName(event.target.value)}
-        onBlur={commitName}
-        onKeyDown={(event) => { if (event.key === 'Enter') commitName() }}
-        className="w-full rounded-[7px] px-[8px] py-[5px] text-[12px] outline-none"
-        style={{ background: 'var(--bg-content)', border: '1px solid color-mix(in srgb, var(--text-title) 12%, transparent)', color: 'var(--text-title)' }}
-      />
-      <div className="flex flex-wrap gap-[6px]">
-        {TAB_GROUP_COLORS.map((color) => (
-          <button
-            key={color}
-            type="button"
-            aria-label={color}
-            onClick={() => onRecolor(color)}
-            className="h-[18px] w-[18px] rounded-full transition-transform hover:scale-110"
-            style={{ background: tabGroupColorVar(color), boxShadow: color === group.color ? '0 0 0 2px var(--bg-content), 0 0 0 3.5px var(--text-title)' : 'none' }}
+      {editing && editingGroup && (
+        <div
+          className="absolute flex flex-col overflow-hidden"
+          style={{
+            left: 8,
+            top: editing.top,
+            width: TAB_GROUP_EDIT_MENU_WIDTH,
+            zIndex: 40,
+            borderRadius: 12,
+            background: VERTICAL_RAIL_FLYOUT_SURFACE_BACKGROUND_OPAQUE,
+            border: VERTICAL_RAIL_FLYOUT_SURFACE_BORDER,
+            boxShadow: 'var(--chat-menu-shadow, 0 24px 48px rgba(31, 36, 46, 0.16)), 0 2px 8px rgba(0, 0, 0, 0.08)',
+          }}
+        >
+          <TabGroupEditMenu
+            // Keyed by group id: switching groups remounts, so the old instance's
+            // unmount-commit runs against the OLD group's draft (P3 review lineage).
+            key={editing.id}
+            group={editingGroup}
+            onRename={(name) => send({ type: 'rename-group', groupId: editing.id, name })}
+            onRecolor={(color) => send({ type: 'recolor-group', groupId: editing.id, color })}
+            onNewTab={() => { send({ type: 'new-tab-in-group', groupId: editing.id }); closeEditor() }}
+            onDisband={() => { send({ type: 'disband-group', groupId: editing.id }); closeEditor() }}
+            onDelete={() => { send({ type: 'delete-group', groupId: editing.id }); closeEditor() }}
+            onRequestClose={closeEditor}
           />
-        ))}
-      </div>
-      <div className="flex flex-col text-[12px]" style={{ color: 'var(--text-body)' }}>
-        <button type="button" onClick={onNewTab} className="flex items-center rounded-[6px] px-[8px] py-[5px] text-left transition-colors hover:bg-[var(--bg-hover)]">群组中新建标签</button>
-        <button type="button" onClick={onDisband} className="flex items-center rounded-[6px] px-[8px] py-[5px] text-left transition-colors hover:bg-[var(--bg-hover)]">取消群组</button>
-        <button type="button" onClick={onDelete} className="flex items-center rounded-[6px] px-[8px] py-[5px] text-left transition-colors hover:bg-[var(--bg-hover)]" style={{ color: 'var(--color-red)' }}>关闭群组标签</button>
-      </div>
+        </div>
+      )}
     </div>
   )
 }

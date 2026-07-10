@@ -57,5 +57,9 @@ export type VerticalRailOverlayCommand =
   | { type: 'disband-group'; groupId: string }
   | { type: 'delete-group'; groupId: string }
   | { type: 'new-tab-in-group'; groupId: string }
+  // The overlay's group-edit menu floats INSIDE the content-sized child window, so the
+  // rail must reserve window height for it: `bottom` is the menu's projected bottom edge
+  // in overlay-window px; null groupId = menu closed (height floor released).
+  | { type: 'set-group-editor'; groupId: string | null; bottom?: number }
   | { type: 'toggle-bookmark'; tabId: string }
   | { type: 'reference'; tabId: string }
