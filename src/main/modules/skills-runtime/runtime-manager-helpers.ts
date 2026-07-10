@@ -76,7 +76,10 @@ export function envNumber(name: string, fallback: number): number {
 export const RETIRED_EMBEDDED_SKILL_IDS: ReadonlySet<string> = new Set(['video-expert-analyzer'])
 
 export function hashDirectoryContents(root: string): string {
+  const startedAt = Date.now()
   const hash = createHash('sha256')
+  let fileCount = 0
+  let byteCount = 0
   const visit = (dir: string, relativePrefix = ''): void => {
     for (const entry of readdirSync(dir).sort()) {
       const absolute = join(dir, entry)
@@ -88,12 +91,20 @@ export function hashDirectoryContents(root: string): string {
         continue
       }
       if (!stat.isFile()) continue
+      fileCount += 1
+      byteCount += stat.size
       hash.update(`file:${relative}:${stat.size}\n`)
       hash.update(readFileSync(absolute))
       hash.update('\n')
     }
   }
   visit(root)
+  const elapsedMs = Date.now() - startedAt
+  if (elapsedMs > 100) {
+    // 同步全量哈希跑在主进程启动路径上；单目录超过 100ms 必须可观测，
+    // 否则大目录会静默拖垮启动（曾表现为启动动画整段冻结）。
+    console.warn(`[skills-runtime] slow directory hash: ${root} ${elapsedMs}ms files=${fileCount} bytes=${byteCount}`)
+  }
   return hash.digest('hex')
 }
 

@@ -325,7 +325,7 @@ export class SkillsRuntimeManager {
       ensureRuntimeToolchain: (toolchainOptions) => this.ensureRuntimeToolchain(toolchainOptions),
       installRequirements: (venvPython, requirementsPath, reqOptions) =>
         this.installRequirements(venvPython, requirementsPath, reqOptions),
-      syncEmbeddedSkill: (manifest) => this.syncEmbeddedSkill(manifest),
+      syncEmbeddedSkill: (manifest, options) => this.syncEmbeddedSkill(manifest, options),
       assertPackagedRuntimeCoversEmbeddedSkill: (skillId) => this.assertPackagedRuntimeCoversEmbeddedSkill(skillId),
     })
     this.jobScheduler = new SkillJobScheduler({
@@ -986,7 +986,17 @@ export class SkillsRuntimeManager {
     return found
   }
 
-  private syncEmbeddedSkill(manifest: EmbeddedSkillManifest): string {
+  // 进程内已同步的 embedded 技能目的地缓存。listSkills() 每次调用都会对全部
+  // embedded 技能走一遍 sync（全量内容哈希 + 状态比对），而启动期 registry/
+  // 工具面/目录提醒会反复调 listSkills——曾实测把 setupAgentIPC 拖成 ~13s 的
+  // 主线程实心块（启动动画整段冻结的根因）。同一进程生命周期内源目录视为
+  // 不变（打包资源本就只读；dev 改技能素材需重启生效），只有 install 管线的
+  // force 路径允许强制重同步。
+  private readonly syncedEmbeddedSkillDestinations = new Map<string, string>()
+
+  private syncEmbeddedSkill(manifest: EmbeddedSkillManifest, options: { force?: boolean } = {}): string {
+    const cachedDestination = this.syncedEmbeddedSkillDestinations.get(manifest.id)
+    if (cachedDestination && !options.force) return cachedDestination
     const sourceRoot = this.resolveEmbeddedSkillsRoot()
     const source = join(sourceRoot, manifest.id)
     if (!existsSync(source)) {
@@ -1008,6 +1018,7 @@ export class SkillsRuntimeManager {
       && existsSync(join(destination, 'SKILL.md'))
       && existsSync(join(destination, 'ready-skill.json'))
     ) {
+      this.syncedEmbeddedSkillDestinations.set(manifest.id, destination)
       return destination
     }
     rmSync(destination, { recursive: true, force: true })
@@ -1022,6 +1033,7 @@ export class SkillsRuntimeManager {
         syncedAt: new Date().toISOString(),
       },
     )
+    this.syncedEmbeddedSkillDestinations.set(manifest.id, destination)
     return destination
   }
 

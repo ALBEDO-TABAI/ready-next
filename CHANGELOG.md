@@ -9,6 +9,15 @@
 - 标签栏新建文档拖拽定存：未保存的新建文档标签（path 为 null）可直接拖到文件树的目录上确认保存位置——文件名由标签标题派生（非法字符清洗、重名自动「标题 2.md」避让、createFile 先占名防覆盖），落盘后标签自动翻转为已保存路径，文件树以既有落点高亮与通知条反馈。载荷走独立 MIME `application/x-ready-untitled-doc-tab` + 拖拽会话（60s TTL），不伪装成 URL/文件拖放。测试 `untitled-doc-tab-save`。
 - 文档标签栏同步文件管理外观：文件树里给文件设置的呈现颜色/自定义图标（FileAppearance）现同步到文档模式竖向标签栏——自定义 emoji/短文字图标替换默认 FileText，外观颜色优先于扩展名默认色（52px 条与 hover 浮层一致，zustand 响应式即时刷新）。渲染测试 `document-tab-rail-appearance`。
 
+### 启动动画秒出（主进程微入口拆分，2026-07-11）
+
+- 启动动画不再等主进程重模块求值完才出现：新增微入口 `src/main/boot-entry.ts`（构建产物仍是 `out/main/index.js`，2.7KB），只做 pre-ready 必需配置（dotenv / userData / 协议注册 / 命令行开关）并在 `app ready` 后第一时间亮 splash，之后才动态加载重模块（`src/main/index.ts` → `out/main/app.js`，5.2MB）。实测 splash 可见时间从进程启动后 ~1.7s 提前到 ~0.35s（dev 与 preview 生产形态一致），总加载时长不变，动画完整覆盖初始化等待段。
+- 重模块保持具名 entry（`out/main/app.js` 落在 `out/main` 根）而非匿名 chunk，保住模块内 `join(__dirname, '../preload/…')`、`'../renderer/…'` 等相对路径基准（preview 实测掉进 `chunks/` 会 renderer/preload 404）。
+- 摘除 `AgentManager` 构造函数在启动路径上的同步 `spawnSync('claude --version')`（实测 ~0.4s、最坏 5s），改走既有懒检查。
+- splash 窗口逻辑迁至 `src/main/startup-splash-window.ts`（boot-entry 与重模块共享同一窗口状态），并修正首帧握手时序：不再在首帧就绪前强制 `show()`，改为等 `ready-to-show`（1.5s 兜底）+ 帧跑道回执（36 rAF）后才放行重模块 import——窗口首帧 commit 期间被重模块同步求值阻塞会卡死合成（真机复现"isVisible 但屏幕全程无像素"）。新增 `[boot-timing]` 启动阶段耗时观测线。合同测试 `startup-splash-fast-path-contract` 新增围栏：构建入口指向 boot-entry、splash 先于重模块动态加载、微入口静态 import 白名单、动画必须合成器可驱动。
+- **启动提速 ~11.5s（根因修复）**：`SkillsRuntimeManager.listSkills()` 此前每次调用都对全部 embedded 技能做 `syncEmbeddedSkill`（源目录全量内容哈希 + 状态比对），启动期 registry/工具面/目录提醒反复调 listSkills，实测把 `setupAgentIPC` 拖成 ~13s 的主线程实心块（CPU profile：`hashDirectoryContents.visit` 占 83%，同一技能一次启动被哈希 8+ 次）——这就是启动动画冻结与"启动慢"的共同主因，此前误判为 renderer 编译耗时（实测 renderer 就绪只要 ~0.3s）。修复=同步结果进程内记忆化（`syncedEmbeddedSkillDestinations`，install 管线 force 路径保留强制重同步照顾 dev 迭代）；dev 实测 `agent-ipc` 段 13s→1.5s、主窗口就绪 ~15.5s→~4.0s。`hashDirectoryContents` 增加 >100ms 慢哈希响亮警告；新增 `startBootStallProbe`（32ms 心跳，>150ms 主线程实心块按最近 boot 阶段归因落日志，启动 30s 后自停）。回归合同 `embedded-skill-managed-sync` 16/16 通过。
+- 启动动画抗冻结三件套（真机逐帧截屏定位：新窗口最初几秒的帧呈现耦合主进程活性，实心同步段会把动画整段冻住）：① splash 窗口改**不透明**（透明窗口呈现路径更脆弱，冻结可永久化；圆角阴影由系统窗形提供，退场改为主进程整窗 setOpacity 渐隐）；② splash 动画从 rAF 逐帧改 SVG 属性重写为**纯 CSS 合成器动画**（逐列 opacity 关键帧扫描 + transform 幕布揭幕 + 收尾按 easeOutCubic 反函数预排 transition-delay 聚合，页面 JS 只剩 finish 事件加 class，等价"预渲染播片"）；③ 重模块**分片预热**（boot-entry 按子系统 9 片动态 import）+ whenReady 大阶段间统一 `yieldToPresentation()`（48ms）让合成器追帧，消除单个 1.4s 实心求值块。
+
 ### 浏览器数据（清除浏览数据 / Cookie 管理）
 
 - 设置页新增「浏览器数据」选项页：Edge 式清除浏览数据（浏览历史、下载记录、Cookie 及其他站点数据、缓存，支持 1 小时 / 24 小时 / 7 天 / 4 周 / 全部时间范围）与 Cookie 管理（按站点分组查看、搜索、单条 / 整站 / 全部删除）。

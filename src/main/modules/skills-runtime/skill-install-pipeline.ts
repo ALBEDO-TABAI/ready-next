@@ -84,7 +84,7 @@ export interface SkillInstallPipelineDeps {
     requirementsPath: string,
     options?: { allowPackaged?: boolean },
   ) => Promise<void>
-  syncEmbeddedSkill: (manifest: EmbeddedSkillManifest) => string
+  syncEmbeddedSkill: (manifest: EmbeddedSkillManifest, options?: { force?: boolean }) => string
   assertPackagedRuntimeCoversEmbeddedSkill: (skillId: EmbeddedSkillId) => void
 }
 
@@ -629,7 +629,9 @@ export class SkillInstallPipeline {
     const manifest = getEmbeddedSkillManifest(skillId)
     if (manifest) {
       this.deps.ensureRuntimeDirs()
-      const skillPath = this.deps.syncEmbeddedSkill(manifest)
+      // force 安装时强制绕过进程内同步缓存：dev 迭代技能素材后 force reinstall
+      // 必须重新哈希源目录并重铺运行时拷贝。
+      const skillPath = this.deps.syncEmbeddedSkill(manifest, { force })
       const statePath = getInstallStatePath(skillPath)
       const requirementsPath = join(skillPath, manifest.requirementsFile)
       const digest = requirementsDigest(requirementsPath)
