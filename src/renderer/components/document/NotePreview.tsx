@@ -1,5 +1,6 @@
 import {
   Children,
+  Fragment,
   isValidElement,
   memo,
   useCallback,
@@ -32,11 +33,29 @@ import DocumentWidgetCardShell from './DocumentWidgetCardShell'
 import type { DocumentWidgetPersistedState } from './widget-state-runtime'
 import { getDocumentWidgetRenderBudget, getWidgetPersistenceKey } from './widget-card-helpers'
 import WidgetRenderer from './WidgetRenderer'
+import {
+  EditableBlockShell,
+  PreviewAppendComposer,
+  PreviewBlockEditor,
+  type PreviewDropIndicator,
+} from './NotePreviewEditable'
+import {
+  appendPreviewParagraph,
+  getPreviewBlockSourceText,
+  movePreviewBlockSource,
+  replacePreviewBlockSource,
+} from '../../modules/document/previewEditOperations'
+
+export const PREVIEW_BLOCK_DRAG_MIME = 'application/x-ready-preview-block'
 
 interface NotePreviewProps {
   content: string
   notePath?: string | null
   focusWidgetTitle?: string | null
+  /** Preview-edit mode: blocks become editable/movable in place. */
+  editable?: boolean
+  /** Receives the full next document text after a preview-edit operation. */
+  onApplyContentEdit?: (nextContent: string) => void
   onWidgetRename?: (currentTitle: string, widgetCode: string, nextTitle: string) => void
   onWidgetQuote?: (title: string, widgetCode: string) => void
   onWidgetExport?: (title: string, widgetCode: string, widgetState?: DocumentWidgetPersistedState | null) => void
@@ -556,6 +575,8 @@ function NotePreview({
   content,
   notePath,
   focusWidgetTitle,
+  editable,
+  onApplyContentEdit,
   onWidgetRename,
   onWidgetQuote,
   onWidgetExport,
@@ -570,6 +591,12 @@ function NotePreview({
       : content
   ), [content, isEbookMarkdown])
   const preview = useMemo(() => buildStructuredNotePreview(displayContent, notePath), [displayContent, notePath])
+  // Ebook markdown strips a marker before parsing, so ranges would not line up
+  // with the tab content — preview-edit stays off there.
+  const canEdit = Boolean(editable && onApplyContentEdit) && !isEbookMarkdown
+  const [editingBlockId, setEditingBlockId] = useState<string | null>(null)
+  const [draggingBlockId, setDraggingBlockId] = useState<string | null>(null)
+  const [dropIndicator, setDropIndicator] = useState<PreviewDropIndicator | null>(null)
   const widgetRenderBudget = useMemo(() => getDocumentWidgetRenderBudget(displayContent), [displayContent])
   const embedsById = useMemo(
     () => new Map(preview.embeds.map((embed) => [embed.id, embed])),
@@ -612,6 +639,85 @@ function NotePreview({
       setCopiedChipId(null)
     }
   }, [])
+
+  // ─── Preview-edit (预览内编辑) ─────────────────────────────
+  const blocksById = useMemo(
+    () => new Map(preview.blocks.map((block) => [block.id, block])),
+    [preview.blocks],
+  )
+
+  useEffect(() => {
+    if (canEdit) return
+    setEditingBlockId(null)
+    setDraggingBlockId(null)
+    setDropIndicator(null)
+  }, [canEdit])
+
+  // Drag state must clear even when the drop lands outside the preview
+  // (dragend fires on the source; drop may land anywhere).
+  useEffect(() => {
+    if (!canEdit) return undefined
+    const reset = () => {
+      setDraggingBlockId(null)
+      setDropIndicator(null)
+    }
+    window.addEventListener('dragend', reset)
+    window.addEventListener('drop', reset)
+    return () => {
+      window.removeEventListener('dragend', reset)
+      window.removeEventListener('drop', reset)
+    }
+  }, [canEdit])
+
+  const applyContentEdit = useCallback((next: string | null) => {
+    if (next === null || next === displayContent) return
+    onApplyContentEdit?.(next)
+  }, [displayContent, onApplyContentEdit])
+
+  const handleBlockEditCommit = useCallback((block: PreviewBlock, nextText: string) => {
+    setEditingBlockId(null)
+    applyContentEdit(replacePreviewBlockSource(displayContent, block, nextText))
+  }, [applyContentEdit, displayContent])
+
+  const handleBlockDragStart = useCallback((event: React.DragEvent<HTMLDivElement>, blockId: string) => {
+    event.dataTransfer.effectAllowed = 'move'
+    event.dataTransfer.setData(PREVIEW_BLOCK_DRAG_MIME, blockId)
+    setDraggingBlockId(blockId)
+  }, [])
+
+  const handleBlockDragEnd = useCallback(() => {
+    setDraggingBlockId(null)
+    setDropIndicator(null)
+  }, [])
+
+  const handleBlockDragOver = useCallback((event: React.DragEvent<HTMLDivElement>, blockId: string) => {
+    if (!draggingBlockId || draggingBlockId === blockId) return
+    event.preventDefault()
+    event.stopPropagation()
+    event.dataTransfer.dropEffect = 'move'
+    const rect = event.currentTarget.getBoundingClientRect()
+    const position: PreviewDropIndicator['position'] = event.clientY - rect.top < rect.height / 2 ? 'before' : 'after'
+    setDropIndicator((prev) => (
+      prev && prev.blockId === blockId && prev.position === position ? prev : { blockId, position }
+    ))
+  }, [draggingBlockId])
+
+  const handleBlockDrop = useCallback((event: React.DragEvent<HTMLDivElement>, blockId: string) => {
+    if (!draggingBlockId) return
+    event.preventDefault()
+    event.stopPropagation()
+    const moved = blocksById.get(draggingBlockId)
+    const target = blocksById.get(blockId)
+    const indicator = dropIndicator
+    setDraggingBlockId(null)
+    setDropIndicator(null)
+    if (!moved || !target || !indicator || indicator.blockId !== blockId) return
+    applyContentEdit(movePreviewBlockSource(displayContent, moved, target, indicator.position))
+  }, [applyContentEdit, blocksById, displayContent, draggingBlockId, dropIndicator])
+
+  const handleAppendParagraph = useCallback((text: string) => {
+    applyContentEdit(appendPreviewParagraph(displayContent, text))
+  }, [applyContentEdit, displayContent])
 
   const markdownComponents = useMemo(() => ({
     h1: ({ children }: { children?: ReactNode }) => <h1 className="note-preview-markdown-h1" data-ready-heading-level="1" data-ready-heading-title={extractMarkdownText(children)}>{children}</h1>,
@@ -760,69 +866,119 @@ function NotePreview({
         </div>
       ) : null}
 
-      <div className="note-preview-body">
+      <div className="note-preview-body" data-preview-editable={canEdit ? 'true' : undefined}>
         {preview.blocks.map((block) => {
-          if (block.type === 'markdown') {
-            return renderMarkdownBlock(block)
-          }
+          const renderBlockBody = (): ReactNode => {
+            if (block.type === 'markdown') {
+              return renderMarkdownBlock(block)
+            }
 
-          if (block.type === 'details') {
-            return renderDetailsBlock(block)
-          }
+            if (block.type === 'details') {
+              return renderDetailsBlock(block)
+            }
 
-          if (block.type === 'chips') {
-            return (
-              <div key={block.id} className="note-preview-chip-group note-preview-inline-chip-block">
-                {block.chips.map((chip) => (
-                  <Chip
-                    key={chip.id}
-                    chip={chip}
-                    copied={copiedChipId === chip.id}
-                    onCopy={handleCopyChip}
-                    onOpen={openHref}
+            if (block.type === 'chips') {
+              return (
+                <div className="note-preview-chip-group note-preview-inline-chip-block">
+                  {block.chips.map((chip) => (
+                    <Chip
+                      key={chip.id}
+                      chip={chip}
+                      copied={copiedChipId === chip.id}
+                      onCopy={handleCopyChip}
+                      onOpen={openHref}
+                    />
+                  ))}
+                </div>
+              )
+            }
+
+            if (block.type === 'embed') {
+              const embed = embedsById.get(block.embedId)
+              if (!embed) return null
+              return <MediaEmbed embed={embed} onOpen={openHref} />
+            }
+
+            if (block.type === 'widget') {
+              const widget = widgetsById.get(block.widgetId)
+              if (!widget) return null
+              const widgetState = widgetStates?.[getWidgetPersistenceKey(widget.title || 'widget', widget.widgetCode)] || widget.widgetState || null
+              return (
+                <DocumentWidgetCardShell
+                  title={widget.title || 'widget'}
+                  onRenameTitle={onWidgetRename ? (nextTitle) => onWidgetRename(widget.title || 'widget', widget.widgetCode, nextTitle) : undefined}
+                  onQuote={onWidgetQuote ? () => onWidgetQuote(widget.title || 'widget', widget.widgetCode) : undefined}
+                  onExport={onWidgetExport ? () => onWidgetExport(widget.title || 'widget', widget.widgetCode, widgetState) : undefined}
+                  dataReadyWidgetTitle={widget.title || ''}
+                  previewClassName="ready-doc-widget-card-preview ready-doc-widget-card-preview-static"
+                >
+                  <WidgetRenderer
+                    title={widget.title}
+                    widgetCode={widget.widgetCode}
+                    preferManualPreview={widgetRenderBudget.forceManualPreviewAll}
+                    widgetState={widgetState}
+                    onWidgetStateChange={onWidgetStateChange ? (state) => onWidgetStateChange(widget.title || 'widget', widget.widgetCode, state) : undefined}
                   />
-                ))}
-              </div>
-            )
+                </DocumentWidgetCardShell>
+              )
+            }
+
+            if (block.type === 'widget_error') {
+              return <BrokenWidgetFallback reason={block.reason} />
+            }
+
+            return null
           }
 
-          if (block.type === 'embed') {
-            const embed = embedsById.get(block.embedId)
-            if (!embed) return null
-            return <MediaEmbed key={block.id} embed={embed} onOpen={openHref} />
+          if (!canEdit) {
+            const body = renderBlockBody()
+            return body === null ? null : <Fragment key={block.id}>{body}</Fragment>
           }
 
-          if (block.type === 'widget') {
-            const widget = widgetsById.get(block.widgetId)
-            if (!widget) return null
-            const widgetState = widgetStates?.[getWidgetPersistenceKey(widget.title || 'widget', widget.widgetCode)] || widget.widgetState || null
-            return (
-              <DocumentWidgetCardShell
-                key={block.id}
-                title={widget.title || 'widget'}
-                onRenameTitle={onWidgetRename ? (nextTitle) => onWidgetRename(widget.title || 'widget', widget.widgetCode, nextTitle) : undefined}
-                onQuote={onWidgetQuote ? () => onWidgetQuote(widget.title || 'widget', widget.widgetCode) : undefined}
-                onExport={onWidgetExport ? () => onWidgetExport(widget.title || 'widget', widget.widgetCode, widgetState) : undefined}
-                dataReadyWidgetTitle={widget.title || ''}
-                previewClassName="ready-doc-widget-card-preview ready-doc-widget-card-preview-static"
-              >
-                <WidgetRenderer
-                  title={widget.title}
-                  widgetCode={widget.widgetCode}
-                  preferManualPreview={widgetRenderBudget.forceManualPreviewAll}
-                  widgetState={widgetState}
-                  onWidgetStateChange={onWidgetStateChange ? (state) => onWidgetStateChange(widget.title || 'widget', widget.widgetCode, state) : undefined}
+          const hasSource = block.source !== null
+          const textEditable = hasSource && (block.type === 'markdown' || block.type === 'details')
+
+          if (textEditable && editingBlockId === block.id) {
+            const seed = getPreviewBlockSourceText(displayContent, block)
+            if (seed !== null) {
+              return (
+                <PreviewBlockEditor
+                  key={block.id}
+                  initialText={seed}
+                  ariaLabel="编辑此段内容"
+                  onCommit={(nextText) => handleBlockEditCommit(block, nextText)}
+                  onCancel={() => setEditingBlockId(null)}
                 />
-              </DocumentWidgetCardShell>
-            )
+              )
+            }
           }
 
-          if (block.type === 'widget_error') {
-            return <BrokenWidgetFallback key={block.id} reason={block.reason} />
-          }
+          const body = renderBlockBody()
+          if (body === null) return null
+          const embed = block.type === 'embed' ? embedsById.get(block.embedId) : undefined
+          const blockDraggable = hasSource && block.type === 'embed' && (embed?.kind === 'image' || embed?.kind === 'video')
 
-          return null
+          return (
+            <EditableBlockShell
+              key={block.id}
+              blockId={block.id}
+              textEditable={textEditable}
+              draggable={blockDraggable}
+              dropTargetable={hasSource && Boolean(draggingBlockId) && draggingBlockId !== block.id}
+              isDraggingSelf={draggingBlockId === block.id}
+              dropIndicator={dropIndicator}
+              onStartEdit={textEditable ? () => setEditingBlockId(block.id) : undefined}
+              onDragStartBlock={(event) => handleBlockDragStart(event, block.id)}
+              onDragEndBlock={handleBlockDragEnd}
+              onDragOverBlock={(event) => handleBlockDragOver(event, block.id)}
+              onDropBlock={(event) => handleBlockDrop(event, block.id)}
+            >
+              {body}
+            </EditableBlockShell>
+          )
         })}
+
+        {canEdit && <PreviewAppendComposer onAppend={handleAppendParagraph} />}
       </div>
     </div>
   )

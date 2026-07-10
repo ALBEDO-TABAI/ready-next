@@ -39,6 +39,8 @@ export interface DocumentVerticalTabItem {
   pathLabel?: string
   title?: string
   dotColor?: string
+  /** 文件管理里为该文件设置的自定义呈现图标（emoji/短文字），优先于默认 FileText。 */
+  customIcon?: string | null
   active?: boolean
   secondaryActive?: boolean
   dirty?: boolean
@@ -71,6 +73,27 @@ interface DocumentVerticalTabRailProps {
 
 function iconNode(tab: DocumentVerticalTabItem, size: number) {
   const isHighlighted = Boolean(tab.active || tab.secondaryActive)
+  if (tab.customIcon) {
+    return (
+      <span
+        aria-hidden
+        className="flex-shrink-0"
+        style={{
+          width: size,
+          height: size,
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          fontSize: Math.max(11, Math.round(size * 0.9)),
+          lineHeight: 1,
+          color: isHighlighted ? tab.dotColor || 'var(--text-title)' : 'var(--text-gray)',
+          filter: isHighlighted ? 'none' : 'grayscale(0.35)',
+        }}
+      >
+        {tab.customIcon}
+      </span>
+    )
+  }
   return (
     <FileText
       style={{ width: size, height: size, color: isHighlighted ? tab.dotColor || 'var(--ready-document-tab-doc-dot, var(--color-ready-orange))' : 'var(--text-gray)' }}

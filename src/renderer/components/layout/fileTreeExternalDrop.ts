@@ -36,11 +36,19 @@ export interface WebDownloadDragPayload {
   unsupportedReason?: string
 }
 
+/** 文档模式标签栏里未保存的新建文档（path 为 null），拖到目录以确认保存位置。 */
+export interface UntitledDocTabDragPayload {
+  type: 'untitled-doc-tab'
+  tabId: string
+  title: string
+}
+
 export type FileTreeExternalDropPayload =
   | BrowserTabDragPayload
   | RSSItemDragPayload
   | WebDownloadDragPayload
   | ReadyBoardResourceDragPayload
+  | UntitledDocTabDragPayload
 
 export type FileTreeDropTarget =
   | {
@@ -316,6 +324,62 @@ export function __rssDragSessionAgeMs(): number | null {
   return activeRssItemDragRecord ? Date.now() - activeRssItemDragRecord.createdAt : null
 }
 
+export const UNTITLED_DOC_TAB_DRAG_MIME = 'application/x-ready-untitled-doc-tab'
+
+export function parseUntitledDocTabDragPayload(raw: string | null | undefined): UntitledDocTabDragPayload | null {
+  if (!raw) return null
+  try {
+    const parsed = JSON.parse(raw) as Partial<UntitledDocTabDragPayload>
+    if (parsed.type !== 'untitled-doc-tab') return null
+    if (!parsed.tabId || typeof parsed.tabId !== 'string') return null
+    return {
+      type: 'untitled-doc-tab',
+      tabId: parsed.tabId,
+      title: typeof parsed.title === 'string' ? parsed.title : '',
+    }
+  } catch {
+    // silent-catch: malformed drag payload simply does not qualify as an untitled-doc drop.
+    return null
+  }
+}
+
+// Same defensive-TTL session pattern as the RSS drag above: `dragover` cannot
+// read dataTransfer contents (protected drag store), so the payload is stashed
+// at dragstart; the TTL keeps an unmount-leaked session from surfacing later.
+let activeUntitledDocTabDragRecord: { payload: UntitledDocTabDragPayload; createdAt: number } | null = null
+
+export function beginUntitledDocTabDragSession(payload: UntitledDocTabDragPayload): void {
+  activeUntitledDocTabDragRecord = { payload: { ...payload }, createdAt: Date.now() }
+}
+
+export function getActiveUntitledDocTabDragPayload(): UntitledDocTabDragPayload | null {
+  if (!activeUntitledDocTabDragRecord) return null
+  if (Date.now() - activeUntitledDocTabDragRecord.createdAt > RSS_DRAG_TTL_MS) {
+    activeUntitledDocTabDragRecord = null
+    return null
+  }
+  return { ...activeUntitledDocTabDragRecord.payload }
+}
+
+export function endUntitledDocTabDragSession(): void {
+  activeUntitledDocTabDragRecord = null
+}
+
+export function setUntitledDocTabDragPayload(
+  event: React.DragEvent,
+  item: { tabId: string; title: string },
+): void {
+  const payload: UntitledDocTabDragPayload = {
+    type: 'untitled-doc-tab',
+    tabId: item.tabId,
+    title: item.title,
+  }
+  beginUntitledDocTabDragSession(payload)
+  // Dedicated MIME only: no text/plain or x-ready-drag, so the payload never
+  // masquerades as a URL/file drop for other drop surfaces.
+  event.dataTransfer.setData(UNTITLED_DOC_TAB_DRAG_MIME, JSON.stringify(payload))
+}
+
 export function setRssItemDragPayload(event: React.DragEvent, item: SetRssItemDragInput): void {
   const payload: RSSItemDragPayload = {
     type: 'rss-item',
@@ -466,7 +530,7 @@ export type FileTreeExternalDropAction =
 
 export function isLikelyVideoDropPayload(payload: FileTreeExternalDropPayload): boolean {
   const url =
-    payload.type === 'ready-board-selection'
+    payload.type === 'ready-board-selection' || payload.type === 'untitled-doc-tab'
       ? ''
       : payload.type === 'browser-tab'
       ? payload.url
@@ -568,7 +632,8 @@ export async function dispatchFileTreeExternalDropAction({
   onAnalysisPlaceholderStart,
   onAnalysisPlaceholderUpdate,
 }: DispatchFileTreeExternalDropArgs): Promise<void> {
-  if (payload.type === 'web-download-url' || payload.type === 'ready-board-selection') return
+  // Direct-handled payload kinds never reach the action menu dispatch.
+  if (payload.type === 'web-download-url' || payload.type === 'ready-board-selection' || payload.type === 'untitled-doc-tab') return
 
   const targetDir =
     target.kind === 'inside-directory' ? target.dirPath : target.containerPath

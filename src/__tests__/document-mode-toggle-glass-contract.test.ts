@@ -38,7 +38,10 @@ test('document mode toggle follows refined iOS Segmented Control style', () => {
   assert.match(styles, /\.draggable-mode-switch__thumb\s*\{[\s\S]*?width:\s*calc\(\(100% - 4px\) \/ 2\)/)
   assert.match(styles, /\.draggable-mode-switch__thumb\s*\{[\s\S]*?top:\s*2px/)
   assert.match(styles, /\.draggable-mode-switch__thumb\s*\{[\s\S]*?left:\s*2px/)
-  assert.match(modeSwitch, /scale\(var\(--ready-document-switch-thumb-scale, 1\)\)/)
+  // 预览下沉态（preview-edit）与皮肤缩放变量在同一 transform 里相乘：
+  // 皮肤变量仍然生效，sinkScale 只做按压缩放（1 → 0.92）。
+  assert.match(modeSwitch, /scale\(calc\(var\(--ready-document-switch-thumb-scale, 1\) \* \$\{sinkScale\}\)\)/)
+  assert.match(modeSwitch, /const sinkScale = 1 - sinkProgress \* PREVIEW_EDIT_SINK_SCALE/)
   // 8ab48cd7 style(ui): checkpoint liquid glass polish — 文档切换 thumb 放大退役（1.1 → 1）
   assert.match(styles, /html\[data-skin='liquid-glass'\] \.draggable-mode-switch\s*\{[\s\S]*?--ready-document-switch-thumb-scale:\s*1;/)
   // 滑块边缘高光

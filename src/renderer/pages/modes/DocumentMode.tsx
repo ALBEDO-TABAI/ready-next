@@ -36,6 +36,11 @@ import {
   canAcceptDocumentPaneDrop,
   getDocumentPaneDropPath,
 } from '../../modules/document/documentPaneDrop'
+import {
+  endUntitledDocTabDragSession,
+  setUntitledDocTabDragPayload,
+} from '../../components/layout/fileTreeExternalDrop'
+import { getFileAppearanceColorValue } from '../../stores/fileAppearance'
 import { startBrowserLocalMediaNativeFileDrag } from '../../modules/browser/localMediaDragBridge'
 import { getFileExtension } from '../../utils/path'
 import { isEbookExtension } from '../../../shared/ebook'
@@ -278,12 +283,14 @@ function SplitResizeHandle({
 function DocumentEditor({
   tab,
   viewMode,
+  previewEditable,
   previewFocusWidgetTitle,
   onVisibleLineChange,
   onActivate,
 }: {
   tab: DocTab
   viewMode: 'edit' | 'preview'
+  previewEditable?: boolean
   previewFocusWidgetTitle?: string | null
   onVisibleLineChange?: (line: number | null) => void
   onActivate?: () => void
@@ -320,6 +327,7 @@ function DocumentEditor({
     <MarkdownEditor
       tab={tab}
       viewMode={viewMode}
+      previewEditable={previewEditable}
       previewFocusWidgetTitle={previewFocusWidgetTitle}
       onVisibleLineChange={onVisibleLineChange}
       onActivate={onActivate}
@@ -337,7 +345,7 @@ export default function DocumentMode({
   isActive = true,
   isMotionSettled = true,
 }: DocumentModeProps) {
-  const { selectedFile, workspaceRoot, pinnedFolders } = useWorkspace()
+  const { selectedFile, workspaceRoot, pinnedFolders, fileAppearances } = useWorkspace()
   const {
     tabs, tabGroups, activeTabId, splitTabId, documentSplitRatio,
     openTab, closeTab, setActiveTab, setSplitTab, setDocumentSplitRatio,
@@ -354,6 +362,8 @@ export default function DocumentMode({
   const liveDocumentSplitRatioRef = useRef(documentSplitRatio)
   const restoreDocumentLayoutFreezeRef = useRef<(() => void) | null>(null)
   const [editorMode, setEditorMode] = useState<'edit' | 'preview'>('preview')
+  // 预览下沉态（预览内编辑）：仅在 preview 模式下有效，切模式/切标签即复位。
+  const [previewEditActive, setPreviewEditActive] = useState(false)
   const [previewFocusWidgetTitle, setPreviewFocusWidgetTitle] = useState<string | null>(null)
   const [hasActivated, setHasActivated] = useState(isActive)
   const [outlinePanelOpen, setOutlinePanelOpen] = useState(() => readDocumentPanelOpenState('ready-document-outline-panel-open'))
@@ -697,8 +707,19 @@ export default function DocumentMode({
   const handleEditorModeChange = useCallback((nextMode: 'edit' | 'preview') => {
     if (nextMode === editorMode) return
     captureVisibleDocumentScrollPositions()
+    setPreviewEditActive(false)
     setEditorMode(nextMode)
   }, [captureVisibleDocumentScrollPositions, editorMode])
+
+  const handleTogglePreviewEdit = useCallback(() => {
+    setPreviewEditActive((value) => !value)
+  }, [])
+
+  // Preview-edit is a per-document deliberate action: leaving the document
+  // (or the preview mode) lifts the thumb back to plain preview.
+  useEffect(() => {
+    setPreviewEditActive(false)
+  }, [activeTabId])
 
   const handlePanelReveal = useCallback((lineStart: number, lineEnd?: number | null) => {
     if (!panelTargetTab?.path) return
@@ -788,11 +809,16 @@ export default function DocumentMode({
       e.dataTransfer.setData('text/plain', tab.path)
       e.dataTransfer.setData('text/uri-list', `file://${encodeURI(tab.path)}`)
       startBrowserLocalMediaNativeFileDrag(e)
+    } else if (tab) {
+      // Untitled draft (未保存的新建文档): dropping it onto a file-tree
+      // directory confirms the save location.
+      setUntitledDocTabDragPayload(e, { tabId: tab.id, title: tab.title })
     }
   }, [tabs])
 
   const handleDragEnd = useCallback(() => {
     dragIndexRef.current = null
+    endUntitledDocTabDragSession()
   }, [])
 
   // Delete a group = close its member tabs. closeTab normalizes groups (drops the
@@ -900,6 +926,8 @@ export default function DocumentMode({
               <DraggableModeSwitch
                 mode={editorMode}
                 onChange={handleEditorModeChange}
+                previewEditActive={previewEditActive}
+                onTogglePreviewEdit={handleTogglePreviewEdit}
               />
             </div>
           </div>
@@ -909,12 +937,15 @@ export default function DocumentMode({
               tabs={tabs.map((tab) => {
                 const isPrimary = tab.id === activeTabId
                 const isSplit = tab.id === splitTabId
+                // 文件管理里设置的呈现颜色/图标（FileAppearance）优先于扩展名默认色。
+                const appearance = tab.path ? fileAppearances[tab.path] : undefined
                 return {
                   id: tab.id,
                   label: tab.title,
                   pathLabel: tab.path || undefined,
                   title: `${tab.title}${isSplit ? ' (分栏)' : ''}\n按住 Shift 点击可分栏`,
-                  dotColor: getFileTypeColor(tab.path),
+                  dotColor: getFileAppearanceColorValue(appearance?.color) ?? getFileTypeColor(tab.path),
+                  customIcon: appearance?.icon ?? null,
                   active: isPrimary,
                   secondaryActive: isSplit && !isPrimary,
                   dirty: tab.isDirty,
@@ -970,6 +1001,7 @@ export default function DocumentMode({
                     key={activeTab.id}
                     tab={activeTab}
                     viewMode={editorMode}
+                    previewEditable={editorMode === 'preview' && previewEditActive}
                     previewFocusWidgetTitle={previewFocusWidgetTitle}
                     onVisibleLineChange={(line) => handlePanelTargetLineChange(activeTab.id, line)}
                     onActivate={() => handlePaneActivate(activeTab.id)}
@@ -991,6 +1023,7 @@ export default function DocumentMode({
                     key={splitTab.id}
                     tab={splitTab}
                     viewMode={editorMode}
+                    previewEditable={editorMode === 'preview' && previewEditActive}
                     previewFocusWidgetTitle={previewFocusWidgetTitle}
                     onVisibleLineChange={(line) => handlePanelTargetLineChange(splitTab.id, line)}
                     onActivate={() => handlePaneActivate(splitTab.id)}
@@ -1007,6 +1040,7 @@ export default function DocumentMode({
                   key={activeTab.id}
                   tab={activeTab}
                   viewMode={editorMode}
+                  previewEditable={editorMode === 'preview' && previewEditActive}
                   previewFocusWidgetTitle={previewFocusWidgetTitle}
                   onVisibleLineChange={(line) => handlePanelTargetLineChange(activeTab.id, line)}
                   onActivate={() => handlePaneActivate(activeTab.id)}

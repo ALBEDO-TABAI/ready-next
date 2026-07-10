@@ -84,6 +84,8 @@ const getFileExt = (path: string | null): string => {
 interface MarkdownEditorProps {
   tab: DocTab
   viewMode?: 'edit' | 'preview'
+  /** Preview-edit mode (滑块下沉态): the preview allows in-place content edits. */
+  previewEditable?: boolean
   previewFocusWidgetTitle?: string | null
   onVisibleLineChange?: (line: number | null) => void
   onActivate?: () => void
@@ -208,6 +210,7 @@ function getMarkdownForDroppedFiles(
 export default function MarkdownEditor({
   tab,
   viewMode = 'edit',
+  previewEditable = false,
   previewFocusWidgetTitle,
   onVisibleLineChange,
   onActivate,
@@ -657,6 +660,13 @@ export default function MarkdownEditor({
     setSaveState('idle')
   }, [tab.id, updateTabContent])
 
+  // Preview-edit writes land on the same tab-content channel as the source
+  // textarea: dirty state + Cmd+S save semantics stay identical.
+  const handlePreviewContentEdit = useCallback((nextContent: string) => {
+    updateTabContent(tab.id, nextContent)
+    setSaveState('idle')
+  }, [tab.id, updateTabContent])
+
   const handleEditorSurfaceScroll = useCallback(() => {
     const surface = editorSurfaceRef.current
     const rawEditor = rawEditorRef.current
@@ -892,6 +902,8 @@ export default function MarkdownEditor({
                     content={tab.content}
                     notePath={tab.path}
                     focusWidgetTitle={previewFocusWidgetTitle}
+                    editable={previewEditable && !blockingLoadError}
+                    onApplyContentEdit={handlePreviewContentEdit}
                     onWidgetRename={handleWidgetRename}
                     onWidgetQuote={handleWidgetQuoteToAgent}
                     onWidgetExport={handleWidgetExport}

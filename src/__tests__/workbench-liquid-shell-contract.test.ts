@@ -422,6 +422,7 @@ test('liquid glass sliders preserve the groove and use lens-backed convex thumbs
   assert.match(modeSwitch, /<LiquidLens[\s\S]*className="ready-slider-thumb-lens"[\s\S]*ior=\{1\.22\}[\s\S]*dome=\{0\.7\}[\s\S]*blur=\{0\}/)
   assert.match(sliderStyles, /\.icon-rail-slider__thumb\s*\{[\s\S]*transform:\s*scale\(var\(--ready-workbench-slider-thumb-scale, 1\)\);/)
   assert.match(sliderStyles, /\.draggable-mode-tabs__thumb\s*\{[\s\S]*transform:\s*translateX\(calc\(var\(--dmt-thumb-pos[\s\S]*scale\(var\(--ready-workbench-slider-thumb-scale, 1\)\);/)
-  assert.match(modeSwitch, /scale\(var\(--ready-document-switch-thumb-scale, 1\)\)/)
+  // 皮肤缩放变量与预览下沉缩放（sinkScale）在同一 transform 相乘：变量仍生效。
+  assert.match(modeSwitch, /scale\(calc\(var\(--ready-document-switch-thumb-scale, 1\) \* \$\{sinkScale\}\)\)/)
   assert.match(appStyles, /\.ready-slider-thumb-lens\s*\{[\s\S]*z-index:\s*1;/)
 })

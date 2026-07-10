@@ -39,13 +39,23 @@ export interface PreviewEmbed {
   isLocal?: boolean
 }
 
+/**
+ * Char range of a block inside the *normalized* (CRLF→LF) full note text.
+ * `null` means the block could not be mapped back to a unique source span —
+ * preview-edit must treat such blocks as read-only.
+ */
+export interface PreviewBlockSourceRange {
+  start: number
+  end: number
+}
+
 export type PreviewBlock =
-  | { id: string; type: 'markdown'; markdown: string }
-  | { id: string; type: 'details'; summary: string; markdown: string; open: boolean }
-  | { id: string; type: 'embed'; embedId: string }
-  | { id: string; type: 'chips'; chips: PreviewTag[] }
-  | { id: string; type: 'widget'; widgetId: string }
-  | { id: string; type: 'widget_error'; reason: string }
+  | { id: string; type: 'markdown'; markdown: string; source: PreviewBlockSourceRange | null }
+  | { id: string; type: 'details'; summary: string; markdown: string; open: boolean; source: PreviewBlockSourceRange | null }
+  | { id: string; type: 'embed'; embedId: string; source: PreviewBlockSourceRange | null }
+  | { id: string; type: 'chips'; chips: PreviewTag[]; source: PreviewBlockSourceRange | null }
+  | { id: string; type: 'widget'; widgetId: string; source: PreviewBlockSourceRange | null }
+  | { id: string; type: 'widget_error'; reason: string; source: PreviewBlockSourceRange | null }
 
 export interface StructuredNotePreview {
   properties: PreviewProperty[]
@@ -1024,16 +1034,37 @@ function normalizeMarkdownBlockSource(lines: string[]): string {
   )
 }
 
-function flushMarkdownBlock(buffer: string[], blocks: PreviewBlock[], indexRef: { value: number }): void {
-  if (buffer.length === 0) return
-  const markdown = normalizeMarkdownBlockSource(buffer)
-  buffer.length = 0
+interface MarkdownLineBuffer {
+  lines: string[]
+  lineIndices: number[]
+}
+
+function flushMarkdownBlock(
+  buffer: MarkdownLineBuffer,
+  blocks: PreviewBlock[],
+  indexRef: { value: number },
+  rangeForLines: (firstLineIndex: number, lastLineIndex: number) => PreviewBlockSourceRange | null,
+): void {
+  if (buffer.lines.length === 0) return
+  const markdown = normalizeMarkdownBlockSource(buffer.lines)
+  // Trim the buffered span to its non-blank extent so the recorded range never
+  // swallows the blank separator lines around the block.
+  let firstContent = 0
+  while (firstContent < buffer.lines.length && buffer.lines[firstContent].trim().length === 0) firstContent += 1
+  let lastContent = buffer.lines.length - 1
+  while (lastContent >= 0 && buffer.lines[lastContent].trim().length === 0) lastContent -= 1
+  const source = firstContent <= lastContent
+    ? rangeForLines(buffer.lineIndices[firstContent], buffer.lineIndices[lastContent])
+    : null
+  buffer.lines.length = 0
+  buffer.lineIndices.length = 0
   if (!markdown) return
 
   blocks.push({
     id: makeId('markdown', `block-${indexRef.value}`, indexRef.value),
     type: 'markdown',
     markdown,
+    source,
   })
   indexRef.value += 1
 }
@@ -1101,6 +1132,7 @@ function parseBodyBlocks(
   content: string,
   notePath: string | null | undefined,
   existingEmbeds: PreviewEmbed[],
+  baseOffset: number | null,
 ): {
   blocks: PreviewBlock[]
   bodyMarkdown: string
@@ -1113,17 +1145,70 @@ function parseBodyBlocks(
   const embeds: PreviewEmbed[] = []
   const widgets: DocumentWidgetData[] = []
   const blockIndex = { value: 0 }
-  const widgetSegments = parseShowWidgetFences(normalizeLineEndings(content))
+  const body = normalizeLineEndings(content)
+  const widgetSegments = parseShowWidgetFences(body)
+
+  // Source-range bookkeeping. Top-level fence segments are verbatim ordered
+  // slices of `body`, so a plain arithmetic cursor recovers their offsets.
+  // Bare-widget subsegments inside a text segment are located with a forward
+  // indexOf and verified; any mismatch marks mapping as broken from that point
+  // on (ranges become null → blocks degrade to read-only, never mis-edited).
+  const rangeState = { broken: baseOffset === null }
+  let segmentCursor = 0
 
   widgetSegments.forEach((segment) => {
-    const normalizedSegments = segment.type === 'widget'
-      ? [segment]
-      : segment.type === 'invalid-widget'
-        ? [segment]
-        : parseBareWidgetPayloadSegments(segment.content)
+    const segmentLength = segment.type === 'widget' ? segment.data.rawFence.length : segment.content.length
+    const segmentStart = segmentCursor
+    segmentCursor += segmentLength
+
+    const toAbsoluteRange = (localStart: number, localEnd: number): PreviewBlockSourceRange | null => {
+      if (rangeState.broken || baseOffset === null) return null
+      if (localStart < 0 || localEnd < localStart) return null
+      return { start: baseOffset + localStart, end: baseOffset + localEnd }
+    }
+
+    if (segment.type === 'widget' || segment.type === 'invalid-widget') {
+      const source = toAbsoluteRange(segmentStart, segmentStart + segmentLength)
+      if (segment.type === 'widget') {
+        const widgetId = segment.data.id || makeId('widget', segment.data.title || `widget-${widgets.length}`, widgets.length)
+        widgets.push({
+          id: widgetId,
+          ...segment.data,
+        })
+        blocks.push({
+          id: makeId('widget-block', widgetId, blockIndex.value),
+          type: 'widget',
+          widgetId,
+          source,
+        })
+      } else {
+        blocks.push({
+          id: makeId('widget-error', segment.reason, blockIndex.value),
+          type: 'widget_error',
+          reason: segment.reason,
+          source,
+        })
+      }
+      blockIndex.value += 1
+      return
+    }
+
+    const normalizedSegments = parseBareWidgetPayloadSegments(segment.content)
+    let subCursor = 0
 
     normalizedSegments.forEach((subsegment) => {
       if (subsegment.type === 'widget') {
+        const fence = subsegment.data.rawFence
+        let subStart = -1
+        if (!rangeState.broken) {
+          const found = segment.content.indexOf(fence, subCursor)
+          if (found >= 0) {
+            subStart = found
+            subCursor = found + fence.length
+          } else {
+            rangeState.broken = true
+          }
+        }
         const widgetId = subsegment.data.id || makeId('widget', subsegment.data.title || `widget-${widgets.length}`, widgets.length)
         widgets.push({
           id: widgetId,
@@ -1133,23 +1218,73 @@ function parseBodyBlocks(
           id: makeId('widget-block', widgetId, blockIndex.value),
           type: 'widget',
           widgetId,
+          source: subStart >= 0 ? toAbsoluteRange(segmentStart + subStart, segmentStart + subStart + fence.length) : null,
         })
         blockIndex.value += 1
         return
       }
 
       if (subsegment.type === 'invalid-widget') {
+        let subStart = -1
+        if (!rangeState.broken) {
+          const found = segment.content.indexOf(subsegment.content, subCursor)
+          if (found >= 0) {
+            subStart = found
+            subCursor = found + subsegment.content.length
+          } else {
+            rangeState.broken = true
+          }
+        }
         blocks.push({
           id: makeId('widget-error', subsegment.reason, blockIndex.value),
           type: 'widget_error',
           reason: subsegment.reason,
+          source: subStart >= 0 ? toAbsoluteRange(segmentStart + subStart, segmentStart + subStart + subsegment.content.length) : null,
         })
         blockIndex.value += 1
         return
       }
 
+      // `parseBareWidgetPayloadSegments` re-appends a fixed `\n\n` after parts
+      // that had a (possibly longer) blank-line separator in the source, so the
+      // verbatim core is the content minus that appended tail.
+      const core = subsegment.content.endsWith('\n\n')
+        ? subsegment.content.slice(0, -2)
+        : subsegment.content
+      let subAbsStart = -1
+      let subAbsEnd = -1
+      if (!rangeState.broken && core.length > 0) {
+        const found = segment.content.indexOf(core, subCursor)
+        if (found >= 0) {
+          subAbsStart = segmentStart + found
+          subAbsEnd = subAbsStart + core.length
+          subCursor = found + core.length
+        } else {
+          rangeState.broken = true
+        }
+      }
+
       const lines = subsegment.content.split('\n')
-      const markdownBuffer: string[] = []
+      // Start offset of each line, local to `body` (only valid when subAbsStart >= 0).
+      const lineStarts: number[] = new Array(lines.length)
+      let lineAcc = subAbsStart
+      for (let index = 0; index < lines.length; index += 1) {
+        lineStarts[index] = lineAcc
+        lineAcc += lines[index].length + 1
+      }
+      const rangeForLines = (firstLineIndex: number, lastLineIndex: number): PreviewBlockSourceRange | null => {
+        if (subAbsStart < 0) return null
+        const start = lineStarts[firstLineIndex]
+        const end = Math.min(lineStarts[lastLineIndex] + lines[lastLineIndex].length, subAbsEnd)
+        if (typeof start !== 'number' || typeof end !== 'number' || end < start) return null
+        return toAbsoluteRange(start, end)
+      }
+
+      const markdownBuffer: MarkdownLineBuffer = { lines: [], lineIndices: [] }
+      const pushBufferLine = (line: string, lineIndex: number) => {
+        markdownBuffer.lines.push(line)
+        markdownBuffer.lineIndices.push(lineIndex)
+      }
       let activeFence: MarkdownFenceMarker | null = null
 
       for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
@@ -1157,7 +1292,7 @@ function parseBodyBlocks(
         const trimmed = line.trim()
 
         if (activeFence) {
-          markdownBuffer.push(line)
+          pushBufferLine(line, lineIndex)
           if (isMarkdownFenceClosing(line, activeFence)) {
             activeFence = null
           }
@@ -1167,7 +1302,7 @@ function parseBodyBlocks(
         const openingFence = getMarkdownFenceMarker(line)
         if (openingFence) {
           activeFence = openingFence
-          markdownBuffer.push(line)
+          pushBufferLine(line, lineIndex)
           continue
         }
 
@@ -1185,13 +1320,14 @@ function parseBodyBlocks(
               : detailsLines.slice(summaryLineIndex + 1)
             const markdown = normalizeMarkdownBlockSource(markdownLines)
 
-            flushMarkdownBlock(markdownBuffer, blocks, blockIndex)
+            flushMarkdownBlock(markdownBuffer, blocks, blockIndex, rangeForLines)
             blocks.push({
               id: makeId('details', summary || `details-${blockIndex.value}`, blockIndex.value),
               type: 'details',
               summary: summary || '详情',
               markdown,
               open: detailsOpen.open,
+              source: rangeForLines(lineIndex, closeIndex),
             })
             blockIndex.value += 1
             lineIndex = closeIndex
@@ -1201,12 +1337,13 @@ function parseBodyBlocks(
 
         const tagLine = parseStandaloneTagLine(trimmed)
         if (tagLine) {
-          flushMarkdownBlock(markdownBuffer, blocks, blockIndex)
+          flushMarkdownBlock(markdownBuffer, blocks, blockIndex, rangeForLines)
           const dedupedTags = dedupeChips(tagLine)
           blocks.push({
             id: makeId('chips', dedupedTags.map((tag) => tag.label).join('-'), blockIndex.value),
             type: 'chips',
             chips: dedupedTags,
+            source: rangeForLines(lineIndex, lineIndex),
           })
           tags.push(...dedupedTags)
           blockIndex.value += 1
@@ -1217,13 +1354,14 @@ function parseBodyBlocks(
         if (embed) {
           const duplicate = [...existingEmbeds, ...embeds].some((item) => item.kind === embed.kind && item.displayUrl === embed.displayUrl)
           if (!duplicate) {
-            flushMarkdownBlock(markdownBuffer, blocks, blockIndex)
+            flushMarkdownBlock(markdownBuffer, blocks, blockIndex, rangeForLines)
             const nextEmbed = { ...embed, id: makeId('embed', embed.displayUrl, embeds.length) }
             embeds.push(nextEmbed)
             blocks.push({
               id: makeId('embed-block', nextEmbed.displayUrl, blockIndex.value),
               type: 'embed',
               embedId: nextEmbed.id,
+              source: rangeForLines(lineIndex, lineIndex),
             })
             blockIndex.value += 1
             continue
@@ -1231,14 +1369,14 @@ function parseBodyBlocks(
         }
 
         if (shouldPromoteToSectionHeading(trimmed)) {
-          markdownBuffer.push(`## ${trimmed}`)
+          pushBufferLine(`## ${trimmed}`, lineIndex)
           continue
         }
 
-        markdownBuffer.push(line)
+        pushBufferLine(line, lineIndex)
       }
 
-      flushMarkdownBlock(markdownBuffer, blocks, blockIndex)
+      flushMarkdownBlock(markdownBuffer, blocks, blockIndex, rangeForLines)
     })
   })
 
@@ -1255,6 +1393,15 @@ function parseBodyBlocks(
   }
 }
 
+/**
+ * Preview block source ranges refer to offsets inside THIS normalization of
+ * the note text. Preview-edit operations must run on the same normalization
+ * before splicing ranges.
+ */
+export function normalizePreviewNoteText(content: string): string {
+  return normalizeLineEndings(content)
+}
+
 export function buildStructuredNotePreview(
   content: string,
   notePath?: string | null,
@@ -1268,10 +1415,17 @@ export function buildStructuredNotePreview(
   )
   const propertyResult = buildProperties(metadata)
   const heroEmbed = buildMetadataEmbed(metadata, notePath)
+  // Frontmatter + header metadata are consumed strictly from the front, so the
+  // body is always a suffix of the normalized text. Guard it anyway: a broken
+  // suffix invariant must disable source ranges, never misplace them.
+  const bodyOffset = normalized.endsWith(headerResult.body)
+    ? normalized.length - headerResult.body.length
+    : null
   const bodyResult = parseBodyBlocks(
     headerResult.body,
     notePath,
     heroEmbed ? [heroEmbed] : [],
+    bodyOffset,
   )
   const embeds = heroEmbed ? [heroEmbed, ...bodyResult.embeds] : bodyResult.embeds
 

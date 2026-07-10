@@ -16,20 +16,25 @@ import type { WorkbenchMode } from '../../stores/useMode'
 import {
   dispatchFileTreeExternalDropAction,
   getActiveRssItemDragPayload,
+  getActiveUntitledDocTabDragPayload,
   parseBrowserTabDragPayload,
   parseReadyBoardFileTreeDropPayload,
   parseRssItemDragPayload,
+  parseUntitledDocTabDragPayload,
   parseWebDownloadDragPayload,
   resolveFileTreeDropTarget,
   resolveInternalMoveDir,
   getTargetDirFromDropTarget,
   canMoveAllToDirectory,
   shouldKeepFileTreeDropHintOnLeave,
+  UNTITLED_DOC_TAB_DRAG_MIME,
   type FileTreeDropTarget,
   type FileTreeExternalDropAction,
   type FileTreeExternalDropPayload,
+  type UntitledDocTabDragPayload,
   type WebDownloadDragPayload,
 } from './fileTreeExternalDrop'
+import { saveUntitledDocTabToDirectory } from '../../modules/document/untitledDocSave'
 import { getActiveBrowserTabDragPayload } from '../../modules/browser/browserTabDragSession'
 import { isReadyBoardFile } from '../../../shared/ready-board'
 import { isLocalHtmlFilePath, openLocalHtmlFileInBrowser } from '../../modules/browser/localHtmlFileOpen'
@@ -747,6 +752,9 @@ export default function FileTree({
     (dataTransfer: DataTransfer): FileTreeExternalDropPayload | null => {
       const readyBoard = parseReadyBoardFileTreeDropPayload(dataTransfer)
       if (readyBoard) return readyBoard
+      const untitledDocTab = parseUntitledDocTabDragPayload(dataTransfer.getData(UNTITLED_DOC_TAB_DRAG_MIME))
+        ?? getActiveUntitledDocTabDragPayload()
+      if (untitledDocTab) return untitledDocTab
       const raw = dataTransfer.getData('application/x-ready-drag')
       const browserTab = parseBrowserTabDragPayload(raw) ?? getActiveBrowserTabDragPayload()
       if (browserTab) return browserTab
@@ -897,6 +905,23 @@ export default function FileTree({
     })()
   }, [flashCompletedPath, loadDirChildren, refreshFiles, resolveBoardCopyDestination, schedulePlaceholderRemoval])
 
+  // 未保存的新建文档标签拖到目录：直接落盘确认保存位置（无动作菜单）。
+  const handleUntitledDocTabDrop = useCallback(async (
+    payload: UntitledDocTabDragPayload,
+    target: FileTreeDropTarget,
+  ) => {
+    const targetDir = getTargetDirFromDropTarget(target)
+    const dirName = targetDir.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || targetDir
+    const result = await saveUntitledDocTabToDirectory(payload.tabId, targetDir)
+    if (result.success) {
+      showMoveNotice(`已保存「${result.fileName}」到 ${dirName}`)
+      return
+    }
+    if (result.reason !== 'not-untitled') {
+      showMoveNotice(`保存到 ${dirName} 失败：${result.error || '未知错误'}`)
+    }
+  }, [showMoveNotice])
+
   const handleResolvedExternalDrop = useCallback((
     payload: FileTreeExternalDropPayload,
     target: FileTreeDropTarget,
@@ -908,12 +933,16 @@ export default function FileTree({
       handleReadyBoardResourceDrop(payload, target)
       return
     }
+    if (payload.type === 'untitled-doc-tab') {
+      void handleUntitledDocTabDrop(payload, target)
+      return
+    }
     if (payload.type === 'web-download-url') {
       handleWebDownloadDrop(payload, target)
       return
     }
     setExternalDropMenu({ x, y, payload, target })
-  }, [handleReadyBoardResourceDrop, handleWebDownloadDrop])
+  }, [handleReadyBoardResourceDrop, handleUntitledDocTabDrop, handleWebDownloadDrop])
 
   const handleItemDragOver = useCallback((e: React.DragEvent, item: FileItem, containerPath: string) => {
     const workspacePayloads = readWorkspaceDragPayloads(e.dataTransfer)

@@ -4,6 +4,9 @@ import { LiquidLens } from '../ui/liquid-glass/LiquidLens'
 interface DraggableModeSwitchProps {
   mode: 'edit' | 'preview'
   onChange: (mode: 'edit' | 'preview') => void
+  /** 预览下沉态（预览内编辑）：再次点击预览时滑块下沉，内容可在预览中直接编辑。 */
+  previewEditActive?: boolean
+  onTogglePreviewEdit?: () => void
 }
 
 const getPositionForMode = (mode: 'edit' | 'preview') => (mode === 'preview' ? 0 : 1)
@@ -13,19 +16,61 @@ const SPRING_STIFFNESS = 120
 const SPRING_DAMPING = 40
 const SPRING_MASS = 1.8
 
-export default function DraggableModeSwitch({ mode, onChange }: DraggableModeSwitchProps) {
+// 下沉态的滑块缩放量：按进轨道的“按压”读感
+const PREVIEW_EDIT_SINK_SCALE = 0.08
+const THUMB_CLICK_SLOP_PX = 4
+
+export default function DraggableModeSwitch({
+  mode,
+  onChange,
+  previewEditActive = false,
+  onTogglePreviewEdit,
+}: DraggableModeSwitchProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [position, setPosition] = useState(getPositionForMode(mode))
   const [isDragging, setIsDragging] = useState(false)
+  const [sinkProgress, setSinkProgress] = useState(previewEditActive && mode === 'preview' ? 1 : 0)
 
   const dragStartXRef = useRef(0)
   const dragStartPosRef = useRef(0)
+  const dragMovedRef = useRef(false)
   const rafRef = useRef<number | null>(null)
+  const sinkRafRef = useRef<number | null>(null)
+  const sinkCurrentRef = useRef(previewEditActive && mode === 'preview' ? 1 : 0)
   const velocityRef = useRef(0)
   const targetRef = useRef(getPositionForMode(mode))
   const currentRef = useRef(getPositionForMode(mode))
   const isDraggingRef = useRef(false)
   const activePointerIdRef = useRef<number | null>(null)
+
+  const isSunken = previewEditActive && mode === 'preview'
+
+  // Sink ease runs in JS (like the position spring) so it never fights the
+  // rAF-driven inline transform with a CSS transition.
+  useEffect(() => {
+    const target = isSunken ? 1 : 0
+    if (sinkRafRef.current) cancelAnimationFrame(sinkRafRef.current)
+    const step = () => {
+      const current = sinkCurrentRef.current
+      const delta = target - current
+      if (Math.abs(delta) < 0.01) {
+        sinkCurrentRef.current = target
+        setSinkProgress(target)
+        sinkRafRef.current = null
+        return
+      }
+      sinkCurrentRef.current = current + delta * 0.28
+      setSinkProgress(sinkCurrentRef.current)
+      sinkRafRef.current = requestAnimationFrame(step)
+    }
+    sinkRafRef.current = requestAnimationFrame(step)
+    return () => {
+      if (sinkRafRef.current) {
+        cancelAnimationFrame(sinkRafRef.current)
+        sinkRafRef.current = null
+      }
+    }
+  }, [isSunken])
 
   // Sync with external mode prop. `startSpringAnimation` is a
   // `useCallback(() => …, [])` declared below with stable identity for the
@@ -149,6 +194,7 @@ export default function DraggableModeSwitch({ mode, onChange }: DraggableModeSwi
 
     dragStartXRef.current = e.clientX
     dragStartPosRef.current = currentRef.current
+    dragMovedRef.current = false
 
     if (rafRef.current) {
       cancelAnimationFrame(rafRef.current)
@@ -165,6 +211,9 @@ export default function DraggableModeSwitch({ mode, onChange }: DraggableModeSwi
     const rect = container.getBoundingClientRect()
     const halfWidth = rect.width / 2
     const deltaX = e.clientX - dragStartXRef.current
+    if (Math.abs(deltaX) > THUMB_CLICK_SLOP_PX) {
+      dragMovedRef.current = true
+    }
     const deltaPos = deltaX / halfWidth
 
     let newPos = dragStartPosRef.current + deltaPos
@@ -176,11 +225,17 @@ export default function DraggableModeSwitch({ mode, onChange }: DraggableModeSwi
 
   const handlePointerUp = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     if (activePointerIdRef.current !== e.pointerId) return
+    // A press on the thumb without real movement is a click: in preview mode
+    // it toggles the sunken preview-edit state (滑块下沉，预览内可编辑).
+    const wasClick = !dragMovedRef.current
     finishDrag()
+    if (wasClick && mode === 'preview') {
+      onTogglePreviewEdit?.()
+    }
     if (e.currentTarget.hasPointerCapture(e.pointerId)) {
       e.currentTarget.releasePointerCapture(e.pointerId)
     }
-  }, [finishDrag])
+  }, [finishDrag, mode, onTogglePreviewEdit])
 
   const handlePointerCancel = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     if (activePointerIdRef.current !== e.pointerId) return
@@ -199,8 +254,16 @@ export default function DraggableModeSwitch({ mode, onChange }: DraggableModeSwi
   const handleLabelClick = useCallback((targetMode: 'edit' | 'preview', e: React.MouseEvent) => {
     e.stopPropagation()
     if (isDraggingRef.current) return
+    if (targetMode === mode) {
+      // Re-clicking 预览 while already previewing sinks the thumb into
+      // preview-edit (and lifts it back out on the next click).
+      if (targetMode === 'preview') onTogglePreviewEdit?.()
+      return
+    }
     onChange(targetMode)
-  }, [onChange])
+  }, [mode, onChange, onTogglePreviewEdit])
+
+  const sinkScale = 1 - sinkProgress * PREVIEW_EDIT_SINK_SCALE
 
   return (
     <div
@@ -208,14 +271,16 @@ export default function DraggableModeSwitch({ mode, onChange }: DraggableModeSwi
       className="draggable-mode-switch"
       data-mode={mode}
       data-dragging={isDragging}
+      data-preview-edit={isSunken ? 'true' : undefined}
     >
       <div className="draggable-mode-switch__track" />
 
       {/* Draggable Thumb */}
       <div
         className={`draggable-mode-switch__thumb ${isDragging ? 'is-dragging' : ''}`}
+        title={mode === 'preview' ? (isSunken ? '预览编辑中 · 点击退出' : '再点一下进入预览编辑') : undefined}
         style={{
-          transform: `translateX(${position * 100}%) scale(var(--ready-document-switch-thumb-scale, 1))`,
+          transform: `translateX(${position * 100}%) scale(calc(var(--ready-document-switch-thumb-scale, 1) * ${sinkScale}))`,
           cursor: isDragging ? 'grabbing' : 'pointer',
         }}
         onPointerDown={handlePointerDown}
