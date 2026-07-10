@@ -1,6 +1,6 @@
 # Ready 项目协作指引（CLAUDE）
 
-> 更新时间: 2026-06-20
+> 更新时间: 2026-07-10
 > 根目录指引只保留全局工作方式、当前不可破合同和索引。阶段性细节放在 `docs/superpowers/plans/`、`docs/superpowers/specs/`、`docs/superpowers/testing-conventions.md` 与 `.claude/architectural-principles.md`。
 
 ## 0. 开工前
@@ -33,6 +33,8 @@
 
 ## 2. 当前硬约束
 - 白屏防护：`src/renderer/main.tsx` 保留 bootstrap 级错误兜底 UI；`src/renderer/App.tsx` 保留 `/workbench` 与 `* -> /workbench` fallback。
+- Renderer CSS 禁止未分层通用 reset：`*`、`*::before`、`*::after` 等通用选择器的 reset 必须放入明确的 `@layer base`，能由 Tailwind preflight 承担的不要重复声明；尤其禁止在层外重置 `margin` / `padding`，回归入口 `scripts/check-css-cascade-layer-reset.cjs`。
+- 代码行数健康度监控：任意任务只要给代码文件增加了行数，收尾前必须检查该文件的当前总行数；超过 1000 行就按“危险 / 一般 / 健康”评估并更新 `docs/code-health/large-file-health-log.md`。健康不处理；一般必须在台账写明计划复查日期；危险必须在任务最终回复中提醒用户可能需要拆分重构。生成物、锁文件、第三方 vendored 文件不计，但它们的生成器源码仍计；未完成评估和台账更新不得宣告任务完成。
 - BrowserView 是原生覆盖层，不受 DOM `z-index` 控制；显示纯 DOM 覆盖层前先 `browser.hideAll()`，恢复后 `browser.showActive()` 并同步 bounds。
 - 会话 scope 按“来源频道 + 线程/本地 conversation + agent”隔离；工具日志只留前台运行态或胶囊层，不混入正文消息。
 - 飞书/远程图片和文件先进入会话资源层，不自动触发 agent；后续任务必须显式选择附件资源。
@@ -124,6 +126,7 @@
 - 更新日志：`CHANGELOG.md`
 - 架构原则：`.claude/architectural-principles.md`
 - 测试规约：`docs/superpowers/testing-conventions.md`
+- 代码行数健康度台账：`docs/code-health/large-file-health-log.md`
 - Electron 聊天输入框液态玻璃规格：`docs/superpowers/specs/2026-06-11-electron-liquid-glass-composer.md`
 
 关键阶段合同索引：
