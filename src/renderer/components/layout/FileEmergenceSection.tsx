@@ -87,8 +87,11 @@ export default function FileEmergenceSection({
   }
 
   return (
+    // 横向不设 section 级边距：这里的 mx-9/px-2 写于 Tailwind 间距类被未分层
+    // reset 压死的时期（2026-06-08），从未真正生效；07-10 级联层根修后复活，
+    // 把整块推离左缘 ~52px。现按文件树行的 8px 内容缩进对齐（见下方行内 inset）。
     <section
-      className="relative mx-9 mb-6 overflow-hidden px-2 pb-3 pt-2"
+      className="relative mb-6 overflow-hidden pb-3 pt-2"
       style={{
         background: 'transparent',
       }}
@@ -145,7 +148,9 @@ export default function FileEmergenceSection({
         </button>
       </div>
 
-      <div className="mt-1 space-y-1" style={{ marginInline: EMERGENCE_CONTENT_INSET_PX }}>
+      {/* 分桶行不再叠 wrapper inset：行自身 px-2 提供 8px 内容缩进，
+          与 FileTreeItem（padding 6px 8px）同缘，hover 药丸同样通到左缘。 */}
+      <div className="mt-1 space-y-1">
         {viewModel.buckets.map((bucket) => {
           const bucketSelectionKey = getBucketSelectionKey(bucket.bucket)
           const isBucketOpen = uiState.expandedBucket === bucket.bucket
@@ -156,7 +161,7 @@ export default function FileEmergenceSection({
               <button
                 type="button"
                 onClick={() => toggleBucket(bucket.bucket)}
-                className="grid min-h-[30px] w-full grid-cols-[22px_82px_minmax(0,1fr)_24px] items-center gap-1.5 rounded-[8px] px-1.5 py-1 text-left transition-[background-color,box-shadow] hover:bg-[var(--files-panel-state-hover-bg)] hover:shadow-[var(--files-panel-state-hover-shadow)]"
+                className="grid min-h-[30px] w-full grid-cols-[22px_82px_minmax(0,1fr)_24px] items-center gap-1.5 rounded-[8px] px-2 py-1 text-left transition-[background-color,box-shadow] hover:bg-[var(--files-panel-state-hover-bg)] hover:shadow-[var(--files-panel-state-hover-shadow)]"
                 aria-expanded={isBucketOpen}
                 data-file-emergence-bucket={bucket.bucket}
                 data-selected={isBucketSelected ? 'true' : undefined}
@@ -193,7 +198,7 @@ export default function FileEmergenceSection({
               {isBucketOpen && (
                 <div className="mt-1 space-y-1">
                   {bucket.projects.length === 0 ? (
-                    <div className="ml-[106px] rounded-[8px] px-1.5 py-1 text-[12px]" style={{ color: 'var(--text-light)' }}>
+                    <div className="ml-[118px] rounded-[8px] px-1.5 py-1 text-[12px]" style={{ color: 'var(--text-light)' }}>
                       暂无项目
                     </div>
                   ) : bucket.projects.map((project) => {
@@ -206,7 +211,7 @@ export default function FileEmergenceSection({
                         <button
                           type="button"
                           onClick={() => toggleProject(project.id)}
-                          className="grid min-h-[28px] w-full grid-cols-[22px_14px_minmax(0,1fr)_auto_20px] items-center gap-1.5 rounded-[8px] px-1.5 py-0.5 text-left transition-[background-color,box-shadow] hover:bg-[var(--files-panel-state-hover-bg)] hover:shadow-[var(--files-panel-state-hover-shadow)]"
+                          className="grid min-h-[28px] w-full grid-cols-[22px_14px_minmax(0,1fr)_auto_20px] items-center gap-1.5 rounded-[8px] px-2 py-0.5 text-left transition-[background-color,box-shadow] hover:bg-[var(--files-panel-state-hover-bg)] hover:shadow-[var(--files-panel-state-hover-shadow)]"
                           title={project.evidence.map((item) => item.label).slice(0, 3).join(' · ')}
                           aria-expanded={isProjectOpen}
                           data-file-emergence-project={project.id}
@@ -246,7 +251,7 @@ export default function FileEmergenceSection({
                                 key={file.path}
                                 type="button"
                                 onClick={() => openEmergenceFile(file.path, project)}
-                                className="grid min-h-[24px] w-full grid-cols-[42px_12px_minmax(0,1fr)] items-center gap-1.5 rounded-[8px] px-1.5 py-0.5 text-left transition-[background-color,box-shadow] hover:bg-[var(--files-panel-state-hover-bg)] hover:shadow-[var(--files-panel-state-hover-shadow)]"
+                                className="grid min-h-[24px] w-full grid-cols-[42px_12px_minmax(0,1fr)] items-center gap-1.5 rounded-[8px] px-2 py-0.5 text-left transition-[background-color,box-shadow] hover:bg-[var(--files-panel-state-hover-bg)] hover:shadow-[var(--files-panel-state-hover-shadow)]"
                                 title={file.path}
                                 data-file-emergence-file={file.path}
                                 data-selected={uiState.selectedItemKey === getFileSelectionKey(file.path) ? 'true' : undefined}
