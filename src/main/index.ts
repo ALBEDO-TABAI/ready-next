@@ -1,12 +1,8 @@
-import { config } from 'dotenv'
-import { resolve } from 'path'
-
-// Load .env from project root (before anything else)
-config({ path: resolve(__dirname, '../../.env') })
-
+// 本文件是重模块：由 boot-entry.ts（构建入口）在 splash 可见后动态加载。
+// dotenv、userData 路径、协议注册、命令行开关等 pre-ready 配置都在 boot-entry 完成。
 import { app, shell, BrowserWindow, ipcMain, protocol, nativeImage, nativeTheme, Menu, dialog, clipboard, type MenuItemConstructorOptions, type NativeImage } from 'electron'
-import { join, extname, isAbsolute, basename } from 'path'
-import { createReadStream, statSync, existsSync, mkdirSync, appendFileSync } from 'fs'
+import { join, extname, isAbsolute, basename, resolve } from 'path'
+import { createReadStream, statSync, existsSync, appendFileSync } from 'fs'
 import { readFile } from 'fs/promises'
 import { tmpdir } from 'os'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
@@ -48,7 +44,6 @@ import { runBeforeQuitCleanup } from './modules/process-cleanup/before-quit'
 import { closeAllBrowsers } from './modules/browser-engine/browser-cleanup'
 import { assertPrimaryDatabaseReady, getDatabase } from './modules/database'
 import { shutdownWorkerDbBridge } from './modules/database/worker-bridge'
-import { toOAuthCompatibleUserAgent } from './modules/browser-engine/popup-policy'
 import { registerMainProcessHandlers } from './process-handlers'
 import {
   createWindowMaterialController,
@@ -58,7 +53,8 @@ import {
   type SupportedPlatform,
   type WindowMaterialController,
 } from './modules/window-material/main-window-material'
-import { createStartupSplashDataUrl } from './startup-splash-html'
+import { createStartupSplashWindow, finishStartupSplashThen, getStartupSplashWindow, yieldToPresentation } from './startup-splash-window'
+import { logBootStage } from './boot-timing'
 import pkg from 'electron-updater'
 const { autoUpdater } = pkg
 
@@ -67,50 +63,13 @@ const { autoUpdater } = pkg
 // All environments: opt-in only via ENABLE_MOCK_SERVICES=true
 const ENABLE_MOCK_SERVICES = process.env.ENABLE_MOCK_SERVICES === 'true'
 const READY_NATIVE_FILE_DRAG_ENABLED = process.env.READY_NATIVE_FILE_DRAG_ENABLED !== '0'
-const READY_APP_NAME = 'Ready'
 const READY_BROWSER_LOG_PATH = join(tmpdir(), 'ready-browser.log')
 const NATIVE_FILE_DRAG_FALLBACK_ICON_DATA_URL = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAJElEQVR42mP4////JUoww+AywOTyzP/E4FEDRg2grQFDMzMBAGl5WG7b5B5RAAAAAElFTkSuQmCC'
-app.setName(READY_APP_NAME)
-
-const READY_USER_DATA_DIR = process.env.READY_USER_DATA_DIR?.trim()
-if (READY_USER_DATA_DIR) {
-  mkdirSync(READY_USER_DATA_DIR, { recursive: true })
-  app.setPath('userData', READY_USER_DATA_DIR)
-}
-
-// Crash forensics (opt-in via READY_PROC_DIAG=1): synchronous stderr timeline
-// of webContents creation / main-frame navigation starts / renderer deaths.
-// Synchronous on purpose — when the main process dies mid-crash, async logs
-// vanish with it; this is the tool that pinned the 2026-07-04 startup crash.
-if (process.env.READY_PROC_DIAG === '1') {
-  const diagT0 = Date.now()
-  const diagWrite = (line: string) => {
-    try {
-      appendFileSync('/dev/fd/2', `[proc-diag +${((Date.now() - diagT0) / 1000).toFixed(2)}s] ${line}\n`)
-    } catch {
-      // stderr gone — nothing left to report to
-    }
-  }
-  app.on('web-contents-created', (_event, wc) => {
-    const id = wc.id
-    diagWrite(`wc#${id} created type=${wc.getType()}`)
-    wc.on('did-start-navigation', ((event: { isMainFrame?: boolean; url?: string }) => {
-      if (event && event.isMainFrame === false) return
-      diagWrite(`wc#${id} nav-start url=${String(event?.url ?? '').slice(0, 100)}`)
-    }) as never)
-    wc.on('render-process-gone', (_ev, details) => {
-      diagWrite(`wc#${id} RENDER-GONE ${JSON.stringify(details)} lastURL=${wc.getURL().slice(0, 100)}`)
-    })
-    wc.on('destroyed', () => diagWrite(`wc#${id} destroyed`))
-  })
-}
 
 function ensureRegularDockApp(): void {
   if (process.platform !== 'darwin') return
   app.setActivationPolicy('regular')
 }
-
-ensureRegularDockApp()
 
 // Document engine always uses real fs, regardless of mock setting
 const DOCUMENT_USE_MOCK = false
@@ -123,9 +82,6 @@ const agentManager = new AgentManager(ENABLE_MOCK_SERVICES)
 
 // Track the current main window for window-state IPC handlers
 let mainWindow: BrowserWindow | null = null
-let startupSplashWindow: BrowserWindow | null = null
-let startupSplashFinishing = false
-let startupSplashShownAtMs: number | null = null
 let browserController: BrowserController | null = null
 let petWindowManager: PetWindowManager | null = null
 let reminderScheduler: ReminderScheduler | null = null
@@ -392,8 +348,9 @@ async function showMainWindow(): Promise<void> {
     mainWindow.restore()
   }
   if (!mainWindow.isVisible()) {
-    if (startupSplashWindow && !startupSplashWindow.isDestroyed()) {
-      startupSplashWindow.focus()
+    const splashWindow = getStartupSplashWindow()
+    if (splashWindow && !splashWindow.isDestroyed()) {
+      splashWindow.focus()
       return
     }
     mainWindow.show()
@@ -403,8 +360,6 @@ async function showMainWindow(): Promise<void> {
 
 const MAIN_WINDOW_RENDERER_RETRY_DELAY_MS = 500
 const TRANSPARENT_SURFACE_REFRESH_DELAY_MS = 50
-const STARTUP_SPLASH_MIN_VISIBLE_MS = 900
-const STARTUP_SPLASH_CLOSE_FALLBACK_MS = 5000
 let transparentSurfaceRefreshInFlight = false
 
 async function refreshMainWindowTransparentSurface(): Promise<void> {
@@ -465,102 +420,8 @@ function showMainWindowAfterStartup(): void {
   }, TRANSPARENT_SURFACE_REFRESH_DELAY_MS)
 }
 
-function finishStartupSplashAndShowMainWindow(): void {
-  const splashWindow = startupSplashWindow
-  if (!splashWindow || splashWindow.isDestroyed()) {
-    showMainWindowAfterStartup()
-    return
-  }
-  if (startupSplashFinishing) return
-
-  startupSplashFinishing = true
-  splashWindow.once('closed', () => {
-    startupSplashWindow = null
-    showMainWindowAfterStartup()
-  })
-
-  const shownAtMs = startupSplashShownAtMs ?? Date.now()
-  const finishDelayMs = Math.max(0, STARTUP_SPLASH_MIN_VISIBLE_MS - (Date.now() - shownAtMs))
-
-  setTimeout(() => {
-    if (splashWindow.isDestroyed()) return
-    void splashWindow.webContents.executeJavaScript("window.dispatchEvent(new Event('ready-startup-finish'))").catch((error) => {
-      console.warn('[startup-splash] finish signal failed:', error instanceof Error ? error.message : String(error))
-      if (!splashWindow.isDestroyed()) splashWindow.close()
-    })
-  }, finishDelayMs)
-
-  setTimeout(() => {
-    if (!splashWindow.isDestroyed()) splashWindow.close()
-  }, finishDelayMs + STARTUP_SPLASH_CLOSE_FALLBACK_MS)
-}
-
-function showStartupSplashWindow(splashWindow: BrowserWindow): void {
-  if (splashWindow.isDestroyed()) return
-  if (!splashWindow.isVisible()) {
-    splashWindow.show()
-  }
-  startupSplashShownAtMs ??= Date.now()
-}
-
-async function createStartupSplashWindow(variant: 'orange' | 'pink' = 'orange'): Promise<void> {
-  if (startupSplashWindow && !startupSplashWindow.isDestroyed()) return
-
-  startupSplashFinishing = false
-  startupSplashShownAtMs = null
-  const splashWindow = new BrowserWindow({
-    width: 650,
-    height: 190,
-    show: false,
-    frame: false,
-    resizable: false,
-    movable: true,
-    minimizable: false,
-    maximizable: false,
-    fullscreenable: false,
-    skipTaskbar: true,
-    transparent: true,
-    hasShadow: false,
-    backgroundColor: '#00000000',
-    autoHideMenuBar: true,
-    webPreferences: {
-      sandbox: false,
-      contextIsolation: true,
-      nodeIntegration: false,
-      backgroundThrottling: false
-    }
-  })
-
-  startupSplashWindow = splashWindow
-  splashWindow.on('closed', () => {
-    if (startupSplashWindow === splashWindow) {
-      startupSplashWindow = null
-    }
-  })
-  splashWindow.once('ready-to-show', () => {
-    showStartupSplashWindow(splashWindow)
-  })
-
-  try {
-    await splashWindow.loadURL(createStartupSplashDataUrl(variant))
-    showStartupSplashWindow(splashWindow)
-    await new Promise<void>((resolve) => {
-      if (splashWindow.isDestroyed() || splashWindow.isVisible()) {
-        resolve()
-        return
-      }
-      const settle = () => resolve()
-      splashWindow.once('ready-to-show', settle)
-      splashWindow.once('closed', settle)
-      setTimeout(settle, 1500)
-    })
-  } catch (error) {
-    console.warn('[startup-splash] renderer load failed:', error instanceof Error ? error.message : String(error))
-    if (!splashWindow.isDestroyed()) splashWindow.close()
-  }
-}
-
 async function createWindow(): Promise<void> {
+  logBootStage('create-window:start')
   nativeTheme.themeSource = resolveStoredThemeSource()
   ensureDockIconVisible()
   // 首帧材料：macOS 从构造期就是透明 under-window，非 macOS 用主题匹配色避免白闪。
@@ -608,8 +469,9 @@ async function createWindow(): Promise<void> {
     if (mainWindow === closedWindow) {
       mainWindow = null
       windowMaterialController = null
-      if (startupSplashWindow && !startupSplashWindow.isDestroyed()) {
-        startupSplashWindow.close()
+      const splashWindow = getStartupSplashWindow()
+      if (splashWindow && !splashWindow.isDestroyed()) {
+        splashWindow.close()
       }
     }
   })
@@ -633,7 +495,8 @@ async function createWindow(): Promise<void> {
   })
 
   mainWindow.on('ready-to-show', () => {
-    finishStartupSplashAndShowMainWindow()
+    logBootStage('main-window-ready-to-show')
+    finishStartupSplashThen(showMainWindowAfterStartup)
   })
 
   // D18-d 观测线（真机第十六轮：窗口在 agent 运行中出现缩放开关，两次
@@ -656,18 +519,22 @@ async function createWindow(): Promise<void> {
   // Setup window-dependent IPC only once (agent/browser handlers register ipcMain.handle
   // which cannot be registered twice without error)
   if (!windowIPCRegistered) {
+    logBootStage('browser-ipc:start')
     browserController = setupBrowserIPC(mainWindow, ENABLE_MOCK_SERVICES, {
       preloadPath: join(__dirname, '../preload/index.mjs'),
       rendererFile: join(__dirname, '../renderer/index.html'),
     })
     setRSSBrowserController(browserController)
+    logBootStage('agent-ipc:start')
     setupAgentIPC(agentManager, mainWindow, browserController)
+    logBootStage('agent-ipc:done')
     windowIPCRegistered = true
   } else {
     browserController?.attachWindow(mainWindow)
   }
   // HMR for renderer base on electron-vite cli.
   // Load the remote URL for development or the local html file for production.
+  logBootStage('renderer-load:kickoff')
   void loadMainWindowRenderer(mainWindow).catch((error) => {
     console.error('[main-window] renderer load failed:', error instanceof Error ? error.message : String(error))
   })
@@ -985,38 +852,14 @@ function setupAutoUpdater(mainWindow: BrowserWindow): void {
   }
 }
 
-// Register local-file as a privileged scheme BEFORE app.whenReady()
-// This is required for video streaming (range requests), fetch API support, etc.
-// Keep auth popups (OAuth / SSO) available inside BrowserView-based tabs.
-app.commandLine.appendSwitch('disable-popup-blocking')
-// FedCM can become a no-op inside BrowserView on some Electron builds.
-// Force legacy OAuth popup flow for stable third-party login behavior.
-app.commandLine.appendSwitch('disable-features', 'FedCm')
-const remoteDebuggingPort = process.env.READY_REMOTE_DEBUGGING_PORT?.trim()
-if (remoteDebuggingPort) {
-  app.commandLine.appendSwitch('remote-debugging-port', remoteDebuggingPort)
-}
-app.userAgentFallback = toOAuthCompatibleUserAgent(app.userAgentFallback)
-protocol.registerSchemesAsPrivileged([
-  {
-    scheme: 'local-file',
-    privileges: {
-      standard: true,
-      secure: true,
-      supportFetchAPI: true,
-      corsEnabled: true,
-      stream: true,
-    }
-  }
-])
-
-// This method will be called when Electron has finished
-// initialization and is ready to create browser windows.
+// pre-ready 配置（协议注册、命令行开关、userAgent、userData）见 boot-entry.ts。
+// 本模块在 splash 可见后才被动态加载，此处 whenReady 已 resolve，回调立即执行。
 app.whenReady().then(async () => {
   // Set app user model id for windows
   electronApp.setAppUserModelId('com.ready.app')
   applyAppIcon()
   setupApplicationMenu()
+  // boot-entry 已建 splash；此 await 幂等，保底"splash 先于 boot 清理与数据库门"。
   await createStartupSplashWindow()
 
   // Reap any orphaned child processes from a previous Ready instance that was
@@ -1035,6 +878,9 @@ app.whenReady().then(async () => {
   } catch (err) {
     console.warn('[boot-reaper] failed:', err instanceof Error ? err.message : String(err))
   }
+  // whenReady 主体的各大同步阶段之间让出主线程：呈现管线追帧靠这些间隙，
+  // 否则 splash 动画在整个初始化期间冻结（见 startup-splash-window.ts 注释）。
+  await yieldToPresentation()
 
   try {
     assertPrimaryDatabaseReady()
@@ -1047,6 +893,7 @@ app.whenReady().then(async () => {
   } catch (error) {
     console.warn('[startup-run-reconciler] failed:', error instanceof Error ? error.message : String(error))
   }
+  await yieldToPresentation()
 
   // nativeTheme.updated 可能在 OS 切换深浅模式时、或我们在 theme:set handler 里设置
   // themeSource 时触发。**必须显式做两件事**：刷新窗口材料 + 广播 renderer。
@@ -1200,9 +1047,14 @@ app.whenReady().then(async () => {
     })
   }
 
+  await yieldToPresentation()
   // Register global IPC handlers once, before any window is created
+  logBootStage('global-ipc:start')
   setupGlobalIPC()
+  logBootStage('global-ipc:done')
+  await yieldToPresentation()
   applyBundledAISettingsSeed()
+  logBootStage('settings-seed:done')
 
   // Reminder bootstrap: replay any missed reminders inside the grace window,
   // then arm the live scheduler. Window creation is async, but the notifier
@@ -1239,6 +1091,7 @@ app.whenReady().then(async () => {
     }
   }
 
+  await yieldToPresentation()
   void createWindow().then(() => petWindowManager?.restoreIfEnabled())
 
   app.on('activate', function () {

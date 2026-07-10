@@ -160,7 +160,8 @@ export class AgentManager extends EventEmitter {
     this.useMock = useMock
     this.agentTimeoutMs = agentTimeoutMs
     this.worktreePool = new WorktreePool(useMock)
-    this.claudeAvailable = this.checkClaudeAvailability()
+    // claudeAvailable 保持 null，首次 shouldUseMock() 时再懒检查：
+    // 构造发生在主进程启动路径上，这里的同步 spawnSync 会拖慢启动。
   }
 
   /**

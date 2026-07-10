@@ -1,5 +1,5 @@
 import readyWordmarkSvg from '../renderer/assets/ready-wordmark.svg?raw'
-import { createReadyLogoDotPattern } from '../shared/ready-logo-dots'
+import { createReadyLogoDotPattern, type ReadyLogoDot } from '../shared/ready-logo-dots'
 
 type StartupSplashVariant = 'orange' | 'pink'
 
@@ -21,6 +21,17 @@ const READY_LOGO_PATTERN = createReadyLogoDotPattern(readyWordmarkSvg, {
   matrixColumnStep: MATRIX_COLUMN_STEP,
 })
 
+// 动画节奏（与旧 rAF 版语义对齐）：揭幕 680ms、扫描每列 86ms、
+// 收尾 logo 聚合 980ms + 定格 460ms + 退场 280ms（退场由主进程整窗渐隐承担）。
+const BACKDROP_REVEAL_MS = 680
+const LOGO_COLUMN_MS = 86
+const LOGO_COMPLETE_MS = 980
+const BACKDROP_FADE_DELAY_MS = 240
+const BACKDROP_FADE_MS = 560
+const FINAL_LOGO_HOLD_MS = 460
+const CARD_EXIT_MS = 280
+const EXIT_TOTAL_MS = LOGO_COMPLETE_MS + FINAL_LOGO_HOLD_MS + CARD_EXIT_MS
+
 const VARIANT_COLORS: Record<StartupSplashVariant, { logo: string; glow: string }> = {
   orange: {
     logo: '#FF4B2B',
@@ -32,6 +43,36 @@ const VARIANT_COLORS: Record<StartupSplashVariant, { logo: string; glow: string 
   }
 }
 
+interface LogoColumn {
+  index: number
+  dots: ReadyLogoDot[]
+  minX: number
+  minY: number
+  width: number
+  height: number
+}
+
+const LOGO_COLUMNS: LogoColumn[] = (() => {
+  const byIndex = new Map<number, ReadyLogoDot[]>()
+  for (const dot of READY_LOGO_PATTERN.dots) {
+    const bucket = byIndex.get(dot.columnIndex)
+    if (bucket) {
+      bucket.push(dot)
+    } else {
+      byIndex.set(dot.columnIndex, [dot])
+    }
+  }
+  return [...byIndex.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([index, dots]) => {
+      const minX = Math.min(...dots.map((dot) => dot.x - dot.r))
+      const maxX = Math.max(...dots.map((dot) => dot.x + dot.r))
+      const minY = Math.min(...dots.map((dot) => dot.y - dot.r))
+      const maxY = Math.max(...dots.map((dot) => dot.y + dot.r))
+      return { index, dots, minX, minY, width: maxX - minX, height: maxY - minY }
+    })
+})()
+
 function escapeHtml(value: string): string {
   return value
     .replace(/&/g, '&amp;')
@@ -41,9 +82,48 @@ function escapeHtml(value: string): string {
     .replace(/'/g, '&#39;')
 }
 
+const pct = (value: number): string => `${(value * 100).toFixed(4)}%`
+
+function renderMatrixCircles(): string {
+  const circles: string[] = []
+  for (let row = 0; row < GRID_ROWS; row += 1) {
+    for (let column = 0; column < GRID_COLUMNS; column += 1) {
+      circles.push(
+        `<circle cx="${MATRIX_X_START + column * MATRIX_COLUMN_STEP}" cy="${MATRIX_Y_START + row * MATRIX_ROW_STEP}" r="${MATRIX_DOT_RADIUS}" fill="currentColor"/>`
+      )
+    }
+  }
+  return circles.join('')
+}
+
+function renderLogoColumnSvgs(): string {
+  const scanPeriodMs = READY_LOGO_PATTERN.columnCount * LOGO_COLUMN_MS
+  return LOGO_COLUMNS.map((column) => {
+    // 负延迟让所有列一开场就处于各自的循环相位（首帧即第 0 列亮起）。
+    const scanDelayMs = -(scanPeriodMs - column.index * LOGO_COLUMN_MS)
+    // 收尾聚合按 easeOutCubic 的反函数排布每列点亮时刻，复刻旧版左→右加速收束。
+    const buildDelayMs = Math.round(
+      LOGO_COMPLETE_MS * (1 - Math.pow(1 - column.index / READY_LOGO_PATTERN.columnCount, 1 / 3))
+    )
+    const circles = column.dots
+      .map((dot) => `<circle cx="${dot.x}" cy="${dot.y}" r="${dot.r}" fill="currentColor"/>`)
+      .join('')
+    const style = [
+      `left:${pct(column.minX / MATRIX_WIDTH)}`,
+      `top:${pct(column.minY / MATRIX_HEIGHT)}`,
+      `width:${pct(column.width / MATRIX_WIDTH)}`,
+      `height:${pct(column.height / MATRIX_HEIGHT)}`,
+      `animation-delay:${scanDelayMs}ms`,
+      `transition-delay:${buildDelayMs}ms`,
+    ].join(';')
+    return `<svg class="logo-col" style="${style}" viewBox="${column.minX} ${column.minY} ${column.width} ${column.height}" preserveAspectRatio="none" aria-hidden="true">${circles}</svg>`
+  }).join('')
+}
+
 export function createStartupSplashDataUrl(variant: StartupSplashVariant): string {
   const colors = VARIANT_COLORS[variant]
-  const logoDots = JSON.stringify(READY_LOGO_PATTERN.dots)
+  const scanPeriodMs = READY_LOGO_PATTERN.columnCount * LOGO_COLUMN_MS
+  const litSlicePct = (100 / READY_LOGO_PATTERN.columnCount).toFixed(4)
   const html = `<!doctype html>
 <html>
 <head>
@@ -51,33 +131,23 @@ export function createStartupSplashDataUrl(variant: StartupSplashVariant): strin
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Ready - 自媒体 AI 工作台</title>
   <style>
+    /* 动画合同：本页所有运动只允许 CSS 合成器可驱动的 opacity/transform
+       关键帧与过渡（等价"预渲染播片"）。启动期主进程与本窗 renderer 主线程
+       都会被重活挤压，任何逐帧 JS / 触发重排重绘的动画都会肉眼卡顿。 */
     html,
     body {
       margin: 0;
       width: 100%;
       height: 100%;
       overflow: hidden;
-      background: transparent;
-    }
-
-    body {
-      display: grid;
-      place-items: center;
+      background: #fff;
     }
 
     .card {
-      position: relative;
-      width: min(600px, calc(100vw - 24px));
-      aspect-ratio: 3.85 / 1;
+      position: absolute;
+      inset: 0;
       overflow: hidden;
-      border: 1px solid rgba(20, 20, 20, 0.045);
-      border-radius: clamp(18px, 2.5vw, 26px);
       background: #fff;
-      box-shadow:
-        0 14px 30px rgba(30, 28, 24, 0.055),
-        0 3px 10px rgba(30, 28, 24, 0.025),
-        inset 0 1px 0 rgba(255, 255, 255, 0.9);
-      opacity: 1;
     }
 
     .matrix,
@@ -86,8 +156,45 @@ export function createStartupSplashDataUrl(variant: StartupSplashVariant): strin
       inset: 3% 7%;
     }
 
-    .matrix {
-      color: #dfded9;
+    .stage {
+      position: absolute;
+      inset: 0;
+      margin: auto;
+      aspect-ratio: ${MATRIX_WIDTH} / ${MATRIX_HEIGHT};
+      max-width: 100%;
+      max-height: 100%;
+    }
+
+    .matrix { color: #dfded9; }
+
+    .matrix-stage svg {
+      display: block;
+      width: 100%;
+      height: 100%;
+      opacity: 0.32;
+    }
+
+    .matrix-stage {
+      overflow: hidden;
+      transition: opacity ${BACKDROP_FADE_MS}ms cubic-bezier(0.65, 0, 0.35, 1) ${BACKDROP_FADE_DELAY_MS}ms;
+    }
+
+    /* 揭幕：白色软边幕布向右滑出（transform 合成器动画），复刻逐列点亮的观感。 */
+    .matrix-veil {
+      position: absolute;
+      top: -4%;
+      bottom: -4%;
+      left: 0;
+      width: 200%;
+      background: linear-gradient(90deg, rgba(255, 255, 255, 0) 0%, #fff 8%, #fff 100%);
+      transform: translateX(-8%);
+      will-change: transform;
+      animation: ready-veil-wipe ${BACKDROP_REVEAL_MS}ms cubic-bezier(0.33, 1, 0.68, 1) forwards;
+    }
+
+    @keyframes ready-veil-wipe {
+      /* 62% × 自身宽(200% stage) = 124% stage 行程：软边(16% stage)恰在动画结束时完全越过右缘 */
+      to { transform: translateX(62%); }
     }
 
     .logo {
@@ -95,138 +202,54 @@ export function createStartupSplashDataUrl(variant: StartupSplashVariant): strin
       filter: drop-shadow(0 0 8px ${escapeHtml(colors.glow)});
     }
 
-    .matrix svg,
-    .logo svg {
+    .logo-col {
+      position: absolute;
       display: block;
-      width: 100%;
-      height: 100%;
-      overflow: visible;
+      opacity: 0;
+      will-change: opacity;
+      animation: ready-logo-scan ${scanPeriodMs}ms linear infinite;
+      transition: opacity 160ms cubic-bezier(0.33, 1, 0.68, 1);
+    }
+
+    @keyframes ready-logo-scan {
+      0% { opacity: 0.9; }
+      ${litSlicePct}% { opacity: 0.9; }
+      ${(Number(litSlicePct) + 0.01).toFixed(4)}% { opacity: 0; }
+      100% { opacity: 0; }
+    }
+
+    /* 收尾：扫描停止，各列按预排延迟点亮聚合出完整 logo；点阵背景淡出。 */
+    .finishing .logo-col {
+      animation: none;
+      opacity: 0.96;
+    }
+
+    .finishing .matrix-stage {
+      opacity: 0;
     }
   </style>
 </head>
 <body>
   <section class="card" aria-label="Ready loading mark">
     <div class="matrix" aria-hidden="true">
-      <svg id="ready-startup-grid" viewBox="0 0 ${MATRIX_WIDTH} ${MATRIX_HEIGHT}" preserveAspectRatio="xMidYMid meet"></svg>
+      <div class="stage matrix-stage">
+        <svg viewBox="0 0 ${MATRIX_WIDTH} ${MATRIX_HEIGHT}" preserveAspectRatio="xMidYMid meet">${renderMatrixCircles()}</svg>
+        <div class="matrix-veil"></div>
+      </div>
     </div>
     <div class="logo" aria-hidden="true">
-      <svg id="ready-startup-logo" viewBox="0 0 ${MATRIX_WIDTH} ${MATRIX_HEIGHT}" preserveAspectRatio="xMidYMid meet"></svg>
+      <div class="stage">${renderLogoColumnSvgs()}</div>
     </div>
   </section>
   <script>
     (() => {
-      const GRID_ROWS = ${GRID_ROWS};
-      const GRID_COLUMNS = ${GRID_COLUMNS};
-      const MATRIX_ROW_STEP = ${MATRIX_ROW_STEP};
-      const MATRIX_COLUMN_STEP = ${MATRIX_COLUMN_STEP};
-      const MATRIX_DOT_RADIUS = ${MATRIX_DOT_RADIUS};
-      const MATRIX_X_START = ${MATRIX_X_START};
-      const MATRIX_Y_START = ${MATRIX_Y_START};
-      const LOGO_DOTS = ${logoDots};
-      const LOGO_COLUMN_COUNT = ${READY_LOGO_PATTERN.columnCount};
-      const BACKDROP_REVEAL_MS = 680;
-      const LOGO_COLUMN_MS = 86;
-      const LOGO_COMPLETE_MS = 980;
-      const BACKDROP_FADE_DELAY_MS = 240;
-      const BACKDROP_FADE_MS = 560;
-      const FINAL_LOGO_HOLD_MS = 460;
-      const CARD_EXIT_MS = 280;
-      const EXIT_TOTAL_MS = LOGO_COMPLETE_MS + FINAL_LOGO_HOLD_MS + CARD_EXIT_MS;
-
-      const clamp01 = value => Math.max(0, Math.min(1, value));
-      const easeOutCubic = value => 1 - Math.pow(1 - clamp01(value), 3);
-      const easeInOutCubic = value => {
-        const t = clamp01(value);
-        return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
-      };
-
-      const grid = document.getElementById('ready-startup-grid');
-      const logo = document.getElementById('ready-startup-logo');
-      const card = document.querySelector('.card');
-      const matrixDots = [];
-      const logoDotElements = [];
-
-      for (let row = 0; row < GRID_ROWS; row += 1) {
-        for (let column = 0; column < GRID_COLUMNS; column += 1) {
-          const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-          circle.setAttribute('cx', String(MATRIX_X_START + column * MATRIX_COLUMN_STEP));
-          circle.setAttribute('cy', String(MATRIX_Y_START + row * MATRIX_ROW_STEP));
-          circle.setAttribute('r', String(MATRIX_DOT_RADIUS));
-          circle.setAttribute('fill', 'currentColor');
-          circle.setAttribute('opacity', '0');
-          grid.appendChild(circle);
-          matrixDots.push({ column, circle });
-        }
-      }
-
-      for (const dot of LOGO_DOTS) {
-        const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-        circle.setAttribute('cx', String(dot.x));
-        circle.setAttribute('cy', String(dot.y));
-        circle.setAttribute('r', String(dot.r));
-        circle.setAttribute('fill', 'currentColor');
-        circle.setAttribute('opacity', '0');
-        logo.appendChild(circle);
-        logoDotElements.push({ columnIndex: dot.columnIndex, circle });
-      }
-
-      function resolveBackdropOpacity(finishElapsedMs) {
-        if (finishElapsedMs === null) return 1;
-        const fadeElapsedMs = Math.max(0, finishElapsedMs - BACKDROP_FADE_DELAY_MS);
-        return 1 - easeInOutCubic(fadeElapsedMs / BACKDROP_FADE_MS);
-      }
-
-      function resolveLogoDotOpacity(dot, loopElapsedMs, finishElapsedMs) {
-        if (finishElapsedMs !== null) {
-          const buildProgress = easeOutCubic(finishElapsedMs / LOGO_COMPLETE_MS) * LOGO_COLUMN_COUNT;
-          return 0.96 * clamp01(buildProgress - dot.columnIndex);
-        }
-
-        const activeColumnIndex = Math.floor(loopElapsedMs / LOGO_COLUMN_MS) % LOGO_COLUMN_COUNT;
-        if (dot.columnIndex !== activeColumnIndex) return 0;
-        const phase = (loopElapsedMs % LOGO_COLUMN_MS) / LOGO_COLUMN_MS;
-        return 0.78 + 0.18 * Math.sin(phase * Math.PI);
-      }
-
-      const startedAt = performance.now();
-      let finishStartedAt = null;
-      let frameId = 0;
-
-      function tick(now) {
-        const loopElapsedMs = now - startedAt;
-        const finishElapsedMs = finishStartedAt === null ? null : now - finishStartedAt;
-        const visibleColumns = loopElapsedMs < BACKDROP_REVEAL_MS
-          ? easeOutCubic(loopElapsedMs / BACKDROP_REVEAL_MS) * GRID_COLUMNS
-          : GRID_COLUMNS;
-        const backdropOpacity = resolveBackdropOpacity(finishElapsedMs);
-
-        for (const dot of matrixDots) {
-          dot.circle.setAttribute('opacity', String(backdropOpacity * 0.32 * clamp01(visibleColumns - dot.column)));
-        }
-
-        for (const dot of logoDotElements) {
-          dot.circle.setAttribute('opacity', String(resolveLogoDotOpacity(dot, loopElapsedMs, finishElapsedMs)));
-        }
-
-        if (finishElapsedMs !== null) {
-          const exitElapsedMs = finishElapsedMs - LOGO_COMPLETE_MS - FINAL_LOGO_HOLD_MS;
-          if (exitElapsedMs > 0) {
-            card.style.opacity = String(1 - easeInOutCubic(exitElapsedMs / CARD_EXIT_MS));
-          }
-          if (finishElapsedMs >= EXIT_TOTAL_MS) {
-            window.close();
-            return;
-          }
-        }
-
-        frameId = window.requestAnimationFrame(tick);
-      }
-
+      const EXIT_TOTAL_MS = ${EXIT_TOTAL_MS};
       window.addEventListener('ready-startup-finish', () => {
-        if (finishStartedAt === null) finishStartedAt = performance.now();
+        if (document.documentElement.classList.contains('finishing')) return;
+        document.documentElement.classList.add('finishing');
+        // 视觉退场由主进程整窗 setOpacity 渐隐承担；这里只兜底自关闭。
+        setTimeout(() => window.close(), EXIT_TOTAL_MS + ${CARD_EXIT_MS});
       });
-      window.addEventListener('beforeunload', () => window.cancelAnimationFrame(frameId));
-      frameId = window.requestAnimationFrame(tick);
     })();
   </script>
 </body>

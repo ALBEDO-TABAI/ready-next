@@ -19,14 +19,63 @@ test('startup splash is shown before boot cleanup and database checks', () => {
   assert.ok(databaseGateIndex > splashIndex)
 })
 
+test('main build entry is the splash-first boot entry, not the heavy app module', () => {
+  const viteConfig = readWorkspaceFile('electron.vite.config.ts')
+
+  assert.match(viteConfig, /index: resolve\(__dirname, 'src\/main\/boot-entry\.ts'\)/)
+  // 重模块必须保持具名 entry：掉进 out/main/chunks/ 会让模块内
+  // `join(__dirname, '../preload/…')` 等路径整体偏一级（renderer/preload 404）。
+  assert.match(viteConfig, /app: resolve\(__dirname, 'src\/main\/index\.ts'\)/)
+})
+
+test('boot entry shows the splash before dynamically importing the heavy app module', () => {
+  const bootEntry = readWorkspaceFile('src/main/boot-entry.ts')
+  const splashIndex = bootEntry.indexOf('await createStartupSplashWindow()')
+  const heavyImportIndex = bootEntry.indexOf("await import('./index')")
+
+  assert.ok(splashIndex > 0)
+  assert.ok(heavyImportIndex > splashIndex)
+})
+
+test('boot entry static import graph stays tiny so the splash is not delayed', () => {
+  const bootEntry = readWorkspaceFile('src/main/boot-entry.ts')
+  // 白名单外的任何静态 import 都会把整棵依赖树求值成本压回 splash 之前。
+  // 新增入口依赖必须先证明它是 pre-ready 必需且自身依赖树极小。
+  const allowedImportSpecifiers = new Set([
+    'dotenv',
+    'path',
+    'fs',
+    'electron',
+    './modules/browser-engine/popup-policy',
+    './startup-splash-window',
+    './boot-timing',
+  ])
+  const staticImports = [...bootEntry.matchAll(/^import[^'"]+from ['"]([^'"]+)['"]/gm)].map((m) => m[1])
+
+  assert.ok(staticImports.length > 0)
+  for (const specifier of staticImports) {
+    assert.ok(allowedImportSpecifiers.has(specifier), `unexpected static import in boot-entry.ts: ${specifier}`)
+  }
+})
+
 test('startup splash uses sparse logo dots instead of revealing a complete wordmark during loading', () => {
   const splashHtml = readWorkspaceFile('src/main/startup-splash-html.ts')
 
   assert.match(splashHtml, /createReadyLogoDotPattern/)
-  assert.match(splashHtml, /resolveLogoDotOpacity/)
+  assert.match(splashHtml, /ready-logo-scan/)
   assert.doesNotMatch(splashHtml, /createInlineWordmark/)
   assert.doesNotMatch(splashHtml, /ready-startup-wordmark/)
   assert.doesNotMatch(splashHtml, /clip-path/)
+})
+
+test('startup splash animation is compositor-driven so boot-time main-thread blocks cannot freeze it', () => {
+  const splashHtml = readWorkspaceFile('src/main/startup-splash-html.ts')
+
+  // 只允许 opacity/transform 的 CSS 关键帧与过渡（合成器可独立驱动，等价预渲染播片）。
+  // 逐帧 JS 动画（rAF + setAttribute）跑在 renderer 主线程，启动期会被整机负载饿死。
+  assert.match(splashHtml, /will-change: opacity/)
+  assert.match(splashHtml, /will-change: transform/)
+  assert.doesNotMatch(splashHtml, /requestAnimationFrame/)
 })
 
 test('workbench defers hidden mode preloads until the first surface is idle', () => {
