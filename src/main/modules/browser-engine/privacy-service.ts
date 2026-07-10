@@ -15,6 +15,7 @@ export interface PrivacyCookieLike {
   name: string
   value: string
   domain?: string
+  hostOnly?: boolean
   path?: string
   secure?: boolean
   httpOnly?: boolean
@@ -64,6 +65,12 @@ export function cookieRemovalUrl(cookie: { domain?: string; path?: string; secur
   const host = normalizeCookieDomain(cookie.domain)
   const path = cookie.path && cookie.path.startsWith('/') ? cookie.path : '/'
   return `${cookie.secure ? 'https' : 'http'}://${host}${path}`
+}
+
+function cookieDomainAppliesToHost(cookie: PrivacyCookieLike, targetHost: string): boolean {
+  const cookieHost = normalizeCookieDomain(cookie.domain)
+  if (cookieHost === targetHost) return true
+  return cookie.hostOnly !== true && targetHost.endsWith(`.${cookieHost}`)
 }
 
 export class BrowserPrivacyService {
@@ -129,7 +136,7 @@ export class BrowserPrivacyService {
     const session = this.getSession()
     const targetDomain = normalizeCookieDomain(payload.domain)
     const sameNameCookies = (await session.cookies.get({})).filter(
-      (cookie) => normalizeCookieDomain(cookie.domain) === targetDomain && cookie.name === payload.name,
+      (cookie) => cookie.name === payload.name && cookieDomainAppliesToHost(cookie, targetDomain),
     )
     if (sameNameCookies.length > 1) {
       throw new Error('该站点存在同名 Cookie，无法安全地单独删除；请删除该站点的全部 Cookie')

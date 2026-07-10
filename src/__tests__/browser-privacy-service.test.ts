@@ -164,6 +164,23 @@ describe('browser-privacy-service', () => {
     assert.equal(session.cookies.store.length, 2)
   })
 
+  it('removeCookie includes applicable parent-domain cookies in the ambiguity check', async () => {
+    const session = new FakeSession({
+      cookies: [
+        { name: 'sid', value: 'parent', domain: '.example.com', path: '/', secure: true, hostOnly: false },
+        { name: 'sid', value: 'child', domain: 'app.example.com', path: '/', secure: true, hostOnly: true },
+      ],
+    })
+    const { service } = makeService(session)
+
+    await assert.rejects(
+      service.removeCookie({ domain: 'app.example.com', path: '/', name: 'sid', secure: true }),
+      /同名 Cookie/,
+    )
+    assert.deepEqual(session.cookies.removeCalls, [])
+    assert.equal(session.cookies.store.length, 2)
+  })
+
   it('removeCookiesForDomain removes only that domain (including dot-prefixed variants)', async () => {
     const session = new FakeSession({ cookies: SAMPLE_COOKIES })
     const { service } = makeService(session)
