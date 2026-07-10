@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Ready 专属包打包器</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="panel">
+        <div class="title-row">
+          <div>
+            <p class="eyebrow">Ready Packer</p>
+            <h1>专属包打包器</h1>
+          </div>
+          <span id="statusPill" class="pill">待命</span>
+        </div>
+
+        <p class="lead">
+          配置内置的 AI 模型接口与打包名后，一键生成一个已预置该配置的 macOS DMG。
+          默认生成不内置技能运行时的精简包，体积接近 ready-pack。
+        </p>
+
+        <form id="packerForm" autocomplete="off">
+          <fieldset>
+            <legend>AI 模型接口</legend>
+
+            <label>
+              <span>Base URL</span>
+              <input id="baseUrl" name="baseUrl" type="url" placeholder="https://cn-novacode.i0yu.cn" />
+            </label>
+
+            <label>
+              <span>API Key<em>可选</em></span>
+              <input id="apiKey" name="apiKey" type="password" placeholder="留空则首次启动在应用内填写" />
+            </label>
+
+            <label>
+              <span>模型</span>
+              <input id="model" name="model" type="text" placeholder="gpt-5.5" />
+            </label>
+
+            <label>
+              <span>预设名称<em>显示在应用内切换器</em></span>
+              <input id="displayName" name="displayName" type="text" placeholder="NovaCode" />
+            </label>
+          </fieldset>
+
+          <fieldset>
+            <legend>打包名</legend>
+            <label>
+              <span>打包名后缀<em>可选</em></span>
+              <input id="packageSuffix" name="packageSuffix" type="text" placeholder="例如 张三" />
+            </label>
+            <p class="hint">输出文件名：<code id="outputPreview">Ready-…-arm64.dmg</code></p>
+          </fieldset>
+
+          <fieldset>
+            <legend>技能运行时</legend>
+            <p id="runtimeStatus" class="runtime-status">检测中…</p>
+            <label>
+              <span>skill-runtime 目录<em>完整包才需要</em></span>
+              <input id="runtimeRoot" name="runtimeRoot" type="text" placeholder="含 runtime-manifest.json 的目录" />
+            </label>
+            <label class="check">
+              <input id="allowSlim" name="allowSlim" type="checkbox" checked />
+              <span>生成精简包（不含技能运行时，部分技能需应用内按需安装）</span>
+            </label>
+          </fieldset>
+
+          <button id="submitButton" type="submit">确认打包</button>
+        </form>
+
+        <div id="result" class="result" hidden></div>
+      </section>
+
+      <section class="log-panel">
+        <div class="log-title">打包日志</div>
+        <pre id="logOutput">等待开始...</pre>
+      </section>
+    </main>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

@@ -42,6 +42,14 @@ const keepStaging = argv.has('--keep-staging')
 const allowNetworkRuntime = argv.has('--allow-network-runtime')
 const releaseRuntimeSource = String(process.env.READY_RELEASE_SKILL_RUNTIME_ROOT || '').trim()
 
+// Opt-in personalized-seed injection (used by the web packer in Packer/server.mjs,
+// mirroring the reference packer's *_PACKER_SEED_CONFIG env). When set, the bundled
+// ai-settings seed is the provided config instead of an empty object. Baking an API
+// key is only allowed together with READY_PACKER_ALLOW_BAKED_KEY=1, so the default
+// clean-release behavior (empty seed + no-credential assertion) is unchanged.
+const packerSeedConfigPath = String(process.env.READY_PACKER_SEED_CONFIG || '').trim()
+const allowBakedKey = String(process.env.READY_PACKER_ALLOW_BAKED_KEY || '').trim() === '1'
+
 const CLEAN_EXPORT_FILENAMES = new Set([
   'builder-debug.yml',
   'builder-effective-config.yaml',
@@ -372,6 +380,18 @@ function buildCleanBuilderConfig() {
 
 function createCleanSeed() {
   ensureDir(resolve(cleanSeedPath, '..'))
+  if (packerSeedConfigPath) {
+    if (!existsSync(packerSeedConfigPath)) {
+      throw new Error(`READY_PACKER_SEED_CONFIG not found: ${packerSeedConfigPath}`)
+    }
+    const raw = readFileSync(packerSeedConfigPath, 'utf8')
+    const parsed = JSON.parse(raw)
+    if (hasSensitiveAIConfig(parsed) && !allowBakedKey) {
+      throw new Error('READY_PACKER_SEED_CONFIG contains an API key; set READY_PACKER_ALLOW_BAKED_KEY=1 to bake it in')
+    }
+    writeFileSync(cleanSeedPath, raw.endsWith('\n') ? raw : `${raw}\n`, 'utf8')
+    return
+  }
   writeFileSync(cleanSeedPath, '{}\n', 'utf8')
 }
 
@@ -692,7 +712,7 @@ function verifyPackagedResources() {
 
   const seedRaw = readFileSync(join(resourcesDir, 'ai-settings.seed.json'), 'utf8')
   const seed = JSON.parse(seedRaw)
-  if (hasSensitiveAIConfig(seed)) {
+  if (hasSensitiveAIConfig(seed) && !allowBakedKey) {
     throw new Error('Packaged ai-settings.seed.json still contains API credentials')
   }
 
@@ -857,7 +877,9 @@ function main() {
     removeOldExports()
   }
 
-  logStep('sanitize', 'write empty ai-settings seed')
+  logStep('sanitize', packerSeedConfigPath
+    ? `write injected ai-settings seed${allowBakedKey ? ' (baked key allowed)' : ''}`
+    : 'write empty ai-settings seed')
   createCleanSeed()
 
   logStep('sanitize', 'copy sidecar without caches')
