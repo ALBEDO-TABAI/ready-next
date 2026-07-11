@@ -40,20 +40,18 @@ test('passes for marked dormant modules, exact intra-cluster imports, test impor
   assert.equal(result.ok, true)
 })
 
-test('fails when a trio file lacks the disabled markers', () => {
+test('packet compiler no longer requires dormant markers after the live flip', () => {
   const root = makeRoot()
   write(root, 'src/main/modules/agent-control/quality/packet-compiler.ts', 'export const compiler = 1\n')
   const result = check({ root })
-  assert.equal(result.ok, false)
-  assert.ok(result.errors.some((error) => error.includes('packet-compiler.ts') && error.includes('markers')))
+  assert.equal(result.ok, true, result.errors.join('\n'))
 })
 
-test('fails when production imports the unwired trio', () => {
+test('allows production to import the live packet compiler', () => {
   const root = makeRoot()
-  write(root, 'src/main/modules/agent-control/runtime-core/runtime.ts', 'import { compiler } from "../quality/packet-compiler"\n')
+  write(root, 'src/main/modules/agent-control/runtime-core/runtime.ts', 'import { runUserPictureCasMerge } from "../maintenance/cas-merge"\nimport { compiler } from "../quality/packet-compiler"\nrunUserPictureCasMerge(); void compiler\n')
   const result = check({ root })
-  assert.equal(result.ok, false)
-  assert.ok(result.errors.some((error) => error.includes('runtime.ts') && error.includes('packet-compiler.ts')))
+  assert.equal(result.ok, true, result.errors.join('\n'))
 })
 
 test('fails when a maintenance or emergence dormant file lacks disabled markers', () => {
@@ -113,12 +111,11 @@ test('fails when live cas-merge is marked unwired', () => {
   assert.ok(result.errors.some((error) => error.includes('cas-merge.ts') && error.includes('live CAS merge')))
 })
 
-test('fails when the enforce doc omits the disabled-system statement', () => {
+test('retired packet-disabled doc no longer controls the live gate', () => {
   const root = makeRoot()
   write(root, 'docs/superpowers/plans/2026-06-20-p5c-packet-trio-disabled-implementation.md', 'packet trio docs\n')
   const result = check({ root })
-  assert.equal(result.ok, false)
-  assert.ok(result.errors.some((error) => error.includes('任务包体系未启用')))
+  assert.equal(result.ok, true, result.errors.join('\n'))
 })
 
 test('fails when the P5d enforce doc or settings null-state copy omits the disabled status', () => {

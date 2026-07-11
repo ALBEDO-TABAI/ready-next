@@ -5,6 +5,7 @@ import AgentDerivationPanel from '../personality/AgentDerivationPanel'
 import AgentRegistryPanel from '../personality/AgentRegistryPanel'
 import AgentSystemStudio from './AgentSystemStudio'
 import { SETTINGS_FLAT_INPUT_STYLE } from '../settings/settings-theme'
+import { DELIVERY_MODE_SETTING_KEY, isDeliveryMode } from '../../../shared/dynamic-delivery'
 
 // 设置页「Agent」单入口容器：把原先分散的 Agent / Agent 人格 / Agent 系统 三个 Tab
 // 合并成一个 Tab，内部用子导航分区，默认首屏直接进「Agent 管理」做渐进披露。
@@ -87,10 +88,11 @@ function BehaviorRow({
   )
 }
 
-function BehaviorSection() {
+export function BehaviorSection() {
   const [autoNarration, setAutoNarration] = useState(true)
   const [prerouteMode, setPrerouteMode] = useState<'off' | 'suggest' | 'auto'>('suggest')
   const [knowledgeEnabled, setKnowledgeEnabled] = useState(true)
+  const [deliveryMode, setDeliveryMode] = useState<'standard' | 'adaptive'>('adaptive')
   const [errors, setErrors] = useState<Record<string, string>>({})
 
   const setError = useCallback((key: string, message: string | null) => {
@@ -118,6 +120,10 @@ function BehaviorSection() {
       if (cards?.list) {
         const r = await cards.list()
         if (!cancelled && r?.success && r.data) setKnowledgeEnabled(Boolean(r.data.knowledgeSystemEnabled))
+      }
+      if (settings?.get) {
+        const r = await settings.get(DELIVERY_MODE_SETTING_KEY)
+        if (!cancelled && r?.success && isDeliveryMode(r.data) && r.data !== 'thorough') setDeliveryMode(r.data)
       }
     })()
     return () => { cancelled = true }
@@ -147,6 +153,14 @@ function BehaviorSection() {
     else setError('knowledge', result.error || '设置保存失败')
   }, [setError])
 
+  const onChangeDeliveryMode = useCallback(async (next: 'standard' | 'adaptive') => {
+    const api = window.electronAPI?.settings?.set
+    if (!api) { setError('delivery', '设置 IPC 不可用'); return }
+    const result = await api(DELIVERY_MODE_SETTING_KEY, next)
+    if (result.success) { setDeliveryMode(next); setError('delivery', null) }
+    else setError('delivery', result.error || '设置保存失败')
+  }, [setError])
+
   return (
     <div className="flex flex-col gap-6">
       <BehaviorRow
@@ -167,6 +181,23 @@ function BehaviorSection() {
             style={{ ...SETTINGS_FLAT_INPUT_STYLE, padding: '9px 32px 9px 14px', width: 'auto', minWidth: 136 }}
           >
             {PREROUTE_OPTIONS.map((opt) => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+          </select>
+        }
+      />
+      <BehaviorRow
+        label="Dynamic Delivery"
+        description="标准模式直接执行；自适应模式只在任务确实能从协作和复核中获益时启用。输入框的“彻底”只影响下一次发送。"
+        error={errors.delivery}
+        control={
+          <select
+            value={deliveryMode}
+            data-ready-delivery-mode="true"
+            onChange={(event) => { void onChangeDeliveryMode(event.target.value as 'standard' | 'adaptive') }}
+            className="rounded-lg border text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30"
+            style={{ ...SETTINGS_FLAT_INPUT_STYLE, padding: '9px 32px 9px 14px', minWidth: 136 }}
+          >
+            <option value="standard">标准</option>
+            <option value="adaptive">自适应</option>
           </select>
         }
       />

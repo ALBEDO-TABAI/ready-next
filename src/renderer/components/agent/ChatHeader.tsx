@@ -51,6 +51,7 @@ interface ChatHeaderProps {
   onTogglePanel?: () => void
   onHistoryOpen?: () => void
   sessionTitle?: string
+  agentResponsibilityLabel?: string
   formatTime: (time: string) => string
 }
 
@@ -82,6 +83,7 @@ export default function ChatHeader({
   onTogglePanel,
   onHistoryOpen,
   sessionTitle,
+  agentResponsibilityLabel,
   formatTime,
 }: ChatHeaderProps) {
   const [showHistory, setShowHistory] = useState(false)
@@ -494,6 +496,14 @@ export default function ChatHeader({
               >
                 {sessionTitle}
               </span>
+              {agentResponsibilityLabel ? (
+                <span
+                  data-chat-agent-responsibility="true"
+                  style={{ fontSize: 11, color: 'var(--text-muted)', flexShrink: 0, whiteSpace: 'nowrap' }}
+                >
+                  {agentResponsibilityLabel}
+                </span>
+              ) : null}
             </button>
           ) : null}
         </div>

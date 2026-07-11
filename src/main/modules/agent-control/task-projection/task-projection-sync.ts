@@ -54,6 +54,11 @@ function shouldSkipProjectionWrite(
   next: TaskProjectionRecord,
   payload: ScopeRunEventPayload,
 ): boolean {
+  const priorContinuation = recordFromUnknown(previous.continuationRef)
+  const priorGeneration = Number(priorContinuation?.handoffGeneration ?? 0)
+  if (priorContinuation?.kind === 'handoff_takeover' && priorGeneration > (payload.handoffGeneration ?? 0)) {
+    return true
+  }
   if (isTerminalProjectionStatus(previous.status) && !isTerminalProjectionStatus(next.status)) {
     return true
   }
@@ -809,8 +814,11 @@ export function buildTaskProjectionRecord(
     || (shouldStoreTerminalBlockedReason ? terminalBlockedReason : null)
     || null
 
+  const taskOrigin = payload.taskOrigin ?? previous?.taskOrigin
+  if (!taskOrigin) throw new Error('[task-projection-sync] taskOrigin is required for a new projection')
   return {
     taskId,
+    taskOrigin,
     scopeId: effectiveSummary.scopeId,
     runId: payload.runId || previous?.runId || taskId,
     parentTaskId: effectiveSummary.parentTaskId ?? payload.parentTaskId ?? previous?.parentTaskId ?? null,
@@ -860,6 +868,8 @@ export function buildTaskProjectionRecord(
       ? effectiveSummary.progress ?? null
       : effectiveSummary.progress ?? previous?.progress ?? null,
     recentArtifacts: effectiveSummary.recentArtifacts || previous?.recentArtifacts || [],
+    ownerAgentId: payload.ownerAgentId ?? previous?.ownerAgentId ?? null,
+    executionBinding: payload.executionBinding ?? previous?.executionBinding ?? null,
     createdAt: previous?.createdAt || payload.timestamp,
     updatedAt: effectiveSummary.updatedAt,
   }

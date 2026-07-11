@@ -37,6 +37,18 @@ function makeContext(
     store,
     invoker: options.invoker ?? 'model',
     scope: options.agent ? makeScope(options.agent) : null,
+    executionProfile: options.agent ? {
+      requestedAgentId: options.agent,
+      effectiveAgentId: options.agent,
+      personaRef: options.agent,
+      name: options.agent,
+      charter: '', personality: '', rules: '', knowledgeIndex: '',
+      allowedKnowledgeRefs: [`agents/${options.agent}/knowledge/pref.md`],
+      knowledgeWriteOwnerAgentId: options.agent,
+      knowledgeWriteNamespace: `agents/${options.agent}/knowledge`,
+      executionMaterialHash: 'test', readinessRevision: 'test', redirectChain: [],
+      readiness: { conversationReady: true, handoffReady: false, autoRoutable: false, collaborationReady: false, reasons: [] },
+    } : null,
     runtime: {
       getBeliefCardStore: () => store,
       getMemoryRepository: () => ({}),
@@ -87,8 +99,12 @@ test('model-supplied active status is downgraded to staged and hidden from defau
     const stagedRead = JSON.parse(
       await executeMemoryTool('memory_read_card', { rel_path: 'knowledge/pref.md', include_staged: true }, ctx),
     )
-    assert.equal(stagedRead.success, true)
-    assert.equal(stagedRead.frontmatter.status, 'staged')
+    assert.equal(stagedRead.success, false, 'model cannot bypass staged quarantine')
+    const hostRead = JSON.parse(
+      await executeMemoryTool('memory_read_card', { rel_path: 'knowledge/pref.md', include_staged: true }, { ...ctx, invoker: 'host' }),
+    )
+    assert.equal(hostRead.success, true)
+    assert.equal(hostRead.frontmatter.status, 'staged')
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
@@ -216,7 +232,7 @@ test('agent-scoped writes require matching owner and never fall back to global',
       await executeMemoryTool(
         'memory_read_card',
         { rel_path: 'agents/alpha/knowledge/pref.md', include_staged: true },
-        matchCtx,
+        { ...matchCtx, invoker: 'host' },
       ),
     )
     assert.equal(stagedRead.success, true)

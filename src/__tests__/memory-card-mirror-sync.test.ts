@@ -60,6 +60,10 @@ function makeFakeMirrorDb(): FakeMirrorDb {
 function makeContext(memoryRoot: string, db: FakeMirrorDb): ToolContext {
   const store = new BeliefCardStore({ memoryRoot })
   return {
+    executionProfile: {
+      knowledgeWriteOwnerAgentId: 'butler',
+      allowedKnowledgeRefs: ['knowledge/mirror.md'],
+    } as never,
     runtime: {
       getBeliefCardStore: () => store,
       getMemoryRepository: () => ({}),
@@ -147,7 +151,7 @@ test('mirror sync failure is observable but does not fail the card write', async
     assert.equal(failures[0].relPath, 'knowledge/mirror.md')
 
     const read = JSON.parse(
-      await executeMemoryTool('memory_read_card', { rel_path: 'knowledge/mirror.md', include_staged: true }, ctx),
+      await executeMemoryTool('memory_read_card', { rel_path: 'knowledge/mirror.md', include_staged: true }, { ...ctx, invoker: 'host' }),
     )
     assert.equal(read.success, true)
     assert.equal(read.frontmatter.status, 'staged')

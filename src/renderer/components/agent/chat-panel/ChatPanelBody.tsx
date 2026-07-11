@@ -93,6 +93,8 @@ interface ChatPanelBodyProps extends Omit<TaskToolSnapshotProps, 'children'> {
   chatInputRef: RefObject<ChatInputHandle | null>
   onInputChange: (value: string) => void
   onSend: () => void
+  thoroughOverride: boolean
+  onThoroughOverrideChange: (enabled: boolean) => void
   onStop: () => void
   onUndo: () => void
   onPickFiles: () => void | Promise<void>
@@ -620,6 +622,8 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
               isChannelScope={isChannelScope}
               onInputChange={onInputChange}
               onSend={onSend}
+              thoroughOverride={props.thoroughOverride}
+              onThoroughOverrideChange={props.onThoroughOverrideChange}
               onStop={onStop}
               onUndo={onUndo}
               onPickFiles={onPickFiles}

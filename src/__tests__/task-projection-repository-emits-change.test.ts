@@ -89,6 +89,7 @@ function makeMockDb() {
 function makeRecord(taskId: string, scopeId: string): TaskProjectionRecord {
   return {
     taskId,
+    taskOrigin: 'legacy',
     scopeId,
     runId: 'r',
     parentTaskId: null,

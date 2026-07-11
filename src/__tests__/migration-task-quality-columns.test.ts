@@ -150,6 +150,7 @@ async function createRepository() {
 function baseRecord(overrides: Record<string, unknown> = {}) {
   return {
     taskId: 'task-q1',
+    taskOrigin: 'legacy',
     scopeId: 'scope-1',
     runId: 'run-1',
     taskType: 'short_task',
@@ -249,6 +250,7 @@ test('check_in_pending survives the runtime summary path into the projection rec
     agent: 'butler',
     runId: 'run-1',
     taskId: 'task-1',
+    taskOrigin: 'legacy',
     phase: 'done',
     timestamp: '2026-06-12T09:01:00.000Z',
   }
@@ -274,6 +276,7 @@ test('check_in_pending survives the truthPatch whitelist into the projection rec
     agent: 'butler',
     runId: 'run-1',
     taskId: 'task-1',
+    taskOrigin: 'legacy',
     phase: 'done',
     timestamp: '2026-06-12T09:01:00.000Z',
   }

@@ -68,6 +68,11 @@ function makeService(root: string, roster?: RosterEntry[]): PromptAssemblyServic
     getScopeMessages: () => [],
     getBeliefCardStore: () => new BeliefCardStore({ memoryRoot: root }),
     getAgentRoster: roster ? () => roster : undefined,
+    getAgentReadiness: roster ? (id) => ({
+      conversationReady: roster.some((agent) => agent.id === id && agent.status === 'active'),
+      handoffReady: roster.some((agent) => agent.id === id && agent.status === 'active' && id !== 'butler' && Boolean(agent.charter)),
+      autoRoutable: true, collaborationReady: false, reasons: [],
+    }) : undefined,
   })
 }
 

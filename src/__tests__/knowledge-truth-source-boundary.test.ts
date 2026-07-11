@@ -166,7 +166,7 @@ const SCOPE: ConversationScope = {
   threadKey: 'scope-k6', meta: {}, createdAt: '2026-06-12T09:00:00.000Z', updatedAt: '2026-06-12T09:00:00.000Z',
 }
 
-test('A4/A5: invalid cards never reach the index; switch off removes injection with files untouched', async () => {
+test('A4/A5: invalid cards never reach the index; switch off removes cards but keeps rules and files untouched', async () => {
   const root = makeRoot()
   try {
     writeFileSync(join(root, 'knowledge', 'good.md'), cardText('GOOD_CARD'), 'utf-8')
@@ -190,7 +190,7 @@ test('A4/A5: invalid cards never reach the index; switch off removes injection w
     const off = await build(false)
     const offText = [off.systemPrompt, ...off.bootstrapMessages].join('\n')
     assert.ok(!offText.includes('GOOD_CARD') && !offText.includes('## 知识索引'), 'A5: index gone')
-    assert.ok(!offText.includes('RULES_MARKER') && !offText.includes('## 运行规则'), 'A5: rules gone')
+    assert.ok(offText.includes('RULES_MARKER') && offText.includes('## 运行规则'), 'A5: rules remain independent from card switch')
     assert.equal(statSync(join(root, 'knowledge', 'good.md')).mtimeMs, beforeMtime, 'A5: files untouched')
 
     const back = await build(true)

@@ -7,6 +7,8 @@ import type {
   TaskProjectionStore,
   TaskProjectionWriteOptions,
 } from '../agent-control/contracts/run-contracts'
+import { assertTaskExecutionBinding } from '../agent-control/task-projection/task-agent-binding'
+import { assertDeliveryState, parseDeliveryStateJson } from '../../../shared/dynamic-delivery'
 
 interface TaskProjectionStatement {
   run(...params: unknown[]): unknown
@@ -16,6 +18,7 @@ interface TaskProjectionStatement {
 
 interface TaskProjectionRawDatabase {
   prepare(sql: string): TaskProjectionStatement
+  exec?(sql: string): void
 }
 
 interface TaskProjectionDatabaseAccessor {
@@ -53,8 +56,11 @@ interface TaskProjectionRow {
   model_criteria_json?: string | null
   expected_outputs_json?: string | null
   owner_agent_id?: string | null
+  task_origin?: string | null
+  execution_binding_json?: string | null
   packet_role?: string | null
   context_refs_json?: string | null
+  delivery_state_json?: string | null
   recent_artifacts_json: string | null
   created_at: string
   updated_at: string
@@ -84,6 +90,17 @@ function safeParseObject(raw: string | null | undefined): Record<string, unknown
     : null
 }
 
+function parseExecutionBinding(raw: string | null | undefined): TaskProjectionRecord['executionBinding'] {
+  if (!raw) return null
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    throw new Error('[task-projection-repository] invalid execution_binding_json')
+  }
+  return assertTaskExecutionBinding(parsed as never)
+}
+
 /**
  * EP2-Q1 — write-side structural validation for the quality fields.
  * Loud rejection: a writer (Q3 proof collector / Q4 adjudicator) passing
@@ -98,6 +115,17 @@ const taskQualityFieldsSchema = z.object({
 })
 
 function validateTaskQualityFields(patch: Partial<TaskProjectionRecord>, context: string): void {
+  if (context === 'create' && !patch.taskOrigin) {
+    throw new Error('[task-projection-repository] taskOrigin is required on create')
+  }
+  if ('taskOrigin' in patch && !['user_root', 'workflow_child', 'system_background', 'legacy'].includes(String(patch.taskOrigin))) {
+    throw new Error(`[task-projection-repository] invalid task origin (${context})`)
+  }
+  if ('executionBinding' in patch && patch.executionBinding) assertTaskExecutionBinding(patch.executionBinding)
+  if ('deliveryState' in patch && patch.deliveryState) assertDeliveryState(patch.deliveryState)
+  if (context === 'create' && (patch.taskOrigin === 'user_root' || patch.taskOrigin === 'workflow_child') && !patch.ownerAgentId) {
+    throw new Error(`[task-projection-repository] ${patch.taskOrigin} requires ownerAgentId`)
+  }
   // EP3-PK1 — packet fields share the loud write-side validation channel.
   if ('packetRole' in patch || 'contextRefs' in patch) {
     try {
@@ -232,6 +260,9 @@ export class TaskProjectionRepository implements TaskProjectionStore {
     const db = this.dbManager.getRawDb()
     if (!db) throw new Error('Database not available')
     validateTaskQualityFields(record, 'create')
+    if (record.executionBinding && record.executionBinding.runId !== record.runId) {
+      throw new Error('[task-projection-repository] execution binding runId must match projection runId')
+    }
     this.assertPacketDepthAgainstStore(
       { taskId: record.taskId, packetRole: record.packetRole ?? null, parentTaskId: record.parentTaskId ?? null },
       'create',
@@ -244,9 +275,9 @@ export class TaskProjectionRepository implements TaskProjectionStore {
         recovery_history_json, degradation_reason, blocked_reason, resumable_actions_json,
         continuation_ref_json, progress_json, recent_artifacts_json,
         criteria_json, checkins_json, proof_refs_json, learning_refs_json, model_criteria_json, expected_outputs_json,
-        owner_agent_id, packet_role, context_refs_json,
+        owner_agent_id, task_origin, execution_binding_json, packet_role, context_refs_json, delivery_state_json,
         created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       record.taskId,
       record.scopeId,
@@ -279,8 +310,11 @@ export class TaskProjectionRepository implements TaskProjectionStore {
       record.modelCriteria ? JSON.stringify(record.modelCriteria) : null,
       record.expectedOutputs ? JSON.stringify(record.expectedOutputs) : null,
       record.ownerAgentId ?? null,
+      record.taskOrigin,
+      record.executionBinding ? JSON.stringify(record.executionBinding) : null,
       record.packetRole ?? null,
       record.contextRefs ? JSON.stringify(record.contextRefs) : null,
+      record.deliveryState ? JSON.stringify(record.deliveryState) : null,
       record.createdAt,
       record.updatedAt,
     )
@@ -292,6 +326,80 @@ export class TaskProjectionRepository implements TaskProjectionStore {
       },
       options,
     )
+  }
+
+  createDeliveryTreeAtomic(input: {
+    parentTaskId: string
+    deliveryState: NonNullable<TaskProjectionRecord['deliveryState']>
+    children: TaskProjectionRecord[]
+  }): void {
+    const db = this.dbManager.getRawDb()
+    if (!db?.exec) throw new Error('[task-projection-repository] atomic delivery tree requires transaction support')
+    const parent = this.get(input.parentTaskId)
+    if (!parent) throw new Error('[task-projection-repository] delivery parent projection is unavailable')
+    assertDeliveryState(input.deliveryState)
+    db.exec('BEGIN IMMEDIATE')
+    try {
+      this.update(input.parentTaskId, {
+        packetRole: input.children.length > 0 ? 'parent' : null,
+        deliveryState: input.deliveryState,
+        updatedAt: new Date().toISOString(),
+      }, { silent: true, reasonHint: 'dynamic_delivery_tree' })
+      for (const child of input.children) {
+        if (child.parentTaskId !== input.parentTaskId || child.packetRole !== 'child') {
+          throw new Error('[task-projection-repository] delivery child must belong to the packet parent')
+        }
+        this.create(child, { silent: true, reasonHint: 'dynamic_delivery_tree' })
+      }
+      db.exec('COMMIT')
+    } catch (error) {
+      db.exec('ROLLBACK')
+      throw error
+    }
+    this.emitChange({
+      scopeId: parent.scopeId,
+      changedTaskIds: [input.parentTaskId, ...input.children.map((child) => child.taskId)],
+      reason: 'dynamic_delivery_tree',
+    })
+  }
+
+  reduceDeliveryState(input: {
+    taskId: string
+    parentGeneration: number
+    expectedStateRevision: number
+    reduce: (current: NonNullable<TaskProjectionRecord['deliveryState']>) => NonNullable<TaskProjectionRecord['deliveryState']>
+  }): NonNullable<TaskProjectionRecord['deliveryState']> {
+    const db = this.dbManager.getRawDb()
+    if (!db?.exec) throw new Error('[task-projection-repository] delivery state reducer requires transaction support')
+    db.exec('BEGIN IMMEDIATE')
+    let next: NonNullable<TaskProjectionRecord['deliveryState']>
+    let scopeId: string
+    try {
+      const current = this.get(input.taskId)
+      if (!current?.deliveryState) throw new Error('[task-projection-repository] delivery state is unavailable')
+      if (current.deliveryState.parentGeneration !== input.parentGeneration) {
+        throw new Error('[task-projection-repository] stale delivery parent generation')
+      }
+      if (current.deliveryState.stateRevision !== input.expectedStateRevision) {
+        throw new Error('[task-projection-repository] delivery state revision conflict')
+      }
+      next = input.reduce(structuredClone(current.deliveryState))
+      assertDeliveryState(next)
+      if (next.parentGeneration !== input.parentGeneration || next.stateRevision !== input.expectedStateRevision + 1) {
+        throw new Error('[task-projection-repository] delivery reducer must preserve generation and increment revision once')
+      }
+      scopeId = current.scopeId
+      this.update(input.taskId, { deliveryState: next, updatedAt: new Date().toISOString() }, {
+        silent: true,
+        reasonHint: 'dynamic_delivery_reduce',
+      })
+      db.exec('COMMIT')
+    } catch (error) {
+      db.exec('ROLLBACK')
+      throw error
+    }
+    this.emitChange({ scopeId, changedTaskIds: [input.taskId], reason: 'dynamic_delivery_reduce' })
+    return next
   }
 
   update(taskId: string, patch: Partial<TaskProjectionRecord>, options?: TaskProjectionWriteOptions): void {
@@ -312,6 +420,11 @@ export class TaskProjectionRepository implements TaskProjectionStore {
     const db = this.dbManager.getRawDb()
     if (!db) throw new Error('Database not available')
     validateTaskQualityFields(patch, 'update')
+    const effectiveRunId = patch.runId ?? priorRecord?.runId
+    const effectiveBinding = 'executionBinding' in patch ? patch.executionBinding : priorRecord?.executionBinding
+    if (effectiveBinding && effectiveBinding.runId !== effectiveRunId) {
+      throw new Error('[task-projection-repository] execution binding runId must match projection runId')
+    }
     // EP3-PK1 — re-assert nesting on the EFFECTIVE row (patch merged over
     // prior) whenever the packet shape can change.
     if ('packetRole' in patch || 'parentTaskId' in patch) {
@@ -369,8 +482,11 @@ export class TaskProjectionRepository implements TaskProjectionStore {
     if ('modelCriteria' in patch) assign('model_criteria_json', patch.modelCriteria ? JSON.stringify(patch.modelCriteria) : null)
     if ('expectedOutputs' in patch) assign('expected_outputs_json', patch.expectedOutputs ? JSON.stringify(patch.expectedOutputs) : null)
     if ('ownerAgentId' in patch) assign('owner_agent_id', patch.ownerAgentId)
+    if ('taskOrigin' in patch) assign('task_origin', patch.taskOrigin)
+    if ('executionBinding' in patch) assign('execution_binding_json', patch.executionBinding ? JSON.stringify(patch.executionBinding) : null)
     if ('packetRole' in patch) assign('packet_role', patch.packetRole)
     if ('contextRefs' in patch) assign('context_refs_json', patch.contextRefs ? JSON.stringify(patch.contextRefs) : null)
+    if ('deliveryState' in patch) assign('delivery_state_json', patch.deliveryState ? JSON.stringify(patch.deliveryState) : null)
     if ('createdAt' in patch) assign('created_at', patch.createdAt)
     if ('updatedAt' in patch) assign('updated_at', patch.updatedAt)
 
@@ -622,8 +738,11 @@ export class TaskProjectionRepository implements TaskProjectionStore {
       modelCriteria: safeParseArray(row.model_criteria_json).filter((item): item is string => typeof item === 'string'),
       expectedOutputs: safeParseArray(row.expected_outputs_json).filter((item): item is string => typeof item === 'string'),
       ownerAgentId: row.owner_agent_id ?? null,
+      taskOrigin: (row.task_origin || 'legacy') as TaskProjectionRecord['taskOrigin'],
+      executionBinding: parseExecutionBinding(row.execution_binding_json),
       packetRole: (row.packet_role === 'parent' || row.packet_role === 'child') ? row.packet_role : null,
       contextRefs: safeParseArray(row.context_refs_json).filter((ref): ref is string => typeof ref === 'string'),
+      deliveryState: parseDeliveryStateJson(row.delivery_state_json),
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     }

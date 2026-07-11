@@ -70,6 +70,30 @@
   ],
   "c4Exempt": [
     {
+      "path": "src/__tests__/agent-execution-profile-contract.test.ts",
+      "reason": "Agent Foundation: exercises the execution-profile resolver with in-memory fake repositories and temporary filesystem fixtures; no path opens better-sqlite3 or reads the real database. Transitive runtime imports alone trigger the C4 scanner, while host-Node coverage must remain active for frozen-profile and readiness assertions.",
+      "since": "2026-07-11",
+      "owner": "agent-foundation-remediation"
+    },
+    {
+      "path": "src/__tests__/agent-execution-readiness.test.ts",
+      "reason": "Agent Foundation: exercises the deterministic readiness evaluator with synthetic agent records and blueprint fixtures; no path opens better-sqlite3 or reads the real database. Host-Node coverage must remain active for exact-foundation and lifecycle assertions.",
+      "since": "2026-07-11",
+      "owner": "agent-foundation-remediation"
+    },
+    {
+      "path": "src/__tests__/agent-knowledge-toggle-boundary.test.ts",
+      "reason": "Agent Foundation: exercises profile material selection with in-memory fake stores and temporary RULES files; no path opens better-sqlite3 or reads the real database. Host-Node coverage must remain active for the knowledge-card versus rules boundary.",
+      "since": "2026-07-11",
+      "owner": "agent-foundation-remediation"
+    },
+    {
+      "path": "src/__tests__/agent-system-studio-read-model.test.ts",
+      "reason": "Agent Foundation: exercises the Studio read model with injected in-memory agent and projection repositories; no path opens better-sqlite3 or reads the real database. Transitive service imports trigger the scanner, while host-Node coverage must remain active for readiness and task-count presentation.",
+      "since": "2026-07-11",
+      "owner": "agent-foundation-remediation"
+    },
+    {
       "path": "src/__tests__/belief-injection-usage-count.test.ts",
       "reason": "P2-4: bumpBeliefCardAccess runs against an in-memory fake MirrorDb (pattern-matches the UPDATE SQL); renderKnowledgeIndex uses a file-only BeliefCardStore under a tmpdir. No test path opens better-sqlite3 or reads the real DB. Host-Node coverage must stay active for the usage-count + renderedRelPaths assertions.",
       "since": "2026-07-03",

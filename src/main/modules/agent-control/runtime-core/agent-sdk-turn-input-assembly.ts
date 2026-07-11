@@ -22,8 +22,10 @@ import { registerSkillShellConsentReminder } from '../system-reminders/skill-she
 import { createSystemReminderRegistry } from '../system-reminders/system-reminder-registry'
 import type { ToolDefinition } from '../tools-runtime/tool-definition'
 import { TOOL_ERROR_METRICS } from '../tools-runtime/tool-error-metrics'
+import { buildDocumentSurfaceGuidance } from '../tool-policy/execution-tool-config'
 import { buildDocumentTargetInstruction } from './agent-sdk-document-utils'
 import { buildLocalDocumentExcerptInstruction, toSdkInput } from './agent-sdk-execution-utils'
+import { primaryInstructionText } from './agent-sdk-input-context-utils'
 import { toOpenAIToolSchemas } from './agent-sdk-model-message-utils'
 import type { TurnOrchestratorHost } from './agent-sdk-turn-context'
 import type {
@@ -142,6 +144,10 @@ export function assembleAgentSdkTurnInput(
         ].join('\n')
       : '',
     buildDocumentTargetInstruction(documentTargetGuard),
+    buildDocumentSurfaceGuidance({
+      toolNames: new Set(toolDefinitions.map((definition) => definition.name)),
+      userText: primaryInstructionText(providerContent)
+    }),
     buildLocalDocumentExcerptInstruction(requiresLocalDocumentExcerpt, preferCurrentDocumentRead),
     useTextToolBridge && toolDefinitions.length > 0
       ? buildTextToolBridgePrompt(toOpenAIToolSchemas(toolDefinitions))

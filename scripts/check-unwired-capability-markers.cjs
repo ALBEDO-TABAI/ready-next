@@ -4,11 +4,10 @@ const path = require('node:path')
 
 const REPO_ROOT = path.resolve(__dirname, '..')
 
-const UNWIRED_PACKET_FILES = Object.freeze([
-  'src/main/modules/agent-control/quality/packet-compiler.ts',
-  'src/main/modules/agent-control/quality/packet-dispatch.ts',
-  'src/main/modules/agent-control/quality/packet-failure.ts',
-])
+// Dynamic Delivery gate-flip (2026-07-11): packet compilation is now in the
+// production coordinator; scheduling and settlement moved to the typed
+// dynamic-delivery modules. No packet module remains on the dormant list.
+const UNWIRED_PACKET_FILES = Object.freeze([])
 
 // P5d cluster — deterministic-parts migration (2026-07-03): crystallize-gate.ts
 // was migrated to live (runtime.ts CrystallizeScheduler + belief-decay round);
@@ -172,7 +171,6 @@ function check({ root = REPO_ROOT } = {}) {
   }
 
   const docRules = [
-    { rel: P5C_DOC_REL, label: 'P5c', phrase: '任务包体系未启用' },
     { rel: P5D_DOC_REL, label: 'P5d', phrase: '维护回合 / 涌现候选未启用' },
   ]
   for (const rule of docRules) {

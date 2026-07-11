@@ -65,13 +65,23 @@ function publicToolTraceText(text: string): string {
 
 export function filterUserVisibleToolTraceEvents<T extends Pick<ToolTraceEvent, 'text'>>(events: T[]): T[] {
   const visible: T[] = []
-  const seen = new Set<string>()
+  const keptIndexByKey = new Map<string, number>()
   for (const event of events) {
     if (isInternalToolTraceText(event.text)) continue
     const text = publicToolTraceText(event.text)
     const key = `${'kind' in event ? String((event as { kind?: unknown }).kind) : ''}:${text}`
-    if (seen.has(key)) continue
-    seen.add(key)
+    const keptIndex = keptIndexByKey.get(key)
+    if (keptIndex != null) {
+      // 同一工具事件有两个生产者（SDK executor 带 toolName/detail 的富事件、
+      // orchestrator 输出流的瘦事件），按 kind:text 去重时把富字段回填到已
+      // 保留的条目上，避免「先到的瘦事件吃掉后到的富事件」。
+      const kept = visible[keptIndex] as T & Pick<ToolTraceEvent, 'toolName' | 'detail'>
+      const duplicate = event as T & Pick<ToolTraceEvent, 'toolName' | 'detail'>
+      if (!kept.toolName && duplicate.toolName) kept.toolName = duplicate.toolName
+      if (!kept.detail && duplicate.detail) kept.detail = duplicate.detail
+      continue
+    }
+    keptIndexByKey.set(key, visible.length)
     visible.push({ ...event, text })
   }
   return visible

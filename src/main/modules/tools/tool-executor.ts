@@ -114,6 +114,8 @@ export interface ToolContext {
   runtime?: AgentControlRuntime | null
   scope?: ConversationScope | null
   agent?: string | null
+  executionBinding?: import('../../../shared/agent-execution-profile').TaskExecutionBinding | null
+  executionProfile?: import('../../../shared/agent-execution-profile').AgentExecutionProfile | null
   allowedToolNames?: Set<string> | string[] | null
   emitToolAction?: (tool: string, args: Record<string, unknown>) => void
   requestModuleToolAction?: (tool: string, args: Record<string, unknown>) => Promise<Record<string, unknown>>
@@ -927,8 +929,9 @@ async function executeToolCallInner(
             }
             return executeProposeHandoff(args as Parameters<typeof executeProposeHandoff>[0], {
               getAgent: (id) => runtime.getAgentRegistry().get(id),
-              updateTaskOwner: (taskId, ownerAgentId) =>
-                runtime.getTaskProjectionStore().update(taskId, { ownerAgentId }),
+              getAgentHandoffReadiness: async (id) => (await runtime.resolveAgentExecutionProfile(id)).readiness,
+              adoptTaskHandoff: (input) => runtime.adoptSameSessionHandoff(input),
+              currentActiveAgentId: context.scope?.activeAgentId ?? null,
               sessionId: context.sessionId,
               conversationId: context.scope?.id || context.sessionId,
               scopeId: context.scopeId,

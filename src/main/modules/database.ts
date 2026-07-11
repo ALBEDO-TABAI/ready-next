@@ -419,6 +419,8 @@ export type ConversationSourceKind = 'local' | 'channel'
 export interface ChatConversationRecord {
   id: string
   agent: string
+  active_agent_id?: string | null
+  handoff_generation?: number | null
   user_id?: string | null
   title: string
   parent_conversation_id?: string | null
@@ -2266,6 +2268,7 @@ export class DatabaseManager {
   upsertConversationScope(payload: {
     id: string
     agent: string
+    activeAgentId?: string
     userId?: string
     title: string
     parentConversationId?: string | null
@@ -2286,11 +2289,10 @@ export class DatabaseManager {
     const metaJson = JSON.stringify(payload.meta || {})
     this.db.prepare(
       `INSERT INTO chat_conversations (
-         id, agent, user_id, title, parent_conversation_id, lineage_root_id, resume_title,
+         id, agent, active_agent_id, handoff_generation, user_id, title, parent_conversation_id, lineage_root_id, resume_title,
          source_kind, source_id, thread_key, meta_json, created_at, updated_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
-         agent = excluded.agent,
          user_id = excluded.user_id,
          title = excluded.title,
          parent_conversation_id = excluded.parent_conversation_id,
@@ -2304,6 +2306,8 @@ export class DatabaseManager {
     ).run(
       id,
       payload.agent,
+      existing?.active_agent_id || payload.activeAgentId || payload.agent,
+      existing?.handoff_generation ?? 0,
       payload.userId || null,
       payload.title,
       payload.parentConversationId ?? existing?.parent_conversation_id ?? null,
@@ -2318,6 +2322,20 @@ export class DatabaseManager {
     )
     this.syncConversationRecallMetadata(id)
     return { row: this.getConversationScope(id)!, mode }
+  }
+
+  updateConversationAgentState(
+    id: string,
+    activeAgentId: string,
+    handoffGeneration: number,
+  ): ChatConversationRecord {
+    if (!this.db) throw new Error('Database not available')
+    this.db.prepare(
+      'UPDATE chat_conversations SET active_agent_id = ?, handoff_generation = ?, updated_at = ? WHERE id = ?',
+    ).run(activeAgentId, handoffGeneration, new Date().toISOString(), id)
+    const row = this.getConversationScope(id)
+    if (!row) throw new Error(`Conversation not found: ${id}`)
+    return row
   }
 
   listConversationScopes(

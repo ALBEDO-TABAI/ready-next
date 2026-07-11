@@ -113,14 +113,33 @@ const REGISTRY = Object.freeze([
     },
   },
   {
-    capability: 'packet-trio (compiler/dispatch/failure)',
-    status: 'deferred-by-design',
-    files: [
-      'src/main/modules/agent-control/quality/packet-compiler.ts',
-      'src/main/modules/agent-control/quality/packet-dispatch.ts',
-      'src/main/modules/agent-control/quality/packet-failure.ts',
+    capability: 'dynamic-delivery',
+    status: 'live-required',
+    wiring: [
+      {
+        name: 'coordinator calls bounded packet compiler',
+        file: 'src/main/modules/agent-control/runtime-core/dynamic-delivery/dynamic-delivery-coordinator.ts',
+        pattern: /compileDynamicDeliveryPlan\s*\(/,
+      },
+      {
+        name: 'SDK runtime constructs the coordinator',
+        file: 'src/main/modules/agent-control/runtime-core/agent-sdk-runtime.ts',
+        pattern: /new DynamicDeliveryCoordinator\s*\(/,
+      },
+      {
+        name: 'runtime reconciles interrupted delivery on startup',
+        file: RUNTIME_REL,
+        pattern: /reconcileInterruptedDeliveryState\s*\(/,
+      },
     ],
-    unwiredList: 'UNWIRED_PACKET_FILES',
+    firedLedger: {
+      file: 'src/main/modules/agent-control/runtime-core/dynamic-delivery/dynamic-delivery-coordinator.ts',
+      event: 'dynamic_delivery_fired',
+    },
+    noStaleMarker: {
+      file: 'src/main/modules/agent-control/quality/packet-compiler.ts',
+      pattern: /P5c\/C22 unwired|not in production path/i,
+    },
   },
   {
     // D7 gate-flip (2026-07-05)：crystallize tick 捎带驱动，三层预算闸在

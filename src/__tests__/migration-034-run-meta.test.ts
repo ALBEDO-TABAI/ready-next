@@ -204,6 +204,26 @@ test('RunMetaRepository — list filters by scopeId / taskId', async (t) => {
   assert.equal(both[0].runId, 'r1')
 })
 
+test('RunMetaRepository — execution bindings are immutable per run and preserve same-task history', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'run-meta execution binding history')) return
+  const db = await buildInMemoryDb()
+  await runAllMigrations(db)
+  const { RunMetaRepository } = await import('../main/modules/agent-control/task-projection/run-meta-repository')
+  const repo = new RunMetaRepository(db as unknown as ConstructorParameters<typeof RunMetaRepository>[0])
+  const binding = (runId: string, agentId: string, runOrigin: 'initial' | 'handoff_takeover') => ({
+    schemaVersion: 1 as const, runId, ownerAgentIdAtStart: agentId, runOrigin,
+    kind: 'registered_agent' as const, requestedAgentId: agentId, effectiveAgentId: agentId,
+    executionMaterialHash: `hash:${agentId}`, ownerAssignmentSource: runOrigin === 'handoff_takeover' ? 'handoff' as const : 'conversation_active' as const,
+    executionSelectionSource: 'task_owner' as const, resolutionKind: 'direct' as const,
+  })
+  repo.create({ runId: 'run-before', taskId: 'task-shared', status: 'done', executionBinding: binding('run-before', 'butler', 'initial') }, 1)
+  repo.create({ runId: 'run-after', taskId: 'task-shared', status: 'running', executionBinding: binding('run-after', 'copywriter', 'handoff_takeover') }, 2)
+  assert.equal(repo.get('run-before')?.executionBinding?.effectiveAgentId, 'butler')
+  assert.equal(repo.get('run-after')?.executionBinding?.effectiveAgentId, 'copywriter')
+  assert.throws(() => repo.update('run-before', { executionBinding: binding('run-before', 'copywriter', 'handoff_takeover') }), /immutable/)
+  assert.equal(repo.get('run-before')?.executionBinding?.effectiveAgentId, 'butler')
+})
+
 test('migration 034 — re-running migrations is idempotent', async (t) => {
   if (skipIfSqliteUnavailable(t, 'migration-034 idempotent')) return
   const db = await buildInMemoryDb()

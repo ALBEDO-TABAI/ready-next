@@ -15,6 +15,7 @@ import type {
   ToolTraceEvent,
 } from '../modules/agent/types'
 import type { TaskDisclosureState, TaskSectionKey } from '../modules/agent/taskCardViewModel'
+import type { DeliveryMode } from '../../shared/dynamic-delivery'
 
 export interface PendingContinuationIntent {
   taskId: string
@@ -169,7 +170,7 @@ export interface AgentState {
   setComposerDraft: (value: string, continuationIntent?: PendingContinuationIntent | null) => void
   clearPendingContinuationIntent: () => void
   setIsStreaming: (streaming: boolean) => void
-  sendMessage: (content: string) => Promise<SendMessageResult>
+  sendMessage: (content: string, options?: { deliveryMode?: DeliveryMode }) => Promise<SendMessageResult>
   stopStreaming: () => void
   undoLastMessage: () => void
   /**

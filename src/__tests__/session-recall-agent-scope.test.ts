@@ -144,6 +144,8 @@ class FakeDatabaseManagerConnection implements DatabaseConnection {
           const [
             id,
             agent,
+            activeAgentId,
+            handoffGeneration,
             userId,
             title,
             parentConversationId,
@@ -159,6 +161,8 @@ class FakeDatabaseManagerConnection implements DatabaseConnection {
           conversations.set(String(id), {
             id: String(id),
             agent: String(agent),
+            active_agent_id: String(activeAgentId),
+            handoff_generation: Number(handoffGeneration),
             user_id: typeof userId === 'string' ? userId : null,
             title: String(title),
             parent_conversation_id: typeof parentConversationId === 'string' ? parentConversationId : null,
@@ -188,6 +192,15 @@ class FakeDatabaseManagerConnection implements DatabaseConnection {
         if (normalized === 'UPDATE chat_conversations SET updated_at = ? WHERE id = ?') {
           const conversation = conversations.get(String(params[1]))
           if (conversation) conversation.updated_at = String(params[0])
+          return { changes: conversation ? 1 : 0 }
+        }
+        if (normalized.startsWith('UPDATE chat_conversations SET active_agent_id = ?')) {
+          const conversation = conversations.get(String(params[3]))
+          if (conversation) {
+            conversation.active_agent_id = String(params[0])
+            conversation.handoff_generation = Number(params[1])
+            conversation.updated_at = String(params[2])
+          }
           return { changes: conversation ? 1 : 0 }
         }
         throw new Error(`Unexpected run SQL: ${normalized}`)
@@ -419,4 +432,20 @@ test('DatabaseManager recall metadata write persists conversation.agent', () => 
   assert.equal(messageWrite[8], 'alpha')
   assert.equal(messageWrite[9], 'local:app')
   assert.equal(messageWrite[10], 'latest assistant turn')
+})
+
+test('reusing a conversation never resets its persisted active agent or handoff generation', () => {
+  const connection = new FakeDatabaseManagerConnection()
+  const manager = Object.create(DatabaseManager.prototype) as DatabaseManager
+  ;(manager as unknown as { db: DatabaseConnection }).db = connection
+  const payload = {
+    id: 'conv-handoff', agent: 'butler', title: '会话', sourceKind: 'local' as const,
+    sourceId: 'app', threadKey: 'conv-handoff', meta: {},
+  }
+  manager.upsertConversationScope(payload)
+  manager.updateConversationAgentState('conv-handoff', 'copywriter', 4)
+  const reused = manager.upsertConversationScope({ ...payload, activeAgentId: 'butler', title: '更新标题' })
+  assert.equal(reused.mode, 'reused')
+  assert.equal(reused.row.active_agent_id, 'copywriter')
+  assert.equal(reused.row.handoff_generation, 4)
 })

@@ -68,6 +68,7 @@ export function decideSessionPreroute(input: {
   recentOwnedTasks: ReadonlyArray<PrerouteOwnedTaskRef>
   routingCards: ReadonlyArray<PrerouteRoutingCard>
   isAgentActive: (agentId: string) => boolean
+  isAgentAutoRoutable?: (agentId: string) => boolean
   mode: SessionPrerouteMode
 }): PrerouteResult {
   if (input.mode === 'off') {
@@ -104,7 +105,7 @@ export function decideSessionPreroute(input: {
   const hits: Hit[] = []
   for (const routingCard of input.routingCards) {
     if (!routingCard.triggers || routingCard.triggers.length === 0) continue
-    if (!input.isAgentActive(routingCard.targetAgentId)) continue
+    if (!(input.isAgentAutoRoutable ?? input.isAgentActive)(routingCard.targetAgentId)) continue
     const matched = routingCard.triggers.filter((keyword) => message.includes(keyword.toLowerCase()))
     if (matched.length > 0) hits.push({ card: routingCard, matched })
   }

@@ -224,6 +224,7 @@ import {
 import {
   buildActivePlanReminderText,
   clearActivePlanForScope,
+  configureActivePlanPersistence,
   getActivePlanForScope,
   noteToolResultForActivePlan,
 } from '../system-reminders/active-plan-step-reminder'
@@ -368,6 +369,8 @@ import { AgentSdkCompactor } from './agent-sdk-compactor'
 import { AgentSdkRunLifecycle, createInitiatorAbort } from './agent-sdk-run-lifecycle'
 import { AgentSdkToolExecutor } from './agent-sdk-tool-executor'
 import { AgentSdkTurnOrchestrator } from './agent-sdk-turn-orchestrator'
+import { DynamicDeliveryCoordinator } from './dynamic-delivery/dynamic-delivery-coordinator'
+import { DynamicDeliveryTaskStore } from './dynamic-delivery/dynamic-delivery-task-store'
 import { AgentSdkSessionManager } from './agent-sdk-session'
 
 
@@ -551,6 +554,7 @@ export class AgentSdkRuntime extends EventEmitter {
   private cancelPendingToolActions: ((agent: string, sessionId?: string) => void) | null = null
   /** EP2-I1 — null = facts unavailable (legacy callers keep S4-1 behavior). */
   private readonly getScopeTaskRefs: ((scopeId: string) => FollowupTaskRef[]) | null
+  private readonly dynamicDelivery: DynamicDeliveryCoordinator
 
   constructor(deps: AgentSdkRuntimeDeps = {}) {
     super()
@@ -567,6 +571,42 @@ export class AgentSdkRuntime extends EventEmitter {
     this.listToolDefinitionsForTurn = deps.listToolDefinitions || ((params) =>
       this.toolExecutor.listDefaultToolDefinitionsForTurn(params))
     const self = this
+    this.dynamicDelivery = new DynamicDeliveryCoordinator({
+      getProjection: (taskId) => {
+        const runtime = self.runtime as (AgentControlRuntime & {
+          getTaskProjection?: (id: string) => TaskProjectionRecord | null
+        }) | null
+        return typeof runtime?.getTaskProjection === 'function'
+          ? runtime.getTaskProjection(taskId)
+          : null
+      },
+      updateProjection: (taskId, patch) => {
+        const store = self.runtime?.getTaskProjectionStore()
+        if (!store) throw new Error('[dynamic-delivery] task projection store unavailable')
+        store.update(taskId, patch, { reasonHint: 'update' })
+      },
+      taskStore: () => {
+        const store = self.runtime?.getTaskProjectionStore()
+        if (!store) throw new Error('[dynamic-delivery] task projection store unavailable')
+        return new DynamicDeliveryTaskStore(store)
+      },
+      listProfiles: () => {
+        const runtime = self.runtime as (AgentControlRuntime & {
+          listAgentProfileSummaries?: () => Array<{ agentId: string; name: string; collaborationReady: boolean }>
+        }) | null
+        return typeof runtime?.listAgentProfileSummaries === 'function'
+          ? runtime.listAgentProfileSummaries()
+          : []
+      },
+      resolveProfile: (agentId) => {
+        if (!self.runtime) throw new Error('[dynamic-delivery] runtime unavailable')
+        return self.runtime.resolveAgentExecutionProfile(agentId)
+      },
+      createRegisteredBinding: (input) => {
+        if (!self.runtime) throw new Error('[dynamic-delivery] runtime unavailable')
+        return self.runtime.createWorkflowParticipantBinding(input)
+      },
+    }, this.runAgent)
     this.runLifecycle = new AgentSdkRunLifecycle({
       sessionManager: this.sessionManager,
       compactor: this.compactor,
@@ -595,6 +635,7 @@ export class AgentSdkRuntime extends EventEmitter {
       loadAIConfig: this.loadAIConfig,
       resumeSkillChildRun: this.resumeSkillChildRun,
       runAgent: this.runAgent,
+      dynamicDelivery: this.dynamicDelivery,
       runLifecycle: this.runLifecycle,
       get runtime() { return self.runtime },
       sessionManager: this.sessionManager,
@@ -663,6 +704,11 @@ export class AgentSdkRuntime extends EventEmitter {
 
   setRuntime(runtime: AgentControlRuntime): void {
     this.runtime = runtime
+    configureActivePlanPersistence({
+      load: (scope) => runtime.getPersistedActivePlan(scope),
+      save: (scope, plan) => runtime.persistActivePlan(scope, plan),
+      remove: (scope) => runtime.persistActivePlan(scope, null),
+    })
   }
 
   private getRunMetaRepositoryForFinalize(): RunMetaRepositoryLike | null {
@@ -738,11 +784,13 @@ export class AgentSdkRuntime extends EventEmitter {
       const store = this.runtime?.getBeliefCardStore?.()
       const registry = this.runtime?.getAgentRegistry?.()
       const proposalStore = this.runtime?.getSpecialistContentEditProposalStore?.()
-      if (!store || !registry || !proposalStore) return
+      const runMetaRepository = this.runtime?.getRunMetaRepository?.()
+      if (!store || !registry || !proposalStore || !runMetaRepository) return
       const result = stageSpecialistTaskEvolutionProposal({
         registry,
         store,
         proposalStore,
+        getRunExecutionBinding: (runId) => runMetaRepository.get(runId)?.executionBinding ?? null,
         now: input.now,
       }, {
         projection: input.projection,
@@ -757,6 +805,41 @@ export class AgentSdkRuntime extends EventEmitter {
         reason: result.status === 'skipped' ? result.reason : null,
         proposalId: result.proposal?.proposalId ?? null,
       })
+      for (const contribution of input.projection.deliveryState?.packages ?? []) {
+        if (contribution.adoptedByOwner !== true || contribution.binding.kind !== 'registered_agent') continue
+        const contributionProjection: TaskProjectionRecord = {
+          ...input.projection,
+          taskId: contribution.childTaskId,
+          runId: contribution.binding.runId,
+          ownerAgentId: contribution.binding.effectiveAgentId,
+          executionBinding: contribution.binding,
+          proofRefs: contribution.evidenceHandleIds.map((ref) => ({ kind: 'artifact', ref })),
+          learningRefs: contribution.evidenceHandleIds.map((ref) => ({ kind: 'artifact', ref })),
+        }
+        const contributionResult = stageSpecialistTaskEvolutionProposal({
+          registry,
+          store,
+          proposalStore,
+          getRunExecutionBinding: (runId) => runId === contribution.binding.runId
+            ? contribution.binding
+            : runMetaRepository.get(runId)?.executionBinding ?? null,
+          now: input.now,
+        }, {
+          projection: contributionProjection,
+          checkIn: input.checkIn,
+          terminalStatus: input.terminalStatus ?? null,
+          terminalReason: input.terminalReason ?? null,
+          allowWorkflowContribution: true,
+        })
+        logAgentMetric('dynamic_delivery_contribution_learning', {
+          taskId: input.projection.taskId,
+          childTaskId: contribution.childTaskId,
+          agentId: contribution.binding.effectiveAgentId,
+          status: contributionResult.status,
+          reason: contributionResult.status === 'skipped' ? contributionResult.reason : null,
+          proposalId: contributionResult.proposal?.proposalId ?? null,
+        })
+      }
     } catch (error) {
       logAgentMetric('specialist_task_evolution_proposal_failed', {
         taskId: input.projection.taskId,

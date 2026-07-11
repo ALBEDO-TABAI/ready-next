@@ -57,6 +57,12 @@ S4-5 在稳定性契约中登记为 **blocked，不排期**（`2026-06-10-agent-
 - 步骤一：**PASS**。Plan P WP3 的 fresh target/generation、stale/ambiguity/readBack 合同已有正式工具接线与行为测试；WP5 的 `BrowserTaskEvidence` 已在 live `BrowserDomainOrchestrator.recordToolLoopProgress()` 消费，并由“口头完成不推进 / 页面证据推进”测试钉死；D10–D18 留有真实 Electron 页面复测记录。
 - 步骤二：已重写为 `2026-07-10-s4-5-evidence-step-completion-implementation.md`。新工单只改 S4-3 活动计划的推进判据：任务句柄、终态、完整下载数量和失败明细成为强证据；移除 `verify=weak`。轻量复审通过后实施。
 
+### 2026-07-11 对抗复核更正
+
+- 上述“WP5 live”结论为 **FAIL**：生产 SDK 只持有 adapter 列表，并不调用 `BrowserDomainAdapter.applyResult()`；旧测试仅证明类存在和模块内行为，不能证明生产接线。
+- 不复活已退役 TurnEngine 路径。S4-5 的准入边改为当前真实执行面：SDK 工具执行器把每个结果送入 code-owned 活动计划，模型循环在下一轮回注当前缺失证据；真实 `AgentSdkRuntime` 集成测试已证明这条链。
+- S4-5 强判据仍成立，并补齐直接 `collect_notes` 入口、失败/剩余发现项、错误工具结果、不相关页面、普通 click 假提交等反例。最终依据以 `2026-07-10-s4-5-evidence-step-completion-implementation.md` 的更正记录为准。
+
 ## O4 · D11：`nextSuggestedAction` 投影纯度（optional，浏览器侧波及）
 
 ### 问题
@@ -94,4 +100,5 @@ Round-2 P1 → P2 → P3 → P4 →（e2e 复跑）→ O1 → O3 步骤一/二 �
 - O1 终态事实优先级已统一：finalizer 的 taskType/budget 优先，projection 只补缺失字段；陈旧 `short_task` 不再覆盖终态 `research`。projection、run_meta 和 run_close 已由新的小型行为测试钉死一致。
 - O2 已按最终架构收口：`agent-sdk-utils.ts` 为 8 行兼容导出层，意图/信封、文档保护、终态转换、提醒组装、模型循环与收口持久化均已按责任拆分；叶子模块不再回依赖 facade，循环依赖已清零。orchestrator 958 行，其余新核心模块均低于 900/1000 目标。
 - O3 的 S4-5 不再是“后续工单”，已完成严格证据化实施；最终合同见 `2026-07-10-s4-5-evidence-step-completion-implementation.md`。
+- O3 的旧 WP5 接线声明已由 2026-07-11 更正取代；完成依据是 live SDK 活动计划证据漏斗，不是 dormant DomainAdapter。
 - 最终三轮命名对抗复审无高/中优先级遗留，全量 `verify` 与真实 Electron 双技能事故复跑通过。本节取代上文早期的“utils ~1839、循环依赖可接受、S4-5 未实施”阶段性描述。

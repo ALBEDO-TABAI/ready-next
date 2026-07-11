@@ -155,6 +155,24 @@ const REQUIRED_WEB_RESEARCH_ERROR_KINDS = [
   'web_fetch_failed',
 ]
 
+const REQUIRED_DYNAMIC_DELIVERY_ERROR_KINDS = [
+  'delivery_preflight_unknown',
+  'delivery_plan_invalid',
+  'delivery_profile_unavailable',
+  'delivery_parent_projection_unavailable',
+  'delivery_packet_tree_transaction_failed',
+  'delivery_scheduler_capacity_exceeded',
+  'delivery_worker_failed',
+  'delivery_worker_report_invalid',
+  'delivery_evidence_invalid',
+  'delivery_required_package_unsettled',
+  'delivery_budget_exhausted',
+  'delivery_wall_clock_exceeded',
+  'delivery_verifier_unavailable',
+  'delivery_repair_exhausted',
+  'delivery_restart_checkpointed',
+]
+
 function abs(rel) {
   return path.join(ROOT, rel)
 }
@@ -382,6 +400,7 @@ function assertRequiredErrorKindsRegistered(violations) {
     ...REQUIRED_ACTION_CONFIRMATION_ERROR_KINDS,
     ...REQUIRED_SPECIALIST_BLUEPRINT_ERROR_KINDS,
     ...REQUIRED_WEB_RESEARCH_ERROR_KINDS,
+    ...REQUIRED_DYNAMIC_DELIVERY_ERROR_KINDS,
   ]) {
     if (!registered.has(code)) {
       push(violations, ERROR_KINDS_REL, 1, 'required_error_kind_unregistered', `${code} must be registered in error-kinds.ts`)
@@ -411,6 +430,11 @@ function assertRequiredErrorKindsRegistered(violations) {
     violations,
     'WEB_RESEARCH_ERROR_KINDS',
     REQUIRED_WEB_RESEARCH_ERROR_KINDS,
+  )
+  assertRequiredErrorKindFamily(
+    violations,
+    'DYNAMIC_DELIVERY_ERROR_KINDS',
+    REQUIRED_DYNAMIC_DELIVERY_ERROR_KINDS,
   )
 }
 

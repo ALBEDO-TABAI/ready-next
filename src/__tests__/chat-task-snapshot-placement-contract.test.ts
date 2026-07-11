@@ -33,16 +33,25 @@ test('chat messages expose a temporary pending task block while the next reply i
 
 test('task and tool cards stay collapsed by default and only reveal the latest line until expanded', () => {
   const taskCard = readWorkspaceFile('src/renderer/components/agent/chat-panel/task/TaskCard.tsx')
+  // 2026-07-10 行数健康度拆分 — L2/L3 时间线组件族独立成文件。
+  const toolTimeline = readWorkspaceFile('src/renderer/components/agent/chat-panel/task/ToolTimeline.tsx')
 
+  // 2026-07-10 activity-capsule — 折叠头保留单行 summary 预览（标题/状态重复时抑制）。
   assert.match(taskCard, /const summaryPreview = formatSingleLinePreview\(vm\.summary\)/)
-  assert.match(taskCard, /\{summaryPreview\}/)
-  // f8682671 checkpoint(agent): P0-P5d 体验修复 — 折叠态优先展示 recentRows 近几行，无近行时才回退 latestEvent 单行预览
-  assert.match(taskCard, /!expanded && recentRows\.length === 0 && latestEvent/)
-  assert.match(taskCard, /!expanded && recentRows\.length > 0/)
+  assert.match(taskCard, /\{headerPreview\}/)
+  // 运行态折叠时自动浮出最近工具条目（P0-2 语义延续），无近行时回退 latestEvent 单行预览。
+  assert.match(taskCard, /pending && !expanded && !compact \? timelineItems\.slice\(-3\) : \[\]/)
+  assert.match(taskCard, /!expanded && recentItems\.length === 0 && latestEvent/)
+  assert.match(taskCard, /!expanded && recentItems\.length > 0/)
   assert.match(taskCard, /const latestPreview = formatToolTracePreview\(latestEvent\?\.text\)/)
   assert.match(taskCard, /expanded && vm\.currentStep/)
-  // f8682671 — 展开态工具轨迹从裸 events.map 改为结构化 rows.map + ToolTraceRowLine 行组件
-  assert.match(taskCard, /expanded \? \(\s*<div className="flex flex-col" style=\{\{ gap: 4 \}\}>\s*\{rows\.map\(\(row\) => \(\s*<ToolTraceRowLine key=\{row\.id\} row=\{row\} \/>/)
+  // 展开态工具轨迹 = 结构化时间线（call/result 配对条目 + 逐条 L3 详情披露）。
+  assert.match(taskCard, /<ToolTimeline items=\{timelineItems\} \/>/)
+  assert.match(taskCard, /deriveToolTimelineItems/)
+  assert.match(toolTimeline, /data-ready-tool-timeline-detail/)
+  // L3 详情优先富事件字段（入参 JSON / 输出全文），瘦事件回退单行 text。
+  assert.match(toolTimeline, /item\.callDetail \|\| item\.callText/)
+  assert.match(toolTimeline, /item\.resultDetail \|\| item\.resultText/)
   assert.doesNotMatch(taskCard, /最近一步：/)
   assert.match(taskCard, /whiteSpace:\s*'nowrap'/)
   assert.match(taskCard, /flexShrink:\s*0/)

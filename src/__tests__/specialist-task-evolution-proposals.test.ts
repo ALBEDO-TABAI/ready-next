@@ -33,6 +33,7 @@ function projection(overrides: Partial<TaskProjectionRecord> = {}): TaskProjecti
     taskId: 'task-1',
     scopeId: 'scope-1',
     runId: 'run-1',
+    taskOrigin: 'user_root',
     taskType: 'short_task',
     module: 'agent',
     taskTitle: '写一版大纲',
@@ -68,6 +69,23 @@ function deps(root: string, agents: AgentRegistryRecord[]) {
     store: new BeliefCardStore({ memoryRoot: root }),
     proposalStore: new SpecialistContentEditProposalStore(),
     registry: { get: (id: string) => agents.find((item) => item.id === id) ?? null },
+    getRunExecutionBinding: (runId: string) => binding('writer', runId),
+  }
+}
+
+function binding(agentId: string, runId = 'run-1') {
+  return {
+    schemaVersion: 1 as const,
+    runId,
+    ownerAgentIdAtStart: agentId,
+    runOrigin: 'initial' as const,
+    kind: 'registered_agent' as const,
+    requestedAgentId: agentId,
+    effectiveAgentId: agentId,
+    executionMaterialHash: `hash-${agentId}`,
+    ownerAssignmentSource: 'conversation_active' as const,
+    executionSelectionSource: 'task_owner' as const,
+    resolutionKind: 'direct' as const,
   }
 }
 
@@ -110,21 +128,21 @@ test('task evolution skips unsafe cases and deduplicates by task', () => {
       now: new Date('2026-06-20T00:02:00.000Z'),
     }
     const accepted = checkIn()
-    assert.equal(stageSpecialistTaskEvolutionProposal(base, {
+    assert.equal(stageSpecialistTaskEvolutionProposal({ ...base, getRunExecutionBinding: () => null }, {
       projection: projection({ ownerAgentId: null }),
       checkIn: accepted,
       terminalStatus: 'done',
-    }).reason, 'missing_owner_agent')
-    assert.equal(stageSpecialistTaskEvolutionProposal(base, {
+    }).reason, 'missing_run_execution_binding')
+    assert.equal(stageSpecialistTaskEvolutionProposal({ ...base, getRunExecutionBinding: () => binding('butler') }, {
       projection: projection({ ownerAgentId: 'butler' }),
       checkIn: accepted,
       terminalStatus: 'done',
-    }).reason, 'owner_not_active_specialist')
-    assert.equal(stageSpecialistTaskEvolutionProposal(base, {
+    }).reason, 'execution_agent_not_active_specialist')
+    assert.equal(stageSpecialistTaskEvolutionProposal({ ...base, getRunExecutionBinding: () => binding('retired-writer') }, {
       projection: projection({ ownerAgentId: 'retired-writer' }),
       checkIn: accepted,
       terminalStatus: 'done',
-    }).reason, 'owner_not_active_specialist')
+    }).reason, 'execution_agent_not_active_specialist')
     assert.equal(stageSpecialistTaskEvolutionProposal(base, {
       projection: projection({ learningRefs: [] }),
       checkIn: accepted,
@@ -140,6 +158,21 @@ test('task evolution skips unsafe cases and deduplicates by task', () => {
       checkIn: accepted,
       terminalStatus: 'error',
     }).reason, 'terminal_status_not_success')
+    assert.equal(stageSpecialistTaskEvolutionProposal(base, {
+      projection: projection(), checkIn: accepted, terminalStatus: 'done', terminalReason: 'adjudication_degraded',
+    }).reason, 'terminal_adjudication_degraded')
+    assert.equal(stageSpecialistTaskEvolutionProposal({
+      ...base,
+      getRunExecutionBinding: () => ({
+        schemaVersion: 1, runId: 'run-1', ownerAgentIdAtStart: 'writer', runOrigin: 'workflow_participant',
+        kind: 'ephemeral', ephemeralRole: 'researcher', executionMaterialHash: 'ephemeral-hash',
+        ownerAssignmentSource: 'parent_task', executionSelectionSource: 'ephemeral_role', resolutionKind: 'direct',
+      }),
+    }, { projection: projection(), checkIn: accepted, terminalStatus: 'done' }).reason, 'execution_not_registered_agent')
+    assert.throws(() => stageSpecialistTaskEvolutionProposal({
+      ...base,
+      getRunExecutionBinding: () => ({ ...binding('writer'), executionMaterialHash: '' }),
+    }, { projection: projection(), checkIn: accepted, terminalStatus: 'done' }), /incomplete execution binding/)
 
     const first = stageSpecialistTaskEvolutionProposal(base, {
       projection: projection(),

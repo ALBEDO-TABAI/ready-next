@@ -33,7 +33,7 @@ export interface BrowserToolLoopProgress {
 }
 
 interface BrowserTaskEvidence {
-  kind: 'page_observed' | 'upload_complete' | 'prompt_complete' | 'submit_confirmed' | 'action_completed'
+  kind: 'page_observed' | 'page_target_matched' | 'upload_complete' | 'prompt_complete' | 'submit_confirmed'
   toolName: string
   summary: string
 }
@@ -89,6 +89,37 @@ function parseToolJson(text: string): Record<string, unknown> | null {
   }
 }
 
+function isSuccessfulToolRecord(record: Record<string, unknown> | null): record is Record<string, unknown> {
+  if (!record || record.ok === false || typeof record.errorKind === 'string') return false
+  const status = typeof record.status === 'string' ? record.status.trim().toLowerCase() : ''
+  return status !== 'error' && status !== 'failed'
+}
+
+function hasPositiveEvidenceValue(value: unknown): boolean {
+  if (value === true) return true
+  if (typeof value === 'string') return value.trim().length > 0
+  if (Array.isArray(value)) return value.length > 0
+  if (value && typeof value === 'object') {
+    return Object.values(value as Record<string, unknown>).some(hasPositiveEvidenceValue)
+  }
+  return false
+}
+
+function recordHasPositiveEvidence(record: Record<string, unknown>, keys: RegExp): boolean {
+  for (const [key, value] of Object.entries(record)) {
+    if (keys.test(key) && hasPositiveEvidenceValue(value)) return true
+    if (typeof value === 'string' && keys.test(value)) return true
+    if (Array.isArray(value) && value.some((item) =>
+      (typeof item === 'string' && keys.test(item)) ||
+      (item && typeof item === 'object' && recordHasPositiveEvidence(item as Record<string, unknown>, keys))
+    )) return true
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      if (recordHasPositiveEvidence(value as Record<string, unknown>, keys)) return true
+    }
+  }
+  return false
+}
+
 function collectBrowserTaskEvidence(
   results: Array<{ toolName: string; resultText: string }> | null | undefined,
 ): BrowserTaskEvidence[] {
@@ -98,42 +129,56 @@ function collectBrowserTaskEvidence(
     const resultText = String(item.resultText || '')
     if (!toolName || /^(Error:|Search failed|Page content is empty)/i.test(resultText.trim())) continue
     const parsed = parseToolJson(resultText)
-    const parsedText = JSON.stringify(parsed || {})
-    if (toolName === 'browser_read_page_map' && parsed?.pageIdentity) {
+    if (!isSuccessfulToolRecord(parsed)) continue
+    if (toolName === 'browser_read_page_map' && parsed.pageIdentity) {
       evidence.push({ kind: 'page_observed', toolName, summary: 'page map captured' })
+      if (recordHasPositiveEvidence(parsed, /^targetMatched$/i)) {
+        evidence.push({ kind: 'page_target_matched', toolName, summary: 'target page matched' })
+      }
       continue
     }
-    if (toolName === 'browser_probe_readonly' && parsed?.ok === true) {
+    if (toolName === 'browser_probe_readonly' && parsed.ok === true) {
       evidence.push({ kind: 'page_observed', toolName, summary: String(parsed.summary || 'readonly probe captured') })
-      if (/input_has_files|attachment_name_matched|fileInput/i.test(parsedText)) {
+      if (recordHasPositiveEvidence(parsed, /^targetMatched$/i)) {
+        evidence.push({ kind: 'page_target_matched', toolName, summary: 'target page matched' })
+      }
+      if (recordHasPositiveEvidence(parsed, /^(input_has_files|attachment_name_matched|fileInput)$/i)) {
         evidence.push({ kind: 'upload_complete', toolName, summary: 'upload evidence in readonly probe' })
       }
-      if (/prompt_matched|prompt_filled|textarea|textbox|input/i.test(parsedText)) {
+      if (recordHasPositiveEvidence(parsed, /^(prompt_matched|prompt_filled)$/i)) {
         evidence.push({ kind: 'prompt_complete', toolName, summary: 'prompt/input evidence in readonly probe' })
       }
+      if (recordHasPositiveEvidence(parsed, /^(submit_confirmed|running_state|page_processing_state)$/i)) {
+        evidence.push({ kind: 'submit_confirmed', toolName, summary: 'post-submit state confirmed' })
+      }
       continue
     }
-    if (toolName === 'browser_upload_scope_attachment' && !/^Error:/i.test(resultText)) {
-      evidence.push({ kind: 'upload_complete', toolName, summary: resultText.slice(0, 160) })
+    if (toolName === 'browser_upload_scope_attachment') {
+      if (parsed.ok === true && recordHasPositiveEvidence(parsed, /^(input_has_files|attachment_name_matched|fileInput)$/i)) {
+        evidence.push({ kind: 'upload_complete', toolName, summary: resultText.slice(0, 160) })
+      }
       continue
     }
-    if (toolName === 'browser_act_on_target' && parsed?.ok === true) {
+    if (toolName === 'browser_act_on_target' && parsed.ok === true && parsed.changed === true) {
       const action = String(parsed.action || '')
-      evidence.push({ kind: 'action_completed', toolName, summary: `target action ${action || 'done'}` })
-      if (action === 'fill' || action === 'choose') {
+      if ((action === 'fill' || action === 'choose') && recordHasPositiveEvidence(parsed, /^(prompt_matched|prompt_filled)$/i)) {
         evidence.push({ kind: 'prompt_complete', toolName, summary: `target action ${action}` })
       }
-      if (action === 'click') {
-        evidence.push({ kind: 'submit_confirmed', toolName, summary: 'target click completed' })
+      if (recordHasPositiveEvidence(parsed, /^(submit_confirmed|running_state|page_processing_state)$/i)) {
+        evidence.push({ kind: 'submit_confirmed', toolName, summary: 'post-action submit state confirmed' })
       }
       continue
     }
     if (['browser_type', 'browser_type_smart', 'browser_compose_message'].includes(toolName)) {
-      evidence.push({ kind: 'prompt_complete', toolName, summary: resultText.slice(0, 160) })
+      if (parsed.ok === true && recordHasPositiveEvidence(parsed, /^(prompt_matched|prompt_filled)$/i)) {
+        evidence.push({ kind: 'prompt_complete', toolName, summary: resultText.slice(0, 160) })
+      }
       continue
     }
     if (['browser_navigate', 'browser_search', 'browser_read_page'].includes(toolName)) {
-      evidence.push({ kind: 'page_observed', toolName, summary: resultText.slice(0, 160) })
+      if (parsed.ok === true) {
+        evidence.push({ kind: 'page_observed', toolName, summary: resultText.slice(0, 160) })
+      }
     }
   }
   return evidence
@@ -143,10 +188,11 @@ function evidenceSatisfiesStep(step: BrowserPlanStep, evidence: BrowserTaskEvide
   if (evidence.length === 0) return false
   const text = `${step.id} ${step.goal} ${step.verify.join(' ')}`.toLowerCase()
   const has = (kind: BrowserTaskEvidence['kind']) => evidence.some((item) => item.kind === kind)
-  if (/(resolve|navigate|target|page|页面|目标页|打开|进入)/i.test(text)) return has('page_observed')
+  if (/(resolve|target|match|确认目标|目标页|页面匹配)/i.test(text)) return has('page_target_matched')
   if (/(upload|attachment|file|附件|上传|素材|文件)/i.test(text)) return has('upload_complete')
   if (/(prompt|input|fill|提示词|输入|填写)/i.test(text)) return has('prompt_complete')
-  if (/(submit|send|running|提交|发送|运行态|生成中)/i.test(text)) return has('submit_confirmed') || has('action_completed')
+  if (/(submit|send|running|提交|发送|运行态|生成中)/i.test(text)) return has('submit_confirmed')
+  if (/(navigate|page|页面|打开|进入)/i.test(text)) return has('page_observed')
   return false
 }
 

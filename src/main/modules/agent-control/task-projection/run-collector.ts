@@ -56,6 +56,8 @@ export function userFacingTerminalErrorText(terminalReason: string | null): stri
       return '本次运行缺少完成证据，已按未完成收口；可以让我重试，或补充完成判定所需的材料。'
     case 'no_artifact':
       return '本次运行没有产出可验证的成果文件，已按未完成收口；可以让我重试。'
+    case 'blocked_tool_error':
+      return '有关键工具在本轮被拦截或不可用，目标没有完成，已按未完成收口；上面保留了已完成的进展说明，可以让我重试。'
     default:
       return null
   }

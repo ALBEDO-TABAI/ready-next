@@ -125,6 +125,8 @@ export interface AgentSystemStudioAgent {
   derivationReason: string | null
   mergedIntoAgentId: string | null
   createdAt: string
+  readinessRevision: string
+  readiness: import('./agent-execution-profile').AgentExecutionReadiness
   rules: AgentSystemStudioRulesFile
   foundation: AgentSystemStudioFoundationFile
   knowledgeCards: AgentSystemStudioKnowledgeCard[]

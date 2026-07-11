@@ -85,6 +85,8 @@ async function seedParentTask(params: {
     agent: params.scope.agent,
     runId: 'run-parent',
     taskId: 'parent-1',
+    taskOrigin: 'user_root',
+    ownerAgentId: 'butler',
     phase: 'planning',
     module: 'document',
     taskTitle: '父任务',

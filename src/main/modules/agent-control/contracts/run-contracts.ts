@@ -57,6 +57,7 @@ import type { TurnTerminalReason } from '../runtime-core/turn-frame'
 import type { CapabilityGroupId } from '../../../../shared/ai-capability-groups'
 import type { SkillChildRunStatus as SharedSkillChildRunStatus } from '../../../../shared/skill-child-run-status'
 import type { ContextUsageSnapshot } from '../../../../shared/context-usage-types'
+import type { TaskCreationOrigin, TaskExecutionBinding } from '../../../../shared/agent-execution-profile'
 import type { SkillRunContract } from './skill-run-contract'
 import type { RecoveryRecord, ToolSnapshot } from './tool-telemetry-contracts'
 import type {
@@ -380,6 +381,8 @@ export interface TaskProjectionRecord {
   /** EP3-A1 — task owner agent (migration 056). Write value comes ONLY from
    *  the A4 handoff adoption; everything else reads. */
   ownerAgentId?: string | null
+  taskOrigin: TaskCreationOrigin
+  executionBinding?: TaskExecutionBinding | null
   /** D4 — 模型经 declare_completion_criteria 声明的补充验收标准。写值唯一
    *  来自该工具（整组替换）；finalizer 终态经 appendModelCriteria 并入裁决。 */
   modelCriteria?: string[] | null
@@ -390,6 +393,8 @@ export interface TaskProjectionRecord {
   packetRole?: 'parent' | 'child' | null
   /** EP3-PK1 — reference strings only (paths/card slugs/packet ids). */
   contextRefs?: string[] | null
+  /** Dynamic Delivery host-owned state. Renderer is read-only. */
+  deliveryState?: import('../../../../shared/dynamic-delivery').DeliveryStateV1 | null
   createdAt: string
   updatedAt: string
 }
@@ -529,8 +534,11 @@ export interface RunCoordinatorRequest {
   parentStepId?: string
   sessionIdOverride?: string
   workspaceRoots?: string[]
+  contextRefIds?: string[]
   budget?: RunBudgetSeed
   continuationIntent?: ContinuationIntent | null
+  runOrigin?: import('../../../../shared/agent-execution-profile').RunExecutionOrigin
+  deliveryMode?: import('../../../../shared/dynamic-delivery').DeliveryMode
 }
 
 export type ScopeRunAuthority = {
@@ -548,6 +556,9 @@ export interface RunCoordinatorResult {
 
 export interface ExecutionHostRequest {
   agent: string
+  sessionAgentId: string
+  executionBinding: TaskExecutionBinding
+  executionProfile: import('../../../../shared/agent-execution-profile').AgentExecutionProfile
   sessionId?: string
   sessionIdOverride?: string
   requestId?: string
@@ -564,6 +575,7 @@ export interface ExecutionHostRequest {
   taskBudgetRuntime?: TaskBudgetRuntime
   continuationIntent?: ContinuationIntent | null
   continuationState?: ContinuationState | null
+  deliveryMode?: import('../../../../shared/dynamic-delivery').DeliveryMode
 }
 
 export interface ExecutionHostResult {
@@ -584,6 +596,8 @@ export interface ExecutionHostResult {
   skillTaskLifecycle?: SkillTaskLifecycleSignal | null
   terminalReason?: TurnTerminalReason | null
   scopeRunAuthority?: ScopeRunAuthority
+  executionBinding?: TaskExecutionBinding | null
+  executionAgentDisplayName?: string | null
 }
 
 export interface ExecutionTurnResult {
@@ -603,6 +617,8 @@ export interface ExecutionTurnResult {
   skillTaskLifecycle?: SkillTaskLifecycleSignal | null
   terminalReason?: TurnTerminalReason | null
   scopeRunAuthority?: ScopeRunAuthority
+  executionBinding?: TaskExecutionBinding | null
+  executionAgentDisplayName?: string | null
 }
 
 export type SkillTaskLifecycleState =

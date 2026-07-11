@@ -27,6 +27,7 @@ import type {
   ToolBridgeRuntimeContext
 } from './agent-sdk-types'
 import type { AgentControlRuntime } from './runtime'
+import type { DynamicDeliveryCoordinator } from './dynamic-delivery/dynamic-delivery-coordinator'
 
 export interface TurnOrchestratorHost {
   readonly executeToolCall: NonNullable<AgentSdkRuntimeDeps['executeToolCall']>
@@ -37,6 +38,7 @@ export interface TurnOrchestratorHost {
   readonly loadAIConfig: () => AIConfigLoad
   readonly resumeSkillChildRun: typeof defaultResumeSkillChildRun
   readonly runAgent: (params: ReadyAgentSdkRunParams) => Promise<ReadyAgentSdkRunResult>
+  readonly dynamicDelivery: DynamicDeliveryCoordinator
   readonly runLifecycle: AgentSdkRunLifecycle
   readonly runtime: AgentControlRuntime | null
   readonly sessionManager: AgentSdkSessionManager

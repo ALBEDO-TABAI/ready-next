@@ -35,7 +35,7 @@
 
 import { useCallback, useMemo } from 'react'
 import type React from 'react'
-import type { AgentMessage } from '../../../../stores/useAgent'
+import type { AgentMessage, ToolTraceEvent } from '../../../../stores/useAgent'
 import {
   createDefaultTaskDisclosureState,
   getTaskRunDisplayKey,
@@ -69,12 +69,7 @@ export interface TaskToolSnapshotProps {
   // --- Serialized payload parsers (kept in ChatPanel for source-grep
   // contract; passed in here as stable useCallback identities) ---
   parseSerializedTaskSnapshot: (raw: unknown) => TaskCardRun | null
-  parseSerializedToolTraceSnapshot: (raw: unknown) => Array<{
-    id: string
-    kind: 'call' | 'result'
-    text: string
-    timestamp: Date
-  }>
+  parseSerializedToolTraceSnapshot: (raw: unknown) => ToolTraceEvent[]
 
   // --- Mutators / handlers lifted from ChatPanel scope. Signatures mirror
   // the `TaskCard` prop interface exactly so the host can pass its existing
@@ -190,17 +185,24 @@ export function TaskToolSnapshot(props: TaskToolSnapshotProps): React.ReactEleme
   } = props
 
   const renderTaskSnapshotCard = useCallback(
-    (run: TaskCardRun, key: string, compact = false) => {
+    (
+      run: TaskCardRun,
+      key: string,
+      compact = false,
+      events?: ToolTraceEvent[],
+      pending = false,
+    ) => {
       const expanded = Boolean(taskDisclosureState[key]?.overview)
       return (
         <TaskCard
           key={key}
           run={run}
-          taskKey={key}
           // Stage V V1.6 / V3.3a — pre-wire the multi-session slot with the
           // active scope id. Currently unused by TaskCard's body; reserved
           // for V3.3a per-session routing.
           sessionId={currentScopeId || undefined}
+          events={events}
+          pending={pending}
           compact={compact}
           expanded={expanded}
           disclosureState={{
@@ -208,7 +210,6 @@ export function TaskToolSnapshot(props: TaskToolSnapshotProps): React.ReactEleme
             ...(taskDisclosureState[key] || {})
           }}
           onToggleExpanded={() => setTaskSectionExpanded(key, 'overview', !expanded)}
-          onToggleSection={setTaskSectionExpanded}
           onOpenArtifact={onOpenTaskArtifact}
           onDismissMemoryCapture={onDismissMemoryCapture}
           onUndoMemoryCapture={onUndoMemoryCapture}
@@ -253,32 +254,6 @@ export function TaskToolSnapshot(props: TaskToolSnapshotProps): React.ReactEleme
     ]
   )
 
-  const messageTaskSnapshots = useMemo<Record<string, React.ReactNode>>(() => {
-    const nextSnapshots: Record<string, React.ReactNode> = {}
-    for (const message of messages) {
-      if (message.type !== 'agent') continue
-      const snapshot = parseSerializedTaskSnapshot(message.meta?.taskSnapshot)
-      if (!snapshot || !isTaskVisible(snapshot)) continue
-      const taskRun = newerTaskSnapshot(snapshot, liveTaskRuns)
-      nextSnapshots[message.id] = renderTaskSnapshotCard(taskRun, `task-snapshot-${message.id}`)
-    }
-
-    if (
-      currentTaskRun &&
-      currentTaskRun.responseMessageId &&
-      messages.find((message) => message.id === currentTaskRun.responseMessageId)?.content.trim() &&
-      !nextSnapshots[currentTaskRun.responseMessageId] &&
-      isTaskVisible(currentTaskRun)
-    ) {
-      nextSnapshots[currentTaskRun.responseMessageId] = renderTaskSnapshotCard(
-        currentTaskRun,
-        `task-snapshot-${currentTaskRun.responseMessageId}`
-      )
-    }
-
-    return nextSnapshots
-  }, [currentTaskRun, liveTaskRuns, messages, parseSerializedTaskSnapshot, renderTaskSnapshotCard])
-
   const currentToolTraceSegment = useMemo(() => {
     if (!currentTaskRun) return []
     const startIndex = Math.max(0, currentTaskRun.responseSegmentToolTraceStart || 0)
@@ -290,10 +265,59 @@ export function TaskToolSnapshot(props: TaskToolSnapshotProps): React.ReactEleme
     [currentToolTraceSegment],
   )
 
+  // Activity-capsule 合并：有可见 task snapshot 的消息，把该消息段的工具
+  // 事件并入同一张任务胶囊（时间线在胶囊内展开）；只有无 task 的消息才
+  // 落到独立的 ToolTraceCard。两个 map 对同一 message id 互斥。
+  const messageTaskSnapshots = useMemo<Record<string, React.ReactNode>>(() => {
+    const nextSnapshots: Record<string, React.ReactNode> = {}
+    for (const message of messages) {
+      if (message.type !== 'agent') continue
+      const snapshot = parseSerializedTaskSnapshot(message.meta?.taskSnapshot)
+      if (!snapshot || !isTaskVisible(snapshot)) continue
+      const taskRun = newerTaskSnapshot(snapshot, liveTaskRuns)
+      const segmentEvents = filterUserVisibleToolTraceEvents(
+        parseSerializedToolTraceSnapshot(message.meta?.toolTraceSnapshot),
+      )
+      nextSnapshots[message.id] = renderTaskSnapshotCard(
+        taskRun,
+        `task-snapshot-${message.id}`,
+        false,
+        segmentEvents,
+      )
+    }
+
+    if (
+      currentTaskRun &&
+      currentTaskRun.responseMessageId &&
+      messages.find((message) => message.id === currentTaskRun.responseMessageId)?.content.trim() &&
+      !nextSnapshots[currentTaskRun.responseMessageId] &&
+      isTaskVisible(currentTaskRun)
+    ) {
+      nextSnapshots[currentTaskRun.responseMessageId] = renderTaskSnapshotCard(
+        currentTaskRun,
+        `task-snapshot-${currentTaskRun.responseMessageId}`,
+        false,
+        currentVisibleToolTraceSegment,
+      )
+    }
+
+    return nextSnapshots
+  }, [
+    currentTaskRun,
+    currentVisibleToolTraceSegment,
+    liveTaskRuns,
+    messages,
+    parseSerializedTaskSnapshot,
+    parseSerializedToolTraceSnapshot,
+    renderTaskSnapshotCard,
+  ])
+
   const messageToolTraceSnapshots = useMemo<Record<string, React.ReactNode>>(() => {
     const nextSnapshots: Record<string, React.ReactNode> = {}
     for (const message of messages) {
       if (message.type !== 'agent') continue
+      // 该消息已有任务胶囊时，工具事件由胶囊时间线承载，不再单独渲染。
+      if (messageTaskSnapshots[message.id]) continue
       const events = parseSerializedToolTraceSnapshot(message.meta?.toolTraceSnapshot)
       const visibleEvents = filterUserVisibleToolTraceEvents(events)
       if (visibleEvents.length === 0) continue
@@ -313,6 +337,7 @@ export function TaskToolSnapshot(props: TaskToolSnapshotProps): React.ReactEleme
       currentTaskRun &&
       currentTaskRun.responseMessageId &&
       messages.find((message) => message.id === currentTaskRun.responseMessageId)?.content.trim() &&
+      !messageTaskSnapshots[currentTaskRun.responseMessageId] &&
       !nextSnapshots[currentTaskRun.responseMessageId] &&
       currentVisibleToolTraceSegment.length > 0
     ) {
@@ -332,6 +357,7 @@ export function TaskToolSnapshot(props: TaskToolSnapshotProps): React.ReactEleme
   }, [
     currentTaskRun,
     currentVisibleToolTraceSegment,
+    messageTaskSnapshots,
     messages,
     parseSerializedToolTraceSnapshot,
     setTaskSectionExpanded,
@@ -342,14 +368,22 @@ export function TaskToolSnapshot(props: TaskToolSnapshotProps): React.ReactEleme
     const streamMessage = messages.find((message) => message.id === streamingMessageId)
     if (!currentTaskRun || !isStreaming || !streamingMessageId) return null
     if (streamMessage && streamMessage.content.length > 0) return null
-    return renderTaskSnapshotCard(currentTaskRun, `pending-task-${currentTaskRun.scopeId}`)
-  }, [currentTaskRun, isStreaming, messages, renderTaskSnapshotCard, streamingMessageId])
+    return renderTaskSnapshotCard(
+      currentTaskRun,
+      `pending-task-${currentTaskRun.scopeId}`,
+      false,
+      currentVisibleToolTraceSegment,
+      true,
+    )
+  }, [currentTaskRun, currentVisibleToolTraceSegment, isStreaming, messages, renderTaskSnapshotCard, streamingMessageId])
 
   const pendingToolTrace = useMemo<React.ReactNode | null>(() => {
     const streamMessage = messages.find((message) => message.id === streamingMessageId)
     if (!currentTaskRun || !isStreaming || !streamingMessageId) return null
     if (streamMessage && streamMessage.content.length > 0) return null
     if (currentVisibleToolTraceSegment.length === 0) return null
+    // 任务胶囊已在 pendingTaskRun 里承载时间线时，不再渲染独立工具卡。
+    if (isTaskVisible(currentTaskRun)) return null
     const toolKey = `pending-tool-${currentTaskRun.scopeId}`
     const expanded = Boolean(taskDisclosureState[toolKey]?.overview)
     return (

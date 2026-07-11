@@ -109,6 +109,7 @@ test('TaskProjectionRepository persists and updates structured task projection r
 
   repository.create({
     taskId: 'task-1',
+    taskOrigin: 'system_background',
     scopeId: 'scope-1',
     runId: 'run-1',
     parentTaskId: 'parent-1',
@@ -276,6 +277,7 @@ test('TaskProjectionRepository supports child-task lookup by parent task id', as
 
   repository.create({
     taskId: 'child-1',
+    taskOrigin: 'system_background',
     scopeId: 'scope-1',
     runId: 'run-1',
     parentTaskId: 'parent-1',
@@ -293,6 +295,7 @@ test('TaskProjectionRepository supports child-task lookup by parent task id', as
 
   repository.create({
     taskId: 'child-2',
+    taskOrigin: 'system_background',
     scopeId: 'scope-1',
     runId: 'run-1',
     parentTaskId: 'parent-1',

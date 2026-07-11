@@ -128,6 +128,8 @@ export interface ChatConversation {
 export interface ConversationScope {
   id: string
   agent: string
+  activeAgentId: string
+  handoffGeneration: number
   title: string
   parentConversationId?: string | null
   lineageRootId?: string | null
@@ -146,6 +148,10 @@ export interface ToolTraceEvent {
   kind: 'call' | 'result'
   text: string
   timestamp: Date
+  /** 工具名（SDK executor 事件携带；orchestrator 输出流事件缺省）。 */
+  toolName?: string
+  /** L3 详情：call = 入参 JSON 预览，result = 输出全文（main 侧已脱敏截断）。 */
+  detail?: string
 }
 
 export type AgentModuleKind =
@@ -459,6 +465,9 @@ export interface SoftErrorInfo {
 export interface ScopeRunState {
   scopeId: string
   agent: string
+  ownerAgentId?: string | null
+  executionBinding?: import('../../../shared/agent-execution-profile').TaskExecutionBinding | null
+  executionAgentDisplayName?: string | null
   requestId: string | null
   taskId?: string | null
   phase:

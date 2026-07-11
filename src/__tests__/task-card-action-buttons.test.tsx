@@ -85,7 +85,6 @@ function mountTaskCard(
   flushSync(() => {
     root.render(createElement(TaskCard, {
       run,
-      taskKey: 'task-a',
       sessionId: 'conv-a',
       expanded: true,
       ...props,

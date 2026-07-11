@@ -138,6 +138,7 @@ function attachFinalizeStore(
 ): void {
   runtime.setRuntime({
     getRunMetaRepository: () => repository,
+    getTaskProjectionStore: () => store,
     getTaskProjectionStoreForFinalize: () => store,
     getTaskProjection: (taskId: string) => store.get(taskId),
   } as never)
@@ -172,6 +173,8 @@ function createProjectionStore(records: Map<string, TaskProjectionRecord>): Task
 function createProjectionRecord(patch: Partial<TaskProjectionRecord> = {}): TaskProjectionRecord {
   return {
     taskId: 'task-finalizer',
+    taskOrigin: 'user_root',
+    ownerAgentId: 'butler',
     scopeId: 'scope-finalizer',
     runId: 'run-finalizer',
     taskType: 'short_task',
@@ -268,6 +271,7 @@ function createSummary(patch: Partial<ScopeRunSummary> = {}): ScopeRunSummary {
     resumableActions: ['cancel'],
     recentArtifacts: [],
     taskId: 'task-finalizer',
+    taskOrigin: 'user_root',
     taskProjectionId: 'task-finalizer',
     updatedAt: '2026-06-10T10:00:00.000Z',
     ...patch,
@@ -281,6 +285,7 @@ function createPayload(patch: Partial<ScopeRunEventPayload> = {}): ScopeRunEvent
     agent: 'butler',
     runId: 'run-finalizer',
     taskId: 'task-finalizer',
+    taskOrigin: 'user_root',
     phase: 'tool_running',
     module: 'system',
     timestamp: '2026-06-10T10:00:00.000Z',
@@ -304,7 +309,7 @@ describe('run finalizer all paths', () => {
     })
 
     const row = repository.get('run-done')
-    assert.equal(result.success, true)
+    assert.equal(result.success, true, JSON.stringify(result))
     assert.equal(row?.status, 'done')
     assert.equal(row?.terminalReason, 'done')
     assert.equal(row?.initiator, 'done')
@@ -403,7 +408,7 @@ describe('run finalizer all paths', () => {
 
     const row = repository.get('run-budget-finalizer')
     const projection = records.get('task-budget-finalizer')
-    assert.equal(result.success, true)
+    assert.equal(result.success, true, JSON.stringify(result))
     assert.equal(result.terminalReason, 'checkpoint_budget')
     assert.equal(row?.status, 'checkpoint')
     assert.equal(row?.terminalReason, 'checkpoint_budget')
@@ -478,7 +483,7 @@ describe('run finalizer all paths', () => {
 
       const row = repository.get('run-max-turn-done-finalizer')
       const projection = records.get('task-max-turn-done-finalizer')
-      assert.equal(result.success, true)
+      assert.equal(result.success, true, JSON.stringify(result))
       assert.equal(result.terminalReason, 'done')
       assert.equal(row?.status, 'done')
       assert.equal(row?.terminalReason, 'done')

@@ -17,6 +17,11 @@ function makeContext(memoryRoot: string): ToolContext & { store: BeliefCardStore
   const store = new BeliefCardStore({ memoryRoot })
   return {
     store,
+    invoker: 'model',
+    executionProfile: {
+      knowledgeWriteOwnerAgentId: 'butler',
+      allowedKnowledgeRefs: ['knowledge/rate-limits.md', 'knowledge/pref.md'],
+    } as never,
     runtime: {
       getBeliefCardStore: () => store,
       // executeMemoryTool retrieves these up-front for all tools; card cases
@@ -59,7 +64,7 @@ test('memory_write_card defaults to staged and is hidden from default read', asy
       await executeMemoryTool(
         'memory_read_card',
         { rel_path: 'knowledge/rate-limits.md', include_staged: true },
-        ctx,
+        { ...ctx, invoker: 'host' },
       ),
     )
     assert.equal(readStaged.success, true)

@@ -80,6 +80,7 @@ function parseUpdateColumns(sql: string): string[] {
 function baseProjection(overrides: Partial<TaskProjectionRecord> = {}): TaskProjectionRecord {
   return {
     taskId: 'task-suspend',
+    taskOrigin: 'legacy',
     scopeId: 'scope-suspend',
     runId: 'run-suspend',
     taskType: 'multi_step_task',

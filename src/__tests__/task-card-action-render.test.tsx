@@ -125,7 +125,6 @@ test('TaskCard renders only exact child-run continue action for suspended child 
 
   const rendered = mount(createElement(TaskCard, {
     run,
-    taskKey: 'scope-1:child-1',
     expanded: true,
     onContinueChildRun: (scopeId, childRunId) => {
       continueChildCalls.push([scopeId, childRunId])
@@ -181,7 +180,6 @@ test('TaskCard hides interaction badge for terminal failed runs', () => {
 
   const rendered = mount(createElement(TaskCard, {
     run,
-    taskKey: 'scope-1:task-failed',
     expanded: true,
   }))
 
@@ -222,7 +220,6 @@ test('TaskCard does not render supplement actions for blocked_config terminal ru
 
   const rendered = mount(createElement(TaskCard, {
     run,
-    taskKey: 'scope-blocked-config:task-blocked-config',
     expanded: true,
   }))
 

@@ -8,7 +8,8 @@ import {
   MAX_AGENT_SESSIONS,
   type ChatAttachment,
   type ConversationScope,
-  type ScopeRunState
+  type ScopeRunState,
+  type ToolTraceEvent
 } from '../../stores/useAgent'
 import { useWorkspace } from '../../stores/useWorkspace'
 import type { WorkbenchMode } from '../../stores/useMode'
@@ -86,6 +87,7 @@ import { formatTime } from './chat-panel/format-time'
 // All deps that previously closed over ChatPanel-local state are now
 // injected via params; behavior preserved byte-for-byte.
 import { useTaskInteractionHandlers } from './chat-panel/task-interaction/use-task-interaction-handlers'
+import { consumeThoroughDeliveryOverride } from '../../modules/agent/dynamicDeliveryMode'
 // Stage V V1.9a — channel + session-recall state, derivations, effects and
 // callbacks (selectedChannelKey / channelOptions / currentChannel /
 // filteredScopes / currentAgentData / sessionRecall query+results+capsules
@@ -101,6 +103,8 @@ import {
 interface SerializedTaskSnapshot {
   scopeId: string
   agent: string
+  ownerAgentId?: string | null
+  executionBinding?: import('../../../shared/agent-execution-profile').TaskExecutionBinding | null
   taskId?: string | null
   title: string
   phase: ScopeRunState['phase']
@@ -123,6 +127,8 @@ interface SerializedTaskSnapshot {
     kind: 'call' | 'result'
     text: string
     timestamp: string
+    toolName?: string
+    detail?: string
   }>
 }
 
@@ -131,6 +137,8 @@ interface SerializedToolTraceSnapshotItem {
   kind: 'call' | 'result'
   text: string
   timestamp: string
+  toolName?: string
+  detail?: string
 }
 
 export type ChatPanelState = 'expanding' | 'expanded' | 'collapsing' | 'collapsed'
@@ -375,6 +383,8 @@ export default function ChatPanel({
         return taskProjectionToTaskCardRun({
           // O1 whitelist
           scopeId: scope.id,
+          ownerAgentId: run.ownerAgentId ?? null,
+          executionBinding: run.executionBinding ?? null,
           taskId: run.taskId || run.taskContinuation?.taskId || null,
           phase: run.phase,
           terminalReason: run.terminalReason,
@@ -499,6 +509,8 @@ export default function ChatPanel({
     if (!projection.scopeId || !projection.updatedAt) return null
     return taskProjectionToTaskCardRun({
       scopeId: projection.scopeId,
+      ownerAgentId: projection.ownerAgentId ?? null,
+      executionBinding: projection.executionBinding ?? null,
       taskId: projection.taskId || projection.taskContinuation?.taskId || null,
       phase: projection.phase,
       title: projection.title || '任务',
@@ -520,6 +532,8 @@ export default function ChatPanel({
         kind: event.kind,
         text: event.text,
         timestamp: new Date(event.timestamp),
+        ...(event.toolName ? { toolName: event.toolName } : {}),
+        ...(event.detail ? { detail: event.detail } : {}),
       })),
       responseMessageId: projection.responseMessageId || null,
     })
@@ -536,15 +550,12 @@ export default function ChatPanel({
           id: event.id,
           kind: event.kind,
           text: event.text,
-          timestamp: new Date(event.timestamp)
+          timestamp: new Date(event.timestamp),
+          ...(event.toolName ? { toolName: event.toolName } : {}),
+          ...(event.detail ? { detail: event.detail } : {}),
         }
       })
-      .filter(Boolean) as Array<{
-      id: string
-      kind: 'call' | 'result'
-      text: string
-      timestamp: Date
-    }>
+      .filter(Boolean) as ToolTraceEvent[]
   }, [])
 
   useEffect(() => {
@@ -747,22 +758,26 @@ export default function ChatPanel({
   }, [])
 
   const sendingRef = useRef(false)
+  const [thoroughOverride, setThoroughOverride] = useState(false)
   const handleSend = useCallback(async () => {
     if (sendingRef.current) return
     const content = inputValue.trim()
     if (!content && attachments.length === 0) return
     sendingRef.current = true
+    const consumedOverride = consumeThoroughDeliveryOverride(thoroughOverride)
+    const deliveryMode = consumedOverride.deliveryMode
+    setThoroughOverride(consumedOverride.nextEnabled)
     setInputValue('', { preserveContinuationIntent: true })
     chatInputRef.current?.resetHeight()
     try {
-      const result = await sendMessage(content)
+      const result = await sendMessage(content, { deliveryMode })
       if (result.preserveInput) {
         setInputValue(content, { preserveContinuationIntent: true })
       }
     } finally {
       sendingRef.current = false
     }
-  }, [attachments.length, inputValue, setInputValue, sendMessage])
+  }, [attachments.length, inputValue, setInputValue, sendMessage, thoroughOverride])
 
   const handleAgentSelect = useCallback(
     (name: string) => {
@@ -923,6 +938,15 @@ export default function ChatPanel({
   // Blank until the current scope carries a real (non-placeholder) title —
   // i.e. until the user has actually started a conversation.
   const sessionTitle = resolveChatSessionTitle(currentScope?.title)
+  const agentDisplayName = (agentId: string | null | undefined): string => {
+    if (!agentId || agentId === 'butler') return 'Ready'
+    return agents.find((agent) => agent.name === agentId)?.displayName || deletedAgentDisplayName(agentId)
+  }
+  const agentResponsibilityLabel = currentScope
+    ? currentScope.activeAgentId === currentScope.agent
+      ? `${agentDisplayName(currentScope.agent)} 会话`
+      : `${agentDisplayName(currentScope.agent)} 会话 · 当前由 ${agentDisplayName(currentScope.activeAgentId)} 负责`
+    : undefined
   const modeSwitcher = workbenchMode && onWorkbenchModeChange
     ? (
         <div className="ready-chat-mode-tabs-dock" data-chat-mode-tabs-dock="true">
@@ -969,6 +993,7 @@ export default function ChatPanel({
         void runSessionRecallSearch(sessionRecallQuery)
       }}
       sessionTitle={sessionTitle}
+      agentResponsibilityLabel={agentResponsibilityLabel}
       formatTime={formatTime}
     />
   )
@@ -1040,6 +1065,8 @@ export default function ChatPanel({
       onSend={() => {
         void handleSend()
       }}
+      thoroughOverride={thoroughOverride}
+      onThoroughOverrideChange={setThoroughOverride}
       onStop={stopStreaming}
       onUndo={undoLastMessage}
       onPickFiles={pickFiles}

@@ -82,7 +82,7 @@ export const agentRegistryGroup: IpcChannelGroup<AgentRegistryGroupDeps> = {
       let rollbackStore: BeliefCardStore | null = null
       try {
         const status = payload?.status
-        if (status !== 'active' && status !== 'disabled' && status !== 'retired' && status !== 'merged') {
+        if (status !== 'active' && status !== 'disabled' && status !== 'merged') {
           return { success: false, error: 'unsupported lifecycle status', errorKind: 'input_validation' }
         }
         const migrated = Array.isArray(payload?.migrateCardRelPaths)

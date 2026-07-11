@@ -1,4 +1,4 @@
-import type { ModelProvider } from '@openai/agents'
+import type { AgentInputItem, MemorySession, ModelProvider } from '@openai/agents'
 import { classifyExecutionError } from '../../claude-bridge/error-classifier'
 import { buildRecoveryPlan } from '../../claude-bridge/recovery-router'
 import {
@@ -63,6 +63,8 @@ import type {
   ToolBridgeRuntimeContext
 } from './agent-sdk-types'
 import type { TurnTerminalReason } from './turn-frame'
+import { addRunUsage } from './run-usage-accumulator'
+import { isHandoffTakeoverToolOutput } from '../agents/handoff-control'
 
 const NATIVE_TEXT_BUFFER_TIMED_FLUSH_MS = 700
 
@@ -103,6 +105,8 @@ export interface AgentSdkModelToolLoopContext {
   preferCurrentDocumentRead: boolean
   requiresLocalDocumentWrite: boolean
   runHandle: RunHandle
+  /** Dynamic Delivery uses a candidate-only working session until verifier accept. */
+  modelSession?: MemorySession
   session: AgentSdkSession
   abortController: AbortController
   instructions: string
@@ -120,6 +124,7 @@ export interface AgentSdkModelToolLoopContext {
     projectionPatch?: Record<string, unknown> | null
   ) => void
   emitHeartbeat: (text: string) => void
+  checkpointSnapshotProvider?: () => Promise<AgentInputItem[] | null>
   nativeTextToolBoundaryFlush: { current: (() => void) | null }
   finishBudgetCheckpointIfNeeded: () => Promise<ExecutionTurnResult | null>
   maybeHandleSkillClarificationGuard: (
@@ -163,6 +168,7 @@ export async function executeAgentSdkModelToolLoop(
     preferCurrentDocumentRead,
     requiresLocalDocumentWrite,
     runHandle,
+    modelSession = runHandle.capturedSession,
     session,
     abortController,
     instructions,
@@ -176,6 +182,7 @@ export async function executeAgentSdkModelToolLoop(
     usedTools,
     emitOutput,
     emitHeartbeat,
+    checkpointSnapshotProvider,
     nativeTextToolBoundaryFlush,
     finishBudgetCheckpointIfNeeded,
     maybeHandleSkillClarificationGuard,
@@ -278,7 +285,8 @@ export async function executeAgentSdkModelToolLoop(
           requiredCapabilityGroups,
           requiredToolNames: allowedToolNames,
           lastUserMessage: pureUserTurnText,
-          resumeKind: 'snapshot'
+          resumeKind: 'snapshot',
+          sessionSnapshotOverride: await checkpointSnapshotProvider?.() ?? null
         })
         state.runMetaContinuationRef =
           rolling.projectionPatch.taskContinuation &&
@@ -294,7 +302,7 @@ export async function executeAgentSdkModelToolLoop(
       nativeTextBuffer = ''
       nativeTextAlreadyEmitted = ''
       clearNativeTextFlushTimer()
-      const baseItems = await runHandle.capturedSession.getItems()
+      const baseItems = await modelSession.getItems()
       const usedToolsAtAttemptStart = usedTools.length
       try {
         if (abortController.signal.aborted) {
@@ -363,7 +371,7 @@ export async function executeAgentSdkModelToolLoop(
           instructions,
           model,
           provider,
-          session: runHandle.capturedSession,
+          session: modelSession,
           tools: sdkTools,
           signal: abortController.signal,
           maxTurns: currentAgentSdkMaxTurns(),
@@ -386,10 +394,13 @@ export async function executeAgentSdkModelToolLoop(
         clearNativeTextFlushTimer()
         if (runResult.usage) {
           session.lastUsageTokens = runResult.usage.totalTokens
-          state.runMetaUsage = runResult.usage
         }
+        state.runMetaUsage = addRunUsage(state.runMetaUsage, runResult.usage)
         consumeModelIterations(Math.max(1, Math.round(runResult.iterationsUsed || 1)))
         await maybeWriteRollingBudgetCheckpoint()
+        if (toolBridgeRuntimeContext.hostControl === 'handoff_takeover') {
+          return finalizeEarlyReturn({ status: 'checkpoint', terminalReason: 'manual_suspend', finalText: '' })
+        }
         break
       } catch (error) {
         nativeTextToolBoundaryFlush.current = null
@@ -419,7 +430,9 @@ export async function executeAgentSdkModelToolLoop(
         ) {
           const compacted = await host.compactCapturedSession(
             name,
-            runHandle,
+            modelSession === runHandle.capturedSession
+              ? runHandle
+              : { ...runHandle, capturedSession: modelSession },
             baseItems,
             'overflow',
             contextWindowTokens
@@ -574,6 +587,9 @@ export async function executeAgentSdkModelToolLoop(
             args: call.args,
             result: output
           })
+          if (isHandoffTakeoverToolOutput(output)) {
+            return finalizeEarlyReturn({ status: 'checkpoint', terminalReason: 'manual_suspend', finalText: '' })
+          }
         }
         const handledMapAmbiguity = await host.resolveMapPlaceAmbiguityIfNeeded({
           bridgeResults,
@@ -765,6 +781,9 @@ export async function executeAgentSdkModelToolLoop(
         args: call.args,
         result: output
       })
+      if (isHandoffTakeoverToolOutput(output)) {
+        return finalizeEarlyReturn({ status: 'checkpoint', terminalReason: 'manual_suspend', finalText: '' })
+      }
     }
     const handledMapAmbiguity = await host.resolveMapPlaceAmbiguityIfNeeded({
       bridgeResults,

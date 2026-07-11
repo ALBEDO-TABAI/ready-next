@@ -63,6 +63,7 @@ export interface ConversationScopeStoreDeps {
    *  and hint persist after each assistant message append. */
   restoreReferenceHintFromScope: (scope: ConversationScope, scopeId: string) => void
   persistReferenceHintToScope: (scopeId: string) => void
+  resolveConversationAgentId: (requestedAgentId: string) => string
 }
 
 export class ConversationScopeStore {
@@ -114,6 +115,7 @@ export class ConversationScopeStore {
     const { row, mode } = this.deps.db.upsertConversationScope({
       id: scopeId,
       agent,
+      activeAgentId: this.deps.resolveConversationAgentId(agent),
       userId: 'default-user',
       title: '新对话',
       sourceKind: 'local',
@@ -133,6 +135,8 @@ export class ConversationScopeStore {
     return {
       id: row.id,
       agent: row.agent,
+      activeAgentId: row.active_agent_id || row.agent,
+      handoffGeneration: row.handoff_generation ?? 0,
       userId: row.user_id || undefined,
       title: row.title,
       parentConversationId: row.parent_conversation_id ?? null,
@@ -172,6 +176,7 @@ export class ConversationScopeStore {
     const { row } = this.deps.db.upsertConversationScope({
       id: existing?.id || `conv-${randomUUID()}`,
       agent,
+      activeAgentId: this.deps.resolveConversationAgentId(agent),
       title: existing?.title || sender || channelMeta?.name || '远程会话',
       sourceKind: 'channel',
       sourceId: channelId,

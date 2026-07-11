@@ -199,6 +199,7 @@ export class AgentRegistryRepository {
   ): AgentRegistryRecord {
     const normalizedId = String(id || '').trim()
     if (!normalizedId) throw new Error('[agent-registry] id is required')
+    if (status === 'retired') throw new Error('[agent-registry] retired is legacy read-only; use disabled')
     const normalizedStatus = normalizeStatus(status)
     if (normalizedId === MAIN_AGENT_ID && normalizedStatus !== 'active') {
       throw new Error('[agent-registry] main agent cannot be disabled or merged')
@@ -228,6 +229,10 @@ export class AgentRegistryRepository {
       if (current.status !== 'disabled') return current
     }
 
+    if (normalizedStatus === 'merged' && mergedIntoAgentId) {
+      db.prepare('UPDATE agents SET merged_into_agent_id = ? WHERE status = ? AND merged_into_agent_id = ?')
+        .run(mergedIntoAgentId, 'merged', normalizedId)
+    }
     db.prepare('UPDATE agents SET status = ?, merged_into_agent_id = ? WHERE id = ?')
       .run(normalizedStatus, mergedIntoAgentId, normalizedId)
 

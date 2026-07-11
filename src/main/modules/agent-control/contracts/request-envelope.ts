@@ -462,6 +462,7 @@ export function buildRequestEnvelope(params: {
   sessionId?: string
   scopeId?: string
   workspaceRoots?: string[]
+  contextRefIds?: string[]
 }): RequestEnvelope {
   const rawUserText = String(params.userText || '')
   const pureUserText = extractPureUserInput(rawUserText)
@@ -531,13 +532,26 @@ export function buildRequestEnvelope(params: {
     countsBySource[chunk.source] += 1
   }
 
+  const carriedContextRefs = Array.isArray(params.contextRefIds)
+    ? params.contextRefIds
+      .map((value) => String(value || '').trim())
+      .filter(Boolean)
+      .map<RequestEnvelopeResourceRef>((value) => ({
+        kind: /^(?:\/|[A-Za-z]:[\\/])/.test(value) ? 'path' : 'mention',
+        value,
+      }))
+    : []
+
   return {
     rawUserText,
     pureUserText,
     primaryInstruction,
     chunks,
     resources,
-    referencedResources: buildReferencedResources(rawUserText),
+    referencedResources: [
+      ...buildReferencedResources(rawUserText),
+      ...carriedContextRefs,
+    ].filter((ref, index, all) => all.findIndex((candidate) => candidate.kind === ref.kind && candidate.value === ref.value) === index),
     environmentHints: {
       hasDocumentContext: rawUserText.includes('### 当前文档上下文') || rawUserText.includes('### 文档引用'),
       hasWidgetTargetContext: rawUserText.includes('### Widget 更新上下文'),

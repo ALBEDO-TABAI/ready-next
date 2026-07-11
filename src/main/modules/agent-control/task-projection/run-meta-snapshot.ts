@@ -32,6 +32,7 @@ export function wrapRunMetaRepositoryWithCloseoutSnapshot(
         ...input,
         taskType: hasExplicitTaskType ? input.taskType : projection.taskType,
         budget: hasExplicitBudget ? input.budget : projection.budget ?? null,
+        executionBinding: input.executionBinding ?? projection.executionBinding ?? null,
       }
     } catch {
       return input // silent-catch: snapshot failure degrades to the unenriched write — never blocks finalize

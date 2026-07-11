@@ -1,6 +1,7 @@
 import { app } from 'electron'
 import { EventEmitter } from 'events'
 import { join } from 'path'
+import { existsSync, readFileSync } from 'node:fs'
 import {
   getDefaultConfig,
   normalizeAIConfig,
@@ -42,6 +43,11 @@ import {
 } from '../agents/specialist-content-edit-runtime'
 import type { SpecialistContentEditProposalStore } from '../agents/specialist-content-edit-proposals'
 import { RunCoordinator } from '../task-projection/run-coordinator'
+import { AgentExecutionProfileResolver, resolveConversationAgentId } from '../agents/agent-execution-profile'
+import { recoverPendingHandoffTakeovers } from '../agents/handoff-takeover-recovery'
+import { commitSameSessionHandoff } from '../agents/handoff-adoption-transaction'
+import { hasAdvancedPastHandoffContinuation } from '../agents/handoff-control'
+import { getSpecialistBlueprintStore } from '../agents/specialist-blueprint-runtime'
 import type { DomainAdapter } from '../domain-adapters/domain-adapter'
 import { getSkillsRuntimeManager } from '../../skills-runtime/runtime-manager'
 import { SkillTaskRunRepository } from '../../repositories/skill-task-run-repository'
@@ -70,8 +76,10 @@ import { ChannelConfigService } from './channel-config-service'
 import { ScopeAttachmentService } from './scope-attachment-service'
 import { SidecarPollService } from './sidecar-poll-service'
 import { ConversationScopeStore } from './conversation-scope-store'
+import type { ActivePlan } from '../system-reminders/active-plan-step-reminder'
 import { RemoteChannelService } from './remote-channel-service'
 import { reconcileTaskProjections } from '../task-projection/task-projection-reconciler'
+import { reconcileInterruptedDeliveryState } from './dynamic-delivery/delivery-reconciliation'
 import { canResumeAsUserPoint, type ResumePointHandle } from '../contracts/resume-handle'
 import { deriveTaskProjectionCanResume } from '../task-projection/task-projection-resume'
 import { assertSkillTaskRunInvariantConsistency } from '../skills/skill-task-tracker'
@@ -171,6 +179,17 @@ export class AgentControlRuntime extends EventEmitter {
   private readonly crystallizeScheduler = new CrystallizeScheduler(() => this.runCrystallizeRoundOnce(false))
   private readonly userProfileRepository = new UserProfileRepository()
   private readonly agentPersonalityRepository = new AgentPersonalityRepository()
+  private readonly executionProfileResolver = new AgentExecutionProfileResolver({
+    registry: this.agentRegistry,
+    personality: this.agentPersonalityRepository,
+    getKnowledgeStore: () => this.getBeliefCardStore(),
+    readAsset: (relPath) => {
+      const path = join(app.getPath('userData'), 'agent-memory', relPath)
+      return existsSync(path) ? readFileSync(path, 'utf8') : ''
+    },
+    isKnowledgeEnabled: () => isKnowledgeSystemEnabled(this.db),
+    listBlueprints: () => getSpecialistBlueprintStore().list(['confirmed']),
+  })
   private readonly externalMemoryProviderSlot = new ExternalMemoryProviderSlot()
   private readonly sessionRecallService = new SessionRecallService(this.db)
   private readonly reflectionService = new ReflectionService({
@@ -263,6 +282,7 @@ export class AgentControlRuntime extends EventEmitter {
     // EP3-A3: agents-table roster for the main-session charter/routing
     // index (registry declared above; empty/dead table degrades to []).
     getAgentRoster: () => this.agentRegistry.list(),
+    getAgentReadiness: (agentId) => this.executionProfileResolver.resolveReadiness(agentId),
     // EP2-K6: rollback switch (single read entry in the knowledge module).
     isKnowledgeSystemEnabled: () => isKnowledgeSystemEnabled(this.db),
     // P1 (2026-07-03, 7/01 reliability contract D) — active browser tab URL
@@ -282,6 +302,7 @@ export class AgentControlRuntime extends EventEmitter {
     agentRegistry: this.agentRegistry,
     taskProjectionStore: this.taskProjectionStore,
     getBeliefCardStore: () => this.getBeliefCardStore(),
+    getAgentReadiness: (agentId) => this.executionProfileResolver.resolveReadiness(agentId),
   })
   // B8-D R2 — session-recall/reference-hint/narration-continuation clusters
   // live in delegated sub-services; same one-line-delegate pattern as R1.
@@ -377,6 +398,8 @@ export class AgentControlRuntime extends EventEmitter {
       this.referenceHints.restoreReferenceHintFromScope(scope, scopeId),
     persistReferenceHintToScope: (scopeId) =>
       this.referenceHints.persistReferenceHintToScope(scopeId),
+    resolveConversationAgentId: (requestedAgentId) =>
+      resolveConversationAgentId(requestedAgentId, this.agentRegistry).effectiveAgentId,
   })
   // B8-D R5 — the remote-channel / inbound-IM cluster lives in a delegated
   // sub-service; same one-line-delegate pattern as R1–R4. Declared AFTER
@@ -453,9 +476,56 @@ export class AgentControlRuntime extends EventEmitter {
       executeAndCollect: (request) => this.orchestrator.executeAndCollect(request),
       emitScopeRunEvent: (payload, projectionTruth) => this.projectionSync.emitScopeRunEvent(payload, projectionTruth),
       reflectOnConversation: (scope, usedTools) => this.reflectOnConversation(scope, usedTools),
-      // EP3-A4 — handoff adoption moves the scope's owner; next turn's
-      // injection follows it (A2 channel).
-      resolveScopeOwnerAgent: (scopeId) => this.taskProjectionStore.getLatestOwnerAgentForScope(scopeId)
+      getTaskProjection: (taskId) => this.taskProjectionStore.get(taskId),
+      resolveExecutionProfile: (agentId) => this.executionProfileResolver.resolve(agentId),
+      createExecutionBinding: (input) => this.executionProfileResolver.createBinding(input),
+      persistRunBinding: (input) => {
+        const repository = this.getRunMetaRepository()
+        if (!repository) throw new Error('[runtime] run_meta unavailable')
+        const existing = repository.get(input.runId)
+        if (existing) {
+          if (JSON.stringify(existing.executionBinding) !== JSON.stringify(input.executionBinding)) {
+            throw new Error('[runtime] conflicting run execution binding')
+          }
+          return
+        }
+        repository.create({
+          runId: input.runId,
+          taskId: input.taskId,
+          scopeId: input.scopeId,
+          agentId: input.sessionAgentId,
+          executionBinding: input.executionBinding,
+          status: 'running',
+        })
+      },
+      getConversationScope: (scopeId) => this.conversationScopes.getConversationScope(scopeId),
+      getPendingHandoff: (taskId) => {
+        const projection = this.taskProjectionStore.get(taskId)
+        const ref = projection?.continuationRef as Record<string, unknown> | null | undefined
+        if (!ref || ref.kind !== 'handoff_takeover' || ref.consumed === true) return null
+        const targetAgentId = typeof ref.targetAgentId === 'string' ? ref.targetAgentId : ''
+        const userRequestVerbatim = typeof ref.userRequestVerbatim === 'string' ? ref.userRequestVerbatim : ''
+        const handoffGeneration = Number(ref.handoffGeneration || 0)
+        if (!targetAgentId || !userRequestVerbatim || !Number.isInteger(handoffGeneration) || handoffGeneration < 1) return null
+        return {
+          targetAgentId,
+          userRequestVerbatim,
+          handoffGeneration,
+          contextRefIds: Array.isArray(ref.contextRefIds) ? ref.contextRefIds.map(String) : [],
+        }
+      },
+      markHandoffConsumed: (taskId, handoffGeneration) => {
+        const projection = this.taskProjectionStore.get(taskId)
+        const ref = projection?.continuationRef as Record<string, unknown> | null | undefined
+        if (hasAdvancedPastHandoffContinuation(projection)) return
+        if (!projection || !ref || Number(ref.handoffGeneration) !== handoffGeneration) {
+          throw new Error('[runtime] handoff continuation changed before consume')
+        }
+        this.taskProjectionStore.update(taskId, {
+          continuationRef: { ...ref, consumed: true } as never,
+          updatedAt: new Date().toISOString(),
+        })
+      },
     })
     this.runProjection = new RunProjection({
       getScope: (scopeId) => this.getConversationScope(scopeId),
@@ -588,6 +658,68 @@ export class AgentControlRuntime extends EventEmitter {
     return this.promptAssembly
   }
 
+  resolveAgentExecutionProfile(agentId: string) {
+    return this.executionProfileResolver.resolve(agentId)
+  }
+
+  resolveAgentExecutionReadiness(agentId: string) {
+    return this.executionProfileResolver.resolveReadiness(agentId)
+  }
+
+  listAgentProfileSummaries() {
+    return this.agentRegistry.list()
+      .filter((record) => record.status === 'active')
+      .map((record) => ({
+        agentId: record.id,
+        name: record.name,
+        collaborationReady: this.executionProfileResolver.resolveReadiness(record.id).collaborationReady,
+      }))
+  }
+
+  createWorkflowParticipantBinding(input: {
+    profile: import('../../../../shared/agent-execution-profile').AgentExecutionProfile
+    runId: string
+    ownerAgentIdAtStart: string
+  }) {
+    return this.executionProfileResolver.createBinding({
+      ...input,
+      runOrigin: 'workflow_participant',
+      ownerAssignmentSource: 'parent_task',
+      executionSelectionSource: 'workflow_participant',
+    })
+  }
+
+  adoptSameSessionHandoff(input: {
+    taskId: string
+    scopeId: string
+    targetAgentId: string
+    userRequestVerbatim: string
+    contextRefs: string[]
+  }): { handoffGeneration: number } {
+    const rawDb = this.db.getRawDb()
+    if (!rawDb) throw new Error('[runtime] database unavailable')
+    return commitSameSessionHandoff({
+      getTask: (taskId) => {
+        const task = this.taskProjectionStore.get(taskId)
+        return task ? { scopeId: task.scopeId, runId: task.runId } : null
+      },
+      getConversation: (scopeId) => {
+        const scope = this.db.getConversationScope(scopeId)
+        return scope ? { agent: scope.agent, handoffGeneration: scope.handoff_generation ?? 0 } : null
+      },
+      begin: () => rawDb.exec('BEGIN'),
+      commit: () => rawDb.exec('COMMIT'),
+      rollback: () => rawDb.exec('ROLLBACK'),
+      updateTask: (taskId, patch) => this.taskProjectionStore.update(taskId, patch as never),
+      updateConversation: (scopeId, activeAgentId, handoffGeneration) => {
+        this.db.updateConversationAgentState(scopeId, activeAgentId, handoffGeneration)
+      },
+      onCommitted: (sessionAgentId, scopeId) => {
+        setTimeout(() => { this.orchestrator.interruptForSuspend(sessionAgentId, scopeId) }, 0)
+      },
+    }, input)
+  }
+
   /** EP1-K1: belief card store rooted at the same agent memory root. */
   getBeliefCardStore(): BeliefCardStore {
     if (!this.beliefCardStore) {
@@ -693,6 +825,22 @@ export class AgentControlRuntime extends EventEmitter {
       createTaskEventProofListener(createTaskProofSink(this.taskProjectionStore)),
     )
     this.projectionSync.scheduleTerminalProjectionSyncRetryDrain('startup')
+    for (const projection of this.taskProjectionStore.listRecentTasksForPreroute(500) as TaskProjectionRecord[]) {
+      if (!projection.deliveryState) continue
+      const reconciled = reconcileInterruptedDeliveryState(projection.deliveryState)
+      if (reconciled === projection.deliveryState) continue
+      this.taskProjectionStore.update(projection.taskId, {
+        deliveryState: reconciled,
+        status: 'recoverable_paused',
+        interactionState: 'suspended',
+        blockedReason: 'Dynamic Delivery 在应用退出时中断，可重新发送继续。',
+      })
+      logAgentMetric('dynamic_delivery_fallback', {
+        runId: projection.runId,
+        taskId: projection.taskId,
+        reason: 'startup_reconciliation',
+      })
+    }
 
     // EP2-K6 — truth-source boundary: startup full sync (K2 handover) +
     // hand-edit watcher, both behind the rollback switch. Files are never
@@ -726,6 +874,8 @@ export class AgentControlRuntime extends EventEmitter {
       console.error('[runtime] knowledge truth-source wiring failed:', error)
     }
 
+    await this.recoverPendingHandoffsOnStartup()
+
     const sidecarEnabled = this.getSettingBool('remote_channels_enabled', true)
     const autostart = this.getSettingBool('sidecar_autostart', true)
     const bindHost = this.db.getSetting('sidecar_bind_host') || '127.0.0.1'
@@ -733,6 +883,51 @@ export class AgentControlRuntime extends EventEmitter {
     this.sidecar.setBindConfig(bindHost, bindPort)
     if (!sidecarEnabled || !autostart) return
     await this.startSidecar()
+  }
+
+  private async recoverPendingHandoffsOnStartup(): Promise<void> {
+    const rawDb = this.db.getRawDb()
+    if (!rawDb) return
+    const rows = rawDb.prepare(`
+      SELECT task_id, scope_id, continuation_ref_json
+      FROM task_projections
+      WHERE status = 'recoverable_paused'
+        AND continuation_ref_json IS NOT NULL
+      ORDER BY updated_at ASC
+    `).all() as Array<{ task_id: string; scope_id: string; continuation_ref_json: string }>
+
+    await recoverPendingHandoffTakeovers({
+      listPending: () => rows.map((row) => ({
+        taskId: row.task_id,
+        scopeId: row.scope_id,
+        continuationRef: parseRecordJson(row.continuation_ref_json),
+      })),
+      getScope: (scopeId) => {
+        const row = this.db.getConversationScope(scopeId)
+        return row ? this.mapConversationRow(row) : null
+      },
+      runTakeover: ({ taskId, scope, userRequestVerbatim, contextRefIds }) => this.runCoordinator.runScoped({
+        scope,
+        message: userRequestVerbatim,
+        taskId,
+        contextRefIds,
+        runOrigin: 'handoff_takeover',
+        coordinators: this.getDomainAdapters(),
+      }),
+      markConsumed: (taskId, handoffGeneration) => {
+        const latest = this.taskProjectionStore.get(taskId)
+        const latestRef = latest?.continuationRef as Record<string, unknown> | null | undefined
+        if (hasAdvancedPastHandoffContinuation(latest)) return
+        if (!latest || !latestRef || Number(latestRef.handoffGeneration) !== handoffGeneration) {
+          throw new Error('handoff continuation changed before startup recovery consume')
+        }
+        this.taskProjectionStore.update(taskId, {
+          continuationRef: { ...latestRef, consumed: true } as never,
+          updatedAt: new Date().toISOString(),
+        })
+      },
+      log: (name, payload) => logAgentMetric(name, payload),
+    })
   }
 
   async stop(): Promise<void> {
@@ -1202,6 +1397,20 @@ export class AgentControlRuntime extends EventEmitter {
     return this.conversationScopes.getConversationScope(scopeId)
   }
 
+  getPersistedActivePlan(scopeId: string): ActivePlan | null {
+    const value = this.getConversationScope(scopeId)?.meta?.activePlan
+    return value && typeof value === 'object' ? value as ActivePlan : null
+  }
+
+  persistActivePlan(scopeId: string, plan: ActivePlan | null): void {
+    const scope = this.getConversationScope(scopeId)
+    if (!scope) return
+    const meta = { ...(scope.meta || {}) }
+    if (plan) meta.activePlan = plan
+    else delete meta.activePlan
+    this.db.updateConversationScopeMeta(scopeId, meta)
+  }
+
   getConversationScopeMessages(scopeId: string): ConversationScopeMessage[] {
     return this.conversationScopes.getConversationScopeMessages(scopeId)
   }
@@ -1258,6 +1467,7 @@ export class AgentControlRuntime extends EventEmitter {
     sessionIdOverride?: string
     workspaceRoots?: string[]
     continuationIntent?: ContinuationIntent | null
+    deliveryMode?: import('../../../../shared/dynamic-delivery').DeliveryMode
   }): Promise<SendScopedResponse> {
     return runConfirmedSendScoped({
       scopeId: payload.scopeId,
@@ -1379,6 +1589,7 @@ export class AgentControlRuntime extends EventEmitter {
               sessionIdOverride: payload.sessionIdOverride,
               workspaceRoots: payload.workspaceRoots,
               continuationIntent: normalizedContinuationIntent,
+              deliveryMode: payload.deliveryMode,
               coordinators: this.getDomainAdapters(),
             },
             {

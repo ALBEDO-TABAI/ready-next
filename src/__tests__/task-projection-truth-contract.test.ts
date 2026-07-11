@@ -61,6 +61,8 @@ test('projection truth snapshots override planning text when building persisted 
     agent: 'butler',
     runId: 'run-1',
     taskId: 'task-1',
+    taskOrigin: 'user_root',
+    ownerAgentId: 'butler',
     phase: 'done',
     latestText: '模型自己总结：也许已经完成',
     timestamp: '2026-04-17T09:01:00.000Z',

@@ -34,7 +34,7 @@ function scope(agent: string): ConversationScope {
 
 function routingCard(status: string, title: string): string {
   return ['---', `title: ${title}`, 'description: 该域请求转交专项 agent', 'confidence: H', 'tag: self',
-    'created: 2026-06-12', `status: ${status}`, '---', '正文'].join('\n')
+    'created: 2026-06-12', `status: ${status}`, 'triggers: 写作', '---', '正文'].join('\n')
 }
 
 function makeRoot(): string {
@@ -44,11 +44,21 @@ function makeRoot(): string {
 }
 
 function makeService(root: string, roster: RosterEntry[]): PromptAssemblyService {
+  for (const agent of roster) {
+    if (agent.id === MAIN_AGENT_ID || agent.status !== 'active' || !agent.charter) continue
+    mkdirSync(join(root, 'agents', agent.id), { recursive: true })
+    writeFileSync(join(root, 'agents', agent.id, 'RULES.md'), `# ${agent.name} rules\n`, 'utf8')
+  }
   return new PromptAssemblyService({
     getMemoryRoot: () => root,
     getScopeMessages: () => [],
     getBeliefCardStore: () => new BeliefCardStore({ memoryRoot: root }),
     getAgentRoster: () => roster,
+    getAgentReadiness: (id) => ({
+      conversationReady: roster.some((agent) => agent.id === id && agent.status === 'active'),
+      handoffReady: roster.some((agent) => agent.id === id && agent.status === 'active' && id !== MAIN_AGENT_ID && Boolean(agent.charter)),
+      autoRoutable: true, collaborationReady: false, reasons: [],
+    }),
   })
 }
 

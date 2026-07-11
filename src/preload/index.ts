@@ -87,8 +87,9 @@ const agentAPI = {
     agent: string,
     message: string | Array<{ type: string; text?: string; base64?: string; mimeType?: string }>,
     sessionId?: string,
-    requestId?: string
-  ) => ipcRenderer.invoke('agent:send', { agent, message, sessionId, requestId }),
+    requestId?: string,
+    deliveryMode?: 'standard' | 'adaptive' | 'thorough'
+  ) => ipcRenderer.invoke('agent:send', { agent, message, sessionId, requestId, deliveryMode }),
   newSession: (agent: string, sessionId?: string) => ipcRenderer.invoke('agent:newSession', { agent, sessionId }),
   sessionPrerouteEvaluate: (firstMessage: string) =>
     ipcRenderer.invoke('agent:sessionPreroute:evaluate', { firstMessage }),
@@ -222,6 +223,7 @@ const agentAPI = {
       message: string | Array<{ type: string; text?: string; base64?: string; mimeType?: string }>
       requestId?: string
       workspaceRoots?: string[]
+      deliveryMode?: 'standard' | 'adaptive' | 'thorough'
       userMessage?: {
         id: string
         content: string

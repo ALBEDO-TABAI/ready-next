@@ -8,9 +8,10 @@ const CHAT_BOTTOM_SAFETY_MARGIN_PX = 12
 // overflows the viewport), composer-resize-driven re-renders must NOT yank the
 // view back down. 96px ≈ one short message of slack so小幅 overshoot still counts.
 const CHAT_STICK_TO_BOTTOM_THRESHOLD_PX = 96
-import { Copy, Check, ChevronRight, Wrench, CheckCircle2, CircleDashed } from 'lucide-react'
+import { Copy, Check } from 'lucide-react'
 import type { AgentMessage, ChatAttachment, ToolTraceEvent } from '../../stores/useAgent'
-import { formatToolTracePreview } from '../../modules/agent/toolTracePreview'
+import { filterUserVisibleToolTraceEvents } from '../../modules/agent/toolTraceVisibility'
+import { ToolTraceCard } from './chat-panel/task/TaskCard'
 import { AskUserQuestionsCard } from './AskUserQuestionsCard'
 import { submitAskUserQuestionsAnswers, cancelAskUserQuestionsCard } from '../../stores/useAgent'
 
@@ -106,9 +107,11 @@ export default function ChatMessages({
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [visibleMessages.length, bottomOverlayInset])
 
-  const latestToolEvent = toolTrace.length > 0 ? toolTrace[toolTrace.length - 1] : null
-  const latestToolPreview = formatToolTracePreview(latestToolEvent?.text)
-  const shouldRenderGlobalToolTraceCapsule = showToolTraceCapsule && Object.keys(messageToolTraceSnapshots).length === 0 && !pendingToolTrace
+  const visibleGlobalToolTrace = useMemo(() => filterUserVisibleToolTraceEvents(toolTrace), [toolTrace])
+  const shouldRenderGlobalToolTraceCapsule = showToolTraceCapsule
+    && Object.keys(messageToolTraceSnapshots).length === 0
+    && !pendingToolTrace
+    && visibleGlobalToolTrace.length > 0
 
   return (
     <div
@@ -402,132 +405,16 @@ export default function ChatMessages({
         )
       })}
 
-      {/* Tool Trace Capsule */}
+      {/* Tool Trace Capsule — no-projection fallback，与消息内胶囊同一组件 */}
       {shouldRenderGlobalToolTraceCapsule && (
         <div className="flex">
-          <div
-            className="max-w-[92%] w-full"
-            style={{
-              borderRadius: 12,
-              border: '1px solid var(--border-default)',
-              background: 'color-mix(in srgb, var(--surface-card-bg) 24%, transparent)',
-              overflow: 'hidden',
-              backdropFilter: 'blur(16px) saturate(132%)',
-              WebkitBackdropFilter: 'blur(16px) saturate(132%)',
-            }}
-          >
-            <button
-              type="button"
-              onClick={onToggleToolTrace}
-              className="w-full text-left"
-              style={{
-                padding: '8px 10px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8,
-                background: 'transparent',
-                border: 'none',
-                cursor: 'pointer',
-              }}
-            >
-              <div
-                className="flex items-center justify-center"
-                style={{
-                  width: 18,
-                  height: 18,
-                  borderRadius: 999,
-                  background: 'color-mix(in srgb, var(--color-blue) 12%, transparent)',
-                  color: 'var(--color-blue)',
-                  flexShrink: 0,
-                }}
-              >
-                {toolTraceStatus === 'running'
-                  ? <CircleDashed style={{ width: 12, height: 12 }} className="animate-spin" strokeWidth={2} />
-                  : <CheckCircle2 style={{ width: 12, height: 12 }} strokeWidth={2} />}
-              </div>
-              <Wrench style={{ width: 13, height: 13, color: 'var(--text-gray)', flexShrink: 0 }} strokeWidth={2} />
-              <div style={{ minWidth: 0, flex: 1 }}>
-                <div
-                  className="t-ui"
-                  data-typography-role="ui"
-                  style={{
-                    color: 'var(--text-body)',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
-                  }}
-                >
-                  {toolTraceStatus === 'running'
-                    ? '工具调用中'
-                    : toolTraceStatus === 'error'
-                      ? '工具调用失败'
-                      : toolTraceStatus === 'cancelled'
-                        ? '工具调用已停止'
-                        : '工具调用结束'}
-                </div>
-                <div
-                  className="t-meta"
-                  data-typography-role="meta"
-                  style={{
-                    color: 'var(--text-gray)',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
-                    marginTop: 1,
-                  }}
-                >
-                  {latestToolPreview || (isStreaming ? '准备执行网页/文档操作…' : '本次会话没有额外工具输出。')}
-                </div>
-              </div>
-              <div className="t-data" data-typography-role="data" style={{ color: 'var(--text-light)', flexShrink: 0 }}>
-                {toolTrace.length} 条
-              </div>
-              <ChevronRight
-                style={{
-                  width: 13,
-                  height: 13,
-                  color: 'var(--text-light)',
-                  transform: toolTraceExpanded ? 'rotate(90deg)' : 'rotate(0deg)',
-                  transition: 'transform 180ms ease',
-                  flexShrink: 0,
-                }}
-                strokeWidth={2}
-              />
-            </button>
-
-            {toolTraceExpanded && (
-              <div
-                style={{
-                  padding: '8px 10px 10px',
-                  borderTop: '1px solid var(--border-default)',
-                  background: 'var(--bg-secondary)',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: 6,
-                  maxHeight: 180,
-                  overflowY: 'auto',
-                }}
-              >
-                {toolTrace.map((event) => (
-                  <div
-                    key={event.id}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'flex-start',
-                      gap: 6,
-                      color: 'var(--text-body)',
-                    }}
-                    className="t-meta"
-                    data-typography-role="meta"
-                  >
-                    <span style={{ color: event.kind === 'call' ? 'var(--color-blue)' : 'var(--color-green)', marginTop: 1 }}>
-                      {event.kind === 'call' ? '•' : '✓'}
-                    </span>
-                    <div style={{ minWidth: 0, flex: 1, wordBreak: 'break-word' }}>{event.text}</div>
-                  </div>
-                ))}
-              </div>
-            )}
+          <div className="max-w-[92%] w-full">
+            <ToolTraceCard
+              events={visibleGlobalToolTrace}
+              pending={toolTraceStatus === 'running'}
+              expanded={toolTraceExpanded}
+              onToggleExpanded={onToggleToolTrace}
+            />
           </div>
         </div>
       )}

@@ -31,7 +31,7 @@ function outcomeText(outcome: HandoffProposalOutcome): string {
         `用户已确认当前会话转给「${outcome.targetAgentName}」继续处理${outcome.taskId ? `（任务 ${outcome.taskId}）` : ''}。`,
         outcome.targetAgentCharter ? `目标 agent 职责：${outcome.targetAgentCharter}` : '',
         `用户原始请求：${outcome.userRequestVerbatim}`,
-        '现在请以该专项 agent 的职责继续完成用户原始请求。不要只说明“已转交”，也不要结束本轮；除非必须补充信息，否则直接交付结果。',
+        '主进程将停止当前身份的执行，并由目标 Agent 开启新的接管回合。当前模型不得继续执行或冒充目标 Agent。',
       ].filter(Boolean).join('\n')
     case 'adopted_new_session':
       return `用户选择新会话接手：目标 ${outcome.targetAgentId}，原话已预填，等待用户在新会话发起。`
@@ -46,9 +46,8 @@ function outcomeText(outcome: HandoffProposalOutcome): string {
 
 export async function executeProposeHandoff(
   args: ProposeHandoffArgs,
-  deps: Omit<HandoffProposalDeps, 'getAgent' | 'updateTaskOwner'> & {
+  deps: HandoffProposalDeps & {
     getAgent: HandoffProposalDeps['getAgent']
-    updateTaskOwner: HandoffProposalDeps['updateTaskOwner']
     taskId?: string | null
   },
 ): Promise<ToolExecutionOutput> {

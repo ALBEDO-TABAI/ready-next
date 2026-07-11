@@ -967,7 +967,8 @@ interface ElectronAgentAPI {
     agent: string,
     message: string | Array<{ type: string; text?: string; base64?: string; mimeType?: string }>,
     sessionId?: string,
-    requestId?: string
+    requestId?: string,
+    deliveryMode?: 'standard' | 'adaptive' | 'thorough'
   ) => Promise<{ success: boolean; error?: string | null }>
   newSession: (agent: string, sessionId?: string) => Promise<{ success: boolean; error?: string }>
   sessionPrerouteEvaluate: (firstMessage: string) => Promise<{
@@ -1138,6 +1139,7 @@ interface ElectronAgentAPI {
 	      message: string | Array<{ type: string; text?: string; base64?: string; mimeType?: string }>
 	      requestId?: string
 	      workspaceRoots?: string[]
+	      deliveryMode?: 'standard' | 'adaptive' | 'thorough'
 	      userMessage?: {
 	        id: string
 	        content: string

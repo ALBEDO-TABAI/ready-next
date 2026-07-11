@@ -122,6 +122,7 @@ async function upsertCollectionConsentProjection(
   }
   const record: TaskProjectionRecord = {
     taskId: request.sourceTaskId,
+    taskOrigin: existing?.taskOrigin ?? 'system_background',
     scopeId: request.scopeId,
     runId: request.requestId,
     taskType: existing?.taskType || 'multi_step_task',

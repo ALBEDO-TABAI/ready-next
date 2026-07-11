@@ -15,6 +15,8 @@ import type {
 } from '../../../../shared/agent-system-studio'
 import type { SpecialistAgentBlueprint } from '../../../../shared/agent-specialist-blueprint'
 import { hashSpecialistStudioContent } from './specialist-content-edit-proposals'
+import { createHash } from 'node:crypto'
+import { isAgentFoundationReady } from './agent-foundation-readiness'
 
 export interface SpecialistStudioDerivationCandidateLike {
   candidateRelPath: string
@@ -109,6 +111,7 @@ export function buildAgentSystemStudioSnapshot(input: {
   derivationCandidates?: SpecialistStudioDerivationCandidateLike[]
   stagedBlueprints?: SpecialistAgentBlueprint[]
   recentPrerouteTraces?: AgentSystemStudioPrerouteTrace[]
+  resolveReadiness?: (agentId: string) => AgentSystemStudioAgent['readiness']
   now?: Date
 }): AgentSystemStudioSnapshot {
   const routingCards = input.store.listRoutingCardInventory(input.agents)
@@ -117,6 +120,27 @@ export function buildAgentSystemStudioSnapshot(input: {
     const agentRoutingCards = routingCards.filter((card) => card.targetAgentId === agent.id)
     const ownedTasks = input.listOwnedTasks(agent.id).map(toOwnedTask)
     const contentEditProposals = input.listContentEditProposals?.(agent.id) ?? []
+    const rules = readRules(input.store, agent.id)
+    const foundation = readFoundation(input.store, agent.id)
+    const isMain = agent.id === MAIN_AGENT_ID
+    const conversationReady = agent.status === 'active'
+    const handoffReady = conversationReady && !isMain && Boolean(agent.charter?.trim()) && rules.exists
+    const autoRoutable = handoffReady && agentRoutingCards.some((card) => card.status === 'active' && !card.disabledReason)
+    const foundationReady = !isMain && isAgentFoundationReady({
+      agentId: agent.id,
+      foundation: foundation.content ?? '',
+      blueprints: input.stagedBlueprints ?? [],
+    })
+    const collaborationReady = handoffReady && foundationReady
+    const reasons = [
+      ...(agent.status !== 'active' ? ['agent_not_active'] : []),
+      ...(!isMain && !rules.exists ? ['rules_missing'] : []),
+      ...(!isMain && !foundation.exists ? ['foundation_missing'] : []),
+      ...(!isMain && foundation.exists && !foundationReady ? ['foundation_invalid'] : []),
+      ...(!isMain && !autoRoutable ? ['active_routing_missing'] : []),
+    ]
+    const readiness = input.resolveReadiness?.(agent.id)
+      ?? { conversationReady, handoffReady, autoRoutable, collaborationReady, reasons }
     return {
       id: agent.id,
       name: agent.name,
@@ -127,8 +151,10 @@ export function buildAgentSystemStudioSnapshot(input: {
       derivationReason: agent.derivationReason ?? null,
       mergedIntoAgentId: agent.mergedIntoAgentId ?? null,
       createdAt: agent.createdAt,
-      rules: readRules(input.store, agent.id),
-      foundation: readFoundation(input.store, agent.id),
+      readinessRevision: createHash('sha256').update(JSON.stringify({ status: agent.status, charter: agent.charter, rules: rules.contentHash, foundation: foundation.contentHash, autoRoutable })).digest('hex'),
+      readiness,
+      rules,
+      foundation,
       knowledgeCards,
       routingCards: agentRoutingCards,
       ownedTasks,

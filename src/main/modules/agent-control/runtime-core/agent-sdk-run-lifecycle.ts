@@ -256,6 +256,8 @@ export class AgentSdkRunLifecycle {
     blockedReason?: string
     waitingFor?: 'background' | 'none'
     resumeKind?: ResumeKind
+    /** Candidate delivery must checkpoint only committed content + canonical receipts. */
+    sessionSnapshotOverride?: AgentInputItem[] | null
   }): Promise<AgentSdkBudgetCheckpoint> {
     const outputDir = join(
       tmpdir(),
@@ -266,7 +268,7 @@ export class AgentSdkRunLifecycle {
     await mkdir(outputDir, { recursive: true })
     const runStatePath = join(outputDir, 'run_state.json')
     const sessionSnapshot = normalizeSessionSnapshotForSeed(
-      await params.runHandle.capturedSession.getItems()
+      params.sessionSnapshotOverride ?? await params.runHandle.capturedSession.getItems()
     )
     const now = new Date().toISOString()
     const terminalReason = params.terminalReason || 'checkpoint_budget'

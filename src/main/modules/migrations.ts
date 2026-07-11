@@ -2730,6 +2730,82 @@ const migrations: Migration[] = [
       db.exec('ALTER TABLE task_projections ADD COLUMN model_criteria_json TEXT')
       db.exec('ALTER TABLE task_projections ADD COLUMN expected_outputs_json TEXT')
     }
+  },
+  {
+    name: '066_agent_foundation_identity_binding',
+    up: (db) => {
+      db.exec('ALTER TABLE chat_conversations ADD COLUMN active_agent_id TEXT')
+      db.exec('ALTER TABLE chat_conversations ADD COLUMN handoff_generation INTEGER NOT NULL DEFAULT 0')
+      db.exec('ALTER TABLE task_projections ADD COLUMN task_origin TEXT')
+      db.exec('ALTER TABLE task_projections ADD COLUMN execution_binding_json TEXT')
+      db.exec('ALTER TABLE run_meta ADD COLUMN execution_binding_json TEXT')
+
+      type AgentRow = { id: string; status: string; merged_into_agent_id: string | null }
+      const agents = new Map(
+        db.prepare('SELECT id, status, merged_into_agent_id FROM agents')
+          .all<AgentRow>()
+          .map((row) => [row.id, row]),
+      )
+      const resolveActive = (requested: string | null | undefined): string => {
+        let current = String(requested || '').trim()
+        const seen = new Set<string>()
+        while (current && !seen.has(current)) {
+          seen.add(current)
+          const agent = agents.get(current)
+          if (!agent) break
+          if (agent.status === 'active') return agent.id
+          if (agent.status !== 'merged' || !agent.merged_into_agent_id) break
+          current = agent.merged_into_agent_id
+        }
+        return 'butler'
+      }
+
+      type ConversationRow = { id: string; agent: string }
+      const conversations = db.prepare('SELECT id, agent FROM chat_conversations').all<ConversationRow>()
+      const latestOwner = db.prepare(`
+        SELECT owner_agent_id
+        FROM task_projections
+        WHERE scope_id = ? AND owner_agent_id IS NOT NULL
+        ORDER BY updated_at DESC, created_at DESC
+        LIMIT 1
+      `)
+      const updateConversation = db.prepare(
+        'UPDATE chat_conversations SET active_agent_id = ? WHERE id = ?',
+      )
+      for (const conversation of conversations) {
+        const owner = latestOwner.all<{ owner_agent_id: string | null }>(conversation.id)[0]?.owner_agent_id
+        const ownerAgent = owner ? agents.get(owner) : null
+        const requested = ownerAgent?.status === 'active' ? owner : conversation.agent
+        updateConversation.run(resolveActive(requested), conversation.id)
+      }
+
+      db.exec("UPDATE task_projections SET task_origin = 'legacy' WHERE task_origin IS NULL")
+      db.exec(`
+        UPDATE task_projections
+        SET owner_agent_id = (
+          SELECT COALESCE(chat_conversations.active_agent_id, chat_conversations.agent)
+          FROM chat_conversations
+          WHERE chat_conversations.id = task_projections.scope_id
+        )
+        WHERE owner_agent_id IS NULL
+          AND NOT EXISTS (
+            SELECT 1
+            FROM task_projections AS handed_off
+            WHERE handed_off.scope_id = task_projections.scope_id
+              AND handed_off.owner_agent_id IS NOT NULL
+          )
+          AND EXISTS (
+            SELECT 1 FROM chat_conversations
+            WHERE chat_conversations.id = task_projections.scope_id
+          )
+      `)
+    }
+  },
+  {
+    name: '067_dynamic_delivery_state',
+    up: (db) => {
+      db.exec('ALTER TABLE task_projections ADD COLUMN delivery_state_json TEXT')
+    }
   }
 ]
 

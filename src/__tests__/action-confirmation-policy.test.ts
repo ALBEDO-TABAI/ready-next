@@ -369,3 +369,24 @@ test('source pin: confirmation gate sits AFTER authorization and consumes only (
   assert.ok(gateIdx > 0, 'confirmation gate must exist and take exactly (toolName, args) — no frame/intent inputs')
   assert.ok(authIdx < gateIdx, 'confirmation gate must run AFTER skill tool authorization')
 })
+
+// --- W10-F6（2026-07-11 dogfood）：导出覆写并入"覆盖即销毁"确认规则 ----------
+
+test('skill_export_artifact with overwrite=true requires confirmation (M2)', () => {
+  const decision = resolveConfirmationGate('skill_export_artifact', {
+    relativePath: 'out/白痴_第二部第1章笔记.md',
+    targetPath: '/Users/user/实验田/测试/lib-a/多看书/白痴笔记/第二部/白痴_第二部第1章笔记.md',
+    overwrite: true,
+  })
+  assert.equal(decision.mode, 'M2')
+  assert.equal(decision.action, 'confirm')
+  assert.equal(decision.ruleId, 'm2-overwrite-existing-file')
+})
+
+test('skill_export_artifact without overwrite stays allowed (M4 default; COPYFILE_EXCL guards existing targets)', () => {
+  const decision = resolveConfirmationGate('skill_export_artifact', {
+    relativePath: 'out/report.md',
+    targetPath: '/tmp/report.md',
+  })
+  assert.equal(decision.action, 'allow')
+})

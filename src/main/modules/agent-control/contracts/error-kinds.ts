@@ -541,6 +541,30 @@ export type WebResearchErrorKindKey = keyof typeof WEB_RESEARCH_ERROR_KINDS
 export type WebResearchErrorKind =
   (typeof WEB_RESEARCH_ERROR_KINDS)[WebResearchErrorKindKey]['code']
 
+// ---------- dynamic delivery runtime ----------
+
+export const DYNAMIC_DELIVERY_ERROR_KINDS = {
+  preflightUnknown: { code: 'delivery_preflight_unknown', noMetric: true, description: 'Required delivery preflight facts were unknown.' },
+  planInvalid: { code: 'delivery_plan_invalid', noMetric: true, description: 'The bounded delivery plan was invalid.' },
+  profileUnavailable: { code: 'delivery_profile_unavailable', noMetric: true, description: 'A selected delivery profile was unavailable.' },
+  parentProjectionUnavailable: { code: 'delivery_parent_projection_unavailable', noMetric: true, description: 'The parent projection was unavailable.' },
+  packetTreeTransactionFailed: { code: 'delivery_packet_tree_transaction_failed', noMetric: true, description: 'The packet tree transaction failed.' },
+  capacityExceeded: { code: 'delivery_scheduler_capacity_exceeded', noMetric: true, description: 'The delivery scheduler reached its hard concurrency cap.' },
+  workerFailed: { code: 'delivery_worker_failed', noMetric: true, description: 'A delivery worker failed and received an explicit settlement.' },
+  workerReportInvalid: { code: 'delivery_worker_report_invalid', noMetric: true, description: 'A worker report failed validation.' },
+  evidenceInvalid: { code: 'delivery_evidence_invalid', noMetric: true, description: 'A delivery evidence handle failed validation.' },
+  requiredPackageUnsettled: { code: 'delivery_required_package_unsettled', noMetric: true, description: 'A required package was not settled.' },
+  budgetExhausted: { code: 'delivery_budget_exhausted', noMetric: true, description: 'The delivery token budget was exhausted.' },
+  wallClockExceeded: { code: 'delivery_wall_clock_exceeded', noMetric: true, description: 'The delivery wall-clock budget was exceeded.' },
+  verifierUnavailable: { code: 'delivery_verifier_unavailable', noMetric: true, description: 'The fresh verifier was unavailable.' },
+  repairExhausted: { code: 'delivery_repair_exhausted', noMetric: true, description: 'The single allowed repair was exhausted.' },
+  restartCheckpointed: { code: 'delivery_restart_checkpointed', noMetric: true, description: 'Interrupted delivery was checkpointed during restart.' },
+} as const satisfies Record<string, ErrorKindMeta>
+
+export type DynamicDeliveryErrorKindKey = keyof typeof DYNAMIC_DELIVERY_ERROR_KINDS
+export type DynamicDeliveryErrorKind =
+  (typeof DYNAMIC_DELIVERY_ERROR_KINDS)[DynamicDeliveryErrorKindKey]['code']
+
 // ---------- helpers ----------
 
 const ALL_REGISTERED_CODES: ReadonlySet<string> = new Set<string>([
@@ -555,6 +579,7 @@ const ALL_REGISTERED_CODES: ReadonlySet<string> = new Set<string>([
   ...Object.values(ACTION_CONFIRMATION_ERROR_KINDS).map((m) => m.code),
   ...Object.values(SPECIALIST_BLUEPRINT_ERROR_KINDS).map((m) => m.code),
   ...Object.values(WEB_RESEARCH_ERROR_KINDS).map((m) => m.code),
+  ...Object.values(DYNAMIC_DELIVERY_ERROR_KINDS).map((m) => m.code),
 ])
 
 /** True iff `kind` is a registered errorKind in either group. */
@@ -595,6 +620,9 @@ export function lookupErrorKindMeta(code: string): ErrorKindMeta | null {
     if (meta.code === code) return meta
   }
   for (const meta of Object.values(WEB_RESEARCH_ERROR_KINDS)) {
+    if (meta.code === code) return meta
+  }
+  for (const meta of Object.values(DYNAMIC_DELIVERY_ERROR_KINDS)) {
     if (meta.code === code) return meta
   }
   return null

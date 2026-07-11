@@ -414,7 +414,7 @@ describe('action announcement guard', () => {
     assert.equal(result.success, true)
     assert.equal(result.status, 'checkpoint')
     assert.equal(result.terminalReason, 'checkpoint_steered')
-    assert.equal(result.contextUsage?.usedInputTokens, 21)
+    assert.equal(result.contextUsage?.usedInputTokens, 32)
     assert.match(result.finalText, /未能启动/)
     assert.match(result.finalText, /回复'继续'可恢复/)
     assert.ok(outputs.some((event) => event.chunk.includes('已保存断点')))
@@ -437,8 +437,8 @@ describe('action announcement guard', () => {
     assert.equal(row?.terminalReason, 'checkpoint_steered')
     assert.deepEqual(row?.continuationRef, continuation)
     assert.equal(row?.lastMessageText, result.finalText)
-    assert.equal(row?.inputTokens, 21)
-    assert.equal(row?.outputTokens, 8)
+    assert.equal(row?.inputTokens, 32)
+    assert.equal(row?.outputTokens, 12)
   })
 
   test('does not trigger for ordinary conversation without active task context', async () => {

@@ -557,7 +557,11 @@ export class RemoteChannelService {
               threadKey: pending.thread,
               sender: agent,
               direction: 'outbound',
-              typingIndicatorSent: typingIndicatorShown
+              typingIndicatorSent: typingIndicatorShown,
+              runId: executionResult.executionBinding?.runId ?? null,
+              executionAgentId: executionResult.executionBinding?.effectiveAgentId ?? null,
+              displayNameSnapshot: executionResult.executionAgentDisplayName ?? executionResult.executionBinding?.effectiveAgentId ?? agent,
+              executionMaterialHash: executionResult.executionBinding?.executionMaterialHash ?? null,
             }
           })
           this.deps.emitConversationEvent({

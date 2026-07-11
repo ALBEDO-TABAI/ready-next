@@ -3,7 +3,7 @@ title: Dynamic Delivery v3：Agent 原生的单轮协作交付
 date: 2026-07-10
 kind: roadmap
 enforce: false
-status: revised v3 — 根基先行，一条协作主链，待实施验收
+status: completed — 2026-07-11 Dynamic Delivery 发布门通过
 owner: 白
 original_author: Claude (Fable 5)
 revision_author: Codex

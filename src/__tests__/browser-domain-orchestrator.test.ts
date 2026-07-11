@@ -69,23 +69,119 @@ test('BrowserDomainOrchestrator does not advance steps from narration alone', ()
   assert.match(progress.checkpointMessage || '', /最近证据: 暂无可推进步骤的结构化证据/)
 })
 
-test('BrowserDomainOrchestrator advances steps from browser tool evidence', () => {
+test('BrowserDomainOrchestrator advances target steps only from an explicit target match', () => {
   const orchestrator = new BrowserDomainOrchestrator({} as BrowserTaskPlanner)
   const initialState = orchestrator.createToolLoopState(createDecision())
 
-  const progress = orchestrator.recordToolLoopProgress({
+  const unrelatedMap = orchestrator.recordToolLoopProgress({
     state: initialState,
-    executedBrowserToolsThisIteration: 2,
+    executedBrowserToolsThisIteration: 1,
     browserToolResultsThisIteration: [{
       toolName: 'browser_read_page_map',
-      resultText: JSON.stringify({ pageIdentity: { url: 'https://example.com', generation: 1 } }),
+      resultText: JSON.stringify({ ok: true, pageIdentity: { url: 'https://example.com', generation: 1 } }),
+    }],
+  })
+  assert.equal(unrelatedMap.state.stepIndex, 0)
+
+  const progress = orchestrator.recordToolLoopProgress({
+    state: unrelatedMap.state,
+    executedBrowserToolsThisIteration: 2,
+    browserToolResultsThisIteration: [{
+      toolName: 'browser_probe_readonly',
+      resultText: JSON.stringify({ ok: true, pageIdentity: { url: 'https://example.com' }, targetMatched: true }),
     }],
   })
 
   assert.equal(progress.state.stepIndex, 1)
   assert.equal(progress.advancedStepIndex, 1)
   assert.match(progress.checkpointMessage || '', /当前步骤: 2\/2 — ensure_upload: 上传附件/)
-  assert.match(progress.checkpointMessage || '', /最近证据: browser_read_page_map:page_observed/)
+  assert.match(progress.checkpointMessage || '', /browser_probe_readonly:page_target_matched/)
+})
+
+test('BrowserDomainOrchestrator rejects failed or generic tool success as completion evidence', () => {
+  const orchestrator = new BrowserDomainOrchestrator({} as BrowserTaskPlanner)
+  const decision = createDecision()
+  decision.plan!.steps = [decision.plan!.steps[1]]
+  const initialState = orchestrator.createToolLoopState(decision)
+
+  for (const [toolName, result] of [
+    ['browser_upload_scope_attachment', { ok: false, input_has_files: true }],
+    ['browser_upload_scope_attachment', { ok: true }],
+    ['browser_upload_scope_attachment', { ok: true, input_has_files: false }],
+    ['browser_type', { ok: false, prompt_matched: true }],
+    ['browser_navigate', { ok: false }],
+  ] as const) {
+    const progress = orchestrator.recordToolLoopProgress({
+      state: initialState,
+      executedBrowserToolsThisIteration: 1,
+      browserToolResultsThisIteration: [{ toolName, resultText: JSON.stringify(result) }],
+    })
+    assert.equal(progress.state.stepIndex, 0, `${toolName} must not satisfy the upload step`)
+  }
+})
+
+test('BrowserDomainOrchestrator requires post-action page state before confirming submit', () => {
+  const orchestrator = new BrowserDomainOrchestrator({} as BrowserTaskPlanner)
+  const decision = createDecision()
+  decision.plan!.steps = [{
+    id: 'submit',
+    goal: '提交并确认进入运行态',
+    action: '点击提交',
+    verify: ['页面出现运行态证据'],
+    skipIf: [],
+    failIf: [],
+    retryLimit: 1,
+    recoverWith: [],
+  }]
+  const initialState = orchestrator.createToolLoopState(decision)
+
+  const clickOnly = orchestrator.recordToolLoopProgress({
+    state: initialState,
+    executedBrowserToolsThisIteration: 1,
+    browserToolResultsThisIteration: [{
+      toolName: 'browser_act_on_target',
+      resultText: JSON.stringify({ ok: true, changed: true, action: 'click' }),
+    }],
+  })
+  assert.equal(clickOnly.state.stepIndex, 0)
+
+  const explicitlyUnconfirmed = orchestrator.recordToolLoopProgress({
+    state: clickOnly.state,
+    executedBrowserToolsThisIteration: 1,
+    browserToolResultsThisIteration: [{
+      toolName: 'browser_probe_readonly',
+      resultText: JSON.stringify({ ok: true, submit_confirmed: false, running_state: false }),
+    }],
+  })
+  assert.equal(explicitlyUnconfirmed.state.stepIndex, 0)
+
+  const confirmed = orchestrator.recordToolLoopProgress({
+    state: clickOnly.state,
+    executedBrowserToolsThisIteration: 1,
+    browserToolResultsThisIteration: [{
+      toolName: 'browser_probe_readonly',
+      resultText: JSON.stringify({ ok: true, submitEvidence: ['page_processing_state'] }),
+    }],
+  })
+  assert.equal(confirmed.state.stepIndex, 1)
+})
+
+test('BrowserDomainOrchestrator rejects explicitly false prompt evidence', () => {
+  const orchestrator = new BrowserDomainOrchestrator({} as BrowserTaskPlanner)
+  const decision = createDecision()
+  decision.plan!.steps = [{
+    id: 'prompt', goal: '填写提示词', action: '输入', verify: ['提示词已填写'],
+    skipIf: [], failIf: [], retryLimit: 1, recoverWith: [],
+  }]
+  const progress = orchestrator.recordToolLoopProgress({
+    state: orchestrator.createToolLoopState(decision),
+    executedBrowserToolsThisIteration: 1,
+    browserToolResultsThisIteration: [{
+      toolName: 'browser_type',
+      resultText: JSON.stringify({ ok: true, prompt_matched: false }),
+    }],
+  })
+  assert.equal(progress.state.stepIndex, 0)
 })
 
 test('BrowserDomainOrchestrator builds limit reminder from current browser step', () => {

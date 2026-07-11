@@ -21,6 +21,8 @@ import {
 import { buildExecutionFallbackState } from '../../claude-bridge/execution-fallback-policy'
 import { randomUUID } from 'node:crypto'
 import type { TurnTerminalReason } from '../runtime-core/turn-frame'
+import type { AgentExecutionProfile, TaskCreationOrigin, TaskExecutionBinding } from '../../../../shared/agent-execution-profile'
+import { runOriginForRequest } from './task-agent-binding'
 
 function phaseFromTerminalReason(reason: TurnTerminalReason | null | undefined, success?: boolean): ScopeRunEventPayload['phase'] | null {
   if (!reason) return null
@@ -50,8 +52,10 @@ export class RunCoordinator {
         message: RunMessage
         coordinators: RunCoordinatorRequest['coordinators']
         workspaceRoots?: string[]
+        contextRefIds?: string[]
         /** EP3-A4 — the scope's effective owner; switches A2 injection. */
         ownerAgentId?: string | null
+        executionProfile: AgentExecutionProfile
       }) => Promise<PreparedRunPayload>
       applyToMessage: (message: RunMessage, prepared: PreparedRunPayload) => RunMessage
       recordRunOutcome: (payload: {
@@ -70,9 +74,30 @@ export class RunCoordinator {
     executeAndCollect: (request: ExecutionHostRequest) => Promise<ExecutionHostResult>
     emitScopeRunEvent: (payload: ScopeRunEventPayload, projectionTruth?: ProjectionTruthSnapshot | null) => void
     reflectOnConversation: (scope: ConversationScope, usedTools: string[]) => Promise<ScopeRunMemoryCapture | null>
-    /** EP3-A4 — most recent ownerAgentId among the scope's tasks (handoff
-     *  adoption switches it); absent/null keeps current behavior. */
-    resolveScopeOwnerAgent?: (scopeId: string) => string | null
+    getTaskProjection?: (taskId: string) => { scopeId?: string; ownerAgentId?: string | null; taskOrigin: TaskCreationOrigin } | null
+    resolveExecutionProfile?: (agentId: string) => Promise<AgentExecutionProfile>
+    createExecutionBinding?: (input: {
+      profile: AgentExecutionProfile
+      runId: string
+      ownerAgentIdAtStart: string
+      runOrigin: TaskExecutionBinding['runOrigin']
+      ownerAssignmentSource: TaskExecutionBinding['ownerAssignmentSource']
+    }) => TaskExecutionBinding
+    persistRunBinding?: (input: {
+      runId: string
+      taskId: string
+      scopeId: string
+      sessionAgentId: string
+      executionBinding: TaskExecutionBinding
+    }) => void
+    getConversationScope?: (scopeId: string) => ConversationScope | null
+    getPendingHandoff?: (taskId: string) => {
+      targetAgentId: string
+      handoffGeneration: number
+      userRequestVerbatim: string
+      contextRefIds: string[]
+    } | null
+    markHandoffConsumed?: (taskId: string, handoffGeneration: number) => void
   }) {}
 
   async runScoped(
@@ -94,14 +119,58 @@ export class RunCoordinator {
     hooks?: RunCompletionHooks & ReflectionResultHook,
   ): Promise<RunCoordinatorResult> {
     const taskId = request.taskId || `task-${randomUUID()}`
+    const runId = request.requestId || `run-${randomUUID()}`
+    const existingTask = request.taskId ? this.deps.getTaskProjection?.(request.taskId) ?? null : null
+    if (existingTask?.scopeId && existingTask.scopeId !== request.scope.id) {
+      throw new Error('[run-coordinator] continuation task does not belong to scope')
+    }
+    const taskOrigin: TaskCreationOrigin = existingTask?.taskOrigin
+      ?? (request.parentTaskId ? 'workflow_child' : 'user_root')
+    const ownerAgentId = existingTask?.ownerAgentId || request.scope.activeAgentId || request.scope.agent
+    if (!ownerAgentId) throw new Error('[run-coordinator] task owner is required')
+    const executionProfile = this.deps.resolveExecutionProfile
+      ? await this.deps.resolveExecutionProfile(ownerAgentId)
+      : {
+        requestedAgentId: ownerAgentId, effectiveAgentId: ownerAgentId, personaRef: ownerAgentId,
+        name: ownerAgentId, charter: '', personality: '', rules: '', knowledgeIndex: '', allowedKnowledgeRefs: [],
+        knowledgeWriteOwnerAgentId: ownerAgentId, knowledgeWriteNamespace: `agents/${ownerAgentId}/knowledge`,
+        executionMaterialHash: `legacy-test-${ownerAgentId}`, readinessRevision: `legacy-test-${ownerAgentId}`,
+        redirectChain: [], readiness: { conversationReady: true, handoffReady: false, autoRoutable: false, collaborationReady: false, reasons: ['legacy_test_fallback'] },
+      } satisfies AgentExecutionProfile
+    const bindingInput = {
+      profile: executionProfile,
+      runId,
+      ownerAgentIdAtStart: ownerAgentId,
+      runOrigin: request.runOrigin ?? runOriginForRequest({ isContinuation: Boolean(existingTask || request.continuationIntent) }),
+      ownerAssignmentSource: request.runOrigin === 'handoff_takeover'
+        ? 'handoff'
+        : existingTask ? 'continuation' : request.parentTaskId ? 'parent_task' : 'conversation_active',
+    } as const
+    const executionBinding = this.deps.createExecutionBinding
+      ? this.deps.createExecutionBinding(bindingInput)
+      : {
+        schemaVersion: 1, runId, ownerAgentIdAtStart: ownerAgentId, runOrigin: bindingInput.runOrigin,
+        kind: 'registered_agent', requestedAgentId: ownerAgentId, effectiveAgentId: ownerAgentId,
+        executionMaterialHash: executionProfile.executionMaterialHash,
+        ownerAssignmentSource: bindingInput.ownerAssignmentSource, executionSelectionSource: 'task_owner', resolutionKind: 'direct',
+      } satisfies TaskExecutionBinding
+    this.deps.persistRunBinding?.({
+      runId,
+      taskId,
+      scopeId: request.scope.id,
+      sessionAgentId: request.scope.agent,
+      executionBinding,
+    })
     const prepared = await this.deps.promptAssembly.buildForScopedRun({
       scope: request.scope,
       message: request.message,
       coordinators: request.coordinators,
       workspaceRoots: request.workspaceRoots,
+      contextRefIds: request.contextRefIds,
       // EP3-A4 — adoption switched the scope's owner; this is where the
       // next turn's injection follows it (A2 channel).
-      ownerAgentId: this.deps.resolveScopeOwnerAgent?.(request.scope.id) ?? null,
+      ownerAgentId,
+      executionProfile,
     })
     const initialTaskType = request.budget ? 'short_task' : resolveInitialTaskTypeFromPrepared(prepared)
     const budget = request.budget || createRunBudgetSeed(initialTaskType)
@@ -148,8 +217,13 @@ export class RunCoordinator {
       type: 'started',
       scopeId: request.scope.id,
       agent: request.scope.agent,
-      runId: request.requestId,
+      runId,
       taskId,
+      ownerAgentId,
+      taskOrigin,
+      executionBinding,
+      executionAgentDisplayName: executionProfile.name,
+      handoffGeneration: request.scope.handoffGeneration,
       parentTaskId: request.parentTaskId,
       parentStepId: request.parentStepId,
       phase: 'planning',
@@ -173,9 +247,12 @@ export class RunCoordinator {
 
     const result = await this.deps.executeAndCollect({
       agent: request.scope.agent,
+      sessionAgentId: request.scope.agent,
+      executionBinding,
+      executionProfile,
       sessionId: request.scope.id,
       sessionIdOverride: request.sessionIdOverride,
-      requestId: request.requestId,
+      requestId: runId,
       sourceMessageId: request.sourceMessageId ?? null,
       taskId,
       parentTaskId: request.parentTaskId,
@@ -188,6 +265,7 @@ export class RunCoordinator {
       budgetState,
       taskBudgetRuntime,
       continuationIntent: request.continuationIntent || null,
+      deliveryMode: request.deliveryMode,
     })
 
     const resolvedTaskBudgetRuntime = result.taskBudgetRuntime
@@ -289,8 +367,13 @@ export class RunCoordinator {
       type: 'updated',
       scopeId: request.scope.id,
       agent: request.scope.agent,
-      runId: request.requestId,
+      runId,
       taskId,
+      ownerAgentId,
+      taskOrigin,
+      executionBinding,
+      executionAgentDisplayName: executionProfile.name,
+      handoffGeneration: request.scope.handoffGeneration,
       parentTaskId: request.parentTaskId,
       parentStepId: request.parentStepId,
       phase: finalPhase,
@@ -338,7 +421,28 @@ export class RunCoordinator {
     }
 
     if (result.terminalReason === 'manual_suspend') {
-      return { success: true }
+      const handoff = this.deps.getPendingHandoff?.(taskId) ?? null
+      if (!handoff || handoff.handoffGeneration <= request.scope.handoffGeneration) {
+        return { success: true }
+      }
+      const takeoverScope = this.deps.getConversationScope?.(request.scope.id) ?? null
+      if (!takeoverScope || takeoverScope.activeAgentId !== handoff.targetAgentId) {
+        return { success: false, error: 'handoff_takeover_scope_mismatch' }
+      }
+      const takeoverResult = await this.executeRun({
+        ...request,
+        scope: takeoverScope,
+        message: handoff.userRequestVerbatim,
+        requestId: undefined,
+        taskId,
+        contextRefIds: handoff.contextRefIds,
+        continuationIntent: null,
+        runOrigin: 'handoff_takeover',
+      }, hooks)
+      if (takeoverResult.success) {
+        this.deps.markHandoffConsumed?.(taskId, handoff.handoffGeneration)
+      }
+      return takeoverResult
     }
 
     await hooks?.onSuccess?.(result)
@@ -350,8 +454,13 @@ export class RunCoordinator {
           type: 'updated',
           scopeId: request.scope.id,
           agent: request.scope.agent,
-          runId: request.requestId,
+          runId,
           taskId,
+          ownerAgentId,
+          taskOrigin,
+          executionBinding,
+          executionAgentDisplayName: executionProfile.name,
+          handoffGeneration: request.scope.handoffGeneration,
           phase: finalPhase,
           terminalReason: result.terminalReason || null,
           interactionState: finalPhase === 'done' ? undefined : finalInteractionState,

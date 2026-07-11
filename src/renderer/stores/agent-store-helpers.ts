@@ -659,6 +659,9 @@ function extractAskUserCardState(
 
 export function rebuildAgentMessageFromRow(row: ChatRowFromIPC, agent: string): AgentMessage {
   const meta = (row.meta || {}) as Record<string, unknown>
+  const executionAgentId = row.role === 'assistant' && typeof meta.executionAgentId === 'string' && meta.executionAgentId.trim()
+    ? meta.executionAgentId.trim()
+    : agent
   const cardState = row.role === 'agent_card'
     ? extractAskUserCardState(meta, row.id, row.timestamp)
     : null
@@ -672,7 +675,7 @@ export function rebuildAgentMessageFromRow(row: ChatRowFromIPC, agent: string): 
         : 'system'
   const message: AgentMessage = {
     id: row.id,
-    agent,
+    agent: executionAgentId,
     content: row.content,
     type,
     timestamp: new Date(row.timestamp),

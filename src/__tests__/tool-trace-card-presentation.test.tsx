@@ -72,24 +72,27 @@ function withDom(run: (render: (element: ReturnType<typeof createElement>) => HT
   }
 }
 
-test('ToolTraceCard: pending+collapsed auto-surfaces the most recent 3 rows with duration labels', () => {
+// 2026-07-10 activity-capsule — 展示单元从裸 call/result 行升级为「配对条目」：
+// 5 个事件（c1+r1 / c2+r2 / c3 未回）派生 3 个时间线条目。
+
+test('ToolTraceCard: pending+collapsed auto-surfaces the most recent timeline items with duration labels', () => {
   withDom((render) => {
     const container = render(createElement(ToolTraceCard, {
       events: makeEvents(),
       pending: true,
       expanded: false,
     }))
-    const recent = container.querySelectorAll('[data-ready-tool-trace-recent="true"] [data-ready-tool-trace-row]')
-    assert.equal(recent.length, 3, 'exactly the last 3 rows are auto-surfaced')
+    const recent = container.querySelectorAll('[data-ready-tool-trace-recent="true"] [data-ready-tool-timeline-item]')
+    assert.equal(recent.length, 3, 'the last 3 timeline items are auto-surfaced')
     const texts = Array.from(recent).map((node) => node.textContent || '')
-    assert.ok(texts[0].includes('调用 browser_click'))
+    assert.ok(texts[0].includes('读取完成'), `done item shows result preview: ${texts[0]}`)
     assert.ok(texts[1].includes('点击完成'))
-    assert.ok(texts[1].includes('1.5s'), `result row carries duration: ${texts[1]}`)
-    assert.ok(texts[2].includes('调用 browser_type'))
+    assert.ok(texts[1].includes('1.5s'), `paired item carries duration: ${texts[1]}`)
+    assert.ok(texts[2].includes('调用 browser_type'), `running item shows call text: ${texts[2]}`)
   })
 })
 
-test('ToolTraceCard: completed run auto-collapses (no recent rows, preview back in header)', () => {
+test('ToolTraceCard: completed run auto-collapses to a single line (count + latest preview in header)', () => {
   withDom((render) => {
     const container = render(createElement(ToolTraceCard, {
       events: makeEvents(),
@@ -97,21 +100,90 @@ test('ToolTraceCard: completed run auto-collapses (no recent rows, preview back 
       expanded: false,
     }))
     assert.equal(container.querySelectorAll('[data-ready-tool-trace-recent="true"]').length, 0)
-    assert.equal(container.querySelectorAll('[data-ready-tool-trace-row]').length, 0)
-    assert.ok(String(container.textContent || '').includes('工具调用'))
+    assert.equal(container.querySelectorAll('[data-ready-tool-timeline-item]').length, 0)
+    const text = String(container.textContent || '')
+    assert.ok(text.includes('3 个工具'), `collapsed header carries the tool count: ${text}`)
+    assert.ok(text.includes('调用 browser_type'), 'collapsed header falls back to the latest event preview')
   })
 })
 
-test('ToolTraceCard: manual expand shows the full row list with durations', () => {
+test('ToolTraceCard: manual expand shows the paired timeline with durations', () => {
   withDom((render) => {
     const container = render(createElement(ToolTraceCard, {
       events: makeEvents(),
       pending: false,
       expanded: true,
     }))
-    const rows = container.querySelectorAll('[data-ready-tool-trace-row]')
-    assert.equal(rows.length, 5, 'expanded shows every event row')
+    const items = container.querySelectorAll('[data-ready-tool-timeline] [data-ready-tool-timeline-item]')
+    assert.equal(items.length, 3, 'expanded shows every paired timeline item')
     const durations = container.querySelectorAll('[data-ready-tool-trace-duration="true"]')
     assert.equal(durations.length, 2, 'both paired results carry duration labels')
+  })
+})
+
+test('ToolTraceCard: clicking a timeline item discloses the call and output detail (L3)', () => {
+  withDom((render) => {
+    const container = render(createElement(ToolTraceCard, {
+      events: makeEvents(),
+      pending: false,
+      expanded: true,
+    }))
+    assert.equal(container.querySelectorAll('[data-ready-tool-timeline-detail="true"]').length, 0)
+    const firstItemButton = container.querySelector(
+      '[data-ready-tool-timeline] [data-ready-tool-timeline-item] button',
+    ) as HTMLButtonElement | null
+    assert.ok(firstItemButton, 'timeline item row is clickable')
+    act(() => {
+      firstItemButton.click()
+    })
+    const detail = container.querySelector('[data-ready-tool-timeline-detail="true"]')
+    assert.ok(detail, 'clicking the row opens the detail block')
+    const detailText = detail?.textContent || ''
+    assert.ok(detailText.includes('调用 browser_read_page'), `detail keeps the full call line: ${detailText}`)
+    assert.ok(detailText.includes('读取完成'), `detail keeps the full output text: ${detailText}`)
+  })
+})
+
+test('ToolTraceCard: rich events surface toolName, args JSON, and full output in the L3 block', () => {
+  withDom((render) => {
+    const base = 1_780_000_000_000
+    const container = render(createElement(ToolTraceCard, {
+      events: [
+        {
+          id: 'c1',
+          kind: 'call' as const,
+          text: 'skill_read_artifact(relativePath)',
+          timestamp: new Date(base),
+          toolName: 'skill_read_artifact',
+          detail: '{\n  "relativePath": "参考/mapping.md"\n}',
+        },
+        {
+          id: 'r1',
+          kind: 'result' as const,
+          text: 'skill_read_artifact: 已读取',
+          timestamp: new Date(base + 800),
+          toolName: 'skill_read_artifact',
+          detail: '# mapping\n第一节 完整正文……',
+        },
+      ],
+      pending: false,
+      expanded: true,
+    }))
+    const itemButton = container.querySelector(
+      '[data-ready-tool-timeline] [data-ready-tool-timeline-item] button',
+    ) as HTMLButtonElement | null
+    assert.ok(itemButton)
+    act(() => {
+      itemButton.click()
+    })
+    const detail = container.querySelector('[data-ready-tool-timeline-detail="true"]')
+    assert.ok(detail)
+    const text = detail?.textContent || ''
+    assert.ok(
+      (detail?.querySelector('[data-ready-tool-timeline-tool-name="true"]')?.textContent || '').includes('skill_read_artifact'),
+      'tool name headline present',
+    )
+    assert.ok(text.includes('"relativePath": "参考/mapping.md"'), `args JSON shown: ${text}`)
+    assert.ok(text.includes('第一节 完整正文……'), `full output shown instead of the 240-char preview: ${text}`)
   })
 })

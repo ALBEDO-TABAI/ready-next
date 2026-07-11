@@ -56,6 +56,8 @@ function makeRecord(taskId: string, scopeId: string): TaskProjectionRecord {
     runId: 'r',
     parentTaskId: null,
     parentStepId: null,
+    taskOrigin: 'user_root',
+    ownerAgentId: 'butler',
     taskType: 'short_task',
     module: 'system',
     taskTitle: null,

@@ -62,7 +62,7 @@ const DOCUMENT_TOOLS: DocumentToolDef[] = [
   },
   {
     name: 'document_insert_widget',
-    description: '向文档插入一个 show-widget 可视化组件代码围栏。',
+    description: '向文档插入一个 show-widget 可视化组件代码围栏。信息卡/摘要卡/对比卡/图表/关系图/流程图等卡片类内容必须经本工具以 componentSpec 结构化落地（Ready 设计系统渲染）；禁止用 document_replace_text / document_replace_exact 把 markdown 表格或手写 HTML 写进正文冒充卡片。',
     action: 'document.insertWidget',
     params: zodObjectToParamList(DOCUMENT_SCHEMAS.document_insert_widget) as ToolParam[],
   },
@@ -92,13 +92,13 @@ const DOCUMENT_TOOLS: DocumentToolDef[] = [
   },
   {
     name: 'document_replace_text',
-    description: '在文档中查找并替换文本。',
+    description: '在文档中查找并替换文本。仅用于文本修正；插入信息卡/图表等卡片类内容必须改用 document_insert_widget。',
     action: 'document.replaceText',
     params: zodObjectToParamList(DOCUMENT_SCHEMAS.document_replace_text) as ToolParam[],
   },
   {
     name: 'document_replace_exact',
-    description: '精准替换文档中的单个目标片段。若目标出现多次，可传 occurrence 指定第几处（从 1 开始）。',
+    description: '精准替换文档中的单个目标片段。若目标出现多次，可传 occurrence 指定第几处（从 1 开始）。仅用于文本修正；插入信息卡/图表等卡片类内容必须改用 document_insert_widget。',
     action: 'document.replaceExact',
     params: zodObjectToParamList(DOCUMENT_SCHEMAS.document_replace_exact) as ToolParam[],
   },

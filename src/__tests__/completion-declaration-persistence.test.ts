@@ -79,6 +79,8 @@ test('declaration persists across repository restart and drives terminal deliver
   const first = makeRepository(db)
   first.create({
     taskId: 'task-crit-p',
+    taskOrigin: 'user_root',
+    ownerAgentId: 'butler',
     scopeId: 'scope-crit-p',
     runId: 'run-crit-p',
     taskType: 'multi_step_task',

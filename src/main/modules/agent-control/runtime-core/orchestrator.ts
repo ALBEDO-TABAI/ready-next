@@ -535,7 +535,10 @@ export class ReadyAgentOrchestrator extends EventEmitter {
     continuationState?: ContinuationState | null,
     sessionIdOverride?: string,
     sourceMessageId?: string | null,
+    executionBinding?: ExecutionHostRequest['executionBinding'],
+    executionProfile?: ExecutionHostRequest['executionProfile'],
     noProgressTimeoutMs?: number,
+    deliveryMode?: ExecutionHostRequest['deliveryMode'],
   ): Promise<{
     success: boolean
     error?: string
@@ -598,6 +601,9 @@ export class ReadyAgentOrchestrator extends EventEmitter {
         continuationIntent,
         continuationState,
         sourceMessageId: sourceMessageId ?? null,
+        executionBinding,
+        executionProfile,
+        deliveryMode,
       })
       if (!result.success) {
         this.sessions.setState(taskKey, 'failed', result.error)
@@ -625,6 +631,9 @@ export class ReadyAgentOrchestrator extends EventEmitter {
     continuationState?: ContinuationState | null,
     sessionIdOverride?: string,
     sourceMessageId?: string | null,
+    executionBinding?: ExecutionHostRequest['executionBinding'],
+    executionProfile?: ExecutionHostRequest['executionProfile'],
+    deliveryMode?: ExecutionHostRequest['deliveryMode'],
   ): Promise<SendAndCollectExecutionResult> {
     const collector = createScopedRunCollector({ agent, sessionId, requestId })
     const cleanupFns: Array<() => void> = []
@@ -662,6 +671,10 @@ export class ReadyAgentOrchestrator extends EventEmitter {
       continuationState,
       sessionIdOverride,
       sourceMessageId,
+      executionBinding,
+      executionProfile,
+      undefined,
+      deliveryMode,
     ).then((result) => {
       executionDiagnostics = result.executionDiagnostics || null
       resolvedTaskId = result.taskId
@@ -777,6 +790,9 @@ export class ReadyAgentOrchestrator extends EventEmitter {
       request.continuationState,
       request.sessionIdOverride,
       request.sourceMessageId ?? null,
+      request.executionBinding,
+      request.executionProfile,
+      request.deliveryMode,
     )
     return {
       success: result.success,
@@ -795,6 +811,8 @@ export class ReadyAgentOrchestrator extends EventEmitter {
       terminalReason: result.terminalReason || null,
       scopeRunAuthority: result.scopeRunAuthority,
       contextUsage: result.contextUsage || null,
+      executionBinding: request.executionBinding,
+      executionAgentDisplayName: request.executionProfile.name,
     }
   }
 

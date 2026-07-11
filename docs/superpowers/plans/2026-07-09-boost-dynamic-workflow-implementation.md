@@ -3,7 +3,7 @@ title: Dynamic Delivery v3 Agent 原生协作实施计划
 date: 2026-07-10
 kind: implementation
 enforce: false
-status: draft v3 — 已收敛为单主链，live 开工受 Agent Foundation 硬阻塞
+status: completed — 2026-07-11 全链验收与唯一对抗审查通过
 owner: 白
 original_author: Claude (Fable 5)
 revision_author: Codex
@@ -625,3 +625,14 @@ shared `DeliveryErrorKind` 闭集：
 - scoped commits、大文件健康评估和明确残余边界。
 
 缺任一项，状态保持 draft/incomplete；“多个模型返回了文字”不等于单轮交付质量提高。
+
+### 2026-07-11 完成证据
+
+- Agent Foundation 前置：`npm run verify:agent-foundation` 通过（含原生数据库验证）。
+- Dynamic Delivery 全链：`npm run verify:dynamic-delivery` 通过；focused runner 62 项中 55 项通过、7 项仅因 host ABI 跳过，随后 Electron 原生 8/8 无跳过通过。
+- 12 个发布 fixture：每条实际执行 standard + adaptive，共 24 次 live runtime seam 对照；默认已切换为 adaptive，设置页可回 standard，本次发送可临时 thorough。
+- 原子性与隔离：真实 SQLite task tree rollback/commit/CAS、candidate accept/block/text repair/artifact repair、可信工具回执保留、拒稿不进入共享会话或恢复快照均有行为测试。
+- 安全与归属：worker 唯一 model_subagent/no-tools 通道；Owner 独占工具和外部动作；registered contribution 仅在 adopted + durable proof used 后进入 staged learning。
+- 退役与正向门禁：旧三通道/父 Check-in/Proof 路径退役；live/unwired/mandated/error-enum/finalizer/check-in gates 全绿。
+- 全局回归：`npm run verify:evolution-p3`、`npm run verify:evolution-p4`、`npm run verify:stability`、`npm run build` 通过。
+- 唯一阶段二对抗审查 agent 完成修复循环，最终无未解决 finding。

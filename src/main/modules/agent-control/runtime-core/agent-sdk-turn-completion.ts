@@ -1,3 +1,4 @@
+import type { ModelProvider } from '@openai/agents'
 import { normalizeSessionSnapshotForSeed } from '../compaction/compact-agent-input'
 import type {
   ExecutionTurnResult,
@@ -27,6 +28,8 @@ import type {
 } from './agent-sdk-types'
 import { finalizeRunOutcome, writeRunCloseMetric } from './run-finalizer'
 import type { TurnTerminalReason } from './turn-frame'
+import type { CollaborationDecision } from '../../../../shared/dynamic-delivery'
+import { mergeRunUsage } from './run-usage-accumulator'
 
 export interface AgentSdkTurnCompletionState {
   finalText: string
@@ -60,6 +63,13 @@ export interface AgentSdkTurnCompletionContext {
   projectionPatches: Record<string, unknown>[]
   transcriptEvents: TurnTranscriptEvent[]
   runHandle: RunHandle
+  deliveryDecision: CollaborationDecision
+  deliveryRealEmitOutput: AgentSdkTurnCompletionContext['emitOutput']
+  model: string
+  provider: ModelProvider
+  contextWindowTokens: number
+  maxOutputTokens: number
+  abortSignal: AbortSignal
   emitOutput: (
     chunk: string,
     type: string,
@@ -108,6 +118,13 @@ export async function finalizeAgentSdkPreparedTurnResult(
     projectionPatches,
     transcriptEvents,
     runHandle,
+    deliveryDecision,
+    deliveryRealEmitOutput,
+    model,
+    provider,
+    contextWindowTokens,
+    maxOutputTokens,
+    abortSignal,
     emitOutput,
     emitOutputForRun,
     emitStatusForRun,
@@ -138,7 +155,7 @@ export async function finalizeAgentSdkPreparedTurnResult(
         status: 'error',
         terminalReason: 'blocked_tool_error',
         error: message,
-        finalText: ''
+        finalText
       })
     }
     if (documentTargetGuard && finalTextIndicatesIncompleteDocument(finalText)) {
@@ -148,7 +165,7 @@ export async function finalizeAgentSdkPreparedTurnResult(
         status: 'error',
         terminalReason: 'blocked_tool_error',
         error: message,
-        finalText: ''
+        finalText
       })
     }
     if (documentTargetGuard) {
@@ -162,7 +179,7 @@ export async function finalizeAgentSdkPreparedTurnResult(
           status: 'error',
           terminalReason: 'blocked_tool_error',
           error: message,
-          finalText: ''
+          finalText
         })
       }
     }
@@ -173,7 +190,7 @@ export async function finalizeAgentSdkPreparedTurnResult(
         status: 'error',
         terminalReason: 'blocked_tool_error',
         error: message,
-        finalText: ''
+        finalText
       })
     }
     if (
@@ -189,7 +206,7 @@ export async function finalizeAgentSdkPreparedTurnResult(
           status: 'error',
           terminalReason: 'blocked_tool_error',
           error: message,
-          finalText: ''
+          finalText
         })
       }
       const observedTarget = observedDocumentMutationTarget as ObservedDocumentToolTarget | null
@@ -200,7 +217,7 @@ export async function finalizeAgentSdkPreparedTurnResult(
           status: 'error',
           terminalReason: 'blocked_tool_error',
           error: message,
-          finalText: ''
+          finalText
         })
       }
       if (!observedTarget.path && observedTarget.requiresSave) {
@@ -210,7 +227,7 @@ export async function finalizeAgentSdkPreparedTurnResult(
           status: 'error',
           terminalReason: 'blocked_tool_error',
           error: message,
-          finalText: ''
+          finalText
         })
       }
       if (observedTarget.path && observedTarget.requiresSave) {
@@ -277,7 +294,7 @@ export async function finalizeAgentSdkPreparedTurnResult(
         status: 'error',
         terminalReason: 'persistence_failed',
         error: message,
-        finalText: ''
+        finalText
       })
     }
     if (newDocumentNeedsSave) {
@@ -287,7 +304,7 @@ export async function finalizeAgentSdkPreparedTurnResult(
         status: 'error',
         terminalReason: 'persistence_failed',
         error: message,
-        finalText: ''
+        finalText
       })
     }
     if (!finalText.trim() && usedTools.length > 0) {
@@ -295,6 +312,72 @@ export async function finalizeAgentSdkPreparedTurnResult(
         ? `已完成，${lastDocumentSaveSuccessText}`
         : '工具已执行完成。'
       emitOutput(finalText, 'text')
+    }
+    if (deliveryDecision !== 'single_path') {
+      const store = host.runtime?.getTaskProjectionStoreForFinalize?.() ?? null
+      const projectionAfterOwner = store?.get(taskId) ?? null
+      if (!projectionAfterOwner) {
+        const message = '协作交付状态不可用，已阻止未经复核的结果。'
+        deliveryRealEmitOutput(message, 'error')
+        return finalizeEarlyReturn({
+          status: 'error',
+          terminalReason: 'blocked_tool_error',
+          error: message,
+          finalText: ''
+        })
+      }
+      const verification = await host.dynamicDelivery.verifyOwnerCandidate({
+        runId,
+        candidateText: finalText,
+        projectionAfterOwner,
+        model,
+        provider,
+        contextWindowTokens,
+        maxOutputTokens,
+        signal: abortSignal,
+        artifactRepairTools: [
+          'document_read_section',
+          'document_replace_exact',
+          'document_update_widget',
+          'document_save_tab',
+        ].flatMap((toolName) => {
+          const definition = definitionByName.get(toolName)
+          return definition ? [host.toolExecutor.buildSdkTool(definition, toolBridgeRuntimeContext)] : []
+        }),
+        materializeAndReadBack: async () => ({
+          version: 1,
+          items: [
+            ...(projectionAfterOwner.proofRefs ?? []),
+            ...(projectionAfterOwner.recentArtifacts ?? []),
+          ].map((value, index) => {
+            const serialized = JSON.stringify(value)
+            return {
+              refId: `delivery-proof-${index + 1}`,
+              digest: value && typeof value === 'object' && typeof (value as { digest?: unknown }).digest === 'string'
+                ? String((value as { digest: string }).digest)
+                : `projection-proof-${index + 1}`,
+              provenance: 'task_projection_readback',
+              excerpt: serialized.slice(0, 1600) || `proof ${index + 1}`,
+              kind: 'artifact' as const,
+            }
+          }),
+        }),
+      })
+      runMetaUsage = mergeRunUsage(runMetaUsage as never, verification.verificationUsage) as ReadyAgentSdkRunResult['usage']
+      if (verification.verdict.verdict !== 'accept' || verification.acceptedText === null) {
+        const message = verification.verdict.verdict === 'repair'
+          ? '独立复核发现仍需修正的缺口，本轮未发布候选结果。'
+          : '独立复核未通过，本轮未发布候选结果。'
+        deliveryRealEmitOutput(message, 'error')
+        return finalizeEarlyReturn({
+          status: 'error',
+          terminalReason: 'blocked_tool_error',
+          error: message,
+          finalText: ''
+        })
+      }
+      finalText = verification.acceptedText
+      deliveryRealEmitOutput(finalText, 'text')
     }
     {
       const checkpointResult = await finishBudgetCheckpointIfNeeded()
@@ -359,6 +442,7 @@ export async function finalizeAgentSdkPreparedTurnResult(
       usage: runMetaUsage
     })
   } finally {
+    host.dynamicDelivery.close(runId)
     Object.assign(state, {
       finalText,
       hasSuccessfulDocumentTargetMutation,

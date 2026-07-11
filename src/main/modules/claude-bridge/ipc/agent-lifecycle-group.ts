@@ -30,6 +30,7 @@ import type { IpcMain } from 'electron'
 import type { MultimodalBlock } from '../../agent-control/contracts/run-contracts'
 import type { ReadyAgentOrchestrator } from '../../agent-control/runtime-core/orchestrator'
 import type { SendScopedUserMessage } from '../../agent-control/send-scoped-confirmation'
+import type { DeliveryMode } from '../../../../shared/dynamic-delivery'
 import type { IpcChannelGroup, IpcDisposeHandle } from './types'
 
 /**
@@ -100,6 +101,7 @@ export interface SendScopedPayload {
   message: string | MultimodalBlock[]
   requestId?: string
   workspaceRoots?: string[]
+  deliveryMode?: DeliveryMode
   userMessage?: SendScopedUserMessage
   continuationIntent?: {
     taskId: string
@@ -192,15 +194,16 @@ export const agentLifecycleGroup: IpcChannelGroup<AgentLifecycleGroupDeps> = {
     }
 
     // Send message to agent — use direct HTTP streaming.
-    ipcMain.handle('agent:send', async (_, { agent, message, sessionId, requestId }: {
+    ipcMain.handle('agent:send', async (_, { agent, message, sessionId, requestId, deliveryMode }: {
       agent: string
       message: string | MultimodalBlock[]
       sessionId?: string
       requestId?: string
+      deliveryMode?: DeliveryMode
     }): Promise<IPCResponse> => {
       deps.log(`agent:send received — agent=${agent}, message=${typeof message === 'string' ? message.slice(0, 50) : `[${message.length} blocks]`}`)
       try {
-        const result = await deps.orchestrator.send(agent, message, sessionId, requestId)
+        const result = await deps.orchestrator.send(agent, message, sessionId, requestId, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, deliveryMode)
         deps.log(`agent:send result — success=${result.success}, error=${result.error}`)
         return {
           success: result.success,

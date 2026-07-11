@@ -12,11 +12,11 @@
  *    through the system-reminder seam, so follow-up turns keep the plan
  *    without re-deriving intent.
  *
- * Cross-process persistence (projection steps_json) is a recorded residual:
- * the scope-run event flow that owns `steps` lives outside this seam; the
- * in-process slot covers the model-facing behavior. State is per main-process
- * lifetime, scoped by the same session key the reminder queue uses.
+ * The in-memory slot is backed by conversation-scope metadata when the live
+ * runtime is attached, so a Ready restart restores the same evidence snapshot.
  */
+
+import { logAgentMetric } from '../metrics'
 
 export interface ActivePlanStep {
   id: string
@@ -59,6 +59,83 @@ export interface ActivePlan {
 }
 
 const plansByScope = new Map<string, ActivePlan>()
+
+export interface ActivePlanPersistence {
+  load: (scope: string) => ActivePlan | null
+  save: (scope: string, plan: ActivePlan) => void
+  remove: (scope: string) => void
+}
+
+let persistence: ActivePlanPersistence | null = null
+
+export function configureActivePlanPersistence(next: ActivePlanPersistence | null): void {
+  persistence = next
+}
+
+function logPersistenceFailure(operation: 'load' | 'save' | 'remove', error: unknown): void {
+  logAgentMetric('active_plan_persistence_failed', {
+    operation,
+    error: error instanceof Error ? error.message : String(error),
+  })
+}
+
+function removePersistedPlan(scope: string): void {
+  try {
+    persistence?.remove(scope)
+  } catch (error) {
+    logPersistenceFailure('remove', error)
+  }
+}
+
+function isActivePlan(value: unknown): value is ActivePlan {
+  if (!value || typeof value !== 'object') return false
+  const plan = value as Partial<ActivePlan>
+  return (
+    plan.verify === 'evidence' &&
+    typeof plan.taskGoal === 'string' &&
+    typeof plan.updatedAtMs === 'number' &&
+    Boolean(plan.evidence && typeof plan.evidence === 'object') &&
+    Array.isArray(plan.steps) &&
+    plan.steps.every((step) =>
+      Boolean(
+        step &&
+        typeof step.id === 'string' &&
+        typeof step.title === 'string' &&
+        Array.isArray(step.advanceOnTools) &&
+        ['pending', 'done'].includes(step.status)
+      )
+    )
+  )
+}
+
+function loadPlan(scope: string, nowMs: number = Date.now()): ActivePlan | null {
+  const live = plansByScope.get(scope)
+  if (live && nowMs - live.updatedAtMs <= ACTIVE_PLAN_TTL_MS) return live
+  if (live) plansByScope.delete(scope)
+  let restored: ActivePlan | null = null
+  try {
+    restored = persistence?.load(scope) || null
+  } catch (error) {
+    logPersistenceFailure('load', error)
+    return null
+  }
+  if (!isActivePlan(restored)) return null
+  if (nowMs - restored.updatedAtMs > ACTIVE_PLAN_TTL_MS) {
+    removePersistedPlan(scope)
+    return null
+  }
+  plansByScope.set(scope, restored)
+  return restored
+}
+
+function savePlan(scope: string, plan: ActivePlan): void {
+  plansByScope.set(scope, plan)
+  try {
+    persistence?.save(scope, plan)
+  } catch (error) {
+    logPersistenceFailure('save', error)
+  }
+}
 
 /** Plans older than this are stale — do not re-inject. */
 const ACTIVE_PLAN_TTL_MS = 30 * 60_000
@@ -165,6 +242,16 @@ function discoveredCount(records: Record<string, unknown>[]): number | null {
   ])
 }
 
+function recordsShowIncompleteWork(records: Record<string, unknown>[]): boolean {
+  for (const record of records) {
+    if (Array.isArray(record.failedItems) && record.failedItems.length > 0) return true
+    const failed = firstCount([record], ['failedCount', 'failed'])
+    const remaining = firstCount([record], ['remaining'])
+    if ((failed !== null && failed > 0) || (remaining !== null && remaining > 0)) return true
+  }
+  return false
+}
+
 function applyTerminalCounts(plan: ActivePlan, records: Record<string, unknown>[]): void {
   plan.evidence.savedCount = undefined
   plan.evidence.failedCount = undefined
@@ -230,7 +317,7 @@ function absorbStructuredEvidence(
     const discoveryExplicitlyIncomplete = discoveryResultStatus
       ? !['complete', 'completed'].includes(discoveryResultStatus)
       : false
-    if (status === 'completed' && !discoveryExplicitlyIncomplete) {
+    if (status === 'completed' && !discoveryExplicitlyIncomplete && !recordsShowIncompleteWork(records)) {
       const count = discoveredCount(records)
       if (count !== null && count > 0 && plan.evidence.expectedCount === undefined) {
         plan.evidence.expectedCount = count
@@ -243,7 +330,9 @@ function absorbStructuredEvidence(
     const sourceTaskId = String(
       args.source_task_id || firstString(records, ['sourceTaskId', 'source_task_id']) || ''
     ).trim()
-    if (!sourceTaskId || sourceTaskId !== plan.evidence.discoveryTaskId) return
+    if (!sourceTaskId) return
+    if (!plan.evidence.discoveryTaskId) plan.evidence.discoveryTaskId = sourceTaskId
+    if (sourceTaskId !== plan.evidence.discoveryTaskId) return
     if (!taskId || taskId === sourceTaskId || !status || !TRACKABLE_TASK_STATUSES.has(status))
       return
     plan.evidence.executionTaskId = taskId
@@ -284,7 +373,7 @@ function absorbStructuredEvidence(
     if (queriedTaskId === plan.evidence.discoveryTaskId) {
       if (status) plan.evidence.discoveryStatus = status
       if (discoveryResultStatus) plan.evidence.discoveryResultStatus = discoveryResultStatus
-      if (status === 'completed') {
+      if (status === 'completed' && !recordsShowIncompleteWork(records)) {
         const count = discoveredCount(records)
         if (count !== null && count > 0 && plan.evidence.expectedCount === undefined) {
           plan.evidence.expectedCount = count
@@ -426,25 +515,27 @@ export function noteToolResultForActivePlan(
   result?: unknown
 ): void {
   if (!scope) return
-  let plan = plansByScope.get(scope) || null
+  let plan = loadPlan(scope, nowMs)
   if (!plan && COLLECTION_DISPATCH_TOOLS.has(toolName)) {
     plan = deriveCollectionPlanFromToolCall(toolName, args, nowMs)
-    if (plan) plansByScope.set(scope, plan)
+    if (plan) savePlan(scope, plan)
   }
   if (!plan || !COLLECTION_EVIDENCE_TOOLS.has(toolName)) return
   absorbStructuredEvidence(plan, toolName, args, result)
   advanceEvidenceBackedSteps(plan)
   plan.updatedAtMs = nowMs
+  savePlan(scope, plan)
 }
 
 export function getActivePlanForScope(scope: string | null | undefined): ActivePlan | null {
   if (!scope) return null
-  return plansByScope.get(scope) || null
+  return loadPlan(scope)
 }
 
 export function clearActivePlanForScope(scope: string | null | undefined): void {
   if (!scope) return
   plansByScope.delete(scope)
+  removePersistedPlan(scope)
 }
 
 export function resetActivePlansForTests(): void {
@@ -490,7 +581,7 @@ export function buildActivePlanReminderText(
   nowMs: number = Date.now()
 ): string | null {
   if (!scope) return null
-  const plan = plansByScope.get(scope)
+  const plan = loadPlan(scope, nowMs)
   if (!plan) return null
   if (nowMs - plan.updatedAtMs > ACTIVE_PLAN_TTL_MS) return null
   const total = plan.steps.length

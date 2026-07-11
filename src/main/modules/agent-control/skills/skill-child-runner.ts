@@ -2700,6 +2700,7 @@ function buildChildTaskProjectionRecord(args: {
   const previousSteps = (args.previous?.steps || []).filter((item) => item.id !== stepId)
   return {
     taskId: args.taskId,
+    taskOrigin: args.previous?.taskOrigin ?? 'system_background',
     scopeId: args.scopeId,
     runId: args.active.childRunId,
     parentTaskId: args.previous?.parentTaskId ?? null,

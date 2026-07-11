@@ -159,6 +159,7 @@ function buildSkillPayload(): ScopeRunEventPayload {
     agent: 'butler',
     runId: 'run-fresh',
     taskId: 'system-fresh',
+    taskOrigin: 'legacy',
     phase: 'takeover',
     module: 'system',
     timestamp: '2026-04-29T05:00:00.000Z',
@@ -168,6 +169,7 @@ function buildSkillPayload(): ScopeRunEventPayload {
 function buildLegacyRecord(overrides: Partial<TaskProjectionRecord> = {}): TaskProjectionRecord {
   return {
     taskId: 'task-61615c03-f09b-4393-b9ba-8c8863e7e7d9',
+    taskOrigin: 'legacy',
     scopeId: 'scope-supersede',
     runId: 'req-1777439706074-cpvytw',
     parentTaskId: null,

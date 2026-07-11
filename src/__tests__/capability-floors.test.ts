@@ -39,17 +39,36 @@ test('computeCapabilityFloors: local document resource floors file_locate + file
   assert.ok(floors.reasons.includes('local_document_resource'))
 })
 
-test('computeCapabilityFloors: current document context floors document_read_section', () => {
+const DOC_CONTEXT_EDIT_FLOOR = [
+  'document_insert_widget',
+  'document_list_widgets',
+  'document_read_section',
+  'document_remove_widget',
+  'document_replace_exact',
+  'document_save_tab',
+  'document_update_widget',
+]
+
+test('computeCapabilityFloors: current document context floors the document editing surface (read + widget CRUD + precise edit + save)', () => {
   const floors = computeCapabilityFloors({ authorization: none, hasLocalDocumentResource: false, hasCurrentDocumentContext: true })
-  assert.deepEqual([...floors.toolNames], ['document_read_section'])
+  assert.deepEqual([...floors.toolNames].sort(), DOC_CONTEXT_EDIT_FLOOR)
   assert.ok(floors.reasons.includes('current_document_context'))
+  // 刻意不含整文覆写工具
+  assert.equal(floors.toolNames.has('document_set_content'), false)
+  assert.equal(floors.toolNames.has('document_append_content'), false)
+})
+
+test('computeCapabilityFloors: skill-selected turn cannot exclude widget insertion for the open document (2026-07-11 dogfood regression)', () => {
+  const floors = computeCapabilityFloors({ authorization: selected, hasLocalDocumentResource: true, hasCurrentDocumentContext: true })
+  assert.ok(floors.toolNames.has('document_insert_widget'))
+  assert.ok(floors.toolNames.has('document_replace_exact'))
 })
 
 test('computeCapabilityFloors: full union (selected + doc resource + doc context)', () => {
   const floors = computeCapabilityFloors({ authorization: selected, hasLocalDocumentResource: true, hasCurrentDocumentContext: true })
   assert.deepEqual(
     [...floors.toolNames].sort(),
-    ['document_read_section', 'file_locate', 'file_read_excerpt', 'skill_make_ppt', 'skill_read_artifact', 'skill_run_shell'],
+    [...DOC_CONTEXT_EDIT_FLOOR, 'file_locate', 'file_read_excerpt', 'skill_make_ppt', 'skill_read_artifact', 'skill_run_shell'].sort(),
   )
   assert.deepEqual(floors.reasons, ['skill_selected:ready-human-touch-ppt', 'local_document_resource', 'current_document_context'])
 })

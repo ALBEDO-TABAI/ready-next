@@ -42,10 +42,20 @@ test('unknown reasons keep the generic fallback', async () => {
 })
 
 test('reason copy table: registered reasons return actionable text, others null', () => {
-  for (const reason of ['browser_transaction_unconfirmed', 'proof_gap', 'no_artifact']) {
+  for (const reason of ['browser_transaction_unconfirmed', 'proof_gap', 'no_artifact', 'blocked_tool_error']) {
     const text = userFacingTerminalErrorText(reason)
     assert.ok(text && text.length > 10, `${reason} 必须有可读文案`)
   }
   assert.equal(userFacingTerminalErrorText('done'), null)
   assert.equal(userFacingTerminalErrorText(null), null)
+})
+
+test('blocked_tool_error surfaces the tool-block copy, not the generic failure (W10-F5, 2026-07-11 dogfood)', async () => {
+  const collector = createScopedRunCollector(MATCH)
+  collector.handleStatus({ ...EVENT_BASE, status: 'error', terminalReason: 'blocked_tool_error' })
+  const result = await collector.result
+  assert.equal(result.success, false)
+  assert.match(result.error || '', /工具/)
+  assert.match(result.error || '', /重试/)
+  assert.doesNotMatch(result.error || '', /Agent execution failed/)
 })

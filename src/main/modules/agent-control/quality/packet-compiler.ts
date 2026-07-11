@@ -1,6 +1,6 @@
 /**
  * EP3-PK2 — dispatch compiler gate + packet-tree validation (09 §3).
- * P5c/C22 unwired: this module is not in production path.
+ * Dynamic Delivery live compiler. Called by DynamicDeliveryCoordinator.
  *
  * The trigger threshold is CODE, never the model: only multi_step_task /
  * research with multiple targets enter compilation; direct_answer and
@@ -22,6 +22,12 @@ import type { CriteriaItem } from './criteria-templates'
 import { validatePacketFields, assertPacketDepth, type PacketDepthRow } from './packet-fields'
 import { PromptAssetLoader } from '../prompt-assets/loader'
 import { promptAssetRoots } from '../prompt-assets/roots'
+import type {
+  AgentProfileSummary,
+  DeliveryMode,
+  DispatchPlan,
+  WorkPackage,
+} from '../../../../shared/dynamic-delivery'
 
 /** 09 §6 风险缓解: 包数上限 v1 ≤4（防模型把简单事拆碎）。 */
 export const MAX_CHILD_PACKETS = 4
@@ -167,4 +173,117 @@ export function buildCompilePacketsPrompt(input: { request: string; knowledgeInd
   return body
     .replace('{{request}}', input.request)
     .replace('{{knowledge_index}}', input.knowledgeIndex || '（空）')
+}
+
+export interface DynamicDeliveryPlanInput {
+  mode: Exclude<DeliveryMode, 'standard'>
+  userRequestVerbatim: string
+  canonicalContextRefIds: readonly string[]
+  profiles: readonly AgentProfileSummary[]
+}
+
+export type BoundedDeliveryPlanCall = (input: {
+  prompt: string
+  tools: []
+  maxTurns: 1
+}) => Promise<string>
+
+const DELIVERY_PLAN_PROMPT_FALLBACK = [
+  '你是受限任务计划器。只输出 DispatchPlan JSON，禁止 Markdown 和代码。',
+  '每个工作包只能有一个可验收交付物；contextRefIds 只能从给定引用中选。',
+  '用户原话：{{request}}',
+  '允许的引用：{{context_refs}}',
+  '可协作 Agent：{{profiles}}',
+  '包数上限：{{max_packages}}',
+].join('\n')
+
+function unwrapJsonFence(raw: string): string {
+  return String(raw || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '')
+}
+
+function stringArray(value: unknown, field: string): string[] {
+  if (!Array.isArray(value)) throw new Error(`[dynamic-delivery] ${field} must be an array`)
+  const result = value.map((item) => typeof item === 'string' ? item.trim() : '')
+  if (result.some((item) => !item)) throw new Error(`[dynamic-delivery] ${field} must contain non-empty strings`)
+  return [...new Set(result)]
+}
+
+export function parseDynamicDeliveryPlan(raw: string, input: DynamicDeliveryPlanInput): DispatchPlan {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(unwrapJsonFence(raw))
+  } catch {
+    throw new Error('[dynamic-delivery] delivery plan is not valid JSON')
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('[dynamic-delivery] delivery plan must be an object')
+  }
+  const record = parsed as Record<string, unknown>
+  if (record.version !== 1) throw new Error('[dynamic-delivery] delivery plan version must be 1')
+  if (!Array.isArray(record.packages)) throw new Error('[dynamic-delivery] delivery plan packages must be an array')
+  const maxPackages = input.mode === 'thorough' ? 3 : 2
+  if (record.packages.length < 1 || record.packages.length > maxPackages) {
+    throw new Error(`[dynamic-delivery] package count must be 1..${maxPackages}`)
+  }
+  const canonicalRefs = new Set(input.canonicalContextRefIds)
+  const readyAgents = new Set(input.profiles.filter((profile) => profile.collaborationReady).map((profile) => profile.agentId))
+  const seenIds = new Set<string>()
+  const packages: WorkPackage[] = record.packages.map((value, index) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      throw new Error(`[dynamic-delivery] package ${index} must be an object`)
+    }
+    const pkg = value as Record<string, unknown>
+    const text = (field: string): string => typeof pkg[field] === 'string' ? String(pkg[field]).trim() : ''
+    const packageId = text('packageId')
+    const title = text('title')
+    const objective = text('objective')
+    const deliverable = text('deliverable')
+    if (!packageId || !title || !objective || !deliverable) throw new Error(`[dynamic-delivery] package ${index} is incomplete`)
+    if (seenIds.has(packageId)) throw new Error(`[dynamic-delivery] duplicate package id: ${packageId}`)
+    seenIds.add(packageId)
+    const expectedOutputs = stringArray(pkg.expectedOutputs, 'expectedOutputs')
+    const proposedCriteria = stringArray(pkg.proposedCriteria, 'proposedCriteria')
+    const contextRefIds = stringArray(pkg.contextRefIds, 'contextRefIds')
+    if (contextRefIds.some((ref) => !canonicalRefs.has(ref))) throw new Error('[dynamic-delivery] plan contains a non-canonical context ref')
+    if (!pkg.executorHint || typeof pkg.executorHint !== 'object' || Array.isArray(pkg.executorHint)) {
+      throw new Error('[dynamic-delivery] executorHint is required')
+    }
+    const hint = pkg.executorHint as Record<string, unknown>
+    let executorHint: WorkPackage['executorHint']
+    if (hint.kind === 'registered_agent' && typeof hint.agentId === 'string' && readyAgents.has(hint.agentId)) {
+      executorHint = { kind: 'registered_agent', agentId: hint.agentId }
+    } else if (hint.kind === 'ephemeral' && ['researcher', 'producer', 'critic'].includes(String(hint.role))) {
+      executorHint = { kind: 'ephemeral', role: hint.role as 'researcher' | 'producer' | 'critic' }
+    } else {
+      throw new Error('[dynamic-delivery] executor hint is unavailable or outside the closed role set')
+    }
+    if (pkg.criticality !== 'required' && pkg.criticality !== 'optional') {
+      throw new Error('[dynamic-delivery] invalid package criticality')
+    }
+    return {
+      packageId,
+      title,
+      objective,
+      deliverable,
+      expectedOutputs,
+      proposedCriteria,
+      contextRefIds,
+      executorHint,
+      criticality: pkg.criticality,
+    }
+  })
+  return { version: 1, packages }
+}
+
+export async function compileDynamicDeliveryPlan(
+  input: DynamicDeliveryPlanInput,
+  boundedTextCall: BoundedDeliveryPlanCall,
+): Promise<DispatchPlan> {
+  const prompt = DELIVERY_PLAN_PROMPT_FALLBACK
+    .replace('{{request}}', input.userRequestVerbatim)
+    .replace('{{context_refs}}', input.canonicalContextRefIds.join(', ') || 'none')
+    .replace('{{profiles}}', input.profiles.filter((profile) => profile.collaborationReady).map((profile) => profile.agentId).join(', ') || 'none')
+    .replace('{{max_packages}}', input.mode === 'thorough' ? '3' : '2')
+  const raw = await boundedTextCall({ prompt, tools: [], maxTurns: 1 })
+  return parseDynamicDeliveryPlan(raw, input)
 }

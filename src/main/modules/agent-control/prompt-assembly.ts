@@ -23,6 +23,8 @@ import { MAIN_AGENT_ID } from '../repositories/agent-registry-repository'
 import type { SessionRecallCapsule } from '../../../shared/session-recall'
 import type { CoordinatorPromptFragment, DomainAdapter } from './domain-adapters/domain-adapter'
 import type { AgentSystemStudioAgentStatus } from '../../../shared/agent-system-studio'
+import type { AgentExecutionProfile } from '../../../shared/agent-execution-profile'
+import { AGENT_KNOWLEDGE_INDEX_MAX_CHARS } from '../../../shared/agent-execution-profile'
 
 export type PromptMemoryLayer = 'l0' | 'l1' | 'l2' | 'recall'
 export type PromptMemorySourceType = MemorySourceType | 'session_recall'
@@ -74,6 +76,7 @@ export interface PromptAssemblyResult {
   compression?: PromptCompressionReport
   requestEnvelope: RequestEnvelope
   intentClassification: IntentClassification
+  executionProfile: AgentExecutionProfile
 }
 
 export interface PromptAssemblyDeps {
@@ -109,7 +112,8 @@ export interface PromptAssemblyDeps {
 	  recordBeliefInjection?: (relPaths: readonly string[]) => void
   /** EP3-A3: agents-table roster for the main-session charter/routing index. */
   getAgentRoster?: () => Array<{ id: string; name: string; charter: string | null; status: string; personaRef?: string | null }>
-  /** EP2-K6: rollback switch — false stops RULES/index injection entirely. */
+  getAgentReadiness?: (agentId: string) => AgentExecutionProfile['readiness']
+  /** EP2-K6: rollback switch — false stops knowledge cards, not Agent RULES. */
   isKnowledgeSystemEnabled?: () => boolean
   /** P1 (2026-07-03, 7/01 reliability contract D) — active browser tab URL so
    *  site-card fragments can match by current domain, not only user-text
@@ -142,7 +146,7 @@ const MAX_AGENT_ROUTING_CHARS = 600
 // EP2-K3 — knowledge layer budgets (01 §7b): RULES global+agent ≤2000 chars,
 // L1.5 index ≤1500 chars with confidence-ordered truncation.
 const MAX_RULES_CHARS = 2000
-const MAX_KNOWLEDGE_INDEX_CHARS = 1500
+const MAX_KNOWLEDGE_INDEX_CHARS = AGENT_KNOWLEDGE_INDEX_MAX_CHARS
 const MAX_L2_CHARS = 6000
 const MAX_TOTAL_CHARS = 16000
 const MAX_TASK_INDEX_CHARS = 1200
@@ -596,7 +600,8 @@ export class PromptAssemblyService {
   }
 
   private async loadL0(
-    scope: ConversationScope
+    scope: ConversationScope,
+    executionProfile: AgentExecutionProfile,
   ): Promise<{ text: string; refs: PromptMemoryRef[]; chars: number }> {
     const residentAgentSections: string[] = []
     const residentRefs: PromptMemoryRef[] = []
@@ -633,7 +638,7 @@ export class PromptAssemblyService {
     }
 
     // Load dynamic L0 files
-    const soul = await this.loadSOUL(scope.agent)
+    const soul = executionProfile.personality
     const memory = await this.loadMEMORY()
     const user = await this.loadUSER(scope.userId)
     const agents = this.readMemoryFile('AGENTS.md')
@@ -1054,12 +1059,64 @@ export class PromptAssemblyService {
     message: string | Array<{ type: string; text?: string; base64?: string; mimeType?: string }>
     coordinators: ReadonlyArray<DomainAdapter>
     workspaceRoots?: string[]
+    contextRefIds?: string[]
     /** EP3-A2 — 本轮任务 owner（projection 的 ownerAgentId）。三段式解析：
      *  显式合法 owner 优先；完全未传时回退 scope.agent；显式但非法的 id
      *  降级 global-only（不回退，防腐败 owner 借道注入他人谱系）。
      *  本单只立解析参数，写值唯一来自 A4。 */
     ownerAgentId?: string | null
+    executionProfile: AgentExecutionProfile
   }): Promise<PromptAssemblyResult> {
+    if (!params.executionProfile) {
+      if (process.env.NODE_ENV === 'production') {
+        throw new Error('[PromptAssembly] executionProfile is required')
+      }
+      const explicitOwner = params.ownerAgentId !== undefined && params.ownerAgentId !== null
+      const ownerCandidate = explicitOwner
+        ? (isSafeAgentScopeId(params.ownerAgentId || '') ? String(params.ownerAgentId) : MAIN_AGENT_ID)
+        : (isSafeAgentScopeId(params.scope.agent) ? params.scope.agent : MAIN_AGENT_ID)
+      const fallbackRoster = this.deps.getAgentRoster?.()
+      const fallbackAgentId = fallbackRoster && ownerCandidate !== MAIN_AGENT_ID
+        ? fallbackRoster.some((agent) => agent.id === ownerCandidate && agent.status === 'active')
+          ? ownerCandidate
+          : MAIN_AGENT_ID
+        : ownerCandidate
+      const knowledgeEnabledForFallback = this.deps.isKnowledgeSystemEnabled?.() ?? true
+      const fallbackStore = knowledgeEnabledForFallback ? this.deps.getBeliefCardStore?.() : null
+      const fallbackRoutingPaths = fallbackStore?.listRoutingCardInventory?.((fallbackRoster ?? [])
+        .filter((agent): agent is { id: string; name: string; charter: string | null; status: AgentSystemStudioAgentStatus } => isAgentSystemStudioAgentStatus(agent.status)))
+        .map((card) => card.relPath) ?? []
+      const fallbackIndex = fallbackStore?.renderKnowledgeIndex({
+        maxChars: MAX_KNOWLEDGE_INDEX_CHARS,
+        ownerAgentId: fallbackAgentId,
+        excludeRelPaths: fallbackRoutingPaths,
+      }) ?? { text: '', renderedRelPaths: [], omittedCount: 0 }
+      params.executionProfile = {
+        requestedAgentId: fallbackAgentId,
+        effectiveAgentId: fallbackAgentId,
+        personaRef: fallbackAgentId,
+        name: fallbackAgentId,
+        charter: '',
+        personality: await this.loadSOUL(fallbackAgentId),
+        rules: knowledgeEnabledForFallback ? this.readMemoryFile(`agents/${fallbackAgentId}/RULES.md`).trim() : '',
+        knowledgeIndex: fallbackIndex.omittedCount > 0
+          ? `${fallbackIndex.text}\n（另有 ${fallbackIndex.omittedCount} 条低置信度条目）`
+          : fallbackIndex.text,
+        allowedKnowledgeRefs: fallbackIndex.renderedRelPaths ?? [],
+        knowledgeWriteOwnerAgentId: fallbackAgentId,
+        knowledgeWriteNamespace: `agents/${fallbackAgentId}/knowledge`,
+        executionMaterialHash: `legacy-test-${fallbackAgentId}`,
+        readinessRevision: `legacy-test-${fallbackAgentId}`,
+        redirectChain: [],
+        readiness: {
+          conversationReady: true,
+          handoffReady: false,
+          autoRoutable: false,
+          collaborationReady: false,
+          reasons: ['missing_explicit_execution_profile'],
+        },
+      }
+    }
     const userText = extractTextFromMessage(params.message)
     // Stage T R2 fix: scoped runs must propagate sessionId/scopeId so
     // turn-engine's MCP authorization (`requestEnvelope.scopeId` at :2223)
@@ -1069,10 +1126,11 @@ export class PromptAssemblyService {
       sessionId: params.scope.id,
       scopeId: params.scope.id,
       workspaceRoots: params.workspaceRoots,
+      contextRefIds: params.contextRefIds,
     })
     const intentClassification = classifyIntent(requestEnvelope)
     const hasExplicitResourceRefs = hasCurrentExplicitResourceRefs(requestEnvelope)
-    const l0 = await this.loadL0(params.scope)
+    const l0 = await this.loadL0(params.scope, params.executionProfile)
     const l1 = await this.loadL1(params.scope, { includeDailyMemory: !hasExplicitResourceRefs })
     // EP2-K3 — RULES (L0 extension) + knowledge index (L1.5). EP2-K4: a
     // missing user RULES.md falls back to the default asset so fresh
@@ -1085,29 +1143,28 @@ export class PromptAssemblyService {
     // scope.agent's lineage (a corrupted owner would leak that agent's
     // rules/knowledge into a task that belongs to someone else), and it
     // never becomes a path fragment.
-    const candidateInjectionOwner = params.ownerAgentId !== undefined && params.ownerAgentId !== null
-      ? (isSafeAgentScopeId(params.ownerAgentId) ? params.ownerAgentId : null)
-      : (isSafeAgentScopeId(params.scope.agent) ? params.scope.agent : null)
+    const candidateInjectionOwner = isSafeAgentScopeId(params.executionProfile.effectiveAgentId)
+      ? params.executionProfile.effectiveAgentId
+      : null
     const roster = this.deps.getAgentRoster?.()
     const activeAgentIds = roster
       ? new Set(roster.filter((agent) => agent.status === 'active').map((agent) => agent.id))
       : null
+    const handoffReadyAgentIds = roster
+      ? new Set(roster.filter((agent) => this.deps.getAgentReadiness?.(agent.id).handoffReady === true).map((agent) => agent.id))
+      : null
     const injectionOwner = candidateInjectionOwner && activeAgentIds
       ? (activeAgentIds.has(candidateInjectionOwner) ? candidateInjectionOwner : null)
       : candidateInjectionOwner
-    const agentRulesText = knowledgeEnabled && injectionOwner
-      ? this.readMemoryFile(`agents/${injectionOwner}/RULES.md`).trim()
-      : ''
+    const agentRulesText = params.executionProfile.rules
     // owner-scope rules render first; the COMBINED text shares the single
     // MAX_RULES_CHARS budget (01 §7b: 全局+agent 合计 ≤2000 字符).
-    const rulesText = knowledgeEnabled
-      ? clip(
-        [agentRulesText, this.readMemoryFile('RULES.md').trim() || loadRulesDefaultBody()]
-          .filter(Boolean).join('\n\n'),
-        MAX_RULES_CHARS,
-      )
-      : ''
-    let knowledgeIndexText = ''
+    const rulesText = clip(
+      [agentRulesText, this.readMemoryFile('RULES.md').trim() || loadRulesDefaultBody()]
+        .filter(Boolean).join('\n\n'),
+      MAX_RULES_CHARS,
+    )
+    let knowledgeIndexText = knowledgeEnabled ? params.executionProfile.knowledgeIndex : ''
     let mainSessionRoutingCards: Array<{ relPath: string; title: string; description: string; targetAgentId: string }> = []
     try {
       const beliefStore = knowledgeEnabled ? (this.deps.getBeliefCardStore?.() ?? null) : null
@@ -1116,7 +1173,7 @@ export class PromptAssemblyService {
 	          ? (beliefStore.listRoutingCards?.() ?? [])
 	          : []
 	        mainSessionRoutingCards = rawRoutingCards
-	          .filter((card) => !activeAgentIds || activeAgentIds.has(card.targetAgentId))
+	          .filter((card) => !handoffReadyAgentIds || handoffReadyAgentIds.has(card.targetAgentId))
 	        const inventoryExcludedRelPaths = params.scope.agent === MAIN_AGENT_ID
 	          ? (beliefStore.listRoutingCardInventory?.((roster ?? [])
 	            .filter((agent): agent is { id: string; name: string; charter: string | null; status: AgentSystemStudioAgentStatus } => (
@@ -1131,14 +1188,7 @@ export class PromptAssemblyService {
 	            .map((card) => card.relPath),
 	          ...inventoryExcludedRelPaths,
 	        ]
-	        const index = beliefStore.renderKnowledgeIndex({
-          maxChars: MAX_KNOWLEDGE_INDEX_CHARS,
-          ownerAgentId: injectionOwner,
-          excludeRelPaths: excludedRoutingRelPaths,
-        })
-        knowledgeIndexText = index.omittedCount > 0
-          ? `${index.text}\n（另有 ${index.omittedCount} 条低置信度条目）`
-          : index.text
+        const index = { renderedRelPaths: params.executionProfile.allowedKnowledgeRefs }
         // P2-4 — count this injection so decay/usefulness metrics have signal.
         if (index.renderedRelPaths.length > 0) {
           try { this.deps.recordBeliefInjection?.(index.renderedRelPaths) } catch { /* silent-catch: counting never breaks assembly */ }
@@ -1152,9 +1202,9 @@ export class PromptAssemblyService {
     // 保持薄的反面约束). Empty roster + no routing cards → section omitted.
     let agentRoutingText = ''
     try {
-      if (knowledgeEnabled && params.scope.agent === MAIN_AGENT_ID) {
+      if (knowledgeEnabled && params.executionProfile.effectiveAgentId === MAIN_AGENT_ID) {
         const activeRoster = (roster ?? [])
-          .filter((agent) => agent.id !== MAIN_AGENT_ID && agent.status === 'active' && agent.charter)
+          .filter((agent) => handoffReadyAgentIds?.has(agent.id))
         const lines: string[] = []
         if (activeRoster.length > 0) {
           lines.push('可转办的专项 agent：')
@@ -1275,6 +1325,7 @@ export class PromptAssemblyService {
       }),
       requestEnvelope,
       intentClassification,
+      executionProfile: params.executionProfile,
     }
   }
 

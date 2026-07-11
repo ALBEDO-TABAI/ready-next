@@ -9,11 +9,14 @@ import {
   type SpecialistContentEditProposalStore,
 } from './specialist-content-edit-proposals'
 import type { AgentSystemStudioContentEditProposal } from '../../../../shared/agent-system-studio'
+import type { TaskExecutionBinding } from '../../../../shared/agent-execution-profile'
+import { assertTaskExecutionBinding } from '../task-projection/task-agent-binding'
 
 export interface SpecialistTaskEvolutionProposalDeps {
   registry: AgentRegistryReader
   store: BeliefCardStore
   proposalStore: SpecialistContentEditProposalStore
+  getRunExecutionBinding: (runId: string) => TaskExecutionBinding | null
   now?: Date
 }
 
@@ -22,6 +25,7 @@ export interface StageSpecialistTaskEvolutionProposalInput {
   checkIn: CheckInRecord
   terminalStatus?: string | null
   terminalReason?: string | null
+  allowWorkflowContribution?: boolean
 }
 
 export type SpecialistTaskEvolutionProposalResult =
@@ -123,17 +127,32 @@ export function stageSpecialistTaskEvolutionProposal(
   if (input.checkIn.verdict !== 'accept') {
     return { status: 'skipped', reason: 'checkin_not_accept' }
   }
+  if (input.terminalReason === 'adjudication_degraded') {
+    return { status: 'skipped', reason: 'terminal_adjudication_degraded' }
+  }
   const projection = input.projection
-  const ownerAgentId = String(projection.ownerAgentId || '').trim()
-  if (!ownerAgentId) return { status: 'skipped', reason: 'missing_owner_agent' }
-  const agent = deps.registry.get(ownerAgentId)
-  if (!isActiveSpecialist(agent)) return { status: 'skipped', reason: 'owner_not_active_specialist' }
+  const storedBinding = deps.getRunExecutionBinding(projection.runId)
+  if (!storedBinding) return { status: 'skipped', reason: 'missing_run_execution_binding' }
+  const binding = assertTaskExecutionBinding(storedBinding)
+  if (binding.runId !== projection.runId) throw new Error('[specialist-task-evolution] binding runId mismatch')
+  if (binding.kind !== 'registered_agent' || !binding.effectiveAgentId) {
+    return { status: 'skipped', reason: 'execution_not_registered_agent' }
+  }
+  if (!input.allowWorkflowContribution && binding.effectiveAgentId !== binding.ownerAgentIdAtStart) {
+    return { status: 'skipped', reason: 'execution_owner_mismatch' }
+  }
+  if (input.allowWorkflowContribution && binding.runOrigin !== 'workflow_participant') {
+    return { status: 'skipped', reason: 'contribution_not_workflow_participant' }
+  }
+  const executionAgentId = binding.effectiveAgentId
+  const agent = deps.registry.get(executionAgentId)
+  if (!isActiveSpecialist(agent)) return { status: 'skipped', reason: 'execution_agent_not_active_specialist' }
   const learningRefs = Array.isArray(projection.learningRefs) ? projection.learningRefs : []
   if (learningRefs.length === 0) return { status: 'skipped', reason: 'missing_learning_refs' }
 
-  const relPath = `agents/${ownerAgentId}/knowledge/task-evolution-${stableSlug(projection.taskId)}.md`
+  const relPath = `agents/${executionAgentId}/knowledge/task-evolution-${stableSlug(projection.taskId)}.md`
   const proposalId = proposalIdFor({
-    agentId: ownerAgentId,
+    agentId: executionAgentId,
     taskId: projection.taskId,
     runId: projection.runId,
     relPath,
@@ -149,7 +168,7 @@ export function stageSpecialistTaskEvolutionProposal(
   })
   const proposal = deps.proposalStore.upsert({
     proposalId,
-    agentId: ownerAgentId,
+    agentId: executionAgentId,
     targetKind: 'knowledge_card',
     targetRelPath: relPath,
     baseHash: hashSpecialistStudioContent(''),

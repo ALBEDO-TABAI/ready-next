@@ -120,7 +120,8 @@ export function buildDocumentTargetInstruction(guard: DocumentTargetGuard | null
   return [
     `本轮用户已明确目标文档：${guard.targetName} (${guard.targetPath})。`,
     '任何写入、追加、插入 widget 或保存前，必须把该路径作为目标文档处理；不要新建临时文档来替代这个目标。',
-    '如果需要改内容，先使用 document_open_tab 打开该路径，再执行内容修改，最后调用 document_save_tab 保存。',
+    '直接调用写入工具即可：系统会在第一次写入前自动打开该路径、写入成功后自动保存；不要因为工具列表里没有 document_open_tab 而放弃写入或改走其他通道。',
+    '信息卡/摘要卡/对比卡/图表/关系图/流程图等卡片类内容，必须用 document_insert_widget 以 componentSpec 结构化落地；禁止用 document_replace_text / document_replace_exact 把 markdown 表格或手写 HTML 写进正文冒充卡片，也禁止用 artifact 导出整文件覆写来替代文档写入。',
     '在目标文档实际写入并保存前，不要用"我将要写入/我准备插入"作为最终回复。',
     '确认目标文档已有结果并保存后，直接用中文说明完成位置，不要继续重复切换标签或重复写入。',
     preservedSnippets
@@ -437,7 +438,7 @@ export function buildDocumentTargetContinuationRepairInput(guard: DocumentTarget
   return [
     '系统检查：上一轮回复表示目标文档还没补完，因此不能进入完成态。',
     `请现在继续修正目标文档 ${guard.targetName} (${guard.targetPath})，把未完成或截断的部分补完整。`,
-    '必须调用 document_set_content、document_append_content、document_replace_text 或 document_replace_exact 完成修正；如果是在修已有 widget，请改用 document_update_widget。最后调用 document_save_tab 保存。',
+    '用本轮工具列表里实际存在的文档写入工具完成修正：卡片/图表类内容用 document_insert_widget（componentSpec），修已有 widget 用 document_update_widget，文本修正优先 document_replace_exact；若列表里有 document_set_content / document_append_content / document_replace_text 也可以使用。系统会自动打开并保存目标文档。',
     '完成后只简短确认，不要再说"我会补完"。'
   ].join('\n')
 }

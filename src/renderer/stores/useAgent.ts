@@ -22,6 +22,7 @@ import { createAgentRuntimeDriver, syncActiveScopeRunAliases } from '../modules/
 import { installAgentPanelTestHarness } from '../modules/agent/agentPanelTestHarness'
 import { computeDesiredRoots, useWorkspace } from './useWorkspace'
 import { MAX_AGENT_SESSIONS } from '../../shared/agent-session-limits'
+import { DEFAULT_DELIVERY_MODE, DELIVERY_MODE_SETTING_KEY, isDeliveryMode, type DeliveryMode } from '../../shared/dynamic-delivery'
 
 import type {
   Agent,
@@ -844,6 +845,8 @@ export const useAgent = create<AgentState>((set, get) => ({
     const fallbackScope: ConversationScope = {
       id: fallbackScopeId,
       agent: currentAgent,
+      activeAgentId: currentAgent,
+      handoffGeneration: 0,
       title: '新对话',
       sourceKind: 'local',
       sourceId: 'app',
@@ -1154,7 +1157,7 @@ export const useAgent = create<AgentState>((set, get) => ({
     } catch { /* ignore */ }
   },
 
-  sendMessage: async (content: string) => {
+  sendMessage: async (content: string, options?: { deliveryMode?: DeliveryMode }) => {
     const normalizedContent = content.trim()
     const { attachments: pendingAttachments } = get()
     if (!normalizedContent && pendingAttachments.length === 0) {
@@ -1578,6 +1581,15 @@ export const useAgent = create<AgentState>((set, get) => ({
           pinnedFolders: workspaceState.pinnedFolders,
         })
 
+        const settingsGet = window.electronAPI.settings?.get
+        const persistedModeResult = options?.deliveryMode || !settingsGet
+          ? null
+          : await settingsGet(DELIVERY_MODE_SETTING_KEY).catch(() => null)
+        const persistedMode = persistedModeResult?.success && isDeliveryMode(persistedModeResult.data)
+          ? persistedModeResult.data
+          : DEFAULT_DELIVERY_MODE
+        const deliveryMode = options?.deliveryMode ?? persistedMode
+
         const sendWithCurrentScope = async (): Promise<AgentSendResult> => (
           window.electronAPI.agent.sendScoped
             ? window.electronAPI.agent.sendScoped({
@@ -1585,6 +1597,7 @@ export const useAgent = create<AgentState>((set, get) => ({
               agent: activeScope.agent,
               message: finalMessage,
               requestId,
+              deliveryMode,
               ...(workspaceRoots.length > 0 ? { workspaceRoots } : {}),
               userMessage: {
                 id: userMsgId,
@@ -1600,7 +1613,7 @@ export const useAgent = create<AgentState>((set, get) => ({
               },
               continuationIntent: pendingContinuationIntent || undefined,
             })
-            : window.electronAPI.agent.send(activeAgentName, finalMessage, activeScopeId, requestId)
+            : window.electronAPI.agent.send(activeAgentName, finalMessage, activeScopeId, requestId, deliveryMode)
         )
 
         let result = await sendWithCurrentScope()

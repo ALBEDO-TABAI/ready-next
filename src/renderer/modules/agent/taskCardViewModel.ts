@@ -20,6 +20,9 @@ export type TaskDisclosureState = Partial<Record<TaskSectionKey, boolean>>
 
 export interface TaskCardRunLike {
   scopeId: string
+  ownerAgentId?: string | null
+  executionBinding?: import('../../../shared/agent-execution-profile').TaskExecutionBinding | null
+  deliveryState?: import('../../../shared/dynamic-delivery').DeliveryStateV1 | null
   taskId?: string | null
   phase: ScopeRunState['phase']
   terminalReason?: ScopeRunState['terminalReason']

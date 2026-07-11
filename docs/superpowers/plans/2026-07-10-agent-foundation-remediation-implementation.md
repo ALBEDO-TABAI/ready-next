@@ -3,7 +3,7 @@ title: 主 Agent / 派生 Agent 根基修复实施计划
 date: 2026-07-10
 kind: implementation
 enforce: false
-status: draft v2 — 两轮反方复审已收口，待逐单实施
+status: completed — 2026-07-11 根基修复、真机验收与对抗审查已收口
 owner: 白
 author: Codex
 requires:
@@ -613,3 +613,15 @@ Dynamic Delivery 不得绕过这些 API 自己查 registry、拼 Agent 路径或
 - 未解决项（若有）及为何不阻塞 Dynamic Delivery。
 
 任何一项未跑或 skip，都不能把本计划标为完成。
+
+## 9. 2026-07-11 实施收口
+
+本计划已完成，Dynamic Workflow 的 live 实施闸门已解锁。
+
+- 身份、任务归属、每次执行绑定、用量归集、学习归属和合并/停用处理已收口到单一可验证合同。
+- same-session handoff 已经真实确认卡、旧 run 暂停、fresh takeover、重启恢复和迟到结果保护验证。
+- Agent Studio 的 RULES、FOUNDATION 和知识卡均可在点击位置直接编辑，保存仍走待确认修改，三类入口均有行为测试和真机截图。
+- 真机证据、迁移前数据统计、handoff 账本和截图见 `docs/superpowers/audits/2026-07-11-agent-foundation-live-evidence/README.md`。专项学习的 staged-only 归属由真实入口行为测试覆盖；真机另外证明了 staged 内容提案不会绕过确认。
+- 单一对抗审查没有发现新的阻塞缺口；审查后的全量验收反而捕获并修复了“把保留的 handoff 工具误当成技能命中”的回归。
+- 最终重跑通过：`verify:agent-foundation`、`verify:evolution-p3`、`verify:evolution-p4`、`verify:stability`、`verify:streaming`、`verify:native`、`typecheck`、`build`。host Node 中的 SQLite ABI guard 仍会显式标记 skip，对应路径已由同链的 Electron native 验证覆盖，不是未测路径。
+- 对抗审查唯一的后续提醒：同一 model turn 内的原生工具为了防止 handoff 后危险工具抢跑而串行；Dynamic Workflow 不得将这个局部安全边界误扩展为参与者之间的全局串行。

@@ -150,9 +150,15 @@ function generateResponseSegmentId(): string {
 function buildTaskSnapshotMeta(scopeId: string, scope: ConversationScope | null, runState: ScopeRunState | null): Record<string, unknown> | undefined {
   if (!runState) return undefined
   return {
+    runId: runState.requestId,
+    executionAgentId: runState.executionBinding?.effectiveAgentId ?? null,
+    displayNameSnapshot: runState.executionAgentDisplayName ?? runState.executionBinding?.effectiveAgentId ?? runState.agent,
+    executionMaterialHash: runState.executionBinding?.executionMaterialHash ?? null,
     taskSnapshot: {
       scopeId,
       agent: runState.agent,
+      ownerAgentId: runState.ownerAgentId ?? null,
+      executionBinding: runState.executionBinding ?? null,
       taskId: runState.taskId || null,
       title: scope?.title || '任务',
       taskTitle: runState.taskTitle || null,
@@ -171,11 +177,15 @@ function buildTaskSnapshotMeta(scopeId: string, scope: ConversationScope | null,
       responseMessageId: runState.responseMessageId || null,
       phase: runState.phase,
       terminalReason: runState.terminalReason || null,
+      // 整轮 toolTrace 是兜底显示面：保留 toolName、刻意剥离 detail —— L3
+      // 详情由逐消息段快照（buildToolTraceSnapshotMeta）承载，避免消息 meta
+      // 随长任务成倍膨胀。
       toolTrace: (runState.toolTrace || []).map((event) => ({
         id: event.id,
         kind: event.kind,
         text: event.text,
         timestamp: event.timestamp instanceof Date ? event.timestamp.toISOString() : String(event.timestamp),
+        ...(event.toolName ? { toolName: event.toolName } : {}),
       })),
     },
   }
@@ -189,6 +199,8 @@ function buildToolTraceSnapshotMeta(runState: ScopeRunState | null): Record<stri
     kind: event.kind,
     text: event.text,
     timestamp: event.timestamp instanceof Date ? event.timestamp.toISOString() : String(event.timestamp),
+    ...(event.toolName ? { toolName: event.toolName } : {}),
+    ...(event.detail ? { detail: event.detail } : {}),
   }))
 
   if (toolTraceSnapshot.length === 0) return undefined
@@ -927,6 +939,7 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
       )
 
       const previousBuffer = runState?.responseBuffer || ''
+      const executionAgentId = runState?.executionBinding?.effectiveAgentId || data.agent
       let targetResponseMessageId = runState?.responseMessageId || null
       let nextBuffer = collapseAdjacentDuplicateAssistantTail(`${previousBuffer}${data.chunk}`)
       let chunkForDisplay = nextBuffer.startsWith(previousBuffer) ? nextBuffer.slice(previousBuffer.length) : data.chunk
@@ -944,7 +957,7 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
         // not this scope is in the foreground right now.
         currentState.appendScopeLiveMessage(scopeId, {
           id: targetResponseMessageId,
-          agent: data.agent,
+          agent: executionAgentId,
           content: chunkForDisplay,
           type: 'agent',
           timestamp: new Date(),
@@ -953,7 +966,7 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
         if (scopeId === currentState.currentScopeId) {
           currentState.addMessage({
             id: targetResponseMessageId,
-            agent: data.agent,
+            agent: executionAgentId,
             content: chunkForDisplay,
             type: 'agent',
             timestamp: new Date(),
@@ -966,7 +979,7 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
           ))
         }
       } else if (targetResponseMessageId) {
-        upsertStreamedSegmentCache(currentState, scopeId, targetResponseMessageId, chunkForDisplay, nextBuffer, data.agent)
+        upsertStreamedSegmentCache(currentState, scopeId, targetResponseMessageId, chunkForDisplay, nextBuffer, executionAgentId)
         if (
           chunkForDisplay &&
           scopeId === currentState.currentScopeId &&
@@ -1651,6 +1664,12 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
                 kind: event.toolEvent.kind,
                 text: event.toolEvent.text,
                 timestamp: new Date(event.toolEvent.timestamp),
+                ...(typeof event.toolEvent.toolName === 'string' && event.toolEvent.toolName
+                  ? { toolName: event.toolEvent.toolName }
+                  : {}),
+                ...(typeof event.toolEvent.detail === 'string' && event.toolEvent.detail
+                  ? { detail: event.toolEvent.detail }
+                  : {}),
               },
             ]
             : toolTrace
@@ -1659,6 +1678,9 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
           return {
             scopeId: event.scopeId,
             agent: previousForRun?.agent || event.agent,
+            ownerAgentId: event.ownerAgentId ?? previousForRun?.ownerAgentId ?? null,
+            executionBinding: event.executionBinding ?? previousForRun?.executionBinding ?? null,
+            executionAgentDisplayName: event.executionAgentDisplayName ?? previousForRun?.executionAgentDisplayName ?? null,
             requestId: event.runId || previousForRun?.requestId || null,
             taskId: event.taskId || previousForRun?.taskId || patch.taskContinuation?.taskId || null,
             phase: patch.phase || event.phase,

@@ -79,6 +79,9 @@ export function mergeTaskRuns(params: UseTaskRunMergeParams): TaskCardRun[] {
     return taskProjectionToTaskCardRun({
       // O1 whitelist fields (persisted scope-run runtime data)
       scopeId: run.scopeId,
+      ownerAgentId: projection?.ownerAgentId ?? null,
+        executionBinding: projection?.executionBinding ?? null,
+        deliveryState: projection?.deliveryState ?? null,
       // taskId is whitelist — multi-source fallback is allowed
       taskId: projection?.taskId || run.taskId || run.taskContinuation?.taskId || null,
       phase: run.phase,
@@ -127,6 +130,9 @@ export function mergeTaskRuns(params: UseTaskRunMergeParams): TaskCardRun[] {
     const cardRun = taskProjectionToTaskCardRun({
       // O1 whitelist fields copied from inMemoryTaskRuns shell
       scopeId: run.scopeId,
+      ownerAgentId: projection?.ownerAgentId ?? null,
+      executionBinding: projection?.executionBinding ?? null,
+      deliveryState: projection?.deliveryState ?? null,
       taskId: projection?.taskId || run.taskId || persistedRun?.taskId || run.taskContinuation?.taskId || null,
       phase: run.phase,
       terminalReason: run.terminalReason,
@@ -217,6 +223,9 @@ export function mergeTaskRuns(params: UseTaskRunMergeParams): TaskCardRun[] {
       const cardRun = taskProjectionToTaskCardRun({
         // O1 whitelist
         scopeId: scope.id,
+        ownerAgentId: projection.ownerAgentId ?? null,
+        executionBinding: projection.executionBinding ?? null,
+        deliveryState: projection.deliveryState ?? null,
         taskId: projection.taskId,
         phase: phaseFromStatus,
         terminalReason: undefined,

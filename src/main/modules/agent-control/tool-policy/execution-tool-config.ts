@@ -13,6 +13,7 @@ import {
   buildDocumentWidgetGuidanceSnippet,
   buildDocumentWidgetOpenUIRulesSnippet,
   buildDocumentWidgetSkeletonRulesSnippet,
+  inferDocumentWidgetProfile,
   type DocumentWidgetProfile,
 } from '../../claude-bridge/widget-guidance'
 import type { CapabilityGroupId } from '../../../../shared/ai-capability-groups'
@@ -258,11 +259,8 @@ function filterOpenAIToolsByAllowedNames(
   })
 }
 
-export function buildToolGuidance(policy: ToolPolicy): string {
-  const guidance: string[] = []
-
-  if (policy.forceDocumentTool) {
-    guidance.push(`
+/** 文档工具使用映射（唯一文案信源：buildToolGuidance 与 live 通道 buildDocumentSurfaceGuidance 共享）。 */
+const DOCUMENT_TOOL_USAGE_RULES = `
 ## 工具使用建议
 
 当前用户的请求可能涉及文档操作。如果用户明确要求编辑、修改或保存文档，请使用 document_* 工具。
@@ -272,13 +270,20 @@ export function buildToolGuidance(policy: ToolPolicy): string {
 - "读取第三部分/某章节内容" → 使用 document_read_section
 - "把这段原文精准改掉" → 使用 document_replace_exact
 - "在文档里做一个交互图表/组件" → 使用 document_insert_widget
+- "插入/生成 信息卡、摘要卡、结论卡、对比卡、数据卡、指标卡、关系图、流程图、时间线、图表" → **必须**使用 document_insert_widget（componentSpec 结构化落地）；**禁止**用 document_replace_text / document_replace_exact / document_set_content / document_append_content 把 markdown 表格或手写 HTML 写进正文冒充卡片
 - "看看文档里有哪些 widget" → 使用 document_list_widgets
 - "更新这个 widget / 改图表内容" → 使用 document_update_widget，不要用 document_replace_text / document_replace_exact 修改 show-widget 围栏内部
 - "删掉这个 widget" → 使用 document_remove_widget
 - "保存文档" → 使用 document_save_tab
 - "你是谁" → 直接回答，不使用工具
 - "这篇文章怎么样" → 直接回答，不使用工具
-`)
+`
+
+export function buildToolGuidance(policy: ToolPolicy): string {
+  const guidance: string[] = []
+
+  if (policy.forceDocumentTool) {
+    guidance.push(DOCUMENT_TOOL_USAGE_RULES)
 
     guidance.push(buildDocumentWidgetSkeletonRulesSnippet())
     guidance.push(buildDocumentWidgetOpenUIRulesSnippet())
@@ -295,6 +300,28 @@ export function buildToolGuidance(policy: ToolPolicy): string {
   }
 
   return guidance.join('\n\n')
+}
+
+/**
+ * W10-F4 — 文档指引的 live 生产通道（SDK 前导词消费）。
+ * 触发信号是"本轮最终工具面里有 document_insert_widget"这一事实，而非意图正则；
+ * 注入内容 = 工具使用映射（与 buildToolGuidance 同源）+ OpenUI 组件目录（componentSpec
+ * 组件名的唯一模型可见来源）+ 命中 widget 家族时的基线建议。骨架清单是编辑抽屉
+ * 词汇，刻意不进自由工具循环轮。
+ */
+export function buildDocumentSurfaceGuidance(params: {
+  toolNames: ReadonlySet<string>
+  userText: string
+}): string {
+  if (!params.toolNames.has('document_insert_widget')) return ''
+  const profile = inferDocumentWidgetProfile(params.userText || '')
+  return [
+    DOCUMENT_TOOL_USAGE_RULES,
+    buildDocumentWidgetOpenUIRulesSnippet(),
+    profile ? buildDocumentWidgetGuidanceSnippet(profile) : '',
+  ]
+    .filter(Boolean)
+    .join('\n\n')
 }
 
 /**

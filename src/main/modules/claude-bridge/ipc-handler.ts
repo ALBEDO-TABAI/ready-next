@@ -1029,6 +1029,7 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
     listOwnedTasks: (agentId) => runtime!.listTaskProjectionsByOwner(agentId, 8),
     listRecentPrerouteTraces: (limit) => runtime!.listRecentSessionPrerouteTraces(limit),
     listStagedBlueprints: () => getSpecialistBlueprintStore().list(['draft', 'needs_clarification', 'staged', 'confirmed']),
+    getAgentReadiness: (agentId) => runtime!.resolveAgentExecutionReadiness(agentId),
     simulateRouting: (firstMessage) => runtime!.simulateSessionPrerouteForStudio(firstMessage),
   })
 

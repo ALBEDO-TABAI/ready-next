@@ -276,6 +276,13 @@ export default function AgentSystemStudio() {
     () => snapshot?.agents.find((agent) => agent.id === selectedId) ?? snapshot?.agents[0] ?? null,
     [snapshot, selectedId],
   )
+  const selectedReadiness = selectedAgent?.readiness ?? {
+    conversationReady: selectedAgent?.status === 'active',
+    handoffReady: false,
+    autoRoutable: false,
+    collaborationReady: false,
+    reasons: [],
+  }
 
   useEffect(() => {
     setContentEditDraft(null)
@@ -626,6 +633,54 @@ export default function AgentSystemStudio() {
       && !blueprintEditorDirty,
   )
 
+  const renderInlineContentEditor = (
+    targetKind: AgentSystemStudioContentEditTargetKind,
+    targetRelPath: string,
+  ) => {
+    if (!contentEditDraft
+      || contentEditDraft.targetKind !== targetKind
+      || contentEditDraft.targetRelPath !== targetRelPath) return null
+    return (
+      <div className="mt-3 rounded-lg border p-3" style={{ borderColor: 'var(--border-default)' }}>
+        <Field
+          label={`修改内容：${contentEditDraft.label}`}
+          value={contentEditDraft.content}
+          multiline
+          rows={10}
+          onChange={(content) => setContentEditDraft((current) => current ? { ...current, content } : current)}
+        />
+        {contentEditError && (
+          <div className="mt-2 text-[12px]" style={{ color: 'var(--color-red)' }}>{contentEditError}</div>
+        )}
+        <div className="mt-3 flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => void handleStageContentEdit()}
+            disabled={contentEditSaving || !contentEditDraft.content.trim()}
+            className="border rounded-lg inline-flex items-center gap-1.5 text-[12px] disabled:opacity-50"
+            style={{ ...SETTINGS_FLAT_BUTTON_STYLE, padding: '8px 11px' }}
+          >
+            <Save className="h-3.5 w-3.5" />
+            保存为提案
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setContentEditDraft(null)
+              setContentEditError(null)
+            }}
+            disabled={contentEditSaving}
+            className="border rounded-lg inline-flex items-center gap-1.5 text-[12px] disabled:opacity-50"
+            style={{ ...SETTINGS_FLAT_BUTTON_STYLE, padding: '8px 11px' }}
+          >
+            <XCircle className="h-3.5 w-3.5" />
+            取消
+          </button>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <section className="glass-surface-card border" style={{ ...SETTINGS_CARD_STYLE, padding: '20px 22px' }}>
       <div className="flex items-start justify-between gap-4">
@@ -692,6 +747,10 @@ export default function AgentSystemStudio() {
                   <Chip>{selectedAgent.kind === 'main' ? '主 agent' : selectedAgent.status}</Chip>
                   {selectedAgent.parentAgentId && <Chip>来源 {selectedAgent.parentAgentId}</Chip>}
                   {selectedAgent.mergedIntoAgentId && <Chip>并入 {selectedAgent.mergedIntoAgentId}</Chip>}
+                  <Chip>{selectedReadiness.conversationReady ? '可聊天' : '不可聊天'}</Chip>
+                  <Chip>{selectedReadiness.handoffReady ? '可转办' : '不可转办'}</Chip>
+                  <Chip>{selectedReadiness.autoRoutable ? '可自动路由' : '不可自动路由'}</Chip>
+                  <Chip>{selectedReadiness.collaborationReady ? '可协作' : '不可协作'}</Chip>
                   <Chip>知识 {selectedAgent.contentSummary.knowledgeCards}</Chip>
                   <Chip>路由 {selectedAgent.contentSummary.routingCards}</Chip>
                   <Chip>任务 {selectedAgent.contentSummary.ownedTasks}</Chip>
@@ -700,6 +759,11 @@ export default function AgentSystemStudio() {
                 <div className="mt-3 text-[12px] leading-5" style={{ color: 'var(--text-muted)' }}>
                   {selectedAgent.charter || '未填写职责'}
                 </div>
+                {selectedReadiness.reasons.length > 0 && (
+                  <div className="mt-2 text-[12px] leading-5" style={{ color: 'var(--text-muted)' }}>
+                    缺少：{selectedReadiness.reasons.join('、')}
+                  </div>
+                )}
               </Section>
             )}
 
@@ -724,6 +788,7 @@ export default function AgentSystemStudio() {
                       </button>
                     )}
                   </div>
+                  {renderInlineContentEditor('rules', selectedAgent.rules.relPath)}
                 </Section>
 
                 <Section icon={<FileText className="h-4 w-4" />} title="FOUNDATION">
@@ -745,6 +810,7 @@ export default function AgentSystemStudio() {
                       </button>
                     )}
                   </div>
+                  {renderInlineContentEditor('foundation', selectedAgent.foundation.relPath)}
                 </Section>
 
                 <Section icon={<Brain className="h-4 w-4" />} title="知识">
@@ -778,6 +844,7 @@ export default function AgentSystemStudio() {
                             编辑
                           </button>
                         )}
+                        {renderInlineContentEditor('knowledge_card', card.relPath)}
                       </div>
                     ))}
                   </div>
@@ -847,53 +914,6 @@ export default function AgentSystemStudio() {
                   </div>
                 </Section>
               </div>
-            )}
-
-            {selectedAgent && contentEditDraft && (
-              <Section icon={<Pencil className="h-4 w-4" />} title="内容修改草稿">
-                <div className="flex flex-wrap gap-2">
-                  <Chip>{selectedAgent.name}</Chip>
-                  <Chip>{contentTargetLabel(contentEditDraft.targetKind)}</Chip>
-                  <Chip>{contentEditDraft.targetRelPath}</Chip>
-                </div>
-                <div className="mt-3">
-                  <Field
-                    label={`修改内容：${contentEditDraft.label}`}
-                    value={contentEditDraft.content}
-                    multiline
-                    rows={10}
-                    onChange={(content) => setContentEditDraft((current) => current ? { ...current, content } : current)}
-                  />
-                </div>
-                {contentEditError && (
-                  <div className="mt-3 text-[12px]" style={{ color: 'var(--color-red)' }}>{contentEditError}</div>
-                )}
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    onClick={() => void handleStageContentEdit()}
-                    disabled={contentEditSaving || !contentEditDraft.content.trim()}
-                    className="border rounded-lg inline-flex items-center gap-1.5 text-[12px] disabled:opacity-50"
-                    style={{ ...SETTINGS_FLAT_BUTTON_STYLE, padding: '8px 11px' }}
-                  >
-                    <Save className="h-3.5 w-3.5" />
-                    保存为提案
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setContentEditDraft(null)
-                      setContentEditError(null)
-                    }}
-                    disabled={contentEditSaving}
-                    className="border rounded-lg inline-flex items-center gap-1.5 text-[12px] disabled:opacity-50"
-                    style={{ ...SETTINGS_FLAT_BUTTON_STYLE, padding: '8px 11px' }}
-                  >
-                    <XCircle className="h-3.5 w-3.5" />
-                    取消
-                  </button>
-                </div>
-              </Section>
             )}
 
             {selectedAgent && (

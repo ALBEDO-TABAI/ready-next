@@ -117,6 +117,8 @@ export interface ToolBridgeRuntimeContext {
   runId: string
   taskId: string
   sessionId?: string
+  executionBinding?: import('../../../../shared/agent-execution-profile').TaskExecutionBinding | null
+  executionProfile?: import('../../../../shared/agent-execution-profile').AgentExecutionProfile | null
   currentUserText?: string
   sourceMessageId?: string | null
   sourceMessageUnavailableReason?: SpecialistBlueprintSourceMessageUnavailableReason | null
@@ -141,6 +143,8 @@ export interface ToolBridgeRuntimeContext {
   browserTurnLease?: BrowserTurnLease | null
   taskBudgetRuntime: TaskBudgetRuntime | null
   budgetWarningMessages: BudgetWarningLevel[]
+  hostControl?: 'handoff_takeover' | null
+  toolExecutionChain?: Promise<void>
 }
 
 export interface SdkLongSkillCheckpoint {
@@ -210,6 +214,10 @@ export interface AgentSdkExecutionOptions {
   taskBudgetRuntime?: TaskBudgetRuntime | null
   continuationIntent?: ContinuationIntent | null
   continuationState?: ContinuationState | null
+  executionBinding?: import('../../../../shared/agent-execution-profile').TaskExecutionBinding | null
+  executionProfile?: import('../../../../shared/agent-execution-profile').AgentExecutionProfile | null
+  /** Typed product choice; never inferred from user text. */
+  deliveryMode?: import('../../../../shared/dynamic-delivery').DeliveryMode
 }
 
 export interface DocumentTargetGuard {

@@ -173,6 +173,8 @@ export interface TaskProjectionRecord {
   learningRefs?: unknown[] | null
   /** EP3-A1 — task owner agent (read-only on the wire; A4 writes). */
   ownerAgentId?: string | null
+  taskOrigin: import('../agent-execution-profile').TaskCreationOrigin
+  executionBinding?: import('../agent-execution-profile').TaskExecutionBinding | null
   /** D4 — 模型经 declare_completion_criteria 声明的补充验收标准（整组替换写入；
    *  finalizer 终态经 appendModelCriteria 并入裁决，renderer 只读不派生）。 */
   modelCriteria?: string[] | null
@@ -181,6 +183,8 @@ export interface TaskProjectionRecord {
   /** EP3-PK1 — packet marker (parent|child|null) + reference list. */
   packetRole?: 'parent' | 'child' | null
   contextRefs?: string[] | null
+  /** Dynamic Delivery host-owned state. Renderer must not derive or mutate it. */
+  deliveryState?: import('../dynamic-delivery').DeliveryStateV1 | null
   createdAt: string
   updatedAt: string
 }
@@ -202,7 +206,13 @@ export interface UnifiedTaskState {
 
 // ---------- change event (U4.1b) ----------
 
-export type TaskProjectionChangeReason = 'create' | 'update' | 'delete' | 'supersede'
+export type TaskProjectionChangeReason =
+  | 'create'
+  | 'update'
+  | 'delete'
+  | 'supersede'
+  | 'dynamic_delivery_tree'
+  | 'dynamic_delivery_reduce'
 
 export interface TaskProjectionChangeEvent {
   scopeId: string

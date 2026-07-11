@@ -477,7 +477,11 @@ test('agent sdk runtime applies selected skill allowed_tools to default surface'
   )
 
   assert.equal(result.success, true)
-  assert.deepEqual(toolNames, ['skill_send_im_file', 'declare_completion_criteria'])
+  assert.deepEqual(toolNames, [
+    'skill_send_im_file',
+    'agent_propose_handoff',
+    'declare_completion_criteria'
+  ])
 })
 
 test('agent sdk runtime preserves base tools when selected skill tools are unavailable', () => {
@@ -518,6 +522,33 @@ test('agent sdk runtime preserves base tools when selected skill tools are unava
   assert.equal(names.includes('skill_missing_runtime_action'), false)
   assert.ok(names.length > 0)
   assert.ok(names.some((name) => name.startsWith('document_') || name.startsWith('file_')))
+})
+
+test('agent sdk runtime keeps handoff available when a fuzzy skill match narrows the turn', () => {
+  const runtime = createRuntime({})
+  const privateRuntime = runtime as unknown as {
+    toolExecutor: {
+      listDefaultToolDefinitionsForTurn: (params: Record<string, unknown>) => Array<{ name: string }>
+    }
+  }
+  const definitions = privateRuntime.toolExecutor.listDefaultToolDefinitionsForTurn({
+    message: '请把当前任务转交给文案 Agent',
+    sessionId: 'scope-skill-handoff',
+    scopeId: 'scope-skill-handoff',
+    config: fakeConfig,
+    browserHostAvailable: true,
+    feishuConnected: false,
+    authorization: buildSelectedSkillToolAuthorization({
+      skillId: 'context-compact',
+      allowedTypedActions: ['skill_compact_context'],
+      allowedPrimitives: [],
+      source: 'explicit',
+      reason: 'test_fuzzy_skill_handoff'
+    }),
+    requestEnvelope: buildRequestEnvelope({ userText: '请把当前任务转交给文案 Agent' })
+  })
+
+  assert.ok(definitions.some((definition) => definition.name === 'agent_propose_handoff'))
 })
 
 test('agent sdk runtime sanitizes raw tool-call text before transcript output', async () => {
@@ -924,6 +955,38 @@ test('agent sdk runtime exposes Ready tool definitions and preserves structured 
     taskTitle: 'Research',
     taskSummary: 'Search done'
   })
+})
+
+test('native handoff tool result checkpoints before reading a stale model final output', async () => {
+  const handoffDefinition = createToolDefinition({
+    name: 'agent_propose_handoff',
+    groupId: 'agent_interaction',
+    domain: 'agent_interaction'
+  })
+  const runtime = createRuntime({
+    listToolDefinitions: () => [handoffDefinition],
+    executeToolCall: async () => createToolExecutionOutput('已采纳交接', {
+      shape: 'json',
+      data: { outcome: { control: 'handoff_takeover' } }
+    }),
+    runAgent: async ({ tools }) => {
+      const sdkTool = tools[0] as { invoke: (context: unknown, input: string) => Promise<string> }
+      await sdkTool.invoke({}, JSON.stringify({ targetAgentId: 'copywriter' }))
+      return { finalText: '旧身份不应继续输出' }
+    }
+  })
+  runtime.newSession('butler::scope-native-handoff', 'system prompt')
+
+  const result = await runtime.sendMessage(
+    'butler::scope-native-handoff',
+    '转交给文案',
+    'run-native-handoff',
+    { publicSessionId: 'scope-native-handoff', taskId: 'task-native-handoff' }
+  )
+
+  assert.equal(result.status, 'checkpoint')
+  assert.equal(result.terminalReason, 'manual_suspend')
+  assert.equal(result.finalText, '')
 })
 
 test('agent sdk runtime buffers native text before recovering XML tool calls', async () => {
@@ -6853,7 +6916,7 @@ test('P0-1 pin: checkpoint after repeated clarification emits preserved text exa
 
   assert.equal(result.success, true)
   assert.equal(runAgentCalls, 2)
-  assert.equal(result.contextUsage?.usedInputTokens, 21)
+  assert.equal(result.contextUsage?.usedInputTokens, 32)
   const visible = joinedTextOutputs(events)
   assert.equal(
     countOccurrences(visible, '请提供门店面积和预算，才能继续。'),

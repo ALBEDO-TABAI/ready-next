@@ -74,6 +74,7 @@ test('PromptAssembly emits context_budget_overage when actual injected sections 
         { id: 'butler', name: '主 agent', charter: null, status: 'active' },
         { id: 'writer', name: '写作专家', charter: 'C'.repeat(2_000), status: 'active' },
       ],
+      getAgentReadiness: (id) => ({ conversationReady: true, handoffReady: id === 'writer', autoRoutable: id === 'writer', collaborationReady: false, reasons: [] }),
       getScopeSessionRecallCapsules: () => [
         capsule('manual-1', '手动一', longSummary),
         capsule('manual-2', '手动二', longSummary),
@@ -144,6 +145,7 @@ test('PromptBudgetReport covers every injected context_bill section', async () =
         { id: 'butler', name: '主 agent', charter: null, status: 'active' },
         { id: 'writer', name: '写作专家', charter: '处理长上下文和文档审查', status: 'active' },
       ],
+      getAgentReadiness: (id) => ({ conversationReady: true, handoffReady: id === 'writer', autoRoutable: id === 'writer', collaborationReady: false, reasons: [] }),
       getScopeSessionRecallCapsules: () => [capsule('manual-recall', '手动回看')],
       getAutoSessionRecallCapsules: () => [capsule('auto-recall', '自动回看')],
       isKnowledgeSystemEnabled: () => true,

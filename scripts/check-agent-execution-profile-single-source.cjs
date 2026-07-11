@@ -1,0 +1,21 @@
+const fs = require('node:fs')
+
+const prompt = fs.readFileSync('src/main/modules/agent-control/prompt-assembly.ts', 'utf8')
+const coordinator = fs.readFileSync('src/main/modules/agent-control/task-projection/run-coordinator.ts', 'utf8')
+const runtime = fs.readFileSync('src/main/modules/agent-control/runtime-core/runtime.ts', 'utf8')
+const preroute = fs.readFileSync('src/main/modules/agent-control/runtime-core/session-preroute-service.ts', 'utf8')
+
+const failures = []
+if (!coordinator.includes('resolveExecutionProfile(ownerAgentId)')) failures.push('run coordinator does not resolve the frozen execution profile')
+if (!prompt.includes('const soul = executionProfile.personality')) failures.push('prompt personality is not profile-owned')
+if (!prompt.includes('params.executionProfile.rules')) failures.push('prompt rules are not profile-owned')
+if (!prompt.includes('params.executionProfile.knowledgeIndex')) failures.push('prompt knowledge is not profile-owned')
+if (!runtime.includes('AgentExecutionProfileResolver')) failures.push('runtime does not own one profile resolver')
+if (!runtime.includes('getAgentReadiness: (agentId) => this.executionProfileResolver.resolveReadiness(agentId)')) failures.push('runtime does not inject profile readiness into routing/prompt surfaces')
+if (!prompt.includes('this.deps.getAgentReadiness?.(agent.id).handoffReady')) failures.push('main roster does not consume resolver readiness')
+if (!preroute.includes('this.deps.getAgentReadiness(agentId).autoRoutable')) failures.push('session preroute does not consume resolver readiness')
+if (prompt.includes('this.readMemoryFile(`agents/${agent.id}/RULES.md`)')) failures.push('prompt assembly re-derives specialist readiness from files')
+if (!prompt.includes('const rulesText = clip(')) failures.push('Agent RULES are still coupled to the knowledge-card toggle')
+if (runtime.includes('getLatestOwnerAgentForScope(scopeId)')) failures.push('live runtime still reads latest scope task owner')
+if (failures.length) throw new Error(failures.join('\n'))
+console.log('agent execution profile single-source gate: ok')

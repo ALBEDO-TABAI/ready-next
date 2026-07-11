@@ -111,7 +111,10 @@ const FIRST_BATCH_RULES: readonly ConfirmationRule[] = [
     id: 'm2-overwrite-existing-file',
     designRef: '05 §3.1 M2 — 删除文件/数据（overwrite=true 即销毁目标文件）',
     mode: 'M2',
-    tools: new Set(['file_rename', 'file_move']),
+    // W10-F6（2026-07-11 dogfood）：skill_export_artifact 带 overwrite=true 可在
+    // workspaceRoots 白名单内无确认整文件覆写用户文档（正门 document 工具重重设防、
+    // 侧门导出一路绿灯的失衡写面），并入同一"覆盖即销毁"确认规则。
+    tools: new Set(['file_rename', 'file_move', 'skill_export_artifact']),
     when: (args) => args.overwrite === true,
     reason: '覆盖已有文件会销毁其当前内容',
   },

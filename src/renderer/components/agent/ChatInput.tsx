@@ -35,6 +35,8 @@ interface ChatInputProps {
   isChannelScope: boolean
   onInputChange: (value: string) => void
   onSend: () => void
+  thoroughOverride: boolean
+  onThoroughOverrideChange: (enabled: boolean) => void
   onStop: () => void
   onUndo: () => void
   onPickFiles: () => void
@@ -76,6 +78,8 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
   isChannelScope,
   onInputChange,
   onSend,
+  thoroughOverride,
+  onThoroughOverrideChange,
   onStop,
   onUndo,
   onPickFiles,
@@ -740,6 +744,23 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
             </div>
 
             <div className="flex items-center" style={{ gap: 6, flexShrink: 0 }}>
+              {!composerLocked && (
+                <button
+                  type="button"
+                  data-ready-delivery-thorough="true"
+                  aria-pressed={thoroughOverride}
+                  title="仅本次发送使用彻底协作；发送后自动关闭"
+                  onClick={() => onThoroughOverrideChange(!thoroughOverride)}
+                  className="rounded-full border px-2.5 py-1 text-[11px] transition-[background-color,border-color,color]"
+                  style={{
+                    borderColor: thoroughOverride ? 'var(--color-blue)' : 'var(--surface-border)',
+                    background: thoroughOverride ? 'var(--color-blue-light)' : 'transparent',
+                    color: thoroughOverride ? 'var(--color-blue)' : 'var(--text-light)',
+                  }}
+                >
+                  彻底
+                </button>
+              )}
               <ContextUsageMeter usage={contextUsage} dimmed={composerLocked} />
 
               {composerLocked ? (

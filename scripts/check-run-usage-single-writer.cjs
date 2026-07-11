@@ -1,0 +1,12 @@
+const fs = require('node:fs')
+const loop = fs.readFileSync('src/main/modules/agent-control/runtime-core/agent-sdk-turn-model-loop.ts', 'utf8')
+const repository = fs.readFileSync('src/main/modules/agent-control/task-projection/run-meta-repository.ts', 'utf8')
+const runtimeFiles = fs.readdirSync('src/main/modules/agent-control/runtime-core').filter((name) => name.endsWith('.ts'))
+const liveRuntime = runtimeFiles.map((name) => fs.readFileSync(`src/main/modules/agent-control/runtime-core/${name}`, 'utf8')).join('\n')
+const failures = []
+if (!loop.includes('addRunUsage(state.runMetaUsage, runResult.usage)')) failures.push('model loop does not add provider usage')
+if (loop.includes('state.runMetaUsage = runResult.usage')) failures.push('model loop overwrites usage with the last call')
+if (!repository.includes('execution binding is immutable')) failures.push('run binding immutability guard missing')
+if (liveRuntime.includes('.upsertTokens(')) failures.push('incremental repository usage writer is live alongside closeout totals')
+if (failures.length) throw new Error(failures.join('\n'))
+console.log('run usage single-writer gate: ok')

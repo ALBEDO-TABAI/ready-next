@@ -76,6 +76,8 @@ export class SubtaskRuntime {
         agent: request.scope.agent,
         runId: identity.workerSessionId,
         taskId: identity.taskId,
+        taskOrigin: 'workflow_child',
+        ownerAgentId: request.scope.agent,
         parentTaskId: request.parentTaskId,
         parentStepId: request.parentStepId,
         phase: params.phase,

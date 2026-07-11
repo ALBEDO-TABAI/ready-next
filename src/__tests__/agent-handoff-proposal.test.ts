@@ -48,7 +48,9 @@ function cardDeps(option: string | null) {
     emittedCount: () => emitted,
     deps: {
       getAgent: (id: string) => AGENTS.get(id) ?? null,
-      updateTaskOwner: () => undefined,
+      adoptTaskHandoff: () => ({ handoffGeneration: 1 }),
+      scopeId: 'scope-1',
+      currentActiveAgentId: 'butler',
       sessionId: 'sess-1',
       askUserStore: store,
       timeoutMs: option === null ? 60 : 10_000,
@@ -129,7 +131,7 @@ test('end-to-end: 提议 → 采纳 → ownerAgentId 经 repository.update 写�
     const { rows, raw } = fakeProjectionDb()
     const repository = new TaskProjectionRepository({ getRawDb: () => raw as never })
     repository.create({
-      taskId: 'task-1', scopeId: 'scope-1', runId: 'r1', taskType: 'multi_step_task', module: 'system',
+      taskId: 'task-1', taskOrigin: 'user_root', ownerAgentId: 'butler', scopeId: 'scope-1', runId: 'r1', taskType: 'multi_step_task', module: 'system',
       status: 'running', interactionState: 'running', steps: [],
       createdAt: '2026-06-12T09:00:00.000Z', updatedAt: '2026-06-12T09:00:00.000Z',
     } as never, { silent: true })
@@ -140,7 +142,10 @@ test('end-to-end: 提议 → 采纳 → ownerAgentId 经 repository.update 写�
       {
         ...deps,
         // 全仓唯一写值点：经 repository.update
-        updateTaskOwner: (taskId, ownerAgentId) => repository.update(taskId, { ownerAgentId } as never, { silent: true }),
+        adoptTaskHandoff: ({ taskId, targetAgentId }) => {
+          repository.update(taskId, { ownerAgentId: targetAgentId } as never, { silent: true })
+          return { handoffGeneration: 1 }
+        },
       },
     )
     assert.equal(outcome.kind, 'adopted')
@@ -160,12 +165,20 @@ test('end-to-end: 提议 → 采纳 → ownerAgentId 经 repository.update 写�
     })
     const scope: ConversationScope = {
       id: 'scope-1', agent: 'butler', title: '会话', sourceKind: 'local', sourceId: 'app',
+      activeAgentId: 'butler', handoffGeneration: 0,
       threadKey: 'scope-1', meta: {}, createdAt: '2026-06-12T09:00:00.000Z', updatedAt: '2026-06-12T09:00:00.000Z',
     }
-    const before = await svc.buildForScopedRun({ scope, message: '继续', coordinators: [], ownerAgentId: null })
+    const profile = (id: string, knowledgeIndex: string, refs: string[]) => ({
+      requestedAgentId: id, effectiveAgentId: id, personaRef: id, name: id, charter: '', personality: '', rules: '',
+      knowledgeIndex, allowedKnowledgeRefs: refs, knowledgeWriteOwnerAgentId: id,
+      knowledgeWriteNamespace: `agents/${id}/knowledge`, executionMaterialHash: id, readinessRevision: id,
+      redirectChain: [], readiness: { conversationReady: true, handoffReady: true, autoRoutable: true, collaborationReady: true, reasons: [] },
+    }) as never
+    const before = await svc.buildForScopedRun({ scope, message: '继续', coordinators: [], ownerAgentId: null, executionProfile: profile('butler', '', []) })
     const after = await svc.buildForScopedRun({
       scope, message: '继续', coordinators: [],
       ownerAgentId: repository.getLatestOwnerAgentForScope('scope-1'),
+      executionProfile: profile('collector', '- COLLECTOR_SCOPE_CARD（H）: 一句话 → agents/collector/knowledge/xhs.md', ['agents/collector/knowledge/xhs.md']),
     })
     const beforeText = [before.systemPrompt, ...before.bootstrapMessages].join('\n')
     const afterText = [after.systemPrompt, ...after.bootstrapMessages].join('\n')
@@ -176,7 +189,7 @@ test('end-to-end: 提议 → 采纳 → ownerAgentId 经 repository.update 写�
   }
 })
 
-test('same-session adoption result tells the model to continue as the target agent, not stop at transfer', async () => {
+test('same-session adoption result tells the old model to stop and yield to a fresh target-agent run', async () => {
   const { deps } = cardDeps(HANDOFF_ADOPT_OPTION)
   const output = await executeProposeHandoff(
     {
@@ -192,9 +205,8 @@ test('same-session adoption result tells the model to continue as the target age
   assert.equal(outcome.userRequestVerbatim, VERBATIM, 'structured result keeps verbatim for same-session continuation')
   assert.match(output.text, /当前会话转给「采集手」继续处理/)
   assert.match(output.text, /用户原始请求/)
-  assert.match(output.text, /现在请以该专项 agent 的职责继续完成用户原始请求/)
-  assert.match(output.text, /不要只说明/)
-  assert.match(output.text, /不要结束本轮/)
+  assert.match(output.text, /主进程将停止当前身份的执行/)
+  assert.match(output.text, /不得继续执行或冒充目标 Agent/)
   assert.ok(output.text.includes(VERBATIM), 'model-visible handoff result includes the exact original request')
 })
 
@@ -203,7 +215,7 @@ test('verbatim passes byte-for-byte into the new-session prefill', async () => {
   let ownerWrites = 0
   const outcome = await runHandoffProposal(
     { targetAgentId: 'collector', reason: 'r', userRequestVerbatim: VERBATIM, contextRefs: ['card:xhs'], taskId: 'task-9' },
-    { ...deps, updateTaskOwner: () => { ownerWrites += 1 } },
+    { ...deps, adoptTaskHandoff: () => { ownerWrites += 1; return { handoffGeneration: 1 } } },
   )
   assert.equal(outcome.kind, 'adopted_new_session')
   if (outcome.kind === 'adopted_new_session') {
@@ -238,7 +250,7 @@ test('invalid proposals never open a card: unknown / main-agent / inactive / emp
       id === 'butler'
         ? { id: 'butler', name: '管家', charter: '主', personaRef: null, status: 'active', createdAt: '2026-06-12' }
         : AGENTS.get(id) ?? null
-    const outcome = await runHandoffProposal(input as never, { ...deps, getAgent })
+    const outcome = await runHandoffProposal(input as never, { ...deps, getAgent, currentActiveAgentId: 'butler' })
     assert.equal(outcome.kind, 'invalid', JSON.stringify(input))
     if (outcome.kind === 'invalid') assert.match(outcome.reason, pattern)
     assert.equal(emittedCount(), 0, '结构化拒绝不开卡')
@@ -250,7 +262,7 @@ test('card timeout degrades to card_failed — the proposal never half-adopts', 
   let ownerWrites = 0
   const outcome = await runHandoffProposal(
     { targetAgentId: 'collector', reason: 'r', userRequestVerbatim: 'x', taskId: 'task-1' },
-    { ...deps, updateTaskOwner: () => { ownerWrites += 1 } },
+    { ...deps, adoptTaskHandoff: () => { ownerWrites += 1; return { handoffGeneration: 1 } } },
   )
   assert.equal(outcome.kind, 'card_failed')
   assert.equal(ownerWrites, 0)

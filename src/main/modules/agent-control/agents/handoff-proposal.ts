@@ -55,9 +55,15 @@ export interface HandoffProposalInput {
 
 export interface HandoffProposalDeps {
   getAgent: (id: string) => AgentRegistryRecord | null
-  /** The ONLY ownerAgentId value writer in the codebase
-   *  (TaskProjectionRepository.update behind this seam). */
-  updateTaskOwner: (taskId: string, ownerAgentId: string) => void
+  getAgentHandoffReadiness?: (id: string) => Promise<{ handoffReady: boolean; reasons: string[] }>
+  adoptTaskHandoff: (input: {
+    taskId: string
+    scopeId: string
+    targetAgentId: string
+    userRequestVerbatim: string
+    contextRefs: string[]
+  }) => { handoffGeneration: number }
+  currentActiveAgentId?: string | null
   sessionId?: string | null
   conversationId?: string | null
   scopeId?: string | null
@@ -78,6 +84,8 @@ export type HandoffProposalOutcome =
       contextRefs: string[]
       taskId: string | null
       ownerWritten: boolean
+      handoffGeneration: number | null
+      control: 'handoff_takeover'
     }
   | {
       kind: 'adopted_new_session'
@@ -110,11 +118,17 @@ export async function runHandoffProposal(
   if (!target) {
     return { kind: 'invalid', reason: `unknown agent: ${String(input.targetAgentId)} — 只能转给 agents 表里已存在的专项 agent` }
   }
-  if (target.id === MAIN_AGENT_ID) {
+  if (target.id === MAIN_AGENT_ID && deps.currentActiveAgentId === MAIN_AGENT_ID) {
     return { kind: 'invalid', reason: 'cannot hand off to the main agent itself' }
   }
   if (target.status !== 'active') {
     return { kind: 'invalid', reason: `agent ${target.id} is not active (${target.status})` }
+  }
+  if (target.id !== MAIN_AGENT_ID && deps.getAgentHandoffReadiness) {
+    const readiness = await deps.getAgentHandoffReadiness(target.id)
+    if (!readiness.handoffReady) {
+      return { kind: 'invalid', reason: `agent ${target.id} is not handoff-ready: ${readiness.reasons.join(',') || 'unknown'}` }
+    }
   }
 
   logAgentMetric(METRIC_PROPOSED, {
@@ -157,9 +171,17 @@ export async function runHandoffProposal(
 
   if (answer === HANDOFF_ADOPT_OPTION) {
     let ownerWritten = false
+    let handoffGeneration: number | null = null
     if (input.taskId) {
-      // adoption = the user clicked; ONLY here does ownerAgentId get a value.
-      deps.updateTaskOwner(input.taskId, target.id)
+      if (!deps.scopeId) return { kind: 'invalid', reason: 'scopeId is required for same-session handoff' }
+      const adopted = deps.adoptTaskHandoff({
+        taskId: input.taskId,
+        scopeId: deps.scopeId,
+        targetAgentId: target.id,
+        userRequestVerbatim: input.userRequestVerbatim,
+        contextRefs,
+      })
+      handoffGeneration = adopted.handoffGeneration
       ownerWritten = true
     }
     logAgentMetric(METRIC_ADOPTED, {
@@ -177,6 +199,8 @@ export async function runHandoffProposal(
       contextRefs,
       taskId: input.taskId ?? null,
       ownerWritten,
+      handoffGeneration,
+      control: 'handoff_takeover',
     }
   }
 

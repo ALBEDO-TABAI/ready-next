@@ -134,6 +134,7 @@ export function filterSelectedSkillToolSurface(
   } = {}
 ): ToolDefinition[] {
   if (!allowedTools || allowedTools.length === 0) return definitions
+  const selected = definitions.filter((definition) => allowedTools.includes(definition.name))
   const selectedOrPreserved = definitions.filter(
     (definition) =>
       allowedTools.includes(definition.name) || options.preserveToolName?.(definition.name) === true
@@ -142,7 +143,7 @@ export function filterSelectedSkillToolSurface(
     (definition) =>
       selectedOrPreserved.includes(definition) || definition.name === 'declare_completion_criteria'
   )
-  if (selectedOrPreserved.length > 0) return filtered
+  if (selected.length > 0) return filtered
 
   const fallback = definitions.filter(
     (definition) => definition.groupId !== 'skills' && definition.domain !== 'skill'

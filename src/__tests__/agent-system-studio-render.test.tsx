@@ -113,6 +113,8 @@ function snapshot(): AgentSystemStudioSnapshot {
         derivationReason: null,
         mergedIntoAgentId: null,
         createdAt: '2026-06-19T00:00:00.000Z',
+        readinessRevision: 'writer-readiness-v1',
+        readiness: { conversationReady: true, handoffReady: true, autoRoutable: true, collaborationReady: true, reasons: [] },
         rules: {
           relPath: 'agents/writer/RULES.md',
           exists: true,
@@ -380,6 +382,10 @@ test('AgentSystemStudio renders read-only snapshot and specialist detail', async
       await flush()
       const text = mounted.container.textContent || ''
       assert.match(text, /只处理写作任务/)
+      assert.match(text, /可聊天/)
+      assert.match(text, /可转办/)
+      assert.match(text, /可自动路由/)
+      assert.match(text, /可协作/)
       assert.match(text, /路由：写作/)
       assert.match(text, /路由：写作草稿/)
       assert.match(text, /启用路由/)
@@ -700,8 +706,44 @@ test('AgentSystemStudio stages and confirms specialist content edits', async () 
       })
       await flush()
 
-      const rulesSection = Array.from(mounted.container.querySelectorAll('section'))
-        .find((section) => section.textContent?.includes('RULES') && section.textContent.includes('只处理写作任务')) as HTMLElement | undefined
+      const foundationSection = Array.from(mounted.container.querySelectorAll('pre'))
+        .find((node) => node.textContent?.includes('写作专项基础文档'))?.closest('section') as HTMLElement | undefined
+      assert.ok(foundationSection)
+      const foundationEdit = Array.from(foundationSection.querySelectorAll('button'))
+        .find((button) => button.textContent?.includes('编辑')) as HTMLButtonElement | undefined
+      assert.ok(foundationEdit)
+      await act(async () => { foundationEdit.click() })
+      await flush()
+      const foundationTextarea = mounted.container.querySelector('textarea[aria-label="修改内容：FOUNDATION"]')
+      assert.ok(foundationTextarea)
+      assert.ok(foundationTextarea.closest('section')?.textContent?.includes('FOUNDATION'))
+      await act(async () => {
+        const cancel = Array.from(foundationTextarea.closest('section')!.querySelectorAll('button')).find((button) => button.textContent?.includes('取消'))
+        assert.ok(cancel)
+        cancel.click()
+      })
+      await flush()
+
+      const knowledgeSection = Array.from(mounted.container.querySelectorAll('pre'))
+        .find((node) => node.textContent?.includes('短句优先'))?.closest('section') as HTMLElement | undefined
+      assert.ok(knowledgeSection)
+      const knowledgeEdit = Array.from(knowledgeSection.querySelectorAll('button'))
+        .find((button) => button.textContent?.includes('编辑')) as HTMLButtonElement | undefined
+      assert.ok(knowledgeEdit)
+      await act(async () => { knowledgeEdit.click() })
+      await flush()
+      const knowledgeTextarea = mounted.container.querySelector('textarea[aria-label="修改内容：写作知识"]')
+      assert.ok(knowledgeTextarea)
+      assert.ok(knowledgeTextarea.closest('section')?.textContent?.includes('知识'))
+      await act(async () => {
+        const cancel = Array.from(knowledgeTextarea.closest('section')!.querySelectorAll('button')).find((button) => button.textContent?.includes('取消'))
+        assert.ok(cancel)
+        cancel.click()
+      })
+      await flush()
+
+      const rulesSection = Array.from(mounted.container.querySelectorAll('pre'))
+        .find((node) => node.textContent?.includes('只处理写作任务'))?.closest('section') as HTMLElement | undefined
       assert.ok(rulesSection)
       const editButton = Array.from(rulesSection.querySelectorAll('button'))
         .find((button) => button.textContent?.includes('编辑')) as HTMLButtonElement | undefined
@@ -711,7 +753,7 @@ test('AgentSystemStudio stages and confirms specialist content edits', async () 
       })
       await flush()
 
-      const textarea = mounted.container.querySelector('textarea[aria-label="修改内容：RULES"]') as HTMLTextAreaElement | null
+      const textarea = rulesSection.querySelector('textarea[aria-label="修改内容：RULES"]') as HTMLTextAreaElement | null
       assert.ok(textarea)
       await setControlValue(textarea, proposal.proposedContent)
       const saveButton = Array.from(mounted.container.querySelectorAll('button'))

@@ -40,6 +40,7 @@ export interface AgentSystemStudioGroupDeps {
   listOwnedTasks(agentId: string): TaskProjectionRecord[]
   listRecentPrerouteTraces(limit?: number): AgentSystemStudioPrerouteTrace[]
   listStagedBlueprints(): SpecialistAgentBlueprint[]
+  getAgentReadiness(agentId: string): AgentSystemStudioSnapshot['agents'][number]['readiness']
   simulateRouting(firstMessage: string): AgentSystemStudioRoutingSimulation
 }
 
@@ -72,6 +73,7 @@ export const agentSystemStudioGroup: IpcChannelGroup<AgentSystemStudioGroupDeps>
             listContentEditProposals: (agentId) => deps.getContentEditProposalStore().listForAgent(agentId),
             derivationCandidates: listDerivationCandidates(store),
             stagedBlueprints: deps.listStagedBlueprints(),
+            resolveReadiness: deps.getAgentReadiness,
             recentPrerouteTraces: deps.listRecentPrerouteTraces(10),
           }),
         }

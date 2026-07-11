@@ -12,12 +12,15 @@
  */
 import type { DatabaseConnection } from '../../database'
 import type { AbortInitiator } from '../contracts/run-contracts-internal'
+import type { TaskExecutionBinding } from '../../../../shared/agent-execution-profile'
+import { assertTaskExecutionBinding } from './task-agent-binding'
 
 export interface RunMetaRecord {
   runId: string
   taskId: string | null
   scopeId: string | null
   agentId: string | null
+  executionBinding: TaskExecutionBinding | null
   status: string
   initiator: AbortInitiator | null
   durationMs: number | null
@@ -45,6 +48,7 @@ export interface RunMetaCreateInput {
   taskId?: string | null
   scopeId?: string | null
   agentId?: string | null
+  executionBinding?: TaskExecutionBinding | null
   status: string
   initiator?: AbortInitiator | null
   durationMs?: number | null
@@ -86,6 +90,7 @@ interface RunMetaRow {
   task_id: string | null
   scope_id: string | null
   agent_id: string | null
+  execution_binding_json?: string | null
   status: string
   initiator?: AbortInitiator | null
   duration_ms?: number | null
@@ -123,11 +128,15 @@ function jsonOrNull(value: unknown): string | null {
 }
 
 function rowToRecord(row: RunMetaRow): RunMetaRecord {
+  const executionBinding = row.execution_binding_json
+    ? assertTaskExecutionBinding(parseJson<TaskExecutionBinding | null>(row.execution_binding_json, null) as TaskExecutionBinding)
+    : null
   return {
     runId: row.run_id,
     taskId: row.task_id,
     scopeId: row.scope_id,
     agentId: row.agent_id,
+    executionBinding,
     status: row.status,
     initiator: row.initiator ?? null,
     durationMs: row.duration_ms ?? null,
@@ -160,6 +169,7 @@ export class RunMetaRepository {
       taskId: input.taskId ?? null,
       scopeId: input.scopeId ?? null,
       agentId: input.agentId ?? null,
+      executionBinding: input.executionBinding ? assertTaskExecutionBinding(input.executionBinding) : null,
       status: input.status,
       initiator: input.initiator ?? null,
       durationMs: input.durationMs ?? null,
@@ -184,20 +194,21 @@ export class RunMetaRepository {
     this.db
       .prepare(
         `INSERT INTO run_meta (
-          run_id, task_id, scope_id, agent_id, status,
+          run_id, task_id, scope_id, agent_id, execution_binding_json, status,
           initiator, duration_ms,
           task_type, terminal_reason, provider_protocol, wire_api, context_window,
           provider_diagnostics_json, budget_json, continuation_ref_json, recovery_history_json,
           input_tokens, output_tokens, total_tokens,
           first_message_text, last_message_text, follow_up_text,
           created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         record.runId,
         record.taskId,
         record.scopeId,
         record.agentId,
+        jsonOrNull(record.executionBinding),
         record.status,
         record.initiator,
         record.durationMs,
@@ -240,11 +251,17 @@ export class RunMetaRepository {
       createdAt: existing.createdAt,
       updatedAt: now,
     }
+    if (existing.executionBinding && patch.executionBinding !== undefined) {
+      const next = patch.executionBinding ? JSON.stringify(patch.executionBinding) : null
+      if (next !== JSON.stringify(existing.executionBinding)) {
+        throw new Error('[run-meta-repository] execution binding is immutable')
+      }
+    }
 
     this.db
       .prepare(
         `UPDATE run_meta SET
-          task_id = ?, scope_id = ?, agent_id = ?, status = ?,
+          task_id = ?, scope_id = ?, agent_id = ?, execution_binding_json = ?, status = ?,
           initiator = ?, duration_ms = ?,
           task_type = ?, terminal_reason = ?, provider_protocol = ?, wire_api = ?, context_window = ?,
           provider_diagnostics_json = ?, budget_json = ?, continuation_ref_json = ?, recovery_history_json = ?,
@@ -257,6 +274,7 @@ export class RunMetaRepository {
         merged.taskId,
         merged.scopeId,
         merged.agentId,
+        jsonOrNull(merged.executionBinding),
         merged.status,
         merged.initiator,
         merged.durationMs,

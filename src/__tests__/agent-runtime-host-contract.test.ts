@@ -272,3 +272,22 @@ test('P6t keeps runtime ownership split with SDK as live sender and DomainAdapte
     },
   ])
 })
+
+test('live SDK browser evidence uses the active-plan funnel, not dormant DomainAdapter.applyResult', () => {
+  const sdkToolExecutor = readWorkspaceFile(
+    'src/main/modules/agent-control/runtime-core/agent-sdk-tool-executor.ts',
+  )
+  const sdkModelLoop = readWorkspaceFile(
+    'src/main/modules/agent-control/runtime-core/agent-sdk-turn-model-loop.ts',
+  )
+  const sdkRuntime = readWorkspaceFile(
+    'src/main/modules/agent-control/runtime-core/agent-sdk-runtime.ts',
+  )
+  const sdkTurnExecution = readWorkspaceFile(
+    'src/main/modules/agent-control/runtime-core/agent-sdk-turn-execution.ts',
+  )
+
+  assert.match(sdkToolExecutor, /noteToolResultForActivePlan\(/)
+  assert.match(sdkModelLoop, /buildActivePlanReminderText\(sessionId\)/)
+  assert.doesNotMatch(`${sdkRuntime}\n${sdkTurnExecution}\n${sdkModelLoop}`, /\.applyResult\(/)
+})

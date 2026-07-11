@@ -43,6 +43,7 @@ logAgentMetric('crystallize_round_fired', {})
 runBeliefDecayRound([], effectors, now)
 logAgentMetric('belief_decay_round_fired', {})
 await runMaintenanceLlmRoundTick({ settings, store, loadAIConfig })
+reconcileInterruptedDeliveryState(state)
 `
 
 // D7 gate-flip fixture: the driver invokes the pinned round and the round
@@ -71,6 +72,9 @@ for (const row of rows) {
   write(root, 'src/renderer/components/ready/TaskPanel.tsx', 'export const panel = <EmergenceFeedSection onOpenScope={open} onOpenSettings={openSettings} />\n')
   write(root, MAINTENANCE_DRIVER_REL, 'import { runMaintenanceLlmRound } from "./maintenance-llm-round"\nexport async function runMaintenanceLlmRoundTick(deps) { return runMaintenanceLlmRound({}) }\n')
   write(root, MAINTENANCE_ROUND_REL, "export async function runMaintenanceLlmRound(deps) { logAgentMetric('maintenance_audit', {}) }\n")
+  write(root, 'src/main/modules/agent-control/runtime-core/dynamic-delivery/dynamic-delivery-coordinator.ts', "compileDynamicDeliveryPlan({})\nlogAgentMetric('dynamic_delivery_fired', {})\n")
+  write(root, 'src/main/modules/agent-control/runtime-core/agent-sdk-runtime.ts', 'const coordinator = new DynamicDeliveryCoordinator({})\n')
+  write(root, 'src/main/modules/agent-control/quality/packet-compiler.ts', 'export function compileDynamicDeliveryPlan() {}\n')
   // D4 gate-flip fixture: declare tool + executor dispatch + finalizer merge/ledger
   write(root, 'src/main/modules/tools/agent-interaction-tool-defs.ts', "export const AGENT_INTERACTION_TOOL_NAMES = ['ask_user_questions', 'declare_completion_criteria']\n")
   write(root, 'src/main/modules/tools/tool-executor.ts', 'import { executeDeclareCompletionCriteria } from "./builtins/declare-completion-criteria"\nexport const dispatch = () => executeDeclareCompletionCriteria({}, {})\n')

@@ -152,8 +152,11 @@ function setupSchema(db: SqliteDatabase): void {
       model_criteria_json TEXT,
       expected_outputs_json TEXT,
       owner_agent_id TEXT,
+      task_origin TEXT,
+      execution_binding_json TEXT,
       packet_role TEXT,
       context_refs_json TEXT,
+      delivery_state_json TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
@@ -320,6 +323,7 @@ function makeProjection(
   const done = status === 'done'
   return {
     taskId: fixture.taskRunId,
+    taskOrigin: 'legacy',
     scopeId: SESSION_ID,
     runId: 'run-acceptance',
     parentTaskId: null,

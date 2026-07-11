@@ -106,7 +106,8 @@ test('agent lifecycle supports disable/enable, terminal merge, and delete', asyn
   assert.throws(() => registry.updateStatus('writer', 'merged', { mergedIntoAgentId: 'writer' }), /another agent/)
   assert.throws(() => registry.updateStatus('writer', 'merged', { mergedIntoAgentId: 'missing' }), /target must be active/)
 
-  const disabledTarget = registry.updateStatus('old-target', 'retired')
+  assert.throws(() => registry.updateStatus('old-target', 'retired'), /legacy read-only/)
+  const disabledTarget = registry.updateStatus('old-target', 'disabled')
   assert.equal(disabledTarget.status, 'disabled')
   assert.throws(() => registry.updateStatus('writer', 'merged', { mergedIntoAgentId: 'old-target' }), /target must be active/)
 

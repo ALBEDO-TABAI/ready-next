@@ -108,6 +108,7 @@ function createPayload(): ScopeRunEventPayload {
     agent: 'butler',
     runId: 'run-1',
     taskId: 'task-1',
+    taskOrigin: 'system_background',
     phase: 'tool_running',
     module: 'browser',
     timestamp: '2026-04-16T11:00:00.000Z',

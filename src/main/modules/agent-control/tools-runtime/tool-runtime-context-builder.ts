@@ -51,6 +51,8 @@ export function buildToolRuntimeContext(params: {
   runtime: AgentControlRuntime | null
   scope?: ConversationScope
   agent?: string | null
+  executionBinding?: import('../../../../shared/agent-execution-profile').TaskExecutionBinding | null
+  executionProfile?: import('../../../../shared/agent-execution-profile').AgentExecutionProfile | null
   allowedToolNames?: Set<string> | string[] | null
   emitToolAction: (tool: string, args: Record<string, unknown>) => void
   requestModuleToolAction?: (tool: string, args: Record<string, unknown>) => Promise<Record<string, unknown>>
@@ -92,6 +94,8 @@ export function buildToolRuntimeContext(params: {
     runtime: params.runtime,
     scope: params.scope,
     agent: params.agent ?? params.scope?.agent ?? null,
+    executionBinding: params.executionBinding ?? null,
+    executionProfile: params.executionProfile ?? null,
     allowedToolNames: params.allowedToolNames || null,
     emitToolAction: params.emitToolAction,
     requestModuleToolAction: params.requestModuleToolAction,
@@ -124,6 +128,8 @@ export function toToolExecutorContext(context: ToolRuntimeContext): ToolContext 
     runtime: context.runtime,
     scope: context.scope,
     agent: context.agent ?? context.scope?.agent ?? null,
+    executionBinding: context.executionBinding ?? null,
+    executionProfile: context.executionProfile ?? null,
     allowedToolNames: context.allowedToolNames || null,
     emitToolAction: context.emitToolAction,
     requestModuleToolAction: context.requestModuleToolAction,

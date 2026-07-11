@@ -14,6 +14,7 @@ import { logAgentMetric } from '../metrics'
 import { collectToolOutputProofs, createTaskProofSink } from '../quality/proof-collector'
 import type { SkillToolAuthorization } from '../skills/skill-tool-authorization'
 import { consumeToolCallBudget } from '../task-projection/run-budget-policy'
+import { prependSystemReminderInput } from '../system-reminders/background-task-terminal-reminder'
 import type { ToolDefinition } from '../tools-runtime/tool-definition'
 import { normalizeToolExecutionOutput } from '../tools-runtime/tool-result-types'
 import { applyContextModifier, createEmptyActiveFrameContext } from '../tools-runtime/tool-runtime'
@@ -47,6 +48,7 @@ import { finalizeAgentSdkPreparedTurnResult } from './agent-sdk-turn-completion'
 import type { TurnOrchestratorHost } from './agent-sdk-turn-context'
 import { createAgentSdkTurnGuards } from './agent-sdk-turn-guards'
 import { assembleAgentSdkTurnInput } from './agent-sdk-turn-input-assembly'
+import type { AgentSdkPreparedTurnContext } from './agent-sdk-turn-execution-types'
 import { executeAgentSdkModelToolLoop } from './agent-sdk-turn-model-loop'
 import type {
   AgentSdkBudgetCheckpointRestore,
@@ -61,6 +63,7 @@ import type {
   ToolBridgeRuntimeContext
 } from './agent-sdk-types'
 import type { TurnTerminalReason } from './turn-frame'
+import { mergeRunUsage } from './run-usage-accumulator'
 
 const LOCAL_DOCUMENT_SOURCE_READ_TOOL_NAMES = new Set([
   'file_read_excerpt',
@@ -98,95 +101,7 @@ function buildFileReadExcerptCheckpoint(
     .join('\n')
 }
 
-export interface AgentSdkPreparedTurnState {
-  actionAnnouncementSteered: boolean
-  criteriaSelfCheckInjected: boolean
-  fileReadExcerptCheckpointForRecovery: string | null
-  finalText: string
-  hasSuccessfulDocumentTargetMutation: boolean
-  hasSuccessfulLocalDocumentSourceReadForRecovery: boolean
-  hasSuccessfulToolProgress: boolean
-  lastDocumentSaveSuccessText: string | null
-  lastRollingCheckpointToolCalls: number
-  longSkillCheckpoint: SdkLongSkillCheckpoint | null
-  observedDocumentMutationConflict: boolean
-  observedDocumentMutationMissingTarget: boolean
-  observedDocumentMutationTarget: ObservedDocumentToolTarget | null
-  runMetaBudgetRuntime: TaskBudgetRuntime | null
-  runMetaContinuationRef: Record<string, unknown> | null
-  runMetaProviderDiagnostics: AgentSdkProviderDiagnostics | null
-  runMetaUsage: ReadyAgentSdkRunResult['usage'] | null
-  sessionRestoreNotice: string | null
-  skillClarificationSteered: boolean
-}
-
-export interface AgentSdkPreparedTurnContext {
-  state: AgentSdkPreparedTurnState
-  host: TurnOrchestratorHost
-  name: string
-  runId: string
-  taskId: string
-  sessionId?: string
-  runStartedAt: number
-  content: RunMessage
-  pureUserTurnText: string
-  effectiveExecutionOptions?: AgentSdkExecutionOptions
-  checkpointRestore: AgentSdkBudgetCheckpointRestore | null
-  checkpointRequiredCapabilityGroups: string[]
-  checkpointRequiredToolNames: string[]
-  skillHintRelevanceForTurn: ReturnType<typeof resolveSkillHintRelevanceForTurn>
-  turnCapabilityFloors: ReturnType<typeof computeCapabilityFloors>
-  toolDefinitions: ToolDefinition[]
-  abortController: AbortController
-  runHandle: RunHandle
-  session: AgentSdkSession
-  isCurrentRun: () => boolean
-  toolArgsByName: Map<string, Record<string, unknown>[]>
-  transcriptEvents: TurnTranscriptEvent[]
-  usedTools: string[]
-  projectionPatches: Record<string, unknown>[]
-  emitOutputForRun: (
-    chunk: string,
-    type: string,
-    projectionPatch?: Record<string, unknown> | null
-  ) => void
-  emitOutput: (
-    chunk: string,
-    type: string,
-    projectionPatch?: Record<string, unknown> | null
-  ) => void
-  emitHeartbeat: (text: string) => void
-  emitStatusForRun: (status: string, terminalReason?: TurnTerminalReason | null) => void
-  finalizeEarlyReturn: (params: {
-    status: 'done' | 'checkpoint' | 'error' | 'cancelled'
-    terminalReason: TurnTerminalReason
-    finalText: string
-    error?: string
-    continuationHandle?: string | null
-    taskBudgetRuntime?: TaskBudgetRuntime | null
-    providerDiagnostics?: AgentSdkProviderDiagnostics | null
-    initiator?: string
-  }) => Promise<ExecutionTurnResult>
-  finalizeBudgetCheckpointReturn: (checkpointText: string) => Promise<ExecutionTurnResult>
-  buildResult: (params: Parameters<typeof buildExecutionTurnResult>[1]) => ExecutionTurnResult
-  recentCollectionIntent: boolean
-  turnFollowup: ReturnType<typeof classifyFollowupIntent>
-  useTextToolBridge: boolean
-  documentTargetGuard: DocumentTargetGuard | null
-  requiresLocalDocumentExcerpt: boolean
-  preferCurrentDocumentRead: boolean
-  requiresLocalDocumentWrite: boolean
-  providerContent: RunMessage
-  capabilities: ReturnType<typeof resolveAIConfigCapabilities>
-  authorization: SkillToolAuthorization
-  activeFrame: ReturnType<typeof createEmptyActiveFrameContext>
-  contextWindowTokens: number
-  maxOutputTokens: number
-  agentContext: ReturnType<typeof buildAgentSpawnContextFromAIConfig>
-  provider: ModelProvider
-  model: string
-  nativeTextToolBoundaryFlush: { current: (() => void) | null }
-}
+export type { AgentSdkPreparedTurnContext, AgentSdkPreparedTurnState } from './agent-sdk-turn-execution-types'
 
 export async function executeAgentSdkPreparedTurn(
   ctx: AgentSdkPreparedTurnContext
@@ -216,7 +131,7 @@ export async function executeAgentSdkPreparedTurn(
     usedTools,
     projectionPatches,
     emitOutputForRun,
-    emitOutput,
+    emitOutput: realEmitOutput,
     emitHeartbeat,
     emitStatusForRun,
     finalizeEarlyReturn: finalizeEarlyReturnFromContext,
@@ -240,6 +155,7 @@ export async function executeAgentSdkPreparedTurn(
     nativeTextToolBoundaryFlush,
     activeFrame
   } = ctx
+  let emitOutput = realEmitOutput
   let {
     actionAnnouncementSteered,
     criteriaSelfCheckInjected,
@@ -379,11 +295,48 @@ export async function executeAgentSdkPreparedTurn(
       sourceMessageId: effectiveExecutionOptions?.sourceMessageId,
       requestEnvelope: effectiveExecutionOptions?.requestEnvelope
     })
+    const preparedDelivery = await host.dynamicDelivery.prepareOwnerInput({
+      mode: effectiveExecutionOptions?.deliveryMode ?? 'adaptive',
+      runId,
+      taskId,
+      scopeId: sessionId ?? null,
+      userRequestVerbatim: pureUserTurnText,
+      requestEnvelope: effectiveExecutionOptions?.requestEnvelope,
+      intentClassification: effectiveExecutionOptions?.intentClassification,
+      inferredTaskType: liveTaskBudgetRuntime?.taskType ?? inferredSdkTaskType ?? 'short_task',
+      liveBudget: liveTaskBudgetRuntime,
+      ownerBinding: effectiveExecutionOptions?.executionBinding ?? null,
+      ownerProfile: effectiveExecutionOptions?.executionProfile ?? null,
+      committedSession: runHandle.capturedSession,
+      model,
+      provider,
+      contextWindowTokens,
+      maxOutputTokens,
+      signal: abortController.signal,
+    })
+    const ownerModelSession = preparedDelivery.ownerSession
+    const deliveryDecision = preparedDelivery.decision
+    const deliveryReminder = preparedDelivery.ownerReminder
+    if (preparedDelivery.usage) {
+      runMetaUsage = mergeRunUsage(runMetaUsage as never, preparedDelivery.usage) as ReadyAgentSdkRunResult['usage']
+    }
+    if (preparedDelivery.emitOutput) {
+      const buffer = preparedDelivery.emitOutput
+      emitOutput = (chunk, type, projectionPatch) => {
+        if (type === 'text') {
+          buffer.append(chunk)
+          return
+        }
+        realEmitOutput(chunk, type, projectionPatch)
+      }
+    }
     const toolBridgeRuntimeContext: ToolBridgeRuntimeContext = {
       agentName: name,
       runId,
       taskId,
       sessionId,
+      executionBinding: effectiveExecutionOptions?.executionBinding ?? null,
+      executionProfile: effectiveExecutionOptions?.executionProfile ?? null,
       currentUserText: pureUserTurnText,
       sourceMessageId: sourceMessageProvenance.sourceMessageId,
       sourceMessageUnavailableReason: sourceMessageProvenance.sourceMessageUnavailableReason,
@@ -556,7 +509,8 @@ export async function executeAgentSdkPreparedTurn(
         requiredCapabilityGroups,
         requiredToolNames: allowedToolNames,
         lastUserMessage: pureUserTurnText,
-        resumeKind: 'paused'
+        resumeKind: 'paused',
+        sessionSnapshotOverride: await host.dynamicDelivery.buildSanitizedCheckpoint(runId)
       })
       runMetaContinuationRef =
         checkpoint.projectionPatch.taskContinuation &&
@@ -684,6 +638,9 @@ export async function executeAgentSdkPreparedTurn(
     if (assembledInput.terminalResult) return await assembledInput.terminalResult
     const { sdkTools, instructions } = assembledInput
     let { nextInput } = assembledInput
+    if (deliveryReminder) {
+      nextInput = prependSystemReminderInput(nextInput, deliveryReminder)
+    }
     const modelToolLoopResult = await executeAgentSdkModelToolLoop({
       state: {
         get criteriaSelfCheckInjected() {
@@ -789,6 +746,7 @@ export async function executeAgentSdkPreparedTurn(
       preferCurrentDocumentRead,
       requiresLocalDocumentWrite,
       runHandle,
+      modelSession: ownerModelSession,
       session,
       abortController,
       instructions,
@@ -802,6 +760,7 @@ export async function executeAgentSdkPreparedTurn(
       usedTools,
       emitOutput,
       emitHeartbeat,
+      checkpointSnapshotProvider: () => host.dynamicDelivery.buildSanitizedCheckpoint(runId),
       nativeTextToolBoundaryFlush,
       finishBudgetCheckpointIfNeeded,
       maybeHandleSkillClarificationGuard,
@@ -884,6 +843,13 @@ export async function executeAgentSdkPreparedTurn(
       projectionPatches,
       transcriptEvents,
       runHandle,
+      deliveryDecision,
+      deliveryRealEmitOutput: realEmitOutput,
+      model,
+      provider,
+      contextWindowTokens,
+      maxOutputTokens,
+      abortSignal: abortController.signal,
       emitOutput,
       emitOutputForRun,
       emitStatusForRun,

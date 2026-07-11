@@ -123,6 +123,8 @@ export interface AgentRuntimeStatus {
 export interface ConversationScope {
   id: string
   agent: string
+  activeAgentId: string
+  handoffGeneration: number
   userId?: string
   title: string
   parentConversationId?: string | null
@@ -478,6 +480,11 @@ export interface ScopeRunEventPayload {
   type: 'started' | 'updated' | 'finished'
   scopeId: string
   agent: string
+  ownerAgentId?: string | null
+  taskOrigin?: import('../../../../shared/agent-execution-profile').TaskCreationOrigin
+  executionBinding?: import('../../../../shared/agent-execution-profile').TaskExecutionBinding | null
+  executionAgentDisplayName?: string | null
+  handoffGeneration?: number
   runId?: string
   taskId?: string
   parentTaskId?: string

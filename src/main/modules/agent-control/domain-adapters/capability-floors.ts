@@ -12,10 +12,23 @@ export interface CapabilityFloors {
   readonly reasons: ReadonlyArray<string>
 }
 
-/** 本地文档资源在场时的文档读取地板（不含 document_read_section —— 那是"当前文档上下文"地板）。 */
+/** 本地文档资源在场时的文档读取地板（提及≠授写：@文件只保证可读，不含任何写面）。 */
 export const LOCAL_DOCUMENT_RESOURCE_FLOOR_TOOL_NAMES: ReadonlyArray<string> = ['file_locate', 'file_read_excerpt']
-/** 当前编辑器文档上下文在场时的地板工具。 */
-export const CURRENT_DOCUMENT_CONTEXT_FLOOR_TOOL_NAME = 'document_read_section'
+/**
+ * 当前编辑器文档上下文在场时的地板工具：用户正开着的文档是可编辑对象，任何轮
+ * （含技能 selected 收窄轮）都必须保有精准编辑与 widget 通道——否则模型会被迫用
+ * artifact 整文件覆写或 markdown 表格冒充信息卡（2026-07-11 dogfood 两例）。
+ * 刻意不含 set_content / append_content 这类整文覆写工具。
+ */
+export const CURRENT_DOCUMENT_CONTEXT_FLOOR_TOOL_NAMES: ReadonlyArray<string> = [
+  'document_read_section',
+  'document_list_widgets',
+  'document_insert_widget',
+  'document_update_widget',
+  'document_remove_widget',
+  'document_replace_exact',
+  'document_save_tab',
+]
 
 export function computeCapabilityFloors(params: {
   authorization: SkillToolAuthorization
@@ -35,7 +48,7 @@ export function computeCapabilityFloors(params: {
     reasons.push('local_document_resource')
   }
   if (params.hasCurrentDocumentContext) {
-    toolNames.add(CURRENT_DOCUMENT_CONTEXT_FLOOR_TOOL_NAME)
+    for (const name of CURRENT_DOCUMENT_CONTEXT_FLOOR_TOOL_NAMES) toolNames.add(name)
     reasons.push('current_document_context')
   }
 

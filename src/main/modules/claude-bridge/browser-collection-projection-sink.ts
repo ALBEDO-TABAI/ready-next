@@ -170,6 +170,7 @@ export function makeNoteCollectProjectionSink(activeRuntime: AgentControlRuntime
     const now = new Date().toISOString()
     const record: TaskProjectionRecord = {
       taskId: projectionTaskId,
+      taskOrigin: existing?.taskOrigin ?? 'system_background',
       scopeId: input.scopeId,
       runId: input.taskId,
       taskType: 'multi_step_task',

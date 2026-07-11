@@ -11,10 +11,37 @@ import { createToolExecutionOutput } from '../main/modules/agent-control/tools-r
 import type { ToolDefinition } from '../main/modules/agent-control/tools-runtime/tool-definition'
 import {
   buildActivePlanReminderText,
+  configureActivePlanPersistence,
   deriveCollectionPlanFromToolCall,
   noteToolResultForActivePlan,
   resetActivePlansForTests
 } from '../main/modules/agent-control/system-reminders/active-plan-step-reminder'
+
+test('active plan restores from durable scope metadata after in-memory state is lost', (t) => {
+  const durable = new Map<string, ReturnType<typeof deriveCollectionPlanFromToolCall>>()
+  configureActivePlanPersistence({
+    load: (scope) => durable.get(scope) || null,
+    save: (scope, plan) => durable.set(scope, structuredClone(plan)),
+    remove: (scope) => { durable.delete(scope) },
+  })
+  t.after(() => {
+    resetActivePlansForTests()
+    configureActivePlanPersistence(null)
+  })
+  resetActivePlansForTests()
+
+  noteToolResultForActivePlan(
+    'scope-durable',
+    'browser_visible_collect',
+    { url: 'https://example.com/u/1' },
+    1000,
+    JSON.stringify({ taskId: 'discover-durable', status: 'completed', result: { targets: [{ id: 'n1' }] } })
+  )
+  resetActivePlansForTests()
+
+  const restored = buildActivePlanReminderText('scope-durable', 1500)
+  assert.ok(restored?.includes('当前步骤 2/3'), `expected durable plan restore, got: ${restored}`)
+})
 
 test('plan-persistence-reinjection declares transitive sqlite ABI guard', (t) => {
   skipIfSqliteUnavailable(t, 'plan-persistence-reinjection transitive sqlite load')
@@ -342,10 +369,27 @@ test('collection dispatch arguments cannot manufacture discovery evidence', () =
     1000,
     JSON.stringify({ taskId: 'collect-1', status: 'queued' })
   )
-  const text = buildActivePlanReminderText('scope-forged-manifest', 1000)
+  let text = buildActivePlanReminderText('scope-forged-manifest', 1000)
   assert.ok(
     text && text.includes('当前步骤 1/3'),
     `dispatch arguments must not skip manifest discovery, got: ${text}`
+  )
+
+  noteToolResultForActivePlan(
+    'scope-forged-manifest',
+    'browser_get_task',
+    { task_id: 'forged-discovery' },
+    1500,
+    JSON.stringify({
+      taskId: 'forged-discovery',
+      status: 'completed',
+      result: { targets: [{ url: 'a' }, { url: 'b' }] }
+    })
+  )
+  text = buildActivePlanReminderText('scope-forged-manifest', 1500)
+  assert.ok(
+    text && text.includes('当前步骤 3/3'),
+    `direct collect handle should become usable only after source-task verification, got: ${text}`
   )
 })
 
@@ -367,6 +411,27 @@ test('completed task status does not bless an explicitly partial discovery manif
     text && text.includes('当前步骤 1/3'),
     `partial manifest must stay on discovery despite completed task status, got: ${text}`
   )
+})
+
+test('completed discovery with failed or remaining items does not freeze a manifest', () => {
+  for (const [scope, result] of [
+    ['scope-discovery-failed', { targets: [{ url: 'a' }], failedItems: [{ url: 'b' }] }],
+    ['scope-discovery-remaining', { targets: [{ url: 'a' }], remaining: 1 }]
+  ] as const) {
+    resetActivePlansForTests()
+    noteToolResultForActivePlan(
+      scope,
+      'browser_visible_collect',
+      { url: 'https://example.com/u/incomplete' },
+      1000,
+      JSON.stringify({ taskId: `${scope}-task`, status: 'completed', result })
+    )
+    const text = buildActivePlanReminderText(scope, 1000)
+    assert.ok(
+      text && text.includes('当前步骤 1/3'),
+      `incomplete completed discovery must stay on step 1, got: ${text}`
+    )
+  }
 })
 
 test('image gallery review does not complete on partial collected-media downloads', () => {

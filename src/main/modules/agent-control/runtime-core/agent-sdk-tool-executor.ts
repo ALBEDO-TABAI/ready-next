@@ -14,6 +14,7 @@ import {
   recoverAbsentFloorsFromRegistry
 } from '../domain-adapters/capability-floors'
 import { resolveActiveSkillAllowedTools } from '../domain-adapters/run-capability-controller'
+import { isHandoffTakeoverToolOutput, runWithHandoffToolGate } from '../agents/handoff-control'
 import { resolvePolicyConflictFacts } from '../policy-arbitration'
 import {
   isBrowserBatchCollectionWorkflowTool,
@@ -357,7 +358,9 @@ export class AgentSdkToolExecutor {
       })
       definitions = filterSelectedSkillToolSurface(definitions, activeSkillAllowedTools, {
         preserveToolName: (name) =>
-          preserveVisibleBrowserTool?.(name) === true || capabilityFloors.toolNames.has(name)
+          preserveVisibleBrowserTool?.(name) === true
+          || name === 'agent_propose_handoff'
+          || capabilityFloors.toolNames.has(name)
       })
     }
     // P1-3 硬地板：地板工具即便被组不可见/意图压制而缺席，也从注册表补回（取不到则记 reason 跳过）。
@@ -392,7 +395,7 @@ export class AgentSdkToolExecutor {
       parameters: schema as never,
       strict: false,
       timeoutMs: definition.executionTimeoutMs,
-      execute: async (input) => {
+      execute: async (input) => runWithHandoffToolGate(runtimeContext, async () => {
         const args =
           input && typeof input === 'object' && !Array.isArray(input)
             ? (input as Record<string, unknown>)
@@ -441,7 +444,9 @@ export class AgentSdkToolExecutor {
           }
         }
         return stringifyToolResult(output)
-      },
+      }, () => stringifyToolResult(createToolExecutionOutput('当前任务已由新 Agent 接管，旧身份不再执行后续工具。', {
+        shape: 'json', data: { errorKind: 'handoff_takeover', skipped: true },
+      }))),
       errorFunction: (_context, error) =>
         stringifyToolResult(
           createToolExecutionOutput(`工具 ${definition.name} 失败：${errorMessage(error)}`, {
@@ -468,6 +473,8 @@ export class AgentSdkToolExecutor {
           ? this.host.runtime?.getConversationScope?.(runtimeContext.sessionId) || undefined
           : undefined,
         agent: publicAgentName(runtimeContext.agentName),
+        executionBinding: runtimeContext.executionBinding ?? null,
+        executionProfile: runtimeContext.executionProfile ?? null,
         allowedToolNames: runtimeContext.allowedToolNames,
         // SDK runtime executes renderer-mediated tools through the request/ack
         // path below. Forwarding tool handlers' advisory emitToolAction here
@@ -613,12 +620,41 @@ export class AgentSdkToolExecutor {
     return output
   }
 
+  /**
+   * W10-F1 — guard 的开/存工具定义在 turn-preparation 早绑（先于地板兜底），技能收窄轮
+   * 常绑空。guard 自动开/存本就不经模型（模型不可见），因此缺失时从注册表就地解析，
+   * 免疫任何轮的工具面收窄；解析成功回写 guard 避免重复解析，并落可观测日志。
+   */
+  private resolveGuardDocumentToolDefinition(
+    bound: ToolDefinition | undefined,
+    toolName: 'document_open_tab' | 'document_save_tab',
+    targetPath: string
+  ): ToolDefinition | null {
+    if (bound) return bound
+    const recovered = defaultToolRegistry.getToolDefinitionForExecution(toolName) ?? null
+    if (recovered) {
+      appendToolCapabilityLog(
+        [
+          '[tool_capability]',
+          'stage=document_target_guard_tool_recovered',
+          `tool=${toolName}`,
+          `targetPath=${targetPath}`
+        ].join(' ')
+      )
+    }
+    return recovered
+  }
+
   private async ensureExplicitDocumentTargetOpened(
     runtimeContext: ToolBridgeRuntimeContext
   ): Promise<ToolExecutionOutput | null> {
     const guard = runtimeContext.documentTargetGuard
     if (!guard || guard.opened) return null
-    const definition = guard.openToolDefinition
+    const definition = this.resolveGuardDocumentToolDefinition(
+      guard.openToolDefinition,
+      'document_open_tab',
+      guard.targetPath
+    )
     if (!definition) {
       return createToolExecutionOutput(
         `无法打开目标文档 ${guard.targetName}：本轮未开放 document_open_tab。`,
@@ -631,6 +667,7 @@ export class AgentSdkToolExecutor {
         }
       )
     }
+    guard.openToolDefinition = definition
 
     const args = { path: guard.targetPath }
     const output = await this.executeGuardDocumentTool(definition, args, runtimeContext)
@@ -657,7 +694,11 @@ export class AgentSdkToolExecutor {
   ): Promise<ToolExecutionOutput | null> {
     const guard = runtimeContext.documentTargetGuard
     if (!guard) return null
-    const definition = guard.saveToolDefinition
+    const definition = this.resolveGuardDocumentToolDefinition(
+      guard.saveToolDefinition,
+      'document_save_tab',
+      guard.targetPath
+    )
     if (!definition) {
       return createToolExecutionOutput(
         `目标文档 ${guard.targetName} 已修改，但本轮未开放 document_save_tab，无法确认落盘。`,
@@ -670,6 +711,7 @@ export class AgentSdkToolExecutor {
         }
       )
     }
+    guard.saveToolDefinition = definition
     const output = await this.executeGuardDocumentTool(definition, {}, runtimeContext)
     if (isDocumentToolFailure(output)) {
       return createToolExecutionOutput(`目标文档 ${guard.targetName} 保存失败，不能声明完成。`, {
@@ -689,6 +731,11 @@ export class AgentSdkToolExecutor {
     args: Record<string, unknown>,
     runtimeContext: ToolBridgeRuntimeContext
   ): Promise<ToolExecutionOutput> {
+    if (runtimeContext.hostControl === 'handoff_takeover') {
+      return createToolExecutionOutput('当前任务已由新 Agent 接管，旧身份不再执行后续工具。', {
+        shape: 'json', data: { errorKind: 'handoff_takeover', skipped: true },
+      })
+    }
     const documentClosureTool = Boolean(
       runtimeContext.documentTargetGuard &&
       (DOCUMENT_TARGET_MUTATION_TOOL_NAMES.has(definition.name) ||
@@ -838,6 +885,9 @@ export class AgentSdkToolExecutor {
     noteToolResultForActivePlan(runtimeContext.sessionId, definition.name, args, Date.now(), output)
     const outputWithSteering = appendBudgetWarningSteering(output, runtimeContext)
     const normalized = normalizeToolExecutionOutput(outputWithSteering)
+    if (isHandoffTakeoverToolOutput(outputWithSteering)) {
+      runtimeContext.hostControl = 'handoff_takeover'
+    }
     if (
       guard &&
       definition.name === 'document_open_tab' &&

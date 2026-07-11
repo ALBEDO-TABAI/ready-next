@@ -378,7 +378,7 @@ export async function executeMemoryTool(
           requestedStatus: status,
           relPath: rel_path,
           invoker: context.invoker,
-          ownerAgentId: context.scope?.agent ?? null,
+          ownerAgentId: context.executionProfile?.knowledgeWriteOwnerAgentId ?? null,
           existingCard,
         })
         if (!authorization.ok) {
@@ -419,7 +419,11 @@ export async function executeMemoryTool(
           include_staged?: boolean
         }
         const store = runtime.getBeliefCardStore()
-        const card = store.readCard(rel_path, { includeStaged: include_staged === true })
+        if (context.executionProfile && !context.executionProfile.allowedKnowledgeRefs.includes(rel_path)) {
+          return JSON.stringify({ success: false, error: 'card is outside the frozen execution profile allowlist' })
+        }
+        const allowStaged = context.invoker === 'host' && include_staged === true
+        const card = store.readCard(rel_path, { includeStaged: allowStaged })
         if (!card) {
           return JSON.stringify({ success: false, error: 'card not found or excluded (staged)' })
         }

@@ -28,6 +28,7 @@ export interface SessionPrerouteServiceDeps {
   agentRegistry: AgentRegistryRepository
   taskProjectionStore: TaskProjectionRepository
   getBeliefCardStore: () => BeliefCardStore
+  getAgentReadiness: (agentId: string) => { autoRoutable: boolean }
 }
 
 export class SessionPrerouteService {
@@ -63,11 +64,13 @@ export class SessionPrerouteService {
       targetAgentId: card.targetAgentId,
       triggers: card.triggers,
     }))
+    const isAgentAutoRoutable = (agentId: string): boolean => this.deps.getAgentReadiness(agentId).autoRoutable
     const result = decideSessionPreroute({
       firstMessage,
       recentOwnedTasks,
       routingCards,
       isAgentActive: (agentId) => this.deps.agentRegistry.get(agentId)?.status === 'active',
+      isAgentAutoRoutable,
       mode,
     })
     pushSessionPrerouteTraceSafely({
@@ -130,11 +133,13 @@ export class SessionPrerouteService {
       targetAgentId: card.targetAgentId,
       triggers: card.triggers,
     }))
+    const isAgentAutoRoutable = (agentId: string): boolean => this.deps.getAgentReadiness(agentId).autoRoutable
     const result = decideSessionPreroute({
       firstMessage: sample,
       recentOwnedTasks,
       routingCards,
       isAgentActive: (agentId) => this.deps.agentRegistry.get(agentId)?.status === 'active',
+      isAgentAutoRoutable,
       mode,
     })
     const trace = buildSessionPrerouteTrace({

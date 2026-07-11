@@ -50,6 +50,8 @@ export interface ToolRuntimeContext {
   runtime?: AgentControlRuntime | null
   scope?: ConversationScope | null
   agent?: string | null
+  executionBinding?: import('../../../../shared/agent-execution-profile').TaskExecutionBinding | null
+  executionProfile?: import('../../../../shared/agent-execution-profile').AgentExecutionProfile | null
   allowedToolNames?: Set<string> | string[] | null
   emitToolAction?: (tool: string, args: Record<string, unknown>) => void
   requestModuleToolAction?: (tool: string, args: Record<string, unknown>) => Promise<Record<string, unknown>>

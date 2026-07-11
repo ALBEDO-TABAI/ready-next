@@ -27,6 +27,7 @@ import {
 } from '../../../../shared/run-meta-terminal-status'
 import type { TaskBudgetRuntime, TaskProjectionRecord } from '../contracts/run-contracts'
 import { canResumeAsUserPoint } from '../contracts/resume-handle'
+import type { DeliveryStateV1 } from '../../../../shared/dynamic-delivery'
 
 export interface RunCloseMetric {
   runId: string
@@ -57,6 +58,9 @@ interface RunOutcomeProviderDiagnostics {
   contextWindow?: number | null
   protocolSource?: 'explicit' | 'inferred' | null
   contextWindowSource?: 'explicit' | 'model' | 'fallback' | null
+  usageSource?: 'provider' | 'estimated' | 'missing'
+  providerCallCount?: number
+  missingCallCount?: number
 }
 
 interface RunOutcomeUsage {
@@ -221,6 +225,22 @@ interface TerminalAdjudicationDecision {
   verdict: CheckInRecord['verdict']
   blockers: string[]
   proofCount: number
+}
+
+export function resolveDynamicDeliveryFinalizerBlocker(
+  state: DeliveryStateV1 | null | undefined,
+): string | null {
+  if (!state || state.decision === 'single_path') return null
+  if (state.verifier.status !== 'accepted') return 'delivery_verifier_unsettled'
+  if (state.decision === 'support_and_verify') {
+    const requiredUnsettled = state.packages.some((entry) =>
+      entry.criticality === 'required'
+      && entry.status !== 'completed'
+      && entry.status !== 'degraded',
+    )
+    if (requiredUnsettled) return 'delivery_required_package_unsettled'
+  }
+  return null
 }
 
 function canKeepProofBearingDegradedVisible(
@@ -542,14 +562,35 @@ async function writeTerminalOutcome(
   terminalReason: string
 ): Promise<FinalizedRunOutcome> {
   const facts = resolveEffectiveTaskFacts(outcome, deps)
-  const adjudication = recordTerminalAdjudication(outcome, deps, status, terminalReason, facts)
+  const deliveryState = (() => {
+    if (!deps.taskProjectionStore || !outcome.taskId) return null
+    return deps.taskProjectionStore.get(outcome.taskId)?.deliveryState ?? null
+  })()
+  const deliveryBlocker = status === 'done'
+    ? resolveDynamicDeliveryFinalizerBlocker(deliveryState)
+    : null
+  const handoffSuperseded = (() => {
+    if (!deps.taskProjectionStore || !outcome.taskId) return false
+    const projection = deps.taskProjectionStore.get(outcome.taskId)
+    const continuation = projection?.continuationRef
+    if (!continuation || typeof continuation !== 'object') return false
+    const ref = continuation as Record<string, unknown>
+    return ref.kind === 'handoff_takeover' && ref.priorRunId === outcome.runId
+  })()
+  const adjudication = handoffSuperseded || deliveryBlocker
+    ? null
+    : recordTerminalAdjudication(outcome, deps, status, terminalReason, facts)
   let effectiveStatus: RunMetaTerminalStatus = status
   let effectiveTerminalReason = terminalReason
-  if (status === 'done' && !adjudication && isBrowserTransactionTask(facts)) {
+  if (deliveryBlocker) {
+    effectiveStatus = 'error'
+    effectiveTerminalReason = deliveryBlocker
+  }
+  if (!deliveryBlocker && !handoffSuperseded && status === 'done' && !adjudication && isBrowserTransactionTask(facts)) {
     effectiveStatus = 'error'
     effectiveTerminalReason = 'browser_transaction_unconfirmed'
   }
-  if (status === 'done' && adjudication && adjudication.verdict !== 'accept') {
+  if (!deliveryBlocker && !handoffSuperseded && status === 'done' && adjudication && adjudication.verdict !== 'accept') {
     const taskContinuation = continuationFromProjectionPatch(outcome.projectionPatch)
     if (isBrowserTransactionTask(facts)) {
       effectiveStatus = 'error'
@@ -591,7 +632,7 @@ async function writeTerminalOutcome(
     effectiveTerminalReason = 'browser_transaction_unconfirmed'
   }
   writeRunMetaOutcome(outcome, deps, effectiveStatus, effectiveTerminalReason, facts)
-  if (deps.writeProjectionTerminalPatch) {
+  if (!handoffSuperseded && deps.writeProjectionTerminalPatch) {
     const terminalProjectionPatch = facts.taskType
       ? { ...(outcome.projectionPatch || {}), taskType: facts.taskType }
       : outcome.projectionPatch || null
@@ -751,8 +792,7 @@ function recordTerminalAdjudication(
       : []
     const criteriaItems =
       declaredModelCriteria.length > 0
-        ? appendModelCriteria(
-            criteria.items,
+        ? appendModelCriteria(criteria.items,
             declaredModelCriteria.map((text) => ({ text }))
           )
         : criteria.items
@@ -909,12 +949,22 @@ function writeRunMetaOutcome(
       ...taskBudgetRuntime.usage
     }
   }
+  const usageDiagnostics = usage && typeof usage === 'object'
+    ? {
+      usageSource: (usage as RunOutcomeUsage & { usageSource?: 'provider' | 'estimated' | 'missing' }).usageSource,
+      providerCallCount: (usage as RunOutcomeUsage & { providerCallCount?: number }).providerCallCount,
+      missingCallCount: (usage as RunOutcomeUsage & { missingCallCount?: number }).missingCallCount,
+    }
+    : null
+  const persistedProviderDiagnostics = providerDiagnostics || usageDiagnostics
+    ? { ...(providerDiagnostics || {}), ...(usageDiagnostics || {}) }
+    : null
   if (providerDiagnostics) {
     patch.providerProtocol = providerDiagnostics.agentProtocol || null
     patch.wireApi = providerDiagnostics.wireApi || null
     patch.contextWindow = providerDiagnostics.contextWindow || null
-    patch.providerDiagnostics = providerDiagnostics
   }
+  if (persistedProviderDiagnostics) patch.providerDiagnostics = persistedProviderDiagnostics
   if (usage) {
     patch.inputTokens = usage.inputTokens ?? 0
     patch.outputTokens = usage.outputTokens ?? 0
