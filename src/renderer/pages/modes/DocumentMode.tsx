@@ -7,6 +7,7 @@ import DocumentVerticalTabRail from '../../components/document/DocumentVerticalT
 import FilePreview from '../../components/document/FilePreview'
 import DraggableModeSwitch from '../../components/document/DraggableModeSwitch'
 import DocumentFloatingPanels, { DocumentPanelToggleButtons } from '../../components/document/DocumentFloatingPanels'
+import DocumentExportButton from '../../components/document/DocumentExportButton'
 import { READY_DOCUMENT_REVEAL_EVENT } from '../../modules/agent/document-quote-navigation'
 import {
   addReadyContextReferenceToAgentInput,
@@ -923,6 +924,7 @@ export default function DocumentMode({
                 onToggleMarks={() => setMarksPanelOpen((value) => !value)}
                 rail
               />
+              <DocumentExportButton tab={panelTargetTab} />
               <DraggableModeSwitch
                 mode={editorMode}
                 onChange={handleEditorModeChange}

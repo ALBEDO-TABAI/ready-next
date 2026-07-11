@@ -736,6 +736,10 @@ const documentAPI = {
   exportWorkspace: (payload: { name: string; folders: string[] }) =>
     ipcRenderer.invoke('document:exportWorkspace', payload),
   importWorkspace: () => ipcRenderer.invoke('document:importWorkspace'),
+  exportPdf: (payload: { html: string; suggestedName?: string; sourcePath?: string | null }) =>
+    ipcRenderer.invoke('document:exportPdf', payload),
+  exportMarkdownBundle: (payload: { content: string; sourcePath?: string | null; suggestedName?: string }) =>
+    ipcRenderer.invoke('document:exportMarkdownBundle', payload),
   getHome: () => ipcRenderer.invoke('document:getHome'),
   showInFolder: (path: string) => ipcRenderer.invoke('document:showInFolder', path),
   openPath: (path: string) => ipcRenderer.invoke('document:openPath', path),

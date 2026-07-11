@@ -1,0 +1,24 @@
+/* 导出按钮（文档顶栏）— 复用 documentFloatingPanels.css 的
+   .document-floating-toggles--rail / .document-floating-toggle 外观，
+   这里只补充导出特有的状态色与禁用态。 */
+
+.document-export-button:disabled {
+  opacity: 0.38;
+  cursor: default;
+}
+
+.document-export-button:disabled:hover {
+  background: transparent;
+  box-shadow: none;
+  color: var(--text-light);
+}
+
+.document-export-button.is-success,
+.document-export-button.is-success:hover {
+  color: var(--color-green, #34d399);
+}
+
+.document-export-button.is-error,
+.document-export-button.is-error:hover {
+  color: var(--color-red, #eb5757);
+}

@@ -60,6 +60,11 @@ import type {
   DocumentMarkRecord,
 } from '../../shared/document-side-panels'
 import type {
+  DocumentExportMarkdownBundlePayload,
+  DocumentExportPdfPayload,
+  DocumentExportResult,
+} from '../../shared/document-export'
+import type {
   BrowserLockOverlayIPCResult,
   BrowserLockOverlaySnapshot,
 } from '../../shared/browser-lock-overlay'
@@ -311,6 +316,8 @@ type ConversationSourceKind = 'local' | 'channel'
 interface ConversationScopeData {
   id: string
   agent: string
+  activeAgentId: string
+  handoffGeneration: number
   title: string
   parentConversationId?: string | null
   lineageRootId?: string | null
@@ -2099,6 +2106,8 @@ interface ElectronDocumentAPI {
     | { success: true; path: string; name: string; folders: string[] }
     | { success: false; error: string }
   >
+  exportPdf: (payload: DocumentExportPdfPayload) => Promise<DocumentExportResult>
+  exportMarkdownBundle: (payload: DocumentExportMarkdownBundlePayload) => Promise<DocumentExportResult>
   getHome: () => Promise<DocumentHomeResponse>
   showInFolder: (path: string) => Promise<DocumentOperationResponse>
   openPath: (path: string) => Promise<DocumentOperationResponse>

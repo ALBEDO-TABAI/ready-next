@@ -21,6 +21,8 @@ import { workspaceGroup } from './ipc/workspace-group'
 import { parserGroup } from './ipc/parser-group'
 import { watchGroup } from './ipc/watch-group'
 import { widgetGroup } from './ipc/widget-group'
+import { exportGroup } from './ipc/export-group'
+import { renderHtmlToPdfBuffer } from './export/pdf-renderer'
 import type { IpcDisposeHandle } from './ipc/types'
 import {
   ATTACHMENT_HARD_CAP_BYTES,
@@ -302,6 +304,13 @@ let watchGroupDispose: IpcDisposeHandle | null = null
  */
 let widgetGroupDispose: IpcDisposeHandle | null = null
 
+/**
+ * Dispose handle returned by `exportGroup.register`. The 2 document export
+ * channels (`document:exportPdf`, `document:exportMarkdownBundle`) live in
+ * `ipc/export-group.ts`; same dev-reload lifecycle as the other groups.
+ */
+let exportGroupDispose: IpcDisposeHandle | null = null
+
 export function setupDocumentIPC(useMock = false): void {
   // Stage V V2.3g — `document:widgetCommitted` (renderer → main push)
   // moved into `widgetGroup`. The group owns the listener registration
@@ -413,6 +422,29 @@ export function setupDocumentIPC(useMock = false): void {
     showSaveWorkspaceDialog: (window, options) => dialog.showSaveDialog(window, options),
     showOpenWorkspaceFileDialog: (window, options) => dialog.showOpenDialog(window, options),
     getHomeDirectory: () => homedir(),
+  })
+
+  // Document export channels (`document:exportPdf`,
+  // `document:exportMarkdownBundle`) — top-bar 导出 button. The group gets
+  // the save-dialog facade (shared window-resolution helper) and the hidden
+  // -window PDF renderer; zip assembly lives inside the group.
+  if (exportGroupDispose) {
+    try { exportGroupDispose.dispose() } catch { /* ignore — handlers may already be gone */ }
+    exportGroupDispose = null
+  }
+  exportGroupDispose = exportGroup.register(ipcMain, {
+    showExportSaveDialog: async (request) => {
+      const window = resolveDialogWindow()
+      if (!window) return { canceled: true }
+      const result = await dialog.showSaveDialog(window, {
+        title: request.title,
+        defaultPath: request.defaultPath,
+        filters: request.filters,
+      })
+      return { canceled: result.canceled, filePath: result.filePath || undefined }
+    },
+    renderHtmlToPdf: (html) => renderHtmlToPdfBuffer({ html, tempDir: app.getPath('temp') }),
+    getFallbackExportDir: () => homedir(),
   })
 
   // Stage V V2.3e — 3 parser channels (`document:parseDocx`,

@@ -2,6 +2,13 @@
 
 ## [Unreleased] - 2026-07-10
 
+### 文档导出：顶栏导出按钮（PDF / 带资源的 Markdown 压缩包，2026-07-11）
+
+- 文档模式顶栏（大纲/书签按钮右侧）新增「导出」按钮，原生下拉两种形式：**导出为 PDF** 与 **导出 Markdown 压缩包（含资源）**；目标是把 Ready 里的阅读呈现以整洁优雅的方式带走。非 markdown/text 文档（表格/图片/视频/PDF/画板/电子书原件）按钮禁用并提示；按钮态（导出中 spinner / 完成 √ / 失败红色 + 错误提示）就地反馈，取消保存对话框静默复位。
+- PDF 走「所见即所得」链路：离屏渲染真实 `NotePreview`（与预览完全同一渲染器，模式无关，未保存修改也生效），等待图片/mermaid/widget iframe 就绪后序列化 DOM + 活体 CSSOM（`theme-tokens`/`markdown.css` 以 ?raw 兜底），主进程隐藏窗口 `printToPDF`（A4、含背景、断页规则：代码块/图表/widget 卡/表格行避免截断，标题不孤行；宽表格与长代码在纸面自动换行）。导出静态化处理：复制/AI 修复/widget 操作钮剥离、`<details>` 全展开、懒加载图片转 eager、YouTube/B 站播放器降级为可点的观看链接（embed URL 反推 watch URL）、本地视频降级为文件名占位卡；深浅主题跟随当前应用主题。长文档完整分页：采集进导出文档的应用壳规则（`base-chrome.css` 的 html/body `height:100%+overflow:hidden`）曾把打印裁成单屏，打印覆盖层现强制释放高度/溢出钳制并把 flex 列预览壳降级为块布局参与分页（真实 Electron 复现 1 页 → 修后 7 页，结构合同钉在 `document-export-capture-transform`）。分页策略二次校准（首版把首页压出 2/3 留白）：文本类容器（代码块/widget 卡/折叠段/属性区）放开允许自然跨页——对它们强行整块会把中等高度块整体推页；只有原子媒体（图片/mermaid/表格行）保持整块并钳进 560px（纸面 ≈14.8cm），让"导读 + 大图"典型开篇同页共存、竖幅截图与上下文合页。真实 Electron 三组冒烟：长代码块 A/B（分页 2 页 vs 旧策略整块 3 页）、用户真实文档开头（导读 + 1600² 结构图收进 1 页）、9:16 场景帧段落（1 页）。
+- Markdown 压缩包：扫描文档里的本地媒体引用（`![]()` 图片/视频、媒体后缀普通链接、内联 `<img>/<video>/<audio>/<source>`，支持 local-file:// 解码；代码围栏与行内代码里的引用不动），复制进 zip 的 `<文档名>/assets/` 并把引用改写为相对路径（同名冲突自动 `-2` 后缀、同源复用、含空格路径用尖括号包裹）；缺失文件保持原引用并计数上报。zip 结构 `<文档名>/<文档名>.md + assets/`，解压即读。
+- 跨进程最小闭环：main `document-engine/ipc/export-group.ts`（`document:exportPdf` / `document:exportMarkdownBundle`，对话框先行、取消零副作用、HTML 32MB 上限）+ `export/pdf-renderer.ts`（沙箱隐藏窗、就绪探针 + 12s 兜底、导航拒止、temp 清理）+ `export/markdown-bundle.ts`（纯规划层）；共享 `shared/markdown-asset-refs.ts`（引用语法扫描/改写）与 `shared/document-export.ts`（IPC 合同）；preload/类型声明同步。行为测试 21 例（`document-export-markdown-bundle` 扫描改写合同 / `document-export-ipc` 真实临时文件 + zip 往返 / `document-export-capture-transform` JSDOM 变换与文档组装），另做真实 Electron 冒烟（隐藏窗产出合法 PDF、坏图不卡死）。
+
 ### 文档模式三功能：预览内编辑 / 新建标签拖存 / 标签外观同步（2026-07-11）
 
 - 预览滑块下沉态（预览内编辑）：预览模式下再点一下「预览」（点滑块或标签均可），滑块以按压下沉的读感切入预览内编辑——正文段落 hover 出现铅笔（或双击）就地改写 markdown 源（⌘/Ctrl+Enter 提交、Esc 取消、失焦提交），独立成行的图片/视频出现拖拽把手可在块间拖动换位（落点线提示 before/after），文档末尾常驻「添加文字」追加段落；再点一下滑块浮起退出。写入与源码编辑完全同通道（isDirty + Cmd+S），切标签或切模式自动退出。
