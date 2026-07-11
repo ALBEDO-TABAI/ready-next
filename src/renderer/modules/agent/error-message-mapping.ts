@@ -72,6 +72,15 @@ export function mapBackendErrorToFriendly(input: {
     }
   }
 
+  if (errorKind === 'delivery_failed' && /delivery_wall_clock_exceeded/i.test(error)) {
+    return {
+      friendlyMessage: '本轮深度协作持续一段时间没有新进展，已安全停止；未通过复核的草稿没有发布，可以继续这项任务',
+      technicalDetails: error || undefined,
+      recoverable: true,
+      retryStrategy: 'user_action',
+    }
+  }
+
   if (/scope_id is required/i.test(error)) {
     return {
       friendlyMessage: '操作失败，请刷新会话',

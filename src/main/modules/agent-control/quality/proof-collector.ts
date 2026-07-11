@@ -32,6 +32,19 @@ export interface ProofRef {
   ref: string
   ts: string
   digest: string
+  /** Run identity for live proofs. Older persisted rows may omit it and remain readable,
+   *  but current-run delivery readback never treats an unscoped row as fresh evidence. */
+  runId?: string
+  /** Research acquisition receipt. Stored only for successful source tools so
+   *  a later verifier can distinguish a real URL+body acquisition from a
+   *  generic tool-result digest. */
+  sourceReceipt?: {
+    acquisitionTool: string
+    urls: string[]
+    acquiredAt: string
+    contentDigest: string
+    excerpt: string
+  }
 }
 
 export const PROOF_REFS_LIMIT = 100
@@ -40,20 +53,93 @@ function sha256(text: string): string {
   return createHash('sha256').update(text).digest('hex')
 }
 
-function proof(kind: ProofKind, ref: string, digestSource: string, now: Date): ProofRef {
-  return { kind, ref: ref.slice(0, 200), ts: now.toISOString(), digest: sha256(digestSource) }
+export const RESEARCH_SOURCE_DISCOVERY_TOOL_NAMES = new Set([
+  'web_search',
+  'browser_search',
+])
+
+export const RESEARCH_SOURCE_CONTENT_TOOL_NAMES = new Set([
+  'web_fetch',
+  'browser_read_page',
+])
+
+// Async browser research/collection tools return task handles, not acquired bodies.
+// They may become source evidence only after a future terminal-result reader validates
+// the completed bundle; the launch result itself never qualifies.
+export const RESEARCH_SOURCE_BUNDLED_TOOL_NAMES = new Set<string>()
+
+const RESEARCH_SOURCE_TOOL_NAMES = new Set([
+  ...RESEARCH_SOURCE_DISCOVERY_TOOL_NAMES,
+  ...RESEARCH_SOURCE_CONTENT_TOOL_NAMES,
+  ...RESEARCH_SOURCE_BUNDLED_TOOL_NAMES,
+])
+const SOURCE_RECEIPT_MATERIAL_CAP = 64 * 1024
+
+function extractHttpUrls(text: string): string[] {
+  const urls = new Set<string>()
+  for (const match of String(text || '').matchAll(/https?:\/\/[^\s<>"'`\])}]+/gi)) {
+    const url = String(match[0] || '').replace(/[.,;:!?\u3002\uff0c\uff1b\uff1a\uff01\uff1f]+$/g, '')
+    if (url) urls.add(url)
+    if (urls.size >= 12) break
+  }
+  return Array.from(urls)
 }
 
-export function collectToolResultProof(toolName: string, resultSummary: string, now: Date): ProofRef {
-  return proof('tool_result', toolName, `${toolName}:${resultSummary}`, now)
+function buildSourceReceipt(toolName: string, summary: string, now: Date): ProofRef['sourceReceipt'] {
+  if (!RESEARCH_SOURCE_TOOL_NAMES.has(toolName)) return undefined
+  const urls = extractHttpUrls(summary)
+  if (urls.length === 0) return undefined
+  const excerpt = String(summary || '').trim().slice(0, 1600)
+  return {
+    acquisitionTool: toolName,
+    urls,
+    acquiredAt: now.toISOString(),
+    contentDigest: sha256(summary),
+    excerpt: excerpt || urls.join('\n'),
+  }
+}
+
+function proof(
+  kind: ProofKind,
+  ref: string,
+  digestSource: string,
+  now: Date,
+  sourceReceipt?: ProofRef['sourceReceipt'],
+  runId?: string,
+): ProofRef {
+  return {
+    kind,
+    ref: ref.slice(0, 200),
+    ts: now.toISOString(),
+    digest: sha256(digestSource),
+    ...(runId ? { runId } : {}),
+    ...(sourceReceipt ? { sourceReceipt } : {}),
+  }
+}
+
+export function collectToolResultProof(
+  toolName: string,
+  resultSummary: string,
+  now: Date,
+  sourceMaterial: string = resultSummary,
+  runId?: string,
+): ProofRef {
+  return proof(
+    'tool_result',
+    toolName,
+    `${toolName}:${resultSummary}`,
+    now,
+    buildSourceReceipt(toolName, sourceMaterial, now),
+    runId,
+  )
 }
 
 function collectScopedToolResultProof(ref: string, resultSummary: string, now: Date): ProofRef {
   return proof('tool_result', ref, `${ref}:${resultSummary}`, now)
 }
 
-export function collectArtifactProof(path: string, now: Date): ProofRef {
-  return proof('artifact', path, path, now)
+export function collectArtifactProof(path: string, now: Date, runId?: string): ProofRef {
+  return proof('artifact', path, path, now, undefined, runId)
 }
 
 export function collectTaskEventProof(payload: { taskId: string; status: string }, now: Date): ProofRef {
@@ -114,6 +200,10 @@ function isFailedToolOutput(output: ToolExecutionOutput): boolean {
     ) && /(?:^Error:|Document action failed|failed|失败|无法|没有可|未匹配到|未找到|缺少|已拒绝|被拒绝|已取消|被取消)/i.test(output.text)
 }
 
+export function isSuccessfulToolOutput(output: ToolExecutionOutput): boolean {
+  return !isFailedToolOutput(normalizeToolExecutionOutput(output))
+}
+
 function cleanArtifactPathCandidate(value: unknown): string | null {
   if (typeof value !== 'string') return null
   let text = value.trim()
@@ -141,6 +231,19 @@ function collectPathCandidatesFromRecord(record: Record<string, unknown> | null,
   for (const artifact of artifacts) {
     const path = cleanArtifactPathCandidate(recordValue(artifact)?.path)
     if (path) paths.add(path)
+  }
+  const autoExport = recordValue(record.autoExport)
+  const autoExportPath = cleanArtifactPathCandidate(autoExport?.absolutePath)
+  const autoExportTarget = cleanArtifactPathCandidate(autoExport?.targetPath)
+  const autoExportBytes = Number(autoExport?.bytesWritten)
+  if (
+    autoExportPath
+    && autoExportTarget
+    && autoExportPath === autoExportTarget
+    && Number.isFinite(autoExportBytes)
+    && autoExportBytes >= 0
+  ) {
+    paths.add(autoExportPath)
   }
 }
 
@@ -196,7 +299,29 @@ function transactionConfirmationRef(toolName: string, confirmation: Record<strin
   return `${toolName}:${source}:${signal}`.slice(0, 200)
 }
 
-export function collectToolOutputProofs(toolName: string, output: ToolExecutionOutput, now: Date): ProofRef[] {
+function sourceReceiptMaterial(
+  toolName: string,
+  normalized: ReturnType<typeof normalizeToolExecutionOutput>,
+): string {
+  if (!RESEARCH_SOURCE_TOOL_NAMES.has(toolName)) return normalized.text
+  const parts = [normalized.text]
+  for (const value of [normalized.data, normalized.projectionPatch]) {
+    if (value === undefined || value === null) continue
+    try {
+      parts.push(JSON.stringify(value))
+    } catch {
+      // silent-catch: text remains authoritative if an unexpected host object is not serializable
+    }
+  }
+  return parts.join('\n').slice(0, SOURCE_RECEIPT_MATERIAL_CAP)
+}
+
+export function collectToolOutputProofs(
+  toolName: string,
+  output: ToolExecutionOutput,
+  now: Date,
+  context: { runId?: string } = {},
+): ProofRef[] {
   const normalized = normalizeToolExecutionOutput(output)
   if (isFailedToolOutput(normalized)) return []
 
@@ -217,9 +342,15 @@ export function collectToolOutputProofs(toolName: string, output: ToolExecutionO
   const documentSavePath = toolName === 'document_save_tab' ? [...paths][0] : null
   proofs.push(documentSavePath
     ? collectScopedToolResultProof(`${toolName}:${documentSavePath}`, summary.slice(0, 500), now)
-    : collectToolResultProof(toolName, summary.slice(0, 500), now))
+    : collectToolResultProof(
+        toolName,
+        summary.slice(0, 500),
+        now,
+        sourceReceiptMaterial(toolName, normalized),
+        context.runId,
+      ))
   for (const path of paths) {
-    proofs.push(collectArtifactProof(path, now))
+    proofs.push(collectArtifactProof(path, now, context.runId))
   }
   if (transactionConfirmation) {
     proofs.push(collectTransactionConfirmedProof(
@@ -233,16 +364,29 @@ export function collectToolOutputProofs(toolName: string, output: ToolExecutionO
   // KIND proof (which `skill_run_state`/`steps_complete` require) is minted ONLY
   // in run-finalizer, after validating the run_state.json is terminally done +
   // delivery report present. Tool-output level only yields the artifact path.
-  return proofs
+  return context.runId
+    ? proofs.map((row) => row.runId ? row : { ...row, runId: context.runId })
+    : proofs
 }
 
 export function isValidProofRef(row: unknown): row is ProofRef {
   if (!row || typeof row !== 'object') return false
   const candidate = row as Record<string, unknown>
-  return (PROOF_KINDS as readonly string[]).includes(String(candidate.kind))
+  const baseValid = (PROOF_KINDS as readonly string[]).includes(String(candidate.kind))
     && typeof candidate.ref === 'string' && candidate.ref.length > 0
     && typeof candidate.ts === 'string' && Number.isFinite(Date.parse(candidate.ts))
     && typeof candidate.digest === 'string' && /^[0-9a-f]{64}$/.test(candidate.digest)
+  if (!baseValid) return false
+  if (candidate.runId !== undefined && (typeof candidate.runId !== 'string' || candidate.runId.length === 0)) return false
+  if (candidate.sourceReceipt === undefined) return true
+  if (!candidate.sourceReceipt || typeof candidate.sourceReceipt !== 'object' || Array.isArray(candidate.sourceReceipt)) return false
+  const receipt = candidate.sourceReceipt as Record<string, unknown>
+  return typeof receipt.acquisitionTool === 'string' && receipt.acquisitionTool.length > 0
+    && Array.isArray(receipt.urls) && receipt.urls.length > 0
+    && receipt.urls.every((url) => typeof url === 'string' && /^https?:\/\//i.test(url))
+    && typeof receipt.acquiredAt === 'string' && Number.isFinite(Date.parse(receipt.acquiredAt))
+    && typeof receipt.contentDigest === 'string' && /^[0-9a-f]{64}$/.test(receipt.contentDigest)
+    && typeof receipt.excerpt === 'string' && receipt.excerpt.length > 0
 }
 
 /**

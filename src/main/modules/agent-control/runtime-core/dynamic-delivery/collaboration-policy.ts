@@ -15,10 +15,13 @@ export function decideDynamicDelivery(facts: DeliveryPreflightFacts): Collaborat
   if (facts.budget.remainingWallClockMs <= 0) return 'single_path'
 
   const hasReadyParticipant = facts.profiles.some((profile) => profile.collaborationReady)
+  const hasResearchIntent = facts.taskType === 'research' || facts.intentDomains.includes('research')
+  const researchWorkerIsGrounded = !hasResearchIntent || facts.groundedWorkerResourceCount > 0
   if (
     hasReadyParticipant
     && SUPPORT_ELIGIBLE.has(facts.taskType)
-    && facts.structuredTargetCount >= 2
+    && researchWorkerIsGrounded
+    && (facts.structuredTargetCount >= 2 || facts.mode === 'thorough')
   ) {
     return 'support_and_verify'
   }

@@ -47,18 +47,6 @@ const REFERENCE_SKILL_PRIMITIVE_TOOL_NAMES = [
 const CONTEXT_COMPACT_SKILL_ID = 'context-compact'
 const CONTEXT_COMPACT_PRIMITIVE_TOOL_NAME = 'skill_compact_context'
 
-const DESCRIPTION_MATCH_STOP_TERMS = new Set([
-  '帮我',
-  '帮忙',
-  '请帮',
-  '给我',
-  '这个',
-  '那个',
-  '一下',
-  '内容',
-  '文档',
-])
-
 function errorKind(error: unknown): string {
   if (error && typeof error === 'object' && 'code' in error && typeof (error as { code?: unknown }).code === 'string') {
     return (error as { code: string }).code
@@ -104,9 +92,13 @@ export class SkillContextOrchestrator {
     if (!normalizedPrimary) return []
     const aliasTokens = this.extractAliasTokens(primary)
     const skills = this.deps.listSkills()
-    const exactMatches: Array<{ skill: SkillState; position: number; index: number }> = []
+    const exactMatches: Array<{
+      skill: SkillState
+      position: number
+      tokenLength: number
+      index: number
+    }> = []
     const aliasMatches: Array<{ skill: SkillState; position: number; index: number }> = []
-    const descriptionMatches: Array<{ skill: SkillState; position: number; index: number }> = []
     const sendImSkill = skills.find((skill) => skill.id === 'send-im')
     if (sendImSkill && hasLocalSendImFileIntent(primary)) return [sendImSkill]
 
@@ -114,11 +106,15 @@ export class SkillContextOrchestrator {
       const candidates = [skill.id, skill.name]
         .map((item) => this.normalizeLooseToken(item))
         .filter((item) => item.length >= 6)
-      const positions = candidates
-        .map((candidate) => normalizedPrimary.indexOf(candidate))
-        .filter((position) => position >= 0)
-      if (positions.length > 0) {
-        exactMatches.push({ skill, position: Math.min(...positions), index })
+      const candidateMatches = candidates
+        .map((candidate) => ({
+          position: normalizedPrimary.indexOf(candidate),
+          tokenLength: candidate.length,
+        }))
+        .filter((match) => match.position >= 0)
+        .sort((left, right) => left.position - right.position || right.tokenLength - left.tokenLength)
+      if (candidateMatches.length > 0) {
+        exactMatches.push({ skill, ...candidateMatches[0], index })
         return
       }
       const aliasPosition = aliasTokens.findIndex((alias) => this.skillMatchesAlias(skill, alias))
@@ -126,16 +122,22 @@ export class SkillContextOrchestrator {
         aliasMatches.push({ skill, position: aliasPosition, index })
         return
       }
-      if (this.skillMatchesDescriptionIntent(skill, primary)) {
-        descriptionMatches.push({ skill, position: Number.MAX_SAFE_INTEGER, index })
-      }
     })
 
     const strongestMatches = exactMatches.length > 0
-      ? exactMatches
+      ? exactMatches.filter((match) => {
+          return !exactMatches.some((other) => {
+            if (other.skill.id === match.skill.id) return false
+            const matchEnd = match.position + match.tokenLength
+            const otherEnd = other.position + other.tokenLength
+            return other.tokenLength > match.tokenLength
+              && other.position <= match.position
+              && otherEnd >= matchEnd
+          })
+        })
       : aliasMatches.length > 0
         ? aliasMatches
-        : descriptionMatches
+        : []
 
     return strongestMatches
       .sort((left, right) => left.position - right.position || left.index - right.index)
@@ -518,32 +520,4 @@ export class SkillContextOrchestrator {
     return Array.from(aliases)
   }
 
-  private skillMatchesDescriptionIntent(skill: SkillState, text: string): boolean {
-    const taskTerms = new Set(this.extractIntentTerms(text).filter((term) => !DESCRIPTION_MATCH_STOP_TERMS.has(term)))
-    if (taskTerms.size < 2) return false
-    const skillTerms = new Set(
-      this.extractIntentTerms(`${skill.name} ${skill.description}`).filter((term) => !DESCRIPTION_MATCH_STOP_TERMS.has(term)),
-    )
-    let matches = 0
-    for (const term of taskTerms) {
-      if (!skillTerms.has(term)) continue
-      matches += 1
-      if (matches >= 2) return true
-    }
-    return false
-  }
-
-  private extractIntentTerms(value: string): string[] {
-    const terms = new Set<string>()
-    const raw = String(value || '').toLowerCase()
-    for (const word of raw.match(/[a-z0-9]{3,}/g) || []) {
-      terms.add(word)
-    }
-    for (const chunk of raw.match(/[\u4e00-\u9fa5]{2,}/g) || []) {
-      for (let index = 0; index < chunk.length - 1; index += 1) {
-        terms.add(chunk.slice(index, index + 2))
-      }
-    }
-    return Array.from(terms)
-  }
 }

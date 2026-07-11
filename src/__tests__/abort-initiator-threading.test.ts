@@ -5,6 +5,7 @@ import {
   AgentSdkRuntime,
   type AgentSdkRuntimeDeps,
 } from '../main/modules/agent-control/runtime-core/agent-sdk-runtime'
+import { createInitiatorAbort } from '../main/modules/agent-control/runtime-core/agent-sdk-run-lifecycle'
 import type { AbortInitiator } from '../main/modules/agent-control/contracts/run-contracts-internal'
 import {
   __setMetricSinkForTests,
@@ -59,6 +60,13 @@ const abortInitiatorValues: AbortInitiator[] = [
 test('AbortInitiator contract includes current and reserved initiators', () => {
   assert.ok(abortInitiatorValues.includes('user_stop'))
   assert.ok(abortInitiatorValues.includes('preempted'))
+})
+
+test('initiator aborts are recognizable AbortErrors even when the message is process_exit', () => {
+  const handle = { abortInitiator: null } as Parameters<typeof createInitiatorAbort>[0]
+  const error = createInitiatorAbort(handle, 'process_exit', 'process_exit')
+  assert.equal(handle.abortInitiator, 'process_exit')
+  assert.equal(error.name, 'AbortError')
 })
 
 test('stopGeneration records user_stop on the active run handle before aborting', async () => {
@@ -219,4 +227,34 @@ test('timeout abort closes through the finalizer with run_meta and run_close rea
   } finally {
     __setMetricSinkForTests(null)
   }
+})
+
+test('delivery wall-clock abort is a delivery failure, not a user cancellation', async () => {
+  const runtimeErrors: Array<{ errorKind?: string }> = []
+  const runtime = createRuntime({
+    runAgent: async () => {
+      const error = new Error('delivery_wall_clock_exceeded')
+      error.name = 'AbortError'
+      throw error
+    },
+  })
+  runtime.on('error', (event) => runtimeErrors.push(event))
+  runtime.newSession('butler::scope-delivery-deadline', 'system prompt')
+
+  const result = await runtime.sendMessage(
+    'butler::scope-delivery-deadline',
+    'research task',
+    'run-delivery-deadline',
+    {
+      publicSessionId: 'scope-delivery-deadline',
+      taskId: 'task-delivery-deadline',
+      deliveryMode: 'standard',
+    },
+  )
+
+  assert.equal(result.success, false)
+  assert.equal(result.cancelled, false)
+  assert.equal(result.terminalReason, 'delivery_failed')
+  assert.equal(result.error, 'delivery_wall_clock_exceeded')
+  assert.equal(runtimeErrors[0]?.errorKind, 'delivery_failed')
 })

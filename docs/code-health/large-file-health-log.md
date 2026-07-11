@@ -1,6 +1,6 @@
 # 代码行数健康度台账
 
-> 更新时间：2026-07-11
+> 更新时间：2026-07-12
 
 这份台账记录“任务给代码文件增加行数后，文件总行数已超过 1000 行”的健康度评估。它不是按行数自动要求拆分，而是把真正影响维护、验证和协作的风险持续留下来。
 
@@ -21,6 +21,20 @@
 
 | 评估日期 | 任务 | 文件 | 总行数 | 本次新增 | 结论 | 判断与后续动作 | 状态 |
 | --- | --- | --- | ---: | ---: | --- | --- | --- |
+| 2026-07-11 | Boost 60 秒误停修复 | `src/main/modules/agent-control/runtime-core/orchestrator.ts` | 1023 | 16 | 一般 | 仅增加按 requestId 查询活跃运行的无副作用入口，不承担业务判断。2026-08-11 复查编排入口密度。 | 已排期：2026-08-11 |
+| 2026-07-11 | Boost 60 秒误停修复 | `src/renderer/modules/agent/runtimeDriver.ts` | 1936 | 15 | 一般 | 只将 60 秒看门狗改为活性查询并处理 active 回执，事件桥职责未扩张。沿用 2026-08-11 的 scope-run 事件映射拆分复查。 | 已排期：2026-08-11 |
+| 2026-07-11 | Boost 模式一次性发送加固 | `src/renderer/components/agent/ChatPanel.tsx` | 1140 | 11 | 一般 | 仅增加同步锁存，保证点击 Boost 后立即发送也会消费 thorough；沿用 2026-08-11 宿主接线复查。 | 已排期：2026-08-11 |
+| 2026-07-11 | Dynamic Delivery | `src/main/modules/agent-control/runtime-core/runtime.ts` | 2303 | 小幅接线 | 一般 | 仅增加启动中断收口、模式转发和活动计划会话持久化接线，判断均在叶子模块。沿用 2026-08-11 复查，优先继续下沉宿主编排。 | 已排期：2026-08-11 |
+| 2026-07-11 | Dynamic Delivery | `src/renderer/stores/useAgent.ts` | 2104 | 小幅接线 | 一般 | 仅在发送入口读取持久模式并转发；状态仍集中但职责边界偏重。2026-08-11 复查发送编排能否继续下沉。 | 已排期：2026-08-11 |
+| 2026-07-11 | Dynamic Delivery | `src/main/modules/agent-control/runtime-core/agent-sdk-runtime.ts` | 1217 | 小幅接线 | 一般 | 只作为 coordinator 组装 owner、贡献学习和活动计划持久层的接线点，核心逻辑均在叶子模块。2026-08-11 复查 composition 接线密度。 | 已排期：2026-08-11 |
+| 2026-07-11 | Dynamic Delivery | `src/main/modules/agent-control/runtime-core/orchestrator.ts` | 1007 | 小幅接线 | 一般 | 首次略过线，仅透传 typed mode；不在此加入业务判断。2026-08-11 复查参数对象化是否能降低位置参数风险。 | 已排期：2026-08-11 |
+| 2026-07-11 | Dynamic Delivery | `src/renderer/components/agent/ChatPanel.tsx` | 1136 | 小幅接线 | 一般 | 仅持有一次性彻底模式并在发送时消费，行为函数已下沉。沿用 2026-08-11 解析器拆分复查。 | 已排期：2026-08-11 |
+| 2026-07-11 | Dynamic Delivery | `src/preload/index.ts` | 1469 | 1 | 一般 | 仅增加 deliveryMode 参数透传；仍是跨进程 API 汇总面。沿用 2026-07-24 按域拆分复查。 | 已排期：2026-07-24 |
+| 2026-07-11 | Dynamic Delivery | `src/renderer/types/electron.d.ts` | 3994 | 2 | 健康 | 机械跨进程声明，新增 typed mode 字段且类型检查和 wire 测试覆盖。 | 无需处理 |
+| 2026-07-12 | Boost 长任务与技能选取收口 | `src/__tests__/agent-sdk-runtime.test.ts` | 7082 | 净 +44 | 危险 | 单套件继续聚合 SDK runtime 的共享宿主与大量状态场景，本轮只补工具面保真回归，但体量已明显妨碍定位和并行修改。后续应先建立可隔离的 runtime fixture，再按目标文档、压缩、provider wire、技能授权拆分。 | 待独立测试拆分合同 |
+| 2026-07-12 | Boost 长任务与真实验收收口 | `src/__tests__/run-finalizer-checkin.test.ts` | 1232 | 88 | 一般 | 仍是终态判决与验收回执的单一行为测试域；本轮新增真实来源回执、伪正文反例和非完成态禁验收用例。若继续增长，优先按来源证明与终态验收拆成两个套件。2026-08-12 复查。 | 已排期：2026-08-12 |
+| 2026-07-12 | Boost 长任务可见终态收口 | `src/__tests__/runtime-driver-terminal-unlock.test.ts` | 1058 | 净 +22 | 一般 | 仍集中验证 renderer 运行驱动的终态解锁与晚到事件仲裁；本轮只补长任务活性和可见终态回归。若继续增长，优先把活性探测场景拆成独立套件。2026-08-12 复查。 | 已排期：2026-08-12 |
+| 2026-07-12 | 模型选技同轮开放 | `src/main/modules/agent-control/runtime-core/agent-sdk-tool-executor.ts` | 1093 | 净 +121 | 一般 | 工具面构建与执行仍集中在同一宿主，但本轮同轮激活状态更新已下沉叶子模块，宿主只负责动态可见性和激活结果回灌。若继续增长，优先把 SDK tool 包装与 trace 发布拆开。2026-08-12 复查。 | 已排期：2026-08-12 |
 | 2026-07-11 | 文档导出按钮（PDF / MD 压缩包） | `src/renderer/pages/modes/DocumentMode.tsx` | 1080 | 2 | 一般 | 仅 +2 行接线（导入 + 顶栏挂 `DocumentExportButton`）；导出逻辑全部在新叶子模块（DocumentExportButton / document-export-capture / document-export-html）。沿用既有判断：继续增长时优先把阅读会话跟踪或滚动锚点管理拆出。2026-08-11 复查不变。 | 已排期：2026-08-11 |
 | 2026-07-11 | 文档导出按钮（PDF / MD 压缩包） | `src/preload/index.ts` | 1467 | 4 | 一般 | 仅新增 exportPdf / exportMarkdownBundle 两条 invoke 包装；仍是跨进程 API 汇总面。沿用 2026-07-24 复查（是否按产品域拆分定义与组装）。 | 已排期：2026-07-24 |
 | 2026-07-11 | 文档导出按钮（PDF / MD 压缩包） | `src/renderer/types/electron.d.ts` | 3992 | 9 | 健康 | 单一用途的 renderer 跨进程声明合同；本次新增 document-export 共享类型导入与两个方法签名，IPC/typecheck 一致性检查在位。 | 无需处理 |
@@ -43,3 +57,11 @@
 | 2026-07-10 | Skill 模块复审收口 | `src/main/modules/tools/skills-tools.ts` | 3076 | 33 | 危险 | 技能工具注册、调度、读根分类仍集中；本轮已把真实路径派生和沙箱执行留在独立叶子模块，本文件只传递只读根与种类。进一步拆分被明确阻塞于“需要独立合同重锚全工具授权/执行 gate”，不在本轮收尾阶段扩大搬移面。 | 待独立拆分合同（阻塞原因已记录） |
 | 2026-07-10 | Skill 模块复审收口 | `src/__tests__/agent-sdk-runtime.test.ts` | 6975 | 2291 | 危险 | 集成级 SDK 共享宿主与大量状态场景仍集中。本轮已把输出上限、预算、准入和终态优先级的新独立域分流到专项测试文件；剩余用例依赖共享 singleton 宿主，继续搬移需先建立隔离 fixture，否则会伪造并发通过。 | 待独立测试拆分合同（阻塞原因已记录） |
 | 2026-07-10 | Skill 真实 Electron 验收 | `scripts/run-agent-panel-mimo-acceptance.mjs` | 1200 | 90 | 一般 | 仍是面板验收入口与套件调度器；本轮增加独立双技能套件与文件真值检查。若再增加套件，优先把各 suite 的 prompt/assertions 拆到独立定义模块。2026-08-10 复查。 | 已排期：2026-08-10 |
+| 2026-07-11 | Agent 根基修复 | `src/main/modules/agent-control/runtime-core/runtime.ts` | 2243 | 154 | 一般 | 本轮只增加冻结身份解析、接管恢复和累计用量的宿主接线，核心判断均已下沉到独立叶子模块；宿主仍偏大。下次增长优先继续下沉 handoff/usage 编排。2026-08-11 复查。 | 已排期：2026-08-11 |
+| 2026-07-11 | Agent 根基修复 | `src/main/modules/agent-control/prompt-assembly.ts` | 1497 | 净 +51 | 一般 | 本轮将人格、规则和知识改为消费同一冻结 profile，并保留知识目录裁剪提示；文件仍是提示组装单一职责。下次增长优先把 agent 段的格式化移到 profile 叶子模块。2026-08-11 复查。 | 已排期：2026-08-11 |
+| 2026-07-11 | Agent 根基修复 | `src/main/modules/migrations.ts` | 2868 | 70 | 健康 | 按版本顺序聚合数据库迁移，单一职责；Migration 066 已通过真实 Electron SQLite 连续迁移和数据保全检查。 | 无需处理 |
+| 2026-07-11 | Agent 根基修复 | `src/main/modules/database.ts` | 3045 | 净 +18 | 危险 | 多产品域数据库入口继续集中；本轮仅接入会话 active Agent 与 handoff generation 的持久化读写。建议后续把 conversation agent state 下沉到独立仓储，避免继续扩大总管理器。 | 待拆分规划 |
+| 2026-07-12 | Agent 根基修复与同轮选技 | `src/main/modules/tools/tool-executor.ts` | 1186 | 净 +4 | 一般 | 本轮只把冻结 execution profile 传入工具运行上下文并校正 use_skill 激活说明；统一调度职责未扩张。沿用 2026-08-10 复查，优先下沉独立 handler 路由。 | 已排期：2026-08-10 |
+| 2026-07-11 | Agent 根基修复 | `src/renderer/components/agent/ChatPanel.tsx` | 1129 | 净 +20 | 一般 | 本轮只解析并传递任务 owner、执行者与消息身份快照；展示逻辑留在子组件。下次增长优先迁出序列化类型和解析器。2026-08-11 复查。 | 已排期：2026-08-11 |
+| 2026-07-11 | Agent 根基修复 | `src/renderer/modules/agent/runtimeDriver.ts` | 1931 | 25 | 一般 | 本轮只把主进程给出的执行身份写入消息与任务快照；事件桥职责未扩张。下次增长优先拆出 scope-run 事件映射器。2026-08-11 复查。 | 已排期：2026-08-11 |
+| 2026-07-11 | Agent 根基修复 | `src/renderer/components/agent-system/studio/AgentSystemStudioView.tsx` | 1535 | 净 +20 | 一般 | 本轮展示代码侧 readiness，并把 RULES / FOUNDATION / 知识卡的编辑器从页面末尾移到被点击内容的原位，未复制保存逻辑。下次增长优先把 roster/detail 或内容提案区拆成纯展示子组件。2026-08-11 复查。 | 已排期：2026-08-11 |

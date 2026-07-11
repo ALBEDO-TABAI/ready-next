@@ -11,7 +11,11 @@ import type {
 } from '../contracts/run-contracts'
 import { computeCapabilityFloors } from '../domain-adapters/capability-floors'
 import { logAgentMetric } from '../metrics'
-import { collectToolOutputProofs, createTaskProofSink } from '../quality/proof-collector'
+import {
+  collectToolOutputProofs,
+  createTaskProofSink,
+  isSuccessfulToolOutput,
+} from '../quality/proof-collector'
 import type { SkillToolAuthorization } from '../skills/skill-tool-authorization'
 import { consumeToolCallBudget } from '../task-projection/run-budget-policy'
 import { prependSystemReminderInput } from '../system-reminders/background-task-terminal-reminder'
@@ -46,6 +50,7 @@ import {
 import { buildExecutionTurnResult } from './agent-sdk-turn-closeout'
 import { finalizeAgentSdkPreparedTurnResult } from './agent-sdk-turn-completion'
 import type { TurnOrchestratorHost } from './agent-sdk-turn-context'
+import { armDynamicDeliveryDeadline } from './dynamic-delivery/delivery-deadline'
 import { createAgentSdkTurnGuards } from './agent-sdk-turn-guards'
 import { assembleAgentSdkTurnInput } from './agent-sdk-turn-input-assembly'
 import type { AgentSdkPreparedTurnContext } from './agent-sdk-turn-execution-types'
@@ -64,6 +69,7 @@ import type {
 } from './agent-sdk-types'
 import type { TurnTerminalReason } from './turn-frame'
 import { mergeRunUsage } from './run-usage-accumulator'
+import { installSameRunSkillActivation } from './same-run-skill-activation'
 
 const LOCAL_DOCUMENT_SOURCE_READ_TOOL_NAMES = new Set([
   'file_read_excerpt',
@@ -238,7 +244,22 @@ export async function executeAgentSdkPreparedTurn(
       return result
     })
   }
+  const deliveryMode = effectiveExecutionOptions?.deliveryMode ?? 'adaptive'
+  const deliveryDeadline = armDynamicDeliveryDeadline({
+    mode: deliveryMode,
+    runId,
+    abortController,
+    runHandle,
+    startedAtMs: runStartedAt,
+  })
+  const emitOutputBeforeProgressTracking = emitOutput
+  emitOutput = (chunk, type, projectionPatch) => {
+    if (type === 'text' && chunk.trim()) deliveryDeadline.noteProgress('text_delta')
+    emitOutputBeforeProgressTracking(chunk, type, projectionPatch)
+  }
   try {
+    const latentSkillToolDefinitions = host.toolExecutor.listLatentSkillToolDefinitions()
+      .filter((definition) => !toolDefinitions.some((visible) => visible.name === definition.name))
     const hasVeaPipelineTool = toolDefinitions.some(
       (definition) => definition.name === 'skill_video_expert_pipeline'
     )
@@ -266,9 +287,8 @@ export async function executeAgentSdkPreparedTurn(
         `floors=${turnCapabilityFloors.reasons.join(',') || 'none'}`
       ].join(' ')
     )
-    const definitionByName = new Map(
-      toolDefinitions.map((definition) => [definition.name, definition])
-    )
+    const definitionByName = new Map([...toolDefinitions, ...latentSkillToolDefinitions]
+      .map((definition) => [definition.name, definition] as const))
     const requiredCapabilityGroups = Array.from(
       new Set(toolDefinitions.map((definition) => definition.groupId))
     )
@@ -296,7 +316,7 @@ export async function executeAgentSdkPreparedTurn(
       requestEnvelope: effectiveExecutionOptions?.requestEnvelope
     })
     const preparedDelivery = await host.dynamicDelivery.prepareOwnerInput({
-      mode: effectiveExecutionOptions?.deliveryMode ?? 'adaptive',
+      mode: deliveryMode,
       runId,
       taskId,
       scopeId: sessionId ?? null,
@@ -324,6 +344,7 @@ export async function executeAgentSdkPreparedTurn(
       const buffer = preparedDelivery.emitOutput
       emitOutput = (chunk, type, projectionPatch) => {
         if (type === 'text') {
+          if (chunk.trim()) deliveryDeadline.noteProgress('text_delta')
           buffer.append(chunk)
           return
         }
@@ -345,6 +366,8 @@ export async function executeAgentSdkPreparedTurn(
       allowedToolNames,
       definitionByName,
       authorization,
+      sameRunActivatedSkillId: null,
+      useTextToolBridge,
       activeFrame,
       documentTargetGuard,
       emitOutput,
@@ -383,7 +406,7 @@ export async function executeAgentSdkPreparedTurn(
         const normalized = normalizeToolExecutionOutput(output)
         if (taskProofSink) {
           try {
-            const proofs = collectToolOutputProofs(toolName, normalized, new Date())
+            const proofs = collectToolOutputProofs(toolName, normalized, new Date(), { runId })
             taskProofSink.append(taskId, proofs)
           } catch (error) {
             logAgentMetric('proof_collect_failed', {
@@ -405,6 +428,7 @@ export async function executeAgentSdkPreparedTurn(
             ? structuredData.status.trim().toLowerCase()
             : ''
         const toolReportedFailure =
+          !isSuccessfulToolOutput(normalized) ||
           documentToolFailed ||
           structuredData.ok === false ||
           typeof structuredData.errorKind === 'string' ||
@@ -413,6 +437,7 @@ export async function executeAgentSdkPreparedTurn(
           sourceReadFailed
         if (!toolReportedFailure) {
           hasSuccessfulToolProgress = true
+          deliveryDeadline.noteProgress('tool_result')
         }
         if (LOCAL_DOCUMENT_SOURCE_READ_TOOL_NAMES.has(toolName) && !toolReportedFailure) {
           hasSuccessfulLocalDocumentSourceRead = true
@@ -476,6 +501,15 @@ export async function executeAgentSdkPreparedTurn(
       taskBudgetRuntime: liveTaskBudgetRuntime,
       budgetWarningMessages: []
     }
+    installSameRunSkillActivation({
+      runtimeContext: toolBridgeRuntimeContext,
+      latentDefinitions: latentSkillToolDefinitions,
+      resolveAuthorization: () => host.resolveSkillAuthorizationForTurn(
+        content as RunMessage, sessionId, effectiveExecutionOptions?.requestEnvelope, false, true,
+      ),
+      allowedToolNames, definitionByName, requiredCapabilityGroups,
+      checkpointRequiredCapabilityGroups, checkpointRequiredToolNames,
+    })
     const skillContextMessages: Array<{
       role: string
       content: string | Array<Record<string, unknown>>
@@ -620,6 +654,7 @@ export async function executeAgentSdkPreparedTurn(
       providerContent,
       useTextToolBridge,
       toolDefinitions,
+      latentSkillToolDefinitions,
       toolBridgeRuntimeContext,
       hasVeaPipelineTool,
       hasMapAmbiguityQuestionTools,
@@ -858,6 +893,7 @@ export async function executeAgentSdkPreparedTurn(
       buildResult
     })
   } finally {
+    deliveryDeadline.dispose()
     syncState()
   }
 }

@@ -487,7 +487,7 @@ test('e2e fence: reference skill primitive still updates visible task projection
   }
 })
 
-test('reference skill write auto-exports when the turn names an authorized target folder', async () => {
+test('reference skill write auto-exports when the turn says 存到 and names an authorized target folder', async () => {
   const root = mkdtempSync(join(tmpdir(), 'ready-ref-auto-export-'))
   const managedPath = join(root, 'skill')
   const outputsRoot = join(root, 'outputs')
@@ -547,9 +547,9 @@ test('reference skill write auto-exports when the turn names an authorized targe
           source: 'explicit',
           reason: 'test_setup',
         }),
-        currentUserText: '@[hfp-space-design]生成一版洞穴风方案，输出到@[hfp空间方案]，文件名 ready-hfp-regression-洞穴风-20260625-105830.md',
+        currentUserText: '@[hfp-space-design]生成一版洞穴风方案，存到@[hfp空间方案]，文件名 ready-hfp-regression-洞穴风-20260625-105830.md',
         requestEnvelope: {
-          primaryInstruction: '@[hfp-space-design]生成一版洞穴风方案，输出到@[hfp空间方案]，文件名 ready-hfp-regression-洞穴风-20260625-105830.md',
+          primaryInstruction: '@[hfp-space-design]生成一版洞穴风方案，存到@[hfp空间方案]，文件名 ready-hfp-regression-洞穴风-20260625-105830.md',
           resources: [
             {
               kind: 'folder_reference',

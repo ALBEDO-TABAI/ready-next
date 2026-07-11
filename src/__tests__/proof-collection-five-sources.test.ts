@@ -17,6 +17,7 @@ import {
   collectResponseDigestProof,
   appendProofRefs,
   isValidProofRef,
+  isSuccessfulToolOutput,
   createTaskProofSink,
   createTaskEventProofListener,
   type ProofRef,
@@ -74,6 +75,30 @@ test('tool output proofs include successful tool results and saved artifact path
     data: { ok: false },
   }), NOW)
   assert.deepEqual(failed, [])
+})
+
+test('research source receipts use structured output when the visible text omits the URL', () => {
+  const proofs = collectToolOutputProofs('web_fetch', createToolExecutionOutput('已抓取正文，正文未重复网址', {
+    shape: 'json',
+    data: {
+      url: 'https://example.com/source',
+      title: '真实来源',
+      content: '可核验正文',
+    },
+  }), NOW)
+
+  assert.deepEqual(proofs[0].sourceReceipt?.urls, ['https://example.com/source'])
+  assert.equal(proofs[0].sourceReceipt?.acquisitionTool, 'web_fetch')
+  assert.ok(proofs[0].sourceReceipt?.excerpt.includes('可核验正文'))
+})
+
+test('plain text tool failures never count as successful progress', () => {
+  assert.equal(isSuccessfulToolOutput(createToolExecutionOutput('Error: upstream failed')), false)
+  assert.equal(isSuccessfulToolOutput(createToolExecutionOutput('Document action failed: path missing')), false)
+  assert.equal(isSuccessfulToolOutput(createToolExecutionOutput('已读取正文', {
+    shape: 'json',
+    data: { ok: true, content: '正文' },
+  })), true)
 })
 
 test('tool output proofs mint transaction_confirmed only from explicit confirmation signal', () => {

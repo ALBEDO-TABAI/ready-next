@@ -29,7 +29,7 @@ function projection(): TaskProjectionRecord {
 async function runScenario(
   t: TestContext,
   verdicts: Array<'accept' | 'repair' | 'block'>,
-  options: { message?: string; deliveryMode?: 'standard' | 'adaptive' } = {},
+  options: { message?: string; deliveryMode?: 'standard' | 'adaptive'; failOwner?: boolean } = {},
 ) {
   skipIfSqliteUnavailable(t, 'dynamic-delivery-live transitive sqlite load')
   let row = projection()
@@ -41,6 +41,10 @@ async function runScenario(
     domainAdapters: [],
     runAgent: async (params) => {
       calls.push(params.agentName)
+      if (options.failOwner && params.agentName === 'butler::scope-live') {
+        params.onTextDelta('hidden draft')
+        throw new Error('provider unavailable')
+      }
       if (params.agentName === 'dynamic-delivery-verifier') {
         const verdict = verdicts[Math.min(verifierIndex++, verdicts.length - 1)]
         return {
@@ -87,7 +91,9 @@ async function runScenario(
     }),
   } as never)
   const outputs: Array<{ chunk: string; type: string }> = []
+  const runtimeErrors: unknown[] = []
   runtime.on('output', (event) => outputs.push({ chunk: event.chunk, type: event.type }))
+  runtime.on('error', (event) => runtimeErrors.push(event))
   runtime.newSession('butler::scope-live', 'system prompt')
   const message = options.message ?? '研究这份材料并给结论'
   const result = await runtime.sendMessage('butler::scope-live', message, 'run-live', {
@@ -102,7 +108,10 @@ async function runScenario(
     executionBinding: row.executionBinding,
     deliveryMode: options.deliveryMode ?? 'adaptive',
   })
-  return { calls, outputs, row, result }
+  const deliveryContext = (runtime as unknown as {
+    dynamicDelivery: { contexts: { get: (runId: string) => unknown } }
+  }).dynamicDelivery.contexts.get('run-live')
+  return { calls, outputs, runtimeErrors, row, result, deliveryContext }
 }
 
 test('adaptive live path keeps candidate hidden until fresh verifier accepts', async (t) => {
@@ -147,4 +156,13 @@ test('adaptive live repair releases only the accepted replacement', async (t) =>
   assert.equal(outputs.filter((entry) => entry.type === 'text').map((entry) => entry.chunk).join(''), 'repaired answer')
   assert.equal(row.deliveryState?.verifier.repaired, true)
   assert.equal(result.finalText, 'repaired answer')
+})
+
+test('owner provider failure discards the hidden candidate and closes the delivery context', async (t) => {
+  skipIfSqliteUnavailable(t, 'dynamic-delivery-live transitive sqlite load')
+  const { outputs, runtimeErrors, result, deliveryContext } = await runScenario(t, ['accept'], { failOwner: true })
+  assert.equal(result.success, false)
+  assert.equal(runtimeErrors.length, 1)
+  assert.equal(outputs.some((entry) => entry.type === 'text' && entry.chunk.includes('hidden draft')), false)
+  assert.equal(deliveryContext, null)
 })

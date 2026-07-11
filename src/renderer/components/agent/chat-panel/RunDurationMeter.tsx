@@ -58,7 +58,14 @@ function runDurationLabel(run: ScopeRunState): Pick<RunDurationMeterModel, 'labe
     return { label: '本轮失败', glyph: 'error', tone: 'signal' }
   }
   if (run.phase === 'checkpoint') {
-    return { label: '本轮等待中', glyph: 'needs_input', tone: 'signal' }
+    const hasWaitingTarget = Boolean(
+      run.taskContinuation
+      || (run.waitingFor && run.waitingFor !== 'none')
+      || (run.resumableActions && run.resumableActions.length > 0),
+    )
+    return hasWaitingTarget
+      ? { label: '本轮等待中', glyph: 'needs_input', tone: 'signal' }
+      : { label: '本轮未完成', glyph: 'error', tone: 'signal' }
   }
   return { label: '本轮用时', glyph: 'done', tone: 'neutral' }
 }

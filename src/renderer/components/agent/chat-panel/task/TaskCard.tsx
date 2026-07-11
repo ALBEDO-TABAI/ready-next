@@ -54,6 +54,13 @@ export const TASK_ACTION_BUTTON_STYLE: React.CSSProperties = {
 
 export function DynamicDeliveryTaskSummary({ run }: { run: TaskCardRun }) {
   if (!run.deliveryState || run.deliveryState.decision === 'single_path') return null
+  const verifierLabel = {
+    not_required: '',
+    pending: '等待独立复核',
+    accepted: '独立复核已通过',
+    repair: '正在按独立复核修补',
+    blocked: '独立复核未通过',
+  }[run.deliveryState.verifier.status]
   return (
     <div
       data-ready-dynamic-delivery-summary="true"
@@ -62,10 +69,10 @@ export function DynamicDeliveryTaskSummary({ run }: { run: TaskCardRun }) {
     >
       {run.deliveryState.packages.length > 0
         ? `协作者 ${run.deliveryState.packages.map((item) => item.binding.effectiveAgentId).join('、')}`
-        : '已启用独立复核'}
+        : verifierLabel}
+      {run.deliveryState.packages.length > 0 && verifierLabel ? ` · ${verifierLabel}` : ''}
       {run.deliveryState.packages.some((item) => item.status === 'degraded') ? ' · 有协作项已降级' : ''}
       {run.deliveryState.packages.some((item) => item.status === 'blocked') ? ' · 有协作项被阻塞' : ''}
-      {run.deliveryState.verifier.status === 'repair' ? ' · 正在修补' : ''}
     </div>
   )
 }
@@ -347,21 +354,6 @@ export function TaskCard({
         ) : null}
         <CapsuleChevron expanded={expanded} />
       </button>
-
-      {(run.ownerAgentId || run.executionBinding?.effectiveAgentId) ? (
-        <div
-          className="t-meta"
-          data-ready-task-agent-identity="true"
-          data-typography-role="meta"
-          style={{ padding: '0 10px 7px 31px', color: 'var(--text-light)' }}
-        >
-          {run.ownerAgentId ? `负责人 ${run.ownerAgentId}` : ''}
-          {run.executionBinding?.effectiveAgentId
-            && run.executionBinding.effectiveAgentId !== run.ownerAgentId
-            ? `${run.ownerAgentId ? ' · ' : ''}由 ${run.executionBinding.effectiveAgentId} 协作执行`
-            : ''}
-        </div>
-      ) : null}
 
       <DynamicDeliveryTaskSummary run={run} />
 

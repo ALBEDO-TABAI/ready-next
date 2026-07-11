@@ -79,7 +79,10 @@ import { ConversationScopeStore } from './conversation-scope-store'
 import type { ActivePlan } from '../system-reminders/active-plan-step-reminder'
 import { RemoteChannelService } from './remote-channel-service'
 import { reconcileTaskProjections } from '../task-projection/task-projection-reconciler'
-import { reconcileInterruptedDeliveryState } from './dynamic-delivery/delivery-reconciliation'
+import {
+  reconcileInterruptedDeliveryState,
+  shouldReconcileInterruptedDeliveryProjection,
+} from './dynamic-delivery/delivery-reconciliation'
 import { canResumeAsUserPoint, type ResumePointHandle } from '../contracts/resume-handle'
 import { deriveTaskProjectionCanResume } from '../task-projection/task-projection-resume'
 import { assertSkillTaskRunInvariantConsistency } from '../skills/skill-task-tracker'
@@ -827,6 +830,8 @@ export class AgentControlRuntime extends EventEmitter {
     this.projectionSync.scheduleTerminalProjectionSyncRetryDrain('startup')
     for (const projection of this.taskProjectionStore.listRecentTasksForPreroute(500) as TaskProjectionRecord[]) {
       if (!projection.deliveryState) continue
+      const runMetaStatus = this.getRunMetaRepository()?.get(projection.runId)?.status ?? null
+      if (!shouldReconcileInterruptedDeliveryProjection({ projectionStatus: projection.status, runMetaStatus })) continue
       const reconciled = reconcileInterruptedDeliveryState(projection.deliveryState)
       if (reconciled === projection.deliveryState) continue
       this.taskProjectionStore.update(projection.taskId, {
@@ -1764,7 +1769,7 @@ export class AgentControlRuntime extends EventEmitter {
     elapsedMs?: number
   }): Promise<{
     success: boolean
-    state?: 'cancel_requested' | 'stale' | 'not_found' | 'paused_user_input'
+    state?: 'active' | 'stale' | 'not_found' | 'paused_user_input'
     error?: string
     errorKind?: string
     activeRunId?: string | null
@@ -1790,7 +1795,8 @@ export class AgentControlRuntime extends EventEmitter {
       }
     }
 
-    if (this.orchestrator.isActiveRun(scope.agent, scope.id, requestId)
+    const activeRun = this.orchestrator.inspectActiveRunIfMatches(scope.agent, scope.id, requestId)
+    if (activeRun.state === 'active'
       && this.orchestrator.isActiveRunAwaitingUserInput(scope.agent, scope.id, requestId)) {
       this.orchestrator.refreshActiveRunProgress(scope.agent, scope.id, requestId)
       logAgentMetric('renderer_infrastructure_timeout_awaiting_user_input', {
@@ -1800,30 +1806,23 @@ export class AgentControlRuntime extends EventEmitter {
       })
       return { success: true, state: 'paused_user_input' }
     }
-
-    const result = this.orchestrator.interruptActiveRunIfMatches(
-      scope.agent,
-      scope.id,
-      requestId,
-      'process_exit',
-    )
     logAgentMetric('renderer_infrastructure_timeout_main_report', {
       scopeId,
       requestId,
       elapsedMs: Number.isFinite(Number(payload.elapsedMs)) ? Number(payload.elapsedMs) : null,
-      state: result.state,
-      activeRunId: result.activeRunId || result.runId || null,
+      state: activeRun.state,
+      activeRunId: ('activeRunId' in activeRun ? activeRun.activeRunId : activeRun.runId) || null,
     })
 
-    if (result.state === 'stale') {
+    if (activeRun.state === 'stale') {
       return {
         success: true,
-        state: result.state,
+        state: activeRun.state,
         errorKind: 'stale_request',
-        activeRunId: result.activeRunId || null,
+        activeRunId: activeRun.activeRunId,
       }
     }
-    return { success: true, state: result.state }
+    return { success: true, state: activeRun.state }
   }
 
   async resumeRun(payload: {

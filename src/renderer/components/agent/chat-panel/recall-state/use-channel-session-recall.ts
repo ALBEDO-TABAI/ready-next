@@ -21,6 +21,8 @@ function scopeToSessionRow(scope: ConversationScope): SessionRecallHit {
     sourceKind: scope.sourceKind,
     sourceId: scope.sourceId,
     threadKey: scope.threadKey,
+    agentId: scope.agent,
+    activeAgentId: scope.activeAgentId,
     matchedBy: ['recent'],
     score: 0,
     attachmentNames: [],

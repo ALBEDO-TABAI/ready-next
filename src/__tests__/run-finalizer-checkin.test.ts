@@ -1081,6 +1081,94 @@ test('adjudicator sets learningDecision.learned true only for accept + durable r
   assert.equal(noRefs.checkIn.learningDecision?.refCount, 0)
 })
 
+test('research source criteria require real acquisition proofs, never a written artifact or generic tool result', () => {
+  const criteria = resolveCriteria('research', 'skill', {
+    skillExecutionForm: 'direct',
+    skillHasRunStateHandle: false,
+  }).items
+  const artifactOnly = adjudicateTerminalOutcome({
+    terminalStatus: 'done',
+    terminalReason: 'done',
+    criteria,
+    proofs: [
+      collectArtifactProof('/tmp/report.md', NOW),
+      collectToolResultProof('skill_write_artifact', 'wrote report', NOW),
+    ],
+    now: NOW,
+  })
+  assert.notEqual(artifactOnly.verdict, 'accept')
+  assert.ok(artifactOnly.checkIn.blockers.includes('criteria_unsatisfied:c2'))
+
+  const discoveryOnly = adjudicateTerminalOutcome({
+    terminalStatus: 'done',
+    terminalReason: 'done',
+    criteria,
+    proofs: [
+      collectArtifactProof('/tmp/report.md', NOW),
+      collectToolResultProof('web_search', 'source list https://example.com/source', NOW),
+    ],
+    now: NOW,
+  })
+  assert.notEqual(discoveryOnly.verdict, 'accept')
+  assert.ok(discoveryOnly.checkIn.blockers.includes('criteria_unsatisfied:c2'))
+
+  for (const fakeContentTool of [
+    'browser_read_page_map',
+    'browser_visible_collect',
+    'browser_collect_notes',
+    'browser_research_topic',
+  ]) {
+    const handleOnly = adjudicateTerminalOutcome({
+      terminalStatus: 'done',
+      terminalReason: 'done',
+      criteria,
+      proofs: [
+        collectArtifactProof('/tmp/report.md', NOW),
+        collectToolResultProof('browser_search', 'source list https://example.com/source', NOW),
+        collectToolResultProof(fakeContentTool, 'task/page handle https://example.com/source', NOW),
+      ],
+      now: NOW,
+    })
+    assert.notEqual(handleOnly.verdict, 'accept', `${fakeContentTool} is not an acquired body`)
+    assert.ok(handleOnly.checkIn.blockers.includes('criteria_unsatisfied:c2'))
+  }
+
+  const sourced = adjudicateTerminalOutcome({
+    terminalStatus: 'done',
+    terminalReason: 'done',
+    criteria,
+    proofs: [
+      collectArtifactProof('/tmp/report.md', NOW),
+      collectToolResultProof('web_search', 'source list https://example.com/source', NOW),
+      collectToolResultProof('web_fetch', 'source body https://example.com/source', NOW),
+    ],
+    now: NOW,
+  })
+  assert.equal(sourced.verdict, 'accept')
+})
+
+test('non-done terminal outcomes can never produce an accepted or learnable Check-in', () => {
+  const result = adjudicateTerminalOutcome({
+    terminalStatus: 'error',
+    terminalReason: 'delivery_failed',
+    criteria: resolveCriteria('research', 'skill', {
+      skillExecutionForm: 'direct',
+      skillHasRunStateHandle: false,
+    }).items,
+    proofs: [
+      collectArtifactProof('/tmp/report.md', NOW),
+      collectToolResultProof('web_search', 'source list https://example.com/source', NOW),
+      collectToolResultProof('web_fetch', 'source body https://example.com/source', NOW),
+    ],
+    learningRefs: [{ kind: 'artifact', ref: '/tmp/report.md' }],
+    now: NOW,
+  })
+
+  assert.equal(result.verdict, 'reject')
+  assert.ok(result.checkIn.blockers.includes('terminal_not_done:error'))
+  assert.equal(result.checkIn.learningDecision?.learned, false)
+})
+
 test('finalizer writes learningRefs to the projection for an accepted durable run', () => {
   return (async () => {
     const store = fakeStore({

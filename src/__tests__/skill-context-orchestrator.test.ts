@@ -277,7 +277,7 @@ test('SkillContextOrchestrator prefers explicitly named skills over fuzzy descri
   assert.equal(getLastReferenceSkill(sessionId)?.id, 'video-expert-analyzer')
 })
 
-test('SkillContextOrchestrator can match concrete tasks through skill descriptions', () => {
+test('SkillContextOrchestrator leaves description-based selection to the model skill catalog', () => {
   const orchestrator = new SkillContextOrchestrator({
     extractPrimaryUserInstruction: (raw) => raw,
     listSkills: () => [
@@ -297,8 +297,47 @@ test('SkillContextOrchestrator can match concrete tasks through skill descriptio
     '分析这个视频 https://www.youtube.com/watch?v=4qkyxm4jppc，输出到 /Users/me/测试',
   )
 
-  assert.equal(matched.length, 1)
-  assert.equal(matched[0]?.id, 'media-scene-review')
+  assert.deepEqual(matched, [])
+})
+
+test('SkillContextOrchestrator does not mislabel generic brand research as an explicit GitHub or OKF skill request', () => {
+  const orchestrator = new SkillContextOrchestrator({
+    extractPrimaryUserInstruction: (raw) => raw,
+    listSkills: () => [
+      {
+        id: 'github-deep-research',
+        name: 'GitHub Deep Research',
+        description: 'GitHub 项目调研方法论：仓库 + issue + 贡献者 + 依赖图',
+        defaultAction: 'read_skill',
+        executionMode: 'advisory',
+        actions: [{ name: 'read_skill', visibility: 'internal', runtime: 'reference', params: [] }],
+      },
+      {
+        id: 'okf-bundle',
+        name: 'OKF Bundle',
+        description: '把指定范围的资料提炼成单个知识包并登记索引',
+        defaultAction: 'read_skill',
+        executionMode: 'advisory',
+        actions: [{ name: 'read_skill', visibility: 'internal', runtime: 'reference', params: [] }],
+      },
+      {
+        id: 'deep-research',
+        name: 'Deep Research',
+        description: '系统化多源研究方法论：维度拆解、多查询、全文抓取、引用追踪',
+        defaultAction: 'read_skill',
+        executionMode: 'advisory',
+        actions: [{ name: 'read_skill', visibility: 'internal', runtime: 'reference', params: [] }],
+      },
+    ] as any,
+    resolveSkillToolByAction: (_skillId, action) => ({ name: `skill_${action}`, action }) as any,
+  })
+  const request = '帮我调研一下宝矿力的广告，从一开始出名到现在，梳理知名人物、作品、风格与项目，分别分析并整理为多份文件和索引，存到@[宝矿力]'
+
+  assert.deepEqual(orchestrator.findExplicitlyRequestedSkills(request), [])
+  assert.deepEqual(
+    orchestrator.findExplicitlyRequestedSkills('用 github-deep-research 分析这个仓库').map((skill) => skill.id),
+    ['github-deep-research'],
+  )
 })
 
 test('SkillContextOrchestrator ignores generic helper terms in fuzzy skill description matches', () => {

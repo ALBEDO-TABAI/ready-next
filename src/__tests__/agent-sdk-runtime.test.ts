@@ -524,6 +524,48 @@ test('agent sdk runtime preserves base tools when selected skill tools are unava
   assert.ok(names.some((name) => name.startsWith('document_') || name.startsWith('file_')))
 })
 
+test('agent sdk runtime keeps research acquisition tools beside a selected reference skill', () => {
+  const runtime = createRuntime({})
+  const privateRuntime = runtime as unknown as {
+    toolExecutor: {
+      listDefaultToolDefinitionsForTurn: (params: Record<string, unknown>) => Array<{ name: string }>
+    }
+  }
+  const userText = [
+    '帮我调研宝矿力广告史，整理人物、案例与来源为多份文件和索引，存到@[宝矿力]',
+    '',
+    '### 当前文档上下文',
+    '- 标题: unrelated.md',
+    '- 路径: /tmp/unrelated.md',
+    '',
+    '### 文件夹引用',
+    '- 名称: 宝矿力',
+    '- 路径: /tmp/宝矿力',
+  ].join('\n')
+  const requestEnvelope = buildRequestEnvelope({ userText })
+  const definitions = privateRuntime.toolExecutor.listDefaultToolDefinitionsForTurn({
+    message: userText,
+    sessionId: 'scope-brand-research',
+    scopeId: 'scope-brand-research',
+    config: fakeConfig,
+    browserHostAvailable: true,
+    feishuConnected: false,
+    authorization: buildSelectedSkillToolAuthorization({
+      skillId: 'deep-research',
+      allowedTypedActions: [],
+      allowedPrimitives: ['skill_write_artifact', 'skill_export_artifact'],
+      source: 'explicit',
+      reason: 'test',
+    }),
+    requestEnvelope,
+  })
+  const names = definitions.map((definition) => definition.name)
+
+  for (const required of ['web_search', 'web_fetch', 'declare_completion_criteria', 'skill_write_artifact', 'skill_export_artifact']) {
+    assert.ok(names.includes(required), `expected ${required}, got ${names.join(',')}`)
+  }
+})
+
 test('agent sdk runtime keeps handoff available when a fuzzy skill match narrows the turn', () => {
   const runtime = createRuntime({})
   const privateRuntime = runtime as unknown as {
@@ -6525,7 +6567,7 @@ test('agent sdk runtime records tool and artifact proofs before final adjudicati
     taskId,
     scopeId: 'scope-proof-collection',
     runId: 'run-proof-collection',
-    taskType: 'research',
+    taskType: 'multi_step_task',
     module: 'document',
     status: 'running',
     interactionState: 'running',

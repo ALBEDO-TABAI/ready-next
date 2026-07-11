@@ -61,27 +61,46 @@ function narrowIntentClassification(value: unknown): IntentFacts {
   }
 }
 
-function envelopeFacts(value: unknown): {
+export function extractDynamicDeliveryEnvelopeFacts(value: unknown): {
   envelope: RequestEnvelope | null
   contextRefIds: string[] | null
   structuredTargetIds: string[] | null
+  groundedWorkerResourceCount: number | null
   selectedSkillId: string | null
 } {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return { envelope: null, contextRefIds: null, structuredTargetIds: null, selectedSkillId: null }
+    return { envelope: null, contextRefIds: null, structuredTargetIds: null, groundedWorkerResourceCount: null, selectedSkillId: null }
   }
   const envelope = value as RequestEnvelope
   if (!Array.isArray(envelope.resources) || !Array.isArray(envelope.referencedResources)) {
-    return { envelope: null, contextRefIds: null, structuredTargetIds: null, selectedSkillId: null }
+    return { envelope: null, contextRefIds: null, structuredTargetIds: null, groundedWorkerResourceCount: null, selectedSkillId: null }
   }
   const resourceIds = envelope.resources.map((resource) => resource.id).filter(Boolean)
   const referenced = envelope.referencedResources.map((resource) => resource.value).filter(Boolean)
+  const explicitMentionNames = new Set(
+    envelope.referencedResources
+      .filter((resource) => resource.kind === 'mention')
+      .map((resource) => resource.value.normalize('NFC').trim().toLowerCase())
+      .filter(Boolean),
+  )
   const selectedSkill = envelope.resources.find((resource) => resource.kind === 'skill_reference')
   return {
     envelope,
     contextRefIds: [...new Set([...resourceIds, ...referenced])],
-    structuredTargetIds: resourceIds,
-    selectedSkillId: selectedSkill?.id ?? null,
+    structuredTargetIds: envelope.resources
+      .filter((resource) =>
+        resource.kind !== 'skill_reference'
+        && explicitMentionNames.has(String(resource.name || '').normalize('NFC').trim().toLowerCase()),
+      )
+      .map((resource) => resource.id)
+      .filter(Boolean),
+    groundedWorkerResourceCount: envelope.resources.filter((resource) =>
+      resource.kind !== 'skill_reference'
+      && resource.canRead
+      && explicitMentionNames.has(String(resource.name || '').normalize('NFC').trim().toLowerCase())
+      && String(resource.text || resource.summary || '').trim().length >= 80,
+    ).length,
+    selectedSkillId: selectedSkill?.name ? String(selectedSkill.name) : null,
   }
 }
 
@@ -175,7 +194,7 @@ export class DynamicDeliveryCoordinator {
   async prepareOwnerInput(input: PrepareDynamicDeliveryInput): Promise<PreparedDynamicDelivery> {
     const projection = this.adapter.getProjection(input.taskId)
     const intent = narrowIntentClassification(input.intentClassification)
-    const envelope = envelopeFacts(input.requestEnvelope)
+    const envelope = extractDynamicDeliveryEnvelopeFacts(input.requestEnvelope)
     const canonical = buildCanonicalDeliveryTaskFacts({
       taskType: projection?.taskType ?? input.inferredTaskType,
       intentDomains: intent.domains,
@@ -190,6 +209,7 @@ export class DynamicDeliveryCoordinator {
       taskType: canonical.taskType,
       intentDomains: canonical.hasUnknownRequiredFact ? null : canonical.intentDomains,
       structuredTargetIds: canonical.hasUnknownRequiredFact ? null : canonical.structuredTargetIds,
+      groundedWorkerResourceCount: canonical.hasUnknownRequiredFact ? null : envelope.groundedWorkerResourceCount,
       contextRefIds: canonical.hasUnknownRequiredFact ? null : canonical.contextRefIds,
       selectedSkillId: envelope.selectedSkillId,
       risk: canonical.taskType === 'browser_transaction' ? 'exclusive_action' : 'ordinary',
@@ -239,7 +259,10 @@ export class DynamicDeliveryCoordinator {
           accumulatedUsage = addRunUsage(accumulatedUsage, result.usage)
           return result.finalText
         })
-      } catch {
+      } catch (error) {
+        if (input.signal.aborted) {
+          throw input.signal.reason ?? error
+        }
         // silent-catch: planner failure deterministically falls back to verifier-only delivery
         logAgentMetric('dynamic_delivery_fallback', {
           runId: input.runId,
@@ -392,7 +415,7 @@ export class DynamicDeliveryCoordinator {
       },
     })
 
-    const scheduler = new DynamicDeliveryPacketScheduler()
+    const scheduler = new DynamicDeliveryPacketScheduler({ parentSignal: params.input.signal })
     for (const entry of packageInputs) {
       scheduler.schedule(entry.workPackage.packageId, async (signal) => {
         const dispatched = await dispatchDynamicDeliveryPackage({
@@ -505,10 +528,36 @@ export class DynamicDeliveryCoordinator {
       usage: params.context.usage.snapshot() ?? params.context.state.usage,
     }
     this.persistNextState(params.context, nextState)
+    if (params.input.signal.aborted) {
+      throw params.input.signal.reason ?? new DOMException('aborted', 'AbortError')
+    }
   }
 
   recordOwnerUsage(runId: string, usage: ReadyAgentSdkRunResult['usage']): RunUsage | null {
     return this.contexts.addUsage(runId, usage)
+  }
+
+  private async verifySealedCandidate(input: Parameters<typeof verifyDeliveryCandidate>[0]): Promise<{
+    verdict: DeliveryVerificationVerdict
+    usage: ReadyAgentSdkRunResult['usage']
+  }> {
+    const issues = input.candidate.resources.mechanicalIssues ?? []
+    if (issues.length > 0) {
+      return {
+        verdict: {
+          version: 1,
+          verdict: 'block',
+          gaps: issues.map((issue) => ({
+            kind: 'artifact' as const,
+            description: `[${issue.code}] ${issue.description}`,
+            ...(issue.targetRefId ? { targetRefId: issue.targetRefId } : {}),
+          })),
+          summary: '产物机械验收未通过，未进入语义复核。',
+        },
+        usage: undefined,
+      }
+    }
+    return verifyDeliveryCandidate(input)
   }
 
   async buildSanitizedCheckpoint(runId: string, receipts: readonly AgentInputItem[] = []): Promise<AgentInputItem[] | null> {
@@ -554,7 +603,7 @@ export class DynamicDeliveryCoordinator {
       openQuestions: context.workerReports.flatMap((report) => report.openQuestions),
       materializeAndReadBack,
     })
-    let verification = await verifyDeliveryCandidate({
+    let verification = await this.verifySealedCandidate({
       candidate: sealed,
       runId: input.runId,
       taskId: context.taskId,
@@ -565,8 +614,8 @@ export class DynamicDeliveryCoordinator {
       signal: input.signal,
       runAgent: this.runAgent,
     })
-    context.usage.add(verification.usage)
-    let supplementalUsage = addRunUsage(null, verification.usage)
+    if (verification.usage) context.usage.add(verification.usage)
+    let supplementalUsage = verification.usage ? addRunUsage(null, verification.usage) : null
     let repaired = false
     if (verification.verdict.verdict === 'repair') {
       const repairKind = classifyDeliveryRepair(
@@ -607,7 +656,7 @@ export class DynamicDeliveryCoordinator {
           openQuestions: context.workerReports.flatMap((report) => report.openQuestions),
           materializeAndReadBack,
         })
-        verification = await verifyDeliveryCandidate({
+        verification = await this.verifySealedCandidate({
           candidate: sealed,
           runId: `${input.runId}:repair`,
           taskId: context.taskId,
@@ -618,8 +667,10 @@ export class DynamicDeliveryCoordinator {
           signal: input.signal,
           runAgent: this.runAgent,
         })
-        context.usage.add(verification.usage)
-        supplementalUsage = addRunUsage(supplementalUsage, verification.usage)
+        if (verification.usage) {
+          context.usage.add(verification.usage)
+          supplementalUsage = addRunUsage(supplementalUsage, verification.usage)
+        }
         repaired = true
       } else if (repairKind === 'artifact_targeted' && input.artifactRepairTools?.length) {
         const targetRefIds = [...new Set(verification.verdict.gaps
@@ -658,7 +709,7 @@ export class DynamicDeliveryCoordinator {
           openQuestions: context.workerReports.flatMap((report) => report.openQuestions),
           materializeAndReadBack,
         })
-        verification = await verifyDeliveryCandidate({
+        verification = await this.verifySealedCandidate({
           candidate: sealed,
           runId: `${input.runId}:artifact-repair`,
           taskId: context.taskId,
@@ -669,8 +720,10 @@ export class DynamicDeliveryCoordinator {
           signal: input.signal,
           runAgent: this.runAgent,
         })
-        context.usage.add(verification.usage)
-        supplementalUsage = addRunUsage(supplementalUsage, verification.usage)
+        if (verification.usage) {
+          context.usage.add(verification.usage)
+          supplementalUsage = addRunUsage(supplementalUsage, verification.usage)
+        }
         repaired = true
       }
     }

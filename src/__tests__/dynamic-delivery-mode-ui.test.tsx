@@ -18,7 +18,7 @@ const common = {
   onThoroughOverrideChange: () => undefined,
 }
 
-test('settings exposes standard/adaptive and composer exposes a one-shot thorough control', () => {
+test('settings exposes standard/adaptive and composer exposes a compact one-shot Boost control', () => {
   const settings = renderToStaticMarkup(createElement(BehaviorSection))
   assert.match(settings, /data-ready-delivery-mode="true"/)
   assert.match(settings, /标准/)
@@ -27,4 +27,7 @@ test('settings exposes standard/adaptive and composer exposes a one-shot thoroug
   const composer = renderToStaticMarkup(createElement(ChatInput, { ...common, thoroughOverride: true }))
   assert.match(composer, /data-ready-delivery-thorough="true"/)
   assert.match(composer, /aria-pressed="true"/)
+  assert.match(composer, />Boost<\/button>/)
+  assert.match(composer, /height:26px/)
+  assert.doesNotMatch(composer, />彻底<\/button>/)
 })

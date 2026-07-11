@@ -1,7 +1,7 @@
 import type { TaskProjectionRecord } from '../contracts/run-contracts'
 import type { RunMetaRecord } from '../task-projection/run-meta-repository'
 
-const RECOVERABLE_REASONS = new Set(['proof_gap', 'adjudication_degraded', 'delivery_failed'])
+const RECOVERABLE_REASONS = new Set(['proof_gap', 'adjudication_degraded'])
 
 function looksLikeFallbackText(text: string): boolean {
   return /这轮还没完整完成|可以继续发送|任务已完成，但本次没有产生可发送的文本结果/.test(text)

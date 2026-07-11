@@ -55,3 +55,16 @@ test('does not steal failed skill retries or fallback-only text', () => {
   assert.equal(skill, null)
   assert.equal(fallback, null)
 })
+
+test('does not turn delivery failure drafts into successful recovered answers', () => {
+  const recovered = recoverUndeliveredAnswerForRetry({
+    projection: projection(),
+    runMeta: {
+      status: 'error',
+      terminalReason: 'delivery_failed',
+      lastMessageText: '我会继续整理总报告、时间线、人物、案例与来源书目。',
+    },
+  })
+
+  assert.equal(recovered, null)
+})

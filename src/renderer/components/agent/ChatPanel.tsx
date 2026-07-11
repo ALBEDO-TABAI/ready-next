@@ -87,7 +87,7 @@ import { formatTime } from './chat-panel/format-time'
 // All deps that previously closed over ChatPanel-local state are now
 // injected via params; behavior preserved byte-for-byte.
 import { useTaskInteractionHandlers } from './chat-panel/task-interaction/use-task-interaction-handlers'
-import { consumeThoroughDeliveryOverride } from '../../modules/agent/dynamicDeliveryMode'
+import { createThoroughDeliveryOverrideLatch } from '../../modules/agent/dynamicDeliveryMode'
 // Stage V V1.9a — channel + session-recall state, derivations, effects and
 // callbacks (selectedChannelKey / channelOptions / currentChannel /
 // filteredScopes / currentAgentData / sessionRecall query+results+capsules
@@ -759,14 +759,23 @@ export default function ChatPanel({
 
   const sendingRef = useRef(false)
   const [thoroughOverride, setThoroughOverride] = useState(false)
+  const thoroughOverrideLatchRef = useRef<ReturnType<typeof createThoroughDeliveryOverrideLatch> | null>(null)
+  if (!thoroughOverrideLatchRef.current) {
+    thoroughOverrideLatchRef.current = createThoroughDeliveryOverrideLatch()
+  }
+  const thoroughOverrideLatch = thoroughOverrideLatchRef.current
+  const handleThoroughOverrideChange = useCallback((enabled: boolean) => {
+    thoroughOverrideLatch.setEnabled(enabled)
+    setThoroughOverride(enabled)
+  }, [thoroughOverrideLatch])
   const handleSend = useCallback(async () => {
     if (sendingRef.current) return
     const content = inputValue.trim()
     if (!content && attachments.length === 0) return
     sendingRef.current = true
-    const consumedOverride = consumeThoroughDeliveryOverride(thoroughOverride)
+    const consumedOverride = thoroughOverrideLatch.consume()
     const deliveryMode = consumedOverride.deliveryMode
-    setThoroughOverride(consumedOverride.nextEnabled)
+    handleThoroughOverrideChange(consumedOverride.nextEnabled)
     setInputValue('', { preserveContinuationIntent: true })
     chatInputRef.current?.resetHeight()
     try {
@@ -777,7 +786,7 @@ export default function ChatPanel({
     } finally {
       sendingRef.current = false
     }
-  }, [attachments.length, inputValue, setInputValue, sendMessage, thoroughOverride])
+  }, [attachments.length, handleThoroughOverrideChange, inputValue, setInputValue, sendMessage, thoroughOverrideLatch])
 
   const handleAgentSelect = useCallback(
     (name: string) => {
@@ -938,15 +947,6 @@ export default function ChatPanel({
   // Blank until the current scope carries a real (non-placeholder) title —
   // i.e. until the user has actually started a conversation.
   const sessionTitle = resolveChatSessionTitle(currentScope?.title)
-  const agentDisplayName = (agentId: string | null | undefined): string => {
-    if (!agentId || agentId === 'butler') return 'Ready'
-    return agents.find((agent) => agent.name === agentId)?.displayName || deletedAgentDisplayName(agentId)
-  }
-  const agentResponsibilityLabel = currentScope
-    ? currentScope.activeAgentId === currentScope.agent
-      ? `${agentDisplayName(currentScope.agent)} 会话`
-      : `${agentDisplayName(currentScope.agent)} 会话 · 当前由 ${agentDisplayName(currentScope.activeAgentId)} 负责`
-    : undefined
   const modeSwitcher = workbenchMode && onWorkbenchModeChange
     ? (
         <div className="ready-chat-mode-tabs-dock" data-chat-mode-tabs-dock="true">
@@ -993,7 +993,11 @@ export default function ChatPanel({
         void runSessionRecallSearch(sessionRecallQuery)
       }}
       sessionTitle={sessionTitle}
-      agentResponsibilityLabel={agentResponsibilityLabel}
+      formatAgentName={(agentId) => (
+        agentId === 'butler'
+          ? 'Ready'
+          : agents.find((agent) => agent.name === agentId)?.displayName || deletedAgentDisplayName(agentId)
+      )}
       formatTime={formatTime}
     />
   )
@@ -1066,7 +1070,7 @@ export default function ChatPanel({
         void handleSend()
       }}
       thoroughOverride={thoroughOverride}
-      onThoroughOverrideChange={setThoroughOverride}
+      onThoroughOverrideChange={handleThoroughOverrideChange}
       onStop={stopStreaming}
       onUndo={undoLastMessage}
       onPickFiles={pickFiles}

@@ -51,7 +51,7 @@ interface ChatHeaderProps {
   onTogglePanel?: () => void
   onHistoryOpen?: () => void
   sessionTitle?: string
-  agentResponsibilityLabel?: string
+  formatAgentName?: (agentId: string) => string
   formatTime: (time: string) => string
 }
 
@@ -83,7 +83,7 @@ export default function ChatHeader({
   onTogglePanel,
   onHistoryOpen,
   sessionTitle,
-  agentResponsibilityLabel,
+  formatAgentName,
   formatTime,
 }: ChatHeaderProps) {
   const [showHistory, setShowHistory] = useState(false)
@@ -258,6 +258,9 @@ export default function ChatHeader({
       ''
     const dotStatus: SessionDotStatus = sessionStatusByConversationId?.[conv.conversationId] ?? recallStatusToDot(conv.sessionStatus)
     const dotColor = SESSION_DOT_COLOR[dotStatus]
+    const responsibleAgent = conv.activeAgentId && conv.activeAgentId !== conv.agentId
+      ? formatAgentName?.(conv.activeAgentId) ?? conv.activeAgentId
+      : null
 
     return (
       <div
@@ -332,9 +335,15 @@ export default function ChatHeader({
                   marginTop: 0,
                   flexShrink: 0,
                   whiteSpace: 'nowrap',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
                 }}
               >
-                {formatTime(conv.updatedAt)}
+                {responsibleAgent ? (
+                  <span data-chat-session-responsible-agent="true">{responsibleAgent}</span>
+                ) : null}
+                <span>{formatTime(conv.updatedAt)}</span>
               </div>
             </div>
             {conversationSummary && (
@@ -496,14 +505,6 @@ export default function ChatHeader({
               >
                 {sessionTitle}
               </span>
-              {agentResponsibilityLabel ? (
-                <span
-                  data-chat-agent-responsibility="true"
-                  style={{ fontSize: 11, color: 'var(--text-muted)', flexShrink: 0, whiteSpace: 'nowrap' }}
-                >
-                  {agentResponsibilityLabel}
-                </span>
-              ) : null}
             </button>
           ) : null}
         </div>

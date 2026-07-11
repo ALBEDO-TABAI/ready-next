@@ -11,6 +11,7 @@ export interface DeliveryPreflightInput {
   taskType: TaskType | null
   intentDomains: readonly string[] | null
   structuredTargetIds: readonly string[] | null
+  groundedWorkerResourceCount: number | null
   contextRefIds: readonly string[] | null
   selectedSkillId: string | null
   risk: DeliveryPreflightFacts['risk'] | null
@@ -30,6 +31,7 @@ export function buildDeliveryPreflightFacts(input: DeliveryPreflightInput): Deli
     input.taskType
     && input.intentDomains
     && input.structuredTargetIds
+    && input.groundedWorkerResourceCount !== null
     && input.contextRefIds
     && input.risk
     && input.profiles
@@ -41,6 +43,7 @@ export function buildDeliveryPreflightFacts(input: DeliveryPreflightInput): Deli
     taskType: input.taskType ?? 'short_task',
     intentDomains: uniqueNonEmpty(input.intentDomains),
     structuredTargetCount: uniqueNonEmpty(input.structuredTargetIds).length,
+    groundedWorkerResourceCount: Math.max(0, Math.floor(input.groundedWorkerResourceCount ?? 0)),
     contextRefIds: uniqueNonEmpty(input.contextRefIds),
     selectedSkillId: input.selectedSkillId?.trim() || null,
     risk: input.risk ?? 'ordinary',

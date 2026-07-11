@@ -6,10 +6,10 @@
  *      error (never bubbles) if absent; `input_validation` if blank.
  *   2. Read the skill's SKILL.md methodology (capped at 12K via the shared reader) so
  *      the model gets the rails THIS turn.
- *   3. Arm the reference-skill hint (`rememberReferenceSkill`) so the NEXT turn's
- *      `resolveSkillAuthorizationForTurn` resolves `selected` for this skill and its
- *      tools unlock — reusing the existing hint→selected authorization path, NOT a new
- *      source. Security posture unchanged: activation is an explicit event.
+ *   3. Arm the reference-skill hint (`rememberReferenceSkill`). The SDK host consumes
+ *      that exact hint immediately after this tool returns, refreshes the current run's
+ *      immutable authorization, and exposes only that skill's tools on the next model
+ *      iteration. The hint also preserves the existing next-turn continuation path.
  *
  * Electron-free + injectable so it runs under `tsx --test`: the skill list, doc reader,
  * and hint memory are passed via deps (the executor wires the real singletons).
@@ -65,10 +65,11 @@ export async function executeUseSkill(
 
   const doc = deps.readSkillDoc(skill.managedPath)
 
-  // Arm the reference-skill hint → the next hint-relevant turn resolves `selected` for this skill.
+  // Arm the reference-skill hint. The SDK tool executor consumes it immediately for
+  // same-run activation; it remains available to the existing continuation resolver.
   deps.rememberReferenceSkill(deps.sessionId, { id: skill.id, name: skill.name })
 
-  const note = '技能方法论已注入；该技能的 skill_* 工具将于下一轮可用。本轮先按方法论给出计划，下一轮再调用技能工具。'
+  const note = '技能方法论已注入。宿主会在本次运行的下一次模型迭代开放该技能获准的工具；请立即继续当前任务，不要只给计划，也不要等待用户再次发言。'
   const header = doc
     ? `已激活技能「${skill.name}」（${skill.id}）。方法论如下${doc.truncated ? '（已截断到 12000 字，更多细节见技能的 references/）' : ''}：`
     : `已激活技能「${skill.name}」（${skill.id}）。该技能未内联方法论文档；请按技能工具的返回逐步执行。`
@@ -78,7 +79,7 @@ export async function executeUseSkill(
     shape: 'json',
     data: {
       skill_id: skill.id,
-      activation: 'armed_next_turn',
+      activation: 'pending_same_run_refresh',
       docTruncated: doc?.truncated ?? false,
       note,
     },

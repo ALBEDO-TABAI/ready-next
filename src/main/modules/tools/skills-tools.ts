@@ -326,7 +326,7 @@ function envelopeInstructionText(envelope: unknown): string {
 }
 
 function hasArtifactExportIntent(text: string): boolean {
-  return /输出到|保存到|导出到|写到|写入到|落到|文件名|save\s+to|export\s+to|target\s+folder/i.test(text)
+  return /输出到|保存到|存到|导出到|写到|写入到|落到|文件名|save\s+to|export\s+to|target\s+folder/i.test(text)
 }
 
 function explicitMarkdownFilenameFromText(text: string): string | null {
@@ -365,7 +365,7 @@ function mentionedFolderNamesFromText(text: string): string[] {
 function targetFolderNamesFromText(text: string): string[] {
   const names = new Set<string>()
   const targetPatterns = [
-    /(?:输出到|保存到|导出到|写到|写入到|落到)\s*@\[([^\]]+)\]/g,
+    /(?:输出到|保存到|存到|导出到|写到|写入到|落到)\s*@\[([^\]]+)\]/g,
     /(?:target\s+folder|save\s+to|export\s+to)\s*@\[([^\]]+)\]/gi,
   ]
   for (const pattern of targetPatterns) {

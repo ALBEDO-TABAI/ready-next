@@ -722,6 +722,12 @@
       "reason": "baseline: tests tool-result envelope/type helpers as pure functions; transitive imports reach sqlite-capable modules but no test path opens better-sqlite3 (verified passing host-Node, 0 skip).",
       "since": "2026-06-24",
       "owner": "stability-baseline-restore"
+    },
+    {
+      "path": "src/__tests__/document-target-guard-selfheal.test.ts",
+      "reason": "W10 目标文档守卫自愈合同：以 {} host 构造 AgentSdkToolExecutor 并在 executeGuardDocumentTool 接缝打桩，自愈解析走静态注册表 provider；纯函数指令文案与 live 指引断言。无任何路径打开 better-sqlite3 或读真实数据库，仅 runtime 传递导入触发 C4 扫描器；host-Node 覆盖必须保持激活以钉住守卫死锁回归。",
+      "since": "2026-07-11",
+      "owner": "document-widget-ready-w10"
     }
   ]
 }

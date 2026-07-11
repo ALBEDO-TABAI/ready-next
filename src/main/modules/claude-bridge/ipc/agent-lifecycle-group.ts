@@ -290,7 +290,7 @@ export const agentLifecycleGroup: IpcChannelGroup<AgentLifecycleGroupDeps> = {
     // handler is a thin wrapper: payload forward + log + result shape.
     ipcMain.handle('agent:sendScoped', async (_, payload: SendScopedPayload): Promise<IPCResponse> => {
       try {
-        deps.log(`[ipc] agent:sendScoped start scopeId=${payload.scopeId} requestId=${payload.requestId || 'none'}`)
+        deps.log(`[ipc] agent:sendScoped start scopeId=${payload.scopeId} requestId=${payload.requestId || 'none'} deliveryMode=${payload.deliveryMode || 'default'}`)
         const result = await deps.sendScoped(payload)
         deps.log(`[ipc] agent:sendScoped done scopeId=${payload.scopeId} requestId=${payload.requestId || 'none'} success=${result.success} error=${result.error || 'none'}`)
         return {

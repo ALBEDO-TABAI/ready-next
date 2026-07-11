@@ -269,11 +269,11 @@ export function syncActiveScopeRunAliases(
 /**
  * Stage X2.6 — infrastructure timeout safety net.
  *
- * Default bootstrap window: 60s. If the send never produces any runtime
- * liveness, the driver fires `infrastructure_timeout`:
- * unlocks the originating session's composer, clears its in-flight
- * request handle, and toasts "Ready lost track of this request;
- * recovered automatically".
+ * Default bootstrap window: 60s. If the renderer has not observed runtime
+ * liveness by then, it asks main for the request's authoritative state.
+ * A matching active run is never cancelled here: the probe is re-armed on a
+ * longer interval and main's independent no-progress guard remains the only
+ * authority allowed to stop a live request.
  *
  * Independent of `ProviderTerminalError` because no error was ever
  * delivered (main process crashed, IPC dropped, etc.). See plan §7.2
@@ -281,8 +281,8 @@ export function syncActiveScopeRunAliases(
  */
 const INFRASTRUCTURE_TIMEOUT_MS = 60_000
 const ACTIVE_RUN_INFRASTRUCTURE_TIMEOUT_MS = 5 * 60_000
-// B step 1 — the report→interrupt→finalize round-trip on main can take well over
-// 1s, so a 1s ack races it: evidence showed only 3/10 reports reached main, and
+// B step 1 — the renderer→main liveness round-trip can take well over 1s, so a
+// 1s ack races it: evidence showed only 3/10 reports reached main, and
 // the 7 "lost" ones triggered the renderer's local false-recovery (contract
 // breach). A 5s ack lets a slow-but-alive main reliably answer so the renderer
 // only declares lost-track when main is genuinely unreachable.
@@ -424,7 +424,7 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
     scopeId: string,
     requestId: string,
     elapsedMs: number,
-  ): Promise<'cancel_requested' | 'stale' | 'not_found' | 'paused_user_input' | null> {
+  ): Promise<'active' | 'stale' | 'not_found' | 'paused_user_input' | null> {
     const report = typeof window !== 'undefined'
       ? window.electronAPI?.agent?.reportInfrastructureTimeout
       : undefined
@@ -442,7 +442,7 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
       if (record.success !== true) return null
       const state = record.data?.state
       if (
-        state === 'cancel_requested'
+        state === 'active'
         || state === 'stale'
         || state === 'not_found'
         || state === 'paused_user_input'
@@ -486,7 +486,7 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
     // We still own the resolution — take the entry out of the map now.
     infrastructureWatchdogs.delete(key)
 
-    if (mainState === 'paused_user_input') {
+    if (mainState === 'active' || mainState === 'paused_user_input') {
       const timer = setTimeout(() => { void fireInfrastructureTimeout(scopeId, requestId) }, ACTIVE_RUN_INFRASTRUCTURE_TIMEOUT_MS)
       const unref = (timer as { unref?: unknown }).unref
       if (typeof unref === 'function') unref.call(timer)
@@ -496,11 +496,16 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
         timeoutMs: ACTIVE_RUN_INFRASTRUCTURE_TIMEOUT_MS,
         reportRetries: 0,
       })
-      emitRendererAgentMetric('renderer_infrastructure_timeout_paused_user_input', {
-        scopeId,
-        requestId,
-        elapsedMs: watchdog.timeoutMs,
-      })
+      emitRendererAgentMetric(
+        mainState === 'active'
+          ? 'renderer_infrastructure_timeout_active_run'
+          : 'renderer_infrastructure_timeout_paused_user_input',
+        {
+          scopeId,
+          requestId,
+          elapsedMs: watchdog.timeoutMs,
+        },
+      )
       return
     }
 
@@ -521,8 +526,8 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
     }
 
     // Resolve. `null` here = retries exhausted, main genuinely unreachable.
-    // `not_found`/`cancel_requested`/`stale` = main answered (run is gone or it
-    // is handling the stop) → quiet unlock, no alarming message. NEVER claim the
+    // `not_found`/`stale` = main answered (run is gone or replaced) → quiet
+    // unlock, no alarming message. NEVER claim the
     // run was "已自动恢复" — that false claim invited duplicate resends while a
     // live main run continued.
     const mainUnreachable = mainState === null

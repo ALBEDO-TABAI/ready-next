@@ -19,6 +19,7 @@ export const RENDERER_AGENT_METRICS = [
 	  // B step 2 — a main-unreachable timeout report is retried before the renderer
 	  // gives up; this fires once per retry attempt.
 	  'renderer_infrastructure_timeout_report_retry',
+	  'renderer_infrastructure_timeout_active_run',
 	  'renderer_infrastructure_timeout_paused_user_input',
 	] as const
 

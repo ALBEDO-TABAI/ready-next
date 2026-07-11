@@ -968,8 +968,9 @@ async function executeToolCallInner(
 
         case 'skill_activation':
           // P2-2 — use_skill: model-side L1 catalog activation. Validates the id, returns
-          // the capped SKILL.md methodology, and arms the reference-skill hint so the NEXT
-          // turn resolves `selected` for this skill (reusing the hint→selected auth path).
+          // the capped SKILL.md methodology, and arms the reference-skill hint. The SDK
+          // executor consumes the same hint immediately to refresh this run's next model
+          // iteration; the hint also preserves ordinary continuation on later turns.
           return executeUseSkill(args as Parameters<typeof executeUseSkill>[0], {
             sessionId: context.sessionId || context.scopeId || context.scope?.id,
             listSkills: () => getSkillsRuntimeManager().listSkills(),

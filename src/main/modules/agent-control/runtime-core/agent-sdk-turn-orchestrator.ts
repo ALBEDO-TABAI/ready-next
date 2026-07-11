@@ -882,6 +882,7 @@ export class AgentSdkTurnOrchestrator {
         buildResult: (params) => this.buildResult(params)
       })
     } finally {
+      this.host.dynamicDelivery.close(runId)
       await finalizeAgentSdkTurnLifecycle({
         host: this.host,
         name,

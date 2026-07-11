@@ -30,6 +30,7 @@ import { finalizeRunOutcome, writeRunCloseMetric } from './run-finalizer'
 import type { TurnTerminalReason } from './turn-frame'
 import type { CollaborationDecision } from '../../../../shared/dynamic-delivery'
 import { mergeRunUsage } from './run-usage-accumulator'
+import { materializeDeliveryArtifacts } from './dynamic-delivery/delivery-artifact-readback'
 
 export interface AgentSdkTurnCompletionState {
   finalText: string
@@ -344,23 +345,14 @@ export async function finalizeAgentSdkPreparedTurnResult(
           const definition = definitionByName.get(toolName)
           return definition ? [host.toolExecutor.buildSdkTool(definition, toolBridgeRuntimeContext)] : []
         }),
-        materializeAndReadBack: async () => ({
-          version: 1,
-          items: [
-            ...(projectionAfterOwner.proofRefs ?? []),
-            ...(projectionAfterOwner.recentArtifacts ?? []),
-          ].map((value, index) => {
-            const serialized = JSON.stringify(value)
-            return {
-              refId: `delivery-proof-${index + 1}`,
-              digest: value && typeof value === 'object' && typeof (value as { digest?: unknown }).digest === 'string'
-                ? String((value as { digest: string }).digest)
-                : `projection-proof-${index + 1}`,
-              provenance: 'task_projection_readback',
-              excerpt: serialized.slice(0, 1600) || `proof ${index + 1}`,
-              kind: 'artifact' as const,
-            }
-          }),
+        materializeAndReadBack: async () => materializeDeliveryArtifacts({
+          proofRefs: projectionAfterOwner.proofRefs,
+          recentArtifacts: projectionAfterOwner.recentArtifacts,
+          expectedOutputs: projectionAfterOwner.expectedOutputs,
+          userRequestVerbatim: String(toolBridgeRuntimeContext.currentUserText || ''),
+          requestEnvelope: toolBridgeRuntimeContext.requestEnvelope,
+          currentRunId: runId,
+          runStartedAtMs: runStartedAt,
         }),
       })
       runMetaUsage = mergeRunUsage(runMetaUsage as never, verification.verificationUsage) as ReadyAgentSdkRunResult['usage']
@@ -442,7 +434,6 @@ export async function finalizeAgentSdkPreparedTurnResult(
       usage: runMetaUsage
     })
   } finally {
-    host.dynamicDelivery.close(runId)
     Object.assign(state, {
       finalText,
       hasSuccessfulDocumentTargetMutation,

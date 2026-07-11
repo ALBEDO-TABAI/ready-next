@@ -749,16 +749,21 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
                   type="button"
                   data-ready-delivery-thorough="true"
                   aria-pressed={thoroughOverride}
-                  title="仅本次发送使用彻底协作；发送后自动关闭"
+                  title="Boost：仅下一次发送启用强化协作与独立复核，发送后自动关闭"
                   onClick={() => onThoroughOverrideChange(!thoroughOverride)}
-                  className="rounded-full border px-2.5 py-1 text-[11px] transition-[background-color,border-color,color]"
+                  className="rounded-full border transition-[background-color,border-color,color]"
                   style={{
+                    height: 26,
+                    padding: '0 8px',
+                    fontSize: 10.5,
+                    lineHeight: 1,
+                    fontWeight: 550,
                     borderColor: thoroughOverride ? 'var(--color-blue)' : 'var(--surface-border)',
                     background: thoroughOverride ? 'var(--color-blue-light)' : 'transparent',
                     color: thoroughOverride ? 'var(--color-blue)' : 'var(--text-light)',
                   }}
                 >
-                  彻底
+                  Boost
                 </button>
               )}
               <ContextUsageMeter usage={contextUsage} dimmed={composerLocked} />

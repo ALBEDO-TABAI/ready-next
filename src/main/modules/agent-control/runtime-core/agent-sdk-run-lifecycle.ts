@@ -47,7 +47,9 @@ export function createInitiatorAbort(
   message: string
 ): Error {
   runHandle.abortInitiator = initiator
-  return new Error(message)
+  const error = new Error(message)
+  error.name = 'AbortError'
+  return error
 }
 
 /**

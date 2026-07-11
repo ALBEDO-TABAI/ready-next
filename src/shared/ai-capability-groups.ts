@@ -251,7 +251,7 @@ export const CAPABILITY_GROUPS: CapabilityGroupDefinition[] = [
     // never leaks into selected turns (no recursive activation) or legacy callers.
     id: 'skill_activation',
     label: '激活技能',
-    description: '按「可用技能」目录激活一个技能（use_skill）：返回其 SKILL.md 方法论并在下一轮解锁该技能工具。仅 local_chat；仅在无显式技能引用的轮次曝光。',
+    description: '按「可用技能」目录激活一个技能（use_skill）：返回其 SKILL.md 方法论，并在本次运行的下一次模型迭代解锁该技能工具。仅 local_chat；仅在无显式技能引用的轮次曝光。',
     exposure: 'model_visible',
     availability: 'active',
     defaultMode: 'on',

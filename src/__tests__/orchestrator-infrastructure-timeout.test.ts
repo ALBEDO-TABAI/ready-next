@@ -3,6 +3,23 @@ import test from 'node:test'
 
 import { ReadyAgentOrchestrator } from '../main/modules/agent-control/runtime-core/orchestrator'
 
+test('renderer liveness report observes a matching active run without cancelling it', () => {
+  const orchestrator = new ReadyAgentOrchestrator()
+  const stops: string[] = []
+  ;(orchestrator as any).sdkEngine.stopGeneration = () => { stops.push('stopped') }
+  ;(orchestrator as any).activeRunIds.set('butler::scope-A', 'req-A')
+
+  assert.deepEqual(
+    orchestrator.inspectActiveRunIfMatches('butler', 'scope-A', 'req-A'),
+    { state: 'active', runId: 'req-A' },
+  )
+  assert.deepEqual(
+    orchestrator.inspectActiveRunIfMatches('butler', 'scope-A', 'req-old'),
+    { state: 'stale', runId: null, activeRunId: 'req-A' },
+  )
+  assert.deepEqual(stops, [], 'a liveness probe must never stop the provider run')
+})
+
 test('renderer infrastructure timeout only stops the active matching request id', () => {
   const orchestrator = new ReadyAgentOrchestrator()
   // 合同随实现同步（Phase C C3，2026-07-05）：引擎停线随退役删除，

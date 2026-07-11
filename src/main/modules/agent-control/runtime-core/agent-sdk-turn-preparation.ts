@@ -35,6 +35,7 @@ import {
   narrowToolSurfaceForLocalDocument,
   recoverEmptyToolSurface,
   restoreCheckpointToolSurface,
+  shouldPreserveTaskIntentToolDuringDocumentNarrowing,
   stripMediaBlocksForLocalSendIm
 } from './agent-sdk-foundation-utils'
 import {
@@ -271,7 +272,9 @@ export function prepareAgentSdkTurn(
     shouldUseLocalDocumentToolSet(content as RunMessage, effectiveExecutionOptions?.requestEnvelope)
   ) {
     // P0-2(D2)：本地文档收窄不得吞掉技能选中轮的地板工具（否则 skill+doc 轮交集为空）。
-    toolDefinitions = narrowToolSurfaceForLocalDocument(toolDefinitions, authorization)
+    toolDefinitions = narrowToolSurfaceForLocalDocument(toolDefinitions, authorization, {
+      preserveDefinition: shouldPreserveTaskIntentToolDuringDocumentNarrowing,
+    })
   }
   // P0-2(T2)：空面回退紧跟本地文档收窄之后（先于 S4-2 status_query / documentTargetGuard /
   // checkpoint 收窄），保证这些安全/定向收窄始终在回退后的面上最后生效——回退永不撤销它们。

@@ -67,7 +67,7 @@ export interface ReportInfrastructureTimeoutPayload {
 
 export interface ReportInfrastructureTimeoutResult {
   success: boolean
-  state?: 'cancel_requested' | 'stale' | 'not_found' | 'paused_user_input'
+  state?: 'active' | 'stale' | 'not_found' | 'paused_user_input'
   error?: string
   errorKind?: string
   activeRunId?: string | null

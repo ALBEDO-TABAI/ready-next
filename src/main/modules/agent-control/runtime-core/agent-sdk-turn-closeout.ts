@@ -356,22 +356,30 @@ export async function handleAgentSdkTurnError(
   } = ctx
   if (isAbortError(error)) {
     const abortReason = abortController.signal.reason
+    const deliveryWallClockExceeded = /delivery_wall_clock_exceeded/.test(
+      `${errorMessage(error)}\n${errorMessage(abortReason)}`,
+    )
     const preemptedByNewerSend =
       abortReason instanceof Error && abortReason.message === 'process_restarted'
     const abortInitiator =
       runHandle.abortInitiator || (preemptedByNewerSend ? 'preempted' : 'user_stop')
     const terminalReason: TurnTerminalReason =
-      abortInitiator === 'user_stop'
-        ? 'cancelled_user'
-        : abortInitiator === 'manual_suspend'
-          ? 'manual_suspend'
-          : abortInitiator === 'timeout'
-            ? 'main_no_progress_timeout'
-            : 'cancelled_runtime'
+      deliveryWallClockExceeded
+        ? 'delivery_failed'
+        : abortInitiator === 'user_stop'
+          ? 'cancelled_user'
+          : abortInitiator === 'manual_suspend'
+            ? 'manual_suspend'
+            : abortInitiator === 'timeout'
+              ? 'main_no_progress_timeout'
+              : 'cancelled_runtime'
     const latestRunId = host.sessionManager.get(name)?.currentRun?.runId
-    if (abortInitiator === 'user_stop')
+    if (!deliveryWallClockExceeded && abortInitiator === 'user_stop')
       emitOutputForRun('已手动停止，进度已保存至当前会话。', 'text')
-    if (abortInitiator === 'manual_suspend') {
+    if (deliveryWallClockExceeded) {
+      emitRuntimeError(error, terminalReason)
+    }
+    if (!deliveryWallClockExceeded && abortInitiator === 'manual_suspend') {
       return finalizeEarlyReturn({
         status: 'checkpoint',
         terminalReason,
@@ -382,7 +390,11 @@ export async function handleAgentSdkTurnError(
     }
     await finalizeRunOutcome(
       {
-        kind: abortInitiator === 'preempted' ? 'preempted' : 'cancelled',
+        kind: deliveryWallClockExceeded
+          ? 'error'
+          : abortInitiator === 'preempted'
+            ? 'preempted'
+            : 'cancelled',
         runId,
         taskId,
         scopeId: sessionId || null,
@@ -407,9 +419,10 @@ export async function handleAgentSdkTurnError(
       }
     )
     return buildResult({
-      success: true,
+      success: !deliveryWallClockExceeded,
+      ...(deliveryWallClockExceeded ? { error: 'delivery_wall_clock_exceeded' } : {}),
       finalText: '',
-      cancelled: true,
+      cancelled: !deliveryWallClockExceeded,
       taskId,
       usedTools,
       transcriptEvents,

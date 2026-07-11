@@ -3,7 +3,7 @@ title: Dynamic Delivery v3 Agent 原生协作实施计划
 date: 2026-07-10
 kind: implementation
 enforce: false
-status: completed — 2026-07-11 全链验收与唯一对抗审查通过
+status: completed — 2026-07-11 全链验收及 Boost 60s 误停事故复审收口
 owner: 白
 original_author: Claude (Fable 5)
 revision_author: Codex
@@ -636,3 +636,13 @@ shared `DeliveryErrorKind` 闭集：
 - 退役与正向门禁：旧三通道/父 Check-in/Proof 路径退役；live/unwired/mandated/error-enum/finalizer/check-in gates 全绿。
 - 全局回归：`npm run verify:evolution-p3`、`npm run verify:evolution-p4`、`npm run verify:stability`、`npm run build` 通过。
 - 唯一阶段二对抗审查 agent 完成修复循环，最终无未解决 finding。
+
+### 2026-07-11 Boost 60s 误停事故复审
+
+- 实际失败请求的 main/renderer/metrics/SQLite 时间线一致证明：Owner 第一次模型请求仍在运行时，renderer 在 60,000ms 把活性探针错当成停止权限，主动中断了 provider；本次无 planner/worker/verifier/tool 超时。
+- 60s renderer watchdog 改为纯活性查询；同 requestId 仍 active 时续期且不停止，真正无进展仍只由 main 守卫收口。
+- Boost thorough 值经同步一次性锁存穿透到 sendScoped；thorough 只放宽收益门槛，不越过简单任务和高风险边界。
+- adaptive 120s / thorough 240s 是滚动无进展窗口：成功文本增量或工具结果会重置窗口，只有持续无进展才以 `delivery_wall_clock_exceeded` 明示收口；长研究不再被固定总时长切断。
+- parent 停止现在会中断所有已派生 worker，已经返回但尚未采纳的 child 结果也不会在停止后写回 parent。
+- Dynamic Delivery context 移到最外层回合 finally 唯一关闭；Owner/provider 中途失败时候选草稿不发布、context 不残留。
+- 事故回归已纳入 `verify:dynamic-delivery`；该链、Electron 原生 SQLite 用例、typed wire、取消传播、候选隔离与总墙钟用例全部通过。

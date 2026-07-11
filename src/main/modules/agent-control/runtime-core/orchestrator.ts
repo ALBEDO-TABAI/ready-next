@@ -91,6 +91,11 @@ export interface RequestScopedStopActiveGenerationResult extends StopActiveGener
   activeRunId?: string | null
 }
 
+export type RequestScopedActiveRunInspection =
+  | { state: 'active'; runId: string }
+  | { state: 'stale'; runId: null; activeRunId: string }
+  | { state: 'not_found'; runId: null }
+
 interface CompactSessionReport {
   beforeTokens: number
   afterTokens: number
@@ -330,6 +335,17 @@ export class ReadyAgentOrchestrator extends EventEmitter {
   isActiveRun(agent: string, sessionId: string | undefined, requestId: string): boolean {
     if (!agent || !requestId) return false
     return this.activeRunIds.get(this.toTaskKey(agent, sessionId)) === requestId
+  }
+
+  inspectActiveRunIfMatches(
+    agent: string,
+    sessionId: string | undefined,
+    requestId: string,
+  ): RequestScopedActiveRunInspection {
+    const activeRunId = this.activeRunIds.get(this.toTaskKey(agent, sessionId)) || null
+    if (!activeRunId) return { state: 'not_found', runId: null }
+    if (activeRunId !== requestId) return { state: 'stale', runId: null, activeRunId }
+    return { state: 'active', runId: activeRunId }
   }
 
   isActiveRunAwaitingUserInput(agent: string, sessionId: string | undefined, requestId: string): boolean {

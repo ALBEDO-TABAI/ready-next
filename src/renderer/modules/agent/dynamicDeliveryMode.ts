@@ -6,3 +6,18 @@ export function consumeThoroughDeliveryOverride(enabled: boolean): {
 } {
   return { deliveryMode: enabled ? 'thorough' : undefined, nextEnabled: false }
 }
+
+export function createThoroughDeliveryOverrideLatch(): {
+  setEnabled: (enabled: boolean) => void
+  consume: () => ReturnType<typeof consumeThoroughDeliveryOverride>
+} {
+  let enabled = false
+  return {
+    setEnabled: (nextEnabled) => { enabled = nextEnabled },
+    consume: () => {
+      const consumed = consumeThoroughDeliveryOverride(enabled)
+      enabled = consumed.nextEnabled
+      return consumed
+    },
+  }
+}

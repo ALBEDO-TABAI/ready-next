@@ -10,8 +10,9 @@
  *   - Runtime intent — THIS file. Terminal errors must clear the
  *     in-flight request handle and hide the Stop button.
  *
- * Plus X2.6 — infrastructure_timeout 60s safety net (the no-terminal-ever
- * recovery path).
+ * Plus X2.6 — the 60s renderer liveness probe. Main-confirmed active runs
+ * stay alive; only a missing/stale run or an unreachable main releases the
+ * renderer lock.
  *
  * The driver listens via `window.electronAPI.agent.onError(...)`. The test
  * installs a minimal electronAPI stub that captures the registered handlers
@@ -104,7 +105,7 @@ const captured: CapturedHandlers = {
 }
 
 const infrastructureTimeoutReports: Array<{ scopeId: string; requestId: string; elapsedMs?: number }> = []
-let infrastructureTimeoutReportResult: unknown = { success: true, data: { state: 'cancel_requested' } }
+let infrastructureTimeoutReportResult: unknown = { success: true, data: { state: 'not_found' } }
 
 function register<K extends keyof CapturedHandlers>(slot: K) {
   return (cb: Handler) => {
@@ -383,10 +384,10 @@ test('X2.1 #5 — mid-send scope switch: terminal still unlocks the originating 
 // ---------------------------------------------------------------------------
 // Test X2.6 — infrastructure_timeout safety net.
 //
-// Per plan §7.2 last paragraph: if no terminal event of any kind arrives
-// within 60s of send, fire infrastructure_timeout: unlock the originating
-// session's composer, hide Stop, and toast "Ready lost track of this
-// request; recovered automatically".
+// If no renderer-visible event arrives within 60s, ask main for the run's
+// authoritative state. Active/paused runs stay locked and are probed later;
+// missing/stale runs unlock quietly; an unreachable main eventually unlocks
+// with an honest unknown-state notice.
 //
 // The driver exposes `armInfrastructureWatchdog(scopeId, requestId,
 // { timeoutMs })` as a test seam so we can fire it on a 1ms budget
@@ -434,9 +435,9 @@ test('X2.6 — infrastructure_timeout fires after timeout with no terminal event
   assert.equal(falseRecoveryMsg, undefined, 'renderer must NOT claim local recovery')
 })
 
-test('X2.6 — main-acknowledged timeout does not surface a lost-track message', async () => {
+test('X2.6 — main-confirmed missing run unlocks without a lost-track message', async () => {
   infrastructureTimeoutReports.length = 0
-  infrastructureTimeoutReportResult = { success: true, data: { state: 'cancel_requested' } }
+  infrastructureTimeoutReportResult = { success: true, data: { state: 'not_found' } }
   seedTwoSessions({
     activeSessionId: 'session-A',
     lockedSessionId: 'session-A',
@@ -457,8 +458,8 @@ test('X2.6 — main-acknowledged timeout does not surface a lost-track message',
   )
   const lostTrackMsg = state.messages.find((m: { content: string }) =>
     typeof m.content === 'string' && m.content.includes('Ready 跟丢了'))
-  assert.equal(lostTrackMsg, undefined, 'main accepted the timeout, so renderer must not claim it lost the request')
-  assert.equal(getSessionSlice(state, 'session-A').composerLocked, false, 'composer still unlocks after acknowledged timeout')
+  assert.equal(lostTrackMsg, undefined, 'main confirmed the run is gone, so renderer must not claim it lost the request')
+  assert.equal(getSessionSlice(state, 'session-A').composerLocked, false, 'composer unlocks after main confirms no active run')
 })
 
 test('X2.6 — paused_user_input keeps the run alive and the composer locked', async () => {
@@ -491,6 +492,31 @@ test('X2.6 — paused_user_input keeps the run alive and the composer locked', a
   const timeoutMsg = state.messages.find((m: { content: string }) =>
     typeof m.content === 'string' && (m.content.includes('联系不上后台') || m.content.includes('超时')))
   assert.equal(timeoutMsg, undefined, 'paused user input does not surface a timeout/lost-track message')
+})
+
+test('X2.6 — a main-confirmed active run survives the one-minute renderer probe', async () => {
+  infrastructureTimeoutReports.length = 0
+  infrastructureTimeoutReportResult = { success: true, data: { state: 'active' } }
+  seedTwoSessions({
+    activeSessionId: 'session-A',
+    lockedSessionId: 'session-A',
+    lockedScopeId: 'scope-A',
+    otherScopeId: 'scope-B',
+    requestId: 'req-A',
+  })
+
+  driverApi.armInfrastructureWatchdog('scope-A', 'req-A', { timeoutMs: 10 })
+  await new Promise((resolve) => setTimeout(resolve, 2300))
+
+  const slice = getSessionSlice(useAgent.getState(), 'session-A')
+  assert.deepEqual(infrastructureTimeoutReports, [
+    { scopeId: 'scope-A', requestId: 'req-A', elapsedMs: 10 },
+  ], 'an active acknowledgement re-arms the long watchdog instead of retrying the bootstrap probe')
+  assert.equal(slice.composerLocked, true)
+  assert.equal(slice.isStreaming, true)
+  assert.equal(slice.foregroundBusy, true)
+  assert.equal(slice.streamingRequestId, 'req-A')
+  assert.notEqual(slice.scopeRunStates['scope-A']?.phase, 'error')
 })
 
 test('X2.6 — hung main timeout report still releases the renderer lock', async () => {
@@ -527,12 +553,12 @@ test('X2.6 — hung main timeout report still releases the renderer lock', async
   assert.equal(falseRecoveryMsg, undefined, 'renderer must NOT claim local recovery')
 })
 
-test('B step 1 — a slow-but-alive main (answers after 1s, before 5s) reaches main, no false lost-track', async () => {
+test('B step 1 — a slow-but-alive main answer keeps the active run alive', async () => {
   infrastructureTimeoutReports.length = 0
   // Resolve at ~2.5s: under the OLD 1s ack this raced out → null → false
   // "lost track" recovery; under the 5s ack the alive main is heard.
   infrastructureTimeoutReportResult = new Promise((resolve) =>
-    setTimeout(() => resolve({ success: true, data: { state: 'cancel_requested' } }), 2500))
+    setTimeout(() => resolve({ success: true, data: { state: 'active' } }), 2500))
   seedTwoSessions({
     activeSessionId: 'session-A',
     lockedSessionId: 'session-A',
@@ -546,11 +572,7 @@ test('B step 1 — a slow-but-alive main (answers after 1s, before 5s) reaches m
 
   const state = useAgent.getState()
   // Assert only renderer-observable facts: the alive main was reached (reported),
-  // no false "lost track" message, and the composer unlocked. We intentionally do
-  // NOT assert a "main-authoritative" terminalReason here — the value the renderer
-  // sets in this branch is a transient LOCAL label, not main's real terminal
-  // reason (a process_exit kill finalizes as cancelled_runtime on main). Asserting
-  // the real terminal reason belongs to a test that simulates main's terminal IPC.
+  // no false "lost track" message, and the active composer remains locked.
   const lostTrackMsg = state.messages.find((m: { content: string }) =>
     typeof m.content === 'string' && m.content.includes('Ready 跟丢了'))
   assert.equal(lostTrackMsg, undefined, 'a slow-but-alive main must NOT be mistaken for lost track')
@@ -559,7 +581,7 @@ test('B step 1 — a slow-but-alive main (answers after 1s, before 5s) reaches m
     [{ scopeId: 'scope-A', requestId: 'req-A', elapsedMs: 10 }],
     'the alive main was actually reached (report delivered) within the 5s ack window',
   )
-  assert.equal(getSessionSlice(state, 'session-A').composerLocked, false, 'composer unlocks after main answers')
+  assert.equal(getSessionSlice(state, 'session-A').composerLocked, true, 'main-confirmed active run remains locked')
 })
 
 test('B step 2 race — a main terminal event arriving DURING the report wait cancels retry, no false unknown-state', async () => {

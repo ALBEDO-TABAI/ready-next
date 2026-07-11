@@ -69,6 +69,9 @@ export interface DeliveryPreflightFacts {
   taskType: TaskType
   intentDomains: string[]
   structuredTargetCount: number
+  /** Explicitly referenced, readable resources with enough real body text for
+   *  a no-tools worker to analyze before the Owner runs. */
+  groundedWorkerResourceCount: number
   contextRefIds: string[]
   selectedSkillId: string | null
   risk: 'ordinary' | 'awaiting_confirmation' | 'exclusive_action' | 'resource_conflict'

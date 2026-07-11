@@ -24,6 +24,7 @@ import {
   BROWSER_CONTENT_TASK_TOOL_NAMES,
   BROWSER_INTERACTION_TOOL_NAMES
 } from '../../tools/browser-tool-catalog'
+import { GENERAL_RESEARCH_TOOL_NAMES } from '../../tools/general-research-tool-defs'
 import { activeNegations } from '../safety/negation-state'
 import { createBrowserTurnLease } from '../../browser-engine/agent-browser-turn-lease'
 import { filterToolsByVisionCapability } from '../tools-runtime/tool-gateway'
@@ -84,6 +85,20 @@ import { getRemainingToolCallBudget } from '../task-projection/run-budget-policy
 
 const BROWSER_INTERACTION_TOOL_NAME_SET = new Set<string>(BROWSER_INTERACTION_TOOL_NAMES)
 const BROWSER_CONTENT_TASK_TOOL_NAME_SET = new Set<string>(BROWSER_CONTENT_TASK_TOOL_NAMES)
+const GENERAL_RESEARCH_TOOL_NAME_SET = new Set<string>(GENERAL_RESEARCH_TOOL_NAMES)
+
+export function isToolEnabledForCurrentAuthorization(
+  toolName: string,
+  authorization: SkillToolAuthorization,
+): boolean {
+  if (toolName === 'use_skill') return authorization.mode === 'none'
+  if (!toolName.startsWith('skill_')) return true
+  return authorization.mode === 'selected'
+    && (
+      authorization.allowedTypedActions.has(toolName)
+      || authorization.allowedPrimitives.has(toolName)
+    )
+}
 
 function createVisibleBrowserToolPreserver(params: {
   visibleCapabilityGroupIds: ReadonlyArray<string>
@@ -165,6 +180,24 @@ export class AgentSdkToolExecutor {
       | null
   ): void {
     this.rendererToolActionRequester = requester
+  }
+
+  /**
+   * Latent definitions are installed into the SDK Agent once, but each definition's
+   * `isEnabled` predicate keeps it invisible until `use_skill` refreshes this run's
+   * immutable authorization. Dispatch authorization remains the final gate.
+   */
+  listLatentSkillToolDefinitions(): ToolDefinition[] {
+    try {
+      return defaultToolRegistry
+        .listToolDefinitions()
+        .filter((definition) => definition.groupId === 'skills' && definition.name.startsWith('skill_'))
+    } catch (error) {
+      appendToolCapabilityLog(
+        `[tool_capability] stage=same_run_skill_latent_list_failed reason=${errorMessage(error)}`,
+      )
+      return []
+    }
   }
 
   listDefaultToolDefinitionsForTurn(params: {
@@ -356,9 +389,13 @@ export class AgentSdkToolExecutor {
         collectionExposure,
         batchCollectionExposure
       })
+      const preserveVisibleResearchTool = capabilityResolution.visibleCapabilityGroupIds.includes('general_research')
+        ? (name: string) => GENERAL_RESEARCH_TOOL_NAME_SET.has(name)
+        : undefined
       definitions = filterSelectedSkillToolSurface(definitions, activeSkillAllowedTools, {
         preserveToolName: (name) =>
           preserveVisibleBrowserTool?.(name) === true
+          || preserveVisibleResearchTool?.(name) === true
           || name === 'agent_propose_handoff'
           || capabilityFloors.toolNames.has(name)
       })
@@ -384,6 +421,83 @@ export class AgentSdkToolExecutor {
     }) as unknown as ToolDefinition[]
   }
 
+  private activateSkillForSameRun(
+    output: ToolExecutionOutput,
+    runtimeContext: ToolBridgeRuntimeContext,
+  ): ToolExecutionOutput {
+    const normalized = normalizeToolExecutionOutput(output)
+    const skillId = typeof normalized.data?.skill_id === 'string'
+      ? normalized.data.skill_id.trim()
+      : ''
+    if (!skillId || typeof runtimeContext.activateSkillForCurrentRun !== 'function') {
+      return createToolExecutionOutput(
+        `${normalized.text}\n\n技能方法论已读取，但本次运行未能刷新技能工具；不能声称技能工具已经可用。`,
+        {
+          shape: 'json',
+          data: {
+            ...(normalized.data || {}),
+            ok: false,
+            activation: 'same_run_refresh_failed',
+            errorKind: 'authorization_denied',
+          },
+          projectionPatch: normalized.projectionPatch,
+          interactionHint: normalized.interactionHint,
+          framePatch: normalized.framePatch,
+          contextModifier: normalized.contextModifier,
+          envelope: normalized.envelope,
+        },
+      )
+    }
+    const enabledDefinitions = runtimeContext.activateSkillForCurrentRun(skillId)
+    if (!enabledDefinitions || runtimeContext.authorization.mode !== 'selected') {
+      return createToolExecutionOutput(
+        `${normalized.text}\n\n技能方法论已读取，但本次运行的技能授权刷新失败；请继续使用现有通用工具，不要伪造技能结果。`,
+        {
+          shape: 'json',
+          data: {
+            ...(normalized.data || {}),
+            ok: false,
+            activation: 'same_run_refresh_failed',
+            errorKind: 'authorization_denied',
+          },
+          projectionPatch: normalized.projectionPatch,
+          interactionHint: normalized.interactionHint,
+          framePatch: normalized.framePatch,
+          contextModifier: normalized.contextModifier,
+          envelope: normalized.envelope,
+        },
+      )
+    }
+    const names = enabledDefinitions.map((definition) => definition.name)
+    const textBridgeCatalog = runtimeContext.useTextToolBridge
+      ? enabledDefinitions.map((definition) => [
+          `- ${definition.name}: ${definition.description}`,
+          `  parameters=${JSON.stringify(definition.schema || { type: 'object', properties: {} })}`,
+        ].join('\n')).join('\n').slice(0, 12_000)
+      : ''
+    return createToolExecutionOutput(
+      [
+        normalized.text,
+        `技能工具已在本次运行中开放：${names.join(', ') || '无专属工具（仅使用方法论）'}。请立即继续当前任务，不要等待用户再发消息。`,
+        textBridgeCatalog ? `文本工具调用定义：\n${textBridgeCatalog}` : '',
+      ].filter(Boolean).join('\n\n'),
+      {
+        shape: 'json',
+        data: {
+          ...(normalized.data || {}),
+          ok: true,
+          activation: 'active_same_run',
+          availableTools: names,
+        },
+        projectionPatch: normalized.projectionPatch,
+        interactionHint: normalized.interactionHint,
+        framePatch: normalized.framePatch,
+        contextModifier: normalized.contextModifier,
+        envelope: normalized.envelope,
+      },
+    )
+  }
+
   buildSdkTool(definition: ToolDefinition, runtimeContext: ToolBridgeRuntimeContext): AgentSdkTool {
     const schema =
       definition.schema && definition.schema.type === 'object'
@@ -395,6 +509,10 @@ export class AgentSdkToolExecutor {
       parameters: schema as never,
       strict: false,
       timeoutMs: definition.executionTimeoutMs,
+      isEnabled: async () => isToolEnabledForCurrentAuthorization(
+        definition.name,
+        runtimeContext.authorization,
+      ),
       execute: async (input) => runWithHandoffToolGate(runtimeContext, async () => {
         const args =
           input && typeof input === 'object' && !Array.isArray(input)
@@ -876,11 +994,14 @@ export class AgentSdkToolExecutor {
       return blockerWithSteering
     }
     runtimeContext.emitToolAction(definition.name, effectiveArgs)
-    const output = await this.host.executeToolCall(
+    let output = await this.host.executeToolCall(
       definition.name,
       effectiveArgs,
       this.buildExecutorContext(runtimeContext)
     )
+    if (definition.name === 'use_skill') {
+      output = this.activateSkillForSameRun(output, runtimeContext)
+    }
     runtimeContext.recordToolResult(definition.name, output)
     noteToolResultForActivePlan(runtimeContext.sessionId, definition.name, args, Date.now(), output)
     const outputWithSteering = appendBudgetWarningSteering(output, runtimeContext)

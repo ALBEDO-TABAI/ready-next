@@ -9,6 +9,7 @@ import {
   recoverEmptyToolSurface,
   isLocalDocumentToolDefinition,
   narrowToolSurfaceForLocalDocument,
+  shouldPreserveTaskIntentToolDuringDocumentNarrowing,
 } from '../main/modules/agent-control/runtime-core/agent-sdk-utils'
 import { buildSelectedSkillToolAuthorization } from '../main/modules/agent-control/skills/skill-tool-authorization'
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
@@ -80,6 +81,42 @@ test('narrowToolSurfaceForLocalDocument drops non-floor non-document tools and k
   assert.deepEqual(narrowed, ['skill_read_artifact', 'skill_write_artifact', 'file_read_excerpt'])
   assert.equal(narrowed.includes('browser_navigate'), false)
   assert.equal(narrowed.includes('browser_visible_collect'), false)
+})
+
+test('research capability and completion declaration survive incidental current-document narrowing', () => {
+  const selected = buildSelectedSkillToolAuthorization({
+    skillId: 'deep-research',
+    allowedTypedActions: [],
+    allowedPrimitives: ['skill_write_artifact', 'skill_export_artifact'],
+    source: 'explicit',
+    reason: 'test',
+  })
+  const surface = [
+    { name: 'document_read_section', domain: 'document', groupId: 'document' },
+    { name: 'skill_write_artifact', domain: 'skill', groupId: 'skills' },
+    { name: 'skill_export_artifact', domain: 'skill', groupId: 'skills' },
+    { name: 'web_search', domain: 'research', groupId: 'general_research' },
+    { name: 'web_fetch', domain: 'research', groupId: 'general_research' },
+    { name: 'browser_research_topic', domain: 'browser', groupId: 'browser_interaction' },
+    { name: 'declare_completion_criteria', domain: 'agent', groupId: 'agent_interaction' },
+    { name: 'pet_set_note', domain: 'pet', groupId: 'pet' },
+  ]
+  const narrowed = narrowToolSurfaceForLocalDocument(surface as never, selected, {
+    preserveDefinition: shouldPreserveTaskIntentToolDuringDocumentNarrowing,
+  }).map((entry: { name: string }) => entry.name)
+
+  for (const required of [
+    'document_read_section',
+    'skill_write_artifact',
+    'skill_export_artifact',
+    'web_search',
+    'web_fetch',
+    'browser_research_topic',
+    'declare_completion_criteria',
+  ]) {
+    assert.ok(narrowed.includes(required), `${required} must survive the mixed research/document turn`)
+  }
+  assert.equal(narrowed.includes('pet_set_note'), false)
 })
 
 test('narrowToolSurfaceForLocalDocument on a none-mode turn keeps only document tools, never skill/browser (no primitive leak)', () => {

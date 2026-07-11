@@ -15,7 +15,12 @@
 import { existsSync, realpathSync } from 'node:fs'
 import { dirname, isAbsolute, join, parse } from 'node:path'
 import type { ProofRef } from './proof-collector'
-import { isValidProofRef } from './proof-collector'
+import {
+  isValidProofRef,
+  RESEARCH_SOURCE_BUNDLED_TOOL_NAMES,
+  RESEARCH_SOURCE_CONTENT_TOOL_NAMES,
+  RESEARCH_SOURCE_DISCOVERY_TOOL_NAMES,
+} from './proof-collector'
 import type { CriteriaItem, CriteriaKind } from './criteria-templates'
 import { normalizeDeliveryTarget } from './criteria-templates'
 
@@ -46,7 +51,7 @@ const CRITERIA_PROOF_MAP: Record<CriteriaKind, ReadonlyArray<ProofRef['kind']>> 
   artifact: ['artifact'],
   // A research report's sources are the search/fetch tool results themselves —
   // a synthesized inline answer (no written report file) must still be provable.
-  report_sources: ['artifact', 'tool_result'],
+  report_sources: [],
   media_file: ['artifact'],
   collection_verdict: ['task_event', 'artifact'],
   result_parseable: ['artifact', 'tool_result'],
@@ -59,6 +64,20 @@ const CRITERIA_PROOF_MAP: Record<CriteriaKind, ReadonlyArray<ProofRef['kind']>> 
   // targets (see resolveDeliveryCoverage). This map entry only documents the
   // source kind; the counting path bypasses the presentKinds membership test.
   delivery_coverage: ['artifact'],
+}
+
+function reportSourceToolName(proof: ProofRef): string | null {
+  if (proof.kind !== 'tool_result' || !proof.sourceReceipt?.urls.length) return null
+  return proof.sourceReceipt.acquisitionTool || proof.ref.split(':', 1)[0] || null
+}
+
+function hasReportSourceCoverage(proofs: ReadonlyArray<ProofRef>): boolean {
+  const sourceTools = proofs
+    .map(reportSourceToolName)
+    .filter((toolName): toolName is string => Boolean(toolName))
+  if (sourceTools.some((toolName) => RESEARCH_SOURCE_BUNDLED_TOOL_NAMES.has(toolName))) return true
+  return sourceTools.some((toolName) => RESEARCH_SOURCE_DISCOVERY_TOOL_NAMES.has(toolName))
+    && sourceTools.some((toolName) => RESEARCH_SOURCE_CONTENT_TOOL_NAMES.has(toolName))
 }
 
 export interface AdjudicationInput {
@@ -223,6 +242,13 @@ export function adjudicateTerminalOutcome(input: AdjudicationInput): Adjudicatio
       const isSatisfied = coverage.expected > 0 && coverage.delivered >= coverage.expected
       return { id: item.id, kind: item.kind, satisfied: isSatisfied, coverage }
     }
+    if (item.kind === 'report_sources') {
+      return {
+        id: item.id,
+        kind: item.kind,
+        satisfied: hasReportSourceCoverage(proofs),
+      }
+    }
     const isSatisfied = (CRITERIA_PROOF_MAP[item.kind] ?? []).some((kind) => presentKinds.has(kind))
     return { id: item.id, kind: item.kind, satisfied: isSatisfied }
   })
@@ -231,8 +257,12 @@ export function adjudicateTerminalOutcome(input: AdjudicationInput): Adjudicatio
   const blockers: string[] = []
   let verdict: CheckInRecord['verdict'] = 'accept'
 
+  if (input.terminalStatus !== 'done') {
+    verdict = input.terminalStatus === 'checkpoint' ? 'degraded' : 'reject'
+    blockers.push(`terminal_not_done:${input.terminalStatus}`)
+  }
   if (input.learningRefsValid === false) {
-    verdict = 'degraded'
+    if (verdict === 'accept') verdict = 'degraded'
     blockers.push('learning_refs_missing')
   }
   if (input.terminalStatus === 'done') {

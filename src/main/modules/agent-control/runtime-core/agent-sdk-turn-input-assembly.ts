@@ -45,6 +45,7 @@ export interface AgentSdkTurnInputAssemblyContext {
   providerContent: RunMessage
   useTextToolBridge: boolean
   toolDefinitions: ToolDefinition[]
+  latentSkillToolDefinitions?: ToolDefinition[]
   toolBridgeRuntimeContext: ToolBridgeRuntimeContext
   hasVeaPipelineTool: boolean
   hasMapAmbiguityQuestionTools: boolean
@@ -92,6 +93,7 @@ export function assembleAgentSdkTurnInput(
     providerContent,
     useTextToolBridge,
     toolDefinitions,
+    latentSkillToolDefinitions = [],
     toolBridgeRuntimeContext,
     hasVeaPipelineTool,
     hasMapAmbiguityQuestionTools,
@@ -107,9 +109,15 @@ export function assembleAgentSdkTurnInput(
     emitOutput,
     finalizeEarlyReturn
   } = ctx
+  const sdkToolDefinitions = Array.from(
+    new Map(
+      [...toolDefinitions, ...latentSkillToolDefinitions]
+        .map((definition) => [definition.name, definition]),
+    ).values(),
+  )
   const sdkTools = useTextToolBridge
     ? []
-    : toolDefinitions.map((definition) =>
+    : sdkToolDefinitions.map((definition) =>
         host.toolExecutor.buildSdkTool(definition, toolBridgeRuntimeContext)
       )
 

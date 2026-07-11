@@ -127,6 +127,11 @@ export interface ToolBridgeRuntimeContext {
   allowedToolNames: string[]
   definitionByName: Map<string, ToolDefinition>
   authorization: SkillToolAuthorization
+  /** `use_skill` refreshes this exact request's authorization and returns the
+   *  newly enabled definitions for the next model iteration. */
+  activateSkillForCurrentRun?: (skillId: string) => ToolDefinition[] | null
+  sameRunActivatedSkillId?: string | null
+  useTextToolBridge?: boolean
   activeFrame: ToolRuntimeActiveFrameContext
   agentContext?: AgentSpawnContext | null
   documentTargetGuard?: DocumentTargetGuard | null

@@ -19,6 +19,8 @@ export interface SessionRecallHit {
   sourceKind: 'local' | 'channel'
   sourceId: string
   threadKey: string
+  agentId?: string | null
+  activeAgentId?: string | null
   matchedBy: SessionRecallMatchKind[]
   score: number
   hitExcerpt?: string | null

@@ -756,7 +756,7 @@ function recordTerminalAdjudication(
     const seededProofs = [
       ...(digestProof ? [digestProof] : []),
       ...(runStateDone ? [collectRunStateProof(runStatePath, now)] : []),
-      ...handleArtifactPaths.map((path) => collectArtifactProof(path, now))
+      ...handleArtifactPaths.map((path) => collectArtifactProof(path, now, outcome.runId))
     ]
     const proofRefs = seededProofs.length
       ? appendProofRefs(projection.proofRefs ?? [], seededProofs)

@@ -191,6 +191,23 @@ test('chat header row menu stays open when the history panel scrolls and can ope
   }
 })
 
+test('history row shows a changed responsible agent beside time without adding a header indicator', () => {
+  const reassigned = { ...recallHit, agentId: 'butler', activeAgentId: 'analyst' }
+  const { unmount } = mountChatHeader({
+    sessionsByChannelKey: { [localChannel.key]: [reassigned] },
+    formatAgentName: (agentId) => agentId === 'analyst' ? '智识' : agentId,
+  })
+  try {
+    const historyButton = document.querySelector('button[title="会话来源"]')
+    assert.ok(historyButton)
+    click(historyButton)
+    assert.equal(document.querySelector('[data-chat-session-responsible-agent="true"]')?.textContent, '智识')
+    assert.equal(document.querySelector('[data-chat-agent-responsibility="true"]'), null)
+  } finally {
+    unmount()
+  }
+})
+
 test('one channel expands into every distinct session — each remote /new is selectable', () => {
   const wechatChannel = {
     key: 'channel:wechat-bot',

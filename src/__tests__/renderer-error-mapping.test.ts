@@ -82,6 +82,17 @@ test('maps main no-progress timeout as takeover rather than model outage', () =>
   assert.doesNotMatch(result.friendlyMessage, /模型服务|模型响应|发送失败/)
 })
 
+test('maps the delivery wall-clock limit to an explicit resumable message', () => {
+  const result = mapBackendErrorToFriendly({
+    error: 'delivery_wall_clock_exceeded',
+    errorKind: 'delivery_failed',
+  })
+
+  assert.match(result.friendlyMessage, /深度协作持续一段时间没有新进展/)
+  assert.equal(result.recoverable, true)
+  assert.equal(result.retryStrategy, 'user_action')
+})
+
 test('maps tool timeout separately from model timeout', () => {
   const tool = mapBackendErrorToFriendly({
     error: 'renderer-watchdog:15000',

@@ -2,7 +2,10 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import type { DeliveryStateV1 } from '../shared/dynamic-delivery'
-import { reconcileInterruptedDeliveryState } from '../main/modules/agent-control/runtime-core/dynamic-delivery/delivery-reconciliation'
+import {
+  reconcileInterruptedDeliveryState,
+  shouldReconcileInterruptedDeliveryProjection,
+} from '../main/modules/agent-control/runtime-core/dynamic-delivery/delivery-reconciliation'
 
 function interruptedState(): DeliveryStateV1 {
   const binding = {
@@ -41,4 +44,11 @@ test('already settled and accepted delivery state is returned unchanged', () => 
   settled.packages = settled.packages.map((pkg) => ({ ...pkg, status: 'completed' }))
   settled.verifier = { status: 'accepted', repaired: false }
   assert.equal(reconcileInterruptedDeliveryState(settled), settled)
+})
+
+test('restart reconciliation never rewrites an already terminal parent failure as an app-exit checkpoint', () => {
+  assert.equal(shouldReconcileInterruptedDeliveryProjection({ projectionStatus: 'failed', runMetaStatus: 'error' }), false)
+  assert.equal(shouldReconcileInterruptedDeliveryProjection({ projectionStatus: 'completed', runMetaStatus: 'done' }), false)
+  assert.equal(shouldReconcileInterruptedDeliveryProjection({ projectionStatus: 'running', runMetaStatus: 'running' }), true)
+  assert.equal(shouldReconcileInterruptedDeliveryProjection({ projectionStatus: 'running', runMetaStatus: null }), true)
 })

@@ -8,6 +8,7 @@ import type { TaskProjectionRecord } from '../main/modules/agent-control/contrac
 import type { ReadyAgentSdkRunParams, ReadyAgentSdkRunResult } from '../main/modules/agent-control/runtime-core/agent-sdk-types'
 import {
   DynamicDeliveryCoordinator,
+  extractDynamicDeliveryEnvelopeFacts,
   type DynamicDeliveryCoordinatorAdapter,
 } from '../main/modules/agent-control/runtime-core/dynamic-delivery/dynamic-delivery-coordinator'
 
@@ -36,8 +37,16 @@ function projection(): TaskProjectionRecord {
 
 function envelope(ids: string[]) {
   return {
-    resources: ids.map((id) => ({ id, kind: 'local_document_resource', source: 'user', canRead: true, summary: id })),
-    referencedResources: ids.map((value) => ({ value })),
+    resources: ids.map((id) => ({
+      id,
+      name: id,
+      kind: 'document_quote',
+      source: 'document_quote',
+      canRead: true,
+      text: `grounded source ${id} `.repeat(12),
+      summary: `grounded source ${id} `.repeat(12),
+    })),
+    referencedResources: ids.map((value) => ({ kind: 'mention', value })),
   }
 }
 
@@ -65,6 +74,25 @@ function verdict(value: 'accept' | 'repair' | 'block') {
     summary: value,
   })
 }
+
+test('delivery envelope facts count only current explicit targets and use the typed skill name', () => {
+  const facts = extractDynamicDeliveryEnvelopeFacts({
+    resources: [
+      { id: 'current-doc', kind: 'document_context', source: 'current_document', name: 'unrelated.md', path: '/tmp/unrelated.md', canRead: true, canWrite: true },
+      { id: 'folder', kind: 'folder_reference', source: 'folder_reference', name: '宝矿力', path: '/tmp/宝矿力', canRead: true, canWrite: false },
+      { id: 'skill_reference-2-deep-research', kind: 'skill_reference', source: 'explicit_reference', name: 'deep-research', path: null, canRead: false, canWrite: false },
+    ],
+    referencedResources: [
+      { kind: 'mention', value: '宝矿力' },
+      { kind: 'mention', value: 'deep-research' },
+    ],
+  })
+
+  assert.deepEqual(facts.structuredTargetIds, ['folder'])
+  assert.equal(facts.selectedSkillId, 'deep-research')
+  assert.equal(facts.groundedWorkerResourceCount, 0)
+  assert.ok(facts.contextRefIds?.includes('current-doc'))
+})
 
 function harness(runAgent: (params: ReadyAgentSdkRunParams) => Promise<ReadyAgentSdkRunResult>) {
   let current = projection()
@@ -164,6 +192,23 @@ test('bad planner JSON degrades to verify-only', async () => {
   assert.equal(prepared.usage?.providerCallCount, 1)
 })
 
+test('parent cancellation during planning is never swallowed as verifier-only fallback', async () => {
+  const parent = new AbortController()
+  const h = harness(async () => {
+    parent.abort(new DOMException('parent stopped', 'AbortError'))
+    throw parent.signal.reason
+  })
+
+  await assert.rejects(
+    prepare(h.coordinator, new MemorySession(), {
+      requestEnvelope: envelope(['a', 'b']),
+      signal: parent.signal,
+    }),
+    /parent stopped/,
+  )
+  assert.equal(h.coordinator.contexts.get('run'), null)
+})
+
 test('required worker failure blocks its package without failing open', async () => {
   const h = harness(async (params) => params.agentName === 'dynamic-delivery-planner'
     ? { finalText: plan('required'), usage: usage(1) }
@@ -196,6 +241,39 @@ test('verifier acceptance cannot publish while a required package is blocked', a
   assert.equal(result.acceptedText, null)
   assert.equal((await committed.getItems()).length, 1)
   assert.equal(prepared.emitOutput!.snapshot(), '')
+  assert.equal(h.projection().deliveryState?.verifier.status, 'blocked')
+})
+
+test('mechanical artifact gaps block before the semantic verifier is called', async () => {
+  let modelCalls = 0
+  const committed = new MemorySession({ initialItems: [user('base')] })
+  const h = harness(async () => {
+    modelCalls += 1
+    return { finalText: verdict('accept'), usage: usage(1) }
+  })
+  const prepared = await prepare(h.coordinator, committed)
+  prepared.emitOutput!.append('must stay hidden')
+
+  const result = await h.coordinator.verifyOwnerCandidate({
+    runId: 'run', candidateText: 'must stay hidden', projectionAfterOwner: h.projection(), model: 'test',
+    provider: {} as never, contextWindowTokens: 10_000, maxOutputTokens: 1_000,
+    signal: new AbortController().signal,
+    materializeAndReadBack: async () => ({
+      version: 1,
+      items: [],
+      mechanicalIssues: [{
+        code: 'index_missing',
+        description: '目标目录没有索引文件',
+        targetRefId: '/tmp/宝矿力',
+      }],
+    }),
+  })
+
+  assert.equal(modelCalls, 0)
+  assert.equal(result.verdict.verdict, 'block')
+  assert.match(result.verdict.gaps[0]?.description || '', /index_missing/)
+  assert.equal(result.acceptedText, null)
+  assert.equal((await committed.getItems()).length, 1)
   assert.equal(h.projection().deliveryState?.verifier.status, 'blocked')
 })
 

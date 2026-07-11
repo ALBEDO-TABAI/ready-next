@@ -192,12 +192,32 @@ export function isLocalDocumentToolDefinition(definition: ToolDefinition): boole
  */
 export function narrowToolSurfaceForLocalDocument(
   toolDefinitions: ToolDefinition[],
-  authorization: SkillToolAuthorization
+  authorization: SkillToolAuthorization,
+  options: {
+    preserveDefinition?: (definition: ToolDefinition) => boolean
+  } = {},
 ): ToolDefinition[] {
   const skillFloor = selectedSkillFloorToolNames(authorization)
   return toolDefinitions.filter(
-    (definition) => isLocalDocumentToolDefinition(definition) || skillFloor.has(definition.name)
+    (definition) =>
+      isLocalDocumentToolDefinition(definition)
+      || skillFloor.has(definition.name)
+      || options.preserveDefinition?.(definition) === true
   )
+}
+
+const TASK_INTENT_GROUPS_THAT_SURVIVE_DOCUMENT_NARROWING = new Set([
+  'general_research',
+  'browser_interaction',
+  'browser_content_tasks',
+])
+
+/** Incidental editor context must not delete a capability explicitly admitted for this turn's task. */
+export function shouldPreserveTaskIntentToolDuringDocumentNarrowing(
+  definition: ToolDefinition,
+): boolean {
+  return definition.name === 'declare_completion_criteria'
+    || TASK_INTENT_GROUPS_THAT_SURVIVE_DOCUMENT_NARROWING.has(String(definition.groupId || ''))
 }
 
 /** P0-2 — 收窄管线末端防空：窄化后为空且窄化前非空 → 回退窄化前全量面。 */

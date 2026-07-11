@@ -191,6 +191,30 @@ test('TaskCard hides interaction badge for terminal failed runs', () => {
   }
 })
 
+test('TaskCard does not repeat the responsible agent below the capsule', () => {
+  const run = taskProjectionToTaskCardRun({
+    scopeId: 'scope-owner',
+    taskId: 'task-owner',
+    phase: 'tool_running',
+    title: 'Research',
+    updatedAt: '2026-07-11T00:00:00Z',
+    toolTrace: [],
+    ownerAgentId: 'analyst',
+  })
+  const rendered = mount(createElement(TaskCard, {
+    run,
+    sessionId: 'scope-owner',
+    expanded: false,
+    onToggleExpanded: () => undefined,
+  }))
+  try {
+    assert.equal(rendered.container.querySelector('[data-ready-task-agent-identity="true"]'), null)
+    assert.doesNotMatch(rendered.container.textContent || '', /负责人 analyst/)
+  } finally {
+    rendered.unmount()
+  }
+})
+
 test('TaskCard does not render supplement actions for blocked_config terminal runs', () => {
   const run = taskProjectionToTaskCardRun({
     scopeId: 'scope-blocked-config',

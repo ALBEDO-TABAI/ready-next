@@ -1164,7 +1164,7 @@ interface ElectronAgentAPI {
     requestId: string
     elapsedMs?: number
 	  }) => Promise<IPCResponse<{
-	    state?: 'cancel_requested' | 'stale' | 'not_found' | 'paused_user_input'
+	    state?: 'active' | 'stale' | 'not_found' | 'paused_user_input'
 	    activeRunId?: string | null
 	  }>>
   suspendRun: (payload: {
