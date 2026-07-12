@@ -1,0 +1,15 @@
+{
+  "id": "style-grammar-distill",
+  "name": "style-grammar-distill",
+  "displayName": "Style Grammar Distill",
+  "description": "聚合多份图片分析报告，提炼带证据与置信度的视觉风格语法。",
+  "version": "0.1.0",
+  "runtime": "reference",
+  "execution": { "mode": "advisory" },
+  "actions": {
+    "read_skill": {
+      "runtime": "reference",
+      "visibility": "internal"
+    }
+  }
+}

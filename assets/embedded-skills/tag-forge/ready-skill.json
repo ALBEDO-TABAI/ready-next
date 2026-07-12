@@ -1,0 +1,15 @@
+{
+  "id": "tag-forge",
+  "name": "tag-forge",
+  "displayName": "Tag Forge",
+  "description": "为文档和图片素材进行受控词表约束的打标、归一与知识包整理。",
+  "version": "0.1.0",
+  "runtime": "reference",
+  "execution": { "mode": "advisory" },
+  "actions": {
+    "read_skill": {
+      "runtime": "reference",
+      "visibility": "internal"
+    }
+  }
+}

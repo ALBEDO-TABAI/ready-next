@@ -1,0 +1,69 @@
+# tag-forge 受控词表（活资产：每轮打标后经用户批复更新并落盘）
+# 词条字段：id(英文kebab-case，机器用) / facet / label(展示名，中文优先) /
+#          aliases(归一命中面) / def(一句话定义+适用边界) / status(active|pending|deprecated)
+# 语言规则：有通行中文名用中文 label；无通行中文名保留官方英文写法
+
+version: 0.1
+config:
+  prefix_mode: false          # true 时 tag 显示为 #facet/label
+  tags_per_doc: [3, 7]        # 每份素材 tag 总数下限/上限
+  new_tags_per_run: 10        # 单轮运行新建词条上限
+  new_tags_per_doc: 2         # 单份素材新建词条上限
+  orphan_review_days: 90      # 孤儿词条观察期
+
+# ============ 形态 form（封闭枚举：不经闸门三新建，扩充需用户显式批准） ============
+entries:
+  - {id: brand-analysis,   facet: form, label: 品牌分析,  aliases: [品牌拆解, 品牌研究, brand analysis], def: 以单一品牌为主要对象的系统性分析报告, status: active}
+  - {id: tutorial,         facet: form, label: 教程,      aliases: [教学, 指南, how-to, guide], def: 以教会读者完成某件事为目的的步骤性内容, status: active}
+  - {id: case-study,       facet: form, label: 案例拆解,  aliases: [案例分析, 复盘, case study], def: 对具体项目/作品/事件的过程与得失拆解, status: active}
+  - {id: reference-doc,    facet: form, label: 参考资料,  aliases: [文档, 手册, reference], def: 供查阅的事实性/规范性资料（参数表、规范、白皮书）, status: active}
+  - {id: prompt-asset,     facet: form, label: 提示词,    aliases: [prompt, 咒语], def: 可复用的 AI 提示词或提示词模板, status: active}
+  - {id: inspiration,      facet: form, label: 灵感采集,  aliases: [参考图, 灵感, moodboard, 收藏], def: 以视觉/创意参考为目的收集的图文素材, status: active}
+  - {id: meeting-notes,    facet: form, label: 会议记录,  aliases: [会议纪要, 访谈记录], def: 会议/访谈/沟通的过程记录, status: active}
+  - {id: contract,         facet: form, label: 合同,      aliases: [协议, 契约, contract], def: 具有法律效力的协议类文档, status: active}
+  - {id: dataset,          facet: form, label: 数据集,    aliases: [数据表, data], def: 以结构化数据为主体的素材, status: active}
+  - {id: essay,            facet: form, label: 随笔观点,  aliases: [杂谈, 评论, 观点文], def: 以表达观点/思考为主的非结构化文章, status: active}
+
+# ============ 领域 domain（半开放：允许两级，父级须为已有词条） ============
+  - {id: skincare,             facet: domain, label: 护肤,            aliases: [护肤品, skincare], def: 护肤类目相关内容的一级领域, status: active}
+  - {id: skincare-efficacy,    facet: domain, label: 功效性护肤,      aliases: [功效护肤, 成分护肤], def: 以成分与功效为核心视角的护肤内容（护肤 的二级）, status: active}
+  - {id: skincare-antiaging,   facet: domain, label: 护肤/抗衰,       aliases: [抗衰老, 抗老, anti-aging], def: 抗衰方向的护肤内容, status: active}
+  - {id: makeup,               facet: domain, label: 彩妆,            aliases: [美妆, makeup], def: 彩妆类目相关内容, status: active}
+  - {id: xhs-marketing,        facet: domain, label: 小红书营销,      aliases: [小红书运营, 小红书投放, RED营销], def: 以小红书为阵地的营销与内容策略, status: active}
+  - {id: short-video-ads,      facet: domain, label: 短视频投放,      aliases: [信息流投放, 千川投放, 效果广告], def: 短视频效果广告的素材与投放方法, status: active}
+  - {id: kv-design,            facet: domain, label: KV设计,          aliases: [主视觉, key visual, 视觉设计], def: 品牌主视觉/平面视觉创作相关, status: active}
+  - {id: cg-production,        facet: domain, label: CG制作,          aliases: [CG, 三维制作], def: 三维/CG 内容制作的一级领域, status: active}
+  - {id: cg-houdini,           facet: domain, label: CG制作/Houdini,  aliases: [胡迪尼], def: Houdini 相关技术内容, status: active}
+  - {id: cg-ue,                facet: domain, label: CG制作/UE,       aliases: [虚幻引擎, Unreal], def: Unreal Engine 相关技术内容, status: active}
+  - {id: ai-workflow,          facet: domain, label: AI工作流,        aliases: [AI流程, AI提效, agent工作流], def: AI 工具链与自动化工作流的设计与实践, status: active}
+  - {id: ai-image,             facet: domain, label: AI生图,          aliases: [AI绘画, 文生图, AI出图], def: AI 图像生成的技术与创作方法, status: active}
+  - {id: ai-video,             facet: domain, label: AI视频,          aliases: [AI视频生成, 文生视频], def: AI 视频生成的技术与创作方法, status: active}
+  - {id: photography,          facet: domain, label: 摄影,            aliases: [photography, 拍摄], def: 摄影技术与美学相关内容, status: active}
+  - {id: copywriting,          facet: domain, label: 文案,            aliases: [copywriting, 文案写作], def: 商业文案的方法与案例, status: active}
+  - {id: team-management,      facet: domain, label: 团队管理,        aliases: [带团队, 管理, 招聘培养], def: 团队组建、招聘、培养与协作方法, status: active}
+
+# ============ 实体 entity（开放但强制归一：一个实体只有一个 label） ============
+  - {id: helena-rubinstein, facet: entity, label: 赫莲娜,   aliases: [HR, Helena Rubinstein, 黑绷带], def: 欧莱雅集团旗下高端护肤品牌, status: active}
+  - {id: skii,              facet: entity, label: SKII,     aliases: [SK-II, sk2, SK2], def: 宝洁旗下高端护肤品牌（无通行中文名，保留英文）, status: active}
+  - {id: estee-lauder,      facet: entity, label: 雅诗兰黛, aliases: [EL, Estee Lauder], def: 雅诗兰黛品牌, status: active}
+  - {id: shiseido,          facet: entity, label: 资生堂,   aliases: [Shiseido], def: 资生堂品牌, status: active}
+  - {id: winona,            facet: entity, label: 薇诺娜,   aliases: [Winona], def: 贝泰妮旗下敏感肌护肤品牌, status: active}
+  - {id: houdini,           facet: entity, label: Houdini,  aliases: [胡迪尼, SideFX Houdini], def: SideFX 的程序化三维软件, status: active}
+  - {id: blender,           facet: entity, label: Blender,  aliases: [布兰德], def: 开源三维创作软件, status: active}
+  - {id: claude,            facet: entity, label: Claude,   aliases: [claude, Anthropic Claude], def: Anthropic 的 AI 模型与产品, status: active}
+  - {id: claude-sdk,        facet: entity, label: Claude-SDK, aliases: [Claude Agent SDK, claude sdk], def: Anthropic 的 Agent 开发套件, status: active}
+  - {id: midjourney,        facet: entity, label: Midjourney, aliases: [MJ, mj], def: AI 图像生成工具, status: active}
+  - {id: comfyui,           facet: entity, label: ComfyUI,  aliases: [comfy], def: 节点式 AI 图像生成工作流工具, status: active}
+
+# ============ 用途 use（半封闭：新建须能想象按此用途批量检索） ============
+  - {id: kv-reference,      facet: use, label: KV参考,   aliases: [视觉参考, 出图参考], def: 供 KV/视觉创作时调取的参考, status: active}
+  - {id: competitor-study,  facet: use, label: 竞品研究, aliases: [竞品分析用, 对标研究], def: 用于了解竞品打法与市场位置, status: active}
+  - {id: teaching,          facet: use, label: 教学,     aliases: [带教, 培训用], def: 用于培训实习生/团队成员, status: active}
+  - {id: team-share,        facet: use, label: 团队分享, aliases: [分享会, 内部分享], def: 计划在团队内分享传播的内容, status: active}
+  - {id: skill-building,    facet: use, label: 建skill用, aliases: [做skill参考, 方法论沉淀], def: 用于沉淀为可复用 skill/方法论的原料, status: active}
+
+# ============ 状态 state（封闭枚举：首轮一律 待整理，流转由用户驱动） ============
+  - {id: inbox,     facet: state, label: 待整理, aliases: [inbox, 未读], def: 新入库、未经人工确认的素材, status: active}
+  - {id: read,      facet: state, label: 已精读, aliases: [已读, 已消化], def: 已完整阅读并确认 tag 的素材, status: active}
+  - {id: curated,   facet: state, label: 精选,   aliases: [收藏, 五星], def: 用户标记的高价值素材, status: active}
+  - {id: archived,  facet: state, label: 已归档, aliases: [归档, 过期], def: 保留但不再活跃使用的素材, status: active}

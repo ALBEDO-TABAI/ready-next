@@ -1,0 +1,15 @@
+{
+  "id": "image-deep-read",
+  "name": "image-deep-read",
+  "displayName": "Image Deep Read",
+  "description": "从创作意图、现实功能和适配度三个层面，对图片做有依据的深度分析。",
+  "version": "0.1.0",
+  "runtime": "reference",
+  "execution": { "mode": "advisory" },
+  "actions": {
+    "read_skill": {
+      "runtime": "reference",
+      "visibility": "internal"
+    }
+  }
+}

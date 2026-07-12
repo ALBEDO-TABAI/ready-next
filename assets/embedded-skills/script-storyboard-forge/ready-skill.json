@@ -1,0 +1,15 @@
+{
+  "id": "script-storyboard-forge",
+  "name": "script-storyboard-forge",
+  "displayName": "Script Storyboard Forge",
+  "description": "将短视频创意、产品或主题转化为可拍摄脚本和逐镜头分镜方案。",
+  "version": "0.1.0",
+  "runtime": "reference",
+  "execution": { "mode": "advisory" },
+  "actions": {
+    "read_skill": {
+      "runtime": "reference",
+      "visibility": "internal"
+    }
+  }
+}

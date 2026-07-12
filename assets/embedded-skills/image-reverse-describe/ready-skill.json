@@ -1,0 +1,15 @@
+{
+  "id": "image-reverse-describe",
+  "name": "image-reverse-describe",
+  "displayName": "Image Reverse Describe",
+  "description": "以可见证据为基础，对图片的空间、构图、光线、色彩和材质进行可重建描述。",
+  "version": "0.1.0",
+  "runtime": "reference",
+  "execution": { "mode": "advisory" },
+  "actions": {
+    "read_skill": {
+      "runtime": "reference",
+      "visibility": "internal"
+    }
+  }
+}

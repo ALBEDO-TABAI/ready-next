@@ -1,0 +1,15 @@
+{
+  "id": "character-costume-forge",
+  "name": "character-costume-forge",
+  "displayName": "Character Costume Forge",
+  "description": "根据已有脚本和分镜，为角色生成可复用的视觉身份与服道化提示词包。",
+  "version": "0.1.0",
+  "runtime": "reference",
+  "execution": { "mode": "advisory" },
+  "actions": {
+    "read_skill": {
+      "runtime": "reference",
+      "visibility": "internal"
+    }
+  }
+}
