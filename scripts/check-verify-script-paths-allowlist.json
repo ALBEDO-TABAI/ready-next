@@ -15,6 +15,27 @@
       "owner": "Stage X1 (handed to whichever stage prunes the candidatePaths[] list)",
       "expiresAt": "2026-12-31",
       "addedBy": "X1.5 — initial meta-gate landing"
+    },
+    {
+      "path": "src/main/modules/agent-control/turn-engine.ts",
+      "reason": "Intentional negative-existence fixture in check-directchat-turnengine-dormant-boundary.cjs: the gate must name this retired file so any resurrection fails. There is no live replacement path to substitute.",
+      "owner": "Phase A retired-runtime existence contract",
+      "expiresAt": "2027-12-31",
+      "addedBy": "2026-07-12 documentation and path hygiene audit"
+    },
+    {
+      "path": "src/main/modules/agent-control/domain-adapters/host-capability-dispatcher.ts",
+      "reason": "Intentional negative-existence fixture in check-directchat-turnengine-dormant-boundary.cjs: the gate must keep the retired path literal to reject file resurrection.",
+      "owner": "Phase A retired-runtime existence contract",
+      "expiresAt": "2027-12-31",
+      "addedBy": "2026-07-12 documentation and path hygiene audit"
+    },
+    {
+      "path": "src/main/modules/claude-bridge/direct-chat.ts",
+      "reason": "Intentional negative-existence fixture in check-directchat-turnengine-dormant-boundary.cjs: the gate scans for imports and rejects recreation of DirectChatEngine, so the deleted path is deliberately retained.",
+      "owner": "Phase C DirectChat retirement existence contract",
+      "expiresAt": "2027-12-31",
+      "addedBy": "2026-07-12 documentation and path hygiene audit"
     }
   ]
 }

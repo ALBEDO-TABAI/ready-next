@@ -3174,7 +3174,9 @@ test('agent sdk runtime anchors explicit target document instead of exposing new
   assert.equal(result.terminalReason, 'blocked_tool_error')
   assert.match(result.error || '', /目标文档/)
   assert.equal(requests.length, 2)
-  assert.equal(runMeta.get('run-doc-target')?.lastMessageText, '')
+  // W10-F5（2026-07-11 dogfood）：守卫强制 error 终态不再丢弃模型的进展说明——
+  // 失败语义由 status=error + terminalReason + 错误文案承担，正文保留供用户理解现场。
+  assert.equal(runMeta.get('run-doc-target')?.lastMessageText, '会写入目标文档。')
 })
 
 test('agent sdk runtime opens explicit target document before the first mutation', async () => {

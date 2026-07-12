@@ -45,6 +45,7 @@ test('electron packaging includes project-owned app icon assets instead of falli
 
 test('main process applies the project-owned icon during development instead of default electron branding', () => {
   const mainIndex = readWorkspaceFile('src/main/index.ts')
+  const bootEntry = readWorkspaceFile('src/main/boot-entry.ts')
   const packageJson = JSON.parse(readWorkspaceFile('package.json')) as {
     scripts: Record<string, string>
   }
@@ -53,14 +54,13 @@ test('main process applies the project-owned icon during development instead of 
   assert.match(mainIndex, /nativeImage/)
   assert.match(mainIndex, /function resolveAppIconPath\(\)/)
   assert.match(mainIndex, /build\/icon\.png/)
-  assert.match(mainIndex, /const READY_APP_NAME = 'Ready'/)
-  assert.match(mainIndex, /app\.setName\(READY_APP_NAME\)/)
+  assert.match(bootEntry, /app\.setName\('Ready'\)/)
   assert.match(mainIndex, /function ensureRegularDockApp\(\): void/)
   assert.match(mainIndex, /ensureRegularDockApp\(\)/)
   assert.match(mainIndex, /app\.dock\.setIcon\(/)
   assert.match(mainIndex, /icon:\s*resolveAppIconPath\(\)/)
   assert.ok(
-    mainIndex.indexOf('ensureRegularDockApp()') < mainIndex.indexOf('app.whenReady()'),
+    bootEntry.indexOf("app.setActivationPolicy('regular')") < bootEntry.indexOf('app.whenReady()'),
     'Ready must opt into a regular Dock app before app.whenReady() registers with LaunchServices',
   )
   assert.equal(
