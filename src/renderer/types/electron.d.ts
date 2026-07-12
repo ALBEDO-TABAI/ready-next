@@ -42,6 +42,10 @@ import type {
   FileEmergenceGetSnapshotPayload,
   FileEmergenceRecordActivityPayload,
   FileEmergenceRecordReadingSessionPayload,
+  FileEmergenceRenameProjectPayload,
+  FileEmergenceAssignFilePayload,
+  FileEmergenceCreateProjectForFilePayload,
+  FileEmergenceFeedbackPayload,
   FileEmergenceSnapshot,
 } from '../../shared/file-emergence'
 // Stage U PR U4.v2-2 / U4.v2-3 — TaskProjectionRecordData +
@@ -3776,6 +3780,7 @@ interface ElectronRunFeedbackAPI {
 // 梯队三 (2026-07-03) — emergence feed 卡（确定性提取，带证据链与行动出口）。
 interface EmergenceCardData {
   id: string
+  projectKey?: string
   type: 'resume' | 'follow_up' | 'crystallize' | 'prepare' | 'harvest' | 'forming'
   title: string
   evidence: Array<{ fact: string; ref: string }>
@@ -3791,6 +3796,8 @@ interface EmergenceCardData {
       | 'open_artifact'
       | 'open_project_group'
     ref: string
+    targetPath?: string | null
+    memberPaths?: string[]
   }
   requiresExplicitConfirm: boolean
 }
@@ -3892,8 +3899,22 @@ interface ElectronFileEmergenceAPI {
   getSnapshot: (payload: FileEmergenceGetSnapshotPayload) => Promise<IPCResponse<FileEmergenceSnapshot>>
   recordActivity: (payload: FileEmergenceRecordActivityPayload) => Promise<IPCResponse>
   recordReadingSession: (payload: FileEmergenceRecordReadingSessionPayload) => Promise<IPCResponse>
+  renameProject: (payload: FileEmergenceRenameProjectPayload) => Promise<IPCResponse>
+  feedbackProject: (payload: FileEmergenceFeedbackPayload) => Promise<IPCResponse>
+  listSuppressed: (payload: { workspaceRoots: string[] }) => Promise<IPCResponse<Array<{ projectKey: string; displayName: string; reason: 'not_related' | 'snoozed' | 'hidden'; until: number | null }>>>
+  getEvaluation: (payload: { workspaceRoots: string[] }) => Promise<IPCResponse<unknown>>
+  assignFile: (payload: FileEmergenceAssignFilePayload) => Promise<IPCResponse>
+  createProjectForFile: (payload: FileEmergenceCreateProjectForFilePayload) => Promise<IPCResponse>
   onFlushReadingSessions: (handler: (requestId: string) => void) => () => void
   ackReadingSessionsFlushed: (requestId: string) => void
+}
+interface ElectronTagForgeAPI {
+  beginCreation: (payload:{sourceRunId:string})=>Promise<IPCResponse<{creationToken:string}|null>>
+  recordCreation: (payload:{creationToken:string;sourceRunId:string;path:string;workspaceRoots:string[]})=>Promise<IPCResponse<{receiptId:string}>>
+  validateCreation:(payload:{creationToken:string;sourceRunId:string;proposals:Array<{facet:'form'|'domain'|'entity'|'use';label:string;evidenceCode:string;evidenceExcerpt?:string;confidence:number}>})=>Promise<IPCResponse<{tags:string[];sparse:boolean;pending:Array<{facet:string;label:string}>}>>
+  finalizeCreation: (payload:{creationToken:string;receiptId:string;sourceRunId:string;path:string;workspaceRoots:string[]})=>Promise<IPCResponse<{receiptId:string;revision:string;path:string;status?:string}>>
+  listPending: ()=>Promise<IPCResponse<Array<{proposalId:string;facet:string;label:string;evidenceCode:string;evidenceExcerpt:string|null}>>>
+  reviewPending: (payload:{proposalId:string;decision:'approve'|'reject'})=>Promise<IPCResponse>
 }
 
 interface ElectronAPI {
@@ -3916,6 +3937,7 @@ interface ElectronAPI {
   theme: ElectronThemeAPI
   settings: ElectronSettingsAPI
   fileEmergence: ElectronFileEmergenceAPI
+  tagForge: ElectronTagForgeAPI
   pet: ElectronPetAPI
   chat: ElectronChatAPI
   userProfile: ElectronUserProfileAPI

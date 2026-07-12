@@ -12,6 +12,7 @@ import {
   FileGetBacklinksSchema,
   FileGetGraphSchema,
   FileClassifySchema,
+  TagForgeApplySchema,
   FileRenameSchema,
   FileMoveSchema,
   FileInventorySchema,
@@ -69,6 +70,10 @@ test('FileClassifySchema requires path; setFrontmatter must be object', () => {
     true,
   )
   assert.equal(FileClassifySchema.safeParse({ path: '/x', setFrontmatter: 'nope' }).success, false)
+})
+test('TagForgeApplySchema requires structured proposals and automatic receipt shape',()=>{
+  assert.equal(TagForgeApplySchema.safeParse({path:'/x.md',mode:'automatic',receiptId:'r',expectedRevision:'h',proposals:[{facet:'domain',label:'AI工作流',evidenceCode:'topic',confidence:.9}]}).success,true)
+  assert.equal(TagForgeApplySchema.safeParse({path:'/x.md',mode:'automatic',expectedRevision:'h',proposals:[{facet:'project',label:'Ready',evidenceCode:'bad',confidence:1}]}).success,false)
 })
 
 test('FileRenameSchema requires path + newName', () => {

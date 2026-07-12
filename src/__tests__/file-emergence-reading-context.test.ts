@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { JSDOM } from 'jsdom'
 
 import { DOCUMENT_READING_POSITIONS_KEY } from '../renderer/modules/document/documentScrollAnchor'
 import {
@@ -60,4 +61,23 @@ test('reading context collects existing document and ebook progress inside works
   })
   assert.deepEqual(checked.map((item) => item.title), ['置身钉内', '白痴'])
   assert.equal(checked.find((item) => item.title === '白痴')?.progressRatio, 0.62)
+})
+
+test('reading context preserves the receiver required by native Web Storage', () => {
+  const now = Date.now()
+  const dom = new JSDOM('<!doctype html>', { url: 'http://localhost' })
+  dom.window.localStorage.setItem(DOCUMENT_READING_POSITIONS_KEY, JSON.stringify([
+    { key: '/workspace/docs/继续写.md', top: 20, ratio: 0.45, maxScroll: 100, updatedAt: now },
+    { key: '/workspace/papers/继续读.pdf', top: 40, ratio: 0.7, maxScroll: 100, updatedAt: now - 1 },
+  ]))
+  dom.window.localStorage.setItem(EBOOK_READING_STATE_KEY, JSON.stringify([
+    { path: '/workspace/books/继续读.epub', fraction: 0.6, updatedAt: now - 2 },
+  ]))
+
+  const records = collectReadingProgress({
+    storage: dom.window.localStorage,
+    workspaceRoots: ['/workspace'],
+  })
+
+  assert.deepEqual(records.map((record) => record.kind), ['document', 'pdf', 'ebook'])
 })

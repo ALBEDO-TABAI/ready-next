@@ -125,6 +125,22 @@ const EXPECTED_ANTHROPIC = [
     },
   },
   {
+    name: 'tag_forge_apply',
+    description:
+      '提交 Tag Forge 的结构化标签提案；Ready 校验词表、配额、创建回执与 revision 后原子写回并验证索引。新建文档自动打标必须带 receiptId，不能用于猜测项目或高级状态。',
+    input_schema: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: '要写回受控标签的 Markdown 绝对路径' },
+        mode: { type: 'string', description: '新建文档自动补全或用户显式打标' },
+        receiptId: { type: 'string', description: 'automatic 模式必需的创建回执' },
+        expectedRevision: { type: 'string', description: '读取最终正文后计算的 SHA-256 revision' },
+        proposals: { type: 'array', description: '模型只提交 form/domain/entity/use 语义提案；state/project 由代码决定', items: { type: 'object' } },
+      },
+      required: ['path', 'mode', 'expectedRevision', 'proposals'],
+    },
+  },
+  {
     name: 'file_rename',
     description:
       '重命名文件（路径不变、只改文件名或在同目录内改扩展名）。必须在 workspace 根内；默认不覆盖已有文件。',

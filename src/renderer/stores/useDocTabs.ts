@@ -21,6 +21,7 @@ export interface DocTab {
     title: string
     content: string
     isDirty: boolean
+    lastActivatedAt?: number | null
     // Renderer-only grouping (mirrors the browser rail). null/absent = ungrouped.
     groupId?: string | null
 }
@@ -208,6 +209,7 @@ function ensureDocumentTabForPath(tabs: DocTab[], path: string): { tabs: DocTab[
                 title,
                 content: '',
                 isDirty: false,
+                lastActivatedAt: null,
             },
         ],
         id,
@@ -233,6 +235,10 @@ function ensureImagePreviewTabForPath(tabs: DocTab[], path: string): { tabs: Doc
         }
     }
     return ensureDocumentTabForPath(tabs, path)
+}
+
+function markTabActivated(tabs: DocTab[], id: string, now = Date.now()): DocTab[] {
+    return tabs.map((tab) => tab.id === id ? { ...tab, lastActivatedAt: now } : tab)
 }
 
 function ensureTabsState(
@@ -268,6 +274,7 @@ export const useDocTabs = create<DocTabsState>()(persist((set, get) => ({
             title: '新文档',
             content: '',
             isDirty: false,
+            lastActivatedAt: null,
         }
     ],
     tabGroups: [],
@@ -291,7 +298,7 @@ export const useDocTabs = create<DocTabsState>()(persist((set, get) => ({
 
         const next = ensureDocumentTabForPath(tabs, path)
         set({
-            tabs: next.tabs,
+            tabs: markTabActivated(next.tabs, next.id),
             activeTabId: next.id,
         })
     },
@@ -302,6 +309,7 @@ export const useDocTabs = create<DocTabsState>()(persist((set, get) => ({
         const next = ensureImagePreviewTabForPath(tabs, path)
         const updates: Partial<DocTabsState> = { tabs: next.tabs }
         if (options?.activate !== false) {
+            updates.tabs = markTabActivated(next.tabs, next.id)
             updates.activeTabId = next.id
         }
         set(updates)
@@ -317,7 +325,7 @@ export const useDocTabs = create<DocTabsState>()(persist((set, get) => ({
         if (pane === 'primary') {
             if (next.id === splitTabId) {
                 set({
-                    tabs: next.tabs,
+                    tabs: markTabActivated(next.tabs, next.id),
                     activeTabId: next.id,
                     splitTabId: activeTabId,
                 })
@@ -325,7 +333,7 @@ export const useDocTabs = create<DocTabsState>()(persist((set, get) => ({
             }
 
             set({
-                tabs: next.tabs,
+                tabs: markTabActivated(next.tabs, next.id),
                 activeTabId: next.id,
             })
             return next.id
@@ -334,13 +342,13 @@ export const useDocTabs = create<DocTabsState>()(persist((set, get) => ({
         if (next.id === activeTabId) {
             if (splitTabId) {
                 set({
-                    tabs: next.tabs,
+                    tabs: markTabActivated(next.tabs, next.id),
                     activeTabId: splitTabId,
                     splitTabId: next.id,
                 })
             } else {
                 set({
-                    tabs: next.tabs,
+                    tabs: markTabActivated(next.tabs, next.id),
                     activeTabId: next.id,
                 })
             }
@@ -348,7 +356,7 @@ export const useDocTabs = create<DocTabsState>()(persist((set, get) => ({
         }
 
         set({
-            tabs: next.tabs,
+            tabs: markTabActivated(next.tabs, next.id),
             splitTabId: next.id,
         })
         return next.id
@@ -367,6 +375,7 @@ export const useDocTabs = create<DocTabsState>()(persist((set, get) => ({
                     title,
                     content: options?.content || '',
                     isDirty: Boolean(options?.content),
+                    lastActivatedAt: null,
                 },
             ],
         })
@@ -412,13 +421,14 @@ export const useDocTabs = create<DocTabsState>()(persist((set, get) => ({
             const oldIndex = tabs.findIndex(t => t.id === id)
             const newActive = remaining[Math.min(oldIndex, remaining.length - 1)]
             updates.activeTabId = newActive.id
+            updates.tabs = markTabActivated(normalized.tabs, newActive.id)
         }
 
         set(updates)
     },
 
     setActiveTab: (id: string) => {
-        set({ activeTabId: id, splitTabId: null })
+        set({ tabs: markTabActivated(get().tabs, id), activeTabId: id, splitTabId: null })
     },
 
     renameTab: (id: string, title: string) => {
@@ -480,7 +490,7 @@ export const useDocTabs = create<DocTabsState>()(persist((set, get) => ({
     },
 
     setSplitTab: (id: string | null) => {
-        set({ splitTabId: id })
+        set({ tabs: id ? markTabActivated(get().tabs, id) : get().tabs, splitTabId: id })
     },
 
     setDocumentSplitRatio: (ratio: number) => {

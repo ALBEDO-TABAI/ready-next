@@ -1,12 +1,16 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   IconChevronDown as ChevronDown,
   IconChevronRight as ChevronRight,
   IconFileText as FileText,
   IconFolder as Folder,
   IconLoader2 as Loader2,
+  IconPencil as Pencil,
   IconRefresh as RefreshCw,
   IconSparkles as Sparkles,
+  IconSwitchHorizontal as SwitchHorizontal,
+  IconCheck as Check,
+  IconX as X,
 } from '@tabler/icons-react'
 
 import type {
@@ -20,9 +24,19 @@ interface FileEmergenceSectionProps {
   isRefreshing: boolean
   onRefresh: () => void
   onOpenFile: (path: string, project: FileEmergenceProject) => void
+  workspaceRoots?: readonly string[]
 }
 
 const EMERGENCE_UI_STATE_STORAGE_KEY = 'ready:file-emergence:ui-state:v1'
+
+const EMPTY_STATE_LABELS: Record<NonNullable<FileEmergenceViewModel['emptyState']>, string> = {
+  no_trusted_candidates: '暂时没有足够可信的项目',
+  sources_degraded: '部分记录暂时无法读取，请稍后刷新',
+  insufficient_history: '使用记录还不够，继续工作后会逐渐出现',
+  all_suppressed: '推荐项目都已隐藏或延后',
+}
+
+type SuppressedProject = { projectKey: string; displayName: string; reason: 'not_related' | 'snoozed' | 'hidden'; until: number | null }
 
 interface FileEmergenceUiState {
   expandedBucket: FileEmergenceBucket | null
@@ -41,12 +55,24 @@ export default function FileEmergenceSection({
   isRefreshing,
   onRefresh,
   onOpenFile,
+  workspaceRoots = [],
 }: FileEmergenceSectionProps) {
   const validState = useMemo(
     () => getValidEmergenceState(viewModel),
     [viewModel],
   )
   const [uiState, setUiState] = useState<FileEmergenceUiState>(() => readFileEmergenceUiState())
+  const [editingProjectKey, setEditingProjectKey] = useState<string | null>(null)
+  const projectNameInputRef = useRef<HTMLInputElement>(null)
+  const [assigningPath, setAssigningPath] = useState<string | null>(null)
+  const [creatingProjectForPath, setCreatingProjectForPath] = useState<string | null>(null)
+  const newProjectNameInputRef = useRef<HTMLInputElement>(null)
+  const [identityError, setIdentityError] = useState<string | null>(null)
+  const [suppressedProjects, setSuppressedProjects] = useState<SuppressedProject[]>([])
+  const allProjects = useMemo(
+    () => viewModel.buckets.flatMap((bucket) => bucket.projects).filter((project) => Boolean(project.projectKey)),
+    [viewModel],
+  )
 
   useEffect(() => {
     setUiState((current) => pruneFileEmergenceUiState(current, validState))
@@ -55,6 +81,18 @@ export default function FileEmergenceSection({
   useEffect(() => {
     writeFileEmergenceUiState(uiState)
   }, [uiState])
+
+  useEffect(() => {
+    if (viewModel.emptyState !== 'all_suppressed') {
+      setSuppressedProjects([])
+      return
+    }
+    let active = true
+    void window.electronAPI?.fileEmergence?.listSuppressed?.({ workspaceRoots: [...workspaceRoots] }).then((result) => {
+      if (active && result?.success) setSuppressedProjects(result.data || [])
+    })
+    return () => { active = false }
+  }, [viewModel.emptyState, workspaceRoots])
 
   const toggleBucket = (bucket: FileEmergenceBucket) => {
     setUiState((current) => ({
@@ -83,6 +121,93 @@ export default function FileEmergenceSection({
       selectedItemKey: getFileSelectionKey(path),
     }))
     onOpenFile(path, project)
+  }
+
+  const beginRenameProject = (project: FileEmergenceProject) => {
+    if (!project.projectKey) {
+      setIdentityError('项目身份尚未建立，请刷新后重试')
+      return
+    }
+    setIdentityError(null)
+    setEditingProjectKey(project.projectKey)
+  }
+
+  const submitProjectRename = async () => {
+    if (!editingProjectKey) return
+    const result = await window.electronAPI?.fileEmergence?.renameProject?.({
+      projectKey: editingProjectKey,
+      displayName: projectNameInputRef.current?.value || '',
+      workspaceRoots: [...workspaceRoots],
+    })
+    if (!result?.success) {
+      setIdentityError(result?.error || '项目重命名失败')
+      return
+    }
+    setEditingProjectKey(null)
+    setIdentityError(null)
+    onRefresh()
+  }
+
+  const assignFileToProject = async (path: string, projectKey: string) => {
+    if (projectKey === '__new__') {
+      setCreatingProjectForPath(path)
+      return
+    }
+    const result = await window.electronAPI?.fileEmergence?.assignFile?.({
+      projectKey,
+      path,
+      workspaceRoots: [...workspaceRoots],
+    })
+    if (!result?.success) {
+      setIdentityError(result?.error || '文件归属调整失败')
+      return
+    }
+    setAssigningPath(null)
+    setIdentityError(null)
+    onRefresh()
+  }
+
+  const createProjectForFile = async (path: string) => {
+    const result = await window.electronAPI?.fileEmergence?.createProjectForFile?.({
+      displayName: newProjectNameInputRef.current?.value || '',
+      path,
+      workspaceRoots: [...workspaceRoots],
+    })
+    if (!result?.success) {
+      setIdentityError(result?.error || '新建项目失败')
+      return
+    }
+    setCreatingProjectForPath(null)
+    setAssigningPath(null)
+    setIdentityError(null)
+    onRefresh()
+  }
+
+  const submitProjectFeedback = async (project: FileEmergenceProject, action: 'not_related' | 'snooze' | 'hide') => {
+    if (!project.projectKey) return
+    const result = await window.electronAPI?.fileEmergence?.feedbackProject?.({
+      projectKey: project.projectKey,
+      action,
+      evidenceCutoff: project.updatedAt,
+      snoozeUntil: action === 'snooze' ? Date.now() + 7 * 24 * 60 * 60 * 1000 : undefined,
+      workspaceRoots: [...workspaceRoots],
+    })
+    if (!result?.success) {
+      setIdentityError(result?.error || '项目反馈保存失败')
+      return
+    }
+    setIdentityError(null)
+    onRefresh()
+  }
+
+  const restoreProject = async (projectKey: string) => {
+    const result = await window.electronAPI?.fileEmergence?.feedbackProject?.({ projectKey, action: 'restore', workspaceRoots: [...workspaceRoots] })
+    if (!result?.success) {
+      setIdentityError(result?.error || '恢复项目失败')
+      return
+    }
+    setIdentityError(null)
+    onRefresh()
   }
 
   return (
@@ -149,6 +274,30 @@ export default function FileEmergenceSection({
       {/* 分桶行不再叠 wrapper inset：行自身 px-2 提供 8px 内容缩进，
           与 FileTreeItem（padding 6px 8px）同缘，hover 药丸同样通到左缘。 */}
       <div className="mt-1 space-y-1">
+        {identityError ? (
+          <div className="mx-2 px-2 py-1 text-[11px]" data-file-emergence-identity-error style={{ color: 'var(--color-danger, #c94b40)' }}>
+            {identityError}
+          </div>
+        ) : null}
+        {viewModel.totalProjects === 0 && viewModel.emptyState ? (
+          <div
+            className="mx-2 rounded-[8px] px-2 py-2 text-[12px]"
+            data-file-emergence-empty-state={viewModel.emptyState}
+            style={{ color: 'var(--text-light)' }}
+          >
+            {EMPTY_STATE_LABELS[viewModel.emptyState]}
+            {viewModel.emptyState === 'all_suppressed' && suppressedProjects.length > 0 ? (
+              <div className="mt-2 space-y-1" data-file-emergence-suppressed-list>
+                {suppressedProjects.map((project) => (
+                  <div key={project.projectKey} className="flex items-center justify-between gap-2">
+                    <span className="min-w-0 truncate">{project.displayName}</span>
+                    <button type="button" className="shrink-0 underline" onClick={() => { void restoreProject(project.projectKey) }} aria-label={`恢复项目 ${project.displayName}`}>恢复</button>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
         {viewModel.buckets.map((bucket) => {
           const bucketSelectionKey = getBucketSelectionKey(bucket.bucket)
           const isBucketOpen = uiState.expandedBucket === bucket.bucket
@@ -206,9 +355,13 @@ export default function FileEmergenceSection({
                     const statusMeta = project.status ? PROJECT_STATUS_META[project.status] : null
                     return (
                       <div key={project.id} className="mb-0.5">
-                        <button
-                          type="button"
+                        <div
+                          role="button"
+                          tabIndex={0}
                           onClick={() => toggleProject(project.id)}
+                          onKeyDown={(event) => {
+                            if (event.key === 'Enter' || event.key === ' ') toggleProject(project.id)
+                          }}
                           className="grid min-h-[28px] w-full grid-cols-[22px_14px_minmax(0,1fr)_auto_20px] items-center gap-1.5 rounded-[8px] px-2 py-0.5 text-left transition-[background-color,box-shadow] hover:bg-[var(--files-panel-state-hover-bg)] hover:shadow-[var(--files-panel-state-hover-shadow)]"
                           title={project.evidence.map((item) => item.label).slice(0, 3).join(' · ')}
                           aria-expanded={isProjectOpen}
@@ -221,9 +374,38 @@ export default function FileEmergenceSection({
                         >
                           <span aria-hidden="true" />
                           <Folder className="h-[14px] w-[14px] shrink-0" style={{ color: 'var(--text-muted)' }} strokeWidth={1.9} />
-                          <span className="min-w-0 flex-1 truncate text-[12px] font-medium" style={{ color: 'var(--text-title)' }}>
-                            {project.title}
-                          </span>
+                          {editingProjectKey && editingProjectKey === project.projectKey ? (
+                            <span className="flex min-w-0 items-center gap-1" onClick={(event) => event.stopPropagation()}>
+                              <input
+                                defaultValue={project.title}
+                                ref={projectNameInputRef}
+                                onKeyDown={(event) => {
+                                  if (event.key === 'Enter') void submitProjectRename()
+                                  if (event.key === 'Escape') setEditingProjectKey(null)
+                                }}
+                                aria-label="项目名称"
+                                className="min-w-0 flex-1 rounded px-1 py-0.5 text-[12px]"
+                              />
+                              <button type="button" aria-label="确认项目名称" onClick={() => { void submitProjectRename() }}><Check className="h-3 w-3" /></button>
+                              <button type="button" aria-label="取消项目重命名" onClick={() => setEditingProjectKey(null)}><X className="h-3 w-3" /></button>
+                            </span>
+                          ) : (
+                            <span className="flex min-w-0 items-center gap-1">
+                              <span className="min-w-0 flex-1 truncate text-[12px] font-medium" style={{ color: 'var(--text-title)' }}>
+                                {project.title}
+                              </span>
+                              {project.projectKey ? (
+                                <button
+                                  type="button"
+                                  aria-label={`重命名项目 ${project.title}`}
+                                  onClick={(event) => { event.stopPropagation(); beginRenameProject(project) }}
+                                  className="shrink-0 opacity-55 hover:opacity-100"
+                                >
+                                  <Pencil className="h-3 w-3" />
+                                </button>
+                              ) : null}
+                            </span>
+                          )}
                           {statusMeta ? (
                             <span className="flex shrink-0 items-center gap-1 text-[11px]" style={{ color: 'var(--text-muted)' }}>
                               <span
@@ -241,15 +423,26 @@ export default function FileEmergenceSection({
                           >
                             {project.files.length}
                           </span>
-                        </button>
+                        </div>
                         {isProjectOpen && project.files.length > 0 && (
                           <div className="mt-0.5 space-y-0.5">
+                            {project.projectKey ? (
+                              <div className="ml-[56px] flex flex-wrap gap-2 py-1 text-[11px]" data-file-emergence-feedback={project.projectKey}>
+                                <button type="button" onClick={() => { void submitProjectFeedback(project, 'not_related') }}>不相关</button>
+                                <button type="button" onClick={() => { void submitProjectFeedback(project, 'snooze') }}>七天后提醒</button>
+                                <button type="button" onClick={() => { void submitProjectFeedback(project, 'hide') }}>不再出现</button>
+                              </div>
+                            ) : null}
                             {project.files.map((file) => (
-                              <button
+                              <div
                                 key={file.path}
-                                type="button"
+                                role="button"
+                                tabIndex={0}
                                 onClick={() => openEmergenceFile(file.path, project)}
-                                className="grid min-h-[24px] w-full grid-cols-[42px_12px_minmax(0,1fr)] items-center gap-1.5 rounded-[8px] px-2 py-0.5 text-left transition-[background-color,box-shadow] hover:bg-[var(--files-panel-state-hover-bg)] hover:shadow-[var(--files-panel-state-hover-shadow)]"
+                                onKeyDown={(event) => {
+                                  if (event.key === 'Enter' || event.key === ' ') openEmergenceFile(file.path, project)
+                                }}
+                                className="grid min-h-[24px] w-full grid-cols-[42px_12px_minmax(0,1fr)_18px] items-center gap-1.5 rounded-[8px] px-2 py-0.5 text-left transition-[background-color,box-shadow] hover:bg-[var(--files-panel-state-hover-bg)] hover:shadow-[var(--files-panel-state-hover-shadow)]"
                                 title={file.path}
                                 data-file-emergence-file={file.path}
                                 data-selected={uiState.selectedItemKey === getFileSelectionKey(file.path) ? 'true' : undefined}
@@ -263,8 +456,41 @@ export default function FileEmergenceSection({
                                 <span className="min-w-0 flex-1 truncate text-[12px]" style={{ color: 'var(--text-muted)' }}>
                                   {file.name}{file.isCurrent ? ' · 当前' : ''}
                                 </span>
-                              </button>
+                                {file.fileKey && allProjects.length > 1 ? (
+                                  <span
+                                    role="button"
+                                    tabIndex={0}
+                                    aria-label={`调整 ${file.name} 的项目归属`}
+                                    onClick={(event) => { event.stopPropagation(); setAssigningPath(file.path) }}
+                                    onKeyDown={(event) => {
+                                      if (event.key === 'Enter' || event.key === ' ') setAssigningPath(file.path)
+                                    }}
+                                  >
+                                    <SwitchHorizontal className="h-3 w-3" />
+                                  </span>
+                                ) : <span aria-hidden="true" />}
+                              </div>
                             ))}
+                            {assigningPath && project.files.some((file) => file.path === assigningPath) ? (
+                              <select
+                                aria-label="选择目标项目"
+                                value={project.projectKey || ''}
+                                onChange={(event) => { void assignFileToProject(assigningPath, event.target.value) }}
+                                className="ml-[56px] max-w-[calc(100%-64px)] rounded px-1 py-0.5 text-[11px]"
+                              >
+                                {allProjects.map((candidate) => (
+                                  <option key={candidate.projectKey} value={candidate.projectKey}>{candidate.title}</option>
+                                ))}
+                                <option value="__new__">新建项目…</option>
+                              </select>
+                            ) : null}
+                            {creatingProjectForPath && project.files.some((file) => file.path === creatingProjectForPath) ? (
+                              <span className="ml-[56px] flex items-center gap-1">
+                                <input ref={newProjectNameInputRef} aria-label="新项目名称" className="min-w-0 flex-1 rounded px-1 py-0.5 text-[11px]" />
+                                <button type="button" aria-label="确认新建项目" onClick={() => { void createProjectForFile(creatingProjectForPath) }}><Check className="h-3 w-3" /></button>
+                                <button type="button" aria-label="取消新建项目" onClick={() => setCreatingProjectForPath(null)}><X className="h-3 w-3" /></button>
+                              </span>
+                            ) : null}
                           </div>
                         )}
                       </div>

@@ -192,3 +192,27 @@ test('document move refuses an existing destination before copy/remove fallback 
   assert.equal(readFileSync(join(sourceDir, 'a.md'), 'utf8'), 'source\n')
   assert.equal(readFileSync(join(destDir, 'a.md'), 'utf8'), 'dest\n')
 })
+
+test('document move rolls the filesystem back when identity bookkeeping fails', async (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'ready-file-move-identity-'))
+  t.after(async () => { await rm(root, { recursive: true, force: true }) })
+  const source = join(root, 'source.md')
+  const destination = join(root, 'destination.md')
+  writeFileSync(source, 'source\n', 'utf8')
+  const { ipc, handleCalls } = createMockIpc()
+  fileMutationGroup.register(ipc, {
+    useMock: false,
+    onPathMoved: () => { throw new Error('identity unavailable') },
+  })
+  const handlers = new Map(handleCalls.map((entry) => [entry.channel, entry.handler]))
+
+  const result = await handlers.get('document:move')?.(
+    {} as IpcMainInvokeEvent,
+    { src: source, dest: destination },
+  ) as { success: boolean; error?: string }
+
+  assert.equal(result.success, false)
+  assert.match(result.error || '', /identity unavailable/)
+  assert.equal(existsSync(source), true)
+  assert.equal(existsSync(destination), false)
+})

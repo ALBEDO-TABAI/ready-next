@@ -28,6 +28,7 @@ export interface CurrentDocumentTabContext {
   isActive: boolean
   isSplit: boolean
   isDirty: boolean
+  lastActivatedAt: number | null
 }
 
 export interface CurrentDocumentContext {
@@ -35,7 +36,7 @@ export interface CurrentDocumentContext {
 }
 
 export function buildCurrentDocumentContext(input: {
-  tabs: ReadonlyArray<{ id: string; path: string | null; title: string; isDirty: boolean }>
+  tabs: ReadonlyArray<{ id: string; path: string | null; title: string; isDirty: boolean; lastActivatedAt?: number | null }>
   activeTabId: string
   splitTabId: string | null
   workspaceRoots: readonly string[]
@@ -48,6 +49,7 @@ export function buildCurrentDocumentContext(input: {
       isActive: tab.id === input.activeTabId,
       isSplit: tab.id === input.splitTabId,
       isDirty: tab.isDirty,
+      lastActivatedAt: Number.isFinite(tab.lastActivatedAt) ? Number(tab.lastActivatedAt) : null,
     }))
   return { tabs }
 }
@@ -103,7 +105,7 @@ function readDocumentProgress(
   workspaceRoots: readonly string[],
 ): FileEmergenceReadingProgress[] {
   return readDocumentReadingPositions({
-    getItem: storage.getItem,
+    getItem: storage.getItem.bind(storage),
     setItem: () => undefined,
   })
     .filter((record) => isInsideWorkspace(record.key, workspaceRoots))

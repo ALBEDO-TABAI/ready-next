@@ -9,6 +9,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { IconRefresh, IconSparkles } from '@tabler/icons-react'
 import type { EmergenceFeedEntryData } from '../../types/electron'
+import { executeFileEmergenceAction } from '../../modules/file-emergence/emergenceAction'
 
 const ACTION_LABELS: Record<EmergenceFeedEntryData['card']['action']['kind'], string> = {
   resume_task: '继续',
@@ -23,6 +24,7 @@ const ACTION_LABELS: Record<EmergenceFeedEntryData['card']['action']['kind'], st
 
 const SCOPE_ACTIONS = new Set(['resume_task', 'adjudicate_task', 'supply_input'])
 const SETTINGS_ACTIONS = new Set(['adopt_candidate', 'review_duplicate'])
+const FILE_ACTIONS = new Set(['open_project','open_artifact','open_project_group'])
 
 export function EmergenceFeedSection({
   onOpenScope,
@@ -33,6 +35,7 @@ export function EmergenceFeedSection({
 }) {
   const [entries, setEntries] = useState<EmergenceFeedEntryData[]>([])
   const [refreshing, setRefreshing] = useState(false)
+  const [actionError,setActionError]=useState<string|null>(null)
 
   const api = typeof window !== 'undefined' ? window.electronAPI?.emergence : undefined
 
@@ -56,13 +59,18 @@ export function EmergenceFeedSection({
 
   if (!api || entries.length === 0) return null
 
-  const activate = (entry: EmergenceFeedEntryData) => {
+  const activate = async (entry: EmergenceFeedEntryData) => {
+    setActionError(null)
     const kind = entry.card.action.kind
     if (SCOPE_ACTIONS.has(kind)) {
       if (entry.scopeId) onOpenScope(entry.scopeId)
       return
     }
     if (SETTINGS_ACTIONS.has(kind)) onOpenSettings()
+    if (FILE_ACTIONS.has(kind)) {
+      const result=await executeFileEmergenceAction(entry.card.action as Parameters<typeof executeFileEmergenceAction>[0])
+      if(!result.success)setActionError(result.error)
+    }
   }
 
   return (
@@ -100,6 +108,7 @@ export function EmergenceFeedSection({
         </button>
       </div>
       <div className="flex flex-col" style={{ gap: 6 }}>
+        {actionError?<div role="alert" data-ready-emergence-action-error style={{fontSize:11,color:'var(--color-red)',padding:'2px 4px'}}>{actionError}</div>:null}
         {entries.map((entry) => {
           const disabled = SCOPE_ACTIONS.has(entry.card.action.kind) && !entry.scopeId
           return (
@@ -136,7 +145,7 @@ export function EmergenceFeedSection({
                   type="button"
                   data-ready-emergence-action={entry.card.action.kind}
                   disabled={disabled}
-                  onClick={() => activate(entry)}
+                  onClick={() => { void activate(entry) }}
                   className="hover:bg-black/5 transition-colors"
                   style={{
                     padding: '2px 8px',

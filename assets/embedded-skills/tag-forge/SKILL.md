@@ -1,6 +1,6 @@
 ---
 name: tag-forge
-description: "图文素材 AI 阅读与收敛式打标引擎。对用户指定的文档、图片或文件夹下所有图文素材做一轮 AI 通读，在文档顶部生成一行受控词表约束的 tag（类似 Obsidian frontmatter tags，但每个 tag 都经过词表归一，防止标签泛滥），并维护一份活的 tag 词表 tag-lexicon.yaml。支持基于 tag 组合从素材库提取知识包。Use when 用户说'帮我打标'、'打 tag'、'给这些文档打标签'、'给这批图片打标'、'整理素材标签'、'建立标签体系'、'tag 收敛'、'合并同义标签'、'提取知识包'、'按标签整理知识'、'tag-forge'、'tf'，或指定一个文件/文件夹要求批量阅读打标时触发。即使用户只说'帮我把这堆资料的标签理一理'或'这些文档太乱了帮我分类'也应使用此 skill。Do not use for 纯摘要或学习笔记（用 study-notes）、纯翻译、视频文件的打标执行（视频目前只提供方法论，见 references/video-tag-methodology.md，不做实际处理）。"
+description: "图文素材 AI 阅读与收敛式打标引擎。对用户指定的文档、图片或文件夹下图文素材通读并提出受控标签，标签由 Ready 校验、写回和回读。支持基于标签组合提取知识包。Use when 用户明确说 tag-forge，或完整技能名 Tag Forge。普通任务词只用于模型读取目录后通过 use_skill 选择，不作为代码侧别名。Do not use for 纯摘要、翻译或视频文件打标执行。"
 ---
 
 # Tag Forge
@@ -10,9 +10,9 @@ description: "图文素材 AI 阅读与收敛式打标引擎。对用户指定�
 ## Read in order
 
 - 必读 [tag-lexicon.yaml](./tag-lexicon.yaml)——它同时是候选池、抽取 schema、归一词典。没读词表就打标是本 skill 的头号违规
-- 首次使用或需要判断 tag 归属哪个 facet 时，读 [references/facet-schema.md](./references/facet-schema.md)
-- 需要完整走查示范时，读 [references/worked-example.md](./references/worked-example.md)（含一个 23 tag → 6 tag 的真实收敛案例）
-- 用户问视频素材怎么打标时，读 [references/video-tag-methodology.md](./references/video-tag-methodology.md)，只讲方法论，不执行
+- 首次使用或需要判断 tag 归属哪个 facet 时，读 [reference/facet-schema.md](./reference/facet-schema.md)
+- 需要完整走查示范时，读 [reference/worked-example.md](./reference/worked-example.md)（含一个 23 tag → 6 tag 的真实收敛案例）
+- 用户问视频素材怎么打标时，读 [reference/video-tag-methodology.md](./reference/video-tag-methodology.md)，只讲方法论，不执行
 
 ## 两种模式
 
@@ -90,7 +90,7 @@ description: "图文素材 AI 阅读与收敛式打标引擎。对用户指定�
 - 疑似同义词合并建议（如词表里同时存在"保湿"与"补水"且语料中混用）
 - 孤儿 tag 提示：仅被 1 份素材使用的词条，建议观察或降级
 
-用户批复后，把词表变更写回 tag-lexicon.yaml。**词表是活资产，每轮必须落盘，不能只改在对话里。**
+用户批复后，把变更交给 Ready 的 pending 审核与用户 overlay；不得写内置 `tag-lexicon.yaml`。内置词表是只读版本种子，用户资产由应用数据层保存。
 
 ---
 

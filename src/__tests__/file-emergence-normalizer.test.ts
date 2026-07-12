@@ -88,6 +88,54 @@ test('directory project titles prefer concrete folder names over opened file nam
   assert.equal(result.titleSource, 'directory')
 })
 
+test('production noise fixtures cannot steal six real project names', () => {
+  const fixtures = [
+    { project: '宝矿力', noise: '04-代表广告与项目拆解' },
+    { project: '多看书', noise: '卡拉马佐夫兄弟完整珍藏版陀思妥耶夫斯基世界文学名著精装商品详情长标题' },
+    { project: 'pin', noise: '5ecdf91a6a98532ba0fec7ec22d35dc4' },
+    { project: '品牌广告', noise: 'BV15oXnBJE43_品牌年度广告完整文字稿' },
+    { project: '服装研究', noise: 'ae28f22b669f8947fbe1a31889047c3a.webp' },
+    { project: '2026 世界杯', noise: '2018-logo-1' },
+  ]
+
+  for (const fixture of fixtures) {
+    const result = buildProjectTitle({
+      rawLabels: [fixture.project, fixture.noise],
+      anchorPath: `/workspace/${fixture.project}`,
+      evidence: [{ source: 'file_activity', label: fixture.noise, score: 1.3, ref: `/workspace/${fixture.project}/${fixture.noise}.md` }],
+      documentTitleHints: [{ title: fixture.noise, source: 'file_name', path: `/workspace/${fixture.project}/${fixture.noise}.md` }],
+    })
+    assert.equal(result.title, fixture.project, fixture.project)
+  }
+})
+
+test('explicit project and named tab-group evidence outrank file titles by source and shared support', () => {
+  const explicit = buildProjectTitle({
+    rawLabels: ['工作内容'],
+    anchorPath: '/workspace/工作内容',
+    evidence: [],
+    documentTitleHints: [
+      { title: '单文件标题', source: 'file_name', path: '/workspace/工作内容/a.md' },
+      { title: '品牌焕新', source: 'ready_project', path: '/workspace/工作内容/a.md' },
+    ],
+  })
+  assert.equal(explicit.title, '品牌焕新')
+  assert.equal(explicit.titleSource, 'frontmatter')
+
+  const group = buildProjectTitle({
+    rawLabels: ['资料'],
+    anchorPath: '/workspace/资料',
+    evidence: [],
+    documentTitleHints: [
+      { title: '夏季发布', source: 'tab_group', path: '/workspace/资料/a.md' },
+      { title: '夏季发布', source: 'tab_group', path: '/workspace/资料/b.md' },
+      { title: '很长但只有一份文件支持的内部分析标题', source: 'file_name', path: '/workspace/资料/a.md' },
+    ],
+  })
+  assert.equal(group.title, '夏季发布')
+  assert.equal(group.titleSource, 'tab_group')
+})
+
 test('semantic candidates matching a directory project merge into directory evidence', () => {
   assert.equal(
     shouldMergeSemanticIntoDirectory({

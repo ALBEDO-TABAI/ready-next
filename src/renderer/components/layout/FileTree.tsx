@@ -188,8 +188,19 @@ export default function FileTree({
   const [fileEmergenceReadingProgress, setFileEmergenceReadingProgress] = useState<FileEmergenceReadingProgress[]>([])
   const [fileEmergenceRefreshing, setFileEmergenceRefreshing] = useState(false)
   const docTabs = useDocTabs((state) => state.tabs)
+  const docTabGroups = useDocTabs((state) => state.tabGroups)
   const activeDocTabId = useDocTabs((state) => state.activeTabId)
   const splitDocTabId = useDocTabs((state) => state.splitTabId)
+  const fileEmergenceProjectContext = useMemo(() => ({
+    tabGroups: docTabGroups
+      .map((group) => ({
+        name: group.name.trim(),
+        paths: docTabs
+          .filter((tab) => tab.groupId === group.id && tab.path)
+          .map((tab) => tab.path!),
+      }))
+      .filter((group) => group.name.length > 0 && group.paths.length >= 2),
+  }), [docTabGroups, docTabs])
   const effectiveGridPath = gridPath !== undefined ? gridPath : internalGridPath
   const setEffectiveGridPath = onGridPathChange ?? setInternalGridPath
   const activeAnalysisJobKey = useMemo(() => buildAnalysisJobKey(pendingClips), [pendingClips])
@@ -259,19 +270,24 @@ export default function FileTree({
     if (typeof window === 'undefined' || !window.electronAPI?.fileEmergence?.getSnapshot) return
     setFileEmergenceRefreshing(true)
     try {
-      const result = await window.electronAPI.fileEmergence.getSnapshot({
-        workspaceRoots: safeWorkspaceRoots,
-        forceRefresh,
-      })
+      const [result, readingProgress] = await Promise.all([
+        window.electronAPI.fileEmergence.getSnapshot({
+          workspaceRoots: safeWorkspaceRoots,
+          forceRefresh,
+          projectContext: fileEmergenceProjectContext,
+        }),
+        readWorkspaceReadingProgress({ workspaceRoots: safeWorkspaceRoots }),
+      ])
       if (result.success && result.data) {
         setFileEmergenceSnapshot(result.data)
+        setFileEmergenceReadingProgress(readingProgress)
       } else if (forceRefresh) {
         console.warn('[file-emergence] getSnapshot failed', result.error)
       }
     } finally {
       setFileEmergenceRefreshing(false)
     }
-  }, [fileEmergenceEnabled, queryLower, safeWorkspaceRoots, viewMode])
+  }, [fileEmergenceEnabled, fileEmergenceProjectContext, queryLower, safeWorkspaceRoots, viewMode])
 
   const recordFileActivity = useCallback((payload: Omit<FileEmergenceRecordActivityPayload, 'workspaceRoots'>) => {
     if (fileEmergenceEnabled !== true || safeWorkspaceRoots.length === 0) return
@@ -1215,6 +1231,7 @@ export default function FileTree({
         isRefreshing={fileEmergenceRefreshing}
         onRefresh={() => { void refreshFileEmergenceSnapshot(true) }}
         onOpenFile={handleOpenEmergenceFile}
+        workspaceRoots={safeWorkspaceRoots}
       />
     ) : null
 

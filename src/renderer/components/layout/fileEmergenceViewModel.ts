@@ -21,7 +21,10 @@ export interface FileEmergenceViewModel {
   buckets: FileEmergenceBucketView[]
   totalProjects: number
   defaultExpandedBucket: FileEmergenceBucket
+  emptyState?: FileEmergenceSnapshot['emptyState']
 }
+
+const CURRENT_DOCUMENT_FRESHNESS_MS = 24 * 60 * 60 * 1000
 
 const BUCKET_LABELS: Record<FileEmergenceBucket, string> = {
   future: '未来',
@@ -65,8 +68,6 @@ export function buildFileEmergenceViewModel(input: {
   }))
 
   const totalProjects = buckets.reduce((sum, bucket) => sum + bucket.projects.length, 0)
-  if (totalProjects === 0) return null
-
   const defaultExpandedBucket =
     buckets.find((bucket) => bucket.bucket === 'today' && bucket.projects.length > 0)?.bucket ||
     buckets.find((bucket) => bucket.projects.length > 0)?.bucket ||
@@ -76,6 +77,7 @@ export function buildFileEmergenceViewModel(input: {
     buckets,
     totalProjects,
     defaultExpandedBucket,
+    emptyState: displaySnapshot.emptyState,
   }
 }
 
@@ -88,8 +90,15 @@ export function applyFileEmergencePostProcessing(input: {
 }): FileEmergenceSnapshot {
   if (!input.snapshot.enabled) return input.snapshot
   const buckets = cloneBuckets(input.snapshot)
+  const suppressedPathKeys = new Set((input.snapshot.suppressedFilePaths ?? []).map(normalizePathKey))
   const tabs = input.currentDocumentContext?.tabs || []
-  const validTabs = tabs.filter((tab) => isInsideWorkspace(tab.path, input.workspaceRoots))
+  const validTabs = tabs
+    .filter((tab) => isInsideWorkspace(tab.path, input.workspaceRoots))
+    .filter((tab) => !suppressedPathKeys.has(normalizePathKey(tab.path)))
+    .filter((tab) => tab.isDirty || (
+      typeof tab.lastActivatedAt === 'number' &&
+      input.now - tab.lastActivatedAt <= CURRENT_DOCUMENT_FRESHNESS_MS
+    ))
   const groupedPathKeys = new Set<string>()
   for (const group of currentDocumentGroups(validTabs)) {
     for (const tab of group.tabs) groupedPathKeys.add(normalizePathKey(tab.path))
@@ -141,6 +150,7 @@ export function applyFileEmergencePostProcessing(input: {
   for (const progress of input.readingProgress
     .filter((record) => record.exists !== false)
     .filter((record) => isInsideWorkspace(record.path, input.workspaceRoots))
+    .filter((record) => !suppressedPathKeys.has(normalizePathKey(record.path)))
     .sort((a, b) => b.updatedAt - a.updatedAt)) {
     if (currentPaths.has(normalizePathKey(progress.path))) {
       annotateExistingDocument({
@@ -197,6 +207,7 @@ function injectIntentCards(input: {
   now: number
 }): void {
   for (const card of input.cards) {
+    if (Object.values(input.buckets).flat().some((project) => project.projectKey === card.projectKey)) continue
     const projection = projectFromIntentCard({
       card,
       workspaceRoots: input.workspaceRoots,
@@ -227,6 +238,7 @@ function projectFromIntentCard(input: {
 
   return {
     id: `intent:${input.card.id}`,
+    projectKey: input.card.projectKey,
     bucket,
     title: cleanTitle(input.card.title),
     rawLabels: [cleanTitle(input.card.title)],

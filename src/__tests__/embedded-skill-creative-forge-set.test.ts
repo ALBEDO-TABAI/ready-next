@@ -39,3 +39,9 @@ test('creative-forge skills ship complete reference assets and register through 
   assert.equal(existsSync(join(SKILLS_ROOT, 'image-reverse-describe', 'references', 'coordinate-system.md')), true)
   assert.equal(existsSync(join(SKILLS_ROOT, 'style-grammar-distill', 'reference', 'grammar-schema.md')), true)
 })
+
+test('tag-forge advisory asset cannot expose shell without scripts',()=>{
+  const root=join(SKILLS_ROOT,'tag-forge');const manifest=JSON.parse(readFileSync(join(root,'ready-skill.json'),'utf8'))
+  assert.equal(existsSync(join(root,'scripts')),false)
+  assert.equal(JSON.stringify(manifest).includes('skill_run_shell'),false)
+})

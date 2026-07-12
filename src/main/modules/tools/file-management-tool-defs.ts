@@ -68,6 +68,11 @@ export const FILE_MANAGEMENT_TOOLS: FileManagementToolDef[] = [
     params: zodObjectToParamList(FILE_MANAGEMENT_SCHEMAS.file_classify) as ToolParam[],
   },
   {
+    name: 'tag_forge_apply',
+    description: '提交 Tag Forge 的结构化标签提案；Ready 校验词表、配额、创建回执与 revision 后原子写回并验证索引。新建文档自动打标必须带 receiptId，不能用于猜测项目或高级状态。',
+    params: zodObjectToParamList(FILE_MANAGEMENT_SCHEMAS.tag_forge_apply) as ToolParam[],
+  },
+  {
     name: 'file_rename',
     description:
       '重命名文件（路径不变、只改文件名或在同目录内改扩展名）。必须在 workspace 根内；默认不覆盖已有文件。',

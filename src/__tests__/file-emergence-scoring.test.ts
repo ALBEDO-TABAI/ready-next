@@ -76,6 +76,8 @@ test('distant requires dormant activity and historical importance', () => {
     lastOpenOrSaveAt: now - 120 * day,
     historicalImportanceScore: 0.72,
     fileClusterStrength: 0.8,
+    activeDays90: 4,
+    totalInvestmentScore: 0.7,
   })
 
   assert.equal(result.assignedBucket, 'distant')
@@ -109,6 +111,28 @@ test('distant rejects projects opened or saved in the last 30 days', () => {
   })
 
   assert.notEqual(result.assignedBucket, 'distant')
+})
+
+test('calendar intent decays smoothly across the former 60 day boundary and remains reachable for one year', () => {
+  const at59 = scoreProject({ anchorType:'directory',hasLinkedFiles:true,evidence,now,upcomingCalendarAt:now+59*day })
+  const at61 = scoreProject({ anchorType:'directory',hasLinkedFiles:true,evidence,now,upcomingCalendarAt:now+61*day })
+  const at300 = scoreProject({ anchorType:'directory',hasLinkedFiles:true,evidence,now,upcomingCalendarAt:now+300*day })
+  assert.equal(at59.assignedBucket,'future')
+  assert.equal(at61.assignedBucket,'future')
+  assert.ok(Math.abs(at59.assignedScore-at61.assignedScore)<0.03)
+  assert.equal(at300.bucketScores.some((score)=>score.bucket==='future'),true)
+})
+
+test('structured intent and high investment each independently qualify future', () => {
+  const explicit=scoreProject({anchorType:'directory',hasLinkedFiles:true,evidence,now,lastOpenOrSaveAt:now-10*day,activeIntentScore:1})
+  const invested=scoreProject({anchorType:'directory',hasLinkedFiles:true,evidence,now,lastOpenOrSaveAt:now-8*day,activeDays90:5,totalInvestmentScore:0.8})
+  assert.equal(explicit.assignedBucket,'future')
+  assert.equal(invested.assignedBucket,'future')
+})
+
+test('recently surfaced long-term projects observe distant cooldown', () => {
+  const result=scoreProject({anchorType:'directory',hasLinkedFiles:true,evidence,now,lastOpenOrSaveAt:now-90*day,historicalImportanceScore:0.8,fileClusterStrength:0.8,activeDays90:4,totalInvestmentScore:0.8,surfacedRecently:true})
+  assert.notEqual(result.assignedBucket,'distant')
 })
 
 test('low confidence projects are kept out of the visible list', () => {
@@ -196,4 +220,18 @@ test('emergence-source open is too weak to create today by itself', () => {
 
   assert.equal(result.assignedBucket, null)
   assert.equal(result.visible, false)
+})
+
+test('controlled state tags only modify qualified candidates according to the P4 contract', () => {
+  const archived = scoreProject({ anchorType:'directory',hasLinkedFiles:true,evidence,now,todayActivityScore:1,controlledTagStates:['已归档'] })
+  assert.equal(archived.visible,false)
+
+  const organizing = scoreProject({ anchorType:'directory',hasLinkedFiles:true,evidence,now,lastOpenOrSaveAt:now-8*day,recentActivityScore:.45,activeDays90:2,totalInvestmentScore:.5,controlledTagStates:['待整理'] })
+  assert.equal(organizing.assignedBucket,'future')
+
+  const read = scoreProject({ anchorType:'document',hasLinkedFiles:true,evidence:[{source:'reading_session',label:'读到 60%',score:.8,timestamp:now-3*day}],now,readingContinuityScore:.66,readingDaysSinceLastRead:3,readingProgressRatio:.62,recentReadingMinutes:300,controlledTagStates:['已精读'] })
+  assert.notEqual(read.assignedBucket,'future')
+
+  const selected = scoreProject({ anchorType:'directory',hasLinkedFiles:true,evidence,now,lastOpenOrSaveAt:now-120*day,historicalImportanceScore:.42,fileClusterStrength:.8,activeDays90:3,totalInvestmentScore:.7,controlledTagStates:['精选'] })
+  assert.equal(selected.assignedBucket,'distant')
 })

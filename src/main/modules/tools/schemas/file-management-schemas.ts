@@ -59,6 +59,20 @@ export const FileClassifySchema = z.object({
     .describe('要覆盖的 frontmatter 键值对'),
 })
 
+export const TagForgeApplySchema = z.object({
+  path: z.string().describe('要写回受控标签的 Markdown 绝对路径'),
+  mode: z.enum(['automatic','explicit']).describe('新建文档自动补全或用户显式打标'),
+  receiptId: z.string().optional().describe('automatic 模式必需的创建回执'),
+  expectedRevision: z.string().describe('读取最终正文后计算的 SHA-256 revision'),
+  proposals: z.array(z.object({
+    facet: z.enum(['form','domain','entity','use','state']),
+    label: z.string(),
+    evidenceCode: z.string(),
+    evidenceExcerpt: z.string().optional(),
+    confidence: z.number(),
+  })).describe('模型只提交 form/domain/entity/use 语义提案；state/project 由代码决定'),
+})
+
 export const FileRenameSchema = z.object({
   path: z.string().describe('原文件绝对路径'),
   newName: z.string().describe('新文件名（含扩展名，不含目录）'),
@@ -128,6 +142,7 @@ export type FileManagementToolName =
   | 'file_get_backlinks'
   | 'file_get_graph'
   | 'file_classify'
+  | 'tag_forge_apply'
   | 'file_rename'
   | 'file_move'
   | 'file_copy'
@@ -145,6 +160,7 @@ export const FILE_MANAGEMENT_SCHEMAS: Record<FileManagementToolName, z.ZodObject
   file_get_backlinks: FileGetBacklinksSchema,
   file_get_graph: FileGetGraphSchema,
   file_classify: FileClassifySchema,
+  tag_forge_apply: TagForgeApplySchema,
   file_rename: FileRenameSchema,
   file_move: FileMoveSchema,
   file_copy: FileCopySchema,

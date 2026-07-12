@@ -247,10 +247,10 @@ const EXPECTED_ANTHROPIC = [
   },
   {
     name: 'document_save_tab',
-    description: '保存当前、指定或最近工具目标文档标签，可选直接保存到目标路径。',
+    description: '保存当前、指定或最近工具目标文档标签，可选直接保存到目标路径。新建 Markdown 时应基于最终正文同时提交 tagProposals（只含 form/domain/entity/use）；Ready 会校验词表并固定 state。',
     input_schema: {
       type: 'object',
-      properties: { tabId: TAB_ID, path: SAVE_PATH },
+      properties: { tabId: TAB_ID, path: SAVE_PATH, tagProposals:{type:'array',description:'新建 Markdown 最终保存时提交 Tag Forge 语义提案；只允许 form/domain/entity/use，state/project 不由模型填写'} },
       required: [],
     },
   },

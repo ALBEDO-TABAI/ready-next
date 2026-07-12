@@ -14,6 +14,7 @@ import { setupBrowserIPC, type BrowserController } from './modules/browser-engin
 import { setupDocumentIPC } from './modules/document-engine/ipc-handler'
 import { setupSearchIPC, shutdownFileWatchers } from './modules/search-engine/ipc-handler'
 import { requestRendererReadingSessionFlush, setupFileEmergenceIPC } from './modules/file-emergence/ipc-handler'
+import { setupTagForgeIPC } from './modules/tag-forge/ipc-handler'
 import { setupRSSIPC, setRSSBrowserController } from './modules/rss-engine/ipc-handler'
 import { setupCalendarIPC } from './modules/calendar-engine/ipc-handler'
 import {
@@ -553,6 +554,7 @@ function setupGlobalIPC(): void {
   setupBoardIPC({ getMainWindow: () => mainWindow })
   setupSearchIPC()
   setupFileEmergenceIPC()
+  setupTagForgeIPC()
   setupRSSIPC(RSS_USE_MOCK)
   // Reminder runtime: notifier closes over the mainWindow accessor (window
   // may be created after this point on cold start; closure defers reads).

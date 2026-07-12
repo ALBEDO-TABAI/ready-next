@@ -23,6 +23,7 @@ import {
   type EmergenceCard,
 } from '../../agent-control/emergence/emergence-cards'
 import type { TaskProjectionRecord } from '../../agent-control/contracts/run-contracts'
+import type { FileEmergenceIntentCard } from '../../../../shared/file-emergence'
 import { logAgentMetric } from '../../agent-control/metrics'
 import type { IpcChannelGroup, IpcDisposeHandle } from './types'
 
@@ -43,6 +44,7 @@ export interface EmergenceFeedGroupDeps {
   listRecentProjections: (limit: number) => TaskProjectionRecord[]
   listCrystallizeSignals: () => CrystallizeSignalCard[]
   listCandidateSignals: () => AgentCandidateFeedSignal[]
+  listFileIntentCards?: () => Promise<FileEmergenceIntentCard[]>
 }
 
 const CHANNELS = ['agent:emergence:feed'] as const
@@ -57,7 +59,7 @@ function dedupeByTypeAndTitle(cards: ReadonlyArray<EmergenceCard>): EmergenceCar
   const seen = new Set<string>()
   const out: EmergenceCard[] = []
   for (const card of cards) {
-    const key = `${card.type}|${card.title}`
+    const key = card.projectKey ? `${card.type}|project:${card.projectKey}` : `${card.type}|${card.title}`
     if (seen.has(key)) continue
     seen.add(key)
     out.push(card)
@@ -65,7 +67,7 @@ function dedupeByTypeAndTitle(cards: ReadonlyArray<EmergenceCard>): EmergenceCar
   return out
 }
 
-export function assembleFeedEntries(deps: EmergenceFeedGroupDeps): EmergenceFeedEntry[] {
+export function assembleFeedEntries(deps: EmergenceFeedGroupDeps, fileIntentCards: readonly FileEmergenceIntentCard[] = []): EmergenceFeedEntry[] {
   const projections = deps.listRecentProjections(PROJECTION_SCAN_LIMIT)
   const scopeByTaskId = new Map<string, string>()
   for (const record of projections) {
@@ -77,6 +79,7 @@ export function assembleFeedEntries(deps: EmergenceFeedGroupDeps): EmergenceFeed
     ...extractFollowUpCards(projections),
     ...extractCrystallizeCards(deps.listCrystallizeSignals()),
     ...extractAgentCandidateCards(deps.listCandidateSignals()),
+    ...fileIntentCards.flatMap(fileIntentCardToEmergenceCard),
   ]))
 
   const entries = cards.map((card) => ({
@@ -102,7 +105,8 @@ export const emergenceFeedGroup: IpcChannelGroup<EmergenceFeedGroupDeps> = {
 
     ipcMain.handle('agent:emergence:feed', async (): Promise<IPCResponse<EmergenceFeedEntry[]>> => {
       try {
-        return { success: true, data: assembleFeedEntries(deps) }
+        const fileIntentCards = await deps.listFileIntentCards?.() ?? []
+        return { success: true, data: assembleFeedEntries(deps, fileIntentCards) }
       } catch (error) {
         return { success: false, error: error instanceof Error ? error.message : String(error) }
       }
@@ -119,3 +123,18 @@ export const emergenceFeedGroup: IpcChannelGroup<EmergenceFeedGroupDeps> = {
 }
 
 export const _emergenceFeedGroupChannelsForTest: ReadonlyArray<string> = CHANNELS
+
+function fileIntentCardToEmergenceCard(card: FileEmergenceIntentCard): EmergenceCard[] {
+  if (card.action.kind !== 'open_project' && card.action.kind !== 'open_artifact' && card.action.kind !== 'open_project_group') return []
+  if (!card.projectKey || !card.action.ref || card.evidence.length === 0) return []
+  return [{
+    id: card.id,
+    projectKey: card.projectKey,
+    type: card.type,
+    title: card.type === 'prepare' ? `接下来要准备：${card.title}` : card.type === 'forming' ? `正在成形：${card.title}` : `已完成产物：${card.title}`,
+    evidence: card.evidence.map((item) => ({fact:item.fact,ref:item.ref ?? `project:${card.projectKey}`})),
+    confidence: card.confidence,
+    action: {kind:card.action.kind,ref:card.action.ref,targetPath:card.action.targetPath,memberPaths:card.action.memberPaths},
+    requiresExplicitConfirm: false,
+  }]
+}

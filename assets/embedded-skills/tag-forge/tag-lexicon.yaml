@@ -10,6 +10,13 @@ config:
   new_tags_per_run: 10        # 单轮运行新建词条上限
   new_tags_per_doc: 2         # 单份素材新建词条上限
   orphan_review_days: 90      # 孤儿词条观察期
+  automatic_state: 待整理
+  facet_openness: {form: closed, domain: semi_open, entity: open, use: semi_open, state: closed}
+  automatic_allowed_facets: [form, domain, entity, use]
+  automatic_forbidden_state_labels: [已精读, 精选, 已归档]
+  broad_label_blacklist: [分析, 内容, 资料, 笔记, 重要, 参考, 学习, 知识, 素材, 其他]
+  pending_requires_user_approval: true
+  project_is_separate_from_tags: true
 
 # ============ 形态 form（封闭枚举：不经闸门三新建，扩充需用户显式批准） ============
 entries:

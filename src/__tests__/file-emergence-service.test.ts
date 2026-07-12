@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { mkdtemp, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 import { FileEmergenceService, isFileEmergenceEnabled } from '../main/modules/file-emergence/service'
 import type { FileEmergenceServiceDeps } from '../main/modules/file-emergence/service'
@@ -173,6 +176,41 @@ test('activity stale marker refreshes the cached snapshot', async () => {
   assert.equal(counters.reads, 10)
 })
 
+test('activity stale marker invalidates every cached root set containing the changed root', async () => {
+  const counters = { reads: 0, searches: 0 }
+  const service = new FileEmergenceService(makeDeps({}, counters))
+
+  await service.getSnapshot({ workspaceRoots: ['/workspace'] })
+  await service.getSnapshot({ workspaceRoots: ['/workspace', '/archive'] })
+  service.markStale(['/workspace'])
+  await service.getSnapshot({ workspaceRoots: ['/workspace'] })
+  await service.getSnapshot({ workspaceRoots: ['/workspace', '/archive'] })
+
+  assert.equal(counters.reads, 20)
+})
+
+test('empty snapshots distinguish insufficient history, degraded sources, and rejected candidates', async () => {
+  const insufficient = await new FileEmergenceService(makeDeps()).getSnapshot({ workspaceRoots: ['/workspace'] })
+  assert.equal(insufficient.emptyState, 'insufficient_history')
+
+  const degraded = await new FileEmergenceService(makeDeps({
+    activity: { prune: () => undefined, listRecent: () => { throw new Error('activity unavailable') } },
+  })).getSnapshot({ workspaceRoots: ['/workspace'] })
+  assert.equal(degraded.emptyState, 'sources_degraded')
+
+  const rejected = await new FileEmergenceService(makeDeps({
+    activity: {
+      prune: () => undefined,
+      listRecent: () => [
+        activity('/workspace/a/one.md', now - 20 * day),
+        activity('/workspace/b/two.md', now - 20 * day),
+      ],
+    },
+  })).getSnapshot({ workspaceRoots: ['/workspace'] })
+  assert.equal(rejected.emptyState, 'no_trusted_candidates')
+  assert.equal(rejected.diagnostics?.rejectedCount, 2)
+})
+
 test('cross-day cached snapshots are treated as stale', async () => {
   let currentNow = now
   const counters = { reads: 0, searches: 0 }
@@ -303,6 +341,38 @@ test('semantic calendar projects reject unrelated search hits', async () => {
   assert.equal(snapshot.buckets.past.length, 0)
 })
 
+test('controlled tags enrich existing attention but never create eligibility by themselves', async () => {
+  const metadata = {
+    getTitleMetadata: (paths: readonly string[]) => new Map(paths.map((path) => [path, {
+      path,
+      readyProject: path.includes('active') ? '宝矿力持续工作' : null,
+      controlledTags: path.includes('active')
+        ? [{tagId:'entity-pocari',facet:'entity' as const,label:'宝矿力'},{tagId:'domain-brand',facet:'domain' as const,label:'品牌研究'}]
+        : [{tagId:'domain-brand',facet:'domain' as const,label:'品牌研究'}],
+    }])),
+    findRelatedFiles: () => [{fileKey:'related',path:'/workspace/related/reference.md',name:'reference.md',sharedTags:[{tagId:'domain-brand',facet:'domain' as const,label:'品牌研究'}]}],
+  }
+  const active = await new FileEmergenceService(makeDeps({
+    activity:{prune:()=>undefined,listRecent:()=>[activity('/workspace/active/brief.md')]},
+    documentMetadata:metadata,
+  })).getSnapshot({workspaceRoots:['/workspace']})
+  assert.equal(active.buckets.today[0]?.title,'宝矿力持续工作','ready_project remains the project title; entity does not become it')
+  assert.ok(active.buckets.today[0]?.files.some((file)=>file.fileKey==='related'),'domain tag recalls a related controlled file')
+  assert.ok(active.buckets.today[0]?.evidence.some((item)=>item.source==='controlled_tag'&&item.label==='entity: 宝矿力'))
+
+  const tagsOnly = await new FileEmergenceService(makeDeps({documentMetadata:metadata})).getSnapshot({workspaceRoots:['/workspace']})
+  assert.equal(tagsOnly.diagnostics?.candidateCount,0,'assignments are modifiers, never candidate generators')
+})
+
+test('raw body tags and CSS color tokens have no metadata port into emergence', async () => {
+  const snapshot = await new FileEmergenceService(makeDeps({
+    activity:{prune:()=>undefined,listRecent:()=>[activity('/workspace/css/theme.md')]},
+    documentMetadata:{getTitleMetadata:(paths)=>new Map(paths.map((path)=>[path,{path,frontmatterTitle:'主题设计',controlledTags:[]}]))},
+  })).getSnapshot({workspaceRoots:['/workspace']})
+  assert.ok(snapshot.buckets.today[0])
+  assert.equal(snapshot.buckets.today[0]?.evidence.some((item)=>/fff|f5f5f5/i.test(item.label)),false)
+})
+
 test('recently ended calendar events can become past projects', async () => {
   const service = new FileEmergenceService(makeDeps({
     calendar: {
@@ -322,6 +392,27 @@ test('recently ended calendar events can become past projects', async () => {
 
   const snapshot = await service.getSnapshot({ workspaceRoots: ['/workspace'] })
   assert.equal(snapshot.buckets.past[0]?.title, '品牌空间案例复盘')
+})
+
+test('production snapshot derives prepare, forming, and harvest from the same resolved projects', async () => {
+  const root = await mkdtemp(join(tmpdir(),'ready-p4-intent-'))
+  const formingA=join(root,'forming','brief.md');const formingB=join(root,'forming','notes.md')
+  const prepareFile=join(root,'launch','新品发布准备.md');const harvestFile=join(root,'done','品牌交付复盘.md')
+  await Promise.all([formingA,formingB,prepareFile,harvestFile].map(async(path)=>{await import('node:fs/promises').then(({mkdir})=>mkdir(path.slice(0,path.lastIndexOf('/')),{recursive:true}));await writeFile(path,'# proof')}))
+  const identity: NonNullable<FileEmergenceServiceDeps['identity']> = {
+    resolveCurrentFile: (_root,path)=>({fileKey:`file:${path}`,currentPath:path}),
+    resolveProject: (input)=>({projectKey:`project:${input.displayName}`,displayName:input.displayName,source:input.source,confidence:input.confidence,files:input.filePaths.map((path)=>({fileKey:`file:${path}`,currentPath:path}))}),
+  }
+  const snapshot = await new FileEmergenceService(makeDeps({
+    identity,
+    activity:{prune:()=>undefined,listRecent:()=>[activity(formingA),activity(formingB)]},
+    readingSessions:{prune:()=>undefined,listRecent:()=>[readingSession(formingA,now,12*60_000,.4)]},
+    calendar:{getEvents:()=>[calendar('新品发布准备',now+5*day),calendar('品牌交付复盘',now-2*day)],getRecurringEventsAndOverrides:()=>({events:[],overridesByParent:new Map()})},
+    search:{search:async(query)=>({items:[{path:query.includes('交付')?harvestFile:prepareFile,name:query.includes('交付')?'品牌交付复盘.md':'新品发布准备.md',sourceType:'document'}]})},
+  })).getSnapshot({workspaceRoots:[root]})
+  assert.ok(snapshot.intentCards?.some((card)=>card.type==='prepare'&&card.projectKey&&card.action.kind==='open_project'))
+  assert.ok(snapshot.intentCards?.some((card)=>card.type==='forming'&&card.projectKey&&card.action.kind==='open_project_group'))
+  assert.ok(snapshot.intentCards?.some((card)=>card.type==='harvest'&&card.projectKey&&card.action.ref===harvestFile))
 })
 
 test('reading sessions can make a recently read book appear in today without save events', async () => {
@@ -410,6 +501,50 @@ test('frontmatter title can name a document when the file name is generic', asyn
   assert.equal(snapshot.buckets.today[0]?.title, '宝库数据库整理')
 })
 
+test('explicit ready_project overrides an unrelated single-file title', async () => {
+  const event = activity('/workspace/资料/5ecdf91a6a98532ba0fec7ec22d35dc4.md', now)
+  const service = new FileEmergenceService(makeDeps({
+    activity: { prune: () => undefined, listRecent: () => [event] },
+    documentMetadata: {
+      getTitleMetadata: () => new Map([[event.path, {
+        path: event.path,
+        name: '5ecdf91a6a98532ba0fec7ec22d35dc4.md',
+        readyProject: 'Pin 灵感整理',
+      }]]),
+    },
+    search: null,
+  }))
+
+  const snapshot = await service.getSnapshot({ workspaceRoots: ['/workspace'] })
+  assert.equal(snapshot.buckets.today[0]?.title, 'Pin 灵感整理')
+  assert.equal(snapshot.buckets.today[0]?.titleSource, 'frontmatter')
+})
+
+test('named tab groups and task artifacts provide bounded structural title evidence', async () => {
+  const event = activity('/workspace/campaign/a.md', now)
+  const service = new FileEmergenceService(makeDeps({
+    activity: { prune: () => undefined, listRecent: () => [event] },
+    structuralHints: {
+      listHints: () => [{
+        source: 'task',
+        label: '夏季发布任务',
+        paths: ['/workspace/campaign/a.md'],
+        updatedAt: now,
+      }],
+    },
+    search: null,
+  }))
+
+  const grouped = await service.getSnapshot({
+    workspaceRoots: ['/workspace'],
+    projectContext: {
+      tabGroups: [{ name: '用户命名发布组', paths: ['/workspace/campaign/a.md', '/workspace/campaign/b.md'] }],
+    },
+  })
+  assert.equal(grouped.buckets.today[0]?.title, '用户命名发布组')
+  assert.equal(grouped.buckets.today[0]?.titleSource, 'tab_group')
+})
+
 test('emergence source open does not single-handedly promote an old project to today', async () => {
   const event = activity('/workspace/old/淘金小镇.md', now)
   event.source = 'emergence'
@@ -424,4 +559,25 @@ test('emergence source open does not single-handedly promote an old project to t
 
   const snapshot = await service.getSnapshot({ workspaceRoots: ['/workspace'] })
   assert.equal(snapshot.buckets.today.length, 0)
+})
+
+test('feedback suppression produces a recoverable all-suppressed empty state', async () => {
+  const identity: NonNullable<FileEmergenceServiceDeps['identity']> = {
+    resolveCurrentFile: (_root, path) => ({ fileKey: `file:${path}`, currentPath: path }),
+    resolveProject: (input) => ({ projectKey: 'project:stable', displayName: input.displayName, source: input.source, confidence: input.confidence, files: input.filePaths.map((path) => ({ fileKey: `file:${path}`, currentPath: path })) }),
+  }
+  const snapshot = await new FileEmergenceService(makeDeps({
+    activity: { prune: () => undefined, listRecent: () => [activity('/workspace/project/a.md')] },
+    identity,
+    feedback: {
+      resolve: () => ({ visible: false, reason: 'hidden', until: null }),
+      listProjectFilePaths: () => ['/workspace/project/a.md'],
+      listSuppressedFilePaths: () => ['/workspace/project/a.md'],
+    },
+    search: null,
+  })).getSnapshot({ workspaceRoots: ['/workspace'] })
+  assert.equal(snapshot.emptyState, 'all_suppressed')
+  assert.equal(snapshot.diagnostics?.suppressedCounts?.hidden, 1)
+  assert.deepEqual(snapshot.suppressedFilePaths, ['/workspace/project/a.md'])
+  assert.equal(Object.values(snapshot.buckets).flat().length, 0)
 })

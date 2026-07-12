@@ -14,7 +14,12 @@ import type {
   FileEmergenceGetSnapshotPayload,
   FileEmergenceRecordActivityPayload,
   FileEmergenceRecordReadingSessionPayload,
+  FileEmergenceRenameProjectPayload,
+  FileEmergenceAssignFilePayload,
+  FileEmergenceCreateProjectForFilePayload,
+  FileEmergenceFeedbackPayload,
 } from '../shared/file-emergence'
+import type { TagForgeBeginCreationPayload,TagForgeFinalizeCreationPayload,TagForgeRecordCreationPayload } from '../shared/tag-forge'
 import type {
   BrowserLockOverlaySnapshot,
 } from '../shared/browser-lock-overlay'
@@ -1250,6 +1255,18 @@ const fileEmergenceAPI = {
     ipcRenderer.invoke('fileEmergence:recordActivity', payload),
   recordReadingSession: (payload: FileEmergenceRecordReadingSessionPayload) =>
     ipcRenderer.invoke('fileEmergence:recordReadingSession', payload),
+  renameProject: (payload: FileEmergenceRenameProjectPayload) =>
+    ipcRenderer.invoke('fileEmergence:renameProject', payload),
+  feedbackProject: (payload: FileEmergenceFeedbackPayload) =>
+    ipcRenderer.invoke('fileEmergence:feedbackProject', payload),
+  listSuppressed: (payload: { workspaceRoots: string[] }) =>
+    ipcRenderer.invoke('fileEmergence:listSuppressed', payload),
+  getEvaluation: (payload: { workspaceRoots: string[] }) =>
+    ipcRenderer.invoke('fileEmergence:getEvaluation', payload),
+  assignFile: (payload: FileEmergenceAssignFilePayload) =>
+    ipcRenderer.invoke('fileEmergence:assignFile', payload),
+  createProjectForFile: (payload: FileEmergenceCreateProjectForFilePayload) =>
+    ipcRenderer.invoke('fileEmergence:createProjectForFile', payload),
   onFlushReadingSessions: (handler: (requestId: string) => void) => {
     const listener = (_event: IpcRendererEvent, requestId: string) => handler(requestId)
     ipcRenderer.on('fileEmergence:flushReadingSessions', listener)
@@ -1257,6 +1274,14 @@ const fileEmergenceAPI = {
   },
   ackReadingSessionsFlushed: (requestId: string) =>
     ipcRenderer.send('fileEmergence:readingSessionsFlushed', requestId),
+}
+const tagForgeAPI={
+  beginCreation:(payload:TagForgeBeginCreationPayload)=>ipcRenderer.invoke('tagForge:beginCreation',payload),
+  recordCreation:(payload:TagForgeRecordCreationPayload)=>ipcRenderer.invoke('tagForge:recordCreation',payload),
+  validateCreation:(payload:{creationToken:string;sourceRunId:string;proposals:Array<{facet:'form'|'domain'|'entity'|'use';label:string;evidenceCode:string;evidenceExcerpt?:string;confidence:number}>})=>ipcRenderer.invoke('tagForge:validateCreation',payload),
+  finalizeCreation:(payload:TagForgeFinalizeCreationPayload)=>ipcRenderer.invoke('tagForge:finalizeCreation',payload),
+  listPending:()=>ipcRenderer.invoke('tagForge:listPending'),
+  reviewPending:(payload:{proposalId:string;decision:'approve'|'reject'})=>ipcRenderer.invoke('tagForge:reviewPending',payload),
 }
 
 const petAPI = {
@@ -1420,6 +1445,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   theme: themeAPI,
   settings: settingsAPI,
   fileEmergence: fileEmergenceAPI,
+  tagForge: tagForgeAPI,
   pet: petAPI,
   chat: chatAPI,
   userProfile: userProfileAPI,
@@ -1456,6 +1482,7 @@ declare global {
       theme: typeof themeAPI
       settings: typeof settingsAPI
       fileEmergence: typeof fileEmergenceAPI
+      tagForge: typeof tagForgeAPI
       pet: typeof petAPI
       chat: typeof chatAPI
       userProfile: typeof userProfileAPI

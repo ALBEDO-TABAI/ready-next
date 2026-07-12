@@ -85,7 +85,7 @@ test('file emergence view model hides outside tree mode and while searching', ()
   }), null)
 })
 
-test('file emergence view model hides disabled or empty snapshots', () => {
+test('file emergence view model hides disabled snapshots but preserves a classified empty state', () => {
   const disabled = snapshot([project('a')])
   disabled.enabled = false
   assert.equal(buildFileEmergenceViewModel({
@@ -96,13 +96,17 @@ test('file emergence view model hides disabled or empty snapshots', () => {
     filters: DEFAULT_FILTERS,
   }), null)
 
-  assert.equal(buildFileEmergenceViewModel({
-    snapshot: snapshot([]),
+  const empty = snapshot([])
+  empty.emptyState = 'insufficient_history'
+  const model = buildFileEmergenceViewModel({
+    snapshot: empty,
     query: '',
     viewMode: 'tree',
     workspaceRoots: ['/workspace'],
     filters: DEFAULT_FILTERS,
-  }), null)
+  })
+  assert.equal(model?.totalProjects, 0)
+  assert.equal(model?.emptyState, 'insufficient_history')
 })
 
 test('file emergence view model caps visible projects at 10 and opens today by default', () => {
@@ -163,6 +167,7 @@ test('file emergence view model applies file filters in renderer only', () => {
 test('intent cards enter file emergence buckets without exposing harvest artifacts', () => {
   const intentCards: FileEmergenceIntentCard[] = [{
     id: 'prepare:launch',
+    projectKey: 'project-launch',
     type: 'prepare',
     title: '接下来要准备：发布会',
     confidence: 0.82,
@@ -170,6 +175,7 @@ test('intent cards enter file emergence buckets without exposing harvest artifac
     evidence: [{ fact: '未来事件 2026-06-19', ref: 'project:/workspace/launch' }],
   }, {
     id: 'forming:popup',
+    projectKey: 'project-popup',
     type: 'forming',
     title: '正在成形：快闪店项目',
     confidence: 0.77,
@@ -180,6 +186,7 @@ test('intent cards enter file emergence buckets without exposing harvest artifac
     ],
   }, {
     id: 'harvest:secret',
+    projectKey: 'project-secret',
     type: 'harvest',
     title: '已完成产物：产物已生成（受保护路径）',
     confidence: 0.9,
@@ -224,6 +231,7 @@ test('current active document is ensured into today without changing the base sn
         isActive: true,
         isSplit: false,
         isDirty: false,
+        lastActivatedAt: now,
       }],
     },
     readingProgress: [],
@@ -234,6 +242,65 @@ test('current active document is ensured into today without changing the base sn
   assert.equal(today[0]?.files[0]?.path, '/workspace/lib-a/置身钉内.md')
   assert.equal(today[0]?.files[0]?.isCurrent, true)
   assert.equal(base.buckets.today.length, 0)
+})
+
+test('durable project feedback prevents current-tab and reading overlays from resurrecting a suppressed file', () => {
+  const base = snapshot([])
+  base.emptyState = 'all_suppressed'
+  base.suppressedFilePaths = ['/workspace/hidden/note.md']
+  const model = buildFileEmergenceViewModel({
+    snapshot: base,
+    query: '',
+    viewMode: 'tree',
+    workspaceRoots: ['/workspace'],
+    filters: DEFAULT_FILTERS,
+    now,
+    currentDocumentContext: {
+      tabs: [{
+        path: '/workspace/hidden/note.md',
+        title: 'note.md',
+        isActive: true,
+        isSplit: false,
+        isDirty: true,
+        lastActivatedAt: now,
+      }],
+    },
+    readingProgress: [{
+      path: '/workspace/hidden/note.md',
+      title: 'note',
+      kind: 'document',
+      progressRatio: 0.55,
+      updatedAt: now - 3 * day,
+      exists: true,
+    }],
+  })
+
+  assert.equal(model?.totalProjects, 0)
+  assert.equal(model?.emptyState, 'all_suppressed')
+})
+
+test('a persisted clean tab without recent activation is not injected into today', () => {
+  const model = buildFileEmergenceViewModel({
+    snapshot: snapshot([]),
+    query: '',
+    viewMode: 'tree',
+    workspaceRoots: ['/workspace'],
+    filters: DEFAULT_FILTERS,
+    now,
+    currentDocumentContext: {
+      tabs: [{
+        path: '/workspace/docs/旧标签.md',
+        title: '旧标签.md',
+        isActive: true,
+        isSplit: false,
+        isDirty: false,
+        lastActivatedAt: now - 2 * day,
+      }],
+    },
+    readingProgress: [],
+  })
+
+  assert.equal(model?.buckets.find((bucket) => bucket.bucket === 'today')?.projects.length, 0)
 })
 
 test('active document covered by a directory project is lifted without a duplicate card', () => {
@@ -260,6 +327,7 @@ test('active document covered by a directory project is lifted without a duplica
         isActive: true,
         isSplit: false,
         isDirty: false,
+        lastActivatedAt: now,
       }],
     },
     readingProgress: [],
@@ -294,6 +362,7 @@ test('active document injection keeps today capped at 10 and replaces the lowest
         isActive: true,
         isSplit: false,
         isDirty: false,
+        lastActivatedAt: now,
       }],
     },
     readingProgress: [],
@@ -320,12 +389,14 @@ test('current documents in the same concrete directory are clustered into one pr
         isActive: true,
         isSplit: false,
         isDirty: false,
+        lastActivatedAt: now,
       }, {
         path: '/workspace/宝库/Aesop 空间案例.md',
         title: 'Aesop 空间案例.md',
         isActive: false,
         isSplit: false,
         isDirty: false,
+        lastActivatedAt: now,
       }],
     },
     readingProgress: [],
@@ -391,6 +462,7 @@ test('switching active tabs changes only the displayed view model for the same s
         isActive: true,
         isSplit: false,
         isDirty: false,
+        lastActivatedAt: now,
       }],
     },
     readingProgress: [],
@@ -409,6 +481,7 @@ test('switching active tabs changes only the displayed view model for the same s
         isActive: true,
         isSplit: false,
         isDirty: false,
+        lastActivatedAt: now,
       }],
     },
     readingProgress: [],

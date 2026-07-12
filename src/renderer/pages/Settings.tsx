@@ -3,7 +3,7 @@ import {
   ChevronLeft, User, Bell, Shield, Database,
   Palette, Keyboard, Globe, Info, Moon, Sun, Bot, Monitor, Droplets,
   ChevronRight, ExternalLink, HardDrive, Trash2, MessageSquare, Brain, Users, Sparkles, Cat,
-  Plug2, Boxes, Cookie
+  Plug2, Boxes, Cookie, Tags
 } from 'lucide-react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useTheme, type ThemeAccent, type ThemeSkin } from '../stores/useTheme'
@@ -34,6 +34,7 @@ import { BrowserPrivacySettingsPanel } from './settings/BrowserPrivacySettingsPa
 import { ExternalServicesSettingsPanel } from './settings/ExternalServicesSettingsPanel'
 import { McpSettingsPanel } from './settings/McpSettingsPanel'
 import { MemorySettingsSection } from './settings/MemorySettingsSection'
+import { TagForgeSettingsPanel } from './settings/TagForgeSettingsPanel'
 
 // 面板拆分后的导出保口（2026-07-05）：行为测试从 pages/Settings 导入这两个面板，import 面保持零变化。
 export { StorageSettingsPanel } from './settings/StorageSettingsPanel'
@@ -94,6 +95,7 @@ const settingsData: SettingSection[] = [
     description: '查看 Agent 已沉淀的记忆，高级工具按需展开',
     settings: [] // Rendered dynamically via Memory components
   },
+  { id:'tag-forge',title:'文档标签',icon:Tags,description:'管理 Tag Forge 自动打标与待审核词条',settings:[] },
   {
     id: 'user-profiles',
     title: '我的偏好',
@@ -454,7 +456,7 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
   }
 
   const isDynamicSection = currentSection
-    ? ['ai', 'remote-im', 'external-services', 'mcp', 'memory', 'agent', 'user-profiles', 'pet', 'rss-storage', MODELS_RUNTIME_SETTINGS_SECTION, 'storage', 'browser-privacy'].includes(currentSection.id)
+    ? ['ai', 'remote-im', 'external-services', 'mcp', 'memory', 'tag-forge', 'agent', 'user-profiles', 'pet', 'rss-storage', MODELS_RUNTIME_SETTINGS_SECTION, 'storage', 'browser-privacy'].includes(currentSection.id)
     : false
 
   return (
@@ -600,6 +602,7 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
                 {currentSection.id === 'memory' && (
                   <MemorySettingsSection />
                 )}
+                {currentSection.id === 'tag-forge' && <TagForgeSettingsPanel />}
 
                 {/* Agent — 单入口容器：人格 / registry / 派生 / 系统 + 行为开关 */}
                 {currentSection.id === 'agent' && (

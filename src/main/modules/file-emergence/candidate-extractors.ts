@@ -48,8 +48,12 @@ export function candidatesFromActivity(
       1,
       candidate.historicalImportanceScore +
       (event.createdAt < recentCutoff ? 0.12 : 0.05) +
-      (IMPORTANT_WORDS.test(event.path) ? 0.18 : 0),
+      (IMPORTANT_WORDS.test(event.path) ? 0.18 : 0) +
+      (event.meta?.source === 'attention_rollup' ? Math.min(0.7, event.weight * 0.35) : 0),
     )
+    if (event.meta?.source === 'attention_rollup') {
+      candidate.fileClusterStrength = Math.min(1, candidate.fileClusterStrength + Math.min(0.65, event.weight * 0.3))
+    }
     const sourceMultiplier = event.source === 'emergence'
       ? 0.1
       : event.source === 'document_mode'

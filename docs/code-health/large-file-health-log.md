@@ -21,6 +21,23 @@
 
 | 评估日期 | 任务 | 文件 | 总行数 | 本次新增 | 结论 | 判断与后续动作 | 状态 |
 | --- | --- | --- | ---: | ---: | --- | --- | --- |
+| 2026-07-12 | 文件涌现与 Tag Forge 对抗复审 | `src/main/modules/migrations.ts` | 3093 | 37 | 健康 | 追加 071 反馈账本和 072 不可变评估快照头、成员键与诊断字段；仍是顺序迁移注册表，已由 72 段连续检查和真实 Electron SQLite 验证。 | 无需处理 |
+| 2026-07-12 | 文件涌现与 Tag Forge 对抗复审 | `src/preload/index.ts` | 1498 | 8 | 一般 | 反馈、本地评估和真实创建回执只增加跨进程透传；沿用 2026-07-24 按产品域拆分复查。 | 已排期：2026-07-24 |
+| 2026-07-12 | 文件涌现与 Tag Forge 对抗复审 | `src/renderer/types/electron.d.ts` | 4017 | 5 | 健康 | 机械补齐反馈、评估与创建回执声明，类型检查和行为测试覆盖。 | 无需处理 |
+| 2026-07-12 | 文件涌现 P4 双投影 | `src/main/modules/claude-bridge/ipc-handler.ts` | 1840 | 2 | 一般 | 仅把文件 intent card 数据源接入现有 Agent feed 组装；业务判断在独立 group/service。2026-08-11 复查组装根密度。 | 已排期：2026-08-11 |
+| 2026-07-12 | 文件涌现 P4 双投影 | `src/renderer/types/electron.d.ts` | 4012 | 3 | 健康 | 只补齐 `projectKey` 和文件打开定位的跨进程类型，由类型检查、行为测试和真应用验收覆盖。 | 无需处理 |
+| 2026-07-12 | 文件涌现 P4 Tag Forge 拆分 | `src/main/modules/tools/file-management-tools.ts` | 1416 | 1 | 危险 | Tag Forge 执行已移至独立 `tag-forge-tool.ts`，本文件不再承担其校验、写回与对账；但仍集中搜索、读取、分类、移动和批量整理，后续应按剩余工具域继续拆分。 | Tag Forge 危险已解除；剩余文件级危险待单独重构 |
+| 2026-07-12 | 文件涌现 P1 项目身份 | `src/renderer/components/layout/FileTree.tsx` | 1906 | 13 | 一般 | 仅组装命名标签页组并传给现有涌现入口；沿用 2026-08-11 的涌现状态/文件树职责拆分复查。 | 已排期：2026-08-11 |
+| 2026-07-12 | 文件涌现 P1 项目身份 | `src/main/modules/migrations.ts` | 2938 | 61 | 健康 | 只追加一次性 068 身份账本迁移，文件是顺序迁移注册表；已由连续编号、重复运行和原生 SQLite 行为测试覆盖。 | 无需处理 |
+| 2026-07-12 | 文件涌现 P2 长期注意力 | `src/main/modules/migrations.ts` | 3056 | 118 | 健康 | 只追加一次性 069 长期注意力、明确意图和低敏预测账本；顺序迁移表职责未扩散，并由真实 Electron SQLite 测试覆盖。 | 无需处理 |
+| 2026-07-12 | Tag Forge P3 | `src/main/modules/migrations.ts` | 3055 | 117 | 健康 | 只追加一次性 070 受控词表、待审核、标签归属和创建回执表；顺序迁移表职责未扩散，原生 SQLite 连续迁移已通过。 | 无需处理 |
+| 2026-07-12 | Tag Forge P3 | `src/main/index.ts` | 1156 | 2 | 一般 | 仅增加 Tag Forge IPC 组装；主进程组合根继续沿用既定拆分复查。 | 已排期：2026-07-25 |
+| 2026-07-12 | Tag Forge P3 | `src/preload/index.ts` | 1490 | 10 | 一般 | 新增 Tag Forge 创建、校验、回执和审核透传；仍是跨进程 API 汇总面，沿用按域拆分复查。 | 已排期：2026-07-24 |
+| 2026-07-12 | Tag Forge P3 | `src/renderer/types/electron.d.ts` | 4009 | 8 | 健康 | 仅补齐 Tag Forge 跨进程类型合同，类型检查与真实界面读回通过。 | 无需处理 |
+| 2026-07-12 | Tag Forge P3 | `src/main/modules/tools/file-management-tools.ts` | 1448 | 30 | 危险 | 文件搜索、读取、分类、移动、批量整理和 Tag Forge 执行继续集中；本轮仅接入受控打标，但文件已跨多个独立职责。 | P4 前先把 Tag Forge executor 移入独立服务，避免继续增长 |
+| 2026-07-12 | 文件涌现 P1 项目身份 | `src/preload/index.ts` | 1480 | 7 | 一般 | 只增加项目重命名、文件归属和从文件新建项目三条 IPC 透传；沿用 2026-07-24 按域拆分复查。 | 已排期：2026-07-24 |
+| 2026-07-12 | 文件涌现 P1 项目身份 | `src/renderer/types/electron.d.ts` | 4001 | 6 | 健康 | 机械补齐三条身份交互的类型声明，已由类型检查与行为测试覆盖。 | 无需处理 |
+| 2026-07-12 | 文件涌现 P0 信号修复 | `src/renderer/components/layout/FileTree.tsx` | 1893 | 4 | 一般 | 只在现有涌现刷新入口并行重读阅读进度，没有继续扩张文件树职责；沿用 2026-08-11 的 pendingClips/涌现状态拆分复查。 | 已排期：2026-08-11 |
 | 2026-07-12 | 浏览器标签浮层跨窗口停留修复 | `src/preload/index.ts` | 1471 | 2 | 一般 | 仅新增浮层鼠标位置核对的 invoke 透传；仍是跨进程 API 汇总面。沿用 2026-07-24 按域拆分复查。 | 已排期：2026-07-24 |
 | 2026-07-12 | 浏览器标签浮层跨窗口停留修复 | `src/renderer/types/electron.d.ts` | 3995 | 1 | 健康 | 机械跨进程声明，新增单一位置核对方法，已由类型检查与行为测试覆盖。 | 无需处理 |
 | 2026-07-11 | Boost 60 秒误停修复 | `src/main/modules/agent-control/runtime-core/orchestrator.ts` | 1023 | 16 | 一般 | 仅增加按 requestId 查询活跃运行的无副作用入口，不承担业务判断。2026-08-11 复查编排入口密度。 | 已排期：2026-08-11 |

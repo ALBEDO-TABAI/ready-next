@@ -62,6 +62,7 @@ import { runQualityGroup } from './ipc/run-quality-group'
 import { runFeedbackGroup } from './ipc/run-feedback-group'
 import { RunFeedbackRepository } from '../agent-control/task-projection/run-feedback-repository'
 import { emergenceFeedGroup } from './ipc/emergence-feed-group'
+import { getFileEmergenceIntentCardsForFeed } from '../file-emergence/ipc-handler'
 import { listDerivationCandidates } from './ipc/agent-derivation-group'
 import { conversationGroup } from './ipc/conversation-group'
 import { taskProjectionGroup } from './ipc/task-projection-group'
@@ -1117,6 +1118,7 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
         evidenceDates: candidate.evidenceDates,
       }))
     },
+    listFileIntentCards: () => getFileEmergenceIntentCardsForFeed(),
   })
 
   // Stage V V2.1e — conversation-scope + attachment channels lifted into

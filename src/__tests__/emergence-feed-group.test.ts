@@ -127,3 +127,14 @@ test('handler answers success with entries and dispose removes the channel symme
     assert.ok(!handlers.has(channel))
   }
 })
+
+test('production file intent cards enter the agent feed with shared projectKey and project-level dedupe', () => {
+  const entries=assembleFeedEntries(EMPTY_DEPS,[
+    {id:'prepare:a',projectKey:'project-a',type:'prepare',title:'发布计划',confidence:.8,action:{kind:'open_project',ref:'project-a'},evidence:[{fact:'五天后发布'}]},
+    {id:'prepare:a-duplicate',projectKey:'project-a',type:'prepare',title:'另一个名称',confidence:.7,action:{kind:'open_project',ref:'project-a'},evidence:[{fact:'同一项目'}]},
+    {id:'forming:b',projectKey:'project-b',type:'forming',title:'案例库',confidence:.75,action:{kind:'open_project_group',ref:'project-b'},evidence:[{fact:'3 个文件'}]},
+    {id:'harvest:c',projectKey:'project-c',type:'harvest',title:'交付物',confidence:.7,action:{kind:'open_artifact',ref:'/workspace/done.md'},evidence:[{fact:'产物已落盘'}]},
+  ])
+  assert.equal(entries.filter((entry)=>entry.card.type==='prepare').length,1)
+  assert.deepEqual(entries.filter((entry)=>['prepare','forming','harvest'].includes(entry.card.type)).map((entry)=>entry.card.projectKey).sort(),['project-a','project-b','project-c'])
+})

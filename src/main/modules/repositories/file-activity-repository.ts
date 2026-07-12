@@ -47,14 +47,23 @@ export class FileActivityRepository {
       throw new Error(`eventType '${input.eventType}' is not recorded in file emergence v1`)
     }
 
-    const recent = this.db
-      .prepare(`
-        SELECT * FROM file_activity_events
-        WHERE path = ? AND event_type = ? AND source = ? AND created_at >= ?
-        ORDER BY created_at DESC
-        LIMIT 1
-      `)
-      .get<FileActivityRow>(path, input.eventType, input.source, now - DEDUPE_WINDOW_MS)
+    const recent = input.eventType === 'open'
+      ? this.db
+          .prepare(`
+            SELECT * FROM file_activity_events
+            WHERE path = ? AND event_type = ? AND created_at >= ?
+            ORDER BY created_at DESC
+            LIMIT 1
+          `)
+          .get<FileActivityRow>(path, input.eventType, now - DEDUPE_WINDOW_MS)
+      : this.db
+          .prepare(`
+            SELECT * FROM file_activity_events
+            WHERE path = ? AND event_type = ? AND source = ? AND created_at >= ?
+            ORDER BY created_at DESC
+            LIMIT 1
+          `)
+          .get<FileActivityRow>(path, input.eventType, input.source, now - DEDUPE_WINDOW_MS)
 
     if (recent) {
       this.db

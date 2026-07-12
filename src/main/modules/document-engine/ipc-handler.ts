@@ -114,8 +114,10 @@ function shouldHideInternalBackup(name: string): boolean {
 
 
 export type DocumentWriteIndexHook = (path: string, content: string) => void
+export type DocumentMoveIdentityHook = (input: { oldPath: string; newPath: string; isDirectory: boolean }) => void
 
 const documentWriteListeners = new Set<DocumentWriteIndexHook>()
+const documentMoveIdentityListeners = new Set<DocumentMoveIdentityHook>()
 
 const documentWriteIndexHook: DocumentWriteIndexHook = (path, content) => {
   for (const listener of Array.from(documentWriteListeners)) {
@@ -133,6 +135,17 @@ export function addDocumentWriteListener(listener: DocumentWriteIndexHook): () =
 export function setDocumentWriteIndexHook(hook: DocumentWriteIndexHook | null): void {
   documentWriteListeners.clear()
   if (hook) documentWriteListeners.add(hook)
+}
+
+export function addDocumentMoveIdentityListener(listener: DocumentMoveIdentityHook): () => void {
+  documentMoveIdentityListeners.add(listener)
+  return () => {
+    documentMoveIdentityListeners.delete(listener)
+  }
+}
+
+function notifyDocumentPathMoved(input: { oldPath: string; newPath: string; isDirectory: boolean }): void {
+  for (const listener of Array.from(documentMoveIdentityListeners)) listener(input)
 }
 
 function resolveDialogWindow(parentWindow?: BrowserWindow | null): BrowserWindow | null {
@@ -403,6 +416,7 @@ export function setupDocumentIPC(useMock = false): void {
   }
   fileMutationGroupDispose = fileMutationGroup.register(ipcMain, {
     useMock,
+    onPathMoved: notifyDocumentPathMoved,
   })
 
   // Stage V V2.3d — 3 workspace-portability channels

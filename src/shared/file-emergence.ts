@@ -24,6 +24,7 @@ export type FileEmergenceEvidenceSource =
   | 'current_document'
   | 'reading_progress'
   | 'reading_session'
+  | 'controlled_tag'
 
 export type FileActivityEventType = 'open' | 'save' | 'select' | 'external_change'
 
@@ -35,6 +36,7 @@ export type FileActivitySource =
   | 'document_write'
 
 export interface FileEmergenceFileRef {
+  fileKey?: string | null
   path: string
   name: string
   kind: FileEmergenceFileKind
@@ -53,6 +55,7 @@ export interface FileEmergenceEvidence {
 }
 
 export interface FileEmergenceProject {
+  projectKey?: string
   id: string
   bucket: FileEmergenceBucket
   title: string
@@ -60,6 +63,11 @@ export interface FileEmergenceProject {
   anchorType: 'directory' | 'semantic' | 'document'
   anchorPath?: string | null
   titleSource:
+    | 'user'
+    | 'frontmatter'
+    | 'tab_group'
+    | 'task'
+    | 'attachment'
     | 'directory'
     | 'calendar'
     | 'agent'
@@ -76,12 +84,15 @@ export interface FileEmergenceProject {
 
 export interface FileEmergenceIntentCard {
   id: string
+  projectKey: string
   type: 'prepare' | 'harvest' | 'forming'
   title: string
   confidence: number
   action: {
     kind: string
     ref: string
+    targetPath?: string | null
+    memberPaths?: string[]
   }
   evidence: Array<{
     fact: string
@@ -97,12 +108,28 @@ export interface FileEmergenceSnapshot {
   enabled: boolean
   buckets: Record<FileEmergenceBucket, FileEmergenceProject[]>
   intentCards?: FileEmergenceIntentCard[]
+  /** Paths currently suppressed by durable project feedback. Renderer-only
+   * current-tab/reading overlays must never re-introduce these files. */
+  suppressedFilePaths?: string[]
   degraded?: Array<{ source: string; reason: string }>
+  emptyState?: 'no_trusted_candidates' | 'sources_degraded' | 'insufficient_history' | 'all_suppressed'
+  diagnostics?: {
+    sourceCounts: Partial<Record<FileEmergenceEvidenceSource | 'calendar' | 'agent' | 'browser_history', number>>
+    candidateCount: number
+    visibleCount: number
+    rejectedCount: number
+    bucketCounts: Record<FileEmergenceBucket, number>
+    cache: 'generated' | 'hit'
+    suppressedCounts?: Partial<Record<'not_related'|'snoozed'|'hidden',number>>
+  }
 }
 
 export interface FileEmergenceGetSnapshotPayload {
   workspaceRoots: string[]
   forceRefresh?: boolean
+  projectContext?: {
+    tabGroups: Array<{ name: string; paths: string[] }>
+  }
 }
 
 export interface FileEmergenceRecordActivityPayload {
@@ -111,6 +138,32 @@ export interface FileEmergenceRecordActivityPayload {
   source: Extract<FileActivitySource, 'file_tree' | 'document_mode' | 'emergence'>
   workspaceRoots: string[]
   meta?: Record<string, unknown>
+}
+
+export interface FileEmergenceRenameProjectPayload {
+  projectKey: string
+  displayName: string
+  workspaceRoots: string[]
+}
+
+export interface FileEmergenceAssignFilePayload {
+  projectKey: string
+  path: string
+  workspaceRoots: string[]
+}
+
+export interface FileEmergenceCreateProjectForFilePayload {
+  displayName: string
+  path: string
+  workspaceRoots: string[]
+}
+
+export interface FileEmergenceFeedbackPayload {
+  projectKey: string
+  action: 'not_related'|'snooze'|'hide'|'restore'
+  workspaceRoots: string[]
+  evidenceCutoff?: number | null
+  snoozeUntil?: number | null
 }
 
 export type FileEmergenceReadingProgressKind = 'document' | 'pdf' | 'ebook'

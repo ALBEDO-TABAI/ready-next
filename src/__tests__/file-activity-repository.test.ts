@@ -128,7 +128,7 @@ test('file activity repository merges short repeated opens for the same path', (
       path: '/workspace/a/note.md',
       workspaceRoot: '/workspace/a',
       eventType: 'open',
-      source: 'file_tree',
+      source: 'document_mode',
       createdAt: 15_000,
     })
     const rows = repo.listRecent({ workspaceRoots: ['/workspace/a'], since: 0, limit: 10 })
@@ -136,6 +136,20 @@ test('file activity repository merges short repeated opens for the same path', (
     assert.equal(first.id, second.id)
     assert.equal(rows.length, 1)
     assert.equal(rows[0].createdAt, 15_000)
+  } finally {
+    db.close()
+  }
+})
+
+test('file activity repository keeps short saves from distinct sources separate', (t) => {
+  if (skipIfSqliteUnavailable(t, 'file activity save source boundary')) return
+  if (!loadSqlite()) return
+  const db = openDb()
+  try {
+    const repo = new FileActivityRepository(db)
+    repo.recordEvent({ path: '/workspace/a/note.md', workspaceRoot: '/workspace/a', eventType: 'save', source: 'document_mode', createdAt: 10_000 })
+    repo.recordEvent({ path: '/workspace/a/note.md', workspaceRoot: '/workspace/a', eventType: 'save', source: 'document_write', createdAt: 11_000 })
+    assert.equal(repo.listRecent({ workspaceRoots: ['/workspace/a'], since: 0, limit: 10 }).length, 2)
   } finally {
     db.close()
   }

@@ -118,3 +118,13 @@ test('hides entirely when the feed is empty or the API is missing', async () => 
     assert.equal(container.querySelector('[data-ready-emergence-feed]'), null)
   })
 })
+
+test('file action failure is shown on the card surface',async()=>{
+  const entry={card:{id:'prepare:p',projectKey:'p',type:'prepare',title:'准备发布',evidence:[{fact:'五天后',ref:'cal'}],confidence:.8,action:{kind:'open_project',ref:'p',targetPath:'/gone.md'},requiresExplicitConfirm:false},scopeId:null}
+  await withDom({feed:async()=>({success:true,data:[entry]})},async(root,container)=>{
+    await act(async()=>root.render(createElement(EmergenceFeedSection,{onOpenScope:()=>{},onOpenSettings:()=>{}})))
+    const button=container.querySelector('[data-ready-emergence-action="open_project"]') as HTMLButtonElement
+    await act(async()=>{button.click();await new Promise((resolve)=>setTimeout(resolve,0))})
+    assert.match(container.querySelector('[role="alert"]')?.textContent||'',/已移动或删除/)
+  })
+})

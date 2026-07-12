@@ -2806,6 +2806,225 @@ const migrations: Migration[] = [
     up: (db) => {
       db.exec('ALTER TABLE task_projections ADD COLUMN delivery_state_json TEXT')
     }
+  },
+  {
+    name: '068_file_project_identity',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE file_identities (
+          file_key TEXT PRIMARY KEY,
+          workspace_root TEXT NOT NULL,
+          current_path TEXT NOT NULL,
+          status TEXT NOT NULL CHECK(status IN ('present', 'missing', 'deleted')),
+          content_hash TEXT,
+          observed_since INTEGER NOT NULL,
+          last_verified_at INTEGER NOT NULL,
+          UNIQUE(workspace_root, current_path)
+        );
+
+        CREATE INDEX idx_file_identities_workspace_path
+          ON file_identities(workspace_root, current_path);
+
+        CREATE TABLE file_move_receipts (
+          receipt_id TEXT PRIMARY KEY,
+          file_key TEXT NOT NULL REFERENCES file_identities(file_key) ON DELETE CASCADE,
+          workspace_root TEXT NOT NULL,
+          old_path TEXT NOT NULL,
+          new_path TEXT NOT NULL,
+          move_kind TEXT NOT NULL CHECK(move_kind IN ('file', 'directory')),
+          moved_at INTEGER NOT NULL,
+          UNIQUE(file_key, old_path, new_path)
+        );
+
+        CREATE INDEX idx_file_move_receipts_old_path
+          ON file_move_receipts(workspace_root, old_path, moved_at DESC);
+
+        CREATE TABLE project_identities (
+          project_key TEXT PRIMARY KEY,
+          workspace_root TEXT NOT NULL,
+          display_name TEXT NOT NULL,
+          source TEXT NOT NULL,
+          confidence REAL NOT NULL,
+          status TEXT NOT NULL CHECK(status IN ('active', 'snoozed', 'hidden', 'merged')),
+          anchor_path TEXT,
+          aliases_json TEXT NOT NULL DEFAULT '[]',
+          evidence_json TEXT NOT NULL DEFAULT '[]',
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        );
+
+        CREATE INDEX idx_project_identities_workspace_anchor
+          ON project_identities(workspace_root, anchor_path, updated_at DESC);
+
+        CREATE TABLE project_identity_members (
+          project_key TEXT NOT NULL REFERENCES project_identities(project_key) ON DELETE CASCADE,
+          file_key TEXT NOT NULL REFERENCES file_identities(file_key) ON DELETE CASCADE,
+          source TEXT NOT NULL,
+          confidence REAL NOT NULL,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          PRIMARY KEY(project_key, file_key)
+        );
+
+        CREATE UNIQUE INDEX idx_project_identity_member_owner
+          ON project_identity_members(file_key);
+      `)
+    }
+  },
+  {
+    name: '069_file_emergence_long_term_attention',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE file_attention_rollups (
+          file_key TEXT PRIMARY KEY REFERENCES file_identities(file_key) ON DELETE CASCADE,
+          observed_since INTEGER NOT NULL,
+          history_coverage_start INTEGER NOT NULL,
+          history_coverage_end INTEGER NOT NULL,
+          first_open_at INTEGER, last_open_at INTEGER,
+          first_save_at INTEGER, last_save_at INTEGER,
+          first_read_at INTEGER, last_read_at INTEGER,
+          open_count INTEGER NOT NULL DEFAULT 0,
+          save_count INTEGER NOT NULL DEFAULT 0,
+          active_days_json TEXT NOT NULL DEFAULT '[]',
+          reading_ms INTEGER NOT NULL DEFAULT 0,
+          latest_progress REAL, max_progress REAL, progress_kind TEXT,
+          mark_count INTEGER NOT NULL DEFAULT 0,
+          link_in_count INTEGER NOT NULL DEFAULT 0,
+          link_out_count INTEGER NOT NULL DEFAULT 0,
+          last_task_at INTEGER, last_artifact_at INTEGER, last_calendar_at INTEGER, last_attachment_at INTEGER,
+          last_surfaced_at INTEGER, last_clicked_at INTEGER, snoozed_until INTEGER, hidden_at INTEGER,
+          exists_state TEXT NOT NULL DEFAULT 'present' CHECK(exists_state IN ('present','missing','archived')),
+          backfilled_at INTEGER, updated_at INTEGER NOT NULL
+        );
+        CREATE INDEX idx_file_attention_rollups_last_activity
+          ON file_attention_rollups(last_open_at, last_save_at, last_read_at);
+
+        CREATE TABLE project_intent_facts (
+          intent_id TEXT PRIMARY KEY,
+          project_key TEXT NOT NULL REFERENCES project_identities(project_key) ON DELETE CASCADE,
+          file_keys_json TEXT NOT NULL DEFAULT '[]',
+          kind TEXT NOT NULL CHECK(kind IN ('continue','prepare','deliver','read')),
+          source TEXT NOT NULL CHECK(source IN ('calendar','task','user_confirmed')),
+          not_before INTEGER, due_at INTEGER, expires_at INTEGER NOT NULL,
+          status TEXT NOT NULL CHECK(status IN ('active','completed','cancelled','expired')),
+          evidence_code TEXT NOT NULL,
+          evidence_ref TEXT,
+          created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+        );
+        CREATE INDEX idx_project_intent_active
+          ON project_intent_facts(project_key, status, expires_at);
+
+        CREATE TABLE file_emergence_prediction_snapshots (
+          snapshot_id TEXT NOT NULL,
+          project_key TEXT NOT NULL,
+          bucket TEXT NOT NULL CHECK(bucket IN ('future','today','past','distant')),
+          reason_codes_json TEXT NOT NULL,
+          generated_at INTEGER NOT NULL,
+          PRIMARY KEY(snapshot_id, project_key)
+        );
+      `)
+    }
+  },
+  {
+    name: '070_tag_forge_controlled_tagging',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE tag_lexicon_overlays (
+          tag_id TEXT PRIMARY KEY,
+          facet TEXT NOT NULL CHECK(facet IN ('form','domain','entity','use','state')),
+          label TEXT NOT NULL,
+          aliases_json TEXT NOT NULL DEFAULT '[]',
+          definition TEXT NOT NULL DEFAULT '',
+          status TEXT NOT NULL CHECK(status IN ('active','deprecated')),
+          created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+        );
+        CREATE UNIQUE INDEX idx_tag_overlay_facet_label ON tag_lexicon_overlays(facet,label);
+
+        CREATE TABLE tag_pending_proposals (
+          proposal_id TEXT PRIMARY KEY,
+          facet TEXT NOT NULL CHECK(facet IN ('form','domain','entity','use','state')),
+          label TEXT NOT NULL,
+          evidence_code TEXT NOT NULL,
+          evidence_excerpt TEXT,
+          source_run_id TEXT,
+          status TEXT NOT NULL CHECK(status IN ('pending','approved','merged','rejected')),
+          created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+          UNIQUE(facet,label,status)
+        );
+
+        CREATE TABLE file_tag_assignments (
+          file_key TEXT NOT NULL REFERENCES file_identities(file_key) ON DELETE CASCADE,
+          tag_id TEXT NOT NULL,
+          facet TEXT NOT NULL CHECK(facet IN ('form','domain','entity','use','state')),
+          label TEXT NOT NULL,
+          source TEXT NOT NULL CHECK(source IN ('user','tag_forge_auto','tag_forge_explicit','import')),
+          ownership TEXT NOT NULL CHECK(ownership IN ('manual','automatic')),
+          suppressed INTEGER NOT NULL DEFAULT 0,
+          lexicon_version TEXT,
+          evidence_code TEXT,
+          confidence REAL,
+          validated_at INTEGER,
+          written_at INTEGER,
+          readback_at INTEGER,
+          updated_at INTEGER NOT NULL,
+          PRIMARY KEY(file_key,tag_id)
+        );
+        CREATE INDEX idx_file_tag_assignment_label ON file_tag_assignments(facet,label,suppressed);
+
+        CREATE TABLE artifact_creation_receipts (
+          receipt_id TEXT PRIMARY KEY,
+          source_run_id TEXT NOT NULL,
+          file_key TEXT NOT NULL REFERENCES file_identities(file_key) ON DELETE CASCADE,
+          created_in_this_run INTEGER NOT NULL CHECK(created_in_this_run=1),
+          created_at INTEGER NOT NULL,
+          final_save_hash TEXT,
+          final_saved_at INTEGER,
+          enrichment_status TEXT NOT NULL CHECK(enrichment_status IN ('awaiting_final_save','pending','completed','completed_sparse','failed_retryable','failed_terminal')),
+          retry_error_code TEXT,
+          updated_at INTEGER NOT NULL,
+          UNIQUE(source_run_id,file_key)
+        );
+        CREATE INDEX idx_artifact_receipt_enrichment ON artifact_creation_receipts(enrichment_status,updated_at);
+      `)
+    }
+  },
+  {
+    name: '071_file_emergence_feedback_and_evaluation',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE file_emergence_feedback (
+          feedback_id TEXT PRIMARY KEY,
+          project_key TEXT NOT NULL REFERENCES project_identities(project_key) ON DELETE CASCADE,
+          action TEXT NOT NULL CHECK(action IN ('rename','not_related','snooze','hide','restore')),
+          evidence_cutoff INTEGER,
+          snooze_until INTEGER,
+          created_at INTEGER NOT NULL
+        );
+        CREATE INDEX idx_file_emergence_feedback_project
+          ON file_emergence_feedback(project_key, created_at DESC);
+        ALTER TABLE file_emergence_prediction_snapshots ADD COLUMN rank INTEGER;
+        ALTER TABLE file_emergence_prediction_snapshots ADD COLUMN score REAL;
+      `)
+    }
+  },
+  {
+    name: '072_file_emergence_snapshot_diagnostics',
+    up: (db) => {
+      db.exec(`
+        ALTER TABLE file_emergence_prediction_snapshots ADD COLUMN machine_name INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE file_emergence_prediction_snapshots ADD COLUMN file_keys_json TEXT NOT NULL DEFAULT '[]';
+        CREATE TABLE file_emergence_snapshot_generations (
+          snapshot_id TEXT PRIMARY KEY,
+          root_scope_hash TEXT NOT NULL,
+          generated_at INTEGER NOT NULL,
+          visible_count INTEGER NOT NULL,
+          machine_name_count INTEGER NOT NULL,
+          rejection_reasons_json TEXT NOT NULL
+        );
+        CREATE INDEX idx_file_emergence_generation_scope_time
+          ON file_emergence_snapshot_generations(root_scope_hash, generated_at);
+      `)
+    }
   }
 ]
 

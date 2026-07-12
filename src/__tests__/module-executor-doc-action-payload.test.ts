@@ -9,6 +9,7 @@ import {
 } from '../renderer/modules/agent/documentActions'
 import { executeModuleToolAction } from '../renderer/modules/agent/moduleExecutor'
 import { useDocTabs } from '../renderer/stores/useDocTabs'
+import { useMode } from '../renderer/stores/useMode'
 import { shouldApplyAsyncDocumentLoad } from '../renderer/components/document/documentLoadGuard'
 
 function buildGuideFenceFixture(): string {
@@ -296,6 +297,26 @@ describe('executeModuleToolAction · document.updateWidget payload 合约', () =
     const summary = await performDocAction({ type: 'list_widgets' })
     assert.equal(typeof summary, 'string')
     assert.equal(classifyDocActionFailureReason({ type: 'list_widgets' }, summary), null)
+  })
+
+  it('new Markdown validates Tag Forge proposals before its one final save',async()=>{
+    const previousWindow=(globalThis as {window?:unknown}).window;const writes:Array<{path:string;content:string}>=[];let began=0;let validated=0
+    useDocTabs.setState({tabs:[{id:'base',path:null,title:'base',content:'',isDirty:false}],activeTabId:'base',splitTabId:null})
+    useMode.setState({workbenchMode:'document'})
+    ;(globalThis as {window?:unknown}).window={localStorage:{getItem:()=>'/tmp'},electronAPI:{document:{readFile:async()=>({success:false}),writeFile:async(path:string,content:string)=>{writes.push({path,content});return{success:true}}},tagForge:{beginCreation:async()=>{began++;return{success:true,data:{creationToken:'token-1'}}},recordCreation:async()=>({success:true,data:{receiptId:'receipt-1'}}),validateCreation:async()=>{validated++;return{success:true,data:{tags:['教程','AI工作流','待整理'],sparse:false,pending:[]}}},finalizeCreation:async()=>({success:true,data:{receiptId:'receipt-1',revision:'hash',path:'/tmp/new.md',status:'completed'}})}}}
+    try{
+      const tagForgeAPI=(globalThis as any).window.electronAPI.tagForge
+      await executeModuleToolAction({...makeParams('document.newTab',{title:'new'}),tagForgeAPI});const tabId=useDocTabs.getState().tabs.find((tab)=>tab.title==='new')!.id
+      await executeModuleToolAction({...makeParams('document.setContent',{tabId,content:'# 新文档\n\nAI 工作流教程'}),tagForgeAPI})
+      const saved=await executeModuleToolAction({...makeParams('document.saveTab',{tabId,path:'/tmp/new.md',tagProposals:[{facet:'form',label:'教程',evidenceCode:'form',confidence:.9}]}),tagForgeAPI})
+      assert.equal(began,1);assert.equal(validated,1);assert.equal(saved.payload?.tagForgeStatus,'completed');assert.equal(saved.payload?.tagForgeEnrichmentRequired,false);assert.equal(writes.length,1);assert.match(writes[0]!.content,/tags:\n  - 教程\n  - AI工作流\n  - 待整理/);assert.match(writes[0]!.content,/AI 工作流教程/)
+    }finally{;(globalThis as {window?:unknown}).window=previousWindow}
+  })
+  it('automatic tag failure preserves the newly saved body and reports retryable',async()=>{
+    const writes:Array<{content:string}>=[];useDocTabs.setState({tabs:[{id:'base2',path:null,title:'base2',content:'',isDirty:false}],activeTabId:'base2',splitTabId:null});useMode.setState({workbenchMode:'document'})
+    const api:any={beginCreation:async()=>({success:true,data:{creationToken:'bad-token'}}),recordCreation:async()=>({success:true,data:{receiptId:'receipt-failed'}}),validateCreation:async()=>({success:false,error:'model unavailable'}),finalizeCreation:async()=>({success:false,error:'validation missing'})}
+    const previousWindow=(globalThis as any).window;(globalThis as any).window={localStorage:{getItem:()=>'/tmp'},electronAPI:{document:{readFile:async()=>({success:false}),writeFile:async(_path:string,content:string)=>{writes.push({content});return{success:true}}},tagForge:api}}
+    try{await executeModuleToolAction({...makeParams('document.newTab',{title:'failed-tag'}),tagForgeAPI:api});const tabId=useDocTabs.getState().tabs.find((tab)=>tab.title==='failed-tag')!.id;await executeModuleToolAction({...makeParams('document.setContent',{tabId,content:'# 正文仍要保存'}),tagForgeAPI:api});const saved=await executeModuleToolAction({...makeParams('document.saveTab',{tabId,path:'/tmp/failed-tag.md'}),tagForgeAPI:api});assert.equal(saved.payload?.tagForgeStatus,'failed_retryable');assert.equal(saved.payload?.tagForgeEnrichmentRequired,true);assert.equal(saved.payload?.tagForgeReceiptId,'receipt-failed');assert.equal(writes[0]?.content,'# 正文仍要保存')}finally{(globalThis as any).window=previousWindow}
   })
 })
 

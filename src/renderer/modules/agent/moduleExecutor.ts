@@ -9,6 +9,11 @@ import {
   performDocActionWithMetadata,
 } from './documentActions'
 import type { AgentArtifact, AgentModuleKind, ScopeRunState, ScopeRunTaskStepStatus, ToolTraceEvent } from './types'
+import { useDocTabs } from '../../stores/useDocTabs'
+import { parseDocumentGraph } from '../../../shared/document-graph-parse'
+import { writeFrontmatter } from '../../../shared/document-graph-parse-frontmatter-writer'
+
+const pendingTagForgeCreations=new Map<string,{creationToken:string;receiptId:string|null}>()
 
 function toExecutionKind(tool: string): ScopeRunState['executionKind'] {
   if (tool === 'rss.analyzeItem') return 'pipeline'
@@ -68,6 +73,7 @@ interface HandleModuleToolActionParams {
   activateWorkbenchMode: (mode: 'browser' | 'document' | 'rss' | 'calendar') => void
   upsertScopeRunState: (scopeId: string, updater: (previous: ScopeRunState | null) => ScopeRunState) => void
   getScopeRunState?: () => ScopeRunState | null
+  tagForgeAPI?: Window['electronAPI']['tagForge']
 }
 
 export interface ModuleToolActionExecutionResult {
@@ -80,6 +86,17 @@ export async function executeModuleToolAction(
 ): Promise<ModuleToolActionExecutionResult> {
   const { scopeId, agentName, tool, args, runId, activateWorkbenchMode, upsertScopeRunState, getScopeRunState } = params
   if (!tool) return { handled: false }
+
+  if(tool==='tagForge.checkRevision'){
+    const path=typeof args.path==='string'?args.path:'';const tab=useDocTabs.getState().tabs.find((item)=>item.path===path)
+    return{handled:true,payload:{ok:!tab?.isDirty,open:Boolean(tab),errorKind:tab?.isDirty?'open_tab_revision_conflict':undefined}}
+  }
+  if(tool==='tagForge.applyContent'){
+    const path=typeof args.path==='string'?args.path:'';const content=typeof args.content==='string'?args.content:'';const state=useDocTabs.getState();const tab=state.tabs.find((item)=>item.path===path)
+    if(tab?.isDirty)return{handled:true,payload:{ok:false,errorKind:'open_tab_revision_conflict'}}
+    if(tab){state.setTabContent(tab.id,content);state.markTabSaved(tab.id)}
+    return{handled:true,payload:{ok:true,open:Boolean(tab)}}
+  }
 
   const pushTrace = (
     kind: ToolTraceEvent['kind'],
@@ -289,6 +306,26 @@ export async function executeModuleToolAction(
   const docAction = mapToolActionToDocAction(tool, args)
   if (docAction) {
     pushTrace('call', `执行 ${tool}`, 'tool_running', { module: 'document', executionKind: 'deterministic' })
+    const tabIdsBefore=new Set(useDocTabs.getState().tabs.map((tab)=>tab.id))
+    let tagValidationFailed=false
+    let creationReceiptError:string|null=null
+    let createdReceiptId:string|null=null
+    const tagForgeApi=params.tagForgeAPI??(globalThis as typeof globalThis&{window?:Window}).window?.electronAPI?.tagForge
+    const begunCreation=docAction.type==='new_tab'&&runId&&tagForgeApi?await tagForgeApi.beginCreation({sourceRunId:runId}).catch(()=>null):null
+    const begunToken=begunCreation?.success&&begunCreation.data&&typeof begunCreation.data==='object'?'creationToken' in begunCreation.data?String(begunCreation.data.creationToken):'':''
+    if(docAction.type==='save_tab'&&runId&&tagForgeApi){
+      const snapshot=getActiveDocumentSnapshot(typeof args.tabId==='string'?args.tabId:undefined);const pending=snapshot?pendingTagForgeCreations.get(`${runId}:${snapshot.tabId}`):null
+      if(snapshot&&pending){
+        if(!pending.receiptId){
+          const root=String(window.localStorage?.getItem('ready-workspace-root')||'').trim();const path=typeof args.path==='string'&&args.path.trim()?args.path.trim():snapshot.path
+          if(root&&path){const recorded=await tagForgeApi.recordCreation({creationToken:pending.creationToken,sourceRunId:runId,path,workspaceRoots:[root]}).catch(()=>null);if(recorded?.success&&recorded.data)pending.receiptId=recorded.data.receiptId;else creationReceiptError=recorded?.error||'自动标签创建回执未建立'}
+        }
+        const proposals=Array.isArray(args.tagProposals)?args.tagProposals:[]
+        const validated=pending.receiptId?await tagForgeApi.validateCreation({creationToken:pending.creationToken,sourceRunId:runId,proposals:proposals as Array<{facet:'form'|'domain'|'entity'|'use';label:string;evidenceCode:string;evidenceExcerpt?:string;confidence:number}>}).catch(()=>null):null
+        if(validated?.success&&validated.data){const latest=getActiveDocumentSnapshot(snapshot.tabId);if(latest){const graph=parseDocumentGraph(latest.content);const fm={...(graph.frontmatter??{})};const existing=Array.isArray(fm.tags)?fm.tags.filter((item):item is string=>typeof item==='string'):[];fm.tags=Array.from(new Map([...existing,...validated.data.tags].map((label)=>[label.toLocaleLowerCase(),label])).values());useDocTabs.getState().setTabContent(latest.tabId,writeFrontmatter(graph.body,fm))}}
+        else tagValidationFailed=true
+      }
+    }
     const result = await performDocActionWithMetadata(docAction)
     const summary = result.summary
     const failureReason = classifyDocActionFailureReason(docAction, summary)
@@ -297,6 +334,18 @@ export async function executeModuleToolAction(
       summary,
     }
     Object.assign(payload, classifyDocActionMutationOutcome(docAction, summary))
+    const createdTabId=docAction.type==='new_tab'?(useDocTabs.getState().tabs.find((tab)=>!tabIdsBefore.has(tab.id))?.id??result.document?.tabId??useDocTabs.getState().tabs.find((tab)=>tab.title===String(args.title||''))?.id):null
+    if(docAction.type==='new_tab'&&runId&&createdTabId&&tagForgeApi){
+      const path=result.document?.path
+      const root=String(window.localStorage?.getItem('ready-workspace-root')||'').trim()
+      if(begunToken&&path&&root){
+        const recorded=await tagForgeApi.recordCreation({creationToken:begunToken,sourceRunId:runId,path,workspaceRoots:[root]}).catch(()=>null)
+        if(recorded?.success&&recorded.data){createdReceiptId=recorded.data.receiptId;pendingTagForgeCreations.set(`${runId}:${createdTabId}`,{creationToken:begunToken,receiptId:recorded.data.receiptId})}
+        else creationReceiptError=recorded?.error||'自动标签创建回执未建立'
+      }else if(begunToken)pendingTagForgeCreations.set(`${runId}:${createdTabId}`,{creationToken:begunToken,receiptId:null})
+    }
+    if(createdReceiptId)payload.tagForgeReceiptId=createdReceiptId
+    if(creationReceiptError){payload.tagForgeStatus='failed_retryable';payload.tagForgeError=creationReceiptError}
     if (result.document) {
       payload.document = result.document
       payload.documentTabId = result.document.tabId
@@ -330,6 +379,19 @@ export async function executeModuleToolAction(
         runId,
       )
       : null
+    if(artifact&&runId&&result.document?.tabId&&typeof payload.documentPath==='string'&&tagForgeApi){
+      const key=`${runId}:${result.document.tabId}`;const pending=pendingTagForgeCreations.get(key)
+      if(pending?.receiptId){
+        const root=String(window.localStorage?.getItem('ready-workspace-root')||'').trim()
+        const finalized=await tagForgeApi.finalizeCreation({creationToken:pending.creationToken,receiptId:pending.receiptId,sourceRunId:runId,path:payload.documentPath,workspaceRoots:root?[root]:[]}).catch(()=>null)
+        if(finalized?.success&&finalized.data){
+          payload.tagForgeEnrichmentRequired=false;payload.tagForgeReceiptId=finalized.data.receiptId;payload.tagForgeExpectedRevision=finalized.data.revision;pendingTagForgeCreations.delete(key)
+          payload.tagForgeStatus=('status' in finalized.data?finalized.data.status:undefined)??'completed'
+        }else if(tagValidationFailed||finalized?.success===false){
+          payload.tagForgeEnrichmentRequired=true;payload.tagForgeReceiptId=pending.receiptId;payload.tagForgeStatus='failed_retryable';payload.tagForgeError=finalized?.error||'自动标签未完成，正文已正常保存'
+        }
+      }
+    }
     const tracePhase: ScopeRunState['phase'] = actionFailed ? 'error' : 'tool_running'
     pushTrace('result', summary, tracePhase, {
       module: 'document',

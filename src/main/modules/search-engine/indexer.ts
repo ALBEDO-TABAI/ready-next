@@ -4,6 +4,7 @@ import { normalizeSearchText } from '../../../shared/document-graph-parse'
 import { validateWorkspaceRoot } from '../../../shared/workspace-validation'
 import { SearchRepository } from './repository'
 import { parseSearchQuery, type SearchHit } from './query'
+import { reconcileIndexedFrontmatter,reconcileIndexedWorkspace } from '../tag-forge/reconcile'
 import {
   AbortError,
   AgentMessageAdapter,
@@ -126,6 +127,7 @@ export class SearchEngine {
       result.scanned = adapterResult.scanned
       this.repository.touchWorkspace(workspaceId, Math.floor(Date.now() / 1000))
       result.ok = true
+      reconcileIndexedWorkspace(this.repository.getConnection(),root,workspaceId)
     } catch (error) {
       // perf-rescue B6: AbortError is a first-class signal for callers; we
       // still log it but surface a structured `aborted: true` flag so the
@@ -243,6 +245,7 @@ export class SearchEngine {
       // content change) still trigger it because rename/incoming-resolve
       // edge cases don't depend on whether the body changed.
       this.scheduleWorkspaceLinkResolve(workspaceId)
+      reconcileIndexedFrontmatter(this.repository.getConnection(),root,parsed.path,parsed.tags)
       return { ok: true, documentId, skipped }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)

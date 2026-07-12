@@ -33,7 +33,9 @@ import type { IpcMain } from 'electron'
 import type { EngineDeps } from './engine-deps'
 import type { IpcChannelGroup, IpcDisposeHandle } from './types'
 
-export type FileMutationGroupDeps = Pick<EngineDeps, 'useMock'>
+export type FileMutationGroupDeps = Pick<EngineDeps, 'useMock'> & {
+  onPathMoved?: (input: { oldPath: string; newPath: string; isDirectory: boolean }) => void
+}
 
 const CHANNELS = [
   'document:mkdir',
@@ -91,7 +93,14 @@ export const fileMutationGroup: IpcChannelGroup<FileMutationGroupDeps> = {
         if (deps.useMock) return { success: true, mock: true }
         if (!existsSync(oldPath)) return { success: false, error: 'Source not found' }
         if (existsSync(newPath)) return { success: false, error: 'Target already exists' }
+        const stats = await stat(oldPath)
         await rename(oldPath, newPath)
+        try {
+          deps.onPathMoved?.({ oldPath, newPath, isDirectory: stats.isDirectory() })
+        } catch (error) {
+          await rename(newPath, oldPath)
+          throw error
+        }
         return { success: true }
       } catch (error) {
         return { success: false, error: error instanceof Error ? error.message : String(error) }
@@ -134,6 +143,12 @@ export const fileMutationGroup: IpcChannelGroup<FileMutationGroupDeps> = {
         if (existsSync(dest)) return { success: false, error: 'Target already exists' }
         const stats = await stat(src)
         await movePath(src, dest, stats.isDirectory())
+        try {
+          deps.onPathMoved?.({ oldPath: src, newPath: dest, isDirectory: stats.isDirectory() })
+        } catch (error) {
+          await movePath(dest, src, stats.isDirectory())
+          throw error
+        }
         return { success: true }
       } catch (error) {
         return { success: false, error: error instanceof Error ? error.message : String(error) }

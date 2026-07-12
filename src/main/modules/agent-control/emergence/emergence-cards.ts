@@ -36,10 +36,13 @@ export interface EmergenceAction {
     | 'open_artifact'
     | 'open_project_group'
   ref: string
+  targetPath?: string | null
+  memberPaths?: string[]
 }
 
 export interface EmergenceCard {
   id: string
+  projectKey?: string
   type: 'resume' | 'follow_up' | 'crystallize' | 'prepare' | 'harvest' | 'forming'
   title: string
   evidence: EmergenceEvidence[]

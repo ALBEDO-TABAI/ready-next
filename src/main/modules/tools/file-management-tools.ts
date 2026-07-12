@@ -9,6 +9,7 @@ import { getWorkerDbBridge } from '../database/worker-bridge'
 import { parseDocumentGraph } from '../../../shared/document-graph-parse'
 import { resolveDocumentSectionAnchor } from '../../../shared/document-sectioning'
 import { validateWorkspaceRoot } from '../../../shared/workspace-validation'
+import { executeTagForgeApply } from '../tag-forge/tag-forge-tool'
 import {
   resolveIndexedDocumentCandidate as resolveIndexedDocumentCandidateFromDb,
   type IndexedDocumentRow,
@@ -29,6 +30,8 @@ interface FileManagementToolContext {
   abortSignal?: AbortSignal
   organizeStoreDir?: string | null
   workspaceRoots?: string[] | null
+  runId?: string | null
+  requestModuleToolAction?: (tool:string,args:Record<string,unknown>)=>Promise<Record<string,unknown>>
 }
 
 const DEFAULT_EXCERPT_CHARS = 32_000
@@ -356,6 +359,8 @@ export async function executeFileManagementTool(
       return runFileGetGraph(args, engine, context)
     case 'file_classify':
       return runFileClassify(args, engine, context)
+    case 'tag_forge_apply':
+      return executeTagForgeApply(args, engine, context)
     case 'file_rename':
       return runFileRename(args, engine, context)
     case 'file_move':

@@ -666,6 +666,8 @@ async function executeToolCallInner(
             return executeFileManagementTool(toolName, args, {
               abortSignal: context.abortSignal,
               workspaceRoots: workspaceRootsFromRequestEnvelope(context.requestEnvelope),
+              runId: context.runId ?? null,
+              requestModuleToolAction: context.requestModuleToolAction,
             })
           }
 
