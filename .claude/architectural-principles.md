@@ -241,13 +241,13 @@ PR 开工前先答：
 
 ## 与本仓既有规则的关系
 
-CLAUDE.md / AGENTS.md 里的具体规则（§6.1-§6.14、§10、§12 等）是这 6 条原则在不同子系统下的具体展开：
+`CLAUDE.md` / `AGENTS.md` 保留红线和必读入口，详细子系统合同集中在 `docs/architecture/current-runtime-contracts.md`：
 
-- §6.7（技能中心原则）→ 多处对应原则 2（统一 skill_* 工具走单一出口）+ 原则 3（B Phase 4 的 skill_executions 状态机退役）。
-- §6.10（Agent 工具策略裁决）→ 原则 2（`run-capability-controller.resolveRunCapabilities` 是策略冲突的唯一裁决点，禁止双重挡板）。
-- §6.11（工具错误契约）→ 原则 1（错误形状是合同）+ 原则 5（CI 验证 errorKind/recoverable 字段）。
-- §6.13（Skill 长任务状态与续跑）→ 原则 2（任务身份验证以 task id 为第一身份）+ 原则 5（real DB 验收前先 rebuild:native）。
-- §7（新功能开发最小闭环）→ 原则 6（跨进程状态必须同步 main / preload / renderer 类型 / UI / 文档）。
-- §12（CLAUDE.md / AGENTS.md 同步）→ 原则 5（同步机制本身要 CI 检查，不靠人审）。
+- Skill 标准、授权与旧状态机退役 → 原则 2（单一出口）+ 原则 3（不复活 `skill_executions`）。
+- capability floor 的 SDK live 强制点 → 原则 2（唯一生产真值）+ 原则 5（gate 强制）；dormant parity 不能冒充 live 权威。
+- 工具错误形状 → 原则 1（先定义合同）+ 原则 5（CI 验证 `errorKind` / recoverable 语义）。
+- Skill 长任务与续跑 → 原则 2（durable handle 是第一身份）+ 原则 5（真实 DB 验收跑 `verify:native`）。
+- 根指引 §7 的跨进程最小闭环 → 原则 6（Main / Preload / Renderer 类型 / UI / 测试共同闭环）。
+- 根指引 §12 的双文档同步与 `docs/README.md` 单一真值规则 → 原则 5（能机器检查的同步不靠人审）。
 
 任何新增的具体规则都应该映射到至少一条原则；映射不上 = 大概率不该加这条规则。

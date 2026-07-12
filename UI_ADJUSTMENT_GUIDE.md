@@ -1,228 +1,119 @@
 # UI 调整导览
 
-这份文件是给以后接手这个项目的 coding agent 用的。
-目标只有一个：想改某个 UI 区域时，先看这里，再去对应文件，不要在整个 `src/renderer/` 里盲搜。
+> 更新时间：2026-07-12
+> 目标：先定位状态拥有者、壳层和回归入口，再修改 UI。详细视觉原则见 `PRODUCT.md`（若已纳入工作区）与对应规格，不在本文件复制阶段设计稿。
 
-## 1. 总入口
+## 1. 工作台壳层
 
-- 工作台总壳层：`src/renderer/pages/WorkbenchMode.tsx`
-  负责左侧图标栏、侧边面板、主内容区、聊天区的整体拼装。
-- 左侧图标栏入口：`src/renderer/components/layout/IconRail.tsx`
-  这里只负责把当前激活项和“面板是否展开”传给左边滑块，不要把滑块状态机写回这里。
-- 左侧图标滑块真实逻辑：`src/renderer/components/motion/MorphIconRailGroup.tsx`
-  这里控制滑块的浮起态、下陷记忆态、按下过程、以及“先浮起再滑动”的节奏。
-- 模式切换出口：`src/renderer/components/layout/WorkbenchModeOutlet.tsx`
-  负责在 `browser / document / rss / calendar` 之间切换。
-- 顶部模式切换栏：`src/renderer/components/layout/TopBar.tsx`
-- 四模块滑块与左栏滑块样式：`src/renderer/styles/workbench-sliders.css`
-- 工作台滑块运动参数基线：`src/renderer/modules/workbench/slider-motion.ts`
-  顶部四模块直接用这里；左栏滑块现在是在这套基线之上做了更慢的派生节奏。
+| 区域 | 入口 |
+| --- | --- |
+| 路由与 fallback | `src/renderer/App.tsx` |
+| Workbench 总壳 | `src/renderer/pages/WorkbenchMode.tsx` |
+| 左侧轨道 | `src/renderer/components/layout/IconRail.tsx` |
+| 顶部模式标签 | `src/renderer/components/layout/DraggableModeTabs.tsx` |
+| 模式切换与分屏 | `src/renderer/modules/workbench/` |
+| 共享 chrome 尺寸 | `src/renderer/modules/workbench/chrome.ts` |
+| 滑块动效 | `src/renderer/components/motion/MorphIconRailGroup.tsx`、`src/renderer/styles/workbench-sliders.css` |
 
-## 2. 侧边面板怎么找
+不要在各模式页面复制工作台尺寸、切换状态或滑块时间线。
 
-- 侧边面板壳层路由：`src/renderer/components/layout/SidePanel.tsx`
-  这里现在负责三件事：
-  1. 决定当前显示哪个面板
-  2. 统一编排标题/内容的滚动切换
-  3. 在收起时保持内部内容按原宽度被裁切，避免文字被右边界挤成一列
-  但它仍然不应该重新塞回文件管理/搜索/技能中心的业务细节。
-- 文件面板真实入口：`src/renderer/components/layout/FilesPanel.tsx`
-  文件管理标题、工具栏、搜索框、网格前进/后退、文件树/网格入口都在这里。
-  现在也负责把“标题槽 / 主体槽”提供给 `SidePanel.tsx`。
-- 全局搜索面板：`src/renderer/components/layout/GlobalSearchPanel.tsx`
-  同样提供“标题槽 / 主体槽”给 `SidePanel.tsx`。
-- 技能中心面板：`src/renderer/components/layout/SkillsCenterPanel.tsx`
-  同样提供“标题槽 / 主体槽”给 `SidePanel.tsx`。
-- 日程左侧内容不走 `SidePanel`，真实入口在：`src/renderer/components/calendar/CalendarWorkbenchShell.tsx`
+## 2. 左侧面板与文件
 
-### 和侧边面板改动最相关的检查
+| 目标 | 入口 |
+| --- | --- |
+| 面板切换/动画壳 | `src/renderer/components/layout/SidePanel.tsx` |
+| 文件面板标题与主体 | `src/renderer/components/layout/FilesPanel.tsx` |
+| 文件树编排 | `src/renderer/components/layout/FileTree.tsx` |
+| 文件树子行为 | `src/renderer/components/layout/file-tree/` |
+| 文件夹缩略图 | `FolderPreview.tsx`、`folderPreviewModel.ts` |
+| 全局搜索 | `GlobalSearchPanel.tsx` |
+| 技能中心 | `SkillsCenterPanel.tsx` |
+| 文件涌现 | `FileEmergenceSection.tsx`、`fileEmergenceViewModel.ts` |
 
-- 侧边面板滚动切换契约：`src/__tests__/side-panel-waterfall-contract.test.ts`
-- 左栏滑块记忆态/浮起态契约：`src/__tests__/icon-rail-resting-thumb-contract.test.ts`
-- 左栏滑块外观基线：`src/__tests__/workbench-mode-and-rail-slider-contract.test.ts`
-- 左栏滑块与顶部滑块的运动基线关系：`src/__tests__/workbench-slider-motion-contract.test.ts`
+瞬时菜单不要挂在带 `overflow-hidden` 的侧栏布局内；使用顶层弹层并由拥有菜单的组件计算位置。文件选择、拖放、移动和删除优先查 `file-tree/`，不要继续把所有逻辑塞回 `FileTree.tsx`。
 
-## 3. 文件面板相关改动去哪改
+## 3. 四个工作面
 
-### 文件列表 / 网格
+### Browser
 
-- 文件树与网格主体：`src/renderer/components/layout/FileTree.tsx`
-  文件夹卡片、网格缩略图卡片、文件夹内容预览的挂载入口都从这里进去找。
-- 文件夹缩略图预览表现：`src/renderer/components/layout/FolderPreview.tsx`
-  这里控制文件夹卡片里那块小预览区域怎么画。
-- 文件夹缩略图筛选与排序规则：`src/renderer/components/layout/folderPreviewModel.ts`
-  想改“优先显示什么内容”“空文件夹文案”“无图片时怎么退化显示”，先看这里。
-- 网格历史逻辑：`src/renderer/components/layout/gridNavigation.ts`
-- 工作区文件状态：`src/renderer/stores/useWorkspace.ts`
+- 页面：`src/renderer/pages/modes/BrowserMode.tsx`
+- 顶栏：`src/renderer/components/browser/BrowserTopBar.tsx`
+- 竖向标签：`src/renderer/components/browser/VerticalTabRail.tsx`
+- 分组共用件：`src/renderer/components/tabs/TabGroupHeaderRow.tsx`、`TabGroupEditMenu.tsx`
+- BrowserView bounds：`src/renderer/modules/browser/useBrowserViewBounds.ts`
+- 状态：`src/renderer/stores/useBrowserTabs.ts`
 
-### 文件面板搜索区
+BrowserView 是原生覆盖层。弹层、hover flyout 和模式切换问题先核对 hide/show 与 bounds，不要只调 `z-index`。
 
-- 文件面板顶部搜索与网格前进后退：`src/renderer/components/layout/FilesPanel.tsx`
-- 文件面板顶部“筛选 / 更多”菜单：
-  真实逻辑也在 `src/renderer/components/layout/FilesPanel.tsx`
-  但菜单本体现在走顶层弹层，不再留在左侧栏内部。
-- 文件面板下拉菜单共用外观：`src/renderer/components/ui/floatingMenuStyles.ts`
-- 文件面板下拉菜单悬停与磨砂样式：`src/renderer/components/layout/filesPanelFloatingMenu.css`
-- 输入槽共用外观：`src/renderer/styles/index.css`
-  关键词：
-  - `--input-slot-bg`
-  - `--input-slot-border`
-  - `.ready-input-shell`
-  - `.ready-input-slot-inner`
+### Document
 
-## 4. 四个主模式分别去哪改
+- 页面：`src/renderer/pages/modes/DocumentMode.tsx`
+- 竖向标签：`src/renderer/components/document/DocumentVerticalTabRail.tsx`
+- 编辑/预览：`src/renderer/components/document/`
+- 状态：`src/renderer/stores/useDocTabs.ts`
+- Widget 主题与结构：`src/shared/document-widget-theme.ts`、`src/shared/document-widget-skeletons.ts`
 
-### Agent 聊天
-
-- 聊天面板总入口：`src/renderer/components/agent/ChatPanel.tsx`
-  这里负责会话来源筛选、历史会话加载、输入区、附件区、消息区的整体拼装。
-- 聊天头部：`src/renderer/components/agent/ChatHeader.tsx`
-  左侧现在是紧凑的会话窗口切换按钮；右侧的历史会话按钮保持独立，不要再把两者合并成一个入口。
-- 聊天头部下拉卡片外观：`src/renderer/components/agent/chatHeaderMenuStyles.ts`
-  这里继续复用聊天头部 / 文件面板同一套磨砂浮层参数。
-- 浮层通用玻璃质感：`src/renderer/components/ui/floatingMenuStyles.ts`
-  如果要改聊天头部下拉卡片的毛玻璃、圆角、阴影和层级，先看这里。
-- 聊天消息列表：`src/renderer/components/agent/ChatMessages.tsx`
-  用户消息仍在右侧，但正文现在固定左对齐；用户与 agent 消息之间的细淡白色分隔线也在这里。
-- 聊天输入框液态玻璃：`src/renderer/components/agent/ChatInput.tsx`
-  输入框的真折射层由 `LiquidLens` 承担，实时背景投影也在这里。不要把它改回普通 `ready-input-shell` 背景。
-- 输入框玻璃通用组件：`src/renderer/components/ui/liquid-glass/LiquidLens.tsx`、`src/renderer/components/ui/liquid-glass/refraction-map.ts`
-  前者负责把折射贴图接到 SVG / backdrop-filter，后者负责生成位移贴图。
-- 液态玻璃调参页：`src/renderer/LiquidTest.tsx`
-  路由是 `#/liquid-test`。先在调参页试参数，再回真实 dev 输入框截图验证。
-
-### 浏览器
-
-- 页面入口：`src/renderer/pages/modes/BrowserMode.tsx`
-- 顶部浏览器栏：`src/renderer/components/browser/BrowserHeader.tsx`
-- 浏览器内容壳：`src/renderer/components/browser/BrowserShellLayout.tsx`
-- 激活标签输入区：`src/renderer/components/browser/ActiveTabSurface.tsx`
-
-### 文档
-
-- 页面入口：`src/renderer/pages/modes/DocumentMode.tsx`
-- 文档标签栏：`src/renderer/components/document/DocumentTabRail.tsx`
-- 编辑器主体：`src/renderer/components/document/MarkdownEditor.tsx`
-- 编辑 / 预览切换滑块：`src/renderer/components/document/DraggableModeSwitch.tsx`
+Widget 视觉不能在组件内另造色板；预览、导出和编辑必须从结构真值重编译。
 
 ### RSS
 
-- 页面入口：`src/renderer/pages/modes/RSSMode.tsx`
-- RSS 主界面：`src/renderer/components/rss/RSSFeed.tsx`
-- 预览浏览器：`src/renderer/components/rss/PreviewBrowser.tsx`
+- 页面：`src/renderer/pages/modes/RSSMode.tsx`
+- 组件：`src/renderer/components/rss/`
+- 状态：`src/renderer/stores/useRSSSession.ts`
 
-### 日程
+### Calendar
 
-- 页面入口：`src/renderer/pages/modes/CalendarMode.tsx`
-- 日程整体壳层：`src/renderer/components/calendar/CalendarWorkbenchShell.tsx`
-- 左侧小日历与来源列表也都从这里往下找
+- 页面：`src/renderer/pages/modes/CalendarMode.tsx`
+- 左栏/工作台：`src/renderer/components/calendar/CalendarWorkbenchShell.tsx`
+- 状态：`src/renderer/stores/useCalendarSession.ts`
 
-### 设置
+日历格线、事件内容和左栏宽度分开验证，避免内容反向撑开网格。
 
-- 页面入口：`src/renderer/pages/Settings.tsx`
-  设置页的整体结构、左侧导航、各分区标题、通用设置项布局都从这里开始改。
-- 设置页共用外观 token：`src/renderer/components/settings/settings-theme.ts`
-  输入槽、按钮、只读短槽、轻量信息块、左侧导航选中态都统一走这里，不要在设置页里再各写一套。
-- 远程 IM 分区：`src/renderer/components/settings/RemoteIMSettingsPanel.tsx`
-- 记忆系统分区：`src/renderer/components/memory/MemoryStatsCard.tsx`、`src/renderer/components/memory/MemoryCreator.tsx`、`src/renderer/components/memory/MemoryListPanel.tsx`、`src/renderer/components/memory/TriggerManager.tsx`
-- Agent 人格分区：`src/renderer/components/personality/PersonalityEditor.tsx`
-- 用户档案分区：`src/renderer/components/profile/UserProfileEditor.tsx`
-- 设置页浏览器预览假数据：`src/renderer/preview/installSettingsPreviewMocks.ts`
-  如果设置页预览打不开，先看这里是不是缺了 Electron API mock。
+## 4. Agent 聊天
 
-### 和设置页改动最相关的检查
+| 区域 | 入口 |
+| --- | --- |
+| 总面板 | `src/renderer/components/agent/ChatPanel.tsx` |
+| 主体布局 | `src/renderer/components/agent/chat-panel/ChatPanelBody.tsx` |
+| 消息列表 | `src/renderer/components/agent/ChatMessages.tsx` |
+| 任务卡 | `src/renderer/components/agent/chat-panel/task/TaskCard.tsx` |
+| 工具时间线 | `src/renderer/components/agent/chat-panel/task/ToolTimeline.tsx` |
+| 工具快照 | `src/renderer/components/agent/chat-panel/task-snapshot/TaskToolSnapshot.tsx` |
+| 状态 | `src/renderer/stores/useAgent.ts` |
 
-- 设置页玻璃壳层与短槽约定：`src/__tests__/settings-liquid-glass-contract.test.ts`
+任务卡和工具时间线只呈现 projection/runtime 真值，不在组件里推断完成或后台运行。输入框是底部浮层，消息列表尾部必须按实测高度留白；液态玻璃以真实 Electron 聊天记录验收。
 
-### 和聊天头部 / 消息区改动最相关的检查
+## 5. Settings
 
-- 聊天头部“窗口切换按钮”和“历史按钮”分工约定：`src/__tests__/chat-session-switcher-contract.test.ts`
-- 聊天头部浮层磨砂样式约定：`src/__tests__/chat-header-menu-style-contract.test.ts`
-- 用户消息左对齐与消息分隔线约定：`src/__tests__/chat-user-message-alignment-contract.test.ts`
-- 输入框液态玻璃与底部遮挡约定：`src/__tests__/input-slot-inset-contract.test.ts`、`src/__tests__/liquid-glass-refraction-map.test.ts`、`src/__tests__/rss-agent-workbench-regressions.test.ts`
+- 页面与分区路由：`src/renderer/pages/Settings.tsx`
+- 共用组件：`src/renderer/components/settings/`
+- 共用 token：`src/renderer/components/settings/settings-theme.ts`
+- Tag Forge：`src/renderer/pages/settings/TagForgeSettingsPanel.tsx`
+- 状态：`src/renderer/stores/useSettings.ts`
 
-## 5. 共用样式去哪里找
+设置页左侧不堆大卡片底板；输入、按钮、只读槽优先复用共用 token。新增持久设置必须同时核对 Main、Preload、Renderer 类型和 native DB 验证。
 
-- 全局 UI 变量和共用壳层：`src/renderer/styles/index.css`
-- 工作台滑块、左栏滑块、四模块切换栏：`src/renderer/styles/workbench-sliders.css`
-- 左栏滑块的“浮起 / 按下 / 记忆态”样式也都在 `workbench-sliders.css`
-- 日程样式：`src/renderer/styles/schedule-x.css`
-- 面板尺寸 token：`src/renderer/components/layout/panelTokens.ts`
+## 6. 样式与验证
 
-## 6. 想改什么，就先看哪里
+共享样式位于 `src/renderer/styles/`。修改前先找现有 layer/token；禁止在层外新增通用 `* { margin/padding }` reset。
 
-- 改工作台布局关系：
-  先看 `WorkbenchMode.tsx`
-- 改侧边面板切换逻辑：
-  先看 `SidePanel.tsx`
-- 改侧边面板“收起时文字不要被挤坏”：
-  先看 `SidePanel.tsx`
-- 改文件面板里的任何内容：
-  先看 `FilesPanel.tsx`
-- 改文件面板顶部下拉菜单位置、显隐、完整显示问题：
-  先看 `FilesPanel.tsx`，再看 `floatingMenuStyles.ts` 和 `filesPanelFloatingMenu.css`
-- 改聊天头部左侧会话窗口切换按钮：
-  先看 `ChatHeader.tsx`
-- 改聊天头部右侧历史会话菜单：
-  先看 `ChatHeader.tsx`
-- 改聊天头部下拉卡片的玻璃感、边框、阴影、层级：
-  先看 `chatHeaderMenuStyles.ts`，再看 `floatingMenuStyles.ts`
-- 改用户消息在右侧区域里的文字对齐方式：
-  先看 `ChatMessages.tsx`
-- 改消息之间那条很淡的分隔线：
-  先看 `ChatMessages.tsx`
-- 改聊天记录底部被输入框遮住的问题：
-  先看 `ChatPanelBody.tsx` 里的 `composerBottomInset`，再看 `ChatMessages.tsx` 的 `data-chat-bottom-overlay-spacer`。
-- 改聊天输入框液态玻璃雾化、折射、圆角：
-  先看 `ChatInput.tsx` 的 `LiquidLens` 参数，再看 `LiquidTest.tsx` 和 `refraction-map.ts`；真实效果必须在 Electron dev 里截图验证。
-- 改文件树、缩略图网格、拖拽、右键菜单：
-  先看 `FileTree.tsx`
-- 改文件夹卡片里那块小缩略图区域：
-  先看 `FolderPreview.tsx`
-- 改文件夹缩略图里“显示哪些子项、按什么顺序排、空状态怎么写”：
-  先看 `folderPreviewModel.ts`
-- 改四模块切换栏或左侧滑块：
-  先看 `workbench-sliders.css`
-- 改左侧滑块的交互节奏、下陷记忆态、先浮起再滑动：
-  先看 `MorphIconRailGroup.tsx`，再看 `IconRail.tsx` 和 `WorkbenchMode.tsx`
-- 改左侧滑块整体速度是否要更慢：
-  先看 `MorphIconRailGroup.tsx`
-  因为左栏现在不是直接复用顶部四模块的现成节奏，而是基于那套参数额外放慢了一层。
-- 改输入框颜色、边框、聚焦态：
-  先看 `index.css`
-- 改日程左栏：
-  先看 `CalendarWorkbenchShell.tsx`
-- 改设置页整体布局、左侧导航、各分区排版：
-  先看 `Settings.tsx`
-- 改设置页输入槽、按钮、只读槽、轻量信息块：
-  先看 `settings-theme.ts`
-- 改设置页某个业务分区的内容：
-  先看对应分区组件，不要回到 `Settings.tsx` 里硬塞业务细节
-- 改设置页预览：
-  先看 `installSettingsPreviewMocks.ts`
+常用 UI 合同：
 
-## 7. 当前约定
+```bash
+npm run test:ui-contracts
+npm run verify:tab-groups
+npm run verify:widget-ready
+node scripts/check-css-cascade-layer-reset.cjs
+npx tsx --test src/__tests__/ui-adjustment-guide-contract.test.ts
+```
 
-- `SidePanel.tsx` 现在不只是“壳层路由”，还负责标题/内容切换编排与收起裁切，但不要再塞回文件面板、搜索面板、技能面板的业务细节。
-- 文件面板的真实入口固定在 `FilesPanel.tsx`。
-- `FilesPanel.tsx`、`GlobalSearchPanel.tsx`、`SkillsCenterPanel.tsx` 现在都要继续保持“标题槽 / 主体槽”输出能力，别再改回每个面板自己整块硬切。
-- 文件面板顶部的瞬时菜单不要再直接留在左侧栏布局层里；左侧栏壳层带 `overflow-hidden`，菜单一旦超出边界就会被裁掉。现在这类菜单应继续保持为顶层弹层，由 `FilesPanel.tsx` 负责位置计算。
-- 聊天头部左侧小按钮只负责“当前会话窗口 / 来源”的切换；右侧 `历史对话` 按钮继续单独负责历史会话浏览与切换，不要再合并成一个入口。
-- 聊天头部这两个弹层都应继续复用 `ready-floating-menu / chat-header-floating-menu` 这套磨砂浮层样式和较高层级，避免被聊天区正文盖住。
-- 用户消息虽然仍然待在右侧，但正文文本固定左对齐，不要再改回右对齐。
-- 用户与 agent 的普通消息之间现在用很淡的白色细线拉开层次；如果继续调整间距，优先在 `ChatMessages.tsx` 里微调，不要把分隔感重新塞回消息气泡内边距。
-- 聊天输入框是覆盖在消息列表底部的玻璃浮层；消息列表末尾必须保留由输入框高度测出来的空白尾巴，避免最后一条内容被压住。
-- 聊天输入框玻璃不允许再加外部暗色投影；需要层次时只用输入框内部高光、雾化、折射和轻量白纱。
-- Electron dev 里的输入框玻璃以真实聊天记录为验收对象；`#/liquid-test` 只用于调参，不代表最终 dev 表现。
-- 文件夹缩略图的画法固定拆在 `FolderPreview.tsx`，不要再把这块样式塞回 `FileTree.tsx`。
-- 文件夹缩略图“看什么内容、怎么退化”的规则固定拆在 `folderPreviewModel.ts`。
-- 日程左栏的真实入口固定在 `CalendarWorkbenchShell.tsx`。
-- 滑块样式优先从 `workbench-sliders.css` 改。
-- 左栏滑块的状态机固定放在 `MorphIconRailGroup.tsx`，不要把“下陷 / 浮起 / 记忆态 / 先浮起再滑动”拆散回 `IconRail.tsx`。
-- 左栏滑块是否处于展开态，由 `WorkbenchMode.tsx -> IconRail.tsx -> MorphIconRailGroup.tsx` 这条链路传递；不要在别的地方各自猜测。
-- 如果要继续调左栏滑块速度，优先改 `MorphIconRailGroup.tsx` 里的时间常量和派生 transition，不要直接改顶部四模块那套基线。
-- 如果改了滑块却表现不对，再检查 `src/renderer/styles/index.css` 里有没有旧的同名样式残留。
-- 设置页左侧导航不要再加整块底板或卡片底色；选中态优先靠文字颜色、轻量高亮和图标状态表达。
-- 设置页右侧内容区尽量保持干净，除了输入槽、按钮、真正承载状态的信息块外，不要额外堆大面积色块或装饰性卡片。
-- 快捷键、存储、关于这类右侧展示值较短的分区，优先用短槽承载，不要让右侧控件默认拉很宽把文本挤坏。
-- 设置页如果要继续补新分区，优先沿用 `settings-theme.ts` 的共用 token；不要在新分区里重新发明一套输入框、按钮和只读槽样式。
+焦点文件以当前 `package.json` 和 `src/__tests__/` 为准，不从旧计划复制测试路径。
+
+## 7. 修改前后检查
+
+1. 先确认状态拥有者和生产调用方。
+2. 查相邻模式是否复用同一 token/组件。
+3. 只改目标区域，不顺手重排整个组件。
+4. 跑焦点行为测试与对应 gate。
+5. BrowserView、窗口材质、液态玻璃、拖放或复杂弹层在真实 Electron 中复核。
+6. 若代码文件净增且总行数超过 1000，更新大文件健康台账。

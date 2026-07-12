@@ -1,0 +1,410 @@
+---
+title: Ready 经验文档（2026-07-12 清扫前全文）
+date: 2026-07-12
+kind: archive
+enforce: false
+---
+
+# Ready 经验文档（清扫前全文）
+
+> 本文件保留完整事故与阶段记录，仅供追溯。当前可执行经验以根目录 `LESSONS_LEARNED.md` 为准。
+
+> 更新时间：2026-07-12
+
+## -3. VEA YouTube 下载 + Send IM 工具暴露：复现优先于读码推断 (2026-06-23)
+
+> 完整问题/修复/Windows 指引见 `docs/diagnostics/2026-06-23-vea-sendim-fixes-and-windows-runtime-guidance.md`。这里只留可迁移的方法论教训。
+
+- **「读代码推正则」连错两次，「运行时复现 + 开关验证」一次锁死。** Send IM「当前会话未开放 skill_send_im_file 工具」我先后猜了两个根因（ret=-3 是全部；`@[Send IM]+绝对路径`），都是只读代码推断，都错。真正坐定是：① 从 `ready.db chat_messages` 捞**用户真实输入** `@[Send IM]@[2026 世界杯.md]`；② 从 `ready-tools.log` 看到 `sdk_runtime_final_tools toolCount=0`；③ 用仓库真实测试夹具 `createRuntime` 复现 `tools(0)`，打补丁→`tools(1)`，**关补丁→回到 0**（开关验证证明这一行就是病根）。固化规则：症状是「工具没暴露 / 行为没发生」时，先复现真实输入 + 看 `tool_capability` 账本 + 在真实 runtime 夹具里跑，不许只凭正则推断下结论。
+- **两个启发式撞车，错的那个赢了。** `@[Send IM]@[文件.md]` 同时是「发文件到微信」(send-im 投递) 和「`@[...md]` 文档引用」。`shouldUseLocalDocumentToolSet` 的 `.md` 分支命中 → 整轮被当文档编辑 → `filter(isLocalDocumentToolDefinition)` 把 `skill_send_im_file` 剔光 → 0 工具。修复=在文档判定里给投递意图让路。教训：一个输入命中多条意图启发式时，要显式定义**优先级**，否则「谁先 return 谁赢」会咬到边界用例。
+- **测试只覆盖「唯一能成的路径」会留盲点。** codex 的 send-im 暴露修复只用**图片**验证（`把这四张图发到我微信`），图片不命中文档正则，所以图片路径绿、`.md` 文档路径红。教训：暴露/路由类修复必须覆盖**会改变路由的输入维度**（此处=附件扩展名 doc vs image），不能只测一类。
+- **修症状 vs 修根因（再次印证 §0.5 #2）。** VEA YouTube 下载间歇 403，codex 在 TS 编排层把失败转 `recoverable_paused` 提示「手动下载」，**没碰 Python 下载代码**。真修复在 `pipeline_enhanced.py`：单发 yt-dlp 加 3 策略重试 + player_client 轮换 + 渐进式回退。间歇性（同一视频先败后成）本身就证明「重试即可救回」，单发零重试才是根因。
+- **运行时是「瘦壳 + 本机置备」两层，不在安装包里。** 为什么不打包 `skill-runtime` 也能用：Python venv / yt-dlp / ffmpeg / 模型包都落在 `~/Library/Application Support/ready/skill-runtime`（跨安装持久、本机置备或按需下载），安装包只带瘦壳 + `embedded-skills` 脚本（脚本按内容 hash 经 `syncEmbeddedSkill` 自动重灌）。换版本只要改的是 TS 或脚本，普通 `build:dist` 即可、运行时零改动。seeded-bundle（`build-seeded-dist.mjs`）只为「全新无运行时机器」的离线分发，非日常必需，且当前是纯 macOS 实现——Windows 需独立置备/打包路径（详见上述 doc §4）。
+
+## -2. Stage 10 (P) — Transitional bridge retirement (2026-05-07)
+
+Stage 4 W3 引入 `SkillToolAuthorization` 三层分离时，留了一个显式的退场条件：当所有 caller 都迁移到 `buildAuthorizationFromIdentity` 计算 authorization 之后，`'not_set'` 兼容短路（`SKILL_TOOL_AUTHORIZATION_NOT_SET` 常量 + reason union 中的 `'not_set'` 字面量）必须被删除。Stage 10 在 5 个 commit 内兑现了这个退场条件：
+
+- **Commit 1（Step B'-1，refactor）**：把 `tool-registry.ts` / `tool-gateway.ts` / `tools/index.ts` 内"模型可见 + 非模型可见"两条调用路径拆开——内部 metadata / execution-lookup 改走私有 `getToolDefinitionsResolutionForGroupForInternalLookup` / `getToolSchemasResolutionForGroupForInternalMetadata` 与公共 unfiltered API（`gateway.listToolDefinitions / getToolDefinition / collectToolNamesForGroups`），公共 model-visible 入口的 authorization 进入"必填"准备态。
+- **Commit 2（Step D，测试迁移）**：把所有 `src/__tests__/` 内引用 `'not_set'` / `SKILL_TOOL_AUTHORIZATION_NOT_SET` / `?? null` 默认 authorization 的测试，改为显式 `buildExplicitNoSkillAuthorization('no_skill_signal')` / `buildSelectedSkillToolAuthorization(...)`。
+- **Commit 3（Step A + B + B'-2 + C，type tightening）**：删掉 `'not_set'` reason union member、删掉 `SKILL_TOOL_AUTHORIZATION_NOT_SET` 常量、6 个 `?? SKILL_TOOL_AUTHORIZATION_NOT_SET` filler 全部退役、`__authorization` 改 `SkillToolAuthorization | null` + invariant assert、`resolvePrimitiveSkillId` cascade 死代码删，`RunCapabilityBaseParams.authorization` / `prepareInitialRun` 入参收紧为必填。
+- **Commit 4（Step E + G + H，cleanup + CI gates + docs）**：移除 5 个 src/main/modules 文件内的 `'not_set'` 注释残留；新增 4 条 CI gate 把"无 `'not_set'` 文本（含注释）/ `resolvePrimitiveSkillId` 不再 cascade / 4 个文件无 authorization passthrough / turn-engine rearm-order"固化下来；新增 `verify:p` 链并把顶层 `verify` / `verify:cloud` 切到 `verify:p`。
+
+8 轮 Codex 计划评审在动手之前就抓出至少 22 个具体问题，包括 9 个被遗漏的测试调用方、4 个错分类的测试、6 个 `?? null` filler / passthrough 漏点。这印证了 §0.5 P5 "CI 强制 > 文档约束 > 人审" —— 哪怕 5 commit、4 步，凭"我会注意"无法保证不复发，必须在 PR 合并那一刻把"不允许字面量 `'not_set'` 出现在 `src/main/modules/`"变成机器拒绝条件，而不是 review 备忘。
+
+## -1. 工具错误契约：stale executionId 引发架构翻新 (2026-04-22)
+
+- **起因**：一次"Agent 错误: Execution not found"。tool-runtime 的 `classifyExecutionError` 对未分类错误默认 `kind='unknown'` 并 rethrow，用户侧把一次可恢复的 skill 调用渲染成终结类系统消息，并 scope 直接翻到 `phase: 'error'`，污染了 10+ 个 downstream 消费点（projection sync / taskCardViewModel / run-coordinator）。根因：错误分类器同时承担"路由决策 + 遥测描述"两个职责，regex 未命中就走致命分支。
+- **分阶段处理（而不是一次大翻）**：
+  - **Phase 1（dispatch 吃异常）**：tool-executor.ts 外层加 try/catch，把任何 non-terminal handler 抛错吞成 `ToolExecutionOutput { errorKind }` 回灌给模型，让模型自主决定是重试、换工具还是认输；只有 `AbortError` + `ToolHostUnavailableError` 继续冒泡。
+  - **Phase 2/2.5（Zod 双向契约）**：原来 tool schema 只是单向告诉模型长什么样；这次把 102 个工具都接入 dispatch 入口 `safeParse`，模型乱传的参数直接 is_error 回灌，不再进 handler 崩在深处。46 个 schema + 31 份测试文件，字节等价靠 golden snapshot 锁。
+  - **Phase 3（IPC 分流）**：`agent:error` payload 加 `{ errorKind, recoverable, toolName? }`，渲染端 recoverable 走软失败胶囊（`SoftFailureCapsule`），其他走系统消息。关键取舍 —— 用 **侧字段 `softError`** 而非新 phase，避免污染原有的 `phase === 'error'` 10+ 个消费点。
+  - **Phase 4（生命周期 + 观测性收口）**：早期曾计划用 `skill_executions` TTL 收口，但后续已纠偏为退役旧 execution 状态机，只保留 reference-skill hint sweep；长任务恢复改走 `skill_task_runs`、task projection、detached task 与 `run_state.json` 的 durable handles。
+- **有意不做的事**：
+  - 不切到 CC-Source 的 `Tool` 接口（async generator + ToolUseContext 50+ 字段）—— 我们的 contract 已经窄，改动成本远大于收益。
+  - 不引 OTel / 外部 telemetry pipeline —— `logAgentMetric` + append-only log + `grep` 对当前阶段刚刚好。
+  - 不把所有 observability metric 收进同一个枚举 —— 只收 tool-error 相关的 6 个，其余 metric 留在所属模块。
+- **踩过的坑 & 固化规则**：
+  - **`PRAGMA foreign_keys = ON` 默认是 OFF**：Migration 018 的 `ON DELETE CASCADE` 在旧 `skill_executions` 表上实际不生效。现在这些表已下线；以后新增跨表清理仍要显式处理子表，不能默认依赖 cascade。
+  - **`INSERT ... ON CONFLICT(id) DO UPDATE` 是静默覆盖**，id 碰撞不抛 UNIQUE 违规。旧 `createExecution` 的经验迁移到新持久表时仍适用：创建身份行要预检或使用不可覆盖的插入路径，不能把 upsert 当唯一性校验。
+  - **Recoverable 路径零副作用**：不动 phase / error / blockedReason / toolTraceStatus / persist，只写侧字段。一旦改了 phase，10+ 下游消费点全要跟进；侧字段让这次 refactor 可以走原子 PR。
+  - **`emitRuntimeError` 字符串化是反模式**：原 `emitRuntimeError(error: string)` 在 `direct-chat.ts` 把 Error 对象拍扁成 message，下游再也拿不到 errorKind/toolName。加宽到 `(error: unknown, options?)` 在 emitter 内部派生 contract，是最小侵入路径。
+  - **Metric 枚举 value 保持原字符串**：rename key 不动 value，log 聚合查询和 Grafana 现有 dashboard 零回归。
+- **当前工具错误合同**：见 `DOCUMENTATION.md` 的“工具错误合同”与 `docs/architecture/current-runtime-contracts.md` §4。旧阶段中的数量、文件名和 execution 状态机不再作为现行真值。
+
+## 0. 视觉主题与启动
+
+### 0.0 CSS 变量主题系统必须在首帧落 `data-theme` / `data-skin`，异步 IPC 不是可行路径
+- 现象：Ready 用 `html[data-theme][data-skin]` 的属性选择器组合喂 CSS 变量，但启动期是先 `await window.electronAPI.theme.get()` 再写属性，IPC 抖动 / SQLite 延迟期间 `<html>` 上没有任何标记，CSS 只能命中 `:root` 的亮色默认值，而 liquid-glass 皮肤的 `--lg-material-*` / `--surface-blur` 等 token 全部缺席，用户看到"纯白平面调试态"。
+- 固化规则：
+  - 任何"用属性选择器切多套 CSS 变量"的方案，必须在 `index.html` `<head>` 里放同步 `<script>` 先从 `localStorage` 读并 `setAttribute`，再让 CSS 解析；IPC 只能作为后续"对齐"而不是"主写入"。
+  - 同时在 `:root` 声明 `color-scheme: light dark`（并在 dark 主题覆盖为 `dark`），让原生滚动条/表单控件首帧就走正确配色。
+  - Electron 的 `BrowserWindow.backgroundColor` 在非 macOS 平台不要留 `undefined`，必须按持久化的主题值给深/浅色，否则 mica/vibrancy 就绪前会先白一闪。
+
+### 0.1 演出层背景色要独立于内容层 token
+- 现象：主题切换过渡用 `background: var(--bg-primary)`；在 liquid-glass+light 下 `--bg-primary = #F7F9FC`（冷白微蓝），但用户日常感知的画布是 `--workbench-mode-bg = #F6F1E7`（暖米）。过渡中途出现的冷白与画布色温不符，被直接当成"既不是亮也不是暗"的 bug。
+- 固化规则：
+  - ritual / overlay / mask 这类演出层要有专门的语义 token（如 `--ritual-overlay-bg`），并通过 `:root` 间接层代理到"画布色"而不是内容色，未来改画布不会顺带改演出、反之亦然。
+  - 切换演出不仅要关心"颜色正不正"，还要关心"与用户当前视野里那块主色的色温是否一致"；肉眼层级的差别比十六进制差别更重要。
+
+### 0.2 Electron 42 的 macOS 液态玻璃残影，要从窗口构造期修
+- 现象：Electron 42 / Chromium 148 下，透明 `BrowserWindow` + macOS `vibrancy: under-window` + 大量 glass surface / `backdrop-filter` / 滚动 hover，会在文件树、设置导航、模块切换后留下旧 hover 白块或旧内容鬼影。React state 没卡住；手动把窗口宽度 +1 再还原会立刻清掉，但高频 `setBounds` / resize / filter toggle 会造成窗口抖动；把玻璃调到 0.9+ 不透明也只是遮住问题，会破坏真实半透明玻璃。
+- 这次验证到的关键点：
+  - 单独给 DOM 加 `contain: paint`、`isolation`、`translateZ(0)`，或者把 hover 改成独立伪元素，都不能稳定解决。
+  - `webContents.invalidate()` / `invalidateShadow()` 可以作为低频兜底，但如果窗口不是从首帧就按 macOS 透明材料创建，真实 Electron 窗口里仍可能残留旧内容鬼影。
+  - 决定性修复是：在 `BrowserWindow` 构造时就传入透明 `backgroundColor` 和 `vibrancy: 'under-window'`，让 macOS compositor 从第一帧进入正确的半透明窗口路径；后续窗口材料控制器要用同一份初始材料做幂等记录，避免启动后再重复打一遍 `setVibrancy` / `setBackgroundColor`。
+- 固化规则：
+  - 不要用“不透明玻璃”“resize 抖一下”“高频强制刷新”当正式方案。
+  - macOS 液态玻璃的窗口级材料必须在窗口构造期落下，后续 `setVibrancy` 只适合作为状态切换，不适合补首帧路径。
+  - 滚动、hover、模块切换后的刷新只能低频、防抖、交互结束后触发，用来兜交互脏区，不承担根因修复。
+  - 验收必须重启真实 Electron 窗口并肉眼扫文件树、设置页、模块切换；只跑源码合同测试或浏览器预览不足以证明这个问题已消失。
+
+### 0.3 Electron 透明窗口里的聊天输入框玻璃，不能只相信预览页
+- 这次输入框液态玻璃在 `#/liquid-test` 里看起来成立，但落到真实 Electron dev 后出现了两类差异：真实透明 vibrancy 窗口里的大半径 backdrop blur 很弱；原消息文字如果不从输入框下方掏掉，会形成“清晰文字 + 雾化文字”的重影。
+- 最终比较稳的路线是：输入框本体使用 `LiquidLens` 做折射；同时把聊天消息滚动区实时克隆到输入框内部当投影，再把原消息滚动区在输入框覆盖范围内 mask 掉。这样用户看到的是同一份实时内容通过玻璃发生雾化和折射，而不是原文透显。
+- 反证也很明确：不要在左右边缘额外贴镜像反射层。它会让输入框看起来像冻结截图，尤其上下滚动时背后内容没有真实位置变化。
+- 输入框现在是绝对定位覆盖在消息列表底部，所以消息列表末尾必须有由输入框高度测出来的空白块。不要只给滚动容器加一个固定小 padding，否则最后一条消息会被输入框压住。
+- 这类视觉改动的验收顺序必须是：调参页找方向 -> 真实 Electron dev 里让文字滚到输入框背后 -> 截图确认没有透显、冻结感和暗色外阴影。预览页过关不等于实装过关。
+
+### 0.4 Windows 顶部 chrome 不能照搬 macOS 交通灯和 vibrancy
+- Windows 的最小化/最大化/关闭在右上角，Ready 自绘圆点不能继续占这个位置。Windows 端应把 `ModeSlider` 里的 Ready 圆点迁到左上，中心 X 用 `IconRail` 的槽位几何计算：`WORKBENCH_EDGE_RAIL_SLOT_INSET_X + WORKBENCH_EDGE_RAIL_SLOT_SIZE / 2`，当前是 25px。不要靠肉眼拖到“差不多”。
+- Windows 标题栏颜色接壤不要复制 macOS 的 `hiddenInset + vibrancy: under-window`。更稳的是 `titleBarStyle: 'hidden'` + `titleBarOverlay` 保留原生按钮，并让 renderer 的同一层背景画到窗口顶边；如果 overlay 透明不稳定，再用同一份主题常量同时驱动 main 侧 overlay 颜色和 renderer CSS 变量。
+- `setBackgroundMaterial('mica')` 只是 Windows 11 22H2+ 的增强，不是基础依赖。旧系统、节能模式或不支持 Mica 时必须回到普通不透明背景，不能出现黑块、灰条或 1px 色差。
+- 验收要看真实 Windows 窗口：普通/最大化、浅色/深色、solid-green/solid-blue 都要截图；右上角系统按钮不能被 Ready 自绘元素覆盖，左上圆点要和左侧竖向切换槽图标中心在同一条竖线上。
+
+## 1. 架构经验
+### 1.0 Electron 开发态里，原生依赖 ABI 不匹配会把“设置丢失 / 历史空白 / scope not found”伪装成前端问题
+- 这次真正的根因不是设置页没保存，也不是历史会话被清空，而是主进程数据库根本没起来。
+- 直接症状：
+  - 设置页看起来回到默认配置
+  - 历史会话列表空白
+  - 新建本地会话时报 `Database not available`，随后连锁变成 `Conversation scope not found`
+- 真正原因：
+  - `better-sqlite3` 是原生模块，必须按当前 Electron 版本重新编译。
+  - 如果它是按别的 Node ABI 编出来的，Electron 主进程加载时会失败，但界面层很容易把后续连锁症状误判成“状态没读出来”。
+- 这次的直接报错是：
+  - `NODE_MODULE_VERSION 127`，但当前 Electron 需要 `NODE_MODULE_VERSION 132`
+- 固化规则：
+  - `package.json` 的 `dev / build / verify` 都要先跑 `electron-builder install-app-deps`
+  - `postinstall` 也要补这一步，避免换环境后继续用旧的 `.node`
+  - 排这类问题时，优先看 `ready-database.log`，不要先怀疑 Zustand、Settings 页面或聊天面板
+
+### 1.0b Windows 同步包要交付“可重建源码”，不是 macOS 运行现场
+- Ready 当前进度同步给 Windows coding agent 时，应该导出 live working tree，因为真正要交接的进度可能还在未提交文件里；同时记录分支和 HEAD 只用于溯源。
+- 源码包必须剥掉本机运行痕迹：`.git`、`node_modules`、`out`、`dist`、`exports`、`.env*`、`.app`、`.dmg`、`.icns`、本机 seed、缓存、日志和密钥都不应进入 Windows 交接包。
+- Windows 端必须在本机重新 `npm ci`、重编 `better-sqlite3`，并验证 `native:check`。Python venv、RSSHub、Puppeteer、sidecar、`local-file://`、用户数据目录都要按 Windows 路径真跑，不能把 macOS 路径或资源布局当成默认正确。
+- Windows 打包要扩展 `electron-builder.yml` 的 `win/nsis/dir` 目标并使用 `build/icon.ico`；macOS 的 codesign、`.app`、`.dmg`、`.icns` 和 `setWindowButtonPosition` 都不能变成 Windows 公共路径。
+
+### 1.1 “OpenAI 兼容”不等于真的兼容 tools
+- 有些供应商虽然长得像 OpenAI API，但会吞掉 `tools` 或只实现一部分字段。
+- 结论：不能只按 provider 名称分支，必须建立共享能力层，并允许原生调用失败后自动降级。
+- 另外一类常见问题不是“完全不支持 tools”，而是只做了严格 schema 校验；像数组字段缺 `items` 这种在宽松通道里能混过去的小瑕疵，到了第三方兼容层会直接返回 400。
+- 结论：工具 schema 也要经过统一修复和兜底，不要把“某个工具定义刚好写漏了”留给单个 provider 特判。
+
+### 1.2 能力层比 provider if/else 更稳
+- 把协议、wire API、工具能力、视觉能力、原生视频能力统一解析，比在多个模块里散落 `if (provider === ...)` 更容易维护。
+- 设置页、direct-chat、browser vision、RSS 子代理最好共用同一份能力判断。
+
+### 1.3 文本工具桥接是兼容层，不是首选通路
+- 对不支持原生 function tools 的通道，文本桥接能兜底，但效果依赖模型是否严格遵守协议。
+- 因此仍需保留：
+  - 明确的桥接提示
+  - 工具结果回灌格式
+  - 模型误答”没有工具”时的自动纠偏
+
+### 1.4 Skill workflow 不能靠模型自己记
+- 如果让模型自己记 workflow，会出现跳步骤、忘 blocker、误读输入和无法定点重跑的问题。
+- 更稳的方式是让宿主编译 workflow、持久化 execution state，并且只在 `need_input / need_confirmation / need_agent_result` 时把控制权交回 Claude。
+
+### 1.5 runtime 结果必须结构化，不要只靠 stdout
+- 仅靠 stdout/stderr 会迫使宿主猜结果，agent_task 也拿不到稳定 source materials。
+- 更稳的方式是让 wrapper 通过 `READY_SKILL_RESULT_PATH` 写回 `SkillActionResult`，stdout 只做日志，不做主协议。
+
+### 1.6 长任务不能只显示粗粒度 phase
+- 只有 `planning / tool_running / done` 这类粗粒度状态时，聊天面板很难解释“现在卡在哪一步”“还能怎么继续”。
+- 更稳的做法是把浏览器阶段、workflow blocker、最近产物和自动沉淀结果统一投影成宿主管理的任务摘要。
+- 这层摘要最好由主进程保留最近状态，renderer 刷新后直接恢复，不要只依赖前端内存。
+
+### 1.7 本地普通请求默认不要暴露 RSS / 日程 / 飞书工具
+- 这次有一类跑偏不是模型“突然变傻”，而是我们把无关工具默认也暴露给了它。
+- 当本地普通请求既不是 RSS，也不是日程，也不是飞书操作时，如果这些 capability group 仍然可见，模型就可能误打到 `rss_*` 或 `feishu_*`。
+- 更稳的做法是：
+  - `rss` 只在用户明确提到 RSS / 订阅源 / feed / RSSHub 时开放
+  - `calendar` 只在用户明确提到日程 / 日历 / 会议 / 提醒 / 排期时开放
+  - `channel_feishu` 只在远程渠道会话里默认开放，或用户明确提到飞书时开放
+- 原则：能力宣告必须贴近当前意图，不能因为“技术上能调用”就默认让模型看见。
+
+## 2. BrowserView 与前端壳层经验
+### 2.1 BrowserView 是原生覆盖层
+- BrowserView 不受 DOM `z-index` 控制。
+- 任何侧栏、抽屉、悬浮层、动画布局只要与 BrowserView 共存，都必须把 bounds、显隐、动画节奏一起设计。
+
+### 2.2 模式切换的丝滑体验：冻结帧是关键
+- BrowserView 是原生层，无法参与 CSS 动画。水平滚动切换模式时，如果 BrowserView 还在显示，会出现"从侧边栏滑入"的穿帮感。
+- **D方案核心**：所有模式常驻 DOM + 水平滚动容器，`isMotionSettled` 控制 BrowserView 显示时机。
+- **冻结帧捕获**：必须在 `hideAll()` **之前**捕获当前画面，使用 `captureViewportSnapshot`（调用 `webContents.capturePage()`），而非 `captureWindowSnapshot`（只捕获主窗口）。
+- **为什么 `captureWindowSnapshot` 不行**：`mainWindow.capturePage()` 只捕获主窗口渲染内容，BrowserView 是独立的 `webContents`，必须用 `view.webContents.capturePage()`。
+- **缓存策略**：`cachedFreezeFramesByTabId` 按标签页缓存，切换回来时显示上次画面而非空白骨架屏。
+- **显示优先级**：过渡期间 `freezeFrame ?? cachedFreezeFrame` → 动画结束 → 真实 BrowserView。
+
+### 2.2b "无法挑剔的丝滑"级优化
+在基础冻结帧之上，要达到极致丝滑还需：
+
+**复合淡出动画（Opacity + Blur + Scale）**
+- 仅用透明度淡出不够细腻，叠加轻微模糊（0→2px）和轻微缩小（1→0.998）能增强"沉入背景"的深度感
+- 使用 JS 驱动的 `requestAnimationFrame` 动画配合 `ease-out-quart` 缓动，比 CSS transition 更可控
+- 三属性同步动画：`opacity`（1→0）、`filter: blur()`（0→2px）、`transform: scale()`（1→0.998）
+
+**预测性预捕获（Predictive Pre-capture）**
+- 用户鼠标悬停在浏览器模式图标上时，立即触发 `browser.captureViewportSnapshot()`
+- 这样点击发生时冻结帧已经准备好，消除"点击→截图→切换"的延迟
+- 事件流：`mouseenter` → `BROWSER_PRE_CAPTURE_EVENT` → 后台 BrowserMode 执行 `captureStableFrame()`
+
+**更激进的延迟优化**
+- `BROWSER_SURFACE_READY_DELAY_MS` 从 24ms 降至 16ms（一帧@60fps）
+- 预截图间隔保持 30s，但页面加载完成后立即补一次捕获
+- 冻结帧淡出持续时间从 120ms 延长至 180ms，配合模糊效果更柔和
+
+### 2.3 面板动画与 BrowserView bounds 需要解耦
+- 面板收放、拖拽边界、浏览器区域缩放如果直接跟 BrowserView 高频同步，容易出现闪动、跳帧或遮挡。
+- 更稳的做法是把”布局动画”与”原生视图刷新”分层处理，必要时在拖拽/收放期间降频或走更稳定的更新节奏。
+
+### 2.3 浏览器头部交互最好由单一状态拥有者协调
+- 当标签、地址栏、刷新/前进/后退 reveal 原本分散在多行、多组件里时，点击外部收起、输入态同步、hover 预热很容易互相打架。
+- 更稳的做法是让单个 `BrowserHeader` 持有 `activeTabMode` 与 `refreshDockMode`，把 transient UI state 和持久化 browser data 分层。
+
+### 2.4 renderer 里的 tab store 不能当成 Browser host 的真值来源
+- Browser tabs/hosts 的真实生命周期在主进程；renderer 里的 Zustand tab store 只是投影缓存。
+- 如果 renderer 重载后把本地 store 清空，却直接按“没有 tabs”去 `createTab()`，就会和主进程里仍然活着的原生 host 叠出双层页面，表现成逐层加载、旧页残留和边界错乱。
+- 冷启动时也有类似竞态：如果 `createTab()` 发生在主进程拿到最新 `viewBounds` 之前，新 host 会短暂使用默认 `800x600` 尺寸。
+- 更稳的做法是：browser mode 激活时先通过 `browser.getTabs()` 从主进程恢复现有 tabs，再决定是否真的需要创建新 tab；首次新建 tab 前显式等待 `updateBounds` 完成；同时切 tab/恢复 active host 时要先清掉所有非目标 host。
+
+### 2.5 Browser 空态也必须保留可测量的内容容器
+- 仅在“有标签页”时才挂 `contentRef`，会让 BrowserMode 空态下的首次 `createTab()` 拿不到真实内容区尺寸。
+- 结果是主进程只能先用默认 `800x600` host 起步，再等后续 bounds 回写，肉眼上就会看到页面不跟边界自适应、重启后先窄后宽或像逐层加载。
+- 更稳的做法是让 `BrowserModeEmptyState` 也挂上真实的 `contentRef` 容器，让首次新建 tab 和后续 `showActive()` 走同一套 bounds 测量链路。
+
+### 2.6 排 BrowserView 边界竞态时先对 `createTab / updateBounds / showActive` 做时序核对
+- 这类问题单看 UI 很容易误判成 DOM 布局、圆角 filler 或网页自身不自适应。
+- 更稳的排法是直接对照 `ready-browser.log` 里的 `createTab / updateBounds / showActive` 时序，看看到底是谁先发生，以及发生时有没有拿到正确 bounds。
+
+### 2.7 浏览器头部的瞬时菜单不要复用会改布局的 side panel
+- 收藏、下载、更多这类”点一下就收起“的工具菜单，如果直接借用 renderer 里的侧栏或内联下拉，就会同时改动 flex 布局和 BrowserView bounds，表现成网页区域被横向挤压、头部高度被拉高，肉眼上像界面位移或闪动。
+- 更稳的做法是把这类入口接到主进程 native menu，或者至少保证菜单不参与布局流；不要把瞬时菜单状态继续塞进 `activePanel` 这类会驱动整块工作区尺寸变化的状态里。
+
+### 2.8 站内点开子页面时，开页动作必须先走 renderer 接管
+- 像 bilibili 这类站点，点视频未必是普通同页跳转，经常会走“新开页面”的链路。
+- 如果主进程在 `window.open` 里直接自己创建新标签或新原生视图，而 renderer 侧的 tab store、地址栏和当前标签状态没有同步接管，就会出现“前面已经是新页面了，但地址栏还是旧网址、前进后退也还在控旧页、关闭后前景页面还残留”的脱节现象。
+- 更稳的做法是：这类开页请求先发回 renderer，由 renderer 走统一的新标签创建和激活流程，再让主进程承载实际页面；不要让主进程绕过 renderer 状态层单独把页面抬到前台。
+
+### 2.9 拖拽边界时如果要冻结 BrowserView，优先冻结整块浏览器区域，不要只冻内部网页
+- 只抓内部网页视口来做拖拽态遮罩，看起来像成本更低，但会立刻碰到边缘拼接问题：顶部圆角、角落遮片、原生 host 外轮廓、DOM 壳层边框并不来自同一层，后面会连续出现“直角、缺角、白块、像被咬一口”的假象。
+- 更稳的方式是直接抓取用户当前看到的整块浏览器区域，再用这张完整画面覆盖拖拽过程。这样顶部、圆角、边缘和网页内容来自同一张图，不需要在拖拽态继续拼角或补边。
+- 同时，冻结层不要撤得太早。像百度、B 站这类页面在宽度变化后，网页自身的重排会比 BrowserView bounds 落位更慢一点；更稳的做法是在拖拽结束后继续保留冻结层一小段时间，并补几次最终 bounds 同步，再露出真实页面。
+
+### 2.10 浏览器切回来的过渡层不要盖住标签栏
+- 切回浏览器时，如果冻结层、启动遮罩、过渡遮罩都从最顶上直接铺满整个壳层，用户会先看到旧图压住标签栏，再看到真实头部弹出来，主观上就像“标签栏歪了一下”或“先没有再出现”。
+- 更稳的做法是把这些过渡层统一收在标签栏下面，只负责网页内容区；顶部标签栏始终交给 DOM 头部自己稳定显示。
+- 过渡层一旦缩到标签栏下面，冻结截图的抓取范围也要一起缩到网页内容区；如果还在抓整块浏览器壳层，就会把旧标题栏一起带进下面那层，表现成“上下两个标题栏闪一下”。
+- 以后只要遇到“切回浏览器时头部错位、头部闪一下、头部像被旧图盖住”这类问题，先检查过渡层的 `top` 和圆角范围，而不是先怀疑标签数据或 BrowserView 显隐本身。
+
+### 2.11 widget 更新目标不能污染下一条普通提问
+- 如果上一轮从文档里点了“更新这个 widget”，聊天输入区会自动挂上一个 `document-widget-target` 目标；用户接着直接问别的问题时，这个目标如果还被一并发给 agent，就会把普通问答误判成文档 widget 任务。
+- 更稳的做法是：发送前先看当前输入是否还像“更新 widget / 改文档”的请求；如果已经变成普通问答，就自动丢掉这个目标，不要把旧任务上下文继续带进新问题。
+- 同时，执行层也要有第二道保险：即使模型还是胡乱调用当前轮未授权的工具，也必须在执行器里直接拒绝，不能只靠上游“理论上不会给它这个工具”。
+
+### 2.12 新本地会话可以带摘要，但摘要不能直接驱动动作
+- 这次排查里，“新开会话却还记着上一轮内容”并不是后端把多个 scope 真的串成了一个大池子；scope 本身是新的，只是提示拼装层会把当天全局摘要一起带进来。
+- 摘要本身并不一定是坏事，问题在于工具权限如果也跟着摘要走，普通问答就会被旧任务带偏，表现成一上来就去开文档、改 widget、跑浏览器。
+- 更稳的做法是：摘要可以继续给模型做参考，但工具开放必须只看当前这句用户请求和当前环境；如果这句只是问天气，就先答天气，最多在回答后建议“要不要顺手做成卡片”，不要直接进入卡片流程。
+
+## 3. Browser Agent 经验
+### 3.1 链接不是动作，只是资源
+- 用户消息里出现 URL，不代表可以立刻导航。
+- 更稳的方式是先把链接、附件、目标站点都收进任务资源，再决定执行路径。
+
+### 3.2 附件先入资源层，不要伪造成文本
+- 图片/文件单发若被伪造成”收到一张图”的文本，agent 会误触发完全错误的普通任务。
+- 正确边界：附件先进入会话资源层，后续由 planner 或 browser workflow 显式消费。
+
+### 3.3 浏览器任务必须按证据推进
+- 上传、输入、提交都要有页面证据，不能靠”看起来像成功了”。
+- 执行器负责推进步骤，不负责临场改写大方向。
+
+### 3.4 连续性上下文能显著减少兜圈子
+- 当前页状态、近期浏览器动作、上次 skill 运行结果、最近使用的附件，都是浏览器任务的重要上下文。
+- 如果 planner 不利用这些上下文，模型很容易重复搜索、重复打开站点、重复上传同一附件。
+
+### 3.5 视频输入不该一刀切关掉 tools
+- 之前只要会话里残留视频，tools 就会被整体关闭，导致 Claude 明明具备 skill / Python 能力却回答“做不到”。
+- 更稳的 gating 是：普通多模态轮次可降级，但显式 `/skill`、手动阶段控制、embedded python、活跃 execution 必须保留工具面。
+
+### 3.6 Browser 阶段最好直接暴露给用户
+- Browser Agent V7 已经有稳定阶段顺序，但如果只把这些阶段写到日志或 tool trace，用户仍然不知道当前处于“确认附件”“填写提示词”还是“结果复核”。
+- 更稳的方式是把阶段名直接投影到聊天任务卡里，并在刷新后保持最近任务摘要。
+
+### 3.6b 浏览器统一层要先立合同，再迁逻辑
+- 这条记录的是已结束迁移的方法：当时不能同时重写旧 `direct-chat`、browser runner 和 browser tools，而是先补 runtime adapter、page state、evidence service 与 planner，再删除分散判断。
+- 当前 `direct-chat.ts` 已删除；后续只在 Agent SDK live 主链上继续收口，不能把这条历史经验误读成保留旧入口。
+
+### 3.6c 结构化浏览器任务状态比纯阶段字符串更稳
+- 只靠 `[计划]` / `[阶段]` 文本去驱动任务卡，文案一变就容易失配。
+- 更稳的做法是保留人能读的阶段文案，同时额外输出结构化浏览器 task payload，让主进程和 renderer 直接消费显式字段。
+
+### 3.6d 浏览器诊断要直接复用执行真相，不能另起一套猜测
+- 如果诊断入口只显示 tab 数量、最近日志和 preview 状态，排查“为什么这轮任务没过”时帮助很有限。
+- 更稳的做法是让 runner 和连续性层直接把当前任务、最近证据、页面摘要、最近失败原因喂给 diagnostics，再由 Browser 模式页内入口直接消费。
+- 这样“聊天任务卡看到的”“浏览器诊断看到的”“恢复逻辑依赖的”会是同一份真相，不容易出现各处说法不一致。
+
+### 3.6e 先补单轮执行 owner，比直接拆大文件更稳
+- 当时先补 `RunCoordinator` 与 `RunProjection`，再迁移 tool visibility、dispatch 和 domain orchestration，避免本地会话、远程通道和浏览器任务同时失血。
+- 这条迁移已经完成：当前 owner 是 Agent SDK runtime/orchestrator，`DirectChatEngine` 不再存在。经验保留的是“先稳定所有权与投影，再拆执行主链”的顺序，不是旧文件入口。
+
+### 3.7 自动记忆必须保守
+- 会话结束后自动沉淀确实能提升下一轮表现，但如果把一次性上下文、临时路径、偶发要求也写成长期记忆，后续任务会越来越偏。
+- 首版更稳的边界是只自动写入 `user_preference` 和 `summary`，并且允许在聊天里直接撤销或补充。
+
+### 3.8 模型的探测叙事不是根因证据（2026-07-04 真机七轮）
+- "写长文在 iframe 里"是模型探测失败后的自我解释，被当成事实沿用了两轮，结果 frame 穿透修完真根因还在。
+- 定性页面问题必须**上真实页面取证**（真实 DOM 里查元素形态、事件绑定、容器链），模型叙事只能当线索。
+- 同理反向：定性"模型不行"之前先查工具返回给它的东西——mimo 的"几十秒放弃"三轮里有两轮是感知面空白逼出来的。
+
+### 3.9 现代 React 站点会让"语义标记"假设集体失明
+- XHS 创作页整页语义元素只有 2 个：可点控件是零标记 span/div（React 根委托监听，无 role/onclick/非 button）。
+- 依赖语义标记的三层会同时失明：map 的目标选择器、click 的 isClickable 启发式、act 的裸 `el.click()`（对委托监听是 no-op）。
+- 修复原则一条：**cursor:pointer 视觉可点击 = 可点击**；点击要派发完整指针序列（pointerdown→mousedown→pointerup→mouseup→click）。
+
+### 3.10 页面主行动按钮几乎总在 DOM 尾部，任何截断/配额的尾部偏置都会优先杀死它
+- 「发布」死过两次：pointer 收集配额被页面前部设置行按文档序吃光；map 文本砍尾式截断。
+- 修法：配额保头también保尾（头 28+尾 12）；截断改中段截断（头 75%+尾 20%）。
+- 引申：`[role]` 容器（微前端页通篇 role=main/region）不能当"已被语义集覆盖"的判据，只有真可交互祖先才算覆盖。
+
+## 4. 远程 IM 经验
+### 4.1 “已连接”不等于真的在线
+- Sidecar / 长连接需要真实心跳与错误回传，不能只靠本地状态假装在线。
+
+### 4.2 远程会话也要遵守 scope 与附件边界
+- 飞书线程进入前台会话后，仍要保持”会话隔离、附件资源化、工具日志不混正文”的原则。
+
+## 5. 日历经验
+### 5.1 日历格线必须按区域分层验证
+- 日历周视图至少有三层：顶部日期行、全天行、小时滚动区。顶部日期行不应该画竖线；全天标签左右两侧都不能有竖线；小时区自己的时间标签、横线和竖线必须跟随同一个滚动网格，并且只能从全天行下面开始。
+- 排这类问题时，不要只看“线有没有出现”。要逐层核对数量、起点、粗细和滚动绑定关系，避免用边框和背景渐变重复画同一根线。
+- 验收要同时看日、周、月三个视图；尤其周视图要上下滚动确认小时文字仍和格子绑定。
+
+### 5.2 日历月视图内容不能参与格子列宽计算
+- 月视图每一行必须始终是 7 个等宽格子，日程标题、按钮、图标都只能在自己的格子内部收缩和裁切，不能靠内容最小宽度把某几列顶宽。
+- 修月视图日程展示时，要同时约束行、格子、事件容器和事件标题的收缩边界：格子用固定等分，内部内容设置 `min-width: 0` 和 `overflow: hidden`，长标题在右侧淡出或裁切。
+- 不能只看短标题模拟数据。验收时必须放一条明显超过单元格宽度的长标题日程，实际量测“事件条宽度 <= 单元格宽度”，再确认点击历史日程能打开编辑、空白日期双击 / 右键仍能新建。
+- 月视图修完后仍要回看日视图和周视图的小时格子，避免只修一个视图却把小时网格、滚动绑定或日程点击链路弄坏。
+
+## 6. 协作与文档经验
+### 6.1 跨 main / preload / renderer 的改动只更新受影响的权威文档
+- 代码闭环仍要同时覆盖 Main、Preload、Renderer 类型、UI 与测试；文档不再机械同步概览、进展、模块图、依赖图和结构快照。
+- 同一事实只保留一份详细说明，其他入口链接过去。模块、依赖和结构统一维护在 `docs/architecture/codebase-map.md`，易变文件数从工作区实时生成。
+- 文档入口、状态与归档口径见 `docs/README.md`；如果代码与旧快照冲突，先修文档，不为快照复活旧实现。
+
+### 6.2 文档不只是总结，也要提供排障入口
+- 对复杂模块，文档里应该直接写清：入口文件、日志文件、状态边界、关键限制。
+
+### 6.3 视觉样式排障不要只看代码和浏览器页
+- Electron 壳层里的顶部控件、侧边栏控件，有时浏览器直接开 `localhost` 看到的是白页或不完整壳层，单靠源码猜“该改哪一层”很容易连续改错。
+- 更稳的做法是直接截正在运行的 Electron 窗口，再只裁出目标区域对照；这次定位顶部四模式滑块时，真正有效的是 `screencapture -l <windowId>` 抓系统窗口，而不是抓浏览器里的开发页。
+
+### 6.4 视觉“没变化”时，要先排查层级遮挡
+- 顶部滑块这类控件，常见问题不是颜色值没改，而是图标和滑块底不在同一层级：要么图标被滑块盖住，要么滑块做得太透明，看起来像没变。
+- 更稳的做法是同时检查两件事：
+  - 激活底本身的颜色和透明度是否真的变了
+  - 图标的层级是否压在滑块上面
+- 这次如果只改底色，不提图标层级，最终视觉上会变成“图标被洗白”，用户体感依然像没改对。
+
+### 6.5 文件管理这类下拉菜单，先排查“被壳层裁切”，不要急着动 BrowserView
+- 这次文件管理的筛选 / 更多菜单，表面上看像是 BrowserView 压住了菜单，但真正的第一层问题其实是：`SidePanel.tsx` 和它的动画层本身就带 `overflow-hidden`，菜单如果仍然挂在 `FilesPanel.tsx` 内部，只要超出左侧栏边界就一定会被截掉。
+- 更稳的排法是先分清：
+  - 如果是“菜单只显示一半、边缘被切齐”，优先检查左侧栏壳层裁切；
+  - 如果是“菜单完整但被网页盖住”，再去检查 BrowserView 层级。
+- 正确做法是把这类菜单改成顶层弹层，再用触发按钮和左侧栏矩形去约束它的展开位置，而不是继续把菜单留在 `FilesPanel` 的 DOM 层级里硬调 `left/right/top`。
+
+### 6.6 遇到左栏菜单问题时，不要为了“浮到最前面”直接把浏览器界面藏掉
+- 这次一度把问题误判成“只要让 BrowserView 退掉，菜单就会正常”，结果虽然菜单不再被盖住，却把右边网页整块吃掉，用户体感更差。
+- 更稳的原则是：
+  - 左侧文件管理这类菜单，如果本来就应该待在左栏附近，优先修“菜单容器和定位策略”；
+  - 不要为了修一个左栏下拉，就让整个浏览器内容区消失。
+- 换句话说：**先修菜单自己的承载层，再考虑原生浏览器层**。如果菜单问题的根因是裁切，就不要拿 BrowserView 的显隐当万能扳手。
+
+### 6.7 任何会展开的下拉菜单，都不要挂在会被动画裁切的头部层里
+- 这次右侧聊天面板为了做“顶部先上滚、整块再收回”的动效，头部被包进了一个带裁切的动画层。结果“应用内”和“历史记录”两个下拉即使层级看起来更高，还是会被父层直接剪掉，表现成菜单只露一截、像藏在后面。
+- 这类问题的第一原则不是继续调 `z-index`，而是先检查菜单有没有挂在：
+  - `overflow: hidden` 的壳层里；
+  - 带 `clip-path`、位移、收纳动画的父层里；
+  - 会跟着面板一起做进出场裁切的容器里。
+- 更稳的做法是：**像文件管理面板那样，把菜单直接挂到顶层浮层，再用触发按钮的屏幕坐标计算位置。**
+- 以后只要是聊天头部、浏览器头部、侧栏头部这种“本身带动画”的区域，默认就不要把下拉菜单写成它的内联子节点，除非能明确证明父层不会裁切它。
+
+### 6.8 半透明工作区底色只能选一个“承载层”，不要多层叠加
+- 这次文档区和 RSS 区“明明改成同一个颜色却还是看起来不对”，根因不是颜色值本身，而是同一块区域同时被外壳、内容面、滚动层各自又铺了一层半透明底色。
+- 这种问题在液态玻璃皮肤下尤其明显：叠两层以后就会明显发灰、发闷；空态如果最外层又被老规则打成透明，还会直接露出黑底。
+- 更稳的做法是先明确一条规则：
+  - 由最外层壳负责底色；
+  - 内层滚动区和内容面默认透明；
+  - 只有确实独立成块的预览面板，再单独给它自己的底色。
+- 这次具体经验是：
+  - 文档编辑区保留外层模块底色，内层 `document-editor-surface / document-preview-surface` 透明；
+  - 文档模式里如果内容区圆角看起来“缺角”，先检查圆角背后的整行承载层和左侧标签轨道是否同底色；只给 `document-content-frame` 补底不够，轨道和正文之间的父层仍可能漏出另一套半透明 chrome 色；
+  - 文档内容速览 / 书签这类浮层不要把背后的正文文字强投影进镜片，否则左侧压在正文上、右侧压在空白上时会出现同款面板亮度不一致；这类工具面板应以统一半透明底为主，折射只做轻量质感；
+  - RSS 列表保留 `rss-feed-sheet` 这一层底色，`rss-feed-surface / rss-feed-scroll` 透明；
+  - RSS 预览保留根面板底色，内部内容层透明；
+  - 任何“兜底透明”规则都要检查空态，避免无内容时直接漏出宿主黑底。
+
+### 6.9 死亡时刻反复出现的消息永远先当第一证词
+- dev 闪退排查中，`Failed to initialize sandbox` 在每次崩溃现场都出现，却被连续两次降级处理（先当 kill 噪音、再当外部 chromium 警告），绕了缓存/签名/终端多层假根因后才回头验它——它一直是第一现场证词（后经符号化定名：renderer 存根 `electron_main_mac.cc` FatalError 的无换行输出，seatbelt 初始化失败）。
+- 规则：与死亡时刻**时序强相关且反复出现**的日志消息，必须先证伪才能降级；"这消息平时也有"不构成证伪（要看它平时出现的时刻是否同样致命）。
+
+### 6.10 存活验证必须锚定在崩溃相关事件之后（三个假阳性的代价）
+- 同一天三次"修好了"误报，各有一个验证缺陷：①固定墙钟采样（缓存重建拖慢启动，崩溃点后移到采样窗口之外）；②`pgrep -f 'node_modules/electron'` 误匹配 electron-vite 监视进程（存活≠应用存活）；③macOS 崩溃报告落盘延迟约一分钟，`find -newermt` 短窗口会漏。
+- 正确形态：先从历史崩溃找到**崩溃相关锚事件**（本例=恢复活动标签的 set-bounds 日志行），验证=等到锚事件出现后再观察一段（≥崩溃延迟上限），同时用精确进程匹配+放宽崩溃报告时间窗。
+
+### 6.11 "换代码无效的启动崩溃"：环境检查只能排除，定案必须有指令级证据（四个假根因的代价）
+- 本次 dev 闪退连出四个假根因——缓存损坏、签名封印、终端沙箱继承、swap 耗尽——每个都有"貌似成立"的环境层证据，swap 版本还一度写进文档定案；重启清空 swap 后崩溃原样复现（同址 SIGTRAP 六帧偏移逐字节一致），全部证伪。共同缺陷：证据停在环境层，从未触达崩溃指令本身。
+- 定案三件套（下次直接从这里开始）：
+  - **breakpad 符号化**：Electron 每个 release 附带 `*-symbols.zip`，把 .ips 的 imageOffset 解成真函数+文件行。本例主进程死于 `~RenderFrameHostImpl` 内的裸 CHECK（release 版 CHECK 零日志直接 trap，所以 stderr 永远安静），调用链 `WebContents::LoadURL → PerformEarlyRenderFrameHostSwapIfNeeded → CommitPending`。
+  - **env 门控同步 stderr 时间线**：`READY_PROC_DIAG=1` 打开 web-contents-created / nav-start / render-process-gone 的毫秒级打点（必须同步写——主进程死亡时异步日志跟着消失）。
+  - **最小复现对照**：同一 Electron 二进制跑最小 app（含 partition/https/3 并发矩阵）全绿 → 二进制与机器洗清，嫌疑收敛到本应用行为差异。
+- 真根因=tab 创建的空白 primer 双导航（tab-lifecycle-service）：标签恢复的并发派生下 renderer seatbelt 初始化偶发失败（当晚 D15 定罪：chokidar v5 在 macOS 每文件一个 kqueue fd，九个工作区 watcher 把主进程 fd 表灌向上限，spawn 的沙箱 socketpair 建不出来——"偶发"是 fd 爬坡的不同阶段），primer 已提交 + 真实导航的 speculative 进程死亡组合恰好走进 Chromium 早期 RFH 交换的裸 CHECK，单标签故障升级为整机崩溃。修复=删 primer（单导航 + `resetPageBackground` 原生涂底防白闪），renderer 失败退化为该标签的悲伤页，主进程免疫。
+- 环境层便宜检查（swapusage / codesign / responsibleProc）仍然先跑——但它们的产出只配叫"排除项"，不配叫"根因"。
+
+### 6.12 回读信号必须与它比较的对象同构（changed 恒真假信号的代价）
+
+- 实锚（2026-07-04 真机第十二轮）：act_on_target 在 `readBack='map'` 时把"动作前的轻量 delta"与"动作后的整张页面 map"做 JSON 字符串比较——形状必不同，`changed` 恒为 true。模型连点三次无效的发布按钮，每次都收到 `changed:true`，于是从不升级、从不怀疑点击本身。假阳性回读比没有回读更糟：它给了模型继续错下去的证据。
+- 规则：任何 before/after 变更信号，两端必须取自同一采集器同一形状；跨形状比较（delta vs map、text vs tree）一律禁止。信号消费者（模型/升级逻辑）依赖它做分支时，给该信号写行为测试钉住"无变化→false"。
+- 同批教训：兜底不能指望模型自觉。站点卡写了"act 无效改 click_at"，模型十二轮里一次都没采——升级动作要长在工具里（同一次调用内自动升级+审计字段），知识卡只兜"工具做不了的判断"。
+
+### 6.13 共享 worktree 的并行会话提交纪律
+
+- 实锚（2026-07-04）：主会话 `git add -A`（带路径排除）提交 Phase A 时，把后台子代理未提交的四个 gate 脚本修改一并收进（排除清单只列了它的三个源文件）。内容恰好逐字节一致所以无损，但提交归属混乱、提交信息未覆盖那四处。
+- 规则：同一 worktree 有并行写者时，提交必须**白名单**（`git add <明确文件列表>`），永不 `add -A`/`add -u`；派发子代理时在 prompt 里写明它将触碰的完整文件面，主会话把该面视为禁区直到其提交落地。
+
+### 6.14 无人值守 run 的每一个模态面都是挂点
+
+- 实锚（2026-07-04 第十二轮汇总）：一条发布链上连环踩了四个"等人"面——行动确认闸（设计中）、站点权限 modal sheet（无超时无日志，还挡住整个窗口）、原生文件选择器（OS 级对话框挂工具环）、接管横幅 pending_confirm（无 TTL 永久冻结写入）。任何一个都能让"我出门了"场景死在半路。
+- 规则：给 agent 通路加任何人工确认面时，同时回答三问：①无人应答时它如何收口（超时语义：拒绝/checkpoint/降级，永不无限挂）；②模型如何得知发生了什么（结构化注记/提醒，不能只有 UI）；③账本记了什么（审计可查）。三问缺一不上线。

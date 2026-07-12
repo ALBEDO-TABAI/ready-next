@@ -1,4 +1,13 @@
+---
+title: Stage U LESSONS_LEARNED 验收清单
+date: 2026-05-23
+kind: archive
+enforce: false
+---
+
 # Stage U LESSONS_LEARNED 验收清单
+
+> Stage U 历史验收快照；段号、行数和黄灯只描述当时状态。当前经验与验证入口见根目录 `LESSONS_LEARNED.md`、`docs/architecture/current-runtime-contracts.md` 和 `package.json`。
 
 > 来源：`LESSONS_LEARNED.md`（329 行）+ `.claude/architectural-principles.md`
 > 目的：Stage U release 前，每条"固化规则"必须有对应 CI gate / 行为测试 / manual verification
