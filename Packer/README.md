@@ -49,7 +49,7 @@ npm --prefix Packer start
    `READY_RELEASE_SKILL_RUNTIME_ROOT=<skill-runtime>` 调用 `pack-clean-release.mjs`。
    Clean Packer 负责净化 sidecar/embedded-skills、暂存并内置 `skill-runtime`、electron-builder、
    用 `hdiutil` 重建 DMG、挂载校验 `Ready.app` 签名与 Electron Framework。
-4. 把 `exports/Ready-<version>-arm64.dmg` 复制到 `Packer/output/`，按配置的打包名命名。
+4. 从主项目 `electron-builder.yml` 实时读取输出目录、产品名、DMG 架构和文件名，再复制到 `Packer/output/`；自定义后缀也会跟随主项目产品名。
 
 精简包会短暂写入 `build/runtime-seeds/ai-settings.seed.json`，打包结束后恢复原文件；
 完整包才走 Clean Packer 的暂存 seed。日志里的 API Key 会脱敏显示；

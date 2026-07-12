@@ -20,6 +20,7 @@ import { createServer } from 'node:http'
 import { homedir } from 'node:os'
 import { delimiter, dirname, extname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import YAML from 'yaml'
 
 export const packerRoot = dirname(fileURLToPath(import.meta.url))
 export const repoRoot = resolve(packerRoot, '..')
@@ -27,11 +28,63 @@ export const repoRoot = resolve(packerRoot, '..')
 const publicRoot = join(packerRoot, 'public')
 const stagingRoot = join(packerRoot, '.staging')
 const outputRoot = join(packerRoot, 'output')
-const exportsDir = join(repoRoot, 'exports')
 const cleanPackerScript = join(packerRoot, 'pack-clean-release.mjs')
 const readyPackSeedPath = join(repoRoot, 'build', 'runtime-seeds', 'ai-settings.seed.json')
 const nodeModulesPath = join(repoRoot, 'node_modules')
 const stagedSymlinkPath = join(stagingRoot, 'node_modules.symlink')
+
+export function derivePackagingContract(builderConfig, packageJson) {
+  const productName = String(builderConfig?.productName || packageJson?.productName || packageJson?.name || '').trim()
+  const version = String(packageJson?.version || '').trim()
+  const output = String(builderConfig?.directories?.output || 'dist').trim()
+  const targets = Array.isArray(builderConfig?.mac?.target) ? builderConfig.mac.target : [builderConfig?.mac?.target]
+  const dmgTarget = targets.find((target) => target === 'dmg' || target?.target === 'dmg')
+  const arches = Array.isArray(dmgTarget?.arch) ? dmgTarget.arch.map(String) : []
+  const arch = arches.length === 1 ? arches[0] : ''
+
+  if (!productName || !version) throw new Error('主项目缺少 productName 或 version，无法确定打包产物')
+  if (!dmgTarget || !arch) throw new Error('主项目必须配置唯一的 macOS DMG 架构，打包器才能确定产物')
+
+  const artifactTemplate = String(builderConfig?.mac?.artifactName || '${productName}-${version}-${arch}.${ext}')
+  const artifactName = artifactTemplate.replace(/\$\{(productName|version|arch|ext)\}/g, (_match, key) => ({
+    productName,
+    version,
+    arch,
+    ext: 'dmg',
+  })[key])
+
+  return {
+    productName,
+    version,
+    arch,
+    output,
+    artifactName,
+    appOutputDir: arch === 'arm64' ? 'mac-arm64' : 'mac',
+  }
+}
+
+export function assertPackagingInputs(builderConfig, packageJson) {
+  if (!packageJson?.scripts?.['build:dist']) {
+    throw new Error('主项目缺少 build:dist 命令，打包器无法复用正式构建链')
+  }
+  const resources = Array.isArray(builderConfig?.extraResources) ? builderConfig.extraResources : []
+  const resourceSources = new Set(resources.map((entry) => String(entry?.from || '')))
+  for (const required of ['build/runtime-seeds/ai-settings.seed.json', 'assets/embedded-skills', 'src/python']) {
+    if (!resourceSources.has(required)) {
+      throw new Error(`主项目打包清单缺少 ${required}，打包器不能保证专属配置或技能资源完整`)
+    }
+  }
+}
+
+export function readPackagingContract() {
+  const builderConfig = YAML.parse(readFileSync(join(repoRoot, 'electron-builder.yml'), 'utf8'))
+  const packageJson = JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf8'))
+  assertPackagingInputs(builderConfig, packageJson)
+  return derivePackagingContract(builderConfig, packageJson)
+}
+
+const packagingContract = readPackagingContract()
+const exportsDir = resolve(repoRoot, packagingContract.output)
 
 const jobs = new Map()
 
@@ -48,12 +101,7 @@ export const DEFAULT_NOVACODE_MODEL = 'gpt-5.5'
 export const DEFAULT_NOVACODE_DISPLAY_NAME = 'NovaCode'
 
 function readAppVersion() {
-  try {
-    const pkg = JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf8'))
-    return String(pkg.version || '').trim() || '0.0.0'
-  } catch {
-    return '0.0.0'
-  }
+  return readPackagingContract().version
 }
 
 // The normal Ready package stays slim and lets Settings provision skill-runtime
@@ -161,9 +209,9 @@ export function buildSeed(request) {
   }
 }
 
-export function safeOutputName(version, packageSuffix) {
-  if (packageSuffix) return `Ready-${packageSuffix}.dmg`
-  return `Ready-${version}-arm64.dmg`
+export function safeOutputName(contract, packageSuffix) {
+  if (packageSuffix) return `${contract.productName}-${packageSuffix}.dmg`
+  return contract.artifactName
 }
 
 function redactText(value, redactions = []) {
@@ -374,14 +422,14 @@ async function withTemporaryReadyPackSeed(seedFile, runBuild) {
   }
 }
 
-function cleanReadyPackOutputs(version) {
-  rmSync(join(exportsDir, 'mac-arm64'), { recursive: true, force: true })
-  rmSync(join(exportsDir, `Ready-${version}-arm64.dmg`), { force: true })
-  rmSync(join(exportsDir, `Ready-${version}-arm64.dmg.blockmap`), { force: true })
+function cleanReadyPackOutputs(contract) {
+  rmSync(join(exportsDir, contract.appOutputDir), { recursive: true, force: true })
+  rmSync(join(exportsDir, contract.artifactName), { force: true })
+  rmSync(join(exportsDir, `${contract.artifactName}.blockmap`), { force: true })
 }
 
-function assertNoPackagedRuntime() {
-  const runtimePath = join(exportsDir, 'mac-arm64', 'Ready.app', 'Contents', 'Resources', 'skill-runtime')
+function assertNoPackagedRuntime(contract) {
+  const runtimePath = join(exportsDir, contract.appOutputDir, `${contract.productName}.app`, 'Contents', 'Resources', 'skill-runtime')
   if (existsSync(runtimePath)) {
     throw new Error(`精简包不应内置技能运行时，但发现了：${runtimePath}`)
   }
@@ -394,8 +442,8 @@ function assertNoPackagedRuntime() {
 async function runPackerJob(job, request) {
   ensureDir(stagingRoot)
   ensureDir(outputRoot)
-  const version = readAppVersion()
-  const producedDmg = join(exportsDir, `Ready-${version}-arm64.dmg`)
+  const contract = readPackagingContract()
+  const producedDmg = join(resolve(repoRoot, contract.output), contract.artifactName)
   const seedFile = join(stagingRoot, `packer-seed-${job.id}.json`)
   let restoreNodeModules = () => {}
 
@@ -430,10 +478,10 @@ async function runPackerJob(job, request) {
     } else {
       emitJob(job, '精简包：使用 ready-pack 同一路径 npm run build:dist，不内置技能运行时')
       await withTemporaryReadyPackSeed(seedFile, async () => {
-        cleanReadyPackOutputs(version)
+        cleanReadyPackOutputs(contract)
         await runCommand('npm', ['run', 'build:dist'], env, (line) => emitJob(job, line))
       })
-      assertNoPackagedRuntime()
+      assertNoPackagedRuntime(contract)
     }
 
     if (!existsSync(producedDmg)) {
@@ -443,7 +491,7 @@ async function runPackerJob(job, request) {
       throw new Error(`没有找到生成的 DMG：${producedDmg}（exports 内 DMG：${dmgs.join(', ') || '无'}）`)
     }
 
-    const outputPath = join(outputRoot, safeOutputName(version, request.packageSuffix))
+    const outputPath = join(outputRoot, safeOutputName(contract, request.packageSuffix))
     copyFileSync(producedDmg, outputPath)
     const sizeMB = (statSync(outputPath).size / (1024 * 1024)).toFixed(1)
     emitJob(job, `专属 DMG 已输出：${outputPath}（${sizeMB} MB）`)
@@ -507,6 +555,9 @@ async function handleRequest(req, res) {
       model: DEFAULT_NOVACODE_MODEL,
       displayName: DEFAULT_NOVACODE_DISPLAY_NAME,
       version: readAppVersion(),
+      productName: packagingContract.productName,
+      arch: packagingContract.arch,
+      artifactName: packagingContract.artifactName,
       runtimeRoot,
       runtimeReady: isValidRuntimeRoot(runtimeRoot),
     })

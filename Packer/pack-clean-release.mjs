@@ -21,11 +21,13 @@ import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { basename, delimiter, join, relative, resolve, sep } from 'node:path'
 import YAML from 'yaml'
+import { readPackagingContract } from './server.mjs'
 
 const projectRoot = fileURLToPath(new URL('../', import.meta.url))
 const packerRoot = fileURLToPath(new URL('./', import.meta.url))
+const packagingContract = readPackagingContract()
 const stagingRoot = join(packerRoot, '.staging', 'clean-package')
-const exportsDir = join(projectRoot, 'exports')
+const exportsDir = resolve(projectRoot, packagingContract.output)
 const cleanSeedPath = join(stagingRoot, 'build', 'runtime-seeds', 'ai-settings.seed.json')
 const cleanPythonRoot = join(stagingRoot, 'src', 'python')
 const cleanEmbeddedSkillsRoot = join(stagingRoot, 'assets', 'embedded-skills')
@@ -320,11 +322,11 @@ function removeOldExports() {
       rmSync(fullPath, { recursive: true, force: true })
       continue
     }
-    if (name === 'mac-arm64') {
+    if (name === packagingContract.appOutputDir) {
       rmSync(fullPath, { recursive: true, force: true })
       continue
     }
-    if (/^Ready-.*\.(dmg|blockmap)$/u.test(name)) {
+    if (name === packagingContract.artifactName || name === `${packagingContract.artifactName}.blockmap`) {
       rmSync(fullPath, { recursive: true, force: true })
     }
   }
@@ -705,7 +707,7 @@ function verifyPackagedRuntime(runtimeRoot) {
 }
 
 function verifyPackagedResources() {
-  const resourcesDir = join(exportsDir, 'mac-arm64', 'Ready.app', 'Contents', 'Resources')
+  const resourcesDir = join(exportsDir, packagingContract.appOutputDir, `${packagingContract.productName}.app`, 'Contents', 'Resources')
   if (!existsSync(resourcesDir)) {
     throw new Error(`Packaged resources not found: ${resourcesDir}`)
   }
@@ -779,17 +781,13 @@ function getAppBuilderBin() {
 }
 
 function appBundlePath(root = exportsDir) {
-  return join(root, 'mac-arm64', 'Ready.app')
+  return join(root, packagingContract.appOutputDir, `${packagingContract.productName}.app`)
 }
 
 function findDmgArtifact() {
-  const dmgNames = existsSync(exportsDir)
-    ? readdirSync(exportsDir).filter((name) => /^Ready-.*-arm64\.dmg$/u.test(name)).sort()
-    : []
-  if (dmgNames.length !== 1) {
-    throw new Error(`Expected exactly one Ready arm64 DMG artifact, found ${dmgNames.length}: ${dmgNames.join(', ')}`)
-  }
-  return join(exportsDir, dmgNames[0])
+  const dmgPath = join(exportsDir, packagingContract.artifactName)
+  if (!existsSync(dmgPath)) throw new Error(`Expected DMG artifact was not generated: ${dmgPath}`)
+  return dmgPath
 }
 
 function verifyElectronFramework(appPath) {
@@ -815,8 +813,8 @@ function verifyDmgArtifact(dmgPath) {
   detachDmgVerifyMount()
   try {
     runCommand('hdiutil', ['attach', '-nobrowse', '-readonly', '-mountpoint', dmgVerifyMountPoint, dmgPath])
-    const appPath = join(dmgVerifyMountPoint, 'Ready.app')
-    if (!existsSync(appPath)) throw new Error(`Mounted DMG does not contain Ready.app: ${dmgPath}`)
+    const appPath = join(dmgVerifyMountPoint, `${packagingContract.productName}.app`)
+    if (!existsSync(appPath)) throw new Error(`Mounted DMG does not contain ${packagingContract.productName}.app: ${dmgPath}`)
     const framework = verifyElectronFramework(appPath)
     runCommand('codesign', ['--verify', '--deep', '--strict', '--verbose=1', appPath])
     return {
@@ -838,7 +836,7 @@ function rebuildDmgWithHdiutil() {
 
   const dmgPath = findDmgArtifact()
   const blockmapPath = `${dmgPath}.blockmap`
-  const macOutputDir = join(exportsDir, 'mac-arm64')
+  const macOutputDir = join(exportsDir, packagingContract.appOutputDir)
   const applicationsLink = join(macOutputDir, 'Applications')
 
   rmSync(dmgPath, { force: true })

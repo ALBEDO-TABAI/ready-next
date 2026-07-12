@@ -15,6 +15,9 @@ const outputPreview = document.getElementById('outputPreview')
 
 const fields = [baseUrl, apiKey, model, displayName, packageSuffix, runtimeRoot, allowSlim]
 let appVersion = '…'
+let productName = 'Ready'
+let packageArch = 'arm64'
+let defaultArtifactName = ''
 let detectedRuntimeRoot = ''
 
 function setStatus(text, state = '') {
@@ -49,7 +52,7 @@ function normalizeSuffix(value) {
 
 function updatePreview() {
   const suffix = normalizeSuffix(packageSuffix.value)
-  outputPreview.textContent = suffix ? `Ready-${suffix}.dmg` : `Ready-${appVersion}-arm64.dmg`
+  outputPreview.textContent = suffix ? `${productName}-${suffix}.dmg` : (defaultArtifactName || `${productName}-${appVersion}-${packageArch}.dmg`)
 }
 
 packageSuffix.addEventListener('input', updatePreview)
@@ -73,6 +76,9 @@ async function loadDefaults() {
     if (!response.ok) return
     const defaults = await response.json()
     appVersion = defaults.version || appVersion
+    productName = defaults.productName || productName
+    packageArch = defaults.arch || packageArch
+    defaultArtifactName = defaults.artifactName || ''
     if (defaults.baseUrl) baseUrl.value = defaults.baseUrl
     if (defaults.model) model.value = defaults.model
     if (defaults.displayName) displayName.value = defaults.displayName
