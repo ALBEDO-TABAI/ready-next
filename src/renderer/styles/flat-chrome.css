@@ -559,7 +559,6 @@ html:not([data-skin='liquid-glass']) .rss-mode-shell [class*="editor-area"] {
 
 .rss-toolbar-select:hover {
   background: color-mix(in srgb, var(--surface-card-bg) 40%, transparent) !important;
-  border-color: color-mix(in srgb, var(--text-gray) 28%, var(--border-input) 72%) !important;
 }
 
 .rss-toolbar-select:focus {
@@ -568,7 +567,6 @@ html:not([data-skin='liquid-glass']) .rss-mode-shell [class*="editor-area"] {
 
 .rss-toolbar-select:focus-visible {
   outline: none;
-  border-color: color-mix(in srgb, var(--color-blue) 45%, var(--border-input) 55%) !important;
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-blue) 16%, transparent);
 }
 

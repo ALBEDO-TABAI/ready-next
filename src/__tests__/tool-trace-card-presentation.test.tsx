@@ -107,6 +107,20 @@ test('ToolTraceCard: completed run auto-collapses to a single line (count + late
   })
 })
 
+test('ToolTraceCard: collapsed row is borderless and aligns with the message edge', () => {
+  withDom((render) => {
+    const container = render(createElement(ToolTraceCard, {
+      events: makeEvents(),
+      pending: false,
+      expanded: false,
+    }))
+    const card = container.querySelector('[data-ready-tool-trace-card="true"]') as HTMLElement | null
+    const header = card?.querySelector('button') as HTMLButtonElement | null
+    assert.equal(card?.style.borderWidth, '0px')
+    assert.equal(header?.style.paddingLeft, '0px')
+  })
+})
+
 test('ToolTraceCard: manual expand shows the paired timeline with durations', () => {
   withDom((render) => {
     const container = render(createElement(ToolTraceCard, {

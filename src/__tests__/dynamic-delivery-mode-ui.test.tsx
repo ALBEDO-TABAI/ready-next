@@ -31,3 +31,16 @@ test('settings exposes standard/adaptive and composer exposes a compact one-shot
   assert.match(composer, /height:26px/)
   assert.doesNotMatch(composer, />彻底<\/button>/)
 })
+
+test('Boost remains available during a running task and uses the Ready orange active state', () => {
+  const composer = renderToStaticMarkup(createElement(ChatInput, {
+    ...common,
+    isStreaming: true,
+    thoroughOverride: true,
+  }))
+
+  assert.match(composer, /data-ready-delivery-thorough="true"/)
+  assert.match(composer, /aria-pressed="true"/)
+  assert.match(composer, /--color-ready-orange/)
+  assert.match(composer, /data-ready-agent-stop="true"/)
+})

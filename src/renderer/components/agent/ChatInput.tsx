@@ -744,28 +744,26 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
             </div>
 
             <div className="flex items-center" style={{ gap: 6, flexShrink: 0 }}>
-              {!composerLocked && (
-                <button
-                  type="button"
-                  data-ready-delivery-thorough="true"
-                  aria-pressed={thoroughOverride}
-                  title="Boost：仅下一次发送启用强化协作与独立复核，发送后自动关闭"
-                  onClick={() => onThoroughOverrideChange(!thoroughOverride)}
-                  className="rounded-full border transition-[background-color,border-color,color]"
-                  style={{
-                    height: 26,
-                    padding: '0 8px',
-                    fontSize: 10.5,
-                    lineHeight: 1,
-                    fontWeight: 550,
-                    borderColor: thoroughOverride ? 'var(--color-blue)' : 'var(--surface-border)',
-                    background: thoroughOverride ? 'var(--color-blue-light)' : 'transparent',
-                    color: thoroughOverride ? 'var(--color-blue)' : 'var(--text-light)',
-                  }}
-                >
-                  Boost
-                </button>
-              )}
+              <button
+                type="button"
+                data-ready-delivery-thorough="true"
+                aria-pressed={thoroughOverride}
+                title="Boost：仅下一次发送启用强化协作与独立复核，发送后自动关闭"
+                onClick={() => onThoroughOverrideChange(!thoroughOverride)}
+                className="rounded-full hover:bg-black/5 active:scale-[0.98] transition-[background-color,color,transform] duration-150"
+                style={{
+                  height: 26,
+                  padding: '0 8px',
+                  fontSize: 10.5,
+                  lineHeight: 1,
+                  fontWeight: 550,
+                  border: '1px solid transparent',
+                  background: thoroughOverride ? 'color-mix(in srgb, var(--color-ready-orange) 14%, transparent)' : 'transparent',
+                  color: thoroughOverride ? 'var(--color-ready-orange)' : 'var(--text-light)',
+                }}
+              >
+                Boost
+              </button>
               <ContextUsageMeter usage={contextUsage} dimmed={composerLocked} />
 
               {composerLocked ? (

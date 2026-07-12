@@ -9,9 +9,14 @@ function readWorkspaceFile(path: string): string {
 
 test('browser tab rail keeps a scrollable strip and stable per-tab width wrappers during active-tab swaps', () => {
   const source = readWorkspaceFile('src/renderer/components/browser/TabRail.tsx')
+  const overlay = readWorkspaceFile('src/renderer/pages/VerticalRailOverlayWindow.tsx')
+  const chrome = readWorkspaceFile('src/renderer/styles/base-chrome.css')
 
   assert.match(source, /overflow-x-auto overflow-y-hidden/)
   assert.match(source, /className="browser-tab-rail-scroll flex min-w-0 flex-1 items-center overflow-x-auto overflow-y-hidden"/)
+  assert.match(overlay, /className="browser-tab-rail-scroll flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden"/)
+  assert.match(chrome, /\.browser-tab-rail-scroll\s*\{\s*scrollbar-width:\s*none;/)
+  assert.match(chrome, /\.browser-tab-rail-scroll::-webkit-scrollbar\s*\{\s*display:\s*none;/)
   assert.match(source, /const activeSurfaceMetrics = getActiveTabSurfaceMetrics\(layoutMetrics, activeTabMode\)/)
   assert.match(source, /const activeSlotMetrics = getActiveTabSlotMetrics\(layoutMetrics, activeTabMode, refreshDockMode\)/)
   assert.match(source, /style=\{\{\s*width:\s*isActive \? activeSlotMetrics\.width : layoutMetrics\.inactiveWidth,/)

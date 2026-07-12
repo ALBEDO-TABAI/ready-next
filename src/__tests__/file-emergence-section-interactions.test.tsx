@@ -176,3 +176,34 @@ test('file emergence section starts collapsed and keeps only the last clicked ro
     cleanup()
   }
 })
+
+test('file emergence refresh control shares the bucket count column', async () => {
+  const { dom, rootElement, cleanup } = installDom()
+  const root = createRoot(rootElement)
+  let refreshCalls = 0
+
+  try {
+    flushSync(() => {
+      root.render(createElement(FileEmergenceSection, {
+        viewModel: makeViewModel(),
+        isRefreshing: false,
+        onRefresh: () => { refreshCalls += 1 },
+        onOpenFile: () => {},
+      }))
+    })
+
+    const refreshButton = dom.window.document.querySelector('[aria-label="重新涌现"]') as HTMLButtonElement | null
+    assert.ok(refreshButton)
+    assert.match(refreshButton.className, /justify-self-center/)
+    assert.match(refreshButton.parentElement?.className ?? '', /grid-cols-\[22px_82px_minmax\(0,1fr\)_24px\]/)
+
+    flushSync(() => {
+      refreshButton.click()
+    })
+    assert.equal(refreshCalls, 1)
+  } finally {
+    flushSync(() => root.unmount())
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    cleanup()
+  }
+})

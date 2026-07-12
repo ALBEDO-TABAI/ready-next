@@ -338,7 +338,7 @@ export default function RSSFeed({
   const calendarPillButtonStyle = {
     padding: '4px 10px',
     borderRadius: 8,
-    border: '1px solid var(--border-input)',
+    border: '1px solid transparent',
     background: 'transparent',
     fontSize: 12,
     fontWeight: 500,

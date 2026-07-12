@@ -28,7 +28,7 @@ test('rss feed keeps compact toolbar controls while article rows stay on the sha
   assert.match(rssFeed, /rss-toolbar-active-dot/)
   assert.match(styles, /\.rss-toolbar-icon-button \{/)
   assert.match(styles, /\.rss-toolbar-select:hover \{/)
-  assert.match(rssFeed, /border: '1px solid var\(--border-input\)'/)
+  assert.match(rssFeed, /border: '1px solid transparent'/)
   assert.match(rssFeed, /color: 'var\(--text-body\)'/)
   assert.match(rssFeed, /background: 'transparent'/)
   assert.match(rssMode, /className=\{`rss-feed-sheet content-surface-panel/)

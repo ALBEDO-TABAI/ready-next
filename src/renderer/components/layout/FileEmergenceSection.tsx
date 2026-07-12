@@ -22,7 +22,6 @@ interface FileEmergenceSectionProps {
   onOpenFile: (path: string, project: FileEmergenceProject) => void
 }
 
-const EMERGENCE_CONTENT_INSET_PX = 8
 const EMERGENCE_UI_STATE_STORAGE_KEY = 'ready:file-emergence:ui-state:v1'
 
 interface FileEmergenceUiState {
@@ -107,10 +106,9 @@ export default function FileEmergenceSection({
         }}
       />
       <div
-        className="flex min-h-[34px] items-center justify-between gap-2 py-1 pl-0 pr-1"
-        style={{ marginInline: EMERGENCE_CONTENT_INSET_PX }}
+        className="grid min-h-[34px] grid-cols-[22px_82px_minmax(0,1fr)_24px] items-center px-2 py-1"
       >
-        <div className="flex items-center gap-1.5 min-w-0">
+        <div className="col-span-3 flex min-w-0 items-center gap-1.5">
           <span className="relative flex h-[18px] w-[18px] shrink-0 items-center justify-start">
             <Folder className="h-[16px] w-[16px]" style={{ color: 'var(--text-title)' }} strokeWidth={1.75} />
             <Sparkles className="absolute left-[1px] -bottom-[1px] h-[9px] w-[9px]" style={{ color: 'var(--text-title)' }} strokeWidth={1.9} />
@@ -133,7 +131,7 @@ export default function FileEmergenceSection({
           disabled={isRefreshing}
           aria-label="重新涌现"
           title="重新涌现"
-          className="flex h-7 w-7 items-center justify-center rounded-[8px] transition-[background-color,box-shadow] hover:bg-[var(--files-panel-state-hover-bg)] hover:shadow-[var(--files-panel-state-hover-shadow)]"
+          className="flex h-7 w-7 justify-self-center items-center justify-center rounded-[8px] transition-[background-color,box-shadow] hover:bg-[var(--files-panel-state-hover-bg)] hover:shadow-[var(--files-panel-state-hover-shadow)]"
           style={{
             color: 'var(--text-muted)',
             background: isRefreshing ? 'var(--files-panel-state-active-bg)' : 'transparent',

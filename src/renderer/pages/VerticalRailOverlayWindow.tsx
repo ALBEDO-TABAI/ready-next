@@ -221,7 +221,7 @@ export default function VerticalRailOverlayWindow() {
       }}
     >
       <div
-        className="flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden"
+        className="browser-tab-rail-scroll flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden"
         style={{ gap: VERTICAL_RAIL_FLYOUT_ROW_GAP }}
         onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropTarget(null) }}
       >

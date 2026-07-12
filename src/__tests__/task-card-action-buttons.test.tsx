@@ -144,6 +144,18 @@ test('task card child-run buttons invoke continue and cancel handlers', () => {
   }
 })
 
+test('task card collapse row is borderless and aligns with the message edge', () => {
+  const { container, unmount } = mountTaskCard(makeRun(), { expanded: false })
+  try {
+    const card = container.querySelector('[data-ready-task-card="true"]') as HTMLElement | null
+    const header = card?.querySelector('button') as HTMLButtonElement | null
+    assert.equal(card?.style.borderWidth, '0px')
+    assert.equal(header?.style.paddingLeft, '0px')
+  } finally {
+    unmount()
+  }
+})
+
 test('task card suspended and cross-scope buttons invoke resume and open handlers', () => {
   const calls: Array<[string, string]> = []
   const suspendedRun = makeRun({

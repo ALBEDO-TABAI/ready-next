@@ -79,7 +79,7 @@ export function DynamicDeliveryTaskSummary({ run }: { run: TaskCardRun }) {
 
 const CAPSULE_SHELL_STYLE: React.CSSProperties = {
   borderRadius: 12,
-  border: '1px solid var(--border-default)',
+  border: 0,
   background: 'color-mix(in srgb, var(--surface-card-bg) 20%, transparent)',
   display: 'flex',
   flexDirection: 'column',
@@ -89,7 +89,7 @@ const CAPSULE_SHELL_STYLE: React.CSSProperties = {
 const CAPSULE_HEADER_STYLE: React.CSSProperties = {
   border: 'none',
   background: 'transparent',
-  padding: '7px 10px',
+  padding: '7px 0',
   display: 'flex',
   alignItems: 'center',
   gap: 8,
@@ -358,7 +358,7 @@ export function TaskCard({
       <DynamicDeliveryTaskSummary run={run} />
 
       {recentItems.length > 0 ? (
-        <div data-ready-task-recent-activity="true" style={{ padding: '0 10px 8px 10px' }}>
+        <div data-ready-task-recent-activity="true" style={{ padding: '0 0 8px' }}>
           <div className="flex flex-col">
             {recentItems.map((item, index) => (
               <ToolTimelineRow
@@ -373,7 +373,7 @@ export function TaskCard({
       ) : null}
 
       {showProgressRow ? (
-        <div style={{ padding: '0 10px 8px 10px' }}>
+        <div style={{ padding: '0 0 8px' }}>
           <div className="flex items-center justify-between" style={{ gap: 8 }}>
             <span
               className="t-meta"
@@ -427,7 +427,7 @@ export function TaskCard({
           className="flex flex-col"
           style={{
             gap: 10,
-            padding: '8px 10px 10px',
+            padding: '8px 0 10px',
             borderTop: '1px solid color-mix(in srgb, var(--border-default) 72%, transparent)',
             maxHeight: '60vh',
             overflowY: 'auto',
@@ -844,7 +844,7 @@ export function ToolTraceCard({
         <CapsuleChevron expanded={Boolean(expanded)} />
       </button>
       {!expanded && recentItems.length > 0 ? (
-        <div className="flex flex-col" style={{ padding: '0 10px 8px' }} data-ready-tool-trace-recent="true">
+        <div className="flex flex-col" style={{ padding: '0 0 8px' }} data-ready-tool-trace-recent="true">
           {recentItems.map((item, index) => (
             <ToolTimelineRow
               key={item.id}
@@ -858,7 +858,7 @@ export function ToolTraceCard({
       {expanded ? (
         <div
           style={{
-            padding: '8px 10px 10px',
+            padding: '8px 0 10px',
             borderTop: '1px solid color-mix(in srgb, var(--border-default) 72%, transparent)',
           }}
         >
