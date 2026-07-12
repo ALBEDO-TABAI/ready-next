@@ -585,6 +585,8 @@ const browserAPI = {
     ipcRenderer.invoke('browser:verticalRailOverlayHide'),
   getVerticalRailOverlaySnapshot: () =>
     ipcRenderer.invoke('browser:verticalRailOverlayGetSnapshot'),
+  isVerticalRailOverlayPointerInside: () =>
+    ipcRenderer.invoke('browser:verticalRailOverlayPointerInside'),
   sendVerticalRailOverlayCommand: (command: VerticalRailOverlayCommand) =>
     ipcRenderer.invoke('browser:verticalRailOverlayCommand', command),
   onVerticalRailOverlayCommand: (callback: (command: VerticalRailOverlayCommand) => void) => {

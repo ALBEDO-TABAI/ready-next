@@ -198,21 +198,33 @@ export default function VerticalTabRail({
 
   const scheduleClose = useCallback(() => {
     if (closeTimerRef.current !== null) return
-    closeTimerRef.current = window.setTimeout(() => {
+    // Cross-window enter/leave delivery is advisory only. While the child window is open,
+    // keep checking the OS cursor so a missed event can neither close early nor stay open.
+    const checkForClose = async () => {
       closeTimerRef.current = null
-      if (draggingIdRef.current) return // never self-close mid-drag
-      if (!railHoveredRef.current && !overlayHoveredRef.current) hideOverlay()
-    }, HOVER_CLOSE_DELAY)
+      if (!overlayOpenRef.current) return
+      if (draggingIdRef.current) {
+        closeTimerRef.current = window.setTimeout(checkForClose, HOVER_CLOSE_DELAY)
+        return
+      }
+      const result = await window.electronAPI?.browser?.isVerticalRailOverlayPointerInside?.().catch(() => null)
+      if (!overlayOpenRef.current) return
+      if (result?.success && result.data) {
+        closeTimerRef.current = window.setTimeout(checkForClose, HOVER_CLOSE_DELAY)
+        return
+      }
+      if (!result?.success && (railHoveredRef.current || overlayHoveredRef.current)) {
+        closeTimerRef.current = window.setTimeout(checkForClose, HOVER_CLOSE_DELAY)
+        return
+      }
+      hideOverlay()
+    }
+    closeTimerRef.current = window.setTimeout(checkForClose, HOVER_CLOSE_DELAY)
   }, [hideOverlay])
-
-  const cancelClose = useCallback(() => {
-    if (closeTimerRef.current !== null) { window.clearTimeout(closeTimerRef.current); closeTimerRef.current = null }
-  }, [])
 
   const handleRailEnter = useCallback(() => {
     railHoveredRef.current = true
-    cancelClose()
-    if (overlayOpenRef.current) return
+    if (overlayOpenRef.current) { scheduleClose(); return }
     if (openTimerRef.current !== null) return
     openTimerRef.current = window.setTimeout(() => {
       openTimerRef.current = null
@@ -221,8 +233,9 @@ export default function VerticalTabRail({
       if (!snapshot) return
       overlayOpenRef.current = true
       void window.electronAPI?.browser?.showVerticalRailOverlay?.(snapshot)
+      scheduleClose()
     }, HOVER_OPEN_DELAY)
-  }, [buildSnapshot, cancelClose])
+  }, [buildSnapshot, scheduleClose])
 
   const handleRailLeave = useCallback(() => {
     railHoveredRef.current = false
@@ -239,7 +252,7 @@ export default function VerticalTabRail({
       switch (command.type) {
         case 'hover-enter':
           overlayHoveredRef.current = true
-          cancelClose()
+          scheduleClose()
           break
         case 'hover-leave':
           overlayHoveredRef.current = false
@@ -326,7 +339,7 @@ export default function VerticalTabRail({
       }
     })
     return off
-  }, [cancelClose, hideOverlay, pushSnapshot, scheduleClose])
+  }, [hideOverlay, pushSnapshot, scheduleClose])
 
   // Keep the overlay in sync with tab/group/active changes while it is open.
   useEffect(() => { pushSnapshot() }, [tabs, tabGroups, activeTabId, splitTabId, bookmarkedUrls, pushSnapshot])

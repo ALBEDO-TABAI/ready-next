@@ -63,6 +63,14 @@ export function setupBrowserVerticalRailOverlayIPC(options: VerticalRailOverlayI
     }
   })
 
+  ipcMain.handle('browser:verticalRailOverlayPointerInside', (): IPCResult<boolean> => {
+    try {
+      return { success: true, data: overlayWindow?.isPointerInsideInteractionRegion() ?? false }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+
   // Forward commands from the overlay renderer to the main window renderer.
   ipcMain.handle('browser:verticalRailOverlayCommand', (_, command: VerticalRailOverlayCommand): IPCResult => {
     try {

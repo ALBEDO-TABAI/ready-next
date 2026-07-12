@@ -39,6 +39,30 @@ export interface VerticalRailOverlaySnapshot {
   scrollTop: number
 }
 
+export interface VerticalRailOverlayScreenPoint {
+  x: number
+  y: number
+}
+
+export interface VerticalRailOverlayScreenRect extends VerticalRailOverlayScreenPoint {
+  width: number
+  height: number
+}
+
+export function isPointInsideVerticalRailOverlayRegion(
+  point: VerticalRailOverlayScreenPoint,
+  railBounds: VerticalRailOverlayScreenRect,
+  overlayBounds: VerticalRailOverlayScreenRect | null,
+): boolean {
+  const contains = (bounds: VerticalRailOverlayScreenRect): boolean => (
+    point.x >= bounds.x
+    && point.x < bounds.x + bounds.width
+    && point.y >= bounds.y
+    && point.y < bounds.y + bounds.height
+  )
+  return contains(railBounds) || Boolean(overlayBounds && contains(overlayBounds))
+}
+
 export type VerticalRailOverlayCommand =
   | { type: 'hover-enter' }
   | { type: 'hover-leave' }

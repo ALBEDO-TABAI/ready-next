@@ -204,10 +204,20 @@ export default function VerticalRailOverlayWindow() {
 
   const editingGroup = editing ? groupById.get(editing.id) : undefined
 
+  const markPointerInside = useCallback(() => {
+    if (pointerInsideRef.current) return
+    pointerInsideRef.current = true
+    send({ type: 'hover-enter' })
+  }, [])
+
   return (
     <div
       className="vertical-rail-overlay-root relative flex h-screen w-screen flex-col overflow-hidden"
-      onMouseEnter={() => { pointerInsideRef.current = true; send({ type: 'hover-enter' }) }}
+      onMouseEnter={markPointerInside}
+      // Chromium can miss the initial mouseenter when this child window becomes visible
+      // underneath a pointer that is already crossing from the rail. Mouse movement is a
+      // second, idempotent presence signal so the rail's close timer cannot win that race.
+      onMouseMove={markPointerInside}
       onMouseLeave={() => { pointerInsideRef.current = false; if (!draggingIdRef.current) send({ type: 'hover-leave' }) }}
       style={{
         paddingTop: VERTICAL_RAIL_FLYOUT_PAD_Y,

@@ -1,6 +1,9 @@
 import { BrowserWindow, screen } from 'electron'
 import { is } from '@electron-toolkit/utils'
-import type { VerticalRailOverlaySnapshot } from '../../../shared/browser-vertical-rail-overlay'
+import {
+  isPointInsideVerticalRailOverlayRegion,
+  type VerticalRailOverlaySnapshot,
+} from '../../../shared/browser-vertical-rail-overlay'
 import { VERTICAL_RAIL_FLYOUT_MIN_HEIGHT } from '../../../shared/vertical-rail-flyout-layout'
 
 interface VerticalRailOverlayWindowOptions {
@@ -56,6 +59,24 @@ export class VerticalRailOverlayWindow {
 
   getSnapshot(): VerticalRailOverlaySnapshot | null {
     return this.snapshot
+  }
+
+  isPointerInsideInteractionRegion(): boolean {
+    if (!this.snapshot) return false
+    const mainBounds = this.options.mainWindow.getContentBounds()
+    const rail = this.snapshot.bounds
+    const point = screen.getCursorScreenPoint()
+    const railBounds = {
+      x: mainBounds.x + Math.round(rail.left),
+      y: mainBounds.y + Math.round(rail.top),
+      width: Math.round(rail.width),
+      height: Math.round(rail.height),
+    }
+    return isPointInsideVerticalRailOverlayRegion(
+      point,
+      railBounds,
+      this.resolveBounds(this.snapshot),
+    )
   }
 
   destroy(): void {
@@ -143,6 +164,10 @@ export class VerticalRailOverlayWindow {
 
   private applyBounds(snapshot: VerticalRailOverlaySnapshot): void {
     if (!this.window || this.window.isDestroyed()) return
+    this.window.setBounds(this.resolveBounds(snapshot))
+  }
+
+  private resolveBounds(snapshot: VerticalRailOverlaySnapshot): Electron.Rectangle {
     const mainBounds = this.options.mainWindow.getContentBounds()
     const display = screen.getDisplayMatching(mainBounds)
     const width = OVERLAY_WIDTH
@@ -153,11 +178,11 @@ export class VerticalRailOverlayWindow {
     const y = mainBounds.y + Math.round(snapshot.bounds.top)
     const maxX = display.workArea.x + display.workArea.width - width
     const maxY = display.workArea.y + display.workArea.height - height
-    this.window.setBounds({
+    return {
       x: Math.max(display.workArea.x, Math.min(x, maxX)),
       y: Math.max(display.workArea.y, Math.min(y, maxY)),
       width,
       height,
-    })
+    }
   }
 }

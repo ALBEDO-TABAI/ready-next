@@ -1606,6 +1606,7 @@ interface ElectronBrowserAPI {
   showVerticalRailOverlay: (payload: VerticalRailOverlaySnapshot) => Promise<{ success: boolean; error?: string }>
   hideVerticalRailOverlay: () => Promise<{ success: boolean; error?: string }>
   getVerticalRailOverlaySnapshot: () => Promise<{ success: boolean; error?: string; data?: VerticalRailOverlaySnapshot | null }>
+  isVerticalRailOverlayPointerInside: () => Promise<{ success: boolean; error?: string; data?: boolean }>
   sendVerticalRailOverlayCommand: (command: VerticalRailOverlayCommand) => Promise<{ success: boolean; error?: string }>
   onVerticalRailOverlayCommand: (callback: (command: VerticalRailOverlayCommand) => void) => () => void
   onVerticalRailOverlaySnapshot: (callback: (snapshot: VerticalRailOverlaySnapshot) => void) => () => void
