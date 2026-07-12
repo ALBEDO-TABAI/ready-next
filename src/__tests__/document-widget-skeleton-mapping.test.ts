@@ -17,20 +17,29 @@ function requireRecord(value: unknown): Record<string, unknown> {
   return value as Record<string, unknown>
 }
 
-describe('document widget skeleton mapping (20 → 8)', () => {
-  it('maps info_card → single_focus preserving heading & body', () => {
+describe('document widget skeleton mapping (openui components → skeletons)', () => {
+  it('maps info_card → single_focus preserving structured facts instead of flattening them into a text wall', () => {
     const spec = requireSpec(
       mapComponentSpecToSkeletonSpec({
         component: 'info_card',
-        props: { heading: '今日重点', body: '同步版本说明。' },
+        props: {
+          heading: '今日重点',
+          body: '同步版本说明。',
+          facts: [{ label: '状态', value: '已完成' }],
+          points: ['准备发布'],
+        },
       }),
     )
     assert.equal(spec.skeleton, 'single_focus')
     const props = requireRecord(spec.props)
     assert.equal(props.title, '今日重点')
     assert.match(String(props.body), /同步版本说明。/)
+    assert.deepEqual(props.facts, [{ label: '状态', value: '已完成' }])
+    assert.deepEqual(props.points, ['准备发布'])
     const compiled = compileWidgetSkeletonSpec(spec)
     assert.match(compiled.widgetCode, /今日重点/)
+    assert.match(compiled.widgetCode, /data-info-facts/)
+    assert.match(compiled.widgetCode, /状态/)
   })
 
   it('maps stats_card → metric_grid with metrics preserved', () => {
@@ -236,7 +245,7 @@ describe('document widget skeleton mapping (20 → 8)', () => {
     compileWidgetSkeletonSpec(spec)
   })
 
-  it('maps flow_diagram → vertical_timeline (linear)', () => {
+  it('maps flow_diagram → process_flow (graph structure preserved)', () => {
     const spec = requireSpec(
       mapComponentSpecToSkeletonSpec({
         component: 'flow_diagram',
@@ -251,12 +260,66 @@ describe('document widget skeleton mapping (20 → 8)', () => {
         },
       }),
     )
-    assert.equal(spec.skeleton, 'vertical_timeline')
+    assert.equal(spec.skeleton, 'process_flow')
     const props = requireRecord(spec.props)
-    const events = props.events as Array<Record<string, unknown>>
-    assert.equal(events.length, 3)
-    assert.equal(events[0].heading, '开始')
+    const steps = props.steps as Array<Record<string, unknown>>
+    assert.equal(steps.length, 3)
+    assert.equal(steps[0].label, '开始')
     compileWidgetSkeletonSpec(spec)
+  })
+
+  it('maps flow_diagram branches (out-degree >= 2) into decision steps', () => {
+    const spec = requireSpec(
+      mapComponentSpecToSkeletonSpec({
+        component: 'flow_diagram',
+        props: {
+          heading: '评审流程',
+          nodes: [
+            { id: 'n1', label: '提交' },
+            { id: 'n2', label: '通过' },
+            { id: 'n3', label: '驳回' },
+          ],
+          edges: [
+            { from: 'n1', to: 'n2', label: '质检 OK' },
+            { from: 'n1', to: 'n3', label: '质检失败' },
+          ],
+        },
+      }),
+    )
+    assert.equal(spec.skeleton, 'process_flow')
+    const props = requireRecord(spec.props)
+    const steps = props.steps as Array<Record<string, unknown>>
+    assert.equal(steps[0].kind, 'decision')
+    const branches = steps[0].branches as Array<Record<string, unknown>>
+    assert.equal(branches.length, 2)
+    assert.equal(branches[0].label, '通过')
+    assert.equal(branches[0].detail, '质检 OK')
+    compileWidgetSkeletonSpec(spec)
+  })
+
+  it('maps relationship_graph → relation_map (nodes/edges passthrough)', () => {
+    const spec = requireSpec(
+      mapComponentSpecToSkeletonSpec({
+        component: 'relationship_graph',
+        props: {
+          heading: '人物关系',
+          groups: [{ id: 'zhou', label: '周家', position: 'left' }],
+          nodes: [
+            { id: 'a', label: '周朴园', group: 'zhou' },
+            { id: 'b', label: '鲁侍萍' },
+          ],
+          edges: [{ from: 'a', to: 'b', kind: 'emotion', label: '旧情' }],
+        },
+      }),
+    )
+    assert.equal(spec.skeleton, 'relation_map')
+    const props = requireRecord(spec.props)
+    assert.equal((props.nodes as unknown[]).length, 2)
+    assert.equal((props.edges as unknown[]).length, 1)
+    assert.equal(props.heading, '人物关系')
+    const compiled = compileWidgetSkeletonSpec(spec)
+    assert.match(compiled.widgetCode, /周朴园/)
+    assert.match(compiled.widgetCode, /data-rg-node/)
   })
 
   it('maps day_schedule_card → vertical_timeline', () => {

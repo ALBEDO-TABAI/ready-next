@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Loader2, X } from 'lucide-react'
 import {
   compileWidgetSkeletonSpec,
   getWidgetSkeleton,
-  RAMP_IDS,
   type WidgetBackgroundMode,
   type WidgetRampId,
   type WidgetSize,
@@ -19,12 +19,23 @@ import { getFieldMap, type FieldDescriptor } from './widget-edit-drawer-field-ma
 
 const BASE64_SOFT_LIMIT_BYTES = 5 * 1024 * 1024
 
+const WIDGET_SIZE_LABELS: Record<WidgetSize, string> = {
+  square_card: '方形卡片',
+  portrait_card: '竖向卡片',
+  story_card: '故事长卡',
+  landscape_card: '横向卡片',
+  landscape_4_3: '横向 4:3',
+  a4_portrait: 'A4 竖版',
+  doc_block: '随文宽度',
+}
+
 export interface WidgetEditDrawerSave {
   skeletonSpec: DocumentWidgetSkeletonSpecSummary
   widgetCode: string
 }
 
 export interface WidgetEditDrawerInput {
+  id?: string
   title: string
   widgetCode: string
   skeletonSpec?: DocumentWidgetSkeletonSpecSummary | null
@@ -114,14 +125,19 @@ export default function WidgetEditDrawer({ open, input, onClose, onSave }: Widge
   const [busy, setBusy] = useState(false)
   const [sizeWarning, setSizeWarning] = useState<string | null>(null)
   const panelRef = useRef<HTMLDivElement | null>(null)
+  const inputRef = useRef(input)
+  inputRef.current = input
+  const inputKey = input
+    ? input.id || `${input.title}\u0000${input.widgetCode}`
+    : null
 
   useEffect(() => {
     if (!open) return
-    const initial = deriveInitialSpec(input)
+    const initial = deriveInitialSpec(inputRef.current)
     setSpec(initial)
     setError(initial ? null : '当前 widget 缺少骨架信息，无法轻量编辑；请在 Agent 里再次生成或引用修改。')
     setSizeWarning(null)
-  }, [open, input])
+  }, [inputKey, open])
 
   const skeleton = useMemo(() => (spec ? getWidgetSkeleton(spec.skeleton) : null), [spec])
   const fieldMap = useMemo(() => (spec ? getFieldMap(spec.skeleton) : null), [spec])
@@ -183,7 +199,11 @@ export default function WidgetEditDrawer({ open, input, onClose, onSave }: Widge
 
   const props = (spec?.props as Record<string, unknown> | undefined) ?? {}
 
-  return (
+  // W10e（2026-07-12 dogfood）：抽屉此前挂在编辑器子树内，祖先一旦携带
+  // transform/filter/contain 就会劫持 position:fixed 的包含块并困住堆叠上下文，
+  // 预览态下面板可见但点击被相邻层吞掉。portal 到 body 让遮罩/面板真正以
+  // 视口为基准置顶，整类陷阱一次消除。
+  return createPortal(
     <div
       className="ready-widget-edit-drawer-backdrop"
       onClick={(event) => {
@@ -196,7 +216,7 @@ export default function WidgetEditDrawer({ open, input, onClose, onSave }: Widge
             <div className="ready-widget-edit-drawer-title">{skeleton?.displayName ?? '编辑 widget'}</div>
             <div className="ready-widget-edit-drawer-subtitle">{input?.title ?? ''}</div>
           </div>
-          <button type="button" className="ready-widget-edit-drawer-close" onClick={onClose}>
+          <button type="button" className="ready-widget-edit-drawer-close" onClick={onClose} aria-label="关闭信息卡编辑">
             <X size={16} />
           </button>
         </div>
@@ -209,11 +229,12 @@ export default function WidgetEditDrawer({ open, input, onClose, onSave }: Widge
               <div className="ready-widget-edit-drawer-section">
                 <div className="ready-widget-edit-drawer-label">尺寸</div>
                 <select
+                  aria-label="尺寸"
                   value={spec.size ?? skeleton.defaultSize}
                   onChange={(event) => updateSize(event.target.value as WidgetSize)}
                 >
                   {skeleton.allowedSizes.map((sizeId) => (
-                    <option key={sizeId} value={sizeId}>{sizeId}</option>
+                    <option key={sizeId} value={sizeId}>{WIDGET_SIZE_LABELS[sizeId]}</option>
                   ))}
                 </select>
               </div>
@@ -222,11 +243,13 @@ export default function WidgetEditDrawer({ open, input, onClose, onSave }: Widge
                 <div className="ready-widget-edit-drawer-segmented">
                   <button
                     type="button"
+                    aria-pressed={(spec.background_mode ?? skeleton.defaultBackgroundMode) === 'opaque'}
                     className={(spec.background_mode ?? skeleton.defaultBackgroundMode) === 'opaque' ? 'is-active' : ''}
                     onClick={() => updateBackground('opaque')}
                   >不透明</button>
                   <button
                     type="button"
+                    aria-pressed={(spec.background_mode ?? skeleton.defaultBackgroundMode) === 'transparent'}
                     className={(spec.background_mode ?? skeleton.defaultBackgroundMode) === 'transparent' ? 'is-active' : ''}
                     onClick={() => updateBackground('transparent')}
                   >透明</button>
@@ -268,7 +291,8 @@ export default function WidgetEditDrawer({ open, input, onClose, onSave }: Widge
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }
 
@@ -286,6 +310,7 @@ function FieldInput({ field, value, onChange }: FieldInputProps) {
           <div className="ready-widget-edit-drawer-label">{field.label}</div>
           <input
             type="text"
+            aria-label={field.label}
             value={typeof value === 'string' ? value : ''}
             placeholder={field.placeholder}
             onChange={(event) => onChange(event.target.value)}
@@ -297,6 +322,7 @@ function FieldInput({ field, value, onChange }: FieldInputProps) {
         <div className="ready-widget-edit-drawer-section">
           <div className="ready-widget-edit-drawer-label">{field.label}</div>
           <textarea
+            aria-label={field.label}
             rows={field.rows ?? 4}
             value={typeof value === 'string' ? value : ''}
             placeholder={field.placeholder}
@@ -309,6 +335,7 @@ function FieldInput({ field, value, onChange }: FieldInputProps) {
         <div className="ready-widget-edit-drawer-section">
           <div className="ready-widget-edit-drawer-label">{field.label}</div>
           <select
+            aria-label={field.label}
             value={typeof value === 'string' ? value : typeof value === 'number' ? String(value) : field.options[0]?.value ?? ''}
             onChange={(event) => {
               const raw = event.target.value
@@ -324,8 +351,12 @@ function FieldInput({ field, value, onChange }: FieldInputProps) {
       )
     case 'ramp':
       return <RampPicker label={field.label} value={typeof value === 'string' ? (value as WidgetRampId) : 'indigo'} onChange={onChange} />
+    case 'key-value-list':
+      return <KeyValueListEditor label={field.label} value={Array.isArray(value) ? value : []} onChange={onChange} />
     case 'metrics-list':
       return <MetricsListEditor label={field.label} value={Array.isArray(value) ? value : []} onChange={onChange} />
+    case 'text-list':
+      return <TextListEditor label={field.label} addLabel={field.addLabel} value={Array.isArray(value) ? value : []} onChange={onChange} />
     case 'events-list':
       return <EventsListEditor label={field.label} value={Array.isArray(value) ? value : []} onChange={onChange} />
     case 'grid-items-list':
@@ -340,21 +371,100 @@ function FieldInput({ field, value, onChange }: FieldInputProps) {
 }
 
 function RampPicker({ label, value, onChange }: { label: string; value: WidgetRampId; onChange: (next: WidgetRampId) => void }) {
+  const choices: Array<{ value: WidgetRampId; label: string; description: string }> = [
+    { value: 'indigo', label: '默认', description: '克制灰阶' },
+    { value: 'amber', label: '强调', description: '橘红提示' },
+    { value: 'emerald', label: '完成', description: '绿色状态' },
+  ]
+  const activeValue = value === 'emerald'
+    ? 'emerald'
+    : value === 'amber' || value === 'rose'
+      ? 'amber'
+      : 'indigo'
   return (
     <div className="ready-widget-edit-drawer-section">
       <div className="ready-widget-edit-drawer-label">{label}</div>
       <div className="ready-widget-edit-drawer-ramp">
-        {RAMP_IDS.map((rampId) => (
+        {choices.map((choice) => (
           <button
-            key={rampId}
+            key={choice.value}
             type="button"
-            className={`ready-widget-edit-drawer-ramp-chip ramp-${rampId} ${value === rampId ? 'is-active' : ''}`}
-            onClick={() => onChange(rampId)}
-            title={rampId}
+            className={`ready-widget-edit-drawer-ramp-chip ramp-${choice.value} ${activeValue === choice.value ? 'is-active' : ''}`}
+            onClick={() => onChange(choice.value)}
+            aria-pressed={activeValue === choice.value}
           >
-            <span>{rampId}</span>
+            <span className="ready-widget-edit-drawer-ramp-dot" />
+            <span><strong>{choice.label}</strong><small>{choice.description}</small></span>
           </button>
         ))}
+      </div>
+    </div>
+  )
+}
+
+function KeyValueListEditor({ label, value, onChange }: { label: string; value: unknown[]; onChange: (next: unknown[]) => void }) {
+  const items = value as Array<Record<string, unknown>>
+  const update = (index: number, patch: Record<string, unknown>) => {
+    const next = items.slice()
+    next[index] = { ...(items[index] || {}), ...patch }
+    onChange(next)
+  }
+  const remove = (index: number) => onChange(items.filter((_, itemIndex) => itemIndex !== index))
+  const add = () => onChange([...items, { label: '新条目', value: '补充内容' }])
+  return (
+    <div className="ready-widget-edit-drawer-section">
+      <div className="ready-widget-edit-drawer-label">{label}</div>
+      <div className="ready-widget-edit-drawer-list">
+        {items.map((item, index) => (
+          <div key={index} className="ready-widget-edit-drawer-row ready-widget-edit-drawer-row-pair">
+            <input
+              type="text"
+              aria-label={`${label} ${index + 1} 标签`}
+              placeholder="标签"
+              value={typeof item.label === 'string' ? item.label : ''}
+              onChange={(event) => update(index, { label: event.target.value })}
+            />
+            <input
+              type="text"
+              aria-label={`${label} ${index + 1} 内容`}
+              placeholder="内容"
+              value={typeof item.value === 'string' ? item.value : typeof item.value === 'number' ? String(item.value) : ''}
+              onChange={(event) => update(index, { value: event.target.value })}
+            />
+            <button type="button" aria-label={`删除${label}第 ${index + 1} 项`} onClick={() => remove(index)}><X size={14} /></button>
+          </div>
+        ))}
+        <button type="button" className="ready-widget-edit-drawer-add" onClick={add}>+ 添加条目</button>
+      </div>
+    </div>
+  )
+}
+
+function TextListEditor({ label, addLabel, value, onChange }: { label: string; addLabel?: string; value: unknown[]; onChange: (next: unknown[]) => void }) {
+  const items = value.map((item) => (typeof item === 'string' ? item : ''))
+  const update = (index: number, nextValue: string) => {
+    const next = items.slice()
+    next[index] = nextValue
+    onChange(next)
+  }
+  const remove = (index: number) => onChange(items.filter((_, itemIndex) => itemIndex !== index))
+  const add = () => onChange([...items, '补充内容'])
+  return (
+    <div className="ready-widget-edit-drawer-section">
+      <div className="ready-widget-edit-drawer-label">{label}</div>
+      <div className="ready-widget-edit-drawer-list">
+        {items.map((item, index) => (
+          <div key={index} className="ready-widget-edit-drawer-row ready-widget-edit-drawer-row-single">
+            <input
+              type="text"
+              aria-label={`${label} ${index + 1}`}
+              value={item}
+              onChange={(event) => update(index, event.target.value)}
+            />
+            <button type="button" aria-label={`删除${label}第 ${index + 1} 项`} onClick={() => remove(index)}><X size={14} /></button>
+          </div>
+        ))}
+        <button type="button" className="ready-widget-edit-drawer-add" onClick={add}>+ {addLabel || `添加${label}`}</button>
       </div>
     </div>
   )
@@ -377,23 +487,26 @@ function MetricsListEditor({ label, value, onChange }: { label: string; value: u
           <div key={index} className="ready-widget-edit-drawer-row">
             <input
               type="text"
+              aria-label={`${label} ${index + 1} 标签`}
               placeholder="标签"
               value={typeof item.label === 'string' ? item.label : ''}
               onChange={(event) => update(index, { label: event.target.value })}
             />
             <input
               type="text"
+              aria-label={`${label} ${index + 1} 数值`}
               placeholder="数值"
               value={typeof item.value === 'string' ? item.value : typeof item.value === 'number' ? String(item.value) : ''}
               onChange={(event) => update(index, { value: event.target.value })}
             />
             <input
               type="text"
+              aria-label={`${label} ${index + 1} 差值`}
               placeholder="差值（可选）"
               value={typeof item.delta === 'string' ? item.delta : ''}
               onChange={(event) => update(index, { delta: event.target.value || undefined })}
             />
-            <button type="button" onClick={() => remove(index)}>✕</button>
+            <button type="button" aria-label={`删除${label}第 ${index + 1} 项`} onClick={() => remove(index)}><X size={14} /></button>
           </div>
         ))}
         <button type="button" className="ready-widget-edit-drawer-add" onClick={add}>+ 添加指标</button>
@@ -410,7 +523,7 @@ function EventsListEditor({ label, value, onChange }: { label: string; value: un
     onChange(next)
   }
   const remove = (index: number) => onChange(items.filter((_, i) => i !== index))
-  const add = () => onChange([...items, { time: '', title: '新事件', status: 'pending' }])
+  const add = () => onChange([...items, { time: '', heading: '新事件', status: 'pending' }])
   return (
     <div className="ready-widget-edit-drawer-section">
       <div className="ready-widget-edit-drawer-label">{label}</div>
@@ -419,17 +532,20 @@ function EventsListEditor({ label, value, onChange }: { label: string; value: un
           <div key={index} className="ready-widget-edit-drawer-row ready-widget-edit-drawer-row-wide">
             <input
               type="text"
+              aria-label={`${label} ${index + 1} 时间`}
               placeholder="时间"
               value={typeof item.time === 'string' ? item.time : ''}
               onChange={(event) => update(index, { time: event.target.value })}
             />
             <input
               type="text"
+              aria-label={`${label} ${index + 1} 标题`}
               placeholder="标题"
-              value={typeof item.title === 'string' ? item.title : ''}
-              onChange={(event) => update(index, { title: event.target.value })}
+              value={typeof item.heading === 'string' ? item.heading : ''}
+              onChange={(event) => update(index, { heading: event.target.value })}
             />
             <select
+              aria-label={`${label} ${index + 1} 状态`}
               value={typeof item.status === 'string' ? item.status : 'pending'}
               onChange={(event) => update(index, { status: event.target.value })}
             >
@@ -438,7 +554,7 @@ function EventsListEditor({ label, value, onChange }: { label: string; value: un
               <option value="pending">待开始</option>
               <option value="blocked">受阻</option>
             </select>
-            <button type="button" onClick={() => remove(index)}>✕</button>
+            <button type="button" aria-label={`删除${label}第 ${index + 1} 项`} onClick={() => remove(index)}><X size={14} /></button>
           </div>
         ))}
         <button type="button" className="ready-widget-edit-drawer-add" onClick={add}>+ 添加事件</button>
@@ -461,26 +577,23 @@ function GridItemsListEditor({ label, value, onChange }: { label: string; value:
       <div className="ready-widget-edit-drawer-label">{label}</div>
       <div className="ready-widget-edit-drawer-list">
         {items.map((item, index) => (
-          <div key={index} className="ready-widget-edit-drawer-row ready-widget-edit-drawer-row-wide">
+          <div key={index} className="ready-widget-edit-drawer-row ready-widget-edit-drawer-row-grid">
             <input
               type="text"
+              aria-label={`${label} ${index + 1} 标签`}
               placeholder="标签"
               value={typeof item.label === 'string' ? item.label : ''}
               onChange={(event) => update(index, { label: event.target.value })}
             />
             <input
               type="text"
-              placeholder="Emoji"
-              value={typeof item.emoji === 'string' ? item.emoji : ''}
-              onChange={(event) => update(index, { emoji: event.target.value || undefined })}
-            />
-            <input
-              type="text"
+              aria-label={`${label} ${index + 1} 图片`}
               placeholder="图片 URL（可选）"
               value={typeof item.image === 'string' ? item.image : ''}
               onChange={(event) => update(index, { image: event.target.value || undefined })}
             />
             <select
+              aria-label={`${label} ${index + 1} 状态`}
               value={typeof item.status === 'string' ? item.status : 'pending'}
               onChange={(event) => update(index, { status: event.target.value })}
             >
@@ -489,7 +602,7 @@ function GridItemsListEditor({ label, value, onChange }: { label: string; value:
               <option value="pending">待办</option>
               <option value="highlight">高亮</option>
             </select>
-            <button type="button" onClick={() => remove(index)}>✕</button>
+            <button type="button" aria-label={`删除${label}第 ${index + 1} 项`} onClick={() => remove(index)}><X size={14} /></button>
           </div>
         ))}
         <button type="button" className="ready-widget-edit-drawer-add" onClick={add}>+ 添加网格项</button>
@@ -512,13 +625,14 @@ function TagsListEditor({ label, value, onChange }: { label: string; value: unkn
       <div className="ready-widget-edit-drawer-label">{label}</div>
       <div className="ready-widget-edit-drawer-list">
         {items.map((tag, index) => (
-          <div key={index} className="ready-widget-edit-drawer-row">
+          <div key={index} className="ready-widget-edit-drawer-row ready-widget-edit-drawer-row-single">
             <input
               type="text"
+              aria-label={`${label} ${index + 1}`}
               value={tag}
               onChange={(event) => update(index, event.target.value)}
             />
-            <button type="button" onClick={() => remove(index)}>✕</button>
+            <button type="button" aria-label={`删除${label}第 ${index + 1} 项`} onClick={() => remove(index)}><X size={14} /></button>
           </div>
         ))}
         <button type="button" className="ready-widget-edit-drawer-add" onClick={add}>+ 添加标签</button>
@@ -528,9 +642,9 @@ function TagsListEditor({ label, value, onChange }: { label: string; value: unkn
 }
 
 function HeroImageEditor({ label, value, onChange }: { label: string; value: Record<string, unknown>; onChange: (next: Record<string, unknown>) => void }) {
-  const type = typeof value.type === 'string' ? value.type : 'image'
+  const storedType = typeof value.type === 'string' ? value.type : 'image'
+  const type = storedType === 'svg_illustration' ? 'svg_illustration' : 'image'
   const src = typeof value.src === 'string' ? value.src : ''
-  const emoji = typeof value.emoji === 'string' ? value.emoji : ''
   const aspect = typeof value.aspect === 'string' ? value.aspect : '4/3'
 
   const handleFile = useCallback(async (file: File | null) => {
@@ -547,14 +661,15 @@ function HeroImageEditor({ label, value, onChange }: { label: string; value: Rec
     <div className="ready-widget-edit-drawer-section">
       <div className="ready-widget-edit-drawer-label">{label}</div>
       <div className="ready-widget-edit-drawer-segmented">
-        {(['image', 'emoji_block', 'svg_illustration'] as const).map((mode) => (
+        {(['image', 'svg_illustration'] as const).map((mode) => (
           <button
             key={mode}
             type="button"
             className={type === mode ? 'is-active' : ''}
             onClick={() => onChange({ ...value, type: mode })}
+            aria-pressed={type === mode}
           >
-            {mode === 'image' ? '图片' : mode === 'emoji_block' ? 'Emoji' : 'SVG'}
+            {mode === 'image' ? '图片' : 'SVG'}
           </button>
         ))}
       </div>
@@ -562,27 +677,22 @@ function HeroImageEditor({ label, value, onChange }: { label: string; value: Rec
         <>
           <input
             type="text"
+            aria-label={`${label} 图片 URL`}
             placeholder="图片 URL（推荐，避免内联体积过大）"
             value={src}
-            onChange={(event) => onChange({ ...value, src: event.target.value })}
+            onChange={(event) => onChange({ ...value, type: 'image', src: event.target.value })}
           />
           <input
             type="file"
+            aria-label={`${label} 本地图片`}
             accept="image/*"
             onChange={(event) => handleFile(event.target.files?.[0] ?? null)}
           />
         </>
       ) : null}
-      {type === 'emoji_block' ? (
-        <input
-          type="text"
-          placeholder="Emoji（如 📘）"
-          value={emoji}
-          onChange={(event) => onChange({ ...value, emoji: event.target.value })}
-        />
-      ) : null}
       {type === 'svg_illustration' ? (
         <textarea
+          aria-label={`${label} SVG 源码`}
           rows={5}
           placeholder="<svg ...> ... </svg>"
           value={typeof value.svg === 'string' ? value.svg : ''}
@@ -591,9 +701,10 @@ function HeroImageEditor({ label, value, onChange }: { label: string; value: Rec
       ) : null}
       <input
         type="text"
+        aria-label={`${label} 宽高比`}
         placeholder="宽高比（如 4/3、16/9）"
         value={aspect}
-        onChange={(event) => onChange({ ...value, aspect: event.target.value })}
+        onChange={(event) => onChange({ ...value, type, aspect: event.target.value })}
       />
     </div>
   )

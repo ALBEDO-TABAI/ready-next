@@ -286,7 +286,7 @@ const TiptapEditor = forwardRef<TiptapEditorRef, TiptapEditorProps>(
       }
       const nextFence = buildWidgetFenceSource(context.title, result.widgetCode, {
         id: context.widget.id,
-        componentSpec: context.widget.componentSpec,
+        componentSpec: null,
         skeletonSpec: result.skeletonSpec,
         widgetState: context.widget.widgetState,
       }).replace(/^```show-widget\s*\n?|\n?\s*```$/g, '')
@@ -315,6 +315,7 @@ const TiptapEditor = forwardRef<TiptapEditorRef, TiptapEditorProps>(
     const editDrawerInput = useMemo<WidgetEditDrawerInput | null>(() => {
       if (!editDrawerContext) return null
       return {
+        id: editDrawerContext.widget.id,
         title: editDrawerContext.title,
         widgetCode: editDrawerContext.widget.widgetCode,
         skeletonSpec: editDrawerContext.widget.skeletonSpec,

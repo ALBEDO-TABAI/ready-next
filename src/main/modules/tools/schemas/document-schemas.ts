@@ -51,7 +51,7 @@ export const DocumentInsertWidgetSchema = z.object({
     .record(z.string(), z.unknown())
     .optional()
     .describe('可选：结构化 OpenUI 组件规格，例如 { component, props?, dataSource? }。优先使用它而不是自由 HTML。'),
-  position: z.string().describe('插入位置：append_end 或 after_section'),
+  position: z.string().describe('插入位置：prepend_start（文档开头/大标题之后，用户要求"开头/顶部/标题下"时用它）、append_end（文末）或 after_section（指定章节后）'),
   sectionTitle: z.string().optional().describe('当 position=after_section 时，目标章节标题'),
   tabId: z.string().optional().describe('可选，目标标签 ID'),
 })

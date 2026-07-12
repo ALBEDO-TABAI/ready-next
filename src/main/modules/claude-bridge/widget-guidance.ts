@@ -52,7 +52,7 @@ function inferWidgetFamily(userText: string): DocumentWidgetFamily {
   if (/(本周|下周|周报|周计划|weekly|week)/i.test(userText)) return 'weekly_focus_chart'
   if (/(周计划板|计划板|kanban|board)/i.test(userText)) return 'weekly_plan_board_manual'
   if (/(评分|打分|计算器|预算|估算|score|calculator|estimate|budget)/i.test(userText)) return 'mini_calculator'
-  if (/(流程|步骤|架构图|flow|diagram|pipeline)/i.test(userText)) return 'flow_diagram'
+  if (/(流程|步骤|架构图|说明图|流程图|科普图|flow|diagram|pipeline)/i.test(userText)) return 'flow_diagram'
   if (/(科研绘图|研究结果|实验结果|investment trend|投资趋向|数据动态|动态变化|走势分析)/i.test(userText)) return 'line_chart'
   if (/(趋势|折线|line chart|time series|走势)/i.test(userText)) return 'line_chart'
   if (/(柱状|条形|分类对比|bar chart|compare|comparison)/i.test(userText)) return 'bar_chart'
@@ -84,8 +84,9 @@ function buildFamilyGuidance(family: DocumentWidgetFamily): {
         titleHint: 'info_card',
         implementationHint: 'HTML + CSS',
         guidanceBullets: [
+          '必须经 document_insert_widget 以 componentSpec 落地，不要把 markdown 表格写进正文冒充信息卡。',
+          '"一眼看懂 / 快速读懂 / 速览"类信息卡：结构化条目必须放 facts（[{label,value}] 键值行），body 只放一句话结论（≤80 字）；禁止把多组"标签：内容"塞进 body 长段落。',
           '适合摘要、推荐、重点说明，不要再扩成多列面板。',
-          '正文要短，优先一句结论加少量补充点。',
         ],
       }
     case 'callout_block':
@@ -151,12 +152,13 @@ function buildFamilyGuidance(family: DocumentWidgetFamily): {
       }
     case 'flow_diagram':
       return {
-        interactionHint: '静态图解或少量节点点击',
+        interactionHint: '结构化流程 / 科普步骤说明图',
         titleHint: 'note_flow_diagram',
-        implementationHint: 'SVG',
+        implementationHint: 'HTML + CSS（结构化步骤渲染）',
         guidanceBullets: [
-          '优先单个 SVG，保证结构完整，不要只输出背景壳。',
-          '节点和连线密度适中，优先清晰层级而不是装饰。',
+          '只给 nodes 与 edges 结构，编号、导轨与分支排版由组件渲染；不要手写 SVG 坐标。',
+          '出度 ≥2 的节点会自动展开为分支 chips；边上的说明写进 edges[].label。',
+          '节点控制在 2-8 个，每个节点 label 保持短语级长度。',
         ],
       }
     case 'relationship_graph':
@@ -172,22 +174,22 @@ function buildFamilyGuidance(family: DocumentWidgetFamily): {
       }
     case 'bar_chart':
       return {
-        interactionHint: '分类对比，可选轻量切换',
+        interactionHint: '分类对比',
         titleHint: 'category_bar_chart',
-        implementationHint: 'Chart.js 或 SVG',
+        implementationHint: 'Ready 点阵图表（代码渲染，单色 + 真值直标）',
         guidanceBullets: [
           '分类控制在 4-6 个以内，避免标签拥挤。',
-          '如果有切换按钮，保持一组简单状态切换，不做复杂联动。',
+          '只给 series 数据与 yLabel 单位，配色与直标由渲染器负责。',
         ],
       }
     case 'line_chart':
       return {
         interactionHint: '趋势追踪',
         titleHint: 'trend_line_chart',
-        implementationHint: 'Chart.js 或 SVG polyline',
+        implementationHint: 'Ready 点阵折线（代码渲染）',
         guidanceBullets: [
           '强调趋势和关键拐点，不要塞太多序列。',
-          '适合科研绘图、投资趋向、数据动态这类高频需求。',
+          '适合科研绘图、投资趋向、数据动态这类高频需求；结论写进 annotation。',
         ],
       }
     case 'tab_info_block':
@@ -204,7 +206,7 @@ function buildFamilyGuidance(family: DocumentWidgetFamily): {
       return {
         interactionHint: '静态指标概览',
         titleHint: 'stats_card',
-        implementationHint: 'SVG',
+        implementationHint: 'HTML + CSS（mono 数字指标格）',
         guidanceBullets: [
           '只放 3-4 个核心指标，横向均分。',
         ],
@@ -362,11 +364,13 @@ export function inferWidgetSkeletonId(userText: string): WidgetSkeletonId | null
 
 export function buildDocumentWidgetSkeletonRulesSnippet(): string {
   const lines: string[] = []
-  lines.push('## Widget 骨架规则 (v0.1)')
-  lines.push('- 优先使用 9 个骨架之一；自由构图（freeform_static/freeform_interactive）仅在用户消息命中触发关键词时使用。')
+  lines.push('## Widget 骨架规则 (v0.2)')
+  lines.push(`- 优先使用 ${WIDGET_SKELETON_IDS.length} 个骨架之一；自由构图（freeform_static/freeform_interactive）仅在用户消息命中触发关键词时使用。`)
   lines.push(`- 支持尺寸：${WIDGET_SIZE_IDS.join(' / ')}。A4 仅用于打印/导出 PDF；landscape_4_3 用于横版报表。`)
   lines.push('- background_mode 是跨骨架维度：opaque 默认带外框，transparent 去掉外框方便无痕嵌入文档。')
   lines.push('- freeform_interactive 必须声明 supports_animation=true，其他骨架不允许带动画脚本。')
+  lines.push('- 视觉风格由代码骨架与 Ready 设计令牌保证（单一品牌橘红强调、点阵图表、mono 标签，不出现饼图/彩虹配色）；只需给结构化内容，不要内联配色或手写坐标。')
+  lines.push('- 信息卡/图表/图谱类内容一律经 document_insert_widget 以 componentSpec 落地；把 markdown 表格或手写 HTML 写进正文不算信息卡，禁止用文本替换类工具冒充。')
   lines.push('')
   lines.push('### 骨架清单')
   for (const id of WIDGET_SKELETON_IDS) {

@@ -849,11 +849,11 @@ function normalizePotentialWidgetPayloadContent(content: string): string {
   return content
 }
 
-function insertWidgetIntoDocument(
+export function insertWidgetIntoDocument(
   source: string,
   title: string,
   widgetCode: string,
-  position: 'append_end' | 'after_section',
+  position: 'append_end' | 'after_section' | 'prepend_start',
   sectionTitle?: string,
   componentSpec?: DocumentWidgetComponentSpecSummary,
 ): { content: string; inserted: boolean; updatedExisting?: boolean; matchedTitle?: string; error?: string; removedDuplicates?: number } {
@@ -873,6 +873,23 @@ function insertWidgetIntoDocument(
     const prefix = normalizedSource.trim().length > 0 ? `${normalizedSource.trimEnd()}\n\n` : ''
     return {
       content: `${prefix}${fence}\n`,
+      inserted: true,
+    }
+  }
+
+  if (position === 'prepend_start') {
+    const lines = normalizedSource.split('\n')
+    if (/^#\s/.test(lines[0] || '')) {
+      const rest = lines.slice(1)
+      while (rest.length > 0 && rest[0].trim() === '') rest.shift()
+      return {
+        content: `${lines[0]}\n\n${fence}\n\n${rest.join('\n')}`,
+        inserted: true,
+      }
+    }
+    const body = normalizedSource.replace(/^\n+/, '')
+    return {
+      content: body.trim().length > 0 ? `${fence}\n\n${body}` : `${fence}\n`,
       inserted: true,
     }
   }
@@ -1237,7 +1254,11 @@ export async function performDocAction(action: DocActionPayload): Promise<string
   if (type === 'insert_widget') {
     const title = typeof action.title === 'string' ? action.title.trim() : ''
     const widgetCode = typeof action.widgetCode === 'string' ? action.widgetCode : ''
-    const position = action.position === 'after_section' ? 'after_section' : 'append_end'
+    const rawPosition = typeof action.position === 'string' ? action.position.trim() : 'append_end'
+    if (rawPosition !== 'append_end' && rawPosition !== 'after_section' && rawPosition !== 'prepend_start') {
+      return `未知插入位置"${rawPosition}"：支持 prepend_start（文档开头/大标题之后）、append_end（文末）、after_section（指定章节后）。`
+    }
+    const position = rawPosition
     const sectionTitle = typeof action.sectionTitle === 'string' ? action.sectionTitle.trim() : ''
     if (!title) return 'insert_widget 缺少 title'
     const ambiguousTargetRejection = rejectAmbiguousVisibleDocumentMutation(action)
@@ -1271,7 +1292,9 @@ export async function performDocAction(action: DocActionPayload): Promise<string
     }
     return position === 'after_section'
       ? `已在章节“${inserted.matchedTitle || sectionTitle}”后插入 widget（${tab.title}）`
-      : `已在文档尾部插入 widget（${tab.title}）`
+      : position === 'prepend_start'
+        ? `已在文档开头插入 widget（${tab.title}）`
+        : `已在文档尾部插入 widget（${tab.title}）`
   }
 
   if (type === 'list_widgets') {

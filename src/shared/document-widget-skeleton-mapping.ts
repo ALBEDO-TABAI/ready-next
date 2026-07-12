@@ -1,5 +1,6 @@
 import type { DocumentWidgetComponentSpecSummary } from './document-widget-parse'
 import type { WidgetSkeletonSpec, WidgetSkeletonId, WidgetBackgroundMode } from './document-widget-skeletons'
+import { resolveInfoCardKicker, resolveInfoCardRamp } from './document-widget-info-card'
 
 type Record_ = Record<string, unknown>
 
@@ -75,7 +76,9 @@ export function mapComponentSpecToSkeletonSpec(
     case 'mini_calculator':
       return wrap('freeform_interactive', mapMiniCalculator(props), backgroundMode)
     case 'flow_diagram':
-      return wrap('vertical_timeline', mapFlowDiagram(props), backgroundMode)
+      return wrap('process_flow', mapFlowDiagram(props), backgroundMode)
+    case 'relationship_graph':
+      return wrap('relation_map', mapRelationshipGraph(props), backgroundMode)
     case 'day_schedule_card':
       return wrap('vertical_timeline', mapDaySchedule(props), backgroundMode)
     case 'week_schedule_card':
@@ -110,14 +113,25 @@ function wrap(
 function mapInfoCard(props: Record_): Record_ {
   const title = pickNonEmpty(props.heading, props.title)
   const body = pickNonEmpty(props.body, '…')
+  const facts = readArray(props.facts)
+    .map((entry) => {
+      const record = toRecord(entry)
+      const label = readString(record.label)
+      const value = readString(record.value)
+      return label && value ? { label, value } : null
+    })
+    .filter((entry): entry is { label: string; value: string } => entry != null)
   const points = readArray(props.points)
     .map((item) => readString(item))
     .filter((text) => text.length > 0)
-  const bodyCombined = points.length > 0 ? `${body}\n${points.map((p) => `• ${p}`).join('\n')}` : body
+  const tone = readString(props.tone)
   return {
     title,
-    body: bodyCombined || body || '（空）',
-    ramp: 'indigo',
+    body: body || '（空）',
+    facts: facts.length > 0 ? facts : undefined,
+    points: points.length > 0 ? points : undefined,
+    kicker: resolveInfoCardKicker(tone),
+    ramp: resolveInfoCardRamp(tone),
     decoration: 'none',
   }
 }
@@ -284,17 +298,54 @@ function mapMiniCalculator(props: Record_): Record_ {
 }
 
 function mapFlowDiagram(props: Record_): Record_ {
-  const title = pickNonEmpty(props.heading, props.title, '流程')
-  const nodes = readArray(props.nodes)
-  const events = nodes.slice(0, 12).map((node, index) => {
+  const heading = pickNonEmpty(props.heading, props.title, '流程')
+  const nodes = readArray(props.nodes).map((node) => {
     const record = toRecord(node)
+    const id = pickNonEmpty(record.id, record.label)
+    return { id, label: pickNonEmpty(record.label, record.id, '节点') }
+  }).filter((node) => node.id.length > 0)
+  const knownIds = new Set(nodes.map((node) => node.id))
+  const edges = readArray(props.edges).map((edge) => {
+    const record = toRecord(edge)
     return {
-      time: `步骤 ${index + 1}`,
-      heading: pickNonEmpty(record.label, record.id, `节点 ${index + 1}`),
-      status: 'pending' as const,
+      from: readString(record.from),
+      to: readString(record.to),
+      label: readString(record.label) || undefined,
+    }
+  }).filter((edge) => knownIds.has(edge.from) && knownIds.has(edge.to))
+  const steps = nodes.slice(0, 10).map((node) => {
+    const outgoing = edges.filter((edge) => edge.from === node.id)
+    if (outgoing.length >= 2) {
+      return {
+        label: node.label,
+        kind: 'decision',
+        branches: outgoing.slice(0, 3).map((edge) => ({
+          label: nodes.find((candidate) => candidate.id === edge.to)?.label || edge.to,
+          detail: edge.label,
+        })),
+      }
+    }
+    return {
+      label: node.label,
+      detail: outgoing[0]?.label ? `→ ${outgoing[0].label}` : undefined,
     }
   })
-  return { title, events: ensureEvents(events) }
+  while (steps.length < 2) steps.push({ label: '（待补充）', detail: undefined })
+  return { heading, steps }
+}
+
+function mapRelationshipGraph(props: Record_): Record_ {
+  const heading = pickNonEmpty(props.heading, props.title)
+  const spec: Record_ = {
+    nodes: readArray(props.nodes),
+    edges: readArray(props.edges),
+  }
+  if (heading) spec.heading = heading
+  const groups = readArray(props.groups)
+  if (groups.length > 0) spec.groups = groups
+  const note = readString(props.note)
+  if (note) spec.note = note
+  return spec
 }
 
 function mapDaySchedule(props: Record_): Record_ {
@@ -399,13 +450,13 @@ function mapWeeklyPlanBoardManual(props: Record_): Record_ {
       const cardRecord = toRecord(card)
       items.push({
         label: pickNonEmpty(cardRecord.label, cardRecord.title, '条目'),
-        emoji: '📌',
+        status: 'pending',
         ramp: 'indigo',
       })
       if (items.length >= 20) break
     }
     if (items.length === 0) {
-      items.push({ label: laneLabel, emoji: '🗂', ramp: 'slate' })
+      items.push({ label: laneLabel, status: 'pending', ramp: 'slate' })
     }
     if (items.length >= 20) break
   }
@@ -424,7 +475,6 @@ function mapHabitStreakManual(props: Record_): Record_ {
     const completed = record.done === true || record.completed === true
     return {
       label: pickNonEmpty(record.label, record.name, '习惯'),
-      emoji: completed ? '✅' : '⭕️',
       status: completed ? 'done' : 'pending',
       ramp: completed ? 'emerald' : 'slate',
     }
@@ -494,10 +544,10 @@ function ensureEvents(events: Record_[]): Record_[] {
 
 function ensureGridItems(items: Record_[]): Record_[] {
   if (items.length >= 2) return items.slice(0, 20)
-  if (items.length === 1) return [...items, { label: '—', emoji: '•', ramp: 'slate' }]
+  if (items.length === 1) return [...items, { label: '—', status: 'pending', ramp: 'slate' }]
   return [
-    { label: '—', emoji: '•', ramp: 'slate' },
-    { label: '—', emoji: '•', ramp: 'slate' },
+    { label: '—', status: 'pending', ramp: 'slate' },
+    { label: '—', status: 'pending', ramp: 'slate' },
   ]
 }
 

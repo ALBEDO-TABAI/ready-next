@@ -84,7 +84,10 @@ export default function DocumentExportButton({ tab }: { tab: DocTab | null }) {
         { id: 'export-pdf', label: '导出为 PDF' },
         { id: 'export-md-bundle', label: '导出 Markdown 压缩包（含资源）' },
       ],
-    }).catch(() => null)
+    }).catch(() => {
+      // silent-catch: closing or failing the native menu means no export selection
+      return null
+    })
 
     const selected = menuResult?.success ? menuResult.selectedId : null
     if (selected !== 'export-pdf' && selected !== 'export-md-bundle') return
@@ -94,6 +97,7 @@ export default function DocumentExportButton({ tab }: { tab: DocTab | null }) {
     try {
       await runExport(selected === 'export-pdf' ? 'pdf' : 'md-bundle', tab)
     } catch (error) {
+      // silent-catch: the failure is surfaced through the export button error phase
       settlePhase('error', error instanceof Error ? error.message : String(error))
     } finally {
       busyRef.current = false

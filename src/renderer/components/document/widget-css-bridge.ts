@@ -1,3 +1,11 @@
+import {
+  WIDGET_THEME_DARK,
+  WIDGET_THEME_LIGHT,
+  buildWidgetBaseStyleCss,
+  buildWidgetTokenVarDeclarations,
+  type WidgetThemeTokenSet,
+} from '../../../shared/document-widget-theme'
+
 export type WidgetBackgroundMode = 'opaque' | 'transparent'
 
 export interface WidgetThemePayload {
@@ -25,32 +33,49 @@ const THEME_VAR_NAMES = [
   '--color-green',
   '--color-orange',
   '--color-red',
+  '--color-ready-orange',
+  '--color-ready-orange-light',
+  '--font-mono',
 ] as const
+
+function pick(live: string | undefined, fallback: string): string {
+  return live && live.trim().length > 0 ? live : fallback
+}
 
 export function resolveWidgetThemePayload(options?: ResolveWidgetThemeOptions): WidgetThemePayload {
   const backgroundMode: WidgetBackgroundMode = options?.backgroundMode === 'transparent' ? 'transparent' : 'opaque'
   const root = document.documentElement
   const styles = getComputedStyle(root)
+  const isDark =
+    root.getAttribute('data-theme') === 'dark' ||
+    root.classList.contains('dark')
+  const tokens: WidgetThemeTokenSet = isDark ? WIDGET_THEME_DARK : WIDGET_THEME_LIGHT
 
   const vars: Record<string, string> = {}
   for (const name of THEME_VAR_NAMES) {
     vars[name] = styles.getPropertyValue(name).trim()
   }
 
-  vars['--widget-bg-primary'] = backgroundMode === 'transparent' ? 'transparent' : vars['--bg-content']
-  vars['--widget-bg-secondary'] = vars['--bg-canvas']
-  vars['--widget-border'] = vars['--border-default']
-  vars['--widget-text-primary'] = vars['--text-title']
-  vars['--widget-text-secondary'] = vars['--text-body']
-  vars['--widget-text-muted'] = vars['--text-muted']
-  vars['--widget-accent'] = vars['--color-blue']
-  vars['--widget-accent-soft'] = vars['--color-blue-light']
+  // Widget 视觉以 Ready 令牌层为唯一来源。工作台 live 变量仍透传给 legacy/freeform
+  // 代码，但不得反向覆盖结构化 widget 的暖纸白、墨阶和 hairline；否则应用的
+  // 功能蓝表面会把两套编译器重新染回旧样式。
+  Object.assign(vars, buildWidgetTokenVarDeclarations(tokens))
+
+  vars['--widget-bg-primary'] = backgroundMode === 'transparent' ? 'transparent' : tokens.card
+  vars['--widget-bg-secondary'] = tokens.canvas
+  vars['--widget-bg-paper'] = tokens.paper
+  vars['--widget-border'] = tokens.hair
+  vars['--widget-text-primary'] = tokens.ink
+  vars['--widget-text-secondary'] = tokens.inkBody
+  vars['--widget-text-muted'] = tokens.ink2
+  vars['--widget-text-faint'] = tokens.ink3
+  vars['--widget-accent'] = tokens.accent
+  vars['--widget-accent-soft'] = tokens.accentSoft
+  vars['--widget-font-mono'] = pick(vars['--font-mono'], vars['--widget-font-mono'])
 
   return {
     vars,
-    isDark:
-      root.getAttribute('data-theme') === 'dark' ||
-      root.classList.contains('dark'),
+    isDark,
     backgroundMode,
   }
 }
@@ -67,126 +92,9 @@ export function getWidgetIframeStyleBlock(
     .map(([key, value]) => `${key}:${value};`)
     .join('\n')
 
-  const isTransparent = options?.backgroundMode === 'transparent'
-  const cardBackground = isTransparent ? 'transparent' : 'var(--widget-bg-primary)'
-  const cardBorder = isTransparent ? '0' : '1px solid var(--widget-border)'
-  const cardPadding = isTransparent ? '0' : '16px'
-
   return `
 :root {
 ${cssVars}
 }
-
-html, body {
-  margin: 0;
-  padding: 0;
-  background: transparent;
-  color: var(--widget-text-secondary);
-  font-family: Inter, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
-}
-
-.widget-root {
-  box-sizing: border-box;
-  width: 100%;
-  color: var(--widget-text-secondary);
-}
-
-.widget-root, .widget-root * {
-  box-sizing: border-box;
-}
-
-.widget-root a {
-  color: var(--widget-accent);
-}
-
-.widget-root .card {
-  border: ${cardBorder};
-  border-radius: 16px;
-  background: ${cardBackground};
-  padding: ${cardPadding};
-}
-
-.widget-root .widget-canvas {
-  display: block;
-  width: 100%;
-}
-
-.widget-root .widget-canvas[data-widget-bg="transparent"] > .card {
-  border: 0;
-  background: transparent;
-  padding: 0;
-}
-
-.widget-root .muted {
-  color: var(--widget-text-muted);
-}
-
-.widget-root .title {
-  color: var(--widget-text-primary);
-  font-size: 18px;
-  font-weight: 700;
-  line-height: 1.35;
-}
-
-.widget-root .subtitle {
-  color: var(--widget-text-muted);
-  font-size: 12px;
-  line-height: 1.6;
-}
-
-.widget-root .row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.widget-root .stack {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.widget-root .badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 999px;
-  padding: 4px 10px;
-  background: var(--widget-accent-soft);
-  color: var(--widget-accent);
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.widget-root button,
-.widget-root input,
-.widget-root select {
-  font: inherit;
-}
-
-.widget-root button {
-  border: 1px solid var(--widget-border);
-  border-radius: 8px;
-  background: var(--widget-bg-primary);
-  color: var(--widget-text-primary);
-  padding: 8px 12px;
-  cursor: pointer;
-}
-
-.widget-root input,
-.widget-root select {
-  width: 100%;
-  border: 1px solid var(--widget-border);
-  border-radius: 8px;
-  background: var(--widget-bg-primary);
-  color: var(--widget-text-primary);
-  padding: 8px 10px;
-}
-
-.widget-root canvas {
-  display: block;
-  width: 100%;
-  max-width: 100%;
-}
-`
+${buildWidgetBaseStyleCss({ backgroundMode: options?.backgroundMode })}`
 }

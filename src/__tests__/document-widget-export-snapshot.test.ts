@@ -27,7 +27,7 @@ describe('widget export snapshot helper', () => {
 
   it('converts scripted widgets into static html snapshots', () => {
     const snapshot = buildWidgetExportSnapshot(
-      '<div class="card">Hello</div><script>window.x = 1</script>',
+      '<button onclick="window.x=1">Hello</button><script>window.x = 1</script>',
       'calc',
     )
 
@@ -35,6 +35,7 @@ describe('widget export snapshot helper', () => {
     assert.equal(snapshot?.kind, 'html')
     assert.equal(snapshot?.fileExtension, '.html')
     assert.doesNotMatch(snapshot?.content || '', /<script/)
+    assert.doesNotMatch(snapshot?.content || '', /onclick=/)
     assert.match(snapshot?.content || '', /widget-export-snapshot/)
   })
 
@@ -53,6 +54,27 @@ describe('widget export snapshot helper', () => {
     assert.match(html, /widget-export-snapshot/)
     assert.doesNotMatch(html, /```show-widget/)
     assert.doesNotMatch(html, /window\.x=1/)
+  })
+
+  it('document html export recompiles structured widgets instead of exporting stale cached markup', () => {
+    const html = buildDocumentHtmlSnapshotExport([
+      '```show-widget',
+      JSON.stringify({
+        title: '速览',
+        widget_code: '<div>legacy cached card</div>',
+        component_spec: {
+          component: 'info_card',
+          props: { heading: '速览', body: '当前设计。', points: ['补充说明。'] },
+        },
+      }),
+      '```',
+    ].join('\n'), 'Demo')
+
+    assert.match(html, /data-ready-info-card/)
+    assert.doesNotMatch(html, /legacy cached card/)
+    assert.match(html, /<div class="widget-root">/)
+    assert.match(html, /--widget-accent:\s*#FF4B2B/)
+    assert.match(html, /\.widget-root \.card/)
   })
 
   it('wires html save-as through the widget snapshot export helper', () => {

@@ -2,7 +2,7 @@ import { getWidgetIframeStyleBlock, resolveWidgetThemePayload } from './widget-c
 import { buildScopedWidgetInlineScript, collectInlineHandlerNames } from './widget-dom-script-runtime'
 import { resolveWidgetExportSuggestedName } from './widget-export-snapshot'
 import { applyWidgetPersistedState, type DocumentWidgetPersistedState } from './widget-state-runtime'
-import { sanitizeWidgetHtml } from './widget-sanitizer'
+import { WIDGET_SCRIPT_NONCE, sanitizeWidgetHtml } from './widget-sanitizer'
 import {
   buildDocumentWidgetFenceSource,
   parseShowWidgetFences,
@@ -12,6 +12,8 @@ import type {
   DocumentWidgetComponentSpecSummary,
   DocumentWidgetSkeletonSpecSummary,
 } from '../../../shared/document-widget-parse'
+import { collectDocumentWidgets } from '../../../shared/document-widget-parse'
+import { resolveDocumentWidgetRenderCode } from '../../../shared/document-widget-render-code'
 
 export function getWidgetPersistenceKey(title: string, widgetCode: string): string {
   return `${title.trim().toLowerCase()}::${widgetCode.trim().slice(0, 160)}`
@@ -28,6 +30,23 @@ export function buildWidgetFenceSource(
   },
 ): string {
   return buildDocumentWidgetFenceSource(title, widgetCode, options)
+}
+
+export function replaceWidgetFenceWithSkeletonInContent(
+  content: string,
+  widgetId: string,
+  widgetCode: string,
+  skeletonSpec: DocumentWidgetSkeletonSpecSummary,
+): string {
+  const normalizedSource = content.replace(/\r\n/g, '\n')
+  const record = collectDocumentWidgets(normalizedSource).find((widget) => widget.id === widgetId)
+  if (!record) return content
+  const replacement = buildWidgetFenceSource(record.title, widgetCode, {
+    id: record.id,
+    skeletonSpec,
+    widgetState: record.widgetState,
+  })
+  return `${normalizedSource.slice(0, record.start)}${replacement}${normalizedSource.slice(record.end)}`
 }
 
 export function getWidgetModeLabel(widgetCode: string): string {
@@ -53,7 +72,11 @@ export function getDocumentWidgetRenderBudget(content: string): {
 } {
   const widgets = parseShowWidgetFences(content)
     .filter((segment) => segment.type === 'widget')
-    .map((segment) => segment.data.widgetCode)
+    .map((segment) => resolveDocumentWidgetRenderCode({
+      widgetCode: segment.data.widgetCode,
+      skeletonSpec: segment.data.skeletonSpec,
+      componentSpec: segment.data.componentSpec,
+    }).widgetCode)
 
   const widgetCount = widgets.length
   const totalWidgetChars = widgets.reduce((sum, widgetCode) => sum + widgetCode.length, 0)
@@ -113,6 +136,10 @@ async function executeWidgetScripts(container: HTMLElement): Promise<void> {
       Array.from(oldScript.attributes).forEach((attr) => {
         next.setAttribute(attr.name, attr.value)
       })
+      // W10c — 宿主 CSP 的 script-src 带 nonce（'unsafe-inline' 因此失效）；
+      // nonce hiding 会让属性拷贝丢值，属性与 IDL 双写保证导出脚本能执行。
+      next.setAttribute('nonce', WIDGET_SCRIPT_NONCE)
+      next.nonce = WIDGET_SCRIPT_NONCE
       if (oldScript.src) {
         next.onload = () => resolve()
         next.onerror = () => resolve()

@@ -13,11 +13,11 @@ test('renderer first frame already carries data-theme + data-skin to prevent FOU
   const rendererMain = readWorkspaceFile('src/renderer/main.tsx')
   const mainIndex = readWorkspaceFile('src/main/index.ts')
 
-  // CSP must still allow inline scripts — the head bootstrap runs inline, before main.tsx.
+  // The head bootstrap runs inline before main.tsx and must carry the CSP nonce.
   assert.match(
     indexHtml,
-    /Content-Security-Policy[\s\S]*script-src[^;]*'unsafe-inline'/,
-    'CSP must allow inline scripts for the head theme-bootstrap to execute',
+    /Content-Security-Policy[\s\S]*script-src[^;]*'nonce-cmVhZHktd2lkZ2V0'/,
+    'CSP must declare the nonce used by the head theme-bootstrap',
   )
 
   // An inline <script> in <head> must synchronously seed data-theme + data-skin from localStorage
@@ -25,7 +25,7 @@ test('renderer first frame already carries data-theme + data-skin to prevent FOU
   const headMatch = indexHtml.match(/<head[\s\S]*?<\/head>/i)
   assert.ok(headMatch, 'index.html must have a <head>')
   const headSection = headMatch![0]
-  assert.match(headSection, /<script>[\s\S]*localStorage\.getItem\(['"]ready-theme['"]\)[\s\S]*<\/script>/)
+  assert.match(headSection, /<script nonce="cmVhZHktd2lkZ2V0">[\s\S]*localStorage\.getItem\(['"]ready-theme['"]\)[\s\S]*<\/script>/)
   assert.match(headSection, /setAttribute\(['"]data-theme['"]/)
   assert.match(headSection, /setAttribute\(['"]data-skin['"]/)
   assert.match(headSection, /localStorage\.getItem\(['"]ready-theme-skin['"]\)/)

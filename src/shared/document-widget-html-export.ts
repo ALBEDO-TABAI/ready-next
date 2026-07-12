@@ -1,9 +1,21 @@
 import { buildWidgetExportSnapshot } from './widget-export-snapshot'
+import { resolveDocumentWidgetRenderCode } from './document-widget-render-code'
+import {
+  WIDGET_THEME_LIGHT,
+  buildWidgetBaseStyleCss,
+  buildWidgetTokenVarDeclarations,
+} from './document-widget-theme'
+import type {
+  DocumentWidgetComponentSpecSummary,
+  DocumentWidgetSkeletonSpecSummary,
+} from './document-widget-parse'
 
 interface WidgetPayload {
   title?: string
   widget_code?: string
   widgetCode?: string
+  component_spec?: DocumentWidgetComponentSpecSummary
+  skeleton_spec?: DocumentWidgetSkeletonSpecSummary
 }
 
 function escapeHtml(value: string): string {
@@ -22,10 +34,23 @@ function parseWidgetPayload(raw: string): { title: string | null; widgetCode: st
         ? payload.widgetCode
         : null
     const title = typeof payload.title === 'string' && payload.title.trim() ? payload.title.trim() : null
-    return { title, widgetCode }
+    if (!widgetCode) return { title, widgetCode: null }
+    const resolved = resolveDocumentWidgetRenderCode({
+      widgetCode,
+      componentSpec: payload.component_spec,
+      skeletonSpec: payload.skeleton_spec,
+    })
+    return { title, widgetCode: resolved.widgetCode }
   } catch {
     return { title: null, widgetCode: null }
   }
+}
+
+function buildExportWidgetStyle(): string {
+  const vars = Object.entries(buildWidgetTokenVarDeclarations(WIDGET_THEME_LIGHT))
+    .map(([name, value]) => `${name}:${value};`)
+    .join('\n')
+  return `:root {\n${vars}\n}\n${buildWidgetBaseStyleCss()}`
 }
 
 export function buildDocumentHtmlSnapshotExport(content: string, documentTitle = 'Document'): string {
@@ -47,7 +72,7 @@ export function buildDocumentHtmlSnapshotExport(content: string, documentTitle =
         blocks.push([
           '<section class="doc-export-widget">',
           payload.title ? `<h2>${escapeHtml(payload.title)}</h2>` : '',
-          snapshot.content,
+          `<div class="widget-root">${snapshot.content}</div>`,
           '</section>',
         ].filter(Boolean).join(''))
       }
@@ -68,6 +93,7 @@ export function buildDocumentHtmlSnapshotExport(content: string, documentTitle =
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>${escapeHtml(documentTitle)}</title>
   <style>
+    ${buildExportWidgetStyle()}
     body {
       margin: 0;
       padding: 32px;
@@ -85,16 +111,16 @@ export function buildDocumentHtmlSnapshotExport(content: string, documentTitle =
       margin: 0 0 20px;
     }
     .doc-export-widget {
-      background: #fff;
-      border: 1px solid rgba(15, 23, 42, 0.08);
-      border-radius: 20px;
-      padding: 20px;
       margin: 0 0 24px;
     }
     .doc-export-widget h2 {
-      margin: 0 0 16px;
-      font-size: 18px;
-      line-height: 1.4;
+      margin: 0 4px 10px;
+      color: var(--widget-text-muted);
+      font-family: var(--widget-font-mono);
+      font-size: 10px;
+      font-weight: 500;
+      letter-spacing: 0.06em;
+      line-height: 1.2;
     }
   </style>
 </head>

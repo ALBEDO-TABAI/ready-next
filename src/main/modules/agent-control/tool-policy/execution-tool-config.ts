@@ -16,6 +16,10 @@ import {
   inferDocumentWidgetProfile,
   type DocumentWidgetProfile,
 } from '../../claude-bridge/widget-guidance'
+import {
+  describeApprovedWidgetProps,
+  type DocumentWidgetComponentName,
+} from '../../../../shared/document-widget-openui'
 import type { CapabilityGroupId } from '../../../../shared/ai-capability-groups'
 import type { ToolResolutionDiagnostics } from '../contracts/run-contracts'
 import {
@@ -271,6 +275,7 @@ const DOCUMENT_TOOL_USAGE_RULES = `
 - "把这段原文精准改掉" → 使用 document_replace_exact
 - "在文档里做一个交互图表/组件" → 使用 document_insert_widget
 - "插入/生成 信息卡、摘要卡、结论卡、对比卡、数据卡、指标卡、关系图、流程图、时间线、图表" → **必须**使用 document_insert_widget（componentSpec 结构化落地）；**禁止**用 document_replace_text / document_replace_exact / document_set_content / document_append_content 把 markdown 表格或手写 HTML 写进正文冒充卡片
+- "在文档开头/顶部/标题下插入卡片" → document_insert_widget 配 position=prepend_start（不要用 append_end 落到文末再声称在开头）
 - "看看文档里有哪些 widget" → 使用 document_list_widgets
 - "更新这个 widget / 改图表内容" → 使用 document_update_widget，不要用 document_replace_text / document_replace_exact 修改 show-widget 围栏内部
 - "删掉这个 widget" → 使用 document_remove_widget
@@ -309,15 +314,33 @@ export function buildToolGuidance(policy: ToolPolicy): string {
  * 组件名的唯一模型可见来源）+ 命中 widget 家族时的基线建议。骨架清单是编辑抽屉
  * 词汇，刻意不进自由工具循环轮。
  */
+/** live 指引携带的核心组件字段结构：componentSpec 的 props 对模型必须可见，否则只能盲猜字段名。 */
+const DOCUMENT_SURFACE_CORE_PROP_FAMILIES: ReadonlyArray<DocumentWidgetComponentName> = [
+  'info_card',
+  'callout_block',
+  'stats_card',
+  'bar_chart',
+  'line_chart',
+  'flow_diagram',
+  'relationship_graph',
+]
+
 export function buildDocumentSurfaceGuidance(params: {
   toolNames: ReadonlySet<string>
   userText: string
 }): string {
   if (!params.toolNames.has('document_insert_widget')) return ''
   const profile = inferDocumentWidgetProfile(params.userText || '')
+  const propFamilies = new Set<DocumentWidgetComponentName>(DOCUMENT_SURFACE_CORE_PROP_FAMILIES)
+  if (profile?.family) propFamilies.add(profile.family as DocumentWidgetComponentName)
+  const propsBlock = [
+    '### componentSpec 字段结构（!必填 ?可选）',
+    describeApprovedWidgetProps(propFamilies),
+  ].join('\n')
   return [
     DOCUMENT_TOOL_USAGE_RULES,
     buildDocumentWidgetOpenUIRulesSnippet(),
+    propsBlock,
     profile ? buildDocumentWidgetGuidanceSnippet(profile) : '',
   ]
     .filter(Boolean)

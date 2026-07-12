@@ -1,4 +1,4 @@
-import { Download, MessageSquareQuote } from 'lucide-react'
+import { Download, MessageSquareQuote, Pencil } from 'lucide-react'
 import { useEffect, useState, type ReactNode } from 'react'
 
 interface DocumentWidgetCardActionProps {
@@ -35,6 +35,7 @@ interface DocumentWidgetCardShellProps {
   onRenameTitle?: (nextTitle: string) => void | Promise<void>
   onQuote?: () => void
   onExport?: () => void
+  onEdit?: () => void
   extraActions?: ReactNode
   children: ReactNode
   contentEditable?: boolean
@@ -49,6 +50,7 @@ export default function DocumentWidgetCardShell({
   onRenameTitle,
   onQuote,
   onExport,
+  onEdit,
   extraActions,
   children,
   contentEditable = false,
@@ -130,6 +132,13 @@ export default function DocumentWidgetCardShell({
         </div>
 
         <div className="ready-doc-widget-card-actions">
+          {onEdit ? (
+            <DocumentWidgetCardAction
+              label="编辑"
+              icon={<Pencil size={13} strokeWidth={2} />}
+              onClick={onEdit}
+            />
+          ) : null}
           <DocumentWidgetCardAction
             label="引用"
             icon={<MessageSquareQuote size={13} strokeWidth={2} />}

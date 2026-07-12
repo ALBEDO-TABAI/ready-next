@@ -71,6 +71,30 @@ const fixtures: Record<WidgetSkeletonId, Record<string, unknown>> = {
       { label: '人月神话', emoji: '📙' },
     ],
   },
+  relation_map: {
+    heading: '雷雨人物关系',
+    groups: [
+      { id: 'zhou', label: '周家', position: 'left' },
+      { id: 'lu', label: '鲁家', position: 'right' },
+    ],
+    nodes: [
+      { id: 'zhupuyuan', label: '周朴园', group: 'zhou', emphasis: 'primary' },
+      { id: 'lushiping', label: '鲁侍萍', group: 'lu' },
+    ],
+    edges: [{ from: 'zhupuyuan', to: 'lushiping', kind: 'emotion', label: '旧情' }],
+  },
+  process_flow: {
+    heading: '光合作用流程',
+    steps: [
+      { label: '吸收光能', detail: '叶绿素捕获光子' },
+      { label: '水的光解', kind: 'decision', branches: [
+        { label: '释放氧气' },
+        { label: '产生电子' },
+      ] },
+      { label: '暗反应固碳' },
+    ],
+    outcome: { label: '生成葡萄糖', detail: '化学能储存' },
+  },
   freeform_static: {
     widget_code: '<div style="padding:16px;">老式电影票</div>',
     aspect_ratio: '4:5',
@@ -83,8 +107,8 @@ const fixtures: Record<WidgetSkeletonId, Record<string, unknown>> = {
 }
 
 describe('document widget skeletons v0.1', () => {
-  it('defines exactly 9 skeletons (8 + H split into static/interactive)', () => {
-    assert.equal(WIDGET_SKELETON_IDS.length, 9)
+  it('defines exactly 11 skeletons (A–G + relation_map/process_flow + H split into static/interactive)', () => {
+    assert.equal(WIDGET_SKELETON_IDS.length, 11)
     for (const id of WIDGET_SKELETON_IDS) {
       assert.ok(WIDGET_SKELETONS[id], `missing skeleton: ${id}`)
     }

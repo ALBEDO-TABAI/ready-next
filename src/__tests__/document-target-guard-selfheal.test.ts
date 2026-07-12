@@ -122,6 +122,19 @@ test('C3 live 文档指引以最终工具面为事实信号（含目录与家族
   assert.equal(withoutWidgetTool, '')
 })
 
+test('C3b live 指引携带 componentSpec 字段结构（2026-07-11 dogfood 第六例：模型盲猜 props）', () => {
+  const guidance = buildDocumentSurfaceGuidance({
+    toolNames: new Set(['document_insert_widget']),
+    userText: '读一遍文档，然后在开头做一张信息卡帮助用户快速获取文章信息',
+  })
+  assert.match(guidance, /componentSpec 字段结构/)
+  assert.match(guidance, /info_card:/)
+  assert.match(guidance, /facts/)
+  assert.match(guidance, /facts\[\] = \{label!\(string\), value!\(string\)\}/)
+  assert.match(guidance, /relationship_graph:/)
+  assert.match(guidance, /速览.*facts|facts.*键值行/)
+})
+
 test('C3 source pin: live 前导词组装必须消费 buildDocumentSurfaceGuidance', () => {
   // eslint-disable-next-line ready/no-source-grep-test -- reviewed hard contract (W10-F4): assembleAgentSdkTurnInput 的行为验证需要完整 SDK host（emitContextBill / skill runtime / reminder registry 均有环境副作用），无法在纯 Node 下驱动；接线本身以源级 pin 钉住，函数行为已由上一条真调用覆盖。
   const source = readFileSync(

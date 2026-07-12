@@ -44,4 +44,20 @@ window.__last = calculateReturn()
     assert.equal(handled, true)
     assert.equal(called, 1)
   })
+
+  it('supports the safe literal arguments commonly emitted by widget markup', () => {
+    const calls: unknown[][] = []
+    const widgetWindow = {
+      switchTab: (...args: unknown[]) => calls.push(args),
+    }
+    const event = { type: 'click', target: { value: 'from-event' } }
+    const target = { value: 'from-this' }
+
+    assert.equal(invokeInlineHandlerExpression('switchTab(1)', widgetWindow, event, target), true)
+    assert.equal(invokeInlineHandlerExpression("switchTab('overview')", widgetWindow, event, target), true)
+    assert.equal(invokeInlineHandlerExpression('switchTab(event)', widgetWindow, event, target), true)
+    assert.equal(invokeInlineHandlerExpression('switchTab(this.value)', widgetWindow, event, target), true)
+    assert.deepEqual(calls, [[1], ['overview'], [event], ['from-this']])
+    assert.equal(invokeInlineHandlerExpression('window.location="https://example.com"', widgetWindow, event, target), false)
+  })
 })

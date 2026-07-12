@@ -4,7 +4,9 @@ export type FieldDescriptor =
   | { kind: 'text'; path: string; label: string; placeholder?: string }
   | { kind: 'textarea'; path: string; label: string; placeholder?: string; rows?: number }
   | { kind: 'ramp'; path: string; label: string }
+  | { kind: 'key-value-list'; path: string; label: string }
   | { kind: 'metrics-list'; path: string; label: string }
+  | { kind: 'text-list'; path: string; label: string; addLabel?: string }
   | { kind: 'events-list'; path: string; label: string }
   | { kind: 'grid-items-list'; path: string; label: string }
   | { kind: 'tags-list'; path: string; label: string }
@@ -26,9 +28,12 @@ export const WIDGET_EDIT_DRAWER_FIELD_MAP: Record<WidgetSkeletonId, WidgetSkelet
     fields: [
       { kind: 'text', path: 'title', label: '标题' },
       { kind: 'textarea', path: 'body', label: '正文', rows: 6 },
+      { kind: 'key-value-list', path: 'facts', label: '键值速览' },
+      { kind: 'text-list', path: 'points', label: '补充说明', addLabel: '添加说明' },
       { kind: 'text', path: 'kicker', label: '上标（可选）' },
       { kind: 'text', path: 'footer', label: '脚注（可选）' },
-      { kind: 'ramp', path: 'ramp', label: '强调色' },
+      { kind: 'text', path: 'attribution', label: '署名（可选）' },
+      { kind: 'ramp', path: 'ramp', label: '视觉语气' },
     ],
   },
   dual_compare: {
@@ -36,11 +41,15 @@ export const WIDGET_EDIT_DRAWER_FIELD_MAP: Record<WidgetSkeletonId, WidgetSkelet
     displayName: '双栏对比',
     fields: [
       { kind: 'text', path: 'title', label: '标题' },
-      { kind: 'text', path: 'left.title', label: '左栏标题' },
-      { kind: 'textarea', path: 'left.body', label: '左栏正文', rows: 4 },
-      { kind: 'text', path: 'right.title', label: '右栏标题' },
-      { kind: 'textarea', path: 'right.body', label: '右栏正文', rows: 4 },
-      { kind: 'ramp', path: 'ramp', label: '强调色' },
+      { kind: 'text', path: 'left.heading', label: '左栏标题' },
+      { kind: 'text-list', path: 'left.items', label: '左栏内容', addLabel: '添加左栏内容' },
+      { kind: 'text', path: 'right.heading', label: '右栏标题' },
+      { kind: 'text-list', path: 'right.items', label: '右栏内容', addLabel: '添加右栏内容' },
+      { kind: 'enum', path: 'divider_style', label: '分隔方式', options: [
+        { value: 'line', label: '细线' },
+        { value: 'vs_badge', label: 'VS 标记' },
+        { value: 'none', label: '无分隔' },
+      ]},
     ],
   },
   metric_grid: {
@@ -48,9 +57,13 @@ export const WIDGET_EDIT_DRAWER_FIELD_MAP: Record<WidgetSkeletonId, WidgetSkelet
     displayName: '多栏数据板',
     fields: [
       { kind: 'text', path: 'title', label: '标题' },
-      { kind: 'text', path: 'subtitle', label: '副标题（可选）' },
+      { kind: 'text', path: 'period', label: '周期（可选）' },
       { kind: 'metrics-list', path: 'metrics', label: 'KPI 列表' },
-      { kind: 'ramp', path: 'ramp', label: '强调色' },
+      { kind: 'enum', path: 'columns', label: '列数', options: [
+        { value: '2', label: '2 列' },
+        { value: '3', label: '3 列' },
+        { value: '4', label: '4 列' },
+      ]},
     ],
   },
   vertical_timeline: {
@@ -58,9 +71,8 @@ export const WIDGET_EDIT_DRAWER_FIELD_MAP: Record<WidgetSkeletonId, WidgetSkelet
     displayName: '垂直时间线',
     fields: [
       { kind: 'text', path: 'title', label: '标题' },
-      { kind: 'text', path: 'subtitle', label: '副标题（可选）' },
+      { kind: 'text', path: 'axis_label', label: '时间轴说明（可选）' },
       { kind: 'events-list', path: 'events', label: '事件序列' },
-      { kind: 'ramp', path: 'ramp', label: '强调色' },
     ],
   },
   photo_note: {
@@ -72,7 +84,6 @@ export const WIDGET_EDIT_DRAWER_FIELD_MAP: Record<WidgetSkeletonId, WidgetSkelet
       { kind: 'hero-image', path: 'hero', label: '主视觉' },
       { kind: 'tags-list', path: 'tags', label: '标签' },
       { kind: 'text', path: 'footer', label: '脚注（可选）' },
-      { kind: 'ramp', path: 'ramp', label: '强调色' },
     ],
   },
   chart_focus: {
@@ -83,7 +94,6 @@ export const WIDGET_EDIT_DRAWER_FIELD_MAP: Record<WidgetSkeletonId, WidgetSkelet
       { kind: 'text', path: 'subtitle', label: '副标题（可选）' },
       { kind: 'textarea', path: 'insight', label: '洞察句', rows: 2 },
       { kind: 'text', path: 'source_note', label: '数据来源（可选）' },
-      { kind: 'ramp', path: 'ramp', label: '强调色' },
     ],
   },
   grid_collection: {
@@ -102,6 +112,23 @@ export const WIDGET_EDIT_DRAWER_FIELD_MAP: Record<WidgetSkeletonId, WidgetSkelet
         { value: 'free', label: '自适应' },
       ]},
       { kind: 'grid-items-list', path: 'items', label: '网格项' },
+    ],
+  },
+  relation_map: {
+    skeletonId: 'relation_map',
+    displayName: '关系图谱',
+    fields: [
+      { kind: 'text', path: 'heading', label: '标题' },
+      { kind: 'textarea', path: 'note', label: '备注（可选）', rows: 2 },
+    ],
+  },
+  process_flow: {
+    skeletonId: 'process_flow',
+    displayName: '流程说明图',
+    fields: [
+      { kind: 'text', path: 'heading', label: '标题' },
+      { kind: 'text', path: 'subtitle', label: '副标题（可选）' },
+      { kind: 'text', path: 'footer', label: '脚注（可选）' },
     ],
   },
   freeform_static: {

@@ -6,6 +6,7 @@ import { parseShowWidgetFences } from '../renderer/components/document/widget-fe
 import { buildStructuredNotePreview } from '../renderer/components/document/note-preview-parser'
 import { buildWidgetReceiverSrcdoc, sanitizeWidgetHtml, widgetHtmlNeedsSandbox } from '../renderer/components/document/widget-sanitizer'
 import { clampNumericInputValue } from '../renderer/components/document/widget-runtime-helpers'
+import { buildDocumentWidgetFenceSource } from '../shared/document-widget-parse'
 import {
   getDocumentWidgetRenderBudget,
   widgetNeedsManualPreview,
@@ -85,7 +86,8 @@ describe('document widget sanitizer', () => {
     assert.ok(!sanitized.includes('<iframe'))
     assert.ok(!sanitized.includes('evil.js'))
     assert.ok(sanitized.includes('cdn.jsdelivr.net'))
-    assert.ok(sanitized.includes('<script>window.__ok = true;</script>'))
+    // W10c：内联脚本必须盖 CSP nonce（详见 widget-script-nonce.test.ts）
+    assert.match(sanitized, /<script nonce="[^"]+">window\.__ok = true;<\/script>/)
   })
 
   it('removes javascript URLs', () => {
@@ -93,10 +95,11 @@ describe('document widget sanitizer', () => {
     assert.ok(!sanitized.includes('javascript:'))
   })
 
-  it('keeps local inline event handlers and still marks the widget for sandbox execution', () => {
+  it('rewrites supported inline handlers for the nonce-safe receiver and drops unsupported handlers', () => {
     const sanitized = sanitizeWidgetHtml(`<svg onload="alert(1)"><rect onclick="alert(1)" /></svg>`)
-    assert.ok(sanitized.includes('onload="alert(1)"'))
-    assert.ok(sanitized.includes('onclick="alert(1)"'))
+    assert.ok(!sanitized.includes('onload='))
+    assert.ok(!sanitized.includes(' onclick='))
+    assert.ok(sanitized.includes('data-ready-onclick="alert(1)"'))
     assert.equal(widgetHtmlNeedsSandbox(sanitized), true)
   })
 
@@ -105,7 +108,18 @@ describe('document widget sanitizer', () => {
 <button onclick="switchTab(1)">切换</button>
 <script>function switchTab(){ return 1 }</script>
 `)
-    assert.ok(sanitized.includes('onclick="switchTab(1)"'))
+    assert.ok(sanitized.includes('data-ready-onclick="switchTab(1)"'))
+    assert.ok(!sanitized.includes(' onclick='))
+  })
+
+  it('rewrites markup handlers without corrupting JavaScript strings inside nonce scripts', () => {
+    const sanitized = sanitizeWidgetHtml(`
+<button onclick="switchTab(1)">切换</button>
+<script>const template = '<button onclick="nested()">'; function switchTab(){ return template }</script>
+`)
+    assert.ok(sanitized.includes('data-ready-onclick="switchTab(1)"'))
+    assert.ok(sanitized.includes(`const template = '<button onclick="nested()">'`))
+    assert.ok(!sanitized.includes(`const template = '<button data-ready-onclick=`))
   })
 
   it('keeps inline event handlers for local interactive widgets even without script tags', () => {
@@ -114,8 +128,8 @@ describe('document widget sanitizer', () => {
 <div onclick="recalc()">总分</div>
 `)
 
-    assert.ok(sanitized.includes('oninput="recalc()"'))
-    assert.ok(sanitized.includes('onclick="recalc()"'))
+    assert.ok(sanitized.includes('data-ready-oninput="recalc()"'))
+    assert.ok(sanitized.includes('data-ready-onclick="recalc()"'))
   })
 })
 
@@ -152,6 +166,20 @@ describe('document widget renderer contract', () => {
     const budget = getDocumentWidgetRenderBudget(content)
 
     assert.equal(budget.widgetCount, 4)
+    assert.equal(budget.forceManualPreviewAll, true)
+  })
+
+  it('budgets the structured runtime render instead of a stale short widget_code cache', () => {
+    const content = buildDocumentWidgetFenceSource('large-current-card', '<div>old</div>', {
+      componentSpec: {
+        component: 'info_card',
+        props: { body: '现'.repeat(13_000) },
+      },
+    })
+
+    const budget = getDocumentWidgetRenderBudget(content)
+
+    assert.ok(budget.totalWidgetChars >= 12_000)
     assert.equal(budget.forceManualPreviewAll, true)
   })
 
@@ -253,7 +281,11 @@ describe('document widget renderer contract', () => {
     assert.doesNotMatch(source, /isScriptWidget/)
   })
 
-  it('uses the external widget receiver bootstrap script so renderer CSP does not block widget startup', () => {
+  it('stamps the CSP nonce on the widget receiver script so inherited CSP does not block widget startup', () => {
+    // W10c（2026-07-11 dogfood）：CSP 的 script-src 同时声明 'unsafe-inline' 与 nonce——
+    // 按规范 nonce 在场时 'unsafe-inline' 被忽略，裸内联接收器曾被静默拦截（widget:ready
+    // 永不到达、交互预览恒降级）。修正后的合同：接收器内联但必须盖 nonce；nonce 与
+    // index.html CSP 的逐字一致性由 widget-script-nonce.test.ts 单独钉住。
     const srcdoc = buildWidgetReceiverSrcdoc(':root{}', false, '<div>demo</div>', 'tok')
     const rendererHtml = readFileSync(
       resolve(process.cwd(), 'src/renderer/index.html'),
@@ -265,8 +297,10 @@ describe('document widget renderer contract', () => {
     assert.match(rendererHtml, /https:\/\/cdn\.jsdelivr\.net/)
     assert.match(rendererHtml, /https:\/\/unpkg\.com/)
     assert.match(rendererHtml, /https:\/\/esm\.sh/)
-    assert.doesNotMatch(srcdoc, /data-widget-script-nonce=/)
-    assert.match(srcdoc, /<script>\(function\(\)/)
+    assert.match(srcdoc, /<script nonce="[^"]+">\(function\(\)/)
+    assert.match(srcdoc, /closest\('\[data-ready-onclick\]'\)/)
+    assert.match(srcdoc, /invokeInlineHandler\(inlineClickNode, 'onclick', event\)/)
+    assert.doesNotMatch(srcdoc, /<script>\(function\(\)/)
     assert.match(srcdoc, /data-widget-token="tok"/)
     assert.match(srcdoc, /<div id="__widget-root"><div class="widget-root"><div>demo<\/div><\/div><\/div>/)
     assert.doesNotMatch(srcdoc, /__widget-template/)

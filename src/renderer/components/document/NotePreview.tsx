@@ -31,6 +31,8 @@ import {
 } from './note-preview-parser'
 import DocumentWidgetCardShell from './DocumentWidgetCardShell'
 import type { DocumentWidgetPersistedState } from './widget-state-runtime'
+import { resolveDocumentWidgetRenderCode } from '../../../shared/document-widget-render-code'
+import type { DocumentWidgetData } from '../../../shared/document-widget-parse'
 import { getDocumentWidgetRenderBudget, getWidgetPersistenceKey } from './widget-card-helpers'
 import WidgetRenderer from './WidgetRenderer'
 import {
@@ -59,6 +61,7 @@ interface NotePreviewProps {
   onWidgetRename?: (currentTitle: string, widgetCode: string, nextTitle: string) => void
   onWidgetQuote?: (title: string, widgetCode: string) => void
   onWidgetExport?: (title: string, widgetCode: string, widgetState?: DocumentWidgetPersistedState | null) => void
+  onWidgetEdit?: (widget: DocumentWidgetData) => void
   onWidgetStateChange?: (title: string, widgetCode: string, widgetState: DocumentWidgetPersistedState) => void
   widgetStates?: Record<string, DocumentWidgetPersistedState>
 }
@@ -580,6 +583,7 @@ function NotePreview({
   onWidgetRename,
   onWidgetQuote,
   onWidgetExport,
+  onWidgetEdit,
   onWidgetStateChange,
   widgetStates,
 }: NotePreviewProps) {
@@ -603,7 +607,14 @@ function NotePreview({
     [preview.embeds],
   )
   const widgetsById = useMemo(
-    () => new Map(preview.widgets.map((widget) => [widget.id || '', widget])),
+    () => new Map(preview.widgets.map((widget) => [widget.id || '', {
+      widget,
+      renderCode: resolveDocumentWidgetRenderCode({
+        widgetCode: widget.widgetCode,
+        skeletonSpec: widget.skeletonSpec,
+        componentSpec: widget.componentSpec,
+      }).widgetCode,
+    }])),
     [preview.widgets],
   )
 
@@ -900,21 +911,23 @@ function NotePreview({
             }
 
             if (block.type === 'widget') {
-              const widget = widgetsById.get(block.widgetId)
-              if (!widget) return null
+              const resolvedWidget = widgetsById.get(block.widgetId)
+              if (!resolvedWidget) return null
+              const { widget, renderCode } = resolvedWidget
               const widgetState = widgetStates?.[getWidgetPersistenceKey(widget.title || 'widget', widget.widgetCode)] || widget.widgetState || null
               return (
                 <DocumentWidgetCardShell
                   title={widget.title || 'widget'}
                   onRenameTitle={onWidgetRename ? (nextTitle) => onWidgetRename(widget.title || 'widget', widget.widgetCode, nextTitle) : undefined}
                   onQuote={onWidgetQuote ? () => onWidgetQuote(widget.title || 'widget', widget.widgetCode) : undefined}
-                  onExport={onWidgetExport ? () => onWidgetExport(widget.title || 'widget', widget.widgetCode, widgetState) : undefined}
+                  onExport={onWidgetExport ? () => onWidgetExport(widget.title || 'widget', renderCode, widgetState) : undefined}
+                  onEdit={canEdit && onWidgetEdit ? () => onWidgetEdit(widget) : undefined}
                   dataReadyWidgetTitle={widget.title || ''}
                   previewClassName="ready-doc-widget-card-preview ready-doc-widget-card-preview-static"
                 >
                   <WidgetRenderer
                     title={widget.title}
-                    widgetCode={widget.widgetCode}
+                    widgetCode={renderCode}
                     preferManualPreview={widgetRenderBudget.forceManualPreviewAll}
                     widgetState={widgetState}
                     onWidgetStateChange={onWidgetStateChange ? (state) => onWidgetStateChange(widget.title || 'widget', widget.widgetCode, state) : undefined}

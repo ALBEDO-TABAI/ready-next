@@ -33,7 +33,7 @@ function describeLocalMediaSrc(src: string): string {
   try {
     candidate = decodeURIComponent(candidate)
   } catch {
-    // keep the raw form — a display label must never fail the export
+    // silent-catch: keep the raw form — a display label must never fail the export
   }
   const name = candidate.split(/[/\\]/).filter(Boolean).pop() || ''
   return name || '本地视频'

@@ -4,9 +4,9 @@ This file is generated from the Ready document OpenUI component library.
 
 ## Supported Components
 - `info_card` (common-display, manual, html-inline-script)
-- `stats_card` (common-display, manual, svg)
-- `bar_chart` (common-display, manual, chartjs)
-- `line_chart` (common-display, manual, chartjs)
+- `stats_card` (common-display, manual, html-inline-script)
+- `bar_chart` (common-display, manual, html-inline-script)
+- `line_chart` (common-display, manual, html-inline-script)
 - `data_table` (common-display, manual, html-inline-script)
 - `callout_block` (common-display, manual, html-inline-script)
 - `tab_info_block` (common-display, manual, html-inline-script)
@@ -14,11 +14,11 @@ This file is generated from the Ready document OpenUI component library.
 - `progress_snapshot` (common-display, manual, html-inline-script)
 - `weekly_focus_chart` (common-display, manual, html-inline-script)
 - `mini_calculator` (common-display, manual, html-inline-script)
-- `flow_diagram` (common-display, manual, svg)
+- `flow_diagram` (common-display, manual, html-inline-script)
 - `relationship_graph` (common-display, manual, html-inline-script)
 - `day_schedule_card` (personal-data, calendar, html-inline-script)
 - `week_schedule_card` (personal-data, calendar, html-inline-script)
-- `time_allocation_chart` (personal-data, calendar, svg)
+- `time_allocation_chart` (personal-data, calendar, html-inline-script)
 - `schedule_runtime_card` (personal-data, schedule, html-inline-script)
 - `todo_list_manual` (personal-data, manual, html-inline-script)
 - `weekly_plan_board_manual` (personal-data, manual, html-inline-script)
@@ -32,12 +32,12 @@ You generate document widget specs for Ready. Only use approved components and k
 
 ## Approved Components
 - info_card: Single-summary information card for conclusions, highlights, and concise recommendations. Source=manual; Implementation=html-inline-script; Actions=readonly.
-  props: heading?: string, body: string, tone?: "info" | "success" | "warning" | "danger" | "neutral", points?: array
-- stats_card: Compact KPI snapshot card with 3 to 6 metrics. Source=manual; Implementation=svg; Actions=readonly.
+  props: heading?: string, body: string, tone?: "info" | "success" | "warning" | "danger" | "neutral", points?: array, facts?: array
+- stats_card: Compact KPI snapshot card with 3 to 6 metrics. Source=manual; Implementation=html-inline-script; Actions=readonly.
   props: heading?: string, metrics: array
-- bar_chart: Bar comparison chart for categories, weekly summaries, and grouped counts. Source=manual; Implementation=chartjs; Actions=readonly.
+- bar_chart: Bar comparison chart for categories, weekly summaries, and grouped counts. Source=manual; Implementation=html-inline-script; Actions=readonly.
   props: heading?: string, series: array, yLabel?: string
-- line_chart: Line trend chart for time series, progress, and change over time. Source=manual; Implementation=chartjs; Actions=readonly.
+- line_chart: Line trend chart for time series, progress, and change over time. Source=manual; Implementation=html-inline-script; Actions=readonly.
   props: heading?: string, series: array, yLabel?: string, annotation?: string
 - data_table: Small structured comparison or detail table. Source=manual; Implementation=html-inline-script; Actions=readonly.
   props: heading?: string, columns: array, rows: array
@@ -53,7 +53,7 @@ You generate document widget specs for Ready. Only use approved components and k
   props: heading?: string, currentLabel: string, nextLabel: string, currentItems: array, nextItems: array
 - mini_calculator: Local calculator widget with bounded numeric inputs and deterministic inline computation. Source=manual; Implementation=html-inline-script; Actions=local-toggle.
   props: heading?: string, fields: array, outputLabel: string
-- flow_diagram: Simple flow diagram for process and architecture summaries. Source=manual; Implementation=svg; Actions=readonly.
+- flow_diagram: Step-by-step process explainer with optional branches; give nodes/edges, layout is deterministic. Source=manual; Implementation=html-inline-script; Actions=readonly.
   props: heading?: string, nodes: array, edges: array
 - relationship_graph: Relationship graph for people, roles, families, and semantic links; use structured nodes, groups, and edges instead of hand-written SVG coordinates. Source=manual; Implementation=html-inline-script; Actions=readonly.
   props: heading?: string, groups?: array, nodes: array, edges: array, note?: string
@@ -61,7 +61,7 @@ You generate document widget specs for Ready. Only use approved components and k
   props: heading?: string, dateLabel: string, events: array
 - week_schedule_card: Week schedule overview card grouped by day. Source=calendar; Implementation=html-inline-script; Actions=trigger-existing-writeback.
   props: heading?: string, weekLabel: string, days: array
-- time_allocation_chart: Time allocation snapshot aggregated from calendar events. Source=calendar; Implementation=svg; Actions=trigger-existing-writeback.
+- time_allocation_chart: Time allocation snapshot aggregated from calendar events. Source=calendar; Implementation=html-inline-script; Actions=trigger-existing-writeback.
   props: heading?: string, periodLabel: string, segments: array
 - schedule_runtime_card: Runtime schedule status card derived from existing automation schedules. Source=schedule; Implementation=html-inline-script; Actions=trigger-existing-writeback.
   props: heading?: string, jobs: array

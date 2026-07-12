@@ -70,6 +70,12 @@
   ],
   "c4Exempt": [
     {
+      "path": "src/__tests__/document-widget-insert-position.test.ts",
+      "reason": "Document widget W10b: tests only the exported insertWidgetIntoDocument text transformation with string fixtures; no path opens better-sqlite3 or reads a repository. The execute module's transitive imports trigger the scanner, while the complete suite passes on host Node with the Electron native module present.",
+      "since": "2026-07-11",
+      "owner": "document-widget-ready"
+    },
+    {
       "path": "src/__tests__/agent-execution-profile-contract.test.ts",
       "reason": "Agent Foundation: exercises the execution-profile resolver with in-memory fake repositories and temporary filesystem fixtures; no path opens better-sqlite3 or reads the real database. Transitive runtime imports alone trigger the C4 scanner, while host-Node coverage must remain active for frozen-profile and readiness assertions.",
       "since": "2026-07-11",

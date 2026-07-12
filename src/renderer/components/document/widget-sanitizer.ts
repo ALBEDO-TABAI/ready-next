@@ -5,10 +5,22 @@ const CDN_WHITELIST = [
   'esm.sh',
 ] as const
 
+/**
+ * W10c（2026-07-11 dogfood）：index.html CSP 的 script-src 同时声明 nonce 与
+ * 'unsafe-inline'——按 CSP 规范 nonce 在场时 'unsafe-inline' 被忽略，因此所有
+ * 未盖 nonce 的内联脚本（含 srcdoc iframe 继承宿主 CSP 后的接收器脚本）都被
+ * 静默拦截，widget:ready 永远不来，交互预览恒降级为静态回退。此常量必须与
+ * index.html CSP 中的 'nonce-…' 逐字一致（一致性由 widget-script-nonce 合同
+ * 测试钉住），并盖到接收器脚本与所有经净化的 widget 内联脚本上。
+ */
+export const WIDGET_SCRIPT_NONCE = 'cmVhZHktd2lkZ2V0'
+
 const DANGEROUS_BLOCK_TAGS = /<(iframe|object|embed|form|meta|link|base)[\s>][\s\S]*?<\/\1>/gi
 const DANGEROUS_VOID_TAGS = /<(iframe|object|embed|meta|link|base)\b[^>]*\/?>/gi
 const SCRIPT_TAG_REGEX = /<script\b([^>]*)>([\s\S]*?)<\/script>/gi
-const EVENT_HANDLER_ATTR_REGEX = /\s+on[a-z0-9_-]+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>"']+)/gi
+const EVENT_HANDLER_ATTR_REGEX = /\s+(on[a-z0-9_-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>"']+))/gi
+const READY_HANDLER_ATTR_REGEX = /\s+data-ready-on(?:click|input|change)\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>"']+)/gi
+const SUPPORTED_EVENT_HANDLERS = new Set(['onclick', 'oninput', 'onchange'])
 function isWhitelistedScriptSrc(src: string): boolean {
   try {
     const url = new URL(src)
@@ -29,30 +41,59 @@ function sanitizeDangerousUrls(html: string): string {
   )
 }
 
+function escapeAttributeValue(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+}
+
+function rewriteSupportedEventHandlers(html: string): string {
+  return html.replace(EVENT_HANDLER_ATTR_REGEX, (_match, rawName: string, dq?: string, sq?: string, uq?: string) => {
+    const name = rawName.toLowerCase()
+    if (!SUPPORTED_EVENT_HANDLERS.has(name)) return ''
+    const value = dq ?? sq ?? uq ?? ''
+    return ` data-ready-${name}="${escapeAttributeValue(value)}"`
+  })
+}
+
 export function sanitizeWidgetHtml(html: string): string {
   const withoutDangerousTags = html
     .replace(DANGEROUS_BLOCK_TAGS, '')
     .replace(DANGEROUS_VOID_TAGS, '')
 
-  const safeScripts = withoutDangerousTags.replace(SCRIPT_TAG_REGEX, (_match, attrs: string, body: string) => {
+  const scriptSlots: string[] = []
+  const markupWithScriptSlots = withoutDangerousTags.replace(SCRIPT_TAG_REGEX, (_match, attrs: string, body: string) => {
     const srcMatch = attrs.match(/\ssrc\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>"']*))/i)
     const src = (srcMatch?.[1] || srcMatch?.[2] || srcMatch?.[3] || '').trim()
+    let safeScript = ''
 
     if (src) {
-      return isWhitelistedScriptSrc(src) ? `<script${attrs}></script>` : ''
+      if (!isWhitelistedScriptSrc(src)) return ''
+      const moduleType = /\stype\s*=\s*(?:"module"|'module'|module)(?=\s|$)/i.test(attrs)
+      const asyncAttr = /\sasync(?:\s|=|$)/i.test(attrs)
+      const deferAttr = /\sdefer(?:\s|=|$)/i.test(attrs)
+      safeScript = `<script${moduleType ? ' type="module"' : ''} src="${escapeAttributeValue(src)}"${asyncAttr ? ' async' : ''}${deferAttr ? ' defer' : ''} nonce="${WIDGET_SCRIPT_NONCE}"></script>`
+    } else {
+      safeScript = `<script nonce="${WIDGET_SCRIPT_NONCE}">${body}</script>`
     }
 
-    return `<script>${body}</script>`
+    const index = scriptSlots.push(safeScript) - 1
+    return `<!--ready-widget-script-slot:${index}-->`
   })
 
-  return sanitizeDangerousUrls(safeScripts)
+  const safeMarkup = sanitizeDangerousUrls(rewriteSupportedEventHandlers(markupWithScriptSlots))
+  return safeMarkup.replace(/<!--ready-widget-script-slot:(\d+)-->/g, (match, rawIndex: string) => (
+    scriptSlots[Number(rawIndex)] ?? match
+  ))
 }
 
 export function stripWidgetScripts(html: string): string {
   return sanitizeDangerousUrls(
     html
       .replace(SCRIPT_TAG_REGEX, '')
-      .replace(EVENT_HANDLER_ATTR_REGEX, ''),
+      .replace(EVENT_HANDLER_ATTR_REGEX, '')
+      .replace(READY_HANDLER_ATTR_REGEX, ''),
   )
 }
 
@@ -153,13 +194,50 @@ function applyWidgetState(state){
 }
 function invokeInlineHandler(target, attrName, event){
   if(!target || typeof target.getAttribute !== 'function') return false;
-  var expr=String(target.getAttribute(attrName) || '').trim();
+  var expr=String(target.getAttribute('data-ready-' + attrName) || '').trim();
   if(!expr) return false;
-  var match=expr.match(/^([A-Za-z_$][\\w$]*)\\((?:\\s*event\\s*)?\\)$/);
+  var match=expr.match(/^(?:return\\s+)?(?:window\\.)?([A-Za-z_$][\\w$]*)\\(([\\s\\S]*)\\)\\s*;?$/);
   if(!match || !match[1]) return false;
   var fn=window[match[1]];
   if(typeof fn !== 'function') return false;
-  fn.call(window, event);
+  var rawArgs=String(match[2] || '').trim();
+  var argTokens=[];
+  if(rawArgs){
+    var current='';
+    var quote='';
+    var escaped=false;
+    for(var i=0;i<rawArgs.length;i+=1){
+      var ch=rawArgs.charAt(i);
+      if(escaped){current+=ch;escaped=false;continue;}
+      if(ch==='\\\\'){current+=ch;escaped=true;continue;}
+      if(quote){current+=ch;if(ch===quote) quote='';continue;}
+      if(ch==='"' || ch==="'"){quote=ch;current+=ch;continue;}
+      if(ch===','){argTokens.push(current.trim());current='';continue;}
+      current+=ch;
+    }
+    if(quote || escaped) return false;
+    argTokens.push(current.trim());
+  }
+  var args=[];
+  for(var j=0;j<argTokens.length;j+=1){
+    var raw=argTokens[j];
+    if(raw==='event'){args.push(event);continue;}
+    if(raw==='this'){args.push(target);continue;}
+    if(raw==='this.value'){args.push(target && 'value' in target ? target.value : undefined);continue;}
+    if(raw==='event.target.value'){args.push(event && event.target ? event.target.value : undefined);continue;}
+    if(raw==='true' || raw==='false'){args.push(raw==='true');continue;}
+    if(raw==='null'){args.push(null);continue;}
+    if(/^-?(?:\\d+\\.?\\d*|\\.\\d+)$/.test(raw)){args.push(Number(raw));continue;}
+    var first=raw.charAt(0);
+    var last=raw.charAt(raw.length-1);
+    if((first==='"' && last==='"') || (first==="'" && last==="'")){args.push(raw.slice(1,-1));continue;}
+    return false;
+  }
+  var result=fn.apply(target,args);
+  if(result===false && event){
+    if(typeof event.preventDefault==='function') event.preventDefault();
+    if(typeof event.stopPropagation==='function') event.stopPropagation();
+  }
   return true;
 }
 function notifyResize(){
@@ -207,6 +285,9 @@ document.addEventListener('click',function(event){
       return;
     }
   }
+  var inlineClickNode=event.target && event.target.closest ? event.target.closest('[data-ready-onclick]') : null;
+  var inlineClickHandled=invokeInlineHandler(inlineClickNode, 'onclick', event);
+  if(inlineClickHandled && event.defaultPrevented) return;
   var link=event.target && event.target.closest ? event.target.closest('a[href]') : null;
   if(!link) return;
   var href=link.getAttribute('href');
@@ -275,7 +356,7 @@ setTimeout(function(){
 </head>
 <body style="margin:0;padding:0;background:transparent;" data-widget-token="${safeToken}">
   <div id="__widget-root"><div class="widget-root">${safeInitialHtml}</div></div>
-  <script>${receiverScript}</script>
+  <script nonce="${WIDGET_SCRIPT_NONCE}">${receiverScript}</script>
 </body>
 </html>`
 }

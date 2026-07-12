@@ -5,6 +5,7 @@ import MarkdownSelectionToolbar, {
   type SelectionRange,
 } from './MarkdownSelectionToolbar'
 import NotePreview from './NotePreview'
+import WidgetEditDrawer, { type WidgetEditDrawerSave } from './WidgetEditDrawer'
 import { addDocumentQuoteReference, addDocumentWidgetTargetReference } from '../../modules/agent/chat-input-bridge'
 import type { DocumentWidgetPersistedState } from './widget-state-runtime'
 import {
@@ -14,8 +15,9 @@ import {
   getWidgetPersistenceKey,
   mergeWidgetStateMapIntoContent,
   renameWidgetFenceTitleInContent,
+  replaceWidgetFenceWithSkeletonInContent,
 } from './widget-card-helpers'
-import { collectDocumentWidgets } from '../../../shared/document-widget-parse'
+import { collectDocumentWidgets, type DocumentWidgetRecord } from '../../../shared/document-widget-parse'
 import { buildDocumentOutline, getOutlineNodeForLine } from '../../../shared/document-side-panels'
 import {
   getDroppedFileKind,
@@ -225,6 +227,7 @@ export default function MarkdownEditor({
   const [widgetStates, setWidgetStates] = useState<Record<string, DocumentWidgetPersistedState>>(() => (
     extractWidgetStateMapFromContent(tab.content)
   ))
+  const [editingWidget, setEditingWidget] = useState<DocumentWidgetRecord | null>(null)
   const widgetStatesRef = useRef(widgetStates)
   const tabContentRef = useRef(tab.content)
   const rawEditorRef = useRef<HTMLTextAreaElement>(null)
@@ -667,6 +670,32 @@ export default function MarkdownEditor({
     setSaveState('idle')
   }, [tab.id, updateTabContent])
 
+  const handleWidgetEditRequest = useCallback((widget: { id?: string; title?: string; widgetCode: string }) => {
+    const current = collectDocumentWidgets(tabContentRef.current).find((record) => (
+      widget.id
+        ? record.id === widget.id
+        : record.title === (widget.title || 'widget') && record.widgetCode.trim() === widget.widgetCode.trim()
+    ))
+    setEditingWidget(current || null)
+  }, [])
+
+  const handleWidgetEditSave = useCallback((result: WidgetEditDrawerSave) => {
+    if (!editingWidget) return
+    const baseContent = tabContentRef.current
+    const nextContent = replaceWidgetFenceWithSkeletonInContent(
+      baseContent,
+      editingWidget.id,
+      result.widgetCode,
+      result.skeletonSpec,
+    )
+    if (nextContent !== baseContent) {
+      tabContentRef.current = nextContent
+      updateTabContent(tab.id, nextContent)
+      setSaveState('idle')
+    }
+    setEditingWidget(null)
+  }, [editingWidget, tab.id, updateTabContent])
+
   const handleEditorSurfaceScroll = useCallback(() => {
     const surface = editorSurfaceRef.current
     const rawEditor = rawEditorRef.current
@@ -907,6 +936,7 @@ export default function MarkdownEditor({
                     onWidgetRename={handleWidgetRename}
                     onWidgetQuote={handleWidgetQuoteToAgent}
                     onWidgetExport={handleWidgetExport}
+                    onWidgetEdit={handleWidgetEditRequest}
                     onWidgetStateChange={handleWidgetStateChange}
                     widgetStates={widgetStates}
                   />
@@ -916,6 +946,19 @@ export default function MarkdownEditor({
           )}
         </>
       </div>
+
+      <WidgetEditDrawer
+        open={editingWidget !== null}
+        input={editingWidget ? {
+          id: editingWidget.id,
+          title: editingWidget.title,
+          widgetCode: editingWidget.widgetCode,
+          skeletonSpec: editingWidget.skeletonSpec,
+          componentSpec: editingWidget.componentSpec,
+        } : null}
+        onClose={() => setEditingWidget(null)}
+        onSave={handleWidgetEditSave}
+      />
 
       {/* ── Markdown selection toolbar (only in edit mode) ───── */}
       {viewMode === 'edit' && selectionRange && (

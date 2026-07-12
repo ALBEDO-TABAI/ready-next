@@ -99,7 +99,8 @@
         },
         "body": {
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "description": "一句话结论（建议 ≤80 字）；结构化内容放 facts / points，不要把长文塞进 body"
         },
         "tone": {
           "type": "string",
@@ -112,9 +113,35 @@
           ]
         },
         "points": {
+          "description": "补充要点列表（每条一短句）",
           "type": "array",
           "items": {
             "type": "string"
+          }
+        },
+        "facts": {
+          "description": "键值速览行；\"一眼看懂本章 / 快速获取文章信息\"类信息卡优先用它承载结构化条目",
+          "maxItems": 8,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "label": {
+                "type": "string",
+                "minLength": 1,
+                "description": "速览项名，如 广告定位 / 核心策略 / 一句话概括"
+              },
+              "value": {
+                "type": "string",
+                "minLength": 1,
+                "description": "该项内容，短语或一句话"
+              }
+            },
+            "required": [
+              "label",
+              "value"
+            ],
+            "additionalProperties": false
           }
         }
       },

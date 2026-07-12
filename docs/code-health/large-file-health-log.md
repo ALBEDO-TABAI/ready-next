@@ -31,6 +31,8 @@
 | 2026-07-11 | Dynamic Delivery | `src/renderer/components/agent/ChatPanel.tsx` | 1136 | 小幅接线 | 一般 | 仅持有一次性彻底模式并在发送时消费，行为函数已下沉。沿用 2026-08-11 解析器拆分复查。 | 已排期：2026-08-11 |
 | 2026-07-11 | Dynamic Delivery | `src/preload/index.ts` | 1469 | 1 | 一般 | 仅增加 deliveryMode 参数透传；仍是跨进程 API 汇总面。沿用 2026-07-24 按域拆分复查。 | 已排期：2026-07-24 |
 | 2026-07-11 | Dynamic Delivery | `src/renderer/types/electron.d.ts` | 3994 | 2 | 健康 | 机械跨进程声明，新增 typed mode 字段且类型检查和 wire 测试覆盖。 | 无需处理 |
+| 2026-07-11 | info_card 键值速览行（W10c） | `src/shared/document-widget-openui.ts` | 1187 | 24 | 一般 | 21 组件的 schema+编译器+目录三合一聚合面；今日大重构已净缩 ~400 行（关系图/流程图/图表提取共享模块），本次仅 info_card facts 字段与渲染。继续增长时优先把 componentSchemas 与 catalog 元数据拆出（编译函数留守）。2026-08-11 复查。 | 已排期：2026-08-11 |
+| 2026-07-11 | widget 插入位置语义（W10b） | `src/renderer/modules/agent/document-actions/execute.ts` | 1897 | 30 | 一般 | renderer 文档动作执行器聚合了全部 document.* 动作分支与纯文本变换 helper；本次新增 prepend_start 分支与未知 position 响亮报错（纯函数已导出供行为测试）。继续增长时优先把 insertWidgetIntoDocument/upsert 等纯文本变换层拆到独立模块（与 target-resolve/write-locks 同级）。2026-08-11 复查。 | 已排期：2026-08-11 |
 | 2026-07-12 | Boost 长任务与技能选取收口 | `src/__tests__/agent-sdk-runtime.test.ts` | 7082 | 净 +44 | 危险 | 单套件继续聚合 SDK runtime 的共享宿主与大量状态场景，本轮只补工具面保真回归，但体量已明显妨碍定位和并行修改。后续应先建立可隔离的 runtime fixture，再按目标文档、压缩、provider wire、技能授权拆分。 | 待独立测试拆分合同 |
 | 2026-07-12 | Boost 长任务与真实验收收口 | `src/__tests__/run-finalizer-checkin.test.ts` | 1232 | 88 | 一般 | 仍是终态判决与验收回执的单一行为测试域；本轮新增真实来源回执、伪正文反例和非完成态禁验收用例。若继续增长，优先按来源证明与终态验收拆成两个套件。2026-08-12 复查。 | 已排期：2026-08-12 |
 | 2026-07-12 | Boost 长任务可见终态收口 | `src/__tests__/runtime-driver-terminal-unlock.test.ts` | 1058 | 净 +22 | 一般 | 仍集中验证 renderer 运行驱动的终态解锁与晚到事件仲裁；本轮只补长任务活性和可见终态回归。若继续增长，优先把活性探测场景拆成独立套件。2026-08-12 复查。 | 已排期：2026-08-12 |

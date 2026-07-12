@@ -22,6 +22,7 @@ export function resolveWidgetExportSuggestedName(
 const DANGEROUS_BLOCK_TAGS = /<(iframe|object|embed|form|meta|link|base)[\s>][\s\S]*?<\/\1>/gi
 const DANGEROUS_VOID_TAGS = /<(iframe|object|embed|meta|link|base)\b[^>]*\/?>/gi
 const SCRIPT_TAG_REGEX = /<script\b([^>]*)>([\s\S]*?)<\/script>/gi
+const EVENT_HANDLER_ATTR_REGEX = /\s+(?:on[a-z0-9_-]+|data-ready-on(?:click|input|change))\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>"']+)/gi
 
 function sanitizeDangerousUrls(html: string): string {
   return html.replace(
@@ -55,7 +56,11 @@ function sanitizeWidgetHtml(html: string): string {
 }
 
 function stripWidgetScripts(html: string): string {
-  return sanitizeDangerousUrls(html.replace(SCRIPT_TAG_REGEX, ''))
+  return sanitizeDangerousUrls(
+    html
+      .replace(SCRIPT_TAG_REGEX, '')
+      .replace(EVENT_HANDLER_ATTR_REGEX, ''),
+  )
 }
 
 export function buildWidgetExportSnapshot(

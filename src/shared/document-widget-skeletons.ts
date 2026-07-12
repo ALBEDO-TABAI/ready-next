@@ -1,4 +1,20 @@
 import { z } from 'zod'
+import { renderReadyChart } from './document-widget-dot-charts'
+import {
+  compileProcessFlow,
+  processFlowPropsSchema,
+} from './document-widget-process-flow'
+import {
+  compileRelationshipGraph,
+  relationshipGraphPropsSchema,
+} from './document-widget-relation-graph'
+import {
+  resolveWidgetTone,
+  resolveWidgetToneStyle,
+  widgetStatusDotColor,
+  widgetVar,
+} from './document-widget-theme'
+import { compileReadyInfoCard } from './document-widget-info-card'
 
 export type WidgetSize =
   | 'square_card'
@@ -29,6 +45,8 @@ export type WidgetSkeletonId =
   | 'photo_note'
   | 'chart_focus'
   | 'grid_collection'
+  | 'relation_map'
+  | 'process_flow'
   | 'freeform_static'
   | 'freeform_interactive'
 
@@ -40,29 +58,18 @@ export const WIDGET_SKELETON_IDS: readonly WidgetSkeletonId[] = [
   'photo_note',
   'chart_focus',
   'grid_collection',
+  'relation_map',
+  'process_flow',
   'freeform_static',
   'freeform_interactive',
 ]
 
+/**
+ * legacy 六色 ramp id 继续被 schema 接受（存量 spec 兼容），但不再驱动多彩配色；
+ * 语义经 resolveWidgetToneStyle 收敛为 Ready 三档（neutral / ok / accent）。
+ */
 export const RAMP_IDS = ['indigo', 'emerald', 'amber', 'slate', 'rose', 'sky'] as const
 export type WidgetRampId = (typeof RAMP_IDS)[number]
-
-interface RampTier {
-  bg: string
-  border: string
-  accent: string
-  sub: string
-  title: string
-}
-
-export const WIDGET_RAMPS: Record<WidgetRampId, RampTier> = {
-  indigo:  { bg: '#EEF2FF', border: '#C7D2FE', accent: '#818CF8', sub: '#4F46E5', title: '#3730A3' },
-  emerald: { bg: '#ECFDF5', border: '#A7F3D0', accent: '#34D399', sub: '#059669', title: '#065F46' },
-  amber:   { bg: '#FFFBEB', border: '#FDE68A', accent: '#FBBF24', sub: '#D97706', title: '#92400E' },
-  slate:   { bg: '#F8FAFC', border: '#E2E8F0', accent: '#94A3B8', sub: '#64748B', title: '#334155' },
-  rose:    { bg: '#FFF1F2', border: '#FECDD3', accent: '#FB7185', sub: '#E11D48', title: '#9F1239' },
-  sky:     { bg: '#F0F9FF', border: '#BAE6FD', accent: '#38BDF8', sub: '#0284C7', title: '#075985' },
-}
 
 const rampSchema = z.enum(RAMP_IDS)
 const sizeSchema = z.enum([
@@ -92,10 +99,6 @@ function escapeRichText(value: string): string {
   return escapeHtml(value).replace(/\n/g, '<br/>')
 }
 
-function ramp(id: WidgetRampId): RampTier {
-  return WIDGET_RAMPS[id] ?? WIDGET_RAMPS.indigo
-}
-
 interface CanvasOptions {
   size: WidgetSize
   backgroundMode: WidgetBackgroundMode
@@ -109,38 +112,34 @@ function wrapCanvas({ size, backgroundMode, skeletonId, body }: CanvasOptions): 
 
 const RAMP_DEFAULT: WidgetRampId = 'indigo'
 
+const INK = widgetVar('ink')
+const INK2 = widgetVar('ink2')
+const INK_BODY = widgetVar('inkBody')
+const HAIR = widgetVar('hair')
+const CARD = widgetVar('card')
+const ACCENT = widgetVar('accent')
+const MONO = "var(--widget-font-mono, ui-monospace, 'SF Mono', monospace)"
+
 const singleFocusProps = z.object({
   title: z.string().optional(),
+  /** 上标（mono 大写 + 橘点）：卡的身份行；抽屉字段表 path=kicker，schema 缺席会导致编辑被静默丢弃。 */
+  kicker: z.string().optional(),
   body: z.string().min(1),
+  facts: z.array(z.object({
+    label: z.string().min(1),
+    value: z.string().min(1),
+  })).max(8).optional(),
+  points: z.array(z.string().min(1)).max(8).optional(),
   attribution: z.string().optional(),
+  /** 脚注（hairline 上缘 + mono 弱化）：来源/日期等元信息行。 */
+  footer: z.string().optional(),
   ramp: rampSchema.default(RAMP_DEFAULT),
   decoration: z.enum(['none', 'quote_mark', 'left_bar', 'top_divider']).default('quote_mark'),
   alignment: z.enum(['left', 'center']).default('left'),
 })
 
 function compileSingleFocus(props: z.infer<typeof singleFocusProps>): string {
-  const r = ramp(props.ramp)
-  const align = props.alignment === 'center' ? 'center' : 'left'
-  const decoration = props.decoration === 'quote_mark'
-    ? `<div style="font-size:48px;line-height:1;color:${r.accent};font-weight:700;">"</div>`
-    : props.decoration === 'left_bar'
-      ? `<div style="position:absolute;left:0;top:0;bottom:0;width:4px;background:${r.accent};border-radius:4px;"></div>`
-      : props.decoration === 'top_divider'
-        ? `<div style="height:3px;width:48px;background:${r.accent};border-radius:3px;"></div>`
-        : ''
-  const attribution = props.attribution
-    ? `<div class="muted" style="margin-top:12px;font-size:13px;">— ${escapeHtml(props.attribution)}</div>`
-    : ''
-  const title = props.title
-    ? `<div class="title" style="color:${r.title};">${escapeHtml(props.title)}</div>`
-    : ''
-  const padLeft = props.decoration === 'left_bar' ? 'padding-left:20px;' : ''
-  return `<div class="card stack" style="position:relative;text-align:${align};gap:14px;${padLeft}">
-    ${decoration}
-    ${title}
-    <div class="subtitle" style="font-size:16px;line-height:1.6;color:var(--widget-text-secondary);">${escapeRichText(props.body)}</div>
-    ${attribution}
-  </div>`
+  return compileReadyInfoCard(props)
 }
 
 const dualCompareProps = z.object({
@@ -160,19 +159,22 @@ const dualCompareProps = z.object({
 })
 
 function renderCompareColumn(side: { heading: string; items: string[]; ramp: WidgetRampId }): string {
-  const r = ramp(side.ramp)
-  const items = side.items.map((item) => `<li style="margin:6px 0;color:var(--widget-text-secondary);">${escapeHtml(item)}</li>`).join('')
-  return `<div class="stack" style="gap:10px;padding:16px;border-radius:12px;background:${r.bg};border:1px solid ${r.border};">
-    <div style="font-weight:700;color:${r.title};">${escapeHtml(side.heading)}</div>
+  const tone = resolveWidgetToneStyle(side.ramp)
+  const items = side.items.map((item) => `<li style="margin:6px 0;color:${INK_BODY};">${escapeHtml(item)}</li>`).join('')
+  return `<div class="stack" style="gap:10px;padding:16px;border-radius:12px;background:${tone.surface};border:1px solid ${tone.border};">
+    <div style="display:flex;align-items:center;gap:8px;">
+      <span style="width:8px;height:8px;border-radius:50%;background:${tone.marker};flex:none;"></span>
+      <div style="font-weight:600;color:${tone.title};">${escapeHtml(side.heading)}</div>
+    </div>
     <ul style="margin:0;padding-left:18px;">${items}</ul>
   </div>`
 }
 
 function compileDualCompare(props: z.infer<typeof dualCompareProps>): string {
   const divider = props.divider_style === 'vs_badge'
-    ? `<div class="badge" style="align-self:center;background:#0f172a;color:#ffffff;">VS</div>`
+    ? `<div class="badge" style="align-self:center;background:${INK};color:${CARD};border-color:transparent;">VS</div>`
     : props.divider_style === 'line'
-      ? `<div style="align-self:stretch;width:1px;background:var(--widget-border);"></div>`
+      ? `<div style="align-self:stretch;width:1px;background:${widgetVar('hairV')};"></div>`
       : ''
   return `<div class="card stack" style="gap:18px;">
     <div class="stack" style="gap:6px;">
@@ -206,14 +208,16 @@ const metricGridProps = z.object({
 function compileMetricGrid(props: z.infer<typeof metricGridProps>): string {
   const cols = props.columns ?? (props.metrics.length <= 2 ? 2 : props.metrics.length <= 4 ? 2 : 3)
   const cells = props.metrics.map((metric) => {
-    const r = ramp(metric.ramp ?? RAMP_DEFAULT)
+    const tone = resolveWidgetToneStyle(metric.ramp)
+    const isHot = resolveWidgetTone(metric.ramp) === 'accent'
     const arrow = metric.delta_direction === 'up' ? '↑' : metric.delta_direction === 'down' ? '↓' : metric.delta_direction === 'flat' ? '→' : ''
+    const deltaColor = metric.delta_direction === 'up' ? widgetVar('ok') : INK2
     const deltaLine = metric.delta
-      ? `<div style="font-size:12px;color:${r.sub};">${arrow ? `${arrow} ` : ''}${escapeHtml(metric.delta)}</div>`
+      ? `<div class="num" style="font-size:12px;color:${deltaColor};">${arrow ? `${arrow} ` : ''}${escapeHtml(metric.delta)}</div>`
       : ''
-    return `<div class="stack" style="gap:6px;padding:14px;border-radius:12px;background:${r.bg};border:1px solid ${r.border};">
-      <div style="font-size:12px;color:var(--widget-text-muted);">${escapeHtml(metric.label)}</div>
-      <div style="font-size:32px;font-weight:700;color:${r.title};line-height:1;font-family:'JetBrains Mono','SF Mono',monospace;">${escapeHtml(metric.value)}${metric.unit ? `<span style="font-size:14px;font-weight:600;margin-left:4px;color:${r.sub};">${escapeHtml(metric.unit)}</span>` : ''}</div>
+    return `<div class="stack" style="gap:6px;padding:14px;border-radius:12px;background:${tone.surface};border:1px solid ${tone.border};">
+      <div class="label" style="font-size:10px;">${escapeHtml(metric.label)}</div>
+      <div class="num" style="font-size:32px;font-weight:600;color:${isHot ? ACCENT : INK};line-height:1;">${escapeHtml(metric.value)}${metric.unit ? `<span style="font-size:14px;font-weight:500;margin-left:4px;color:${INK2};">${escapeHtml(metric.unit)}</span>` : ''}</div>
       ${deltaLine}
     </div>`
   }).join('')
@@ -243,24 +247,17 @@ const verticalTimelineProps = z.object({
 
 function compileVerticalTimeline(props: z.infer<typeof verticalTimelineProps>): string {
   const items = props.events.map((event, index) => {
-    const r = ramp(event.ramp ?? RAMP_DEFAULT)
-    const dotColor = event.status === 'done'
-      ? r.accent
-      : event.status === 'blocked'
-        ? '#E11D48'
-        : event.status === 'pending'
-          ? '#94A3B8'
-          : r.sub
+    const dotColor = widgetStatusDotColor(event.status ?? 'pending')
     const isLast = index === props.events.length - 1
     const connector = props.show_connector && !isLast
-      ? `<div style="position:absolute;left:7px;top:18px;bottom:-12px;width:2px;background:${r.border};"></div>`
+      ? `<div style="position:absolute;left:6px;top:18px;bottom:-12px;width:1px;background:${HAIR};"></div>`
       : ''
     const body = event.body ? `<div class="subtitle" style="margin-top:4px;">${escapeRichText(event.body)}</div>` : ''
     return `<div style="position:relative;padding-left:28px;padding-bottom:${isLast ? '0' : '12px'};">
       ${connector}
-      <div style="position:absolute;left:0;top:4px;width:14px;height:14px;border-radius:999px;background:${dotColor};border:2px solid var(--widget-bg-primary);"></div>
-      <div style="font-size:12px;color:var(--widget-text-muted);font-family:'JetBrains Mono','SF Mono',monospace;">${escapeHtml(event.time)}</div>
-      <div style="font-weight:600;color:var(--widget-text-primary);">${escapeHtml(event.heading)}</div>
+      <div style="position:absolute;left:0;top:4px;width:13px;height:13px;border-radius:50%;background:${dotColor};border:2px solid ${CARD};"></div>
+      <div class="num" style="font-size:12px;color:${INK2};">${escapeHtml(event.time)}</div>
+      <div style="font-weight:600;color:${INK};">${escapeHtml(event.heading)}</div>
       ${body}
     </div>`
   }).join('')
@@ -294,124 +291,76 @@ const photoNoteProps = z.object({
   ramp: rampSchema.default(RAMP_DEFAULT),
 })
 
-function compileHero(hero: z.infer<typeof photoNoteProps>['hero'], r: RampTier): string {
+function compileHero(hero: z.infer<typeof photoNoteProps>['hero']): string {
   const aspect = hero.aspect || '4/3'
+  const wellBg = widgetVar('canvas')
   if (hero.type === 'image' && hero.src) {
-    return `<div style="aspect-ratio:${escapeAttr(aspect)};border-radius:12px;overflow:hidden;background:${r.bg};"><img src="${escapeAttr(hero.src)}" alt="" style="display:block;width:100%;height:100%;object-fit:cover;"/></div>`
+    return `<div style="aspect-ratio:${escapeAttr(aspect)};border-radius:18px;overflow:hidden;background:${wellBg};"><img src="${escapeAttr(hero.src)}" alt="" style="display:block;width:100%;height:100%;object-fit:cover;"/></div>`
   }
   if (hero.type === 'svg_illustration' && hero.svg) {
-    return `<div style="aspect-ratio:${escapeAttr(aspect)};border-radius:12px;overflow:hidden;background:${r.bg};display:flex;align-items:center;justify-content:center;">${hero.svg}</div>`
+    return `<div style="aspect-ratio:${escapeAttr(aspect)};border-radius:18px;overflow:hidden;background:${wellBg};display:flex;align-items:center;justify-content:center;">${hero.svg}</div>`
   }
-  if (hero.type === 'emoji_block' && hero.emoji) {
-    return `<div style="aspect-ratio:${escapeAttr(aspect)};border-radius:12px;background:${r.bg};display:flex;align-items:center;justify-content:center;font-size:96px;line-height:1;">${escapeHtml(hero.emoji)}</div>`
+  if (hero.type === 'emoji_block') {
+    return `<div data-ready-media-placeholder style="aspect-ratio:${escapeAttr(aspect)};border-radius:18px;background:${wellBg};display:flex;align-items:center;justify-content:center;gap:9px;"><span class="dot dot--active"></span><span class="label">视觉占位</span></div>`
   }
-  return `<div style="aspect-ratio:${escapeAttr(aspect)};border-radius:12px;background:${r.bg};border:1px dashed ${r.border};"></div>`
+  return `<div style="aspect-ratio:${escapeAttr(aspect)};border-radius:18px;background:${wellBg};border:1px dashed ${HAIR};"></div>`
 }
 
 function compilePhotoNote(props: z.infer<typeof photoNoteProps>): string {
-  const r = ramp(props.ramp)
-  const hero = compileHero(props.hero, r)
+  const hero = compileHero(props.hero)
   const tags = props.tags?.length
-    ? `<div style="display:flex;gap:6px;flex-wrap:wrap;">${props.tags.map((tag) => `<span class="badge" style="background:${r.bg};color:${r.sub};">#${escapeHtml(tag)}</span>`).join('')}</div>`
+    ? `<div style="display:flex;gap:6px;flex-wrap:wrap;">${props.tags.map((tag) => `<span class="badge">#${escapeHtml(tag)}</span>`).join('')}</div>`
     : ''
   return `<div class="card stack" style="gap:14px;">
     ${hero}
-    <div class="title" style="color:${r.title};">${escapeHtml(props.title)}</div>
-    ${props.body ? `<div class="subtitle" style="font-size:15px;">${escapeRichText(props.body)}</div>` : ''}
+    <div class="title">${escapeHtml(props.title)}</div>
+    ${props.body ? `<div style="font-size:15px;line-height:1.7;color:${INK_BODY};">${escapeRichText(props.body)}</div>` : ''}
     ${tags}
     ${props.footer ? `<div class="muted" style="font-size:12px;">${escapeHtml(props.footer)}</div>` : ''}
   </div>`
 }
 
+const chartDatumPartSchema = z.object({
+  label: z.string().min(1),
+  value: z.number(),
+})
+
 const chartDatumSchema = z.object({
   label: z.string().min(1),
   value: z.number(),
+  x: z.number().optional(),
+  parts: z.array(chartDatumPartSchema).min(1).max(6).optional(),
 })
 
 const chartFocusProps = z.object({
   title: z.string().min(1),
   subtitle: z.string().optional(),
   chart: z.object({
-    type: z.enum(['bar', 'line', 'pie', 'stacked_bar', 'scatter']),
+    type: z.enum(['bar', 'hbar', 'line', 'pie', 'stacked_bar', 'scatter', 'waffle']),
     data: z.array(chartDatumSchema).min(1).max(20),
     ramp: rampSchema.default('sky'),
+    unit: z.string().optional(),
+    hot: z.number().int().min(0).optional(),
   }),
   insight: z.string().optional(),
   source_note: z.string().optional(),
 })
 
-function compileBarChart(data: { label: string; value: number }[], r: RampTier): string {
-  const max = Math.max(...data.map((d) => d.value), 1)
-  return data.map((d) => {
-    const w = Math.max(8, (d.value / max) * 100)
-    return `<div class="stack" style="gap:4px;">
-      <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--widget-text-muted);"><span>${escapeHtml(d.label)}</span><span style="color:${r.sub};font-weight:600;">${d.value}</span></div>
-      <div style="height:10px;border-radius:6px;background:${r.bg};overflow:hidden;"><div style="height:100%;width:${w}%;background:${r.accent};border-radius:6px;"></div></div>
-    </div>`
-  }).join('')
-}
-
-function compileLineChart(data: { label: string; value: number }[], r: RampTier): string {
-  if (data.length < 2) return compileBarChart(data, r)
-  const w = 640
-  const h = 200
-  const max = Math.max(...data.map((d) => d.value), 1)
-  const min = Math.min(...data.map((d) => d.value), 0)
-  const range = max - min || 1
-  const stepX = (w - 80) / (data.length - 1)
-  const points = data.map((d, i) => ({
-    x: 40 + i * stepX,
-    y: h - 40 - ((d.value - min) / range) * (h - 80),
-    d,
-  }))
-  const polyline = points.map((p) => `${p.x},${p.y}`).join(' ')
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}" style="width:100%;height:auto;">
-    <polyline fill="none" stroke="${r.accent}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" points="${polyline}"/>
-    ${points.map((p) => `<circle cx="${p.x}" cy="${p.y}" r="4" fill="${r.sub}"/>`).join('')}
-    ${points.map((p) => `<text x="${p.x}" y="${h - 12}" text-anchor="middle" font-size="11" fill="#94A3B8">${escapeHtml(p.d.label)}</text>`).join('')}
-  </svg>`
-}
-
-function compilePieChart(data: { label: string; value: number }[], r: RampTier): string {
-  const total = data.reduce((acc, d) => acc + d.value, 0) || 1
-  const cx = 90
-  const cy = 90
-  const radius = 72
-  let cursor = -Math.PI / 2
-  const palette = [r.accent, r.sub, r.title, r.border, '#94A3B8', '#475569']
-  const slices = data.map((d, i) => {
-    const angle = (d.value / total) * Math.PI * 2
-    const x1 = cx + radius * Math.cos(cursor)
-    const y1 = cy + radius * Math.sin(cursor)
-    cursor += angle
-    const x2 = cx + radius * Math.cos(cursor)
-    const y2 = cy + radius * Math.sin(cursor)
-    const largeArc = angle > Math.PI ? 1 : 0
-    const color = palette[i % palette.length]
-    return `<path d="M${cx},${cy} L${x1},${y1} A${radius},${radius} 0 ${largeArc} 1 ${x2},${y2} Z" fill="${color}"/>`
-  }).join('')
-  const legend = data.map((d, i) => `<div style="display:flex;align-items:center;gap:6px;font-size:12px;"><span style="width:10px;height:10px;border-radius:2px;background:${palette[i % palette.length]}"></span>${escapeHtml(d.label)} <span style="color:var(--widget-text-muted);margin-left:auto;">${Math.round((d.value / total) * 100)}%</span></div>`).join('')
-  return `<div style="display:grid;grid-template-columns:180px 1fr;gap:16px;align-items:center;">
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 180" style="width:180px;height:180px;">${slices}</svg>
-    <div class="stack" style="gap:6px;">${legend}</div>
-  </div>`
-}
-
 function compileChartFocus(props: z.infer<typeof chartFocusProps>): string {
-  const r = ramp(props.chart.ramp)
-  const chartHtml = props.chart.type === 'line'
-    ? compileLineChart(props.chart.data, r)
-    : props.chart.type === 'pie'
-      ? compilePieChart(props.chart.data, r)
-      : compileBarChart(props.chart.data, r)
+  const chartHtml = renderReadyChart({
+    type: props.chart.type,
+    data: props.chart.data,
+    unitLabel: props.chart.unit,
+    hot: props.chart.hot,
+  })
   return `<div class="card stack" style="gap:16px;">
     <div class="stack" style="gap:4px;">
       <div class="title">${escapeHtml(props.title)}</div>
       ${props.subtitle ? `<div class="subtitle">${escapeHtml(props.subtitle)}</div>` : ''}
     </div>
     <div class="stack" style="gap:8px;">${chartHtml}</div>
-    ${props.insight ? `<div class="subtitle" style="font-size:14px;color:${r.sub};">💡 ${escapeHtml(props.insight)}</div>` : ''}
-    ${props.source_note ? `<div class="muted" style="font-size:11px;">来源：${escapeHtml(props.source_note)}</div>` : ''}
+    ${props.insight ? `<div style="display:flex;gap:8px;align-items:baseline;"><span class="label" style="color:${ACCENT};">INSIGHT</span><span style="font-size:13px;color:${INK_BODY};">${escapeHtml(props.insight)}</span></div>` : ''}
+    ${props.source_note ? `<div class="label" style="font-size:10px;">来源 · ${escapeHtml(props.source_note)}</div>` : ''}
   </div>`
 }
 
@@ -433,25 +382,19 @@ const gridCollectionProps = z.object({
 })
 
 function renderGridItem(item: z.infer<typeof gridItemSchema>, shape: 'square' | 'portrait' | 'free'): string {
-  const r = ramp(item.ramp ?? RAMP_DEFAULT)
+  const tone = resolveWidgetToneStyle(item.ramp)
   const aspect = shape === 'square' ? '1/1' : shape === 'portrait' ? '3/4' : 'auto'
   const visual = item.image
     ? `<img src="${escapeAttr(item.image)}" alt="" style="display:block;width:100%;height:100%;object-fit:cover;"/>`
-    : item.emoji
-      ? `<div style="font-size:36px;line-height:1;">${escapeHtml(item.emoji)}</div>`
-      : item.icon
-        ? `<div style="font-size:24px;color:${r.sub};">${escapeHtml(item.icon)}</div>`
-        : `<div style="width:24px;height:24px;border-radius:6px;background:${r.accent};"></div>`
+    : `<div style="width:14px;height:14px;border-radius:50%;background:${widgetStatusDotColor(item.status ?? 'pending')};"></div>`
   const statusBorder = item.status === 'done'
-    ? r.accent
-    : item.status === 'active'
-      ? r.sub
-      : item.status === 'highlight'
-        ? '#FBBF24'
-        : r.border
-  return `<div class="stack" style="gap:6px;align-items:center;justify-content:center;text-align:center;padding:12px;border-radius:12px;background:${r.bg};border:1px solid ${statusBorder};${aspect !== 'auto' ? `aspect-ratio:${aspect};` : ''}">
+    ? widgetVar('ok')
+    : item.status === 'active' || item.status === 'highlight'
+      ? ACCENT
+      : tone.border
+  return `<div class="stack" style="gap:6px;align-items:center;justify-content:center;text-align:center;padding:12px;border-radius:12px;background:${tone.surface};border:1px solid ${statusBorder};${aspect !== 'auto' ? `aspect-ratio:${aspect};` : ''}">
     <div style="display:flex;align-items:center;justify-content:center;flex:1;${item.image ? 'width:100%;height:100%;border-radius:8px;overflow:hidden;' : ''}">${visual}</div>
-    ${item.label ? `<div style="font-size:12px;color:${r.title};font-weight:600;">${escapeHtml(item.label)}</div>` : ''}
+    ${item.label ? `<div style="font-size:12px;color:${INK};font-weight:600;">${escapeHtml(item.label)}</div>` : ''}
   </div>`
 }
 
@@ -461,6 +404,30 @@ function compileGridCollection(props: z.infer<typeof gridCollectionProps>): stri
     <div class="title">${escapeHtml(props.title)}</div>
     <div style="display:grid;grid-template-columns:repeat(${props.cols}, minmax(0,1fr));gap:10px;">${cells}</div>
   </div>`
+}
+
+const relationMapProps = relationshipGraphPropsSchema.extend({
+  title: z.string().optional(),
+})
+
+function compileRelationMap(props: z.infer<typeof relationMapProps>): string {
+  const { title, ...graphProps } = props
+  return compileRelationshipGraph({
+    ...graphProps,
+    heading: props.heading ?? title,
+  })
+}
+
+const processFlowSkeletonProps = processFlowPropsSchema.extend({
+  title: z.string().optional(),
+})
+
+function compileProcessFlowSkeleton(props: z.infer<typeof processFlowSkeletonProps>): string {
+  const { title, ...flowProps } = props
+  return compileProcessFlow({
+    ...flowProps,
+    heading: props.heading ?? title,
+  })
 }
 
 const freeformAspectSchema = z.enum(['1:1', '9:16', '16:9', '4:5', '4:3', 'a4'])
@@ -524,7 +491,7 @@ export const WIDGET_SKELETONS: Record<WidgetSkeletonId, WidgetSkeletonDefinition
     id: 'single_focus',
     displayName: '单焦长卡',
     description: '一段引语 / 摘录 / 金句 / 长文，单视觉焦点',
-    defaultSize: 'square_card',
+    defaultSize: 'doc_block',
     allowedSizes: ['square_card', 'portrait_card', 'story_card', 'doc_block'],
     defaultBackgroundMode: 'opaque',
     supportsAnimation: false,
@@ -578,7 +545,7 @@ export const WIDGET_SKELETONS: Record<WidgetSkeletonId, WidgetSkeletonDefinition
   chart_focus: defineSkeleton({
     id: 'chart_focus',
     displayName: '单图表聚焦',
-    description: '一张图说明一个趋势 / 分布',
+    description: '一张图说明一个趋势 / 分布 / 占比 / 相关性（点阵图表：bar/hbar/line/scatter/stacked_bar/waffle；pie 输入自动转合规占比形态）',
     defaultSize: 'landscape_card',
     allowedSizes: ['landscape_card', 'landscape_4_3', 'square_card', 'a4_portrait', 'doc_block'],
     defaultBackgroundMode: 'opaque',
@@ -596,6 +563,28 @@ export const WIDGET_SKELETONS: Record<WidgetSkeletonId, WidgetSkeletonDefinition
     supportsAnimation: false,
     propsSchema: gridCollectionProps,
     compile: compileGridCollection,
+  }),
+  relation_map: defineSkeleton({
+    id: 'relation_map',
+    displayName: '关系图谱',
+    description: '人物 / 组织 / 概念关系网络：分组卡片 + 自动连线 + 图例，只给 groups/nodes/edges 不给坐标',
+    defaultSize: 'landscape_4_3',
+    allowedSizes: ['landscape_4_3', 'landscape_card', 'square_card', 'a4_portrait', 'doc_block'],
+    defaultBackgroundMode: 'opaque',
+    supportsAnimation: false,
+    propsSchema: relationMapProps,
+    compile: compileRelationMap,
+  }),
+  process_flow: defineSkeleton({
+    id: 'process_flow',
+    displayName: '流程说明图',
+    description: '步骤 / 科普流程 / 因果链：编号步骤 + 可选分支 chips + 可选结果卡',
+    defaultSize: 'portrait_card',
+    allowedSizes: ['portrait_card', 'story_card', 'square_card', 'a4_portrait', 'landscape_4_3', 'doc_block'],
+    defaultBackgroundMode: 'opaque',
+    supportsAnimation: false,
+    propsSchema: processFlowSkeletonProps,
+    compile: compileProcessFlowSkeleton,
   }),
   freeform_static: defineSkeleton({
     id: 'freeform_static',
