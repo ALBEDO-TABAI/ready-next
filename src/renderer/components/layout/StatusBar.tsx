@@ -1,5 +1,6 @@
 import { Clock } from 'lucide-react'
 import { useEffect, useState } from 'react'
+import { READY_VERSION_LABEL } from '../../../shared/app-version'
 import { WORKBENCH_EDGE_ICON_INSET, WORKBENCH_STATUSBAR_HEIGHT } from '../../modules/workbench/chrome'
 
 export default function StatusBar() {
@@ -23,7 +24,7 @@ export default function StatusBar() {
         boxShadow: 'none',
       }}
     >
-      <span>Ready v0.1.0</span>
+      <span>{READY_VERSION_LABEL}</span>
       <div className="flex items-center gap-3">
         <div className="flex items-center gap-1">
           <Clock className="w-3 h-3" />

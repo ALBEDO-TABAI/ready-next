@@ -164,6 +164,7 @@ npm run build
 
 ## 10. 提交前检查
 - `npm run typecheck` 无错误。
+- 发布版本只以 `package.json` 为权威来源：界面与服务标识必须使用 `src/shared/app-version.ts` 或主进程的 `app.getVersion()`，禁止新增硬编码版本号。改版本时同步 `package-lock.json`、`CHANGELOG.md`，运行 `npm run verify:version`；完成打包后再把真实包体验证结果补回更新日志。
 - 涉及 SQLite、设置、本地持久化时，`npm run verify:native` 必须通过。
 - 关键页面可正常渲染与切换；Browser、Agent、Settings 关键链路至少做一次基础回归。
 - 架构级改动必须能配对到 `docs/superpowers/plans/YYYY-MM-DD-*-implementation.md`；`*-arrangement.md`、`*-counterplan.md` 只作反提案，历史材料需在 frontmatter 标 `enforce: false`。

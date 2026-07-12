@@ -12,6 +12,7 @@
  */
 
 import { spawn, type ChildProcessWithoutNullStreams } from 'child_process'
+import { APP_VERSION } from '../../../shared/app-version'
 import { ensureAuthorized, type McpOAuthToken } from './oauth'
 import { getMcpToolCatalogEntry, type McpToolAnnotations } from './registry'
 
@@ -205,7 +206,7 @@ class McpStdioConnection {
         await this.sendRequest('initialize', {
           protocolVersion: MCP_PROTOCOL_VERSION,
           capabilities: {},
-          clientInfo: { name: 'ready-cowork', version: '0.1.0' },
+          clientInfo: { name: 'ready-cowork', version: APP_VERSION },
         }, HANDSHAKE_TIMEOUT_MS)
         this.sendNotification('notifications/initialized', {})
       })().catch((error) => {

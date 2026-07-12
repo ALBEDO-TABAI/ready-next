@@ -135,6 +135,7 @@ export class SidecarManager {
             READY_SIDECAR_HOST: this.host,
             READY_SIDECAR_PORT: String(port),
             READY_SIDECAR_RUNTIME_ROOT: this.runtimeRoot,
+            READY_APP_VERSION: app.getVersion(),
           },
         },
       )

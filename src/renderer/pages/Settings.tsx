@@ -7,6 +7,7 @@ import {
 } from 'lucide-react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useTheme, type ThemeAccent, type ThemeSkin } from '../stores/useTheme'
+import { READY_VERSION_LABEL } from '../../shared/app-version'
 import { nextIntentId } from '../../shared/browser-view-intent'
 import { BROWSER_POWER_MODE_SETTING_KEY } from '../../shared/browser-power'
 import RemoteIMSettingsPanel from '../components/settings/RemoteIMSettingsPanel'
@@ -215,7 +216,7 @@ const settingsData: SettingSection[] = [
     icon: Info,
     description: '应用版本信息和更新',
     settings: [
-      { id: 'version', label: '当前版本', type: 'readonly', value: 'Ready v0.1.1' },
+      { id: 'version', label: '当前版本', type: 'readonly', value: READY_VERSION_LABEL },
       { id: 'checkUpdate', label: '检查更新', description: '查看是否有新版本可用', type: 'button', buttonLabel: '检查更新', buttonVariant: 'primary' }
     ]
   }
@@ -548,7 +549,7 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
             <div className="flex items-center gap-2 px-1">
               <HardDrive className="w-3 h-3" style={{ color: 'var(--text-light)' }} />
               <span className="text-[10px]" style={{ color: 'var(--text-light)' }}>
-                Ready v0.1.1 · Electron 42
+                {READY_VERSION_LABEL} · Electron 42
               </span>
             </div>
           </div>

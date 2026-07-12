@@ -38,7 +38,7 @@ test('topbar and rail icon controls use direct-on-surface styling without extra 
   assert.match(statusBar, /paddingRight:\s*WORKBENCH_EDGE_ICON_INSET/)
   assert.match(statusBar, /data-liquid-shell="statusbar"/)
   assert.match(statusBar, /borderTop: '1px solid transparent'/)
-  assert.match(statusBar, /Ready v0\.1\.0/)
+  assert.match(statusBar, /READY_VERSION_LABEL/)
   assert.match(statusBar, /toLocaleTimeString/)
   assert.match(statusBar, /justify-between/)
   assert.doesNotMatch(statusBar, /Kimi API 已连接|浏览器预览模式|main/)

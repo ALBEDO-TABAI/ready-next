@@ -1026,9 +1026,10 @@ class WechatOpenClawAdapter(ChannelAdapter):
         path.write_text(json.dumps(tokens, ensure_ascii=False), encoding="utf-8")
 
     def _base_info(self) -> Dict[str, str]:
+        app_version = os.environ.get("READY_APP_VERSION", "0.0.0").strip() or "0.0.0"
         return {
             "channel_version": CHANNEL_VERSION,
-            "bot_agent": self.configured_bot_agent or f"Ready/0.1.0 OpenClaw-Weixin/{CHANNEL_VERSION}",
+            "bot_agent": self.configured_bot_agent or f"Ready/{app_version} OpenClaw-Weixin/{CHANNEL_VERSION}",
         }
 
     def _headers(self, token: Optional[str] = None) -> Dict[str, str]:

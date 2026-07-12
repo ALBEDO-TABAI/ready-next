@@ -2,6 +2,30 @@
 
 ## [Unreleased] - 2026-07-10
 
+### Dynamic Delivery（2026-07-11）
+
+- 默认启用自适应交付：简单任务保持单路径，复杂任务按事实选择独立复核或最多两个无工具协作者。
+- 候选答案在复核通过前完全隔离；支持一次定向修补，拒绝稿不会进入聊天记录、续跑快照或重启恢复。
+- 设置页可切换标准/自适应，输入框可为下一次发送临时启用“彻底”模式；任务卡显示真实负责人、协作者和降级/阻塞状态。
+- 协作者贡献只有在父任务通过且证据被实际采用后，才进入对应专项 Agent 的待确认学习。
+
+### 文档 widget Ready 设计语言 + 关系图/流程图一等公民（2026-07-11）
+
+- **设计令牌单一来源**：新增 `src/shared/document-widget-theme.ts`（暖纸白/墨阶/hairline/品牌橘红 `#FF4B2B`/mono 字栈/图表三色，亮暗两套；图表数据 mark 亮暗恒定 `#FF4B2B`），`widget-css-bridge` 的 iframe 基线 CSS 与两套 widget 编译器（openui componentSpec + 骨架）全部改走令牌——此前 accent 错接功能蓝、编译器内散落 Tailwind 冷灰蓝 pastel 的根因修复。基线类层新增 `.label`（mono 大写 0.08em）/`.num`（tabular-nums）/`.dot` 状态点（橘=进行中/绿=完成/灰=未开始），标题 700→600，卡壳外投影摘除、badge 改 mono hairline 胶囊。legacy 六色 ramp id 保持 schema 兼容，语义收敛为 neutral/ok/accent 三档（彩虹不可再现）。
+- **点阵图表引擎**：新增 `document-widget-dot-charts.ts`（Ready dot-matrix：单 accent + 退避灰、unit 图例 `● = N` 与逐项真值直标强制、`resolveDotUnit` 让最大值落 8–15 点）。`chart_focus` 与 openui `bar_chart`/`line_chart`/`time_allocation_chart` 共同委托；**`stacked_bar`/`scatter` 从静默降级成 bar 修为真实现**（分组构成小图并置 / SVG 散点场），新增 `hbar`/`waffle` 类型；`pie` 输入保持接受但渲染为合规占比形态（单值→waffle，多值→排序点条+百分比），emoji 装饰（💡）清除。调色经 dataviz 六检脚本验证（#FF4B2B 三面全 PASS）。
+- **关系图/流程说明图一等公民**：`relationship_graph` 渲染器提取为共享 `document-widget-relation-graph.ts`（连线身份=标签 chip+线型+图例，颜色只作强调：情感=橘红/同盟=绿/其余墨阶；组色板墨阶化，模型供色不参与渲染），新增骨架 `relation_map` 与映射 case——此前该组件映射缺失导致编辑抽屉直接失败。新增 `document-widget-process-flow.ts` + 骨架 `process_flow`（编号步骤 + hairline 导轨 + decision 分支 chips + OUTCOME 卡，面向科普流程/步骤说明），openui `flow_diagram` 委托同一渲染器（出度≥2 节点确定性展开分支）；**映射从 `flow_diagram→vertical_timeline` 的丢结构降级修为 `→process_flow`**。骨架总数 9→11，新骨架不设触发词门。
+- **提示词对齐**：骨架清单数量动态生成、补 Ready 纪律行（结构化内容交给模型、配色/坐标由代码执掌）；bar/line/flow/stats 家族 implementation 提示与新实现对齐；`inferWidgetFamily` 增补 说明图/流程图/科普图 关键词。openui 生成物（PROMPT.md）已再生成。
+- **合同**：新增 `document-widget-ready-theme.test.ts`（legacy pastel hex 禁入、令牌变量引用、stacked/scatter 真形态、pie 无扇形、unit 图例+直标、关系图双路同渲染器指纹、非法边跳过警示、process_flow 编号/分支/outcome、ramp 兼容、accent 数据字段不落漆、触发词门不变、清单数量一致），既有骨架/映射/抽屉合同同步至 11 骨架。回归入口 `npm run verify:widget-ready`；真浏览器亮暗双主题视觉验收通过。计划文档 `docs/superpowers/plans/2026-07-11-document-widget-ready-design-language-implementation.md`。
+- **"markdown 表格冒充信息卡"修复（提示词硬指令）**：真机 dogfood 发现模型在工具面含 `document_insert_widget` 时仍用 `document_replace_exact` 把 md 表格写进正文当"信息卡"（工具映射表只把"交互图表/组件"指向 insert_widget，"信息卡"无映射）。修复=三处硬指令：`buildToolGuidance` 映射表补"信息卡/摘要卡/对比卡/关系图/流程图/图表 → 必须 document_insert_widget，禁止文本替换类工具冒充卡片"；骨架规则片段与 info_card 家族指引同步补硬指令。行为测试直调 `buildToolGuidance`/`inferDocumentWidgetProfile` 断言硬指令在场。
+- **抽屉可点性 + 卡片身份行（W10e，dogfood 第七例，与 Codex 修复协同）**：Codex 已接通 facts→骨架层与抽屉键值编辑器；本轮补三件——① 编辑抽屉 **portal 到 body**：此前挂在编辑器子树内，祖先带 transform/filter/contain 时 position:fixed 包含块被劫持（截图证据：遮罩未盖顶栏）、面板可见但点击被相邻堆叠层吞掉，portal 一次消除整类陷阱（真机交互验收项，源钉合同）；② **single_focus 补 kicker/footer schema**：抽屉字段表早有 上标/脚注 路径但 schema 缺席，用户编辑保存即被 zod 静默剥除（数据丢失 bug）——补齐并 Ready 化渲染（kicker=橘点+mono 大写身份行，footer=hairline 上缘 mono 弱化行），这也是"像表格不像卡"的解药之一；③ **卡壳暖化**：壳底/头部混色伙伴从冷色 surface-card-bg 换暖纸白 bg-panel，预览内边距收紧。verify:widget-ready 158 断言全绿。
+- **componentSpec 字段结构进 live 指引（W10d，dogfood 第六例）**：nonce 修复后 iframe 真渲染了（payload 出现 widget_state 即接收器回传证明），prepend_start 位置也对了，但卡片仍是"title+327 字长 body"的文字墙——地面真相取证：模型 props 只有 `[title, body, tone]`（连字段名都用错，靠 renderer 的 title→heading 容错救回），因为 **live 指引只给过组件名清单、从未给过 props 结构**（zod describe 只进 docs 生成物与管线路径），模型全程盲猜。真浏览器 A/B 对照（同数据 title+长文 vs facts 键值行）确认卡片 chrome 本身正常、缺的只是内容形态。修复=`buildDocumentSurfaceGuidance` 注入 `describeApprovedWidgetProps`（核心七组件 + 命中家族，`!必填 ?可选` 紧凑格式），info_card 家族指引补"速览类必须 facts、body 只放一句结论"硬指令；合同 C3b 钉住字段结构在场（verify:widget-ready 152 断言全绿）。
+- **信息卡全链复审收口（W11）**：补齐此前合同未覆盖的六个真实回退点——OpenUI 信息卡经编辑抽屉保存时不再把 `facts` 键值行压成长正文，编辑后以 `skeleton_spec` 为唯一真值并移除会覆盖人工修改的旧 `component_spec`；原编辑抽屉只接在已退出生产入口的旧编辑器上，现已接入文档模式真实预览编辑链；数据表去掉残留冷灰硬编码并改走 Ready 令牌；折线图从“只标最高点和末点”修为逐点真值直标；计划板/习惯卡映射不再偷偷注入 Emoji。新增生成→映射→编译→围栏往返行为合同；独立 Ready 数据目录真机加载五张卡，并实测从预览打开速览卡编辑、原有键值回填、保存后结构与唯一真值均保持，速览/折线/表格/关系图/流程图的 iframe 与脚本均正常启动。
+- **信息卡最终观感与编辑可靠性收口（W12）**：现有卡片不再被围栏中的旧样式缓存冻结；只要有结构化描述，预览与导出都会按当前设计重新生成，旧代码仅在无法重建时回退。iframe 也不再用应用的功能蓝表面覆盖 Ready 暖纸白令牌；信息卡现为白卡、暖灰分区、细暖边线和单一橘红强调，配合身份行、重点结论、响应式事实网格和更小的补充说明，并去掉重复外框，尺寸选项也真正改变版式。编辑面板按卡片身份保持草稿，父界面刷新不再把标题、尺寸、透明背景和视觉语气弹回原值；字段路径、无效选项与残留 Emoji 同步清理。真实 Ready 临时副本完成“修改→强制刷新→保存→落盘→重开”全链验证，用户原文未改动。同批修复宿主启动脚本漏盖安全标记、重编译后预览预算仍看旧缓存，以及卡内 `onclick/oninput/onchange` 实际被拦截却没有接收器代执行三条暗路径；真机带参数按钮点击成功且控制台零报错，静态回退与导出不再携带可执行事件属性。
+- **widget 交互预览 CSP nonce 修复 + info_card 键值速览行（W10c，dogfood 第五例）**：卡片终于出现在开头，却渲染成"交互预览加载较慢，先显示静态回退内容"的无样式文本堆。根因一（渲染面，自诞生即坏的暗路径）：index.html CSP 的 script-src 同时声明 'unsafe-inline' 与 `nonce-cmVhZHktd2lkZ2V0`（base64="ready-widget"）——按 CSP 规范 **nonce 在场时 unsafe-inline 被忽略**，而该 nonce 全仓零盖章代码，srcdoc iframe（继承宿主 CSP）里的接收器脚本被静默拦截，`widget:ready` 永不到达 → 180ms 永久降级静态回退；旧合同测试恰好钉住了坏状态（断言裸内联 `<script>` + CSP 文本含 unsafe-inline）。修复=按设计初衷补盖章：`WIDGET_SCRIPT_NONCE` 单一常量，接收器脚本、sanitizeWidgetHtml 的内联/白名单 CDN 脚本（伪造 nonce 会被替换）、PNG 导出路径的 DOM 注入脚本（属性+IDL 双写防 nonce hiding）全部盖章；新合同 `widget-script-nonce.test.ts` 钉住"常量与 index.html CSP nonce 逐字一致 + 三处盖章 + 静态回退剥净"，旧合同更新为修正语义。真浏览器（宿主带同款 CSP）探针验证：widget:ready/state/resize 全部到达。根因二（内容形态）：模型把整卡内容塞进 body 长文本——info_card 新增 `facts: [{label,value}]` 键值速览行（Ready mono 标签列 + hairline 分行渲染），body/points/facts 补 describe 引导（body 一句话结论 ≤80 字），骨架映射同步折叠不丢内容，openui 生成物已再生成。verify:widget-ready 151 断言全绿。
+- **widget 插入位置语义（W10b，dogfood 第四例）**：用户要"开头做信息卡"，componentSpec/守卫链路全部成功但 widget 落在 226 行文件的第 224 行（文末），完成宣告谎称"已在开头插入"。两个根因都修：`document_insert_widget` 新增 `prepend_start` 位置（H1 大标题后、无 H1 则顶部；schema description 明示"开头/顶部/标题下→prepend_start"），execute.ts 不再把未知 position 静默强转 append_end（响亮报错列出合法值），结果文案如实回报插入位置（开头/文末/章节后）。live 指引映射同步补"开头插卡→prepend_start，不要 append_end 落底再声称在开头"。纯函数导出 + 行为合同 `document-widget-insert-position.test.ts`（prepend/append/miss/upsert 六案）挂入 verify:widget-ready（144 断言全绿）。
+- **@路径写入全链自愈（W10，dogfood 三连修终章）**：全链深挖（目标解析/技能选中两路取证 + run_meta 终因）确认 8 个链上问题后系统性修复——F1 目标文档守卫的 open/save 工具在本轮面缺席时由 executor 从注册表自愈（落 `document_target_guard_tool_recovered`；根治 `target_document_open_unavailable` 死锁与"地板兜底晚于守卫早绑"时序坑）；F2 守卫指令/修复文案对齐"自动开存"现实并携带 widget 硬指令（此前指令叫模型调它没有的 open_tab）；F3 insert_widget/replace_* 工具 description 内置"禁止 md 表格冒充卡片"（schema 是模型必看通道）；F4 **修复硬指令生产死代码**——`buildToolGuidance` 全仓零生产调用方，新增 `buildDocumentSurfaceGuidance` live 通道（事实信号=最终工具面含 insert_widget；注入映射+OpenUI 目录+家族基线；单一文案信源）接进 SDK 前导词组装；F5 `blocked_tool_error` 登记用户可读文案、守卫 error 终态保留模型进展说明（交付复核路径刻意除外）；F6 `skill_export_artifact` overwrite=true 并入 M2"覆盖即销毁"确认闸门（关掉无确认整文件覆写侧门）。合同：`document-target-guard-selfheal.test.ts` + 三个既有套件扩展，`verify:widget-ready` 全量挂入；verify:stability / agent-sdk-runtime 92 用例 / typecheck 全绿。
+- **当前文档上下文地板升级为文档编辑面（floors 语义修订，W9）**：dogfood 第二例坐实硬指令不够——技能 selected 轮（floors=skill_selected:obsidian-web-clip + 文档资源/上下文）最终面仅 8 工具，`document_insert_widget` 物理不在场，模型被迫用 `skill_export_artifact` 整文件覆写（bytesWritten 9572），md 表格复现且暴露"能整文覆写却不能插 widget"的失衡写面。修订=`computeCapabilityFloors` 纯函数单点：`current_document_context`（当前打开的文档）地板从单一 `document_read_section` 升级为 `read_section + widget 增删改查 + replace_exact + save_tab`（刻意不含 set_content/append_content 整文覆写）；`local_document_resource`（@提及文件）保持只读地板——提及≠授写。三个 live 消费点与 dormant parity 同源自动生效；`capability-floors.test.ts` 正交矩阵同步 + 新增 dogfood 回归 case；`verify:widget-ready` 挂入地板矩阵与 `check-capability-gate-enforced-in-arbitration.cjs`（125 断言 + gate 全绿）；CLAUDE/AGENTS 地板硬约束段同步。
+
 ### 文档导出：顶栏导出按钮（PDF / 带资源的 Markdown 压缩包，2026-07-11）
 
 - 文档模式顶栏（大纲/书签按钮右侧）新增「导出」按钮，原生下拉两种形式：**导出为 PDF** 与 **导出 Markdown 压缩包（含资源）**；目标是把 Ready 里的阅读呈现以整洁优雅的方式带走。非 markdown/text 文档（表格/图片/视频/PDF/画板/电子书原件）按钮禁用并提示；按钮态（导出中 spinner / 完成 √ / 失败红色 + 错误提示）就地反馈，取消保存对话框静默复位。
@@ -25,11 +49,59 @@
 - **启动提速 ~11.5s（根因修复）**：`SkillsRuntimeManager.listSkills()` 此前每次调用都对全部 embedded 技能做 `syncEmbeddedSkill`（源目录全量内容哈希 + 状态比对），启动期 registry/工具面/目录提醒反复调 listSkills，实测把 `setupAgentIPC` 拖成 ~13s 的主线程实心块（CPU profile：`hashDirectoryContents.visit` 占 83%，同一技能一次启动被哈希 8+ 次）——这就是启动动画冻结与"启动慢"的共同主因，此前误判为 renderer 编译耗时（实测 renderer 就绪只要 ~0.3s）。修复=同步结果进程内记忆化（`syncedEmbeddedSkillDestinations`，install 管线 force 路径保留强制重同步照顾 dev 迭代）；dev 实测 `agent-ipc` 段 13s→1.5s、主窗口就绪 ~15.5s→~4.0s。`hashDirectoryContents` 增加 >100ms 慢哈希响亮警告；新增 `startBootStallProbe`（32ms 心跳，>150ms 主线程实心块按最近 boot 阶段归因落日志，启动 30s 后自停）。回归合同 `embedded-skill-managed-sync` 16/16 通过。
 - 启动动画抗冻结三件套（真机逐帧截屏定位：新窗口最初几秒的帧呈现耦合主进程活性，实心同步段会把动画整段冻住）：① splash 窗口改**不透明**（透明窗口呈现路径更脆弱，冻结可永久化；圆角阴影由系统窗形提供，退场改为主进程整窗 setOpacity 渐隐）；② splash 动画从 rAF 逐帧改 SVG 属性重写为**纯 CSS 合成器动画**（逐列 opacity 关键帧扫描 + transform 幕布揭幕 + 收尾按 easeOutCubic 反函数预排 transition-delay 聚合，页面 JS 只剩 finish 事件加 class，等价"预渲染播片"）；③ 重模块**分片预热**（boot-entry 按子系统 9 片动态 import）+ whenReady 大阶段间统一 `yieldToPresentation()`（48ms）让合成器追帧，消除单个 1.4s 实心求值块。
 
+### 聊天任务卡 / 工具调用 activity-capsule 重设计
+
+- 会话内任务卡与工具调用合并为一张「活动胶囊」，采用 Claude web 式三层披露：折叠态只占一行（状态点 + 任务标题 + 最新动态预览 + N 个工具 + chevron）；点开展开为竖向时间线（徽章 / 摘要 / 进度 / 计划步骤 / 工具条目 / 产物 / 评分）；再点单个工具条目展开完整调用行与输出文本。多子步骤任务不再被大卡片和独立工具卡吃掉正文空间。
+- 工具时间线以「调用+结果」配对成条目（纯函数 `deriveToolTimelineItems`，串行配对 + 时长标签 + 失败字样判 error），运行中折叠态自动浮出最近 3 条动态（保留 P0-2 语义），完成后自动收回到单行。
+- 同一条消息下任务胶囊与独立工具卡互斥：有任务胶囊时消息段工具事件并入胶囊时间线；无任务投影的轮次落到同款式 ToolTraceCard；ChatMessages 里的全局工具胶囊（无投影兜底）也统一为同一组件。
+- 交互闸门语义逐字保留：Stage Q `canResume` 门、child-run/detached/browser 精确按钮路由、采集 consent、记忆捕获确认；等待用户的阻塞型动作在折叠态也直接露出，「暂停任务」仅展开时出现。评分星收进展开态终态区。
+- 合同同步：`chat-task-snapshot-placement-contract` 改锚新胶囊结构；`tool-trace-card-presentation` 更新为配对条目断言并新增 L3 披露用例；`toolTraceRows` 新增时间线派生单测。`TaskCard` 退役 `taskKey`/`onToggleSection` 死参。
+- L3 详情数据面（main 侧事件结构扩展）：`ScopeRunTraceItem` 增加可选 `toolName`/`detail`，SDK executor 在发布工具事件时携带完整入参 JSON（秘密键过滤 + 逐值/数组/深度/总量截断，`tool-trace-detail.ts` 纯层单点强制）与脱敏输出全文（≤4000 字符，仅在比 240 字符预览多出信息时生成）；三级披露从「参数键名 + 截断输出」升级为「工具名 + 入参 JSON + 输出全文」。双生产者（executor 富事件 / orchestrator 瘦事件）在可见性去重点做富字段回填合并；逐消息段快照持久化两字段，整轮 taskSnapshot 刻意剥离 `detail` 控制消息 meta 体积。`ToolTimeline` 组件族按行数健康度预留缝拆到独立文件。新增 `tool-trace-detail`/`tool-trace-visibility-merge` 测试与 store→持久化快照 round-trip 用例。
+
+### 样式基建（级联层根修）
+
+- 修复 renderer 全局样式根因：`base-chrome.css` 未分层的 `* { margin:0; padding:0 }` 按 CSS 级联层规则无条件压过 `@layer utilities`，导致全应用 Tailwind margin/padding 工具类（约 600 处、59 个文件）自 v4 迁移以来静默失效。该 reset 语义由 Tailwind preflight（`@layer base`）等价承担，已删除；CDP 探针 before/after（`div.mt-5.px-4` computed 0px→20px/16px）与 workbench 截图对比验证，无破版。
+- 新增回归 gate `scripts/check-css-cascade-layer-reset.cjs`（禁止未分层通用选择器声明 margin/padding，含 @media 内；已接入 `npm run verify` 链），防止同类静默失效复发。
+
 ### 浏览器数据（清除浏览数据 / Cookie 管理）
 
 - 设置页新增「浏览器数据」选项页：Edge 式清除浏览数据（浏览历史、下载记录、Cookie 及其他站点数据、缓存，支持 1 小时 / 24 小时 / 7 天 / 4 周 / 全部时间范围）与 Cookie 管理（按站点分组查看、搜索、单条 / 整站 / 全部删除）。
 - 新增 `BrowserPrivacyService`（`browser-engine/privacy-service.ts`）：清理与枚举全部作用于真实浏览分区 `persist:browser`（此前 `app:clearCache` 只清 defaultSession，清不到浏览会话）；历史 / 下载记录按 SQLite `visited_at`/`created_at` 支持时间范围，Cookie / 缓存 / 站点存储受 Electron API 限制仅支持全量清除并在 UI 明示。
 - 新增 IPC：`browser:getPrivacySummary` / `browser:clearBrowsingData` / `browser:listCookies` / `browser:removeCookie` / `browser:removeCookiesForDomain`，wire 契约见 `src/shared/browser-privacy.ts`；行为测试 `browser-privacy-service.test.ts`（含 Electron ABI 下真 SQLite 时间边界验证）。
+
+### Agent / 链式技能信封（Round-2 + 残债优化）
+
+- 技能任务可先用 `declare_completion_criteria.expected_outputs` 声明「本任务承诺交付哪几份最终文件」，收尾时按同一条通道逐份核对交付证据——声明 2 份只交付 1 份不再判 accept。声明经数据库持久化（迁移 065），重启后仍按同判；同批修复了 `modelCriteria`（模型补充验收标准）此前写入即丢的持久化空转。技能选中轮工具面现固定保留该声明工具。
+- 长 CJK 深读不再被 anthropic 4096 输出上限硬截断：输出上限按模型能力解析（opus 32000 / sonnet 64000 / haiku 8192，未知模型兜底 8192，可经设置覆盖），三条 provider 通道命中截断都落 `provider_output_truncated` 可观测账本。
+- 修正上下文预算把「用户附图」按字节数虚高估算（单张图曾被当成数万 token）导致的误压缩撕碎上下文：图片按 tile 常量估算，压缩阈值与语义不变，另落估算/实耗对账账本。
+- 链式技能任务现可只读同 envelope 显式引用的兄弟技能资产与同任务先前产物目录（越权与写面严格隔离）。
+- 台账、投影与巨文件收口：终态账本两处旁路补齐 close-out enrich；`agent-sdk-utils` 巨文件按内聚 seam 拆分（facade 原位 re-export，行为不变）；浏览器 receipt 的「下一步建议」只留元数据通道，不再伪装成完成度造成假 100%。
+- 回归入口：`verify:skill-envelope-write` / `verify:streaming` / `verify:context-instrumentation` / `verify:stability` / `verify:browser-reliability` 全绿；新增 gate `check-delivery-coverage-producer-model-declared.cjs`、`check-provider-output-cap-model-aware.cjs`、`check-image-token-estimate-tiled.cjs`、`check-skill-crossref-read-root.cjs`。
+
+## [0.6.1] - 2026-07-12
+
+### Ready 0.6.1 更新日志
+
+本次更新主要把 7 月 2 日以来的 Agent 主线、浏览器驾驶、远程协作、MCP 管理、安装命令代跑、界面拆分和液态玻璃细节收口到一个可发布版本。
+
+- 统一应用版本：底部状态栏、设置侧栏和“关于”页现在都从发布版本读取，不会再出现安装包已经升级、界面仍显示旧版本的情况。
+- 提升浏览器 Agent 的真机可用性：长文发布、页面地图、底部主按钮、自定义元素、Shadow DOM、受控输入框、文件选择器和站点权限处理都更稳。
+- 修复浏览器任务里“看起来完成但其实没点到/没确认/没拿到结果”的多类误判，失败时会给出更明确的救济提示。
+- 强化 Agent 任务收口：模型可以先声明完成标准，运行结束时按同一条通道归账，减少空泛行动宣告和假完成。
+- 补齐运行反馈与过程记录：任务反馈、涌现信息、完成标准自检、运行时间线和可观测账本更完整，便于复盘和继续推进。
+- 改进远程协作：微信远程确认、文件直达回传、远程运行观察面和发送慢问题得到处理。
+- 新增 MCP 管理能力：支持从设置侧管理 MCP，并允许 Agent 在确认后代装本地二进制 MCP server。
+- 新增一次性安装/配置命令代跑能力；交互式命令会快速失败并提示改用终端，不再把任务卡死。
+- 改进实时信息意图判断，活动、事件、行情等问题更容易进入实时查询链路。
+- 修复文件索引监听在 macOS 上可能耗尽文件句柄的问题，降低主进程被拖垮的风险。
+- 改进聊天输入框液态玻璃折射边缘，并拆分大型界面与样式文件，后续维护和回归验证更清晰。
+
+建议所有正在狗粮测试浏览器 Agent、远程协作、MCP、安装工具和新界面结构的人更新到 0.6.1，尤其是依赖小红书发布/采集与远程微信协作的人。
+
+- 解决问题：7 月 2 日以来的主线修复集中解决浏览器驾驶误判、Agent 假完成、远程协作断点、MCP/安装工具缺口、主进程稳定性和大型 UI 文件难维护等问题。
+- 用户变化：浏览器 Agent 更能完成真实网页任务，远程用户能确认动作和接收文件，MCP 与一次性配置命令有了明确入口，界面、服务标识和任务反馈更稳定。
+- 验证情况：按 2026-07-02 至 2026-07-12 的提交历史、路线文档和提交内记录汇总；历史记录显示期间完成过完整 `verify` 全绿、`npm test` 清账、IPC/silent-catch 等 gate 归零，以及多轮真机回归记录。本次更新日志编辑后另跑版本一致性检查。
+- 后续注意：以后提升发布版本时只修改 `package.json` 的版本并同步锁文件、更新本更新日志；`npm run verify:version` 会检查界面和关联服务仍从同一版本来源读取。当前工作区其他未提交功能不因本条自动视为已发布。
 
 ## [Unreleased] - 2026-06-22
 
