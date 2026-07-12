@@ -442,7 +442,11 @@ function normalizeWorkspaceRoots(rawRoots: unknown): string[] {
 export function envelopeHasLocalDocumentResource(envelope: RequestEnvelope): boolean {
   return envelope.resources.some((resource) =>
     resource.kind !== 'skill_reference'
-    && /\.(?:md|markdown|txt|docx?)$/i.test(resource.path || resource.name || ''))
+    && (
+      resource.kind === 'folder_reference'
+      || resource.source === 'folder_reference'
+      || /\.(?:md|markdown|txt|docx?)$/i.test(resource.path || resource.name || '')
+    ))
 }
 export function envelopeHasCurrentDocumentContext(envelope: RequestEnvelope): boolean {
   return envelope.resources.some((resource) =>

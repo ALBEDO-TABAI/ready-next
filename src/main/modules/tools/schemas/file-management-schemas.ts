@@ -73,6 +73,21 @@ export const TagForgeApplySchema = z.object({
   })).describe('模型只提交 form/domain/entity/use 语义提案；state/project 由代码决定'),
 })
 
+export const TagForgePrepareBatchSchema = z.object({
+  rootPath: z.string().describe('要批量打标的授权文件夹绝对路径'),
+  batchId: z.string().optional().describe('继续既有批次时传入上一轮 batchId'),
+  limit: z.number().optional().describe('本批返回的待处理文档数（默认 8，上限 12）'),
+})
+
+export const TagForgeApplyBatchSchema = z.object({
+  batchId: z.string().describe('tag_forge_prepare_batch 返回的批次 id'),
+  items: z.array(z.object({
+    path: z.string(),
+    expectedRevision: z.string(),
+    proposals: TagForgeApplySchema.shape.proposals,
+  })).describe('本批每份文档的版本凭证与标签提案'),
+})
+
 export const FileRenameSchema = z.object({
   path: z.string().describe('原文件绝对路径'),
   newName: z.string().describe('新文件名（含扩展名，不含目录）'),
@@ -143,6 +158,8 @@ export type FileManagementToolName =
   | 'file_get_graph'
   | 'file_classify'
   | 'tag_forge_apply'
+  | 'tag_forge_prepare_batch'
+  | 'tag_forge_apply_batch'
   | 'file_rename'
   | 'file_move'
   | 'file_copy'
@@ -161,6 +178,8 @@ export const FILE_MANAGEMENT_SCHEMAS: Record<FileManagementToolName, z.ZodObject
   file_get_graph: FileGetGraphSchema,
   file_classify: FileClassifySchema,
   tag_forge_apply: TagForgeApplySchema,
+  tag_forge_prepare_batch: TagForgePrepareBatchSchema,
+  tag_forge_apply_batch: TagForgeApplyBatchSchema,
   file_rename: FileRenameSchema,
   file_move: FileMoveSchema,
   file_copy: FileCopySchema,

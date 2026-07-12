@@ -111,8 +111,14 @@ function collectLocalDocumentReferences(
   requestEnvelope?: unknown
 ): Array<{ name: string; path: string }> {
   const envelopeRefs = parseEnvelopeResourceReferences(requestEnvelope)
-  return [...envelopeRefs.resources, ...parseAttachmentReferences(message)].filter((reference) =>
-    /\.(?:md|markdown|txt|docx?)$/i.test(reference.path || reference.name)
+  const references: Array<{ name: string; path: string; kind?: string; source?: string }> = [
+    ...envelopeRefs.resources,
+    ...parseAttachmentReferences(message),
+  ]
+  return references.filter((reference) =>
+    reference.kind === 'folder_reference'
+    || reference.source === 'folder_reference'
+    || /\.(?:md|markdown|txt|docx?)$/i.test(reference.path || reference.name)
   )
 }
 

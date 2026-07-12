@@ -73,6 +73,16 @@ export const FILE_MANAGEMENT_TOOLS: FileManagementToolDef[] = [
     params: zodObjectToParamList(FILE_MANAGEMENT_SCHEMAS.tag_forge_apply) as ToolParam[],
   },
   {
+    name: 'tag_forge_prepare_batch',
+    description: '建立或继续一个可恢复的 Tag Forge 文件夹批次。返回本批文档全文、版本凭证和进度；已有标签的文档自动跳过。',
+    params: zodObjectToParamList(FILE_MANAGEMENT_SCHEMAS.tag_forge_prepare_batch) as ToolParam[],
+  },
+  {
+    name: 'tag_forge_apply_batch',
+    description: '按准备批次受控写回多份 Markdown 标签，逐文件校验版本并持久记录成功、冲突与失败，随后可继续下一批。',
+    params: zodObjectToParamList(FILE_MANAGEMENT_SCHEMAS.tag_forge_apply_batch) as ToolParam[],
+  },
+  {
     name: 'file_rename',
     description:
       '重命名文件（路径不变、只改文件名或在同目录内改扩展名）。必须在 workspace 根内；默认不覆盖已有文件。',

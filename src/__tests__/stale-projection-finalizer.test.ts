@@ -156,3 +156,29 @@ test('stale projection with a durable handle stays resumable', () => {
     false,
   )
 })
+
+test('stale projection restores a durable continuation held by run_meta', async () => {
+  const fx = createStore(projection())
+  let finalizeCalls = 0
+  const closed = await finalizeStaleWithoutHandleProjections({
+    scopeId: 'scope-stale',
+    records: [fx.current],
+    taskProjectionStore: fx.store,
+    runMetaRepository: {
+      get: () => ({ continuationRef: { childRunId: 'child-durable', outputDir: '/tmp/out', runStatePath: '/tmp/out/run_state.json' } }),
+      create: () => null,
+      update: () => null,
+    },
+    hasActiveRun: () => false,
+    now: NOW,
+    finalize: async (): Promise<FinalizedRunOutcome> => {
+      finalizeCalls += 1
+      return { status: 'interrupted', terminalReason: 'stale_without_handle' }
+    },
+  })
+  assert.equal(closed, 0)
+  assert.equal(finalizeCalls, 0)
+  assert.equal(fx.current.status, 'recoverable_paused')
+  assert.deepEqual(fx.current.resumableActions, ['continue', 'cancel'])
+  assert.equal(fx.current.continuationRef?.runStatePath, '/tmp/out/run_state.json')
+})

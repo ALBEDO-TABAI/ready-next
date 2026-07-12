@@ -33,3 +33,23 @@ test('delivery deadline is a rolling no-progress window and successful progress 
   assert.equal((abortController.signal.reason as Error).name, 'AbortError')
   assert.equal((abortController.signal.reason as Error).message, 'delivery_wall_clock_exceeded')
 })
+
+test('delivery deadline stays suspended while the run is awaiting user input', async () => {
+  const abortController = new AbortController()
+  const runHandle = { abortInitiator: null } as Parameters<typeof armDynamicDeliveryDeadline>[0]['runHandle']
+  let awaiting = true
+  const deadline = armDynamicDeliveryDeadline({
+    mode: 'adaptive',
+    runId: 'run-awaiting-user',
+    abortController,
+    runHandle,
+    timeoutMsForTest: 20,
+    isAwaitingUserInput: () => awaiting,
+  })
+  await new Promise((resolve) => setTimeout(resolve, 45))
+  assert.equal(abortController.signal.aborted, false)
+  awaiting = false
+  await new Promise<void>((resolve) => abortController.signal.addEventListener('abort', () => resolve(), { once: true }))
+  deadline.dispose()
+  assert.equal((abortController.signal.reason as Error).message, 'delivery_wall_clock_exceeded')
+})

@@ -22,6 +22,7 @@ export function armDynamicDeliveryDeadline(input: {
   runHandle: RunHandle
   startedAtMs?: number
   timeoutMsForTest?: number
+  isAwaitingUserInput?: () => boolean
 }): DynamicDeliveryDeadlineHandle {
   const configuredMs = resolveDynamicDeliveryWallClockMs(input.mode)
   if (configuredMs === null) {
@@ -40,6 +41,14 @@ export function armDynamicDeliveryDeadline(input: {
     const armedRevision = progressRevision
     timer = setTimeout(() => {
       if (disposed || input.abortController.signal.aborted || armedRevision !== progressRevision) return
+      if (input.isAwaitingUserInput?.()) {
+        logAgentMetric('dynamic_delivery_deadline_suspended_for_user_input', {
+          runId: input.runId,
+          mode: input.mode,
+        })
+        arm(Math.min(progressWindowMs, 1_000))
+        return
+      }
       const error = createInitiatorAbort(
         input.runHandle,
         'timeout',

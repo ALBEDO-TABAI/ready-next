@@ -141,6 +141,31 @@ const EXPECTED_ANTHROPIC = [
     },
   },
   {
+    name: 'tag_forge_prepare_batch',
+    description: '建立或继续一个可恢复的 Tag Forge 文件夹批次。返回本批文档全文、版本凭证和进度；已有标签的文档自动跳过。',
+    input_schema: {
+      type: 'object',
+      properties: {
+        rootPath: { type: 'string', description: '要批量打标的授权文件夹绝对路径' },
+        batchId: { type: 'string', description: '继续既有批次时传入上一轮 batchId' },
+        limit: { type: 'number', description: '本批返回的待处理文档数（默认 8，上限 12）' },
+      },
+      required: ['rootPath'],
+    },
+  },
+  {
+    name: 'tag_forge_apply_batch',
+    description: '按准备批次受控写回多份 Markdown 标签，逐文件校验版本并持久记录成功、冲突与失败，随后可继续下一批。',
+    input_schema: {
+      type: 'object',
+      properties: {
+        batchId: { type: 'string', description: 'tag_forge_prepare_batch 返回的批次 id' },
+        items: { type: 'array', description: '本批每份文档的版本凭证与标签提案', items: { type: 'object' } },
+      },
+      required: ['batchId', 'items'],
+    },
+  },
+  {
     name: 'file_rename',
     description:
       '重命名文件（路径不变、只改文件名或在同目录内改扩展名）。必须在 workspace 根内；默认不覆盖已有文件。',

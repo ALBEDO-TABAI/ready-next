@@ -54,9 +54,10 @@ export const TASK_ACTION_BUTTON_STYLE: React.CSSProperties = {
 
 export function DynamicDeliveryTaskSummary({ run }: { run: TaskCardRun }) {
   if (!run.deliveryState || run.deliveryState.decision === 'single_path') return null
-  const verifierLabel = {
+  const verifierLabel = dynamicDeliveryVerifierLabel(run.phase, run.deliveryState.verifier.status)
+  const verifierStateLabel = {
     not_required: '',
-    pending: '等待独立复核',
+    pending: verifierLabel,
     accepted: '独立复核已通过',
     repair: '正在按独立复核修补',
     blocked: '独立复核未通过',
@@ -69,12 +70,20 @@ export function DynamicDeliveryTaskSummary({ run }: { run: TaskCardRun }) {
     >
       {run.deliveryState.packages.length > 0
         ? `协作者 ${run.deliveryState.packages.map((item) => item.binding.effectiveAgentId).join('、')}`
-        : verifierLabel}
-      {run.deliveryState.packages.length > 0 && verifierLabel ? ` · ${verifierLabel}` : ''}
+        : verifierStateLabel}
+      {run.deliveryState.packages.length > 0 && verifierStateLabel ? ` · ${verifierStateLabel}` : ''}
       {run.deliveryState.packages.some((item) => item.status === 'degraded') ? ' · 有协作项已降级' : ''}
       {run.deliveryState.packages.some((item) => item.status === 'blocked') ? ' · 有协作项被阻塞' : ''}
     </div>
   )
+}
+
+export function dynamicDeliveryVerifierLabel(
+  phase: TaskCardRun['phase'],
+  verifierStatus: 'not_required' | 'pending' | 'accepted' | 'repair' | 'blocked',
+): string {
+  if (verifierStatus !== 'pending') return ''
+  return phase === 'done' || phase === 'error' || phase === 'cancelled' ? '' : '等待独立复核'
 }
 
 const CAPSULE_SHELL_STYLE: React.CSSProperties = {

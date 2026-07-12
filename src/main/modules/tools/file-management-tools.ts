@@ -1,6 +1,6 @@
 import { copyFile, lstat, mkdir, readFile, readdir, realpath, rename, stat, writeFile } from 'fs/promises'
 import { constants, existsSync } from 'fs'
-import { randomUUID } from 'crypto'
+import { createHash, randomUUID } from 'crypto'
 import { tmpdir } from 'os'
 import { basename, dirname, extname, isAbsolute, join, relative, resolve as resolvePath } from 'path'
 import { fileURLToPath } from 'url'
@@ -10,6 +10,7 @@ import { parseDocumentGraph } from '../../../shared/document-graph-parse'
 import { resolveDocumentSectionAnchor } from '../../../shared/document-sectioning'
 import { validateWorkspaceRoot } from '../../../shared/workspace-validation'
 import { executeTagForgeApply } from '../tag-forge/tag-forge-tool'
+import { revisionOf } from '../tag-forge/tag-forge-writer'
 import {
   resolveIndexedDocumentCandidate as resolveIndexedDocumentCandidateFromDb,
   type IndexedDocumentRow,
@@ -92,6 +93,21 @@ type OrganizeJournal = {
   executedAt: string
   undoneAt: string | null
   operations: Array<JournalMove | JournalFolder>
+}
+
+type TagForgeBatchItemState = {
+  path: string
+  status: 'pending' | 'completed' | 'conflict' | 'failed'
+  errorKind?: string | null
+}
+
+type TagForgeBatchState = {
+  batchId: string
+  rootPath: string
+  workspaceRoot: string
+  items: TagForgeBatchItemState[]
+  createdAt: string
+  updatedAt: string
 }
 
 type AuthorizedRoot =
@@ -361,6 +377,10 @@ export async function executeFileManagementTool(
       return runFileClassify(args, engine, context)
     case 'tag_forge_apply':
       return executeTagForgeApply(args, engine, context)
+    case 'tag_forge_prepare_batch':
+      return runTagForgePrepareBatch(args, engine, context)
+    case 'tag_forge_apply_batch':
+      return runTagForgeApplyBatch(args, engine, context)
     case 'file_rename':
       return runFileRename(args, engine, context)
     case 'file_move':
@@ -382,6 +402,134 @@ export async function executeFileManagementTool(
     default:
       return `Unknown file management tool: ${toolName}`
   }
+}
+
+function tagForgeBatchPath(storeDir: string, batchId: string): string {
+  return join(storeDir, 'tag-forge-batches', `${batchId}.json`)
+}
+
+function hasExistingTagMetadata(content: string): boolean {
+  const graph = parseDocumentGraph(content)
+  if (Array.isArray(graph.frontmatter?.tags) && graph.frontmatter.tags.length > 0) return true
+  return graph.body.replace(/^\uFEFF/, '').split(/\r?\n/).some((line) => /^(?:#[\p{L}\p{N}_\-/]+\s*){1,20}$/u.test(line.trim()))
+}
+
+async function loadTagForgeBatch(storeDir: string, batchId: string): Promise<TagForgeBatchState | null> {
+  if (!/^[a-zA-Z0-9-]{8,80}$/.test(batchId)) return null
+  return readJsonFile<TagForgeBatchState>(tagForgeBatchPath(storeDir, batchId))
+}
+
+async function saveTagForgeBatch(storeDir: string, state: TagForgeBatchState): Promise<void> {
+  state.updatedAt = new Date().toISOString()
+  await writeJsonFile(tagForgeBatchPath(storeDir, state.batchId), state)
+}
+
+async function runTagForgePrepareBatch(
+  args: Record<string, unknown>,
+  engine: SearchEngine,
+  context?: FileManagementToolContext,
+): Promise<string> {
+  const storeDir = await getOrganizeStoreDir(context)
+  const requestedBatchId = typeof args.batchId === 'string' ? args.batchId.trim() : ''
+  let state = requestedBatchId ? await loadTagForgeBatch(storeDir, requestedBatchId) : null
+  if (requestedBatchId && !state) return toJsonString({ ok: false, errorKind: 'tag_forge_batch_not_found' })
+  if (!state) {
+    const auth = await authorizeRoot(typeof args.rootPath === 'string' ? args.rootPath : '', engine, context?.workspaceRoots)
+    if (!auth.ok) return toJsonString(auth.output)
+    const inventory = await collectInventory(auth.rootPath, auth, true, MAX_INVENTORY_DEPTH)
+    const items: TagForgeBatchItemState[] = []
+    for (const item of inventory) {
+      if (item.kind !== 'file' || extname(item.path).toLowerCase() !== '.md') continue
+      const content = await readFile(item.path, 'utf-8').catch(() => null)
+      if (content === null || hasExistingTagMetadata(content)) continue
+      items.push({ path: item.path, status: 'pending' })
+    }
+    const fingerprint = createHash('sha256').update(`${auth.rootPath}\0${Date.now()}\0${randomUUID()}`).digest('hex').slice(0, 20)
+    const now = new Date().toISOString()
+    state = {
+      batchId: `tfb-${fingerprint}`,
+      rootPath: auth.rootPath,
+      workspaceRoot: auth.workspaceRoot,
+      items,
+      createdAt: now,
+      updatedAt: now,
+    }
+    await saveTagForgeBatch(storeDir, state)
+  }
+  const limit = typeof args.limit === 'number' ? Math.max(1, Math.min(12, Math.floor(args.limit))) : 8
+  const pending = state.items.filter((item) => item.status !== 'completed').slice(0, limit)
+  const documents: Array<{ path: string; expectedRevision: string; content: string }> = []
+  for (const item of pending) {
+    try {
+      const content = await readFile(item.path, 'utf-8')
+      documents.push({ path: item.path, expectedRevision: revisionOf(content), content })
+    } catch (error) {
+      item.status = 'failed'
+      item.errorKind = error instanceof Error ? error.message : String(error)
+    }
+  }
+  await saveTagForgeBatch(storeDir, state)
+  const completed = state.items.filter((item) => item.status === 'completed').length
+  const remaining = state.items.filter((item) => item.status !== 'completed').length
+  return toJsonString({
+    ok: true,
+    batchId: state.batchId,
+    rootPath: state.rootPath,
+    total: state.items.length,
+    completed,
+    remaining,
+    done: remaining === 0,
+    documents,
+  })
+}
+
+async function runTagForgeApplyBatch(
+  args: Record<string, unknown>,
+  engine: SearchEngine,
+  context?: FileManagementToolContext,
+): Promise<string> {
+  const batchId = typeof args.batchId === 'string' ? args.batchId.trim() : ''
+  const storeDir = await getOrganizeStoreDir(context)
+  const state = await loadTagForgeBatch(storeDir, batchId)
+  if (!state) return toJsonString({ ok: false, errorKind: 'tag_forge_batch_not_found' })
+  const submitted = Array.isArray(args.items) ? args.items : []
+  const results: Array<Record<string, unknown>> = []
+  for (const raw of submitted) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue
+    const item = raw as Record<string, unknown>
+    const path = typeof item.path === 'string' ? resolvePath(item.path) : ''
+    const tracked = state.items.find((candidate) => candidate.path === path)
+    if (!tracked || tracked.status === 'completed') {
+      results.push({ path, ok: false, errorKind: tracked ? 'already_completed' : 'path_not_in_batch' })
+      continue
+    }
+    const output = JSON.parse(await executeTagForgeApply({
+      path,
+      mode: 'explicit',
+      expectedRevision: item.expectedRevision,
+      proposals: item.proposals,
+    }, engine, context)) as Record<string, unknown>
+    if (output.ok === true) {
+      tracked.status = 'completed'
+      tracked.errorKind = null
+    } else {
+      const errorKind = typeof output.errorKind === 'string' ? output.errorKind : 'tag_write_failed'
+      tracked.status = errorKind === 'revision_conflict' || errorKind === 'open_tab_revision_conflict' ? 'conflict' : 'failed'
+      tracked.errorKind = errorKind
+    }
+    results.push(output)
+    await saveTagForgeBatch(storeDir, state)
+  }
+  const completed = state.items.filter((item) => item.status === 'completed').length
+  const remaining = state.items.filter((item) => item.status !== 'completed').length
+  return toJsonString({
+    ok: results.every((result) => result.ok === true),
+    batchId,
+    completed,
+    remaining,
+    done: remaining === 0,
+    results,
+  })
 }
 
 async function getDefaultSearchEngine(): Promise<SearchEngine | null> {

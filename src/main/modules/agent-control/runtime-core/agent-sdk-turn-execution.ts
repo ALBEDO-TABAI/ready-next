@@ -51,6 +51,8 @@ import { buildExecutionTurnResult } from './agent-sdk-turn-closeout'
 import { finalizeAgentSdkPreparedTurnResult } from './agent-sdk-turn-completion'
 import type { TurnOrchestratorHost } from './agent-sdk-turn-context'
 import { armDynamicDeliveryDeadline } from './dynamic-delivery/delivery-deadline'
+import { getEphemeralExecutionStore } from '../../tools/skill-primitives/ephemeral-execution-store'
+import { getAskUserQuestionsStore } from '../../tools/builtins/ask-user-questions-store'
 import { createAgentSdkTurnGuards } from './agent-sdk-turn-guards'
 import { assembleAgentSdkTurnInput } from './agent-sdk-turn-input-assembly'
 import type { AgentSdkPreparedTurnContext } from './agent-sdk-turn-execution-types'
@@ -251,6 +253,9 @@ export async function executeAgentSdkPreparedTurn(
     abortController,
     runHandle,
     startedAtMs: runStartedAt,
+    isAwaitingUserInput: () =>
+      getEphemeralExecutionStore().hasPendingForRun(name, sessionId ?? null, runId)
+      || getAskUserQuestionsStore().hasPendingForRun(name, sessionId ?? null, runId),
   })
   const emitOutputBeforeProgressTracking = emitOutput
   emitOutput = (chunk, type, projectionPatch) => {

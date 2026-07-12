@@ -86,6 +86,25 @@ export async function finalizeStaleWithoutHandleProjections(
   let finalized = 0
 
   for (const record of params.records) {
+    const runMeta = record.runId && params.runMetaRepository
+      ? params.runMetaRepository.get(record.runId) as { continuationRef?: TaskProjectionRecord['continuationRef'] } | null
+      : null
+    if (runMeta?.continuationRef && deriveTaskProjectionCanResume({
+      ...record,
+      continuationRef: runMeta.continuationRef,
+    }).canResume === true) {
+      await params.taskProjectionStore.update(record.taskId, {
+        continuationRef: runMeta.continuationRef,
+        status: 'recoverable_paused',
+        interactionState: 'suspended',
+        waitingFor: 'none',
+        blockedReason: null,
+        degradationReason: null,
+        resumableActions: ['continue', 'cancel'],
+        updatedAt: now,
+      }, { reasonHint: 'update' })
+      continue
+    }
     if (!shouldFinalizeStaleWithoutHandleProjection(record, nowMs, params.graceMs)) continue
     if (params.hasActiveRun()) break
     const projectionPatch = staleWithoutHandleProjectionPatch(record, now)

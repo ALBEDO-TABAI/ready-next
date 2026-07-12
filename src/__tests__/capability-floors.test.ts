@@ -16,6 +16,13 @@ const selected = buildSelectedSkillToolAuthorization({
   reason: 'test',
 })
 const none = buildExplicitNoSkillAuthorization('no_skill_signal')
+const tagForge = buildSelectedSkillToolAuthorization({
+  skillId: 'tag-forge',
+  allowedTypedActions: [],
+  allowedPrimitives: ['skill_read_artifact'],
+  source: 'explicit',
+  reason: 'test',
+})
 
 test('computeCapabilityFloors: none turn with no resources → empty floor', () => {
   const floors = computeCapabilityFloors({ authorization: none, hasLocalDocumentResource: false, hasCurrentDocumentContext: false })
@@ -37,6 +44,20 @@ test('computeCapabilityFloors: local document resource floors file_locate + file
   assert.deepEqual([...floors.toolNames].sort(), ['file_locate', 'file_read_excerpt'])
   assert.equal(floors.toolNames.has('document_read_section'), false)
   assert.ok(floors.reasons.includes('local_document_resource'))
+})
+
+test('computeCapabilityFloors: Tag Forge folder keeps its controlled batch surface', () => {
+  const floors = computeCapabilityFloors({ authorization: tagForge, hasLocalDocumentResource: true, hasCurrentDocumentContext: false })
+  assert.deepEqual([...floors.toolNames].sort(), [
+    'file_extract_text',
+    'file_inventory',
+    'file_locate',
+    'file_read_excerpt',
+    'skill_read_artifact',
+    'tag_forge_apply_batch',
+    'tag_forge_prepare_batch',
+  ])
+  assert.ok(floors.reasons.includes('tag_forge_folder_batch'))
 })
 
 const DOC_CONTEXT_EDIT_FLOOR = [
