@@ -56,16 +56,6 @@ export interface UpsertChannelPayload {
   config?: Record<string, unknown>
 }
 
-export interface UpsertSchedulePayload {
-  id?: string
-  name: string
-  cronExpr: string
-  prompt: string
-  channelId?: string | null
-  enabled?: boolean
-  payload?: Record<string, unknown>
-}
-
 export type ActiveChildRunSummaryForRuntime = {
   childRunId: string
   skillId: string

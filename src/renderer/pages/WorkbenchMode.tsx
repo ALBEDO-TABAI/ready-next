@@ -8,6 +8,8 @@ import IconRail from '../components/layout/IconRail'
 import SidePanel, { type SidePanelVariant } from '../components/layout/SidePanel'
 import WorkbenchModeOutlet from '../components/layout/WorkbenchModeOutlet'
 import ChatPanel from '../components/agent/ChatPanel'
+import { ScheduledTasksWorkspace } from '../components/agent/scheduled-tasks/ScheduledTasksWorkspace'
+import type { ScheduledTasksSummary } from '../components/agent/scheduled-tasks/ScheduledTasksPanel'
 import StatusBar from '../components/layout/StatusBar'
 import { LiquidSceneProvider } from '../components/ui/LiquidGlassScene'
 import { WORKBENCH_EDGE_RAIL_SIZE } from '../modules/workbench/chrome'
@@ -24,6 +26,8 @@ import type { BrowserHostLayoutPhase } from '../../shared/browser-view-layout'
 import { nextIntentId } from '../../shared/browser-view-intent'
 import { createModeSwitchAckWaiter } from '../modules/browser/modeSwitchAckWaiter'
 import { withRitual, setPanelResizingSignal } from '../modules/overlay/useRitualOverlay'
+import { useAgent } from '../stores/useAgent'
+import '../styles/scheduled-tasks.css'
 
 const MIN_SIDE_PANEL_WIDTH = 220
 const MAX_SIDE_PANEL_WIDTH = 420
@@ -124,7 +128,10 @@ export default function WorkbenchMode() {
     setSidePanelVariant,
     renamingPath,
     creatingType,
+    workspaceRoot,
+    pinnedFolders,
   } = useWorkspace()
+  const { agents, currentAgent, currentScopeId, loadConversation } = useAgent()
   const chatPanelWidth = clampWorkbenchChatPanelWidth(rawChatPanelWidth)
   const sidePanelWidths = useMemo(
     () => ({ ...rawSidePanelWidths, shared: clampWorkbenchSidePanelWidth(rawSidePanelWidths.shared) }),
@@ -142,9 +149,19 @@ export default function WorkbenchMode() {
   const [isMotionSettled, setIsMotionSettled] = useState(true)
   const [isPanelResizing, setIsPanelResizing] = useState(false)
   const [browserLayoutMotionPhase, setBrowserLayoutMotionPhase] = useState<BrowserHostLayoutPhase>('idle')
+  const [scheduledTasksOpen, setScheduledTasksOpen] = useState(false)
+  const [scheduledTasksSummary, setScheduledTasksSummary] = useState<ScheduledTasksSummary>({
+    enabledCount: 0,
+    attentionCount: 0,
+  })
   const transitionTargetModeRef = useRef<WorkbenchModeType>(workbenchMode)
   const workbenchSurfaceRefreshTimersRef = useRef<number[]>([])
   const browserLayoutPhase = isPanelResizing ? 'dragging' : browserLayoutMotionPhase
+  const scheduledWorkspaceRoots = useMemo(() => (
+    workspaceRoot
+      ? [workspaceRoot, ...pinnedFolders.filter((path) => path !== workspaceRoot)]
+      : pinnedFolders
+  ), [pinnedFolders, workspaceRoot])
 
   const isSidebarContentVisible = sidebarVisible
   const chatPanelState: 'expanded' | 'collapsed' = chatPanelVisible ? 'expanded' : 'collapsed'
@@ -587,53 +604,74 @@ export default function WorkbenchMode() {
               <ResizeHandle onResize={handleSidebarResize} direction="right" onResizeStateChange={handleSidebarResizeStateChange} />
             )}
 
-            {splitMode ? (
-              <div
-                className="workbench-split-layout flex-1 flex min-w-0"
-                ref={splitContainerRef}
-                data-workbench-split-layout="true"
-              >
+            <div
+              className="relative flex flex-1 min-w-0 overflow-hidden"
+              style={{ background: 'transparent' }}
+            >
+              {splitMode ? (
                 <div
-                  className="workbench-split-pane flex flex-col min-w-0"
-                  style={{
-                    flexBasis: `${workbenchSplitRatio}%`,
-                    flexShrink: 0,
-                    flexGrow: 0,
-                    background: 'transparent',
-                  }}
+                  className="workbench-split-layout flex-1 flex min-w-0"
+                  ref={splitContainerRef}
+                  data-workbench-split-layout="true"
+                  data-workbench-content-backdrop="true"
                 >
+                  <div
+                    className="workbench-split-pane flex flex-col min-w-0"
+                    style={{
+                      flexBasis: `${workbenchSplitRatio}%`,
+                      flexShrink: 0,
+                      flexGrow: 0,
+                      background: 'transparent',
+                    }}
+                  >
+                    <WorkbenchModeOutlet
+                      mode={workbenchMode}
+                      mountedModes={[workbenchMode]}
+                      isMotionSettled={isMotionSettled}
+                      browserLayoutPhase={browserLayoutPhase}
+                    />
+                  </div>
+                  <WorkbenchSplitResizeHandle
+                    onResize={handleSplitResize}
+                    onResizeStateChange={handlePanelResizeStateChange}
+                  />
+                  <div className="workbench-split-pane flex-1 flex flex-col min-w-0" style={{ background: 'transparent' }}>
+                    <WorkbenchModeOutlet
+                      mode={splitMode}
+                      mountedModes={[splitMode]}
+                      isMotionSettled={isMotionSettled}
+                      browserLayoutPhase={browserLayoutPhase}
+                    />
+                  </div>
+                </div>
+              ) : (
+                <div className="relative flex flex-1 flex-col min-w-0 overflow-hidden" data-workbench-content-backdrop="true">
                   <WorkbenchModeOutlet
                     mode={workbenchMode}
-                    mountedModes={[workbenchMode]}
                     isMotionSettled={isMotionSettled}
                     browserLayoutPhase={browserLayoutPhase}
                   />
                 </div>
-                <WorkbenchSplitResizeHandle
-                  onResize={handleSplitResize}
-                  onResizeStateChange={handlePanelResizeStateChange}
-                />
-                <div className="workbench-split-pane flex-1 flex flex-col min-w-0" style={{ background: 'transparent' }}>
-                  <WorkbenchModeOutlet
-                    mode={splitMode}
-                    mountedModes={[splitMode]}
-                    isMotionSettled={isMotionSettled}
-                    browserLayoutPhase={browserLayoutPhase}
-                  />
-                </div>
-              </div>
-            ) : (
-              <div
-                className="relative flex-1 flex flex-col min-w-0 overflow-hidden"
-                style={{ background: 'transparent' }}
-              >
-                <WorkbenchModeOutlet
-                  mode={workbenchMode}
-                  isMotionSettled={isMotionSettled}
-                  browserLayoutPhase={browserLayoutPhase}
-                />
-              </div>
-            )}
+              )}
+
+              <ScheduledTasksWorkspace
+                open={scheduledTasksOpen}
+                onClose={() => setScheduledTasksOpen(false)}
+                currentScopeId={currentScopeId}
+                currentAgentId={currentAgent || 'butler'}
+                workspaceRoots={scheduledWorkspaceRoots}
+                agentOptions={agents.map((agent) => ({ id: agent.name, name: agent.displayName }))}
+                onSummaryChange={setScheduledTasksSummary}
+                onOpenOccurrence={(occurrence) => {
+                  void window.electronAPI.scheduledTasks.get(occurrence.scheduleId).then((response) => {
+                    if (response.success && response.data.scopeId) {
+                      void loadConversation(response.data.scopeId)
+                      setScheduledTasksOpen(false)
+                    }
+                  })
+                }}
+              />
+            </div>
 
             {showChatResizeHandle && (
               <ResizeHandle onResize={handleChatResize} direction="left" onResizeStateChange={handleChatResizeStateChange} />
@@ -647,6 +685,9 @@ export default function WorkbenchMode() {
               onWorkbenchModeChange={handleWorkbenchModeChange}
               onWorkbenchSplitToggle={handleWorkbenchSplitToggle}
               onTogglePanel={handleToggleChatPanelWithResize}
+              scheduledTasksOpen={scheduledTasksOpen}
+              scheduledTasksSummary={scheduledTasksSummary}
+              onScheduledTasksToggle={() => setScheduledTasksOpen((value) => !value)}
             />
           </div>
 

@@ -45,4 +45,5 @@ test('run origin is independent from immutable task creation origin', () => {
   assert.equal(runOriginForRequest({}), 'initial')
   assert.equal(runOriginForRequest({ isContinuation: true }), 'continuation')
   assert.equal(runOriginForRequest({ isHandoffTakeover: true, isContinuation: true }), 'handoff_takeover')
+  assert.equal(runOriginForRequest({ isScheduledTask: true }), 'scheduled_task')
 })

@@ -519,11 +519,15 @@ export function useBrowserViewBounds({
     }
 
     const handleOverlayLock = (event: Event) => {
-      const detail = (event as CustomEvent<{ locked?: boolean }>).detail
+      const detail = (event as CustomEvent<{ locked?: boolean; persistent?: boolean }>).detail
       if (!detail) return
 
       if (detail.locked) {
         overlayLockCountRef.current += 1
+        if (detail.persistent) {
+          void syncBrowserVisibility({ forceExact: true, forceBoundsSync: false })
+          return
+        }
         const selfHealTimer = window.setTimeout(() => {
           const index = pendingSelfHealTimers.indexOf(selfHealTimer)
           if (index >= 0) pendingSelfHealTimers.splice(index, 1)
@@ -539,7 +543,7 @@ export function useBrowserViewBounds({
         pendingSelfHealTimers.push(selfHealTimer)
       } else {
         overlayLockCountRef.current = Math.max(0, overlayLockCountRef.current - 1)
-        cancelOldestSelfHeal()
+        if (!detail.persistent) cancelOldestSelfHeal()
       }
 
       void syncBrowserVisibility({

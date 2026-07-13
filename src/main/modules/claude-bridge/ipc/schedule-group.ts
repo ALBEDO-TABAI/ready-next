@@ -1,199 +1,167 @@
-// Stage V V2.1l — ScheduleGroup channel group.
-//
-// Bundles the 6 channels that expose the agent-schedule (cron) CRUD + control
-// surface used by the Schedules settings UI:
-//
-//   agent:listSchedules     (read all cron rows — sync)
-//   agent:upsertSchedule    (create or replace one cron row)
-//   agent:runScheduleNow    (manual one-shot trigger of one cron row)
-//   agent:pauseSchedule     (flip enabled=false for one cron row)
-//   agent:resumeSchedule    (flip enabled=true for one cron row)
-//   agent:deleteSchedule    (remove one cron row)
-//
-// Handler bodies are lifted VERBATIM from `ipc-handler.ts` (V2.1l is a pure
-// move — semantics must be byte-for-byte identical so the V5 IPC contract
-// gate stays green and the Schedules settings UI does not notice the
-// refactor).
-//
-// All six channels live in one group because they share:
-//   • the same domain concept (agent schedule lifecycle: list → upsert →
-//     run/pause/resume → delete)
-//   • the same dispose lifecycle (renderer boots them together when opening
-//     the schedules settings page)
-//   • a closely-coupled dep surface (every handler is a one-line forward to
-//     a `runtime.*` method)
-//
-// Per-group deps are NOT a `Pick<EngineDeps>` — same rationale as the other
-// V2.1 groups: the dep surface is bound runtime methods (resolved fresh per
-// `setupAgentIPC` invocation), not composition-root singletons. `engine-deps.ts`
-// is reserved for true singletons; mixed/bound surfaces stay on the per-group
-// interface where they belong.
 import type { IpcMain } from 'electron'
-import type { CronTask } from '../../agent-control/contracts/types'
+import type {
+  AgentScheduleDefinition,
+  AgentScheduleOccurrence,
+  ScheduleCreateRequest,
+  ScheduleMutationErrorKind,
+  SchedulePreview,
+  SchedulePreviewRequest,
+  ScheduleUpdateRequest,
+  ScheduledTasksResponse,
+} from '../../../../shared/scheduled-tasks'
 import type { IpcChannelGroup, IpcDisposeHandle } from './types'
 
-/**
- * Local mirror of the host's `IPCResponse` shape. Inlined to avoid a back
- * import from `ipc-handler.ts` (the file we are extracting AWAY from); the
- * shape is stable across the codebase — see `IPCResponse<T>` in the host.
- */
-interface IPCResponse<T = unknown> {
-  success: boolean
-  data?: T
-  error?: string
-}
-
-/**
- * Upsert-schedule payload. Mirrors the inline anonymous type from the
- * pre-extraction handler verbatim so the runtime forward stays a one-liner.
- * Also matches `UpsertSchedulePayload` exported from
- * `agent-control/runtime-core/runtime.ts` — kept local to avoid pulling the
- * runtime module into this group's import graph (deps are bound methods, not
- * the runtime class).
- */
-export interface UpsertSchedulePayload {
-  id?: string
-  name: string
-  cronExpr: string
-  prompt: string
-  channelId?: string | null
-  enabled?: boolean
-  payload?: Record<string, unknown>
-}
-
-/**
- * Per-group deps. Mixed surface — see file header for why this is not
- * `Pick<EngineDeps, …>`.
- *
- * Each field is a bound runtime method (bound by the host so the group never
- * imports `AgentControlRuntime` and stays decoupled from the runtime
- * concrete class).
- */
 export interface ScheduleGroupDeps {
-  /**
-   * Bound `runtime.listSchedules` — synchronous, returns all cron rows.
-   */
-  listSchedules(): CronTask[]
-  /**
-   * Bound `runtime.upsertSchedule` — async, creates or replaces one cron
-   * row and returns the resulting `CronTask`.
-   */
-  upsertSchedule(payload: UpsertSchedulePayload): Promise<CronTask>
-  /**
-   * Bound `runtime.runScheduleNow` — async, performs a manual one-shot
-   * trigger. Returns `{ success, error? }` (NEVER throws for protocol-level
-   * failures — those are surfaced via `success: false`).
-   */
-  runScheduleNow(id: string): Promise<{ success: boolean; error?: string }>
-  /**
-   * Bound `runtime.pauseSchedule` — async, flips enabled=false for one
-   * cron row. Returns the resulting `CronTask`, or `null` if the schedule
-   * does not exist.
-   */
-  pauseSchedule(id: string): Promise<CronTask | null>
-  /**
-   * Bound `runtime.resumeSchedule` — async, flips enabled=true for one
-   * cron row. Returns the resulting `CronTask`, or `null` if the schedule
-   * does not exist.
-   */
-  resumeSchedule(id: string): Promise<CronTask | null>
-  /**
-   * Bound `runtime.deleteSchedule` — async, removes one cron row. Returns
-   * `true` if a row existed, `false` if not.
-   */
-  deleteSchedule(id: string): Promise<boolean>
+  list(): AgentScheduleDefinition[]
+  get(id: string): AgentScheduleDefinition | null
+  preview(request: SchedulePreviewRequest): SchedulePreview
+  create(request: ScheduleCreateRequest): Promise<AgentScheduleDefinition>
+  update(request: ScheduleUpdateRequest): Promise<AgentScheduleDefinition | null>
+  pause(id: string): Promise<AgentScheduleDefinition | null>
+  resume(id: string): Promise<AgentScheduleDefinition | null>
+  delete(id: string): Promise<boolean>
+  runNow(id: string): Promise<AgentScheduleOccurrence | null>
+  listOccurrences(scheduleId: string, limit?: number): AgentScheduleOccurrence[]
+  emitChanged(scheduleId?: string): void
 }
 
 const CHANNELS = [
-  'agent:listSchedules',
-  'agent:upsertSchedule',
-  'agent:runScheduleNow',
-  'agent:pauseSchedule',
-  'agent:resumeSchedule',
-  'agent:deleteSchedule',
+  'scheduledTasks:list',
+  'scheduledTasks:get',
+  'scheduledTasks:preview',
+  'scheduledTasks:create',
+  'scheduledTasks:update',
+  'scheduledTasks:pause',
+  'scheduledTasks:resume',
+  'scheduledTasks:delete',
+  'scheduledTasks:runNow',
+  'scheduledTasks:listOccurrences',
 ] as const
 
+function failure(error: unknown): ScheduledTasksResponse<never> {
+  const message = error instanceof Error ? error.message : String(error)
+  let kind: ScheduleMutationErrorKind = 'internal_error'
+  if (/not found/i.test(message)) kind = 'not_found'
+  else if (/request|required|empty/i.test(message)) kind = 'invalid_request'
+  else if (/scope|conversation|agent|workspace|target/i.test(message)) kind = 'target_missing'
+  else if (/time|date|timezone|schedule|interval|future/i.test(message)) kind = 'invalid_time'
+  return { success: false, error: { kind, message } }
+}
+
+function requireId(payload: unknown): string {
+  const id = (payload as { id?: unknown } | null)?.id
+  if (typeof id !== 'string' || !id.trim()) throw new Error('Schedule id is required')
+  return id.trim()
+}
+
+function requirePreview(payload: unknown): SchedulePreviewRequest {
+  const value = payload as Partial<SchedulePreviewRequest> | null
+  if (!value || typeof value !== 'object' || !value.scheduleSpec || typeof value.timezone !== 'string') {
+    throw new Error('Schedule preview request is required')
+  }
+  return value as SchedulePreviewRequest
+}
+
+function requireMutation<T extends ScheduleCreateRequest | ScheduleUpdateRequest>(
+  payload: unknown,
+  requireScheduleId: boolean,
+): T {
+  const value = payload as Partial<ScheduleUpdateRequest> | null
+  if (!value || typeof value !== 'object') throw new Error('Schedule request is required')
+  if (requireScheduleId && (typeof value.id !== 'string' || !value.id.trim())) {
+    throw new Error('Schedule id is required')
+  }
+  if (!value.scheduleSpec || typeof value.timezone !== 'string' || typeof value.instruction !== 'string'
+    || typeof value.name !== 'string' || typeof value.agentId !== 'string' || !value.agentId.trim()
+    || !Array.isArray(value.workspaceRoots) || value.workspaceRoots.some((root) => typeof root !== 'string')
+    || typeof value.enabled !== 'boolean' || !['coalesce_latest', 'skip'].includes(String(value.missedPolicy))
+    || !['dedicated', 'existing'].includes(String(value.scopeMode))) {
+    throw new Error('Schedule request is invalid')
+  }
+  if (value.scopeMode === 'existing' && (typeof value.scopeId !== 'string' || !value.scopeId.trim())) {
+    throw new Error('Existing scope id is required')
+  }
+  return value as T
+}
+
+async function respond<T>(operation: () => T | Promise<T>): Promise<ScheduledTasksResponse<T>> {
+  try {
+    return { success: true, data: await operation() }
+  } catch (error) {
+    return failure(error)
+  }
+}
+
 export const scheduleGroup: IpcChannelGroup<ScheduleGroupDeps> = {
-  namespace: 'agent:schedule',
+  namespace: 'scheduledTasks',
 
   register(ipcMain: IpcMain, deps: ScheduleGroupDeps): IpcDisposeHandle {
-    // setupAgentIPC runs on every dev reload; strip any prior handler so
-    // `ipcMain.handle` does not throw on the second registration. Mirrors the
-    // pre-extraction defensive `removeHandler` calls in `ipc-handler.ts`.
     for (const channel of CHANNELS) {
-      try { ipcMain.removeHandler(channel) } catch { /* ignore — handler may not exist */ }
+      try { ipcMain.removeHandler(channel) } catch { /* handler may not exist */ }
     }
 
-    ipcMain.handle('agent:listSchedules', (): IPCResponse => {
-      try {
-        return { success: true, data: deps.listSchedules() }
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : String(error)
-        return { success: false, error: errorMessage }
-      }
-    })
+    ipcMain.handle('scheduledTasks:list', () => respond(() => deps.list()))
+    ipcMain.handle('scheduledTasks:get', (_, payload) => respond(() => {
+      const id = requireId(payload)
+      const schedule = deps.get(id)
+      if (!schedule) throw new Error(`Schedule not found: ${id}`)
+      return schedule
+    }))
+    ipcMain.handle('scheduledTasks:preview', (_, payload: SchedulePreviewRequest) => respond(() => deps.preview(requirePreview(payload))))
+    ipcMain.handle('scheduledTasks:create', (_, payload: ScheduleCreateRequest) => respond(async () => {
+      const schedule = await deps.create(requireMutation<ScheduleCreateRequest>(payload, false))
+      deps.emitChanged(schedule.id)
+      return schedule
+    }))
+    ipcMain.handle('scheduledTasks:update', (_, payload: ScheduleUpdateRequest) => respond(async () => {
+      const validPayload = requireMutation<ScheduleUpdateRequest>(payload, true)
+      const schedule = await deps.update(validPayload)
+      if (!schedule) throw new Error(`Schedule not found: ${payload?.id || ''}`)
+      deps.emitChanged(schedule.id)
+      return schedule
+    }))
 
-    ipcMain.handle('agent:upsertSchedule', async (_, payload: UpsertSchedulePayload): Promise<IPCResponse> => {
-      try {
-        const schedule = await deps.upsertSchedule(payload)
-        return { success: true, data: schedule }
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : String(error)
-        return { success: false, error: errorMessage }
-      }
-    })
-
-    ipcMain.handle('agent:runScheduleNow', async (_, payload: { id: string }): Promise<IPCResponse> => {
-      try {
-        const result = await deps.runScheduleNow(payload.id)
-        return { success: result.success, error: result.error }
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : String(error)
-        return { success: false, error: errorMessage }
-      }
-    })
-
-    ipcMain.handle('agent:pauseSchedule', async (_, payload: { id: string }): Promise<IPCResponse> => {
-      try {
-        const schedule = await deps.pauseSchedule(payload.id)
-        if (!schedule) return { success: false, error: `Schedule not found: ${payload.id}` }
-        return { success: true, data: schedule }
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : String(error)
-        return { success: false, error: errorMessage }
-      }
-    })
-
-    ipcMain.handle('agent:resumeSchedule', async (_, payload: { id: string }): Promise<IPCResponse> => {
-      try {
-        const schedule = await deps.resumeSchedule(payload.id)
-        if (!schedule) return { success: false, error: `Schedule not found: ${payload.id}` }
-        return { success: true, data: schedule }
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : String(error)
-        return { success: false, error: errorMessage }
-      }
-    })
-
-    ipcMain.handle('agent:deleteSchedule', async (_, payload: { id: string }): Promise<IPCResponse> => {
-      try {
-        const removed = await deps.deleteSchedule(payload.id)
-        return { success: removed, error: removed ? undefined : `Schedule not found: ${payload.id}` }
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : String(error)
-        return { success: false, error: errorMessage }
-      }
-    })
+    ipcMain.handle('scheduledTasks:pause', (_, payload) => respond(async () => {
+      const id = requireId(payload)
+      const schedule = await deps.pause(id)
+      if (!schedule) throw new Error(`Schedule not found: ${id}`)
+      deps.emitChanged(id)
+      return schedule
+    }))
+    ipcMain.handle('scheduledTasks:resume', (_, payload) => respond(async () => {
+      const id = requireId(payload)
+      const schedule = await deps.resume(id)
+      if (!schedule) throw new Error(`Schedule not found: ${id}`)
+      deps.emitChanged(id)
+      return schedule
+    }))
+    ipcMain.handle('scheduledTasks:delete', (_, payload) => respond(async () => {
+      const id = requireId(payload)
+      if (!await deps.delete(id)) throw new Error(`Schedule not found: ${id}`)
+      deps.emitChanged(id)
+      return { id }
+    }))
+    ipcMain.handle('scheduledTasks:runNow', (_, payload) => respond(async () => {
+      const id = requireId(payload)
+      const occurrence = await deps.runNow(id)
+      if (!occurrence) throw new Error(`Schedule not found or not runnable: ${id}`)
+      deps.emitChanged(id)
+      return occurrence
+    }))
+    ipcMain.handle('scheduledTasks:listOccurrences', (_, payload) => respond(() => {
+      const scheduleId = typeof payload?.scheduleId === 'string' ? payload.scheduleId.trim() : ''
+      if (!scheduleId) throw new Error('Schedule id is required')
+      return deps.listOccurrences(scheduleId, payload?.limit)
+    }))
 
     return {
       dispose(): void {
         for (const channel of CHANNELS) {
-          try { ipcMain.removeHandler(channel) } catch { /* ignore — already removed */ }
+          try { ipcMain.removeHandler(channel) } catch { /* already removed */ }
         }
       },
     }
   },
 }
 
-/** Exposed for the registration-behavior test (channels list assertion). */
 export const _scheduleGroupChannelsForTest: ReadonlyArray<string> = CHANNELS

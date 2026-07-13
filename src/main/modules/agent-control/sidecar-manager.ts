@@ -295,45 +295,6 @@ export class SidecarManager {
     })
   }
 
-  async listSchedules(): Promise<Record<string, unknown>> {
-    return this.request('/cron')
-  }
-
-  async upsertSchedule(payload: Record<string, unknown>): Promise<Record<string, unknown>> {
-    return this.request('/cron/upsert', {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    })
-  }
-
-  async pauseSchedule(id: string): Promise<Record<string, unknown>> {
-    return this.request('/cron/pause', {
-      method: 'POST',
-      body: JSON.stringify({ id }),
-    })
-  }
-
-  async resumeSchedule(id: string): Promise<Record<string, unknown>> {
-    return this.request('/cron/resume', {
-      method: 'POST',
-      body: JSON.stringify({ id }),
-    })
-  }
-
-  async deleteSchedule(id: string): Promise<Record<string, unknown>> {
-    return this.request('/cron/delete', {
-      method: 'POST',
-      body: JSON.stringify({ id }),
-    })
-  }
-
-  async runScheduleNow(id: string): Promise<Record<string, unknown>> {
-    return this.request('/cron/run-now', {
-      method: 'POST',
-      body: JSON.stringify({ id }),
-    })
-  }
-
   async pullEvents(limit = 20): Promise<Array<Record<string, unknown>>> {
     const data = await this.request(`/events/pull?limit=${Math.max(1, Math.min(200, limit))}`)
     const events = Array.isArray((data as { events?: unknown[] }).events)

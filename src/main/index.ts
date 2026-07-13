@@ -1,6 +1,6 @@
 // 本文件是重模块：由 boot-entry.ts（构建入口）在 splash 可见后动态加载。
 // dotenv、userData 路径、协议注册、命令行开关等 pre-ready 配置都在 boot-entry 完成。
-import { app, shell, BrowserWindow, ipcMain, protocol, nativeImage, nativeTheme, Menu, dialog, clipboard, type MenuItemConstructorOptions, type NativeImage } from 'electron'
+import { app, shell, BrowserWindow, ipcMain, protocol, nativeImage, nativeTheme, Menu, dialog, clipboard, powerMonitor, type MenuItemConstructorOptions, type NativeImage } from 'electron'
 import { join, extname, isAbsolute, basename, resolve } from 'path'
 import { createReadStream, statSync, existsSync, appendFileSync } from 'fs'
 import { readFile } from 'fs/promises'
@@ -8,7 +8,7 @@ import { tmpdir } from 'os'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 
 // Import modules
-import { setupAgentIPC, cleanupAgentRuntime } from './modules/claude-bridge/ipc-handler'
+import { setupAgentIPC, cleanupAgentRuntime, reconcileAgentSchedulesOnResume } from './modules/claude-bridge/ipc-handler'
 import { AgentManager } from './modules/claude-bridge/agent-manager'
 import { setupBrowserIPC, type BrowserController } from './modules/browser-engine/ipc-handler'
 import { setupDocumentIPC } from './modules/document-engine/ipc-handler'
@@ -856,11 +856,18 @@ function setupAutoUpdater(mainWindow: BrowserWindow): void {
 
 // pre-ready 配置（协议注册、命令行开关、userAgent、userData）见 boot-entry.ts。
 // 本模块在 splash 可见后才被动态加载，此处 whenReady 已 resolve，回调立即执行。
+const handlePowerResume = (): void => {
+  void reconcileAgentSchedulesOnResume().catch((error) => {
+    console.warn('[scheduled-tasks] resume reconcile failed:', error)
+  })
+}
+
 app.whenReady().then(async () => {
   // Set app user model id for windows
   electronApp.setAppUserModelId('com.ready.app')
   applyAppIcon()
   setupApplicationMenu()
+  powerMonitor.on('resume', handlePowerResume)
   // boot-entry 已建 splash；此 await 幂等，保底"splash 先于 boot 清理与数据库门"。
   await createStartupSplashWindow()
 
@@ -1120,6 +1127,7 @@ app.on('before-quit', (event) => {
   if (isQuitting) return
   isQuitting = true
   event.preventDefault()
+  powerMonitor.removeListener('resume', handlePowerResume)
   // Stop the reminder scheduler synchronously — it owns only in-process
   // setTimeout handles, no IO or sidecar processes, so it's safe to run
   // before the async cleanup chain. Doing it here prevents any timer that

@@ -61,20 +61,6 @@ export interface AgentChannelConfig {
   updatedAt: string
 }
 
-export interface CronTask {
-  id: string
-  name: string
-  cronExpr: string
-  prompt: string
-  channelId?: string | null
-  enabled: boolean
-  payload?: Record<string, unknown>
-  lastRunAt?: string | null
-  nextRunAt?: string | null
-  createdAt: string
-  updatedAt: string
-}
-
 export interface HeartbeatComponentSnapshot {
   healthy: boolean
   lastBeatAt?: string

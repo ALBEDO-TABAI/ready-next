@@ -6,6 +6,12 @@ import {
 } from '../shared/browser-view-intent'
 import type { BrowserUtilityMenuRequest } from '../shared/browser-utility-menu'
 import type { NativeContextMenuRequest } from '../shared/native-context-menu'
+import type {
+  ScheduleCreateRequest,
+  SchedulePreviewRequest,
+  ScheduledTasksAPI,
+  ScheduleUpdateRequest,
+} from '../shared/scheduled-tasks'
 import type { RendererAgentMetricName } from '../shared/renderer-agent-metrics'
 import type { ModelPackDownloadUpdate, ModelPackId, ModelSource } from '../shared/model-pack-types'
 import type { RuntimeStatus, RuntimeProvisionProgress } from '../shared/runtime-provision-types'
@@ -301,20 +307,6 @@ const agentAPI = {
     ipcRenderer.invoke('agent:setChannelEnabled', { id, enabled }),
   sendChannelProbe: (id: string, text: string) =>
     ipcRenderer.invoke('agent:sendChannelProbe', { id, text }),
-  listSchedules: () => ipcRenderer.invoke('agent:listSchedules'),
-  upsertSchedule: (payload: {
-    id?: string
-    name: string
-    cronExpr: string
-    prompt: string
-    channelId?: string | null
-    enabled?: boolean
-    payload?: Record<string, unknown>
-  }) => ipcRenderer.invoke('agent:upsertSchedule', payload),
-  runScheduleNow: (id: string) => ipcRenderer.invoke('agent:runScheduleNow', { id }),
-  pauseSchedule: (id: string) => ipcRenderer.invoke('agent:pauseSchedule', { id }),
-  resumeSchedule: (id: string) => ipcRenderer.invoke('agent:resumeSchedule', { id }),
-  deleteSchedule: (id: string) => ipcRenderer.invoke('agent:deleteSchedule', { id }),
   // Stage V V3.2 — push payloads carry `sessionId: string | null`
   // (not optional). null = global event (not session-scoped); a string
   // means the event belongs to a specific session and renderer routes by it.
@@ -398,6 +390,27 @@ const agentAPI = {
       callback(data as { scopeId: string; sessionId: string | null; changedTaskIds: string[]; reason: 'create' | 'update' | 'delete' | 'supersede' })
     ipcRenderer.on('agent:taskProjectionsChanged', handler)
     return () => { ipcRenderer.removeListener('agent:taskProjectionsChanged', handler) }
+  },
+}
+
+const scheduledTasksAPI: ScheduledTasksAPI = {
+  list: () => ipcRenderer.invoke('scheduledTasks:list'),
+  get: (id: string) => ipcRenderer.invoke('scheduledTasks:get', { id }),
+  preview: (request: SchedulePreviewRequest) => ipcRenderer.invoke('scheduledTasks:preview', request),
+  create: (request: ScheduleCreateRequest) => ipcRenderer.invoke('scheduledTasks:create', request),
+  update: (request: ScheduleUpdateRequest) => ipcRenderer.invoke('scheduledTasks:update', request),
+  pause: (id: string) => ipcRenderer.invoke('scheduledTasks:pause', { id }),
+  resume: (id: string) => ipcRenderer.invoke('scheduledTasks:resume', { id }),
+  delete: (id: string) => ipcRenderer.invoke('scheduledTasks:delete', { id }),
+  runNow: (id: string) => ipcRenderer.invoke('scheduledTasks:runNow', { id }),
+  listOccurrences: (scheduleId: string, limit?: number) =>
+    ipcRenderer.invoke('scheduledTasks:listOccurrences', { scheduleId, limit }),
+  onChanged: (callback: (scheduleId?: string) => void) => {
+    const handler = (_: IpcRendererEvent, scheduleId?: unknown): void => {
+      callback(typeof scheduleId === 'string' ? scheduleId : undefined)
+    }
+    ipcRenderer.on('scheduledTasks:changed', handler)
+    return () => ipcRenderer.removeListener('scheduledTasks:changed', handler)
   },
 }
 
@@ -1427,6 +1440,7 @@ const mcpAPI = {
 
 contextBridge.exposeInMainWorld('electronAPI', {
   agent: agentAPI,
+  scheduledTasks: scheduledTasksAPI,
   memory: memoryAPI,
   memoryCards: memoryCardsAPI,
   runQuality: runQualityAPI,
@@ -1465,6 +1479,7 @@ declare global {
   interface Window {
     electronAPI: {
       agent: typeof agentAPI
+      scheduledTasks: typeof scheduledTasksAPI
       mcp: typeof mcpAPI
       memory: typeof memoryAPI
       memoryCards: typeof memoryCardsAPI

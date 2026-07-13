@@ -124,7 +124,18 @@ export class RunCoordinator {
     if (existingTask?.scopeId && existingTask.scopeId !== request.scope.id) {
       throw new Error('[run-coordinator] continuation task does not belong to scope')
     }
+    const hasScheduledSource = Boolean(request.scheduledTaskOccurrence)
+    if (hasScheduledSource !== (request.runOrigin === 'scheduled_task')) {
+      throw new Error('[run-coordinator] scheduled task origin and occurrence source must be provided together')
+    }
+    if (request.runOrigin === 'scheduled_task' && request.taskOrigin !== 'system_background') {
+      throw new Error('[run-coordinator] scheduled task requires system_background task origin')
+    }
+    if (existingTask && request.taskOrigin && request.taskOrigin !== existingTask.taskOrigin) {
+      throw new Error('[run-coordinator] task creation origin is immutable')
+    }
     const taskOrigin: TaskCreationOrigin = existingTask?.taskOrigin
+      ?? request.taskOrigin
       ?? (request.parentTaskId ? 'workflow_child' : 'user_root')
     const ownerAgentId = existingTask?.ownerAgentId || request.scope.activeAgentId || request.scope.agent
     if (!ownerAgentId) throw new Error('[run-coordinator] task owner is required')
@@ -144,6 +155,8 @@ export class RunCoordinator {
       runOrigin: request.runOrigin ?? runOriginForRequest({ isContinuation: Boolean(existingTask || request.continuationIntent) }),
       ownerAssignmentSource: request.runOrigin === 'handoff_takeover'
         ? 'handoff'
+        : request.runOrigin === 'scheduled_task'
+          ? 'scheduled_task'
         : existingTask ? 'continuation' : request.parentTaskId ? 'parent_task' : 'conversation_active',
     } as const
     const executionBinding = this.deps.createExecutionBinding
@@ -254,6 +267,7 @@ export class RunCoordinator {
       sessionIdOverride: request.sessionIdOverride,
       requestId: runId,
       sourceMessageId: request.sourceMessageId ?? null,
+      scheduledTaskOccurrence: request.scheduledTaskOccurrence,
       taskId,
       parentTaskId: request.parentTaskId,
       parentStepId: request.parentStepId,

@@ -363,15 +363,15 @@ let telemetryGroupDispose: IpcDisposeHandle | null = null
 let channelManagementGroupDispose: IpcDisposeHandle | null = null
 
 /**
- * Stage V V2.1l — dispose handle returned by `scheduleGroup.register`.
- * Owns the 6 agent-schedule (cron) CRUD + control channels
- * (`agent:listSchedules`, `agent:upsertSchedule`, `agent:runScheduleNow`,
- * `agent:pauseSchedule`, `agent:resumeSchedule`, `agent:deleteSchedule`).
+ * Dispose handle returned by `scheduleGroup.register`.
+ * Owns the structured `scheduledTasks:*` read, mutation, preview, history,
+ * and manual-run channels.
  * Same lifecycle pattern as the other group dispose slots: register on
  * `setupAgentIPC`, dispose on dev-reload re-entry, dispose on
  * `cleanupAgentRuntime` shutdown.
  */
 let scheduleGroupDispose: IpcDisposeHandle | null = null
+let scheduledTaskChangedOff: (() => void) | null = null
 
 /**
  * Stage V V2.1m — dispose handle returned by `chatPersistenceGroup.register`.
@@ -618,12 +618,14 @@ export async function cleanupAgentRuntime(): Promise<void> {
     try { channelManagementGroupDispose.dispose() } catch { /* ignore */ }
     channelManagementGroupDispose = null
   }
-  // Stage V V2.1l — symmetric release of the 6 schedule (cron) channel
-  // handlers (listSchedules / upsertSchedule / runScheduleNow /
-  // pauseSchedule / resumeSchedule / deleteSchedule).
+  // Symmetric release of the structured scheduled-task handlers.
   if (scheduleGroupDispose) {
     try { scheduleGroupDispose.dispose() } catch { /* ignore */ }
     scheduleGroupDispose = null
+  }
+  if (scheduledTaskChangedOff) {
+    scheduledTaskChangedOff()
+    scheduledTaskChangedOff = null
   }
   // Stage V V2.1m — symmetric release of the 8 chat-persistence +
   // file-picker channel handlers (getConversations / getMessages /
@@ -658,6 +660,10 @@ export async function cleanupAgentRuntime(): Promise<void> {
   // and prevent GC. Idempotent — safe to call when no emitter was set.
   setReferenceHintChangeEmitter(null)
   registerSkillReferenceInlinedEmitter(null)
+}
+
+export async function reconcileAgentSchedulesOnResume(): Promise<void> {
+  await runtime?.reconcileScheduledTasks('resume')
 }
 
 export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWindow, browserController?: BrowserController): void {
@@ -1269,21 +1275,34 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
     sendChannelProbe: (id, text) => runtime!.sendChannelProbe(id, text),
   })
 
-  // Stage V V2.1l — the 6 schedule (cron) handlers below were moved into
-  // `scheduleGroup`. Symmetric dispose lives in `cleanupAgentRuntime` above
-  // and the dev-reload re-entry block below.
+  // Structured scheduled-task handlers. Symmetric dispose lives in
+  // `cleanupAgentRuntime` above and the dev-reload re-entry block below.
   if (scheduleGroupDispose) {
     try { scheduleGroupDispose.dispose() } catch { /* ignore — handlers may already be gone */ }
     scheduleGroupDispose = null
   }
   scheduleGroupDispose = scheduleGroup.register(ipcMain, {
-    listSchedules: () => runtime!.listSchedules(),
-    upsertSchedule: (payload) => runtime!.upsertSchedule(payload),
-    runScheduleNow: (id) => runtime!.runScheduleNow(id),
-    pauseSchedule: (id) => runtime!.pauseSchedule(id),
-    resumeSchedule: (id) => runtime!.resumeSchedule(id),
-    deleteSchedule: (id) => runtime!.deleteSchedule(id),
+    list: () => runtime!.listScheduledTasks(),
+    get: (id) => runtime!.getScheduledTask(id),
+    preview: (payload) => runtime!.previewScheduledTask(payload),
+    create: (payload) => runtime!.createScheduledTask(payload),
+    update: (payload) => runtime!.updateScheduledTask(payload),
+    runNow: (id) => runtime!.runScheduledTaskNow(id),
+    pause: (id) => runtime!.pauseScheduledTask(id),
+    resume: (id) => runtime!.resumeScheduledTask(id),
+    delete: (id) => runtime!.deleteScheduledTask(id),
+    listOccurrences: (scheduleId, limit) => runtime!.listScheduledTaskOccurrences(scheduleId, limit),
+    emitChanged: (scheduleId) => {
+      if (!mainWindow.isDestroyed()) mainWindow.webContents.send('scheduledTasks:changed', scheduleId)
+    },
   })
+  if (scheduledTaskChangedOff) scheduledTaskChangedOff()
+  const scheduleRuntime = runtime
+  const onScheduledTaskChanged = (scheduleId: string) => {
+    if (!mainWindow.isDestroyed()) mainWindow.webContents.send('scheduledTasks:changed', scheduleId)
+  }
+  scheduleRuntime.on('scheduledTasksChanged', onScheduledTaskChanged)
+  scheduledTaskChangedOff = () => scheduleRuntime.removeListener('scheduledTasksChanged', onScheduledTaskChanged)
 
   // Stage V V2.1m — the 8 chat-persistence + file-picker channels
   // (chat:getConversations, chat:getMessages, chat:deleteConversation,

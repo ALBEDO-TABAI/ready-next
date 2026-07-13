@@ -84,14 +84,14 @@ export interface CalendarWidgetSourceLike {
 /**
  * Optional schedule runtime fetcher; threaded in by callers that want
  * the `schedule_runtime_card` to show real automation jobs. The
- * default adapter wires this to `window.electronAPI.agent.listSchedules`.
+ * default adapter wires this to `window.electronAPI.scheduledTasks.list`.
  */
 export interface ScheduleRuntimeApi {
-  listSchedules(): Promise<CalendarWidgetIpcResponse<ReadonlyArray<{
+  list(): Promise<CalendarWidgetIpcResponse<ReadonlyArray<{
     name?: string
     enabled?: boolean
     nextRunAt?: string
-    lastRunAt?: string
+    lastOccurrenceAt?: string | null
   }>>>
 }
 
@@ -382,9 +382,9 @@ export function createCalendarWidgetFetcher(deps: CreateFetcherDeps): CalendarWi
         jobs: [{ name: '当前没有自动计划', status: 'paused', nextRun: undefined, lastRun: undefined }],
       }
     }
-    let rows: ReadonlyArray<{ name?: string; enabled?: boolean; nextRunAt?: string; lastRunAt?: string }> = []
+    let rows: ReadonlyArray<{ name?: string; enabled?: boolean; nextRunAt?: string; lastOccurrenceAt?: string | null }> = []
     try {
-      const res = await schedule.listSchedules()
+      const res = await schedule.list()
       rows = res?.success && Array.isArray(res.data) ? res.data : []
     } catch {
       rows = []
@@ -393,7 +393,7 @@ export function createCalendarWidgetFetcher(deps: CreateFetcherDeps): CalendarWi
       name: String(row.name || '未命名计划'),
       status: row.enabled ? 'enabled' : 'paused',
       nextRun: typeof row.nextRunAt === 'string' ? row.nextRunAt : undefined,
-      lastRun: typeof row.lastRunAt === 'string' ? row.lastRunAt : undefined,
+      lastRun: typeof row.lastOccurrenceAt === 'string' ? row.lastOccurrenceAt : undefined,
     }))
     return {
       heading: '自动计划',
@@ -494,7 +494,7 @@ export function getDefaultCalendarWidgetFetcher(): CalendarWidgetFetcher {
   const electronAPI = (globalThis as { electronAPI?: unknown }).electronAPI
     ?? (globalThis as { window?: { electronAPI?: unknown } }).window?.electronAPI
   const calendarApi = (electronAPI as { calendar?: unknown })?.calendar as CalendarWidgetApi | undefined
-  const agentApi = (electronAPI as { agent?: unknown })?.agent as ScheduleRuntimeApi | undefined
+  const scheduleApi = (electronAPI as { scheduledTasks?: unknown })?.scheduledTasks as ScheduleRuntimeApi | undefined
 
   if (!calendarApi) {
     return createCalendarWidgetFetcher({
@@ -502,12 +502,12 @@ export function getDefaultCalendarWidgetFetcher(): CalendarWidgetFetcher {
         async getEvents() { return { success: false, data: [] } },
         async getSources() { return { success: false, data: [] } },
       },
-      schedule: agentApi,
+      schedule: scheduleApi,
     })
   }
   return createCalendarWidgetFetcher({
     calendar: wrapCalendarApiWithWireNormalization(calendarApi),
-    schedule: agentApi,
+    schedule: scheduleApi,
   })
 }
 

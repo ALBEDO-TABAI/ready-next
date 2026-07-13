@@ -17,6 +17,7 @@ import {
   normalizeAgentLifecycleStatus,
   normalizeAgentSlug,
 } from '../../shared/agent-identity'
+import type { ScheduleSpecV1 } from '../../shared/scheduled-tasks'
 
 // Minimal interface compatible with DatabaseConnection from database.ts.
 // Defined locally to avoid circular imports.
@@ -31,6 +32,103 @@ export interface MigrationDatabase {
 interface Migration {
   name: string
   up: (db: MigrationDatabase) => void
+}
+
+interface LegacyAgentScheduleRow {
+  id: string
+  name: string
+  cron_expr: string
+  prompt: string
+  enabled: number
+  payload_json: string | null
+  last_run_at: string | null
+  next_run_at: string | null
+  created_at: string
+  updated_at: string
+}
+
+function parseLegacySchedulePayload(raw: string | null): Record<string, unknown> {
+  if (!raw) return {}
+  try {
+    const parsed = JSON.parse(raw) as unknown
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : {}
+  } catch {
+    return {}
+  }
+}
+
+function readLegacyText(payload: Record<string, unknown>, ...keys: string[]): string | null {
+  for (const key of keys) {
+    const value = payload[key]
+    if (typeof value === 'string' && value.trim()) return value.trim()
+  }
+  return null
+}
+
+function parseCronInteger(value: string, min: number, max: number): number | null {
+  if (!/^\d+$/.test(value)) return null
+  const parsed = Number(value)
+  return Number.isInteger(parsed) && parsed >= min && parsed <= max ? parsed : null
+}
+
+function parseCronList(value: string, min: number, max: number): number[] | null {
+  const values = value.split(',').map((part) => parseCronInteger(part, min, max))
+  if (values.some((part) => part === null)) return null
+  return [...new Set(values as number[])]
+}
+
+/** Convert only cron shapes whose UTC behavior is exactly representable by ScheduleSpecV1. */
+function convertLegacyCron(cron: string): ScheduleSpecV1 | null {
+  const parts = cron.trim().split(/\s+/)
+  if (parts.length !== 5) return null
+  const [minuteRaw, hourRaw, dayRaw, monthRaw, weekdayRaw] = parts
+  const minute = parseCronInteger(minuteRaw, 0, 59)
+  const hour = parseCronInteger(hourRaw, 0, 23)
+  const localTime = minute !== null && hour !== null
+    ? `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`
+    : null
+
+  const minuteInterval = /^\*\/(\d+)$/.exec(minuteRaw)
+  if (minuteInterval && hourRaw === '*' && dayRaw === '*' && monthRaw === '*' && weekdayRaw === '*') {
+    const every = Number(minuteInterval[1])
+    if (every >= 5 && every <= 60 && 60 % every === 0) {
+      return { kind: 'interval', every, unit: 'minute', anchorAt: '1970-01-01T00:00:00Z' }
+    }
+    return null
+  }
+
+  const hourInterval = /^\*\/(\d+)$/.exec(hourRaw)
+  if (minute === 0 && hourInterval && dayRaw === '*' && monthRaw === '*' && weekdayRaw === '*') {
+    const every = Number(hourInterval[1])
+    if (every >= 1 && every <= 24 && 24 % every === 0) {
+      return { kind: 'interval', every, unit: 'hour', anchorAt: '1970-01-01T00:00:00Z' }
+    }
+    return null
+  }
+
+  if (!localTime) return null
+  if (dayRaw === '*' && monthRaw === '*' && weekdayRaw === '*') {
+    return { kind: 'calendar', frequency: 'daily', localTime }
+  }
+  if (dayRaw === '*' && monthRaw === '*' && weekdayRaw !== '*') {
+    const cronWeekdays = parseCronList(weekdayRaw, 0, 7)
+    if (!cronWeekdays?.length) return null
+    const weekdays = [...new Set(cronWeekdays.map((day) => day === 0 || day === 7 ? 7 : day))]
+      .sort((a, b) => a - b)
+    return { kind: 'calendar', frequency: 'weekly', localTime, weekdays }
+  }
+  const dayOfMonth = parseCronInteger(dayRaw, 1, 31)
+  if (dayOfMonth !== null && monthRaw === '*' && weekdayRaw === '*') {
+    return { kind: 'calendar', frequency: 'monthly', localTime, dayOfMonth }
+  }
+  if (dayOfMonth !== null && monthRaw !== '*' && weekdayRaw === '*') {
+    const months = parseCronList(monthRaw, 1, 12)
+    if (!months?.length) return null
+    return { kind: 'calendar', frequency: 'yearly', localTime, dayOfMonth, months }
+  }
+  return null
 }
 
 const DEFAULT_AGENT_PERSONA_SEEDS = [
@@ -3024,6 +3122,114 @@ const migrations: Migration[] = [
         CREATE INDEX idx_file_emergence_generation_scope_time
           ON file_emergence_snapshot_generations(root_scope_hash, generated_at);
       `)
+    }
+  },
+  {
+    name: '073_agent_scheduled_tasks',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE scheduled_tasks (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          instruction TEXT NOT NULL,
+          schedule_spec_version INTEGER NOT NULL DEFAULT 1 CHECK(schedule_spec_version = 1),
+          schedule_spec_json TEXT NOT NULL,
+          timezone TEXT NOT NULL,
+          scope_id TEXT,
+          scope_mode TEXT NOT NULL DEFAULT 'existing' CHECK(scope_mode IN ('dedicated', 'existing')),
+          agent_id TEXT NOT NULL,
+          workspace_roots_json TEXT NOT NULL DEFAULT '[]',
+          enabled INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0, 1)),
+          next_run_at TEXT,
+          last_occurrence_at TEXT,
+          missed_policy TEXT NOT NULL DEFAULT 'coalesce_latest'
+            CHECK(missed_policy IN ('coalesce_latest', 'skip')),
+          migration_state TEXT CHECK(migration_state IN ('needs_scope', 'needs_schedule_review')),
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          deleted_at TEXT
+        );
+        CREATE INDEX idx_scheduled_tasks_enabled_next
+          ON scheduled_tasks(enabled, next_run_at)
+          WHERE deleted_at IS NULL;
+        CREATE INDEX idx_scheduled_tasks_updated
+          ON scheduled_tasks(updated_at DESC);
+
+        CREATE TABLE agent_schedule_occurrences (
+          id TEXT PRIMARY KEY,
+          schedule_id TEXT NOT NULL REFERENCES scheduled_tasks(id) ON DELETE RESTRICT,
+          scheduled_for TEXT NOT NULL,
+          triggered_at TEXT NOT NULL,
+          trigger_source TEXT NOT NULL
+            CHECK(trigger_source IN ('timer', 'startup', 'resume', 'manual')),
+          trigger_source_key TEXT NOT NULL,
+          claim_status TEXT NOT NULL
+            CHECK(claim_status IN (
+              'queued', 'dispatching', 'dispatched', 'dispatch_failed',
+              'skipped_missed', 'skipped_coalesced', 'blocked_target'
+            )),
+          attempt INTEGER NOT NULL DEFAULT 0 CHECK(attempt >= 0),
+          run_id TEXT,
+          task_id TEXT,
+          delay_ms INTEGER NOT NULL DEFAULT 0 CHECK(delay_ms >= 0),
+          started_at TEXT,
+          finished_at TEXT,
+          error_kind TEXT,
+          error_message TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          UNIQUE(schedule_id, scheduled_for, trigger_source_key)
+        );
+        CREATE INDEX idx_agent_schedule_occurrences_recovery
+          ON agent_schedule_occurrences(claim_status, scheduled_for);
+        CREATE INDEX idx_agent_schedule_occurrences_schedule_history
+          ON agent_schedule_occurrences(schedule_id, created_at DESC);
+      `)
+
+      const legacyRows = db.prepare('SELECT * FROM agent_schedules').all<LegacyAgentScheduleRow>()
+      const insert = db.prepare(`
+        INSERT INTO scheduled_tasks (
+          id, name, instruction, schedule_spec_version, schedule_spec_json,
+          timezone, scope_id, scope_mode, agent_id, workspace_roots_json, enabled,
+          next_run_at, last_occurrence_at, missed_policy, migration_state,
+          created_at, updated_at, deleted_at
+        ) VALUES (?, ?, ?, 1, ?, 'UTC', ?, 'existing', ?, ?, ?, ?, ?, 'coalesce_latest', ?, ?, ?, NULL)
+      `)
+      for (const row of legacyRows) {
+        const payload = parseLegacySchedulePayload(row.payload_json)
+        const scopeId = readLegacyText(payload, 'scopeId', 'conversationId')
+        const agentId = readLegacyText(payload, 'agent', 'agentId') || 'butler'
+        const roots = Array.isArray(payload.workspaceRoots)
+          ? payload.workspaceRoots.filter((value): value is string => typeof value === 'string' && Boolean(value.trim()))
+          : []
+        if (roots.length === 0) {
+          const singleRoot = readLegacyText(payload, 'workspaceRoot', 'workspaceId')
+          if (singleRoot) roots.push(singleRoot)
+        }
+        const scheduleSpec = convertLegacyCron(row.cron_expr)
+        const migrationState = !scopeId
+          ? 'needs_scope'
+          : scheduleSpec
+            ? null
+            : 'needs_schedule_review'
+        const enabled = Boolean(row.enabled) && migrationState === null
+        insert.run(
+          row.id,
+          row.name,
+          row.prompt,
+          JSON.stringify(scheduleSpec || {}),
+          scopeId,
+          agentId,
+          JSON.stringify(roots),
+          enabled ? 1 : 0,
+          enabled ? row.next_run_at : null,
+          row.last_run_at,
+          migrationState,
+          row.created_at,
+          row.updated_at,
+        )
+      }
+      db.exec('DROP TABLE agent_schedules')
     }
   }
 ]

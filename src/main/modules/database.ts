@@ -383,20 +383,6 @@ export interface AgentChannelRecord {
   updated_at: string
 }
 
-export interface AgentScheduleRecord {
-  id: string
-  name: string
-  cron_expr: string
-  prompt: string
-  channel_id: string | null
-  enabled: number
-  payload_json: string | null
-  last_run_at: string | null
-  next_run_at: string | null
-  created_at: string
-  updated_at: string
-}
-
 export interface AgentChannelThreadRecord {
   channel_id: string
   remote_thread: string
@@ -2941,86 +2927,6 @@ export class DatabaseManager {
       now,
     )
     return this.getAgentChannelEvent(payload.eventId)!
-  }
-
-  listAgentSchedules(): AgentScheduleRecord[] {
-    if (!this.db) return []
-    return this.db
-      .prepare('SELECT * FROM agent_schedules ORDER BY updated_at DESC')
-      .all<AgentScheduleRecord>()
-  }
-
-  getAgentSchedule(id: string): AgentScheduleRecord | null {
-    if (!this.db) return null
-    const row = this.db
-      .prepare('SELECT * FROM agent_schedules WHERE id = ? LIMIT 1')
-      .get<AgentScheduleRecord>(id)
-    return row ?? null
-  }
-
-  upsertAgentSchedule(payload: {
-    id: string
-    name: string
-    cronExpr: string
-    prompt: string
-    channelId?: string | null
-    enabled: boolean
-    payloadJson?: string | null
-    nextRunAt?: string | null
-  }): AgentScheduleRecord {
-    if (!this.db) throw new Error('Database not available')
-    const now = new Date().toISOString()
-    const existing = this.getAgentSchedule(payload.id)
-    this.db.prepare(
-      `INSERT INTO agent_schedules
-       (id, name, cron_expr, prompt, channel_id, enabled, payload_json, last_run_at, next_run_at, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(id) DO UPDATE SET
-         name = excluded.name,
-         cron_expr = excluded.cron_expr,
-         prompt = excluded.prompt,
-         channel_id = excluded.channel_id,
-         enabled = excluded.enabled,
-         payload_json = excluded.payload_json,
-         next_run_at = excluded.next_run_at,
-         updated_at = excluded.updated_at`
-    ).run(
-      payload.id,
-      payload.name,
-      payload.cronExpr,
-      payload.prompt,
-      payload.channelId ?? null,
-      payload.enabled ? 1 : 0,
-      payload.payloadJson ?? null,
-      existing?.last_run_at ?? null,
-      payload.nextRunAt ?? existing?.next_run_at ?? null,
-      existing?.created_at ?? now,
-      now,
-    )
-    return this.getAgentSchedule(payload.id)!
-  }
-
-  setAgentScheduleEnabled(id: string, enabled: boolean): AgentScheduleRecord | null {
-    if (!this.db) throw new Error('Database not available')
-    this.db.prepare('UPDATE agent_schedules SET enabled = ?, updated_at = ? WHERE id = ?')
-      .run(enabled ? 1 : 0, new Date().toISOString(), id)
-    return this.getAgentSchedule(id)
-  }
-
-  markAgentScheduleRun(id: string, nextRunAt?: string | null): AgentScheduleRecord | null {
-    if (!this.db) throw new Error('Database not available')
-    this.db.prepare(
-      'UPDATE agent_schedules SET last_run_at = ?, next_run_at = ?, updated_at = ? WHERE id = ?'
-    ).run(new Date().toISOString(), nextRunAt ?? null, new Date().toISOString(), id)
-    return this.getAgentSchedule(id)
-  }
-
-  deleteAgentSchedule(id: string): boolean {
-    if (!this.db) return false
-    const result = this.db.prepare('DELETE FROM agent_schedules WHERE id = ?').run(id) as {
-      changes?: number
-    }
-    return (result.changes ?? 0) > 0
   }
 
   close(): void {

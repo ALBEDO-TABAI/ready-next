@@ -11,6 +11,7 @@ export type RunExecutionOrigin =
   | 'continuation'
   | 'handoff_takeover'
   | 'workflow_participant'
+  | 'scheduled_task'
 
 export type TaskExecutorKind = 'registered_agent' | 'ephemeral'
 
@@ -24,7 +25,7 @@ export interface TaskExecutionBinding {
   effectiveAgentId?: string | null
   ephemeralRole?: string | null
   executionMaterialHash: string
-  ownerAssignmentSource: 'conversation_active' | 'continuation' | 'handoff' | 'parent_task'
+  ownerAssignmentSource: 'conversation_active' | 'continuation' | 'handoff' | 'parent_task' | 'scheduled_task'
   executionSelectionSource: 'task_owner' | 'workflow_participant' | 'ephemeral_role'
   resolutionKind: 'direct' | 'merged_redirect' | 'main_fallback'
 }

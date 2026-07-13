@@ -216,11 +216,11 @@ describe('calendar widget data provider — fetchTodayFocusSnapshot', () => {
 describe('calendar widget data provider — fetchScheduleRuntime', () => {
   it('maps schedule rows into job entries', async () => {
     const schedule: ScheduleRuntimeApi = {
-      async listSchedules() {
+      async list() {
         return {
           success: true,
           data: [
-            { name: '每日总结', enabled: true, nextRunAt: '2026-05-17T18:00:00Z', lastRunAt: '2026-05-16T18:00:00Z' },
+            { name: '每日总结', enabled: true, nextRunAt: '2026-05-17T18:00:00Z', lastOccurrenceAt: '2026-05-16T18:00:00Z' },
             { name: '关闭中', enabled: false },
           ],
         }

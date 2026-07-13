@@ -64,6 +64,9 @@ import {
 // `useAgent` / store / IPC dependencies; signatures preserved byte-for-byte.
 import { ChatPanelMotionLayer, CollapsedChatRail } from './chat-panel/layout/MotionLayer'
 import DraggableModeTabs from '../layout/DraggableModeTabs'
+import { ScheduledTasksButton } from './scheduled-tasks/ScheduledTasksButton'
+import type { ScheduledTasksSummary } from './scheduled-tasks/ScheduledTasksPanel'
+import '../../styles/scheduled-tasks.css'
 import SessionCompleteToast from './chat-panel/session-tabs/SessionCompleteToast'
 import { resolveChatSessionTitle } from './chat-panel/helpers/session-title'
 import { resolveSessionDotStatus, type SessionDotStatus } from './chat-panel/helpers/session-status'
@@ -159,6 +162,9 @@ interface ChatPanelProps {
   onWorkbenchModeChange?: (mode: WorkbenchMode) => void | Promise<void>
   onWorkbenchSplitToggle?: (mode: WorkbenchMode) => void
   onTogglePanel?: () => void
+  scheduledTasksOpen?: boolean
+  scheduledTasksSummary?: ScheduledTasksSummary
+  onScheduledTasksToggle?: () => void
 }
 
 export default function ChatPanel({
@@ -169,6 +175,9 @@ export default function ChatPanel({
   onWorkbenchModeChange,
   onWorkbenchSplitToggle,
   onTogglePanel,
+  scheduledTasksOpen = false,
+  scheduledTasksSummary = { enabledCount: 0, attentionCount: 0 },
+  onScheduledTasksToggle,
 }: ChatPanelProps) {
   const {
     agents,
@@ -957,6 +966,12 @@ export default function ChatPanel({
               void onWorkbenchModeChange(mode)
             }}
             onSplitToggle={onWorkbenchSplitToggle}
+          />
+          <ScheduledTasksButton
+            active={scheduledTasksOpen}
+            enabledCount={scheduledTasksSummary.enabledCount}
+            attentionCount={scheduledTasksSummary.attentionCount}
+            onClick={() => onScheduledTasksToggle?.()}
           />
         </div>
       )

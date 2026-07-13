@@ -1,30 +1,6 @@
-// Stage V V2.1l — behavior test for `scheduleGroup.register` /
-// `IpcDisposeHandle.dispose()`.
-//
-// V2.1l extracts the 6 schedule (cron) channels from claude-bridge's
-// `setupAgentIPC`:
-//
-//   agent:listSchedules     (read all cron rows — sync)
-//   agent:upsertSchedule    (create or replace one cron row)
-//   agent:runScheduleNow    (manual one-shot trigger of one cron row)
-//   agent:pauseSchedule     (flip enabled=false for one cron row)
-//   agent:resumeSchedule    (flip enabled=true for one cron row)
-//   agent:deleteSchedule    (remove one cron row)
-//
-// The V5 IPC contract gate proves the channel literals still exist on the
-// renderer side, but it cannot prove:
-//
-//   1. `register` wires EXACTLY the 6 channel names the group owns via
-//      `ipcMain.handle` (no extras, no missing ones — all 6 are invoke /
-//      async-return so they all live on the handle slot).
-//   2. The returned dispose handle calls `removeHandler` for each of those
-//      same 6 channels — so dev-reload re-registration and
-//      `cleanupAgentRuntime` shutdown don't leak handler slots.
-//
-// Handler bodies are NOT exercised here — those are covered by pre-existing
-// runtime tests and the V5 gate ensures the channel literal stays correct.
-// The point of this file is the GROUP MECHANISM (register routing + dispose
-// symmetry), not handler semantics.
+// Behavior tests for structured scheduled-task IPC registration, disposal,
+// and malformed-payload rejection. Runtime behavior is covered separately by
+// the schedule coordinator, repository, queue, and execution suites.
 
 import assert from 'node:assert/strict'
 import test from 'node:test'
@@ -71,16 +47,21 @@ function createMockDeps(): ScheduleGroupDeps {
     throw new Error(`mock dep ${label} should not be called from registration test`)
   }
   return {
-    listSchedules: fail('listSchedules') as ScheduleGroupDeps['listSchedules'],
-    upsertSchedule: fail('upsertSchedule') as ScheduleGroupDeps['upsertSchedule'],
-    runScheduleNow: fail('runScheduleNow') as ScheduleGroupDeps['runScheduleNow'],
-    pauseSchedule: fail('pauseSchedule') as ScheduleGroupDeps['pauseSchedule'],
-    resumeSchedule: fail('resumeSchedule') as ScheduleGroupDeps['resumeSchedule'],
-    deleteSchedule: fail('deleteSchedule') as ScheduleGroupDeps['deleteSchedule'],
+    list: fail('list') as ScheduleGroupDeps['list'],
+    get: fail('get') as ScheduleGroupDeps['get'],
+    preview: fail('preview') as ScheduleGroupDeps['preview'],
+    create: fail('create') as ScheduleGroupDeps['create'],
+    update: fail('update') as ScheduleGroupDeps['update'],
+    runNow: fail('runNow') as ScheduleGroupDeps['runNow'],
+    pause: fail('pause') as ScheduleGroupDeps['pause'],
+    resume: fail('resume') as ScheduleGroupDeps['resume'],
+    delete: fail('delete') as ScheduleGroupDeps['delete'],
+    listOccurrences: fail('listOccurrences') as ScheduleGroupDeps['listOccurrences'],
+    emitChanged: fail('emitChanged') as ScheduleGroupDeps['emitChanged'],
   }
 }
 
-test('scheduleGroup.register wires the 6 documented channels exactly once each via ipcMain.handle', () => {
+test('scheduleGroup.register wires the 10 structured channels exactly once each via ipcMain.handle', () => {
   const { ipc, handleCalls } = createMockIpc()
   scheduleGroup.register(ipc, createMockDeps())
 
@@ -89,21 +70,25 @@ test('scheduleGroup.register wires the 6 documented channels exactly once each v
   assert.deepEqual(
     registered,
     expected,
-    'register must subscribe to exactly the 6 schedule channels',
+    'register must subscribe to exactly the 10 schedule channels',
   )
-  assert.equal(handleCalls.length, 6, 'each channel must be registered exactly once')
+  assert.equal(handleCalls.length, 10, 'each channel must be registered exactly once')
 
-  // Spot-check the exact channel literals per the plan (V2.1l, §3 V2.1) so
+  // Spot-check the exact channel literals from the scheduled-task plan so
   // accidental renames trip this test even if the channel count happens to
-  // still be 6. The V5 IPC contract gate catches the renderer side; this
+  // stays unchanged. The IPC contract gate catches the renderer side; this
   // pins the main-side literals.
   for (const required of [
-    'agent:listSchedules',
-    'agent:upsertSchedule',
-    'agent:runScheduleNow',
-    'agent:pauseSchedule',
-    'agent:resumeSchedule',
-    'agent:deleteSchedule',
+    'scheduledTasks:list',
+    'scheduledTasks:get',
+    'scheduledTasks:preview',
+    'scheduledTasks:create',
+    'scheduledTasks:update',
+    'scheduledTasks:pause',
+    'scheduledTasks:resume',
+    'scheduledTasks:delete',
+    'scheduledTasks:runNow',
+    'scheduledTasks:listOccurrences',
   ]) {
     assert.ok(
       registered.includes(required),
@@ -116,10 +101,10 @@ test('scheduleGroup namespace is the documented label so dispose ordering can re
   // The plan's V2.0 skeleton documents the namespace as a human label. We pin
   // it because the host (`ipc-handler.ts`) may later sort dispose calls or
   // log by namespace; renaming would silently break that ordering.
-  assert.equal(scheduleGroup.namespace, 'agent:schedule')
+  assert.equal(scheduleGroup.namespace, 'scheduledTasks')
 })
 
-test('IpcDisposeHandle.dispose removes the same 6 channels that register added', () => {
+test('IpcDisposeHandle.dispose removes the same 10 channels that register added', () => {
   const { ipc, removeHandlerCalls } = createMockIpc()
   const handle = scheduleGroup.register(ipc, createMockDeps())
 
@@ -150,11 +135,42 @@ test('dispose is idempotent — calling twice does not throw and stays bounded',
   // invocation must NOT throw. We allow the call to issue removeHandler
   // again — what we care about is no exception, no handler-slot leak.
   assert.doesNotThrow(() => handle.dispose())
-  // Second dispose runs the same 6 removeHandler calls; total count grows by
+  // Second dispose runs the same removeHandler calls; total count grows by
   // exactly the channel count, never more.
   assert.equal(
     removeHandlerCalls.length - afterFirst,
     _scheduleGroupChannelsForTest.length,
     'second dispose issues at most one removeHandler per channel',
   )
+})
+
+test('handlers reject malformed payloads with typed errors before calling runtime deps', async () => {
+  const { ipc, handleCalls } = createMockIpc()
+  scheduleGroup.register(ipc, createMockDeps())
+  const preview = handleCalls.find((entry) => entry.channel === 'scheduledTasks:preview')!.handler
+  const create = handleCalls.find((entry) => entry.channel === 'scheduledTasks:create')!.handler
+  const event = {} as IpcMainInvokeEvent
+
+  assert.deepEqual(await preview(event, null), {
+    success: false,
+    error: { kind: 'invalid_request', message: 'Schedule preview request is required' },
+  })
+  assert.deepEqual(await create(event, { name: 'missing fields' }), {
+    success: false,
+    error: { kind: 'invalid_request', message: 'Schedule request is invalid' },
+  })
+  const otherwiseValid = {
+    name: 'Task', instruction: 'Do it',
+    scheduleSpec: { kind: 'calendar', frequency: 'daily', localTime: '09:00' },
+    timezone: 'UTC', agentId: 'butler', workspaceRoots: [], enabled: true,
+    missedPolicy: 'coalesce_latest', scopeMode: 'dedicated',
+  }
+  assert.deepEqual(await create(event, { ...otherwiseValid, missedPolicy: 'run_everything' }), {
+    success: false,
+    error: { kind: 'invalid_request', message: 'Schedule request is invalid' },
+  })
+  assert.deepEqual(await create(event, { ...otherwiseValid, workspaceRoots: [42] }), {
+    success: false,
+    error: { kind: 'invalid_request', message: 'Schedule request is invalid' },
+  })
 })

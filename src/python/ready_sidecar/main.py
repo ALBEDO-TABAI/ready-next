@@ -10,8 +10,6 @@ from datetime import datetime, timezone
 from threading import Lock
 from typing import Any, Deque, Dict, List, Optional
 
-from apscheduler.schedulers.background import BackgroundScheduler
-from apscheduler.triggers.cron import CronTrigger
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 import uvicorn
@@ -73,16 +71,6 @@ class ChannelConfig(BaseModel):
     config: Dict[str, Any] = Field(default_factory=dict)
 
 
-class ScheduleConfig(BaseModel):
-    id: str
-    name: str
-    cronExpr: str
-    prompt: str
-    channelId: Optional[str] = None
-    enabled: bool = True
-    payload: Dict[str, Any] = Field(default_factory=dict)
-
-
 class EventPayload(BaseModel):
     type: str
     payload: Dict[str, Any] = Field(default_factory=dict)
@@ -122,12 +110,9 @@ class RuntimeState:
         self.started_at = now_iso()
         self.last_heartbeat_at: Optional[str] = None
         self.channels: Dict[str, ChannelConfig] = {}
-        self.schedules: Dict[str, ScheduleConfig] = {}
         self.events: Deque[Dict[str, Any]] = deque(maxlen=EVENT_QUEUE_MAXLEN)
         self.dropped_event_count = 0
         self.lock = Lock()
-        self.scheduler = BackgroundScheduler(timezone="UTC")
-        self.scheduler.start()
         self.channel_manager = ChannelManager(self.enqueue_event)
 
     def enqueue_event(self, event_type: str, payload: Dict[str, Any]) -> None:
@@ -173,57 +158,13 @@ def check_auth(x_ready_token: Optional[str] = Header(default=None)) -> None:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
 
-def schedule_job_id(schedule_id: str) -> str:
-    return f"schedule:{schedule_id}"
-
-
-def enqueue_schedule_trigger(schedule_id: str) -> None:
-    schedule = state.schedules.get(schedule_id)
-    if not schedule:
-        return
-    state.enqueue_event(
-        "schedule.trigger",
-        {
-            "scheduleId": schedule.id,
-            "name": schedule.name,
-            "prompt": schedule.prompt,
-            "channelId": schedule.channelId,
-            "payload": schedule.payload,
-        },
-    )
-
-
-def register_schedule_job(schedule: ScheduleConfig) -> None:
-    job_id = schedule_job_id(schedule.id)
-    try:
-        state.scheduler.remove_job(job_id)
-    except Exception:
-        pass
-
-    if not schedule.enabled:
-        return
-
-    trigger = CronTrigger.from_crontab(schedule.cronExpr, timezone="UTC")
-    state.scheduler.add_job(
-        enqueue_schedule_trigger,
-        trigger=trigger,
-        args=[schedule.id],
-        id=job_id,
-        replace_existing=True,
-        coalesce=True,
-        max_instances=1,
-    )
-
-
 @app.get("/health")
 def health(_: None = Depends(check_auth)) -> Dict[str, Any]:
     state.last_heartbeat_at = now_iso()
     return {
         "ok": True,
         "startedAt": state.started_at,
-        "schedulerRunning": bool(state.scheduler.running),
         "channels": len(state.channels),
-        "schedules": len(state.schedules),
     }
 
 
@@ -248,7 +189,6 @@ def heartbeat(_: None = Depends(check_auth)) -> Dict[str, Any]:
         "sidecar": {
             "healthy": True,
             "lastBeatAt": now,
-            "schedulerRunning": bool(state.scheduler.running),
         },
         "adapters": adapters,
     }
@@ -319,62 +259,6 @@ def send_channel_typing(payload: ChannelTypingPayload, _: None = Depends(check_a
 @app.post("/channels/test")
 def test_channel(channel: ChannelConfig, _: None = Depends(check_auth)) -> Dict[str, Any]:
     return state.channel_manager.test(ChannelConfigModel(**channel.model_dump()))
-
-
-@app.get("/cron")
-def list_cron(_: None = Depends(check_auth)) -> Dict[str, Any]:
-    return {"schedules": [s.model_dump() for s in state.schedules.values()]}
-
-
-@app.post("/cron/upsert")
-def upsert_cron(schedule: ScheduleConfig, _: None = Depends(check_auth)) -> Dict[str, Any]:
-    state.schedules[schedule.id] = schedule
-    register_schedule_job(schedule)
-    return {"success": True, "schedule": schedule.model_dump()}
-
-
-@app.post("/cron/pause")
-def pause_cron(payload: Dict[str, str], _: None = Depends(check_auth)) -> Dict[str, Any]:
-    schedule_id = payload.get("id", "")
-    schedule = state.schedules.get(schedule_id)
-    if not schedule:
-        return {"success": False, "error": "schedule not found"}
-    schedule.enabled = False
-    register_schedule_job(schedule)
-    return {"success": True}
-
-
-@app.post("/cron/resume")
-def resume_cron(payload: Dict[str, str], _: None = Depends(check_auth)) -> Dict[str, Any]:
-    schedule_id = payload.get("id", "")
-    schedule = state.schedules.get(schedule_id)
-    if not schedule:
-        return {"success": False, "error": "schedule not found"}
-    schedule.enabled = True
-    register_schedule_job(schedule)
-    return {"success": True}
-
-
-@app.post("/cron/delete")
-def delete_cron(payload: Dict[str, str], _: None = Depends(check_auth)) -> Dict[str, Any]:
-    schedule_id = payload.get("id", "")
-    if schedule_id in state.schedules:
-        del state.schedules[schedule_id]
-    try:
-        state.scheduler.remove_job(schedule_job_id(schedule_id))
-    except Exception:
-        pass
-    return {"success": True}
-
-
-@app.post("/cron/run-now")
-def cron_run_now(payload: Dict[str, str], _: None = Depends(check_auth)) -> Dict[str, Any]:
-    schedule_id = payload.get("id", "")
-    schedule = state.schedules.get(schedule_id)
-    if not schedule:
-        return {"success": False, "error": "schedule not found"}
-    enqueue_schedule_trigger(schedule_id)
-    return {"success": True}
 
 
 @app.get("/events/pull")

@@ -8,6 +8,7 @@ import type {
   ClearBrowsingDataResult,
 } from '../../shared/browser-privacy'
 import type { NativeContextMenuRequest, NativeContextMenuResponse } from '../../shared/native-context-menu'
+import type { ScheduledTasksAPI } from '../../shared/scheduled-tasks'
 import type { CapabilityRuntimeSnapshot } from '../../shared/ai-capability-runtime'
 import type { RendererAgentMetricName } from '../../shared/renderer-agent-metrics'
 import type { ContextUsageSnapshot } from '../../shared/context-usage-types'
@@ -236,20 +237,6 @@ interface AgentRegistryKnowledgeCardData {
   title: string
   description: string
   status: string
-}
-
-interface AgentCronTaskData {
-  id: string
-  name: string
-  cronExpr: string
-  prompt: string
-  channelId?: string | null
-  enabled: boolean
-  payload?: Record<string, unknown>
-  lastRunAt?: string | null
-  nextRunAt?: string | null
-  createdAt: string
-  updatedAt: string
 }
 
 interface AgentHeartbeatSnapshot {
@@ -1233,20 +1220,6 @@ interface ElectronAgentAPI {
   deleteChannel: (id: string) => Promise<{ success: boolean; error?: string }>
   setChannelEnabled: (id: string, enabled: boolean) => Promise<IPCResponse<AgentChannelConfigData>>
   sendChannelProbe: (id: string, text: string) => Promise<{ success: boolean; error?: string }>
-  listSchedules: () => Promise<IPCResponse<AgentCronTaskData[]>>
-  upsertSchedule: (payload: {
-    id?: string
-    name: string
-    cronExpr: string
-    prompt: string
-    channelId?: string | null
-    enabled?: boolean
-    payload?: Record<string, unknown>
-  }) => Promise<IPCResponse<AgentCronTaskData>>
-  runScheduleNow: (id: string) => Promise<{ success: boolean; error?: string }>
-  pauseSchedule: (id: string) => Promise<IPCResponse<AgentCronTaskData>>
-  resumeSchedule: (id: string) => Promise<IPCResponse<AgentCronTaskData>>
-  deleteSchedule: (id: string) => Promise<{ success: boolean; error?: string }>
   // Stage V V3.2 — push payloads carry `sessionId: string | null` (not
   // optional). null = global event (not session-scoped); a string means
   // the event belongs to a specific session. Renderer routes by this
@@ -3919,6 +3892,7 @@ interface ElectronTagForgeAPI {
 
 interface ElectronAPI {
   agent: ElectronAgentAPI
+  scheduledTasks: ScheduledTasksAPI
   memory: ElectronMemoryAPI
   memoryCards: ElectronMemoryCardsAPI
   runQuality: ElectronRunQualityAPI

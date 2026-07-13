@@ -58,6 +58,7 @@ import type { CapabilityGroupId } from '../../../../shared/ai-capability-groups'
 import type { SkillChildRunStatus as SharedSkillChildRunStatus } from '../../../../shared/skill-child-run-status'
 import type { ContextUsageSnapshot } from '../../../../shared/context-usage-types'
 import type { TaskCreationOrigin, TaskExecutionBinding } from '../../../../shared/agent-execution-profile'
+import type { ScheduledTaskOccurrenceSource } from '../../../../shared/scheduled-tasks'
 import type { SkillRunContract } from './skill-run-contract'
 import type { RecoveryRecord, ToolSnapshot } from './tool-telemetry-contracts'
 import type {
@@ -537,7 +538,9 @@ export interface RunCoordinatorRequest {
   contextRefIds?: string[]
   budget?: RunBudgetSeed
   continuationIntent?: ContinuationIntent | null
+  taskOrigin?: TaskCreationOrigin
   runOrigin?: import('../../../../shared/agent-execution-profile').RunExecutionOrigin
+  scheduledTaskOccurrence?: ScheduledTaskOccurrenceSource
   deliveryMode?: import('../../../../shared/dynamic-delivery').DeliveryMode
 }
 
@@ -563,6 +566,7 @@ export interface ExecutionHostRequest {
   sessionIdOverride?: string
   requestId?: string
   sourceMessageId?: string | null
+  scheduledTaskOccurrence?: ScheduledTaskOccurrenceSource
   taskId?: string
   parentTaskId?: string
   parentStepId?: string

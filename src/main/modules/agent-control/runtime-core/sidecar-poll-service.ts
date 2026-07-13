@@ -1,11 +1,11 @@
-// B8-D R4 — SidecarPollService: the DB→sidecar mirror sync, the 3s poll loop
-// (heartbeat refresh / channel-state cache refresh / cron-trigger + inbound
-// event pull), and the errored-adapter revive pass with its restart backoff,
+// B8-D R4 — SidecarPollService: the DB→sidecar channel mirror sync, the 3s
+// poll loop (heartbeat / channel-state refresh and inbound event pull), and
+// the errored-adapter revive pass with its restart backoff,
 // extracted from AgentControlRuntime (runtime.ts) as a delegated sub-service.
 // Method bodies are mechanical moves; the only substitutions are
 // `this.db` / `this.sidecar` / `this.heartbeat` → `this.deps.*`, the runtime
-// hub calls (`listChannels` / `listSchedules` / `getSettingBool` /
-// `startSidecar` / `schedules.executeSchedule` / `handleInboundChannel`)
+// hub calls (`listChannels` / `getSettingBool` / `startSidecar` /
+// `handleInboundChannel`)
 // becoming injected callbacks, and the `channelStateCache` whole-object
 // reassignment becoming two in-place property writes so the runtime-owned
 // cache object (read by `getRuntimeStatus`, which stays on the runtime) keeps
@@ -16,10 +16,9 @@
 // entry point (that cluster stays on the runtime until the next batch); the
 // callback binds the runtime method, so when the cluster migrates the
 // delegation re-binds automatically.
-import type { AgentScheduleRecord, DatabaseManager } from '../../database'
+import type { DatabaseManager } from '../../database'
 import type { SidecarManager } from '../sidecar-manager'
-import type { AgentChannelConfig, ChannelAdapterType, CronTask, HeartbeatSnapshot } from '../contracts/types'
-import type { ScheduleTriggerSource } from './schedule-execution'
+import type { AgentChannelConfig, ChannelAdapterType, HeartbeatSnapshot } from '../contracts/types'
 
 export interface SidecarPollServiceDeps {
   db: DatabaseManager
@@ -38,14 +37,6 @@ export interface SidecarPollServiceDeps {
   getSettingBool: (key: string, fallback: boolean) => boolean
   /** Bound to `ChannelConfigService.listChannels` via the runtime delegate. */
   listChannels: () => AgentChannelConfig[]
-  /** Bound to `ScheduleService.listSchedules` via the runtime delegate. */
-  listSchedules: () => CronTask[]
-  /** Bound to `ScheduleService.executeSchedule` — cron triggers pulled from
-   *  the sidecar event stream. */
-  executeSchedule: (
-    schedule: AgentScheduleRecord,
-    triggerSource: ScheduleTriggerSource
-  ) => Promise<{ success: boolean; error?: string }>
   /** Bound to the runtime `handleInboundChannel` — remote-channel cluster
    *  entry (migrates in the next batch; the callback re-binds through it). */
   handleInboundChannel: (payload: Record<string, unknown>) => Promise<void>
@@ -74,18 +65,6 @@ export class SidecarPollService {
       } else {
         await this.deps.sidecar.stopChannel(channel.id).catch(() => undefined)
       }
-    }
-    const schedules = this.deps.listSchedules()
-    for (const schedule of schedules) {
-      await this.deps.sidecar.upsertSchedule({
-        id: schedule.id,
-        name: schedule.name,
-        cronExpr: schedule.cronExpr,
-        prompt: schedule.prompt,
-        channelId: schedule.channelId,
-        enabled: schedule.enabled,
-        payload: schedule.payload || {}
-      })
     }
   }
 
@@ -148,15 +127,6 @@ export class SidecarPollService {
       const events = await this.deps.sidecar.pullEvents(24)
       for (const evt of events) {
         const evtType = String(evt.type || '')
-        if (evtType === 'schedule.trigger') {
-          const payload = (evt.payload || {}) as Record<string, unknown>
-          const scheduleId = String(payload.scheduleId || '')
-          if (!scheduleId) continue
-          const schedule = this.deps.db.getAgentSchedule(scheduleId)
-          if (!schedule || schedule.enabled === 0) continue
-          await this.deps.executeSchedule(schedule, 'cron')
-          continue
-        }
         if (evtType === 'channel.inbound') {
           const payload = (evt.payload || {}) as Record<string, unknown>
           await this.deps.handleInboundChannel(payload)

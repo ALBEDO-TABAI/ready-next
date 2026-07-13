@@ -110,13 +110,13 @@ describe('Database Schema Validation', () => {
             columns: ['id', 'type', 'name', 'enabled', 'config_json', 'updated_at']
         }
         const scheduleSchema = {
-            tableName: 'agent_schedules',
-            columns: ['id', 'name', 'cron_expr', 'prompt', 'enabled', 'next_run_at']
+            tableName: 'scheduled_tasks',
+            columns: ['id', 'name', 'schedule_spec_json', 'instruction', 'enabled', 'next_run_at']
         }
         assert.ok(channelSchema.columns.includes('type'))
         assert.ok(channelSchema.columns.includes('config_json'))
-        assert.ok(scheduleSchema.columns.includes('cron_expr'))
-        assert.ok(scheduleSchema.columns.includes('prompt'))
+        assert.ok(scheduleSchema.columns.includes('schedule_spec_json'))
+        assert.ok(scheduleSchema.columns.includes('instruction'))
     })
 
     it('should validate unified conversation scope columns for local and remote sessions', () => {

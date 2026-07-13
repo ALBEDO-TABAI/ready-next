@@ -1,5 +1,6 @@
 import { app } from 'electron'
 import { EventEmitter } from 'events'
+import { randomUUID } from 'node:crypto'
 import { join } from 'path'
 import { existsSync, readFileSync } from 'node:fs'
 import {
@@ -71,7 +72,22 @@ import { DetachedSkillService } from './detached-skill-service'
 import { SessionRecallFacade } from './session-recall-facade'
 import { NarrationContinuationService } from './narration-continuation-service'
 import { ReferenceHintService } from './reference-hint-service'
-import { ScheduleService } from './schedule-service'
+import { ScheduleCoordinator } from '../../scheduled-tasks/schedule-coordinator'
+import { ScheduleRepository, type ScheduledTaskOccurrence } from '../../scheduled-tasks/schedule-repository'
+import { ScheduleDispatchQueue } from '../../scheduled-tasks/schedule-dispatch-queue'
+import { dispatchScheduledOccurrence } from '../../scheduled-tasks/schedule-execution'
+import { recoverScheduledOccurrenceAfterRestart } from '../../scheduled-tasks/schedule-recovery'
+import { getNextScheduleRuns } from '../../scheduled-tasks/schedule-next-run'
+import { validateWorkspaceRoot } from '../../../../shared/workspace-validation'
+import type {
+  AgentScheduleDefinition,
+  AgentScheduleOccurrence,
+  ScheduleBlockedReason,
+  ScheduleCreateRequest,
+  SchedulePreview,
+  SchedulePreviewRequest,
+  ScheduleUpdateRequest,
+} from '../../../../shared/scheduled-tasks'
 import { ChannelConfigService } from './channel-config-service'
 import { ScopeAttachmentService } from './scope-attachment-service'
 import { SidecarPollService } from './sidecar-poll-service'
@@ -138,7 +154,6 @@ import type {
   ConversationEventPayload,
   ConversationScope,
   ConversationScopeMessage,
-  CronTask,
   HeartbeatSnapshot,
   ScopeRunMemoryCapture,
   ScopeRunEventPayload,
@@ -157,10 +172,9 @@ import {
   type ActiveChildRunSummaryForRuntime,
   type TaskProjectionChildSummaryRow,
   type UpsertChannelPayload,
-  type UpsertSchedulePayload,
 } from './runtime-helpers'
 
-export type { UpsertChannelPayload, UpsertSchedulePayload } from './runtime-helpers'
+export type { UpsertChannelPayload } from './runtime-helpers'
 
 export class AgentControlRuntime extends EventEmitter {
   private readonly db = getDatabase()
@@ -343,19 +357,78 @@ export class AgentControlRuntime extends EventEmitter {
       lastBeatAt: new Date().toISOString()
     }
   }
-  // B8-D R3 — the schedule / channel-config / scope-attachment clusters live
-  // in delegated sub-services; same one-line-delegate pattern as R1/R2.
-  // Declared AFTER `heartbeat` so the ChannelConfigService deps capture an
-  // initialized snapshot reference (field initializers run in declaration
-  // order; the heartbeat object is mutated in place, never reassigned). The
-  // sendScoped/sendUnscoped/startSidecar callbacks are lazy closures, so the
-  // constructor-assigned `orchestrator` is safe to reference here.
-  private readonly schedules = new ScheduleService({
-    db: this.db,
-    sidecar: this.sidecar,
-    sendScoped: (payload) => this.sendScoped(payload),
-    sendUnscoped: (agent, message, requestId) =>
-      this.orchestrator.send(agent, message, undefined, requestId),
+  private readonly scheduleRepository = new ScheduleRepository(this.db)
+  private readonly scheduleDispatchQueue = new ScheduleDispatchQueue({
+    isScopeBusy: (scopeId) => {
+      const row = this.db.getConversationScope(scopeId)
+      if (!row) return false
+      const scope = this.mapConversationRow(row)
+      return this.orchestrator.isScopeLive(scope.agent, scope.id)
+    },
+    dispatch: async (item) => {
+      const occurrence = this.scheduleRepository.getOccurrence(item.occurrenceId)
+      if (!occurrence) return
+      await this.dispatchScheduledTaskOccurrence(occurrence)
+    },
+    markSkippedCoalesced: (item) => {
+      const updated = this.scheduleRepository.updateOccurrenceStatus(item.occurrenceId, 'skipped_coalesced', {
+        finishedAt: new Date().toISOString(),
+      })
+      if (updated) logAgentMetric('scheduled_task_occurrence_status', {
+        scheduleId: updated.scheduleId, occurrenceId: updated.id, status: updated.claimStatus,
+      })
+      this.emitScheduledTasksChanged(item.scheduleId)
+    },
+    onDispatchError: (item, error) => logAgentMetric('scheduled_task_dispatch_failed', {
+      scheduleId: item.scheduleId,
+      occurrenceId: item.occurrenceId,
+      reason: error instanceof Error ? error.message : String(error),
+    }),
+  })
+  private readonly scheduledTaskCoordinator = new ScheduleCoordinator({
+    repository: {
+      listEnabled: () => this.scheduleRepository.listEnabled().map((schedule) => ({
+        id: schedule.id,
+        spec: schedule.scheduleSpec,
+        timezone: schedule.timezone,
+        nextRunAt: schedule.nextRunAt,
+        missedPolicy: schedule.missedPolicy,
+        claimedExecutionCount: this.scheduleRepository.countScheduledExecutionClaims(schedule.id),
+      })),
+      reconcile: (input) => {
+        const occurrences = this.scheduleRepository.reconcile(input)
+        for (const occurrence of occurrences) {
+          logAgentMetric('scheduled_task_occurrence_status', {
+            scheduleId: occurrence.scheduleId,
+            occurrenceId: occurrence.id,
+            scheduledFor: occurrence.scheduledFor,
+            triggerSource: occurrence.triggerSource,
+            status: occurrence.claimStatus,
+          })
+        }
+        if (input.occurrences.length > 0 || input.disableAfterReconcile) {
+          this.emitScheduledTasksChanged(input.scheduleId)
+        }
+        return occurrences
+      },
+      listRecoverable: () => this.scheduleRepository.listRecoverable(),
+    },
+    enqueue: (occurrence) => {
+      const durable = this.scheduleRepository.getOccurrence(occurrence.id)
+      if (!durable) return
+      recoverScheduledOccurrenceAfterRestart(durable, {
+        markInterrupted: (item) => {
+          this.scheduleRepository.updateOccurrenceStatus(item.id, 'dispatch_failed', {
+            errorKind: 'interrupted_restart',
+            errorMessage: 'Ready restarted before Agent acceptance could be proven',
+            finishedAt: new Date().toISOString(),
+          })
+          this.emitScheduledTasksChanged(item.scheduleId)
+        },
+        enqueue: (item) => this.enqueueScheduledOccurrence(item),
+      })
+    },
+    log: (message) => logAgentMetric('scheduled_task_reconcile', { message }),
   })
   private readonly channelConfig = new ChannelConfigService({
     db: this.db,
@@ -382,9 +455,6 @@ export class AgentControlRuntime extends EventEmitter {
     startSidecar: () => this.startSidecar(),
     getSettingBool: (key, fallback) => this.getSettingBool(key, fallback),
     listChannels: () => this.listChannels(),
-    listSchedules: () => this.listSchedules(),
-    executeSchedule: (schedule, triggerSource) =>
-      this.schedules.executeSchedule(schedule, triggerSource),
     handleInboundChannel: (payload) => this.handleInboundChannel(payload),
   })
   private readonly conversationScopes = new ConversationScopeStore({
@@ -812,6 +882,7 @@ export class AgentControlRuntime extends EventEmitter {
   async start(): Promise<void> {
     this.cleanupLegacyCopawSettings()
     this.detachedSkills.publishRestoredDetachedSkillTasks()
+    await this.scheduledTaskCoordinator.start()
 
     // Start memory lifecycle manager
     this.memoryLifecycle.start()
@@ -936,6 +1007,7 @@ export class AgentControlRuntime extends EventEmitter {
   }
 
   async stop(): Promise<void> {
+    this.scheduledTaskCoordinator.stop()
     const terminalStates = new Set(['done', 'failed', 'cancelled', 'closed'])
     for (const session of this.orchestrator.listAllSessions()) {
       if (terminalStates.has(session.state)) continue
@@ -951,6 +1023,294 @@ export class AgentControlRuntime extends EventEmitter {
     await this.externalMemoryProviderSlot.shutdown()
 
     await this.sidecar.stop()
+  }
+
+  async reconcileScheduledTasks(source: 'timer' | 'startup' | 'resume'): Promise<void> {
+    await this.scheduledTaskCoordinator.reconcile(source)
+  }
+
+  listScheduledTasks(): AgentScheduleDefinition[] {
+    return this.scheduleRepository.list().map((schedule) => this.mapScheduledTask(schedule))
+  }
+
+  getScheduledTask(id: string): AgentScheduleDefinition | null {
+    const schedule = this.scheduleRepository.get(id)
+    return schedule ? this.mapScheduledTask(schedule) : null
+  }
+
+  previewScheduledTask(request: SchedulePreviewRequest): SchedulePreview {
+    const occurrences = getNextScheduleRuns({
+      spec: request.scheduleSpec,
+      timezone: request.timezone,
+      after: request.from || new Date().toISOString(),
+      count: request.count ?? 3,
+    })
+    return { occurrences, nextRunAt: occurrences[0] ?? null, blockedReason: null }
+  }
+
+  async createScheduledTask(request: ScheduleCreateRequest): Promise<AgentScheduleDefinition> {
+    const instruction = request.instruction.trim()
+    if (!instruction) throw new Error('Schedule instruction is required')
+    const name = request.name.trim() || instruction.split(/\r?\n/, 1)[0].slice(0, 48)
+    const scopeId = this.resolveScheduleMutationScope(request, null)
+    const nextRunAt = request.enabled
+      ? this.previewScheduledTask({ scheduleSpec: request.scheduleSpec, timezone: request.timezone, count: 1 }).nextRunAt
+      : null
+    if (request.enabled && !nextRunAt) throw new Error('Schedule does not produce a future time')
+    this.assertScheduleTargetAvailable(scopeId, request.agentId, request.workspaceRoots)
+    const created = this.scheduleRepository.create({
+      id: `schedule-${randomUUID()}`,
+      name,
+      instruction,
+      scheduleSpec: request.scheduleSpec,
+      timezone: request.timezone,
+      scopeId,
+      scopeMode: request.scopeMode,
+      agentId: request.agentId,
+      workspaceRoots: request.workspaceRoots,
+      enabled: request.enabled,
+      nextRunAt,
+      missedPolicy: request.missedPolicy,
+    })
+    await this.scheduledTaskCoordinator.reschedule()
+    return this.mapScheduledTask(created)
+  }
+
+  async updateScheduledTask(request: ScheduleUpdateRequest): Promise<AgentScheduleDefinition | null> {
+    const existing = this.scheduleRepository.get(request.id)
+    if (!existing) return null
+    const instruction = request.instruction.trim()
+    if (!instruction) throw new Error('Schedule instruction is required')
+    const name = request.name.trim() || instruction.split(/\r?\n/, 1)[0].slice(0, 48)
+    const scopeId = this.resolveScheduleMutationScope(request, existing)
+    const nextRunAt = request.enabled
+      ? this.previewScheduledTask({ scheduleSpec: request.scheduleSpec, timezone: request.timezone, count: 1 }).nextRunAt
+      : null
+    if (request.enabled && !nextRunAt) throw new Error('Schedule does not produce a future time')
+    this.assertScheduleTargetAvailable(scopeId, request.agentId, request.workspaceRoots)
+    const updated = this.scheduleRepository.update(request.id, {
+      name,
+      instruction,
+      scheduleSpec: request.scheduleSpec,
+      timezone: request.timezone,
+      scopeId,
+      scopeMode: request.scopeMode,
+      agentId: request.agentId,
+      workspaceRoots: request.workspaceRoots,
+      enabled: request.enabled,
+      nextRunAt,
+      missedPolicy: request.missedPolicy,
+      migrationState: null,
+    })
+    await this.scheduledTaskCoordinator.reschedule()
+    return updated ? this.mapScheduledTask(updated) : null
+  }
+
+  async pauseScheduledTask(id: string): Promise<AgentScheduleDefinition | null> {
+    const updated = this.scheduleRepository.update(id, { enabled: false, nextRunAt: null })
+    await this.scheduledTaskCoordinator.reschedule()
+    return updated ? this.mapScheduledTask(updated) : null
+  }
+
+  async resumeScheduledTask(id: string): Promise<AgentScheduleDefinition | null> {
+    const existing = this.scheduleRepository.get(id)
+    if (!existing || !existing.scopeId) return null
+    this.assertScheduleTargetAvailable(existing.scopeId, existing.agentId, existing.workspaceRoots)
+    const nextRunAt = this.previewScheduledTask({
+      scheduleSpec: existing.scheduleSpec,
+      timezone: existing.timezone,
+      count: 1,
+    }).nextRunAt
+    if (!nextRunAt) throw new Error('Schedule does not produce a future time')
+    const updated = this.scheduleRepository.update(id, { enabled: true, nextRunAt, migrationState: null })
+    await this.scheduledTaskCoordinator.reschedule()
+    return updated ? this.mapScheduledTask(updated) : null
+  }
+
+  async deleteScheduledTask(id: string): Promise<boolean> {
+    const removed = this.scheduleRepository.delete(id)
+    await this.scheduledTaskCoordinator.reschedule()
+    return removed
+  }
+
+  async runScheduledTaskNow(id: string): Promise<AgentScheduleOccurrence | null> {
+    const schedule = this.scheduleRepository.get(id)
+    if (!schedule || !schedule.enabled || !schedule.scopeId) return null
+    this.assertScheduleTargetAvailable(schedule.scopeId, schedule.agentId, schedule.workspaceRoots)
+    const now = new Date().toISOString()
+    const occurrence = this.scheduleRepository.claimDue({
+      scheduleId: id,
+      scheduledFor: now,
+      triggeredAt: now,
+      triggerSource: 'manual',
+      nextRunAt: schedule.nextRunAt,
+      occurrenceId: `occ-manual-${randomUUID()}`,
+    })
+    if (!occurrence) return null
+    logAgentMetric('scheduled_task_occurrence_status', {
+      scheduleId: occurrence.scheduleId,
+      occurrenceId: occurrence.id,
+      scheduledFor: occurrence.scheduledFor,
+      triggerSource: occurrence.triggerSource,
+      status: occurrence.claimStatus,
+    })
+    this.enqueueScheduledOccurrence(occurrence)
+    return occurrence
+  }
+
+  listScheduledTaskOccurrences(scheduleId: string, limit?: number): AgentScheduleOccurrence[] {
+    return this.scheduleRepository.listHistory(scheduleId, limit).map((occurrence) => {
+      const projection = occurrence.taskId ? this.taskProjectionStore.get(occurrence.taskId) : null
+      return {
+        ...occurrence,
+        runStatus: projection?.status ?? null,
+        interactionState: projection?.interactionState ?? null,
+        runBlockedReason: projection?.blockedReason ?? null,
+      }
+    })
+  }
+
+  private enqueueScheduledOccurrence(occurrence: ScheduledTaskOccurrence): void {
+    const schedule = this.scheduleRepository.get(occurrence.scheduleId)
+    if (!schedule?.scopeId) return
+    void this.scheduleDispatchQueue.enqueue({
+      occurrenceId: occurrence.id,
+      scheduleId: occurrence.scheduleId,
+      scopeId: schedule.scopeId,
+      scheduledFor: occurrence.scheduledFor,
+    })
+  }
+
+  private emitScheduledTasksChanged(scheduleId: string): void {
+    this.emit('scheduledTasksChanged', scheduleId)
+  }
+
+  private resolveScheduleMutationScope(
+    request: ScheduleCreateRequest | ScheduleUpdateRequest,
+    existing: import('../../scheduled-tasks/schedule-repository').ScheduledTaskDefinition | null,
+  ): string {
+    if (request.scopeMode === 'existing') {
+      if (!request.scopeId.trim()) throw new Error('Scheduled tasks require a scope')
+      return request.scopeId.trim()
+    }
+    if (existing?.scopeMode === 'dedicated' && existing.agentId === request.agentId && existing.scopeId) {
+      return existing.scopeId
+    }
+    return this.createLocalScope(request.agentId, `conv-scheduled-${randomUUID()}`).id
+  }
+
+  private assertScheduleTargetAvailable(scopeId: string, agentId: string, workspaceRoots: string[]): void {
+    if (!this.db.getConversationScope(scopeId)) throw new Error('Target conversation is missing')
+    if (!this.resolveAgentExecutionReadiness(agentId).conversationReady) throw new Error('Target Agent is unavailable')
+    if (workspaceRoots.some((root) => !validateWorkspaceRoot(root).ok)) {
+      throw new Error('Target workspace is unavailable')
+    }
+  }
+
+  private mapScheduledTask(schedule: import('../../scheduled-tasks/schedule-repository').ScheduledTaskDefinition): AgentScheduleDefinition {
+    const latest = this.scheduleRepository.listHistory(schedule.id, 1)[0]
+    const blockedReason = latest?.claimStatus === 'blocked_target' && latest.errorKind?.startsWith('blocked_')
+      ? latest.errorKind as ScheduleBlockedReason
+      : null
+    return {
+      id: schedule.id,
+      name: schedule.name,
+      instruction: schedule.instruction,
+      scheduleSpecVersion: schedule.scheduleSpecVersion,
+      scheduleSpec: schedule.scheduleSpec,
+      timezone: schedule.timezone,
+      scopeId: schedule.scopeId,
+      scopeMode: schedule.scopeMode,
+      agentId: schedule.agentId,
+      workspaceRoots: schedule.workspaceRoots,
+      enabled: schedule.enabled,
+      nextRunAt: schedule.nextRunAt,
+      lastOccurrenceAt: schedule.lastOccurrenceAt,
+      missedPolicy: schedule.missedPolicy,
+      blockedReason,
+      migrationState: schedule.migrationState,
+      createdAt: schedule.createdAt,
+      updatedAt: schedule.updatedAt,
+    }
+  }
+
+  private async dispatchScheduledTaskOccurrence(
+    occurrence: ScheduledTaskOccurrence,
+  ): Promise<{ success: boolean; error?: string; errorKind?: string }> {
+    return dispatchScheduledOccurrence(occurrence, {
+      getSchedule: (id) => this.scheduleRepository.get(id),
+      scopeExists: (scopeId) => Boolean(this.db.getConversationScope(scopeId)),
+      agentAvailable: (agentId) => this.resolveAgentExecutionReadiness(agentId).conversationReady,
+      workspaceAvailable: (root) => validateWorkspaceRoot(root).ok,
+      pauseSchedule: (id) => {
+        this.scheduleRepository.update(id, { enabled: false, nextRunAt: null })
+        this.emitScheduledTasksChanged(id)
+        void this.scheduledTaskCoordinator.reschedule()
+      },
+      markDispatching: (id, runId, taskId) => {
+        const updated = this.scheduleRepository.updateOccurrenceStatus(id, 'dispatching', { runId, taskId })
+        if (updated) {
+          logAgentMetric('scheduled_task_occurrence_status', {
+            scheduleId: updated.scheduleId, occurrenceId: updated.id, runId, taskId, status: updated.claimStatus,
+          })
+          this.emitScheduledTasksChanged(updated.scheduleId)
+        }
+        return Boolean(updated)
+      },
+      markDispatched: (id, runId, taskId) => {
+        this.scheduleRepository.updateOccurrenceStatus(id, 'dispatched', {
+          runId,
+          taskId,
+          finishedAt: new Date().toISOString(),
+        })
+        logAgentMetric('scheduled_task_occurrence_status', {
+          scheduleId: occurrence.scheduleId, occurrenceId: id, runId, taskId, status: 'dispatched',
+        })
+        this.emitScheduledTasksChanged(occurrence.scheduleId)
+      },
+      markFailed: (id, errorKind, errorMessage) => {
+        const current = this.scheduleRepository.getOccurrence(id)
+        if (!current) return
+        const status = errorKind.startsWith('blocked_') ? 'blocked_target' : 'dispatch_failed'
+        this.scheduleRepository.updateOccurrenceStatus(id, status, {
+          errorKind,
+          errorMessage,
+          finishedAt: new Date().toISOString(),
+        })
+        logAgentMetric('scheduled_task_occurrence_status', {
+          scheduleId: current.scheduleId,
+          occurrenceId: id,
+          runId: current.runId,
+          taskId: current.taskId,
+          status,
+          errorKind,
+        })
+        this.emitScheduledTasksChanged(current.scheduleId)
+      },
+      send: (payload) => this.sendScoped({
+        scopeId: payload.scopeId,
+        agent: payload.agent,
+        message: payload.message,
+        requestId: payload.requestId,
+        taskId: payload.taskId,
+        workspaceRoots: payload.workspaceRoots,
+        taskOrigin: 'system_background',
+        runOrigin: 'scheduled_task',
+        scheduledTaskOccurrence: {
+          occurrenceId: payload.envelope.occurrenceId,
+          scheduleId: payload.envelope.scheduleId,
+          scheduledFor: payload.envelope.scheduledFor,
+          triggerSource: payload.envelope.triggerSource,
+        },
+        userMessage: {
+          id: `msg-${payload.requestId}`,
+          content: payload.message,
+          timestamp: new Date().toISOString(),
+          meta: { source: 'scheduled_task', scheduledTask: payload.envelope },
+        },
+      }),
+      log: (message) => logAgentMetric('scheduled_task_dispatch', { message }),
+    })
   }
 
   async startSidecar(): Promise<void> {
@@ -970,7 +1330,7 @@ export class AgentControlRuntime extends EventEmitter {
 
   async getRuntimeStatus(): Promise<AgentRuntimeStatus> {
     const channels = this.listChannels()
-    const schedules = this.listSchedules()
+    const schedules = this.listScheduledTasks()
     const byType: Record<string, number> = {}
     for (const channel of channels) {
       byType[channel.type] = (byType[channel.type] || 0) + 1
@@ -1473,6 +1833,9 @@ export class AgentControlRuntime extends EventEmitter {
     workspaceRoots?: string[]
     continuationIntent?: ContinuationIntent | null
     deliveryMode?: import('../../../../shared/dynamic-delivery').DeliveryMode
+    taskOrigin?: import('../../../../shared/agent-execution-profile').TaskCreationOrigin
+    runOrigin?: import('../../../../shared/agent-execution-profile').RunExecutionOrigin
+    scheduledTaskOccurrence?: import('../../../../shared/scheduled-tasks').ScheduledTaskOccurrenceSource
   }): Promise<SendScopedResponse> {
     return runConfirmedSendScoped({
       scopeId: payload.scopeId,
@@ -1595,6 +1958,9 @@ export class AgentControlRuntime extends EventEmitter {
               workspaceRoots: payload.workspaceRoots,
               continuationIntent: normalizedContinuationIntent,
               deliveryMode: payload.deliveryMode,
+              taskOrigin: payload.taskOrigin,
+              runOrigin: payload.runOrigin,
+              scheduledTaskOccurrence: payload.scheduledTaskOccurrence,
               coordinators: this.getDomainAdapters(),
             },
             {
@@ -1626,6 +1992,7 @@ export class AgentControlRuntime extends EventEmitter {
           )
         } finally {
           await this.finalizeStaleWithoutHandleProjectionsForScope(scope)
+          void this.scheduleDispatchQueue.drain(scope.id)
         }
         const autoRecoveredUndeliveredAnswer = !result.success && payload.requestId
           ? this.recoverUndeliveredAnswerForRun(scope.id, payload.requestId)
@@ -1961,30 +2328,6 @@ export class AgentControlRuntime extends EventEmitter {
 
   async submitWechatLoginVerifyCode(channelId: string, sessionKey: string, code: string): Promise<Record<string, unknown>> {
     return this.channelConfig.submitWechatLoginVerifyCode(channelId, sessionKey, code)
-  }
-
-  listSchedules(): CronTask[] {
-    return this.schedules.listSchedules()
-  }
-
-  async upsertSchedule(payload: UpsertSchedulePayload): Promise<CronTask> {
-    return this.schedules.upsertSchedule(payload)
-  }
-
-  async pauseSchedule(id: string): Promise<CronTask | null> {
-    return this.schedules.pauseSchedule(id)
-  }
-
-  async resumeSchedule(id: string): Promise<CronTask | null> {
-    return this.schedules.resumeSchedule(id)
-  }
-
-  async deleteSchedule(id: string): Promise<boolean> {
-    return this.schedules.deleteSchedule(id)
-  }
-
-  async runScheduleNow(id: string): Promise<{ success: boolean; error?: string }> {
-    return this.schedules.runScheduleNow(id)
   }
 
   async syncDatabaseToSidecar(): Promise<void> {

@@ -53,9 +53,11 @@ export function runOriginForRequest(input: {
   isHandoffTakeover?: boolean
   isContinuation?: boolean
   isWorkflowParticipant?: boolean
+  isScheduledTask?: boolean
 }): RunExecutionOrigin {
   if (input.isHandoffTakeover) return 'handoff_takeover'
   if (input.isWorkflowParticipant) return 'workflow_participant'
+  if (input.isScheduledTask) return 'scheduled_task'
   if (input.isContinuation) return 'continuation'
   return 'initial'
 }

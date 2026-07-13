@@ -232,9 +232,11 @@ html[data-theme='dark'][data-skin='liquid-glass'] .ready-liquid-card__lens::afte
 }
 
 .ready-chat-mode-tabs-dock {
+  position: relative;
   align-self: flex-start;
   display: flex;
   align-items: center;
+  gap: 8px;
   min-height: 40px;
   padding-left: 8px;
   margin-bottom: -12px;
