@@ -9,7 +9,8 @@
  *     ($ ` ; | & 等) 不被解释——从根上消除 shell 注入，args 里出现它们
  *     也只是普通字面量传给子进程；
  *   - 两阶段确认：阶段 1 只展示完整命令 + 风险，绝不执行；阶段 2 必须
- *     confirmAck + 回传阶段 1 的 command/args（重新校验形状）；
+ *     confirmAck + 回传阶段 1 的 command/args（重新校验形状），随后由
+ *     dispatch 行动确认策略冻结完整调用并显示 Ready 确认卡；
  *   - 超时 + 输出上限：默认 180s，stdout/stderr 各截 8KB 回给模型；
  *   - 工作目录默认家目录，可指定绝对路径（存在性校验）。
  *
@@ -19,7 +20,7 @@
 import { spawn } from 'child_process'
 import { existsSync, statSync } from 'fs'
 import { homedir } from 'os'
-import { isAbsolute } from 'path'
+import { basename, isAbsolute } from 'path'
 
 import { ToolDomainError } from '../tool-errors'
 import { SETUP_COMMAND_ERROR_KINDS } from '../../agent-control/contracts/error-kinds'
@@ -111,6 +112,105 @@ function resolveDescriptor(raw: Record<string, unknown>): SetupCommandDescriptor
 
 function commandLineOf(descriptor: SetupCommandDescriptor): string {
   return [descriptor.command, ...descriptor.args].join(' ')
+}
+
+type JsonObject = Record<string, unknown>
+
+function asJsonObject(value: unknown): JsonObject | null {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? value as JsonObject
+    : null
+}
+
+function parseJsonObject(text: string): JsonObject | null {
+  const trimmed = text.trim()
+  if (!trimmed) return null
+  const candidates = [trimmed]
+  const lines = trimmed.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    if (lines[index] !== trimmed) candidates.push(lines[index])
+  }
+  for (const candidate of candidates) {
+    try {
+      const parsed = asJsonObject(JSON.parse(candidate))
+      if (parsed) return parsed
+    } catch {
+      // Keep looking: a CLI may print a human-readable prefix before its
+      // final one-line JSON envelope.
+    }
+  }
+  return null
+}
+
+function structuredOutputRecords(stdout: string, stderr: string): JsonObject[] {
+  return [parseJsonObject(stdout), parseJsonObject(stderr)].filter((value): value is JsonObject => Boolean(value))
+}
+
+function stringField(record: JsonObject, names: readonly string[]): string | null {
+  for (const name of names) {
+    const value = record[name]
+    if (typeof value === 'string' && value.trim()) return value.trim()
+  }
+  return null
+}
+
+function isHttpUrl(value: string): boolean {
+  try {
+    const url = new URL(value)
+    return url.protocol === 'https:' || url.protocol === 'http:'
+  } catch {
+    return false
+  }
+}
+
+function findAuthorizationChallenge(records: readonly JsonObject[]): {
+  url: string
+  deviceCode: string | null
+} | null {
+  for (const record of records) {
+    const candidates = [record, asJsonObject(record.data), asJsonObject(record.error)]
+      .filter((value): value is JsonObject => Boolean(value))
+    for (const candidate of candidates) {
+      const url = stringField(candidate, [
+        'verification_url',
+        'verification_uri_complete',
+        'verification_uri',
+        'console_url',
+      ])
+      if (!url || !isHttpUrl(url)) continue
+      return {
+        url,
+        deviceCode: stringField(candidate, ['device_code', 'user_code']),
+      }
+    }
+  }
+  return null
+}
+
+function findCliConfirmation(records: readonly JsonObject[], exitCode: number | null): {
+  riskLevel: string | null
+  riskAction: string | null
+} | null {
+  if (exitCode !== 10) return null
+  for (const record of records) {
+    const error = asJsonObject(record.error)
+    if (stringField(error || {}, ['type']) !== 'confirmation_required') continue
+    const risk = asJsonObject(error?.risk)
+    return {
+      riskLevel: stringField(risk || {}, ['level']),
+      riskAction: stringField(risk || {}, ['action']),
+    }
+  }
+  return null
+}
+
+function buildDeviceCodeResumeArgs(
+  descriptor: SetupCommandDescriptor,
+  deviceCode: string | null,
+): string[] | null {
+  if (!deviceCode || basename(descriptor.command).toLowerCase() !== 'lark-cli') return null
+  if (descriptor.args[0] !== 'auth' || descriptor.args[1] !== 'login') return null
+  return ['auth', 'login', '--device-code', deviceCode]
 }
 
 async function defaultRunProcess(
@@ -229,6 +329,66 @@ export async function executeRunSetupCommand(
         { command: descriptor.command, stdoutTail: tailOf(result.stdout), stderrTail: tailOf(result.stderr) },
       )
     }
+    const structuredRecords = structuredOutputRecords(result.stdout, result.stderr)
+    const commonData = {
+      exitCode: result.code,
+      signal: result.signal,
+      command: descriptor.command,
+      args: descriptor.args,
+      cwd: descriptor.cwd,
+      stdout: result.stdout,
+      stderr: result.stderr,
+    }
+    const cliConfirmation = findCliConfirmation(structuredRecords, result.code)
+    if (cliConfirmation) {
+      const retryArgs = descriptor.args.includes('--yes')
+        ? descriptor.args
+        : [...descriptor.args, '--yes']
+      const riskSummary = [cliConfirmation.riskLevel, cliConfirmation.riskAction]
+        .filter(Boolean)
+        .join(' · ') || 'CLI 标记为高风险写入'
+      return createToolExecutionOutput([
+        'CLI 请求对高风险动作再次确认，Ready 未自动重试。',
+        `风险：${riskSummary}`,
+        `确认后可用同一 command 和以下 args 重新走预览与执行确认：${JSON.stringify(retryArgs)}`,
+      ].join('\n'), {
+        shape: 'json',
+        data: {
+          ...commonData,
+          ok: true,
+          status: 'waiting_confirmation',
+          needsConfirmation: true,
+          confirmationType: 'cli_high_risk',
+          riskLevel: cliConfirmation.riskLevel,
+          riskAction: cliConfirmation.riskAction,
+          retryArgs,
+        },
+      })
+    }
+    const authorization = findAuthorizationChallenge(structuredRecords)
+    if (authorization) {
+      const resumeArgs = buildDeviceCodeResumeArgs(descriptor, authorization.deviceCode)
+      return createToolExecutionOutput([
+        'CLI 需要在浏览器中完成授权，当前命令尚未完成。',
+        '授权链接（请原样展示给用户，Ready 中可直接点击）：',
+        authorization.url,
+        authorization.deviceCode ? `设备码：${authorization.deviceCode}` : '',
+        resumeArgs
+          ? `用户完成授权后，用同一 command 和以下 args 续接：${JSON.stringify(resumeArgs)}`
+          : '用户完成授权后，按该 CLI 返回的 device-code 流程续接；不要重复创建新的授权请求。',
+      ].filter(Boolean).join('\n'), {
+        shape: 'json',
+        data: {
+          ...commonData,
+          ok: true,
+          status: 'waiting_authorization',
+          authorizationRequired: true,
+          authorizationUrl: authorization.url,
+          deviceCode: authorization.deviceCode,
+          resumeArgs,
+        },
+      })
+    }
     const ok = result.code === 0
     const tail = (label: string, text: string): string => {
       const trimmed = text.trim()
@@ -241,13 +401,7 @@ export async function executeRunSetupCommand(
       shape: 'json',
       data: {
         ok,
-        exitCode: result.code,
-        signal: result.signal,
-        command: descriptor.command,
-        args: descriptor.args,
-        cwd: descriptor.cwd,
-        stdout: result.stdout,
-        stderr: result.stderr,
+        ...commonData,
       },
     })
   }
@@ -259,12 +413,12 @@ export async function executeRunSetupCommand(
     `将在本机执行命令（不经 shell，参数按原样传子进程）：${commandLine}`,
     `工作目录：${descriptor.cwd}`,
     '这类安装/配置命令可能下载并运行第三方代码、写入系统文件或修改工具链，需要用户确认这确实是他要装的工具。',
-    '如命令需要交互式输入（登录、选择项），本工具无法应答——那种情况请让用户在终端自行执行。',
+    '浏览器授权应优先使用 CLI 的非阻塞 JSON/device-code 流程；依赖键盘输入、密码输入或 TTY 的命令无法在本工具中应答。',
   ]
   const text = [
     `已解析（未执行）。命令：${commandLine}`,
     `风险提示：${riskNotes.join(' ')}`,
-    '下一步：用 ask_user_questions 把完整命令与风险讲清楚让用户决定；用户明确同意后，用 run_setup_command({ confirmAck: true, command, args, cwd }) 原样回传完成执行。',
+    '下一步：用 run_setup_command({ confirmAck: true, command, args, cwd }) 原样回传；Ready 会冻结完整调用并显示行动确认卡，用户确认后才会执行。',
   ].join('\n')
   return createToolExecutionOutput(text, {
     shape: 'json',

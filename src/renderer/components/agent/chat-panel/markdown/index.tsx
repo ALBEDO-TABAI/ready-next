@@ -2,7 +2,7 @@ import { useMemo } from 'react'
 
 // ---------------------------------------------------------------------------
 // Lightweight Markdown renderer (no external deps)
-// Supports: **bold**, *italic*, `inline code`, ```code blocks```,
+// Supports: **bold**, *italic*, `inline code`, http(s) links, ```code blocks```,
 //           # headers, bullet lists (- / *), numbered lists, line breaks
 // ---------------------------------------------------------------------------
 //
@@ -201,11 +201,39 @@ function isMarkdownTablePipe(char: string | undefined): boolean {
   return char === '|' || char === '｜'
 }
 
-/** Parse inline formatting: **bold**, *italic*, `code` */
+function splitBareUrl(raw: string): { href: string; trailing: string } {
+  let end = raw.length
+  while (end > 0 && /[.,!?;:，。！？；：]/.test(raw[end - 1])) end -= 1
+  while (end > 0 && raw[end - 1] === ')') {
+    const value = raw.slice(0, end)
+    const opens = (value.match(/\(/g) || []).length
+    const closes = (value.match(/\)/g) || []).length
+    if (closes <= opens) break
+    end -= 1
+  }
+  return { href: raw.slice(0, end), trailing: raw.slice(end) }
+}
+
+function externalLink(href: string, label: string, key: string): React.ReactNode {
+  return (
+    <a
+      key={key}
+      href={href}
+      target="_blank"
+      rel="noreferrer"
+      style={{ color: 'inherit', textDecoration: 'underline', textUnderlineOffset: 2 }}
+    >
+      {label}
+    </a>
+  )
+}
+
+/** Parse inline formatting: **bold**, *italic*, `code`, and safe http(s) links. */
 export function renderInline(text: string): React.ReactNode[] {
   const parts: React.ReactNode[] = []
-  // Combined regex for inline code, bold, italic
-  const regex = /(`([^`]+)`)|(\*\*(.+?)\*\*)|(\*(.+?)\*)/g
+  // Ordering is significant: code consumes URLs before the bare-URL branch;
+  // labelled links consume their URL before that same branch.
+  const regex = /(`([^`]+)`)|(\[([^\]]+)\]\((https?:\/\/[^\s)]+)\))|(\*\*(.+?)\*\*)|(\*(.+?)\*)|(https?:\/\/[^\s<>"'`]+)/g
   let lastIndex = 0
   let match: RegExpExecArray | null
   let key = 0
@@ -231,11 +259,18 @@ export function renderInline(text: string): React.ReactNode[] {
         </code>
       )
     } else if (match[3]) {
+      // labelled Markdown link; regex only admits http(s)
+      parts.push(externalLink(match[5], match[4], `a-${key++}`))
+    } else if (match[6]) {
       // bold
-      parts.push(<strong key={`b-${key++}`}>{match[4]}</strong>)
-    } else if (match[5]) {
+      parts.push(<strong key={`b-${key++}`}>{match[7]}</strong>)
+    } else if (match[8]) {
       // italic
-      parts.push(<em key={`i-${key++}`}>{match[6]}</em>)
+      parts.push(<em key={`i-${key++}`}>{match[9]}</em>)
+    } else if (match[10]) {
+      const { href, trailing } = splitBareUrl(match[10])
+      parts.push(externalLink(href, href, `a-${key++}`))
+      if (trailing) parts.push(trailing)
     }
     lastIndex = match.index + match[0].length
   }

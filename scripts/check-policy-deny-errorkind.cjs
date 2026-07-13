@@ -3,11 +3,11 @@ const fs = require('fs')
 const path = require('path')
 
 const root = process.cwd()
-// 2026-07-04 同步：runtime 侧 allowedToolNames 预检已随 SDK live 路径迁至
-// agent-sdk-turn-orchestrator.ts（tool-runtime.ts 瘦身后不再承载该判定）。
+// 2026-07-13 同步：runtime 侧 allowedToolNames 预检位于模型循环；
+// orchestrator 只负责编排，不再承载 tool-call 预检。
 const files = [
   'src/main/modules/tools/tool-executor.ts',
-  'src/main/modules/agent-control/runtime-core/agent-sdk-turn-orchestrator.ts',
+  'src/main/modules/agent-control/runtime-core/agent-sdk-turn-model-loop.ts',
 ]
 
 let failed = false
@@ -33,7 +33,7 @@ if (!/errorKind:\s*TOOL_ADMISSION_ERROR_KINDS\.toolRestrictedThisTurn\.code/.tes
   failed = true
 }
 
-const runtime = fs.readFileSync(path.join(root, 'src/main/modules/agent-control/runtime-core/agent-sdk-turn-orchestrator.ts'), 'utf8')
+const runtime = fs.readFileSync(path.join(root, 'src/main/modules/agent-control/runtime-core/agent-sdk-turn-model-loop.ts'), 'utf8')
 if (!/errorKind:\s*TOOL_ADMISSION_ERROR_KINDS\.toolRestrictedThisTurn\.code/.test(runtime)) {
   console.error('[check-policy-deny-errorkind] FAIL — tool_restricted_this_turn must be a top-level errorKind in the SDK runtime preflight.')
   failed = true

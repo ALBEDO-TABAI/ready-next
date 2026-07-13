@@ -997,9 +997,10 @@ async function executeToolCallInner(
           })
 
         case 'command_exec':
-          // Phase M+ —— agent 代跑一次性安装/配置命令：两阶段确认在工具内
-          // 完成；命令不经 shell（数组式 spawn），元字符/超时/输出由代码守；
-          // 用户停止 run 时经 abortSignal 连带杀掉命令进程树。
+          // Phase M+ —— agent 代跑一次性安装/配置命令：执行阶段已由上方
+          // FrozenCall 行动确认闸门放行；命令不经 shell（数组式 spawn），
+          // 元字符/超时/输出由代码守；用户停止 run 时经 abortSignal 连带
+          // 杀掉命令进程树。
           return executeRunSetupCommand(args as Record<string, unknown>, {
             abortSignal: context.abortSignal,
           })

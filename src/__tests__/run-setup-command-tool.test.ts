@@ -5,13 +5,31 @@
  * 断言：
  *   1. 阶段 1 只展示不执行（needsConfirmation + 完整命令 + riskNotes）；
  *   2. 命令不经 shell：command 位含元字符即拒；args 必须是数组；
- *   3. 阶段 2 confirmAck 才执行，回报 stdout/stderr/退出码；
+ *   3. 阶段 2 confirmAck 进入代码侧确认卡，放行后才执行并回报结果；
  *   4. spawn 失败 / 超时 → 结构化响亮错误。
  */
 import assert from 'node:assert/strict'
+import { access, mkdtemp, readFile, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import test from 'node:test'
 
+import {
+  FROZEN_CALL_CONFIRM_OPTION,
+  FROZEN_CALL_QUESTION_ID,
+} from '../main/modules/agent-control/safety/frozen-call-confirmation'
+import {
+  _resetFrozenCallBridgeForTests,
+  registerFrozenCallStore,
+} from '../main/modules/agent-control/safety/frozen-call-bridge'
+import { FrozenCallStore } from '../main/modules/agent-control/safety/frozen-call-store'
+import { buildExplicitNoSkillAuthorization } from '../main/modules/agent-control/skills/skill-tool-authorization'
 import { executeRunSetupCommand } from '../main/modules/tools/builtins/run-setup-command'
+import {
+  _resetAskUserQuestionsStoreForTests,
+  getAskUserQuestionsStore,
+} from '../main/modules/tools/builtins/ask-user-questions-store'
+import { executeToolCall, type ToolContext } from '../main/modules/tools/tool-executor'
 import { ToolDomainError } from '../main/modules/tools/tool-errors'
 
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
@@ -28,7 +46,7 @@ test('phase 1 previews the full command without executing', async () => {
   )
   assert.match(output.text, /已解析（未执行）/)
   assert.match(output.text, /npx @larksuite\/cli@latest install/)
-  assert.match(output.text, /ask_user_questions/)
+  assert.match(output.text, /Ready 会冻结完整调用并显示行动确认卡/)
   const data = output.data as Record<string, unknown>
   assert.equal(data.needsConfirmation, true)
   assert.deepEqual(data.args, ['@larksuite/cli@latest', 'install'])
@@ -77,6 +95,113 @@ test('phase 2 executes with confirmAck and reports stdout/stderr/exit code (neve
     { runProcess: async () => ({ code: 0, signal: null, stdout: 'a && b', stderr: '' }) },
   )
   assert.equal((safeArg.data as Record<string, unknown>).ok, true)
+})
+
+test('real dispatch freezes phase 2 until the Ready confirmation card is approved', async (t) => {
+  _resetAskUserQuestionsStoreForTests()
+  registerFrozenCallStore(new FrozenCallStore(null))
+  const dir = await mkdtemp(join(tmpdir(), 'ready-setup-confirm-'))
+  const sentinel = join(dir, 'executed.txt')
+  t.after(async () => {
+    _resetFrozenCallBridgeForTests()
+    _resetAskUserQuestionsStoreForTests()
+    await rm(dir, { recursive: true, force: true })
+  })
+
+  const sessionId = `setup-confirm-${Date.now()}`
+  const context: ToolContext = {
+    invoker: 'model',
+    authorization: buildExplicitNoSkillAuthorization('no_skill_signal'),
+    allowedToolNames: new Set(['run_setup_command']),
+    sessionId,
+  }
+  const pending = executeToolCall('run_setup_command', {
+    confirmAck: true,
+    command: process.execPath,
+    args: ['-e', "require('node:fs').writeFileSync(process.argv[1], 'ran')", sentinel],
+  }, context)
+
+  const startedAt = Date.now()
+  let card = getAskUserQuestionsStore().findPendingForSession(sessionId)
+  while (!card && Date.now() - startedAt < 2_000) {
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    card = getAskUserQuestionsStore().findPendingForSession(sessionId)
+  }
+  assert.ok(card, 'Ready must show a confirmation card before executing the command')
+  await assert.rejects(access(sentinel), 'the command must not run before confirmation')
+
+  getAskUserQuestionsStore().resolve(card.cardId, {
+    answers: [{ id: FROZEN_CALL_QUESTION_ID, answer: FROZEN_CALL_CONFIRM_OPTION }],
+    answeredAt: Date.now(),
+  })
+  const output = await pending
+
+  assert.equal(await readFile(sentinel, 'utf8'), 'ran')
+  assert.equal((output.data as Record<string, unknown>).ok, true)
+})
+
+test('structured device authorization output preserves the clickable URL and resume code', async () => {
+  const verificationUrl = 'https://open.feishu.cn/open-apis/authen/v1/device?state=abc123'
+  const output = await executeRunSetupCommand(
+    {
+      confirmAck: true,
+      command: 'lark-cli',
+      args: ['auth', 'login', '--no-wait', '--json'],
+    },
+    {
+      runProcess: async () => ({
+        code: 0,
+        signal: null,
+        stdout: JSON.stringify({ verification_url: verificationUrl, device_code: 'device-42' }),
+        stderr: '',
+      }),
+    },
+  )
+
+  const data = output.data as Record<string, unknown>
+  assert.equal(data.ok, true, 'authorization handoff is a resumable wait, not a tool failure')
+  assert.equal(data.status, 'waiting_authorization')
+  assert.equal(data.authorizationRequired, true)
+  assert.equal(data.authorizationUrl, verificationUrl)
+  assert.equal(data.deviceCode, 'device-42')
+  assert.match(output.text, new RegExp(verificationUrl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+  assert.match(output.text, /device-42/)
+})
+
+test('CLI confirmation_required never auto-retries and returns an explicit --yes retry', async () => {
+  const output = await executeRunSetupCommand(
+    {
+      confirmAck: true,
+      command: 'lark-cli',
+      args: ['im', 'message', 'send', '--receive-id', 'oc_123'],
+    },
+    {
+      runProcess: async () => ({
+        code: 10,
+        signal: null,
+        stdout: '',
+        stderr: JSON.stringify({
+          ok: false,
+          error: {
+            type: 'confirmation_required',
+            hint: 'add --yes',
+            risk: { level: 'high-risk-write', action: 'send message to oc_123' },
+          },
+        }),
+      }),
+    },
+  )
+
+  const data = output.data as Record<string, unknown>
+  assert.equal(data.ok, true, 'CLI confirmation request is a resumable wait, not a tool failure')
+  assert.equal(data.status, 'waiting_confirmation')
+  assert.equal(data.needsConfirmation, true)
+  assert.equal(data.confirmationType, 'cli_high_risk')
+  assert.deepEqual(data.retryArgs, ['im', 'message', 'send', '--receive-id', 'oc_123', '--yes'])
+  assert.equal(data.riskLevel, 'high-risk-write')
+  assert.equal(data.riskAction, 'send message to oc_123')
+  assert.match(output.text, /未自动重试/)
+  assert.match(output.text, /--yes/)
 })
 
 test('non-zero exit is reported as a warning with stderr, not thrown', async () => {

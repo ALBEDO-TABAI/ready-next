@@ -213,6 +213,24 @@ test('file_move without overwrite → allow; with overwrite=true → M2 confirm'
   assert.equal(overwrite.action, 'confirm')
 })
 
+test('run_setup_command preview is read-only; execution phase always requires M2 confirmation', () => {
+  const preview = resolveConfirmationGate('run_setup_command', {
+    command: 'lark-cli',
+    args: ['auth', 'login', '--no-wait', '--json'],
+  })
+  assert.equal(preview.mode, 'M4')
+  assert.equal(preview.action, 'allow')
+
+  const execution = resolveConfirmationGate('run_setup_command', {
+    confirmAck: true,
+    command: 'lark-cli',
+    args: ['auth', 'login', '--no-wait', '--json'],
+  })
+  assert.equal(execution.mode, 'M2')
+  assert.equal(execution.action, 'confirm')
+  assert.equal(execution.ruleId, 'm2-run-setup-command')
+})
+
 test('feishu_message_send: sensitive content → M2; ordinary content → M3 (both confirm in phase 1)', () => {
   const sensitive = resolveConfirmationGate('feishu_message_send', {
     channel_id: 'ch-1',

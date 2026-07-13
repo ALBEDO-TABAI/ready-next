@@ -930,7 +930,7 @@ const GROUP_TOOL_PROVIDERS: Record<CapabilityGroupId, ToolRegistryProvider> = {
     },
   },
   // Phase M+（2026-07-05）—— agent 代跑一次性安装/配置命令（飞书/即梦 CLI）。
-  // 命令不经 shell，两阶段确认在工具内经 ask_user_questions 完成。
+  // 命令不经 shell；执行阶段统一经过 dispatch 层的 FrozenCall 确认卡。
   command_exec: {
     staticToolNames: SETUP_COMMAND_TOOL_NAMES,
     getToolDefinitions: () => buildToolDefinitions('command_exec', SETUP_COMMAND_TOOL_NAMES),

@@ -18,6 +18,7 @@ import { useCallback, useEffect, useMemo, useState, type ReactElement } from 're
 import { ChevronLeft, ChevronRight, Check, AlertCircle } from 'lucide-react'
 
 import type { AskUserQuestionsCardState } from '../../modules/agent/types'
+import { renderInline } from './chat-panel/markdown'
 
 interface AskUserQuestionsCardProps {
   card: AskUserQuestionsCardState
@@ -231,7 +232,7 @@ export function AskUserQuestionsCard({ card, onSubmit, onCancel }: AskUserQuesti
                 : '(未作答)'
               return (
                 <li key={q.id} style={{ fontSize: 12, lineHeight: 1.5 }}>
-                  <div style={{ color: 'var(--text-body)' }}>{q.question}</div>
+                  <div style={{ color: 'var(--text-body)' }}>{renderInline(q.question)}</div>
                   <div style={{ color: 'var(--text-gray)', fontStyle: answer ? 'normal' : 'italic' }}>→ {rendered}</div>
                 </li>
               )
@@ -292,7 +293,7 @@ export function AskUserQuestionsCard({ card, onSubmit, onCancel }: AskUserQuesti
       </div>
 
       <div style={{ fontSize: 13.5, lineHeight: 1.55, marginBottom: 12, whiteSpace: 'pre-wrap', color: 'var(--text-body)' }}>
-        {currentQ.question}
+        {renderInline(currentQ.question)}
         {currentQ.required === false && (
           <span style={{ marginLeft: 6, fontSize: 11, color: 'var(--text-light)' }}>（可选）</span>
         )}

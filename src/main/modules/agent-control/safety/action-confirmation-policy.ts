@@ -101,6 +101,16 @@ const FIRST_BATCH_RULES: readonly ConfirmationRule[] = [
   },
   // --- M2 — 每次执行前确认，预批准无效 -------------------------------------
   {
+    id: 'm2-run-setup-command',
+    designRef: '2026-07-13 CLI 授权桥接 — 本机命令执行',
+    mode: 'M2',
+    tools: new Set(['run_setup_command']),
+    // `confirmAck` is only the tool's phase selector. It is model-authored
+    // input and therefore cannot prove that the user approved this command.
+    when: (args) => args.confirmAck === true,
+    reason: '将在本机执行安装或配置命令，可能下载代码或修改本机环境',
+  },
+  {
     id: 'm2-delete-data',
     designRef: '05 §3.1 M2 — 删除文件/数据',
     mode: 'M2',

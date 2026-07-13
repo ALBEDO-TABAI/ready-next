@@ -82,13 +82,17 @@ test('maps main no-progress timeout as takeover rather than model outage', () =>
   assert.doesNotMatch(result.friendlyMessage, /模型服务|模型响应|发送失败/)
 })
 
-test('maps the delivery wall-clock limit to an explicit resumable message', () => {
+test('maps the delivery wall-clock limit without claiming Boost collaboration or verification', () => {
   const result = mapBackendErrorToFriendly({
     error: 'delivery_wall_clock_exceeded',
     errorKind: 'delivery_failed',
   })
 
-  assert.match(result.friendlyMessage, /深度协作持续一段时间没有新进展/)
+  assert.equal(
+    result.friendlyMessage,
+    '这次任务持续一段时间没有新进展，Ready 已安全停止；目标尚未完成，可以继续这项任务',
+  )
+  assert.doesNotMatch(result.friendlyMessage, /深度协作|复核|草稿/)
   assert.equal(result.recoverable, true)
   assert.equal(result.retryStrategy, 'user_action')
 })
