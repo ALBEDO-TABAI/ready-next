@@ -98,7 +98,8 @@ html[data-theme='dark'][data-skin='liquid-glass'] .ready-chat-mode-tabs-dock .sc
   min-height: 0;
 }
 
-.scheduled-tasks-panel.is-workspace {
+.ready-app-liquid-panel.scheduled-tasks-panel.is-workspace {
+  --ready-app-panel-glass-shadow: none;
   position: relative;
   right: auto;
   bottom: auto;

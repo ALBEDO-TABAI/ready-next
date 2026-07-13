@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import { createElement, type ReactElement } from 'react'
 import { act } from 'react'
@@ -199,6 +200,28 @@ test('scheduled tasks workspace owns the central canvas and keeps BrowserView ma
     await unmount(workspace.root)
     await flush()
     assert.deepEqual(lockEvents.at(-1), { locked: false, persistent: true })
+  } finally {
+    handle.restore()
+  }
+})
+
+test('workspace panel overrides the shared liquid panel lift shadow', () => {
+  const handle = installDom()
+  try {
+    const style = handle.dom.window.document.createElement('style')
+    style.textContent = [
+      readFileSync(new URL('../renderer/styles/flat-chrome.css', import.meta.url), 'utf8'),
+      readFileSync(new URL('../renderer/styles/scheduled-tasks.css', import.meta.url), 'utf8'),
+    ].join('\n')
+    handle.dom.window.document.head.append(style)
+    handle.dom.window.document.documentElement.dataset.skin = 'liquid-glass'
+    const panel = handle.dom.window.document.createElement('div')
+    panel.className = 'ready-app-liquid-panel scheduled-tasks-panel is-workspace'
+    handle.dom.window.document.body.append(panel)
+
+    const computed = handle.dom.window.getComputedStyle(panel)
+    assert.equal(computed.getPropertyValue('--ready-app-panel-glass-shadow').trim(), 'none')
+    assert.equal(computed.boxShadow, 'none')
   } finally {
     handle.restore()
   }
