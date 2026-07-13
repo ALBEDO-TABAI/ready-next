@@ -133,6 +133,9 @@ export function getToolResourceTag(toolName: string): ToolResourceTag {
       accessMode: READ_ONLY_DOCUMENT_TOOL_NAMES.has(normalized) ? 'read' : 'write',
     }
   }
+  if (normalized.startsWith('tag_forge_')) {
+    return { domain: 'file', accessMode: 'write' }
+  }
   if (normalized.startsWith('file_')) {
     const writeFileTools = new Set([
       'file_classify',

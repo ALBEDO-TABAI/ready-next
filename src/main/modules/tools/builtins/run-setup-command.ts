@@ -20,7 +20,7 @@
 import { spawn } from 'child_process'
 import { existsSync, statSync } from 'fs'
 import { homedir } from 'os'
-import { basename, isAbsolute } from 'path'
+import { basename, delimiter, isAbsolute, join } from 'path'
 
 import { ToolDomainError } from '../tool-errors'
 import { SETUP_COMMAND_ERROR_KINDS } from '../../agent-control/contracts/error-kinds'
@@ -45,7 +45,7 @@ export interface SetupCommandDescriptor {
 
 export interface RunSetupCommandDeps {
   /** 测试注入：替换真实 spawn 执行。 */
-  runProcess?: (descriptor: Required<Pick<SetupCommandDescriptor, 'command' | 'args' | 'cwd'>>, timeoutMs: number, abortSignal?: AbortSignal) => Promise<{
+  runProcess?: (descriptor: Required<Pick<SetupCommandDescriptor, 'command' | 'args' | 'cwd'>> & { env: NodeJS.ProcessEnv }, timeoutMs: number, abortSignal?: AbortSignal) => Promise<{
     code: number | null
     signal: string | null
     stdout: string
@@ -55,6 +55,8 @@ export interface RunSetupCommandDeps {
   }>
   /** 执行器传入：用户停止 run 时必须连带杀掉命令进程树。 */
   abortSignal?: AbortSignal
+  /** 测试注入：模拟 Finder/Dock 启动时的最小环境。 */
+  processEnv?: NodeJS.ProcessEnv
 }
 
 function validateCommandName(command: string): string {
@@ -213,8 +215,31 @@ function buildDeviceCodeResumeArgs(
   return ['auth', 'login', '--device-code', deviceCode]
 }
 
+function buildSetupCommandEnv(baseEnv: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const env = { ...baseEnv }
+  if (process.platform === 'win32') return env
+  const pathKey = Object.keys(env).find((key) => key.toLowerCase() === 'path') || 'PATH'
+  const home = String(env.HOME || env.USERPROFILE || homedir())
+  const standardBins = [
+    '/opt/homebrew/bin',
+    '/opt/homebrew/sbin',
+    '/usr/local/bin',
+    '/usr/local/sbin',
+    join(home, '.local', 'bin'),
+    join(home, 'bin'),
+    join(home, '.npm-global', 'bin'),
+    join(home, '.bun', 'bin'),
+    join(home, '.volta', 'bin'),
+    join(home, '.cargo', 'bin'),
+    join(home, 'Library', 'pnpm'),
+  ]
+  const inherited = String(env[pathKey] || '').split(delimiter)
+  env[pathKey] = [...new Set([...standardBins, ...inherited].map((item) => item.trim()).filter(Boolean))].join(delimiter)
+  return env
+}
+
 async function defaultRunProcess(
-  descriptor: Required<Pick<SetupCommandDescriptor, 'command' | 'args' | 'cwd'>>,
+  descriptor: Required<Pick<SetupCommandDescriptor, 'command' | 'args' | 'cwd'>> & { env: NodeJS.ProcessEnv },
   timeoutMs: number,
   abortSignal?: AbortSignal,
 ): Promise<{ code: number | null; signal: string | null; stdout: string; stderr: string; spawnError?: string; timedOut?: boolean }> {
@@ -225,7 +250,7 @@ async function defaultRunProcess(
     let settled = false
     const child = spawn(descriptor.command, descriptor.args, {
       cwd: descriptor.cwd,
-      env: process.env,
+      env: descriptor.env,
       // 关键 1：不经 shell。数组式参数直接传子进程，元字符不被解释。
       shell: false,
       // 关键 2：stdin 立即 EOF。交互式命令（config init 之类等键盘输入的）
@@ -307,7 +332,7 @@ export async function executeRunSetupCommand(
       Math.max(5_000, Number(rawArgs.timeoutMs) || DEFAULT_TIMEOUT_MS),
     )
     const run = deps.runProcess ?? defaultRunProcess
-    const result = await run({ command: descriptor.command, args: descriptor.args, cwd: descriptor.cwd! }, timeoutMs, deps.abortSignal)
+    const result = await run({ command: descriptor.command, args: descriptor.args, cwd: descriptor.cwd!, env: buildSetupCommandEnv(deps.processEnv) }, timeoutMs, deps.abortSignal)
     if (result.spawnError) {
       throw new ToolDomainError(
         SETUP_COMMAND_ERROR_KINDS.executionFailed.code,

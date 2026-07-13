@@ -16,12 +16,18 @@ date: 2026-07-12
 6. 独立复核的输出合同必须显式给模型；任何非合同输出安全降级为 block 并落可追踪指纹，不得抛错后遗留 pending。
 7. stale projection 收口前必须合并 `run_meta.continuationRef`；存在真实 durable handle 时恢复 projection，不得清空续跑入口。
 8. 终态任务卡不得显示“等待独立复核”。
+9. Tag Forge 三个受控写入工具必须同时注册在 `file_management`、解析为 `file` 执行域并按写操作串行；统一工具入口不得把它们送进 system handler。
+10. `degraded_visible` 只能保留至少满足一条完成判据的部分成果；多步任务即使产生了失败工具回执或盘点结果，只要完成判据满足数为 0，就不得写成成功或完成。
+11. 显式打标遇到任何未审核新词时不得写回或关闭文件项；结果必须进入 `waiting_review`，给出“设置 > 文档标签”审核位置和原 `batchId` 的续跑参数。
+12. 封闭 facet 的未知值在自动模式仍拒绝；在用户显式打标模式中必须进入待审核，只有用户转正后才可成为 active 标签。用户废弃的同 facet/label 不得在重试时再次进入待审核。
+13. 显式打标在没有 active 标签且也没有待审核项时必须失败且不改文件；`completed_sparse` 至少包含一个已批准 active 标签。
 
 ## 验证入口
 
 - `tag-forge-folder-capability.test.ts`
 - `capability-floors.test.ts`
 - `tag-forge-batch.test.ts`（Electron ABI）
+- `run-finalizer-checkin.test.ts`
 - `dynamic-delivery-deadline.test.ts`
 - `dynamic-delivery-verifier-contract.test.ts`
 - `dynamic-delivery-task-card.test.ts`
@@ -32,5 +38,5 @@ date: 2026-07-12
 ## 非目标
 
 - 不开放任意文件写入或 shell。
-- 不改变 Tag Forge 词表、facet 配额和标签判断方法。
+- 不改写内置 Tag Forge 词表，不改变 facet 配额和语义判断方法。
 - 不修改用户已有标签；默认跳过已有 tag/frontmatter 的文档。

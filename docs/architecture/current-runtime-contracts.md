@@ -114,7 +114,7 @@
 
 - hidden、snoozed、not_related 等持久反馈必须在 Main 与 Renderer 两端同时生效；当前 tab、dirty tab 或阅读进度不能把被压制项目重新注入。
 - 自动 Tag Forge 写入必须先有 durable creation receipt。receipt 绑定 source run、创建 tab、目标 path/fileKey 和最终 hash；禁止 run 级 token fallback。
-- 文件夹批量打标使用专用 `tag_forge_prepare_batch -> tag_forge_apply_batch` 合同。typed folder reference 必须保留盘点、全文读取和受控批量写回地板；revision 由代码签发，批次状态持久化，冲突可重试。
+- 文件夹批量打标使用专用 `tag_forge_prepare_batch -> tag_forge_apply_batch` 合同。typed folder reference 必须保留盘点、全文读取和受控批量写回地板；revision 由代码签发，批次状态持久化，冲突可重试。显式提案含未审核新词时必须停在可恢复的 `waiting_review`，不写文件、不关闭批次；用户转正或废弃后从同一 `batchId` 续跑。封闭 facet 只有显式模式可送人工审核，自动模式继续拒绝。
 - 批量路径不得退回逐文件 read/write 消耗单轮预算，也不得为此开放通用写文件或 shell。
 - 自动新文档路径只接受尚不存在、位于授权 workspace 且 realpath 不越界的 Markdown 目标；失败重试必须从持久 receipt 恢复。
 - 文件涌现只能消费 `suppressed=0` 且已经索引 readback 的 assignment。用户删除自动标签后手工加回时，来源转为 user/manual。

@@ -21,6 +21,9 @@ export class TagForgeRepository {
   listPending():Array<{proposalId:string;facet:TagFacet;label:string;evidenceCode:string;evidenceExcerpt:string|null}> {
     return this.db.prepare(`SELECT proposal_id AS proposalId,facet,label,evidence_code AS evidenceCode,evidence_excerpt AS evidenceExcerpt FROM tag_pending_proposals WHERE status='pending' ORDER BY created_at`).all<any>()
   }
+  listRejected():Array<{facet:TagFacet;label:string}> {
+    return this.db.prepare(`SELECT facet,label FROM tag_pending_proposals WHERE status='rejected' ORDER BY updated_at`).all<any>()
+  }
   reviewPending(proposalId:string,decision:'approve'|'reject',now=Date.now()):void {
     const row=this.db.prepare(`SELECT facet,label FROM tag_pending_proposals WHERE proposal_id=? AND status='pending'`).get<{facet:TagFacet;label:string}>(proposalId);if(!row)throw new Error('pending proposal not found')
     if(decision==='approve'){const id=`user-${Buffer.from(`${row.facet}:${row.label}`).toString('base64url').slice(0,32)}`;this.upsertOverlay({id,facet:row.facet,label:row.label,aliases:[]},now);this.db.prepare(`UPDATE tag_pending_proposals SET status='approved',updated_at=? WHERE proposal_id=?`).run(now,proposalId)}else this.db.prepare(`UPDATE tag_pending_proposals SET status='rejected',updated_at=? WHERE proposal_id=?`).run(now,proposalId)

@@ -25,7 +25,10 @@ export async function executeTagForgeApply(args:Record<string,unknown>,engine:Se
     if(receipt.finalSaveHash!==expectedRevision)return json({ok:false,errorKind:'final_save_revision_mismatch'})
   }
   const policy=loadTagForgePolicy();const proposals=args.proposals.filter((item):item is TagProposal=>Boolean(item&&typeof item==='object'))
-  const validated=validateTagProposals(policy,proposals,mode,repo.listOverlay());repo.addPending(validated.pending,runId||null)
+  const validated=validateTagProposals(policy,proposals,mode,repo.listOverlay(),repo.listRejected());repo.addPending(validated.pending,runId||null)
+  const pending=validated.pending.map((item)=>({facet:item.facet,label:item.label}));const rejected=validated.rejected.map((item)=>({label:item.proposal.label,reason:item.reason}))
+  if(mode==='explicit'&&pending.length)return json({ok:true,status:'waiting_review',reviewRequired:true,reviewLocation:'设置 > 文档标签',path,tags:[],pending,rejected,revision:expectedRevision})
+  if(mode==='explicit'&&validated.active.length===0)return json({ok:false,status:'failed_terminal',errorKind:'no_active_tags',path,pending,rejected})
   const before=repo.listAssignments(file.fileKey);const previousAuto=before.filter((item)=>item.ownership==='automatic').map((item)=>item.label);const suppressed=before.filter((item)=>item.ownership==='automatic'&&item.suppressed).map((item)=>item.label)
   try{
     const written=await writeControlledTags({path,workspaceRoot:root,expectedRevision,selectedTags:validated.active,previousAutomaticLabels:previousAuto,suppressedAutomaticLabels:suppressed})
@@ -36,7 +39,7 @@ export async function executeTagForgeApply(args:Record<string,unknown>,engine:Se
     const indexedTags=(()=>{try{const value=JSON.parse(indexed?.frontmatter||'{}').tags;return Array.isArray(value)?value.map(String):[]}catch{return[]}})()
     if(JSON.stringify(indexedTags)!==JSON.stringify(written.tags))throw Object.assign(new Error('index_readback_mismatch'),{code:'index_readback_mismatch'})
     repo.markReadback(file.fileKey);if(mode==='automatic'&&receiptId)repo.markReceipt(receiptId,validated.sparse?'completed_sparse':'completed')
-    return json({ok:true,status:validated.sparse?'completed_sparse':'completed',path,tags:written.tags,pending:validated.pending.map((item)=>({facet:item.facet,label:item.label})),rejected:validated.rejected.map((item)=>({label:item.proposal.label,reason:item.reason})),revision:written.revision})
+    return json({ok:true,status:validated.sparse?'completed_sparse':'completed',path,tags:written.tags,pending,rejected,revision:written.revision})
   }catch(error){const code=typeof (error as {code?:unknown})?.code==='string'?(error as {code:string}).code:'tag_write_failed';if(mode==='automatic'&&receiptId)repo.markReceipt(receiptId,'failed_retryable',code);return json({ok:false,status:mode==='automatic'?'failed_retryable':'failed_terminal',errorKind:code})}
 }
 

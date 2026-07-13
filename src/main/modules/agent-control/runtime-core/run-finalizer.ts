@@ -225,6 +225,7 @@ interface TerminalAdjudicationDecision {
   verdict: CheckInRecord['verdict']
   blockers: string[]
   proofCount: number
+  satisfiedCount: number
 }
 
 export function resolveDynamicDeliveryFinalizerBlocker(
@@ -251,6 +252,7 @@ function canKeepProofBearingDegradedVisible(
   if (isBrowserTransactionTask(facts)) return false
   if (adjudication.verdict !== 'degraded') return false
   if (adjudication.proofCount <= 0) return false
+  if (adjudication.satisfiedCount <= 0) return false
   if (adjudication.blockers.some((blocker) => blocker === 'criteria_unsatisfied:s1')) return false
   if (readTerminalFailureReason(projectionPatch?.terminalFailureReason)) return false
   const terminalFailure = projectionPatch?.terminalFailure
@@ -603,9 +605,9 @@ async function writeTerminalOutcome(
       effectiveStatus = 'checkpoint'
       effectiveTerminalReason = 'checkpoint_budget'
     } else if (canKeepProofBearingDegradedVisible(adjudication, outcome.projectionPatch, facts)) {
-      // P1: a run that DID produce proofs but has unsatisfied criteria stays
+      // P1: a run that DID satisfy part of its criteria stays
       // 'done' with a visible degraded reason — does not force-fail the run.
-      // Only zero-proof rejects are hard-converted in this mode.
+      // Proofs that satisfy no criteria are hard-converted in this mode.
       effectiveTerminalReason = 'adjudication_degraded'
     } else {
       effectiveStatus = 'error'
@@ -899,7 +901,7 @@ function recordTerminalAdjudication(
       logAgentMetric('adjudicator_enforce_divergence', divergencePayload)
       logAgentMetric('adjudicator_shadow_divergence', { ...divergencePayload, compatibility: true })
     }
-    return { verdict, blockers: checkIn.blockers, proofCount: checkIn.proofCount }
+    return { verdict, blockers: checkIn.blockers, proofCount: checkIn.proofCount, satisfiedCount: checkIn.satisfiedCount }
   } catch (error) {
     logAgentMetric('adjudication_failed', {
       runId: outcome.runId,

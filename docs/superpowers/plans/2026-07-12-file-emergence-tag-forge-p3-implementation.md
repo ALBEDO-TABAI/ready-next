@@ -12,11 +12,11 @@ enforce: true
 P3 is complete only when the application, not prompt memory, owns these invariants:
 
 1. The bundled `tag-forge` copy and `/Users/user/实验田/skill-fac/tag-forge` authoring source are parity-checked. Relative references resolve; the unimplemented `tf` alias and writes to the bundled lexicon are removed.
-2. One machine policy defines facet openness, quotas, blacklist, automatic state, pending behavior, and version. A validator resolves aliases only inside the proposed facet, rejects unknown closed-facet values, rejects model-proposed privileged state/project values, and never promotes pending terms.
+2. One machine policy defines facet openness, quotas, blacklist, automatic state, pending behavior, and version. A validator resolves aliases only inside the proposed facet, rejects unknown closed-facet values during automatic tagging, queues them for explicit user review during user-requested tagging, rejects model-proposed privileged state/project values, and never promotes pending terms.
 3. Seed lexicon, user overlay, pending proposals, assignments, and artifact creation receipts have separate durable stores. Seed upgrades never overwrite the overlay.
 4. Automatic tagging is eligible only for a Markdown file with a durable receipt minted by a real create action in the same run and completed by a final-save hash receipt. Existing files and ordinary edits are ineligible.
 5. The hardened writer rejects symlinks and boundary escape, requires revision CAS, uses an atomic replace, merges existing frontmatter, removes duplicate top tag lines, preserves manual tags, and only replaces tags previously owned by automation.
-6. A successful operation is not complete until disk, parsed frontmatter, durable assignment, and search-index readback agree. Fewer than three trustworthy active tags is `completed_sparse`, not failure. A retryable automatic failure preserves the body; an explicit tagging failure remains a delivery failure.
+6. A successful operation is not complete until disk, parsed frontmatter, durable assignment, and search-index readback agree. One or two trustworthy active tags is `completed_sparse`; zero active tags is not completion. Explicit proposals awaiting user review preserve the body and batch continuation; a retryable automatic failure preserves the body; an explicit tagging failure remains a delivery failure.
 7. Ordinary document saves, external changes, and reindex completion deterministically reconcile frontmatter with assignments without an LLM or file rewrite. Manual deletion of an automatic tag is remembered and not restored on retry.
 8. Settings exposes the automatic-tagging switch and pending review. File-emergence refresh neither invokes a model nor writes a file.
 

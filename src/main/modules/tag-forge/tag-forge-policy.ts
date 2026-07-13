@@ -50,6 +50,11 @@ export interface TagValidationResult {
   sparse: boolean
 }
 
+export interface RejectedTagProposal {
+  facet: TagFacet
+  label: string
+}
+
 export function resolveTagForgeLexiconPath():string{
   const resources=(process as NodeJS.Process&{resourcesPath?:string}).resourcesPath
   const candidates=[resources?join(resources,'embedded-skills/tag-forge/tag-lexicon.yaml'):'',resolve(process.cwd(),'assets/embedded-skills/tag-forge/tag-lexicon.yaml')].filter(Boolean)
@@ -78,6 +83,7 @@ export function validateTagProposals(
   proposals: readonly TagProposal[],
   mode: 'automatic' | 'explicit',
   overlay: readonly TagLexiconEntry[] = [],
+  reviewedRejections: readonly RejectedTagProposal[] = [],
 ): TagValidationResult {
   const entries = [...policy.entries, ...overlay].filter((entry) => entry.status === 'active')
   const active: ValidatedTag[] = []
@@ -113,7 +119,11 @@ export function validateTagProposals(
       }
       continue
     }
-    if (policy.facetOpenness[proposal.facet] === 'closed') {
+    if (reviewedRejections.some((item) => item.facet === proposal.facet && same(item.label, proposal.label))) {
+      rejected.push({ proposal, reason: 'user_rejected_pending' })
+      continue
+    }
+    if (mode === 'automatic' && policy.facetOpenness[proposal.facet] === 'closed') {
       rejected.push({ proposal, reason: 'closed_facet_unknown' })
       continue
     }

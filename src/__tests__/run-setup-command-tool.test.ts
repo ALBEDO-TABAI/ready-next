@@ -9,7 +9,7 @@
  *   4. spawn 失败 / 超时 → 结构化响亮错误。
  */
 import assert from 'node:assert/strict'
-import { access, mkdtemp, readFile, rm } from 'node:fs/promises'
+import { access, chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -229,6 +229,30 @@ test('spawn error and timeout are structured refusals', async () => {
     ),
     (e: unknown) => e instanceof ToolDomainError && e.errorKind === 'setup_command_timed_out',
   )
+})
+
+test('desktop launch PATH finds a CLI in the standard user bin without a shell', async (t) => {
+  if (process.platform === 'win32') {
+    t.skip('the executable fixture uses a POSIX shebang')
+    return
+  }
+  const home = await mkdtemp(join(tmpdir(), 'ready-desktop-cli-home-'))
+  const bin = join(home, '.local', 'bin')
+  const executable = join(bin, 'ready-cli-path-fixture')
+  await mkdir(bin, { recursive: true })
+  await writeFile(executable, '#!/usr/bin/env node\nprocess.stdout.write("desktop-path-ok")\n')
+  await chmod(executable, 0o755)
+  t.after(() => rm(home, { recursive: true, force: true }))
+
+  const output = await executeRunSetupCommand({
+    confirmAck: true,
+    command: 'ready-cli-path-fixture',
+    args: [],
+  }, {
+    processEnv: { HOME: home, PATH: '/usr/bin:/bin' },
+  })
+  assert.equal((output.data as Record<string, unknown>).ok, true)
+  assert.equal((output.data as Record<string, unknown>).stdout, 'desktop-path-ok')
 })
 
 // ── 2026-07-06 真机回测（飞书 CLI B5）抓获的卡死修复合同 ──────────────────

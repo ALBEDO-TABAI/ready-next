@@ -704,7 +704,10 @@ test('P1 degraded_visible mode keeps proof-bearing degraded runs done but still 
   try {
     const store = fakeStore({
       taskId: 'task-degraded-visible', taskType: 'research' as never, module: 'system',
-      proofRefs: [collectToolResultProof('web_search', 'sources found', NOW)],
+      proofRefs: [
+        collectToolResultProof('web_search', 'sources found', NOW),
+        collectArtifactProof('/tmp/research.md', NOW),
+      ],
     })
     const finalized = await finalizeRunOutcome({
       kind: 'done', runId: 'run-degraded-visible', taskId: 'task-degraded-visible', scopeId: 's1',
@@ -717,8 +720,51 @@ test('P1 degraded_visible mode keeps proof-bearing degraded runs done but still 
     })
     const last = (store.rows.get('task-degraded-visible')!.checkins as CheckInRecord[]).at(-1)!
     assert.equal(last.verdict, 'degraded')
-    assert.ok(last.blockers.includes('criteria_unsatisfied:c1'))
+    assert.ok(last.blockers.includes('criteria_unsatisfied:c2'))
+    assert.equal(last.satisfiedCount, 1)
+    assert.equal(last.totalCount, 2)
     assert.equal(finalized.status, 'done')
+    assert.equal(finalized.terminalReason, 'adjudication_degraded')
+  } finally {
+    if (previous === undefined) delete process.env.READY_ADJUDICATION_ENFORCE_MODE
+    else process.env.READY_ADJUDICATION_ENFORCE_MODE = previous
+  }
+})
+
+test('P1 degraded_visible mode cannot complete a multi-step run with zero satisfied criteria', async () => {
+  const previous = process.env.READY_ADJUDICATION_ENFORCE_MODE
+  process.env.READY_ADJUDICATION_ENFORCE_MODE = 'degraded_visible'
+  try {
+    const store = fakeStore({
+      taskId: 'task-tag-forge-no-write',
+      taskType: 'multi_step_task' as never,
+      module: 'system',
+      proofRefs: [
+        collectToolResultProof('tag_forge_prepare_batch', 'Unknown system tool: tag_forge_prepare_batch', NOW),
+        collectToolResultProof('file_inventory', '{"ok":true,"total":31}', NOW),
+      ],
+    })
+    const finalized = await finalizeRunOutcome({
+      kind: 'done',
+      runId: 'run-tag-forge-no-write',
+      taskId: 'task-tag-forge-no-write',
+      scopeId: 's1',
+      durationMs: 10,
+      toolCallsUsed: 2,
+      initiator: 'done',
+      finalText: '工具不可用，因此没有写入任何文档。',
+      projectionPatch: { taskType: 'multi_step_task', module: 'system' },
+    } as RunOutcome, {
+      writeRunCloseMetric: () => {},
+      taskProjectionStore: store,
+      now: () => NOW,
+    })
+
+    const last = (store.rows.get('task-tag-forge-no-write')!.checkins as CheckInRecord[]).at(-1)!
+    assert.equal(last.verdict, 'degraded')
+    assert.equal(last.satisfiedCount, 0)
+    assert.equal(last.totalCount, 2)
+    assert.equal(finalized.status, 'error')
     assert.equal(finalized.terminalReason, 'adjudication_degraded')
   } finally {
     if (previous === undefined) delete process.env.READY_ADJUDICATION_ENFORCE_MODE

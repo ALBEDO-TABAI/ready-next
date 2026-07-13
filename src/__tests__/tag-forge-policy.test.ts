@@ -30,13 +30,28 @@ test('automatic mode fixes state, rejects model privilege claims, blacklist, and
   assert.equal(result.sparse,true)
 })
 
-test('unknown closed form stays pending-free while approved overlay remains separate from seed',()=>{
-  const unknown=validateTagProposals(policy,[{facet:'form',label:'发明的新形态',evidenceCode:'form',confidence:.9}],'explicit')
-  assert.equal(unknown.pending.length,0)
-  assert.equal(unknown.rejected[0]?.reason,'closed_facet_unknown')
+test('unknown closed form requires explicit review while automatic tagging still rejects it',()=>{
+  const automatic=validateTagProposals(policy,[{facet:'form',label:'发明的新形态',evidenceCode:'form',confidence:.9}],'automatic')
+  assert.equal(automatic.pending.length,0)
+  assert.equal(automatic.rejected[0]?.reason,'closed_facet_unknown')
+  const explicit=validateTagProposals(policy,[{facet:'form',label:'发明的新形态',evidenceCode:'form',confidence:.9}],'explicit')
+  assert.equal(explicit.pending[0]?.label,'发明的新形态')
+  assert.equal(explicit.rejected.length,0)
   const overlay=validateTagProposals(policy,[{facet:'entity',label:'Ready',evidenceCode:'entity',confidence:.9}],'explicit',[{id:'ready',facet:'entity',label:'Ready',aliases:['ready-app'],status:'active'}])
   assert.equal(overlay.active[0]?.tagId,'ready')
   assert.equal(policy.entries.some((entry)=>entry.id==='ready'),false)
+})
+
+test('a term explicitly rejected by the user is not proposed for review again',()=>{
+  const result=validateTagProposals(
+    policy,
+    [{facet:'form',label:'读书笔记',evidenceCode:'form',confidence:.9}],
+    'explicit',
+    [],
+    [{facet:'form',label:'读书笔记'}],
+  )
+  assert.equal(result.pending.length,0)
+  assert.equal(result.rejected[0]?.reason,'user_rejected_pending')
 })
 
 test('mutually exclusive explicit states are not silently chosen',()=>{

@@ -97,7 +97,7 @@ type OrganizeJournal = {
 
 type TagForgeBatchItemState = {
   path: string
-  status: 'pending' | 'completed' | 'conflict' | 'failed'
+  status: 'pending' | 'awaiting_review' | 'completed' | 'conflict' | 'failed'
   errorKind?: string | null
 }
 
@@ -509,7 +509,10 @@ async function runTagForgeApplyBatch(
       expectedRevision: item.expectedRevision,
       proposals: item.proposals,
     }, engine, context)) as Record<string, unknown>
-    if (output.ok === true) {
+    if (output.ok === true && output.status === 'waiting_review') {
+      tracked.status = 'awaiting_review'
+      tracked.errorKind = null
+    } else if (output.ok === true) {
       tracked.status = 'completed'
       tracked.errorKind = null
     } else {
@@ -522,12 +525,17 @@ async function runTagForgeApplyBatch(
   }
   const completed = state.items.filter((item) => item.status === 'completed').length
   const remaining = state.items.filter((item) => item.status !== 'completed').length
+  const awaitingReview = state.items.filter((item) => item.status === 'awaiting_review').length
   return toJsonString({
     ok: results.every((result) => result.ok === true),
     batchId,
     completed,
     remaining,
     done: remaining === 0,
+    awaitingReview,
+    reviewRequired: awaitingReview > 0,
+    reviewLocation: awaitingReview > 0 ? '设置 > 文档标签' : null,
+    resume: awaitingReview > 0 ? { tool: 'tag_forge_prepare_batch', args: { rootPath: state.rootPath, batchId } } : null,
     results,
   })
 }

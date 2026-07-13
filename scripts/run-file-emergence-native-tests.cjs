@@ -11,6 +11,7 @@ const tests = [
   'src/__tests__/file-attention-repository.test.ts',
   'src/__tests__/file-emergence-feedback-repository.test.ts',
   'src/__tests__/tag-forge-repository.test.ts',
+  'src/__tests__/tag-forge-folder-capability.test.ts',
   'src/__tests__/tag-forge-batch.test.ts',
 ]
 
