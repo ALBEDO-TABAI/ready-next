@@ -72,6 +72,7 @@ function reportSourceToolName(proof: ProofRef): string | null {
 }
 
 function hasReportSourceCoverage(proofs: ReadonlyArray<ProofRef>): boolean {
+  if (proofs.some((proof) => proof.sourceReceipt?.acquisitionKind === 'answer')) return true
   const sourceTools = proofs
     .map(reportSourceToolName)
     .filter((toolName): toolName is string => Boolean(toolName))

@@ -533,6 +533,7 @@ export function resolvePureUserTextForClassification(
 export function resolveAgentSdkTaskBudgetRuntime(params: {
   options?: AgentSdkExecutionOptions
   inferredTaskType?: import('../contracts/run-contracts').TaskType | null
+  forceInferredTaskType?: boolean
 }): TaskBudgetRuntime | null {
   const inherited = params.options?.taskBudgetRuntime
     ? cloneTaskBudgetRuntime(params.options.taskBudgetRuntime)
@@ -541,12 +542,13 @@ export function resolveAgentSdkTaskBudgetRuntime(params: {
   const unfrozen = inherited?.frozen ? resumeBudgetRuntime(inherited) : inherited
 
   if (unfrozen) {
-    if (unfrozen.bootstrapBudget && inferredTaskType !== unfrozen.taskType) {
+    if (
+      inferredTaskType !== unfrozen.taskType &&
+      (unfrozen.bootstrapBudget || params.forceInferredTaskType)
+    ) {
       return rebindTaskBudgetRuntime(unfrozen, inferredTaskType, { bootstrapBudget: false })
     }
-    return inferredTaskType !== unfrozen.taskType && unfrozen.bootstrapBudget
-      ? rebindTaskBudgetRuntime(unfrozen, inferredTaskType, { bootstrapBudget: false })
-      : unfrozen
+    return unfrozen
   }
 
   const seed = params.options?.budget || null

@@ -8,7 +8,7 @@
  *
  * Tool routing (落点 17, plan §3.1.12):
  *   - browser-mode      → ['browser_research_topic', 'present_file']
- *   - non-browser-mode  → ['web_search', 'web_fetch', 'present_file']
+ *   - non-browser-mode  → ['web_search_domains', 'web_search', 'web_fetch', 'present_file']
  * Both modes include `present_file` so the agent can present produced
  * artifacts regardless of which research backend ran (capability group
  * `general_research` exposure is profile-level only; mode-specific prefix
@@ -106,7 +106,7 @@ export class ResearchDomainAdapter implements DomainAdapter {
     // the agent is otherwise in browser-mode for live page interaction.
     const prefixes = isBrowserMode
       ? ['browser_research_topic', 'present_file', 'web_clip_url']
-      : ['web_search', 'web_fetch', 'present_file', 'web_clip_url']
+      : ['web_search_domains', 'web_search', 'web_fetch', 'present_file', 'web_clip_url']
     const filtered = filterAllowedToolNamesByPrefixes(inputAllowed, prefixes)
     return {
       // R3-D1: filtered === null means either input was empty OR no prefix

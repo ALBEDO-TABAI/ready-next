@@ -22,6 +22,13 @@ import { hasRecalledTaskContext } from './agent-sdk-skill-intent-utils'
 
 // ── Group G: Tool and execution helpers (lines 1801-2122) ──
 
+export function throwIfAbortSignalAborted(signal: AbortSignal): void {
+  if (!signal.aborted) return
+  const error = signal.reason instanceof Error ? signal.reason : new Error('aborted')
+  error.name = 'AbortError'
+  throw error
+}
+
 export function recoverLooseXmlToolCallText(text: string): {
   visibleText: string
   toolCalls: Array<{ name: string; args: Record<string, unknown> }>

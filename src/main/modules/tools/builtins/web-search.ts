@@ -23,10 +23,23 @@ import { logAgentMetric } from '../../agent-control/metrics'
 import { ToolDomainError } from '../tool-errors'
 import { WEB_TOOL_FALLBACK_METRICS } from './web-tool-metrics'
 import { fetchWithRetryPolicy } from '../retry-policy'
+import {
+  ANYSEARCH_DOMAINS,
+  callAnySearch,
+  parseAnySearchResults,
+} from './anysearch-client'
 
 export const webSearchSchema = z.object({
   query: z.string().min(1).max(500).describe('搜索关键词；建议短句，不超过 500 字符'),
   topK: z.number().int().min(1).max(10).optional().default(5).describe('返回结果数量，1~10，默认 5'),
+  domain: z.enum(ANYSEARCH_DOMAINS).optional()
+    .describe('AnySearch 垂直领域；使用前先调用 web_search_domains 查询能力'),
+  subDomain: z.string().min(1).max(120).optional()
+    .describe('web_search_domains 返回的 AnySearch 子领域，例如 finance.quote'),
+  subDomainParams: z.record(z.string(), z.string().max(500))
+    .meta({ additionalProperties: true })
+    .optional()
+    .describe('AnySearch 子领域参数对象；必填参数即使无值也要传空字符串'),
 })
 
 export type WebSearchArgs = z.infer<typeof webSearchSchema>
@@ -35,19 +48,24 @@ export interface WebSearchResultItem {
   title: string
   url: string
   snippet: string
-  source: 'tavily' | 'ddg'
+  source: 'anysearch' | 'tavily' | 'ddg'
 }
 
 export interface WebSearchResult {
   results: WebSearchResultItem[]
+  acquisitionKind: 'discovery' | 'answer'
 }
 
 export interface WebSearchContext {
   abortSignal?: AbortSignal
+  anysearchEnabled?: boolean
+  anysearchKey?: string
+  anysearchBaseUrl?: string
   tavilyKey?: string
   tavilyBaseUrl?: string
   ddgEnabled?: boolean
   ddgBaseUrl?: string
+  preferredSearchService?: 'anysearch' | 'tavily' | 'duckduckgo'
 }
 
 interface TavilyApiResponse {
@@ -56,6 +74,24 @@ interface TavilyApiResponse {
     url?: unknown
     content?: unknown
   }>
+}
+
+async function searchViaAnySearch(
+  args: WebSearchArgs,
+  ctx: WebSearchContext,
+): Promise<WebSearchResultItem[]> {
+  const rpcArgs: Record<string, unknown> = {
+    query: args.query,
+    max_results: args.topK,
+  }
+  if (args.domain) rpcArgs.domain = args.domain
+  if (args.subDomain) rpcArgs.sub_domain = args.subDomain
+  if (args.subDomainParams) rpcArgs.sub_domain_params = args.subDomainParams
+  const markdown = await callAnySearch('search', rpcArgs, ctx)
+  return parseAnySearchResults(markdown, args.topK).map((result) => ({
+    ...result,
+    source: 'anysearch' as const,
+  }))
 }
 
 async function searchViaTavily(
@@ -165,58 +201,77 @@ export async function executeWebSearch(
   args: WebSearchArgs,
   ctx: WebSearchContext,
 ): Promise<WebSearchResult> {
-  let tavilyError: unknown = null
-  if (ctx.tavilyKey) {
-    try {
-      const results = await searchViaTavily(args, ctx)
-      // Stage R W1.1 follow-up: do NOT throw on empty Tavily results either —
-      // returning an empty array as the model-facing answer keeps the loop
-      // forward-progressing. We only fall through to DDG for empty results
-      // because DDG sometimes finds long-tail hits Tavily misses; we do NOT
-      // synthesize an error to drive that fallback.
-      if (results.length > 0) return { results }
-      tavilyError = null  // empty, not an error
-    } catch (error) {
-      // silent-catch: capture for fallback handoff; metric is logged below before DDG try
-      tavilyError = error
+  const isVertical = Boolean(args.domain || args.subDomain || args.subDomainParams)
+  if (isVertical) {
+    if (!ctx.anysearchEnabled) {
+      throw new ToolDomainError(
+        WEB_RESEARCH_ERROR_KINDS.webSearchFailed.code,
+        'AnySearch is required for vertical search but is not enabled',
+        { query: args.query, domain: args.domain || null, subDomain: args.subDomain || null },
+      )
     }
-    logAgentMetric(WEB_TOOL_FALLBACK_METRICS.WEB_SEARCH_TAVILY_TO_DDG, {
-      reason: tavilyError instanceof Error ? tavilyError.message : String(tavilyError),
-    })
+    try {
+      return {
+        results: await searchViaAnySearch(args, ctx),
+        acquisitionKind: 'answer',
+      }
+    } catch (error) {
+      throw new ToolDomainError(
+        WEB_RESEARCH_ERROR_KINDS.webSearchFailed.code,
+        `AnySearch vertical search failed without semantic downgrade: ${error instanceof Error ? error.message : String(error)}`,
+        { query: args.query, domain: args.domain || null, subDomain: args.subDomain || null },
+      )
+    }
   }
 
-  let ddgError: unknown = null
-  if (ctx.ddgEnabled === false) {
-    throw new ToolDomainError(
-      WEB_RESEARCH_ERROR_KINDS.webSearchFailed.code,
-      `Tavily failed and DDG is disabled: tavily=${tavilyError instanceof Error ? tavilyError.message : String(tavilyError ?? 'not_attempted')}`,
-      {
-        query: args.query,
-        tavilyError: tavilyError ? String(tavilyError) : null,
-        ddgError: 'disabled',
-      },
-    )
-  }
-  try {
-    const results = await searchViaDdg(args, ctx)
-    // Stage R W1.1 follow-up: empty results are NOT a failure — query may
-    // simply have no match. Return [] and let the model decide whether to
-    // refine the query. Throwing for empty was forcing the parent loop into
-    // wasteful retries on rare topics. Real network/HTTP errors still throw
-    // from inside searchViaDdg and land in the catch below.
-    return { results }
-  } catch (error) {
-    // silent-catch: capture for ToolDomainError aggregation thrown immediately below
-    ddgError = error
+  type Backend = 'anysearch' | 'tavily' | 'duckduckgo'
+  const preferred = ctx.preferredSearchService
+  const defaultOrder: Backend[] = ['anysearch', 'tavily', 'duckduckgo']
+  const order = preferred
+    ? [preferred, ...defaultOrder.filter((backend) => backend !== preferred)]
+    : defaultOrder
+  const errors: Partial<Record<Backend, string>> = {}
+  let sawEmpty = false
+
+  for (let index = 0; index < order.length; index += 1) {
+    const backend = order[index]!
+    if (backend === 'anysearch' && !ctx.anysearchEnabled) continue
+    if (backend === 'tavily' && !ctx.tavilyKey) continue
+    if (backend === 'duckduckgo' && ctx.ddgEnabled === false) continue
+    try {
+      const results = backend === 'anysearch'
+        ? await searchViaAnySearch(args, ctx)
+        : backend === 'tavily'
+          ? await searchViaTavily(args, ctx)
+          : await searchViaDdg(args, ctx)
+      if (results.length > 0) return { results, acquisitionKind: 'discovery' }
+      sawEmpty = true
+    } catch (error) {
+      errors[backend] = error instanceof Error ? error.message : String(error)
+    }
+
+    const next = order.slice(index + 1).find((candidate) => (
+      candidate === 'anysearch' ? ctx.anysearchEnabled
+        : candidate === 'tavily' ? Boolean(ctx.tavilyKey)
+          : ctx.ddgEnabled !== false
+    ))
+    if (backend === 'anysearch' && next) {
+      logAgentMetric(WEB_TOOL_FALLBACK_METRICS.WEB_SEARCH_ANYSEARCH_FALLBACK, {
+        next,
+        reason: errors.anysearch || 'empty_results',
+      })
+    }
+    if (backend === 'tavily' && next === 'duckduckgo') {
+      logAgentMetric(WEB_TOOL_FALLBACK_METRICS.WEB_SEARCH_TAVILY_TO_DDG, {
+        reason: errors.tavily || 'empty_results',
+      })
+    }
   }
 
+  if (sawEmpty) return { results: [], acquisitionKind: 'discovery' }
   throw new ToolDomainError(
     WEB_RESEARCH_ERROR_KINDS.webSearchFailed.code,
-    `Both Tavily and DDG failed: tavily=${tavilyError instanceof Error ? tavilyError.message : String(tavilyError ?? 'not_attempted')}, ddg=${ddgError instanceof Error ? ddgError.message : String(ddgError)}`,
-    {
-      query: args.query,
-      tavilyError: tavilyError ? String(tavilyError) : null,
-      ddgError: String(ddgError),
-    },
+    `All configured web search backends failed: anysearch=${errors.anysearch || 'not_attempted'}, tavily=${errors.tavily || 'not_attempted'}, ddg=${errors.duckduckgo || 'not_attempted'}`,
+    { query: args.query, backendErrors: errors },
   )
 }

@@ -10,6 +10,8 @@ import type { CapabilityResolution, CapabilityRuntimeAvailability } from './capa
 import { buildCapabilityRuntimeSnapshot } from './capability-runtime-snapshot'
 import { buildExecutionToolState, type ExecutionIntentContext } from '../execution-intent-resolver'
 import { computeCapabilityFloors } from './capability-floors'
+import { defaultToolRegistry } from '../tools-runtime/tool-registry'
+import { getSkillsRuntimeManager } from '../../skills-runtime/runtime-manager'
 import { envelopeHasCurrentDocumentContext, envelopeHasLocalDocumentResource } from '../contracts/request-envelope'
 import { logAgentMetric } from '../metrics'
 import {
@@ -144,12 +146,6 @@ export function resolveActiveSkillAllowedTools(
   const skillId = authorization.skillId
   if (!skillId) return null
   try {
-    // Lazy require so we don't import the runtime manager at module load
-    // time (would create a circular import via skill_*-tools paths).
-     
-    const { getSkillsRuntimeManager } = require('../../skills-runtime/runtime-manager') as {
-      getSkillsRuntimeManager: () => { listSkills(): Array<{ id: string; allowedTools?: string[] | null }> }
-    }
     const skill = getSkillsRuntimeManager()
       .listSkills()
       .find((s) => s.id === skillId)
@@ -163,6 +159,39 @@ export function resolveActiveSkillAllowedTools(
     // skills tree). Conservative behavior: identity filter.
     return null
   }
+}
+
+export function resolveCapabilityGroupIdsForAllowedTools(
+  allowedTools: ReadonlyArray<string> | null,
+  resolveGroupId: (toolName: string) => CapabilityGroupId | null,
+): CapabilityGroupId[] {
+  if (!allowedTools || allowedTools.length === 0) return []
+  const groupIds = new Set<CapabilityGroupId>()
+  for (const toolName of allowedTools) {
+    const groupId = resolveGroupId(toolName)
+    if (groupId) groupIds.add(groupId)
+  }
+  return [...groupIds]
+}
+
+const READ_ONLY_RESEARCH_SKILL_TOOL_NAMES = new Set([
+  'web_search_domains',
+  'web_search',
+  'web_fetch',
+])
+
+export function isReadOnlyResearchSkillToolSet(
+  toolNames: ReadonlyArray<string> | null | undefined,
+): boolean {
+  return Boolean(
+    toolNames &&
+    toolNames.length > 0 &&
+    toolNames.every((toolName) => READ_ONLY_RESEARCH_SKILL_TOOL_NAMES.has(toolName)),
+  )
+}
+
+function resolveToolGroupIdFromRegistry(toolName: string): CapabilityGroupId | null {
+  return defaultToolRegistry.getToolDefinitionForExecution(toolName)?.groupId || null
 }
 
 function resolveHostShortcutDecision(params: {
@@ -218,6 +247,11 @@ function resolveRunCapabilities(
   baseParams: RunCapabilityBaseParams,
   recursionDepth = 0,
 ): Omit<PreparedRunCapabilities, '_baseParams'> {
+  const activeSkillAllowedTools = resolveActiveSkillAllowedTools(baseParams.authorization)
+  const requiredCapabilityGroupIds = resolveCapabilityGroupIdsForAllowedTools(
+    activeSkillAllowedTools,
+    resolveToolGroupIdFromRegistry,
+  )
   let { visibilityPlan, toolPolicy, capabilityResolution } = buildExecutionToolState({
     config: baseParams.config,
     capabilityProfile: baseParams.capabilityProfile,
@@ -226,6 +260,7 @@ function resolveRunCapabilities(
     hasIncomingVideo: baseParams.hasIncomingVideo,
     keepToolsWithVideo: baseParams.keepToolsWithVideo,
     preferredSkillToolNames: baseParams.preferredSkillToolNames,
+    requiredCapabilityGroupIds,
     contextualUserInput: baseParams.executionIntentContext.contextualUserInput,
     userInstructionText: baseParams.executionIntentContext.userInstructionText,
     intentClassification: baseParams.executionIntentContext.intentClassification,
@@ -392,7 +427,7 @@ function resolveRunCapabilities(
   // here (not in the bundle) so the lookup is single-shot per turn and
   // skill-runtime crashes (e.g. host startup race) cannot fault the
   // tool bundle path. `null` / empty → identity (no filtering).
-  toolPolicy.activeSkillAllowedTools = resolveActiveSkillAllowedTools(baseParams.authorization)
+  toolPolicy.activeSkillAllowedTools = activeSkillAllowedTools
 
   // P1-4 — 唯一裁决点计算能力地板并挂到 toolPolicy；SDK executor 消费同一 computeCapabilityFloors。
   //   bundle 侧把地板并入 activeSkillAllowedTools 过滤集，保证技能收窄不移除地板项（parity）。

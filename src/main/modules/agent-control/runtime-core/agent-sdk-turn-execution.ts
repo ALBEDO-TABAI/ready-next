@@ -72,6 +72,11 @@ import type {
 import type { TurnTerminalReason } from './turn-frame'
 import { mergeRunUsage } from './run-usage-accumulator'
 import { installSameRunSkillActivation } from './same-run-skill-activation'
+import { captureResearchSearchDelivery } from './research-result-delivery'
+import {
+  isReadOnlyResearchSkillToolSet,
+  resolveActiveSkillAllowedTools,
+} from '../domain-adapters/run-capability-controller'
 
 const LOCAL_DOCUMENT_SOURCE_READ_TOOL_NAMES = new Set([
   'file_read_excerpt',
@@ -308,9 +313,13 @@ export async function executeAgentSdkPreparedTurn(
     const inferredSdkTaskType =
       resolveTaskTypeFromBrowserWorkflowText(pureUserTurnText) ||
       resolveTaskTypeFromToolDefinitions(toolDefinitions)
+    const readOnlyResearchSkill = isReadOnlyResearchSkillToolSet(
+      resolveActiveSkillAllowedTools(authorization),
+    )
     let liveTaskBudgetRuntime = resolveAgentSdkTaskBudgetRuntime({
       options: effectiveExecutionOptions,
-      inferredTaskType: inferredSdkTaskType
+      inferredTaskType: inferredSdkTaskType,
+      forceInferredTaskType: readOnlyResearchSkill,
     })
     runMetaBudgetRuntime = liveTaskBudgetRuntime
     let lastDocumentSaveFailure: string | null = null
@@ -409,9 +418,18 @@ export async function executeAgentSdkPreparedTurn(
           }
         }
         const normalized = normalizeToolExecutionOutput(output)
+        const resultRecordedAt = new Date()
+        const researchDelivery = captureResearchSearchDelivery(
+          toolName,
+          normalized,
+          resultRecordedAt,
+        )
+        if (researchDelivery) {
+          toolBridgeRuntimeContext.latestResearchSearchDelivery = researchDelivery
+        }
         if (taskProofSink) {
           try {
-            const proofs = collectToolOutputProofs(toolName, normalized, new Date(), { runId })
+            const proofs = collectToolOutputProofs(toolName, normalized, resultRecordedAt, { runId })
             taskProofSink.append(taskId, proofs)
           } catch (error) {
             logAgentMetric('proof_collect_failed', {

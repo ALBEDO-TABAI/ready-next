@@ -1,5 +1,6 @@
 export type ExternalServiceKind =
   | 'tavily'
+  | 'anysearch'
   | 'duckduckgo'
   | 'jina'
   | 'rsshub'
@@ -75,6 +76,15 @@ export const DEFAULT_EXTERNAL_SERVICE_PROFILES: ExternalServiceProfile[] = [
     options: {},
   },
   {
+    id: 'anysearch-default',
+    kind: 'anysearch',
+    name: 'AnySearch',
+    enabled: false,
+    baseUrl: 'https://api.anysearch.com/mcp',
+    secrets: { apiKey: '' },
+    options: {},
+  },
+  {
     id: 'duckduckgo-default',
     kind: 'duckduckgo',
     name: 'DuckDuckGo HTML',
@@ -145,6 +155,7 @@ export const DEFAULT_EXTERNAL_SERVICE_PROFILES: ExternalServiceProfile[] = [
 
 export const EXTERNAL_SERVICE_KIND_LABELS: Record<ExternalServiceKind, string> = {
   tavily: 'Tavily',
+  anysearch: 'AnySearch',
   duckduckgo: 'DuckDuckGo',
   jina: 'Jina',
   rsshub: 'RSSHub',

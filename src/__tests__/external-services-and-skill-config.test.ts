@@ -46,8 +46,12 @@ test('external service public profile masks secrets and preserves defaults', () 
 
   const tavily = profiles.find((profile) => profile.id === 'tavily-default')
   const ddg = profiles.find((profile) => profile.id === 'duckduckgo-default')
+  const anysearch = profiles.find((profile) => profile.id === 'anysearch-default')
   assert.ok(tavily)
   assert.ok(ddg, 'normalization should keep missing default profiles')
+  assert.ok(anysearch, 'normalization should add the AnySearch default profile')
+  assert.equal(anysearch?.enabled, false)
+  assert.equal(anysearch?.baseUrl, 'https://api.anysearch.com/mcp')
 
   const publicProfile = toPublicExternalServiceProfile(tavily!)
   assert.equal(publicProfile.secretStatus.apiKey.configured, true)
@@ -88,6 +92,50 @@ test('external service draft test uses current form values without persisting th
   }
 })
 
+test('AnySearch draft test uses the unsaved key and runtime config keeps it encrypted behind the store', async () => {
+  const repo = new InMemorySettingsRepository()
+  const store = new ExternalServiceStore(repo as unknown as ConstructorParameters<typeof ExternalServiceStore>[0])
+  const originalFetch = globalThis.fetch
+  let authorization = ''
+  globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+    authorization = new Headers(init?.headers).get('Authorization') || ''
+    return new Response(JSON.stringify({
+      jsonrpc: '2.0',
+      id: 1,
+      result: { content: [{ type: 'text', text: '## Search Results (0 results)' }] },
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+  }) as typeof fetch
+
+  try {
+    const result = await store.testProfileDraft({
+      id: 'anysearch-default',
+      kind: 'anysearch',
+      enabled: true,
+      baseUrl: 'https://api.anysearch.test/mcp',
+      secrets: { apiKey: 'draft-anysearch-key' },
+      options: {},
+    })
+    assert.equal(result.ok, true)
+    assert.equal(authorization, 'Bearer draft-anysearch-key')
+    assert.equal(store.getRuntimeService('anysearch-default')?.enabled, false, 'draft test must not persist')
+
+    store.upsertProfile({
+      id: 'anysearch-default',
+      kind: 'anysearch',
+      enabled: true,
+      baseUrl: 'https://api.anysearch.test/mcp',
+      secrets: { apiKey: 'saved-anysearch-key' },
+    })
+    const publicProfile = store.getPublicProfile('anysearch-default')
+    assert.equal(publicProfile?.secretStatus.apiKey.configured, true)
+    assert.equal('secrets' in (publicProfile || {}), false)
+    assert.equal(store.getGeneralResearchConfig().anysearchKey, 'saved-anysearch-key')
+    assert.doesNotMatch(repo.getSetting('external_service_profiles_v1') || '', /saved-anysearch-key/)
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
 test('skill configuration normalizer keeps service bindings and defaults', () => {
   const config = normalizeSkillConfiguration({
     version: 1,
@@ -120,6 +168,7 @@ test('embedded analysis and research skills declare user-facing configuration', 
   const vea = compileSkillDefinition({ folderPath: join(ROOT, 'video-expert-analyzer'), source: 'embedded' })
   const copy = compileSkillDefinition({ folderPath: join(ROOT, 'video-copy-analyzer'), source: 'embedded' })
   const research = compileSkillDefinition({ folderPath: join(ROOT, 'deep-research'), source: 'embedded' })
+  const anysearch = compileSkillDefinition({ folderPath: join(ROOT, 'anysearch'), source: 'embedded' })
   const rss = compileSkillDefinition({ folderPath: join(ROOT, 'lets-go-rss'), source: 'embedded' })
 
   assert.equal(vea.configuration?.serviceBindings.some((binding) => binding.id === 'visionModel'), true)
@@ -128,6 +177,17 @@ test('embedded analysis and research skills declare user-facing configuration', 
   assert.equal(copy.configuration?.fields.some((field) => field.id === 'subtitleModel'), false)
   assert.equal(research.configuration?.serviceBindings.some((binding) => binding.id === 'searchService'), true)
   assert.equal(research.configuration?.serviceBindings.some((binding) => binding.id === 'fetchService'), true)
+  assert.equal(
+    research.configuration?.serviceBindings.find((binding) => binding.id === 'searchService')?.allowedKinds.includes('anysearch'),
+    true,
+  )
+  assert.equal(
+    research.configuration?.serviceBindings.find((binding) => binding.id === 'fetchService')?.allowedKinds.includes('anysearch'),
+    true,
+  )
+  assert.equal(anysearch.executionMode, 'advisory')
+  assert.equal(anysearch.configuration?.serviceBindings.find((binding) => binding.id === 'searchService')?.defaultServiceId, 'anysearch-default')
+  assert.equal(anysearch.configuration?.serviceBindings.find((binding) => binding.id === 'fetchService')?.defaultServiceId, 'anysearch-default')
   assert.equal(rss.configuration?.serviceBindings.some((binding) => binding.id === 'rsshub'), true)
 })
 

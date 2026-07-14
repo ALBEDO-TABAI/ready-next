@@ -47,6 +47,8 @@ export interface SkillState {
    */
   hostRequirements?: import('../../../shared/skill-host-contract').SkillHostRequirements
   childLoop?: SkillChildLoopDefinition
+  /** Embedded manifest tool contract used to admit the selected skill's capability groups. */
+  allowedTools?: string[]
   configuration?: import('../../../shared/skill-configuration').SkillConfigurationDefinition
 }
 

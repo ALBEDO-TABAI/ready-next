@@ -102,8 +102,8 @@ const BASE_TEMPLATES: Record<TaskType, CriteriaItem[]> = {
     item('c2', 'artifact', '至少一个产物或状态变更 proof'),
   ],
   research: [
-    item('c1', 'artifact', '产出报告文件'),
-    item('c2', 'report_sources', '报告含足够数量的来源 ref'),
+    item('c1', 'response_digest', '向用户交付非空的研究结果或报告'),
+    item('c2', 'report_sources', '结果含可核查的来源 ref'),
   ],
   media_task: [
     item('c1', 'media_file', '媒体产物文件存在且可打开'),

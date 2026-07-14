@@ -8,7 +8,9 @@
  */
 
 export const WEB_TOOL_FALLBACK_METRICS = {
+  WEB_SEARCH_ANYSEARCH_FALLBACK: 'web_search_anysearch_fallback',
   WEB_SEARCH_TAVILY_TO_DDG: 'web_search_tavily_to_ddg_fallback',
+  WEB_FETCH_ANYSEARCH_FALLBACK: 'web_fetch_anysearch_fallback',
   WEB_FETCH_JINA_TO_TAVILY: 'web_fetch_jina_to_tavily_fallback',
 } as const
 

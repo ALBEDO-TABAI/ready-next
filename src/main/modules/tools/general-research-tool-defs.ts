@@ -25,6 +25,7 @@ export interface GeneralResearchToolDef {
 }
 
 export const GENERAL_RESEARCH_TOOL_NAMES: readonly string[] = [
+  'web_search_domains',
   'web_search',
   'web_fetch',
   'present_file',
@@ -33,15 +34,21 @@ export const GENERAL_RESEARCH_TOOL_NAMES: readonly string[] = [
 
 export const GENERAL_RESEARCH_TOOLS: GeneralResearchToolDef[] = [
   {
+    name: 'web_search_domains',
+    description:
+      '查询 AnySearch 垂直领域的子领域与必填参数。使用 finance、academic、legal、health 等垂直搜索前必须先调用；返回内容用于原样构造 web_search 的 domain、subDomain 和 subDomainParams。',
+    params: zodObjectToParamList(GENERAL_RESEARCH_SCHEMAS.web_search_domains!) as ToolParam[],
+  },
+  {
     name: 'web_search',
     description:
-      '在公开互联网上检索资料，返回标题/链接/摘要列表。优先使用 Tavily API；网络受限时自动回退到 DuckDuckGo HTML。引用结果时请标明 source。',
+      '在公开互联网上检索资料，返回标题/链接/摘要列表。可使用 AnySearch、Tavily 或 DuckDuckGo；需要垂直领域时先调用 web_search_domains。引用结果时请标明 source。',
     params: zodObjectToParamList(GENERAL_RESEARCH_SCHEMAS.web_search!) as ToolParam[],
   },
   {
     name: 'web_fetch',
     description:
-      '抓取指定 URL 并返回纯文本正文（最多 4096 字符）。优先走 Jina reader，失败时回退到 Tavily Extract。仅用于公开 http/https 页面。',
+      '抓取指定 URL 并返回纯文本正文（最多 4096 字符）。可使用 Jina Reader、AnySearch Extract 或 Tavily Extract。仅用于公开 http/https 页面。',
     params: zodObjectToParamList(GENERAL_RESEARCH_SCHEMAS.web_fetch!) as ToolParam[],
   },
   {

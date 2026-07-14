@@ -198,9 +198,10 @@ export function getToolResourceTag(toolName: string): ToolResourceTag {
     return { domain: 'skill', accessMode: 'interactive' }
   }
   // Stage R W1.1/W1.2/W6.4 — `general_research` group tools. Read-safe HTTP
-  // calls (`web_search` / `web_fetch`) join parallel groups; `present_file`
+  // calls (`web_search_domains` / `web_search` / `web_fetch`) join parallel groups; `present_file`
   // is interactive (renderer IPC) so it serializes. `web_clip_url` writes
   // a file + calls present_file so it is also interactive / serialized.
+  if (normalized === 'web_search_domains') return { domain: 'general_research', accessMode: 'read' }
   if (normalized === 'web_search') return { domain: 'general_research', accessMode: 'read' }
   if (normalized === 'web_fetch') return { domain: 'general_research', accessMode: 'read' }
   if (normalized === 'present_file') return { domain: 'general_research', accessMode: 'interactive' }

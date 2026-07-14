@@ -11,6 +11,7 @@ const EXTERNAL_SERVICE_SECRET_LABELS: Record<string, string> = {
 }
 
 const EXTERNAL_SERVICE_DESCRIPTIONS: Partial<Record<PublicExternalServiceProfile['kind'], string>> = {
+  anysearch: '供通用、垂直领域搜索与正文提取使用',
   tavily: '供网页研究使用',
   duckduckgo: '供备用搜索使用',
   jina: '供网页正文读取使用',
@@ -19,6 +20,44 @@ const EXTERNAL_SERVICE_DESCRIPTIONS: Partial<Record<PublicExternalServiceProfile
   github: '供代码仓库操作使用',
   amap: '供路线规划 Agent 使用',
   'vision-model': '供视觉分析独立使用',
+}
+
+const EXTERNAL_SERVICE_GUIDES: Partial<Record<PublicExternalServiceProfile['kind'], {
+  summary: string
+  note: string
+  links: Array<{ label: string; href: string }>
+}>> = {
+  anysearch: {
+    summary: '适合通用搜索、网页正文提取，以及金融、学术、法律、健康等垂直领域。',
+    note: 'Key 可选：无 Key 也可试用，配置后可获得更稳定的额度。',
+    links: [
+      { label: '获取 Key', href: 'https://anysearch.com/console/api-keys' },
+      { label: '查看文档', href: 'https://www.anysearch.com/docs' },
+    ],
+  },
+  tavily: {
+    summary: '适合多轮网络调研与结果摘要，需要 API Key 后才能启用。',
+    note: '在 Tavily 控制台注册并复制 API Key。',
+    links: [
+      { label: '获取 Key', href: 'https://app.tavily.com/home' },
+      { label: '查看文档', href: 'https://docs.tavily.com/' },
+    ],
+  },
+  jina: {
+    summary: '适合把公开网页转成便于 Agent 阅读的干净正文。',
+    note: 'Key 可选：不配置也可使用公共 Reader，配置后限额更明确。',
+    links: [
+      { label: '获取 Key', href: 'https://jina.ai/api-dashboard/' },
+      { label: '查看文档', href: 'https://jina.ai/reader/' },
+    ],
+  },
+  duckduckgo: {
+    summary: '无需 Key 的基础搜索通道，适合在其他搜索服务不可用时继续查找公开资料。',
+    note: '无需注册；保留默认服务地址即可。',
+    links: [
+      { label: '了解搜索结果', href: 'https://duckduckgo.com/duckduckgo-help-pages/results/' },
+    ],
+  },
 }
 
 type ExternalServiceFeedback = {
@@ -30,7 +69,7 @@ type ExternalServiceFeedback = {
 function serviceSecretKeys(profile: PublicExternalServiceProfile): string[] {
   const keys = Object.keys(profile.secretStatus || {})
   if (keys.length > 0) return keys
-  if (profile.kind === 'tavily' || profile.kind === 'jina' || profile.kind === 'vision-model') return ['apiKey']
+  if (profile.kind === 'tavily' || profile.kind === 'anysearch' || profile.kind === 'jina' || profile.kind === 'vision-model') return ['apiKey']
   if (profile.kind === 'github') return ['token']
   if (profile.kind === 'bilibili') return ['sessdata', 'biliJct']
   return []
@@ -382,6 +421,7 @@ export function ExternalServicesSettingsPanel() {
   const isSelectedBusy = Boolean(selectedProfile && busyId === selectedProfile.id)
   const isSelectedTesting = Boolean(selectedProfile && testingId === selectedProfile.id)
   const selectedSummary = selectedProfile ? externalServiceDraftSummary(selectedProfile, selectedDraft, selectedClearSecrets) : ''
+  const selectedGuide = selectedProfile ? EXTERNAL_SERVICE_GUIDES[selectedProfile.kind] : undefined
   // Y1.1 §11.1 honest-label path: vision-model "test" only field-validates in
   // main-process (`external-service-store.ts:342-344,390` — no HTTP probe).
   // Renderer relabels the button so the user sees what the system actually does.
@@ -468,6 +508,35 @@ export function ExternalServicesSettingsPanel() {
               <span>{selectedSummary}</span>
               {selectedProfile.updatedAt ? <span>· 更新于 {new Date(selectedProfile.updatedAt).toLocaleString()}</span> : null}
             </div>
+
+            {selectedGuide && (
+              <div
+                data-external-service-guide={selectedProfile.kind}
+                className="mt-4 rounded-xl border px-3.5 py-3 text-[11px] leading-5"
+                style={{
+                  borderColor: 'color-mix(in srgb, var(--color-blue) 22%, var(--surface-border))',
+                  background: 'color-mix(in srgb, var(--color-blue) 5%, transparent)',
+                  color: 'var(--text-muted)',
+                }}
+              >
+                <p>{selectedGuide.summary}</p>
+                <p className="mt-1" style={{ color: 'var(--text-light)' }}>{selectedGuide.note}</p>
+                <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1">
+                  {selectedGuide.links.map((link) => (
+                    <a
+                      key={link.href}
+                      href={link.href}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="font-medium hover:underline"
+                      style={{ color: 'var(--color-blue)' }}
+                    >
+                      {link.label} ↗
+                    </a>
+                  ))}
+                </div>
+              </div>
+            )}
 
             <div className="mt-4 flex max-w-[640px] flex-col gap-3.5">
               {serviceNeedsBaseUrl(selectedProfile) && (

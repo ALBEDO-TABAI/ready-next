@@ -94,12 +94,17 @@ function hasSecret(profile: ExternalServiceProfile, key: string): boolean {
 }
 
 export interface GeneralResearchServiceRuntimeConfig {
+  anysearchEnabled: boolean
+  anysearchKey?: string
+  anysearchBaseUrl?: string
   tavilyKey?: string
   tavilyBaseUrl?: string
   jinaKey?: string
   jinaBaseUrl?: string
   ddgEnabled: boolean
   ddgBaseUrl?: string
+  preferredSearchService?: 'anysearch' | 'tavily' | 'duckduckgo'
+  preferredFetchService?: 'anysearch' | 'jina' | 'tavily'
   preferTavilyExtract?: boolean
 }
 
@@ -204,6 +209,7 @@ export class ExternalServiceStore {
   }
 
   getGeneralResearchConfig(): GeneralResearchServiceRuntimeConfig {
+    const anysearch = this.getFirstRuntimeService('anysearch')
     const tavily = this.getFirstRuntimeService('tavily')
     const jina = this.getFirstRuntimeService('jina')
     const ddg = this.getFirstRuntimeService('duckduckgo')
@@ -219,6 +225,9 @@ export class ExternalServiceStore {
       : undefined
 
     return {
+      anysearchEnabled: anysearch?.enabled === true,
+      anysearchKey: anysearch?.enabled ? anysearch.secrets.apiKey || undefined : undefined,
+      anysearchBaseUrl: anysearch?.enabled ? trimBaseUrl(anysearch.baseUrl) : undefined,
       tavilyKey: tavily?.enabled ? (tavily.secrets.apiKey || emergencyLegacyTavilyKey) : emergencyLegacyTavilyKey,
       tavilyBaseUrl: tavily?.enabled ? trimBaseUrl(tavily.baseUrl) : undefined,
       jinaKey: jina?.enabled ? (jina.secrets.apiKey || emergencyLegacyJinaKey) : emergencyLegacyJinaKey,
@@ -338,6 +347,52 @@ export class ExternalServiceStore {
     }
     if (profile.kind === 'tavily' && !hasSecret(profile, 'apiKey')) {
       return { ok: false, serviceId: profile.id, message: '缺少 Tavily API Key' }
+    }
+    if (profile.kind === 'anysearch') {
+      const endpoint = trimBaseUrl(profile.baseUrl)
+      if (!endpoint) return { ok: false, serviceId: profile.id, message: '缺少服务地址' }
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        'X-Anysearch-Client': 'ready-settings/1.0',
+      }
+      const apiKey = String(profile.secrets?.apiKey || '').trim()
+      if (apiKey) headers.Authorization = `Bearer ${apiKey}`
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'tools/call',
+          params: {
+            name: 'search',
+            arguments: { query: 'Ready', max_results: 1 },
+          },
+        }),
+        signal: AbortSignal.timeout(8_000),
+      })
+      if (!response.ok) {
+        return { ok: false, serviceId: profile.id, message: `HTTP ${response.status}`, latencyMs: Date.now() - start }
+      }
+      const payload = await response.json() as {
+        error?: { message?: string }
+        result?: { content?: Array<{ type?: string; text?: string }> }
+      }
+      if (payload.error) {
+        return {
+          ok: false,
+          serviceId: profile.id,
+          message: payload.error.message || 'AnySearch 返回错误',
+          latencyMs: Date.now() - start,
+        }
+      }
+      const hasText = payload.result?.content?.some((item) => item.type === 'text' && Boolean(item.text)) === true
+      return {
+        ok: hasText,
+        serviceId: profile.id,
+        message: hasText ? '连接正常' : 'AnySearch 未返回可读内容',
+        latencyMs: Date.now() - start,
+      }
     }
     if (profile.kind === 'vision-model' && (!profile.baseUrl || !hasSecret(profile, 'apiKey') || !optionString(profile.options || {}, 'model'))) {
       return { ok: false, serviceId: profile.id, message: '缺少读图模型 baseUrl / model / apiKey' }

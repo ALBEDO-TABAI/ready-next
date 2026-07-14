@@ -20,6 +20,7 @@ import { logAgentMetric } from '../../agent-control/metrics'
 import { ToolDomainError } from '../tool-errors'
 import { WEB_TOOL_FALLBACK_METRICS } from './web-tool-metrics'
 import { fetchWithRetryPolicy } from '../retry-policy'
+import { callAnySearch, readAnySearchMarkdownTitle } from './anysearch-client'
 
 export const webFetchSchema = z.object({
   url: z.string().url().describe('要抓取的页面 URL；只接受 http/https 协议'),
@@ -36,10 +37,14 @@ export interface WebFetchResult {
 
 export interface WebFetchContext {
   abortSignal?: AbortSignal
+  anysearchEnabled?: boolean
+  anysearchKey?: string
+  anysearchBaseUrl?: string
   tavilyKey?: string
   jinaKey?: string
   tavilyBaseUrl?: string
   jinaBaseUrl?: string
+  preferredFetchService?: 'anysearch' | 'jina' | 'tavily'
   preferTavilyExtract?: boolean
 }
 
@@ -143,40 +148,68 @@ async function fetchViaTavilyExtract(
   }
 }
 
+async function fetchViaAnySearch(
+  args: WebFetchArgs,
+  ctx: WebFetchContext,
+): Promise<WebFetchResult> {
+  const content = await callAnySearch('extract', { url: args.url }, ctx)
+  return {
+    url: args.url,
+    title: readAnySearchMarkdownTitle(content),
+    content: truncateContent(content),
+  }
+}
+
 export async function executeWebFetch(
   args: WebFetchArgs,
   ctx: WebFetchContext,
 ): Promise<WebFetchResult> {
-  let jinaError: unknown = null
-  if (!ctx.preferTavilyExtract) {
-    try {
-      return await fetchViaJina(args, ctx)
-    } catch (error) {
-      // silent-catch: capture for fallback handoff; metric is logged below before Tavily try
-      jinaError = error
-    }
-    logAgentMetric(WEB_TOOL_FALLBACK_METRICS.WEB_FETCH_JINA_TO_TAVILY, {
-      reason: jinaError instanceof Error ? jinaError.message : String(jinaError),
-    })
-  } else {
-    jinaError = 'disabled_by_preference'
-  }
+  type Backend = 'anysearch' | 'jina' | 'tavily'
+  const preferred = ctx.preferredFetchService || (ctx.preferTavilyExtract ? 'tavily' : undefined)
+  const defaultOrder: Backend[] = ['jina', 'anysearch', 'tavily']
+  const order = preferred
+    ? [preferred, ...defaultOrder.filter((backend) => backend !== preferred)]
+    : defaultOrder
+  const errors: Partial<Record<Backend, string>> = {}
 
-  let tavilyError: unknown = null
-  try {
-    return await fetchViaTavilyExtract(args, ctx)
-  } catch (error) {
-    // silent-catch: capture for ToolDomainError aggregation thrown immediately below
-    tavilyError = error
+  for (let index = 0; index < order.length; index += 1) {
+    const backend = order[index]!
+    if (backend === 'anysearch' && !ctx.anysearchEnabled) continue
+    if (backend === 'tavily' && !ctx.tavilyKey) continue
+    try {
+      return backend === 'anysearch'
+        ? await fetchViaAnySearch(args, ctx)
+        : backend === 'jina'
+          ? await fetchViaJina(args, ctx)
+          : await fetchViaTavilyExtract(args, ctx)
+    } catch (error) {
+      errors[backend] = error instanceof Error ? error.message : String(error)
+    }
+
+    const next = order.slice(index + 1).find((candidate) => (
+      candidate === 'anysearch' ? ctx.anysearchEnabled
+        : candidate === 'tavily' ? Boolean(ctx.tavilyKey)
+          : true
+    ))
+    if (backend === 'anysearch' && next) {
+      logAgentMetric(WEB_TOOL_FALLBACK_METRICS.WEB_FETCH_ANYSEARCH_FALLBACK, {
+        next,
+        reason: errors.anysearch,
+      })
+    }
+    if (backend === 'jina' && next === 'tavily') {
+      logAgentMetric(WEB_TOOL_FALLBACK_METRICS.WEB_FETCH_JINA_TO_TAVILY, {
+        reason: errors.jina,
+      })
+    }
   }
 
   throw new ToolDomainError(
     WEB_RESEARCH_ERROR_KINDS.webFetchFailed.code,
-    `Both Jina and Tavily Extract failed: jina=${jinaError instanceof Error ? jinaError.message : String(jinaError)}, tavily=${tavilyError instanceof Error ? tavilyError.message : String(tavilyError)}`,
+    `All configured web fetch backends failed: jina=${errors.jina || 'not_attempted'}, anysearch=${errors.anysearch || 'not_attempted'}, tavily=${errors.tavily || 'not_attempted'}`,
     {
       url: args.url,
-      jinaError: String(jinaError),
-      tavilyError: String(tavilyError),
+      backendErrors: errors,
     },
   )
 }

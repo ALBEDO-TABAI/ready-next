@@ -25,6 +25,7 @@ import {
 
 export const PROOF_KINDS = ['tool_result', 'artifact', 'task_event', 'run_state', 'assistant_response', 'transaction_confirmed'] as const
 export type ProofKind = (typeof PROOF_KINDS)[number]
+export type ResearchSourceAcquisitionKind = 'discovery' | 'content' | 'answer'
 
 export interface ProofRef {
   kind: ProofKind
@@ -40,6 +41,7 @@ export interface ProofRef {
    *  generic tool-result digest. */
   sourceReceipt?: {
     acquisitionTool: string
+    acquisitionKind: ResearchSourceAcquisitionKind
     urls: string[]
     acquiredAt: string
     contentDigest: string
@@ -85,13 +87,21 @@ function extractHttpUrls(text: string): string[] {
   return Array.from(urls)
 }
 
-function buildSourceReceipt(toolName: string, summary: string, now: Date): ProofRef['sourceReceipt'] {
+function buildSourceReceipt(
+  toolName: string,
+  summary: string,
+  now: Date,
+  acquisitionKind?: ResearchSourceAcquisitionKind,
+): ProofRef['sourceReceipt'] {
   if (!RESEARCH_SOURCE_TOOL_NAMES.has(toolName)) return undefined
   const urls = extractHttpUrls(summary)
   if (urls.length === 0) return undefined
   const excerpt = String(summary || '').trim().slice(0, 1600)
   return {
     acquisitionTool: toolName,
+    acquisitionKind: acquisitionKind || (
+      RESEARCH_SOURCE_CONTENT_TOOL_NAMES.has(toolName) ? 'content' : 'discovery'
+    ),
     urls,
     acquiredAt: now.toISOString(),
     contentDigest: sha256(summary),
@@ -123,13 +133,14 @@ export function collectToolResultProof(
   now: Date,
   sourceMaterial: string = resultSummary,
   runId?: string,
+  acquisitionKind?: ResearchSourceAcquisitionKind,
 ): ProofRef {
   return proof(
     'tool_result',
     toolName,
     `${toolName}:${resultSummary}`,
     now,
-    buildSourceReceipt(toolName, sourceMaterial, now),
+    buildSourceReceipt(toolName, sourceMaterial, now, acquisitionKind),
     runId,
   )
 }
@@ -329,6 +340,9 @@ export function collectToolOutputProofs(
   const proofs: ProofRef[] = []
   const paths = new Set<string>()
   const dataRecord = recordValue(normalized.data)
+  const acquisitionKind = toolName === 'web_search' && dataRecord?.acquisitionKind === 'answer'
+    ? 'answer' as const
+    : undefined
   const transactionConfirmation =
     transactionConfirmationFromRecord(dataRecord)
     || transactionConfirmationFromRecord(recordValue(normalized.projectionPatch))
@@ -348,6 +362,7 @@ export function collectToolOutputProofs(
         now,
         sourceReceiptMaterial(toolName, normalized),
         context.runId,
+        acquisitionKind,
       ))
   for (const path of paths) {
     proofs.push(collectArtifactProof(path, now, context.runId))

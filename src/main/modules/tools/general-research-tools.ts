@@ -1,7 +1,7 @@
 /**
  * Stage R — `general_research` group dispatcher.
  *
- * Routes the three general-research tools (`web_search`, `web_fetch`,
+ * Routes the general-research tools (`web_search_domains`, `web_search`, `web_fetch`,
  * `present_file`) into their per-tool implementations under `builtins/`.
  * Each branch performs Zod parsing locally even though the dispatch layer
  * already validates input via `tool-input-validator`; this preserves the
@@ -24,6 +24,10 @@ import {
   type ToolExecutionOutput,
 } from '../agent-control/tools-runtime/tool-result-types'
 import { ToolDomainError } from './tool-errors'
+import {
+  anySearchDomainsSchema,
+  executeAnySearchDomainLookup,
+} from './builtins/anysearch-domains'
 import {
   executePresentFile,
   presentFileSchema,
@@ -51,6 +55,9 @@ export interface GeneralResearchToolContext {
   ) => Promise<Record<string, unknown>>
   scope?: ConversationScope | null
   /** Optional Tavily API key for web_search / web_fetch backends. */
+  anysearchEnabled?: boolean
+  anysearchKey?: string
+  anysearchBaseUrl?: string
   tavilyKey?: string
   tavilyBaseUrl?: string
   /** Optional Jina reader key for web_fetch. */
@@ -58,6 +65,8 @@ export interface GeneralResearchToolContext {
   jinaBaseUrl?: string
   ddgEnabled?: boolean
   ddgBaseUrl?: string
+  preferredSearchService?: 'anysearch' | 'tavily' | 'duckduckgo'
+  preferredFetchService?: 'anysearch' | 'jina' | 'tavily'
   preferTavilyExtract?: boolean
   /** Embedded skill preset dir for `web_clip_url`; injected by host. */
   obsidianWebClipPresetDir?: string
@@ -69,6 +78,21 @@ export async function executeGeneralResearchTool(
   ctx: GeneralResearchToolContext,
 ): Promise<string | ToolExecutionOutput> {
   switch (toolName) {
+    case 'web_search_domains': {
+      const parsed = anySearchDomainsSchema.safeParse(args)
+      if (!parsed.success) {
+        throw new ToolDomainError('input_validation', parsed.error.message)
+      }
+      const result = await executeAnySearchDomainLookup(parsed.data, {
+        abortSignal: ctx.abortSignal,
+        anysearchEnabled: ctx.anysearchEnabled,
+        anysearchKey: ctx.anysearchKey,
+        anysearchBaseUrl: ctx.anysearchBaseUrl,
+      })
+      return createToolExecutionOutput(JSON.stringify(result), {
+        data: result as unknown as Record<string, unknown>,
+      })
+    }
     case 'web_search': {
       const parsed = webSearchSchema.safeParse(args)
       if (!parsed.success) {
@@ -76,10 +100,14 @@ export async function executeGeneralResearchTool(
       }
       const result = await executeWebSearch(parsed.data, {
         abortSignal: ctx.abortSignal,
+        anysearchEnabled: ctx.anysearchEnabled,
+        anysearchKey: ctx.anysearchKey,
+        anysearchBaseUrl: ctx.anysearchBaseUrl,
         tavilyKey: ctx.tavilyKey,
         tavilyBaseUrl: ctx.tavilyBaseUrl,
         ddgEnabled: ctx.ddgEnabled,
         ddgBaseUrl: ctx.ddgBaseUrl,
+        preferredSearchService: ctx.preferredSearchService,
       })
       return createToolExecutionOutput(JSON.stringify(result), {
         data: result as unknown as Record<string, unknown>,
@@ -92,10 +120,14 @@ export async function executeGeneralResearchTool(
       }
       const result = await executeWebFetch(parsed.data, {
         abortSignal: ctx.abortSignal,
+        anysearchEnabled: ctx.anysearchEnabled,
+        anysearchKey: ctx.anysearchKey,
+        anysearchBaseUrl: ctx.anysearchBaseUrl,
         tavilyKey: ctx.tavilyKey,
         tavilyBaseUrl: ctx.tavilyBaseUrl,
         jinaKey: ctx.jinaKey,
         jinaBaseUrl: ctx.jinaBaseUrl,
+        preferredFetchService: ctx.preferredFetchService,
         preferTavilyExtract: ctx.preferTavilyExtract,
       })
       return createToolExecutionOutput(JSON.stringify(result), {

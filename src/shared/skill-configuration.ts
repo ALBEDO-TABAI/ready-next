@@ -68,6 +68,7 @@ function normalizeKinds(value: unknown): ExternalServiceKind[] {
     .map((item) => String(item).trim())
     .filter((item): item is ExternalServiceKind => (
       item === 'tavily'
+      || item === 'anysearch'
       || item === 'duckduckgo'
       || item === 'jina'
       || item === 'rsshub'

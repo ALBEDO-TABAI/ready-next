@@ -11,9 +11,14 @@ import type { SkillToolAuthorization } from '../skills/skill-tool-authorization'
 import { resolveCapabilityResolution } from '../domain-adapters/capability-resolver'
 import {
   computeCapabilityFloors,
-  recoverAbsentFloorsFromRegistry
+  recoverAbsentFloorsFromRegistry,
+  TAG_FORGE_FOLDER_RUNTIME_TOOL_NAMES,
 } from '../domain-adapters/capability-floors'
-import { resolveActiveSkillAllowedTools } from '../domain-adapters/run-capability-controller'
+import {
+  isReadOnlyResearchSkillToolSet,
+  resolveActiveSkillAllowedTools,
+  resolveCapabilityGroupIdsForAllowedTools
+} from '../domain-adapters/run-capability-controller'
 import { isHandoffTakeoverToolOutput, runWithHandoffToolGate } from '../agents/handoff-control'
 import { resolvePolicyConflictFacts } from '../policy-arbitration'
 import {
@@ -226,11 +231,18 @@ export class AgentSdkToolExecutor {
       params.browserHostAvailable,
       params.requestEnvelope
     )
+    const manifestSkillAllowedTools = resolveActiveSkillAllowedTools(params.authorization)
+    const readOnlyResearchSkill = isReadOnlyResearchSkillToolSet(manifestSkillAllowedTools)
+    const requiredCapabilityGroupIds = resolveCapabilityGroupIdsForAllowedTools(
+      manifestSkillAllowedTools,
+      (toolName) => defaultToolRegistry.getToolDefinitionForExecution(toolName)?.groupId || null
+    )
     const sdkIntentSurface = resolveSdkDefaultIntentSurface({
       message: params.message,
       requestEnvelope: params.requestEnvelope,
       authorization: params.authorization,
-      browserDecisionMode
+      browserDecisionMode,
+      requiredCapabilityGroupIds
     })
     const policyConflict = resolvePolicyConflictFacts({
       forceDocumentTool: sdkIntentSurface.forceDocumentTool,
@@ -370,8 +382,7 @@ export class AgentSdkToolExecutor {
         ? sdkIntentSurface.preferredSkillToolNames
         : null
     const allowedPrimitiveNames = authorizedPrimitiveToolNames(params.authorization)
-    const resolvedSkillAllowedTools =
-      resolveActiveSkillAllowedTools(params.authorization) || fallbackSkillAllowedTools
+    const resolvedSkillAllowedTools = manifestSkillAllowedTools || fallbackSkillAllowedTools
     const activeSkillAllowedTools =
       resolvedSkillAllowedTools && allowedPrimitiveNames.length > 0
         ? Array.from(new Set([...resolvedSkillAllowedTools, ...allowedPrimitiveNames]))
@@ -384,14 +395,18 @@ export class AgentSdkToolExecutor {
       hasCurrentDocumentContext: hasCurrentDocumentContextResource(params.requestEnvelope)
     })
     if (activeSkillAllowedTools) {
-      const preserveVisibleBrowserTool = createVisibleBrowserToolPreserver({
-        visibleCapabilityGroupIds: capabilityResolution.visibleCapabilityGroupIds,
-        collectionExposure,
-        batchCollectionExposure
-      })
-      const preserveVisibleResearchTool = capabilityResolution.visibleCapabilityGroupIds.includes('general_research')
-        ? (name: string) => GENERAL_RESEARCH_TOOL_NAME_SET.has(name)
-        : undefined
+      const preserveVisibleBrowserTool = readOnlyResearchSkill
+        ? undefined
+        : createVisibleBrowserToolPreserver({
+            visibleCapabilityGroupIds: capabilityResolution.visibleCapabilityGroupIds,
+            collectionExposure,
+            batchCollectionExposure
+          })
+      const preserveVisibleResearchTool =
+        !readOnlyResearchSkill &&
+        capabilityResolution.visibleCapabilityGroupIds.includes('general_research')
+          ? (name: string) => GENERAL_RESEARCH_TOOL_NAME_SET.has(name)
+          : undefined
       definitions = filterSelectedSkillToolSurface(definitions, activeSkillAllowedTools, {
         preserveToolName: (name) =>
           preserveVisibleBrowserTool?.(name) === true
@@ -399,6 +414,11 @@ export class AgentSdkToolExecutor {
           || name === 'agent_propose_handoff'
           || capabilityFloors.toolNames.has(name)
       })
+    }
+    if (readOnlyResearchSkill) {
+      definitions = definitions.filter(
+        (definition) => definition.name !== 'declare_completion_criteria',
+      )
     }
     // P1-3 硬地板：地板工具即便被组不可见/意图压制而缺席，也从注册表补回（取不到则记 reason 跳过）。
     const floorRecovery = recoverAbsentFloorsFromRegistry(
@@ -416,6 +436,10 @@ export class AgentSdkToolExecutor {
       )
     }
     definitions = floorRecovery.definitions
+    if (capabilityFloors.reasons.includes('tag_forge_folder_batch')) {
+      const tagForgeToolNames = new Set(TAG_FORGE_FOLDER_RUNTIME_TOOL_NAMES)
+      definitions = definitions.filter((definition) => tagForgeToolNames.has(definition.name))
+    }
     return filterToolsByVisionCapability(definitions as unknown as Array<Record<string, unknown>>, {
       supportsVision: capabilityResolution.supportsVision === true
     }) as unknown as ToolDefinition[]
@@ -509,10 +533,8 @@ export class AgentSdkToolExecutor {
       parameters: schema as never,
       strict: false,
       timeoutMs: definition.executionTimeoutMs,
-      isEnabled: async () => isToolEnabledForCurrentAuthorization(
-        definition.name,
-        runtimeContext.authorization,
-      ),
+      isEnabled: async () => runtimeContext.allowedToolNames.includes(definition.name)
+        && isToolEnabledForCurrentAuthorization(definition.name, runtimeContext.authorization),
       execute: async (input) => runWithHandoffToolGate(runtimeContext, async () => {
         const args =
           input && typeof input === 'object' && !Array.isArray(input)

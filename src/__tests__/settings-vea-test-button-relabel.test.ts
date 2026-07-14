@@ -145,6 +145,19 @@ function makeAmapProfile(overrides: Partial<PublicExternalServiceProfile> = {}):
   }
 }
 
+function makeAnySearchProfile(overrides: Partial<PublicExternalServiceProfile> = {}): PublicExternalServiceProfile {
+  return {
+    id: 'anysearch-default',
+    kind: 'anysearch',
+    name: 'AnySearch',
+    enabled: true,
+    baseUrl: 'https://api.anysearch.com/mcp',
+    options: {},
+    secretStatus: { apiKey: { configured: true, masked: '•••1234' } },
+    ...overrides,
+  }
+}
+
 function installElectronAPIStub(dom: JSDOM, bag: StubBag): void {
   const settings = {
     listExternalServices: async (): Promise<ElectronAPIStubResult<PublicExternalServiceProfile[]>> => ({
@@ -351,6 +364,36 @@ test('Y1.1 — configured external-service secrets can be marked for clearing an
     assert.equal(bag.updateCalls?.length, 1)
     assert.deepEqual(bag.updateCalls?.[0].clearSecrets, ['apiKey'])
     assert.deepEqual(bag.updateCalls?.[0].secrets, {})
+  } finally {
+    root.unmount()
+    await new Promise((resolve) => setTimeout(resolve, 25))
+    handle.restore()
+  }
+})
+
+test('AnySearch settings card explains its role and links to the official key console and docs', async () => {
+  const handle = installDomGlobals()
+  const bag: StubBag = {
+    profiles: [makeAnySearchProfile()],
+    testCalls: [],
+  }
+  installElectronAPIStub(handle.dom, bag)
+
+  const { ExternalServicesSettingsPanel } = await import('../renderer/pages/Settings')
+  const root = createRoot(handle.dom.window.document.getElementById('root') as HTMLElement)
+  try {
+    flushSync(() => { root.render(createElement(ExternalServicesSettingsPanel)) })
+    await flushAsync()
+    flushSync(() => { /* drain */ })
+
+    const guide = handle.dom.window.document.querySelector('[data-external-service-guide="anysearch"]')
+    assert.ok(guide, 'AnySearch should render an inline configuration guide')
+    assert.match(guide?.textContent || '', /垂直领域/)
+    assert.match(guide?.textContent || '', /Key 可选/)
+
+    const links = Array.from(guide?.querySelectorAll('a') || []) as HTMLAnchorElement[]
+    assert.ok(links.some((link) => link.href === 'https://anysearch.com/console/api-keys'))
+    assert.ok(links.some((link) => link.href === 'https://www.anysearch.com/docs'))
   } finally {
     root.unmount()
     await new Promise((resolve) => setTimeout(resolve, 25))

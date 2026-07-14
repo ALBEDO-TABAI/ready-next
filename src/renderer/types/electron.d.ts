@@ -3310,6 +3310,7 @@ interface SettingsTestResult {
 
 type ExternalServiceKindData =
   | 'tavily'
+  | 'anysearch'
   | 'duckduckgo'
   | 'jina'
   | 'rsshub'

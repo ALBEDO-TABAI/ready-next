@@ -222,8 +222,10 @@ export function resolveIntentCapabilityGroupModes(params: {
   explicitWidgetCreateIntent: boolean
   documentWidgetTaskKind: DocumentWidgetTaskKind
   preferredSkillToolNames?: string[] | null
+  requiredCapabilityGroupIds?: readonly CapabilityGroupId[]
   mapSemanticIntent?: MapSemanticIntent | null
 }): IntentCapabilityGroupModeResolution {
+  const requiredCapabilityGroups = new Set(params.requiredCapabilityGroupIds || [])
   const hasLiveInfoBrowserIntent = params.intentClassification.objectSignals.some((signal) => /browser-live-info/i.test(signal))
   const positiveDomains = new Set<IntentClassification['primaryDomain'] | Exclude<IntentClassification['primaryDomain'], 'generic'>>([
     params.intentClassification.primaryDomain,
@@ -256,23 +258,29 @@ export function resolveIntentCapabilityGroupModes(params: {
     // above dead code (pet-sticky-tool-contract). Pet-dominant turns must not
     // expose document tools on surface keywords alone.
     hasDocumentIntent ||
-    (hasMapIntent && mapSecondarySignals.has('document_output'))
+    (hasMapIntent && mapSecondarySignals.has('document_output')) ||
+    requiredCapabilityGroups.has('document')
   )
-  const allowRSSTools = params.hasTools && hasRSSIntent
-  const allowCalendarTools = params.hasTools && hasCalendarIntent
+  const allowRSSTools = params.hasTools && (hasRSSIntent || requiredCapabilityGroups.has('rss'))
+  const allowCalendarTools = params.hasTools && (hasCalendarIntent || requiredCapabilityGroups.has('calendar'))
   const allowFeishuTools = params.hasTools && (
     params.capabilityProfile === 'remote_channel' ||
-    hasFeishuIntent
+    hasFeishuIntent ||
+    requiredCapabilityGroups.has('channel_feishu')
   )
-  const allowPetTools = params.hasTools && hasPetIntent
+  const allowPetTools = params.hasTools && (hasPetIntent || requiredCapabilityGroups.has('pet'))
   const allowSkillTools = params.hasTools
-    && Array.isArray(params.preferredSkillToolNames)
-    && params.preferredSkillToolNames.length > 0
+    && (
+      (Array.isArray(params.preferredSkillToolNames) && params.preferredSkillToolNames.length > 0) ||
+      requiredCapabilityGroups.has('skills')
+    )
   const hasResearchIntent = positiveDomains.has('research') && !excludedDomains.has('research')
   const allowResearchTools = params.hasTools && (
-    hasResearchIntent || (hasMapIntent && mapSecondarySignals.has('research_lookup'))
+    hasResearchIntent ||
+    (hasMapIntent && mapSecondarySignals.has('research_lookup')) ||
+    requiredCapabilityGroups.has('general_research')
   )
-  const allowMapTools = params.hasTools && hasMapIntent
+  const allowMapTools = params.hasTools && (hasMapIntent || requiredCapabilityGroups.has('map_planning'))
   const allowMapBrowserTools = hasMapIntent && mapSecondarySignals.has('browser_lookup')
   const forceDocumentTool = allowDocumentTools && (
     (params.hasWidgetTargetContext && !params.explicitWidgetCreateIntent) ||
@@ -282,6 +290,11 @@ export function resolveIntentCapabilityGroupModes(params: {
 
   return {
     intentGroupModes: {
+      ...(params.hasTools
+        ? Object.fromEntries(
+            [...requiredCapabilityGroups].map((groupId) => [groupId, true]),
+          ) as Partial<Record<CapabilityGroupId, boolean>>
+        : {}),
       ...(hasLiveInfoBrowserIntent ? { browser_interaction: true } : {}),
       ...(allowMapBrowserTools ? { browser_interaction: true, browser_content_tasks: true } : {}),
       document: allowDocumentTools,
@@ -313,6 +326,7 @@ export function buildExecutionToolState(params: {
   hasIncomingVideo: boolean
   keepToolsWithVideo: boolean
   preferredSkillToolNames?: string[] | null
+  requiredCapabilityGroupIds?: readonly CapabilityGroupId[]
   contextualUserInput: string
   userInstructionText: string
   intentClassification: IntentClassification
@@ -347,6 +361,7 @@ export function buildExecutionToolState(params: {
     explicitWidgetCreateIntent: params.explicitWidgetCreateIntent,
     documentWidgetTaskKind: params.documentWidgetTaskKind,
     preferredSkillToolNames: params.preferredSkillToolNames,
+    requiredCapabilityGroupIds: params.requiredCapabilityGroupIds,
     mapSemanticIntent: params.mapSemanticIntent,
   })
   const { allowDocumentTools } = intentModes

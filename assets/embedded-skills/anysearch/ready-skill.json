@@ -1,0 +1,38 @@
+{
+  "id": "anysearch",
+  "name": "anysearch",
+  "displayName": "AnySearch",
+  "description": "使用 AnySearch 进行网页、学术、金融、法律、健康等多领域搜索与正文提取",
+  "version": "2.1.0",
+  "runtime": "reference",
+  "execution": { "mode": "advisory" },
+  "allowed_tools": ["web_search_domains", "web_search", "web_fetch"],
+  "configuration": {
+    "version": 1,
+    "serviceBindings": [
+      {
+        "id": "searchService",
+        "label": "搜索服务",
+        "description": "使用 AnySearch 搜索与垂直领域能力。",
+        "allowedKinds": ["anysearch"],
+        "defaultServiceId": "anysearch-default",
+        "required": false
+      },
+      {
+        "id": "fetchService",
+        "label": "正文提取服务",
+        "description": "使用 AnySearch Extract 读取公开网页正文。",
+        "allowedKinds": ["anysearch"],
+        "defaultServiceId": "anysearch-default",
+        "required": false
+      }
+    ],
+    "fields": []
+  },
+  "actions": {
+    "read_skill": {
+      "runtime": "reference",
+      "visibility": "internal"
+    }
+  }
+}

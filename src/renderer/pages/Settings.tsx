@@ -78,7 +78,7 @@ const settingsData: SettingSection[] = [
     id: 'external-services',
     title: '外部服务',
     icon: ExternalLink,
-    description: '统一管理 Tavily、Jina、RSSHub、Bilibili、GitHub、高德地图与读图模型',
+    description: '统一管理 AnySearch、Tavily、Jina、DuckDuckGo、RSSHub、Bilibili、GitHub、高德地图与读图模型',
     settings: []
   },
   {

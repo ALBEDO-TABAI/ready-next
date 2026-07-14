@@ -142,6 +142,7 @@ export interface ToolBridgeRuntimeContext {
   ) => void
   emitToolAction: (toolName: string, args: Record<string, unknown>) => void
   recordToolResult: (toolName: string, output: ToolExecutionOutput) => void
+  latestResearchSearchDelivery?: import('./research-result-delivery').ResearchSearchDelivery | null
   nativeMapCriticalClose?: MapToolFailureClose | null
   nativeMapAmbiguityResolved?: boolean
   runHandle: RunHandle

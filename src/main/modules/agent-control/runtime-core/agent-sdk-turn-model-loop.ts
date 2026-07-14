@@ -39,7 +39,8 @@ import {
   extractSdkMissingToolName,
   isAbortError,
   recoverLooseXmlToolCallText,
-  shouldSuppressVisibleTextOnToolCall
+  shouldSuppressVisibleTextOnToolCall,
+  throwIfAbortSignalAborted
 } from './agent-sdk-execution-utils'
 import {
   ROLLING_BUDGET_CHECKPOINT_TOOL_INTERVAL,
@@ -65,6 +66,10 @@ import type {
 import type { TurnTerminalReason } from './turn-frame'
 import { addRunUsage } from './run-usage-accumulator'
 import { isHandoffTakeoverToolOutput } from '../agents/handoff-control'
+import {
+  ensureResearchSearchResultDelivered,
+  recoverResearchSearchDeliveryAfterTimeout
+} from './research-result-delivery'
 
 const NATIVE_TEXT_BUFFER_TIMED_FLUSH_MS = 700
 
@@ -390,6 +395,7 @@ export async function executeAgentSdkModelToolLoop(
             }
           }
         })
+        throwIfAbortSignalAborted(abortController.signal)
         nativeTextToolBoundaryFlush.current = null
         clearNativeTextFlushTimer()
         if (runResult.usage) {
@@ -410,6 +416,20 @@ export async function executeAgentSdkModelToolLoop(
             abortController.signal.reason instanceof Error
               ? abortController.signal.reason
               : new Error('aborted')
+          const recoveredResearchText = recoverResearchSearchDeliveryAfterTimeout(
+            abortError,
+            toolBridgeRuntimeContext.latestResearchSearchDelivery
+          )
+          if (recoveredResearchText) {
+            state.finalText = recoveredResearchText
+            emitOutput(recoveredResearchText, 'text')
+            return finalizeEarlyReturn({
+              status: 'done',
+              terminalReason: 'done',
+              finalText: recoveredResearchText,
+              initiator: 'research_result_timeout_recovery'
+            })
+          }
           abortError.name = 'AbortError'
           throw abortError
         }
@@ -620,7 +640,10 @@ export async function executeAgentSdkModelToolLoop(
         state.finalText = leakedToolCall.visibleText
         continue
       }
-      state.finalText = modelText
+      state.finalText = ensureResearchSearchResultDelivered(
+        modelText,
+        toolBridgeRuntimeContext.latestResearchSearchDelivery,
+      )
       {
         const skillClarificationResult = await maybeHandleSkillClarificationGuard(state.finalText)
         if (skillClarificationResult === 'continue') continue
@@ -689,7 +712,10 @@ export async function executeAgentSdkModelToolLoop(
 
     const parsed = parseTextToolBridgeResponse(modelText)
     if (parsed.toolCalls.length === 0) {
-      state.finalText = parsed.visibleText || modelText
+      state.finalText = ensureResearchSearchResultDelivered(
+        parsed.visibleText || modelText,
+        toolBridgeRuntimeContext.latestResearchSearchDelivery,
+      )
       {
         const skillClarificationResult = await maybeHandleSkillClarificationGuard(state.finalText)
         if (skillClarificationResult === 'continue') continue
@@ -814,5 +840,6 @@ export async function executeAgentSdkModelToolLoop(
     state.finalText = parsed.visibleText
   }
 
+  throwIfAbortSignalAborted(abortController.signal)
   return null
 }

@@ -12,16 +12,16 @@
       {
         "id": "searchService",
         "label": "优先搜索服务",
-        "description": "Tavily 有 key 时优先使用；DuckDuckGo 作为无 key 兜底。",
-        "allowedKinds": ["tavily", "duckduckgo"],
+        "description": "可选 AnySearch、Tavily 或 DuckDuckGo；AnySearch 额外支持垂直领域。",
+        "allowedKinds": ["anysearch", "tavily", "duckduckgo"],
         "defaultServiceId": "tavily-default",
         "required": false
       },
       {
         "id": "fetchService",
         "label": "全文抓取服务",
-        "description": "Jina Reader 作为主抓取服务，失败后可回退 Tavily Extract。",
-        "allowedKinds": ["jina", "tavily"],
+        "description": "可选 Jina Reader、AnySearch Extract 或 Tavily Extract。",
+        "allowedKinds": ["anysearch", "jina", "tavily"],
         "defaultServiceId": "jina-default",
         "required": false
       }

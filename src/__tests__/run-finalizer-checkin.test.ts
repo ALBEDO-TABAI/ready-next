@@ -20,6 +20,7 @@ import { adjudicateTerminalOutcome, appendCheckIns, type CheckInRecord } from '.
 import { resolveCriteria } from '../main/modules/agent-control/quality/criteria-templates'
 import {
   collectArtifactProof,
+  collectResponseDigestProof,
   collectToolOutputProofs,
   collectToolResultProof,
   collectTransactionConfirmedProof,
@@ -1132,11 +1133,13 @@ test('research source criteria require real acquisition proofs, never a written 
     skillExecutionForm: 'direct',
     skillHasRunStateHandle: false,
   }).items
+  const responseProof = collectResponseDigestProof('research response', NOW)!
   const artifactOnly = adjudicateTerminalOutcome({
     terminalStatus: 'done',
     terminalReason: 'done',
     criteria,
     proofs: [
+      responseProof,
       collectArtifactProof('/tmp/report.md', NOW),
       collectToolResultProof('skill_write_artifact', 'wrote report', NOW),
     ],
@@ -1150,6 +1153,7 @@ test('research source criteria require real acquisition proofs, never a written 
     terminalReason: 'done',
     criteria,
     proofs: [
+      responseProof,
       collectArtifactProof('/tmp/report.md', NOW),
       collectToolResultProof('web_search', 'source list https://example.com/source', NOW),
     ],
@@ -1169,6 +1173,7 @@ test('research source criteria require real acquisition proofs, never a written 
       terminalReason: 'done',
       criteria,
       proofs: [
+        responseProof,
         collectArtifactProof('/tmp/report.md', NOW),
         collectToolResultProof('browser_search', 'source list https://example.com/source', NOW),
         collectToolResultProof(fakeContentTool, 'task/page handle https://example.com/source', NOW),
@@ -1184,6 +1189,7 @@ test('research source criteria require real acquisition proofs, never a written 
     terminalReason: 'done',
     criteria,
     proofs: [
+      responseProof,
       collectArtifactProof('/tmp/report.md', NOW),
       collectToolResultProof('web_search', 'source list https://example.com/source', NOW),
       collectToolResultProof('web_fetch', 'source body https://example.com/source', NOW),

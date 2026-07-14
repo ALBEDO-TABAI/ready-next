@@ -736,34 +736,58 @@ async function executeToolCallInner(
           // child-runner / model invokers all converge here.
           const runtimeInfo = getSkillsRuntimeManager().getRuntimeInfo()
           let serviceConfig: ReturnType<ExternalServiceStore['getGeneralResearchConfig']> = {
+            anysearchEnabled: false,
             ddgEnabled: true,
           }
           try {
             const externalServices = new ExternalServiceStore()
             serviceConfig = externalServices.getGeneralResearchConfig()
-            if (context.authorization.mode === 'selected' && context.authorization.skillId === 'deep-research') {
-              const skillConfig = getSkillsRuntimeManager().getSkillConfiguration('deep-research')
+            if (context.authorization.mode === 'selected') {
+              const skillConfig = getSkillsRuntimeManager().getSkillConfiguration(context.authorization.skillId)
               const searchServiceId = skillConfig?.values.serviceBindings.searchService
               const fetchServiceId = skillConfig?.values.serviceBindings.fetchService
               if (searchServiceId) {
                 const searchService = externalServices.getRuntimeService(searchServiceId)
-                if (searchService?.kind === 'duckduckgo') {
+                if (searchService?.kind === 'anysearch') {
                   serviceConfig = {
                     ...serviceConfig,
-                    tavilyKey: undefined,
-                    tavilyBaseUrl: undefined,
+                    anysearchEnabled: searchService.enabled,
+                    anysearchKey: searchService.enabled ? searchService.secrets.apiKey || undefined : undefined,
+                    anysearchBaseUrl: searchService.enabled ? searchService.baseUrl : undefined,
+                    preferredSearchService: 'anysearch',
+                  }
+                } else if (searchService?.kind === 'tavily') {
+                  serviceConfig = {
+                    ...serviceConfig,
+                    tavilyKey: searchService.enabled ? searchService.secrets.apiKey || serviceConfig.tavilyKey : serviceConfig.tavilyKey,
+                    tavilyBaseUrl: searchService.enabled ? searchService.baseUrl || serviceConfig.tavilyBaseUrl : serviceConfig.tavilyBaseUrl,
+                    preferredSearchService: 'tavily',
+                  }
+                } else if (searchService?.kind === 'duckduckgo') {
+                  serviceConfig = {
+                    ...serviceConfig,
                     ddgEnabled: searchService.enabled,
                     ddgBaseUrl: searchService.baseUrl,
+                    preferredSearchService: 'duckduckgo',
                   }
                 }
               }
               if (fetchServiceId) {
                 const fetchService = externalServices.getRuntimeService(fetchServiceId)
-                if (fetchService?.kind === 'tavily') {
+                if (fetchService?.kind === 'anysearch') {
+                  serviceConfig = {
+                    ...serviceConfig,
+                    anysearchEnabled: fetchService.enabled,
+                    anysearchKey: fetchService.enabled ? fetchService.secrets.apiKey || undefined : undefined,
+                    anysearchBaseUrl: fetchService.enabled ? fetchService.baseUrl : undefined,
+                    preferredFetchService: 'anysearch',
+                  }
+                } else if (fetchService?.kind === 'tavily') {
                   serviceConfig = {
                     ...serviceConfig,
                     tavilyKey: fetchService.enabled ? fetchService.secrets.apiKey || serviceConfig.tavilyKey : serviceConfig.tavilyKey,
                     tavilyBaseUrl: fetchService.enabled ? fetchService.baseUrl || serviceConfig.tavilyBaseUrl : serviceConfig.tavilyBaseUrl,
+                    preferredFetchService: 'tavily',
                     preferTavilyExtract: true,
                   }
                 } else if (fetchService?.kind === 'jina') {
@@ -771,6 +795,7 @@ async function executeToolCallInner(
                     ...serviceConfig,
                     jinaKey: fetchService.enabled ? fetchService.secrets.apiKey || serviceConfig.jinaKey : serviceConfig.jinaKey,
                     jinaBaseUrl: fetchService.enabled ? fetchService.baseUrl || serviceConfig.jinaBaseUrl : serviceConfig.jinaBaseUrl,
+                    preferredFetchService: 'jina',
                     preferTavilyExtract: false,
                   }
                 }
@@ -791,12 +816,17 @@ async function executeToolCallInner(
             outputsRoot: runtimeInfo.outputsRoot,
             requestModuleToolAction: context.requestModuleToolAction,
             scope: context.scope,
+            anysearchEnabled: serviceConfig.anysearchEnabled,
+            anysearchKey: serviceConfig.anysearchKey,
+            anysearchBaseUrl: serviceConfig.anysearchBaseUrl,
             tavilyKey: serviceConfig.tavilyKey,
             tavilyBaseUrl: serviceConfig.tavilyBaseUrl,
             jinaKey: serviceConfig.jinaKey,
             jinaBaseUrl: serviceConfig.jinaBaseUrl,
             ddgEnabled: serviceConfig.ddgEnabled,
             ddgBaseUrl: serviceConfig.ddgBaseUrl,
+            preferredSearchService: serviceConfig.preferredSearchService,
+            preferredFetchService: serviceConfig.preferredFetchService,
             preferTavilyExtract: serviceConfig.preferTavilyExtract,
             obsidianWebClipPresetDir,
           })
