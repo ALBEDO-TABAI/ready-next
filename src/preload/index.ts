@@ -5,7 +5,9 @@ import {
   type BrowserViewIntentAck,
 } from '../shared/browser-view-intent'
 import type { BrowserUtilityMenuRequest } from '../shared/browser-utility-menu'
+import type { DocumentIndexChangedEvent } from '../shared/document-index-events'
 import type { NativeContextMenuRequest } from '../shared/native-context-menu'
+import type { RSSAutoRefreshSnapshot } from '../shared/rss-auto-refresh'
 import type {
   ScheduleCreateRequest,
   SchedulePreviewRequest,
@@ -772,6 +774,11 @@ const documentAPI = {
     ipcRenderer.on('document:directoryChanged', handler)
     return () => { ipcRenderer.removeListener('document:directoryChanged', handler) }
   },
+  onIndexChanged: (callback: (event: DocumentIndexChangedEvent) => void) => {
+    const handler = (_: IpcRendererEvent, event: DocumentIndexChangedEvent): void => callback(event)
+    ipcRenderer.on('document:indexChanged', handler)
+    return () => { ipcRenderer.removeListener('document:indexChanged', handler) }
+  },
   notifyWidgetCommitted: (payload: { tabId: string; widgetId: string; requestId?: string; committedAt: number }) => {
     ipcRenderer.send('document:widgetCommitted', payload)
   },
@@ -842,6 +849,12 @@ const rssAPI = {
   refreshSource: (sourceId: string) => ipcRenderer.invoke('rss:refreshSource', { sourceId }),
   fetchAll: (options?: { digest?: boolean; classification?: 'simple' | 'none'; group?: string; sourceIds?: string[] }) =>
     ipcRenderer.invoke('rss:fetchAll', options),
+  autoRefreshStatus: () => ipcRenderer.invoke('rss:autoRefreshStatus'),
+  onAutoRefreshCompleted: (callback: (snapshot: RSSAutoRefreshSnapshot) => void) => {
+    const handler = (_: IpcRendererEvent, snapshot: RSSAutoRefreshSnapshot): void => callback(snapshot)
+    ipcRenderer.on('rss:autoRefreshCompleted', handler)
+    return () => ipcRenderer.removeListener('rss:autoRefreshCompleted', handler)
+  },
   status: () => ipcRenderer.invoke('rss:status'),
   stats: () => ipcRenderer.invoke('rss:stats'),
   diagnostics: () => ipcRenderer.invoke('rss:diagnostics'),

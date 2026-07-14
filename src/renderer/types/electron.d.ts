@@ -1,6 +1,7 @@
 import type { BrowserDiagnosticsData } from '../modules/browser/types'
 import type { BrowserUtilityMenuRequest } from '../../shared/browser-utility-menu'
 import type { BrowserViewIntent, BrowserViewIntentAck } from '../../shared/browser-view-intent'
+import type { DocumentIndexChangedEvent } from '../../shared/document-index-events'
 import type {
   BrowserCookieDomainGroup,
   BrowserPrivacySummary,
@@ -8,6 +9,7 @@ import type {
   ClearBrowsingDataResult,
 } from '../../shared/browser-privacy'
 import type { NativeContextMenuRequest, NativeContextMenuResponse } from '../../shared/native-context-menu'
+import type { RSSAutoRefreshSnapshot } from '../../shared/rss-auto-refresh'
 import type { ScheduledTasksAPI } from '../../shared/scheduled-tasks'
 import type { CapabilityRuntimeSnapshot } from '../../shared/ai-capability-runtime'
 import type { RendererAgentMetricName } from '../../shared/renderer-agent-metrics'
@@ -2096,6 +2098,7 @@ interface ElectronDocumentAPI {
   onDirectoryChange: (
     callback: (data: { paths: string[]; timestamp: number }) => void
   ) => () => void
+  onIndexChanged: (callback: (event: DocumentIndexChangedEvent) => void) => () => void
   notifyWidgetCommitted?: (payload: {
     tabId: string
     widgetId: string
@@ -2190,6 +2193,7 @@ interface DocumentGraphNode {
   type: 'doc' | 'tag' | 'ghost'
   label: string
   sourceType?: string
+  path?: string
 }
 
 interface DocumentGraphEdge {
@@ -2200,7 +2204,13 @@ interface DocumentGraphEdge {
 
 interface DocumentGraphResponse {
   success: boolean
-  data?: { nodes: DocumentGraphNode[]; edges: DocumentGraphEdge[] }
+  data?: {
+    nodes: DocumentGraphNode[]
+    edges: DocumentGraphEdge[]
+    totalDocs: number
+    truncated: boolean
+    note?: string
+  }
   error?: string
 }
 
@@ -2449,6 +2459,8 @@ interface ElectronRSSAPI {
       status?: unknown
     }>
   >
+  autoRefreshStatus: () => Promise<RSSResponse<RSSAutoRefreshSnapshot>>
+  onAutoRefreshCompleted: (callback: (snapshot: RSSAutoRefreshSnapshot) => void) => () => void
   status: () => Promise<RSSResponse<RSSStatusData>>
   stats: () => Promise<
     RSSResponse<{

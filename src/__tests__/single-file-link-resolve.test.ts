@@ -25,22 +25,27 @@
  */
 
 import assert from 'node:assert/strict'
+import { mkdtempSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
+import { createRequire } from 'node:module'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import test from 'node:test'
 
 import { runMigrations, type MigrationDatabase } from '../main/modules/migrations'
 import type { DatabaseConnection } from '../main/modules/database'
 import { SearchRepository } from '../main/modules/search-engine/repository'
 import { SearchEngine } from '../main/modules/search-engine/indexer'
+import { SEARCH_INDEX_CONTENT_VERSION } from '../main/modules/search-engine/query'
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 
 // ----- Sqlite loader (skip when native binding unavailable) -----------------
 
 type SqliteCtor = new (path: string) => DatabaseConnection & MigrationDatabase
+const nodeRequire = createRequire(import.meta.url)
 
 function loadSqliteCtor(): SqliteCtor | null {
   try {
-     
-    const mod = require('better-sqlite3') as SqliteCtor & { default?: SqliteCtor }
+    const mod = nodeRequire('better-sqlite3') as SqliteCtor & { default?: SqliteCtor }
     const Sqlite = mod.default || mod
     // Probe — better-sqlite3 throws ERR_DLOPEN_FAILED on construction when
     // the binding doesn't match the host Node ABI.
@@ -465,5 +470,109 @@ test('end-to-end via indexDocument: per-doc resolve + debounced backup', async (
     await new Promise<void>((resolve) => setTimeout(resolve, 80))
   } finally {
     db.close()
+  }
+})
+
+test('reindex and indexDocument preserve derived rows when content is unchanged', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'single-file-link-resolve: unchanged content fast path')) return
+  const Sqlite = loadSqliteCtor()!
+  const db = openSchemaDb(Sqlite)
+  const root = mkdtempSync(join(tmpdir(), 'ready-index-fast-path-'))
+  try {
+    const engine = new SearchEngine(db, {
+      fts5Available: false,
+      workspaceResolveDebounceMs: 1_000,
+    })
+    const path = join(root, 'A.md')
+    const content = '---\ntags:\n  - 教程\n---\n# A\n\n[[Target]] ![[asset.png]]\n'
+    writeFileSync(path, content, 'utf-8')
+    const first = await engine.reindexWorkspace({ root })
+    assert.equal(first.ok, true)
+    assert.equal(first.indexed, 1)
+    const row = db.prepare(
+      'SELECT id, content_hash FROM documents WHERE path = ?',
+    ).get<{ id: number; content_hash: string }>(path)
+    assert.ok(row)
+    assert.match(row.content_hash, new RegExp(`^${SEARCH_INDEX_CONTENT_VERSION}:`))
+
+    const repo = engine.getRepository()
+    let derivedWrites = 0
+    let narrowResolves = 0
+    let workspaceResolves = 0
+    let scheduledResolves = 0
+    repo.replaceTags = () => { derivedWrites += 1 }
+    repo.replaceLinks = () => { derivedWrites += 1 }
+    repo.replaceAttachments = () => { derivedWrites += 1 }
+    repo.resolveWikilinkTargetsForDocument = () => { narrowResolves += 1 }
+    repo.resolveWikilinkTargets = () => { workspaceResolves += 1 }
+    const identity = db.prepare(
+      'SELECT file_key AS fileKey FROM file_identities WHERE workspace_root = ? AND current_path = ?',
+    ).get<{ fileKey: string }>(root, path)
+    assert.ok(identity)
+    db.prepare('UPDATE file_tag_assignments SET readback_at = NULL WHERE file_key = ?').run(identity.fileKey)
+
+    const repeated = await engine.reindexWorkspace({ root })
+
+    assert.equal(repeated.indexed, 0)
+    assert.equal(repeated.skipped, 1)
+    assert.equal(repeated.removed, 0)
+    assert.equal(derivedWrites, 0)
+    assert.equal(workspaceResolves, 0)
+    const readback = db.prepare(
+      'SELECT readback_at AS readbackAt FROM file_tag_assignments WHERE file_key = ? AND suppressed = 0',
+    ).get<{ readbackAt: number | null }>(identity.fileKey)
+    assert.ok(readback?.readbackAt, 'a no-change rebuild must still complete pending Tag Forge readback')
+
+    engine.scheduleWorkspaceLinkResolve = (): AbortSignal => {
+      scheduledResolves += 1
+      return new AbortController().signal
+    }
+
+    const direct = await engine.indexDocument(root, path, content)
+
+    assert.deepEqual(direct, { ok: true, documentId: row.id, skipped: true })
+    assert.equal(derivedWrites, 0)
+    assert.equal(narrowResolves, 0)
+    assert.equal(scheduledResolves, 0)
+  } finally {
+    db.close()
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('single-document indexing reads content even when size and mtime were restored', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'single-file-link-resolve: strong single-file change signal')) return
+  const Sqlite = loadSqliteCtor()!
+  const db = openSchemaDb(Sqlite)
+  const root = mkdtempSync(join(tmpdir(), 'ready-index-restored-mtime-'))
+  try {
+    const engine = new SearchEngine(db, { fts5Available: false })
+    const path = join(root, 'A.md')
+    const before = '# A\n\n[[One]]\n'
+    const after = '# A\n\n[[Two]]\n'
+    assert.equal(Buffer.byteLength(before), Buffer.byteLength(after))
+    writeFileSync(path, before, 'utf-8')
+    const first = await engine.reindexWorkspace({ root })
+    assert.equal(first.indexed, 1)
+    const beforeRow = db.prepare('SELECT id, content_hash AS contentHash FROM documents WHERE path = ?')
+      .get<{ id: number; contentHash: string }>(path)
+    assert.ok(beforeRow)
+    const original = statSync(path)
+
+    writeFileSync(path, after, 'utf-8')
+    utimesSync(path, original.atime, original.mtime)
+    const indexed = await engine.indexDocument(root, path)
+
+    assert.equal(indexed.ok, true)
+    assert.equal(indexed.skipped, false)
+    const afterRow = db.prepare('SELECT content_hash AS contentHash FROM documents WHERE path = ?')
+      .get<{ contentHash: string }>(path)
+    assert.notEqual(afterRow?.contentHash, beforeRow.contentHash)
+    const links = db.prepare('SELECT target_text AS targetText FROM doc_links WHERE src_doc_id = ?')
+      .all<{ targetText: string }>(beforeRow.id)
+    assert.deepEqual(links.map((link) => link.targetText), ['Two'])
+  } finally {
+    db.close()
+    rmSync(root, { recursive: true, force: true })
   }
 })

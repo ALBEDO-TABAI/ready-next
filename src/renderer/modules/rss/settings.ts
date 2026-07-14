@@ -1,6 +1,15 @@
-export const RSS_AUTO_REFRESH_INTERVAL_KEY = 'rss:auto_refresh_interval_ms'
+import {
+  DEFAULT_RSS_AUTO_REFRESH_INTERVAL_MS,
+  parseRSSAutoRefreshInterval,
+  RSS_AUTO_REFRESH_INTERVAL_KEY,
+} from '../../../shared/rss-auto-refresh'
+import type { RSSAutoRefreshSnapshot } from '../../../shared/rss-auto-refresh'
 
-export const DEFAULT_RSS_AUTO_REFRESH_INTERVAL_MS = 15 * 60 * 1000
+export {
+  DEFAULT_RSS_AUTO_REFRESH_INTERVAL_MS,
+  parseRSSAutoRefreshInterval,
+  RSS_AUTO_REFRESH_INTERVAL_KEY,
+}
 
 export type RSSRefreshRiskLevel = 'none' | 'notice' | 'warning' | 'danger'
 
@@ -37,16 +46,31 @@ const RISKY_PLATFORM_KEYWORDS = [
   'scraper',
 ]
 
-export function parseRSSAutoRefreshInterval(value: string | null | undefined): number {
-  if (!value) return DEFAULT_RSS_AUTO_REFRESH_INTERVAL_MS
-  const parsed = Number(value)
-  if (!Number.isFinite(parsed) || parsed < 0) return DEFAULT_RSS_AUTO_REFRESH_INTERVAL_MS
-  if (RSS_REFRESH_INTERVAL_OPTIONS.some((option) => option.value === parsed)) return parsed
-  return DEFAULT_RSS_AUTO_REFRESH_INTERVAL_MS
-}
-
 export function formatRSSRefreshInterval(value: number): string {
   return RSS_REFRESH_INTERVAL_OPTIONS.find((option) => option.value === value)?.label || '15 分钟'
+}
+
+export function getRSSAutoRefreshWarning(snapshot: RSSAutoRefreshSnapshot): string | null {
+  if (snapshot.intervalMs <= 0 || snapshot.running || !snapshot.completedAt || snapshot.success !== false) return null
+  if (snapshot.errors.length > 0) {
+    return `RSS 自动刷新完成，但存在错误：${snapshot.errors[0]}`
+  }
+  return snapshot.message || 'RSS 自动刷新失败，稍后会再次尝试。'
+}
+
+export function getRSSFetchAllResultWarning(result: {
+  success: boolean
+  error?: string
+  data?: { message?: string; errors?: string[] }
+}): string | null {
+  if (!result.success) {
+    const detail = result.error || result.data?.errors?.[0] || result.data?.message
+    return detail ? `RSS 刷新失败：${detail}` : 'RSS 刷新失败，稍后可再次尝试。'
+  }
+  if (result.data?.errors?.length) {
+    return `RSS 刷新完成，但存在错误：${result.data.errors[0]}`
+  }
+  return null
 }
 
 export function hasRiskyRSSPlatform(platforms: Array<string | null | undefined>): boolean {

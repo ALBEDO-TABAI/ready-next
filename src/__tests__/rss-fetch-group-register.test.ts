@@ -28,6 +28,7 @@ import {
   _fetchGroupChannelsForTest,
   type FetchGroupDeps,
 } from '../main/modules/rss-engine/ipc/fetch-group'
+import { RSSUpdateLock } from '../main/modules/rss-engine/update-lock'
 
 type HandlerFn = (event: IpcMainInvokeEvent, ...args: unknown[]) => unknown
 
@@ -105,6 +106,7 @@ function createMockDeps(): FetchGroupDeps {
     filterSelectedSources: fail('filterSelectedSources') as FetchGroupDeps['filterSelectedSources'],
     normalizeFetchOptions: fail('normalizeFetchOptions') as FetchGroupDeps['normalizeFetchOptions'],
     persistFetchInvocation: fail('persistFetchInvocation') as FetchGroupDeps['persistFetchInvocation'],
+    recordFetchAllCompletedAt: fail('recordFetchAllCompletedAt') as FetchGroupDeps['recordFetchAllCompletedAt'],
     loadDigestSnapshot: fail('loadDigestSnapshot') as FetchGroupDeps['loadDigestSnapshot'],
     saveDigestSnapshot: fail('saveDigestSnapshot') as FetchGroupDeps['saveDigestSnapshot'],
     limitConcurrency: fail('limitConcurrency') as FetchGroupDeps['limitConcurrency'],
@@ -147,6 +149,61 @@ test('fetchGroup namespace is the documented label so dispose ordering can rely 
   // (`ipc-handler.ts`) may later sort dispose calls or log by namespace;
   // renaming would silently break that ordering.
   assert.equal(fetchGroup.namespace, 'rss:fetch')
+})
+
+test('the callable fetchAll handle and IPC channel execute the same business entry', async () => {
+  const { ipc, handleCalls } = createMockIpc()
+  const handle = fetchGroup.register(ipc, { ...createMockDeps(), useMock: true })
+  const ipcHandler = handleCalls.find((entry) => entry.channel === 'rss:fetchAll')?.handler
+  assert.ok(ipcHandler)
+
+  const directResult = await handle.fetchAll()
+  const ipcResult = await ipcHandler({} as IpcMainInvokeEvent)
+
+  assert.deepEqual(directResult, ipcResult)
+  assert.equal((directResult as { success?: boolean }).success, true)
+})
+
+test('completed fetchAll records durable completion after passing through RSSUpdateLock', async () => {
+  const { ipc } = createMockIpc()
+  const completedAt: string[] = []
+  const handle = fetchGroup.register(ipc, {
+    ...createMockDeps(),
+    getRSSSources: () => [],
+    filterSelectedSources: (sources) => sources,
+    normalizeFetchOptions: () => ({ digest: false, classification: 'simple' }),
+    persistFetchInvocation: () => undefined,
+    recordFetchAllCompletedAt: (value) => completedAt.push(value),
+    rssUpdateLock: new RSSUpdateLock(),
+  })
+
+  const result = await handle.fetchAll()
+
+  assert.equal(result.success, true)
+  assert.equal(result.data?.message, 'No RSS sources configured')
+  assert.equal(completedAt.length, 1)
+  assert.ok(Number.isFinite(Date.parse(completedAt[0])))
+})
+
+test('failed fetchAll also records completion so cold start does not retry in a tight loop', async () => {
+  const { ipc } = createMockIpc()
+  const completedAt: string[] = []
+  const handle = fetchGroup.register(ipc, {
+    ...createMockDeps(),
+    getRSSSources: () => {
+      throw new Error('database unavailable')
+    },
+    normalizeFetchOptions: () => ({ digest: false, classification: 'simple' }),
+    persistFetchInvocation: () => undefined,
+    recordFetchAllCompletedAt: (value) => completedAt.push(value),
+    rssUpdateLock: new RSSUpdateLock(),
+  })
+
+  const result = await handle.fetchAll()
+
+  assert.equal(result.success, false)
+  assert.equal(result.error, 'database unavailable')
+  assert.equal(completedAt.length, 1)
 })
 
 test('IpcDisposeHandle.dispose removes the same 5 channels that register added', () => {

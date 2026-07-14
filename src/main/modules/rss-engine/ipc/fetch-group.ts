@@ -59,7 +59,7 @@ import type {
 import type { buildBenchmarkSummary as BuildBenchmarkSummaryFn } from '../source-diagnostics'
 import type { RSSBrowserOpenAction } from '../browser-handoff'
 import type { EngineDeps } from './engine-deps'
-import type { IpcChannelGroup, IpcDisposeHandle } from './types'
+import type { IpcDisposeHandle } from './types'
 
 /** Mirror of the host's `FetchAllOptions` (kept here so the group is self-describing). */
 export type ClassificationMode = 'simple' | 'none'
@@ -204,6 +204,7 @@ export interface FetchGroupDeps {
     sourceIds?: string[]
   }
   persistFetchInvocation(payload: Record<string, unknown>): void
+  recordFetchAllCompletedAt(completedAt: string, result: RSSFetchAllResponse): void
   loadDigestSnapshot(): Record<string, string>
   saveDigestSnapshot(snapshot: Record<string, string>): void
   limitConcurrency<T>(
@@ -228,6 +229,19 @@ interface RSSResponse<T> {
   error?: string
 }
 
+export type RSSFetchAllResponse = RSSResponse<{
+  message: string
+  fetched: number
+  digest?: boolean
+  running?: boolean
+  errors?: string[]
+  status?: unknown
+}>
+
+export interface FetchGroupHandle extends IpcDisposeHandle {
+  fetchAll(options?: FetchAllOptions): Promise<RSSFetchAllResponse>
+}
+
 function ok<T>(data: T, isMock: boolean): RSSResponse<T> {
   return { success: true, mock: isMock, data }
 }
@@ -238,10 +252,13 @@ function fail<T = never>(error: string, data?: T): RSSResponse<T> {
     : { success: false, mock: false, error, data }
 }
 
-export const fetchGroup: IpcChannelGroup<FetchGroupDeps> = {
+export const fetchGroup: {
+  readonly namespace: string
+  register(ipcMain: IpcMain, deps: FetchGroupDeps): FetchGroupHandle
+} = {
   namespace: 'rss:fetch',
 
-  register(ipcMain: IpcMain, deps: FetchGroupDeps): IpcDisposeHandle {
+  register(ipcMain: IpcMain, deps: FetchGroupDeps): FetchGroupHandle {
     // Defensive pre-clear — `setupRSSIPC` may be re-entered on dev reload;
     // strip any prior handler so `ipcMain.handle` does not throw on the
     // second registration. Mirrors SourceGroup / ItemGroup / AnalysisGroup.
@@ -323,7 +340,7 @@ export const fetchGroup: IpcChannelGroup<FetchGroupDeps> = {
       }
     })
 
-    ipcMain.handle('rss:fetchAll', async (_, options?: FetchAllOptions) => {
+    const fetchAll = async (options?: FetchAllOptions): Promise<RSSFetchAllResponse> => {
       if (deps.useMock) {
         return ok(
           { message: 'RSS fetch simulated (mock mode)', fetched: 0, digest: false, errors: [] as string[] },
@@ -331,6 +348,8 @@ export const fetchGroup: IpcChannelGroup<FetchGroupDeps> = {
         )
       }
 
+      let fetchAttemptStarted = false
+      let completedResult: RSSFetchAllResponse | null = null
       try {
         const normalized = deps.normalizeFetchOptions(options)
         deps.persistFetchInvocation({
@@ -341,6 +360,7 @@ export const fetchGroup: IpcChannelGroup<FetchGroupDeps> = {
           classification: normalized.classification,
         })
         const lockResult = await deps.rssUpdateLock.run(normalized, async () => {
+          fetchAttemptStarted = true
           const allSources = deps.getRSSSources()
           const sources = deps.filterSelectedSources(allSources, normalized)
 
@@ -533,7 +553,7 @@ export const fetchGroup: IpcChannelGroup<FetchGroupDeps> = {
           )
         }
 
-        return ok(
+        completedResult = ok(
           {
             message: lockResult.message,
             fetched: lockResult.insertedCount,
@@ -543,10 +563,17 @@ export const fetchGroup: IpcChannelGroup<FetchGroupDeps> = {
           },
           false,
         )
+        return completedResult
       } catch (error) {
-        return fail(error instanceof Error ? error.message : String(error))
+        completedResult = fail(error instanceof Error ? error.message : String(error))
+        return completedResult
+      } finally {
+        if (fetchAttemptStarted && completedResult) {
+          deps.recordFetchAllCompletedAt(new Date().toISOString(), completedResult)
+        }
       }
-    })
+    }
+    ipcMain.handle('rss:fetchAll', async (_, options?: FetchAllOptions) => fetchAll(options))
 
     ipcMain.handle('rss:refreshSource', async (_, payload?: { sourceId?: string }) => {
       if (deps.useMock) {
@@ -898,6 +925,7 @@ export const fetchGroup: IpcChannelGroup<FetchGroupDeps> = {
     })
 
     return {
+      fetchAll,
       dispose(): void {
         for (const channel of CHANNELS) {
           try { ipcMain.removeHandler(channel) } catch { /* ignore — already removed */ }

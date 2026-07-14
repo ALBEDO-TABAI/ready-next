@@ -1,27 +1,61 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react'
 import { useWorkspace } from '../../stores/useWorkspace'
 import { useMode } from '../../stores/useMode'
-import { useForceLayout, type GraphEdge, type GraphNode, type LayoutNode } from './useForceLayout'
+import { useDocTabs } from '../../stores/useDocTabs'
+import { applyWorkbenchModeOpenDecision, requestWorkbenchModeChange } from '../../modules/workbench/mode-transition'
+import {
+  applyGraphWheelGesture,
+  buildGraphDocumentPreview,
+  type GraphViewport,
+} from './graph-interactions'
+import {
+  DARK_GRAPH_PALETTE,
+  LIGHT_GRAPH_PALETTE,
+  drawGraphCanvas,
+  findGraphNodeAtPoint,
+  fitGraphViewport,
+} from './graph-canvas-renderer'
+import { graphSessionRegistry, type GraphDataFetcher } from './graph-session'
+import { createLatestFrameScheduler, type LatestFrameScheduler } from './graph-frame-scheduler'
+import {
+  getLocalPoint,
+  isOpenableDocumentNode,
+  normalizeGraphData,
+  type CachedDocumentPreview,
+  type HoveredDocumentPreview,
+  type PendingGraphPin,
+  type PointerInteraction,
+} from './graph-view-model'
+import type { GraphNode, GraphQuery } from './graph-types'
 
-interface GraphViewProps {
+export interface GraphViewProps {
   centerPath?: string
   workspaceRoot?: string
   depth?: number
   width?: number
   height?: number
   className?: string
+  viewId?: string
+  onDocumentOpen?: (path: string) => void
 }
 
-const NODE_COLORS: Record<GraphNode['type'], string> = {
-  doc: 'var(--accent-blue, #3b82f6)',
-  tag: 'var(--accent-amber, #f59e0b)',
-  ghost: 'var(--text-muted, #9ca3af)',
-}
-
-const EDGE_COLORS: Record<string, string> = {
-  wikilink: 'rgba(59, 130, 246, 0.35)',
-  mdlink: 'rgba(107, 114, 128, 0.30)',
-  'tag-of': 'rgba(245, 158, 11, 0.30)',
+const fetchGraphData: GraphDataFetcher = async (query: GraphQuery) => {
+  const response = await window.electronAPI?.document?.getGraph({
+    workspaceRoot: query.workspaceRoot,
+    centerPath: query.centerPath,
+    depth: query.depth,
+  })
+  if (!response?.success || !response.data) {
+    throw new Error(response?.error || '暂时无法读取图谱')
+  }
+  return normalizeGraphData(response.data)
 }
 
 export default function GraphView({
@@ -31,329 +65,408 @@ export default function GraphView({
   width = 800,
   height = 600,
   className,
+  viewId = 'panel',
+  onDocumentOpen,
 }: GraphViewProps) {
+  const storedWorkspaceRoot = useWorkspace((state) => state.workspaceRoot)
   const selectFile = useWorkspace((state) => state.selectFile)
-  const setWorkbenchMode = useMode((state) => state.setWorkbenchMode)
-
-  const [graph, setGraph] = useState<{ nodes: GraphNode[]; edges: GraphEdge[] }>({ nodes: [], edges: [] })
-  const [loading, setLoading] = useState(false)
-  const [pan, setPan] = useState({ x: 0, y: 0 })
-  const [zoom, setZoom] = useState(1)
-  const dragRef = useRef<{ id: string; offsetX: number; offsetY: number } | null>(null)
-  const panRef = useRef<{ startX: number; startY: number; originX: number; originY: number } | null>(null)
-  const svgRef = useRef<SVGSVGElement | null>(null)
+  const resolvedWorkspaceRoot = workspaceRoot ?? storedWorkspaceRoot ?? ''
+  const session = useMemo(() => graphSessionRegistry.get({
+    workspaceRoot: resolvedWorkspaceRoot,
+    centerPath,
+    depth,
+  }), [centerPath, depth, resolvedWorkspaceRoot])
+  const snapshot = useSyncExternalStore(session.subscribe, session.getSnapshot, session.getSnapshot)
+  const canvasRef = useRef<HTMLCanvasElement | null>(null)
+  const containerRef = useRef<HTMLDivElement | null>(null)
+  const previewCacheRef = useRef<Map<string, CachedDocumentPreview>>(new Map())
+  const interactionRef = useRef<PointerInteraction | null>(null)
+  const viewportSchedulerRef = useRef<LatestFrameScheduler<GraphViewport> | null>(null)
+  const pinSchedulerRef = useRef<LatestFrameScheduler<PendingGraphPin> | null>(null)
+  const suppressClickRef = useRef(false)
+  const viewportRef = useRef<GraphViewport>({ x: width / 2, y: height / 2, zoom: 1 })
+  const [viewport, setViewport] = useState<GraphViewport>(() => (
+    session.getViewState(viewId)?.viewport ?? viewportRef.current
+  ))
+  const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null)
+  const [hoveredPreview, setHoveredPreview] = useState<HoveredDocumentPreview | null>(null)
+  const [darkTheme, setDarkTheme] = useState(() => (
+    typeof document !== 'undefined' && document.documentElement.dataset.theme === 'dark'
+  ))
 
   useEffect(() => {
+    if (!resolvedWorkspaceRoot) return
+    void session.ensureLoaded(fetchGraphData)
+  }, [resolvedWorkspaceRoot, session])
+
+  useEffect(() => {
+    const root = document.documentElement
+    const updateTheme = () => setDarkTheme(root.dataset.theme === 'dark')
+    updateTheme()
+    const observer = new MutationObserver(updateTheme)
+    observer.observe(root, { attributes: true, attributeFilter: ['data-theme'] })
+    return () => observer.disconnect()
+  }, [])
+
+  useEffect(() => {
+    const requestFrame = window.requestAnimationFrame.bind(window)
+    const cancelFrame = window.cancelAnimationFrame.bind(window)
+    viewportSchedulerRef.current = createLatestFrameScheduler((next) => {
+      setViewport(next)
+      session.setViewState(viewId, { viewport: next, userAdjusted: true })
+    }, requestFrame, cancelFrame)
+    pinSchedulerRef.current = createLatestFrameScheduler(
+      (next) => session.pinNode(next.id, next.x, next.y),
+      requestFrame,
+      cancelFrame,
+    )
+    return () => {
+      viewportSchedulerRef.current?.cancel()
+      pinSchedulerRef.current?.cancel()
+      viewportSchedulerRef.current = null
+      pinSchedulerRef.current = null
+    }
+  }, [session, viewId])
+
+  useEffect(() => {
+    const stored = session.getViewState(viewId)
+    const next = stored?.viewport ?? { x: width / 2, y: height / 2, zoom: 1 }
+    viewportRef.current = next
+    setViewport(next)
+  }, [session, viewId])
+
+  useEffect(() => {
+    if (snapshot.positions.length < 2) return
+    const stored = session.getViewState(viewId)
+    if (stored?.userAdjusted) return
+    const next = fitGraphViewport(snapshot.positions, width, height, width >= 600 ? 64 : 30)
+    viewportRef.current = next
+    setViewport(next)
+    session.setViewState(viewId, { viewport: next, userAdjusted: false })
+  }, [height, session, snapshot.revision, viewId, width])
+
+  const schedulePersistentViewport = useCallback((next: GraphViewport) => {
+    viewportRef.current = next
+    viewportSchedulerRef.current?.schedule(next)
+  }, [])
+
+  const indexById = useMemo(
+    () => new Map(snapshot.graph.nodes.map((node, index) => [node.id, index] as const)),
+    [snapshot.graph.nodes],
+  )
+  const nodeDegrees = useMemo(() => {
+    const degrees = new Uint32Array(snapshot.graph.nodes.length)
+    for (const edge of snapshot.graph.edges) {
+      const source = indexById.get(edge.source)
+      const target = indexById.get(edge.target)
+      if (source === undefined || target === undefined) continue
+      degrees[source] += 1
+      degrees[target] += 1
+    }
+    return degrees
+  }, [indexById, snapshot.graph.edges, snapshot.graph.nodes.length])
+  const relatedNodeIds = useMemo(() => {
+    if (!hoveredNodeId) return null
+    const related = new Set<string>([hoveredNodeId])
+    for (const edge of snapshot.graph.edges) {
+      if (edge.source === hoveredNodeId) related.add(edge.target)
+      if (edge.target === hoveredNodeId) related.add(edge.source)
+    }
+    return related
+  }, [hoveredNodeId, snapshot.graph.edges])
+
+  useEffect(() => {
+    const canvas = canvasRef.current
+    const context = canvas?.getContext('2d')
+    if (!canvas || !context) return
+    drawGraphCanvas(context, snapshot.graph, snapshot.positions, {
+      width,
+      height,
+      pixelRatio: Math.min(2, Math.max(1, window.devicePixelRatio || 1)),
+      viewport,
+      hoveredNodeId,
+      relatedNodeIds,
+      palette: darkTheme ? DARK_GRAPH_PALETTE : LIGHT_GRAPH_PALETTE,
+      indexById,
+      degrees: nodeDegrees,
+    })
+  }, [darkTheme, height, hoveredNodeId, indexById, nodeDegrees, relatedNodeIds, snapshot.graph, snapshot.positions, viewport, width])
+
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const handleWheel = (event: WheelEvent) => {
+      event.preventDefault()
+      const point = getLocalPoint(canvas, event.clientX, event.clientY)
+      const deltaScale = event.deltaMode === WheelEvent.DOM_DELTA_LINE
+        ? 16
+        : event.deltaMode === WheelEvent.DOM_DELTA_PAGE
+          ? Math.max(1, height)
+          : 1
+      schedulePersistentViewport(applyGraphWheelGesture(viewportRef.current, {
+        deltaX: event.deltaX * deltaScale,
+        deltaY: event.deltaY * deltaScale,
+        ctrlKey: event.ctrlKey,
+        pointerX: point.x,
+        pointerY: point.y,
+      }))
+    }
+    canvas.addEventListener('wheel', handleWheel, { passive: false })
+    return () => canvas.removeEventListener('wheel', handleWheel)
+  }, [height, schedulePersistentViewport])
+
+  const positionPreview = useCallback((clientX: number, clientY: number) => {
+    const rect = containerRef.current?.getBoundingClientRect()
+    const localX = clientX - (rect?.left ?? 0)
+    const localY = clientY - (rect?.top ?? 0)
+    const cardWidth = Math.min(320, Math.max(80, width - 24))
+    const cardHeight = 166
+    let left = localX + 16
+    if (left + cardWidth > width - 8) left = localX - cardWidth - 16
+    let top = localY + 16
+    if (top + cardHeight > height - 8) top = localY - cardHeight - 16
+    return {
+      left: Math.max(8, Math.min(Math.max(8, width - cardWidth - 8), left)),
+      top: Math.max(8, Math.min(Math.max(8, height - cardHeight - 8), top)),
+      width: cardWidth,
+    }
+  }, [height, width])
+
+  const previewPath = hoveredPreview?.path
+  const previewFallbackTitle = hoveredPreview?.title
+  useEffect(() => {
+    if (!previewPath || !previewFallbackTitle || previewCacheRef.current.has(previewPath)) return
     let cancelled = false
-    setLoading(true)
-    const doc = typeof window !== 'undefined' ? window.electronAPI?.document : null
-    const fetcher = doc?.getGraph
-    if (!fetcher) {
-      setLoading(false)
+    const timer = window.setTimeout(() => {
+      const reader = window.electronAPI?.document?.readFile
+      if (!reader) return
+      void reader(previewPath).then((response) => {
+        if (cancelled) return
+        const content = response?.data?.type === 'text'
+          ? response.data.content
+          : typeof response?.content === 'string'
+            ? response.content
+            : null
+        const next: CachedDocumentPreview = content !== null
+          ? { ...buildGraphDocumentPreview(content, previewFallbackTitle), status: 'ready' }
+          : {
+              title: previewFallbackTitle,
+              body: '这个文件暂时不能显示文字预览，点击仍可在文档模式打开。',
+              status: 'unavailable',
+            }
+        previewCacheRef.current.set(previewPath, next)
+        setHoveredPreview((current) => current?.path === previewPath ? { ...current, ...next } : current)
+      }).catch(() => {
+        if (cancelled) return
+        const next: CachedDocumentPreview = {
+          title: previewFallbackTitle,
+          body: '暂时无法读取预览，点击仍可在文档模式打开。',
+          status: 'unavailable',
+        }
+        previewCacheRef.current.set(previewPath, next)
+        setHoveredPreview((current) => current?.path === previewPath ? { ...current, ...next } : current)
+      })
+    }, 100)
+    return () => {
+      cancelled = true
+      window.clearTimeout(timer)
+    }
+  }, [previewFallbackTitle, previewPath])
+
+  const hitTest = useCallback((clientX: number, clientY: number): GraphNode | null => {
+    const canvas = canvasRef.current
+    if (!canvas) return null
+    const point = getLocalPoint(canvas, clientX, clientY)
+    return findGraphNodeAtPoint(snapshot.graph.nodes, snapshot.positions, viewportRef.current, point.x, point.y)
+  }, [snapshot.graph.nodes, snapshot.positions])
+
+  const updateHover = useCallback((clientX: number, clientY: number) => {
+    const node = hitTest(clientX, clientY)
+    setHoveredNodeId(node?.id ?? null)
+    if (!isOpenableDocumentNode(node)) {
+      setHoveredPreview(null)
       return
     }
-    void fetcher({ centerPath, workspaceRoot, depth }).then((response) => {
-      if (cancelled) return
-      if (response?.success && response.data) setGraph(response.data)
-      else setGraph({ nodes: [], edges: [] })
-      setLoading(false)
-    }).catch(() => {
-      if (cancelled) return
-      setGraph({ nodes: [], edges: [] })
-      setLoading(false)
+    const cached = previewCacheRef.current.get(node.path)
+    setHoveredPreview({
+      nodeId: node.id,
+      path: node.path,
+      title: cached?.title || node.label,
+      body: cached?.body || '',
+      status: cached?.status || 'loading',
+      ...positionPreview(clientX, clientY),
     })
-    return () => { cancelled = true }
-  }, [centerPath, workspaceRoot, depth])
+  }, [hitTest, positionPreview])
 
-  const [bypassCap, setBypassCap] = useState(false)
-  const [confirmOpen, setConfirmOpen] = useState(false)
-  // Reset the bypass when the underlying graph changes (e.g. user switched to
-  // focus mode on a smaller subgraph) so the cap re-engages on the next big set.
-  useEffect(() => { setBypassCap(false) }, [centerPath, workspaceRoot, depth])
-
-  const layoutResult = useForceLayout(graph.nodes, graph.edges, { width, height, bypassNodeCap: bypassCap })
-  const layoutNodes = layoutResult.status === 'ok' ? layoutResult.nodes : []
-  const { pin, release } = layoutResult
-
-  const idToNode = useMemo(() => {
-    const map = new Map<string, LayoutNode>()
-    for (const n of layoutNodes) map.set(n.id, n)
-    return map
-  }, [layoutNodes])
-
-  const toLocal = useCallback((evt: React.PointerEvent<SVGElement>): { x: number; y: number } => {
-    const svg = svgRef.current
-    if (!svg) return { x: 0, y: 0 }
-    const pt = svg.createSVGPoint()
-    pt.x = evt.clientX
-    pt.y = evt.clientY
-    const ctm = svg.getScreenCTM()
-    if (!ctm) return { x: 0, y: 0 }
-    const local = pt.matrixTransform(ctm.inverse())
-    return { x: (local.x - pan.x) / zoom, y: (local.y - pan.y) / zoom }
-  }, [pan, zoom])
-
-  const onNodePointerDown = (evt: React.PointerEvent<SVGElement>, node: LayoutNode): void => {
-    evt.stopPropagation()
-    ;(evt.currentTarget as Element).setPointerCapture(evt.pointerId)
-    const local = toLocal(evt)
-    dragRef.current = { id: node.id, offsetX: local.x - node.x, offsetY: local.y - node.y }
-  }
-  const onNodePointerMove = (evt: React.PointerEvent<SVGElement>): void => {
-    if (!dragRef.current) return
-    const local = toLocal(evt)
-    pin(dragRef.current.id, local.x - dragRef.current.offsetX, local.y - dragRef.current.offsetY)
-  }
-  const onNodePointerUp = (evt: React.PointerEvent<SVGElement>): void => {
-    dragRef.current = null
-    ;(evt.currentTarget as Element).releasePointerCapture(evt.pointerId)
-  }
-
-  const onSvgPointerDown = (evt: React.PointerEvent<SVGSVGElement>): void => {
-    if (dragRef.current) return
-    panRef.current = {
-      startX: evt.clientX,
-      startY: evt.clientY,
-      originX: pan.x,
-      originY: pan.y,
+  const onPointerDown = (event: React.PointerEvent<HTMLCanvasElement>): void => {
+    if (event.button !== 0) return
+    setHoveredPreview(null)
+    const point = getLocalPoint(event.currentTarget, event.clientX, event.clientY)
+    const node = findGraphNodeAtPoint(
+      snapshot.graph.nodes,
+      snapshot.positions,
+      viewportRef.current,
+      point.x,
+      point.y,
+    )
+    if (node) {
+      const index = indexById.get(node.id)
+      if (index === undefined) return
+      const worldX = (point.x - viewportRef.current.x) / viewportRef.current.zoom
+      const worldY = (point.y - viewportRef.current.y) / viewportRef.current.zoom
+      interactionRef.current = {
+        kind: 'node',
+        id: node.id,
+        offsetX: worldX - snapshot.positions[index * 2],
+        offsetY: worldY - snapshot.positions[index * 2 + 1],
+        startClientX: event.clientX,
+        startClientY: event.clientY,
+        moved: false,
+      }
+    } else {
+      interactionRef.current = {
+        kind: 'pan',
+        startClientX: event.clientX,
+        startClientY: event.clientY,
+        originX: viewportRef.current.x,
+        originY: viewportRef.current.y,
+        moved: false,
+      }
     }
-    ;(evt.currentTarget as SVGSVGElement).setPointerCapture(evt.pointerId)
+    event.currentTarget.setPointerCapture?.(event.pointerId)
   }
-  const onSvgPointerMove = (evt: React.PointerEvent<SVGSVGElement>): void => {
-    if (!panRef.current) return
-    setPan({
-      x: panRef.current.originX + (evt.clientX - panRef.current.startX),
-      y: panRef.current.originY + (evt.clientY - panRef.current.startY),
+
+  const onPointerMove = (event: React.PointerEvent<HTMLCanvasElement>): void => {
+    const interaction = interactionRef.current
+    if (!interaction) {
+      updateHover(event.clientX, event.clientY)
+      return
+    }
+    const distance = Math.hypot(
+      event.clientX - interaction.startClientX,
+      event.clientY - interaction.startClientY,
+    )
+    if (!interaction.moved && distance >= 3) interaction.moved = true
+    if (!interaction.moved) return
+    if (interaction.kind === 'pan') {
+      schedulePersistentViewport({
+        x: interaction.originX + event.clientX - interaction.startClientX,
+        y: interaction.originY + event.clientY - interaction.startClientY,
+        zoom: viewportRef.current.zoom,
+      })
+      return
+    }
+    const point = getLocalPoint(event.currentTarget, event.clientX, event.clientY)
+    pinSchedulerRef.current?.schedule({
+      id: interaction.id,
+      x: (point.x - viewportRef.current.x) / viewportRef.current.zoom - interaction.offsetX,
+      y: (point.y - viewportRef.current.y) / viewportRef.current.zoom - interaction.offsetY,
     })
   }
-  const onSvgPointerUp = (evt: React.PointerEvent<SVGSVGElement>): void => {
-    panRef.current = null
-    ;(evt.currentTarget as SVGSVGElement).releasePointerCapture(evt.pointerId)
-  }
 
-  const onWheel = (evt: React.WheelEvent<SVGSVGElement>): void => {
-    evt.preventDefault()
-    const delta = -evt.deltaY * 0.0015
-    setZoom((z) => Math.max(0.3, Math.min(3, z + delta)))
-  }
-
-  const onNodeDoubleClick = (node: LayoutNode): void => {
-    if (node.type === 'doc' && node.sourceType === 'document' && !node.id.startsWith('ghost:')) {
-      const path = node.label
-      // node.id is `doc:<id>` — we need the path; store it alongside label by
-      // fetching once more from the server via selectFile heuristic. Simpler:
-      // the label is the filename; users need the full path, so let's just
-      // ignore double-click unless we pass path through. For now, dispatch
-      // a getBacklinks-like lookup by filename.
-      void path
-      // Fallback: best-effort — not all graphs carry paths; a future iteration
-      // can include path in the node payload.
+  const finishPointerInteraction = (event: React.PointerEvent<HTMLCanvasElement>): void => {
+    const interaction = interactionRef.current
+    if (interaction?.kind === 'node' && interaction.moved) {
+      pinSchedulerRef.current?.flush()
+      session.releaseNode(interaction.id)
     }
-    release(node.id)
+    if (interaction?.kind === 'pan' && interaction.moved) viewportSchedulerRef.current?.flush()
+    if (interaction?.moved) {
+      suppressClickRef.current = true
+      window.setTimeout(() => { suppressClickRef.current = false }, 0)
+    }
+    interactionRef.current = null
+    if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
+      event.currentTarget.releasePointerCapture?.(event.pointerId)
+    }
   }
-  void setWorkbenchMode
-  void selectFile
 
-  const transform = `translate(${pan.x} ${pan.y}) scale(${zoom})`
+  const openDocument = useCallback((node: GraphNode | null) => {
+    if (!isOpenableDocumentNode(node)) return
+    selectFile(node.path)
+    useDocTabs.getState().openTab(node.path)
+    const mode = useMode.getState()
+    applyWorkbenchModeOpenDecision({
+      workbenchMode: mode.workbenchMode,
+      splitMode: mode.splitMode,
+    }, 'document', {
+      setSplitMode: mode.setSplitMode,
+      requestModeChange: requestWorkbenchModeChange,
+    })
+    onDocumentOpen?.(node.path)
+  }, [onDocumentOpen, selectFile])
+
+  const onClick = (event: React.MouseEvent<HTMLCanvasElement>): void => {
+    if (suppressClickRef.current) return
+    openDocument(hitTest(event.clientX, event.clientY))
+  }
+
+  const showInitialLoader = snapshot.status === 'loading' && snapshot.graph.nodes.length === 0
+  const isEmpty = snapshot.status !== 'loading' && snapshot.graph.nodes.length === 0
 
   return (
-    <div className={className} style={{ position: 'relative', width, height, overflow: 'hidden' }}>
-      <svg
-        ref={svgRef}
-        width={width}
-        height={height}
-        onPointerDown={onSvgPointerDown}
-        onPointerMove={onSvgPointerMove}
-        onPointerUp={onSvgPointerUp}
-        onWheel={onWheel}
-        style={{ cursor: dragRef.current ? 'grabbing' : 'grab', userSelect: 'none' }}
-      >
-        <g transform={transform}>
-          {graph.edges.map((edge, idx) => {
-            const a = idToNode.get(edge.source)
-            const b = idToNode.get(edge.target)
-            if (!a || !b) return null
-            return (
-              <line
-                key={`edge-${idx}`}
-                x1={a.x}
-                y1={a.y}
-                x2={b.x}
-                y2={b.y}
-                stroke={EDGE_COLORS[edge.kind] ?? 'rgba(120,120,120,0.25)'}
-                strokeWidth={1.2}
-              />
-            )
-          })}
-          {layoutNodes.map((node) => (
-            <g
-              key={node.id}
-              transform={`translate(${node.x} ${node.y})`}
-              onPointerDown={(evt) => onNodePointerDown(evt, node)}
-              onPointerMove={onNodePointerMove}
-              onPointerUp={onNodePointerUp}
-              onDoubleClick={() => onNodeDoubleClick(node)}
-              style={{ cursor: 'pointer' }}
-            >
-              <circle
-                r={node.type === 'tag' ? 5 : node.type === 'ghost' ? 4 : 7}
-                fill={NODE_COLORS[node.type]}
-                fillOpacity={node.type === 'ghost' ? 0.6 : 0.9}
-                stroke="rgba(0,0,0,0.15)"
-                strokeWidth={0.5}
-              />
-              <text
-                x={10}
-                y={4}
-                fontSize={10}
-                fill="var(--text, #111)"
-                style={{ pointerEvents: 'none' }}
-              >
-                {node.label.length > 24 ? `${node.label.slice(0, 24)}…` : node.label}
-              </text>
-            </g>
-          ))}
-        </g>
-      </svg>
-      {loading && (
+    <div
+      ref={containerRef}
+      className={className}
+      data-graph-view="true"
+      data-graph-settled={snapshot.settled ? 'true' : 'false'}
+      style={{ position: 'relative', width, height, overflow: 'hidden' }}
+    >
+      <canvas
+        ref={canvasRef}
+        data-knowledge-graph-canvas="true"
+        aria-label="关系图谱，可用双指移动和捏合缩放"
+        width={Math.max(1, Math.round(width))}
+        height={Math.max(1, Math.round(height))}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={finishPointerInteraction}
+        onPointerCancel={finishPointerInteraction}
+        onPointerLeave={() => {
+          if (!interactionRef.current) {
+            setHoveredNodeId(null)
+            setHoveredPreview(null)
+          }
+        }}
+        onClick={onClick}
+        style={{
+          display: 'block',
+          width,
+          height,
+          cursor: hoveredNodeId ? 'pointer' : 'grab',
+          touchAction: 'none',
+          userSelect: 'none',
+        }}
+      />
+      {hoveredPreview && (
         <div
-          style={{
-            position: 'absolute',
-            top: 8,
-            left: 8,
-            padding: '4px 8px',
-            borderRadius: 6,
-            background: 'rgba(0,0,0,0.6)',
-            color: '#fff',
-            fontSize: 11,
-          }}
+          className="knowledge-graph-preview"
+          data-graph-document-preview="true"
+          role="tooltip"
+          style={{ left: hoveredPreview.left, top: hoveredPreview.top, width: hoveredPreview.width }}
         >
-          正在加载图谱…
+          <strong>{hoveredPreview.title}</strong>
+          <p>{hoveredPreview.status === 'loading' ? '正在读取文档预览…' : hoveredPreview.body}</p>
+          <span>点击在文档模式打开</span>
         </div>
       )}
-      {!loading && graph.nodes.length === 0 && (
-        <div
-          style={{
-            position: 'absolute',
-            inset: 0,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            color: 'var(--text-placeholder, #999)',
-            fontSize: 12,
-          }}
-        >
-          暂无图谱数据 — 先在搜索面板点「重建索引」
+      {showInitialLoader && <div className="knowledge-graph-status">正在加载图谱…</div>}
+      {snapshot.status === 'loading' && snapshot.graph.nodes.length > 0 && (
+        <div className="knowledge-graph-status">正在更新图谱…</div>
+      )}
+      {snapshot.error && snapshot.graph.nodes.length > 0 && (
+        <div className="knowledge-graph-status knowledge-graph-status--warning">
+          更新失败，已保留上次图谱
         </div>
       )}
-      {!loading && layoutResult.status === 'degraded' && (
-        <div
-          role="alert"
-          style={{
-            position: 'absolute',
-            top: 8,
-            left: 8,
-            right: 8,
-            padding: '10px 12px',
-            borderRadius: 8,
-            background: 'rgba(245, 158, 11, 0.12)',
-            border: '1px solid rgba(245, 158, 11, 0.45)',
-            color: 'var(--text, #111)',
-            fontSize: 12,
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 6,
-          }}
-        >
-          <div>
-            {`图谱节点过多 (${layoutResult.nodeCount} > ${layoutResult.maxSupported})，已切换到聚焦模式。请选择一个节点查看其邻居关系。`}
-          </div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button
-              type="button"
-              onClick={() => setConfirmOpen(true)}
-              style={{
-                padding: '4px 10px',
-                borderRadius: 6,
-                border: '1px solid rgba(0,0,0,0.15)',
-                background: 'transparent',
-                color: 'inherit',
-                fontSize: 11,
-                cursor: 'pointer',
-              }}
-            >
-              仍要显示完整图谱
-            </button>
-          </div>
+      {snapshot.graph.truncated && (
+        <div className="knowledge-graph-status knowledge-graph-status--warning">
+          {`已显示 ${snapshot.graph.nodes.length} 个节点，当前文档总数 ${snapshot.graph.totalDocs}`}
         </div>
       )}
-      {confirmOpen && layoutResult.status === 'degraded' && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          style={{
-            position: 'absolute',
-            inset: 0,
-            background: 'rgba(0,0,0,0.45)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 10,
-          }}
-          onClick={() => setConfirmOpen(false)}
-        >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            style={{
-              maxWidth: 360,
-              padding: 16,
-              borderRadius: 8,
-              background: 'var(--bg, #fff)',
-              color: 'var(--text, #111)',
-              fontSize: 12,
-              boxShadow: '0 10px 30px rgba(0,0,0,0.25)',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 12,
-            }}
-          >
-            <div style={{ fontSize: 13, fontWeight: 600 }}>渲染完整图谱可能会卡死浏览器</div>
-            <div>
-              {`即将渲染 ${layoutResult.nodeCount} 个节点（O(N²) per tick），这很可能让渲染线程长时间无响应。仍要继续吗？`}
-            </div>
-            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-              <button
-                type="button"
-                onClick={() => setConfirmOpen(false)}
-                style={{
-                  padding: '6px 12px',
-                  borderRadius: 6,
-                  border: '1px solid rgba(0,0,0,0.15)',
-                  background: 'transparent',
-                  color: 'inherit',
-                  fontSize: 12,
-                  cursor: 'pointer',
-                }}
-              >
-                取消
-              </button>
-              <button
-                type="button"
-                onClick={() => { setBypassCap(true); setConfirmOpen(false) }}
-                style={{
-                  padding: '6px 12px',
-                  borderRadius: 6,
-                  border: '1px solid rgba(220, 38, 38, 0.6)',
-                  background: 'rgba(220, 38, 38, 0.12)',
-                  color: 'var(--accent-red, #b91c1c)',
-                  fontSize: 12,
-                  cursor: 'pointer',
-                }}
-              >
-                继续
-              </button>
-            </div>
-          </div>
+      {isEmpty && (
+        <div className="knowledge-graph-empty">
+          {snapshot.error || snapshot.graph.note || '暂无图谱数据 — 先在搜索面板点「重建索引」'}
         </div>
       )}
     </div>

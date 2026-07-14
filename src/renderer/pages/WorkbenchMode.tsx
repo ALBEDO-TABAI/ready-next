@@ -10,6 +10,8 @@ import WorkbenchModeOutlet from '../components/layout/WorkbenchModeOutlet'
 import ChatPanel from '../components/agent/ChatPanel'
 import { ScheduledTasksWorkspace } from '../components/agent/scheduled-tasks/ScheduledTasksWorkspace'
 import type { ScheduledTasksSummary } from '../components/agent/scheduled-tasks/ScheduledTasksPanel'
+import GraphWorkspace, { type GraphWorkspaceRequest } from '../components/graph/GraphWorkspace'
+import { invalidateGraphWorkspace } from '../components/graph/graph-session'
 import StatusBar from '../components/layout/StatusBar'
 import { LiquidSceneProvider } from '../components/ui/LiquidGlassScene'
 import { WORKBENCH_EDGE_RAIL_SIZE } from '../modules/workbench/chrome'
@@ -28,6 +30,7 @@ import { createModeSwitchAckWaiter } from '../modules/browser/modeSwitchAckWaite
 import { withRitual, setPanelResizingSignal } from '../modules/overlay/useRitualOverlay'
 import { useAgent } from '../stores/useAgent'
 import '../styles/scheduled-tasks.css'
+import '../styles/knowledge-graph.css'
 
 const MIN_SIDE_PANEL_WIDTH = 220
 const MAX_SIDE_PANEL_WIDTH = 420
@@ -150,6 +153,7 @@ export default function WorkbenchMode() {
   const [isPanelResizing, setIsPanelResizing] = useState(false)
   const [browserLayoutMotionPhase, setBrowserLayoutMotionPhase] = useState<BrowserHostLayoutPhase>('idle')
   const [scheduledTasksOpen, setScheduledTasksOpen] = useState(false)
+  const [graphWorkspaceRequest, setGraphWorkspaceRequest] = useState<GraphWorkspaceRequest | null>(null)
   const [scheduledTasksSummary, setScheduledTasksSummary] = useState<ScheduledTasksSummary>({
     enabledCount: 0,
     attentionCount: 0,
@@ -174,6 +178,27 @@ export default function WorkbenchMode() {
     transitionTargetModeRef.current = workbenchMode
   }, [workbenchMode])
 
+  useEffect(() => {
+    const subscribe = window.electronAPI?.document?.onIndexChanged
+    if (!subscribe) return
+    let timer: number | null = null
+    const pendingRoots = new Set<string>()
+    const unsubscribe = subscribe((event) => {
+      pendingRoots.add(event.workspaceRoot)
+      if (timer !== null) window.clearTimeout(timer)
+      timer = window.setTimeout(() => {
+        timer = null
+        const roots = [...pendingRoots]
+        pendingRoots.clear()
+        void Promise.all(roots.map((root) => invalidateGraphWorkspace(root)))
+      }, 50)
+    })
+    return () => {
+      if (timer !== null) window.clearTimeout(timer)
+      unsubscribe()
+    }
+  }, [])
+
   const clearScheduledWorkbenchSurfaceRefresh = useCallback(() => {
     workbenchSurfaceRefreshTimersRef.current.forEach((timer) => window.clearTimeout(timer))
     workbenchSurfaceRefreshTimersRef.current = []
@@ -190,6 +215,16 @@ export default function WorkbenchMode() {
       }, delay)
     ))
   }, [clearScheduledWorkbenchSurfaceRefresh])
+
+  const handleGraphWorkspaceOpen = useCallback((request: GraphWorkspaceRequest) => {
+    setScheduledTasksOpen(false)
+    setGraphWorkspaceRequest(request)
+  }, [])
+
+  const handleScheduledTasksToggle = useCallback(() => {
+    setGraphWorkspaceRequest(null)
+    setScheduledTasksOpen((value) => !value)
+  }, [])
 
   useEffect(() => {
     scheduleWorkbenchSurfaceRefresh()
@@ -598,6 +633,8 @@ export default function WorkbenchMode() {
               variant={sidePanelVariant}
               panelWidth={sidebarShellWidth}
               contentVisible={isSidebarContentVisible}
+              onGraphWorkspaceOpen={handleGraphWorkspaceOpen}
+              graphWorkspaceOpen={graphWorkspaceRequest !== null}
             />
 
             {showSidebarResizeHandle && (
@@ -629,6 +666,7 @@ export default function WorkbenchMode() {
                       mountedModes={[workbenchMode]}
                       isMotionSettled={isMotionSettled}
                       browserLayoutPhase={browserLayoutPhase}
+                      suspended={graphWorkspaceRequest !== null}
                     />
                   </div>
                   <WorkbenchSplitResizeHandle
@@ -641,6 +679,7 @@ export default function WorkbenchMode() {
                       mountedModes={[splitMode]}
                       isMotionSettled={isMotionSettled}
                       browserLayoutPhase={browserLayoutPhase}
+                      suspended={graphWorkspaceRequest !== null}
                     />
                   </div>
                 </div>
@@ -650,6 +689,7 @@ export default function WorkbenchMode() {
                     mode={workbenchMode}
                     isMotionSettled={isMotionSettled}
                     browserLayoutPhase={browserLayoutPhase}
+                    suspended={graphWorkspaceRequest !== null}
                   />
                 </div>
               )}
@@ -671,6 +711,13 @@ export default function WorkbenchMode() {
                   })
                 }}
               />
+              {graphWorkspaceRequest && (
+                <GraphWorkspace
+                  request={graphWorkspaceRequest}
+                  workspaceRoot={workspaceRoot}
+                  onClose={() => setGraphWorkspaceRequest(null)}
+                />
+              )}
             </div>
 
             {showChatResizeHandle && (
@@ -687,7 +734,7 @@ export default function WorkbenchMode() {
               onTogglePanel={handleToggleChatPanelWithResize}
               scheduledTasksOpen={scheduledTasksOpen}
               scheduledTasksSummary={scheduledTasksSummary}
-              onScheduledTasksToggle={() => setScheduledTasksOpen((value) => !value)}
+              onScheduledTasksToggle={handleScheduledTasksToggle}
             />
           </div>
 

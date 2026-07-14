@@ -1,0 +1,178 @@
+import assert from 'node:assert/strict'
+import test from 'node:test'
+
+import {
+  DARK_GRAPH_PALETTE,
+  drawGraphCanvas,
+  graphLabelOpacity,
+  graphNodeRadius,
+  findGraphNodeAtPoint,
+  fitGraphViewport,
+  shouldDrawGraphLabel,
+} from '../renderer/components/graph/graph-canvas-renderer'
+import type { GraphNode } from '../renderer/components/graph/graph-types'
+
+const nodes: GraphNode[] = [
+  { id: 'doc:1', type: 'doc', label: 'one.md', sourceType: 'document', path: '/workspace/one.md' },
+  { id: 'tag:notes', type: 'tag', label: 'notes' },
+]
+
+test('fitGraphViewport centers a circular graph and hit testing resolves the visible document', () => {
+  const positions = new Float32Array([-100, 0, 100, 0])
+  const viewport = fitGraphViewport(positions, 800, 600, 60)
+  const docScreen = {
+    x: -100 * viewport.zoom + viewport.x,
+    y: viewport.y,
+  }
+  const hit = findGraphNodeAtPoint(nodes, positions, viewport, docScreen.x + 2, docScreen.y - 1)
+
+  assert.equal(hit?.id, 'doc:1')
+  assert.ok(viewport.zoom > 0)
+  assert.ok(Math.abs(((-100 * viewport.zoom + viewport.x) + (100 * viewport.zoom + viewport.x)) / 2 - 400) < 1)
+})
+
+test('label level-of-detail hides the text cloud at overview zoom but keeps hovered context', () => {
+  assert.equal(shouldDrawGraphLabel({ zoom: 0.35, nodeCount: 1700, isHovered: false, isRelated: false }), false)
+  assert.equal(shouldDrawGraphLabel({ zoom: 0.35, nodeCount: 1700, isHovered: true, isRelated: true }), true)
+  assert.equal(shouldDrawGraphLabel({ zoom: 1.2, nodeCount: 1700, isHovered: false, isRelated: true }), true)
+})
+
+test('label opacity rises continuously with zoom and connection importance', () => {
+  const isolatedOverview = graphLabelOpacity({
+    zoom: 0.9, nodeCount: 1700, degree: 0, isHovered: false, isRelated: false,
+  })
+  const connectedNear = graphLabelOpacity({
+    zoom: 1.05, nodeCount: 1700, degree: 24, isHovered: false, isRelated: false,
+  })
+  const connectedCloser = graphLabelOpacity({
+    zoom: 1.2, nodeCount: 1700, degree: 24, isHovered: false, isRelated: false,
+  })
+  const hoveredOverview = graphLabelOpacity({
+    zoom: 0.1, nodeCount: 1700, degree: 0, isHovered: true, isRelated: false,
+  })
+
+  assert.equal(isolatedOverview, 0)
+  assert.ok(connectedNear > 0 && connectedNear < 1)
+  assert.ok(connectedCloser > connectedNear && connectedCloser <= 1)
+  assert.equal(hoveredOverview, 1)
+})
+
+test('large overview uses small adaptive dots while connected and hovered nodes remain legible', () => {
+  const isolatedOverview = graphNodeRadius({
+    nodeType: 'doc',
+    degree: 0,
+    zoom: 0.1,
+    nodeCount: 1700,
+    isHovered: false,
+  })
+  const connectedOverview = graphNodeRadius({
+    nodeType: 'doc',
+    degree: 24,
+    zoom: 0.1,
+    nodeCount: 1700,
+    isHovered: false,
+  })
+  const connectedCloseUp = graphNodeRadius({
+    nodeType: 'doc',
+    degree: 24,
+    zoom: 1.2,
+    nodeCount: 1700,
+    isHovered: false,
+  })
+  const hoveredOverview = graphNodeRadius({
+    nodeType: 'doc',
+    degree: 0,
+    zoom: 0.1,
+    nodeCount: 1700,
+    isHovered: true,
+  })
+
+  assert.ok(isolatedOverview >= 1.1 && isolatedOverview < 1.8)
+  assert.ok(connectedOverview > isolatedOverview)
+  assert.ok(connectedOverview < 3)
+  assert.ok(connectedCloseUp > connectedOverview)
+  assert.ok(hoveredOverview >= 5)
+})
+
+test('overlapping overview hit areas choose the geometrically nearest node', () => {
+  const crowdedNodes: GraphNode[] = [
+    { id: 'near', type: 'doc', label: 'near.md' },
+    { id: 'far-but-later', type: 'doc', label: 'far.md' },
+  ]
+  const hit = findGraphNodeAtPoint(
+    crowdedNodes,
+    new Float32Array([0, 0, 6, 0]),
+    { x: 100, y: 100, zoom: 1 },
+    100.2,
+    100,
+  )
+
+  assert.equal(hit?.id, 'near')
+})
+
+test('canvas drawing uses the adaptive overview radius', () => {
+  const radii: number[] = []
+  const canvas = { width: 0, height: 0 }
+  const context = {
+    canvas,
+    setTransform() {}, clearRect() {}, fillRect() {}, beginPath() {}, moveTo() {}, lineTo() {},
+    stroke() {}, fill() {}, fillText() {},
+    arc(_x: number, _y: number, radius: number) { radii.push(radius) },
+  } as unknown as CanvasRenderingContext2D
+  const graph = {
+    nodes: [{ id: 'doc:1', type: 'doc' as const, label: 'one.md' }],
+    edges: [],
+    totalDocs: 1,
+    truncated: false,
+  }
+  const baseOptions = {
+    width: 400,
+    height: 300,
+    pixelRatio: 1,
+    hoveredNodeId: null,
+    relatedNodeIds: null,
+    palette: DARK_GRAPH_PALETTE,
+  }
+
+  drawGraphCanvas(context, graph, new Float32Array([0, 0]), {
+    ...baseOptions,
+    viewport: { x: 200, y: 150, zoom: 0.1 },
+  })
+  const overviewRadius = radii.at(-1)!
+  drawGraphCanvas(context, graph, new Float32Array([0, 0]), {
+    ...baseOptions,
+    viewport: { x: 200, y: 150, zoom: 1.2 },
+  })
+
+  assert.ok(radii.at(-1)! > overviewRadius)
+})
+
+test('canvas keeps the hovered label when nearby labels overlap', () => {
+  const labels: string[] = []
+  const context = {
+    canvas: { width: 0, height: 0 },
+    setTransform() {}, clearRect() {}, fillRect() {}, beginPath() {}, moveTo() {}, lineTo() {},
+    stroke() {}, fill() {}, arc() {},
+    fillText(label: string) { labels.push(label) },
+  } as unknown as CanvasRenderingContext2D
+  const crowded = {
+    nodes: [
+      { id: 'low:1', type: 'doc' as const, label: 'low priority one' },
+      { id: 'low:2', type: 'doc' as const, label: 'low priority two' },
+      { id: 'hovered', type: 'doc' as const, label: 'hovered label' },
+    ],
+    edges: [], totalDocs: 3, truncated: false,
+  }
+
+  drawGraphCanvas(context, crowded, new Float32Array([0, 0, 2, 0, 4, 0]), {
+    width: 400,
+    height: 300,
+    pixelRatio: 1,
+    viewport: { x: 180, y: 150, zoom: 2.4 },
+    hoveredNodeId: 'hovered',
+    relatedNodeIds: null,
+    palette: DARK_GRAPH_PALETTE,
+  })
+
+  assert.deepEqual(labels, ['hovered label'])
+})

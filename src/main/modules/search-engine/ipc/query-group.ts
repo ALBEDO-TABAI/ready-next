@@ -32,6 +32,7 @@
 //   • the same dep surface (engine getter + worker bridge facade +
 //     workspace validator + worker-fallback observers)
 import type { IpcMain } from 'electron'
+import type { DocumentGraphResult } from '../../database/document-graph-query'
 import type { SearchHit } from '../query'
 import type { EngineDeps } from './engine-deps'
 import type { IpcChannelGroup, IpcDisposeHandle } from './types'
@@ -199,10 +200,7 @@ export const searchQueryGroup: IpcChannelGroup<SearchQueryGroupDeps> = {
       async (
         _event,
         payload: { centerPath?: string; depth?: number; workspaceRoot?: string } | undefined,
-      ): Promise<SearchIPCResponse<{
-        nodes: Array<{ id: string; type: 'doc' | 'tag' | 'ghost'; label: string; sourceType?: string }>
-        edges: Array<{ source: string; target: string; kind: string }>
-      }>> => {
+      ): Promise<SearchIPCResponse<DocumentGraphResult>> => {
         const searchEngine = deps.getSearchEngine()
         if (!searchEngine) return { success: false, error: 'search engine unavailable' }
         const depth = typeof payload?.depth === 'number' ? Math.max(1, Math.min(6, payload.depth)) : 2
@@ -213,7 +211,7 @@ export const searchQueryGroup: IpcChannelGroup<SearchQueryGroupDeps> = {
         // because callers handle the structured error.
         try {
           const result = await deps.getWorkerBridge().getDocumentGraph({ depth, centerPath, workspaceRoot })
-          return { success: true, data: { nodes: result.nodes, edges: result.edges } }
+          return { success: true, data: result }
         } catch (error) {
           return { success: false, error: error instanceof Error ? error.message : String(error) }
         }

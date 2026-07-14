@@ -35,6 +35,7 @@
 import type { IpcMain } from 'electron'
 import { isInotifyExhaustionError } from '../file-watcher'
 import type { EngineDeps } from './engine-deps'
+import { publishDocumentIndexChanged } from './document-index-events'
 import type { IpcChannelGroup, IpcDisposeHandle } from './types'
 
 /**
@@ -75,7 +76,7 @@ export const watcherGroup: IpcChannelGroup<WatcherGroupDeps> = {
     ipcMain.handle(
       'document:startWatcher',
       async (
-        _event,
+        event,
         payload: { workspaceRoot: string },
       ): Promise<SearchIPCResponse<{ watcherId: string; workspaceRoot: string }> & {
         errorKind?: 'invalid_root' | 'enospc' | 'failed' | 'engine_unavailable'
@@ -107,13 +108,27 @@ export const watcherGroup: IpcChannelGroup<WatcherGroupDeps> = {
                 // so the workspace is guaranteed to exist by this point.
                 const repo = engine.getRepository()
                 const wsId = repo.ensureWorkspace(workspaceRoot)
-                repo.deletePath(wsId, filePath)
+                const deleted = repo.deletePath(wsId, filePath)
+                if (deleted > 0) {
+                  publishDocumentIndexChanged(event.sender, {
+                    workspaceRoot,
+                    reason: 'incremental',
+                    changedPaths: [filePath],
+                  })
+                }
                 return
               }
               // add / change → re-index this single file. The indexer's own
               // `decideFileForIndex` filter will reject binary / oversized
               // files, so we don't pre-filter here.
-              await engine.indexDocument(workspaceRoot, filePath)
+              const indexResult = await engine.indexDocument(workspaceRoot, filePath)
+              if (indexResult.ok && !indexResult.skipped) {
+                publishDocumentIndexChanged(event.sender, {
+                  workspaceRoot,
+                  reason: 'incremental',
+                  changedPaths: [filePath],
+                })
+              }
             } catch (error) {
               // Per-event errors must not crash the watcher. Logged inside the
               // indexer via `logSearch`; we just swallow here.

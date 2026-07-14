@@ -46,11 +46,21 @@ import {
 import { sourceGroup } from './ipc/source-group'
 import { itemGroup } from './ipc/item-group'
 import { analysisGroup } from './ipc/analysis-group'
-import { fetchGroup } from './ipc/fetch-group'
+import {
+  fetchGroup,
+  type FetchAllOptions as FetchGroupFetchAllOptions,
+  type FetchGroupHandle,
+  type RSSFetchAllResponse,
+} from './ipc/fetch-group'
 import { diagnosticsGroup } from './ipc/diagnostics-group'
 import { exportGroup } from './ipc/export-group'
 import type { AddSourceCoreInput, AddSourceCoreResult } from './ipc/engine-deps'
 import type { IpcDisposeHandle } from './ipc/types'
+import {
+  parseRSSAutoRefreshInterval,
+  RSS_AUTO_REFRESH_INTERVAL_KEY,
+  RSS_LAST_FETCH_ALL_COMPLETED_AT_KEY,
+} from '../../../shared/rss-auto-refresh'
 
 interface RSSResponse<T> {
   success: boolean
@@ -183,6 +193,7 @@ const FETCH_INVOCATION_SNAPSHOT_KEY = 'rss:last_fetch_invocation'
 const rssRepository = new RSSRepository()
 const appSettingsRepository = new AppSettingsRepository()
 let rssBrowserController: BrowserController | null = null
+let fetchAllCompletedListener: ((completedAt: string, result: RSSFetchAllResponse) => void) | null = null
 const sourceRefreshInFlight = new Set<string>()
 
 /**
@@ -219,7 +230,7 @@ let analysisGroupDispose: IpcDisposeHandle | null = null
  * reload re-entry into `setupRSSIPC` releases every group before the next
  * registration binds.
  */
-let fetchGroupDispose: IpcDisposeHandle | null = null
+let fetchGroupDispose: FetchGroupHandle | null = null
 
 /**
  * Stage V V2.2e — dispose handle returned by `diagnosticsGroup.register`.
@@ -242,6 +253,30 @@ let exportGroupDispose: IpcDisposeHandle | null = null
 
 export function setRSSBrowserController(controller: BrowserController | null): void {
   rssBrowserController = controller
+}
+
+export function setRSSFetchAllCompletedListener(
+  listener: ((completedAt: string, result: RSSFetchAllResponse) => void) | null,
+): void {
+  fetchAllCompletedListener = listener
+}
+
+export function readRSSAutoRefreshInterval(): number {
+  return parseRSSAutoRefreshInterval(appSettingsRepository.getSetting(RSS_AUTO_REFRESH_INTERVAL_KEY))
+}
+
+export function readLastRSSFetchAllCompletedAt(): number | null {
+  const raw = appSettingsRepository.getSetting(RSS_LAST_FETCH_ALL_COMPLETED_AT_KEY)
+  if (!raw) return null
+  const parsed = Date.parse(raw)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+export function fetchAllRSSFeeds(options?: FetchGroupFetchAllOptions): Promise<RSSFetchAllResponse> {
+  if (!fetchGroupDispose) {
+    return Promise.resolve({ success: false, mock: false, error: 'RSS fetch runtime is not initialized' })
+  }
+  return fetchGroupDispose.fetchAll(options)
 }
 
 function createSuccessResponse<T>(data: T, isMock: boolean): RSSResponse<T> {
@@ -1101,6 +1136,14 @@ export function setupRSSIPC(useMock = false): void {
     filterSelectedSources,
     normalizeFetchOptions,
     persistFetchInvocation,
+    recordFetchAllCompletedAt: (completedAt, result) => {
+      appSettingsRepository.setSetting(RSS_LAST_FETCH_ALL_COMPLETED_AT_KEY, completedAt)
+      try {
+        fetchAllCompletedListener?.(completedAt, result)
+      } catch (error) {
+        console.warn('[rss:auto-refresh] completion listener failed:', error instanceof Error ? error.message : String(error))
+      }
+    },
     loadDigestSnapshot,
     saveDigestSnapshot,
     limitConcurrency,

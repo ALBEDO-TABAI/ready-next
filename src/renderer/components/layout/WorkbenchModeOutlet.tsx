@@ -4,6 +4,7 @@ import type { BrowserHostLayoutPhase } from '../../../shared/browser-view-layout
 
 type ModeComponentProps = {
   isActive?: boolean
+  isSuspended?: boolean
   isMotionSettled?: boolean
   browserLayoutPhase?: BrowserHostLayoutPhase | null
   layoutPhase?: BrowserHostLayoutPhase
@@ -19,6 +20,7 @@ interface ModeSceneProps {
   browserLayoutPhase: BrowserHostLayoutPhase | null
   visualState: ModeVisualState
   direction: ModeDirection
+  suspended: boolean
 }
 
 const loadBrowserMode = () => import('../../pages/modes/BrowserMode')
@@ -71,6 +73,7 @@ function ModeFallback() {
 
 function areModeScenePropsEqual(previous: ModeSceneProps, next: ModeSceneProps) {
   if (previous.modeKey !== next.modeKey) return false
+  if (previous.suspended !== next.suspended) return false
   if (previous.visualState === 'hidden' && next.visualState === 'hidden') return true
   return (
     previous.isActive === next.isActive
@@ -88,6 +91,7 @@ const ModeScene = memo(function ModeScene({
   browserLayoutPhase,
   visualState,
   direction,
+  suspended,
 }: ModeSceneProps) {
   const ModeComponent = MODE_COMPONENTS[modeKey]
 
@@ -95,16 +99,18 @@ const ModeScene = memo(function ModeScene({
     <div
       className="workbench-mode-scene"
       style={{
-        pointerEvents: visualState === 'current' ? 'auto' : 'none',
+        pointerEvents: visualState === 'current' && !suspended ? 'auto' : 'none',
+        visibility: suspended ? 'hidden' : 'visible',
       }}
       data-workbench-mode-panel={modeKey}
       data-mode-visual-state={visualState}
       data-mode-direction={direction}
-      aria-hidden={!isActive}
+      aria-hidden={!isActive || suspended}
     >
       <Suspense fallback={<ModeFallback />}>
         <ModeComponent
           isActive={isActive}
+          isSuspended={suspended}
           isMotionSettled={isActive ? isMotionSettled : false}
           browserLayoutPhase={modeKey === 'browser' ? browserLayoutPhase : null}
           layoutPhase={modeKey === 'browser' ? browserLayoutPhase ?? undefined : undefined}
@@ -136,11 +142,13 @@ export default function WorkbenchModeOutlet({
   mountedModes = ALL_WORKBENCH_MODES,
   isMotionSettled = true,
   browserLayoutPhase = null,
+  suspended = false,
 }: {
   mode: WorkbenchMode
   mountedModes?: WorkbenchMode[]
   isMotionSettled?: boolean
   browserLayoutPhase?: BrowserHostLayoutPhase | null
+  suspended?: boolean
 }) {
   const previousModeRef = useRef<WorkbenchMode>(mode)
   const [runtime, setRuntime] = useState<SceneRuntime>({
@@ -213,11 +221,12 @@ export default function WorkbenchModeOutlet({
           <ModeScene
             key={modeKey}
             modeKey={modeKey}
-            isActive={modeKey === runtime.current}
+            isActive={modeKey === runtime.current && !suspended}
             isMotionSettled={isMotionSettled}
             browserLayoutPhase={browserLayoutPhase}
             visualState={visualState}
             direction={runtime.direction}
+            suspended={suspended}
           />
         )
       })}

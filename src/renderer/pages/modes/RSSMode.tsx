@@ -12,6 +12,8 @@ import { fetchRSSWarmSnapshot } from '../../modules/rss/rssWarmLoader'
 import { getRSSWarmCache, primeRSSWarmCache, setRSSWarmCache } from '../../modules/rss/rssWarmCache'
 import {
   DEFAULT_RSS_AUTO_REFRESH_INTERVAL_MS,
+  getRSSAutoRefreshWarning,
+  getRSSFetchAllResultWarning,
   parseRSSAutoRefreshInterval,
   RSS_AUTO_REFRESH_INTERVAL_KEY,
 } from '../../modules/rss/settings'
@@ -75,6 +77,7 @@ interface RSSAnalysisJobState {
 
 interface RSSModeProps {
   isActive?: boolean
+  isSuspended?: boolean
   isMotionSettled?: boolean
 }
 
@@ -93,6 +96,7 @@ interface RSSModeSnapshot {
 
 export default function RSSMode({
   isActive = true,
+  isSuspended = false,
   isMotionSettled = true,
 }: RSSModeProps) {
   const navigate = useNavigate()
@@ -125,7 +129,8 @@ export default function RSSMode({
   const [newItemIds, setNewItemIds] = useState<Set<string>>(new Set())
   const [statusMessage, setStatusMessage] = useState<string | null>(null)
   const [statusAction, setStatusAction] = useState<RSSBrowserOpenActionData | null>(null)
-  const [backgroundWarning, setBackgroundWarning] = useState<string | null>(null)
+  const [analysisBackgroundWarning, setAnalysisBackgroundWarning] = useState<string | null>(null)
+  const [autoRefreshWarning, setAutoRefreshWarning] = useState<string | null>(null)
   const [analysisProgressMap, setAnalysisProgressMap] = useState<Record<string, RSSItemAnalysisProgressState>>({})
   const [analysisJobs, setAnalysisJobs] = useState<RSSAnalysisJobState[]>([])
   const [hasHydrated, setHasHydrated] = useState(() => Boolean(initialWarmCache))
@@ -133,7 +138,11 @@ export default function RSSMode({
   const sourcesRef = useRef<RSSSource[]>([])
   const becameVisibleRef = useRef(false)
   const lastModalActionKeyRef = useRef<string | null>(null)
-  const shouldPoll = isActive && hasHydrated
+  const suspendedRef = useRef(isSuspended)
+  const pendingAutoRefreshSnapshotRef = useRef<Parameters<typeof getRSSAutoRefreshWarning>[0] | null>(null)
+  suspendedRef.current = isSuspended
+  const shouldPoll = isActive && !isSuspended && hasHydrated
+  const backgroundWarning = autoRefreshWarning || analysisBackgroundWarning
   const { modalProps, showConfirm } = useModal()
   const activeBrowserTab = useMemo(
     () => browserTabs.find((tab) => tab.id === activeBrowserTabId) ?? null,
@@ -361,7 +370,7 @@ export default function RSSMode({
       const progress = await fetchAnalysisProgress(visibleItemIds)
       const jobsOk = await fetchAnalysisJobs()
       const pollState = getRSSAnalysisPollState(progress, jobsOk)
-      setBackgroundWarning(pollState.backgroundWarning)
+      setAnalysisBackgroundWarning(pollState.backgroundWarning)
       if (disposed) return
       timer = setTimeout(tick, pollState.nextDelayMs)
     }
@@ -373,21 +382,37 @@ export default function RSSMode({
     }
   }, [fetchAnalysisJobs, fetchAnalysisProgress, shouldPoll, visibleItemIds])
 
-  // Auto-refresh interval is user-configurable, preserving 15 minutes as the upgrade default.
   useEffect(() => {
-    if (!shouldPoll) return
-    if (autoRefreshIntervalMs <= 0) return
-    const interval = setInterval(async () => {
-      try {
-        await window.electronAPI?.rss?.fetchAll()
-        await loadRSSData()
-        setBackgroundWarning(null)
-      } catch {
-        setBackgroundWarning('RSS 自动刷新失败，稍后会再次尝试。')
+    const rss = window.electronAPI?.rss
+    if (!rss?.autoRefreshStatus || !rss.onAutoRefreshCompleted) return
+
+    const applySnapshot = (snapshot: Parameters<typeof getRSSAutoRefreshWarning>[0]) => {
+      setAutoRefreshWarning(getRSSAutoRefreshWarning(snapshot))
+    }
+    const unsubscribe = rss.onAutoRefreshCompleted((snapshot) => {
+      if (suspendedRef.current) {
+        pendingAutoRefreshSnapshotRef.current = snapshot
+        return
       }
-    }, autoRefreshIntervalMs)
-    return () => clearInterval(interval)
-  }, [autoRefreshIntervalMs, loadRSSData, shouldPoll])
+      applySnapshot(snapshot)
+      void loadRSSData({ background: true })
+    })
+    void rss.autoRefreshStatus().then((result) => {
+      if (!result.success || !result.data) return
+      if (suspendedRef.current) pendingAutoRefreshSnapshotRef.current = result.data
+      else applySnapshot(result.data)
+    })
+    return unsubscribe
+  }, [loadRSSData])
+
+  useEffect(() => {
+    if (isSuspended) return
+    const pending = pendingAutoRefreshSnapshotRef.current
+    if (!pending) return
+    pendingAutoRefreshSnapshotRef.current = null
+    setAutoRefreshWarning(getRSSAutoRefreshWarning(pending))
+    void loadRSSData({ background: true })
+  }, [isSuspended, loadRSSData])
 
   useEffect(() => {
     if (!shouldPoll) return
@@ -527,6 +552,7 @@ export default function RSSMode({
     if (refreshing) return
     setRefreshing(true)
     setStatusAction(null)
+    let attemptedFullRefresh = false
     try {
       if (typeof window !== 'undefined' && window.electronAPI) {
         const latestSelectedSourceId = useRSSSession.getState().selectedSourceId
@@ -558,7 +584,9 @@ export default function RSSMode({
             setStatusMessage(result.data?.message || `${selectedSourceEntry.name} 已刷新`)
           }
         } else {
+          attemptedFullRefresh = true
           const result = await window.electronAPI.rss.fetchAll()
+          setAutoRefreshWarning(getRSSFetchAllResultWarning(result))
           if (!result.success) {
             setStatusMessage(result.error || '刷新失败')
           } else if (result.data?.running) {
@@ -572,7 +600,11 @@ export default function RSSMode({
       }
       await loadRSSData()
     } catch (error) {
-      setStatusMessage(error instanceof Error ? error.message : '刷新失败')
+      const message = error instanceof Error ? error.message : '刷新失败'
+      setStatusMessage(message)
+      if (attemptedFullRefresh) {
+        setAutoRefreshWarning(`RSS 刷新失败：${message}`)
+      }
     } finally {
       setRefreshing(false)
     }
@@ -586,6 +618,11 @@ export default function RSSMode({
   const handleOpenExternalServices = useCallback(() => {
     navigate('/settings?section=external-services')
   }, [navigate])
+
+  const handleAutoRefreshIntervalChange = useCallback((intervalMs: number) => {
+    setAutoRefreshIntervalMs(intervalMs)
+    if (intervalMs <= 0) setAutoRefreshWarning(null)
+  }, [])
 
   useRSSAgentAdapter({
     items,
@@ -853,7 +890,7 @@ export default function RSSMode({
               sources={sources}
               selectedSourceId={selectedSource}
               autoRefreshIntervalMs={autoRefreshIntervalMs}
-              onAutoRefreshIntervalChange={setAutoRefreshIntervalMs}
+              onAutoRefreshIntervalChange={handleAutoRefreshIntervalChange}
               onClose={() => setSettingsOpen(false)}
               onReloadData={() => loadRSSData({ background: true })}
               onOpenExternalServices={handleOpenExternalServices}

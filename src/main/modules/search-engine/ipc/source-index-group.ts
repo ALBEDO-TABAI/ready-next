@@ -36,11 +36,13 @@
 // SearchQueryGroup (V2.4b) because they consume the FTS surface and
 // independent diagnostic gating.
 import type { IpcMain } from 'electron'
+import { FS_SOURCE_TYPE } from '../../../../shared/search-source-types'
 import type {
   ReindexAllSourcesResult,
   ReindexWorkspaceResult,
 } from '../indexer'
 import type { EngineDeps } from './engine-deps'
+import { publishDocumentIndexChanged } from './document-index-events'
 import type { IpcChannelGroup, IpcDisposeHandle } from './types'
 
 /**
@@ -85,7 +87,7 @@ export const sourceIndexGroup: IpcChannelGroup<SourceIndexGroupDeps> = {
 
     ipcMain.handle(
       'document:reindexWorkspace',
-      async (_event, root: string): Promise<SearchIPCResponse<ReindexWorkspaceResult> & {
+      async (event, root: string): Promise<SearchIPCResponse<ReindexWorkspaceResult> & {
         errorKind?: 'invalid_root' | 'engine_unavailable' | 'failed'
         validationReason?: string
       }> => {
@@ -113,6 +115,13 @@ export const sourceIndexGroup: IpcChannelGroup<SourceIndexGroupDeps> = {
         try {
           const result = await deps.getWorkerBridge().reindexWorkspace({ root })
           deps.noteSearchWorkerSuccess()
+          if (result.ok && (result.indexed > 0 || result.removed > 0)) {
+            publishDocumentIndexChanged(event.sender, {
+              workspaceRoot: root,
+              reason: 'rebuild',
+              changedPaths: [],
+            })
+          }
           return { success: true, data: result }
         } catch (workerError) {
           // Stage U / U8.1 — log fallback so we can see how often the worker
@@ -120,6 +129,13 @@ export const sourceIndexGroup: IpcChannelGroup<SourceIndexGroupDeps> = {
           deps.recordSearchWorkerFallback({ task: 'reindexWorkspace', error: workerError, workspaceRoot: root })
           try {
             const result = await searchEngine.reindexWorkspace({ root })
+            if (result.ok && (result.indexed > 0 || result.removed > 0)) {
+              publishDocumentIndexChanged(event.sender, {
+                workspaceRoot: root,
+                reason: 'rebuild',
+                changedPaths: [],
+              })
+            }
             return { success: true, data: result }
           } catch (error) {
             return { success: false, error: error instanceof Error ? error.message : String(error), errorKind: 'failed' }
@@ -130,7 +146,7 @@ export const sourceIndexGroup: IpcChannelGroup<SourceIndexGroupDeps> = {
 
     ipcMain.handle(
       'document:reindexAllSources',
-      async (_event, root: string): Promise<SearchIPCResponse<ReindexAllSourcesResult> & {
+      async (event, root: string): Promise<SearchIPCResponse<ReindexAllSourcesResult> & {
         errorKind?: 'invalid_root' | 'engine_unavailable' | 'failed'
         validationReason?: string
       }> => {
@@ -154,11 +170,27 @@ export const sourceIndexGroup: IpcChannelGroup<SourceIndexGroupDeps> = {
         try {
           const result = await deps.getWorkerBridge().reindexAllSources({ root })
           deps.noteSearchWorkerSuccess()
+          const fsResult = result.perSource[FS_SOURCE_TYPE]
+          if (result.ok && fsResult && (fsResult.indexed > 0 || fsResult.removed > 0)) {
+            publishDocumentIndexChanged(event.sender, {
+              workspaceRoot: root,
+              reason: 'rebuild',
+              changedPaths: [],
+            })
+          }
           return { success: true, data: result }
         } catch (workerError) {
           deps.recordSearchWorkerFallback({ task: 'reindexAllSources', error: workerError, workspaceRoot: root })
           try {
             const result = await searchEngine.reindexAllSources({ root })
+            const fsResult = result.perSource[FS_SOURCE_TYPE]
+            if (result.ok && fsResult && (fsResult.indexed > 0 || fsResult.removed > 0)) {
+              publishDocumentIndexChanged(event.sender, {
+                workspaceRoot: root,
+                reason: 'rebuild',
+                changedPaths: [],
+              })
+            }
             return { success: true, data: result }
           } catch (error) {
             return { success: false, error: error instanceof Error ? error.message : String(error), errorKind: 'failed' }
@@ -195,7 +227,7 @@ export const sourceIndexGroup: IpcChannelGroup<SourceIndexGroupDeps> = {
     ipcMain.handle(
       'document:indexDocument',
       async (
-        _event,
+        event,
         payload: { path: string; root?: string; content?: string },
       ): Promise<SearchIPCResponse<{ ok: boolean; documentId?: number; skipped?: boolean; error?: string }>> => {
         const searchEngine = deps.getSearchEngine()
@@ -213,6 +245,13 @@ export const sourceIndexGroup: IpcChannelGroup<SourceIndexGroupDeps> = {
         }
         try {
           const result = await searchEngine.indexDocument(root, payload.path, payload.content)
+          if (result.ok && !result.skipped) {
+            publishDocumentIndexChanged(event.sender, {
+              workspaceRoot: root,
+              reason: 'incremental',
+              changedPaths: [payload.path],
+            })
+          }
           return { success: true, data: result }
         } catch (error) {
           return { success: false, error: error instanceof Error ? error.message : String(error) }

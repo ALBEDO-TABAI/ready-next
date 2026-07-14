@@ -35,6 +35,14 @@ export interface UpsertDocumentResult {
   skipped: boolean
 }
 
+export interface IndexedPathMetadata {
+  id: number
+  path: string
+  size: number | null
+  mtime: number | null
+  contentHash: string | null
+}
+
 export class SearchRepository {
   private readonly ensureWorkspaceStmt: DatabaseStatement
   private readonly findWorkspaceStmt: DatabaseStatement
@@ -42,6 +50,7 @@ export class SearchRepository {
   private readonly selectDocumentByPathStmt: DatabaseStatement
   private readonly insertDocumentStmt: DatabaseStatement
   private readonly updateDocumentStmt: DatabaseStatement
+  private readonly updateDocumentMetadataStmt: DatabaseStatement
   private readonly deletePathStmt: DatabaseStatement
   private readonly listPathsForWorkspaceStmt: DatabaseStatement
   private readonly countDocumentsStmt: DatabaseStatement
@@ -70,7 +79,7 @@ export class SearchRepository {
     this.findWorkspaceStmt = db.prepare('SELECT id FROM workspaces WHERE root = ?')
     this.touchWorkspaceStmt = db.prepare('UPDATE workspaces SET last_indexed_at = ? WHERE id = ?')
     this.selectDocumentByPathStmt = db.prepare(
-      'SELECT id, content_hash FROM documents WHERE workspace_id = ? AND path = ?'
+      'SELECT id, path, size, mtime, content_hash AS contentHash FROM documents WHERE workspace_id = ? AND path = ?'
     )
     this.insertDocumentStmt = db.prepare(`
       INSERT INTO documents
@@ -84,11 +93,17 @@ export class SearchRepository {
           source_type = ?, source_id = ?, source_meta_json = ?
       WHERE id = ?
     `)
+    this.updateDocumentMetadataStmt = db.prepare(`
+      UPDATE documents
+      SET name = ?, ext = ?, size = ?, mtime = ?, frontmatter_json = ?, indexed_at = ?,
+          source_type = ?, source_id = ?, source_meta_json = ?
+      WHERE id = ?
+    `)
     this.deletePathStmt = db.prepare(
       'DELETE FROM documents WHERE workspace_id = ? AND path = ?'
     )
     this.listPathsForWorkspaceStmt = db.prepare(
-      'SELECT id, path FROM documents WHERE workspace_id = ?'
+      'SELECT id, path, size, mtime, content_hash AS contentHash FROM documents WHERE workspace_id = ?'
     )
     this.countDocumentsStmt = db.prepare(
       'SELECT COUNT(*) AS total FROM documents WHERE workspace_id = ?'
@@ -213,19 +228,31 @@ export class SearchRepository {
   }
 
   upsertDocument(input: UpsertDocumentInput): UpsertDocumentResult {
-    const existing = this.selectDocumentByPathStmt.get<{ id: number; content_hash: string | null }>(
+    const existing = this.selectDocumentByPathStmt.get<IndexedPathMetadata>(
       input.workspaceId,
       input.path,
     )
-
-    if (existing && existing.content_hash === input.contentHash && input.contentHash !== null) {
-      return { documentId: existing.id, skipped: true }
-    }
 
     const indexedAt = Math.floor(Date.now() / 1000)
     const sourceType = input.sourceType ?? 'document'
     const sourceId = input.sourceId ?? null
     const sourceMetaJson = input.sourceMetaJson ?? null
+
+    if (existing && existing.contentHash === input.contentHash && input.contentHash !== null) {
+      this.updateDocumentMetadataStmt.run(
+        input.name,
+        input.ext,
+        input.size,
+        input.mtime,
+        input.frontmatterJson,
+        indexedAt,
+        sourceType,
+        sourceId,
+        sourceMetaJson,
+        existing.id,
+      )
+      return { documentId: existing.id, skipped: true }
+    }
 
     if (!existing) {
       const insertResult = this.insertDocumentStmt.run(
@@ -347,17 +374,26 @@ export class SearchRepository {
     }
   }
 
-  deletePath(workspaceId: number, path: string): void {
-    this.deletePathStmt.run(workspaceId, path)
+  deletePath(workspaceId: number, path: string): number {
+    const result = this.deletePathStmt.run(workspaceId, path) as { changes?: number }
+    return Number(result.changes ?? 0)
   }
 
-  listPathsForWorkspace(workspaceId: number, sourceType?: string): Array<{ id: number; path: string }> {
+  getPathMetadata(workspaceId: number, path: string): IndexedPathMetadata | undefined {
+    return this.selectDocumentByPathStmt.get<IndexedPathMetadata>(workspaceId, path)
+  }
+
+  listPathsForWorkspace(workspaceId: number, sourceType?: string): IndexedPathMetadata[] {
     if (sourceType) {
       return this.db
-        .prepare('SELECT id, path FROM documents WHERE workspace_id = ? AND source_type = ?')
-        .all<{ id: number; path: string }>(workspaceId, sourceType)
+        .prepare(`
+          SELECT id, path, size, mtime, content_hash AS contentHash
+          FROM documents
+          WHERE workspace_id = ? AND source_type = ?
+        `)
+        .all<IndexedPathMetadata>(workspaceId, sourceType)
     }
-    return this.listPathsForWorkspaceStmt.all<{ id: number; path: string }>(workspaceId)
+    return this.listPathsForWorkspaceStmt.all<IndexedPathMetadata>(workspaceId)
   }
 
   countDocuments(workspaceId: number): number {

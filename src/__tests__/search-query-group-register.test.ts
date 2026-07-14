@@ -143,3 +143,39 @@ test('dispose is idempotent — calling twice does not throw and removes nothing
     'second dispose issues at most one removeHandler per channel',
   )
 })
+
+test('document:getGraph preserves worker completeness metadata', async () => {
+  const { ipc, handleCalls } = createMockIpc()
+  const deps = {
+    getSearchEngine: () => ({}),
+    getWorkerBridge: () => ({
+      getDocumentGraph: async () => ({
+        nodes: [],
+        edges: [],
+        totalDocs: 6123,
+        truncated: true,
+        note: 'limited',
+      }),
+    }),
+    validateWorkspaceRoot: () => ({ ok: true }),
+    recordSearchWorkerFallback: () => undefined,
+    noteSearchWorkerSuccess: () => undefined,
+  } as unknown as SearchQueryGroupDeps
+  searchQueryGroup.register(ipc, deps)
+  const handler = handleCalls.find((entry) => entry.channel === 'document:getGraph')?.handler
+  assert.ok(handler)
+
+  const response = await handler({} as IpcMainInvokeEvent, { workspaceRoot: '/work' }) as {
+    success: boolean
+    data?: { totalDocs: number; truncated: boolean; note?: string }
+  }
+
+  assert.equal(response.success, true)
+  assert.deepEqual(response.data, {
+    nodes: [],
+    edges: [],
+    totalDocs: 6123,
+    truncated: true,
+    note: 'limited',
+  })
+})

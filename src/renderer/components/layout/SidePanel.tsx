@@ -9,6 +9,7 @@ import {
   WORKBENCH_PANEL_MOTION_OFFSET_PX,
   WORKBENCH_PANEL_REDUCED_MOTION_DURATION_S,
 } from '../../modules/workbench/panel-motion'
+import type { GraphWorkspaceRequest } from '../graph/GraphWorkspace'
 
 export type SidePanelVariant = 'files' | 'search' | 'skills' | 'backlinks' | 'graph' | 'hidden'
 
@@ -18,6 +19,8 @@ interface SidePanelProps {
   variant?: SidePanelVariant
   panelWidth: number
   contentVisible?: boolean
+  onGraphWorkspaceOpen?: (request: GraphWorkspaceRequest) => void
+  graphWorkspaceOpen?: boolean
 }
 
 interface AnimatedPanelSlots {
@@ -34,7 +37,10 @@ type PanelDirection = -1 | 0 | 1
 const GlobalSearchPanel = lazy(() => import('./GlobalSearchPanel')) as ComponentType<DeferredPanelProps>
 const SkillsCenterPanel = lazy(() => import('./SkillsCenterPanel')) as ComponentType<DeferredPanelProps>
 const BacklinksCenterPanel = lazy(() => import('./BacklinksCenterPanel')) as ComponentType<DeferredPanelProps>
-const GraphCenterPanel = lazy(() => import('./GraphCenterPanel')) as ComponentType<DeferredPanelProps>
+const GraphCenterPanel = lazy(() => import('./GraphCenterPanel')) as ComponentType<DeferredPanelProps & {
+  onOpenGlobal?: (request: GraphWorkspaceRequest) => void
+  globalBrowseOpen?: boolean
+}>
 
 const PANEL_STACK_ORDER: Record<RenderableSidePanelVariant, number> = {
   files: 0,
@@ -104,6 +110,8 @@ export default function SidePanel({
   variant = 'files',
   panelWidth,
   contentVisible = true,
+  onGraphWorkspaceOpen,
+  graphWorkspaceOpen = false,
 }: SidePanelProps) {
   const reduceMotion = useReducedMotion()
   const lastVisibleVariantRef = useRef<RenderableSidePanelVariant>('files')
@@ -154,7 +162,20 @@ export default function SidePanel({
     }
 
     if (targetVariant === 'graph') {
-      return renderDeferredPanel(GraphCenterPanel, panelKey)
+      return (
+        <Suspense key={panelKey} fallback={null}>
+          <GraphCenterPanel onOpenGlobal={onGraphWorkspaceOpen} globalBrowseOpen={graphWorkspaceOpen}>
+            {(slots: AnimatedPanelSlots) => (
+              <AnimatedPanelLayer
+                direction={transitionDirection}
+                reduceMotion={!!reduceMotion}
+                header={slots.header}
+                body={slots.body}
+              />
+            )}
+          </GraphCenterPanel>
+        </Suspense>
+      )
     }
 
     return (

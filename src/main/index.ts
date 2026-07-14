@@ -15,7 +15,18 @@ import { setupDocumentIPC } from './modules/document-engine/ipc-handler'
 import { setupSearchIPC, shutdownFileWatchers } from './modules/search-engine/ipc-handler'
 import { requestRendererReadingSessionFlush, setupFileEmergenceIPC } from './modules/file-emergence/ipc-handler'
 import { setupTagForgeIPC } from './modules/tag-forge/ipc-handler'
-import { setupRSSIPC, setRSSBrowserController } from './modules/rss-engine/ipc-handler'
+import {
+  fetchAllRSSFeeds,
+  readLastRSSFetchAllCompletedAt,
+  readRSSAutoRefreshInterval,
+  setupRSSIPC,
+  setRSSBrowserController,
+  setRSSFetchAllCompletedListener,
+} from './modules/rss-engine/ipc-handler'
+import {
+  RSSAutoRefreshScheduler,
+  setupRSSAutoRefreshIPC,
+} from './modules/rss-engine/auto-refresh-scheduler'
 import { setupCalendarIPC } from './modules/calendar-engine/ipc-handler'
 import {
   startReminderScheduler,
@@ -29,6 +40,9 @@ import {
   type SyncScheduler,
 } from './modules/calendar-engine/sync-scheduler'
 import { setupSettingsIPC } from './modules/settings-engine/ipc-handler'
+import {
+  RSS_AUTO_REFRESH_INTERVAL_KEY,
+} from '../shared/rss-auto-refresh'
 import { setupPetIPC } from './modules/pet/ipc-handler'
 import type { PetWindowManager } from './modules/pet/pet-window-manager'
 import { applyBundledAISettingsSeed } from './modules/settings-engine/seed-loader'
@@ -88,6 +102,7 @@ let petWindowManager: PetWindowManager | null = null
 let reminderScheduler: ReminderScheduler | null = null
 let reminderNotifierFire: ((payload: import('./modules/calendar-engine/reminder-scheduler').ReminderFirePayload) => void) | null = null
 let calendarSyncScheduler: SyncScheduler | null = null
+let rssAutoRefreshScheduler: RSSAutoRefreshScheduler | null = null
 // Guard to prevent re-registering window-dependent IPC handlers on macOS dock re-open
 let windowIPCRegistered = false
 const THEME_SETTING_KEY = 'ui_theme_option'
@@ -291,12 +306,27 @@ function setupApplicationMenu(): void {
   Menu.setApplicationMenu(menu)
 }
 
+function stopRSSAutoRefresh(): Promise<void> {
+  setRSSFetchAllCompletedListener(null)
+  try {
+    return rssAutoRefreshScheduler?.stop() ?? Promise.resolve()
+  } catch (error) {
+    console.warn('[rss:auto-refresh] stop failed:', error instanceof Error ? error.message : String(error))
+    return Promise.resolve()
+  }
+}
+
 function runFatalProcessCleanup(): Promise<void> {
+  const rssAutoRefreshStopped = stopRSSAutoRefresh()
   return runBeforeQuitCleanup({
     cleanupAgentRuntime,
     cleanupAgentManager: () => agentManager.cleanup(),
-    cleanupRsshubManager: () => rsshubManager.cleanup(),
+    cleanupRsshubManager: async () => {
+      await rssAutoRefreshStopped
+      await rsshubManager.cleanup()
+    },
     cleanupManagedBrowsers: async () => {
+      await rssAutoRefreshStopped
       const result = await closeAllBrowsers()
       if (result.errors.length > 0) {
         console.warn('[process-handlers] closeAllBrowsers errors', result.errors)
@@ -556,6 +586,25 @@ function setupGlobalIPC(): void {
   setupFileEmergenceIPC()
   setupTagForgeIPC()
   setupRSSIPC(RSS_USE_MOCK)
+  rssAutoRefreshScheduler = new RSSAutoRefreshScheduler({
+    now: () => Date.now(),
+    readIntervalMs: readRSSAutoRefreshInterval,
+    readLastCompletedAt: readLastRSSFetchAllCompletedAt,
+    runFetchAll: () => fetchAllRSSFeeds(),
+    schedule: (delayMs, callback) => setTimeout(callback, delayMs),
+    cancel: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
+    publish: (snapshot) => {
+      for (const window of BrowserWindow.getAllWindows()) {
+        if (!window.isDestroyed()) {
+          window.webContents.send('rss:autoRefreshCompleted', snapshot)
+        }
+      }
+    },
+  })
+  setRSSFetchAllCompletedListener((completedAt, result) => {
+    rssAutoRefreshScheduler?.onFetchAllCompleted(completedAt, result)
+  })
+  setupRSSAutoRefreshIPC(ipcMain, () => rssAutoRefreshScheduler!.getSnapshot())
   // Reminder runtime: notifier closes over the mainWindow accessor (window
   // may be created after this point on cold start; closure defers reads).
   // Scheduler reads from the DB and calls notifier.fire() when timers
@@ -644,7 +693,13 @@ function setupGlobalIPC(): void {
     },
     syncScheduler: calendarSyncScheduler ?? undefined,
   })
-  setupSettingsIPC()
+  setupSettingsIPC({
+    onSettingChanged: (key) => {
+      if (key === RSS_AUTO_REFRESH_INTERVAL_KEY) {
+        rssAutoRefreshScheduler?.onSettingChanged()
+      }
+    },
+  })
   petWindowManager = setupPetIPC({
     preloadPath: join(__dirname, '../preload/index.mjs'),
       rendererFile: join(__dirname, '../renderer/index.html'),
@@ -1101,7 +1156,10 @@ app.whenReady().then(async () => {
   }
 
   await yieldToPresentation()
-  void createWindow().then(() => petWindowManager?.restoreIfEnabled())
+  void createWindow().then(() => {
+    rssAutoRefreshScheduler?.start()
+    return petWindowManager?.restoreIfEnabled()
+  })
 
   app.on('activate', function () {
     // Pet windows are separate BrowserWindows; Dock activation should restore the main app window.
@@ -1142,11 +1200,16 @@ app.on('before-quit', (event) => {
   } catch (err) {
     console.warn('[before-quit] calendarSyncScheduler.stop threw:', err)
   }
+  const rssAutoRefreshStopped = stopRSSAutoRefresh()
   void runBeforeQuitCleanup({
     cleanupAgentRuntime,
     cleanupAgentManager: () => agentManager.cleanup(),
-    cleanupRsshubManager: () => rsshubManager.cleanup(),
+    cleanupRsshubManager: async () => {
+      await rssAutoRefreshStopped
+      await rsshubManager.cleanup()
+    },
     cleanupManagedBrowsers: async () => {
+      await rssAutoRefreshStopped
       const result = await closeAllBrowsers()
       if (result.errors.length > 0) {
         console.warn('[before-quit] closeAllBrowsers errors', result.errors)

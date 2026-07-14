@@ -5,7 +5,7 @@ import { BINARY_EXTENSIONS } from '../document-engine/binary-extensions'
 import { createRotatingLogger } from '../../utils/rotating-logger'
 import { parseDocumentGraph } from '../../../shared/document-graph-parse'
 import { FS_SOURCE_TYPE } from '../../../shared/search-source-types'
-import type { SearchRepository } from './repository'
+import type { IndexedPathMetadata, SearchRepository } from './repository'
 import { SEARCH_INDEX_CONTENT_VERSION } from './query'
 
 const searchLogger = createRotatingLogger('ready-search.log')
@@ -38,6 +38,12 @@ export interface AdapterContext {
   signal?: AbortSignal
 }
 
+interface IndexFileStat {
+  size: number
+  mtimeMs: number
+  isFile(): boolean
+}
+
 // Hardened 2026-04-25 (perf-rescue B5): bumped from 2MB → 5MB so legitimate
 // large markdown/SQL dumps fit. Anything beyond is skipped + logged.
 const MAX_FILE_BYTES = 5 * 1024 * 1024
@@ -52,6 +58,7 @@ const MAX_FILE_BYTES = 5 * 1024 * 1024
 //     event loop can service abort/cancel posts mid-batch.
 const BATCH_SIZE = 50
 const BATCH_CONCURRENCY = 4
+const METADATA_CONCURRENCY = 24
 
 /** Cancellation marker. Distinguished by `name === 'AbortError'`. */
 export class AbortError extends Error {
@@ -239,9 +246,9 @@ export class FileSystemAdapter implements IndexSourceAdapter {
       return result
     }
 
-    const existingPaths = new Map<string, number>()
+    const existingPaths = new Map<string, IndexedPathMetadata>()
     for (const row of ctx.repository.listPathsForWorkspace(ctx.workspaceId, this.sourceType)) {
-      existingPaths.set(row.path, row.id)
+      existingPaths.set(row.path, row)
     }
 
     const filePaths = await this.collectCandidatePaths(ctx.workspaceRoot)
@@ -258,11 +265,29 @@ export class FileSystemAdapter implements IndexSourceAdapter {
       // 50-wide Promise.all. Yields to the event loop after each individual
       // file so the worker can process incoming abort/cancel posts mid-batch.
 
-      const parsedBatch = await mapBounded(batch, BATCH_CONCURRENCY, async (p) => {
-        const parsed = await this.loadFile(p)
+      // Metadata checks are cheap and do not read file bodies, so they can run
+      // wider than content parsing. This keeps a no-change rebuild from being
+      // serialized behind the conservative four-reader content limit.
+      const candidates = await mapBounded(batch, METADATA_CONCURRENCY, async (p) => ({
+        path: p,
+        fileStat: await stat(p).catch(() => null),
+      }))
+      const changedCandidates: Array<{ path: string; fileStat: IndexFileStat | null }> = []
+      for (const candidate of candidates) {
+        const existing = existingPaths.get(candidate.path)
+        if (isUnchangedIndexedMetadata(existing, candidate.fileStat)) {
+          result.skipped += 1
+          existingPaths.delete(candidate.path)
+        } else {
+          changedCandidates.push(candidate)
+        }
+      }
+
+      const parsedBatch = await mapBounded(changedCandidates, BATCH_CONCURRENCY, async (candidate) => {
+        const parsed = await this.loadFile(candidate.path, undefined, candidate.fileStat)
         // Per-file yield. setImmediate runs on the macrotask queue, giving
         // any pending message handler (cancel posts) a chance to set the
-        // abort flag before we stat/read the next file.
+        // abort flag before we read the next changed file.
         await new Promise<void>((resolve) => setImmediate(resolve))
         return parsed
       })
@@ -271,29 +296,39 @@ export class FileSystemAdapter implements IndexSourceAdapter {
       // arriving during loadFile shouldn't blow another sync write.
       if (ctx.signal?.aborted) throw new AbortError()
 
-      ctx.repository.transaction(() => {
-        for (const parsed of parsedBatch) {
-          if (!parsed) continue
-          const upsert = ctx.repository.upsertDocument({
-            workspaceId: ctx.workspaceId,
-            path: parsed.path,
-            name: parsed.name,
-            ext: parsed.ext,
-            size: parsed.size,
-            mtime: parsed.mtime,
-            contentHash: parsed.contentHash,
-            frontmatterJson: parsed.frontmatterJson,
-            body: parsed.body,
-            sourceType: this.sourceType,
-          })
-          ctx.repository.replaceTags(upsert.documentId, parsed.tags)
-          ctx.repository.replaceLinks(upsert.documentId, parsed.wikilinks, parsed.mdlinks)
-          ctx.repository.replaceAttachments(upsert.documentId, parsed.attachments)
-          if (upsert.skipped) result.skipped += 1
-          else result.indexed += 1
-          existingPaths.delete(parsed.path)
-        }
-      })
+      const filesToUpsert: LoadedFile[] = []
+      for (const parsed of parsedBatch) {
+        if (!parsed) continue
+        filesToUpsert.push(parsed)
+      }
+
+      if (filesToUpsert.length > 0) {
+        ctx.repository.transaction(() => {
+          for (const parsed of filesToUpsert) {
+            const upsert = ctx.repository.upsertDocument({
+              workspaceId: ctx.workspaceId,
+              path: parsed.path,
+              name: parsed.name,
+              ext: parsed.ext,
+              size: parsed.size,
+              mtime: parsed.mtime,
+              contentHash: parsed.contentHash,
+              frontmatterJson: parsed.frontmatterJson,
+              body: parsed.body,
+              sourceType: this.sourceType,
+            })
+            if (upsert.skipped) {
+              result.skipped += 1
+            } else {
+              ctx.repository.replaceTags(upsert.documentId, parsed.tags)
+              ctx.repository.replaceLinks(upsert.documentId, parsed.wikilinks, parsed.mdlinks)
+              ctx.repository.replaceAttachments(upsert.documentId, parsed.attachments)
+              result.indexed += 1
+            }
+            existingPaths.delete(parsed.path)
+          }
+        })
+      }
 
       // Inter-batch yield. Combined with the per-file yield above, this is
       // belt-and-suspenders for cancel responsiveness on huge workspaces.
@@ -313,15 +348,21 @@ export class FileSystemAdapter implements IndexSourceAdapter {
       })
     }
 
-    ctx.repository.transaction(() => {
-      ctx.repository.resolveWikilinkTargets(ctx.workspaceId)
-    })
+    if (result.indexed > 0 || result.removed > 0) {
+      ctx.repository.transaction(() => {
+        ctx.repository.resolveWikilinkTargets(ctx.workspaceId)
+      })
+    }
 
     return result
   }
 
-  async loadOne(filePath: string, rawOverride?: string): Promise<LoadedFile | null> {
-    return this.loadFile(filePath, rawOverride)
+  async loadOne(
+    filePath: string,
+    rawOverride?: string,
+  ): Promise<LoadedFile | null> {
+    const fileStat = await stat(filePath).catch(() => null)
+    return this.loadFile(filePath, rawOverride, fileStat)
   }
 
   private async collectCandidatePaths(root: string): Promise<string[]> {
@@ -356,10 +397,13 @@ export class FileSystemAdapter implements IndexSourceAdapter {
     return results
   }
 
-  private async loadFile(filePath: string, rawOverride?: string): Promise<LoadedFile | null> {
+  private async loadFile(
+    filePath: string,
+    rawOverride: string | undefined,
+    fileStat: IndexFileStat | null,
+  ): Promise<LoadedFile | null> {
     try {
       const ext = extname(filePath).toLowerCase()
-      const fileStat = await stat(filePath).catch(() => null)
       // When we have an override (e.g. live in-memory edit being re-indexed)
       // skip the on-disk binary sniff — caller already has the bytes — but
       // still enforce extension + path-segment blocks.
@@ -387,7 +431,7 @@ export class FileSystemAdapter implements IndexSourceAdapter {
         size = Buffer.byteLength(raw, 'utf-8')
         mtime = Math.floor(Date.now())
       }
-      const contentHash = hashContent(raw)
+      const contentHash = buildSearchIndexContentHash(raw)
       const graph = parseDocumentGraph(raw)
       const frontmatterJson = graph.frontmatter ? JSON.stringify(graph.frontmatter) : null
       return {
@@ -438,6 +482,19 @@ export interface LoadedFile {
   attachments: ReturnType<typeof parseDocumentGraph>['attachments']
 }
 
+function isUnchangedIndexedMetadata(
+  existing: IndexedPathMetadata | undefined,
+  fileStat: IndexFileStat | null,
+): existing is IndexedPathMetadata {
+  return Boolean(
+    existing
+      && fileStat?.isFile()
+      && existing.size === fileStat.size
+      && existing.mtime === Math.floor(fileStat.mtimeMs)
+      && existing.contentHash?.startsWith(`${SEARCH_INDEX_CONTENT_VERSION}:`),
+  )
+}
+
 // ---------------------------------------------------------------------------
 // Shared-scope adapters below. Each reads a single SQLite table (owned by its
 // domain module) and mirrors rows into `documents` with source_type set. The
@@ -463,8 +520,14 @@ function stripHtml(html: string | null | undefined): string {
     .trim()
 }
 
-function hashContent(body: string): string {
-  return createHash('sha256').update(SEARCH_INDEX_CONTENT_VERSION).update('\0').update(body).digest('hex').slice(0, 16)
+export function buildSearchIndexContentHash(body: string): string {
+  const digest = createHash('sha256')
+    .update(SEARCH_INDEX_CONTENT_VERSION)
+    .update('\0')
+    .update(body)
+    .digest('hex')
+    .slice(0, 16)
+  return `${SEARCH_INDEX_CONTENT_VERSION}:${digest}`
 }
 
 function syncShared(
@@ -487,7 +550,7 @@ function syncShared(
 
   ctx.repository.transaction(() => {
     for (const row of rows) {
-      const contentHash = hashContent(`${row.name}\n${row.body}`)
+      const contentHash = buildSearchIndexContentHash(`${row.name}\n${row.body}`)
       const upsert = ctx.repository.upsertDocument({
         workspaceId: ctx.workspaceId,
         path: row.path,
@@ -504,9 +567,11 @@ function syncShared(
       })
       if (upsert.skipped) result.skipped += 1
       else result.indexed += 1
-      ctx.repository.replaceTags(upsert.documentId, [])
-      ctx.repository.replaceLinks(upsert.documentId, [], [])
-      ctx.repository.replaceAttachments(upsert.documentId, [])
+      if (!upsert.skipped) {
+        ctx.repository.replaceTags(upsert.documentId, [])
+        ctx.repository.replaceLinks(upsert.documentId, [], [])
+        ctx.repository.replaceAttachments(upsert.documentId, [])
+      }
       existingPaths.delete(row.path)
     }
     for (const path of existingPaths.keys()) {

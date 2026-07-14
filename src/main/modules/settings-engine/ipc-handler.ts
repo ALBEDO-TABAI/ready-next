@@ -36,7 +36,7 @@ function logSettings(msg: string) {
   try { settingsLogger.append(`[${new Date().toISOString()}] ${msg}\n`) } catch { /* ignore */ }
 }
 
-export function setupSettingsIPC(): void {
+export function setupSettingsIPC(options?: { onSettingChanged?: (key: string, value: string) => void }): void {
   const repository = new AppSettingsRepository()
   const externalServices = new ExternalServiceStore(repository)
   setBrowserPowerGlobalModeReader(() => repository.getSetting(BROWSER_POWER_MODE_SETTING_KEY) === 'true')
@@ -55,6 +55,7 @@ export function setupSettingsIPC(): void {
   ipcMain.handle('settings:set', (_, { key, value }: { key: string; value: string }): SettingsIPCResponse => {
     try {
       repository.setSetting(key, value)
+      options?.onSettingChanged?.(key, value)
       return { success: true }
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : String(error) }

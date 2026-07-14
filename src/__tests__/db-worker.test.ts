@@ -13,6 +13,7 @@
 import assert from 'node:assert/strict'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import test from 'node:test'
@@ -23,6 +24,8 @@ import {
   type WorkerFactory,
 } from '../main/modules/database/worker-bridge'
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
+
+const nodeRequire = createRequire(import.meta.url)
 
 function resolveWorkerEntry(): string | null {
   // 1) bundled output (real production layout)
@@ -44,7 +47,7 @@ test('db-worker integration: end-to-end query/response', async (t) => {
 
   // Build a real DB on disk with a minimal schema so the worker can run a
   // graph query against it.
-  const sqlMod = require('better-sqlite3') as (new (path: string) => { exec: (sql: string) => void; close: () => void; pragma: (s: string, opts?: { simple?: boolean }) => unknown }) & { default?: new (path: string) => { exec: (sql: string) => void; close: () => void; pragma: (s: string, opts?: { simple?: boolean }) => unknown } }
+  const sqlMod = nodeRequire('better-sqlite3') as (new (path: string) => { exec: (sql: string) => void; close: () => void; pragma: (s: string, opts?: { simple?: boolean }) => unknown }) & { default?: new (path: string) => { exec: (sql: string) => void; close: () => void; pragma: (s: string, opts?: { simple?: boolean }) => unknown } }
   const Sqlite = (sqlMod as { default?: new (path: string) => { exec: (sql: string) => void; close: () => void; pragma: (s: string, opts?: { simple?: boolean }) => unknown } }).default || sqlMod
 
   const tmpDir = await mkdtemp(join(tmpdir(), 'db-worker-itest-'))
@@ -103,11 +106,13 @@ test('db-worker integration: end-to-end query/response', async (t) => {
       const graph = await bridge.getDocumentGraph({ workspaceRoot: '/work', depth: 2 })
       // 2 docs, 1 tag node. 1 link edge + 1 tag edge.
       assert.equal(graph.nodes.length, 3, `expected 3 nodes, got ${graph.nodes.length}: ${JSON.stringify(graph.nodes)}`)
-      assert.ok(graph.nodes.some((n) => n.type === 'doc' && n.label === 'a.md'))
-      assert.ok(graph.nodes.some((n) => n.type === 'doc' && n.label === 'b.md'))
+      assert.ok(graph.nodes.some((n) => n.type === 'doc' && n.label === 'a.md' && n.path === '/work/a.md'))
+      assert.ok(graph.nodes.some((n) => n.type === 'doc' && n.label === 'b.md' && n.path === '/work/b.md'))
       assert.ok(graph.nodes.some((n) => n.type === 'tag' && n.label === 'note'))
       assert.ok(graph.edges.some((e) => e.kind === 'wikilink'))
       assert.ok(graph.edges.some((e) => e.kind === 'tag-of'))
+      assert.equal(graph.totalDocs, 2)
+      assert.equal(graph.truncated, false)
     } finally {
       await bridge.shutdown()
     }

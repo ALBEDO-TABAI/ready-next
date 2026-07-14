@@ -4,7 +4,11 @@ import { normalizeSearchText } from '../../../shared/document-graph-parse'
 import { validateWorkspaceRoot } from '../../../shared/workspace-validation'
 import { SearchRepository } from './repository'
 import { parseSearchQuery, type SearchHit } from './query'
-import { reconcileIndexedFrontmatter,reconcileIndexedWorkspace } from '../tag-forge/reconcile'
+import {
+  reconcileIndexedFrontmatter,
+  reconcileIndexedWorkspace,
+  reconcilePendingIndexedReadbacks,
+} from '../tag-forge/reconcile'
 import {
   AbortError,
   AgentMessageAdapter,
@@ -127,7 +131,11 @@ export class SearchEngine {
       result.scanned = adapterResult.scanned
       this.repository.touchWorkspace(workspaceId, Math.floor(Date.now() / 1000))
       result.ok = true
-      reconcileIndexedWorkspace(this.repository.getConnection(),root,workspaceId)
+      if (result.indexed > 0) {
+        reconcileIndexedWorkspace(this.repository.getConnection(),root,workspaceId)
+      } else {
+        reconcilePendingIndexedReadbacks(this.repository.getConnection(),root,workspaceId)
+      }
     } catch (error) {
       // perf-rescue B6: AbortError is a first-class signal for callers; we
       // still log it but surface a structured `aborted: true` flag so the
@@ -225,27 +233,29 @@ export class SearchEngine {
         })
         documentId = upsert.documentId
         skipped = upsert.skipped
-        this.repository.replaceTags(documentId, parsed.tags)
-        this.repository.replaceLinks(documentId, parsed.wikilinks, parsed.mdlinks)
-        this.repository.replaceAttachments(documentId, parsed.attachments)
-        // perf-rescue B8: per-document wikilink resolve.
-        //
-        // Was: resolveWikilinkTargets(workspaceId) — full workspace re-scan
-        //      on every save. On a 100k-doc workspace this is a multi-second
-        //      hot loop that runs for every keystroke-triggered save.
-        //
-        // Now: resolve only THIS doc's outgoing + incoming links. The
-        //      backup workspace-wide pass below catches edge cases (deletes,
-        //      renames, name-collision reshuffles) by aggregating bursts of
-        //      saves into one scan after a 5s quiet window.
-        this.repository.resolveWikilinkTargetsForDocument(documentId)
+        if (!skipped) {
+          this.repository.replaceTags(documentId, parsed.tags)
+          this.repository.replaceLinks(documentId, parsed.wikilinks, parsed.mdlinks)
+          this.repository.replaceAttachments(documentId, parsed.attachments)
+          // perf-rescue B8: per-document wikilink resolve.
+          //
+          // Was: resolveWikilinkTargets(workspaceId) — full workspace re-scan
+          //      on every save. On a 100k-doc workspace this is a multi-second
+          //      hot loop that runs for every keystroke-triggered save.
+          //
+          // Now: resolve only THIS doc's outgoing + incoming links. The
+          //      backup workspace-wide pass below catches edge cases (deletes,
+          //      renames, name-collision reshuffles) by aggregating bursts of
+          //      saves into one scan after a 5s quiet window.
+          this.repository.resolveWikilinkTargetsForDocument(documentId)
+        }
       })
-      // Schedule the backup resolve outside the transaction — we don't want
-      // this to keep the per-file transaction open. Skipped writes (no
-      // content change) still trigger it because rename/incoming-resolve
-      // edge cases don't depend on whether the body changed.
-      this.scheduleWorkspaceLinkResolve(workspaceId)
-      reconcileIndexedFrontmatter(this.repository.getConnection(),root,parsed.path,parsed.tags)
+      if (!skipped) {
+        // Schedule the backup resolve outside the transaction — we don't want
+        // this to keep the per-file transaction open.
+        this.scheduleWorkspaceLinkResolve(workspaceId)
+        reconcileIndexedFrontmatter(this.repository.getConnection(),root,parsed.path,parsed.tags)
+      }
       return { ok: true, documentId, skipped }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)

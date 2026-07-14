@@ -20,3 +20,8 @@ export function reconcileIndexedWorkspace(db:DatabaseConnection,workspaceRoot:st
   const rows=db.prepare(`SELECT path,frontmatter_json AS frontmatter FROM documents WHERE workspace_id=? AND source_type='document'`).all<{path:string;frontmatter:string|null}>(workspaceId)
   for(const row of rows){let tags:string[]=[];try{const parsed=JSON.parse(row.frontmatter||'{}');tags=Array.isArray(parsed.tags)?parsed.tags.map(String):[]}catch{/* malformed is no controlled tags */}reconcileIndexedFrontmatter(db,workspaceRoot,row.path,tags)}
 }
+
+export function reconcilePendingIndexedReadbacks(db:DatabaseConnection,workspaceRoot:string,workspaceId:number):void{
+  const rows=db.prepare(`SELECT DISTINCT d.path,d.frontmatter_json AS frontmatter FROM documents d JOIN file_identities f ON f.workspace_root=? AND f.current_path=d.path AND f.status='present' JOIN file_tag_assignments a ON a.file_key=f.file_key WHERE d.workspace_id=? AND d.source_type='document' AND LOWER(d.path) LIKE '%.md' AND a.suppressed=0 AND a.readback_at IS NULL`).all<{path:string;frontmatter:string|null}>(workspaceRoot,workspaceId)
+  for(const row of rows){let tags:string[]=[];try{const parsed=JSON.parse(row.frontmatter||'{}');tags=Array.isArray(parsed.tags)?parsed.tags.map(String):[]}catch{/* malformed is no controlled tags */}reconcileIndexedFrontmatter(db,workspaceRoot,row.path,tags)}
+}

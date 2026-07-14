@@ -13,11 +13,18 @@
 
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
-import { AbortError, FileSystemAdapter } from '../main/modules/search-engine/adapters'
+import {
+  AbortError,
+  buildSearchIndexContentHash,
+  FileSystemAdapter,
+  type LoadedFile,
+} from '../main/modules/search-engine/adapters'
+import { SearchEngine } from '../main/modules/search-engine/indexer'
+import { SEARCH_INDEX_CONTENT_VERSION } from '../main/modules/search-engine/query'
 import {
   WorkerDbBridgeImpl,
   type WorkerFactory,
@@ -103,8 +110,8 @@ test('FileSystemAdapter indexes 200 fixture files in 4 batches of 50', async () 
     assert.equal(result.indexed, 200, 'all 200 fixtures should be indexed')
     assert.equal(state.indexedPaths.length, 200)
 
-    // Batch transactions only — we ignore the trailing resolveWikilinkTargets
-    // transaction (always present, always 0-row delta).
+    // Batch transactions only — ignore the trailing resolveWikilinkTargets
+    // transaction that runs after changed rows (always a 0-row stub delta).
     const batchTxns = state.txnSizes.filter((n) => n > 0)
     assert.equal(batchTxns.length, 4, `expected 4 batch transactions, got ${batchTxns.length}`)
     for (const size of batchTxns) {
@@ -114,6 +121,179 @@ test('FileSystemAdapter indexes 200 fixture files in 4 batches of 50', async () 
     const sum = batchTxns.reduce((acc, n) => acc + n, 0)
     assert.equal(sum, 200, 'sum of batch sizes must equal indexed count')
   })
+})
+
+test('search index hashes carry the parser content-version prefix', () => {
+  const hash = buildSearchIndexContentHash('# Title\n\nBody')
+  assert.match(hash, new RegExp(`^${SEARCH_INDEX_CONTENT_VERSION}:[0-9a-f]{16}$`))
+})
+
+test('FileSystemAdapter skips unchanged current-version files before content sniffing', async () => {
+  await withTempRoot(async (root) => {
+    const path = join(root, 'opaque')
+    writeFileSync(path, Buffer.from([0x00, 0x01, 0x02, 0x03]))
+    const fileStat = statSync(path)
+    let upserts = 0
+    let derivedWrites = 0
+    let deletes = 0
+    let transactions = 0
+    const repo = {
+      listPathsForWorkspace() {
+        return [{
+          id: 41,
+          path,
+          size: fileStat.size,
+          mtime: Math.floor(fileStat.mtimeMs),
+          contentHash: `${SEARCH_INDEX_CONTENT_VERSION}:existing`,
+        }]
+      },
+      upsertDocument() {
+        upserts += 1
+        return { documentId: 41, skipped: false }
+      },
+      replaceTags() { derivedWrites += 1 },
+      replaceLinks() { derivedWrites += 1 },
+      replaceAttachments() { derivedWrites += 1 },
+      deletePath() { deletes += 1 },
+      resolveWikilinkTargets() {},
+      transaction(fn: () => void) {
+        transactions += 1
+        fn()
+      },
+    } as unknown as import('../main/modules/search-engine/repository').SearchRepository
+
+    const result = await new FileSystemAdapter().reindex({
+      workspaceId: 1,
+      workspaceRoot: root,
+      repository: repo,
+    })
+
+    assert.deepEqual(result, { indexed: 0, skipped: 1, removed: 0, scanned: 1 })
+    assert.equal(upserts, 0, 'unchanged metadata should bypass content loading and upsert')
+    assert.equal(derivedWrites, 0, 'unchanged files should not rewrite derived rows')
+    assert.equal(deletes, 0, 'an unchanged file must remain in the index')
+    assert.equal(transactions, 0, 'an unchanged batch should not open an empty write transaction')
+  })
+})
+
+test('FileSystemAdapter rebuilds same-metadata files from an older content version', async () => {
+  await withTempRoot(async (root) => {
+    const path = join(root, 'versioned.md')
+    writeFileSync(path, '# Versioned\n', 'utf-8')
+    const fileStat = statSync(path)
+    let upserts = 0
+    const repo = {
+      listPathsForWorkspace() {
+        return [{
+          id: 43,
+          path,
+          size: fileStat.size,
+          mtime: Math.floor(fileStat.mtimeMs),
+          contentHash: 'fts-legacy-version:existing',
+        }]
+      },
+      upsertDocument() {
+        upserts += 1
+        return { documentId: 43, skipped: false }
+      },
+      replaceTags() {},
+      replaceLinks() {},
+      replaceAttachments() {},
+      deletePath() {},
+      resolveWikilinkTargets() {},
+      transaction(fn: () => void) { fn() },
+    } as unknown as import('../main/modules/search-engine/repository').SearchRepository
+
+    const result = await new FileSystemAdapter().reindex({
+      workspaceId: 1,
+      workspaceRoot: root,
+      repository: repo,
+    })
+
+    assert.equal(upserts, 1)
+    assert.equal(result.indexed, 1)
+    assert.equal(result.skipped, 0)
+  })
+})
+
+test('FileSystemAdapter does not rewrite derived rows when hash upsert is skipped', async () => {
+  await withTempRoot(async (root) => {
+    const path = join(root, 'same.md')
+    writeFileSync(path, '# Same\n\n#tag [[Target]] ![[asset.png]]\n', 'utf-8')
+    const fileStat = statSync(path)
+    let derivedWrites = 0
+    const repo = {
+      listPathsForWorkspace() {
+        return [{
+          id: 52,
+          path,
+          size: fileStat.size + 1,
+          mtime: Math.floor(fileStat.mtimeMs),
+          contentHash: `${SEARCH_INDEX_CONTENT_VERSION}:existing`,
+        }]
+      },
+      upsertDocument() { return { documentId: 52, skipped: true } },
+      replaceTags() { derivedWrites += 1 },
+      replaceLinks() { derivedWrites += 1 },
+      replaceAttachments() { derivedWrites += 1 },
+      deletePath() {},
+      resolveWikilinkTargets() {},
+      transaction(fn: () => void) { fn() },
+    } as unknown as import('../main/modules/search-engine/repository').SearchRepository
+
+    const result = await new FileSystemAdapter().reindex({
+      workspaceId: 1,
+      workspaceRoot: root,
+      repository: repo,
+    })
+
+    assert.equal(result.skipped, 1)
+    assert.equal(derivedWrites, 0, 'hash-equal upserts must preserve tags, links, and attachments')
+  })
+})
+
+test('SearchEngine.indexDocument stops after a hash-equal upsert', async () => {
+  const parsed: LoadedFile = {
+    path: '/tmp/work/A.md',
+    name: 'A.md',
+    ext: '.md',
+    size: 8,
+    mtime: 123,
+    contentHash: buildSearchIndexContentHash('# A'),
+    frontmatterJson: null,
+    body: '# A',
+    tags: [],
+    wikilinks: [],
+    mdlinks: [],
+    attachments: [],
+  }
+  let derivedWrites = 0
+  let narrowResolves = 0
+  let scheduledResolves = 0
+  const repository = {
+    ensureWorkspace() { return 1 },
+    transaction(fn: () => void) { fn() },
+    upsertDocument() { return { documentId: 77, skipped: true } },
+    replaceTags() { derivedWrites += 1 },
+    replaceLinks() { derivedWrites += 1 },
+    replaceAttachments() { derivedWrites += 1 },
+    resolveWikilinkTargetsForDocument() { narrowResolves += 1 },
+    getConnection(): never { throw new Error('unchanged content must not reconcile frontmatter') },
+  } as unknown as import('../main/modules/search-engine/repository').SearchRepository
+  const engine = Object.create(SearchEngine.prototype) as SearchEngine
+  Reflect.set(engine, 'repository', repository)
+  Reflect.set(engine, 'fsAdapter', { loadOne: async () => parsed })
+  Reflect.set(engine, 'scheduleWorkspaceLinkResolve', () => {
+    scheduledResolves += 1
+    return new AbortController().signal
+  })
+
+  const result = await engine.indexDocument('/tmp/work', parsed.path, parsed.body)
+
+  assert.deepEqual(result, { ok: true, documentId: 77, skipped: true })
+  assert.equal(derivedWrites, 0)
+  assert.equal(narrowResolves, 0)
+  assert.equal(scheduledResolves, 0)
 })
 
 // ----- Mid-stream abort: partial index remains -------------------------------

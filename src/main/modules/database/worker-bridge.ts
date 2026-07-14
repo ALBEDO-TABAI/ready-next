@@ -24,6 +24,7 @@ import type {
   ReindexAllSourcesResult,
   ReindexWorkspaceResult,
 } from '../search-engine/indexer'
+import type { DocumentGraphQuery, DocumentGraphResult } from './document-graph-query'
 
 const require = createRequire(import.meta.url)
 let electronModule: typeof import('electron') | null = null
@@ -55,15 +56,7 @@ interface IncomingMessage {
   error?: { message: string; stack?: string }
 }
 
-export interface GraphResult {
-  nodes: Array<{ id: string; type: 'doc' | 'tag' | 'ghost'; label: string; sourceType?: string }>
-  edges: Array<{ source: string; target: string; kind: string }>
-  note?: string
-  // B3: degrade signal + pagination cursor.
-  degraded?: boolean
-  totalDocs?: number
-  nextCursor?: { afterId: number } | null
-}
+export type GraphResult = DocumentGraphResult
 
 export type SearchResult = SearchHit & {
   sourceType: string
@@ -77,14 +70,7 @@ export interface SearchPayload {
 }
 
 export interface WorkerDbBridge {
-  getDocumentGraph(opts: {
-    workspaceRoot?: string
-    centerPath?: string
-    depth?: number
-    limit?: number
-    cursor?: { afterId: number }
-    mode?: 'full' | 'focus'
-  }): Promise<GraphResult>
+  getDocumentGraph(opts: DocumentGraphQuery): Promise<GraphResult>
   searchDocuments(opts: {
     query: string
     workspaceRoot?: string
@@ -222,14 +208,7 @@ export class WorkerDbBridgeImpl implements WorkerDbBridge {
     return promise
   }
 
-  getDocumentGraph(opts: {
-    workspaceRoot?: string
-    centerPath?: string
-    depth?: number
-    limit?: number
-    cursor?: { afterId: number }
-    mode?: 'full' | 'focus'
-  }): Promise<GraphResult> {
+  getDocumentGraph(opts: DocumentGraphQuery): Promise<GraphResult> {
     return this.send<GraphResult>('getDocumentGraph', opts ?? {})
   }
 
