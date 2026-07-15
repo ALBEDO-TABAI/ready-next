@@ -227,7 +227,8 @@ export async function executeAgentSdkModelToolLoop(
   const bufferNativeTextUntilParsed = !useTextToolBridge && toolDefinitions.length > 0
   const holdNativeTextUntilFinal =
     bufferNativeTextUntilParsed && allowedToolNames.includes('skill_ask_user')
-  for (let bridgeTurn = 0; bridgeTurn < (useTextToolBridge ? 4 : 3); bridgeTurn += 1) {
+  const bridgeTurnLimit = useTextToolBridge ? currentAgentSdkMaxTurns() : 3
+  for (let bridgeTurn = 0; bridgeTurn < bridgeTurnLimit; bridgeTurn += 1) {
     let streamedText = ''
     let nativeTextBuffer = ''
     let nativeTextAlreadyEmitted = ''
@@ -668,7 +669,7 @@ export async function executeAgentSdkModelToolLoop(
       if (state.newDocumentNeedsSave && newDocumentSaveRepairAttempts < 1) {
         newDocumentSaveRepairAttempts += 1
         state.nextInput = buildNewDocumentSaveRepairInput()
-        emitOutput('新文档已经写入但还没有保存，我会先保存再结束。', 'text')
+        emitOutput('正文或标签尚未完成，我会先补全再结束。', 'text')
         continue
       }
       if (
@@ -737,7 +738,7 @@ export async function executeAgentSdkModelToolLoop(
       if (state.newDocumentNeedsSave && newDocumentSaveRepairAttempts < 1) {
         newDocumentSaveRepairAttempts += 1
         state.nextInput = buildNewDocumentSaveRepairInput()
-        emitOutput('新文档已经写入但还没有保存，我会先保存再结束。', 'text')
+        emitOutput('正文或标签尚未完成，我会先补全再结束。', 'text')
         continue
       }
       if (

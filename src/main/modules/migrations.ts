@@ -3231,6 +3231,54 @@ const migrations: Migration[] = [
       }
       db.exec('DROP TABLE agent_schedules')
     }
+  },
+  {
+    name: '074_tag_forge_scoped_review_proposals',
+    up: (db) => {
+      db.exec(`
+        ALTER TABLE tag_pending_proposals RENAME TO tag_pending_proposals_legacy;
+
+        CREATE TABLE tag_pending_proposals (
+          proposal_id TEXT PRIMARY KEY,
+          facet TEXT NOT NULL CHECK(facet IN ('form','domain','entity','use','state')),
+          label TEXT NOT NULL,
+          evidence_code TEXT NOT NULL,
+          evidence_excerpt TEXT,
+          source_run_id TEXT,
+          batch_id TEXT NOT NULL,
+          item_id TEXT NOT NULL,
+          scope_id TEXT,
+          status TEXT NOT NULL CHECK(status IN ('pending','approved','merged','rejected','dismissed')),
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          UNIQUE(batch_id,item_id,facet,label,status)
+        );
+
+        INSERT INTO tag_pending_proposals (
+          proposal_id,facet,label,evidence_code,evidence_excerpt,source_run_id,
+          batch_id,item_id,scope_id,status,created_at,updated_at
+        )
+        SELECT
+          proposal_id,facet,label,evidence_code,evidence_excerpt,source_run_id,
+          COALESCE(source_run_id,'legacy'),proposal_id,NULL,status,created_at,updated_at
+        FROM tag_pending_proposals_legacy;
+
+        DROP TABLE tag_pending_proposals_legacy;
+        CREATE INDEX idx_tag_pending_review_scope
+          ON tag_pending_proposals(batch_id,item_id,status,created_at);
+      `)
+    }
+  },
+  {
+    name: '075_tag_forge_durable_creation_validation',
+    up: (db) => {
+      db.exec(`
+        ALTER TABLE artifact_creation_receipts ADD COLUMN validation_json TEXT;
+        UPDATE artifact_creation_receipts
+        SET enrichment_status='failed_retryable',retry_error_code='legacy_sparse_result',updated_at=strftime('%s','now')*1000
+        WHERE enrichment_status='completed_sparse';
+      `)
+    }
   }
 ]
 

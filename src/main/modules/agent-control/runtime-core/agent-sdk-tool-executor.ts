@@ -493,6 +493,9 @@ export class AgentSdkToolExecutor {
       )
     }
     const names = enabledDefinitions.map((definition) => definition.name)
+    const activationSummary = skillId === 'tag-forge'
+      ? `已切换到 Tag Forge 受控打标流程；当前仅可使用：${names.join(', ')}。列表外工具已关闭。请立即继续当前任务，不要等待用户再发消息。`
+      : `技能工具已在本次运行中开放：${names.join(', ') || '无专属工具（仅使用方法论）'}。请立即继续当前任务，不要等待用户再发消息。`
     const textBridgeCatalog = runtimeContext.useTextToolBridge
       ? enabledDefinitions.map((definition) => [
           `- ${definition.name}: ${definition.description}`,
@@ -502,7 +505,7 @@ export class AgentSdkToolExecutor {
     return createToolExecutionOutput(
       [
         normalized.text,
-        `技能工具已在本次运行中开放：${names.join(', ') || '无专属工具（仅使用方法论）'}。请立即继续当前任务，不要等待用户再发消息。`,
+        activationSummary,
         textBridgeCatalog ? `文本工具调用定义：\n${textBridgeCatalog}` : '',
       ].filter(Boolean).join('\n\n'),
       {

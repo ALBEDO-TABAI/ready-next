@@ -261,7 +261,24 @@ test('derives document_save_tab params', () => {
   const expected: SkillParamDefinition[] = [
     TAB_ID_OPTIONAL,
     { name: 'path', type: 'string', description: '可选，直接保存到该绝对路径', required: false },
-    { name:'tagProposals',type:'array',description:'新建 Markdown 最终保存时提交 Tag Forge 语义提案；只允许 form/domain/entity/use，state/project 不由模型填写',required:false },
+    {
+      name: 'tagProposals',
+      type: 'array',
+      description: '新建 Markdown 只需提交现有标签尚未覆盖的候选；已有标签可直接满足形态/主题，无需补充时可省略。每项都要附最终正文中的准确摘录，state/project 不由模型填写',
+      required: false,
+      items: {
+        type: 'object',
+        properties: {
+          facet: { type: 'string', enum: ['form', 'domain', 'entity', 'use'] },
+          label: { type: 'string', minLength: 1 },
+          evidenceCode: { type: 'string', minLength: 1 },
+          evidenceExcerpt: { type: 'string', minLength: 2 },
+          confidence: { type: 'number', minimum: 0, maximum: 1 },
+        },
+        required: ['facet', 'label', 'evidenceCode', 'evidenceExcerpt', 'confidence'],
+        additionalProperties: false,
+      },
+    },
   ]
   assert.deepEqual(zodObjectToParamList(DOCUMENT_SCHEMAS.document_save_tab), expected)
 })

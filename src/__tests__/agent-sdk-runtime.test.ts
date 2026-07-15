@@ -31,6 +31,7 @@ import {
   clearLastReferenceSkill,
   rememberLastReferenceSkill
 } from '../main/modules/agent-control/skills/skill-reference-hints'
+import { __setSkillsRuntimeManagerForTests } from '../main/modules/skills-runtime/runtime-manager'
 import { buildSelectedSkillToolAuthorization } from '../main/modules/agent-control/skills/skill-tool-authorization'
 import { __setSkillActionToolDefsForTests } from '../main/modules/tools/skills-tools'
 import {
@@ -85,6 +86,23 @@ function createRuntime(deps: Partial<AgentSdkRuntimeDeps>): AgentSdkRuntime {
     domainAdapters: [],
     ...deps
   })
+}
+
+async function enabledSdkTools<T extends {
+  name: string
+  isEnabled?: (context?: unknown) => boolean | Promise<boolean>
+}>(tools: T[]): Promise<T[]> {
+  const enabled: T[] = []
+  for (const tool of tools) {
+    if (!tool.isEnabled || await tool.isEnabled()) enabled.push(tool)
+  }
+  return enabled
+}
+
+async function enabledSdkToolNames(
+  tools: Array<{ name: string; isEnabled?: (context?: unknown) => boolean | Promise<boolean> }>
+): Promise<string[]> {
+  return (await enabledSdkTools(tools)).map((tool) => tool.name)
 }
 
 function attachMemoryRunMeta(runtime: AgentSdkRuntime): Map<string, Record<string, unknown>> {
@@ -306,7 +324,7 @@ test('agent sdk runtime exposes only background collection workflow tools for mu
   let toolNames: string[] = []
   const runtime = createRuntime({
     runAgent: async ({ tools }) => {
-      toolNames = tools.map((tool) => tool.name)
+      toolNames = await enabledSdkToolNames(tools)
       return { finalText: '采集工具已收窄' }
     }
   })
@@ -374,7 +392,7 @@ test('agent sdk runtime demotes widget edits before exposing browser tools', asy
   let toolNames: string[] = []
   const runtime = createRuntime({
     runAgent: async ({ tools }) => {
-      toolNames = tools.map((tool) => tool.name)
+      toolNames = await enabledSdkToolNames(tools)
       return { finalText: 'widget tools captured' }
     }
   })
@@ -421,7 +439,7 @@ test('agent sdk runtime exposes map tools for deterministic route intent', async
   let toolNames: string[] = []
   const runtime = createRuntime({
     runAgent: async ({ tools }) => {
-      toolNames = tools.map((tool) => tool.name)
+      toolNames = await enabledSdkToolNames(tools)
       return { finalText: 'map tools captured' }
     }
   })
@@ -449,7 +467,7 @@ test('agent sdk runtime applies selected skill allowed_tools to default surface'
   let toolNames: string[] = []
   const runtime = createRuntime({
     runAgent: async ({ tools }) => {
-      toolNames = tools.map((tool) => tool.name)
+      toolNames = await enabledSdkToolNames(tools)
       return { finalText: 'send-im tools captured' }
     }
   })
@@ -542,7 +560,10 @@ test('agent sdk runtime keeps research acquisition tools beside a selected refer
     '- 名称: 宝矿力',
     '- 路径: /tmp/宝矿力',
   ].join('\n')
-  const requestEnvelope = buildRequestEnvelope({ userText })
+  const requestEnvelope = buildRequestEnvelope({
+    userText,
+    trustedFolderReferences: [{ name: '宝矿力', path: '/tmp/宝矿力' }],
+  })
   const definitions = privateRuntime.toolExecutor.listDefaultToolDefinitionsForTurn({
     message: userText,
     sessionId: 'scope-brand-research',
@@ -629,7 +650,7 @@ test('agent sdk runtime exposes skill_send_im_file when the file to send is refe
   let toolNames: string[] = []
   const runtime = createRuntime({
     runAgent: async ({ tools }) => {
-      toolNames = tools.map((tool) => tool.name)
+      toolNames = await enabledSdkToolNames(tools)
       return { finalText: 'send-im md ref captured' }
     }
   })
@@ -698,7 +719,7 @@ test('agent sdk runtime suppresses browser task tools for active VEA skill resum
     getScopeTaskRefs: () =>
       activeSkillHint ? [{ taskId: 'task-vea-active', status: 'running' }] : [],
     runAgent: async ({ tools }) => {
-      seenToolNames.push(tools.map((tool) => tool.name))
+      seenToolNames.push(await enabledSdkToolNames(tools))
       return { finalText: 'ok' }
     }
   })
@@ -761,7 +782,7 @@ test('agent sdk runtime keeps Send IM visible for a bare retry after explicit lo
   const seenToolNames: string[][] = []
   const runtime = createRuntime({
     runAgent: async ({ tools }) => {
-      seenToolNames.push(tools.map((tool) => tool.name))
+      seenToolNames.push(await enabledSdkToolNames(tools))
       return { finalText: 'ok' }
     }
   })
@@ -808,7 +829,7 @@ test('agent sdk runtime keeps Send IM visible for an attached try-this follow-up
   const seenToolNames: string[][] = []
   const runtime = createRuntime({
     runAgent: async ({ tools }) => {
-      seenToolNames.push(tools.map((tool) => tool.name))
+      seenToolNames.push(await enabledSdkToolNames(tools))
       return { finalText: 'ok' }
     }
   })
@@ -975,8 +996,9 @@ test('agent sdk runtime exposes Ready tool definitions and preserves structured 
       })
     },
     runAgent: async ({ tools, onTextDelta }) => {
-      assert.equal(tools.length, 1)
-      const sdkTool = tools[0] as { invoke: (context: unknown, input: string) => Promise<string> }
+      const enabledTools = await enabledSdkTools(tools)
+      assert.equal(enabledTools.length, 1)
+      const sdkTool = enabledTools[0] as { invoke: (context: unknown, input: string) => Promise<string> }
       const toolOutput = await sdkTool.invoke({}, JSON.stringify({ query: 'OpenAI Agents SDK' }))
       assert.match(toolOutput, /"projectionPatch"/)
       onTextDelta('研究完成')
@@ -3080,7 +3102,7 @@ test('agent sdk runtime repairs new document turns that mutate without saving', 
         )
         return { finalText: '' }
       }
-      assert.match(String(input), /还没有调用 document_save_tab 保存/)
+      assert.match(String(input), /内容标签还没有完整通过校验/)
       onTextDelta('我会保存当前文档。')
       return { finalText: '我会保存当前文档。' }
     }
@@ -5591,6 +5613,113 @@ test('agent sdk runtime uses Ready text bridge for non-native tool transports', 
   )
 })
 
+test('text-bridge Tag Forge carries each prepared page into one valid apply until the folder is done', async () => {
+  const schema = { type: 'object' as const, additionalProperties: true }
+  const definitions = ['tag_forge_prepare_batch', 'tag_forge_apply_batch'].map((name) => createToolDefinition({
+    name, groupId: 'file_management', domain: 'file', kind: 'write', schema
+  }))
+  const pages = [1, 2, 3].map((index) => ({
+    itemId: `opaque-item-${index}`,
+    expectedRevision: `revision-${index}`,
+    content: '# Claude 教程\n\nAI 工作流。'
+  }))
+  const proposals = [
+    { facet: 'form', label: '教程', evidenceCode: 'form', evidenceExcerpt: '教程', confidence: 0.99 },
+    { facet: 'domain', label: 'AI工作流', evidenceCode: 'topic', evidenceExcerpt: 'AI 工作流', confidence: 0.99 }
+  ]
+  const toolNames: string[] = []
+  let prepareCount = 0
+  let applyCount = 0
+  let runCount = 0
+  const call = (tool: string, args: Record<string, unknown>) => ({
+    finalText: `:::tool_call\n${JSON.stringify({ tool, args })}\n:::`
+  })
+  const runtime = new AgentSdkRuntime({
+    loadAIConfig: () => ({
+      ok: true,
+      reason: 'present',
+      config: {
+        ...fakeConfig,
+        provider: 'openai-compatible',
+        baseUrl: 'https://code.newcli.com/codex/v1',
+        agentProtocol: 'openai',
+        wireApi: 'chat/completions'
+      }
+    }),
+    listToolDefinitions: () => definitions,
+    executeToolCall: async (name, args) => {
+      toolNames.push(name)
+      if (name === 'tag_forge_prepare_batch') {
+        const document = pages[prepareCount++]
+        return createToolExecutionOutput('Tag Forge 已准备下一页。', {
+          shape: 'json',
+          data: {
+            ok: true, batchId: 'tfb-model-loop', done: false,
+            remaining: pages.length - prepareCount + 1,
+            documents: [document],
+            lexicon: { active: { form: [{ label: '教程', aliases: [] }], domain: [{ label: 'AI工作流', aliases: [] }] } }
+          }
+        })
+      }
+      assert.equal(name, 'tag_forge_apply_batch')
+      const item = (args.items as Array<Record<string, unknown>>)[0]
+      assert.equal(item.itemId, pages[applyCount].itemId)
+      assert.equal(item.expectedRevision, pages[applyCount].expectedRevision)
+      assert.equal('path' in item, false)
+      assert.equal('tags' in item, false)
+      const submitted = item.proposals as Array<Record<string, unknown>>
+      assert.deepEqual(submitted.map((proposal) => proposal.label), ['教程', 'AI工作流'])
+      assert.equal(submitted.some((proposal) => proposal.label === '待整理'), false)
+      applyCount += 1
+      const done = applyCount === pages.length
+      return createToolExecutionOutput('Tag Forge 已写入当前页。', {
+        shape: 'json',
+        data: { ok: true, batchId: 'tfb-model-loop', done, remaining: pages.length - applyCount, results: [{ ok: true }] }
+      })
+    },
+    runAgent: async ({ tools, instructions, input }) => {
+      runCount += 1
+      assert.equal(tools.length, 0)
+      assert.match(instructions, /tag_forge_prepare_batch/)
+      if (runCount === 1) return call('tag_forge_prepare_batch', { rootPath: '/workspace/docs' })
+      if (applyCount < prepareCount) {
+        const page = pages[applyCount]
+        const next = String(input)
+        for (const expected of [page.itemId, page.expectedRevision, 'Claude', 'AI工作流']) assert.match(next, new RegExp(expected))
+        return call('tag_forge_apply_batch', {
+          batchId: 'tfb-model-loop',
+          items: [{ itemId: page.itemId, expectedRevision: page.expectedRevision, proposals }]
+        })
+      }
+      if (applyCount < pages.length) {
+        assert.match(String(input), /"done":false/)
+        return call('tag_forge_prepare_batch', { batchId: 'tfb-model-loop' })
+      }
+      assert.match(String(input), /"done":true/)
+      return { finalText: '文件夹标签已全部完成。' }
+    }
+  })
+  runtime.newSession('butler::scope-tag-forge-model-loop', 'system prompt')
+
+  const result = await runtime.sendMessage(
+    'butler::scope-tag-forge-model-loop',
+    '用 Tag Forge 给这个文件夹里的文档全部打好标签',
+    'run-tag-forge-model-loop',
+    { publicSessionId: 'scope-tag-forge-model-loop', taskId: 'task-tag-forge-model-loop' }
+  )
+
+  assert.equal(result.success, true)
+  assert.equal(result.finalText, '文件夹标签已全部完成。')
+  assert.equal(runCount, 7)
+  assert.equal(prepareCount, 3)
+  assert.equal(applyCount, 3)
+  assert.deepEqual(toolNames, [
+    'tag_forge_prepare_batch', 'tag_forge_apply_batch',
+    'tag_forge_prepare_batch', 'tag_forge_apply_batch',
+    'tag_forge_prepare_batch', 'tag_forge_apply_batch'
+  ])
+})
+
 test('agent sdk runtime keeps skill eligibility fixed across text-bridge iterations', async () => {
   const prompt = 'hi，今天让你跟我聊哲学的话，你会怎么开头'
   const finalAnswer =
@@ -5721,7 +5850,7 @@ test('agent sdk runtime exposes authorized skill tools for explicit skill turns'
       }
     },
     runAgent: async ({ tools, onTextDelta }) => {
-      seenToolNames.push(...tools.map((item) => item.name))
+      seenToolNames.push(...await enabledSdkToolNames(tools))
       onTextDelta('技能工具面已加载')
       return { finalText: '技能工具面已加载' }
     }
@@ -5769,7 +5898,7 @@ test('agent sdk runtime preserves browser tools when an explicit reference skill
       }
     },
     runAgent: async ({ tools, instructions, onTextDelta }) => {
-      seenToolNames.push(...tools.map((item) => item.name))
+      seenToolNames.push(...await enabledSdkToolNames(tools))
       seenInstructions = instructions
       onTextDelta('浏览器工具面已加载')
       return { finalText: '浏览器工具面已加载' }
@@ -5830,7 +5959,7 @@ test('agent sdk runtime does not expose clarification tools for unrelated chat w
       }
     },
     runAgent: async ({ tools, onTextDelta }) => {
-      seenToolNames.push(...tools.map((item) => item.name))
+      seenToolNames.push(...await enabledSdkToolNames(tools))
       onTextDelta(answer)
       return { finalText: answer }
     }
@@ -5926,7 +6055,7 @@ test('agent sdk runtime ignores stale skill names in assembled context for no-to
       }
     },
     runAgent: async ({ tools, onTextDelta }) => {
-      seenToolNames.push(...tools.map((item) => item.name))
+      seenToolNames.push(...await enabledSdkToolNames(tools))
       onTextDelta(answer)
       return { finalText: answer }
     }
@@ -5981,7 +6110,7 @@ test('agent sdk runtime keeps stale reference tools for natural skill follow-ups
       buildPreferredSkillToolNames: () => ['skill_ask_user', 'skill_inspect_run_state']
     },
     runAgent: async ({ tools }) => {
-      seenToolNames.push(...tools.map((item) => item.name))
+      seenToolNames.push(...await enabledSdkToolNames(tools))
       return { finalText: '继续推进' }
     }
   })
@@ -6017,7 +6146,7 @@ test('agent sdk runtime keeps reference tools for unfinished skill task facts', 
     },
     getScopeTaskRefs: () => [{ taskId: 'task-hfp-active', status: 'running' }],
     runAgent: async ({ tools }) => {
-      seenToolNames.push(...tools.map((item) => item.name))
+      seenToolNames.push(...await enabledSdkToolNames(tools))
       return { finalText: '继续推进' }
     }
   })
@@ -6078,7 +6207,7 @@ test('agent sdk runtime exposes skill_run_shell for explicit script-backed refer
       }
     },
     runAgent: async ({ tools, instructions, onTextDelta }) => {
-      seenToolNames.push(...tools.map((item) => item.name))
+      seenToolNames.push(...await enabledSdkToolNames(tools))
       seenInstructions = instructions
       onTextDelta('脚本型 reference skill 工具面已加载')
       return { finalText: '脚本型 reference skill 工具面已加载' }
@@ -6366,7 +6495,7 @@ test('agent sdk runtime keeps default model-visible surface intent-scoped', asyn
   const seenToolNames: string[] = []
   const runtime = createRuntime({
     runAgent: async ({ tools, onTextDelta }) => {
-      seenToolNames.push(...tools.map((item) => item.name))
+      seenToolNames.push(...await enabledSdkToolNames(tools))
       onTextDelta('工具面已加载')
       return { finalText: '工具面已加载' }
     }
@@ -6401,7 +6530,7 @@ test('agent sdk runtime exposes browser, feishu, file, pet, and research tools w
   const seenToolNames: string[] = []
   const runtime = createRuntime({
     runAgent: async ({ tools, onTextDelta }) => {
-      seenToolNames.push(...tools.map((item) => item.name))
+      seenToolNames.push(...await enabledSdkToolNames(tools))
       onTextDelta('工具面已加载')
       return { finalText: '工具面已加载' }
     }
@@ -6534,7 +6663,7 @@ test('agent sdk runtime exposes upload browser tools for upload workflow intent'
   const seenToolNames: string[] = []
   const runtime = createRuntime({
     runAgent: async ({ tools, onTextDelta }) => {
-      seenToolNames.push(...tools.map((item) => item.name))
+      seenToolNames.push(...await enabledSdkToolNames(tools))
       onTextDelta('上传工具面已加载')
       return { finalText: '上传工具面已加载' }
     }
@@ -6666,7 +6795,7 @@ test('agent sdk runtime keeps MCP tools scoped to explicit OAuth authorization',
     runAgent: async ({ tools, onTextDelta, sessionId }) => {
       seenByScope.set(
         sessionId || '',
-        tools.map((item) => item.name)
+        await enabledSdkToolNames(tools)
       )
       onTextDelta('MCP 工具面已加载')
       return { finalText: 'MCP 工具面已加载' }
@@ -6723,7 +6852,7 @@ test('agent sdk runtime gates vision tools with resolved provider capability', a
       }
     }),
     runAgent: async ({ tools, onTextDelta }) => {
-      seenToolNames.push(...tools.map((item) => item.name))
+      seenToolNames.push(...await enabledSdkToolNames(tools))
       onTextDelta('视觉工具检查完成')
       return { finalText: '视觉工具检查完成' }
     }
@@ -6753,7 +6882,7 @@ test('agent sdk runtime does not leak host-only or unauthorized skill tools by d
   const seenToolNames: string[] = []
   const runtime = createRuntime({
     runAgent: async ({ tools, onTextDelta }) => {
-      seenToolNames.push(...tools.map((item) => item.name))
+      seenToolNames.push(...await enabledSdkToolNames(tools))
       onTextDelta('工具检查完成')
       return { finalText: '工具检查完成' }
     }
@@ -7042,7 +7171,7 @@ test('agent sdk runtime surfaces capability floor tools to the model end-to-end 
       tools: Array<{ name: string }>
       onTextDelta: (t: string) => void
     }) => {
-      seenToolNames.push(...tools.map((item) => item.name))
+      seenToolNames.push(...await enabledSdkToolNames(tools))
       onTextDelta('done')
       return { finalText: 'done' }
     }
@@ -7078,5 +7207,294 @@ test('agent sdk runtime surfaces capability floor tools to the model end-to-end 
     )
   } finally {
     clearLastReferenceSkill('scope-floor-wiring')
+  }
+})
+
+test('Tag Forge folder turns expose only the controlled batch path and required read tools', async () => {
+  const seenToolNames: string[] = []
+  const skillRoot = join(process.cwd(), 'assets', 'embedded-skills', 'tag-forge')
+  const runtime = createRuntime({
+    skillContextOrchestrator: {
+      findExplicitlyRequestedSkills: (text: string) =>
+        text.includes('tag-forge')
+          ? [{ id: 'tag-forge', name: 'tag-forge', managedPath: skillRoot }]
+          : [],
+      buildPreferredSkillToolNames: (text: string) =>
+        text.includes('tag-forge')
+          ? ['tag_forge_prepare_batch', 'tag_forge_apply_batch']
+          : [],
+      rememberExplicitReferenceSkillHint: () => true,
+    },
+    runAgent: async ({ tools }) => {
+      seenToolNames.push(...await enabledSdkToolNames(tools))
+      return { finalText: '完成' }
+    },
+  })
+  const scopeId = 'scope-tag-forge-controlled-surface'
+  const userText = '用 @[tag-forge] 给 @[工作内容] 文件夹下的文档打标'
+  runtime.newSession(`butler::${scopeId}`, 'system prompt')
+  try {
+    await runtime.sendMessage(`butler::${scopeId}`, userText, 'run-tag-forge-controlled-surface', {
+      publicSessionId: scopeId,
+      requestEnvelope: {
+        primaryInstruction: userText,
+        resources: [{
+          name: '工作内容',
+          path: '/tmp/工作内容',
+          text: '',
+          kind: 'folder_reference',
+          source: 'folder_reference',
+        }],
+      },
+    })
+
+    for (const required of [
+      'file_locate',
+      'file_read_excerpt',
+      'tag_forge_prepare_batch',
+      'tag_forge_apply_batch',
+    ]) {
+      assert.ok(seenToolNames.includes(required), `expected ${required}; got ${seenToolNames.join('|')}`)
+    }
+    for (const forbidden of [
+      'file_classify',
+      'file_move',
+      'file_copy',
+      'file_organize_apply',
+      'run_setup_command',
+      'ask_user_questions',
+      'skill_ask_user',
+      'skill_write_artifact',
+      'skill_read_artifact',
+      'skill_export_artifact',
+      'skill_inspect_run_state',
+    ]) {
+      assert.equal(seenToolNames.includes(forbidden), false, `unexpected ${forbidden}; got ${seenToolNames.join('|')}`)
+    }
+    assert.deepEqual([...seenToolNames].sort(), [
+      'declare_completion_criteria',
+      'file_locate',
+      'file_read_excerpt',
+      'tag_forge_apply_batch',
+      'tag_forge_prepare_batch',
+    ])
+  } finally {
+    clearLastReferenceSkill(scopeId)
+  }
+})
+
+test('same-run Tag Forge selection replaces generic file tools with the controlled folder surface', async () => {
+  let activated = false
+  const names = [
+    'use_skill',
+    'file_locate',
+    'file_read_excerpt',
+    'file_classify',
+    'file_move',
+    'file_copy',
+    'file_organize_apply',
+    'tag_forge_prepare_batch',
+    'tag_forge_apply_batch',
+    'agent_propose_handoff',
+    'declare_completion_criteria',
+  ]
+  const definitions = names.map((name) => createToolDefinition({
+    name,
+    groupId: name === 'use_skill'
+      ? 'skill_activation'
+      : name === 'agent_propose_handoff'
+        ? 'agent_interaction'
+        : name === 'declare_completion_criteria'
+          ? 'system_host'
+          : 'file_management',
+    domain: name.startsWith('file_') || name.startsWith('tag_forge_') ? 'file' : 'system',
+  }))
+  const runtime = createRuntime({
+    listToolDefinitions: () => definitions,
+    executeToolCall: async (name) => {
+      assert.equal(name, 'use_skill')
+      activated = true
+      return createToolExecutionOutput('Tag Forge 方法论已读取。', {
+        shape: 'json',
+        data: { ok: true, skill_id: 'tag-forge', activation: 'pending_same_run_refresh' },
+      })
+    },
+    skillContextOrchestrator: {
+      findExplicitlyRequestedSkills: () => [],
+      buildPreferredSkillToolNames: () => [],
+      peekCurrentReferenceSkillHint: () => activated
+        ? { id: 'tag-forge', name: 'Tag Forge' }
+        : null,
+      getCurrentReferenceSkillHint: () => activated
+        ? { id: 'tag-forge', name: 'Tag Forge' }
+        : null,
+    },
+    runAgent: async ({ tools }) => {
+      const before = await enabledSdkToolNames(tools)
+      assert.ok(before.includes('use_skill'))
+      assert.ok(before.includes('file_classify'))
+      const useSkill = tools.find((tool) => tool.name === 'use_skill') as {
+        invoke: (context: unknown, input: string) => Promise<string>
+      } | undefined
+      assert.ok(useSkill)
+      const result = await useSkill.invoke({}, JSON.stringify({ skill_id: 'tag-forge' }))
+      assert.match(result, /tag_forge_prepare_batch/)
+      assert.match(result, /列表外工具已关闭/)
+
+      const after = await enabledSdkToolNames(tools)
+      assert.deepEqual(after.sort(), [
+        'declare_completion_criteria',
+        'file_locate',
+        'file_read_excerpt',
+        'tag_forge_apply_batch',
+        'tag_forge_prepare_batch',
+      ])
+      return { finalText: '已切换到受控打标流程' }
+    },
+  })
+  const scopeId = 'scope-tag-forge-same-run-surface'
+  const userText = '给 @[工作内容] 文件夹下的文档自动打好标签'
+  runtime.newSession(`butler::${scopeId}`, 'system prompt')
+  const result = await runtime.sendMessage(
+    `butler::${scopeId}`,
+    userText,
+    'run-tag-forge-same-run-surface',
+    {
+      publicSessionId: scopeId,
+      requestEnvelope: {
+        primaryInstruction: userText,
+        resources: [{
+          name: '工作内容',
+          path: '/tmp/工作内容',
+          text: '',
+          kind: 'folder_reference',
+          source: 'folder_reference',
+        }],
+      },
+    },
+  )
+  assert.equal(result.success, true)
+})
+
+test('same-run Tag Forge checkpoint continuation preserves the controlled folder surface', async () => {
+  const expectedToolNames = [
+    'file_locate',
+    'file_read_excerpt',
+    'tag_forge_prepare_batch',
+    'tag_forge_apply_batch',
+    'declare_completion_criteria',
+  ]
+  const scopeId = 'scope-tag-forge-same-run-checkpoint'
+  const taskId = 'task-tag-forge-same-run-checkpoint'
+  const userText = '给 @[work] 文件夹下的文档自动打好标签'
+  const requestEnvelope = {
+    primaryInstruction: userText,
+    resources: [{
+      name: 'work',
+      path: '/tmp/work',
+      text: '',
+      kind: 'folder_reference',
+      source: 'folder_reference',
+    }],
+  }
+  let activated = false
+  let modelRunCount = 0
+  let checkpointOutputDir: string | null = null
+
+  __setSkillsRuntimeManagerForTests({
+    listSkills: () => [{ id: 'tag-forge', name: 'Tag Forge', manifestValid: true }],
+  } as never)
+
+  const runtime = createRuntime({
+    executeToolCall: async (name) => {
+      assert.equal(name, 'use_skill')
+      activated = true
+      return createToolExecutionOutput('Tag Forge 方法论已读取。', {
+        shape: 'json',
+        data: { ok: true, skill_id: 'tag-forge', activation: 'pending_same_run_refresh' },
+      })
+    },
+    skillContextOrchestrator: {
+      findExplicitlyRequestedSkills: () => [],
+      buildPreferredSkillToolNames: () => [],
+      peekCurrentReferenceSkillHint: () => activated
+        ? { id: 'tag-forge', name: 'Tag Forge' }
+        : null,
+      getCurrentReferenceSkillHint: () => activated
+        ? { id: 'tag-forge', name: 'Tag Forge' }
+        : null,
+    },
+    runAgent: async ({ tools }) => {
+      modelRunCount += 1
+      if (modelRunCount === 1) {
+        const useSkill = tools.find((tool) => tool.name === 'use_skill') as {
+          invoke: (context: unknown, input: string) => Promise<string>
+        } | undefined
+        assert.ok(useSkill)
+        await useSkill.invoke({}, JSON.stringify({ skill_id: 'tag-forge' }))
+        assert.deepEqual(await enabledSdkToolNames(tools), expectedToolNames)
+        return { finalText: '已保存续跑检查点' }
+      }
+
+      assert.deepEqual(await enabledSdkToolNames(tools), expectedToolNames)
+      return { finalText: '文件夹标签已继续处理' }
+    },
+  })
+  runtime.newSession(`butler::${scopeId}`, 'system prompt')
+
+  try {
+    const checkpoint = await runtime.sendMessage(
+      `butler::${scopeId}`,
+      userText,
+      'run-tag-forge-same-run-checkpoint-1',
+      {
+        publicSessionId: scopeId,
+        taskId,
+        requestEnvelope,
+        taskBudgetRuntime: createTaskBudgetRuntime('multi_step_task', {
+          budget: {
+            maxIterations: 4,
+            maxToolCalls: 1,
+            maxParallelToolGroups: 2,
+            reservedToolCalls: 0,
+          },
+        }),
+      },
+    )
+    assert.equal(checkpoint.status, 'checkpoint')
+    assert.equal(checkpoint.terminalReason, 'checkpoint_budget')
+    const continuation = checkpoint.projectionTruth?.projectionPatch?.taskContinuation as {
+      outputDir?: string
+      runStatePath?: string
+    } | undefined
+    assert.ok(continuation?.outputDir)
+    assert.ok(continuation.runStatePath)
+    checkpointOutputDir = continuation.outputDir
+
+    const continued = await runtime.sendMessage(
+      `butler::${scopeId}`,
+      '继续',
+      'run-tag-forge-same-run-checkpoint-2',
+      {
+        publicSessionId: scopeId,
+        taskId,
+        requestEnvelope,
+        continuationIntent: {
+          taskId,
+          outputDir: continuation.outputDir,
+          runStatePath: continuation.runStatePath,
+        },
+      },
+    )
+
+    assert.equal(continued.success, true)
+    assert.equal(continued.status, 'done')
+    assert.equal(modelRunCount, 2)
+  } finally {
+    __setSkillsRuntimeManagerForTests(null)
+    clearLastReferenceSkill(scopeId)
+    if (checkpointOutputDir) {
+      await rm(checkpointOutputDir, { recursive: true, force: true })
+    }
   }
 })

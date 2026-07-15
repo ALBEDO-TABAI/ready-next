@@ -68,18 +68,13 @@ export const FILE_MANAGEMENT_TOOLS: FileManagementToolDef[] = [
     params: zodObjectToParamList(FILE_MANAGEMENT_SCHEMAS.file_classify) as ToolParam[],
   },
   {
-    name: 'tag_forge_apply',
-    description: '提交 Tag Forge 的结构化标签提案；Ready 校验词表、配额、创建回执与 revision 后原子写回并验证索引。新建文档自动打标必须带 receiptId，不能用于猜测项目或高级状态。',
-    params: zodObjectToParamList(FILE_MANAGEMENT_SCHEMAS.tag_forge_apply) as ToolParam[],
-  },
-  {
     name: 'tag_forge_prepare_batch',
-    description: '建立或继续一个可恢复的 Tag Forge 文件夹批次。返回本批文档全文、版本凭证和进度；已有标签的文档自动跳过。',
+    description: 'Tag Forge 文件夹批量打标的唯一准备入口。首次传 rootPath 会读取文件夹内全部 Markdown，续跑只传 batchId；返回正文、不透明 itemId、版本凭证、当前受控词表和进度。',
     params: zodObjectToParamList(FILE_MANAGEMENT_SCHEMAS.tag_forge_prepare_batch) as ToolParam[],
   },
   {
     name: 'tag_forge_apply_batch',
-    description: '按准备批次受控写回多份 Markdown 标签，逐文件校验版本并持久记录成功、冲突与失败，随后可继续下一批。',
+    description: '按 prepare 返回的 itemId 和版本凭证写回多份 Markdown 内容标签。可靠标签立即写入；原文可核对的高置信新词自动采用；扫描完整个文件夹后，真正存疑的新词由宿主在 Agent 对话中集中确认一次。',
     params: zodObjectToParamList(FILE_MANAGEMENT_SCHEMAS.tag_forge_apply_batch) as ToolParam[],
   },
   {

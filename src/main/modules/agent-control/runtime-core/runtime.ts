@@ -114,6 +114,7 @@ import { taskEventBridge } from '../../browser-engine/task-event-bridge'
 import { createTaskEventProofListener, createTaskProofSink } from '../quality/proof-collector'
 import { isKnowledgeSystemEnabled, runStartupBeliefSync, KnowledgeWatcher } from '../knowledge/knowledge-truth-source'
 import { isRetryOnlyTurn } from '../skills/skill-detection-inputs'
+import { trustedFolderReferencesFromMessageMeta } from '../contracts/request-envelope'
 import { logAgentMetric } from '../metrics'
 import { TOOL_ERROR_METRICS } from '../tools-runtime/tool-error-metrics'
 import {
@@ -1956,6 +1957,7 @@ export class AgentControlRuntime extends EventEmitter {
               parentStepId: payload.parentStepId,
               sessionIdOverride: payload.sessionIdOverride,
               workspaceRoots: payload.workspaceRoots,
+              trustedFolderReferences: trustedFolderReferencesFromMessageMeta(payload.userMessage?.meta),
               continuationIntent: normalizedContinuationIntent,
               deliveryMode: payload.deliveryMode,
               taskOrigin: payload.taskOrigin,

@@ -131,7 +131,7 @@ export const DocumentRewriteSectionSchema = z.object({
 export const DocumentSaveTabSchema = z.object({
   tabId: z.string().optional().describe('可选，目标标签 ID'),
   path: z.string().optional().describe('可选，直接保存到该绝对路径'),
-  tagProposals: z.array(z.object({facet:z.enum(['form','domain','entity','use']),label:z.string(),evidenceCode:z.string(),evidenceExcerpt:z.string().optional(),confidence:z.number()})).optional().describe('新建 Markdown 最终保存时提交 Tag Forge 语义提案；只允许 form/domain/entity/use，state/project 不由模型填写'),
+  tagProposals: z.array(z.object({facet:z.enum(['form','domain','entity','use']),label:z.string().trim().min(1),evidenceCode:z.string().trim().min(1),evidenceExcerpt:z.string().trim().min(2),confidence:z.number().min(0).max(1)})).min(1).optional().describe('新建 Markdown 只需提交现有标签尚未覆盖的候选；已有标签可直接满足形态/主题，无需补充时可省略。每项都要附最终正文中的准确摘录，state/project 不由模型填写'),
 })
 
 export type DocumentToolName =

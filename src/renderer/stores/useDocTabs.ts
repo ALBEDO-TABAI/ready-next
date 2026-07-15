@@ -22,6 +22,7 @@ export interface DocTab {
     content: string
     isDirty: boolean
     lastActivatedAt?: number | null
+    tagForgeCreationPending?: boolean
     // Renderer-only grouping (mirrors the browser rail). null/absent = ungrouped.
     groupId?: string | null
 }

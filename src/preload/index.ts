@@ -27,7 +27,7 @@ import type {
   FileEmergenceCreateProjectForFilePayload,
   FileEmergenceFeedbackPayload,
 } from '../shared/file-emergence'
-import type { TagForgeBeginCreationPayload,TagForgeFinalizeCreationPayload,TagForgeRecordCreationPayload } from '../shared/tag-forge'
+import type { TagForgeFinalizeCreationPayload,TagForgePrepareCreationPayload } from '../shared/tag-forge'
 import type {
   ImageGenerationCopyInput,
   ImageGenerationPersistToDirectoryInput,
@@ -1316,12 +1316,8 @@ const fileEmergenceAPI = {
     ipcRenderer.send('fileEmergence:readingSessionsFlushed', requestId),
 }
 const tagForgeAPI={
-  beginCreation:(payload:TagForgeBeginCreationPayload)=>ipcRenderer.invoke('tagForge:beginCreation',payload),
-  recordCreation:(payload:TagForgeRecordCreationPayload)=>ipcRenderer.invoke('tagForge:recordCreation',payload),
-  validateCreation:(payload:{creationToken:string;sourceRunId:string;proposals:Array<{facet:'form'|'domain'|'entity'|'use';label:string;evidenceCode:string;evidenceExcerpt?:string;confidence:number}>})=>ipcRenderer.invoke('tagForge:validateCreation',payload),
+  prepareCreation:(payload:TagForgePrepareCreationPayload)=>ipcRenderer.invoke('tagForge:prepareCreation',payload),
   finalizeCreation:(payload:TagForgeFinalizeCreationPayload)=>ipcRenderer.invoke('tagForge:finalizeCreation',payload),
-  listPending:()=>ipcRenderer.invoke('tagForge:listPending'),
-  reviewPending:(payload:{proposalId:string;decision:'approve'|'reject'})=>ipcRenderer.invoke('tagForge:reviewPending',payload),
 }
 
 const petAPI = {

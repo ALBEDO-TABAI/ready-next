@@ -10,13 +10,20 @@ export interface DynamicDeliveryDeadlineHandle {
   dispose(): void
 }
 
-export function resolveDynamicDeliveryWallClockMs(mode: DeliveryMode): number | null {
+export type DynamicDeliveryDeadlineProfile = 'default' | 'tag_forge_folder_batch'
+
+export function resolveDynamicDeliveryWallClockMs(
+  mode: DeliveryMode,
+  profile: DynamicDeliveryDeadlineProfile = 'default',
+): number | null {
   if (mode === 'standard') return null
-  return Math.min(mode === 'thorough' ? 240_000 : 120_000, DYNAMIC_DELIVERY_HARD_WALL_CLOCK_MS)
+  const configuredMs = mode === 'thorough' || profile === 'tag_forge_folder_batch' ? 240_000 : 120_000
+  return Math.min(configuredMs, DYNAMIC_DELIVERY_HARD_WALL_CLOCK_MS)
 }
 
 export function armDynamicDeliveryDeadline(input: {
   mode: DeliveryMode
+  profile?: DynamicDeliveryDeadlineProfile
   runId: string
   abortController: AbortController
   runHandle: RunHandle
@@ -24,7 +31,7 @@ export function armDynamicDeliveryDeadline(input: {
   timeoutMsForTest?: number
   isAwaitingUserInput?: () => boolean
 }): DynamicDeliveryDeadlineHandle {
-  const configuredMs = resolveDynamicDeliveryWallClockMs(input.mode)
+  const configuredMs = resolveDynamicDeliveryWallClockMs(input.mode, input.profile)
   if (configuredMs === null) {
     return { noteProgress: () => undefined, dispose: () => undefined }
   }
@@ -45,6 +52,7 @@ export function armDynamicDeliveryDeadline(input: {
         logAgentMetric('dynamic_delivery_deadline_suspended_for_user_input', {
           runId: input.runId,
           mode: input.mode,
+          profile: input.profile || 'default',
         })
         arm(Math.min(progressWindowMs, 1_000))
         return
@@ -57,6 +65,7 @@ export function armDynamicDeliveryDeadline(input: {
       logAgentMetric('delivery_wall_clock_exceeded', {
         runId: input.runId,
         mode: input.mode,
+        profile: input.profile || 'default',
         timeoutMs,
         wallClockMs: configuredMs,
         noProgressWindowMs: progressWindowMs,
@@ -77,6 +86,7 @@ export function armDynamicDeliveryDeadline(input: {
       logAgentMetric('dynamic_delivery_progress_window_refreshed', {
         runId: input.runId,
         mode: input.mode,
+        profile: input.profile || 'default',
         reason,
         progressRevision,
         nextTimeoutMs: progressWindowMs,

@@ -49,14 +49,12 @@ test('computeCapabilityFloors: local document resource floors file_locate + file
 test('computeCapabilityFloors: Tag Forge folder keeps its controlled batch surface', () => {
   const floors = computeCapabilityFloors({ authorization: tagForge, hasLocalDocumentResource: true, hasCurrentDocumentContext: false })
   assert.deepEqual([...floors.toolNames].sort(), [
-    'file_extract_text',
-    'file_inventory',
     'file_locate',
     'file_read_excerpt',
-    'skill_read_artifact',
     'tag_forge_apply_batch',
     'tag_forge_prepare_batch',
   ])
+  assert.equal([...floors.toolNames].some((name) => name.startsWith('skill_')), false)
   assert.ok(floors.reasons.includes('tag_forge_folder_batch'))
 })
 

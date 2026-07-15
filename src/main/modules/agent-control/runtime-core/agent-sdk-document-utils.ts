@@ -419,8 +419,9 @@ export function buildDocumentTargetRepairInput(guard: DocumentTargetGuard): stri
 
 export function buildNewDocumentSaveRepairInput(): string {
   return [
-    '系统检查：你已经创建并修改了新文档，但还没有调用 document_save_tab 保存，不能算完成。',
-    '请现在只调用 document_save_tab 保存当前文档；保存成功后，用中文简短说明结果并给出保存路径。',
+    '系统检查：新文档正文可能已经保存，但内容标签还没有完整通过校验，因此不能算完成。',
+    '请重新读取你刚写入的最终正文，只调用 document_save_tab 保存当前文档，并提交完整 tagProposals：恰好一个 form，加至少一个 domain 或 entity。',
+    '每个提案都必须包含最终正文中真实存在的短摘录 evidenceExcerpt；不要提交 state，工作流状态由系统填写。',
     '不要再新建文档，不要只口头说明，不要输出伪工具调用文本。'
   ].join('\n')
 }

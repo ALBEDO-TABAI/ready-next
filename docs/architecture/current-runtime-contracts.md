@@ -117,9 +117,14 @@
 
 - hidden、snoozed、not_related 等持久反馈必须在 Main 与 Renderer 两端同时生效；当前 tab、dirty tab 或阅读进度不能把被压制项目重新注入。
 - 自动 Tag Forge 写入必须先有 durable creation receipt。receipt 绑定 source run、创建 tab、目标 path/fileKey 和最终 hash；禁止 run 级 token fallback。
-- 文件夹批量打标使用专用 `tag_forge_prepare_batch -> tag_forge_apply_batch` 合同。typed folder reference 必须保留盘点、全文读取和受控批量写回地板；revision 由代码签发，批次状态持久化，冲突可重试。显式提案含未审核新词时必须停在可恢复的 `waiting_review`，不写文件、不关闭批次；用户转正或废弃后从同一 `batchId` 续跑。封闭 facet 只有显式模式可送人工审核，自动模式继续拒绝。
-- 批量路径不得退回逐文件 read/write 消耗单轮预算，也不得为此开放通用写文件或 shell。
-- 自动新文档路径只接受尚不存在、位于授权 workspace 且 realpath 不越界的 Markdown 目标；失败重试必须从持久 receipt 恢复。
+- 文件夹批量打标的模型只调用 `tag_forge_prepare_batch -> tag_forge_apply_batch`；typed folder reference 只为这两个动作补充本轮目录边界，不得授权任何其他文件工具。目录授权只来自用户消息上由 Renderer 携带的结构化文件夹附件元数据；本轮实际 `@[文件夹]` 引用的历史附件沿用同一元数据，不授权未引用的附件，正文中的同名标记也不得生成授权。执行前必须对目录与文件的真实路径重新做边界检查，禁止通过符号链接绕到宽根；目录内的 Markdown 符号链接只登记失败原因，不得读取其目标正文。工作区根自身是符号链接时，以其真实位置完成同一边界判断，不得误拒绝合法文件。准备工具在代码侧递归盘点、读取正文、签发 revision，并只给模型返回不透露主机路径的 `itemId`。每批最多 4 份且正文合计不超过 60000 字符（单份超长文档可独立返回）；无法读取的 Markdown 必须显式阻断 `done`，不得静默漏标。
+- 无论用户显式点名 Tag Forge，还是只用自然语言要求给文件夹打标，选技后模型工具面都必须立即替换为 `file_locate` / `file_read_excerpt` / `tag_forge_prepare_batch` / `tag_forge_apply_batch` / `declare_completion_criteria`。不得保留通用文件写入、命令、技能产物或自行追问工具。
+- 内容标签与工作流状态分离：Tag Forge 本轮自动负责的内容标签必须有且仅有一个 form，并至少有一个 domain 或 entity，安全范围为 2–15；手工或导入标签原样保留、不占自动标签名额，也不转为自动标签或全局词表项。除 form 最多一个外，domain/entity/use 不设独立硬配额；模型只保留有直接证据、可跨文档复用且能新增独立检索路径的标签。同义词、翻译、大小写和拼写变体只保留一个归一标签，已有具体标签时不再添加同义的宽泛上位词。active 标签名与别名必须跨词条唯一，标准名优先于别名解析；词表冲突必须在加载时失败，不能留给运行时猜 facet。当前文档已有且能由受控词表标签或别名确定 facet 的手工标签，直接在本文件内满足覆盖要求，不依赖模型本轮重复提案；正文证据成立的同名手工标签也只在本文件内满足覆盖，不进入全局词表或反问。两者都不重复写入、不发起冗余确认。`ready_state` 由代码单独维护且不在文档预览中展示。只有状态标签的历史文档必须自动进入修复，不得因“已有标签”而跳过。
+- 显式批量写回只接受带文内证据的 `proposals`，不再接受 `tags` 简写。已有词条立即归一；置信度不低于 0.92、证据中直接出现标签名的新 domain/entity/use，只受每份文档 15 个自动内容标签的安全上限约束并直接采用。达到上限后的候选直接忽略，不得仅因数量溢出进入用户确认。文档中已存在的用户标签不得再次进入反问；其余存疑项在整个文件夹确定项都写完后由宿主合并反问。同一 folder run 最多一张、最多 35 项，超出容量的低置信候选直接忽略，不制造第二张卡或无卡等待状态。卡片、批次、文档、scope、run 和精确 proposal id 必须一一绑定，用户回答后宿主自动续跑。
+- 标签文件、当前打开 tab、搜索索引与标签归属必须是一个可回滚的写入单元；任一步写入或回读失败都恢复原文，禁止出现“文件已改但任务失败”。`waiting_review`、`done:false` 和其他非终态不产生完成证明，不得被任务卡写成完成。
+- Tag Forge 文件夹轮使用 240 秒无进展窗口，为单次模型等待超时后的既有 provider 重试留出时间；abort 后 provider 即使正常返回，也必须按超时收口，禁止再显示“工具已执行完成”。成功批次 JSON 必须按结构化 `ok/status` 判断，正文出现“失败”“无法”等词不能把成功进度误判成失败。
+- 批量路径不得退回逐文件 read/write 或已退役的单文件 Tag Forge 工具，也不得为此开放通用写文件或 shell。文本工具桥必须把 prepare 的结构数据完整交给下一模型回合，并沿既有任务回合预算循环到 `done:true`；预算耗尽时不得把 `remaining>0` 伪装成完成。
+- 自动新文档路径只接受尚不存在、位于授权 workspace 且 realpath 不越界的 Markdown 目标；每条标签证据必须从最终将落盘的正文中精确回查，最终正文、回执 hash 与写回内容必须一致。精确命中且置信度不低于 0.65 的 domain/entity/use 新词在文档 2–15 个自动内容标签安全范围内直接采用，低可信、无精确证据或超出容量的候选直接忽略，不发起新文档确认。缺少“恰好一个 form + 至少一个 domain 或 entity”时不得稀疏完成；失败重试必须从持久 receipt 恢复。
 - 文件涌现只能消费 `suppressed=0` 且已经索引 readback 的 assignment。用户删除自动标签后手工加回时，来源转为 user/manual。
 - 长期评估使用生成时的 immutable snapshot、稳定 fileKey 和成熟窗口；不能用评估时的可变项目成员倒推历史。
 - 回归入口：`npm run verify:file-emergence`、`npm run verify:tag-forge`。

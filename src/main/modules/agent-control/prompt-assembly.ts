@@ -13,7 +13,7 @@ import { logAgentMetric } from './metrics'
 import { buildContextBill, emitContextBill, type ContextBillPayload, type ContextBillSectionInput } from './context-bill'
 import type { IntentClassification } from './intent-classifier'
 import { classifyIntent } from './intent-classifier'
-import type { RequestEnvelope } from './contracts/request-envelope'
+import type { RequestEnvelope, TrustedFolderReference } from './contracts/request-envelope'
 import { buildRequestEnvelope } from './contracts/request-envelope'
 import { filterDailyMemoryForScope } from './session/daily-memory-scope-filter'
 import { buildDailyTaskIndex, type TaskIndexEntry } from './session/daily-task-index-builder'
@@ -1060,6 +1060,7 @@ export class PromptAssemblyService {
     coordinators: ReadonlyArray<DomainAdapter>
     workspaceRoots?: string[]
     contextRefIds?: string[]
+    trustedFolderReferences?: TrustedFolderReference[]
     /** EP3-A2 — 本轮任务 owner（projection 的 ownerAgentId）。三段式解析：
      *  显式合法 owner 优先；完全未传时回退 scope.agent；显式但非法的 id
      *  降级 global-only（不回退，防腐败 owner 借道注入他人谱系）。
@@ -1127,6 +1128,7 @@ export class PromptAssemblyService {
       scopeId: params.scope.id,
       workspaceRoots: params.workspaceRoots,
       contextRefIds: params.contextRefIds,
+      trustedFolderReferences: params.trustedFolderReferences,
     })
     const intentClassification = classifyIntent(requestEnvelope)
     const hasExplicitResourceRefs = hasCurrentExplicitResourceRefs(requestEnvelope)

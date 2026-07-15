@@ -14,6 +14,7 @@ import { logAgentMetric } from '../metrics'
 import {
   collectToolOutputProofs,
   createTaskProofSink,
+  isNonterminalToolOutput,
   isSuccessfulToolOutput,
 } from '../quality/proof-collector'
 import type { SkillToolAuthorization } from '../skills/skill-tool-authorization'
@@ -36,7 +37,10 @@ import {
   resolveTaskTypeFromBrowserWorkflowText,
   resolveTaskTypeFromToolDefinitions
 } from './agent-sdk-foundation-utils'
-import { messageToText } from './agent-sdk-input-context-utils'
+import {
+  messageToText,
+  parseEnvelopeResourceReferences,
+} from './agent-sdk-input-context-utils'
 import { readStructuredResultRecord } from './agent-sdk-provider-utils'
 import {
   buildTerminalFailureProjectionPatch,
@@ -254,6 +258,9 @@ export async function executeAgentSdkPreparedTurn(
   const deliveryMode = effectiveExecutionOptions?.deliveryMode ?? 'adaptive'
   const deliveryDeadline = armDynamicDeliveryDeadline({
     mode: deliveryMode,
+    profile: turnCapabilityFloors.reasons.includes('tag_forge_folder_batch')
+      ? 'tag_forge_folder_batch'
+      : 'default',
     runId,
     abortController,
     runHandle,
@@ -450,15 +457,17 @@ export async function executeAgentSdkPreparedTurn(
           typeof structuredData.status === 'string'
             ? structuredData.status.trim().toLowerCase()
             : ''
+        const toolReportedNonterminal = isNonterminalToolOutput(normalized)
         const toolReportedFailure =
+          !toolReportedNonterminal && (
           !isSuccessfulToolOutput(normalized) ||
           documentToolFailed ||
           structuredData.ok === false ||
           typeof structuredData.errorKind === 'string' ||
           structuredStatus === 'error' ||
           structuredStatus === 'failed' ||
-          sourceReadFailed
-        if (!toolReportedFailure) {
+          sourceReadFailed)
+        if (!toolReportedFailure && !toolReportedNonterminal) {
           hasSuccessfulToolProgress = true
           deliveryDeadline.noteProgress('tool_result')
         }
@@ -532,6 +541,10 @@ export async function executeAgentSdkPreparedTurn(
       ),
       allowedToolNames, definitionByName, requiredCapabilityGroups,
       checkpointRequiredCapabilityGroups, checkpointRequiredToolNames,
+      hasFolderResource: parseEnvelopeResourceReferences(
+        effectiveExecutionOptions?.requestEnvelope,
+      ).resources.some((resource) =>
+        resource.kind === 'folder_reference' || resource.source === 'folder_reference'),
     })
     const skillContextMessages: Array<{
       role: string

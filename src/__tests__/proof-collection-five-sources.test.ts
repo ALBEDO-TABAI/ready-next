@@ -101,6 +101,22 @@ test('plain text tool failures never count as successful progress', () => {
   })), true)
 })
 
+test('waiting Tag Forge batches never mint completion proof or successful progress', () => {
+  const output=createToolExecutionOutput('Tag Forge waiting for review',{
+    shape:'json',data:{ok:true,status:'waiting_review',done:false,remaining:1,reviewRequired:true},
+  })
+  assert.equal(isSuccessfulToolOutput(output),false)
+  assert.deepEqual(collectToolOutputProofs('tag_forge_apply_batch',output,NOW),[])
+})
+
+test('successful JSON text is not failed by ordinary words inside document content', () => {
+  assert.equal(isSuccessfulToolOutput(createToolExecutionOutput(JSON.stringify({
+    ok: true,
+    batchId: 'tfb-proof',
+    documents: [{ content: '这里讨论失败原因，以及暂时无法完成的情况。' }],
+  }))), true)
+})
+
 test('tool output proofs mint transaction_confirmed only from explicit confirmation signal', () => {
   const proofs = collectToolOutputProofs('browser_power_network_trace', createToolExecutionOutput('发布 API 成功', {
     shape: 'json',

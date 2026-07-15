@@ -59,33 +59,32 @@ export const FileClassifySchema = z.object({
     .describe('要覆盖的 frontmatter 键值对'),
 })
 
-export const TagForgeApplySchema = z.object({
-  path: z.string().describe('要写回受控标签的 Markdown 绝对路径'),
-  mode: z.enum(['automatic','explicit']).describe('新建文档自动补全或用户显式打标'),
-  receiptId: z.string().optional().describe('automatic 模式必需的创建回执'),
-  expectedRevision: z.string().describe('读取最终正文后计算的 SHA-256 revision'),
-  proposals: z.array(z.object({
-    facet: z.enum(['form','domain','entity','use','state']),
-    label: z.string(),
-    evidenceCode: z.string(),
-    evidenceExcerpt: z.string().optional(),
-    confidence: z.number(),
-  })).describe('模型只提交 form/domain/entity/use 语义提案；state/project 由代码决定'),
+export const TagForgeProposalSchema = z.object({
+  facet: z.enum(['form','domain','entity','use']).describe('内容标签分面；工作流状态不属于标签提案'),
+  label: z.string().describe('归一后的标签名'),
+  evidenceCode: z.string().describe('短证据类型，例如 title_topic 或 body_topic'),
+  evidenceExcerpt: z.string().min(2).describe('原文中的准确短摘录；每个内容标签都必需'),
+  confidence: z.number().describe('0 到 1；>=0.92 且证据可回查的新领域/实体/用途可自动采用'),
 })
 
 export const TagForgePrepareBatchSchema = z.object({
-  rootPath: z.string().describe('要批量打标的授权文件夹绝对路径'),
+  rootPath: z.string().optional().describe('新建批次时必需：要批量打标的授权文件夹绝对路径'),
   batchId: z.string().optional().describe('继续既有批次时传入上一轮 batchId'),
-  limit: z.number().optional().describe('本批返回的待处理文档数（默认 8，上限 12）'),
+  limit: z.number().optional().describe('本批返回的待处理文档数（默认 4，上限 4，并受正文总量限制）'),
 })
 
 export const TagForgeApplyBatchSchema = z.object({
   batchId: z.string().describe('tag_forge_prepare_batch 返回的批次 id'),
   items: z.array(z.object({
-    path: z.string(),
-    expectedRevision: z.string(),
-    proposals: TagForgeApplySchema.shape.proposals,
-  })).describe('本批每份文档的版本凭证与标签提案'),
+    itemId: z.string().describe('prepare 返回的不透明文档 id；不要改写或用文件路径代替'),
+    expectedRevision: z.string().describe('prepare 返回的版本凭证；必须原样回传'),
+    proposals: z.array(TagForgeProposalSchema).min(1).describe('本文档的完整内容标签提案；每项都必须带正文证据'),
+  })).min(1).describe('本批每份文档的版本凭证和带正文证据的完整标签提案'),
+})
+
+export const TagForgeReviewBatchSchema = z.object({
+  batchId: z.string().describe('出现 reviewRequired 的原 Tag Forge 批次 id'),
+  confirmationCardId: z.string().describe('用户已提交的对应 ask_user_questions 反问卡 id；代码会核对问题、答案和本轮身份'),
 })
 
 export const FileRenameSchema = z.object({
@@ -157,9 +156,9 @@ export type FileManagementToolName =
   | 'file_get_backlinks'
   | 'file_get_graph'
   | 'file_classify'
-  | 'tag_forge_apply'
   | 'tag_forge_prepare_batch'
   | 'tag_forge_apply_batch'
+  | 'tag_forge_review_batch'
   | 'file_rename'
   | 'file_move'
   | 'file_copy'
@@ -177,9 +176,9 @@ export const FILE_MANAGEMENT_SCHEMAS: Record<FileManagementToolName, z.ZodObject
   file_get_backlinks: FileGetBacklinksSchema,
   file_get_graph: FileGetGraphSchema,
   file_classify: FileClassifySchema,
-  tag_forge_apply: TagForgeApplySchema,
   tag_forge_prepare_batch: TagForgePrepareBatchSchema,
   tag_forge_apply_batch: TagForgeApplyBatchSchema,
+  tag_forge_review_batch: TagForgeReviewBatchSchema,
   file_rename: FileRenameSchema,
   file_move: FileMoveSchema,
   file_copy: FileCopySchema,

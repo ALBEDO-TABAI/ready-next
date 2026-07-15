@@ -53,6 +53,7 @@ export class RunCoordinator {
         coordinators: RunCoordinatorRequest['coordinators']
         workspaceRoots?: string[]
         contextRefIds?: string[]
+        trustedFolderReferences?: RunCoordinatorRequest['trustedFolderReferences']
         /** EP3-A4 — the scope's effective owner; switches A2 injection. */
         ownerAgentId?: string | null
         executionProfile: AgentExecutionProfile
@@ -180,6 +181,7 @@ export class RunCoordinator {
       coordinators: request.coordinators,
       workspaceRoots: request.workspaceRoots,
       contextRefIds: request.contextRefIds,
+      trustedFolderReferences: request.trustedFolderReferences,
       // EP3-A4 — adoption switched the scope's owner; this is where the
       // next turn's injection follows it (A2 channel).
       ownerAgentId,

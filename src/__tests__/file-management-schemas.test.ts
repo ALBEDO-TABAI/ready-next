@@ -12,7 +12,10 @@ import {
   FileGetBacklinksSchema,
   FileGetGraphSchema,
   FileClassifySchema,
-  TagForgeApplySchema,
+  TagForgeProposalSchema,
+  TagForgePrepareBatchSchema,
+  TagForgeApplyBatchSchema,
+  TagForgeReviewBatchSchema,
   FileRenameSchema,
   FileMoveSchema,
   FileInventorySchema,
@@ -71,9 +74,25 @@ test('FileClassifySchema requires path; setFrontmatter must be object', () => {
   )
   assert.equal(FileClassifySchema.safeParse({ path: '/x', setFrontmatter: 'nope' }).success, false)
 })
-test('TagForgeApplySchema requires structured proposals and automatic receipt shape',()=>{
-  assert.equal(TagForgeApplySchema.safeParse({path:'/x.md',mode:'automatic',receiptId:'r',expectedRevision:'h',proposals:[{facet:'domain',label:'AI工作流',evidenceCode:'topic',confidence:.9}]}).success,true)
-  assert.equal(TagForgeApplySchema.safeParse({path:'/x.md',mode:'automatic',expectedRevision:'h',proposals:[{facet:'project',label:'Ready',evidenceCode:'bad',confidence:1}]}).success,false)
+test('TagForgeProposalSchema requires content evidence and rejects non-content facets',()=>{
+  assert.equal(TagForgeProposalSchema.safeParse({facet:'domain',label:'AI工作流',evidenceCode:'topic',evidenceExcerpt:'AI 工作流',confidence:.9}).success,true)
+  assert.equal(TagForgeProposalSchema.safeParse({facet:'domain',label:'AI工作流',evidenceCode:'topic',confidence:.9}).success,false)
+  assert.equal(TagForgeProposalSchema.safeParse({facet:'project',label:'Ready',evidenceCode:'bad',evidenceExcerpt:'Ready',confidence:1}).success,false)
+})
+
+test('TagForgeApplyBatchSchema rejects an empty no-progress apply', () => {
+  assert.equal(TagForgeApplyBatchSchema.safeParse({ batchId: 'tfb-test', items: [] }).success, false)
+  const proposals=[{facet:'form',label:'教程',evidenceCode:'form',evidenceExcerpt:'教程',confidence:.9}]
+  assert.equal(TagForgeApplyBatchSchema.safeParse({batchId:'tfb-test',items:[{itemId:'tfi-1',expectedRevision:'hash',proposals}]}).success,true)
+  assert.equal(TagForgeApplyBatchSchema.safeParse({batchId:'tfb-test',items:[{path:'/x.md',expectedRevision:'hash',proposals}]}).success,false)
+  assert.equal(TagForgeApplyBatchSchema.safeParse({batchId:'tfb-test',items:[{path:'/x.md',expectedRevision:'hash',tags:['教程']}]}).success,false)
+})
+
+test('TagForge prepare resumes by batch id and review requires the submitted card id', () => {
+  assert.equal(TagForgePrepareBatchSchema.safeParse({rootPath:'/x'}).success,true)
+  assert.equal(TagForgePrepareBatchSchema.safeParse({batchId:'tfb-test'}).success,true)
+  assert.equal(TagForgeReviewBatchSchema.safeParse({ batchId: 'tfb-test', confirmationCardId:'auq-1' }).success, true)
+  assert.equal(TagForgeReviewBatchSchema.safeParse({ batchId: 'tfb-test', decisions: [] }).success, false)
 })
 
 test('FileRenameSchema requires path + newName', () => {

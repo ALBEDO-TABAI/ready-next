@@ -75,6 +75,7 @@ import {
   getAskUserQuestionsCardEmitter,
   getAskUserQuestionsCardPersistor,
 } from '../agent-control/ask-user/ask-user-questions-bridge'
+import { completeTagForgeHostReview } from '../tag-forge/tag-forge-host-review'
 import { executeMcpTool } from './mcp-tools'
 import { executeRSSTool } from './rss-tools'
 import { executeSkillTool, findSkillToolByNameForExecution } from './skills-tools'
@@ -224,18 +225,6 @@ function inheritBrowserActionSessionTarget(
   if (!targetTabId) return args
   const tabExists = context.browserController?.getTabList?.().some((tab) => tab.id === targetTabId)
   return tabExists ? { ...args, tab_id: targetTabId } : args
-}
-
-function workspaceRootsFromRequestEnvelope(envelope: unknown): string[] | null {
-  if (!envelope || typeof envelope !== 'object' || Array.isArray(envelope)) return null
-  const environmentHints = (envelope as { environmentHints?: unknown }).environmentHints
-  if (!environmentHints || typeof environmentHints !== 'object' || Array.isArray(environmentHints)) return null
-  const workspaceRoots = (environmentHints as { workspaceRoots?: unknown }).workspaceRoots
-  if (!Array.isArray(workspaceRoots)) return null
-  const roots = workspaceRoots
-    .filter((root): root is string => typeof root === 'string' && root.trim().length > 0)
-    .map((root) => root.trim())
-  return roots.length > 0 ? roots : null
 }
 
 function isFrameScopedInternalSkillActionAllowed(
@@ -663,12 +652,22 @@ async function executeToolCallInner(
 
         case 'file':
           {
-            const { executeFileManagementTool } = await import('./file-management-tools')
-            return executeFileManagementTool(toolName, args, {
+            const {
+              executeFileManagementTool,
+              resolveFileToolWorkspaceRoots,
+            } = await import('./file-management-tools')
+            const fileContext = {
               abortSignal: context.abortSignal,
-              workspaceRoots: workspaceRootsFromRequestEnvelope(context.requestEnvelope),
+              workspaceRoots: resolveFileToolWorkspaceRoots(toolName, context.requestEnvelope),
               runId: context.runId ?? null,
+              sessionId: context.sessionId ?? null,
+              scopeId: context.scopeId ?? null,
               requestModuleToolAction: context.requestModuleToolAction,
+            }
+            const result = await executeFileManagementTool(toolName, args, fileContext)
+            return completeTagForgeHostReview(toolName, result, context, fileContext, {
+              askUserQuestions: executeAskUserQuestions,
+              executeFileTool: executeFileManagementTool,
             })
           }
 
@@ -1077,7 +1076,31 @@ async function executeToolCallInner(
 }
 
 function toStructuredToolResult(toolName: string, rawResult: string | ToolExecutionOutput): ToolExecutionOutput {
-  const normalized = normalizeToolExecutionOutput(rawResult)
+  let normalized = normalizeToolExecutionOutput(rawResult)
+  if ((toolName === 'tag_forge_prepare_batch' || toolName === 'tag_forge_apply_batch' || toolName === 'tag_forge_review_batch') && !normalized.data) {
+    try {
+      const data = JSON.parse(normalized.text) as Record<string, unknown>
+      const count = toolName === 'tag_forge_prepare_batch'
+        ? Array.isArray(data.documents) ? data.documents.length : 0
+        : toolName === 'tag_forge_review_batch'
+          ? Array.isArray(data.decisions) ? data.decisions.length : 0
+          : Array.isArray(data.results) ? data.results.length : 0
+      const remaining = typeof data.remaining === 'number' ? data.remaining : 0
+      normalized = {
+        ...normalized,
+        text: data.ok === false
+          ? 'Tag Forge 批次执行失败。'
+          : data.reviewRequired === true
+            ? `Tag Forge 已写入确定标签，还有 ${Array.isArray(data.reviewItems) ? data.reviewItems.length : 0} 个存疑标签需要在对话中一次确认。`
+            : `Tag Forge 批次已处理 ${count} 份，剩余 ${remaining} 份。`,
+        shape: 'json',
+        data,
+        interactionHint: data.reviewRequired === true ? 'awaiting_clarification' : null,
+      }
+    } catch {
+      // silent-catch: malformed handler output remains plain text and is classified downstream.
+    }
+  }
   if (normalized.interactionHint) {
     return normalized
   }

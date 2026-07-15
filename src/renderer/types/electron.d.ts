@@ -3908,12 +3908,8 @@ interface ElectronFileEmergenceAPI {
   ackReadingSessionsFlushed: (requestId: string) => void
 }
 interface ElectronTagForgeAPI {
-  beginCreation: (payload:{sourceRunId:string})=>Promise<IPCResponse<{creationToken:string}|null>>
-  recordCreation: (payload:{creationToken:string;sourceRunId:string;path:string;workspaceRoots:string[]})=>Promise<IPCResponse<{receiptId:string}>>
-  validateCreation:(payload:{creationToken:string;sourceRunId:string;proposals:Array<{facet:'form'|'domain'|'entity'|'use';label:string;evidenceCode:string;evidenceExcerpt?:string;confidence:number}>})=>Promise<IPCResponse<{tags:string[];sparse:boolean;pending:Array<{facet:string;label:string}>}>>
-  finalizeCreation: (payload:{creationToken:string;receiptId:string;sourceRunId:string;path:string;workspaceRoots:string[]})=>Promise<IPCResponse<{receiptId:string;revision:string;path:string;status?:string}>>
-  listPending: ()=>Promise<IPCResponse<Array<{proposalId:string;facet:string;label:string;evidenceCode:string;evidenceExcerpt:string|null}>>>
-  reviewPending: (payload:{proposalId:string;decision:'approve'|'reject'})=>Promise<IPCResponse>
+  prepareCreation:(payload:{sourceRunId:string;path:string;workspaceRoots:string[];content:string;proposals:Array<{facet:'form'|'domain'|'entity'|'use';label:string;evidenceCode:string;evidenceExcerpt:string;confidence:number}>;creationPending:boolean})=>Promise<IPCResponse<{receiptId:string;content:string;tags:string[];workflowState:string|null}|null>>
+  finalizeCreation: (payload:{receiptId:string;sourceRunId:string;path:string;workspaceRoots:string[]})=>Promise<IPCResponse<{receiptId:string;revision:string;path:string;status:'completed'}>>
 }
 
 interface ElectronAPI {

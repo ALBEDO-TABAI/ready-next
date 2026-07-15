@@ -66,6 +66,11 @@ export interface RequestEnvelopeResource {
   widgetTextSample?: string | null
 }
 
+export interface TrustedFolderReference {
+  name: string
+  path: string
+}
+
 export interface RequestEnvelope {
   rawUserText: string
   pureUserText: string
@@ -256,7 +261,11 @@ function summarizeResourceText(text: string): string | null {
   return normalized ? normalized.slice(0, 240) : null
 }
 
-function buildResourceFromBlock(block: StructuredBlock, order: number): RequestEnvelopeResource | null {
+function buildResourceFromBlock(
+  block: StructuredBlock,
+  order: number,
+  trustedFolderReferences: readonly TrustedFolderReference[],
+): RequestEnvelopeResource | null {
   if (block.marker === '--- 附件:' || block.marker === '--- 引用文件:') {
     const name = block.text.match(/^---\s*(?:引用文件|附件):\s*(.+?)\s*---/m)?.[1]?.trim()
     if (!name) return null
@@ -352,8 +361,11 @@ function buildResourceFromBlock(block: StructuredBlock, order: number): RequestE
   }
 
   if (block.marker === '### 文件夹引用') {
-    const name = extractNamedBlockValue(block.text, '名称') || '文件夹引用'
-    const path = extractNamedBlockValue(block.text, '路径')
+    const parsedName = extractNamedBlockValue(block.text, '名称') || '文件夹引用'
+    const parsedPath = extractNamedBlockValue(block.text, '路径')
+    const trusted = trustedFolderReferences.find((folder) => folder.name === parsedName && folder.path === parsedPath)
+    if (!trusted) return null
+    const { name, path } = trusted
     const text = stripStructuredResourceBoilerplate(block.text)
     return {
       id: `${block.marker}-${order}-${name}`,
@@ -393,6 +405,33 @@ function buildResourceFromBlock(block: StructuredBlock, order: number): RequestE
   }
 
   return null
+}
+
+function normalizeTrustedFolderReferences(value: unknown): TrustedFolderReference[] {
+  if (!Array.isArray(value)) return []
+  const seen = new Set<string>()
+  const result: TrustedFolderReference[] = []
+  for (const candidate of value) {
+    if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) continue
+    const record = candidate as { name?: unknown; path?: unknown }
+    const name = typeof record.name === 'string' ? record.name.trim() : ''
+    const path = typeof record.path === 'string' ? record.path.trim() : ''
+    const key = `${name}\0${path}`
+    if (!name || !path || seen.has(key)) continue
+    seen.add(key)
+    result.push({ name, path })
+  }
+  return result
+}
+
+export function trustedFolderReferencesFromMessageMeta(meta: unknown): TrustedFolderReference[] {
+  if (!meta || typeof meta !== 'object' || Array.isArray(meta)) return []
+  const attachments = (meta as { attachments?: unknown }).attachments
+  if (!Array.isArray(attachments)) return []
+  return normalizeTrustedFolderReferences(attachments.filter((attachment) => (
+    attachment && typeof attachment === 'object' && !Array.isArray(attachment)
+    && (attachment as { isDirectory?: unknown }).isDirectory === true
+  )))
 }
 
 function buildReferencedResources(raw: string): RequestEnvelopeResourceRef[] {
@@ -467,12 +506,14 @@ export function buildRequestEnvelope(params: {
   scopeId?: string
   workspaceRoots?: string[]
   contextRefIds?: string[]
+  trustedFolderReferences?: TrustedFolderReference[]
 }): RequestEnvelope {
   const rawUserText = String(params.userText || '')
   const pureUserText = extractPureUserInput(rawUserText)
   const primaryInstruction = extractPrimaryUserInstructionFromText(pureUserText || rawUserText).trim()
   const structuredBlocks = collectStructuredBlocks(rawUserText)
   const workspaceRoots = normalizeWorkspaceRoots(params.workspaceRoots)
+  const trustedFolderReferences = normalizeTrustedFolderReferences(params.trustedFolderReferences)
 
   const chunks: InputChunk[] = []
   if (pureUserText) {
@@ -492,7 +533,7 @@ export function buildRequestEnvelope(params: {
   }
 
   const resources = structuredBlocks
-    .map((block, index) => buildResourceFromBlock(block, index))
+    .map((block, index) => buildResourceFromBlock(block, index, trustedFolderReferences))
     .filter(Boolean) as RequestEnvelopeResource[]
 
   // P1-1 — 当前轮用户文本（pureUserText，已剥离装配上下文/bootstrap）里每个 @[token]，若没有被

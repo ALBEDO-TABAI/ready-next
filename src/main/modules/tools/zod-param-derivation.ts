@@ -13,10 +13,11 @@
  * Pure module — no electron, no side effects.
  */
 
-import type {
-  ZodObject,
-  ZodRawShape,
-  ZodTypeAny,
+import {
+  z,
+  type ZodObject,
+  type ZodRawShape,
+  type ZodTypeAny,
 } from 'zod'
 
 import type { SkillParamDefinition } from '../../../shared/skill-execution-types'
@@ -141,6 +142,10 @@ function resolveParamType(node: ZodTypeAny): ResolvedParam {
         try {
           const unwrapped = unwrap(element).inner
           const elemResolved = resolveParamType(unwrapped)
+          if (elemResolved.type === 'object' && ['ZodObject', 'object'].includes(getTypeName(unwrapped))) {
+            const { $schema: _schema, ...items } = z.toJSONSchema(unwrapped) as Record<string, unknown>
+            return { type: 'array', items }
+          }
           const items: Record<string, unknown> = { type: elemResolved.type }
           if (elemResolved.additionalProperties !== undefined) {
             items.additionalProperties = elemResolved.additionalProperties

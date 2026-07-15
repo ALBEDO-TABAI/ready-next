@@ -13,6 +13,7 @@ import {
   buildComposedAgentInputWithDiagnostics,
   filterAttachmentsForComposedAgentInput,
   persistMessage as persistChatMessage,
+  resolveReferencedFilePoolAttachments,
   serializePersistedAttachments as serializeAttachments,
 } from '../modules/agent/messageComposer'
 import { mapBackendErrorToFriendly } from '../modules/agent/error-message-mapping'
@@ -1468,7 +1469,14 @@ export const useAgent = create<AgentState>((set, get) => ({
       attachments: currentAttachments.length > 0 ? [...currentAttachments] : undefined
     })
 
-    const persistedAttachments = serializeAttachments(currentAttachments)
+    const referencedPoolAttachments = resolveReferencedFilePoolAttachments(content, filePool)
+    const messageAttachments = [...currentAttachments]
+    for (const attachment of referencedPoolAttachments) {
+      if (!messageAttachments.some((candidate) => isSameAttachmentPoolEntry(candidate, attachment))) {
+        messageAttachments.push(attachment)
+      }
+    }
+    const persistedAttachments = serializeAttachments(messageAttachments)
     const userMessageMeta = {
       sourceKind: activeScope.sourceKind,
       sourceId: activeScope.sourceId,

@@ -455,6 +455,8 @@ interface PersistAskUserQuestionsCardArgs {
   cardId: string
   sessionId: string | null
   conversationId: string | null
+  scopeId?: string | null
+  requestId?: string | null
   questions: AskUserQuestionSpec[]
   askedAt: number
 }
@@ -486,6 +488,8 @@ function persistAskUserQuestionsCardPending(args: PersistAskUserQuestionsCardArg
         status: 'pending',
         questions: args.questions,
         askedAt: args.askedAt,
+        scopeId: args.scopeId || null,
+        requestId: args.requestId || null,
       },
     },
   )

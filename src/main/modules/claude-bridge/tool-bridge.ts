@@ -1,5 +1,9 @@
 import { serializeToolExecutionOutputForModel } from '../agent-control/tools-runtime/model-visible-tool-output'
-import type { ToolExecutionResultLike } from '../agent-control/tools-runtime/tool-result-types'
+import {
+  createToolExecutionOutput,
+  normalizeToolExecutionOutput,
+  type ToolExecutionResultLike,
+} from '../agent-control/tools-runtime/tool-result-types'
 
 export interface TextToolBridgeCall {
   name: string
@@ -46,6 +50,46 @@ function normalizeSchemaType(value: unknown): string {
   return typeof value === 'string' ? value : 'unknown'
 }
 
+function formatSchemaProperty(
+  name: string,
+  rawSchema: unknown,
+  required: boolean,
+  depth = 0,
+): string[] {
+  const schema = rawSchema && typeof rawSchema === 'object'
+    ? rawSchema as Record<string, unknown>
+    : {}
+  const type = normalizeSchemaType(schema.type)
+  const description = typeof schema.description === 'string' ? schema.description.trim() : ''
+  const enumValues = Array.isArray(schema.enum)
+    ? schema.enum.filter((item): item is string => typeof item === 'string')
+    : []
+  const itemSchema = schema.items && typeof schema.items === 'object'
+    ? schema.items as Record<string, unknown>
+    : null
+  const itemType = itemSchema ? normalizeSchemaType(itemSchema.type) : ''
+  const shownType = type === 'array' && itemType && itemType !== 'unknown'
+    ? `array<${itemType}>`
+    : type
+  const requiredLabel = required ? ', required' : ''
+  const enumLabel = enumValues.length > 0 ? `, enum: ${enumValues.join(' / ')}` : ''
+  const lines = [
+    `${'  '.repeat(depth)}- ${name} (${shownType}${requiredLabel}${enumLabel}): ${description || '无额外说明'}`,
+  ]
+  const childSchema = type === 'array' ? itemSchema : schema
+  if (!childSchema || normalizeSchemaType(childSchema.type) !== 'object') return lines
+  const childProperties = childSchema.properties && typeof childSchema.properties === 'object'
+    ? childSchema.properties as Record<string, unknown>
+    : {}
+  const childRequired = new Set(Array.isArray(childSchema.required)
+    ? childSchema.required.filter((item): item is string => typeof item === 'string')
+    : [])
+  for (const [childName, child] of Object.entries(childProperties)) {
+    lines.push(...formatSchemaProperty(childName, child, childRequired.has(childName), depth + 1))
+  }
+  return lines
+}
+
 function formatToolDescription(tool: Record<string, unknown>): string | null {
   const fn = (tool.function && typeof tool.function === 'object') ? tool.function as Record<string, unknown> : null
   const name = typeof fn?.name === 'string' ? fn.name : ''
@@ -65,17 +109,8 @@ function formatToolDescription(tool: Record<string, unknown>): string | null {
   const lines = [`### ${name}`]
   if (description) lines.push(description)
 
-  const propertyLines = Object.entries(properties).map(([paramName, schema]) => {
-    const param = schema && typeof schema === 'object' ? schema as Record<string, unknown> : {}
-    const type = normalizeSchemaType(param.type)
-    const paramDescription = typeof param.description === 'string' ? param.description.trim() : ''
-    const enumValues = Array.isArray(param.enum)
-      ? param.enum.filter((item): item is string => typeof item === 'string')
-      : []
-    const requiredLabel = required.includes(paramName) ? ', required' : ''
-    const enumLabel = enumValues.length > 0 ? `, enum: ${enumValues.join(' / ')}` : ''
-    return `- ${paramName} (${type}${requiredLabel}${enumLabel}): ${paramDescription || '无额外说明'}`
-  })
+  const propertyLines = Object.entries(properties).flatMap(([paramName, schema]) =>
+    formatSchemaProperty(paramName, schema, required.includes(paramName)))
 
   if (propertyLines.length > 0) {
     lines.push('Parameters:')
@@ -218,7 +253,7 @@ export function buildTextToolResultMessage(
     `call_id: ${item.id}`,
     `tool: ${item.name}`,
     'result:',
-    serializeToolExecutionOutputForModel(item.result),
+    serializeTextBridgeToolResult(item.name, item.result),
     '[/tool_result]',
   ].join('\n'))
 
@@ -226,6 +261,15 @@ export function buildTextToolResultMessage(
     ...blocks,
     '请基于以上工具结果继续下一步；如果任务已经完成，直接给出最终答复。',
   ].join('\n\n')
+}
+
+function serializeTextBridgeToolResult(name: string, result: ToolExecutionResultLike): string {
+  const summary = serializeToolExecutionOutputForModel(result)
+  if (name !== 'tag_forge_prepare_batch' && name !== 'tag_forge_apply_batch') return summary
+  const data = normalizeToolExecutionOutput(result).data
+  if (!data) return summary
+  const structured = serializeToolExecutionOutputForModel(createToolExecutionOutput('', { shape: 'json', data }))
+  return summary && summary !== structured ? `${summary}\n${structured}` : structured
 }
 
 export function looksLikeMissingNativeToolsReply(text: string): boolean {

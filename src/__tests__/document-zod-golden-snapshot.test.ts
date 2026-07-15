@@ -247,10 +247,29 @@ const EXPECTED_ANTHROPIC = [
   },
   {
     name: 'document_save_tab',
-    description: '保存当前、指定或最近工具目标文档标签，可选直接保存到目标路径。新建 Markdown 时应基于最终正文同时提交 tagProposals（只含 form/domain/entity/use）；Ready 会校验词表并固定 state。',
+    description: '保存当前、指定或最近工具目标文档标签，可选直接保存到目标路径。新建 Markdown 只需基于最终正文提交现有标签尚未覆盖的 tagProposals；已有标签可直接满足形态/主题，无需补充时可省略。Ready 会回查正文、补固定状态，证据充分的高置信新词可直接采用。',
     input_schema: {
       type: 'object',
-      properties: { tabId: TAB_ID, path: SAVE_PATH, tagProposals:{type:'array',description:'新建 Markdown 最终保存时提交 Tag Forge 语义提案；只允许 form/domain/entity/use，state/project 不由模型填写'} },
+      properties: {
+        tabId: TAB_ID,
+        path: SAVE_PATH,
+        tagProposals: {
+          type: 'array',
+          description: '新建 Markdown 只需提交现有标签尚未覆盖的候选；已有标签可直接满足形态/主题，无需补充时可省略。每项都要附最终正文中的准确摘录，state/project 不由模型填写',
+          items: {
+            type: 'object',
+            properties: {
+              facet: { type: 'string', enum: ['form', 'domain', 'entity', 'use'] },
+              label: { type: 'string', minLength: 1 },
+              evidenceCode: { type: 'string', minLength: 1 },
+              evidenceExcerpt: { type: 'string', minLength: 2 },
+              confidence: { type: 'number', minimum: 0, maximum: 1 },
+            },
+            required: ['facet', 'label', 'evidenceCode', 'evidenceExcerpt', 'confidence'],
+            additionalProperties: false,
+          },
+        },
+      },
       required: [],
     },
   },

@@ -46,7 +46,7 @@ import type {
 import type { IntentClassification } from '../intent-classifier'
 import type { PromptAssemblyResult } from '../prompt-assembly'
 import type { RecentSkillRunForResume } from '../skills/skill-turn-identity-snapshot'
-import type { RequestEnvelope } from './request-envelope'
+import type { RequestEnvelope, TrustedFolderReference } from './request-envelope'
 import type { ContinuationIntent, ContinuationState } from './continuation-state'
 import type { DomainAdapter } from '../domain-adapters/domain-adapter'
 import type { ToolExecutionHooks } from '../tools-runtime/tool-execution-hooks'
@@ -536,6 +536,7 @@ export interface RunCoordinatorRequest {
   sessionIdOverride?: string
   workspaceRoots?: string[]
   contextRefIds?: string[]
+  trustedFolderReferences?: TrustedFolderReference[]
   budget?: RunBudgetSeed
   continuationIntent?: ContinuationIntent | null
   taskOrigin?: TaskCreationOrigin

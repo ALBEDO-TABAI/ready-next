@@ -9,6 +9,7 @@ import {
 test('delivery wall-clock budgets are explicit and stay below the hard cap', () => {
   assert.equal(resolveDynamicDeliveryWallClockMs('standard'), null)
   assert.equal(resolveDynamicDeliveryWallClockMs('adaptive'), 120_000)
+  assert.equal(resolveDynamicDeliveryWallClockMs('adaptive', 'tag_forge_folder_batch'), 240_000)
   assert.equal(resolveDynamicDeliveryWallClockMs('thorough'), 240_000)
 })
 

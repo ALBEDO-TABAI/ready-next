@@ -1,16 +1,20 @@
-import { copyFile, lstat, mkdir, readFile, readdir, realpath, rename, stat, writeFile } from 'fs/promises'
-import { constants, existsSync } from 'fs'
+import { copyFile, lstat, mkdir, readFile, readdir, realpath, rename, stat, unlink, writeFile } from 'fs/promises'
+import { constants, existsSync, realpathSync, statSync } from 'fs'
 import { createHash, randomUUID } from 'crypto'
 import { tmpdir } from 'os'
 import { basename, dirname, extname, isAbsolute, join, relative, resolve as resolvePath } from 'path'
 import { fileURLToPath } from 'url'
 import type { SearchEngine } from '../search-engine/indexer'
+import type { DatabaseConnection } from '../database'
 import { getWorkerDbBridge } from '../database/worker-bridge'
 import { parseDocumentGraph } from '../../../shared/document-graph-parse'
 import { resolveDocumentSectionAnchor } from '../../../shared/document-sectioning'
 import { validateWorkspaceRoot } from '../../../shared/workspace-validation'
-import { executeTagForgeApply } from '../tag-forge/tag-forge-tool'
+import { buildTagForgeLexiconSnapshot, executeTagForgeApply } from '../tag-forge/tag-forge-tool'
 import { revisionOf } from '../tag-forge/tag-forge-writer'
+import { extractDocumentTagLabels } from '../tag-forge/tag-forge-content-tags'
+import { evaluateControlledContentLabels, loadTagForgePolicy, type TagFacet, type TagProposal } from '../tag-forge/tag-forge-policy'
+import { TagForgeRepository } from '../repositories/tag-forge-repository'
 import {
   resolveIndexedDocumentCandidate as resolveIndexedDocumentCandidateFromDb,
   type IndexedDocumentRow,
@@ -22,6 +26,43 @@ export {
   getFileManagementOpenAITools,
 } from './file-management-tool-defs'
 
+const TAG_FORGE_FOLDER_AUTH_TOOLS = new Set([
+  'tag_forge_prepare_batch',
+  'tag_forge_apply_batch',
+])
+
+export function resolveFileToolWorkspaceRoots(
+  toolName: string,
+  envelope: unknown,
+): string[] | null {
+  if (!envelope || typeof envelope !== 'object' || Array.isArray(envelope)) return null
+  const record = envelope as { environmentHints?: unknown; resources?: unknown }
+  const roots: string[] = []
+  const push = (value: unknown): void => {
+    const root = typeof value === 'string' ? value.trim() : ''
+    if (root && !roots.includes(root)) roots.push(root)
+  }
+  if (record.environmentHints && typeof record.environmentHints === 'object' && !Array.isArray(record.environmentHints)) {
+    const configured = (record.environmentHints as { workspaceRoots?: unknown }).workspaceRoots
+    if (Array.isArray(configured)) configured.forEach(push)
+  }
+  if (TAG_FORGE_FOLDER_AUTH_TOOLS.has(toolName) && Array.isArray(record.resources)) {
+    for (const resource of record.resources) {
+      if (!resource || typeof resource !== 'object' || Array.isArray(resource)) continue
+      const candidate = resource as { kind?: unknown; source?: unknown; path?: unknown; canRead?: unknown }
+      if (candidate.kind !== 'folder_reference' || candidate.source !== 'folder_reference' || candidate.canRead !== true) continue
+      const path = typeof candidate.path === 'string' ? candidate.path.trim() : ''
+      try {
+        const canonical = path ? realpathSync(path) : ''
+        if (canonical && statSync(canonical).isDirectory() && validateWorkspaceRoot(canonical).ok) push(path)
+      } catch {
+        // Transient paths are rejected by the authoritative root check below.
+      }
+    }
+  }
+  return roots.length > 0 ? roots : null
+}
+
 // ---------------------------------------------------------------------------
 // Execution
 // ---------------------------------------------------------------------------
@@ -32,6 +73,8 @@ interface FileManagementToolContext {
   organizeStoreDir?: string | null
   workspaceRoots?: string[] | null
   runId?: string | null
+  sessionId?: string | null
+  scopeId?: string | null
   requestModuleToolAction?: (tool:string,args:Record<string,unknown>)=>Promise<Record<string,unknown>>
 }
 
@@ -44,6 +87,11 @@ const MAX_INVENTORY_LIMIT = 500
 const DEFAULT_INVENTORY_DEPTH = 2
 const MAX_INVENTORY_DEPTH = 5
 const ORGANIZE_PLAN_TTL_MS = 30 * 60 * 1000
+const TAG_FORGE_BATCH_DOCUMENT_LIMIT = 4
+const TAG_FORGE_BATCH_CONTENT_CHARS = 60_000
+const TAG_FORGE_REVIEW_CANDIDATE_LIMIT = 35
+const TAG_FORGE_REVIEW_OPTIONS_PER_QUESTION = 7
+const TAG_FORGE_REVIEW_IGNORE_OPTION = '以上标签都不采用'
 
 type OrganizeOperationInput = {
   path: string
@@ -96,16 +144,32 @@ type OrganizeJournal = {
 }
 
 type TagForgeBatchItemState = {
+  itemId: string
   path: string
+  relativePath: string
   status: 'pending' | 'awaiting_review' | 'completed' | 'conflict' | 'failed'
   errorKind?: string | null
+  pending?: Array<{ proposalId: string; facet: TagFacet; label: string }>
+  pendingSubmission?: {
+    expectedRevision: string
+    proposals?: TagProposal[]
+  }
 }
 
 type TagForgeBatchState = {
   batchId: string
   rootPath: string
   workspaceRoot: string
+  policyVersion: string
   items: TagForgeBatchItemState[]
+  reviewRequestId?: string
+  reviewFingerprint?: string
+  reviewCardId?: string
+  reviewDecision?: {
+    confirmationCardId: string
+    selected: string[]
+    decisions: Array<{ proposalId: string; facet: TagFacet; label: string; decision: 'approve' | 'ignore' }>
+  }
   createdAt: string
   updatedAt: string
 }
@@ -120,11 +184,28 @@ function normalizeExplicitWorkspaceRoots(roots: string[] | null | undefined): st
   const normalized: string[] = []
   for (const rawRoot of roots) {
     const root = typeof rawRoot === 'string' ? resolvePath(rawRoot.trim()) : ''
-    if (!root || !validateWorkspaceRoot(root).ok || seen.has(root)) continue
-    seen.add(root)
+    const canonical = root ? canonicalBoundaryPath(root) : null
+    if (!canonical || !validateWorkspaceRoot(canonical).ok || seen.has(canonical)) continue
+    seen.add(canonical)
     normalized.push(root)
   }
   return normalized
+}
+
+function canonicalBoundaryPath(rawPath: string): string | null {
+  let cursor = resolvePath(rawPath)
+  const missingSegments: string[] = []
+  while (!existsSync(cursor)) {
+    const parent = dirname(cursor)
+    if (parent === cursor) return null
+    missingSegments.unshift(basename(cursor))
+    cursor = parent
+  }
+  try {
+    return resolvePath(realpathSync(cursor), ...missingSegments)
+  } catch {
+    return null
+  }
 }
 
 function assertInsideWorkspace(
@@ -136,13 +217,19 @@ function assertInsideWorkspace(
     return { ok: false, error: 'path must be absolute' }
   }
   const resolved = resolvePath(target)
+  const canonicalTarget = canonicalBoundaryPath(resolved)
+  if (!canonicalTarget) return { ok: false, error: `path cannot be resolved safely: ${resolved}` }
   const scopedRoots = normalizeExplicitWorkspaceRoots(explicitRoots)
+  const containsCanonicalTarget = (candidate: string | null): candidate is string => {
+    if (!candidate) return false
+    const canonicalRoot = canonicalBoundaryPath(candidate)
+    return Boolean(canonicalRoot && isPathInsideRoot(canonicalTarget, canonicalRoot))
+  }
   const root = scopedRoots
-    ? scopedRoots.find((candidate) => isPathInsideRoot(resolved, candidate))
-    : engine.findWorkspaceRootForPath(resolved)
+    ? scopedRoots.find(containsCanonicalTarget)
+    : [engine.findWorkspaceRootForPath(resolved), engine.findWorkspaceRootForPath(canonicalTarget)]
+        .find(containsCanonicalTarget)
   if (!root) return { ok: false, error: `path is outside any known workspace: ${resolved}` }
-  const rel = relative(root, resolved)
-  if (rel.startsWith('..')) return { ok: false, error: `path escapes workspace root: ${rel}` }
   return { ok: true, root }
 }
 
@@ -160,13 +247,16 @@ async function authorizeRoot(
   if (!raw) return { ok: false, output: { ok: false, error: 'rootPath is required' } }
   const rootPath = resolvePath(raw)
   if (!isAbsolute(rootPath)) return { ok: false, output: { ok: false, error: 'rootPath must be absolute' } }
-  const guard = assertInsideWorkspace(rootPath, engine, explicitRoots)
-  if (!guard.ok) return { ok: false, output: { ok: false, error: guard.error } }
   try {
     const rootStat = await stat(rootPath)
     if (!rootStat.isDirectory()) return { ok: false, output: { ok: false, error: 'rootPath must be a directory', rootPath } }
-    const workspaceRealPath = await realpath(guard.root)
     const rootRealPath = await realpath(rootPath)
+    if (!validateWorkspaceRoot(rootRealPath).ok) {
+      return { ok: false, output: { ok: false, error: 'rootPath resolves to a forbidden broad root', rootPath } }
+    }
+    const guard = assertInsideWorkspace(rootRealPath, engine, explicitRoots)
+    if (!guard.ok) return { ok: false, output: { ok: false, error: guard.error } }
+    const workspaceRealPath = await realpath(guard.root)
     if (!isPathInsideRoot(rootRealPath, workspaceRealPath)) {
       return { ok: false, output: { ok: false, error: 'rootPath escapes workspace via symlink', rootPath } }
     }
@@ -235,7 +325,14 @@ async function getOrganizeStoreDir(context?: FileManagementToolContext): Promise
 
 async function writeJsonFile(path: string, value: unknown): Promise<void> {
   await mkdir(dirname(path), { recursive: true })
-  await writeFile(path, `${JSON.stringify(value, null, 2)}\n`, 'utf-8')
+  const tmp = join(dirname(path), `.${basename(path)}.${randomUUID()}.tmp`)
+  try {
+    await writeFile(tmp, `${JSON.stringify(value, null, 2)}\n`, { encoding: 'utf-8', flag: 'wx' })
+    await rename(tmp, path)
+  } catch (error) {
+    await unlink(tmp).catch(() => undefined)
+    throw error
+  }
 }
 
 async function readJsonFile<T>(path: string): Promise<T | null> {
@@ -375,12 +472,12 @@ export async function executeFileManagementTool(
       return runFileGetGraph(args, engine, context)
     case 'file_classify':
       return runFileClassify(args, engine, context)
-    case 'tag_forge_apply':
-      return executeTagForgeApply(args, engine, context)
     case 'tag_forge_prepare_batch':
       return runTagForgePrepareBatch(args, engine, context)
     case 'tag_forge_apply_batch':
       return runTagForgeApplyBatch(args, engine, context)
+    case 'tag_forge_review_batch':
+      return runTagForgeReviewBatch(args, engine, context)
     case 'file_rename':
       return runFileRename(args, engine, context)
     case 'file_move':
@@ -408,12 +505,6 @@ function tagForgeBatchPath(storeDir: string, batchId: string): string {
   return join(storeDir, 'tag-forge-batches', `${batchId}.json`)
 }
 
-function hasExistingTagMetadata(content: string): boolean {
-  const graph = parseDocumentGraph(content)
-  if (Array.isArray(graph.frontmatter?.tags) && graph.frontmatter.tags.length > 0) return true
-  return graph.body.replace(/^\uFEFF/, '').split(/\r?\n/).some((line) => /^(?:#[\p{L}\p{N}_\-/]+\s*){1,20}$/u.test(line.trim()))
-}
-
 async function loadTagForgeBatch(storeDir: string, batchId: string): Promise<TagForgeBatchState | null> {
   if (!/^[a-zA-Z0-9-]{8,80}$/.test(batchId)) return null
   return readJsonFile<TagForgeBatchState>(tagForgeBatchPath(storeDir, batchId))
@@ -433,16 +524,27 @@ async function runTagForgePrepareBatch(
   const requestedBatchId = typeof args.batchId === 'string' ? args.batchId.trim() : ''
   let state = requestedBatchId ? await loadTagForgeBatch(storeDir, requestedBatchId) : null
   if (requestedBatchId && !state) return toJsonString({ ok: false, errorKind: 'tag_forge_batch_not_found' })
-  if (!state) {
-    const auth = await authorizeRoot(typeof args.rootPath === 'string' ? args.rootPath : '', engine, context?.workspaceRoots)
+  const policy = loadTagForgePolicy()
+  if (!state || state.policyVersion !== policy.version) {
+    const requestedRoot = state?.rootPath || (typeof args.rootPath === 'string' ? args.rootPath : '')
+    const auth = await authorizeRoot(requestedRoot, engine, context?.workspaceRoots)
     if (!auth.ok) return toJsonString(auth.output)
-    const inventory = await collectInventory(auth.rootPath, auth, true, MAX_INVENTORY_DEPTH)
+    const inventory = await collectInventory(auth.rootPath, auth, true, Number.MAX_SAFE_INTEGER)
     const items: TagForgeBatchItemState[] = []
     for (const item of inventory) {
       if (item.kind !== 'file' || extname(item.path).toLowerCase() !== '.md') continue
-      const content = await readFile(item.path, 'utf-8').catch(() => null)
-      if (content === null || hasExistingTagMetadata(content)) continue
-      items.push({ path: item.path, status: 'pending' })
+      const itemId = `tfi-${randomUUID()}`
+      const relativePath = relative(auth.rootPath, item.path)
+      if (item.errorKind) {
+        items.push({ itemId, path: item.path, relativePath, status: 'failed', errorKind: item.errorKind })
+        continue
+      }
+      try {
+        await readFile(item.path, 'utf-8')
+        items.push({ itemId, path: item.path, relativePath, status: 'pending' })
+      } catch {
+        items.push({ itemId, path: item.path, relativePath, status: 'failed', errorKind: 'tag_read_failed' })
+      }
     }
     const fingerprint = createHash('sha256').update(`${auth.rootPath}\0${Date.now()}\0${randomUUID()}`).digest('hex').slice(0, 20)
     const now = new Date().toISOString()
@@ -450,36 +552,84 @@ async function runTagForgePrepareBatch(
       batchId: `tfb-${fingerprint}`,
       rootPath: auth.rootPath,
       workspaceRoot: auth.workspaceRoot,
+      policyVersion: policy.version,
       items,
       createdAt: now,
       updatedAt: now,
     }
     await saveTagForgeBatch(storeDir, state)
   }
-  const limit = typeof args.limit === 'number' ? Math.max(1, Math.min(12, Math.floor(args.limit))) : 8
-  const pending = state.items.filter((item) => item.status !== 'completed').slice(0, limit)
-  const documents: Array<{ path: string; expectedRevision: string; content: string }> = []
+  for (const item of state.items) {
+    item.itemId ||= `tfi-${randomUUID()}`
+    item.relativePath ||= relative(state.rootPath, item.path)
+  }
+  const currentAuth = await authorizeRoot(state.rootPath, engine, [state.workspaceRoot])
+  if (!currentAuth.ok) return toJsonString(currentAuth.output)
+  const limit = typeof args.limit === 'number'
+    ? Math.max(1, Math.min(TAG_FORGE_BATCH_DOCUMENT_LIMIT, Math.floor(args.limit)))
+    : TAG_FORGE_BATCH_DOCUMENT_LIMIT
+  const pending = state.items.filter((item) => item.status !== 'completed' && item.status !== 'awaiting_review')
+  const documents: Array<{ itemId: string; file: string; expectedRevision: string; content: string }> = []
+  let contentChars = 0
   for (const item of pending) {
+    if (documents.length >= limit) break
     try {
-      const content = await readFile(item.path, 'utf-8')
-      documents.push({ path: item.path, expectedRevision: revisionOf(content), content })
+      const currentStats = await lstat(item.path)
+      if (currentStats.isSymbolicLink()) {
+        item.status = 'failed'
+        item.errorKind = 'symlink_not_supported'
+        continue
+      }
+      const resolved = await resolveExistingPathInsideRoot(item.path, currentAuth)
+      if (!resolved.ok) {
+        item.status = 'failed'
+        item.errorKind = 'workspace_boundary_rejected'
+        continue
+      }
+      const content = await readFile(resolved.realPath, 'utf-8')
+      if (documents.length > 0 && contentChars + content.length > TAG_FORGE_BATCH_CONTENT_CHARS) break
+      item.status = 'pending'
+      item.errorKind = null
+      documents.push({ itemId: item.itemId, file: item.relativePath, expectedRevision: revisionOf(content), content })
+      contentChars += content.length
     } catch (error) {
       item.status = 'failed'
       item.errorKind = error instanceof Error ? error.message : String(error)
     }
   }
-  await saveTagForgeBatch(storeDir, state)
+  const actionableRemaining = state.items.filter((item) => item.status !== 'completed' && item.status !== 'awaiting_review').length
+  const review = actionableRemaining === 0 ? await prepareTagForgeReview(state, engine) : null
   const completed = state.items.filter((item) => item.status === 'completed').length
   const remaining = state.items.filter((item) => item.status !== 'completed').length
+  await saveTagForgeBatch(storeDir, state)
+  if (review?.question && state.reviewDecision) {
+    return runTagForgeReviewBatch({
+      batchId: state.batchId,
+      confirmationCardId: state.reviewDecision.confirmationCardId,
+    }, engine, context)
+  }
+  const runStatePath = tagForgeBatchPath(storeDir, state.batchId)
+  const overlay = new TagForgeRepository(engine.getRepository().getConnection()).listOverlay()
   return toJsonString({
     ok: true,
     batchId: state.batchId,
-    rootPath: state.rootPath,
     total: state.items.length,
     completed,
     remaining,
     done: remaining === 0,
+    contentChars,
     documents,
+    errors: state.items.filter((item) => item.status === 'failed' || item.status === 'conflict').map((item) => ({ itemId: item.itemId, file: item.relativePath, errorKind: item.errorKind })),
+    lexicon: buildTagForgeLexiconSnapshot(policy, overlay),
+    reviewRequired: Boolean(review?.question),
+    reviewItems: review ? publicTagForgeReviewItems(review.items) : [],
+    reviewQuestion: review?.question ?? null,
+    resume: remaining > 0 ? {
+      tool: 'tag_forge_prepare_batch',
+      args: { batchId: state.batchId },
+      outputDir: dirname(runStatePath),
+      runStatePath,
+    } : null,
   })
 }
 
@@ -497,47 +647,352 @@ async function runTagForgeApplyBatch(
   for (const raw of submitted) {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue
     const item = raw as Record<string, unknown>
-    const path = typeof item.path === 'string' ? resolvePath(item.path) : ''
-    const tracked = state.items.find((candidate) => candidate.path === path)
-    if (!tracked || tracked.status === 'completed') {
-      results.push({ path, ok: false, errorKind: tracked ? 'already_completed' : 'path_not_in_batch' })
+    const itemId = typeof item.itemId === 'string' ? item.itemId.trim() : ''
+    const tracked = state.items.find((candidate) => candidate.itemId === itemId)
+    const reviewRetry = args.reviewRetry === true
+    if (!tracked) {
+      results.push({ itemId, ok: false, errorKind: 'item_not_in_batch' })
       continue
     }
+    if (tracked.status === 'completed') {
+      results.push({ itemId, file: tracked.relativePath, ok: true, status: 'completed', replayed: true })
+      continue
+    }
+    if (tracked.status === 'awaiting_review' && !reviewRetry) {
+      results.push({ itemId, file: tracked.relativePath, ok: true, status: 'waiting_review', reviewRequired: true, replayed: true })
+      continue
+    }
+    const path = tracked.path
     const output = JSON.parse(await executeTagForgeApply({
       path,
-      mode: 'explicit',
       expectedRevision: item.expectedRevision,
       proposals: item.proposals,
-    }, engine, context)) as Record<string, unknown>
+    }, engine, { ...context, batchId, itemId })) as Record<string, unknown>
     if (output.ok === true && output.status === 'waiting_review') {
-      tracked.status = 'awaiting_review'
-      tracked.errorKind = null
-    } else if (output.ok === true) {
+      tracked.pending = normalizePendingTags(output.pending)
+      if (tracked.pending.length === 0) {
+        tracked.status = 'failed'
+        tracked.errorKind = 'tag_review_state_missing'
+        tracked.pendingSubmission = undefined
+      } else {
+        tracked.status = 'awaiting_review'
+        tracked.errorKind = null
+        tracked.pendingSubmission = {
+          expectedRevision: typeof output.revision === 'string' ? output.revision : String(item.expectedRevision || ''),
+          proposals: normalizeTagProposals(item.proposals),
+        }
+      }
+    } else if (output.ok === true && output.status === 'completed') {
       tracked.status = 'completed'
       tracked.errorKind = null
+      tracked.pending = undefined
+      tracked.pendingSubmission = undefined
     } else {
       const errorKind = typeof output.errorKind === 'string' ? output.errorKind : 'tag_write_failed'
       tracked.status = errorKind === 'revision_conflict' || errorKind === 'open_tab_revision_conflict' ? 'conflict' : 'failed'
       tracked.errorKind = errorKind
+      tracked.pendingSubmission = undefined
     }
-    results.push(output)
+    results.push({ ...output, path: undefined, itemId, file: tracked.relativePath })
     await saveTagForgeBatch(storeDir, state)
   }
+  const actionableRemaining = state.items.filter((item) => item.status !== 'completed' && item.status !== 'awaiting_review').length
+  const review = actionableRemaining === 0 ? await prepareTagForgeReview(state, engine) : null
   const completed = state.items.filter((item) => item.status === 'completed').length
   const remaining = state.items.filter((item) => item.status !== 'completed').length
   const awaitingReview = state.items.filter((item) => item.status === 'awaiting_review').length
+  await saveTagForgeBatch(storeDir, state)
+  const runStatePath = tagForgeBatchPath(storeDir, batchId)
   return toJsonString({
-    ok: results.every((result) => result.ok === true),
+    ok: submitted.length > 0 && results.length === submitted.length && results.every((result) => result.ok === true),
     batchId,
     completed,
     remaining,
     done: remaining === 0,
     awaitingReview,
-    reviewRequired: awaitingReview > 0,
-    reviewLocation: awaitingReview > 0 ? '设置 > 文档标签' : null,
-    resume: awaitingReview > 0 ? { tool: 'tag_forge_prepare_batch', args: { rootPath: state.rootPath, batchId } } : null,
+    reviewRequired: Boolean(review?.question),
+    reviewLocation: review?.question ? 'Agent 对话' : null,
+    reviewItems: review ? publicTagForgeReviewItems(review.items) : [],
+    reviewRequestId: review?.question ? state.reviewRequestId : null,
+    reviewQuestion: review?.question ?? null,
+    resume: remaining > 0 ? {
+      tool: 'tag_forge_prepare_batch',
+      args: { batchId },
+      outputDir: dirname(runStatePath),
+      runStatePath,
+    } : null,
     results,
   })
+}
+
+async function runTagForgeReviewBatch(
+  args: Record<string, unknown>,
+  engine: SearchEngine,
+  context?: FileManagementToolContext,
+): Promise<string> {
+  const batchId = typeof args.batchId === 'string' ? args.batchId.trim() : ''
+  const storeDir = await getOrganizeStoreDir(context)
+  const state = await loadTagForgeBatch(storeDir, batchId)
+  if (!state) return toJsonString({ ok: false, errorKind: 'tag_forge_batch_not_found' })
+  const confirmationCardId = typeof args.confirmationCardId === 'string' ? args.confirmationCardId.trim() : ''
+  if (state.reviewCardId === confirmationCardId && state.items.every((item) => item.status !== 'awaiting_review')) {
+    const remaining = state.items.filter((item) => item.status !== 'completed').length
+    return toJsonString({ ok: remaining === 0, batchId, done: remaining === 0, remaining, confirmationCardId, replayed: true })
+  }
+  const review = await prepareTagForgeReview(state, engine)
+  const reviewItems = review.items
+  if (!state.reviewRequestId || reviewItems.length === 0) {
+    return toJsonString({ ok: false, errorKind: 'tag_forge_review_not_pending' })
+  }
+  if (!review.question) return toJsonString({ ok: false, errorKind: 'tag_forge_review_question_missing' })
+  if (state.reviewCardId && state.reviewCardId !== confirmationCardId) {
+    return toJsonString({ ok: false, errorKind: 'tag_forge_review_card_already_consumed' })
+  }
+  let decisionLog = state.reviewDecision
+  if (decisionLog && decisionLog.confirmationCardId !== confirmationCardId) {
+    return toJsonString({ ok: false, errorKind: 'tag_forge_review_confirmation_mismatch' })
+  }
+  if (!decisionLog) {
+    const confirmation = readTagForgeReviewConfirmation(
+      engine.getRepository().getConnection(),
+      confirmationCardId,
+      review.question,
+      context?.runId ?? null,
+      context?.scopeId ?? null,
+    )
+    if (!confirmation.ok) return toJsonString({ ok: false, errorKind: confirmation.errorKind })
+    const decisions = reviewItems.flatMap((item) => {
+      const decision = confirmation.selected.has(tagForgeReviewOption(item)) ? 'approve' as const : 'ignore' as const
+      return item.proposalIds.map((proposalId) => ({ proposalId, facet: item.facet, label: item.label, decision }))
+    })
+    decisionLog = { confirmationCardId, selected: [...confirmation.selected], decisions }
+    state.reviewDecision = decisionLog
+    await saveTagForgeBatch(storeDir, state)
+  }
+  const repository = new TagForgeRepository(engine.getRepository().getConnection())
+  const resolved: Array<Record<string, unknown>> = []
+  engine.getRepository().transaction(() => {
+    for (const decision of decisionLog!.decisions) {
+      repository.reviewPending(decision.proposalId, decision.decision === 'approve' ? 'approve' : 'dismiss')
+      resolved.push({ proposalId: decision.proposalId, facet: decision.facet, label: decision.label, decision: decision.decision, ok: true })
+    }
+  })
+  state.reviewCardId = confirmationCardId
+  const decisionsById = new Map(decisionLog.decisions.map((decision) => [decision.proposalId, decision]))
+  const overlay = repository.listOverlay()
+  const policy = loadTagForgePolicy()
+  const retryItems: Array<{ itemId: string; expectedRevision: string; proposals?: TagProposal[] }> = []
+  for (const item of state.items) {
+    if (item.status !== 'awaiting_review' || !item.pendingSubmission || !item.pending?.every((pending) => decisionsById.has(pending.proposalId))) continue
+    const itemDecisions = item.pending.map((pending) => decisionsById.get(pending.proposalId)!)
+    if (itemDecisions.every((decision) => decision.decision === 'ignore') && await hasCompleteTagForgeContent(item.path, policy, overlay)) {
+      item.status = 'completed'
+      item.errorKind = null
+      item.pending = undefined
+      item.pendingSubmission = undefined
+      continue
+    }
+    retryItems.push({ itemId: item.itemId, ...item.pendingSubmission })
+  }
+  await saveTagForgeBatch(storeDir, state)
+  if (retryItems.length === 0) {
+    const continued = JSON.parse(await runTagForgePrepareBatch({ batchId }, engine, context)) as Record<string, unknown>
+    return toJsonString({ ...continued, decisions: resolved, confirmationCardId })
+  }
+  const retried = JSON.parse(await runTagForgeApplyBatch({ batchId, items: retryItems, reviewRetry: true }, engine, context)) as Record<string, unknown>
+  return toJsonString({ ...retried, ok: retried.ok === true, decisions: resolved, confirmationCardId })
+}
+
+async function hasCompleteTagForgeContent(
+  path: string,
+  policy: ReturnType<typeof loadTagForgePolicy>,
+  overlay: ReturnType<TagForgeRepository['listOverlay']>,
+): Promise<boolean> {
+  const content = await readFile(path, 'utf8').catch(() => null)
+  if (content === null) return false
+  const coverage = evaluateControlledContentLabels(policy, extractDocumentTagLabels(content), overlay)
+  return coverage.formCount >= 1 && (coverage.facets.includes('domain') || coverage.facets.includes('entity'))
+}
+
+function normalizePendingTags(value: unknown): Array<{ proposalId: string; facet: TagFacet; label: string }> {
+  if (!Array.isArray(value)) return []
+  return value.flatMap((item) => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return []
+    const facet = (item as Record<string, unknown>).facet
+    const label = (item as Record<string, unknown>).label
+    const proposalId = (item as Record<string, unknown>).proposalId
+    return typeof facet === 'string' && ['form','domain','entity','use'].includes(facet) && typeof label === 'string' && typeof proposalId === 'string'
+      ? [{ proposalId, facet: facet as TagFacet, label }]
+      : []
+  })
+}
+
+function normalizeTagProposals(value: unknown): TagProposal[] | undefined {
+  if (!Array.isArray(value)) return undefined
+  return value.filter((item): item is TagProposal => Boolean(item && typeof item === 'object' && !Array.isArray(item)))
+}
+
+type TagForgeReviewItem = {
+  facet: TagFacet
+  label: string
+  proposalIds: string[]
+  files: string[]
+  evidenceExcerpt: string | null
+  confidence: number | null
+}
+
+function collectTagForgeReviewItems(state: TagForgeBatchState): TagForgeReviewItem[] {
+  const grouped = new Map<string, TagForgeReviewItem>()
+  for (const item of state.items) {
+    if (item.status !== 'awaiting_review') continue
+    for (const pending of item.pending ?? []) {
+      const key = `${pending.facet}:${pending.label}`.toLocaleLowerCase()
+      const proposal = item.pendingSubmission?.proposals?.find((candidate) => (
+        candidate.facet === pending.facet && candidate.label.toLocaleLowerCase() === pending.label.toLocaleLowerCase()
+      ))
+      const current = grouped.get(key) ?? {
+        ...pending,
+        proposalIds: [],
+        files: [],
+        evidenceExcerpt: proposal?.evidenceExcerpt?.trim() || null,
+        confidence: typeof proposal?.confidence === 'number' ? proposal.confidence : null,
+      }
+      if (!current.proposalIds.includes(pending.proposalId)) current.proposalIds.push(pending.proposalId)
+      if (!current.files.includes(item.relativePath)) current.files.push(item.relativePath)
+      grouped.set(key, current)
+    }
+  }
+  const facetPriority: Record<TagFacet, number> = { form: 0, domain: 1, entity: 2, use: 3, state: 4 }
+  return [...grouped.values()].sort((a, b) => (
+    facetPriority[a.facet] - facetPriority[b.facet]
+    || (b.confidence ?? 0) - (a.confidence ?? 0)
+    || a.label.localeCompare(b.label)
+  ))
+}
+
+async function prepareTagForgeReview(
+  state: TagForgeBatchState,
+  engine: SearchEngine,
+): Promise<{ items: TagForgeReviewItem[]; question: Record<string, unknown> | null }> {
+  const candidates = collectTagForgeReviewItems(state)
+  const reviewAlreadyUsed = Boolean(state.reviewCardId)
+  const items = reviewAlreadyUsed ? [] : candidates.slice(0, TAG_FORGE_REVIEW_CANDIDATE_LIMIT)
+  const ignoredProposalIds = new Set((reviewAlreadyUsed ? candidates : candidates.slice(TAG_FORGE_REVIEW_CANDIDATE_LIMIT))
+    .flatMap((item) => item.proposalIds))
+  if (ignoredProposalIds.size > 0) {
+    const repository = new TagForgeRepository(engine.getRepository().getConnection())
+    engine.getRepository().transaction(() => {
+      for (const proposalId of ignoredProposalIds) repository.reviewPending(proposalId, 'dismiss')
+    })
+    for (const item of state.items) {
+      if (item.status !== 'awaiting_review') continue
+      item.pending = item.pending?.filter((pending) => !ignoredProposalIds.has(pending.proposalId))
+      if ((item.pending?.length ?? 0) > 0) continue
+      const complete = await hasCompleteTagForgeContent(item.path, loadTagForgePolicy(), repository.listOverlay())
+      item.status = complete ? 'completed' : 'failed'
+      item.errorKind = complete ? null : 'insufficient_content_tags_after_review'
+      item.pending = undefined
+      item.pendingSubmission = undefined
+    }
+  }
+  if (items.length === 0) return { items, question: null }
+  const fingerprint = createHash('sha256').update(JSON.stringify(items.map((item) => [item.facet, item.label, item.proposalIds]))).digest('hex')
+  if (state.reviewFingerprint !== fingerprint || !state.reviewRequestId) {
+    state.reviewFingerprint = fingerprint
+    state.reviewRequestId = `tfr-${randomUUID()}`
+    state.reviewCardId = undefined
+    state.reviewDecision = undefined
+  }
+  return { items, question: buildTagForgeReviewQuestion(state.reviewRequestId, items) }
+}
+
+function buildTagForgeReviewQuestion(requestId: string, items: TagForgeReviewItem[]): Record<string, unknown> {
+  const chunks: TagForgeReviewItem[][] = []
+  for (let index = 0; index < items.length; index += TAG_FORGE_REVIEW_OPTIONS_PER_QUESTION) {
+    chunks.push(items.slice(index, index + TAG_FORGE_REVIEW_OPTIONS_PER_QUESTION))
+  }
+  return {
+    questions: chunks.map((chunk, index) => ({
+      id: `tag-forge-${requestId}-${index + 1}`,
+      question: '请选择要采用的存疑标签。未选择的标签会被忽略。',
+      kind: 'multi_choice',
+      options: [...chunk.map(tagForgeReviewOption), TAG_FORGE_REVIEW_IGNORE_OPTION],
+      required: false,
+    })),
+  }
+}
+
+function tagForgeReviewOption(item: TagForgeReviewItem): string {
+  const facet = ({ form: '形态', domain: '领域', entity: '实体', use: '用途', state: '状态' } as const)[item.facet]
+  const evidence = item.evidenceExcerpt ? ` | “${item.evidenceExcerpt.replace(/\s+/g, ' ').slice(0, 32)}”` : ''
+  const identity = createHash('sha256').update(item.proposalIds.join('\0')).digest('hex').slice(0, 6)
+  return `[${identity}] ${facet}：${item.label}${evidence}`.slice(0, 80)
+}
+
+function publicTagForgeReviewItems(items: TagForgeReviewItem[]): Array<Record<string, unknown>> {
+  return items.map(({ proposalIds: _proposalIds, ...item }) => item)
+}
+
+function readTagForgeReviewConfirmation(
+  db: DatabaseConnection,
+  cardId: string,
+  expectedArgs: Record<string, unknown>,
+  runId: string | null,
+  scopeId: string | null,
+): { ok: true; selected: Set<string> } | { ok: false; errorKind: string } {
+  if (!cardId || !runId || !scopeId) return { ok: false, errorKind: 'tag_forge_review_confirmation_required' }
+  const row = db.prepare(`SELECT role,meta_json AS metaJson FROM chat_messages WHERE id=?`).get<{ role: string; metaJson: string | null }>(cardId)
+  if (!row || row.role !== 'agent_card') return { ok: false, errorKind: 'tag_forge_review_card_not_found' }
+  let meta: Record<string, unknown>
+  try {
+    meta = JSON.parse(row.metaJson || '{}') as Record<string, unknown>
+  } catch {
+    return { ok: false, errorKind: 'tag_forge_review_card_invalid' }
+  }
+  const ask = meta.askUserQuestions && typeof meta.askUserQuestions === 'object' && !Array.isArray(meta.askUserQuestions)
+    ? meta.askUserQuestions as Record<string, unknown>
+    : null
+  if (!ask || ask.status !== 'submitted' || ask.requestId !== runId) {
+    return { ok: false, errorKind: 'tag_forge_review_card_not_submitted_for_run' }
+  }
+  if (ask.scopeId !== scopeId) return { ok: false, errorKind: 'tag_forge_review_card_scope_mismatch' }
+  const expectedQuestions = canonicalReviewQuestions(expectedArgs.questions)
+  const actualQuestions = canonicalReviewQuestions(ask.questions)
+  if (expectedQuestions.length === 0 || JSON.stringify(actualQuestions) !== JSON.stringify(expectedQuestions)) {
+    return { ok: false, errorKind: 'tag_forge_review_card_question_mismatch' }
+  }
+  const answers = Array.isArray(ask.answers) ? ask.answers : []
+  const selected: string[] = []
+  for (const question of expectedQuestions) {
+    const answer = answers.find((candidate) => candidate && typeof candidate === 'object' && !Array.isArray(candidate) && (candidate as Record<string, unknown>).id === question.id) as Record<string, unknown> | undefined
+    const values = answer?.answer === undefined ? [] : answer.answer
+    if (!Array.isArray(values) || values.some((value) => typeof value !== 'string')) {
+      return { ok: false, errorKind: 'tag_forge_review_card_answer_invalid' }
+    }
+    const allowed = new Set(question.options)
+    if (values.some((value) => !allowed.has(String(value)))) return { ok: false, errorKind: 'tag_forge_review_card_answer_mismatch' }
+    selected.push(...values.map(String).filter((value) => value !== TAG_FORGE_REVIEW_IGNORE_OPTION))
+  }
+  return { ok: true, selected: new Set(selected) }
+}
+
+function canonicalReviewQuestions(value: unknown): Array<{ id: string; question: string; kind: string; options: string[]; placeholder: null; required: false }> {
+  if (!Array.isArray(value)) return []
+  const result: Array<{ id: string; question: string; kind: string; options: string[]; placeholder: null; required: false }> = []
+  for (const candidate of value) {
+    if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) return []
+    const question = candidate as Record<string, unknown>
+    if (typeof question.id !== 'string' || typeof question.question !== 'string' || question.kind !== 'multi_choice' || !Array.isArray(question.options) || question.required !== false) return []
+    result.push({
+      id: question.id,
+      question: question.question,
+      kind: 'multi_choice',
+      options: question.options.map(String),
+      placeholder: null,
+      required: false as const,
+    })
+  }
+  return result
 }
 
 async function getDefaultSearchEngine(): Promise<SearchEngine | null> {
@@ -1093,15 +1548,25 @@ async function collectInventory(
   recursive: boolean,
   maxDepth: number,
   depth = 0,
-): Promise<Array<{ path: string; name: string; kind: 'file' | 'directory'; size: number | null; mtimeMs: number | null; depth: number }>> {
+): Promise<Array<{ path: string; name: string; kind: 'file' | 'directory'; size: number | null; mtimeMs: number | null; depth: number; errorKind?: string }>> {
   const entries = await readdir(dir, { withFileTypes: true })
   const sorted = entries.sort((a, b) => a.name.localeCompare(b.name))
-  const items: Array<{ path: string; name: string; kind: 'file' | 'directory'; size: number | null; mtimeMs: number | null; depth: number }> = []
+  const items: Array<{ path: string; name: string; kind: 'file' | 'directory'; size: number | null; mtimeMs: number | null; depth: number; errorKind?: string }> = []
   for (const entry of sorted) {
     const path = join(dir, entry.name)
     if (!isPathInsideRoot(path, auth.rootPath)) continue
-    const stats = await stat(path).catch(() => null)
-    const kind = entry.isDirectory() ? 'directory' : 'file'
+    if (entry.isSymbolicLink()) {
+      items.push({ path, name: entry.name, kind: 'file', size: null, mtimeMs: null, depth, errorKind: 'symlink_not_supported' })
+      continue
+    }
+    const resolved = await resolveExistingPathInsideRoot(path, auth)
+    if (!resolved.ok) {
+      items.push({ path, name: entry.name, kind: entry.isDirectory() ? 'directory' : 'file', size: null, mtimeMs: null, depth, errorKind: 'workspace_boundary_rejected' })
+      continue
+    }
+    const stats = await lstat(path).catch(() => null)
+    if (!stats || stats.isSymbolicLink() || (!stats.isFile() && !stats.isDirectory())) continue
+    const kind = stats.isDirectory() ? 'directory' : 'file'
     items.push({
       path,
       name: entry.name,
@@ -1110,11 +1575,8 @@ async function collectInventory(
       mtimeMs: stats?.mtimeMs ?? null,
       depth,
     })
-    if (recursive && entry.isDirectory() && depth + 1 < maxDepth) {
-      const childReal = await realpath(path).catch(() => null)
-      if (childReal && isPathInsideRoot(childReal, auth.rootRealPath)) {
-        items.push(...await collectInventory(path, auth, recursive, maxDepth, depth + 1))
-      }
+    if (recursive && kind === 'directory' && depth + 1 < maxDepth) {
+      items.push(...await collectInventory(path, auth, recursive, maxDepth, depth + 1))
     }
   }
   return items
@@ -1142,8 +1604,8 @@ async function runFileInventory(
     const items: Array<Record<string, unknown>> = []
     for (const item of page) {
       let summary: string | null = null
-      let summaryError: string | null = null
-      if (includeSummaries && item.kind === 'file') {
+      let summaryError: string | null = item.errorKind ?? null
+      if (includeSummaries && item.kind === 'file' && !summaryError) {
         const extracted = await extractTextFromPath(item.path)
         if (extracted.ok) summary = extracted.text.slice(0, 600)
         else summaryError = extracted.error

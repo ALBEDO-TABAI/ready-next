@@ -14,7 +14,7 @@ import {
   isDocumentToolFailure,
   mergeProjectionPatches
 } from './agent-sdk-document-utils'
-import { errorMessage } from './agent-sdk-execution-utils'
+import { errorMessage, throwIfAbortSignalAborted } from './agent-sdk-execution-utils'
 import { log } from './agent-sdk-provider'
 import { buildExecutionTurnResult } from './agent-sdk-turn-closeout'
 import type { TurnOrchestratorHost } from './agent-sdk-turn-context'
@@ -145,6 +145,7 @@ export async function finalizeAgentSdkPreparedTurnResult(
     runMetaUsage
   } = state
   try {
+    throwIfAbortSignalAborted(abortSignal)
     if (useTextToolBridge && !finalText && usedTools.length > 0) {
       finalText = '工具已执行，但模型尚未给出最终回复。'
       emitOutput(finalText, 'text')
@@ -263,7 +264,7 @@ export async function finalizeAgentSdkPreparedTurnResult(
     if (newDocumentNeedsSave) {
       const saveDefinition = definitionByName.get('document_save_tab')
       if (saveDefinition) {
-        emitOutput('新文档已经写入但还没有保存，我会自动保存当前文档。', 'text')
+        emitOutput('正文或标签尚未完成，我会自动补全当前文档。', 'text')
         const output = await host.toolExecutor.executeReadyToolDefinition(
           saveDefinition,
           {},
@@ -379,6 +380,7 @@ export async function finalizeAgentSdkPreparedTurnResult(
       projectionPatches.push({ taskType: 'direct_answer', module: 'system' })
     }
     const finalProjectionPatch = mergeProjectionPatches(projectionPatches)
+    throwIfAbortSignalAborted(abortSignal)
     const finalizedDone = await finalizeRunOutcome(
       {
         kind: 'done',

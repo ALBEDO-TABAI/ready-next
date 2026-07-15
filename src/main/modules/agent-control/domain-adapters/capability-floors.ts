@@ -15,10 +15,13 @@ export interface CapabilityFloors {
 /** 本地文档资源在场时的文档读取地板（提及≠授写：@文件只保证可读，不含任何写面）。 */
 export const LOCAL_DOCUMENT_RESOURCE_FLOOR_TOOL_NAMES: ReadonlyArray<string> = ['file_locate', 'file_read_excerpt']
 export const TAG_FORGE_FOLDER_FLOOR_TOOL_NAMES: ReadonlyArray<string> = [
-  'file_inventory',
-  'file_extract_text',
   'tag_forge_prepare_batch',
   'tag_forge_apply_batch',
+]
+export const TAG_FORGE_FOLDER_RUNTIME_TOOL_NAMES: ReadonlyArray<string> = [
+  ...LOCAL_DOCUMENT_RESOURCE_FLOOR_TOOL_NAMES,
+  ...TAG_FORGE_FOLDER_FLOOR_TOOL_NAMES,
+  'declare_completion_criteria',
 ]
 /**
  * 当前编辑器文档上下文在场时的地板工具：用户正开着的文档是可编辑对象，任何轮
@@ -43,16 +46,21 @@ export function computeCapabilityFloors(params: {
 }): CapabilityFloors {
   const toolNames = new Set<string>()
   const reasons: string[] = []
+  const tagForgeFolderBatch = params.authorization.mode === 'selected'
+    && params.authorization.skillId === 'tag-forge'
+    && params.hasLocalDocumentResource
 
   if (params.authorization.mode === 'selected') {
-    for (const name of params.authorization.allowedTypedActions) toolNames.add(name)
-    for (const name of params.authorization.allowedPrimitives) toolNames.add(name)
+    if (!tagForgeFolderBatch) {
+      for (const name of params.authorization.allowedTypedActions) toolNames.add(name)
+      for (const name of params.authorization.allowedPrimitives) toolNames.add(name)
+    }
     reasons.push(`skill_selected:${params.authorization.skillId}`)
   }
   if (params.hasLocalDocumentResource) {
     for (const name of LOCAL_DOCUMENT_RESOURCE_FLOOR_TOOL_NAMES) toolNames.add(name)
     reasons.push('local_document_resource')
-    if (params.authorization.mode === 'selected' && params.authorization.skillId === 'tag-forge') {
+    if (tagForgeFolderBatch) {
       for (const name of TAG_FORGE_FOLDER_FLOOR_TOOL_NAMES) toolNames.add(name)
       reasons.push('tag_forge_folder_batch')
     }

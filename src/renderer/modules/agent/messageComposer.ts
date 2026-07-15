@@ -469,6 +469,15 @@ export async function buildComposedAgentInput(params: {
   return (await buildComposedAgentInputWithDiagnostics(params)).message
 }
 
+export function resolveReferencedFilePoolAttachments(content: string, filePool: ChatAttachment[]): ChatAttachment[] {
+  const references = content.match(/@\[([^\]]+)\]/g) ?? []
+  return references.flatMap((reference) => {
+    const name = reference.slice(2, -1)
+    const attachment = [...filePool].reverse().find((candidate) => candidate.name === name)
+    return attachment ? [attachment] : []
+  })
+}
+
 export async function buildComposedAgentInputWithDiagnostics(params: {
   content: string
   attachments: ChatAttachment[]
@@ -697,18 +706,16 @@ export async function buildComposedAgentInputWithDiagnostics(params: {
     finalMessage = hasMediaBlocks ? blocks : blocks.map((b) => b.text || '').join('')
   }
 
-  const atRefs = content.match(/@\[([^\]]+)\]/g)
-  if (atRefs && filePool.length > 0) {
+  const referencedPoolAttachments = resolveReferencedFilePoolAttachments(content, filePool)
+  if (referencedPoolAttachments.length > 0) {
     const isAlreadyAttached = (candidate: ChatAttachment) => effectiveAttachments.some((attachment) => (
       attachment.source === candidate.source &&
       attachment.path === candidate.path &&
       attachment.name === candidate.name
     ))
 
-    for (const ref of atRefs) {
-      const fileName = ref.slice(2, -1)
-      const poolFile = [...filePool].reverse().find((f) => f.name === fileName)
-      if (!poolFile) continue
+    for (const poolFile of referencedPoolAttachments) {
+      const fileName = poolFile.name
       if (isAlreadyAttached(poolFile)) continue
       try {
         if (poolFile.source === 'skill-folder') {

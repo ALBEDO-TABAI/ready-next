@@ -3,17 +3,16 @@
 #          aliases(归一命中面) / def(一句话定义+适用边界) / status(active|pending|deprecated)
 # 语言规则：有通行中文名用中文 label；无通行中文名保留官方英文写法
 
-version: 0.1
+version: 0.4
 config:
   prefix_mode: false          # true 时 tag 显示为 #facet/label
-  tags_per_doc: [3, 7]        # 每份素材 tag 总数下限/上限
-  new_tags_per_run: 10        # 单轮运行新建词条上限
-  new_tags_per_doc: 2         # 单份素材新建词条上限
+  tags_per_doc: [2, 15]       # Tag Forge 自动内容 tag 的安全范围；手工标签与工作流状态不计入
   orphan_review_days: 90      # 孤儿词条观察期
   automatic_state: 待整理
   facet_openness: {form: closed, domain: semi_open, entity: open, use: semi_open, state: closed}
-  automatic_allowed_facets: [form, domain, entity, use]
-  automatic_forbidden_state_labels: [已精读, 精选, 已归档]
+  explicit_auto_admit_confidence: 0.92
+  explicit_review_confidence: 0.65
+  explicit_auto_admit_facets: [domain, entity, use]
   broad_label_blacklist: [分析, 内容, 资料, 笔记, 重要, 参考, 学习, 知识, 素材, 其他]
   pending_requires_user_approval: true
   project_is_separate_from_tags: true
@@ -21,7 +20,7 @@ config:
 # ============ 形态 form（封闭枚举：不经闸门三新建，扩充需用户显式批准） ============
 entries:
   - {id: brand-analysis,   facet: form, label: 品牌分析,  aliases: [品牌拆解, 品牌研究, brand analysis], def: 以单一品牌为主要对象的系统性分析报告, status: active}
-  - {id: tutorial,         facet: form, label: 教程,      aliases: [教学, 指南, how-to, guide], def: 以教会读者完成某件事为目的的步骤性内容, status: active}
+  - {id: tutorial,         facet: form, label: 教程,      aliases: [指南, how-to, guide], def: 以教会读者完成某件事为目的的步骤性内容, status: active}
   - {id: case-study,       facet: form, label: 案例拆解,  aliases: [案例分析, 复盘, case study], def: 对具体项目/作品/事件的过程与得失拆解, status: active}
   - {id: reference-doc,    facet: form, label: 参考资料,  aliases: [文档, 手册, reference], def: 供查阅的事实性/规范性资料（参数表、规范、白皮书）, status: active}
   - {id: prompt-asset,     facet: form, label: 提示词,    aliases: [prompt, 咒语], def: 可复用的 AI 提示词或提示词模板, status: active}
@@ -40,7 +39,7 @@ entries:
   - {id: short-video-ads,      facet: domain, label: 短视频投放,      aliases: [信息流投放, 千川投放, 效果广告], def: 短视频效果广告的素材与投放方法, status: active}
   - {id: kv-design,            facet: domain, label: KV设计,          aliases: [主视觉, key visual, 视觉设计], def: 品牌主视觉/平面视觉创作相关, status: active}
   - {id: cg-production,        facet: domain, label: CG制作,          aliases: [CG, 三维制作], def: 三维/CG 内容制作的一级领域, status: active}
-  - {id: cg-houdini,           facet: domain, label: CG制作/Houdini,  aliases: [胡迪尼], def: Houdini 相关技术内容, status: active}
+  - {id: cg-houdini,           facet: domain, label: CG制作/Houdini,  aliases: [Houdini技术], def: Houdini 相关技术内容, status: active}
   - {id: cg-ue,                facet: domain, label: CG制作/UE,       aliases: [虚幻引擎, Unreal], def: Unreal Engine 相关技术内容, status: active}
   - {id: ai-workflow,          facet: domain, label: AI工作流,        aliases: [AI流程, AI提效, agent工作流], def: AI 工具链与自动化工作流的设计与实践, status: active}
   - {id: ai-image,             facet: domain, label: AI生图,          aliases: [AI绘画, 文生图, AI出图], def: AI 图像生成的技术与创作方法, status: active}
@@ -69,8 +68,8 @@ entries:
   - {id: team-share,        facet: use, label: 团队分享, aliases: [分享会, 内部分享], def: 计划在团队内分享传播的内容, status: active}
   - {id: skill-building,    facet: use, label: 建skill用, aliases: [做skill参考, 方法论沉淀], def: 用于沉淀为可复用 skill/方法论的原料, status: active}
 
-# ============ 状态 state（封闭枚举：首轮一律 待整理，流转由用户驱动） ============
+# ============ 工作流状态 state（独立写入 ready_state，不作为可见内容 tag） ============
   - {id: inbox,     facet: state, label: 待整理, aliases: [inbox, 未读], def: 新入库、未经人工确认的素材, status: active}
   - {id: read,      facet: state, label: 已精读, aliases: [已读, 已消化], def: 已完整阅读并确认 tag 的素材, status: active}
-  - {id: curated,   facet: state, label: 精选,   aliases: [收藏, 五星], def: 用户标记的高价值素材, status: active}
+  - {id: curated,   facet: state, label: 精选,   aliases: [五星], def: 用户标记的高价值素材, status: active}
   - {id: archived,  facet: state, label: 已归档, aliases: [归档, 过期], def: 保留但不再活跃使用的素材, status: active}

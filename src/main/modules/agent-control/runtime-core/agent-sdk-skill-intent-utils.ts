@@ -85,10 +85,12 @@ export function skillContextMessagesToInstruction(
 
 export function allowedPrimitiveToolsForSdkSkillTurn(
   options: {
+    skillId?: string
     allowRunShell?: boolean
     allowAskUser?: boolean
   } = {}
 ): string[] {
+  if (options.skillId === 'tag-forge') return []
   const safeSkillPrimitives = new Set([
     'skill_write_artifact',
     'skill_read_artifact',
@@ -398,6 +400,7 @@ export function resolveSdkDefaultIntentSurface(params: {
   requestEnvelope?: unknown
   authorization: SkillToolAuthorization
   browserDecisionMode: import('../../../../shared/browser-agent-task').BrowserTaskDecisionMode
+  requiredCapabilityGroupIds?: readonly CapabilityGroupId[]
 }): SdkDefaultIntentSurface {
   const envelopeRefs = parseEnvelopeResourceReferences(params.requestEnvelope)
   const userInstructionText =
@@ -446,6 +449,7 @@ export function resolveSdkDefaultIntentSurface(params: {
     explicitWidgetCreateIntent,
     documentWidgetTaskKind,
     preferredSkillToolNames,
+    requiredCapabilityGroupIds: params.requiredCapabilityGroupIds,
     mapSemanticIntent
   })
 

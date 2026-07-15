@@ -180,8 +180,17 @@ function recordValue(value: unknown): Record<string, unknown> | null {
     : null
 }
 
+function parseJsonRecord(text: string): Record<string, unknown> | null {
+  if (!text.trim().startsWith('{')) return null
+  try {
+    return recordValue(JSON.parse(text))
+  } catch {
+    return null
+  }
+}
+
 function isFailedToolOutput(output: ToolExecutionOutput): boolean {
-  const data = recordValue(output.data)
+  const data = recordValue(output.data) || parseJsonRecord(output.text)
   const status = typeof data?.status === 'string' ? data.status.trim().toLowerCase() : ''
   const mutationReason = typeof data?.mutationReason === 'string' ? data.mutationReason.trim() : ''
   if (
@@ -211,8 +220,19 @@ function isFailedToolOutput(output: ToolExecutionOutput): boolean {
     ) && /(?:^Error:|Document action failed|failed|失败|无法|没有可|未匹配到|未找到|缺少|已拒绝|被拒绝|已取消|被取消)/i.test(output.text)
 }
 
+export function isNonterminalToolOutput(output: ToolExecutionOutput): boolean {
+  const data = recordValue(output.data) || parseJsonRecord(output.text)
+  const status = typeof data?.status === 'string' ? data.status.trim().toLowerCase() : ''
+  return data?.reviewRequired === true
+    || data?.done === false
+    || status === 'waiting_review'
+    || status === 'pending'
+    || status === 'running'
+}
+
 export function isSuccessfulToolOutput(output: ToolExecutionOutput): boolean {
-  return !isFailedToolOutput(normalizeToolExecutionOutput(output))
+  const normalized = normalizeToolExecutionOutput(output)
+  return !isFailedToolOutput(normalized) && !isNonterminalToolOutput(normalized)
 }
 
 function cleanArtifactPathCandidate(value: unknown): string | null {
@@ -334,7 +354,7 @@ export function collectToolOutputProofs(
   context: { runId?: string } = {},
 ): ProofRef[] {
   const normalized = normalizeToolExecutionOutput(output)
-  if (isFailedToolOutput(normalized)) return []
+  if (isFailedToolOutput(normalized) || isNonterminalToolOutput(normalized)) return []
 
   const summary = normalized.text || JSON.stringify(normalized.data || normalized.projectionPatch || {})
   const proofs: ProofRef[] = []

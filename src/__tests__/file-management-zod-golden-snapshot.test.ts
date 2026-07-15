@@ -125,42 +125,75 @@ const EXPECTED_ANTHROPIC = [
     },
   },
   {
-    name: 'tag_forge_apply',
-    description:
-      '提交 Tag Forge 的结构化标签提案；Ready 校验词表、配额、创建回执与 revision 后原子写回并验证索引。新建文档自动打标必须带 receiptId，不能用于猜测项目或高级状态。',
-    input_schema: {
-      type: 'object',
-      properties: {
-        path: { type: 'string', description: '要写回受控标签的 Markdown 绝对路径' },
-        mode: { type: 'string', description: '新建文档自动补全或用户显式打标' },
-        receiptId: { type: 'string', description: 'automatic 模式必需的创建回执' },
-        expectedRevision: { type: 'string', description: '读取最终正文后计算的 SHA-256 revision' },
-        proposals: { type: 'array', description: '模型只提交 form/domain/entity/use 语义提案；state/project 由代码决定', items: { type: 'object' } },
-      },
-      required: ['path', 'mode', 'expectedRevision', 'proposals'],
-    },
-  },
-  {
     name: 'tag_forge_prepare_batch',
-    description: '建立或继续一个可恢复的 Tag Forge 文件夹批次。返回本批文档全文、版本凭证和进度；已有标签的文档自动跳过。',
+    description: 'Tag Forge 文件夹批量打标的唯一准备入口。首次传 rootPath 会读取文件夹内全部 Markdown，续跑只传 batchId；返回正文、不透明 itemId、版本凭证、当前受控词表和进度。',
     input_schema: {
       type: 'object',
       properties: {
-        rootPath: { type: 'string', description: '要批量打标的授权文件夹绝对路径' },
+        rootPath: { type: 'string', description: '新建批次时必需：要批量打标的授权文件夹绝对路径' },
         batchId: { type: 'string', description: '继续既有批次时传入上一轮 batchId' },
-        limit: { type: 'number', description: '本批返回的待处理文档数（默认 8，上限 12）' },
+        limit: { type: 'number', description: '本批返回的待处理文档数（默认 4，上限 4，并受正文总量限制）' },
       },
-      required: ['rootPath'],
+      required: [],
     },
   },
   {
     name: 'tag_forge_apply_batch',
-    description: '按准备批次受控写回多份 Markdown 标签，逐文件校验版本并持久记录成功、冲突与失败，随后可继续下一批。',
+    description: '按 prepare 返回的 itemId 和版本凭证写回多份 Markdown 内容标签。可靠标签立即写入；原文可核对的高置信新词自动采用；扫描完整个文件夹后，真正存疑的新词由宿主在 Agent 对话中集中确认一次。',
     input_schema: {
       type: 'object',
       properties: {
         batchId: { type: 'string', description: 'tag_forge_prepare_batch 返回的批次 id' },
-        items: { type: 'array', description: '本批每份文档的版本凭证与标签提案', items: { type: 'object' } },
+        items: {
+          type: 'array',
+          description: '本批每份文档的版本凭证和带正文证据的完整标签提案',
+          items: {
+            type: 'object',
+            properties: {
+              itemId: {
+                type: 'string',
+                description: 'prepare 返回的不透明文档 id；不要改写或用文件路径代替',
+              },
+              expectedRevision: {
+                type: 'string',
+                description: 'prepare 返回的版本凭证；必须原样回传',
+              },
+              proposals: {
+                minItems: 1,
+                type: 'array',
+                items: {
+                  type: 'object',
+                  properties: {
+                    facet: {
+                      type: 'string',
+                      enum: ['form', 'domain', 'entity', 'use'],
+                      description: '内容标签分面；工作流状态不属于标签提案',
+                    },
+                    label: { type: 'string', description: '归一后的标签名' },
+                    evidenceCode: {
+                      type: 'string',
+                      description: '短证据类型，例如 title_topic 或 body_topic',
+                    },
+                    evidenceExcerpt: {
+                      type: 'string',
+                      minLength: 2,
+                      description: '原文中的准确短摘录；每个内容标签都必需',
+                    },
+                    confidence: {
+                      type: 'number',
+                      description: '0 到 1；>=0.92 且证据可回查的新领域/实体/用途可自动采用',
+                    },
+                  },
+                  required: ['facet', 'label', 'evidenceCode', 'evidenceExcerpt', 'confidence'],
+                  additionalProperties: false,
+                },
+                description: '本文档的完整内容标签提案；每项都必须带正文证据',
+              },
+            },
+            required: ['itemId', 'expectedRevision', 'proposals'],
+            additionalProperties: false,
+          },
+        },
       },
       required: ['batchId', 'items'],
     },
@@ -281,7 +314,16 @@ const EXPECTED_ANTHROPIC = [
         operations: {
           type: 'array',
           description: '要预览的移动/改名操作列表',
-          items: { type: 'object' },
+          items: {
+            type: 'object',
+            properties: {
+              path: { type: 'string', description: '原文件绝对路径' },
+              destDir: { type: 'string', description: '目标目录绝对路径' },
+              newName: { type: 'string', description: '可选：新文件名' },
+            },
+            required: ['path', 'destDir'],
+            additionalProperties: false,
+          },
         },
       },
       required: ['rootPath', 'operations'],

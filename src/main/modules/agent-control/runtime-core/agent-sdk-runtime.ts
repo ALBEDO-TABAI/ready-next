@@ -1112,6 +1112,7 @@ export class AgentSdkRuntime extends EventEmitter {
           skillId: typedRefSkillId,
           allowedTypedActions: typedRefActions,
           allowedPrimitives: allowedPrimitiveToolsForSdkSkillTurn({
+            skillId: typedRefSkillId,
             allowRunShell: typedRefAllowRunShell,
             allowAskUser: typedRefAllowAskUser,
           }),
@@ -1178,7 +1179,7 @@ export class AgentSdkRuntime extends EventEmitter {
     return buildSelectedSkillToolAuthorization({
       skillId,
       allowedTypedActions: typedActions,
-      allowedPrimitives: allowedPrimitiveToolsForSdkSkillTurn({ allowRunShell, allowAskUser }),
+      allowedPrimitives: allowedPrimitiveToolsForSdkSkillTurn({ skillId, allowRunShell, allowAskUser }),
       source: explicitSkillId ? 'explicit' : 'active_task',
       reason: explicitSkillId ? 'explicit_user_mention' : 'reference_hint',
     })

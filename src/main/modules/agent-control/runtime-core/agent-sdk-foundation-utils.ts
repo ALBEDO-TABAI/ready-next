@@ -15,6 +15,7 @@ import type {
   RunMessage,
   TaskBudgetRuntime
 } from '../contracts/run-contracts'
+import { TAG_FORGE_FOLDER_RUNTIME_TOOL_NAMES } from '../domain-adapters/capability-floors'
 import { isRetryOnlyTurn } from '../skills/skill-detection-inputs'
 import type { SkillToolAuthorization } from '../skills/skill-tool-authorization'
 import { buildSelectedSkillToolAuthorization } from '../skills/skill-tool-authorization'
@@ -217,6 +218,7 @@ export function shouldPreserveTaskIntentToolDuringDocumentNarrowing(
   definition: ToolDefinition,
 ): boolean {
   return definition.name === 'declare_completion_criteria'
+    || definition.name === 'use_skill'
     || TASK_INTENT_GROUPS_THAT_SURVIVE_DOCUMENT_NARROWING.has(String(definition.groupId || ''))
 }
 
@@ -588,8 +590,15 @@ export function restoreCheckpointToolSurface(params: {
   const requiredToolNames =
     restore.requiredToolNames.length > 0 ? restore.requiredToolNames : restore.usedToolNames
   const missingToolNames = requiredToolNames.filter((name) => !byName.has(name))
+  const isTagForgeFolderSurface =
+    requiredToolNames.length === TAG_FORGE_FOLDER_RUNTIME_TOOL_NAMES.length
+    && TAG_FORGE_FOLDER_RUNTIME_TOOL_NAMES.every((name) => requiredToolNames.includes(name))
   return {
-    toolDefinitions: Array.from(byName.values()),
+    toolDefinitions: isTagForgeFolderSurface
+      ? requiredToolNames
+          .map((name) => byName.get(name))
+          .filter((definition): definition is ToolDefinition => Boolean(definition))
+      : Array.from(byName.values()),
     missingToolNames
   }
 }

@@ -6,6 +6,7 @@
   "version": "0.1.0",
   "runtime": "reference",
   "execution": { "mode": "advisory" },
+  "allowed_tools": ["tag_forge_prepare_batch", "tag_forge_apply_batch"],
   "actions": {
     "read_skill": {
       "runtime": "reference",

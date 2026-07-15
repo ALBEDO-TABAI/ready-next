@@ -2,6 +2,7 @@ import { basename } from 'node:path'
 
 import { DOCUMENT_SCHEMAS } from './schemas/document-schemas'
 import { zodObjectToParamList } from './zod-param-derivation'
+import { buildToolParamSchema, type ToolParamSchemaSpec } from './tool-schema'
 import { logAgentMetric } from '../agent-control/metrics'
 import { TOOL_ERROR_METRICS } from '../agent-control/tools-runtime/tool-error-metrics'
 import {
@@ -9,12 +10,7 @@ import {
   type ToolExecutionOutput,
 } from '../agent-control/tools-runtime/tool-result-types'
 
-interface ToolParam {
-  name: string
-  type: string
-  description: string
-  required: boolean
-}
+type ToolParam = ToolParamSchemaSpec
 
 interface DocumentToolDef {
   name: string
@@ -116,17 +112,14 @@ const DOCUMENT_TOOLS: DocumentToolDef[] = [
   },
   {
     name: 'document_save_tab',
-    description: '保存当前、指定或最近工具目标文档标签，可选直接保存到目标路径。新建 Markdown 时应基于最终正文同时提交 tagProposals（只含 form/domain/entity/use）；Ready 会校验词表并固定 state。',
+    description: '保存当前、指定或最近工具目标文档标签，可选直接保存到目标路径。新建 Markdown 只需基于最终正文提交现有标签尚未覆盖的 tagProposals；已有标签可直接满足形态/主题，无需补充时可省略。Ready 会回查正文、补固定状态，证据充分的高置信新词可直接采用。',
     action: 'document.saveTab',
     params: zodObjectToParamList(DOCUMENT_SCHEMAS.document_save_tab) as ToolParam[],
   },
 ]
 
 function toSchemaParam(param: ToolParam): Record<string, unknown> {
-  return {
-    type: param.type,
-    description: param.description,
-  }
+  return buildToolParamSchema(param)
 }
 
 export function getDocumentAnthropicTools(): Array<Record<string, unknown>> {
@@ -274,6 +267,15 @@ function documentProjectionPatch(toolName: string, summary: string, data: Record
   }
   if (toolName !== 'document_save_tab') return null
 
+  if (data.tagForgeEnrichmentRequired === true) {
+    return {
+      taskTitle: '正在补全文档标签',
+      taskSummary: summary,
+      steps: [{ id: 'document_save', title: '正文已保存，正在补全标签', status: 'running', updatedAt: now }],
+      currentStepId: 'document_save',
+      waitingFor: 'none',
+    }
+  }
   const saved = data.documentSaved === true
   const skippedSave = /文档未改动，已跳过保存/.test(summary)
   if (!saved) {
