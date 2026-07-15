@@ -77,6 +77,7 @@ export interface ChatAttachment {
     | 'document-widget-target'
     | 'calendar-event'
     | 'channel'
+    | 'generated-image'
   browserTabId?: string
   url?: string
   title?: string

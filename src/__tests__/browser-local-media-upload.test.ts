@@ -1,5 +1,9 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { createElement, type DragEvent as ReactDragEvent } from 'react'
+import { flushSync } from 'react-dom'
+import { createRoot } from 'react-dom/client'
+import { JSDOM } from 'jsdom'
 
 import {
   filterBrowserLocalMediaUploadPaths,
@@ -14,6 +18,7 @@ import {
   startBrowserLocalMediaNativeFileDrag,
 } from '../renderer/modules/browser/localMediaDragBridge'
 import { useMode } from '../renderer/stores/useMode'
+import { useBrowserTabActions } from '../renderer/modules/browser/useBrowserTabActions'
 import { getDroppedFilesFromDataTransfer } from '../renderer/utils/dragDrop'
 
 test('browser local media upload accepts image and video files only', () => {
@@ -113,5 +118,102 @@ test('browser local media drag bridge starts native file drag when browser is vi
     useMode.getState().setWorkbenchMode(previousWorkbenchMode)
     useMode.getState().setSplitMode(previousSplitMode)
     ;(globalThis as { window?: unknown }).window = previousWindow
+  }
+})
+
+test('generated image HTML drop uploads the cached image to the active webpage', async () => {
+  const dom = new JSDOM('<div id="root"></div>', { url: 'http://localhost' })
+  const previousWindow = globalThis.window
+  const previousDocument = globalThis.document
+  Object.defineProperty(globalThis, 'window', { value: dom.window, configurable: true })
+  Object.defineProperty(globalThis, 'document', { value: dom.window.document, configurable: true })
+
+  const uploads: Array<{ tabId?: string | null; files: string[] }> = []
+  const statuses: string[] = []
+  ;(window as Window & { electronAPI?: unknown }).electronAPI = {
+    browser: {
+      uploadLocalMediaFiles: async (payload: { tabId?: string | null; files: string[] }) => {
+        uploads.push(payload)
+        return { success: true, method: 'file-input' }
+      },
+    },
+  }
+
+  let handleDrop: ((event: ReactDragEvent<HTMLDivElement>, tabId?: string | null) => void) | null = null
+  function Harness() {
+    const actions = useBrowserTabActions({
+      isElectron: true,
+      activeTab: {
+        id: 'tab-image',
+        url: 'https://example.com/upload',
+        title: 'Upload',
+        loading: false,
+        canGoBack: false,
+        canGoForward: false,
+        domain: 'example.com',
+        owner: 'manual',
+        required: false,
+        activity: 'idle',
+      },
+      activeTabId: 'tab-image',
+      normalizeUrl: (value) => value,
+      sendBoundsImmediate: async () => undefined,
+      setTabs: () => undefined,
+      setActiveTabId: () => undefined,
+      setUrlInput: () => undefined,
+      addTab: () => undefined,
+      updateTab: () => undefined,
+      reorderTabs: () => undefined,
+      onLocalMediaUploadStatus: (status) => {
+        if (status) statuses.push(status.kind)
+      },
+    })
+    handleDrop = actions.handleContentDrop
+    return null
+  }
+
+  const root = createRoot(dom.window.document.getElementById('root') as HTMLElement)
+  try {
+    flushSync(() => root.render(createElement(Harness)))
+    assert.ok(handleDrop)
+    let prevented = false
+    handleDrop({
+      dataTransfer: {
+        types: ['application/x-ready-drag'],
+        files: [],
+        getData: (format: string) => format === 'application/x-ready-drag'
+          ? JSON.stringify({
+            type: 'file',
+            path: '/tmp/ready-image-generation/generated.png',
+            name: 'generated.png',
+            ext: 'png',
+            size: 128,
+          })
+          : '',
+      },
+      preventDefault: () => { prevented = true },
+    } as unknown as ReactDragEvent<HTMLDivElement>, 'tab-image')
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    assert.equal(prevented, true)
+    assert.deepEqual(uploads, [{
+      tabId: 'tab-image',
+      files: ['/tmp/ready-image-generation/generated.png'],
+    }])
+    assert.deepEqual(statuses, ['uploading', 'success'])
+  } finally {
+    root.unmount()
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    if (previousWindow) {
+      Object.defineProperty(globalThis, 'window', { value: previousWindow, configurable: true })
+    } else {
+      delete (globalThis as typeof globalThis & { window?: Window }).window
+    }
+    if (previousDocument) {
+      Object.defineProperty(globalThis, 'document', { value: previousDocument, configurable: true })
+    } else {
+      delete (globalThis as typeof globalThis & { document?: Document }).document
+    }
+    dom.window.close()
   }
 })

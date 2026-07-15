@@ -6,6 +6,7 @@ import {
 } from '../../utils/boardTransfer'
 import { canAttemptVisualAnalysis } from '../../../shared/browser-tab-resource-classifier'
 import type { WorkspaceDragPayload } from './fileTreeDragPayload'
+import type { GeneratedImageDragPayload } from '../../modules/image-generation/generatedImageDrag'
 
 export interface BrowserTabDragPayload {
   type: 'browser-tab'
@@ -49,6 +50,9 @@ export type FileTreeExternalDropPayload =
   | WebDownloadDragPayload
   | ReadyBoardResourceDragPayload
   | UntitledDocTabDragPayload
+  | GeneratedImageDragPayload
+
+export type FileTreeExternalActionPayload = BrowserTabDragPayload | RSSItemDragPayload
 
 export type FileTreeDropTarget =
   | {
@@ -528,15 +532,8 @@ export type FileTreeExternalDropAction =
   | 'copy-analysis'
   | 'visual-analysis'
 
-export function isLikelyVideoDropPayload(payload: FileTreeExternalDropPayload): boolean {
-  const url =
-    payload.type === 'ready-board-selection' || payload.type === 'untitled-doc-tab'
-      ? ''
-      : payload.type === 'browser-tab'
-      ? payload.url
-      : payload.type === 'rss-item'
-        ? payload.link
-        : payload.url
+export function isLikelyVideoDropPayload(payload: FileTreeExternalActionPayload): boolean {
+  const url = payload.type === 'browser-tab' ? payload.url : payload.link
   return canAttemptVisualAnalysis(url)
 }
 
@@ -608,7 +605,7 @@ export interface FileTreeStudyPlaceholderPatch {
 }
 
 export interface DispatchFileTreeExternalDropArgs {
-  payload: FileTreeExternalDropPayload
+  payload: FileTreeExternalActionPayload
   action: FileTreeExternalDropAction
   target: FileTreeDropTarget
   onPlaceholderStart?: (placeholder: FileTreeExternalDropPlaceholder) => void
@@ -632,9 +629,6 @@ export async function dispatchFileTreeExternalDropAction({
   onAnalysisPlaceholderStart,
   onAnalysisPlaceholderUpdate,
 }: DispatchFileTreeExternalDropArgs): Promise<void> {
-  // Direct-handled payload kinds never reach the action menu dispatch.
-  if (payload.type === 'web-download-url' || payload.type === 'ready-board-selection' || payload.type === 'untitled-doc-tab') return
-
   const targetDir =
     target.kind === 'inside-directory' ? target.dirPath : target.containerPath
   const targetHint =

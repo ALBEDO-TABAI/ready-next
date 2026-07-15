@@ -27,6 +27,12 @@ import {
   getGeneralResearchOpenAITools,
 } from '../../tools/general-research-tool-defs'
 import {
+  IMAGE_GENERATION_TOOL_NAMES,
+  getImageGenerationAnthropicTools,
+  getImageGenerationOpenAITools,
+} from '../../tools/image-generation-tool-defs'
+import { IMAGE_GENERATION_TOOL_TIMEOUT_MS } from '../../tools/tool-execution-timeout-policy'
+import {
   AGENT_INTERACTION_TOOL_NAMES,
   getAgentInteractionAnthropicTools,
   getAgentInteractionOpenAITools,
@@ -277,7 +283,7 @@ const BROWSER_READ_TOOL_NAMES = new Set([
 ])
 
 const BROWSER_WRITE_TOOL_NAMES = new Set(['browser_download_urls', 'browser_download_collected_media'])
-const PROJECTION_PATCH_TOOL_DOMAINS = new Set<ToolDomain>(['skill'])
+const PROJECTION_PATCH_TOOL_DOMAINS = new Set<ToolDomain>(['skill', 'image_generation'])
 const PROJECTION_PATCH_DOCUMENT_TOOL_NAMES = new Set<string>([
   'document_insert_widget',
   'document_update_widget',
@@ -449,6 +455,7 @@ function resolveToolTimeoutProfile(toolName: string, domain: ToolDomain, kind: T
   if (toolName === 'skill_run_shell') return 'skill_long'
   if (domain === 'skill') return 'skill'
   if (domain === 'feishu') return 'feishu'
+  if (domain === 'image_generation') return 'image_generation'
   return 'default'
 }
 
@@ -656,7 +663,8 @@ function resolveToolProjectionHint(
     PROJECTION_PATCH_TOOL_DOMAINS.has(domain) && toolName.startsWith('skill_')
   const emitsFromDocument =
     domain === 'document' && PROJECTION_PATCH_DOCUMENT_TOOL_NAMES.has(toolName)
-  if (emitsFromSkill || emitsFromDocument) {
+  const emitsFromImageGeneration = domain === 'image_generation' && toolName === 'generate_image'
+  if (emitsFromSkill || emitsFromDocument || emitsFromImageGeneration) {
     hint.emitsProjectionPatch = true
   }
   return Object.keys(hint).length > 0 ? hint : null
@@ -669,6 +677,7 @@ function resolveToolResultShape(toolName: string, domain: ToolDomain): ToolDefin
   if (domain === 'document' && PROJECTION_PATCH_DOCUMENT_TOOL_NAMES.has(toolName)) {
     return 'projection_patch'
   }
+  if (domain === 'image_generation' && toolName === 'generate_image') return 'projection_patch'
   return 'text'
 }
 
@@ -829,6 +838,13 @@ const GROUP_TOOL_PROVIDERS: Record<CapabilityGroupId, ToolRegistryProvider> = {
         return GENERAL_RESEARCH_TOOL_NAMES.map((name) => createStaticFallbackSchema(name, 'openai'))
       }
     },
+  },
+  image_generation: {
+    staticToolNames: IMAGE_GENERATION_TOOL_NAMES,
+    getToolDefinitions: () => buildToolDefinitions('image_generation', IMAGE_GENERATION_TOOL_NAMES)
+      .map((definition) => ({ ...definition, executionTimeoutMs: IMAGE_GENERATION_TOOL_TIMEOUT_MS })),
+    getAnthropicTools: () => getImageGenerationAnthropicTools(),
+    getOpenAITools: () => getImageGenerationOpenAITools(),
   },
   map_planning: {
     staticToolNames: MAP_TOOL_NAMES,

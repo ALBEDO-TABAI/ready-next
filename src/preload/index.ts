@@ -29,6 +29,11 @@ import type {
 } from '../shared/file-emergence'
 import type { TagForgeBeginCreationPayload,TagForgeFinalizeCreationPayload,TagForgeRecordCreationPayload } from '../shared/tag-forge'
 import type {
+  ImageGenerationCopyInput,
+  ImageGenerationPersistToDirectoryInput,
+  ImageGenerationPersistToDocumentInput,
+} from '../shared/image-generation'
+import type {
   BrowserLockOverlaySnapshot,
 } from '../shared/browser-lock-overlay'
 import type {
@@ -1274,6 +1279,15 @@ const settingsAPI = {
   testExternalServiceDraft: (input: unknown) => ipcRenderer.invoke('settings:testExternalServiceDraft', input),
 }
 
+const imageGenerationAPI = {
+  persistToDocument: (input: ImageGenerationPersistToDocumentInput) =>
+    ipcRenderer.invoke('imageGeneration:persistToDocument', input),
+  persistToDirectory: (input: ImageGenerationPersistToDirectoryInput) =>
+    ipcRenderer.invoke('imageGeneration:persistToDirectory', input),
+  copyToClipboard: (input: ImageGenerationCopyInput) =>
+    ipcRenderer.invoke('imageGeneration:copyToClipboard', input),
+}
+
 const fileEmergenceAPI = {
   getSnapshot: (payload: FileEmergenceGetSnapshotPayload) =>
     ipcRenderer.invoke('fileEmergence:getSnapshot', payload),
@@ -1471,6 +1485,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   window: windowAPI,
   theme: themeAPI,
   settings: settingsAPI,
+  imageGeneration: imageGenerationAPI,
   fileEmergence: fileEmergenceAPI,
   tagForge: tagForgeAPI,
   pet: petAPI,
@@ -1509,6 +1524,7 @@ declare global {
       window: typeof windowAPI
       theme: typeof themeAPI
       settings: typeof settingsAPI
+      imageGeneration: typeof imageGenerationAPI
       fileEmergence: typeof fileEmergenceAPI
       tagForge: typeof tagForgeAPI
       pet: typeof petAPI

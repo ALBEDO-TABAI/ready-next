@@ -3318,6 +3318,7 @@ type ExternalServiceKindData =
   | 'github'
   | 'amap'
   | 'vision-model'
+  | 'image-generation'
 
 type ExternalServiceOptionValueData = string | number | boolean | string[] | null
 
@@ -3378,6 +3379,18 @@ interface ElectronSettingsAPI {
   testExternalServiceDraft: (
     input: ExternalServiceUpdateInputData
   ) => Promise<{ success: boolean; data?: ExternalServiceTestResultData; error?: string }>
+}
+
+interface ElectronImageGenerationAPI {
+  persistToDocument: (input: {
+    sourcePath: string
+    documentPath: string
+  }) => Promise<IPCResponse<{ path: string; name: string; relativePath?: string }>>
+  persistToDirectory: (input: {
+    sourcePath: string
+    directoryPath: string
+  }) => Promise<IPCResponse<{ path: string; name: string; relativePath?: string }>>
+  copyToClipboard: (input: { sourcePath: string }) => Promise<IPCResponse>
 }
 
 interface ElectronPetAPI {
@@ -3923,6 +3936,7 @@ interface ElectronAPI {
   window: ElectronWindowAPI
   theme: ElectronThemeAPI
   settings: ElectronSettingsAPI
+  imageGeneration: ElectronImageGenerationAPI
   fileEmergence: ElectronFileEmergenceAPI
   tagForge: ElectronTagForgeAPI
   pet: ElectronPetAPI

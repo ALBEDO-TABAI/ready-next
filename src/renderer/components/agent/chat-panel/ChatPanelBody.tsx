@@ -347,6 +347,7 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
             onCopyMessage={onCopyMessage}
             onAgentSelectionContextMenu={onAgentSelectionContextMenu}
             onAttachmentPreview={handleAttachmentPreview}
+            onReferenceSelect={onReferenceSelect}
             onRevealDocumentQuote={revealDocumentQuoteAttachment}
             getDocumentQuoteTooltip={getDocumentQuoteTooltip}
             getAttachmentMetaSummary={getAttachmentMetaSummary}

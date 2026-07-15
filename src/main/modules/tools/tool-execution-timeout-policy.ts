@@ -1,5 +1,6 @@
 import type { ToolTimeoutProfile } from '../agent-control/tools-runtime/tool-definition'
 import { getToolResourceTag } from '../agent-control/tools-runtime/tool-parallelism-policy'
+import { IMAGE_GENERATION_REQUEST_TIMEOUT_MS } from '../../../shared/image-generation'
 
 export const DEFAULT_TOOL_EXECUTION_TIMEOUT_MS = 15_000
 export const DOCUMENT_WRITE_TOOL_TIMEOUT_MS = 30_000
@@ -7,6 +8,7 @@ export const BROWSER_INTERACTIVE_TOOL_TIMEOUT_MS = 60_000
 export const SKILL_TOOL_TIMEOUT_MS = 120_000
 export const SKILL_LONG_TOOL_TIMEOUT_MS = 600_000
 export const FEISHU_TOOL_TIMEOUT_MS = 30_000
+export const IMAGE_GENERATION_TOOL_TIMEOUT_MS = IMAGE_GENERATION_REQUEST_TIMEOUT_MS + 5_000
 export const MAP_TOOL_TIMEOUT_MS = 60_000
 
 export function resolveToolExecutionTimeoutMsForProfile(profile: ToolTimeoutProfile): number {
@@ -21,6 +23,8 @@ export function resolveToolExecutionTimeoutMsForProfile(profile: ToolTimeoutProf
       return SKILL_LONG_TOOL_TIMEOUT_MS
     case 'feishu':
       return FEISHU_TOOL_TIMEOUT_MS
+    case 'image_generation':
+      return IMAGE_GENERATION_TOOL_TIMEOUT_MS
     case 'map':
       return MAP_TOOL_TIMEOUT_MS
     default:
@@ -45,6 +49,9 @@ export function resolveToolExecutionTimeoutMs(toolName: string): number {
   }
   if (tag.domain === 'feishu') {
     return resolveToolExecutionTimeoutMsForProfile('feishu')
+  }
+  if (tag.domain === 'image_generation') {
+    return resolveToolExecutionTimeoutMsForProfile('image_generation')
   }
   if (tag.domain === 'map') {
     return resolveToolExecutionTimeoutMsForProfile('map')

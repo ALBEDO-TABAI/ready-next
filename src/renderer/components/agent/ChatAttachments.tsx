@@ -1,4 +1,5 @@
 import { X } from 'lucide-react'
+import { isImageGenerationReferencePath } from '../../../shared/image-generation'
 import type { ChatAttachment } from '../../stores/useAgent'
 
 interface ChatAttachmentsProps {
@@ -23,10 +24,15 @@ export default function ChatAttachments({
   toLocalFileUrl,
 }: ChatAttachmentsProps) {
   if (attachments.length === 0) return null
+  const referenceImageIds = attachments
+    .filter((attachment) => attachment.type === 'image' && isImageGenerationReferencePath(attachment.path))
+    .map((attachment) => attachment.id)
 
   return (
     <div className="flex items-center gap-2 overflow-x-auto" style={{ padding: '4px 0' }}>
       {attachments.map((att) => {
+        const referenceOrder = referenceImageIds.indexOf(att.id) + 1
+        const metaSummary = referenceOrder > 0 ? `参考图 ${referenceOrder}` : getAttachmentMetaSummary(att)
         return (
           <div
             key={att.id}
@@ -82,8 +88,9 @@ export default function ChatAttachments({
                 >
                   {att.name}
                 </span>
-                {getAttachmentMetaSummary(att) ? (
+                {metaSummary ? (
                   <span
+                    data-reference-image-order={referenceOrder > 0 ? referenceOrder : undefined}
                     style={{
                       fontSize: 10,
                       lineHeight: 1.1,
@@ -97,7 +104,7 @@ export default function ChatAttachments({
                       maxWidth: '100%',
                     }}
                   >
-                    {getAttachmentMetaSummary(att)}
+                    {metaSummary}
                   </span>
                 ) : null}
               </span>

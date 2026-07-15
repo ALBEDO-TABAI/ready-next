@@ -36,7 +36,7 @@ import {
   isLikelyVideoDropPayload,
   type FileTreeDropTarget,
   type FileTreeExternalDropAction,
-  type FileTreeExternalDropPayload,
+  type FileTreeExternalActionPayload,
 } from '../fileTreeExternalDrop'
 import type { FileTreeDeleteTarget } from '../fileTreeSelection'
 import { buildWorkspaceDragPayload } from '../fileTreeDragPayload'
@@ -49,7 +49,7 @@ import { isActiveReadyBoardTab } from './ready-board-tab'
 export interface FileTreeExternalDropMenuState {
   x: number
   y: number
-  payload: FileTreeExternalDropPayload
+  payload: FileTreeExternalActionPayload
   target: FileTreeDropTarget
 }
 

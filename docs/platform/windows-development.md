@@ -102,7 +102,7 @@ node scripts/run-packaged-smoke.cjs --platform win32 --port 9335 --timeout 90000
 - 不把平台差异变成无批准的产品差异。
 - 不提交密钥、Cookie、用户数据或带隐私的日志。
 
-当前跨平台硬合同见 `docs/architecture/current-runtime-contracts.md` §1/§10；历史平台证据见 `docs/superpowers/audits/2026-05-24-stage-z-closeout/platform-parity.md` 与 `docs/superpowers/audits/2026-05-24-stage-z-closeout/platform-windows-smoke.md`。
+当前跨平台硬合同见 `docs/architecture/current-runtime-contracts.md` §1/§11；历史平台证据见 `docs/superpowers/audits/2026-05-24-stage-z-closeout/platform-parity.md` 与 `docs/superpowers/audits/2026-05-24-stage-z-closeout/platform-windows-smoke.md`。
 
 ## 7. 回传
 

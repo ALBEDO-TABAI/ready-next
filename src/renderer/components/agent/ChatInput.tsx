@@ -1,6 +1,6 @@
 import { forwardRef, useRef, useEffect, useState, useImperativeHandle, useCallback, useMemo } from 'react'
 import { createPortal } from 'react-dom'
-import { ArrowUp, Plus, Square, ChevronDown, Puzzle } from 'lucide-react'
+import { ArrowUp, Plus, Square, ChevronDown, ImagePlus, Puzzle } from 'lucide-react'
 import { LiquidLens } from '../ui/liquid-glass/LiquidLens'
 import { LiquidBackdropProjection } from '../ui/liquid-glass/LiquidBackdropProjection'
 import { LiquidFloatingPanel } from '../ui/liquid-glass/LiquidFloatingPanel'
@@ -12,6 +12,7 @@ import { chatMenuItemStyle, chatMenuSurfaceStyle } from './chatMenuStyles'
 import { ContextUsageMeter } from './chat-panel/ContextUsageMeter'
 import {
   buildSlashSkillInsertion,
+  buildSlashCommandInsertion,
   filterSlashSkills,
   type SkillMenuItem,
 } from '../../modules/agent/slash-skill-selection'
@@ -227,14 +228,19 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
   const filteredSkills = useMemo(() => {
     return filterSlashSkills(skills, slashFilter)
   }, [skills, slashFilter])
+  const showImageCommand = useMemo(() => {
+    const query = slashFilter.trim().toLowerCase()
+    return !query || 'imag'.startsWith(query) || 'image'.startsWith(query) || '生图'.includes(query)
+  }, [slashFilter])
+  const slashItemCount = filteredSkills.length + (showImageCommand ? 1 : 0)
 
   useEffect(() => {
     setSlashSelectedIndex(0)
   }, [slashFilter])
 
   useEffect(() => {
-    setSlashSelectedIndex((index) => Math.max(0, Math.min(index, Math.max(0, filteredSkills.length - 1))))
-  }, [filteredSkills.length])
+    setSlashSelectedIndex((index) => Math.max(0, Math.min(index, Math.max(0, slashItemCount - 1))))
+  }, [slashItemCount])
 
   const insertAtReference = useCallback((file: ChatAttachment) => {
     const textarea = textareaRef.current
@@ -288,6 +294,20 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
     setShowSlashMenu(false)
     setSlashFilter('')
   }, [inputValue, onInputChange, onSkillReference])
+
+  const insertImageCommand = useCallback(() => {
+    const textarea = textareaRef.current
+    if (!textarea) return
+    const insertion = buildSlashCommandInsertion(inputValue, textarea.selectionStart, 'imag')
+    if (!insertion) return
+    onInputChange(insertion.nextValue)
+    setTimeout(() => {
+      textarea.setSelectionRange(insertion.cursorPosition, insertion.cursorPosition)
+      textarea.focus()
+    }, 0)
+    setShowSlashMenu(false)
+    setSlashFilter('')
+  }, [inputValue, onInputChange])
 
   const showNativeAgentMenu = useCallback(async (button: HTMLButtonElement) => {
     if (isChannelScope) return
@@ -371,7 +391,13 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
     }
     if (showSlashMenu) {
       if ((e.key === 'Enter' && !e.shiftKey) || e.key === 'Tab') {
-        const selected = filteredSkills[slashSelectedIndex] || filteredSkills[0]
+        if (showImageCommand && slashSelectedIndex === 0) {
+          e.preventDefault()
+          insertImageCommand()
+          return
+        }
+        const skillIndex = slashSelectedIndex - (showImageCommand ? 1 : 0)
+        const selected = filteredSkills[skillIndex] || (!showImageCommand ? filteredSkills[0] : undefined)
         if (selected) {
           e.preventDefault()
           insertSlashSkillReference(selected)
@@ -380,7 +406,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
       }
       if (e.key === 'ArrowDown') {
         e.preventDefault()
-        setSlashSelectedIndex((index) => Math.min(index + 1, Math.max(0, filteredSkills.length - 1)))
+        setSlashSelectedIndex((index) => Math.min(index + 1, Math.max(0, slashItemCount - 1)))
         return
       }
       if (e.key === 'ArrowUp') {
@@ -502,17 +528,39 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
       contentClassName="ready-liquid-popover__content panel-hover-scrollbar"
     >
       <div style={{ fontSize: 10, color: 'var(--text-light)', padding: '2px 8px', marginBottom: 2 }}>
-        选择 Skill
+        命令与 Skill
       </div>
-      {filteredSkills.length > 0 ? filteredSkills.map((skill, index) => (
+      {showImageCommand ? (
+        <button
+          type="button"
+          data-slash-command="imag"
+          onMouseDown={(event) => {
+            event.preventDefault()
+            insertImageCommand()
+          }}
+          onPointerEnter={() => setSlashSelectedIndex(0)}
+          className={`ready-floating-menu-item w-full flex items-center gap-2 active:scale-[0.98] transition-[background-color,transform] duration-150 ${slashSelectedIndex === 0 ? 'is-selected' : ''}`}
+          style={{ ...chatMenuItemStyle, textAlign: 'left' }}
+        >
+          <ImagePlus style={{ width: 15, height: 15, flexShrink: 0, color: 'var(--color-ready-orange)' }} strokeWidth={2} />
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-body)' }}>/imag</div>
+            <div style={{ fontSize: 10, color: 'var(--text-light)', marginTop: 2 }}>生成图片，可搭配已添加的参考图</div>
+          </div>
+          <span style={{ fontSize: 10, color: 'var(--text-light)', marginLeft: 'auto', flexShrink: 0 }}>命令</span>
+        </button>
+      ) : null}
+      {filteredSkills.length > 0 ? filteredSkills.map((skill, index) => {
+        const menuIndex = index + (showImageCommand ? 1 : 0)
+        return (
         <button
           key={skill.id}
           onMouseDown={(event) => {
             event.preventDefault()
             insertSlashSkillReference(skill)
           }}
-          onPointerEnter={() => setSlashSelectedIndex(index)}
-          className={`ready-floating-menu-item w-full flex items-center gap-2 active:scale-[0.98] transition-[background-color,transform] duration-150 ${index === slashSelectedIndex ? 'is-selected' : ''}`}
+          onPointerEnter={() => setSlashSelectedIndex(menuIndex)}
+          className={`ready-floating-menu-item w-full flex items-center gap-2 active:scale-[0.98] transition-[background-color,transform] duration-150 ${menuIndex === slashSelectedIndex ? 'is-selected' : ''}`}
           style={{
             ...chatMenuItemStyle,
             textAlign: 'left',
@@ -550,11 +598,12 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
             {skill.installed ? '已就绪' : '未安装'}
           </span>
         </button>
-      )) : (
+        )
+      }) : !showImageCommand ? (
         <div style={{ padding: '8px 10px', fontSize: 12, color: 'var(--text-light)' }}>
           没有匹配的 skill
         </div>
-      )}
+      ) : null}
     </LiquidFloatingPanel>
   ) : null
 

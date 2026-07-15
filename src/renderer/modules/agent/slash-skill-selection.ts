@@ -56,3 +56,21 @@ export function buildSlashSkillInsertion(inputValue: string, cursorPos: number, 
     cursorPosition: (beforeSlash + insertion).length,
   }
 }
+
+export function buildSlashCommandInsertion(inputValue: string, cursorPos: number, command: string): {
+  nextValue: string
+  cursorPosition: number
+} | null {
+  const textBeforeCursor = inputValue.slice(0, cursorPos)
+  const match = textBeforeCursor.match(/(?:^|\s)\/([^\s/@]*)$/)
+  if (!match) return null
+  const slashOffset = match[0].lastIndexOf('/')
+  const slashIndex = (match.index ?? 0) + slashOffset
+  const beforeSlash = inputValue.slice(0, slashIndex)
+  const afterCursor = inputValue.slice(cursorPos)
+  const insertion = `/${command} `
+  return {
+    nextValue: beforeSlash + insertion + afterCursor,
+    cursorPosition: (beforeSlash + insertion).length,
+  }
+}

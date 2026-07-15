@@ -8,6 +8,7 @@ export type ExternalServiceKind =
   | 'github'
   | 'amap'
   | 'vision-model'
+  | 'image-generation'
 
 export type ExternalServiceOptionValue = string | number | boolean | string[] | null
 
@@ -151,6 +152,33 @@ export const DEFAULT_EXTERNAL_SERVICE_PROFILES: ExternalServiceProfile[] = [
       inputModes: ['text', 'image'],
     },
   },
+  {
+    id: 'gpt-image-default',
+    kind: 'image-generation',
+    name: 'GPT Image',
+    enabled: false,
+    baseUrl: '',
+    secrets: { apiKey: '' },
+    options: {
+      protocol: 'openai-images',
+      model: 'gpt-image-2',
+      size: '1024x1024',
+    },
+  },
+  {
+    id: 'gemini-image-default',
+    kind: 'image-generation',
+    name: 'Gemini Image',
+    enabled: false,
+    baseUrl: '',
+    secrets: { apiKey: '' },
+    options: {
+      protocol: 'gemini-generate-content',
+      model: 'gemini-3.1-flash-image',
+      aspectRatio: '1:1',
+      imageSize: '1K',
+    },
+  },
 ]
 
 export const EXTERNAL_SERVICE_KIND_LABELS: Record<ExternalServiceKind, string> = {
@@ -163,6 +191,7 @@ export const EXTERNAL_SERVICE_KIND_LABELS: Record<ExternalServiceKind, string> =
   github: 'GitHub',
   amap: '高德地图',
   'vision-model': '读图模型',
+  'image-generation': 'AI 生图',
 }
 
 export function defaultExternalServiceProfile(id: string): ExternalServiceProfile | null {

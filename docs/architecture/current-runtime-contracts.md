@@ -1,6 +1,6 @@
 # Ready 当前运行时硬合同
 
-> 更新时间：2026-07-12
+> 更新时间：2026-07-15
 > 本文承接原先重复写在 `AGENTS.md` 与 `CLAUDE.md` 里的详细约束。两份根指引保留入口与红线；修改本页覆盖的模块前必须读取对应章节。
 
 代码、类型、行为测试和 CI gate 比本文更权威。若实现与本文冲突，先判断是实现回归还是文档漂移；不得为旧文档复活已退役路径。
@@ -124,7 +124,15 @@
 - 长期评估使用生成时的 immutable snapshot、稳定 fileKey 和成熟窗口；不能用评估时的可变项目成员倒推历史。
 - 回归入口：`npm run verify:file-emergence`、`npm run verify:tag-forge`。
 
-## 10. 测试、原生依赖与平台
+## 10. AI 生图与图片产物
+
+- GPT Image 与 Gemini Image 复用 `external_service_profiles_v1` 的加密密钥边界；设置页“试生成”必须走正式协议客户端并真实返回图片后才算成功，不能用模型列表或普通聊天请求代替。
+- 本地主 Agent 只通过 `generate_image` 进入生图主链；自然语言与 `/imag` 共用该工具。参考图只来自本轮 `user_attachment / explicit_reference` 图片资源，按界面序号解析，模型不得提供或改写本机路径。
+- GPT Image 使用 OpenAI Images generations/edits；Gemini Image 使用 `generateContent`。两条路径都必须支持取消、超时、大小与真实图片格式校验，并把远程结果收敛为本机临时图片，禁止把 base64 写入聊天历史。
+- 生成结果先落在 `os.tmpdir()/ready-image-generation` 的有界缓存；聊天只保存结构化产物引用。复制、引用和落地前重新验证缓存真实路径；Markdown 文档的编辑/预览面都接收落点，复制到同级 `assets/`；文件树落地使用不覆盖复制。拖拽开始时先隐藏原生 BrowserView，再用 Renderer 落点判断文档、文件树或网页目标；网页落点复用既有本地媒体上传链，完成后再恢复 BrowserView。
+- 任务产物经既有 projection 进入聊天；不新增 Renderer 直连模型、第二套任务状态机、自动服务切换或永久图库。完整合同与 gate 见 `docs/superpowers/plans/2026-07-15-ai-image-generation-service-implementation.md`。
+
+## 11. 测试、原生依赖与平台
 
 - 新测试默认验证真实入口的可观察行为；结构测试只用于行为无法证明的硬合同。不得用 source grep 冒充行为验证，不得用 skip 当通过。
 - SQLite、设置、搜索索引或本地持久化验收先跑 `npm run verify:native`；普通 Node 下 ABI skip 只说明该路径未覆盖。

@@ -57,6 +57,7 @@ import {
 import { executeCalendarTool } from './calendar-tools'
 import { executeDocumentTool } from './document-tools'
 import { executeGeneralResearchTool } from './general-research-tools'
+import { executeImageGenerationTool } from './image-generation-tools'
 import { executeMapTool } from './map-tools'
 import { executeAskUserQuestions } from './builtins/ask-user-questions'
 import { executeDeclareCompletionCriteria } from './builtins/declare-completion-criteria'
@@ -831,6 +832,12 @@ async function executeToolCallInner(
             obsidianWebClipPresetDir,
           })
         }
+
+        case 'image_generation':
+          return executeImageGenerationTool(toolName, args as Record<string, unknown>, {
+            requestEnvelope: context.requestEnvelope,
+            abortSignal: context.abortSignal,
+          })
 
         case 'map':
           return executeMapTool(toolName, args as Record<string, unknown>, {

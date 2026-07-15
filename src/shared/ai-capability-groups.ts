@@ -11,6 +11,7 @@ export type CapabilityGroupId =
   | 'pet'
   | 'channel_feishu'
   | 'general_research'
+  | 'image_generation'
   | 'map_planning'
   | 'system_host'
   | 'design_reserved'
@@ -176,6 +177,17 @@ export const CAPABILITY_GROUPS: CapabilityGroupDefinition[] = [
     defaultProfiles: ['local_chat', 'scheduled_run'],
     executionKinds: ['deterministic'],
     settingsVisible: true,
+  },
+  {
+    id: 'image_generation',
+    label: 'AI 生图',
+    description: '根据文字和本轮有序参考图生成图片。',
+    exposure: 'model_visible',
+    availability: 'active',
+    defaultMode: 'auto',
+    defaultProfiles: ['local_chat'],
+    executionKinds: ['interactive'],
+    settingsVisible: false,
   },
   {
     id: 'map_planning',

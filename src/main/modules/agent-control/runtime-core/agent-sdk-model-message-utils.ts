@@ -441,6 +441,7 @@ export function scopeRunModuleForTool(
   if (definition.domain === 'general_research') return 'research'
   if (
     definition.domain === 'file' ||
+    definition.domain === 'image_generation' ||
     definition.domain === 'memory' ||
     definition.domain === 'session' ||
     definition.domain === 'mcp' ||

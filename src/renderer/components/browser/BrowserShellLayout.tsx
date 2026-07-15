@@ -50,6 +50,7 @@ export default function BrowserShellLayout({
         <div className="flex min-h-0 min-w-0 flex-1 bg-transparent">
           <div
             ref={contentRef}
+            data-browser-local-media-drop-surface=""
             className="relative min-h-0 min-w-0 flex-1 overflow-hidden"
             onDragOver={onDragOver}
             onDrop={onDrop}
@@ -222,11 +223,11 @@ export default function BrowserShellLayout({
                   cursor: mediaDropActive ? 'copy' : undefined,
                 }}
               >
-                {mediaUploadStatus && (
+                {(mediaUploadStatus || mediaDropActive) && (
                   <div
                     className="flex items-center gap-2 rounded-full border px-3 py-2"
                     style={{
-                      borderColor: mediaUploadStatus.kind === 'error' ? 'var(--color-red)' : 'color-mix(in srgb, var(--color-blue) 34%, transparent)',
+                      borderColor: mediaUploadStatus?.kind === 'error' ? 'var(--color-red)' : 'color-mix(in srgb, var(--color-blue) 34%, transparent)',
                       background: 'color-mix(in srgb, var(--surface-floating-bg) 86%, transparent)',
                       color: 'var(--text-body)',
                       boxShadow: '0 8px 24px rgba(15, 23, 42, 0.12)',
@@ -234,15 +235,15 @@ export default function BrowserShellLayout({
                       WebkitBackdropFilter: 'blur(14px) saturate(132%)',
                     }}
                   >
-                    {mediaUploadStatus.kind === 'success' ? (
+                    {mediaUploadStatus?.kind === 'success' ? (
                       <CheckCircle style={{ width: 15, height: 15, color: 'var(--color-green)' }} strokeWidth={2} />
-                    ) : mediaUploadStatus.kind === 'error' ? (
+                    ) : mediaUploadStatus?.kind === 'error' ? (
                       <AlertTriangle style={{ width: 15, height: 15, color: 'var(--color-red)' }} strokeWidth={2} />
                     ) : (
                       <UploadCloud style={{ width: 15, height: 15, color: 'var(--color-blue)' }} strokeWidth={2} />
                     )}
                     <span className="text-[12px] font-medium">
-                      {mediaUploadStatus.message}
+                      {mediaUploadStatus?.message || '松开即可上传到当前网页'}
                     </span>
                   </div>
                 )}

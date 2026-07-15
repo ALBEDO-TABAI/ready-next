@@ -14,6 +14,7 @@ export type ToolDomain =
   | 'pet'
   | 'system'
   | 'general_research'
+  | 'image_generation'
   | 'map'
   | 'mcp'
   | 'agent_interaction'
@@ -34,6 +35,7 @@ export type ToolTimeoutProfile =
   | 'skill'
   | 'skill_long'
   | 'feishu'
+  | 'image_generation'
   | 'map'
 
 export interface ToolProjectionHint {

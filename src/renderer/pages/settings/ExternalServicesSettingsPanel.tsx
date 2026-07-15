@@ -20,6 +20,7 @@ const EXTERNAL_SERVICE_DESCRIPTIONS: Partial<Record<PublicExternalServiceProfile
   github: '供代码仓库操作使用',
   amap: '供路线规划 Agent 使用',
   'vision-model': '供视觉分析独立使用',
+  'image-generation': '供 Agent 生成与编辑图片使用',
 }
 
 const EXTERNAL_SERVICE_GUIDES: Partial<Record<PublicExternalServiceProfile['kind'], {
@@ -69,7 +70,7 @@ type ExternalServiceFeedback = {
 function serviceSecretKeys(profile: PublicExternalServiceProfile): string[] {
   const keys = Object.keys(profile.secretStatus || {})
   if (keys.length > 0) return keys
-  if (profile.kind === 'tavily' || profile.kind === 'anysearch' || profile.kind === 'jina' || profile.kind === 'vision-model') return ['apiKey']
+  if (profile.kind === 'tavily' || profile.kind === 'anysearch' || profile.kind === 'jina' || profile.kind === 'vision-model' || profile.kind === 'image-generation') return ['apiKey']
   if (profile.kind === 'github') return ['token']
   if (profile.kind === 'bilibili') return ['sessdata', 'biliJct']
   return []
@@ -198,7 +199,7 @@ function hasExternalServiceSecret(
 }
 
 function requiredExternalServiceSecretKeys(profile: PublicExternalServiceProfile): string[] {
-  if (profile.kind === 'tavily' || profile.kind === 'amap' || profile.kind === 'vision-model') return ['apiKey']
+  if (profile.kind === 'tavily' || profile.kind === 'amap' || profile.kind === 'vision-model' || profile.kind === 'image-generation') return ['apiKey']
   if (profile.kind === 'github') return ['token']
   if (profile.kind === 'bilibili') return ['sessdata']
   return []
@@ -219,6 +220,11 @@ function externalServiceMissingRequirements(
   }
   if (profile.kind === 'vision-model') {
     if (!String(profile.options.model || '').trim()) missing.push('Model')
+  }
+  if (profile.kind === 'image-generation') {
+    if (!String(profile.options.model || '').trim()) missing.push('模型名')
+    const protocol = String(profile.options.protocol || '').trim()
+    if (protocol !== 'openai-images' && protocol !== 'gemini-generate-content') missing.push('生图类型')
   }
   return missing
 }
@@ -388,7 +394,11 @@ export function ExternalServicesSettingsPanel() {
   const testProfile = useCallback(async (profile: PublicExternalServiceProfile) => {
     if (!window.electronAPI?.settings?.testExternalServiceDraft) return
     setTestingId(profile.id)
-    setFeedback({ kind: 'info', serviceId: profile.id, text: '正在测试当前表单配置...' })
+    setFeedback({
+      kind: 'info',
+      serviceId: profile.id,
+      text: profile.kind === 'image-generation' ? '正在试生成一张测试图，完成后会立即丢弃...' : '正在测试当前表单配置...',
+    })
     try {
       const res = await window.electronAPI.settings.testExternalServiceDraft(buildExternalServicePayload(profile, secretDrafts[profile.id], secretClearRequests[profile.id] || []))
       const detail = res.data?.latencyMs ? `（${res.data.latencyMs}ms）` : ''
@@ -427,16 +437,40 @@ export function ExternalServicesSettingsPanel() {
   // Renderer relabels the button so the user sees what the system actually does.
   // Other kinds (amap / jina / rsshub / duckduckgo) DO probe and stay labeled `测试`.
   const isSelectedVisionModel = selectedProfile?.kind === 'vision-model'
+  const isSelectedImageGeneration = selectedProfile?.kind === 'image-generation'
   const visionMissingRequirements = isSelectedVisionModel && selectedProfile
     ? externalServiceMissingRequirements(selectedProfile, selectedDraft, selectedClearSecrets)
     : []
   const isVisionTestDisabled = isSelectedVisionModel && visionMissingRequirements.length > 0
+  const imageMissingRequirements = isSelectedImageGeneration && selectedProfile
+    ? externalServiceMissingRequirements(selectedProfile, selectedDraft, selectedClearSecrets)
+    : []
+  const imageTestBlockers = isSelectedImageGeneration
+    ? [
+        selectedProfile?.enabled ? null : '请先启用服务',
+        imageMissingRequirements.length > 0 ? `缺少：${imageMissingRequirements.join('、')}` : null,
+      ].filter((item): item is string => Boolean(item))
+    : []
+  const isImageTestDisabled = imageTestBlockers.length > 0
+  const navigationSections = [
+    { label: '外部服务', profiles: profiles.filter((profile) => profile.kind !== 'image-generation') },
+    { label: 'AI 生成服务', profiles: profiles.filter((profile) => profile.kind === 'image-generation') },
+  ]
 
   return (
     <div className="flex flex-col gap-3">
       <div className="grid gap-5 xl:grid-cols-[260px_minmax(0,760px)]">
         <nav className="flex flex-col gap-1" aria-label="外部服务列表">
-          {profiles.map((profile) => {
+          {navigationSections.map((section, sectionIndex) => section.profiles.length > 0 ? (
+            <div key={section.label} className={sectionIndex > 0 ? 'mt-4' : ''}>
+              <div
+                className="px-2 pb-1.5 text-[10px] font-semibold tracking-[0.12em]"
+                style={{ color: sectionIndex > 0 ? 'var(--color-ready-orange)' : 'var(--text-light)' }}
+              >
+                {section.label}
+              </div>
+              <div className="flex flex-col gap-1">
+              {section.profiles.map((profile) => {
             const active = profile.id === selectedProfile?.id
             const hovered = profile.id === hoveredId
             return (
@@ -480,7 +514,10 @@ export function ExternalServicesSettingsPanel() {
                 </div>
               </div>
             )
-          })}
+              })}
+              </div>
+            </div>
+          ) : null)}
         </nav>
 
         {selectedProfile && (
@@ -546,9 +583,74 @@ export function ExternalServicesSettingsPanel() {
                     value={selectedProfile.baseUrl || ''}
                     onChange={(event) => patchProfile(selectedProfile.id, { baseUrl: event.target.value })}
                     style={externalServiceInputStyle()}
-                    placeholder={selectedProfile.kind === 'vision-model' ? 'https://api.example.com/v1' : 'https://...'}
+                    placeholder={selectedProfile.kind === 'vision-model' || selectedProfile.kind === 'image-generation' ? 'https://api.example.com' : 'https://...'}
                   />
                 </label>
+              )}
+
+              {selectedProfile.kind === 'image-generation' && (
+                <div className="grid gap-3 md:grid-cols-2">
+                  <label className="flex flex-col gap-1.5 text-[11px] font-medium" style={{ color: 'var(--text-muted)' }}>
+                    生图类型
+                    <select
+                      value={String(selectedProfile.options.protocol || '')}
+                      onChange={(event) => patchOptions(selectedProfile.id, { protocol: event.target.value })}
+                      style={externalServiceInputStyle()}
+                    >
+                      <option value="openai-images">GPT Image</option>
+                      <option value="gemini-generate-content">Gemini Image</option>
+                    </select>
+                  </label>
+                  <label className="flex flex-col gap-1.5 text-[11px] font-medium" style={{ color: 'var(--text-muted)' }}>
+                    模型名
+                    <input
+                      value={String(selectedProfile.options.model || '')}
+                      onChange={(event) => patchOptions(selectedProfile.id, { model: event.target.value })}
+                      style={externalServiceInputStyle()}
+                      placeholder={selectedProfile.options.protocol === 'gemini-generate-content' ? 'gemini-3.1-flash-image' : 'gpt-image-2'}
+                    />
+                  </label>
+                  {selectedProfile.options.protocol === 'openai-images' ? (
+                    <label className="flex flex-col gap-1.5 text-[11px] font-medium" style={{ color: 'var(--text-muted)' }}>
+                      默认尺寸
+                      <input
+                        value={String(selectedProfile.options.size || '')}
+                        onChange={(event) => patchOptions(selectedProfile.id, { size: event.target.value })}
+                        style={externalServiceInputStyle()}
+                        placeholder="1024x1024"
+                      />
+                    </label>
+                  ) : (
+                    <>
+                      <label className="flex flex-col gap-1.5 text-[11px] font-medium" style={{ color: 'var(--text-muted)' }}>
+                        默认比例
+                        <select
+                          value={String(selectedProfile.options.aspectRatio || '1:1')}
+                          onChange={(event) => patchOptions(selectedProfile.id, { aspectRatio: event.target.value })}
+                          style={externalServiceInputStyle()}
+                        >
+                          <option value="1:1">1:1</option>
+                          <option value="16:9">16:9</option>
+                          <option value="9:16">9:16</option>
+                          <option value="4:3">4:3</option>
+                          <option value="3:4">3:4</option>
+                        </select>
+                      </label>
+                      <label className="flex flex-col gap-1.5 text-[11px] font-medium" style={{ color: 'var(--text-muted)' }}>
+                        默认清晰度
+                        <select
+                          value={String(selectedProfile.options.imageSize || '1K')}
+                          onChange={(event) => patchOptions(selectedProfile.id, { imageSize: event.target.value })}
+                          style={externalServiceInputStyle()}
+                        >
+                          <option value="1K">1K</option>
+                          <option value="2K">2K</option>
+                          <option value="4K">4K</option>
+                        </select>
+                      </label>
+                    </>
+                  )}
+                </div>
               )}
 
               {selectedProfile.kind === 'vision-model' && (
@@ -658,6 +760,14 @@ export function ExternalServicesSettingsPanel() {
                 </div>
               )}
 
+              {isSelectedImageGeneration && (
+                <div data-image-generation-test-help className="text-[11px] leading-5" style={{ color: 'var(--text-light)' }}>
+                  “试生成”会真实调用当前服务并产生一次费用；测试图不会保存。
+                  同时启用两个服务时，聊天默认使用列表中第一个；也可以在需求里明确指定 GPT Image 或 Gemini Image。
+                  {imageTestBlockers.length > 0 ? `（${imageTestBlockers.join('；')}）` : ''}
+                </div>
+              )}
+
               <div className="flex items-center justify-between gap-3 pt-0.5">
                 <button
                   type="button"
@@ -674,17 +784,19 @@ export function ExternalServicesSettingsPanel() {
                     type="button"
                     data-vea-test-button={isSelectedVisionModel ? 'fields-only' : 'probe'}
                     onClick={() => { void testProfile(selectedProfile) }}
-                    disabled={isSelectedTesting || isSelectedBusy || isVisionTestDisabled}
+                    disabled={isSelectedTesting || isSelectedBusy || isVisionTestDisabled || isImageTestDisabled}
                     title={isSelectedVisionModel
                       ? '仅校验字段，不发起真实请求 / Validates fields only; no live request issued.'
                       : undefined}
                     className="inline-flex items-center justify-center gap-1.5 rounded-xl text-[12px] font-medium transition-[border-color,color,background-color,opacity,filter] duration-150 enabled:hover:bg-[var(--bg-hover)]"
-                    style={externalServiceButtonStyle('secondary', isSelectedTesting || isSelectedBusy || isVisionTestDisabled)}
+                    style={externalServiceButtonStyle('secondary', isSelectedTesting || isSelectedBusy || isVisionTestDisabled || isImageTestDisabled)}
                   >
                     {isSelectedTesting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
                     {isSelectedVisionModel
                       ? (isSelectedTesting ? '校验中' : '仅校验字段')
-                      : (isSelectedTesting ? '测试中' : '测试')}
+                      : isSelectedImageGeneration
+                        ? (isSelectedTesting ? '生成中' : '试生成')
+                        : (isSelectedTesting ? '测试中' : '测试')}
                   </button>
                   <button
                     type="button"

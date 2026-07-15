@@ -47,11 +47,26 @@ test('external service public profile masks secrets and preserves defaults', () 
   const tavily = profiles.find((profile) => profile.id === 'tavily-default')
   const ddg = profiles.find((profile) => profile.id === 'duckduckgo-default')
   const anysearch = profiles.find((profile) => profile.id === 'anysearch-default')
+  const gptImage = profiles.find((profile) => profile.id === 'gpt-image-default')
+  const geminiImage = profiles.find((profile) => profile.id === 'gemini-image-default')
   assert.ok(tavily)
   assert.ok(ddg, 'normalization should keep missing default profiles')
   assert.ok(anysearch, 'normalization should add the AnySearch default profile')
   assert.equal(anysearch?.enabled, false)
   assert.equal(anysearch?.baseUrl, 'https://api.anysearch.com/mcp')
+  assert.deepEqual(gptImage?.options, {
+    protocol: 'openai-images',
+    model: 'gpt-image-2',
+    size: '1024x1024',
+  })
+  assert.deepEqual(geminiImage?.options, {
+    protocol: 'gemini-generate-content',
+    model: 'gemini-3.1-flash-image',
+    aspectRatio: '1:1',
+    imageSize: '1K',
+  })
+  assert.equal(gptImage?.enabled, false)
+  assert.equal(geminiImage?.enabled, false)
 
   const publicProfile = toPublicExternalServiceProfile(tavily!)
   assert.equal(publicProfile.secretStatus.apiKey.configured, true)

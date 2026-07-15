@@ -86,6 +86,11 @@ import { FileTreeRecursive } from './file-tree/FileTreeRecursive'
 import { mapAnalysisJobToPlaceholderPatch, isActiveAnalysisStatus, isTrackedAnalysisPlaceholder, analysisPlaceholderTerminalDelay, buildAnalysisJobKey, type PendingClipPlaceholder } from './file-tree/pending-placeholders'
 import { FileColorPalette, FileTreeExternalDropMenu, ContextMenuBridge, type FileAppearanceColorMenuState, type FileTreeExternalDropMenuState } from './file-tree/floating-menus'
 import { isActiveReadyBoardTab } from './file-tree/ready-board-tab'
+import {
+  endGeneratedImageDrag,
+  getGeneratedImageDragPayload,
+  type GeneratedImageDragPayload,
+} from '../../modules/image-generation/generatedImageDrag'
 
 export { DEFAULT_FILE_FILTERS } from './file-tree/file-kinds'
 export type { FileFilterMap, FileViewMode } from './file-tree/file-kinds'
@@ -766,6 +771,8 @@ export default function FileTree({
 
   const getExternalDropPayload = useCallback(
     (dataTransfer: DataTransfer): FileTreeExternalDropPayload | null => {
+      const generatedImage = getGeneratedImageDragPayload(dataTransfer)
+      if (generatedImage) return generatedImage
       const readyBoard = parseReadyBoardFileTreeDropPayload(dataTransfer)
       if (readyBoard) return readyBoard
       const untitledDocTab = parseUntitledDocTabDragPayload(dataTransfer.getData(UNTITLED_DOC_TAB_DRAG_MIME))
@@ -938,6 +945,32 @@ export default function FileTree({
     }
   }, [showMoveNotice])
 
+  const handleGeneratedImageDrop = useCallback(async (
+    payload: GeneratedImageDragPayload,
+    target: FileTreeDropTarget,
+  ) => {
+    const targetDir = getTargetDirFromDropTarget(target)
+    const dirName = targetDir.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || targetDir
+    endGeneratedImageDrag()
+    showMoveNotice(`正在保存图片到 ${dirName}...`)
+    try {
+      const result = await window.electronAPI.imageGeneration.persistToDirectory({
+        sourcePath: payload.path,
+        directoryPath: targetDir,
+      })
+      if (!result.success || !result.data) {
+        showMoveNotice(`保存到 ${dirName} 失败：${result.error || '未知错误'}`)
+        return
+      }
+      await refreshFiles()
+      await loadDirChildren(targetDir)
+      flashCompletedPath(result.data.path)
+      showMoveNotice(`已保存「${result.data.name}」到 ${dirName}`)
+    } catch (error) {
+      showMoveNotice(`保存到 ${dirName} 失败：${error instanceof Error ? error.message : String(error)}`)
+    }
+  }, [flashCompletedPath, loadDirChildren, refreshFiles, showMoveNotice])
+
   const handleResolvedExternalDrop = useCallback((
     payload: FileTreeExternalDropPayload,
     target: FileTreeDropTarget,
@@ -945,6 +978,10 @@ export default function FileTree({
     y: number,
   ) => {
     setContextMenu(null)
+    if (payload.type === 'generated-image') {
+      void handleGeneratedImageDrop(payload, target)
+      return
+    }
     if (payload.type === 'ready-board-selection') {
       handleReadyBoardResourceDrop(payload, target)
       return
@@ -958,7 +995,7 @@ export default function FileTree({
       return
     }
     setExternalDropMenu({ x, y, payload, target })
-  }, [handleReadyBoardResourceDrop, handleUntitledDocTabDrop, handleWebDownloadDrop])
+  }, [handleGeneratedImageDrop, handleReadyBoardResourceDrop, handleUntitledDocTabDrop, handleWebDownloadDrop])
 
   const handleItemDragOver = useCallback((e: React.DragEvent, item: FileItem, containerPath: string) => {
     const workspacePayloads = readWorkspaceDragPayloads(e.dataTransfer)

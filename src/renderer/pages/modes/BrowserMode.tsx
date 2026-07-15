@@ -8,6 +8,10 @@ import BrowserShellLayout from '../../components/browser/BrowserShellLayout'
 import { nextIntentId } from '../../../shared/browser-view-intent'
 import { isBrowserSupervisionVisibleTaskStatus } from '../../../shared/browser-task-status'
 import { appendToAgentInput } from '../../modules/agent/chat-input-bridge'
+import {
+  endGeneratedImageDrag,
+  GENERATED_IMAGE_DRAG_STATE_EVENT,
+} from '../../modules/image-generation/generatedImageDrag'
 import { useBrowserDiagnosticsState } from '../../modules/browser/useBrowserDiagnosticsState'
 import { useBrowserPanelData } from '../../modules/browser/useBrowserPanelData'
 import { useBrowserResizeFreeze } from '../../modules/browser/useBrowserResizeFreeze'
@@ -230,6 +234,8 @@ export default function BrowserMode({
   const collapseFastCard = useFastCard(s => s.collapse)
   const [fastCardResultPanel, setFastCardResultPanel] = useState<FastCardResultPanelData | null>(null)
   const [localMediaUploadStatus, setLocalMediaUploadStatus] = useState<{ kind: 'uploading' | 'success' | 'error'; message: string } | null>(null)
+  const [generatedImageDragActive, setGeneratedImageDragActive] = useState(false)
+  const suppressNativeBrowserSurface = generatedImageDragActive || localMediaUploadStatus !== null
   const fastCardResultTargetRef = useRef<BrowserFastCardTarget | null>(null)
   const fastCardResultRequestIdRef = useRef(0)
   const setAddressEditing = useCallback((next: boolean) => {
@@ -259,7 +265,7 @@ export default function BrowserMode({
     splitTabId: visibleSplitTab?.id || null,
     isActive: shouldPrepareBrowserHost,
     layoutPhase,
-    isVisibleAllowed: isMotionSettled, // D方案：水平滚动动画期间禁止 BrowserView 显示
+    isVisibleAllowed: isMotionSettled && !suppressNativeBrowserSurface, // 拖拽素材时先让出原生覆盖面，由 DOM 落点接收。
     hostVisibleRef,
     topInset: 0,
     sidebarVisible,
@@ -294,6 +300,34 @@ export default function BrowserMode({
       publishLocalMediaUploadStatus(event.status)
     })
   }, [isElectron, publishLocalMediaUploadStatus])
+
+  useEffect(() => {
+    const finishGeneratedImageDrag = () => {
+      endGeneratedImageDrag()
+      setGeneratedImageDragActive(false)
+    }
+    const handleGeneratedImageDragState = (event: Event) => {
+      const active = (event as CustomEvent<{ active?: boolean }>).detail?.active === true
+      if (active && isElectron) {
+        window.electronAPI?.browser?.sendIntent({
+          kind: 'hide-all',
+          intentId: nextIntentId(),
+          reason: 'overlay-open',
+        })
+      }
+      setGeneratedImageDragActive(active)
+    }
+    window.addEventListener(GENERATED_IMAGE_DRAG_STATE_EVENT, handleGeneratedImageDragState)
+    window.addEventListener('dragend', finishGeneratedImageDrag)
+    window.addEventListener('drop', finishGeneratedImageDrag)
+    window.addEventListener('blur', finishGeneratedImageDrag)
+    return () => {
+      window.removeEventListener(GENERATED_IMAGE_DRAG_STATE_EVENT, handleGeneratedImageDragState)
+      window.removeEventListener('dragend', finishGeneratedImageDrag)
+      window.removeEventListener('drop', finishGeneratedImageDrag)
+      window.removeEventListener('blur', finishGeneratedImageDrag)
+    }
+  }, [isElectron])
 
   useEffect(() => {
     if (!agentPaneTaskId || agentPaneTaskId === lastAgentPaneTaskIdRef.current) return
@@ -1198,6 +1232,7 @@ export default function BrowserMode({
                     onDragOver={handleContentDragOver}
                     onDrop={(event) => handleContentDrop(event, activeTab.id)}
                     onRetry={() => void handleRetry(activeTab.id)}
+                    mediaDropActive={generatedImageDragActive}
                     mediaUploadStatus={localMediaUploadStatus}
                   />
                 </div>
@@ -1270,6 +1305,7 @@ export default function BrowserMode({
                       onDragOver={handleContentDragOver}
                       onDrop={(event) => handleContentDrop(event, visibleSplitTab.id)}
                       onRetry={() => void handleRetry(visibleSplitTab.id)}
+                      mediaDropActive={generatedImageDragActive}
                       mediaUploadStatus={localMediaUploadStatus}
                       fillBottomLeftCorner={false}
                     />
@@ -1295,6 +1331,7 @@ export default function BrowserMode({
                 onDragOver={handleContentDragOver}
                 onDrop={handleContentDrop}
                 onRetry={() => void handleRetry()}
+                mediaDropActive={generatedImageDragActive}
                 mediaUploadStatus={localMediaUploadStatus}
               />
             )}

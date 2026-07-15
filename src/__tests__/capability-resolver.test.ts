@@ -34,6 +34,7 @@ test('capability groups define required reserved and host-only entries', () => {
     'pet',
     'channel_feishu',
     'general_research',
+    'image_generation',
     'map_planning',
     'system_host',
     'design_reserved',
@@ -63,6 +64,8 @@ test('capability groups define required reserved and host-only entries', () => {
   assert.equal(getCapabilityGroup('skill_install')?.defaultMode, 'on')
   assert.equal(getCapabilityGroup('skill_install')?.settingsVisible, false)
   assert.deepEqual(getCapabilityGroup('skill_install')?.defaultProfiles, ['local_chat'])
+  assert.equal(getCapabilityGroup('image_generation')?.exposure, 'model_visible')
+  assert.deepEqual(getCapabilityGroup('image_generation')?.defaultProfiles, ['local_chat'])
   // P2-2 — skill_activation (use_skill): model_visible + on by default; executor gates real exposure.
   assert.equal(getCapabilityGroup('skill_activation')?.exposure, 'model_visible')
   assert.equal(getCapabilityGroup('skill_activation')?.defaultMode, 'on')

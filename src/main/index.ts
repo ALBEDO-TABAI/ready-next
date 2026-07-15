@@ -53,6 +53,7 @@ import { reconcileStartupRunsOnStartup } from './modules/app-control/startup-run
 import { setupBoardIPC } from './modules/board-engine/ipc-handler'
 import { setupSkillsIPC } from './modules/skills-runtime/ipc-handler'
 import { setupMemoryManagementIPC } from './modules/memory-management/ipc-handler'
+import { setupImageGenerationIPC } from './modules/image-generation/ipc-handler'
 import { rsshubManager } from './modules/rss-engine/rsshub-process'
 import { reapOrphans } from './modules/process-cleanup/boot-reaper'
 import { runBeforeQuitCleanup } from './modules/process-cleanup/before-quit'
@@ -585,6 +586,7 @@ function setupGlobalIPC(): void {
   setupSearchIPC()
   setupFileEmergenceIPC()
   setupTagForgeIPC()
+  setupImageGenerationIPC()
   setupRSSIPC(RSS_USE_MOCK)
   rssAutoRefreshScheduler = new RSSAutoRefreshScheduler({
     now: () => Date.now(),

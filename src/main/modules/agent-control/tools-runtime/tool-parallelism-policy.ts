@@ -57,7 +57,7 @@ export interface ParallelToolGroup {
 }
 
 export interface ToolResourceTag {
-  domain: 'browser' | 'document' | 'file' | 'rss' | 'calendar' | 'feishu' | 'skill' | 'memory' | 'session' | 'pet' | 'system' | 'general_research' | 'map' | 'mcp' | 'agent_interaction' | 'skill_install' | 'skill_activation' | 'channel' | 'mcp_install' | 'command_exec'
+  domain: 'browser' | 'document' | 'file' | 'rss' | 'calendar' | 'feishu' | 'skill' | 'memory' | 'session' | 'pet' | 'system' | 'general_research' | 'image_generation' | 'map' | 'mcp' | 'agent_interaction' | 'skill_install' | 'skill_activation' | 'channel' | 'mcp_install' | 'command_exec'
   accessMode: 'read' | 'write' | 'interactive'
 }
 
@@ -206,6 +206,7 @@ export function getToolResourceTag(toolName: string): ToolResourceTag {
   if (normalized === 'web_fetch') return { domain: 'general_research', accessMode: 'read' }
   if (normalized === 'present_file') return { domain: 'general_research', accessMode: 'interactive' }
   if (normalized === 'web_clip_url') return { domain: 'general_research', accessMode: 'interactive' }
+  if (normalized === 'generate_image') return { domain: 'image_generation', accessMode: 'write' }
   if (normalized.startsWith('map_')) return { domain: 'map', accessMode: 'write' }
   // Stage T PR-T5 — MCP tools advertised as `mcp_*` are dispatched to the
   // mcp client and are interactive by default (the client makes a remote

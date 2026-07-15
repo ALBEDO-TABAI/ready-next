@@ -27,6 +27,10 @@ import {
 import { convertDocxHtmlToMarkdownText } from '../../utils/docx-format'
 import { shouldApplyAsyncDocumentLoad } from './documentLoadGuard'
 import { shouldRefreshDocumentTabForDirectoryChange } from '../../modules/document/documentExternalRefresh'
+import {
+  endGeneratedImageDrag,
+  getGeneratedImageDragPayload,
+} from '../../modules/image-generation/generatedImageDrag'
 import '../../styles/tiptap.css'
 
 type SaveState = 'idle' | 'saving' | 'saved' | 'error'
@@ -545,6 +549,68 @@ export default function MarkdownEditor({
   }, [])
 
   const handleEditorDrop = useCallback((e: React.DragEvent) => {
+    const generatedImage = getGeneratedImageDragPayload(e.dataTransfer)
+    if (generatedImage) {
+      e.preventDefault()
+      e.stopPropagation()
+      endGeneratedImageDrag()
+      const rawEditor = rawEditorRef.current
+      const selectionStart = viewMode === 'edit' && rawEditor ? rawEditor.selectionStart : null
+      const selectionEnd = viewMode === 'edit' && rawEditor ? rawEditor.selectionEnd : null
+      void (async () => {
+        if (!tab.path) {
+          setSaveState('error')
+          setSaveError('请先保存文档，再插入生成图片。')
+          return
+        }
+        if (currentExt === 'docx') {
+          setSaveState('error')
+          setSaveError('生成图片请插入 Markdown 文档；DOCX 当前不会可靠保留外部 assets 图片。')
+          return
+        }
+        const result = await window.electronAPI.imageGeneration.persistToDocument({
+          sourcePath: generatedImage.path,
+          documentPath: tab.path,
+        })
+        if (!result.success || !result.data?.relativePath) {
+          setSaveState('error')
+          setSaveError(result.error || '图片复制到文档 assets 失败')
+          return
+        }
+        const alt = generatedImage.name.replace(/\.[^.]+$/, '')
+        const snippet = `![${alt}](${result.data.relativePath})`
+        const currentContent = tabContentRef.current
+        let nextContent: string
+        if (selectionStart !== null && selectionEnd !== null) {
+          const start = Math.max(0, Math.min(selectionStart, currentContent.length))
+          const end = Math.max(start, Math.min(selectionEnd, currentContent.length))
+          const before = currentContent.slice(0, start)
+          const after = currentContent.slice(end)
+          const leading = before.length > 0 && !before.endsWith('\n') ? '\n\n' : ''
+          const trailing = after.length > 0 && !snippet.endsWith('\n') ? '\n' : ''
+          const insertion = `${leading}${snippet}${trailing}`
+          nextContent = `${before}${insertion}${after}`
+          requestAnimationFrame(() => {
+            const editor = rawEditorRef.current
+            if (!editor) return
+            const cursor = before.length + insertion.length
+            editor.focus()
+            editor.setSelectionRange(cursor, cursor)
+          })
+        } else {
+          const prefix = currentContent.trim().length === 0 ? '' : currentContent.endsWith('\n') ? '\n' : '\n\n'
+          nextContent = `${currentContent}${prefix}${snippet}\n`
+        }
+        tabContentRef.current = nextContent
+        updateTabContent(tab.id, nextContent)
+        setSaveError(null)
+        setSaveState('idle')
+      })().catch((error) => {
+        setSaveState('error')
+        setSaveError(error instanceof Error ? error.message : String(error))
+      })
+      return
+    }
     const droppedFiles = getDroppedFilesFromDataTransfer(e.dataTransfer)
     const droppedText = e.dataTransfer.getData('text/plain')?.trim()
     if (droppedFiles.length === 0 && !droppedText) return
@@ -578,7 +644,7 @@ export default function MarkdownEditor({
       updateTabContent(tab.id, `${tab.content}${prefix}${snippet}\n`)
     }
     setSaveState('idle')
-  }, [currentExt, tab.content, tab.id, updateTabContent, viewMode])
+  }, [currentExt, tab.content, tab.id, tab.path, updateTabContent, viewMode])
 
   const closeContextMenu = useCallback(() => {
     setContextMenu((prev) => ({ ...prev, visible: false }))
@@ -920,6 +986,8 @@ export default function MarkdownEditor({
               className="panel-hover-scrollbar document-preview-surface flex-1 overflow-auto"
               style={{ background: 'transparent' }}
               onContextMenu={handleContextMenu}
+              onDragOver={handleEditorDragOver}
+              onDrop={handleEditorDrop}
               onPointerDownCapture={handleSurfacePointerDown}
               onScroll={handlePreviewSurfaceScroll}
             >

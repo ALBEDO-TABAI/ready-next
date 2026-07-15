@@ -134,6 +134,7 @@ function normalizeAttachmentSource(value: unknown): ChatAttachment['source'] {
   if (normalized === 'document-quote') return 'document-quote'
   if (normalized === 'document-widget-target') return 'document-widget-target'
   if (normalized === 'calendar-event') return 'calendar-event'
+  if (normalized === 'generated-image') return 'generated-image'
   if (normalized === 'file') return 'file'
   return 'channel'
 }

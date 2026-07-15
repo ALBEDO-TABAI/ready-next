@@ -13,7 +13,10 @@ import type { AgentMessage, ChatAttachment, ToolTraceEvent } from '../../stores/
 import { filterUserVisibleToolTraceEvents } from '../../modules/agent/toolTraceVisibility'
 import { ToolTraceCard } from './chat-panel/task/TaskCard'
 import { AskUserQuestionsCard } from './AskUserQuestionsCard'
+import { GeneratedImageGallery } from './GeneratedImageGallery'
+import { generatedImagesFromMessage } from '../../modules/image-generation/generatedImageArtifacts'
 import { submitAskUserQuestionsAnswers, cancelAskUserQuestionsCard } from '../../stores/useAgent'
+import { isImageGenerationReferencePath } from '../../../shared/image-generation'
 
 // The session-tab strip + chat header overflow ~24px into the top of this
 // scroll region (MotionLayer's header row is a fixed 44px). The top padding
@@ -40,6 +43,7 @@ interface ChatMessagesProps {
   onCopyMessage: (id: string, content: string) => void | Promise<void>
   onAgentSelectionContextMenu?: (event: React.MouseEvent, selectedText: string) => void
   onAttachmentPreview: (attachment: ChatAttachment) => void | Promise<void>
+  onReferenceSelect: (attachment: ChatAttachment) => void
   onRevealDocumentQuote: (attachment: ChatAttachment) => void
   getDocumentQuoteTooltip: (attachment: ChatAttachment) => string
   getAttachmentMetaSummary: (attachment: ChatAttachment) => string | null
@@ -68,6 +72,7 @@ export default function ChatMessages({
   onCopyMessage,
   onAgentSelectionContextMenu,
   onAttachmentPreview,
+  onReferenceSelect,
   onRevealDocumentQuote,
   getDocumentQuoteTooltip,
   getAttachmentMetaSummary,
@@ -217,6 +222,7 @@ export default function ChatMessages({
         const showMessageDivider = index < visibleMessages.length - 1 && (msg.type === 'user' || msg.type === 'agent')
         const taskSnapshot = msg.type === 'agent' ? messageTaskSnapshots[msg.id] : null
         const toolTraceSnapshot = msg.type === 'agent' ? messageToolTraceSnapshots[msg.id] : null
+        const generatedImages = generatedImagesFromMessage(msg)
 
         return (
           <div key={msg.id} className="flex flex-col" style={{ gap: 10 }}>
@@ -235,7 +241,16 @@ export default function ChatMessages({
                 >
                   {msg.attachments && msg.attachments.length > 0 && (
                     <div className="flex flex-wrap justify-end gap-1.5">
-                      {msg.attachments.map((att) => (
+                      {msg.attachments.map((att) => {
+                        const referenceOrder = att.type === 'image' && isImageGenerationReferencePath(att.path)
+                          ? msg.attachments!
+                            .filter((item) => item.type === 'image' && isImageGenerationReferencePath(item.path))
+                            .findIndex((item) => item.id === att.id) + 1
+                          : 0
+                        const metaSummary = referenceOrder > 0
+                          ? `参考图 ${referenceOrder}`
+                          : getAttachmentMetaSummary(att)
+                        return (
                         <button
                           key={att.id}
                           type="button"
@@ -285,7 +300,7 @@ export default function ChatMessages({
                             }}
                           >
                             <span className="truncate" style={{ maxWidth: '100%' }}>{att.name}</span>
-                            {getAttachmentMetaSummary(att) ? (
+                            {metaSummary ? (
                               <span
                                 style={{
                                   fontSize: 'var(--text-xs)',
@@ -300,12 +315,13 @@ export default function ChatMessages({
                                   whiteSpace: 'nowrap',
                                 }}
                               >
-                                {getAttachmentMetaSummary(att)}
+                                {metaSummary}
                               </span>
                             ) : null}
                           </span>
                         </button>
-                      ))}
+                        )
+                      })}
                     </div>
                   )}
                   {msg.content && <div style={{ whiteSpace: 'pre-wrap', textAlign: 'left' }}>{msg.content}</div>}
@@ -339,6 +355,13 @@ export default function ChatMessages({
                   <div className="t-body" data-typography-role="body" style={{ color: 'var(--text-body)' }}>
                     {renderMarkdown(msg.content)}
                   </div>
+                  {generatedImages.length > 0 ? (
+                    <GeneratedImageGallery
+                      images={generatedImages}
+                      onPreview={onAttachmentPreview}
+                      onReferenceSelect={onReferenceSelect}
+                    />
+                  ) : null}
                   {!!msg.content?.trim() && (
                     <button
                       type="button"

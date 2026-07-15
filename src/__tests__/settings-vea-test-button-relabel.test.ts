@@ -158,6 +158,19 @@ function makeAnySearchProfile(overrides: Partial<PublicExternalServiceProfile> =
   }
 }
 
+function makeImageProfile(overrides: Partial<PublicExternalServiceProfile> = {}): PublicExternalServiceProfile {
+  return {
+    id: 'gpt-image-default',
+    kind: 'image-generation',
+    name: 'GPT Image',
+    enabled: true,
+    baseUrl: 'https://images.example.test',
+    options: { protocol: 'openai-images', model: 'gpt-image-2', size: '1024x1024' },
+    secretStatus: { apiKey: { configured: true, masked: '•••1234' } },
+    ...overrides,
+  }
+}
+
 function installElectronAPIStub(dom: JSDOM, bag: StubBag): void {
   const settings = {
     listExternalServices: async (): Promise<ElectronAPIStubResult<PublicExternalServiceProfile[]>> => ({
@@ -394,6 +407,86 @@ test('AnySearch settings card explains its role and links to the official key co
     const links = Array.from(guide?.querySelectorAll('a') || []) as HTMLAnchorElement[]
     assert.ok(links.some((link) => link.href === 'https://anysearch.com/console/api-keys'))
     assert.ok(links.some((link) => link.href === 'https://www.anysearch.com/docs'))
+  } finally {
+    root.unmount()
+    await new Promise((resolve) => setTimeout(resolve, 25))
+    handle.restore()
+  }
+})
+
+test('AI image profiles live in a separate settings region and expose a real generation probe', async () => {
+  const handle = installDomGlobals()
+  const bag: StubBag = {
+    profiles: [makeAmapProfile(), makeImageProfile()],
+    testCalls: [],
+  }
+  installElectronAPIStub(handle.dom, bag)
+
+  const { ExternalServicesSettingsPanel } = await import('../renderer/pages/Settings')
+  const root = createRoot(handle.dom.window.document.getElementById('root') as HTMLElement)
+  try {
+    flushSync(() => { root.render(createElement(ExternalServicesSettingsPanel)) })
+    await flushAsync()
+    flushSync(() => { /* drain */ })
+
+    const bodyText = handle.dom.window.document.body.textContent || ''
+    assert.match(bodyText, /AI 生成服务/)
+    assert.match(bodyText, /GPT Image/)
+    const imageNavButton = Array.from(handle.dom.window.document.querySelectorAll('button'))
+      .find((button) => (button.textContent || '').includes('GPT Image')) as HTMLButtonElement | undefined
+    assert.ok(imageNavButton)
+    imageNavButton.click()
+    await flushAsync()
+
+    const selectedText = handle.dom.window.document.body.textContent || ''
+    assert.match(selectedText, /生图类型/)
+    assert.match(selectedText, /模型名/)
+    assert.match(selectedText, /默认尺寸/)
+    assert.match(selectedText, /会真实调用当前服务并产生一次费用/)
+
+    const probeButton = Array.from(handle.dom.window.document.querySelectorAll('button'))
+      .find((button) => (button.textContent || '').trim() === '试生成') as HTMLButtonElement | undefined
+    assert.ok(probeButton)
+    assert.equal(probeButton.disabled, false)
+    probeButton.click()
+    await flushAsync()
+    assert.equal(bag.testCalls.length, 1)
+    assert.equal(bag.testCalls[0]?.kind, 'image-generation')
+    assert.equal(bag.testCalls[0]?.options?.protocol, 'openai-images')
+  } finally {
+    root.unmount()
+    await new Promise((resolve) => setTimeout(resolve, 25))
+    handle.restore()
+  }
+})
+
+test('AI image trial stays disabled until the draft service is enabled', async () => {
+  const handle = installDomGlobals()
+  const bag: StubBag = {
+    profiles: [makeImageProfile({ enabled: false })],
+    testCalls: [],
+  }
+  installElectronAPIStub(handle.dom, bag)
+
+  const { ExternalServicesSettingsPanel } = await import('../renderer/pages/Settings')
+  const root = createRoot(handle.dom.window.document.getElementById('root') as HTMLElement)
+  try {
+    flushSync(() => { root.render(createElement(ExternalServicesSettingsPanel)) })
+    await flushAsync()
+    flushSync(() => { /* drain */ })
+
+    const probeButton = Array.from(handle.dom.window.document.querySelectorAll('button'))
+      .find((button) => (button.textContent || '').trim() === '试生成') as HTMLButtonElement | undefined
+    assert.ok(probeButton)
+    assert.equal(probeButton.disabled, true)
+    assert.match(
+      handle.dom.window.document.querySelector('[data-image-generation-test-help]')?.textContent || '',
+      /请先启用服务/,
+    )
+
+    probeButton.click()
+    await flushAsync()
+    assert.equal(bag.testCalls.length, 0)
   } finally {
     root.unmount()
     await new Promise((resolve) => setTimeout(resolve, 25))

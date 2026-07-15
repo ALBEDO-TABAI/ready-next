@@ -4,6 +4,10 @@ import { logAgentMetric } from '../agent-control/metrics'
 import { getDatabase } from '../database'
 import type { AgentSpawnContext } from '../../../shared/skill-host-contract'
 import {
+  generateImageBytes,
+  resolveImageGenerationClientConfig,
+} from '../image-generation/image-generation-client'
+import {
   DEFAULT_EXTERNAL_SERVICE_PROFILES,
   type ExternalServiceKind,
   type ExternalServiceProfile,
@@ -145,6 +149,11 @@ export class ExternalServiceStore {
 
   getFirstRuntimeService(kind: ExternalServiceKind): RuntimeExternalServiceConfig | null {
     const profile = this.readProfiles().find((item) => item.kind === kind)
+    return profile ? toRuntimeExternalServiceConfig(profile) : null
+  }
+
+  getFirstEnabledImageGenerationService(): RuntimeExternalServiceConfig | null {
+    const profile = this.readProfiles().find((item) => item.kind === 'image-generation' && item.enabled)
     return profile ? toRuntimeExternalServiceConfig(profile) : null
   }
 
@@ -347,6 +356,28 @@ export class ExternalServiceStore {
     }
     if (profile.kind === 'tavily' && !hasSecret(profile, 'apiKey')) {
       return { ok: false, serviceId: profile.id, message: '缺少 Tavily API Key' }
+    }
+    if (profile.kind === 'image-generation') {
+      try {
+        const config = resolveImageGenerationClientConfig(toRuntimeExternalServiceConfig(profile))
+        await generateImageBytes({
+          config,
+          prompt: '一枚简单的橙色圆点，纯白背景，无文字。',
+        })
+        return {
+          ok: true,
+          serviceId: profile.id,
+          message: '试生成成功，测试图片已丢弃',
+          latencyMs: Date.now() - start,
+        }
+      } catch (error) {
+        return {
+          ok: false,
+          serviceId: profile.id,
+          message: error instanceof Error ? error.message : String(error),
+          latencyMs: Date.now() - start,
+        }
+      }
     }
     if (profile.kind === 'anysearch') {
       const endpoint = trimBaseUrl(profile.baseUrl)
