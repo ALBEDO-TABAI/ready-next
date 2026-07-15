@@ -254,7 +254,19 @@ export class SearchEngine {
         // Schedule the backup resolve outside the transaction — we don't want
         // this to keep the per-file transaction open.
         this.scheduleWorkspaceLinkResolve(workspaceId)
-        reconcileIndexedFrontmatter(this.repository.getConnection(),root,parsed.path,parsed.tags)
+        const indexedFrontmatter = parsed.frontmatterJson
+          ? JSON.parse(parsed.frontmatterJson) as Record<string, unknown>
+          : null
+        const workflowState = typeof indexedFrontmatter?.ready_state === 'string'
+          ? indexedFrontmatter.ready_state
+          : null
+        reconcileIndexedFrontmatter(
+          this.repository.getConnection(),
+          root,
+          parsed.path,
+          parsed.tags,
+          workflowState,
+        )
       }
       return { ok: true, documentId, skipped }
     } catch (error) {

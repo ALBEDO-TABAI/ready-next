@@ -69,6 +69,46 @@ test('a scoped dismissal remains effective when the host has no run id',()=>{con
 
 test('automatic replacement never takes ownership away from a manual tag',()=>{const db=openDb();try{const ids=new FileProjectIdentityRepository(db);const file=ids.ensureFile({workspaceRoot:'/w',path:'/w/manual.md'});const repo=new TagForgeRepository(db);const entry=loadTagForgePolicy().entries.find((item)=>item.id==='ai-workflow')!;repo.reconcileAssignments({fileKey:file.fileKey,frontmatterTags:['AI工作流'],knownEntries:[entry]});repo.replaceAutomaticAssignments(file.fileKey,[{tagId:entry.id,facet:entry.facet,label:entry.label,confidence:.9,evidenceCode:'auto',resolution:'exact'}],'tag_forge_explicit','0.2');assert.equal(repo.listAssignments(file.fileKey)[0]?.ownership,'manual')}finally{db.close()}})
 
+test('single-file reindex reconciles ready_state changes into tag assignments', async () => {
+  const db = openDb()
+  try {
+    const rawRoot = await mkdtemp(join(tmpdir(), 'tag-forge-single-file-state-'))
+    const rawPath = join(rawRoot, 'state.md')
+    const firstContent = '---\ntags: [AI工作流]\nready_state: 待整理\n---\n# Ready 工作流\n'
+    await writeFile(rawPath, firstContent)
+    const root = await realpath(rawRoot)
+    const path = await realpath(rawPath)
+    const engine = new SearchEngine(db, { fts5Available: false })
+
+    const first = await engine.indexDocument(root, path)
+    assert.equal(first.ok, true)
+    assert.equal(first.skipped, false)
+
+    const file = new FileProjectIdentityRepository(db).ensureFile({ workspaceRoot: root, path })
+    const repo = new TagForgeRepository(db)
+    assert.deepEqual(
+      repo.listAssignments(file.fileKey)
+        .filter((item) => item.facet === 'state')
+        .map((item) => ({ label: item.label, ownership: item.ownership, suppressed: item.suppressed })),
+      [{ label: '待整理', ownership: 'manual', suppressed: false }],
+    )
+
+    const updatedContent = firstContent.replace('ready_state: 待整理', 'ready_state: 精选')
+    await writeFile(path, updatedContent)
+    const updated = await engine.indexDocument(root, path)
+    assert.equal(updated.ok, true)
+    assert.equal(updated.skipped, false)
+    assert.deepEqual(
+      repo.listAssignments(file.fileKey)
+        .filter((item) => item.facet === 'state')
+        .map((item) => ({ label: item.label, ownership: item.ownership, suppressed: item.suppressed })),
+      [{ label: '精选', ownership: 'manual', suppressed: false }],
+    )
+  } finally {
+    db.close()
+  }
+})
+
 test('tag forge stages automatic ownership before indexing while preserving manual ownership',async()=>{
   const db=openDb()
   try{

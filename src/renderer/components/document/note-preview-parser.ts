@@ -771,7 +771,7 @@ function buildProperties(metadata: MetadataMap): {
   tags: PreviewTag[]
   related: PreviewTag[]
 } {
-  const orderedKeys = Array.from(metadata.keys()).sort((a, b) => {
+  const orderedKeys = Array.from(metadata.keys()).filter((key) => key !== 'ready_state').sort((a, b) => {
     const aIndex = KNOWN_METADATA_ORDER.indexOf(a as (typeof KNOWN_METADATA_ORDER)[number])
     const bIndex = KNOWN_METADATA_ORDER.indexOf(b as (typeof KNOWN_METADATA_ORDER)[number])
     if (aIndex === -1 && bIndex === -1) return a.localeCompare(b)

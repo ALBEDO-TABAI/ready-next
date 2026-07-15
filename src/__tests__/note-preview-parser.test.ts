@@ -33,6 +33,22 @@ Some summary text.
     assert.match(preview.bodyMarkdown, /## Description/)
   })
 
+  it('keeps the code-owned Ready workflow state out of the document preview', () => {
+    const preview = buildStructuredNotePreview(`---
+tags:
+  - 参考资料
+  - Web开发
+ready_state: 待整理
+---
+
+# Browser API
+`)
+
+    assert.deepEqual(preview.tags.map((tag) => tag.label), ['参考资料', 'Web开发'])
+    assert.equal(preview.properties.some((property) => property.key === 'ready_state'), false)
+    assert.doesNotMatch(preview.bodyMarkdown, /待整理/)
+  })
+
   it('parses half-structured top metadata blocks with list properties', () => {
     const preview = buildStructuredNotePreview(`created: 2025-05-20T21:09:30+08:00 url: "https://www.youtube.com/watch?v=VIXBLhoZbl4" title: "《奥术》 第二季深度解析" channel: "超粒方" related:
 - "[[Videos]]"
