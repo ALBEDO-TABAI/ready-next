@@ -18,6 +18,9 @@
 
 - 会话 scope 按“来源频道 + 线程或本地 conversation + agent”隔离；工具日志只进入运行态或胶囊层，不混入正文消息。
 - 飞书或远程图片、文件先进入会话资源层，不自动触发 Agent；后续任务必须显式选择资源。
+- 系统提示词分为版本化常驻核心、按需领域/产品资料和每轮运行时事实。常驻核心的唯一来源是 `assets/prompts/core/ready-system.md`，常规 scoped run 与默认/fallback 入口必须复用同一加载器；`assets/prompts/product/about-ready.md` 只在用户询问 Ready 开发、协作背景或关注渠道时进入 L2，普通任务不得主动宣传。
+- `TOOLS.md` 不进入 L0，也不代表授权；本轮最终工具定义是模型可调用能力的唯一事实。默认 `USER.md` 不得伪造未确认偏好；用户画像、记忆、人格和历史只能作为低于当前用户指令与代码边界的上下文。
+- 每轮日期事实使用应用所在系统的本地日历日期与星期，同一格式器同时服务运行时提示和每日记忆文件；不得用 UTC 日期与本地星期拼接出跨日矛盾。
 - 显式技能引用与本地文档资源产生代码级 capability floor。收窄过滤只能做减法，不得移除地板；最终工具面必须非空且包含全部地板。
 - `current_document_context` 的地板是文档编辑面：read section、Widget 增删改查、replace exact、save tab；刻意不含整文覆写。`local_document_resource` 保持只读，提及文件不等于授予写权限。
 - capability floor 的 live 权威点是 SDK executor 计算/补回工具，以及 turn orchestrator 收窄后的最终强制。违反要记录 `tool_surface_floor_violation` 或 `sdk_runtime_empty_surface_recovered`。
@@ -29,7 +32,7 @@
 ## 3. Skill 标准、选择与续跑
 
 - embedded skill 由启动扫描 `assets/embedded-skills/*` 注册：优先读 `ready-skill.json`，否则读 `SKILL.md` frontmatter。目录名必须与 manifest id 或 bare skill name 一致。
-- L1 技能目录经 `SystemReminderRegistry` 注入 name + description；模型以 `use_skill` 明确激活。latent `skill_*` 工具只在选中后的下一次模型迭代按 allow-set 可见，dispatch authorization 始终是最终闸门。
+- 每轮只读取一次有效技能清单并形成不可漂移的 snapshot；`use_skill` 曝光、模型可见目录和已选技能的动态提醒共用该 snapshot。只有最终工具面真实含 `use_skill` 时，目录才经 `SystemReminderRegistry` 组装 id + name + description 并进入本 run 的 instructions；它不写入 `MemorySession` 输入历史，也不在无激活工具时宣传不可用的技能。升级前已经持久化的旧目录必须在低压压缩、强制压缩和 snapshot 恢复入口全部剔除。模型以完整 `skill_id` 调用 `use_skill`；latent `skill_*` 工具只在选中后的下一次模型迭代按 allow-set 可见，dispatch authorization 始终是最终闸门。
 - 代码侧 `findExplicitlyRequestedSkills` 只认完整技能名或明确别名，禁止按普通任务词或 description 模糊激活。
 - `use_skill` 返回方法论后必须继续完成当前任务，不能只给计划等用户再次发言。
 - 外来技能的 `allowed-tools` 一律忽略并记 `ignoredFields`；工具面只由 Ready 授权层决定。未知 frontmatter 字段忽略，不因规范扩展拒绝导入。
@@ -71,6 +74,7 @@
 ## 6. 后台任务、采集与浏览器执行
 
 - Browser Agent 走“理解 -> 计划 -> 分步执行 -> 复核”；链接是资源，不是立即执行指令。
+- `assets/prompts/browser/discipline.md` 是 Browser 详细纪律的唯一稳定来源；只在最终模型工具面含 `browser_interaction` 或 `browser_content_tasks` 时注入一次本轮 instructions。Browser DomainAdapter 不再按关键词重复注入该纪律，普通 `web_search` 也不触发；运行时只补当前 `browser_visible_collect`、Power 与用户接管等动态事实。
 - Safe Mode 只接受 `browser-readonly-script-templates.ts` 中的命名只读模板，自由脚本以 `freeform_script_denied` / `script_blocked` 拒绝。
 - Power Mode 使用 `browser_power_eval`、`browser_power_cdp`、`browser_power_network_trace`、`browser_power_resource_forensics`，按 effect/grant/audit 执行，不用站点静态封锁代替授权。
 - 破坏性浏览器效果由 `src/shared/browser-power.ts` 枚举；live target 命中支付、凭据、访问控制等语义时必须返回 `grant_required`。

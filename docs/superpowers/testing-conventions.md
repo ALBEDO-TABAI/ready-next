@@ -87,6 +87,7 @@ e2e 默认 opt-in，使用 `READY_E2E=1` 单独运行；默认 `npm test` 和常
 | 命令 | 覆盖范围 | 默认场景 |
 |---|---|---|
 | `npm test` | 常规单元与集成测试，不跑 opt-in e2e | 本地快速回归 |
+| `npm run test:serial-performance` | 串行运行 `*.serial.test.ts(x)` 性能合同，保留真实墙钟门槛 | 对并发负载敏感的性能验收 |
 | `npm run native:check` | Electron runtime 下打开 `better-sqlite3`、创建内存库并执行 smoke query | 验证 native ABI 与 Electron 匹配 |
 | `npm run verify:native` | `rebuild:native` 后立刻跑 `native:check` | SQLite-backed 改动的最小验收门 |
 | `npm run test:a0:focus` | A0 流程门与配套焦点测试 | 改动 A0 gate / plan pairing 时 |
@@ -95,6 +96,8 @@ e2e 默认 opt-in，使用 `READY_E2E=1` 单独运行；默认 `npm test` 和常
 | `READY_E2E=1 npx tsx@^4.19.2 --test --test-concurrency=1 src/__tests__/e2e/*.e2e.ts` | opt-in 真链路 e2e | 专门验证子进程或真实依赖 |
 
 普通 Node 下的 SQLite 相关测试允许因 ABI 不匹配而 skip，但这些 skip 不能作为 SQLite-backed 验收通过的证据。涉及真实 DB、设置持久化、搜索索引或 skill task persistence 的验收必须跑 Electron native gate；`npm run dev` 和 `npm run build` 也必须在进入应用/构建前先通过该 gate。
+
+需要断言真实执行耗时的测试使用 `*.serial.test.ts(x)` 后缀；默认并行 runner 会通用排除这类文件，再由串行 runner 统一发现和执行。不得为了让并发全量测试通过而放宽产品性能门槛。
 
 ## Stage 5 covenants — test 归属与 sqlite skip 纪律
 

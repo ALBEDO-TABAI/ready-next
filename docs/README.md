@@ -1,6 +1,6 @@
 # Ready 文档导航与维护规则
 
-> 更新时间：2026-07-14
+> 更新时间：2026-07-15
 
 本文是 `docs/` 的入口。代码、`package.json` 与机器校验结果始终优先于叙述性文档；如果两者冲突，应修正文档，而不是为旧文档保留兼容实现。
 
@@ -21,6 +21,7 @@
 | --- | --- |
 | 当前代码入口、模块与依赖 | `docs/architecture/codebase-map.md` |
 | Agent、Browser、Skill、Widget 等运行时硬合同 | `docs/architecture/current-runtime-contracts.md` |
+| Ready 系统提示词实施审阅记录 | `docs/superpowers/specs/2026-07-15-ready-system-prompt-implementation-review.md` |
 | 架构原则的反例与自检 | `.claude/architectural-principles.md` |
 | 测试边界与 SQLite 验收 | `docs/superpowers/testing-conventions.md` |
 | UI 修改入口 | `UI_ADJUSTMENT_GUIDE.md` |
