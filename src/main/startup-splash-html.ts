@@ -129,7 +129,7 @@ export function createStartupSplashDataUrl(variant: StartupSplashVariant): strin
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Ready - 自媒体 AI 工作台</title>
+  <title>Ready — 通用桌面工作台</title>
   <style>
     /* 动画合同：本页所有运动只允许 CSS 合成器可驱动的 opacity/transform
        关键帧与过渡（等价"预渲染播片"）。启动期主进程与本窗 renderer 主线程

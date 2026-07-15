@@ -875,7 +875,7 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
                       访问 Ready 官方网站
                     </button>
                     <p className="text-[11px] mt-4" style={{ color: 'var(--text-light)' }}>
-                      Ready — 面向自媒体创作者的 AI 桌面工作台
+                      Ready 是由@上班摸鱼 开发的，面向知识工作者和创作者的通用桌面工作台
                       <br />
                       Built with Electron · React · TypeScript
                     </p>

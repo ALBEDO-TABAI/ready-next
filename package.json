@@ -1,9 +1,9 @@
 {
   "name": "ready",
   "version": "0.6.1",
-  "description": "Ready - 自媒体 AI 工作台",
+  "description": "Ready 是由@上班摸鱼 开发的，面向知识工作者和创作者的通用桌面工作台",
   "main": "./out/main/index.js",
-  "author": "Ready Team",
+  "author": "@上班摸鱼",
   "license": "MIT",
   "private": true,
   "type": "module",
