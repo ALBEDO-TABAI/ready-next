@@ -113,8 +113,10 @@ function execGit(root, args) {
 }
 
 function isPlanEnforced(filePath) {
-  const text = readFileSync(filePath, 'utf8').slice(0, 600)
-  return !/^---[\s\S]*?\benforce:\s*false\b[\s\S]*?---/m.test(text)
+  const text = readFileSync(filePath, 'utf8')
+  const frontmatter = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(text)?.[1]
+  if (!frontmatter) return true
+  return !/^enforce:\s*false\s*(?:#.*)?$/m.test(frontmatter)
 }
 
 function isCounterPlanFile(file) {

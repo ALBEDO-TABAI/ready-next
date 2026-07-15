@@ -67,6 +67,31 @@ test('check-plan-pairing skips historical counter material with enforce false', 
   }
 })
 
+test('check-plan-pairing reads enforce false beyond a long frontmatter prelude', () => {
+  const root = makeFixture()
+  try {
+    writePlan(root, '2026-04-30-long-demo-counterplan.md', [
+      '---',
+      'related:',
+      ...Array.from({ length: 40 }, (_, index) => `  - docs/example-${index}.md`),
+      'enforce: false',
+      '---',
+      '',
+      '# Long Demo Counterplan',
+      '',
+    ].join('\n'))
+
+    const result = checkPlanPairing({
+      root,
+      changedFiles: ['src/main/modules/agent-control/demo.ts'],
+    })
+
+    assert.equal(result.ok, true)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
 test('resolveBaseRef falls back to main merge-base when no upstream exists', () => {
   const root = makeFixture()
   try {
