@@ -37,6 +37,7 @@ test('composePersonaSystemPrompt uses the selected agent personality, tone, and 
     defaultSystemPrompt,
   )
 
+  assert.match(result, /Ready 是由@上班摸鱼 开发的，面向知识工作者和创作者的通用桌面工作台。/)
   assert.match(result, /人格正文：copywriter/)
   assert.match(result, /语气：温和直接/)
   assert.match(result, /用户档案（关于当前用户）/)
@@ -64,7 +65,7 @@ test('composePersonaSystemPrompt falls back when a persona is missing and omits 
     defaultSystemPrompt,
   )
 
-  assert.match(result, /你是 Ready 应用中的 AI 助手/)
+  assert.match(result, /Ready 是由@上班摸鱼 开发的，面向知识工作者和创作者的通用桌面工作台。/)
   assert.match(result, /用户档案（关于当前用户）/)
   assert.match(result, /语言：zh/)
   assert.doesNotMatch(result, /昵称：/)

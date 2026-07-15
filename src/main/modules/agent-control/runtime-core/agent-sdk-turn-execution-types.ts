@@ -20,6 +20,7 @@ import type {
   AgentSdkExecutionOptions,
   AgentSdkProviderDiagnostics,
   AgentSdkSession,
+  AgentSdkSkillCatalogSnapshotEntry,
   DocumentTargetGuard,
   ObservedDocumentToolTarget,
   ReadyAgentSdkRunResult,
@@ -65,6 +66,7 @@ export interface AgentSdkPreparedTurnContext {
   checkpointRequiredCapabilityGroups: string[]
   checkpointRequiredToolNames: string[]
   skillHintRelevanceForTurn: ReturnType<typeof resolveSkillHintRelevanceForTurn>
+  skillCatalogSnapshot: readonly AgentSdkSkillCatalogSnapshotEntry[]
   turnCapabilityFloors: ReturnType<typeof computeCapabilityFloors>
   toolDefinitions: ToolDefinition[]
   abortController: AbortController

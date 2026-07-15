@@ -18,6 +18,12 @@ import { buildRequestEnvelope } from './contracts/request-envelope'
 import { filterDailyMemoryForScope } from './session/daily-memory-scope-filter'
 import { buildDailyTaskIndex, type TaskIndexEntry } from './session/daily-task-index-builder'
 import { loadRulesDefaultBody } from './prompt-assets/rules-default-asset'
+import { formatLocalCalendarDate } from './system-reminders/current-date-reminder'
+import {
+  loadReadyProductFacts,
+  loadReadySystemPrompt,
+  READY_PRODUCT_BACKGROUND_PATTERN,
+} from './prompt-assets/ready-system-asset'
 import { isSafeAgentScopeId } from './knowledge/belief-card-store'
 import { MAIN_AGENT_ID } from '../repositories/agent-registry-repository'
 import type { SessionRecallCapsule } from '../../../shared/session-recall'
@@ -187,11 +193,7 @@ const DEFAULT_FILES: Record<string, string> = {
     '- 命中 Pre-Action Trigger 时，先读取规则，再执行动作。',
     '- 保存结构化 evidence、artifact、checkpoint。'
   ].join('\n'),
-  'USER.md': ['# USER.md', '- 用户偏好：简洁直接，不要废话。', '- 默认使用中文。'].join('\n'),
-  'TOOLS.md': [
-    '# TOOLS.md',
-    '- browser/document/rss/calendar/skill/system/feishu/memory 工具族可用。'
-  ].join('\n'),
+  'USER.md': ['# USER.md', '- 暂无已确认的长期用户偏好。'].join('\n'),
   'SOUL.md': ['# SOUL.md', '- 直接、清晰、务实。', '- 优先可执行结果。'].join('\n'),
   'docs/feishu-rules.md': [
     '# 飞书规则',
@@ -220,7 +222,23 @@ const DEFAULT_FILES: Record<string, string> = {
   'docs/calendar-rules.md': ['# 日程规则', '- 写入前先检查时间歧义和冲突。'].join('\n')
 }
 
-const TRIGGERS: TriggerDefinition[] = []
+const TRIGGERS: TriggerDefinition[] = [
+  {
+    id: 'ready-product-background',
+    label: 'Ready 开发与协作背景',
+    module: 'system',
+    pattern: READY_PRODUCT_BACKGROUND_PATTERN,
+    blocking: false,
+    refs: [
+      {
+        path: null,
+        title: 'Ready 开发与协作背景',
+        summary: '只在用户询问时使用的开发者、协作和关注渠道资料',
+        text: loadReadyProductFacts(),
+      },
+    ],
+  },
+]
 
 function clip(text: string, maxChars: number): string {
   return text.length <= maxChars ? text : `${text.slice(0, maxChars)}\n...[truncated]`
@@ -642,7 +660,6 @@ export class PromptAssemblyService {
     const memory = await this.loadMEMORY()
     const user = await this.loadUSER(scope.userId)
     const agents = this.readMemoryFile('AGENTS.md')
-    const tools = this.readMemoryFile('TOOLS.md')
 
     const sections = [
       formatMemorySection(
@@ -651,7 +668,6 @@ export class PromptAssemblyService {
       ),
       formatMemorySection('运行指令', agents),
       formatMemorySection('用户画像', user),
-      formatMemorySection('工具索引', tools),
       formatMemorySection('人格定义', soul)
     ]
 
@@ -681,8 +697,10 @@ export class PromptAssemblyService {
       { keepRecent: 2, maxChars: 600 }
     )
     const now = this.now()
-    const day = now.toISOString().slice(0, 10)
-    const yesterday = new Date(now.getTime() - 86400_000).toISOString().slice(0, 10)
+    const day = formatLocalCalendarDate(now)
+    const previousDay = new Date(now)
+    previousDay.setDate(previousDay.getDate() - 1)
+    const yesterday = formatLocalCalendarDate(previousDay)
     const memoryRoot = this.getMemoryRoot()
     const dayFiles = [`memory/${day}.md`, `memory/${yesterday}.md`]
     const includeDailyMemory = options.includeDailyMemory !== false
@@ -1308,10 +1326,9 @@ export class PromptAssemblyService {
 
     return {
       systemPrompt: [
-        '你是 Ready 应用中的 AI 助手，面向自媒体创作者。你擅长内容策划、文案写作、数据分析和创意建议。请使用简洁清晰的中文回答。',
+        loadReadySystemPrompt(),
         formatMemorySection('L0 常驻上下文', l0.text),
         rulesText ? formatMemorySection('运行规则', rulesText) : '',
-        '若命中 Pre-Action Trigger，必须先吸收对应规则再执行动作。'
       ].filter(Boolean).join('\n\n'),
       bootstrapMessages,
       memoryRefs,
@@ -1350,7 +1367,7 @@ export class PromptAssemblyService {
     resumableActions?: ScopeRunEventPayload['resumableActions']
     taskContinuation?: ScopeRunEventPayload['taskContinuation']
   }): void {
-    const day = this.now().toISOString().slice(0, 10)
+    const day = formatLocalCalendarDate(this.now())
     const memoryDir = join(this.getMemoryRoot(), 'memory')
     const path = join(memoryDir, `${day}.md`)
     const safeSummary = sanitizeCommandLikeContent(params.finalText).trim()

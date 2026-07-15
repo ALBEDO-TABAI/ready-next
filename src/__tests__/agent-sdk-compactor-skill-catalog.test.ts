@@ -30,7 +30,7 @@ function memory(initial: AgentInputItem[]) {
   }
 }
 
-test('durable compaction keeps only the newest accumulated skill catalog reminder', async () => {
+test('durable compaction removes every accumulated legacy skill catalog reminder', async () => {
   const call = {
     type: 'function_call',
     callId: 'c1',
@@ -59,9 +59,8 @@ test('durable compaction keeps only the newest accumulated skill catalog reminde
   const compacted = await new AgentSdkCompactor().compactMemorySession(fixture.session, 200_000)
   assert.equal(compacted.status, 'compacted')
   const serialized = JSON.stringify(fixture.read())
-  assert.equal(serialized.split(HEADER).length - 1, 1)
-  assert.match(serialized, /newest/)
-  assert.doesNotMatch(serialized, /old-1|old-2/)
+  assert.equal(serialized.split(HEADER).length - 1, 0)
+  assert.doesNotMatch(serialized, /old-1|old-2|newest/)
   assert.equal(
     fixture.read().some((item) => (item as { type?: string }).type === 'function_call'),
     true
@@ -103,6 +102,6 @@ test('unrelated system reminders that quote the catalog heading are preserved', 
   const fixture = memory([quotedHeading, catalog])
 
   const compacted = await new AgentSdkCompactor().compactMemorySession(fixture.session, 200_000)
-  assert.equal(compacted.status, 'noop')
-  assert.deepEqual(fixture.read(), [quotedHeading, catalog])
+  assert.equal(compacted.status, 'compacted')
+  assert.deepEqual(fixture.read(), [quotedHeading])
 })

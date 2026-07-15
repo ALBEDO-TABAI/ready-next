@@ -114,6 +114,9 @@ test('declare_completion_criteria 在 agent_interaction 双协议曝光面注册
   const openaiNames = getAgentInteractionOpenAITools().map((tool) => (tool.function as { name?: string })?.name)
   assert.ok(anthropicNames.includes('declare_completion_criteria'))
   assert.ok(openaiNames.includes('declare_completion_criteria'))
+  const description = getAgentInteractionAnthropicTools()
+    .find((tool) => tool.name === 'declare_completion_criteria')?.description || ''
+  assert.match(description, /单次实时查询、简单搜索/)
 })
 
 test('skill-selected 轮保留独立的 declare_completion_criteria 工具面', () => {

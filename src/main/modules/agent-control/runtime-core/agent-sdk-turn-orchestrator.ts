@@ -693,6 +693,7 @@ export class AgentSdkTurnOrchestrator {
       })
       if (preparedTurn.terminalResult) return await preparedTurn.terminalResult
       const {
+        skillCatalogSnapshot,
         skillHintRelevanceForTurn,
         authorization,
         documentTargetGuard,
@@ -771,6 +772,7 @@ export class AgentSdkTurnOrchestrator {
         checkpointRestore,
         checkpointRequiredCapabilityGroups,
         checkpointRequiredToolNames,
+        skillCatalogSnapshot,
         skillHintRelevanceForTurn,
         turnCapabilityFloors,
         toolDefinitions,

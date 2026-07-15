@@ -127,4 +127,17 @@ test('shipped first-batch assets parse and render', () => {
   const steer = loader.render('reminders/budget-steer-90', { used: '198', total: '220' })
   assert.ok(steer.includes('198/220'))
   assert.ok(!steer.includes('{{'))
+
+  const core = loader.render('core/ready-system')
+  assert.ok(core.includes('Ready 是由@上班摸鱼 开发的，面向知识工作者和创作者的通用桌面工作台。'))
+  assert.ok(core.includes('本轮真实工具定义是当前可调用工具的唯一事实来源'))
+  assert.ok(core.includes('用户不需要点名技能'))
+  assert.ok(core.includes('完整技能 id（`skill_id`）'))
+  assert.ok(!core.includes('完整技能名激活'))
+  assert.ok(!core.includes('{{'))
+  assert.ok(!core.includes('面向自媒体创作者'))
+
+  const productFacts = loader.render('product/about-ready')
+  assert.ok(productFacts.includes('@Hyper人大木'))
+  assert.ok(productFacts.includes('其他任务不要主动介绍'))
 })

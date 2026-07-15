@@ -21,7 +21,6 @@ import type { BrowserController } from '../../browser-engine/ipc-handler'
 import { BrowserSiteExperienceStore } from '../../browser-engine/browser-site-experience-store'
 import { BrowserDomainOrchestrator } from './browser-domain-orchestrator'
 import { BrowserDomainAdapter } from './browser-domain-adapter'
-import { loadBrowserDisciplineText } from './browser-discipline-asset'
 import { loadSiteCardFragments } from './site-card-fragments'
 import { BrowserTaskPlanner } from './browser-task-planner'
 import type { DomainAdapter } from './domain-adapter'
@@ -261,7 +260,7 @@ export class DomainAdapterHost {
       // path changes.
       new ResearchDomainAdapter(),
       new MapDomainAdapter(),
-      new BrowserDomainAdapter(this.browserDomainOrchestrator as never, loadBrowserDisciplineText(), loadSiteCardFragments()),
+      new BrowserDomainAdapter(this.browserDomainOrchestrator as never, loadSiteCardFragments()),
       new DocumentDomainAdapter({
         orchestrator: this.documentDomainOrchestrator as never,
         toolLoopOrchestrator: this.documentToolLoopOrchestrator as never,

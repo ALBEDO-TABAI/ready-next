@@ -25,6 +25,7 @@ import {
 } from '../main/modules/mcp/oauth'
 import { __setSkillActionToolDefsForTests } from '../main/modules/tools/skills-tools'
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
+import { enabledSdkToolNames } from './utils/sdk-tool-visibility'
 
 const fakeConfig = {
   provider: 'openai',
@@ -146,7 +147,7 @@ function createAcceptanceRun(params: {
     }),
     runAgent: params.runAgent || (async ({ tools: sdkTools, instructions, onTextDelta }) => {
       seenInstructions.push(instructions)
-      seenToolNames.push(...sdkTools.map((tool) => tool.name))
+      seenToolNames.push(...await enabledSdkToolNames(sdkTools))
       for (const step of plan) {
         const output = await invokeSdkTool(sdkTools, step)
         toolOutputs.push({ name: step.name, output })

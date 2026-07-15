@@ -121,7 +121,7 @@ test('listDomains includes all five bundled seeds, each frontmatter-valid', () =
 })
 
 test('adapter emits a per-domain site-card fragment that matches domain mention with store risk line', () => {
-  const adapter = new BrowserDomainAdapter({} as never, '', [
+  const adapter = new BrowserDomainAdapter({} as never, [
     { domain: 'xiaohongshu.com', aliases: ['xiaohongshu', '小红书'], text: '[风险等级: high（以代码 store 为准）]\n反爬经验' },
   ])
   const frags = adapter.contributePromptFragment() ?? []

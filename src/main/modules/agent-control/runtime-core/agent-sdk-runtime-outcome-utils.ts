@@ -40,6 +40,45 @@ export function readTextField(record: Record<string, unknown>, key: string): str
   return text || null
 }
 
+const LOCAL_DOCUMENT_SOURCE_READ_TOOL_NAMES = new Set([
+  'file_read_excerpt',
+  'document_read_section'
+])
+
+export function isLocalDocumentSourceReadTool(toolName: string): boolean {
+  return LOCAL_DOCUMENT_SOURCE_READ_TOOL_NAMES.has(toolName)
+}
+
+export function isLocalDocumentSourceReadFailure(toolName: string, text: string): boolean {
+  if (!isLocalDocumentSourceReadTool(toolName)) return false
+  const normalized = String(text || '').trim()
+  if (!normalized) return false
+  return (
+    /^(?:Error:|Document action failed:)/i.test(normalized) ||
+    /(?:ok["']?\s*:\s*false|未找到章节|没有可读取|无法读取|读取失败|不在当前工作区|工作区索引|not in index|outside any known workspace|path_missing|not found|找不到|未找到)/i.test(
+      normalized
+    )
+  )
+}
+
+export function buildFileReadExcerptCheckpoint(output: ToolExecutionOutput): string | null {
+  const normalized = normalizeToolExecutionOutput(output)
+  const data = readStructuredResultRecord(normalized)
+  if (data.ok === false) return null
+  const content = readTextField(data, 'content')
+  if (!content) return null
+  const path = readTextField(data, 'path')
+  const excerpt = content.length > 1600 ? `${content.slice(0, 1600).trimEnd()}...` : content
+  return [
+    '我已经读到相关文件，但模型在工具轮次内没有收口；先把已读到的关键片段给你，避免变成发送失败。',
+    path ? `文件：${path}` : '',
+    '',
+    excerpt
+  ]
+    .filter((line) => line !== '')
+    .join('\n')
+}
+
 export function mapToolFailureClose(
   results: Array<{
     id: string

@@ -3,6 +3,10 @@ import {
   CONTEXT_SOFT_RATIO,
   estimateInputItemTokens,
 } from '../../../../shared/context-budget-types'
+import {
+  CATALOG_HEADER as SKILL_CATALOG_HEADER,
+  SKILL_CATALOG_REMINDER_MARKER,
+} from '../system-reminders/skill-catalog-reminder'
 
 export interface CompactOptions {
   windowTokens: number
@@ -40,6 +44,28 @@ const RESULT_CALL_TYPES = Object.fromEntries(
   Object.entries(CALL_RESULT_TYPES).map(([callType, resultType]) => [resultType, callType]),
 )
 
+function isLegacySkillCatalogReminderItem(item: AgentInputItem): boolean {
+  if (!item || typeof item !== 'object') return false
+  const record = item as Record<string, unknown>
+  if (record.role !== 'system') return false
+  try {
+    const content = JSON.stringify(record.content ?? '')
+    return content.includes(SKILL_CATALOG_REMINDER_MARKER)
+      && content.includes(SKILL_CATALOG_HEADER)
+  } catch {
+    // silent-catch: non-serializable content cannot match the versioned legacy catalog marker.
+    return false
+  }
+}
+
+export function stripLegacySkillCatalogReminderItems(items: AgentInputItem[]): {
+  items: AgentInputItem[]
+  droppedItems: number
+} {
+  const stripped = items.filter((item) => !isLegacySkillCatalogReminderItem(item))
+  return { items: stripped, droppedItems: items.length - stripped.length }
+}
+
 export function compactAgentInputItems(
   items: AgentInputItem[],
   options: CompactOptions,
@@ -50,26 +76,29 @@ export function compactAgentInputItems(
     DEFAULT_MAX_TOOL_RESULT_TOKENS,
   )
   const beforeTokens = estimateInputItemTokens(items)
+  const legacyCatalogs = stripLegacySkillCatalogReminderItems(items)
+  const sourceItems = legacyCatalogs.items
+  const sourceTokens = estimateInputItemTokens(sourceItems)
 
   // 2026-07-03 真机回归 R1 根因修复：单结果超限截断只允许在真实上下文压力
   // 下发生。此前无条件执行——59k/200k（远低于 0.8 软线）时也把两个 ~27k 的
   // page_map 读回执整体替换成占位符，模型在关键动作后拿到信息真空，直接
   // 盲宣告完成。低于软线时原样放行；到达软线（或 force）才进入截断+压缩。
-  if (!options.force && beforeTokens <= windowTokens * CONTEXT_SOFT_RATIO) {
+  if (!options.force && sourceTokens <= windowTokens * CONTEXT_SOFT_RATIO) {
     return {
-      items,
-      compacted: false,
+      items: sourceItems,
+      compacted: legacyCatalogs.droppedItems > 0,
       report: {
         beforeTokens,
-        afterTokens: beforeTokens,
-        droppedItems: 0,
+        afterTokens: sourceTokens,
+        droppedItems: legacyCatalogs.droppedItems,
         truncatedToolResults: 0,
         summarized: false,
       },
     }
   }
 
-  const truncated = truncateOversizedToolResults(items, maxToolResultTokens)
+  const truncated = truncateOversizedToolResults(sourceItems, maxToolResultTokens)
 
   const workingItems = truncated.items
   const afterTruncateTokens = estimateInputItemTokens(workingItems)
@@ -77,7 +106,7 @@ export function compactAgentInputItems(
     return buildResult({
       items: workingItems,
       beforeTokens,
-      droppedItems: 0,
+      droppedItems: legacyCatalogs.droppedItems,
       truncatedToolResults: truncated.truncatedToolResults,
       summarized: false,
     })
@@ -97,7 +126,7 @@ export function compactAgentInputItems(
     return buildResult({
       items: workingItems,
       beforeTokens,
-      droppedItems: 0,
+      droppedItems: legacyCatalogs.droppedItems,
       truncatedToolResults: truncated.truncatedToolResults,
       summarized: false,
     })
@@ -111,7 +140,7 @@ export function compactAgentInputItems(
       tailStart,
       summary: resolvedSummary,
       beforeTokens,
-      droppedItems: droppedItems.length,
+      droppedItems: legacyCatalogs.droppedItems + droppedItems.length,
       truncatedToolResults: truncated.truncatedToolResults,
     }))
   }
@@ -122,15 +151,19 @@ export function compactAgentInputItems(
     tailStart,
     summary,
     beforeTokens,
-    droppedItems: droppedItems.length,
+    droppedItems: legacyCatalogs.droppedItems + droppedItems.length,
     truncatedToolResults: truncated.truncatedToolResults,
   })
 }
 
 export function normalizeSessionSnapshotForSeed(items: AgentInputItem[]): AgentInputItem[] {
-  const normalized = applyToolPairIntegrity(items, items.map(() => true))
-  if (normalized.droppedItems === 0) return items
-  return items.filter((_, index) => normalized.keep[index])
+  const legacyCatalogs = stripLegacySkillCatalogReminderItems(items)
+  const normalized = applyToolPairIntegrity(
+    legacyCatalogs.items,
+    legacyCatalogs.items.map(() => true),
+  )
+  if (legacyCatalogs.droppedItems === 0 && normalized.droppedItems === 0) return items
+  return legacyCatalogs.items.filter((_, index) => normalized.keep[index])
 }
 
 function buildCompactedResult(input: {

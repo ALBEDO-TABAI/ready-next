@@ -54,6 +54,7 @@ import type {
   AgentSdkBudgetCheckpointRestore,
   AgentSdkExecutionOptions,
   AgentSdkProviderDiagnostics,
+  AgentSdkSkillCatalogSnapshotEntry,
   DocumentTargetGuard
 } from './agent-sdk-types'
 import type { TurnTerminalReason } from './turn-frame'
@@ -97,6 +98,7 @@ export type AgentSdkTurnPreparationResult =
   | {
       terminalResult: null
       documentTargetHydration: Promise<void> | null
+      skillCatalogSnapshot: AgentSdkSkillCatalogSnapshotEntry[]
       skillHintRelevanceForTurn: ReturnType<typeof resolveSkillHintRelevanceForTurn>
       authorization: SkillToolAuthorization
       documentTargetGuard: DocumentTargetGuard | null
@@ -160,16 +162,26 @@ export function prepareAgentSdkTurn(
     localSendImTurn,
     skillHintRelevanceForTurn.relevant
   )
+  let skillCatalogSnapshot: AgentSdkSkillCatalogSnapshotEntry[] = []
   // R-XREAD — the live SDK path owns a lightweight active-frame context,
   // not the legacy TurnFrame resolver. Seed it here from typed envelope
   // siblings plus this exact task's prior output evidence.
   try {
     const manager = getSkillsRuntimeManager()
+    const skills = manager.listSkills()
+    skillCatalogSnapshot = skills
+      .filter((skill) => skill && skill.id && skill.name && skill.manifestValid !== false)
+      .map((skill) => ({
+        id: String(skill.id),
+        name: String(skill.name),
+        description: String(skill.description || ''),
+        managedPath: skill.managedPath
+      }))
     const projection = host.runtime?.getTaskProjectionStoreForFinalize?.().get(taskId) ?? null
     const roots = deriveChainedSkillReadRoots({
       selectedSkillId: authorization.mode === 'selected' ? authorization.skillId : null,
       referencedSkillNames: readSkillReferenceNames(effectiveExecutionOptions?.requestEnvelope),
-      skills: manager.listSkills(),
+      skills,
       outputsRoot: manager.getRuntimeInfo().outputsRoot,
       taskProjection: projection
     })
@@ -255,17 +267,8 @@ export function prepareAgentSdkTurn(
     recentBatchCollectionIntent,
     localSendImIntent: localSendImTurn,
     requestEnvelope: effectiveExecutionOptions?.requestEnvelope,
-    // P2-2 — gate use_skill exposure on a non-empty L1 catalog (same source as the catalog reminder).
-    skillCatalogAvailable: (() => {
-      try {
-        return getSkillsRuntimeManager()
-          .listSkills()
-          .some((skill) => skill && skill.id && skill.manifestValid !== false)
-      } catch {
-        // silent-catch: skills runtime not initialized (e.g. non-native test) → no catalog, no use_skill.
-        return false
-      }
-    })()
+    // P2-2 — gate use_skill exposure on the exact per-turn catalog snapshot later shown to the model.
+    skillCatalogAvailable: skillCatalogSnapshot.length > 0
   })
   const preNarrowingToolDefinitions = toolDefinitions
   if (
@@ -377,6 +380,7 @@ export function prepareAgentSdkTurn(
   return {
     terminalResult: null,
     documentTargetHydration,
+    skillCatalogSnapshot,
     skillHintRelevanceForTurn,
     authorization,
     documentTargetGuard,

@@ -1,42 +1,7 @@
 import type { AgentInputItem, MemorySession } from '@openai/agents'
 
 import { compactAgentInputItems } from '../compaction/compact-agent-input'
-import { estimateInputItemTokens } from '../../../../shared/context-budget-types'
 import type { AgentSdkSession, CompactSessionResult } from './agent-sdk-types'
-// W3 — single source of truth: dedup must match the live catalog header verbatim,
-// otherwise this becomes silent dead code if the reminder text ever changes.
-import {
-  CATALOG_HEADER as SKILL_CATALOG_HEADER,
-  SKILL_CATALOG_REMINDER_MARKER
-} from '../system-reminders/skill-catalog-reminder'
-
-function isSkillCatalogReminderItem(item: AgentInputItem): boolean {
-  if (!item || typeof item !== 'object') return false
-  const record = item as Record<string, unknown>
-  if (record.role !== 'system') return false
-  try {
-    const content = JSON.stringify(record.content ?? '')
-    return content.includes(SKILL_CATALOG_REMINDER_MARKER) && content.includes(SKILL_CATALOG_HEADER)
-  } catch {
-    // silent-catch: non-serializable content (e.g. circular) is never a catalog reminder.
-    return false
-  }
-}
-
-export function dedupeSkillCatalogReminderItems(items: AgentInputItem[]): {
-  items: AgentInputItem[]
-  droppedItems: number
-} {
-  let latest = -1
-  for (let index = 0; index < items.length; index += 1) {
-    if (isSkillCatalogReminderItem(items[index])) latest = index
-  }
-  if (latest < 0) return { items, droppedItems: 0 }
-  const deduped = items.filter(
-    (item, index) => index === latest || !isSkillCatalogReminderItem(item)
-  )
-  return { items: deduped, droppedItems: items.length - deduped.length }
-}
 
 /**
  * Pure session compaction primitive, extracted from AgentSdkRuntime (V3 Phase 2).
@@ -55,19 +20,14 @@ export class AgentSdkCompactor {
   ): Promise<CompactSessionResult> {
     const sourceItems = baseItems ?? (await sdkSession.getItems())
     const result = await compactAgentInputItems(sourceItems, { windowTokens, force })
-    const catalogDeduped = dedupeSkillCatalogReminderItems(result.items)
-    if (!result.compacted && catalogDeduped.droppedItems === 0) {
+    if (!result.compacted) {
       return { status: 'noop', report: result.report }
     }
     await sdkSession.clearSession()
-    await sdkSession.addItems(catalogDeduped.items)
+    await sdkSession.addItems(result.items)
     return {
       status: 'compacted',
-      report: {
-        ...result.report,
-        afterTokens: estimateInputItemTokens(catalogDeduped.items),
-        droppedItems: result.report.droppedItems + catalogDeduped.droppedItems
-      }
+      report: result.report
     }
   }
 

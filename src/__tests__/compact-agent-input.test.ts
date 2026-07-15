@@ -6,6 +6,7 @@ import {
   compactAgentInputItems,
   normalizeSessionSnapshotForSeed,
 } from '../main/modules/agent-control/compaction/compact-agent-input'
+import { buildSkillCatalogText } from '../main/modules/agent-control/system-reminders/skill-catalog-reminder'
 
 test('compactAgentInputItems keeps complete call/result pairs in the retained tail', async () => {
   const result = await compactAgentInputItems([
@@ -138,8 +139,41 @@ test('normalizeSessionSnapshotForSeed preserves retained request text while drop
   assert.ok(JSON.stringify(normalized).includes(latestRequest))
 })
 
+test('legacy skill catalogs are removed below the soft limit and from restored snapshot seeds', async () => {
+  const catalog = systemMessage(
+    buildSkillCatalogText([{ id: 'retired', name: 'Retired', description: 'no longer installed' }]),
+  )
+  const user = userMessage('keep the current request')
+
+  const compacted = await compactAgentInputItems([catalog, user], { windowTokens: 200_000 })
+  assert.equal(compacted.compacted, true)
+  assert.equal(compacted.report.droppedItems, 1)
+  assert.deepEqual(compacted.items, [user])
+  assert.deepEqual(normalizeSessionSnapshotForSeed([catalog, user]), [user])
+})
+
+test('forced compaction persists legacy catalog removal even when every remaining item is retained', async () => {
+  const catalog = systemMessage(
+    buildSkillCatalogText([{ id: 'retired', name: 'Retired', description: 'no longer installed' }]),
+  )
+  const user = userMessage('keep the current request')
+
+  const compacted = await compactAgentInputItems([catalog, user], {
+    windowTokens: 200_000,
+    keepTailCount: 8,
+    force: true,
+  })
+  assert.equal(compacted.compacted, true)
+  assert.equal(compacted.report.droppedItems, 1)
+  assert.deepEqual(compacted.items, [user])
+})
+
 function userMessage(content: string): AgentInputItem {
   return { role: 'user', content } as AgentInputItem
+}
+
+function systemMessage(content: string): AgentInputItem {
+  return { role: 'system', content } as AgentInputItem
 }
 
 function functionCall(callId: string): AgentInputItem {

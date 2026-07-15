@@ -9,7 +9,7 @@ const root = join(import.meta.dirname, '..')
 // TOOL_SYSTEM_PROMPT 的 observe-probe-act 句子随文件消亡。live 的 observe-probe-act
 // 纪律锚点 = browser-tool-catalog.ts 的工具描述（read_page_map 优先 / probe 需
 // fresh generation / act 带 target_id 且动作后复查 / 旧动作标 Fallback），交互
-// 纪律资产 = assets/prompts/browser/discipline.md（经 BrowserDomainAdapter 注入）。
+// 纪律资产 = assets/prompts/browser/discipline.md（最终 Browser 工具面已确定后注入本轮 instructions）。
 test('browser tool catalog keeps observe-probe-act discipline and demotes legacy actions', () => {
   const source = readFileSync(join(root, 'main/modules/tools/browser-tool-catalog.ts'), 'utf8')
 

@@ -43,9 +43,11 @@ import {
 } from './agent-sdk-input-context-utils'
 import { readStructuredResultRecord } from './agent-sdk-provider-utils'
 import {
+  buildFileReadExcerptCheckpoint,
   buildTerminalFailureProjectionPatch,
   extractLongSkillCheckpoint,
-  readTextField
+  isLocalDocumentSourceReadFailure,
+  isLocalDocumentSourceReadTool
 } from './agent-sdk-runtime-outcome-utils'
 import {
   resolveSkillHintRelevanceForTurn,
@@ -82,42 +84,6 @@ import {
   resolveActiveSkillAllowedTools,
 } from '../domain-adapters/run-capability-controller'
 
-const LOCAL_DOCUMENT_SOURCE_READ_TOOL_NAMES = new Set([
-  'file_read_excerpt',
-  'document_read_section'
-])
-
-function isLocalDocumentSourceReadFailureText(text: string): boolean {
-  const normalized = String(text || '').trim()
-  if (!normalized) return false
-  return (
-    /^(?:Error:|Document action failed:)/i.test(normalized) ||
-    /(?:ok["']?\s*:\s*false|未找到章节|没有可读取|无法读取|读取失败|不在当前工作区|工作区索引|not in index|outside any known workspace|path_missing|not found|找不到|未找到)/i.test(
-      normalized
-    )
-  )
-}
-
-function buildFileReadExcerptCheckpoint(
-  output: ReturnType<typeof normalizeToolExecutionOutput>
-): string | null {
-  const normalized = normalizeToolExecutionOutput(output)
-  const data = readStructuredResultRecord(normalized)
-  if (data.ok === false) return null
-  const content = readTextField(data, 'content')
-  if (!content) return null
-  const path = readTextField(data, 'path')
-  const excerpt = content.length > 1600 ? `${content.slice(0, 1600).trimEnd()}...` : content
-  return [
-    '我已经读到相关文件，但模型在工具轮次内没有收口；先把已读到的关键片段给你，避免变成发送失败。',
-    path ? `文件：${path}` : '',
-    '',
-    excerpt
-  ]
-    .filter((line) => line !== '')
-    .join('\n')
-}
-
 export type { AgentSdkPreparedTurnContext, AgentSdkPreparedTurnState } from './agent-sdk-turn-execution-types'
 
 export async function executeAgentSdkPreparedTurn(
@@ -136,6 +102,7 @@ export async function executeAgentSdkPreparedTurn(
     checkpointRestore,
     checkpointRequiredCapabilityGroups,
     checkpointRequiredToolNames,
+    skillCatalogSnapshot,
     skillHintRelevanceForTurn,
     turnCapabilityFloors,
     toolDefinitions,
@@ -282,15 +249,6 @@ export async function executeAgentSdkPreparedTurn(
     )
     const hasMapAmbiguityQuestionTools = toolDefinitions.some(
       (definition) => definition.name === 'map_plan_route'
-    )
-    const hasBrowserTools = toolDefinitions.some((definition) =>
-      definition.name.startsWith('browser_')
-    )
-    const hasBrowserVisibleCollectTool = toolDefinitions.some(
-      (definition) => definition.name === 'browser_visible_collect'
-    )
-    const hasBrowserPowerTools = toolDefinitions.some((definition) =>
-      definition.name.startsWith('browser_power_')
     )
     const allowedToolNames = toolDefinitions.map((definition) => definition.name)
     appendToolCapabilityLog(
@@ -450,9 +408,7 @@ export async function executeAgentSdkPreparedTurn(
         host.learnSiteCardFromToolFailure(toolName, argsQueue?.shift(), normalized)
         const structuredData = readStructuredResultRecord(normalized)
         const documentToolFailed = isDocumentToolFailure(normalized)
-        const sourceReadFailed =
-          LOCAL_DOCUMENT_SOURCE_READ_TOOL_NAMES.has(toolName) &&
-          isLocalDocumentSourceReadFailureText(normalized.text)
+        const sourceReadFailed = isLocalDocumentSourceReadFailure(toolName, normalized.text)
         const structuredStatus =
           typeof structuredData.status === 'string'
             ? structuredData.status.trim().toLowerCase()
@@ -471,7 +427,7 @@ export async function executeAgentSdkPreparedTurn(
           hasSuccessfulToolProgress = true
           deliveryDeadline.noteProgress('tool_result')
         }
-        if (LOCAL_DOCUMENT_SOURCE_READ_TOOL_NAMES.has(toolName) && !toolReportedFailure) {
+        if (isLocalDocumentSourceReadTool(toolName) && !toolReportedFailure) {
           hasSuccessfulLocalDocumentSourceRead = true
           hasSuccessfulLocalDocumentSourceReadForRecovery = true
         }
@@ -694,15 +650,13 @@ export async function executeAgentSdkPreparedTurn(
       toolBridgeRuntimeContext,
       hasVeaPipelineTool,
       hasMapAmbiguityQuestionTools,
-      hasBrowserTools,
-      hasBrowserVisibleCollectTool,
-      hasBrowserPowerTools,
       skillContextInstruction,
       documentTargetGuard,
       requiresLocalDocumentExcerpt,
       preferCurrentDocumentRead,
       capabilities,
       authorization,
+      skillCatalogSnapshot,
       emitOutput,
       finalizeEarlyReturn
     })

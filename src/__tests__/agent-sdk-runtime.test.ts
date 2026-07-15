@@ -39,6 +39,7 @@ import {
   type AgentMetricEvent
 } from '../main/modules/agent-control/metrics'
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
+import { enabledSdkToolNames, enabledSdkTools } from './utils/sdk-tool-visibility'
 
 const fakeConfig = {
   provider: 'openai',
@@ -86,23 +87,6 @@ function createRuntime(deps: Partial<AgentSdkRuntimeDeps>): AgentSdkRuntime {
     domainAdapters: [],
     ...deps
   })
-}
-
-async function enabledSdkTools<T extends {
-  name: string
-  isEnabled?: (context?: unknown) => boolean | Promise<boolean>
-}>(tools: T[]): Promise<T[]> {
-  const enabled: T[] = []
-  for (const tool of tools) {
-    if (!tool.isEnabled || await tool.isEnabled()) enabled.push(tool)
-  }
-  return enabled
-}
-
-async function enabledSdkToolNames(
-  tools: Array<{ name: string; isEnabled?: (context?: unknown) => boolean | Promise<boolean> }>
-): Promise<string[]> {
-  return (await enabledSdkTools(tools)).map((tool) => tool.name)
 }
 
 function attachMemoryRunMeta(runtime: AgentSdkRuntime): Map<string, Record<string, unknown>> {
@@ -5931,7 +5915,7 @@ test('agent sdk runtime preserves browser tools when an explicit reference skill
       assert.equal(seenToolNames.includes(expected), true, `${expected} should remain visible`)
     }
     assert.match(seenInstructions, /Power 网页操作配方/)
-    assert.match(seenInstructions, /页面结构探测/)
+    assert.match(seenInstructions, /探测页面结构/)
     assert.match(seenInstructions, /读回验证/)
     assert.match(seenInstructions, /viewport=0/)
     assert.match(seenInstructions, /Page\.getFrameTree/)

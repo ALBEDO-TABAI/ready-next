@@ -36,7 +36,7 @@ const DECLARE_COMPLETION_CRITERIA_DESCRIPTION = [
   '- 每条必须是可验证的一句话，不写抱负式空话（「做到最好」不合格）。',
   '- 系统模板标准不可被覆盖或降低；你的声明只能补充。',
   '',
-  '不要使用的场景：direct_answer / 闲聊类回合；标准与系统模板完全重合时（不必重复声明）。',
+  '不要使用的场景：direct_answer / 闲聊类回合；单次实时查询、简单搜索或只需在对话中给出结果的调研；标准与系统模板完全重合时（不必重复声明）。',
 ].join('\n')
 
 const DECLARE_COMPLETION_CRITERIA_INPUT_SCHEMA = {

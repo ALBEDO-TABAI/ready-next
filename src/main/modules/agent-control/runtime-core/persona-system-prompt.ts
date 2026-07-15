@@ -27,9 +27,11 @@ export async function composePersonaSystemPrompt(
   fallback: () => string,
 ): Promise<string> {
   const personality = await personalityRepo.getPersonality(agentName)
-  const personaLines: string[] = []
+  const personaLines: string[] = [fallback()]
   const personalityText = normalizeText(personality?.personalityText)
-  personaLines.push(personalityText || fallback())
+  if (personalityText) {
+    personaLines.push(['当前 Agent 人格：', personalityText].join('\n'))
+  }
 
   const tone = normalizeText(personality?.tone)
   if (tone) {

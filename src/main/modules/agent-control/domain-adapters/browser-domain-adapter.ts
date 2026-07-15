@@ -1,6 +1,5 @@
 import type { BrowserExecutionPreparation, BrowserToolLoopState } from './browser-domain-orchestrator'
 import type { DomainAdapter, DomainAdapterApplyResult, DomainAdapterDispatchResult, DomainAdapterPrepareResult } from './domain-adapter'
-import { resolveBrowserCollectionIntent } from '../../../../shared/browser-collection-intent'
 import { resolveBrowserWorkflowIntent } from '../../../../shared/browser-workflow-intent'
 
 interface BrowserDomainOrchestratorLike {
@@ -151,7 +150,6 @@ export class BrowserDomainAdapter implements DomainAdapter {
 
   constructor(
     private readonly orchestrator: BrowserDomainOrchestratorLike,
-    private readonly disciplineText: string = '',
     private readonly siteCards: ReadonlyArray<{ domain: string; aliases: string[]; text: string }> = [],
   ) {}
 
@@ -186,32 +184,8 @@ export class BrowserDomainAdapter implements DomainAdapter {
         ],
       }
     })
-    const disciplineFragment = this.disciplineText
-      ? [
-          {
-            // EP1-B2 — browser interaction discipline (versioned X3 asset,
-            // injected inline). Matches browser intent (match never assumes a
-            // route — prompt assembly runs before route resolution).
-            id: 'browser-discipline',
-            label: '浏览器交互纪律',
-            priority: 70,
-            matches: ({ userText }: { userText: string }) =>
-              matchesBrowserPromptTrigger(userText) || resolveBrowserCollectionIntent(userText),
-            blocking: false,
-            refs: [
-              {
-                path: null,
-                title: '浏览器交互纪律',
-                summary: '通道决策 / 五步配方 / 定位器优先级 / 错误恢复 / token 经济 / 风险站点',
-                text: this.disciplineText,
-              },
-            ],
-          },
-        ]
-      : []
     return [
       ...siteCardFragments,
-      ...disciplineFragment,
       {
         // Collection-workflow guidance: when the user wants to collect a
         // blogger's notes (每篇建文件夹下载图片), tell the agent to dispatch

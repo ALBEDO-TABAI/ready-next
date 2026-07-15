@@ -40,6 +40,13 @@ export interface AgentSdkSession {
   lastUsageTokens: number
 }
 
+export interface AgentSdkSkillCatalogSnapshotEntry {
+  id: string
+  name: string
+  description: string
+  managedPath?: string
+}
+
 export interface RunHandle {
   runId: string
   runGeneration: number

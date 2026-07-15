@@ -17,6 +17,7 @@ import type {
 } from '../contracts/run-contracts'
 import { TAG_FORGE_FOLDER_RUNTIME_TOOL_NAMES } from '../domain-adapters/capability-floors'
 import { isRetryOnlyTurn } from '../skills/skill-detection-inputs'
+import { loadReadySystemPrompt } from '../prompt-assets/ready-system-asset'
 import type { SkillToolAuthorization } from '../skills/skill-tool-authorization'
 import { buildSelectedSkillToolAuthorization } from '../skills/skill-tool-authorization'
 import {
@@ -254,7 +255,7 @@ export function supplementAuthorizedSkillPrimitiveDefinitions(
 // ── Group C: Message/text utilities (lines 604-710) ──
 
 export function defaultSystemPrompt(): string {
-  return '你是 Ready 应用中的 AI 助手，面向自媒体创作者。你擅长内容策划、文案写作、数据分析和创意建议。请使用简洁清晰的中文回答。'
+  return loadReadySystemPrompt()
 }
 
 export function resolveSourceMessageProvenance(params: {

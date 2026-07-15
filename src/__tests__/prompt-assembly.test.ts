@@ -63,6 +63,7 @@ describe('PromptAssemblyService', () => {
     mkdirSync(join(root, 'docs'), { recursive: true })
     mkdirSync(join(root, 'memory'), { recursive: true })
     writeFileSync(join(root, 'memory', '2026-03-08.md'), '## daily\n- drafted a script', 'utf8')
+    writeFileSync(join(root, 'TOOLS.md'), '# TOOLS.md\n- 所有工具族始终可用。', 'utf8')
 
     const service = new PromptAssemblyService({
       getMemoryRoot: () => root,
@@ -80,6 +81,10 @@ describe('PromptAssemblyService', () => {
     })
 
     assert.match(result.systemPrompt, /L0 常驻上下文/)
+    assert.match(result.systemPrompt, /Ready 是由@上班摸鱼 开发的，面向知识工作者和创作者的通用桌面工作台。/)
+    assert.doesNotMatch(result.systemPrompt, /所有工具族始终可用/)
+    assert.doesNotMatch(result.systemPrompt, /工具索引/)
+    assert.doesNotMatch(result.systemPrompt, /@Hyper人大木/)
     assert.strictEqual(result.triggerHits.length, 0)
     assert.ok(result.memoryRefs.some((item) => item.sourceType === 'resident_agent'))
     assert.ok(result.memoryRefs.some((item) => item.sourceType === 'resident_user'))
@@ -88,6 +93,56 @@ describe('PromptAssemblyService', () => {
     assert.ok(!result.memoryRefs.some((item) => item.title === '工具索引'))
     assert.ok(!result.memoryRefs.some((item) => item.title === '人格定义'))
     assert.ok(result.bootstrapMessages.some((item) => item.includes('L1 会话上下文')))
+
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  it('loads Ready development background only for a relevant product question', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'ready-prompt-product-background-'))
+    mkdirSync(join(root, 'memory'), { recursive: true })
+    const service = new PromptAssemblyService({
+      getMemoryRoot: () => root,
+      getScopeMessages: () => [],
+      now: () => new Date('2026-03-08T10:00:00.000Z')
+    })
+
+    const unrelated = await service.buildForScopedRun({
+      scope: createScope(),
+      message: '请帮我把这份提纲整理得更清楚',
+      coordinators: []
+    })
+    assert.equal(countTrigger(unrelated, 'ready-product-background'), 0)
+    assert.doesNotMatch(unrelated.bootstrapMessages.join('\n'), /@Hyper人大木/)
+
+    for (const message of [
+      '我今天想上班摸鱼，帮我把这句话改得更幽默',
+      '我喜欢 @Hyper人大木 的笔记，帮我分析风格',
+      'Hyper人大木是谁？',
+      '请介绍 Ready 的日历怎么用',
+      'Ready 的团队协作功能怎么用？',
+      'Ready 文档里的作者字段在哪里改？',
+      'Ready 怎么协作编辑文档？',
+      'Ready 能导入小红书链接吗？',
+      'I already follow @Hyper人大木 for writing notes.',
+    ]) {
+      const negative = await service.buildForScopedRun({
+        scope: createScope(),
+        message,
+        coordinators: []
+      })
+      assert.equal(countTrigger(negative, 'ready-product-background'), 0, message)
+      assert.doesNotMatch(negative.bootstrapMessages.join('\n'), /@Hyper人大木/, message)
+    }
+
+    const productQuestion = await service.buildForScopedRun({
+      scope: createScope(),
+      message: 'Ready 是谁开发的？在哪里关注后续进展？',
+      coordinators: []
+    })
+    assert.equal(countTrigger(productQuestion, 'ready-product-background'), 1)
+    assert.match(productQuestion.bootstrapMessages.join('\n'), /“上班摸鱼”是开发者在小红书使用的 ID/)
+    assert.match(productQuestion.bootstrapMessages.join('\n'), /@Hyper人大木/)
+    assert.match(productQuestion.bootstrapMessages.join('\n'), /不是对具体功能或时间表的承诺/)
 
     rmSync(root, { recursive: true, force: true })
   })
