@@ -1,4 +1,5 @@
 import {
+  ExternalLink,
   X,
   FileText,
   Image,
@@ -9,10 +10,13 @@ import {
   Puzzle,
   Pen,
   MessageSquareQuote,
-  Folder
+  Folder,
+  FolderOpen
 } from 'lucide-react'
+import { useEffect } from 'react'
 import type { ChatAttachment, AttachmentPreviewState } from '../../../../stores/useAgent'
 import { toLocalFileUrl } from '../../../../utils/dragDrop'
+import { LiquidSurfaceLayer } from '../../../ui/liquid-glass/LiquidFloatingPanel'
 
 export function AttachmentIcon({ attachment, size = 16 }: { attachment: ChatAttachment; size?: number }) {
   const style = { width: size, height: size }
@@ -68,103 +72,72 @@ export function AttachmentPreviewModal({
   onReveal,
   onOpen
 }: AttachmentPreviewModalProps) {
+  useEffect(() => {
+    if (!preview) return
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [onClose, preview])
+
   if (!preview) return null
   return (
     <div
-      style={{
-        position: 'absolute',
-        inset: 0,
-        background: 'rgba(10, 14, 22, 0.42)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: 20,
-        zIndex: 40
-      }}
+      className="attachment-preview-overlay"
       onClick={onClose}
+      role="presentation"
     >
       <div
-        className="glass-surface-floating"
-        style={{
-          width: 'min(760px, 100%)',
-          maxHeight: '82%',
-          overflow: 'hidden',
-          borderRadius: 16,
-          border: '1px solid var(--border-default)',
-          background: 'color-mix(in srgb, var(--surface-floating-bg) 32%, transparent)',
-          display: 'flex',
-          flexDirection: 'column'
-        }}
+        className="attachment-preview-panel ready-app-liquid-panel"
         onClick={(event) => event.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-label="附件预览"
       >
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: 12,
-            padding: '14px 16px',
-            borderBottom: '1px solid var(--border-default)'
-          }}
-        >
-          <div style={{ minWidth: 0 }}>
-            <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-title)' }}>
-              {preview.attachment.name}
-            </div>
-            <div style={{ fontSize: 11, color: 'var(--text-gray)', marginTop: 2 }}>
-              {preview.attachment.path}
-            </div>
-          </div>
-          <div className="flex items-center" style={{ gap: 8 }}>
+        <LiquidSurfaceLayer
+          className="ready-liquid-popover__lens ready-app-liquid-panel__lens"
+          radius={16}
+          blur={7}
+          saturation={1.14}
+          brightness={1.05}
+          contrast={0.86}
+        />
+        <div className="attachment-preview-toolbar" aria-label="预览操作">
             <button
               type="button"
+              className="attachment-preview-action"
               onClick={() => {
                 void onReveal(preview.attachment)
               }}
-              style={{
-                padding: '8px 10px',
-                borderRadius: 8,
-                border: '1px solid var(--border-default)',
-                fontSize: 12,
-                color: 'var(--text-body)'
-              }}
+              title="在 Finder 中显示"
+              aria-label="在 Finder 中显示"
             >
-              在 Finder 中显示
+              <FolderOpen aria-hidden="true" />
             </button>
             <button
               type="button"
+              className="attachment-preview-action"
               onClick={() => {
                 void onOpen(preview.attachment)
               }}
-              style={{
-                padding: '8px 10px',
-                borderRadius: 8,
-                border: '1px solid var(--border-default)',
-                fontSize: 12,
-                color: 'var(--text-body)'
-              }}
+              title="系统打开"
+              aria-label="系统打开"
             >
-              系统打开
+              <ExternalLink aria-hidden="true" />
             </button>
             <button
               type="button"
+              className="attachment-preview-action"
               onClick={onClose}
-              style={{
-                width: 30,
-                height: 30,
-                borderRadius: 16,
-                border: '1px solid var(--border-default)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center'
-              }}
+              title="关闭"
+              aria-label="关闭"
             >
-              <X style={{ width: 14, height: 14 }} strokeWidth={2} />
+              <X aria-hidden="true" />
             </button>
-          </div>
         </div>
 
-        <div style={{ padding: 16, overflow: 'auto' }}>
+        <div className="attachment-preview-content">
           {loading && (
             <div style={{ fontSize: 12, color: 'var(--text-gray)' }}>正在读取附件内容…</div>
           )}
@@ -173,12 +146,7 @@ export function AttachmentPreviewModal({
             <img
               src={toLocalFileUrl(preview.attachment.path)}
               alt={preview.attachment.name}
-              style={{
-                width: '100%',
-                maxHeight: '70vh',
-                objectFit: 'contain',
-                borderRadius: 12
-              }}
+              className="attachment-preview-media"
             />
           )}
 
@@ -186,7 +154,7 @@ export function AttachmentPreviewModal({
             <video
               src={toLocalFileUrl(preview.attachment.path)}
               controls
-              style={{ width: '100%', maxHeight: '70vh', borderRadius: 12, background: '#000' }}
+              className="attachment-preview-media attachment-preview-video"
             />
           )}
 

@@ -90,16 +90,13 @@ export function GeneratedImageGallery({ images, onPreview, onReferenceSelect }: 
                 announceGeneratedImageDragState(false)
                 endGeneratedImageDrag()
               }}
-              className="group/generated-image overflow-hidden text-left transition-[border-color,transform,box-shadow] duration-150 active:scale-[0.99]"
+              className="group/generated-image overflow-hidden border-0 text-left transition-transform duration-150 active:scale-[0.99]"
               style={{
                 width: cards.length === 1 ? 'min(100%, 420px)' : 'min(48%, 260px)',
                 minWidth: 168,
                 borderRadius: 14,
-                border: active
-                  ? '2px solid var(--color-ready-orange)'
-                  : '1px solid var(--border-default)',
                 background: 'var(--surface-card-bg)',
-                boxShadow: active ? '0 0 0 3px color-mix(in srgb, var(--color-ready-orange) 13%, transparent)' : 'none',
+                boxShadow: 'none',
                 cursor: 'grab',
               }}
               title="点击放大；拖到文档、网页或文件区"

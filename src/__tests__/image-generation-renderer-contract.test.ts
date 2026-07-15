@@ -6,6 +6,7 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 
 import ChatAttachments from '../renderer/components/agent/ChatAttachments'
+import { AttachmentPreviewModal } from '../renderer/components/agent/chat-panel/attachments-preview'
 import { buildSlashCommandInsertion } from '../renderer/modules/agent/slash-skill-selection'
 import type { AgentMessage } from '../renderer/modules/agent/types'
 import {
@@ -104,6 +105,26 @@ test('composer marks supported image attachments in submission order', () => {
   assert.match(html, /data-reference-image-order="1"[^>]*>参考图 1</)
   assert.match(html, /data-reference-image-order="2"[^>]*>参考图 2</)
   assert.equal((html.match(/参考图/g) || []).length, 2)
+})
+
+test('generated image preview keeps the chat visible and exposes only three icon actions', () => {
+  const html = renderToStaticMarkup(createElement(AttachmentPreviewModal, {
+    preview: {
+      attachment: generatedImageArtifactToAttachment(artifact),
+      mode: 'image' as const,
+    },
+    loading: false,
+    onClose: () => undefined,
+    onReveal: () => undefined,
+    onOpen: () => undefined,
+  }))
+
+  assert.match(html, /class="attachment-preview-overlay"/)
+  assert.match(html, /class="attachment-preview-panel ready-app-liquid-panel"/)
+  assert.equal((html.match(/class="attachment-preview-action"/g) || []).length, 3)
+  assert.doesNotMatch(html, />ready-image\.png</)
+  assert.doesNotMatch(html, />在 Finder 中显示</)
+  assert.doesNotMatch(html, />系统打开</)
 })
 
 test('generated images can drop into both document editing surfaces', () => {
