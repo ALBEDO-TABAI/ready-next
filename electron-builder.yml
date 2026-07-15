@@ -52,6 +52,8 @@ extraResources:
     to: embedded-skills
     filter:
       - "**/*"
+      - "!**/__pycache__/**"
+      - "!**/*.py[co]"
   - from: assets/pets
     to: pets
     filter:
@@ -74,6 +76,8 @@ extraResources:
     to: sidecar
     filter:
       - "**/*"
+      - "!**/__pycache__/**"
+      - "!**/*.py[co]"
 mac:
   category: public.app-category.productivity
   target:

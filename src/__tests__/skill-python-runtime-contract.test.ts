@@ -3,6 +3,7 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
+import { parse as parseYaml } from 'yaml'
 
 import {
   buildReadyPythonCandidates,
@@ -71,10 +72,24 @@ test('agent sidecar is pinned to the shared Python version gate', () => {
   assert.match(source, /isSupportedReadyPythonVersion/)
   assert.match(source, /isSupportedReadyPythonSslVersion/)
   assert.match(source, /SIDECAR_REQUIRED_IMPORTS/)
+  assert.match(source, /PYTHONDONTWRITEBYTECODE:\s*'1'/)
   assert.match(source, /hasRequiredPythonModules\(venvPython\)/)
   assert.match(source, /Sidecar exited before health check/)
   assert.match(source, /No usable Python 3\.9-3\.12 interpreter found/)
   assert.doesNotMatch(source, /minor > 14/)
+})
+
+test('signed Python resources exclude bytecode caches', () => {
+  const config = parseYaml(
+    readFileSync(new URL('../../electron-builder.yml', import.meta.url), 'utf8'),
+  ) as { extraResources?: Array<{ from?: string; filter?: string[] }> }
+
+  for (const source of ['assets/embedded-skills', 'src/python']) {
+    const resource = config.extraResources?.find((item) => item.from === source)
+    assert.ok(resource, `${source} must be packaged as an extra resource`)
+    assert.ok(resource.filter?.includes('!**/__pycache__/**'))
+    assert.ok(resource.filter?.includes('!**/*.py[co]'))
+  }
 })
 
 test('packaged skill runtime resolves only when a manifest is present', (t) => {
