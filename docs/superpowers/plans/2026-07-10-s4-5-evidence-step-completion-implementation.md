@@ -46,6 +46,7 @@ verify_entry: npx tsx@^4.19.2 --test src/__tests__/plan-persistence-reinjection.
 ## 5. 实施结果
 
 - `ActivePlan.verify` 只允许 `evidence`；发现句柄、执行句柄、冻结目标数、已保存/失败/剩余数持久化在会话元数据的证据快照中，内存状态丢失后可恢复。
+- 持久层读取、保存或删除失败只记录 `active_plan_persistence_failed`，不得中断已成功的工具回合；损坏快照拒绝恢复。超过 30 分钟的持久计划在加载时删除，后续工具结果不能把旧计划复活。
 - 冻结数量不可被后续结果改写；任务句柄不一致、queued/running/paused、partial、空 JSON、单独 `ok:true`、失败或剩余非零均不推进最终步骤。
 - 同一结构化结果只能连续证明相邻步骤；提醒只显示当前缺少的证据，源码与测试已清除 `weak` 判据文案。
 - 直接从 `browser_collect_notes` 进入时只暂存 source/execution 句柄，必须再查询并验证 source task 的 completed + 非空清单后才能推进；completed 但仍有 `failedItems`/`remaining` 的发现结果不冻结清单。

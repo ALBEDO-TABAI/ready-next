@@ -11,6 +11,7 @@ import { createToolExecutionOutput } from '../main/modules/agent-control/tools-r
 import type { ToolDefinition } from '../main/modules/agent-control/tools-runtime/tool-definition'
 import {
   buildActivePlanReminderText,
+  clearActivePlanForScope,
   configureActivePlanPersistence,
   deriveCollectionPlanFromToolCall,
   noteToolResultForActivePlan,
@@ -41,6 +42,79 @@ test('active plan restores from durable scope metadata after in-memory state is 
 
   const restored = buildActivePlanReminderText('scope-durable', 1500)
   assert.ok(restored?.includes('当前步骤 2/3'), `expected durable plan restore, got: ${restored}`)
+})
+
+test('active plan persistence failures never interrupt the tool or reminder path', (t) => {
+  configureActivePlanPersistence({
+    load: () => { throw new Error('load unavailable') },
+    save: () => { throw new Error('save unavailable') },
+    remove: () => { throw new Error('remove unavailable') },
+  })
+  t.after(() => {
+    resetActivePlansForTests()
+    configureActivePlanPersistence(null)
+  })
+  resetActivePlansForTests()
+
+  assert.doesNotThrow(() => buildActivePlanReminderText('scope-load-failure', 1000))
+  assert.doesNotThrow(() => noteToolResultForActivePlan(
+    'scope-save-failure',
+    'browser_visible_collect',
+    { url: 'https://example.com/u/1' },
+    1000,
+    JSON.stringify({ taskId: 'discover-save-failure', status: 'queued' })
+  ))
+  assert.match(buildActivePlanReminderText('scope-save-failure', 1100) || '', /当前步骤 1\/3/)
+  assert.doesNotThrow(() => clearActivePlanForScope('scope-save-failure'))
+})
+
+test('expired persisted plans are removed and cannot be revived by later evidence', (t) => {
+  const expired = deriveCollectionPlanFromToolCall(
+    'browser_visible_collect',
+    { url: 'https://example.com/old' },
+    1000
+  )!
+  let stored: typeof expired | null = structuredClone(expired)
+  let saveCount = 0
+  configureActivePlanPersistence({
+    load: () => stored,
+    save: (_scope, plan) => { saveCount += 1; stored = structuredClone(plan) },
+    remove: () => { stored = null },
+  })
+  t.after(() => {
+    resetActivePlansForTests()
+    configureActivePlanPersistence(null)
+  })
+  resetActivePlansForTests()
+
+  noteToolResultForActivePlan(
+    'scope-expired',
+    'browser_get_task',
+    { task_id: 'old-task' },
+    1000 + 31 * 60_000,
+    JSON.stringify({ taskId: 'old-task', status: 'completed', result: { targets: [{ id: 'n1' }] } })
+  )
+
+  assert.equal(stored, null)
+  assert.equal(saveCount, 0)
+  assert.equal(buildActivePlanReminderText('scope-expired', 1000 + 31 * 60_000), null)
+})
+
+test('malformed persisted plans are ignored instead of reaching reminder rendering', (t) => {
+  configureActivePlanPersistence({
+    load: () => ({
+      taskGoal: 'broken', verify: 'evidence', updatedAtMs: 1000, evidence: {},
+      steps: [{ id: 'x', title: 'x', advanceOnTools: [], evidenceRequirement: 'unknown', status: 'pending' }],
+    } as never),
+    save: () => undefined,
+    remove: () => undefined,
+  })
+  t.after(() => {
+    resetActivePlansForTests()
+    configureActivePlanPersistence(null)
+  })
+  resetActivePlansForTests()
+  assert.equal(buildActivePlanReminderText('scope-malformed', 1100), null)
 })
 
 test('plan-persistence-reinjection declares transitive sqlite ABI guard', (t) => {

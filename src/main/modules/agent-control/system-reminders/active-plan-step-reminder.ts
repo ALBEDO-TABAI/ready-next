@@ -90,18 +90,26 @@ function removePersistedPlan(scope: string): void {
 function isActivePlan(value: unknown): value is ActivePlan {
   if (!value || typeof value !== 'object') return false
   const plan = value as Partial<ActivePlan>
+  const requirements = new Set<ActivePlanStep['evidenceRequirement']>([
+    'collection_manifest',
+    'collection_run',
+    'media_download_complete',
+    'task_terminal_complete',
+  ])
   return (
     plan.verify === 'evidence' &&
     typeof plan.taskGoal === 'string' &&
     typeof plan.updatedAtMs === 'number' &&
-    Boolean(plan.evidence && typeof plan.evidence === 'object') &&
-    Array.isArray(plan.steps) &&
+    Boolean(plan.evidence && typeof plan.evidence === 'object' && !Array.isArray(plan.evidence)) &&
+    Array.isArray(plan.steps) && plan.steps.length > 0 &&
     plan.steps.every((step) =>
       Boolean(
         step &&
         typeof step.id === 'string' &&
         typeof step.title === 'string' &&
         Array.isArray(step.advanceOnTools) &&
+        step.advanceOnTools.every((toolName) => typeof toolName === 'string') &&
+        requirements.has(step.evidenceRequirement) &&
         ['pending', 'done'].includes(step.status)
       )
     )
