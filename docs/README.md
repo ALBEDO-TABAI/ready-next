@@ -1,6 +1,6 @@
 # Ready 文档导航与维护规则
 
-> 更新时间：2026-07-12
+> 更新时间：2026-07-14
 
 本文是 `docs/` 的入口。代码、`package.json` 与机器校验结果始终优先于叙述性文档；如果两者冲突，应修正文档，而不是为旧文档保留兼容实现。
 
@@ -25,6 +25,7 @@
 | 测试边界与 SQLite 验收 | `docs/superpowers/testing-conventions.md` |
 | UI 修改入口 | `UI_ADJUSTMENT_GUIDE.md` |
 | Windows 开发与交接 | `docs/platform/windows-development.md` |
+| Windows x64 支持方案（范围待确认） | `docs/superpowers/plans/2026-07-14-windows-x64-support-implementation.md` |
 | 大文件健康台账 | `docs/code-health/large-file-health-log.md` |
 
 ## 3. 目录职责
