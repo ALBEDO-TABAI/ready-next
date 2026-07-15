@@ -37,6 +37,8 @@
 | 2026-07-14 | AnySearch 搜索与调研接入 | `src/main/modules/skills-runtime/runtime-manager.ts` | 1166 | 净 +1 | 一般 | 仅把内置技能 manifest 的 `allowed_tools` 传入现有运行时描述，未增加新的加载分支；沿用 2026-08-11 的技能运行时装配复查。 | 已排期：2026-08-11 |
 | 2026-07-14 | AnySearch 搜索与调研接入 | `src/main/modules/tools/tool-executor.ts` | 1251 | 净 +30 | 一般 | 本轮只在统一工具入口解析已选技能的搜索/正文服务绑定并透传配置，搜索、垂直领域和回退行为都在独立叶子模块。沿用 2026-08-14 的全局工具入口路由复查。 | 已排期：2026-08-14 |
 | 2026-07-14 | AnySearch 搜索与调研接入 | `src/renderer/types/electron.d.ts` | 4000 | 净 +1 | 健康 | 只在外部服务类型合同中增加 AnySearch 枚举值，类型检查和 IPC 合同检查均已覆盖。 | 无需处理 |
+| 2026-07-14 | RSS 重复内容修复 | `src/main/modules/migrations.ts` | 3352 | 净 +6 | 健康 | 只注册顺序 migration 076，具体身份归一和历史合并留在 RSS 叶子模块；连续编号、真实 Electron SQLite 和用户数据库副本迁移均已验证。 | 无需处理 |
+| 2026-07-14 | RSS 重复内容修复 | `src/main/modules/rss-engine/ipc-handler.ts` | 1229 | 净 +16 | 一般 | 仅在统一抓取出口归一文章身份，让新增、单源刷新和全部刷新共用同一规则；沿用 2026-08-13 的 RSS IPC 组合根复查。 | 已排期：2026-08-13 |
 | 2026-07-14 | Tag Forge 低干预打标闭环 | `src/main/modules/tools/file-management-tools.ts` | 2034 | 净 +462 | 危险 | 批次全量扫描、不透明 item id、持久续跑、集中确认、真实路径复核与幂等审核都仍与搜索、读取、整理共存一文件，已明显妨碍定位和并行修改。下一步应整体迁出 Tag Forge batch executor 与状态存储；本轮不在交付前混入无行为收益的大规模搬移。 | 待独立拆分；交付时提醒 |
 | 2026-07-14 | Tag Forge 低干预打标闭环 | `src/main/modules/tools/tool-executor.ts` | 1221 | 净 +32 | 一般 | 全局入口只保留 Tag Forge 宿主确认调用，具体流程已下沉到 `tag-forge-host-review.ts`；2026-08-14 复查文件域路由与结果整形是否还能继续下沉。 | 已排期：2026-08-14 |
 | 2026-07-14 | Tag Forge 低干预打标闭环 | `src/main/modules/migrations.ts` | 3336 | +37 | 健康 | 只追加顺序 migration 074，把存疑提案改为批次、文档与 scope 隔离；连续迁移和真实 Electron SQLite 门禁覆盖。 | 无需处理 |

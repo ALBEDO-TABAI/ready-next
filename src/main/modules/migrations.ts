@@ -18,6 +18,7 @@ import {
   normalizeAgentSlug,
 } from '../../shared/agent-identity'
 import type { ScheduleSpecV1 } from '../../shared/scheduled-tasks'
+import { migrateCanonicalRSSItemIdentities } from './rss-engine/item-identity-migration'
 
 // Minimal interface compatible with DatabaseConnection from database.ts.
 // Defined locally to avoid circular imports.
@@ -3279,6 +3280,10 @@ const migrations: Migration[] = [
         WHERE enrichment_status='completed_sparse';
       `)
     }
+  },
+  {
+    name: '076_canonicalize_rss_item_identity',
+    up: (db) => migrateCanonicalRSSItemIdentities(db)
   }
 ]
 

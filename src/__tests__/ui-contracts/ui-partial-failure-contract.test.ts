@@ -13,7 +13,9 @@ test('rss skills and global search surface partial failures instead of silently 
   const globalSearch = readWorkspaceFile('src/renderer/components/layout/GlobalSearchPanel.tsx')
 
   assert.match(rssMode, /backgroundWarning/)
-  assert.match(rssMode, /setBackgroundWarning\(/)
+  assert.match(rssMode, /onAutoRefreshCompleted/)
+  assert.match(rssMode, /setAutoRefreshWarning\(getRSSAutoRefreshWarning\(snapshot\)\)/)
+  assert.match(rssMode, /setAutoRefreshWarning\(getRSSFetchAllResultWarning\(result\)\)/)
   assert.doesNotMatch(rssMode, /silent fail on auto-refresh/)
 
   assert.match(skillsPanel, /interface LegacyImportedFolderParseResult/)

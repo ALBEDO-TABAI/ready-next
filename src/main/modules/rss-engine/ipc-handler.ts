@@ -16,6 +16,7 @@ import { isLikelyStaleBilibiliResult, resolveBilibiliStaleRouteResult } from './
 import { classifyItem } from './classifier'
 import { rsshubManager } from './rsshub-process'
 import type { ScrapedItem, ScrapeResult } from './scrapers/base'
+import { normalizeScrapedItemIdentities } from './item-identity'
 import { generateRSSArtifacts, generateRSSBenchmarkArtifacts } from './reports'
 import { rssUpdateLock } from './update-lock'
 import { getRSSItemAnalysisManager } from './item-analysis-manager'
@@ -665,7 +666,7 @@ async function ensureArtifactFiles() {
   })
 }
 
-async function fetchSourceWithCurrentStack(
+async function fetchSourceWithCurrentStackRaw(
   source: Pick<DBRSSSource, 'id' | 'name' | 'url' | 'group_name' | 'draft_seeded'>,
   platform: PlatformType,
   rsshubBase?: string,
@@ -789,6 +790,21 @@ async function fetchSourceWithCurrentStack(
   return {
     result,
     backendUsed: resolveSourceBackend(platform),
+  }
+}
+
+async function fetchSourceWithCurrentStack(
+  source: Pick<DBRSSSource, 'id' | 'name' | 'url' | 'group_name' | 'draft_seeded'>,
+  platform: PlatformType,
+  rsshubBase?: string,
+): Promise<{ result: ScrapeResult; backendUsed: SourceBackend }> {
+  const outcome = await fetchSourceWithCurrentStackRaw(source, platform, rsshubBase)
+  return {
+    ...outcome,
+    result: {
+      ...outcome.result,
+      items: normalizeScrapedItemIdentities(outcome.result.items),
+    },
   }
 }
 
