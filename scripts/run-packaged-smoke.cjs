@@ -185,9 +185,8 @@ async function pollTarget(port, timeoutMs) {
       const targets = await requestJson(`http://127.0.0.1:${port}/json/list`)
       const page = Array.isArray(targets)
         ? targets.find((target) => {
-            const title = String(target.title || '')
             const url = String(target.url || '')
-            return target.type === 'page' && (title.includes('Ready') || url.includes('/out/renderer/'))
+            return target.type === 'page' && url.includes('/out/renderer/')
           })
         : null
       if (page) return { page, targets }
