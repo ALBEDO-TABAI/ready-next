@@ -52,6 +52,7 @@ exports/
 build/runtime-seeds/
 
 # Local scratch / generated artifacts
+/Pack-source/
 .superpowers/
 .claude/codex-audit/
 .claude/scheduled_tasks.lock
