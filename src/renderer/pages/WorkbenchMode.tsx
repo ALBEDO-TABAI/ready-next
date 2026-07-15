@@ -15,7 +15,13 @@ import { invalidateGraphWorkspace } from '../components/graph/graph-session'
 import StatusBar from '../components/layout/StatusBar'
 import { LiquidSceneProvider } from '../components/ui/LiquidGlassScene'
 import { WORKBENCH_EDGE_RAIL_SIZE } from '../modules/workbench/chrome'
-import { READY_WORKBENCH_MODE_CHANGE_EVENT } from '../modules/workbench/mode-transition'
+import {
+  READY_WORKBENCH_MODE_CHANGE_EVENT,
+  resolveBrowserVisibilityTransition,
+  resolveWorkbenchModeOpenDecision,
+  type WorkbenchModeChangePresentation,
+  type WorkbenchModeChangeRequestDetail,
+} from '../modules/workbench/mode-transition'
 import { resolveWorkbenchSplitToggle } from '../modules/workbench/mode-split'
 import { resolveWorkbenchPanelShortcutAction } from '../modules/workbench/panel-shortcuts'
 import { useRafResizeDrag } from '../modules/workbench/useRafResizeDrag'
@@ -27,7 +33,7 @@ import { readStorage } from '../utils/storage'
 import type { BrowserHostLayoutPhase } from '../../shared/browser-view-layout'
 import { nextIntentId } from '../../shared/browser-view-intent'
 import { createModeSwitchAckWaiter } from '../modules/browser/modeSwitchAckWaiter'
-import { withRitual, setPanelResizingSignal } from '../modules/overlay/useRitualOverlay'
+import { cancelRitual, withRitual, setPanelResizingSignal } from '../modules/overlay/useRitualOverlay'
 import { useAgent } from '../stores/useAgent'
 import '../styles/scheduled-tasks.css'
 import '../styles/knowledge-graph.css'
@@ -150,6 +156,7 @@ export default function WorkbenchMode() {
   const restoreDocumentLayoutFreezeRef = useRef<(() => void) | null>(null)
   const [workspaceInitError, setWorkspaceInitError] = useState<string | null>(null)
   const [isMotionSettled, setIsMotionSettled] = useState(true)
+  const [modeScenePresentation, setModeScenePresentation] = useState<WorkbenchModeChangePresentation>('animated')
   const [isPanelResizing, setIsPanelResizing] = useState(false)
   const [browserLayoutMotionPhase, setBrowserLayoutMotionPhase] = useState<BrowserHostLayoutPhase>('idle')
   const [scheduledTasksOpen, setScheduledTasksOpen] = useState(false)
@@ -158,7 +165,6 @@ export default function WorkbenchMode() {
     enabledCount: 0,
     attentionCount: 0,
   })
-  const transitionTargetModeRef = useRef<WorkbenchModeType>(workbenchMode)
   const workbenchSurfaceRefreshTimersRef = useRef<number[]>([])
   const browserLayoutPhase = isPanelResizing ? 'dragging' : browserLayoutMotionPhase
   const scheduledWorkspaceRoots = useMemo(() => (
@@ -173,10 +179,6 @@ export default function WorkbenchMode() {
   const hasVisibleDocumentMode = workbenchMode === 'document' || splitMode === 'document'
   const panelWidthTransitionMode = hasDocumentSplitPane ? 'instant' : 'animated'
   const panelToggleSettleMs = hasDocumentSplitPane ? INSTANT_PANEL_TOGGLE_SETTLE_MS : undefined
-
-  useEffect(() => {
-    transitionTargetModeRef.current = workbenchMode
-  }, [workbenchMode])
 
   useEffect(() => {
     const subscribe = window.electronAPI?.document?.onIndexChanged
@@ -442,36 +444,171 @@ export default function WorkbenchMode() {
   // holds the active waiter's `cancel` handle so a rapid second mode
   // click orphans the first waiter (per plan §9 line 684).
   const pendingModeSwitchAckCancelRef = useRef<(() => void) | null>(null)
+  const modeChangeRequestRef = useRef(0)
+  const modeScenePresentationResetRef = useRef<number | null>(null)
+  const browserHiddenForModeChangeRef = useRef(false)
+  const browserVisibilityRecoveryNeededRef = useRef(false)
+  const browserVisibilityRecoveryFrameRef = useRef<number | null>(null)
 
-  const handleWorkbenchModeChange = useCallback(async function handleWorkbenchModeChange(nextMode: WorkbenchModeType) {
-    const strategy = resolveModeTransitionStrategy(workbenchMode, nextMode)
-
-    if (splitMode) {
-      setWorkbenchMode(nextMode)
-      scheduleWorkbenchSurfaceRefresh()
-      return
-    }
-
-    if (strategy === 'same-mode') return
-
-    if (strategy === 'dom-only') {
-      transitionTargetModeRef.current = nextMode
-      setWorkbenchMode(nextMode)
-      scheduleWorkbenchSurfaceRefresh()
-      return
-    }
-
-    // Stage X4 PR-shell-2 — orphan any in-flight ack waiter from a
-    // previous click so its late ack is dropped per stale-id rule.
+  const beginModeChangeRequest = useCallback(() => {
+    const requestId = ++modeChangeRequestRef.current
+    cancelRitual('mode-switch')
     pendingModeSwitchAckCancelRef.current?.()
     pendingModeSwitchAckCancelRef.current = null
+    if (browserVisibilityRecoveryFrameRef.current !== null) {
+      window.cancelAnimationFrame(browserVisibilityRecoveryFrameRef.current)
+      browserVisibilityRecoveryFrameRef.current = null
+    }
+    return requestId
+  }, [])
+
+  const reconcileBrowserVisibilityAfterModeDecision = useCallback((
+    requestId: number,
+    state: { workbenchMode: WorkbenchModeType; splitMode: WorkbenchModeType | null },
+  ) => {
+    const browserWillBeVisible = state.workbenchMode === 'browser' || state.splitMode === 'browser'
+    if (!browserWillBeVisible) {
+      browserHiddenForModeChangeRef.current = false
+      browserVisibilityRecoveryNeededRef.current = false
+      if (browserVisibilityRecoveryFrameRef.current !== null) {
+        window.cancelAnimationFrame(browserVisibilityRecoveryFrameRef.current)
+        browserVisibilityRecoveryFrameRef.current = null
+      }
+      return
+    }
+    if (!browserHiddenForModeChangeRef.current && !browserVisibilityRecoveryNeededRef.current) return
+
+    browserHiddenForModeChangeRef.current = false
+    browserVisibilityRecoveryNeededRef.current = true
+    setBrowserLayoutMotionPhase('idle')
+    setIsMotionSettled(false)
+    browserVisibilityRecoveryFrameRef.current = window.requestAnimationFrame(() => {
+      browserVisibilityRecoveryFrameRef.current = null
+      if (requestId !== modeChangeRequestRef.current) return
+      browserVisibilityRecoveryNeededRef.current = false
+      setIsMotionSettled(true)
+      scheduleWorkbenchSurfaceRefresh()
+    })
+  }, [scheduleWorkbenchSurfaceRefresh])
+
+  const prepareModeScenePresentation = useCallback((presentation: WorkbenchModeChangePresentation) => {
+    if (modeScenePresentationResetRef.current !== null) {
+      window.cancelAnimationFrame(modeScenePresentationResetRef.current)
+      modeScenePresentationResetRef.current = null
+    }
+    setModeScenePresentation(presentation)
+    if (presentation === 'immediate') {
+      modeScenePresentationResetRef.current = window.requestAnimationFrame(() => {
+        modeScenePresentationResetRef.current = null
+        setModeScenePresentation('animated')
+      })
+    }
+  }, [])
+
+  useEffect(() => () => {
+    pendingModeSwitchAckCancelRef.current?.()
+    if (browserVisibilityRecoveryFrameRef.current !== null) {
+      window.cancelAnimationFrame(browserVisibilityRecoveryFrameRef.current)
+    }
+    if (modeScenePresentationResetRef.current !== null) {
+      window.cancelAnimationFrame(modeScenePresentationResetRef.current)
+    }
+  }, [])
+
+  const hideBrowserBeforeModeCommit = useCallback(async () => {
+    pendingModeSwitchAckCancelRef.current?.()
+    pendingModeSwitchAckCancelRef.current = null
+
+    const ackSource = window.electronAPI?.browser?.onIntentAck
+    const intentId = nextIntentId()
+    browserHiddenForModeChangeRef.current = true
+    browserVisibilityRecoveryNeededRef.current = false
+    window.electronAPI?.browser?.sendIntent({
+      kind: 'hide-all',
+      intentId,
+      reason: 'mode-switch-prepare',
+    })
+    if (!ackSource) return
+
+    const waiter = createModeSwitchAckWaiter(ackSource, intentId)
+    pendingModeSwitchAckCancelRef.current = waiter.cancel
+    try {
+      await waiter.wait
+    } finally {
+      if (pendingModeSwitchAckCancelRef.current === waiter.cancel) {
+        pendingModeSwitchAckCancelRef.current = null
+      }
+    }
+  }, [])
+
+  const handleWorkbenchModeChange = useCallback(async function handleWorkbenchModeChange(
+    nextMode: WorkbenchModeType,
+    options: { presentation?: WorkbenchModeChangePresentation } = {},
+  ) {
+    const requestId = beginModeChangeRequest()
+    const presentation = options.presentation ?? 'animated'
+    const strategy = resolveModeTransitionStrategy(workbenchMode, nextMode)
+    const browserVisibilityTransition = resolveBrowserVisibilityTransition(
+      { workbenchMode, splitMode },
+      { workbenchMode: nextMode, splitMode: null },
+    )
+
+    if (splitMode) {
+      if (browserVisibilityTransition === 'leaves') {
+        await hideBrowserBeforeModeCommit()
+        if (requestId !== modeChangeRequestRef.current) return
+      }
+      prepareModeScenePresentation(presentation)
+      setWorkbenchMode(nextMode)
+      reconcileBrowserVisibilityAfterModeDecision(requestId, { workbenchMode: nextMode, splitMode: null })
+      scheduleWorkbenchSurfaceRefresh()
+      return
+    }
+
+    if (strategy === 'same-mode') {
+      reconcileBrowserVisibilityAfterModeDecision(requestId, { workbenchMode, splitMode })
+      return
+    }
+
+    if (strategy === 'dom-only') {
+      prepareModeScenePresentation(presentation)
+      setWorkbenchMode(nextMode)
+      reconcileBrowserVisibilityAfterModeDecision(requestId, { workbenchMode: nextMode, splitMode: null })
+      scheduleWorkbenchSurfaceRefresh()
+      return
+    }
+
+    if (presentation === 'immediate') {
+      const comingFromBrowser = browserVisibilityTransition === 'leaves'
+      const enteringBrowser = browserVisibilityTransition === 'enters'
+      setIsMotionSettled(false)
+      if (comingFromBrowser) setBrowserLayoutMotionPhase('leaving')
+      else if (enteringBrowser) setBrowserLayoutMotionPhase('entering')
+      try {
+        if (comingFromBrowser) {
+          await hideBrowserBeforeModeCommit()
+          if (requestId !== modeChangeRequestRef.current) return
+        }
+        prepareModeScenePresentation('immediate')
+        setWorkbenchMode(nextMode)
+        reconcileBrowserVisibilityAfterModeDecision(requestId, { workbenchMode: nextMode, splitMode: null })
+        scheduleWorkbenchSurfaceRefresh()
+      } finally {
+        window.requestAnimationFrame(() => {
+          if (requestId !== modeChangeRequestRef.current) return
+          setBrowserLayoutMotionPhase('idle')
+          setIsMotionSettled(true)
+        })
+      }
+      return
+    }
 
     setIsMotionSettled(false)
     let didCommitModeChange = false
     try {
       await withRitual('mode-switch', async ({ signalReady }) => {
-        const comingFromBrowser = transitionTargetModeRef.current === 'browser' && nextMode !== 'browser'
-        const enteringBrowser = transitionTargetModeRef.current !== 'browser' && nextMode === 'browser'
+        const comingFromBrowser = browserVisibilityTransition === 'leaves'
+        const enteringBrowser = browserVisibilityTransition === 'enters'
         if (comingFromBrowser) setBrowserLayoutMotionPhase('leaving')
         else if (enteringBrowser) setBrowserLayoutMotionPhase('entering')
 
@@ -480,28 +617,17 @@ export default function WorkbenchMode() {
         // BEFORE flipping renderer mode so the native BrowserView is
         // off-top by the time the DOM-only overlay mounts.
         if (comingFromBrowser) {
-          const ackSource = window.electronAPI?.browser?.onIntentAck
-          const intentId = nextIntentId()
-          window.electronAPI?.browser?.sendIntent({
-            kind: 'hide-all',
-            intentId,
-            reason: 'mode-switch-prepare',
-          })
-          if (ackSource) {
-            const waiter = createModeSwitchAckWaiter(ackSource, intentId)
-            pendingModeSwitchAckCancelRef.current = waiter.cancel
-            try {
-              await waiter.wait
-            } finally {
-              if (pendingModeSwitchAckCancelRef.current === waiter.cancel) {
-                pendingModeSwitchAckCancelRef.current = null
-              }
-            }
-          }
+          await hideBrowserBeforeModeCommit()
+          if (requestId !== modeChangeRequestRef.current) return
+        }
+        if (requestId !== modeChangeRequestRef.current) {
+          signalReady()
+          return
         }
 
-        transitionTargetModeRef.current = nextMode
+        prepareModeScenePresentation('animated')
         setWorkbenchMode(nextMode)
+        reconcileBrowserVisibilityAfterModeDecision(requestId, { workbenchMode: nextMode, splitMode: null })
         didCommitModeChange = true
         signalReady()
       })
@@ -510,19 +636,111 @@ export default function WorkbenchMode() {
         throw error
       }
     } finally {
-      setBrowserLayoutMotionPhase('idle')
-      setIsMotionSettled(true)
+      if (requestId === modeChangeRequestRef.current) {
+        setBrowserLayoutMotionPhase('idle')
+        setIsMotionSettled(true)
+      }
       if (didCommitModeChange) scheduleWorkbenchSurfaceRefresh()
     }
-  }, [scheduleWorkbenchSurfaceRefresh, setWorkbenchMode, splitMode, workbenchMode])
+  }, [
+    beginModeChangeRequest,
+    hideBrowserBeforeModeCommit,
+    prepareModeScenePresentation,
+    reconcileBrowserVisibilityAfterModeDecision,
+    scheduleWorkbenchSurfaceRefresh,
+    setWorkbenchMode,
+    splitMode,
+    workbenchMode,
+  ])
+
+  const handleWorkbenchModeOpen = useCallback(async (
+    nextMode: WorkbenchModeType,
+    presentation: WorkbenchModeChangePresentation,
+  ) => {
+    const requestId = beginModeChangeRequest()
+    const decision = resolveWorkbenchModeOpenDecision({ workbenchMode, splitMode }, nextMode)
+    if (decision.kind === 'already-visible') {
+      reconcileBrowserVisibilityAfterModeDecision(requestId, { workbenchMode, splitMode })
+      return
+    }
+    if (decision.kind === 'switch-primary') {
+      await handleWorkbenchModeChange(decision.workbenchMode, { presentation })
+      return
+    }
+
+    const browserVisibilityTransition = resolveBrowserVisibilityTransition(
+      { workbenchMode, splitMode },
+      { workbenchMode, splitMode: decision.splitMode },
+    )
+    if (browserVisibilityTransition === 'leaves') {
+      await hideBrowserBeforeModeCommit()
+      if (requestId !== modeChangeRequestRef.current) return
+    }
+    if (browserVisibilityTransition === 'enters') setIsMotionSettled(false)
+    prepareModeScenePresentation(presentation)
+    setSplitMode(decision.splitMode)
+    reconcileBrowserVisibilityAfterModeDecision(requestId, {
+      workbenchMode,
+      splitMode: decision.splitMode,
+    })
+    scheduleWorkbenchSurfaceRefresh()
+    if (browserVisibilityTransition === 'enters') {
+      window.requestAnimationFrame(() => {
+        if (requestId === modeChangeRequestRef.current) setIsMotionSettled(true)
+      })
+    }
+  }, [
+    beginModeChangeRequest,
+    handleWorkbenchModeChange,
+    hideBrowserBeforeModeCommit,
+    prepareModeScenePresentation,
+    reconcileBrowserVisibilityAfterModeDecision,
+    scheduleWorkbenchSurfaceRefresh,
+    setSplitMode,
+    splitMode,
+    workbenchMode,
+  ])
 
   const handleWorkbenchSplitToggle = useCallback((mode: WorkbenchModeType) => {
-    setSplitMode(resolveWorkbenchSplitToggle({
+    const nextSplitMode = resolveWorkbenchSplitToggle({
       workbenchMode,
       splitMode,
       requestedMode: mode,
-    }))
-  }, [setSplitMode, splitMode, workbenchMode])
+    })
+    const requestId = beginModeChangeRequest()
+    void (async () => {
+      const browserVisibilityTransition = resolveBrowserVisibilityTransition(
+        { workbenchMode, splitMode },
+        { workbenchMode, splitMode: nextSplitMode },
+      )
+      if (browserVisibilityTransition === 'leaves') {
+        await hideBrowserBeforeModeCommit()
+        if (requestId !== modeChangeRequestRef.current) return
+      }
+      if (browserVisibilityTransition === 'enters') setIsMotionSettled(false)
+      prepareModeScenePresentation('animated')
+      setSplitMode(nextSplitMode)
+      reconcileBrowserVisibilityAfterModeDecision(requestId, {
+        workbenchMode,
+        splitMode: nextSplitMode,
+      })
+      scheduleWorkbenchSurfaceRefresh()
+      if (browserVisibilityTransition === 'enters') {
+        window.requestAnimationFrame(() => {
+          if (requestId === modeChangeRequestRef.current) setIsMotionSettled(true)
+        })
+      }
+    })()
+  }, [
+    beginModeChangeRequest,
+    hideBrowserBeforeModeCommit,
+    prepareModeScenePresentation,
+    reconcileBrowserVisibilityAfterModeDecision,
+    scheduleWorkbenchSurfaceRefresh,
+    setSplitMode,
+    splitMode,
+    workbenchMode,
+  ])
 
   useEffect(() => {
     return () => {
@@ -539,16 +757,21 @@ export default function WorkbenchMode() {
 
   useEffect(() => {
     const handleExternalWorkbenchModeChange = (event: Event) => {
-      const nextMode = (event as CustomEvent<{ mode?: WorkbenchModeType }>).detail?.mode
+      const detail = (event as CustomEvent<WorkbenchModeChangeRequestDetail>).detail
+      const nextMode = detail?.mode
       if (!nextMode) return
-      handleWorkbenchModeChange(nextMode)
+      if (detail.placement === 'open') {
+        void handleWorkbenchModeOpen(nextMode, detail.presentation ?? 'immediate')
+        return
+      }
+      void handleWorkbenchModeChange(nextMode, { presentation: detail.presentation })
     }
 
     window.addEventListener(READY_WORKBENCH_MODE_CHANGE_EVENT, handleExternalWorkbenchModeChange as EventListener)
     return () => {
       window.removeEventListener(READY_WORKBENCH_MODE_CHANGE_EVENT, handleExternalWorkbenchModeChange as EventListener)
     }
-  }, [handleWorkbenchModeChange])
+  }, [handleWorkbenchModeChange, handleWorkbenchModeOpen])
 
   useEffect(() => {
     const handlePanelShortcut = (event: KeyboardEvent) => {
@@ -664,6 +887,7 @@ export default function WorkbenchMode() {
                     <WorkbenchModeOutlet
                       mode={workbenchMode}
                       mountedModes={[workbenchMode]}
+                      transitionPresentation={modeScenePresentation}
                       isMotionSettled={isMotionSettled}
                       browserLayoutPhase={browserLayoutPhase}
                       suspended={graphWorkspaceRequest !== null}
@@ -677,6 +901,7 @@ export default function WorkbenchMode() {
                     <WorkbenchModeOutlet
                       mode={splitMode}
                       mountedModes={[splitMode]}
+                      transitionPresentation={modeScenePresentation}
                       isMotionSettled={isMotionSettled}
                       browserLayoutPhase={browserLayoutPhase}
                       suspended={graphWorkspaceRequest !== null}
@@ -687,6 +912,7 @@ export default function WorkbenchMode() {
                 <div className="relative flex flex-1 flex-col min-w-0 overflow-hidden" data-workbench-content-backdrop="true">
                   <WorkbenchModeOutlet
                     mode={workbenchMode}
+                    transitionPresentation={modeScenePresentation}
                     isMotionSettled={isMotionSettled}
                     browserLayoutPhase={browserLayoutPhase}
                     suspended={graphWorkspaceRequest !== null}

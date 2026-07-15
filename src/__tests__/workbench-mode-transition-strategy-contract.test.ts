@@ -31,17 +31,22 @@ test('WorkbenchMode.tsx routes mode switches through the strategy function and o
 
   assert.match(source, /import \{ resolveModeTransitionStrategy \} from '\.\.\/modules\/workbench\/modeTransitionStrategy'/)
   assert.match(source, /const strategy = resolveModeTransitionStrategy\(workbenchMode, nextMode\)/)
-  assert.match(source, /if \(strategy === 'same-mode'\) return/)
+  assert.match(source, /const browserVisibilityTransition = resolveBrowserVisibilityTransition\(/)
+  assert.match(source, /if \(strategy === 'same-mode'\) \{[\s\S]*reconcileBrowserVisibilityAfterModeDecision\([\s\S]*return[\s\S]*\}/)
   const splitCollapseIndex = source.search(/if \(splitMode\) \{[\s\S]*?setWorkbenchMode\(nextMode\)[\s\S]*?return[\s\S]*?\}/)
-  const sameModeReturnIndex = source.indexOf("if (strategy === 'same-mode') return")
+  const sameModeReturnIndex = source.indexOf("if (strategy === 'same-mode') {")
   assert.notEqual(splitCollapseIndex, -1)
   assert.notEqual(sameModeReturnIndex, -1)
   assert.ok(splitCollapseIndex < sameModeReturnIndex)
   assert.match(
     source,
-    /if \(strategy === 'dom-only'\) \{[\s\S]*?transitionTargetModeRef\.current = nextMode[\s\S]*?setWorkbenchMode\(nextMode\)[\s\S]*?return[\s\S]*?\}/,
+    /if \(strategy === 'dom-only'\) \{[\s\S]*?prepareModeScenePresentation\(presentation\)[\s\S]*?setWorkbenchMode\(nextMode\)[\s\S]*?return[\s\S]*?\}/,
   )
+  assert.match(source, /if \(presentation === 'immediate'\) \{[\s\S]*?hideBrowserBeforeModeCommit\(\)[\s\S]*?prepareModeScenePresentation\('immediate'\)/)
   assert.match(source, /await withRitual\('mode-switch'/)
+  assert.match(source, /cancelRitual\('mode-switch'\)/)
+  assert.match(source, /browserHiddenForModeChangeRef/)
+  assert.match(source, /browserVisibilityRecoveryNeededRef/)
 })
 
 test('RitualOverlay toggles html[data-mode-switching] during mode-switch phases and the slider thumb disables its transition under that attribute', () => {

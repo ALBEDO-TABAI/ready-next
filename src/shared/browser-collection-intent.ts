@@ -57,6 +57,37 @@ export function isBrowserCollectionSubsetTool(toolName: string): boolean {
   return BROWSER_COLLECTION_SUBSET_SET.has(toolName)
 }
 
+/**
+ * Read/observe surface used when a browser reference is present but the user
+ * did not explicitly ask to collect or save anything. In particular this list
+ * excludes every persistent collection, download, resume, and cancel tool.
+ */
+export const BROWSER_OBSERVATION_SUBSET_TOOL_NAMES: readonly string[] = [
+  'browser_navigate',
+  'browser_search',
+  'browser_get_tabs',
+  'browser_read_page',
+  'browser_read_page_map',
+  'browser_capture_viewport',
+  'browser_scroll_at',
+  'browser_click_text',
+  'browser_wait',
+  'browser_wait_for_condition',
+  'browser_collect_images',
+  'browser_inspect_resources',
+  'browser_power_network_trace',
+  'browser_power_resource_forensics',
+  'browser_extract_structured',
+  'browser_aggregate_results',
+  'browser_ask_user_takeover',
+]
+
+const BROWSER_OBSERVATION_SUBSET_SET = new Set(BROWSER_OBSERVATION_SUBSET_TOOL_NAMES)
+
+export function isBrowserObservationSubsetTool(toolName: string): boolean {
+  return BROWSER_OBSERVATION_SUBSET_SET.has(toolName)
+}
+
 export const BROWSER_BATCH_COLLECTION_WORKFLOW_TOOL_NAMES: readonly string[] = [
   'browser_visible_collect',
   'browser_collect_notes',
@@ -132,7 +163,7 @@ export function resolveBrowserCollectionIntent(text: string | null | undefined):
 
 export function resolveBrowserBatchCollectionIntent(text: string | null | undefined): boolean {
   const t = String(text || '')
-  if (!resolveBrowserCollectionIntent(t)) return false
+  if (!resolveBrowserCollectionIntent(t) || !COLLECTION_VERB.test(t)) return false
   return (
     (BATCH_SCOPE_SIGNAL.test(t) && BATCH_CONTENT_OBJECT.test(t))
     || /(?:主页|账号|博主|这个号).{0,32}(?:笔记|帖子|作品|动态|短视频|视频|内容)/i.test(t)

@@ -130,7 +130,7 @@ export function useKeyboardShortcuts() {
       preventDefault()
       const { openTab } = useDocTabs.getState()
       openTab('')
-      setWorkbenchMode('document')
+      activateWorkbenchMode('document')
       return true
     }
 

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import test from 'node:test'
+import { shouldAnimateWorkbenchModeTransition } from '../renderer/modules/workbench/mode-transition'
 
 function readWorkspaceFile(path: string): string {
   return readFileSync(resolve(process.cwd(), path), 'utf8')
@@ -15,6 +16,12 @@ test('WorkbenchModeOutlet emits visual-state and direction attributes that drive
   assert.match(source, /previous: previousMode,/, 'outlet must track previous mode to drive leaving animation')
   assert.match(source, /const direction: ModeDirection = nextIdx >= prevIdx \? 'forward' : 'backward'/)
   assert.doesNotMatch(source, /transform: 'translate3d\(0, 0, 0\)',/, 'inline static transform must be removed — CSS drives the slide')
+})
+
+test('file-open presentation skips scene motion while ordinary mode switches retain it', () => {
+  assert.equal(shouldAnimateWorkbenchModeTransition('immediate', false), false)
+  assert.equal(shouldAnimateWorkbenchModeTransition('animated', false), true)
+  assert.equal(shouldAnimateWorkbenchModeTransition('animated', true), false)
 })
 
 test('ritual overlay uses transparent background on mode-switch so scene translate is visible', () => {

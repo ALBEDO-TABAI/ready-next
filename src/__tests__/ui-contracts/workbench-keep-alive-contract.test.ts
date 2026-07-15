@@ -45,10 +45,13 @@ test('workbench outlet keeps all modes mounted and routes mode switching through
 
   assert.match(workbenchMode, /import \{[^}]*withRitual[^}]*\} from '\.\.\/modules\/overlay\/useRitualOverlay'/)
   assert.match(workbenchMode, /resolveModeTransitionStrategy\(workbenchMode, nextMode\)/)
+  assert.match(workbenchMode, /resolveBrowserVisibilityTransition\(/)
   assert.match(workbenchMode, /const \[isMotionSettled, setIsMotionSettled\] = useState\(true\)/)
-  assert.match(workbenchMode, /const transitionTargetModeRef = useRef<WorkbenchMode(?:Type)>\(workbenchMode\)/)
+  assert.match(workbenchMode, /const \[modeScenePresentation, setModeScenePresentation\] = useState<WorkbenchModeChangePresentation>\('animated'\)/)
   assert.match(workbenchMode, /const handleWorkbenchModeChange = useCallback\(async function handleWorkbenchModeChange/)
-  assert.match(workbenchMode, /if \(strategy === 'same-mode'\) return/)
+  assert.match(workbenchMode, /if \(strategy === 'same-mode'\) \{[\s\S]*reconcileBrowserVisibilityAfterModeDecision\([\s\S]*return[\s\S]*\}/)
+  assert.match(workbenchMode, /const requestId = beginModeChangeRequest\(\)[\s\S]*const strategy = resolveModeTransitionStrategy/)
+  assert.match(workbenchMode, /cancelRitual\('mode-switch'\)/)
   assert.match(workbenchMode, /if \(splitMode\) \{[\s\S]*setWorkbenchMode\(nextMode\)[\s\S]*return/)
   assert.match(workbenchMode, /await withRitual\('mode-switch', async \(\{ signalReady \}\) => \{[\s\S]*setWorkbenchMode\(nextMode\)[\s\S]*signalReady\(\)/)
   assert.match(workbenchMode, /setIsMotionSettled\(false\)/)
@@ -57,8 +60,9 @@ test('workbench outlet keeps all modes mounted and routes mode switching through
   assert.doesNotMatch(workbenchMode, /const transitionTimerRef = useRef/)
   assert.doesNotMatch(workbenchMode, /transitionTimerRef\.current = window\.setTimeout/)
   assert.match(workbenchMode, /READY_WORKBENCH_MODE_CHANGE_EVENT/)
+  assert.match(workbenchMode, /detail\.placement === 'open'/)
   assert.match(workbenchMode, /window\.addEventListener\(READY_WORKBENCH_MODE_CHANGE_EVENT, handleExternalWorkbenchModeChange as EventListener\)/)
-  assert.match(workbenchMode, /<WorkbenchModeOutlet[\s\S]*mode=\{workbenchMode\}[\s\S]*isMotionSettled=\{isMotionSettled\}[\s\S]*browserLayoutPhase=\{browserLayoutPhase\}[\s\S]*\/>/)
+  assert.match(workbenchMode, /<WorkbenchModeOutlet[\s\S]*mode=\{workbenchMode\}[\s\S]*transitionPresentation=\{modeScenePresentation\}[\s\S]*isMotionSettled=\{isMotionSettled\}[\s\S]*browserLayoutPhase=\{browserLayoutPhase\}[\s\S]*\/>/)
   assert.match(workbenchMode, /suspended=\{graphWorkspaceRequest !== null\}/)
   assert.match(workbenchMode, /const pendingRoots = new Set<string>\(\)/)
   assert.match(workbenchMode, /window\.setTimeout\(\(\) => \{[\s\S]*Promise\.all\(roots\.map\(\(root\) => invalidateGraphWorkspace\(root\)\)\)[\s\S]*\}, 50\)/)
@@ -70,6 +74,7 @@ test('workbench outlet keeps all modes mounted and routes mode switching through
 
 test('workbench shell hides all browser hosts on unmount (show/hide during mode change is now consolidated inside useBrowserViewBounds)', () => {
   const workbenchMode = readWorkspaceFile('src/renderer/pages/WorkbenchMode.tsx')
+  const boundsHook = readWorkspaceFile('src/renderer/modules/browser/useBrowserViewBounds.ts')
 
   // Mode-change hide/show is now driven by the isActive/isVisibleAllowed reactive effect inside useBrowserViewBounds,
   // so WorkbenchMode no longer needs the visibleModes effect.
@@ -85,6 +90,10 @@ test('workbench shell hides all browser hosts on unmount (show/hide during mode 
   )
   assert.doesNotMatch(workbenchMode, /browser\.hideAll\(\)/)
   assert.doesNotMatch(workbenchMode, /browser\.hideActiveHost\(\)/)
+  assert.match(
+    boundsHook,
+    /useEffect\(\(\) => \(\) => \{[\s\S]*visibilitySyncTokenRef\.current \+= 1[\s\S]*kind: 'hide-all'[\s\S]*reason: 'mode-switch-prepare'/,
+  )
 })
 
 test('rss and calendar modes gate heavyweight work behind foreground activity when kept alive', () => {
@@ -115,8 +124,8 @@ test('rss and calendar modes gate heavyweight work behind foreground activity wh
 
   assert.match(documentMode, /interface DocumentModeProps \{[\s\S]*isActive\?: boolean[\s\S]*isMotionSettled\?: boolean[\s\S]*\}/)
   assert.match(documentMode, /export default function DocumentMode\(\{[\s\S]*isActive = true,[\s\S]*isMotionSettled = true,[\s\S]*\}: DocumentModeProps\)/)
-  assert.match(documentMode, /const \[hasActivated, setHasActivated\] = useState\(isActive\)/)
-  assert.match(documentMode, /if \(!hasActivated \|\| !selectedFile\) return undefined/)
+  assert.match(documentMode, /shouldHandleSelectedDocument\(\{[\s\S]*isActive,[\s\S]*selectedFile,/)
+  assert.doesNotMatch(documentMode, /const \[hasActivated, setHasActivated\] = useState\(isActive\)/)
   assert.match(previewBrowser, /export default function PreviewBrowser\(\{ item, onClose, isActive = true \}:/)
   assert.match(previewBrowser, /if \(!isActive\) \{[\s\S]*previewClose/)
 })

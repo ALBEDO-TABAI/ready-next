@@ -632,6 +632,12 @@ async function executeToolCallInner(
             browserLeaseGate,
             context.currentUserText,
             context.runtime,
+            {
+              ownerAgentId: context.agent ?? null,
+              ownerRunId: context.runId ?? null,
+              parentTaskId: context.taskId ?? null,
+              executionBinding: context.executionBinding ?? null,
+            },
           )
           if (typeof browserResult === 'string' && browserResult.startsWith('Error:')) {
             return browserFailureOutput({

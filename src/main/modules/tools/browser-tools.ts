@@ -489,6 +489,12 @@ export async function executeBrowserTool(
   leaseGate?: BrowserLeaseGate,
   currentUserText?: string,
   runtime?: AgentControlRuntime | null,
+  taskExecutionContext?: {
+    ownerAgentId?: string | null
+    ownerRunId?: string | null
+    parentTaskId?: string | null
+    executionBinding?: import('../../../shared/agent-execution-profile').TaskExecutionBinding | null
+  },
 ): Promise<string | ToolExecutionOutput> {
   log(`executeBrowserTool: ${toolName} args=${JSON.stringify(args).slice(0, 200)}`)
 
@@ -516,6 +522,7 @@ export async function executeBrowserTool(
           leaseGate,
           currentUserText,
           runtime,
+          taskExecutionContext,
         )
       }
       if (toolName === 'browser_run_workflow') {
@@ -535,6 +542,7 @@ export async function executeBrowserTool(
           leaseGate,
           currentUserText,
           runtime,
+          taskExecutionContext,
         )
       }
     }
@@ -691,6 +699,7 @@ export async function executeBrowserTool(
           runtime,
           candidateTargetUrls,
           runWorkflowStep,
+          taskExecutionContext,
         })
 
       default:

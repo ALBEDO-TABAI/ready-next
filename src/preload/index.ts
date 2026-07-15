@@ -16,7 +16,7 @@ import type {
 } from '../shared/scheduled-tasks'
 import type { RendererAgentMetricName } from '../shared/renderer-agent-metrics'
 import type { ModelPackDownloadUpdate, ModelPackId, ModelSource } from '../shared/model-pack-types'
-import type { RuntimeStatus, RuntimeProvisionProgress } from '../shared/runtime-provision-types'
+import type { RuntimeStatus, RuntimeProvisionTaskSnapshot } from '../shared/runtime-provision-types'
 import type { PetActivitySnapshot, PetSettings, PetStickyNoteInput, PetWindowSnapshot } from '../shared/pet'
 import type {
   FileEmergenceGetSnapshotPayload,
@@ -517,6 +517,7 @@ const browserAPI = {
   confirmCollectionConsent: (payload: { requestId: string; confirmedVia: 'ask_user_questions' | 'ui_action' }) =>
     ipcRenderer.invoke('browser:confirmCollectionConsent', payload),
   resumeTask: (payload: { taskId: string }) => ipcRenderer.invoke('browser:resumeTask', payload),
+  cancelTask: (payload: { taskId: string }) => ipcRenderer.invoke('browser:cancelTask', payload),
   onAgentControlChanged: (callback: (data: { state: string }) => void) => {
     const handler = (_event: unknown, data: { state: string }) => callback(data)
     ipcRenderer.on('browser:agentControlChanged', handler)
@@ -1076,9 +1077,11 @@ const skillsAPI = {
   //   Named *SkillRuntime* to avoid colliding with the agent `getRuntimeStatus`.
   getSkillRuntimeStatus: (): Promise<{ success: boolean; data?: RuntimeStatus; error?: string }> =>
     ipcRenderer.invoke('runtime:status'),
-  provisionSkillRuntime: (payload?: { force?: boolean }): Promise<{ success: boolean; data?: RuntimeStatus | { kind?: string }; error?: string }> =>
+  getSkillRuntimeProvisionState: (): Promise<{ success: boolean; data?: RuntimeProvisionTaskSnapshot; error?: string }> =>
+    ipcRenderer.invoke('runtime:provisionState'),
+  provisionSkillRuntime: (payload?: { force?: boolean }): Promise<{ success: boolean; data?: RuntimeProvisionTaskSnapshot; error?: string }> =>
     ipcRenderer.invoke('runtime:provision', payload),
-  cancelSkillRuntimeProvision: (): Promise<{ success: boolean; error?: string }> =>
+  cancelSkillRuntimeProvision: (): Promise<{ success: boolean; data?: RuntimeProvisionTaskSnapshot; error?: string }> =>
     ipcRenderer.invoke('runtime:cancel'),
   getSkillRuntimeMirror: (): Promise<{ success: boolean; data?: string; error?: string }> =>
     ipcRenderer.invoke('runtime:getMirror'),
@@ -1086,8 +1089,8 @@ const skillsAPI = {
     ipcRenderer.invoke('runtime:setMirror', payload),
   selfTestSkillRuntime: (): Promise<{ success: boolean; data?: RuntimeStatus; error?: string }> =>
     ipcRenderer.invoke('runtime:selfTest'),
-  onSkillRuntimeProvisionUpdate: (handler: (progress: RuntimeProvisionProgress) => void) => {
-    const listener = (_event: unknown, progress: RuntimeProvisionProgress) => handler(progress)
+  onSkillRuntimeProvisionUpdate: (handler: (snapshot: RuntimeProvisionTaskSnapshot) => void) => {
+    const listener = (_event: unknown, snapshot: RuntimeProvisionTaskSnapshot) => handler(snapshot)
     ipcRenderer.on('runtime:provisionUpdate', listener)
     return () => ipcRenderer.removeListener('runtime:provisionUpdate', listener)
   },

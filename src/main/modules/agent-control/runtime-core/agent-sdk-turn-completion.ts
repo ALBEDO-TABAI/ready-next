@@ -26,7 +26,11 @@ import type {
   RunHandle,
   ToolBridgeRuntimeContext
 } from './agent-sdk-types'
-import { finalizeRunOutcome, writeRunCloseMetric } from './run-finalizer'
+import {
+  finalizeRunOutcome,
+  reconcileTerminalTaskBudgetRuntime,
+  writeRunCloseMetric
+} from './run-finalizer'
 import type { TurnTerminalReason } from './turn-frame'
 import type { CollaborationDecision } from '../../../../shared/dynamic-delivery'
 import { mergeRunUsage } from './run-usage-accumulator'
@@ -376,10 +380,15 @@ export async function finalizeAgentSdkPreparedTurnResult(
       const checkpointResult = await finishBudgetCheckpointIfNeeded()
       if (checkpointResult) return checkpointResult
     }
-    if (usedTools.length === 0) {
+    if (usedTools.length === 0 && (!liveTaskBudgetRuntime || liveTaskBudgetRuntime.bootstrapBudget)) {
       projectionPatches.push({ taskType: 'direct_answer', module: 'system' })
     }
     const finalProjectionPatch = mergeProjectionPatches(projectionPatches)
+    liveTaskBudgetRuntime = reconcileTerminalTaskBudgetRuntime(
+      liveTaskBudgetRuntime,
+      finalProjectionPatch,
+      usedTools.length
+    )
     throwIfAbortSignalAborted(abortSignal)
     const finalizedDone = await finalizeRunOutcome(
       {

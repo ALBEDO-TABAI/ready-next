@@ -7,7 +7,7 @@ function readWorkspaceFile(path: string): string {
   return readFileSync(resolve(process.cwd(), path), 'utf8')
 }
 
-test('workbench mode switching routes through the shared ritual overlay and deletes the per-mode freeze-frame chrome', () => {
+test('workbench mode switching routes through the shared ritual overlay and immediate opens bypass scene animation', () => {
   const workbenchMode = readWorkspaceFile('src/renderer/pages/WorkbenchMode.tsx')
   const outlet = readWorkspaceFile('src/renderer/components/layout/WorkbenchModeOutlet.tsx')
   const browserMode = readWorkspaceFile('src/renderer/pages/modes/BrowserMode.tsx')
@@ -16,7 +16,7 @@ test('workbench mode switching routes through the shared ritual overlay and dele
   const browserMask = readWorkspaceFile('src/renderer/modules/overlay/browserViewMask.ts')
   const ritualOverlay = readWorkspaceFile('src/renderer/components/overlay/RitualOverlay.tsx')
 
-  assert.match(workbenchMode, /import \{ withRitual \} from '\.\.\/modules\/overlay\/useRitualOverlay'/)
+  assert.match(workbenchMode, /import \{[^}]*cancelRitual[^}]*withRitual[^}]*\} from '\.\.\/modules\/overlay\/useRitualOverlay'/)
   assert.match(workbenchMode, /await withRitual\('mode-switch'/)
   assert.match(workbenchMode, /signalReady\(\)/)
   assert.doesNotMatch(workbenchMode, /const MODE_TRANSITION_DURATION_MS\s*=\s*350/)
@@ -26,6 +26,7 @@ test('workbench mode switching routes through the shared ritual overlay and dele
   assert.match(ritualHook, /export type RitualPhase = 'idle' \| 'entering' \| 'holding' \| 'leaving'/)
   assert.match(ritualHook, /MODE_SWITCH_TIMELINE/)
   assert.match(ritualHook, /export async function withRitual/)
+  assert.match(ritualHook, /export function cancelRitual/)
   assert.match(ritualHook, /signalReady/)
   assert.match(ritualHook, /prefers-reduced-motion/)
 
@@ -39,7 +40,8 @@ test('workbench mode switching routes through the shared ritual overlay and dele
   assert.match(ritualOverlay, /data-ritual-overlay/)
   assert.match(ritualOverlay, /data-phase=/)
 
-  assert.doesNotMatch(outlet, /MODE_SCENE_TRANSITION/)
+  assert.match(outlet, /transitionPresentation\?: WorkbenchModeChangePresentation/)
+  assert.match(outlet, /shouldAnimateWorkbenchModeTransition\(transitionPresentation, prefersReducedMotion\(\)\)/)
   assert.doesNotMatch(outlet, /MODE_LEAVING_OFFSET_PERCENT/)
   assert.doesNotMatch(outlet, /MODE_ENTERING_OFFSET_PERCENT/)
   assert.doesNotMatch(outlet, /MODE_LEAVING_FADE_OPACITY/)

@@ -12,6 +12,7 @@ export interface DeliveryRunContext {
   runId: string
   taskId: string
   userRequestVerbatim: string
+  ownerSystemPrompt: string
   decision: CollaborationDecision
   state: DeliveryStateV1
   committedSession: MemorySession

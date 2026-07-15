@@ -135,6 +135,18 @@ test('maps provider auth failures to settings action', () => {
   assert.equal(result.retryStrategy, 'user_action')
 })
 
+test('maps website HTML responses to an API address correction instead of an outage', () => {
+  const result = mapBackendErrorToFriendly({
+    error: 'API 返回了网页内容，不是 JSON。请检查 API 地址是否填成了官网页或登录页。',
+    errorKind: 'blocked_external',
+  })
+
+  assert.equal(result.friendlyMessage, 'API 地址不是模型接口，请在设置中检查地址（OpenAI 兼容服务通常以 /v1 结尾）')
+  assert.equal(result.recoverable, true)
+  assert.equal(result.retryStrategy, 'user_action')
+  assert.doesNotMatch(result.friendlyMessage, /暂时不可用/)
+})
+
 test('maps provider rate limits to retry guidance', () => {
   const result = mapBackendErrorToFriendly({
     error: 'HTTP 429: Too Many Requests; Retry-After: 45',

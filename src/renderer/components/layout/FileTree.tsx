@@ -38,8 +38,7 @@ import { saveUntitledDocTabToDirectory } from '../../modules/document/untitledDo
 import { getActiveBrowserTabDragPayload } from '../../modules/browser/browserTabDragSession'
 import { isReadyBoardFile } from '../../../shared/ready-board'
 import { isLocalHtmlFilePath, openLocalHtmlFileInBrowser } from '../../modules/browser/localHtmlFileOpen'
-import { applyWorkbenchModeOpenDecision, requestWorkbenchModeChange } from '../../modules/workbench/mode-transition'
-import { useMode } from '../../stores/useMode'
+import { requestWorkbenchModeOpen } from '../../modules/workbench/mode-transition'
 import {
   compactFileTreeDeleteTargets,
   computeNextFileTreeSelection,
@@ -55,6 +54,13 @@ import { buildMoveBlockedNotice } from './fileTreeMoveNotice'
 import FileEmergenceSection from './FileEmergenceSection'
 import { buildFileEmergenceViewModel } from './fileEmergenceViewModel'
 import { recordFileEmergenceActivity, readFileEmergenceEnabled } from '../../modules/file-emergence/fileEmergenceClient'
+import { createDeferredSnapshotRefresh, type DeferredSnapshotRefresh } from '../../modules/file-emergence/deferredSnapshotRefresh'
+import {
+  readFileEmergenceDocumentStateSignature,
+  readFileEmergenceProjectContextSignature,
+  selectFileEmergenceDocumentStateSignature,
+  selectFileEmergenceProjectContextSignature,
+} from '../../modules/file-emergence/fileEmergenceTabContext'
 import {
   buildCurrentDocumentContext,
   readWorkspaceReadingProgress,
@@ -96,14 +102,7 @@ export { DEFAULT_FILE_FILTERS } from './file-tree/file-kinds'
 export type { FileFilterMap, FileViewMode } from './file-tree/file-kinds'
 
 function revealWorkbenchModeForFileOpen(mode: WorkbenchMode): void {
-  const state = useMode.getState()
-  applyWorkbenchModeOpenDecision({
-    workbenchMode: state.workbenchMode,
-    splitMode: state.splitMode,
-  }, mode, {
-    setSplitMode: state.setSplitMode,
-    requestModeChange: requestWorkbenchModeChange,
-  })
+  requestWorkbenchModeOpen(mode)
 }
 
 export default function FileTree({
@@ -180,6 +179,7 @@ export default function FileTree({
   const treeRootRef = useRef<HTMLDivElement>(null)
   const gridPreviewLoadingRef = useRef(new Set<string>())
   const fileTreeSurfaceRefreshTimerRef = useRef<number | null>(null)
+  const fileEmergenceRefreshSchedulerRef = useRef<DeferredSnapshotRefresh | null>(null)
   const selectionAnchorPathRef = useRef<string | null>(null)
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set())
   const queryLower = query.trim().toLowerCase()
@@ -192,20 +192,16 @@ export default function FileTree({
   const [fileEmergenceSnapshot, setFileEmergenceSnapshot] = useState<FileEmergenceSnapshot | null>(null)
   const [fileEmergenceReadingProgress, setFileEmergenceReadingProgress] = useState<FileEmergenceReadingProgress[]>([])
   const [fileEmergenceRefreshing, setFileEmergenceRefreshing] = useState(false)
-  const docTabs = useDocTabs((state) => state.tabs)
-  const docTabGroups = useDocTabs((state) => state.tabGroups)
-  const activeDocTabId = useDocTabs((state) => state.activeTabId)
-  const splitDocTabId = useDocTabs((state) => state.splitTabId)
-  const fileEmergenceProjectContext = useMemo(() => ({
-    tabGroups: docTabGroups
-      .map((group) => ({
-        name: group.name.trim(),
-        paths: docTabs
-          .filter((tab) => tab.groupId === group.id && tab.path)
-          .map((tab) => tab.path!),
-      }))
-      .filter((group) => group.name.length > 0 && group.paths.length >= 2),
-  }), [docTabGroups, docTabs])
+  const fileEmergenceProjectContextSignature = useDocTabs(selectFileEmergenceProjectContextSignature)
+  const fileEmergenceDocumentStateSignature = useDocTabs(selectFileEmergenceDocumentStateSignature)
+  const fileEmergenceProjectContext = useMemo(
+    () => readFileEmergenceProjectContextSignature(fileEmergenceProjectContextSignature),
+    [fileEmergenceProjectContextSignature],
+  )
+  const fileEmergenceDocumentState = useMemo(
+    () => readFileEmergenceDocumentStateSignature(fileEmergenceDocumentStateSignature),
+    [fileEmergenceDocumentStateSignature],
+  )
   const effectiveGridPath = gridPath !== undefined ? gridPath : internalGridPath
   const setEffectiveGridPath = onGridPathChange ?? setInternalGridPath
   const activeAnalysisJobKey = useMemo(() => buildAnalysisJobKey(pendingClips), [pendingClips])
@@ -294,6 +290,22 @@ export default function FileTree({
     }
   }, [fileEmergenceEnabled, fileEmergenceProjectContext, queryLower, safeWorkspaceRoots, viewMode])
 
+  const refreshFileEmergenceSnapshotRef = useRef(refreshFileEmergenceSnapshot)
+  refreshFileEmergenceSnapshotRef.current = refreshFileEmergenceSnapshot
+
+  useEffect(() => {
+    const scheduler = createDeferredSnapshotRefresh(() => {
+      void refreshFileEmergenceSnapshotRef.current(false)
+    })
+    fileEmergenceRefreshSchedulerRef.current = scheduler
+    return () => {
+      scheduler.cancel()
+      if (fileEmergenceRefreshSchedulerRef.current === scheduler) {
+        fileEmergenceRefreshSchedulerRef.current = null
+      }
+    }
+  }, [])
+
   const recordFileActivity = useCallback((payload: Omit<FileEmergenceRecordActivityPayload, 'workspaceRoots'>) => {
     if (fileEmergenceEnabled !== true || safeWorkspaceRoots.length === 0) return
     void (async () => {
@@ -301,13 +313,13 @@ export default function FileTree({
         ...payload,
         workspaceRoots: safeWorkspaceRoots,
       })
-      await refreshFileEmergenceSnapshot(true)
+      fileEmergenceRefreshSchedulerRef.current?.schedule()
     })()
-  }, [fileEmergenceEnabled, refreshFileEmergenceSnapshot, safeWorkspaceRoots])
+  }, [fileEmergenceEnabled, safeWorkspaceRoots])
 
   useEffect(() => {
-    void refreshFileEmergenceSnapshot(false)
-  }, [refreshFileEmergenceSnapshot, safeWorkspaceRootsKey])
+    void refreshFileEmergenceSnapshotRef.current(false)
+  }, [fileEmergenceEnabled, fileEmergenceProjectContextSignature, queryLower, safeWorkspaceRootsKey, viewMode])
 
   useEffect(() => {
     if (fileEmergenceEnabled !== true || safeWorkspaceRoots.length === 0) {
@@ -321,7 +333,7 @@ export default function FileTree({
     return () => {
       disposed = true
     }
-  }, [fileEmergenceEnabled, safeWorkspaceRoots, safeWorkspaceRootsKey, activeDocTabId, splitDocTabId, docTabs.length])
+  }, [fileEmergenceEnabled, safeWorkspaceRoots, safeWorkspaceRootsKey])
 
   useEffect(() => {
     const handleDragCleanup = () => clearFileTreeDragState()
@@ -708,7 +720,7 @@ export default function FileTree({
     selectFile(result.data.path)
     await refreshFiles()
     await loadDirChildren(parentDir)
-    requestWorkbenchModeChange('document')
+    requestWorkbenchModeOpen('document')
   }, [currentPath, loadDirChildren, openTab, refreshFiles, selectFile])
 
   const handleSelectFile = useCallback((event: React.MouseEvent, item: FileItem, orderedPaths: readonly string[]) => {
@@ -1544,24 +1556,22 @@ export default function FileTree({
       filters,
       currentDocumentContext: fileEmergenceEnabled === true
         ? buildCurrentDocumentContext({
-            tabs: docTabs,
-            activeTabId: activeDocTabId,
-            splitTabId: splitDocTabId,
+            tabs: fileEmergenceDocumentState.tabs,
+            activeTabId: fileEmergenceDocumentState.activeTabId,
+            splitTabId: fileEmergenceDocumentState.splitTabId,
             workspaceRoots: safeWorkspaceRoots,
           })
         : null,
       readingProgress: fileEmergenceEnabled === true ? fileEmergenceReadingProgress : [],
     }),
     [
-      activeDocTabId,
-      docTabs,
+      fileEmergenceDocumentState,
       fileEmergenceEnabled,
       fileEmergenceReadingProgress,
       fileEmergenceSnapshot,
       filters,
       query,
       safeWorkspaceRoots,
-      splitDocTabId,
       viewMode,
     ],
   )

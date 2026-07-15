@@ -71,6 +71,7 @@ export interface TaskInteractionHandlers {
   handleCancelChildRun: (scopeId: string, childRunId: string) => Promise<void>
   handleContinueChildRun: (scopeId: string, childRunId: string) => Promise<void>
   handleResumeBrowserTask: (scopeId: string, taskId: string) => Promise<void>
+  handleCancelBrowserTask: (scopeId: string, taskId: string) => Promise<void>
   handleConfirmBrowserCollectionConsent: (scopeId: string, requestId: string) => Promise<void>
   handleResumeTask: (scopeId: string) => Promise<void>
   handleRetryTask: (scopeId: string) => Promise<void>
@@ -316,6 +317,23 @@ export function useTaskInteractionHandlers(
     void refreshPersistedTaskProjections()
   }, [currentScopeId, loadConversation, refreshPersistedTaskProjections])
 
+  const handleCancelBrowserTask = useCallback(async (scopeId: string, taskId: string) => {
+    const normalizedTaskId = String(taskId || '').trim()
+    if (!normalizedTaskId || !window.electronAPI?.browser?.cancelTask) return
+    if (currentScopeId !== scopeId) {
+      void loadConversation(scopeId)
+    }
+    const cancelResult = await window.electronAPI.browser.cancelTask({ taskId: normalizedTaskId }).catch(() => null)
+    recordTaskActionTestEvent({
+      action: 'cancel-browser-task',
+      observed: 'browser.cancelTask',
+      scopeId,
+      taskId: normalizedTaskId,
+      success: cancelResult?.success === true,
+    })
+    void refreshPersistedTaskProjections()
+  }, [currentScopeId, loadConversation, refreshPersistedTaskProjections])
+
   const handleConfirmBrowserCollectionConsent = useCallback(async (scopeId: string, requestId: string) => {
     const normalizedRequestId = String(requestId || '').trim()
     if (!normalizedRequestId || !window.electronAPI?.browser?.confirmCollectionConsent) return
@@ -456,6 +474,7 @@ export function useTaskInteractionHandlers(
     handleCancelChildRun,
     handleContinueChildRun,
     handleResumeBrowserTask,
+    handleCancelBrowserTask,
     handleConfirmBrowserCollectionConsent,
     handleResumeTask,
     handleRetryTask,

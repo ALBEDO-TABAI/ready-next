@@ -17,6 +17,7 @@ import { loadBrowserDisciplineText } from '../domain-adapters/browser-discipline
 import { logAgentMetric } from '../metrics'
 import type { SkillToolAuthorization } from '../skills/skill-tool-authorization'
 import { buildCurrentDateReminderText } from '../system-reminders/current-date-reminder'
+import { moveResponseStyleReminderToEnd } from '../user-profile-prompt'
 import { registerSkillCatalogReminder } from '../system-reminders/skill-catalog-reminder'
 import { registerSkillShellConsentReminder } from '../system-reminders/skill-shell-consent-reminder'
 import { createSystemReminderRegistry } from '../system-reminders/system-reminder-registry'
@@ -170,8 +171,12 @@ export function assembleAgentSdkTurnInput(
       ].filter(Boolean).join('\n')
     : ''
 
+  const {
+    systemPrompt: systemPromptWithoutResponseStyleReminder,
+    responseStyleReminder,
+  } = moveResponseStyleReminderToEnd(session.systemPrompt)
   const instructions = [
-    session.systemPrompt,
+    systemPromptWithoutResponseStyleReminder,
     toolDefinitions.length > 0
       ? '本轮可用工具已经按 Ready 的策略过滤。不要声称使用不存在的工具。'
       : '本轮没有开放工具；直接回答或说明缺口。',
@@ -193,7 +198,8 @@ export function assembleAgentSdkTurnInput(
     useTextToolBridge && toolDefinitions.length > 0
       ? buildTextToolBridgePrompt(toOpenAIToolSchemas(toolDefinitions))
       : '',
-    buildCurrentDateReminderText()
+    buildCurrentDateReminderText(),
+    responseStyleReminder,
   ].join('\n')
 
   // B6 (N-CTX-01 budget) — the prompt-assembly context budget is computed

@@ -1,6 +1,7 @@
 import type { ModelProvider } from '@openai/agents'
 import { classifyFollowupIntent } from '../../../../shared/agent-followup-intent'
 import { resolveAIConfigCapabilities } from '../../../../shared/ai-providers'
+import { resolveBrowserWorkflowIntent } from '../../../../shared/browser-workflow-intent'
 import { buildAgentSpawnContextFromAIConfig } from '../../skills-runtime/agent-context-source'
 import { appendToolCapabilityLog } from '../../tools/tool-event-log'
 import type {
@@ -278,6 +279,9 @@ export async function executeAgentSdkPreparedTurn(
     const inferredSdkTaskType =
       resolveTaskTypeFromBrowserWorkflowText(pureUserTurnText) ||
       resolveTaskTypeFromToolDefinitions(toolDefinitions)
+    if (resolveBrowserWorkflowIntent(pureUserTurnText).kind === 'collection') {
+      projectionPatches.push({ browserCollectionRequired: true })
+    }
     const readOnlyResearchSkill = isReadOnlyResearchSkillToolSet(
       resolveActiveSkillAllowedTools(authorization),
     )
@@ -300,6 +304,7 @@ export async function executeAgentSdkPreparedTurn(
       taskId,
       scopeId: sessionId ?? null,
       userRequestVerbatim: pureUserTurnText,
+      ownerSystemPrompt: session.systemPrompt,
       requestEnvelope: effectiveExecutionOptions?.requestEnvelope,
       intentClassification: effectiveExecutionOptions?.intentClassification,
       inferredTaskType: liveTaskBudgetRuntime?.taskType ?? inferredSdkTaskType ?? 'short_task',

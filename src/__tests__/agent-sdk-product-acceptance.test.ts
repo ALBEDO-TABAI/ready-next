@@ -867,6 +867,7 @@ test('acceptance 20: SDK OpenAI-compatible text bridge keeps tools available wit
       baseUrl: 'https://code.newcli.com/codex/v1',
       agentProtocol: 'openai',
       wireApi: 'chat/completions',
+      toolUseMode: 'on',
     },
     tools: createToolSet([
       { name: 'web_search', groupId: 'general_research', domain: 'general_research', kind: 'read' },

@@ -28,6 +28,7 @@ import {
 import type { TaskBudgetRuntime, TaskProjectionRecord } from '../contracts/run-contracts'
 import { canResumeAsUserPoint } from '../contracts/resume-handle'
 import type { DeliveryStateV1 } from '../../../../shared/dynamic-delivery'
+import { rebindTaskBudgetRuntime } from '../task-projection/run-budget-policy'
 
 export interface RunCloseMetric {
   runId: string
@@ -202,6 +203,7 @@ interface EffectiveTaskFacts {
   taskTypeSource: 'projection_patch' | 'projection_row' | 'budget_runtime' | 'missing'
   module: string | null
   skillExecutionForm: SkillExecutionForm | null
+  browserCollectionRequired: boolean | null
 }
 
 type TerminalFailureReason =
@@ -359,6 +361,15 @@ export async function finalizeRunOutcome(
   outcome: RunOutcome,
   deps: RunFinalizerDeps
 ): Promise<FinalizedRunOutcome> {
+  const terminalBudgetRuntime = reconcileTerminalTaskBudgetRuntime(
+    outcome.taskBudgetRuntime,
+    outcome.projectionPatch,
+    outcome.toolCallsUsed
+  )
+  if (terminalBudgetRuntime !== outcome.taskBudgetRuntime) {
+    outcome = { ...outcome, taskBudgetRuntime: terminalBudgetRuntime } as RunOutcome
+  }
+
   if (outcome.kind === 'done') {
     return writeTerminalOutcome(outcome, deps, 'done', outcome.terminalReason || 'done')
   }
@@ -382,6 +393,27 @@ export async function finalizeRunOutcome(
     statusFromOutcomeKind(outcome.kind),
     outcome.terminalReason
   )
+}
+
+/**
+ * A bootstrap budget is only a pre-run capacity guess. Once a zero-tool turn
+ * closes with the terminal direct-answer patch, align that snapshot before
+ * adjudication and persistence. Explicit task budgets remain authoritative so
+ * research, browser transactions, continuations, and skill work cannot evade
+ * their proof contract by returning prose without using their required tools.
+ */
+export function reconcileTerminalTaskBudgetRuntime(
+  runtime: TaskBudgetRuntime | null | undefined,
+  projectionPatch: Record<string, unknown> | null | undefined,
+  toolCallsUsed: number
+): TaskBudgetRuntime | null {
+  if (!runtime) return null
+  if (
+    toolCallsUsed !== 0
+    || projectionPatch?.taskType !== 'direct_answer'
+    || !runtime.bootstrapBudget
+  ) return runtime
+  return rebindTaskBudgetRuntime(runtime, 'direct_answer', { bootstrapBudget: false })
 }
 
 function statusFromOutcomeKind(
@@ -511,10 +543,10 @@ function hasDocumentDeliveryProof(proofRefs: ReadonlyArray<unknown>): boolean {
   return [...deliveredDocumentPaths].some((path) => artifactPaths.has(path))
 }
 
-/** P0-3 — the row in task_projections may still carry first-build defaults
- *  (short_task) at finalize time: the terminal projectionPatch is the
- *  authoritative correction and must win for adjudication AND coverage
- *  accounting, independent of patch-persistence timing. */
+/** P0-3 — the row in task_projections may still carry first-build defaults.
+ *  A terminal direct-answer patch first rebinds a stale bootstrap budget;
+ *  explicit non-bootstrap runtimes remain authoritative so evidence-bearing
+ *  task types cannot be downgraded. Both beat the stale projection row. */
 function resolveEffectiveTaskFacts(
   outcome: RunOutcome,
   deps: RunFinalizerDeps
@@ -524,6 +556,7 @@ function resolveEffectiveTaskFacts(
         taskType?: unknown
         module?: unknown
         skillExecutionForm?: unknown
+        browserCollectionRequired?: unknown
       }
     | null
     | undefined
@@ -553,7 +586,10 @@ function resolveEffectiveTaskFacts(
     taskType,
     taskTypeSource,
     module: typeof patch?.module === 'string' && patch.module ? patch.module : rowModule,
-    skillExecutionForm: normalizeSkillExecutionForm(patch?.skillExecutionForm)
+    skillExecutionForm: normalizeSkillExecutionForm(patch?.skillExecutionForm),
+    browserCollectionRequired: typeof patch?.browserCollectionRequired === 'boolean'
+      ? patch.browserCollectionRequired
+      : null
   }
 }
 
@@ -604,7 +640,10 @@ async function writeTerminalOutcome(
     } else if (canResumeAsUserPoint(taskContinuation)) {
       effectiveStatus = 'checkpoint'
       effectiveTerminalReason = 'checkpoint_budget'
-    } else if (canKeepProofBearingDegradedVisible(adjudication, outcome.projectionPatch, facts)) {
+    } else if (
+      !(facts.taskType === 'research' && outcome.toolCallsUsed === 0)
+      && canKeepProofBearingDegradedVisible(adjudication, outcome.projectionPatch, facts)
+    ) {
       // P1: a run that DID satisfy part of its criteria stays
       // 'done' with a visible degraded reason — does not force-fail the run.
       // Proofs that satisfy no criteria are hard-converted in this mode.
@@ -783,6 +822,9 @@ function recordTerminalAdjudication(
       hasPlannedSteps: hasPlannedStepsRequiringProof(projection, outcome.projectionPatch),
       hasStepCompletionProof: hasProofKind(proofRefs, new Set(['run_state', 'task_event'])),
       hasDocumentDeliveryProof: hasDocumentDeliveryProof(proofRefs),
+      browserCollectionRequired: effectiveModule === 'browser'
+        ? facts?.browserCollectionRequired === true
+        : undefined,
       coverageTargets: deriveCoverageTargets(projection, outcome.projectionPatch)
     })
     // D4 — 模型经 declare_completion_criteria 声明的补充标准并入裁决：

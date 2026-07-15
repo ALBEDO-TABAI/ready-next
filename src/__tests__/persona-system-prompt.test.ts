@@ -2,7 +2,10 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { defaultSystemPrompt } from '../main/modules/agent-control/runtime-core/agent-sdk-runtime'
-import { composePersonaSystemPrompt } from '../main/modules/agent-control/runtime-core/persona-system-prompt'
+import {
+  composePersonaSystemPrompt,
+  resolvePersonaProfileUserId,
+} from '../main/modules/agent-control/runtime-core/persona-system-prompt'
 
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 
@@ -35,6 +38,7 @@ test('composePersonaSystemPrompt uses the selected agent personality, tone, and 
       }),
     },
     defaultSystemPrompt,
+    'default-user',
   )
 
   assert.match(result, /Ready 是由@上班摸鱼 开发的，面向知识工作者和创作者的通用桌面工作台。/)
@@ -63,6 +67,7 @@ test('composePersonaSystemPrompt falls back when a persona is missing and omits 
       }),
     },
     defaultSystemPrompt,
+    'default-user',
   )
 
   assert.match(result, /Ready 是由@上班摸鱼 开发的，面向知识工作者和创作者的通用桌面工作台。/)
@@ -71,4 +76,48 @@ test('composePersonaSystemPrompt falls back when a persona is missing and omits 
   assert.doesNotMatch(result, /昵称：/)
   assert.doesNotMatch(result, /回复风格：/)
   assert.doesNotMatch(result, /长期偏好：/)
+})
+
+test('persona fallback resolves local, bound remote, and unbound remote identities without leakage', async () => {
+  assert.equal(resolvePersonaProfileUserId({ sourceKind: 'local' }), 'default-user')
+  assert.equal(
+    resolvePersonaProfileUserId({ sourceKind: 'channel', userId: ' remote-user ' }),
+    'remote-user',
+  )
+  assert.equal(resolvePersonaProfileUserId({ sourceKind: 'channel' }), null)
+  assert.equal(resolvePersonaProfileUserId(null), null)
+
+  const profileReads: string[] = []
+  const profileRepo = {
+    getProfile: async (userId: string) => {
+      profileReads.push(userId)
+      return {
+        id: userId,
+        name: userId,
+        preferencesJson: { longTermPreferences: `PRIVATE:${userId}` },
+        createdAt: 1,
+        updatedAt: 1,
+      }
+    },
+  }
+  const composeFor = (scope: { sourceKind: 'local' | 'channel'; userId?: string }) =>
+    composePersonaSystemPrompt(
+      'butler',
+      { getPersonality: async () => null },
+      profileRepo,
+      () => 'BASE',
+      resolvePersonaProfileUserId(scope),
+    )
+
+  const local = await composeFor({ sourceKind: 'local' })
+  const boundRemote = await composeFor({ sourceKind: 'channel', userId: 'remote-user' })
+  const unboundRemote = await composeFor({ sourceKind: 'channel' })
+
+  assert.deepEqual(profileReads, ['default-user', 'remote-user'])
+  assert.match(local, /PRIVATE:default-user/)
+  assert.doesNotMatch(local, /PRIVATE:remote-user/)
+  assert.match(boundRemote, /PRIVATE:remote-user/)
+  assert.doesNotMatch(boundRemote, /PRIVATE:default-user/)
+  assert.equal(unboundRemote, 'BASE')
+  assert.doesNotMatch(unboundRemote, /PRIVATE:/)
 })

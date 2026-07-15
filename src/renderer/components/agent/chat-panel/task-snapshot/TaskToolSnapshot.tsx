@@ -33,7 +33,7 @@
  * Plan: docs/superpowers/plans/2026-05-21-V-stage-v-comprehensive-implementation.md §2 V1.8
  */
 
-import { useCallback, useMemo } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import type React from 'react'
 import type { AgentMessage, ToolTraceEvent } from '../../../../stores/useAgent'
 import {
@@ -91,6 +91,7 @@ export interface TaskToolSnapshotProps {
   onCancelChildRun: (scopeId: string, childRunId: string) => void
   onContinueChildRun: (scopeId: string, childRunId: string) => void
   onResumeBrowserTask: (scopeId: string, taskId: string) => void
+  onCancelBrowserTask: (scopeId: string, taskId: string) => void
   onConfirmBrowserCollectionConsent: (scopeId: string, requestId: string) => void
 
   // --- Render-prop ---
@@ -98,6 +99,29 @@ export interface TaskToolSnapshotProps {
 }
 
 export const MAX_BOTTOM_BACKGROUND_TASK_CARDS = 2
+const DISMISSED_BOTTOM_TASK_STORAGE_KEY = 'ready.agent.dismissed-bottom-task-cards.v1'
+const MAX_PERSISTED_DISMISSED_TASKS = 200
+
+function readDismissedBottomTaskKeys(): Set<string> {
+  if (typeof window === 'undefined') return new Set()
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(DISMISSED_BOTTOM_TASK_STORAGE_KEY) || '[]')
+    if (!Array.isArray(parsed)) return new Set()
+    return new Set(parsed.filter((value): value is string => typeof value === 'string' && Boolean(value.trim())))
+  } catch {
+    return new Set()
+  }
+}
+
+function persistDismissedBottomTaskKeys(keys: Set<string>): void {
+  if (typeof window === 'undefined') return
+  try {
+    const values = [...keys].slice(-MAX_PERSISTED_DISMISSED_TASKS)
+    window.localStorage.setItem(DISMISSED_BOTTOM_TASK_STORAGE_KEY, JSON.stringify(values))
+  } catch {
+    // Presentation-only persistence must never block task rendering.
+  }
+}
 
 function taskRunSnapshotKey(run: TaskCardRun): string {
   return `${run.scopeId}:${getTaskRunDisplayKey(run)}`
@@ -180,9 +204,11 @@ export function TaskToolSnapshot(props: TaskToolSnapshotProps): React.ReactEleme
     onCancelChildRun,
     onContinueChildRun,
     onResumeBrowserTask,
+    onCancelBrowserTask,
     onConfirmBrowserCollectionConsent,
     children,
   } = props
+  const [dismissedBottomTaskKeys, setDismissedBottomTaskKeys] = useState<Set<string>>(readDismissedBottomTaskKeys)
 
   const renderTaskSnapshotCard = useCallback(
     (
@@ -191,7 +217,10 @@ export function TaskToolSnapshot(props: TaskToolSnapshotProps): React.ReactEleme
       compact = false,
       events?: ToolTraceEvent[],
       pending = false,
+      dismissible = false,
     ) => {
+      const dismissalKey = taskRunSnapshotKey(run)
+      if (dismissible && dismissedBottomTaskKeys.has(dismissalKey)) return null
       const expanded = Boolean(taskDisclosureState[key]?.overview)
       return (
         <TaskCard
@@ -226,7 +255,16 @@ export function TaskToolSnapshot(props: TaskToolSnapshotProps): React.ReactEleme
           onCancelChildRun={onCancelChildRun}
           onContinueChildRun={onContinueChildRun}
           onResumeBrowserTask={onResumeBrowserTask}
+          onCancelBrowserTask={onCancelBrowserTask}
           onConfirmBrowserCollectionConsent={onConfirmBrowserCollectionConsent}
+          dismissible={dismissible}
+          onDismiss={dismissible ? () => {
+            setDismissedBottomTaskKeys((current) => {
+              const next = new Set(current).add(dismissalKey)
+              persistDismissedBottomTaskKeys(next)
+              return next
+            })
+          } : undefined}
         />
       )
     },
@@ -239,6 +277,7 @@ export function TaskToolSnapshot(props: TaskToolSnapshotProps): React.ReactEleme
       onContinueDetachedTask,
       onContinueChildRun,
       onConfirmBrowserCollectionConsent,
+      onCancelBrowserTask,
       onResumeBrowserTask,
       onDismissMemoryCapture,
       onOpenTaskArtifact,
@@ -250,6 +289,7 @@ export function TaskToolSnapshot(props: TaskToolSnapshotProps): React.ReactEleme
       onSupplementMemoryCapture,
       onUndoMemoryCapture,
       setTaskSectionExpanded,
+      dismissedBottomTaskKeys,
       taskDisclosureState
     ]
   )
@@ -466,22 +506,32 @@ export function TaskToolSnapshot(props: TaskToolSnapshotProps): React.ReactEleme
     const suppressForeground = foregroundActive && (hasPendingAskUserCard || !isHeavyOngoing(currentTaskRun))
     const effectiveForegroundActive = foregroundActive && !suppressForeground
 
-    if (!effectiveForegroundActive && backgroundTaskRuns.length === 0) return null
-    const { visibleRuns: visibleBackgroundTaskRuns, hiddenCount } = selectBottomBackgroundTaskRuns(backgroundTaskRuns)
+    const foregroundDismissed = currentTaskRun
+      ? dismissedBottomTaskKeys.has(taskRunSnapshotKey(currentTaskRun))
+      : false
+    const visibleForegroundActive = effectiveForegroundActive && !foregroundDismissed
+    const undismissedBackgroundTaskRuns = backgroundTaskRuns.filter(
+      (run) => !dismissedBottomTaskKeys.has(taskRunSnapshotKey(run)),
+    )
+    if (!visibleForegroundActive && undismissedBackgroundTaskRuns.length === 0) return null
+    const { visibleRuns: visibleBackgroundTaskRuns, hiddenCount } = selectBottomBackgroundTaskRuns(undismissedBackgroundTaskRuns)
     return (
       // width:100% + box-sizing so the card visually pairs with the
       // composer chrome (which is also `w-full`). Without the explicit
       // width some intrinsic-sized children inside TaskCard can collapse
       // the wrapper narrower than the input slot.
       <div className="flex flex-col" style={{ gap: 6, width: '100%', boxSizing: 'border-box' }}>
-        {effectiveForegroundActive && currentTaskRun
+        {visibleForegroundActive && currentTaskRun
           ? renderTaskSnapshotCard(
               currentTaskRun,
               `bottom-task-${currentTaskRun.scopeId}-${getTaskRunDisplayKey(currentTaskRun)}`,
               true,
+              undefined,
+              false,
+              true,
             )
           : null}
-        {backgroundTaskRuns.length > 0 && (
+        {undismissedBackgroundTaskRuns.length > 0 && (
           <div
             className="panel-hover-scrollbar flex flex-col"
             style={{
@@ -492,7 +542,7 @@ export function TaskToolSnapshot(props: TaskToolSnapshotProps): React.ReactEleme
               paddingRight: hiddenCount > 0 ? 2 : 0,
             }}
           >
-            {(effectiveForegroundActive || backgroundTaskRuns.length > 1) && (
+            {(visibleForegroundActive || undismissedBackgroundTaskRuns.length > 1) && (
               <div
                 style={{
                   fontSize: 10.5,
@@ -508,6 +558,9 @@ export function TaskToolSnapshot(props: TaskToolSnapshotProps): React.ReactEleme
               renderTaskSnapshotCard(
                 run,
                 `bottom-task-${run.scopeId}-${getTaskRunDisplayKey(run)}`,
+                true,
+                undefined,
+                false,
                 true,
               ),
             )}
@@ -529,7 +582,7 @@ export function TaskToolSnapshot(props: TaskToolSnapshotProps): React.ReactEleme
         )}
       </div>
     )
-  }, [backgroundTaskRuns, currentTaskRun, isStreaming, messages, renderTaskSnapshotCard])
+  }, [backgroundTaskRuns, currentTaskRun, dismissedBottomTaskKeys, isStreaming, messages, renderTaskSnapshotCard])
 
   return (
     <>

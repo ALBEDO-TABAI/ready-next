@@ -166,6 +166,70 @@ describe('AI provider workspace', () => {
     assert.deepEqual(config.modelIds, ['gpt-5.4', 'gpt-4o'])
   })
 
+  it('canonicalizes origin-only OpenAI-compatible endpoints to the /v1 API prefix', () => {
+    const publicRelay = normalizeAIConfig({
+      provider: 'openai-compatible',
+      baseUrl: 'https://relay.example.com/',
+      apiKey: 'sk-test',
+      model: 'gpt-test',
+      agentProtocol: 'openai',
+    })
+    const internalRelay = normalizeAIConfig({
+      provider: 'openai-compatible',
+      baseUrl: 'http://10.10.10.45:3000',
+      apiKey: 'sk-test',
+      model: 'gpt-test',
+      agentProtocol: 'openai',
+    })
+    const explicitPrefix = normalizeAIConfig({
+      provider: 'openai-compatible',
+      baseUrl: 'https://relay.example.com/openai/v1/',
+      apiKey: 'sk-test',
+      model: 'gpt-test',
+      agentProtocol: 'openai',
+    })
+    const anthropicRelay = normalizeAIConfig({
+      provider: 'openai-compatible',
+      baseUrl: 'https://relay.example.com/',
+      apiKey: 'sk-test',
+      model: 'claude-test',
+      agentProtocol: 'anthropic',
+    })
+
+    assert.equal(publicRelay.baseUrl, 'https://relay.example.com/v1')
+    assert.equal(internalRelay.baseUrl, 'http://10.10.10.45:3000/v1')
+    assert.equal(explicitPrefix.baseUrl, 'https://relay.example.com/openai/v1')
+    assert.equal(anthropicRelay.baseUrl, 'https://relay.example.com')
+  })
+
+  it('removes credentials, query parameters, and fragments from compatible base URLs', () => {
+    const originOnly = normalizeAIConfig({
+      provider: 'openai-compatible',
+      baseUrl: 'https://user:password@relay.example.com?token=secret#debug',
+      apiKey: 'sk-test',
+      model: 'gpt-test',
+      agentProtocol: 'openai',
+    })
+    const explicitPrefix = normalizeAIConfig({
+      provider: 'openai-compatible',
+      baseUrl: 'https://user:password@relay.example.com/openai/v1/?token=secret#debug',
+      apiKey: 'sk-test',
+      model: 'gpt-test',
+      agentProtocol: 'openai',
+    })
+    const anthropicRelay = normalizeAIConfig({
+      provider: 'openai-compatible',
+      baseUrl: 'https://user:password@relay.example.com?token=secret#debug',
+      apiKey: 'sk-test',
+      model: 'claude-test',
+      agentProtocol: 'anthropic',
+    })
+
+    assert.equal(originOnly.baseUrl, 'https://relay.example.com/v1')
+    assert.equal(explicitPrefix.baseUrl, 'https://relay.example.com/openai/v1')
+    assert.equal(anthropicRelay.baseUrl, 'https://relay.example.com')
+  })
+
   it('normalizes DeepSeek endpoints away from generic placeholder models', () => {
     const config = normalizeAIConfig({
       provider: 'deepseek',

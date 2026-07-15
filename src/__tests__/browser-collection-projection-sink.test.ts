@@ -63,6 +63,54 @@ describe('browser collection projection sink', () => {
     assert.equal(record.progress && typeof record.progress === 'object' ? (record.progress as { completed?: number }).completed : null, 2)
   })
 
+  it('keeps collection ownership and exposes the real save destination as artifacts', () => {
+    const { records, runtime } = createRuntimeStore()
+    const sink = makeNoteCollectProjectionSink(runtime as never)
+    const executionBinding = {
+      schemaVersion: 1 as const,
+      runId: 'run-agent-1',
+      ownerAgentIdAtStart: 'analyst',
+      runOrigin: 'initial' as const,
+      kind: 'registered_agent' as const,
+      executionMaterialHash: 'hash',
+      ownerAssignmentSource: 'conversation_active' as const,
+      executionSelectionSource: 'task_owner' as const,
+      resolutionKind: 'direct' as const,
+    }
+
+    sink.upsert({
+      taskId: 'browser-task-note-output',
+      scopeId: 'scope-output',
+      title: '浏览器逐篇采集',
+      summary: '已保存 2/3 篇',
+      state: 'running',
+      total: 3,
+      completed: 2,
+      failed: 0,
+      saved: 2,
+      remaining: 1,
+      ownerAgentId: 'analyst',
+      ownerRunId: 'run-agent-1',
+      parentTaskId: 'task-agent-1',
+      executionBinding,
+      outputRootDir: '/Users/user/Documents/Ready采集/profile',
+      reportPath: '/Users/user/Documents/Ready采集/profile/采集报告.md',
+      manifestPath: '/Users/user/Documents/Ready采集/profile/collection-manifest.json',
+    })
+
+    const record = records.get('browser-task-note-output')
+    assert.ok(record)
+    assert.equal(record.taskOrigin, 'workflow_child')
+    assert.equal(record.ownerAgentId, 'analyst')
+    assert.equal(record.parentTaskId, 'task-agent-1')
+    assert.deepEqual(record.executionBinding, executionBinding)
+    assert.match(String(record.progress?.detail || ''), /保存到 \/Users\/bai\/Documents\/Ready采集\/profile/)
+    assert.deepEqual(
+      record.recentArtifacts?.map((artifact) => artifact.kind),
+      ['collection_output', 'collection_report', 'collection_manifest'],
+    )
+  })
+
   it('aggregates multiple child collection tasks under the same visible job without double-counting child updates', () => {
     const { records, runtime } = createRuntimeStore()
     const sink = makeNoteCollectProjectionSink(runtime as never)

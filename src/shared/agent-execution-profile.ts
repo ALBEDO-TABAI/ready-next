@@ -45,6 +45,7 @@ export interface AgentExecutionProfile {
   name: string
   charter: string
   personality: string
+  tone?: string
   rules: string
   knowledgeIndex: string
   allowedKnowledgeRefs: string[]

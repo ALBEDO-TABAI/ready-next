@@ -4,29 +4,39 @@ import type { ActiveSkillContextSource } from '../session/active-skill-context'
 import type { SkillRunContract } from '../contracts/run-contracts'
 import { isVeaAction, isVeaStage, resolveVeaResumeAction } from '../vea-resume-action'
 
-export type TurnTerminalReason =
-  | 'done'
-  | 'checkpoint_budget'
-  | 'checkpoint_background'
-  | 'checkpoint_user_input'
-  | 'checkpoint_steered'
-  | 'blocked_config'
-  | 'blocked_external'
-  | 'context_overflow'
-  | 'blocked_tool_error'
-  | 'adjudication_degraded'
-  | 'browser_transaction_unconfirmed'
-  | 'delivery_failed'
-  | 'tool_unavailable'
-  | 'no_artifact'
-  | 'proof_gap'
-  | 'failed_skill'
-  | 'resume_launch_failed'
-  | 'persistence_failed'
-  | 'manual_suspend'
-  | 'cancelled_user'
-  | 'cancelled_runtime'
-  | 'main_no_progress_timeout'
+export const TURN_TERMINAL_REASONS = [
+  'done',
+  'checkpoint_budget',
+  'checkpoint_background',
+  'checkpoint_user_input',
+  'checkpoint_steered',
+  'blocked_config',
+  'blocked_external',
+  'context_overflow',
+  'blocked_tool_error',
+  'adjudication_degraded',
+  'browser_transaction_unconfirmed',
+  'delivery_failed',
+  'tool_unavailable',
+  'no_artifact',
+  'proof_gap',
+  'failed_skill',
+  'resume_launch_failed',
+  'persistence_failed',
+  'manual_suspend',
+  'cancelled_user',
+  'cancelled_runtime',
+  'main_no_progress_timeout',
+] as const
+
+export type TurnTerminalReason = typeof TURN_TERMINAL_REASONS[number]
+
+const TURN_TERMINAL_REASON_SET = new Set<string>(TURN_TERMINAL_REASONS)
+
+export function normalizeTurnTerminalReason(value: unknown): TurnTerminalReason | null {
+  const normalized = String(value || '').trim()
+  return TURN_TERMINAL_REASON_SET.has(normalized) ? normalized as TurnTerminalReason : null
+}
 
 export type TurnUserIntent =
   | 'start'

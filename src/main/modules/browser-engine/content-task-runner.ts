@@ -36,6 +36,7 @@ import { runBrowserCollection } from './browser-collector-engine'
 import type { NoteCollectFacade } from './browser-collector-actions'
 import { isHighControlPlatformText } from '../../../shared/browser-collection-intent'
 import { isBrowserSupervisionVisibleTaskStatus } from '../../../shared/browser-task-status'
+import type { TaskExecutionBinding } from '../../../shared/agent-execution-profile'
 import {
   assessCollectionTargets,
   deriveCollectionTargets,
@@ -97,6 +98,13 @@ export interface BrowserTaskProjectionInput {
   canResume?: boolean
   startedAt?: string | null
   finishedAt?: string | null
+  ownerAgentId?: string | null
+  ownerRunId?: string | null
+  parentTaskId?: string | null
+  executionBinding?: TaskExecutionBinding | null
+  outputRootDir?: string | null
+  reportPath?: string | null
+  manifestPath?: string | null
   /** EP2 dogfood — progress-only refresh: update the EXISTING projection in
    *  place (status untouched) so download write-backs move the card numbers
    *  even when no status transition fires an event. */
@@ -216,6 +224,38 @@ function sourceTaskIdFromPayload(payload: Record<string, unknown> | null | undef
   const plan = payload?.plan && typeof payload.plan === 'object' ? payload.plan as Record<string, unknown> : null
   const sourceTaskId = String(plan?.sourceTaskId || '').trim()
   return sourceTaskId || undefined
+}
+
+function collectionProjectionMetadata(
+  task: BrowserCapabilityTaskHandle | null,
+  payload: Record<string, unknown> | null | undefined,
+): Pick<BrowserTaskProjectionInput,
+  'ownerAgentId' | 'ownerRunId' | 'parentTaskId' | 'executionBinding'
+  | 'outputRootDir' | 'reportPath' | 'manifestPath'> {
+  const plan = payload?.plan && typeof payload.plan === 'object'
+    ? payload.plan as Record<string, unknown>
+    : null
+  const result = resultObject(task)
+  const stringValue = (...values: unknown[]): string | null => {
+    for (const value of values) {
+      if (typeof value === 'string' && value.trim()) return value.trim()
+    }
+    return null
+  }
+  const executionBinding = payload?.executionBinding && typeof payload.executionBinding === 'object'
+    ? payload.executionBinding as TaskExecutionBinding
+    : plan?.executionBinding && typeof plan.executionBinding === 'object'
+      ? plan.executionBinding as TaskExecutionBinding
+      : null
+  return {
+    ownerAgentId: stringValue(payload?.ownerAgentId, plan?.ownerAgentId),
+    ownerRunId: stringValue(payload?.ownerRunId, plan?.ownerRunId),
+    parentTaskId: stringValue(payload?.parentTaskId, plan?.parentTaskId),
+    executionBinding,
+    outputRootDir: stringValue(result?.outputRootDir, plan?.outputRootDir, payload?.outputRootDir),
+    reportPath: stringValue(result?.collectionReportPath, result?.reportPath),
+    manifestPath: stringValue(result?.collectionManifestPath, result?.manifestPath),
+  }
 }
 
 function sourceIdsFromOutputs(outputs: Array<{ sourceId?: string; success?: boolean }> | null | undefined): {
@@ -666,6 +706,7 @@ export class BrowserContentTaskRunner {
           canResume: this.canResumeTask(task, payload),
           startedAt: task.startedAt,
           finishedAt: task.finishedAt,
+          ...collectionProjectionMetadata(task, payload),
         })
         if (sourceTaskId) projectedSourceTaskIds.add(sourceTaskId)
       } else {
@@ -726,6 +767,7 @@ export class BrowserContentTaskRunner {
       canResume: task ? this.canResumeTask(task, payload) : false,
       startedAt: task?.startedAt,
       finishedAt: task?.finishedAt,
+      ...collectionProjectionMetadata(task, payload),
     })
   }
 
@@ -759,6 +801,7 @@ export class BrowserContentTaskRunner {
       canResume: task ? this.canResumeTask(task, payload) : false,
       startedAt: task?.startedAt,
       finishedAt: task?.finishedAt,
+      ...collectionProjectionMetadata(task, payload),
     })
   }
 
@@ -778,6 +821,10 @@ export class BrowserContentTaskRunner {
     targetUrl?: string
     outputRootDir?: string
     sourceMessageIds?: string[]
+    ownerAgentId?: string
+    ownerRunId?: string
+    parentTaskId?: string
+    executionBinding?: TaskExecutionBinding
   }): BrowserCapabilityTaskHandle {
     const handle = this.persistenceService.createTask({
       kind: 'visible_collect',
@@ -787,6 +834,10 @@ export class BrowserContentTaskRunner {
         targetUrl: params.targetUrl || undefined,
         outputRootDir: params.outputRootDir || undefined,
         sourceMessageIds: params.sourceMessageIds || [],
+        ...(params.ownerAgentId ? { ownerAgentId: params.ownerAgentId } : {}),
+        ...(params.ownerRunId ? { ownerRunId: params.ownerRunId } : {}),
+        ...(params.parentTaskId ? { parentTaskId: params.parentTaskId } : {}),
+        ...(params.executionBinding ? { executionBinding: params.executionBinding } : {}),
         ...(params.scopeId && params.scopeId.trim() ? { scopeId: params.scopeId.trim() } : {}),
       },
     })

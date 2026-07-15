@@ -13,7 +13,7 @@ interface ProfileRegistryReader {
 }
 
 interface ProfilePersonalityReader {
-  getPersonality(agentName: string): Promise<{ personalityText: string } | null>
+  getPersonality(agentName: string): Promise<{ personalityText: string; tone?: string } | null>
 }
 
 interface ProfileKnowledgeStore {
@@ -148,6 +148,7 @@ export class AgentExecutionProfileResolver {
     const personalityRecord = await this.deps.personality.getPersonality(personaRef)
     const fallbackPersonality = this.deps.readAsset('SOUL.md').trim()
     const personality = personalityRecord?.personalityText?.trim() || fallbackPersonality
+    const tone = personalityRecord?.tone?.trim() || undefined
     const reasons: string[] = []
     if (!personalityRecord) reasons.push('personality_fallback')
 
@@ -191,6 +192,7 @@ export class AgentExecutionProfileResolver {
       effectiveAgentId: record.id,
       personaRef,
       personality,
+      ...(tone ? { tone } : {}),
       rules,
       knowledge: cards.map((card) => ({ relPath: card.relPath, frontmatter: card.frontmatter, body: card.body })),
     })
@@ -210,6 +212,7 @@ export class AgentExecutionProfileResolver {
       name: record.name,
       charter: record.charter || '',
       personality,
+      tone,
       rules,
       knowledgeIndex,
       allowedKnowledgeRefs,

@@ -23,17 +23,22 @@ describe('browser collection consent IPC contract', () => {
     assert.match(rendererTypes, /confirmedVia:\s*'ask_user_questions' \| 'ui_action'/)
   })
 
-  it('exposes browser task resume from main through preload and renderer types', () => {
+  it('exposes side-effect-free resume and explicit cancel from main through preload and renderer types', () => {
     const main = read('src/main/modules/browser-engine/ipc-handler.ts')
     const preload = read('src/preload/index.ts')
     const rendererTypes = read('src/renderer/types/electron.d.ts')
 
     assert.match(main, /ipcMain\.handle\('browser:resumeTask'/)
     assert.match(main, /resumeBrowserTask\(payload\)/)
-    assert.match(main, /startCollectionFromCompletedVisibleTask\(task\)/)
+    assert.doesNotMatch(main, /startCollectionFromCompletedVisibleTask/)
+    assert.match(main, /ipcMain\.handle\('browser:cancelTask'/)
+    assert.match(main, /cancelBrowserTask\(payload\)/)
     assert.match(preload, /resumeTask:\s*\(payload:\s*\{ taskId: string \}\)/)
     assert.match(preload, /ipcRenderer\.invoke\('browser:resumeTask', payload\)/)
+    assert.match(preload, /cancelTask:\s*\(payload:\s*\{ taskId: string \}\)/)
+    assert.match(preload, /ipcRenderer\.invoke\('browser:cancelTask', payload\)/)
     assert.match(rendererTypes, /resumeTask:\s*\(payload:\s*\{/)
     assert.match(rendererTypes, /taskId:\s*string/)
+    assert.match(rendererTypes, /cancelTask:\s*\(payload:\s*\{/)
   })
 })

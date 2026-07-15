@@ -258,6 +258,136 @@ test('success path: python connect + venv rebuild + core deps + overallReady', a
   assert.equal(state.text.get('__skills_python_path'), '/r/python-dist/python/bin/python3')
 })
 
+test('provision state stays queryable and duplicate starts join the same in-flight task', async () => {
+  let releaseDownload: (() => void) | null = null
+  const downloadGate = new Promise<void>((resolve) => { releaseDownload = resolve })
+  const { deps, calls } = makeDeps({
+    assets: [pinnedPython()],
+    download: async (url, onProgress) => {
+      calls[`download:${url}`] = (calls[`download:${url}`] || 0) + 1
+      onProgress(25, 100)
+      await downloadGate
+      onProgress(100, 100)
+      return Buffer.from(HASH_GOOD)
+    },
+  })
+  const provisioner = new RuntimeProvisioner(deps)
+  const firstProgress: string[] = []
+  const secondProgress: string[] = []
+
+  const first = provisioner.provision({}, (progress) => firstProgress.push(`${progress.phase}:${progress.receivedBytes || 0}`))
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  const running = provisioner.getProvisionSnapshot()
+  assert.equal(running.state, 'running')
+  assert.equal(running.progress?.phase, 'download')
+  assert.equal(running.progress?.receivedBytes, 25)
+
+  const second = provisioner.provision({}, (progress) => secondProgress.push(`${progress.phase}:${progress.receivedBytes || 0}`))
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  assert.equal(calls['download:PY_A'], 1, 'duplicate start must not launch another download')
+  assert.ok(secondProgress.includes('download:25'), 'joining caller receives the latest progress snapshot')
+
+  releaseDownload?.()
+  const [firstStatus, secondStatus] = await Promise.all([first, second])
+  assert.equal(firstStatus.overallReady, true)
+  assert.equal(secondStatus.overallReady, true)
+  assert.ok(firstProgress.includes('done:0'))
+  assert.ok(secondProgress.includes('done:0'))
+  const completed = provisioner.getProvisionSnapshot()
+  assert.equal(completed.state, 'succeeded')
+  assert.equal(completed.result?.overallReady, true)
+})
+
+test('core dependency install failure becomes a retryable terminal provision snapshot', async () => {
+  const { deps } = makeDeps({
+    assets: [pinnedPython()],
+    installCoreDeps: async () => ({ ready: false, missing: ['video-expert-analyzer'] }),
+  })
+  const provisioner = new RuntimeProvisioner(deps)
+
+  await assert.rejects(
+    provisioner.provision({}, () => {}),
+    (error: unknown) => error instanceof RuntimeProvisionError && error.kind === 'runtime_setup_failed',
+  )
+  const failed = provisioner.getProvisionSnapshot()
+  assert.equal(failed.state, 'failed')
+  assert.equal(failed.errorKind, 'runtime_setup_failed')
+  assert.match(failed.error || '', /video-expert-analyzer/)
+})
+
+test('cancel remains cancelling until work exits, then becomes cancelled without publishing done', async () => {
+  let releaseDownload: (() => void) | null = null
+  let lateProgress: ((received: number, total: number | null) => void) | null = null
+  const downloadGate = new Promise<void>((resolve) => { releaseDownload = resolve })
+  const { deps } = makeDeps({
+    assets: [pinnedPython()],
+    download: async (_url, onProgress) => {
+      lateProgress = onProgress
+      onProgress(10, 100)
+      await downloadGate
+      return Buffer.from(HASH_GOOD)
+    },
+  })
+  const provisioner = new RuntimeProvisioner(deps)
+  const phases: string[] = []
+  const running = provisioner.provision({}, (progress) => phases.push(progress.phase))
+  await new Promise((resolve) => setTimeout(resolve, 0))
+
+  const stopping = provisioner.cancel()
+  assert.equal(stopping.state, 'cancelling')
+  assert.equal(provisioner.isProvisioning(), true)
+
+  releaseDownload?.()
+  await assert.rejects(
+    running,
+    (error: unknown) => error instanceof RuntimeProvisionError && error.kind === 'cancelled',
+  )
+  assert.equal(provisioner.getProvisionSnapshot().state, 'cancelled')
+  assert.equal(provisioner.isProvisioning(), false)
+  assert.equal(phases.includes('done'), false)
+
+  const terminal = provisioner.getProvisionSnapshot()
+  lateProgress?.(90, 100)
+  assert.deepEqual(provisioner.getProvisionSnapshot(), terminal, 'late progress must not resurrect a terminal task')
+})
+
+test('late progress from a cancelled run cannot overwrite a later retry', async () => {
+  const progressCallbacks: Array<(received: number, total: number | null) => void> = []
+  const releases: Array<() => void> = []
+  const { deps } = makeDeps({
+    assets: [pinnedPython()],
+    download: async (_url, onProgress) => {
+      progressCallbacks.push(onProgress)
+      const gate = new Promise<void>((resolve) => { releases.push(resolve) })
+      onProgress(10, 100)
+      await gate
+      return Buffer.from(HASH_GOOD)
+    },
+  })
+  const provisioner = new RuntimeProvisioner(deps)
+
+  const first = provisioner.provision({}, () => {})
+  while (releases.length < 1) await new Promise((resolve) => setTimeout(resolve, 0))
+  provisioner.cancel()
+  releases[0]()
+  await assert.rejects(first, (error: unknown) => error instanceof RuntimeProvisionError && error.kind === 'cancelled')
+
+  const second = provisioner.provision({}, () => {})
+  while (releases.length < 2) await new Promise((resolve) => setTimeout(resolve, 0))
+  const retryBeforeLateProgress = provisioner.getProvisionSnapshot()
+  progressCallbacks[0](99, 100)
+  assert.deepEqual(
+    provisioner.getProvisionSnapshot(),
+    retryBeforeLateProgress,
+    'a callback carrying the previous run identity must be ignored',
+  )
+
+  releases[1]()
+  const result = await second
+  assert.equal(result.overallReady, true)
+  assert.equal(provisioner.getProvisionSnapshot().state, 'succeeded')
+})
+
 test('ffmpeg wrong-arch on verify → asset_integrity_failed; stale binary removed before replace', async () => {
   const state: FakeState = { existing: new Set(['/r/bin/ffmpeg']), extractedDirs: new Set(), text: new Map(), realpathMap: new Map() }
   let probeCalls = 0

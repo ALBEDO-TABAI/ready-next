@@ -4,7 +4,9 @@
 // (source loop, error classification, venv-rebuild decision) is unit-testable.
 //
 // Plan: docs/superpowers/plans/2026-06-23-one-click-runtime-provisioning-implementation.md
+// Recovery: docs/superpowers/plans/2026-07-15-packaged-provider-runtime-recovery-implementation.md
 
+import { randomUUID } from 'node:crypto'
 import {
   isRuntimeAssetPinned,
   isRuntimeIntegrityError,
@@ -24,6 +26,7 @@ import type {
   RuntimeStatus,
   RuntimeProvisionProgress,
   RuntimeProvisionErrorKind,
+  RuntimeProvisionTaskSnapshot,
 } from '../../../shared/runtime-provision-types'
 
 export type {
@@ -31,6 +34,7 @@ export type {
   RuntimeStatus,
   RuntimeProvisionProgress,
   RuntimeProvisionErrorKind,
+  RuntimeProvisionTaskSnapshot,
 } from '../../../shared/runtime-provision-types'
 
 export class RuntimeProvisionError extends Error {
@@ -87,17 +91,45 @@ export interface RuntimeProvisionerDeps {
 
 const SIZE_CAP_SAFETY = 1.5
 
+interface ActiveProvision {
+  runId: string
+  controller: AbortController
+  promise: Promise<RuntimeStatus>
+}
+
 export class RuntimeProvisioner {
-  private inFlight: AbortController | null = null
+  private active: ActiveProvision | null = null
+  private snapshot: RuntimeProvisionTaskSnapshot = {
+    runId: null,
+    revision: 0,
+    state: 'idle',
+    updatedAt: Date.now(),
+  }
+  private readonly snapshotListeners = new Set<(snapshot: RuntimeProvisionTaskSnapshot) => void>()
+  private readonly progressListeners = new Set<(progress: RuntimeProvisionProgress) => void>()
 
   constructor(private readonly deps: RuntimeProvisionerDeps) {}
 
   isProvisioning(): boolean {
-    return this.inFlight !== null
+    return this.active !== null
   }
 
-  cancel(): void {
-    this.inFlight?.abort()
+  getProvisionSnapshot(): RuntimeProvisionTaskSnapshot {
+    return cloneSnapshot(this.snapshot)
+  }
+
+  subscribeProvisionSnapshot(listener: (snapshot: RuntimeProvisionTaskSnapshot) => void): () => void {
+    this.snapshotListeners.add(listener)
+    return () => this.snapshotListeners.delete(listener)
+  }
+
+  cancel(): RuntimeProvisionTaskSnapshot {
+    if (!this.active) return this.getProvisionSnapshot()
+    if (this.snapshot.state === 'running') {
+      this.publishSnapshot({ state: 'cancelling' })
+      this.active.controller.abort()
+    }
+    return this.getProvisionSnapshot()
   }
 
   async getStatus(): Promise<RuntimeStatus> {
@@ -134,66 +166,128 @@ export class RuntimeProvisioner {
 
   async provision(
     opts: { force?: boolean },
-    onProgress: (p: RuntimeProvisionProgress) => void,
+    onProgress: (p: RuntimeProvisionProgress) => void = () => {},
   ): Promise<RuntimeStatus> {
-    if (this.inFlight) throw new RuntimeProvisionError('cancelled', '运行时配置已在进行中', undefined)
+    if (this.active) return this.joinProvision(this.active.promise, onProgress)
+
+    const runId = randomUUID()
+    const controller = new AbortController()
+    const startedAt = Date.now()
+    this.publishSnapshot({
+      runId,
+      state: 'running',
+      progress: { phase: 'probe' },
+      startedAt,
+      finishedAt: undefined,
+      errorKind: undefined,
+      error: undefined,
+      result: undefined,
+    })
+
+    const promise = this.runProvision(opts, controller.signal, runId)
+      .then((result) => {
+        this.publishSnapshot({
+          state: 'succeeded',
+          result,
+          errorKind: undefined,
+          error: undefined,
+          finishedAt: Date.now(),
+        })
+        return result
+      })
+      .catch((error: unknown) => {
+        const normalized = this.normalizeFailure(error, controller.signal)
+        this.publishSnapshot({
+          state: normalized.kind === 'cancelled' ? 'cancelled' : 'failed',
+          errorKind: normalized.kind,
+          error: normalized.message,
+          finishedAt: Date.now(),
+        })
+        throw normalized
+      })
+      .finally(() => {
+        if (this.active?.runId === runId) this.active = null
+      })
+
+    this.active = { runId, controller, promise }
+    return this.joinProvision(promise, onProgress)
+  }
+
+  private async runProvision(opts: { force?: boolean }, signal: AbortSignal, runId: string): Promise<RuntimeStatus> {
     const { deps } = this
     if (!deps.platformKey) {
       throw new RuntimeProvisionError('all_sources_unreachable' as ProvisionErrorKind, '当前平台暂不支持自动配置运行时', undefined)
     }
-    const controller = new AbortController()
-    this.inFlight = controller
+    const assets = deps.listAssets()
+    const unpinned = assets.filter((a) => !isRuntimeAssetPinned(a))
+    if (unpinned.length > 0) {
+      throw new RuntimeProvisionError(
+        'assets_not_pinned',
+        '运行时资产尚未发布真实校验值（待 P0 钉死），暂不能下载。',
+        unpinned[0].id,
+      )
+    }
+    const current = opts.force ? null : await this.getStatus()
+    this.throwIfAborted(signal)
+    for (const asset of assets) {
+      this.throwIfAborted(signal, asset.id)
+      if (current && await this.assetAlreadyReady(asset, current)) continue
+      await this.provisionAsset(asset, signal, runId)
+    }
+
     try {
-      const assets = deps.listAssets()
-      const unpinned = assets.filter((a) => !isRuntimeAssetPinned(a))
-      if (unpinned.length > 0) {
+      this.publishProgress(runId, { phase: 'venv', message: 'building venv' })
+      await this.takeOverVenv(signal)
+      this.throwIfAborted(signal)
+      this.publishProgress(runId, { phase: 'deps', message: 'installing core deps' })
+      const coreDeps = await deps.installCoreDeps()
+      this.throwIfAborted(signal)
+      if (!coreDeps.ready) {
         throw new RuntimeProvisionError(
-          'assets_not_pinned',
-          '运行时资产尚未发布真实校验值（待 P0 钉死），暂不能下载。',
-          unpinned[0].id,
+          'runtime_setup_failed',
+          `核心依赖安装后仍未就绪：${coreDeps.missing.join('、') || '未知依赖'}`,
         )
       }
-      const current = opts.force ? null : await this.getStatus()
-      for (const asset of assets) {
-        if (controller.signal.aborted) throw new RuntimeProvisionError('cancelled', '已取消', asset.id)
-        if (current && this.assetAlreadyReady(asset, current)) continue
-        await this.provisionAsset(asset, controller.signal, onProgress)
-      }
-
-      // Python venv takeover (C10) + core-dep prewarm. Wrap so a venv/pip failure
-      //   returns a structured provision error instead of escaping as an infra
-      //   throw (the IPC layer needs a kind to render, not a raw stack).
-      try {
-        onProgress({ phase: 'venv', message: 'building venv' })
-        await this.takeOverVenv()
-        onProgress({ phase: 'deps', message: 'installing core deps' })
-        await deps.installCoreDeps()
-      } catch (error) {
-        if (controller.signal.aborted) throw new RuntimeProvisionError('cancelled', '已取消')
-        throw new RuntimeProvisionError('runtime_setup_failed', `运行时初始化失败（venv/依赖）：${errMsg(error)}`)
-      }
-
-      onProgress({ phase: 'done' })
-      return await this.getStatus()
-    } finally {
-      this.inFlight = null
+    } catch (error) {
+      if (signal.aborted) throw new RuntimeProvisionError('cancelled', '已取消')
+      if (error instanceof RuntimeProvisionError) throw error
+      throw new RuntimeProvisionError('runtime_setup_failed', `运行时初始化失败（venv/依赖）：${errMsg(error)}`)
     }
+
+    const status = await this.getStatus()
+    this.throwIfAborted(signal)
+    if (!status.overallReady) {
+      const missing = [
+        !status.python.ready && 'Python',
+        !status.ffmpeg.ready && 'ffmpeg',
+        !status.ffprobe.ready && 'ffprobe',
+        !status.coreDeps.ready && '核心依赖',
+      ].filter(Boolean).join('、')
+      throw new RuntimeProvisionError('runtime_setup_failed', `配置结束后仍有组件未就绪：${missing}`)
+    }
+    this.publishProgress(runId, { phase: 'done' })
+    return status
   }
 
-  private assetAlreadyReady(asset: RuntimeAsset, status: RuntimeStatus): boolean {
+  private async assetAlreadyReady(asset: RuntimeAsset, status: RuntimeStatus): Promise<boolean> {
     if (asset.id === 'ffmpeg') return status.ffmpeg.ready && status.ffprobe.ready
     const pythonOutput = findRuntimeAssetOutput(asset, 'python')
-    if (asset.id === 'python' && pythonOutput) return Boolean(this.deps.fs.exists(this.deps.fs.join(this.deps.pythonDistRoot(), pythonOutput.relPath)))
+    if (asset.id === 'python' && pythonOutput) {
+      const pythonPath = this.deps.fs.join(this.deps.pythonDistRoot(), pythonOutput.relPath)
+      if (!this.deps.fs.exists(pythonPath)) return false
+      const probe = await this.deps.probeBinary(pythonPath, 'python', pythonOutput.expectedArch)
+      return probe.ok && probe.sslOk !== false
+    }
     return false
   }
 
   private async provisionAsset(
     asset: RuntimeAsset,
     signal: AbortSignal,
-    onProgress: (p: RuntimeProvisionProgress) => void,
+    runId: string,
   ): Promise<void> {
     for (const archive of asset.archives) {
-      await this.provisionArchive(asset, archive, signal, onProgress)
+      await this.provisionArchive(asset, archive, signal, runId)
     }
   }
 
@@ -201,19 +295,20 @@ export class RuntimeProvisioner {
     asset: RuntimeAsset,
     archive: RuntimeAssetArchive,
     signal: AbortSignal,
-    onProgress: (p: RuntimeProvisionProgress) => void,
+    runId: string,
   ): Promise<void> {
     const { deps } = this
-    onProgress({ assetId: asset.id, phase: 'probe' })
+    this.publishProgress(runId, { assetId: asset.id, phase: 'probe' })
     const order = await selectRuntimeSourceOrder(asset, archive, deps.getMirrorBase(), deps.probe)
+    this.throwIfAborted(signal, asset.id)
     const attempts: RuntimeSourceAttempt[] = []
 
     for (const url of order) {
       if (signal.aborted) throw new RuntimeProvisionError('cancelled', '已取消', asset.id, attempts)
       let buffer: Buffer
       try {
-        onProgress({ assetId: asset.id, phase: 'download' })
-        buffer = await deps.download(url, (received, total) => onProgress({ assetId: asset.id, phase: 'download', receivedBytes: received, totalBytes: total }), signal)
+        this.publishProgress(runId, { assetId: asset.id, phase: 'download' })
+        buffer = await deps.download(url, (received, total) => this.publishProgress(runId, { assetId: asset.id, phase: 'download', receivedBytes: received, totalBytes: total }), signal)
       } catch (error) {
         if (signal.aborted) throw new RuntimeProvisionError('cancelled', '已取消', asset.id, attempts)
         // A size-cap/corrupt-stream failure is an integrity problem (a mirror has
@@ -222,7 +317,8 @@ export class RuntimeProvisioner {
         attempts.push({ url, ok: false, failureKind, reason: errMsg(error) })
         continue
       }
-      onProgress({ assetId: asset.id, phase: 'verify' })
+      this.throwIfAborted(signal, asset.id)
+      this.publishProgress(runId, { assetId: asset.id, phase: 'verify' })
       if (deps.sha256(buffer) !== archive.sha256) {
         attempts.push({ url, ok: false, failureKind: 'integrity', reason: 'sha256 不匹配' })
         continue
@@ -231,19 +327,22 @@ export class RuntimeProvisioner {
         ? deps.pythonDistRoot()
         : deps.fs.join(deps.runtimeRoot, '.runtime-ffmpeg-extract', archive.filename.replace(/[^a-zA-Z0-9._-]/g, '_'))
       try {
-        onProgress({ assetId: asset.id, phase: 'extract' })
+        this.publishProgress(runId, { assetId: asset.id, phase: 'extract' })
         deps.fs.rmrf(extractDir)
         deps.fs.mkdirp(extractDir)
         await deps.extractArchive({ buffer, archiveKind: archive.archiveKind, destDir: extractDir, sizeCap: Math.floor(archive.expectedUncompressedBytes * SIZE_CAP_SAFETY) })
+        this.throwIfAborted(signal, asset.id)
       } catch (error) {
+        if (signal.aborted) throw new RuntimeProvisionError('cancelled', '已取消', asset.id, attempts)
         // silent-catch: extract failure is recorded as a structured attempt before trying the next source
         attempts.push({ url, ok: false, failureKind: 'integrity', reason: `解包失败：${errMsg(error)}` })
         continue
       }
       try {
-        onProgress({ assetId: asset.id, phase: 'connect' })
-        await this.connectArchiveOutputs(archive, extractDir)
+        this.publishProgress(runId, { assetId: asset.id, phase: 'connect' })
+        await this.connectArchiveOutputs(archive, extractDir, signal)
       } catch (error) {
+        if (signal.aborted) throw new RuntimeProvisionError('cancelled', '已取消', asset.id, attempts)
         // silent-catch: connect failure is recorded as a structured attempt before trying the next source
         attempts.push({ url, ok: false, failureKind: 'integrity', reason: `接通失败：${errMsg(error)}` })
         continue
@@ -262,9 +361,10 @@ export class RuntimeProvisioner {
     return `运行时资产校验失败（${asset.id}/${archive.filename}，疑似钉死值过期或资产被污染）。换镜像通常无效。\n${lines}`
   }
 
-  private async connectArchiveOutputs(archive: RuntimeAssetArchive, extractDir: string): Promise<void> {
+  private async connectArchiveOutputs(archive: RuntimeAssetArchive, extractDir: string, signal: AbortSignal): Promise<void> {
     const { deps } = this
     for (const output of archive.outputs) {
+      this.throwIfAborted(signal)
       if (output.kind === 'python') {
         const interp = deps.fs.join(extractDir, output.relPath)
         if (!deps.fs.exists(interp)) throw new Error(`解包后未找到 Python：${output.relPath}`)
@@ -277,16 +377,19 @@ export class RuntimeProvisioner {
       if (!deps.fs.exists(src)) throw new Error(`解包后未找到 ${output.kind}：${output.relPath}`)
       const dest = deps.fs.join(binDir, deps.isWindows ? `${output.kind}.exe` : output.kind)
       const existing = await deps.probeBinary(dest, output.kind, output.expectedArch)
+      this.throwIfAborted(signal)
       if (deps.fs.exists(dest) && !existing.ok) deps.fs.rmrf(dest) // remove stale/broken/wrong-arch
       deps.fs.placeExecutable(src, dest)
       const verify = await deps.probeBinary(dest, output.kind, output.expectedArch)
+      this.throwIfAborted(signal)
       if (!verify.ok || verify.archOk === false) throw new Error(`${output.kind} 架构校验未通过`)
     }
   }
 
   /** C10: rebuild venv if its base no longer resolves under python-dist. */
-  private async takeOverVenv(): Promise<void> {
+  private async takeOverVenv(signal: AbortSignal): Promise<void> {
     const { deps } = this
+    this.throwIfAborted(signal)
     const venvRoot = deps.venvRootPath()
     const venvExists = deps.fs.exists(venvRoot)
     const pyvenvCfg = venvExists ? deps.fs.readText(deps.fs.join(venvRoot, 'pyvenv.cfg')) : null
@@ -299,6 +402,82 @@ export class RuntimeProvisioner {
       deps.fs.rmrf(venvRoot)
     }
     await deps.rebuildVenvFromBase()
+    this.throwIfAborted(signal)
+  }
+
+  private joinProvision(
+    promise: Promise<RuntimeStatus>,
+    onProgress: (progress: RuntimeProvisionProgress) => void,
+  ): Promise<RuntimeStatus> {
+    this.progressListeners.add(onProgress)
+    const latest = this.snapshot.progress
+    if (latest) safelyNotifyProgress(onProgress, latest)
+    return promise.finally(() => this.progressListeners.delete(onProgress))
+  }
+
+  private publishProgress(runId: string, progress: RuntimeProvisionProgress): void {
+    if (this.snapshot.runId !== runId) return
+    if (this.snapshot.state !== 'running' && this.snapshot.state !== 'cancelling') return
+    for (const listener of this.progressListeners) safelyNotifyProgress(listener, progress)
+    this.publishSnapshot({
+      state: this.snapshot.state === 'cancelling' ? 'cancelling' : 'running',
+      progress,
+    })
+  }
+
+  private publishSnapshot(patch: Partial<RuntimeProvisionTaskSnapshot>): void {
+    this.snapshot = {
+      ...this.snapshot,
+      ...patch,
+      revision: this.snapshot.revision + 1,
+      updatedAt: Date.now(),
+    }
+    const snapshot = this.getProvisionSnapshot()
+    for (const listener of this.snapshotListeners) {
+      try {
+        listener(snapshot)
+      } catch {
+        // A broken observer must not interrupt the Main-owned provision task.
+      }
+    }
+  }
+
+  private throwIfAborted(signal: AbortSignal, assetId?: RuntimeAsset['id']): void {
+    if (signal.aborted) throw new RuntimeProvisionError('cancelled', '已取消', assetId)
+  }
+
+  private normalizeFailure(error: unknown, signal: AbortSignal): RuntimeProvisionError {
+    if (signal.aborted) return new RuntimeProvisionError('cancelled', '已取消')
+    if (error instanceof RuntimeProvisionError) return error
+    return new RuntimeProvisionError('runtime_setup_failed', `运行时配置失败：${errMsg(error)}`)
+  }
+}
+
+function safelyNotifyProgress(
+  listener: (progress: RuntimeProvisionProgress) => void,
+  progress: RuntimeProvisionProgress,
+): void {
+  try {
+    listener({ ...progress })
+  } catch {
+    // A stale renderer/caller callback must not interrupt the provision task.
+  }
+}
+
+function cloneSnapshot(snapshot: RuntimeProvisionTaskSnapshot): RuntimeProvisionTaskSnapshot {
+  return {
+    ...snapshot,
+    progress: snapshot.progress ? { ...snapshot.progress } : undefined,
+    result: snapshot.result ? {
+      ...snapshot.result,
+      python: { ...snapshot.result.python },
+      ffmpeg: { ...snapshot.result.ffmpeg },
+      ffprobe: { ...snapshot.result.ffprobe },
+      coreDeps: {
+        ...snapshot.result.coreDeps,
+        missing: snapshot.result.coreDeps.missing ? [...snapshot.result.coreDeps.missing] : undefined,
+      },
+    } : undefined,
   }
 }
 

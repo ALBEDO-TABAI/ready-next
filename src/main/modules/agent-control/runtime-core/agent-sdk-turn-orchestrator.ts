@@ -60,7 +60,11 @@ import type {
   ReadyAgentSdkRunResult,
   SdkLongSkillCheckpoint
 } from './agent-sdk-types'
-import { finalizeRunOutcome, writeRunCloseMetric } from './run-finalizer'
+import {
+  finalizeRunOutcome,
+  reconcileTerminalTaskBudgetRuntime,
+  writeRunCloseMetric
+} from './run-finalizer'
 import type { TurnTerminalReason } from './turn-frame'
 
 import {
@@ -434,7 +438,12 @@ export class AgentSdkTurnOrchestrator {
       providerDiagnostics?: AgentSdkProviderDiagnostics | null
       initiator?: string
     }): Promise<ExecutionTurnResult> => {
-      if (params.status === 'done' && usedTools.length === 0) {
+      const requestedBudgetRuntime = params.taskBudgetRuntime ?? runMetaBudgetRuntime
+      if (
+        params.status === 'done'
+        && usedTools.length === 0
+        && (!requestedBudgetRuntime || requestedBudgetRuntime.bootstrapBudget)
+      ) {
         projectionPatches.push({ taskType: 'direct_answer', module: 'system' })
       }
       const projectionPatch = mergeProjectionPatches(projectionPatches) || {}
@@ -444,7 +453,11 @@ export class AgentSdkTurnOrchestrator {
           : projectionPatch.continuationRef && typeof projectionPatch.continuationRef === 'object'
             ? (projectionPatch.continuationRef as Record<string, unknown>)
             : null
-      const effectiveBudgetRuntime = params.taskBudgetRuntime ?? runMetaBudgetRuntime
+      const effectiveBudgetRuntime = reconcileTerminalTaskBudgetRuntime(
+        requestedBudgetRuntime,
+        projectionPatch,
+        usedTools.length
+      )
       const effectiveProviderDiagnostics = params.providerDiagnostics ?? runMetaProviderDiagnostics
       finalText = params.finalText
       runMetaBudgetRuntime = effectiveBudgetRuntime

@@ -133,6 +133,7 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
     onSuspendTask,
     onResumeTask,
     onResumeBrowserTask,
+    onCancelBrowserTask,
     onCancelDetachedTask,
     onContinueDetachedTask,
     onCancelChildRun,
@@ -304,6 +305,7 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
       onSuspendTask={onSuspendTask}
       onResumeTask={onResumeTask}
       onResumeBrowserTask={onResumeBrowserTask}
+      onCancelBrowserTask={onCancelBrowserTask}
       onCancelDetachedTask={onCancelDetachedTask}
       onContinueDetachedTask={onContinueDetachedTask}
       onCancelChildRun={onCancelChildRun}

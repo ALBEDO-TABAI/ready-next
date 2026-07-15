@@ -87,17 +87,12 @@ test('packaged runtime check rejects apps without skill-runtime', (t) => {
   )
 })
 
-test('seeded dist build uses the runtime-aware seeded packager', () => {
+test('release scripts retire the local-settings seeded packager', () => {
   const pkg = JSON.parse(fs.readFileSync(path.resolve(process.cwd(), 'package.json'), 'utf8'))
-  assert.match(pkg.scripts['build:dist:seeded'], /build-seeded-dist\.mjs/)
-})
-
-test('seeded packager requires and verifies packaged skill-runtime', () => {
-  const script = fs.readFileSync(path.resolve(process.cwd(), 'scripts/build-seeded-dist.mjs'), 'utf8')
-  assert.match(script, /READY_RELEASE_SKILL_RUNTIME_ROOT is required/)
-  assert.match(script, /to: 'skill-runtime'/)
-  assert.match(script, /check-packaged-skill-runtime\.cjs.+--app/s)
-  assert.match(script, /check-packaged-skill-runtime\.cjs.+--dmg/s)
-  assert.match(script, /hdiutil.+verify/s)
-  assert.match(script, /target: 'dir'/)
+  assert.equal(pkg.scripts['build:dist:seeded'], undefined)
+  assert.match(pkg.scripts['build:dist'], /check-ai-seed-release-safety\.cjs/)
+  assert.match(pkg.scripts['build:dir'], /check-ai-seed-release-safety\.cjs/)
+  assert.match(pkg.scripts['pack:clean'], /Packer\/pack-clean-release\.mjs/)
+  assert.equal(fs.existsSync(path.resolve(process.cwd(), 'scripts/build-seeded-dist.mjs')), false)
+  assert.equal(fs.existsSync(path.resolve(process.cwd(), 'scripts/export-ai-settings-seed.mjs')), false)
 })

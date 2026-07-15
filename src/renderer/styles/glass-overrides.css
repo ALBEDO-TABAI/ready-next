@@ -239,7 +239,7 @@ html[data-skin='liquid-glass']:is([data-glass-variant='solid-green'], [data-glas
 
 html[data-skin='liquid-glass']:is([data-glass-variant='solid-green'], [data-glass-variant='solid-blue']) [data-ready-task-card='true'] {
   color: var(--ready-card-ink) !important;
-  border: none !important;
+  border-color: var(--ready-card-hover-border) !important;
   background: var(--ready-liquid-card-base-bg, var(--ready-task-card-bg)) !important;
 }
 
@@ -296,7 +296,6 @@ html[data-skin='liquid-glass']:is([data-glass-variant='solid-green'], [data-glas
   background: var(--ready-card-hover-bg) !important;
 }
 
-html[data-skin='liquid-glass']:is([data-glass-variant='solid-green'], [data-glass-variant='solid-blue']) [data-ready-task-card='true']:hover,
 html[data-skin='liquid-glass']:is([data-glass-variant='solid-green'], [data-glass-variant='solid-blue']) [data-reference-skill-hint='true']:hover {
   border: none !important;
   background: var(--ready-liquid-card-base-bg, var(--ready-card-hover-bg)) !important;

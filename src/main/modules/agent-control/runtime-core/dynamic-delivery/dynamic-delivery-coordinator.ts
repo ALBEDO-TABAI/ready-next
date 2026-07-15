@@ -145,6 +145,7 @@ export interface PrepareDynamicDeliveryInput {
   taskId: string
   scopeId: string | null
   userRequestVerbatim: string
+  ownerSystemPrompt: string
   requestEnvelope: unknown
   intentClassification: unknown
   inferredTaskType: TaskType
@@ -295,6 +296,7 @@ export class DynamicDeliveryCoordinator {
       runId: input.runId,
       taskId: input.taskId,
       userRequestVerbatim: input.userRequestVerbatim,
+      ownerSystemPrompt: input.ownerSystemPrompt,
       decision,
       state: initialState,
       committedSession: input.committedSession,
@@ -633,7 +635,10 @@ export class DynamicDeliveryCoordinator {
             candidateText,
             gaps: verification.verdict.gaps,
           }),
-          instructions: 'Repair only the listed text gaps. Use no tools and return only the complete replacement answer.',
+          instructions: [
+            context.ownerSystemPrompt,
+            'Repair only the listed text gaps. Use no tools and return only the complete replacement answer.',
+          ].filter(Boolean).join('\n\n'),
           model: input.model,
           provider: input.provider,
           session: context.ownerSession,
@@ -686,7 +691,10 @@ export class DynamicDeliveryCoordinator {
             allowedTargetRefIds: targetRefIds,
             gaps: verification.verdict.gaps,
           }),
-          instructions: 'Repair only the listed gaps on the listed existing targets. Read back and save the same target. Do not perform external actions or touch any other target.',
+          instructions: [
+            context.ownerSystemPrompt,
+            'Repair only the listed gaps on the listed existing targets. Read back and save the same target. Do not perform external actions or touch any other target.',
+          ].filter(Boolean).join('\n\n'),
           model: input.model,
           provider: input.provider,
           session: context.ownerSession,

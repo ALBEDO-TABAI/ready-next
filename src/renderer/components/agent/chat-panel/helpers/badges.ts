@@ -109,6 +109,12 @@ export function isBackgroundTaskRun(run: TaskCardRun | null | undefined): boolea
     taskId.startsWith('detached:'),
   )
   const visualState = deriveTaskCardRuntimeState(run).visualState
+  const hasCollectionOutput = run.module === 'browser' && (run.recentArtifacts || []).some(
+    (artifact) => artifact.kind === 'collection_output'
+      || artifact.kind === 'collection_report'
+      || artifact.kind === 'collection_manifest',
+  )
+  if (hasCollectionOutput) return true
   if (visualState === 'done') return false
   return (
     visualState === 'background_running'

@@ -7,9 +7,8 @@ import {
   useSyncExternalStore,
 } from 'react'
 import { useWorkspace } from '../../stores/useWorkspace'
-import { useMode } from '../../stores/useMode'
 import { useDocTabs } from '../../stores/useDocTabs'
-import { applyWorkbenchModeOpenDecision, requestWorkbenchModeChange } from '../../modules/workbench/mode-transition'
+import { requestWorkbenchModeOpen } from '../../modules/workbench/mode-transition'
 import {
   applyGraphWheelGesture,
   buildGraphDocumentPreview,
@@ -385,14 +384,7 @@ export default function GraphView({
     if (!isOpenableDocumentNode(node)) return
     selectFile(node.path)
     useDocTabs.getState().openTab(node.path)
-    const mode = useMode.getState()
-    applyWorkbenchModeOpenDecision({
-      workbenchMode: mode.workbenchMode,
-      splitMode: mode.splitMode,
-    }, 'document', {
-      setSplitMode: mode.setSplitMode,
-      requestModeChange: requestWorkbenchModeChange,
-    })
+    requestWorkbenchModeOpen('document')
     onDocumentOpen?.(node.path)
   }, [onDocumentOpen, selectFile])
 

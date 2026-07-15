@@ -247,7 +247,7 @@ function main() {
     return 0
   } catch (error) {
     console.error(`[packaged-runtime] ${error instanceof Error ? error.message : String(error)}`)
-    console.error('[packaged-runtime] Use READY_RELEASE_SKILL_RUNTIME_ROOT=/path/to/skill-runtime npm run build:dist:seeded for release DMGs.')
+    console.error('[packaged-runtime] Use the controlled Packer full-build flow for bundled runtime, or npm run pack:clean for a credential-free release package.')
     return 1
   }
 }

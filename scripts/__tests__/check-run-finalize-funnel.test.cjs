@@ -145,6 +145,37 @@ export function recover(db: any, runMetaRepository: any) {
   assert.doesNotMatch(r.stderr, /run_meta_terminal_sql/)
 })
 
+test('migration 077 has one path-bound exception for repairing persisted false failures', (t) => {
+  const root = makeRealSplitFixture(t)
+  writeFile(
+    root,
+    'src/main/modules/agent-control/task-projection/direct-answer-history-migration.ts',
+    `// run-finalizer-exempt: migration-077 repairs persisted legacy false failures only
+export function migrate(db: any) {
+  db.prepare(\`UPDATE run_meta SET status = 'done' WHERE status = 'error'\`).run()
+}`
+  )
+
+  const r = runIn(root)
+  assert.equal(r.status, 0, r.stdout + r.stderr)
+})
+
+test('migration 077 exception marker cannot exempt another terminal writer', (t) => {
+  const root = makeRealSplitFixture(t)
+  writeFile(
+    root,
+    'src/main/modules/agent-control/task-projection/rogue-history-repair.ts',
+    `// run-finalizer-exempt: migration-077 repairs persisted legacy false failures only
+export function migrate(db: any) {
+  db.prepare(\`UPDATE run_meta SET status = 'done' WHERE status = 'error'\`).run()
+}`
+  )
+
+  const r = runIn(root)
+  assert.equal(r.status, 1)
+  assert.match(r.stderr, /run_meta_terminal_sql/)
+})
+
 test('run finalize gate fails when C03a early-return families bypass finalizer', (t) => {
   const root = makeHarnessRoot(t)
   writeFile(

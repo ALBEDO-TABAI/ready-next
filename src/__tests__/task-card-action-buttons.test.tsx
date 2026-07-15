@@ -54,6 +54,7 @@ process.on('exit', () => {
 })
 
 const { TaskCard } = await import('../renderer/components/agent/chat-panel/task/TaskCard')
+const { TaskToolSnapshot } = await import('../renderer/components/agent/chat-panel/task-snapshot/TaskToolSnapshot')
 const { taskProjectionToTaskCardRun } = await import('../renderer/components/agent/task-card-from-projection')
 
 function makeRun(overrides: Partial<Omit<TaskCardRun, '__brand'>> = {}): TaskCardRun {
@@ -144,13 +145,47 @@ test('task card child-run buttons invoke continue and cancel handlers', () => {
   }
 })
 
-test('task card collapse row is borderless and aligns with the message edge', () => {
+test('task card keeps a visible boundary and inset header', () => {
   const { container, unmount } = mountTaskCard(makeRun(), { expanded: false })
   try {
     const card = container.querySelector('[data-ready-task-card="true"]') as HTMLElement | null
     const header = card?.querySelector('button') as HTMLButtonElement | null
-    assert.equal(card?.style.borderWidth, '0px')
-    assert.equal(header?.style.paddingLeft, '0px')
+    assert.match(card?.style.border || '', /1px solid/)
+    assert.equal(header?.style.paddingLeft, '10px')
+  } finally {
+    unmount()
+  }
+})
+
+test('collapsed fixed collection card keeps its save destination directly openable', () => {
+  const opened: string[] = []
+  const run = makeRun({
+    module: 'browser',
+    status: 'completed',
+    phase: 'done',
+    waitingFor: 'none',
+    resumableActions: ['none'],
+    canResume: false,
+    recentArtifacts: [{
+      id: 'collection-output',
+      module: 'browser',
+      kind: 'collection_output',
+      label: '采集结果文件夹',
+      path: '/tmp/Ready采集/profile',
+      createdAt: '2026-07-15T00:00:00.000Z',
+    }],
+  })
+  const { container, unmount } = mountTaskCard(run, {
+    compact: true,
+    expanded: false,
+    onOpenArtifact: (path: string) => opened.push(path),
+  })
+  try {
+    const button = container.querySelector('[data-ready-task-primary-artifact="true"]') as HTMLButtonElement | null
+    assert.equal(button?.textContent?.trim(), '打开采集结果')
+    assert.equal(button?.title, '/tmp/Ready采集/profile')
+    button?.click()
+    assert.deepEqual(opened, ['/tmp/Ready采集/profile'])
   } finally {
     unmount()
   }
@@ -202,8 +237,10 @@ test('task card browser collection button invokes browser resume handler instead
     scopeId: 'conv-browser',
     taskId: 'browser-task-visible-1',
     module: 'browser',
-    interactionState: 'suspended',
-    waitingFor: 'none',
+    phase: 'tool_running',
+    status: 'running',
+    interactionState: 'running',
+    waitingFor: 'background',
     resumableActions: ['continue', 'cancel'],
     canResume: true,
     taskContinuation: {
@@ -215,6 +252,7 @@ test('task card browser collection button invokes browser resume handler instead
   })
   const { container, unmount } = mountTaskCard(run, {
     onResumeBrowserTask: (scopeId: string, taskId: string) => calls.push(['browser', scopeId, taskId]),
+    onCancelBrowserTask: (scopeId: string, taskId: string) => calls.push(['cancel', scopeId, taskId]),
     onResumeRun: (scopeId: string) => calls.push(['generic', scopeId, '']),
   })
   try {
@@ -224,9 +262,131 @@ test('task card browser collection button invokes browser resume handler instead
     const button = container.querySelector('[data-ready-task-action="resume-browser-task"]')
     assert.equal(button?.getAttribute('data-ready-task-id'), 'browser-task-card-loop-1')
     clickButton(container, '继续浏览器采集')
-    assert.deepEqual(calls, [['browser', 'conv-browser', 'browser-task-card-loop-1']])
+    clickButton(container, '停止采集')
+    assert.deepEqual(calls, [
+      ['browser', 'conv-browser', 'browser-task-card-loop-1'],
+      ['cancel', 'conv-browser', 'browser-task-card-loop-1'],
+    ])
   } finally {
     unmount()
+  }
+})
+
+test('dismiss button clears only the task card presentation', () => {
+  let dismissed = 0
+  const { container, unmount } = mountTaskCard(makeRun(), {
+    dismissible: true,
+    onDismiss: () => { dismissed += 1 },
+  })
+  try {
+    const dismiss = container.querySelector('[data-ready-task-dismiss="true"]') as HTMLButtonElement | null
+    assert.ok(dismiss)
+    assert.equal(dismiss.title, '清除任务卡（不会停止任务）')
+    dismiss.click()
+    assert.equal(dismissed, 1)
+  } finally {
+    unmount()
+  }
+})
+
+test('right swipe dismisses a fixed task card without invoking task controls', () => {
+  let dismissed = 0
+  let cancelled = 0
+  const { container, unmount } = mountTaskCard(makeRun(), {
+    dismissible: true,
+    onDismiss: () => { dismissed += 1 },
+    onCancelDetachedTask: () => { cancelled += 1 },
+  })
+  try {
+    const card = container.querySelector('[data-ready-task-card="true"]') as HTMLElement | null
+    assert.ok(card)
+    card.dispatchEvent(new domHandle.dom.window.MouseEvent('pointerdown', { bubbles: true, button: 0, clientX: 10 }))
+    card.dispatchEvent(new domHandle.dom.window.MouseEvent('pointermove', { bubbles: true, button: 0, clientX: 100 }))
+    card.dispatchEvent(new domHandle.dom.window.MouseEvent('pointerup', { bubbles: true, button: 0, clientX: 100 }))
+    assert.equal(dismissed, 1)
+    assert.equal(cancelled, 0)
+  } finally {
+    unmount()
+  }
+})
+
+test('cleared fixed task cards stay cleared after the task area remounts', () => {
+  domHandle.dom.window.localStorage.clear()
+  const run = makeRun({
+    taskId: 'browser-task-persisted-dismiss',
+    module: 'browser',
+    phase: 'done',
+    status: 'completed',
+    interactionState: 'suspended',
+    waitingFor: 'none',
+    resumableActions: ['none'],
+    canResume: false,
+    recentArtifacts: [{
+      id: 'collection-output',
+      module: 'browser',
+      kind: 'collection_output',
+      label: '采集结果文件夹',
+      path: '/tmp/Ready采集/profile',
+      createdAt: '2026-07-15T00:00:00.000Z',
+    }],
+  })
+  const host = document.getElementById('root')
+  assert.ok(host)
+
+  const mountSnapshot = (): Root => {
+    host.innerHTML = ''
+    const root = createRoot(host)
+    const noop = () => {}
+    flushSync(() => {
+      root.render(createElement(TaskToolSnapshot, {
+        messages: [],
+        currentTaskRun: null,
+        backgroundTaskRuns: [run],
+        liveTaskRuns: [run],
+        currentScopeId: 'conv-a',
+        taskDisclosureState: {},
+        isStreaming: false,
+        streamingMessageId: null,
+        parseSerializedTaskSnapshot: () => null,
+        parseSerializedToolTraceSnapshot: () => [],
+        setTaskSectionExpanded: noop,
+        onOpenTaskArtifact: noop,
+        onDismissMemoryCapture: noop,
+        onUndoMemoryCapture: noop,
+        onSupplementMemoryCapture: noop,
+        onOpenScope: noop,
+        onContinueTaskInput: noop,
+        onSubmitTaskConfirmation: noop,
+        onSubmitTaskAgentResult: noop,
+        onRetryTask: noop,
+        onSuspendTask: noop,
+        onResumeTask: noop,
+        onCancelDetachedTask: noop,
+        onContinueDetachedTask: noop,
+        onCancelChildRun: noop,
+        onContinueChildRun: noop,
+        onResumeBrowserTask: noop,
+        onCancelBrowserTask: noop,
+        onConfirmBrowserCollectionConsent: noop,
+        children: ({ bottomTaskCard }) => createElement('div', null, bottomTaskCard),
+      }))
+    })
+    return root
+  }
+
+  let root = mountSnapshot()
+  try {
+    const dismiss = host.querySelector('[data-ready-task-dismiss="true"]') as HTMLButtonElement | null
+    assert.ok(dismiss)
+    flushSync(() => dismiss.click())
+    assert.equal(host.querySelector('[data-ready-task-card="true"]'), null)
+    root.unmount()
+
+    root = mountSnapshot()
+    assert.equal(host.querySelector('[data-ready-task-card="true"]'), null)
+  } finally {
+    try { root.unmount() } catch { /* silent-catch: unmount best effort */ }
+    domHandle.dom.window.localStorage.clear()
   }
 })
 

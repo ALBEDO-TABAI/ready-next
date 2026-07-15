@@ -146,6 +146,8 @@ export function resolveCriteria(
     hasPlannedSteps?: boolean
     hasStepCompletionProof?: boolean
     hasDocumentDeliveryProof?: boolean
+    /** Browser observation/analysis does not owe persistent collection files. */
+    browserCollectionRequired?: boolean
     /** R-CRIT (方案 b) — flattened delivery targets declared by the run's
      *  planned steps (steps_json expectedOutputs). Non-empty → c1 becomes a
      *  delivery_coverage criterion for skill-primitive runs. */
@@ -154,6 +156,8 @@ export function resolveCriteria(
 ): ResolvedCriteria {
   const base = BASE_TEMPLATES[taskType] ?? BASE_TEMPLATES.short_task
   const overlay = taskType === 'browser_transaction' && module === 'browser'
+    ? []
+    : module === 'browser' && options?.browserCollectionRequired === false
     ? []
     : OVERLAY_TEMPLATES[module] ?? []
   const items = [...base, ...overlay].map((entry) => ({ ...entry }))

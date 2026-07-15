@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { assembleAgentSdkTurnInput } from '../main/modules/agent-control/runtime-core/agent-sdk-turn-input-assembly'
+import { formatUserProfilePrompt } from '../main/modules/agent-control/user-profile-prompt'
 import type { AgentSdkSkillCatalogSnapshotEntry } from '../main/modules/agent-control/runtime-core/agent-sdk-types'
 import { buildExplicitNoSkillAuthorization } from '../main/modules/agent-control/skills/skill-tool-authorization'
 import type { ToolDefinition } from '../main/modules/agent-control/tools-runtime/tool-definition'
@@ -32,6 +33,7 @@ function assemble(
   options: {
     useTextToolBridge?: boolean
     skillCatalogSnapshot?: AgentSdkSkillCatalogSnapshotEntry[]
+    systemPrompt?: string
   } = {},
 ) {
   return assembleAgentSdkTurnInput({
@@ -40,7 +42,7 @@ function assemble(
         buildSdkTool: (definition: ToolDefinition) => ({ name: definition.name }),
       },
     } as never,
-    session: { systemPrompt: 'Ready system prompt' } as never,
+    session: { systemPrompt: options.systemPrompt ?? 'Ready system prompt' } as never,
     sessionId: 'scope-turn-input-assembly',
     runId: 'run-turn-input-assembly',
     providerContent: '请完成本轮任务',
@@ -60,6 +62,35 @@ function assemble(
     finalizeEarlyReturn: async () => ({} as never),
   })
 }
+
+test('saved response style is moved to the final instruction block exactly once', () => {
+  const profilePrompt = formatUserProfilePrompt({
+    communicationStyle: 'friendly',
+    preferencesJson: { longTermPreferences: '风趣幽默，四川辣妹' },
+  })
+  const assembled = assemble([], {
+    systemPrompt: `Ready system prompt\n\n${profilePrompt}\n\nLATE_SYSTEM_RULE`,
+  })
+
+  assert.equal(
+    (assembled.instructions.match(/ready:user-response-style:v1:start/g) || []).length,
+    1,
+  )
+  assert.match(assembled.instructions, /把“四川辣妹”这类地域或人物气质标签理解为表达风格/)
+  assert.match(assembled.instructions, /LATE_SYSTEM_RULE/)
+  assert.ok(
+    assembled.instructions.trimEnd().endsWith('<!-- ready:user-response-style:v1:end -->'),
+    '风格执行合同必须是 provider instructions 的最后一块',
+  )
+})
+
+test('turn instructions stay unchanged when the user has no saved response style', () => {
+  const assembled = assemble([], {
+    systemPrompt: formatUserProfilePrompt({ preferredLanguage: 'zh' }),
+  })
+  assert.doesNotMatch(assembled.instructions, /ready:user-response-style/)
+  assert.ok(!assembled.instructions.trimEnd().endsWith('ready:user-response-style:v1:end -->'))
+})
 
 test('browser discipline is absent without a final browser group and present exactly once with both browser groups', () => {
   const withoutBrowser = assemble([

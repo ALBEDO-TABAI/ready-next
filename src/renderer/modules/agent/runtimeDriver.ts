@@ -313,6 +313,7 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
   // in-flight send. Cleared by any terminal-event handler below.
   const infrastructureWatchdogs = new Map<string, InfrastructureWatchdog>()
   const backendRecoveredResponseRequests = new Set<string>()
+  const backendRecoveredResponseLimit = 256
   let lastInfrastructureToastAt = 0
 
   function watchdogKey(scopeId: string, requestId: string): string {
@@ -326,6 +327,11 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
   function markBackendRecoveredResponse(scopeId: string, requestId: string): void {
     if (!scopeId || !requestId) return
     backendRecoveredResponseRequests.add(watchdogKey(scopeId, requestId))
+    while (backendRecoveredResponseRequests.size > backendRecoveredResponseLimit) {
+      const oldest = backendRecoveredResponseRequests.values().next().value
+      if (!oldest) break
+      backendRecoveredResponseRequests.delete(oldest)
+    }
   }
 
   function isBackendRecoveredResponse(scopeId: string, requestId: string | null | undefined, errorKind: unknown): boolean {

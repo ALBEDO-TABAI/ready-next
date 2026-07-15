@@ -1,11 +1,11 @@
 # Ready 开发进展
 
-> 更新时间：2026-07-12
+> 更新时间：2026-07-15
 > 本文件只保留当前看板。完整历史见 `CHANGELOG.md`、Git 与 `docs/superpowers/plans/`；旧测试流水账不再在这里累积。
 
 ## 1. 当前基线
 
-- 应用版本：`0.6.1`（以 `package.json` 为准）。
+- 应用版本：`0.7.1`（以 `package.json` 为准）。
 - 技术基线：Electron 42.3、React 19、TypeScript 5.7、Vite 6、Tailwind CSS 4、SQLite/better-sqlite3。
 - Workbench mode：`browser | document | rss | calendar`。
 - Agent live 主链：`AgentSdkRuntime -> AgentSdkTurnOrchestrator -> finalizeRunOutcome`。
@@ -37,16 +37,17 @@
 - 启动微入口、工作台控制区和大型 UI 文件拆分已落地。
 - 文件涌现与 Tag Forge P0-P5 已完成独立对抗复审；持久反馈、防复活、项目身份、receipt/readback、长期评估和真实 SQLite 覆盖已收口。
 
-## 3. 当前未发布变化
+## 3. 0.7.1 发布
 
-`0.6.1` 之后的提交仍属于下一版候选，至少包括：
+`0.6.1` 之后的变化已统一收口为 `0.7.1` 发布，包括：
 
 - 工作台控制区与标签交互调整。
 - Creative Production embedded skills。
 - Browser 竖向标签 flyout 修复。
 - 文件涌现与 Tag Forge P0-P5。
+- 安装包模型接入、运行时下载续传、历史任务状态、用户偏好和文档打开性能的系统修复。
 
-它们进入安装包前仍需按发布流程构建和验证；“源码已合入”不等于旧安装包已经包含。
+当前 arm64 DMG 已完成构建、签名、挂载、全新用户启动、NovaCode 实际聊天、任务状态和文档打开验收，结果已回填 `CHANGELOG.md`。
 
 工作区中的未提交 Packer 或其他实验改动不在本看板的“已完成”口径内，除非另有完成合同和验证记录。
 

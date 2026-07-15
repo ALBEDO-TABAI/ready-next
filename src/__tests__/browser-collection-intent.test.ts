@@ -5,11 +5,13 @@ import {
   resolveBrowserCollectionIntent,
   resolveBrowserBatchCollectionIntent,
   isBrowserCollectionSubsetTool,
+  isBrowserObservationSubsetTool,
   isBrowserBatchCollectionWorkflowTool,
   isHighControlPlatformText,
   stepCollectionIntentTtl,
   isBareContinuationInstruction,
   BROWSER_COLLECTION_SUBSET_TOOL_NAMES,
+  BROWSER_OBSERVATION_SUBSET_TOOL_NAMES,
   BROWSER_BATCH_COLLECTION_WORKFLOW_TOOL_NAMES,
 } from '../shared/browser-collection-intent'
 import { buildRequestEnvelope } from '../main/modules/agent-control/contracts/request-envelope'
@@ -118,10 +120,23 @@ describe('collection subset white-list', () => {
   })
 })
 
+describe('browser observation subset', () => {
+  it('allows account analysis tools but no persistent collection lifecycle', () => {
+    for (const name of ['browser_read_page', 'browser_extract_structured', 'browser_scroll_at']) {
+      assert.equal(isBrowserObservationSubsetTool(name), true)
+    }
+    for (const name of ['browser_visible_collect', 'browser_collect_notes', 'browser_get_task', 'browser_resume_task', 'browser_cancel_task', 'browser_download_urls']) {
+      assert.equal(isBrowserObservationSubsetTool(name), false, `${name} must require explicit collection intent`)
+    }
+    assert.ok(BROWSER_OBSERVATION_SUBSET_TOOL_NAMES.length < BROWSER_COLLECTION_SUBSET_TOOL_NAMES.length)
+  })
+})
+
 describe('batch collection workflow subset', () => {
   it('detects multi-note/profile collection separately from ordinary single-page collection', () => {
     assert.equal(resolveBrowserBatchCollectionIntent('把这个博主的每篇笔记都保存图片'), true)
     assert.equal(resolveBrowserBatchCollectionIntent('继续\n\n## 最近会话摘要\n用户要采集小红书博主全部笔记'), true)
+    assert.equal(resolveBrowserBatchCollectionIntent('分析这个小红书账号并给我一些选题'), false)
     assert.equal(resolveBrowserBatchCollectionIntent('下载当前页面里这张图片'), false)
   })
 

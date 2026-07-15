@@ -15,7 +15,7 @@ import type { CapabilityRuntimeSnapshot } from '../../shared/ai-capability-runti
 import type { RendererAgentMetricName } from '../../shared/renderer-agent-metrics'
 import type { ContextUsageSnapshot } from '../../shared/context-usage-types'
 import type { ModelPackDownloadUpdate, ModelPackId, ModelPackSelfTestReport, ModelPackStatus, ModelSource } from '../../shared/model-pack-types'
-import type { RuntimeStatus, RuntimeProvisionProgress } from '../../shared/runtime-provision-types'
+import type { RuntimeStatus, RuntimeProvisionTaskSnapshot } from '../../shared/runtime-provision-types'
 import type { SkillSourceSelfTestReport } from '../../shared/skill-source-types'
 import type {
   AgentBrowserCollectionTask,
@@ -1523,6 +1523,9 @@ interface ElectronBrowserAPI {
     confirmedVia: 'ask_user_questions' | 'ui_action'
   }) => Promise<{ success: boolean; data?: unknown; error?: string }>
   resumeTask: (payload: {
+    taskId: string
+  }) => Promise<{ success: boolean; data?: unknown; error?: string }>
+  cancelTask: (payload: {
     taskId: string
   }) => Promise<{ success: boolean; data?: unknown; error?: string }>
   onAgentControlChanged: (callback: (data: { state: AgentBrowserControlState }) => void) => () => void
@@ -3113,12 +3116,13 @@ interface ElectronSkillsAPI {
   onModelPackDownloadUpdate?: (handler: (update: ModelPackDownloadUpdate) => void) => () => void
   // One-click skill-runtime provisioning (Python + ffmpeg + core deps).
   getSkillRuntimeStatus: () => Promise<IPCResponse<RuntimeStatus>>
-  provisionSkillRuntime: (payload?: { force?: boolean }) => Promise<IPCResponse<RuntimeStatus | { kind?: string }>>
-  cancelSkillRuntimeProvision: () => Promise<IPCResponse<void>>
+  getSkillRuntimeProvisionState: () => Promise<IPCResponse<RuntimeProvisionTaskSnapshot>>
+  provisionSkillRuntime: (payload?: { force?: boolean }) => Promise<IPCResponse<RuntimeProvisionTaskSnapshot>>
+  cancelSkillRuntimeProvision: () => Promise<IPCResponse<RuntimeProvisionTaskSnapshot>>
   getSkillRuntimeMirror: () => Promise<IPCResponse<string>>
   setSkillRuntimeMirror: (payload: { mirror: string }) => Promise<IPCResponse<void>>
   selfTestSkillRuntime: () => Promise<IPCResponse<RuntimeStatus>>
-  onSkillRuntimeProvisionUpdate?: (handler: (progress: RuntimeProvisionProgress) => void) => () => void
+  onSkillRuntimeProvisionUpdate?: (handler: (snapshot: RuntimeProvisionTaskSnapshot) => void) => () => void
 	  // Skill-source diagnostics (reachability self-test for the agent install path).
 	  selfTestSkillSources: () => Promise<IPCResponse<SkillSourceSelfTestReport>>
 	  submitAskUserAnswer: (payload: { executionId: string; answer: string }) => Promise<IPCResponse>

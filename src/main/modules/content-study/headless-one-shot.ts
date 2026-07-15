@@ -12,7 +12,7 @@
  *
  * Two protocols covered:
  *   - `anthropic`: POST `${baseUrl}/v1/messages`
- *   - `openai`   : POST `${baseUrl}/v1/chat/completions` (default)
+ *   - `openai`   : POST `${baseUrl}/chat/completions` (default)
  *
  * The 7-provider matrix (§6.26) collapses to one of these two on the wire
  * once `resolveAIConfigCapabilities` has decided `agentProtocol`. Kimi-coding
@@ -192,7 +192,7 @@ async function callAnthropic(args: ProtocolCallArgs): Promise<HeadlessOneShotRes
 }
 
 async function callOpenAICompatible(args: ProtocolCallArgs): Promise<HeadlessOneShotResult> {
-  const url = `${args.baseUrl}/v1/chat/completions`
+  const url = `${args.baseUrl}/chat/completions`
   const body = {
     model: args.model,
     max_tokens: args.maxTokens,

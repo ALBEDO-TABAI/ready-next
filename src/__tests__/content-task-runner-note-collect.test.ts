@@ -737,7 +737,17 @@ describe('note_collect background task (content-task-runner)', () => {
 })
 
 describe('note_collect → chat task projection (scope-bound)', () => {
-  type Upsert = { taskId: string; scopeId: string; state: string; total: number; completed: number; summary: string }
+  type Upsert = {
+    taskId: string
+    scopeId: string
+    state: string
+    total: number
+    completed: number
+    summary: string
+    outputRootDir?: string | null
+    reportPath?: string | null
+    manifestPath?: string | null
+  }
   function fakeSink() {
     const upserts: Upsert[] = []
     return { sink: { upsert: (i: Upsert) => upserts.push(i) }, upserts }
@@ -756,6 +766,9 @@ describe('note_collect → chat task projection (scope-bound)', () => {
     assert.equal(upserts[0].state, 'running', 'first projection is running')
     assert.equal(upserts[upserts.length - 1].state, 'completed', 'final projection is completed')
     assert.equal(upserts[upserts.length - 1].total, 2)
+    assert.equal(upserts[upserts.length - 1].outputRootDir, join(tmpdir(), 'ready-note-collect-test'))
+    assert.equal(upserts[upserts.length - 1].reportPath, join(tmpdir(), 'ready-note-collect-test', '采集报告.md'))
+    assert.equal(upserts[upserts.length - 1].manifestPath, join(tmpdir(), 'ready-note-collect-test', 'collection-manifest.json'))
   })
 
   it('does NOT project when no scopeId is supplied (non-chat dispatch)', async () => {

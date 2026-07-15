@@ -12,6 +12,8 @@ enforce: false
 
 # Ready Windows Sync Handoff
 
+> 历史快照：本文绑定的旧源码和发布命令不再是当前实现基线。会导出本机凭据的 `export-ai-settings-seed.mjs` 和 `build:dist:seeded` 已退役；Windows/公开包不得内置本机 AI 设置，最新计划见 `2026-07-14-windows-x64-support-implementation.md`。
+
 ## 1. Purpose
 
 This document is for the Windows-side coding agent that will continue Ready from a clean source snapshot. The goal is not to run the macOS build on Windows. The goal is to rebuild Ready from source on Windows, preserve the current feature state, and make platform differences explicit.
@@ -118,7 +120,7 @@ Required validation on Windows:
 - npm run verify:stability
 - npm run verify:evolution-p4
 - npm run build
-- node scripts/export-ai-settings-seed.mjs
+- node scripts/check-ai-seed-release-safety.cjs
 - npm run build:dir
 - electron-builder --config electron-builder.yml --win --x64
 
@@ -199,7 +201,7 @@ npm run typecheck
 npm run verify:stability
 npm run verify:evolution-p4
 npm run build
-node scripts/export-ai-settings-seed.mjs
+node scripts/check-ai-seed-release-safety.cjs
 npm run build:dir
 electron-builder --config electron-builder.yml --win --x64
 ```

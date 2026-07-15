@@ -5,6 +5,10 @@ interface RefreshableDocumentTab {
   isDirty: boolean
 }
 
+interface ActivationRefreshableDocumentTab extends RefreshableDocumentTab {
+  content: string
+}
+
 const RELOADABLE_TEXT_EXTENSIONS = new Set(['md', 'txt', 'json', 'ts', 'tsx', 'js', 'css', 'html'])
 
 function normalizeForPathMatch(path: string): string {
@@ -30,4 +34,11 @@ export function shouldRefreshDocumentTabForDirectoryChange(
   if (!tab.path || tab.isDirty) return false
   if (!isReloadableTextDocumentPath(tab.path)) return false
   return changedDirectories.some((dir) => isPathWithinChangedDirectory(tab.path!, dir))
+}
+
+export function shouldRefreshDocumentTabOnActivation(
+  tab: ActivationRefreshableDocumentTab,
+): boolean {
+  if (tab.content.length === 0) return false
+  return !tab.isDirty && isReloadableTextDocumentPath(tab.path)
 }

@@ -148,5 +148,8 @@ export function terminalFailureReasonFromToolFailure(
     return 'no_artifact'
   }
   if (toolName === 'skill_send_im_file' && errorKind) return 'delivery_failed'
-  return 'proof_gap'
+  // An arbitrary tool failure is not itself a terminal verdict. Optional reads
+  // may fail before another tool supplies valid proof; the final adjudicator
+  // owns the decision when no explicit terminal category applies.
+  return null
 }

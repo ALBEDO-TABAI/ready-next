@@ -4,8 +4,12 @@ import test from 'node:test'
 import { openRSSItemInBrowserTab } from '../renderer/modules/rss/open-rss-item-in-browser'
 import { isWorkbenchModePairActive, resolveWorkbenchSplitToggle } from '../renderer/modules/workbench/mode-split'
 import { resolveWorkbenchModeTabLayout } from '../renderer/modules/workbench/mode-tabs-layout'
-import { applyWorkbenchModeOpenDecision, resolveWorkbenchModeOpenDecision } from '../renderer/modules/workbench/mode-transition'
-import type { WorkbenchMode } from '../renderer/stores/useMode'
+import {
+  READY_WORKBENCH_MODE_CHANGE_EVENT,
+  requestWorkbenchModeOpen,
+  resolveBrowserVisibilityTransition,
+  resolveWorkbenchModeOpenDecision,
+} from '../renderer/modules/workbench/mode-transition'
 
 test('Shift-click split selection adds, swaps, and removes only the secondary workbench module', () => {
   assert.equal(
@@ -115,36 +119,48 @@ test('file-open mode reveal switches primary only when no split exists', () => {
   )
 })
 
-test('file-open mode reveal action preserves split instead of clearing it', () => {
-  const splitChanges: WorkbenchMode[] = []
-  const primaryChanges: WorkbenchMode[] = []
-
-  applyWorkbenchModeOpenDecision({
-    workbenchMode: 'browser',
-    splitMode: 'rss',
-  }, 'document', {
-    setSplitMode: (mode) => splitChanges.push(mode),
-    requestModeChange: (mode) => primaryChanges.push(mode),
-  })
-
-  assert.deepEqual(splitChanges, ['document'])
-  assert.deepEqual(primaryChanges, [])
+test('browser visibility transition covers primary and secondary replacement', () => {
+  assert.equal(resolveBrowserVisibilityTransition(
+    { workbenchMode: 'browser', splitMode: null },
+    { workbenchMode: 'document', splitMode: null },
+  ), 'leaves')
+  assert.equal(resolveBrowserVisibilityTransition(
+    { workbenchMode: 'rss', splitMode: 'browser' },
+    { workbenchMode: 'rss', splitMode: 'document' },
+  ), 'leaves')
+  assert.equal(resolveBrowserVisibilityTransition(
+    { workbenchMode: 'browser', splitMode: 'rss' },
+    { workbenchMode: 'browser', splitMode: 'document' },
+  ), 'unchanged')
+  assert.equal(resolveBrowserVisibilityTransition(
+    { workbenchMode: 'document', splitMode: null },
+    { workbenchMode: 'browser', splitMode: null },
+  ), 'enters')
 })
 
-test('file-open mode reveal action is a no-op when the target module is already visible in split', () => {
-  const splitChanges: WorkbenchMode[] = []
-  const primaryChanges: WorkbenchMode[] = []
+test('file-open requests carry central placement and immediate presentation', () => {
+  const previousWindow = (globalThis as { window?: unknown }).window
+  const events: Event[] = []
+  ;(globalThis as { window?: unknown }).window = {
+    dispatchEvent: (event: Event) => {
+      events.push(event)
+      return true
+    },
+  }
+  try {
+    requestWorkbenchModeOpen('document')
+  } finally {
+    if (previousWindow === undefined) delete (globalThis as { window?: unknown }).window
+    else (globalThis as { window?: unknown }).window = previousWindow
+  }
 
-  applyWorkbenchModeOpenDecision({
-    workbenchMode: 'browser',
-    splitMode: 'document',
-  }, 'document', {
-    setSplitMode: (mode) => splitChanges.push(mode),
-    requestModeChange: (mode) => primaryChanges.push(mode),
+  assert.equal(events.length, 1)
+  assert.equal(events[0]?.type, READY_WORKBENCH_MODE_CHANGE_EVENT)
+  assert.deepEqual((events[0] as CustomEvent).detail, {
+    mode: 'document',
+    placement: 'open',
+    presentation: 'immediate',
   })
-
-  assert.deepEqual(splitChanges, [])
-  assert.deepEqual(primaryChanges, [])
 })
 
 test('split mode tab layout pulls the secondary icon next to the primary and stretches the thumb over both', () => {

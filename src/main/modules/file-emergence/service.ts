@@ -86,6 +86,8 @@ interface CacheEntry {
 
 export class FileEmergenceService {
   private readonly cache = new Map<string, CacheEntry>()
+  private readonly inFlight = new Map<string, Promise<FileEmergenceSnapshot>>()
+  private readonly rootInvalidationRevision = new Map<string, number>()
   private readonly now: () => number
 
   constructor(private readonly deps: FileEmergenceServiceDeps) {
@@ -94,6 +96,9 @@ export class FileEmergenceService {
 
   markStale(workspaceRoots: readonly string[]): void {
     const changedRoots = new Set(normalizeRoots(workspaceRoots))
+    for (const root of changedRoots) {
+      this.rootInvalidationRevision.set(root, (this.rootInvalidationRevision.get(root) ?? 0) + 1)
+    }
     for (const entry of this.cache.values()) {
       if (entry.workspaceRoots.some((root) => changedRoots.has(root))) entry.stale = true
     }
@@ -133,9 +138,25 @@ export class FileEmergenceService {
           ? 'stale'
           : 'scheduled'
 
-    const snapshot = await this.generateSnapshot(roots, now, refreshReason, contextualHints)
-    this.cache.set(key, { snapshot, stale: false, workspaceRoots: roots })
-    return snapshot
+    const currentGeneration = this.inFlight.get(key)
+    if (currentGeneration) return currentGeneration
+
+    const invalidationRevisionAtStart = new Map(
+      roots.map((root) => [root, this.rootInvalidationRevision.get(root) ?? 0]),
+    )
+    const generation = this.generateSnapshot(roots, now, refreshReason, contextualHints)
+      .then((snapshot) => {
+        const invalidatedDuringGeneration = roots.some(
+          (root) => (this.rootInvalidationRevision.get(root) ?? 0) !== invalidationRevisionAtStart.get(root),
+        )
+        this.cache.set(key, { snapshot, stale: invalidatedDuringGeneration, workspaceRoots: roots })
+        return snapshot
+      })
+      .finally(() => {
+        if (this.inFlight.get(key) === generation) this.inFlight.delete(key)
+      })
+    this.inFlight.set(key, generation)
+    return generation
   }
 
   private isStale(entry: CacheEntry, now: number): boolean {

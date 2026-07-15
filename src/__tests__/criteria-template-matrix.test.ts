@@ -52,6 +52,15 @@ test('browser_transaction uses transaction confirmation criteria, not browser co
   assert.equal(resolved.items.some((item) => item.kind === 'result_parseable'), false)
 })
 
+test('browser observation does not inherit collection-file criteria', () => {
+  const resolved = resolveCriteria('multi_step_task', 'browser', {
+    browserCollectionRequired: false,
+  })
+  assert.equal(resolved.items.some((item) => item.kind === 'collection_verdict'), false)
+  assert.equal(resolved.items.some((item) => item.kind === 'result_parseable'), false)
+  assert.ok(resolved.items.some((item) => item.kind === 'steps_complete'))
+})
+
 test('direct_answer: assistant_response digest is the proof expectation, with the action-declaration escape hatch sealed', () => {
   const resolved = resolveCriteria('direct_answer', 'system')
   assert.equal(resolved.proofExpectation, 'assistant_response_digest')

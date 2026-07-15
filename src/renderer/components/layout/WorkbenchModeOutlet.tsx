@@ -1,6 +1,10 @@
 import { lazy, memo, Suspense, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { WorkbenchMode } from '../../stores/useMode'
 import type { BrowserHostLayoutPhase } from '../../../shared/browser-view-layout'
+import {
+  shouldAnimateWorkbenchModeTransition,
+  type WorkbenchModeChangePresentation,
+} from '../../modules/workbench/mode-transition'
 
 type ModeComponentProps = {
   isActive?: boolean
@@ -140,12 +144,14 @@ function resolveVisualState(
 export default function WorkbenchModeOutlet({
   mode,
   mountedModes = ALL_WORKBENCH_MODES,
+  transitionPresentation = 'animated',
   isMotionSettled = true,
   browserLayoutPhase = null,
   suspended = false,
 }: {
   mode: WorkbenchMode
   mountedModes?: WorkbenchMode[]
+  transitionPresentation?: WorkbenchModeChangePresentation
   isMotionSettled?: boolean
   browserLayoutPhase?: BrowserHostLayoutPhase | null
   suspended?: boolean
@@ -193,7 +199,7 @@ export default function WorkbenchModeOutlet({
     const nextIdx = ALL_WORKBENCH_MODES.indexOf(mode)
     const direction: ModeDirection = nextIdx >= prevIdx ? 'forward' : 'backward'
 
-    if (prefersReducedMotion()) {
+    if (!shouldAnimateWorkbenchModeTransition(transitionPresentation, prefersReducedMotion())) {
       setRuntime({ current: mode, previous: null, direction })
       return
     }
@@ -206,7 +212,7 @@ export default function WorkbenchModeOutlet({
     return () => {
       window.clearTimeout(timer)
     }
-  }, [mode])
+  }, [mode, transitionPresentation])
 
   return (
     <div

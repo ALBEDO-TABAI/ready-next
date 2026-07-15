@@ -86,16 +86,16 @@ Ready 是**瘦壳 + 本地置备的运行时**两层，运行时不在安装包�
 
 **所以一个不含运行时的 DMG 也能完整工作的根本原因**：运行时是**独立、本机置备、跨安装持久**的一层。你的开发/测试机上 `skill-runtime` 早已建好（之前用过），新装 DMG 直接复用它；新版只更新瘦壳 + 技能脚本（脚本按 hash 自动重灌）。Python venv、yt-dlp、ffmpeg、模型一律不在包里，也不随安装重置。
 
-> codex 的 `build-seeded-dist.mjs` / `prepare-release-skill-runtime.mjs` 是**可选的**「把整套 runtime 也塞进 DMG」的发布路径（给全新无运行时的机器），不是日常 build:dist 的必需。日常 `build:dist` 只打瘦壳 + embedded-skills。
+> 历史更新（2026-07-16）：`build-seeded-dist.mjs` 已退役并删除，不得再从本机设置导出发布配置。日常 `build:dist` 只允许空 AI seed；确需内置配置或完整 runtime 时使用受控 Packer 流程。
 
 ### 3.1.1 更新（2026-06-23）：一键运行时配置已实现（P1+P2）
 全新机器原本需要预装系统 Python/ffmpeg、且 ASR 模型要手动下（见本节原结论）。现已实现「设置 › 模型与运行时 › 运行时环境」的**一键下载并配置**：自下载固定版 standalone Python + 静态 ffmpeg/ffprobe + 预热 VEA 核心 pip 依赖（不含 torch），用户点一下即可，无需系统 Python/homebrew。设计见 `docs/superpowers/plans/2026-06-23-one-click-runtime-provisioning-implementation.md`。
 - 已完成：注册表 + provisioner（试完所有源/校验/护栏解包/venv 接管/架构校验）+ IPC/preload/UI + 16 行为测试 + codex 对抗审查 SHIP。
-- **未完成（仍是派发前提）**：P0 = 用 `scripts/pin-runtime-assets.mjs` 在真机产出真实 sha256 填进注册表（在此之前按钮以 `assets_not_pinned` 礼貌拒绝）；P3 = 干净 mac/win 真机实测（含 `tar` 可用性、Windows `.exe`、首次 VEA 真跑）。ASR 大模型仍走独立下载按钮（运行时与模型分开）。
+- **当前状态**：P0 已完成，注册表的 8 个 archive 均为真实 64-hex sha256，`assets_not_pinned` 只保留为未来新增未钉死资产的安全拒绝。仍未完成的是 P3 干净 mac/win 真机验收（含 `tar` 可用性、Windows `.exe`、首次 VEA 真跑）。ASR 大模型仍走独立下载按钮（运行时与模型分开）。
 
 ### 3.2 推论
 - 在**已有运行时**的机器上换版本，只要改的是 TS（瘦壳）或 embedded-skills（脚本），普通 `build:dist` 即可，运行时零改动。今天两处修复正是如此：send-im 是 TS、VEA 是 embedded-skills 脚本。
-- 真正需要 seeded-bundle 的，只有「目标机器没有也无法在线置备运行时」的场景（离线分发 / 全新 Windows）。
+- 目标机器无法在线置备运行时时，必须改走受控 Packer 的完整包流程；不得恢复已退役的本机设置导出脚本。
 
 ---
 
@@ -107,14 +107,14 @@ Ready 是**瘦壳 + 本地置备的运行时**两层，运行时不在安装包�
 - **Send IM 工具暴露修复（问题 2/3）**：纯 TS，跨平台一致，随瘦壳生效。`LOCAL_INLINE_ABSOLUTE_FILE_SOURCE` 只匹配 `/Users|/Volumes|/var|/tmp|...` 这类 **POSIX 绝对路径**——Windows 绝对路径是 `C:\Users\...`，当前不匹配。**Windows 待办**：若要支持「把 `C:\...\foo.md` 发微信」这种内联 Windows 路径，需在该正则补 `[A-Za-z]:\\\\...` 形态。`@[Send IM]@[文件.md]` 与 `@[文件]` 引用路径不受影响（跨平台一致）。
 - **VEA 下载重试（问题 1）**：`pipeline_enhanced.py` 用 `build_yt_dlp_command` 解析 `yt-dlp`/`node`/`ffmpeg`，已有 Windows 回退（`yt-dlp` 不在 PATH 时回退 `python -m yt_dlp`）。**Windows 待办**：确认 `node`（nsig 用）、`ffmpeg.exe`、`yt-dlp.exe` 在 Windows runtime 的 PATH 内可解析；`--ffmpeg-location` 传的是目录/可执行，注意 `.exe` 后缀与反斜杠。`--extractor-args`/`--no-continue`/`--force-overwrites` 等参数跨平台一致。
 
-### 4.2 全新 Windows 机器置备运行时（seeded 或在线）的坑
+### 4.2 全新 Windows 机器置备运行时的坑
 1. **Python 解释器**：无打包 Python 时需从注册表/PATH 找 3.9–3.12 且 OpenSSL 1.1.1+；找不到要走「设置里手填 `skills_python_path`」。venv 路径为 `python\Scripts\python.exe`。
 2. **ffmpeg/ffprobe**：dev macOS 是 symlink 到 homebrew；Windows **没有 homebrew**，`where ffmpeg` 多半失败。必须随 runtime 带 `ffmpeg.exe/ffprobe.exe` 或引导用户装。**注意**：`prepare-release-skill-runtime.mjs` 当前 deref symlink 的逻辑是为 macOS 的悬空 symlink 设计的，Windows 应直接拷 `.exe`，不要带任何 macOS `bin/` 产物。
 3. **better-sqlite3 ABI**：必须在 Windows 本机按 Electron 版本重编（win32-x64），不能带入 macOS `node_modules`/`.node`。
 4. **symlink/junction**：`ensureRuntimeToolchain` 用 `symlinkSync` 建 `bin/` 链接；Windows 无管理员或禁用 NTFS symlink 时会失败——Windows 上应优先**直接拷贝** `.exe` 而非 symlink。
 5. **PATH 分隔符**：`path.delimiter`（Windows `;`）仓库已用对，沿用即可，勿硬编码 `:`。
 6. **模型包离线门**：打包模式默认 `MODELSCOPE_OFFLINE=1/HF_HUB_OFFLINE=1/TRANSFORMERS_OFFLINE=1`；全新 Windows 无预置模型时，需模型的技能（VEA 的 ASR 段）会抛 `__READY_ASR_MODEL_PACK_MISSING__` 并阻塞，直到用户在「设置 › 模型与运行时」下载。Windows 安装引导应提示这一步。
-7. **seeded-bundle 脚本本身**：`build-seeded-dist.mjs` 用 `ditto/hdiutil` 造 DMG、引用 `.app` 路径——**纯 macOS**。Windows 需要独立的 NSIS/dir 打包路径（electron-builder.yml 的 win/nsis 目标），不能复用这套。
+7. **发布边界**：旧 `build-seeded-dist.mjs` 已退役；Windows 需要独立的 NSIS/dir 打包路径（electron-builder.yml 的 win/nsis 目标），不能复用 macOS Packer 或携带本机 AI 设置。
 
 ### 4.3 验收口径（Windows）
 - VEA：在 Windows 本机真跑一个 YouTube 链接，确认重试内能下成 + ASR 模型包已就绪；不接受「TS 测试绿」当证据。

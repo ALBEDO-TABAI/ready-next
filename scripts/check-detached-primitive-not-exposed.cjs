@@ -5,7 +5,10 @@ const fs = require('node:fs')
 const path = require('node:path')
 
 const ROOT = process.cwd()
-const FILE = path.join(ROOT, 'src/main/modules/agent-control/runtime-core/agent-sdk-runtime.ts')
+const FILE = path.join(
+  ROOT,
+  'src/main/modules/agent-control/runtime-core/agent-sdk-skill-intent-utils.ts',
+)
 const DETACHED = ['skill_start_detached', 'skill_inspect_detached', 'skill_cancel_detached']
 
 function fail(message) {

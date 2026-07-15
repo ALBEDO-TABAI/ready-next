@@ -1577,8 +1577,8 @@ describe('browser-tools v2', () => {
     assert.strictEqual((parseTool(aggregateResult) as Array<{ title?: string }>).length, 1)
   })
 
-  it('browser_resume_task starts card_loop when resuming a completed high-control discovery task', async () => {
-    const started: Array<Record<string, unknown>> = []
+  it('browser_resume_task never turns a completed discovery query into a write task', async () => {
+    let resumedTaskId = ''
     const controller = createControllerMock({
       getTask: async () => ({
         taskId: 'browser-task-visible-xhs-resume',
@@ -1595,12 +1595,18 @@ describe('browser-tools v2', () => {
           ],
         },
       }) as never,
-      startCardLoopCollection: async (plan: Record<string, unknown>, scopeId?: string) => {
-        started.push({ ...plan, scopeId })
-        return { taskId: 'browser-task-card-from-resume', kind: 'card_loop', status: 'running', progress: { total: 2, completed: 0, failed: 0, currentLabel: 'One' } } as never
+      startCardLoopCollection: async () => {
+        throw new Error('query/resume must not start a downstream collection')
       },
-      resumeTask: async () => {
-        throw new Error('completed visible discovery should not call plain resumeTask')
+      resumeTask: async (taskId: string) => {
+        resumedTaskId = taskId
+        return {
+          taskId,
+          kind: 'visible_collect',
+          status: 'completed',
+          progress: { total: 2, completed: 0, failed: 0, currentLabel: null },
+          result: { discoveryStatus: 'complete', outputRootDir: '/tmp/ready-xhs-out' },
+        } as never
       },
     } as Partial<BrowserController>)
 
@@ -1612,19 +1618,15 @@ describe('browser-tools v2', () => {
       'scope-xhs-resume',
     )
 
-    assert.equal((parseTool(result) as { taskId?: string }).taskId, 'browser-task-card-from-resume')
-    assert.equal(started.length, 1)
-    const plan = started[0] as { strategy?: string; expectedCount?: number; sourceTaskId?: string; outputRootDir?: string; notes?: unknown[]; scopeId?: string }
-    assert.equal(plan.strategy, 'card_loop')
-    assert.equal(plan.expectedCount, 2)
-    assert.equal(plan.sourceTaskId, 'browser-task-visible-xhs-resume')
-    assert.equal(plan.outputRootDir, '/tmp/ready-xhs-out')
-    assert.equal(plan.notes?.length, 2)
-    assert.equal(plan.scopeId, 'scope-xhs-resume')
+    const payload = parseTool(result) as { taskId?: string; status?: string; result?: { outputRootDir?: string; noteCandidates?: unknown[] } }
+    assert.equal(payload.taskId, 'browser-task-visible-xhs-resume')
+    assert.equal(payload.status, 'completed')
+    assert.equal(payload.result?.outputRootDir, '/tmp/ready-xhs-out')
+    assert.equal(payload.result?.noteCandidates, undefined)
+    assert.equal(resumedTaskId, 'browser-task-visible-xhs-resume')
   })
 
-  it('browser_get_task hands off a completed high-control discovery task to card_loop', async () => {
-    const started: Array<Record<string, unknown>> = []
+  it('browser_get_task is a compact, side-effect-free query for a completed discovery task', async () => {
     const controller = createControllerMock({
       getTask: async () => ({
         taskId: 'browser-task-visible-xhs-get',
@@ -1641,9 +1643,9 @@ describe('browser-tools v2', () => {
           ],
         },
       }) as never,
-      startCardLoopCollection: async (plan: Record<string, unknown>, scopeId?: string) => {
-        started.push({ ...plan, scopeId })
-        return { taskId: 'browser-task-card-from-get', kind: 'card_loop', status: 'running', progress: { total: 2, completed: 0, failed: 0, currentLabel: 'One' } } as never
+      findCollectionTaskBySourceTaskId: async () => null,
+      startCardLoopCollection: async () => {
+        throw new Error('browser_get_task must never start a collection')
       },
     } as Partial<BrowserController>)
 
@@ -1655,16 +1657,20 @@ describe('browser-tools v2', () => {
       'scope-xhs-get',
     )
 
-    assert.equal((parseTool(result) as { taskId?: string }).taskId, 'browser-task-card-from-get')
-    assert.equal(started.length, 1)
-    const plan = started[0] as { strategy?: string; sourceTaskId?: string; outputRootDir?: string; scopeId?: string }
-    assert.equal(plan.strategy, 'card_loop')
-    assert.equal(plan.sourceTaskId, 'browser-task-visible-xhs-get')
-    assert.equal(plan.outputRootDir, '/tmp/ready-xhs-out')
-    assert.equal(plan.scopeId, 'scope-xhs-get')
+    const payload = parseTool(result) as {
+      taskId?: string
+      status?: string
+      result?: { outputRootDir?: string; collectedCount?: number; noteCandidates?: unknown[] }
+      activeExecution?: unknown
+    }
+    assert.equal(payload.taskId, 'browser-task-visible-xhs-get')
+    assert.equal(payload.status, 'completed')
+    assert.equal(payload.result?.outputRootDir, '/tmp/ready-xhs-out')
+    assert.equal(payload.result?.noteCandidates, undefined)
+    assert.equal(payload.activeExecution, undefined)
   })
 
-  it('browser_get_task reuses an existing downstream collection for a completed discovery task', async () => {
+  it('browser_get_task reports an existing downstream collection without replacing the source identity', async () => {
     const controller = createControllerMock({
       getTask: async () => ({
         taskId: 'browser-task-visible-xhs-existing',
@@ -1696,7 +1702,10 @@ describe('browser-tools v2', () => {
       controller,
     )
 
-    assert.equal((parseTool(result) as { taskId?: string }).taskId, 'browser-task-card-existing')
+    const payload = parseTool(result) as { taskId?: string; activeExecution?: { taskId?: string; status?: string } }
+    assert.equal(payload.taskId, 'browser-task-visible-xhs-existing')
+    assert.equal(payload.activeExecution?.taskId, 'browser-task-card-existing')
+    assert.equal(payload.activeExecution?.status, 'running')
   })
 
   it('browser_download_gallery and browser_research_topic should offer thin task adapters for agents', async () => {
@@ -1836,17 +1845,27 @@ describe('browser_collect_notes (background sub-agent dispatch)', () => {
       undefined,
       undefined,
       '请采集 https://example.com/note/1 和 https://example.com/note/2',
+      undefined,
+      {
+        ownerAgentId: 'analyst',
+        ownerRunId: 'run-note-1',
+        parentTaskId: 'task-agent-note-1',
+      },
     )
     const handle = parseTool(result) as { taskId: string }
     assert.equal(handle.taskId, 'task-note-1')
     assert.equal(synthetic.length, 1)
     assert.equal(started.length, 1)
-    const plan = started[0] as { notes: Array<{ url: string }>; targetProfileUrl: string; outputRootDir: string; sourceTaskId?: string; stopConditions?: { maxNotes?: number } }
+    const plan = started[0] as { notes: Array<{ url: string }>; targetProfileUrl: string; outputRootDir: string; sourceTaskId?: string; stopConditions?: { maxNotes?: number }; ownerAgentId?: string; ownerRunId?: string; parentTaskId?: string }
     assert.equal(plan.sourceTaskId, 'browser-task-synthetic-1')
     assert.equal(plan.notes.length, 2, 'the non-http note is dropped')
     assert.deepEqual(plan.notes.map((n) => n.url), ['https://example.com/note/1', 'https://example.com/note/2'])
     assert.equal(plan.stopConditions?.maxNotes, 50)
     assert.ok(plan.outputRootDir.includes('abc123'), 'derives the output folder from the profile slug')
+    assert.equal(plan.ownerAgentId, 'analyst')
+    assert.equal(plan.ownerRunId, 'run-note-1')
+    assert.equal(plan.parentTaskId, 'task-agent-note-1')
+    assert.equal(synthetic[0]?.ownerAgentId, 'analyst')
   })
 
   it('refuses direct notes when URLs cannot be proven from current user text', async () => {
@@ -2602,6 +2621,14 @@ describe('browser_visible_collect (agent pane dispatch)', () => {
       controller,
       undefined,
       'scope-collection-1',
+      undefined,
+      undefined,
+      undefined,
+      {
+        ownerAgentId: 'analyst',
+        ownerRunId: 'run-collection-1',
+        parentTaskId: 'task-agent-1',
+      },
     )
 
     const handle = parseTool(result) as { taskId: string }
@@ -2610,6 +2637,9 @@ describe('browser_visible_collect (agent pane dispatch)', () => {
     assert.equal(started[0]?.scopeId, 'scope-collection-1')
     assert.equal(started[0]?.payload.outputRootDir, '/tmp/ao-i')
     assert.equal(started[0]?.payload.highControl, true)
+    assert.equal(started[0]?.payload.ownerAgentId, 'analyst')
+    assert.equal(started[0]?.payload.ownerRunId, 'run-collection-1')
+    assert.equal(started[0]?.payload.parentTaskId, 'task-agent-1')
   })
 })
 

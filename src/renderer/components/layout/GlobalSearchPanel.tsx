@@ -2,14 +2,14 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { FileText, Loader2, Database, RotateCw } from 'lucide-react'
 import { useWorkspace, computeDesiredRoots } from '../../stores/useWorkspace'
 import { reduceReindexResponse } from './reindex-response-reducer'
-import { useMode, type WorkbenchMode } from '../../stores/useMode'
+import type { WorkbenchMode } from '../../stores/useMode'
 import { useDocTabs, type DocTab } from '../../stores/useDocTabs'
 import { parseDocumentGraph, normalizeSearchText } from '../../../shared/document-graph-parse'
 import { readJsonStorage, writeJsonStorage, removeStorage } from '../../utils/storage'
 import { GLOBAL_SEARCH_DIMENSIONS, PANEL_TOKENS } from './panelTokens'
 import Modal from '../ui/Modal'
 import { isLocalHtmlFilePath, openLocalHtmlFileInBrowser } from '../../modules/browser/localHtmlFileOpen'
-import { applyWorkbenchModeOpenDecision, requestWorkbenchModeChange } from '../../modules/workbench/mode-transition'
+import { requestWorkbenchModeOpen } from '../../modules/workbench/mode-transition'
 
 interface SearchResultItem {
   path: string
@@ -205,14 +205,7 @@ function modeForPath(path: string): WorkbenchMode {
 }
 
 function revealWorkbenchModeForSearchOpen(mode: WorkbenchMode): void {
-  const state = useMode.getState()
-  applyWorkbenchModeOpenDecision({
-    workbenchMode: state.workbenchMode,
-    splitMode: state.splitMode,
-  }, mode, {
-    setSplitMode: state.setSplitMode,
-    requestModeChange: requestWorkbenchModeChange,
-  })
+  requestWorkbenchModeOpen(mode)
 }
 
 function renderSnippet(snippet: string): ReactNode {

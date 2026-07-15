@@ -1,6 +1,7 @@
 import { useDocTabs } from '../../stores/useDocTabs'
 import { useMode } from '../../stores/useMode'
 import { useWorkspace } from '../../stores/useWorkspace'
+import { requestWorkbenchModeOpen } from '../workbench/mode-transition'
 
 export type FileEmergenceAction = {
   kind: 'open_project' | 'open_artifact' | 'open_project_group'
@@ -61,5 +62,6 @@ function openDocumentPaths(paths:readonly string[],targetPath:string,group:boole
   }
   const targetId=useDocTabs.getState().ensureTabForPath(targetPath)
   if(targetId)useDocTabs.getState().setActiveTab(targetId)
-  const mode=useMode.getState();mode.setAppMode('workbench');mode.setWorkbenchMode('document')
+  useMode.getState().setAppMode('workbench')
+  requestWorkbenchModeOpen('document')
 }

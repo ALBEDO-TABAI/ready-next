@@ -259,17 +259,17 @@ export const BROWSER_TOOLS: BrowserToolDef[] = [
   },
   {
     name: 'browser_get_task',
-    description: '读取后台浏览器任务的当前进度、状态和结果摘要。',
+    description: '只读查询后台浏览器任务的当前进度、状态和结果摘要；不会启动、续跑或升级为采集任务。',
     params: zodObjectToParamList(BROWSER_CONTENT_SCHEMAS.browser_get_task) as ToolParamSchemaSpec[],
   },
   {
     name: 'browser_resume_task',
-    description: '继续一个已暂停或未完成的后台浏览器任务。',
+    description: '继续同一个已暂停或未完成的后台浏览器任务；不会把已完成的发现任务自动升级为保存采集。',
     params: zodObjectToParamList(BROWSER_CONTENT_SCHEMAS.browser_resume_task) as ToolParamSchemaSpec[],
   },
   {
     name: 'browser_cancel_task',
-    description: '取消一个后台浏览器任务。',
+    description: '取消一个后台浏览器任务；若任务卡代表发现任务与后续保存任务组成的链，会停止当前仍在运行的保存任务。',
     params: zodObjectToParamList(BROWSER_CONTENT_SCHEMAS.browser_cancel_task) as ToolParamSchemaSpec[],
   },
   {

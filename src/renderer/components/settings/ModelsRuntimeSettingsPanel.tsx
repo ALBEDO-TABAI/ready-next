@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Activity, CheckCircle2, Download, HardDrive, Loader2, RefreshCw, XCircle } from 'lucide-react'
 import type { ModelPackId, ModelPackSelfTestReport, ModelPackStatus, ModelSource } from '../../../shared/model-pack-types'
 import type { SkillSourceSelfTestReport } from '../../../shared/skill-source-types'
-import type { RuntimeStatus, RuntimeProvisionProgress } from '../../../shared/runtime-provision-types'
+import type { RuntimeStatus, RuntimeProvisionTaskSnapshot } from '../../../shared/runtime-provision-types'
 import { MODEL_SOURCES } from '../../../shared/model-pack-types'
 import {
   SETTINGS_CARD_STYLE,
@@ -49,19 +49,16 @@ const RUNTIME_PHASE_LABELS: Record<string, string> = {
   connect: '安装', venv: '构建 Python 环境', deps: '安装核心依赖', done: '完成',
 }
 
-function RuntimeEnvironmentCard() {
+export function RuntimeEnvironmentCard() {
   const [status, setStatus] = useState<RuntimeStatus | null>(null)
-  const [busy, setBusy] = useState(false)
-  const [phase, setPhase] = useState<string | null>(null)
-  const [pct, setPct] = useState<number | null>(null)
-  const [errorKind, setErrorKind] = useState<string | null>(null)
-  const [errorText, setErrorText] = useState<string | null>(null)
+  const [provisionTask, setProvisionTask] = useState<RuntimeProvisionTaskSnapshot | null>(null)
+  const [starting, setStarting] = useState(false)
+  const [startError, setStartError] = useState<string | null>(null)
   const [mirror, setMirror] = useState('')
   const [mirrorSaving, setMirrorSaving] = useState(false)
   const [mirrorNotice, setMirrorNotice] = useState<string | null>(null)
   const [mirrorNoticeKind, setMirrorNoticeKind] = useState<'error' | 'success'>('success')
-  const [progressAsset, setProgressAsset] = useState<string | null>(null)
-  const [doneNotice, setDoneNotice] = useState<string | null>(null)
+  const latestProvisionRevision = useRef(-1)
   // Advanced: the custom-mirror input is hidden by default (normal users never
   //   need to paste a CDN URL); it auto-opens only when all sources are unreachable.
   const [showMirror, setShowMirror] = useState(false)
@@ -75,51 +72,59 @@ function RuntimeEnvironmentCard() {
     }
   }, [])
 
+  const applyProvisionSnapshot = useCallback((snapshot: RuntimeProvisionTaskSnapshot) => {
+    if (snapshot.revision < latestProvisionRevision.current) return
+    latestProvisionRevision.current = snapshot.revision
+    setProvisionTask(snapshot)
+    if (snapshot.result) setStatus(snapshot.result)
+    if (snapshot.state === 'failed' && snapshot.errorKind === 'all_sources_unreachable') {
+      setShowMirror(true)
+    }
+    if (snapshot.state !== 'idle') setStartError(null)
+  }, [])
+
   useEffect(() => {
+    const off = window.electronAPI.skills.onSkillRuntimeProvisionUpdate?.(applyProvisionSnapshot)
     void refresh()
+    void window.electronAPI.skills.getSkillRuntimeProvisionState().then((res) => {
+      if (res.success && res.data) applyProvisionSnapshot(res.data)
+    })
     void window.electronAPI.skills.getSkillRuntimeMirror().then((res) => {
       if (res.success && typeof res.data === 'string') setMirror(res.data)
     })
-    const off = window.electronAPI.skills.onSkillRuntimeProvisionUpdate?.((p: RuntimeProvisionProgress) => {
-      setPhase(p.phase)
-      setProgressAsset(p.assetId ?? null)
-      if (p.phase === 'download' && p.totalBytes && p.receivedBytes) {
-        setPct(Math.min(100, Math.round((p.receivedBytes / p.totalBytes) * 100)))
-      } else {
-        setPct(null)
-      }
-    })
     return () => { off?.() }
-  }, [refresh])
+  }, [applyProvisionSnapshot, refresh])
 
   const provision = useCallback(async (force: boolean) => {
-    setBusy(true)
-    setErrorKind(null)
-    setErrorText(null)
-    setDoneNotice(null)
-    setPhase('probe')
+    setStarting(true)
+    setStartError(null)
     try {
       const res = await window.electronAPI.skills.provisionSkillRuntime({ force })
-      if (res.success && res.data && 'overallReady' in res.data) {
-        const next = res.data as RuntimeStatus
-        setStatus(next)
-        setDoneNotice(next.overallReady ? '运行时已配置完成。' : '配置已结束，但部分组件仍未就绪，请重试。')
+      if (res.success && res.data) {
+        applyProvisionSnapshot(res.data)
       } else {
-        const kind = res.data && typeof res.data === 'object' && 'kind' in res.data ? String(res.data.kind) : null
-        setErrorKind(kind)
-        setErrorText(res.error || '配置失败')
-        if (kind === 'all_sources_unreachable') setShowMirror(true)
-        await refresh()
+        setStartError(res.error || '无法启动配置')
       }
     } catch (err) {
-      setErrorText(err instanceof Error ? err.message : String(err))
+      setStartError(err instanceof Error ? err.message : String(err))
     } finally {
-      setBusy(false)
-      setPhase(null)
-      setPct(null)
-      setProgressAsset(null)
+      setStarting(false)
     }
-  }, [refresh])
+  }, [applyProvisionSnapshot])
+
+  const cancelProvision = useCallback(async () => {
+    setStartError(null)
+    try {
+      const res = await window.electronAPI.skills.cancelSkillRuntimeProvision()
+      if (res.success && res.data) {
+        applyProvisionSnapshot(res.data)
+      } else {
+        setStartError(res.error || '无法停止配置')
+      }
+    } catch (err) {
+      setStartError(err instanceof Error ? err.message : String(err))
+    }
+  }, [applyProvisionSnapshot])
 
   const saveMirror = useCallback(async () => {
     const trimmed = mirror.trim()
@@ -154,6 +159,26 @@ function RuntimeEnvironmentCard() {
 
   const ready = status?.overallReady === true
   const unsupported = status?.platformSupported === false
+  const taskRunning = provisionTask?.state === 'running' || provisionTask?.state === 'cancelling'
+  const busy = starting || taskRunning
+  const progress = provisionTask?.progress
+  const phase = progress?.phase ?? null
+  const progressAsset = progress?.assetId ?? null
+  const pct = progress?.phase === 'download'
+    && typeof progress.receivedBytes === 'number'
+    && typeof progress.totalBytes === 'number'
+    && progress.totalBytes > 0
+    ? Math.min(100, Math.round((progress.receivedBytes / progress.totalBytes) * 100))
+    : null
+  const errorKind = provisionTask?.state === 'failed' || provisionTask?.state === 'cancelled'
+    ? provisionTask.errorKind ?? null
+    : null
+  const errorText = provisionTask?.state === 'failed'
+    ? provisionTask.error || '配置失败'
+    : provisionTask?.state === 'cancelled'
+      ? provisionTask.error || '配置已取消，可以重新开始。'
+      : startError
+  const doneNotice = provisionTask?.state === 'succeeded' ? '运行时已配置完成。' : null
 
   return (
     <section className="glass-surface-card rounded-2xl border" style={{ ...SETTINGS_CARD_STYLE, padding: '18px 20px' }}>
@@ -163,17 +188,41 @@ function RuntimeEnvironmentCard() {
           <div style={{ ...SETTINGS_FIELD_HINT_STYLE, marginTop: 4 }}>
             一键下载并配置 Python + ffmpeg + 技能核心依赖（在线视频分析所需）。本地 ASR 降级链需另装 torch/模型（见下方模型下载）。
           </div>
+          <div style={{ ...SETTINGS_FIELD_HINT_STYLE, marginTop: 3 }}>
+            离开设置页不会中断配置，返回后会自动恢复当前进度。
+          </div>
         </div>
-        <button
-          type="button"
-          onClick={() => void provision(ready)}
-          disabled={busy || unsupported}
-          className="inline-flex items-center gap-1.5"
-          style={{ ...SETTINGS_FLAT_BUTTON_STYLE, minWidth: 0, padding: '8px 14px', opacity: busy || unsupported ? 0.6 : 1 }}
-        >
-          {busy ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}
-          {busy ? '配置中…' : ready ? '重新配置' : '一键下载并配置'}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => void provision(ready)}
+            disabled={busy || unsupported}
+            className="inline-flex items-center gap-1.5"
+            style={{ ...SETTINGS_FLAT_BUTTON_STYLE, minWidth: 0, padding: '8px 14px', opacity: busy || unsupported ? 0.6 : 1 }}
+          >
+            {busy ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}
+            {busy ? '配置中…' : ready ? '重新配置' : '一键下载并配置'}
+          </button>
+          {taskRunning && (
+            <button
+              type="button"
+              onClick={() => void cancelProvision()}
+              disabled={provisionTask?.state === 'cancelling'}
+              className="inline-flex items-center gap-1.5"
+              style={{
+                ...SETTINGS_FLAT_BUTTON_STYLE,
+                minWidth: 0,
+                padding: '8px 12px',
+                opacity: provisionTask?.state === 'cancelling' ? 0.6 : 1,
+              }}
+            >
+              {provisionTask?.state === 'cancelling'
+                ? <Loader2 size={13} className="animate-spin" />
+                : <XCircle size={13} />}
+              {provisionTask?.state === 'cancelling' ? '正在停止…' : '停止'}
+            </button>
+          )}
+        </div>
       </div>
 
       {unsupported ? (

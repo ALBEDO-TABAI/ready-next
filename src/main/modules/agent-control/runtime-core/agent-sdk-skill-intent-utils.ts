@@ -159,6 +159,28 @@ export function messageHasBrowserCollectionIntent(
   return false
 }
 
+/**
+ * Persistent collection is opt-in. A page reference or platform/account name
+ * only proves that browser observation is relevant; it must never authorize a
+ * collection write task by itself.
+ */
+export function messageHasExplicitBrowserCollectionIntent(
+  message: RunMessage,
+  requestEnvelope?: unknown
+): boolean {
+  const fullText = messageToText(message)
+  const envelopePrimary = parseEnvelopeResourceReferences(requestEnvelope).primaryInstruction
+  const primary = envelopePrimary || primaryInstructionText(message)
+  const hasActiveTaskContext = hasRecalledTaskContext(fullText)
+  const primaryIntent = resolveBrowserWorkflowIntent(primary)
+  const fullIntent = followupConsultsRecalledContext(primary, { hasActiveTaskContext })
+    ? resolveBrowserWorkflowIntent(`${primary}\n${fullText}`)
+    : primaryIntent
+  if (primaryIntent.kind !== 'collection' && fullIntent.kind !== 'collection') return false
+  const negated = classifyFollowupIntent(primary, { hasActiveTaskContext })
+  return !negated.negations.includes('collection')
+}
+
 export function hasRecalledTaskContext(fullText: string): boolean {
   return fullText.includes('## 最近会话摘要') || fullText.includes('### 浏览页面引用')
 }

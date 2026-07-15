@@ -1,6 +1,6 @@
 import type { ChatAttachment } from './types'
 import { useDocTabs } from '../../stores/useDocTabs'
-import { useMode } from '../../stores/useMode'
+import { requestWorkbenchModeOpen } from '../workbench/mode-transition'
 
 export const READY_DOCUMENT_REVEAL_EVENT = 'ready:document-reveal'
 
@@ -8,8 +8,8 @@ export function revealDocumentQuoteAttachment(attachment: ChatAttachment): void 
   if (attachment.source !== 'document-quote') return
   if (!attachment.path || !attachment.path.startsWith('/')) return
 
-  useMode.getState().setWorkbenchMode('document')
   useDocTabs.getState().openTab(attachment.path)
+  requestWorkbenchModeOpen('document')
   useDocTabs.getState().setPendingReveal({
     path: attachment.path,
     selection: attachment.selection,

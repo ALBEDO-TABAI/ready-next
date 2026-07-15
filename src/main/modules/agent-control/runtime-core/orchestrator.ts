@@ -80,7 +80,7 @@ type SendAndCollectExecutionResult = SendAndCollectResult & {
   contextUsage?: ExecutionHostResult['contextUsage']
 }
 
-type PersonaSystemPromptResolver = (agent: string) => Promise<string | undefined>
+type PersonaSystemPromptResolver = (agent: string, scopeId: string | undefined) => Promise<string | undefined>
 
 export interface StopActiveGenerationResult {
   runId: string | null
@@ -593,7 +593,7 @@ export class ReadyAgentOrchestrator extends EventEmitter {
       let resolvedSystemPrompt = systemPrompt
       if (systemPrompt === undefined && this.personaResolver) {
         try {
-          resolvedSystemPrompt = await this.personaResolver(agent)
+          resolvedSystemPrompt = await this.personaResolver(agent, sessionId)
         } catch (error) {
           this.sessions.setState(
             taskKey,

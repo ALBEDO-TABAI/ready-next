@@ -202,23 +202,32 @@ function isFailedToolOutput(output: ToolExecutionOutput): boolean {
   ) {
     return true
   }
-  return typeof data?.errorKind === 'string'
+  if (
+    typeof data?.errorKind === 'string'
     || data?.ok === false
     || status === 'error'
     || status === 'failed'
-    || !(
-      data?.ok === true ||
-      data?.mutated === true ||
-      mutationReason === 'changed' ||
-      mutationReason === 'saved' ||
-      mutationReason === 'identical' ||
-      mutationReason === 'not_mutation' ||
-      data?.documentSaved === true ||
-      'documentTabId' in (data || {}) ||
-      'documentTitle' in (data || {}) ||
-      'documentSaveState' in (data || {}) ||
-      'documentDirty' in (data || {})
-    ) && /(?:^Error:|Document action failed|failed|失败|无法|没有可|未匹配到|未找到|缺少|已拒绝|被拒绝|已取消|被取消)/i.test(output.text)
+  ) {
+    return true
+  }
+  const explicitlySuccessful =
+    data?.ok === true ||
+    data?.mutated === true ||
+    status === 'completed' ||
+    status === 'success' ||
+    status === 'succeeded' ||
+    status === 'done' ||
+    mutationReason === 'changed' ||
+    mutationReason === 'saved' ||
+    mutationReason === 'identical' ||
+    mutationReason === 'not_mutation' ||
+    data?.documentSaved === true ||
+    'documentTabId' in (data || {}) ||
+    'documentTitle' in (data || {}) ||
+    'documentSaveState' in (data || {}) ||
+    'documentDirty' in (data || {})
+  if (explicitlySuccessful) return false
+  return /(?:^Error:|Document action failed|failed|失败|无法|没有可|未匹配到|未找到|缺少|已拒绝|被拒绝|已取消|被取消)/i.test(output.text)
 }
 
 export function isNonterminalToolOutput(output: ToolExecutionOutput): boolean {

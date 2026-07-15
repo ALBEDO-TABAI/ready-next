@@ -23,9 +23,9 @@ npm --prefix Packer start
 
 ### 配置项
 
-- **Base URL** —— 默认预填 `https://cn-novacode.i0yu.cn`（NovaCode，OpenAI 兼容网关）。
+- **Base URL** —— 默认预填 `https://cn-novacode.i0yu.cn/v1`（NovaCode，OpenAI 兼容网关）。只填域名或 IP 时会自动补 `/v1`；已填自定义路径时保持原样。
 - **API Key** —— 可选。留空则生成的包首次启动时需在“设置 › AI”里补填 Key。
-- **模型** —— 默认预填 `gpt-5.5`。
+- **模型** —— 默认预填 `gpt-5.6-terra`。
 - **预设名称** —— 默认 `NovaCode`，显示在应用内模型切换器里。
 - **打包名后缀** —— 可选。填 `张三` 则输出 `Ready-张三.dmg`；留空则用默认版本号命名 `Ready-<version>-arm64.dmg`。
 - **生成精简包** —— 默认开启。不内置 `skill-runtime`，体积接近 `ready-pack` 的最小包；依赖 Python/ffmpeg 的技能首次使用时在应用内安装运行时。
@@ -49,9 +49,11 @@ npm --prefix Packer start
    `READY_RELEASE_SKILL_RUNTIME_ROOT=<skill-runtime>` 调用 `pack-clean-release.mjs`。
    Clean Packer 负责净化 sidecar/embedded-skills、暂存并内置 `skill-runtime`、electron-builder、
    用 `hdiutil` 重建 DMG、挂载校验 `Ready.app` 签名与 Electron Framework。
-4. 从主项目 `electron-builder.yml` 实时读取输出目录、产品名、DMG 架构和文件名，再复制到 `Packer/output/`；自定义后缀也会跟随主项目产品名。
+4. 从主项目 `electron-builder.yml` 实时读取输出目录、产品名、DMG 架构和文件名；复制到临时输出后，逐项核对配置、运行时形态、Electron Framework、签名、DMG 完整性和只读挂载内容，全部通过才原子替换 `Packer/output/` 的正式文件。
 
-精简包会短暂写入 `build/runtime-seeds/ai-settings.seed.json`，打包结束后恢复原文件；
+精简包会短暂写入 `build/runtime-seeds/ai-settings.seed.json`，临时文件和备份均只允许当前用户读取，打包结束后恢复原文件；若进程意外中断，下次启动 Packer 会先恢复最早的开发机 seed 并清除遗留副本。
+打包中间目录权限为 `0700`；无论成功还是失败，任务结束前都会删除 `exports/` 中可能含 API Key 的 app、DMG、ZIP、blockmap 和元数据。正式 `Packer/output/*.dmg` 权限为 `0600`。
+普通 `npm run build:dist` 默认拒绝打包非空 seed，只有 Web Packer 受控任务会临时放行，避免把开发机配置误带进安装包。
 完整包才走 Clean Packer 的暂存 seed。日志里的 API Key 会脱敏显示；
 `READY_PACKER_ALLOW_BAKED_KEY=1` 只在完整包路径里放行「有意内置的 Key」，
 默认（不带此环境变量）Clean Packer 仍会断言发行包内不含任何 Key。

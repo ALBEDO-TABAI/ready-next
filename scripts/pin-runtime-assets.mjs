@@ -1,7 +1,6 @@
 #!/usr/bin/env node
-// P0 (plan §0.6): download each runtime asset, compute the real sha256, and
-// verify the internal layout, so the placeholder PENDING_P0_PIN digests in
-// src/shared/runtime-asset-registry.ts can be replaced with real values.
+// Download each runtime asset, recompute sha256, and verify the internal layout
+// before changing a pinned coordinate in src/shared/runtime-asset-registry.ts.
 //
 // MUST run on a networked machine. It prints ready-to-paste `sha256:` values and
 // writes build/runtime-asset-pins.json. It does NOT mutate the registry (so the
@@ -200,7 +199,7 @@ async function main() {
   mkdirSync(dirname(outPath), { recursive: true })
   writeFileSync(outPath, `${JSON.stringify(pins, null, 2)}\n`, 'utf8')
   console.log(`\n[pin] wrote ${outPath}`) // eslint-disable-line no-console
-  console.log('[pin] paste each archive sha256 into src/shared/runtime-asset-registry.ts (replace PENDING_P0_PIN).') // eslint-disable-line no-console
+  console.log('[pin] compare these digests with src/shared/runtime-asset-registry.ts and update only reviewed changes.') // eslint-disable-line no-console
 }
 
 main().catch((error) => { console.error(error); process.exit(1) }) // eslint-disable-line no-console

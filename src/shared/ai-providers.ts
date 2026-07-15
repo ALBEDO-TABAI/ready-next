@@ -381,6 +381,45 @@ export function normalizeProviderId(
   return undefined
 }
 
+/**
+ * An origin-only OpenAI-compatible URL normally identifies the service host,
+ * while the protocol itself lives under `/v1`. Preserve explicit path prefixes
+ * so self-hosted gateways such as `/openai/v1` keep working unchanged.
+ */
+function sanitizeOpenAICompatibleBaseUrl(value: string, appendDefaultVersion: boolean): string {
+  const normalized = String(value || '').trim().replace(/\/+$/, '')
+  if (!normalized) return normalized
+  try {
+    const parsed = new URL(normalized)
+    // Credentials and URL decorations are never part of an API base prefix.
+    // Removing them here protects persisted legacy configs as well as every
+    // request consumer that normalizes immediately before execution.
+    parsed.username = ''
+    parsed.password = ''
+    parsed.search = ''
+    parsed.hash = ''
+    if (
+      appendDefaultVersion &&
+      (parsed.protocol === 'http:' || parsed.protocol === 'https:') &&
+      parsed.pathname === '/'
+    ) {
+      parsed.pathname = '/v1'
+    }
+    return parsed.toString().replace(/\/+$/, '')
+  } catch {
+    // Invalid URLs cannot be canonicalized, but still must not carry obvious
+    // authority credentials or query/fragment secrets into logs and errors.
+    return normalized
+      .replace(/^([a-z][a-z\d+.-]*:\/\/)[^/?#@]+@/i, '$1')
+      .replace(/[?#].*$/, '')
+      .replace(/\/+$/, '')
+  }
+}
+
+export function normalizeOpenAICompatibleBaseUrl(value: string): string {
+  return sanitizeOpenAICompatibleBaseUrl(value, true)
+}
+
 export function normalizeAIConfig<T extends AIModelConfig | null | undefined>(config: T): T {
   if (!config) return config
   const providerId = normalizeProviderId(config.provider, config.baseUrl)
@@ -390,15 +429,19 @@ export function normalizeAIConfig<T extends AIModelConfig | null | undefined>(co
   const normalizedBaseUrl = String(config.baseUrl || '')
     .trim()
     .replace(/\/+$/, '')
-  const isKimiCoding = normalizedBaseUrl.includes('api.kimi.com/coding')
+  const canonicalBaseUrl = providerId === 'openai-compatible'
+    ? sanitizeOpenAICompatibleBaseUrl(normalizedBaseUrl, config.agentProtocol !== 'anthropic')
+    : normalizedBaseUrl
+  const isKimiCoding = canonicalBaseUrl.includes('api.kimi.com/coding')
   const modelDefaults =
     providerId === 'openai-compatible'
-      ? normalizeDeepSeekModelDefaults(config, normalizedBaseUrl)
+      ? normalizeDeepSeekModelDefaults(config, canonicalBaseUrl)
       : { model: config.model, modelIds: config.modelIds }
   const normalizedModelIds = normalizeModelIds(modelDefaults.model, modelDefaults.modelIds)
   const nextConfig: AIModelConfig = {
     ...config,
     provider: providerId,
+    baseUrl: canonicalBaseUrl,
     model: modelDefaults.model,
     wireApi: config.wireApi || provider?.wireApi || config.wireApi,
     reasoningEffort:
@@ -536,7 +579,7 @@ export function resolveAIConfigCapabilities(
   const isKimiCoding = baseUrl.includes('api.kimi.com/coding')
   const supportsToolCalls = applyCapabilityMode(
     normalizeCapabilityMode(normalizedConfig.toolUseMode),
-    true
+    normalizedConfig.provider !== 'openai-compatible'
   )
   const supportsNativeToolCalls =
     supportsToolCalls &&

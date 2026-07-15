@@ -2,10 +2,12 @@
 import { spawn, spawnSync } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import {
+  chmodSync,
   copyFileSync,
   createReadStream,
   existsSync,
   lstatSync,
+  mkdtempSync,
   mkdirSync,
   readdirSync,
   readFileSync,
@@ -17,9 +19,10 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { createServer } from 'node:http'
-import { homedir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 import { delimiter, dirname, extname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { isDeepStrictEqual } from 'node:util'
 import YAML from 'yaml'
 
 export const packerRoot = dirname(fileURLToPath(import.meta.url))
@@ -96,8 +99,8 @@ const MIME_TYPES = {
   '.svg': 'image/svg+xml',
 }
 
-export const DEFAULT_NOVACODE_BASE_URL = 'https://cn-novacode.i0yu.cn'
-export const DEFAULT_NOVACODE_MODEL = 'gpt-5.5'
+export const DEFAULT_NOVACODE_BASE_URL = 'https://cn-novacode.i0yu.cn/v1'
+export const DEFAULT_NOVACODE_MODEL = 'gpt-5.6-terra'
 export const DEFAULT_NOVACODE_DISPLAY_NAME = 'NovaCode'
 
 function readAppVersion() {
@@ -129,11 +132,28 @@ export function normalizeBaseUrl(value) {
   } catch {
     throw new Error('Base URL 格式不正确')
   }
-  if (parsed.protocol !== 'https:') {
-    throw new Error('Base URL 必须是 https 地址')
+  const privateHttpHost = (() => {
+    const host = parsed.hostname.replace(/^\[|\]$/g, '').toLowerCase()
+    if (host === 'localhost' || host === '::1') return true
+    const match = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/)
+    if (!match) return /^(?:fc|fd)[0-9a-f]{2}:/i.test(host)
+    const octets = match.slice(1).map(Number)
+    if (octets.some((part) => part > 255)) return false
+    return octets[0] === 127
+      || octets[0] === 10
+      || (octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31)
+      || (octets[0] === 192 && octets[1] === 168)
+  })()
+  if (parsed.protocol !== 'https:' && !(parsed.protocol === 'http:' && privateHttpHost)) {
+    throw new Error('Base URL 必须是 HTTPS；只有本机或私有网段允许 HTTP')
   }
-  parsed.hash = ''
-  parsed.search = ''
+  if (parsed.username || parsed.password) {
+    throw new Error('Base URL 不能包含用户名或密码，请只填写接口地址')
+  }
+  if (parsed.search || parsed.hash) {
+    throw new Error('Base URL 不能包含查询参数或锚点，请只填写接口地址')
+  }
+  if (parsed.pathname === '/') parsed.pathname = '/v1'
   return parsed.toString().replace(/\/+$/, '')
 }
 
@@ -167,7 +187,7 @@ export function validatePackageRequest(payload) {
   let baseUrl = ''
   if (wantsAI) {
     baseUrl = normalizeBaseUrl(rawBaseUrl)
-    if (!model) throw new Error('请填写模型名称（例如 gpt-5.5）')
+    if (!model) throw new Error('请填写模型名称（例如 gpt-5.6-terra）')
   }
 
   if (!runtimeRoot && !allowSlim) {
@@ -181,6 +201,9 @@ export function validatePackageRequest(payload) {
 }
 
 export function buildAIConfig(request) {
+  const parsedBaseUrl = new URL(request.baseUrl)
+  const verifiedNovaCode = parsedBaseUrl.hostname === 'cn-novacode.i0yu.cn'
+    && request.model === DEFAULT_NOVACODE_MODEL
   return {
     provider: 'openai-compatible',
     baseUrl: request.baseUrl,
@@ -188,9 +211,9 @@ export function buildAIConfig(request) {
     model: request.model,
     agentProtocol: 'openai',
     wireApi: 'chat/completions',
-    toolUseMode: 'auto',
-    visionMode: 'auto',
-    nativeVideoMode: 'auto',
+    toolUseMode: verifiedNovaCode ? 'on' : 'off',
+    visionMode: 'off',
+    nativeVideoMode: 'off',
     capabilityModes: {},
     modelIds: [request.model],
     displayName: request.displayName,
@@ -295,6 +318,11 @@ function ensureDir(path) {
   mkdirSync(path, { recursive: true })
 }
 
+export function ensurePrivateDir(path) {
+  ensureDir(path)
+  chmodSync(path, 0o700)
+}
+
 function lexists(path) {
   try {
     lstatSync(path)
@@ -377,6 +405,49 @@ function restoreOrphanedNodeModulesSymlink() {
   console.log('[packer] restored orphaned node_modules symlink from a prior interrupted build')
 }
 
+export function replaceFileSecure(sourcePath, destinationPath) {
+  ensureDir(dirname(destinationPath))
+  const temporaryPath = `${destinationPath}.packer-${randomUUID()}.tmp`
+  try {
+    copyFileSync(sourcePath, temporaryPath)
+    chmodSync(temporaryPath, 0o600)
+    renameSync(temporaryPath, destinationPath)
+  } finally {
+    rmSync(temporaryPath, { force: true })
+  }
+}
+
+export function recoverInterruptedReadyPackSeed(
+  recoveryStagingRoot = stagingRoot,
+  targetSeedPath = readyPackSeedPath,
+) {
+  ensureDir(recoveryStagingRoot)
+  const entries = readdirSync(recoveryStagingRoot, { withFileTypes: true })
+  const backups = entries
+    .filter((entry) => entry.isFile() && /^ready-pack-seed-backup-.+\.json$/.test(entry.name))
+    .map((entry) => {
+      const path = join(recoveryStagingRoot, entry.name)
+      return { path, name: entry.name, mtimeMs: statSync(path).mtimeMs }
+    })
+    .sort((left, right) => left.mtimeMs - right.mtimeMs || left.name.localeCompare(right.name))
+  const transientSeeds = entries
+    .filter((entry) => entry.isFile() && /^packer-seed-.+\.json$/.test(entry.name))
+    .map((entry) => join(recoveryStagingRoot, entry.name))
+
+  // Repeated interrupted runs can leave a chain of backups. The oldest one is
+  // the last known developer seed before any temporary package seed replaced it.
+  if (backups.length > 0) replaceFileSecure(backups[0].path, targetSeedPath)
+
+  for (const backup of backups) rmSync(backup.path, { force: true })
+  for (const seedPath of transientSeeds) rmSync(seedPath, { force: true })
+
+  return {
+    restored: backups.length > 0,
+    removedBackups: backups.length,
+    removedTransientSeeds: transientSeeds.length,
+  }
+}
+
 function runCommand(command, args, env, onLine) {
   return new Promise((resolveRun, reject) => {
     const child = spawn(command, args, {
@@ -408,24 +479,36 @@ async function withTemporaryReadyPackSeed(seedFile, runBuild) {
   ensureDir(dirname(readyPackSeedPath))
   const backupPath = join(stagingRoot, `ready-pack-seed-backup-${randomUUID()}.json`)
   const hadSeed = existsSync(readyPackSeedPath)
-  if (hadSeed) copyFileSync(readyPackSeedPath, backupPath)
-  copyFileSync(seedFile, readyPackSeedPath)
+  if (hadSeed) replaceFileSecure(readyPackSeedPath, backupPath)
+  replaceFileSecure(seedFile, readyPackSeedPath)
   try {
     await runBuild()
   } finally {
     if (hadSeed) {
-      copyFileSync(backupPath, readyPackSeedPath)
+      replaceFileSecure(backupPath, readyPackSeedPath)
+      rmSync(backupPath, { force: true })
     } else {
       rmSync(readyPackSeedPath, { force: true })
     }
-    rmSync(backupPath, { force: true })
   }
 }
 
-function cleanReadyPackOutputs(contract) {
-  rmSync(join(exportsDir, contract.appOutputDir), { recursive: true, force: true })
-  rmSync(join(exportsDir, contract.artifactName), { force: true })
-  rmSync(join(exportsDir, `${contract.artifactName}.blockmap`), { force: true })
+export function cleanReadyPackOutputs(contract, targetDir = exportsDir) {
+  const artifactStem = contract.artifactName.replace(/\.dmg$/i, '')
+  const paths = [
+    contract.appOutputDir,
+    `${artifactStem}.dmg`,
+    `${artifactStem}.dmg.blockmap`,
+    `${artifactStem}.zip`,
+    `${artifactStem}.zip.blockmap`,
+    'latest-mac.yml',
+    'builder-effective-config.yaml',
+    'builder-debug.yml',
+    'clean-package-manifest.json',
+  ]
+  for (const path of paths) {
+    rmSync(join(targetDir, path), { recursive: true, force: true })
+  }
 }
 
 function assertNoPackagedRuntime(contract) {
@@ -435,17 +518,88 @@ function assertNoPackagedRuntime(contract) {
   }
 }
 
+export function assertPackagedApp(appPath, contract, expectedSeed, expectRuntime) {
+  if (!existsSync(appPath)) throw new Error(`安装包缺少 ${contract.productName}.app：${appPath}`)
+
+  const frameworkPath = join(
+    appPath,
+    'Contents',
+    'Frameworks',
+    'Electron Framework.framework',
+    'Versions',
+    'A',
+    'Electron Framework',
+  )
+  if (!existsSync(frameworkPath) || !statSync(frameworkPath).isFile()) {
+    throw new Error(`安装包缺少 Electron Framework：${frameworkPath}`)
+  }
+
+  const resourcesPath = join(appPath, 'Contents', 'Resources')
+  const packagedSeedPath = join(resourcesPath, 'ai-settings.seed.json')
+  if (!existsSync(packagedSeedPath)) throw new Error(`安装包缺少 AI seed：${packagedSeedPath}`)
+  let packagedSeed
+  try {
+    packagedSeed = JSON.parse(readFileSync(packagedSeedPath, 'utf8'))
+  } catch {
+    throw new Error(`安装包内 AI seed 不是有效 JSON：${packagedSeedPath}`)
+  }
+  if (!isDeepStrictEqual(packagedSeed, expectedSeed)) {
+    throw new Error('安装包内 AI 配置与本次打包请求不一致')
+  }
+
+  const runtimePath = join(resourcesPath, 'skill-runtime')
+  if (expectRuntime && !existsSync(runtimePath)) throw new Error(`完整包缺少技能运行时：${runtimePath}`)
+  if (!expectRuntime && existsSync(runtimePath)) throw new Error(`精简包不应内置技能运行时：${runtimePath}`)
+
+  return { frameworkPath, packagedSeedPath, runtimePath }
+}
+
+async function verifyFinalDmg(job, dmgPath, contract, request, env) {
+  const expectedSeed = buildSeed(request)
+  const expectRuntime = Boolean(request.runtimeRoot)
+  const mountPoint = mkdtempSync(join(tmpdir(), 'ready-packer-dmg-'))
+  let mounted = false
+
+  try {
+    emitJob(job, '校验 DMG 完整性与只读挂载内容')
+    await runCommand('hdiutil', ['verify', dmgPath], env, (line) => emitJob(job, line))
+    await runCommand('hdiutil', [
+      'attach',
+      '-readonly',
+      '-nobrowse',
+      '-mountpoint',
+      mountPoint,
+      dmgPath,
+    ], env, (line) => emitJob(job, line))
+    mounted = true
+
+    const mountedAppPath = join(mountPoint, `${contract.productName}.app`)
+    assertPackagedApp(mountedAppPath, contract, expectedSeed, expectRuntime)
+    const applicationsLink = join(mountPoint, 'Applications')
+    if (!lexists(applicationsLink) || !lstatSync(applicationsLink).isSymbolicLink() || readlinkSync(applicationsLink) !== '/Applications') {
+      throw new Error('DMG 缺少指向 /Applications 的安装链接')
+    }
+    await runCommand('codesign', ['--verify', '--deep', '--strict', mountedAppPath], env, (line) => emitJob(job, line))
+  } finally {
+    if (mounted) spawnSync('hdiutil', ['detach', mountPoint, '-quiet'], { stdio: 'ignore' })
+    rmSync(mountPoint, { recursive: true, force: true })
+  }
+}
+
 // Slim packages intentionally follow the ready-pack skill path:
 // write the seed, run `npm run build:dist`, then restore the local seed file.
 // Full packages keep using clean-release because that path stages and verifies
 // the explicit skill-runtime bundle.
 async function runPackerJob(job, request) {
-  ensureDir(stagingRoot)
-  ensureDir(outputRoot)
+  ensurePrivateDir(stagingRoot)
+  ensurePrivateDir(outputRoot)
+  ensurePrivateDir(exportsDir)
   const contract = readPackagingContract()
   const producedDmg = join(resolve(repoRoot, contract.output), contract.artifactName)
   const seedFile = join(stagingRoot, `packer-seed-${job.id}.json`)
   let restoreNodeModules = () => {}
+  let finalStatus = 'failed'
+  let finalPayload = { error: '打包任务未完成' }
 
   try {
     writeFileSync(seedFile, `${JSON.stringify(buildSeed(request), null, 2)}\n`, { mode: 0o600 })
@@ -466,8 +620,10 @@ async function runPackerJob(job, request) {
     const env = {
       ...process.env,
       DISABLE_AUTO_UPDATE: 'true',
+      READY_ALLOW_BAKED_AI_SEED: '1',
       PATH: [join(repoRoot, 'node_modules', '.bin'), process.env.PATH || ''].join(delimiter),
     }
+    cleanReadyPackOutputs(contract)
     if (request.runtimeRoot) {
       const args = [cleanPackerScript]
       env.READY_PACKER_SEED_CONFIG = seedFile
@@ -478,7 +634,6 @@ async function runPackerJob(job, request) {
     } else {
       emitJob(job, '精简包：使用 ready-pack 同一路径 npm run build:dist，不内置技能运行时')
       await withTemporaryReadyPackSeed(seedFile, async () => {
-        cleanReadyPackOutputs(contract)
         await runCommand('npm', ['run', 'build:dist'], env, (line) => emitJob(job, line))
       })
       assertNoPackagedRuntime(contract)
@@ -491,16 +646,40 @@ async function runPackerJob(job, request) {
       throw new Error(`没有找到生成的 DMG：${producedDmg}（exports 内 DMG：${dmgs.join(', ') || '无'}）`)
     }
 
+    const appPath = join(exportsDir, contract.appOutputDir, `${contract.productName}.app`)
+    assertPackagedApp(appPath, contract, buildSeed(request), Boolean(request.runtimeRoot))
+    await runCommand('codesign', ['--verify', '--deep', '--strict', appPath], env, (line) => emitJob(job, line))
+
     const outputPath = join(outputRoot, safeOutputName(contract, request.packageSuffix))
-    copyFileSync(producedDmg, outputPath)
+    const pendingOutputPath = join(outputRoot, `.${safeOutputName(contract, request.packageSuffix)}.${job.id}.tmp.dmg`)
+    rmSync(pendingOutputPath, { force: true })
+    copyFileSync(producedDmg, pendingOutputPath)
+    chmodSync(pendingOutputPath, 0o600)
+    try {
+      await verifyFinalDmg(job, pendingOutputPath, contract, request, env)
+      renameSync(pendingOutputPath, outputPath)
+      chmodSync(outputPath, 0o600)
+    } finally {
+      rmSync(pendingOutputPath, { force: true })
+    }
     const sizeMB = (statSync(outputPath).size / (1024 * 1024)).toFixed(1)
     emitJob(job, `专属 DMG 已输出：${outputPath}（${sizeMB} MB）`)
-    finishJob(job, 'done', { outputPath })
+    finalStatus = 'done'
+    finalPayload = { outputPath }
   } catch (error) {
-    finishJob(job, 'failed', { error: error && error.message ? error.message : String(error) })
+    finalPayload = { error: error && error.message ? error.message : String(error) }
   } finally {
     restoreNodeModules()
     rmSync(seedFile, { force: true })
+    try {
+      cleanReadyPackOutputs(contract)
+    } catch (error) {
+      finalStatus = 'failed'
+      finalPayload = {
+        error: `打包中间产物清理失败：${error && error.message ? error.message : String(error)}`,
+      }
+    }
+    finishJob(job, finalStatus, finalPayload)
   }
 }
 
@@ -618,7 +797,13 @@ async function handleRequest(req, res) {
 }
 
 export async function startServer(port = Number(process.env.PORT || 4291)) {
-  ensureDir(outputRoot)
+  ensurePrivateDir(outputRoot)
+  ensurePrivateDir(stagingRoot)
+  ensurePrivateDir(exportsDir)
+  const recoveredSeed = recoverInterruptedReadyPackSeed()
+  if (recoveredSeed.restored || recoveredSeed.removedTransientSeeds > 0) {
+    console.log('[packer] restored the developer AI seed and removed interrupted package seed files')
+  }
   restoreOrphanedNodeModulesSymlink()
   const server = createServer((req, res) => {
     handleRequest(req, res).catch((error) => {

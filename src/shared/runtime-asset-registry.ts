@@ -5,10 +5,9 @@
 // writable skill-runtime dir. See:
 //   docs/superpowers/plans/2026-06-23-one-click-runtime-provisioning-implementation.md
 //
-// IMPORTANT (plan §0.6 / P0): `sha256` values are PLACEHOLDERS until
-// scripts/pin-runtime-assets.mjs runs on a networked machine and fills real
-// digests. `isRuntimeAssetPinned` gates that; the registry gate must NOT enter
-// the verify chain while any asset is unpinned (avoids "非空即过" fake-pass).
+// Every current archive has a pinned sha256. `isRuntimeAssetPinned` keeps the
+// placeholder sentinel as a hard stop for any future asset added before it is
+// verified by scripts/pin-runtime-assets.mjs.
 
 export type RuntimePlatformKey = 'darwin-arm64' | 'darwin-x64' | 'win32-x64'
 export type RuntimeAssetId = 'python' | 'ffmpeg'
@@ -26,7 +25,7 @@ export interface RuntimeAssetOutput {
 }
 
 export interface RuntimeAssetArchive {
-  /** Real digest filled by P0 pin script; equals RUNTIME_ASSET_PLACEHOLDER_SHA until then. */
+  /** Verified archive digest; the placeholder sentinel is rejected at runtime. */
   sha256: string
   /** Bare archive filename — used to build a user-mirror URL `${base}/${platform}/${filename}`. */
   filename: string
@@ -56,7 +55,7 @@ export const RUNTIME_ASSET_PLACEHOLDER_SHA = 'PENDING_P0_PIN'
 
 export type ProvisionErrorKind = 'all_sources_unreachable' | 'asset_integrity_failed' | 'unsupported_platform'
 
-// --- Pinned coordinates (versions/URLs are real; sha256 filled by P0). ---
+// --- Pinned coordinates (versions, URLs and sha256 values are verified). ---
 // Python: astral-sh/python-build-standalone `install_only` (relocatable). The
 //   archive expands to a top-level `python/` dir.
 // ffmpeg: win = BtbN/FFmpeg-Builds win64-gpl (bin/ffmpeg.exe + ffprobe.exe);

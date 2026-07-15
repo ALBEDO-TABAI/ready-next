@@ -46,7 +46,10 @@ test('document save failures surface a visible alert and keep the tab dirty', ()
 test('document widget-only state changes enter shared tab content so clean markdown can be saved', () => {
   const markdownEditor = readWorkspaceFile('src/renderer/components/document/MarkdownEditor.tsx')
 
-  assert.match(markdownEditor, /if \(!tab\.path \|\| !canSave \|\| !tab\.isDirty\) return/)
+  assert.match(markdownEditor, /const saveInFlightRef = useRef\(false\)/)
+  assert.match(markdownEditor, /if \(!tab\.path \|\| !canSave \|\| !tab\.isDirty \|\| saveInFlightRef\.current\) return/)
+  assert.match(markdownEditor, /const committed = commitTabSaveSnapshot\(tab\.id, baseContent, nextContent\)/)
+  assert.match(markdownEditor, /setSaveState\(committed \? 'saved' : 'idle'\)/)
   assert.match(markdownEditor, /const widgetStatesRef = useRef\(widgetStates\)/)
   assert.match(markdownEditor, /const tabContentRef = useRef\(tab\.content\)/)
   assert.match(markdownEditor, /const nextWidgetStates = \{[\s\S]*\.\.\.widgetStatesRef\.current,[\s\S]*\[getWidgetPersistenceKey\(widgetTitle, widgetCode\)\]: widgetState,[\s\S]*\}/)

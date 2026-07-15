@@ -19,6 +19,7 @@ import {
 } from '../../shared/agent-identity'
 import type { ScheduleSpecV1 } from '../../shared/scheduled-tasks'
 import { migrateCanonicalRSSItemIdentities } from './rss-engine/item-identity-migration'
+import { migrateFalseFailedDirectAnswers } from './agent-control/task-projection/direct-answer-history-migration'
 
 // Minimal interface compatible with DatabaseConnection from database.ts.
 // Defined locally to avoid circular imports.
@@ -3284,6 +3285,23 @@ const migrations: Migration[] = [
   {
     name: '076_canonicalize_rss_item_identity',
     up: (db) => migrateCanonicalRSSItemIdentities(db)
+  },
+  {
+    name: '077_repair_false_failed_direct_answers',
+    up: (db) => {
+      migrateFalseFailedDirectAnswers(db)
+    }
+  },
+  {
+    name: '078_backfill_local_conversation_default_user',
+    up: (db) => {
+      db.exec(`
+        UPDATE chat_conversations
+        SET user_id = 'default-user'
+        WHERE source_kind = 'local'
+          AND (user_id IS NULL OR trim(user_id) = '');
+      `)
+    }
   }
 ]
 

@@ -8,6 +8,8 @@ const result = spawnSync(electronBinary, [
   '--import', 'tsx', '--test', '--test-concurrency=1',
   'src/__tests__/migration-task-agent-binding.test.ts',
   'src/__tests__/migration-034-run-meta.test.ts',
+  'src/__tests__/migration-077-direct-answer-truth.test.ts',
+  'src/__tests__/migration-078-local-conversation-user-binding-native.test.ts',
 ], {
   env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
   stdio: 'inherit',

@@ -2,8 +2,8 @@
 title: 一键运行时配置（Python + ffmpeg + 核心依赖 自下载）实施计划
 date: 2026-06-23
 branch: agent-evolution/phase1
-status: draft
-enforce: false
+status: implemented-pending-p3
+enforce: true
 author: Claude (Opus 4.8)
 reviewers:
   - codex (2026-06-23 只读审查，提 6 点，全部采纳；据此降回 draft 并补方案)
@@ -16,15 +16,15 @@ review_log:
   - r2: codex 二审 4 点（旧 venv 不重建 / 错误类型混淆 / 镜像优先级与文件名不清 / 解包护栏夸大）全部采纳，见 §0.8。
   - r3: codex 三审 3 点（源循环须试完 / venv 比对用 realpath / P1 编号 C10）全部采纳，见 §0.9。codex 结论：补完即可进 P0 脚本阶段。
   - r5（2026-06-23，P0 钉死）：**P0 已完成**——`pin-runtime-assets.mjs` 真机跑通，8 个 archive 全部填入真实 sha256（registry 0 占位）。修正：codex 写的 PBS tag/版本（20260325/3.11.14）不存在，实际是 **tag `20260610` / `3.11.15`**（GitHub API 查得）；win BtbN 大包 node fetch 反复 terminated，改用 curl 取得（167MB）。新增注册表「全 archive 已钉死」断言。真实 IO 烟测通过（`downloadRuntimeArchive`→sha 匹配→`extractRuntimeArchive` 守卫解包→解释器就位）。**⚠️ 遗留：win BtbN `latest` 是滚动 nightly，sha 会过期**，Windows 派发前需重钉或改 dated tag/自建镜像（mac osxexperts + python 是版本化文件名/tag，稳定）。**P3（干净 mac/win 真机 + venv/pip + 首次 VEA 真跑）仍未做。**
-  - r4（2026-06-23，实现）：**P1+P2 已实现并提交**（commit `feat(skill-runtime): one-click runtime provisioning`）。文件见 §0.10。16 个行为测试（mock 下载器）+ web/node typecheck 全过。codex 对抗审查 FIX-FIRST→修复→**SHIP**：① 下载体积超限归类 integrity（非 unreachable）；② venv/依赖失败包成结构化 `runtime_setup_failed`。Claude 自审另修：tar 护栏的元数据前缀漏洞（改用 `tar -tf` 干净名做 abs/`..`，`tar -tvf` 仅取 symlink 目标）+ xattr 去隔离的 stale-path 竞态（改 rename 后同步执行）。**P0（真 sha256）与 P3（干净 mac/win 真机）仍未做** —— 见 §7/§8，未做完前 status 不升 ready、registry gate 不入 verify。
-gate_before_ready: §0.6 P0（钉死真实资产 + 真 sha256）未完成前，status 不得升 ready；P1 的注册表 gate 必须校验真实值而非「非空」。
+  - r4（2026-06-23，实现）：**P1+P2 已实现并提交**（commit `feat(skill-runtime): one-click runtime provisioning`）。文件见 §0.10。16 个行为测试（mock 下载器）+ web/node typecheck 全过。codex 对抗审查 FIX-FIRST→修复→**SHIP**：① 下载体积超限归类 integrity（非 unreachable）；② venv/依赖失败包成结构化 `runtime_setup_failed`。Claude 自审另修：tar 护栏的元数据前缀漏洞（改用 `tar -tf` 干净名做 abs/`..`，`tar -tvf` 仅取 symlink 目标）+ xattr 去隔离的 stale-path 竞态（改 rename 后同步执行）。P0 后续已由 r5 完成；当前只剩 P3 干净 mac/win 真机验收。
+gate_before_ready: P0 已完成，注册表 gate 校验真实 64-hex sha256 并拒绝未钉死哨兵值；对外声称跨平台完全就绪前，仍必须完成 P3 干净 mac/win 真机验收。
 goal: 让安装包保持瘦壳（几十 MB），用户在「设置 › 模型与运行时」点一个按钮即自下载并配好 Python + ffmpeg + 技能核心依赖，使首次跑（在线）视频分析不再卡在环境/依赖下载上；无需预装系统 Python/homebrew。
 ---
 
-# 一键运行时配置 — 实施计划（draft）
+# 一键运行时配置 — 实施与验收计划
 
 > 合同先行（CLAUDE.md §0.5）。本文给：契约 → 数据模型 → IPC 面 → 下载器 → 平台矩阵 → UI → 测试/gate → 分期 → 不可在本机验证项。
-> **状态=draft**：§0.6 P0（真实资产钉死）完成前不开写实现；先把「真实资产清单+hash」「依赖范围」「失败后镜像配置路径」三块补实，再升 ready。
+> **当前状态**：P0 真实资产钉死、P1 主链与 P2 UI 均已完成；仅 P3 干净 mac/win 真机首次安装与 VEA 验收尚未完成。
 
 ## 0. 背景、范围、reviewer 修订
 
@@ -43,11 +43,11 @@ goal: 让安装包保持瘦壳（几十 MB），用户在「设置 › 模型与
 **不含**（保留现状/独立按钮）：torch + funasr（GB 级，VEA 字幕降级第 3/4 级才需，requirements.txt 标为可选 extras）；ASR/OCR 模型权重——仍走现有 `modelPacks:download`。
 **因此承诺收窄为**：点完按钮，**在线**视频分析（yt-dlp 抽流 + ffmpeg 合流 + 视觉分析 + API 字幕）即刻可用；**本地 ASR 降级链**仍需用户另装 torch/模型（UI 明示）。
 
-### 0.6 P0 前置（升 ready 的硬门）——回应 0.7#3
-开写实现前，必须先产出**真实资产清单**并钉死：每个 `{platform,arch}` 的 Python、ffmpeg 资产中每个 archive 的**精确版本、URL、sha256、解包后相对路径**。
+### 0.6 P0 资产钉死（已完成）——回应 0.7#3
+P0 已产出**真实资产清单**并钉死：每个 `{platform,arch}` 的 Python、ffmpeg 资产中每个 archive 均有**精确版本、URL、sha256、解包后相对路径**。
 - 交付物：`scripts/pin-runtime-assets.mjs` —— 给定 pinned 版本，真实下载各平台资产、`sha256sum`、探明解包布局，**生成** `shared/runtime-asset-registry.ts` 的数据（含真实 hash）。
 - 该脚本须在**有网机器**上各跑一次（mac arm64/x64 + win x64 资产都拉一遍）；产出的 registry 连同 sha256 一起提交。
-- **本环境/CI 不能下载大文件 → 本机无法产出真 hash**；这是 P0 必须在真机完成的事，不得用占位 hash 进 P1 gate。
+- 已完成的真机结果是 PBS `tag 20260610 / Python 3.11.15`，共 8 个 archive 且注册表无占位 hash。未来更换坐标时必须重跑同一脚本，不得手写猜测值。
 
 ### 0.7 codex 审查 6 点（全部采纳，落点如下）
 1. **轻依赖未覆盖** → §0.2 把核心 pip 依赖纳入按钮（`ensureSkillInstalled` 预热），torch/模型显式排除并 UI 明示。
@@ -69,7 +69,7 @@ goal: 让安装包保持瘦壳（几十 MB），用户在「设置 › 模型与
 3. **P1 编号**（→ §7 已修）：`C1–C9` 改 `C1–C10`。
 
 ### 0.10 已实现文件（P1+P2，2026-06-23）
-- `src/shared/runtime-asset-registry.ts`：注册表（mac arm64/x64 + win x64，archive 级 sha256；mac ffmpeg/ffprobe 为两个 archive）+ 纯 helper（`selectRuntimeSourceOrder`/`classifyProvisionFailure`/`venvNeedsRebuild`/`assertSafeRuntimeArchiveEntry`/`buildMirrorUrl`/integrity-error 标记）。sha256=`PENDING_P0_PIN` 占位 → 未钉死时 `provision()` 以 `assets_not_pinned` 拒绝。
+- `src/shared/runtime-asset-registry.ts`：注册表（mac arm64/x64 + win x64，archive 级 sha256；mac ffmpeg/ffprobe 为两个 archive）+ 纯 helper（`selectRuntimeSourceOrder`/`classifyProvisionFailure`/`venvNeedsRebuild`/`assertSafeRuntimeArchiveEntry`/`buildMirrorUrl`/integrity-error 标记）。当前资源均已写入真实 sha256；`PENDING_P0_PIN` 仅作为未来新增资源未校验时的拒绝哨兵。
 - `src/shared/runtime-provision-types.ts`：renderer-facing 类型。
 - `src/main/modules/skills-runtime/runtime-provisioner.ts`：编排（试完所有源 / 分类 / venv 接管 / ffmpeg 接通+架构校验 / 依赖预热）。注入 IO → 16 行为测试。
 - `src/main/modules/skills-runtime/runtime-provisioner-io.ts`：真实 IO（下载/护栏解包/原子放置/探测）。
@@ -119,7 +119,7 @@ interface RuntimeAsset {
 // 用户镜像：setting `runtime_asset_mirror_base`（如 https://my-cdn/ready-runtime/）→
 //   `${base}/${platform}/${archive.filename}`，强制最高优先（不测速，C9/0.8#9）。
 ```
-钉死源（版本由 §0.6 定，hash 由脚本填）：Python=`astral-sh/python-build-standalone` `cpython-3.11.14+20260211 install_only`（triple: aarch64/x86_64-apple-darwin、x86_64-pc-windows-msvc），**国内优先走 USTC GitHub Release 镜像** `https://mirrors.ustc.edu.cn/github-release/astral-sh/python-build-standalone/20260325/`，GitHub 原站和 ghproxy 仅兜底；ffmpeg=mac `OSXExperts`（arm64 8.1、Intel 8.0，ffmpeg/ffprobe 分 archive；页面提供输出文件 SHA256，P0 脚本会校验），win `BtbN/FFmpeg-Builds win64-gpl`（一个 archive 含 ffmpeg.exe/ffprobe.exe）。`Evermeet` 仅 Intel、`FFbinaries` 无 mac arm64、`eugeneware/ffmpeg-static` 不覆盖 ffprobe，均不作为当前主源。mac ffmpeg 和 BtbN 暂未找到可公开证明稳定收录的国内机构镜像；这两类资产国内分发走 `runtime_asset_mirror_base` 指向的自建/域内 CDN，并由同一套 archive sha256 防污染。
+当前钉死源：Python=`astral-sh/python-build-standalone` `cpython-3.11.15+20260610 install_only`（triple: aarch64/x86_64-apple-darwin、x86_64-pc-windows-msvc），**国内优先走 USTC GitHub Release 镜像** `https://mirrors.ustc.edu.cn/github-release/astral-sh/python-build-standalone/20260610/`，GitHub 原站和 ghproxy 仅兜底；ffmpeg=mac `OSXExperts`（arm64 8.1、Intel 8.0，ffmpeg/ffprobe 分 archive），win `BtbN/FFmpeg-Builds win64-gpl`（一个 archive 含 ffmpeg.exe/ffprobe.exe）。`Evermeet` 仅 Intel、`FFbinaries` 无 mac arm64、`eugeneware/ffmpeg-static` 不覆盖 ffprobe，均不作为当前主源。mac ffmpeg 和 BtbN 国内分发可走 `runtime_asset_mirror_base` 指向的自建/域内 CDN，并由同一套 archive sha256 防污染。
 
 ## 3. 主进程 — `RuntimeProvisioner`（新）
 - `getRuntimeStatus()`（C1，真实探测，5s 缓存）。
@@ -148,16 +148,16 @@ interface RuntimeAsset {
 - **镜像强制优先**（C9/0.8#9）：配置 `runtime_asset_mirror_base` 后，镜像 URL 置顶被先试，即便其测速更慢/未测速；无配置→走默认源。
 - **成功路径** → 写设置 + venv 接管 + `ensureSkillInstalled` 被调 + status overallReady（C5/C8/C10）。
 - 原子性：中断后 status≠ready（C3）；force/幂等（C7）。
-注册表 gate：每 `RuntimePlatformKey` 的 python+ffmpeg 条目齐全、每个 archive 的 **sha256 为真实 64-hex（§0.6 后）**、`sources≥1 primary`（镜像可选，用户镜像仍强制置顶）、`expectedArch` 对齐。**P0 未完成前此 gate 不并入 verify 链**（避免「非空即过」假绿，0.7#3）。
+注册表 gate：每 `RuntimePlatformKey` 的 python+ffmpeg 条目齐全、每个 archive 的 **sha256 为真实 64-hex**、`sources≥1 primary`（镜像可选，用户镜像仍强制置顶）、`expectedArch` 对齐。该合同已进入 `runtime-provisioner.test.ts`，同时保留对未来占位哨兵值的失败测试。
 
 ## 7. 分期
 - **P0 ✅ 已完成**（2026-06-23）：`pin-runtime-assets.mjs` 真机跑通；8 个 archive（python ×3 / mac ffmpeg+ffprobe ×4 / win ffmpeg ×1）真实 sha256 已填入 registry（0 占位）；真实 IO 烟测通过。真值：PBS `tag 20260610 / 3.11.15`、osxexperts ffmpeg/ffprobe 8.1(arm)/8.0(intel)、BtbN win64-gpl latest。**遗留**：win BtbN `latest` sha 会随 nightly 过期，Windows 派发前需重钉/改 dated tag。
-- **P1（本机可完整交付+测）✅ 已完成**：注册表(占位 sha256) + `RuntimeProvisioner`(mock 下载器跑通 C1–C10) + `selectRuntimeSourceOrder` + IPC/preload/类型 + §6 全部行为测试（16 个）。注：注册表 gate **暂未并入 verify**（P0 未填真值前会假绿，§0.6）。
+- **P1（本机可完整交付+测）✅ 已完成**：真实 sha256 注册表 + `RuntimeProvisioner`(mock 下载器跑通 C1–C10) + `selectRuntimeSourceOrder` + IPC/preload/类型 + §6 全部行为测试（16 个）。注册表完整性与占位哨兵拒绝已进入同一行为测试。
 - **P2 ✅ 已完成**：`RuntimeEnvironmentCard` UI 卡 + 进度/失败镜像配置 + selfTest。
 - **P3（真机/真网验收）**：干净 Mac 一键→**首次 VEA 在线视频真实跑通**；Windows x64 实测（`.exe`/拷贝/quarantine 不适用/`verify:native`）。不接受单测绿当派发就绪。
 
-## 8. 不可在此环境验证（如实声明）
-- 真实下载、sha256 实值、Gatekeeper quarantine、Windows 执行、首次 VEA 真跑——本机/CI 都不能全验；P0/P3 必须真机。
+## 8. 尚需目标机验证（如实声明）
+- 资产真实下载与 sha256 实值已在 P0 完成；尚未全验的是干净系统首次安装、Gatekeeper quarantine、Windows 执行与首次 VEA 真跑，即 P3。
 - better-sqlite3 ABI 由各平台 app 构建负责，不在本功能内。
 
 ## 9. 关联

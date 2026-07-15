@@ -31,6 +31,7 @@ import type { CoordinatorPromptFragment, DomainAdapter } from './domain-adapters
 import type { AgentSystemStudioAgentStatus } from '../../../shared/agent-system-studio'
 import type { AgentExecutionProfile } from '../../../shared/agent-execution-profile'
 import { AGENT_KNOWLEDGE_INDEX_MAX_CHARS } from '../../../shared/agent-execution-profile'
+import { formatAgentTonePrompt, formatUserProfilePrompt } from './user-profile-prompt'
 
 export type PromptMemoryLayer = 'l0' | 'l1' | 'l2' | 'recall'
 export type PromptMemorySourceType = MemorySourceType | 'session_recall'
@@ -146,6 +147,9 @@ interface CoordinatorTriggerCandidate {
 }
 
 const MAX_L0_CHARS = 6000
+const MAX_L0_USER_CHARS = 1600
+const MAX_L0_PERSONA_CHARS = 2200
+const MAX_L0_INSTRUCTIONS_CHARS = 1400
 const MAX_L1_CHARS = 8000
 // EP3-A3 — charter/routing index budget (main agent sessions only).
 const MAX_AGENT_ROUTING_CHARS = 600
@@ -561,9 +565,9 @@ export class PromptAssemblyService {
   /**
    * Load USER.md dynamically from database or fallback to file
    */
-  private async loadUSER(userId?: string): Promise<string> {
+  private async loadUSER(userId?: string, fallbackToFile = true): Promise<string> {
     if (!userId || !this.deps.enableDatabaseMemory) {
-      return this.readMemoryFile('USER.md')
+      return fallbackToFile ? this.readMemoryFile('USER.md') : ''
     }
 
     try {
@@ -573,15 +577,10 @@ export class PromptAssemblyService {
         : null
 
       if (!profile) {
-        return this.readMemoryFile('USER.md')
+        return fallbackToFile ? this.readMemoryFile('USER.md') : ''
       }
 
-      // Generate USER.md content from profile
-      const sections = [
-        `# User Profile: ${profile.name || userId}`,
-        `Language: ${profile.preferredLanguage}`,
-        profile.communicationStyle ? `Communication Style: ${profile.communicationStyle}` : ''
-      ]
+      const sections = [formatUserProfilePrompt(profile)]
 
       // Load user-specific memories
       if (this.deps.memoryRepository) {
@@ -593,7 +592,7 @@ export class PromptAssemblyService {
         })
 
         if (userMemories.length > 0) {
-          sections.push('\n## Preferences')
+          sections.push('\n已确认的用户记忆')
           for (const memory of userMemories) {
             const content = await this.loadMemoryContent(memory.contentKey)
             if (content) {
@@ -606,7 +605,7 @@ export class PromptAssemblyService {
       return sections.filter(Boolean).join('\n')
     } catch (error) {
       console.error('[PromptAssembly] Failed to load user profile from database:', error)
-      return this.readMemoryFile('USER.md')
+      return fallbackToFile ? this.readMemoryFile('USER.md') : ''
     }
   }
 
@@ -657,26 +656,36 @@ export class PromptAssemblyService {
 
     // Load dynamic L0 files
     const soul = executionProfile.personality
+    const personaText = [
+      formatAgentTonePrompt(executionProfile.tone),
+      soul,
+    ].filter(Boolean).join('\n\n')
     const memory = await this.loadMEMORY()
-    const user = await this.loadUSER(scope.userId)
+    const isLocalScope = scope.sourceKind === 'local'
+    const scopedUserId = scope.userId || (isLocalScope ? 'default-user' : undefined)
+    const user = scopedUserId ? await this.loadUSER(scopedUserId, isLocalScope) : ''
     const agents = this.readMemoryFile('AGENTS.md')
 
-    const sections = [
-      formatMemorySection(
+    const coreSections = [
+      user ? clip(formatMemorySection('用户画像', user), MAX_L0_USER_CHARS) : '',
+      clip(formatMemorySection('人格定义', personaText), MAX_L0_PERSONA_CHARS),
+      clip(formatMemorySection('运行指令', agents), MAX_L0_INSTRUCTIONS_CHARS),
+    ].filter(Boolean)
+    const core = coreSections.join('\n\n')
+    const memoryBudget = Math.max(0, MAX_L0_CHARS - core.length - (core ? 2 : 0))
+    const residentMemory = memoryBudget > 0
+      ? clip(formatMemorySection(
         '常驻记忆',
-        [memory, ...residentAgentSections].filter(Boolean).join('\n')
-      ),
-      formatMemorySection('运行指令', agents),
-      formatMemorySection('用户画像', user),
-      formatMemorySection('人格定义', soul)
-    ]
-
-    const rendered = sections.join('\n\n')
-    const clipped = clip(rendered, MAX_L0_CHARS)
+        [memory, ...residentAgentSections].filter(Boolean).join('\n'),
+      ), memoryBudget)
+      : ''
+    const clipped = clip([core, residentMemory].filter(Boolean).join('\n\n'), MAX_L0_CHARS)
 
     const refs = [
       this.makeMemoryRef('l0', 'resident_agent', '常驻记忆', 'MEMORY.md', '常驻 agent 记忆'),
-      this.makeMemoryRef('l0', 'resident_user', '用户画像', 'USER.md', '常驻用户偏好'),
+      ...(user
+        ? [this.makeMemoryRef('l0', 'resident_user', '用户画像', 'USER.md', '常驻用户偏好')]
+        : []),
       ...residentRefs
     ]
 

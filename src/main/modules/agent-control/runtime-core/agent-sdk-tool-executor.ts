@@ -23,7 +23,8 @@ import { isHandoffTakeoverToolOutput, runWithHandoffToolGate } from '../agents/h
 import { resolvePolicyConflictFacts } from '../policy-arbitration'
 import {
   isBrowserBatchCollectionWorkflowTool,
-  isBrowserCollectionSubsetTool
+  isBrowserCollectionSubsetTool,
+  isBrowserObservationSubsetTool
 } from '../../../../shared/browser-collection-intent'
 import {
   BROWSER_CONTENT_TASK_TOOL_NAMES,
@@ -73,6 +74,7 @@ import {
   mapToolFailureClose,
   messageHasBrowserBatchCollectionIntent,
   messageHasBrowserCollectionIntent,
+  messageHasExplicitBrowserCollectionIntent,
   normalizeExplicitDocumentTargetToolArgs,
   publicAgentName,
   resolveBrowserDecisionMode,
@@ -108,6 +110,7 @@ export function isToolEnabledForCurrentAuthorization(
 function createVisibleBrowserToolPreserver(params: {
   visibleCapabilityGroupIds: ReadonlyArray<string>
   collectionExposure: boolean
+  persistentCollectionExposure: boolean
   batchCollectionExposure: boolean
 }): ((name: string) => boolean) | undefined {
   const browserInteractionVisible = params.visibleCapabilityGroupIds.includes('browser_interaction')
@@ -119,7 +122,9 @@ function createVisibleBrowserToolPreserver(params: {
     if (params.collectionExposure) {
       return params.batchCollectionExposure
         ? isBrowserBatchCollectionWorkflowTool(name)
-        : isBrowserCollectionSubsetTool(name)
+        : params.persistentCollectionExposure
+          ? isBrowserCollectionSubsetTool(name)
+          : isBrowserObservationSubsetTool(name)
     }
     return (
       (browserInteractionVisible && BROWSER_INTERACTION_TOOL_NAME_SET.has(name)) ||
@@ -263,6 +268,10 @@ export class AgentSdkToolExecutor {
     // Intent carries the TTL continuity so a bare follow-up ("再试一次") stays
     // exposed.
     const msgIntent = messageHasBrowserCollectionIntent(params.message, params.requestEnvelope)
+    const msgExplicitCollectionIntent = messageHasExplicitBrowserCollectionIntent(
+      params.message,
+      params.requestEnvelope
+    )
     const msgBatchIntent = messageHasBrowserBatchCollectionIntent(
       params.message,
       params.requestEnvelope
@@ -272,7 +281,7 @@ export class AgentSdkToolExecutor {
       hasLocalSendImIntentForTurn(params.message, params.requestEnvelope)
     const skillResumeOrRepairContext =
       params.authorization.mode === 'selected' && params.authorization.source !== 'explicit'
-    const explicitBrowserCollectionIntent = msgIntent || msgBatchIntent
+    const explicitBrowserCollectionIntent = msgExplicitCollectionIntent || msgBatchIntent
     const suppressBrowserContentTasks =
       skillResumeOrRepairContext &&
       browserDecisionMode === 'free_tool_loop' &&
@@ -283,8 +292,11 @@ export class AgentSdkToolExecutor {
       !localSendImIntent &&
       (msgIntent || params.recentCollectionIntent === true) &&
       !suppressBrowserContentTasks
+    const persistentCollectionExposure =
+      collectionExposure &&
+      (msgExplicitCollectionIntent || params.recentCollectionIntent === true)
     const batchCollectionExposure =
-      collectionExposure && (msgBatchIntent || params.recentBatchCollectionIntent === true)
+      persistentCollectionExposure && (msgBatchIntent || params.recentBatchCollectionIntent === true)
     appendToolCapabilityLog(
       [
         '[collection_exposure]',
@@ -292,6 +304,7 @@ export class AgentSdkToolExecutor {
         `mode=${browserDecisionMode}`,
         `effectiveMode=${effectiveBrowserDecisionMode}`,
         `msgIntent=${msgIntent}`,
+        `explicitCollection=${msgExplicitCollectionIntent}`,
         `recentIntent=${params.recentCollectionIntent === true}`,
         `batchIntent=${msgBatchIntent}`,
         `recentBatch=${params.recentBatchCollectionIntent === true}`,
@@ -369,7 +382,8 @@ export class AgentSdkToolExecutor {
         const name = (definition as { name?: unknown }).name
         if (typeof name !== 'string' || !name.startsWith('browser_')) return true
         if (batchCollectionExposure) return isBrowserBatchCollectionWorkflowTool(name)
-        return isBrowserCollectionSubsetTool(name)
+        if (persistentCollectionExposure) return isBrowserCollectionSubsetTool(name)
+        return isBrowserObservationSubsetTool(name)
       })
     }
     if (capabilityResolution.visibleCapabilityGroupIds.includes('skills')) {
@@ -400,6 +414,7 @@ export class AgentSdkToolExecutor {
         : createVisibleBrowserToolPreserver({
             visibleCapabilityGroupIds: capabilityResolution.visibleCapabilityGroupIds,
             collectionExposure,
+            persistentCollectionExposure,
             batchCollectionExposure
           })
       const preserveVisibleResearchTool =

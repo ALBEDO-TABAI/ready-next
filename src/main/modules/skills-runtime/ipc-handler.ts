@@ -1,8 +1,7 @@
-import { ipcMain } from 'electron'
+import { BrowserWindow, ipcMain } from 'electron'
 import { getSkillsRuntimeManager } from './runtime-manager'
 import { getDatabase } from '../database'
 import { MODEL_PACK_IDS, type ModelPackId, type ModelSource } from '../../../shared/model-pack-types'
-import { RuntimeProvisionError } from './runtime-provisioner'
 
 interface SkillsIPCResponse<T = unknown> {
   success: boolean
@@ -12,6 +11,15 @@ interface SkillsIPCResponse<T = unknown> {
 
 export function setupSkillsIPC(): void {
   const manager = getSkillsRuntimeManager()
+  const runtimeProvisioner = manager.getRuntimeProvisioner()
+
+  runtimeProvisioner.subscribeProvisionSnapshot((snapshot) => {
+    for (const window of BrowserWindow.getAllWindows()) {
+      if (!window.webContents.isDestroyed()) {
+        window.webContents.send('runtime:provisionUpdate', snapshot)
+      }
+    }
+  })
 
   ipcMain.handle('skills:list', (): SkillsIPCResponse => {
     try {
@@ -224,30 +232,34 @@ export function setupSkillsIPC(): void {
   //   docs/superpowers/plans/2026-06-23-one-click-runtime-provisioning-implementation.md
   ipcMain.handle('runtime:status', async (): Promise<SkillsIPCResponse> => {
     try {
-      return { success: true, data: await manager.getRuntimeProvisioner().getStatus() }
+      return { success: true, data: await runtimeProvisioner.getStatus() }
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : String(error) }
     }
   })
 
-  ipcMain.handle('runtime:provision', async (event, payload?: { force?: boolean }): Promise<SkillsIPCResponse> => {
+  ipcMain.handle('runtime:provisionState', (): SkillsIPCResponse => {
     try {
-      const data = await manager.getRuntimeProvisioner().provision({ force: payload?.force }, (progress) => {
-        if (!event.sender.isDestroyed()) event.sender.send('runtime:provisionUpdate', progress)
-      })
-      return { success: true, data }
+      return { success: true, data: runtimeProvisioner.getProvisionSnapshot() }
     } catch (error) {
-      // silent-catch: Carry the structured kind so the renderer can branch (unreachable → offer
-      //   mirror config; integrity → do not).
-      const kind = error instanceof RuntimeProvisionError ? error.kind : undefined
-      return { success: false, error: error instanceof Error ? error.message : String(error), data: kind ? { kind } : undefined }
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+
+  ipcMain.handle('runtime:provision', (_, payload?: { force?: boolean }): SkillsIPCResponse => {
+    try {
+      void runtimeProvisioner.provision({ force: payload?.force }).catch(() => {
+        // The terminal failure is retained in the provision snapshot and broadcast.
+      })
+      return { success: true, data: runtimeProvisioner.getProvisionSnapshot() }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
     }
   })
 
   ipcMain.handle('runtime:cancel', (): SkillsIPCResponse => {
     try {
-      manager.getRuntimeProvisioner().cancel()
-      return { success: true }
+      return { success: true, data: runtimeProvisioner.cancel() }
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : String(error) }
     }
@@ -272,7 +284,7 @@ export function setupSkillsIPC(): void {
 
   ipcMain.handle('runtime:selfTest', async (): Promise<SkillsIPCResponse> => {
     try {
-      return { success: true, data: await manager.getRuntimeProvisioner().getStatus() }
+      return { success: true, data: await runtimeProvisioner.getStatus() }
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : String(error) }
     }

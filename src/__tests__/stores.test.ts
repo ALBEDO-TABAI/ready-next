@@ -1659,7 +1659,7 @@ describe('useAgent Store', () => {
                 }),
                 sendScoped: async () => ({
                     success: true,
-                    responseText: '刚才的结果没有成功显示，我重新发一次：\n\n广州一周天气：小雨为主。',
+                    responseText: '广州一周天气：小雨为主。',
                     persistence: {
                         scope: 'pre-existing',
                         message: 'persisted',
@@ -1715,6 +1715,84 @@ describe('useAgent Store', () => {
         assert.equal(useAgent.getState().isStreaming, false)
         await new Promise<void>((resolve) => setTimeout(resolve, 0))
         assert.equal(savedMessages.some((message) => message.role === 'assistant' && /广州一周天气/.test(message.content)), true)
+    })
+
+    it('should not append backend responseText after the same answer already streamed', async () => {
+        const scopeId = 'conv-local-streamed-response-text'
+        ;(globalThis as any).window.electronAPI = {
+            agent: {
+                createLocalScope: async (_agent: string, requestedScopeId?: string) => ({
+                    success: true,
+                    data: {
+                        id: requestedScopeId || scopeId,
+                        agent: 'butler',
+                        title: '新对话',
+                        sourceKind: 'local',
+                        sourceId: 'app',
+                        threadKey: requestedScopeId || scopeId,
+                        meta: { sourceLabel: '应用内', createdBy: 'app' },
+                        createdAt: '2026-04-15T10:00:00.000Z',
+                        updatedAt: '2026-04-15T10:00:00.000Z',
+                        lastMessageAt: null,
+                    },
+                }),
+                sendScoped: async () => {
+                    const responseId = useAgent.getState().streamingMessageId
+                    assert.ok(responseId)
+                    useAgent.getState().appendToMessage(responseId, '账号分析完成，建议做三个系列。')
+                    return {
+                        success: true,
+                        responseText: '账号分析完成，建议做三个系列。',
+                        persistence: {
+                            scope: 'pre-existing',
+                            message: 'persisted',
+                            attachments: 'none',
+                            inputAttachments: 'none',
+                        },
+                    }
+                },
+                emitRendererMetric: async () => ({ success: true }),
+                kill: async () => ({ success: true }),
+            },
+            chat: {
+                createConversation: async () => ({ success: true }),
+                saveMessage: async () => ({ success: true }),
+                updateConversationTitle: async () => ({ success: true }),
+            },
+            settings: {
+                getAIConfig: async () => ({ success: true, data: null }),
+            },
+        }
+
+        useAgent.setState({
+            currentAgent: 'butler',
+            currentScopeId: scopeId,
+            currentScope: {
+                id: scopeId,
+                agent: 'butler',
+                title: '新对话',
+                sourceKind: 'local',
+                sourceId: 'app',
+                threadKey: scopeId,
+                meta: { sourceLabel: '应用内', createdBy: 'app' },
+                createdAt: '2026-04-15T10:00:00.000Z',
+                updatedAt: '2026-04-15T10:00:00.000Z',
+                lastMessageAt: null,
+            },
+            scopes: [],
+            conversations: [],
+            messages: [],
+            attachments: [],
+            filePool: [],
+            isStreaming: false,
+            sendCoalescingEnabled: false,
+        })
+
+        const result = await useAgent.getState().sendMessage('分析账号')
+        const assistantMessage = useAgent.getState().messages.find((message) => message.type === 'agent')
+
+        assert.equal(result.success, true)
+        assert.equal(assistantMessage?.content, '账号分析完成，建议做三个系列。')
     })
 
     it('should keep hard adjudication-degraded failures visible after persisting the user message', async () => {
@@ -1803,7 +1881,7 @@ describe('useAgent Store', () => {
         )
     })
 
-    it('should keep generated text visible for soft adjudication-degraded completions', async () => {
+    it('should keep generated text visible without turning a hard degraded result green', async () => {
         const scopeId = 'conv-local-soft-degraded-after-text'
         ;(globalThis as any).window.electronAPI = {
             agent: {
@@ -1877,12 +1955,12 @@ describe('useAgent Store', () => {
 
         const result = await useAgent.getState().sendMessage('hello')
 
-        assert.equal(result.success, true)
+        assert.equal(result.success, false)
         assert.equal(result.preserveInput, false)
         assert.equal(result.shouldClearInput, true)
-        assert.equal(useAgent.getState().scopeRunStates[scopeId]?.phase, 'done')
+        assert.equal(useAgent.getState().scopeRunStates[scopeId]?.phase, 'error')
         assert.equal(useAgent.getState().scopeRunStates[scopeId]?.terminalReason, 'adjudication_degraded')
-        assert.equal(useAgent.getState().toolTraceStatus, 'done')
+        assert.equal(useAgent.getState().toolTraceStatus, 'error')
         assert.equal(
             useAgent.getState().messages.some((message) => message.type === 'agent' && message.content === '已生成正文'),
             true,
@@ -3022,6 +3100,41 @@ describe('useSettings Store', () => {
 
         await new Promise((resolve) => setTimeout(resolve, 260))
         assert.deepStrictEqual(calls, ['second'])
+    })
+
+    it('keeps a Base URL draft verbatim while persisting its canonical API prefix', async () => {
+        const calls: string[] = []
+        ;(globalThis as any).window.electronAPI.settings.setAIWorkspace = async (workspace: { profiles: Array<{ id: string; config: { baseUrl: string } }> }) => {
+            const profile = workspace.profiles.find((item) => item.id === useSettings.getState().selectedProfileId)
+            calls.push(profile?.config.baseUrl || '')
+            return { success: true }
+        }
+
+        const profileId = useSettings.getState().addCustomProfile({
+            provider: 'openai-compatible',
+            baseUrl: '',
+            model: 'gpt-test',
+        })
+
+        useSettings.getState().updateField('baseUrl', 'https://r')
+        assert.strictEqual(
+            useSettings.getState().workspace.profiles.find((profile) => profile.id === profileId)?.config.baseUrl,
+            'https://r',
+        )
+
+        useSettings.getState().updateField('baseUrl', 'https://relay.example.com')
+        assert.strictEqual(
+            useSettings.getState().workspace.profiles.find((profile) => profile.id === profileId)?.config.baseUrl,
+            'https://relay.example.com',
+        )
+
+        await new Promise((resolve) => setTimeout(resolve, 380))
+
+        assert.deepStrictEqual(calls, ['https://relay.example.com/v1'])
+        assert.strictEqual(
+            useSettings.getState().workspace.profiles.find((profile) => profile.id === profileId)?.config.baseUrl,
+            'https://relay.example.com',
+        )
     })
 
     it('flushes pending config before switching provider', async () => {

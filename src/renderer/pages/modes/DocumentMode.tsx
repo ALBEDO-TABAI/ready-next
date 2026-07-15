@@ -1,7 +1,12 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, lazy, Suspense } from 'react'
 import { FileText, Loader2 } from 'lucide-react'
 import { computeDesiredRoots, useWorkspace } from '../../stores/useWorkspace'
-import { isImagePreviewPath, useDocTabs, type DocTab, type DocumentPaneTarget } from '../../stores/useDocTabs'
+import {
+  isImagePreviewPath,
+  useDocTabs,
+  type DocTab,
+  type DocumentPaneTarget,
+} from '../../stores/useDocTabs'
 import MarkdownEditor from '../../components/document/MarkdownEditor'
 import DocumentVerticalTabRail from '../../components/document/DocumentVerticalTabRail'
 import FilePreview from '../../components/document/FilePreview'
@@ -22,6 +27,7 @@ import {
 } from '../../modules/workbench/chrome'
 import { useRafResizeDrag } from '../../modules/workbench/useRafResizeDrag'
 import { freezeVisibleDocumentLayoutWidths } from '../../modules/document/documentLayoutFreeze'
+import { shouldHandleSelectedDocument } from '../../modules/document/documentSelectionOpen'
 import {
   captureMarkdownLineAnchor,
   readDocumentReadingPositionMap,
@@ -32,6 +38,7 @@ import {
 import {
   isReloadableTextDocumentPath,
   shouldRefreshDocumentTabForDirectoryChange,
+  shouldRefreshDocumentTabOnActivation,
 } from '../../modules/document/documentExternalRefresh'
 import {
   canAcceptDocumentPaneDrop,
@@ -350,7 +357,7 @@ export default function DocumentMode({
   const {
     tabs, tabGroups, activeTabId, splitTabId, documentSplitRatio,
     openTab, closeTab, setActiveTab, setSplitTab, setDocumentSplitRatio,
-    updateTabContent, markTabSaved, setPendingReveal, openTabInPane,
+    hydrateTabContentFromDisk, setPendingReveal, openTabInPane,
     openImageTab, ensureTabForPath, createBackgroundTab,
     createTabGroupFromDrop, addTabToGroup, reorderTabToRank,
     renameTabGroup, recolorTabGroup, setTabGroupCollapsed, disbandTabGroup,
@@ -366,7 +373,6 @@ export default function DocumentMode({
   // 预览下沉态（预览内编辑）：仅在 preview 模式下有效，切模式/切标签即复位。
   const [previewEditActive, setPreviewEditActive] = useState(false)
   const [previewFocusWidgetTitle, setPreviewFocusWidgetTitle] = useState<string | null>(null)
-  const [hasActivated, setHasActivated] = useState(isActive)
   const [outlinePanelOpen, setOutlinePanelOpen] = useState(() => readDocumentPanelOpenState('ready-document-outline-panel-open'))
   const [marksPanelOpen, setMarksPanelOpen] = useState(() => readDocumentPanelOpenState('ready-document-marks-panel-open'))
   const [panelTargetTabId, setPanelTargetTabId] = useState<string | null>(activeTabId)
@@ -382,12 +388,6 @@ export default function DocumentMode({
   useEffect(() => {
     documentWorkspaceRootsRef.current = documentWorkspaceRoots
   }, [documentWorkspaceRoots])
-
-  useEffect(() => {
-    if (isActive) {
-      setHasActivated(true)
-    }
-  }, [isActive])
 
   useEffect(() => {
     window.localStorage?.setItem('ready-document-outline-panel-open', outlinePanelOpen ? '1' : '0')
@@ -406,13 +406,22 @@ export default function DocumentMode({
     }
   }, [documentSplitRatio])
 
-  // Open the file selected in SidePanel. This must react only to a *new selection*
-  // (selectedFile / hasActivated), never to ongoing tab state — otherwise switching
+  // Open the file selected in SidePanel. Hidden keep-alive modes must not react;
+  // the foreground FileTree/search/graph path already opens its target before the
+  // selection effect runs, so detect that state and avoid a duplicate stat/open/activity.
+  // This must react only to a *new selection* (selectedFile / isActive), never to ongoing tab state — otherwise switching
   // tabs or browsing another image re-fires the effect and snaps the active tab back
   // to the selected file, locking the document view. Tab state and workspace roots are
   // therefore read live at execution time, not through the dependency array.
   useEffect(() => {
-    if (!hasActivated || !selectedFile) return undefined
+    if (!selectedFile) return undefined
+    const initialState = useDocTabs.getState()
+    if (!shouldHandleSelectedDocument({
+      isActive,
+      selectedFile,
+      tabs: initialState.tabs,
+      activeTabId: initialState.activeTabId,
+    })) return undefined
 
     let disposed = false
     void (async () => {
@@ -447,7 +456,7 @@ export default function DocumentMode({
     return () => {
       disposed = true
     }
-  }, [ensureTabForPath, hasActivated, openImageTab, openTab, selectedFile])
+  }, [ensureTabForPath, isActive, openImageTab, openTab, selectedFile])
 
   useEffect(() => {
     const handler = () => {
@@ -596,14 +605,15 @@ export default function DocumentMode({
       if (!current || current.path !== candidate.path || current.isDirty) continue
       const nextContent = result.content || ''
       if (current.content === nextContent) continue
-      updateTabContent(current.id, nextContent)
-      markTabSaved(current.id)
+      hydrateTabContentFromDisk(current.id, nextContent)
     }
-  }, [markTabSaved, updateTabContent])
+  }, [hydrateTabContentFromDisk])
 
   useEffect(() => {
     if (!isActive) return
-    const visibleTabs = [activeTab, splitTab].filter((tab): tab is DocTab => Boolean(tab))
+    const visibleTabs = [activeTab, splitTab]
+      .filter((tab): tab is DocTab => Boolean(tab))
+      .filter(shouldRefreshDocumentTabOnActivation)
     void refreshCleanTextTabsFromDisk(visibleTabs)
   }, [activeTab?.id, isActive, refreshCleanTextTabsFromDisk, splitTab?.id])
 

@@ -91,8 +91,8 @@ import { BrowserTaskPersistenceService } from './task-persistence-service'
 import { BrowserUtilityMenuService } from './utility-menu-service'
 import { BrowserWindowOpenService } from './window-open-service'
 import { BrowserCollectionConsentStore, type BrowserCollectionConsentVia } from './browser-collection-consent'
-import { buildCollectionHandoffPlanFromTask } from './collection-handoff'
 import { resolveHighControlCollectionTarget, resolveSourceCollectionTarget } from './collection-routing'
+import { collectionTaskIdToCancel, selectLinkedCollectionExecution } from './collection-task-lifecycle'
 import { withHtmlInCanvasWebPreferences } from '../app-control/html-in-canvas-feature'
 import { getReadyBoardService } from '../board-engine/ipc-handler'
 import {
@@ -1033,6 +1033,10 @@ export class BrowserController {
     targetUrl?: string
     outputRootDir?: string
     sourceMessageIds?: string[]
+    ownerAgentId?: string
+    ownerRunId?: string
+    parentTaskId?: string
+    executionBinding?: import('../../../shared/agent-execution-profile').TaskExecutionBinding
   }, scopeId?: string): BrowserCapabilityTaskHandle {
     return this.contentTaskRunner.createSyntheticVisibleCollection({
       ...payload,
@@ -1081,24 +1085,7 @@ export class BrowserController {
       if (status === 'cancelled' || status === 'failed') return false
       return plan?.sourceTaskId === sourceId || result?.sourceTaskId === sourceId
     })
-    return matches.sort((a, b) => String(b.updatedAt || b.createdAt || '').localeCompare(String(a.updatedAt || a.createdAt || '')))[0] || null
-  }
-
-  private async startCollectionFromCompletedVisibleTask(
-    sourceTask: BrowserCapabilityTaskHandle,
-  ): Promise<BrowserCapabilityTaskHandle | null> {
-    const handoff = buildCollectionHandoffPlanFromTask(sourceTask)
-    if (!handoff) return null
-    const existing = await this.findCollectionTaskBySourceTaskId(sourceTask.taskId)
-    if (existing) return existing
-    const sourcePayload = this.contentTaskRunner.getTaskPayload(sourceTask.taskId)
-    const scopeId = typeof sourcePayload?.scopeId === 'string' && sourcePayload.scopeId.trim()
-      ? sourcePayload.scopeId.trim()
-      : undefined
-    if (handoff.strategy === 'card_loop') {
-      return this.startCardLoopCollection(handoff.plan, scopeId)
-    }
-    return this.startNoteCollection(handoff.plan, scopeId)
+    return selectLinkedCollectionExecution(matches)
   }
 
   async resumeTask(taskId: string): Promise<BrowserCapabilityTaskHandle | null> {
@@ -1118,7 +1105,12 @@ export class BrowserController {
   }
 
   async cancelTask(taskId: string): Promise<BrowserCapabilityTaskHandle | null> {
-    return this.contentTaskRunner.cancelTask(taskId)
+    const sourceTask = await this.contentTaskRunner.getTask(taskId)
+    if (!sourceTask) return null
+    const linkedExecution = sourceTask.kind === 'visible_collect'
+      ? await this.findCollectionTaskBySourceTaskId(taskId)
+      : null
+    return this.contentTaskRunner.cancelTask(collectionTaskIdToCancel(sourceTask, linkedExecution))
   }
 
   /**
@@ -1481,12 +1473,19 @@ export class BrowserController {
       )
     }
     const agentTabId = await this.ensureAgentTab()
+    const ownership = {
+      ...(typeof plan.ownerAgentId === 'string' && plan.ownerAgentId.trim() ? { ownerAgentId: plan.ownerAgentId.trim() } : {}),
+      ...(typeof plan.ownerRunId === 'string' && plan.ownerRunId.trim() ? { ownerRunId: plan.ownerRunId.trim() } : {}),
+      ...(typeof plan.parentTaskId === 'string' && plan.parentTaskId.trim() ? { parentTaskId: plan.parentTaskId.trim() } : {}),
+      ...(plan.executionBinding && typeof plan.executionBinding === 'object' ? { executionBinding: plan.executionBinding } : {}),
+    }
     return this.contentTaskRunner.startTask({
       kind: 'note_collect',
       payload: {
         agentTabId,
         surface: 'agent-view' as AgentBrowserSurface,
         plan,
+        ...ownership,
         // Bind the task to the dispatching conversation so it projects into
         // that chat (plan §3.2); absent for non-chat callers (skip projection).
         ...(scopeId && scopeId.trim() ? { scopeId: scopeId.trim() } : {}),
@@ -1510,12 +1509,19 @@ export class BrowserController {
     const sourceTarget = resolveSourceCollectionTarget({ highControl: isHighControl, sourcePayload })
     const agentTabId = sourceTarget?.tabId ?? await this.ensureAgentTab()
     const surface = sourceTarget?.surface ?? 'agent-view'
+    const ownership = {
+      ...(typeof withStrategy.ownerAgentId === 'string' && withStrategy.ownerAgentId.trim() ? { ownerAgentId: withStrategy.ownerAgentId.trim() } : {}),
+      ...(typeof withStrategy.ownerRunId === 'string' && withStrategy.ownerRunId.trim() ? { ownerRunId: withStrategy.ownerRunId.trim() } : {}),
+      ...(typeof withStrategy.parentTaskId === 'string' && withStrategy.parentTaskId.trim() ? { parentTaskId: withStrategy.parentTaskId.trim() } : {}),
+      ...(withStrategy.executionBinding && typeof withStrategy.executionBinding === 'object' ? { executionBinding: withStrategy.executionBinding } : {}),
+    }
     return this.contentTaskRunner.startTask({
       kind: 'card_loop',
       payload: {
         agentTabId,
         surface,
         plan: withStrategy,
+        ...ownership,
         ...(scopeId && scopeId.trim() ? { scopeId: scopeId.trim() } : {}),
       },
     })
@@ -2566,8 +2572,15 @@ export class BrowserController {
     if (!taskId) return { success: false, error: 'Missing taskId' }
     const task = await this.resumeTask(taskId)
     if (!task) return { success: false, error: 'Browser task not found' }
-    const downstreamTask = await this.startCollectionFromCompletedVisibleTask(task)
-    return { success: true, data: downstreamTask || task }
+    return { success: true, data: task }
+  }
+
+  async cancelBrowserTask(payload: { taskId?: string }): Promise<{ success: boolean; data?: unknown; error?: string }> {
+    const taskId = String(payload?.taskId || '').trim()
+    if (!taskId) return { success: false, error: 'Missing taskId' }
+    const task = await this.cancelTask(taskId)
+    if (!task) return { success: false, error: 'Browser task not found' }
+    return { success: true, data: task }
   }
 }
 
@@ -2646,6 +2659,9 @@ export function setupBrowserIPC(
   })
   ipcMain.handle('browser:resumeTask', (_, payload: { taskId?: string }) => {
     return controller.resumeBrowserTask(payload)
+  })
+  ipcMain.handle('browser:cancelTask', (_, payload: { taskId?: string }) => {
+    return controller.cancelBrowserTask(payload)
   })
 
   return controller

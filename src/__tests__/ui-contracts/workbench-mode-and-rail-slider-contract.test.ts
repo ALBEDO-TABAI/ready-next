@@ -7,13 +7,13 @@ function readWorkspaceFile(path: string): string {
   return readFileSync(resolve(process.cwd(), path), 'utf8')
 }
 
-test('workbench mode switch and icon rail share the blue slider treatment', () => {
+test('workbench mode switch and icon rail keep the current Ready accent and slider geometry', () => {
   const modeTabs = readWorkspaceFile('src/renderer/components/layout/DraggableModeTabs.tsx')
   const iconRail = readWorkspaceFile('src/renderer/components/layout/IconRail.tsx')
   const iconRailGroup = readWorkspaceFile('src/renderer/components/motion/MorphIconRailGroup.tsx')
   const styles = readWorkspaceFile('src/renderer/styles/workbench-sliders.css')
 
-  assert.match(styles, /var\(--color-blue,\s*#5B8DEF\)/)
+  assert.match(styles, /var\(--color-ready-orange(?:,\s*#ff4b2b)?\)/)
 
   assert.match(iconRail, /className="icon-rail-slider-shell"/)
   assert.match(iconRailGroup, /icon-rail-slider/)
@@ -26,11 +26,10 @@ test('workbench mode switch and icon rail share the blue slider treatment', () =
   assert.doesNotMatch(iconRailGroup, /<motion\.button[\s\S]*layout/)
 
   assert.match(styles, /\.icon-rail-slider\s*\{[\s\S]*?flex-direction:\s*column/)
-  assert.match(styles, /\.icon-rail-slider\s*\{[\s\S]*?border-radius:\s*18px/)
+  assert.match(styles, /\.icon-rail-slider\s*\{[\s\S]*?border-radius:\s*19px/)
   assert.match(styles, /\.icon-rail-slider-shell\s*\{[\s\S]*?width:\s*100%/)
   assert.match(styles, /\.icon-rail-slider-shell\s*\{[\s\S]*?justify-content:\s*flex-start/)
-  assert.match(styles, /\.icon-rail-slider__thumb-shell\s*\{[\s\S]*?will-change:\s*transform/)
-  assert.match(styles, /\.icon-rail-slider__thumb-shell\s*\{[\s\S]*?height:\s*34px/)
+  assert.match(styles, /\.icon-rail-slider__thumb-shell\s*\{[\s\S]*?display:\s*none/)
   assert.match(styles, /\.icon-rail-slider__button\s*\{[\s\S]*?z-index:\s*3/)
 
   assert.match(modeTabs, /<Icon style=\{\{ width: 15, height: 15 \}\} strokeWidth=\{2\} \/>/)

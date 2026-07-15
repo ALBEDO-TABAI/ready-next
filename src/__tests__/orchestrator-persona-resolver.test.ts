@@ -20,6 +20,7 @@ const fakeConfig = {
 
 test('orchestrator resolves persona prompt when send has no explicit systemPrompt', async () => {
   let resolverAgent: string | null = null
+  let resolverScopeId: string | undefined
   let capturedInstructions = ''
   const orchestrator = new ReadyAgentOrchestrator({
     agentSdkRuntimeDeps: {
@@ -34,8 +35,9 @@ test('orchestrator resolves persona prompt when send has no explicit systemPromp
     },
   })
 
-  orchestrator.setPersonaResolver(async (agent) => {
+  orchestrator.setPersonaResolver(async (agent, scopeId) => {
     resolverAgent = agent
+    resolverScopeId = scopeId
     return `resolved persona for ${agent}`
   })
 
@@ -43,6 +45,7 @@ test('orchestrator resolves persona prompt when send has no explicit systemPromp
 
   assert.equal(result.success, true)
   assert.equal(resolverAgent, 'copywriter')
+  assert.equal(resolverScopeId, 'scope-1')
   assert.match(capturedInstructions, /resolved persona for copywriter/)
 })
 

@@ -189,6 +189,57 @@ test('activity stale marker invalidates every cached root set containing the cha
   assert.equal(counters.reads, 20)
 })
 
+test('concurrent refreshes for the same workspace share one snapshot generation', async () => {
+  const counters = { reads: 0, searches: 0 }
+  const service = new FileEmergenceService(makeDeps({}, counters))
+
+  const [first, second] = await Promise.all([
+    service.getSnapshot({ workspaceRoots: ['/workspace'] }),
+    service.getSnapshot({ workspaceRoots: ['/workspace'] }),
+  ])
+
+  assert.strictEqual(first, second)
+  assert.equal(counters.reads, 5)
+})
+
+test('stale markers raised during generation survive singleflight completion', async () => {
+  const counters = { reads: 0, searches: 0 }
+  let releaseSearch!: () => void
+  let reportSearchStarted!: () => void
+  const searchGate = new Promise<void>((resolve) => { releaseSearch = resolve })
+  const searchStarted = new Promise<void>((resolve) => { reportSearchStarted = resolve })
+  const service = new FileEmergenceService(makeDeps({
+    calendar: {
+      getEvents: () => {
+        counters.reads += 1
+        return [calendar('未来品牌发布计划', now + 3 * day)]
+      },
+      getRecurringEventsAndOverrides: () => ({ events: [], overridesByParent: new Map() }),
+    },
+    search: {
+      search: async () => {
+        counters.searches += 1
+        if (counters.searches === 1) {
+          reportSearchStarted()
+          await searchGate
+        }
+        return { items: [] }
+      },
+    },
+  }, counters))
+
+  const firstGeneration = service.getSnapshot({ workspaceRoots: ['/workspace'] })
+  await searchStarted
+  service.markStale(['/workspace'])
+  releaseSearch()
+  await firstGeneration
+
+  await service.getSnapshot({ workspaceRoots: ['/workspace'] })
+
+  assert.equal(counters.reads, 10)
+  assert.equal(counters.searches, 2)
+})
+
 test('empty snapshots distinguish insufficient history, degraded sources, and rejected candidates', async () => {
   const insufficient = await new FileEmergenceService(makeDeps()).getSnapshot({ workspaceRoots: ['/workspace'] })
   assert.equal(insufficient.emptyState, 'insufficient_history')

@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo } from 'react'
-import { Wrench } from 'lucide-react'
+import { Wrench, X } from 'lucide-react'
 import {
   buildTaskCardViewModel,
   deriveTaskCardRuntimeState,
@@ -95,6 +95,12 @@ const CAPSULE_SHELL_STYLE: React.CSSProperties = {
   overflow: 'hidden',
 }
 
+const TASK_CARD_SHELL_STYLE: React.CSSProperties = {
+  ...CAPSULE_SHELL_STYLE,
+  border: '1px solid color-mix(in srgb, var(--border-default) 82%, transparent)',
+  background: 'color-mix(in srgb, var(--surface-card-bg) 44%, transparent)',
+}
+
 const CAPSULE_HEADER_STYLE: React.CSSProperties = {
   border: 'none',
   background: 'transparent',
@@ -105,6 +111,11 @@ const CAPSULE_HEADER_STYLE: React.CSSProperties = {
   cursor: 'pointer',
   textAlign: 'left',
   width: '100%',
+}
+
+const TASK_CARD_HEADER_STYLE: React.CSSProperties = {
+  ...CAPSULE_HEADER_STYLE,
+  padding: '7px 10px',
 }
 
 export function TaskCard({
@@ -132,7 +143,10 @@ export function TaskCard({
   onCancelChildRun,
   onContinueChildRun,
   onResumeBrowserTask,
+  onCancelBrowserTask,
   onConfirmBrowserCollectionConsent,
+  dismissible = false,
+  onDismiss,
 }: {
   run: TaskCardRun
   /**
@@ -168,7 +182,11 @@ export function TaskCard({
   onCancelChildRun?: (scopeId: string, childRunId: string) => void
   onContinueChildRun?: (scopeId: string, childRunId: string) => void
   onResumeBrowserTask?: (scopeId: string, taskId: string) => void
+  onCancelBrowserTask?: (scopeId: string, taskId: string) => void
   onConfirmBrowserCollectionConsent?: (scopeId: string, requestId: string) => void
+  /** Presentation-only removal. It never stops the underlying task. */
+  dismissible?: boolean
+  onDismiss?: () => void
 }) {
   const vm = buildTaskCardViewModel(run, disclosureState)
   const taskRuntimeState = deriveTaskCardRuntimeState(run)
@@ -189,9 +207,18 @@ export function TaskCard({
   const steps = vm.steps
   const PLAN_STEP_COLLAPSE_THRESHOLD = 10
   const [showAllPlanSteps, setShowAllPlanSteps] = useState(false)
+  const [swipeOffset, setSwipeOffset] = useState(0)
+  const swipeStartXRef = useRef<number | null>(null)
+  const swipeOffsetRef = useRef(0)
+  const suppressHeaderClickRef = useRef(false)
   const planStepsToRender = showAllPlanSteps ? steps : steps.slice(0, PLAN_STEP_COLLAPSE_THRESHOLD)
   const hiddenPlanStepCount = Math.max(0, steps.length - planStepsToRender.length)
   const recentArtifacts = run.recentArtifacts || []
+  const compactPrimaryArtifact = compact && !expanded
+    ? recentArtifacts.find((artifact) => artifact.kind === 'collection_output' && artifact.path)
+      || recentArtifacts.find((artifact) => artifact.path)
+      || null
+    : null
   const isDetachedTask = typeof run.taskId === 'string' && run.taskId.startsWith('detached:')
   const childRunId = run.taskContinuation?.childRunId || null
   const isAgentHandoff = isInternalAgentHandoffTask(run)
@@ -274,6 +301,10 @@ export function TaskCard({
   const showContinueChild = Boolean(childRunId) && run.canResume === true && resumableActions.includes('continue')
   const showCancelChild = Boolean(childRunId) && resumableActions.includes('cancel')
   const showResumeBrowser = Boolean(browserTaskId) && run.canResume === true && resumableActions.includes('continue')
+  const showCancelBrowser = Boolean(browserTaskId)
+    && resumableActions.includes('cancel')
+    && !hasTerminalTaskStatus
+    && taskRuntimeState.visualState === 'background_running'
   const showConsentButton = Boolean(browserCollectionConsent?.requestId)
   /* Stage Q — generic 继续运行：suspended + canResume，且 child/detached/
      browser 各自的精确按钮优先；waitingFor/resumable 残余条件保持旧动作行
@@ -294,6 +325,7 @@ export function TaskCard({
     || showContinueChild
     || showCancelChild
     || showResumeBrowser
+    || showCancelBrowser
     || showConsentButton
     || showGenericResume
     || showContinueInput
@@ -309,13 +341,53 @@ export function TaskCard({
       data-ready-task-scope-id={run.scopeId || undefined}
       data-ready-task-id={run.taskId || undefined}
       data-ready-task-child-run-id={childRunId || undefined}
-      style={CAPSULE_SHELL_STYLE}
+      data-ready-task-dismissible={dismissible ? 'true' : undefined}
+      onPointerDown={(event) => {
+        if (!dismissible || event.button !== 0) return
+        swipeStartXRef.current = event.clientX
+        swipeOffsetRef.current = 0
+        event.currentTarget.setPointerCapture?.(event.pointerId)
+      }}
+      onPointerMove={(event) => {
+        if (swipeStartXRef.current == null) return
+        const delta = Math.max(0, event.clientX - swipeStartXRef.current)
+        if (delta > 8) suppressHeaderClickRef.current = true
+        const nextOffset = Math.min(120, delta)
+        swipeOffsetRef.current = nextOffset
+        setSwipeOffset(nextOffset)
+      }}
+      onPointerUp={() => {
+        if (swipeStartXRef.current == null) return
+        const shouldDismiss = swipeOffsetRef.current >= 72
+        swipeStartXRef.current = null
+        swipeOffsetRef.current = 0
+        setSwipeOffset(0)
+        if (shouldDismiss) onDismiss?.()
+        setTimeout(() => { suppressHeaderClickRef.current = false }, 0)
+      }}
+      onPointerCancel={() => {
+        swipeStartXRef.current = null
+        swipeOffsetRef.current = 0
+        setSwipeOffset(0)
+        suppressHeaderClickRef.current = false
+      }}
+      style={{
+        ...TASK_CARD_SHELL_STYLE,
+        position: 'relative',
+        touchAction: dismissible ? 'pan-y' : undefined,
+        transform: swipeOffset ? `translateX(${swipeOffset}px)` : undefined,
+        opacity: swipeOffset ? Math.max(0.55, 1 - swipeOffset / 220) : 1,
+        transition: swipeStartXRef.current == null ? 'transform 160ms ease, opacity 160ms ease' : 'none',
+      }}
     >
       <button
         type="button"
-        onClick={onToggleExpanded}
+        onClick={() => {
+          if (suppressHeaderClickRef.current) return
+          onToggleExpanded?.()
+        }}
         className="hover:bg-[color-mix(in_srgb,var(--surface-card-bg)_44%,transparent)] transition-colors duration-160"
-        style={CAPSULE_HEADER_STYLE}
+        style={{ ...TASK_CARD_HEADER_STYLE, paddingRight: dismissible ? 36 : 10 }}
       >
         <span style={{ flexShrink: 0, display: 'flex', alignItems: 'center' }}>
           <AgentStatusDot state={taskRuntimeState.visualState} size={11} />
@@ -363,6 +435,36 @@ export function TaskCard({
         ) : null}
         <CapsuleChevron expanded={expanded} />
       </button>
+
+      {dismissible ? (
+        <button
+          type="button"
+          data-ready-task-dismiss="true"
+          aria-label="清除任务卡"
+          title="清除任务卡（不会停止任务）"
+          onClick={(event) => {
+            event.stopPropagation()
+            onDismiss?.()
+          }}
+          style={{
+            position: 'absolute',
+            top: 6,
+            right: 7,
+            width: 24,
+            height: 24,
+            padding: 0,
+            border: 'none',
+            borderRadius: 8,
+            background: 'transparent',
+            color: 'var(--text-light)',
+            cursor: 'pointer',
+            display: 'grid',
+            placeItems: 'center',
+          }}
+        >
+          <X size={13} strokeWidth={2} />
+        </button>
+      ) : null}
 
       <DynamicDeliveryTaskSummary run={run} />
 
@@ -431,7 +533,24 @@ export function TaskCard({
         </div>
       ) : null}
 
-      {expanded && !compact && (
+      {compactPrimaryArtifact ? (
+        <div style={{ padding: '0 0 8px' }}>
+          <button
+            type="button"
+            data-ready-task-primary-artifact="true"
+            onClick={() => compactPrimaryArtifact.path && onOpenArtifact?.(compactPrimaryArtifact.path)}
+            title={compactPrimaryArtifact.path || compactPrimaryArtifact.label}
+            style={{
+              ...TASK_ACTION_BUTTON_STYLE,
+              color: 'var(--text-gray)',
+            }}
+          >
+            {compactPrimaryArtifact.kind === 'collection_output' ? '打开采集结果' : compactPrimaryArtifact.label}
+          </button>
+        </div>
+      ) : null}
+
+      {expanded && (
         <div
           className="flex flex-col"
           style={{
@@ -706,6 +825,18 @@ export function TaskCard({
               style={{ ...TASK_ACTION_BUTTON_STYLE }}
             >
               继续浏览器采集
+            </button>
+          )}
+          {showCancelBrowser && browserTaskId && (
+            <button
+              type="button"
+              data-ready-task-action="cancel-browser-task"
+              data-ready-task-scope-id={run.scopeId || undefined}
+              data-ready-task-id={browserTaskId}
+              onClick={() => onCancelBrowserTask?.(run.scopeId, browserTaskId)}
+              style={{ ...TASK_ACTION_BUTTON_STYLE }}
+            >
+              停止采集
             </button>
           )}
           {showConsentButton && browserCollectionConsent?.requestId && (

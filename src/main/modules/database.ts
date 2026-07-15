@@ -2204,6 +2204,7 @@ export class DatabaseManager {
       title,
       sourceKind: 'local',
       sourceId: 'app',
+      userId: 'default-user',
       threadKey: id,
       meta: {},
     })
@@ -2294,7 +2295,7 @@ export class DatabaseManager {
       payload.agent,
       existing?.active_agent_id || payload.activeAgentId || payload.agent,
       existing?.handoff_generation ?? 0,
-      payload.userId || null,
+      payload.userId?.trim() || existing?.user_id || null,
       payload.title,
       payload.parentConversationId ?? existing?.parent_conversation_id ?? null,
       payload.lineageRootId || existing?.lineage_root_id || id,

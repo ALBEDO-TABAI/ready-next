@@ -1,4 +1,4 @@
-import type { BrowserTaskProjectionSink } from '../browser-engine/content-task-runner'
+import type { BrowserTaskProjectionInput, BrowserTaskProjectionSink } from '../browser-engine/content-task-runner'
 import type { AgentControlRuntime } from '../agent-control/runtime-core/runtime'
 import type { TaskProjectionRecord } from '../agent-control/contracts/run-contracts'
 
@@ -31,6 +31,7 @@ export function makeNoteCollectProjectionSink(activeRuntime: AgentControlRuntime
     userExpectedTotal?: number
     startedAt?: string | null
     finishedAt?: string | null
+    outputRootDir?: string | null
   }): string => {
     const discovered = Math.max(0, Number(input.discovered ?? input.total ?? 0) || 0)
     const saved = Math.max(0, Number(input.saved ?? input.completed ?? 0) || 0)
@@ -48,7 +49,32 @@ export function makeNoteCollectProjectionSink(activeRuntime: AgentControlRuntime
       failed > 0 ? `失败 ${failed}` : null,
       `剩余 ${remaining}`,
       durationMinutes ? `后台运行约 ${durationMinutes} 分钟` : null,
+      input.outputRootDir ? `保存到 ${input.outputRootDir}` : null,
     ].filter(Boolean).join(' · ')
+  }
+
+  const collectionArtifacts = (
+    input: BrowserTaskProjectionInput,
+    existing?: TaskProjectionRecord | null,
+  ): NonNullable<TaskProjectionRecord['recentArtifacts']> => {
+    const now = new Date().toISOString()
+    const entries = [
+      input.outputRootDir ? { path: input.outputRootDir, kind: 'collection_output', label: '采集结果文件夹' } : null,
+      input.reportPath ? { path: input.reportPath, kind: 'collection_report', label: '采集报告' } : null,
+      input.manifestPath ? { path: input.manifestPath, kind: 'collection_manifest', label: '采集清单' } : null,
+    ].filter((entry): entry is { path: string; kind: string; label: string } => Boolean(entry))
+      .map((entry) => ({
+        id: `${input.taskId}:${entry.kind}`,
+        module: 'browser',
+        ...entry,
+        sourceRunId: input.ownerRunId || input.taskId,
+        createdAt: now,
+      }))
+    const byPath = new Map<string, NonNullable<TaskProjectionRecord['recentArtifacts']>[number]>()
+    for (const artifact of [...(existing?.recentArtifacts || []), ...entries]) {
+      if (artifact.path) byPath.set(artifact.path, artifact)
+    }
+    return [...byPath.values()]
   }
 
   const buildContinuationRef = (
@@ -137,27 +163,7 @@ export function makeNoteCollectProjectionSink(activeRuntime: AgentControlRuntime
   }
 
   const write = (
-    input: {
-      taskId: string
-      sourceTaskId?: string
-      scopeId: string
-      title: string
-      summary: string
-      total?: number
-      completed?: number
-      failed?: number
-      waitingFor?: 'background' | 'none' | 'verification'
-      discovered?: number
-      saved?: number
-      remaining?: number
-      userExpectedTotal?: number
-      completedSourceIds?: string[]
-      failedSourceIds?: string[]
-      terminalDwell?: boolean
-      canResume?: boolean
-      startedAt?: string | null
-      finishedAt?: string | null
-    },
+    input: BrowserTaskProjectionInput,
     status: TaskProjectionRecord['status'],
     waitingFor: 'background' | 'none' | 'verification',
     createIfMissing: boolean,
@@ -170,9 +176,10 @@ export function makeNoteCollectProjectionSink(activeRuntime: AgentControlRuntime
     const now = new Date().toISOString()
     const record: TaskProjectionRecord = {
       taskId: projectionTaskId,
-      taskOrigin: existing?.taskOrigin ?? 'system_background',
+      taskOrigin: existing?.taskOrigin ?? (input.ownerAgentId ? 'workflow_child' : 'system_background'),
       scopeId: input.scopeId,
       runId: input.taskId,
+      parentTaskId: input.parentTaskId ?? existing?.parentTaskId ?? null,
       taskType: 'multi_step_task',
       module: 'browser',
       taskTitle: input.title,
@@ -199,6 +206,9 @@ export function makeNoteCollectProjectionSink(activeRuntime: AgentControlRuntime
         }),
       },
       continuationRef: buildContinuationRef(input, projectionTaskId),
+      recentArtifacts: collectionArtifacts(input, existing),
+      ownerAgentId: input.ownerAgentId ?? existing?.ownerAgentId ?? null,
+      executionBinding: input.executionBinding ?? existing?.executionBinding ?? null,
       createdAt: existing?.createdAt || now,
       updatedAt: now,
       canResume: input.canResume === true,
@@ -243,21 +253,34 @@ export function makeNoteCollectProjectionSink(activeRuntime: AgentControlRuntime
           : 'killed'
       const existing = activeRuntime.getTaskProjectionStore().get(input.sourceTaskId || input.taskId)
       if (input.terminalDwell === false) {
-        if (existing && (
-          existing.status === 'queued'
-          || existing.status === 'running'
-          || existing.status === 'recoverable_paused'
-          || existing.status === 'budget_paused'
-          || existing.status === 'blocked'
-        )) {
+        if (existing && (existing.status === 'completed' || existing.status === 'failed' || existing.status === 'killed')) {
+          const destinationSuffix = input.outputRootDir ? `保存到 ${input.outputRootDir}` : ''
+          const currentDetail = String(existing.progress?.detail || '').trim()
+          activeRuntime.getTaskProjectionStore().update(existing.taskId, {
+            ...existing,
+            recentArtifacts: collectionArtifacts(input, existing),
+            ownerAgentId: input.ownerAgentId ?? existing.ownerAgentId ?? null,
+            executionBinding: input.executionBinding ?? existing.executionBinding ?? null,
+            parentTaskId: input.parentTaskId ?? existing.parentTaskId ?? null,
+            progress: existing.progress
+              ? {
+                  ...existing.progress,
+                  detail: destinationSuffix && !currentDetail.includes(destinationSuffix)
+                    ? [currentDetail, destinationSuffix].filter(Boolean).join(' · ')
+                    : existing.progress.detail,
+                }
+              : existing.progress,
+          })
+        } else if (existing) {
           write(input, terminal, 'none', false)
         }
         return
       }
       write(input, 'running', 'background', true)
-      setTimeout(() => {
+      const dwellTimer = setTimeout(() => {
         write(input, terminal, 'none', false)
       }, NOTE_COLLECT_TERMINAL_DWELL_MS)
+      dwellTimer.unref?.()
     },
   }
 }

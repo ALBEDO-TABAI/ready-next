@@ -3,6 +3,7 @@ import test from 'node:test'
 
 import { SkillHostController } from '../main/modules/skills-runtime/skill-host-controller'
 import { SHELL_ALLOWLIST } from '../main/modules/tools/skill-primitives/run-shell'
+import { allowedPrimitiveToolsForSdkSkillTurn } from '../main/modules/agent-control/runtime-core/agent-sdk-skill-intent-utils'
 import { SkillHostRequirementsSchema } from '../shared/skill-host-contract'
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 
@@ -38,4 +39,19 @@ test('shell allowlist extensions are filtered again by SkillHostController', () 
 
   assert.equal(effective.has('jq'), true)
   assert.equal(effective.has('rm'), false)
+})
+
+test('detached lifecycle primitives stay outside the SDK safe primitive surface', () => {
+  const visible = new Set(allowedPrimitiveToolsForSdkSkillTurn({
+    allowAskUser: true,
+    allowRunShell: true,
+  }))
+
+  for (const toolName of [
+    'skill_start_detached',
+    'skill_inspect_detached',
+    'skill_cancel_detached',
+  ]) {
+    assert.equal(visible.has(toolName), false, `${toolName} must remain host-owned`)
+  }
 })

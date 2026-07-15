@@ -568,7 +568,7 @@ export function AISettingsPanel() {
                       <>
                         服务端点 URL，<a href={currentProvider.helpUrl} target="_blank" rel="noreferrer" className="underline" style={{ color: 'var(--color-blue)' }}>查看文档</a>
                       </>
-                    ) : '自定义供应商地址'}
+                    ) : '自定义供应商地址；OpenAI 兼容服务只填域名或 IP 时会自动使用 /v1'}
                     control={(
                       <input
                         type="text"

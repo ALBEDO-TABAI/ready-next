@@ -39,7 +39,7 @@ function flushPendingWorkspaceSave(get: () => AISettingsState): void {
   const selectedProfileId = get().selectedProfileId
   clearPendingWorkspaceSave()
   if (!workspaceToPersist) return
-  void get().saveWorkspace(workspaceToPersist, { selectedProfileId })
+  void get().saveWorkspace(workspaceToPersist, { selectedProfileId, preserveEditorState: true })
 }
 
 function deriveSavedConfigs(workspace: AIProviderWorkspace): Partial<Record<AIProviderType, AIModelConfig>> {
@@ -56,18 +56,38 @@ function getProfileById(workspace: AIProviderWorkspace, profileId?: string | nul
   return workspace.profiles.find((profile) => profile.id === resolvedId) || null
 }
 
-function buildStateFromWorkspace(workspace: AIProviderWorkspace, selectedProfileId?: string | null) {
+function buildStateFromWorkspace(
+  workspace: AIProviderWorkspace,
+  selectedProfileId?: string | null,
+  baseUrlDraft?: { profileId: string; value: string },
+) {
   const normalizedWorkspace = normalizeAIWorkspace(workspace)
-  const activeConfig = getActiveAIConfig(normalizedWorkspace) || createConfigFromProvider('openai')
+  const displayWorkspace = baseUrlDraft
+    ? {
+        ...normalizedWorkspace,
+        profiles: normalizedWorkspace.profiles.map((profile) => (
+          profile.id === baseUrlDraft.profileId
+            ? {
+                ...profile,
+                config: {
+                  ...profile.config,
+                  baseUrl: baseUrlDraft.value,
+                },
+              }
+            : profile
+        )),
+      }
+    : normalizedWorkspace
+  const activeConfig = getActiveAIConfig(displayWorkspace) || createConfigFromProvider('openai')
   const nextSelectedProfileId = normalizedWorkspace.profiles.some((profile) => profile.id === selectedProfileId)
     ? selectedProfileId || normalizedWorkspace.activeProfileId
     : normalizedWorkspace.activeProfileId
 
   return {
-    workspace: normalizedWorkspace,
+    workspace: displayWorkspace,
     config: activeConfig,
     selectedProfileId: nextSelectedProfileId,
-    savedConfigs: deriveSavedConfigs(normalizedWorkspace),
+    savedConfigs: deriveSavedConfigs(displayWorkspace),
   }
 }
 
@@ -97,7 +117,10 @@ interface AISettingsState {
 
   loadConfig: () => Promise<void>
   saveConfig: (config: AIModelConfig) => Promise<void>
-  saveWorkspace: (workspace: AIProviderWorkspace, options?: { selectedProfileId?: string | null }) => Promise<void>
+  saveWorkspace: (workspace: AIProviderWorkspace, options?: {
+    selectedProfileId?: string | null
+    preserveEditorState?: boolean
+  }) => Promise<void>
   updateField: <K extends keyof AIModelConfig>(key: K, value: AIModelConfig[K]) => void
   updateCapabilityMode: (groupId: CapabilityGroupId, mode: CapabilityMode) => void
   switchProvider: (provider: AIProviderType) => void
@@ -130,7 +153,7 @@ function scheduleWorkspaceSave(get: () => AISettingsState, workspace: AIProvider
     const workspaceToPersist = pendingWorkspaceSave
     clearPendingWorkspaceSave()
     if (!workspaceToPersist) return
-    void get().saveWorkspace(workspaceToPersist, { selectedProfileId })
+    void get().saveWorkspace(workspaceToPersist, { selectedProfileId, preserveEditorState: true })
   }, SETTINGS_SAVE_DEBOUNCE_MS)
 }
 
@@ -243,11 +266,13 @@ export const useSettings = create<AISettingsState>((set, get) => ({
     clearPendingWorkspaceSave()
     const previousState = get()
     const normalizedWorkspace = normalizeAIWorkspace(workspace)
-    set({
-      ...buildStateFromWorkspace(normalizedWorkspace, options?.selectedProfileId),
-      saveStatus: 'saving',
-      saveMessage: '',
-    })
+    set(options?.preserveEditorState
+      ? { saveStatus: 'saving', saveMessage: '' }
+      : {
+          ...buildStateFromWorkspace(normalizedWorkspace, options?.selectedProfileId),
+          saveStatus: 'saving',
+          saveMessage: '',
+        })
     try {
       if (typeof window !== 'undefined' && window.electronAPI?.settings?.setAIWorkspace) {
         const result = await window.electronAPI.settings.setAIWorkspace(normalizedWorkspace)
@@ -263,16 +288,21 @@ export const useSettings = create<AISettingsState>((set, get) => ({
     } catch (error) {
       const message = formatSettingsPersistenceError(error)
       console.error('Failed to save AI workspace:', error)
-      set({
-        ...buildStateFromWorkspace(previousState.workspace, previousState.selectedProfileId),
-        testStatus: previousState.testStatus,
-        testMessage: previousState.testMessage,
-        testLatency: previousState.testLatency,
-        remoteModels: previousState.remoteModels,
-        loaded: previousState.loaded,
-        saveStatus: 'error',
-        saveMessage: `设置保存失败：${message}`,
-      })
+      set(options?.preserveEditorState
+        ? {
+            saveStatus: 'error',
+            saveMessage: `设置保存失败：${message}`,
+          }
+        : {
+            ...buildStateFromWorkspace(previousState.workspace, previousState.selectedProfileId),
+            testStatus: previousState.testStatus,
+            testMessage: previousState.testMessage,
+            testLatency: previousState.testLatency,
+            remoteModels: previousState.remoteModels,
+            loaded: previousState.loaded,
+            saveStatus: 'error',
+            saveMessage: `设置保存失败：${message}`,
+          })
     }
   },
 
@@ -322,7 +352,13 @@ export const useSettings = create<AISettingsState>((set, get) => ({
     })
 
     set({
-      ...buildStateFromWorkspace(nextWorkspace, state.selectedProfileId),
+      ...buildStateFromWorkspace(
+        nextWorkspace,
+        state.selectedProfileId,
+        key === 'baseUrl' && typeof value === 'string'
+          ? { profileId: targetProfile.id, value }
+          : undefined,
+      ),
       testStatus: 'idle',
       testMessage: '',
       saveStatus: 'idle',

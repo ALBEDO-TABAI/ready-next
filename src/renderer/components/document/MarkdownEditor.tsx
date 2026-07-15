@@ -221,7 +221,7 @@ export default function MarkdownEditor({
   onVisibleLineChange,
   onActivate,
 }: MarkdownEditorProps) {
-  const { updateTabContent, markTabSaved, pendingReveal, setPendingReveal } = useDocTabs()
+  const { updateTabContent, hydrateTabContentFromDisk, commitTabSaveSnapshot, pendingReveal, setPendingReveal } = useDocTabs()
   const [isLoading, setIsLoading] = useState(!!tab.path)
   const [saveState, setSaveState] = useState<SaveState>('idle')
   const [saveError, setSaveError] = useState<string | null>(null)
@@ -234,6 +234,7 @@ export default function MarkdownEditor({
   const [editingWidget, setEditingWidget] = useState<DocumentWidgetRecord | null>(null)
   const widgetStatesRef = useRef(widgetStates)
   const tabContentRef = useRef(tab.content)
+  const saveInFlightRef = useRef(false)
   const rawEditorRef = useRef<HTMLTextAreaElement>(null)
   const editorSurfaceRef = useRef<HTMLDivElement>(null)
   const previewSurfaceRef = useRef<HTMLDivElement>(null)
@@ -308,8 +309,7 @@ export default function MarkdownEditor({
           const result = (await window.electronAPI.document.readFile(tab.path)) as ReadResult
           if (!result.success) throw new Error(result.error || '文件读取失败')
           if (!cancelled && canCommitLoadedContent()) {
-            updateTabContent(tab.id, result.content || '')
-            markTabSaved(tab.id)
+            hydrateTabContentFromDisk(tab.id, result.content || '')
           }
         } else if (ext === 'docx') {
           const result = (await window.electronAPI.document.parseDocx(tab.path)) as ReadResult
@@ -326,8 +326,7 @@ export default function MarkdownEditor({
               rawText || result.content || result.html || '',
             )
             if (canCommitLoadedContent()) {
-              updateTabContent(tab.id, markdownish)
-              markTabSaved(tab.id)
+              hydrateTabContentFromDisk(tab.id, markdownish)
             }
           }
         } else {
@@ -386,8 +385,9 @@ export default function MarkdownEditor({
 
   // ─── Save logic ─────────────────────────────────────────────
   const handleSave = useCallback(async () => {
-    if (!tab.path || !canSave || !tab.isDirty) return
+    if (!tab.path || !canSave || !tab.isDirty || saveInFlightRef.current) return
     if (typeof window === 'undefined' || !window.electronAPI) return
+    saveInFlightRef.current = true
     setSaveState('saving')
     setSaveError(null)
     try {
@@ -395,18 +395,19 @@ export default function MarkdownEditor({
       const nextContent = mergeWidgetStateMapIntoContent(baseContent, widgetStatesRef.current)
       const result = (await window.electronAPI.document.writeFile(tab.path, nextContent)) as ReadResult
       if (!result.success) throw new Error(result.error || '保存失败')
-      if (nextContent !== baseContent) {
+      const committed = commitTabSaveSnapshot(tab.id, baseContent, nextContent)
+      if (committed && nextContent !== baseContent) {
         tabContentRef.current = nextContent
-        updateTabContent(tab.id, nextContent)
       }
-      setSaveState('saved')
+      setSaveState(committed ? 'saved' : 'idle')
       setSaveError(null)
-      markTabSaved(tab.id)
     } catch (error) {
       setSaveState('error')
       setSaveError(`保存失败：${error instanceof Error ? error.message : String(error)}`)
+    } finally {
+      saveInFlightRef.current = false
     }
-  }, [tab.path, tab.isDirty, canSave, markTabSaved, tab.id, updateTabContent])
+  }, [tab.path, tab.isDirty, canSave, commitTabSaveSnapshot, tab.id])
 
   // Cmd+S keyboard shortcut
   useEffect(() => {

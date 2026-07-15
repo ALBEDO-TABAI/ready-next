@@ -21,6 +21,12 @@ import {
   type AckSource,
   type AckWaiterDeps,
 } from '../renderer/modules/browser/modeSwitchAckWaiter'
+import {
+  __testing__ as ritualTesting,
+  cancelRitual,
+  useRitualOverlayStore,
+  withRitual,
+} from '../renderer/modules/overlay/useRitualOverlay'
 import type { BrowserViewIntentAck } from '../shared/browser-view-intent'
 
 interface FakeTimerSlot {
@@ -189,4 +195,40 @@ test('idempotent settle: ack arriving after timeout does not change outcome', as
   assert.deepEqual(outcome, { outcome: 'timeout', intentId: 11 })
   emit({ intentId: 11 })
   // no second outcome possible — promise already resolved
+})
+
+test('a newer mode request can abort the active mode-switch ritual before it commits', async () => {
+  const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window')
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: {
+      setTimeout: globalThis.setTimeout.bind(globalThis),
+      clearTimeout: globalThis.clearTimeout.bind(globalThis),
+      matchMedia: () => ({ matches: false }),
+    },
+  })
+  ritualTesting.resetRitualOverlay()
+  let committed = false
+
+  try {
+    const pending = withRitual('mode-switch', () => {
+      committed = true
+    })
+    assert.equal(useRitualOverlayStore.getState().session?.stage, 'mode-switch')
+
+    cancelRitual('theme-transition')
+    assert.equal(useRitualOverlayStore.getState().session?.stage, 'mode-switch', 'a different stage must not be cancelled')
+
+    cancelRitual('mode-switch')
+    await assert.rejects(
+      pending,
+      (error: unknown) => error instanceof DOMException && error.name === 'AbortError',
+    )
+    assert.equal(committed, false)
+    assert.equal(useRitualOverlayStore.getState().session, null)
+  } finally {
+    ritualTesting.resetRitualOverlay()
+    if (previousWindow) Object.defineProperty(globalThis, 'window', previousWindow)
+    else delete (globalThis as typeof globalThis & { window?: Window }).window
+  }
 })

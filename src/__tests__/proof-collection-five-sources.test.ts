@@ -101,6 +101,18 @@ test('plain text tool failures never count as successful progress', () => {
   })), true)
 })
 
+test('completed structured output is not failed merely because its counters include failed: 0', () => {
+  const output = createToolExecutionOutput(
+    JSON.stringify({ status: 'completed', progress: { completed: 34, failed: 0 } }),
+    {
+      shape: 'json',
+      data: { status: 'completed', progress: { completed: 34, failed: 0 } },
+    },
+  )
+  assert.equal(isSuccessfulToolOutput(output), true)
+  assert.ok(collectToolOutputProofs('browser_get_task', output, NOW).length > 0)
+})
+
 test('waiting Tag Forge batches never mint completion proof or successful progress', () => {
   const output=createToolExecutionOutput('Tag Forge waiting for review',{
     shape:'json',data:{ok:true,status:'waiting_review',done:false,remaining:1,reviewRequired:true},

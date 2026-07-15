@@ -13,6 +13,7 @@ import { makeNoteCollectProjectionSink } from './browser-collection-projection-s
 import { readFileSync, statSync } from 'fs'
 import { basename, extname } from 'path'
 import { AgentControlRuntime } from '../agent-control/runtime-core/runtime'
+import { normalizeTurnTerminalReason } from '../agent-control/runtime-core/turn-frame'
 import { ChatRepository } from '../repositories/chat-repository'
 // Stage V V2.1b — `getLogPath` import retired: the only call site (the
 // design-run NDJSON append inside `agent:completeToolActionRequest`) moved
@@ -166,28 +167,6 @@ function mapAgentStatusToScopeRunEventType(status: unknown): ScopeRunEventPayloa
     return 'finished'
   }
   return 'updated'
-}
-
-function normalizeScopeRunTerminalReason(value: unknown): ScopeRunEventPayload['terminalReason'] {
-  const normalized = String(value || '').trim()
-  if (
-    normalized === 'done' ||
-    normalized === 'checkpoint_budget' ||
-    normalized === 'checkpoint_background' ||
-    normalized === 'checkpoint_user_input' ||
-    normalized === 'blocked_config' ||
-    normalized === 'blocked_external' ||
-    normalized === 'blocked_tool_error' ||
-    normalized === 'failed_skill' ||
-    normalized === 'resume_launch_failed' ||
-    normalized === 'persistence_failed' ||
-    normalized === 'cancelled_user' ||
-    normalized === 'cancelled_runtime' ||
-    normalized === 'main_no_progress_timeout'
-  ) {
-    return normalized
-  }
-  return null
 }
 
 export interface IPCResponse<T = unknown> {
@@ -1680,7 +1659,7 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
           log(`Ignoring unknown agent status for scope run event: status=${String(data.status || '')} agent=${data.agent || ''}`)
           return
         }
-        const terminalReason = normalizeScopeRunTerminalReason((data as { terminalReason?: unknown }).terminalReason)
+        const terminalReason = normalizeTurnTerminalReason((data as { terminalReason?: unknown }).terminalReason)
         const payload: ScopeRunEventPayload = {
           type: mapAgentStatusToScopeRunEventType(data.status),
           scopeId: data.sessionId,

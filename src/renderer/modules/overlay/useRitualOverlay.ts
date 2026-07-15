@@ -85,6 +85,15 @@ export function isRitualBypassActive(): boolean {
   }
 }
 
+export function cancelRitual(stage?: RitualStage): void {
+  const currentStage = useRitualOverlayStore.getState().session?.stage
+  if (stage && currentStage !== stage) return
+  currentAbortController?.abort()
+  if (currentCleanup) {
+    try { currentCleanup() } catch { /* ignore */ }
+  }
+}
+
 const resolveTimeline = (stage: RitualStage): RitualTimelineConfig =>
   stage === 'theme-transition' ? THEME_TRANSITION_TIMELINE : MODE_SWITCH_TIMELINE
 

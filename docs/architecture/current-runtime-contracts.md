@@ -10,7 +10,7 @@
 - `src/renderer/main.tsx` 保留 bootstrap 级错误兜底；`src/renderer/App.tsx` 保留 `/workbench` 与 `* -> /workbench` fallback。
 - Renderer 的通用 `*` reset 必须位于明确的 `@layer base`。禁止在层外重置通用 `margin` / `padding`；回归入口是 `scripts/check-css-cascade-layer-reset.cjs`。
 - 代码文件只要净增行数，收尾前就检查总行数。超过 1000 行按“危险 / 一般 / 健康”更新 `docs/code-health/large-file-health-log.md`：健康无需动作，一般写复查日期，危险在最终回复提醒。生成物、锁文件和 vendored 第三方文件不计，但生成器源码仍计。
-- BrowserView 是原生覆盖层，不受 DOM `z-index` 控制。显示纯 DOM 覆盖面前先 `browser.hideAll()`；恢复后 `browser.showActive()` 并同步 bounds。
+- BrowserView 是原生覆盖层，不受 DOM `z-index` 控制。任何 primary、secondary、关闭分栏或卸载转换只要让 Browser 离开可见 mode 集合，都必须先经 `hide-all` intent + 匹配 ack，再提交 DOM mode；恢复后按稳定 bounds 显示。文件打开使用同一协调入口，但只保留这段正确性等待，不串行等待 ritual 或场景滑动。
 - 聊天输入框液态玻璃只以真实 Electron dev 为验收面；`#/liquid-test` 只用于调参。生产输入框不得加外部暗色阴影或静态截图贴片，消息末尾必须按浮层实测高度留白。
 - Windows 顶部 chrome 保留系统最小化、最大化、关闭按钮；Ready 圆点在左上，中心按 `WORKBENCH_EDGE_RAIL_SLOT_INSET_X + WORKBENCH_EDGE_RAIL_SLOT_SIZE / 2` 与左轨槽位对齐（当前 25px）。`titleBarStyle: 'hidden'` + `titleBarOverlay` 负责同层背景，Mica 只能是有普通背景 fallback 的增强。
 
@@ -20,6 +20,7 @@
 - 飞书或远程图片、文件先进入会话资源层，不自动触发 Agent；后续任务必须显式选择资源。
 - 系统提示词分为版本化常驻核心、按需领域/产品资料和每轮运行时事实。常驻核心的唯一来源是 `assets/prompts/core/ready-system.md`，常规 scoped run 与默认/fallback 入口必须复用同一加载器；`assets/prompts/product/about-ready.md` 只在用户询问 Ready 开发、协作背景或关注渠道时进入 L2，普通任务不得主动宣传。
 - `TOOLS.md` 不进入 L0，也不代表授权；本轮最终工具定义是模型可调用能力的唯一事实。默认 `USER.md` 不得伪造未确认偏好；用户画像、记忆、人格和历史只能作为低于当前用户指令与代码边界的上下文。
+- scoped run 的用户画像只由当前 scope 的 `userId` 读取；无绑定的本地会话回落 `default-user`，无绑定的远程会话不得读取本机档案或 `USER.md`。长期偏好、沟通风格和 Agent tone 必须经共享格式器进入生产提示；用户画像、人格和运行指令拥有 L0 保留预算，不能被增长的常驻记忆从尾部裁掉。已保存的回复风格还必须以版本化末端提醒成为 provider instructions 最后一块，且只出现一次；地域/人物气质标签是表达要求，不是真实身份声明。它只影响面向用户的自然语言，不得改写引用、代码、工具参数、权限或事实标准。
 - 每轮日期事实使用应用所在系统的本地日历日期与星期，同一格式器同时服务运行时提示和每日记忆文件；不得用 UTC 日期与本地星期拼接出跨日矛盾。
 - 显式技能引用与本地文档资源产生代码级 capability floor。收窄过滤只能做减法，不得移除地板；最终工具面必须非空且包含全部地板。
 - `current_document_context` 的地板是文档编辑面：read section、Widget 增删改查、replace exact、save tab；刻意不含整文覆写。`local_document_resource` 保持只读，提及文件不等于授予写权限。
@@ -47,18 +48,24 @@
 
 ## 4. Provider、流式与工具错误
 
-- AI provider 能力必须由共享能力层解析；“OpenAI 兼容”不代表一定支持原生 tools、vision 或 video。
+- AI provider 能力必须由共享能力层解析；“OpenAI 兼容”不代表一定支持原生 tools、vision 或 video。通用 openai-compatible 的 `toolUseMode=auto` 必须按不支持工具收口，只有显式 `on` 或内置 provider 合同可以开放；Packer 仅可为已经真实验证过工具流的固定端点写入 `on`。
+- OpenAI-compatible 的 `baseUrl` 是 API 前缀：origin-only 地址统一补 `/v1`，显式前缀原样保留，消费者只能再拼资源路径，禁止形成 `/v1/v1`。保存和请求边界必须移除 URL 中的用户名、密码、查询参数与锚点；设置输入框保留编辑草稿。Packer 的明文 HTTP 仅允许严格解析后的本机或私网地址，不能用域名前缀猜私网。
+- 一键运行时配置由 Main 持有带 `runId/revision` 的单任务快照；设置页重进只恢复投影，重复开始加入原任务。停止先进入 `cancelling`，旧 run 的晚到进度不得改写终态或后续重试，Renderer 必须提供可见的停止与失败后重试入口。
+- 标准 `build:dist` 只允许空 AI seed；有意内置配置只能由 Web Packer 显式授权、临时写入并在 finally/下次启动恢复。Packer 只有在包内 seed 与本次请求一致、精简/完整运行时形态正确、Framework/签名/DMG 校验及只读挂载全部通过后才能发布成品。
 - 公开网络调研统一走 `web_search_domains / web_search / web_fetch`：AnySearch、Tavily、DuckDuckGo 和 Jina 由加密的外部服务配置提供。AnySearch 垂直搜索先查询子领域参数，失败不得丢掉 domain 约束改做通用搜索；通用搜索与正文提取才允许按已启用服务显式回退。
 - openai-compatible chat/responses 与 anthropic 三条 SDK 路径都必须真 SSE：文本增量交付，工具调用和推理在流中累积，终局与阻塞路径同构整形。
 - 降级只有三类：`READY_SDK_TRUE_SSE=off` 总开关；服务返回非 SSE 时伪流式交付；仅错误体明确提及 stream 的 4xx 可单次阻塞重试。413/401/429 等语义性 4xx 必须原样冒泡。
 - 回归入口：`npm run verify:streaming`。
 - 工具错误由 dispatch 转成结构化 `ToolExecutionOutput` 回灌模型；只有 Abort 或 host 不可用等基础设施错误可以冒泡。
+- 单个可选工具失败不能提前写死整轮 `proof_gap`；只有明确的交付失败、工具不可用或产物缺失可写终态失败类别，其余由最终证据统一裁决。`run_meta.last_message_text` 只用于诊断，禁止据此猜测“正文未送达”并补发；Renderer 只在消息正文仍为空时接收 send 返回文本，已有流式正文时不得追加。
 - `tool_not_registered` 表示工具不存在；`authorization_denied` 表示工具存在但本轮未授权，两者互斥。
 - 新 error kind 必须进入 `src/main/modules/agent-control/contracts/error-kinds.ts` 并通过对应 drift gate；日志或 metric 失败不能反过来打断请求。
 
 ## 5. Run 终止、连续性与 Dynamic Delivery
 
 - 所有退出路径都经 `src/main/modules/agent-control/runtime-core/run-finalizer.ts` 的 `finalizeRunOutcome()`；终态账本与可见收口在同一通道完成。通道外写终态由 `check-run-finalize-funnel.cjs` 拒绝。
+- bootstrap 预算只是执行前容量猜测；零工具回合以终态 `direct_answer` 收口时必须先重绑预算，再用同一任务类型写 projection、`run_meta`、裁决和关闭指标。显式 research、browser transaction、continuation 或 skill 预算不得被纯文本逃逸降级。
+- Renderer 可以保留失败前已流出的正文，但不得把 Main 返回的 `error/adjudication_degraded` 猜成未持久化的绿色完成；合法纯回答必须由 Main 直接写成 `done`。
 - 零工具的行动宣告不能直接判 done：先转向，再 checkpoint；完成判定必须基于本轮真实证据。
 - Renderer 60 秒 watchdog 只是活性探针。Main 确认同 requestId 仍 active 时返回 active 并续期，Renderer 不得终止仍运行的 provider。
 - Main 的 no-progress 守卫独立于 Renderer watchdog，按 requestId 仲裁；用 `main_no_progress_timeout` 区分 renderer/model/tool timeout。
@@ -80,6 +87,9 @@
 - 破坏性浏览器效果由 `src/shared/browser-power.ts` 枚举；live target 命中支付、凭据、访问控制等语义时必须返回 `grant_required`。
 - 后台任务终态经 `TaskEventBridge` 回到 Agent 循环：活跃 run 注入提醒，无活跃 run 写 pending 并播报续跑。没有注册路由的 `scheduleTask` 必须运行时失败。
 - 自动续跑只允许播报建议；执行动作仍需用户明确确认。
+- 浏览器页面引用、平台名、账号名和“分析/选题”只开放观察工具；只有用户明确说采集、抓取、下载或保存，才开放持久采集工具并承担采集文件验收标准。`browser_get_task` 必须纯查询，`browser_resume_task` 只能继续原任务，两者都不得把完成的发现任务自动升级成保存采集。
+- 可见发现任务与后续保存任务是一条可追踪的任务链：停止入口必须指向当前仍运行的保存任务；卡片清除只移除展示，不能偷偷停止任务。采集卡在运行和完成后都保留固定位置，直到用户点右上角清除或右滑清除，并展示可打开的结果文件夹、报告与清单。
+- 采集 projection 必须继承发起 Agent、父任务与执行绑定；保存目录从任务计划开始就可见，终态以 runner 回写的真实 `outputRootDir/reportPath/manifestPath` 为准，不能让用户靠默认路径猜结果位置。
 - 采集终态只由 `browser-engine/collection-verdict.ts` 的 `resolveCollectionVerdict()` 决定：0 条永不 completed，部分进展不清断点，整任务重试只重试失败项。
 - RSS 自动刷新由 Main 单实例调度，不依赖 RSS 页面是否打开；`rss:auto_refresh_interval_ms=0` 表示仅手动刷新。冷启动按持久化的最近一次 `fetchAll` 完成时间补跑或等待剩余间隔，设置保存后立即重新排期。手动与自动刷新必须复用同一个 `fetchAll` 入口和 `RSSUpdateLock`；自动结果通过状态查询与完成事件通知 Renderer，`success:false` 和部分源错误都必须保留为可见警告。
 - RSS 文章在统一抓取出口按平台内容编号归一后再入库；Bilibili 视频页、带追踪参数的链接和明确只指向一条视频的动态，以及 Twitter/X 同一状态的等价链接，必须得到同一文章身份。普通文章对视频或推文的引用不得改变文章身份。同标题或同发布时间不能单独作为去重依据；历史别名合并必须保留未读、收藏、收件箱可见性和分析任务关联。
@@ -91,6 +101,9 @@
 
 - 附件、`@[文件]`、当前文档与引用片段先进入结构化资源层；多来源、多目标、多步骤任务先计划再执行。
 - 关系图谱中可打开的文档节点必须由 Main 返回真实路径；Renderer 只对本地文档节点提供悬浮正文预览与点击打开，并沿统一工作面切换入口进入 Document，不能用文件名猜路径。
+- 文档标签元数据与可恢复草稿分开持久化：标签激活不得同步重写未变化的大正文；草稿合并写入，并在页面隐藏或退出前冲刷。磁盘回读必须一次性落为 clean 内容，不能先制造 dirty 再补 saved。旧内嵌草稿快照必须无损迁移。
+- 保存只提交发起写盘时的精确正文快照；写盘期间继续输入时，晚到结果不得覆盖新正文或删除新草稿。首次 clean/empty-memory 文本只由编辑器读盘一次，父级激活刷新只处理已有内存正文。
+- keep-alive 的 DocumentMode 只在可见时响应文件选择。文件树、搜索和图谱已经打开的目标不得被 DocumentMode 再次 stat/open/activity；文件涌现活动只把快照标脏，刷新经空闲合并调度且同一工作区只允许一轮生成。FileTree 的涌现上下文只订阅 group/path 等结构事实，正文、dirty 与激活时间变化不得重建调度或发查询。
 - H1/H2 freeform 只在命中特定触发词时使用；其他 Widget 使用结构化骨架 A-G、`relation_map` 或 `process_flow`。
 - Widget 视觉唯一来源是 `src/shared/document-widget-theme.ts` 与 `document-widget-dot-charts.ts`：Ready 单橘红、mono 标签、禁饼图/彩虹/Emoji 图标；`pie` 输入渲染为合规占比形态。
 - OpenUI componentSpec、骨架编译器与 iframe 基线 CSS 都走令牌。预览/导出优先从 `skeleton_spec` 或 `component_spec` 重编译；`widget_code` 只作无法重建时的兼容回退。
@@ -122,6 +135,7 @@
 
 - 文件管理公开入口只负责无状态查询与工具分发；路径授权、真实路径边界和持久 JSON 原语集中在共享运行层，文件整理状态归文件整理模块，Tag Forge 批次与审核状态归 Tag Forge 域。禁止把这些状态重新塞回公开入口或复制边界实现。
 - hidden、snoozed、not_related 等持久反馈必须在 Main 与 Renderer 两端同时生效；当前 tab、dirty tab 或阅读进度不能把被压制项目重新注入。
+- 文件涌现生成必须携带失效代次；生成期间的新活动或反馈不能被旧生成结果覆盖为 fresh，下一次查询必须重新读取真值。
 - 自动 Tag Forge 写入必须先有 durable creation receipt。receipt 绑定 source run、创建 tab、目标 path/fileKey 和最终 hash；禁止 run 级 token fallback。
 - 文件夹批量打标的模型只调用 `tag_forge_prepare_batch -> tag_forge_apply_batch`；typed folder reference 只为这两个动作补充本轮目录边界，不得授权任何其他文件工具。目录授权只来自用户消息上由 Renderer 携带的结构化文件夹附件元数据；本轮实际 `@[文件夹]` 引用的历史附件沿用同一元数据，不授权未引用的附件，正文中的同名标记也不得生成授权。执行前必须对目录与文件的真实路径重新做边界检查，禁止通过符号链接绕到宽根；目录内的 Markdown 符号链接只登记失败原因，不得读取其目标正文。工作区根自身是符号链接时，以其真实位置完成同一边界判断，不得误拒绝合法文件。准备工具在代码侧递归盘点、读取正文、签发 revision，并只给模型返回不透露主机路径的 `itemId`。每批最多 4 份且正文合计不超过 60000 字符（单份超长文档可独立返回）；无法读取的 Markdown 必须显式阻断 `done`，不得静默漏标。
 - 无论用户显式点名 Tag Forge，还是只用自然语言要求给文件夹打标，选技后模型工具面都必须立即替换为 `file_locate` / `file_read_excerpt` / `tag_forge_prepare_batch` / `tag_forge_apply_batch` / `declare_completion_criteria`。不得保留通用文件写入、命令、技能产物或自行追问工具。

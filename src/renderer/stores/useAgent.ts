@@ -1672,7 +1672,6 @@ export const useAgent = create<AgentState>((set, get) => ({
             failureTerminalReason === 'adjudication_degraded'
             && String(existingResponse?.content || '').trim(),
           )
-          const isDegradedCompletion = canKeepExistingResponse
           emitRendererAgentMetric(
             persistedUserMessage
               ? 'renderer_send_failed_after_persisted_message'
@@ -1700,7 +1699,6 @@ export const useAgent = create<AgentState>((set, get) => ({
             )
             const sessionKey = sessionKeyForScopeId(state, activeScopeId)
             const slice = normalizeSessionSlice(state.sessions[sessionKey])
-            const nextPhase = isDegradedCompletion ? 'done' as const : 'error' as const
             return {
               ...withSessionSliceAndActiveMirror(state, sessionKey, {
                 messages,
@@ -1720,20 +1718,20 @@ export const useAgent = create<AgentState>((set, get) => ({
                       startedAt: new Date().toISOString(),
                     }),
                     requestId,
-                    phase: nextPhase,
+                    phase: 'error',
                     terminalReason: failureTerminalReason,
                     updatedAt: new Date().toISOString(),
-                    error: isDegradedCompletion ? null : friendly.friendlyMessage,
+                    error: friendly.friendlyMessage,
                   },
                 },
               }),
               attachments: result.persistence?.message === 'failed' ? currentAttachments : state.attachments,
-              toolTraceStatus: isDegradedCompletion ? 'done' : 'error',
+              toolTraceStatus: 'error',
             }
           })
-          const preserveInput = !isDegradedCompletion && result.persistence?.message !== 'persisted'
+          const preserveInput = result.persistence?.message !== 'persisted'
           return {
-            success: isDegradedCompletion,
+            success: false,
             shouldClearInput: !preserveInput,
             preserveInput,
             errorKind: result.errorKind || 'unknown',
@@ -1742,11 +1740,15 @@ export const useAgent = create<AgentState>((set, get) => ({
         const backendResponseText = typeof result.responseText === 'string'
           ? result.responseText.trim()
           : ''
-        if (backendResponseText) {
+        const streamedResponseText = String(
+          get().messages.find((message) => message.id === responseId)?.content || ''
+        ).trim()
+        const insertedBackendResponse = Boolean(backendResponseText && !streamedResponseText)
+        if (insertedBackendResponse) {
           get().appendToMessage(responseId, backendResponseText)
         }
         agentRuntimeDriver.completeScopeRunAfterSendSuccess(activeScopeId, requestId, {
-          backendRecoveredResponse: Boolean(backendResponseText),
+          backendRecoveredResponse: insertedBackendResponse,
         })
         set({ pendingContinuationIntent: null, pendingContinuationDraftAnchor: null })
         // Stream data arrives via onStream listener

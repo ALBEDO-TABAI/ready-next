@@ -30,7 +30,7 @@ import { normalizeBrowserTaskFailedItems } from '../browser-engine/content-task-
 import type { BrowserLeaseGate } from '../browser-engine/agent-browser-lease-gate'
 import { isHighControlPlatformText } from '../../../shared/browser-collection-intent'
 import { normalizeCollectionTargets, targetsFromTask, type BrowserCollectionTarget } from '../browser-engine/collection-targets'
-import { buildCollectionHandoffPlanFromTask, buildCollectionPlanNotes } from '../browser-engine/collection-handoff'
+import { buildCollectionPlanNotes } from '../browser-engine/collection-handoff'
 import { inspectBrowserResources, type BrowserResourceKind } from '../browser-engine/resource-sniffer'
 import {
   BrowserCollectionConsentStore,
@@ -427,6 +427,91 @@ function enrichBrowserTaskPayload(task: BrowserCapabilityTaskHandle): BrowserCap
   }
 }
 
+const COLLECTION_TASK_RESULT_SUMMARY_KEYS = [
+  'status',
+  'verdict',
+  'labelKey',
+  'discoveryStatus',
+  'frozenCount',
+  'expectedCount',
+  'remaining',
+  'rounds',
+  'stopReason',
+  'sourceTaskId',
+  'targetUrl',
+  'outputRootDir',
+  'reportPath',
+  'manifestPath',
+  'hasMoreLikely',
+  'userExpectedTotal',
+  'autoContinue',
+  'resumeFromCursor',
+  'summary',
+  'suggestedNextTool',
+  'suggestedContinueTool',
+] as const
+
+function compactCollectionTaskPayload(
+  task: BrowserCapabilityTaskHandle,
+  linkedExecution?: BrowserCapabilityTaskHandle | null,
+): Record<string, unknown> {
+  const result = task.result && typeof task.result === 'object' && !Array.isArray(task.result)
+    ? task.result as Record<string, unknown>
+    : null
+  const resultSummary: Record<string, unknown> = {}
+  for (const key of COLLECTION_TASK_RESULT_SUMMARY_KEYS) {
+    if (result?.[key] !== undefined) resultSummary[key] = result[key]
+  }
+  const collectedCount = Array.isArray(result?.collected)
+    ? result.collected.length
+    : Array.isArray(result?.notes)
+      ? result.notes.length
+      : undefined
+  const normalizedFailedItems = normalizeBrowserTaskFailedItems(result?.failed)
+  const failedItems = normalizedFailedItems.slice(0, 20)
+  const compact = {
+    taskId: task.taskId,
+    kind: task.kind,
+    status: task.status,
+    progress: task.progress,
+    checkpoint: task.checkpoint
+      ? {
+          taskId: task.checkpoint.taskId,
+          stage: task.checkpoint.stage,
+          cursor: task.checkpoint.cursor ?? null,
+        }
+      : null,
+    result: {
+      ...resultSummary,
+      ...(collectedCount !== undefined ? { collectedCount } : {}),
+      failedCount: normalizedFailedItems.length,
+    },
+    failedItems,
+    suggestedNextAction: failedItems.length === 0
+      ? 'done'
+      : failedItems.some((item) => item.retryable)
+        ? 'retry_failed'
+        : 'review_manually',
+    error: task.error ?? null,
+    createdAt: task.createdAt,
+    startedAt: task.startedAt ?? null,
+    finishedAt: task.finishedAt ?? null,
+    updatedAt: task.updatedAt,
+  }
+  return linkedExecution
+    ? { ...compact, activeExecution: compactCollectionTaskPayload(linkedExecution) }
+    : compact
+}
+
+function browserTaskToolPayload(
+  task: BrowserCapabilityTaskHandle,
+  linkedExecution?: BrowserCapabilityTaskHandle | null,
+): Record<string, unknown> | BrowserCapabilityTaskHandle {
+  return task.kind === 'visible_collect' || task.kind === 'note_collect' || task.kind === 'card_loop'
+    ? compactCollectionTaskPayload(task, linkedExecution)
+    : enrichBrowserTaskPayload(task)
+}
+
 function normalizedPathField(value: unknown): string {
   const raw = stringField(value)
   return raw ? expandHomePath(raw) : ''
@@ -454,33 +539,6 @@ function sourceTaskHandoffMismatch(
     }
   }
   return null
-}
-
-async function startCollectionFromCompletedVisibleTask(
-  controller: BrowserController,
-  sourceTask: BrowserCapabilityTaskHandle,
-  sessionId?: string,
-): Promise<unknown | null> {
-  if (!isCompleteSourceTask(sourceTask)) return null
-  const existing = await (controller as {
-    findCollectionTaskBySourceTaskId?: (sourceTaskId: string) => Promise<BrowserCapabilityTaskHandle | null>
-  }).findCollectionTaskBySourceTaskId?.(sourceTask.taskId)
-  if (existing) return existing
-  const handoff = buildCollectionHandoffPlanFromTask(sourceTask)
-  if (!handoff) return null
-  if (handoff.strategy === 'card_loop') {
-    const startCardLoopCollection = (controller as { startCardLoopCollection?: (plan: Record<string, unknown>, scopeId?: string) => Promise<unknown> }).startCardLoopCollection
-    if (typeof startCardLoopCollection !== 'function') {
-      return {
-        ok: false,
-        errorCode: 'card_loop_not_ready',
-        message: 'browser_resume_task 收到已完成发现任务，但 card_loop runner 未注册。',
-        sourceTaskId: sourceTask.taskId,
-      }
-    }
-    return startCardLoopCollection.call(controller, handoff.plan, sessionId)
-  }
-  return controller.startNoteCollection(handoff.plan, sessionId)
 }
 
 function isLikelyReadyNonBrowserTaskId(taskId: string): boolean {
@@ -515,6 +573,12 @@ export interface BrowserCollectionToolContext {
   leaseGate?: BrowserLeaseGate
   runtime?: AgentControlRuntime | null
   candidateTargetUrls: string[]
+  taskExecutionContext?: {
+    ownerAgentId?: string | null
+    ownerRunId?: string | null
+    parentTaskId?: string | null
+    executionBinding?: import('../../../shared/agent-execution-profile').TaskExecutionBinding | null
+  }
   runWorkflowStep: (
     controller: BrowserController,
     step: Record<string, unknown>,
@@ -528,7 +592,13 @@ export async function executeBrowserCollectionTool(
   args: Record<string, unknown>,
   ctx: BrowserCollectionToolContext,
 ): Promise<string | ToolExecutionOutput> {
-  const { controller, abortSignal, sessionId, currentUserText, leaseGate, runtime, candidateTargetUrls, runWorkflowStep } = ctx
+  const { controller, abortSignal, sessionId, currentUserText, leaseGate, runtime, candidateTargetUrls, runWorkflowStep, taskExecutionContext } = ctx
+  const collectionOwnership = {
+    ...(taskExecutionContext?.ownerAgentId ? { ownerAgentId: taskExecutionContext.ownerAgentId } : {}),
+    ...(taskExecutionContext?.ownerRunId ? { ownerRunId: taskExecutionContext.ownerRunId } : {}),
+    ...(taskExecutionContext?.parentTaskId ? { parentTaskId: taskExecutionContext.parentTaskId } : {}),
+    ...(taskExecutionContext?.executionBinding ? { executionBinding: taskExecutionContext.executionBinding } : {}),
+  }
   switch (toolName) {
       case 'browser_collect_images': {
         let tabId = (args.tab_id as string) || null
@@ -1225,7 +1295,7 @@ export async function executeBrowserCollectionTool(
         //   • stamp the current scope so scope-bound collection guards
         //     (findScope…ImageGallery…) can see a failure started here.
         // Neither overrides a value the caller already set in the internal shape.
-        const scopedPayload: Record<string, unknown> = { ...payload }
+        const scopedPayload: Record<string, unknown> = { ...payload, ...collectionOwnership }
         if (typeof scopedPayload.tabId !== 'string' && typeof scopedPayload.tab_id === 'string') {
           scopedPayload.tabId = scopedPayload.tab_id
         }
@@ -1249,12 +1319,15 @@ export async function executeBrowserCollectionTool(
         const taskId = String(args.task_id || '').trim()
         if (!taskId) return 'Error: task_id is required'
         const result = await controller.getTask(taskId)
-        const resumedCollection = result ? await startCollectionFromCompletedVisibleTask(controller, result, sessionId) : null
-        if (resumedCollection) return JSON.stringify(resumedCollection, null, 2)
         if (!result && isLikelyReadyNonBrowserTaskId(taskId)) {
           return browserStructuredOutput(wrongBrowserTaskIdPayload('browser_get_task', taskId))
         }
-        return JSON.stringify(result ? enrichBrowserTaskPayload(result) : { taskId, status: 'missing' }, null, 2)
+        const linkedExecution = result?.kind === 'visible_collect'
+          ? await (controller as {
+              findCollectionTaskBySourceTaskId?: (sourceTaskId: string) => Promise<BrowserCapabilityTaskHandle | null>
+            }).findCollectionTaskBySourceTaskId?.(result.taskId) || null
+          : null
+        return JSON.stringify(result ? browserTaskToolPayload(result, linkedExecution) : { taskId, status: 'missing' }, null, 2)
       }
 
       case 'browser_resume_task': {
@@ -1267,13 +1340,11 @@ export async function executeBrowserCollectionTool(
           log(`browser_resume_task getTask failed taskId=${taskId}: ${error instanceof Error ? error.message : String(error)}`)
           current = null
         }
-        const resumedCollection = current ? await startCollectionFromCompletedVisibleTask(controller, current, sessionId) : null
-        if (resumedCollection) return JSON.stringify(resumedCollection, null, 2)
         if (!current && isLikelyReadyNonBrowserTaskId(taskId)) {
           return browserStructuredOutput(wrongBrowserTaskIdPayload('browser_resume_task', taskId))
         }
         const result = await controller.resumeTask(taskId)
-        return JSON.stringify(result || { taskId, status: 'missing' }, null, 2)
+        return JSON.stringify(result ? browserTaskToolPayload(result) : { taskId, status: 'missing' }, null, 2)
       }
 
       case 'browser_cancel_task': {
@@ -1283,7 +1354,7 @@ export async function executeBrowserCollectionTool(
         if (!result && isLikelyReadyNonBrowserTaskId(taskId)) {
           return browserStructuredOutput(wrongBrowserTaskIdPayload('browser_cancel_task', taskId))
         }
-        return JSON.stringify(result || { taskId, status: 'missing' }, null, 2)
+        return JSON.stringify(result ? browserTaskToolPayload(result) : { taskId, status: 'missing' }, null, 2)
       }
 
       case 'browser_aggregate_results': {
@@ -1398,6 +1469,7 @@ export async function executeBrowserCollectionTool(
           // startVisibleCollection, which rewrites these to agent-view.
           surface: leaseGate?.surface,
           leaseId: leaseGate?.leaseId ?? undefined,
+          ...collectionOwnership,
         }
         const startVisibleCollection = (controller as { startVisibleCollection?: (payload: Record<string, unknown>, scopeId?: string) => Promise<unknown> }).startVisibleCollection
         const result = startVisibleCollection
@@ -1568,6 +1640,10 @@ export async function executeBrowserCollectionTool(
               targetUrl?: string
               outputRootDir?: string
               sourceMessageIds?: string[]
+              ownerAgentId?: string
+              ownerRunId?: string
+              parentTaskId?: string
+              executionBinding?: import('../../../shared/agent-execution-profile').TaskExecutionBinding
             }, scopeId?: string) => BrowserCapabilityTaskHandle | Promise<BrowserCapabilityTaskHandle>
           }).createSyntheticVisibleCollection
           if (typeof createSyntheticVisibleCollection !== 'function') {
@@ -1582,6 +1658,7 @@ export async function executeBrowserCollectionTool(
             targetUrl: profileUrl,
             outputRootDir,
             sourceMessageIds: ['current-turn'],
+            ...collectionOwnership,
           }, sessionId)
           effectiveSourceTaskId = sourceTask.taskId
         }
@@ -1628,6 +1705,7 @@ export async function executeBrowserCollectionTool(
           ...(effectiveSourceTaskId ? { sourceTaskId: effectiveSourceTaskId } : {}),
           outputRootDir,
           ...(Object.keys(stopConditions).length > 0 ? { stopConditions } : {}),
+          ...collectionOwnership,
         }
         // Pass the agent's session/scope so the background task projects into
         // THIS conversation's chat (plan §3.2). sessionId ≈ scopeId.

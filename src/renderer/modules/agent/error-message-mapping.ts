@@ -223,6 +223,15 @@ export function mapBackendErrorToFriendly(input: {
     }
   }
 
+  if (/API 返回了网页内容|不是 JSON|provider_protocol_mismatch|供应商协议不匹配/i.test(source)) {
+    return {
+      friendlyMessage: 'API 地址不是模型接口，请在设置中检查地址（OpenAI 兼容服务通常以 /v1 结尾）',
+      technicalDetails: error || undefined,
+      recoverable: true,
+      retryStrategy: 'user_action',
+    }
+  }
+
   if (
     errorKind === 'network' ||
     errorKind === 'transient' ||

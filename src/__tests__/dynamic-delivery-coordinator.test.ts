@@ -131,6 +131,7 @@ async function prepare(
 ) {
   return coordinator.prepareOwnerInput({
     mode: 'adaptive', runId: 'run', taskId: 'task', scopeId: 'scope', userRequestVerbatim: 'request',
+    ownerSystemPrompt: 'base owner system prompt',
     requestEnvelope: envelope(['a']), intentClassification: { primaryDomain: 'research', confidence: 1 },
     inferredTaskType: 'research', liveBudget: null, ownerBinding: binding(), ownerProfile: null,
     committedSession, model: 'test', provider: {} as never, contextWindowTokens: 10_000,
@@ -323,14 +324,18 @@ test('accept alone commits candidate history, releases buffered output, and clos
 test('one text repair replaces the hidden draft and commits only the accepted answer', async () => {
   const committed = new MemorySession({ initialItems: [user('base')] })
   let verifierCalls = 0
+  let repairInstructions = ''
   const h = harness(async (params) => {
     if (params.agentName === 'dynamic-delivery-owner-repair') {
+      repairInstructions = params.instructions
       return { finalText: 'repaired answer', usage: usage(2) }
     }
     verifierCalls += 1
     return { finalText: verdict(verifierCalls === 1 ? 'repair' : 'accept'), usage: usage(1) }
   })
-  const prepared = await prepare(h.coordinator, committed)
+  const prepared = await prepare(h.coordinator, committed, {
+    ownerSystemPrompt: 'STYLE_CONTRACT_MARKER',
+  })
   prepared.emitOutput!.append('rejected draft')
   const result = await h.coordinator.verifyOwnerCandidate({
     runId: 'run', candidateText: 'rejected draft', projectionAfterOwner: h.projection(), model: 'test',
@@ -345,6 +350,7 @@ test('one text repair replaces the hidden draft and commits only the accepted an
   assert.equal(committedItems.includes('rejected draft'), false)
   assert.equal(h.projection().deliveryState?.verifier.repaired, true)
   assert.equal(result.usage?.providerCallCount, 3)
+  assert.equal(repairInstructions.includes('STYLE_CONTRACT_MARKER'), true)
 })
 
 test('artifact repair reuses only the supplied Owner repair-safe tools on the verified target', async () => {
@@ -354,6 +360,7 @@ test('artifact repair reuses only the supplied Owner repair-safe tools on the ve
     if (params.agentName === 'dynamic-delivery-owner-artifact-repair') {
       assert.equal(params.tools.length, 1)
       assert.match(String(params.input), /doc-1/)
+      assert.match(params.instructions, /base owner system prompt/)
       return { finalText: 'artifact repaired', usage: usage(2) }
     }
     verifierCalls += 1

@@ -35,6 +35,10 @@ const AGENT_SDK_TURN_COMPLETION_REL =
   'src/main/modules/agent-control/runtime-core/agent-sdk-turn-completion.ts'
 const RUN_META_REPOSITORY_REL =
   'src/main/modules/agent-control/task-projection/run-meta-repository.ts'
+const DIRECT_ANSWER_HISTORY_MIGRATION_REL =
+  'src/main/modules/agent-control/task-projection/direct-answer-history-migration.ts'
+const DIRECT_ANSWER_HISTORY_MIGRATION_MARKER =
+  'run-finalizer-exempt: migration-077 repairs persisted legacy false failures only'
 const STARTUP_RUN_RECONCILER_REL = 'src/main/modules/app-control/startup-run-reconciler.ts'
 const STARTUP_RECONCILER_EXEMPT_MARKER =
   'run-finalizer-exempt: startup-recovery-only working->interrupted'
@@ -94,7 +98,12 @@ function lineOf(text, idx) {
 }
 
 function isAllowedRunMetaWriter(rel, text) {
-  return rel === RUN_FINALIZER_REL || rel === RUN_META_REPOSITORY_REL
+  return rel === RUN_FINALIZER_REL
+    || rel === RUN_META_REPOSITORY_REL
+    || (
+      rel === DIRECT_ANSWER_HISTORY_MIGRATION_REL
+      && text.includes(DIRECT_ANSWER_HISTORY_MIGRATION_MARKER)
+    )
 }
 
 function sourceForRunMetaRules(rel, text) {

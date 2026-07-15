@@ -46,7 +46,7 @@ import {
 import {
   hasRecalledTaskContext,
   messageHasBrowserBatchCollectionIntent,
-  messageHasBrowserCollectionIntent,
+  messageHasExplicitBrowserCollectionIntent,
   readSkillReferenceNames,
   resolveSkillHintRelevanceForTurn
 } from './agent-sdk-skill-intent-utils'
@@ -230,16 +230,32 @@ export function prepareAgentSdkTurn(
     effectiveExecutionOptions?.requestEnvelope,
     localSendImTurn
   )
+  const turnFollowupPrimary =
+    parseEnvelopeResourceReferences(effectiveExecutionOptions?.requestEnvelope)
+      .primaryInstruction || primaryInstructionText(content as RunMessage)
+  const turnFollowup = classifyFollowupIntent(turnFollowupPrimary, {
+    hasActiveTaskContext: hasRecalledTaskContext(messageToText(content as RunMessage)),
+    taskRefs: scopeTaskRefs
+  })
   // Synchronous continuity (no await in the run hot path): track this turn's
-  // collection intent and decay the TTL so bare follow-ups stay exposed.
-  if (localSendImTurn && sessionId) {
+  // collection intent and decay the TTL so bare follow-ups stay exposed. A
+  // substantive new task or explicit collection refusal starts a fresh intent
+  // window instead of inheriting write tools from an unrelated prior turn.
+  if (
+    sessionId &&
+    (
+      localSendImTurn ||
+      turnFollowup.kind === 'new_task' ||
+      turnFollowup.negations.includes('collection')
+    )
+  ) {
     host.intentTracker.resetCollectionIntents(sessionId)
   }
   const recentCollectionIntent = host.intentTracker.trackCollectionIntent(
     sessionId,
     localSendImTurn
       ? false
-      : messageHasBrowserCollectionIntent(
+      : messageHasExplicitBrowserCollectionIntent(
           content as RunMessage,
           effectiveExecutionOptions?.requestEnvelope
         )
@@ -297,16 +313,6 @@ export function prepareAgentSdkTurn(
   // tools narrow to read-classified ones, so the model can browser_get_task
   // but cannot re-dispatch a collection. classifyBrowserToolCall fails
   // closed (unknown → write), which is exactly the conservative default.
-  const turnFollowupPrimary =
-    parseEnvelopeResourceReferences(effectiveExecutionOptions?.requestEnvelope)
-      .primaryInstruction || primaryInstructionText(content as RunMessage)
-  // EP2-I1 — state-first: feed projection FACTS (when wired) so "继续"
-  // with no continuable task is new_task and vague interrogatives with an
-  // active task report status instead of starting over (05 §2.1).
-  const turnFollowup = classifyFollowupIntent(turnFollowupPrimary, {
-    hasActiveTaskContext: hasRecalledTaskContext(messageToText(content as RunMessage)),
-    taskRefs: scopeTaskRefs
-  })
   // EP2-I2 — standing negation lifecycle (session lineage): record fresh
   // negations from this turn; an explicit release signal ("现在可以采集
   // 了") lifts them. Dispatch-layer interception consults this state.

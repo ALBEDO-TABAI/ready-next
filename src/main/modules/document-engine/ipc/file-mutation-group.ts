@@ -26,7 +26,7 @@
 // fully overlap; pinning the mutation set on its own would silently leak
 // the read companion back into the host. The grouping is mixed-surface
 // by design, mirroring the file-io group's read+write+shell pairing.
-import { existsSync, statSync } from 'fs'
+import { existsSync } from 'fs'
 import { copyFile, cp, mkdir, rename, rm, stat, unlink } from 'fs/promises'
 import { dirname, extname } from 'path'
 import type { IpcMain } from 'electron'
@@ -166,8 +166,11 @@ export const fileMutationGroup: IpcChannelGroup<FileMutationGroupDeps> = {
             stat: { size: 1024, isDirectory: false, modified: new Date() }
           }
         }
-        if (!existsSync(path)) return { success: false, error: 'Not found' }
-        const stats = statSync(path)
+        const stats = await stat(path).catch((error: NodeJS.ErrnoException) => {
+          if (error.code === 'ENOENT') return null
+          throw error
+        })
+        if (!stats) return { success: false, error: 'Not found' }
         const ext = extname(path).toLowerCase()
         return {
           success: true,

@@ -23,7 +23,7 @@ import {
 } from './write-locks'
 import { getActiveDocTab, resolveDocActionTab, resolveDocTab } from './target-resolve'
 import { useDocTabs } from '../../../stores/useDocTabs'
-import { useMode } from '../../../stores/useMode'
+import { requestWorkbenchModeOpen } from '../../workbench/mode-transition'
 import { parseShowWidgetFences, tryParseWidgetPayload } from '../../../components/document/widget-fence-parser'
 import {
   buildDocumentWidgetFenceSource,
@@ -1194,7 +1194,7 @@ export async function performDocAction(action: DocActionPayload): Promise<string
     const target = typeof action.target === 'string' ? action.target : typeof action.tabId === 'string' ? action.tabId : undefined
     const tab = resolveDocTab(target)
     if (!tab) return `未找到文档标签：${target || '(空)'}`
-    useMode.getState().setWorkbenchMode('document')
+    requestWorkbenchModeOpen('document')
     docStore.setActiveTab(tab.id)
     rememberToolTargetTab(tab.id)
     rememberDocActionDocument(tab.id)
@@ -1687,7 +1687,7 @@ export async function runDocCommand(raw: string): Promise<CommandResult> {
     }
   }
 
-  useMode.getState().setWorkbenchMode('document')
+  requestWorkbenchModeOpen('document')
   const docStore = useDocTabs.getState()
   const [command, ...rest] = body.split(' ')
   const arg = rest.join(' ').trim()

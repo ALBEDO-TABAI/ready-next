@@ -10,6 +10,7 @@ function createConfig(overrides: Partial<AIModelConfig> = {}): AIModelConfig {
     baseUrl: 'https://example.com/v1',
     apiKey: 'test',
     model: 'gpt-test',
+    toolUseMode: 'on',
     ...overrides,
   }
 }

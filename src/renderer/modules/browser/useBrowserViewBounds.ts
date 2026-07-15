@@ -560,6 +560,16 @@ export function useBrowserViewBounds({
     }
   }, [syncBrowserVisibility])
 
+  useEffect(() => () => {
+    if (!isElectron) return
+    visibilitySyncTokenRef.current += 1
+    window.electronAPI?.browser?.sendIntent({
+      kind: 'hide-all',
+      intentId: nextIntentId(),
+      reason: 'mode-switch-prepare',
+    })
+  }, [isElectron])
+
   return {
     sendBounds,
     sendBoundsImmediate,

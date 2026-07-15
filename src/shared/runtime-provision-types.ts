@@ -30,6 +30,27 @@ export interface RuntimeProvisionProgress {
   message?: string
 }
 
+export type RuntimeProvisionTaskState =
+  | 'idle'
+  | 'running'
+  | 'cancelling'
+  | 'succeeded'
+  | 'failed'
+  | 'cancelled'
+
+export interface RuntimeProvisionTaskSnapshot {
+  runId: string | null
+  revision: number
+  state: RuntimeProvisionTaskState
+  progress?: RuntimeProvisionProgress
+  startedAt?: number
+  updatedAt: number
+  finishedAt?: number
+  errorKind?: RuntimeProvisionErrorKind
+  error?: string
+  result?: RuntimeStatus
+}
+
 export type RuntimeProvisionErrorKind =
   | ProvisionErrorKind
   | 'assets_not_pinned'

@@ -15,6 +15,7 @@ import assert from 'node:assert/strict'
 import {
   ReadyAnthropicModel,
   ReadyOpenAICompatibleModel,
+  resolveAgentSdkProvider,
   resolveTrueSseMode,
 } from '../main/modules/agent-control/runtime-core/agent-sdk-provider'
 import {
@@ -175,6 +176,18 @@ test('provider-sse: mid-stream abort throws the abort reason and stops iteration
 // ============================================================================
 // OpenAI chat-completions streaming
 // ============================================================================
+
+test('SDK provider request uses the sanitized compatible base URL', async () => {
+  const { fetch, captured } = makeQueuedFetch([sseResponse(['data: [DONE]\n\n'])])
+  const { provider } = resolveAgentSdkProvider(makeConfig({
+    baseUrl: 'https://user:password@relay.example.invalid?token=secret#debug',
+  }), { fetchWithTimeout: fetch })
+
+  await collect(provider.getModel().getStreamedResponse(makeRequest()))
+
+  assert.equal(captured[0].url, 'https://relay.example.invalid/v1/chat/completions')
+  assert.doesNotMatch(captured[0].url, /user|password|token|secret|debug/)
+})
 
 test('SDK chat stream: incremental deltas, interleaved tool-call fragments, reasoning kept silent, usage from final chunk', async () => {
   const chunks = [

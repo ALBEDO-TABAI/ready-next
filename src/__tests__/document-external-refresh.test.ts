@@ -5,6 +5,7 @@ import {
   isPathWithinChangedDirectory,
   isReloadableTextDocumentPath,
   shouldRefreshDocumentTabForDirectoryChange,
+  shouldRefreshDocumentTabOnActivation,
 } from '../renderer/modules/document/documentExternalRefresh'
 
 test('document external refresh targets clean markdown tabs under changed directories', () => {
@@ -42,5 +43,40 @@ test('document external refresh path matching handles Windows separators', () =>
   assert.equal(
     isPathWithinChangedDirectory('C:\\workspace\\outside\\文案分析报告.md', 'C:\\workspace\\out'),
     false,
+  )
+})
+
+test('document activation refresh leaves new empty-memory tabs to the editor loader', () => {
+  assert.equal(
+    shouldRefreshDocumentTabOnActivation({
+      path: '/workspace/out/文案分析报告.md',
+      isDirty: false,
+      content: '',
+    }),
+    false,
+  )
+  assert.equal(
+    shouldRefreshDocumentTabOnActivation({
+      path: '/workspace/out/文案分析报告.md',
+      isDirty: false,
+      content: '# 已加载',
+    }),
+    true,
+  )
+  assert.equal(
+    shouldRefreshDocumentTabOnActivation({
+      path: '/workspace/out/文案分析报告.md',
+      isDirty: true,
+      content: '# 未保存',
+    }),
+    false,
+  )
+
+  assert.equal(
+    shouldRefreshDocumentTabForDirectoryChange(
+      { path: '/workspace/out/文案分析报告.md', isDirty: false },
+      ['/workspace/out'],
+    ),
+    true,
   )
 })

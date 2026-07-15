@@ -219,6 +219,7 @@ test('agent sdk runtime streams text and closes with terminal reason', async () 
   })
 
   assert.equal(result.success, true)
+  assert.equal(result.projectionTruth?.projectionPatch?.browserCollectionRequired, undefined)
   assert.equal(result.finalText, '你好，已完成')
   assert.equal(result.terminalReason, 'done')
   assert.deepEqual(
@@ -304,6 +305,65 @@ test('agent sdk runtime scales max turns for long reading resources', async () =
   assert.equal(result.finalText, '长文预算已放宽')
 })
 
+test('agent sdk runtime keeps account analysis read-only even with a browser page reference', async () => {
+  let toolNames: string[] = []
+  const runtime = createRuntime({
+    runAgent: async ({ tools }) => {
+      toolNames = await enabledSdkToolNames(tools)
+      return { finalText: '账号分析完成' }
+    }
+  })
+  runtime.setBrowserController({} as never)
+  runtime.newSession('butler::scope-browser-account-analysis', 'system prompt')
+
+  const priorCollection = await runtime.sendMessage(
+    'butler::scope-browser-account-analysis',
+    '把这个博主的全部笔记采集下来并保存',
+    'run-browser-prior-collection',
+    {
+      publicSessionId: 'scope-browser-account-analysis',
+      taskId: 'task-browser-prior-collection',
+      requestEnvelope: {
+        primaryInstruction: '把这个博主的全部笔记采集下来并保存',
+        resources: []
+      }
+    }
+  )
+  assert.equal(priorCollection.success, true)
+  assert.ok(toolNames.includes('browser_collect_notes'))
+  toolNames = []
+
+  const instruction = '帮我分析一下这个小红书账号，然后列一些选题给我'
+  const result = await runtime.sendMessage(
+    'butler::scope-browser-account-analysis',
+    `${instruction}\n\n### 浏览页面引用\n见乔 - 小红书 https://www.xiaohongshu.com/user/profile/abc`,
+    'run-browser-account-analysis',
+    {
+      publicSessionId: 'scope-browser-account-analysis',
+      taskId: 'task-browser-account-analysis',
+      requestEnvelope: {
+        primaryInstruction: instruction,
+        resources: []
+      }
+    }
+  )
+
+  assert.equal(result.success, true)
+  assert.equal(result.projectionTruth?.projectionPatch?.browserCollectionRequired, undefined)
+  assert.ok(toolNames.includes('browser_read_page'))
+  assert.ok(toolNames.includes('browser_extract_structured'))
+  for (const name of [
+    'browser_visible_collect',
+    'browser_collect_notes',
+    'browser_download_collected_media',
+    'browser_get_task',
+    'browser_resume_task',
+    'browser_cancel_task'
+  ]) {
+    assert.equal(toolNames.includes(name), false, `${name} must require explicit collection intent`)
+  }
+})
+
 test('agent sdk runtime exposes only background collection workflow tools for multi-note browser collection', async () => {
   let toolNames: string[] = []
   const runtime = createRuntime({
@@ -330,6 +390,7 @@ test('agent sdk runtime exposes only background collection workflow tools for mu
   )
 
   assert.equal(result.success, true)
+  assert.equal(result.projectionTruth?.projectionPatch?.browserCollectionRequired, true)
   for (const name of [
     'browser_visible_collect',
     'browser_collect_notes',
@@ -5540,7 +5601,8 @@ test('agent sdk runtime uses Ready text bridge for non-native tool transports', 
         provider: 'openai-compatible',
         baseUrl: 'https://code.newcli.com/codex/v1',
         agentProtocol: 'openai',
-        wireApi: 'chat/completions'
+        wireApi: 'chat/completions',
+        toolUseMode: 'on'
       }
     }),
     listToolDefinitions: () => [toolDefinition],
@@ -5627,7 +5689,8 @@ test('text-bridge Tag Forge carries each prepared page into one valid apply unti
         provider: 'openai-compatible',
         baseUrl: 'https://code.newcli.com/codex/v1',
         agentProtocol: 'openai',
-        wireApi: 'chat/completions'
+        wireApi: 'chat/completions',
+        toolUseMode: 'on'
       }
     }),
     listToolDefinitions: () => definitions,
