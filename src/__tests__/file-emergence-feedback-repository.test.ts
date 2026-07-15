@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
 import test from 'node:test'
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 import type { DatabaseConnection } from '../main/modules/database'
 import { runMigrations, type MigrationDatabase } from '../main/modules/migrations'
 import { FileEmergenceFeedbackRepository } from '../main/modules/repositories/file-emergence-feedback-repository'
@@ -13,7 +14,8 @@ type SqliteCtor = new(path:string) => DatabaseConnection & MigrationDatabase
 const require = createRequire(import.meta.url)
 function openDb(){const mod=require('better-sqlite3') as SqliteCtor&{default?:SqliteCtor};const C=mod.default||mod;const db=new C(':memory:');runMigrations(db);return db}
 
-test('feedback survives reread, snooze expires, and hide remains attached to stable project identity',()=>{
+test('feedback survives reread, snooze expires, and hide remains attached to stable project identity',(t)=>{
+  if(skipIfSqliteUnavailable(t,'file-emergence-feedback-repository'))return
   const db=openDb();try{
     const identities=new FileProjectIdentityRepository(db)
     const project=identities.createUserProjectForPath({workspaceRoot:'/w',path:'/w/a.md',displayName:'原名称',updatedAt:100})
@@ -42,7 +44,8 @@ test('feedback survives reread, snooze expires, and hide remains attached to sta
   }finally{db.close()}
 })
 
-test('not-related projects remain recoverable until replaced by later feedback',()=>{
+test('not-related projects remain recoverable until replaced by later feedback',(t)=>{
+  if(skipIfSqliteUnavailable(t,'file-emergence-feedback-repository'))return
   const db=openDb();try{
     const project=new FileProjectIdentityRepository(db).createUserProjectForPath({workspaceRoot:'/w',path:'/w/a.md',displayName:'项目',updatedAt:100})
     const feedback=new FileEmergenceFeedbackRepository(db)
@@ -54,7 +57,8 @@ test('not-related projects remain recoverable until replaced by later feedback',
   }finally{db.close()}
 })
 
-test('local evaluation repository reads history and immutable prediction snapshots without upload',()=>{
+test('local evaluation repository reads history and immutable prediction snapshots without upload',(t)=>{
+  if(skipIfSqliteUnavailable(t,'file-emergence-feedback-repository'))return
   const db=openDb();try{
     const identities=new FileProjectIdentityRepository(db)
     const project=identities.createUserProjectForPath({workspaceRoot:'/w',path:'/w/a.md',displayName:'项目',updatedAt:1})
@@ -71,7 +75,8 @@ test('local evaluation repository reads history and immutable prediction snapsho
   }finally{db.close()}
 })
 
-test('postlaunch outcomes use immutable snapshot file membership across a later internal move',()=>{
+test('postlaunch outcomes use immutable snapshot file membership across a later internal move',(t)=>{
+  if(skipIfSqliteUnavailable(t,'file-emergence-feedback-repository'))return
   const db=openDb();try{
     const identities=new FileProjectIdentityRepository(db);const activity=new FileActivityRepository(db);const attention=new FileAttentionRepository(db)
     const project=identities.createUserProjectForPath({workspaceRoot:'/w',path:'/w/old.md',displayName:'项目',updatedAt:1});const file=identities.listProjectFiles(project.projectKey)[0]!

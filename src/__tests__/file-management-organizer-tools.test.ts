@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { existsSync } from 'node:fs'
+import { existsSync, realpathSync } from 'node:fs'
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -18,6 +18,9 @@ test('file-management-organizer-tools declares transitive sqlite ABI guard', (t)
 })
 
 function fakeSearchEngine(root: string) {
+  const canonicalRoot = realpathSync(root)
+  const contains = (path: string, candidate: string) =>
+    path === candidate || path.startsWith(`${candidate}/`)
   const db = {
     prepare() {
       return {
@@ -28,7 +31,8 @@ function fakeSearchEngine(root: string) {
     },
   }
   return {
-    findWorkspaceRootForPath: (path: string) => path === root || path.startsWith(`${root}/`) ? root : null,
+    findWorkspaceRootForPath: (path: string) =>
+      contains(path, root) || contains(path, canonicalRoot) ? root : null,
     indexDocument: async () => ({ ok: true }),
     getRepository: () => ({
       getConnection: () => db,
@@ -39,6 +43,7 @@ function fakeSearchEngine(root: string) {
 }
 
 function fakeSearchEngineForRoots(roots: string[], indexedPaths: string[]) {
+  const rootPairs = roots.map((root) => ({ root, canonicalRoot: realpathSync(root) }))
   const indexed = new Set(indexedPaths)
   const db = {
     prepare() {
@@ -52,7 +57,11 @@ function fakeSearchEngineForRoots(roots: string[], indexedPaths: string[]) {
     },
   }
   return {
-    findWorkspaceRootForPath: (path: string) => roots.find((root) => path === root || path.startsWith(`${root}/`)) || null,
+    findWorkspaceRootForPath: (path: string) => rootPairs.find(({ root, canonicalRoot }) =>
+      path === root
+      || path.startsWith(`${root}/`)
+      || path === canonicalRoot
+      || path.startsWith(`${canonicalRoot}/`))?.root || null,
     indexDocument: async () => ({ ok: true }),
     getRepository: () => ({
       getConnection: () => db,

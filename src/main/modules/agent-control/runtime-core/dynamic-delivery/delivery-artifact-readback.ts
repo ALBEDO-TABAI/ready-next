@@ -44,6 +44,7 @@ function canonicalPath(value: string): string {
   try {
     return realpathSync(value)
   } catch {
+    // silent-catch: a path may disappear between existence checks; lexical resolution keeps comparison deterministic without claiming a successful readback.
     return resolve(value)
   }
 }
@@ -147,6 +148,7 @@ function cleanMarkdownTarget(value: string): string | null {
   try {
     return decodeURIComponent(target)
   } catch {
+    // silent-catch: malformed percent escapes do not invalidate an otherwise usable local Markdown target.
     return target
   }
 }

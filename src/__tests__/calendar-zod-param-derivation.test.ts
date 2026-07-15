@@ -9,6 +9,23 @@ import { CALENDAR_SCHEMAS } from '../main/modules/tools/schemas/calendar-schemas
 import { zodObjectToParamList } from '../main/modules/tools/zod-param-derivation'
 import type { SkillParamDefinition } from '../shared/skill-execution-types'
 
+const REMINDER_ITEMS: Record<string, unknown> = {
+  type: 'object',
+  properties: {
+    offsetMinutes: {
+      type: 'number',
+      description: '相对事件开始时间的分钟偏移，负数表示开始前（例如 -15 表示提前 15 分钟）',
+    },
+    method: {
+      type: 'string',
+      enum: ['notification', 'sound'],
+      description: '提醒方式',
+    },
+  },
+  required: ['offsetMinutes', 'method'],
+  additionalProperties: false,
+}
+
 test('derives calendar_list_window params identical to legacy hand-rolled list', () => {
   const expected: SkillParamDefinition[] = [
     { name: 'start', type: 'string', description: '开始时间 ISO 字符串', required: true },
@@ -17,7 +34,7 @@ test('derives calendar_list_window params identical to legacy hand-rolled list',
   assert.deepEqual(zodObjectToParamList(CALENDAR_SCHEMAS.calendar_list_window), expected)
 })
 
-test('derives calendar_create_event params identical to legacy hand-rolled list', () => {
+test('derives the complete structured calendar_create_event parameter contract', () => {
   // L0-Schema-Lock: this expected list mirrors `CalendarCreateEventSchema` —
   // any addition there (reminders, recurrenceRule …) must be reflected here.
   const expected: SkillParamDefinition[] = [
@@ -33,14 +50,14 @@ test('derives calendar_create_event params identical to legacy hand-rolled list'
       type: 'array',
       description: '提醒列表',
       required: false,
-      items: { type: 'object' },
+      items: REMINDER_ITEMS,
     },
     { name: 'recurrenceRule', type: 'string', description: 'RFC 5545 RRULE 字符串，描述循环规则', required: false },
   ]
   assert.deepEqual(zodObjectToParamList(CALENDAR_SCHEMAS.calendar_create_event), expected)
 })
 
-test('derives calendar_update_event params identical to legacy hand-rolled list', () => {
+test('derives the complete structured calendar_update_event parameter contract', () => {
   const expected: SkillParamDefinition[] = [
     { name: 'id', type: 'string', description: '事件 ID', required: true },
     { name: 'title', type: 'string', description: '可选，更新后的标题', required: false },
@@ -54,7 +71,7 @@ test('derives calendar_update_event params identical to legacy hand-rolled list'
       type: 'array',
       description: '可选，新的提醒列表（整组替换）',
       required: false,
-      items: { type: 'object' },
+      items: REMINDER_ITEMS,
     },
     { name: 'recurrenceRule', type: 'string', description: '可选，新的 RFC 5545 RRULE 字符串', required: false },
   ]

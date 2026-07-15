@@ -4,6 +4,7 @@ import test from 'node:test'
 import { mkdtemp,writeFile,readFile,realpath } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 import type { DatabaseConnection } from '../main/modules/database'
 import { runMigrations,type MigrationDatabase } from '../main/modules/migrations'
 import { FileProjectIdentityRepository } from '../main/modules/repositories/file-project-identity-repository'
@@ -45,31 +46,56 @@ async function createFinalizeFixture(db:ReturnType<typeof openDb>,name:string,ma
   return{root,path,body,content,file,repo,runId,receiptId,searchEngine,payload:{receiptId,sourceRunId:runId,path,workspaceRoots:[root]}}
 }
 
-test('creation validation survives repository recreation and remains recoverable by trusted file identity',()=>{const db=openDb();try{const file=new FileProjectIdentityRepository(db).ensureFile({workspaceRoot:'/w',path:'/w/recover.md'});let repo=new TagForgeRepository(db);const receipt=repo.mintCreationReceipt({sourceRunId:'run-before-restart',fileKey:file.fileKey});const validation=JSON.stringify({tags:[{tagId:'tutorial',facet:'form',label:'教程',confidence:.95,evidenceCode:'form',resolution:'exact'}],admittedEntries:[],bodyRevision:'body-hash'});repo.storeCreationValidation(receipt,'final-hash',validation);repo=new TagForgeRepository(db);const recovered=repo.findRecoverableCreationReceipt(file.fileKey);assert.equal(recovered?.receiptId,receipt);assert.equal(recovered?.finalSaveHash,'final-hash');assert.equal(recovered?.validationJson,validation);assert.equal(repo.findOpenCreationReceipt('run-before-restart',file.fileKey)?.receiptId,receipt)}finally{db.close()}})
+test('creation validation survives repository recreation and remains recoverable by trusted file identity', (t) => {
+  if (skipIfSqliteUnavailable(t, 'tag-forge-repository')) return
+  const db=openDb();try{const file=new FileProjectIdentityRepository(db).ensureFile({workspaceRoot:'/w',path:'/w/recover.md'});let repo=new TagForgeRepository(db);const receipt=repo.mintCreationReceipt({sourceRunId:'run-before-restart',fileKey:file.fileKey});const validation=JSON.stringify({tags:[{tagId:'tutorial',facet:'form',label:'教程',confidence:.95,evidenceCode:'form',resolution:'exact'}],admittedEntries:[],bodyRevision:'body-hash'});repo.storeCreationValidation(receipt,'final-hash',validation);repo=new TagForgeRepository(db);const recovered=repo.findRecoverableCreationReceipt(file.fileKey);assert.equal(recovered?.receiptId,receipt);assert.equal(recovered?.finalSaveHash,'final-hash');assert.equal(recovered?.validationJson,validation);assert.equal(repo.findOpenCreationReceipt('run-before-restart',file.fileKey)?.receiptId,receipt)}finally{db.close()}})
 
-test('a completed recovery supersedes the old receipt so later saves cannot revive it',()=>{const db=openDb();try{const file=new FileProjectIdentityRepository(db).ensureFile({workspaceRoot:'/w',path:'/w/recovered.md'});const repo=new TagForgeRepository(db);const oldReceipt=repo.mintCreationReceipt({sourceRunId:'old-run',fileKey:file.fileKey});repo.storeCreationValidation(oldReceipt,'old-hash','{"tags":[],"admittedEntries":[],"bodyRevision":"body"}');const newReceipt=repo.mintCreationReceipt({sourceRunId:'new-run',fileKey:file.fileKey});repo.storeCreationValidation(newReceipt,'new-hash','{"tags":[],"admittedEntries":[],"bodyRevision":"body"}');repo.supersedeCreationReceipt(oldReceipt);repo.markReceipt(newReceipt,'completed');assert.equal(repo.getCreationReceipt(oldReceipt,'old-run')?.status,'failed_terminal');assert.equal(repo.findRecoverableCreationReceipt(file.fileKey),null)}finally{db.close()}})
+test('a completed recovery supersedes the old receipt so later saves cannot revive it', (t) => {
+  if (skipIfSqliteUnavailable(t, 'tag-forge-repository')) return
+  const db=openDb();try{const file=new FileProjectIdentityRepository(db).ensureFile({workspaceRoot:'/w',path:'/w/recovered.md'});const repo=new TagForgeRepository(db);const oldReceipt=repo.mintCreationReceipt({sourceRunId:'old-run',fileKey:file.fileKey});repo.storeCreationValidation(oldReceipt,'old-hash','{"tags":[],"admittedEntries":[],"bodyRevision":"body"}');const newReceipt=repo.mintCreationReceipt({sourceRunId:'new-run',fileKey:file.fileKey});repo.storeCreationValidation(newReceipt,'new-hash','{"tags":[],"admittedEntries":[],"bodyRevision":"body"}');repo.supersedeCreationReceipt(oldReceipt);repo.markReceipt(newReceipt,'completed');assert.equal(repo.getCreationReceipt(oldReceipt,'old-run')?.status,'failed_terminal');assert.equal(repo.findRecoverableCreationReceipt(file.fileKey),null)}finally{db.close()}})
 
-test('creation finalize accepts an already-indexed skipped write while preserving manual ownership',async()=>{const db=openDb();try{const fixture=await createFinalizeFixture(db,'skipped',['教程','AI工作流']);await fixture.searchEngine.indexDocument(fixture.root,fixture.path,fixture.content);let calls=0;fixture.searchEngine.indexDocument=async()=>{calls+=1;return{ok:true,documentId:1,skipped:true}};const output=await finalizeTagForgeCreation(fixture.payload,{db,searchEngine:fixture.searchEngine});const ownership=Object.fromEntries(fixture.repo.listAssignments(fixture.file.fileKey).map((item)=>[item.label,item.ownership]));assert.equal(output.success,true);assert.equal(calls,1);assert.equal(ownership['教程'],'manual');assert.equal(ownership['AI工作流'],'manual');assert.equal(ownership['参考资料'],undefined);assert.equal(ownership['CanvasKit API'],'automatic');assert.equal(fixture.repo.getCreationReceipt(fixture.receiptId,fixture.runId)?.status,'completed')}finally{db.close()}})
+test('creation finalize accepts an already-indexed skipped write while preserving manual ownership', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'tag-forge-repository')) return
+  const db=openDb();try{const fixture=await createFinalizeFixture(db,'skipped',['教程','AI工作流']);await fixture.searchEngine.indexDocument(fixture.root,fixture.path,fixture.content);let calls=0;fixture.searchEngine.indexDocument=async()=>{calls+=1;return{ok:true,documentId:1,skipped:true}};const output=await finalizeTagForgeCreation(fixture.payload,{db,searchEngine:fixture.searchEngine});const ownership=Object.fromEntries(fixture.repo.listAssignments(fixture.file.fileKey).map((item)=>[item.label,item.ownership]));assert.equal(output.success,true);assert.equal(calls,1);assert.equal(ownership['教程'],'manual');assert.equal(ownership['AI工作流'],'manual');assert.equal(ownership['参考资料'],undefined);assert.equal(ownership['CanvasKit API'],'automatic');assert.equal(fixture.repo.getCreationReceipt(fixture.receiptId,fixture.runId)?.status,'completed')}finally{db.close()}})
 
-test('completed creation finalize is a read-only idempotent success',async()=>{const db=openDb();try{const fixture=await createFinalizeFixture(db,'repeat');const first=await finalizeTagForgeCreation(fixture.payload,{db,searchEngine:fixture.searchEngine});assert.equal(first.success,true);db.prepare(`UPDATE artifact_creation_receipts SET validation_json=NULL WHERE receipt_id=?`).run(fixture.receiptId);const before=db.prepare(`SELECT enrichment_status AS status,updated_at AS updatedAt FROM artifact_creation_receipts WHERE receipt_id=?`).get<{status:string;updatedAt:number}>(fixture.receiptId)!;let calls=0;fixture.searchEngine.indexDocument=async()=>{calls+=1;throw new Error('must not reindex')};const second=await finalizeTagForgeCreation(fixture.payload,{db,searchEngine:fixture.searchEngine});const after=db.prepare(`SELECT enrichment_status AS status,updated_at AS updatedAt FROM artifact_creation_receipts WHERE receipt_id=?`).get<{status:string;updatedAt:number}>(fixture.receiptId)!;assert.equal(second.success,true);assert.equal(calls,0);assert.deepEqual(after,before)}finally{db.close()}})
+test('completed creation finalize is a read-only idempotent success', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'tag-forge-repository')) return
+  const db=openDb();try{const fixture=await createFinalizeFixture(db,'repeat');const first=await finalizeTagForgeCreation(fixture.payload,{db,searchEngine:fixture.searchEngine});assert.equal(first.success,true);db.prepare(`UPDATE artifact_creation_receipts SET validation_json=NULL WHERE receipt_id=?`).run(fixture.receiptId);const before=db.prepare(`SELECT enrichment_status AS status,updated_at AS updatedAt FROM artifact_creation_receipts WHERE receipt_id=?`).get<{status:string;updatedAt:number}>(fixture.receiptId)!;let calls=0;fixture.searchEngine.indexDocument=async()=>{calls+=1;throw new Error('must not reindex')};const second=await finalizeTagForgeCreation(fixture.payload,{db,searchEngine:fixture.searchEngine});const after=db.prepare(`SELECT enrichment_status AS status,updated_at AS updatedAt FROM artifact_creation_receipts WHERE receipt_id=?`).get<{status:string;updatedAt:number}>(fixture.receiptId)!;assert.equal(second.success,true);assert.equal(calls,0);assert.deepEqual(after,before)}finally{db.close()}})
 
-test('superseded creation receipts cannot be revived by a stale finalize',async()=>{const db=openDb();try{const fixture=await createFinalizeFixture(db,'superseded');fixture.repo.supersedeCreationReceipt(fixture.receiptId);const output=await finalizeTagForgeCreation(fixture.payload,{db,searchEngine:fixture.searchEngine});assert.equal(output.success,false);assert.equal(fixture.repo.getCreationReceipt(fixture.receiptId,fixture.runId)?.status,'failed_terminal')}finally{db.close()}})
+test('superseded creation receipts cannot be revived by a stale finalize', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'tag-forge-repository')) return
+  const db=openDb();try{const fixture=await createFinalizeFixture(db,'superseded');fixture.repo.supersedeCreationReceipt(fixture.receiptId);const output=await finalizeTagForgeCreation(fixture.payload,{db,searchEngine:fixture.searchEngine});assert.equal(output.success,false);assert.equal(fixture.repo.getCreationReceipt(fixture.receiptId,fixture.runId)?.status,'failed_terminal')}finally{db.close()}})
 
-test('creation finalize restores the index to an external post-index disk edit',async()=>{const db=openDb();try{const fixture=await createFinalizeFixture(db,'external');const external='# 外部修改\n\n用户同时改写了文档。';const realIndex=fixture.searchEngine.indexDocument.bind(fixture.searchEngine);let calls=0;fixture.searchEngine.indexDocument=async(root,path,content)=>{calls+=1;const result=await realIndex(root,path,content);if(calls===1)await writeFile(fixture.path,external);return result};const output=await finalizeTagForgeCreation(fixture.payload,{db,searchEngine:fixture.searchEngine});assert.equal(output.success,false);assert.equal(output.error,'post_index_disk_mismatch');assert.equal(calls,2);assert.equal(await readFile(fixture.path,'utf8'),external);const indexed=db.prepare(`SELECT d.content_hash AS contentHash FROM documents d JOIN workspaces w ON w.id=d.workspace_id WHERE w.root=? AND d.path=?`).get<{contentHash:string}>(fixture.root,fixture.path);assert.equal(indexed?.contentHash,buildSearchIndexContentHash(external))}finally{db.close()}})
+test('creation finalize restores the index to an external post-index disk edit', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'tag-forge-repository')) return
+  const db=openDb();try{const fixture=await createFinalizeFixture(db,'external');const external='# 外部修改\n\n用户同时改写了文档。';const realIndex=fixture.searchEngine.indexDocument.bind(fixture.searchEngine);let calls=0;fixture.searchEngine.indexDocument=async(root,path,content)=>{calls+=1;const result=await realIndex(root,path,content);if(calls===1)await writeFile(fixture.path,external);return result};const output=await finalizeTagForgeCreation(fixture.payload,{db,searchEngine:fixture.searchEngine});assert.equal(output.success,false);assert.equal(output.error,'post_index_disk_mismatch');assert.equal(calls,2);assert.equal(await readFile(fixture.path,'utf8'),external);const indexed=db.prepare(`SELECT d.content_hash AS contentHash FROM documents d JOIN workspaces w ON w.id=d.workspace_id WHERE w.root=? AND d.path=?`).get<{contentHash:string}>(fixture.root,fixture.path);assert.equal(indexed?.contentHash,buildSearchIndexContentHash(external))}finally{db.close()}})
 
-test('concurrent finalize calls share one commit and preserve the admitted overlay',async()=>{const db=openDb();try{const fixture=await createFinalizeFixture(db,'concurrent');const realIndex=fixture.searchEngine.indexDocument.bind(fixture.searchEngine);let release!:()=>void;const gate=new Promise<void>((resolve)=>{release=resolve});let started!:()=>void;const firstIndexStarted=new Promise<void>((resolve)=>{started=resolve});let calls=0;fixture.searchEngine.indexDocument=async(...args)=>{calls+=1;if(calls===1)started();await gate;return realIndex(...args)};const pending=Promise.all([finalizeTagForgeCreation(fixture.payload,{db,searchEngine:fixture.searchEngine}),finalizeTagForgeCreation(fixture.payload,{db,searchEngine:fixture.searchEngine})]);await firstIndexStarted;await new Promise<void>((resolve)=>setImmediate(resolve));const observedCalls=calls;release();const results=await pending;assert.equal(observedCalls,1);assert.equal(results.every((item)=>item.success),true);assert.equal(fixture.repo.listOverlay().some((entry)=>entry.label==='CanvasKit API'),true);assert.equal(fixture.repo.getCreationReceipt(fixture.receiptId,fixture.runId)?.status,'completed')}finally{db.close()}})
+test('concurrent finalize calls share one commit and preserve the admitted overlay', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'tag-forge-repository')) return
+  const db=openDb();try{const fixture=await createFinalizeFixture(db,'concurrent');const realIndex=fixture.searchEngine.indexDocument.bind(fixture.searchEngine);let release!:()=>void;const gate=new Promise<void>((resolve)=>{release=resolve});let started!:()=>void;const firstIndexStarted=new Promise<void>((resolve)=>{started=resolve});let calls=0;fixture.searchEngine.indexDocument=async(...args)=>{calls+=1;if(calls===1)started();await gate;return realIndex(...args)};const pending=Promise.all([finalizeTagForgeCreation(fixture.payload,{db,searchEngine:fixture.searchEngine}),finalizeTagForgeCreation(fixture.payload,{db,searchEngine:fixture.searchEngine})]);await firstIndexStarted;await new Promise<void>((resolve)=>setImmediate(resolve));const observedCalls=calls;release();const results=await pending;assert.equal(observedCalls,1);assert.equal(results.every((item)=>item.success),true);assert.equal(fixture.repo.listOverlay().some((entry)=>entry.label==='CanvasKit API'),true);assert.equal(fixture.repo.getCreationReceipt(fixture.receiptId,fixture.runId)?.status,'completed')}finally{db.close()}})
 
-test('overlay rollback cannot remove an entry assigned to another file',()=>{const db=openDb();try{const file=new FileProjectIdentityRepository(db).ensureFile({workspaceRoot:'/w',path:'/w/kept.md'});const repo=new TagForgeRepository(db);const tagId=tagOverlayId('entity','CanvasKit API');repo.upsertOverlay({id:tagId,facet:'entity',label:'CanvasKit API',aliases:[]});repo.replaceAutomaticAssignments(file.fileKey,[{tagId,facet:'entity',label:'CanvasKit API',confidence:.9,evidenceCode:'entity',resolution:'exact'}],'tag_forge_auto','test');repo.removeOverlayIfUnassigned(tagId);assert.equal(repo.listOverlay().some((entry)=>entry.id===tagId),true)}finally{db.close()}})
+test('overlay rollback cannot remove an entry assigned to another file', (t) => {
+  if (skipIfSqliteUnavailable(t, 'tag-forge-repository')) return
+  const db=openDb();try{const file=new FileProjectIdentityRepository(db).ensureFile({workspaceRoot:'/w',path:'/w/kept.md'});const repo=new TagForgeRepository(db);const tagId=tagOverlayId('entity','CanvasKit API');repo.upsertOverlay({id:tagId,facet:'entity',label:'CanvasKit API',aliases:[]});repo.replaceAutomaticAssignments(file.fileKey,[{tagId,facet:'entity',label:'CanvasKit API',confidence:.9,evidenceCode:'entity',resolution:'exact'}],'tag_forge_auto','test');repo.removeOverlayIfUnassigned(tagId);assert.equal(repo.listOverlay().some((entry)=>entry.id===tagId),true)}finally{db.close()}})
 
-test('overlay is independent, pending dedupes, and manual deletion suppresses automatic restoration',()=>{const db=openDb();try{const ids=new FileProjectIdentityRepository(db);const file=ids.ensureFile({workspaceRoot:'/w',path:'/w/new.md'});const repo=new TagForgeRepository(db);repo.upsertOverlay({id:'ready',facet:'entity',label:'Ready',aliases:['Ready App']});assert.equal(repo.listOverlay()[0]?.label,'Ready');repo.addPending([{facet:'entity',label:'新实体',evidenceCode:'entity',confidence:.8}],null);repo.addPending([{facet:'entity',label:'新实体',evidenceCode:'entity2',confidence:.9}],null);assert.equal(repo.listPending().length,1);repo.replaceAutomaticAssignments(file.fileKey,[{tagId:'ai-workflow',facet:'domain',label:'AI工作流',confidence:.8,evidenceCode:'domain',resolution:'exact'}],'tag_forge_auto','0.1');repo.reconcileAssignments({fileKey:file.fileKey,frontmatterTags:[],knownEntries:loadTagForgePolicy().entries});assert.equal(repo.listAssignments(file.fileKey)[0]?.suppressed,true)}finally{db.close()}})
+test('overlay is independent, pending dedupes, and manual deletion suppresses automatic restoration', (t) => {
+  if (skipIfSqliteUnavailable(t, 'tag-forge-repository')) return
+  const db=openDb();try{const ids=new FileProjectIdentityRepository(db);const file=ids.ensureFile({workspaceRoot:'/w',path:'/w/new.md'});const repo=new TagForgeRepository(db);repo.upsertOverlay({id:'ready',facet:'entity',label:'Ready',aliases:['Ready App']});assert.equal(repo.listOverlay()[0]?.label,'Ready');repo.addPending([{facet:'entity',label:'新实体',evidenceCode:'entity',confidence:.8}],null);repo.addPending([{facet:'entity',label:'新实体',evidenceCode:'entity2',confidence:.9}],null);assert.equal(repo.listPending().length,1);repo.replaceAutomaticAssignments(file.fileKey,[{tagId:'ai-workflow',facet:'domain',label:'AI工作流',confidence:.8,evidenceCode:'domain',resolution:'exact'}],'tag_forge_auto','0.1');repo.reconcileAssignments({fileKey:file.fileKey,frontmatterTags:[],knownEntries:loadTagForgePolicy().entries});assert.equal(repo.listAssignments(file.fileKey)[0]?.suppressed,true)}finally{db.close()}})
 
-test('pending proposals with the same label stay isolated by batch item',()=>{const db=openDb();try{const repo=new TagForgeRepository(db);const proposal=[{facet:'domain' as const,label:'浏览器技术',evidenceCode:'topic',evidenceExcerpt:'浏览器技术',confidence:.8}];const first={sourceRunId:'run-1',batchId:'batch-1',itemId:'item-1',scopeId:'scope-1'};const second={sourceRunId:'run-2',batchId:'batch-2',itemId:'item-2',scopeId:'scope-2'};const firstRows=repo.addPending(proposal,first);const secondRows=repo.addPending(proposal,second);assert.equal(repo.listPending().length,2);assert.notEqual(firstRows[0].proposalId,secondRows[0].proposalId);repo.reviewPending(firstRows[0].proposalId,'dismiss');assert.equal(repo.listRejected(first).some((item)=>item.label==='浏览器技术'),true);assert.equal(repo.listRejected(second).some((item)=>item.label==='浏览器技术'),false);assert.equal(repo.listPending(second).length,1)}finally{db.close()}})
+test('pending proposals with the same label stay isolated by batch item', (t) => {
+  if (skipIfSqliteUnavailable(t, 'tag-forge-repository')) return
+  const db=openDb();try{const repo=new TagForgeRepository(db);const proposal=[{facet:'domain' as const,label:'浏览器技术',evidenceCode:'topic',evidenceExcerpt:'浏览器技术',confidence:.8}];const first={sourceRunId:'run-1',batchId:'batch-1',itemId:'item-1',scopeId:'scope-1'};const second={sourceRunId:'run-2',batchId:'batch-2',itemId:'item-2',scopeId:'scope-2'};const firstRows=repo.addPending(proposal,first);const secondRows=repo.addPending(proposal,second);assert.equal(repo.listPending().length,2);assert.notEqual(firstRows[0].proposalId,secondRows[0].proposalId);repo.reviewPending(firstRows[0].proposalId,'dismiss');assert.equal(repo.listRejected(first).some((item)=>item.label==='浏览器技术'),true);assert.equal(repo.listRejected(second).some((item)=>item.label==='浏览器技术'),false);assert.equal(repo.listPending(second).length,1)}finally{db.close()}})
 
-test('a scoped dismissal remains effective when the host has no run id',()=>{const db=openDb();try{const repo=new TagForgeRepository(db);const identity={sourceRunId:null,batchId:'batch-no-run',itemId:'item-no-run',scopeId:'scope-no-run'};const [pending]=repo.addPending([{facet:'domain',label:'未采用候选',evidenceCode:'topic',evidenceExcerpt:'未采用候选',confidence:.8}],identity);repo.reviewPending(pending.proposalId,'dismiss');assert.deepEqual(repo.listRejected(identity),[{facet:'domain',label:'未采用候选'}]);assert.deepEqual(repo.listRejected(),[])}finally{db.close()}})
+test('a scoped dismissal remains effective when the host has no run id', (t) => {
+  if (skipIfSqliteUnavailable(t, 'tag-forge-repository')) return
+  const db=openDb();try{const repo=new TagForgeRepository(db);const identity={sourceRunId:null,batchId:'batch-no-run',itemId:'item-no-run',scopeId:'scope-no-run'};const [pending]=repo.addPending([{facet:'domain',label:'未采用候选',evidenceCode:'topic',evidenceExcerpt:'未采用候选',confidence:.8}],identity);repo.reviewPending(pending.proposalId,'dismiss');assert.deepEqual(repo.listRejected(identity),[{facet:'domain',label:'未采用候选'}]);assert.deepEqual(repo.listRejected(),[])}finally{db.close()}})
 
-test('automatic replacement never takes ownership away from a manual tag',()=>{const db=openDb();try{const ids=new FileProjectIdentityRepository(db);const file=ids.ensureFile({workspaceRoot:'/w',path:'/w/manual.md'});const repo=new TagForgeRepository(db);const entry=loadTagForgePolicy().entries.find((item)=>item.id==='ai-workflow')!;repo.reconcileAssignments({fileKey:file.fileKey,frontmatterTags:['AI工作流'],knownEntries:[entry]});repo.replaceAutomaticAssignments(file.fileKey,[{tagId:entry.id,facet:entry.facet,label:entry.label,confidence:.9,evidenceCode:'auto',resolution:'exact'}],'tag_forge_explicit','0.2');assert.equal(repo.listAssignments(file.fileKey)[0]?.ownership,'manual')}finally{db.close()}})
+test('automatic replacement never takes ownership away from a manual tag', (t) => {
+  if (skipIfSqliteUnavailable(t, 'tag-forge-repository')) return
+  const db=openDb();try{const ids=new FileProjectIdentityRepository(db);const file=ids.ensureFile({workspaceRoot:'/w',path:'/w/manual.md'});const repo=new TagForgeRepository(db);const entry=loadTagForgePolicy().entries.find((item)=>item.id==='ai-workflow')!;repo.reconcileAssignments({fileKey:file.fileKey,frontmatterTags:['AI工作流'],knownEntries:[entry]});repo.replaceAutomaticAssignments(file.fileKey,[{tagId:entry.id,facet:entry.facet,label:entry.label,confidence:.9,evidenceCode:'auto',resolution:'exact'}],'tag_forge_explicit','0.2');assert.equal(repo.listAssignments(file.fileKey)[0]?.ownership,'manual')}finally{db.close()}})
 
-test('single-file reindex reconciles ready_state changes into tag assignments', async () => {
+test('single-file reindex reconciles ready_state changes into tag assignments', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'tag-forge-repository')) return
   const db = openDb()
   try {
     const rawRoot = await mkdtemp(join(tmpdir(), 'tag-forge-single-file-state-'))
@@ -109,7 +135,8 @@ test('single-file reindex reconciles ready_state changes into tag assignments', 
   }
 })
 
-test('tag forge stages automatic ownership before indexing while preserving manual ownership',async()=>{
+test('tag forge stages automatic ownership before indexing while preserving manual ownership', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'tag-forge-repository')) return
   const db=openDb()
   try{
     const root=await mkdtemp(join(tmpdir(),'tag-forge-ownership-'))
@@ -144,7 +171,8 @@ test('tag forge stages automatic ownership before indexing while preserving manu
   }finally{db.close()}
 })
 
-test('an unchanged generic apply indexes an unindexed document on the first run',async()=>{
+test('an unchanged generic apply indexes an unindexed document on the first run', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'tag-forge-repository')) return
   const db=openDb()
   try{
     const root=await mkdtemp(join(tmpdir(),'tag-forge-noop-index-'))
@@ -173,7 +201,8 @@ test('an unchanged generic apply indexes an unindexed document on the first run'
   }finally{db.close()}
 })
 
-test('skipped indexing succeeds when strict readback already matches',async()=>{
+test('skipped indexing succeeds when strict readback already matches', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'tag-forge-repository')) return
   const db=openDb()
   try{
     const root=await mkdtemp(join(tmpdir(),'tag-forge-skipped-'))
@@ -212,7 +241,8 @@ test('skipped indexing succeeds when strict readback already matches',async()=>{
   }finally{db.close()}
 })
 
-test('an unindexed manual tag stays manual across repeated explicit retagging',async()=>{
+test('an unindexed manual tag stays manual across repeated explicit retagging', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'tag-forge-repository')) return
   const db=openDb()
   try{
     const root=await mkdtemp(join(tmpdir(),'tag-forge-unindexed-manual-'))
@@ -243,7 +273,8 @@ test('an unindexed manual tag stays manual across repeated explicit retagging',a
   }finally{db.close()}
 })
 
-test('a post-index external edit is preserved and becomes the indexed truth',async()=>{
+test('a post-index external edit is preserved and becomes the indexed truth', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'tag-forge-repository')) return
   const db=openDb()
   try{
     const root=await mkdtemp(join(tmpdir(),'tag-forge-race-'))
@@ -284,7 +315,8 @@ test('a post-index external edit is preserved and becomes the indexed truth',asy
   }finally{db.close()}
 })
 
-test('overlay ids use the full stable hash and reject a conflicting legacy id',()=>{
+test('overlay ids use the full stable hash and reject a conflicting legacy id', (t) => {
+  if (skipIfSqliteUnavailable(t, 'tag-forge-repository')) return
   const db=openDb()
   try{
     const shared='这是一个非常长且前缀完全相同的用户标签-'

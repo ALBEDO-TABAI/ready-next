@@ -185,6 +185,7 @@ function parseJsonRecord(text: string): Record<string, unknown> | null {
   try {
     return recordValue(JSON.parse(text))
   } catch {
+    // silent-catch: non-JSON tool text is valid input here; the caller falls back to text-based failure detection.
     return null
   }
 }

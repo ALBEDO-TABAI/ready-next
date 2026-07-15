@@ -28,6 +28,7 @@ function validHttpUrl(value: unknown): string | null {
     const url = new URL(value.trim())
     return url.protocol === 'http:' || url.protocol === 'https:' ? url.href : null
   } catch {
+    // silent-catch: malformed result URLs are excluded from the structured research delivery.
     return null
   }
 }

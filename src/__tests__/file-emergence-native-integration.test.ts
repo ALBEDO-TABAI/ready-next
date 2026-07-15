@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
 import test from 'node:test'
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 
 import type { DatabaseConnection } from '../main/modules/database'
 import { FileEmergenceService } from '../main/modules/file-emergence/service'
@@ -23,7 +24,8 @@ function openDb(): DatabaseConnection & MigrationDatabase {
   return db
 }
 
-test('native repositories carry one open fact and real reading progress into a snapshot', async () => {
+test('native repositories carry one open fact and real reading progress into a snapshot', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'file-emergence-native-integration')) return
   const db = openDb()
   try {
     const activity = new FileActivityRepository(db)
@@ -118,7 +120,8 @@ test('native repositories carry one open fact and real reading progress into a s
   }
 })
 
-test('native metadata port reads controlled assignments and never promotes raw CSS body tags',()=>{
+test('native metadata port reads controlled assignments and never promotes raw CSS body tags',(t)=>{
+  if(skipIfSqliteUnavailable(t,'file-emergence-native-integration'))return
   const db=openDb()
   try{
     db.prepare(`INSERT INTO workspaces(root) VALUES(?)`).run('/workspace')

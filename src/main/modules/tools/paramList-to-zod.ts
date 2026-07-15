@@ -14,7 +14,8 @@
  * - 'boolean' → LenientBoolean (accepts true/false/'true'/'false'/'1'/'0'/1/0)
  * - 'object' → z.record(z.string(), z.unknown()) + optional .meta({
  *     additionalProperties: true }) if the legacy param set it
- * - 'array' → z.array(<element>) where element is picked from items.type
+ * - 'array' → z.array(<element>) recursively rebuilt from items, including
+ *   structured object properties, required fields, enums and length bounds
  *
  * Pure module — Zod only.
  */
@@ -33,11 +34,95 @@ const LenientBoolean = z.union([
   z.literal(0).transform(() => false),
 ])
 
-function elementTypeOf(param: SkillParamDefinition): string {
-  const raw = param.items && typeof param.items === 'object'
-    ? (param.items as Record<string, unknown>).type
-    : undefined
-  return typeof raw === 'string' ? raw : 'unknown'
+function describeSchema(
+  schema: z.ZodTypeAny,
+  definition: Record<string, unknown>,
+): z.ZodTypeAny {
+  const description = definition.description
+  return typeof description === 'string' && description.length > 0
+    ? schema.describe(description)
+    : schema
+}
+
+function buildJsonSchemaNode(definition: Record<string, unknown>): z.ZodTypeAny {
+  const type = typeof definition.type === 'string'
+    ? definition.type.toLowerCase()
+    : ''
+  let schema: z.ZodTypeAny
+
+  if (type === 'string') {
+    const enumValues = Array.isArray(definition.enum)
+      ? definition.enum.filter((value): value is string => typeof value === 'string')
+      : []
+    if (enumValues.length > 0) {
+      schema = z.enum(enumValues as [string, ...string[]])
+    } else {
+      let stringSchema = z.string()
+      if (typeof definition.minLength === 'number') {
+        stringSchema = stringSchema.min(definition.minLength)
+      }
+      if (typeof definition.maxLength === 'number') {
+        stringSchema = stringSchema.max(definition.maxLength)
+      }
+      schema = stringSchema
+    }
+  } else if (type === 'number' || type === 'integer') {
+    let numberSchema = type === 'integer' ? z.number().int() : z.number()
+    if (typeof definition.minimum === 'number') {
+      numberSchema = numberSchema.min(definition.minimum)
+    }
+    if (typeof definition.maximum === 'number') {
+      numberSchema = numberSchema.max(definition.maximum)
+    }
+    schema = numberSchema
+  } else if (type === 'boolean') {
+    schema = z.boolean()
+  } else if (type === 'array') {
+    const items = definition.items
+    const element = items && typeof items === 'object' && !Array.isArray(items)
+      ? buildJsonSchemaNode(items as Record<string, unknown>)
+      : z.unknown()
+    let arraySchema = z.array(element)
+    if (typeof definition.minItems === 'number') {
+      arraySchema = arraySchema.min(definition.minItems)
+    }
+    if (typeof definition.maxItems === 'number') {
+      arraySchema = arraySchema.max(definition.maxItems)
+    }
+    schema = arraySchema
+  } else if (type === 'object') {
+    const properties = definition.properties
+    if (properties && typeof properties === 'object' && !Array.isArray(properties)) {
+      const required = new Set(
+        Array.isArray(definition.required)
+          ? definition.required.filter((value): value is string => typeof value === 'string')
+          : [],
+      )
+      const shape: Record<string, z.ZodTypeAny> = {}
+      for (const [name, property] of Object.entries(properties)) {
+        if (!property || typeof property !== 'object' || Array.isArray(property)) continue
+        const propertyDefinition = property as Record<string, unknown>
+        let node = buildJsonSchemaNode(propertyDefinition)
+        if (!required.has(name)) {
+          node = node.optional()
+          node = describeSchema(node, propertyDefinition)
+        }
+        shape[name] = node
+      }
+      schema = definition.additionalProperties === true
+        ? z.looseObject(shape).meta({ additionalProperties: true })
+        : z.object(shape).meta({ additionalProperties: false })
+    } else {
+      const record = z.record(z.string(), z.unknown())
+      schema = definition.additionalProperties === true
+        ? record.meta({ additionalProperties: true })
+        : record
+    }
+  } else {
+    schema = z.unknown()
+  }
+
+  return describeSchema(schema, definition)
 }
 
 function buildLeafSchema(param: SkillParamDefinition): z.ZodTypeAny {
@@ -58,18 +143,8 @@ function buildLeafSchema(param: SkillParamDefinition): z.ZodTypeAny {
     return base
   }
   if (type === 'array') {
-    const element = elementTypeOf(param)
-    if (element === 'string') return z.array(z.string())
-    if (element === 'number' || element === 'integer') return z.array(z.number())
-    if (element === 'boolean') return z.array(z.boolean())
-    if (element === 'object') {
-      const inner = z.record(z.string(), z.unknown())
-      const items = param.items as Record<string, unknown> | undefined
-      if (items && items.additionalProperties === true) {
-        return z.array(inner.meta({ additionalProperties: true }))
-      }
-      return z.array(inner)
-    }
+    const items = param.items as Record<string, unknown> | undefined
+    if (items) return z.array(buildJsonSchemaNode(items))
     return z.array(z.unknown())
   }
   // Unknown leaf type — accept anything and rely on handler for deeper validation.

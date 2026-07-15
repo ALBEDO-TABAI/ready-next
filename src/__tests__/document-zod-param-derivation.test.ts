@@ -95,7 +95,7 @@ test('derives document_insert_widget params', () => {
     {
       name: 'position',
       type: 'string',
-      description: '插入位置：append_end 或 after_section',
+      description: '插入位置：prepend_start（文档开头/大标题之后，用户要求"开头/顶部/标题下"时用它）、append_end（文末）或 after_section（指定章节后）',
       required: true,
     },
     {

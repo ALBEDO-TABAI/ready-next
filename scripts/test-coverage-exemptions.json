@@ -70,6 +70,24 @@
   ],
   "c4Exempt": [
     {
+      "path": "src/__tests__/agent-sdk-turn-input-assembly.test.ts",
+      "reason": "Ready system prompt integration assembles one turn from an injected host, session, tool definitions, and an immutable test skill catalog. It never selects a shell-enabled skill, calls getDatabase, or opens a repository; the shell-consent helper import alone makes the static graph reach database.ts, so host-Node coverage should remain active.",
+      "since": "2026-07-15",
+      "owner": "ready-system-prompt"
+    },
+    {
+      "path": "src/__tests__/anysearch-research-tools.test.ts",
+      "reason": "AnySearch coverage uses injected AI configuration, an injected skill catalog, synthetic tool results, and stubbed fetch responses. Constructing AgentSdkRuntime does not call its default settings repository, and no test path opens getDatabase or a real SQLite repository; only transitive runtime imports trigger C4.",
+      "since": "2026-07-15",
+      "owner": "anysearch-research"
+    },
+    {
+      "path": "src/__tests__/image-generation-service.test.ts",
+      "reason": "Image generation coverage injects an in-memory external-service store and HTTP client, then exercises only reference ordering and temporary filesystem copies. It never calls the default settings repository or getDatabase; the ExternalServiceStore import alone makes the static graph reach database.ts.",
+      "since": "2026-07-15",
+      "owner": "image-generation-service"
+    },
+    {
       "path": "src/__tests__/document-widget-insert-position.test.ts",
       "reason": "Document widget W10b: tests only the exported insertWidgetIntoDocument text transformation with string fixtures; no path opens better-sqlite3 or reads a repository. The execute module's transitive imports trigger the scanner, while the complete suite passes on host Node with the Electron native module present.",
       "since": "2026-07-11",

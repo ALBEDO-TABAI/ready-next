@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
 import test from 'node:test'
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 
 import type { DatabaseConnection } from '../main/modules/database'
 import {
@@ -27,7 +28,8 @@ function openBefore075():DatabaseConnection&MigrationDatabase {
   return db
 }
 
-test('migration 075 leaves ambiguous legacy package tag ownership untouched',()=>{
+test('migration 075 leaves ambiguous legacy package tag ownership untouched',(t)=>{
+  if(skipIfSqliteUnavailable(t,'migration-075-tag-forge-creation-validation'))return
   const db=openBefore075()
   try{
     db.prepare(`INSERT INTO workspaces(root) VALUES('/workspace')`).run()

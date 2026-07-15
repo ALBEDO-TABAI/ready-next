@@ -113,3 +113,35 @@ test('additionalProperties=true on array items is preserved', () => {
   const derived = zodObjectToParamList(schema)
   assert.deepEqual(derived, params)
 })
+
+test('structured object array items preserve nested validation', () => {
+  const params: SkillParamDefinition[] = [
+    {
+      name: 'operations',
+      type: 'array',
+      description: '补丁操作',
+      required: true,
+      items: {
+        type: 'object',
+        properties: {
+          op: { type: 'string', enum: ['set', 'delete'], description: '操作类型' },
+          path: { type: 'string', minLength: 1, description: 'JSON pointer' },
+          value: { description: '可选新值' },
+        },
+        required: ['op', 'path'],
+        additionalProperties: false,
+      },
+    },
+  ]
+  const schema = paramListToZodObject(params)
+
+  assert.equal(schema.safeParse({ operations: [{ op: 'set', path: '/a' }] }).success, true)
+  assert.equal(schema.safeParse({ operations: [{ op: 'other', path: '/a' }] }).success, false)
+  assert.equal(schema.safeParse({ operations: [{ op: 'set', path: '' }] }).success, false)
+  const extraKey = schema.safeParse({ operations: [{ op: 'set', path: '/a', extra: true }] })
+  assert.equal(extraKey.success, true)
+  if (extraKey.success) {
+    assert.deepEqual(extraKey.data, { operations: [{ op: 'set', path: '/a' }] })
+  }
+  assert.deepEqual(zodObjectToParamList(schema), params)
+})

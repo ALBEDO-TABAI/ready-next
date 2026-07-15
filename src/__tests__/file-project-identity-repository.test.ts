@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
 import test from 'node:test'
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 
 import type { DatabaseConnection } from '../main/modules/database'
 import { runMigrations, type MigrationDatabase } from '../main/modules/migrations'
@@ -17,7 +18,8 @@ function openDb(): DatabaseConnection & MigrationDatabase {
   return db
 }
 
-test('migration 068 creates file and project identity tables idempotently', () => {
+test('migration 068 creates file and project identity tables idempotently', (t) => {
+  if (skipIfSqliteUnavailable(t, 'file-project-identity-repository')) return
   const db = openDb()
   try {
     runMigrations(db)
@@ -37,7 +39,8 @@ test('migration 068 creates file and project identity tables idempotently', () =
   }
 })
 
-test('file identity survives Ready file and directory moves with idempotent receipts', () => {
+test('file identity survives Ready file and directory moves with idempotent receipts', (t) => {
+  if (skipIfSqliteUnavailable(t, 'file-project-identity-repository')) return
   const db = openDb()
   try {
     const repository = new FileProjectIdentityRepository(db)
@@ -85,7 +88,8 @@ test('file identity survives Ready file and directory moves with idempotent rece
   }
 })
 
-test('equal content hashes do not merge external files without an internal move receipt', () => {
+test('equal content hashes do not merge external files without an internal move receipt', (t) => {
+  if (skipIfSqliteUnavailable(t, 'file-project-identity-repository')) return
   const db = openDb()
   try {
     const repository = new FileProjectIdentityRepository(db)
@@ -105,7 +109,8 @@ test('equal content hashes do not merge external files without an internal move 
   }
 })
 
-test('project rename preserves projectKey and user authority over later automatic refreshes', () => {
+test('project rename preserves projectKey and user authority over later automatic refreshes', (t) => {
+  if (skipIfSqliteUnavailable(t, 'file-project-identity-repository')) return
   const db = openDb()
   try {
     const repository = new FileProjectIdentityRepository(db)
@@ -138,7 +143,8 @@ test('project rename preserves projectKey and user authority over later automati
   }
 })
 
-test('user file assignment moves one stable file identity between projects', () => {
+test('user file assignment moves one stable file identity between projects', (t) => {
+  if (skipIfSqliteUnavailable(t, 'file-project-identity-repository')) return
   const db = openDb()
   try {
     const repository = new FileProjectIdentityRepository(db)

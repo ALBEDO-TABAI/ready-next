@@ -201,12 +201,11 @@ export class RunCoordinator {
     })
     const messageWithBootstrap = this.deps.promptAssembly.applyToMessage(request.message, prepared)
 
-    // P1 fix (2026-07-03, live regression) — cross-cutting fragments
-    // (browser interaction discipline, site-experience cards) are injected
-    // context, NOT task descriptors. Using the top trigger's label made every
-    // browser task card read "浏览器交互纪律" (discipline priority 70 always
-    // won triggerHits[0]). Skip them so the placeholder falls back to the
-    // neutral "正在理解需求", which the real task title later replaces.
+    // P1 fix (2026-07-03, live regression) — cross-cutting site-experience
+    // cards are injected context, NOT task descriptors. Skip them so the
+    // placeholder falls back to the neutral "正在理解需求", which the real
+    // task title later replaces. Browser discipline is now a per-turn runtime
+    // instruction and no longer appears in triggerHits.
     //
     // 2026-07-04 真机回归第三轮追加：browser-collect-notes / browser-upload
     // 同为流程知识片段（注入指导≠任务名）——此前发布 run 被贴"浏览器逐篇
@@ -214,8 +213,7 @@ export class RunCoordinator {
     // 语义同病，一并排除出标题选择。
     const isCrossCuttingTrigger = (id: string | undefined): boolean =>
       typeof id === 'string' && (
-        id === 'browser-discipline'
-        || id === 'browser-collect-notes'
+        id === 'browser-collect-notes'
         || id === 'browser-upload'
         || id.startsWith('site-card-')
       )

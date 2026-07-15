@@ -137,8 +137,7 @@ function parseJsonObject(text: string): JsonObject | null {
       const parsed = asJsonObject(JSON.parse(candidate))
       if (parsed) return parsed
     } catch {
-      // Keep looking: a CLI may print a human-readable prefix before its
-      // final one-line JSON envelope.
+      // silent-catch: keep looking because a CLI may print a human-readable prefix before its final one-line JSON envelope.
     }
   }
   return null
@@ -161,6 +160,7 @@ function isHttpUrl(value: string): boolean {
     const url = new URL(value)
     return url.protocol === 'https:' || url.protocol === 'http:'
   } catch {
+    // silent-catch: invalid authorization URLs are rejected and never shown as a resumable challenge.
     return false
   }
 }

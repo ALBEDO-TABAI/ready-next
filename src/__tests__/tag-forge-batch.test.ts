@@ -4,6 +4,7 @@ import test from 'node:test'
 import { mkdir, mkdtemp, readFile, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 
 import type { DatabaseConnection } from '../main/modules/database'
 import { runMigrations, type MigrationDatabase } from '../main/modules/migrations'
@@ -64,7 +65,8 @@ function insertSubmittedReviewCard(
   )
 }
 
-test('folder batch uses opaque item ids, persists progress, and resumes without host paths', async () => {
+test('folder batch uses opaque item ids, persists progress, and resumes without host paths', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'tag-forge-batch')) return
   const db = openDb()
   try {
     const root = await mkdtemp(join(tmpdir(), 'tag-forge-batch-root-'))
@@ -104,7 +106,8 @@ test('folder batch uses opaque item ids, persists progress, and resumes without 
   }
 })
 
-test('a typed folder attachment authorizes only the Tag Forge batch in a fresh workspace', async () => {
+test('a typed folder attachment authorizes only the Tag Forge batch in a fresh workspace', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'tag-forge-batch')) return
   const db = openDb()
   try {
     const root = await mkdtemp(join(tmpdir(), 'tag-forge-attached-root-'))
@@ -183,7 +186,8 @@ test('a typed folder attachment authorizes only the Tag Forge batch in a fresh w
   }
 })
 
-test('folder preparation reports Markdown symlinks without reading outside content', async () => {
+test('folder preparation reports Markdown symlinks without reading outside content', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'tag-forge-batch')) return
   const db = openDb()
   try {
     const root = await mkdtemp(join(tmpdir(), 'tag-forge-symlink-root-'))
@@ -212,7 +216,8 @@ test('folder preparation reports Markdown symlinks without reading outside conte
   }
 })
 
-test('state-only legacy documents are repaired with content tags and hidden workflow state', async () => {
+test('state-only legacy documents are repaired with content tags and hidden workflow state', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'tag-forge-batch')) return
   const db = openDb()
   try {
     const root = await mkdtemp(join(tmpdir(), 'tag-forge-state-only-root-'))
@@ -243,7 +248,8 @@ test('state-only legacy documents are repaired with content tags and hidden work
   }
 })
 
-test('a new explicit folder run rechecks complete-looking tags after the body changes', async () => {
+test('a new explicit folder run rechecks complete-looking tags after the body changes', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'tag-forge-batch')) return
   const db = openDb()
   try {
     const root = await mkdtemp(join(tmpdir(), 'tag-forge-retag-root-'))
@@ -262,7 +268,8 @@ test('a new explicit folder run rechecks complete-looking tags after the body ch
   }
 })
 
-test('high-confidence evidenced terms auto-admit while workflow state stays out of tags', async () => {
+test('high-confidence evidenced terms auto-admit while workflow state stays out of tags', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'tag-forge-batch')) return
   const db = openDb()
   try {
     const root = await mkdtemp(join(tmpdir(), 'tag-forge-auto-admit-root-'))
@@ -289,7 +296,8 @@ test('high-confidence evidenced terms auto-admit while workflow state stays out 
   }
 })
 
-test('an existing manual label never creates a redundant review question', async () => {
+test('an existing manual label never creates a redundant review question', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'tag-forge-batch')) return
   const db = openDb()
   try {
     const root = await mkdtemp(join(tmpdir(), 'tag-forge-existing-manual-root-'))
@@ -318,7 +326,8 @@ test('an existing manual label never creates a redundant review question', async
   }
 })
 
-test('a manual alias keeps one content facet and survives workflow-state migration', async () => {
+test('a manual alias keeps one content facet and survives workflow-state migration', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'tag-forge-batch')) return
   const db = openDb()
   try {
     const root = await mkdtemp(join(tmpdir(), 'tag-forge-manual-alias-root-'))
@@ -346,7 +355,8 @@ test('a manual alias keeps one content facet and survives workflow-state migrati
   }
 })
 
-test('existing manual coverage completes without making the model repeat those labels', async () => {
+test('existing manual coverage completes without making the model repeat those labels', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'tag-forge-batch')) return
   const db = openDb()
   try {
     const root = await mkdtemp(join(tmpdir(), 'tag-forge-manual-coverage-root-'))
@@ -372,7 +382,8 @@ test('existing manual coverage completes without making the model repeat those l
   }
 })
 
-test('a failed run reports only the facet still missing after manual coverage', async () => {
+test('a failed run reports only the facet still missing after manual coverage', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'tag-forge-batch')) return
   const db = openDb()
   try {
     const root = await mkdtemp(join(tmpdir(), 'tag-forge-missing-facet-root-'))
@@ -396,7 +407,8 @@ test('a failed run reports only the facet still missing after manual coverage', 
   }
 })
 
-test('a manual alias prevents the canonical label from being written twice', async () => {
+test('a manual alias prevents the canonical label from being written twice', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'tag-forge-batch')) return
   const db = openDb()
   try {
     const root = await mkdtemp(join(tmpdir(), 'tag-forge-manual-alias-root-'))
@@ -424,7 +436,8 @@ test('a manual alias prevents the canonical label from being written twice', asy
   }
 })
 
-test('an existing manual form prevents a second automatic form', async () => {
+test('an existing manual form prevents a second automatic form', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'tag-forge-batch')) return
   const db = openDb()
   try {
     const root = await mkdtemp(join(tmpdir(), 'tag-forge-manual-form-root-'))
@@ -453,7 +466,8 @@ test('an existing manual form prevents a second automatic form', async () => {
   }
 })
 
-test('every high-confidence evidenced term auto-admits up to the fifteen-tag document cap without run budgets', async () => {
+test('every high-confidence evidenced term auto-admits up to the fifteen-tag document cap without run budgets', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'tag-forge-batch')) return
   const db = openDb()
   try {
     const root = await mkdtemp(join(tmpdir(), 'tag-forge-unbudgeted-root-'))
@@ -490,7 +504,8 @@ test('every high-confidence evidenced term auto-admits up to the fifteen-tag doc
   }
 })
 
-test('fourteen imported tags stay manual and do not block independent automatic connections', async () => {
+test('fourteen imported tags stay manual and do not block independent automatic connections', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'tag-forge-batch')) return
   const db = openDb()
   try {
     const root = await mkdtemp(join(tmpdir(), 'tag-forge-rich-manual-root-'))
@@ -529,7 +544,8 @@ test('fourteen imported tags stay manual and do not block independent automatic 
   }
 })
 
-test('capacity overflow is ignored instead of being turned into a review question', async () => {
+test('capacity overflow is ignored instead of being turned into a review question', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'tag-forge-batch')) return
   const db = openDb()
   try {
     const root = await mkdtemp(join(tmpdir(), 'tag-forge-capacity-root-'))
@@ -562,7 +578,8 @@ test('capacity overflow is ignored instead of being turned into a review questio
   }
 })
 
-test('a required unknown form remains the only review item when optional content fills the cap', async () => {
+test('a required unknown form remains the only review item when optional content fills the cap', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'tag-forge-batch')) return
   const db = openDb()
   try {
     const root = await mkdtemp(join(tmpdir(), 'tag-forge-required-review-root-'))
@@ -591,7 +608,8 @@ test('a required unknown form remains the only review item when optional content
   }
 })
 
-test('a manual alias does not consume the fifteen automatic tag slots', async () => {
+test('a manual alias does not consume the fifteen automatic tag slots', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'tag-forge-batch')) return
   const db = openDb()
   try {
     const root = await mkdtemp(join(tmpdir(), 'tag-forge-manual-cap-root-'))
@@ -622,7 +640,8 @@ test('a manual alias does not consume the fifteen automatic tag slots', async ()
   }
 })
 
-test('the required high-confidence topic displaces an optional tag at capacity', async () => {
+test('the required high-confidence topic displaces an optional tag at capacity', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'tag-forge-batch')) return
   const db = openDb()
   try {
     const root = await mkdtemp(join(tmpdir(), 'tag-forge-required-topic-root-'))
@@ -656,7 +675,8 @@ test('the required high-confidence topic displaces an optional tag at capacity',
   }
 })
 
-test('revision conflicts never overwrite changed content', async () => {
+test('revision conflicts never overwrite changed content', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'tag-forge-batch')) return
   const db = openDb()
   try {
     const root = await mkdtemp(join(tmpdir(), 'tag-forge-conflict-root-'))
@@ -677,7 +697,8 @@ test('revision conflicts never overwrite changed content', async () => {
   }
 })
 
-test('one submitted chat card approves a pending label and is idempotent on replay', async () => {
+test('one submitted chat card approves a pending label and is idempotent on replay', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'tag-forge-batch')) return
   const db = openDb()
   try {
     const root = await mkdtemp(join(tmpdir(), 'tag-forge-review-root-'))
@@ -715,7 +736,8 @@ test('one submitted chat card approves a pending label and is idempotent on repl
   }
 })
 
-test('an edit during review still finishes without asking a second card', async () => {
+test('an edit during review still finishes without asking a second card', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'tag-forge-batch')) return
   const db = openDb()
   try {
     const root = await mkdtemp(join(tmpdir(), 'tag-forge-review-edit-root-'))
@@ -765,7 +787,8 @@ test('an edit during review still finishes without asking a second card', async 
   }
 })
 
-test('ignoring an optional pending label completes with reliable content tags', async () => {
+test('ignoring an optional pending label completes with reliable content tags', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'tag-forge-batch')) return
   const db = openDb()
   try {
     const root = await mkdtemp(join(tmpdir(), 'tag-forge-ignore-root-'))
@@ -790,7 +813,8 @@ test('ignoring an optional pending label completes with reliable content tags', 
   }
 })
 
-test('folder batches stay bounded and expose durable resume metadata', async () => {
+test('folder batches stay bounded and expose durable resume metadata', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'tag-forge-batch')) return
   const db = openDb()
   try {
     const root = await mkdtemp(join(tmpdir(), 'tag-forge-bounded-root-'))
@@ -806,7 +830,8 @@ test('folder batches stay bounded and expose durable resume metadata', async () 
   }
 })
 
-test('exact active labels complete without review and path shorthand cannot identify a batch item', async () => {
+test('exact active labels complete without review and path shorthand cannot identify a batch item', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'tag-forge-batch')) return
   const db = openDb()
   try {
     const root = await mkdtemp(join(tmpdir(), 'tag-forge-active-root-'))
@@ -833,7 +858,8 @@ test('exact active labels complete without review and path shorthand cannot iden
   }
 })
 
-test('deep markdown files are scanned and unreadable markdown entries block done', async () => {
+test('deep markdown files are scanned and unreadable markdown entries block done', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'tag-forge-batch')) return
   const db = openDb()
   try {
     const root = await mkdtemp(join(tmpdir(), 'tag-forge-deep-root-'))
@@ -852,7 +878,8 @@ test('deep markdown files are scanned and unreadable markdown entries block done
   }
 })
 
-test('extra manual form tags are preserved without blocking the automatic contract', async () => {
+test('extra manual form tags are preserved without blocking the automatic contract', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'tag-forge-batch')) return
   const db = openDb()
   try {
     const root = await mkdtemp(join(tmpdir(), 'tag-forge-final-gate-root-'))
@@ -877,7 +904,8 @@ test('extra manual form tags are preserved without blocking the automatic contra
   }
 })
 
-test('index failure restores disk and an already-synced open tab', async () => {
+test('index failure restores disk and an already-synced open tab', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'tag-forge-batch')) return
   const db = openDb()
   try {
     const root = await mkdtemp(join(tmpdir(), 'tag-forge-rollback-root-'))
@@ -916,7 +944,8 @@ test('index failure restores disk and an already-synced open tab', async () => {
   }
 })
 
-test('folder review is deferred until every document has been processed and stays one card', async () => {
+test('folder review is deferred until every document has been processed and stays one card', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'tag-forge-batch')) return
   const db = openDb()
   try {
     const root = await mkdtemp(join(tmpdir(), 'tag-forge-one-card-root-'))
@@ -942,7 +971,8 @@ test('folder review is deferred until every document has been processed and stay
   }
 })
 
-test('review capacity overflow is silently ignored and one card finishes the folder run', async () => {
+test('review capacity overflow is silently ignored and one card finishes the folder run', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'tag-forge-batch')) return
   const db = openDb()
   try {
     const root = await mkdtemp(join(tmpdir(), 'tag-forge-review-pages-root-'))
@@ -987,7 +1017,8 @@ test('review capacity overflow is silently ignored and one card finishes the fol
   }
 })
 
-test('prepare resumes a persisted review decision after database commit without another card', async () => {
+test('prepare resumes a persisted review decision after database commit without another card', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'tag-forge-batch')) return
   const db = openDb()
   try {
     const root = await mkdtemp(join(tmpdir(), 'tag-forge-review-recovery-root-'))

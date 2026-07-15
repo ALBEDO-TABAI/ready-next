@@ -247,6 +247,7 @@ export async function executeWebSearch(
       if (results.length > 0) return { results, acquisitionKind: 'discovery' }
       sawEmpty = true
     } catch (error) {
+      // silent-catch: preserve this backend's error for fallback metrics and the final structured failure, then try the next configured backend.
       errors[backend] = error instanceof Error ? error.message : String(error)
     }
 

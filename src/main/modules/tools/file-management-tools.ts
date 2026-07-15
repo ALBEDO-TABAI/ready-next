@@ -56,7 +56,7 @@ export function resolveFileToolWorkspaceRoots(
         const canonical = path ? realpathSync(path) : ''
         if (canonical && statSync(canonical).isDirectory() && validateWorkspaceRoot(canonical).ok) push(path)
       } catch {
-        // Transient paths are rejected by the authoritative root check below.
+        // silent-catch: unreadable or transient folder references are omitted; the later authoritative root check cannot grant them access.
       }
     }
   }
@@ -543,6 +543,7 @@ async function runTagForgePrepareBatch(
         await readFile(item.path, 'utf-8')
         items.push({ itemId, path: item.path, relativePath, status: 'pending' })
       } catch {
+        // silent-catch: an unreadable document is retained as a structured failed batch item instead of aborting the remaining batch.
         items.push({ itemId, path: item.path, relativePath, status: 'failed', errorKind: 'tag_read_failed' })
       }
     }
@@ -593,6 +594,7 @@ async function runTagForgePrepareBatch(
       documents.push({ itemId: item.itemId, file: item.relativePath, expectedRevision: revisionOf(content), content })
       contentChars += content.length
     } catch (error) {
+      // silent-catch: per-document preparation failures are persisted on the item and returned in the batch error list.
       item.status = 'failed'
       item.errorKind = error instanceof Error ? error.message : String(error)
     }
@@ -947,6 +949,7 @@ function readTagForgeReviewConfirmation(
   try {
     meta = JSON.parse(row.metaJson || '{}') as Record<string, unknown>
   } catch {
+    // silent-catch: malformed confirmation metadata is returned as an explicit invalid-card result and cannot authorize a write.
     return { ok: false, errorKind: 'tag_forge_review_card_invalid' }
   }
   const ask = meta.askUserQuestions && typeof meta.askUserQuestions === 'object' && !Array.isArray(meta.askUserQuestions)

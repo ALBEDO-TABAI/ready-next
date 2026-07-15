@@ -183,6 +183,7 @@ export async function executeWebFetch(
           ? await fetchViaJina(args, ctx)
           : await fetchViaTavilyExtract(args, ctx)
     } catch (error) {
+      // silent-catch: preserve this backend's error for fallback metrics and the final structured failure, then try the next configured backend.
       errors[backend] = error instanceof Error ? error.message : String(error)
     }
 

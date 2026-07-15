@@ -967,6 +967,7 @@ export default function FileTree({
       flashCompletedPath(result.data.path)
       showMoveNotice(`已保存「${result.data.name}」到 ${dirName}`)
     } catch (error) {
+      // silent-catch: the IPC failure is surfaced to the user in the file-tree notice and no success state is applied.
       showMoveNotice(`保存到 ${dirName} 失败：${error instanceof Error ? error.message : String(error)}`)
     }
   }, [flashCompletedPath, loadDirChildren, refreshFiles, showMoveNotice])

@@ -66,7 +66,6 @@ import { ChatPanelMotionLayer, CollapsedChatRail } from './chat-panel/layout/Mot
 import DraggableModeTabs from '../layout/DraggableModeTabs'
 import { ScheduledTasksButton } from './scheduled-tasks/ScheduledTasksButton'
 import type { ScheduledTasksSummary } from './scheduled-tasks/ScheduledTasksPanel'
-import '../../styles/scheduled-tasks.css'
 import SessionCompleteToast from './chat-panel/session-tabs/SessionCompleteToast'
 import { resolveChatSessionTitle } from './chat-panel/helpers/session-title'
 import { resolveSessionDotStatus, type SessionDotStatus } from './chat-panel/helpers/session-status'

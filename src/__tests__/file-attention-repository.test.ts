@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
 import test from 'node:test'
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 import type { DatabaseConnection } from '../main/modules/database'
 import { runMigrations, type MigrationDatabase } from '../main/modules/migrations'
 import { FileActivityRepository } from '../main/modules/repositories/file-activity-repository'
@@ -12,7 +13,8 @@ const require=createRequire(import.meta.url)
 function openDb(){const mod=require('better-sqlite3') as SqliteCtor&{default?:SqliteCtor};const C=mod.default||mod;const db=new C(':memory:');runMigrations(db);return db}
 const day=86_400_000
 
-test('rollup backfill is idempotent, survives raw pruning, and follows stable file identity through a move',()=>{
+test('rollup backfill is idempotent, survives raw pruning, and follows stable file identity through a move',(t)=>{
+  if(skipIfSqliteUnavailable(t,'file-attention-repository'))return
   const db=openDb();try{
     const now=200*day;const activity=new FileActivityRepository(db);const identities=new FileProjectIdentityRepository(db)
     activity.recordEvent({path:'/w/p/a.md',workspaceRoot:'/w',eventType:'open',source:'file_tree',createdAt:now-70*day})
@@ -26,7 +28,8 @@ test('rollup backfill is idempotent, survives raw pruning, and follows stable fi
   }finally{db.close()}
 })
 
-test('a live event recorded before first backfill does not hide older retained history or mark another root backfilled',()=>{
+test('a live event recorded before first backfill does not hide older retained history or mark another root backfilled',(t)=>{
+  if(skipIfSqliteUnavailable(t,'file-attention-repository'))return
   const db=openDb();try{
     const now=200*day;const activity=new FileActivityRepository(db);const identities=new FileProjectIdentityRepository(db);const repo=new FileAttentionRepository(db)
     activity.recordEvent({path:'/w/a.md',workspaceRoot:'/w',eventType:'open',source:'file_tree',createdAt:now-20*day})
@@ -47,7 +50,8 @@ test('a live event recorded before first backfill does not hide older retained h
   }finally{db.close()}
 })
 
-test('intent lifecycle expires deterministically and snapshots contain keys rather than paths',()=>{
+test('intent lifecycle expires deterministically and snapshots contain keys rather than paths',(t)=>{
+  if(skipIfSqliteUnavailable(t,'file-attention-repository'))return
   const db=openDb();try{
     const ids=new FileProjectIdentityRepository(db);const project=ids.createUserProjectForPath({workspaceRoot:'/w',path:'/w/a.md',displayName:'阅读项目',updatedAt:Date.now()})
     const file=ids.listProjectFiles(project.projectKey)[0]!;const repo=new FileAttentionRepository(db)
@@ -62,7 +66,8 @@ test('intent lifecycle expires deterministically and snapshots contain keys rath
   }finally{db.close()}
 })
 
-test('active intent is durably cancelled when its project is hidden or a referenced file becomes missing or archived',()=>{
+test('active intent is durably cancelled when its project is hidden or a referenced file becomes missing or archived',(t)=>{
+  if(skipIfSqliteUnavailable(t,'file-attention-repository'))return
   const db=openDb();try{
     const ids=new FileProjectIdentityRepository(db);const repo=new FileAttentionRepository(db);const now=Date.now()
     const project=ids.createUserProjectForPath({workspaceRoot:'/w',path:'/w/a.md',displayName:'项目',updatedAt:now})

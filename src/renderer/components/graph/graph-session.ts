@@ -72,6 +72,7 @@ function defaultCreateWorker(): GraphLayoutWorkerLike | null {
   try {
     return new Worker(new URL('./graph-layout.worker.ts', import.meta.url), { type: 'module' }) as GraphLayoutWorkerLike
   } catch {
+    // silent-catch: worker startup is optional; a null worker selects the bounded main-thread layout fallback.
     return null
   }
 }
@@ -176,6 +177,7 @@ export class GraphSession {
       this.worker.postMessage(message)
       return true
     } catch {
+      // silent-catch: a failed worker channel is disabled immediately and the session keeps its local layout snapshot.
       this.disableWorker()
       return false
     }

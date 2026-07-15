@@ -10,6 +10,7 @@ function parseRecord(value: unknown): Record<string, unknown> | null {
   try {
     return asRecord(JSON.parse(value))
   } catch {
+    // silent-catch: malformed persisted metadata is excluded and cannot become a generated-image artifact.
     return null
   }
 }

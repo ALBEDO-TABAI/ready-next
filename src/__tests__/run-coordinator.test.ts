@@ -452,9 +452,9 @@ test('RunCoordinator preserves typed scope run authority on failed execution', a
   })
 })
 
-// P1 fix (2026-07-03, live regression) — cross-cutting fragments (browser
-// interaction discipline, site-experience cards) must NOT seed the planning
-// task title; they are injected context, not task descriptors.
+// P1 fix (2026-07-03, live regression) — cross-cutting site-experience
+// fragments must NOT seed the planning task title; they are injected context,
+// not task descriptors. Browser discipline no longer enters triggerHits.
 function coordinatorWithTriggers(triggerHits: ScopeRunEventPayload['triggerHits']): {
   coordinator: RunCoordinator
   events: ScopeRunEventPayload[]
@@ -481,17 +481,16 @@ function coordinatorWithTriggers(triggerHits: ScopeRunEventPayload['triggerHits'
 
 test('planning title skips cross-cutting fragments and uses the real task fragment', async () => {
   const { coordinator, events } = coordinatorWithTriggers([
-    { id: 'browser-discipline', label: '浏览器交互纪律', module: 'browser', blocking: false, refs: [] },
+    { id: 'site-card-xiaohongshu.com', label: '站点经验 xiaohongshu.com', module: 'browser', blocking: false, refs: [] },
     { id: 'rss-analysis', label: 'RSS 分析操作', module: 'rss', blocking: false, refs: [] },
   ] as never)
   await coordinator.runScoped({ scope: createScope(), message: 'hello', requestId: 'req-title-1', coordinators: [] })
   assert.equal(events[0]?.taskTitle, 'RSS 分析操作')
-  assert.notEqual(events[0]?.taskTitle, '浏览器交互纪律')
+  assert.notEqual(events[0]?.taskTitle, '站点经验 xiaohongshu.com')
 })
 
 test('planning title falls back to the neutral placeholder when only cross-cutting fragments matched', async () => {
   const { coordinator, events } = coordinatorWithTriggers([
-    { id: 'browser-discipline', label: '浏览器交互纪律', module: 'browser', blocking: false, refs: [] },
     { id: 'site-card-xiaohongshu.com', label: '站点经验 xiaohongshu.com', module: 'browser', blocking: false, refs: [] },
   ] as never)
   await coordinator.runScoped({ scope: createScope(), message: 'hello', requestId: 'req-title-2', coordinators: [] })
@@ -500,7 +499,7 @@ test('planning title falls back to the neutral placeholder when only cross-cutti
 
 test('真机回归 2026-07-04：流程知识片段（逐篇采集/上传流程）不做任务标题', async () => {
   // 此前发布 run 顶着"浏览器逐篇采集"标题、大量浏览器任务卡长期显示
-  // "浏览器上传流程"（注入指导 ≠ 任务名）。两者与 discipline/site-card
+  // "浏览器上传流程"（注入指导 ≠ 任务名）。两者与 site-card
   // 同类，标题一律回中性占位，等真实任务标题回填。
   const { coordinator, events } = coordinatorWithTriggers([
     { id: 'browser-collect-notes', label: '浏览器逐篇采集', module: 'browser', blocking: false, refs: [] },

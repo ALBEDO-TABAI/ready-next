@@ -86,7 +86,7 @@ const EXPECTED_ANTHROPIC = [
   },
   {
     name: 'document_insert_widget',
-    description: '向文档插入一个 show-widget 可视化组件代码围栏。',
+    description: '向文档插入一个 show-widget 可视化组件代码围栏。信息卡/摘要卡/对比卡/图表/关系图/流程图等卡片类内容必须经本工具以 componentSpec 结构化落地（Ready 设计系统渲染）；禁止用 document_replace_text / document_replace_exact 把 markdown 表格或手写 HTML 写进正文冒充卡片。',
     input_schema: {
       type: 'object',
       properties: {
@@ -101,7 +101,10 @@ const EXPECTED_ANTHROPIC = [
           description:
             '可选：结构化 OpenUI 组件规格，例如 { component, props?, dataSource? }。优先使用它而不是自由 HTML。',
         },
-        position: { type: 'string', description: '插入位置：append_end 或 after_section' },
+        position: {
+          type: 'string',
+          description: '插入位置：prepend_start（文档开头/大标题之后，用户要求"开头/顶部/标题下"时用它）、append_end（文末）或 after_section（指定章节后）',
+        },
         sectionTitle: {
           type: 'string',
           description: '当 position=after_section 时，目标章节标题',
@@ -190,7 +193,7 @@ const EXPECTED_ANTHROPIC = [
   },
   {
     name: 'document_replace_text',
-    description: '在文档中查找并替换文本。',
+    description: '在文档中查找并替换文本。仅用于文本修正；插入信息卡/图表等卡片类内容必须改用 document_insert_widget。',
     input_schema: {
       type: 'object',
       properties: {
@@ -204,7 +207,7 @@ const EXPECTED_ANTHROPIC = [
   {
     name: 'document_replace_exact',
     description:
-      '精准替换文档中的单个目标片段。若目标出现多次，可传 occurrence 指定第几处（从 1 开始）。',
+      '精准替换文档中的单个目标片段。若目标出现多次，可传 occurrence 指定第几处（从 1 开始）。仅用于文本修正；插入信息卡/图表等卡片类内容必须改用 document_insert_widget。',
     input_schema: {
       type: 'object',
       properties: {

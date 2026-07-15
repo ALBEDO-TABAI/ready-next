@@ -130,12 +130,12 @@ describe('skill-resume G6 — buildPreferredSkillToolNames honors expose_when_hi
     assert.equal(tools.includes('skill_video_expert_ai_analyze'), false)
   })
 
-  it('replaces an unrelated hint when a fresh concrete video task matches VEA', () => {
+  it('replaces an unrelated hint when a fresh task explicitly names VEA', () => {
     const sessionId = 'session-restored-rss-then-vea-task'
     rememberLastReferenceSkill(sessionId, { id: 'lets-go-rss', name: 'lets-go-rss' })
 
     const orchestrator = makeOrchestratorWithStaticVeaToolNames()
-    const taskText = '分析这个视频 https://www.youtube.com/watch?v=4qkyxm4jppc，输出到 /Users/me/测试'
+    const taskText = '用 Video Expert Analyzer (VNext) 分析 https://www.youtube.com/watch?v=4qkyxm4jppc，输出到 /Users/me/测试'
 
     assert.equal(orchestrator.rememberExplicitReferenceSkillHint(taskText, sessionId), true)
     const tools = orchestrator.buildPreferredSkillToolNames(taskText, sessionId)

@@ -21,6 +21,7 @@ export function parseDeliveryVerification(raw: string): DeliveryVerificationVerd
   try {
     parsed = JSON.parse(String(raw || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, ''))
   } catch {
+    // silent-catch: malformed verifier output is converted into the blocking verdict below, never accepted.
     return invalidVerifierVerdict('独立复核返回内容无法识别')
   }
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return invalidVerifierVerdict('独立复核返回格式错误')

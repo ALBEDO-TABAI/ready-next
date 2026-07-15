@@ -35,6 +35,7 @@ export function parseGeneratedImageDragPayload(raw: string | null | undefined): 
       mimeType: typeof value.mimeType === 'string' ? value.mimeType : 'image/png',
     }
   } catch {
+    // silent-catch: malformed drag payloads are rejected; the caller may still use the validated in-memory drag state.
     return null
   }
 }

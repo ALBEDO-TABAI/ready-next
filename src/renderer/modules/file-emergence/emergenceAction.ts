@@ -33,6 +33,7 @@ export async function executeFileEmergenceAction(
     await deps.revealPath(targetPath)
     return {success:true}
   } catch(error) {
+    // silent-catch: open/reveal failures are returned to the caller as the action's structured failure result.
     return {success:false,error:error instanceof Error?error.message:String(error)}
   }
 }
