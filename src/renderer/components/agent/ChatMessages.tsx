@@ -17,6 +17,7 @@ import { GeneratedImageGallery } from './GeneratedImageGallery'
 import { generatedImagesFromMessage } from '../../modules/image-generation/generatedImageArtifacts'
 import { submitAskUserQuestionsAnswers, cancelAskUserQuestionsCard } from '../../stores/useAgent'
 import { isImageGenerationReferencePath } from '../../../shared/image-generation'
+import WelcomePanel from './WelcomePanel'
 
 // The session-tab strip + chat header overflow ~24px into the top of this
 // scroll region (MotionLayer's header row is a fixed 44px). The top padding
@@ -137,62 +138,7 @@ export default function ChatMessages({
     >
       {/* Welcome Card */}
       {visibleMessages.length === 0 && messages.length === 0 && (
-        <div
-          className="flex flex-col items-center"
-          style={{ gap: 16, padding: '12px 16px' }}
-        >
-          <div
-            className="flex items-center justify-center"
-            style={{
-              width: 40, height: 40,
-              borderRadius: 8,
-              background: 'var(--bg-avatar)'
-            }}
-          >
-            <span className="t-title-lg" data-typography-role="title-lg" style={{ color: 'var(--text-title)' }}>R</span>
-          </div>
-
-          <span className="t-subtitle" data-typography-role="subtitle" style={{ color: 'var(--text-secondary)' }}>Ready AI Assistant</span>
-
-          <span
-            className="t-body"
-            data-typography-role="body"
-            style={{
-              color: 'var(--text-gray)',
-              textAlign: 'center',
-            }}
-          >
-            你的智能工作区助手。随时提问、创作内容、分析数据。
-          </span>
-
-          {/* Quick Action Cards */}
-          <div className="flex w-full" style={{ gap: 8 }}>
-            <button
-              onClick={() => onSetInputSuggestion('帮我分析最近的热门视频趋势')}
-              className="flex-1 text-left hover:border-[var(--color-blue)] transition-[border-color,transform] duration-200 ease-out active:scale-[0.98]"
-              style={{
-                padding: 12, borderRadius: 8,
-                border: '1px solid var(--border-default)',
-                display: 'flex', flexDirection: 'column', gap: 4
-              }}
-            >
-              <span className="t-ui" data-typography-role="ui" style={{ color: 'var(--text-title)' }}>内容优化</span>
-              <span className="t-meta" data-typography-role="meta" style={{ color: 'var(--text-gray)' }}>分析热门数据...</span>
-            </button>
-            <button
-              onClick={() => onSetInputSuggestion('帮我写一篇关于 AI 创作的文案')}
-              className="flex-1 text-left hover:border-[var(--color-blue)] transition-[border-color,transform] duration-200 ease-out active:scale-[0.98]"
-              style={{
-                padding: 12, borderRadius: 8,
-                border: '1px solid var(--border-default)',
-                display: 'flex', flexDirection: 'column', gap: 4
-              }}
-            >
-              <span className="t-ui" data-typography-role="ui" style={{ color: 'var(--text-title)' }}>写作文案</span>
-              <span className="t-meta" data-typography-role="meta" style={{ color: 'var(--text-gray)' }}>创作优质内容...</span>
-            </button>
-          </div>
-        </div>
+        <WelcomePanel onSetInputSuggestion={onSetInputSuggestion} />
       )}
 
       {/* Bottom-anchor spacer: only active once the user has typed. When the
