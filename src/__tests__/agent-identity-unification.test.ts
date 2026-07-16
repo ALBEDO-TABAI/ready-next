@@ -2,7 +2,11 @@ import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
 import test from 'node:test'
 
-import { runMigrations, type MigrationDatabase } from '../main/modules/migrations'
+import {
+  AGENT_IDENTITY_PERSONAS,
+  runMigrations,
+  type MigrationDatabase,
+} from '../main/modules/migrations'
 import { BUILTIN_AGENT_IDS, BUILTIN_AGENT_META } from '../shared/agent-identity'
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 
@@ -42,7 +46,7 @@ test('agent identity migration creates 1:1 built-in agent rows', (t) => {
       SELECT a.id, a.name, a.status, a.persona_ref, p.agent_name
       FROM agents a
       LEFT JOIN agent_personalities p ON p.agent_name = a.id
-      WHERE a.id IN ('butler', 'copywriter', 'video-editor', 'analyst')
+      WHERE a.id IN ('butler', 'copywriter', 'video-editor', 'analyst', 'operator')
       ORDER BY a.id
     `).all<{ id: string; name: string; status: string; persona_ref: string | null; agent_name: string | null }>()
 
@@ -74,6 +78,7 @@ test('agent identity migration reassigns a reserved slug conflict without resurr
           persona_ref = NULL
       WHERE id = 'copywriter'
     `).run()
+    db.prepare("UPDATE agent_personalities SET personality_text = 'custom copywriter soul' WHERE agent_name = 'copywriter'").run()
     db.prepare("DELETE FROM migrations WHERE name = '064_agent_identity_unification'").run()
 
     runMigrations(db)
@@ -84,6 +89,10 @@ test('agent identity migration reassigns a reserved slug conflict without resurr
       .get<{ id: string; name: string; status: string; parent_agent_id: string; persona_ref: string }>()
     const ledger = db.prepare("SELECT old_agent_id, new_agent_id FROM agent_identity_migration WHERE old_agent_id = 'copywriter'")
       .get<{ old_agent_id: string; new_agent_id: string }>()
+    const builtinPersonality = db.prepare("SELECT personality_text FROM agent_personalities WHERE agent_name = 'copywriter'")
+      .get<{ personality_text: string }>()
+    const reassignedPersonality = db.prepare("SELECT personality_text FROM agent_personalities WHERE agent_name = 'copywriter-custom'")
+      .get<{ personality_text: string }>()
 
     assert.deepEqual(builtin, {
       id: 'copywriter',
@@ -97,6 +106,8 @@ test('agent identity migration reassigns a reserved slug conflict without resurr
     assert.equal(reassigned?.parent_agent_id, 'butler')
     assert.equal(reassigned?.persona_ref, 'copywriter-custom')
     assert.equal(ledger?.new_agent_id, 'copywriter-custom')
+    assert.equal(builtinPersonality?.personality_text, AGENT_IDENTITY_PERSONAS.copywriter)
+    assert.equal(reassignedPersonality?.personality_text, 'custom copywriter soul')
   } finally {
     ;(db as unknown as { close?: () => void }).close?.()
   }

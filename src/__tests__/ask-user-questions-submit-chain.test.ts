@@ -77,6 +77,7 @@ function registerPendingCard(
   store: AskUserQuestionsStore,
   cardId: string,
   questions: AskUserQuestionSpec[],
+  responsePolicy: 'local_or_remote' | 'local_renderer_only' = 'local_or_remote',
 ): {
   resolve: (a: AskUserQuestionsAnswerSet) => void
   reject: (e: Error) => void
@@ -99,6 +100,7 @@ function registerPendingCard(
     cardId,
     sessionId: 'sess-1',
     conversationId: 'conv-1',
+    responsePolicy,
     questions,
     askedAt: 1,
     resolve: resolveFn,
@@ -153,6 +155,30 @@ test('happy path: valid answers → DB write + store.resolve + success envelope'
   const ans = await promise
   assert.equal(ans.answers[0].answer, 'my answer')
   assert.equal(store.size(), 0, 'store record removed after resolve')
+})
+
+test('local-only confirmation rejects a remote submission before any DB write', () => {
+  const store = new AskUserQuestionsStore()
+  registerPendingCard(
+    store,
+    'card-local-only',
+    SINGLE_REQUIRED_FREETEXT,
+    'local_renderer_only',
+  )
+  const { db, writes } = makeFakeDb()
+
+  const result = submitAskUserQuestionsAnswersCore(
+    'card-local-only',
+    [{ id: 'q1', answer: 'approve' }],
+    { store, db, submissionSurface: 'remote_channel' },
+  )
+
+  assert.equal(result.success, false)
+  if (result.success) throw new Error('unreachable')
+  assert.equal(result.errorKind, 'confirmation_surface_denied')
+  assert.equal(writes.length, 0)
+  assert.equal(store.size(), 1)
+  store.reject('card-local-only', new Error('test cleanup'))
 })
 
 // ============================================================================

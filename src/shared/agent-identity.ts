@@ -1,6 +1,6 @@
 export const MAIN_AGENT_ID = 'butler'
 
-export const BUILTIN_AGENT_IDS = ['butler', 'copywriter', 'video-editor', 'analyst'] as const
+export const BUILTIN_AGENT_IDS = ['butler', 'copywriter', 'video-editor', 'analyst', 'operator'] as const
 export type BuiltinAgentId = (typeof BUILTIN_AGENT_IDS)[number]
 
 export const BUILTIN_AGENT_META: Record<BuiltinAgentId, {
@@ -27,6 +27,11 @@ export const BUILTIN_AGENT_META: Record<BuiltinAgentId, {
     displayName: '智识',
     emoji: '📚',
     charter: '智识 agent：负责学习、知识积累、研究整理与分析判断。',
+  },
+  operator: {
+    displayName: '运营',
+    emoji: '📈',
+    charter: '运营 agent：负责社媒账号诊断、定位选题、内容策略、数据复盘与增长变现指导。',
   },
 }
 

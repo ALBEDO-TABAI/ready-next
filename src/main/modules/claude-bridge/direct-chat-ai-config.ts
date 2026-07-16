@@ -9,7 +9,13 @@ import { logAgentMetric } from '../agent-control/metrics'
  * repo threw). Stage 2.4 — see plans/codex-agent-toasty-starfish.md §5.2.
  */
 export type AIConfigLoad =
-  | { ok: true; config: AIModelConfig | null; reason: 'absent' | 'present' }
+  | {
+      ok: true
+      config: AIModelConfig | null
+      reason: 'absent' | 'present'
+      /** Stable identity for compare-and-set settings updates. */
+      activeProfileId?: string | null
+    }
   | { ok: false; reason: 'json_corrupt' | 'db_error'; message: string }
 
 /**

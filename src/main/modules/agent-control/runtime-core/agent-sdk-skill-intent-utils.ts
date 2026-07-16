@@ -410,6 +410,8 @@ function resolveAuthorizationPreferredToolNames(
 
 interface SdkDefaultIntentSurface {
   intentGroupModes: Partial<Record<CapabilityGroupId, boolean>>
+  requestedIntentGroupIds: CapabilityGroupId[]
+  browserIntentNegated: boolean
   forceDocumentTool: boolean
   allowBrowserTools: boolean
   preferredSkillToolNames: string[] | null
@@ -474,15 +476,39 @@ export function resolveSdkDefaultIntentSurface(params: {
     requiredCapabilityGroupIds: params.requiredCapabilityGroupIds,
     mapSemanticIntent
   })
+  const browserIntentNegated = classifyFollowupIntent(userInstructionText, {
+    hasActiveTaskContext: false,
+  }).negations.includes('browser')
+  const intentGroupModes = {
+    ...intentModes.intentGroupModes,
+    ...(browserIntentNegated
+      ? { browser_interaction: false, browser_content_tasks: false }
+      : {}),
+  }
+  const requestedIntentGroupIds = Array.from(new Set([
+    ...Object.entries(intentGroupModes)
+      .filter(([, enabled]) => enabled === true)
+      .map(([groupId]) => groupId as CapabilityGroupId),
+    ...(!browserIntentNegated && (
+      params.browserDecisionMode === 'browser_workflow'
+      || params.browserDecisionMode === 'browser_upload_workflow'
+    )
+      ? ['browser_interaction', 'browser_content_tasks'] as const
+      : []),
+  ]))
 
   return {
-    intentGroupModes: intentModes.intentGroupModes,
+    intentGroupModes,
+    requestedIntentGroupIds,
+    browserIntentNegated,
     forceDocumentTool: intentModes.forceDocumentTool,
     allowBrowserTools:
-      params.browserDecisionMode === 'browser_workflow' ||
-      params.browserDecisionMode === 'browser_upload_workflow' ||
-      intentModes.intentGroupModes.browser_interaction === true ||
-      intentModes.intentGroupModes.browser_content_tasks === true,
+      !browserIntentNegated && (
+        params.browserDecisionMode === 'browser_workflow' ||
+        params.browserDecisionMode === 'browser_upload_workflow' ||
+        intentGroupModes.browser_interaction === true ||
+        intentGroupModes.browser_content_tasks === true
+      ),
     preferredSkillToolNames,
     documentWidgetTaskKind,
     explicitWidgetCreateIntent

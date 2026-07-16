@@ -1,6 +1,6 @@
 # Ready 开发进展
 
-> 更新时间：2026-07-15
+> 更新时间：2026-07-17
 > 本文件只保留当前看板。完整历史见 `CHANGELOG.md`、Git 与 `docs/superpowers/plans/`；旧测试流水账不再在这里累积。
 
 ## 1. 当前基线
@@ -24,6 +24,8 @@
 
 ### Skills 与工具面
 
+- 新增内置「运营」agent（`operator`）：与文案/美术/智识同款五件套预设（soul/RULES/FOUNDATION/知识卡/路由卡）；迁移 079 补种并保护所有同 slug 用户身份，迁移 080 只修复证据明确的历史人格错绑。配套 embedded 技能 `social-media-ops`（reference/advisory，SKILL.md 意图路由 + 九篇方法论参考：科学卡组/账号诊断/选题/内容工艺/数据复盘/平台机制/增长变现/合规风控/浏览器工作流）。
+- 工具总闸门关闭时，用户明确请求的能力会得到真实阻断原因；明确开启需本机确认并只修改当前模型配置，远程会话不能代答。设置页显示 `auto` 的真实生效值，线上工具统计直接取实际请求，不再把未启用工具算进去。
 - capability floor 已由 SDK executor 与 orchestrator live 强制；current document 与 local resource 的读写边界分开。
 - embedded skill 改为目录扫描和 drop-in 注册，`use_skill` 负责模型侧显式激活，custom shell 需要逐技能同意。
 - Creative Production 技能组已嵌入；Tag Forge 已从只读方法论扩展为受 receipt、授权路径与索引 readback 约束的结构化能力。

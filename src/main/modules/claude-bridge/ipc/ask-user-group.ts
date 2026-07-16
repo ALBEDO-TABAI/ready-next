@@ -134,6 +134,7 @@ export const askUserGroup: IpcChannelGroup<AskUserGroupDeps> = {
 	      const result = submitAskUserQuestionsAnswersCore(cardId, answers, {
 	        store: deps.getAskUserQuestionsStore(),
 	        db: deps.getDatabase(),
+	        submissionSurface: 'local_renderer',
 	        logMetric: (name, payload) => deps.logAgentMetric(name, payload),
 	      })
 	      if (result.success && record?.agent && record.requestId) {
@@ -193,6 +194,7 @@ export const askUserGroup: IpcChannelGroup<AskUserGroupDeps> = {
         {
           store: deps.getAskUserQuestionsStore(),
           db: deps.getDatabase(),
+	          submissionSurface: 'local_renderer',
 	          logMetric: (name, payload) => deps.logAgentMetric(name, payload),
 	        },
 	      )

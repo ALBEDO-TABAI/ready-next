@@ -50,7 +50,11 @@ export interface AskUserAnswer {
 export interface AskUserQuestionsAnswerSet {
   answers: AskUserAnswer[]
   answeredAt: number
+  answeredVia?: AskUserQuestionsSubmissionSurface
 }
+
+export type AskUserQuestionsResponsePolicy = 'local_or_remote' | 'local_renderer_only'
+export type AskUserQuestionsSubmissionSurface = 'local_renderer' | 'remote_channel'
 
 export interface AskUserQuestionsCardRecord {
   cardId: string
@@ -59,6 +63,7 @@ export interface AskUserQuestionsCardRecord {
   scopeId?: string | null
   agent?: string | null
   requestId?: string | null
+  responsePolicy?: AskUserQuestionsResponsePolicy
   questions: AskUserQuestionSpec[]
   askedAt: number
   resolve: (answerSet: AskUserQuestionsAnswerSet) => void
@@ -73,6 +78,7 @@ export interface PendingAskUserQuestionsCardView {
   scopeId?: string | null
   agent?: string | null
   requestId?: string | null
+  responsePolicy?: AskUserQuestionsResponsePolicy
   questions: AskUserQuestionSpec[]
   askedAt: number
 }
@@ -223,6 +229,7 @@ export class AskUserQuestionsStore {
         scopeId: record.scopeId ?? record.sessionId,
         agent: record.agent ?? null,
         requestId: record.requestId ?? null,
+        responsePolicy: record.responsePolicy,
         questions: record.questions,
         askedAt: record.askedAt,
       })

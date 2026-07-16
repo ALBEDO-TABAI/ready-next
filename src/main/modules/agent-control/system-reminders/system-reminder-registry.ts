@@ -44,6 +44,7 @@ export type ReminderTopic =
   | 'skill-catalog'
   // P3-2 — selected 轮：激活技能带脚本但未获脚本执行授权时提醒模型走只读方法论，别伪造脚本结果。priority 85。
   | 'skill-shell-consent'
+  | 'tool-capability-conflict'
 
 export interface ReminderEntry {
   readonly topic: ReminderTopic

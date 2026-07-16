@@ -80,6 +80,7 @@ import {
   type AgentSdkPreparedTurnState
 } from './agent-sdk-turn-execution'
 import { prepareAgentSdkTurn } from './agent-sdk-turn-preparation'
+import { maybeHandleToolCapabilityConsent } from './tool-capability-consent'
 
 export type { TurnOrchestratorHost } from './agent-sdk-turn-context'
 
@@ -715,11 +716,32 @@ export class AgentSdkTurnOrchestrator {
         requiresLocalDocumentWrite,
         providerContent,
         recentCollectionIntent,
+        requestedCapabilityConflicts,
         preNarrowingToolDefinitions,
         turnFollowup
       } = preparedTurn
       let { toolDefinitions } = preparedTurn
       if (preparedTurn.documentTargetHydration) await preparedTurn.documentTargetHydration
+      if (capabilities) {
+        const consentResult = await maybeHandleToolCapabilityConsent({
+          conflicts: requestedCapabilityConflicts,
+          supportsToolCalls: capabilities.supportsToolCalls,
+          currentConfig: capabilities.config,
+          activeProfileId: configDetail.activeProfileId ?? null,
+          localSettingsConsentAllowed:
+            !(this.host.runtime?.isScopeChannelBound?.(sessionId) ?? false),
+          userText: pureUserTurnText,
+          agentName: name,
+          sessionId,
+          runId,
+          taskId,
+          signal: abortController.signal,
+          emitOutput,
+          finalizeEarlyReturn,
+          setActiveToolUseMode: this.host.setActiveToolUseMode
+        })
+        if (consentResult) return consentResult
+      }
       documentTargetGuardForRecovery = documentTargetGuard
       requiresLocalDocumentExcerptForRecovery = requiresLocalDocumentExcerpt
       requiresLocalDocumentWriteForRecovery = requiresLocalDocumentWrite
@@ -823,6 +845,7 @@ export class AgentSdkTurnOrchestrator {
         },
         buildResult: (params) => this.buildResult(params),
         recentCollectionIntent,
+        requestedCapabilityConflicts,
         turnFollowup,
         useTextToolBridge,
         documentTargetGuard,

@@ -7,6 +7,7 @@
 
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { Agent, MemorySession, tool } from '@openai/agents'
 
 import {
   billProviderRequestSections,
@@ -18,6 +19,11 @@ import {
   emitProviderEstimateReconciliation,
   recordProviderRequestBills
 } from '../main/modules/agent-control/runtime-core/agent-sdk-provider-request-instrumentation'
+import {
+  resolveEnabledSdkToolsForRequest,
+  runWithOpenAIAgentsSdk,
+} from '../main/modules/agent-control/runtime-core/agent-sdk-provider-runner'
+import { ReadyOpenAICompatibleModel } from '../main/modules/agent-control/runtime-core/agent-sdk-provider'
 import {
   __setMetricSinkForTests,
   type AgentMetricEvent
@@ -282,6 +288,141 @@ test('wire bill includes system instructions and tool schemas', () => {
     assert.equal(wireMetric?.estimatedCoverage, 'instructions_input_and_tool_schemas')
     assert.deepEqual(wireMetric?.omittedSections, [])
     assert.equal(wireMetric?.toolSchemaCount, 1)
+  } finally {
+    __setMetricSinkForTests(null)
+  }
+})
+
+test('provider bills count the SDK-enabled snapshot, not latent registered tools', async () => {
+  const registeredTools = Array.from({ length: 18 }, (_, index) => tool({
+    name: `tool_${index}`,
+    description: `tool ${index}`,
+    parameters: {
+      type: 'object',
+      properties: {},
+      additionalProperties: false,
+    } as never,
+    strict: false,
+    isEnabled: async () => index === 0,
+    execute: async () => 'ok',
+  }))
+  const agent = new Agent({
+    name: 'billing-agent',
+    instructions: 'system',
+    model: 'test-model',
+    tools: registeredTools,
+  })
+  const enabledTools = await resolveEnabledSdkToolsForRequest(agent, undefined)
+  assert.equal(enabledTools.length, 1)
+  assert.equal(enabledTools[0].type, 'function')
+  assert.equal(enabledTools[0].name, 'tool_0')
+
+  const metrics: AgentMetricEvent[] = []
+  __setMetricSinkForTests((event) => metrics.push(event))
+  try {
+    const bills = recordProviderRequestBills({
+      agentName: 'billing-agent',
+      sessionId: 'scope-billing',
+      runId: 'run-billing',
+      taskId: 'task-billing',
+      contextWindowTokens: 200_000,
+      beforeInput: [{ role: 'user', content: 'hello' }] as never,
+      wireInput: [{ role: 'user', content: 'hello' }] as never,
+      tools: enabledTools,
+      configuredToolSchemaCount: registeredTools.length,
+      compacted: false,
+    })
+    assert.equal(bills.diagnostic.toolSchemaCount, 1)
+    assert.equal(bills.wire.toolSchemaCount, 1)
+    const wire = metrics.find((event) => event.metric === 'provider_wire_request_bill')
+    assert.equal(wire?.toolSchemaCount, 1)
+    assert.equal(wire?.configuredToolSchemaCount, 18)
+    assert.equal(wire?.disabledToolSchemaCount, 17)
+  } finally {
+    __setMetricSinkForTests(null)
+  }
+})
+
+test('provider request body and wire bill share the same enabled-tool snapshot', async () => {
+  let alternatingToolChecks = 0
+  const registeredTools = Array.from({ length: 18 }, (_, index) => tool({
+    name: `wire_tool_${index}`,
+    description: `wire tool ${index}`,
+    parameters: {
+      type: 'object',
+      properties: {},
+      additionalProperties: false,
+    } as never,
+    strict: false,
+    isEnabled: async () => {
+      if (index !== 0) return false
+      alternatingToolChecks += 1
+      return alternatingToolChecks === 1
+    },
+    execute: async () => 'ok',
+  }))
+  const requestBodies: Array<Record<string, unknown>> = []
+  const config = {
+    provider: 'openai-compatible' as const,
+    baseUrl: 'https://compatible.example/v1',
+    apiKey: 'test-key',
+    model: 'custom-model',
+    toolUseMode: 'on' as const,
+  }
+  const model = new ReadyOpenAICompatibleModel({
+    config,
+    baseUrl: config.baseUrl,
+    fetchWithTimeout: (async (_url, init) => {
+      requestBodies.push(JSON.parse(String(init.body || '{}')) as Record<string, unknown>)
+      return new Response(JSON.stringify({
+        id: 'response-enabled-tools',
+        choices: [{ message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }],
+        usage: { prompt_tokens: 4, completion_tokens: 1, total_tokens: 5 },
+      }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      })
+    }) as never,
+  })
+  const metrics: AgentMetricEvent[] = []
+  __setMetricSinkForTests((event) => metrics.push(event))
+  try {
+    await runWithOpenAIAgentsSdk({
+      agentName: 'billing-agent',
+      sessionId: 'scope-wire-billing',
+      runId: 'run-wire-billing',
+      taskId: 'task-wire-billing',
+      input: 'hello',
+      instructions: 'system',
+      model: config.model,
+      provider: { getModel: () => model },
+      session: new MemorySession(),
+      tools: registeredTools,
+      signal: new AbortController().signal,
+      maxTurns: 1,
+      contextWindowTokens: 200_000,
+      maxOutputTokens: 1024,
+      onTextDelta: () => undefined,
+    })
+
+    assert.equal(requestBodies.length, 1)
+    const wireTools = requestBodies[0].tools as Array<{
+      function?: { name?: string }
+    }>
+    assert.equal(wireTools.length, 1)
+    assert.equal(wireTools[0].function?.name, 'wire_tool_0')
+    assert.equal(
+      alternatingToolChecks,
+      1,
+      'billing must reuse ModelRequest.tools without re-running isEnabled',
+    )
+    const wireBill = metrics.find(
+      (event) => event.metric === 'provider_wire_request_bill'
+        && event.runId === 'run-wire-billing'
+    )
+    assert.equal(wireBill?.toolSchemaCount, wireTools.length)
+    assert.equal(wireBill?.configuredToolSchemaCount, 18)
+    assert.equal(wireBill?.disabledToolSchemaCount, 17)
   } finally {
     __setMetricSinkForTests(null)
   }

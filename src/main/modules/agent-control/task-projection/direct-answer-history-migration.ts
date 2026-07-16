@@ -40,6 +40,7 @@ function parseRecord(raw: string | null | undefined): Record<string, unknown> | 
       ? parsed as Record<string, unknown>
       : null
   } catch {
+    // silent-catch: malformed legacy metadata is intentionally treated as absent.
     return null
   }
 }
@@ -50,6 +51,7 @@ function parseArray(raw: string | null | undefined): unknown[] | null {
     const parsed = JSON.parse(raw) as unknown
     return Array.isArray(parsed) ? parsed : null
   } catch {
+    // silent-catch: malformed legacy arrays are intentionally treated as absent.
     return null
   }
 }

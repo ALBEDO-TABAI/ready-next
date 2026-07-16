@@ -9,6 +9,7 @@ import type {
   TurnTranscriptEvent
 } from '../contracts/run-contracts'
 import { computeCapabilityFloors } from '../domain-adapters/capability-floors'
+import type { RequestedCapabilityConflict } from '../domain-adapters/capability-resolver'
 import type { SkillToolAuthorization } from '../skills/skill-tool-authorization'
 import type { ToolDefinition } from '../tools-runtime/tool-definition'
 import { createEmptyActiveFrameContext } from '../tools-runtime/tool-runtime'
@@ -102,6 +103,7 @@ export interface AgentSdkPreparedTurnContext {
   finalizeBudgetCheckpointReturn: (checkpointText: string) => Promise<ExecutionTurnResult>
   buildResult: (params: Parameters<typeof buildExecutionTurnResult>[1]) => ExecutionTurnResult
   recentCollectionIntent: boolean
+  requestedCapabilityConflicts: readonly RequestedCapabilityConflict[]
   turnFollowup: ReturnType<typeof classifyFollowupIntent>
   useTextToolBridge: boolean
   documentTargetGuard: DocumentTargetGuard | null

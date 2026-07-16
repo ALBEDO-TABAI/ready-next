@@ -4,11 +4,15 @@ import type { RunMessage } from '../contracts/run-contracts'
 import { TARGET_DOCUMENT_ERROR_KINDS } from '../contracts/error-kinds'
 import { buildTextToolResultMessage } from '../../claude-bridge/tool-bridge'
 import type { AIModelConfig } from '../../../../shared/ai-providers'
+import type { CapabilityGroupId } from '../../../../shared/ai-capability-groups'
 import { DEFAULT_CONTEXT_WINDOW } from '../../../../shared/context-budget-types'
 import { defaultToolRegistry } from '../tools-runtime/tool-registry'
 import type { ToolDefinition } from '../tools-runtime/tool-definition'
 import type { SkillToolAuthorization } from '../skills/skill-tool-authorization'
-import { resolveCapabilityResolution } from '../domain-adapters/capability-resolver'
+import {
+  resolveCapabilityResolution,
+  type CapabilityResolution
+} from '../domain-adapters/capability-resolver'
 import {
   computeCapabilityFloors,
   recoverAbsentFloorsFromRegistry,
@@ -230,6 +234,7 @@ export class AgentSdkToolExecutor {
     requestEnvelope?: unknown
     /** P2-2 — the L1 skill catalog is non-empty this turn (gates use_skill exposure). */
     skillCatalogAvailable?: boolean
+    onCapabilityResolution?: (resolution: CapabilityResolution) => void
   }): ToolDefinition[] {
     const browserDecisionMode = resolveBrowserDecisionMode(
       params.message,
@@ -333,6 +338,12 @@ export class AgentSdkToolExecutor {
       ...browserConflictGroupModes,
       skill_activation: exposeSkillActivation
     }
+    const requestedIntentGroupIds = Array.from(new Set([
+      ...sdkIntentSurface.requestedIntentGroupIds,
+      ...(!sdkIntentSurface.browserIntentNegated && explicitBrowserCollectionIntent
+        ? ['browser_interaction', 'browser_content_tasks'] as const
+        : []),
+    ]))
     const capabilityResolution = resolveCapabilityResolution({
       config: params.config,
       profile: 'local_chat',
@@ -342,8 +353,10 @@ export class AgentSdkToolExecutor {
         feishuConnected: params.feishuConnected,
         channelScopeBound: params.channelScopeBound === true
       },
-      intentGroupModes
+      intentGroupModes,
+      requestedIntentGroupIds
     })
+    params.onCapabilityResolution?.(capabilityResolution)
     appendToolCapabilityLog(
       [
         '[tool_capability]',

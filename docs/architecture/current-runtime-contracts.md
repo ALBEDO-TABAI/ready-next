@@ -1,6 +1,6 @@
 # Ready 当前运行时硬合同
 
-> 更新时间：2026-07-15
+> 更新时间：2026-07-17
 > 本文承接原先重复写在 `AGENTS.md` 与 `CLAUDE.md` 里的详细约束。两份根指引保留入口与红线；修改本页覆盖的模块前必须读取对应章节。
 
 代码、类型、行为测试和 CI gate 比本文更权威。若实现与本文冲突，先判断是实现回归还是文档漂移；不得为旧文档复活已退役路径。
@@ -26,6 +26,7 @@
 - 显式技能引用与本地文档资源产生代码级 capability floor。收窄过滤只能做减法，不得移除地板；最终工具面必须非空且包含全部地板。
 - `current_document_context` 的地板是文档编辑面：read section、Widget 增删改查、replace exact、save tab；刻意不含整文覆写。`local_document_resource` 保持只读，提及文件不等于授予写权限。
 - capability floor 的 live 权威点是 SDK executor 计算/补回工具，以及 turn orchestrator 收窄后的最终强制。违反要记录 `tool_surface_floor_violation` 或 `sdk_runtime_empty_surface_recovered`。
+- SDK executor 的同一份 `CapabilityResolution` 必须同时驱动工具面与本轮能力冲突事实。只有用户或任务意图明确请求、但最终组状态不可见的能力进入 `requestedButSuppressed`；默认技能目录曝光、显式 false 与 `run_intent_suppressed` 不得伪造用户请求。否定浏览器表达优先于工作流与最近意图兜底，不能继承上一轮浏览器工具面。冲突经 `SystemReminderRegistry` 只进入本轮 instructions，必须告诉模型真实原因并禁止声称“已收到授权”或“稍后自动挂载”，不得写入 `MemorySession` 历史。
 - `documentTargetGuard` 所需的 open/save 工具若不在模型可见面，由 executor 从注册表恢复执行并记录 `document_target_guard_tool_recovered`；提示文案必须与自动开存行为一致。
 - typed envelope refs 是权限第一信源；只有缺失时才允许文本候选兜底，并记录 `source=text_fallback`。禁止仅靠用户原文正则决定权限。
 - `run-capability-controller.resolveRunCapabilities` 目前没有生产调用方，只承担 SDK-shaped parity。不得把它描述成 live 工具面的权威裁决点。
@@ -50,11 +51,13 @@
 ## 4. Provider、流式与工具错误
 
 - AI provider 能力必须由共享能力层解析；“OpenAI 兼容”不代表一定支持原生 tools、vision 或 video。通用 openai-compatible 的 `toolUseMode=auto` 必须按不支持工具收口，只有显式 `on` 或内置 provider 合同可以开放；Packer 仅可为已经真实验证过工具流的固定端点写入 `on`。
+- 设置页的工具调用 `auto` 必须展示共享能力层解析出的生效值；openai-compatible 自动关闭时明确说明：端点真实支持 function calling 才可“强制开启”。聊天文字不得直接写设置。只有本轮已有 `provider_disabled_tools` 冲突、共享能力仍为关闭且用户明确肯定授权具体工具时，Main 才可直接复用 `ask_user_questions` 确认卡；“打开网页”“当前打开的标签页”“使用浏览器工具”等任务动作不算设置授权。卡片只允许本机 Renderer 作答，远程绑定会话不得发起、转发或提交这类本机设置确认。确认后重新读取活跃配置，核对 active profile id + provider/baseUrl/model，只修改 `toolUseMode`；workspace、当前配置与兼容镜像在同一数据库事务内写入。配置漂移、拒绝、取消、超时或持久化失败均不写；成功也必须结束旧工具面回合并要求用户重发原任务。
 - OpenAI-compatible 的 `baseUrl` 是 API 前缀：origin-only 地址统一补 `/v1`，显式前缀原样保留，消费者只能再拼资源路径，禁止形成 `/v1/v1`。保存和请求边界必须移除 URL 中的用户名、密码、查询参数与锚点；设置输入框保留编辑草稿。Packer 的明文 HTTP 仅允许严格解析后的本机或私网地址，不能用域名前缀猜私网。
 - 一键运行时配置由 Main 持有带 `runId/revision` 的单任务快照；设置页重进只恢复投影，重复开始加入原任务。停止先进入 `cancelling`，旧 run 的晚到进度不得改写终态或后续重试，Renderer 必须提供可见的停止与失败后重试入口。
 - 标准 `build:dist` 只允许空 AI seed；有意内置配置只能由 Web Packer 显式授权、临时写入并在 finally/下次启动恢复。Packer 只有在包内 seed 与本次请求一致、精简/完整运行时形态正确、Framework/签名/DMG 校验及只读挂载全部通过后才能发布成品。
 - 公开网络调研统一走 `web_search_domains / web_search / web_fetch`：AnySearch、Tavily、DuckDuckGo 和 Jina 由加密的外部服务配置提供。AnySearch 垂直搜索先查询子领域参数，失败不得丢掉 domain 约束改做通用搜索；通用搜索与正文提取才允许按已启用服务显式回退。
 - openai-compatible chat/responses 与 anthropic 三条 SDK 路径都必须真 SSE：文本增量交付，工具调用和推理在流中累积，终局与阻塞路径同构整形。
+- `provider_request_bill` 与 `provider_wire_request_bill.toolSchemaCount` 必须直接读取 provider 边界同一个实际 `ModelRequest.tools`；禁止为统计重新执行动态 `isEnabled`，也禁止用注册全集近似。注册全集只能另记为 `configuredToolSchemaCount`，差值记 `disabledToolSchemaCount`。每次请求的 input、instructions 与 tools 必须成对记录。
 - 降级只有三类：`READY_SDK_TRUE_SSE=off` 总开关；服务返回非 SSE 时伪流式交付；仅错误体明确提及 stream 的 4xx 可单次阻塞重试。413/401/429 等语义性 4xx 必须原样冒泡。
 - 回归入口：`npm run verify:streaming`。
 - 工具错误由 dispatch 转成结构化 `ToolExecutionOutput` 回灌模型；只有 Abort 或 host 不可用等基础设施错误可以冒泡。
@@ -117,6 +120,7 @@
 ## 8. 行动确认、知识与专项 Agent
 
 - 非浏览器高危工具在 authorization 后由 `agent-control/safety/action-confirmation-policy.ts` 的 M1-M4 表裁决；不得用提示词代替确认闸门。
+- 内置 `operator` 使用保留身份与独立内置人格；迁移遇到任何不完全等于内置种子的同 slug agent 时，必须先无损改名和搬迁人格再补种。历史保留 slug 人格错绑只允许由后续迁移在账本与精确占位内容共同证明时修复，含糊或用户编辑状态不得覆盖。`social-media-ops` 是 reference/advisory 技能；截图缓存只算坐标证据，视觉判断必须走能返回分析结果的工具。
 - `run_setup_command` 的 `confirmAck` 只表示进入执行阶段，不是用户授权凭证；所有执行阶段调用必须冻结原参数并走 Ready 确认卡。CLI 授权优先使用可续接的 JSON/device-code 流程并显示可点击链接；退出码 10 的高风险重试不得自动追加 `--yes` 后执行，原始 TTY 交互仍明确不支持。
 - staged 信念卡不得进入 prompt；Reflection 不得直接写 prompt 可见的 `resident_user` / `scope_memory`，并必须发 `reflection_outcome` 账本。
 - owner 解析顺序：显式合法 `ownerAgentId` 优先；完全未传时回退 `scope.agent`；显式非法时降级 global-only，不借道读取其他 Agent 谱系。

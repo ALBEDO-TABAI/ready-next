@@ -95,6 +95,88 @@ test('resolver suppresses all model-visible groups when provider tool calling is
   assert.equal(resolution.groupStates.channel_feishu.reason, 'provider_disabled_tools')
 })
 
+test('resolver records only explicitly requested groups that the final tool gate suppresses', () => {
+  const resolution = resolveCapabilityResolution({
+    config: {
+      ...BASE_CONFIG,
+      provider: 'openai-compatible',
+      baseUrl: 'https://compatible.example/v1',
+      toolUseMode: 'auto',
+    },
+    profile: 'local_chat',
+    browserDecisionMode: 'browser_workflow',
+    runtimeAvailability: {
+      browserHostAvailable: true,
+      feishuConnected: false,
+    },
+    intentGroupModes: {
+      document: true,
+      calendar: false,
+    },
+  })
+
+  assert.deepEqual(resolution.intentRequestedCapabilityGroupIds, [
+    'browser_interaction',
+    'browser_content_tasks',
+    'document',
+  ])
+  assert.deepEqual(
+    resolution.requestedButSuppressed.map(({ groupId, reason }) => ({ groupId, reason })),
+    [
+      { groupId: 'browser_interaction', reason: 'provider_disabled_tools' },
+      { groupId: 'browser_content_tasks', reason: 'provider_disabled_tools' },
+      { groupId: 'document', reason: 'provider_disabled_tools' },
+    ],
+  )
+})
+
+test('provider-wide suppression does not invent a conflict for an ordinary no-tool turn', () => {
+  const resolution = resolveCapabilityResolution({
+    config: {
+      ...BASE_CONFIG,
+      provider: 'openai-compatible',
+      baseUrl: 'https://compatible.example/v1',
+      toolUseMode: 'auto',
+    },
+    profile: 'local_chat',
+    browserDecisionMode: 'free_tool_loop',
+    runtimeAvailability: {
+      browserHostAvailable: true,
+      feishuConnected: false,
+    },
+    intentGroupModes: {
+      browser_interaction: false,
+      browser_content_tasks: false,
+    },
+  })
+
+  assert.deepEqual(resolution.intentRequestedCapabilityGroupIds, [])
+  assert.deepEqual(resolution.requestedButSuppressed, [])
+})
+
+test('default catalog exposure can be enabled without being misreported as user intent', () => {
+  const resolution = resolveCapabilityResolution({
+    config: {
+      ...BASE_CONFIG,
+      provider: 'openai-compatible',
+      baseUrl: 'https://compatible.example/v1',
+      toolUseMode: 'auto',
+    },
+    profile: 'local_chat',
+    browserDecisionMode: 'free_tool_loop',
+    runtimeAvailability: {
+      browserHostAvailable: true,
+      feishuConnected: false,
+    },
+    intentGroupModes: { skill_activation: true },
+    requestedIntentGroupIds: [],
+  })
+
+  assert.equal(resolution.groupStates.skill_activation.reason, 'provider_disabled_tools')
+  assert.deepEqual(resolution.intentRequestedCapabilityGroupIds, [])
+  assert.deepEqual(resolution.requestedButSuppressed, [])
+})
+
 test('resolver differentiates browser interaction and browser content task visibility by run intent', () => {
   const uploadResolution = resolveCapabilityResolution({
     config: BASE_CONFIG,

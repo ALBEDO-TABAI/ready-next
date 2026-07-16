@@ -57,6 +57,7 @@ export function useKeyboardShortcuts() {
       const filename = result.path.split(/[\\/]/).pop() || result.path
       publishCaptureFeedback({ kind: 'success', message: `已保存到桌面：${filename}` })
     } catch (error) {
+      // silent-catch: the failure is surfaced to the user through capture feedback.
       publishCaptureFeedback({
         kind: 'error',
         message: `截图失败：${error instanceof Error ? error.message : String(error)}`,

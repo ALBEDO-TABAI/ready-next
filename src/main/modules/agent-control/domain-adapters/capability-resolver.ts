@@ -31,7 +31,15 @@ export interface CapabilityGroupState {
   label: string
 }
 
+export interface RequestedCapabilityConflict {
+  groupId: CapabilityGroupId
+  label: string
+  reason: CapabilityGroupReason
+}
+
 export interface CapabilityResolution {
+  intentRequestedCapabilityGroupIds: CapabilityGroupId[]
+  requestedButSuppressed: RequestedCapabilityConflict[]
   visibleCapabilityGroupIds: CapabilityGroupId[]
   hostOnlyCapabilityIds: CapabilityGroupId[]
   suppressedCapabilityGroupIds: CapabilityGroupId[]
@@ -67,6 +75,7 @@ export function resolveCapabilityResolution(params: {
   browserDecisionMode: BrowserTaskDecisionMode
   runtimeAvailability: CapabilityRuntimeAvailability
   intentGroupModes?: Partial<Record<CapabilityGroupId, boolean>>
+  requestedIntentGroupIds?: readonly CapabilityGroupId[]
 }): CapabilityResolution {
   const capabilityModes = normalizeCapabilityModeMap(params.config.capabilityModes)
   const resolvedCapabilities = resolveAIConfigCapabilities(params.config)
@@ -90,6 +99,15 @@ export function resolveCapabilityResolution(params: {
     ...defaultIntentModes,
     ...(params.intentGroupModes || {}),
   }
+  const requestedIntentGroupIdSet = params.requestedIntentGroupIds
+    ? new Set(params.requestedIntentGroupIds)
+    : null
+  const intentRequestedCapabilityGroupIds = CAPABILITY_GROUPS
+    .filter((group) =>
+      mergedIntentModes[group.id] === true
+      && (!requestedIntentGroupIdSet || requestedIntentGroupIdSet.has(group.id))
+    )
+    .map((group) => group.id)
 
   for (const group of CAPABILITY_GROUPS) {
     const mode = capabilityModes[group.id] || group.defaultMode
@@ -217,7 +235,20 @@ export function resolveCapabilityResolution(params: {
     reasons[group.id] = 'enabled'
   }
 
+  const requestedButSuppressed = intentRequestedCapabilityGroupIds.flatMap((groupId) => {
+    const state = groupStates[groupId]
+    if (
+      !state
+      || state.status === 'visible'
+      || state.status === 'host_only'
+      || state.reason === 'run_intent_suppressed'
+    ) return []
+    return [{ groupId, label: state.label, reason: state.reason }]
+  })
+
   return {
+    intentRequestedCapabilityGroupIds,
+    requestedButSuppressed,
     visibleCapabilityGroupIds,
     hostOnlyCapabilityIds,
     suppressedCapabilityGroupIds,

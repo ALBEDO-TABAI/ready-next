@@ -82,6 +82,7 @@ function bindPromptToProvider(systemPrompt: string): string {
     capabilities: {} as never,
     authorization: buildExplicitNoSkillAuthorization('no_skill_signal'),
     skillCatalogSnapshot: [],
+    requestedCapabilityConflicts: [],
     emitOutput: () => undefined,
     finalizeEarlyReturn: async () => ({} as never),
   })

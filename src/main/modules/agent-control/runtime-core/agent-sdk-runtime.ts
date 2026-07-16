@@ -369,6 +369,7 @@ import { AgentSdkCompactor } from './agent-sdk-compactor'
 import { AgentSdkRunLifecycle, createInitiatorAbort } from './agent-sdk-run-lifecycle'
 import { AgentSdkToolExecutor } from './agent-sdk-tool-executor'
 import { AgentSdkTurnOrchestrator } from './agent-sdk-turn-orchestrator'
+import { updateActiveToolUseMode } from './tool-use-mode-config-update'
 import { DynamicDeliveryCoordinator } from './dynamic-delivery/dynamic-delivery-coordinator'
 import { DynamicDeliveryTaskStore } from './dynamic-delivery/dynamic-delivery-task-store'
 import { AgentSdkSessionManager } from './agent-sdk-session'
@@ -539,6 +540,7 @@ export class AgentSdkRuntime extends EventEmitter {
   private readonly domainAdapters: ReadonlyArray<DomainAdapter>
   private readonly loadAIConfig: () => AIConfigLoad
   private readonly runAgent: (params: ReadyAgentSdkRunParams) => Promise<ReadyAgentSdkRunResult>
+  private readonly setActiveToolUseMode: NonNullable<AgentSdkRuntimeDeps['setActiveToolUseMode']>
   private readonly listToolDefinitionsForTurn: NonNullable<AgentSdkRuntimeDeps['listToolDefinitions']>
   private readonly executeToolCall: NonNullable<AgentSdkRuntimeDeps['executeToolCall']>
   private readonly fetchWithTimeout: NonNullable<AgentSdkRuntimeDeps['fetchWithTimeout']>
@@ -559,9 +561,23 @@ export class AgentSdkRuntime extends EventEmitter {
   constructor(deps: AgentSdkRuntimeDeps = {}) {
     super()
     this.domainAdapters = deps.domainAdapters || []
-    this.loadAIConfig = deps.loadAIConfig || (() =>
-      readAIConfigDetailed(() => settingsRepository.getSetting('ai_model_config')))
+    this.loadAIConfig = deps.loadAIConfig || (() => {
+      const detail = readAIConfigDetailed(() => settingsRepository.getSetting('ai_model_config'))
+      if (!detail.ok) return detail
+      try {
+        return {
+          ...detail,
+          activeProfileId: settingsRepository.getActiveAIProfileId(),
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        logAgentMetric('ai_config_db_error', { message: message.slice(0, 200) })
+        return { ok: false, reason: 'db_error', message }
+      }
+    })
     this.runAgent = deps.runAgent || runWithOpenAIAgentsSdk
+    this.setActiveToolUseMode = deps.setActiveToolUseMode || ((request) =>
+      updateActiveToolUseMode(settingsRepository, request))
     this.executeToolCall = deps.executeToolCall || executeReadyToolCall
     this.fetchWithTimeout = deps.fetchWithTimeout || defaultFetchWithTimeout
     this.skillContextOrchestrator = deps.skillContextOrchestrator || null
@@ -635,6 +651,7 @@ export class AgentSdkRuntime extends EventEmitter {
       loadAIConfig: this.loadAIConfig,
       resumeSkillChildRun: this.resumeSkillChildRun,
       runAgent: this.runAgent,
+      setActiveToolUseMode: this.setActiveToolUseMode,
       dynamicDelivery: this.dynamicDelivery,
       runLifecycle: this.runLifecycle,
       get runtime() { return self.runtime },

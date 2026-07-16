@@ -69,6 +69,7 @@ const FALLBACK_AGENTS: readonly Agent[] = [
   { name: 'copywriter', displayName: '文案', avatar: '✍️', status: 'idle', selected: false },
   { name: 'video-editor', displayName: '剪辑', avatar: '🎬', status: 'idle', selected: false },
   { name: 'analyst', displayName: '分析', avatar: '📊', status: 'idle', selected: false },
+  { name: 'operator', displayName: '运营', avatar: '📈', status: 'idle', selected: false },
 ]
 
 export interface AgentPersonalityListItem {

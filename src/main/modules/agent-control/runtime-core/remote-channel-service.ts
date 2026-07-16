@@ -1044,6 +1044,7 @@ export class RemoteChannelService {
    * 行为变化；反查/发送失败只记 metric，不影响本地卡可答性（条款 5）。
    */
   async maybeForwardAskCardToChannel(event: AskUserQuestionsCardEvent): Promise<boolean> {
+    if (event.responsePolicy === 'local_renderer_only') return false
     const scopeKey = String(event.scopeId || event.sessionId || '').trim()
     if (!scopeKey) return false
     let thread: { channel_id: string; remote_thread: string } | null = null
@@ -1084,6 +1085,19 @@ export class RemoteChannelService {
     const store = getAskUserQuestionsStore()
     const card = store.findPendingForScope(scopeId)
     if (!card) return false
+    if (card.responsePolicy === 'local_renderer_only') {
+      logAgentMetric('remote_ask_card_answer_denied', {
+        cardId: card.cardId,
+        scopeId,
+        reason: 'local_renderer_only',
+      })
+      await this.sendChannelReply(
+        pending.channelId,
+        pending.thread,
+        '这项设置只能在本机 Ready 中确认，远程回复不会修改本机模型配置。',
+      ).catch(() => undefined)
+      return true
+    }
     const parsed = parseChannelAskCardReply(inboundText, card.questions)
     if (parsed.kind === 'cancel') {
       const result = cancelAskUserQuestionsCardCore(card.cardId, 'user_cancelled', {
@@ -1115,6 +1129,7 @@ export class RemoteChannelService {
     const result = submitAskUserQuestionsAnswersCore(card.cardId, parsed.answers, {
       store,
       db: this.deps.db,
+      submissionSurface: 'remote_channel',
       logMetric: (name, payload) => logAgentMetric(name, payload)
     })
     logAgentMetric('remote_ask_card_answered', {

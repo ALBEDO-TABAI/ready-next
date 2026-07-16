@@ -437,7 +437,7 @@ export class RuntimeProvisioner {
       try {
         listener(snapshot)
       } catch {
-        // A broken observer must not interrupt the Main-owned provision task.
+        // silent-catch: a broken observer must not interrupt the Main-owned provision task.
       }
     }
   }
@@ -460,7 +460,7 @@ function safelyNotifyProgress(
   try {
     listener({ ...progress })
   } catch {
-    // A stale renderer/caller callback must not interrupt the provision task.
+    // silent-catch: a stale renderer/caller callback must not interrupt the provision task.
   }
 }
 

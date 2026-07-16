@@ -1,0 +1,15 @@
+{
+  "id": "social-media-ops",
+  "name": "social-media-ops",
+  "displayName": "社媒运营指导",
+  "description": "社媒账号运营指导：账号诊断、定位、选题挖掘、内容创作优化、数据复盘、增长变现与合规风控。基于浏览器实证采集与科学方法论，覆盖小红书/公众号/微博/X/抖音/B站/视频号/知乎",
+  "version": "2026.07.17",
+  "runtime": "reference",
+  "execution": { "mode": "advisory" },
+  "actions": {
+    "read_skill": {
+      "runtime": "reference",
+      "visibility": "internal"
+    }
+  }
+}

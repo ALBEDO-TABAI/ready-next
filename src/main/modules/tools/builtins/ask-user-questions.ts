@@ -44,6 +44,8 @@ import {
   getAskUserQuestionsStore,
   type AskUserAnswer,
   type AskUserQuestionsAnswerSet,
+  type AskUserQuestionsResponsePolicy,
+  type AskUserQuestionsSubmissionSurface,
   type AskUserQuestionSpec,
 } from './ask-user-questions-store'
 
@@ -175,6 +177,7 @@ export interface AskUserQuestionsCardEvent {
   scopeId?: string | null
   agent?: string | null
   requestId?: string | null
+  responsePolicy?: AskUserQuestionsResponsePolicy
   questions: AskUserQuestionSpec[]
   askedAt: number
 }
@@ -188,6 +191,7 @@ export interface PersistCardPendingArgs {
   scopeId?: string | null
   agent?: string | null
   requestId?: string | null
+  responsePolicy?: AskUserQuestionsResponsePolicy
   questions: AskUserQuestionSpec[]
   askedAt: number
 }
@@ -200,6 +204,8 @@ export interface AskUserQuestionsHandlerDeps {
   scopeId?: string
   agent?: string | null
   requestId?: string | null
+  /** Restricts who may answer host-owned, setting-level confirmations. */
+  responsePolicy?: AskUserQuestionsResponsePolicy
   signal?: AbortSignal
   /** Notifies the renderer a card is pending. No-op in unit tests. */
   emitAskUserQuestionsCard?: EmitAskUserQuestionsCard
@@ -286,6 +292,7 @@ export interface SubmitDbAccess {
 export interface SubmitAskUserQuestionsDeps {
   store: AskUserQuestionsStore
   db: SubmitDbAccess
+  submissionSurface?: AskUserQuestionsSubmissionSurface
   logMetric?: (name: string, payload: Record<string, unknown>) => void
   now?: () => number
 }
@@ -323,6 +330,17 @@ export function submitAskUserQuestionsAnswersCore(
       success: false,
       errorKind: ASK_USER_ERROR_KINDS.waitingTaskGone.code,
       error: 'No pending card with this id (already answered, cancelled or timed out)',
+    }
+  }
+
+  if (
+    record.responsePolicy === 'local_renderer_only'
+    && deps.submissionSurface === 'remote_channel'
+  ) {
+    return {
+      success: false,
+      errorKind: 'confirmation_surface_denied',
+      error: 'This confirmation must be answered in the local app.',
     }
   }
 
@@ -383,7 +401,11 @@ export function submitAskUserQuestionsAnswersCore(
     }
   }
 
-  const resolved = store.resolve(cardId, { answers, answeredAt })
+  const resolved = store.resolve(cardId, {
+    answers,
+    answeredAt,
+    answeredVia: deps.submissionSurface || 'local_renderer',
+  })
   if (!resolved) {
     logMetric(TOOL_ERROR_METRICS.askUserQuestionsSubmitResolverMissed, { cardId })
     try {
@@ -536,6 +558,7 @@ export async function executeAskUserQuestions(
   const scopeId = deps.scopeId || conversationId || sessionId
   const agent = deps.agent || null
   const requestId = deps.requestId || null
+  const responsePolicy = deps.responsePolicy || 'local_or_remote'
 
   // Single-pending invariant. The model must not stack reflection cards.
   if (sessionId) {
@@ -570,6 +593,7 @@ export async function executeAskUserQuestions(
       scopeId,
       agent,
       requestId,
+      responsePolicy,
       questions,
       askedAt,
     })
@@ -609,6 +633,7 @@ export async function executeAskUserQuestions(
         scopeId,
         agent,
         requestId,
+        responsePolicy,
         questions,
         askedAt,
       resolve: resolvePromise,
@@ -638,6 +663,7 @@ export async function executeAskUserQuestions(
         scopeId,
         agent,
         requestId,
+        responsePolicy,
         questions,
         askedAt,
       })
@@ -684,6 +710,7 @@ export async function executeAskUserQuestions(
       cardId,
       askedAt,
       answeredAt: answerSet.answeredAt,
+      answeredVia: answerSet.answeredVia || 'local_renderer',
       answers: enrichedAnswers,
     },
   })

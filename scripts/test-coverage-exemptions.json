@@ -70,6 +70,18 @@
   ],
   "c4Exempt": [
     {
+      "path": "src/__tests__/app-settings-repository-atomic.test.ts",
+      "reason": "AI workspace atomicity coverage injects a transaction-aware in-memory settings database into AppSettingsRepository and deliberately fails the second settings write to prove all keys roll back. No test path calls getDatabase or opens better-sqlite3; host-Node coverage must remain active for the exact transaction boundary.",
+      "since": "2026-07-17",
+      "owner": "tool-capability-consent"
+    },
+    {
+      "path": "src/__tests__/tool-capability-consent-runtime.test.ts",
+      "reason": "Tool-capability consent runtime coverage constructs AgentSdkRuntime with injected model execution, tool resolution, and settings-update fakes. The default settings repository is never called, no test path opens getDatabase or better-sqlite3, and host-Node coverage must remain active for the exact SDK conflict and confirmation wiring.",
+      "since": "2026-07-17",
+      "owner": "tool-capability-consent"
+    },
+    {
       "path": "src/__tests__/agent-sdk-turn-input-assembly.test.ts",
       "reason": "Ready system prompt integration assembles one turn from an injected host, session, tool definitions, and an immutable test skill catalog. It never selects a shell-enabled skill, calls getDatabase, or opens a repository; the shell-consent helper import alone makes the static graph reach database.ts, so host-Node coverage should remain active.",
       "since": "2026-07-15",

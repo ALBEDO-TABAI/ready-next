@@ -6,6 +6,7 @@ import { formatUserProfilePrompt } from '../main/modules/agent-control/user-prof
 import type { AgentSdkSkillCatalogSnapshotEntry } from '../main/modules/agent-control/runtime-core/agent-sdk-types'
 import { buildExplicitNoSkillAuthorization } from '../main/modules/agent-control/skills/skill-tool-authorization'
 import type { ToolDefinition } from '../main/modules/agent-control/tools-runtime/tool-definition'
+import type { RequestedCapabilityConflict } from '../main/modules/agent-control/domain-adapters/capability-resolver'
 
 function toolDefinition(
   name: string,
@@ -33,6 +34,7 @@ function assemble(
   options: {
     useTextToolBridge?: boolean
     skillCatalogSnapshot?: AgentSdkSkillCatalogSnapshotEntry[]
+    requestedCapabilityConflicts?: RequestedCapabilityConflict[]
     systemPrompt?: string
   } = {},
 ) {
@@ -58,6 +60,7 @@ function assemble(
     capabilities: {} as never,
     authorization: buildExplicitNoSkillAuthorization('no_skill_signal'),
     skillCatalogSnapshot: options.skillCatalogSnapshot ?? [],
+    requestedCapabilityConflicts: options.requestedCapabilityConflicts ?? [],
     emitOutput: () => undefined,
     finalizeEarlyReturn: async () => ({} as never),
   })
@@ -147,4 +150,22 @@ test('skill catalog is not advertised when the final tool surface cannot activat
   )
   assert.doesNotMatch(assembled.instructions, /ready:system-reminder:skill-catalog/)
   assert.doesNotMatch(assembled.instructions, /use_skill/)
+})
+
+test('requested capability conflicts are injected per turn and never persisted in next input', () => {
+  const assembled = assemble([], {
+    requestedCapabilityConflicts: [{
+      groupId: 'browser_interaction',
+      label: '浏览器交互',
+      reason: 'provider_disabled_tools',
+    }],
+  })
+
+  assert.match(assembled.instructions, /ready:system-reminder:tool-capability-conflict/)
+  assert.match(assembled.instructions, /当前模型配置关闭了工具调用/)
+  assert.match(assembled.instructions, /不得声称“已收到授权”/)
+  assert.doesNotMatch(
+    JSON.stringify(assembled.nextInput),
+    /ready:system-reminder:tool-capability-conflict/,
+  )
 })

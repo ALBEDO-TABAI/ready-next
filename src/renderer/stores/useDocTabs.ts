@@ -105,6 +105,7 @@ function getDocTabStorage(): DocTabStorage | null {
     try {
         return typeof localStorage !== 'undefined' ? localStorage : null
     } catch {
+        // silent-catch: unavailable renderer storage is represented by null.
         return null
     }
 }
@@ -120,6 +121,7 @@ function writePendingDraft(id: string): void {
         getDocTabStorage()?.setItem(getDocTabDraftStorageKey(id), pending.content)
         pendingDraftWrites.delete(id)
     } catch {
+        // silent-catch: keep the draft queued so a later flush can retry it.
         pending.timer = null
     }
 }
@@ -149,7 +151,7 @@ function discardDraft(id: string): void {
     try {
         getDocTabStorage()?.removeItem(getDocTabDraftStorageKey(id))
     } catch {
-        // A clean/saved tab never needs a renderer draft to be authoritative.
+        // silent-catch: a clean/saved tab never needs a renderer draft to be authoritative.
     }
 }
 
@@ -159,6 +161,7 @@ function readDraft(id: string): string | null {
     try {
         return getDocTabStorage()?.getItem(getDocTabDraftStorageKey(id)) ?? null
     } catch {
+        // silent-catch: an unreadable draft is treated as absent.
         return null
     }
 }
@@ -175,7 +178,7 @@ function persistLegacyDrafts(tabs: DocTab[]): void {
         try {
             storage.setItem(getDocTabDraftStorageKey(tab.id), tab.content)
         } catch {
-            // Re-attempt after the middleware has replaced the much larger legacy metadata record.
+            // silent-catch: re-attempt after the middleware replaces the larger legacy metadata record.
             queueDraftWrite(tab.id, tab.content)
         }
     }

@@ -11,6 +11,7 @@ import {
   SETTINGS_FLAT_INPUT_STYLE,
 } from '../../components/settings/settings-theme'
 import { AISettingsFieldCard, SettingsSwitch } from './settings-shared'
+import { resolveToolUseModePresentation } from './tool-use-mode-copy'
 
 // ── AI Settings Panel (dynamic, wired to backend) ──────────────────────────
 const compactSelectStyle = {
@@ -88,6 +89,10 @@ export function AISettingsPanel() {
   const selectedConfig = selectedProfile?.config || activeConfig
   const currentProvider = getProviderDef(selectedConfig.provider, selectedConfig.baseUrl)
   const capabilities = useMemo(() => resolveAIConfigCapabilities(selectedConfig), [selectedConfig])
+  const toolUsePresentation = useMemo(
+    () => resolveToolUseModePresentation(selectedConfig),
+    [selectedConfig]
+  )
   const models = currentProvider?.models || []
   const showReasoningEffort = capabilities?.agentProtocol === 'openai' && capabilities?.wireApi === 'responses'
   const capabilityGroups = listSettingsCapabilityGroups()
@@ -776,7 +781,7 @@ export function AISettingsPanel() {
                     )}
                     <AISettingsFieldCard
                       title="工具调用"
-                      description={`当前为 ${capabilities?.supportsToolCalls ? '开启' : '关闭'}。`}
+                      description={toolUsePresentation.description}
                       control={(
                         <select
                           value={selectedConfig.toolUseMode || 'auto'}
@@ -784,7 +789,7 @@ export function AISettingsPanel() {
                           className="rounded-lg border text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30 cursor-pointer"
                           style={stackedSelectStyle}
                         >
-                          <option value="auto">自动</option>
+                          <option value="auto">{toolUsePresentation.autoOptionLabel}</option>
                           <option value="on">强制开启</option>
                           <option value="off">关闭</option>
                         </select>

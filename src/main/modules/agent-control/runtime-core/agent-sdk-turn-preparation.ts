@@ -15,6 +15,10 @@ import {
 } from '../safety/authorization-fact-store'
 import { recordNegations, releaseNegations } from '../safety/negation-state'
 import type { SkillToolAuthorization } from '../skills/skill-tool-authorization'
+import type {
+  CapabilityResolution,
+  RequestedCapabilityConflict
+} from '../domain-adapters/capability-resolver'
 import { clearActivePlanForScope } from '../system-reminders/active-plan-step-reminder'
 import type { ToolDefinition } from '../tools-runtime/tool-definition'
 import { createEmptyActiveFrameContext } from '../tools-runtime/tool-runtime'
@@ -107,6 +111,7 @@ export type AgentSdkTurnPreparationResult =
       requiresLocalDocumentWrite: boolean
       providerContent: RunMessage
       recentCollectionIntent: boolean
+      requestedCapabilityConflicts: RequestedCapabilityConflict[]
       preNarrowingToolDefinitions: ToolDefinition[]
       toolDefinitions: ToolDefinition[]
       turnFollowup: ReturnType<typeof classifyFollowupIntent>
@@ -269,6 +274,7 @@ export function prepareAgentSdkTurn(
           effectiveExecutionOptions?.requestEnvelope
         )
   )
+  const capabilityResolutionCapture: { current: CapabilityResolution | null } = { current: null }
   let toolDefinitions = host.listToolDefinitionsForTurn({
     message: content as RunMessage,
     sessionId,
@@ -284,8 +290,19 @@ export function prepareAgentSdkTurn(
     localSendImIntent: localSendImTurn,
     requestEnvelope: effectiveExecutionOptions?.requestEnvelope,
     // P2-2 — gate use_skill exposure on the exact per-turn catalog snapshot later shown to the model.
-    skillCatalogAvailable: skillCatalogSnapshot.length > 0
+    skillCatalogAvailable: skillCatalogSnapshot.length > 0,
+    onCapabilityResolution: (resolution) => { capabilityResolutionCapture.current = resolution }
   })
+  const requestedCapabilityConflicts =
+    capabilityResolutionCapture.current?.requestedButSuppressed || []
+  if (requestedCapabilityConflicts.length > 0) {
+    const groups = requestedCapabilityConflicts.map((conflict) => conflict.groupId).join('|')
+    const reasons = requestedCapabilityConflicts.map((conflict) => conflict.reason).join('|')
+    appendToolCapabilityLog(
+      `[tool_capability] stage=requested_capability_conflict runId=${runId} groups=${groups} reasons=${reasons}`
+    )
+    logAgentMetric('tool_capability_conflict', { runId, taskId, scopeId: sessionId || null, groups, reasons })
+  }
   const preNarrowingToolDefinitions = toolDefinitions
   if (
     shouldUseLocalDocumentToolSet(content as RunMessage, effectiveExecutionOptions?.requestEnvelope)
@@ -395,6 +412,7 @@ export function prepareAgentSdkTurn(
     requiresLocalDocumentWrite,
     providerContent,
     recentCollectionIntent,
+    requestedCapabilityConflicts,
     preNarrowingToolDefinitions,
     toolDefinitions,
     turnFollowup

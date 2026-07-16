@@ -35,6 +35,7 @@ const DEFAULT_CONFLICTS: Record<ReminderTopic, ReadonlyArray<ReminderTopic>> = {
   'skill-catalog': [],
   // P3-2 — 脚本执行同意缺失提醒；selected 轮独立文案，no conflicts。
   'skill-shell-consent': [],
+  'tool-capability-conflict': [],
 }
 
 export function composeSystemReminder(

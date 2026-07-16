@@ -9,8 +9,9 @@
  * breakdown (vision / history / tool_results / skill_inline / reminders) — so
  * "is the same image re-sent every turn?" is answerable from the ledger. This
  * gate pins that the metric exists, carries the section fields, is emitted on
- * EVERY provider call (not only when compaction fires), and is NOT a rename of
- * context_bill. Behavior is unchanged (instrumentation only).
+ * EVERY provider call (not only when compaction fires), bills the exact
+ * ModelRequest.tools snapshot rather than re-running dynamic predicates, and
+ * is NOT a rename of context_bill.
  */
 
 const { existsSync, readFileSync } = require('node:fs')
@@ -81,49 +82,45 @@ function main() {
   if (!provider) {
     violations.push({ file: PROVIDER_FILE, reason: 'missing file' })
   } else {
+    if (!/instrumentProviderRequests\(params\.provider,[\s\S]{0,500}?request\)\s*=>/.test(provider)) {
+      violations.push({
+        file: PROVIDER_FILE,
+        reason: 'must instrument the actual ModelRequest boundary'
+      })
+    }
+    if (/resolveEnabledSdkToolsForRequest\(activeAgent,\s*context\)/.test(provider)) {
+      violations.push({
+        file: PROVIDER_FILE,
+        reason: 'must not re-run SDK tool predicates inside callModelInputFilter'
+      })
+    }
+    if (!/configuredToolSchemaCount\s*=\s*params\.tools\.length/.test(provider)) {
+      violations.push({
+        file: PROVIDER_FILE,
+        reason: 'must keep the registered tool count separate from enabled wire tools'
+      })
+    }
+    if (!/beforeInput:\s*pending\.beforeInput[\s\S]{0,180}?tools:\s*request\.tools/.test(provider)) {
+      violations.push({
+        file: PROVIDER_FILE,
+        reason: 'diagnostic bill must use the actual ModelRequest tool snapshot'
+      })
+    }
     if (
-      !/recordProviderDiagnosticRequestBill\(\s*\{[\s\S]{0,300}?beforeInput:\s*modelData\.input[\s\S]{0,120}?instructions:\s*modelData\.instructions/.test(
+      !/recordProviderWireRequestBill\(\s*\{[\s\S]{0,260}?diagnostic,[\s\S]{0,160}?wireInput:\s*modelRequestInputItems\(request\.input\)[\s\S]{0,120}?instructions:\s*request\.systemInstructions/.test(
         provider
       )
     ) {
       violations.push({
         file: PROVIDER_FILE,
         reason:
-          'must record the diagnostic bill over modelData.instructions + modelData.input + params.tools'
+          'must record the true wire bill at the ModelRequest boundary and bind it to the diagnostic bill'
       })
     }
-    if (!/beforeInput:\s*modelData\.input[\s\S]{0,180}?tools:\s*params\.tools/.test(provider)) {
+    if (!/wireInput:\s*modelRequestInputItems\(request\.input\)[\s\S]{0,180}?tools:\s*request\.tools/.test(provider)) {
       violations.push({
         file: PROVIDER_FILE,
-        reason: 'diagnostic bill must include the exact tool schemas supplied to the Agent'
-      })
-    }
-    // The diagnostic bill must be emitted BEFORE compaction so a failed
-    // compaction cannot erase the pre-compaction evidence.
-    const billIdx = provider.indexOf('recordProviderDiagnosticRequestBill(')
-    const compactIdx = provider.indexOf('compactAgentInputItems(modelData.input')
-    if (billIdx === -1 || compactIdx === -1 || billIdx > compactIdx) {
-      violations.push({
-        file: PROVIDER_FILE,
-        reason:
-          'provider_request_bill must be emitted before compactAgentInputItems (every call, not only on compaction)'
-      })
-    }
-    if (
-      !/recordProviderWireRequestBill\(\s*\{[\s\S]{0,260}?diagnostic,[\s\S]{0,160}?wireInput,[\s\S]{0,120}?instructions:\s*modelData\.instructions/.test(
-        provider
-      )
-    ) {
-      violations.push({
-        file: PROVIDER_FILE,
-        reason:
-          'must record the true wire bill after compaction and bind it to the diagnostic bill'
-      })
-    }
-    if (!/wireInput,[\s\S]{0,180}?tools:\s*params\.tools/.test(provider)) {
-      violations.push({
-        file: PROVIDER_FILE,
-        reason: 'wire bill must include the exact tool schemas supplied to the Agent'
+        reason: 'wire bill must use request.input and request.tools from the same ModelRequest'
       })
     }
   }
@@ -143,6 +140,11 @@ function main() {
     for (const metric of ['provider_request_bill', 'provider_wire_request_bill']) {
       if (!new RegExp(`logAgentMetric\\(\\s*['"]${metric}['"]`).test(instrumentation)) {
         violations.push({ file: INSTRUMENTATION_FILE, reason: `must emit ${metric}` })
+      }
+    }
+    for (const field of ['configuredToolSchemaCount', 'disabledToolSchemaCount']) {
+      if (!new RegExp(`\\b${field}\\b`).test(instrumentation)) {
+        violations.push({ file: INSTRUMENTATION_FILE, reason: `metrics must include ${field}` })
       }
     }
     if (/provider_request_bill[\s\S]{0,80}context_bill/.test(instrumentation)) {

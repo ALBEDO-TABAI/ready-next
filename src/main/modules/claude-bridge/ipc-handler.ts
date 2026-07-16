@@ -436,6 +436,7 @@ interface PersistAskUserQuestionsCardArgs {
   conversationId: string | null
   scopeId?: string | null
   requestId?: string | null
+  responsePolicy?: 'local_or_remote' | 'local_renderer_only'
   questions: AskUserQuestionSpec[]
   askedAt: number
 }
@@ -469,6 +470,7 @@ function persistAskUserQuestionsCardPending(args: PersistAskUserQuestionsCardArg
         askedAt: args.askedAt,
         scopeId: args.scopeId || null,
         requestId: args.requestId || null,
+        responsePolicy: args.responsePolicy || 'local_or_remote',
       },
     },
   )
@@ -731,7 +733,9 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
     // Phase I P0 —— 远程 scope 的卡同时转投微信线程（本地 push 保持原样，
     // 双出口）。非渠道 scope 在 runtime 内零动作；转投失败只记 metric，
     // 本地卡照常可答（合同条款 1/5）。
-    void runtime?.forwardAskUserCardToRemoteChannel(event).catch(() => undefined)
+    if (event.responsePolicy !== 'local_renderer_only') {
+      void runtime?.forwardAskUserCardToRemoteChannel(event).catch(() => undefined)
+    }
   })
   registerAskUserQuestionsCardPersistor((args) => persistAskUserQuestionsCardPending(args))
   // Phase M（2026-07-05）—— MCP 管理面 IPC group（status/saveConfig/reload）+

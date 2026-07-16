@@ -13,13 +13,23 @@ import {
 } from '../../../shared/ai-providers'
 import { getDatabase } from '../database'
 
+interface SettingsDatabaseLike {
+  getSetting(key: string): string | undefined
+  setSetting(key: string, value: string): void
+  getRawDb(): { exec(sql: string): void } | null
+}
+
 export class AppSettingsRepository {
+  constructor(
+    private readonly getSettingsDatabase: () => SettingsDatabaseLike = getDatabase,
+  ) {}
+
   getSetting(key: string): string | undefined {
-    return getDatabase().getSetting(key)
+    return this.getSettingsDatabase().getSetting(key)
   }
 
   setSetting(key: string, value: string): void {
-    getDatabase().setSetting(key, value)
+    this.getSettingsDatabase().setSetting(key, value)
   }
 
   getAllSettings(): Record<string, string> {
@@ -57,6 +67,10 @@ export class AppSettingsRepository {
 
   getAIConfig(): AIModelConfig | null {
     return getActiveAIConfig(this.getAIWorkspace())
+  }
+
+  getActiveAIProfileId(): string | null {
+    return this.getAIWorkspace().activeProfileId || null
   }
 
   setAIConfig(config: AIModelConfig): void {
@@ -138,15 +152,29 @@ export class AppSettingsRepository {
   }
 
   private persistAIWorkspace(normalizedWorkspace: AIProviderWorkspace): void {
-    this.setSetting('ai_provider_workspace', JSON.stringify(normalizedWorkspace))
-
     const legacyPayload = deriveLegacyAISettingsPayload(normalizedWorkspace)
     const activeConfig = legacyPayload.aiModelConfig || getActiveAIConfig(normalizedWorkspace)
-    if (activeConfig) {
-      this.setSetting('ai_model_config', JSON.stringify(activeConfig))
-    }
-    if (legacyPayload.aiSavedConfigs) {
-      this.setSetting('ai_saved_configs', JSON.stringify(legacyPayload.aiSavedConfigs))
+    const database = this.getSettingsDatabase()
+    const rawDb = database.getRawDb()
+    if (!rawDb) throw new Error('Database not available')
+
+    rawDb.exec('BEGIN IMMEDIATE')
+    try {
+      database.setSetting('ai_provider_workspace', JSON.stringify(normalizedWorkspace))
+      if (activeConfig) {
+        database.setSetting('ai_model_config', JSON.stringify(activeConfig))
+      }
+      if (legacyPayload.aiSavedConfigs) {
+        database.setSetting('ai_saved_configs', JSON.stringify(legacyPayload.aiSavedConfigs))
+      }
+      rawDb.exec('COMMIT')
+    } catch (error) {
+      try {
+        rawDb.exec('ROLLBACK')
+      } catch {
+        // silent-catch: preserve the original settings write failure.
+      }
+      throw error
     }
   }
 }

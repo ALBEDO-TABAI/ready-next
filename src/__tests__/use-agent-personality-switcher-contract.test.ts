@@ -105,7 +105,7 @@ describe('useAgent personality switcher contract', () => {
 
     assert.deepEqual(
       useAgent.getState().agents.map((agent) => agent.name),
-      ['butler', 'copywriter', 'video-editor', 'analyst'],
+      ['butler', 'copywriter', 'video-editor', 'analyst', 'operator'],
     )
     assert.equal(useAgent.getState().currentAgent, 'butler')
 
@@ -118,7 +118,7 @@ describe('useAgent personality switcher contract', () => {
 
     assert.deepEqual(
       useAgent.getState().agents.map((agent) => agent.name),
-      ['butler', 'copywriter', 'video-editor', 'analyst'],
+      ['butler', 'copywriter', 'video-editor', 'analyst', 'operator'],
     )
     assert.equal(useAgent.getState().currentAgent, 'butler')
   })

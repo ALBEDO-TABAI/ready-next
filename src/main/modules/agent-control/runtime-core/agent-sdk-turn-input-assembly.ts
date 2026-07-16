@@ -13,6 +13,7 @@ import type {
   TaskBudgetRuntime
 } from '../contracts/run-contracts'
 import { assertCurrentMessageCapability } from '../domain-adapters/message-capability-filter'
+import type { RequestedCapabilityConflict } from '../domain-adapters/capability-resolver'
 import { loadBrowserDisciplineText } from '../domain-adapters/browser-discipline-asset'
 import { logAgentMetric } from '../metrics'
 import type { SkillToolAuthorization } from '../skills/skill-tool-authorization'
@@ -21,6 +22,7 @@ import { moveResponseStyleReminderToEnd } from '../user-profile-prompt'
 import { registerSkillCatalogReminder } from '../system-reminders/skill-catalog-reminder'
 import { registerSkillShellConsentReminder } from '../system-reminders/skill-shell-consent-reminder'
 import { createSystemReminderRegistry } from '../system-reminders/system-reminder-registry'
+import { registerToolCapabilityConflictReminder } from '../system-reminders/tool-capability-conflict-reminder'
 import type { ToolDefinition } from '../tools-runtime/tool-definition'
 import { TOOL_ERROR_METRICS } from '../tools-runtime/tool-error-metrics'
 import { buildDocumentSurfaceGuidance } from '../tool-policy/execution-tool-config'
@@ -58,6 +60,7 @@ export interface AgentSdkTurnInputAssemblyContext {
   capabilities: ReturnType<typeof resolveAIConfigCapabilities>
   authorization: SkillToolAuthorization
   skillCatalogSnapshot: readonly AgentSdkSkillCatalogSnapshotEntry[]
+  requestedCapabilityConflicts: readonly RequestedCapabilityConflict[]
   emitOutput: (
     chunk: string,
     type: string,
@@ -104,6 +107,7 @@ export function assembleAgentSdkTurnInput(
     capabilities,
     authorization,
     skillCatalogSnapshot,
+    requestedCapabilityConflicts,
     emitOutput,
     finalizeEarlyReturn
   } = ctx
@@ -134,17 +138,16 @@ export function assembleAgentSdkTurnInput(
     (definition) => definition.name === 'use_skill'
   )
 
-  let skillReminderText = ''
+  const turnRegistry = createSystemReminderRegistry()
   if (canActivateSkill || authorization.mode === 'selected') {
-    const catalogRegistry = createSystemReminderRegistry()
     if (canActivateSkill) {
-      registerSkillCatalogReminder(catalogRegistry, skillCatalogSnapshot)
+      registerSkillCatalogReminder(turnRegistry, skillCatalogSnapshot)
     }
     if (authorization.mode === 'selected') {
       const activeSkill = skillCatalogSnapshot.find((skill) => skill.id === authorization.skillId)
       if (activeSkill) {
         try {
-          registerSkillShellConsentReminder(catalogRegistry, {
+          registerSkillShellConsentReminder(turnRegistry, {
             skillName: String(activeSkill.name || authorization.skillId),
             hasScripts: skillDirHasScripts(activeSkill.managedPath),
             isEmbedded: isEmbeddedSkill(authorization.skillId),
@@ -155,8 +158,9 @@ export function assembleAgentSdkTurnInput(
         }
       }
     }
-    skillReminderText = catalogRegistry.compose() || ''
   }
+  registerToolCapabilityConflictReminder(turnRegistry, requestedCapabilityConflicts)
+  const skillReminderText = turnRegistry.compose() || ''
 
   const browserInstruction = hasBrowserTools
     ? [

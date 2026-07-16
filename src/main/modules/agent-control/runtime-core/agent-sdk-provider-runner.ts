@@ -1,4 +1,15 @@
-import { Agent, Runner, type ModelResponse } from '@openai/agents'
+import {
+  Agent,
+  RunContext,
+  Runner,
+  type AgentOutputType,
+  type AgentInputItem,
+  type Model,
+  type ModelProvider,
+  type ModelRequest,
+  type ModelResponse,
+  type Tool
+} from '@openai/agents'
 
 import { compactAgentInputItems } from '../compaction/compact-agent-input'
 import { logAgentMetric } from '../metrics'
@@ -25,13 +36,88 @@ export function createReadyAgentForRun(params: ReadyAgentSdkRunParams): Agent {
   })
 }
 
+export async function resolveEnabledSdkToolsForRequest<
+  TContext,
+  TOutput extends AgentOutputType
+>(
+  agent: Agent<TContext, TOutput>,
+  context: TContext | undefined
+): Promise<Tool<TContext>[]> {
+  return agent.getAllTools(new RunContext(context))
+}
+
+interface PendingProviderRequestBill {
+  beforeInput: AgentInputItem[]
+  compacted: boolean
+}
+
+function modelRequestInputItems(input: ModelRequest['input']): AgentInputItem[] {
+  return typeof input === 'string'
+    ? [{ role: 'user', content: input }]
+    : input
+}
+
+function instrumentProviderRequests(
+  provider: ModelProvider,
+  onRequest: (request: ModelRequest) => void,
+): ModelProvider {
+  return {
+    async getModel(modelName?: string): Promise<Model> {
+      const model = await provider.getModel(modelName)
+      const instrumented: Model = {
+        getResponse(request) {
+          onRequest(request)
+          return model.getResponse(request)
+        },
+        getStreamedResponse(request) {
+          onRequest(request)
+          return model.getStreamedResponse(request)
+        },
+      }
+      if (model.getRetryAdvice) {
+        instrumented.getRetryAdvice = (args) => model.getRetryAdvice!(args)
+      }
+      return instrumented
+    },
+  }
+}
+
 export async function runWithOpenAIAgentsSdk(
   params: ReadyAgentSdkRunParams
 ): Promise<ReadyAgentSdkRunResult> {
   const requestBills: ProviderRequestBills[] = []
+  const pendingRequestBills: PendingProviderRequestBill[] = []
   const agent = createReadyAgentForRun(params)
+  const billContext = {
+    agentName: params.agentName,
+    sessionId: params.sessionId || null,
+    runId: params.runId,
+    taskId: params.taskId || null,
+    contextWindowTokens: params.contextWindowTokens,
+  }
+  const modelProvider = instrumentProviderRequests(params.provider, (request) => {
+    const pending = pendingRequestBills.shift()
+    if (!pending) return
+    const configuredToolSchemaCount = params.tools.length
+    const diagnostic = recordProviderDiagnosticRequestBill({
+      ...billContext,
+      beforeInput: pending.beforeInput,
+      instructions: request.systemInstructions,
+      tools: request.tools,
+      configuredToolSchemaCount,
+    })
+    requestBills.push(recordProviderWireRequestBill({
+      ...billContext,
+      diagnostic,
+      wireInput: modelRequestInputItems(request.input),
+      instructions: request.systemInstructions,
+      tools: request.tools,
+      configuredToolSchemaCount,
+      compacted: pending.compacted,
+    }))
+  })
   const runner = new Runner({
-    modelProvider: params.provider,
+    modelProvider,
     tracingDisabled: true,
     traceIncludeSensitiveData: false,
     workflowName: 'Ready Agent SDK Runtime',
@@ -43,33 +129,13 @@ export async function runWithOpenAIAgentsSdk(
     session: params.session,
     maxTurns: params.maxTurns,
     callModelInputFilter: async ({ modelData }) => {
-      const billContext = {
-        agentName: params.agentName,
-        sessionId: params.sessionId || null,
-        runId: params.runId,
-        taskId: params.taskId || null,
-        contextWindowTokens: params.contextWindowTokens
-      }
-      const diagnostic = recordProviderDiagnosticRequestBill({
-        ...billContext,
-        beforeInput: modelData.input,
-        instructions: modelData.instructions,
-        tools: params.tools
-      })
       const result = await compactAgentInputItems(modelData.input, {
         windowTokens: params.contextWindowTokens
       })
-      const wireInput = result.compacted ? result.items : modelData.input
-      requestBills.push(
-        recordProviderWireRequestBill({
-          ...billContext,
-          diagnostic,
-          wireInput,
-          instructions: modelData.instructions,
-          tools: params.tools,
-          compacted: result.compacted
-        })
-      )
+      pendingRequestBills.push({
+        beforeInput: modelData.input,
+        compacted: result.compacted,
+      })
       if (!result.compacted) return modelData
       logAgentMetric('agent_sdk_auto_context_compacted', {
         agentName: params.agentName,

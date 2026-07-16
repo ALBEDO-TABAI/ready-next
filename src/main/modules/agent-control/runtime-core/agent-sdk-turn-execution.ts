@@ -123,6 +123,7 @@ export async function executeAgentSdkPreparedTurn(
     finalizeBudgetCheckpointReturn: finalizeBudgetCheckpointReturnFromContext,
     buildResult,
     recentCollectionIntent,
+    requestedCapabilityConflicts,
     turnFollowup,
     useTextToolBridge,
     documentTargetGuard,
@@ -662,6 +663,7 @@ export async function executeAgentSdkPreparedTurn(
       capabilities,
       authorization,
       skillCatalogSnapshot,
+      requestedCapabilityConflicts,
       emitOutput,
       finalizeEarlyReturn
     })

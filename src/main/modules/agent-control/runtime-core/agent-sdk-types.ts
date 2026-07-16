@@ -15,8 +15,13 @@ import type { AIConfigLoad } from '../../claude-bridge/direct-chat-ai-config'
 import type { SkillToolAuthorization } from '../skills/skill-tool-authorization'
 import type { ToolRuntimeActiveFrameContext } from '../tools-runtime/tool-runtime'
 import type { AgentSpawnContext } from '../../../../shared/skill-host-contract'
+import type {
+  ActiveToolUseModeUpdateRequest,
+  ActiveToolUseModeUpdateResult
+} from './tool-use-mode-config-update'
 import type { BrowserTurnLease } from '../../browser-engine/agent-browser-turn-lease'
 import type { DomainAdapter } from '../domain-adapters/domain-adapter'
+import type { CapabilityResolution } from '../domain-adapters/capability-resolver'
 import type {
   resumeSkillChildRun as defaultResumeSkillChildRun,
   waitForSkillChildRunClose as defaultWaitForSkillChildRunClose
@@ -280,6 +285,9 @@ export interface AgentSdkRuntimeDeps {
   domainAdapters?: ReadonlyArray<DomainAdapter>
   loadAIConfig?: () => AIConfigLoad
   runAgent?: (params: ReadyAgentSdkRunParams) => Promise<ReadyAgentSdkRunResult>
+  setActiveToolUseMode?: (
+    request: ActiveToolUseModeUpdateRequest
+  ) => ActiveToolUseModeUpdateResult | Promise<ActiveToolUseModeUpdateResult>
   listToolDefinitions?: (params: {
     message: RunMessage
     sessionId?: string
@@ -296,6 +304,7 @@ export interface AgentSdkRuntimeDeps {
     requestEnvelope?: unknown
     /** P2-2 — the L1 skill catalog is non-empty this turn (gates use_skill exposure). */
     skillCatalogAvailable?: boolean
+    onCapabilityResolution?: (resolution: CapabilityResolution) => void
   }) => ToolDefinition[]
   executeToolCall?: (
     toolName: string,

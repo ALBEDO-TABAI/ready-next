@@ -109,6 +109,7 @@ function readDismissedBottomTaskKeys(): Set<string> {
     if (!Array.isArray(parsed)) return new Set()
     return new Set(parsed.filter((value): value is string => typeof value === 'string' && Boolean(value.trim())))
   } catch {
+    // silent-catch: malformed presentation-only state falls back to no dismissed cards.
     return new Set()
   }
 }
@@ -119,7 +120,7 @@ function persistDismissedBottomTaskKeys(keys: Set<string>): void {
     const values = [...keys].slice(-MAX_PERSISTED_DISMISSED_TASKS)
     window.localStorage.setItem(DISMISSED_BOTTOM_TASK_STORAGE_KEY, JSON.stringify(values))
   } catch {
-    // Presentation-only persistence must never block task rendering.
+    // silent-catch: presentation-only persistence must never block task rendering.
   }
 }
 

@@ -44,6 +44,7 @@ export function recordProviderDiagnosticRequestBill(
     beforeInput: AgentInputItem[]
     instructions?: string
     tools?: unknown[]
+    configuredToolSchemaCount?: number
   }
 ): ProviderRequestBill {
   const diagnostic = billModelInput(params.beforeInput, params.instructions, params.tools)
@@ -53,6 +54,11 @@ export function recordProviderDiagnosticRequestBill(
     itemCount: diagnostic.itemCount,
     visionItems: diagnostic.visionItems,
     toolSchemaCount: diagnostic.toolSchemaCount,
+    configuredToolSchemaCount: params.configuredToolSchemaCount ?? diagnostic.toolSchemaCount,
+    disabledToolSchemaCount: Math.max(
+      0,
+      (params.configuredToolSchemaCount ?? diagnostic.toolSchemaCount) - diagnostic.toolSchemaCount
+    ),
     sections: diagnostic.sections,
     estimatedCoverage: 'instructions_input_and_tool_schemas',
     omittedSections: []
@@ -66,6 +72,7 @@ export function recordProviderWireRequestBill(
     wireInput: AgentInputItem[]
     instructions?: string
     tools?: unknown[]
+    configuredToolSchemaCount?: number
     compacted: boolean
   }
 ): ProviderRequestBills {
@@ -76,6 +83,11 @@ export function recordProviderWireRequestBill(
     itemCount: wire.itemCount,
     visionItems: wire.visionItems,
     toolSchemaCount: wire.toolSchemaCount,
+    configuredToolSchemaCount: params.configuredToolSchemaCount ?? wire.toolSchemaCount,
+    disabledToolSchemaCount: Math.max(
+      0,
+      (params.configuredToolSchemaCount ?? wire.toolSchemaCount) - wire.toolSchemaCount
+    ),
     sections: wire.sections,
     compacted: params.compacted,
     savedTokens: Math.max(0, params.diagnostic.totalTokens - wire.totalTokens),
@@ -91,6 +103,7 @@ export function recordProviderRequestBills(
     wireInput: AgentInputItem[]
     instructions?: string
     tools?: unknown[]
+    configuredToolSchemaCount?: number
     compacted: boolean
   }
 ): ProviderRequestBills {
