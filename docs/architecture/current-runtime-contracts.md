@@ -13,6 +13,7 @@
 - BrowserView 是原生覆盖层，不受 DOM `z-index` 控制。任何 primary、secondary、关闭分栏或卸载转换只要让 Browser 离开可见 mode 集合，都必须先经 `hide-all` intent + 匹配 ack，再提交 DOM mode；恢复后按稳定 bounds 显示。文件打开使用同一协调入口，但只保留这段正确性等待，不串行等待 ritual 或场景滑动。
 - 聊天输入框液态玻璃只以真实 Electron dev 为验收面；`#/liquid-test` 只用于调参。生产输入框不得加外部暗色阴影或静态截图贴片，消息末尾必须按浮层实测高度留白。
 - Windows 顶部 chrome 保留系统最小化、最大化、关闭按钮；Ready 圆点在左上，中心按 `WORKBENCH_EDGE_RAIL_SLOT_INSET_X + WORKBENCH_EDGE_RAIL_SLOT_SIZE / 2` 与左轨槽位对齐（当前 25px）。`titleBarStyle: 'hidden'` + `titleBarOverlay` 负责同层背景，Mica 只能是有普通背景 fallback 的增强。
+- 窗口截图必须从 Main 捕获完整 `BrowserWindow` 合成面，不得只截 Renderer DOM 而遗漏 BrowserView。PNG 的窗口主体必须完全不透明；普通 macOS 窗口补齐原生窗口按钮，只在四角外侧保留透明抗锯齿圆角；全屏/最大化不强行裁圆角。快捷键指南与实际解析器共用 `src/shared/app-shortcuts.ts` 的单一目录。
 
 ## 2. 会话、资源与工具面
 

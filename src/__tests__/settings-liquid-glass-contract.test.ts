@@ -128,6 +128,7 @@ test('shared liquid glass surfaces remain real backdrop blur instead of flat pai
 test('compact utility settings opt into short control slots so labels do not collapse into vertical stacks', () => {
   const settingsPage = readWorkspaceFile('src/renderer/pages/Settings.tsx')
   const settingsShared = readWorkspaceFile('src/renderer/pages/settings/settings-shared.tsx')
+  const shortcutCatalog = readWorkspaceFile('src/shared/app-shortcuts.ts')
 
   // Note: storage section (cacheSize / clearCache) is rendered via the dynamic
   // StorageSettingsPanel since D1; it manages its own layout and no longer
@@ -145,11 +146,13 @@ test('compact utility settings opt into short control slots so labels do not col
     settingsPage,
     /setting\.type === 'button' && \([\s\S]*?minWidth: SETTINGS_ROW_CONTROL_MIN_WIDTH,\s+justifyContent: 'center',/,
   )
-  assert.match(settingsPage, /id: 'newTask'[\s\S]*?type: 'readonly'/)
-  assert.match(settingsPage, /id: 'sendMessage'[\s\S]*?type: 'readonly'/)
-  assert.match(settingsPage, /id: 'search'[\s\S]*?type: 'readonly'/)
-  assert.match(settingsPage, /id: 'toggleSidebar'[\s\S]*?type: 'readonly'/)
-  assert.match(settingsPage, /id: 'switchMode'[\s\S]*?type: 'readonly'/)
+  assert.match(settingsPage, /settings: READY_SHORTCUT_GUIDE\.map\(\(item\) => \(\{ \.\.\.item, type: 'readonly' as const \}\)\)/)
+  assert.match(shortcutCatalog, /id: 'captureWindow'/)
+  assert.match(shortcutCatalog, /id: 'sendMessage'/)
+  assert.match(shortcutCatalog, /id: 'toggleSidebar'/)
+  assert.match(shortcutCatalog, /id: 'switchMode'/)
+  assert.doesNotMatch(shortcutCatalog, /id: 'newTask'/)
+  assert.doesNotMatch(shortcutCatalog, /id: 'globalSearch'/)
   assert.match(settingsPage, /id: 'version'[\s\S]*?type: 'readonly'/)
   assert.match(settingsPage, /id: 'checkUpdate'[\s\S]*?type: 'button'/)
 })

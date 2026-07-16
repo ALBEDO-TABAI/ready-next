@@ -3,7 +3,7 @@
 import { app, shell, BrowserWindow, ipcMain, protocol, nativeImage, nativeTheme, Menu, dialog, clipboard, powerMonitor, type MenuItemConstructorOptions, type NativeImage } from 'electron'
 import { join, extname, isAbsolute, basename, resolve } from 'path'
 import { createReadStream, statSync, existsSync, appendFileSync } from 'fs'
-import { readFile } from 'fs/promises'
+import { readFile, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 
@@ -48,6 +48,7 @@ import type { PetWindowManager } from './modules/pet/pet-window-manager'
 import { applyBundledAISettingsSeed } from './modules/settings-engine/seed-loader'
 import { setupAppCacheIPC } from './modules/app-control/cache-stats-ipc'
 import { setupNativeContextMenuIPC } from './modules/app-control/native-context-menu-ipc'
+import { captureReadyWindow, type ReadyWindowCaptureResult } from './modules/app-control/window-capture-service'
 import { isPathAllowed } from './modules/app-control/local-path-safety'
 import { reconcileStartupRunsOnStartup } from './modules/app-control/startup-run-reconciler'
 import { setupBoardIPC } from './modules/board-engine/ipc-handler'
@@ -729,6 +730,25 @@ function setupGlobalIPC(): void {
     mainWindow?.close()
   })
   ipcMain.handle('window:refreshTransparentSurface', () => refreshMainWindowTransparentSurface())
+
+  let windowCaptureInFlight: Promise<ReadyWindowCaptureResult> | null = null
+  ipcMain.handle('app:captureWindow', () => {
+    if (windowCaptureInFlight) return windowCaptureInFlight
+
+    const captureTask = captureReadyWindow({
+      window: mainWindow,
+      desktopPath: app.getPath('desktop'),
+      now: () => new Date(),
+      platform: process.platform,
+      createPngFromBitmap: (bitmap, size) => nativeImage.createFromBitmap(bitmap, size).toPNG(),
+      writeFile,
+    })
+    windowCaptureInFlight = captureTask
+    void captureTask.finally(() => {
+      if (windowCaptureInFlight === captureTask) windowCaptureInFlight = null
+    })
+    return captureTask
+  })
 
   ipcMain.on('app:startNativeFileDrag', (event, paths: unknown) => {
     try {

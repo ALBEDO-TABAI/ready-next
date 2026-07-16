@@ -1,10 +1,11 @@
-import { useEffect, useCallback } from 'react'
+import { useEffect, useCallback, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useMode, type WorkbenchMode } from '../stores/useMode'
 import { useWorkspace } from '../stores/useWorkspace'
 import { useDocTabs } from '../stores/useDocTabs'
 import { requestWorkbenchModeChange } from '../modules/workbench/mode-transition'
 import { shouldIgnoreGlobalKeyboardShortcut } from '../modules/keyboard/shortcut-guard'
+import { resolveReadyAppShortcut, type ReadyAppShortcutAction } from '../../shared/app-shortcuts'
 
 type ShortcutLikeEvent = {
   key: string
@@ -26,6 +27,42 @@ export function useKeyboardShortcuts() {
   const navigate = useNavigate()
   const { appMode, setWorkbenchMode, setReadySubMode, setAppMode, toggleMode } = useMode()
   const { toggleSidebar } = useWorkspace()
+  const [captureFeedback, setCaptureFeedback] = useState<{ kind: 'success' | 'error'; message: string } | null>(null)
+  const captureFeedbackTimerRef = useRef<number | null>(null)
+
+  const publishCaptureFeedback = useCallback((feedback: { kind: 'success' | 'error'; message: string }) => {
+    setCaptureFeedback(feedback)
+    if (captureFeedbackTimerRef.current !== null) {
+      window.clearTimeout(captureFeedbackTimerRef.current)
+    }
+    captureFeedbackTimerRef.current = window.setTimeout(() => {
+      setCaptureFeedback(null)
+      captureFeedbackTimerRef.current = null
+    }, 3600)
+  }, [])
+
+  const captureCurrentWindow = useCallback(async () => {
+    const capture = window.electronAPI?.app?.captureWindow
+    if (!capture) {
+      publishCaptureFeedback({ kind: 'error', message: '当前版本不支持窗口截图' })
+      return
+    }
+
+    try {
+      const result = await capture()
+      if (!result.success || !result.path) {
+        publishCaptureFeedback({ kind: 'error', message: result.error || '截图失败' })
+        return
+      }
+      const filename = result.path.split(/[\\/]/).pop() || result.path
+      publishCaptureFeedback({ kind: 'success', message: `已保存到桌面：${filename}` })
+    } catch (error) {
+      publishCaptureFeedback({
+        kind: 'error',
+        message: `截图失败：${error instanceof Error ? error.message : String(error)}`,
+      })
+    }
+  }, [publishCaptureFeedback])
 
   const saveActiveDocument = useCallback(async () => {
     const { activeTabId, tabs, setTabPath, renameTab, markTabSaved } = useDocTabs.getState()
@@ -64,6 +101,15 @@ export function useKeyboardShortcuts() {
   }, [appMode, navigate, setAppMode, setReadySubMode, setWorkbenchMode])
 
   const handleShortcut = useCallback((e: ShortcutLikeEvent) => {
+    const action = resolveReadyAppShortcut(e)
+    const preventDefault = () => e.preventDefault?.()
+
+    if (action === 'capture-window') {
+      preventDefault()
+      void captureCurrentWindow()
+      return true
+    }
+
     if (shouldIgnoreGlobalKeyboardShortcut({
       target: e.target,
       activeElement: typeof document !== 'undefined' ? document.activeElement : null,
@@ -73,51 +119,47 @@ export function useKeyboardShortcuts() {
       return false
     }
 
-    const meta = Boolean(e.metaKey) || Boolean(e.ctrlKey)
-    const shift = Boolean(e.shiftKey)
-    const preventDefault = () => e.preventDefault?.()
+    if (!action) return false
 
-    if (!meta && !shift && e.key === 'Home') {
+    if (action === 'open-ready') {
       preventDefault()
       setAppMode('ready')
       navigate('/ready')
       return true
     }
 
-    if (!meta && !shift) {
-      const functionModeMap: Record<string, WorkbenchMode> = {
-        F1: 'browser',
-        F2: 'document',
-        F3: 'rss',
-        F4: 'calendar',
-      }
-      const functionMode = functionModeMap[e.key]
-      if (functionMode) {
-        preventDefault()
-        activateWorkbenchMode(functionMode)
-        return true
-      }
+    const modeByAction: Partial<Record<ReadyAppShortcutAction, WorkbenchMode>> = {
+      'switch-browser': 'browser',
+      'switch-document': 'document',
+      'switch-rss': 'rss',
+      'switch-calendar': 'calendar',
+    }
+    const targetMode = modeByAction[action]
+    if (targetMode) {
+      preventDefault()
+      activateWorkbenchMode(targetMode)
+      return true
     }
 
-    if (meta && e.key === ',') {
+    if (action === 'open-settings') {
       preventDefault()
       navigate('/settings')
       return true
     }
 
-    if (meta && e.key.toLowerCase() === 'b') {
+    if (action === 'toggle-sidebar') {
       preventDefault()
       toggleSidebar()
       return true
     }
 
-    if (meta && e.key.toLowerCase() === 's' && !shift) {
+    if (action === 'save-document') {
       preventDefault()
       void saveActiveDocument()
       return true
     }
 
-    if (meta && e.key.toLowerCase() === 'w' && !shift) {
+    if (action === 'close-document') {
       preventDefault()
       const { activeTabId, closeTab } = useDocTabs.getState()
       if (activeTabId) {
@@ -126,7 +168,7 @@ export function useKeyboardShortcuts() {
       return true
     }
 
-    if (meta && e.key.toLowerCase() === 't' && !shift) {
+    if (action === 'new-document') {
       preventDefault()
       const { openTab } = useDocTabs.getState()
       openTab('')
@@ -134,28 +176,20 @@ export function useKeyboardShortcuts() {
       return true
     }
 
-    if (meta && e.key === '\\') {
+    if (action === 'toggle-theme') {
       preventDefault()
       toggleMode()
       return true
     }
 
-    if (meta && !shift) {
-      const modeMap: Record<string, WorkbenchMode> = {
-        '1': 'browser',
-        '2': 'document',
-        '3': 'rss',
-        '4': 'calendar',
-      }
-      if (modeMap[e.key]) {
-        preventDefault()
-        activateWorkbenchMode(modeMap[e.key])
-        return true
-      }
-    }
-
     return false
-  }, [activateWorkbenchMode, navigate, saveActiveDocument, setAppMode, setWorkbenchMode, toggleMode, toggleSidebar])
+  }, [activateWorkbenchMode, captureCurrentWindow, navigate, saveActiveDocument, setAppMode, toggleMode, toggleSidebar])
+
+  useEffect(() => () => {
+    if (captureFeedbackTimerRef.current !== null) {
+      window.clearTimeout(captureFeedbackTimerRef.current)
+    }
+  }, [])
 
   useEffect(() => {
     const keydownHandler = (e: KeyboardEvent) => {
@@ -177,4 +211,6 @@ export function useKeyboardShortcuts() {
       unsubscribeShortcut?.()
     }
   }, [handleShortcut])
+
+  return { captureFeedback }
 }

@@ -1171,6 +1171,7 @@ const skillsAPI = {
 const appAPI = {
   checkUpdate: () => ipcRenderer.invoke('app:check-update'),
   installUpdate: () => ipcRenderer.invoke('app:install-update'),
+  captureWindow: () => ipcRenderer.invoke('app:captureWindow'),
   writeImageToClipboard: (payload: { path: string; text?: string }) =>
     ipcRenderer.invoke('app:writeImageToClipboard', payload),
   onUpdateStatus: (callback: (data: {

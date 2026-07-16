@@ -35,6 +35,7 @@ import { ExternalServicesSettingsPanel } from './settings/ExternalServicesSettin
 import { McpSettingsPanel } from './settings/McpSettingsPanel'
 import { MemorySettingsSection } from './settings/MemorySettingsSection'
 import { TagForgeSettingsPanel } from './settings/TagForgeSettingsPanel'
+import { READY_SHORTCUT_GUIDE } from '../../shared/app-shortcuts'
 
 // 面板拆分后的导出保口（2026-07-05）：行为测试从 pages/Settings 导入这两个面板，import 面保持零变化。
 export { StorageSettingsPanel } from './settings/StorageSettingsPanel'
@@ -190,14 +191,8 @@ const settingsData: SettingSection[] = [
     id: 'shortcuts',
     title: '快捷键',
     icon: Keyboard,
-    description: '查看和自定义键盘快捷键',
-    settings: [
-      { id: 'newTask', label: '新建任务', type: 'readonly', value: '⌘ N' },
-      { id: 'sendMessage', label: '发送消息', type: 'readonly', value: '⌘ Enter' },
-      { id: 'search', label: '全局搜索', type: 'readonly', value: '⌘ K' },
-      { id: 'toggleSidebar', label: '切换侧边栏', type: 'readonly', value: '⌘ B' },
-      { id: 'switchMode', label: '切换模式', type: 'readonly', value: '⌘ 1-6' }
-    ]
+    description: '查看当前可用的键盘快捷键',
+    settings: READY_SHORTCUT_GUIDE.map((item) => ({ ...item, type: 'readonly' as const })),
   },
   {
     id: 'language',

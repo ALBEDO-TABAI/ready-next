@@ -24,7 +24,7 @@ const StartupPreview = lazy(() => import('./pages/StartupPreview'))
 void primeRSSWarmCache(fetchRSSWarmSnapshot).catch(() => undefined)
 
 function MainAppShell() {
-  useKeyboardShortcuts()
+  const { captureFeedback } = useKeyboardShortcuts()
   usePetActivityBridge()
 
   // `data-theme` 与 `data-skin` / `data-glass-backdrop` 都由 useTheme 单点拥有
@@ -130,6 +130,30 @@ function MainAppShell() {
       <RitualOverlay />
       <SkillAskUserPrompt />
       <SkillInlinedToast />
+      {captureFeedback && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="glass-surface-floating"
+          style={{
+            position: 'fixed',
+            top: 12,
+            left: '50%',
+            zIndex: 100000,
+            maxWidth: 'min(560px, calc(100vw - 180px))',
+            transform: 'translateX(-50%)',
+            borderRadius: 10,
+            padding: '8px 14px',
+            color: captureFeedback.kind === 'success' ? 'var(--success, #218358)' : 'var(--danger, #c0392b)',
+            fontSize: 12,
+            fontWeight: 600,
+            lineHeight: 1.4,
+            pointerEvents: 'none',
+          }}
+        >
+          {captureFeedback.message}
+        </div>
+      )}
     </ErrorBoundary>
   )
 }
