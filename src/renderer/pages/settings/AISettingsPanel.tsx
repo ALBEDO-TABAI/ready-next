@@ -1,6 +1,10 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { ChevronLeft, Loader2, RefreshCw, XCircle } from 'lucide-react'
 import { resolveAIConfigCapabilities, getActiveAIProfile } from '../../../shared/ai-providers'
+import {
+  isKimiK3Config,
+  KIMI_K3_REASONING_EFFORTS,
+} from '../../../shared/ai-providers/kimi-k3'
 import type { CapabilityRuntimeSnapshot } from '../../../shared/ai-capability-runtime'
 import { listSettingsCapabilityGroups, type CapabilityGroupId } from '../../../shared/ai-capability-groups'
 import { useSettings, getProviderDef } from '../../stores/useSettings'
@@ -94,7 +98,11 @@ export function AISettingsPanel() {
     [selectedConfig]
   )
   const models = currentProvider?.models || []
-  const showReasoningEffort = capabilities?.agentProtocol === 'openai' && capabilities?.wireApi === 'responses'
+  const isKimiK3 = isKimiK3Config(selectedConfig)
+  const showReasoningEffort = isKimiK3 || (capabilities?.agentProtocol === 'openai' && capabilities?.wireApi === 'responses')
+  const reasoningEffortOptions = isKimiK3
+    ? KIMI_K3_REASONING_EFFORTS
+    : ['minimal', 'low', 'medium', 'high'] as const
   const capabilityGroups = listSettingsCapabilityGroups()
   const customProfiles = workspace.profiles.filter((profile) => profile.category === 'custom')
   const visibleProfiles = useMemo(
@@ -814,7 +822,7 @@ export function AISettingsPanel() {
                     {showReasoningEffort && (
                       <AISettingsFieldCard
                         title="思考强度"
-                        description="只在 responses 风格接口下显示。"
+                        description={isKimiK3 ? 'K3 支持 low / high / max，默认 high。' : '只在 responses 风格接口下显示。'}
                         control={(
                           <select
                             value={selectedConfig.reasoningEffort || 'high'}
@@ -822,10 +830,9 @@ export function AISettingsPanel() {
                             className="rounded-lg border text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30 cursor-pointer"
                             style={stackedSelectStyle}
                           >
-                            <option value="minimal">minimal</option>
-                            <option value="low">low</option>
-                            <option value="medium">medium</option>
-                            <option value="high">high</option>
+                            {reasoningEffortOptions.map((effort) => (
+                              <option key={effort} value={effort}>{effort}</option>
+                            ))}
                           </select>
                         )}
                       />

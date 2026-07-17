@@ -563,26 +563,47 @@ export function modelInputToAnthropicMessages(
     return [{ role: 'user', content: input }]
   }
   const messages: Array<Record<string, unknown>> = []
+  let lastAssistantResponseId: string | null = null
+  const appendAssistantContent = (
+    item: Record<string, unknown>,
+    contentBlocks: Array<Record<string, unknown>>,
+  ): void => {
+    const responseId = typeof item.id === 'string' && item.id ? item.id : null
+    const thinkingBlocks = readAnthropicThinkingBlocksFromRecord(item)
+    const previous = messages.at(-1)
+    if (
+      responseId
+      && responseId === lastAssistantResponseId
+      && previous?.role === 'assistant'
+      && Array.isArray(previous.content)
+    ) {
+      const previousContent = previous.content as Array<Record<string, unknown>>
+      if (!previousContent.some((block) => block.type === 'thinking')) {
+        previousContent.unshift(...thinkingBlocks)
+      }
+      previousContent.push(...contentBlocks)
+      return
+    }
+    messages.push({
+      role: 'assistant',
+      content: [...thinkingBlocks, ...contentBlocks],
+    })
+    lastAssistantResponseId = responseId
+  }
   for (const rawItem of input || []) {
     if (!rawItem || typeof rawItem !== 'object') continue
     const item = rawItem as Record<string, unknown>
     if (item.type === 'function_call') {
-      const thinkingBlocks = readAnthropicThinkingBlocksFromRecord(item)
-      messages.push({
-        role: 'assistant',
-        content: [
-          ...thinkingBlocks,
-          {
-            type: 'tool_use',
-            id: String(item.callId || item.id || ''),
-            name: String(item.name || ''),
-            input: typeof item.arguments === 'string' ? safeJsonParseObject(item.arguments) : {}
-          }
-        ]
-      })
+      appendAssistantContent(item, [{
+        type: 'tool_use',
+        id: String(item.callId || item.id || ''),
+        name: String(item.name || ''),
+        input: typeof item.arguments === 'string' ? safeJsonParseObject(item.arguments) : {}
+      }])
       continue
     }
     if (item.type === 'function_call_result') {
+      lastAssistantResponseId = null
       const output = stringifyModelVisibleFunctionResult(item.output)
       messages.push({
         role: 'user',
@@ -603,6 +624,17 @@ export function modelInputToAnthropicMessages(
           ? 'user'
           : null
     if (!role) continue
+    if (role === 'assistant') {
+      const normalizedContent = normalizeAnthropicContent(item.content)
+      appendAssistantContent(
+        item,
+        typeof normalizedContent === 'string'
+          ? (normalizedContent ? [{ type: 'text', text: normalizedContent }] : [])
+          : normalizedContent,
+      )
+      continue
+    }
+    lastAssistantResponseId = null
     messages.push({
       role,
       content: normalizeAnthropicContent(item.content)
@@ -626,7 +658,8 @@ export function serializeAnthropicTools(request: ModelRequest): Array<Record<str
 
 export function extractAnthropicOutput(
   json: Record<string, unknown>,
-  fallbackId: string
+  fallbackId: string,
+  responseProviderData?: Record<string, unknown>,
 ): AgentOutputItem[] {
   const output: AgentOutputItem[] = []
   const content = Array.isArray(json.content)
@@ -635,8 +668,12 @@ export function extractAnthropicOutput(
   const thinkingBlocks = content
     .map(sanitizeAnthropicThinkingBlock)
     .filter((block): block is Record<string, unknown> => Boolean(block))
-  const providerData =
-    thinkingBlocks.length > 0 ? { anthropicThinkingBlocks: thinkingBlocks } : undefined
+  const providerData = thinkingBlocks.length > 0 || responseProviderData
+    ? {
+        ...(responseProviderData || {}),
+        ...(thinkingBlocks.length > 0 ? { anthropicThinkingBlocks: thinkingBlocks } : {}),
+      }
+    : undefined
   const text = content
     .filter((block) => block.type === 'text')
     .map((block) => String(block.text || ''))
@@ -647,7 +684,8 @@ export function extractAnthropicOutput(
       type: 'message',
       role: 'assistant',
       status: 'completed',
-      content: [{ type: 'output_text', text }]
+      content: [{ type: 'output_text', text }],
+      ...(providerData ? { providerData } : {})
     } as AgentOutputItem)
   }
   for (const block of content) {

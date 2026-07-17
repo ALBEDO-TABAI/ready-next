@@ -8,6 +8,11 @@ import {
   resolveAIConfigCapabilities,
   type AIProviderWorkspace,
 } from '../../../shared/ai-providers'
+import {
+  applyKimiK3AnthropicHeaders,
+  applyKimiK3AnthropicRequestContract,
+  isKimiK3Config,
+} from '../../../shared/ai-providers/kimi-k3'
 import { AppSettingsRepository } from '../repositories/app-settings-repository'
 import { createRotatingLogger } from '../../utils/rotating-logger'
 import { parseJsonResponse } from '../openai-responses'
@@ -235,19 +240,23 @@ export function setupSettingsIPC(options?: { onSettingChanged?: (key: string, va
         const finalModel = model && model !== '__custom__' && model !== 'custom'
           ? model
           : (useAnthropicCompatForKimiCoding ? 'kimi-for-coding' : 'claude-haiku-3-5-20241022')
+        const isKimiK3 = isKimiK3Config(configToUse)
+        applyKimiK3AnthropicHeaders(headers, configToUse)
+        const requestBody: Record<string, unknown> = {
+          model: finalModel,
+          max_tokens: isKimiK3 ? 1024 : 1,
+          messages: [{ role: 'user', content: 'hi' }],
+        }
+        applyKimiK3AnthropicRequestContract(requestBody, configToUse)
         const resp = await fetch(`${baseUrl}/v1/messages`, {
           method: 'POST',
           headers,
-          body: JSON.stringify({
-            model: finalModel,
-            max_tokens: 1,
-            messages: [{ role: 'user', content: 'hi' }],
-          }),
+          body: JSON.stringify(requestBody),
           signal: AbortSignal.timeout(15000),
         })
         const latencyMs = Date.now() - startTime
 
-        if (resp.ok || resp.status === 400) {
+        if (resp.ok || (!isKimiK3 && resp.status === 400)) {
           return { success: true, data: { latencyMs } }
         }
         if (resp.status === 401 || resp.status === 403) {

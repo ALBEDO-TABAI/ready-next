@@ -4,6 +4,10 @@ import test from 'node:test'
 import { MemorySession, type AgentInputItem } from '@openai/agents'
 
 import type { TaskExecutionBinding } from '../shared/agent-execution-profile'
+import {
+  KIMI_K3_SESSION_IDENTITY,
+  KIMI_K3_SESSION_IDENTITY_FIELD,
+} from '../shared/ai-providers/kimi-k3'
 import type { TaskProjectionRecord } from '../main/modules/agent-control/contracts/run-contracts'
 import type { ReadyAgentSdkRunParams, ReadyAgentSdkRunResult } from '../main/modules/agent-control/runtime-core/agent-sdk-types'
 import {
@@ -302,7 +306,25 @@ test('accept alone commits candidate history, releases buffered output, and clos
   const committed = new MemorySession({ initialItems: [user('base')] })
   const h = harness(async () => ({ finalText: verdict('accept'), usage: usage(4) }))
   const prepared = await prepare(h.coordinator, committed)
-  await prepared.ownerSession.addItems([user('accepted')])
+  const k3ProviderData = {
+    [KIMI_K3_SESSION_IDENTITY_FIELD]: KIMI_K3_SESSION_IDENTITY,
+    anthropicThinkingBlocks: [{
+      type: 'thinking',
+      thinking: 'accepted reasoning',
+      signature: 'sig-k3-accepted',
+    }],
+  }
+  await prepared.ownerSession.addItems([
+    user('accepted'),
+    {
+      id: 'msg-k3-accepted',
+      type: 'message',
+      role: 'assistant',
+      status: 'completed',
+      content: [{ type: 'output_text', text: 'unverified draft' }],
+      providerData: k3ProviderData,
+    } as AgentInputItem,
+  ])
   prepared.emitOutput!.append('visible')
   h.coordinator.recordOwnerUsage('run', usage(2))
   const result = await h.coordinator.verifyOwnerCandidate({
@@ -315,6 +337,11 @@ test('accept alone commits candidate history, releases buffered output, and clos
   const acceptedHistory = await committed.getItems()
   assert.equal(acceptedHistory.length, 3)
   assert.equal(JSON.stringify(acceptedHistory).includes('accepted'), true)
+  assert.equal(JSON.stringify(acceptedHistory).includes('unverified draft'), false)
+  assert.deepEqual(
+    (acceptedHistory.at(-1) as AgentInputItem & { providerData?: Record<string, unknown> }).providerData,
+    k3ProviderData,
+  )
   assert.equal(result.usage?.providerCallCount, 2)
   assert.equal(h.projection().deliveryState?.verifier.status, 'accepted')
   h.coordinator.close('run')

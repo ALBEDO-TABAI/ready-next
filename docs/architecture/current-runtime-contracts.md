@@ -57,6 +57,7 @@
 - 标准 `build:dist` 只允许空 AI seed；有意内置配置只能由 Web Packer 显式授权、临时写入并在 finally/下次启动恢复。Packer 只有在包内 seed 与本次请求一致、精简/完整运行时形态正确、Framework/签名/DMG 校验及只读挂载全部通过后才能发布成品。
 - 公开网络调研统一走 `web_search_domains / web_search / web_fetch`：AnySearch、Tavily、DuckDuckGo 和 Jina 由加密的外部服务配置提供。AnySearch 垂直搜索先查询子领域参数，失败不得丢掉 domain 约束改做通用搜索；通用搜索与正文提取才允许按已启用服务显式回退。
 - openai-compatible chat/responses 与 anthropic 三条 SDK 路径都必须真 SSE：文本增量交付，工具调用和推理在流中累积，终局与阻塞路径同构整形。
+- Kimi Coding 的 `k3` 只走 Anthropic `/v1/messages` 主链，思考强度只允许 `low / high / max` 且默认 `high`；普通文字与工具调用都必须保留并在下一轮原样回传完整思考块和签名，请求必须声明 `keep=all` 等价的上下文保留合同。其他模型或旧版无完整身份的历史不得中途切入 K3，必须在联网前拒绝并提示新建会话。
 - `provider_request_bill` 与 `provider_wire_request_bill.toolSchemaCount` 必须直接读取 provider 边界同一个实际 `ModelRequest.tools`；禁止为统计重新执行动态 `isEnabled`，也禁止用注册全集近似。注册全集只能另记为 `configuredToolSchemaCount`，差值记 `disabledToolSchemaCount`。每次请求的 input、instructions 与 tools 必须成对记录。
 - 降级只有三类：`READY_SDK_TRUE_SSE=off` 总开关；服务返回非 SSE 时伪流式交付；仅错误体明确提及 stream 的 4xx 可单次阻塞重试。413/401/429 等语义性 4xx 必须原样冒泡。
 - 回归入口：`npm run verify:streaming`。

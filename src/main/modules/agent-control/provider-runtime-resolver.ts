@@ -24,7 +24,7 @@ export function resolveOpenAIProviderRuntime(params: {
 
   const reasoningEffort = (() => {
     const effort = params.config.reasoningEffort || params.provider?.defaultReasoningEffort
-    return effort === 'minimal' || effort === 'low' || effort === 'medium' || effort === 'high'
+    return effort === 'minimal' || effort === 'low' || effort === 'medium' || effort === 'high' || effort === 'max'
       ? effort
       : undefined
   })()

@@ -765,6 +765,7 @@ export class DynamicDeliveryCoordinator {
       })
       const acceptedText = context.outputBuffer.snapshot()
       const acceptedInputItems = await context.transaction.collectAcceptedInputItems()
+      const acceptedAssistantProviderData = await context.transaction.collectAcceptedAssistantProviderData()
       await context.transaction.commitAccepted([
         ...acceptedInputItems,
         {
@@ -772,6 +773,9 @@ export class DynamicDeliveryCoordinator {
           role: 'assistant',
           status: 'completed',
           content: [{ type: 'output_text', text: acceptedText }],
+          ...(acceptedAssistantProviderData
+            ? { providerData: acceptedAssistantProviderData }
+            : {}),
         } as AgentInputItem,
       ])
       const nextState: DeliveryStateV1 = {

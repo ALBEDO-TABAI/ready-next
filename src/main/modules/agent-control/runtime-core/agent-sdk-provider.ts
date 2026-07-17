@@ -20,6 +20,12 @@ import {
   type AIProviderDef
 } from '../../../../shared/ai-providers'
 import {
+  applyKimiK3AnthropicHeaders,
+  applyKimiK3AnthropicRequestContract,
+  isKimiCodingBaseUrl,
+  kimiK3ResponseProviderData,
+} from '../../../../shared/ai-providers/kimi-k3'
+import {
   applyProviderRequestPatch,
   applyProviderResponsePatch,
   resolveProviderDefaultPatchers,
@@ -40,6 +46,7 @@ import {
 import { buildProviderHttpError } from '../../claude-bridge/provider-terminal-error'
 import { resolveOpenAIProviderRuntime } from '../provider-runtime-resolver'
 import { assertManualThinkingModeProviderSafe } from '../thinking-compatibility'
+import { assertKimiK3HistoryCompatible } from './kimi-k3-session-contract'
 import { logAgentMetric } from '../metrics'
 import {
   extractAnthropicOutput,
@@ -750,7 +757,8 @@ class ReadyAnthropicModelProvider implements ModelProvider {
 function shapeAnthropicModelResponse(
   json: Record<string, unknown>,
   fallbackResponseId: string,
-  diagnostics: ProviderResponseDiagnostics
+  diagnostics: ProviderResponseDiagnostics,
+  responseProviderData?: Record<string, unknown>,
 ): ModelResponse {
   logProviderOutputTruncated(json, diagnostics)
   const usage =
@@ -761,7 +769,7 @@ function shapeAnthropicModelResponse(
       outputTokens: Number(usage.output_tokens || usage.outputTokens || 0),
       totalTokens: Number(usage.total_tokens || usage.totalTokens || 0)
     }),
-    output: extractAnthropicOutput(json, fallbackResponseId),
+    output: extractAnthropicOutput(json, fallbackResponseId, responseProviderData),
     responseId: String(json.id || fallbackResponseId),
     providerData: json
   }
@@ -783,6 +791,7 @@ export class ReadyAnthropicModel implements Model {
     body: Record<string, unknown>
     maxOutputTokens: number
   } {
+    assertKimiK3HistoryCompatible(request.input, this.deps.config, 'sdk-anthropic')
     const responseId = `anthropic-${randomUUID()}`
     const maxOutputTokens =
       normalizeMaxOutputTokens(request.modelSettings?.maxTokens) ??
@@ -799,15 +808,21 @@ export class ReadyAnthropicModel implements Model {
     }
     const tools = serializeAnthropicTools(request)
     if (tools.length > 0) body.tools = tools
+    applyKimiK3AnthropicRequestContract(body, this.deps.config)
     const provider = getProviderDef(this.deps.config.provider, this.deps.baseUrl)
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       'anthropic-version': '2023-06-01'
     }
-    const authHeader = provider?.authHeader || 'Authorization'
-    const authPrefix = provider?.authPrefix ?? 'Bearer '
-    headers[authHeader] = `${authPrefix}${this.deps.config.apiKey}`
-    if (provider?.extraHeaders) Object.assign(headers, provider.extraHeaders)
+    if (isKimiCodingBaseUrl(this.deps.baseUrl)) {
+      headers['x-api-key'] = this.deps.config.apiKey
+    } else {
+      const authHeader = provider?.authHeader || 'Authorization'
+      const authPrefix = provider?.authPrefix ?? 'Bearer '
+      headers[authHeader] = `${authPrefix}${this.deps.config.apiKey}`
+      if (provider?.extraHeaders) Object.assign(headers, provider.extraHeaders)
+    }
+    applyKimiK3AnthropicHeaders(headers, this.deps.config)
     return { responseId, url: `${this.deps.baseUrl}/v1/messages`, headers, body, maxOutputTokens }
   }
 
@@ -842,7 +857,8 @@ export class ReadyAnthropicModel implements Model {
     return shapeAnthropicModelResponse(
       json,
       parts.responseId,
-      this.responseDiagnostics(parts.maxOutputTokens)
+      this.responseDiagnostics(parts.maxOutputTokens),
+      kimiK3ResponseProviderData(this.deps.config),
     )
   }
 
@@ -898,7 +914,8 @@ export class ReadyAnthropicModel implements Model {
         shapeAnthropicModelResponse(
           json,
           parts.responseId,
-          this.responseDiagnostics(parts.maxOutputTokens)
+          this.responseDiagnostics(parts.maxOutputTokens),
+          kimiK3ResponseProviderData(this.deps.config),
         ),
         parts.responseId
       )
@@ -930,7 +947,8 @@ export class ReadyAnthropicModel implements Model {
     const shaped = shapeAnthropicModelResponse(
       accumulator.final(parts.responseId),
       parts.responseId,
-      this.responseDiagnostics(parts.maxOutputTokens)
+      this.responseDiagnostics(parts.maxOutputTokens),
+      kimiK3ResponseProviderData(this.deps.config),
     )
     yield buildResponseDoneEvent(shaped, parts.responseId)
   }

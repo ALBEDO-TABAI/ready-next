@@ -36,6 +36,7 @@ import type { AIModelConfig } from '../../shared/ai-providers'
 
 type CapturedRequest = {
   url: string
+  headers: Headers
   body: Record<string, unknown>
 }
 
@@ -65,7 +66,7 @@ function makeFakeFetch(): {
       // Leave body as {} — assertion will fail on missing fields with a
       // useful diagnostic, easier to debug than a thrown parse error.
     }
-    captured.push({ url, body })
+    captured.push({ url, headers: new Headers(init.headers), body })
     // Return a benign empty-success response so getResponse can complete
     // without throwing in our parse path. The assertion happens after.
     return new Response(JSON.stringify({
@@ -248,6 +249,220 @@ test('SDK Anthropic: vision-off model → image block stripped from messages[].c
     assert.notEqual(block.type, 'image', 'image block must NOT survive vision-off sanitize')
   }
   assert.ok(blocks.some((b) => b.type === 'text' && b.text === 'what is this'))
+})
+
+function kimiK3Config(reasoningEffort: 'low' | 'high' | 'max' = 'high'): AIModelConfig {
+  return {
+    provider: 'moonshot',
+    model: 'k3',
+    apiKey: 'sk-test',
+    baseUrl: 'https://api.kimi.com/coding',
+    agentProtocol: 'anthropic',
+    reasoningEffort,
+  } as AIModelConfig
+}
+
+test('SDK Kimi K3: low/high/max all send preserved-thinking request contract', async () => {
+  for (const effort of ['low', 'high', 'max'] as const) {
+    const { fetch, captured } = makeFakeFetch()
+    const model = new ReadyAnthropicModel({
+      config: kimiK3Config(effort),
+      baseUrl: 'https://api.kimi.com/coding',
+      fetchWithTimeout: fetch,
+    })
+
+    await model.getResponse(makeModelRequest([{ role: 'user', content: 'hello' }]) as never)
+
+    assert.equal(captured.length, 1)
+    assert.deepEqual(captured[0].body.thinking, { type: 'enabled' })
+    assert.deepEqual(captured[0].body.output_config, { effort })
+    assert.deepEqual(captured[0].body.context_management, {
+      edits: [{ type: 'clear_thinking_20251015', keep: 'all' }],
+    })
+    assert.equal(captured[0].headers.get('x-api-key'), 'sk-test')
+    assert.equal(captured[0].headers.get('authorization'), null)
+    assert.match(captured[0].headers.get('anthropic-beta') || '', /context-management-2025-06-27/)
+  }
+})
+
+test('SDK Kimi K3: true-stream request uses the same preserved-thinking contract', async () => {
+  const { fetch, captured } = makeFakeFetch()
+  const model = new ReadyAnthropicModel({
+    config: kimiK3Config('max'),
+    baseUrl: 'https://api.kimi.com/coding',
+    fetchWithTimeout: fetch,
+  })
+
+  for await (const _event of model.getStreamedResponse(
+    makeModelRequest([{ role: 'user', content: 'hello' }]) as never,
+  )) {
+    // Consume the full stream so the same final response shaping runs.
+  }
+
+  assert.equal(captured.length, 1)
+  assert.equal(captured[0].body.stream, true)
+  assert.deepEqual(captured[0].body.thinking, { type: 'enabled' })
+  assert.deepEqual(captured[0].body.output_config, { effort: 'max' })
+  assert.deepEqual(captured[0].body.context_management, {
+    edits: [{ type: 'clear_thinking_20251015', keep: 'all' }],
+  })
+})
+
+test('SDK Kimi K3: streamed thinking and signature are echoed on the next turn', async () => {
+  const captured: CapturedRequest[] = []
+  let call = 0
+  const model = new ReadyAnthropicModel({
+    config: kimiK3Config('high'),
+    baseUrl: 'https://api.kimi.com/coding',
+    fetchWithTimeout: async (url, init) => {
+      captured.push({
+        url,
+        headers: new Headers(init.headers),
+        body: JSON.parse(String(init.body || '{}')) as Record<string, unknown>,
+      })
+      call += 1
+      if (call === 1) {
+        const events = [
+          ['message_start', { type: 'message_start', message: { id: 'msg-k3-stream', usage: {} } }],
+          ['content_block_start', { type: 'content_block_start', index: 0, content_block: { type: 'thinking', thinking: '' } }],
+          ['content_block_delta', { type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: 'streamed reasoning' } }],
+          ['content_block_delta', { type: 'content_block_delta', index: 0, delta: { type: 'signature_delta', signature: 'sig-k3-stream' } }],
+          ['content_block_stop', { type: 'content_block_stop', index: 0 }],
+          ['content_block_start', { type: 'content_block_start', index: 1, content_block: { type: 'text', text: '' } }],
+          ['content_block_delta', { type: 'content_block_delta', index: 1, delta: { type: 'text_delta', text: 'stream answer' } }],
+          ['content_block_stop', { type: 'content_block_stop', index: 1 }],
+          ['message_delta', { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: {} }],
+          ['message_stop', { type: 'message_stop' }],
+        ]
+        const payload = `${events
+          .map(([event, data]) => `event: ${event}\ndata: ${JSON.stringify(data)}`)
+          .join('\n\n')}\n\n`
+        return new Response(new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode(payload))
+            controller.close()
+          },
+        }), { status: 200, headers: { 'content-type': 'text/event-stream' } })
+      }
+      return new Response(JSON.stringify({
+        id: 'msg-k3-stream-second',
+        content: [{ type: 'text', text: 'second answer' }],
+        usage: {},
+      }), { status: 200, headers: { 'content-type': 'application/json' } })
+    },
+  })
+
+  const streamedEvents: Array<Record<string, unknown>> = []
+  for await (const event of model.getStreamedResponse(
+    makeModelRequest([{ role: 'user', content: 'first' }]) as never,
+  )) {
+    streamedEvents.push(event as unknown as Record<string, unknown>)
+  }
+  const done = streamedEvents.find((event) => event.type === 'response_done') as
+    | { response: { output: ModelInputItem[] } }
+    | undefined
+  assert.ok(done)
+
+  await model.getResponse(makeModelRequest([
+    ...done.response.output,
+    { role: 'user', content: 'second' },
+  ]) as never)
+
+  const secondMessages = captured[1].body.messages as Array<Record<string, unknown>>
+  const assistant = secondMessages.find((message) => message.role === 'assistant')
+  assert.ok(assistant)
+  assert.deepEqual(assistant.content, [
+    { type: 'thinking', thinking: 'streamed reasoning', signature: 'sig-k3-stream' },
+    { type: 'text', text: 'stream answer' },
+  ])
+})
+
+test('SDK Kimi K3: plain-text thinking block and signature are echoed on the next turn', async () => {
+  const captured: CapturedRequest[] = []
+  let call = 0
+  const model = new ReadyAnthropicModel({
+    config: kimiK3Config('high'),
+    baseUrl: 'https://api.kimi.com/coding',
+    fetchWithTimeout: async (url, init) => {
+      captured.push({
+        url,
+        headers: new Headers(init.headers),
+        body: JSON.parse(String(init.body || '{}')) as Record<string, unknown>,
+      })
+      call += 1
+      return new Response(JSON.stringify(call === 1 ? {
+        id: 'msg-k3-text',
+        content: [
+          { type: 'thinking', thinking: 'private reasoning', signature: 'sig-k3-text' },
+          { type: 'text', text: 'first answer' },
+        ],
+        usage: {},
+      } : {
+        id: 'msg-k3-second',
+        content: [{ type: 'text', text: 'second answer' }],
+        usage: {},
+      }), { status: 200, headers: { 'content-type': 'application/json' } })
+    },
+  })
+
+  const first = await model.getResponse(makeModelRequest([{ role: 'user', content: 'first' }]) as never)
+  await model.getResponse(makeModelRequest([
+    ...first.output as never[],
+    { role: 'user', content: 'second' },
+  ]) as never)
+
+  const secondMessages = captured[1].body.messages as Array<Record<string, unknown>>
+  const assistant = secondMessages.find((message) => message.role === 'assistant')
+  assert.ok(assistant)
+  assert.deepEqual(assistant.content, [
+    { type: 'thinking', thinking: 'private reasoning', signature: 'sig-k3-text' },
+    { type: 'text', text: 'first answer' },
+  ])
+})
+
+test('SDK Kimi K3: text and tool call from one response rejoin one assistant message without duplicating thinking', async () => {
+  const captured: CapturedRequest[] = []
+  let call = 0
+  const model = new ReadyAnthropicModel({
+    config: kimiK3Config('low'),
+    baseUrl: 'https://api.kimi.com/coding',
+    fetchWithTimeout: async (url, init) => {
+      captured.push({
+        url,
+        headers: new Headers(init.headers),
+        body: JSON.parse(String(init.body || '{}')) as Record<string, unknown>,
+      })
+      call += 1
+      return new Response(JSON.stringify(call === 1 ? {
+        id: 'msg-k3-tool',
+        content: [
+          { type: 'thinking', thinking: 'tool reasoning', signature: 'sig-k3-tool' },
+          { type: 'text', text: 'checking' },
+          { type: 'tool_use', id: 'call-k3', name: 'lookup', input: { q: 'x' } },
+        ],
+        usage: {},
+      } : {
+        id: 'msg-k3-after-tool',
+        content: [{ type: 'text', text: 'done' }],
+        usage: {},
+      }), { status: 200, headers: { 'content-type': 'application/json' } })
+    },
+  })
+
+  const first = await model.getResponse(makeModelRequest([{ role: 'user', content: 'use a tool' }]) as never)
+  await model.getResponse(makeModelRequest([
+    ...first.output as never[],
+    { type: 'function_call_result', callId: 'call-k3', output: 'result' },
+    { role: 'user', content: 'continue' },
+  ]) as never)
+
+  const secondMessages = captured[1].body.messages as Array<Record<string, unknown>>
+  const assistantMessages = secondMessages.filter((message) => message.role === 'assistant')
+  assert.equal(assistantMessages.length, 1)
+  const content = assistantMessages[0].content as Array<Record<string, unknown>>
+  assert.deepEqual(content.map((block) => block.type), ['thinking', 'text', 'tool_use'])
+  assert.equal(content.filter((block) => block.type === 'thinking').length, 1)
+  assert.equal((content[0] as { signature?: string }).signature, 'sig-k3-tool')
 })
 
 // Note on video: the SDK's Anthropic normalize layer (contentPartToAnthropic)

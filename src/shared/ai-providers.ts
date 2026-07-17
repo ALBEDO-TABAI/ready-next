@@ -6,6 +6,10 @@
 import type { CapabilityModeMap } from './ai-capability-groups'
 import { normalizeCapabilityModeMap } from './ai-capability-groups'
 import type { MultiTurnThinkingPolicy } from './ai-providers/types'
+import {
+  isKimiK3Config,
+  resolveKimiK3ReasoningEffort,
+} from './ai-providers/kimi-k3'
 
 // Stage S (PR-S3): the 7 inline provider literals were extracted into
 // per-provider sub-modules under `./ai-providers/`. The umbrella file
@@ -35,7 +39,7 @@ export type AIProviderType =
 
 export type AIModelCategory = 'chat' | 'image' | 'video'
 export type AIWireAPI = 'chat/completions' | 'responses'
-export type AIReasoningEffort = 'minimal' | 'low' | 'medium' | 'high'
+export type AIReasoningEffort = 'minimal' | 'low' | 'medium' | 'high' | 'max'
 export type AIAgentProtocol = 'anthropic' | 'openai'
 export type AICapabilityMode = 'auto' | 'on' | 'off'
 export type AIToolCallTransport = 'native' | 'text' | 'none'
@@ -437,6 +441,11 @@ export function normalizeAIConfig<T extends AIModelConfig | null | undefined>(co
     providerId === 'openai-compatible'
       ? normalizeDeepSeekModelDefaults(config, canonicalBaseUrl)
       : { model: config.model, modelIds: config.modelIds }
+  const isKimiK3 = isKimiK3Config({
+    baseUrl: canonicalBaseUrl,
+    model: modelDefaults.model,
+    reasoningEffort: config.reasoningEffort,
+  })
   const normalizedModelIds = normalizeModelIds(modelDefaults.model, modelDefaults.modelIds)
   const nextConfig: AIModelConfig = {
     ...config,
@@ -444,8 +453,9 @@ export function normalizeAIConfig<T extends AIModelConfig | null | undefined>(co
     baseUrl: canonicalBaseUrl,
     model: modelDefaults.model,
     wireApi: config.wireApi || provider?.wireApi || config.wireApi,
-    reasoningEffort:
-      config.reasoningEffort || provider?.defaultReasoningEffort || config.reasoningEffort,
+    reasoningEffort: isKimiK3
+      ? resolveKimiK3ReasoningEffort(config.reasoningEffort)
+      : config.reasoningEffort || provider?.defaultReasoningEffort || config.reasoningEffort,
     capabilityModes: normalizeCapabilityModeMap(config.capabilityModes),
     modelIds: normalizedModelIds
   }
@@ -577,6 +587,7 @@ export function resolveAIConfigCapabilities(
       : undefined
   const reasoningEffort = normalizedConfig.reasoningEffort || provider?.defaultReasoningEffort
   const isKimiCoding = baseUrl.includes('api.kimi.com/coding')
+  const isKimiK3 = isKimiK3Config(normalizedConfig)
   const supportsToolCalls = applyCapabilityMode(
     normalizeCapabilityMode(normalizedConfig.toolUseMode),
     normalizedConfig.provider !== 'openai-compatible'
@@ -620,13 +631,16 @@ export function resolveAIConfigCapabilities(
     isKimiCoding ||
     (modelCap.supportsNativeVideo ??
       (visionDefault ? (providerCap.supportsNativeVideo ?? false) : false))
-  const thinkingDefault = modelCap.supportsThinking ?? providerCap.supportsThinking ?? false
+  const thinkingDefault = isKimiK3
+    ? true
+    : modelCap.supportsThinking ?? providerCap.supportsThinking ?? false
   const longContextDefault =
     modelCap.supportsLongContext ??
     providerCap.supportsLongContext ??
     (modelDef?.contextWindow ?? 0) >= 128000
-  const multiTurnThinkingPolicy =
-    modelCap.multiTurnThinkingPolicy ?? providerCap.multiTurnThinkingPolicy ?? 'unknown'
+  const multiTurnThinkingPolicy = isKimiK3
+    ? 'echo_required'
+    : modelCap.multiTurnThinkingPolicy ?? providerCap.multiTurnThinkingPolicy ?? 'unknown'
 
   return {
     config: normalizedConfig,
@@ -648,7 +662,7 @@ export function resolveAIConfigCapabilities(
     ),
     supportsToolChoice: agentProtocol === 'anthropic' || wireApi === 'chat/completions',
     isKimiCoding,
-    supportsThinking: applyCapabilityMode(
+    supportsThinking: isKimiK3 || applyCapabilityMode(
       normalizeCapabilityMode(normalizedConfig.thinkingMode),
       thinkingDefault
     ),

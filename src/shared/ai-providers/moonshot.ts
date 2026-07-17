@@ -18,6 +18,7 @@ export const def: AIProviderDef = {
   authPrefix: 'Bearer ',
   agentProtocol: 'openai',
   models: [
+    { id: 'k3', label: 'Kimi K3', category: 'chat', description: 'Coding Agent；支持 low / high / max 思考强度', capabilityOverrides: { supportsThinking: true, multiTurnThinkingPolicy: 'echo_required' } },
     { id: 'kimi-for-coding', label: 'Kimi For Coding', category: 'chat', description: 'Coding 专用（第三方 Agent 兼容）' },
     { id: 'moonshot-v1-128k', label: 'Moonshot V1 128K', category: 'chat', contextWindow: 128000, description: '超长上下文' },
     { id: 'moonshot-v1-32k', label: 'Moonshot V1 32K', category: 'chat', contextWindow: 32768 },

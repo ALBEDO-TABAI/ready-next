@@ -49,6 +49,22 @@ export class CandidateSessionTransaction {
     ))
   }
 
+  async collectAcceptedAssistantProviderData(): Promise<Record<string, unknown> | undefined> {
+    const working = await this.workingSession.getItems()
+    for (let index = working.length - 1; index >= this.committedBase.length; index -= 1) {
+      const item = working[index] as AgentInputItem & {
+        role?: unknown
+        providerData?: unknown
+      }
+      if (item.role !== 'assistant') continue
+      const providerData = item.providerData
+      return providerData && typeof providerData === 'object' && !Array.isArray(providerData)
+        ? structuredClone(providerData) as Record<string, unknown>
+        : undefined
+    }
+    return undefined
+  }
+
   async commitAccepted(acceptedItems?: readonly AgentInputItem[]): Promise<AgentInputItem[]> {
     if (this.closed) throw new Error('[dynamic-delivery] candidate transaction is already closed')
     const working = await this.workingSession.getItems()

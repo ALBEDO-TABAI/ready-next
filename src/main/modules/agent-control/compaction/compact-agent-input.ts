@@ -7,6 +7,7 @@ import {
   CATALOG_HEADER as SKILL_CATALOG_HEADER,
   SKILL_CATALOG_REMINDER_MARKER,
 } from '../system-reminders/skill-catalog-reminder'
+import { kimiK3CompactionProviderData } from '../../../../shared/ai-providers/kimi-k3'
 
 export interface CompactOptions {
   windowTokens: number
@@ -187,7 +188,7 @@ function buildCompactedResult(input: {
   }
 
   return buildResult({
-    items: [...headItems, createSummaryItem(input.summary), ...tailItems],
+    items: [...headItems, createSummaryItem(input.summary, input.items), ...tailItems],
     beforeTokens: input.beforeTokens,
     droppedItems: input.droppedItems,
     truncatedToolResults: input.truncatedToolResults,
@@ -334,10 +335,12 @@ function buildDefaultSummary(items: readonly AgentInputItem[]): string {
   ].join('\n')
 }
 
-function createSummaryItem(summary: string): AgentInputItem {
+function createSummaryItem(summary: string, sourceItems: AgentInputItem[]): AgentInputItem {
+  const providerData = kimiK3CompactionProviderData(sourceItems)
   return {
     role: 'user',
     content: summary,
+    ...(providerData ? { providerData } : {}),
   } as AgentInputItem
 }
 
