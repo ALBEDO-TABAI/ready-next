@@ -68,7 +68,7 @@ export const RESEARCH_SOURCE_CONTENT_TOOL_NAMES = new Set([
 // Async browser research/collection tools return task handles, not acquired bodies.
 // They may become source evidence only after a future terminal-result reader validates
 // the completed bundle; the launch result itself never qualifies.
-export const RESEARCH_SOURCE_BUNDLED_TOOL_NAMES = new Set<string>()
+export const RESEARCH_SOURCE_BUNDLED_TOOL_NAMES = new Set<string>(['browser_task'])
 
 const RESEARCH_SOURCE_TOOL_NAMES = new Set([
   ...RESEARCH_SOURCE_DISCOVERY_TOOL_NAMES,
@@ -237,7 +237,11 @@ export function isNonterminalToolOutput(output: ToolExecutionOutput): boolean {
     || data?.done === false
     || status === 'waiting_review'
     || status === 'pending'
+    || status === 'queued'
     || status === 'running'
+    || status === 'paused'
+    || status === 'waiting_human'
+    || status === 'recoverable_paused'
 }
 
 export function isSuccessfulToolOutput(output: ToolExecutionOutput): boolean {
@@ -345,6 +349,15 @@ function sourceReceiptMaterial(
   normalized: ReturnType<typeof normalizeToolExecutionOutput>,
 ): string {
   if (!RESEARCH_SOURCE_TOOL_NAMES.has(toolName)) return normalized.text
+  if (toolName === 'browser_task') {
+    const data = recordValue(normalized.data)
+    const result = recordValue(data?.result)
+    const taskKind = String(data?.kind || data?.taskKind || result?.kind || '').trim()
+    const status = String(data?.status || '').trim().toLowerCase()
+    const essentialOutputSatisfied = data?.essentialOutputSatisfied === true
+      || result?.essentialOutputSatisfied === true
+    if (taskKind !== 'site_research' || status !== 'completed' || !essentialOutputSatisfied) return ''
+  }
   const parts = [normalized.text]
   for (const value of [normalized.data, normalized.projectionPatch]) {
     if (value === undefined || value === null) continue

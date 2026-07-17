@@ -21,16 +21,28 @@ export const BROWSER_TOOL_SCHEMAS = {
     url: z.string().optional().describe('open 时的地址'),
     tab_id: tabId,
     background: z.boolean().optional().describe('open 时是否在后台创建'),
+    opener_tab_id: z.string().optional().describe('open 时绑定的来源标签页 ID'),
+  }).superRefine((value, ctx) => {
+    if ((value.action === 'switch' || value.action === 'close') && !value.tab_id?.trim()) {
+      ctx.addIssue({ code: 'custom', path: ['tab_id'], message: `tab_id is required when action is ${value.action}` })
+    }
   }),
   browser_navigate: z.object({
     action: z.enum(['open', 'back', 'forward', 'reload']).optional().describe('导航动作，默认 open'),
     url: z.string().optional().describe('open 时必填的 URL'),
     tab_id: tabId,
+    allow_repeat: z.boolean().optional().describe('是否允许短时间内重复导航到同一地址'),
+  }).superRefine((value, ctx) => {
+    if ((value.action === undefined || value.action === 'open') && !value.url?.trim()) {
+      ctx.addIssue({ code: 'custom', path: ['url'], message: 'url is required when action is open' })
+    }
   }),
   browser_search: z.object({
     query: z.string().describe('搜索关键词'),
     engine: z.enum(['auto', 'duckduckgo', 'google', 'bing', 'baidu']).optional().describe('搜索引擎，默认 auto'),
+    scope: z.enum(['web', 'current_site']).optional().describe('搜索范围；current_site 只在当前站点内搜索且不回退外部引擎'),
     tab_id: tabId,
+    allow_repeat: z.boolean().optional().describe('是否允许短时间内重复执行同一搜索'),
   }),
   browser_snapshot: z.object({
     tab_id: tabId,
@@ -65,6 +77,13 @@ export const BROWSER_TOOL_SCHEMAS = {
     selector: z.string().optional().describe('等待出现的选择器'),
     text: z.string().optional().describe('等待出现的文本'),
     url: z.string().optional().describe('等待匹配的 URL 片段'),
+    check_interval_ms: z.number().optional().describe('条件检查间隔'),
+    stable_iterations: z.number().optional().describe('内容稳定所需连续命中次数'),
+  }).superRefine((value, ctx) => {
+    const requiredField = value.condition === 'selector' ? 'selector' : value.condition === 'text' ? 'text' : value.condition === 'url' ? 'url' : null
+    if (requiredField && !value[requiredField]?.trim()) {
+      ctx.addIssue({ code: 'custom', path: [requiredField], message: `${requiredField} is required when condition is ${value.condition}` })
+    }
   }),
 
   browser_click: z.object({
@@ -145,27 +164,68 @@ export const BROWSER_TOOL_SCHEMAS = {
     tab_id: tabId,
   }),
 
+  browser_research: z.object({
+    scope: z.enum(['current_site', 'url_set']).describe('研究范围；不允许静默改用外部搜索引擎'),
+    queries: z.array(z.string().min(1)).min(1).optional().describe('current_site 的非空查询列表，保序去重'),
+    site_tab_id: z.string().optional().describe('当前站点的绑定标签页 ID；已有明确页面引用时可省略'),
+    urls: z.array(z.string().url()).min(1).optional().describe('url_set 的完整 URL 列表'),
+    per_query_limit: z.number().int().min(1).max(50).optional().describe('每个查询冻结的结果卡上限'),
+    detail_limit_per_query: z.number().int().min(0).max(20).optional().describe('每个查询深读详情上限'),
+    fields: z.array(z.enum(['title', 'url', 'author', 'engagement', 'published_at', 'body'])).optional().describe('需要返回的受控字段'),
+    preserve_source_tab: z.boolean().optional().describe('是否保留用户来源页，默认 true'),
+  }),
   browser_collect: z.object({
-    mode: z.enum(['images', 'structured', 'scroll', 'visible', 'notes', 'research', 'start']).optional().describe('采集模式，默认按参数和页面选择'),
+    mode: z.enum(['images', 'structured', 'scroll', 'visible', 'notes']).optional().describe('采集模式，默认按参数和页面选择'),
     url: z.string().optional().describe('目标 URL'),
     urls: z.array(z.string()).optional().describe('目标 URL 列表'),
     source_task_id: z.string().optional().describe('上游冻结清单任务 ID'),
     output_dir: z.string().optional().describe('绑定到任务资源的输出目录'),
-    template: z.string().optional().describe('结构提取模板'),
+    output_root_dir: z.string().optional().describe('逐篇采集的授权输出根目录'),
+    template: z.enum(['article_list', 'image_gallery', 'link_list', 'card_list']).optional().describe('结构提取模板'),
     limit: z.number().optional().describe('采集上限'),
     expected_count: z.number().optional().describe('预期条目数'),
-    payload: arbitraryObject.optional().describe('长任务的受控参数'),
+    keyword: z.string().optional().describe('图片过滤关键词'),
+    min_width: z.number().optional().describe('图片最小宽度'),
+    include_hidden: z.boolean().optional().describe('是否包含隐藏图片'),
+    item_selector: z.string().optional().describe('结构化条目选择器'),
+    fields: z.array(z.object({
+      name: z.string(),
+      selector: z.string().optional(),
+      attr: z.string().optional(),
+      type: z.enum(['text', 'html', 'href', 'src', 'attr']).optional(),
+    })).optional().describe('结构化字段映射'),
+    max_scrolls: z.number().optional().describe('最大滚动轮数'),
+    scroll_delay_ms: z.number().optional().describe('滚动后等待时间'),
+    max_items: z.number().optional().describe('可见采集最大条目数'),
+    max_rounds: z.number().optional().describe('可见采集最大轮数'),
+    max_duration_ms: z.number().optional().describe('单段最大运行时长'),
+    user_expected_total: z.number().optional().describe('用户明确给出的预期总数'),
+    target_profile_url: z.string().optional().describe('逐篇采集的来源主页'),
+    notes: z.array(arbitraryObject).optional().describe('用户明确提供的冻结笔记清单'),
+    max_notes: z.number().optional().describe('逐篇采集最大笔记数'),
+    max_consecutive_failures: z.number().optional().describe('连续失败保护上限'),
     tab_id: tabId,
-  }).passthrough(),
+  }),
   browser_download: z.object({
-    mode: z.enum(['urls', 'collected', 'page', 'media', 'resolve', 'gallery']).optional().describe('下载来源，默认按参数选择'),
-    urls: z.array(z.string()).optional().describe('下载 URL 列表'),
-    url: z.string().optional().describe('单个页面或资源 URL'),
+    mode: z.enum(['urls', 'collected', 'page', 'media', 'resolve', 'gallery']).describe('下载来源'),
+    urls: z.array(z.string().url()).min(1).optional().describe('下载 URL 列表'),
+    url: z.string().url().optional().describe('单个页面或资源 URL'),
+    page_url: z.string().url().optional().describe('resolve 时的来源页面 URL'),
+    video_url: z.string().url().optional().describe('resolve 时已知的视频 URL'),
+    poster_url: z.string().url().optional().describe('resolve 时已知的封面 URL'),
+    title: z.string().optional().describe('resolve 时的页面或视频标题'),
+    sources: z.array(z.string().url()).min(1).optional().describe('resolve 时的候选媒体 URL'),
     source_task_id: z.string().optional().describe('已完成采集任务 ID'),
     directory: z.string().optional().describe('由用户指令、任务资源或当前工作区绑定的目录；省略时使用 Ready 默认下载目录'),
     max_total_bytes: z.number().optional().describe('本次任务允许写入的总字节预算'),
+    filename_prefix: z.string().optional().describe('输出文件名前缀'),
+    overwrite: z.boolean().optional().describe('是否覆盖同名文件'),
+    expected_total: z.number().optional().describe('预期下载总数'),
+    limit: z.number().optional().describe('最多处理的候选数'),
+    max_scrolls: z.number().optional().describe('图库发现最大滚动轮数'),
+    retry_failed: z.boolean().optional().describe('是否只重试失败项'),
     tab_id: tabId,
-  }).passthrough(),
+  }),
   browser_archive: z.object({
     format: z.enum(['pdf', 'mhtml', 'html', 'markdown']).describe('归档格式'),
     path: z.string().describe('绑定到用户任务资源的输出路径'),
@@ -186,6 +246,7 @@ export const BROWSER_TOOL_SCHEMAS = {
     action: z.enum(['list', 'clear']).optional().describe('控制台动作，默认 list'),
     levels: z.array(z.enum(['debug', 'info', 'warning', 'error'])).optional().describe('日志级别过滤'),
     limit: z.number().optional().describe('最多返回条数'),
+    duration_ms: z.number().optional().describe('list 前采集控制台日志的时长'),
     tab_id: tabId,
   }),
   browser_network: z.object({
@@ -199,6 +260,8 @@ export const BROWSER_TOOL_SCHEMAS = {
     url: z.string().optional().describe('可选目标页 URL'),
     kinds: z.array(z.enum(['video', 'audio', 'image', 'document', 'json', 'stream', 'unknown'])).optional().describe('资源类型过滤'),
     include_response_bodies: z.boolean().optional().describe('是否读取受限的小型响应正文'),
+    wait_ms: z.number().optional().describe('等待资源出现的最长时间'),
+    max_candidates: z.number().optional().describe('最多返回的资源候选数'),
     tab_id: tabId,
   }),
   browser_eval: z.object({

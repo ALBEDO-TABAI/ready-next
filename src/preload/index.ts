@@ -5,7 +5,10 @@ import {
   type BrowserViewIntentAck,
 } from '../shared/browser-view-intent'
 import type { BrowserUtilityMenuRequest } from '../shared/browser-utility-menu'
-import type { DocumentIndexChangedEvent } from '../shared/document-index-events'
+import type {
+  DocumentIndexChangedEvent,
+  DocumentWatcherFailedEvent,
+} from '../shared/document-index-events'
 import type { NativeContextMenuRequest } from '../shared/native-context-menu'
 import type { RSSAutoRefreshSnapshot } from '../shared/rss-auto-refresh'
 import type {
@@ -800,6 +803,11 @@ const documentAPI = {
     const handler = (_: IpcRendererEvent, event: DocumentIndexChangedEvent): void => callback(event)
     ipcRenderer.on('document:indexChanged', handler)
     return () => { ipcRenderer.removeListener('document:indexChanged', handler) }
+  },
+  onWatcherFailed: (callback: (event: DocumentWatcherFailedEvent) => void) => {
+    const handler = (_: IpcRendererEvent, event: DocumentWatcherFailedEvent): void => callback(event)
+    ipcRenderer.on('document:watcherFailed', handler)
+    return () => { ipcRenderer.removeListener('document:watcherFailed', handler) }
   },
   notifyWidgetCommitted: (payload: { tabId: string; widgetId: string; requestId?: string; committedAt: number }) => {
     ipcRenderer.send('document:widgetCommitted', payload)

@@ -59,6 +59,20 @@ test('browser surface binding marks collect_notes as an agent-view background ha
   assert.equal(result.binding.engineSurface, 'agent-view')
 })
 
+test('browser research releases the turn lane and binds to the background agent surface', () => {
+  const result = resolveBrowserToolSurfaceBinding({
+    toolName: 'browser_research',
+    args: { scope: 'current_site', queries: ['one'] },
+    dispatch: 'tool-executor',
+    hasTurnLease: true,
+  })
+  assert.equal(result.ok, true)
+  if (!result.ok) return
+  assert.equal(result.binding.backgroundHandoff, true)
+  assert.equal(result.binding.intent, 'agent-view-background')
+  assert.equal(result.binding.engineSurface, 'agent-view')
+})
+
 test('scoped facade agent-view writes require an agent tab id', () => {
   const result = resolveBrowserToolSurfaceBinding({
     toolName: 'browser_navigate',

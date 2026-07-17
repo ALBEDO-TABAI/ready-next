@@ -1556,8 +1556,15 @@ describe('browser-tools v2', () => {
     assert.strictEqual(getPayload.progress?.currentLabel, 'image-003.jpg')
   })
 
-  it('browser_task, browser_task and browser_task should use capability-backed helpers', async () => {
+  it('browser_task resume, cancel and result should use capability-backed helpers', async () => {
     const controller = createControllerMock({
+      getTask: async (_taskId) => ({
+        taskId: 'task-1',
+        kind: 'research',
+        status: 'completed',
+        progress: { total: 3, completed: 3, failed: 0, currentLabel: null },
+        result: { items: [{ sourceUrl: 'https://example.com/a', title: 'Alpha', link: 'https://example.com/1' }] },
+      }),
       resumeTask: async (_taskId) => ({
         taskId: 'task-1',
         kind: 'research',
@@ -1570,25 +1577,15 @@ describe('browser-tools v2', () => {
         status: 'cancelled',
         progress: { total: 3, completed: 1, failed: 0, currentLabel: null },
       }),
-      aggregateResults: (_items, _options) => ([
-        { sourceUrl: 'https://example.com/a', title: 'Alpha', link: 'https://example.com/1' },
-      ]),
     } as Partial<BrowserController>)
 
     const resumeResult = await executeBrowserTool('browser_task', { action: 'resume', task_id: 'task-1' }, controller)
     const cancelResult = await executeBrowserTool('browser_task', { action: 'cancel', task_id: 'task-1' }, controller)
-    const aggregateResult = await executeBrowserTool('browser_task', { action: 'result',
-      items: [
-        { sourceUrl: 'https://example.com/a', title: 'Alpha', link: 'https://example.com/1' },
-        { sourceUrl: 'https://example.com/a', title: 'Alpha', link: 'https://example.com/1' },
-      ],
-      merge_strategy: 'dedupe',
-      sort_by: 'source',
-    }, controller)
+    const taskResult = await executeBrowserTool('browser_task', { action: 'result', task_id: 'task-1' }, controller)
 
     assert.strictEqual((parseTool(resumeResult) as { status?: string }).status, 'running')
     assert.strictEqual((parseTool(cancelResult) as { status?: string }).status, 'cancelled')
-    assert.strictEqual((parseTool(aggregateResult) as Array<{ title?: string }>).length, 1)
+    assert.strictEqual((parseTool(taskResult) as { status?: string }).status, 'completed')
   })
 
   it('browser_task never turns a completed discovery query into a write task', async () => {
@@ -2225,7 +2222,7 @@ describe('browser_collect (background sub-agent dispatch)', () => {
     assert.equal(dispatched, false)
   })
 
-  it('does not trust allow_partial for direct notes when a larger frozen collection exists', async () => {
+  it('ignores retired allow_partial input and still requires consent for a partial direct list', async () => {
     let dispatched = false
     const frozenNotes = Array.from({ length: 31 }, (_item, index) => ({
       url: `https://example.com/post/${index + 1}`,
@@ -2258,11 +2255,10 @@ describe('browser_collect (background sub-agent dispatch)', () => {
 
     const parsed = parseTool(result) as {
       errorCode?: string
-      allowPartialIgnored?: boolean
       pendingConsentRequest?: { requestId?: string; consentKind?: string; sourceTaskId?: string }
     }
     assert.equal(parsed.errorCode, 'partial_collection_consent_required')
-    assert.equal(parsed.allowPartialIgnored, true)
+    assert.equal('allowPartialIgnored' in parsed, false)
     assert.match(parsed.pendingConsentRequest?.requestId || '', /^browser-consent-/)
     assert.equal(parsed.pendingConsentRequest?.consentKind, 'partial_collection')
     assert.equal(parsed.pendingConsentRequest?.sourceTaskId, 'browser-task-visible-large')

@@ -1,5 +1,8 @@
 import type { WebContents } from 'electron'
-import type { DocumentIndexChangedEvent } from '../../../../shared/document-index-events'
+import type {
+  DocumentIndexChangedEvent,
+  DocumentWatcherFailedEvent,
+} from '../../../../shared/document-index-events'
 
 export function publishDocumentIndexChanged(
   sender: Pick<WebContents, 'isDestroyed' | 'send'>,
@@ -10,4 +13,12 @@ export function publishDocumentIndexChanged(
     ...event,
     completedAt: Date.now(),
   } satisfies DocumentIndexChangedEvent)
+}
+
+export function publishDocumentWatcherFailed(
+  sender: Pick<WebContents, 'isDestroyed' | 'send'>,
+  event: DocumentWatcherFailedEvent,
+): void {
+  if (sender.isDestroyed()) return
+  sender.send('document:watcherFailed', event)
 }

@@ -46,7 +46,7 @@ function getTypeName(node: ZodTypeAny): string {
 function metaAdditionalPropertiesOf(node: ZodTypeAny): boolean | undefined {
   // Allow per-field opt-in via .meta({ additionalProperties: true }) for the
   // rare case where the LLM-facing schema needs to advertise that extra keys
-  // are accepted (e.g. browser_collect(mode=start).payload). Default Zod records map
+  // are accepted (for example, bounded structured field maps). Default Zod records map
   // to {type:'object'} without this flag — adding it unconditionally would
   // change the LLM-facing output for every earlier-migrated domain.
   const metaFn = (node as unknown as { meta?: () => Record<string, unknown> | undefined }).meta

@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 
+import { generateDocumentPerfFixtures } from '../../scripts/generate-document-perf-fixtures'
 import {
   getDocumentPerformanceDiagnosticsSnapshot,
   recordDocumentPerformanceCounter,
@@ -67,27 +69,32 @@ test('document performance diagnostics are opt-in, resettable, and timer-free', 
   resetDocumentPerformanceDiagnostics()
 })
 
-test('document performance fixtures cover dual documents, multiple boards, and worker formats', () => {
-  const fixtureDir = join(tmpdir(), 'ready-document-perf-fixtures')
-  const manifest = JSON.parse(readFileSync(join(fixtureDir, 'manifest.json'), 'utf8')) as {
-    files: Record<string, string>
-    counts: { boards: number; boardNodes: number[]; workerFormats: number }
-  }
+test('document performance fixtures cover dual documents, multiple boards, and worker formats', async () => {
+  const fixtureDir = await mkdtemp(join(tmpdir(), 'ready-document-perf-fixtures-test-'))
+  try {
+    await generateDocumentPerfFixtures(fixtureDir)
+    const manifest = JSON.parse(readFileSync(join(fixtureDir, 'manifest.json'), 'utf8')) as {
+      files: Record<string, string>
+      counts: { boards: number; boardNodes: number[]; workerFormats: number }
+    }
 
-  assert.equal(manifest.counts.boards, 2)
-  assert.deepEqual(manifest.counts.boardNodes, [150, 30])
-  assert.equal(manifest.counts.workerFormats, 3)
-  for (const name of [
-    'markdown',
-    'secondaryMarkdown',
-    'board',
-    'secondaryBoard',
-    'pdf',
-    'docx',
-    'xlsx',
-    'epub',
-  ]) {
-    assert.ok(readFileSync(join(fixtureDir, manifest.files[name])).byteLength > 0, `${name} fixture exists`)
+    assert.equal(manifest.counts.boards, 2)
+    assert.deepEqual(manifest.counts.boardNodes, [150, 30])
+    assert.equal(manifest.counts.workerFormats, 3)
+    for (const name of [
+      'markdown',
+      'secondaryMarkdown',
+      'board',
+      'secondaryBoard',
+      'pdf',
+      'docx',
+      'xlsx',
+      'epub',
+    ]) {
+      assert.ok(readFileSync(join(fixtureDir, manifest.files[name])).byteLength > 0, `${name} fixture exists`)
+    }
+  } finally {
+    await rm(fixtureDir, { recursive: true, force: true })
   }
 })
 

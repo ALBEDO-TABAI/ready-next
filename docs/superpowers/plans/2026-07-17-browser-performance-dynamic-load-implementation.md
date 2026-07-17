@@ -307,7 +307,7 @@ dormant                 # view 已销毁或尚未物化，仅存可恢复记录
 | P3 事件/IPC/store | completed | Main quiet-burst 合并、Renderer 相等短路/idle 持久化、普通 bounds 零 ack、`syncMode` 删除、rail 快照 rAF 合帧已落地；S3 为 91→11→1。 |
 | P4 双开/overlay | completed | 工作台拖拽 ref 化、四类子窗共享 follower、相交浮层等待 hide ack、快速 mode/split 竞态修复已落地；窗口缩放又补上容量为 6 的稳定帧 LRU，遮住原生面单帧滞后且不在长会话无界占用内存。S2/S5 真机通过；原生 host 收敛为唯一 WebContentsView，四种布局圆角截图通过。 |
 | P5 RSSHub/log/CDP/RSS | completed | RSSHub 首次真实请求才启动，临时 Bilibili 源 9.565 秒抓取 30 项；日志批量冲刷、CDP/observer/歧义缓存关闭清理、RSS 行 memo 与 `content-visibility` 已落地。 |
-| Document 联合合同 | completed | `npm run verify:document-perf` 134/134（2026-07-17）；文档专项真机与打包态验收已完成，浏览器 S1–S5 也已独立回填。 |
+| Document 联合合同 | completed | `npm run verify:document-perf` 137/137（2026-07-17）；文档专项真机与打包态验收已完成，浏览器 S1–S5 也已独立回填。 |
 | 真实 Electron + 系统采样 | completed | S1–S5、overlay 相交、RSSHub 首次请求和四组圆角布局均走真实 Electron。完整 Xcode `xctrace` 不可用，按合同改用 `/usr/bin/sample`；Main 峰值 258.3 MB、Renderer 峰值 111.0 MB，等待栈占主导。 |
-| 唯一一次对抗复审 | completed | Fresh Stage2 reviewer 提出的 6 项有效问题已全部修复并回归：保护期结束后自动唤醒回收、命名 profile 冷启动不丢、独立 CDP 命令及时断开、同一任务提示关闭后不反复出现、超额/非法 dormant 记录不生成幽灵标签、overlay follower 隐藏与销毁生命周期分离。复审未留可延期项。 |
-| 最终全量验收 | completed | `verify:browser-perf` 为 117 通过 + 2 项按合同由 native gate 覆盖，另有 2/2 性能合同脚本通过；`verify:stability` 为 159 通过 + 22 项 native 转验，Send IM 为 140 通过 + 1 项转验；`npm run verify` 主测试 7389 通过、串行子任务 154 通过、串行性能 11 通过，零失败；`npm run build` 成功生成 Main、Preload、Renderer、RSSHub worker 与 document worker。 |
+| 同一个对抗复审者 | completed | Fresh Stage2 reviewer 提出的 6 项有效问题已全部修复并回归：保护期结束后自动唤醒回收、命名 profile 冷启动不丢、独立 CDP 命令及时断开、同一任务提示关闭后不反复出现、超额/非法 dormant 记录不生成幽灵标签、overlay follower 隐藏与销毁生命周期分离。同一复审者继续审查文档联动修正，最终结论为 PASS，无可延期项。 |
+| 最终全量验收 | completed | `verify:browser-perf` 为 117 通过 + 2 项按合同由 native gate 覆盖，另有 2/2 性能合同脚本通过；`verify:stability` 为 159 通过 + 22 项 native 转验，Send IM 为 140 通过 + 1 项转验；`npm run verify` 主测试 7373 通过、串行子任务 154 通过、串行时序/性能 31 通过，零失败；`npm run build` 成功生成 Main、Preload、Renderer、RSSHub worker 与 document worker。 |

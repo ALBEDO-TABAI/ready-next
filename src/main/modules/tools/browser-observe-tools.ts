@@ -42,7 +42,7 @@ import {
   stringifyBrowserJsonOrFailure,
 } from './browser-failure-output'
 import { buildBrowserPageMapProbeJs, buildBrowserTargetReadJs } from './browser-probe'
-import { waitForReady } from './browser-input-actions'
+import { sleepWithAbort, waitForReady } from './browser-input-actions'
 import {
   browserStructuredErrorOutput,
   getPageIdentity,
@@ -1139,11 +1139,25 @@ export async function executeBrowserObserveTool(
       }
 
       case 'wait_condition': {
+        const durationMs = Math.max(0, Math.min(60_000, Number(args.duration_ms || 0) || 0))
+        if (durationMs > 0 && !args.condition) {
+          await sleepWithAbort(durationMs, abortSignal)
+          return JSON.stringify({ matched: true, elapsedMs: durationMs }, null, 2)
+        }
         let tabId = (args.tab_id as string) || null
         tabId = (await resolveHighControlAgentTab(controller, args, { signal: abortSignal })).tabId
-        const customJs = typeof args.custom_js === 'string' ? args.custom_js : undefined
+        const requestedCondition = String(args.condition || 'ready')
+        const customJs = requestedCondition === 'text'
+          ? `Boolean(document.body?.innerText?.includes(${JSON.stringify(String(args.text || ''))}))`
+          : requestedCondition === 'url'
+            ? `location.href.includes(${JSON.stringify(String(args.url || ''))})`
+            : undefined
         const result = await controller.waitForCondition(tabId, {
-          condition: String(args.condition || 'page_readable') as never,
+          condition: (customJs
+            ? 'custom_js'
+            : requestedCondition === 'ready'
+              ? 'page_readable'
+              : requestedCondition) as never,
           selector: typeof args.selector === 'string' ? args.selector : undefined,
           customJs,
           timeoutMs: Number(args.timeout_ms || 0) || undefined,

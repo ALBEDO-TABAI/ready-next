@@ -39,6 +39,7 @@ export interface TurnOrchestratorHost {
   readonly resumeSkillChildRun: typeof defaultResumeSkillChildRun
   readonly runAgent: (params: ReadyAgentSdkRunParams) => Promise<ReadyAgentSdkRunResult>
   readonly setActiveToolUseMode: NonNullable<AgentSdkRuntimeDeps['setActiveToolUseMode']>
+  readonly dispatchToolConsentRetry: NonNullable<AgentSdkRuntimeDeps['dispatchToolConsentRetry']>
   readonly dynamicDelivery: DynamicDeliveryCoordinator
   readonly runLifecycle: AgentSdkRunLifecycle
   readonly runtime: AgentControlRuntime | null

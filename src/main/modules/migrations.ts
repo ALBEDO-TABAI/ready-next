@@ -3642,6 +3642,21 @@ const migrations: Migration[] = [
           ON browser_power_preflight_audit(scope_id, created_at DESC);
       `)
     },
+  },
+  {
+    name: '082_browser_task_execution_identity',
+    up: (db) => {
+      db.exec(`
+        ALTER TABLE browser_tasks ADD COLUMN revision INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE browser_tasks ADD COLUMN created_by_run_id TEXT;
+        ALTER TABLE browser_tasks ADD COLUMN active_execution_binding_json TEXT;
+        ALTER TABLE browser_tasks ADD COLUMN parent_task_id TEXT;
+        ALTER TABLE browser_tasks ADD COLUMN projection_revision INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE browser_tasks ADD COLUMN projection_sync_json TEXT;
+        CREATE INDEX IF NOT EXISTS idx_browser_tasks_projection_revision
+          ON browser_tasks(projection_revision, revision, updated_at DESC);
+      `)
+    },
   }
 ]
 

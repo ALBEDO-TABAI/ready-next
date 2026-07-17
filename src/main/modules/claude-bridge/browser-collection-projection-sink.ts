@@ -120,15 +120,13 @@ export function makeNoteCollectProjectionSink(activeRuntime: AgentControlRuntime
     )
     aggregate.discovered = discovered
     aggregate.userExpectedTotal = userExpectedTotal
-    if (input.sourceTaskId) {
-      aggregate.contributions.set(input.taskId, {
+    aggregate.contributions.set(input.taskId, {
         discovered: Math.max(0, Number(input.total ?? input.discovered ?? 0) || 0),
         saved: Math.max(0, Number(input.saved ?? input.completed ?? 0) || 0),
         failed: Math.max(0, Number(input.failed ?? 0) || 0),
         completedSourceIds: Array.from(new Set((input.completedSourceIds || []).map((id) => String(id).trim()).filter(Boolean))),
         failedSourceIds: Array.from(new Set((input.failedSourceIds || []).map((id) => String(id).trim()).filter(Boolean))),
-      })
-    }
+    })
     aggregates.set(projectionTaskId, aggregate)
     const savedSourceIds = new Set<string>()
     const failedSourceIds = new Set<string>()
@@ -178,7 +176,7 @@ export function makeNoteCollectProjectionSink(activeRuntime: AgentControlRuntime
       taskId: projectionTaskId,
       taskOrigin: existing?.taskOrigin ?? (input.ownerAgentId ? 'workflow_child' : 'system_background'),
       scopeId: input.scopeId,
-      runId: input.taskId,
+      runId: input.executionBinding?.runId || input.ownerRunId || input.taskId,
       parentTaskId: input.parentTaskId ?? existing?.parentTaskId ?? null,
       taskType: 'multi_step_task',
       module: 'browser',
@@ -196,7 +194,7 @@ export function makeNoteCollectProjectionSink(activeRuntime: AgentControlRuntime
         fingerprint: null,
         updatedAt: now,
         lastError: status === 'failed' ? input.summary : null,
-        detail: progressDetail({
+        detail: input.progressDetail || progressDetail({
           ...input,
           discovered: aggregate.discovered,
           saved: aggregate.saved,
@@ -294,9 +292,7 @@ export function makeNoteCollectProjectionSink(activeRuntime: AgentControlRuntime
                 }
               : existing.progress,
           })
-        } else if (existing) {
-          write(input, terminal, 'none', false)
-        }
+        } else write(input, terminal, 'none', true)
         return
       }
       write(input, 'running', 'background', true)

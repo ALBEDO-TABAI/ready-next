@@ -51,7 +51,7 @@
 ## 4. Provider、流式与工具错误
 
 - AI provider 能力必须由共享能力层解析；“OpenAI 兼容”不代表一定支持原生 tools、vision 或 video。通用 openai-compatible 的 `toolUseMode=auto` 必须按不支持工具收口，只有显式 `on` 或内置 provider 合同可以开放；Packer 仅可为已经真实验证过工具流的固定端点写入 `on`。
-- 设置页的工具调用 `auto` 必须展示共享能力层解析出的生效值；openai-compatible 自动关闭时明确说明：端点真实支持 function calling 才可“强制开启”。聊天文字不得直接写设置。只有本轮已有 `provider_disabled_tools` 冲突、共享能力仍为关闭且用户明确肯定授权具体工具时，Main 才可直接复用 `ask_user_questions` 确认卡；“打开网页”“当前打开的标签页”“使用浏览器工具”等任务动作不算设置授权。卡片只允许本机 Renderer 作答，远程绑定会话不得发起、转发或提交这类本机设置确认。确认后重新读取活跃配置，核对 active profile id + provider/baseUrl/model，只修改 `toolUseMode`；workspace、当前配置与兼容镜像在同一数据库事务内写入。配置漂移、拒绝、取消、超时或持久化失败均不写；成功也必须结束旧工具面回合并要求用户重发原任务。
+- 设置页的工具调用 `auto` 必须展示共享能力层解析出的生效值；openai-compatible 自动关闭时明确说明：端点真实支持 function calling 才可“强制开启”。聊天文字不得直接写设置。只有本轮已有 `provider_disabled_tools` 冲突、共享能力仍为关闭且用户明确肯定授权具体工具时，Main 才可直接复用 `ask_user_questions` 确认卡；“打开网页”“当前打开的标签页”“使用浏览器工具”等任务动作不算设置授权。卡片只允许本机 Renderer 作答，远程绑定会话不得发起、转发或提交这类本机设置确认。确认后重新读取活跃配置，核对 active profile id + provider/baseUrl/model，只修改 `toolUseMode`；workspace、当前配置与兼容镜像在同一数据库事务内写入。配置漂移、拒绝、取消、超时或持久化失败均不写。成功时旧工具面回合先结束，再以原始请求、原 scope/task 和全新 run 唯一地自动续跑；不得要求用户重发，也不得复用旧配置快照。
 - OpenAI-compatible 的 `baseUrl` 是 API 前缀：origin-only 地址统一补 `/v1`，显式前缀原样保留，消费者只能再拼资源路径，禁止形成 `/v1/v1`。保存和请求边界必须移除 URL 中的用户名、密码、查询参数与锚点；设置输入框保留编辑草稿。Packer 的明文 HTTP 仅允许严格解析后的本机或私网地址，不能用域名前缀猜私网。
 - 一键运行时配置由 Main 持有带 `runId/revision` 的单任务快照；设置页重进只恢复投影，重复开始加入原任务。停止先进入 `cancelling`，旧 run 的晚到进度不得改写终态或后续重试，Renderer 必须提供可见的停止与失败后重试入口。
 - 标准 `build:dist` 只允许空 AI seed；有意内置配置只能由 Web Packer 显式授权、临时写入并在 finally/下次启动恢复。Packer 只有在包内 seed 与本次请求一致、精简/完整运行时形态正确、Framework/签名/DMG 校验及只读挂载全部通过后才能发布成品。
@@ -87,7 +87,7 @@
 
 - Browser Agent 走“理解 -> 计划 -> 分步执行 -> 复核”；链接是资源，不是立即执行指令。
 - `assets/prompts/browser/discipline.md` 是 Browser 详细纪律的唯一稳定来源；只在最终模型工具面含 `browser_interaction` 或 `browser_content_tasks` 时注入一次本轮 instructions。Browser DomainAdapter 不再重复注入，普通 `web_search` 也不触发；运行时只补当前采集、Power 与用户接管事实。
-- 模型可见浏览器能力只来自 `src/shared/browser-tool-surface.ts` 的 31 项语义清单；阅读、交互、长任务和高级能力按本轮意图分层暴露。旧工具名、`browser_execute_js`、`browser_run_workflow`、模型自证采集同意和模型自报 effects 不得保留兼容执行分支。
+- 模型可见浏览器能力只来自 `src/shared/browser-tool-surface.ts` 的 32 项语义清单；阅读、交互、站内研究、持久采集和高级能力按本轮意图分层暴露。`browser_research` 负责当前登录站点或 URL 集的多查询研究；`browser_collect` 只负责按页、按清单或按结构采集，普通分析、整理、筛选和选题不得因此打开下载或持久采集。旧工具名、`browser_execute_js`、`browser_run_workflow`、模型自证采集同意和模型自报 effects 不得保留兼容执行分支。
 - 所有公开浏览器调用先经过 `BrowserActionExecutor`，统一完成参数归一、写租约、同 origin 串行、自适应冷却、总时限、中止、动作生命周期和结构化错误。点击、输入、按键、滚动与拖拽使用可信浏览器输入；写动作结束后快照标脏，旧 ref 不能跨标签、文档或快照版本复用。
 - `BrowserSnapshotService` 是页面结构与 target ref 的唯一公开真值。默认快照总预算 16 KiB；`browser_find` 在私有完整目标集上查找，动作只允许一次内部刷新与唯一重绑定。`browser_screenshot` 返回真实图像块，不再返回只有缓存可见的图片 ID。
 - Power 使用 `browser_eval`、`browser_cdp`、`browser_network` 与 `browser_resources`；效果由代码按工具、CDP 方法、目标和输出通道推导，不按域名静态封锁。普通观察和诊断不因审计暂时失败而阻断；支付、远程删除、账号或凭据修改、秘密导出等破坏性效果在执行前必须有匹配且持久化成功的 grant/audit。
@@ -96,6 +96,9 @@
 - 后台任务终态经 `TaskEventBridge` 回到 Agent 循环：活跃 run 注入提醒，无活跃 run 写 pending 并播报续跑。没有注册路由的 `scheduleTask` 必须运行时失败。
 - 已由当前用户目标明确授权的同一浏览器长任务，可从持久 checkpoint 自动续跑，不重复询问内部策略或批次选择；只有安全验证需要接管、任务边界扩大，或系统确实无法完成全量且准备交付部分结果时才打断用户。
 - 浏览器页面引用、平台名、账号名和“分析/选题”只开放观察能力；只有用户明确说采集、抓取、下载或保存，才开放持久采集工具并承担产物验收。`browser_task(action=get|result)` 必须纯查询，`resume` 只能继续原任务，不能把完成的发现任务自动升级成保存采集。
+- 浏览器续跑只继承完整 `BrowserWorkIntent`、原始查询和持久任务句柄，不继承孤立的 collection/batch 标记。站内研究默认串行复用一个独立研究标签并保留来源页；当前站点 adapter 不支持时必须明确失败，禁止静默退回外部搜索。
+- 浏览器任务永久保留创建 run，活动执行绑定、父任务、任务 revision 与 projection revision 分字段持久化。projection 的 `runId` 必须与活动执行绑定一致；projection 写失败只进入任务内的有界重试与启动对账，不能反向杀死真实浏览器任务，旧 revision 不能覆盖新续跑。
+- `browser_research` 完成前必须先通过必要输出检查：查询覆盖、候选结果以及用户明确要求的正文/互动量缺一不可。失败回执只证明失败发生，不得让通用降级判定把 0/18、缺正文或缺互动量的结果显示成绿色完成。
 - 可见发现任务与后续保存任务是一条可追踪的任务链：停止入口必须指向当前仍运行的保存任务；卡片清除只移除展示，不能偷偷停止任务。采集卡在运行和完成后都保留固定位置，直到用户点右上角清除或右滑清除，并展示可打开的结果文件夹、报告与清单。
 - 采集 projection 必须继承发起 Agent、父任务与执行绑定；保存目录从任务计划开始就可见，终态以 runner 回写的真实 `outputRootDir/reportPath/manifestPath` 为准，不能让用户靠默认路径猜结果位置。
 - 采集终态只由 `browser-engine/collection-verdict.ts` 的 `resolveCollectionVerdict()` 决定：0 条永不 completed，部分进展不清断点，整任务重试只重试失败项。

@@ -134,6 +134,9 @@ export class BrowserRepository {
     started_at?: string | null
     updated_at: string
     finished_at?: string | null
+    created_by_run_id?: string | null
+    active_execution_binding_json?: string | null
+    parent_task_id?: string | null
   }): void {
     getDatabase().createBrowserTask(task)
   }
@@ -153,8 +156,13 @@ export class BrowserRepository {
       started_at?: string | null
       updated_at?: string
       finished_at?: string | null
+      created_by_run_id?: string | null
+      active_execution_binding_json?: string | null
+      parent_task_id?: string | null
+      projection_revision?: number
+      projection_sync_json?: string | null
     },
-    options?: { expectedUpdatedAt?: string },
+    options?: { expectedUpdatedAt?: string; incrementRevision?: boolean },
   ): boolean {
     return getDatabase().updateBrowserTask(id, updates, options)
   }

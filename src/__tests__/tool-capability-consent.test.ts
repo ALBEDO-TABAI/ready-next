@@ -96,11 +96,12 @@ test('explicit tool consent requires an affirmative tool target and rejects nega
   assert.equal(isExplicitToolEnableConsentMessage('我授权你继续回答'), false)
 })
 
-test('confirmed consent updates only through the host setter and ends the old-surface turn', async () => {
+test('confirmed consent updates only through the host setter and schedules the original task', async () => {
   const metrics: AgentMetricEvent[] = []
   __setMetricSinkForTests((event) => metrics.push(event))
   try {
-    const fixture = makeContext()
+    let continued = 0
+    const fixture = makeContext({ onEnabledAfterFinalize: () => { continued += 1 } })
     await maybeHandleToolCapabilityConsent(fixture.context as never, {
       askUserQuestions: (async (args, deps) => {
         assert.deepEqual(args.questions[0].options, [
@@ -118,7 +119,8 @@ test('confirmed consent updates only through the host setter and ends the old-su
       expectedFingerprint: fingerprintAIConfig(CONFIG, 'profile-a'),
     })
     assert.equal(fixture.finalized[0].status, 'done')
-    assert.match(String(fixture.finalized[0].finalText), /请重发上一条任务/)
+    assert.match(String(fixture.finalized[0].finalText), /自动继续/)
+    assert.equal(continued, 1)
     const audit = metrics.find((event) => event.metric === 'tool_calling_consent_applied')
     assert.equal(audit?.scopeId, 'scope-consent')
     assert.equal(audit?.cardId, 'card-consent-1')

@@ -10,6 +10,7 @@ import type {
   BrowserTaskCheckpoint,
 } from './capability-types'
 import { taskEventBridge, toBridgeStatus } from './task-event-bridge'
+import type { TaskExecutionBinding } from '../../../shared/agent-execution-profile'
 
 function parseJSON<T>(raw: string | null | undefined, fallback: T): T {
   if (!raw) return fallback
@@ -232,12 +233,42 @@ function buildTaskEventSummary(
   return `后台任务状态更新：${status}`
 }
 
+function recordToHandle(record: import('../database').BrowserTaskRecord): BrowserCapabilityTaskHandle {
+  return {
+    taskId: record.id,
+    kind: record.kind as BrowserCapabilityTaskKind,
+    status: record.status as BrowserCapabilityTaskStatus,
+    progress: {
+      total: Number(record.progress_total || 0),
+      completed: Number(record.progress_completed || 0),
+      failed: Number(record.progress_failed || 0),
+      currentLabel: record.current_label,
+    },
+    checkpoint: parseJSON<BrowserTaskCheckpoint | null>(record.checkpoint_json, null),
+    result: parseJSON<unknown>(record.result_json, null),
+    error: record.error,
+    createdAt: record.created_at,
+    startedAt: record.started_at,
+    finishedAt: record.finished_at,
+    updatedAt: record.updated_at,
+    revision: Number(record.revision || 0),
+    createdByRunId: record.created_by_run_id || null,
+    activeExecutionBinding: parseJSON<TaskExecutionBinding | null>(record.active_execution_binding_json, null),
+    parentTaskId: record.parent_task_id || null,
+    projectionRevision: Number(record.projection_revision || 0),
+    projectionSync: parseJSON<Record<string, unknown> | null>(record.projection_sync_json, null),
+  }
+}
+
 export class BrowserTaskPersistenceService {
   constructor(private readonly repository = new BrowserRepository()) {}
 
   createTask(request: BrowserStartTaskRequest): BrowserCapabilityTaskHandle {
     const now = new Date().toISOString()
     const taskId = `browser-task-${randomUUID()}`
+    const executionBinding = asRecord(request.payload.executionBinding)
+    const createdByRunId = readString(request.payload, ['ownerRunId']) || readString(executionBinding, ['runId'])
+    const parentTaskId = readString(request.payload, ['parentTaskId'])
     this.repository.createTask({
       id: taskId,
       kind: request.kind,
@@ -254,6 +285,9 @@ export class BrowserTaskPersistenceService {
       started_at: null,
       updated_at: now,
       finished_at: null,
+      created_by_run_id: createdByRunId,
+      active_execution_binding_json: executionBinding ? JSON.stringify(executionBinding) : null,
+      parent_task_id: parentTaskId,
     })
     return {
       taskId,
@@ -262,30 +296,19 @@ export class BrowserTaskPersistenceService {
       progress: { total: 0, completed: 0, failed: 0, currentLabel: null },
       createdAt: now,
       updatedAt: now,
+      revision: 0,
+      createdByRunId,
+      activeExecutionBinding: executionBinding as unknown as TaskExecutionBinding | null,
+      parentTaskId,
+      projectionRevision: 0,
+      projectionSync: null,
     }
   }
 
   getTask(taskId: string): BrowserCapabilityTaskHandle | null {
     const record = this.repository.getTask(taskId)
     if (!record) return null
-    return {
-      taskId: record.id,
-      kind: record.kind as BrowserCapabilityTaskKind,
-      status: record.status as BrowserCapabilityTaskStatus,
-      progress: {
-        total: Number(record.progress_total || 0),
-        completed: Number(record.progress_completed || 0),
-        failed: Number(record.progress_failed || 0),
-        currentLabel: record.current_label,
-      },
-      checkpoint: parseJSON<BrowserTaskCheckpoint | null>(record.checkpoint_json, null),
-      result: parseJSON<unknown>(record.result_json, null),
-      error: record.error,
-      createdAt: record.created_at,
-      startedAt: record.started_at,
-      finishedAt: record.finished_at,
-      updatedAt: record.updated_at,
-    }
+    return recordToHandle(record)
   }
 
   getTaskPayload(taskId: string): Record<string, unknown> | null {
@@ -294,14 +317,55 @@ export class BrowserTaskPersistenceService {
     return parseJSON<Record<string, unknown>>(record.payload_json, {})
   }
 
-  updateTaskPayload(taskId: string, payload: Record<string, unknown>): void {
+  updateTaskPayload(taskId: string, payload: Record<string, unknown>): boolean {
     const current = this.getTask(taskId)
-    if (!current) return
+    if (!current) return false
     const expectedUpdatedAt = String(current.updatedAt || current.createdAt || '')
-    this.repository.updateTask(taskId, {
+    return this.repository.updateTask(taskId, {
       payload_json: JSON.stringify(payload || {}),
+      active_execution_binding_json: payload.executionBinding && typeof payload.executionBinding === 'object'
+        ? JSON.stringify(payload.executionBinding)
+        : null,
+      parent_task_id: readString(payload, ['parentTaskId']),
       updated_at: monotonicIsoAfter(expectedUpdatedAt),
     }, expectedUpdatedAt ? { expectedUpdatedAt } : undefined)
+  }
+
+  patchTaskPayload(taskId: string, patch: Record<string, unknown>): boolean {
+    const record = this.repository.getTask(taskId)
+    if (!record) return false
+    const payload = {
+      ...parseJSON<Record<string, unknown>>(record.payload_json, {}),
+      ...patch,
+    }
+    const expectedUpdatedAt = String(record.updated_at || record.created_at || '')
+    return this.repository.updateTask(taskId, {
+      payload_json: JSON.stringify(payload),
+      active_execution_binding_json: payload.executionBinding && typeof payload.executionBinding === 'object'
+        ? JSON.stringify(payload.executionBinding)
+        : null,
+      parent_task_id: readString(payload, ['parentTaskId']),
+      updated_at: monotonicIsoAfter(expectedUpdatedAt),
+    }, expectedUpdatedAt ? { expectedUpdatedAt } : undefined)
+  }
+
+  updateProjectionSync(taskId: string, input: {
+    projectionRevision: number
+    sync: Record<string, unknown> | null
+  }): BrowserCapabilityTaskHandle | null {
+    const current = this.getTask(taskId)
+    if (!current) return null
+    const expectedUpdatedAt = String(current.updatedAt || current.createdAt || '')
+    const committed = this.repository.updateTask(taskId, {
+      projection_revision: Math.max(
+        Number(current.projectionRevision || 0),
+        Math.max(0, Math.floor(input.projectionRevision)),
+      ),
+      projection_sync_json: input.sync ? JSON.stringify(input.sync) : null,
+      updated_at: monotonicIsoAfter(expectedUpdatedAt),
+    }, { ...(expectedUpdatedAt ? { expectedUpdatedAt } : {}), incrementRevision: false })
+    if (committed === false) return this.getTask(taskId)
+    return this.getTask(taskId)
   }
 
   updateProgress(taskId: string, progress: Partial<BrowserCapabilityTaskProgress>, extras?: {
@@ -323,7 +387,9 @@ export class BrowserTaskPersistenceService {
       total: progress.total ?? current.progress.total,
       completed: progress.completed ?? current.progress.completed,
       failed: progress.failed ?? current.progress.failed,
-      currentLabel: progress.currentLabel ?? current.progress.currentLabel ?? null,
+      currentLabel: Object.prototype.hasOwnProperty.call(progress, 'currentLabel')
+        ? progress.currentLabel ?? null
+        : current.progress.currentLabel ?? null,
     }
     const expectedUpdatedAt = String(current.updatedAt || current.createdAt || '')
     const updatedAt = monotonicIsoAfter(expectedUpdatedAt)
@@ -343,7 +409,9 @@ export class BrowserTaskPersistenceService {
       progress_completed: nextProgress.completed,
       progress_failed: nextProgress.failed,
       current_label: nextProgress.currentLabel ?? null,
-      error: extras?.error ?? current.error ?? null,
+      error: extras && Object.prototype.hasOwnProperty.call(extras, 'error')
+        ? extras.error ?? null
+        : current.error ?? null,
       started_at: extras?.startedAt,
       finished_at: extras?.finishedAt,
       updated_at: updatedAt,
@@ -366,46 +434,12 @@ export class BrowserTaskPersistenceService {
   listPendingTasks(): BrowserCapabilityTaskHandle[] {
     return this.repository
       .listTasks(['queued', 'running', 'paused'])
-      .map((record) => ({
-        taskId: record.id,
-        kind: record.kind as BrowserCapabilityTaskKind,
-        status: record.status as BrowserCapabilityTaskStatus,
-        progress: {
-          total: Number(record.progress_total || 0),
-          completed: Number(record.progress_completed || 0),
-          failed: Number(record.progress_failed || 0),
-          currentLabel: record.current_label,
-        },
-        checkpoint: parseJSON<BrowserTaskCheckpoint | null>(record.checkpoint_json, null),
-        result: parseJSON<unknown>(record.result_json, null),
-        error: record.error,
-        createdAt: record.created_at,
-        startedAt: record.started_at,
-        finishedAt: record.finished_at,
-        updatedAt: record.updated_at,
-      }))
+      .map(recordToHandle)
   }
 
   listTasks(): BrowserCapabilityTaskHandle[] {
     return this.repository
       .listTasks()
-      .map((record) => ({
-        taskId: record.id,
-        kind: record.kind as BrowserCapabilityTaskKind,
-        status: record.status as BrowserCapabilityTaskStatus,
-        progress: {
-          total: Number(record.progress_total || 0),
-          completed: Number(record.progress_completed || 0),
-          failed: Number(record.progress_failed || 0),
-          currentLabel: record.current_label,
-        },
-        checkpoint: parseJSON<BrowserTaskCheckpoint | null>(record.checkpoint_json, null),
-        result: parseJSON<unknown>(record.result_json, null),
-        error: record.error,
-        createdAt: record.created_at,
-        startedAt: record.started_at,
-        finishedAt: record.finished_at,
-        updatedAt: record.updated_at,
-      }))
+      .map(recordToHandle)
   }
 }

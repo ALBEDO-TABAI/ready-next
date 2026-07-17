@@ -6,6 +6,7 @@ export type BrowserToolIntent =
   | 'reading'
   | 'interaction'
   | 'observation'
+  | 'site_research'
   | 'collection'
   | 'batch_collection'
   | 'advanced'
@@ -19,7 +20,7 @@ export interface BrowserToolSurfaceEntry {
   requiresAttachment?: boolean
 }
 
-const READ = ['reading', 'interaction', 'observation', 'collection'] as const
+const READ = ['reading', 'interaction', 'observation', 'site_research', 'collection'] as const
 const OBSERVE_AND_COLLECT = ['observation', 'collection'] as const
 
 /**
@@ -30,31 +31,32 @@ const OBSERVE_AND_COLLECT = ['observation', 'collection'] as const
 export const BROWSER_TOOL_SURFACE_MANIFEST = [
   { name: 'browser_tabs', layer: 'read', defaultAccess: 'read', effects: ['observe'], intents: READ },
   { name: 'browser_navigate', layer: 'read', defaultAccess: 'write', effects: ['navigate'], intents: READ },
-  { name: 'browser_search', layer: 'read', defaultAccess: 'write', effects: ['navigate'], intents: ['reading', 'interaction', 'observation', 'collection'] },
+  { name: 'browser_search', layer: 'read', defaultAccess: 'write', effects: ['navigate'], intents: ['reading', 'interaction', 'observation', 'site_research', 'collection'] },
   { name: 'browser_snapshot', layer: 'read', defaultAccess: 'read', effects: ['observe'], intents: READ },
   { name: 'browser_find', layer: 'read', defaultAccess: 'read', effects: ['observe'], intents: READ },
   { name: 'browser_read', layer: 'read', defaultAccess: 'read', effects: ['observe'], intents: READ },
-  { name: 'browser_screenshot', layer: 'read', defaultAccess: 'read', effects: ['observe'], intents: ['reading', 'interaction', 'observation', 'collection'] },
+  { name: 'browser_screenshot', layer: 'read', defaultAccess: 'read', effects: ['observe'], intents: ['reading', 'interaction', 'observation', 'site_research', 'collection'] },
   { name: 'browser_wait', layer: 'read', defaultAccess: 'read', effects: ['observe'], intents: READ },
 
-  { name: 'browser_click', layer: 'interaction', defaultAccess: 'write', effects: ['page_mutation'], intents: ['interaction'] },
-  { name: 'browser_type', layer: 'interaction', defaultAccess: 'write', effects: ['page_mutation'], intents: ['interaction'] },
+  { name: 'browser_click', layer: 'interaction', defaultAccess: 'write', effects: ['page_mutation'], intents: ['interaction', 'site_research'] },
+  { name: 'browser_type', layer: 'interaction', defaultAccess: 'write', effects: ['page_mutation'], intents: ['interaction', 'site_research'] },
   { name: 'browser_fill_form', layer: 'interaction', defaultAccess: 'write', effects: ['page_mutation'], intents: ['interaction'] },
   { name: 'browser_select', layer: 'interaction', defaultAccess: 'write', effects: ['page_mutation'], intents: [] },
   { name: 'browser_hover', layer: 'interaction', defaultAccess: 'write', effects: ['page_mutation'], intents: [] },
-  { name: 'browser_scroll', layer: 'interaction', defaultAccess: 'write', effects: ['page_mutation'], intents: ['interaction', 'observation', 'collection'] },
-  { name: 'browser_press_key', layer: 'interaction', defaultAccess: 'write', effects: ['page_mutation'], intents: ['interaction'] },
+  { name: 'browser_scroll', layer: 'interaction', defaultAccess: 'write', effects: ['page_mutation'], intents: ['interaction', 'observation', 'site_research', 'collection'] },
+  { name: 'browser_press_key', layer: 'interaction', defaultAccess: 'write', effects: ['page_mutation'], intents: ['interaction', 'site_research'] },
   { name: 'browser_drag', layer: 'interaction', defaultAccess: 'write', effects: ['page_mutation'], intents: [] },
   { name: 'browser_upload', layer: 'interaction', defaultAccess: 'write', effects: ['upload'], intents: [], requiresAttachment: true },
   { name: 'browser_dialog', layer: 'interaction', defaultAccess: 'read', effects: ['observe'], intents: ['interaction'] },
-  { name: 'browser_request_takeover', layer: 'interaction', defaultAccess: 'write', effects: ['challenge_interaction'], intents: ['interaction', 'observation', 'collection', 'batch_collection'] },
+  { name: 'browser_request_takeover', layer: 'interaction', defaultAccess: 'write', effects: ['challenge_interaction'], intents: ['interaction', 'observation', 'site_research', 'collection', 'batch_collection'] },
 
+  { name: 'browser_research', layer: 'long_task', defaultAccess: 'write', effects: ['observe', 'navigate'], intents: ['site_research'] },
   { name: 'browser_collect', layer: 'long_task', defaultAccess: 'write', effects: ['observe', 'navigate', 'download'], intents: ['collection', 'batch_collection'] },
   { name: 'browser_download', layer: 'long_task', defaultAccess: 'write', effects: ['download'], intents: ['collection', 'batch_collection'] },
   { name: 'browser_archive', layer: 'long_task', defaultAccess: 'write', effects: ['download'], intents: [] },
-  { name: 'browser_task', layer: 'long_task', defaultAccess: 'read', effects: ['observe'], intents: ['collection', 'batch_collection'] },
+  { name: 'browser_task', layer: 'long_task', defaultAccess: 'read', effects: ['observe'], intents: ['site_research', 'collection', 'batch_collection'] },
 
-  { name: 'browser_status', layer: 'advanced', defaultAccess: 'read', effects: ['observe'], intents: OBSERVE_AND_COLLECT },
+  { name: 'browser_status', layer: 'advanced', defaultAccess: 'read', effects: ['observe'], intents: ['observation', 'site_research', 'collection'] },
   { name: 'browser_console', layer: 'advanced', defaultAccess: 'read', effects: ['observe'], intents: ['advanced'] },
   { name: 'browser_network', layer: 'advanced', defaultAccess: 'read', effects: ['observe'], intents: ['advanced'] },
   { name: 'browser_resources', layer: 'advanced', defaultAccess: 'read', effects: ['observe'], intents: ['observation', 'collection', 'advanced'] },

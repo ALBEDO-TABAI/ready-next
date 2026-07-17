@@ -5,8 +5,22 @@ import { BROWSER_PUBLIC_TOOL_NAMES } from '../shared/browser-tool-surface'
 import { resolveBrowserToolInvocation } from '../main/modules/tools/browser-tool-invocation'
 
 test('every public semantic tool resolves to a private operation', () => {
+  const fixtures: Partial<Record<(typeof BROWSER_PUBLIC_TOOL_NAMES)[number], Record<string, unknown>>> = {
+    browser_navigate: { action: 'open', url: 'https://example.com/fixture' },
+    browser_search: { query: 'fixture' },
+    browser_type: { text: 'fixture' },
+    browser_fill_form: { fields: [] },
+    browser_press_key: { key: 'Enter' },
+    browser_request_takeover: { reason: 'verification required' },
+    browser_research: { scope: 'current_site', queries: ['fixture'] },
+    browser_download: { mode: 'page', url: 'https://example.com/fixture' },
+    browser_archive: { format: 'pdf', path: '/tmp/fixture.pdf' },
+    browser_task: { task_id: 'browser-task-fixture' },
+    browser_eval: { code: 'document.title', purpose: 'read title' },
+    browser_cdp: { method: 'Runtime.evaluate', purpose: 'read title' },
+  }
   for (const name of BROWSER_PUBLIC_TOOL_NAMES) {
-    const invocation = resolveBrowserToolInvocation(name, {})
+    const invocation = resolveBrowserToolInvocation(name, fixtures[name] || {}, 'model')
     assert.equal(invocation.ok, true, `${name} should resolve`)
     if (!invocation.ok) continue
     assert.doesNotMatch(invocation.operation, /^browser_/)
@@ -25,9 +39,28 @@ test('locator and compound tools choose one deterministic private operation', ()
   assert.equal(resolveBrowserToolInvocation('browser_click', { text: '保存' }).operation, 'click_text')
   assert.equal(resolveBrowserToolInvocation('browser_click', { x: 10, y: 20 }).operation, 'click_coordinate')
   assert.equal(resolveBrowserToolInvocation('browser_type', { x: 10, y: 20, text: 'A' }).operation, 'type_coordinate')
-  assert.equal(resolveBrowserToolInvocation('browser_collect', { mode: 'notes' }).operation, 'collect_notes')
-  assert.equal(resolveBrowserToolInvocation('browser_download', { mode: 'collected' }).operation, 'download_collected')
-  assert.equal(resolveBrowserToolInvocation('browser_task', { action: 'cancel' }).operation, 'task_cancel')
+  assert.equal(resolveBrowserToolInvocation('browser_collect', { mode: 'notes', notes: [] }).operation, 'collect_notes')
+  assert.equal(resolveBrowserToolInvocation('browser_download', { mode: 'collected', source_task_id: 'task-1' }).operation, 'download_collected')
+  assert.equal(resolveBrowserToolInvocation('browser_task', { action: 'cancel', task_id: 'task-1' }).operation, 'task_cancel')
+})
+
+test('long-task contracts reject calls that the handler cannot execute', () => {
+  assert.equal(resolveBrowserToolInvocation('browser_research', { scope: 'current_site' }, 'model').ok, false)
+  assert.equal(resolveBrowserToolInvocation('browser_collect', { mode: 'research' }, 'model').ok, false)
+  assert.equal(resolveBrowserToolInvocation('browser_collect', { mode: 'start' }, 'model').ok, false)
+  assert.equal(resolveBrowserToolInvocation('browser_download', { mode: 'urls', urls: [] }, 'model').ok, false)
+  assert.equal(resolveBrowserToolInvocation('browser_download', { mode: 'collected' }, 'model').ok, false)
+  assert.equal(resolveBrowserToolInvocation('browser_download', { mode: 'page' }, 'model').ok, false)
+  assert.equal(resolveBrowserToolInvocation('browser_download', { mode: 'media' }, 'model').ok, false)
+  assert.equal(resolveBrowserToolInvocation('browser_download', { mode: 'resolve' }, 'model').ok, false)
+  assert.equal(resolveBrowserToolInvocation('browser_task', { action: 'result' }, 'model').ok, false)
+})
+
+test('compound action contracts reject calls before their handlers run', () => {
+  assert.equal(resolveBrowserToolInvocation('browser_navigate', {}, 'model').ok, false)
+  assert.equal(resolveBrowserToolInvocation('browser_tabs', { action: 'switch' }, 'model').ok, false)
+  assert.equal(resolveBrowserToolInvocation('browser_wait', { condition: 'selector' }, 'model').ok, false)
+  assert.equal(resolveBrowserToolInvocation('browser_wait', { condition: 'text', text: 'ready' }, 'model').ok, true)
 })
 
 test('old public names are rejected and model-declared effects are stripped', () => {
@@ -36,8 +69,26 @@ test('old public names are rejected and model-declared effects are stripped', ()
     code: 'document.title',
     purpose: 'read title',
     expected_effects: ['observe'],
-  })
+  }, 'model')
   assert.equal(invocation.ok, true)
   if (!invocation.ok) return
   assert.equal('expected_effects' in invocation.args, false)
+})
+
+test('trusted internal calls keep control flags while model calls cannot inject them', () => {
+  const trusted = resolveBrowserToolInvocation('browser_download', {
+    urls: ['https://example.com/a'],
+    unrelated_to_collection: true,
+  })
+  assert.equal(trusted.ok, true)
+  if (trusted.ok) assert.equal(trusted.args.unrelated_to_collection, true)
+
+  const model = resolveBrowserToolInvocation('browser_collect', {
+    mode: 'scroll',
+    custom_script: 'document.cookie',
+    strategy: 'url_batch',
+  }, 'model')
+  assert.equal(model.ok, true)
+  if (model.ok) assert.equal('custom_script' in model.args, false)
+  if (model.ok) assert.equal('strategy' in model.args, false)
 })

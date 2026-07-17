@@ -49,11 +49,10 @@ import {
 } from './agent-sdk-input-context-utils'
 import {
   hasRecalledTaskContext,
-  messageHasBrowserBatchCollectionIntent,
-  messageHasExplicitBrowserCollectionIntent,
   readSkillReferenceNames,
   resolveSkillHintRelevanceForTurn
 } from './agent-sdk-skill-intent-utils'
+import { resolveBrowserWorkIntent, type BrowserWorkIntent } from '../../../../shared/browser-work-intent'
 import type {
   AgentSdkBudgetCheckpointRestore,
   AgentSdkExecutionOptions,
@@ -110,7 +109,7 @@ export type AgentSdkTurnPreparationResult =
       preferCurrentDocumentRead: boolean
       requiresLocalDocumentWrite: boolean
       providerContent: RunMessage
-      recentCollectionIntent: boolean
+      recentBrowserWorkIntent: BrowserWorkIntent
       requestedCapabilityConflicts: RequestedCapabilityConflict[]
       preNarrowingToolDefinitions: ToolDefinition[]
       toolDefinitions: ToolDefinition[]
@@ -242,10 +241,9 @@ export function prepareAgentSdkTurn(
     hasActiveTaskContext: hasRecalledTaskContext(messageToText(content as RunMessage)),
     taskRefs: scopeTaskRefs
   })
-  // Synchronous continuity (no await in the run hot path): track this turn's
-  // collection intent and decay the TTL so bare follow-ups stay exposed. A
-  // substantive new task or explicit collection refusal starts a fresh intent
-  // window instead of inheriting write tools from an unrelated prior turn.
+  // Keep the complete browser-work contract across a bare retry/correction.
+  // A substantive new task or explicit refusal clears it, so a stale write
+  // boolean cannot leak into an unrelated turn.
   if (
     sessionId &&
     (
@@ -256,23 +254,10 @@ export function prepareAgentSdkTurn(
   ) {
     host.intentTracker.resetCollectionIntents(sessionId)
   }
-  const recentCollectionIntent = host.intentTracker.trackCollectionIntent(
+  const recentBrowserWorkIntent = host.intentTracker.trackBrowserWorkIntent(
     sessionId,
-    localSendImTurn
-      ? false
-      : messageHasExplicitBrowserCollectionIntent(
-          content as RunMessage,
-          effectiveExecutionOptions?.requestEnvelope
-        )
-  )
-  const recentBatchCollectionIntent = host.intentTracker.trackBatchCollectionIntent(
-    sessionId,
-    localSendImTurn
-      ? false
-      : messageHasBrowserBatchCollectionIntent(
-          content as RunMessage,
-          effectiveExecutionOptions?.requestEnvelope
-        )
+    resolveBrowserWorkIntent(localSendImTurn ? '' : turnFollowupPrimary),
+    turnFollowup.kind,
   )
   const capabilityResolutionCapture: { current: CapabilityResolution | null } = { current: null }
   let toolDefinitions = host.listToolDefinitionsForTurn({
@@ -285,8 +270,7 @@ export function prepareAgentSdkTurn(
     // Phase I —— 渠道回传组仅对绑定了远程线程的 scope 暴露
     channelScopeBound: host.runtime?.isScopeChannelBound?.(sessionId) ?? false,
     authorization,
-    recentCollectionIntent,
-    recentBatchCollectionIntent,
+    recentBrowserWorkIntent,
     localSendImIntent: localSendImTurn,
     requestEnvelope: effectiveExecutionOptions?.requestEnvelope,
     // P2-2 — gate use_skill exposure on the exact per-turn catalog snapshot later shown to the model.
@@ -411,7 +395,7 @@ export function prepareAgentSdkTurn(
     preferCurrentDocumentRead,
     requiresLocalDocumentWrite,
     providerContent,
-    recentCollectionIntent,
+    recentBrowserWorkIntent,
     requestedCapabilityConflicts,
     preNarrowingToolDefinitions,
     toolDefinitions,

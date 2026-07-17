@@ -480,7 +480,7 @@ export function resolveTaskTypeFromToolDefinitions(
   if (
     definitions.some(
       (definition) =>
-        definition.domain === 'general_research' || definition.name === 'browser_collect'
+        definition.domain === 'general_research' || definition.name === 'browser_research'
     )
   ) {
     return 'research'

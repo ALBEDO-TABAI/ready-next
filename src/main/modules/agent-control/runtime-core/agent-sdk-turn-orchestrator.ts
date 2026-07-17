@@ -66,7 +66,6 @@ import {
   writeRunCloseMetric
 } from './run-finalizer'
 import type { TurnTerminalReason } from './turn-frame'
-
 import {
   buildExecutionTurnResult,
   finalizeAgentSdkTurnLifecycle,
@@ -80,47 +79,26 @@ import {
   type AgentSdkPreparedTurnState
 } from './agent-sdk-turn-execution'
 import { prepareAgentSdkTurn } from './agent-sdk-turn-preparation'
-import { maybeHandleToolCapabilityConsent } from './tool-capability-consent'
+import {
+  isExplicitToolEnableConsentMessage,
+  maybeHandleToolCapabilityConsent
+} from './tool-capability-consent'
+import { ToolConsentRetryCoordinator } from './tool-consent-retry-coordinator'
+import { resolveBeginRunRejection } from './agent-sdk-admission-outcome'
+import {
+  buildLocalDocumentWriteBudgetCheckpoint,
+  buildToolProgressBudgetCheckpoint
+} from './agent-sdk-budget-messages'
 
 export type { TurnOrchestratorHost } from './agent-sdk-turn-context'
 
-export function resolveBeginRunRejection(reason: 'superseded' | 'orphan_limit'): {
-  status: 'cancelled' | 'error'
-  terminalReason: 'cancelled_runtime' | 'blocked_external'
-  cancelled: boolean
-} {
-  return reason === 'superseded'
-    ? { status: 'cancelled', terminalReason: 'cancelled_runtime', cancelled: true }
-    : { status: 'error', terminalReason: 'blocked_external', cancelled: false }
-}
-
-// Local helpers moved with sendMessage from AgentSdkRuntime (V3 Phase 5-B).
-function buildLocalDocumentWriteBudgetCheckpoint(): string {
-  return [
-    '已经读取源文档，但这轮工具调用次数用完了，目标文档还没有确认写入并保存。',
-    '请继续这项任务，我会从已读取的依据接着写入目标文档；不会把原文贴到聊天里。'
-  ].join('\n')
-}
-
-function buildToolProgressBudgetCheckpoint(usedTools: string[]): string {
-  const toolCount = usedTools.length
-  return [
-    '本轮工具调用次数已用完，任务还没完全收口。',
-    toolCount > 0
-      ? `已完成 ${toolCount} 次工具操作；请继续这项任务，我会沿着当前进度接着处理。`
-      : '请继续这项任务，我会沿着当前进度接着处理。'
-  ].join('\n')
-}
-
 /**
- * Turn orchestrator — owns sendMessage (the model/tool turn loop) plus the
- * funnel-pinned finalizers (buildResult, recordAdmissionRejection,
- * persistRunMetaSnapshot). Extracted verbatim from AgentSdkRuntime (V3 Phase 5-B):
- * the closures and locals are unchanged; only this.<collaborator> became
- * this.host.<collaborator>. All run-finalize-funnel invariants are preserved and
- * enforced by check-run-finalize-funnel.cjs against THIS file.
+ * Owns the model/tool turn loop and funnel-pinned finalizers. The stability gate
+ * enforces the run-finalize invariants against this file.
  */
 export class AgentSdkTurnOrchestrator {
+  private readonly toolConsentRetries = new ToolConsentRetryCoordinator()
+
   constructor(private readonly host: TurnOrchestratorHost) {}
 
   async sendMessage(
@@ -301,14 +279,14 @@ export class AgentSdkTurnOrchestrator {
             executionOptions?.taskBudgetRuntime ?? checkpointRestore.taskBudgetRuntime
         }
       : executionOptions
-    // 2026-07-04 — 意图/交易判定与 checkpoint 的 lastUserMessage 只认用户话语：
-    // content 已被 bootstrap 注入（站点卡/纪律含发布类词，会把采集轮判成
-    // browser_transaction），分类文本一律从 envelope 取纯文本，无 envelope
-    // 时回退旧行为。
+    // Intent and transaction classification only consume the user's envelope text.
     const pureUserTurnText = resolvePureUserTextForClassification(
       effectiveExecutionOptions?.requestEnvelope,
       messageToText(content as RunMessage)
     )
+    if (sessionId && !isExplicitToolEnableConsentMessage(pureUserTurnText)) {
+      this.toolConsentRetries.discard(sessionId)
+    }
     if (checkpointRestore) {
       const restoredSession = new MemorySession({
         sessionId: name,
@@ -715,7 +693,7 @@ export class AgentSdkTurnOrchestrator {
         preferCurrentDocumentRead,
         requiresLocalDocumentWrite,
         providerContent,
-        recentCollectionIntent,
+        recentBrowserWorkIntent,
         requestedCapabilityConflicts,
         preNarrowingToolDefinitions,
         turnFollowup
@@ -723,6 +701,26 @@ export class AgentSdkTurnOrchestrator {
       let { toolDefinitions } = preparedTurn
       if (preparedTurn.documentTargetHydration) await preparedTurn.documentTargetHydration
       if (capabilities) {
+        const providerToolsBlocked = requestedCapabilityConflicts.some(
+          (conflict) => conflict.reason === 'provider_disabled_tools'
+        )
+        if (
+          sessionId &&
+          providerToolsBlocked &&
+          !isExplicitToolEnableConsentMessage(pureUserTurnText)
+        ) {
+          this.toolConsentRetries.remember({
+            scopeId: sessionId,
+            sourceRunId: runId,
+            agentName: name,
+            content,
+            taskId,
+            executionOptions: effectiveExecutionOptions,
+          })
+        }
+        const consentRetryDispatch = sessionId
+          ? this.toolConsentRetries.createDispatch(sessionId, this.host.dispatchToolConsentRetry)
+          : undefined
         const consentResult = await maybeHandleToolCapabilityConsent({
           conflicts: requestedCapabilityConflicts,
           supportsToolCalls: capabilities.supportsToolCalls,
@@ -738,9 +736,13 @@ export class AgentSdkTurnOrchestrator {
           signal: abortController.signal,
           emitOutput,
           finalizeEarlyReturn,
-          setActiveToolUseMode: this.host.setActiveToolUseMode
+          setActiveToolUseMode: this.host.setActiveToolUseMode,
+          onEnabledAfterFinalize: consentRetryDispatch
         })
-        if (consentResult) return consentResult
+        if (consentResult) {
+          if (sessionId) this.toolConsentRetries.discard(sessionId)
+          return consentResult
+        }
       }
       documentTargetGuardForRecovery = documentTargetGuard
       requiresLocalDocumentExcerptForRecovery = requiresLocalDocumentExcerpt
@@ -844,7 +846,7 @@ export class AgentSdkTurnOrchestrator {
           return finalizeBudgetCheckpointReturn(checkpointText)
         },
         buildResult: (params) => this.buildResult(params),
-        recentCollectionIntent,
+        recentBrowserWorkIntent,
         requestedCapabilityConflicts,
         turnFollowup,
         useTextToolBridge,

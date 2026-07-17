@@ -5,6 +5,7 @@ import {
   validateWorkspaceRoot,
   type WorkspaceValidationResult,
 } from '../../shared/workspace-validation'
+import type { DocumentWatcherFailedEvent } from '../../shared/document-index-events'
 import {
   FILE_APPEARANCE_STORAGE_KEY,
   clearFileAppearanceForPath,
@@ -44,6 +45,16 @@ interface SidePanelWidths {
   shared: number
 }
 
+export interface WorkspaceWatcherFailure {
+  workspaceRoot: string
+  message: string
+  hint?: string
+}
+
+export interface WorkspaceWatcherReconcileResult {
+  failures: WorkspaceWatcherFailure[]
+}
+
 interface WorkspaceState {
   // State
   workspaceRoot: string | null
@@ -63,6 +74,7 @@ interface WorkspaceState {
   renamingPath: string | null
   creatingType: 'file' | 'folder' | null
   creatingPath: string | null
+  watcherFailure: WorkspaceWatcherFailure | null
 
   // Navigation
   setCurrentPath: (path: string) => void
@@ -255,8 +267,41 @@ const resolveCreationBaseDir = (state: Pick<
 //     intent — if the root was added back during the inflight wait, the
 //     wanted watcher is preserved.
 const watcherIdsByRoot = new Map<string, string>()
-const watcherStartInflight = new Map<string, Promise<void>>()
+const watcherStartInflight = new Map<string, Promise<WorkspaceWatcherFailure | null>>()
+const failedWatchersBeforeResponse = new Map<string, DocumentWatcherFailedEvent>()
 let intendedRoots: ReadonlySet<string> = new Set()
+
+function recordWatcherFailure(failure: WorkspaceWatcherFailure): WorkspaceWatcherFailure {
+  useWorkspace.setState({ watcherFailure: failure })
+  return failure
+}
+
+function clearWatcherFailureForRoot(root: string): void {
+  if (useWorkspace.getState().watcherFailure?.workspaceRoot === root) {
+    useWorkspace.setState({ watcherFailure: null })
+  }
+}
+
+export function handleWorkspaceWatcherFailure(event: DocumentWatcherFailedEvent): boolean {
+  const currentId = watcherIdsByRoot.get(event.workspaceRoot)
+  if (currentId === event.watcherId) {
+    watcherIdsByRoot.delete(event.workspaceRoot)
+    recordWatcherFailure({ workspaceRoot: event.workspaceRoot, message: event.message })
+    return true
+  }
+  if (currentId || !intendedRoots.has(event.workspaceRoot) || !watcherStartInflight.has(event.workspaceRoot)) {
+    return false
+  }
+  failedWatchersBeforeResponse.set(event.watcherId, event)
+  recordWatcherFailure({ workspaceRoot: event.workspaceRoot, message: event.message })
+  return true
+}
+
+export function formatWorkspaceWatcherFailure(failure: WorkspaceWatcherFailure | null): string | null {
+  if (!failure) return null
+  const detail = failure.hint ?? failure.message
+  return `文件变化监听不可用：${failure.workspaceRoot}。${detail} 请重试。`
+}
 
 /** Pure: roots that pass `validateWorkspaceRoot`. Unsafe pins still show in
  * the file tree but never feed the indexer / watcher / search subsystem. */
@@ -269,36 +314,59 @@ export function computeDesiredRoots(
   return union.filter((root) => validateWorkspaceRoot(root).ok)
 }
 
-async function ensureWatcherFor(root: string): Promise<void> {
-  if (typeof window === 'undefined' || !window.electronAPI?.document) return
+async function ensureWatcherFor(root: string): Promise<WorkspaceWatcherFailure | null> {
+  if (typeof window === 'undefined' || !window.electronAPI?.document) return null
   const doc = window.electronAPI.document
-  if (watcherIdsByRoot.has(root)) return
+  if (watcherIdsByRoot.has(root)) return null
   const existing = watcherStartInflight.get(root)
   if (existing) return existing
-  if (!doc.startWatcher) return
+  if (!doc.startWatcher) return null
   const promise = (async () => {
     try {
       const result = await doc.startWatcher({ workspaceRoot: root })
+      const watcherId = result?.success ? result.data?.watcherId : undefined
+      const beforeResponseFailure = watcherId
+        ? failedWatchersBeforeResponse.get(watcherId)
+        : undefined
+      if (watcherId) failedWatchersBeforeResponse.delete(watcherId)
       // Race check #1: intent may have flipped away during the await
       // (e.g. user clearWorkspace before chokidar `ready`). Roll back
       // the newly-allocated watcher immediately and skip recording it.
       if (!intendedRoots.has(root)) {
-        if (result?.success && result.data?.watcherId && doc.stopWatcher) {
+        if (watcherId && doc.stopWatcher) {
           try {
-            await doc.stopWatcher({ watcherId: result.data.watcherId })
+            await doc.stopWatcher({ watcherId })
           } catch (error) {
             console.warn('[workspace] watcher race rollback stopWatcher failed:', error)
           }
         }
-        return
+        return null
       }
-      if (result?.success && result.data?.watcherId) {
-        watcherIdsByRoot.set(root, result.data.watcherId)
+      if (result?.success && watcherId) {
+        if (beforeResponseFailure) {
+          return recordWatcherFailure({
+            workspaceRoot: root,
+            message: beforeResponseFailure.message,
+          })
+        }
+        watcherIdsByRoot.set(root, watcherId)
+        clearWatcherFailureForRoot(root)
+        return null
       } else if (result && !result.success) {
         console.warn('[workspace] startWatcher rejected:', result.errorKind, result.error, result.hint)
+        return recordWatcherFailure({
+          workspaceRoot: root,
+          message: result.error || '文件变化监听启动失败。',
+          ...(result.hint ? { hint: result.hint } : {}),
+        })
       }
+      return recordWatcherFailure({ workspaceRoot: root, message: '文件变化监听未返回有效结果。' })
     } catch (error) {
       console.warn('[workspace] startWatcher failed:', error)
+      return recordWatcherFailure({
+        workspaceRoot: root,
+        message: error instanceof Error ? error.message : String(error),
+      })
     } finally {
       watcherStartInflight.delete(root)
     }
@@ -379,8 +447,12 @@ async function releaseAllWatchers(): Promise<void> {
   )
 }
 
-async function reconcileWatchers(desired: readonly string[]): Promise<void> {
+async function reconcileWatchers(desired: readonly string[]): Promise<WorkspaceWatcherReconcileResult> {
   intendedRoots = new Set(desired)
+  const visibleFailure = useWorkspace.getState().watcherFailure
+  if (visibleFailure && !intendedRoots.has(visibleFailure.workspaceRoot)) {
+    useWorkspace.setState({ watcherFailure: null })
+  }
   const current = new Set(watcherIdsByRoot.keys())
   const toStop: string[] = []
   for (const root of current) {
@@ -392,17 +464,23 @@ async function reconcileWatchers(desired: readonly string[]): Promise<void> {
       toStart.push(root)
     }
   }
-  await Promise.all([
-    ...toStop.map((r) => releaseWatcherFor(r)),
-    ...toStart.map((r) => ensureWatcherFor(r)),
+  const results = await Promise.all([
+    ...toStop.map(async (root) => {
+      await releaseWatcherFor(root)
+      return null
+    }),
+    ...toStart.map((root) => ensureWatcherFor(root)),
   ])
+  return {
+    failures: results.filter((failure): failure is WorkspaceWatcherFailure => failure !== null),
+  }
 }
 
 /** Single external entry point for boot / WorkbenchMode reconcile.
  * External callers do not compose root sets themselves — `computeDesiredRoots`
  * is the only place the union rule lives. */
-export async function reconcileWorkspaceWatchersFromStore(): Promise<void> {
-  await reconcileWatchers(computeDesiredRoots(useWorkspace.getState()))
+export async function reconcileWorkspaceWatchersFromStore(): Promise<WorkspaceWatcherReconcileResult> {
+  return reconcileWatchers(computeDesiredRoots(useWorkspace.getState()))
 }
 
 const SIDE_PANEL_WIDTHS_KEY = 'ready-side-panel-widths-v2'
@@ -540,6 +618,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
   renamingPath: null,
   creatingType: null,
   creatingPath: null,
+  watcherFailure: null,
 
   setCurrentPath: (path) => {
     set({ currentPath: path })
@@ -731,6 +810,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
       renamingPath: null,
       creatingType: null,
       creatingPath: null,
+      watcherFailure: null,
     })
     removeStorage('ready-workspace-root')
     removeStorage('ready-pinned-folders')

@@ -8,9 +8,9 @@ import {
 } from '../../../../shared/agent-followup-intent'
 import type { CapabilityGroupId } from '../../../../shared/ai-capability-groups'
 import {
-  resolveBrowserBatchCollectionIntent,
   resolveBrowserCollectionIntent
 } from '../../../../shared/browser-collection-intent'
+import { resolveBrowserWorkIntent } from '../../../../shared/browser-work-intent'
 import {
   isBrowserTransactionIntent,
   resolveBrowserWorkflowIntent
@@ -172,11 +172,11 @@ export function messageHasExplicitBrowserCollectionIntent(
   const envelopePrimary = parseEnvelopeResourceReferences(requestEnvelope).primaryInstruction
   const primary = envelopePrimary || primaryInstructionText(message)
   const hasActiveTaskContext = hasRecalledTaskContext(fullText)
-  const primaryIntent = resolveBrowserWorkflowIntent(primary)
-  const fullIntent = followupConsultsRecalledContext(primary, { hasActiveTaskContext })
-    ? resolveBrowserWorkflowIntent(`${primary}\n${fullText}`)
-    : primaryIntent
-  if (primaryIntent.kind !== 'collection' && fullIntent.kind !== 'collection') return false
+  const primaryWorkIntent = resolveBrowserWorkIntent(primary)
+  const fullWorkIntent = followupConsultsRecalledContext(primary, { hasActiveTaskContext })
+    ? resolveBrowserWorkIntent(`${primary}\n${fullText}`)
+    : primaryWorkIntent
+  if (!primaryWorkIntent.persistenceRequested && !fullWorkIntent.persistenceRequested) return false
   const negated = classifyFollowupIntent(primary, { hasActiveTaskContext })
   return !negated.negations.includes('collection')
 }
@@ -192,7 +192,7 @@ export function messageHasBrowserBatchCollectionIntent(
   const fullText = messageToText(message)
   const envelopePrimary = parseEnvelopeResourceReferences(requestEnvelope).primaryInstruction
   const primary = envelopePrimary || primaryInstructionText(message)
-  if (resolveBrowserBatchCollectionIntent(primary)) {
+  if (resolveBrowserWorkIntent(primary).batchScope === 'explicit_all_items') {
     const negated = classifyFollowupIntent(primary, {
       hasActiveTaskContext: hasRecalledTaskContext(fullText)
     })
@@ -203,7 +203,7 @@ export function messageHasBrowserBatchCollectionIntent(
     followupConsultsRecalledContext(primary, {
       hasActiveTaskContext: hasRecalledTaskContext(fullText)
     }) &&
-    resolveBrowserBatchCollectionIntent(fullText)
+    resolveBrowserWorkIntent(fullText).batchScope === 'explicit_all_items'
   )
     return true
   return false

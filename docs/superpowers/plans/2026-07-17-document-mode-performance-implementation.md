@@ -211,6 +211,9 @@ depends_on:
 - local unsaved node + external image，以及 local save in-flight + external image，最终状态都同时含原节点和图片；隐藏后重挂载不丢图。
 - 双画板相反 open 完成顺序不改变点选目标；旧画板关闭不清除新画板。
 - 只读、软链接、多重硬链接和权限位都有真文件行为测试。超额 loading 页在 loading 结束后自动回收。
+- 聚焦文本未走完常规提交时直接退出，磁盘 readback 仍必须包含最后输入。
+- 一个失败与一个慢保存并存时，退出冲刷必须等慢保存完成后再聚合失败；失败路径在后续同路径成功之前不得允许从旧盘面重开。
+- 原位替换与恢复都失败时保留原文件备份，清理临时文件，并返回可读的 backupPath。
 
 ## 10. 最终验收顺序
 
@@ -230,15 +233,15 @@ depends_on:
 
 | 阶段 | 状态 | 证据 |
 |---|---|---|
-| P0 基线/gate | completed | 固定生成 5000 行/50 图/20 Widget/双文档/双画布/500 页 PDF/DOCX/XLSX/EPUB；`verify:document-perf` 134/134。默认样本目录每轮先清空，避免导入产物污染。 |
+| P0 基线/gate | completed | 固定生成 5000 行/50 图/20 Widget/双文档/双画布/500 页 PDF/DOCX/XLSX/EPUB；最终 `verify:document-perf` 全部通过，并纳入 workspace watcher 订阅唯一性合同。默认样本目录每轮先清空，避免导入产物污染。 |
 | P1 编辑/双开 | completed | 打包态 194955 字正文连续输入 next-frame p95 3.2ms、metadata 写 1 次且无大纲/Widget 派生；双栏焦点保存只写目标栏，外部覆盖不覆盖 dirty 正文。 |
 | P2 预览/Widget | completed | 单块修改只触发 1 次结构解析和 1 个预览块渲染，未变 Widget 编译/渲染均为 0；隐藏期连续写 50 次派生计算为 0，返回后各补算 1 次。 |
-| P3 变更/guard/查看器 | completed | 合并目录广播、20 MiB 文本边界、Ebook 合并写入与 ImageGallery 目录 LRU 均进入最终 134 项专项行为 gate；Widget 总 gate 196 项通过。 |
+| P3 变更/guard/查看器 | completed | 合并目录广播、20 MiB 文本边界、Ebook 合并写入与 ImageGallery 目录 LRU 均进入最终 137 项专项行为 gate；Widget 总 gate 196 项通过。 |
 | P4 PDF/Board | completed | 打包态 500 页 PDF 在 200% 缩放和滚动后同时挂载 7 页，Renderer V8 used heap 22.3 MiB；150 节点拖动 5 秒只提交 1 次，诊断记录 120 个合并帧。 |
 | P5 worker/原子发布 | completed | 打包态真实 DOCX/XLSX/EPUB 均在界面打开；连续 600 个 DOCX/XLSX worker 请求 2185.1ms 全成功，10ms Renderer heartbeat 最大 11.5ms；原子中断/恢复和 Electron 42 SQLite 原生 gate 通过。 |
-| P6 对抗时序/所有者 | completed | 连续刷新、退出落盘、只读/链接/权限、画板外部导入、双画板焦点和超额 loading 回收行为合同全部落地；补齐外部素材“持久回执 → 隐藏恢复 → 保存成功 → 确认清除”闭环及失败重试，退出刷盘只等待主 Renderer。`verify:document-perf` 134/134，`verify:browser-perf` 117 通过 + 2 项由 native gate 覆盖，IPC 合同与真实 Electron 补验通过。 |
+| P6 对抗时序/所有者 | completed | 连续刷新、退出落盘、只读/链接/权限、画板外部导入、双画板焦点和超额 loading 回收行为合同全部落地；补齐聚焦文本退出提交、保存失败传递、同路径失败阻断旧状态重开、多画板 all-settled 等待和双重失败备份保留。macOS 文件监听进一步补齐启动确认、运行期死亡自动摘除、跨路由失败真值、旧事件仲裁和可见重试。`verify:document-perf` 全部通过，`verify:browser-perf` 117 通过 + 2 项由 native gate 覆盖，IPC 合同与真实 Electron 补验通过。 |
 | 真实 Electron + 系统采样 | completed | `xctrace` 因本机仅有 CommandLineTools 不可用，已按合同使用 `/usr/bin/sample`：Renderer 20 秒样本峰值 244.3 MiB，Main 12 秒样本峰值 302.0 MiB；D1/D5/D7 重放期间等待栈占主导，浏览器交互保持响应，未出现文档解析占用 Main UI 线程的热点。 |
-| 对抗复审 | completed | 唯一 fresh Stage2 reviewer 未发现独立的 Document P0/P1/P2；其指出的 6 项共享浏览器问题全部修复。最终总检查继续发现并补齐隐藏画板回执重投递竞态、保存后确认和 macOS ACL 临时文件清理，专项与总 gate 均复测通过。 |
-| 最终全量验收 | completed | `npm run verify` 主测试 7389 通过、串行子任务 154 通过、串行性能 11 通过，零失败；`npm run build` 成功生成独立 document worker 和全部生产包入口。 |
+| 对抗复审 | completed | 全程只使用同一个 fresh adversarial agent；每轮有效问题都先修复、补行为证据，再由它继续复查。最终组合验证覆盖延迟重挂载阻断、一失败+一慢保存全部等完、聚合报错、后续成功清除失败、双重失败保留备份，以及 watcher 启动/运行/跨路由/延迟事件/重复重试竞态；同一复审者第三轮给出 PASS。 |
+| 最终全量验收 | completed | 最终 `npm run verify` 零失败；串行子任务 154 项通过、3 项由 native gate 覆盖，串行时序/性能 35 项全过。文档性能样本已改为测试自建、自清理，macOS 真文件监听改在串行 lane 验收，并对异步启动失败明确报错。`npm run build:dist` 生成 Ready 0.7.5 arm64 应用、ZIP 与 DMG；成品已通过签名、版本、架构、只读挂载、Applications 快捷方式、独立 document worker 和全新隔离资料启动检查。 |
 
-上述阶段均已按证据回填并标为 `completed`；普通 Node 的 native ABI 项由本轮 Electron 42 `verify:native` 真机原生门补足，不作为跳过验收。
+实现与验收阶段均已按证据回填；普通 Node 的 native ABI 项由本轮 Electron 42 `verify:native` 真机原生门补足，不作为跳过验收。最终提交仍以同一对抗复审者给出 PASS 为最后一道门。

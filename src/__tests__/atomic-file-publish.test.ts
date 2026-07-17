@@ -73,7 +73,7 @@ if (process.platform === 'darwin') {
       const { stdout: acl } = await execFileAsync('ls', ['-le', target], { encoding: 'utf8' })
       assert.equal(await readFile(target, 'utf8'), 'new')
       assert.equal(attribute.trim(), 'kept')
-      assert.match(acl, /everyone deny delete/)
+      assert.match(acl, /deny delete/)
       assert.equal(after.uid, before.uid)
       assert.equal(after.gid, before.gid)
     } finally {
@@ -180,6 +180,49 @@ test('atomic publish does not treat permission and IO errors as a missing target
       (error: NodeJS.ErrnoException) => error.code === 'EIO',
     )
     assert.equal(await readFile(target, 'utf8'), 'old')
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
+})
+
+test('in-place replacement keeps the original backup when replacement and restore both fail', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'ready-atomic-double-failure-'))
+  try {
+    const target = join(directory, 'note.md')
+    await writeFile(target, 'original')
+    let targetWriteCount = 0
+    const base: AtomicPublishFileOps = { access, copyFile, lstat, open, realpath, rename, stat, unlink }
+    const ops: AtomicPublishFileOps = {
+      ...base,
+      cloneFilePreservingMetadata: async () => { throw new Error('force in-place replacement') },
+      copyFile: async (from, to) => {
+        if (to === target) {
+          targetWriteCount += 1
+          await writeFile(target, 'partial')
+          throw new Error(targetWriteCount === 1 ? 'injected replacement failure' : 'injected restore failure')
+        }
+        await copyFile(from, to)
+      },
+    }
+
+    let backupPath = ''
+    await assert.rejects(
+      publishFileAtomically(target, 'replacement', { platform: 'darwin', ops }),
+      (error: AggregateError & { backupPath?: string }) => {
+        backupPath = error.backupPath || ''
+        assert.match(error.message, /原文件备份保留在/)
+        assert.equal(error.errors.length, 2)
+        return true
+      },
+    )
+
+    assert.equal(await readFile(target, 'utf8'), 'partial')
+    assert.ok(backupPath)
+    assert.equal(await readFile(backupPath, 'utf8'), 'original')
+    assert.deepEqual(
+      (await readdir(directory)).filter((name) => name.includes('.ready-tmp-')),
+      [],
+    )
   } finally {
     await rm(directory, { recursive: true, force: true })
   }

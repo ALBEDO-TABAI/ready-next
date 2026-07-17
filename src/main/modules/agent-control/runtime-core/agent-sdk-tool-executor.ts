@@ -39,6 +39,7 @@ import {
   browserOnDemandToolNames,
   browserToolNamesForIntent,
 } from '../../../../shared/browser-tool-surface'
+import { resolveBrowserWorkIntent, type BrowserWorkIntent } from '../../../../shared/browser-work-intent'
 import { GENERAL_RESEARCH_TOOL_NAMES } from '../../tools/general-research-tool-defs'
 import { activeNegations } from '../safety/negation-state'
 import { createBrowserTurnLease } from '../../browser-engine/agent-browser-turn-lease'
@@ -237,10 +238,8 @@ export class AgentSdkToolExecutor {
     authorization: SkillToolAuthorization
     /** Continuity: a recent explicit local Send IM turn can be retried directly. */
     localSendImIntent?: boolean
-    /** Continuity: a recent turn in this session expressed collection intent. */
-    recentCollectionIntent?: boolean
-    /** Continuity: a recent turn expressed multi-item collection intent. */
-    recentBatchCollectionIntent?: boolean
+    /** Complete browser-work contract inherited only by retry/correction turns. */
+    recentBrowserWorkIntent?: BrowserWorkIntent
     /** Request envelope — used to read the canonical user instruction. */
     requestEnvelope?: unknown
     /** P2-2 — the L1 skill catalog is non-empty this turn (gates use_skill exposure). */
@@ -283,21 +282,21 @@ export class AgentSdkToolExecutor {
       && messageToText(params.message).includes('## 最近会话摘要')
         ? messageToText(params.message)
         : currentInstruction
+    const browserWorkIntent = resolveBrowserWorkIntent(currentInstruction)
+    const effectiveBrowserWorkIntent = browserWorkIntent.kind === 'observe'
+      ? params.recentBrowserWorkIntent || browserWorkIntent
+      : browserWorkIntent
     const defaultBrowserNames = new Set<string>(browserToolNamesForIntent(
-      effectiveBrowserDecisionMode === 'browser_upload_workflow'
-        ? 'interaction'
-        : browserBaseIntentForInstruction(instructionForBaseSurface)
+      effectiveBrowserWorkIntent.kind === 'site_research'
+        ? 'site_research'
+        : effectiveBrowserDecisionMode === 'browser_upload_workflow'
+          ? 'interaction'
+          : browserBaseIntentForInstruction(instructionForBaseSurface)
     ))
     for (const name of browserOnDemandToolNames(currentInstruction)) defaultBrowserNames.add(name)
     if (effectiveBrowserDecisionMode === 'browser_upload_workflow') defaultBrowserNames.add('browser_upload')
-    // WP1: decouple browser collection exposure from the deterministic workflow
-    // decision. Expose the browser groups (via intentGroupModes, WITHOUT changing
-    // the decision mode) when this turn — or a recent turn — shows browser
-    // collection intent. messageHasBrowserCollectionIntent uses the "### 浏览页面
-    // 引用" reference marker plus the predicate over the PRIMARY instruction text
-    // (not the full text, so context markers don't over-trigger); recentCollection
-    // Intent carries the TTL continuity so a bare follow-up ("再试一次") stays
-    // exposed.
+    // The current instruction owns the intent. Only a classified retry/correction
+    // may supply a complete prior BrowserWorkIntent through the tracker.
     const msgIntent = messageHasBrowserCollectionIntent(params.message, params.requestEnvelope)
     const msgExplicitCollectionIntent = messageHasExplicitBrowserCollectionIntent(
       params.message,
@@ -316,18 +315,22 @@ export class AgentSdkToolExecutor {
     const suppressBrowserContentTasks =
       skillResumeOrRepairContext &&
       browserDecisionMode === 'free_tool_loop' &&
+      effectiveBrowserWorkIntent.kind !== 'site_research' &&
       !explicitBrowserCollectionIntent
+    const inheritedCollectionIntent = effectiveBrowserWorkIntent.kind === 'persist_collection'
     const collectionExposure =
       params.browserHostAvailable &&
       browserDecisionMode === 'free_tool_loop' &&
       !localSendImIntent &&
-      (msgIntent || params.recentCollectionIntent === true) &&
+      (msgIntent || effectiveBrowserWorkIntent.kind === 'site_research' || inheritedCollectionIntent) &&
       !suppressBrowserContentTasks
     const persistentCollectionExposure =
       collectionExposure &&
-      (msgExplicitCollectionIntent || params.recentCollectionIntent === true)
+      (msgExplicitCollectionIntent || inheritedCollectionIntent)
     const batchCollectionExposure =
-      persistentCollectionExposure && (msgBatchIntent || params.recentBatchCollectionIntent === true)
+      persistentCollectionExposure && (
+        msgBatchIntent || effectiveBrowserWorkIntent.batchScope === 'explicit_all_items'
+      )
     appendToolCapabilityLog(
       [
         '[collection_exposure]',
@@ -336,9 +339,9 @@ export class AgentSdkToolExecutor {
         `effectiveMode=${effectiveBrowserDecisionMode}`,
         `msgIntent=${msgIntent}`,
         `explicitCollection=${msgExplicitCollectionIntent}`,
-        `recentIntent=${params.recentCollectionIntent === true}`,
+        `workIntent=${effectiveBrowserWorkIntent.kind}`,
         `batchIntent=${msgBatchIntent}`,
-        `recentBatch=${params.recentBatchCollectionIntent === true}`,
+        `batchScope=${effectiveBrowserWorkIntent.batchScope}`,
         `localSendIm=${localSendImIntent}`,
         `skillResumeSuppress=${suppressBrowserContentTasks}`,
         `exposure=${collectionExposure}`,
@@ -356,6 +359,9 @@ export class AgentSdkToolExecutor {
       params.authorization.mode === 'none' && params.skillCatalogAvailable === true
     const intentGroupModes = {
       ...sdkIntentSurface.intentGroupModes,
+      ...(effectiveBrowserWorkIntent.kind === 'site_research'
+        ? { general_research: false }
+        : {}),
       ...(Array.from(defaultBrowserNames).some((name) => BROWSER_CONTENT_TASK_TOOL_NAME_SET.has(name))
         ? { browser_content_tasks: true }
         : {}),
@@ -426,6 +432,7 @@ export class AgentSdkToolExecutor {
       definitions = definitions.filter((definition) => {
         const name = (definition as { name?: unknown }).name
         if (typeof name !== 'string' || !name.startsWith('browser_')) return true
+        if (effectiveBrowserWorkIntent.kind === 'site_research') return defaultBrowserNames.has(name)
         if (batchCollectionExposure) return isBrowserBatchCollectionWorkflowTool(name)
         if (persistentCollectionExposure) return isBrowserCollectionSubsetTool(name)
         return isBrowserObservationSubsetTool(name)
@@ -462,7 +469,7 @@ export class AgentSdkToolExecutor {
       hasCurrentDocumentContext: hasCurrentDocumentContextResource(params.requestEnvelope)
     })
     if (activeSkillAllowedTools) {
-      const preserveVisibleBrowserTool = readOnlyResearchSkill
+      const preserveVisibleBrowserTool = readOnlyResearchSkill && effectiveBrowserWorkIntent.kind !== 'site_research'
         ? undefined
         : createVisibleBrowserToolPreserver({
             visibleCapabilityGroupIds: capabilityResolution.visibleCapabilityGroupIds,
@@ -476,9 +483,13 @@ export class AgentSdkToolExecutor {
         capabilityResolution.visibleCapabilityGroupIds.includes('general_research')
           ? (name: string) => GENERAL_RESEARCH_TOOL_NAME_SET.has(name)
           : undefined
+      const preserveSiteResearchTool = effectiveBrowserWorkIntent.kind === 'site_research'
+        ? (name: string) => defaultBrowserNames.has(name)
+        : undefined
       definitions = filterSelectedSkillToolSurface(definitions, activeSkillAllowedTools, {
         preserveToolName: (name) =>
-          preserveVisibleBrowserTool?.(name) === true
+          preserveSiteResearchTool?.(name) === true
+          || preserveVisibleBrowserTool?.(name) === true
           || preserveVisibleResearchTool?.(name) === true
           || name === 'agent_propose_handoff'
           || capabilityFloors.toolNames.has(name)

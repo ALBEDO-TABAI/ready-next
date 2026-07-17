@@ -1,4 +1,5 @@
 import type { ModelProvider } from '@openai/agents'
+import type { BrowserWorkIntent } from '../../../../shared/browser-work-intent'
 import { classifyFollowupIntent } from '../../../../shared/agent-followup-intent'
 import { resolveAIConfigCapabilities } from '../../../../shared/ai-providers'
 import { buildAgentSpawnContextFromAIConfig } from '../../skills-runtime/agent-context-source'
@@ -102,7 +103,7 @@ export interface AgentSdkPreparedTurnContext {
   }) => Promise<ExecutionTurnResult>
   finalizeBudgetCheckpointReturn: (checkpointText: string) => Promise<ExecutionTurnResult>
   buildResult: (params: Parameters<typeof buildExecutionTurnResult>[1]) => ExecutionTurnResult
-  recentCollectionIntent: boolean
+  recentBrowserWorkIntent: BrowserWorkIntent
   requestedCapabilityConflicts: readonly RequestedCapabilityConflict[]
   turnFollowup: ReturnType<typeof classifyFollowupIntent>
   useTextToolBridge: boolean

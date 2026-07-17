@@ -27,6 +27,12 @@ interface FakeBrowserTaskRecord {
   started_at: string | null
   updated_at: string
   finished_at: string | null
+  revision?: number
+  created_by_run_id?: string | null
+  active_execution_binding_json?: string | null
+  parent_task_id?: string | null
+  projection_revision?: number
+  projection_sync_json?: string | null
 }
 
 class FakeBrowserRepository {
@@ -253,6 +259,91 @@ describe('browser task persistence', () => {
     assert.equal(late?.status, 'cancelled')
     assert.deepEqual(late?.result, { partial: true })
     assert.equal(late?.progress.completed, 0)
+  })
+
+  it('clears nullable progress fields explicitly and reports payload CAS conflicts', () => {
+    const repository = new FakeBrowserRepository()
+    const service = new BrowserTaskPersistenceService(repository as never)
+    const taskId = 'browser-task-null-clear'
+    repository.createTask({
+      ...makeRecord(taskId),
+      status: 'running',
+      current_label: 'working',
+      error: 'old error',
+      payload_json: JSON.stringify({ scopeId: 'scope-a' }),
+    })
+
+    const cleared = service.updateProgress(taskId, { currentLabel: null }, { error: null })
+    assert.equal(cleared?.progress.currentLabel, null)
+    assert.equal(cleared?.error, null)
+
+    repository.beforeUpdate = (id) => {
+      const current = repository.tasks.get(id)!
+      repository.tasks.set(id, { ...current, updated_at: '2026-06-21T00:00:02.000Z' })
+    }
+    assert.equal(service.updateTaskPayload(taskId, { scopeId: 'scope-b' }), false)
+    assert.deepEqual(service.getTaskPayload(taskId), { scopeId: 'scope-a' })
+  })
+
+  it('patches payload fields without replacing unrelated state and fails closed on a concurrent update', () => {
+    const repository = new FakeBrowserRepository()
+    const service = new BrowserTaskPersistenceService(repository as never)
+    const taskId = 'browser-task-payload-patch'
+    repository.createTask({
+      ...makeRecord(taskId),
+      payload_json: JSON.stringify({ scopeId: 'scope-a', agentTabId: 'tab-old' }),
+    })
+
+    assert.equal(service.patchTaskPayload(taskId, { ownerRunId: 'run-new' }), true)
+    assert.deepEqual(service.getTaskPayload(taskId), {
+      scopeId: 'scope-a',
+      agentTabId: 'tab-old',
+      ownerRunId: 'run-new',
+    })
+
+    repository.beforeUpdate = (id) => {
+      const current = repository.tasks.get(id)!
+      repository.tasks.set(id, {
+        ...current,
+        payload_json: JSON.stringify({ scopeId: 'scope-a', agentTabId: 'tab-newer' }),
+        updated_at: '2026-06-21T00:00:02.000Z',
+      })
+    }
+    assert.equal(service.patchTaskPayload(taskId, { ownerRunId: 'run-late' }), false)
+    assert.deepEqual(service.getTaskPayload(taskId), { scopeId: 'scope-a', agentTabId: 'tab-newer' })
+  })
+
+  it('keeps projection revisions monotonic and exposes a concurrent sync conflict', () => {
+    const repository = new FakeBrowserRepository()
+    const service = new BrowserTaskPersistenceService(repository as never)
+    const taskId = 'browser-task-projection-sync'
+    repository.createTask({
+      ...makeRecord(taskId),
+      revision: 5,
+      projection_revision: 4,
+      projection_sync_json: null,
+    })
+
+    const monotonic = service.updateProjectionSync(taskId, {
+      projectionRevision: 2,
+      sync: null,
+    })
+    assert.equal(monotonic?.projectionRevision, 4)
+
+    repository.beforeUpdate = (id) => {
+      const current = repository.tasks.get(id)!
+      repository.tasks.set(id, {
+        ...current,
+        revision: 6,
+        updated_at: '2026-06-21T00:00:02.000Z',
+      })
+    }
+    const conflicted = service.updateProjectionSync(taskId, {
+      projectionRevision: 5,
+      sync: null,
+    })
+    assert.equal(conflicted?.revision, 6)
+    assert.equal(conflicted?.projectionRevision, 4)
   })
 
   it('persists a complete resume checkpoint contract with targets, failures, hashes, binding and next step', () => {

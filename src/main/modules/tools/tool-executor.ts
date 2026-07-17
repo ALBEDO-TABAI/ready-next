@@ -708,6 +708,7 @@ async function executeToolCallInner(
                     }
                   }
                 : undefined,
+              inputSource: invoker === 'model' ? 'model' : 'trusted_internal',
             },
           )
           if (typeof browserResult === 'string' && browserResult.startsWith('Error:')) {

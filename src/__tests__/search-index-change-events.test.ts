@@ -4,8 +4,15 @@ import type { IpcMain, IpcMainInvokeEvent } from 'electron'
 
 import { sourceIndexGroup, type SourceIndexGroupDeps } from '../main/modules/search-engine/ipc/source-index-group'
 import { watcherGroup, type WatcherGroupDeps } from '../main/modules/search-engine/ipc/watcher-group'
-import type { FileWatcherChange, FileWatcherOptions } from '../main/modules/search-engine/file-watcher'
-import type { DocumentIndexChangedEvent } from '../shared/document-index-events'
+import {
+  FileWatcherRegistry,
+  type FileWatcherChange,
+  type FileWatcherOptions,
+} from '../main/modules/search-engine/file-watcher'
+import type {
+  DocumentIndexChangedEvent,
+  DocumentWatcherFailedEvent,
+} from '../shared/document-index-events'
 
 type Handler = (event: IpcMainInvokeEvent, ...args: never[]) => unknown
 
@@ -18,17 +25,23 @@ function registerHandlers(register: (ipc: IpcMain) => void): Map<string, Handler
   return handlers
 }
 
-function eventCapture(): { event: IpcMainInvokeEvent; sent: DocumentIndexChangedEvent[] } {
+function eventCapture(): {
+  event: IpcMainInvokeEvent
+  sent: DocumentIndexChangedEvent[]
+  watcherFailures: DocumentWatcherFailedEvent[]
+} {
   const sent: DocumentIndexChangedEvent[] = []
+  const watcherFailures: DocumentWatcherFailedEvent[] = []
   const event = {
     sender: {
       isDestroyed: () => false,
-      send(channel: string, payload: DocumentIndexChangedEvent) {
-        if (channel === 'document:indexChanged') sent.push(payload)
+      send(channel: string, payload: DocumentIndexChangedEvent | DocumentWatcherFailedEvent) {
+        if (channel === 'document:indexChanged') sent.push(payload as DocumentIndexChangedEvent)
+        if (channel === 'document:watcherFailed') watcherFailures.push(payload as DocumentWatcherFailedEvent)
       },
     },
   } as unknown as IpcMainInvokeEvent
-  return { event, sent }
+  return { event, sent, watcherFailures }
 }
 
 test('successful rebuild and single-document indexing publish index readback events', async () => {
@@ -96,7 +109,7 @@ test('watcher publishes only after add/change/unlink has reached the index', asy
       onChange = options.onChange
       return { id: 'watch-1', workspaceRoot: options.workspaceRoot, close: async () => undefined }
     },
-    getFileWatcherRegistry: () => ({ add: () => undefined, stop: async () => true }),
+    getFileWatcherRegistry: () => ({ add: () => true, stop: async () => true }),
   } as unknown as WatcherGroupDeps
   const handlers = registerHandlers((ipc) => { watcherGroup.register(ipc, deps) })
   const capture = eventCapture()
@@ -164,7 +177,7 @@ test('watcher does not publish when incremental indexing reports failure', async
       onChange = options.onChange
       return { id: 'watch-2', workspaceRoot: options.workspaceRoot, close: async () => undefined }
     },
-    getFileWatcherRegistry: () => ({ add: () => undefined, stop: async () => true }),
+    getFileWatcherRegistry: () => ({ add: () => true, stop: async () => true }),
   } as unknown as WatcherGroupDeps
   const handlers = registerHandlers((ipc) => { watcherGroup.register(ipc, deps) })
   const capture = eventCapture()
@@ -174,6 +187,54 @@ test('watcher does not publish when incremental indexing reports failure', async
   await onChange!({ filePath: '/workspace/broken.md', kind: 'change', workspaceRoot: '/workspace' })
 
   assert.deepEqual(capture.sent, [])
+})
+
+test('watcher runtime failure removes the registry entry and notifies the renderer', async () => {
+  let fatalCallback: ((event: DocumentWatcherFailedEvent) => void) | null = null
+  let closed = false
+  const registry = new FileWatcherRegistry()
+  const deps = {
+    getSearchEngine: () => ({ indexDocument: async () => ({ ok: true, skipped: false }) }),
+    createFileWatcher: async (options: FileWatcherOptions) => ({
+      id: 'watch-runtime-failure',
+      workspaceRoot: options.workspaceRoot,
+      isClosed: () => closed,
+      onFatalError: (callback: (event: DocumentWatcherFailedEvent) => void) => {
+        fatalCallback = callback
+        return () => { fatalCallback = null }
+      },
+      close: async () => { closed = true },
+    }),
+    getFileWatcherRegistry: () => registry,
+  } as unknown as WatcherGroupDeps
+  const handlers = registerHandlers((ipc) => { watcherGroup.register(ipc, deps) })
+  const capture = eventCapture()
+
+  const response = await handlers.get('document:startWatcher')!(
+    capture.event,
+    { workspaceRoot: '/workspace' } as never,
+  ) as { success: boolean; data?: { watcherId: string } }
+  assert.equal(response.success, true)
+  assert.equal(registry.has('watch-runtime-failure'), true)
+  assert.ok(fatalCallback)
+
+  closed = true
+  fatalCallback!({
+    watcherId: 'watch-runtime-failure',
+    workspaceRoot: '/workspace',
+    kind: 'failed',
+    message: 'native watcher stopped',
+    failedAt: 123,
+  })
+
+  assert.equal(registry.has('watch-runtime-failure'), false)
+  assert.deepEqual(capture.watcherFailures, [{
+    watcherId: 'watch-runtime-failure',
+    workspaceRoot: '/workspace',
+    kind: 'failed',
+    message: 'native watcher stopped',
+    failedAt: 123,
+  }])
 })
 
 test('no-change rebuild, skipped indexing, and missing unlink do not invalidate the graph', async () => {
@@ -224,7 +285,7 @@ test('no-change rebuild, skipped indexing, and missing unlink do not invalidate 
       onChange = options.onChange
       return { id: 'watch-no-change', workspaceRoot: options.workspaceRoot, close: async () => undefined }
     },
-    getFileWatcherRegistry: () => ({ add: () => undefined, stop: async () => true }),
+    getFileWatcherRegistry: () => ({ add: () => true, stop: async () => true }),
   } as unknown as WatcherGroupDeps
   const watcherHandlers = registerHandlers((ipc) => { watcherGroup.register(ipc, watcherDeps) })
   const watcherCapture = eventCapture()

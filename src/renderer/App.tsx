@@ -17,6 +17,7 @@ import { initAgentListeners } from './stores/useAgent'
 import { usePetActivityBridge } from './modules/pet/usePetActivityBridge'
 import { fetchRSSWarmSnapshot } from './modules/rss/rssWarmLoader'
 import { primeRSSWarmCache } from './modules/rss/rssWarmCache'
+import { handleWorkspaceWatcherFailure } from './stores/useWorkspace'
 
 const LiquidTest = lazy(() => import('./LiquidTest'))
 const StartupPreview = lazy(() => import('./pages/StartupPreview'))
@@ -89,6 +90,14 @@ function MainAppShell() {
   useEffect(() => {
     const cleanup = initAgentListeners()
     return cleanup
+  }, [])
+
+  useEffect(() => {
+    const subscribe = window.electronAPI?.document?.onWatcherFailed
+    if (!subscribe) return
+    return subscribe((event) => {
+      handleWorkspaceWatcherFailure(event)
+    })
   }, [])
 
   useEffect(() => {

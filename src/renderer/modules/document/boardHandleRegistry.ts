@@ -22,9 +22,12 @@ export function trackBoardPathSave(path: string, save: Promise<void>): Promise<v
   const previous = pendingSavesByPath.get(path) ?? Promise.resolve()
   const tracked = previous.catch(() => undefined).then(() => save)
   pendingSavesByPath.set(path, tracked)
-  void tracked.finally(() => {
-    if (pendingSavesByPath.get(path) === tracked) pendingSavesByPath.delete(path)
-  }).catch(() => undefined)
+  void tracked.then(
+    () => {
+      if (pendingSavesByPath.get(path) === tracked) pendingSavesByPath.delete(path)
+    },
+    () => undefined,
+  )
   return tracked
 }
 
@@ -33,7 +36,9 @@ export async function waitForBoardPathSave(path: string): Promise<void> {
 }
 
 export async function waitForAllBoardPathSaves(): Promise<void> {
-  await Promise.allSettled([...pendingSavesByPath.values()])
+  const results = await Promise.allSettled([...pendingSavesByPath.values()])
+  const errors = results.flatMap((result) => result.status === 'rejected' ? [result.reason] : [])
+  if (errors.length > 0) throw new AggregateError(errors, '一个或多个画板未能保存')
 }
 
 export function resetBoardHandleRegistryForTests(): void {

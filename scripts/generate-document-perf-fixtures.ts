@@ -1,6 +1,7 @@
 import { mkdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { pathToFileURL } from 'node:url'
 
 import JSZip from 'jszip'
 import * as XLSX from 'xlsx'
@@ -133,8 +134,7 @@ async function buildEpub(): Promise<Buffer> {
   return zip.generateAsync({ type: 'nodebuffer' })
 }
 
-async function main(): Promise<void> {
-  const outputDir = readOutputArgument()
+export async function generateDocumentPerfFixtures(outputDir = DEFAULT_OUTPUT): Promise<void> {
   if (outputDir === DEFAULT_OUTPUT) {
     await rm(outputDir, { recursive: true, force: true })
   }
@@ -193,7 +193,14 @@ async function main(): Promise<void> {
       },
     }, null, 2)}\n`),
   ])
+}
+
+async function main(): Promise<void> {
+  const outputDir = readOutputArgument()
+  await generateDocumentPerfFixtures(outputDir)
   process.stdout.write(`${outputDir}\n`)
 }
 
-await main()
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+  await main()
+}

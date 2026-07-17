@@ -89,6 +89,7 @@ export const BROWSER_CAPABILITY_TASK_KINDS = [
   'download_urls',
   'scroll_collect',
   'research',
+  'site_research',
   'visible_collect',
   'note_collect',
   'card_loop',
@@ -145,6 +146,12 @@ export interface BrowserCapabilityTaskHandle {
   startedAt?: string | null
   finishedAt?: string | null
   updatedAt?: string
+  revision?: number
+  createdByRunId?: string | null
+  activeExecutionBinding?: import('../../../shared/agent-execution-profile').TaskExecutionBinding | null
+  parentTaskId?: string | null
+  projectionRevision?: number
+  projectionSync?: Record<string, unknown> | null
 }
 
 export interface BrowserStartTaskRequest {

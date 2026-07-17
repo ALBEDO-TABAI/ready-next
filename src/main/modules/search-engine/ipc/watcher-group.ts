@@ -35,7 +35,7 @@
 import type { IpcMain } from 'electron'
 import { isInotifyExhaustionError } from '../file-watcher'
 import type { EngineDeps } from './engine-deps'
-import { publishDocumentIndexChanged } from './document-index-events'
+import { publishDocumentIndexChanged, publishDocumentWatcherFailed } from './document-index-events'
 import type { IpcChannelGroup, IpcDisposeHandle } from './types'
 
 /**
@@ -152,7 +152,16 @@ export const watcherGroup: IpcChannelGroup<WatcherGroupDeps> = {
           }
         }
 
-        deps.getFileWatcherRegistry().add(result)
+        const registered = deps.getFileWatcherRegistry().add(result, (failure) => {
+          publishDocumentWatcherFailed(event.sender, failure)
+        })
+        if (!registered) {
+          return {
+            success: false,
+            error: 'file watcher stopped before registration completed',
+            errorKind: 'failed',
+          }
+        }
         return {
           success: true,
           data: { watcherId: result.id, workspaceRoot: result.workspaceRoot },

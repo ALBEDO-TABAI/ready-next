@@ -112,44 +112,52 @@ function makeController(over: Record<string, unknown> = {}) {
 }
 
 test('gap 1: raw browser_download redirects to the chained tool when a gallery source task exists', async () => {
-  const controller = makeController()
-  const output = await executeBrowserTool('browser_download', {
-    urls: ['https://example.com/img-0.jpg'],
-    directory: '~/Documents',
-  }, controller, undefined, 'scope-img')
-  const parsed = parseBrowserJson(output)
-  assert.equal(parsed.ok, false)
-  assert.equal(parsed.errorCode, 'use_collected_media_download')
-  assert.equal(parsed.sourceTaskId, 'task-gallery-1')
-  assert.equal(parsed.suggestedNextTool, 'browser_download')
+  const downloadRoot = mkdtempSync(join(tmpdir(), 'ready-dl-guard-'))
+  const userText = `download to ${downloadRoot}`
+  try {
+    const controller = makeController()
+    const output = await executeBrowserTool('browser_download', {
+      urls: ['https://example.com/img-0.jpg'],
+      directory: downloadRoot,
+    }, controller, undefined, 'scope-img', undefined, userText)
+    const parsed = parseBrowserJson(output)
+    assert.equal(parsed.ok, false)
+    assert.equal(parsed.errorCode, 'use_collected_media_download')
+    assert.equal(parsed.sourceTaskId, 'task-gallery-1')
+    assert.equal(parsed.suggestedNextTool, 'browser_download')
 
-  // explicitly unrelated downloads pass the guard (and fail later on the
-  // unsupported protocol — proving we got PAST the redirect)
-  const unrelated = await executeBrowserTool('browser_download', {
-    urls: ['ftp://example.com/file.bin'],
-    unrelated_to_collection: true,
-  }, controller, undefined, 'scope-img')
-  const unrelatedParsed = parseBrowserJson(unrelated)
-  assert.equal(unrelatedParsed.results[0].error, 'unsupported_protocol')
+    // explicitly unrelated downloads pass the guard (and fail later on the
+    // unsupported protocol — proving we got PAST the redirect)
+    const unrelated = await executeBrowserTool('browser_download', {
+      urls: ['ftp://example.com/file.bin'],
+      directory: downloadRoot,
+      unrelated_to_collection: true,
+    }, controller, undefined, 'scope-img', undefined, userText)
+    const unrelatedParsed = parseBrowserJson(unrelated)
+    assert.equal(unrelatedParsed.results[0].error, 'unsupported_protocol')
 
-  // no gallery task in scope → no redirect either
-  const bare = makeController({ listTasksByKind: async () => [] })
-  const free = await executeBrowserTool('browser_download', {
-    urls: ['ftp://example.com/file.bin'],
-  }, bare, undefined, 'scope-img')
-  assert.equal(parseBrowserJson(free).results[0].error, 'unsupported_protocol')
+    // no gallery task in scope → no redirect either
+    const bare = makeController({ listTasksByKind: async () => [] })
+    const free = await executeBrowserTool('browser_download', {
+      urls: ['ftp://example.com/file.bin'],
+      directory: downloadRoot,
+    }, bare, undefined, 'scope-img', undefined, userText)
+    assert.equal(parseBrowserJson(free).results[0].error, 'unsupported_protocol')
 
-  const partial = makeController({
-    listTasksByKind: async () => [partialGalleryTask('task-gallery-1')],
-    getTask: async () => partialGalleryTask('task-gallery-1'),
-  })
-  const redirectedPartial = await executeBrowserTool('browser_download', {
-    urls: ['https://example.com/img-0.jpg'],
-    directory: '~/Documents',
-  }, partial, undefined, 'scope-img')
-  const redirectedPartialParsed = parseBrowserJson(redirectedPartial)
-  assert.equal(redirectedPartialParsed.errorCode, 'use_collected_media_download')
-  assert.equal(redirectedPartialParsed.sourceTaskId, 'task-gallery-1')
+    const partial = makeController({
+      listTasksByKind: async () => [partialGalleryTask('task-gallery-1')],
+      getTask: async () => partialGalleryTask('task-gallery-1'),
+    })
+    const redirectedPartial = await executeBrowserTool('browser_download', {
+      urls: ['https://example.com/img-0.jpg'],
+      directory: downloadRoot,
+    }, partial, undefined, 'scope-img', undefined, userText)
+    const redirectedPartialParsed = parseBrowserJson(redirectedPartial)
+    assert.equal(redirectedPartialParsed.errorCode, 'use_collected_media_download')
+    assert.equal(redirectedPartialParsed.sourceTaskId, 'task-gallery-1')
+  } finally {
+    rmSync(downloadRoot, { recursive: true, force: true })
+  }
 })
 
 test('gaps 2+3: collected-media download reconciles discovered/saved/remaining and writes back to the source task', async () => {
@@ -225,7 +233,7 @@ test('partial gallery sources require consent, then download discovered media wi
     }, controller, undefined, 'scope-img')
     const blockedParsed = parseBrowserJson(blocked)
     assert.equal(blockedParsed.errorCode, 'partial_collection_consent_required')
-    assert.equal(blockedParsed.allowPartialIgnored, true)
+    assert.equal('allowPartialIgnored' in blockedParsed, false)
     assert.match(blockedParsed.pendingConsentRequest?.requestId || '', /^browser-consent-test-/)
 
     store.confirmPendingRequest(blockedParsed.pendingConsentRequest.requestId)

@@ -5,6 +5,7 @@ import { resolveToolExecutionTimeoutMs } from './tool-execution-timeout-policy'
 import { createBrowserStructuredOutput } from './browser-failure-output'
 import {
   resolveBrowserToolInvocation,
+  type BrowserToolInputSource,
   type BrowserToolInvocation,
 } from './browser-tool-invocation'
 import type { ToolExecutionOutput } from '../agent-control/tools-runtime/tool-result-types'
@@ -25,6 +26,7 @@ export interface BrowserActionExecutorEvent {
 export interface BrowserActionExecutorInput {
   toolName: string
   args: Record<string, unknown>
+  inputSource?: BrowserToolInputSource
   abortSignal?: AbortSignal
   leaseGate?: BrowserLeaseGate
   origin?: string | null
@@ -125,7 +127,7 @@ function linkAbortSignal(source: AbortSignal | undefined, target: AbortControlle
 
 export class BrowserActionExecutor {
   async execute(input: BrowserActionExecutorInput): Promise<string | ToolExecutionOutput> {
-    const invocation = resolveBrowserToolInvocation(input.toolName, input.args)
+    const invocation = resolveBrowserToolInvocation(input.toolName, input.args, input.inputSource)
     if (!invocation.ok) {
       return createBrowserStructuredOutput({
         ok: false,
@@ -217,7 +219,8 @@ export class BrowserActionExecutor {
       }
       const origin = String(input.origin || '').trim()
       const controlPlaneWrite = input.toolName === 'browser_request_takeover'
-        || (input.toolName === 'browser_task' && invocation.args.action === 'cancel')
+        || input.toolName === 'browser_task'
+      const recordOriginOutcome = input.toolName !== 'browser_task'
       const execution = access === 'write' && !controlPlaneWrite
         ? (input.interactionBudget || browserOriginInteractionBudget)
             .runWrite(origin, dispatch, abortController.signal)
@@ -257,7 +260,7 @@ export class BrowserActionExecutor {
           }),
         ])
         if (drainTimer) clearTimeout(drainTimer)
-        if (drained.kind === 'result' && access === 'write' && origin) {
+        if (drained.kind === 'result' && access === 'write' && recordOriginOutcome && origin) {
           ;(input.interactionBudget || browserOriginInteractionBudget).record(
             origin,
             interactionSignalFromResult(drained.value, authoritativeInteractionSignal),
@@ -275,7 +278,7 @@ export class BrowserActionExecutor {
       }
       if (first.kind === 'error') throw first.error
       const result = normalizeBareBrowserToolError(first.value)
-      if (access === 'write' && origin) {
+      if (access === 'write' && recordOriginOutcome && origin) {
         ;(input.interactionBudget || browserOriginInteractionBudget).record(
           origin,
           interactionSignalFromResult(result, authoritativeInteractionSignal),

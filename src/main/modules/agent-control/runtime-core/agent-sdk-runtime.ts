@@ -652,6 +652,10 @@ export class AgentSdkRuntime extends EventEmitter {
       resumeSkillChildRun: this.resumeSkillChildRun,
       runAgent: this.runAgent,
       setActiveToolUseMode: this.setActiveToolUseMode,
+      dispatchToolConsentRetry: deps.dispatchToolConsentRetry || ((input) => {
+        if (!self.runtime) return Promise.reject(new Error('agent runtime unavailable for tool consent retry'))
+        return self.runtime.sendScoped(input)
+      }),
       dynamicDelivery: this.dynamicDelivery,
       runLifecycle: this.runLifecycle,
       get runtime() { return self.runtime },

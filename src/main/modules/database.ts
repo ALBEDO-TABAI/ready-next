@@ -361,6 +361,12 @@ export interface BrowserTaskRecord {
   started_at: string | null
   updated_at: string
   finished_at: string | null
+  revision: number
+  created_by_run_id: string | null
+  active_execution_binding_json: string | null
+  parent_task_id: string | null
+  projection_revision: number
+  projection_sync_json: string | null
 }
 
 export interface BrowserPowerPreflightAuditRecord {
@@ -2134,14 +2140,18 @@ export class DatabaseManager {
     started_at?: string | null
     updated_at: string
     finished_at?: string | null
+    created_by_run_id?: string | null
+    active_execution_binding_json?: string | null
+    parent_task_id?: string | null
   }): void {
     if (!this.db) throw new Error('Database not available')
     this.db.prepare(
       `INSERT INTO browser_tasks (
         id, kind, status, payload_json, checkpoint_json, result_json,
         progress_total, progress_completed, progress_failed, current_label, error,
-        created_at, started_at, updated_at, finished_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        created_at, started_at, updated_at, finished_at,
+        created_by_run_id, active_execution_binding_json, parent_task_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
       task.id,
       task.kind,
@@ -2158,6 +2168,9 @@ export class DatabaseManager {
       task.started_at ?? null,
       task.updated_at,
       task.finished_at ?? null,
+      task.created_by_run_id ?? null,
+      task.active_execution_binding_json ?? null,
+      task.parent_task_id ?? null,
     )
   }
 
@@ -2176,8 +2189,13 @@ export class DatabaseManager {
       started_at?: string | null
       updated_at?: string
       finished_at?: string | null
+      created_by_run_id?: string | null
+      active_execution_binding_json?: string | null
+      parent_task_id?: string | null
+      projection_revision?: number
+      projection_sync_json?: string | null
     },
-    options?: { expectedUpdatedAt?: string },
+    options?: { expectedUpdatedAt?: string; incrementRevision?: boolean },
   ): boolean {
     if (!this.db) return false
     const setClauses: string[] = []
@@ -2188,6 +2206,7 @@ export class DatabaseManager {
       values.push(value ?? null)
     }
     if (setClauses.length === 0) return false
+    if (options?.incrementRevision !== false) setClauses.push('revision = revision + 1')
     if (updates.updated_at === undefined) {
       setClauses.push('updated_at = ?')
       values.push(new Date().toISOString())

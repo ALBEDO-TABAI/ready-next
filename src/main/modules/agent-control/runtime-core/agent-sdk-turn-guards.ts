@@ -19,6 +19,7 @@ import { resolveTaskTypeFromBrowserWorkflowText } from './agent-sdk-foundation-u
 import { resolveSkillHintRelevanceForTurn } from './agent-sdk-skill-intent-utils'
 import { buildExecutionTurnResult } from './agent-sdk-turn-closeout'
 import type { TurnOrchestratorHost } from './agent-sdk-turn-context'
+import type { BrowserWorkIntent } from '../../../../shared/browser-work-intent'
 import type {
   AgentSdkBudgetCheckpointRestore,
   AgentSdkExecutionOptions,
@@ -61,7 +62,7 @@ export interface AgentSdkTurnGuardContext {
   checkpointRestore: AgentSdkBudgetCheckpointRestore | null
   skillHintRelevanceForTurn: ReturnType<typeof resolveSkillHintRelevanceForTurn>
   turnFollowup: ReturnType<typeof classifyFollowupIntent>
-  recentCollectionIntent: boolean
+  recentBrowserWorkIntent: BrowserWorkIntent
   inferredSdkTaskType: ReturnType<typeof resolveTaskTypeFromBrowserWorkflowText>
   allowedToolNames: string[]
   requiredCapabilityGroups: string[]
@@ -105,7 +106,7 @@ export function createAgentSdkTurnGuards(ctx: AgentSdkTurnGuardContext): {
     checkpointRestore,
     skillHintRelevanceForTurn,
     turnFollowup,
-    recentCollectionIntent,
+    recentBrowserWorkIntent,
     inferredSdkTaskType,
     allowedToolNames,
     requiredCapabilityGroups,
@@ -128,7 +129,7 @@ export function createAgentSdkTurnGuards(ctx: AgentSdkTurnGuardContext): {
       // intent continuity, an active plan, or a follow-up that points
       // back at prior work.
       getActivePlanForScope(sessionId) ||
-      recentCollectionIntent ||
+      recentBrowserWorkIntent.kind !== 'observe' ||
       turnFollowup.kind === 'continue_task' ||
       turnFollowup.kind === 'correction' ||
       turnFollowup.kind === 'status_query' ||

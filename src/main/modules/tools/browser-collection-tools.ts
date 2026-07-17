@@ -4,9 +4,9 @@
  * 从 browser-tools.ts 逐字搬出十九个 case 的实现体（browser_collect /
  * browser_resources / browser_download(mode=resolve) / browser_download /
  * browser_download / browser_collect /
- * browser_collect / browser_collect(mode=start) / browser_task(action=get) /
+ * browser_collect / browser_task(action=get) /
  * browser_task(action=resume) / browser_task(action=cancel) / browser_task(action=result) /
- * browser_download(mode=gallery) / browser_collect(mode=research) / internal_browser_workflow /
+ * browser_download(mode=gallery) / browser_research / internal_browser_workflow /
  * internal_site_strategy_stage / browser_collect / browser_collect /
  * browser_collection_ui_confirmation，经 executeBrowserCollectionTool 统一入口
  * 分发）与本组独占 helper（采集共识 store/投影、来源校验、任务接力判定、
@@ -64,6 +64,8 @@ import {
   resolveHighControlAgentTab,
   truncate,
 } from './browser-tool-shared'
+import { parseBrowserResearchPublicRequest } from './browser-action-contracts'
+import { resolveBrowserWorkIntent } from '../../../shared/browser-work-intent'
 
 const logger = createRotatingLogger('ready-tools.log', { buffered: true })
 function log(msg: string) {
@@ -378,6 +380,38 @@ function enrichBrowserTaskPayload(task: BrowserCapabilityTaskHandle): BrowserCap
   }
 }
 
+function browserResearchProjectionPatch(task: BrowserCapabilityTaskHandle): Record<string, unknown> | null {
+  if (task.kind !== 'site_research') return null
+  const result = task.result && typeof task.result === 'object' && !Array.isArray(task.result)
+    ? task.result as Record<string, unknown>
+    : null
+  const resumable = task.status === 'queued' || task.status === 'running' || task.status === 'paused' || task.status === 'waiting_human'
+    || (task.status === 'failed' && Boolean(task.checkpoint))
+  const satisfied = task.status === 'completed' && result?.essentialOutputSatisfied === true
+  const terminalFailure = !resumable && !satisfied
+  return {
+    taskType: 'research',
+    module: 'browser',
+    browserResearchEssentialOutputSatisfied: satisfied,
+    browserResearchCoverage: {
+      queryCount: Number(result?.queryCount || 0),
+      completedQueries: Number(result?.completedQueries || 0),
+      candidateCount: Number(result?.candidateCount || 0),
+      detailCount: Number(result?.detailCount || 0),
+      engagementCount: Number(result?.engagementCount || 0),
+    },
+    ...(resumable ? {
+      continuationRef: {
+        taskId: task.taskId,
+        detachedTaskId: task.taskId,
+        resumeKind: 'paused',
+        action: 'browser_task',
+      },
+    } : {}),
+    ...(terminalFailure ? { terminalFailureReason: 'proof_gap' } : {}),
+  }
+}
+
 const COLLECTION_TASK_RESULT_SUMMARY_KEYS = [
   'status',
   'verdict',
@@ -454,13 +488,152 @@ function compactCollectionTaskPayload(
     : compact
 }
 
+function compactSiteResearchTaskPayload(
+  task: BrowserCapabilityTaskHandle,
+  includeResults = false,
+): Record<string, unknown> {
+  const result = task.result && typeof task.result === 'object' && !Array.isArray(task.result)
+    ? task.result as Record<string, unknown>
+    : null
+  const rawQueryResults = Array.isArray(result?.queryResults)
+    ? result.queryResults as Array<Record<string, unknown>>
+    : []
+  const rawEvaluationEvidence = Array.isArray(result?.evaluationEvidence)
+    ? result.evaluationEvidence as Array<Record<string, unknown>>
+    : []
+  const rawEvaluationReceipt = result?.evaluationReceipt && typeof result.evaluationReceipt === 'object' && !Array.isArray(result.evaluationReceipt)
+    ? result.evaluationReceipt as Record<string, unknown>
+    : null
+  const evaluationReceipt = rawEvaluationReceipt
+    ? {
+        targetUrl: String(rawEvaluationReceipt.targetUrl || '').slice(0, 2_000),
+        state: String(rawEvaluationReceipt.state || ''),
+        capturedAt: String(rawEvaluationReceipt.capturedAt || ''),
+        title: typeof rawEvaluationReceipt.title === 'string' ? rawEvaluationReceipt.title.slice(0, 300) : null,
+        summary: typeof rawEvaluationReceipt.summary === 'string' ? rawEvaluationReceipt.summary.slice(0, 2_000) : null,
+        visibleItemCount: Number(rawEvaluationReceipt.visibleItemCount || 0),
+      }
+    : null
+  const evaluationEvidence = includeResults
+    ? rawEvaluationEvidence.slice(0, 12).map((entry) => ({
+        title: String(entry.title || '').slice(0, 500),
+        canonicalUrl: String(entry.canonicalUrl || '').slice(0, 2_000),
+        retrievalUrl: typeof entry.retrievalUrl === 'string' ? entry.retrievalUrl.slice(0, 2_000) : null,
+        author: typeof entry.author === 'string' ? entry.author.slice(0, 300) : null,
+        engagement: typeof entry.engagement === 'number' ? entry.engagement : null,
+        publishedAt: typeof entry.publishedAt === 'string' ? entry.publishedAt.slice(0, 100) : null,
+      }))
+    : []
+  let returnedCandidates = 0
+  let truncated = false
+  const queryResults = includeResults
+    ? rawQueryResults.map((entry) => {
+        const rawCandidates = Array.isArray(entry.candidates) ? entry.candidates as Array<Record<string, unknown>> : []
+        if (rawCandidates.length > 5) truncated = true
+        const candidates = rawCandidates.slice(0, 5).map((candidate) => {
+          returnedCandidates += 1
+          const body = typeof candidate.body === 'string' ? candidate.body : null
+          if (body && body.length > 2_000) truncated = true
+          return { ...candidate, body: body ? body.slice(0, 2_000) : body }
+        })
+        return {
+          query: entry.query,
+          status: entry.status,
+          error: entry.error ?? null,
+          candidates,
+        }
+      })
+    : rawQueryResults.map((entry) => ({
+        query: entry.query,
+        status: entry.status,
+        candidateCount: Array.isArray(entry.candidates) ? entry.candidates.length : 0,
+        error: entry.error ?? null,
+      }))
+  if (returnedCandidates > 100) {
+    truncated = true
+    let remaining = 100
+    for (const entry of queryResults) {
+      if (!('candidates' in entry) || !Array.isArray(entry.candidates)) continue
+      entry.candidates = entry.candidates.slice(0, remaining)
+      remaining = Math.max(0, remaining - entry.candidates.length)
+    }
+  }
+  const suggestedNextAction = task.status === 'waiting_human'
+    ? 'complete_takeover_then_resume'
+    : task.status === 'paused'
+      ? 'resume'
+      : task.status === 'queued' || task.status === 'running'
+        ? 'wait'
+        : task.status === 'completed' && result?.essentialOutputSatisfied === true
+          ? 'done'
+          : 'retry_or_review'
+  return {
+    taskId: task.taskId,
+    kind: task.kind,
+    status: task.status,
+    progress: task.progress,
+    checkpoint: task.checkpoint ? {
+      stage: task.checkpoint.stage,
+      cursor: task.checkpoint.cursor ?? null,
+    } : null,
+    result: {
+      queryCount: Number(result?.queryCount || task.progress.total || 0),
+      completedQueries: Number(result?.completedQueries || task.progress.completed || 0),
+      candidateCount: Number(result?.candidateCount || 0),
+      detailCount: Number(result?.detailCount || 0),
+      engagementCount: Number(result?.engagementCount || 0),
+      evaluationRequired: result?.evaluationRequired === true,
+      evaluationCompleted: result?.evaluationCompleted === true,
+      evaluationTargetUrl: typeof result?.evaluationTargetUrl === 'string' ? result.evaluationTargetUrl.slice(0, 2_000) : null,
+      evaluationEvidenceCount: rawEvaluationEvidence.length,
+      evaluationReceipt,
+      ...(includeResults ? { evaluationEvidence } : {}),
+      essentialOutputSatisfied: result?.essentialOutputSatisfied === true,
+      missingEssentialOutputs: Array.isArray(result?.missingEssentialOutputs) ? result.missingEssentialOutputs : [],
+      pauseReason: result?.pauseReason ?? task.error ?? null,
+      queryResults,
+      ...(includeResults ? { truncated } : {}),
+    },
+    suggestedNextAction,
+    error: task.error ?? null,
+    createdAt: task.createdAt,
+    startedAt: task.startedAt ?? null,
+    finishedAt: task.finishedAt ?? null,
+    updatedAt: task.updatedAt,
+  }
+}
+
 function browserTaskToolPayload(
   task: BrowserCapabilityTaskHandle,
   linkedExecution?: BrowserCapabilityTaskHandle | null,
 ): Record<string, unknown> | BrowserCapabilityTaskHandle {
+  if (task.kind === 'site_research') return compactSiteResearchTaskPayload(task)
   return task.kind === 'visible_collect' || task.kind === 'note_collect' || task.kind === 'card_loop'
     ? compactCollectionTaskPayload(task, linkedExecution)
     : enrichBrowserTaskPayload(task)
+}
+
+function browserTaskAuthorizationFailure(
+  payload: Record<string, unknown> | null,
+  sessionId: string | undefined,
+  taskExecutionContext: BrowserCollectionToolContext['taskExecutionContext'],
+): Record<string, unknown> | null {
+  if (!payload) return null
+  const storedScopeId = stringField(payload.scopeId)
+  if (storedScopeId && sessionId && storedScopeId !== sessionId) {
+    return { ok: false, errorKind: 'authorization_denied', message: 'browser task belongs to a different conversation scope' }
+  }
+  const storedOwnerAgentId = stringField(payload.ownerAgentId)
+  const currentOwnerAgentId = stringField(taskExecutionContext?.ownerAgentId)
+  if (storedOwnerAgentId && storedOwnerAgentId !== currentOwnerAgentId) {
+    return { ok: false, errorKind: 'authorization_denied', message: 'browser task belongs to a different agent owner' }
+  }
+  // A follow-up message creates a new user-visible parent task. The explicit
+  // browser task id is the continuation identity; scope + agent ownership are
+  // the access boundary, while parentTaskId is audit/handoff metadata that is
+  // atomically rebound by resume. Rejecting a read here makes every legitimate
+  // status follow-up look like a missing tool.
+  return null
 }
 
 function normalizedPathField(value: unknown): string {
@@ -552,6 +725,88 @@ export async function executeBrowserCollectionTool(
     ...(taskExecutionContext?.executionBinding ? { executionBinding: taskExecutionContext.executionBinding } : {}),
   }
   switch (toolName) {
+      case 'task_start_internal': {
+        const kind = String(args.kind || '').trim()
+        const rawPayload = args.payload && typeof args.payload === 'object' && !Array.isArray(args.payload)
+          ? args.payload as Record<string, unknown>
+          : {}
+        if (!kind) return 'Error: kind is required'
+        const payload = {
+          ...rawPayload,
+          ...(typeof rawPayload.tab_id === 'string' ? { tabId: rawPayload.tab_id } : {}),
+          ...(sessionId ? { scopeId: sessionId } : {}),
+          ...collectionOwnership,
+        }
+        const result = await controller.startTask({ kind: kind as never, payload })
+        return JSON.stringify(result, null, 2)
+      }
+      case 'task_research_internal': {
+        const result = await controller.startTask({
+          kind: 'research',
+          payload: {
+            query: String(args.query || '').trim(),
+            urls: Array.isArray(args.urls) ? args.urls : undefined,
+            maxPages: Number(args.max_pages || 0) || undefined,
+            limitPerPage: Number(args.limit_per_page || 0) || undefined,
+            ...(sessionId ? { scopeId: sessionId } : {}),
+            ...collectionOwnership,
+          },
+        })
+        return JSON.stringify(result, null, 2)
+      }
+      case 'research_site': {
+        const parsed = parseBrowserResearchPublicRequest(args)
+        if (!parsed.ok) return `Error: ${parsed.message}`
+        const request = parsed.value
+        const tabs = controller.getTabList()
+        const sourceTab = request.siteTabId
+          ? tabs.find((tab) => tab.id === request.siteTabId)
+          : controller.getActiveTab()
+        if (request.scope === 'current_site' && (!sourceTab?.id || !sourceTab.url)) {
+          return 'Error: current_site research requires one uniquely bound site tab'
+        }
+        const agentTabId = await controller.ensureAgentTab()
+        const workIntent = resolveBrowserWorkIntent(currentUserText)
+        const evaluationRequired = workIntent.roles.evaluationTargets.includes('current_account')
+        const result = await controller.startTask({
+          kind: 'site_research',
+          payload: {
+            scope: request.scope,
+            queries: request.queries,
+            urls: request.urls,
+            siteTabId: sourceTab?.id || null,
+            siteUrl: sourceTab?.url || null,
+            agentTabId,
+            perQueryLimit: request.perQueryLimit,
+            detailLimitPerQuery: request.detailLimitPerQuery,
+            fields: request.fields,
+            preserveSourceTab: request.preserveSourceTab,
+            evaluationRequired,
+            evaluationTargetUrl: evaluationRequired ? sourceTab?.url || null : null,
+            routeContract: {
+              version: 1,
+              intent: 'site_research',
+              publicTool: 'browser_research',
+              operation: 'research_site',
+            },
+            surface: 'agent-view',
+            ...(sessionId ? { scopeId: sessionId } : {}),
+            ...collectionOwnership,
+          },
+        })
+        const startPayload = {
+          ...result,
+          browserTaskId: result.taskId,
+          queryCount: request.scope === 'current_site' ? request.queries.length : request.urls.length,
+          phase: 'bind_site_session',
+          continuation: { tool: 'browser_task', args: { action: 'get', task_id: result.taskId } },
+        }
+        return createToolExecutionOutput(JSON.stringify(startPayload, null, 2), {
+          shape: 'json',
+          data: startPayload,
+          projectionPatch: browserResearchProjectionPatch(result) || undefined,
+        })
+      }
       case 'collect_images': {
         let tabId = (args.tab_id as string) || null
         tabId = (await resolveHighControlAgentTab(controller, args, { signal: abortSignal })).tabId
@@ -994,9 +1249,12 @@ export async function executeBrowserCollectionTool(
             return browserStructuredOutput({
               ok: false,
               errorCode: 'image_gallery_collection_failed_retry_required',
-              message: `本会话最近的图片采集任务 ${failedGallery.taskId} 失败了（${stringField((failedGallery.result as Record<string, unknown> | null)?.stopReason) || failedGallery.status}）。不要改用 browser_download 手工下载——请用 browser_collect(mode=start) / browser_collect(image_gallery) 重试或 browser_task(action=resume) 续跑，让采集卡、证据和失败学习都留在采集链路上。只有与该采集无关的下载才可以传 unrelated_to_collection: true。`,
+              message: `本会话最近的图片采集任务 ${failedGallery.taskId} 失败了（${stringField((failedGallery.result as Record<string, unknown> | null)?.stopReason) || failedGallery.status}）。不要改用 browser_download 手工下载——请先用 browser_task(action=resume, task_id=${failedGallery.taskId}) 续跑；若该任务不可恢复，再用 browser_collect(mode=structured, template=image_gallery) 重新采集，让采集卡、证据和失败学习都留在采集链路上。只有与该采集无关的下载才可以传 unrelated_to_collection: true。`,
               failedTaskId: failedGallery.taskId,
-              suggestedNextTool: 'browser_collect',
+              suggestedNextTool: {
+                name: 'browser_task',
+                args: { action: 'resume', task_id: failedGallery.taskId },
+              },
             })
           }
           // P0.1 — close the original bypass: even with NO prior collection task,
@@ -1009,7 +1267,7 @@ export async function executeBrowserCollectionTool(
             return browserStructuredOutput({
               ok: false,
               errorCode: 'use_structured_image_gallery_collection',
-              message: `检测到 ${harvestCount} 张图床(pinimg)图片的批量下载，这属于画板/图库采集。请用 browser_collect(image_gallery) 走结构化采集（自动滚动穷尽、按原图去重、产出采集卡与证据），再用 browser_download 保存；不要用 browser_collect + browser_download 手工批量下载。确实是与采集无关的零散下载才传 unrelated_to_collection: true。`,
+              message: `检测到 ${harvestCount} 张图床(pinimg)图片的批量下载，这属于画板/图库采集。请用 browser_collect(mode=structured, template=image_gallery) 走结构化采集（自动滚动穷尽、按原图去重、产出采集卡与证据），再用 browser_download 保存；不要用 browser_collect + browser_download 手工批量下载。确实是与采集无关的零散下载才传 unrelated_to_collection: true。`,
               suggestedNextTool: 'browser_collect',
             })
           }
@@ -1107,7 +1365,6 @@ export async function executeBrowserCollectionTool(
               discoveryStatus: status,
               continueTaskId: typeof result?.continueTaskId === 'string' ? result.continueTaskId : sourceTaskId,
               frozenCount,
-              allowPartialIgnored: args.allow_partial === true,
               pendingConsentRequest,
             })
           }
@@ -1254,38 +1511,6 @@ export async function executeBrowserCollectionTool(
         return JSON.stringify(result, null, 2)
       }
 
-      case 'collect_start': {
-        const kind = String(args.kind || '').trim()
-        if (!kind) return 'Error: kind is required'
-        const payload = args.payload && typeof args.payload === 'object' ? args.payload as Record<string, unknown> : {}
-        // P0.1 — normalize the payload for this raw entry so a background
-        // collection started here behaves like the dedicated tools:
-        //   • map the external snake_case `tab_id` to the internal `tabId` the
-        //     runner reads — otherwise it ignores the target tab, scrapes the
-        //     active page and may learn the failure against the wrong site;
-        //   • stamp the current scope so scope-bound collection guards
-        //     (findScope…ImageGallery…) can see a failure started here.
-        // Neither overrides a value the caller already set in the internal shape.
-        const scopedPayload: Record<string, unknown> = { ...payload, ...collectionOwnership }
-        if (typeof scopedPayload.tabId !== 'string' && typeof scopedPayload.tab_id === 'string') {
-          scopedPayload.tabId = scopedPayload.tab_id
-        }
-        if (sessionId && typeof scopedPayload.scopeId !== 'string') {
-          scopedPayload.scopeId = sessionId
-        }
-        // P0.4 — a visible_collect started via this raw entry must resolve its
-        // page URL the SAME way the dedicated browser_collect entry does
-        // (controller.startVisibleCollection reads the target tab's URL from the
-        // tab registry). Otherwise a tab_id-only collection has no page URL, and
-        // a later failure can't be learned against a domain. Fall back to raw
-        // startTask only for non-collection kinds or hosts without the method.
-        const startVisibleCollection = (controller as { startVisibleCollection?: (payload: Record<string, unknown>, scopeId?: string) => Promise<BrowserCapabilityTaskHandle> }).startVisibleCollection
-        const result = kind === 'visible_collect' && typeof startVisibleCollection === 'function'
-          ? await startVisibleCollection.call(controller, scopedPayload, sessionId)
-          : await controller.startTask({ kind: kind as never, payload: scopedPayload })
-        return JSON.stringify(result, null, 2)
-      }
-
       case 'task_get': {
         const taskId = String(args.task_id || '').trim()
         if (!taskId) return 'Error: task_id is required'
@@ -1293,12 +1518,20 @@ export async function executeBrowserCollectionTool(
         if (!result && isLikelyReadyNonBrowserTaskId(taskId)) {
           return browserStructuredOutput(wrongBrowserTaskIdPayload('browser_task(action=get)', taskId))
         }
+        const authorizationFailure = result
+          ? browserTaskAuthorizationFailure(controller.getTaskPayload?.(taskId) || null, sessionId, taskExecutionContext)
+          : null
+        if (authorizationFailure) return browserStructuredOutput(authorizationFailure)
         const linkedExecution = result?.kind === 'visible_collect'
           ? await (controller as {
               findCollectionTaskBySourceTaskId?: (sourceTaskId: string) => Promise<BrowserCapabilityTaskHandle | null>
             }).findCollectionTaskBySourceTaskId?.(result.taskId) || null
           : null
-        return JSON.stringify(result ? browserTaskToolPayload(result, linkedExecution) : { taskId, status: 'missing' }, null, 2)
+        const payload = result ? browserTaskToolPayload(result, linkedExecution) : { taskId, status: 'missing' }
+        const projectionPatch = result ? browserResearchProjectionPatch(result) : null
+        return projectionPatch
+          ? createToolExecutionOutput(JSON.stringify(payload, null, 2), { shape: 'json', data: { ...payload }, projectionPatch })
+          : JSON.stringify(payload, null, 2)
       }
 
       case 'task_resume': {
@@ -1314,6 +1547,23 @@ export async function executeBrowserCollectionTool(
         if (!current && isLikelyReadyNonBrowserTaskId(taskId)) {
           return browserStructuredOutput(wrongBrowserTaskIdPayload('browser_task(action=resume)', taskId))
         }
+        const payload = controller.getTaskPayload?.(taskId) || null
+        const authorizationFailure = current
+          ? browserTaskAuthorizationFailure(payload, sessionId, taskExecutionContext)
+          : null
+        if (authorizationFailure) return browserStructuredOutput(authorizationFailure)
+        const rebound = controller.rebindTaskExecution?.(taskId, {
+          ownerRunId: taskExecutionContext?.ownerRunId,
+          parentTaskId: taskExecutionContext?.parentTaskId,
+          executionBinding: taskExecutionContext?.executionBinding,
+        })
+        if (rebound === false) {
+          return browserStructuredOutput({
+            ok: false,
+            errorKind: 'task_rebind_conflict',
+            message: 'browser task changed while resume ownership was being rebound; refresh and retry',
+          })
+        }
         const result = await controller.resumeTask(taskId)
         return JSON.stringify(result ? browserTaskToolPayload(result) : { taskId, status: 'missing' }, null, 2)
       }
@@ -1321,20 +1571,36 @@ export async function executeBrowserCollectionTool(
       case 'task_cancel': {
         const taskId = String(args.task_id || '').trim()
         if (!taskId) return 'Error: task_id is required'
-        const result = await controller.cancelTask(taskId)
-        if (!result && isLikelyReadyNonBrowserTaskId(taskId)) {
+        const current = await controller.getTask(taskId)
+        if (!current && isLikelyReadyNonBrowserTaskId(taskId)) {
           return browserStructuredOutput(wrongBrowserTaskIdPayload('browser_task(action=cancel)', taskId))
         }
+        const authorizationFailure = current
+          ? browserTaskAuthorizationFailure(controller.getTaskPayload?.(taskId) || null, sessionId, taskExecutionContext)
+          : null
+        if (authorizationFailure) return browserStructuredOutput(authorizationFailure)
+        const result = current ? await controller.cancelTask(taskId) : null
         return JSON.stringify(result ? browserTaskToolPayload(result) : { taskId, status: 'missing' }, null, 2)
       }
 
       case 'task_result': {
-        const items = Array.isArray(args.items) ? args.items as Array<Record<string, unknown>> : []
-        const result = controller.aggregateResults(items as never, {
-          mergeStrategy: typeof args.merge_strategy === 'string' ? args.merge_strategy as 'concat' | 'dedupe' : undefined,
-          sortBy: typeof args.sort_by === 'string' ? args.sort_by as 'title' | 'link' | 'source' : undefined,
-        })
-        return JSON.stringify(result, null, 2)
+        const taskId = String(args.task_id || '').trim()
+        if (!taskId) return 'Error: task_id is required'
+        const task = await controller.getTask(taskId)
+        if (!task && isLikelyReadyNonBrowserTaskId(taskId)) {
+          return browserStructuredOutput(wrongBrowserTaskIdPayload('browser_task(action=result)', taskId))
+        }
+        const authorizationFailure = task
+          ? browserTaskAuthorizationFailure(controller.getTaskPayload?.(taskId) || null, sessionId, taskExecutionContext)
+          : null
+        if (authorizationFailure) return browserStructuredOutput(authorizationFailure)
+        const payload = task
+          ? task.kind === 'site_research' ? compactSiteResearchTaskPayload(task, true) : enrichBrowserTaskPayload(task)
+          : { taskId, status: 'missing' }
+        const projectionPatch = task ? browserResearchProjectionPatch(task) : null
+        return projectionPatch
+          ? createToolExecutionOutput(JSON.stringify(payload, null, 2), { shape: 'json', data: { ...payload }, projectionPatch })
+          : JSON.stringify(payload, null, 2)
       }
 
       case 'download_gallery': {
@@ -1350,22 +1616,6 @@ export async function executeBrowserCollectionTool(
             limit: Number(args.limit || 0) || undefined,
             maxScrolls: Number(args.max_scrolls || 0) || undefined,
             retryFailed: args.retry_failed === true,
-          },
-        })
-        return JSON.stringify(result, null, 2)
-      }
-
-      case 'collect_research': {
-        const query = String(args.query || '').trim()
-        if (!query) return 'Error: query is required'
-        const result = await controller.startTask({
-          kind: 'research',
-          payload: {
-            query,
-            urls: Array.isArray(args.urls) ? args.urls : undefined,
-            maxPages: Number(args.max_pages || 0) || undefined,
-            limitPerPage: Number(args.limit_per_page || 0) || undefined,
-            template: typeof args.template === 'string' ? args.template : undefined,
           },
         })
         return JSON.stringify(result, null, 2)
@@ -1462,7 +1712,6 @@ export async function executeBrowserCollectionTool(
         const requestedStrategy = String(args.strategy || '').trim()
         const requestedOutputRootDir = normalizedPathField(args.output_root_dir)
         const rawNotes = Array.isArray(args.notes) ? args.notes as Array<Record<string, unknown>> : []
-        const allowPartial = args.allow_partial === true
         const partialConsent = sourceTaskId
           ? collectionConsentStore.hasConsent('partial_collection', sessionId || '', sourceTaskId)
           : false
@@ -1520,7 +1769,6 @@ export async function executeBrowserCollectionTool(
               sourceTaskId,
               continueTaskId,
               frozenCount: frozenNotes.length,
-              allowPartialIgnored: allowPartial,
               pendingConsentRequest,
             })
           }
@@ -1561,7 +1809,6 @@ export async function executeBrowserCollectionTool(
               sourceTaskId: largerFrozen.taskId,
               frozenCount: largerFrozen.count,
               requestedCount: notes.length,
-              allowPartialIgnored: allowPartial,
               pendingConsentRequest,
             })
           }

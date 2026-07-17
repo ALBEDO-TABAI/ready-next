@@ -502,7 +502,7 @@ Gate：多标签研究、SPA 故障诊断、页面归档、登录态切换、内
 
 已落地：
 
-- 公开目录为 31 个语义工具，旧名称的 schema、模型暴露和执行 handler 同时退役。
+- 本计划完成时公开目录为 31 个语义工具；自 2026-07-18 起由 `2026-07-17-browser-agent-site-research-and-tool-contract-repair-implementation.md` 覆盖为 32 个，并新增独立 `browser_research`。旧名称的 schema、模型暴露和执行 handler 仍保持退役。
 - BrowserActionExecutor 统一负责工具解析、写租约、origin 节奏、deadline、中止、动作生命周期和结构化失败；Power 效果不再由模型自报。
 - BrowserSnapshotService 提供文档身份、紧凑快照、缓存、污标、不透明 ref 与一次重绑；默认页面地图预算从 32 KiB 收紧为 16 KiB。
 - 点击、输入、按键、滚动和拖拽使用可信浏览器输入；对话框、下载、会话/profile、权限、console/network、归档、长任务检查点与恢复已补齐。

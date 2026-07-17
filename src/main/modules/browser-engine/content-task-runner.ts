@@ -4,7 +4,6 @@ import { join } from 'path'
 import type {
   BrowserCapabilityTaskHandle,
   BrowserCapabilityTaskKind,
-  BrowserCapabilityTaskStatus,
   BrowserResearchBundle,
   BrowserStartTaskRequest,
   BrowserStructuredItem,
@@ -45,6 +44,7 @@ import {
 import { resolveCollectionVerdict } from './collection-verdict'
 import type { BrowserAgentRuntime } from './agent-runtime-adapter'
 import { BrowserPageStateService, normalizeEmptyPageDiagnostic, type BrowserEmptyPageDiagnostic } from './page-state-service'
+import { runBrowserSiteResearchTask } from './browser-site-research-task'
 
 /**
  * Per-task collector binding (plan §3.4). The controller provides this factory
@@ -109,6 +109,7 @@ export interface BrowserTaskProjectionInput {
    *  place (status untouched) so download write-backs move the card numbers
    *  even when no status transition fires an event. */
   refreshOnly?: boolean
+  progressDetail?: string
 }
 export interface BrowserTaskProjectionSink {
   upsert(input: BrowserTaskProjectionInput): void
@@ -157,6 +158,11 @@ function hasBrowserTaskCheckpoint(task: BrowserCapabilityTaskHandle, payload: Re
     return checkpoint?.stage === 'research_collect'
       && Array.isArray(checkpoint.partialResults)
       && (Array.isArray(payload.urls) || typeof payload.query === 'string')
+  }
+  if (task.kind === 'site_research') {
+    return checkpoint?.stage === 'site_research'
+      && Boolean(checkpoint.partialResults)
+      && (Array.isArray(payload.queries) || Array.isArray(payload.urls))
   }
   if (task.kind === 'scroll_collect') {
     return checkpoint?.stage === 'scroll_collect'
@@ -654,6 +660,7 @@ function toStringArray(value: unknown): string[] {
 export class BrowserContentTaskRunner {
   private activeRuns = new Map<string, Promise<void>>()
   private cancelledTasks = new Set<string>()
+  private projectionRetryTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
   constructor(
     private readonly capabilityService: BrowserCapabilityService,
@@ -696,13 +703,15 @@ export class BrowserContentTaskRunner {
     })
     const projectedSourceTaskIds = new Set<string>()
     for (const task of tasks) {
-      if (task.kind !== 'note_collect' && task.kind !== 'visible_collect' && task.kind !== 'card_loop') continue
+      if (task.kind !== 'note_collect' && task.kind !== 'visible_collect' && task.kind !== 'card_loop' && task.kind !== 'site_research') continue
       const payload = this.persistenceService.getTaskPayload(task.taskId)
       const scopeId = typeof payload?.scopeId === 'string' ? payload.scopeId.trim() : ''
       if (!scopeId) continue
       const state = noteCollectState(task.status)
       const { total, completed, failed, currentLabel } = task.progress
-      if (task.kind === 'note_collect' || task.kind === 'card_loop') {
+      if (task.kind === 'site_research') {
+        this.projectSiteResearch(task.taskId, scopeId)
+      } else if (task.kind === 'note_collect' || task.kind === 'card_loop') {
         const sourceTaskId = sourceTaskIdFromPayload(payload)
         const shouldProject = shouldReprojectBrowserCollectTask(task.status)
           || (sourceTaskId && shouldReprojectLinkedTerminalCollectionTask(task.status))
@@ -823,6 +832,100 @@ export class BrowserContentTaskRunner {
       finishedAt: task?.finishedAt,
       ...collectionProjectionMetadata(task, payload),
     })
+  }
+
+  private projectSiteResearch(taskId: string, scopeId: string): void {
+    const sink = this.taskProjectionSink
+    if (!sink || !scopeId) return
+    const task = this.persistenceService.getTask(taskId)
+    const payload = this.persistenceService.getTaskPayload(taskId)
+    if (!task || !payload) return
+    const result = resultObject(task)
+    const queryCount = Math.max(0, Number(result?.queryCount || toStringArray(payload.queries).length || toStringArray(payload.urls).length))
+    const completedQueries = Math.max(0, Number(result?.completedQueries || task.progress.completed || 0))
+    const candidateCount = Math.max(0, Number(result?.candidateCount || 0))
+    const detailCount = Math.max(0, Number(result?.detailCount || 0))
+    const engagementCount = Math.max(0, Number(result?.engagementCount || 0))
+    const pauseReason = String(result?.pauseReason || task.error || '').trim()
+    const coverage = `查询 ${completedQueries}/${queryCount} · 候选 ${candidateCount} · 详情 ${detailCount} · 互动量 ${engagementCount}`
+    try {
+      sink.upsert({
+        taskId,
+        scopeId,
+        title: '站内多关键词研究',
+        summary: pauseReason && task.status !== 'completed' ? `${coverage} · ${pauseReason}` : coverage,
+        progressDetail: `查询覆盖 ${completedQueries}/${queryCount} · 候选 ${candidateCount} · 详情正文 ${detailCount} · 有互动量 ${engagementCount}`,
+        state: noteCollectState(task.status),
+        waitingFor: task.status === 'waiting_human' ? 'verification' : task.status === 'running' ? 'background' : 'none',
+        total: queryCount,
+        completed: completedQueries,
+        failed: Math.max(0, Number(task.progress.failed || 0)),
+        canResume: this.canResumeTask(task, payload),
+        terminalDwell: false,
+        startedAt: task.startedAt,
+        finishedAt: task.finishedAt,
+        ...collectionProjectionMetadata(task, payload),
+      })
+      const desiredRevision = Number(task.revision || 0)
+      const synced = this.persistenceService.updateProjectionSync(taskId, {
+        projectionRevision: Number(task.revision || 0),
+        sync: null,
+      })
+      if (
+        !synced
+        || Number(synced.projectionRevision || 0) < desiredRevision
+        || Number(synced.projectionRevision || 0) < Number(synced.revision || 0)
+      ) {
+        const attempts = Number(synced?.projectionSync?.attempts || 0) + 1
+        const targetRevision = Math.max(desiredRevision, Number(synced?.revision || 0))
+        this.persistenceService.updateProjectionSync(taskId, {
+          projectionRevision: Number(synced?.projectionRevision || 0),
+          sync: {
+            revision: targetRevision,
+            attempts,
+            error: 'browser task changed during projection sync',
+            updatedAt: new Date().toISOString(),
+          },
+        })
+        this.scheduleSiteResearchProjectionRetry(taskId, scopeId, targetRevision, attempts)
+        return
+      }
+      const timer = this.projectionRetryTimers.get(taskId)
+      if (timer) clearTimeout(timer)
+      this.projectionRetryTimers.delete(taskId)
+    } catch (error) {
+      const attempts = Number(task.projectionSync?.attempts || 0) + 1
+      this.persistenceService.updateProjectionSync(taskId, {
+        projectionRevision: Number(task.projectionRevision || 0),
+        sync: {
+          revision: Number(task.revision || 0),
+          attempts,
+          error: error instanceof Error ? error.message : String(error),
+          updatedAt: new Date().toISOString(),
+        },
+      })
+      this.scheduleSiteResearchProjectionRetry(taskId, scopeId, Number(task.revision || 0), attempts)
+    }
+  }
+
+  private scheduleSiteResearchProjectionRetry(
+    taskId: string,
+    scopeId: string,
+    targetRevision: number,
+    attempts: number,
+  ): void {
+    if (attempts > 5 || this.projectionRetryTimers.has(taskId)) return
+    const timer = setTimeout(() => {
+      this.projectionRetryTimers.delete(taskId)
+      const current = this.persistenceService.getTask(taskId)
+      if (
+        current
+        && Number(current.revision || 0) >= targetRevision
+        && Number(current.projectionRevision || 0) < Number(current.revision || 0)
+      ) this.projectSiteResearch(taskId, scopeId)
+    }, Math.min(2_000, 50 * (2 ** (attempts - 1))))
+    timer.unref?.()
+    this.projectionRetryTimers.set(taskId, timer)
   }
 
   async startTask(request: BrowserStartTaskRequest): Promise<BrowserCapabilityTaskHandle> {
@@ -961,8 +1064,12 @@ export class BrowserContentTaskRunner {
     return updated
   }
 
-  updateTaskPayload(taskId: string, payload: Record<string, unknown>): void {
-    this.persistenceService.updateTaskPayload(taskId, payload)
+  updateTaskPayload(taskId: string, payload: Record<string, unknown>): boolean {
+    return this.persistenceService.updateTaskPayload(taskId, payload)
+  }
+
+  patchTaskPayload(taskId: string, patch: Record<string, unknown>): boolean {
+    return this.persistenceService.patchTaskPayload(taskId, patch)
   }
 
   private canResumeTask(task: BrowserCapabilityTaskHandle, payload: Record<string, unknown> | null | undefined): boolean {
@@ -1170,7 +1277,7 @@ export class BrowserContentTaskRunner {
         leaseId = reacquired.leaseId
         ownsLease = true
         payload = { ...payload, leaseId }
-        this.persistenceService.updateTaskPayload(taskId, payload)
+        this.persistenceService.patchTaskPayload(taskId, { leaseId })
       }
     }
     if (!leaseId) {
@@ -1256,7 +1363,7 @@ export class BrowserContentTaskRunner {
       const sameTab = !requestedTabId || (activeTab?.id != null && activeTab.id === requestedTabId)
       const resolvedUrl = sameTab ? (activeTab?.url || '') : ''
       if (resolvedUrl && resolvedUrl !== String(payload.url || '')) {
-        this.persistenceService.updateTaskPayload(taskId, { ...payload, url: resolvedUrl })
+        this.persistenceService.patchTaskPayload(taskId, { url: resolvedUrl })
       }
     }
 
@@ -1868,6 +1975,22 @@ export class BrowserContentTaskRunner {
 
     if (kind === 'note_collect' || kind === 'card_loop') {
       await this.runNoteCollect(taskId, payload)
+      return
+    }
+
+    if (kind === 'site_research') {
+      const scopeId = typeof payload.scopeId === 'string' ? payload.scopeId.trim() : ''
+      await runBrowserSiteResearchTask({
+        taskId,
+        payload,
+        capabilityService: this.capabilityService,
+        persistenceService: this.persistenceService,
+        leaseService: this.leaseService,
+        isCancelled: () => this.cancelledTasks.has(taskId),
+        project: () => {
+          if (scopeId) this.projectSiteResearch(taskId, scopeId)
+        },
+      })
       return
     }
 

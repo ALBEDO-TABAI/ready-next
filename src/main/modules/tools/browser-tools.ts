@@ -17,6 +17,7 @@ import { resolveBrowserWorkflowIntent } from '../../../shared/browser-workflow-i
 import { createRotatingLogger } from '../../utils/rotating-logger'
 import { getBrowserAnthropicTools, getBrowserOpenAITools } from './browser-tool-catalog'
 import { BrowserActionExecutor, type BrowserActionExecutorEvent } from './browser-action-executor'
+import type { BrowserToolInputSource } from './browser-tool-invocation'
 import { executeBrowserActTool, runWorkflowStep } from './browser-act-tools'
 import { executeBrowserObserveTool } from './browser-observe-tools'
 import { executeBrowserCollectionTool } from './browser-collection-tools'
@@ -30,6 +31,7 @@ import { createBrowserStructuredOutput } from './browser-failure-output'
 import type { BrowserTaskEnvelope } from '../../../shared/browser-task-envelope'
 import type { BrowserPowerEffect } from '../../../shared/browser-power'
 import type { OriginInteractionSignal } from '../browser-engine/origin-interaction-budget'
+import { resolveBrowserWorkIntent } from '../../../shared/browser-work-intent'
 
 export { normalizeDownloadTargets, pinimgOriginalsUrl } from './browser-media-download'
 
@@ -38,6 +40,59 @@ const actionExecutor = new BrowserActionExecutor()
 
 function log(message: string): void {
   try { logger.append(`[${new Date().toISOString()}] ${message}\n`) } catch { /* silent-catch: diagnostics must not fail browser work. */ }
+}
+
+const SITE_RESEARCH_MANUAL_FALLBACK_TOOLS = new Set([
+  'browser_navigate',
+  'browser_search',
+  'browser_click',
+  'browser_type',
+  'browser_fill_form',
+  'browser_select',
+  'browser_hover',
+  'browser_scroll',
+  'browser_press_key',
+  'browser_drag',
+])
+
+async function guardSiteResearchManualFallback(params: {
+  toolName: string
+  args: Record<string, unknown>
+  controller: BrowserController
+  sessionId?: string
+  currentUserText?: string
+  inputSource?: BrowserToolInputSource
+}): Promise<ToolExecutionOutput | null> {
+  if (params.inputSource !== 'model') return null
+  if (resolveBrowserWorkIntent(params.currentUserText).kind !== 'site_research') return null
+
+  if (params.toolName === 'browser_tabs' && String(params.args.action || 'list') === 'open') {
+    return createBrowserStructuredOutput({
+      ok: false,
+      errorKind: 'site_research_tab_fanout_forbidden',
+      message: 'Site research must use browser_research and its one dedicated agent tab. Do not open one tab per query.',
+      nextSuggestedAction: 'bind the existing site tab, then call browser_research once with the complete query list',
+    })
+  }
+  if (!params.sessionId || !SITE_RESEARCH_MANUAL_FALLBACK_TOOLS.has(params.toolName)) return null
+
+  const tasks = await params.controller.listTasksByKind('site_research')
+  const task = tasks.find((candidate) => {
+    const payload = params.controller.getTaskPayload(candidate.taskId)
+    return String(payload?.scopeId || '') === params.sessionId
+  })
+  if (!task) return null
+
+  return createBrowserStructuredOutput({
+    ok: false,
+    errorKind: 'site_research_manual_fallback_forbidden',
+    taskId: task.taskId,
+    status: task.status,
+    message: 'The bound browser_research task owns query navigation. Manual per-query navigation or interaction is blocked to prevent tab and resource fan-out.',
+    nextSuggestedAction: task.status === 'paused'
+      ? 'inspect the task with browser_task; request human takeover when the pause is caused by login or verification, otherwise resume the same task'
+      : 'inspect the same task with browser_task and wait for or report its evidence-backed state',
+  })
 }
 
 export function getAnthropicTools(): Array<Record<string, unknown>> {
@@ -288,14 +343,25 @@ export async function executeBrowserTool(
       objectRef: string
       inputHash: string
     }) => Promise<boolean>
+    inputSource?: BrowserToolInputSource
   },
 ): Promise<string | ToolExecutionOutput> {
   const origin = browserActionOrigin(args, controller)
   log(`executeBrowserTool: ${toolName} args=${JSON.stringify(args).slice(0, 300)}`)
   try {
+    const siteResearchGuard = await guardSiteResearchManualFallback({
+      toolName,
+      args,
+      controller,
+      sessionId,
+      currentUserText,
+      inputSource: taskExecutionContext?.inputSource,
+    })
+    if (siteResearchGuard) return siteResearchGuard
     return await actionExecutor.execute({
       toolName,
       args,
+      inputSource: taskExecutionContext?.inputSource,
       abortSignal,
       leaseGate,
       origin,

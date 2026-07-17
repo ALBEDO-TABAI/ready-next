@@ -146,3 +146,39 @@ test('before-quit waits for a board save that started during editor unmount', as
   resetBeforeQuitFlushRegistryForTests()
   resetBoardHandleRegistryForTests()
 })
+
+test('before-quit waits for every unmounted board save before acknowledging a sibling failure', async () => {
+  resetBeforeQuitFlushRegistryForTests()
+  resetBoardHandleRegistryForTests()
+  let fail!: (error: Error) => void
+  let releaseSlow!: () => void
+  const failed = new Promise<void>((_resolve, reject) => { fail = reject })
+  const slow = new Promise<void>((resolve) => { releaseSlow = resolve })
+  trackBoardPathSave('/workspace/failed.readyboard', failed)
+  trackBoardPathSave('/workspace/slow.readyboard', slow)
+  registerBeforeQuitFlushHandler('board:unmounted-saves', waitForAllBoardPathSaves)
+  let requestHandler: ((requestId: string) => void) | null = null
+  let acknowledge!: () => void
+  let acknowledged = false
+  const acknowledgement = new Promise<void>((resolve) => { acknowledge = resolve })
+  installBeforeQuitFlushBridge({
+    onBeforeQuitFlush: (handler) => {
+      requestHandler = handler
+      return () => { requestHandler = null }
+    },
+    ackBeforeQuitFlushed: () => {
+      acknowledged = true
+      acknowledge()
+    },
+  })
+
+  requestHandler?.('quit-multiple-hidden-boards')
+  fail(new Error('injected board save failure'))
+  await new Promise<void>((resolve) => setImmediate(resolve))
+  assert.equal(acknowledged, false)
+  releaseSlow()
+  await acknowledgement
+  assert.equal(acknowledged, true)
+  resetBeforeQuitFlushRegistryForTests()
+  resetBoardHandleRegistryForTests()
+})

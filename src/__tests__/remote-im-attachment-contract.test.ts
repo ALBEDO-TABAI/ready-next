@@ -219,12 +219,10 @@ test('local send-im attached media turns bypass model vision input and browser c
   assert.match(foundationUtilsSource, /function hasLocalSendImIntentForTurn/)
   assert.match(foundationUtilsSource, /function stripMediaBlocksForLocalSendIm/)
   assert.match(source, /typedActionNames\.add\('skill_send_im_file'\)/)
-  assert.match(toolExecutorSource, /!localSendImIntent\s*&&\s*\(\s*msgIntent \|\| params\.recentCollectionIntent === true\s*\)/)
-  // On a local-send-im turn preparation resets collection intent via the tracker,
-  // which clears BOTH the collection and batch-collection TTL maps.
+  assert.match(toolExecutorSource, /!localSendImIntent\s*&&\s*\(msgIntent \|\| effectiveBrowserWorkIntent\.kind === 'site_research' \|\| inheritedCollectionIntent\)/)
+  // On a local-send-im turn preparation clears the complete inherited browser-work intent.
   assert.match(turnPreparationSource, /host\.intentTracker\.resetCollectionIntents\(sessionId\)/)
-  assert.match(intentTrackerSource, /this\.collectionIntentTtl\.delete\(sessionId\)/)
-  assert.match(intentTrackerSource, /this\.batchCollectionIntentTtl\.delete\(sessionId\)/)
+  assert.match(intentTrackerSource, /this\.browserWorkIntents\.delete\(sessionId\)/)
   assert.match(turnPreparationSource, /const providerContent = stripMediaBlocksForLocalSendIm/)
 
   const mediaMessage: RunMessage = [

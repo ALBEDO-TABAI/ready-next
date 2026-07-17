@@ -253,13 +253,33 @@ async function evaluateRendererDom(page, timeoutMs) {
   }
 }
 
-function stopApp(child, platform) {
+function waitForChildExit(child, timeoutMs) {
+  if (!child || child.exitCode != null) return Promise.resolve(true)
+  return new Promise((resolve) => {
+    let settled = false
+    const finish = (exited) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      child.removeListener('exit', onExit)
+      resolve(exited)
+    }
+    const onExit = () => finish(true)
+    const timer = setTimeout(() => finish(false), timeoutMs)
+    child.once('exit', onExit)
+  })
+}
+
+async function stopApp(child, platform) {
   if (!child || child.exitCode != null) return
   if (platform === 'win32') {
     spawnSync('taskkill', ['/pid', String(child.pid), '/t', '/f'], { stdio: 'ignore' })
     return
   }
   child.kill('SIGTERM')
+  if (await waitForChildExit(child, 5000)) return
+  child.kill('SIGKILL')
+  await waitForChildExit(child, 5000)
 }
 
 async function main(argv = process.argv.slice(2)) {
@@ -312,7 +332,7 @@ async function main(argv = process.argv.slice(2)) {
     }
     console.log(JSON.stringify(report, null, 2))
   } finally {
-    stopApp(child, options.platform)
+    await stopApp(child, options.platform)
   }
 }
 

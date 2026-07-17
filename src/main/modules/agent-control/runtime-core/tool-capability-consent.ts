@@ -64,6 +64,7 @@ export interface ToolCapabilityConsentContext {
   setActiveToolUseMode: (
     request: ActiveToolUseModeUpdateRequest
   ) => ActiveToolUseModeUpdateResult | Promise<ActiveToolUseModeUpdateResult>
+  onEnabledAfterFinalize?: () => void | Promise<void>
 }
 
 export interface ToolCapabilityConsentDeps {
@@ -227,10 +228,14 @@ export async function maybeHandleToolCapabilityConsent(
   }
   logAgentMetric('tool_calling_consent_applied', audit)
   appendToolCapabilityLog(`[tool_capability] stage=tool_calling_consent_applied audit=${JSON.stringify(audit)}`)
-  return emitAndFinalize(
+  const finalized = await emitAndFinalize(
     ctx,
-    '已开启工具调用。当前这条消息是在旧工具面上启动的，请重发上一条任务。',
+    ctx.onEnabledAfterFinalize
+      ? '已开启工具调用。原任务正在自动继续。'
+      : '已开启工具调用。',
     'done',
     'done'
   )
+  await ctx.onEnabledAfterFinalize?.()
+  return finalized
 }

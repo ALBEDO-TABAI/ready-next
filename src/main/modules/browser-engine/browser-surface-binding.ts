@@ -36,6 +36,7 @@ export function isBrowserBackgroundHandoffTool(
   toolName: string,
   args: Record<string, unknown> = {},
 ): boolean {
+  if (toolName === 'browser_research') return true
   if (toolName === 'browser_collect') {
     return ['visible', 'notes', 'research', 'start'].includes(String(args.mode || 'visible'))
   }
@@ -152,7 +153,8 @@ export function resolveBrowserToolSurfaceBinding(params: {
   }
 
   const backgroundHandoff = isBrowserBackgroundHandoffTool(params.toolName, args)
-  const intent: BrowserSurfaceIntent = params.toolName === 'browser_collect' && String(args.mode || 'visible') === 'notes'
+  const intent: BrowserSurfaceIntent = params.toolName === 'browser_research'
+    || (params.toolName === 'browser_collect' && String(args.mode || 'visible') === 'notes')
     ? 'agent-view-background'
     : 'user-view-assisted'
   return binding({

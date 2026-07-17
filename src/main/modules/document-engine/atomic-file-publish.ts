@@ -119,22 +119,25 @@ async function replaceInPlaceWithRollback(input: {
   platform: NodeJS.Platform
 }): Promise<void> {
   await input.ops.copyFile(input.targetPath, input.backupPath)
+  let backupCanBeRemoved = false
   try {
     await input.ops.copyFile(input.tempPath, input.targetPath)
     await syncFile(input.targetPath, input.ops)
+    backupCanBeRemoved = true
   } catch (replaceError) {
     try {
       await input.ops.copyFile(input.backupPath, input.targetPath)
       await syncFile(input.targetPath, input.ops)
+      backupCanBeRemoved = true
     } catch (restoreError) {
-      throw new AggregateError(
+      throw Object.assign(new AggregateError(
         [replaceError, restoreError],
-        `原位替换失败，且无法恢复原文件：${input.targetPath}`,
-      )
+        `原位替换失败，且无法恢复原文件；原文件备份保留在：${input.backupPath}`,
+      ), { backupPath: input.backupPath })
     }
     throw replaceError
   } finally {
-    await cleanupFile(input.backupPath, input.ops, input.platform)
+    if (backupCanBeRemoved) await cleanupFile(input.backupPath, input.ops, input.platform)
   }
 }
 

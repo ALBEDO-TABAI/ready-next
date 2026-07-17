@@ -732,6 +732,44 @@ test('P1 degraded_visible mode keeps proof-bearing degraded runs done but still 
   }
 })
 
+test('browser research essential-output floor cannot be turned into green completion by degraded-visible policy', async () => {
+  const previous = process.env.READY_ADJUDICATION_ENFORCE_MODE
+  process.env.READY_ADJUDICATION_ENFORCE_MODE = 'degraded_visible'
+  try {
+    const store = fakeStore({
+      taskId: 'task-browser-research-empty',
+      taskType: 'research' as never,
+      module: 'browser',
+      proofRefs: [collectToolResultProof('browser_task', 'query failed: invalid_arguments', NOW)],
+    })
+    const finalized = await finalizeRunOutcome({
+      kind: 'done',
+      runId: 'run-browser-research-empty',
+      taskId: 'task-browser-research-empty',
+      scopeId: 's1',
+      durationMs: 10,
+      toolCallsUsed: 2,
+      initiator: 'done',
+      finalText: '尝试过研究，但没有拿到任何关键词结果。',
+      projectionPatch: {
+        taskType: 'research',
+        module: 'browser',
+        browserResearchEssentialOutputSatisfied: false,
+        terminalFailureReason: 'proof_gap',
+      },
+    }, {
+      writeRunCloseMetric: () => {},
+      taskProjectionStore: store,
+      now: () => NOW,
+    })
+    assert.equal(finalized.status, 'error')
+    assert.equal(finalized.terminalReason, 'proof_gap')
+  } finally {
+    if (previous === undefined) delete process.env.READY_ADJUDICATION_ENFORCE_MODE
+    else process.env.READY_ADJUDICATION_ENFORCE_MODE = previous
+  }
+})
+
 test('P1 degraded_visible mode cannot complete a multi-step run with zero satisfied criteria', async () => {
   const previous = process.env.READY_ADJUDICATION_ENFORCE_MODE
   process.env.READY_ADJUDICATION_ENFORCE_MODE = 'degraded_visible'

@@ -1205,6 +1205,29 @@ export async function executeBrowserActTool(
         const query = args.query as string
         if (!query) return 'Error: query is required'
         const searchTabId = (args.tab_id as string) || null
+        const searchScope = args.scope === 'current_site' ? 'current_site' : 'web'
+        if (searchScope === 'current_site') {
+          const boundTab = searchTabId
+            ? controller.getTabList().find((tab) => tab.id === searchTabId)
+            : controller.getActiveTab()
+          if (!boundTab?.id || !boundTab.url) return 'Error: current_site search requires a bound site tab'
+          let targetUrl = ''
+          try {
+            const current = new URL(boundTab.url)
+            if (/(^|\.)xiaohongshu\.com$/i.test(current.hostname)) {
+              targetUrl = `${current.origin}/search_result?keyword=${encodeURIComponent(query)}`
+            }
+          } catch {
+            // silent-catch: invalid tab URLs are returned as a user-facing contract error.
+            return 'Error: current_site search requires a valid http(s) site URL'
+          }
+          if (!targetUrl) return 'Error: current_site search is not supported by this site; external search fallback is forbidden'
+          const result = await controller.navigate(boundTab.id, targetUrl)
+          if (!result.success) return `Error: ${result.error || 'current-site search navigation failed'}`
+          rememberBrowserAction(sessionId, 'search', `${boundTab.id}:${query}`)
+          const waitResult = await waitForReady(controller, boundTab.id, 10_000, undefined, abortSignal)
+          return `Searched current site for "${query}"\nPage ready: ${waitResult.ready} (${waitResult.elapsedMs}ms)\nURL: ${targetUrl}`
+        }
         const allowRepeat = args.allow_repeat === true
         const duplicate = !allowRepeat ? findRecentBrowserAction(sessionId, 'search', query) : null
         // Duplicate-check must inspect the SEARCH tab, not the active tab, so a

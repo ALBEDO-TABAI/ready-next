@@ -1,6 +1,6 @@
 import { useEffect, useCallback, useRef, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useWorkspace, type SidePanelWidthKey, reconcileWorkspaceWatchersFromStore, getNextSidePanelVariant } from '../stores/useWorkspace'
+import { useWorkspace, type SidePanelWidthKey, reconcileWorkspaceWatchersFromStore, getNextSidePanelVariant, formatWorkspaceWatcherFailure } from '../stores/useWorkspace'
 import { useMode, type WorkbenchMode as WorkbenchModeType } from '../stores/useMode'
 import { useDocTabs } from '../stores/useDocTabs'
 import TopBar from '../components/layout/TopBar'
@@ -143,6 +143,7 @@ export default function WorkbenchMode() {
   const creatingType = useWorkspace((state) => state.creatingType)
   const workspaceRoot = useWorkspace((state) => state.workspaceRoot)
   const pinnedFolders = useWorkspace((state) => state.pinnedFolders)
+  const watcherFailure = useWorkspace((state) => state.watcherFailure)
   const agents = useAgent((state) => state.agents)
   const currentAgent = useAgent((state) => state.currentAgent)
   const currentScopeId = useAgent((state) => state.currentScopeId)
@@ -179,6 +180,7 @@ export default function WorkbenchMode() {
     enabledCount: 0,
     attentionCount: 0,
   })
+  const workspaceError = workspaceInitError ?? formatWorkspaceWatcherFailure(watcherFailure)
   const workbenchSurfaceRefreshTimersRef = useRef<number[]>([])
   const browserLayoutPhase = isPanelResizing ? 'dragging' : browserLayoutMotionPhase
   const scheduledWorkspaceRoots = useMemo(() => (
@@ -855,7 +857,7 @@ export default function WorkbenchMode() {
         className="workbench-mode-root relative flex h-full flex-col overflow-hidden"
       >
         <div className="relative z-10 flex h-full flex-col">
-          {workspaceInitError && (
+          {workspaceError && (
             <div
               className="glass-surface-floating mx-3 mt-2 flex items-center justify-between rounded-[12px] px-3 py-2 text-[12px]"
               style={{
@@ -864,7 +866,7 @@ export default function WorkbenchMode() {
                 background: 'color-mix(in srgb, var(--surface-floating-bg) 34%, transparent)',
               }}
             >
-              <span>{workspaceInitError}</span>
+              <span>{workspaceError}</span>
               <button
                 type="button"
                 onClick={() => void initializeWorkspace()}

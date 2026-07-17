@@ -1,7 +1,10 @@
 import type { BrowserDiagnosticsData } from '../modules/browser/types'
 import type { BrowserUtilityMenuRequest } from '../../shared/browser-utility-menu'
 import type { BrowserViewIntent, BrowserViewIntentAck } from '../../shared/browser-view-intent'
-import type { DocumentIndexChangedEvent } from '../../shared/document-index-events'
+import type {
+  DocumentIndexChangedEvent,
+  DocumentWatcherFailedEvent,
+} from '../../shared/document-index-events'
 import type {
   BrowserCookieDomainGroup,
   BrowserPrivacySummary,
@@ -2127,6 +2130,7 @@ interface ElectronDocumentAPI {
     callback: (data: { paths: string[]; timestamp: number }) => void
   ) => () => void
   onIndexChanged: (callback: (event: DocumentIndexChangedEvent) => void) => () => void
+  onWatcherFailed: (callback: (event: DocumentWatcherFailedEvent) => void) => () => void
   notifyWidgetCommitted?: (payload: {
     tabId: string
     widgetId: string

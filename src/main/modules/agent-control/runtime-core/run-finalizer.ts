@@ -252,6 +252,7 @@ function canKeepProofBearingDegradedVisible(
   facts?: EffectiveTaskFacts | null
 ): boolean {
   if (isBrowserTransactionTask(facts)) return false
+  if (projectionPatch?.browserResearchEssentialOutputSatisfied === false) return false
   if (adjudication.verdict !== 'degraded') return false
   if (adjudication.proofCount <= 0) return false
   if (adjudication.satisfiedCount <= 0) return false

@@ -71,6 +71,11 @@ class FakePersistence {
     if (task) task.payload = payload
   }
 
+  patchTaskPayload(taskId: string, patch: Record<string, unknown>): void {
+    const task = this.store.get(taskId)
+    if (task) task.payload = { ...task.payload, ...patch }
+  }
+
   updateProgress(
     taskId: string,
     progress: Partial<BrowserCapabilityTaskProgress>,

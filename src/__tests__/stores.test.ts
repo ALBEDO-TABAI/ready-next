@@ -82,7 +82,13 @@ const { useMode } = await import('../renderer/stores/useMode')
 const { useDocTabs } = await import('../renderer/stores/useDocTabs')
 const { useAgent } = await import('../renderer/stores/useAgent')
 const { phaseToToolTraceStatus } = await import('../renderer/modules/agent/scopeRunState')
-const { useWorkspace, computeDesiredRoots } = await import('../renderer/stores/useWorkspace')
+const {
+    useWorkspace,
+    computeDesiredRoots,
+    handleWorkspaceWatcherFailure,
+    reconcileWorkspaceWatchersFromStore,
+    formatWorkspaceWatcherFailure,
+} = await import('../renderer/stores/useWorkspace')
 const { useTheme } = await import('../renderer/stores/useTheme')
 const { useRSSSession } = await import('../renderer/stores/useRSSSession')
 const { useSettings } = await import('../renderer/stores/useSettings')
@@ -2676,6 +2682,7 @@ describe('useWorkspace multi-root watchers', () => {
     let watcherIdCounter: number
     let startResolvers: Array<{ root: string; resolve: (id: string) => void }>
     let delayStart: boolean
+    let startFailure: { error: string; errorKind: 'failed'; hint?: string } | null
 
     const resetWorkspaceState = () => {
         useWorkspace.setState({
@@ -2695,6 +2702,7 @@ describe('useWorkspace multi-root watchers', () => {
             renamingPath: null,
             creatingType: null,
             creatingPath: null,
+            watcherFailure: null,
         })
     }
 
@@ -2716,6 +2724,7 @@ describe('useWorkspace multi-root watchers', () => {
         watcherIdCounter = 0
         startResolvers = []
         delayStart = false
+        startFailure = null
         // Install the mock FIRST so the upcoming cleanup pass below can use it
         // to drain any leaked module-level watcher state (`watcherIdsByRoot` /
         // `intendedRoots` are private and persist across tests).
@@ -2731,6 +2740,7 @@ describe('useWorkspace multi-root watchers', () => {
                         })
                         return { success: true, data: { watcherId: id, workspaceRoot } }
                     }
+                    if (startFailure) return { success: false, ...startFailure }
                     return {
                         success: true,
                         data: { watcherId: `wch-${++watcherIdCounter}`, workspaceRoot },
@@ -2859,6 +2869,129 @@ describe('useWorkspace multi-root watchers', () => {
         await flushWatchers()
         // Exactly one stop for the rolled-back watcherId — no leak.
         assert.ok(stopCalls.some((c) => c.watcherId === 'wch-late'), 'late watcherId must be rolled back')
+    })
+
+    it('does not retain a watcher that fails before its start response reaches the renderer', async () => {
+        delayStart = true
+        useWorkspace.getState().addPinnedFolder(SAFE_A)
+        await flushWatchers()
+        assert.strictEqual(startResolvers.length, 1, 'start is in flight')
+
+        assert.strictEqual(handleWorkspaceWatcherFailure({
+            watcherId: 'wch-failed-before-response',
+            workspaceRoot: SAFE_A,
+            kind: 'failed',
+            message: 'native watcher stopped',
+            failedAt: Date.now(),
+        }), true)
+        startResolvers[0].resolve('wch-failed-before-response')
+        await flushWatchers()
+
+        delayStart = false
+        await reconcileWorkspaceWatchersFromStore()
+        await flushWatchers()
+        assert.strictEqual(startCalls.length, 2, 'retry reconcile must start a replacement watcher')
+    })
+
+    it('drops a before-response failure when its root is removed before the response', async () => {
+        delayStart = true
+        useWorkspace.getState().addPinnedFolder(SAFE_A)
+        await flushWatchers()
+        assert.strictEqual(startResolvers.length, 1)
+        assert.strictEqual(handleWorkspaceWatcherFailure({
+            watcherId: 'wch-1',
+            workspaceRoot: SAFE_A,
+            kind: 'failed',
+            message: 'native watcher stopped',
+            failedAt: Date.now(),
+        }), true)
+
+        useWorkspace.getState().clearWorkspace()
+        startResolvers[0].resolve('wch-1')
+        await flushWatchers(8)
+        assert.ok(stopCalls.some((call) => call.watcherId === 'wch-1'))
+
+        delayStart = false
+        watcherIdCounter = 0
+        useWorkspace.getState().addPinnedFolder(SAFE_A)
+        await flushWatchers()
+        await reconcileWorkspaceWatchersFromStore()
+        await flushWatchers()
+        assert.strictEqual(startCalls.length, 2, 'reused id must not be poisoned by the removed root failure')
+        assert.strictEqual(useWorkspace.getState().watcherFailure, null)
+    })
+
+    it('removes an active failed watcher so route-independent retry can replace it without stale failure state', async () => {
+        useWorkspace.getState().addPinnedFolder(SAFE_A)
+        await flushWatchers()
+        assert.deepStrictEqual(startCalls, [{ workspaceRoot: SAFE_A }])
+
+        assert.strictEqual(handleWorkspaceWatcherFailure({
+            watcherId: 'wch-1',
+            workspaceRoot: SAFE_A,
+            kind: 'failed',
+            message: 'native watcher stopped',
+            failedAt: Date.now(),
+        }), true)
+        assert.ok(formatWorkspaceWatcherFailure(useWorkspace.getState().watcherFailure))
+        watcherIdCounter = 0
+        await reconcileWorkspaceWatchersFromStore()
+        await flushWatchers()
+        await reconcileWorkspaceWatchersFromStore()
+        await flushWatchers()
+
+        assert.strictEqual(startCalls.length, 2, 'retry reconcile must replace the failed active watcher')
+        assert.strictEqual(useWorkspace.getState().watcherFailure, null, 'successful retry must clear the visible failure')
+    })
+
+    it('ignores failures for removed roots and stale ids without disturbing a healthy replacement', async () => {
+        useWorkspace.getState().addPinnedFolder(SAFE_A)
+        useWorkspace.getState().addPinnedFolder(SAFE_B)
+        await flushWatchers()
+        useWorkspace.getState().removePinnedFolder(SAFE_B)
+        await flushWatchers()
+
+        const removedFailure = {
+            watcherId: 'wch-2',
+            workspaceRoot: SAFE_B,
+            kind: 'failed' as const,
+            message: 'late removed-root failure',
+            failedAt: Date.now(),
+        }
+        assert.strictEqual(handleWorkspaceWatcherFailure(removedFailure), false)
+        assert.strictEqual(useWorkspace.getState().watcherFailure, null)
+
+        useWorkspace.getState().addPinnedFolder(SAFE_B)
+        await flushWatchers()
+        assert.strictEqual(startCalls.length, 3)
+        assert.strictEqual(handleWorkspaceWatcherFailure(removedFailure), false, 'old id must not replace healthy state')
+        await reconcileWorkspaceWatchersFromStore()
+        await flushWatchers()
+        assert.strictEqual(startCalls.length, 3, 'stale failure must not trigger another start')
+        assert.strictEqual(useWorkspace.getState().watcherFailure, null)
+    })
+
+    it('keeps a visible failure across repeated startup retries and clears it only after success', async () => {
+        startFailure = {
+            error: 'EMFILE: too many open files',
+            errorKind: 'failed',
+            hint: '请关闭不需要的工作区后重试。',
+        }
+        useWorkspace.getState().addPinnedFolder(SAFE_A)
+        await flushWatchers()
+
+        const firstRetry = await reconcileWorkspaceWatchersFromStore()
+        assert.strictEqual(firstRetry.failures.length, 1)
+        assert.match(formatWorkspaceWatcherFailure(useWorkspace.getState().watcherFailure) ?? '', /EMFILE|关闭不需要的工作区/)
+
+        const secondRetry = await reconcileWorkspaceWatchersFromStore()
+        assert.strictEqual(secondRetry.failures.length, 1)
+        assert.ok(useWorkspace.getState().watcherFailure, 'a repeated failure must stay visible')
+
+        startFailure = null
+        const recovered = await reconcileWorkspaceWatchersFromStore()
+        assert.deepStrictEqual(recovered.failures, [])
+        assert.strictEqual(useWorkspace.getState().watcherFailure, null)
     })
 
     it('preserves the watcher when remove happens during in-flight start and the same path is re-added before stop fires', async () => {

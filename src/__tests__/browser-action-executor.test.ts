@@ -117,6 +117,21 @@ test('takeover is control-plane work and bypasses an origin challenge throttle',
   assert.equal(dispatched, 1)
 })
 
+test('browser task control actions bypass and do not mutate the page-origin budget', async () => {
+  const budget = new OriginInteractionBudget()
+  budget.record('https://example.test', { challenge: true, actionSucceeded: false })
+  const before = budget.getState('https://example.test')
+  const result = await new BrowserActionExecutor().execute({
+    toolName: 'browser_task',
+    args: { action: 'resume', task_id: 'browser-task-1' },
+    origin: 'https://example.test',
+    interactionBudget: budget,
+    dispatch: async () => JSON.stringify({ status: 'running' }),
+  })
+  assert.deepEqual(typeof result === 'string' ? JSON.parse(result) : result.data, { status: 'running' })
+  assert.deepEqual(budget.getState('https://example.test'), before)
+})
+
 test('ordinary page text cannot permanently mark an origin as a login wall', async () => {
   const budget = new OriginInteractionBudget()
   await new BrowserActionExecutor().execute({

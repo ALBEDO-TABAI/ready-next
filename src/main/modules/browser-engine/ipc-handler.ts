@@ -1174,6 +1174,18 @@ export class BrowserController {
     return this.contentTaskRunner.getTaskPayload(taskId)
   }
 
+  rebindTaskExecution(taskId: string, input: {
+    ownerRunId?: string | null
+    parentTaskId?: string | null
+    executionBinding?: import('../../../shared/agent-execution-profile').TaskExecutionBinding | null
+  }): boolean {
+    return this.contentTaskRunner.patchTaskPayload(taskId, {
+      ...(input.ownerRunId ? { ownerRunId: input.ownerRunId } : {}),
+      ...(input.parentTaskId ? { parentTaskId: input.parentTaskId } : {}),
+      ...(input.executionBinding ? { executionBinding: input.executionBinding } : {}),
+    })
+  }
+
   async findCollectionTaskBySourceTaskId(sourceTaskId: string): Promise<BrowserCapabilityTaskHandle | null> {
     const sourceId = sourceTaskId.trim()
     if (!sourceId) return null
@@ -1194,15 +1206,15 @@ export class BrowserController {
 
   async resumeTask(taskId: string): Promise<BrowserCapabilityTaskHandle | null> {
     const current = await this.contentTaskRunner.getTask(taskId)
-    if (current?.kind === 'note_collect' || current?.kind === 'card_loop') {
+    if (current?.kind === 'note_collect' || current?.kind === 'card_loop' || current?.kind === 'site_research') {
       const payload = this.contentTaskRunner.getTaskPayload(taskId)
       if (payload) {
         const agentTabId = await this.ensureAgentTab()
-        this.contentTaskRunner.updateTaskPayload(taskId, {
-          ...payload,
+        const rebound = this.contentTaskRunner.patchTaskPayload(taskId, {
           agentTabId,
-          surface: payload.surface || 'agent-view',
+          surface: current.kind === 'site_research' ? 'agent-view' : payload.surface || 'agent-view',
         })
+        if (!rebound) throw new Error('browser_task_resume_payload_conflict')
       }
     }
     return this.contentTaskRunner.resumeTask(taskId)

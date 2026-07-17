@@ -101,6 +101,7 @@ describe('browser collection projection sink', () => {
     const record = records.get('browser-task-note-output')
     assert.ok(record)
     assert.equal(record.taskOrigin, 'workflow_child')
+    assert.equal(record.runId, 'run-agent-1')
     assert.equal(record.ownerAgentId, 'analyst')
     assert.equal(record.parentTaskId, 'task-agent-1')
     assert.deepEqual(record.executionBinding, executionBinding)
@@ -291,5 +292,37 @@ describe('browser collection projection sink', () => {
     assert.ok(unchanged)
     assert.equal(unchanged.status, 'failed')
     assert.equal(unchanged.runId, 'browser-task-note-terminal')
+  })
+
+  it('projects direct site-research progress and creates a terminal card without dwell', () => {
+    const { records, runtime } = createRuntimeStore()
+    const sink = makeNoteCollectProjectionSink(runtime as never)
+    sink.upsert({
+      taskId: 'browser-task-site-1',
+      scopeId: 'scope-site',
+      title: '站内多关键词研究',
+      summary: '查询 5/18',
+      state: 'running',
+      total: 18,
+      completed: 5,
+      failed: 0,
+    })
+    assert.equal(records.get('browser-task-site-1')?.progress?.total, 18)
+    assert.equal(records.get('browser-task-site-1')?.progress?.completed, 5)
+
+    const fresh = createRuntimeStore()
+    makeNoteCollectProjectionSink(fresh.runtime as never).upsert({
+      taskId: 'browser-task-site-terminal',
+      scopeId: 'scope-site',
+      title: '站内多关键词研究',
+      summary: '查询 18/18',
+      state: 'completed',
+      total: 18,
+      completed: 18,
+      failed: 0,
+      terminalDwell: false,
+    })
+    assert.equal(fresh.records.get('browser-task-site-terminal')?.status, 'completed')
+    assert.equal(fresh.records.get('browser-task-site-terminal')?.progress?.completed, 18)
   })
 })

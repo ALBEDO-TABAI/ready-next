@@ -1,5 +1,6 @@
 import type { MemorySession } from '@openai/agents'
 import type { AIModelConfig } from '../../../../shared/ai-providers'
+import type { BrowserWorkIntent } from '../../../../shared/browser-work-intent'
 import type {
   BudgetWarningLevel,
   RunBudgetSeed,
@@ -288,6 +289,15 @@ export interface AgentSdkRuntimeDeps {
   setActiveToolUseMode?: (
     request: ActiveToolUseModeUpdateRequest
   ) => ActiveToolUseModeUpdateResult | Promise<ActiveToolUseModeUpdateResult>
+  dispatchToolConsentRetry?: (input: {
+    scopeId: string
+    agent: string
+    message: string | import('../contracts/run-contracts').MultimodalBlock[]
+    requestId: string
+    taskId: string
+    deliveryMode?: import('../../../../shared/dynamic-delivery').DeliveryMode
+    runOrigin?: import('../../../../shared/agent-execution-profile').RunExecutionOrigin
+  }) => Promise<unknown>
   listToolDefinitions?: (params: {
     message: RunMessage
     sessionId?: string
@@ -299,8 +309,7 @@ export interface AgentSdkRuntimeDeps {
     channelScopeBound?: boolean
     authorization: SkillToolAuthorization
     localSendImIntent?: boolean
-    recentCollectionIntent?: boolean
-    recentBatchCollectionIntent?: boolean
+    recentBrowserWorkIntent?: BrowserWorkIntent
     requestEnvelope?: unknown
     /** P2-2 — the L1 skill catalog is non-empty this turn (gates use_skill exposure). */
     skillCatalogAvailable?: boolean

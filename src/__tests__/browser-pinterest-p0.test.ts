@@ -130,7 +130,13 @@ test('browser_download is blocked after a recent failed image_gallery and steers
   assert.equal(parsed.ok, false)
   assert.equal(parsed.errorCode, 'image_gallery_collection_failed_retry_required')
   assert.equal(parsed.failedTaskId, 'task-failed-1')
-  assert.equal(parsed.suggestedNextTool, 'browser_collect')
+  assert.deepEqual(parsed.suggestedNextTool, {
+    name: 'browser_task',
+    args: { action: 'resume', task_id: 'task-failed-1' },
+  })
+  assert.match(String(parsed.message), /browser_task\(action=resume, task_id=task-failed-1\)/)
+  assert.match(String(parsed.message), /browser_collect\(mode=structured, template=image_gallery\)/)
+  assert.doesNotMatch(String(parsed.message), /mode=start/)
 })
 
 test('a pinimg batch with NO prior collection task is steered to the structured image_gallery chain', async () => {
@@ -152,6 +158,7 @@ test('a pinimg batch with NO prior collection task is steered to the structured 
   assert.equal(parsed.ok, false)
   assert.equal(parsed.errorCode, 'use_structured_image_gallery_collection')
   assert.equal(parsed.suggestedNextTool, 'browser_collect')
+  assert.match(String(parsed.message), /browser_collect\(mode=structured, template=image_gallery\)/)
 })
 
 test('a USABLE gallery source wins over a failed one (redirect to collected-media, not retry)', async () => {

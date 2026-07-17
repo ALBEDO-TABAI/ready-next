@@ -70,6 +70,12 @@
   ],
   "c4Exempt": [
     {
+      "path": "src/__tests__/browser-site-research-runner.test.ts",
+      "reason": "Site research coverage injects extraction, tab-session, lease, controller, and task fixtures. No test path opens getDatabase or better-sqlite3; only the browser-tools import graph reaches database.ts, so host-Node coverage must remain active.",
+      "since": "2026-07-18",
+      "owner": "browser-agent-site-research-repair"
+    },
+    {
       "path": "src/__tests__/browser-capability-service-structure.test.ts",
       "reason": "Browser capability structure coverage runs extraction against JSDOM pages with a directly constructed capability service. It never opens getDatabase or a repository; only the widened browser service import graph reaches database.ts, so host-Node coverage must remain active.",
       "since": "2026-07-17",

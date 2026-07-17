@@ -1,4 +1,5 @@
 import { stepCollectionIntentTtl } from '../../../../shared/browser-collection-intent'
+import type { BrowserWorkIntent } from '../../../../shared/browser-work-intent'
 
 const COLLECTION_INTENT_TTL_TURNS = 6
 
@@ -17,8 +18,7 @@ const COLLECTION_INTENT_TTL_TURNS = 6
  * dependency on the runtime instance.
  */
 export class AgentSdkIntentTracker {
-  private readonly collectionIntentTtl = new Map<string, number>()
-  private readonly batchCollectionIntentTtl = new Map<string, number>()
+  private readonly browserWorkIntents = new Map<string, BrowserWorkIntent>()
   private readonly localSendImIntentTtl = new Map<string, number>()
 
   /** Update the TTL for THIS turn and return whether a recent turn (incl. now) had intent. */
@@ -40,12 +40,22 @@ export class AgentSdkIntentTracker {
     return recent
   }
 
-  trackCollectionIntent(sessionId: string | undefined, currentMessageHasIntent: boolean): boolean {
-    return this.trackIntentTtl(this.collectionIntentTtl, sessionId, currentMessageHasIntent)
-  }
-
-  trackBatchCollectionIntent(sessionId: string | undefined, currentMessageHasIntent: boolean): boolean {
-    return this.trackIntentTtl(this.batchCollectionIntentTtl, sessionId, currentMessageHasIntent)
+  trackBrowserWorkIntent(
+    sessionId: string | undefined,
+    current: BrowserWorkIntent,
+    followupKind: 'continue_task' | 'status_query' | 'correction' | 'new_task',
+  ): BrowserWorkIntent {
+    const sid = sessionId || ''
+    if (!sid) return current
+    if (current.kind !== 'observe') {
+      this.browserWorkIntents.set(sid, current)
+      return current
+    }
+    if (followupKind === 'continue_task' || followupKind === 'correction') {
+      return this.browserWorkIntents.get(sid) || current
+    }
+    if (followupKind === 'new_task') this.browserWorkIntents.delete(sid)
+    return current
   }
 
   trackLocalSendImIntent(sessionId: string | undefined, currentMessageHasIntent: boolean): boolean {
@@ -57,7 +67,6 @@ export class AgentSdkIntentTracker {
    * send turn does not inherit a stale browser-collection surface.
    */
   resetCollectionIntents(sessionId: string): void {
-    this.collectionIntentTtl.delete(sessionId)
-    this.batchCollectionIntentTtl.delete(sessionId)
+    this.browserWorkIntents.delete(sessionId)
   }
 }

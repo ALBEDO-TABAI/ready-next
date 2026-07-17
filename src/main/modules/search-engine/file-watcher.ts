@@ -35,6 +35,7 @@ import { randomBytes } from 'crypto'
 
 import { createRotatingLogger } from '../../utils/rotating-logger'
 import { validateWorkspaceRoot } from '../../../shared/workspace-validation'
+import type { DocumentWatcherFailedEvent } from '../../../shared/document-index-events'
 import { IGNORED_DIR_NAMES } from './adapters'
 
 const searchLogger = createRotatingLogger('ready-search.log')
@@ -81,6 +82,8 @@ export type ChokidarFactory = (paths: string | string[], opts?: ChokidarOptions)
  * graph.
  */
 export interface ChokidarLike {
+  /** Native watchers set this when callers must await the first ready/error event. */
+  readonly startupConfirmationRequired?: boolean
   on(event: 'add' | 'change' | 'unlink', cb: (path: string) => void): this
   on(event: 'error', cb: (err: Error) => void): this
   on(event: 'ready', cb: () => void): this
@@ -92,6 +95,10 @@ export interface FileWatcherHandle {
   readonly id: string
   /** The root being watched. Convenience for callers. */
   readonly workspaceRoot: string
+  /** True after either an explicit stop or an unrecoverable runtime error. */
+  isClosed(): boolean
+  /** Subscribe to the single fatal runtime failure for registry/UI cleanup. */
+  onFatalError(callback: (event: DocumentWatcherFailedEvent) => void): () => void
   /** Idempotent. Resolves once the underlying chokidar handle is closed. */
   close(): Promise<void>
 }
@@ -194,14 +201,19 @@ export function createDarwinRecursiveWatcher(root: string): ChokidarLike {
   }
 
   const watcher: FSWatcher = fsWatchNative(root, { recursive: true, persistent: true }, emit)
+  let startupFailed = false
+  let watcherClosed = false
   watcher.on('error', (error) => {
+    startupFailed = true
     for (const cb of errorListeners) cb(error)
   })
-  queueMicrotask(() => {
+  const readyTimer = setTimeout(() => {
+    if (startupFailed || watcherClosed) return
     for (const cb of readyListeners) cb()
-  })
+  }, 25)
 
   const like = {
+    startupConfirmationRequired: true as const,
     on(event: 'add' | 'change' | 'unlink' | 'error' | 'ready', cb: unknown) {
       if (event === 'error') errorListeners.push(cb as (e: Error) => void)
       else if (event === 'ready') readyListeners.push(cb as () => void)
@@ -209,6 +221,9 @@ export function createDarwinRecursiveWatcher(root: string): ChokidarLike {
       return like
     },
     async close() {
+      if (watcherClosed) return
+      watcherClosed = true
+      clearTimeout(readyTimer)
       watcher.close()
     },
   }
@@ -272,59 +287,24 @@ export async function createFileWatcher(
     return { kind: 'failed', message }
   }
 
+  const watcherId = makeWatcherId()
+
   // 2. Track close state so it's idempotent + the abort signal can call it.
   //    Declared before `enqueue` so the closure reads from a fully-initialised
   //    binding (avoids any TDZ surprise even if chokidar ever fired sync).
   let closed = false
   let closePromise: Promise<void> | null = null
+  let startupConfirmed = watcher.startupConfirmationRequired !== true
+  let finishStartup: ((error: Error | null) => void) | null = null
+  let abortListener: (() => void) | null = null
+  let fatalError: DocumentWatcherFailedEvent | null = null
+  const fatalErrorListeners = new Set<(event: DocumentWatcherFailedEvent) => void>()
 
   // 3. Set up debounce. We debounce per (filePath, kind) so a file rapidly
   //    "saved → modified → saved" still emits a single 'change' instead of
   //    three. Key shape: `${kind}:${filePath}`.
   const pending = new Map<string, NodeJS.Timeout>()
-
-  const flush = (key: string, change: FileWatcherChange): void => {
-    pending.delete(key)
-    try {
-      options.onChange(change)
-    } catch (error) {
-      // Caller errors should not blow up the watcher — log + continue.
-      const message = error instanceof Error ? error.message : String(error)
-      logWatcher(`onChange threw path=${change.filePath} error=${message}`)
-    }
-  }
-
-  const enqueue = (kind: FileWatcherChangeKind) => (filePath: string) => {
-    if (closed) return
-    // Defense in depth: chokidar should already have filtered via `ignored`,
-    // but if anything slipped through (symlink retarget, glob edge case)
-    // we re-check here.
-    if (isPathIgnored(filePath)) return
-    const key = `${kind}:${filePath}`
-    const existing = pending.get(key)
-    if (existing) clearTimeout(existing)
-    const timer = setTimeout(() => {
-      flush(key, { filePath, kind, workspaceRoot: options.workspaceRoot })
-    }, debounceMs)
-    // Don't keep the event loop alive solely for a debounce — if the watcher
-    // is shutting down we want to exit cleanly.
-    if (typeof timer.unref === 'function') timer.unref()
-    pending.set(key, timer)
-  }
-
-  watcher.on('add', enqueue('add'))
-  watcher.on('change', enqueue('change'))
-  watcher.on('unlink', enqueue('unlink'))
-  watcher.on('error', (error: Error) => {
-    if (isInotifyExhaustionError(error)) {
-      logWatcher(`ENOSPC root=${options.workspaceRoot} — inotify watch limit exhausted`)
-    } else {
-      logWatcher(`error root=${options.workspaceRoot} message=${error.message}`)
-    }
-  })
-  watcher.on('ready', () => {
-    logWatcher(`ready root=${options.workspaceRoot}`)
-  })
+  const startupPending = new Map<string, FileWatcherChange>()
 
   const close = async (): Promise<void> => {
     if (closed) return closePromise ?? Promise.resolve()
@@ -335,6 +315,11 @@ export async function createFileWatcher(
     // that's already being torn down.
     for (const timer of pending.values()) clearTimeout(timer)
     pending.clear()
+    startupPending.clear()
+    if (options.signal && abortListener) {
+      options.signal.removeEventListener('abort', abortListener)
+      abortListener = null
+    }
     closePromise = (async () => {
       try {
         await watcher.close()
@@ -347,17 +332,122 @@ export async function createFileWatcher(
 
   if (options.signal) {
     if (options.signal.aborted) {
-      // Don't return a handle the caller can never reach — close immediately
-      // and report the failure.
       await close()
       return { kind: 'failed', message: 'aborted before watcher attached' }
     }
-    options.signal.addEventListener('abort', () => { void close() }, { once: true })
+    abortListener = () => {
+      finishStartup?.(new Error('aborted before watcher attached'))
+      void close()
+    }
+    options.signal.addEventListener('abort', abortListener, { once: true })
+  }
+
+  const flush = (key: string, change: FileWatcherChange): void => {
+    pending.delete(key)
+    try {
+      options.onChange(change)
+    } catch (error) {
+      // Caller errors should not blow up the watcher — log + continue.
+      const message = error instanceof Error ? error.message : String(error)
+      logWatcher(`onChange threw path=${change.filePath} error=${message}`)
+    }
+  }
+
+  const schedule = (key: string, change: FileWatcherChange): void => {
+    const existing = pending.get(key)
+    if (existing) clearTimeout(existing)
+    const timer = setTimeout(() => flush(key, change), debounceMs)
+    // Don't keep the event loop alive solely for a debounce — if the watcher
+    // is shutting down we want to exit cleanly.
+    if (typeof timer.unref === 'function') timer.unref()
+    pending.set(key, timer)
+  }
+
+  const enqueue = (kind: FileWatcherChangeKind) => (filePath: string) => {
+    if (closed) return
+    // Defense in depth: chokidar should already have filtered via `ignored`,
+    // but if anything slipped through (symlink retarget, glob edge case)
+    // we re-check here.
+    if (isPathIgnored(filePath)) return
+    const key = `${kind}:${filePath}`
+    const change = { filePath, kind, workspaceRoot: options.workspaceRoot }
+    if (!startupConfirmed) {
+      startupPending.set(key, change)
+      return
+    }
+    schedule(key, change)
+  }
+
+  watcher.on('add', enqueue('add'))
+  watcher.on('change', enqueue('change'))
+  watcher.on('unlink', enqueue('unlink'))
+  watcher.on('error', (error: Error) => {
+    if (isInotifyExhaustionError(error)) {
+      logWatcher(`ENOSPC root=${options.workspaceRoot} — inotify watch limit exhausted`)
+    } else {
+      logWatcher(`error root=${options.workspaceRoot} message=${error.message}`)
+    }
+    if (!startupConfirmed || closed || fatalError) return
+    fatalError = {
+      watcherId,
+      workspaceRoot: options.workspaceRoot,
+      kind: isInotifyExhaustionError(error) ? 'enospc' : 'failed',
+      message: error.message,
+      failedAt: Date.now(),
+    }
+    void close()
+    const listeners = Array.from(fatalErrorListeners)
+    fatalErrorListeners.clear()
+    for (const listener of listeners) {
+      try {
+        listener(fatalError)
+      } catch (callbackError) {
+        logWatcher(`onFatalError threw root=${options.workspaceRoot} error=${callbackError instanceof Error ? callbackError.message : String(callbackError)}`)
+      }
+    }
+  })
+  watcher.on('ready', () => {
+    startupConfirmed = true
+    logWatcher(`ready root=${options.workspaceRoot}`)
+  })
+
+  if (watcher.startupConfirmationRequired) {
+    const startupError = await new Promise<Error | null>((resolve) => {
+      let settled = false
+      let timeout: NodeJS.Timeout | undefined
+      const finish = (error: Error | null): void => {
+        if (settled) return
+        settled = true
+        if (timeout) clearTimeout(timeout)
+        resolve(error)
+      }
+      finishStartup = finish
+      timeout = setTimeout(() => finish(new Error('file watcher startup confirmation timed out')), 1_000)
+      watcher.on('error', (error: Error) => finish(error))
+      watcher.on('ready', () => finish(null))
+    })
+    finishStartup = null
+    if (startupError || fatalError) {
+      await close()
+      return { kind: 'failed', message: startupError?.message ?? fatalError!.message }
+    }
+    startupConfirmed = true
+    for (const [key, change] of startupPending) schedule(key, change)
+    startupPending.clear()
   }
 
   return {
-    id: makeWatcherId(),
+    id: watcherId,
     workspaceRoot: options.workspaceRoot,
+    isClosed: () => closed,
+    onFatalError(callback) {
+      if (fatalError) {
+        callback(fatalError)
+        return () => undefined
+      }
+      fatalErrorListeners.add(callback)
+      return () => { fatalErrorListeners.delete(callback) }
+    },
     close,
   }
 }
@@ -376,6 +466,7 @@ function makeWatcherId(): string {
  */
 export class FileWatcherRegistry {
   private readonly watchers = new Map<string, FileWatcherHandle>()
+  private readonly fatalErrorUnsubscribers = new Map<string, () => void>()
 
   size(): number {
     return this.watchers.size
@@ -389,8 +480,24 @@ export class FileWatcherRegistry {
     return Array.from(this.watchers.values())
   }
 
-  add(handle: FileWatcherHandle): void {
+  add(
+    handle: FileWatcherHandle,
+    onFatalError?: (event: DocumentWatcherFailedEvent) => void,
+  ): boolean {
+    if (handle.isClosed()) return false
     this.watchers.set(handle.id, handle)
+    const unsubscribe = handle.onFatalError((event) => {
+      if (this.watchers.get(handle.id) !== handle) return
+      this.watchers.delete(handle.id)
+      this.fatalErrorUnsubscribers.delete(handle.id)
+      onFatalError?.(event)
+    })
+    if (this.watchers.get(handle.id) !== handle) {
+      unsubscribe()
+      return false
+    }
+    this.fatalErrorUnsubscribers.set(handle.id, unsubscribe)
+    return true
   }
 
   /** Idempotent: returns true if a handle existed and was closed. */
@@ -398,6 +505,8 @@ export class FileWatcherRegistry {
     const handle = this.watchers.get(id)
     if (!handle) return false
     this.watchers.delete(id)
+    this.fatalErrorUnsubscribers.get(id)?.()
+    this.fatalErrorUnsubscribers.delete(id)
     await handle.close()
     return true
   }
@@ -406,6 +515,8 @@ export class FileWatcherRegistry {
   async stopAll(): Promise<number> {
     const handles = Array.from(this.watchers.values())
     this.watchers.clear()
+    for (const unsubscribe of this.fatalErrorUnsubscribers.values()) unsubscribe()
+    this.fatalErrorUnsubscribers.clear()
     await Promise.all(handles.map((h) => h.close().catch(() => {})))
     return handles.length
   }

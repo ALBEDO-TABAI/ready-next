@@ -42,6 +42,7 @@ export function createBoardSaveCoordinator<T, R>(
         options.onSaveSuccess?.(snapshot, result)
       } catch (error) {
         options.onSaveError?.(snapshot, error)
+        throw error
       }
     })
     tail = operation.catch(() => undefined)
@@ -63,7 +64,7 @@ export function createBoardSaveCoordinator<T, R>(
       cancelTimer()
       timer = setTimer(() => {
         timer = null
-        void saveNow()
+        void saveNow().catch(() => undefined)
       }, options.delayMs)
     },
     saveNow,
