@@ -94,7 +94,7 @@ html[data-fastcard-overlay-window='true'] .knowledge-graph-workspace__panel {
 }
 
 .knowledge-graph-workspace__header button:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--accent-color, #56807a) 72%, white);
+  outline: 2px solid color-mix(in srgb, var(--color-ready-orange, #FF4B2B) 62%, white);
   outline-offset: 2px;
 }
 
@@ -105,7 +105,7 @@ html[data-fastcard-overlay-window='true'] .knowledge-graph-workspace__panel {
   flex: 1;
   overflow: hidden;
   background:
-    radial-gradient(circle at 50% 42%, color-mix(in srgb, var(--accent-blue, #4f8ce8) 8%, transparent), transparent 52%),
+    radial-gradient(circle at 50% 42%, color-mix(in srgb, var(--color-ready-orange, #FF4B2B) 5%, transparent), transparent 54%),
     radial-gradient(circle, color-mix(in srgb, currentColor 8%, transparent) 0.65px, transparent 0.8px);
   background-position: center, 0 0;
   background-size: auto, 22px 22px;
@@ -156,7 +156,7 @@ html[data-fastcard-overlay-window='true'] .knowledge-graph-workspace__panel {
   pointer-events: none;
   color: var(--text-primary, #282722);
   background: color-mix(in srgb, var(--ready-app-panel-glass-bg, rgba(247, 246, 242, 0.96)) 94%, transparent);
-  border: 0.5px solid color-mix(in srgb, var(--accent-blue, #4f8ce8) 28%, transparent);
+  border: 0.5px solid color-mix(in srgb, var(--color-ready-orange, #FF4B2B) 30%, transparent);
   border-radius: 14px;
   box-shadow: 0 16px 38px rgba(30, 29, 26, 0.16), inset 0 1px rgba(255, 255, 255, 0.35);
   backdrop-filter: blur(20px) saturate(122%);
@@ -206,7 +206,7 @@ html[data-fastcard-overlay-window='true'] .knowledge-graph-workspace__panel {
 
 .knowledge-graph-status--warning {
   color: var(--text-primary, #282722);
-  background: color-mix(in srgb, var(--accent-amber, #e59a28) 18%, var(--bg-primary, #fff));
+  background: color-mix(in srgb, var(--color-orange, #E97A2B) 18%, var(--bg-primary, #fff));
 }
 
 .knowledge-graph-empty {

@@ -6,15 +6,35 @@ const REPULSION_RADIUS = 224
 const REPULSION_RADIUS_SQUARED = REPULSION_RADIUS * REPULSION_RADIUS
 const MIN_NODE_DISTANCE = 48
 const ISOLATED_SEED_SPACING = 29
-const COMPONENT_CLEARANCE = 14
+const COMPONENT_CLEARANCE = 24
+const SIBLING_RING_SPACING = 52
 const DRAG_PROXIMITY_RADIUS = 72
 const DRAG_PROXIMITY_RADIUS_SQUARED = DRAG_PROXIMITY_RADIUS * DRAG_PROXIMITY_RADIUS
+const CHARGE_BASE = 760
+
+// Leaf spokes stay short so each hub keeps a tight dandelion skirt; ties between
+// two connected nodes grow with both degrees so hub skirts cannot interleave.
+function edgeIdealLength(degreeA: number, degreeB: number): number {
+  const low = Math.min(degreeA, degreeB)
+  const high = Math.max(degreeA, degreeB)
+  if (low <= 1) return 56 + Math.min(24, Math.sqrt(high) * 3)
+  return 92 + Math.min(92, Math.log2(low * high + 1) * 10)
+}
+
+// Degree-weighted repulsion mass: hubs push everything (especially other hubs)
+// further away than leaves do, which separates cluster cores and keeps the
+// isolated starfield out of cluster skirts.
+function chargeScaleFor(degree: number): number {
+  return Math.sqrt(1 + Math.min(2.6, Math.log2(degree + 1) * 0.5))
+}
 
 export interface GraphSimulationState {
   readonly nodes: GraphNode[]
   readonly indexById: Map<string, number>
   readonly edgePairs: Int32Array
+  readonly edgeLengths: Float64Array
   readonly degrees: Uint32Array
+  readonly chargeScale: Float64Array
   readonly positions: Float64Array
   readonly velocities: Float64Array
   readonly anchors: Float64Array
@@ -75,7 +95,6 @@ interface GraphComponent {
 function collectGraphComponents(
   nodes: GraphNode[],
   edgePairs: Int32Array,
-  degrees: Uint32Array,
 ): GraphComponent[] {
   const parents = Int32Array.from({ length: nodes.length }, (_, index) => index)
   const find = (index: number): number => {
@@ -100,18 +119,80 @@ function collectGraphComponents(
     if (members) members.push(index)
     else membersByRoot.set(root, [index])
   }
-  const components = [...membersByRoot.values()].map((indices): GraphComponent => {
-    const maxDegree = indices.reduce((maximum, index) => Math.max(maximum, degrees[index]), 0)
-    const radius = indices.length === 1
-      ? 0
-      : 110 + Math.sqrt(Math.max(0, indices.length - 2)) * 22 + Math.min(36, Math.log2(maxDegree + 1) * 8)
-    return { indices, radius, x: 0, y: 0 }
-  })
+  const components = [...membersByRoot.values()].map((indices): GraphComponent => (
+    { indices, radius: 0, x: 0, y: 0 }
+  ))
   components.sort((left, right) => {
     if (left.indices.length !== right.indices.length) return right.indices.length - left.indices.length
     return nodes[left.indices[0]].id.localeCompare(nodes[right.indices[0]].id)
   })
   return components
+}
+
+// Radial BFS layout relative to the component center: the strongest hub sits in
+// the middle, every other node seeds one ideal edge length away from the
+// already-placed neighbour it hangs off, fanning away from that neighbour's own
+// direction. Spokes of one hub cannot cross each other, so the settled layout
+// starts near a crossing-minimal dandelion instead of an arbitrary spiral.
+function seedComponentRelative(input: {
+  nodes: GraphNode[]
+  degrees: Uint32Array
+  neighbors: number[][]
+  members: number[]
+  relativeX: Float64Array
+  relativeY: Float64Array
+}): number {
+  const { nodes, degrees, neighbors, members, relativeX, relativeY } = input
+  const byImportance = (left: number, right: number): number => (
+    degrees[right] - degrees[left] || nodes[left].id.localeCompare(nodes[right].id)
+  )
+  const ordered = [...members].sort(byImportance)
+  const root = ordered[0]
+  const angles = new Map<number, number>()
+  const seeded = new Set<number>([root])
+  relativeX[root] = 0
+  relativeY[root] = 0
+  angles.set(root, idRotation(nodes[root].id))
+  const queue: number[] = [root]
+  for (let head = 0; head < queue.length; head += 1) {
+    const parent = queue[head]
+    const children = neighbors[parent].filter((child) => !seeded.has(child)).sort(byImportance)
+    if (children.length === 0) continue
+    const parentAngle = angles.get(parent) ?? 0
+    // A crowded fan cannot keep its siblings closer than the collision spacing
+    // allows: widen the ring until the arc fits every child.
+    const angleSpan = parent === root
+      ? Math.PI * 2
+      : (children.length - 1) * (Math.PI / Math.max(3, children.length))
+    const ringNeed = children.length <= 1
+      ? 0
+      : ((parent === root ? children.length : children.length - 1) * SIBLING_RING_SPACING) / Math.max(0.6, angleSpan)
+    for (let slot = 0; slot < children.length; slot += 1) {
+      const child = children[slot]
+      const angle = parent === root
+        ? parentAngle + (slot * Math.PI * 2) / children.length
+        : parentAngle + (slot - (children.length - 1) / 2) * (Math.PI / Math.max(3, children.length))
+      const spoke = Math.max(edgeIdealLength(degrees[parent], degrees[child]), ringNeed)
+      relativeX[child] = relativeX[parent] + Math.cos(angle) * spoke
+      relativeY[child] = relativeY[parent] + Math.sin(angle) * spoke
+      angles.set(child, angle)
+      seeded.add(child)
+      queue.push(child)
+    }
+  }
+  let fallbackRank = 1
+  let maxRadius = 0
+  for (const member of members) {
+    if (!seeded.has(member)) {
+      const radius = 70 + Math.sqrt(fallbackRank) * 22
+      const angle = fallbackRank * GOLDEN_ANGLE
+      relativeX[member] = Math.cos(angle) * radius
+      relativeY[member] = Math.sin(angle) * radius
+      fallbackRank += 1
+    }
+    maxRadius = Math.max(maxRadius, Math.hypot(relativeX[member], relativeY[member]))
+  }
+  return maxRadius
 }
 
 function placeConnectedComponents(components: GraphComponent[]): void {
@@ -159,9 +240,12 @@ function placeIsolatedComponents(components: GraphComponent[]): void {
       candidateRank += 1
       const x = Math.cos(angle) * radius
       const y = Math.sin(angle) * radius
-      const overlapsRelationshipIsland = connected.some((candidate) => (
-        Math.hypot(x - candidate.x, y - candidate.y) < candidate.radius + COMPONENT_CLEARANCE
-      ))
+      const overlapsRelationshipIsland = connected.some((candidate) => {
+        const clearance = candidate.radius + COMPONENT_CLEARANCE
+        const dx = x - candidate.x
+        const dy = y - candidate.y
+        return dx * dx + dy * dy < clearance * clearance
+      })
       if (overlapsRelationshipIsland) continue
       component.x = x
       component.y = y
@@ -183,36 +267,49 @@ function seedComponentPositions(
   nodes: GraphNode[],
   edgePairs: Int32Array,
   degrees: Uint32Array,
+  neighbors: number[][],
   prior?: Float32Array | ReadonlyMap<string, { x: number; y: number }>,
 ): { positions: Float64Array; anchors: Float64Array } {
   const positions = new Float64Array(nodes.length * 2)
   const anchors = new Float64Array(nodes.length * 2)
-  const components = collectGraphComponents(nodes, edgePairs, degrees)
+  const relativeX = new Float64Array(nodes.length)
+  const relativeY = new Float64Array(nodes.length)
+  const components = collectGraphComponents(nodes, edgePairs)
+  for (const component of components) {
+    if (component.indices.length === 1) continue
+    const maxRadius = seedComponentRelative({
+      nodes,
+      degrees,
+      neighbors,
+      members: component.indices,
+      relativeX,
+      relativeY,
+    })
+    // Tree-like components settle at ~1.0x their BFS seed extent; meshy ones
+    // (shared tags, dense wikilinks) contract because cross links pull the BFS
+    // tree back together — measured ~0.65x at density 1.7. Estimating honestly
+    // keeps the shelf packing tight and the isolated starfield evenly filled.
+    const density = component.indices.reduce((sum, index) => sum + degrees[index], 0) / 2
+      / component.indices.length
+    const contraction = density > 1.05 ? Math.max(0.62, 1.08 - (density - 1) * 0.62) : 1.08
+    component.radius = maxRadius * contraction + 30
+  }
   placeConnectedComponents(components)
   placeIsolatedComponents(components)
 
   for (const component of components) {
-    const members = [...component.indices].sort((left, right) => (
-      degrees[right] - degrees[left] || nodes[left].id.localeCompare(nodes[right].id)
-    ))
-    const rotation = idRotation(nodes[members[0]].id)
-    for (let rank = 0; rank < members.length; rank += 1) {
-      const index = members[rank]
-      const localRadius = rank === 0 ? 0 : 70 + Math.sqrt(rank - 1) * 22
-      const localAngle = rotation + rank * GOLDEN_ANGLE
-      const localX = Math.cos(localAngle) * localRadius
-      const localY = Math.sin(localAngle) * localRadius
-      const x = component.x + localX
-      const y = component.y + localY
-      const anchorScale = members.length === 1 ? 1 : 0.34
+    const anchorScale = component.indices.length === 1 ? 1 : 0.34
+    for (const index of component.indices) {
+      const localX = relativeX[index]
+      const localY = relativeY[index]
       anchors[index * 2] = component.x + localX * anchorScale
       anchors[index * 2 + 1] = component.y + localY * anchorScale
 
       const previous = prior instanceof Float32Array
         ? { x: prior[index * 2], y: prior[index * 2 + 1] }
         : prior?.get(nodes[index].id)
-      positions[index * 2] = previous && Number.isFinite(previous.x) ? previous.x : x
-      positions[index * 2 + 1] = previous && Number.isFinite(previous.y) ? previous.y : y
+      positions[index * 2] = previous && Number.isFinite(previous.x) ? previous.x : component.x + localX
+      positions[index * 2 + 1] = previous && Number.isFinite(previous.y) ? previous.y : component.y + localY
     }
   }
   return { positions, anchors }
@@ -225,13 +322,25 @@ export function createGraphSimulation(
 ): GraphSimulationState {
   const copiedNodes = nodes.map((node) => ({ ...node }))
   const { edgePairs, degrees, indexById } = makeEdgePairs(copiedNodes, edges)
-  const { positions, anchors } = seedComponentPositions(copiedNodes, edgePairs, degrees, prior)
+  const neighbors: number[][] = Array.from({ length: copiedNodes.length }, () => [])
+  for (let pair = 0; pair < edgePairs.length; pair += 2) {
+    neighbors[edgePairs[pair]].push(edgePairs[pair + 1])
+    neighbors[edgePairs[pair + 1]].push(edgePairs[pair])
+  }
+  const edgeLengths = new Float64Array(edgePairs.length / 2)
+  for (let pair = 0; pair < edgePairs.length; pair += 2) {
+    edgeLengths[pair / 2] = edgeIdealLength(degrees[edgePairs[pair]], degrees[edgePairs[pair + 1]])
+  }
+  const chargeScale = Float64Array.from(degrees, chargeScaleFor)
+  const { positions, anchors } = seedComponentPositions(copiedNodes, edgePairs, degrees, neighbors, prior)
   const pinned = new Float64Array(copiedNodes.length * 2)
   pinned.fill(Number.NaN)
   return {
     nodes: copiedNodes,
     edgePairs,
+    edgeLengths,
     degrees,
+    chargeScale,
     indexById,
     positions,
     velocities: new Float64Array(copiedNodes.length * 2),
@@ -248,11 +357,17 @@ export function createGraphSimulation(
   }
 }
 
-function cellKey(x: number, y: number): string {
-  return `${Math.floor(x / CELL_SIZE)},${Math.floor(y / CELL_SIZE)}`
+// Integer grid key: string keys allocate on every lookup and dominate tick cost
+// once layouts spread over many cells. ±32768 cells covers ±2.7M world px.
+function cellKey(x: number, y: number): number {
+  return (Math.floor(x / CELL_SIZE) + 0x8000) * 0x10000 + (Math.floor(y / CELL_SIZE) + 0x8000)
 }
 
-function expandDragProximity(state: GraphSimulationState, grid: Map<string, number[]>): void {
+function packedCellKey(cellX: number, cellY: number): number {
+  return (cellX + 0x8000) * 0x10000 + (cellY + 0x8000)
+}
+
+function expandDragProximity(state: GraphSimulationState, grid: Map<number, number[]>): void {
   if (!state.interactionActive || state.activeDragIndex < 0) return
   const cellRange = Math.ceil(DRAG_PROXIMITY_RADIUS / CELL_SIZE)
   for (let index = 0; index < state.nodes.length; index += 1) {
@@ -263,7 +378,7 @@ function expandDragProximity(state: GraphSimulationState, grid: Map<string, numb
     const cellY = Math.floor(y / CELL_SIZE)
     for (let dxCell = -cellRange; dxCell <= cellRange; dxCell += 1) {
       for (let dyCell = -cellRange; dyCell <= cellRange; dyCell += 1) {
-        const candidates = grid.get(`${cellX + dxCell},${cellY + dyCell}`)
+        const candidates = grid.get(packedCellKey(cellX + dxCell, cellY + dyCell))
         if (!candidates) continue
         for (const other of candidates) {
           if (state.interactionMask[other] !== 0) continue
@@ -308,9 +423,9 @@ function activateDragNeighborhood(state: GraphSimulationState, index: number): v
 
 function singleSimulationTick(state: GraphSimulationState): { moved: number; pairChecks: number } {
   const count = state.nodes.length
-  const { positions, velocities, pinned, anchors, degrees, dragInfluence, interactionMask } = state
+  const { positions, velocities, pinned, anchors, degrees, chargeScale, edgeLengths, dragInfluence, interactionMask } = state
   const alpha = state.alpha
-  const grid = new Map<string, number[]>()
+  const grid = new Map<number, number[]>()
   for (let index = 0; index < count; index += 1) {
     const key = cellKey(positions[index * 2], positions[index * 2 + 1])
     const occupants = grid.get(key)
@@ -329,7 +444,7 @@ function singleSimulationTick(state: GraphSimulationState): { moved: number; pai
     const cellY = Math.floor(y / CELL_SIZE)
     for (let dxCell = -cellRange; dxCell <= cellRange; dxCell += 1) {
       for (let dyCell = -cellRange; dyCell <= cellRange; dyCell += 1) {
-        const candidates = grid.get(`${cellX + dxCell},${cellY + dyCell}`)
+        const candidates = grid.get(packedCellKey(cellX + dxCell, cellY + dyCell))
         if (!candidates) continue
         for (const other of candidates) {
           if (other <= index) continue
@@ -347,7 +462,7 @@ function singleSimulationTick(state: GraphSimulationState): { moved: number; pai
           }
           const distance = Math.sqrt(distanceSquared)
           const collisionDistance = MIN_NODE_DISTANCE + Math.min(18, Math.log2(degrees[index] + degrees[other] + 1) * 3)
-          const chargeForce = (1050 / distanceSquared) * alpha
+          const chargeForce = ((CHARGE_BASE * chargeScale[index] * chargeScale[other]) / distanceSquared) * alpha
           const collisionForce = Math.max(0, collisionDistance - distance) * 0.032 * Math.max(alpha, 0.18)
           const force = Math.min(3.8, chargeForce + collisionForce)
           const forceX = (dx / distance) * force
@@ -374,7 +489,7 @@ function singleSimulationTick(state: GraphSimulationState): { moved: number; pai
     const dx = positions[targetOffset] - positions[sourceOffset]
     const dy = positions[targetOffset + 1] - positions[sourceOffset + 1]
     const distance = Math.max(0.001, Math.hypot(dx, dy))
-    const idealLength = 92 + Math.min(38, Math.log2(degrees[source] + degrees[target] + 1) * 8)
+    const idealLength = edgeLengths[pair / 2]
     const localInfluence = Math.max(dragInfluence[source], dragInfluence[target])
     const force = (distance - idealLength) * (0.013 + localInfluence * 0.026) * alpha
     const forceX = (dx / distance) * force

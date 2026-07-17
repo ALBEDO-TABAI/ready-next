@@ -48,28 +48,30 @@ export function graphNodeRadius({
   return isHovered ? Math.max(5.2, radius + 1.8) : radius
 }
 
+// Ready 设计语言：暖纸白上的墨点星野，单一品牌橘红做结构 accent（标签/悬浮），
+// 文档与连线保持暖墨灰 —— 不引入第二彩色。
 export const LIGHT_GRAPH_PALETTE: GraphCanvasPalette = {
   background: 'rgba(255,255,255,0)',
-  document: '#4f8ce8',
-  tag: '#e59a28',
-  ghost: '#9a9891',
-  label: '#2e2d29',
-  edge: 'rgba(111, 113, 110, 0.26)',
-  tagEdge: 'rgba(222, 145, 34, 0.31)',
-  linkEdge: 'rgba(79, 140, 232, 0.28)',
-  highlight: '#6ba9ee',
+  document: '#6E6A61',
+  tag: '#FF4B2B',
+  ghost: '#BDB9AF',
+  label: '#3D3A34',
+  edge: 'rgba(110, 106, 97, 0.26)',
+  tagEdge: 'rgba(255, 75, 43, 0.24)',
+  linkEdge: 'rgba(90, 86, 78, 0.32)',
+  highlight: '#FF4B2B',
 }
 
 export const DARK_GRAPH_PALETTE: GraphCanvasPalette = {
   background: 'rgba(0,0,0,0)',
-  document: '#62a1ef',
-  tag: '#e9a743',
-  ghost: '#777872',
-  label: '#ecebe7',
-  edge: 'rgba(168, 171, 168, 0.23)',
-  tagEdge: 'rgba(233, 167, 67, 0.3)',
-  linkEdge: 'rgba(98, 161, 239, 0.3)',
-  highlight: '#82bdff',
+  document: '#9C988E',
+  tag: '#FF6345',
+  ghost: '#5E5B54',
+  label: '#DDDACF',
+  edge: 'rgba(196, 192, 182, 0.17)',
+  tagEdge: 'rgba(255, 99, 69, 0.27)',
+  linkEdge: 'rgba(196, 192, 182, 0.24)',
+  highlight: '#FF6345',
 }
 
 function clamp(value: number, min: number, max: number): number {
