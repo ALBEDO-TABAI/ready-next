@@ -2,6 +2,7 @@ import type {
   BrowserBookmark,
   BrowserDownload,
   BrowserHistoryEntry,
+  BrowserPowerPreflightAuditRecord,
   BrowserTaskRecord,
 } from '../database'
 import { getDatabase } from '../database'
@@ -153,8 +154,9 @@ export class BrowserRepository {
       updated_at?: string
       finished_at?: string | null
     },
-  ): void {
-    getDatabase().updateBrowserTask(id, updates)
+    options?: { expectedUpdatedAt?: string },
+  ): boolean {
+    return getDatabase().updateBrowserTask(id, updates, options)
   }
 
   getTask(id: string): BrowserTaskRecord | undefined {
@@ -163,5 +165,13 @@ export class BrowserRepository {
 
   listTasks(statuses?: string[]): BrowserTaskRecord[] {
     return getDatabase().listBrowserTasks(statuses)
+  }
+
+  addPowerPreflightAudit(record: BrowserPowerPreflightAuditRecord): void {
+    getDatabase().addBrowserPowerPreflightAudit(record)
+  }
+
+  getPowerPreflightAudit(id: string): BrowserPowerPreflightAuditRecord | undefined {
+    return getDatabase().getBrowserPowerPreflightAudit(id)
   }
 }

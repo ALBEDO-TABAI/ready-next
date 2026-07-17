@@ -29,6 +29,64 @@ interface BrowserAutomationHost {
     beginKeys(labels: readonly string[], windowMs?: number): void
     beginMouse(windowMs?: number): void
   }
+  onTrustedInput?: (event: {
+    tabId: string
+    kind: 'mouse' | 'key' | 'drag'
+    type: string
+    x?: number
+    y?: number
+    pageZoomFactor?: number
+  }) => void
+}
+
+export interface BrowserExecutionDeadlineOptions {
+  timeoutMs?: number
+  signal?: AbortSignal
+}
+
+const DEFAULT_BROWSER_JS_TIMEOUT_MS = 10_000
+const DEFAULT_BROWSER_CDP_TIMEOUT_MS = 15_000
+
+async function withBrowserExecutionDeadline<T>(
+  label: string,
+  operation: Promise<T>,
+  options: BrowserExecutionDeadlineOptions | undefined,
+  onTimeout?: () => void | Promise<void>,
+): Promise<T> {
+  const timeoutMs = Math.max(1, Math.floor(options?.timeoutMs || DEFAULT_BROWSER_JS_TIMEOUT_MS))
+  const controller = new AbortController()
+  const externalSignal = options?.signal
+  const abortFromExternal = () => controller.abort(externalSignal?.reason || new Error(`${label}:aborted`))
+  if (externalSignal?.aborted) abortFromExternal()
+  else externalSignal?.addEventListener('abort', abortFromExternal, { once: true })
+
+  let timer: ReturnType<typeof setTimeout> | null = null
+  try {
+    return await Promise.race([
+      operation,
+      new Promise<never>((_resolve, reject) => {
+        const abort = async () => {
+          const reason = controller.signal.reason instanceof Error
+            ? controller.signal.reason
+            : new Error(`${label}:aborted`)
+          await onTimeout?.()
+          reject(reason)
+        }
+        controller.signal.addEventListener('abort', () => { void abort() }, { once: true })
+        if (controller.signal.aborted) {
+          void abort()
+        } else {
+          timer = setTimeout(() => {
+            controller.abort(new Error(`${label}:deadline_exceeded:${timeoutMs}`))
+          }, timeoutMs)
+        }
+      }),
+    ])
+  } finally {
+    if (timer) clearTimeout(timer)
+    externalSignal?.removeEventListener('abort', abortFromExternal)
+    void operation.catch(() => undefined)
+  }
 }
 
 export class BrowserAutomationService {
@@ -108,12 +166,15 @@ export class BrowserAutomationService {
     method: string,
     params?: Record<string, unknown>,
   ): Promise<unknown> {
-    if (this.host.cdpSession) {
-      return this.host.cdpSession.sendCommand(tabId, method, params)
-    }
     const { view } = this.host.resolveTabView(tabId)
-    await this.ensureDebugger(tabId)
-    return view.webContents.debugger.sendCommand(method, params)
+    const operation = this.host.cdpSession
+      ? this.host.cdpSession.sendCommand(tabId, method, params)
+      : this.ensureDebugger(tabId).then(() => view.webContents.debugger.sendCommand(method, params))
+    return withBrowserExecutionDeadline(
+      `browser_cdp:${method}`,
+      operation,
+      { timeoutMs: DEFAULT_BROWSER_CDP_TIMEOUT_MS },
+    )
   }
 
   async getViewportMetrics(tabId: string | null): Promise<BrowserViewportMetrics> {
@@ -212,6 +273,15 @@ export class BrowserAutomationService {
         deltaY: payload.deltaY || 0,
         modifiers: payload.modifiers || 0,
       })
+      const resolved = this.host.resolveTabView(tabId)
+      this.host.onTrustedInput?.({
+        tabId: resolved.tabId,
+        kind: 'mouse',
+        type: payload.type,
+        x: payload.x,
+        y: payload.y,
+        pageZoomFactor: resolved.view.webContents.getZoomFactor(),
+      })
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       throw this.host.createBrowserError('CDP_COMMAND_FAILED', `Input.dispatchMouseEvent failed: ${message}`)
@@ -240,6 +310,8 @@ export class BrowserAutomationService {
         unmodifiedText: payload.unmodifiedText,
         location: payload.location,
       })
+      const resolvedTabId = this.host.resolveTabView(tabId).tabId
+      this.host.onTrustedInput?.({ tabId: resolvedTabId, kind: 'key', type: payload.type })
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       throw this.host.createBrowserError('CDP_COMMAND_FAILED', `Input.dispatchKeyEvent failed: ${message}`)
@@ -326,9 +398,26 @@ export class BrowserAutomationService {
     }
   }
 
-  async executeJS(tabId: string | null, code: string): Promise<unknown> {
+  async executeJS(
+    tabId: string | null,
+    code: string,
+    options?: BrowserExecutionDeadlineOptions,
+  ): Promise<unknown> {
     const { view } = this.host.resolveTabView(tabId)
-    return view.webContents.executeJavaScript(code, true)
+    const operation = view.webContents.executeJavaScript(code, true)
+    return withBrowserExecutionDeadline(
+      'browser_execute_javascript',
+      operation,
+      options,
+      async () => {
+        try {
+          if (!view.webContents.debugger.isAttached()) view.webContents.debugger.attach('1.3')
+          await view.webContents.debugger.sendCommand('Runtime.terminateExecution')
+        } catch {
+          try { view.webContents.stop() } catch { /* tab may already be gone */ }
+        }
+      },
+    )
   }
 
   /**
@@ -357,8 +446,13 @@ export class BrowserAutomationService {
     return frames
   }
 
-  async executeJSInFrame(tabId: string | null, frameKey: string, code: string): Promise<unknown> {
-    if (!frameKey || frameKey === '0') return this.executeJS(tabId, code)
+  async executeJSInFrame(
+    tabId: string | null,
+    frameKey: string,
+    code: string,
+    options?: BrowserExecutionDeadlineOptions,
+  ): Promise<unknown> {
+    if (!frameKey || frameKey === '0') return this.executeJS(tabId, code, options)
     const { view } = this.host.resolveTabView(tabId)
     const mainFrame = view.webContents.mainFrame
     const frame = mainFrame.framesInSubtree.find((candidate) => {
@@ -372,7 +466,15 @@ export class BrowserAutomationService {
     if (!frame) {
       throw this.host.createBrowserError('FRAME_NOT_FOUND', `Frame ${frameKey} is no longer present on this page`)
     }
-    return frame.executeJavaScript(code, true)
+    const operation = frame.executeJavaScript(code, true)
+    return withBrowserExecutionDeadline('browser_frame_execute_javascript', operation, options, async () => {
+      try {
+        if (!view.webContents.debugger.isAttached()) view.webContents.debugger.attach('1.3')
+        await view.webContents.debugger.sendCommand('Runtime.terminateExecution')
+      } catch {
+        try { view.webContents.stop() } catch { /* tab may already be gone */ }
+      }
+    })
   }
 
   async getPageContent(tabId: string | null): Promise<string> {
@@ -671,8 +773,6 @@ export class BrowserAutomationService {
           const input = document.querySelector('[data-ready-upload-target="${marker}"]')
           if (!(input instanceof HTMLInputElement)) return { assigned: false, names: [] }
           const names = Array.from(input.files || []).map((file) => String(file.name || ''))
-          input.dispatchEvent(new Event('input', { bubbles: true }))
-          input.dispatchEvent(new Event('change', { bubbles: true }))
           input.removeAttribute('data-ready-upload-target')
           return { assigned: names.length > 0, names }
         })()
@@ -781,6 +881,15 @@ export class BrowserAutomationService {
       await this.sendCdpCommand(tabId, 'Input.dispatchDragEvent', { type: 'dragEnter', x, y, data })
       await this.sendCdpCommand(tabId, 'Input.dispatchDragEvent', { type: 'dragOver', x, y, data })
       await this.sendCdpCommand(tabId, 'Input.dispatchDragEvent', { type: 'drop', x, y, data })
+      const resolved = this.host.resolveTabView(tabId)
+      this.host.onTrustedInput?.({
+        tabId: resolved.tabId,
+        kind: 'drag',
+        type: 'drop',
+        x,
+        y,
+        pageZoomFactor: resolved.view.webContents.getZoomFactor(),
+      })
       return true
     } catch {
       return false

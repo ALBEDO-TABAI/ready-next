@@ -7,6 +7,7 @@ function createCapabilityHost() {
   const calls: Array<{ type: string; payload?: unknown }> = []
   let currentUrl = 'https://example.com/feed'
   let lastExtractScript = ''
+  let scrollStep = 0
 
   return {
     calls,
@@ -22,15 +23,19 @@ function createCapabilityHost() {
         return { success: true, tabId: 'tab-1' }
       },
       getActiveTab: () => ({ id: 'tab-1', url: currentUrl }),
+      dispatchMouse: async (_tabId: string | null, payload: Record<string, unknown>) => {
+        calls.push({ type: 'mouse', payload })
+        if (payload.type === 'mouseWheel') scrollStep = Math.min(3, scrollStep + 1)
+      },
       executeJS: async (_tabId: string | null, code: string) => {
-        if (code.includes('__READY_SCROLL_COLLECT__')) {
+        if (code.includes('document.scrollingElement')) {
           return {
-            items: [
-              { sourceUrl: currentUrl, title: 'Card 1', link: 'https://example.com/card-1' },
-              { sourceUrl: currentUrl, title: 'Card 2', link: 'https://example.com/card-2' },
-            ],
-            reachedEnd: true,
-            scrolls: 3,
+            url: currentUrl,
+            x: 600,
+            y: scrollStep * 600,
+            viewport: 667,
+            height: 2467,
+            maxScroll: 1800,
           }
         }
         if (code.includes('__READY_EXTRACT_TEMPLATE__')) {
@@ -112,11 +117,39 @@ describe('BrowserCapabilityService', () => {
     const result = await service.scrollCollect('tab-1', {
       template: 'card_list',
       maxScrolls: 8,
+      stableRounds: 1,
       limit: 20,
     })
 
     assert.strictEqual(result.items.length, 2)
     assert.strictEqual(result.reachedEnd, true)
     assert.strictEqual(result.scrolls, 3)
+    assert.equal((host as any).dispatchMouse instanceof Function, true)
+  })
+
+  it('resumes a batch download without requesting an already hashed successful URL again', async () => {
+    const { host } = createCapabilityHost()
+    const requested: string[] = []
+    ;(host as any).downloadUrlToDirectory = async ({ url, targetDir }: { url: string; targetDir: string }) => {
+      requested.push(url)
+      return { success: true, savePath: `${targetDir}/next.bin`, sha256: 'next-hash' }
+    }
+    const service = new BrowserCapabilityService(host as any)
+    const result = await service.batchDownload([
+      'https://example.com/already.bin',
+      'https://example.com/next.bin',
+    ], {
+      directory: process.cwd(),
+      resumeResults: [{
+        url: 'https://example.com/already.bin',
+        success: true,
+        path: '/tmp/already.bin',
+        sha256: 'prior-hash',
+      }],
+    })
+
+    assert.deepEqual(requested, ['https://example.com/next.bin'])
+    assert.equal(result.success, 2)
+    assert.equal(result.results.length, 2)
   })
 })

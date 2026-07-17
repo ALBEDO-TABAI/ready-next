@@ -129,10 +129,10 @@ export function assembleAgentSdkTurnInput(
       || definition.groupId === 'browser_content_tasks'
   )
   const hasBrowserVisibleCollectTool = toolDefinitions.some(
-    (definition) => definition.name === 'browser_visible_collect'
+    (definition) => definition.name === 'browser_collect'
   )
   const hasBrowserPowerTools = toolDefinitions.some(
-    (definition) => definition.name.startsWith('browser_power_')
+    (definition) => ['browser_eval', 'browser_cdp', 'browser_network', 'browser_resources'].includes(definition.name)
   )
   const canActivateSkill = toolDefinitions.some(
     (definition) => definition.name === 'use_skill'
@@ -166,8 +166,8 @@ export function assembleAgentSdkTurnInput(
     ? [
         '本轮已开放浏览器工具：只使用实际列出的工具；下方规则中的工具示例不代表未列出的工具可用。可操作或采集用户当前登录且可正常访问的页面；用户随时可接管，接管后写操作会被拒绝，应立即停止。',
         hasBrowserVisibleCollectTool
-          ? '本轮可用 browser_visible_collect 采集信息流、评论和长列表。'
-          : '本轮未开放 browser_visible_collect；使用已列出的页面观察工具分批采集。',
+          ? '本轮可用 browser_collect 采集信息流、评论和长列表。'
+          : '本轮未开放 browser_collect；使用已列出的页面观察工具分批采集。',
         hasBrowserPowerTools
           ? '本轮已开放列出的 Browser Power 工具；安全等级、授权与审计仍由代码执行。'
           : '本轮未开放 Browser Power 工具；不要声称可用自由脚本或 Power 能力。',

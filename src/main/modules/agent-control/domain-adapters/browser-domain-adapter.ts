@@ -70,7 +70,7 @@ function normalizeBrowserEvidenceSnippet(toolName: string, resultText: string): 
   if (/^(Error:|Search failed|Page content is empty|Skipped duplicate)/i.test(normalized)) {
     return null
   }
-  const limit = toolName === 'browser_read_page' ? 420 : toolName === 'browser_search' ? 320 : 220
+  const limit = toolName === 'browser_read' ? 420 : toolName === 'browser_search' ? 320 : 220
   return normalized.length > limit ? `${normalized.slice(0, limit - 3)}...` : normalized
 }
 
@@ -189,7 +189,7 @@ export class BrowserDomainAdapter implements DomainAdapter {
       {
         // Collection-workflow guidance: when the user wants to collect a
         // blogger's notes (每篇建文件夹下载图片), tell the agent to dispatch
-        // browser_collect_notes after gathering the list — otherwise it gathers
+        // browser_collect after gathering the list — otherwise it gathers
         // links with extract_structured and "completes" without starting the
         // background task. Higher priority than browser-upload + document-write
         // so the task is labelled as collection, not document rewrite.
@@ -206,7 +206,7 @@ export class BrowserDomainAdapter implements DomainAdapter {
           {
             path: 'docs/browser-collect-rules.md',
             title: '浏览器逐篇采集流程',
-            summary: '收集清单后优先用 browser_visible_collect 的 source_task_id 调用 browser_collect_notes；保存目录先随 browser_visible_collect.output_root_dir 传递',
+            summary: '收集清单后优先用 browser_collect 的 source_task_id 调用 browser_collect；保存目录先随 browser_collect.output_root_dir 传递',
           },
         ],
       },

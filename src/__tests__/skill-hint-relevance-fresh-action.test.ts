@@ -5,7 +5,7 @@
  * Before the fix, resolveSkillHintRelevanceForTurn returned continuable_task
  * unconditionally whenever a reference hint + continuable task existed, which
  * narrowed the surface to 12 skill/collection tools and stripped
- * browser_media_download_advanced / browser_power_eval / resolve_video — the
+ * browser_download / browser_eval / resolve_video — the
  * agent then reported it "lacked the tools" and the download failed.
  */
 import test from 'node:test'

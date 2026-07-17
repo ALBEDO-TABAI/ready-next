@@ -83,10 +83,10 @@ test('partial browser exposure is recorded with a nonzero allowed count', async 
   const events: Array<Record<string, unknown>> = []
   __setMetricSinkForTests((event) => { events.push(event as unknown as Record<string, unknown>) })
   try {
-    await executeToolCall('browser_start_task', { goal: 'x' }, {
+    await executeToolCall('browser_collect', { goal: 'x' }, {
       sessionId: 'scope-gating-partial',
       currentUserText: '打开这个页面看看',
-      allowedToolNames: ['browser_navigate', 'browser_read_page'],
+      allowedToolNames: ['browser_navigate', 'browser_read'],
       authorization: buildExplicitNoSkillAuthorization(),
     } as never)
     const miss = events.filter((event) => event.metric === 'intent_gating_miss')

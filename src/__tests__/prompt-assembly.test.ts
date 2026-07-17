@@ -333,8 +333,8 @@ describe('PromptAssemblyService', () => {
     assert.equal(countTrigger(result, 'browser-collect-notes'), 1)
     assert.equal(countTrigger(result, 'document-write'), 0)
     const joinedBootstrap = result.bootstrapMessages.join('\n\n')
-    assert.match(joinedBootstrap, /逐个点开/)
-    assert.match(joinedBootstrap, /strategy=card_loop/)
+    assert.match(joinedBootstrap, /逐篇打开/)
+    assert.match(joinedBootstrap, /card_loop 或 url_batch 是系统内部选择/)
 
     rmSync(root, { recursive: true, force: true })
   })

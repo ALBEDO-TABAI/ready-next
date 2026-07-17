@@ -91,8 +91,9 @@ export function resolveCapabilityResolution(params: {
   const defaultIntentModes: Partial<Record<CapabilityGroupId, boolean>> = {
     browser_interaction:
       params.browserDecisionMode === 'browser_workflow' || params.browserDecisionMode === 'browser_upload_workflow',
-    browser_content_tasks:
-      params.browserDecisionMode === 'browser_workflow' || params.browserDecisionMode === 'browser_upload_workflow',
+    // Long-running and advanced browser tools are opened by the current turn's
+    // explicit operation/collection intent, never by a generic browser task.
+    browser_content_tasks: false,
   }
 
   const mergedIntentModes = {

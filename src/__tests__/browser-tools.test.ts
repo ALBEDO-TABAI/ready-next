@@ -6,6 +6,8 @@ import { join } from 'node:path'
 import { JSDOM } from 'jsdom'
 import { executeBrowserTool } from '../main/modules/tools/browser-tools'
 import { __resetBrowserAgentPageMapForTests } from '../main/modules/tools/browser-observe-tools'
+import { parseBrowserSnapshotRef } from '../main/modules/browser-engine/browser-snapshot-service'
+import { browserOriginInteractionBudget } from '../main/modules/browser-engine/origin-interaction-budget'
 import { __setBrowserCollectionConsentStoreForTests } from '../main/modules/tools/browser-collection-tools'
 import { BrowserTaskPlanner } from '../main/modules/agent-control/domain-adapters/browser-task-planner'
 import {
@@ -64,7 +66,7 @@ function createConsentStoreMock() {
         confirmedAt: new Date(0).toISOString(),
       }
     },
-  } as never
+  }
 }
 
 function createRuntimeProjectionStore() {
@@ -91,6 +93,7 @@ function createRuntimeProjectionStore() {
 
 beforeEach(() => {
   __resetBrowserAgentPageMapForTests()
+  browserOriginInteractionBudget.resetForTests()
   __setSessionContinuityStoragePathForTests(TEST_CONTINUITY_PATH)
   __resetSessionContinuityForTests()
   __setBrowserCollectionConsentStoreForTests(createConsentStoreMock())
@@ -98,6 +101,7 @@ beforeEach(() => {
 
 afterEach(() => {
   __resetBrowserAgentPageMapForTests()
+  browserOriginInteractionBudget.resetForTests()
   __resetSessionContinuityForTests()
   __setSessionContinuityStoragePathForTests(null)
   __setBrowserCollectionConsentStoreForTests(null)
@@ -141,6 +145,26 @@ function toolText(out: unknown): string {
   return String(out)
 }
 
+async function snapshotTargetRef(
+  controller: BrowserController,
+  rawTargetId = '1:0:1',
+): Promise<string> {
+  const payload = parseTool(await executeBrowserTool('browser_snapshot', {}, controller)) as {
+    pageIdentity?: { url?: string; title?: string }
+    pageMap?: { targets?: Array<{ targetId: string }> }
+  }
+  const pageUrl = String(payload.pageIdentity?.url || '')
+  if (pageUrl) {
+    const tab = { id: 'tab-1', title: String(payload.pageIdentity?.title || 'T'), url: pageUrl, active: true }
+    controller.getActiveTab = () => tab as never
+    controller.getTabList = () => []
+  }
+  const ref = payload.pageMap?.targets?.find((target) =>
+    parseBrowserSnapshotRef(target.targetId)?.rawTargetId === rawTargetId)?.targetId
+  assert.ok(ref, `snapshot should expose ${rawTargetId}`)
+  return ref
+}
+
 function createControllerMock(overrides?: Partial<BrowserController>): BrowserController & MockedController {
   const calls = {
     normalized: [] as Array<{ x: number; y: number }>,
@@ -151,6 +175,7 @@ function createControllerMock(overrides?: Partial<BrowserController>): BrowserCo
 
   const mock: MockedController = {
     calls,
+    getActiveTab: () => ({ id: 'tab-1', title: 'Gemini', url: 'https://gemini.google.com', active: true }) as never,
     getTabList: () => [{ id: 'tab-1', title: 'Gemini', url: 'https://gemini.google.com', active: true }],
     createTab: async () => ({ success: true, tabId: 'tab-1' }),
     navigate: async () => ({ success: true }),
@@ -207,7 +232,7 @@ function createControllerMock(overrides?: Partial<BrowserController>): BrowserCo
       if (result !== null && result !== undefined) return result
       // Readiness-only fallthrough: settleAfterAction's real-timer waits
       // (waitForLoadingStop 8s + waitForReady 6s) otherwise burn wall-clock
-      // (~28s per browser_click_text) when an override stubs only its own probe
+      // (~28s per browser_click) when an override stubs only its own probe
       // and returns null for the page-readiness probes the default stubs.
       const source = String(code || '')
       if (source.includes("document.readyState === 'interactive'")) return true
@@ -222,7 +247,7 @@ function createControllerMock(overrides?: Partial<BrowserController>): BrowserCo
 }
 
 describe('browser-tools v2', () => {
-  it('browser_read_page_map returns a generation, targets, and ambiguity groups', async () => {
+  it('browser_snapshot returns a generation, targets, and ambiguity groups', async () => {
     const controller = createControllerMock({
       executeJS: async (_tabId, code) => {
         const source = String(code || '')
@@ -252,7 +277,7 @@ describe('browser-tools v2', () => {
       },
     })
 
-    const result = await executeBrowserTool('browser_read_page_map', {}, controller)
+    const result = await executeBrowserTool('browser_snapshot', {}, controller)
     const payload = parseTool(result) as {
       pageIdentity: { generation: number; title: string }
       pageMap: {
@@ -267,11 +292,14 @@ describe('browser-tools v2', () => {
     assert.strictEqual(payload.pageIdentity.generation, 1)
     assert.strictEqual(payload.pageIdentity.title, 'Example Form')
     assert.strictEqual(payload.pageMap.targets.length, 5)
-    assert.strictEqual(payload.pageMap.targets[0]?.targetId, '1:0:1')
+    assert.strictEqual(parseBrowserSnapshotRef(payload.pageMap.targets[0]?.targetId || '')?.rawTargetId, '1:0:1')
     assert.deepStrictEqual(payload.pageMap.structureHints, { iframes: [], shadowRoots: [], hiddenLoaded: [] })
     assert.strictEqual(payload.ambiguityGroups.length, 1)
     assert.strictEqual(payload.ambiguityGroups[0]?.name, 'Search')
-    assert.deepStrictEqual(payload.ambiguityGroups[0]?.targetIds, ['1:0:1', '1:0:2'])
+    assert.deepStrictEqual(
+      payload.ambiguityGroups[0]?.targetIds.map((id) => parseBrowserSnapshotRef(id)?.rawTargetId),
+      ['1:0:1', '1:0:2'],
+    )
     assert.strictEqual(payload.riskFlags.externalLinkCount, 1)
     assert.deepStrictEqual(payload.evidence, {
       generation: 1,
@@ -281,7 +309,7 @@ describe('browser-tools v2', () => {
     })
   })
 
-  it('browser_probe_readonly requires a fresh page-map generation before probing', async () => {
+  it('browser_find searches the current compact snapshot and returns opaque target references', async () => {
     const controller = createControllerMock({
       executeJS: async (_tabId, code) => {
         const source = String(code || '')
@@ -302,48 +330,19 @@ describe('browser-tools v2', () => {
             riskFlags: {},
           }
         }
-        if (source.includes('__READY_READONLY_PROBE__')) {
-          return {
-            ok: true,
-            generation: 1,
-            query: 'query',
-            scope: 'forms',
-            riskDecision: 'allowed',
-            summary: 'scope=forms returned=1',
-            counts: {
-              totalCandidates: 1,
-              returned: 1,
-              hiddenLoaded: 0,
-              forms: 1,
-              fileInputs: 0,
-              links: 0,
-              media: 0,
-              frames: 0,
-              shadowRoots: 0,
-            },
-            nodes: [{ kind: 'input', text: 'Query', inputType: 'text' }],
-            failureKind: null,
-            nextAllowedActions: ['read map again'],
-          }
-        }
         return null
       },
     })
 
-    const stale = await executeBrowserTool('browser_probe_readonly', { generation: 1, query: 'query', scope: 'forms' }, controller)
-    const stalePayload = parseTool(stale) as { ok: boolean; errorCode: string }
-    assert.strictEqual(stalePayload.ok, false)
-    assert.strictEqual(stalePayload.errorCode, 'stale_page_map')
-
-    await executeBrowserTool('browser_read_page_map', {}, controller)
-    const result = await executeBrowserTool('browser_probe_readonly', { generation: 1, query: 'query', scope: 'forms' }, controller)
-    const payload = parseTool(result) as { ok: boolean; scope: string; nodes: Array<{ text: string }> }
-    assert.strictEqual(payload.ok, true)
-    assert.strictEqual(payload.scope, 'forms')
-    assert.strictEqual(payload.nodes[0]?.text, 'Query')
+    const result = await executeBrowserTool('browser_find', { query: 'query', role: 'textbox', limit: 1 }, controller)
+    const payload = parseTool(result) as { ok: boolean; matches: Array<{ name: string; targetId: string }>; total: number }
+    assert.strictEqual(payload.ok, true, JSON.stringify(payload))
+    assert.strictEqual(payload.total, 1)
+    assert.strictEqual(payload.matches[0]?.name, 'Query')
+    assert.strictEqual(parseBrowserSnapshotRef(payload.matches[0]?.targetId || '')?.rawTargetId, '1:0:1')
   })
 
-  it('browser_act_on_target rejects a target that belongs to an ambiguity group without disambiguation', async () => {
+  it('browser_click rejects a target that belongs to an ambiguity group without disambiguation', async () => {
     const controller = createControllerMock({
       executeJS: async (_tabId, code) => {
         const source = String(code || '')
@@ -373,16 +372,19 @@ describe('browser-tools v2', () => {
       },
     })
 
-    await executeBrowserTool('browser_read_page_map', {}, controller)
-    const result = await executeBrowserTool('browser_act_on_target', { target_id: '1:0:1', action: 'click' }, controller)
+    const targetId = await snapshotTargetRef(controller)
+    const result = await executeBrowserTool('browser_click', { target_id: targetId }, controller)
     const payload = parseTool(result) as { ok: boolean; errorCode: string; detail?: Record<string, unknown> }
 
     assert.strictEqual(payload.ok, false)
-    assert.strictEqual(payload.errorCode, 'ambiguous_target')
-    assert.deepStrictEqual(payload.detail?.ambiguityGroup, { role: 'button', name: 'Search', targetIds: ['1:0:1', '1:0:2'] })
+    assert.strictEqual(payload.errorCode, 'ambiguous_target', JSON.stringify(payload))
+    const group = payload.detail?.ambiguityGroup as { role?: string; name?: string; targetIds?: string[] }
+    assert.equal(group.role, 'button')
+    assert.equal(group.name, 'Search')
+    assert.deepStrictEqual(group.targetIds?.map((id) => parseBrowserSnapshotRef(id)?.rawTargetId), ['1:0:1', '1:0:2'])
   })
 
-  it('browser_act_on_target requires a fresh page map and then performs a target action', async () => {
+  it('browser_click requires a fresh page map and then performs a target action', async () => {
     const calls: string[] = []
     const controller = createControllerMock({
       executeJS: async (_tabId, code) => {
@@ -406,7 +408,7 @@ describe('browser-tools v2', () => {
           }
         }
         if (source.includes('__READY_AGENT_TARGET_PROBE__')) {
-          return { matchCount: 1, disabled: false, target: { role: 'textbox', name: 'Query' } }
+          return { matchCount: 1, disabled: false, target: { role: 'textbox', name: 'Query', box: { x: 100, y: 100, width: 300, height: 40 } } }
         }
         if (source.includes('__READY_AGENT_ACT_ON_TARGET__')) {
           return { ok: true, action: 'fill', target: { role: 'textbox', name: 'Query' } }
@@ -418,29 +420,34 @@ describe('browser-tools v2', () => {
       },
     })
 
-    const stale = await executeBrowserTool('browser_act_on_target', { target_id: '1:0:1', action: 'fill', value: 'hello' }, controller)
-    const stalePayload = parseTool(stale) as { ok: boolean; errorCode: string }
-    assert.strictEqual(stalePayload.ok, false)
-    assert.strictEqual(stalePayload.errorCode, 'stale_page_map')
-
-    await executeBrowserTool('browser_read_page_map', {}, controller)
-    const result = await executeBrowserTool('browser_act_on_target', { target_id: '1:0:1', action: 'fill', value: 'hello' }, controller)
-    const payload = parseTool(result) as { ok: boolean; action: string; readBack: string; changed: boolean; failureKind: string | null; result: { ok?: boolean } }
-
-    assert.strictEqual(payload.ok, true)
-    assert.strictEqual(payload.action, 'fill')
-    assert.strictEqual(payload.readBack, 'delta')
-    assert.strictEqual(payload.changed, false)
-    assert.strictEqual(payload.failureKind, null)
-    assert.strictEqual(payload.result.ok, true)
-    assert.ok(calls.some((source) => source.includes('__READY_AGENT_ACT_ON_TARGET__')))
+    const staleTargetId = await snapshotTargetRef(controller)
+    __resetBrowserAgentPageMapForTests()
+    const stale = await executeBrowserTool('browser_type', { target_id: staleTargetId, text: 'hello' }, controller)
+    const stalePayload = parseTool(stale) as {
+      ok: boolean
+      refreshedFromStaleSnapshot?: boolean
+      action: string
+      readBack: string
+      changed: boolean
+      failureKind: string | null
+      result: { ok?: boolean }
+    }
+    assert.strictEqual(stalePayload.ok, true)
+    assert.strictEqual(stalePayload.refreshedFromStaleSnapshot, true)
+    assert.strictEqual(stalePayload.action, 'fill')
+    assert.strictEqual(stalePayload.readBack, 'delta')
+    assert.strictEqual(stalePayload.changed, false)
+    assert.strictEqual(stalePayload.failureKind, null)
+    assert.strictEqual(stalePayload.result.ok, true)
+    assert.ok(!calls.some((source) => source.includes('__READY_AGENT_ACT_ON_TARGET__')), 'target typing must not fall back to synthetic DOM actions')
+    assert.ok(controller.calls.typed.some((item) => item.text === 'hello'))
   })
 
   // D18（真机第十二轮实锚，XHS 发布按钮 closed shadow root）：合成点击对
   // closed shadow 内部监听器不可达且回读 changed 恒真（delta vs map 形状
   // 必不同）。合同：click 判无效果 → 同一次调用内自动升级可信指针点击
-  // （dispatchMouse 通道），升级点击与 browser_click_at 的破坏性闸门同构。
-  it('browser_act_on_target escalates an ineffective click to a trusted pointer click', async () => {
+  // （dispatchMouse 通道），升级点击与 browser_click 的破坏性闸门同构。
+  it('browser_click escalates an ineffective click to a trusted pointer click', async () => {
     let deltaCalls = 0
     const controller = createControllerMock({
       executeJS: async (_tabId, code) => {
@@ -463,7 +470,7 @@ describe('browser-tools v2', () => {
           }
         }
         if (source.includes('__READY_AGENT_TARGET_PROBE__')) {
-          return { matchCount: 1, disabled: false, target: { role: 'clickable', name: '发布' } }
+          return { matchCount: 1, disabled: false, target: { role: 'clickable', name: '发布', box: { x: 400, y: 700, width: 200, height: 40 } } }
         }
         if (source.includes('__READY_AGENT_ACT_ON_TARGET__')) {
           return {
@@ -483,27 +490,27 @@ describe('browser-tools v2', () => {
       },
     })
 
-    await executeBrowserTool('browser_read_page_map', {}, controller)
-    const result = await executeBrowserTool('browser_act_on_target', { target_id: '1:0:1', action: 'click' }, controller)
+    const targetId = await snapshotTargetRef(controller)
+    const result = await executeBrowserTool('browser_click', { target_id: targetId }, controller)
     const payload = parseTool(result) as {
       ok: boolean
       changed: boolean
       escalation?: { attempted?: boolean; mode?: string; changed?: boolean }
     }
 
-    assert.strictEqual(payload.ok, true)
+    assert.strictEqual(payload.ok, true, JSON.stringify(payload))
     assert.strictEqual(payload.changed, true)
     assert.strictEqual(payload.escalation?.attempted, true)
     assert.strictEqual(payload.escalation?.mode, 'trusted_pointer')
     assert.strictEqual(payload.escalation?.changed, true)
     assert.ok(controller.calls.mouse.length >= 3, 'trusted pointer input must go through dispatchMouse')
-    assert.deepStrictEqual(controller.calls.normalized?.[0], { x: 500, y: 975 })
+    assert.deepStrictEqual(controller.calls.normalized?.[0], { x: 500, y: 900 })
   })
 
   // D18-b（第十三轮实锚）：动态页面（占位符轮换/轮播）让 delta 恒变，
   // changed:true 假信号压制升级。合同：closed/无 shadowRoot 的自定义 host
   // 无条件升级（合成点击对它必然 no-op，双击风险不存在）。
-  it('browser_act_on_target force-escalates a closed-shadow host even when the page delta changed', async () => {
+  it('browser_click force-escalates a closed-shadow host even when the page delta changed', async () => {
     let deltaCalls = 0
     const controller = createControllerMock({
       executeJS: async (_tabId, code) => {
@@ -526,7 +533,12 @@ describe('browser-tools v2', () => {
           }
         }
         if (source.includes('__READY_AGENT_TARGET_PROBE__')) {
-          return { matchCount: 1, disabled: false, target: { role: 'clickable', name: '发布' } }
+          return {
+            matchCount: 1,
+            disabled: false,
+            target: { role: 'clickable', name: '发布', box: { x: 400, y: 700, width: 200, height: 40 } },
+            clickPoint: { hostShadow: 'closed_or_none' },
+          }
         }
         if (source.includes('__READY_AGENT_ACT_ON_TARGET__')) {
           return {
@@ -545,8 +557,8 @@ describe('browser-tools v2', () => {
       },
     })
 
-    await executeBrowserTool('browser_read_page_map', {}, controller)
-    const result = await executeBrowserTool('browser_act_on_target', { target_id: '1:0:1', action: 'click' }, controller)
+    const targetId = await snapshotTargetRef(controller)
+    const result = await executeBrowserTool('browser_click', { target_id: targetId }, controller)
     const payload = parseTool(result) as {
       ok: boolean
       escalation?: { attempted?: boolean; reason?: string }
@@ -558,7 +570,7 @@ describe('browser-tools v2', () => {
     assert.ok(controller.calls.mouse.length >= 3, 'closed-shadow host must always get the trusted pointer click')
   })
 
-  it('browser_act_on_target does not escalate when the synthetic click already changed the page', async () => {
+  it('browser_click does not retry when the initial trusted click already changed the page', async () => {
     let deltaCalls = 0
     const controller = createControllerMock({
       executeJS: async (_tabId, code) => {
@@ -581,7 +593,7 @@ describe('browser-tools v2', () => {
           }
         }
         if (source.includes('__READY_AGENT_TARGET_PROBE__')) {
-          return { matchCount: 1, disabled: false, target: { role: 'button', name: '发布' } }
+          return { matchCount: 1, disabled: false, target: { role: 'button', name: '发布', box: { x: 400, y: 700, width: 200, height: 40 } } }
         }
         if (source.includes('__READY_AGENT_ACT_ON_TARGET__')) {
           return {
@@ -601,17 +613,17 @@ describe('browser-tools v2', () => {
       },
     })
 
-    await executeBrowserTool('browser_read_page_map', {}, controller)
-    const result = await executeBrowserTool('browser_act_on_target', { target_id: '1:0:1', action: 'click' }, controller)
+    const targetId = await snapshotTargetRef(controller)
+    const result = await executeBrowserTool('browser_click', { target_id: targetId }, controller)
     const payload = parseTool(result) as { ok: boolean; changed: boolean; escalation?: unknown }
 
     assert.strictEqual(payload.ok, true)
     assert.strictEqual(payload.changed, true)
     assert.strictEqual(payload.escalation, undefined)
-    assert.strictEqual(controller.calls.mouse.length, 0)
+    assert.strictEqual(controller.calls.mouse.length, 3)
   })
 
-  it('browser_act_on_target escalation keeps the destructive-target gate loud', async () => {
+  it('browser_click escalation keeps the destructive-target gate loud', async () => {
     const controller = createControllerMock({
       executeJS: async (_tabId, code) => {
         const source = String(code || '')
@@ -633,7 +645,7 @@ describe('browser-tools v2', () => {
           }
         }
         if (source.includes('__READY_AGENT_TARGET_PROBE__')) {
-          return { matchCount: 1, disabled: false, target: { role: 'clickable', name: '继续' } }
+          return { matchCount: 1, disabled: false, target: { role: 'clickable', name: '继续', box: { x: 400, y: 700, width: 200, height: 40 } } }
         }
         if (source.includes('__READY_AGENT_ACT_ON_TARGET__')) {
           return {
@@ -654,9 +666,9 @@ describe('browser-tools v2', () => {
       },
     })
 
-    await executeBrowserTool('browser_read_page_map', {}, controller)
+    const targetId = await snapshotTargetRef(controller)
     await assert.rejects(
-      executeBrowserTool('browser_act_on_target', { target_id: '1:0:1', action: 'click' }, controller),
+      executeBrowserTool('browser_click', { target_id: targetId }, controller),
       (error: unknown) => (error as { errorKind?: string }).errorKind === 'grant_required',
     )
     assert.strictEqual(controller.calls.mouse.length, 0, 'gated escalation must not dispatch mouse input')
@@ -722,7 +734,12 @@ describe('browser-tools v2', () => {
           }
         }
         if (source.includes('__READY_AGENT_TARGET_PROBE__')) {
-          return { matchCount: 1, disabled: false, target: { role: 'clickable', name: opts.targetName } }
+          return {
+            matchCount: 1,
+            disabled: false,
+            target: { role: 'clickable', name: opts.targetName, box: { x: 400, y: 740, width: 340, height: 44 } },
+            clickPoint: { hostShadow: 'closed_or_none' },
+          }
         }
         if (source.includes('__READY_AGENT_ACT_ON_TARGET__')) {
           return {
@@ -750,10 +767,10 @@ describe('browser-tools v2', () => {
     return controller
   }
 
-  it('browser_act_on_target escalation scans the closed-shadow host and clicks the name-matched inner button', async () => {
+  it('browser_click escalation scans the closed-shadow host and clicks the name-matched inner button', async () => {
     const controller = createShadowScanControllerMock({ targetName: '发布' })
-    await executeBrowserTool('browser_read_page_map', {}, controller)
-    const result = await executeBrowserTool('browser_act_on_target', { target_id: '1:0:1', action: 'click' }, controller)
+    const targetId = await snapshotTargetRef(controller)
+    const result = await executeBrowserTool('browser_click', { target_id: targetId }, controller)
     const payload = parseTool(result) as {
       ok: boolean
       changed: boolean
@@ -778,13 +795,13 @@ describe('browser-tools v2', () => {
     assert.ok((lastNormalized?.x ?? 0) >= 580, `dispatch must use the scanned point, got ${JSON.stringify(lastNormalized)}`)
   })
 
-  it('browser_act_on_target escalation refuses a blind click when shadow candidates are ambiguous', async () => {
+  it('browser_click escalation refuses a blind click when shadow candidates are ambiguous', async () => {
     // 真机第十四轮实态：map 名是 tag 回退 'xhs-publish-btn'（closed root 文本
     // 不可见），两个内部按钮都无法唯一匹配 → 宁可不点（点到「暂存离开」会
     // 毁掉发布流程），把候选连坐标交回模型。
     const controller = createShadowScanControllerMock({ targetName: 'xhs-publish-btn', deltaAfterEscalation: false })
-    await executeBrowserTool('browser_read_page_map', {}, controller)
-    const result = await executeBrowserTool('browser_act_on_target', { target_id: '1:0:1', action: 'click' }, controller)
+    const targetId = await snapshotTargetRef(controller)
+    const result = await executeBrowserTool('browser_click', { target_id: targetId }, controller)
     const payload = parseTool(result) as {
       ok: boolean
       escalation?: {
@@ -800,16 +817,16 @@ describe('browser-tools v2', () => {
     const texts = (payload.escalation?.candidates || []).map((c) => c.text).sort()
     assert.deepStrictEqual(texts, ['发布', '暂存离开'].sort())
     assert.ok(payload.escalation?.candidates?.every((c) => Number.isFinite(c.normalized?.x)))
-    assert.ok(String(payload.escalation?.hint || '').includes('browser_click_at'))
-    assert.strictEqual(controller.calls.mouse.length, 0, 'ambiguous scan must not dispatch a blind click')
+    assert.ok(String(payload.escalation?.hint || '').includes('browser_click'))
+    assert.strictEqual(controller.calls.mouse.length, 3, 'ambiguous scan must not dispatch a second blind click')
   })
 
-  it('browser_act_on_target escalation resolves ambiguity via the disambiguation text', async () => {
+  it('browser_click escalation resolves ambiguity via the disambiguation text', async () => {
     const controller = createShadowScanControllerMock({ targetName: 'xhs-publish-btn' })
-    await executeBrowserTool('browser_read_page_map', {}, controller)
+    const targetId = await snapshotTargetRef(controller)
     const result = await executeBrowserTool(
-      'browser_act_on_target',
-      { target_id: '1:0:1', action: 'click', disambiguation: '页面底部的发布按钮，最终提交' },
+      'browser_click',
+      { target_id: targetId, disambiguation: '页面底部的发布按钮，最终提交' },
       controller,
     )
     const payload = parseTool(result) as {
@@ -822,9 +839,9 @@ describe('browser-tools v2', () => {
     assert.ok((payload.escalation?.clickNormalized?.x ?? 0) >= 580)
   })
 
-  it('browser_click_at should clamp normalized coordinates', async () => {
+  it('browser_click should clamp normalized coordinates', async () => {
     const controller = createControllerMock()
-    const result = await executeBrowserTool('browser_click_at', { x: -20, y: 1800 }, controller)
+    const result = await executeBrowserTool('browser_click', { x: -20, y: 1800 }, controller)
     const payload = parseTool(result) as { normalized: { x: number; y: number } }
 
     assert.strictEqual(payload.normalized.x, 0)
@@ -832,7 +849,7 @@ describe('browser-tools v2', () => {
     assert.ok(controller.calls.mouse.length >= 3)
   })
 
-  it('browser_click_at fails closed when coordinate target probe throws', async () => {
+  it('browser_click fails closed when coordinate target probe throws', async () => {
     const controller = createControllerMock({
       executeJS: async (_tabId, code) => {
         const source = String(code || '')
@@ -844,7 +861,7 @@ describe('browser-tools v2', () => {
     })
 
     await assert.rejects(
-      executeBrowserTool('browser_click_at', { x: 500, y: 500 }, controller),
+      executeBrowserTool('browser_click', { x: 500, y: 500 }, controller),
       (error: unknown) => {
         assert.equal(error instanceof Error ? error.name : '', 'ToolDomainError')
         assert.match(error instanceof Error ? error.message : String(error), /无法确认坐标点击目标/)
@@ -854,7 +871,7 @@ describe('browser-tools v2', () => {
     assert.equal(controller.calls.mouse.length, 0)
   })
 
-  it('browser_click_at fails closed when coordinate point resolution throws', async () => {
+  it('browser_click fails closed when coordinate point resolution throws', async () => {
     const controller = createControllerMock({
       normalizedToCss: async () => {
         throw new Error('point mapping crashed')
@@ -862,7 +879,7 @@ describe('browser-tools v2', () => {
     })
 
     await assert.rejects(
-      executeBrowserTool('browser_click_at', { x: 500, y: 500 }, controller),
+      executeBrowserTool('browser_click', { x: 500, y: 500 }, controller),
       (error: unknown) => {
         assert.equal(error instanceof Error ? error.name : '', 'ToolDomainError')
         assert.match(error instanceof Error ? error.message : String(error), /无法确认坐标点击目标/)
@@ -872,7 +889,7 @@ describe('browser-tools v2', () => {
     assert.equal(controller.calls.mouse.length, 0)
   })
 
-  it('browser_click_text should locate text with JS but click through trusted mouse events', async () => {
+  it('browser_click should locate text with JS but click through trusted mouse events', async () => {
     const controller = createControllerMock({
       executeJS: async (_tabId, code) => {
         const source = String(code || '')
@@ -882,7 +899,7 @@ describe('browser-tools v2', () => {
         return null
       },
     })
-    const result = await executeBrowserTool('browser_click_text', { text: '笔记一' }, controller)
+    const result = await executeBrowserTool('browser_click', { text: '笔记一' }, controller)
     const payload = parseTool(result) as { ok: boolean; normalized: { x: number; y: number } }
 
     assert.strictEqual(payload.ok, true)
@@ -890,7 +907,7 @@ describe('browser-tools v2', () => {
     assert.ok(controller.calls.mouse.length >= 3)
   })
 
-  it('browser_click_text follows a newly opened active tab after the click', async () => {
+  it('browser_click follows a newly opened active tab after the click', async () => {
     let tabs = [
       { id: 'tab-1', title: '小红书', url: 'https://www.xiaohongshu.com', active: true },
     ]
@@ -921,7 +938,7 @@ describe('browser-tools v2', () => {
       },
     })
 
-    const result = await executeBrowserTool('browser_click_text', { text: '发布' }, controller)
+    const result = await executeBrowserTool('browser_click', { text: '发布' }, controller)
     const payload = parseTool(result) as { followedTab?: { tabId: string; reason: string; url: string }; nextSuggestedAction?: string }
 
     assert.equal(payload.followedTab?.tabId, 'tab-2')
@@ -936,21 +953,27 @@ describe('browser-tools v2', () => {
       { id: 'tab-1', title: '小红书', url: 'https://www.xiaohongshu.com', active: true },
     ]
     let switchedTo: string | null = null
-    const controller = createControllerMock({
+    let controller!: BrowserController & MockedController
+    controller = createControllerMock({
       getTabList: () => tabs as never,
       switchTab: (tabId) => {
         switchedTo = tabId
         tabs = tabs.map((tab) => ({ ...tab, active: tab.id === tabId }))
         return { success: true, activeTabId: tabId }
       },
-      executeJS: async (_tabId, code) => {
-        const source = String(code || '')
-        if (source.includes('document.querySelector("#publish")')) {
+      dispatchMouse: async (_tabId, payload) => {
+        controller.calls.mouse.push(payload as unknown as Record<string, unknown>)
+        if ((payload as { type?: string }).type === 'mouseReleased') {
           tabs = [
             { id: 'tab-1', title: '小红书', url: 'https://www.xiaohongshu.com', active: false },
             { id: 'tab-2', title: '发布笔记', url: 'https://creator.xiaohongshu.com/publish/publish?source=official', active: true },
           ]
-          return 'Clicked: BUTTON "发布"'
+        }
+      },
+      executeJS: async (_tabId, code) => {
+        const source = String(code || '')
+        if (source.includes('document.querySelector("#publish")')) {
+          return { ok: true, label: '发布', tag: 'button', x: 500, y: 320, width: 1000, height: 800 }
         }
         return null
       },
@@ -966,7 +989,7 @@ describe('browser-tools v2', () => {
     assert.equal(switchedTo, 'tab-2')
   })
 
-  it('browser_click_text prefers the largest visible matching href when a card link marker is provided', async () => {
+  it('browser_click prefers the largest visible matching href when a card link marker is provided', async () => {
     let locateCode = ''
     const controller = createControllerMock({
       executeJS: async (_tabId, code) => {
@@ -978,7 +1001,7 @@ describe('browser-tools v2', () => {
         return null
       },
     })
-    const result = await executeBrowserTool('browser_click_text', { text: '笔记一', href_contains: 'source-1' }, controller)
+    const result = await executeBrowserTool('browser_click', { text: '笔记一', href_contains: 'source-1' }, controller)
     const payload = parseTool(result) as { ok: boolean; clickedDirect: boolean; normalized: { x: number; y: number } }
 
     assert.strictEqual(payload.ok, true)
@@ -990,22 +1013,21 @@ describe('browser-tools v2', () => {
     assert.ok(controller.calls.mouse.length >= 3)
   })
 
-  it('browser_capture_viewport returns recovery guidance when viewport metrics are zero', async () => {
+  it('browser_screenshot returns recovery guidance when viewport metrics are zero', async () => {
     const controller = createControllerMock({
       getViewportMetrics: async () => ({ width: 0, height: 0, pageX: 0, pageY: 0, scale: 1 }),
     })
 
-    const result = await executeBrowserTool('browser_capture_viewport', {}, controller)
+    const result = await executeBrowserTool('browser_screenshot', {}, controller)
     const payload = parseTool(result) as { width: number; height: number; warning?: string; nextSuggestedAction?: string }
 
     assert.equal(payload.width, 0)
     assert.equal(payload.height, 0)
     assert.equal(payload.warning, 'viewport_zero_or_hidden')
-    assert.match(payload.nextSuggestedAction || '', /browser_power_cdp/)
-    assert.match(payload.nextSuggestedAction || '', /Page\.getFrameTree/)
+    assert.match(payload.nextSuggestedAction || '', /browser_cdp/)
   })
 
-  it('browser_collect_images filters images that are covered by a foreground detail layer', async () => {
+  it('browser_collect filters images that are covered by a foreground detail layer', async () => {
     let collectCode = ''
     const controller = createControllerMock({
 	      executeJS: async (_tabId, code) => {
@@ -1017,7 +1039,7 @@ describe('browser-tools v2', () => {
 	        return null
 	      },
 	    })
-	    const result = await executeBrowserTool('browser_collect_images', { include_hidden: false }, controller)
+	    const result = await executeBrowserTool('browser_collect', { mode: 'images', include_hidden: false }, controller)
 	    const payload = parseTool(result) as { count: number; scope?: string }
 
 	    assert.equal(payload.count, 0)
@@ -1028,7 +1050,7 @@ describe('browser-tools v2', () => {
 	    assert.ok(collectCode.includes("const imgs = queryAll('img')"))
 	  })
 
-  it('browser_collect_images keeps all Xiaohongshu carousel images inside the detail media scope', async () => {
+  it('browser_collect keeps all Xiaohongshu carousel images inside the detail media scope', async () => {
     const dom = new JSDOM(`
       <div class="note-container">
         <div class="media-container">
@@ -1064,7 +1086,7 @@ describe('browser-tools v2', () => {
       const controller = createControllerMock({
         executeJS: async (_tabId, code) => dom.window.Function('code', 'with (this) { return eval(code) }').call(dom.window, String(code || '')),
       })
-      const result = await executeBrowserTool('browser_collect_images', { include_hidden: false, limit: 10 }, controller)
+      const result = await executeBrowserTool('browser_collect', { mode: 'images', include_hidden: false, limit: 10 }, controller)
       const payload = parseTool(result) as { count: number; scope?: string; images: Array<{ url: string }> }
       const urls = payload.images.map((item) => item.url)
 
@@ -1079,7 +1101,7 @@ describe('browser-tools v2', () => {
     }
   })
 
-  it('browser_collect_images reports Xiaohongshu carousel total when only the active image is loaded', async () => {
+  it('browser_collect reports Xiaohongshu carousel total when only the active image is loaded', async () => {
     const dom = new JSDOM(`
       <div class="note-container">
         <div class="media-container">
@@ -1108,7 +1130,7 @@ describe('browser-tools v2', () => {
       const controller = createControllerMock({
         executeJS: async (_tabId, code) => dom.window.Function('code', 'with (this) { return eval(code) }').call(dom.window, String(code || '')),
       })
-      const result = await executeBrowserTool('browser_collect_images', { include_hidden: false, limit: 20 }, controller)
+      const result = await executeBrowserTool('browser_collect', { mode: 'images', include_hidden: false, limit: 20 }, controller)
       const payload = parseTool(result) as { count: number; expectedImageCount?: number; images: Array<{ url: string }> }
 
       assert.equal(payload.count, 1)
@@ -1121,7 +1143,7 @@ describe('browser-tools v2', () => {
     }
   })
 
-  it('browser_collect_images reports Xiaohongshu player-only details as videos', async () => {
+  it('browser_collect reports Xiaohongshu player-only details as videos', async () => {
     const dom = new JSDOM(`
       <div class="note-container">
         <div class="media-container">
@@ -1146,7 +1168,7 @@ describe('browser-tools v2', () => {
       const controller = createControllerMock({
         executeJS: async (_tabId, code) => dom.window.Function('code', 'with (this) { return eval(code) }').call(dom.window, String(code || '')),
       })
-      const result = await executeBrowserTool('browser_collect_images', { include_hidden: false, limit: 10 }, controller)
+      const result = await executeBrowserTool('browser_collect', { mode: 'images', include_hidden: false, limit: 10 }, controller)
       const payload = parseTool(result) as { count: number; videoCount: number; scope?: string; videos: Array<{ posterUrl?: string }> }
 
       assert.equal(payload.scope, 'xiaohongshu-detail')
@@ -1158,7 +1180,7 @@ describe('browser-tools v2', () => {
     }
   })
 
-  it('browser_collect_images extracts Xiaohongshu video URLs already exposed in page scripts', async () => {
+  it('browser_collect extracts Xiaohongshu video URLs already exposed in page scripts', async () => {
     const dom = new JSDOM(`
       <div class="note-container">
         <div class="media-container">
@@ -1187,7 +1209,7 @@ describe('browser-tools v2', () => {
       const controller = createControllerMock({
         executeJS: async (_tabId, code) => dom.window.Function('code', 'with (this) { return eval(code) }').call(dom.window, String(code || '')),
       })
-      const result = await executeBrowserTool('browser_collect_images', { include_hidden: false, limit: 10 }, controller)
+      const result = await executeBrowserTool('browser_collect', { mode: 'images', include_hidden: false, limit: 10 }, controller)
       const payload = parseTool(result) as { videoCount: number; videos: Array<{ url?: string }> }
 
       assert.equal(payload.videoCount, 1)
@@ -1197,13 +1219,14 @@ describe('browser-tools v2', () => {
     }
   })
 
-  it('browser_resolve_video resolves a direct page video without external parsing', async () => {
+  it('browser_download resolves a direct page video without external parsing', async () => {
     const controller = createControllerMock({
       getTabList: () => [{ id: 'tab-1', title: '视频页', url: 'https://www.xiaohongshu.com/explore/69df5244000000001a02a0f8', active: true }],
     })
     const result = await executeBrowserTool(
-      'browser_resolve_video',
+      'browser_download',
       {
+        mode: 'resolve',
         video_url: 'https://sns-video.xhscdn.com/video.mp4',
         poster_url: 'https://sns-webpic-qc.xhscdn.com/poster.webp',
         title: '视频笔记',
@@ -1219,9 +1242,9 @@ describe('browser-tools v2', () => {
     assert.equal(payload.video.platform, 'xiaohongshu')
   })
 
-  it('browser_type_at should clear, type and send enter by default', async () => {
+  it('browser_type clears, types and submits when explicitly requested', async () => {
     const controller = createControllerMock()
-    const result = await executeBrowserTool('browser_type_at', { x: 500, y: 900, text: '今晚吃什么' }, controller)
+    const result = await executeBrowserTool('browser_type', { x: 500, y: 900, text: '今晚吃什么', submit: true }, controller)
     const payload = parseTool(result) as { submitted: boolean; text_length: number }
 
     assert.strictEqual(payload.submitted, true)
@@ -1234,7 +1257,7 @@ describe('browser-tools v2', () => {
   // D18-c（真机第十四轮实锚）：type_at 的聚焦点击落在死区时焦点滞留上一个
   // 控件/回落 body，旧实现照打不误——正文全文灌进 XHS 标题框，模型盲试
   // 4 分钟。合同：点击后焦点不可编辑 → 拒绝打字、响亮报告点到了什么。
-  it('browser_type_at refuses to type when the focusing click lands on a non-editable spot', async () => {
+  it('browser_type refuses to type when the focusing click lands on a non-editable spot', async () => {
     const controller = createControllerMock({
       executeJS: async (_tabId, code) => {
         const source = String(code || '')
@@ -1247,7 +1270,7 @@ describe('browser-tools v2', () => {
         return null
       },
     })
-    const result = await executeBrowserTool('browser_type_at', { x: 525, y: 302, text: '今天天气不错' }, controller)
+    const result = await executeBrowserTool('browser_type', { x: 525, y: 302, text: '今天天气不错' }, controller)
     const payload = parseTool(result) as {
       ok: boolean
       errorKind?: string
@@ -1264,7 +1287,7 @@ describe('browser-tools v2', () => {
 
   // D18-d（真机第十六轮实锚）：typedInto 只报不拒救不了模型的坐标微调循环
   // ——64 字上限的标题框收 500 字正文必须机械拒绝。
-  it('browser_type_at refuses to feed long text into a capacity-limited field', async () => {
+  it('browser_type refuses to feed long text into a capacity-limited field', async () => {
     const controller = createControllerMock({
       executeJS: async (_tabId, code) => {
         const source = String(code || '')
@@ -1278,7 +1301,7 @@ describe('browser-tools v2', () => {
       },
     })
     const longBody = '今天天气不错，' .repeat(40)
-    const result = await executeBrowserTool('browser_type_at', { x: 500, y: 300, text: longBody }, controller)
+    const result = await executeBrowserTool('browser_type', { x: 500, y: 300, text: longBody }, controller)
     const payload = parseTool(result) as { ok: boolean; errorKind?: string; focusTarget?: { maxLength?: number }; message?: string }
     assert.strictEqual(payload.ok, false)
     assert.strictEqual(payload.errorKind, 'type_field_capacity_exceeded')
@@ -1287,7 +1310,7 @@ describe('browser-tools v2', () => {
     assert.strictEqual(controller.calls.typed.length, 0, 'capacity refusal must not type')
   })
 
-  it('browser_type_at refuses multiline text when focus is a single-line input', async () => {
+  it('browser_type refuses multiline text when focus is a single-line input', async () => {
     const controller = createControllerMock({
       executeJS: async (_tabId, code) => {
         const source = String(code || '')
@@ -1300,7 +1323,7 @@ describe('browser-tools v2', () => {
         return null
       },
     })
-    const result = await executeBrowserTool('browser_type_at', { x: 500, y: 300, text: '第一段\n\n第二段' }, controller)
+    const result = await executeBrowserTool('browser_type', { x: 500, y: 300, text: '第一段\n\n第二段' }, controller)
     const payload = parseTool(result) as { ok: boolean; errorKind?: string }
     assert.strictEqual(payload.ok, false)
     assert.strictEqual(payload.errorKind, 'type_multiline_into_single_line')
@@ -1310,7 +1333,7 @@ describe('browser-tools v2', () => {
   // D18-d：smart 评分器容量出局——上一轮它把 maxlength=64 的标题 textarea
   // (52.19 分) 排在正文 contenteditable 前，500 字正文灌进标题。JSDOM 真跑
   // 注入 JS 验证多段长文必须落 contenteditable。
-  it('browser_type_smart routes multi-paragraph text past a capacity-limited textarea into the contenteditable editor', async () => {
+  it('browser_type routes multi-paragraph text past a capacity-limited textarea into the contenteditable editor', async () => {
     const dom = new JSDOM(`
       <div>
         <textarea placeholder="输入标题" maxlength="64"></textarea>
@@ -1325,23 +1348,30 @@ describe('browser-tools v2', () => {
           toJSON: () => ({}),
         })
       }
+      const editor = dom.window.document.querySelector('#editor') as HTMLElement
+      Object.defineProperty(editor, 'isContentEditable', { configurable: true, value: true })
+      ;(dom.window.document as unknown as { elementFromPoint: (x: number, y: number) => Element }).elementFromPoint = () => editor
       const controller = createControllerMock({
+        dispatchMouse: async (_tabId, payload) => {
+          if ((payload as { type?: string }).type === 'mousePressed') editor.focus()
+        },
         executeJS: async (_tabId, code) => dom.window.Function('code', 'with (this) { return eval(code) }').call(dom.window, String(code || '')),
       })
       const body = '今天天气不错，风也刚好。\n\n中午云很干净。\n\n傍晚想散步。'
-      const result = await executeBrowserTool('browser_type_smart', { target: '正文', text: body, press_enter: false }, controller)
-      const text = toolText(result)
-      assert.match(text, /Typed into smart target/)
-      const editor = dom.window.document.querySelector('#editor') as { textContent?: string | null }
+      const result = await executeBrowserTool('browser_type', { target: '正文', text: body, press_enter: false }, controller)
+      const payload = parseTool(result) as { ok?: boolean; target?: string; trustedInput?: boolean }
       const title = dom.window.document.querySelector('textarea') as HTMLTextAreaElement
-      assert.ok(String(editor.textContent || '').includes('今天天气不错'), 'body must land in contenteditable')
+      assert.equal(payload.ok, true)
+      assert.equal(payload.target, 'editor')
+      assert.equal(payload.trustedInput, true)
+      assert.ok(controller.calls.typed.some((item) => item.text === body), 'body must be sent through the trusted input channel')
       assert.strictEqual(String(title.value || ''), '', 'capacity-limited title textarea must stay untouched')
     } finally {
       dom.window.close()
     }
   })
 
-  it('browser_type_at reports where the text actually landed (typedInto readback)', async () => {
+  it('browser_type reports where the text actually landed (typedInto readback)', async () => {
     const controller = createControllerMock({
       executeJS: async (_tabId, code) => {
         const source = String(code || '')
@@ -1357,7 +1387,7 @@ describe('browser-tools v2', () => {
         return null
       },
     })
-    const result = await executeBrowserTool('browser_type_at', { x: 500, y: 300, text: '今天天气不错', press_enter: false }, controller)
+    const result = await executeBrowserTool('browser_type', { x: 500, y: 300, text: '今天天气不错', press_enter: false }, controller)
     const payload = parseTool(result) as {
       ok: boolean
       focusTarget?: { kind?: string; label?: string }
@@ -1370,7 +1400,7 @@ describe('browser-tools v2', () => {
     assert.ok(controller.calls.typed.some((item) => item.text === '今天天气不错'))
   })
 
-  it('browser_type_at fails closed when coordinate target probe throws', async () => {
+  it('browser_type fails closed when coordinate target probe throws', async () => {
     const controller = createControllerMock({
       executeJS: async (_tabId, code) => {
         const source = String(code || '')
@@ -1382,7 +1412,7 @@ describe('browser-tools v2', () => {
     })
 
     await assert.rejects(
-      executeBrowserTool('browser_type_at', { x: 500, y: 500, text: 'secret' }, controller),
+      executeBrowserTool('browser_type', { x: 500, y: 500, text: 'secret' }, controller),
       (error: unknown) => {
         assert.equal(error instanceof Error ? error.name : '', 'ToolDomainError')
         assert.match(error instanceof Error ? error.message : String(error), /无法确认坐标输入目标/)
@@ -1393,7 +1423,7 @@ describe('browser-tools v2', () => {
     assert.equal(controller.calls.typed.length, 0)
   })
 
-  it('browser_type_at fails closed when coordinate point resolution throws', async () => {
+  it('browser_type fails closed when coordinate point resolution throws', async () => {
     const controller = createControllerMock({
       normalizedToCss: async () => {
         throw new Error('point mapping crashed')
@@ -1401,7 +1431,7 @@ describe('browser-tools v2', () => {
     })
 
     await assert.rejects(
-      executeBrowserTool('browser_type_at', { x: 500, y: 500, text: 'secret' }, controller),
+      executeBrowserTool('browser_type', { x: 500, y: 500, text: 'secret' }, controller),
       (error: unknown) => {
         assert.equal(error instanceof Error ? error.name : '', 'ToolDomainError')
         assert.match(error instanceof Error ? error.message : String(error), /无法确认坐标输入目标/)
@@ -1412,23 +1442,7 @@ describe('browser-tools v2', () => {
     assert.equal(controller.calls.typed.length, 0)
   })
 
-  it('browser_query_gemini should fallback to coordinate typing when DOM compose fails', async () => {
-    const controller = createControllerMock()
-    const result = await executeBrowserTool('browser_query_gemini', { text: '今晚吃什么', wait_response_ms: 5000 }, controller)
-    const payload = parseTool(result) as {
-      submitted: boolean
-      response_detected: boolean
-      attempted: string[]
-      evidence: { coordinate?: unknown }
-    }
-
-    assert.strictEqual(payload.submitted, true)
-    assert.strictEqual(payload.response_detected, true)
-    assert.ok(payload.attempted.includes('probe-editables'))
-    assert.ok(payload.evidence.coordinate)
-  })
-
-  it('browser_locate_input_targets should surface active input and nearby send targets', async () => {
+  it('browser_find should surface active input and nearby send targets', async () => {
     const controller = createControllerMock({
       executeJS: async (_tabId, code) => {
         const source = String(code || '')
@@ -1475,7 +1489,7 @@ describe('browser-tools v2', () => {
       },
     })
 
-    const result = await executeBrowserTool('browser_locate_input_targets', { target: '提示词' }, controller)
+    const result = await executeBrowserTool('browser_find', { purpose: 'input', target: '提示词' }, controller)
     const payload = parseTool(result) as {
       active_target?: { label?: string; focused?: boolean }
       nearby_send_targets?: Array<{ label?: string; nearActiveInput?: boolean }>
@@ -1490,7 +1504,7 @@ describe('browser-tools v2', () => {
     assert.strictEqual(payload.nearby_send_targets?.[0]?.nearActiveInput, true)
   })
 
-  it('browser_extract_structured should delegate to the browser capability layer', async () => {
+  it('browser_collect should delegate to the browser capability layer', async () => {
     const controller = createControllerMock({
       extractStructured: async (_tabId, options) => ({
         items: [
@@ -1504,14 +1518,14 @@ describe('browser-tools v2', () => {
       }),
     } as Partial<BrowserController>)
 
-    const result = await executeBrowserTool('browser_extract_structured', { template: 'article_list' }, controller)
+    const result = await executeBrowserTool('browser_collect', { template: 'article_list' }, controller)
     const payload = parseTool(result) as { items: Array<{ title?: string }> }
 
     assert.strictEqual(payload.items.length, 1)
     assert.strictEqual(payload.items[0]?.title, 'First post')
   })
 
-  it('browser_start_task and browser_get_task should expose persistent browser task progress', async () => {
+  it('browser_collect and browser_task should expose persistent browser task progress', async () => {
     const controller = createControllerMock({
       startTask: async (_request) => ({
         taskId: 'task-1',
@@ -1527,13 +1541,13 @@ describe('browser-tools v2', () => {
       }),
     } as Partial<BrowserController>)
 
-    const startResult = await executeBrowserTool('browser_start_task', {
+    const startResult = await executeBrowserTool('browser_collect', { mode: 'start',
       kind: 'download_urls',
       payload: { urls: ['https://example.com/a.jpg'] },
     }, controller)
     const startPayload = parseTool(startResult) as { taskId?: string; progress?: { completed?: number } }
 
-    const getResult = await executeBrowserTool('browser_get_task', { task_id: 'task-1' }, controller)
+    const getResult = await executeBrowserTool('browser_task', { task_id: 'task-1' }, controller)
     const getPayload = parseTool(getResult) as { status?: string; progress?: { currentLabel?: string } }
 
     assert.strictEqual(startPayload.taskId, 'task-1')
@@ -1542,7 +1556,7 @@ describe('browser-tools v2', () => {
     assert.strictEqual(getPayload.progress?.currentLabel, 'image-003.jpg')
   })
 
-  it('browser_resume_task, browser_cancel_task and browser_aggregate_results should use capability-backed helpers', async () => {
+  it('browser_task, browser_task and browser_task should use capability-backed helpers', async () => {
     const controller = createControllerMock({
       resumeTask: async (_taskId) => ({
         taskId: 'task-1',
@@ -1561,9 +1575,9 @@ describe('browser-tools v2', () => {
       ]),
     } as Partial<BrowserController>)
 
-    const resumeResult = await executeBrowserTool('browser_resume_task', { task_id: 'task-1' }, controller)
-    const cancelResult = await executeBrowserTool('browser_cancel_task', { task_id: 'task-1' }, controller)
-    const aggregateResult = await executeBrowserTool('browser_aggregate_results', {
+    const resumeResult = await executeBrowserTool('browser_task', { action: 'resume', task_id: 'task-1' }, controller)
+    const cancelResult = await executeBrowserTool('browser_task', { action: 'cancel', task_id: 'task-1' }, controller)
+    const aggregateResult = await executeBrowserTool('browser_task', { action: 'result',
       items: [
         { sourceUrl: 'https://example.com/a', title: 'Alpha', link: 'https://example.com/1' },
         { sourceUrl: 'https://example.com/a', title: 'Alpha', link: 'https://example.com/1' },
@@ -1577,7 +1591,7 @@ describe('browser-tools v2', () => {
     assert.strictEqual((parseTool(aggregateResult) as Array<{ title?: string }>).length, 1)
   })
 
-  it('browser_resume_task never turns a completed discovery query into a write task', async () => {
+  it('browser_task never turns a completed discovery query into a write task', async () => {
     let resumedTaskId = ''
     const controller = createControllerMock({
       getTask: async () => ({
@@ -1611,8 +1625,8 @@ describe('browser-tools v2', () => {
     } as Partial<BrowserController>)
 
     const result = await executeBrowserTool(
-      'browser_resume_task',
-      { task_id: 'browser-task-visible-xhs-resume' },
+      'browser_task',
+      { action: 'resume', task_id: 'browser-task-visible-xhs-resume' },
       controller,
       undefined,
       'scope-xhs-resume',
@@ -1626,7 +1640,7 @@ describe('browser-tools v2', () => {
     assert.equal(resumedTaskId, 'browser-task-visible-xhs-resume')
   })
 
-  it('browser_get_task is a compact, side-effect-free query for a completed discovery task', async () => {
+  it('browser_task is a compact, side-effect-free query for a completed discovery task', async () => {
     const controller = createControllerMock({
       getTask: async () => ({
         taskId: 'browser-task-visible-xhs-get',
@@ -1645,13 +1659,13 @@ describe('browser-tools v2', () => {
       }) as never,
       findCollectionTaskBySourceTaskId: async () => null,
       startCardLoopCollection: async () => {
-        throw new Error('browser_get_task must never start a collection')
+        throw new Error('browser_task must never start a collection')
       },
     } as Partial<BrowserController>)
 
     const result = await executeBrowserTool(
-      'browser_get_task',
-      { task_id: 'browser-task-visible-xhs-get' },
+      'browser_task',
+      { action: 'get', task_id: 'browser-task-visible-xhs-get' },
       controller,
       undefined,
       'scope-xhs-get',
@@ -1670,7 +1684,7 @@ describe('browser-tools v2', () => {
     assert.equal(payload.activeExecution, undefined)
   })
 
-  it('browser_get_task reports an existing downstream collection without replacing the source identity', async () => {
+  it('browser_task reports an existing downstream collection without replacing the source identity', async () => {
     const controller = createControllerMock({
       getTask: async () => ({
         taskId: 'browser-task-visible-xhs-existing',
@@ -1697,8 +1711,8 @@ describe('browser-tools v2', () => {
     } as Partial<BrowserController>)
 
     const result = await executeBrowserTool(
-      'browser_get_task',
-      { task_id: 'browser-task-visible-xhs-existing' },
+      'browser_task',
+      { action: 'get', task_id: 'browser-task-visible-xhs-existing' },
       controller,
     )
 
@@ -1708,7 +1722,7 @@ describe('browser-tools v2', () => {
     assert.equal(payload.activeExecution?.status, 'running')
   })
 
-  it('browser_download_gallery and browser_research_topic should offer thin task adapters for agents', async () => {
+  it('browser_download and browser_collect should offer thin task adapters for agents', async () => {
     const controller = createControllerMock({
       startTask: async (request) => {
         if ((request as { kind?: string }).kind === 'scroll_collect') {
@@ -1728,12 +1742,12 @@ describe('browser-tools v2', () => {
       },
     } as Partial<BrowserController>)
 
-    const galleryResult = await executeBrowserTool('browser_download_gallery', {
+    const galleryResult = await executeBrowserTool('browser_download', { mode: 'gallery',
       url: 'https://example.com/gallery',
       directory: '~/Downloads/gallery',
       limit: 80,
     }, controller)
-    const researchResult = await executeBrowserTool('browser_research_topic', {
+    const researchResult = await executeBrowserTool('browser_collect', { mode: 'research',
       query: 'climate change adaptation',
       max_pages: 6,
       limit_per_page: 10,
@@ -1809,7 +1823,7 @@ describe('browser-tools v2', () => {
   })
 })
 
-describe('browser_collect_notes (background sub-agent dispatch)', () => {
+describe('browser_collect (background sub-agent dispatch)', () => {
   it('parses the planned notes and dispatches startNoteCollection with a valid plan', async () => {
     const started: Array<Record<string, unknown>> = []
     const synthetic: Array<Record<string, unknown>> = []
@@ -1830,8 +1844,8 @@ describe('browser_collect_notes (background sub-agent dispatch)', () => {
       },
     })
     const result = await executeBrowserTool(
-      'browser_collect_notes',
-      {
+      'browser_collect',
+      { mode: 'notes',
         target_profile_url: 'https://example.com/user/profile/abc123',
         notes: [
           { url: 'https://example.com/note/1', title: '笔记一' },
@@ -1882,8 +1896,8 @@ describe('browser_collect_notes (background sub-agent dispatch)', () => {
     })
 
     const result = await executeBrowserTool(
-      'browser_collect_notes',
-      {
+      'browser_collect',
+      { mode: 'notes',
         target_profile_url: 'https://example.com/user/profile/abc123',
         notes: [{ url: 'https://example.com/note/not-from-user', title: '笔记一' }],
       },
@@ -1909,8 +1923,8 @@ describe('browser_collect_notes (background sub-agent dispatch)', () => {
       },
     })
     const result = await executeBrowserTool(
-      'browser_collect_notes',
-      { target_profile_url: 'https://www.xiaohongshu.com/user/profile/abc', notes: [{ url: 'ftp://x' }] },
+      'browser_collect',
+      { mode: 'notes', target_profile_url: 'https://www.xiaohongshu.com/user/profile/abc', notes: [{ url: 'ftp://x' }] },
       controller,
     )
     assert.match(toolText(result), /至少一条/)
@@ -1941,8 +1955,8 @@ describe('browser_collect_notes (background sub-agent dispatch)', () => {
     })
 
     const result = await executeBrowserTool(
-      'browser_collect_notes',
-      {
+      'browser_collect',
+      { mode: 'notes',
         target_profile_url: 'https://example.com/profile/abc',
         source_task_id: 'browser-task-visible-1',
         expected_count: 2,
@@ -1994,8 +2008,8 @@ describe('browser_collect_notes (background sub-agent dispatch)', () => {
     })
 
     const result = await executeBrowserTool(
-      'browser_collect_notes',
-      {
+      'browser_collect',
+      { mode: 'notes',
         target_profile_url: 'https://example.com/profile/abc',
         source_task_id: 'browser-task-visible-old',
         expected_count: 1,
@@ -2034,8 +2048,8 @@ describe('browser_collect_notes (background sub-agent dispatch)', () => {
       },
     })
     const outputMismatchResult = await executeBrowserTool(
-      'browser_collect_notes',
-      {
+      'browser_collect',
+      { mode: 'notes',
         target_profile_url: 'https://example.com/profile/abc',
         source_task_id: 'browser-task-visible-old',
         expected_count: 1,
@@ -2073,8 +2087,8 @@ describe('browser_collect_notes (background sub-agent dispatch)', () => {
     })
 
     const result = await executeBrowserTool(
-      'browser_collect_notes',
-      {
+      'browser_collect',
+      { mode: 'notes',
         target_profile_url: 'https://example.com/profile/abc',
         source_task_id: 'browser-task-visible-1',
       },
@@ -2082,11 +2096,13 @@ describe('browser_collect_notes (background sub-agent dispatch)', () => {
     )
 
     assert.match(toolText(result), /不是完整全量/)
-    assert.match(toolText(result), /browser_resume_task/)
+    assert.match(toolText(result), /browser_task/)
     assert.equal(dispatched, false)
   })
 
   it('allows partial source_task_id handoff after confirming the pending consent request', async () => {
+    const consentStore = createConsentStoreMock()
+    __setBrowserCollectionConsentStoreForTests(consentStore as never)
     const started: Array<Record<string, unknown>> = []
     const controller = createControllerMock({
       getTask: async () => ({
@@ -2108,8 +2124,8 @@ describe('browser_collect_notes (background sub-agent dispatch)', () => {
     })
 
     const first = await executeBrowserTool(
-      'browser_collect_notes',
-      {
+      'browser_collect',
+      { mode: 'notes',
         target_profile_url: 'https://example.com/profile/abc',
         source_task_id: 'browser-task-visible-partial-consent',
       },
@@ -2120,21 +2136,12 @@ describe('browser_collect_notes (background sub-agent dispatch)', () => {
     const pending = (parseTool(first) as { pendingConsentRequest?: { requestId?: string } }).pendingConsentRequest
     assert.match(pending?.requestId || '', /^browser-consent-/)
 
-    const confirmed = await executeBrowserTool(
-      'browser_confirm_collection_consent',
-      {
-        request_id: pending?.requestId,
-        confirmed_via: 'ask_user_questions',
-      },
-      controller,
-      undefined,
-      'scope-consent',
-    )
-    assert.equal((parseTool(confirmed) as { ok?: boolean }).ok, true)
+    const confirmed = consentStore.confirmPendingRequest(pending?.requestId || '', 'ui_action')
+    assert.ok(confirmed)
 
     const second = await executeBrowserTool(
-      'browser_collect_notes',
-      {
+      'browser_collect',
+      { mode: 'notes',
         target_profile_url: 'https://example.com/profile/abc',
         source_task_id: 'browser-task-visible-partial-consent',
       },
@@ -2169,8 +2176,8 @@ describe('browser_collect_notes (background sub-agent dispatch)', () => {
     })
 
     const result = await executeBrowserTool(
-      'browser_collect_notes',
-      {
+      'browser_collect',
+      { mode: 'notes',
         target_profile_url: 'https://example.com/profile/abc',
         source_task_id: 'browser-task-visible-1',
         expected_count: 2,
@@ -2204,8 +2211,8 @@ describe('browser_collect_notes (background sub-agent dispatch)', () => {
     })
 
     const result = await executeBrowserTool(
-      'browser_collect_notes',
-      {
+      'browser_collect',
+      { mode: 'notes',
         target_profile_url: 'https://example.com/profile/abc',
         notes: frozenNotes.slice(0, 12),
       },
@@ -2240,8 +2247,8 @@ describe('browser_collect_notes (background sub-agent dispatch)', () => {
     })
 
     const result = await executeBrowserTool(
-      'browser_collect_notes',
-      {
+      'browser_collect',
+      { mode: 'notes',
         target_profile_url: 'https://example.com/profile/abc',
         notes: frozenNotes.slice(0, 12),
         allow_partial: true,
@@ -2263,6 +2270,8 @@ describe('browser_collect_notes (background sub-agent dispatch)', () => {
   })
 
   it('projects pending collection consent and clears it after ui confirmation', async () => {
+    const consentStore = createConsentStoreMock()
+    __setBrowserCollectionConsentStoreForTests(consentStore as never)
     const frozenNotes = Array.from({ length: 31 }, (_item, index) => ({
       url: `https://example.com/post/${index + 1}`,
       title: `Post ${index + 1}`,
@@ -2280,8 +2289,8 @@ describe('browser_collect_notes (background sub-agent dispatch)', () => {
     const { records, runtime } = createRuntimeProjectionStore()
 
     const first = await executeBrowserTool(
-      'browser_collect_notes',
-      {
+      'browser_collect',
+      { mode: 'notes',
         target_profile_url: 'https://example.com/profile/abc',
         notes: frozenNotes.slice(0, 12),
       },
@@ -2304,16 +2313,14 @@ describe('browser_collect_notes (background sub-agent dispatch)', () => {
     assert.equal(projected?.progress?.browserCollectionConsent?.requestId, requestId)
     assert.equal(projected?.progress?.browserCollectionConsent?.consentKind, 'partial_collection')
 
-    await executeBrowserTool(
-      'browser_confirm_collection_consent',
-      { request_id: requestId, confirmed_via: 'ui_action' },
-      controller,
-      undefined,
-      'scope-consent-ui',
-      undefined,
-      undefined,
-      runtime as never,
-    )
+    const confirmed = consentStore.confirmPendingRequest(requestId, 'ui_action')
+    assert.ok(confirmed)
+    const { makeNoteCollectProjectionSink } = await import('../main/modules/claude-bridge/browser-collection-projection-sink')
+    await makeNoteCollectProjectionSink(runtime as never).resolveCollectionConsent?.({
+      scopeId: 'scope-consent-ui',
+      sourceTaskId: 'browser-task-visible-large',
+      requestId,
+    })
 
     const cleared = records.get('browser-task-visible-large')
     assert.equal(cleared?.interactionState, 'suspended')
@@ -2321,56 +2328,11 @@ describe('browser_collect_notes (background sub-agent dispatch)', () => {
     assert.equal(cleared?.progress?.browserCollectionConsent, null)
   })
 
-  it('rejects high-control url_batch without downgrade consent', async () => {
-    let dispatched = false
-    const controller = createControllerMock({
-      getTask: async () => ({
-        taskId: 'browser-task-visible-xhs',
-        kind: 'visible_collect',
-        status: 'completed',
-        progress: { total: 1, completed: 0, failed: 0, currentLabel: null },
-        result: {
-          discoveryStatus: 'complete',
-          noteCandidates: [{ url: 'https://www.xiaohongshu.com/explore/abc', title: 'XHS Note', sourceId: 'abc' }],
-        },
-      }) as never,
-      startNoteCollection: async () => {
-        dispatched = true
-        return {} as never
-      },
-    })
-
-    const result = await executeBrowserTool(
-      'browser_collect_notes',
-      {
-        target_profile_url: 'https://www.xiaohongshu.com/user/profile/abc',
-        source_task_id: 'browser-task-visible-xhs',
-        strategy: 'url_batch',
-      },
-      controller,
-      undefined,
-      'scope-xhs',
-    )
-
-    const parsed = parseTool(result) as {
-      errorCode?: string
-      strategy?: string
-      pendingConsentRequest?: { requestId?: string; consentKind?: string; sourceTaskId?: string; targetHost?: string }
-    }
-    assert.equal(parsed.errorCode, 'high_control_url_batch_denied')
-    assert.equal(parsed.strategy, 'url_batch')
-    assert.match(parsed.pendingConsentRequest?.requestId || '', /^browser-consent-/)
-    assert.equal(parsed.pendingConsentRequest?.consentKind, 'high_control_url_batch_downgrade')
-    assert.equal(parsed.pendingConsentRequest?.sourceTaskId, 'browser-task-visible-xhs')
-    assert.equal(parsed.pendingConsentRequest?.targetHost, 'www.xiaohongshu.com')
-    assert.equal(dispatched, false)
-  })
-
-  it('allows high-control url_batch after confirming downgrade consent', async () => {
+  it('runs an explicitly requested high-control url_batch without an extra consent gate', async () => {
     const started: Array<Record<string, unknown>> = []
     const controller = createControllerMock({
       getTask: async () => ({
-        taskId: 'browser-task-visible-xhs-confirm',
+        taskId: 'browser-task-visible-xhs',
         kind: 'visible_collect',
         status: 'completed',
         progress: { total: 1, completed: 0, failed: 0, currentLabel: null },
@@ -2385,44 +2347,19 @@ describe('browser_collect_notes (background sub-agent dispatch)', () => {
       },
     })
 
-    const first = await executeBrowserTool(
-      'browser_collect_notes',
-      {
+    const result = await executeBrowserTool(
+      'browser_collect',
+      { mode: 'notes',
         target_profile_url: 'https://www.xiaohongshu.com/user/profile/abc',
-        source_task_id: 'browser-task-visible-xhs-confirm',
+        source_task_id: 'browser-task-visible-xhs',
         strategy: 'url_batch',
       },
       controller,
       undefined,
-      'scope-xhs-confirm',
-    )
-    const pending = (parseTool(first) as { pendingConsentRequest?: { requestId?: string } }).pendingConsentRequest
-    assert.match(pending?.requestId || '', /^browser-consent-/)
-
-    await executeBrowserTool(
-      'browser_confirm_collection_consent',
-      {
-        request_id: pending?.requestId,
-        confirmed_via: 'ask_user_questions',
-      },
-      controller,
-      undefined,
-      'scope-xhs-confirm',
+      'scope-xhs',
     )
 
-    const second = await executeBrowserTool(
-      'browser_collect_notes',
-      {
-        target_profile_url: 'https://www.xiaohongshu.com/user/profile/abc',
-        source_task_id: 'browser-task-visible-xhs-confirm',
-        strategy: 'url_batch',
-      },
-      controller,
-      undefined,
-      'scope-xhs-confirm',
-    )
-
-    assert.equal((parseTool(second) as { taskId?: string }).taskId, 'task-xhs-url-batch')
+    assert.equal((parseTool(result) as { taskId?: string }).taskId, 'task-xhs-url-batch')
     assert.equal(started.length, 1)
     assert.equal((started[0] as { strategy?: string }).strategy, 'url_batch')
   })
@@ -2447,8 +2384,8 @@ describe('browser_collect_notes (background sub-agent dispatch)', () => {
     } as Partial<BrowserController>)
 
     const result = await executeBrowserTool(
-      'browser_collect_notes',
-      {
+      'browser_collect',
+      { mode: 'notes',
         target_profile_url: 'https://www.xiaohongshu.com/user/profile/abc',
         source_task_id: 'browser-task-visible-xhs',
         strategy: 'card_loop',
@@ -2512,7 +2449,7 @@ describe('high-control browser tools (agent tab routing)', () => {
       },
     } as Partial<BrowserController>)
 
-    await executeBrowserTool('browser_capture_viewport', { tab_id: 'tab-4' }, controller)
+    await executeBrowserTool('browser_screenshot', { tab_id: 'tab-4' }, controller)
 
     assert.deepEqual(navigations, [{ tabId: 'agent-tab', url: profileUrl }])
     assert.equal(screenshotTabId, 'agent-tab')
@@ -2551,7 +2488,7 @@ describe('high-control browser tools (agent tab routing)', () => {
     } as Partial<BrowserController>)
 
     await executeBrowserTool(
-      'browser_click_text',
+      'browser_click',
       {
         text: '笔记一',
         href_contains: 'source-1',
@@ -2591,7 +2528,7 @@ describe('high-control browser tools (agent tab routing)', () => {
       },
     } as Partial<BrowserController>)
 
-    await executeBrowserTool('browser_extract_structured', { url: profileUrl, template: 'card_list' }, controller)
+    await executeBrowserTool('browser_collect', { url: profileUrl, template: 'card_list' }, controller)
 
     assert.deepEqual(navigations, [{ tabId: 'agent-tab', url: profileUrl }])
     assert.equal(extractedTabId, 'agent-tab')
@@ -2599,7 +2536,7 @@ describe('high-control browser tools (agent tab routing)', () => {
   })
 })
 
-describe('browser_visible_collect (agent pane dispatch)', () => {
+describe('browser_collect (agent pane dispatch)', () => {
   it('dispatches visible collection through the agent-tab entrypoint with output dir', async () => {
     const started: Array<{ payload: Record<string, unknown>; scopeId?: string }> = []
     const controller = createControllerMock({
@@ -2612,8 +2549,8 @@ describe('browser_visible_collect (agent pane dispatch)', () => {
     } as Partial<BrowserController>)
 
     const result = await executeBrowserTool(
-      'browser_visible_collect',
-      {
+      'browser_collect',
+      { mode: 'visible',
         url: 'https://www.xiaohongshu.com/user/profile/abc',
         template: 'article_list',
         output_root_dir: '/tmp/ao-i',
@@ -2643,7 +2580,7 @@ describe('browser_visible_collect (agent pane dispatch)', () => {
   })
 })
 
-describe('browser_download_collected_media', () => {
+describe('browser_download', () => {
   it('downloads media from a completed image_gallery source task with the source page as Referer', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'ready-collected-media-'))
     const calls: Array<{ url: string; sourcePageUrl?: string | null; suggestedName?: string | null }> = []
@@ -2661,7 +2598,7 @@ describe('browser_download_collected_media', () => {
             mediaCandidates: ['https://sns-img.xhscdn.com/a.webp', 'https://sns-img.xhscdn.com/b.webp'],
           },
         }) as never,
-        getTaskPayload: () => ({ scopeId: 'scope-media', template: 'image_gallery' }),
+        getTaskPayload: () => ({ scopeId: 'scope-media', template: 'image_gallery', outputRootDir: dir }),
         downloadUrlToDirectory: async (payload: { url: string; sourcePageUrl?: string | null; suggestedName?: string | null }) => {
           calls.push(payload)
           return { success: true, savePath: join(dir, `${payload.suggestedName}.webp`), filename: `${payload.suggestedName}.webp` }
@@ -2669,8 +2606,8 @@ describe('browser_download_collected_media', () => {
       })
 
       const out = await executeBrowserTool(
-        'browser_download_collected_media',
-        { source_task_id: 'browser-task-gallery-1', directory: dir },
+        'browser_download',
+      { mode: 'collected', source_task_id: 'browser-task-gallery-1', directory: dir },
         controller,
         undefined,
         'scope-media',
@@ -2679,7 +2616,7 @@ describe('browser_download_collected_media', () => {
         ? parseTool(out)
         : out.data || parseTool(out.text)) as { ok?: boolean; success?: number; mediaCandidateCount?: number }
 
-      assert.equal(parsed.ok, true)
+      assert.equal(parsed.ok, true, JSON.stringify(parsed))
       assert.equal(parsed.success, 2)
       assert.equal(parsed.mediaCandidateCount, 2)
       assert.deepEqual(calls.map((call) => call.url), ['https://sns-img.xhscdn.com/a.webp', 'https://sns-img.xhscdn.com/b.webp'])
@@ -2701,17 +2638,20 @@ describe('browser_download_collected_media', () => {
           ? { template: 'image_gallery', discoveryStatus: 'complete', mediaCandidates: [] }
           : { template: 'card_list', discoveryStatus: 'complete', noteCandidates: [{ url: 'https://example.com/1' }] },
       }) as never,
-      getTaskPayload: (taskId: string) => ({ template: taskId === 'browser-task-empty' ? 'image_gallery' : 'card_list' }),
+      getTaskPayload: (taskId: string) => ({
+        template: taskId === 'browser-task-empty' ? 'image_gallery' : 'card_list',
+        outputRootDir: '/tmp/out',
+      }),
     })
 
     const wrongKind = parseTool(await executeBrowserTool(
-      'browser_download_collected_media',
-      { source_task_id: 'browser-task-not-gallery', directory: '/tmp/out' },
+      'browser_download',
+      { mode: 'collected', source_task_id: 'browser-task-not-gallery', directory: '/tmp/out' },
       controller,
     )) as { errorCode?: string }
     const empty = parseTool(await executeBrowserTool(
-      'browser_download_collected_media',
-      { source_task_id: 'browser-task-empty', directory: '/tmp/out' },
+      'browser_download',
+      { mode: 'collected', source_task_id: 'browser-task-empty', directory: '/tmp/out' },
       controller,
     )) as { errorCode?: string }
 
@@ -2721,7 +2661,7 @@ describe('browser_download_collected_media', () => {
 })
 
 describe('browser task id guardrails', () => {
-  it('rejects chat and skill task ids for browser_get_task / browser_resume_task / browser_cancel_task with an actionable status', async () => {
+  it('rejects chat and skill task ids for browser_task / browser_task / browser_task with an actionable status', async () => {
     let resumeCalls = 0
     const controller = createControllerMock({
       getTask: async () => null,
@@ -2731,10 +2671,10 @@ describe('browser task id guardrails', () => {
         return null
       },
     })
-    const getResult = await executeBrowserTool('browser_get_task', { task_id: 'task-chat-1' }, controller)
-    const cancelResult = await executeBrowserTool('browser_cancel_task', { task_id: 'task-chat-1' }, controller)
-    const resumeChatResult = await executeBrowserTool('browser_resume_task', { task_id: 'task-0db610cf-c6f1-4f8e-ae71-d881959d529b' }, controller)
-    const resumeSkillResult = await executeBrowserTool('browser_resume_task', { task_id: 'skill-child:vez51e5su' }, controller)
+    const getResult = await executeBrowserTool('browser_task', { task_id: 'task-chat-1' }, controller)
+    const cancelResult = await executeBrowserTool('browser_task', { action: 'cancel', task_id: 'task-chat-1' }, controller)
+    const resumeChatResult = await executeBrowserTool('browser_task', { action: 'resume', task_id: 'task-0db610cf-c6f1-4f8e-ae71-d881959d529b' }, controller)
+    const resumeSkillResult = await executeBrowserTool('browser_task', { action: 'resume', task_id: 'skill-child:vez51e5su' }, controller)
 
     assert.equal((parseTool(getResult) as { status: string }).status, 'wrong_id_type')
     assert.equal((parseTool(cancelResult) as { status: string }).status, 'wrong_id_type')

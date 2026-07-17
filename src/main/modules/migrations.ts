@@ -3618,6 +3618,30 @@ const migrations: Migration[] = [
         db.prepare('UPDATE agents SET persona_ref = ? WHERE id = ?').run(oldAgentId, oldAgentId)
       }
     },
+  },
+  {
+    name: '081_browser_power_preflight_audit',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS browser_power_preflight_audit (
+          id TEXT PRIMARY KEY,
+          tool_name TEXT NOT NULL,
+          grant_id TEXT NOT NULL,
+          confirmation_source TEXT NOT NULL,
+          scope_id TEXT,
+          tab_id TEXT,
+          document_key_hash TEXT NOT NULL,
+          url TEXT,
+          object_ref TEXT,
+          effects_json TEXT NOT NULL,
+          purpose TEXT,
+          input_hash TEXT NOT NULL,
+          created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_browser_power_preflight_scope
+          ON browser_power_preflight_audit(scope_id, created_at DESC);
+      `)
+    },
   }
 ]
 

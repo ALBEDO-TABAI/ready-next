@@ -158,7 +158,7 @@ describe('auto narration setting and browser task payload', () => {
     }
   })
 
-  it('browser_get_task returns normalized failedItems and suggestedNextAction', async () => {
+  it('browser_task returns normalized failedItems and suggestedNextAction', async () => {
     const controller = {
       getTask: async () => ({
         taskId: 'browser-task-failure-payload-s2-4',
@@ -175,7 +175,7 @@ describe('auto narration setting and browser task payload', () => {
     } as Partial<BrowserController> as BrowserController
 
     const raw = await executeBrowserTool(
-      'browser_get_task',
+      'browser_task',
       { task_id: 'browser-task-failure-payload-s2-4' },
       controller,
     )

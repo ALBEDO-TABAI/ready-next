@@ -1,20 +1,19 @@
 /**
  * P3 Phase B4（2026-07-04，纯移动拆分）— browser-tools Power 工具组。
  *
- * 从 browser-tools.ts 逐字搬出七个 case 的实现体（browser_execute_js /
- * browser_power_eval / browser_power_cdp / browser_power_network_trace /
- * browser_power_resource_forensics / browser_media_download_advanced /
- * browser_power_script_run，经 executeBrowserPowerTool 统一入口分发）与
- * Power 独占 helper（clampNumber / detectNetworkTransactionConfirmation /
- * summarizeCodeForAudit / truncateJsonValue / redactHeaders /
+ * 从 browser-tools.ts 逐字搬出七个 case 的实现体（browser_eval /
+ * browser_eval / browser_cdp / browser_network /
+ * browser_resources / browser_download /
+ * internal_browser_action_composer，经 executeBrowserPowerTool 统一入口分发）与
+ * Power 独占 helper（clampNumber / summarizeCodeForAudit / truncateJsonValue /
  * browserPowerDeniedOutput / resolvePowerDecisionForTool，后三者供
  * browser-tools 的 legacy power 前置路径回接导入）。
- * attachBrowserActionSessionOutput（sitePermissionNotices 排空合同）与
- * runWorkflowStep（与 browser_run_workflow 共享的守卫执行层）留在
+ * attachBrowserActionSessionOutput（sitePermissionNotices 排空合同）留在
  * browser-tools，经 BrowserPowerToolContext 注入回接，防循环依赖。
  * 行为零变更。
  */
 import type { BrowserController } from '../browser-engine/ipc-handler'
+import { createHash, randomUUID } from 'node:crypto'
 import { classifyBrowserPowerFailure, browserToolOriginFromUrl } from './browser-power-failure'
 import { verifyDownloadedMedia } from '../browser-engine/media-verification'
 import { inspectBrowserResources } from '../browser-engine/resource-sniffer'
@@ -22,31 +21,33 @@ import {
   browserPowerGrantRequiredPayload,
   inferBrowserPowerEffects,
   recordBrowserPowerAuditEvent,
+  registerBrowserPowerGrant,
   resolveBrowserPowerAuthorization,
   type BrowserPowerDecision,
 } from '../browser-engine/browser-power-policy'
-import {
-  createBrowserTransactionConfirmation,
-  type BrowserTransactionConfirmation,
-} from '../browser-engine/browser-action-session'
+import type { BrowserTransactionConfirmation } from '../browser-engine/browser-action-session'
 import {
   createToolExecutionOutput,
   type ToolExecutionOutput,
 } from '../agent-control/tools-runtime/tool-result-types'
-import type { BrowserPowerEffect } from '../../../shared/browser-power'
+import {
+  browserEffectsIncludeDestructive,
+  type BrowserPowerEffect,
+  type BrowserPowerGrant,
+} from '../../../shared/browser-power'
 import {
   createBrowserStructuredOutput as browserStructuredOutput,
   stringifyBrowserJsonOrFailure,
 } from './browser-failure-output'
-import { downloadUrlsToDirectory, normalizeResourceKinds } from './browser-media-download'
-import { sleepWithAbort } from './browser-input-actions'
+import { downloadUrlsToDirectory, normalizeResourceKinds, resolveAuthorizedBrowserDownloadDirectory } from './browser-media-download'
 import { createRotatingLogger } from '../../utils/rotating-logger'
 import {
   activeBrowserToolUrl,
   detectBrowserPageTransactionConfirmation,
-  normalizeTransactionText,
   truncate,
 } from './browser-tool-shared'
+import { browserSnapshotService } from '../browser-engine/browser-snapshot-service'
+import type { BrowserTaskEnvelope } from '../../../shared/browser-task-envelope'
 
 const logger = createRotatingLogger('ready-tools.log')
 function log(msg: string) {
@@ -57,41 +58,6 @@ function clampNumber(value: unknown, fallback: number, min: number, max: number)
   const next = Number(value)
   if (!Number.isFinite(next)) return fallback
   return Math.max(min, Math.min(max, Math.floor(next)))
-}
-
-function detectNetworkTransactionConfirmation(
-  events: ReadonlyArray<Record<string, unknown>>,
-  bodies: ReadonlyArray<Record<string, unknown>>,
-): BrowserTransactionConfirmation | null {
-  const bodyByRequestId = new Map<string, Record<string, unknown>>()
-  for (const body of bodies) {
-    const requestId = typeof body.requestId === 'string' ? body.requestId : ''
-    if (requestId) bodyByRequestId.set(requestId, body)
-  }
-  for (const event of events) {
-    const method = String(event.method || event.requestMethod || '').toUpperCase()
-    if (!['POST', 'PUT', 'PATCH'].includes(method)) continue
-    const status = Number(event.status || event.statusCode || 0)
-    if (!Number.isFinite(status) || status < 200 || status >= 300) continue
-    const url = String(event.url || '')
-    if (/(?:autosave|auto-save|draft|preflight|log|track|metric|analytics|beacon|heartbeat|ping)/i.test(url)) continue
-    const requestId = typeof event.requestId === 'string' ? event.requestId : ''
-    const body = bodyByRequestId.get(requestId)
-    const bodyText = normalizeTransactionText(body?.body)
-    if (!bodyText || /(?:draft|autosave|草稿|自动保存)/i.test(bodyText)) continue
-    const successSemantic = /(?:"success"\s*:\s*true|"code"\s*:\s*0\b|"ok"\s*:\s*true|发布成功|提交成功|已发布)/i.test(bodyText)
-    const idMatch = bodyText.match(/(?:"(?:note|post|article|item)?_?id"\s*:\s*"([A-Za-z0-9_-]{6,})"|"(?:noteId|postId|articleId)"\s*:\s*"([A-Za-z0-9_-]{6,})")/i)
-    if (!successSemantic && !idMatch) continue
-    return createBrowserTransactionConfirmation({
-      source: 'network',
-      signal: successSemantic ? 'success_response' : 'resource_id_response',
-      url,
-      resourceId: idMatch?.[1] || idMatch?.[2] || null,
-      statusCode: status,
-      text: bodyText.slice(0, 1000),
-    })
-  }
-  return null
 }
 
 export function summarizeCodeForAudit(code: string): string {
@@ -115,17 +81,64 @@ function truncateJsonValue(value: unknown, maxBytes: number): { value: unknown; 
   }
 }
 
-function redactHeaders(headers: Record<string, string> | undefined): Record<string, string> | undefined {
-  if (!headers) return undefined
-  const out: Record<string, string> = {}
-  for (const [key, value] of Object.entries(headers)) {
-    if (/cookie|authorization|token|secret|set-cookie/i.test(key)) {
-      out[key] = '[redacted]'
-    } else {
-      out[key] = value
+function powerInputHash(value: unknown): string {
+  return createHash('sha256').update(JSON.stringify(value)).digest('hex')
+}
+
+async function persistDestructivePowerPreflight(params: {
+  controller: BrowserController
+  decision: BrowserPowerDecision
+  toolName: string
+  sessionId?: string
+  tabId: string | null
+  url: string | null
+  purpose: string
+  objectRef: string | null
+  input: unknown
+}): Promise<{ ok: true; auditId: string | null } | { ok: false; output: ToolExecutionOutput }> {
+  if (params.decision.destructiveEffects.length === 0) return { ok: true, auditId: null }
+  if (!params.decision.grantId || !params.decision.confirmationSource) {
+    return {
+      ok: false,
+      output: browserStructuredOutput({
+        ok: false,
+        errorKind: 'power_preflight_confirmation_missing',
+        message: '高风险浏览器动作缺少绑定本轮对象的真实用户确认。',
+      }),
     }
   }
-  return out
+  try {
+    const identity = await browserSnapshotService.documentIdentity(params.controller, params.tabId)
+    if (!identity.key) throw new Error('browser_document_identity_unavailable')
+    const auditId = `browser-power-preflight-${randomUUID()}`
+    params.controller.recordBrowserPowerPreflightAudit({
+      id: auditId,
+      tool_name: params.toolName,
+      grant_id: params.decision.grantId,
+      confirmation_source: params.decision.confirmationSource,
+      scope_id: params.sessionId || null,
+      tab_id: params.tabId,
+      document_key_hash: powerInputHash(identity.key),
+      url: params.url,
+      object_ref: params.objectRef,
+      effects_json: JSON.stringify(params.decision.effects),
+      purpose: params.purpose,
+      input_hash: powerInputHash(params.input),
+      created_at: new Date().toISOString(),
+    })
+    return { ok: true, auditId }
+  } catch (error) {
+    log(`power preflight audit failed tool=${params.toolName}: ${error instanceof Error ? error.message : String(error)}`)
+    return {
+      ok: false,
+      output: browserStructuredOutput({
+        ok: false,
+        errorKind: 'power_preflight_audit_failed',
+        message: '高风险浏览器动作无法在执行前写入持久记录，已拒绝执行。',
+        cause: error instanceof Error ? error.message : String(error),
+      }),
+    }
+  }
 }
 
 export function browserPowerDeniedOutput(decision: BrowserPowerDecision, extra?: Record<string, unknown>): ToolExecutionOutput {
@@ -142,6 +155,9 @@ export function resolvePowerDecisionForTool(params: {
   url?: string | null
   destination?: string | null
   fallbackEffects?: BrowserPowerEffect[]
+  taskEnvelope?: BrowserTaskEnvelope | null
+  documentKeyHash?: string | null
+  objectRef?: string | null
 }): BrowserPowerDecision {
   const tabId = params.tabId ?? (typeof params.args.tab_id === 'string' ? params.args.tab_id : null)
   const url = params.url ?? activeBrowserToolUrl(params.controller, tabId)
@@ -154,8 +170,12 @@ export function resolvePowerDecisionForTool(params: {
       fallback: params.fallbackEffects,
     }),
     grantId: typeof params.args.grant_id === 'string' ? params.args.grant_id : null,
-    scopeId: params.sessionId || null,
+    scopeId: params.taskEnvelope?.scopeId || params.sessionId || null,
+    runId: params.taskEnvelope?.runId || null,
+    taskId: params.taskEnvelope?.taskId || null,
     tabId,
+    documentKeyHash: params.documentKeyHash || null,
+    objectRef: params.objectRef || null,
     url,
     destination: params.destination || null,
     currentUserText: params.currentUserText || null,
@@ -163,15 +183,24 @@ export function resolvePowerDecisionForTool(params: {
 }
 
 /**
- * B4 注入面：attachBrowserActionSessionOutput 与 runWorkflowStep 的实现体
- * 留在 browser-tools.ts（前者是 sitePermissionNotices 排空合同红线，后者
- * 与其余 workflow case 深度共享），以函数引用注入，本模块不反向 import。
+ * B4 注入面：attachBrowserActionSessionOutput 的实现体留在
+ * browser-tools.ts，以函数引用注入，本模块不反向 import。
  */
 export interface BrowserPowerToolContext {
   controller: BrowserController
   abortSignal?: AbortSignal
   sessionId?: string
   currentUserText?: string
+  trustedRoots?: string[]
+  taskEnvelope?: BrowserTaskEnvelope | null
+  requestPowerConfirmation?: (details: {
+    toolName: string
+    effects: BrowserPowerEffect[]
+    purpose: string
+    origin: string | null
+    objectRef: string
+    inputHash: string
+  }) => Promise<boolean>
   attachBrowserActionSessionOutput: (
     result: string | ToolExecutionOutput,
     params: {
@@ -186,12 +215,118 @@ export interface BrowserPowerToolContext {
       nextSuggestedAction?: string | null
     },
   ) => string | ToolExecutionOutput
-  runWorkflowStep: (
-    controller: BrowserController,
-    step: Record<string, unknown>,
-    fallbackTabId: string | null,
-    signal?: AbortSignal,
-  ) => Promise<string>
+}
+
+function currentInstructionAuthorizesPowerEffects(
+  instruction: string,
+  effects: readonly BrowserPowerEffect[],
+): boolean {
+  const text = String(instruction || '')
+  return effects.every((effect) => {
+    switch (effect) {
+      case 'payment':
+        return /(?:确认|立即|执行|帮我).{0,10}(?:支付|付款|下单|购买|转账)|(?:pay|place order|purchase|transfer).{0,10}(?:now|confirm|execute)/i.test(text)
+      case 'remote_delete':
+        return /(?:删除|撤回|销毁).{0,20}(?:帖子|消息|记录|远程|云端|内容)/i.test(text)
+      case 'account_delete':
+        return /(?:注销|删除|关闭).{0,12}(?:账号|账户)/i.test(text)
+      case 'credential_change':
+        return /(?:修改|更换|重置|更新).{0,12}(?:密码|凭据|登录信息|2fa|双重验证)/i.test(text)
+      case 'secret_export':
+        return /(?:导出|复制|读取并保存).{0,16}(?:cookie|token|令牌|密钥|secret|凭据)/i.test(text)
+      case 'access_control_circumvention':
+        return /(?:确认|明确).{0,10}(?:运行|执行|调用).{0,18}(?:动态脚本|混淆脚本|未知\s*cdp|未列出的\s*cdp)/i.test(text)
+      default:
+        return true
+    }
+  })
+}
+
+async function resolvePowerDecisionWithTaskAuthority(params: {
+  toolName: string
+  args: Record<string, unknown>
+  controller: BrowserController
+  sessionId?: string
+  currentUserText?: string
+  taskEnvelope?: BrowserTaskEnvelope | null
+  tabId: string | null
+  purpose: string
+  objectRef: string
+  input: unknown
+  destination?: string | null
+  fallbackEffects?: BrowserPowerEffect[]
+  requestPowerConfirmation?: BrowserPowerToolContext['requestPowerConfirmation']
+}): Promise<BrowserPowerDecision> {
+  const effects = inferBrowserPowerEffects({
+    toolName: params.toolName,
+    args: params.args,
+    fallback: params.fallbackEffects,
+  })
+  if (!browserEffectsIncludeDestructive(effects)) return resolvePowerDecisionForTool(params)
+  const envelope = params.taskEnvelope
+  const publicToolName = params.toolName === 'eval' ? 'browser_eval' : 'browser_cdp'
+  const hasSuppliedGrant = typeof params.args.grant_id === 'string' && params.args.grant_id.trim().length > 0
+  const canMintBoundGrant = Boolean(
+    envelope
+    && envelope.allowedToolNames.includes(publicToolName)
+    && envelope.tabId === params.tabId,
+  )
+  if (!hasSuppliedGrant && !canMintBoundGrant) return resolvePowerDecisionForTool(params)
+  const identity = await browserSnapshotService.documentIdentity(params.controller, params.tabId)
+  const documentKeyHash = identity.key ? powerInputHash(identity.key) : null
+  const base = resolvePowerDecisionForTool({ ...params, documentKeyHash })
+  if (base.action !== 'grant_required') return base
+  if (
+    !envelope
+    || !documentKeyHash
+    || !envelope.allowedToolNames.includes(publicToolName)
+    || envelope.tabId !== params.tabId
+  ) return base
+
+  const currentUrl = activeBrowserToolUrl(params.controller, params.tabId)
+  const explicit = currentInstructionAuthorizesPowerEffects(envelope.primaryInstruction, base.destructiveEffects)
+  const confirmed = explicit || await params.requestPowerConfirmation?.({
+    toolName: publicToolName,
+    effects: base.effects,
+    purpose: params.purpose,
+    origin: (() => {
+      try { return currentUrl ? new URL(currentUrl).origin : null } catch {
+        // silent-catch: a malformed current URL cannot authorize an origin-bound grant.
+        return null
+      }
+    })(),
+    objectRef: params.objectRef,
+    inputHash: powerInputHash(params.input),
+  }) === true
+  if (!confirmed) return base
+
+  const grant: BrowserPowerGrant = registerBrowserPowerGrant({
+    source: explicit ? 'current_user_verbatim' : 'confirmation_card',
+    scopeId: envelope.scopeId,
+    runId: envelope.runId,
+    taskId: envelope.taskId,
+    tabId: params.tabId,
+    documentKeyHash,
+    objectRef: params.objectRef,
+    hostname: (() => {
+      try { return currentUrl ? new URL(currentUrl).hostname : null } catch {
+        // silent-catch: a malformed current URL fails closed to an unbound hostname.
+        return null
+      }
+    })(),
+    destination: params.destination || null,
+    effects: base.effects,
+    expiresAt: Date.now() + 10 * 60_000,
+    remainingCalls: 1,
+    reason: explicit
+      ? 'current user explicitly requested this exact destructive effect'
+      : 'one-shot browser power confirmation card',
+  })
+  return resolvePowerDecisionForTool({
+    ...params,
+    args: { ...params.args, grant_id: grant.id },
+    documentKeyHash,
+  })
 }
 
 export async function executeBrowserPowerTool(
@@ -199,55 +334,87 @@ export async function executeBrowserPowerTool(
   args: Record<string, unknown>,
   ctx: BrowserPowerToolContext,
 ): Promise<string | ToolExecutionOutput> {
-  const { controller, abortSignal, sessionId, currentUserText, attachBrowserActionSessionOutput, runWorkflowStep } = ctx
+  const {
+    controller,
+    abortSignal,
+    sessionId,
+    currentUserText,
+    trustedRoots,
+    taskEnvelope,
+    requestPowerConfirmation,
+    attachBrowserActionSessionOutput,
+  } = ctx
   switch (toolName) {
-      case 'browser_execute_js': {
-        const code = typeof args.code === 'string' ? args.code : ''
-        if (!code) return 'Error: code is required'
-        const tabId = (args.tab_id as string) || null
-        log(`Executing JS: ${code.slice(0, 100)}`)
-        const result = await controller.executeJS(tabId, code)
-        const resultStr = typeof result === 'string' ? result : JSON.stringify(result, null, 2)
-        return truncate(resultStr ?? 'undefined')
-      }
-
-      case 'browser_power_eval': {
+      case 'eval': {
         const code = String(args.code || '')
         if (!code.trim()) return 'Error: code is required'
         const purpose = String(args.purpose || '').trim()
         if (!purpose) return 'Error: purpose is required'
         const tabId = (args.tab_id as string) || null
         const frameId = String(args.frame_id || '').trim() || null
+        const world = args.world === 'main' ? 'main' : 'isolated'
         const maxResultBytes = clampNumber(args.max_result_bytes, 20_000, 1024, 200_000)
         const timeoutMs = clampNumber(args.timeout_ms, 5000, 250, 30_000)
-        const decision = resolvePowerDecisionForTool({
+        const objectRef = powerInputHash({ code, frameId, world })
+        const decision = await resolvePowerDecisionWithTaskAuthority({
           toolName,
           args,
           controller,
           currentUserText,
           sessionId,
           tabId,
+          taskEnvelope,
+          purpose,
+          objectRef,
+          input: { code, frameId, world },
+          requestPowerConfirmation,
           fallbackEffects: ['observe'],
         })
         if (decision.action !== 'allow') {
           return browserPowerDeniedOutput(decision, { tool: toolName, purpose })
         }
         const url = activeBrowserToolUrl(controller, tabId)
+        const preflight = await persistDestructivePowerPreflight({
+          controller,
+          decision,
+          toolName,
+          sessionId,
+          tabId,
+          url,
+          purpose,
+          objectRef,
+          input: { code, frameId, world },
+        })
+        if (!preflight.ok) return preflight.output
         try {
           const run = (async () => {
-            if (!frameId) return controller.executeJS(tabId, code)
+            if (world === 'main') {
+              if (frameId && typeof controller.executeJSInFrame === 'function') {
+                return controller.executeJSInFrame(tabId, frameId, code, { timeoutMs, signal: abortSignal })
+              }
+              return controller.executeJS(tabId, code, { timeoutMs, signal: abortSignal })
+            }
             const sendCdpCommand = (controller as {
-              sendCdpCommand?: (tabId: string | null, method: string, params?: Record<string, unknown>) => Promise<unknown>
+              sendCdpCommand?: (tabId: string | null, method: string, params?: Record<string, unknown>, options?: { timeoutMs?: number; signal?: AbortSignal }) => Promise<unknown>
             }).sendCdpCommand
             if (typeof sendCdpCommand !== 'function') {
               throw new Error('browser_power_frame_eval_unavailable')
             }
-            const world = await sendCdpCommand.call(controller, tabId, 'Page.createIsolatedWorld', {
-              frameId,
+            let targetFrameId = frameId
+            if (!targetFrameId) {
+              const tree = await sendCdpCommand.call(controller, tabId, 'Page.getFrameTree', undefined, {
+                timeoutMs,
+                signal: abortSignal,
+              }) as { frameTree?: { frame?: { id?: string } } }
+              targetFrameId = String(tree.frameTree?.frame?.id || '') || null
+            }
+            if (!targetFrameId) throw new Error('browser_eval_frame_context_unavailable')
+            const isolatedWorld = await sendCdpCommand.call(controller, tabId, 'Page.createIsolatedWorld', {
+              frameId: targetFrameId,
               worldName: 'ready_power_eval',
               grantUniveralAccess: true,
-            }) as Record<string, unknown>
-            const contextId = Number(world.executionContextId)
+            }, { timeoutMs, signal: abortSignal }) as Record<string, unknown>
+            const contextId = Number(isolatedWorld.executionContextId)
             if (!Number.isFinite(contextId)) {
               throw new Error('browser_power_frame_context_unavailable')
             }
@@ -256,7 +423,7 @@ export async function executeBrowserPowerTool(
               contextId,
               awaitPromise: true,
               returnByValue: true,
-            }) as Record<string, unknown>
+            }, { timeoutMs, signal: abortSignal }) as Record<string, unknown>
             const resultObject = evaluated.result && typeof evaluated.result === 'object'
               ? evaluated.result as Record<string, unknown>
               : null
@@ -265,12 +432,7 @@ export async function executeBrowserPowerTool(
             }
             return resultObject && 'value' in resultObject ? resultObject.value : resultObject
           })()
-          const result = await Promise.race([
-            run,
-            sleepWithAbort(timeoutMs, abortSignal).then(() => {
-              throw new Error(`browser_power_eval timed out after ${timeoutMs}ms`)
-            }),
-          ])
+          const result = await run
           const limited = truncateJsonValue(result, maxResultBytes)
           const audit = recordBrowserPowerAuditEvent({
             toolName,
@@ -280,7 +442,7 @@ export async function executeBrowserPowerTool(
             effects: decision.effects,
             purpose,
             codeSummary: summarizeCodeForAudit(code),
-            paramsSummary: { timeoutMs, maxResultBytes, frameId },
+            paramsSummary: { timeoutMs, maxResultBytes, frameId, world },
             resultSummary: { bytes: limited.bytes, truncated: limited.truncated },
           })
           const confirmation = await detectBrowserPageTransactionConfirmation(controller, tabId)
@@ -291,7 +453,7 @@ export async function executeBrowserPowerTool(
           // 语义不变），引导回原生 setter 的 fill/type 工具。
           const formWritePattern = /\.(value|innerText|innerHTML|textContent)\s*=(?!=)/
           const formWriteAdvisory = formWritePattern.test(code)
-            ? '检测到对 value/innerText/innerHTML 的直接赋值：React/ProseMirror 受控组件会吞掉这种写入（DOM 显示已填、框架状态仍为空，表单校验静默失败，页面会进入人点也无效的坏状态）。请改用 browser_act_on_target 的 fill 或 browser_type_smart / browser_type_at（原生 setter + 真实输入事件）。'
+            ? '检测到对 value/innerText/innerHTML 的直接赋值：React/ProseMirror 受控组件会吞掉这种写入（DOM 显示已填、框架状态仍为空，表单校验静默失败，页面会进入人点也无效的坏状态）。请改用 browser_click/browser_type 的 fill 或 browser_type / browser_type（原生 setter + 真实输入事件）。'
             : undefined
           return attachBrowserActionSessionOutput(JSON.stringify({
             ok: true,
@@ -299,6 +461,7 @@ export async function executeBrowserPowerTool(
             powerMode: true,
             grantId: decision.grantId,
             auditId: audit.id,
+            preflightAuditId: preflight.auditId,
             effects: decision.effects,
             residualRisk: 'free_eval_scope_is_audit_only_for_side_effects',
             result: limited.value,
@@ -306,6 +469,7 @@ export async function executeBrowserPowerTool(
             resultBytes: limited.bytes,
             ...(formWriteAdvisory ? { formWriteAdvisory } : {}),
             frameId,
+            world,
           }, null, 2), {
             toolName,
             args,
@@ -318,6 +482,7 @@ export async function executeBrowserPowerTool(
             nextSuggestedAction: confirmation ? 'finish with transaction proof' : 'read map again',
           })
         } catch (error) {
+          if (error instanceof Error && error.name === 'AbortError') throw error
           const message = error instanceof Error ? error.message : String(error)
           // silent-catch: P1-A1 — differentiated recovery advice + full target identity on
           // every Power failure (tabId/origin were missing before; the hint
@@ -331,7 +496,7 @@ export async function executeBrowserPowerTool(
             effects: decision.effects,
             purpose,
             codeSummary: summarizeCodeForAudit(code),
-            paramsSummary: { timeoutMs, maxResultBytes, frameId },
+            paramsSummary: { timeoutMs, maxResultBytes, frameId, world },
             resultSummary: { failed: true, error: message.slice(0, 500) },
           })
           return attachBrowserActionSessionOutput(JSON.stringify({
@@ -340,8 +505,9 @@ export async function executeBrowserPowerTool(
             powerMode: true,
             grantId: decision.grantId,
             auditId: audit.id,
+            preflightAuditId: preflight.auditId,
             effects: decision.effects,
-            errorKind: 'browser_power_eval_failed',
+            errorKind: 'browser_eval_failed',
             failureClass: advice.failureClass,
             errorMessage: message,
             codeSummary: summarizeCodeForAudit(code),
@@ -363,7 +529,7 @@ export async function executeBrowserPowerTool(
         }
       }
 
-      case 'browser_power_cdp': {
+      case 'cdp': {
         const method = String(args.method || '').trim()
         if (!method) return 'Error: method is required'
         const purpose = String(args.purpose || '').trim()
@@ -371,33 +537,55 @@ export async function executeBrowserPowerTool(
         const tabId = (args.tab_id as string) || null
         const frameId = String(args.frame_id || '').trim() || null
         const params = args.params && typeof args.params === 'object' ? args.params as Record<string, unknown> : {}
-        const decision = resolvePowerDecisionForTool({
+        const objectRef = powerInputHash({ method, params, frameId })
+        const decision = await resolvePowerDecisionWithTaskAuthority({
           toolName,
           args,
           controller,
           currentUserText,
           sessionId,
           tabId,
+          taskEnvelope,
+          purpose,
+          objectRef,
+          input: { method, params, frameId },
+          requestPowerConfirmation,
         })
         if (decision.action !== 'allow') {
           return browserPowerDeniedOutput(decision, { tool: toolName, purpose, method })
         }
         const sendCdpCommand = (controller as {
-          sendCdpCommand?: (tabId: string | null, method: string, params?: Record<string, unknown>) => Promise<unknown>
+          sendCdpCommand?: (tabId: string | null, method: string, params?: Record<string, unknown>, options?: { timeoutMs?: number; signal?: AbortSignal }) => Promise<unknown>
         }).sendCdpCommand
         if (typeof sendCdpCommand !== 'function') {
           return browserStructuredOutput({
             ok: false,
-            errorKind: 'browser_power_cdp_unavailable',
+            errorKind: 'browser_cdp_unavailable',
             message: '当前 BrowserController 未暴露 CDP command 通道。',
             method,
           })
         }
+        const currentUrl = activeBrowserToolUrl(controller, tabId)
+        const preflight = await persistDestructivePowerPreflight({
+          controller,
+          decision,
+          toolName,
+          sessionId,
+          tabId,
+          url: currentUrl,
+          purpose,
+          objectRef,
+          input: { method, params, frameId },
+        })
+        if (!preflight.ok) return preflight.output
         // P1-A1 — a failing CDP command previously threw into the generic
-        // outer catch ("Error executing browser_power_cdp: …") and lost the
+        // outer catch ("Error executing browser_cdp: …") and lost the
         // target/session state the model needs to recover.
         try {
-          const result = await sendCdpCommand.call(controller, tabId, method, params)
+          const result = await sendCdpCommand.call(controller, tabId, method, params, {
+            timeoutMs: clampNumber(args.timeout_ms, 15_000, 250, 30_000),
+            signal: abortSignal,
+          })
           const limited = truncateJsonValue(result, 80_000)
           const audit = recordBrowserPowerAuditEvent({
             toolName,
@@ -415,6 +603,7 @@ export async function executeBrowserPowerTool(
             tool: toolName,
             grantId: decision.grantId,
             auditId: audit.id,
+            preflightAuditId: preflight.auditId,
             method,
             effects: decision.effects,
             result: limited.value,
@@ -432,6 +621,7 @@ export async function executeBrowserPowerTool(
             nextSuggestedAction: confirmation ? 'finish with transaction proof' : 'read map again',
           })
         } catch (error) {
+          if (error instanceof Error && error.name === 'AbortError') throw error
           // silent-catch: failure returns structured audit-backed error output with recovery advice
           const message = error instanceof Error ? error.message : String(error)
           const advice = classifyBrowserPowerFailure(message)
@@ -452,8 +642,9 @@ export async function executeBrowserPowerTool(
             powerMode: true,
             grantId: decision.grantId,
             auditId: audit.id,
+            preflightAuditId: preflight.auditId,
             effects: decision.effects,
-            errorKind: 'browser_power_cdp_failed',
+            errorKind: 'browser_cdp_failed',
             failureClass: advice.failureClass,
             errorMessage: message,
             method,
@@ -475,159 +666,7 @@ export async function executeBrowserPowerTool(
         }
       }
 
-      case 'browser_power_network_trace': {
-        let tabId = (args.tab_id as string) || null
-        const url = String(args.url || '').trim()
-        const durationMs = clampNumber(args.duration_ms, 3000, 250, 30_000)
-        const maxEvents = clampNumber(args.max_events, 120, 1, 500)
-        const includeBodies = args.include_response_bodies === true
-        const bodyMaxBytes = clampNumber(args.body_max_bytes, 4096, 256, 65_536)
-        const purpose = String(args.purpose || 'resource/network trace').trim()
-        const decision = resolvePowerDecisionForTool({
-          toolName,
-          args,
-          controller,
-          currentUserText,
-          sessionId,
-          tabId,
-          url: url || undefined,
-          fallbackEffects: url ? ['observe', 'navigate'] : ['observe'],
-        })
-        if (decision.action !== 'allow') {
-          return browserPowerDeniedOutput(decision, { tool: toolName, purpose })
-        }
-        const active = controller.getActiveTab?.()
-        tabId = tabId || active?.id || null
-        if (!tabId) return 'Error: no active tab for network trace'
-        if (typeof controller.startNetworkObserver !== 'function') {
-          return browserStructuredOutput({
-            ok: false,
-            errorKind: 'browser_power_trace_unavailable',
-            message: '当前 BrowserController 未暴露 network observer。',
-          })
-        }
-        const observer = await controller.startNetworkObserver(tabId, { maxEvents })
-        try {
-          if (url) {
-            const nav = await controller.navigate(tabId, url)
-            if (!nav.success) {
-              // P1-A1 — a navigate failure is structured, not a bare string.
-              const advice = classifyBrowserPowerFailure(nav.error || 'target_stale navigation failed')
-              const currentUrl = activeBrowserToolUrl(controller, tabId)
-              return attachBrowserActionSessionOutput(JSON.stringify({
-                ok: false,
-                tool: toolName,
-                powerMode: true,
-                grantId: decision.grantId,
-                errorKind: 'browser_power_trace_failed',
-                failureClass: advice.failureClass,
-                errorMessage: nav.error || 'failed to navigate target url',
-                tabId,
-                targetUrl: url,
-                currentUrl,
-                origin: browserToolOriginFromUrl(url || currentUrl),
-                nextSuggestedAction: advice.nextSuggestedAction,
-              }, null, 2), {
-                toolName,
-                args,
-                controller,
-                sessionId,
-                currentUserText,
-                tabId,
-                nextSuggestedAction: advice.nextSuggestedAction,
-              })
-            }
-          }
-          await sleepWithAbort(durationMs, abortSignal)
-          const events = observer.events().map((event) => ({
-            ...event,
-            responseHeaders: redactHeaders(event.responseHeaders),
-          }))
-          const bodies: Array<Record<string, unknown>> = []
-          if (includeBodies) {
-            for (const event of events.slice(0, 40)) {
-              if (!event.requestId || event.failed) continue
-              try {
-                const body = await observer.getResponseBody(event.requestId)
-                const limited = truncateJsonValue(body.body, bodyMaxBytes)
-                bodies.push({
-                  requestId: event.requestId,
-                  url: event.url,
-                  mimeType: event.mimeType,
-                  base64Encoded: body.base64Encoded,
-                  body: limited.value,
-                  truncated: limited.truncated,
-                  bytes: limited.bytes,
-                })
-              } catch {
-                // silent-catch: Some response bodies are unavailable after redirects/cors/cache; trace still succeeds.
-              }
-            }
-          }
-          const audit = recordBrowserPowerAuditEvent({
-            toolName,
-            grantId: decision.grantId,
-            tabId,
-            url: url || activeBrowserToolUrl(controller, tabId),
-            effects: decision.effects,
-            purpose,
-            paramsSummary: { durationMs, maxEvents, includeBodies },
-            resultSummary: { eventCount: events.length, bodyCount: bodies.length },
-          })
-          const confirmation = detectNetworkTransactionConfirmation(events, bodies)
-            || await detectBrowserPageTransactionConfirmation(controller, tabId)
-          return attachBrowserActionSessionOutput(JSON.stringify({
-            ok: true,
-            tool: toolName,
-            grantId: decision.grantId,
-            auditId: audit.id,
-            durationMs,
-            eventCount: events.length,
-            events,
-            bodies,
-            transactionConfirmed: confirmation || undefined,
-          }, null, 2), {
-            toolName,
-            args,
-            controller,
-            sessionId,
-            currentUserText,
-            tabId,
-            confirmation,
-            nextSuggestedAction: confirmation ? 'finish with transaction proof' : 'read map again',
-          })
-        } catch (error) {
-          // silent-catch: P1-A1 — observer / body-retrieval failures stay structured.
-          const message = error instanceof Error ? error.message : String(error)
-          const advice = classifyBrowserPowerFailure(message)
-          const currentUrl = url || activeBrowserToolUrl(controller, tabId)
-          return attachBrowserActionSessionOutput(JSON.stringify({
-            ok: false,
-            tool: toolName,
-            powerMode: true,
-            grantId: decision.grantId,
-            errorKind: 'browser_power_trace_failed',
-            failureClass: advice.failureClass,
-            errorMessage: message,
-            tabId,
-            currentUrl,
-            origin: browserToolOriginFromUrl(currentUrl),
-            nextSuggestedAction: advice.nextSuggestedAction,
-          }, null, 2), {
-            toolName,
-            args,
-            controller,
-            sessionId,
-            currentUserText,
-            tabId,
-            nextSuggestedAction: advice.nextSuggestedAction,
-          })
-        } finally {
-          await observer.stop().catch(() => undefined)
-        }
-      }
-
-      case 'browser_power_resource_forensics': {
+      case 'resources_forensics': {
         const url = String(args.url || '').trim()
         const tabId = (args.tab_id as string) || null
         const purpose = String(args.purpose || 'resource forensics').trim()
@@ -673,6 +712,7 @@ export async function executeBrowserPowerTool(
             auditId: audit.id,
           })
         } catch (error) {
+          if (error instanceof Error && error.name === 'AbortError') throw error
           // silent-catch: failure returns structured error output with recovery advice
           const message = error instanceof Error ? error.message : String(error)
           const advice = classifyBrowserPowerFailure(message)
@@ -682,7 +722,7 @@ export async function executeBrowserPowerTool(
             tool: toolName,
             powerMode: true,
             grantId: decision.grantId,
-            errorKind: 'browser_power_forensics_failed',
+            errorKind: 'browser_resources_failed',
             failureClass: advice.failureClass,
             errorMessage: message,
             tabId,
@@ -701,9 +741,12 @@ export async function executeBrowserPowerTool(
         }
       }
 
-      case 'browser_media_download_advanced': {
-        const directory = String(args.directory || '').trim()
-        if (!directory) return 'Error: directory is required'
+      case 'download_advanced': {
+        const resolvedDirectory = resolveAuthorizedBrowserDownloadDirectory(args.directory, { currentUserText, trustedRoots })
+        if (!resolvedDirectory.ok) {
+          return browserStructuredOutput({ ok: false, errorKind: resolvedDirectory.errorCode, requested: resolvedDirectory.requested })
+        }
+        const directory = resolvedDirectory.directory
         const tabId = (args.tab_id as string) || null
         const pageUrl = String(args.page_url || '').trim()
         const decision = resolvePowerDecisionForTool({
@@ -736,13 +779,13 @@ export async function executeBrowserPowerTool(
         }
         const urls = candidates
           .map((item) => String(item.url || item.downloadUrl || '').trim())
-          .filter((item, index, arr) => /^https?:\/\//i.test(item) && arr.indexOf(item) === index)
+          .filter((item, index, arr) => /^(?:https?:\/\/|blob:|data:)/i.test(item) && arr.indexOf(item) === index)
           .slice(0, 20)
         if (urls.length === 0) {
           return browserStructuredOutput({
             ok: false,
             errorKind: 'media_candidates_missing',
-            message: '未找到可下载媒体候选；请先 browser_power_resource_forensics 或播放/滚动/等待后重试。',
+            message: '未找到可下载媒体候选；请先 browser_resources 或播放/滚动/等待后重试。',
             candidateCount: candidates.length,
           })
         }
@@ -753,6 +796,8 @@ export async function executeBrowserPowerTool(
           overwrite: args.overwrite === true,
           tabId,
           referer: pageUrl || null,
+          maxTotalBytes: typeof args.max_total_bytes === 'number' ? args.max_total_bytes : undefined,
+          abortSignal,
         })
         const text = typeof output === 'string' ? output : output.text
         const parsed = (() => {
@@ -803,56 +848,6 @@ export async function executeBrowserPowerTool(
           projectionPatch: output.projectionPatch,
           contextModifier: output.contextModifier,
         })
-      }
-
-      case 'browser_power_script_run': {
-        const stepsRaw = args.steps
-        if (!Array.isArray(stepsRaw)) return 'Error: steps must be an array'
-        const purpose = String(args.purpose || '').trim()
-        if (!purpose) return 'Error: purpose is required'
-        const tabId = (args.tab_id as string) || null
-        const decision = resolvePowerDecisionForTool({
-          toolName,
-          args,
-          controller,
-          currentUserText,
-          sessionId,
-          tabId,
-          fallbackEffects: ['page_mutation'],
-        })
-        if (decision.action !== 'allow') {
-          return browserPowerDeniedOutput(decision, { tool: toolName, purpose })
-        }
-        const continueOnError = args.continue_on_error === true
-        const lines: string[] = []
-        for (let index = 0; index < stepsRaw.length; index += 1) {
-          const step = stepsRaw[index]
-          if (!step || typeof step !== 'object') {
-            lines.push(`Step ${index + 1}: Error: invalid step`)
-            if (!continueOnError) break
-            continue
-          }
-          const result = await runWorkflowStep(controller, step as Record<string, unknown>, tabId, abortSignal)
-          lines.push(`Step ${index + 1}: ${result}`)
-          if (!continueOnError && result.startsWith('Error:')) break
-        }
-        const audit = recordBrowserPowerAuditEvent({
-          toolName,
-          grantId: decision.grantId,
-          tabId,
-          url: activeBrowserToolUrl(controller, tabId),
-          effects: decision.effects,
-          purpose,
-          paramsSummary: { stepCount: stepsRaw.length },
-          resultSummary: { lineCount: lines.length },
-        })
-        return truncate(JSON.stringify({
-          ok: true,
-          tool: toolName,
-          grantId: decision.grantId,
-          auditId: audit.id,
-          output: lines,
-        }, null, 2))
       }
 
       default:

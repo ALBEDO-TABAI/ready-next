@@ -117,14 +117,12 @@ test('resolver records only explicitly requested groups that the final tool gate
 
   assert.deepEqual(resolution.intentRequestedCapabilityGroupIds, [
     'browser_interaction',
-    'browser_content_tasks',
     'document',
   ])
   assert.deepEqual(
     resolution.requestedButSuppressed.map(({ groupId, reason }) => ({ groupId, reason })),
     [
       { groupId: 'browser_interaction', reason: 'provider_disabled_tools' },
-      { groupId: 'browser_content_tasks', reason: 'provider_disabled_tools' },
       { groupId: 'document', reason: 'provider_disabled_tools' },
     ],
   )
@@ -199,11 +197,10 @@ test('resolver differentiates browser interaction and browser content task visib
   })
 
   assert.ok(uploadResolution.visibleCapabilityGroupIds.includes('browser_interaction'))
-  assert.ok(uploadResolution.visibleCapabilityGroupIds.includes('browser_content_tasks'))
-  assert.equal(uploadResolution.groupStates.browser_content_tasks.reason, 'enabled')
+  assert.ok(!uploadResolution.visibleCapabilityGroupIds.includes('browser_content_tasks'))
 
   assert.ok(researchResolution.visibleCapabilityGroupIds.includes('browser_interaction'))
-  assert.ok(researchResolution.visibleCapabilityGroupIds.includes('browser_content_tasks'))
+  assert.ok(!researchResolution.visibleCapabilityGroupIds.includes('browser_content_tasks'))
 })
 
 test('collection intent exposes browser groups via intentGroupModes WITHOUT a browser_workflow decision (WP1 decoupling)', () => {

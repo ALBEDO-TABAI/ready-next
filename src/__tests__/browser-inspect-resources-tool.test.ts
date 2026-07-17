@@ -16,7 +16,7 @@ function parseToolOutput(out: unknown): Record<string, unknown> {
   return JSON.parse(String(out)) as Record<string, unknown>
 }
 
-test('browser_inspect_resources returns deduped candidates with safe download headers', async (t) => {
+test('browser_resources returns deduped candidates with safe download headers', async (t) => {
   if (skipIfSqliteUnavailable(t, 'browser-inspect-resources-tool transitive sqlite load')) return
   const callOrder: string[] = []
   const networkEvents: BrowserNetworkEventRecord[] = [
@@ -71,7 +71,7 @@ test('browser_inspect_resources returns deduped candidates with safe download he
   } as unknown as BrowserController
 
   const out = await executeBrowserTool(
-    'browser_inspect_resources',
+    'browser_resources',
     {
       url: 'https://www.douyin.com/video/7650355790565395731',
       kinds: ['video'],
@@ -95,7 +95,7 @@ test('browser_inspect_resources returns deduped candidates with safe download he
   })
 })
 
-test('browser_resolve_video uses current-tab resource inspection before external parsing', async () => {
+test('browser_download uses current-tab resource inspection before external parsing', async () => {
   const networkEvents: BrowserNetworkEventRecord[] = [
     {
       requestId: 'r1',
@@ -121,8 +121,9 @@ test('browser_resolve_video uses current-tab resource inspection before external
   } as unknown as BrowserController
 
   const out = await executeBrowserTool(
-    'browser_resolve_video',
+    'browser_download',
     {
+      mode: 'resolve',
       page_url: 'https://www.douyin.com/video/7650355790565395731',
       tab_id: 'tab-1',
     },
@@ -137,7 +138,7 @@ test('browser_resolve_video uses current-tab resource inspection before external
   assert.equal(video.downloadUrl, 'https://v.douyinvod.com/video/tos/cn/current-tab?mime_type=video_mp4')
 })
 
-test('browser_inspect_resources extracts Douyin video candidates from detail API response bodies', async () => {
+test('browser_resources extracts Douyin video candidates from detail API response bodies', async () => {
   const detailUrl = 'https://www.douyin.com/aweme/v1/web/aweme/detail/?aweme_id=7650355790565395731'
   const controller = {
     getActiveTab: () => ({ id: 'tab-1', url: 'https://www.douyin.com/video/7650355790565395731', title: 'Video', active: true }),
@@ -186,7 +187,7 @@ test('browser_inspect_resources extracts Douyin video candidates from detail API
   } as unknown as BrowserController
 
   const out = await executeBrowserTool(
-    'browser_inspect_resources',
+    'browser_resources',
     { tab_id: 'tab-1', kinds: ['video'], wait_ms: 0 },
     controller,
   )
@@ -199,7 +200,7 @@ test('browser_inspect_resources extracts Douyin video candidates from detail API
   assert.deepEqual(candidates[0].evidence, ['douyin.detail_api', 'label:normal_720p', 'bitrate:800000'])
 })
 
-test('browser_inspect_resources classifies YouTube googlevideo playback URLs by query mime', async () => {
+test('browser_resources classifies YouTube googlevideo playback URLs by query mime', async () => {
   const videoUrl = 'https://rr1---sn-googlevideo.com/videoplayback?expire=1&mime=video%2Fmp4&itag=18'
   const audioUrl = 'https://rr1---sn-googlevideo.com/videoplayback?expire=1&mime=audio%2Fmp4&itag=140'
   const controller = {
@@ -234,7 +235,7 @@ test('browser_inspect_resources classifies YouTube googlevideo playback URLs by 
   } as unknown as BrowserController
 
   const out = await executeBrowserTool(
-    'browser_inspect_resources',
+    'browser_resources',
     { tab_id: 'tab-1', kinds: ['video'], wait_ms: 0 },
     controller,
   )
@@ -248,7 +249,7 @@ test('browser_inspect_resources classifies YouTube googlevideo playback URLs by 
   assert.equal(candidates[0].url, videoUrl)
 })
 
-test('browser_inspect_resources extracts YouTube player response candidates and prefers progressive video', async () => {
+test('browser_resources extracts YouTube player response candidates and prefers progressive video', async () => {
   const progressiveUrl = 'https://rr1---sn-googlevideo.com/videoplayback?expire=1&mime=video%2Fmp4&itag=18'
   const videoOnlyUrl = 'https://rr1---sn-googlevideo.com/videoplayback?expire=1&mime=video%2Fmp4&itag=137'
   const audioOnlyUrl = 'https://rr1---sn-googlevideo.com/videoplayback?expire=1&mime=audio%2Fmp4&itag=140'
@@ -311,7 +312,7 @@ test('browser_inspect_resources extracts YouTube player response candidates and 
   } as unknown as BrowserController
 
   const out = await executeBrowserTool(
-    'browser_inspect_resources',
+    'browser_resources',
     { tab_id: 'tab-1', kinds: ['video'], wait_ms: 0, max_candidates: 5 },
     controller,
   )
@@ -332,7 +333,7 @@ test('browser_inspect_resources extracts YouTube player response candidates and 
   assert.equal(candidates.some((candidate) => candidate.url === audioOnlyUrl), false)
 })
 
-test('browser_inspect_resources gives generic discovery guidance when no candidate is loaded yet', async () => {
+test('browser_resources gives generic discovery guidance when no candidate is loaded yet', async () => {
   const controller = {
     getActiveTab: () => ({ id: 'tab-1', url: 'https://www.youtube.com/shorts/vzqbgZjBsi4', title: 'Short', active: true }),
     getTabList: () => [{ id: 'tab-1', url: 'https://www.youtube.com/shorts/vzqbgZjBsi4', title: 'Short', active: true }],
@@ -348,7 +349,7 @@ test('browser_inspect_resources gives generic discovery guidance when no candida
   } as unknown as BrowserController
 
   const out = await executeBrowserTool(
-    'browser_inspect_resources',
+    'browser_resources',
     { tab_id: 'tab-1', kinds: ['video'], wait_ms: 0 },
     controller,
   )

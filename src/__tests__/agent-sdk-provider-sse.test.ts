@@ -371,7 +371,7 @@ test('SDK responses stream: output_text deltas + completed payload carries tool 
     id: 'resp_1',
     output: [
       { type: 'message', content: [{ type: 'output_text', text: '早安！' }] },
-      { type: 'function_call', name: 'browser_read_page', call_id: 'fc_1', arguments: '{"tab":"t1"}' },
+      { type: 'function_call', name: 'browser_read', call_id: 'fc_1', arguments: '{"tab":"t1"}' },
     ],
     usage: { input_tokens: 6, output_tokens: 8, total_tokens: 14 },
   }
@@ -396,7 +396,7 @@ test('SDK responses stream: output_text deltas + completed payload carries tool 
   assert.equal(done.response.usage.totalTokens, 14)
   const serialized = JSON.stringify(done.response.output)
   assert.ok(serialized.includes('早安！'))
-  assert.ok(serialized.includes('browser_read_page'))
+  assert.ok(serialized.includes('browser_read'))
 })
 
 test('SDK responses stream: delta-only stream without terminal payload fails loud (stream_incomplete)', async () => {

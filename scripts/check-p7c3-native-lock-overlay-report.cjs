@@ -33,6 +33,9 @@ function validateReport(report) {
   if (report.overlay?.visible !== true) {
     errors.push('overlay.visible must be true')
   }
+  if (!report.pointer || report.pointer.mechanism !== 'click-through-native-child-window') {
+    errors.push('pointer.mechanism must be click-through-native-child-window')
+  }
   if (!report.browserViewFixture?.activeTabId || !report.browserViewFixture?.fixtureUrl) {
     errors.push('browserViewFixture must include activeTabId and fixtureUrl')
   }
@@ -48,6 +51,10 @@ function validateReport(report) {
     'nativeOverlayBoundsIntersectBrowserView',
     'browserViewTargetRendersFixture',
     'overlayClearsAfterUnlock',
+    'closeButtonDismissesOverlay',
+    'pointerMatchesTrustedInput',
+    'pointerClearsOnBrowserViewLifecycle',
+    'pointerClearsAfterTerminal',
     'activeTabPreserved',
   ]) {
     if (assertions[key]?.ok !== true) {
@@ -72,6 +79,18 @@ function validateReport(report) {
   const visible = assertions.browserViewTargetRendersFixture || {}
   if (visible.source !== 'browser-webcontents-runtime-eval') {
     errors.push('browserViewTargetRendersFixture.source must be browser-webcontents-runtime-eval')
+  }
+  const pointer = assertions.pointerMatchesTrustedInput || {}
+  if (pointer.source !== 'trusted-cdp-input-and-native-pointer-geometry') {
+    errors.push('pointerMatchesTrustedInput.source must be trusted-cdp-input-and-native-pointer-geometry')
+  }
+  const pointerLifecycle = assertions.pointerClearsOnBrowserViewLifecycle || {}
+  if (pointerLifecycle.source !== 'native-browserview-hide-show-lifecycle') {
+    errors.push('pointerClearsOnBrowserViewLifecycle.source must be native-browserview-hide-show-lifecycle')
+  }
+  const terminal = assertions.pointerClearsAfterTerminal || {}
+  if (terminal.source !== 'agent-action-terminal-lifecycle') {
+    errors.push('pointerClearsAfterTerminal.source must be agent-action-terminal-lifecycle')
   }
 
   return { ok: errors.length === 0, errors }

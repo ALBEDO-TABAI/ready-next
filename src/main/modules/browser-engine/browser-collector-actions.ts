@@ -511,7 +511,8 @@ function extractImagesFromStructuredGallery(output: string): ImageCandidate[] {
 }
 
 async function collectXiaohongshuGalleryFallback(facade: NoteCollectFacade): Promise<ImageCandidate[]> {
-  const out = await facade.run('browser_extract_structured', {
+  const out = await facade.run('browser_collect', {
+    mode: 'structured',
     template: 'image_gallery',
     limit: 60,
     min_width: 120,
@@ -635,9 +636,9 @@ async function waitForTargetDetailTab(
   const deadline = Date.now() + CARD_DETAIL_OPEN_TIMEOUT_MS
   let lastTabsOut = ''
   while (Date.now() <= deadline) {
-    lastTabsOut = await facade.run('browser_get_tabs').catch(() => '')
+    lastTabsOut = await facade.run('browser_tabs').catch(() => '')
     if (activeTabOutputContainsTargetUrl(lastTabsOut, input)) return { opened: true, tabsOut: lastTabsOut }
-    const pageOut = await facade.run('browser_read_page').catch(() => '')
+    const pageOut = await facade.run('browser_read').catch(() => '')
     if (
       pageOut
       && !parseFacadeError(pageOut)
@@ -671,7 +672,7 @@ async function pageHasCarouselStructure(
   detailText: string,
 ): Promise<boolean> {
   if (!shouldProbeCarousel(input, detailText)) return false
-  const out = await facade.run('browser_wait_for_condition', {
+  const out = await facade.run('browser_wait', {
     condition: 'selector',
     selector: CAROUSEL_DETECTION_SELECTOR,
     timeout_ms: CARD_DETAIL_OPEN_POLL_MS,
@@ -700,7 +701,7 @@ function carouselMaxImages(input: CollectNoteInput): number {
 }
 
 async function collectVisibleCarouselFrame(facade: NoteCollectFacade, maxImages: number): Promise<MediaCollection> {
-  const out = await facade.run('browser_collect_images', { include_hidden: false, limit: Math.max(36, maxImages) }).catch(() => '')
+  const out = await facade.run('browser_collect', { mode: 'images', include_hidden: false, limit: Math.max(36, maxImages) }).catch(() => '')
   if (!out || parseFacadeError(out)) return { images: [], videos: [], videoCount: 0 }
   return extractMediaCollection(out)
 }
@@ -735,7 +736,7 @@ async function collectCarouselMedia(
 
     const clickOut = await facade.run('browser_click', { selector: CAROUSEL_NEXT_BUTTON_SELECTOR }).catch(() => '')
     if (!carouselClickSucceeded(clickOut)) break
-    await facade.run('browser_wait', { ms: CARD_DETAIL_OPEN_POLL_MS }).catch(() => '')
+    await facade.run('browser_wait', { duration_ms: CARD_DETAIL_OPEN_POLL_MS }).catch(() => '')
   }
 
   const images = filterNoteImageCandidates(rawImages, maxImages)
@@ -753,7 +754,7 @@ function facadeWithCarouselMedia(facade: NoteCollectFacade, media: MediaCollecti
   let consumed = false
   return {
     run: async (toolName, args = {}) => {
-      if (toolName === 'browser_collect_images' && !consumed && args.include_hidden !== true) {
+      if (toolName === 'browser_collect' && args.mode === 'images' && !consumed && args.include_hidden !== true) {
         consumed = true
         return JSON.stringify({
           count: media.images.length,
@@ -904,14 +905,15 @@ async function resolveNoteVideo(
 ): Promise<{ downloadUrl?: string; videoUrl?: string; posterUrl?: string; error?: string }> {
   const directVideoUrl = media.videos.map((video) => video.url).find(isLikelyDirectVideoUrl)
   const posterUrl = media.videos.map((video) => video.posterUrl || video.url).find((url) => /^https?:\/\//i.test(String(url || '')))
-  const tabsOut = await facade.run('browser_get_tabs').catch(() => '')
+  const tabsOut = await facade.run('browser_tabs').catch(() => '')
   const pageUrls = videoPageUrlCandidates(input, tabsOut)
   const sources = media.videos.map((video) => video.url).filter(isLikelyDirectVideoUrl)
   const attempts = directVideoUrl && pageUrls.length === 0 ? [''] : pageUrls
   let lastError = ''
 
   for (const pageUrl of attempts) {
-    const out = await facade.run('browser_resolve_video', {
+    const out = await facade.run('browser_download', {
+      mode: 'resolve',
       ...(pageUrl ? { page_url: pageUrl } : {}),
       ...(directVideoUrl ? { video_url: directVideoUrl } : {}),
       ...(posterUrl ? { poster_url: posterUrl } : {}),
@@ -959,7 +961,7 @@ async function downloadVideoNote(
   }
 
   const assetsDir = pathJoin(args.noteDir, 'assets')
-  const dlOut = await facade.run('browser_download_urls', { urls: [resolved.downloadUrl], directory: assetsDir, filename_prefix: 'video' })
+  const dlOut = await facade.run('browser_download', { mode: 'urls', urls: [resolved.downloadUrl], directory: assetsDir, filename_prefix: 'video' })
   const dlErr = parseFacadeError(dlOut)
   if (dlErr) {
     return writeArtifacts(fileOps, pathJoin, {
@@ -1053,7 +1055,7 @@ export async function collectNote(
       }, {})
     }
   }
-  const pageOut = await facade.run('browser_read_page')
+  const pageOut = await facade.run('browser_read')
   const pageErr = parseFacadeError(pageOut)
   let pageText = pageErr ? '' : pageOut
   if (!input.skipNavigate && isLikelyXiaohongshuProfileListPage(pageText, input)) {
@@ -1089,7 +1091,7 @@ export async function collectNote(
   // 2. Read the detail page title/body when the generic structured extractor
   // can see them. Failure here is non-fatal; image capture still proceeds.
   let detail: { title?: string; summary?: string } = {}
-  const detailOut = await facade.run('browser_extract_structured', { template: 'article_list', limit: 1 })
+  const detailOut = await facade.run('browser_collect', { mode: 'structured', template: 'article_list', limit: 1 })
   const detailErr = parseFacadeError(detailOut)
   if (!detailErr) detail = extractDetail(detailOut)
   const title = requestedTitle && !titleCanBeReplaced(input.titleConfidence)
@@ -1114,7 +1116,7 @@ export async function collectNote(
 
   // 3. Collect image candidates on the note page. Prefer visible images so a
   // modal detail page does not download the profile grid behind it.
-  let imagesOut = await facade.run('browser_collect_images', { include_hidden: false, limit: 36 })
+  let imagesOut = await facade.run('browser_collect', { mode: 'images', include_hidden: false, limit: 36 })
   const collectErr = parseFacadeError(imagesOut)
   if (collectErr) {
     return writeArtifacts(fileOps, pathJoin, {
@@ -1171,7 +1173,7 @@ export async function collectNote(
         reason: visibleAccessBlock,
       }, { summary: detail.summary, imageUrls: rawImages.map((img) => img.url) })
     }
-    imagesOut = await facade.run('browser_collect_images', { include_hidden: true, limit: 36 })
+    imagesOut = await facade.run('browser_collect', { mode: 'images', include_hidden: true, limit: 36 })
     const hiddenCollectErr = parseFacadeError(imagesOut)
     if (hiddenCollectErr) {
       return writeArtifacts(fileOps, pathJoin, {
@@ -1223,8 +1225,8 @@ export async function collectNote(
   }
   if (images.length === 0 && videoCount === 0 && input.skipNavigate && isXiaohongshuTarget(input)) {
     for (const waitMs of [1000, 1500, 2500]) {
-      await facade.run('browser_wait', { ms: waitMs }).catch(() => '')
-      const retryPageOut = await facade.run('browser_read_page').catch(() => '')
+      await facade.run('browser_wait', { duration_ms: waitMs }).catch(() => '')
+      const retryPageOut = await facade.run('browser_read').catch(() => '')
       if (retryPageOut && !parseFacadeError(retryPageOut)) {
         pageText = retryPageOut
         const retryPageBlock = detectTerminalPageBlock({ pageText, title: detail.title || title, summary: detail.summary, images: rawImagesForAccessBlock })
@@ -1243,7 +1245,7 @@ export async function collectNote(
           }, { summary: detail.summary, imageUrls: rawImagesForAccessBlock.map((img) => img.url) })
         }
       }
-      const retryVisibleOut = await facade.run('browser_collect_images', { include_hidden: false, limit: 36 })
+      const retryVisibleOut = await facade.run('browser_collect', { mode: 'images', include_hidden: false, limit: 36 })
       if (parseFacadeError(retryVisibleOut)) break
       let retryMedia = extractMediaCollection(retryVisibleOut)
       rawImages = retryMedia.images
@@ -1253,7 +1255,7 @@ export async function collectNote(
       rawImagesForAccessBlock = rawImages
       images = filterNoteImageCandidates(rawImages)
       if (images.length > 0 || videoCount > 0) break
-      const retryHiddenOut = await facade.run('browser_collect_images', { include_hidden: true, limit: 36 })
+      const retryHiddenOut = await facade.run('browser_collect', { mode: 'images', include_hidden: true, limit: 36 })
       if (parseFacadeError(retryHiddenOut)) break
       retryMedia = extractMediaCollection(retryHiddenOut)
       rawImages = retryMedia.images
@@ -1271,8 +1273,8 @@ export async function collectNote(
     && isXiaohongshuTarget(input)
     && (media.scope === 'xiaohongshu-detail' || input.skipNavigate)
   ) {
-    await facade.run('browser_wait', { ms: 1200 }).catch(() => '')
-    const retryHiddenOut = await facade.run('browser_collect_images', { include_hidden: true, limit: 60 }).catch(() => '')
+    await facade.run('browser_wait', { duration_ms: 1200 }).catch(() => '')
+    const retryHiddenOut = await facade.run('browser_collect', { mode: 'images', include_hidden: true, limit: 60 }).catch(() => '')
     if (retryHiddenOut && !parseFacadeError(retryHiddenOut)) {
       const retryMedia = extractMediaCollection(retryHiddenOut)
       expectedImageCount = Math.max(expectedImageCount, retryMedia.expectedImageCount || 0)
@@ -1365,7 +1367,7 @@ export async function collectNote(
 
   // 4. Cookie-aware download into the note's own folder.
   const assetsDir = pathJoin(noteDir, 'assets')
-  const dlOut = await facade.run('browser_download_urls', { urls: imageUrls, directory: assetsDir, filename_prefix: 'image' })
+  const dlOut = await facade.run('browser_download', { mode: 'urls', urls: imageUrls, directory: assetsDir, filename_prefix: 'image' })
   const dlErr = parseFacadeError(dlOut)
   if (dlErr) {
     return writeArtifacts(fileOps, pathJoin, {
@@ -1442,7 +1444,7 @@ export async function collectCardNote(
     }, {})
   }
 
-  const clickOut = await facade.run('browser_click_text', { text: title, exact: false, ...(sourceId ? { href_contains: sourceId } : {}) })
+  const clickOut = await facade.run('browser_click', { text: title, exact: false, ...(sourceId ? { href_contains: sourceId } : {}) })
   const clickErr = parseFacadeError(clickOut)
   if (clickErr) {
     return writeArtifacts(fileOps, pathJoin, {
@@ -1468,7 +1470,7 @@ export async function collectCardNote(
   const detailTab = await waitForTargetDetailTab(facade, detailTarget)
   const activeTargetConfirmed = activeTabOutputContainsTargetUrl(detailTab.tabsOut, detailTarget)
   if (!detailTab.opened) {
-    await facade.run('browser_go_back').catch(() => '')
+    await facade.run('browser_navigate', { action: 'back' }).catch(() => '')
     return writeArtifacts(fileOps, pathJoin, {
       success: false,
       noteUrl: input.noteUrl,
@@ -1482,10 +1484,10 @@ export async function collectCardNote(
       reason: 'detail_not_opened',
     }, {})
   }
-  let detailOut = await facade.run('browser_read_page')
+  let detailOut = await facade.run('browser_read')
   const detailErr = parseFacadeError(detailOut)
   if (detailErr) {
-    await facade.run('browser_go_back').catch(() => '')
+    await facade.run('browser_navigate', { action: 'back' }).catch(() => '')
     return writeArtifacts(fileOps, pathJoin, {
       success: false,
       noteUrl: input.noteUrl,
@@ -1500,7 +1502,7 @@ export async function collectCardNote(
     }, {})
   }
   if (isLikelyXiaohongshuProfileListPage(detailOut, input) && !activeTargetConfirmed) {
-    await facade.run('browser_go_back').catch(() => '')
+    await facade.run('browser_navigate', { action: 'back' }).catch(() => '')
     return writeArtifacts(fileOps, pathJoin, {
       success: false,
       noteUrl: input.noteUrl,
@@ -1520,9 +1522,9 @@ export async function collectCardNote(
     canonicalUrl: input.canonicalUrl || input.noteUrl,
     noteUrl: input.noteUrl,
   })) {
-    const confirmedTabsOut = await facade.run('browser_get_tabs').catch(() => detailTab.tabsOut)
+    const confirmedTabsOut = await facade.run('browser_tabs').catch(() => detailTab.tabsOut)
     if (!activeTabOutputContainsTargetUrl(confirmedTabsOut, detailTarget)) {
-      await facade.run('browser_go_back').catch(() => '')
+      await facade.run('browser_navigate', { action: 'back' }).catch(() => '')
       return writeArtifacts(fileOps, pathJoin, {
         success: false,
         noteUrl: input.noteUrl,
@@ -1540,7 +1542,7 @@ export async function collectCardNote(
   const carouselMedia = await collectCarouselMedia(facade, input, detailOut)
   const collectFacade = carouselMedia ? facadeWithCarouselMedia(facade, carouselMedia) : facade
   const result = await collectNote(collectFacade, { ...input, skipNavigate: true }, pathJoin, fileOps)
-  const returnOut = await facade.run('browser_go_back').catch((error) => JSON.stringify({
+  const returnOut = await facade.run('browser_navigate', { action: 'back' }).catch((error) => JSON.stringify({
     ok: false,
     errorCode: 'return_failed',
     message: error instanceof Error ? error.message : String(error),
@@ -1560,6 +1562,6 @@ export async function collectCardNote(
       reason: `return_list:${returnErr}`,
     }, {})
   }
-  await facade.run('browser_wait', { ms: 500 }).catch(() => '')
+  await facade.run('browser_wait', { duration_ms: 500 }).catch(() => '')
   return result
 }

@@ -8,7 +8,7 @@ import {
 
 test('browser surface binding maps reads to read-only-observe without an engine write surface', () => {
   const result = resolveBrowserToolSurfaceBinding({
-    toolName: 'browser_read_page',
+    toolName: 'browser_read',
     dispatch: 'tool-executor',
   })
   assert.equal(result.ok, true)
@@ -21,7 +21,8 @@ test('browser surface binding maps reads to read-only-observe without an engine 
 
 test('browser surface binding rejects tool-executor writes without a turn lease', () => {
   const result = resolveBrowserToolSurfaceBinding({
-    toolName: 'browser_go_back',
+    toolName: 'browser_navigate',
+    args: { action: 'back' },
     dispatch: 'tool-executor',
   })
   assert.equal(result.ok, false)
@@ -31,7 +32,8 @@ test('browser surface binding rejects tool-executor writes without a turn lease'
 
 test('browser surface binding maps foreground writes to user-view-assisted', () => {
   const result = resolveBrowserToolSurfaceBinding({
-    toolName: 'browser_go_back',
+    toolName: 'browser_navigate',
+    args: { action: 'back' },
     dispatch: 'tool-executor',
     hasTurnLease: true,
   })
@@ -44,13 +46,14 @@ test('browser surface binding maps foreground writes to user-view-assisted', () 
 
 test('browser surface binding marks collect_notes as an agent-view background handoff', () => {
   const result = resolveBrowserToolSurfaceBinding({
-    toolName: 'browser_collect_notes',
+    toolName: 'browser_collect',
+    args: { mode: 'notes' },
     dispatch: 'tool-executor',
     hasTurnLease: true,
   })
   assert.equal(result.ok, true)
   if (!result.ok) return
-  assert.equal(isBrowserBackgroundHandoffTool('browser_collect_notes'), true)
+  assert.equal(isBrowserBackgroundHandoffTool('browser_collect', { mode: 'notes' }), true)
   assert.equal(result.binding.backgroundHandoff, true)
   assert.equal(result.binding.intent, 'agent-view-background')
   assert.equal(result.binding.engineSurface, 'agent-view')
@@ -83,7 +86,7 @@ test('scoped facade defaults concrete agent tab writes to agent-view-background'
 
 test('browser-agent-runner declares user-view-assisted workflow binding', () => {
   const result = resolveBrowserToolSurfaceBinding({
-    toolName: 'browser_run_workflow',
+    toolName: 'browser_click',
     dispatch: 'browser-agent-runner',
     hasRunnerLeaseGate: true,
     boundSurface: 'user-view',
@@ -96,7 +99,7 @@ test('browser-agent-runner declares user-view-assisted workflow binding', () => 
 
 test('browser-agent-runner declares agent-view foreground workflow binding', () => {
   const result = resolveBrowserToolSurfaceBinding({
-    toolName: 'browser_click_at',
+    toolName: 'browser_click',
     dispatch: 'browser-agent-runner',
     hasRunnerLeaseGate: true,
     boundSurface: 'agent-view',
@@ -111,7 +114,7 @@ test('browser-agent-runner declares agent-view foreground workflow binding', () 
 
 test('browser-agent-runner agent-view writes require a bound agent tab', () => {
   const result = resolveBrowserToolSurfaceBinding({
-    toolName: 'browser_click_at',
+    toolName: 'browser_click',
     dispatch: 'browser-agent-runner',
     hasRunnerLeaseGate: true,
     boundSurface: 'agent-view',
@@ -123,7 +126,7 @@ test('browser-agent-runner agent-view writes require a bound agent tab', () => {
 
 test('browser-agent-runner writes require the runner lease gate at each tool call', () => {
   const result = resolveBrowserToolSurfaceBinding({
-    toolName: 'browser_click_at',
+    toolName: 'browser_click',
     dispatch: 'browser-agent-runner',
     hasRunnerLeaseGate: false,
   })

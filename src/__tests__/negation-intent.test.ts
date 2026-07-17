@@ -51,7 +51,7 @@ test('session-lineage state: record persists across turns until explicit release
 })
 
 test('tool-family mapping is conservative by name', () => {
-  assert.equal(matchToolNegationFamily('browser_visible_collect', ['collection']), 'collection')
+  assert.equal(matchToolNegationFamily('browser_collect', ['collection']), 'collection')
   assert.equal(matchToolNegationFamily('browser_open_url', ['collection']), null, 'open is not collection')
   assert.equal(matchToolNegationFamily('browser_open_url', ['browser']), 'browser')
   assert.equal(matchToolNegationFamily('feishu_message_send', ['external_send']), 'external_send')
@@ -59,7 +59,7 @@ test('tool-family mapping is conservative by name', () => {
 })
 
 test('dispatch layer: negated collection call returns denied_by_user_negation (second layer of the double net)', async () => {
-  const output = await executeToolCall('browser_visible_collect', { url: 'https://x' }, {
+  const output = await executeToolCall('browser_collect', { url: 'https://x' }, {
     activeNegations: ['collection'],
     sessionId: 'scope-neg',
     authorization: NO_AUTH,
@@ -89,7 +89,7 @@ test('host invoker and released state pass the negation layer', async () => {
   // host bypass: the user acting is not the model — interception skipped
   // (the call proceeds into normal dispatch and fails later for unrelated
   // infra reasons, NOT with a negation denial).
-  const hostOutput = await executeToolCall('browser_visible_collect', {}, {
+  const hostOutput = await executeToolCall('browser_collect', {}, {
     activeNegations: ['collection'],
     invoker: 'host',
     authorization: NO_AUTH,
@@ -98,7 +98,7 @@ test('host invoker and released state pass the negation layer', async () => {
   assert.notEqual(hostData.errorKind, 'denied_by_user_negation')
 
   // released: empty negation list → layer inert
-  const releasedOutput = await executeToolCall('browser_visible_collect', {}, {
+  const releasedOutput = await executeToolCall('browser_collect', {}, {
     activeNegations: [],
     authorization: NO_AUTH,
   } as never)

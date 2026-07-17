@@ -21,6 +21,7 @@ export interface BrowserLockOverlayProofMarker {
 }
 
 export interface BrowserLockOverlaySnapshot {
+  revision?: number
   kind: BrowserLockOverlayKind
   label: string
   detail: string

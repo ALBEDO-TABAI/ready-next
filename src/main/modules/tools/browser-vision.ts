@@ -271,7 +271,7 @@ async function runVisionCompletion(
 }
 
 export async function analyzeViewportWithVision(options: {
-  action: 'upload' | 'send' | 'close' | 'back' | 'input'
+  action: 'upload' | 'send' | 'close' | 'back' | 'input' | 'general'
   title?: string
   url?: string
   screenshotBase64: string

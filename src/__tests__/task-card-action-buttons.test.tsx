@@ -247,7 +247,7 @@ test('task card browser collection button invokes browser resume handler instead
       taskId: 'browser-task-visible-1',
       detachedTaskId: 'browser-task-card-loop-1',
       resumeKind: 'paused',
-      action: 'browser_resume_task',
+      action: 'browser_task',
     },
   })
   const { container, unmount } = mountTaskCard(run, {

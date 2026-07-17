@@ -1,15 +1,15 @@
 /**
  * P3 Phase B6（2026-07-05，纯移动拆分）— browser-tools 观察/感知组。
  *
- * 从 browser-tools.ts 逐字搬出十二个 case 的实现体（browser_get_tabs /
- * browser_read_page / browser_read_page_map / browser_probe_readonly /
- * browser_capture_viewport / browser_probe_workflow_state /
- * browser_locate_action_targets / browser_locate_input_targets /
- * browser_analyze_viewport / browser_wait / browser_wait_for_condition /
- * browser_query_gemini，经 executeBrowserObserveTool 统一入口分发）与本组
+ * 从 browser-tools.ts 逐字搬出十二个 case 的实现体（browser_tabs /
+ * browser_read / browser_snapshot / browser_snapshot /
+ * browser_screenshot / browser_status /
+ * browser_find / browser_find /
+ * browser_screenshot / browser_wait / browser_wait /
+ * browser_wait 等入口，经 executeBrowserObserveTool 统一入口分发）与本组
  * 独占 helper（页面地图 generation/ambiguity 单例、captureAgentPageMap 与
  * settle-retry 感知面、截图缓存、workflow 状态探针、输入/发送目标排序）。
- * 页面地图状态随组迁移并导出，留守的 browser_act_on_target 改从本模块
+ * 页面地图状态随组迁移并导出，留守的 browser_click/browser_type 改从本模块
  * import 回读（facade→observe 单向）。attachBrowserActionSessionOutput
  * （sitePermissionNotices 排空合同红线）留在 browser-tools，经
  * BrowserObserveToolContext 注入回接；resolveToolContextMeta / getPageIdentity /
@@ -21,25 +21,23 @@ import type { BrowserController } from '../browser-engine/ipc-handler'
 import { BrowserAgentRuntimeAdapter } from '../browser-engine/agent-runtime-adapter'
 import { BrowserPageStateService } from '../browser-engine/page-state-service'
 import { BrowserEvidenceService } from '../browser-engine/evidence-service'
-import { randomUUID } from 'crypto'
 import { createRotatingLogger } from '../../utils/rotating-logger'
 import { analyzeViewportWithVision } from './browser-vision'
-import { isHighControlPlatformText } from '../../../shared/browser-collection-intent'
 import {
   buildBrowserReadonlyProbeJs,
   normalizeBrowserReadonlyProbeRequest,
 } from '../../../shared/browser-readonly-probe'
 import { agentBrowserError } from '../browser-engine/agent-browser-errors'
 import type { BrowserTransactionConfirmation } from '../browser-engine/browser-action-session'
-import { buildPageMap, type PageMap, type RawAxNode } from '../browser-engine/agent-browser-page-map'
-import type { ToolExecutionOutput } from '../agent-control/tools-runtime/tool-result-types'
+import { buildPageMap, parseTargetId, type PageMap, type RawAxNode } from '../browser-engine/agent-browser-page-map'
+import { browserSnapshotService } from '../browser-engine/browser-snapshot-service'
+import { createToolExecutionOutput, type ToolExecutionOutput } from '../agent-control/tools-runtime/tool-result-types'
 import {
   createBrowserStructuredOutput as browserStructuredOutput,
   stringifyBrowserJsonOrFailure,
 } from './browser-failure-output'
-import { buildBrowserPageMapProbeJs } from './browser-probe'
+import { buildBrowserPageMapProbeJs, buildBrowserTargetReadJs } from './browser-probe'
 import { waitForReady } from './browser-input-actions'
-import { runGeminiQuery } from './browser-gemini'
 import {
   browserStructuredErrorOutput,
   getPageIdentity,
@@ -61,11 +59,10 @@ export const __breaksInvariants = [
   'test-only browser page-map singleton reset mutates shared browser tool state',
 ]
 
-const browserPageMapGenerationByTab = new Map<string, number>()
 const browserPageMapAmbiguityByTab = new Map<string, Map<string, { role: string; name: string; targetIds: string[] }>>()
 
 export function __resetBrowserAgentPageMapForTests(): void {
-  browserPageMapGenerationByTab.clear()
+  browserSnapshotService.resetForTests()
   browserPageMapAmbiguityByTab.clear()
 }
 
@@ -73,15 +70,40 @@ function resolveBrowserToolTabKey(controller: BrowserController, tabId: string |
   return tabId || controller.getActiveTab?.()?.id || '__active__'
 }
 
-function nextBrowserPageMapGeneration(controller: BrowserController, tabId: string | null): number {
-  const key = resolveBrowserToolTabKey(controller, tabId)
-  const next = (browserPageMapGenerationByTab.get(key) || 0) + 1
-  browserPageMapGenerationByTab.set(key, next)
-  return next
+function strictReadMaxChars(value: unknown): number {
+  const parsed = Number(value)
+  return Number.isFinite(parsed)
+    ? Math.max(1, Math.min(200_000, Math.floor(parsed)))
+    : 20_000
+}
+
+function fitReadContent(value: unknown, maxChars: number): string {
+  return String(value ?? '').slice(0, maxChars)
+}
+
+function scopedReadProbeJs(selector: string): string {
+  return `(() => {
+    try {
+      const nodes = Array.from(document.querySelectorAll(${JSON.stringify(selector)}));
+      if (nodes.length !== 1) return { matchCount: nodes.length, content: '' };
+      const el = nodes[0];
+      const chunks = [
+        el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement
+          ? String(el.value || '')
+          : '',
+        String(el.innerText || ''),
+        String(el.textContent || ''),
+        String(el.getAttribute('aria-label') || ''),
+      ].map((value) => value.replace(/\\s+/g, ' ').trim()).filter(Boolean);
+      return { matchCount: 1, content: Array.from(new Set(chunks)).join('\\n') };
+    } catch (error) {
+      return { matchCount: 0, content: '', invalidSelector: true, message: String(error && error.message || error) };
+    }
+  })()`
 }
 
 export function currentBrowserPageMapGeneration(controller: BrowserController, tabId: string | null): number | null {
-  return browserPageMapGenerationByTab.get(resolveBrowserToolTabKey(controller, tabId)) ?? null
+  return browserSnapshotService.currentState(controller, tabId)?.snapshotRevision ?? null
 }
 
 function rememberBrowserPageMapAmbiguity(
@@ -124,80 +146,88 @@ function buildPageMapAmbiguityGroups(targets: PageMap['targets']): Array<{ role:
  * max_bytes 时 map 不限量——小红书发布编辑器单次 ~27k token，触发 presend
  * 单结果截断后模型信息真空。32KB（钳制区间内）≈8-11k token，留足两次读。
  */
-export const DEFAULT_AGENT_PAGE_MAP_MAX_BYTES = 32_768
+export const DEFAULT_AGENT_PAGE_MAP_MAX_BYTES = 16_384
 
 export async function captureAgentPageMap(
   controller: BrowserController,
   tabId: string | null,
   maxBytes?: number,
+  options: { force?: boolean } = {},
 ): Promise<Record<string, unknown>> {
-  const raw = await controller.executeJS(tabId, buildBrowserPageMapProbeJs()) as {
+  const budget = maxBytes || DEFAULT_AGENT_PAGE_MAP_MAX_BYTES
+  const payload = await browserSnapshotService.capture(controller, tabId, budget, async (generation) => {
+    const raw = await controller.executeJS(tabId, buildBrowserPageMapProbeJs()) as {
     identity?: { url?: string; title?: string }
     viewport?: { width?: number; height?: number }
     bodyText?: string
     rawRoots?: RawAxNode[]
     riskFlags?: Record<string, unknown>
     structureHints?: Record<string, unknown>
-  } | null
-  const generation = nextBrowserPageMapGeneration(controller, tabId)
-  const viewport = {
-    width: Number(raw?.viewport?.width || 0) || 0,
-    height: Number(raw?.viewport?.height || 0) || 0,
-  }
+    } | null
+    const viewport = {
+      width: Number(raw?.viewport?.width || 0) || 0,
+      height: Number(raw?.viewport?.height || 0) || 0,
+    }
   // D10 frame 穿透：主帧 probe 后逐子帧补采，目标打上 frameKey（进 targetId
   // 的 frameId 槽位，act 侧按它路由回同一帧执行）。单帧失败不阻断整图。
-  const rawRoots: RawAxNode[] = Array.isArray(raw?.rawRoots) ? raw.rawRoots : []
-  const mappedFrames: Array<{ frameKey: string; url: string; targetCount: number }> = []
-  if (typeof controller.executeJSInFrame === 'function') {
-    for (const frame of listSubframesSafe(controller, tabId)) {
-      try {
-        const frameRaw = await controller.executeJSInFrame(tabId, frame.frameKey, buildBrowserPageMapProbeJs()) as {
-          rawRoots?: RawAxNode[]
-        } | null
-        const children = Array.isArray(frameRaw?.rawRoots?.[0]?.children) ? frameRaw.rawRoots[0].children : []
-        if (children.length === 0) continue
-        for (const child of children) child.frameId = frame.frameKey
-        rawRoots.push({ role: 'iframe', name: frame.url.slice(0, 120), frameId: frame.frameKey, children })
-        mappedFrames.push({ frameKey: frame.frameKey, url: frame.url.slice(0, 200), targetCount: children.length })
-      } catch (error) {
-        log(`page map subframe probe failed (${frame.frameKey}): ${error instanceof Error ? error.message : String(error)}`)
+    const rawRoots: RawAxNode[] = Array.isArray(raw?.rawRoots) ? raw.rawRoots : []
+    const mappedFrames: Array<{ frameKey: string; url: string; targetCount: number }> = []
+    if (typeof controller.executeJSInFrame === 'function') {
+      for (const frame of listSubframesSafe(controller, tabId)) {
+        try {
+          const frameRaw = await controller.executeJSInFrame(tabId, frame.frameKey, buildBrowserPageMapProbeJs()) as {
+            rawRoots?: RawAxNode[]
+          } | null
+          const children = Array.isArray(frameRaw?.rawRoots?.[0]?.children) ? frameRaw.rawRoots[0].children : []
+          if (children.length === 0) continue
+          for (const child of children) child.frameId = frame.frameKey
+          rawRoots.push({ role: 'iframe', name: frame.url.slice(0, 120), frameId: frame.frameKey, children })
+          mappedFrames.push({ frameKey: frame.frameKey, url: frame.url.slice(0, 200), targetCount: children.length })
+        } catch (error) {
+          log(`page map subframe probe failed (${frame.frameKey}): ${error instanceof Error ? error.message : String(error)}`)
+        }
       }
     }
-  }
-  const map = buildPageMap(rawRoots, {
-    generation,
-    viewport,
-    ...(maxBytes ? { maxBytes } : {}),
-  })
-  const ambiguityGroups = buildPageMapAmbiguityGroups(map.targets)
+    // Text receives half of the unified snapshot budget. The snapshot service
+    // spends the remainder on compact target metadata and keeps the complete
+    // target set private for cached browser_find queries.
+    const pageMap = buildPageMap(rawRoots, {
+      generation,
+      viewport,
+      maxBytes: Math.max(512, Math.floor(budget * 0.5)),
+    })
+    return {
+      pageIdentity: {
+        url: String(raw?.identity?.url || ''),
+        title: String(raw?.identity?.title || ''),
+        generation,
+        capturedAt: new Date().toISOString(),
+      },
+      summary: {
+        bodyText: String(raw?.bodyText || '').slice(0, 1000),
+        targetCount: pageMap.targets.length,
+        truncated: pageMap.truncated,
+      },
+      pageMap: {
+        ...pageMap,
+        structureHints: raw?.structureHints || { iframes: [], shadowRoots: [], hiddenLoaded: [] },
+      },
+      riskFlags: raw?.riskFlags || {},
+      evidence: {
+        generation,
+        targetSource: 'dom-target-library',
+        targetCount: pageMap.targets.length,
+        truncated: pageMap.truncated,
+        ...(mappedFrames.length > 0 ? { frames: mappedFrames } : {}),
+      },
+      nextAllowedActions: ['click or type by target reference', 'wait', 'stop with reason'],
+    }
+  }, options)
+  const transformedMap = payload.pageMap as PageMap
+  const ambiguityGroups = buildPageMapAmbiguityGroups(transformedMap.targets)
+  payload.ambiguityGroups = ambiguityGroups
   rememberBrowserPageMapAmbiguity(controller, tabId, ambiguityGroups)
-  return {
-    pageIdentity: {
-      url: String(raw?.identity?.url || ''),
-      title: String(raw?.identity?.title || ''),
-      generation,
-      capturedAt: new Date().toISOString(),
-    },
-    summary: {
-      bodyText: String(raw?.bodyText || '').slice(0, 1000),
-      targetCount: map.targets.length,
-      truncated: map.truncated,
-    },
-    pageMap: {
-      ...map,
-      structureHints: raw?.structureHints || { iframes: [], shadowRoots: [], hiddenLoaded: [] },
-    },
-    ambiguityGroups,
-    riskFlags: raw?.riskFlags || {},
-    evidence: {
-      generation,
-      targetSource: 'dom-target-library',
-      targetCount: map.targets.length,
-      truncated: map.truncated,
-      ...(mappedFrames.length > 0 ? { frames: mappedFrames } : {}),
-    },
-    nextAllowedActions: ['read map again', 'act on target', 'wait', 'stop with reason'],
-  }
+  return payload
 }
 
 function createBrowserAgentHelpers(controller: BrowserController) {
@@ -205,21 +235,6 @@ function createBrowserAgentHelpers(controller: BrowserController) {
   const pageStateService = new BrowserPageStateService(runtime)
   const evidenceService = new BrowserEvidenceService()
   return { runtime, pageStateService, evidenceService }
-}
-
-const screenshotCache = new Map<string, { base64: string; width: number; height: number; createdAt: number }>()
-const SCREENSHOT_CACHE_MAX = 30
-
-function cacheScreenshot(base64: string, width: number, height: number): string {
-  const id = `browser-shot-${randomUUID()}`
-  screenshotCache.set(id, { base64, width, height, createdAt: Date.now() })
-  if (screenshotCache.size > SCREENSHOT_CACHE_MAX) {
-    const stale = Array.from(screenshotCache.entries())
-      .sort((a, b) => a[1].createdAt - b[1].createdAt)
-      .slice(0, screenshotCache.size - SCREENSHOT_CACHE_MAX)
-    stale.forEach(([key]) => screenshotCache.delete(key))
-  }
-  return id
 }
 
 interface WorkflowUploadProbe {
@@ -581,25 +596,161 @@ export async function executeBrowserObserveTool(
 ): Promise<string | ToolExecutionOutput> {
   const { controller, abortSignal, sessionId, currentUserText, attachBrowserActionSessionOutput } = ctx
   switch (toolName) {
-      case 'browser_get_tabs': {
-        const tabs = controller.getTabList()
+      case 'tabs_list': {
+        const tabs = controller.getTabList() as Array<ReturnType<BrowserController['getTabList']>[number] & {
+          openerTabId?: string | null
+        }>
         if (tabs.length === 0) return 'No tabs open.'
-        return tabs.map(t =>
-          `${t.active ? '▶ ' : '  '}[${t.id}] ${t.title}\n    ${t.url}`
-        ).join('\n')
+        const byId = new Map(tabs.map((tab) => [tab.id, tab]))
+        const rootTabId = (tabId: string): string => {
+          const seen = new Set<string>()
+          let current = byId.get(tabId)
+          while (current?.openerTabId && byId.has(current.openerTabId) && !seen.has(current.openerTabId)) {
+            seen.add(current.id)
+            current = byId.get(current.openerTabId)
+          }
+          return current?.id || tabId
+        }
+        const workflow = (controller as unknown as {
+          getActiveForegroundBrowserWorkflowSession?: () => {
+            runId: string
+            taskId: string
+            lane: string
+            boundTabId: string
+            sourceUserTabId: string | null
+            status: string
+          } | null
+        }).getActiveForegroundBrowserWorkflowSession?.() || null
+        const leaseSnapshot = (controller as unknown as {
+          getBrowserLeaseSnapshot?: () => {
+            surfaces?: Record<string, {
+              state?: string
+              heldBy?: string | null
+              runId?: string | null
+              tabId?: string | null
+              leaseId?: string | null
+            }>
+          }
+        }).getBrowserLeaseSnapshot?.() || null
+        return browserStructuredOutput({
+          ok: true,
+          activeTabId: tabs.find((tab) => tab.active)?.id || null,
+          tabs: tabs.map((tab) => {
+            const bindings: Record<string, unknown>[] = []
+            if (workflow?.boundTabId === tab.id) {
+              bindings.push({
+                kind: 'foreground_workflow',
+                runId: workflow.runId,
+                taskId: workflow.taskId,
+                lane: workflow.lane,
+                status: workflow.status,
+                sourceUserTabId: workflow.sourceUserTabId,
+              })
+            }
+            for (const [surface, lease] of Object.entries(leaseSnapshot?.surfaces || {})) {
+              if (lease.tabId !== tab.id || lease.state === 'idle') continue
+              bindings.push({
+                kind: 'write_lease',
+                surface,
+                state: lease.state,
+                taskId: lease.heldBy || null,
+                runId: lease.runId || null,
+                leaseId: lease.leaseId || null,
+              })
+            }
+            return {
+              ...tab,
+              openerTabId: tab.openerTabId || null,
+              rootTabId: rootTabId(tab.id),
+              workflowBindings: bindings,
+            }
+          }),
+        })
       }
 
-      case 'browser_read_page': {
+      case 'read': {
         let tabId = (args.tab_id as string) || null
         tabId = (await resolveHighControlAgentTab(controller, args, { signal: abortSignal })).tabId
+        const maxChars = strictReadMaxChars(args.max_chars)
+        const targetId = typeof args.target_id === 'string' ? args.target_id.trim() : ''
+        const selector = typeof args.selector === 'string' ? args.selector.trim() : ''
+        if (targetId && selector) {
+          return browserStructuredOutput({
+            ok: false,
+            errorKind: 'invalid_scope',
+            message: 'target_id and selector are mutually exclusive',
+          })
+        }
+        if (targetId) {
+          const resolved = await browserSnapshotService.resolveRef(controller, tabId, targetId)
+          if (!resolved.ok) {
+            return browserStructuredOutput({
+              ok: false,
+              errorKind: resolved.errorCode === 'stale_document' || resolved.errorCode === 'stale_snapshot'
+                ? 'target_stale'
+                : resolved.errorCode === 'wrong_tab'
+                  ? 'target_wrong_tab'
+                  : 'target_not_found',
+              reason: resolved.errorCode,
+              targetId,
+              currentDocumentEpoch: resolved.currentDocumentEpoch,
+              currentSnapshotRevision: resolved.currentSnapshotRevision,
+            })
+          }
+          const parsed = parseTargetId(resolved.rawTargetId)
+          if (!parsed) {
+            return browserStructuredOutput({ ok: false, errorKind: 'target_not_found', targetId })
+          }
+          let probe: unknown
+          try {
+            probe = parsed.frameId === '0'
+              ? await controller.executeJS(tabId, buildBrowserTargetReadJs(parsed.node))
+              : typeof controller.executeJSInFrame === 'function'
+                ? await controller.executeJSInFrame(tabId, parsed.frameId, buildBrowserTargetReadJs(parsed.node))
+                : null
+          } catch (error) {
+            // silent-catch: the structured stale-target result below carries the failure to the caller.
+            return browserStructuredOutput({
+              ok: false,
+              errorKind: 'target_stale',
+              targetId,
+              message: error instanceof Error ? error.message : String(error),
+            })
+          }
+          const record = probe && typeof probe === 'object' ? probe as Record<string, unknown> : {}
+          if (Number(record.matchCount || 0) !== 1) {
+            return browserStructuredOutput({ ok: false, errorKind: 'target_stale', targetId })
+          }
+          return fitReadContent(record.content, maxChars)
+        }
+        if (selector) {
+          const probe = await controller.executeJS(tabId, scopedReadProbeJs(selector))
+          const record = probe && typeof probe === 'object' ? probe as Record<string, unknown> : {}
+          if (record.invalidSelector === true) {
+            return browserStructuredOutput({
+              ok: false,
+              errorKind: 'invalid_selector',
+              selector,
+              message: String(record.message || 'Invalid selector'),
+            })
+          }
+          const matchCount = Number(record.matchCount || 0)
+          if (matchCount === 0) {
+            return browserStructuredOutput({ ok: false, errorKind: 'target_not_found', selector })
+          }
+          if (matchCount > 1) {
+            return browserStructuredOutput({ ok: false, errorKind: 'target_ambiguous', selector, matchCount })
+          }
+          return fitReadContent(record.content, maxChars)
+        }
         const content = await controller.getPageContent(tabId)
         if (!content || content.trim().length === 0) {
-          return 'Page content is empty or still loading.'
+          return fitReadContent('Page content is empty or still loading.', maxChars)
         }
-        return truncate(content)
+        return fitReadContent(content, maxChars)
       }
 
-      case 'browser_read_page_map': {
+      case 'snapshot': {
         let tabId = (args.tab_id as string) || null
         tabId = (await resolveHighControlAgentTab(controller, args, { signal: abortSignal })).tabId
         const maxBytes = typeof args.max_bytes === 'number'
@@ -615,7 +766,7 @@ export async function executeBrowserObserveTool(
           : 0
         if (firstTargetCount < 5) {
           await waitForReady(controller, tabId, 3000, undefined, abortSignal)
-          payload = await captureAgentPageMap(controller, tabId, maxBytes)
+          payload = await captureAgentPageMap(controller, tabId, maxBytes, { force: true })
           payload.evidence = {
             ...(payload.evidence as Record<string, unknown>),
             settleRetried: true,
@@ -643,7 +794,29 @@ export async function executeBrowserObserveTool(
         })
       }
 
-      case 'browser_probe_readonly': {
+      case 'find': {
+        let tabId = (args.tab_id as string) || null
+        tabId = (await resolveHighControlAgentTab(controller, args, { signal: abortSignal })).tabId
+        const limit = Math.max(1, Math.min(100, Number(args.limit || 20)))
+        const payload = await captureAgentPageMap(controller, tabId, DEFAULT_AGENT_PAGE_MAP_MAX_BYTES)
+        const found = browserSnapshotService.find(controller, tabId, {
+          query: String(args.query || ''),
+          role: String(args.role || ''),
+          cursor: Number(args.cursor || 0),
+          limit,
+        })
+        return browserStructuredOutput({
+          ok: true,
+          pageIdentity: payload.pageIdentity,
+          matches: found?.matches || [],
+          count: found?.matches.length || 0,
+          total: found?.total || 0,
+          cursor: found?.cursor || 0,
+          nextCursor: found?.nextCursor || null,
+        })
+      }
+
+      case 'snapshot_probe': {
         let tabId = (args.tab_id as string) || null
         tabId = (await resolveHighControlAgentTab(controller, args, { signal: abortSignal })).tabId
         const requestedGeneration = Number(args.generation)
@@ -651,35 +824,29 @@ export async function executeBrowserObserveTool(
         if (!Number.isFinite(requestedGeneration) || requestedGeneration <= 0) {
           return browserStructuredErrorOutput(agentBrowserError(
             'stale_page_map',
-            'generation is required. Call browser_read_page_map first and pass its pageIdentity.generation.',
+            'generation is required. Call browser_snapshot first and pass its pageIdentity.generation.',
           ))
         }
         if (currentGeneration === null || currentGeneration !== requestedGeneration) {
           return browserStructuredErrorOutput(agentBrowserError(
             'stale_page_map',
-            'Readonly probe requires a fresh page map generation. Call browser_read_page_map again.',
+            'Readonly probe requires a fresh page map generation. Call browser_snapshot again.',
             { currentGeneration, requestedGeneration },
           ))
         }
-        const activeUrl = tabId
-          ? controller.getTabList?.().find((tab) => tab.id === tabId)?.url
-          : controller.getActiveTab?.()?.url
-        const riskDecision = isHighControlPlatformText(activeUrl)
-          ? 'fixed_scope_only'
-          : 'allowed'
         const request = normalizeBrowserReadonlyProbeRequest({
           generation: requestedGeneration,
           query: args.query,
           scope: args.scope,
           maxNodes: args.max_nodes,
           includeHidden: args.include_hidden,
-          riskDecision,
+          riskDecision: 'allowed',
         })
         const result = await controller.executeJS(tabId, buildBrowserReadonlyProbeJs(request))
         return JSON.stringify(result, null, 2)
       }
 
-      case 'browser_capture_viewport': {
+      case 'screenshot': {
         let tabId = (args.tab_id as string) || null
         tabId = (await resolveHighControlAgentTab(controller, args, { signal: abortSignal })).tabId
         const mode = String(args.mode || 'viewport') as 'viewport' | 'clip' | 'full_page'
@@ -697,20 +864,24 @@ export async function executeBrowserObserveTool(
         const width = Math.round(metrics.width)
         const height = Math.round(metrics.height)
         const viewportZero = width <= 0 || height <= 0
-        const imageId = cacheScreenshot(base64, Math.round(metrics.width), Math.round(metrics.height))
-        return JSON.stringify({
-          image_id: imageId,
+        const data = {
+          ok: !viewportZero,
           width,
           height,
           mode,
           ...(viewportZero ? {
             warning: 'viewport_zero_or_hidden',
-            nextSuggestedAction: 'Use browser_get_tabs to confirm active tab, then use browser_power_eval or browser_power_cdp(Page.getFrameTree / Runtime.evaluate) for iframe/OOPIF page structure instead of repeating viewport capture.',
+            nextSuggestedAction: 'Use browser_tabs to confirm the active tab, then browser_snapshot or browser_cdp for frame structure instead of repeating capture.',
           } : {}),
-        }, null, 2)
+        }
+        return createToolExecutionOutput(JSON.stringify(data, null, 2), {
+          shape: 'multimodal',
+          data,
+          content: viewportZero ? [] : [{ type: 'image', data: base64, mediaType: 'image/png', detail: 'auto' }],
+        })
       }
 
-      case 'browser_probe_workflow_state': {
+      case 'status': {
         const startedAt = Date.now()
         const tabId = (args.tab_id as string) || null
         const prompt = String(args.prompt || '')
@@ -728,7 +899,6 @@ export async function executeBrowserObserveTool(
 
         const base64 = await controller.screenshotAdvanced(tabId, { mode: 'viewport' })
         const metrics = await controller.getViewportMetrics(tabId)
-        const imageId = cacheScreenshot(base64, Math.round(metrics.width), Math.round(metrics.height))
 
         let uploadTargets: ActionTargetCandidate[] = []
         let inputTargets: ActionTargetCandidate[] = []
@@ -812,12 +982,11 @@ export async function executeBrowserObserveTool(
             : undefined,
         })
 
-        return JSON.stringify({
+        const data = {
           ok: true,
           ...toolMeta,
           latencyMs: Date.now() - startedAt,
           screenshot: {
-            image_id: imageId,
             width: Math.round(metrics.width),
             height: Math.round(metrics.height),
             mode: 'viewport',
@@ -842,10 +1011,15 @@ export async function executeBrowserObserveTool(
             ...(domState.bodyStateText ? ['body_state_observed'] : []),
             ...visionCandidates.flatMap((item) => item.evidence || []),
           ]),
-        }, null, 2)
+        }
+        return createToolExecutionOutput(JSON.stringify(data, null, 2), {
+          shape: 'multimodal',
+          data,
+          content: [{ type: 'image', data: base64, mediaType: 'image/png', detail: 'auto' }],
+        })
       }
 
-      case 'browser_locate_action_targets': {
+      case 'find_action': {
         const startedAt = Date.now()
         const tabId = (args.tab_id as string) || null
         const action = String(args.action || '').trim() as 'upload' | 'send' | 'close' | 'back'
@@ -869,7 +1043,7 @@ export async function executeBrowserObserveTool(
         }, null, 2)
       }
 
-      case 'browser_locate_input_targets': {
+      case 'find_input': {
         const startedAt = Date.now()
         const tabId = (args.tab_id as string) || null
         const target = String(args.target || '').trim().toLowerCase()
@@ -906,18 +1080,26 @@ export async function executeBrowserObserveTool(
         }, null, 2)
       }
 
-      case 'browser_analyze_viewport': {
+      case 'screenshot_analyze': {
         const startedAt = Date.now()
-        const tabId = (args.tab_id as string) || null
-        const action = String(args.action || '').trim() as 'upload' | 'send' | 'close' | 'back' | 'input'
-        if (!['upload', 'send', 'close', 'back', 'input'].includes(action)) {
-          return browserStructuredOutput({ ok: false, reason: 'invalid_action' })
-        }
+        let tabId = (args.tab_id as string) || null
+        tabId = (await resolveHighControlAgentTab(controller, args, { signal: abortSignal })).tabId
+        const action = String(args.action || 'general').trim() as 'upload' | 'send' | 'close' | 'back' | 'input' | 'general'
         const includeDomCandidates = args.include_dom_candidates !== false
-        const domCandidates = includeDomCandidates
+        const domCandidates = includeDomCandidates && action !== 'general'
           ? await locateActionTargets(controller, tabId, action)
           : []
-        const screenshot = await controller.screenshotAdvanced(tabId, { mode: 'viewport' })
+        const mode = String(args.mode || 'viewport') as 'viewport' | 'clip' | 'full_page'
+        const clipRaw = args.clip
+        const clip = clipRaw && typeof clipRaw === 'object'
+          ? {
+            x: Number((clipRaw as Record<string, unknown>).x || 0),
+            y: Number((clipRaw as Record<string, unknown>).y || 0),
+            width: Number((clipRaw as Record<string, unknown>).width || 0),
+            height: Number((clipRaw as Record<string, unknown>).height || 0),
+          }
+          : undefined
+        const screenshot = await controller.screenshotAdvanced(tabId, { mode, clip })
         const identity = await getPageIdentity(controller, tabId)
         const analysis = await analyzeViewportWithVision({
           action,
@@ -932,6 +1114,7 @@ export async function executeBrowserObserveTool(
           ...toolMeta,
           ...(!analysis.ok ? { errorCode: 'viewport_analysis_failed' } : {}),
           action,
+          mode,
           latencyMs: Date.now() - startedAt,
           reason: analysis.reason,
           ...(analysis.remediation ? { remediation: analysis.remediation } : {}),
@@ -942,18 +1125,14 @@ export async function executeBrowserObserveTool(
             ...((analysis.analysis?.targets || []).map((item) => String(item.reason || ''))),
           ]),
         }
-        return stringifyBrowserJsonOrFailure(payload)
+        return createToolExecutionOutput(JSON.stringify(payload, null, 2), {
+          shape: 'multimodal',
+          data: payload,
+          content: [{ type: 'image', data: screenshot, mediaType: 'image/png', detail: 'auto' }],
+        })
       }
 
-      case 'browser_query_gemini': {
-        const text = String(args.text || '').trim()
-        if (!text) return 'Error: text is required'
-        const tabId = (args.tab_id as string) || null
-        const waitResponseMs = Math.max(6000, Math.min(120_000, Number(args.wait_response_ms || 35_000)))
-        return await runGeminiQuery(controller, text, tabId, waitResponseMs, abortSignal)
-      }
-
-      case 'browser_wait': {
+      case 'wait_ready': {
         const timeoutMs = Number(args.timeout_ms || 8000)
         const selector = typeof args.selector === 'string' ? args.selector : undefined
         let tabId = (args.tab_id as string) || null
@@ -962,7 +1141,7 @@ export async function executeBrowserObserveTool(
         return `Wait result: ready=${ready.ready}, selectorMatched=${ready.matchedSelector}, elapsed=${ready.elapsedMs}ms`
       }
 
-      case 'browser_wait_for_condition': {
+      case 'wait_condition': {
         let tabId = (args.tab_id as string) || null
         tabId = (await resolveHighControlAgentTab(controller, args, { signal: abortSignal })).tabId
         const customJs = typeof args.custom_js === 'string' ? args.custom_js : undefined

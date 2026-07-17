@@ -1,0 +1,248 @@
+import assert from 'node:assert/strict'
+import test from 'node:test'
+
+import type { BrowserController } from '../main/modules/browser-engine/ipc-handler'
+import { mapBrowserAgentPointerToOverlay } from '../shared/browser-agent-pointer'
+import { createToolExecutionOutput, type ToolExecutionOutput } from '../main/modules/agent-control/tools-runtime/tool-result-types'
+import { runBrowserFillFormSequence } from '../main/modules/tools/browser-act-tools'
+import { executeBrowserTool } from '../main/modules/tools/browser-tools'
+import { browserOriginInteractionBudget } from '../main/modules/browser-engine/origin-interaction-budget'
+import {
+  captureAgentPageMap,
+  executeBrowserObserveTool,
+  __resetBrowserAgentPageMapForTests,
+} from '../main/modules/tools/browser-observe-tools'
+
+function observeContext(controller: BrowserController) {
+  return {
+    controller,
+    attachBrowserActionSessionOutput: (result: string | ToolExecutionOutput) => result,
+  }
+}
+
+test('browser_fill_form stops at the first failed field and never submits partial data', async () => {
+  const calls: string[] = []
+  const outcome = await runBrowserFillFormSequence(
+    [
+      { selector: '#name', value: 'Ada' },
+      { selector: '#email', value: 'bad' },
+      { selector: '#city', value: 'London' },
+    ],
+    { submit: true },
+    async (operation) => {
+      calls.push(operation)
+      return calls.length === 2
+        ? createToolExecutionOutput('{"ok":false,"errorKind":"target_not_found"}', {
+          data: { ok: false, errorKind: 'target_not_found' },
+        })
+        : createToolExecutionOutput('{"ok":true}', { data: { ok: true } })
+    },
+  )
+  assert.equal(outcome.ok, false)
+  assert.equal(outcome.failedIndex, 1)
+  assert.equal(outcome.submitted, false)
+  assert.deepEqual(calls, ['type_selector', 'type_selector'])
+})
+
+test('browser_fill_form reports a failed submit instead of claiming submitted', async () => {
+  const calls: string[] = []
+  const outcome = await runBrowserFillFormSequence(
+    [{ selector: '#name', value: 'Ada' }],
+    { submit: true },
+    async (operation) => {
+      calls.push(operation)
+      return operation === 'press_key' ? 'Error: key dispatch failed' : '{"ok":true}'
+    },
+  )
+  assert.equal(outcome.ok, false)
+  assert.equal(outcome.errorKind, 'form_submit_failed')
+  assert.equal(outcome.submitted, false)
+  assert.deepEqual(calls, ['type_selector', 'press_key'])
+})
+
+test('browser_read enforces max_chars and returns structured selector ambiguity', async () => {
+  let selectorMatches = 1
+  const controller = {
+    getActiveTab: () => ({ id: 'tab-a', url: 'https://example.test/' }),
+    getTabList: () => [{ id: 'tab-a', url: 'https://example.test/', active: true }],
+    getPageContent: async () => 'abcdefghijk',
+    executeJS: async () => ({ matchCount: selectorMatches, content: 'selected region' }),
+  } as unknown as BrowserController
+
+  const bounded = await executeBrowserObserveTool('read', { tab_id: 'tab-a', max_chars: 5 }, observeContext(controller))
+  assert.equal(bounded, 'abcde')
+
+  selectorMatches = 2
+  const ambiguous = await executeBrowserObserveTool('read', { tab_id: 'tab-a', selector: '.card' }, observeContext(controller))
+  assert.equal(typeof ambiguous, 'object')
+  assert.equal((ambiguous as ToolExecutionOutput).data?.ok, false)
+  assert.equal((ambiguous as ToolExecutionOutput).data?.errorKind, 'target_ambiguous')
+  assert.equal((ambiguous as ToolExecutionOutput).data?.matchCount, 2)
+})
+
+test('browser_read resolves a fresh opaque target and rejects stale refs structurally', async () => {
+  __resetBrowserAgentPageMapForTests()
+  let documentKey = 'doc-1'
+  const controller = {
+    getActiveTab: () => ({ id: 'tab-a', url: 'https://example.test/' }),
+    getTabList: () => [{ id: 'tab-a', url: 'https://example.test/', active: true }],
+    listFrames: () => [],
+    executeJS: async (_tabId: string | null, script: string) => {
+      if (script.includes('__readyBrowserSnapshotMutationState')) {
+        return { url: `https://example.test/${documentKey}`, title: 'Example', timeOrigin: documentKey, mutationRevision: 0 }
+      }
+      if (script.includes('__READY_AGENT_PAGE_MAP__')) {
+        return {
+          identity: { url: 'https://example.test/', title: 'Example' },
+          viewport: { width: 1000, height: 800 },
+          bodyText: 'body',
+          rawRoots: [{
+            role: 'generic',
+            children: [{ role: 'button', name: 'Open details', backendDOMNodeId: 1 }],
+          }],
+        }
+      }
+      if (script.includes('__READY_AGENT_TARGET_READ__')) {
+        return { matchCount: 1, content: 'Open details\nAccount details' }
+      }
+      return null
+    },
+  } as unknown as BrowserController
+
+  const snapshot = await captureAgentPageMap(controller, 'tab-a')
+  const ref = String(((snapshot.pageMap as { targets: Array<{ targetId: string }> }).targets[0]).targetId)
+  const content = await executeBrowserObserveTool('read', { tab_id: 'tab-a', target_id: ref, max_chars: 12 }, observeContext(controller))
+  assert.equal(content, 'Open details')
+
+  documentKey = 'doc-2'
+  const stale = await executeBrowserObserveTool('read', { tab_id: 'tab-a', target_id: ref }, observeContext(controller))
+  assert.equal(typeof stale, 'object')
+  assert.equal((stale as ToolExecutionOutput).data?.ok, false)
+  assert.equal((stale as ToolExecutionOutput).data?.errorKind, 'target_stale')
+})
+
+test('browser_screenshot with analysis always returns the image and honors clip mode', async () => {
+  let captured: unknown = null
+  const controller = {
+    getActiveTab: () => ({ id: 'tab-a', url: 'https://example.test/' }),
+    getTabList: () => [{ id: 'tab-a', url: 'https://example.test/', active: true }],
+    screenshotAdvanced: async (_tabId: string | null, options: unknown) => {
+      captured = options
+      return 'ZmFrZS1wbmc='
+    },
+    executeJS: async () => ({ title: 'Example', url: 'https://example.test/', activeElement: 'body:' }),
+  } as unknown as BrowserController
+
+  const result = await executeBrowserObserveTool('screenshot_analyze', {
+    tab_id: 'tab-a',
+    mode: 'clip',
+    clip: { x: 1, y: 2, width: 300, height: 200 },
+  }, observeContext(controller))
+  assert.equal(typeof result, 'object')
+  const output = result as ToolExecutionOutput
+  assert.equal(output.shape, 'multimodal')
+  assert.deepEqual(captured, { mode: 'clip', clip: { x: 1, y: 2, width: 300, height: 200 } })
+  assert.equal(output.data?.action, 'general')
+  assert.equal(output.content?.[0]?.type, 'image')
+  assert.equal(output.content?.[0]?.type === 'image' ? output.content[0].data : '', 'ZmFrZS1wbmc=')
+})
+
+test('browser_tabs reports popup lineage and exact workflow or lease ownership', async () => {
+  const controller = {
+    getTabList: () => [
+      { id: 'tab-root', title: 'Root', url: 'https://example.test/', active: false, openerTabId: null, owner: 'manual', activity: 'idle' },
+      { id: 'tab-popup', title: 'Popup', url: 'https://example.test/popup', active: true, openerTabId: 'tab-root', owner: 'agent', activity: 'running' },
+      { id: 'tab-other', title: 'Other task', url: 'https://other.test/', active: false, openerTabId: null, owner: 'manual', activity: 'running' },
+    ],
+    getActiveForegroundBrowserWorkflowSession: () => ({
+      runId: 'run-popup',
+      taskId: 'task-popup',
+      lane: 'agent-view',
+      boundTabId: 'tab-popup',
+      sourceUserTabId: 'tab-root',
+      status: 'running',
+    }),
+    getBrowserLeaseSnapshot: () => ({
+      surfaces: {
+        'agent-view': { state: 'held', heldBy: 'task-popup', runId: 'run-popup', tabId: 'tab-popup', leaseId: 'lease-popup' },
+        'user-view': { state: 'held', heldBy: 'task-other', runId: 'run-other', tabId: 'tab-other', leaseId: 'lease-other' },
+      },
+    }),
+  } as unknown as BrowserController
+
+  const result = await executeBrowserObserveTool('tabs_list', {}, observeContext(controller)) as ToolExecutionOutput
+  const tabs = result.data?.tabs as Array<Record<string, unknown>>
+  const popup = tabs.find((tab) => tab.id === 'tab-popup')!
+  const other = tabs.find((tab) => tab.id === 'tab-other')!
+  assert.equal(popup.openerTabId, 'tab-root')
+  assert.equal(popup.rootTabId, 'tab-root')
+  assert.deepEqual(
+    (popup.workflowBindings as Array<Record<string, unknown>>).map((item) => item.kind),
+    ['foreground_workflow', 'write_lease'],
+  )
+  assert.equal((other.workflowBindings as Array<Record<string, unknown>>)[0]?.taskId, 'task-other')
+})
+
+test('agent pointer follows page zoom while remaining Retina-DIP invariant', () => {
+  const bounds = { left: 50, top: 80, width: 1000, height: 800 }
+  for (const [zoom, expectedX, expectedY] of [
+    [0.72, 72, 144],
+    [1, 100, 200],
+    [1.25, 125, 250],
+    [2, 200, 400],
+  ] as const) {
+    assert.deepEqual(
+      mapBrowserAgentPointerToOverlay({ x: 100, y: 200, bounds, pageZoomFactor: zoom, displayScaleFactor: 2 }),
+      { x: expectedX, y: expectedY },
+    )
+  }
+  assert.deepEqual(
+    mapBrowserAgentPointerToOverlay({ x: 100, y: 200, bounds, pageZoomFactor: 1, displayScaleFactor: 1 }),
+    mapBrowserAgentPointerToOverlay({ x: 100, y: 200, bounds, pageZoomFactor: 1, displayScaleFactor: 2 }),
+  )
+})
+
+test('browser tool wiring records same-origin network 429 and explicit takeover completion clears challenges', async () => {
+  browserOriginInteractionBudget.resetForTests()
+  let stopped = false
+  let dialogOpen = true
+  const controller = {
+    getActiveTab: () => ({ id: 'tab-a', url: 'https://example.test/' }),
+    getTabList: () => [{ id: 'tab-a', url: 'https://example.test/', active: true }],
+    getBrowserDialog: async () => dialogOpen ? { type: 'confirm', message: 'Publish?' } : null,
+    handleBrowserDialog: async () => { dialogOpen = false },
+    startNetworkObserver: async () => ({
+      events: () => [{
+        requestId: 'request-1',
+        url: 'https://example.test/api/publish',
+        status: 429,
+        responseHeaders: { 'Retry-After': '3' },
+      }],
+      stop: async () => { stopped = true },
+    }),
+  } as unknown as BrowserController
+
+  try {
+    await executeBrowserTool('browser_dialog', { action: 'accept' }, controller)
+    const limited = browserOriginInteractionBudget.getState('https://example.test')
+    assert.equal(stopped, true)
+    assert.equal(limited.consecutiveFailures, 1)
+    assert.ok(limited.cooldownUntil > Date.now())
+
+    browserOriginInteractionBudget.record('https://example.test', { challenge: true, actionSucceeded: false })
+    const completed = await executeBrowserTool(
+      'browser_request_takeover',
+      { action: 'complete', reason: 'challenge solved' },
+      controller,
+      undefined,
+      undefined,
+      undefined,
+      '验证完成了，继续',
+    )
+    assert.equal(typeof completed, 'object')
+    assert.equal((completed as ToolExecutionOutput).data?.takeover_state, 'completed')
+    assert.equal(browserOriginInteractionBudget.getState('https://example.test').challengeBlocked, false)
+  } finally {
+    browserOriginInteractionBudget.resetForTests()
+  }
+})

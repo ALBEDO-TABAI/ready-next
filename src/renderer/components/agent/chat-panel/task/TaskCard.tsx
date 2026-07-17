@@ -237,9 +237,7 @@ export function TaskCard({
   const browserCollectionConsent = run.module === 'browser'
     ? run.progress?.browserCollectionConsent || null
     : null
-  const browserCollectionConsentLabel = browserCollectionConsent?.consentKind === 'high_control_url_batch_downgrade'
-    ? '确认降级采集'
-    : '确认部分采集'
+  const browserCollectionConsentLabel = '确认部分采集'
   const progressLabel = formatTaskProgressLabel(run.progress)
   const progressValue = progressPercent(run.progress)
   const progressLabelAlreadyHasPercent = Boolean(progressLabel && /\d+%/.test(progressLabel))

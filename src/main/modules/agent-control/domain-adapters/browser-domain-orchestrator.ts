@@ -130,14 +130,14 @@ function collectBrowserTaskEvidence(
     if (!toolName || /^(Error:|Search failed|Page content is empty)/i.test(resultText.trim())) continue
     const parsed = parseToolJson(resultText)
     if (!isSuccessfulToolRecord(parsed)) continue
-    if (toolName === 'browser_read_page_map' && parsed.pageIdentity) {
+    if (toolName === 'browser_snapshot' && parsed.pageIdentity) {
       evidence.push({ kind: 'page_observed', toolName, summary: 'page map captured' })
       if (recordHasPositiveEvidence(parsed, /^targetMatched$/i)) {
         evidence.push({ kind: 'page_target_matched', toolName, summary: 'target page matched' })
       }
       continue
     }
-    if (toolName === 'browser_probe_readonly' && parsed.ok === true) {
+    if (toolName === 'browser_snapshot' && parsed.ok === true) {
       evidence.push({ kind: 'page_observed', toolName, summary: String(parsed.summary || 'readonly probe captured') })
       if (recordHasPositiveEvidence(parsed, /^targetMatched$/i)) {
         evidence.push({ kind: 'page_target_matched', toolName, summary: 'target page matched' })
@@ -153,13 +153,14 @@ function collectBrowserTaskEvidence(
       }
       continue
     }
-    if (toolName === 'browser_upload_scope_attachment') {
+    if (toolName === 'browser_upload') {
       if (parsed.ok === true && recordHasPositiveEvidence(parsed, /^(input_has_files|attachment_name_matched|fileInput)$/i)) {
         evidence.push({ kind: 'upload_complete', toolName, summary: resultText.slice(0, 160) })
       }
       continue
     }
-    if (toolName === 'browser_act_on_target' && parsed.ok === true && parsed.changed === true) {
+    if (['browser_click', 'browser_type', 'browser_fill_form', 'browser_select'].includes(toolName)
+      && parsed.ok === true && parsed.changed === true) {
       const action = String(parsed.action || '')
       if ((action === 'fill' || action === 'choose') && recordHasPositiveEvidence(parsed, /^(prompt_matched|prompt_filled)$/i)) {
         evidence.push({ kind: 'prompt_complete', toolName, summary: `target action ${action}` })
@@ -169,13 +170,13 @@ function collectBrowserTaskEvidence(
       }
       continue
     }
-    if (['browser_type', 'browser_type_smart', 'browser_compose_message'].includes(toolName)) {
+    if (['browser_type', 'browser_fill_form'].includes(toolName)) {
       if (parsed.ok === true && recordHasPositiveEvidence(parsed, /^(prompt_matched|prompt_filled)$/i)) {
         evidence.push({ kind: 'prompt_complete', toolName, summary: resultText.slice(0, 160) })
       }
       continue
     }
-    if (['browser_navigate', 'browser_search', 'browser_read_page'].includes(toolName)) {
+    if (['browser_navigate', 'browser_search', 'browser_read'].includes(toolName)) {
       if (parsed.ok === true) {
         evidence.push({ kind: 'page_observed', toolName, summary: resultText.slice(0, 160) })
       }

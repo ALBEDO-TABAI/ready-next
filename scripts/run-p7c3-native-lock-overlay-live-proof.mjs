@@ -283,7 +283,7 @@ function buildMainProbeExpression(fixtureUrl) {
     async () => {
       const api = window.electronAPI?.browser
       const fail = (error, detail = null) => JSON.stringify({ ok: false, error, detail })
-      if (!api?.createTab || !api?.switchTab || !api?.getTabs || !api?.showBrowserLockOverlay || !api?.hideBrowserLockOverlay || !api?.getBrowserLockOverlaySnapshot) {
+      if (!api?.createTab || !api?.switchTab || !api?.getTabs || !api?.sendIntent || !api?.showBrowserLockOverlay || !api?.hideBrowserLockOverlay || !api?.getBrowserLockOverlaySnapshot || !api?.getBrowserAgentPointerSnapshot || !api?.p7cLiveProofAgentClick || !api?.p7cLiveProofFinishAgentAction) {
         return fail('missing-p7c3-browser-api')
       }
       window.dispatchEvent(new CustomEvent('ready:workbench-mode-change-request', { detail: { mode: 'browser' } }))
@@ -297,10 +297,35 @@ function buildMainProbeExpression(fixtureUrl) {
       if (!created?.success || !created.tabId) return fail('failed-to-create-fixture-tab', created?.error || created)
       await api.switchTab(created.tabId)
       await new Promise((resolve) => setTimeout(resolve, 1500))
-      const frame = document.querySelector('[data-browser-content-frame]')
+      let frame = document.querySelector('[data-browser-content-frame]')
+      if (!frame) {
+        // A direct proof-only create can race the renderer's initial empty-tab
+        // hydration. A real mode round-trip makes the renderer reconcile the
+        // already-created native tab before geometry is measured.
+        window.dispatchEvent(new CustomEvent('ready:workbench-mode-change-request', { detail: { mode: 'document' } }))
+        await new Promise((resolve) => setTimeout(resolve, 700))
+        window.dispatchEvent(new CustomEvent('ready:workbench-mode-change-request', { detail: { mode: 'browser' } }))
+        const frameReadyStartedAt = performance.now()
+        while (performance.now() - frameReadyStartedAt < 5000) {
+          frame = document.querySelector('[data-browser-content-frame]')
+          if (frame) break
+          await new Promise((resolve) => setTimeout(resolve, 100))
+        }
+      }
       if (!frame) return fail('missing-browser-content-frame')
       const rect = frame.getBoundingClientRect()
       if (rect.width <= 0 || rect.height <= 0) return fail('invalid-browser-content-frame', { width: rect.width, height: rect.height })
+      const hostShown = api.sendIntent({
+        kind: 'show',
+        intentId: Date.now(),
+        tabId: created.tabId,
+        bounds: { x: rect.left, y: rect.top, w: rect.width, h: rect.height },
+        reason: 'tab-activate',
+      })
+      if (!hostShown?.success) return fail('failed-to-show-fixture-host', hostShown?.error || hostShown)
+      await new Promise((resolve) => setTimeout(resolve, 500))
+      const lifecycleStarted = await api.p7cLiveProofAgentClick(140, 160)
+      if (!lifecycleStarted?.success) return fail('failed-to-start-agent-action-lifecycle', lifecycleStarted?.error || lifecycleStarted)
       const tabsBefore = await api.getTabs()
       const activeBefore = Array.isArray(tabsBefore) ? tabsBefore.find((tab) => tab.id === created.tabId) : null
       const snapshot = {
@@ -311,9 +336,18 @@ function buildMainProbeExpression(fixtureUrl) {
         bounds: { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
         proof: { enabled: true, color: ${JSON.stringify(OVERLAY_MARKER_HEX)}, samplePoint: ${JSON.stringify(PROOF_SAMPLE)} },
       }
-      const shown = await api.showBrowserLockOverlay(snapshot)
+      let shown = await api.showBrowserLockOverlay(snapshot)
       if (!shown?.success) return fail('failed-to-show-lock-overlay', shown?.error || shown)
       await new Promise((resolve) => setTimeout(resolve, 700))
+      let shownSnapshot = await api.getBrowserLockOverlaySnapshot()
+      if (!shownSnapshot?.success || !shownSnapshot.data) {
+        await new Promise((resolve) => setTimeout(resolve, 800))
+        shown = await api.showBrowserLockOverlay(snapshot)
+        if (!shown?.success) return fail('failed-to-reshow-lock-overlay', shown?.error || shown)
+        await new Promise((resolve) => setTimeout(resolve, 500))
+        shownSnapshot = await api.getBrowserLockOverlaySnapshot()
+      }
+      if (!shownSnapshot?.success || !shownSnapshot.data) return fail('lock-overlay-did-not-stabilize', shownSnapshot)
       const tabsAfter = await api.getTabs()
       const activeAfter = Array.isArray(tabsAfter) ? tabsAfter.find((tab) => tab.id === created.tabId) : null
       return JSON.stringify({
@@ -321,6 +355,9 @@ function buildMainProbeExpression(fixtureUrl) {
         created,
         activeBefore,
         activeAfter,
+        hostShown,
+        lifecycleStarted,
+        shownSnapshot,
         snapshot,
         frameBounds: { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
         devicePixelRatio: window.devicePixelRatio || 1,
@@ -335,13 +372,15 @@ async function main() {
   const fixture = await startFixtureServer()
   let report
   let mainClient = null
+  let overlayClient = null
+  let pointerClient = null
   try {
     const mainTarget = await findTarget((target) => (
       target.type === 'page'
       && target.webSocketDebuggerUrl
       && typeof target.url === 'string'
       && target.url.startsWith('http://localhost:5173/')
-      && !/browser-lock-overlay/.test(target.url)
+      && !/(browser-lock-overlay|browser-agent-pointer)/.test(target.url)
     ), 20_000, 'Ready renderer')
     mainClient = await connect(mainTarget)
     const probe = await evaluate(mainClient, buildMainProbeExpression(fixture.url))
@@ -353,38 +392,34 @@ async function main() {
       && typeof target.url === 'string'
       && /browser-lock-overlay/.test(target.url)
     ), 8_000, 'browser lock overlay')
-    const overlayClient = await connect(overlayTarget)
-    let overlayMetrics
-    try {
-      overlayMetrics = await evaluate(overlayClient, `JSON.stringify({
-        text: document.body.innerText,
-        url: location.href,
-        marker: Boolean(document.querySelector('[data-p7c3-proof-marker]')),
-        screenX: window.screenX,
-        screenY: window.screenY,
-        outerWidth: window.outerWidth,
-        outerHeight: window.outerHeight,
-        devicePixelRatio: window.devicePixelRatio || 1,
-        screenWidth: window.screen.width,
-        screenHeight: window.screen.height,
-        screenAvailLeft: window.screen.availLeft || 0,
-        screenAvailTop: window.screen.availTop || 0,
-        proofMarkerRectContainsSample: (() => {
-          const marker = document.querySelector('[data-p7c3-proof-marker]')
-          if (!marker) return false
-          const rect = marker.getBoundingClientRect()
-          return rect.left <= ${PROOF_SAMPLE.x}
-            && rect.right >= ${PROOF_SAMPLE.x}
-            && rect.top <= ${PROOF_SAMPLE.y}
-            && rect.bottom >= ${PROOF_SAMPLE.y}
-        })(),
-        proofMarkerColor: document.querySelector('[data-p7c3-proof-marker]')
-          ? getComputedStyle(document.querySelector('[data-p7c3-proof-marker]')).backgroundColor
-          : null
-      })`)
-    } finally {
-      overlayClient.ws.close()
-    }
+    overlayClient = await connect(overlayTarget)
+    const overlayMetrics = await evaluate(overlayClient, `JSON.stringify({
+      text: document.body.innerText,
+      url: location.href,
+      marker: Boolean(document.querySelector('[data-p7c3-proof-marker]')),
+      visibilityState: document.visibilityState,
+      screenX: window.screenX,
+      screenY: window.screenY,
+      outerWidth: window.outerWidth,
+      outerHeight: window.outerHeight,
+      devicePixelRatio: window.devicePixelRatio || 1,
+      screenWidth: window.screen.width,
+      screenHeight: window.screen.height,
+      screenAvailLeft: window.screen.availLeft || 0,
+      screenAvailTop: window.screen.availTop || 0,
+      proofMarkerRectContainsSample: (() => {
+        const marker = document.querySelector('[data-p7c3-proof-marker]')
+        if (!marker) return false
+        const rect = marker.getBoundingClientRect()
+        return rect.left <= ${PROOF_SAMPLE.x}
+          && rect.right >= ${PROOF_SAMPLE.x}
+          && rect.top <= ${PROOF_SAMPLE.y}
+          && rect.bottom >= ${PROOF_SAMPLE.y}
+      })(),
+      proofMarkerColor: document.querySelector('[data-p7c3-proof-marker]')
+        ? getComputedStyle(document.querySelector('[data-p7c3-proof-marker]')).backgroundColor
+        : null
+    })`)
 
     const fixtureTarget = await findTarget((target) => (
       target.type === 'page'
@@ -436,6 +471,134 @@ async function main() {
       && /rgb\(255, 0, 255\)/.test(String(overlayMetrics.proofMarkerColor || '')),
     )
 
+    const closeButtonClicked = await evaluate(overlayClient, `JSON.stringify((() => {
+      const button = document.querySelector('button[aria-label="关闭 Agent 控制提示"]')
+      if (!button) return false
+      button.click()
+      return true
+    })())`)
+    await wait(400)
+    const overlayAfterClose = await evaluate(overlayClient, `JSON.stringify({
+      visibilityState: document.visibilityState,
+      rootPresent: Boolean(document.querySelector('[data-browser-lock-overlay-root]'))
+    })`)
+    const closeButtonDismissesOverlay = Boolean(closeButtonClicked && overlayAfterClose.visibilityState === 'hidden')
+
+    const clickResult = await evaluate(mainClient, `(async () => {
+      const click = await window.electronAPI.browser.p7cLiveProofAgentClick(140, 160)
+      await new Promise((resolve) => setTimeout(resolve, 500))
+      const pointerSnapshot = await window.electronAPI.browser.getBrowserAgentPointerSnapshot()
+      return JSON.stringify({ click, pointerSnapshot })
+    })()`)
+    const pointerTarget = await findTarget((target) => (
+      target.type === 'page'
+      && target.webSocketDebuggerUrl
+      && typeof target.url === 'string'
+      && /browser-agent-pointer/.test(target.url)
+    ), 8_000, 'browser agent pointer')
+    pointerClient = await connect(pointerTarget)
+    const pointerMetrics = await evaluate(pointerClient, `JSON.stringify((() => {
+      const root = document.querySelector('[data-browser-agent-pointer-root]')
+      const ring = document.querySelector('[data-browser-agent-pointer-ring]')
+      const ringRect = ring?.getBoundingClientRect()
+      return {
+        url: location.href,
+        visibilityState: document.visibilityState,
+        phase: root?.getAttribute('data-pointer-phase') || null,
+        ringCenter: ringRect ? { x: ringRect.left + ringRect.width / 2, y: ringRect.top + ringRect.height / 2 } : null,
+        screenX: window.screenX,
+        screenY: window.screenY,
+        outerWidth: window.outerWidth,
+        outerHeight: window.outerHeight,
+      }
+    })())`)
+    const pointerSnapshot = clickResult.pointerSnapshot?.data
+    const pointerBounds = {
+      x: Number(pointerMetrics.screenX || 0),
+      y: Number(pointerMetrics.screenY || 0),
+      width: Number(pointerMetrics.outerWidth || 0),
+      height: Number(pointerMetrics.outerHeight || 0),
+    }
+    const pointerMatchesTrustedInput = Boolean(
+      clickResult.click?.success
+      && clickResult.pointerSnapshot?.success
+      && pointerSnapshot?.phase === 'release'
+      && pointerMetrics.phase === 'release'
+      && pointerMetrics.visibilityState === 'visible'
+      && Math.abs(Number(pointerSnapshot?.x) - Number(clickResult.click?.x)) <= 1
+      && Math.abs(Number(pointerSnapshot?.y) - Number(clickResult.click?.y)) <= 1
+      && Math.abs(Number(pointerMetrics.ringCenter?.x) - Number(clickResult.click?.x)) <= 2
+      && Math.abs(Number(pointerMetrics.ringCenter?.y) - Number(clickResult.click?.y)) <= 2
+      && Math.abs(pointerBounds.x - browserFrameScreenBounds.x) <= 2
+      && Math.abs(pointerBounds.y - browserFrameScreenBounds.y) <= 2
+      && Math.abs(pointerBounds.width - browserFrameScreenBounds.width) <= 2
+      && Math.abs(pointerBounds.height - browserFrameScreenBounds.height) <= 2
+    )
+
+    const hostHideResult = await evaluate(mainClient, `(async () => {
+      const api = window.electronAPI.browser
+      const hide = api.sendIntent({
+        kind: 'hide',
+        intentId: Date.now(),
+        tabId: ${JSON.stringify(probe.created.tabId)},
+        reason: 'mode-switch',
+      })
+      await new Promise((resolve) => setTimeout(resolve, 300))
+      const pointer = await api.getBrowserAgentPointerSnapshot()
+      return JSON.stringify({ hide, pointer })
+    })()`)
+    const pointerAfterHostHide = await evaluate(pointerClient, `JSON.stringify({ visibilityState: document.visibilityState })`)
+    const pointerClearsWhenHostHidden = Boolean(
+      hostHideResult.hide?.success
+      && hostHideResult.pointer?.success
+      && hostHideResult.pointer.data === null
+      && pointerAfterHostHide.visibilityState === 'hidden'
+    )
+    const restoreAndClickResult = await evaluate(mainClient, `(async () => {
+      const api = window.electronAPI.browser
+      const show = api.sendIntent({
+        kind: 'show',
+        intentId: Date.now(),
+        tabId: ${JSON.stringify(probe.created.tabId)},
+        bounds: ${JSON.stringify({
+          x: probe.frameBounds.left,
+          y: probe.frameBounds.top,
+          w: probe.frameBounds.width,
+          h: probe.frameBounds.height,
+        })},
+        reason: 'tab-activate',
+      })
+      await new Promise((resolve) => setTimeout(resolve, 300))
+      const click = await api.p7cLiveProofAgentClick(140, 160)
+      await new Promise((resolve) => setTimeout(resolve, 300))
+      const pointer = await api.getBrowserAgentPointerSnapshot()
+      return JSON.stringify({ show, click, pointer })
+    })()`)
+    const pointerReturnsAfterHostRestore = Boolean(
+      restoreAndClickResult.show?.success
+      && restoreAndClickResult.click?.success
+      && restoreAndClickResult.pointer?.success
+      && restoreAndClickResult.pointer.data?.phase === 'release'
+    )
+
+    const finishResult = await evaluate(mainClient, `(async () => JSON.stringify(
+      await window.electronAPI.browser.p7cLiveProofFinishAgentAction('finish')
+    ))()`)
+    await wait(1_100)
+    const terminalSnapshots = await evaluate(mainClient, `(async () => JSON.stringify({
+      pointer: await window.electronAPI.browser.getBrowserAgentPointerSnapshot(),
+      overlay: await window.electronAPI.browser.getBrowserLockOverlaySnapshot()
+    }))()`)
+    const terminalOverlayState = await evaluate(overlayClient, `JSON.stringify({ visibilityState: document.visibilityState })`)
+    const terminalPointerState = await evaluate(pointerClient, `JSON.stringify({ visibilityState: document.visibilityState })`)
+    const pointerClearsAfterTerminal = Boolean(
+      finishResult?.success
+      && terminalSnapshots.pointer?.success
+      && terminalSnapshots.pointer.data === null
+      && terminalPointerState.visibilityState === 'hidden'
+      && terminalOverlayState.visibilityState === 'hidden'
+    )
+
     const hideResult = await evaluate(mainClient, `(async () => {
       const hide = await window.electronAPI.browser.hideBrowserLockOverlay()
       await new Promise((resolve) => setTimeout(resolve, 300))
@@ -448,7 +611,19 @@ async function main() {
       && probe.activeBefore?.url === probe.activeAfter?.url
 
     report = {
-      ok: Boolean(overlayRenders && overlayMatchesExpected && overlayWithinBrowserFrame && browserViewVisible && clears && activeTabPreserved),
+      ok: Boolean(
+        overlayRenders
+        && overlayMatchesExpected
+        && overlayWithinBrowserFrame
+        && browserViewVisible
+        && closeButtonDismissesOverlay
+        && pointerMatchesTrustedInput
+        && pointerClearsWhenHostHidden
+        && pointerReturnsAfterHostRestore
+        && pointerClearsAfterTerminal
+        && clears
+        && activeTabPreserved
+      ),
       scope: 'P7c3-browserview-proof-native-lock-overlay',
       generatedAt: new Date().toISOString(),
       error: null,
@@ -470,6 +645,12 @@ async function main() {
           height: overlayMetrics.outerHeight,
         },
         text: overlayMetrics.text,
+      },
+      pointer: {
+        mechanism: 'click-through-native-child-window',
+        route: '/browser-agent-pointer',
+        bounds: pointerBounds,
+        snapshot: pointerSnapshot,
       },
       browserViewFixture: {
         activeTabId: probe.created.tabId,
@@ -514,6 +695,35 @@ async function main() {
           source: 'browser-lock-overlay-snapshot',
           hideResult,
         },
+        closeButtonDismissesOverlay: {
+          ok: closeButtonDismissesOverlay,
+          source: 'native-overlay-close-button',
+          closeButtonClicked,
+          after: overlayAfterClose,
+        },
+        pointerMatchesTrustedInput: {
+          ok: pointerMatchesTrustedInput,
+          source: 'trusted-cdp-input-and-native-pointer-geometry',
+          clickResult,
+          pointerMetrics,
+          pointerBounds,
+          browserFrameScreenBounds,
+        },
+        pointerClearsOnBrowserViewLifecycle: {
+          ok: Boolean(pointerClearsWhenHostHidden && pointerReturnsAfterHostRestore),
+          source: 'native-browserview-hide-show-lifecycle',
+          hostHideResult,
+          pointerAfterHostHide,
+          restoreAndClickResult,
+        },
+        pointerClearsAfterTerminal: {
+          ok: pointerClearsAfterTerminal,
+          source: 'agent-action-terminal-lifecycle',
+          finishResult,
+          terminalSnapshots,
+          terminalOverlayState,
+          terminalPointerState,
+        },
         activeTabPreserved: {
           ok: activeTabPreserved,
           before: probe.activeBefore,
@@ -538,9 +748,14 @@ async function main() {
     }
   } finally {
     if (mainClient) {
+      await evaluate(mainClient, `(async () => JSON.stringify(
+        await window.electronAPI?.browser?.p7cLiveProofFinishAgentAction?.('abort')
+      ))()`).catch(() => undefined)
       await evaluate(mainClient, '(async () => JSON.stringify(await window.electronAPI?.browser?.hideBrowserLockOverlay?.()))()').catch(() => undefined)
       mainClient.ws.close()
     }
+    overlayClient?.ws.close()
+    pointerClient?.ws.close()
     await fixture.close()
   }
 

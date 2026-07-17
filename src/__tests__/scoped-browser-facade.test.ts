@@ -61,18 +61,18 @@ describe('ScopedBrowserFacade (§3.4 dispatch keystone)', () => {
 
   it('rejects tools outside the collection subset', async () => {
     const { facade, calls } = makeFacade()
-    const out = await facade.run('browser_execute_js', { code: 'x' })
+    const out = await facade.run('browser_eval', { code: 'x', purpose: 'test' })
     assert.equal(parseErr(out)?.errorCode, 'script_blocked')
     assert.equal(calls.length, 0, 'must not dispatch a non-subset tool')
   })
 
   it('rejects the url-form of collect/extract (would steal the foreground)', async () => {
     const { facade, calls } = makeFacade()
-    const out = await facade.run('browser_visible_collect', { template: 'card_list', url: 'https://www.xiaohongshu.com/u/1' })
+    const out = await facade.run('browser_collect', { mode: 'visible', template: 'card_list', url: 'https://www.xiaohongshu.com/u/1' })
     assert.equal(parseErr(out)?.errorCode, 'script_blocked')
     assert.equal(calls.length, 0)
     // tabId form is allowed
-    const ok = await facade.run('browser_visible_collect', { template: 'card_list' })
+    const ok = await facade.run('browser_collect', { mode: 'visible', template: 'card_list' })
     assert.equal(parseErr(ok), null)
     assert.equal(calls[0].args.tab_id, 'agent-tab-1')
   })
@@ -90,7 +90,7 @@ describe('ScopedBrowserFacade (§3.4 dispatch keystone)', () => {
     const gate = new AgentTabControlGate()
     const { facade, calls } = makeFacade({ controlGate: gate, surface: 'user-view' })
     gate.requestInterruption()
-    const out = await facade.run('browser_click_text', { text: '笔记一' })
+    const out = await facade.run('browser_click', { text: '笔记一' })
     assert.equal(parseErr(out), null)
     assert.equal(calls.length, 1, 'user-view writes are governed by the user-view lease, not the agent-view freeze gate')
     assert.equal(calls[0].surface, 'user-view')
@@ -101,14 +101,14 @@ describe('ScopedBrowserFacade (§3.4 dispatch keystone)', () => {
     const gate = new AgentTabControlGate()
     const { facade, calls } = makeFacade({ controlGate: gate })
     gate.requestInterruption()
-    const out = await facade.run('browser_read_page', {})
+    const out = await facade.run('browser_read', {})
     assert.equal(parseErr(out), null, 'reads pass even when writes are frozen')
     assert.equal(calls[0].args.tab_id, 'agent-tab-1')
   })
 
   it('dispatches under the agent-view lease', async () => {
     const { facade, calls, leaseId } = makeFacade()
-    await facade.run('browser_collect_images', {})
+    await facade.run('browser_collect', { mode: 'images' })
     assert.equal(calls[0].surface, 'agent-view')
     assert.equal(calls[0].leaseId, leaseId)
   })

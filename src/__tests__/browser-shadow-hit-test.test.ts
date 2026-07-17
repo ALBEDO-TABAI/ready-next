@@ -6,7 +6,7 @@
  * 瞬时校验提示。本文件用脚本化 CDP 假端断言：
  *   1. 扫描候选携带 disabled / rect / cover；
  *   2. 选点优先控件真实 rect 中心（采样均值会被 host rect 采样分布拉偏）；
- *   3. invokeShadowNodeClick 经组合树直接引用触发 el.click()；
+ *   3. 扫描只返回可信坐标，不在页面内触发合成 click()；
  *   4. buildTransientNoticeProbeJs 采集 fixed/高 z-index 的瞬时提示文本。
  */
 import assert from 'node:assert/strict'
@@ -15,7 +15,6 @@ import vm from 'node:vm'
 
 import type { BrowserController } from '../main/modules/browser-engine/ipc-handler'
 import {
-  invokeShadowNodeClick,
   scanClosedShadowHostForClickPoint,
 } from '../main/modules/tools/browser-shadow-hit-test'
 import { buildTransientNoticeProbeJs } from '../main/modules/tools/browser-probe'
@@ -61,11 +60,6 @@ function makeScriptedCdpController(buttons: FakeButtonSpec[]): {
         const backendNodeId = Number(objectId.replace('obj-', ''))
         const button = byId.get(backendNodeId)
         const declaration = String(params.functionDeclaration || '')
-        if (declaration.includes('cur.click()')) {
-          // HIT_NODE_INVOKE_FN 路径
-          if (!button) return { result: { value: { clicked: false, tag: 'div', text: '' } } }
-          return { result: { value: { clicked: true, tag: 'button', text: button.text } } }
-        }
         // HIT_NODE_DESCRIBE_FN 路径
         if (!button) {
           return {
@@ -167,12 +161,19 @@ test('scan refuses to pick a point among ambiguous candidates', async () => {
   assert.equal(scan.candidates.length, 2)
 })
 
-test('invokeShadowNodeClick clicks the composed-tree node behind the point', async () => {
-  const { controller } = makeScriptedCdpController(xhsPublishButtons({ publishDisabled: false }))
-  const invoked = await invokeShadowNodeClick(controller, 'tab-1', { cssX: 644, cssY: 851 })
-  assert.equal(invoked?.clicked, true)
-  assert.equal(invoked?.tag, 'button')
-  assert.equal(invoked?.text, '发布')
+test('closed-shadow scan returns a point without invoking page-side synthetic click', async () => {
+  const { controller, calls } = makeScriptedCdpController(xhsPublishButtons({ publishDisabled: false }))
+  const scan = await scanClosedShadowHostForClickPoint(
+    controller,
+    'tab-1',
+    HOST_RECT,
+    VIEWPORT,
+    { targetName: '发布', disambiguation: '' },
+  )
+  assert.deepEqual(scan.point, { cssX: 644, cssY: 851 })
+  assert.equal(calls.some((call) =>
+    call.method === 'Runtime.callFunctionOn' && String(call.params.functionDeclaration || '').includes('.click()')
+  ), false)
 })
 
 test('transient notice probe collects fixed/high-z short texts and skips inline content', () => {

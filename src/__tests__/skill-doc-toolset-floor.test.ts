@@ -75,12 +75,12 @@ test('narrowToolSurfaceForLocalDocument drops non-floor non-document tools and k
     def('skill_write_artifact', 'skill'),
     def('file_read_excerpt', 'file'),
     def('browser_navigate', 'browser'), // must be dropped: non-floor, non-document
-    def('browser_visible_collect', 'browser'), // must be dropped: write-classified collection tool
+    def('browser_collect', 'browser'), // must be dropped: write-classified collection tool
   ]
   const narrowed = narrowToolSurfaceForLocalDocument(surface as never, selected).map((d: { name: string }) => d.name)
   assert.deepEqual(narrowed, ['skill_read_artifact', 'skill_write_artifact', 'file_read_excerpt'])
   assert.equal(narrowed.includes('browser_navigate'), false)
-  assert.equal(narrowed.includes('browser_visible_collect'), false)
+  assert.equal(narrowed.includes('browser_collect'), false)
 })
 
 test('research capability and completion declaration survive incidental current-document narrowing', () => {
@@ -97,7 +97,7 @@ test('research capability and completion declaration survive incidental current-
     { name: 'skill_export_artifact', domain: 'skill', groupId: 'skills' },
     { name: 'web_search', domain: 'research', groupId: 'general_research' },
     { name: 'web_fetch', domain: 'research', groupId: 'general_research' },
-    { name: 'browser_research_topic', domain: 'browser', groupId: 'browser_interaction' },
+    { name: 'browser_collect', domain: 'browser', groupId: 'browser_interaction' },
     { name: 'declare_completion_criteria', domain: 'agent', groupId: 'agent_interaction' },
     { name: 'pet_set_note', domain: 'pet', groupId: 'pet' },
   ]
@@ -111,7 +111,7 @@ test('research capability and completion declaration survive incidental current-
     'skill_export_artifact',
     'web_search',
     'web_fetch',
-    'browser_research_topic',
+    'browser_collect',
     'declare_completion_criteria',
   ]) {
     assert.ok(narrowed.includes(required), `${required} must survive the mixed research/document turn`)
@@ -141,13 +141,13 @@ test('narrowToolSurfaceForLocalDocument emptying a pure-browser surface triggers
     reason: 'test',
   })
   // A pure-browser surface carries neither a document tool nor the skill floor member → narrows to empty.
-  const pre = [def('browser_navigate', 'browser'), def('browser_visible_collect', 'browser')]
+  const pre = [def('browser_navigate', 'browser'), def('browser_collect', 'browser')]
   const narrowed = narrowToolSurfaceForLocalDocument(pre as never, selected)
   assert.equal(narrowed.length, 0, 'pure-browser surface narrows to empty under local-document narrowing')
   const recovery = recoverEmptyToolSurface(narrowed, pre)
   assert.equal(recovery.recovered, true)
   assert.deepEqual(
     recovery.definitions.map((d) => (d as { name: string }).name),
-    ['browser_navigate', 'browser_visible_collect'],
+    ['browser_navigate', 'browser_collect'],
   )
 })

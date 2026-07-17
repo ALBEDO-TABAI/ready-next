@@ -43,13 +43,13 @@ function modelContext(overrides: Partial<ToolContext> = {}): ToolContext {
 // ---------------------------------------------------------------------------
 
 test('browser payment text no longer resolves to M1 manual-only at dispatch', () => {
-  const decision = resolveConfirmationGate('browser_click_text', { text: '确认支付' })
+  const decision = resolveConfirmationGate('browser_click', { text: '确认支付' })
   assert.equal(decision.mode, 'M4')
   assert.equal(decision.action, 'allow')
 })
 
 test('browser password-change text no longer resolves to M1 manual-only at dispatch', () => {
-  const decision = resolveConfirmationGate('browser_click_text', { text: '保存新密码' })
+  const decision = resolveConfirmationGate('browser_click', { text: '保存新密码' })
   assert.equal(decision.mode, 'M4')
   assert.equal(decision.action, 'allow')
 })
@@ -61,7 +61,7 @@ test('browser captcha field no longer resolves to M1 manual-only at dispatch', (
 })
 
 test('browser act-on-target payment text no longer resolves to M1 manual-only at dispatch', () => {
-  const decision = resolveConfirmationGate('browser_act_on_target', {
+  const decision = resolveConfirmationGate('browser_click', {
     target_id: 'pm-3:button-17',
     action: 'click',
     disambiguation: '订单页底部的「确认支付」主按钮',
@@ -71,7 +71,7 @@ test('browser act-on-target payment text no longer resolves to M1 manual-only at
 })
 
 test('browser act-on-target captcha text no longer resolves to M1 manual-only at dispatch', () => {
-  const decision = resolveConfirmationGate('browser_act_on_target', {
+  const decision = resolveConfirmationGate('browser_click', {
     target_id: 'pm-3:input-4',
     action: 'fill',
     value: '8244',
@@ -82,7 +82,7 @@ test('browser act-on-target captcha text no longer resolves to M1 manual-only at
 })
 
 test('browser password fill no longer resolves to M3 at dispatch', () => {
-  const decision = resolveConfirmationGate('browser_act_on_target', {
+  const decision = resolveConfirmationGate('browser_click', {
     target_id: 'pm-2:input-9',
     action: 'fill',
     value: 'hunter2',
@@ -93,7 +93,7 @@ test('browser password fill no longer resolves to M3 at dispatch', () => {
 })
 
 test('M4 matrix: a neutral act-on-target click stays allowed', () => {
-  const decision = resolveConfirmationGate('browser_act_on_target', {
+  const decision = resolveConfirmationGate('browser_click', {
     target_id: 'pm-1:link-2',
     action: 'click',
     disambiguation: '文章列表第一条链接',
@@ -147,7 +147,7 @@ test('M3 matrix: file upload → mode M3 but action is confirm (same path as M2,
 })
 
 test('browser upload is no longer gated by the non-browser confirmation table', () => {
-  const decision = resolveConfirmationGate('browser_upload_scope_attachment', { attachmentId: 'att-1' })
+  const decision = resolveConfirmationGate('browser_upload', { attachmentId: 'att-1' })
   assert.equal(decision.mode, 'M4')
   assert.equal(decision.action, 'allow')
 })
@@ -159,14 +159,14 @@ test('browser password type is no longer gated by the non-browser confirmation t
 })
 
 test('browser high-control collection no longer routes through M3 confirmation', () => {
-  const risky = resolveConfirmationGate('browser_start_task', {
+  const risky = resolveConfirmationGate('browser_collect', {
     kind: 'scroll_collect',
     payload: { url: 'https://www.xiaohongshu.com/explore' },
   })
   assert.equal(risky.mode, 'M4')
   assert.equal(risky.action, 'allow')
 
-  const neutral = resolveConfirmationGate('browser_start_task', {
+  const neutral = resolveConfirmationGate('browser_collect', {
     kind: 'scroll_collect',
     payload: { url: 'https://example.org/blog' },
   })
@@ -185,13 +185,13 @@ test('M4 matrix: read-only tool not in the first batch → allow by default', ()
 })
 
 test('M4 matrix: downloads are explicitly allowed', () => {
-  const decision = resolveConfirmationGate('browser_download_urls', { urls: ['https://example.org/a.png'] })
+  const decision = resolveConfirmationGate('browser_download', { urls: ['https://example.org/a.png'] })
   assert.equal(decision.mode, 'M4')
   assert.equal(decision.action, 'allow')
 })
 
 test('M4 matrix: cookie-consent click is carved out before the M1 click rules', () => {
-  const decision = resolveConfirmationGate('browser_click_text', { text: '接受所有 Cookie' })
+  const decision = resolveConfirmationGate('browser_click', { text: '接受所有 Cookie' })
   assert.equal(decision.mode, 'M4')
   assert.equal(decision.action, 'allow')
 })
@@ -298,7 +298,7 @@ test('no-cache (dispatch level): two consecutive identical M2 dispatches are BOT
 // ---------------------------------------------------------------------------
 
 test('dispatch: browser destructive text no longer stops at the action-confirmation M1 gate', async () => {
-  const output = await executeToolCall('browser_click_text', { text: '确认支付' }, modelContext())
+  const output = await executeToolCall('browser_click', { text: '确认支付' }, modelContext())
   assert.notEqual(output.data?.errorKind, 'denied_manual_only')
   assert.notEqual(output.data?.mode, 'M1')
 })

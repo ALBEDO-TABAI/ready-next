@@ -14,17 +14,17 @@ describe('parseTextToolBridgeResponse', () => {
     const parsed = parseTextToolBridgeResponse([
       '我先读取当前页面。',
       ':::tool_call',
-      '{"tool":"browser_read_page","args":{"mode":"full"}}',
+      '{"tool":"browser_read","args":{"mode":"full"}}',
       ':::',
       '读取后我会继续。',
       ':::tool_call',
-      '{"tool":"browser_locate_input_targets","args":{}}',
+      '{"tool":"browser_find","args":{}}',
       ':::',
     ].join('\n'))
 
     assert.deepStrictEqual(parsed.toolCalls, [
-      { name: 'browser_read_page', args: { mode: 'full' } },
-      { name: 'browser_locate_input_targets', args: {} },
+      { name: 'browser_read', args: { mode: 'full' } },
+      { name: 'browser_find', args: {} },
     ])
     assert.strictEqual(parsed.visibleText, '我先读取当前页面。\n读取后我会继续。')
   })
@@ -129,11 +129,11 @@ describe('shouldEnforceBrowserToolRetry', () => {
 describe('buildTextToolResultMessage', () => {
   it('formats tool outputs back into model-readable text', () => {
     const message = buildTextToolResultMessage([
-      { id: 'call_1', name: 'browser_read_page', result: 'page ok' },
+      { id: 'call_1', name: 'browser_read', result: 'page ok' },
     ])
 
     assert.match(message, /\[tool_result\]/)
-    assert.match(message, /browser_read_page/)
+    assert.match(message, /browser_read/)
     assert.match(message, /page ok/)
   })
 

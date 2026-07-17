@@ -221,7 +221,7 @@ export async function dispatchClickAt(
 }
 
 // EP1-I3 live-target net — ONE guarded entry per primitive action, shared by
-// the top-level tools AND the workflow substeps (browser_run_workflow is not
+// the top-level tools AND the workflow substeps (internal_browser_workflow is not
 // in the dispatch confirmation policy, so its inner click/type carry no
 // semantics the gate can see — they MUST re-check at the execution layer).
 
@@ -231,8 +231,9 @@ export async function runGuardedSelectorClick(
   controller: BrowserController,
   tabId: string | null,
   selector: string,
+  abortSignal?: AbortSignal,
 ): Promise<string> {
-  const clickJs = `
+  const probeJs = `
     (function() {
       const __READY_DESTRUCTIVE_TARGET_CHECK__ = true;
       ${buildTargetSemanticsLibraryJs()}
@@ -243,13 +244,39 @@ export async function runGuardedSelectorClick(
       if (label && READY_DESTRUCTIVE_TARGET_PATTERNS.some((p) => p.test(label))) {
         return { __readyDestructiveTargetBlocked: true, label: label.slice(0, 80) };
       }
-      el.click();
-      return 'Clicked: ' + (el.tagName || '') + (el.textContent ? ' "' + el.textContent.slice(0, 50) + '"' : '');
+      const rect = el.getBoundingClientRect();
+      return {
+        ok: rect.width > 0 && rect.height > 0,
+        label,
+        tag: String(el.tagName || '').toLowerCase(),
+        x: rect.left + rect.width / 2,
+        y: rect.top + rect.height / 2,
+        width: Number(window.innerWidth || 0),
+        height: Number(window.innerHeight || 0)
+      };
     })()
   `
-  const result = await controller.executeJS(tabId, clickJs)
-  throwIfLiveTargetGuardBlocked(result, { selector })
-  return String(result)
+  const probe = await controller.executeJS(tabId, probeJs)
+  throwIfLiveTargetGuardBlocked(probe, { selector })
+  if (!probe || typeof probe !== 'object' || (probe as { ok?: unknown }).ok !== true) return `Error: Element not found or hidden: ${selector}`
+  const point = probe as { x?: unknown; y?: unknown; width?: unknown; height?: unknown; label?: unknown; tag?: unknown }
+  const width = Number(point.width)
+  const height = Number(point.height)
+  if (!(width > 0 && height > 0)) return `Error: Element has no visible viewport: ${selector}`
+  const clicked = await runGuardedCoordinateClick(
+    controller,
+    tabId,
+    (Number(point.x) / width) * 1000,
+    (Number(point.y) / height) * 1000,
+    abortSignal,
+  )
+  return JSON.stringify({
+    ok: true,
+    selector,
+    trustedInput: true,
+    target: { label: String(point.label || ''), tag: String(point.tag || '') },
+    point: { x: clicked.cssX, y: clicked.cssY },
+  })
 }
 
 /** Guarded coordinate click: probes the target under the point. Clicking a
@@ -338,41 +365,46 @@ export async function runGuardedSelectorType(
   selector: string,
   text: string,
   opts: { clearFirst: boolean; allowPasswordFill: boolean; submit?: boolean },
+  abortSignal?: AbortSignal,
 ): Promise<string> {
-  const typeJs = `
+  const probeJs = `
     (function() {
       ${buildInputGuardSnippetJs(opts.allowPasswordFill)}
       const el = document.querySelector(${JSON.stringify(selector)});
       if (!el) return ${JSON.stringify(`Element not found: ${selector}`)};
       const guard = readyInputGuard(el);
       if (guard) return guard;
-      el.focus();
-      if ('value' in el) {
-        // D16-b：React 受控输入必须走原型原生 setter，绕过实例 valueTracker，
-        // 否则 DOM 有字而框架状态为空、校验静默失败。
-        const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype
-          : el instanceof HTMLInputElement ? HTMLInputElement.prototype : null;
-        const nativeSet = proto ? (Object.getOwnPropertyDescriptor(proto, 'value') || {}).set : null;
-        ${opts.clearFirst ? 'if (nativeSet) nativeSet.call(el, ""); else el.value = "";' : ''}
-        if (nativeSet) nativeSet.call(el, ${JSON.stringify(text)});
-        else el.value = ${JSON.stringify(text)};
-      } else {
-        ${opts.clearFirst ? 'el.textContent = "";' : ''}
-        el.textContent = ${JSON.stringify(text)};
-      }
-      el.dispatchEvent(new Event('input', { bubbles: true }));
-      el.dispatchEvent(new Event('change', { bubbles: true }));
-      ${opts.submit ? `
-        el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true }));
-        const form = el.closest && el.closest('form');
-        if (form) form.requestSubmit && form.requestSubmit();
-      ` : ''}
-      return 'Typed "${text.slice(0, 50).replace(/"/g, '\\"')}" into ' + el.tagName + (el.name ? '[name=' + el.name + ']' : '');
+      const rect = el.getBoundingClientRect();
+      return {
+        ok: rect.width > 0 && rect.height > 0,
+        x: rect.left + rect.width / 2,
+        y: rect.top + rect.height / 2,
+        width: Number(window.innerWidth || 0),
+        height: Number(window.innerHeight || 0)
+      };
     })()
   `
-  const result = await controller.executeJS(tabId, typeJs)
-  throwIfLiveTargetGuardBlocked(result, { selector })
-  return String(result)
+  const probe = await controller.executeJS(tabId, probeJs)
+  throwIfLiveTargetGuardBlocked(probe, { selector })
+  if (!probe || typeof probe !== 'object' || (probe as { ok?: unknown }).ok !== true) return `Error: Element not found or hidden: ${selector}`
+  const point = probe as { x?: unknown; y?: unknown; width?: unknown; height?: unknown }
+  const width = Number(point.width)
+  const height = Number(point.height)
+  const typed = await runGuardedCoordinateType(
+    controller,
+    tabId,
+    (Number(point.x) / width) * 1000,
+    (Number(point.y) / height) * 1000,
+    text,
+    {
+      clearBefore: opts.clearFirst,
+      pressEnter: opts.submit === true,
+      useShiftEnter: false,
+      allowPasswordFill: opts.allowPasswordFill,
+    },
+    abortSignal,
+  )
+  return JSON.stringify({ ok: typed.typed, selector, trustedInput: true, ...typed })
 }
 
 /** Guarded coordinate type: probes the field under the point. Non-editable
@@ -529,7 +561,7 @@ export async function sendKeyStroke(
   // combos (Ctrl+c / Meta+v / etc.) are shortcuts, and Enter/Tab/Escape are
   // navigation — those pass (pressing Enter after the USER typed their
   // credential is the user's own action completing). Both the
-  // browser_send_keys tool and the workflow send_keys substep funnel through
+  // browser_press_key tool and the workflow send_keys substep funnel through
   // here. Best-effort probe: empty/failed probe proceeds (visual channel).
   const COMMAND_MODIFIER_MASK = 0b0111 // Alt | Control | Meta
   if (keyLabel.length === 1 && (mask & COMMAND_MODIFIER_MASK) === 0) {
@@ -722,7 +754,7 @@ export async function waitForReady(
   return { ready: false, matchedSelector: false, elapsedMs: Date.now() - started }
 }
 
-export function buildSmartTypeJs(options: {
+export function buildSmartTypeProbeJs(options: {
   target: string
   text: string
   clearFirst: boolean
@@ -888,90 +920,17 @@ export function buildSmartTypeJs(options: {
       const __readyGuard = readyInputGuard(best)
       if (__readyGuard) return __readyGuard
 
-      const focusAndClick = (el) => {
-        try { el.scrollIntoView({ block: 'center', behavior: 'instant' }) } catch { /* ignore */ }
-        try { el.focus({ preventScroll: true }) } catch { /* ignore */ }
-        try { el.click?.() } catch { /* ignore */ }
-      }
-
-      const readText = (el) => {
-        if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
-          return String(el.value || '')
-        }
-        return String(el.innerText || el.textContent || '')
-      }
-
-      const setText = (el, value) => {
-        if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
-          const current = String(el.value || '')
-          if (normalize(current) === normalize(value)) return
-          // D16-b：原生 setter 绕过 React valueTracker（同 buildTypeJs）。
-          const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype
-          const nativeSet = (Object.getOwnPropertyDescriptor(proto, 'value') || {}).set
-          if (clearFirst) { if (nativeSet) nativeSet.call(el, ''); else el.value = '' }
-          if (nativeSet) nativeSet.call(el, value)
-          else el.value = value
-          return
-        }
-        if (isRichEditable(el)) {
-          const current = String(el.innerText || el.textContent || '')
-          if (normalize(current) === normalize(value)) return
-          if (clearFirst) el.textContent = ''
-          let inserted = false
-          try {
-            const selection = window.getSelection()
-            if (selection) {
-              const range = document.createRange()
-              range.selectNodeContents(el)
-              range.collapse(false)
-              selection.removeAllRanges()
-              selection.addRange(range)
-            }
-            inserted = document.execCommand('insertText', false, value)
-          } catch {
-            inserted = false
-          }
-          if (!inserted) {
-            el.textContent = (clearFirst ? '' : (el.textContent || '')) + value
-          }
-          return
-        }
-        el.textContent = value
-      }
-
-      focusAndClick(best)
-      const currentText = normalize(readText(best))
-      const normalizedText = normalize(text)
-      const alreadyHasSameText = Boolean(currentText && normalizedText && currentText === normalizedText)
-      if (!alreadyHasSameText) {
-        setText(best, text)
-        try {
-          best.dispatchEvent(new InputEvent('input', { bubbles: true, data: text, inputType: 'insertText' }))
-        } catch {
-          best.dispatchEvent(new Event('input', { bubbles: true }))
-        }
-        best.dispatchEvent(new Event('change', { bubbles: true }))
-      }
-
-      if (submit) {
-        const keyOpts = { key: 'Enter', code: 'Enter', bubbles: true, cancelable: true }
-        const down = new KeyboardEvent('keydown', keyOpts)
-        const notCanceled = best.dispatchEvent(down)
-        best.dispatchEvent(new KeyboardEvent('keypress', keyOpts))
-        best.dispatchEvent(new KeyboardEvent('keyup', keyOpts))
-        if (notCanceled) {
-          const form = best.closest('form')
-          if (form && typeof form.requestSubmit === 'function') {
-            form.requestSubmit()
-          }
-        }
-      }
-
       const idName = best.getAttribute('name') || best.getAttribute('id') || best.getAttribute('aria-label') || best.tagName
-      if (alreadyHasSameText) {
-        return 'Smart target already has same text: ' + idName
+      const rect = best.getBoundingClientRect()
+      return {
+        ok: rect.width > 0 && rect.height > 0,
+        target: String(idName || ''),
+        score: bestScore,
+        x: rect.left + rect.width / 2,
+        y: rect.top + rect.height / 2,
+        width: Number(window.innerWidth || 0),
+        height: Number(window.innerHeight || 0)
       }
-      return 'Typed into smart target: ' + idName + ' (score=' + bestScore.toFixed(2) + ')'
     })()
   `
 }

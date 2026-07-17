@@ -1,17 +1,17 @@
 /**
  * P3 Phase B5（2026-07-05，纯移动拆分）— browser-tools 采集/内容任务组。
  *
- * 从 browser-tools.ts 逐字搬出十九个 case 的实现体（browser_collect_images /
- * browser_inspect_resources / browser_resolve_video / browser_download_urls /
- * browser_download_collected_media / browser_extract_structured /
- * browser_scroll_collect / browser_start_task / browser_get_task /
- * browser_resume_task / browser_cancel_task / browser_aggregate_results /
- * browser_download_gallery / browser_research_topic / browser_run_workflow /
- * browser_stage_site_strategy / browser_visible_collect / browser_collect_notes /
- * browser_confirm_collection_consent，经 executeBrowserCollectionTool 统一入口
+ * 从 browser-tools.ts 逐字搬出十九个 case 的实现体（browser_collect /
+ * browser_resources / browser_download(mode=resolve) / browser_download /
+ * browser_download / browser_collect /
+ * browser_collect / browser_collect(mode=start) / browser_task(action=get) /
+ * browser_task(action=resume) / browser_task(action=cancel) / browser_task(action=result) /
+ * browser_download(mode=gallery) / browser_collect(mode=research) / internal_browser_workflow /
+ * internal_site_strategy_stage / browser_collect / browser_collect /
+ * browser_collection_ui_confirmation，经 executeBrowserCollectionTool 统一入口
  * 分发）与本组独占 helper（采集共识 store/投影、来源校验、任务接力判定、
  * 图库/媒体接力下载组装等）。runWorkflowStep（与 browser_search /
- * browser_click_text 等留守 case 深度共享的守卫执行层）留在 browser-tools，
+ * browser_click 等留守 case 深度共享的守卫执行层）留在 browser-tools，
  * 经 BrowserCollectionToolContext 注入回接；resolveHighControlAgentTab /
  * activePageLikelyMatchesTarget 因留守 case 同时使用而移入
  * browser-tool-shared.ts。本模块零反向 import。行为零变更。
@@ -34,7 +34,6 @@ import { buildCollectionPlanNotes } from '../browser-engine/collection-handoff'
 import { inspectBrowserResources, type BrowserResourceKind } from '../browser-engine/resource-sniffer'
 import {
   BrowserCollectionConsentStore,
-  type BrowserCollectionConsentRecord,
   type PendingBrowserCollectionConsentRequest,
 } from '../browser-engine/browser-collection-consent'
 import { resolveFastCardVideo } from '../browser-engine/fastcard-video-resolver'
@@ -56,6 +55,7 @@ import {
   imageBoardHarvestUrlCount,
   normalizeDownloadTargets,
   normalizeResourceKinds,
+  resolveAuthorizedBrowserDownloadDirectory,
   safeHostname,
   sanitizeFilename,
 } from './browser-media-download'
@@ -83,9 +83,6 @@ export function __setBrowserCollectionConsentStoreForTests(store: BrowserCollect
 const RECENT_COLLECTION_HANDOFF_WINDOW_MS = 30 * 60 * 1000
 
 function collectionConsentMessage(request: PendingBrowserCollectionConsentRequest): string {
-  if (request.consentKind === 'high_control_url_batch_downgrade') {
-    return request.warningText || '高风控平台需要用户明确确认后，才允许使用 URL 批处理采集。'
-  }
   return '发现清单尚未证明是完整全量，需要用户明确确认后，才允许只采集当前冻结的部分内容。'
 }
 
@@ -150,52 +147,6 @@ async function upsertCollectionConsentProjection(
   }
   if (existing) await store.update(request.sourceTaskId, record)
   else await store.create(record)
-}
-
-async function clearCollectionConsentProjection(
-  runtime: AgentControlRuntime | null | undefined,
-  record: BrowserCollectionConsentRecord,
-): Promise<void> {
-  if (!runtime || !record.scopeId || !record.sourceTaskId) return
-  const store = runtime.getTaskProjectionStore()
-  const existing = await store.get(record.sourceTaskId)
-  if (!existing) return
-  const now = new Date().toISOString()
-  await store.update(record.sourceTaskId, {
-    taskSummary: '采集确认已记录，可以继续。',
-    status: 'recoverable_paused',
-    interactionState: 'suspended',
-    waitingFor: 'none',
-    blockedReason: null,
-    progress: {
-      ...(existing.progress || {
-        stage: null,
-        completed: null,
-        total: null,
-        coverage: null,
-        fingerprint: null,
-        updatedAt: null,
-        lastError: null,
-      }),
-      updatedAt: now,
-      lastError: null,
-      detail: '采集确认已记录，可以继续。',
-      browserCollectionConsent: null,
-    },
-    updatedAt: now,
-  })
-}
-
-function targetHostForCollection(profileUrl: string, notes: Array<{ url: string }>): string {
-  for (const value of [profileUrl, ...notes.map((note) => note.url)]) {
-    try {
-      const host = new URL(value).host
-      if (host) return host
-    } catch {
-      // silent-catch: invalid candidate URL; try the next collection target.
-    }
-  }
-  return ''
 }
 
 function normalizeUrlForProvenance(value: string): string {
@@ -341,7 +292,7 @@ function isImageGallerySourceTask(
 
 /** P0.1 — the failed counterpart of findScopeImageGallerySourceTask: a recent
  *  FAILED image-gallery collection for this scope. After it, the model must
- *  NOT silently fall back to manual `browser_download_urls`; it should retry /
+ *  NOT silently fall back to manual `browser_download`; it should retry /
  *  resume the structured collection so the card, evidence and learning stay on
  *  the collection chain. Bounded to the handoff window so a stale failure from
  *  hours ago no longer blocks an unrelated raw download. */
@@ -528,14 +479,14 @@ function sourceTaskHandoffMismatch(
   if (sessionId && sourceScopeId && sourceScopeId !== sessionId) {
     return {
       errorCode: 'stale_source_task_scope',
-      message: `source_task_id ${sourceTaskId} 属于另一个会话，不能接力到当前采集。请使用本轮 browser_visible_collect 返回的 source_task_id。`,
+      message: `source_task_id ${sourceTaskId} 属于另一个会话，不能接力到当前采集。请使用本轮 browser_collect 返回的 source_task_id。`,
     }
   }
   const sourceOutputRootDir = normalizedPathField(sourceResult?.outputRootDir) || normalizedPathField(sourcePayload?.outputRootDir)
   if (requestedOutputRootDir && sourceOutputRootDir && sourceOutputRootDir !== requestedOutputRootDir) {
     return {
       errorCode: 'stale_source_task_output',
-      message: `source_task_id ${sourceTaskId} 的保存目录与当前请求不一致，不能用旧发现清单接力。请使用本轮 browser_visible_collect 返回的 source_task_id。`,
+      message: `source_task_id ${sourceTaskId} 的保存目录与当前请求不一致，不能用旧发现清单接力。请使用本轮 browser_collect 返回的 source_task_id。`,
     }
   }
   return null
@@ -561,7 +512,7 @@ function wrongBrowserTaskIdPayload(toolName: string, taskId: string): Record<str
 
 /**
  * B5 注入面：runWorkflowStep 的实现体留在 browser-tools.ts（与 browser_search /
- * browser_click_text 等留守 case 深度共享），以函数引用注入；
+ * browser_click 等留守 case 深度共享），以函数引用注入；
  * candidateTargetUrls / leaseGate / runtime 是 executeBrowserTool 预备段的
  * 每次调用态，随调用传入。本模块不反向 import browser-tools，防循环依赖。
  */
@@ -578,6 +529,7 @@ export interface BrowserCollectionToolContext {
     ownerRunId?: string | null
     parentTaskId?: string | null
     executionBinding?: import('../../../shared/agent-execution-profile').TaskExecutionBinding | null
+    workspaceRoots?: string[]
   }
   runWorkflowStep: (
     controller: BrowserController,
@@ -600,7 +552,7 @@ export async function executeBrowserCollectionTool(
     ...(taskExecutionContext?.executionBinding ? { executionBinding: taskExecutionContext.executionBinding } : {}),
   }
   switch (toolName) {
-      case 'browser_collect_images': {
+      case 'collect_images': {
         let tabId = (args.tab_id as string) || null
         tabId = (await resolveHighControlAgentTab(controller, args, { signal: abortSignal })).tabId
         const keyword = String(args.keyword || '').trim().toLowerCase()
@@ -917,7 +869,7 @@ export async function executeBrowserCollectionTool(
         }, null, 2)
       }
 
-      case 'browser_inspect_resources': {
+      case 'resources': {
         const url = String(args.url || '').trim()
         let tabId = (args.tab_id as string) || null
         tabId = (await resolveHighControlAgentTab(controller, args, {
@@ -935,7 +887,7 @@ export async function executeBrowserCollectionTool(
         return stringifyBrowserJsonOrFailure({ ...result })
       }
 
-      case 'browser_resolve_video': {
+      case 'download_resolve': {
         let tabId = (args.tab_id as string) || null
         tabId = (await resolveHighControlAgentTab(controller, args, { signal: abortSignal })).tabId
         const tabs = controller.getTabList()
@@ -1012,7 +964,7 @@ export async function executeBrowserCollectionTool(
         return stringifyBrowserJsonOrFailure(payload)
       }
 
-      case 'browser_download_urls': {
+      case 'download_urls': {
         const rawUrls = Array.isArray(args.urls) ? args.urls : []
         // EP2 dogfood gap 1 — keep downloads ON the collection chain: if this
         // scope already discovered an image gallery, raw URL downloads orphan
@@ -1027,9 +979,9 @@ export async function executeBrowserCollectionTool(
             return browserStructuredOutput({
               ok: false,
               errorCode: 'use_collected_media_download',
-              message: `本会话已有图片采集任务 ${chained.taskId}（已发现 ${mediaUrlsFromVisibleCollectTask(chained).length} 张）。保存这些图片必须用 browser_download_collected_media(source_task_id) 让下载结果回到采集卡；只有与该采集无关的下载才可以传 unrelated_to_collection: true 继续使用本工具。`,
+              message: `本会话已有图片采集任务 ${chained.taskId}（已发现 ${mediaUrlsFromVisibleCollectTask(chained).length} 张）。保存这些图片必须用 browser_download(source_task_id) 让下载结果回到采集卡；只有与该采集无关的下载才可以传 unrelated_to_collection: true 继续使用本工具。`,
               sourceTaskId: chained.taskId,
-              suggestedNextTool: 'browser_download_collected_media',
+              suggestedNextTool: 'browser_download',
             })
           }
           // P0.1 — otherwise, if the most recent gallery attempt FAILED and there
@@ -1042,9 +994,9 @@ export async function executeBrowserCollectionTool(
             return browserStructuredOutput({
               ok: false,
               errorCode: 'image_gallery_collection_failed_retry_required',
-              message: `本会话最近的图片采集任务 ${failedGallery.taskId} 失败了（${stringField((failedGallery.result as Record<string, unknown> | null)?.stopReason) || failedGallery.status}）。不要改用 browser_download_urls 手工下载——请用 browser_start_task / browser_visible_collect(image_gallery) 重试或 browser_resume_task 续跑，让采集卡、证据和失败学习都留在采集链路上。只有与该采集无关的下载才可以传 unrelated_to_collection: true。`,
+              message: `本会话最近的图片采集任务 ${failedGallery.taskId} 失败了（${stringField((failedGallery.result as Record<string, unknown> | null)?.stopReason) || failedGallery.status}）。不要改用 browser_download 手工下载——请用 browser_collect(mode=start) / browser_collect(image_gallery) 重试或 browser_task(action=resume) 续跑，让采集卡、证据和失败学习都留在采集链路上。只有与该采集无关的下载才可以传 unrelated_to_collection: true。`,
               failedTaskId: failedGallery.taskId,
-              suggestedNextTool: 'browser_visible_collect',
+              suggestedNextTool: 'browser_collect',
             })
           }
           // P0.1 — close the original bypass: even with NO prior collection task,
@@ -1057,36 +1009,37 @@ export async function executeBrowserCollectionTool(
             return browserStructuredOutput({
               ok: false,
               errorCode: 'use_structured_image_gallery_collection',
-              message: `检测到 ${harvestCount} 张图床(pinimg)图片的批量下载，这属于画板/图库采集。请用 browser_visible_collect(image_gallery) 走结构化采集（自动滚动穷尽、按原图去重、产出采集卡与证据），再用 browser_download_collected_media 保存；不要用 browser_collect_images + browser_download_urls 手工批量下载。确实是与采集无关的零散下载才传 unrelated_to_collection: true。`,
-              suggestedNextTool: 'browser_visible_collect',
+              message: `检测到 ${harvestCount} 张图床(pinimg)图片的批量下载，这属于画板/图库采集。请用 browser_collect(image_gallery) 走结构化采集（自动滚动穷尽、按原图去重、产出采集卡与证据），再用 browser_download 保存；不要用 browser_collect + browser_download 手工批量下载。确实是与采集无关的零散下载才传 unrelated_to_collection: true。`,
+              suggestedNextTool: 'browser_collect',
             })
           }
         }
-        // P0.3 — the target folder must be explicit; a silent `~/Documents`
-        // default scatters collected images away from the user's chosen folder.
-        const downloadDirectory = String(args.directory || '').trim()
-        if (!downloadDirectory) {
+        const resolvedDirectory = resolveAuthorizedBrowserDownloadDirectory(args.directory, {
+          currentUserText,
+          trustedRoots: taskExecutionContext?.workspaceRoots,
+        })
+        if (!resolvedDirectory.ok) {
           return browserStructuredOutput({
             ok: false,
-            errorCode: 'download_directory_required',
-            message: '缺少 directory：请明确传入目标文件夹（通常是用户用 @[文件夹] 指定的目录），不要使用默认目录。',
+            errorCode: resolvedDirectory.errorCode,
+            message: '目标文件夹没有绑定到当前任务、当前工作区或用户指令。省略目录可使用 Ready 默认下载文件夹。',
+            requested: resolvedDirectory.requested,
           })
         }
         return await downloadUrlsToDirectory(controller, {
           urls: rawUrls.map((item) => String(item || '')),
-          directory: downloadDirectory,
+          directory: resolvedDirectory.directory,
           filenamePrefix: String(args.filename_prefix || 'download'),
           overwrite: args.overwrite === true,
           tabId: (args.tab_id as string) || null,
+          maxTotalBytes: typeof args.max_total_bytes === 'number' ? args.max_total_bytes : undefined,
+          abortSignal,
         })
       }
 
-      case 'browser_download_collected_media': {
+      case 'download_collected': {
         const sourceTaskId = String(args.source_task_id || '').trim()
         if (!sourceTaskId) return 'Error: source_task_id is required'
-        const directory = String(args.directory || '').trim()
-        if (!directory) return 'Error: directory is required'
-
         const sourceTask = await controller.getTask(sourceTaskId)
         const sourcePayload = typeof (controller as { getTaskPayload?: (taskId: string) => Record<string, unknown> | null }).getTaskPayload === 'function'
           ? ((controller as { getTaskPayload: (taskId: string) => Record<string, unknown> | null }).getTaskPayload(sourceTaskId) || null)
@@ -1099,12 +1052,27 @@ export async function executeBrowserCollectionTool(
             sourceTaskId,
           })
         }
+        const sourceOutputRoot = stringField(sourcePayload?.outputRootDir)
+          || stringField((sourcePayload?.plan as Record<string, unknown> | undefined)?.outputRootDir)
+        const resolvedDirectory = resolveAuthorizedBrowserDownloadDirectory(args.directory, {
+          currentUserText,
+          trustedRoots: [sourceOutputRoot, ...(taskExecutionContext?.workspaceRoots || [])].filter(Boolean) as string[],
+        })
+        if (!resolvedDirectory.ok) {
+          return browserStructuredOutput({
+            ok: false,
+            errorCode: resolvedDirectory.errorCode,
+            message: '下载目录没有绑定到来源任务、当前工作区或用户指令。',
+            requested: resolvedDirectory.requested,
+          })
+        }
+        const directory = resolvedDirectory.directory
         const sourceScopeId = stringField(sourcePayload?.scopeId)
         if (sessionId && sourceScopeId && sourceScopeId !== sessionId) {
           return browserStructuredOutput({
             ok: false,
             errorCode: 'stale_source_task_scope',
-            message: `source_task_id ${sourceTaskId} 属于另一个会话，不能接力下载。请使用本轮 browser_visible_collect 返回的 source_task_id。`,
+            message: `source_task_id ${sourceTaskId} 属于另一个会话，不能接力下载。请使用本轮 browser_collect 返回的 source_task_id。`,
             sourceTaskId,
           })
         }
@@ -1112,7 +1080,7 @@ export async function executeBrowserCollectionTool(
           return browserStructuredOutput({
             ok: false,
             errorCode: 'source_task_not_image_gallery',
-            message: `source_task_id ${sourceTaskId} 不是 browser_visible_collect(image_gallery) 任务，不能用图片下载接力。`,
+            message: `source_task_id ${sourceTaskId} 不是 browser_collect(image_gallery) 任务，不能用图片下载接力。`,
             sourceTaskId,
             kind: sourceTask.kind,
           })
@@ -1129,7 +1097,7 @@ export async function executeBrowserCollectionTool(
               sourceTaskId,
               consentKind: 'partial_collection',
             })
-            const message = `source_task_id ${sourceTaskId} 的图片发现还未证明是完整全量（discoveryStatus=${status}, stopReason=${stopReason}, 已发现 ${frozenCount} 张）。请先用 browser_resume_task 继续发现；如果用户明确只下载当前已发现图片，需要先完成部分采集确认。`
+            const message = `source_task_id ${sourceTaskId} 的图片发现还未证明是完整全量（discoveryStatus=${status}, stopReason=${stopReason}, 已发现 ${frozenCount} 张）。请先用 browser_task(action=resume) 继续发现；如果用户明确只下载当前已发现图片，需要先完成部分采集确认。`
             await upsertCollectionConsentProjection(runtime, pendingConsentRequest, message)
             return browserStructuredOutput({
               ok: false,
@@ -1161,6 +1129,9 @@ export async function executeBrowserCollectionTool(
           filenamePrefix: String(args.filename_prefix || 'image'),
           overwrite: args.overwrite === true,
           referer,
+          tabId: (args.tab_id as string) || null,
+          maxTotalBytes: typeof args.max_total_bytes === 'number' ? args.max_total_bytes : undefined,
+          abortSignal,
         })
         const outputText = typeof output === 'string' ? output : output.text
         if (outputText.startsWith('Error:')) {
@@ -1234,7 +1205,7 @@ export async function executeBrowserCollectionTool(
         })
       }
 
-      case 'browser_extract_structured': {
+      case 'collect_structured': {
         const template = String(args.template || 'article_list') as never
         const url = String(args.url || '').trim()
         let tabId = (args.tab_id as string) || null
@@ -1260,7 +1231,7 @@ export async function executeBrowserCollectionTool(
         return JSON.stringify(result, null, 2)
       }
 
-      case 'browser_scroll_collect': {
+      case 'collect_scroll': {
         const template = String(args.template || 'card_list') as never
         const url = String(args.url || '').trim()
         let tabId = (args.tab_id as string) || null
@@ -1283,7 +1254,7 @@ export async function executeBrowserCollectionTool(
         return JSON.stringify(result, null, 2)
       }
 
-      case 'browser_start_task': {
+      case 'collect_start': {
         const kind = String(args.kind || '').trim()
         if (!kind) return 'Error: kind is required'
         const payload = args.payload && typeof args.payload === 'object' ? args.payload as Record<string, unknown> : {}
@@ -1303,7 +1274,7 @@ export async function executeBrowserCollectionTool(
           scopedPayload.scopeId = sessionId
         }
         // P0.4 — a visible_collect started via this raw entry must resolve its
-        // page URL the SAME way the dedicated browser_visible_collect entry does
+        // page URL the SAME way the dedicated browser_collect entry does
         // (controller.startVisibleCollection reads the target tab's URL from the
         // tab registry). Otherwise a tab_id-only collection has no page URL, and
         // a later failure can't be learned against a domain. Fall back to raw
@@ -1315,12 +1286,12 @@ export async function executeBrowserCollectionTool(
         return JSON.stringify(result, null, 2)
       }
 
-      case 'browser_get_task': {
+      case 'task_get': {
         const taskId = String(args.task_id || '').trim()
         if (!taskId) return 'Error: task_id is required'
         const result = await controller.getTask(taskId)
         if (!result && isLikelyReadyNonBrowserTaskId(taskId)) {
-          return browserStructuredOutput(wrongBrowserTaskIdPayload('browser_get_task', taskId))
+          return browserStructuredOutput(wrongBrowserTaskIdPayload('browser_task(action=get)', taskId))
         }
         const linkedExecution = result?.kind === 'visible_collect'
           ? await (controller as {
@@ -1330,34 +1301,34 @@ export async function executeBrowserCollectionTool(
         return JSON.stringify(result ? browserTaskToolPayload(result, linkedExecution) : { taskId, status: 'missing' }, null, 2)
       }
 
-      case 'browser_resume_task': {
+      case 'task_resume': {
         const taskId = String(args.task_id || '').trim()
         if (!taskId) return 'Error: task_id is required'
         let current: BrowserCapabilityTaskHandle | null = null
         try {
           current = await controller.getTask(taskId)
         } catch (error) {
-          log(`browser_resume_task getTask failed taskId=${taskId}: ${error instanceof Error ? error.message : String(error)}`)
+          log(`browser_task(action=resume) getTask failed taskId=${taskId}: ${error instanceof Error ? error.message : String(error)}`)
           current = null
         }
         if (!current && isLikelyReadyNonBrowserTaskId(taskId)) {
-          return browserStructuredOutput(wrongBrowserTaskIdPayload('browser_resume_task', taskId))
+          return browserStructuredOutput(wrongBrowserTaskIdPayload('browser_task(action=resume)', taskId))
         }
         const result = await controller.resumeTask(taskId)
         return JSON.stringify(result ? browserTaskToolPayload(result) : { taskId, status: 'missing' }, null, 2)
       }
 
-      case 'browser_cancel_task': {
+      case 'task_cancel': {
         const taskId = String(args.task_id || '').trim()
         if (!taskId) return 'Error: task_id is required'
         const result = await controller.cancelTask(taskId)
         if (!result && isLikelyReadyNonBrowserTaskId(taskId)) {
-          return browserStructuredOutput(wrongBrowserTaskIdPayload('browser_cancel_task', taskId))
+          return browserStructuredOutput(wrongBrowserTaskIdPayload('browser_task(action=cancel)', taskId))
         }
         return JSON.stringify(result ? browserTaskToolPayload(result) : { taskId, status: 'missing' }, null, 2)
       }
 
-      case 'browser_aggregate_results': {
+      case 'task_result': {
         const items = Array.isArray(args.items) ? args.items as Array<Record<string, unknown>> : []
         const result = controller.aggregateResults(items as never, {
           mergeStrategy: typeof args.merge_strategy === 'string' ? args.merge_strategy as 'concat' | 'dedupe' : undefined,
@@ -1366,7 +1337,7 @@ export async function executeBrowserCollectionTool(
         return JSON.stringify(result, null, 2)
       }
 
-      case 'browser_download_gallery': {
+      case 'download_gallery': {
         const url = String(args.url || '').trim()
         if (!url) return 'Error: url is required'
         const result = await controller.startTask({
@@ -1384,7 +1355,7 @@ export async function executeBrowserCollectionTool(
         return JSON.stringify(result, null, 2)
       }
 
-      case 'browser_research_topic': {
+      case 'collect_research': {
         const query = String(args.query || '').trim()
         if (!query) return 'Error: query is required'
         const result = await controller.startTask({
@@ -1400,7 +1371,7 @@ export async function executeBrowserCollectionTool(
         return JSON.stringify(result, null, 2)
       }
 
-      case 'browser_run_workflow': {
+      case 'workflow_internal': {
         const stepsRaw = args.steps
         if (!Array.isArray(stepsRaw)) return 'Error: steps must be an array'
         const tabId = (args.tab_id as string) || null
@@ -1422,7 +1393,7 @@ export async function executeBrowserCollectionTool(
         return truncate(lines.join('\n'))
       }
 
-      case 'browser_stage_site_strategy': {
+      case 'strategy_stage': {
         const domain = String(args.domain || '').trim().toLowerCase()
         const taskKind = String(args.task_kind || '').trim()
         const summary = String(args.summary || '').trim()
@@ -1446,7 +1417,7 @@ export async function executeBrowserCollectionTool(
         return JSON.stringify({ ...payload, path: filePath }, null, 2)
       }
 
-      case 'browser_visible_collect': {
+      case 'collect_visible': {
         // Reuse the same full target-URL set as the script guard (active tab,
         // tab_id, url) so high-control rate limits can't be bypassed via tab_id.
         const highControl = candidateTargetUrls.some((u) => isHighControlPlatformText(u))
@@ -1481,9 +1452,9 @@ export async function executeBrowserCollectionTool(
         return JSON.stringify(result, null, 2)
       }
 
-      case 'browser_collect_notes': {
+      case 'collect_notes': {
         // Dispatch a background note-collection sub-agent (plan §3.3). The main
-        // agent either supplies a frozen source_task_id from browser_visible_collect
+        // agent either supplies a frozen source_task_id from browser_collect
         // or a direct planned list; source_task_id is the stronger contract so
         // the model cannot accidentally drop targets while restating the list.
         const sourceTaskId = String(args.source_task_id || '').trim()
@@ -1514,7 +1485,7 @@ export async function executeBrowserCollectionTool(
             : null
           const mismatch = sourceTaskHandoffMismatch(sourceTaskId, sourcePayload, resultObject(sourceTask), sessionId, requestedOutputRootDir)
           if (mismatch) {
-            log(`browser_collect_notes refusal ${mismatch.errorCode} sourceTaskId=${sourceTaskId}`)
+            log(`browser_collect refusal ${mismatch.errorCode} sourceTaskId=${sourceTaskId}`)
             return browserStructuredOutput({
               ok: false,
               ...mismatch,
@@ -1539,9 +1510,9 @@ export async function executeBrowserCollectionTool(
               sourceTaskId,
               consentKind: 'partial_collection',
             })
-            const message = `source_task_id ${sourceTaskId} 的发现清单不是完整全量（discoveryStatus=${status}, stopReason=${stopReason}, 已冻结 ${frozenNotes.length} 条）。请先用 browser_resume_task 继续发现：${continueTaskId}；如果用户明确只采当前这部分，需要先完成部分采集确认。`
+            const message = `source_task_id ${sourceTaskId} 的发现清单不是完整全量（discoveryStatus=${status}, stopReason=${stopReason}, 已冻结 ${frozenNotes.length} 条）。请先用 browser_task(action=resume) 继续发现：${continueTaskId}；如果用户明确只采当前这部分，需要先完成部分采集确认。`
             await upsertCollectionConsentProjection(runtime, pendingConsentRequest, message)
-            log(`browser_collect_notes refusal partial_collection sourceTaskId=${sourceTaskId}`)
+            log(`browser_collect refusal partial_collection sourceTaskId=${sourceTaskId}`)
             return browserStructuredOutput({
               ok: false,
               errorCode: 'partial_collection_consent_required',
@@ -1557,7 +1528,7 @@ export async function executeBrowserCollectionTool(
             return browserStructuredOutput({
               ok: false,
               errorCode: 'source_task_note_count_mismatch',
-              message: `browser_collect_notes 数量不一致：source_task_id ${sourceTaskId} 有 ${frozenNotes.length} 条，传入 notes 有 ${notes.length} 条。请直接使用 source_task_id 接力。`,
+              message: `browser_collect 数量不一致：source_task_id ${sourceTaskId} 有 ${frozenNotes.length} 条，传入 notes 有 ${notes.length} 条。请直接使用 source_task_id 接力。`,
               sourceTaskId,
               frozenCount: frozenNotes.length,
               requestedCount: notes.length,
@@ -1569,7 +1540,7 @@ export async function executeBrowserCollectionTool(
           return browserStructuredOutput({
             ok: false,
             errorCode: 'collection_targets_required',
-            message: 'browser_collect_notes 需要 source_task_id，或至少一条带 http(s) URL 的 notes。',
+            message: 'browser_collect 需要 source_task_id，或至少一条带 http(s) URL 的 notes。',
           })
         }
         if (!sourceTaskId) {
@@ -1580,9 +1551,9 @@ export async function executeBrowserCollectionTool(
               sourceTaskId: largerFrozen.taskId,
               consentKind: 'partial_collection',
             })
-            const message = `browser_collect_notes 检测到最近的 browser_visible_collect (${largerFrozen.taskId}) 已冻结 ${largerFrozen.count} 条目标，但当前只传入 ${notes.length} 条。请改用 source_task_id 接力；若用户明确只要部分采集，需要先完成部分采集确认。`
+            const message = `browser_collect 检测到最近的 browser_collect (${largerFrozen.taskId}) 已冻结 ${largerFrozen.count} 条目标，但当前只传入 ${notes.length} 条。请改用 source_task_id 接力；若用户明确只要部分采集，需要先完成部分采集确认。`
             await upsertCollectionConsentProjection(runtime, pendingConsentRequest, message)
-            log(`browser_collect_notes refusal partial_collection recentFrozen=${largerFrozen.taskId}`)
+            log(`browser_collect refusal partial_collection recentFrozen=${largerFrozen.taskId}`)
             return browserStructuredOutput({
               ok: false,
               errorCode: 'partial_collection_consent_required',
@@ -1596,11 +1567,11 @@ export async function executeBrowserCollectionTool(
           }
           const missingUrls = missingUserProvidedUrls(notes, currentUserText || '')
           if (missingUrls.length > 0) {
-            log(`browser_collect_notes refusal url_provenance_required missing=${missingUrls.length}`)
+            log(`browser_collect refusal url_provenance_required missing=${missingUrls.length}`)
             return browserStructuredOutput({
               ok: false,
               errorCode: 'url_provenance_required',
-              message: 'browser_collect_notes 直接接收 URL 列表时，必须确认这些 URL 来自当前用户消息原文或用户显式选择的会话资源；当前缺少可证明来源的 URL。',
+              message: 'browser_collect 直接接收 URL 列表时，必须确认这些 URL 来自当前用户消息原文或用户显式选择的会话资源；当前缺少可证明来源的 URL。',
               missingUrls,
             })
           }
@@ -1609,7 +1580,7 @@ export async function executeBrowserCollectionTool(
           return browserStructuredOutput({
             ok: false,
             errorCode: 'collection_expected_count_mismatch',
-            message: `browser_collect_notes 数量不一致：预期 ${expectedCount} 条，实际冻结清单 ${notes.length} 条。`,
+            message: `browser_collect 数量不一致：预期 ${expectedCount} 条，实际冻结清单 ${notes.length} 条。`,
             expectedCount,
             actualCount: notes.length,
           })
@@ -1650,7 +1621,7 @@ export async function executeBrowserCollectionTool(
             return browserStructuredOutput({
               ok: false,
               errorCode: 'synthetic_source_not_ready',
-              message: 'browser_collect_notes 直接 URL 列表已通过来源校验，但当前浏览器控制器未注册 synthetic source task 入口，不能启动无 source_task_id 的采集。',
+              message: 'browser_collect 直接 URL 列表已通过来源校验，但当前浏览器控制器未注册 synthetic source task 入口，不能启动无 source_task_id 的采集。',
             })
           }
           sourceTask = await createSyntheticVisibleCollection.call(controller, {
@@ -1662,41 +1633,12 @@ export async function executeBrowserCollectionTool(
           }, sessionId)
           effectiveSourceTaskId = sourceTask.taskId
         }
-        const targetHost = targetHostForCollection(profileUrl, notes)
         const highControlCollection = isHighControlPlatformText(profileUrl) || notes.some((note) => isHighControlPlatformText(note.url))
         const strategy = requestedStrategy === 'card_loop'
           ? 'card_loop'
           : requestedStrategy === 'url_batch'
             ? 'url_batch'
             : highControlCollection ? 'card_loop' : 'url_batch'
-        if (highControlCollection && strategy === 'url_batch') {
-          const hasDowngradeConsent = effectiveSourceTaskId
-            ? collectionConsentStore.hasConsent('high_control_url_batch_downgrade', sessionId || '', effectiveSourceTaskId, targetHost)
-            : false
-          if (!hasDowngradeConsent) {
-            const pendingConsentRequest = effectiveSourceTaskId
-              ? collectionConsentStore.createPendingRequest({
-                  scopeId: sessionId || '',
-                  sourceTaskId: effectiveSourceTaskId,
-                  consentKind: 'high_control_url_batch_downgrade',
-                  targetHost,
-                  warningText: '该目标命中高风控平台，url_batch 会硬跳详情页，可能触发验证或丢失自然浏览上下文。',
-                })
-              : undefined
-            const message = '该目标命中高风控平台，不能在没有明确降级确认的情况下使用 url_batch 硬跳详情页。请改用 strategy=card_loop，或先完成高风控 URL 批处理降级确认。'
-            await upsertCollectionConsentProjection(runtime, pendingConsentRequest, message)
-            log(`browser_collect_notes refusal high_control_url_batch sourceTaskId=${effectiveSourceTaskId || ''} host=${targetHost}`)
-            return browserStructuredOutput({
-              ok: false,
-              errorCode: 'high_control_url_batch_denied',
-              message,
-              strategy,
-              sourceTaskId: effectiveSourceTaskId,
-              targetHost,
-              pendingConsentRequest,
-            })
-          }
-        }
         const plan = {
           targetProfileUrl: profileUrl,
           strategy,
@@ -1724,36 +1666,6 @@ export async function executeBrowserCollectionTool(
           return browserStructuredOutput(result as Record<string, unknown>)
         }
         return JSON.stringify(result, null, 2)
-      }
-
-      case 'browser_confirm_collection_consent': {
-        const requestId = String(args.request_id || '').trim()
-        const confirmedVia = String(args.confirmed_via || '').trim()
-        if (!requestId) {
-          return browserStructuredOutput({
-            ok: false,
-            errorCode: 'collection_consent_request_id_required',
-            message: 'browser_confirm_collection_consent 需要 request_id。',
-          })
-        }
-        if (confirmedVia !== 'ask_user_questions' && confirmedVia !== 'ui_action') {
-          return browserStructuredOutput({
-            ok: false,
-            errorCode: 'collection_consent_via_invalid',
-            message: 'confirmed_via 必须是 ask_user_questions 或 ui_action。',
-          })
-        }
-        const record = collectionConsentStore.confirmPendingRequest(requestId, confirmedVia)
-        if (!record) {
-          return browserStructuredOutput({
-            ok: false,
-            errorCode: 'collection_consent_request_not_found',
-            message: `找不到可确认的浏览器采集确认请求：${requestId}`,
-            requestId,
-          })
-        }
-        await clearCollectionConsentProjection(runtime, record)
-        return JSON.stringify({ ok: true, record }, null, 2)
       }
 
       default:

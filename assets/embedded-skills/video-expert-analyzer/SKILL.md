@@ -64,7 +64,7 @@ LLM 看到工具名时按下表对应：
 - **续跑 / 观察 / 诊断**：只有用户给出 `run_state.json`、`scene_scores.json`、输出目录、任务卡继续、childRunId，或明确要求查进度/历史时，才 inspect/read 对应状态和 artifact。
 - **历史目录**：如果偶然发现历史任务，但用户没有要求续跑，表述为“检测到历史任务；它不影响这次新的分析”，继续按新分析推进，不要暗示正在恢复旧任务。
 - **配置**：Ready 会通过 host requirements 写入当前 agent 的视觉模型配置。只有用户主动要求改输出根目录、报告语言或模型偏好时才讨论配置；不要把配置扫描当作新分析前置步骤。API key 只让用户自己设置环境变量，绝不写进 JSON。
-- **finalize 续跑**：用户说“跑 finalize / 再试一次 / 接力完成”且上下文已有 VEA childRun、`run_state.json` 或输出目录时，继续同一个 VEA skill 任务。不要调用 `browser_resume_task`、不要重新做浏览器采集，也不要因为旧任务卡显示失败就改找另一个 browser 任务。
+- **finalize 续跑**：用户说“跑 finalize / 再试一次 / 接力完成”且上下文已有 VEA childRun、`run_state.json` 或输出目录时，继续同一个 VEA skill 任务。不要调用 `browser_task(action=resume)`、不要重新做浏览器采集，也不要因为旧任务卡显示失败就改找另一个 browser 任务。
 
 ## 默认执行模式
 

@@ -47,6 +47,7 @@ function makeController(
   const mock = {
     calls,
     getTabList: () => [{ id: 'tab-1', title: 'Example', url: 'https://example.com', active: true }],
+    getViewportMetrics: async () => ({ width: 1000, height: 800, deviceScaleFactor: 1 }),
     normalizedToCss: async (_tabId: unknown, x: number, y: number) => ({ x, y, width: 1000, height: 800 }),
     dispatchMouse: async (_tabId: unknown, payload: Record<string, unknown>) => {
       calls.mouse.push(payload)
@@ -60,6 +61,9 @@ function makeController(
     executeJS: async (_tabId: unknown, code: unknown) => {
       const source = String(code || '')
       calls.scripts.push(source)
+      if (source.includes('document.readyState')) {
+        return { readyState: 'complete', bodyTextLen: 20, matched: false }
+      }
       return executeJS(source)
     },
   }
@@ -83,17 +87,26 @@ test.beforeEach(() => {
   __resetBrowserAgentPageMapForTests()
 })
 
+async function captureFirstTargetId(context: ToolContext): Promise<string> {
+  const output = await executeToolCall('browser_snapshot', {}, context)
+  const data = output.data || JSON.parse(output.text) as Record<string, unknown>
+  const pageMap = data.pageMap as { targets?: Array<{ targetId?: string }> }
+  const targetId = String(pageMap.targets?.[0]?.targetId || '')
+  assert.ok(targetId.startsWith('br2.'), 'snapshot must return an opaque live target reference')
+  return targetId
+}
+
 // ---------------------------------------------------------------------------
 // 1. target_id-only act_on_target
 // ---------------------------------------------------------------------------
 
-test('act_on_target: bare target_id click on a payment-confirm control → grant_required', async () => {
+test('browser_click: bare target_id on a payment-confirm control → grant_required', async () => {
   const controller = makeController((source) => {
     if (source.includes('__READY_AGENT_PAGE_MAP__')) {
       return {
         identity: { url: 'https://example.com/checkout', title: 'Checkout' },
         viewport: { width: 1000, height: 800 },
-        rawRoots: [{ role: 'generic', children: [{ role: 'button', name: '确认支付', backendDOMNodeId: 1, frameId: '0' }, { role: 'button', name: 'Filler A', backendDOMNodeId: 91, frameId: '0' }, { role: 'button', name: 'Filler B', backendDOMNodeId: 92, frameId: '0' }, { role: 'button', name: 'Filler C', backendDOMNodeId: 93, frameId: '0' }, { role: 'button', name: 'Filler D', backendDOMNodeId: 94, frameId: '0' }] }],
+        rawRoots: [{ role: 'generic', children: [{ role: 'button', name: '确认支付', backendDOMNodeId: 1, frameId: '0', box: { x: 450, y: 350, width: 100, height: 40 } }, { role: 'button', name: 'Filler A', backendDOMNodeId: 91, frameId: '0' }, { role: 'button', name: 'Filler B', backendDOMNodeId: 92, frameId: '0' }, { role: 'button', name: 'Filler C', backendDOMNodeId: 93, frameId: '0' }, { role: 'button', name: 'Filler D', backendDOMNodeId: 94, frameId: '0' }] }],
         riskFlags: {},
       }
     }
@@ -103,27 +116,27 @@ test('act_on_target: bare target_id click on a payment-confirm control → grant
     return null
   })
   const context = modelContext(controller)
-  await executeToolCall('browser_read_page_map', {}, context)
+  const targetId = await captureFirstTargetId(context)
   // Args carry NO semantic cue — the dispatch gate classified this M4.
-  const output = await executeToolCall('browser_act_on_target', { target_id: '1:0:1', action: 'click' }, context)
+  const output = await executeToolCall('browser_click', { target_id: targetId }, context)
   assert.equal(output.data?.errorKind, 'grant_required')
   assert.equal(output.envelope?.kind, 'denied_by_policy')
   assert.ok(!controller.calls.scripts.some((s) => s.includes('__READY_AGENT_ACT_ON_TARGET__')),
     'the act script must never run against a destructive-grant target')
 })
 
-test('act_on_target: fill into a live password field without an args cue → reroute to confirmation', async () => {
+test('browser_type: target ref into a live password field without an args cue → reroute to confirmation', async () => {
   const controller = makeController((source) => {
     if (source.includes('__READY_AGENT_PAGE_MAP__')) {
       return {
         identity: { url: 'https://example.com/login', title: 'Login' },
         viewport: { width: 1000, height: 800 },
-        rawRoots: [{ role: 'generic', children: [{ role: 'textbox', name: '口令', backendDOMNodeId: 1, frameId: '0' }, { role: 'button', name: 'Filler A', backendDOMNodeId: 91, frameId: '0' }, { role: 'button', name: 'Filler B', backendDOMNodeId: 92, frameId: '0' }, { role: 'button', name: 'Filler C', backendDOMNodeId: 93, frameId: '0' }, { role: 'button', name: 'Filler D', backendDOMNodeId: 94, frameId: '0' }] }],
+        rawRoots: [{ role: 'generic', children: [{ role: 'textbox', name: '口令', backendDOMNodeId: 1, frameId: '0', box: { x: 400, y: 300, width: 200, height: 40 } }, { role: 'button', name: 'Filler A', backendDOMNodeId: 91, frameId: '0' }, { role: 'button', name: 'Filler B', backendDOMNodeId: 92, frameId: '0' }, { role: 'button', name: 'Filler C', backendDOMNodeId: 93, frameId: '0' }, { role: 'button', name: 'Filler D', backendDOMNodeId: 94, frameId: '0' }] }],
         riskFlags: {},
       }
     }
     if (source.includes('__READY_AGENT_TARGET_PROBE__')) {
-      return { matchCount: 1, disabled: false, target: { role: 'textbox', name: '', states: { password: true } } }
+      return { matchCount: 1, disabled: false, target: { role: 'textbox', name: '', states: { password: true }, box: { x: 400, y: 300, width: 200, height: 40 } } }
     }
     if (source.includes('__READY_AGENT_ACT_ON_TARGET__')) {
       return { ok: true, action: 'fill', target: { role: 'textbox' } }
@@ -131,29 +144,28 @@ test('act_on_target: fill into a live password field without an args cue → rer
     return null
   })
   const context = modelContext(controller)
-  await executeToolCall('browser_read_page_map', {}, context)
-  const output = await executeToolCall('browser_act_on_target', {
-    target_id: '1:0:1',
-    action: 'fill',
-    value: 'hunter2',
+  const targetId = await captureFirstTargetId(context)
+  const output = await executeToolCall('browser_type', {
+    target_id: targetId,
+    text: 'hunter2',
   }, context)
   assert.equal(output.data?.errorKind, 'denied_pending_confirmation')
   assert.ok(!controller.calls.scripts.some((s) => s.includes('__READY_AGENT_ACT_ON_TARGET__')),
     'credentials must not be filled without confirmation')
 })
 
-test('act_on_target: password fill WITH an args cue proceeds (gate upstream owned the confirmation)', async () => {
+test('browser_type: password fill WITH an args cue proceeds (gate upstream owned the confirmation)', async () => {
   const controller = makeController((source) => {
     if (source.includes('__READY_AGENT_PAGE_MAP__')) {
       return {
         identity: { url: 'https://example.com/login', title: 'Login' },
         viewport: { width: 1000, height: 800 },
-        rawRoots: [{ role: 'generic', children: [{ role: 'textbox', name: '口令', backendDOMNodeId: 1, frameId: '0' }, { role: 'button', name: 'Filler A', backendDOMNodeId: 91, frameId: '0' }, { role: 'button', name: 'Filler B', backendDOMNodeId: 92, frameId: '0' }, { role: 'button', name: 'Filler C', backendDOMNodeId: 93, frameId: '0' }, { role: 'button', name: 'Filler D', backendDOMNodeId: 94, frameId: '0' }] }],
+        rawRoots: [{ role: 'generic', children: [{ role: 'textbox', name: '口令', backendDOMNodeId: 1, frameId: '0', box: { x: 400, y: 300, width: 200, height: 40 } }, { role: 'button', name: 'Filler A', backendDOMNodeId: 91, frameId: '0' }, { role: 'button', name: 'Filler B', backendDOMNodeId: 92, frameId: '0' }, { role: 'button', name: 'Filler C', backendDOMNodeId: 93, frameId: '0' }, { role: 'button', name: 'Filler D', backendDOMNodeId: 94, frameId: '0' }] }],
         riskFlags: {},
       }
     }
     if (source.includes('__READY_AGENT_TARGET_PROBE__')) {
-      return { matchCount: 1, disabled: false, target: { role: 'textbox', name: '', states: { password: true } } }
+      return { matchCount: 1, disabled: false, target: { role: 'textbox', name: '', states: { password: true }, box: { x: 400, y: 300, width: 200, height: 40 } } }
     }
     if (source.includes('__READY_AGENT_ACT_ON_TARGET__')) {
       return { ok: true, action: 'fill', target: { role: 'textbox' } }
@@ -164,19 +176,18 @@ test('act_on_target: password fill WITH an args cue proceeds (gate upstream owne
   // (args carry the password cue → m3-login); host calls carry the user's
   // own action and skip the gate — the browser net must respect the cue.
   const context = modelContext(controller, { invoker: 'host' })
-  await executeToolCall('browser_read_page_map', {}, context)
-  const output = await executeToolCall('browser_act_on_target', {
-    target_id: '1:0:1',
-    action: 'fill',
-    value: 'hunter2',
-    disambiguation: '登录密码输入框',
+  const targetId = await captureFirstTargetId(context)
+  const output = await executeToolCall('browser_type', {
+    target_id: targetId,
+    text: 'hunter2',
+    target: '登录密码输入框',
   }, context)
   assert.notEqual(output.data?.errorKind, 'denied_pending_confirmation')
-  assert.ok(controller.calls.scripts.some((s) => s.includes('__READY_AGENT_ACT_ON_TARGET__')),
-    'cue-carrying fill must execute')
+  assert.deepEqual(controller.calls.typed, ['hunter2'])
+  assert.ok(controller.calls.mouse.length >= 3, 'cue-carrying fill must use trusted focus input')
 })
 
-test('act_on_target: fill into an editable field whose VALUE contains a trigger word is NOT blocked (P2 parity)', async () => {
+test('browser_type: fill into an editable field whose VALUE contains a trigger word is NOT blocked (P2 parity)', async () => {
   // The probe reports the field's current value (提交订单草稿); for a fill the
   // value is content, not a control caption — it must not trip destructive-grant.
   const controller = makeController((source) => {
@@ -184,12 +195,12 @@ test('act_on_target: fill into an editable field whose VALUE contains a trigger 
       return {
         identity: { url: 'https://example.com/form', title: 'Form' },
         viewport: { width: 1000, height: 800 },
-        rawRoots: [{ role: 'generic', children: [{ role: 'textbox', name: '订单备注', backendDOMNodeId: 1, frameId: '0' }, { role: 'button', name: 'Filler A', backendDOMNodeId: 91, frameId: '0' }, { role: 'button', name: 'Filler B', backendDOMNodeId: 92, frameId: '0' }, { role: 'button', name: 'Filler C', backendDOMNodeId: 93, frameId: '0' }, { role: 'button', name: 'Filler D', backendDOMNodeId: 94, frameId: '0' }] }],
+        rawRoots: [{ role: 'generic', children: [{ role: 'textbox', name: '订单备注', backendDOMNodeId: 1, frameId: '0', box: { x: 400, y: 300, width: 200, height: 40 } }, { role: 'button', name: 'Filler A', backendDOMNodeId: 91, frameId: '0' }, { role: 'button', name: 'Filler B', backendDOMNodeId: 92, frameId: '0' }, { role: 'button', name: 'Filler C', backendDOMNodeId: 93, frameId: '0' }, { role: 'button', name: 'Filler D', backendDOMNodeId: 94, frameId: '0' }] }],
         riskFlags: {},
       }
     }
     if (source.includes('__READY_AGENT_TARGET_PROBE__')) {
-      return { matchCount: 1, disabled: false, target: { role: 'textbox', name: '订单备注', value: '提交订单草稿' } }
+      return { matchCount: 1, disabled: false, target: { role: 'textbox', name: '订单备注', value: '提交订单草稿', box: { x: 400, y: 300, width: 200, height: 40 } } }
     }
     if (source.includes('__READY_AGENT_ACT_ON_TARGET__')) {
       return { ok: true, action: 'fill', target: { role: 'textbox' } }
@@ -197,15 +208,13 @@ test('act_on_target: fill into an editable field whose VALUE contains a trigger 
     return null
   })
   const context = modelContext(controller)
-  await executeToolCall('browser_read_page_map', {}, context)
-  const output = await executeToolCall('browser_act_on_target', {
-    target_id: '1:0:1',
-    action: 'fill',
-    value: '加急处理',
+  const targetId = await captureFirstTargetId(context)
+  const output = await executeToolCall('browser_type', {
+    target_id: targetId,
+    text: '加急处理',
   }, context)
   assert.notEqual(output.data?.errorKind, 'grant_required', 'field value must not enter the destructive-grant decision for fill')
-  assert.ok(controller.calls.scripts.some((s) => s.includes('__READY_AGENT_ACT_ON_TARGET__')),
-    'a benign editable fill must execute')
+  assert.deepEqual(controller.calls.typed, ['加急处理'])
 })
 
 // ---------------------------------------------------------------------------
@@ -231,7 +240,7 @@ test('browser_click: in-script destructive check refuses without clicking; patte
   assert.ok(clickScript!.includes('aria-labelledby'), 'click label must resolve aria-labelledby')
 })
 
-test('browser_click_text: generic text resolving to a payment button → grant_required before mouse event', async () => {
+test('browser_click by text: generic text resolving to a payment button → grant_required before mouse event', async () => {
   const controller = makeController((source) => {
     if (source.includes('const target = "确认"')) {
       return { ok: true, text: '确认支付', clickedDirect: false, cssX: 500, cssY: 500, width: 1000, height: 800 }
@@ -241,7 +250,7 @@ test('browser_click_text: generic text resolving to a payment button → grant_r
     }
     return null
   })
-  const output = await executeToolCall('browser_click_text', { text: '确认' }, modelContext(controller))
+  const output = await executeToolCall('browser_click', { text: '确认' }, modelContext(controller))
   assert.equal(output.data?.errorKind, 'grant_required')
   assert.equal(controller.calls.mouse.length, 0, 'the resolved payment button must not receive a mouse event')
 })
@@ -250,14 +259,14 @@ test('browser_click_text: generic text resolving to a payment button → grant_r
 // 3. Coordinate click
 // ---------------------------------------------------------------------------
 
-test('browser_click_at: labeled destructive target under the point is refused before any mouse event', async () => {
+test('browser_click by coordinate: labeled destructive target is refused before any mouse event', async () => {
   const controller = makeController((source) => {
     if (source.includes('__READY_CLICK_POINT_LABEL_PROBE__')) {
       return { label: '立即支付' }
     }
     return null
   })
-  const output = await executeToolCall('browser_click_at', { x: 500, y: 500 }, modelContext(controller))
+  const output = await executeToolCall('browser_click', { x: 500, y: 500 }, modelContext(controller))
   assert.equal(output.data?.errorKind, 'grant_required')
   assert.equal(controller.calls.mouse.length, 0, 'no mouse event may fire on a refused target')
   // Parent-bubble proof: clicks bubble, so hitting an icon/span inside a
@@ -269,9 +278,9 @@ test('browser_click_at: labeled destructive target under the point is refused be
   assert.ok(probeScript!.includes('aria-labelledby'), 'probe must resolve aria-labelledby references')
 })
 
-test('browser_click_at: unresolvable label proceeds (visual channel stays usable)', async () => {
+test('browser_click by coordinate: unresolvable label proceeds (visual channel stays usable)', async () => {
   const controller = makeController(() => null)
-  const output = await executeToolCall('browser_click_at', { x: 500, y: 500 }, modelContext(controller))
+  const output = await executeToolCall('browser_click', { x: 500, y: 500 }, modelContext(controller))
   assert.match(output.text, /"ok": true/)
   assert.ok(controller.calls.mouse.length >= 3, 'click must dispatch when no label is resolvable')
 })
@@ -310,35 +319,35 @@ test('browser_type: opaque selector resolving to a captcha field → grant_requi
 })
 
 // ---------------------------------------------------------------------------
-// 4b. Coordinate typing (browser_type_at)
+// 4b. Coordinate typing (browser_type)
 // ---------------------------------------------------------------------------
 
-test('browser_type_at: password field under the point without an args cue → reroute, nothing typed', async () => {
+test('browser_type by coordinate: password field without an args cue → reroute, nothing typed', async () => {
   const controller = makeController((source) => {
     if (source.includes('__READY_CLICK_POINT_LABEL_PROBE__')) {
       return { label: '', inputLabel: '', password: true, editable: true }
     }
     return null
   })
-  const output = await executeToolCall('browser_type_at', { x: 500, y: 500, text: 'hunter2' }, modelContext(controller))
+  const output = await executeToolCall('browser_type', { x: 500, y: 500, text: 'hunter2' }, modelContext(controller))
   assert.equal(output.data?.errorKind, 'denied_pending_confirmation')
   assert.deepEqual(controller.calls.typed, [], 'no text may be typed into an unconfirmed password field')
   assert.equal(controller.calls.mouse.length, 0, 'the focusing click must not fire either')
 })
 
-test('browser_type_at: captcha INPUT field under the point → grant_required (editable branch, field semantics)', async () => {
+test('browser_type by coordinate: captcha INPUT field → grant_required (editable branch, field semantics)', async () => {
   const controller = makeController((source) => {
     if (source.includes('__READY_CLICK_POINT_LABEL_PROBE__')) {
       return { label: '', inputLabel: '请输入验证码', password: false, editable: true }
     }
     return null
   })
-  const output = await executeToolCall('browser_type_at', { x: 500, y: 500, text: '8244' }, modelContext(controller))
+  const output = await executeToolCall('browser_type', { x: 500, y: 500, text: '8244' }, modelContext(controller))
   assert.equal(output.data?.errorKind, 'grant_required')
   assert.deepEqual(controller.calls.typed, [])
 })
 
-test('browser_type_at: editable field whose CURRENT VALUE contains a trigger word is NOT blocked (P2 false-positive fix)', async () => {
+test('browser_type by coordinate: editable field whose CURRENT VALUE contains a trigger word is NOT blocked', async () => {
   // A normal text field already holding "提交订单草稿" must stay typable —
   // the value must never enter the destructive-grant decision (only field
   // semantics do, and those exclude value).
@@ -348,30 +357,30 @@ test('browser_type_at: editable field whose CURRENT VALUE contains a trigger wor
     }
     return null
   })
-  const output = await executeToolCall('browser_type_at', { x: 500, y: 500, text: '加急' }, modelContext(controller))
+  const output = await executeToolCall('browser_type', { x: 500, y: 500, text: '加急' }, modelContext(controller))
   assert.match(output.text, /"ok": true/)
   assert.deepEqual(controller.calls.typed, ['加急'], 'a benign editable field must remain typable')
 })
 
-test('browser_type_at: unresolvable probe proceeds (visual channel stays usable)', async () => {
+test('browser_type by coordinate: unresolvable probe proceeds (visual channel stays usable)', async () => {
   const controller = makeController(() => null)
-  const output = await executeToolCall('browser_type_at', { x: 500, y: 500, text: '你好' }, modelContext(controller))
+  const output = await executeToolCall('browser_type', { x: 500, y: 500, text: '你好' }, modelContext(controller))
   assert.match(output.text, /"ok": true/)
   assert.deepEqual(controller.calls.typed, ['你好'])
 })
 
 // ---------------------------------------------------------------------------
-// 4c. Smart typing (browser_type_smart) — scorer-resolved element
+// 4c. Smart typing (browser_type) — scorer-resolved element
 // ---------------------------------------------------------------------------
 
-test('browser_type_smart: scorer resolving a password field without an args cue → reroute', async () => {
+test('browser_type semantic target resolving a password field without an args cue → reroute', async () => {
   const controller = makeController((source) => {
     if (source.includes('__READY_LIVE_TARGET_GUARD__') && source.includes('Smart target not found')) {
       return { __readyPasswordFillBlocked: true }
     }
     return null
   })
-  const output = await executeToolCall('browser_type_smart', { target: '输入框', text: 'hunter2' }, modelContext(controller))
+  const output = await executeToolCall('browser_type', { target: '输入框', text: 'hunter2' }, modelContext(controller))
   assert.equal(output.data?.errorKind, 'denied_pending_confirmation')
 })
 
@@ -380,14 +389,14 @@ test('browser_type_smart: scorer resolving a password field without an args cue 
 //     fires before any typing — pressing a payment button is already the act)
 // ---------------------------------------------------------------------------
 
-test('browser_type_at: payment button under the point → grant_required BEFORE the focusing click', async () => {
+test('browser_type by coordinate: payment button → grant_required BEFORE the focusing click', async () => {
   const controller = makeController((source) => {
     if (source.includes('__READY_CLICK_POINT_LABEL_PROBE__')) {
       return { label: '确认支付', inputLabel: '', password: false }
     }
     return null
   })
-  const output = await executeToolCall('browser_type_at', { x: 500, y: 500, text: '随便' }, modelContext(controller))
+  const output = await executeToolCall('browser_type', { x: 500, y: 500, text: '随便' }, modelContext(controller))
   assert.equal(output.data?.errorKind, 'grant_required')
   assert.equal(controller.calls.mouse.length, 0, 'the focusing click must never fire')
   assert.deepEqual(controller.calls.typed, [])
@@ -398,33 +407,33 @@ test('browser_type_at: payment button under the point → grant_required BEFORE 
 //     sendKeyStroke, the single enforcement entry)
 // ---------------------------------------------------------------------------
 
-test('browser_send_keys: printable key while a captcha field is focused → grant_required', async () => {
+test('browser_press_key: printable key while a captcha field is focused → grant_required', async () => {
   const controller = makeController((source) => {
     if (source.includes('__READY_FOCUSED_FIELD_PROBE__')) {
       return { inputLabel: '请输入验证码', password: false }
     }
     return null
   })
-  const output = await executeToolCall('browser_send_keys', { key: 'a' }, modelContext(controller))
+  const output = await executeToolCall('browser_press_key', { key: 'a' }, modelContext(controller))
   assert.equal(output.data?.errorKind, 'grant_required')
   assert.deepEqual(controller.calls.keys, [], 'no key event may reach a captcha field')
 })
 
-test('browser_send_keys: printable key while a password field is focused → reroute, nothing sent', async () => {
+test('browser_press_key: printable key while a password field is focused → reroute, nothing sent', async () => {
   const controller = makeController((source) => {
     if (source.includes('__READY_FOCUSED_FIELD_PROBE__')) {
       return { inputLabel: '', password: true }
     }
     return null
   })
-  const output = await executeToolCall('browser_send_keys', { key: '8' }, modelContext(controller))
+  const output = await executeToolCall('browser_press_key', { key: '8' }, modelContext(controller))
   assert.equal(output.data?.errorKind, 'denied_pending_confirmation')
   assert.deepEqual(controller.calls.keys, [])
 })
 
-test('browser_send_keys: navigation keys (Enter) skip the probe and pass — user-driven submits stay usable', async () => {
+test('browser_press_key: navigation keys (Enter) skip the probe and pass', async () => {
   const controller = makeController(() => null)
-  const output = await executeToolCall('browser_send_keys', { key: 'Enter' }, modelContext(controller))
+  const output = await executeToolCall('browser_press_key', { key: 'Enter' }, modelContext(controller))
   assert.match(output.text, /Sent key/)
   assert.ok(controller.calls.keys.length > 0, 'Enter must dispatch')
   assert.ok(
@@ -433,16 +442,14 @@ test('browser_send_keys: navigation keys (Enter) skip the probe and pass — use
   )
 })
 
-test('workflow send_keys substep funnels through the same guard', async () => {
+test('browser_press_key stays on the same focused-field guard for every caller', async () => {
   const controller = makeController((source) => {
     if (source.includes('__READY_FOCUSED_FIELD_PROBE__')) {
       return { inputLabel: '', password: true }
     }
     return null
   })
-  const output = await executeToolCall('browser_run_workflow', {
-    steps: [{ action: 'send_keys', key: 'a' }],
-  }, modelContext(controller))
+  const output = await executeToolCall('browser_press_key', { key: 'a' }, modelContext(controller))
   assert.equal(output.data?.errorKind, 'denied_pending_confirmation',
     'the workflow substep must hit the same sendKeyStroke guard')
   assert.deepEqual(controller.calls.keys, [])
@@ -452,7 +459,7 @@ test('workflow send_keys substep funnels through the same guard', async () => {
 // 4f. send_keys — Shift-modified printable chars must still be guarded
 // ---------------------------------------------------------------------------
 
-test('browser_send_keys: Shift+letter into a focused password field → reroute (Shift is a text modifier)', async () => {
+test('browser_press_key: Shift+letter into a focused password field → reroute', async () => {
   const controller = makeController((source) => {
     if (source.includes('__READY_FOCUSED_FIELD_PROBE__')) {
       return { inputLabel: '', password: true }
@@ -460,14 +467,14 @@ test('browser_send_keys: Shift+letter into a focused password field → reroute 
     return null
   })
   // Shift mask bit = 8; the guard must still probe (Shift+a → 'A').
-  const output = await executeToolCall('browser_send_keys', { key: 'a', modifiers: ['shift'] }, modelContext(controller))
+  const output = await executeToolCall('browser_press_key', { key: 'a', modifiers: ['shift'] }, modelContext(controller))
   assert.equal(output.data?.errorKind, 'denied_pending_confirmation')
   assert.deepEqual(controller.calls.keys, [], 'no Shift+char may reach a password field')
 })
 
-test('browser_send_keys: Ctrl+a (select-all shortcut) skips the probe and passes', async () => {
+test('browser_press_key: Ctrl+a (select-all shortcut) skips the probe and passes', async () => {
   const controller = makeController(() => null)
-  const output = await executeToolCall('browser_send_keys', { key: 'a', modifiers: ['ctrl'] }, modelContext(controller))
+  const output = await executeToolCall('browser_press_key', { key: 'a', modifiers: ['ctrl'] }, modelContext(controller))
   assert.match(output.text, /Sent key/)
   assert.ok(
     !controller.calls.scripts.some((s) => s.includes('__READY_FOCUSED_FIELD_PROBE__')),
@@ -480,83 +487,79 @@ test('browser_send_keys: Ctrl+a (select-all shortcut) skips the probe and passes
 //     (the workflow tool is NOT in the dispatch confirmation policy)
 // ---------------------------------------------------------------------------
 
-test('workflow click: selector hitting a payment button → grant_required, not clicked', async () => {
+test('browser_click selector hitting a payment button → grant_required, not clicked', async () => {
   const controller = makeController((source) => {
     if (source.includes('__READY_DESTRUCTIVE_TARGET_CHECK__')) {
       return { __readyDestructiveTargetBlocked: true, label: '确认支付' }
     }
     return null
   })
-  const output = await executeToolCall('browser_run_workflow', {
-    steps: [{ action: 'click', selector: '#pay' }],
-  }, modelContext(controller))
+  const output = await executeToolCall('browser_click', { selector: '#pay' }, modelContext(controller))
   assert.equal(output.data?.errorKind, 'grant_required')
 })
 
-test('workflow click_at: payment button under the point → grant_required, no mouse event', async () => {
+test('browser_click coordinate on payment button → grant_required, no mouse event', async () => {
   const controller = makeController((source) => {
     if (source.includes('__READY_CLICK_POINT_LABEL_PROBE__')) {
       return { label: '立即支付', inputLabel: '', password: false, editable: false }
     }
     return null
   })
-  const output = await executeToolCall('browser_run_workflow', {
-    steps: [{ action: 'click_at', x: 500, y: 500 }],
-  }, modelContext(controller))
+  const output = await executeToolCall('browser_click', { x: 500, y: 500 }, modelContext(controller))
   assert.equal(output.data?.errorKind, 'grant_required')
   assert.equal(controller.calls.mouse.length, 0)
 })
 
-test('workflow type: selector resolving to a password field → reroute (workflow never confirms, so no cue path)', async () => {
+test('browser_type selector resolving to a password field → reroute without a cue', async () => {
   const controller = makeController((source) => {
     if (source.includes('__READY_LIVE_TARGET_GUARD__')) {
       return { __readyPasswordFillBlocked: true }
     }
     return null
   })
-  const output = await executeToolCall('browser_run_workflow', {
-    steps: [{ action: 'type', selector: '#pw', text: 'hunter2' }],
-  }, modelContext(controller))
+  const output = await executeToolCall('browser_type', { selector: '#pw', text: 'hunter2' }, modelContext(controller))
   assert.equal(output.data?.errorKind, 'denied_pending_confirmation')
 })
 
-test('workflow type_at: captcha input under the point → grant_required', async () => {
+test('browser_type coordinate on captcha input → grant_required', async () => {
   const controller = makeController((source) => {
     if (source.includes('__READY_CLICK_POINT_LABEL_PROBE__')) {
       return { label: '', inputLabel: '验证码', password: false, editable: true }
     }
     return null
   })
-  const output = await executeToolCall('browser_run_workflow', {
-    steps: [{ action: 'type_at', x: 400, y: 400, text: '1234' }],
-  }, modelContext(controller))
+  const output = await executeToolCall('browser_type', { x: 400, y: 400, text: '1234' }, modelContext(controller))
   assert.equal(output.data?.errorKind, 'grant_required')
   assert.deepEqual(controller.calls.typed, [])
 })
 
-test('workflow click_text: generic text resolving to a payment button → grant_required', async () => {
+test('browser_click text resolving to a payment button → grant_required', async () => {
   const controller = makeController((source) => {
-    if (source.includes('readyClickSemanticsLabel') || source.includes('Element by text')) {
-      return { __readyDestructiveTargetBlocked: true, label: '确认支付' }
+    if (source.includes('const target = "确认"')) {
+      return { ok: true, text: '确认支付', cssX: 500, cssY: 400, width: 1000, height: 800 }
+    }
+    if (source.includes('__READY_CLICK_POINT_LABEL_PROBE__')) {
+      return { label: '确认支付', inputLabel: '', password: false, editable: false }
     }
     return null
   })
-  const output = await executeToolCall('browser_run_workflow', {
-    steps: [{ action: 'click_text', text: '确认' }],
-  }, modelContext(controller))
+  const output = await executeToolCall('browser_click', { text: '确认' }, modelContext(controller))
   assert.equal(output.data?.errorKind, 'grant_required')
 })
 
-test('workflow click_text: text arg itself naming a destructive-grant action → denied before locating', async () => {
-  const controller = makeController(() => null)
-  const output = await executeToolCall('browser_run_workflow', {
-    steps: [{ action: 'click_text', text: '确认支付' }],
-  }, modelContext(controller))
+test('browser_click text naming a destructive-grant action → denied before trusted input', async () => {
+  const controller = makeController((source) => {
+    if (source.includes('const target = "确认支付"')) {
+      return { ok: true, text: '确认支付', cssX: 500, cssY: 400, width: 1000, height: 800 }
+    }
+    if (source.includes('__READY_CLICK_POINT_LABEL_PROBE__')) {
+      return { label: '确认支付', inputLabel: '', password: false, editable: false }
+    }
+    return null
+  })
+  const output = await executeToolCall('browser_click', { text: '确认支付' }, modelContext(controller))
   assert.equal(output.data?.errorKind, 'grant_required')
-  assert.ok(
-    !controller.calls.scripts.some((s) => s.includes('Element by text')),
-    'a destructive-grant text arg must be refused before the locate script runs',
-  )
+  assert.equal(controller.calls.mouse.length, 0)
 })
 
 // ---------------------------------------------------------------------------

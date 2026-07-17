@@ -306,7 +306,7 @@ export function resolveSkillHintRelevanceForTurn(params: {
   // collection/download). Before, ANY turn with a reference hint + continuable
   // task hit continuable_task, so a fresh "把这条视频下载到X" after a paused
   // collection got the 12-tool skill set and lost
-  // browser_media_download_advanced / browser_power_eval / resolve_video — the
+  // browser_download / browser_eval / resolve_video — the
   // agent then reported it "lacked the tools". A skill-resume follow-up with no
   // browser intent (e.g. "跑 finalize") still keeps the skill surface; genuine
   // resumes also come through the continuationIntent branch above.
@@ -493,7 +493,7 @@ export function resolveSdkDefaultIntentSurface(params: {
       params.browserDecisionMode === 'browser_workflow'
       || params.browserDecisionMode === 'browser_upload_workflow'
     )
-      ? ['browser_interaction', 'browser_content_tasks'] as const
+      ? ['browser_interaction'] as const
       : []),
   ]))
 

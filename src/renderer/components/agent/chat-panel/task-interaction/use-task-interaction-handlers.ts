@@ -342,7 +342,6 @@ export function useTaskInteractionHandlers(
     }
     const result = await window.electronAPI.browser.confirmCollectionConsent({
       requestId: normalizedRequestId,
-      confirmedVia: 'ui_action',
     }).catch(() => null)
     recordTaskActionTestEvent({
       action: 'confirm-browser-collection-consent',

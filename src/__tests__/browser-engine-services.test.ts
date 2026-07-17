@@ -629,6 +629,53 @@ describe('BrowserTabLifecycleService', () => {
 
     assert.deepStrictEqual(historyEntries, [])
   })
+
+  it('uses a distinct persistent partition for each named profile', async () => {
+    const tabs = new Map<string, BrowserLifecycleTabRecord>()
+    const partitions: string[] = []
+    const views = [createMockView(), createMockView()]
+    let activeTabId: string | null = null
+    let nextId = 0
+    const service = new BrowserTabLifecycleService({
+      tabs,
+      getActiveTabId: () => activeTabId,
+      setActiveTabId: (tabId) => { activeTabId = tabId },
+      getNextTabId: () => `tab-${++nextId}`,
+      getViewBounds: () => ({ x: 0, y: 0, width: 800, height: 600 }),
+      shouldPresentHosts: () => true,
+      isAllowedUrl: () => true,
+      extractDomain: (url) => new URL(url).hostname,
+      createHost: (partition) => {
+        partitions.push(partition)
+        return views[partitions.length - 1].view as any
+      },
+      ...noopPageBackgroundDeps,
+      applyBounds: () => undefined,
+      detachHost: () => undefined,
+      showHost: () => undefined,
+      sendToRenderer: () => undefined,
+      emitTabMeta: () => undefined,
+      logBrowserDiag: () => undefined,
+      bindPopup: () => undefined,
+      bindAppShortcutBridge: () => undefined,
+      installContextMenu: () => undefined,
+      handleWindowOpen: () => ({ action: 'deny' }),
+      ensureDownloadSession: () => undefined,
+      addHistoryEntry: () => undefined,
+      browserUserAgent: 'test-agent',
+      useMock: false,
+    })
+
+    await service.createTab('https://example.com', { profile: 'work' })
+    await service.createTab('https://example.com', { profile: 'personal' })
+
+    assert.deepStrictEqual(partitions, [
+      'persist:browser-profile-work',
+      'persist:browser-profile-personal',
+    ])
+    assert.equal(tabs.get('tab-1')?.profile, 'work')
+    assert.equal(tabs.get('tab-2')?.profile, 'personal')
+  })
 })
 
 describe('BrowserPreviewService', () => {
@@ -955,8 +1002,31 @@ describe('BrowserWindowOpenService', () => {
         reason: 'default',
         // popup 来源追踪（agentOwned popup 收养链）：通知携带来源 tab 上下文，
         // 本 fixture 无来源 tab → 双 null。
-        context: { sourceOwner: null, sourceTabId: null },
+        context: { sourceOwner: null, sourceTabId: null, profile: null },
       },
     ])
+  })
+
+  it('forwards the source profile through popup policy and tab fallback', () => {
+    const resolvedContexts: unknown[] = []
+    const openedContexts: unknown[] = []
+    const service = new BrowserWindowOpenService({
+      popupManager: {
+        resolveWindowOpen: (_details: unknown, context: unknown) => {
+          resolvedContexts.push(context)
+          return { mode: 'open-tab', reason: 'default' }
+        },
+        notifyWindowOpenRequested: () => undefined,
+      } as any,
+      openInTab: (_url, context) => { openedContexts.push(context) },
+      logBrowserDiag: () => undefined,
+      openExternal: () => undefined,
+    })
+    const context = { sourceTabId: 'tab-work', sourceOwner: 'agent' as const, profile: 'work' }
+
+    service.handle({ url: 'https://example.com/popup' }, 'tab', 42, context)
+
+    assert.deepStrictEqual(resolvedContexts, [context])
+    assert.deepStrictEqual(openedContexts, [context])
   })
 })

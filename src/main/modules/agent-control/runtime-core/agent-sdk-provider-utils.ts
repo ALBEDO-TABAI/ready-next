@@ -1,4 +1,4 @@
-import { type RunStreamEvent } from '@openai/agents'
+import { type RunStreamEvent, type ToolCallOutputContent } from '@openai/agents'
 import {
   getProviderDef,
   type AIModelConfig,
@@ -61,6 +61,29 @@ export function stringifyModelVisibleFunctionResult(output: unknown): string {
 
 export function stringifyToolResult(output: ToolExecutionOutput): string {
   return JSON.stringify(buildModelVisibleToolResultPayload(output))
+}
+
+export function toAgentSdkToolResult(output: ToolExecutionOutput): string | ToolCallOutputContent[] {
+  const normalized = normalizeToolExecutionOutput(output)
+  if (!normalized.content?.length) return stringifyToolResult(normalized)
+  const content: ToolCallOutputContent[] = []
+  if (normalized.text) {
+    content.push({ type: 'text', text: redactModelVisibleToolText(normalized.text) })
+  }
+  for (const part of normalized.content) {
+    if (part.type === 'text') {
+      content.push({ type: 'text', text: redactModelVisibleToolText(part.text) })
+    } else if (part.type === 'image') {
+      content.push({
+        type: 'image',
+        image: { data: part.data, mediaType: part.mediaType },
+        detail: part.detail || 'auto',
+      })
+    } else {
+      content.push({ type: 'file', file: part.path })
+    }
+  }
+  return content
 }
 
 export function readStructuredResultRecord(output: ToolExecutionOutput): Record<string, unknown> {

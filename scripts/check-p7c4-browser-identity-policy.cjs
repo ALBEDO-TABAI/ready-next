@@ -27,8 +27,8 @@ function assertIncludes(relPath, needles) {
 
 function assertInventory() {
   const inventory = JSON.parse(read('scripts/p7c4-browser-identity-inventory.json'))
-  if (inventory.policy !== 'shared-persist-browser') {
-    fail(`inventory policy must be shared-persist-browser, got ${inventory.policy}`)
+  if (inventory.policy !== 'shared-default-with-explicit-profiles') {
+    fail(`inventory policy must be shared-default-with-explicit-profiles, got ${inventory.policy}`)
   }
   if (!Array.isArray(inventory.surfaces) || inventory.surfaces.length < 6) {
     fail('inventory must list the current shared browser surfaces')
@@ -41,9 +41,6 @@ function assertInventory() {
     const evidence = String(surface.evidence || '').trim()
     if (!id || !file || !partition || !evidence) {
       fail(`inventory entry is incomplete: ${JSON.stringify(surface)}`)
-    }
-    if (partition !== 'persist:browser') {
-      fail(`inventory entry ${id} must remain honest about current shared partition, got ${partition}`)
     }
     assertIncludes(file, [evidence])
   }
@@ -64,7 +61,7 @@ function assertNoSharedSessionIsolationClaim(relPath, source) {
 assertInventory()
 
 const tabLifecycle = assertIncludes('src/main/modules/browser-engine/tab-lifecycle-service.ts', [
-  "this.host.createHost('persist:browser')",
+  "profile ? `persist:browser-profile-${profile}` : 'persist:browser'",
 ])
 
 const ipcHandler = assertIncludes('src/main/modules/browser-engine/ipc-handler.ts', [
@@ -80,11 +77,11 @@ assertIncludes('src/main/modules/browser-engine/preview-service.ts', [
 ])
 
 assertIncludes('src/main/modules/browser-engine/auth-popup-manager.ts', [
-  "partition: 'persist:browser'",
+  "profile ? `persist:browser-profile-${profile}` : 'persist:browser'",
 ])
 
 assertIncludes('src/main/modules/browser-engine/session-policy-service.ts', [
-  "applyForPartition('persist:browser')",
+  "this.applyForPartition('persist:browser')",
 ])
 
 assertIncludes('src/main/modules/browser-engine/browser-surface-binding.ts', [
@@ -94,12 +91,12 @@ assertIncludes('src/main/modules/browser-engine/browser-surface-binding.ts', [
 ])
 
 const plan = assertIncludes('docs/superpowers/plans/2026-06-20-p7c4-browser-identity-policy-spike-implementation.md', [
-  'Current State: Shared Browser Identity',
+  'Current State: Shared Default With Explicit Profiles',
   'current agent browser work is not browser identity isolation',
-  'Ready keeps the current shared browser identity for now',
+  'Ready keeps the default browser identity shared',
   'native lock overlay and supervision panel signal control ownership only',
-  'Gate proves normal tabs, agent tabs, preview, auth popup, background probe, downloads, and session policy all still use `persist:browser`.',
-  'No production partition/profile change in this batch',
+  'named profiles isolate cookies and origin storage, while history and application-level learning remain shared by policy.',
+  'Profile selection is explicit; Ready never silently moves an existing tab into another identity.',
 ])
 
 const consensus = assertIncludes('outputs/agent-audit/fix-plan/164-CONSENSUS-BROWSER-ISOLATION-SPECIALIST-PRODUCT-ROUTE.md', [

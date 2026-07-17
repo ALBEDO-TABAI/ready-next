@@ -289,7 +289,7 @@ export interface ScopeRunSkillProgress {
 
 export interface BrowserCollectionConsentProgress {
   requestId: string
-  consentKind: 'partial_collection' | 'high_control_url_batch_downgrade'
+  consentKind: 'partial_collection'
   sourceTaskId: string
   targetHost?: string | null
   warningText?: string | null

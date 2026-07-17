@@ -23,7 +23,7 @@ function browserTool(name: string): ToolDefinition {
     name,
     groupId: 'browser_content_tasks',
     domain: 'browser',
-    kind: name === 'browser_get_task' ? 'read' : 'write',
+    kind: name === 'browser_task' ? 'read' : 'write',
     concurrency: 'serial',
     interruptBehavior: 'abort_signal',
     timeoutProfile: 'default',
@@ -44,9 +44,9 @@ function createRuntime(
     loadAIConfig: () => ({ ok: true, config: fakeConfig, reason: 'present' }),
     domainAdapters: [],
     listToolDefinitions: () => [
-      browserTool('browser_get_task'),
-      browserTool('browser_visible_collect'),
-      browserTool('browser_collect_notes'),
+      browserTool('browser_task'),
+      browserTool('browser_collect'),
+      browserTool('browser_collect'),
     ],
     executeToolCall: async () => createToolExecutionOutput('ok', { shape: 'json', data: { ok: true } }),
     runAgent: async ({ tools }) => {
@@ -77,9 +77,9 @@ test('status question narrows browser tools to read-only surface', async () => {
   await runtime.sendMessage('butler::scope-status', instructionWithContext('怎么样了'), 'run-status-1', {})
   assert.equal(seenTools.length, 1)
   const names = seenTools[0]
-  assert.ok(names.includes('browser_get_task'), `expected read tool kept, got ${names.join(',')}`)
-  assert.ok(!names.includes('browser_visible_collect'), 'write collect tool must be hidden on status query')
-  assert.ok(!names.includes('browser_collect_notes'), 'write dispatch tool must be hidden on status query')
+  assert.ok(names.includes('browser_task'), `expected read tool kept, got ${names.join(',')}`)
+  assert.ok(!names.includes('browser_collect'), 'write collect tool must be hidden on status query')
+  assert.ok(!names.includes('browser_collect'), 'write dispatch tool must be hidden on status query')
 })
 
 test('bare continue keeps the full collection surface (99fc8f regression)', async () => {
@@ -89,6 +89,6 @@ test('bare continue keeps the full collection surface (99fc8f regression)', asyn
   await runtime.sendMessage('butler::scope-continue', instructionWithContext('继续'), 'run-continue-1', {})
   assert.equal(seenTools.length, 1)
   const names = seenTools[0]
-  assert.ok(names.includes('browser_visible_collect'), `continue must keep write tools, got ${names.join(',')}`)
-  assert.ok(names.includes('browser_collect_notes'), 'continue must keep dispatch tool')
+  assert.ok(names.includes('browser_collect'), `continue must keep write tools, got ${names.join(',')}`)
+  assert.ok(names.includes('browser_collect'), 'continue must keep dispatch tool')
 })

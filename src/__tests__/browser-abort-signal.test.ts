@@ -9,20 +9,18 @@ test('browser-abort-signal declares transitive sqlite ABI guard', (t) => {
   skipIfSqliteUnavailable(t, 'browser-abort-signal transitive sqlite load')
 })
 
-test('browser tool abort signal rethrows instead of returning an error string', async () => {
+test('pre-aborted browser write returns a structured cancellation result', async () => {
   const controller = {
     getActiveTab: () => null,
   } as unknown as BrowserController
   const abort = new AbortController()
   abort.abort()
 
-  await assert.rejects(
-    () => executeBrowserTool('browser_get_task', { task_id: 'browser-task-1' }, controller, abort.signal),
-    (error: unknown) => error instanceof Error && error.name === 'AbortError',
-  )
+  const output = await executeBrowserTool('browser_navigate', { action: 'reload' }, controller, abort.signal)
+  assert.equal(typeof output === 'string' ? null : output.data?.errorKind, 'origin_budget_aborted')
 })
 
-test('browser_query_gemini rethrows mid-execution abort instead of formatting fallback text', async () => {
+test('browser_eval rethrows a mid-execution AbortError instead of formatting fallback text', async () => {
   const abortError = new Error('mid execution abort')
   abortError.name = 'AbortError'
   const controller = {
@@ -35,8 +33,8 @@ test('browser_query_gemini rethrows mid-execution abort instead of formatting fa
 
   await assert.rejects(
     () => executeBrowserTool(
-      'browser_query_gemini',
-      { text: 'hello', tab_id: 'tab-gemini', wait_response_ms: 6000 },
+      'browser_eval',
+      { code: 'document.title', purpose: 'read title', world: 'main', tab_id: 'tab-gemini' },
       controller,
     ),
     (error: unknown) => error instanceof Error && error.name === 'AbortError',

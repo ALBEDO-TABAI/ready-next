@@ -897,18 +897,15 @@ export class BrowserAgentRunner {
     }
     if ([
       'browser_navigate',
-      'browser_upload_scope_attachment',
-      'browser_click_at',
+      'browser_upload',
       'browser_click',
-      'browser_click_text',
       'browser_type',
-      'browser_type_smart',
-      'browser_type_at',
-      'browser_compose_message',
-      'browser_send_keys',
-      'browser_go_back',
-      'browser_run_workflow',
-      'browser_query_gemini',
+      'browser_fill_form',
+      'browser_select',
+      'browser_hover',
+      'browser_scroll',
+      'browser_drag',
+      'browser_press_key',
     ].includes(toolName)) {
       this.invalidateWorkflowCaches()
     }
@@ -1348,7 +1345,7 @@ export class BrowserAgentRunner {
     const visionCacheKey = visionAction ? this.getVisionCacheKey(visionAction) : null
     const cachedVision = visionCacheKey ? this.visionHintCache.get(visionCacheKey) : null
     const probeRaw = await this.invokeTool(
-      'browser_probe_workflow_state',
+      'browser_status',
       {
         prompt: promptCandidate,
         attachment_name: attachmentName,
@@ -1444,7 +1441,7 @@ export class BrowserAgentRunner {
 
     const [page, screenshotRaw, uploadState, promptState, domState] = await Promise.all([
       this.getPageIdentity(),
-      this.invokeTool('browser_capture_viewport', { mode: 'viewport' }, { silent: true }),
+      this.invokeTool('browser_screenshot', { mode: 'viewport' }, { silent: true }),
       this.probeUploadState(attachmentName),
       this.probePromptSubmissionState(promptCandidate),
       this.probeDomState(),
@@ -1479,7 +1476,7 @@ export class BrowserAgentRunner {
 
     if (visionAction && this.needsVisionFallback(visionAction, snapshot)) {
       const analyzedRaw = await this.invokeTool(
-        'browser_analyze_viewport',
+        'browser_screenshot',
         { action: visionAction, include_dom_candidates: true },
         { silent: true },
       )
@@ -1657,15 +1654,15 @@ export class BrowserAgentRunner {
       return this.captureWorkflowSnapshot('recover', '', this.getPlannedAttachment(this.activePlan || this.buildDefaultPlan())?.name)
     }
     this.emitStage('recover', '尝试通过 Escape、关闭或返回恢复页面状态')
-    await this.invokeTool('browser_send_keys', { key: 'Escape' }, { silent: true })
+    await this.invokeTool('browser_press_key', { key: 'Escape' }, { silent: true })
     await this.waitShort(260)
 
     const closeTargets = this.parseActionTargets(
-      await this.invokeTool('browser_locate_action_targets', { action: 'close' }, { silent: true }),
+      await this.invokeTool('browser_find', { action: 'close' }, { silent: true }),
     ).slice(0, 2)
     if (closeTargets[0]) {
       await this.invokeTool(
-        'browser_click_at',
+        'browser_click',
         { x: Number(closeTargets[0].x), y: Number(closeTargets[0].y) },
         { silent: true },
       )
@@ -1678,17 +1675,17 @@ export class BrowserAgentRunner {
     }
 
     const backTargets = this.parseActionTargets(
-      await this.invokeTool('browser_locate_action_targets', { action: 'back' }, { silent: true }),
+      await this.invokeTool('browser_find', { action: 'back' }, { silent: true }),
     ).slice(0, 1)
     if (backTargets[0]) {
       await this.invokeTool(
-        'browser_click_at',
+        'browser_click',
         { x: Number(backTargets[0].x), y: Number(backTargets[0].y) },
         { silent: true },
       )
       await this.waitShort(400)
     } else if (snapshot.page.url && refreshed.page.url !== snapshot.page.url) {
-      await this.invokeTool('browser_go_back', {}, { silent: true })
+      await this.invokeTool('browser_navigate', { action: 'back' }, { silent: true })
       await this.waitShort(420)
     }
 
@@ -1720,7 +1717,7 @@ export class BrowserAgentRunner {
       const uploadArgs: Record<string, unknown> = attachment?.attachmentId && attachment.attachmentId !== 'latest'
         ? { attachment_id: attachment.attachmentId }
         : { latest: true }
-      const uploadRaw = await this.invokeTool('browser_upload_scope_attachment', uploadArgs, { silent: true })
+      const uploadRaw = await this.invokeTool('browser_upload', uploadArgs, { silent: true })
       const uploadPayload = parseJSONText(uploadRaw) || {}
       evidence = uniqueEvidence([
         ...evidence,
@@ -1765,7 +1762,7 @@ export class BrowserAgentRunner {
         const visionTarget = snapshot.visionHints.upload[0]
         this.emitStage('ensure_upload', `DOM 入口不足，改用视觉候选：${visionTarget.label || visionTarget.kind || 'upload_target'}`)
         const secondRaw = await this.invokeTool(
-          'browser_upload_scope_attachment',
+          'browser_upload',
           {
             ...(attachment?.attachmentId && attachment.attachmentId !== 'latest'
               ? { attachment_id: attachment.attachmentId }
@@ -1889,7 +1886,7 @@ export class BrowserAgentRunner {
     }
     if (inputTargets.length === 0) {
       const inputTargetsRaw = await this.invokeTool(
-        'browser_locate_input_targets',
+        'browser_find',
         { target: '提示词 输入框 prompt 描述 文案 生成内容' },
         { silent: true },
       )
@@ -1915,7 +1912,7 @@ export class BrowserAgentRunner {
     }
     if (inputTargets.length === 0) {
       const analyzedRaw = await this.invokeTool(
-        'browser_analyze_viewport',
+        'browser_screenshot',
         { action: 'input', include_dom_candidates: true },
         { silent: true },
       )
@@ -1925,7 +1922,7 @@ export class BrowserAgentRunner {
     for (const target of inputTargets) {
       evidence.push(`type_at:${target.label || target.kind || 'input'}`)
       await this.invokeTool(
-        'browser_type_at',
+        'browser_type',
         {
           x: Number(target.x),
           y: Number(target.y),
@@ -1948,7 +1945,7 @@ export class BrowserAgentRunner {
     ]) {
       evidence.push(`compose_message:${target}`)
       await this.invokeTool(
-        'browser_compose_message',
+        'browser_type',
         {
           text: promptCandidate,
           target,
@@ -2050,7 +2047,7 @@ export class BrowserAgentRunner {
     }
     if (!anchorInput && sendTargets.length === 0) {
       const inputTargetsRaw = await this.invokeTool(
-        'browser_locate_input_targets',
+        'browser_find',
         { target: '提示词 输入框 prompt 描述 文案 生成内容' },
         { silent: true },
       )
@@ -2069,7 +2066,7 @@ export class BrowserAgentRunner {
 
     if (sendTargets.length === 0) {
       const sendTargetsRaw = await this.invokeTool(
-        'browser_locate_action_targets',
+        'browser_find',
         { action: 'send' },
         { silent: true },
       )
@@ -2080,7 +2077,7 @@ export class BrowserAgentRunner {
     }
     if (sendTargets.length === 0) {
       const analyzedRaw = await this.invokeTool(
-        'browser_analyze_viewport',
+        'browser_screenshot',
         { action: 'send', include_dom_candidates: true },
         { silent: true },
       )
@@ -2119,7 +2116,7 @@ export class BrowserAgentRunner {
       if ((target.confidence || 0) < 0.52) continue
       evidence.push(`click_send:${target.label || target.kind || 'target'}`)
       await this.invokeTool(
-        'browser_click_at',
+        'browser_click',
         { x: Number(target.x), y: Number(target.y) },
         { silent: true },
       )
@@ -2138,7 +2135,7 @@ export class BrowserAgentRunner {
       for (const fallback of keyFallbacks) {
         evidence.push(`key_submit:${fallback.label}`)
         await this.invokeTool(
-          'browser_send_keys',
+          'browser_press_key',
           { key: fallback.key, modifiers: fallback.modifiers },
           { silent: true },
         )

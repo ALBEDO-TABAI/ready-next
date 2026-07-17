@@ -10,9 +10,9 @@ when-to-use: 用户要求"研究 X / 调研 Y / 综述 Z / 对比 A 与 B"等需
 
 <tools-contract>
 本 skill 使用的工具按 capability profile 分流：
-- browser-mode：优先 `browser_research_topic`（页面级深度调研）
+- browser-mode：优先 `browser_collect(mode=research)`（页面级深度调研）
 - non-browser-mode：优先 `web_search` + `web_fetch`（多查询并行 + 全文 fetch）；使用 AnySearch 垂直领域前先调用 `web_search_domains`
-两套工具不冲突：browser_research_topic 在 BrowserView UI 内运行；web_search/web_fetch 是 backend AnySearch/Tavily/DDG/Jina API 调用。
+两套工具不冲突：browser_collect(mode=research) 在 BrowserView UI 内运行；web_search/web_fetch 是 backend AnySearch/Tavily/DDG/Jina API 调用。
 </tools-contract>
 
 ## 方法论

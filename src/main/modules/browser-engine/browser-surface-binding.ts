@@ -32,14 +32,14 @@ export type BrowserToolSurfaceBindingResult =
   | { ok: true; binding: BrowserToolSurfaceBinding }
   | { ok: false; error: AgentBrowserStructuredError }
 
-const BACKGROUND_HANDOFF_TOOLS = new Set([
-  'browser_visible_collect',
-  'browser_collect_notes',
-  'browser_resume_task',
-])
-
-export function isBrowserBackgroundHandoffTool(toolName: string): boolean {
-  return BACKGROUND_HANDOFF_TOOLS.has(toolName)
+export function isBrowserBackgroundHandoffTool(
+  toolName: string,
+  args: Record<string, unknown> = {},
+): boolean {
+  if (toolName === 'browser_collect') {
+    return ['visible', 'notes', 'research', 'start'].includes(String(args.mode || 'visible'))
+  }
+  return toolName === 'browser_task' && String(args.action || 'get') === 'resume'
 }
 
 function binding(params: {
@@ -151,8 +151,8 @@ export function resolveBrowserToolSurfaceBinding(params: {
     }
   }
 
-  const backgroundHandoff = isBrowserBackgroundHandoffTool(params.toolName)
-  const intent: BrowserSurfaceIntent = params.toolName === 'browser_collect_notes'
+  const backgroundHandoff = isBrowserBackgroundHandoffTool(params.toolName, args)
+  const intent: BrowserSurfaceIntent = params.toolName === 'browser_collect' && String(args.mode || 'visible') === 'notes'
     ? 'agent-view-background'
     : 'user-view-assisted'
   return binding({

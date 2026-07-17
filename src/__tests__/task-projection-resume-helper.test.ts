@@ -105,7 +105,7 @@ test('deriveTaskProjectionCanResume trusts browser module canResume proof only',
       taskId: 'browser-task-visible-source',
       detachedTaskId: 'browser-task-card-loop-real',
       resumeKind: 'paused',
-      action: 'browser_resume_task',
+      action: 'browser_task',
     },
   }))
   assert.equal(browserDetachedHandle.canResume, true)

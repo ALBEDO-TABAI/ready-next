@@ -14,6 +14,11 @@ function validReport() {
       bounds: { x: 100, y: 100, width: 304, height: 58 },
       route: '/browser-lock-overlay',
     },
+    pointer: {
+      mechanism: 'click-through-native-child-window',
+      route: '/browser-agent-pointer',
+      bounds: { x: 0, y: 0, width: 800, height: 600 },
+    },
     browserViewFixture: {
       activeTabId: 'tab-1',
       fixtureUrl: 'http://127.0.0.1:12345/',
@@ -28,6 +33,10 @@ function validReport() {
       nativeOverlayBoundsIntersectBrowserView: { ok: true, source: 'runtime-native-child-window-geometry' },
       browserViewTargetRendersFixture: { ok: true, source: 'browser-webcontents-runtime-eval' },
       overlayClearsAfterUnlock: { ok: true },
+      closeButtonDismissesOverlay: { ok: true, source: 'native-overlay-close-button' },
+      pointerMatchesTrustedInput: { ok: true, source: 'trusted-cdp-input-and-native-pointer-geometry' },
+      pointerClearsOnBrowserViewLifecycle: { ok: true, source: 'native-browserview-hide-show-lifecycle' },
+      pointerClearsAfterTerminal: { ok: true, source: 'agent-action-terminal-lifecycle' },
       activeTabPreserved: { ok: true },
       fullIsolationDeferred: { ok: true, separatePartitionImplemented: false },
     },
@@ -56,4 +65,19 @@ test('rejects reports that claim full browser isolation', () => {
   const result = validateReport(report)
   assert.equal(result.ok, false)
   assert.match(result.errors.join('\n'), /separatePartitionImplemented/)
+})
+
+test('rejects reports without trusted pointer and terminal lifecycle proof', () => {
+  const report = validReport()
+  report.pointer.mechanism = 'renderer-dom'
+  report.assertions.pointerMatchesTrustedInput.ok = false
+  report.assertions.pointerClearsOnBrowserViewLifecycle.source = 'timer-assumption'
+  report.assertions.pointerClearsAfterTerminal.source = 'timer-assumption'
+
+  const result = validateReport(report)
+  assert.equal(result.ok, false)
+  assert.match(result.errors.join('\n'), /click-through-native-child-window/)
+  assert.match(result.errors.join('\n'), /pointerMatchesTrustedInput/)
+  assert.match(result.errors.join('\n'), /native-browserview-hide-show-lifecycle/)
+  assert.match(result.errors.join('\n'), /agent-action-terminal-lifecycle/)
 })

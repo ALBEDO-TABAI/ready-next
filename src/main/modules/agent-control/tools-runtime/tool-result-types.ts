@@ -2,7 +2,12 @@ import type { TurnFramePatch } from '../runtime-core/turn-frame'
 import type { SkillRunContract } from '../contracts/run-contracts'
 import type { ToolResultEnvelope } from '../../tools/tool-result-envelope'
 
-export type ToolResultShape = 'text' | 'json' | 'projection_patch'
+export type ToolResultShape = 'text' | 'json' | 'projection_patch' | 'multimodal'
+
+export type ToolExecutionContentPart =
+  | { type: 'text'; text: string }
+  | { type: 'image'; data: string; mediaType: string; detail?: 'low' | 'high' | 'auto' }
+  | { type: 'artifact'; path: string; mediaType?: string; filename?: string }
 
 export type ToolInteractionHint =
   | 'awaiting_confirmation'
@@ -38,6 +43,8 @@ export interface ToolExecutionOutput {
   data: Record<string, unknown> | null
   projectionPatch: Record<string, unknown> | null
   interactionHint: ToolInteractionHint | null
+  /** Provider-ready result blocks. Images are real model inputs, not cache ids. */
+  content?: ToolExecutionContentPart[]
   /**
    * Stage 5 — optional structured updates a tool can return to mutate the
    * next iteration's TurnFrame (active artifact roots, validated config,
@@ -72,6 +79,7 @@ export function createToolExecutionOutput(
     data?: Record<string, unknown> | null
     projectionPatch?: Record<string, unknown> | null
     interactionHint?: ToolInteractionHint | null
+    content?: ToolExecutionContentPart[]
     framePatch?: TurnFramePatch | null
     contextModifier?: ToolExecutionContextModifier | null
     envelope?: ToolResultEnvelope | null
@@ -80,6 +88,7 @@ export function createToolExecutionOutput(
   const projectionPatch = options?.projectionPatch || null
   const data = options?.data || null
   const shape = options?.shape
+    || (options?.content?.some((part) => part.type !== 'text') ? 'multimodal' : undefined)
     || (projectionPatch ? 'projection_patch' : data ? 'json' : 'text')
 
   return {
@@ -88,6 +97,7 @@ export function createToolExecutionOutput(
     data,
     projectionPatch,
     interactionHint: options?.interactionHint || null,
+    ...(options?.content?.length ? { content: options.content } : {}),
     framePatch: options?.framePatch || null,
     contextModifier: options?.contextModifier || null,
     ...(options?.envelope ? { envelope: options.envelope } : {}),
@@ -105,6 +115,7 @@ export function normalizeToolExecutionOutput(output: ToolExecutionResultLike): T
     data: output.data && typeof output.data === 'object' ? output.data : null,
     projectionPatch: output.projectionPatch && typeof output.projectionPatch === 'object' ? output.projectionPatch : null,
     interactionHint: output.interactionHint || null,
+    ...(Array.isArray(output.content) ? { content: output.content } : {}),
     framePatch: output.framePatch && typeof output.framePatch === 'object' ? output.framePatch : null,
     contextModifier: output.contextModifier && typeof output.contextModifier === 'object' ? output.contextModifier : null,
     ...(output.envelope && typeof output.envelope === 'object' ? { envelope: output.envelope } : {}),

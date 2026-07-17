@@ -149,11 +149,10 @@ function savePlan(scope: string, plan: ActivePlan): void {
 const ACTIVE_PLAN_TTL_MS = 30 * 60_000
 
 const COLLECTION_DISPATCH_TOOLS = new Set([
-  'browser_visible_collect',
-  'browser_collect_notes',
-  'browser_download_collected_media'
+  'browser_collect',
+  'browser_download'
 ])
-const COLLECTION_EVIDENCE_TOOLS = new Set([...COLLECTION_DISPATCH_TOOLS, 'browser_get_task'])
+const COLLECTION_EVIDENCE_TOOLS = new Set([...COLLECTION_DISPATCH_TOOLS, 'browser_task'])
 const TRACKABLE_TASK_STATUSES = new Set(['queued', 'running', 'paused', 'completed'])
 
 function resultRecord(value: unknown): Record<string, unknown> | null {
@@ -310,13 +309,13 @@ function absorbStructuredEvidence(
 ): void {
   const record = resultRecord(result)
   if (!record) return
-  if (record.ok === false && toolName !== 'browser_download_collected_media') return
+  if (record.ok === false && toolName !== 'browser_download') return
   const records = evidenceRecords(record)
   const taskId = firstString(records, ['taskId', 'task_id'])
   const status = firstString(records, ['status'])
   const discoveryResultStatus = firstString(records, ['discoveryStatus', 'discovery_status'])
 
-  if (toolName === 'browser_visible_collect') {
+  if (toolName === 'browser_collect' && String(args.mode || 'visible') !== 'notes') {
     if (!taskId || (plan.evidence.discoveryTaskId && plan.evidence.discoveryTaskId !== taskId))
       return
     plan.evidence.discoveryTaskId = taskId
@@ -334,7 +333,7 @@ function absorbStructuredEvidence(
     return
   }
 
-  if (toolName === 'browser_collect_notes') {
+  if (toolName === 'browser_collect' && String(args.mode || '') === 'notes') {
     const sourceTaskId = String(
       args.source_task_id || firstString(records, ['sourceTaskId', 'source_task_id']) || ''
     ).trim()
@@ -348,7 +347,7 @@ function absorbStructuredEvidence(
     return
   }
 
-  if (toolName === 'browser_download_collected_media') {
+  if (toolName === 'browser_download') {
     const sourceTaskId = String(
       args.source_task_id || firstString(records, ['sourceTaskId', 'source_task_id']) || ''
     ).trim()
@@ -375,7 +374,7 @@ function absorbStructuredEvidence(
     return
   }
 
-  if (toolName === 'browser_get_task') {
+  if (toolName === 'browser_task') {
     const queriedTaskId = String(args.task_id || '').trim()
     if (!queriedTaskId || !taskId || queriedTaskId !== taskId) return
     if (queriedTaskId === plan.evidence.discoveryTaskId) {
@@ -451,7 +450,7 @@ export function deriveCollectionPlanFromToolCall(
         ? args.target_profile_url
         : '目标页面'
   const template = typeof args.template === 'string' ? args.template : ''
-  const mediaPlan = toolName === 'browser_download_collected_media' || template === 'image_gallery'
+  const mediaPlan = toolName === 'browser_download' || template === 'image_gallery'
   return {
     taskGoal: `采集 ${target} 的内容并交付到指定位置`,
     steps: mediaPlan
@@ -460,9 +459,9 @@ export function deriveCollectionPlanFromToolCall(
             id: 'discover',
             title: '发现并冻结图片清单',
             advanceOnTools: [
-              'browser_visible_collect',
-              'browser_get_task',
-              'browser_download_collected_media'
+              'browser_collect',
+              'browser_task',
+              'browser_download'
             ],
             evidenceRequirement: 'collection_manifest',
             status: 'pending'
@@ -470,14 +469,14 @@ export function deriveCollectionPlanFromToolCall(
           {
             id: 'download',
             title: '下载已发现图片到本地目录',
-            advanceOnTools: ['browser_download_collected_media'],
+            advanceOnTools: ['browser_download'],
             evidenceRequirement: 'media_download_complete',
             status: 'pending'
           },
           {
             id: 'review',
             title: '复核图片下载数量并向用户交付',
-            advanceOnTools: ['browser_get_task', 'browser_download_collected_media'],
+            advanceOnTools: ['browser_task', 'browser_download'],
             evidenceRequirement: 'task_terminal_complete',
             status: 'pending'
           }
@@ -486,21 +485,21 @@ export function deriveCollectionPlanFromToolCall(
           {
             id: 'discover',
             title: '发现并冻结条目清单',
-            advanceOnTools: ['browser_visible_collect', 'browser_get_task'],
+            advanceOnTools: ['browser_collect', 'browser_task'],
             evidenceRequirement: 'collection_manifest',
             status: 'pending'
           },
           {
             id: 'collect',
             title: '启动逐项后台采集',
-            advanceOnTools: ['browser_collect_notes'],
+            advanceOnTools: ['browser_collect'],
             evidenceRequirement: 'collection_run',
             status: 'pending'
           },
           {
             id: 'review',
             title: '复核采集结果并向用户交付（核对数量与失败明细）',
-            advanceOnTools: ['browser_get_task'],
+            advanceOnTools: ['browser_task'],
             evidenceRequirement: 'task_terminal_complete',
             status: 'pending'
           }

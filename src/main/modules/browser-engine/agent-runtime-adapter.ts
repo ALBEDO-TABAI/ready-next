@@ -1,5 +1,6 @@
 import type { BrowserAggregateOptions, BrowserCapabilityTaskHandle, BrowserExtractStructuredOptions, BrowserExtractStructuredResult, BrowserStructuredItem } from './capability-types'
 import type { BrowserTabContextData, BrowserUploadTarget, BrowserViewportMetrics } from './automation-types'
+import type { BrowserExecutionDeadlineOptions } from './automation-service'
 import type { BrowserController } from './ipc-handler'
 import type { BrowserNetworkObserverHandle, BrowserNetworkObserverOptions } from './network-observer-service'
 
@@ -12,7 +13,7 @@ export interface BrowserAgentRuntime {
     active?: boolean
   } | undefined
   getTabContext(tabId?: string | null): Promise<BrowserTabContextData | null>
-  executeJS(tabId: string | null, code: string): Promise<unknown>
+  executeJS(tabId: string | null, code: string, options?: BrowserExecutionDeadlineOptions): Promise<unknown>
   navigate(tabId: string | null, url: string): Promise<{ success: boolean; error?: string }>
   normalizedToCss(tabId: string | null, x: number, y: number): Promise<{ x: number; y: number; width: number; height: number }>
   dispatchMouse(tabId: string | null, payload: Record<string, unknown>): Promise<void>
@@ -74,8 +75,8 @@ export class BrowserAgentRuntimeAdapter implements BrowserAgentRuntime {
     return this.controller.getTabContext(this.resolveTabId(tabId))
   }
 
-  async executeJS(tabId: string | null, code: string): Promise<unknown> {
-    return this.controller.executeJS(this.resolveTabId(tabId), code)
+  async executeJS(tabId: string | null, code: string, options?: BrowserExecutionDeadlineOptions): Promise<unknown> {
+    return this.controller.executeJS(this.resolveTabId(tabId), code, options)
   }
 
   async navigate(tabId: string | null, url: string): Promise<{ success: boolean; error?: string }> {

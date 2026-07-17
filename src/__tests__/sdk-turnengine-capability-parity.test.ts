@@ -144,8 +144,71 @@ function listLiveSdkDefaultToolNames(input: {
     feishuConnected: true,
     authorization: input.authorization || buildExplicitNoSkillAuthorization('p9c_live_sdk_tool_list'),
     requestEnvelope: input.requestEnvelope,
-  }).map((definition) => definition.name).sort()
+}).map((definition) => definition.name).sort()
 }
+
+test('live SDK exposes exactly the 8 common browser tools for an ordinary reading turn', () => {
+  const userText = '打开 https://example.com 并阅读当前页面内容'
+  const names = listLiveSdkDefaultToolNames({
+    userText,
+    requestEnvelope: buildRequestEnvelope({ userText }),
+  }).filter((name) => name.startsWith('browser_'))
+
+  assert.deepEqual(names, [
+    'browser_find',
+    'browser_navigate',
+    'browser_read',
+    'browser_screenshot',
+    'browser_search',
+    'browser_snapshot',
+    'browser_tabs',
+    'browser_wait',
+  ])
+})
+
+test('live SDK keeps ordinary browser interaction within 15 tools and excludes specialist powers', () => {
+  const userText = '打开网页，点击登录并填写表单后提交'
+  const names = listLiveSdkDefaultToolNames({
+    userText,
+    requestEnvelope: buildRequestEnvelope({ userText }),
+  }).filter((name) => name.startsWith('browser_'))
+
+  assert.equal(names.length, 15)
+  assert.ok(names.includes('browser_click'))
+  assert.ok(names.includes('browser_dialog'))
+  assert.ok(names.includes('browser_request_takeover'))
+  for (const unavailable of ['browser_eval', 'browser_cdp', 'browser_session', 'browser_permission']) {
+    assert.equal(names.includes(unavailable), false, unavailable)
+  }
+})
+
+test('live SDK specialist browser exposure reads only the current primary instruction', () => {
+  const userText = [
+    '阅读当前网页',
+    '## 最近会话摘要',
+    '旧任务曾要求使用 CDP、清理 session 和修改 permission。',
+  ].join('\n')
+  const names = listLiveSdkDefaultToolNames({
+    userText,
+    requestEnvelope: {
+      primaryInstruction: '阅读当前网页',
+      rawUserText: userText,
+      resources: [],
+    },
+  }).filter((name) => name.startsWith('browser_'))
+  assert.equal(names.length, 8)
+  assert.equal(names.includes('browser_cdp'), false)
+  assert.equal(names.includes('browser_session'), false)
+  assert.equal(names.includes('browser_permission'), false)
+
+  const explicit = '使用 CDP 查看当前页的 Performance 指标'
+  const explicitNames = listLiveSdkDefaultToolNames({
+    userText: explicit,
+    requestEnvelope: buildRequestEnvelope({ userText: explicit }),
+  }).filter((name) => name.startsWith('browser_'))
+  assert.ok(explicitNames.includes('browser_cdp'))
+  assert.equal(explicitNames.includes('browser_eval'), false)
+})
 
 function buildSdkShapedResolution(testCase: CapabilityCase): CapabilityResolution {
   const context = buildContext(testCase.userText, testCase.context)
@@ -388,7 +451,7 @@ test('P9C checks the live SDK default tool list exposes only the collection subs
     requestEnvelope: buildRequestEnvelope({ userText }),
   })
 
-  assert.ok(toolNames.includes('browser_visible_collect'))
+  assert.ok(toolNames.includes('browser_collect'))
   assert.ok(toolNames.includes('ask_user_questions'))
   assert.equal(toolNames.includes('browser_click'), false)
   assert.equal(toolNames.includes('browser_type'), false)
@@ -401,11 +464,11 @@ test('P9C exposes browser resource tools for webpage video download requests', (
     requestEnvelope: buildRequestEnvelope({ userText }),
   })
 
-  assert.ok(toolNames.includes('browser_inspect_resources'))
-  assert.ok(toolNames.includes('browser_resolve_video'))
-  assert.ok(toolNames.includes('browser_download_urls'))
+  assert.ok(toolNames.includes('browser_resources'))
+  assert.ok(toolNames.includes('browser_download'))
+  assert.ok(toolNames.includes('browser_download'))
   assert.equal(toolNames.includes('browser_type'), false)
-  assert.equal(toolNames.includes('browser_execute_js'), false)
+  assert.equal(toolNames.includes('browser_eval'), false)
 })
 
 test('P9C keeps browser resource tools when a reference skill is selected', () => {
@@ -426,14 +489,14 @@ test('P9C keeps browser resource tools when a reference skill is selected', () =
   assert.ok(toolNames.includes('skill_read_artifact'))
   assert.ok(toolNames.includes('skill_write_artifact'))
   assert.ok(toolNames.includes('skill_export_artifact'))
-  assert.ok(toolNames.includes('browser_inspect_resources'))
-  assert.ok(toolNames.includes('browser_resolve_video'))
-  assert.ok(toolNames.includes('browser_download_urls'))
+  assert.ok(toolNames.includes('browser_resources'))
+  assert.ok(toolNames.includes('browser_download'))
+  assert.ok(toolNames.includes('browser_download'))
   assert.equal(toolNames.includes('browser_type'), false)
-  assert.equal(toolNames.includes('browser_execute_js'), false)
+  assert.equal(toolNames.includes('browser_eval'), false)
 })
 
-test('P9C keeps full browser tools for publish continuations with a reference skill selected', () => {
+test('P9C keeps common interaction tools for publish continuations without exposing specialist powers', () => {
   const userText = [
     '## 最近会话摘要',
     '上一轮用户要：在小红书网页发布一篇笔记。',
@@ -463,9 +526,9 @@ test('P9C keeps full browser tools for publish continuations with a reference sk
   assert.ok(toolNames.includes('browser_navigate'))
   assert.ok(toolNames.includes('browser_click'))
   assert.ok(toolNames.includes('browser_type'))
-  assert.ok(toolNames.includes('browser_capture_viewport'))
-  assert.ok(toolNames.includes('browser_power_eval'))
-  assert.ok(toolNames.includes('browser_power_cdp'))
+  assert.ok(toolNames.includes('browser_screenshot'))
+  assert.equal(toolNames.includes('browser_eval'), false)
+  assert.equal(toolNames.includes('browser_cdp'), false)
 })
 
 test('P9C bare retry keeps resource tools despite upload words in recalled context', () => {
@@ -486,11 +549,10 @@ test('P9C bare retry keeps resource tools despite upload words in recalled conte
   }
   const toolNames = listLiveSdkDefaultToolNames({ userText, requestEnvelope })
 
-  assert.ok(toolNames.includes('browser_inspect_resources'))
-  assert.ok(toolNames.includes('browser_resolve_video'))
-  assert.ok(toolNames.includes('browser_download_urls'))
-  assert.equal(toolNames.includes('browser_list_upload_targets'), false)
-  assert.equal(toolNames.includes('browser_upload_scope_attachment'), false)
+  assert.ok(toolNames.includes('browser_resources'))
+  assert.ok(toolNames.includes('browser_download'))
+  assert.ok(toolNames.includes('browser_find'))
+  assert.equal(toolNames.includes('browser_upload'), false)
   assert.equal(toolNames.includes('browser_click'), false)
 })
 
@@ -1000,8 +1062,9 @@ test('P6e keeps reconcileAfterBrowserDecision parity for late browser upload dec
   assertCapabilityResolutionParity('late browser upload reconciliation', reconciled.capabilityResolution, sdkUpload)
   assert.equal(reconciled.toolPolicy.allowBrowserTools, true)
   assert.ok(reconciled.allowedToolNames.includes('browser_click'))
-  assert.ok(reconciled.allowedToolNames.includes('browser_extract_structured'))
-  assert.ok(reconciled.allowedToolNames.includes('browser_power_eval'))
+  assert.ok(reconciled.allowedToolNames.includes('browser_upload'))
+  assert.equal(reconciled.allowedToolNames.includes('browser_collect'), false)
+  assert.equal(reconciled.allowedToolNames.includes('browser_eval'), false)
 })
 
 // P1-2 — typed envelope skill_reference 是授权第一信源；正则文本候选降为兜底。

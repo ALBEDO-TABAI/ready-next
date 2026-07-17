@@ -30,6 +30,13 @@ export function buildModelVisibleToolResultPayload(output: ToolExecutionOutput):
     projectionPatch: redactModelVisibleValue(normalized.projectionPatch),
     framePatch: redactModelVisibleValue(normalized.framePatch),
     interactionHint: normalized.interactionHint,
+    ...(normalized.content?.length
+      ? {
+          content: normalized.content.map((part) => part.type === 'image'
+            ? { type: 'image', mediaType: part.mediaType, detail: part.detail || 'auto' }
+            : redactModelVisibleValue(part)),
+        }
+      : {}),
   }
 }
 

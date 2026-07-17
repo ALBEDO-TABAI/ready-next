@@ -23,42 +23,37 @@ describe('browser tool write classification', () => {
   })
 
   it('treats obvious page mutations as writes', () => {
-    for (const name of ['browser_navigate', 'browser_click', 'browser_type', 'browser_click_at', 'browser_scroll_at', 'browser_upload_scope_attachment', 'browser_go_back', 'browser_act_on_target']) {
+    for (const name of ['browser_navigate', 'browser_click', 'browser_type', 'browser_scroll', 'browser_upload', 'browser_collect', 'browser_download']) {
       assert.equal(classifyBrowserToolCall(name), 'write', `${name} should be write`)
     }
   })
 
   it('treats pure observation as reads (free of the lease)', () => {
-  for (const name of ['browser_read_page', 'browser_read_page_map', 'browser_probe_readonly', 'browser_get_tabs', 'browser_capture_viewport', 'browser_probe_workflow_state', 'browser_get_task', 'browser_aggregate_results']) {
+    for (const name of ['browser_read', 'browser_snapshot', 'browser_tabs', 'browser_screenshot', 'browser_status']) {
       assert.equal(classifyBrowserToolCall(name), 'read', `${name} should be read`)
     }
+    assert.equal(classifyBrowserToolCall('browser_task', { action: 'get' }), 'read')
+    assert.equal(classifyBrowserToolCall('browser_task', { action: 'resume' }), 'write')
   })
 
-  it('classifies browser_extract_structured by THIS call: url present => write, absent => read', () => {
-    assert.equal(classifyBrowserToolCall('browser_extract_structured', {}), 'read')
-    assert.equal(classifyBrowserToolCall('browser_extract_structured', { template: 'card_list' }), 'read')
-    assert.equal(classifyBrowserToolCall('browser_extract_structured', { url: 'https://example.com' }), 'write')
+  it('classifies browser_resources by THIS call: url present => write, absent => read', () => {
+    assert.equal(classifyBrowserToolCall('browser_resources', {}), 'read')
+    assert.equal(classifyBrowserToolCall('browser_resources', { tab_id: 'tab-1' }), 'read')
+    assert.equal(classifyBrowserToolCall('browser_resources', { url: 'https://example.com' }), 'write')
   })
 
-  it('classifies browser_inspect_resources by THIS call: url present => write, absent => read', () => {
-    assert.equal(classifyBrowserToolCall('browser_inspect_resources', {}), 'read')
-    assert.equal(classifyBrowserToolCall('browser_inspect_resources', { tab_id: 'tab-1' }), 'read')
-    assert.equal(classifyBrowserToolCall('browser_inspect_resources', { url: 'https://example.com' }), 'write')
+  it('treats browser_collect as always write (it scrolls the page)', () => {
+    assert.equal(classifyBrowserToolCall('browser_collect', {}), 'write')
   })
 
-  it('treats browser_scroll_collect as always write (it scrolls the page)', () => {
-    assert.equal(classifyBrowserToolCall('browser_scroll_collect', {}), 'write')
+  it('treats browser_eval as always write (read-only-ness is undecidable)', () => {
+    assert.equal(classifyBrowserToolCall('browser_eval', { code: 'document.title' }), 'write')
   })
 
-  it('treats browser_execute_js as always write (read-only-ness is undecidable)', () => {
-    assert.equal(classifyBrowserToolCall('browser_execute_js', { code: 'document.title' }), 'write')
-  })
-
-  it('classifies browser_wait_for_condition by call: custom_js runs page JS => write, else read', () => {
-    assert.equal(classifyBrowserToolCall('browser_wait_for_condition', { condition: 'page_readable' }), 'read')
-    assert.equal(classifyBrowserToolCall('browser_wait_for_condition', { condition: 'selector', selector: '.x' }), 'read')
-    assert.equal(classifyBrowserToolCall('browser_wait_for_condition', { condition: 'custom_js', custom_js: 'return true' }), 'write')
-    assert.equal(classifyBrowserToolCall('browser_wait_for_condition', { custom_js: 'document.title' }), 'write')
+  it('keeps browser_wait read-only and ignores removed custom script claims', () => {
+    assert.equal(classifyBrowserToolCall('browser_wait', { condition: 'ready' }), 'read')
+    assert.equal(classifyBrowserToolCall('browser_wait', { condition: 'selector', selector: '.x' }), 'read')
+    assert.equal(classifyBrowserToolCall('browser_wait', { custom_js: 'document.title' }), 'read')
   })
 
   it('fails closed: an unknown tool defaults to write', () => {

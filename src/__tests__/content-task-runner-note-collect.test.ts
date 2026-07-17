@@ -108,7 +108,7 @@ function okFacadeFactory(extra?: { isFrozen?: () => boolean }): CollectorFacadeF
   return () => {
     const facade: NoteCollectFacade = {
       run: async (tool) => {
-        if (tool === 'browser_get_tabs') return [
+        if (tool === 'browser_tabs') return [
           '[tab-agent-1] 详情页',
           '    https://www.xiaohongshu.com/note/0',
           '    https://www.xiaohongshu.com/note/1',
@@ -116,9 +116,9 @@ function okFacadeFactory(extra?: { isFrozen?: () => boolean }): CollectorFacadeF
           '    https://www.xiaohongshu.com/note/3',
           '    https://www.xiaohongshu.com/note/4',
         ].join('\n')
-        if (tool === 'browser_read_page') return '详情页：笔记0 笔记1 笔记2'
-        if (tool === 'browser_collect_images') return imagesJson
-        if (tool === 'browser_download_urls') return JSON.stringify({ success: 1 })
+        if (tool === 'browser_read') return '详情页：笔记0 笔记1 笔记2'
+        if (tool === 'browser_collect') return imagesJson
+        if (tool === 'browser_download') return JSON.stringify({ success: 1 })
         return JSON.stringify({ ok: true })
       },
     }
@@ -178,18 +178,18 @@ function slowOkFacadeFactory(): CollectorFacadeFactory {
   return () => {
     const facade: NoteCollectFacade = {
       run: async (tool) => {
-        if (tool === 'browser_collect_images') {
+        if (tool === 'browser_collect') {
           await new Promise((resolve) => setTimeout(resolve, 3))
           return imagesJson
         }
-        if (tool === 'browser_get_tabs') return [
+        if (tool === 'browser_tabs') return [
           '[tab-agent-1] 详情页',
           '    https://www.xiaohongshu.com/note/0',
           '    https://www.xiaohongshu.com/note/1',
           '    https://www.xiaohongshu.com/note/2',
         ].join('\n')
-        if (tool === 'browser_read_page') return '详情页：笔记0 笔记1 笔记2'
-        if (tool === 'browser_download_urls') return JSON.stringify({ success: 1 })
+        if (tool === 'browser_read') return '详情页：笔记0 笔记1 笔记2'
+        if (tool === 'browser_download') return JSON.stringify({ success: 1 })
         return JSON.stringify({ ok: true })
       },
     }
@@ -267,7 +267,7 @@ describe('note_collect background task (content-task-runner)', () => {
 
     assert.equal(plan.notes.length, 75)
     assert.equal(plan.stopConditions?.maxNotes, undefined)
-    assert.equal(plan.stopConditions?.maxConsecutiveFailures, 3)
+    assert.equal(plan.stopConditions?.maxConsecutiveFailures, undefined)
   })
 
   it('auto-continues max_duration segment pauses until the note collection completes', async () => {
@@ -305,14 +305,14 @@ describe('note_collect background task (content-task-runner)', () => {
     assert.ok(segmentPauses.every((resultUpdate) => Number(resultUpdate?.resumeFromCursor || 0) > 0), 'auto continuation only starts after useful checkpoint progress')
   })
 
-  it('allows more consecutive failures for high-control card_loop plans', () => {
+  it('does not silently rewrite the failure budget for high-control card_loop plans', () => {
     const rawPlan = {
       ...planPayload(75).plan,
       strategy: 'card_loop' as const,
     }
     const plan = normalizeHighControlCollectionPlan(rawPlan)
 
-    assert.equal(plan.stopConditions?.maxConsecutiveFailures, 8)
+    assert.equal(plan.stopConditions?.maxConsecutiveFailures, undefined)
   })
 
   it('fails cleanly when no collector facade factory is wired', async () => {
@@ -376,8 +376,8 @@ describe('note_collect background task (content-task-runner)', () => {
       facade: {
         run: async (tool) => {
           if (tool === 'browser_navigate') notesNavigated += 1
-          if (tool === 'browser_collect_images') return imagesJson
-          if (tool === 'browser_download_urls') return JSON.stringify({ success: 1 })
+          if (tool === 'browser_collect') return imagesJson
+          if (tool === 'browser_download') return JSON.stringify({ success: 1 })
           return JSON.stringify({ ok: true })
         },
       },
@@ -417,7 +417,7 @@ describe('note_collect background task (content-task-runner)', () => {
     assert.equal(result.verdict, 'needs_user_takeover')
     assert.equal(result.stopReason, 'too_many_failures')
     assert.equal(result.collected.length, 0)
-    assert.equal(result.failed.length, 3, 'high-control collections clamp the consecutive failure budget')
+    assert.equal(result.failed.length, 5, 'the ordinary collection failure budget remains authoritative')
   })
 
   it('card_loop clicks a card and returns without navigating directly to the detail URL', async () => {
@@ -428,10 +428,10 @@ describe('note_collect background task (content-task-runner)', () => {
       facade: {
         run: async (tool, args = {}) => {
           calls.push({ tool, args })
-          if (tool === 'browser_get_tabs') return '[tab-agent-1] 详情页\n    https://www.xiaohongshu.com/note/0'
-          if (tool === 'browser_read_page') return '详情页：笔记0 source 0'
-          if (tool === 'browser_collect_images') return imagesJson
-          if (tool === 'browser_download_urls') return JSON.stringify({ success: 1 })
+          if (tool === 'browser_tabs') return '[tab-agent-1] 详情页\n    https://www.xiaohongshu.com/note/0'
+          if (tool === 'browser_read') return '详情页：笔记0 source 0'
+          if (tool === 'browser_collect') return imagesJson
+          if (tool === 'browser_download') return JSON.stringify({ success: 1 })
           return JSON.stringify({ ok: true })
         },
       },
@@ -452,9 +452,9 @@ describe('note_collect background task (content-task-runner)', () => {
 
     const task = tasks.get(handle.taskId)!
     assert.equal(task.status, 'completed')
-    assert.ok(calls.some((call) => call.tool === 'browser_click_text'), 'card_loop must open via a visible card click')
-    assert.ok(calls.some((call) => call.tool === 'browser_go_back'), 'card_loop must return to the list after collecting')
-    const navigations = calls.filter((call) => call.tool === 'browser_navigate')
+    assert.ok(calls.some((call) => call.tool === 'browser_click'), 'card_loop must open via a visible card click')
+    assert.ok(calls.some((call) => call.tool === 'browser_navigate'), 'card_loop must return to the list after collecting')
+    const navigations = calls.filter((call) => call.tool === 'browser_navigate' && typeof call.args.url === 'string')
     assert.deepEqual(navigations.map((call) => call.args.url), ['https://www.xiaohongshu.com/user/profile/abc'])
     assert.ok(navigations.every((call) => !String(call.args.url || '').includes('/note/')), 'card_loop must not hard-jump detail URLs')
   })
@@ -470,15 +470,15 @@ describe('note_collect background task (content-task-runner)', () => {
       facade: {
         run: async (tool, args = {}) => {
           calls.push({ tool, args })
-          if (tool === 'browser_click_text') {
+          if (tool === 'browser_click') {
             currentTitle = String(args?.text || '')
             clickedTitles.push(currentTitle)
             return JSON.stringify({ ok: true })
           }
-          if (tool === 'browser_get_tabs') return `[tab-agent-1] 详情页\n    ${notes.find((note) => note.title === currentTitle)?.url || ''}`
-          if (tool === 'browser_read_page') return `详情页：${currentTitle}`
-          if (tool === 'browser_collect_images') return imagesJson
-          if (tool === 'browser_download_urls') return JSON.stringify({ success: 1 })
+          if (tool === 'browser_tabs') return `[tab-agent-1] 详情页\n    ${notes.find((note) => note.title === currentTitle)?.url || ''}`
+          if (tool === 'browser_read') return `详情页：${currentTitle}`
+          if (tool === 'browser_collect') return imagesJson
+          if (tool === 'browser_download') return JSON.stringify({ success: 1 })
           return JSON.stringify({ ok: true })
         },
       },
@@ -515,9 +515,9 @@ describe('note_collect background task (content-task-runner)', () => {
     assert.equal(result.collected.length, 120)
     assert.equal(result.failed.length, 0)
     assert.equal(clickedTitles.length, 120)
-    assert.equal(calls.filter((call) => call.tool === 'browser_click_text').length, 120)
-    assert.equal(calls.filter((call) => call.tool === 'browser_go_back').length, 120)
-    const navigations = calls.filter((call) => call.tool === 'browser_navigate')
+    assert.equal(calls.filter((call) => call.tool === 'browser_click').length, 120)
+    assert.equal(calls.filter((call) => call.tool === 'browser_navigate' && call.args.action === 'back').length, 120)
+    const navigations = calls.filter((call) => call.tool === 'browser_navigate' && typeof call.args.url === 'string')
     assert.deepEqual(navigations.map((call) => call.args.url), ['https://fixture.example.test/profile/local'])
     assert.ok(navigations.every((call) => !String(call.args.url || '').includes('/note/')), 'card_loop must not navigate to fixture detail URLs')
     assert.ok(result.collectionManifestPath, 'root collection manifest path is recorded')
@@ -533,13 +533,13 @@ describe('note_collect background task (content-task-runner)', () => {
   it('downloads video targets without collecting covers or failing the whole batch', async () => {
     const { svc: persistence, tasks } = fakePersistence()
     const { svc: lease } = fakeLease()
-    const calls: string[] = []
+    const calls: Array<{ tool: string; args: Record<string, unknown> }> = []
     let collectCalls = 0
     const factory: CollectorFacadeFactory = () => ({
       facade: {
-        run: async (tool) => {
-          calls.push(tool)
-          if (tool === 'browser_collect_images') {
+        run: async (tool, args = {}) => {
+          calls.push({ tool, args })
+          if (tool === 'browser_collect' && args.mode === 'images') {
             collectCalls += 1
             return collectCalls <= 2
               ? JSON.stringify({
@@ -550,10 +550,10 @@ describe('note_collect background task (content-task-runner)', () => {
               })
               : imagesJson
           }
-          if (tool === 'browser_resolve_video') {
+          if (tool === 'browser_download' && args.mode === 'resolve') {
             return JSON.stringify({ ok: true, video: { parseStatus: 'not_needed', downloadUrl: 'https://sns-video.xhscdn.com/video.mp4' } })
           }
-          if (tool === 'browser_download_urls') return JSON.stringify({ success: 1, results: [{ success: true, path: '/out/assets/video-1.mp4' }] })
+          if (tool === 'browser_download' && args.mode === 'urls') return JSON.stringify({ success: 1, results: [{ success: true, path: '/out/assets/video-1.mp4' }] })
           return JSON.stringify({ ok: true })
         },
       },
@@ -579,8 +579,9 @@ describe('note_collect background task (content-task-runner)', () => {
     assert.equal(result.stopReason, 'completed')
     assert.equal(result.collected.length, 2)
     assert.deepEqual(result.failed.map((item) => item.reason), [])
-    assert.equal(calls.filter((tool) => tool === 'browser_resolve_video').length, 1)
-    assert.equal(calls.filter((tool) => tool === 'browser_collect_images').length, 3)
+    assert.equal(calls.filter((call) => call.tool === 'browser_download' && call.args.mode === 'resolve').length, 1)
+    assert.equal(calls.filter((call) => call.tool === 'browser_download' && call.args.mode === 'urls').length, 2)
+    assert.equal(calls.filter((call) => call.tool === 'browser_collect' && call.args.mode === 'images').length, 3)
   })
 
   it('treats discovered video-only details as downloadable without failing the whole batch', async () => {
@@ -589,8 +590,8 @@ describe('note_collect background task (content-task-runner)', () => {
     let collectCalls = 0
     const factory: CollectorFacadeFactory = () => ({
       facade: {
-        run: async (tool) => {
-          if (tool === 'browser_collect_images') {
+        run: async (tool, args = {}) => {
+          if (tool === 'browser_collect' && args.mode === 'images') {
             collectCalls += 1
             return collectCalls <= 2
               ? JSON.stringify({
@@ -601,10 +602,10 @@ describe('note_collect background task (content-task-runner)', () => {
               })
               : imagesJson
           }
-          if (tool === 'browser_resolve_video') {
+          if (tool === 'browser_download' && args.mode === 'resolve') {
             return JSON.stringify({ ok: true, video: { parseStatus: 'not_needed', downloadUrl: 'https://sns-video.xhscdn.com/video.mp4' } })
           }
-          if (tool === 'browser_download_urls') return JSON.stringify({ success: 1, results: [{ success: true, path: '/out/assets/video-1.mp4' }] })
+          if (tool === 'browser_download' && args.mode === 'urls') return JSON.stringify({ success: 1, results: [{ success: true, path: '/out/assets/video-1.mp4' }] })
           return JSON.stringify({ ok: true })
         },
       },
@@ -630,14 +631,14 @@ describe('note_collect background task (content-task-runner)', () => {
     const factory: CollectorFacadeFactory = () => ({
       facade: {
         run: async (tool) => {
-          if (tool === 'browser_read_page') {
+          if (tool === 'browser_read') {
             pageReads += 1
             return pageReads === 1
               ? '小红书 - 你访问的页面不见了 当前笔记暂时无法浏览'
               : JSON.stringify({ ok: true })
           }
-          if (tool === 'browser_collect_images') return imagesJson
-          if (tool === 'browser_download_urls') return JSON.stringify({ success: 1 })
+          if (tool === 'browser_collect') return imagesJson
+          if (tool === 'browser_download') return JSON.stringify({ success: 1 })
           return JSON.stringify({ ok: true })
         },
       },
@@ -665,12 +666,12 @@ describe('note_collect background task (content-task-runner)', () => {
       facade: {
         run: async (tool, args) => {
           if (tool === 'browser_navigate') navigated.push(String(args?.url))
-          if (tool === 'browser_read_page' && verifyOnce) {
+          if (tool === 'browser_read' && verifyOnce) {
             verifyOnce = false
             return '请扫码登录后继续查看内容'
           }
-          if (tool === 'browser_collect_images') return imagesJson
-          if (tool === 'browser_download_urls') return JSON.stringify({ success: 1 })
+          if (tool === 'browser_collect') return imagesJson
+          if (tool === 'browser_download') return JSON.stringify({ success: 1 })
           return JSON.stringify({ ok: true })
         },
       },
@@ -716,7 +717,7 @@ describe('note_collect background task (content-task-runner)', () => {
     const factory: CollectorFacadeFactory = () => ({
       facade: {
         run: async (tool) => {
-          if (tool === 'browser_read_page') return '请扫码登录后继续查看内容'
+          if (tool === 'browser_read') return '请扫码登录后继续查看内容'
           return JSON.stringify({ ok: true })
         },
       },
@@ -814,7 +815,7 @@ describe('note_collect → chat task projection (scope-bound)', () => {
     const factory: CollectorFacadeFactory = () => ({
       facade: {
         run: async (tool) => {
-          if (tool === 'browser_read_page') return '请扫码登录后继续查看内容'
+          if (tool === 'browser_read') return '请扫码登录后继续查看内容'
           return JSON.stringify({ ok: true })
         },
       },

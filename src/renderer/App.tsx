@@ -7,6 +7,7 @@ import PetWindow from './pages/PetWindow'
 import FastCardOverlayWindow from './pages/FastCardOverlayWindow'
 import VerticalRailOverlayWindow from './pages/VerticalRailOverlayWindow'
 import BrowserLockOverlayWindow from './pages/BrowserLockOverlayWindow'
+import BrowserAgentPointerWindow from './pages/BrowserAgentPointerWindow'
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import RitualOverlay from './components/overlay/RitualOverlay'
@@ -185,6 +186,13 @@ function App() {
     return (
       <ErrorBoundary>
         <BrowserLockOverlayWindow />
+      </ErrorBoundary>
+    )
+  }
+  if (location.pathname === '/browser-agent-pointer') {
+    return (
+      <ErrorBoundary>
+        <BrowserAgentPointerWindow />
       </ErrorBoundary>
     )
   }

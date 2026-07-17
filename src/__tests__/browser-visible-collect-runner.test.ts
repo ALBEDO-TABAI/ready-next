@@ -66,6 +66,11 @@ class FakePersistence {
     return this.store.get(taskId)?.payload ?? null
   }
 
+  updateTaskPayload(taskId: string, payload: Record<string, unknown>): void {
+    const task = this.store.get(taskId)
+    if (task) task.payload = payload
+  }
+
   updateProgress(
     taskId: string,
     progress: Partial<BrowserCapabilityTaskProgress>,
@@ -238,7 +243,7 @@ describe('visible_collect task runner', () => {
     assert.deepEqual(result.noteCandidates, [])
     assert.deepEqual(result.mediaCandidates, ['https://img.example.com/1.webp', 'https://img.example.com/2.webp'])
     assert.equal(result.mediaCandidateCount, 2)
-    assert.equal(result.suggestedNextTool?.name, 'browser_download_collected_media')
+    assert.equal(result.suggestedNextTool?.name, 'browser_download')
     assert.equal(result.suggestedNextTool?.args?.source_task_id, handle.taskId)
     assert.equal(result.suggestedNextTool?.args?.directory, '/tmp/gallery')
     assert.equal(result.suggestedNextTool?.args?.filename_prefix, 'image')
@@ -357,7 +362,7 @@ describe('visible_collect task runner', () => {
         sourceId: '6a0987c5000000003601f3f5',
       },
     ])
-    assert.equal(result.suggestedNextTool?.name, 'browser_collect_notes')
+    assert.equal(result.suggestedNextTool?.name, 'browser_collect')
     assert.equal(result.outputRootDir, '/tmp/ao-i')
     assert.equal(result.suggestedNextTool?.args.output_root_dir, '/tmp/ao-i')
     assert.equal(result.suggestedNextTool?.args.source_task_id, handle.taskId)
@@ -439,7 +444,7 @@ describe('visible_collect task runner', () => {
     assert.equal(result.noteCandidates.length, 2)
     assert.equal(result.noteCandidates[0].sourceId, '6928017e000000001e0334f4')
     assert.match(result.noteCandidates[0].openUrl, /xsec_token=token-a/)
-    assert.equal(result.suggestedNextTool?.name, 'browser_collect_notes')
+    assert.equal(result.suggestedNextTool?.name, 'browser_collect')
     assert.equal(result.suggestedNextTool?.args.expected_count, 2)
   })
 
@@ -466,7 +471,7 @@ describe('visible_collect task runner', () => {
     assert.equal(result.frozenCount, 1)
     assert.equal(result.userExpectedTotal, 3)
     assert.equal(result.suggestedNextTool, undefined)
-    assert.equal(result.suggestedContinueTool?.name, 'browser_resume_task')
+    assert.equal(result.suggestedContinueTool?.name, 'browser_task')
     assert.equal(done.progress.completed, 0)
   })
 
@@ -542,7 +547,7 @@ describe('visible_collect task runner', () => {
     assert.equal(result.discoveryStatus, 'paused')
     assert.ok(result.noteCandidates.length > 0)
     assert.equal(result.suggestedNextTool, undefined)
-    assert.equal(result.suggestedContinueTool?.name, 'browser_resume_task')
+    assert.equal(result.suggestedContinueTool?.name, 'browser_task')
     assert.equal(result.suggestedContinueTool?.args?.task_id, handle.taskId)
   })
 
@@ -621,6 +626,45 @@ describe('visible_collect task runner', () => {
     // Prior 3 are retained (not re-collected as duplicates) and only item 4 is added.
     assert.deepEqual(links, ['https://example.com/1', 'https://example.com/2', 'https://example.com/3', 'https://example.com/4'])
     assert.ok(result.rounds > 2, 'round counter continued from the checkpoint cursor (2), not from 0')
+  })
+
+  it('reacquires a fresh lease when a restarted task carries a stale process-local lease id', async () => {
+    const persistence = new FakePersistence()
+    const seeded = persistence.createTask({
+      kind: 'visible_collect',
+      payload: { template: 'card_list', tabId: 'tab-1', maxRounds: 2, surface: 'user-view', leaseId: 'lease-from-old-process' },
+    })
+    persistence.updateProgress(seeded.taskId, { total: 1 }, {
+      status: 'paused',
+      checkpoint: {
+        taskId: seeded.taskId,
+        stage: 'visible_collect_round',
+        cursor: '1',
+        partialResults: [{ sourceUrl: 'u', title: 'One', link: 'https://example.com/1' }],
+      },
+    })
+    const lease = new BrowserWriteLeaseService()
+    const seenLeaseIds: string[] = []
+    const capability = {
+      extractStructured: async () => ({
+        template: 'card_list' as const,
+        items: [{ sourceUrl: 'u', title: 'Two', link: 'https://example.com/2' }],
+        sourceUrl: 'u',
+      }),
+      scrollViewportOnce: async (_tabId: string, gate: { leaseId: string }) => {
+        seenLeaseIds.push(gate.leaseId)
+        assert.equal(lease.checkWrite({ surface: 'user-view', leaseId: gate.leaseId }), null)
+        return { scrollY: 0, atBottom: true }
+      },
+    } as unknown as BrowserCapabilityService
+    const runner = new BrowserContentTaskRunner(capability, persistence as never, lease)
+
+    await runner.resumeTask(seeded.taskId)
+    const done = await waitForStatus(persistence, seeded.taskId, ['completed'])
+    assert.equal(done.status, 'completed')
+    assert.ok(seenLeaseIds.length > 0)
+    assert.notEqual(seenLeaseIds[0], 'lease-from-old-process')
+    assert.equal(persistence.store.get(seeded.taskId)?.payload.leaseId, seenLeaseIds[0])
   })
 
   it('the background loop stops with lease_lost when the user takes over (no bypass of the lease)', async () => {

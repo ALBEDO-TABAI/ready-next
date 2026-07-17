@@ -57,12 +57,12 @@ function modelContext(overrides: Partial<ToolContext> = {}): ToolContext {
 // 1. Browser-domain pilot
 // ---------------------------------------------------------------------------
 
-test('browser pilot: successful browser_get_task carries an ok envelope, legacy text untouched', async () => {
+test('browser pilot: successful browser_task carries an ok envelope, legacy text untouched', async () => {
   const controller = {
     getTask: async () => null,
   } as unknown as BrowserController
   const output = await executeToolCall(
-    'browser_get_task',
+    'browser_task',
     { task_id: 'browser-task-99' },
     modelContext({ browserController: controller }),
   )
@@ -82,7 +82,7 @@ test('browser pilot: thrown ToolDomainError surfaces with a correctly mapped err
     },
   } as unknown as BrowserController
   const output = await executeToolCall(
-    'browser_get_task',
+    'browser_task',
     { task_id: 'browser-task-x' },
     modelContext({ browserController: controller }),
   )

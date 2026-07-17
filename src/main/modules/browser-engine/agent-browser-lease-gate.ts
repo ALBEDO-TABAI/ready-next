@@ -27,6 +27,9 @@ export interface BrowserLeaseGate {
 export interface LeaseGateHandle {
   /** Non-null when the call is denied; the caller should return it verbatim. */
   deniedMessage: string | null
+  /** Recheck and open the short agent-action window at the physical dispatch
+   * boundary, after any origin queue/cooldown wait. */
+  begin: () => string | null
   /** Always call once the tool finishes (closes the agent action window). */
   end: () => void
 }
@@ -38,19 +41,29 @@ export function beginLeaseGate(
   toolName: string,
   args: Record<string, unknown>,
 ): LeaseGateHandle {
-  if (!gate) return { deniedMessage: null, end: NOOP }
+  if (!gate) return { deniedMessage: null, begin: () => null, end: NOOP }
 
   const effect = classifyBrowserToolCall(toolName, args)
-  if (effect === 'read') return { deniedMessage: null, end: NOOP }
+  if (effect === 'read') return { deniedMessage: null, begin: () => null, end: NOOP }
 
   const denied = gate.service.checkWrite({ surface: gate.surface, leaseId: gate.leaseId })
   if (denied && isAgentBrowserError(denied)) {
-    return { deniedMessage: JSON.stringify(denied), end: NOOP }
+    return { deniedMessage: JSON.stringify(denied), begin: () => JSON.stringify(denied), end: NOOP }
   }
 
-  const correlationId = gate.service.beginAgentAction(gate.surface)
+  let correlationId: string | null = null
   return {
     deniedMessage: null,
-    end: () => gate.service.endAgentAction(gate.surface, correlationId),
+    begin: () => {
+      if (correlationId) return null
+      const boundaryDenied = gate.service.checkWrite({ surface: gate.surface, leaseId: gate.leaseId })
+      if (boundaryDenied) return JSON.stringify(boundaryDenied)
+      correlationId = gate.service.beginAgentAction(gate.surface)
+      return null
+    },
+    end: () => {
+      if (correlationId) gate.service.endAgentAction(gate.surface, correlationId)
+      correlationId = null
+    },
   }
 }

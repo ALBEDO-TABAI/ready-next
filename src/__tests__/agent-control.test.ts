@@ -17,7 +17,7 @@ describe('createScopedRunCollector', () => {
             sessionId: 'scope-feishu-1',
             runId: 'req-1',
             type: 'tool_use',
-            chunk: 'browser_click_at(x=512,y=880)',
+            chunk: 'browser_click(x=512,y=880)',
         })
         collector.handleOutput({
             agent: 'butler',
@@ -39,7 +39,7 @@ describe('createScopedRunCollector', () => {
         assert.strictEqual(result.success, true)
         assert.strictEqual(result.cancelled, false)
         assert.strictEqual(result.finalText, '今晚可以吃面或者煲仔饭。')
-        assert.deepStrictEqual(result.usedTools, ['browser_click_at'])
+        assert.deepStrictEqual(result.usedTools, ['browser_click'])
         assert.strictEqual(result.error, undefined)
     })
 
@@ -55,7 +55,7 @@ describe('createScopedRunCollector', () => {
             sessionId: 'scope-feishu-2',
             runId: 'req-2',
             type: 'tool_use',
-            chunk: 'browser_query_gemini(text="今晚吃什么")',
+            chunk: 'browser_screenshot(text="今晚吃什么")',
         })
         collector.handleError({
             agent: 'butler',
@@ -69,7 +69,7 @@ describe('createScopedRunCollector', () => {
         assert.strictEqual(result.success, false)
         assert.strictEqual(result.cancelled, false)
         assert.strictEqual(result.finalText, '')
-        assert.deepStrictEqual(result.usedTools, ['browser_query_gemini'])
+        assert.deepStrictEqual(result.usedTools, ['browser_screenshot'])
         assert.strictEqual(result.error, 'Gemini page did not produce a response')
     })
 

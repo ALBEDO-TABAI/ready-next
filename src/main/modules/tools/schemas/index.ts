@@ -27,8 +27,7 @@ import { SESSION_SCHEMAS } from './session-schemas'
 import { FILE_MANAGEMENT_SCHEMAS } from './file-management-schemas'
 import { DOCUMENT_SCHEMAS } from './document-schemas'
 import { FEISHU_SCHEMAS } from './feishu-schemas'
-import { BROWSER_INTERACTION_SCHEMAS } from './browser-interaction-schemas'
-import { BROWSER_CONTENT_SCHEMAS } from './browser-content-schemas'
+import { BROWSER_TOOL_SCHEMAS } from './browser-tool-schemas'
 import { SYSTEM_SCHEMAS } from './system-schemas'
 import { PET_SCHEMAS } from './pet-schemas'
 import { SKILL_PRIMITIVE_SCHEMAS } from '../skill-primitives/primitive-schemas'
@@ -47,8 +46,7 @@ const STATIC_TOOL_INPUT_SCHEMAS: Record<string, ZodObject<ZodRawShape>> = {
   ...FILE_MANAGEMENT_SCHEMAS,
   ...DOCUMENT_SCHEMAS,
   ...FEISHU_SCHEMAS,
-  ...BROWSER_INTERACTION_SCHEMAS,
-  ...BROWSER_CONTENT_SCHEMAS,
+  ...BROWSER_TOOL_SCHEMAS,
   ...SYSTEM_SCHEMAS,
   ...PET_SCHEMAS,
   ...GENERAL_RESEARCH_SCHEMAS,

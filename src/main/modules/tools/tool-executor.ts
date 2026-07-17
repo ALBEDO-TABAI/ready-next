@@ -98,6 +98,15 @@ import {
   isTerminalInfrastructureError,
 } from './tool-errors'
 import { resolveBrowserWorkflowIntent } from '../../../shared/browser-workflow-intent'
+import {
+  BROWSER_PUBLIC_TOOL_NAMES,
+  browserToolSurfaceEntry,
+} from '../../../shared/browser-tool-surface'
+import {
+  browserSensitiveOperationsForInstruction,
+  type BrowserTaskEnvelope,
+} from '../../../shared/browser-task-envelope'
+import { parseEnvelopeResourceReferences, primaryInstructionText } from '../agent-control/runtime-core/agent-sdk-input-context-utils'
 import { deriveEnvelopeForToolOutput } from './tool-result-envelope'
 import { validateToolInput } from './tool-input-validator'
 import {
@@ -174,40 +183,68 @@ export interface ToolContext {
   authorization: SkillToolAuthorization
 }
 
-const BROWSER_SESSION_TARGET_INHERIT_TOOLS = new Set([
-  'browser_navigate',
-  'browser_search',
-  'browser_read_page',
-  'browser_read_page_map',
-  'browser_probe_readonly',
-  'browser_click',
-  'browser_click_text',
-  'browser_act_on_target',
-  'browser_type',
-  'browser_type_smart',
-  'browser_compose_message',
-  'browser_capture_viewport',
-  'browser_probe_workflow_state',
-  'browser_locate_action_targets',
-  'browser_locate_input_targets',
-  'browser_analyze_viewport',
-  'browser_list_upload_targets',
-  'browser_upload_scope_attachment',
-  'browser_click_at',
-  'browser_type_at',
-  'browser_scroll_at',
-  'browser_send_keys',
-  'browser_wait',
-  'browser_wait_for_condition',
-  'browser_go_back',
-  'browser_execute_js',
-  'browser_power_eval',
-  'browser_power_cdp',
-  'browser_power_network_trace',
-  'browser_power_resource_forensics',
-  'browser_power_script_run',
-  'browser_run_workflow',
-])
+function requestEnvelopeWorkspaceRoots(value: unknown): string[] {
+  if (!value || typeof value !== 'object') return []
+  const hints = (value as { environmentHints?: unknown }).environmentHints
+  if (!hints || typeof hints !== 'object') return []
+  const roots = (hints as { workspaceRoots?: unknown }).workspaceRoots
+  return Array.isArray(roots)
+    ? roots.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+    : []
+}
+
+function browserOriginOf(value: string | null | undefined): string | null {
+  if (!value) return null
+  try { return new URL(value).origin } catch { return null }
+}
+
+function buildBrowserTaskEnvelope(
+  toolName: string,
+  args: Record<string, unknown>,
+  context: ToolContext,
+  allowedToolNames: Set<string> | null,
+): BrowserTaskEnvelope | null {
+  const scopeId = context.scopeId || context.scope?.id || context.sessionId || ''
+  const runId = context.runId || ''
+  const taskId = context.taskId || runId
+  if (!scopeId || !runId || !taskId || !context.browserController) return null
+  const primaryInstruction =
+    parseEnvelopeResourceReferences(context.requestEnvelope).primaryInstruction
+    || primaryInstructionText(context.currentUserText || '')
+  const tabId = typeof args.tab_id === 'string' && args.tab_id.trim()
+    ? args.tab_id.trim()
+    : context.browserController.getActiveTab?.()?.id || null
+  const tab = tabId
+    ? context.browserController.getTabList?.().find((item) => item.id === tabId) || null
+    : context.browserController.getActiveTab?.() || null
+  const names = Array.from(allowedToolNames || new Set([toolName]))
+    .filter((name) => BROWSER_PUBLIC_TOOL_NAMES.includes(name as never))
+  if (!names.includes(toolName)) names.push(toolName)
+  const effects = Array.from(new Set(names.flatMap((name) => browserToolSurfaceEntry(name)?.effects || [])))
+  const destination = typeof args.path === 'string'
+    ? args.path
+    : typeof args.directory === 'string'
+      ? args.directory
+      : null
+  return {
+    version: 1,
+    scopeId,
+    runId,
+    taskId,
+    agentId: context.agent || context.scope?.agent || null,
+    primaryInstruction,
+    allowedToolNames: names,
+    allowedEffects: effects,
+    allowedSensitiveOperations: browserSensitiveOperationsForInstruction(primaryInstruction),
+    tabId,
+    origin: browserOriginOf(tab?.url || null),
+    destination,
+    workspaceRoots: requestEnvelopeWorkspaceRoots(context.requestEnvelope),
+    createdAt: Date.now(),
+  }
+}
+
+const BROWSER_SESSION_TARGET_INHERIT_TOOLS = new Set<string>(BROWSER_PUBLIC_TOOL_NAMES)
 
 function inheritBrowserActionSessionTarget(
   toolName: string,
@@ -597,7 +634,7 @@ async function executeToolCallInner(
             return browserFailureOutput(surfaceBinding.error as unknown as Record<string, unknown>)
           }
           if (turnLease && surfaceBinding.binding.effect === 'write') {
-            if (isBrowserBackgroundHandoffTool(toolName)) {
+            if (isBrowserBackgroundHandoffTool(toolName, args)) {
               // Hand the surface to a background browser task (single writer):
               // release the turn lease so the task can acquire or use its own lane.
               turnLease.releaseForBackgroundHandoff()
@@ -635,8 +672,42 @@ async function executeToolCallInner(
             {
               ownerAgentId: context.agent ?? null,
               ownerRunId: context.runId ?? null,
-              parentTaskId: context.taskId ?? null,
+              parentTaskId: context.taskId ?? context.runId ?? null,
               executionBinding: context.executionBinding ?? null,
+              workspaceRoots: requestEnvelopeWorkspaceRoots(context.requestEnvelope),
+              taskEnvelope: buildBrowserTaskEnvelope(toolName, args, context, allowedToolNames),
+              requestPowerConfirmation: invoker === 'model'
+                ? async (details) => {
+                    try {
+                      const questionId = `browser_power_${details.inputHash.slice(0, 12)}`
+                      const output = await executeAskUserQuestions({
+                        questions: [{
+                          id: questionId,
+                          kind: 'single_choice',
+                          question: [
+                            `确认执行 ${details.toolName}：${details.purpose}。`,
+                            `目标：${details.origin || '当前页面'}。`,
+                            `效果：${details.effects.join(', ')}。`,
+                            '本次确认仅对当前任务、当前标签、当前页面和这一组参数生效一次。',
+                          ].join(' '),
+                          options: ['确认执行', '取消'],
+                        }],
+                      }, {
+                        sessionId: context.sessionId,
+                        conversationId: context.scope?.id || context.scopeId || context.sessionId,
+                        signal: context.abortSignal,
+                        emitAskUserQuestionsCard: getAskUserQuestionsCardEmitter(),
+                        persistCardPending: getAskUserQuestionsCardPersistor(),
+                        timeoutMs: 10 * 60_000,
+                      })
+                      const answers = (output.data?.answers || []) as Array<{ id?: unknown; answer?: unknown }>
+                      return answers.some((answer) => answer.id === questionId && answer.answer === '确认执行')
+                    } catch {
+                      // silent-catch: missing/aborted confirmation must fail closed without executing Power.
+                      return false
+                    }
+                  }
+                : undefined,
             },
           )
           if (typeof browserResult === 'string' && browserResult.startsWith('Error:')) {

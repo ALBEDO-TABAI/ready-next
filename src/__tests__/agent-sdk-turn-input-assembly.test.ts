@@ -103,15 +103,15 @@ test('browser discipline is absent without a final browser group and present exa
 
   const withBrowser = assemble([
     toolDefinition('browser_navigate', 'browser_interaction'),
-    toolDefinition('browser_collect_notes', 'browser_content_tasks'),
-    toolDefinition('browser_visible_collect', 'browser_content_tasks'),
-    toolDefinition('browser_power_eval', 'browser_interaction'),
+    toolDefinition('browser_collect', 'browser_content_tasks'),
+    toolDefinition('browser_collect', 'browser_content_tasks'),
+    toolDefinition('browser_eval', 'browser_interaction'),
   ])
   assert.equal((withBrowser.instructions.match(/# 浏览器交互纪律/g) || []).length, 1)
-  assert.match(withBrowser.instructions, /本轮可用 browser_visible_collect/)
+  assert.match(withBrowser.instructions, /本轮可用 browser_collect/)
   assert.match(withBrowser.instructions, /本轮已开放列出的 Browser Power 工具/)
-  assert.match(withBrowser.instructions, /browser_media_download_advanced/)
-  assert.match(withBrowser.instructions, /browser_download_collected_media/)
+  assert.match(withBrowser.instructions, /browser_download/)
+  assert.match(withBrowser.instructions, /browser_download/)
 })
 
 test('tool availability follows the final tool definitions even when the text bridge exposes no SDK tools', () => {

@@ -33,7 +33,7 @@ function parseToolOutput(out: unknown): Record<string, unknown> {
   return JSON.parse(String(out)) as Record<string, unknown>
 }
 
-describe('browser_download_urls cookie-aware routing (WP4)', () => {
+describe('browser_download cookie-aware routing (WP4)', () => {
   it('routes downloads through the browser session (cookie+Referer), not fetch, when available', async () => {
     const calls: Array<{ url: string; sourcePageUrl?: string | null }> = []
     const dir = tempDir()
@@ -47,9 +47,15 @@ describe('browser_download_urls cookie-aware routing (WP4)', () => {
     } as unknown as BrowserController
 
     const out = await executeBrowserTool(
-      'browser_download_urls',
+      'browser_download',
       { urls: ['https://sns-img.xhscdn.com/a.jpg'], directory: dir },
       controller,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { workspaceRoots: [dir] },
     )
     const parsed = parseToolOutput(out)
     const results = parsed.results as Array<Record<string, unknown>>
@@ -76,9 +82,15 @@ describe('browser_download_urls cookie-aware routing (WP4)', () => {
     } as unknown as BrowserController
 
     const out = await executeBrowserTool(
-      'browser_download_urls',
+      'browser_download',
       { urls: ['https://v.douyinvod.com/video/tos/cn/example?mime_type=video_mp4'], directory: dir },
       controller,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { workspaceRoots: [dir] },
     )
     const parsed = parseToolOutput(out)
     assert.equal(parsed.success, 1)
@@ -89,7 +101,7 @@ describe('browser_download_urls cookie-aware routing (WP4)', () => {
     )
   })
 
-  it('falls back to fetch (structured) when the session download path reports failure', async () => {
+  it('keeps browser-session failure structured without falling back to Node fetch', async () => {
     const dir = tempDir()
     const controller: BrowserController = {
       getActiveTab: () => ({ id: 'tab-1', url: 'https://www.xiaohongshu.com/x', title: 'T', active: true }) as never,
@@ -98,14 +110,19 @@ describe('browser_download_urls cookie-aware routing (WP4)', () => {
     } as unknown as BrowserController
 
     const out = await executeBrowserTool(
-      'browser_download_urls',
+      'browser_download',
       { urls: ['https://no-such-host.invalid/a.jpg'], directory: dir },
       controller,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { workspaceRoots: [dir] },
     )
     const parsed = parseToolOutput(out)
-    // Session path failed → fell back to fetch → structured failure (not silent).
     const results = parsed.results as Array<Record<string, unknown>>
-    assert.equal(results[0].via, 'fetch')
+    assert.equal(results[0].via, 'browser_session')
     assert.equal(results[0].success, false)
     assert.ok(Number(parsed.failed) >= 1)
   })

@@ -1,6 +1,9 @@
-import type { Session } from 'electron'
-import { existsSync, statSync } from 'fs'
+import type { DownloadItem, Session } from 'electron'
+import { closeSync, createReadStream, existsSync, openSync, statSync } from 'fs'
+import { rename, stat, unlink } from 'fs/promises'
+import { createHash } from 'crypto'
 import { basename, extname, isAbsolute, join } from 'path'
+import { isIP } from 'net'
 import { BrowserDataService } from './data-service'
 
 interface BrowserDownloadServiceDeps {
@@ -11,15 +14,22 @@ interface BrowserDownloadServiceDeps {
 export interface BrowserDownloadUrlToDirectoryPayload {
   url: string
   targetDir: string
+  tabId?: string | null
   sourcePageUrl?: string | null
   suggestedName?: string | null
   downloadHeaders?: Record<string, string> | null
+  maxBytes?: number | null
+  signal?: AbortSignal
 }
 
 export interface BrowserDownloadUrlToDirectoryResult {
   success: boolean
   savePath?: string
   filename?: string
+  size?: number
+  sha256?: string
+  mimeType?: string | null
+  urlChain?: string[]
   error?: string
 }
 
@@ -27,6 +37,14 @@ interface PendingTargetedDownload {
   requestedUrl: string
   targetDir: string
   suggestedName?: string | null
+  maxBytes?: number | null
+  budgetError?: string | null
+  signal?: AbortSignal
+  abortListener?: (() => void) | null
+  item?: DownloadItem | null
+  cleanupOnAbort?: (() => Promise<void>) | null
+  aborted: boolean
+  settled: boolean
   resolve: (result: BrowserDownloadUrlToDirectoryResult) => void
   timer: ReturnType<typeof setTimeout>
 }
@@ -90,6 +108,53 @@ function isHttpUrl(value: string): boolean {
   } catch {
     return false
   }
+}
+
+function isPrivateIpv4(host: string): boolean {
+  const octets = host.split('.').map(Number)
+  if (octets.length !== 4 || octets.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return false
+  const [a, b] = octets
+  return a === 0
+    || a === 10
+    || a === 127
+    || (a === 100 && b >= 64 && b <= 127)
+    || (a === 169 && b === 254)
+    || (a === 172 && b >= 16 && b <= 31)
+    || (a === 192 && b === 168)
+}
+
+export function isBrowserLocalNetworkUrl(value: string): boolean {
+  try {
+    const host = new URL(value).hostname.replace(/^\[|\]$/g, '').toLowerCase()
+    if (!host) return false
+    if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local')) return true
+    const ipVersion = isIP(host)
+    if (ipVersion === 4) return isPrivateIpv4(host)
+    if (ipVersion === 6) {
+      return host === '::1'
+        || host === '::'
+        || /^f[cd]/i.test(host)
+        || /^fe[89ab]/i.test(host)
+    }
+    return false
+  } catch {
+    return false
+  }
+}
+
+export function rejectsPublicToLocalDownloadRedirect(requestedUrl: string, urlChain: readonly string[]): boolean {
+  if (isBrowserLocalNetworkUrl(requestedUrl)) return false
+  return urlChain.some((url) => isBrowserLocalNetworkUrl(url))
+}
+
+async function sha256File(path: string): Promise<string> {
+  return await new Promise<string>((resolve, reject) => {
+    const hash = createHash('sha256')
+    const stream = createReadStream(path)
+    stream.on('error', reject)
+    stream.on('data', (chunk) => hash.update(chunk))
+    stream.on('end', () => resolve(hash.digest('hex')))
+  })
 }
 
 function buildDownloadHeaders(payload: BrowserDownloadUrlToDirectoryPayload): Record<string, string> {
@@ -164,9 +229,24 @@ function uniquePathForDownload(targetDir: string, requestedName: string): string
   return candidate
 }
 
+function reserveUniquePathForDownload(targetDir: string, requestedName: string): string {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    const candidate = uniquePathForDownload(targetDir, requestedName)
+    try {
+      closeSync(openSync(candidate, 'wx'))
+      return candidate
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'EEXIST') continue
+      throw error
+    }
+  }
+  throw new Error('download_destination_exhausted')
+}
+
 export class BrowserDownloadService {
   private registeredSessions = new WeakSet<Session>()
   private pendingTargetedDownloads = new Map<string, PendingTargetedDownload[]>()
+  private timedOutTargetedDownloads = new Map<string, number>()
 
   constructor(private readonly deps: BrowserDownloadServiceDeps) {}
 
@@ -193,18 +273,46 @@ export class BrowserDownloadService {
       return { success: false, error: '目标目录不可用' }
     }
 
+    if (payload.signal?.aborted) return { success: false, error: 'download_aborted' }
+
     this.ensureRegistered(targetSession)
     return await new Promise((resolve) => {
       const pending: PendingTargetedDownload = {
         requestedUrl: url,
         targetDir,
         suggestedName: payload.suggestedName,
+        maxBytes: Number.isFinite(payload.maxBytes) && Number(payload.maxBytes) > 0 ? Number(payload.maxBytes) : null,
+        budgetError: null,
+        signal: payload.signal,
+        abortListener: null,
+        item: null,
+        cleanupOnAbort: null,
+        aborted: false,
+        settled: false,
         resolve,
         timer: setTimeout(() => {
           this.removePendingTargetedDownload(url, pending)
-          resolve({ success: false, error: '下载没有开始' })
+          this.timedOutTargetedDownloads.set(url, Date.now() + 60_000)
+          this.resolvePendingTargetedDownload(pending, { success: false, error: '下载没有开始' })
         }, TARGETED_DOWNLOAD_START_TIMEOUT_MS),
       }
+      const abort = () => {
+        if (pending.settled) return
+        pending.aborted = true
+        if (!pending.item) {
+          this.removePendingTargetedDownload(url, pending)
+          this.timedOutTargetedDownloads.set(url, Date.now() + 60_000)
+          this.resolvePendingTargetedDownload(pending, { success: false, error: 'download_aborted' })
+          return
+        }
+        pending.item.cancel()
+        void (async () => {
+          await pending.cleanupOnAbort?.().catch(() => undefined)
+          this.resolvePendingTargetedDownload(pending, { success: false, error: 'download_aborted' })
+        })()
+      }
+      pending.abortListener = abort
+      pending.signal?.addEventListener('abort', abort, { once: true })
       const queue = this.pendingTargetedDownloads.get(url) ?? []
       queue.push(pending)
       this.pendingTargetedDownloads.set(url, queue)
@@ -214,9 +322,20 @@ export class BrowserDownloadService {
       } catch (error) {
         clearTimeout(pending.timer)
         this.removePendingTargetedDownload(url, pending)
-        resolve({ success: false, error: error instanceof Error ? error.message : String(error) })
+        this.resolvePendingTargetedDownload(pending, { success: false, error: error instanceof Error ? error.message : String(error) })
       }
     })
+  }
+
+  private resolvePendingTargetedDownload(
+    pending: PendingTargetedDownload,
+    result: BrowserDownloadUrlToDirectoryResult,
+  ): void {
+    if (pending.settled) return
+    pending.settled = true
+    clearTimeout(pending.timer)
+    if (pending.abortListener) pending.signal?.removeEventListener('abort', pending.abortListener)
+    pending.resolve(result)
   }
 
   private removePendingTargetedDownload(url: string, pending: PendingTargetedDownload): void {
@@ -247,18 +366,60 @@ export class BrowserDownloadService {
     return null
   }
 
+  private consumeTimedOutTarget(itemUrl: string, urlChain: string[]): boolean {
+    const now = Date.now()
+    for (const [url, expiresAt] of this.timedOutTargetedDownloads) {
+      if (expiresAt <= now) this.timedOutTargetedDownloads.delete(url)
+    }
+    for (const candidate of [itemUrl, ...urlChain]) {
+      if (!this.timedOutTargetedDownloads.has(candidate)) continue
+      this.timedOutTargetedDownloads.delete(candidate)
+      return true
+    }
+    return false
+  }
+
   ensureRegistered(targetSession: Session): void {
     if (this.registeredSessions.has(targetSession)) return
 
     targetSession.on('will-download', (_event, item) => {
       const downloadId = `dl-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-      const pendingTarget = this.takePendingTargetedDownload(item.getURL(), item.getURLChain())
+      const urlChain = item.getURLChain()
+      const pendingTarget = this.takePendingTargetedDownload(item.getURL(), urlChain)
+      if (!pendingTarget && this.consumeTimedOutTarget(item.getURL(), urlChain)) {
+        item.cancel()
+        return
+      }
       let savePath = item.getSavePath() || ''
       let filename = item.getFilename()
       const mimeType = typeof item.getMimeType === 'function' ? item.getMimeType() : null
+      let finalPath = savePath
+      let temporaryPath = savePath
+      let reservedFinalPath = false
       if (pendingTarget) {
+        pendingTarget.item = item
         try {
-          savePath = uniquePathForDownload(
+          if (rejectsPublicToLocalDownloadRedirect(pendingTarget.requestedUrl, urlChain)) {
+            item.cancel()
+            this.resolvePendingTargetedDownload(pendingTarget, {
+              success: false,
+              error: 'redirect_to_local_network_rejected',
+              urlChain,
+            })
+            return
+          }
+          const declaredBytes = item.getTotalBytes()
+          if (pendingTarget.maxBytes && declaredBytes > pendingTarget.maxBytes) {
+            item.cancel()
+            this.resolvePendingTargetedDownload(pendingTarget, {
+              success: false,
+              error: 'download_byte_budget_exceeded',
+              size: declaredBytes,
+              urlChain,
+            })
+            return
+          }
+          finalPath = reserveUniquePathForDownload(
             pendingTarget.targetDir,
             withInferredExtension(
               pendingTarget.suggestedName || filename || filenameFromUrl(pendingTarget.requestedUrl),
@@ -266,11 +427,19 @@ export class BrowserDownloadService {
               mimeType,
             ),
           )
-          item.setSavePath(savePath)
-          filename = basename(savePath)
+          reservedFinalPath = true
+          temporaryPath = join(pendingTarget.targetDir, `.ready-${downloadId}.part`)
+          pendingTarget.cleanupOnAbort = async () => {
+            await unlink(temporaryPath).catch(() => undefined)
+            await unlink(finalPath).catch(() => undefined)
+          }
+          item.setSavePath(temporaryPath)
+          savePath = finalPath
+          filename = basename(finalPath)
         } catch (error) {
           item.cancel()
-          pendingTarget.resolve({ success: false, error: error instanceof Error ? error.message : String(error) })
+          if (reservedFinalPath) void unlink(finalPath).catch(() => undefined)
+          this.resolvePendingTargetedDownload(pendingTarget, { success: false, error: error instanceof Error ? error.message : String(error) })
           return
         }
       }
@@ -298,6 +467,11 @@ export class BrowserDownloadService {
       item.on('updated', (_ev, state) => {
         if (state !== 'progressing') return
         const received = item.getReceivedBytes()
+        if (pendingTarget?.maxBytes && received > pendingTarget.maxBytes) {
+          pendingTarget.budgetError = 'download_byte_budget_exceeded'
+          item.cancel()
+          return
+        }
         try { this.deps.dataService.updateDownloadProgress(downloadId, received) } catch { /* ignore */ }
         try {
           this.deps.dataService.updateDownloadState(downloadId, 'progressing', {
@@ -319,12 +493,38 @@ export class BrowserDownloadService {
       })
 
       item.once('done', (_ev, state) => {
-        const finalPath = item.getSavePath()
-        if (state === 'completed') {
+        const downloadedPath = item.getSavePath() || temporaryPath
+        void (async () => {
+        let completedSize = 0
+        let completedSha256 = ''
+        let terminalState = pendingTarget?.aborted ? 'cancelled' : state
+        let terminalError: string | null = pendingTarget?.aborted
+          ? 'download_aborted'
+          : pendingTarget?.budgetError || (state === 'completed' ? null : state)
+        if (state === 'completed' && pendingTarget && !pendingTarget.aborted) {
+          try {
+            const downloadedStat = await stat(downloadedPath)
+            if (!downloadedStat.isFile() || downloadedStat.size <= 0) throw new Error('downloaded_file_empty')
+            completedSize = downloadedStat.size
+            completedSha256 = await sha256File(downloadedPath)
+            if (pendingTarget.aborted) throw new Error('download_aborted')
+            await rename(downloadedPath, finalPath)
+          } catch (error) {
+            terminalState = 'interrupted'
+            terminalError = error instanceof Error ? error.message : String(error)
+            await unlink(downloadedPath).catch(() => undefined)
+            await unlink(finalPath).catch(() => undefined)
+          }
+        } else if (state !== 'completed' && pendingTarget) {
+          await unlink(downloadedPath).catch(() => undefined)
+          await unlink(finalPath).catch(() => undefined)
+        }
+        const recordedPath = pendingTarget ? finalPath : downloadedPath
+        if (terminalState === 'completed') {
           try {
             this.deps.dataService.updateDownloadProgress(downloadId, item.getReceivedBytes())
             this.deps.dataService.updateDownloadState(downloadId, 'completed', {
-              savePath: finalPath,
+              savePath: recordedPath,
               mimeType,
               endTime: Math.max(startedAt, Math.floor(Date.now() / 1000)),
               error: null,
@@ -336,11 +536,11 @@ export class BrowserDownloadService {
         } else {
           try {
             this.deps.dataService.updateDownloadProgress(downloadId, item.getReceivedBytes())
-            this.deps.dataService.updateDownloadState(downloadId, state, {
-              savePath: finalPath,
+            this.deps.dataService.updateDownloadState(downloadId, terminalState, {
+              savePath: recordedPath,
               mimeType,
               endTime: Math.max(startedAt, Math.floor(Date.now() / 1000)),
-              error: state,
+              error: terminalError,
               canResume: typeof item.canResume === 'function' ? item.canResume() : canResume,
             })
           } catch {
@@ -352,17 +552,22 @@ export class BrowserDownloadService {
           filename,
           totalBytes,
           receivedBytes: item.getReceivedBytes(),
-          state,
-          savePath: finalPath,
+          state: terminalState,
+          savePath: recordedPath,
         })
         if (pendingTarget) {
-          pendingTarget.resolve({
-            success: state === 'completed',
-            savePath: state === 'completed' ? finalPath : undefined,
+          this.resolvePendingTargetedDownload(pendingTarget, {
+            success: terminalState === 'completed',
+            savePath: terminalState === 'completed' ? recordedPath : undefined,
             filename,
-            error: state === 'completed' ? undefined : state,
+            size: terminalState === 'completed' ? completedSize : undefined,
+            sha256: terminalState === 'completed' ? completedSha256 : undefined,
+            mimeType,
+            urlChain,
+            error: terminalState === 'completed' ? undefined : (terminalError || terminalState),
           })
         }
+        })()
       })
     })
 

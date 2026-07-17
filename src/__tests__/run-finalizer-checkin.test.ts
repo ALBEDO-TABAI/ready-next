@@ -171,8 +171,8 @@ test('browser_transaction with transaction_confirmed proof can complete', async 
     taskType: 'browser_transaction' as never,
     module: 'browser',
     proofRefs: [
-      collectToolResultProof('browser_power_network_trace', 'ok', NOW),
-      collectTransactionConfirmedProof('browser_power_network_trace:network:success_response', 'network success', NOW),
+      collectToolResultProof('browser_network', 'ok', NOW),
+      collectTransactionConfirmedProof('browser_network:network:success_response', 'network success', NOW),
     ],
   })
   const finalized = await finalizeRunOutcome({
@@ -202,7 +202,7 @@ test('run_meta records effective browser_transaction type from terminal projecti
     taskType: 'short_task' as never,
     module: 'browser',
     proofRefs: [
-      collectTransactionConfirmedProof('browser_power_eval:page_text:success_text', 'page success', NOW),
+      collectTransactionConfirmedProof('browser_eval:page_text:success_text', 'page success', NOW),
     ],
   })
   const runMeta = new Map<string, Record<string, unknown>>()
@@ -1163,10 +1163,10 @@ test('research source criteria require real acquisition proofs, never a written 
   assert.ok(discoveryOnly.checkIn.blockers.includes('criteria_unsatisfied:c2'))
 
   for (const fakeContentTool of [
-    'browser_read_page_map',
-    'browser_visible_collect',
-    'browser_collect_notes',
-    'browser_research_topic',
+    'browser_snapshot',
+    'browser_collect',
+    'browser_collect',
+    'browser_collect',
   ]) {
     const handleOnly = adjudicateTerminalOutcome({
       terminalStatus: 'done',
@@ -1228,8 +1228,8 @@ test('finalizer writes learningRefs to the projection for an accepted durable ru
       taskType: 'browser_transaction' as never,
       module: 'browser',
       proofRefs: [
-        collectToolResultProof('browser_power_network_trace', 'ok', NOW),
-        collectTransactionConfirmedProof('browser_power_network_trace:network:success_response', 'network success', NOW),
+        collectToolResultProof('browser_network', 'ok', NOW),
+        collectTransactionConfirmedProof('browser_network:network:success_response', 'network success', NOW),
       ],
     })
     await finalizeRunOutcome({

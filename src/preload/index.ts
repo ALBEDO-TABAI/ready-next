@@ -36,6 +36,7 @@ import type {
 import type {
   BrowserLockOverlaySnapshot,
 } from '../shared/browser-lock-overlay'
+import type { BrowserAgentPointerSnapshot } from '../shared/browser-agent-pointer'
 import type {
   VerticalRailOverlayCommand,
   VerticalRailOverlaySnapshot,
@@ -514,7 +515,7 @@ const browserAPI = {
   requestAgentInterruption: () => ipcRenderer.invoke('browser:requestAgentInterruption'),
   confirmAgentInterruption: () => ipcRenderer.invoke('browser:confirmAgentInterruption'),
   dismissAgentInterruption: () => ipcRenderer.invoke('browser:dismissAgentInterruption'),
-  confirmCollectionConsent: (payload: { requestId: string; confirmedVia: 'ask_user_questions' | 'ui_action' }) =>
+  confirmCollectionConsent: (payload: { requestId: string }) =>
     ipcRenderer.invoke('browser:confirmCollectionConsent', payload),
   resumeTask: (payload: { taskId: string }) => ipcRenderer.invoke('browser:resumeTask', payload),
   cancelTask: (payload: { taskId: string }) => ipcRenderer.invoke('browser:cancelTask', payload),
@@ -554,6 +555,10 @@ const browserAPI = {
   p7cLiveProofPrepareForegroundProbe: () => ipcRenderer.invoke('browser:p7cLiveProofPrepareForegroundProbe'),
   p7cLiveProofSampleActiveTabState: () => ipcRenderer.invoke('browser:p7cLiveProofSampleActiveTabState'),
   p7cLiveProofSendUserKey: (key?: string) => ipcRenderer.invoke('browser:p7cLiveProofSendUserKey', key),
+  p7cLiveProofAgentClick: (x?: number, y?: number) =>
+    ipcRenderer.invoke('browser:p7cLiveProofAgentClick', x, y),
+  p7cLiveProofFinishAgentAction: (phase?: 'finish' | 'abort') =>
+    ipcRenderer.invoke('browser:p7cLiveProofFinishAgentAction', phase),
   p7cLiveProofCheckWriteDenied: () => ipcRenderer.invoke('browser:p7cLiveProofCheckWriteDenied'),
   p7cLiveProofClear: () => ipcRenderer.invoke('browser:p7cLiveProofClear'),
   onPreviewUpdate: (callback: (data: unknown) => void) => {
@@ -629,12 +634,21 @@ const browserAPI = {
     ipcRenderer.invoke('browser:lockOverlayShow', payload),
   hideBrowserLockOverlay: () =>
     ipcRenderer.invoke('browser:lockOverlayHide'),
+  dismissBrowserLockOverlay: () =>
+    ipcRenderer.invoke('browser:lockOverlayDismiss'),
   getBrowserLockOverlaySnapshot: () =>
     ipcRenderer.invoke('browser:lockOverlayGetSnapshot'),
   onBrowserLockOverlaySnapshot: (callback: (snapshot: BrowserLockOverlaySnapshot) => void) => {
     const handler = (_: unknown, snapshot: BrowserLockOverlaySnapshot): void => callback(snapshot)
     ipcRenderer.on('browser:lockOverlaySnapshot', handler)
     return () => ipcRenderer.removeListener('browser:lockOverlaySnapshot', handler)
+  },
+  getBrowserAgentPointerSnapshot: () =>
+    ipcRenderer.invoke('browser:agentPointerGetSnapshot'),
+  onBrowserAgentPointerSnapshot: (callback: (snapshot: BrowserAgentPointerSnapshot) => void) => {
+    const handler = (_: unknown, snapshot: BrowserAgentPointerSnapshot): void => callback(snapshot)
+    ipcRenderer.on('browser:agentPointerSnapshot', handler)
+    return () => ipcRenderer.removeListener('browser:agentPointerSnapshot', handler)
   },
 
   // Bookmarks

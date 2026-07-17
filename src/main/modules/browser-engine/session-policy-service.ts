@@ -71,6 +71,35 @@ export class BrowserSessionPolicyService {
     }
   }
 
+  getPermissionDecision(permission: string, requestingUrl: string): Record<string, unknown> {
+    const key = this.getPermissionDecisionKey(permission, requestingUrl)
+    const cached = this.permissionDecisions.get(key)
+    return {
+      permission: String(permission || '').toLowerCase(),
+      origin: this.formatRequestingHost(requestingUrl),
+      decision: cached === true
+        ? 'allow'
+        : cached === false
+          ? 'deny'
+          : shouldAllowBrowserPermission(permission, requestingUrl)
+            ? 'allow'
+            : 'ask',
+      source: cached === undefined ? 'policy' : 'session_override',
+    }
+  }
+
+  setPermissionDecision(
+    permission: string,
+    requestingUrl: string,
+    decision: 'allow' | 'deny' | 'ask',
+  ): Record<string, unknown> {
+    const key = this.getPermissionDecisionKey(permission, requestingUrl)
+    if (decision === 'ask') this.permissionDecisions.delete(key)
+    else this.permissionDecisions.set(key, decision === 'allow')
+    this.logPermissionEvent(`agent_set=${decision}`, permission, requestingUrl)
+    return this.getPermissionDecision(permission, requestingUrl)
+  }
+
   setAdblockEnabled(enabled: boolean, scope: 'main' | 'preview' | 'all' = 'all'): BrowserAdblockState {
     if (scope === 'all' || scope === 'main') {
       this.adblockState.enabled = enabled
@@ -98,7 +127,10 @@ export class BrowserSessionPolicyService {
   }
 
   setupBrowserSessionPolicies(): void {
-    const applyForPartition = (partition: string): void => {
+    this.applyForPartition('persist:browser')
+  }
+
+  applyForPartition(partition: string): void {
       const targetSession = session.fromPartition(partition)
       const marker = targetSession as unknown as {
         __readyBrowserPolicyApplied?: boolean
@@ -173,9 +205,6 @@ export class BrowserSessionPolicyService {
           callback({ cancel: false })
         })
       }
-    }
-
-    applyForPartition('persist:browser')
   }
 
   private persistAdblockState(): void {

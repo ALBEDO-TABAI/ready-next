@@ -318,7 +318,7 @@ export class BrowserTaskPlanner {
       const resolveStep = steps.find((step) => step.id === 'resolve_target_page')
       const navigateStep = steps.find((step) => step.id === 'navigate_target')
       if (resolveStep) {
-        resolveStep.action = `${resolveStep.action} 若到达的是即梦落地页、模式选择页或创作导航页，先定位 Agent 模式 / 图片生成 / 视频生成 等候选控件；遇到疑似下拉或模式切换按钮时，先点击一次，再 browser_read_page 复核展开后的选项。`
+        resolveStep.action = `${resolveStep.action} 若到达的是即梦落地页、模式选择页或创作导航页，先定位 Agent 模式 / 图片生成 / 视频生成 等候选控件；遇到疑似下拉或模式切换按钮时，先点击一次，再 browser_read 复核展开后的选项。`
         resolveStep.verify = Array.from(new Set(['已确认当前页是否只是模式选择页', ...resolveStep.verify]))
         resolveStep.failIf = Array.from(new Set([...resolveStep.failIf, '点击 1-2 个疑似模式按钮后仍无法判断正确入口']))
         resolveStep.recoverWith = Array.from(new Set(['若模式入口仍不明确，立即向用户确认要进入哪个模式', ...resolveStep.recoverWith]))
@@ -706,10 +706,10 @@ export class BrowserTaskPlanner {
       `8. 不要在 ensure_upload 完成前执行 ensure_prompt`,
       `9. 在 ensure_prompt 里先确认当前焦点或最高置信输入区就是目标 prompt 输入区，再输入内容`,
       `10. 在没有输入锚点时，不要先点击发送/生成按钮；先重新定位输入区或让光标回到正确文本框`,
-      `11. 提交时优先使用与当前输入区相邻的发送/生成控件，或复用 browser_locate_input_targets 返回的 nearby_send_targets`,
+      `11. 提交时优先使用与当前输入区相邻的发送/生成控件，或复用 browser_find 返回的 nearby_send_targets`,
       `12. 不要点击"重新生成""再次生成"等历史记录按钮`,
       `13. 若最近状态已显示附件/提示词/运行态已就位，先验证，不要默认重复动作`,
-      `14. 最后一步 final_reconcile 必须执行，用 browser_read_page 确认最终状态`,
+      `14. 最后一步 final_reconcile 必须执行，用 browser_read 确认最终状态`,
       plan.targetSearchQuery ? `15. 当前没有直接 URL，先搜索“${plan.targetSearchQuery}”定位官方入口；若结果仍不唯一，先向用户确认，不要来回跳转。` : '',
       shouldInspectModeEntry ? '16. 如果当前页像模式选择页或带下拉的入口页，先检查 Agent 模式 / 图片生成 / 视频生成 等可疑按钮；点击一层后立即重新读页确认选项，仍不明确就直接澄清。' : '',
     ].filter(Boolean).join('\n')

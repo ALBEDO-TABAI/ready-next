@@ -82,7 +82,8 @@ export function resolveBrowserOwnershipStatus(input: {
       tone: 'agent',
     }
   }
-  if (input.activeTab?.owner === 'agent' || (input.agentTabId && input.activeTab?.id === input.agentTabId)) {
+  if (input.activeTab?.activity === 'running'
+    && (input.activeTab.owner === 'agent' || (input.agentTabId && input.activeTab.id === input.agentTabId))) {
     return {
       kind: 'agent-current',
       label: 'Agent 协作当前页',
@@ -90,13 +91,11 @@ export function resolveBrowserOwnershipStatus(input: {
       tone: 'agent',
     }
   }
-  if (input.agentTabId || input.activeAgentTaskCount > 0) {
+  if (input.activeAgentTaskCount > 0) {
     return {
       kind: 'agent-background',
       label: 'Agent 后台页',
-      detail: input.activeAgentTaskCount > 0
-        ? `${input.activeAgentTaskCount} 个后台 Agent 浏览任务`
-        : '后台 Agent 标签页待命',
+      detail: `${input.activeAgentTaskCount} 个后台 Agent 浏览任务`,
       tone: 'agent',
     }
   }

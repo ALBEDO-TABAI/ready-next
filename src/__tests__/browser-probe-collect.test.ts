@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import vm from 'node:vm'
 
-import { buildBrowserActOnTargetJs, buildBrowserPageMapProbeJs } from '../main/modules/tools/browser-probe'
+import { buildBrowserPageMapProbeJs, buildBrowserTargetProbeJs } from '../main/modules/tools/browser-probe'
 
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 
@@ -193,13 +193,13 @@ test('pointer-cursor collection still works alongside custom hosts, order determ
   )
 })
 
-// D18：act click 分支必须把点击坐标（视口 CSS px + 视口尺寸）交回工具层，
-// 供 closed-shadow 无效果时升级可信指针点击。fill 等非 click 动作不带。
-function runAct(nodeId: string, action: 'click' | 'fill', elements: {
+// D18：目标实时探针必须把点击坐标（视口 CSS px + 视口尺寸）交回工具层，
+// 供 closed-shadow 无效果时升级可信指针点击。探针只观测，不在页面内合成点击。
+function runTargetProbe(nodeId: string, elements: {
   semantic: FakeElement[]
   pointer: FakeElement[]
   all: FakeElement[]
-}): { ok: boolean; clickPoint: { x: number; y: number; vw: number; vh: number } | null } {
+}): { matchCount: number; clickPoint?: { x: number; y: number; vw: number; vh: number } | null } {
   const querySelectorAll = (selector: string): FakeElement[] => {
     if (selector === '*') return elements.all
     if (selector === 'div,span,li,p,img,svg') return elements.pointer
@@ -217,7 +217,7 @@ function runAct(nodeId: string, action: 'click' | 'fill', elements: {
       getElementById: () => null,
       title: 'fake',
       body: { innerText: '' },
-      // elementFromPoint 缺省：act JS 的穿透块 try/catch 吞掉后按原目标派发
+      // elementFromPoint 缺省：目标探针只需要枚举后的目标几何。
     },
     window: { getComputedStyle, innerWidth: 1200, innerHeight: 900 },
     getComputedStyle,
@@ -236,21 +236,21 @@ function runAct(nodeId: string, action: 'click' | 'fill', elements: {
       origin = 'https://fake.example'
     },
   }
-  return JSON.parse(JSON.stringify(vm.runInNewContext(buildBrowserActOnTargetJs(nodeId, action, 'v'), sandbox))) as {
-    ok: boolean
-    clickPoint: { x: number; y: number; vw: number; vh: number } | null
+  return JSON.parse(JSON.stringify(vm.runInNewContext(buildBrowserTargetProbeJs(nodeId), sandbox))) as {
+    matchCount: number
+    clickPoint?: { x: number; y: number; vw: number; vh: number } | null
   }
 }
 
-test('act click returns the click point for trusted-pointer escalation', () => {
+test('target probe returns the click point for trusted-pointer escalation', () => {
   const stashButton = new FakeElement('button', { text: '暂存离开' })
   const publishHost = new FakeElement('xhs-publish-btn', { text: '发布' })
-  const result = runAct('2', 'click', {
+  const result = runTargetProbe('2', {
     semantic: [stashButton],
     pointer: [],
     all: [stashButton, publishHost],
   })
-  assert.strictEqual(result.ok, true)
+  assert.strictEqual(result.matchCount, 1)
   // rect: left 10 top 10, 120x40 → center (70, 30)；视口 1200x900。
   // D18-c 起 clickPoint 还带完整 host rect——升级路径用它做 shadow 内部
   // 命中扫描（host 包围盒可能横跨按钮组，中心点是死区）。
@@ -278,23 +278,21 @@ test('map names an empty contenteditable editor from data-placeholder (D18-d)', 
   assert.strictEqual(editorTarget!.name, '输入文字，内容将自动保存')
 })
 
-test('act fill carries no click point', () => {
-  const editable = new FakeElement('div', { text: '' })
-  editable.isContentEditable = true
+test('target probe reports a missing stale node without inventing a click point', () => {
   const stashButton = new FakeElement('button', { text: '暂存离开' })
-  const result = runAct('2', 'fill', {
-    semantic: [stashButton, editable],
+  const result = runTargetProbe('99', {
+    semantic: [stashButton],
     pointer: [],
-    all: [stashButton, editable],
+    all: [stashButton],
   })
-  assert.strictEqual(result.ok, true)
-  assert.strictEqual(result.clickPoint, null)
+  assert.strictEqual(result.matchCount, 0)
+  assert.strictEqual(result.clickPoint, undefined)
 })
 
-test('act click reports hostShadow accessibility for custom hosts', () => {
+test('target probe reports hostShadow accessibility for custom hosts', () => {
   const stashButton = new FakeElement('button', { text: '暂存离开' })
   const publishHost = new FakeElement('xhs-publish-btn', { text: '发布' })
-  const result = runAct('2', 'click', {
+  const result = runTargetProbe('2', {
     semantic: [stashButton],
     pointer: [],
     all: [stashButton, publishHost],
@@ -302,7 +300,7 @@ test('act click reports hostShadow accessibility for custom hosts', () => {
   // FakeElement.shadowRoot === null → closed_or_none（closed shadow 与无 shadow 同判）
   assert.strictEqual(result.clickPoint.hostShadow, 'closed_or_none')
 
-  const plain = runAct('1', 'click', {
+  const plain = runTargetProbe('1', {
     semantic: [stashButton],
     pointer: [],
     all: [stashButton],

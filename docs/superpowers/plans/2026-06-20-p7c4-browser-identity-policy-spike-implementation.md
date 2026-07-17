@@ -16,7 +16,7 @@ Decide and document Ready's current agent-browser identity policy before any pro
 
 The immediate goal is not to implement isolation. It is to prevent the current protections from being misdescribed as isolation.
 
-## Current State: Shared Browser Identity
+## Current State: Shared Default With Explicit Profiles
 
 Current protections are real but limited:
 
@@ -25,32 +25,34 @@ Current protections are real but limited:
 - `ensureAgentTab()` creates an agent-owned background tab without stealing the user's foreground tab.
 - P7c3/P7c3b use native lock/supervision copy for intentional visible co-driving.
 
-Current identity is still shared:
+The default identity is still shared:
 
-- normal tabs are created with `createHost('persist:browser')`;
+- normal tabs and agent tabs use `persist:browser` unless a named profile is explicitly selected;
 - agent tabs are created through the same tab lifecycle path;
 - preview views use `createHost('persist:browser')`;
-- auth popups use `partition: 'persist:browser'`;
+- auth popups follow the source tab's profile;
 - background probes use `partition: 'persist:browser'`;
-- downloads use `session.fromPartition('persist:browser')`;
-- permission/adblock policy is applied only to `persist:browser`.
+- downloads follow the source tab's browser session;
+- permission/adblock policy is applied to every browser partition Ready creates.
 
 Therefore, current agent browser work is not browser identity isolation.
 
 ## Policy Decision For This Batch
 
-Ready keeps the current shared browser identity for now.
+Ready keeps the default browser identity shared. `browser_session(action=switch_profile)` may explicitly open a named profile for a separate cookie and origin-storage identity.
 
 This is an explicit product/infrastructure state, not an isolation claim:
 
 - visible co-driving remains `user-view-assisted`;
 - background agent tab work remains same-session `agent-view-background`;
 - the native lock overlay and supervision panel signal control ownership only;
-- cookies, login state, permissions, downloads, history, and site learning remain shared unless a future batch changes the browser identity root.
+- default tabs continue sharing cookies and login state;
+- named profiles isolate cookies and origin storage, while history and application-level learning remain shared by policy.
+- Profile selection is explicit; Ready never silently moves an existing tab into another identity.
 
-## Future Isolation Option
+## Broader Isolation Option
 
-If Ready later chooses true agent browser isolation, the implementation must use a separate browser identity root such as a dedicated Electron partition/profile.
+Named profiles now provide a separate browser identity root for cookies and origin storage. If Ready later needs full product-data isolation, it must also separate the shared application records listed below.
 
 Minimum proof for that future implementation:
 
@@ -62,7 +64,7 @@ Minimum proof for that future implementation:
 
 ## Non-Goals
 
-- No production partition/profile change in this batch.
+- No silent profile migration or automatic per-agent identity split.
 - No cookie/login/session migration.
 - No browser history/download/schema migration.
 - No UI claim that agent background tab means an independent browser.
@@ -76,7 +78,7 @@ Record the current shared-session evidence and keep it machine-checkable.
 
 Acceptance:
 
-- Gate proves normal tabs, agent tabs, preview, auth popup, background probe, downloads, and session policy all still use `persist:browser`.
+- Gate proves the shared default, explicit named profiles, profile-following popups/downloads, and policy coverage stay aligned.
 - Gate fails if docs claim current P7c4 isolation while source remains shared.
 
 ### WP2 · Negative Isolation Claim Gate
@@ -92,7 +94,7 @@ Acceptance:
 
 - Gate passes with current honest wording.
 - Gate fails on "P7c4 isolation complete" while source still uses `persist:browser`.
-- Gate fails if the P7c4 plan stops saying current identity is shared.
+- Gate fails if the P7c4 plan stops saying the default identity is shared or overstates named-profile isolation.
 
 ### WP3 · Roadmap Sync
 

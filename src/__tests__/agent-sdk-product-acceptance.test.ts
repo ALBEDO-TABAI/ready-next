@@ -362,21 +362,21 @@ test('acceptance 05: SDK browser current-page task can read, click, type, and ve
     sessionId: 'accept-browser-current',
     browserAvailable: true,
     tools: createToolSet([
-      { name: 'browser_read_page', groupId: 'browser_interaction', domain: 'browser', kind: 'read' },
+      { name: 'browser_read', groupId: 'browser_interaction', domain: 'browser', kind: 'read' },
       { name: 'browser_click', groupId: 'browser_interaction', domain: 'browser', kind: 'write', concurrency: 'serialized', timeoutProfile: 'browser_interactive' },
       { name: 'browser_type', groupId: 'browser_interaction', domain: 'browser', kind: 'write', concurrency: 'serialized', timeoutProfile: 'browser_interactive' },
     ]),
     plan: [
-      { name: 'browser_read_page', input: { mode: 'current' } },
+      { name: 'browser_read', input: { mode: 'current' } },
       { name: 'browser_click', input: { selector: '#prompt' } },
       { name: 'browser_type', input: { selector: '#prompt', text: 'Ready Agent SDK' } },
-      { name: 'browser_read_page', input: { mode: 'evidence' } },
+      { name: 'browser_read', input: { mode: 'evidence' } },
     ],
     executeToolCall: async (toolName, args) => createToolExecutionOutput(`${toolName} ok`, {
       shape: 'json',
       data: {
         args,
-        pageEvidence: toolName === 'browser_read_page',
+        pageEvidence: toolName === 'browser_read',
         promptEntered: toolName === 'browser_type',
       },
       projectionPatch: {
@@ -390,10 +390,10 @@ test('acceptance 05: SDK browser current-page task can read, click, type, and ve
 
   assert.equal(result.success, true)
   assert.deepEqual(result.usedTools, [
-    'browser_read_page',
+    'browser_read',
     'browser_click',
     'browser_type',
-    'browser_read_page',
+    'browser_read',
   ])
   assert.equal(result.projectionTruth?.projectionPatch?.taskTitle, 'Browser current page')
 })
@@ -409,24 +409,24 @@ test('acceptance 06: SDK browser upload path captures the four required evidence
     sessionId: 'accept-browser-upload',
     browserAvailable: true,
     tools: createToolSet([
-      { name: 'browser_list_upload_targets', groupId: 'browser_interaction', domain: 'browser', kind: 'read', timeoutProfile: 'browser_interactive' },
-      { name: 'browser_upload_scope_attachment', groupId: 'browser_interaction', domain: 'browser', kind: 'write', concurrency: 'serialized', timeoutProfile: 'browser_interactive' },
+      { name: 'browser_find', groupId: 'browser_interaction', domain: 'browser', kind: 'read', timeoutProfile: 'browser_interactive' },
+      { name: 'browser_upload', groupId: 'browser_interaction', domain: 'browser', kind: 'write', concurrency: 'serialized', timeoutProfile: 'browser_interactive' },
       { name: 'browser_type', groupId: 'browser_interaction', domain: 'browser', kind: 'write', concurrency: 'serialized', timeoutProfile: 'browser_interactive' },
       { name: 'browser_click', groupId: 'browser_interaction', domain: 'browser', kind: 'write', concurrency: 'serialized', timeoutProfile: 'browser_interactive' },
-      { name: 'browser_read_page', groupId: 'browser_interaction', domain: 'browser', kind: 'read' },
+      { name: 'browser_read', groupId: 'browser_interaction', domain: 'browser', kind: 'read' },
     ]),
     plan: [
-      { name: 'browser_list_upload_targets', input: { reason: 'find input' } },
-      { name: 'browser_upload_scope_attachment', input: { attachmentId: 'att-1', targetId: 'upload-1' } },
+      { name: 'browser_find', input: { reason: 'find input' } },
+      { name: 'browser_upload', input: { attachmentId: 'att-1', targetId: 'upload-1' } },
       { name: 'browser_type', input: { selector: '#prompt', text: '分析这张图' } },
       { name: 'browser_click', input: { selector: '#send' } },
-      { name: 'browser_read_page', input: { mode: 'result_evidence' } },
+      { name: 'browser_read', input: { mode: 'result_evidence' } },
     ],
     executeToolCall: async (toolName) => {
-      if (toolName === 'browser_upload_scope_attachment') uploadEvidence.attachmentMounted = true
+      if (toolName === 'browser_upload') uploadEvidence.attachmentMounted = true
       if (toolName === 'browser_type') uploadEvidence.promptEntered = true
       if (toolName === 'browser_click') uploadEvidence.submitted = true
-      if (toolName === 'browser_read_page') uploadEvidence.runningEvidenceSeen = true
+      if (toolName === 'browser_read') uploadEvidence.runningEvidenceSeen = true
       const evidence = {
         ...uploadEvidence,
       }
@@ -445,11 +445,11 @@ test('acceptance 06: SDK browser upload path captures the four required evidence
 
   assert.equal(result.success, true)
   assert.deepEqual(result.usedTools, [
-    'browser_list_upload_targets',
-    'browser_upload_scope_attachment',
+    'browser_find',
+    'browser_upload',
     'browser_type',
     'browser_click',
-    'browser_read_page',
+    'browser_read',
   ])
   assert.deepEqual(result.projectionTruth?.projectionPatch?.uploadEvidence, {
     attachmentMounted: true,
@@ -464,20 +464,20 @@ test('acceptance 07: SDK background browser task uses persistent task tools and 
     sessionId: 'accept-browser-background',
     browserAvailable: true,
     tools: createToolSet([
-      { name: 'browser_start_task', groupId: 'browser_content', domain: 'browser', kind: 'job', concurrency: 'serialized', timeoutProfile: 'browser_interactive' },
-      { name: 'browser_get_task', groupId: 'browser_content', domain: 'browser', kind: 'read', timeoutProfile: 'browser_interactive' },
+      { name: 'browser_collect', groupId: 'browser_content', domain: 'browser', kind: 'job', concurrency: 'serialized', timeoutProfile: 'browser_interactive' },
+      { name: 'browser_task', groupId: 'browser_content', domain: 'browser', kind: 'read', timeoutProfile: 'browser_interactive' },
     ]),
     plan: [
-      { name: 'browser_start_task', input: { kind: 'scroll_collect', payload: { url: 'https://example.com' } } },
-      { name: 'browser_get_task', input: { taskId: 'browser-task-1' } },
+      { name: 'browser_collect', input: { kind: 'scroll_collect', payload: { url: 'https://example.com' } } },
+      { name: 'browser_task', input: { taskId: 'browser-task-1' } },
     ],
     executeToolCall: async (toolName) => createToolExecutionOutput(`${toolName} ok`, {
       shape: 'json',
-      data: { taskId: 'browser-task-1', status: toolName === 'browser_get_task' ? 'running' : 'queued' },
+      data: { taskId: 'browser-task-1', status: toolName === 'browser_task' ? 'running' : 'queued' },
       projectionPatch: {
         taskTitle: 'Background browser',
         backgroundTaskId: 'browser-task-1',
-        backgroundStatus: toolName === 'browser_get_task' ? 'running' : 'queued',
+        backgroundStatus: toolName === 'browser_task' ? 'running' : 'queued',
       },
     }),
   })
@@ -485,7 +485,7 @@ test('acceptance 07: SDK background browser task uses persistent task tools and 
   const result = await run.send('后台收集这个网页的完整内容')
 
   assert.equal(result.success, true)
-  assert.deepEqual(result.usedTools, ['browser_start_task', 'browser_get_task'])
+  assert.deepEqual(result.usedTools, ['browser_collect', 'browser_task'])
   assert.equal(result.projectionTruth?.projectionPatch?.backgroundTaskId, 'browser-task-1')
   assert.equal(result.projectionTruth?.projectionPatch?.backgroundStatus, 'running')
 })

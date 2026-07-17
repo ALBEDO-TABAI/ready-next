@@ -106,12 +106,12 @@ describe('document signal priority', () => {
 
 describe('collection subset white-list', () => {
   it('includes navigation/read/collect/download/task tools', () => {
-    for (const name of ['browser_navigate', 'browser_read_page', 'browser_read_page_map', 'browser_visible_collect', 'browser_inspect_resources', 'browser_resolve_video', 'browser_download_urls', 'browser_download_collected_media', 'browser_get_task']) {
+    for (const name of ['browser_navigate', 'browser_read', 'browser_snapshot', 'browser_collect', 'browser_resources', 'browser_download', 'browser_task']) {
       assert.equal(isBrowserCollectionSubsetTool(name), true, `${name} should be in subset`)
     }
   })
   it('EXCLUDES high-risk script and form-write/transmit tools', () => {
-    for (const name of ['browser_execute_js', 'browser_run_workflow', 'browser_type', 'browser_type_at', 'browser_compose_message', 'browser_send_keys', 'browser_upload_scope_attachment']) {
+    for (const name of ['browser_eval', 'browser_cdp', 'browser_type', 'browser_press_key', 'browser_upload']) {
       assert.equal(isBrowserCollectionSubsetTool(name), false, `${name} must NOT be in subset`)
     }
   })
@@ -122,10 +122,10 @@ describe('collection subset white-list', () => {
 
 describe('browser observation subset', () => {
   it('allows account analysis tools but no persistent collection lifecycle', () => {
-    for (const name of ['browser_read_page', 'browser_extract_structured', 'browser_scroll_at']) {
+    for (const name of ['browser_read', 'browser_snapshot', 'browser_status', 'browser_resources', 'browser_scroll']) {
       assert.equal(isBrowserObservationSubsetTool(name), true)
     }
-    for (const name of ['browser_visible_collect', 'browser_collect_notes', 'browser_get_task', 'browser_resume_task', 'browser_cancel_task', 'browser_download_urls']) {
+    for (const name of ['browser_collect', 'browser_task', 'browser_download']) {
       assert.equal(isBrowserObservationSubsetTool(name), false, `${name} must require explicit collection intent`)
     }
     assert.ok(BROWSER_OBSERVATION_SUBSET_TOOL_NAMES.length < BROWSER_COLLECTION_SUBSET_TOOL_NAMES.length)
@@ -141,10 +141,10 @@ describe('batch collection workflow subset', () => {
   })
 
   it('keeps only background collection workflow tools for batch note collection', () => {
-    for (const name of ['browser_visible_collect', 'browser_collect_notes', 'browser_download_collected_media', 'browser_resume_task', 'browser_get_task']) {
+    for (const name of ['browser_collect', 'browser_download', 'browser_task', 'browser_request_takeover']) {
       assert.equal(isBrowserBatchCollectionWorkflowTool(name), true, `${name} should stay available`)
     }
-    for (const name of ['browser_navigate', 'browser_click_text', 'browser_collect_images', 'browser_resolve_video', 'browser_download_urls', 'browser_extract_structured']) {
+    for (const name of ['browser_navigate', 'browser_click', 'browser_read', 'browser_snapshot']) {
       assert.equal(isBrowserBatchCollectionWorkflowTool(name), false, `${name} must not be available for batch workflow`)
     }
     assert.ok(BROWSER_BATCH_COLLECTION_WORKFLOW_TOOL_NAMES.length > 0)

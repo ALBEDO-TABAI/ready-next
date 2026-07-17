@@ -75,13 +75,28 @@ test('browser_type output carries a change receipt (integration)', async () => {
   const controller = {
     getActiveTab: () => ({ id: 'tab-1', title: 'Editor', url: 'https://creator.xiaohongshu.com/publish', active: true }) as never,
     getTabList: () => [{ id: 'tab-1', title: 'Editor', url: 'https://creator.xiaohongshu.com/publish', active: true }] as never,
+    normalizedToCss: async (_tabId: string | null, x: number, y: number) => ({ x, y, width: 1000, height: 800 }),
+    dispatchMouse: async () => undefined,
+    dispatchKey: async () => undefined,
+    typeTextDirectly: async () => undefined,
     executeJS: async (_tabId: string | null, code: string) => {
       if (code.includes('__READY_ACTION_RECEIPT__')) {
         probed = true
         return { url: 'https://creator.xiaohongshu.com/publish', title: '写笔记', activeElement: 'textarea:正文', visibleSignal: '已保存草稿' }
       }
-      // runGuardedSelectorType path returns a JSON string result
-      return JSON.stringify({ ok: true, typed: true })
+      if (code.includes('__READY_CLICK_POINT_LABEL_PROBE__')) {
+        return { label: '', inputLabel: '正文', password: false, editable: true }
+      }
+      if (code.includes('__READY_FOCUSED_EDITABLE_PROBE__')) {
+        return { kind: 'editable', tag: 'textarea', label: '正文', maxLength: null, singleLine: false }
+      }
+      if (code.includes('__READY_TYPED_INTO_PROBE__')) {
+        return { tag: 'textarea', label: '正文', textHead: '今天天气不错', textLength: 6 }
+      }
+      if (code.includes('document.querySelector')) {
+        return { ok: true, x: 100, y: 100, width: 1000, height: 800 }
+      }
+      return true
     },
   } as unknown as BrowserController
 

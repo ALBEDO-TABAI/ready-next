@@ -7,10 +7,11 @@
  * `pinimgOriginalsUrl`/`normalizeDownloadTargets` 门面再导出，外部消费者
  * 零改动。
  */
-import { access, mkdir, writeFile } from 'fs/promises'
-import { constants as fsConstants } from 'fs'
-import { join, basename, extname } from 'path'
+import { access, mkdir, open, rename, statfs, unlink } from 'fs/promises'
+import { constants as fsConstants, existsSync, realpathSync } from 'fs'
+import { join, basename, dirname, extname, isAbsolute, relative, resolve } from 'path'
 import { homedir } from 'os'
+import { createHash, randomUUID } from 'crypto'
 import type { BrowserController } from '../browser-engine/ipc-handler'
 import type { BrowserResourceKind } from '../browser-engine/resource-sniffer'
 import { broadcastDirectoryChanged } from '../document-engine/ipc/directory-change-broadcast'
@@ -22,6 +23,76 @@ export function expandHomePath(input: string): string {
   if (raw === '~') return homedir()
   if (raw.startsWith('~/')) return join(homedir(), raw.slice(2))
   return raw
+}
+
+export const DEFAULT_BROWSER_DOWNLOAD_DIRECTORY = join(homedir(), 'Downloads', 'Ready')
+
+function isWithin(root: string, target: string): boolean {
+  const canonical = (input: string): string => {
+    let cursor = resolve(input)
+    const suffix: string[] = []
+    while (!existsSync(cursor)) {
+      const parent = dirname(cursor)
+      if (parent === cursor) break
+      suffix.unshift(basename(cursor))
+      cursor = parent
+    }
+    try { cursor = realpathSync(cursor) } catch { /* silent-catch: nonexistent suffix uses the bounded lexical fallback below. */ }
+    return resolve(cursor, ...suffix)
+  }
+  const child = relative(canonical(root), canonical(target))
+  return child === '' || (!child.startsWith('..') && !isAbsolute(child))
+}
+
+function isDangerouslyBroadFilesystemRoot(value: string): boolean {
+  const root = resolve(expandHomePath(value))
+  return root === resolve('/') || root === resolve(homedir())
+}
+
+export function resolveAuthorizedBrowserDownloadDirectory(
+  requested: unknown,
+  options: { currentUserText?: string | null; trustedRoots?: readonly string[] } = {},
+): { ok: true; directory: string; authority: 'ready_default' | 'user_instruction' | 'task_resource' } | {
+  ok: false
+  errorCode: 'download_directory_not_authorized'
+  requested: string
+} {
+  const raw = String(requested || '').trim()
+  if (!raw) return { ok: true, directory: DEFAULT_BROWSER_DOWNLOAD_DIRECTORY, authority: 'ready_default' }
+  const directory = resolve(expandHomePath(raw))
+  if (isWithin(DEFAULT_BROWSER_DOWNLOAD_DIRECTORY, directory)) {
+    return { ok: true, directory, authority: 'ready_default' }
+  }
+  for (const trustedRoot of options.trustedRoots || []) {
+    if (trustedRoot && !isDangerouslyBroadFilesystemRoot(trustedRoot) && isWithin(expandHomePath(trustedRoot), directory)) {
+      return { ok: true, directory, authority: 'task_resource' }
+    }
+  }
+  const userText = String(options.currentUserText || '')
+  if (
+    !isDangerouslyBroadFilesystemRoot(directory)
+    && ((raw.length >= 4 && userText.includes(raw)) || (directory.length >= 4 && userText.includes(directory)))
+  ) {
+    return { ok: true, directory, authority: 'user_instruction' }
+  }
+  return { ok: false, errorCode: 'download_directory_not_authorized', requested: raw }
+}
+
+export function resolveAuthorizedBrowserOutputPath(
+  requested: unknown,
+  options: { currentUserText?: string | null; trustedRoots?: readonly string[] } = {},
+): { ok: true; path: string; authority: 'ready_default' | 'user_instruction' | 'task_resource' } | {
+  ok: false
+  errorCode: 'output_path_not_authorized'
+  requested: string
+} {
+  const raw = String(requested || '').trim()
+  if (!raw) return { ok: false, errorCode: 'output_path_not_authorized', requested: raw }
+  const path = resolve(expandHomePath(raw))
+  const directory = dirname(path)
+  const authorized = resolveAuthorizedBrowserDownloadDirectory(directory, options)
+  if (!authorized.ok) return { ok: false, errorCode: 'output_path_not_authorized', requested: raw }
+  return { ok: true, path, authority: authorized.authority }
 }
 
 export function sanitizeFilename(input: string, fallback = 'download'): string {
@@ -89,37 +160,6 @@ function inferFilenameParts(
   const rawBase = pathnameBase ? pathnameBase.slice(0, pathnameBase.length - pathnameExt.length) : fallbackBase
   const base = sanitizeFilename(rawBase || fallbackBase, fallbackBase)
   return { base, ext: ext.startsWith('.') ? ext : `.${ext}` }
-}
-
-async function writeFileSmart(
-  directory: string,
-  base: string,
-  ext: string,
-  data: Buffer,
-  overwrite: boolean,
-): Promise<string> {
-  const safeBase = sanitizeFilename(base, 'download')
-  const safeExt = ext.startsWith('.') ? ext : `.${ext}`
-  const defaultPath = join(directory, `${safeBase}${safeExt}`)
-
-  if (overwrite) {
-    await writeFile(defaultPath, data)
-    return defaultPath
-  }
-
-  for (let i = 0; i < 200; i += 1) {
-    const candidate = i === 0 ? defaultPath : join(directory, `${safeBase}-${i}${safeExt}`)
-    try {
-      await writeFile(candidate, data, { flag: 'wx' })
-      return candidate
-    } catch (error) {
-      const code = (error as NodeJS.ErrnoException)?.code
-      if (code === 'EEXIST') continue
-      throw error
-    }
-  }
-
-  throw new Error(`无法在目录中写入文件：${directory}`)
 }
 
 function mimeTypeFromDownloadedPath(path: string, contentType?: string | null): string | null {
@@ -299,6 +339,156 @@ function downloadHeadersForTarget(url: string): Record<string, string> | null {
   }
 }
 
+function pageScopedDownloadProtocol(url: string): boolean {
+  return /^(?:blob:|data:)/i.test(url)
+}
+
+async function reservePageDownloadPath(directory: string, requestedName: string): Promise<{
+  finalPath: string
+  temporaryPath: string
+}> {
+  const safeName = sanitizeFilename(basename(requestedName), 'download')
+  const ext = extname(safeName)
+  const stem = ext ? safeName.slice(0, -ext.length) : safeName
+  for (let index = 0; index < 200; index += 1) {
+    const filename = index === 0 ? safeName : `${stem || 'download'} (${index})${ext}`
+    const finalPath = join(directory, filename)
+    try {
+      const reservation = await open(finalPath, 'wx')
+      await reservation.close()
+      return {
+        finalPath,
+        temporaryPath: join(directory, `.ready-${randomUUID()}.part`),
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'EEXIST') continue
+      throw error
+    }
+  }
+  throw new Error('download_destination_exhausted')
+}
+
+export async function downloadPageScopedUrlToDirectory(
+  controller: BrowserController,
+  params: {
+    url: string
+    directory: string
+    suggestedName: string
+    tabId?: string | null
+    maxBytes: number
+    signal?: AbortSignal
+  },
+): Promise<{
+  success: boolean
+  savePath?: string
+  filename?: string
+  size?: number
+  sha256?: string
+  mimeType?: string | null
+  urlChain?: string[]
+  error?: string
+}> {
+  const tabId = params.tabId || null
+  const streamKey = '__readyBrowserPageDownloadStreams'
+  let streamId = ''
+  let finalPath = ''
+  let temporaryPath = ''
+  let file: Awaited<ReturnType<typeof open>> | null = null
+  try {
+    const initialized = await controller.executeJS(tabId, `(async () => {
+      const root = globalThis;
+      const key = ${JSON.stringify(streamKey)};
+      const store = root[key] instanceof Map ? root[key] : new Map();
+      root[key] = store;
+      const response = await fetch(${JSON.stringify(params.url)}, { credentials: 'include' });
+      if (!response.ok && !/^(blob:|data:)/i.test(${JSON.stringify(params.url)})) {
+        throw new Error('download_http_' + response.status);
+      }
+      if (!response.body) throw new Error('download_stream_unavailable');
+      const id = 'ready-download-' + Date.now() + '-' + Math.random().toString(36).slice(2);
+      store.set(id, { reader: response.body.getReader() });
+      return {
+        id,
+        contentType: response.headers.get('content-type') || '',
+        contentLength: Number(response.headers.get('content-length') || 0) || 0,
+      };
+    })()`, { timeoutMs: 30_000, signal: params.signal }) as {
+      id?: unknown
+      contentType?: unknown
+      contentLength?: unknown
+    } | null
+    streamId = String(initialized?.id || '')
+    if (!streamId) throw new Error('download_stream_initialization_failed')
+    const contentType = String(initialized?.contentType || '')
+    const declaredBytes = Number(initialized?.contentLength || 0)
+    if (declaredBytes > params.maxBytes) throw new Error('download_byte_budget_exceeded')
+    const parts = inferFilenameParts(params.url, params.suggestedName, contentType)
+    const reserved = await reservePageDownloadPath(params.directory, `${parts.base}${parts.ext}`)
+    finalPath = reserved.finalPath
+    temporaryPath = reserved.temporaryPath
+    file = await open(temporaryPath, 'wx')
+    const hash = createHash('sha256')
+    let size = 0
+
+    while (true) {
+      if (params.signal?.aborted) throw params.signal.reason || new Error('download_aborted')
+      const chunk = await controller.executeJS(tabId, `(async () => {
+        const store = globalThis[${JSON.stringify(streamKey)}];
+        const state = store instanceof Map ? store.get(${JSON.stringify(streamId)}) : null;
+        if (!state) throw new Error('download_stream_expired');
+        const next = await state.reader.read();
+        if (next.done) {
+          store.delete(${JSON.stringify(streamId)});
+          return { done: true, chunk: '' };
+        }
+        const bytes = next.value;
+        let binary = '';
+        const stride = 0x8000;
+        for (let offset = 0; offset < bytes.length; offset += stride) {
+          binary += String.fromCharCode(...bytes.subarray(offset, Math.min(bytes.length, offset + stride)));
+        }
+        return { done: false, chunk: btoa(binary) };
+      })()`, { timeoutMs: 30_000, signal: params.signal }) as { done?: unknown; chunk?: unknown } | null
+      if (chunk?.done === true) break
+      const buffer = Buffer.from(String(chunk?.chunk || ''), 'base64')
+      if (buffer.length === 0) continue
+      size += buffer.length
+      if (size > params.maxBytes) throw new Error('download_byte_budget_exceeded')
+      hash.update(buffer)
+      await file.write(buffer)
+    }
+
+    if (size <= 0) throw new Error('downloaded_file_empty')
+    await file.sync()
+    await file.close()
+    file = null
+    await rename(temporaryPath, finalPath)
+    return {
+      success: true,
+      savePath: finalPath,
+      filename: basename(finalPath),
+      size,
+      sha256: hash.digest('hex'),
+      mimeType: contentType || null,
+      urlChain: [params.url],
+    }
+  } catch (error) {
+    // silent-catch: the original failure is returned to the caller after best-effort cleanup.
+    await file?.close().catch(() => undefined)
+    if (temporaryPath) await unlink(temporaryPath).catch(() => undefined)
+    if (finalPath) await unlink(finalPath).catch(() => undefined)
+    return { success: false, error: error instanceof Error ? error.message : String(error), urlChain: [params.url] }
+  } finally {
+    if (streamId) {
+      await controller.executeJS(tabId, `(() => {
+        const store = globalThis[${JSON.stringify(streamKey)}];
+        const state = store instanceof Map ? store.get(${JSON.stringify(streamId)}) : null;
+        if (state) { try { state.reader.cancel(); } catch {} store.delete(${JSON.stringify(streamId)}); }
+      })()`, { timeoutMs: 2_000 }).catch(() => undefined)
+    }
+  }
+}
+
 export function normalizeResourceKinds(value: unknown): BrowserResourceKind[] {
   const allowed = new Set<BrowserResourceKind>(['video', 'audio', 'image', 'document', 'json', 'stream', 'unknown'])
   if (!Array.isArray(value)) return []
@@ -319,6 +509,8 @@ export async function downloadUrlsToDirectory(
     overwrite?: boolean
     tabId?: string | null
     referer?: string | null
+    maxTotalBytes?: number
+    abortSignal?: AbortSignal
   },
 ): Promise<string | ToolExecutionOutput> {
   const rawUrls = params.urls
@@ -330,7 +522,6 @@ export async function downloadUrlsToDirectory(
   if (targets.length === 0) return 'Error: urls is required and must be a non-empty array'
 
   const tabId = params.tabId || null
-  const overwrite = params.overwrite === true
   const directory = expandHomePath(params.directory || '~/Documents')
   const filenamePrefix = sanitizeFilename(String(params.filenamePrefix || '').trim(), 'download')
 
@@ -341,6 +532,22 @@ export async function downloadUrlsToDirectory(
     // silent-catch: 目录不可写以结构化错误文本返回给模型。
     return `Error: target directory is not writable: ${directory}`
   }
+
+  let disk: Awaited<ReturnType<typeof statfs>>
+  try {
+    disk = await statfs(directory)
+  } catch (error) {
+    // silent-catch: capacity lookup failure is returned verbatim and prevents the download.
+    return `Error: cannot read download disk capacity: ${error instanceof Error ? error.message : String(error)}`
+  }
+  const availableBytes = Math.max(0, Number(disk.bavail) * Number(disk.bsize))
+  const reserveBytes = Math.min(512 * 1024 * 1024, Math.floor(availableBytes * 0.1))
+  const diskBudget = Math.max(0, availableBytes - reserveBytes)
+  const requestedBudget = Number.isFinite(params.maxTotalBytes) && Number(params.maxTotalBytes) > 0
+    ? Number(params.maxTotalBytes)
+    : diskBudget
+  const taskByteBudget = Math.min(diskBudget, requestedBudget)
+  if (taskByteBudget <= 0) return 'Error: download_disk_budget_unavailable'
 
   let referer = String(params.referer || '').trim()
   if (!referer) {
@@ -353,92 +560,95 @@ export async function downloadUrlsToDirectory(
   }
 
   const results: Array<Record<string, unknown>> = []
+  let consumedBytes = 0
   for (let index = 0; index < targets.length; index += 1) {
     const { url, fallbackUrl } = targets[index]
-    if (!/^https?:\/\//i.test(url)) {
+    if (params.abortSignal?.aborted) {
+      results.push({ url: url.slice(0, 2048), success: false, error: 'download_aborted' })
+      break
+    }
+    if (!/^(?:https?:\/\/|blob:|data:)/i.test(url)) {
       results.push({ url, success: false, error: 'unsupported_protocol' })
       continue
     }
 
-    let downloadedViaSession = false
-    if (typeof controller.downloadUrlToDirectory === 'function') {
+    const remainingBudget = Math.max(0, taskByteBudget - consumedBytes)
+    if (remainingBudget <= 0) {
+      results.push({ url: url.slice(0, 2048), success: false, error: 'download_byte_budget_exceeded' })
+      break
+    }
+    if (pageScopedDownloadProtocol(url)) {
+      const pageResult = await downloadPageScopedUrlToDirectory(controller, {
+        url,
+        directory,
+        suggestedName: `${filenamePrefix}-${index + 1}`,
+        tabId,
+        maxBytes: remainingBudget,
+        signal: params.abortSignal,
+      })
+      if (pageResult.success) consumedBytes += Number(pageResult.size || 0)
+      results.push({
+        url: url.slice(0, 2048),
+        success: pageResult.success,
+        path: pageResult.savePath,
+        filename: pageResult.filename,
+        size: pageResult.size,
+        sha256: pageResult.sha256,
+        content_type: pageResult.mimeType,
+        url_chain: pageResult.urlChain || [],
+        error: pageResult.error,
+        via: 'browser_page_session',
+      })
+      continue
+    }
+    if (typeof controller.downloadUrlToDirectory !== 'function') {
+      results.push({ url, success: false, error: 'browser_session_download_unavailable' })
+      continue
+    }
+    let finalResult: Awaited<ReturnType<BrowserController['downloadUrlToDirectory']>> | null = null
+    let downloadedUrl = url
+    for (const candidate of [url, fallbackUrl].filter((value): value is string => Boolean(value))) {
       try {
         const sessionResult = await controller.downloadUrlToDirectory({
-          url,
+          url: candidate,
           targetDir: directory,
+          tabId,
           sourcePageUrl: referer || null,
           suggestedName: filenamePrefix ? `${filenamePrefix}-${index + 1}` : null,
-          downloadHeaders: downloadHeadersForTarget(url),
+          downloadHeaders: downloadHeadersForTarget(candidate),
+          maxBytes: remainingBudget,
+          signal: params.abortSignal,
         })
-        if (sessionResult.success) {
-          downloadedViaSession = true
-          results.push({
-            url,
-            success: true,
-            path: sessionResult.savePath,
-            filename: sessionResult.filename,
-            via: 'browser_session',
-          })
-        }
-      } catch {
-        // silent-catch: session download failed; fetch fallback records the final outcome.
+        finalResult = sessionResult
+        downloadedUrl = candidate
+        if (sessionResult.success) break
+      } catch (error) {
+        // silent-catch: each session failure is retained in finalResult and returned for this URL.
+        finalResult = { success: false, error: error instanceof Error ? error.message : String(error) }
       }
     }
-    if (downloadedViaSession) continue
-
-    try {
-      // Prefer the (upgraded /originals/) url; if it 404s, retry the original
-      // pre-upgrade variant so a missing original never drops the pin entirely.
-      const fetchOnce = (target: string) => fetch(target, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Ready Browser Agent)',
-          ...(downloadHeadersForTarget(target) || {}),
-          ...(referer ? { Referer: referer } : {}),
-        },
-      })
-      let fetchedUrl = url
-      let response = await fetchOnce(url)
-      if (!response.ok && fallbackUrl && fallbackUrl !== url) {
-        const retry = await fetchOnce(fallbackUrl)
-        if (retry.ok) {
-          fetchedUrl = fallbackUrl
-          response = retry
-        }
-      }
-      if (!response.ok) {
-        results.push({
-          url: fetchedUrl,
-          success: false,
-          error: `http_${response.status}`,
-          via: 'fetch',
-        })
-        continue
-      }
-
-      const contentType = response.headers.get('content-type') || ''
-      const buffer = Buffer.from(await response.arrayBuffer())
-      const fallbackBase = filenamePrefix
-        ? `${filenamePrefix}-${index + 1}`
-        : `download-${index + 1}`
-      const parts = inferFilenameParts(fetchedUrl, fallbackBase, contentType)
-      const filePath = await writeFileSmart(directory, parts.base, parts.ext, buffer, overwrite)
+    if (!finalResult?.success) {
       results.push({
-        url: fetchedUrl,
-        success: true,
-        path: filePath,
-        size: buffer.byteLength,
-        content_type: contentType,
-        via: 'fetch',
-      })
-    } catch (error) {
-      // silent-catch: 单条下载失败已记入 results，整体流程不中断。
-      results.push({
-        url,
+        url: downloadedUrl,
         success: false,
-        error: error instanceof Error ? error.message : String(error),
-        via: 'fetch',
+        error: finalResult?.error || 'browser_session_download_failed',
+        via: 'browser_session',
+        url_chain: finalResult?.urlChain || [],
       })
+      continue
     }
+    consumedBytes += Number(finalResult.size || 0)
+    results.push({
+      url: downloadedUrl,
+      success: true,
+      path: finalResult.savePath,
+      filename: finalResult.filename,
+      size: finalResult.size,
+      sha256: finalResult.sha256,
+      content_type: finalResult.mimeType,
+      url_chain: finalResult.urlChain || [],
+      via: 'browser_session',
+    })
   }
 
   const successCount = results.filter((item) => item.success === true).length
@@ -456,6 +666,8 @@ export async function downloadUrlsToDirectory(
     total: results.length,
     success: successCount,
     failed: results.length - successCount,
+    byteBudget: taskByteBudget,
+    bytesWritten: consumedBytes,
     results,
   }
   const artifacts = buildDownloadedArtifacts(results, directory)

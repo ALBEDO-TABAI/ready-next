@@ -220,7 +220,7 @@ test('B3: a task the startup layer would call "has checkpoint" but the resume la
   assert.equal(resumed?.status, 'running')
 })
 
-test('browser_resume_task with a failed task and failure ledger retries only failed collection items', async () => {
+test('browser_task with a failed task and failure ledger retries only failed collection items', async () => {
   const urls = Array.from({ length: 5 }, (_, index) => `https://www.xiaohongshu.com/note/partial-${index}`)
   const failedUrl = urls[2]
   const navigated: string[] = []
@@ -274,9 +274,9 @@ test('browser_resume_task with a failed task and failure ledger retries only fai
           navigated.push(String(args.url || ''))
           return JSON.stringify({ ok: true })
         }
-        if (tool === 'browser_read_page') return '详情页'
-        if (tool === 'browser_collect_images') return JSON.stringify({ count: 1, images: [{ url: 'https://img.xhscdn.com/resume.jpg' }] })
-        if (tool === 'browser_download_urls') return JSON.stringify({ success: 1 })
+        if (tool === 'browser_read') return '详情页'
+        if (tool === 'browser_collect') return JSON.stringify({ count: 1, images: [{ url: 'https://img.xhscdn.com/resume.jpg' }] })
+        if (tool === 'browser_download') return JSON.stringify({ success: 1 })
         return JSON.stringify({ ok: true })
       },
     }
@@ -337,9 +337,9 @@ test('B3: resuming a LOOSE checkpoint (fails strict check) reruns FRESH — old 
     facade: {
       run: async (tool, args = {}) => {
         if (tool === 'browser_navigate') { navigated.push(String(args.url || '')); return JSON.stringify({ ok: true }) }
-        if (tool === 'browser_read_page') return '详情页'
-        if (tool === 'browser_collect_images') return JSON.stringify({ count: 1, images: [{ url: 'https://img.xhscdn.com/loose.jpg' }] })
-        if (tool === 'browser_download_urls') return JSON.stringify({ success: 1 })
+        if (tool === 'browser_read') return '详情页'
+        if (tool === 'browser_collect') return JSON.stringify({ count: 1, images: [{ url: 'https://img.xhscdn.com/loose.jpg' }] })
+        if (tool === 'browser_download') return JSON.stringify({ success: 1 })
         return JSON.stringify({ ok: true })
       },
     },
@@ -356,7 +356,7 @@ test('B3: resuming a LOOSE checkpoint (fails strict check) reruns FRESH — old 
   assert.deepEqual(navigated, urls, 'loose checkpoint ignored → all notes re-collected from scratch')
 })
 
-test('browser_resume_task refuses failed note_collect without checkpoint proof', async () => {
+test('browser_task refuses failed note_collect without checkpoint proof', async () => {
   const task: FakeStoredTask = {
     taskId: 'browser-task-failed-empty',
     kind: 'note_collect',

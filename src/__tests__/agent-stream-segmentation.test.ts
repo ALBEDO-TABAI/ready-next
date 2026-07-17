@@ -192,7 +192,7 @@ describe('agent stream segmentation', () => {
       toolEvent: {
         id: 'tool-1',
         kind: 'call',
-        text: 'browser_click_at(x=512,y=880)',
+        text: 'browser_click(x=512,y=880)',
         timestamp: '2026-03-07T09:00:02.000Z',
       },
     })

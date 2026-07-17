@@ -16,7 +16,7 @@
 import { composeSystemReminder } from './system-reminder-assembly'
 
 export const BROWSER_TASK_CORRECTION_REMINDER_TEXT =
-  '系统补充：当前任务是浏览器任务，至少先调用一个 browser_* 工具（例如 browser_search、browser_navigate、browser_read_page），不要直接解释这轮工具列表。'
+  '系统补充：当前任务是浏览器任务，至少先调用一个 browser_* 工具（例如 browser_search、browser_navigate、browser_read），不要直接解释这轮工具列表。'
 
 export function composeBrowserTaskCorrectionReminder(): string | null {
   return composeSystemReminder([{

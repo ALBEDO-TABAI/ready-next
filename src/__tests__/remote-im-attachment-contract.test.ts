@@ -240,7 +240,7 @@ test('local send-im attached media turns bypass model vision input and browser c
 test('local send-im collection wording removes browser tools from the runtime tool surface', () => {
   const collectionMessage = '把小红书这个博主的图片都采集下来'
   const collectionToolNames = createRuntimeToolNames({ message: collectionMessage })
-  assert.ok(collectionToolNames.includes('browser_visible_collect'))
+  assert.ok(collectionToolNames.includes('browser_collect'))
 
   const sendImMessage = '把小红书这个博主的图片都采集下来，并把这四张图发到我微信'
   const requestEnvelope = {

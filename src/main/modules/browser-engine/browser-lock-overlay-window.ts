@@ -16,6 +16,9 @@ export class BrowserLockOverlayWindow {
   private window: BrowserWindow | null = null
   private snapshot: BrowserLockOverlaySnapshot | null = null
   private boundParentWindow: BrowserWindow | null = null
+  private dismissed = false
+  private revision = 0
+  private terminalHideTimer: ReturnType<typeof setTimeout> | null = null
 
   constructor(private options: BrowserLockOverlayWindowOptions) {
     this.bindParentWindow(this.options.mainWindow)
@@ -30,25 +33,48 @@ export class BrowserLockOverlayWindow {
   }
 
   async show(snapshot: BrowserLockOverlaySnapshot): Promise<void> {
-    this.snapshot = snapshot
+    this.snapshot = { ...snapshot, revision: ++this.revision }
+    if (this.dismissed) return
     const window = await this.ensureWindow()
-    if (this.snapshot !== snapshot) {
+    if (!this.snapshot || this.snapshot.revision !== this.revision) {
       if (!this.snapshot && !window.isDestroyed()) window.hide()
       return
     }
-    this.applyBounds(snapshot)
+    this.applyBounds(this.snapshot)
     window.setAlwaysOnTop(true, 'floating')
     if (!window.isVisible()) window.showInactive()
     window.moveTop()
-    window.webContents.send('browser:lockOverlaySnapshot', snapshot)
+    window.webContents.send('browser:lockOverlaySnapshot', this.snapshot)
   }
 
   hide(): void {
+    if (this.terminalHideTimer) clearTimeout(this.terminalHideTimer)
+    this.terminalHideTimer = null
     this.snapshot = null
     if (this.window && !this.window.isDestroyed()) {
       this.window.setAlwaysOnTop(false)
       this.window.hide()
     }
+  }
+
+  dismiss(): void {
+    this.dismissed = true
+    if (this.window && !this.window.isDestroyed()) this.window.hide()
+  }
+
+  noteAction(phase: 'start' | 'finish' | 'abort'): void {
+    if (this.terminalHideTimer) clearTimeout(this.terminalHideTimer)
+    this.terminalHideTimer = null
+    if (phase === 'start') {
+      this.dismissed = false
+      if (this.snapshot) void this.show(this.snapshot)
+      return
+    }
+    this.terminalHideTimer = setTimeout(() => {
+      this.dismissed = true
+      if (this.window && !this.window.isDestroyed()) this.window.hide()
+      this.terminalHideTimer = null
+    }, 800)
   }
 
   getSnapshot(): BrowserLockOverlaySnapshot | null {
@@ -76,6 +102,8 @@ export class BrowserLockOverlayWindow {
     this.boundParentWindow = null
     this.window = null
     this.snapshot = null
+    if (this.terminalHideTimer) clearTimeout(this.terminalHideTimer)
+    this.terminalHideTimer = null
   }
 
   private bindParentWindow(mainWindow: BrowserWindow): void {
@@ -129,7 +157,7 @@ export class BrowserLockOverlayWindow {
       },
     })
 
-    this.window.setIgnoreMouseEvents(true, { forward: true })
+    this.window.setIgnoreMouseEvents(false)
     if (process.platform === 'darwin') {
       this.window.setWindowButtonVisibility(false)
     }

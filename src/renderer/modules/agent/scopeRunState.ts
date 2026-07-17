@@ -24,7 +24,7 @@ function generateArtifactId(): string {
 }
 
 function readHumanTakeoverSignal(text: string): Record<string, unknown> | null {
-  // Narrow fallback: only used for `browser_ask_user_takeover` tool output.
+  // Narrow fallback: only used for `browser_request_takeover` tool output.
   // Main process does not yet surface human_required / takeover_state through
   // ScopeRunEventPayload; once it does, this parser can be deleted entirely.
   if (!text) return null
@@ -643,7 +643,7 @@ function parseSkillProgress(input: unknown): ScopeRunSkillProgress | null {
   const browserCollectionConsent = browserConsentRecord
     && typeof browserConsentRecord.requestId === 'string'
     && browserConsentRecord.requestId.trim()
-    && (browserConsentKind === 'partial_collection' || browserConsentKind === 'high_control_url_batch_downgrade')
+    && browserConsentKind === 'partial_collection'
     && typeof browserConsentRecord.sourceTaskId === 'string'
     && browserConsentRecord.sourceTaskId.trim()
     ? {

@@ -182,14 +182,14 @@ test('browser tool error envelopes map to site-card learning signals conservativ
     text: 'missing 风控 blocked but no closed code',
   }), null)
   assert.equal(siteCardLearningSignalFromToolFailure({
-    toolName: 'browser_collect_notes',
+    toolName: 'browser_collect',
     errorKind: 'high_control_url_batch_denied',
     args: { target_profile_url: 'https://example.com/list' },
     data: { errorCode: 'high_control_url_batch_denied', message: '高风控平台需要用户确认' },
     text: '风控确认缺失',
   }), null)
   assert.equal(siteCardLearningSignalFromToolFailure({
-    toolName: 'browser_collect_notes',
+    toolName: 'browser_collect',
     args: { notes: [{ url: 'https://example.com/note/1' }] },
     data: { ok: false, errorCode: 'url_provenance_required', message: 'missing URL provenance' },
     text: 'missing provenance',
@@ -204,7 +204,7 @@ test('browser tool error envelopes map to site-card learning signals conservativ
 test('G1: pageUrl resolves the domain when args/data carry no URL', () => {
   // a tab_id-only / current-page collection failure: no URL anywhere except the tab
   const sig = siteCardLearningSignalFromToolFailure({
-    toolName: 'browser_visible_collect',
+    toolName: 'browser_collect',
     errorKind: 'selector_missing',
     args: { tab_id: 'tab-6' },
     pageUrl: 'https://jp.pinterest.com/u/board',
@@ -214,7 +214,7 @@ test('G1: pageUrl resolves the domain when args/data carry no URL', () => {
   assert.equal(sig?.failureKind, 'selector_missing')
   // args/data URL still wins over pageUrl
   assert.equal(siteCardLearningSignalFromToolFailure({
-    toolName: 'browser_visible_collect',
+    toolName: 'browser_collect',
     errorKind: 'selector_missing',
     args: { url: 'https://example.com/list' },
     pageUrl: 'https://jp.pinterest.com/u/board',
@@ -224,7 +224,7 @@ test('G1: pageUrl resolves the domain when args/data carry no URL', () => {
 
 test('G1: new failure-kind aliases map to learnable site-card kinds', () => {
   const sig = (errorKind: string) => siteCardLearningSignalFromToolFailure({
-    toolName: 'browser_visible_collect', errorKind,
+    toolName: 'browser_collect', errorKind,
     pageUrl: 'https://example.com/board', now: NOW,
   })
   assert.equal(sig('target_not_found')?.failureKind, 'selector_missing')

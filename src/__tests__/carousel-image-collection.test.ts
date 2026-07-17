@@ -13,7 +13,8 @@ function facadeFrom(handlers: Record<string, (args: Record<string, unknown>) => 
   const facade: NoteCollectFacade = {
     run: async (tool, args = {}) => {
       calls.push({ tool, args })
-      return (handlers[tool] ?? (() => JSON.stringify({ ok: true })))(args)
+      const modeKey = `${tool}:${String(args.mode || '')}`
+      return (handlers[modeKey] ?? handlers[tool] ?? (() => JSON.stringify({ ok: true })))(args)
     },
   }
   return { facade, calls }
@@ -28,10 +29,10 @@ function carouselFacade(frameCount: number): {
     `https://sns-webpic-qc.xhscdn.com/notes_pre_post/carousel-${index + 1}!nc_n_webp_mw_1`)
   let frame = 0
   const result = facadeFrom({
-    browser_get_tabs: () => '▶ [tab-1] 详情页\n    https://www.xiaohongshu.com/explore/source-1',
-    browser_read_page: () => '详情页：多图笔记 source-1',
-    browser_wait_for_condition: () => JSON.stringify({ matched: true, elapsedMs: 1, value: true }),
-    browser_collect_images: () => {
+    browser_tabs: () => '▶ [tab-1] 详情页\n    https://www.xiaohongshu.com/explore/source-1',
+    browser_read: () => '详情页：多图笔记 source-1',
+    browser_wait: () => JSON.stringify({ matched: true, elapsedMs: 1, value: true }),
+    'browser_collect:images': () => {
       const index = Math.min(frame, urls.length - 1)
       return JSON.stringify({
         count: 1,
@@ -39,13 +40,14 @@ function carouselFacade(frameCount: number): {
         images: [{ url: urls[index], width: 1200, height: 1600 }],
       })
     },
-    browser_click: () => {
+    browser_click: (args) => {
+      if (!args.selector) return JSON.stringify({ ok: true })
       if (frame >= urls.length - 1) return 'Element not found: next'
       frame += 1
       return 'Clicked: BUTTON "Next"'
     },
-    browser_extract_structured: () => JSON.stringify({ items: [{ title: '多图笔记' }] }),
-    browser_download_urls: (args) => JSON.stringify({
+    'browser_collect:structured': () => JSON.stringify({ items: [{ title: '多图笔记' }] }),
+    browser_download: (args) => JSON.stringify({
       total: Array.isArray(args.urls) ? args.urls.length : 0,
       success: Array.isArray(args.urls) ? args.urls.length : 0,
       failed: 0,
@@ -70,11 +72,11 @@ describe('collectCardNote carousel image collection', () => {
       join,
     )
 
-    const download = calls.find((call) => call.tool === 'browser_download_urls')!
+    const download = calls.find((call) => call.tool === 'browser_download')!
     assert.equal(res.success, true)
     assert.equal(res.imageCount, 10)
     assert.deepEqual(download.args.urls, urls)
-    assert.equal(calls.filter((call) => call.tool === 'browser_collect_images').length, 10)
+    assert.equal(calls.filter((call) => call.tool === 'browser_collect' && call.args.mode === 'images').length, 10)
   })
 
   it('keeps the non-carousel card path unchanged', async () => {
@@ -83,10 +85,10 @@ describe('collectCardNote carousel image collection', () => {
       images: [{ url: 'https://img.example.com/a.jpg' }, { url: 'https://img.example.com/b.jpg' }],
     })
     const { facade, calls } = facadeFrom({
-      browser_get_tabs: () => '[tab-1] 详情页\n    https://www.example.com/post/source-1',
-      browser_read_page: () => '详情页：笔记一 source-1',
-      browser_collect_images: () => imagesJson,
-      browser_download_urls: () => JSON.stringify({ success: 2 }),
+      browser_tabs: () => '[tab-1] 详情页\n    https://www.example.com/post/source-1',
+      browser_read: () => '详情页：笔记一 source-1',
+      browser_collect: () => imagesJson,
+      browser_download: () => JSON.stringify({ success: 2 }),
     })
     const res = await collectCardNote(
       facade,
@@ -96,14 +98,14 @@ describe('collectCardNote carousel image collection', () => {
 
     assert.equal(res.success, true)
     assert.deepEqual(calls.map((call) => call.tool), [
-      'browser_click_text',
-      'browser_get_tabs',
-      'browser_read_page',
-      'browser_read_page',
-      'browser_extract_structured',
-      'browser_collect_images',
-      'browser_download_urls',
-      'browser_go_back',
+      'browser_click',
+      'browser_tabs',
+      'browser_read',
+      'browser_read',
+      'browser_collect',
+      'browser_collect',
+      'browser_download',
+      'browser_navigate',
       'browser_wait',
     ])
   })
@@ -124,10 +126,10 @@ describe('collectCardNote carousel image collection', () => {
       join,
     )
 
-    const download = calls.find((call) => call.tool === 'browser_download_urls')!
+    const download = calls.find((call) => call.tool === 'browser_download')!
     assert.equal(res.success, true)
     assert.equal(res.imageCount, 4)
     assert.deepEqual(download.args.urls, urls.slice(0, 4))
-    assert.equal(calls.filter((call) => call.tool === 'browser_collect_images').length, 4)
+    assert.equal(calls.filter((call) => call.tool === 'browser_collect' && call.args.mode === 'images').length, 4)
   })
 })

@@ -53,22 +53,22 @@ function noLeaseContext(controller: BrowserController): ToolContext {
   } as ToolContext
 }
 
-test('high-control script refusal returns structured browser failure data and envelope', async () => {
+test('advanced execution failure returns structured browser failure data and envelope', async () => {
   const output = await executeToolCall(
-    'browser_execute_js',
-    { code: 'document.body.click()' },
+    'browser_eval',
+    { code: 'document.title', purpose: 'read title' },
     writeContext(makeController({
       getActiveTab: () => ({ id: 'tab-xhs', title: 'XHS', url: 'https://www.xiaohongshu.com/explore/1', active: true }) as never,
       getTabList: () => [{ id: 'tab-xhs', title: 'XHS', url: 'https://www.xiaohongshu.com/explore/1', active: true }] as never,
-      executeJS: async () => {
-        throw new Error('executeJS must not run for high-control script refusal')
+      sendCdpCommand: async () => {
+        throw new Error('debugger unavailable')
       },
     })),
   )
 
-  assert.equal(output.data?.errorKind, 'script_blocked')
+  assert.equal(output.data?.errorKind, 'browser_eval_failed')
   assert.equal(output.envelope?.ok, false)
-  assert.equal(output.envelope?.kind, 'denied_by_policy')
+  assert.equal(output.envelope?.kind, 'internal_error')
 })
 
 test('browser structured output keeps errorKind as a bounded token', () => {
@@ -109,17 +109,17 @@ test('browser write with held lease returns structured browser failure data', as
   assert.equal(output.envelope?.kind, 'internal_error')
 })
 
-test('legacy browser Error string returns are structured at dispatcher exit', async () => {
+test('navigation Error string returns are structured at dispatcher exit', async () => {
   const output = await executeToolCall(
-    'browser_go_back',
-    {},
+    'browser_navigate',
+    { action: 'back' },
     writeContext(makeController({
       goBack: () => ({ success: false, error: 'cannot go back' }),
     })),
   )
 
   assert.equal(output.data?.ok, false)
-  assert.equal(output.data?.errorKind, 'browser_tool_failed')
+  assert.equal(output.data?.errorKind, 'browser_operation_failed')
   assert.equal(output.data?.message, 'cannot go back')
   assert.equal(output.envelope?.ok, false)
   assert.equal(output.envelope?.kind, 'internal_error')
@@ -127,8 +127,8 @@ test('legacy browser Error string returns are structured at dispatcher exit', as
 
 test('wrong browser task id results are structured failures', async () => {
   const output = await executeToolCall(
-    'browser_get_task',
-    { task_id: 'task-not-a-browser-task' },
+    'browser_task',
+    { action: 'get', task_id: 'task-not-a-browser-task' },
     writeContext(makeController({
       getTask: async () => null,
     })),
@@ -141,57 +141,34 @@ test('wrong browser task id results are structured failures', async () => {
   assert.equal(output.envelope?.kind, 'internal_error')
 })
 
-test('browser_act_on_target action failure returns an error envelope, not ok text', async () => {
-  const controller = makeController({
-    executeJS: async (_tabId: string | null, script: string) => {
-      if (script.includes('__READY_AGENT_PAGE_MAP__')) {
-        return {
-          viewport: { width: 800, height: 600 },
-          rawRoots: [
-            { role: 'button', name: 'Open', backendDOMNodeId: 42, frameId: '0' },
-            { role: 'button', name: 'Filler A', backendDOMNodeId: 91, frameId: '0' },
-            { role: 'button', name: 'Filler B', backendDOMNodeId: 92, frameId: '0' },
-            { role: 'button', name: 'Filler C', backendDOMNodeId: 93, frameId: '0' },
-            { role: 'button', name: 'Filler D', backendDOMNodeId: 94, frameId: '0' },
-          ],
-        }
-      }
-      if (script.includes('__READY_AGENT_TARGET_PROBE__')) {
-        return {
-          matchCount: 1,
-          disabled: false,
-          target: { role: 'button', name: 'Open', value: 'Open', states: {} },
-        }
-      }
-      if (script.includes('__READY_AGENT_ACT_ON_TARGET__')) {
-        return { ok: false, errorCode: 'selector_click_failed' }
-      }
-      return null
-    },
-  })
-  const context = writeContext(controller)
-  await executeToolCall('browser_read_page_map', {}, context)
-
+test('browser_click target failure returns an error envelope, not ok text', async () => {
   const output = await executeToolCall(
-    'browser_act_on_target',
-    { target_id: '1:0:42', action: 'click', read_back: 'none' },
-    context,
+    'browser_click',
+    { selector: '#missing' },
+    writeContext(makeController({
+      executeJS: async (_tabId, code) => {
+        if (code.includes('__READY_DESTRUCTIVE_TARGET_CHECK__')) return 'Element not found: #missing'
+        if (code.includes('document.readyState')) return { readyState: 'complete', bodyTextLen: 20, matched: false }
+        return null
+      },
+    })),
   )
 
   assert.equal(output.data?.ok, false)
-  assert.equal(output.data?.errorKind, 'selector_click_failed')
+  assert.equal(output.data?.errorKind, 'target_not_found')
   assert.equal(output.envelope?.ok, false)
-  assert.equal(output.envelope?.kind, 'internal_error')
+  assert.equal(output.envelope?.kind, 'arg_error')
 })
 
-test('browser_collect_notes source handoff mismatch returns structured envelope', async () => {
+test('browser_collect source handoff mismatch returns structured envelope', async () => {
   __setBrowserCollectionConsentStoreForTests({
     hasConsent: () => false,
   } as never)
   try {
     const output = await executeToolCall(
-      'browser_collect_notes',
+      'browser_collect',
       {
+        mode: 'notes',
         source_task_id: 'source-task-1',
         target_profile_url: 'https://example.com/profile',
         output_root_dir: '/tmp/other-output-root',

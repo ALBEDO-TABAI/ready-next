@@ -2,6 +2,7 @@ import type {
   BrowserBookmark,
   BrowserDownload,
   BrowserHistoryEntry,
+  BrowserPowerPreflightAuditRecord,
 } from '../database'
 import { BrowserRepository } from '../repositories/browser-repository'
 
@@ -191,5 +192,9 @@ export class BrowserDataService {
 
   getDownloadCount(): number {
     return this.repository.getDownloadCount()
+  }
+
+  addPowerPreflightAudit(record: BrowserPowerPreflightAuditRecord): void {
+    this.repository.addPowerPreflightAudit(record)
   }
 }

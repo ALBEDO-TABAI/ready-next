@@ -75,6 +75,7 @@ import type {
   BrowserLockOverlayIPCResult,
   BrowserLockOverlaySnapshot,
 } from '../../shared/browser-lock-overlay'
+import type { BrowserAgentPointerSnapshot } from '../../shared/browser-agent-pointer'
 import type {
   VerticalRailOverlayCommand,
   VerticalRailOverlaySnapshot,
@@ -487,7 +488,7 @@ interface ScopeRunSkillProgressData {
 
 interface BrowserCollectionConsentProgressData {
   requestId: string
-  consentKind: 'partial_collection' | 'high_control_url_batch_downgrade'
+  consentKind: 'partial_collection'
   sourceTaskId: string
   targetHost?: string | null
   warningText?: string | null
@@ -1520,7 +1521,6 @@ interface ElectronBrowserAPI {
   dismissAgentInterruption: () => Promise<{ state: AgentBrowserControlState; error?: string }>
   confirmCollectionConsent: (payload: {
     requestId: string
-    confirmedVia: 'ask_user_questions' | 'ui_action'
   }) => Promise<{ success: boolean; data?: unknown; error?: string }>
   resumeTask: (payload: {
     taskId: string
@@ -1569,6 +1569,18 @@ interface ElectronBrowserAPI {
     error?: string
   }>
   p7cLiveProofSendUserKey: (key?: string) => Promise<{ success: boolean; error?: string }>
+  p7cLiveProofAgentClick: (x?: number, y?: number) => Promise<{
+    success: boolean
+    tabId?: string
+    x?: number
+    y?: number
+    error?: string
+  }>
+  p7cLiveProofFinishAgentAction: (phase?: 'finish' | 'abort') => Promise<{
+    success: boolean
+    phase?: 'finish' | 'abort'
+    error?: string
+  }>
   p7cLiveProofCheckWriteDenied: () => Promise<{ success: boolean; errorKind?: string; error?: string }>
   p7cLiveProofClear: () => Promise<{ success: boolean; error?: string }>
   onPreviewUpdate: (callback: (data: BrowserPreviewState) => void) => () => void
@@ -1594,8 +1606,11 @@ interface ElectronBrowserAPI {
   onVerticalRailOverlaySnapshot: (callback: (snapshot: VerticalRailOverlaySnapshot) => void) => () => void
   showBrowserLockOverlay: (payload: BrowserLockOverlaySnapshot) => Promise<BrowserLockOverlayIPCResult<void>>
   hideBrowserLockOverlay: () => Promise<BrowserLockOverlayIPCResult<void>>
+  dismissBrowserLockOverlay: () => Promise<BrowserLockOverlayIPCResult<void>>
   getBrowserLockOverlaySnapshot: () => Promise<BrowserLockOverlayIPCResult<BrowserLockOverlaySnapshot | null>>
   onBrowserLockOverlaySnapshot: (callback: (snapshot: BrowserLockOverlaySnapshot) => void) => () => void
+  getBrowserAgentPointerSnapshot: () => Promise<BrowserLockOverlayIPCResult<BrowserAgentPointerSnapshot | null>>
+  onBrowserAgentPointerSnapshot: (callback: (snapshot: BrowserAgentPointerSnapshot) => void) => () => void
 
   // Bookmarks
   addBookmark: (

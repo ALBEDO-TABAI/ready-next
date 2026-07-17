@@ -15,7 +15,7 @@ const DAILY_FIXTURE = [
   '- scope: 把@[Henry.L]这个博主的全部笔记',
   '- success: yes',
   '- lifecycle: done',
-  '- tools: browser_visible_collect, browser_collect_notes',
+  '- tools: browser_collect, browser_collect',
   '- summary: 已完成 3/6 篇笔记采集，继续等待后台任务完成。',
 ].join('\n')
 

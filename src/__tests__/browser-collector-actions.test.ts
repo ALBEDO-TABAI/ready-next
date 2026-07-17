@@ -13,7 +13,9 @@ function facadeFrom(handlers: Record<string, (args: Record<string, unknown>) => 
   const facade: NoteCollectFacade = {
     run: async (tool, args = {}) => {
       calls.push({ tool, args })
-      return (handlers[tool] ?? (() => JSON.stringify({ ok: true })))(args)
+      const modeKey = `${tool}:${String(args.mode || '')}`
+      const templateKey = `${modeKey}:${String(args.template || '')}`
+      return (handlers[templateKey] ?? handlers[modeKey] ?? handlers[tool] ?? (() => JSON.stringify({ ok: true })))(args)
     },
   }
   return { facade, calls }
@@ -24,14 +26,14 @@ const imagesJson = JSON.stringify({ count: 2, images: [{ url: 'https://img.xhscd
 describe('collectNote (per-note sequence via facade)', () => {
   it('navigates, collects images, downloads to the note folder, and reports success', async () => {
     const { facade, calls } = facadeFrom({
-      browser_collect_images: () => imagesJson,
-      browser_download_urls: () => JSON.stringify({ total: 2, success: 2, failed: 0 }),
+      browser_collect: () => imagesJson,
+      browser_download: () => JSON.stringify({ total: 2, success: 2, failed: 0 }),
     })
     const res = await collectNote(facade, { noteUrl: 'https://www.xiaohongshu.com/note/1', title: '笔记一', outputDir: '/out' }, join)
     assert.equal(res.success, true)
     assert.equal(res.imageCount, 2)
     assert.equal(res.savedDir, '/out/01 - 笔记一')
-    assert.deepEqual(calls.map((c) => c.tool), ['browser_navigate', 'browser_read_page', 'browser_extract_structured', 'browser_collect_images', 'browser_download_urls'])
+    assert.deepEqual(calls.map((c) => c.tool), ['browser_navigate', 'browser_read', 'browser_collect', 'browser_collect', 'browser_download'])
     assert.equal(calls[3].args.include_hidden, false)
     assert.deepEqual(calls[4].args.urls, ['https://img.xhscdn.com/a.jpg', 'https://img.xhscdn.com/b.jpg'])
     assert.equal(calls[4].args.directory, '/out/01 - 笔记一/assets')
@@ -45,7 +47,7 @@ describe('collectNote (per-note sequence via facade)', () => {
       height: 1600,
     }))
     const { facade, calls } = facadeFrom({
-      browser_collect_images: () => JSON.stringify({
+      'browser_collect:images': () => JSON.stringify({
         count: noteImages.length + 4,
         images: [
           { url: 'https://fe-platform.xhscdn.com/platform/logo.webp', width: 240, height: 120 },
@@ -55,10 +57,10 @@ describe('collectNote (per-note sequence via facade)', () => {
           ...noteImages,
         ],
       }),
-      browser_download_urls: () => JSON.stringify({ total: 24, success: 24, failed: 0 }),
+      browser_download: () => JSON.stringify({ total: 24, success: 24, failed: 0 }),
     })
     const res = await collectNote(facade, { noteUrl: 'https://x', title: '卡片标题', outputDir: '/out' }, join)
-    const download = calls.find((call) => call.tool === 'browser_download_urls')!
+    const download = calls.find((call) => call.tool === 'browser_download')!
     const urls = download.args.urls as string[]
 
     assert.equal(res.success, true)
@@ -73,7 +75,7 @@ describe('collectNote (per-note sequence via facade)', () => {
 
   it('filters comment images and protocol duplicates from note downloads', async () => {
     const { facade, calls } = facadeFrom({
-      browser_collect_images: () => JSON.stringify({
+      browser_collect: () => JSON.stringify({
         count: 6,
         images: [
           { url: 'https://sns-webpic-qc.xhscdn.com/202606061939/a/comment/comment-1!nc_n_webp_mw_1', width: 1200, height: 900 },
@@ -84,10 +86,10 @@ describe('collectNote (per-note sequence via facade)', () => {
           { url: 'https://sns-webpic-qc.xhscdn.com/202606061939/d/notes_pre_post/note-2!nd_dft_wlteh_webp_3', width: 1200, height: 1600 },
         ],
       }),
-      browser_download_urls: () => JSON.stringify({ total: 2, success: 2, failed: 0 }),
+      browser_download: () => JSON.stringify({ total: 2, success: 2, failed: 0 }),
     })
     const res = await collectNote(facade, { noteUrl: 'https://x', title: '卡片标题', outputDir: '/out' }, join)
-    const download = calls.find((call) => call.tool === 'browser_download_urls')!
+    const download = calls.find((call) => call.tool === 'browser_download')!
     const urls = download.args.urls as string[]
 
     assert.equal(res.success, true)
@@ -100,20 +102,20 @@ describe('collectNote (per-note sequence via facade)', () => {
 
   it('only falls back to hidden images when visible images have no usable note assets', async () => {
     const { facade, calls } = facadeFrom({
-      browser_collect_images: (args) => {
+      browser_collect: (args) => {
         if (args.include_hidden) {
           return JSON.stringify({ count: 1, images: [{ url: 'https://sns-webpic-qc.xhscdn.com/notes_pre_post/hidden.jpg' }] })
         }
         return JSON.stringify({ count: 0, images: [] })
       },
-      browser_download_urls: () => JSON.stringify({ total: 1, success: 1, failed: 0 }),
+      browser_download: () => JSON.stringify({ total: 1, success: 1, failed: 0 }),
     })
     const res = await collectNote(facade, { noteUrl: 'https://x', title: '卡片标题', outputDir: '/out' }, join)
-    const collectCalls = calls.filter((call) => call.tool === 'browser_collect_images')
+    const collectCalls = calls.filter((call) => call.tool === 'browser_collect' && call.args.mode === 'images')
 
     assert.equal(res.success, true)
     assert.deepEqual(collectCalls.map((call) => call.args.include_hidden), [false, true])
-    assert.deepEqual(calls.find((call) => call.tool === 'browser_download_urls')?.args.urls, [
+    assert.deepEqual(calls.find((call) => call.tool === 'browser_download')?.args.urls, [
       'https://sns-webpic-qc.xhscdn.com/notes_pre_post/hidden.jpg',
     ])
   })
@@ -122,16 +124,16 @@ describe('collectNote (per-note sequence via facade)', () => {
     const urls = Array.from({ length: 10 }, (_, index) =>
       `https://sns-webpic-qc.xhscdn.com/notes_pre_post/image-${index + 1}!nc_n_webp_mw_1`)
     const { facade, calls } = facadeFrom({
-      browser_collect_images: () => JSON.stringify({
+      browser_collect: () => JSON.stringify({
         count: 1,
         scope: 'xiaohongshu-detail',
         expectedImageCount: 10,
         images: [{ url: urls[0], width: 1200, height: 1600 }],
       }),
-      browser_extract_structured: (args) => args.template === 'image_gallery'
+      'browser_collect:structured': (args) => args.template === 'image_gallery'
         ? JSON.stringify({ items: urls.map((url) => ({ link: url, media: [url] })) })
         : JSON.stringify({ items: [{ title: '多图笔记' }] }),
-      browser_download_urls: () => JSON.stringify({ total: 10, success: 10, failed: 0 }),
+      browser_download: () => JSON.stringify({ total: 10, success: 10, failed: 0 }),
     })
     const res = await collectNote(
       facade,
@@ -142,24 +144,24 @@ describe('collectNote (per-note sequence via facade)', () => {
       },
       join,
     )
-    const download = calls.find((call) => call.tool === 'browser_download_urls')!
+    const download = calls.find((call) => call.tool === 'browser_download')!
 
     assert.equal(res.success, true)
     assert.equal(res.imageCount, 10)
     assert.deepEqual(download.args.urls, urls)
-    assert.equal(calls.filter((call) => call.tool === 'browser_extract_structured' && call.args.template === 'image_gallery').length, 1)
+    assert.equal(calls.filter((call) => call.tool === 'browser_collect' && call.args.template === 'image_gallery').length, 1)
   })
 
   it('pauses a Xiaohongshu note before download when the carousel total is still under-collected', async () => {
     const url = 'https://sns-webpic-qc.xhscdn.com/notes_pre_post/image-1!nc_n_webp_mw_1'
     const { facade, calls } = facadeFrom({
-      browser_collect_images: () => JSON.stringify({
+      'browser_collect:images': () => JSON.stringify({
         count: 1,
         scope: 'xiaohongshu-detail',
         expectedImageCount: 10,
         images: [{ url, width: 1200, height: 1600 }],
       }),
-      browser_extract_structured: (args) => args.template === 'image_gallery'
+      'browser_collect:structured': (args) => args.template === 'image_gallery'
         ? JSON.stringify({ items: [{ link: url, media: [url] }] })
         : JSON.stringify({ items: [{ title: '多图笔记' }] }),
     })
@@ -175,20 +177,20 @@ describe('collectNote (per-note sequence via facade)', () => {
 
     assert.equal(res.success, false)
     assert.equal(res.reason, 'partial_images:1/10')
-    assert.equal(calls.some((call) => call.tool === 'browser_download_urls'), false)
+    assert.equal(calls.some((call) => call.tool === 'browser_download'), false)
     assert.equal(calls.some((call) => call.tool === 'browser_wait'), true)
   })
 
   it('marks a Xiaohongshu carousel as partial when only one image is found and total is unknown', async () => {
     const url = 'https://sns-webpic-qc.xhscdn.com/notes_pre_post/image-1!nc_n_webp_mw_1'
     const { facade, calls } = facadeFrom({
-      browser_collect_images: () => JSON.stringify({
+      'browser_collect:images': () => JSON.stringify({
         count: 1,
         scope: 'xiaohongshu-detail',
         hasCarouselSignal: true,
         images: [{ url, width: 1200, height: 1600 }],
       }),
-      browser_extract_structured: (args) => args.template === 'image_gallery'
+      'browser_collect:structured': (args) => args.template === 'image_gallery'
         ? JSON.stringify({ items: [{ link: url, media: [url] }] })
         : JSON.stringify({ items: [{ title: '多图笔记' }] }),
     })
@@ -204,21 +206,21 @@ describe('collectNote (per-note sequence via facade)', () => {
 
     assert.equal(res.success, false)
     assert.equal(res.reason, 'partial_images:1/unknown')
-    assert.equal(calls.some((call) => call.tool === 'browser_download_urls'), false)
+    assert.equal(calls.some((call) => call.tool === 'browser_download'), false)
   })
 
   it('still saves a genuine single-image Xiaohongshu note without carousel signals', async () => {
     const url = 'https://sns-webpic-qc.xhscdn.com/notes_pre_post/single!nc_n_webp_mw_1'
     const { facade, calls } = facadeFrom({
-      browser_collect_images: () => JSON.stringify({
+      'browser_collect:images': () => JSON.stringify({
         count: 1,
         scope: 'xiaohongshu-detail',
         images: [{ url, width: 1200, height: 1600 }],
       }),
-      browser_extract_structured: (args) => args.template === 'image_gallery'
+      'browser_collect:structured': (args) => args.template === 'image_gallery'
         ? JSON.stringify({ items: [{ link: url, media: [url] }] })
         : JSON.stringify({ items: [{ title: '单图笔记' }] }),
-      browser_download_urls: () => JSON.stringify({ total: 1, success: 1, failed: 0 }),
+      browser_download: () => JSON.stringify({ total: 1, success: 1, failed: 0 }),
     })
     const res = await collectNote(
       facade,
@@ -232,7 +234,7 @@ describe('collectNote (per-note sequence via facade)', () => {
 
     assert.equal(res.success, true)
     assert.equal(res.imageCount, 1)
-    assert.deepEqual(calls.find((call) => call.tool === 'browser_download_urls')?.args.urls, [url])
+    assert.deepEqual(calls.find((call) => call.tool === 'browser_download')?.args.urls, [url])
   })
 
   it('fails the note (does not throw) when navigate is blocked by the facade', async () => {
@@ -246,7 +248,7 @@ describe('collectNote (per-note sequence via facade)', () => {
   })
 
   it('fails with no_images when the note page yields no image candidates', async () => {
-    const { facade } = facadeFrom({ browser_collect_images: () => JSON.stringify({ count: 0, images: [] }) })
+    const { facade } = facadeFrom({ browser_collect: () => JSON.stringify({ count: 0, images: [] }) })
     const res = await collectNote(facade, { noteUrl: 'https://x', outputDir: '/out' }, join)
     assert.equal(res.success, false)
     assert.equal(res.reason, 'no_images')
@@ -254,24 +256,24 @@ describe('collectNote (per-note sequence via facade)', () => {
 
   it('marks Xiaohongshu unavailable notes explicitly instead of no_images', async () => {
     const { facade, calls } = facadeFrom({
-      browser_read_page: () => '小红书 - 你访问的页面不见了 当前笔记暂时无法浏览',
-      browser_collect_images: () => JSON.stringify({ count: 0, images: [] }),
+      browser_read: () => '小红书 - 你访问的页面不见了 当前笔记暂时无法浏览',
+      browser_collect: () => JSON.stringify({ count: 0, images: [] }),
     })
     const res = await collectNote(facade, { noteUrl: 'https://www.xiaohongshu.com/explore/1', outputDir: '/out' }, join)
     assert.equal(res.success, false)
     assert.equal(res.reason, 'unavailable')
-    assert.deepEqual(calls.map((c) => c.tool), ['browser_navigate', 'browser_read_page'])
+    assert.deepEqual(calls.map((c) => c.tool), ['browser_navigate', 'browser_read'])
   })
 
   it('waits briefly for Xiaohongshu card-loop media before no_images', async () => {
     let collectCalls = 0
     const { facade, calls } = facadeFrom({
-      browser_collect_images: () => {
+      'browser_collect:images': () => {
         collectCalls += 1
         if (collectCalls < 3) return JSON.stringify({ count: 0, images: [] })
         return imagesJson
       },
-      browser_download_urls: () => JSON.stringify({ total: 2, success: 2, failed: 0 }),
+      browser_download: () => JSON.stringify({ total: 2, success: 2, failed: 0 }),
     })
     const res = await collectNote(facade, {
       noteUrl: 'https://www.xiaohongshu.com/explore/1',
@@ -283,12 +285,12 @@ describe('collectNote (per-note sequence via facade)', () => {
     assert.equal(res.success, true)
     assert.equal(res.imageCount, 2)
     assert.ok(calls.some((call) => call.tool === 'browser_wait'))
-    assert.equal(calls.filter((call) => call.tool === 'browser_collect_images').length, 3)
+    assert.equal(calls.filter((call) => call.tool === 'browser_collect' && call.args.mode === 'images').length, 3)
   })
 
   it('downloads video-only notes instead of marking them skipped', async () => {
     const { facade, calls } = facadeFrom({
-      browser_collect_images: () => JSON.stringify({
+      browser_collect: () => JSON.stringify({
         count: 2,
         images: [
           { url: 'https://sns-webpic-qc.xhscdn.com/202606061939/a/comment/comment-1!nc_n_webp_mw_1', width: 1200, height: 900 },
@@ -297,14 +299,14 @@ describe('collectNote (per-note sequence via facade)', () => {
         videoCount: 1,
         videos: [{ url: 'https://sns-video.xhscdn.com/video.mp4', width: 716, height: 378 }],
       }),
-      browser_resolve_video: () => JSON.stringify({
+      'browser_download:resolve': () => JSON.stringify({
         ok: true,
         video: {
           parseStatus: 'not_needed',
           downloadUrl: 'https://sns-video.xhscdn.com/video.mp4',
         },
       }),
-      browser_download_urls: () => JSON.stringify({
+      'browser_download:urls': () => JSON.stringify({
         total: 1,
         success: 1,
         failed: 0,
@@ -316,27 +318,28 @@ describe('collectNote (per-note sequence via facade)', () => {
     assert.equal(res.imageCount, 0)
     assert.equal(res.videoCount, 1)
     assert.equal(res.mediaKind, 'video')
-    assert.equal(calls.some((call) => call.tool === 'browser_resolve_video'), true)
-    assert.deepEqual(calls.find((call) => call.tool === 'browser_download_urls')?.args.urls, ['https://sns-video.xhscdn.com/video.mp4'])
-    assert.equal(calls.find((call) => call.tool === 'browser_download_urls')?.args.filename_prefix, 'video')
+    assert.equal(calls.some((call) => call.tool === 'browser_download'), true)
+    const urlDownload = calls.find((call) => call.tool === 'browser_download' && call.args.mode === 'urls')
+    assert.deepEqual(urlDownload?.args.urls, ['https://sns-video.xhscdn.com/video.mp4'])
+    assert.equal(urlDownload?.args.filename_prefix, 'video')
   })
 
   it('stops before download when the page asks for login or QR verification', async () => {
     const { facade, calls } = facadeFrom({
-      browser_read_page: () => '请扫码登录后继续查看内容',
-      browser_collect_images: () => imagesJson,
+      browser_read: () => '请扫码登录后继续查看内容',
+      browser_collect: () => imagesJson,
     })
     const res = await collectNote(facade, { noteUrl: 'https://x', title: '卡片标题', outputDir: '/out' }, join)
     assert.equal(res.success, false)
     assert.equal(res.reason, 'needs_verification')
-    assert.deepEqual(calls.map((c) => c.tool), ['browser_navigate', 'browser_read_page'])
+    assert.deepEqual(calls.map((c) => c.tool), ['browser_navigate', 'browser_read'])
   })
 
   it('does not treat account placeholder images as collected note images', async () => {
     const { facade, calls } = facadeFrom({
-      browser_read_page: () => 'Page content is empty or still loading.',
-      browser_extract_structured: () => JSON.stringify({ items: [{ title: '消息' }] }),
-      browser_collect_images: () => JSON.stringify({
+      browser_read: () => 'Page content is empty or still loading.',
+      'browser_collect:structured': () => JSON.stringify({ items: [{ title: '消息' }] }),
+      'browser_collect:images': () => JSON.stringify({
         count: 2,
         images: [
           { url: 'https://fe-platform.example.com/platform/login-a.webp', width: 198, height: 198 },
@@ -347,14 +350,14 @@ describe('collectNote (per-note sequence via facade)', () => {
     const res = await collectNote(facade, { noteUrl: 'https://x', title: '卡片标题', outputDir: '/out' }, join)
     assert.equal(res.success, false)
     assert.equal(res.reason, 'needs_verification')
-    assert.equal(calls.some((c) => c.tool === 'browser_download_urls'), false)
+    assert.equal(calls.some((c) => c.tool === 'browser_download'), false)
   })
 
   it('does not reject a card-loop detail just because the Xiaohongshu profile text remains behind it', async () => {
     const profileAndDetailText = 'Aoi葵 小红书号：95490005330 1.6万 粉丝 10.7万 获赞与收藏 笔记 收藏 门主 #cosplay'
     const { facade, calls } = facadeFrom({
-      browser_read_page: () => profileAndDetailText,
-      browser_collect_images: () => JSON.stringify({
+      browser_read: () => profileAndDetailText,
+      browser_collect: () => JSON.stringify({
         count: 2,
         scope: 'xiaohongshu-detail',
         images: [
@@ -362,7 +365,7 @@ describe('collectNote (per-note sequence via facade)', () => {
           { url: 'https://sns-webpic-qc.xhscdn.com/202606061939/b/notes_pre_post/note-2!nd_dft_wlteh_webp_3', width: 1080, height: 1620 },
         ],
       }),
-      browser_download_urls: () => JSON.stringify({ total: 2, success: 2, failed: 0 }),
+      browser_download: () => JSON.stringify({ total: 2, success: 2, failed: 0 }),
     })
     const res = await collectNote(
       facade,
@@ -379,14 +382,14 @@ describe('collectNote (per-note sequence via facade)', () => {
 
     assert.equal(res.success, true)
     assert.equal(calls.some((c) => c.tool === 'browser_navigate'), false)
-    assert.equal(calls.some((c) => c.tool === 'browser_download_urls'), true)
+    assert.equal(calls.some((c) => c.tool === 'browser_download'), true)
   })
 
   it('rejects card-loop Xiaohongshu backdrop images without detail media scope', async () => {
     const profileText = 'Aoi葵 小红书号：95490005330 1.6万 粉丝 10.7万 获赞与收藏 笔记 收藏 门主'
     const { facade, calls } = facadeFrom({
-      browser_read_page: () => profileText,
-      browser_collect_images: () => JSON.stringify({
+      browser_read: () => profileText,
+      browser_collect: () => JSON.stringify({
         count: 2,
         scope: 'document',
         images: [
@@ -410,13 +413,13 @@ describe('collectNote (per-note sequence via facade)', () => {
 
     assert.equal(res.success, false)
     assert.equal(res.reason, 'detail_not_opened')
-    assert.equal(calls.some((c) => c.tool === 'browser_download_urls'), false)
+    assert.equal(calls.some((c) => c.tool === 'browser_download'), false)
   })
 
   it('fails when all downloads fail (success count 0)', async () => {
     const { facade } = facadeFrom({
-      browser_collect_images: () => imagesJson,
-      browser_download_urls: () => JSON.stringify({ total: 2, success: 0, failed: 2 }),
+      browser_collect: () => imagesJson,
+      browser_download: () => JSON.stringify({ total: 2, success: 0, failed: 2 }),
     })
     const res = await collectNote(facade, { noteUrl: 'https://x', outputDir: '/out' }, join)
     assert.equal(res.success, false)
@@ -425,8 +428,8 @@ describe('collectNote (per-note sequence via facade)', () => {
 
   it('falls back to the note URL for the folder name when no title is given', async () => {
     const { facade } = facadeFrom({
-      browser_collect_images: () => imagesJson,
-      browser_download_urls: () => JSON.stringify({ success: 2 }),
+      browser_collect: () => imagesJson,
+      browser_download: () => JSON.stringify({ success: 2 }),
     })
     const res = await collectNote(facade, { noteUrl: 'https://www.xiaohongshu.com/note/xyz', outputDir: '/out' }, join)
     assert.equal(res.success, true)
@@ -437,9 +440,9 @@ describe('collectNote (per-note sequence via facade)', () => {
     const writes: Record<string, string> = {}
     const ensured: string[] = []
     const { facade } = facadeFrom({
-      browser_extract_structured: () => JSON.stringify({ items: [{ title: '真实标题', summary: '正文摘要' }] }),
-      browser_collect_images: () => imagesJson,
-      browser_download_urls: () => JSON.stringify({
+      'browser_collect:structured': () => JSON.stringify({ items: [{ title: '真实标题', summary: '正文摘要' }] }),
+      'browser_collect:images': () => imagesJson,
+      'browser_download:urls': () => JSON.stringify({
         total: 2,
         success: 2,
         failed: 0,
@@ -475,17 +478,17 @@ describe('collectNote (per-note sequence via facade)', () => {
     const writes: Record<string, string> = {}
     const ensured: string[] = []
     const { facade } = facadeFrom({
-      browser_collect_images: () => JSON.stringify({
+      browser_collect: () => JSON.stringify({
         count: 0,
         images: [],
         videoCount: 1,
         videos: [{ url: 'https://sns-video.xhscdn.com/video.mp4', width: 720, height: 1280 }],
       }),
-      browser_resolve_video: () => JSON.stringify({
+      'browser_download:resolve': () => JSON.stringify({
         ok: true,
         video: { parseStatus: 'not_needed', downloadUrl: 'https://sns-video.xhscdn.com/video.mp4' },
       }),
-      browser_download_urls: () => JSON.stringify({
+      'browser_download:urls': () => JSON.stringify({
         total: 1,
         success: 1,
         failed: 0,
@@ -518,7 +521,7 @@ describe('collectNote (per-note sequence via facade)', () => {
   it('keeps zero-image failures out of ordinary note folders when file ops are provided', async () => {
     const writes: Record<string, string> = {}
     const ensured: string[] = []
-    const { facade } = facadeFrom({ browser_collect_images: () => JSON.stringify({ count: 0, images: [] }) })
+    const { facade } = facadeFrom({ browser_collect: () => JSON.stringify({ count: 0, images: [] }) })
     const res = await collectNote(
       facade,
       { noteUrl: 'https://www.example.com/post/empty', title: '空图', sourceId: 'empty', outputDir: '/out' },
@@ -541,10 +544,10 @@ describe('collectNote (per-note sequence via facade)', () => {
 describe('collectCardNote (visible card loop)', () => {
   it('verifies the opened detail belongs to the target before collecting', async () => {
     const { facade, calls } = facadeFrom({
-      browser_get_tabs: () => '[tab-1] 详情页\n    https://www.example.com/post/source-1',
-      browser_read_page: () => '详情页：笔记一 source-1',
-      browser_collect_images: () => imagesJson,
-      browser_download_urls: () => JSON.stringify({ success: 2 }),
+      browser_tabs: () => '[tab-1] 详情页\n    https://www.example.com/post/source-1',
+      browser_read: () => '详情页：笔记一 source-1',
+      browser_collect: () => imagesJson,
+      browser_download: () => JSON.stringify({ success: 2 }),
     })
     const res = await collectCardNote(
       facade,
@@ -555,28 +558,28 @@ describe('collectCardNote (visible card loop)', () => {
     assert.equal(res.success, true)
     assert.equal(calls[0].args.href_contains, 'source-1')
     assert.deepEqual(calls.map((c) => c.tool), [
-      'browser_click_text',
-      'browser_get_tabs',
-      'browser_read_page',
-      'browser_read_page',
-      'browser_extract_structured',
-      'browser_collect_images',
-      'browser_download_urls',
-      'browser_go_back',
+      'browser_click',
+      'browser_tabs',
+      'browser_read',
+      'browser_read',
+      'browser_collect',
+      'browser_collect',
+      'browser_download',
+      'browser_navigate',
       'browser_wait',
     ])
   })
 
   it('does not save profile-grid images when the card click leaves the tab on the list page', async () => {
     const { facade, calls } = facadeFrom({
-      browser_get_tabs: () => [
+      browser_tabs: () => [
         '▶ [tab-1] 用户主页',
         '    https://www.example.com/user/profile/source-owner',
         '  [tab-2] 详情页',
         '    https://www.example.com/post/source-1',
       ].join('\n'),
-      browser_read_page: () => '主页列表：笔记一 source-1',
-      browser_collect_images: () => imagesJson,
+      browser_read: () => '主页列表：笔记一 source-1',
+      browser_collect: () => imagesJson,
     })
     const res = await collectCardNote(
       facade,
@@ -586,19 +589,19 @@ describe('collectCardNote (visible card loop)', () => {
 
     assert.equal(res.success, false)
     assert.equal(res.reason, 'detail_not_opened')
-    assert.equal(calls[0].tool, 'browser_click_text')
-    assert.ok(calls.filter((c) => c.tool === 'browser_get_tabs').length >= 15)
-    assert.equal(calls.at(-1)?.tool, 'browser_go_back')
-    assert.equal(calls.some((c) => c.tool === 'browser_download_urls'), false)
+    assert.equal(calls[0].tool, 'browser_click')
+    assert.ok(calls.filter((c) => c.tool === 'browser_tabs').length >= 15)
+    assert.equal(calls.at(-1)?.tool, 'browser_navigate')
+    assert.equal(calls.some((c) => c.tool === 'browser_download'), false)
   })
 
   it('collects same-page detail after a card click without falling back to href navigation', async () => {
     const { facade, calls } = facadeFrom({
-      browser_click_text: () => JSON.stringify({ ok: true, href: 'https://www.example.com/user/profile/u/source-1?xsec_source=pc_user' }),
-      browser_get_tabs: () => '▶ [tab-1] 用户主页\n    https://www.example.com/user/profile/u',
-      browser_read_page: () => '详情页：笔记一 source-1',
-      browser_collect_images: () => imagesJson,
-      browser_download_urls: () => JSON.stringify({ success: 2 }),
+      browser_click: () => JSON.stringify({ ok: true, href: 'https://www.example.com/user/profile/u/source-1?xsec_source=pc_user' }),
+      browser_tabs: () => '▶ [tab-1] 用户主页\n    https://www.example.com/user/profile/u',
+      browser_read: () => '详情页：笔记一 source-1',
+      browser_collect: () => imagesJson,
+      browser_download: () => JSON.stringify({ success: 2 }),
     })
     const res = await collectCardNote(
       facade,
@@ -607,18 +610,18 @@ describe('collectCardNote (visible card loop)', () => {
     )
 
     assert.equal(res.success, true)
-    assert.equal(calls.some((c) => c.tool === 'browser_navigate'), false)
-    assert.equal(calls.some((c) => c.tool === 'browser_download_urls'), true)
+    assert.equal(calls.some((c) => c.tool === 'browser_navigate' && c.args.action !== 'back'), false)
+    assert.equal(calls.some((c) => c.tool === 'browser_download'), true)
   })
 
   it('does not save Xiaohongshu profile-grid images when the URL changes but the detail body is still the profile list', async () => {
     const profileText = 'Aoi葵 小红书号：95490005330 1.6万 粉丝 10.7万 获赞与收藏 已关注 笔记 收藏 摸鱼 Aoi葵 猫儿 Aoi葵'
     const { facade, calls } = facadeFrom({
-      browser_click_text: () => JSON.stringify({ ok: true, href: 'https://www.xiaohongshu.com/user/profile/u/source-1?xsec_source=pc_user' }),
-      browser_get_tabs: () => '▶ [tab-1] Aoi葵 - 小红书\n    https://www.xiaohongshu.com/explore/source-1?xsec_source=pc_user',
-      browser_read_page: () => profileText,
+      browser_click: () => JSON.stringify({ ok: true, href: 'https://www.xiaohongshu.com/user/profile/u/source-1?xsec_source=pc_user' }),
+      browser_tabs: () => '▶ [tab-1] Aoi葵 - 小红书\n    https://www.xiaohongshu.com/explore/source-1?xsec_source=pc_user',
+      browser_read: () => profileText,
       browser_navigate: () => JSON.stringify({ ok: true }),
-      browser_collect_images: () => imagesJson,
+      browser_collect: () => imagesJson,
     })
     const res = await collectCardNote(
       facade,
@@ -635,16 +638,16 @@ describe('collectCardNote (visible card loop)', () => {
 
     assert.equal(res.success, false)
     assert.equal(res.reason, 'detail_not_opened')
-    assert.equal(calls.some((c) => c.tool === 'browser_download_urls'), false)
+    assert.equal(calls.some((c) => c.tool === 'browser_download'), false)
   })
 
   it('uses same-page detail evidence when click output has no href', async () => {
     const { facade, calls } = facadeFrom({
-      browser_click_text: () => JSON.stringify({ ok: true }),
-      browser_get_tabs: () => '▶ [tab-1] 用户主页\n    https://www.example.com/user/profile/u',
-      browser_read_page: () => '详情页：笔记一 source-1',
-      browser_collect_images: () => imagesJson,
-      browser_download_urls: () => JSON.stringify({ success: 2 }),
+      browser_click: () => JSON.stringify({ ok: true }),
+      browser_tabs: () => '▶ [tab-1] 用户主页\n    https://www.example.com/user/profile/u',
+      browser_read: () => '详情页：笔记一 source-1',
+      browser_collect: () => imagesJson,
+      browser_download: () => JSON.stringify({ success: 2 }),
     })
     const res = await collectCardNote(
       facade,
@@ -660,21 +663,21 @@ describe('collectCardNote (visible card loop)', () => {
     )
 
     assert.equal(res.success, true)
-    assert.equal(calls.some((c) => c.tool === 'browser_navigate'), false)
-    assert.equal(calls.some((c) => c.tool === 'browser_download_urls'), true)
+    assert.equal(calls.some((c) => c.tool === 'browser_navigate' && c.args.action !== 'back'), false)
+    assert.equal(calls.some((c) => c.tool === 'browser_download'), true)
   })
 
   it('marks a card failed when the click opens the wrong detail', async () => {
     let tabReads = 0
     const { facade, calls } = facadeFrom({
-      browser_get_tabs: () => {
+      browser_tabs: () => {
         tabReads += 1
         return tabReads === 1
           ? '[tab-1] 详情页\n    https://www.example.com/post/source-1'
           : '[tab-1] 详情页\n    https://www.example.com/post/source-2'
       },
-      browser_read_page: () => '详情页：别的笔记 wrong-source',
-      browser_collect_images: () => imagesJson,
+      browser_read: () => '详情页：别的笔记 wrong-source',
+      browser_collect: () => imagesJson,
     })
     const res = await collectCardNote(
       facade,
@@ -684,15 +687,15 @@ describe('collectCardNote (visible card loop)', () => {
 
     assert.equal(res.success, false)
     assert.equal(res.reason, 'detail_mismatch')
-    assert.deepEqual(calls.map((c) => c.tool), ['browser_click_text', 'browser_get_tabs', 'browser_read_page', 'browser_get_tabs', 'browser_go_back'])
+    assert.deepEqual(calls.map((c) => c.tool), ['browser_click', 'browser_tabs', 'browser_read', 'browser_tabs', 'browser_navigate'])
   })
 
   it('continues when the target URL is confirmed but the detail text omits the title', async () => {
     const { facade, calls } = facadeFrom({
-      browser_get_tabs: () => '[tab-1] 详情页\n    https://www.example.com/post/source-1',
-      browser_read_page: () => 'Page content is empty or still loading.',
-      browser_collect_images: () => imagesJson,
-      browser_download_urls: () => JSON.stringify({ success: 2 }),
+      browser_tabs: () => '[tab-1] 详情页\n    https://www.example.com/post/source-1',
+      browser_read: () => 'Page content is empty or still loading.',
+      browser_collect: () => imagesJson,
+      browser_download: () => JSON.stringify({ success: 2 }),
     })
     const res = await collectCardNote(
       facade,
@@ -701,16 +704,16 @@ describe('collectCardNote (visible card loop)', () => {
     )
 
     assert.equal(res.success, true)
-    assert.equal(calls.some((c) => c.tool === 'browser_download_urls'), true)
+    assert.equal(calls.some((c) => c.tool === 'browser_download'), true)
   })
 
   it('marks a card failed when it cannot return to the list after collecting', async () => {
     const { facade, calls } = facadeFrom({
-      browser_get_tabs: () => '[tab-1] 详情页\n    https://www.example.com/post/source-1',
-      browser_read_page: () => '详情页：笔记一 source-1',
-      browser_collect_images: () => imagesJson,
-      browser_download_urls: () => JSON.stringify({ success: 2 }),
-      browser_go_back: () => JSON.stringify({ ok: false, errorCode: 'history_empty', message: 'cannot return' }),
+      browser_tabs: () => '[tab-1] 详情页\n    https://www.example.com/post/source-1',
+      browser_read: () => '详情页：笔记一 source-1',
+      browser_collect: () => imagesJson,
+      browser_download: () => JSON.stringify({ success: 2 }),
+      browser_navigate: () => JSON.stringify({ ok: false, errorCode: 'history_empty', message: 'cannot return' }),
     })
     const res = await collectCardNote(
       facade,
@@ -721,14 +724,14 @@ describe('collectCardNote (visible card loop)', () => {
     assert.equal(res.success, false)
     assert.equal(res.reason, 'return_list:history_empty')
     assert.deepEqual(calls.map((c) => c.tool), [
-      'browser_click_text',
-      'browser_get_tabs',
-      'browser_read_page',
-      'browser_read_page',
-      'browser_extract_structured',
-      'browser_collect_images',
-      'browser_download_urls',
-      'browser_go_back',
+      'browser_click',
+      'browser_tabs',
+      'browser_read',
+      'browser_read',
+      'browser_collect',
+      'browser_collect',
+      'browser_download',
+      'browser_navigate',
     ])
   })
 })

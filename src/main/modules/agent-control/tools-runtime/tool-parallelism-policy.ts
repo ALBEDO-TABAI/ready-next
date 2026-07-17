@@ -3,6 +3,7 @@ import {
   isFramePatchEmittingToolName,
 } from '../contracts/run-contracts'
 import { AGENT_INTERACTION_TOOL_NAMES } from '../../tools/agent-interaction-tool-defs'
+import { browserToolSurfaceEntry } from '../../../../shared/browser-tool-surface'
 
 /**
  * Phase 3 (skill-child-loop) — tools that may emit a `contextModifier` on
@@ -121,7 +122,11 @@ export function getToolResourceTag(toolName: string): ToolResourceTag {
   const normalized = String(toolName || '').trim()
 
   if (normalized.startsWith('browser_')) {
-    return { domain: 'browser', accessMode: 'interactive' }
+    const entry = browserToolSurfaceEntry(normalized)
+    return {
+      domain: 'browser',
+      accessMode: entry?.defaultAccess === 'read' ? 'read' : 'interactive',
+    }
   }
   // Phase I（2026-07-05）—— 远程会话回传（channel_send_file 等）：外发写动作，串行
   if (normalized.startsWith('channel_')) {

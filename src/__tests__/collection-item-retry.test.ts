@@ -43,9 +43,9 @@ function facadeWithNavigationFailures(failUntil: Map<string, number>): {
           }
           return JSON.stringify({ ok: true })
         }
-        if (tool === 'browser_read_page') return `详情页 ${currentUrl}`
-        if (tool === 'browser_collect_images') return okImages
-        if (tool === 'browser_download_urls') return JSON.stringify({ success: 1 })
+        if (tool === 'browser_read') return `详情页 ${currentUrl}`
+        if (tool === 'browser_collect') return okImages
+        if (tool === 'browser_download') return JSON.stringify({ success: 1 })
         return JSON.stringify({ ok: true })
       },
     },

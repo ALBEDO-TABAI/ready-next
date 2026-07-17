@@ -1208,7 +1208,7 @@ export class AgentSdkRuntime extends EventEmitter {
     if (usedTools.some((name) =>
       name.startsWith('web_')
       || name === 'present_file'
-      || name === 'browser_research_topic'
+      || name === 'browser_collect'
       || name === 'browser_search',
     )) {
       return 'research'

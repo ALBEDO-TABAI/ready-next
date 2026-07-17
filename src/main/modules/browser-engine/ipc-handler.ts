@@ -1,9 +1,12 @@
 import { BrowserWindow, ipcMain, shell, session } from 'electron'
-import { join } from 'node:path'
+import { mkdir, open, rename, stat, unlink, writeFile } from 'node:fs/promises'
+import { dirname, extname, join } from 'node:path'
+import { randomUUID } from 'node:crypto'
 import { BrowserAppShortcutBridgeService } from './app-shortcut-service'
-import { BrowserAutomationService } from './automation-service'
+import { BrowserAutomationService, type BrowserExecutionDeadlineOptions } from './automation-service'
 import { BrowserCapabilityService } from './capability-service'
 import { BrowserCdpSessionService } from './cdp-session-service'
+import { BrowserDialogService, type BrowserDialogSnapshot } from './browser-dialog-service'
 import type {
   BrowserAggregateOptions,
   BrowserCapabilityTaskHandle,
@@ -72,7 +75,12 @@ import { setupBrowserPrivacyIPC } from './ipc-privacy'
 import { BrowserPrivacyService } from './privacy-service'
 import { setupBrowserFastCardIPC } from './ipc-fastcard'
 import { setupBrowserVerticalRailOverlayIPC } from './ipc-vertical-rail-overlay'
-import { setupBrowserLockOverlayIPC } from './ipc-browser-lock-overlay'
+import {
+  clearBrowserAgentPointer,
+  publishBrowserAgentActionLifecycle,
+  publishBrowserAgentPointer,
+  setupBrowserLockOverlayIPC,
+} from './ipc-browser-lock-overlay'
 import { setupBrowserShellIPC } from './ipc-shell'
 import { setupBrowserSupervisionIPC } from './ipc-supervision'
 import type { BrowserLeaseSupervisionSnapshot } from './ipc-supervision'
@@ -90,7 +98,7 @@ import { BrowserTabShellService } from './tab-shell-service'
 import { BrowserTaskPersistenceService } from './task-persistence-service'
 import { BrowserUtilityMenuService } from './utility-menu-service'
 import { BrowserWindowOpenService } from './window-open-service'
-import { BrowserCollectionConsentStore, type BrowserCollectionConsentVia } from './browser-collection-consent'
+import { BrowserCollectionConsentStore } from './browser-collection-consent'
 import { resolveHighControlCollectionTarget, resolveSourceCollectionTarget } from './collection-routing'
 import { collectionTaskIdToCancel, selectLinkedCollectionExecution } from './collection-task-lifecycle'
 import { withHtmlInCanvasWebPreferences } from '../app-control/html-in-canvas-feature'
@@ -105,8 +113,11 @@ import {
   type BrowserWorkflowSession,
 } from './browser-workflow-session'
 import type { BrowserUtilityMenuRequest } from '../../../shared/browser-utility-menu'
+import { mapBrowserAgentPointerToOverlay } from '../../../shared/browser-agent-pointer'
 import { READY_BROWSER_BLANK_URL } from '../../../shared/browser-defaults'
 import { parseBrowserLocalMediaDropUrl } from '../../../shared/browser-local-media-drop'
+import type { BrowserPowerPreflightAuditRecord } from '../database'
+import { readBrowserSessionStatus } from './browser-session-status'
 
 interface Tab extends BrowserTabMetaRecord {
   id: string
@@ -122,6 +133,7 @@ interface Tab extends BrowserTabMetaRecord {
   canGoBack: boolean
   canGoForward: boolean
   error: string | null
+  profile?: string | null
   view?: BrowserHostView
 }
 
@@ -170,6 +182,7 @@ export class BrowserController {
   private readonly hostLayoutService: BrowserHostLayoutService
   private readonly pageBackgroundService: BrowserPageBackgroundService
   private readonly cdpSessionService: BrowserCdpSessionService
+  private readonly dialogService: BrowserDialogService
   private readonly fileChooserGuard: BrowserFileChooserGuard
   private readonly networkObserverService: BrowserNetworkObserverService
   private readonly automationService: BrowserAutomationService
@@ -197,6 +210,14 @@ export class BrowserController {
   private readonly windowOpenService: BrowserWindowOpenService
   private readonly userViewTakeoverWebContentsIds = new Set<number>()
   private p7cLiveProofLeaseId: string | null = null
+
+  publishAgentBrowserAction(event: { phase: 'start' | 'finish' | 'abort' }): void {
+    publishBrowserAgentActionLifecycle(event.phase)
+  }
+
+  recordBrowserPowerPreflightAudit(record: BrowserPowerPreflightAuditRecord): void {
+    this.dataService.addPowerPreflightAudit(record)
+  }
 
   constructor(mainWindow: BrowserWindow, useMock = false) {
     this.mainWindow = mainWindow
@@ -241,6 +262,7 @@ export class BrowserController {
       resolveTabView: (tabId) => this.resolveTabView(tabId),
       createBrowserError: (code, message) => this.createBrowserError(code, message),
     })
+    this.dialogService = new BrowserDialogService(this.cdpSessionService)
     this.fileChooserGuard = new BrowserFileChooserGuard({
       cdp: this.cdpSessionService,
       resolveTabUrl: (tabId) => {
@@ -256,7 +278,10 @@ export class BrowserController {
     this.previewService = new BrowserPreviewService({
       useMock: this.useMock,
       browserUserAgent: this.browserUserAgent,
-      createHost: (partition) => this.createHost(partition),
+      createHost: (partition) => {
+        this.sessionPolicyService.applyForPartition(partition)
+        return this.createHost(partition)
+      },
       resetPageBackground: (view) => this.pageBackgroundService.reset(view),
       syncPageBackground: (view) => this.pageBackgroundService.sync(view),
       showHost: (view, bounds) => this.showHost(view, bounds),
@@ -281,6 +306,43 @@ export class BrowserController {
       createBrowserError: (code, message) => this.createBrowserError(code, message),
       getViewBounds: () => this.viewBounds,
       cdpSession: this.cdpSessionService,
+      agentInputPassthrough: this.agentInputPassthrough,
+      onTrustedInput: (event) => {
+        if (event.tabId !== this.activeTabId || !this.browserVisibilityState.shouldPresentHosts()) return
+        if (!Number.isFinite(event.x) || !Number.isFinite(event.y)) return
+        const phase = event.kind === 'drag'
+          ? 'drag'
+          : event.type === 'mousePressed'
+            ? 'press'
+            : event.type === 'mouseReleased'
+              ? 'release'
+              : event.type === 'mouseWheel'
+                ? 'scroll'
+                : 'move'
+        const pointer = mapBrowserAgentPointerToOverlay({
+          x: Number(event.x),
+          y: Number(event.y),
+          pageZoomFactor: event.pageZoomFactor,
+          bounds: {
+            left: this.viewBounds.x,
+            top: this.viewBounds.y,
+            width: this.viewBounds.width,
+            height: this.viewBounds.height,
+          },
+        })
+        publishBrowserAgentPointer({
+          tabId: event.tabId,
+          phase,
+          x: pointer.x,
+          y: pointer.y,
+          bounds: {
+            left: this.viewBounds.x,
+            top: this.viewBounds.y,
+            width: this.viewBounds.width,
+            height: this.viewBounds.height,
+          },
+        })
+      },
     })
     this.capabilityService = new BrowserCapabilityService({
       openForCaptureTarget: (url) => this.openForCaptureTarget(url),
@@ -288,6 +350,8 @@ export class BrowserController {
       navigate: (tabId, url) => this.navigate(tabId, url),
       getActiveTab: () => this.getActiveTab(),
       executeJS: (tabId, code) => this.executeJS(tabId, code),
+      dispatchMouse: (tabId, payload) => this.dispatchMouse(tabId, payload as unknown as BrowserMouseEventPayload),
+      downloadUrlToDirectory: (payload) => this.downloadUrlToDirectory(payload),
       captureLiveTabPage: (url, options) => this.captureLiveTabPage(url, options),
       captureBackgroundPage: (url, options) => this.captureBackgroundPage(url, options),
     })
@@ -341,7 +405,10 @@ export class BrowserController {
       shouldPresentHosts: () => this.browserVisibilityState.shouldPresentHosts(),
       isAllowedUrl: (url) => isAllowedBrowserURL(url, { allowLocalHtml: true }),
       extractDomain: (url) => extractBrowserDomain(url),
-      createHost: (partition) => this.createHost(partition),
+      createHost: (partition) => {
+        this.sessionPolicyService.applyForPartition(partition)
+        return this.createHost(partition)
+      },
       resetPageBackground: (view) => this.pageBackgroundService.reset(view),
       syncPageBackground: (view) => this.pageBackgroundService.sync(view),
       applyBounds: (view) => this.applyBounds(view, 'settled'),
@@ -356,6 +423,7 @@ export class BrowserController {
         this.popupManager.bindWindow(webContents, {
           sourceTabId,
           sourceOwner: sourceTabId ? this.tabs.get(sourceTabId)?.owner ?? null : null,
+          profile: sourceTabId ? this.tabs.get(sourceTabId)?.profile ?? null : null,
         })
       },
       bindAppShortcutBridge: (webContents) => this.bindAppShortcutBridge(webContents),
@@ -460,6 +528,8 @@ export class BrowserController {
       // D16 — 写租约离开 held（释放/接管/过期）即解除文件选择器拦截，
       // 用户随后的原生选择器行为不受 agent 遗留影响。
       if (transition.previousState === 'held' && transition.state !== 'held') {
+        clearBrowserAgentPointer()
+        publishBrowserAgentActionLifecycle('abort')
         void this.fileChooserGuard.disarmAll()
       }
     })
@@ -520,6 +590,7 @@ export class BrowserController {
     this.popupManager.bindWindow(webContents, {
       sourceTabId: tab.id,
       sourceOwner: tab.owner,
+      profile: tab.profile ?? null,
     })
   }
 
@@ -653,10 +724,14 @@ export class BrowserController {
 
   private openPopupInTab(
     url: string,
-    context: { sourceTabId?: string | null; sourceOwner?: BrowserTabOwner | null } = {},
+    context: { sourceTabId?: string | null; sourceOwner?: BrowserTabOwner | null; profile?: string | null } = {},
   ): void {
     const agentOwned = context.sourceOwner === 'agent'
-    void this.createTab(url, { background: agentOwned, openerTabId: context.sourceTabId ?? null })
+    void this.createTab(url, {
+      background: agentOwned,
+      openerTabId: context.sourceTabId ?? null,
+      profile: context.profile ?? null,
+    })
       .then((result) => {
         if (!result.success || !result.tabId) {
           this.logBrowserDiag(`[browser-v3][popup] create tab failed: ${result.error || 'unknown error'}`)
@@ -1286,6 +1361,7 @@ export class BrowserController {
     }
     this.notifyBrowserLeaseChanged()
     this.sendToRenderer('browser:agentControlChanged', { state: this.agentTabControlGate.getState() })
+    publishBrowserAgentActionLifecycle(closeKind === 'workflow_completed' ? 'finish' : 'abort')
     return session
   }
 
@@ -1731,6 +1807,56 @@ export class BrowserController {
     return { success: true }
   }
 
+  async sendP7cLiveProofAgentClick(
+    x = 140,
+    y = 160,
+  ): Promise<{ success: boolean; tabId?: string; x?: number; y?: number; error?: string }> {
+    if (!this.isP7cLiveProofEnabled()) {
+      return { success: false, error: 'p7c live proof is disabled' }
+    }
+    const tab = this.getActiveTab()
+    if (!tab?.id || !tab.view?.webContents) {
+      return { success: false, error: 'no active browser webContents' }
+    }
+    try {
+      const metrics = await this.getViewportMetrics(tab.id)
+      const clickX = Math.max(0, Math.min(Math.max(0, metrics.width - 1), Math.round(x)))
+      const clickY = Math.max(0, Math.min(Math.max(0, metrics.height - 1), Math.round(y)))
+      publishBrowserAgentActionLifecycle('start')
+      await this.dispatchMouse(tab.id, { type: 'mouseMoved', x: clickX, y: clickY, button: 'none' })
+      await this.dispatchMouse(tab.id, {
+        type: 'mousePressed',
+        x: clickX,
+        y: clickY,
+        button: 'left',
+        buttons: 1,
+        clickCount: 1,
+      })
+      await this.dispatchMouse(tab.id, {
+        type: 'mouseReleased',
+        x: clickX,
+        y: clickY,
+        button: 'left',
+        buttons: 0,
+        clickCount: 1,
+      })
+      return { success: true, tabId: tab.id, x: clickX, y: clickY }
+    } catch (error) {
+      publishBrowserAgentActionLifecycle('abort')
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  }
+
+  finishP7cLiveProofAgentAction(
+    phase: 'finish' | 'abort' = 'finish',
+  ): { success: boolean; phase?: 'finish' | 'abort'; error?: string } {
+    if (!this.isP7cLiveProofEnabled()) {
+      return { success: false, error: 'p7c live proof is disabled' }
+    }
+    publishBrowserAgentActionLifecycle(phase)
+    return { success: true, phase }
+  }
+
   checkP7cLiveProofWriteDenied(): { success: boolean; errorKind?: string; error?: string } {
     if (!this.isP7cLiveProofEnabled()) {
       return { success: false, error: 'p7c live proof is disabled' }
@@ -1749,6 +1875,7 @@ export class BrowserController {
     }
     this.p7cLiveProofLeaseId = null
     getBrowserWriteLeaseService().clearTakeover('user-view')
+    publishBrowserAgentActionLifecycle('abort')
     return { success: true }
   }
 
@@ -1787,10 +1914,11 @@ export class BrowserController {
     const referrerUrl = details.referrer?.url || this.resolveUrlForWebContentsId(sourceContentsId)
     const sourceTabId = this.getTabIdForWebContents(sourceContentsId)
     const sourceOwner = sourceTabId ? this.tabs.get(sourceTabId)?.owner ?? null : null
+    const profile = sourceTabId ? this.tabs.get(sourceTabId)?.profile ?? null : null
     return this.windowOpenService.handle({
       ...details,
       referrer: referrerUrl ? { url: referrerUrl } : details.referrer,
-    }, source, sourceContentsId, { sourceTabId, sourceOwner })
+    }, source, sourceContentsId, { sourceTabId, sourceOwner, profile })
   }
 
   async importBookmarksFromDialog(): Promise<{
@@ -1856,17 +1984,159 @@ export class BrowserController {
 
   // ── Programmatic API (for tool calling, not IPC) ──────────────────
 
+  async getBrowserDialog(tabId: string | null): Promise<BrowserDialogSnapshot | null> {
+    const resolved = this.resolveTabView(tabId).tabId
+    await this.dialogService.ensure(resolved)
+    return this.dialogService.get(resolved)
+  }
+
+  async handleBrowserDialog(
+    tabId: string | null,
+    params: { accept: boolean; promptText?: string },
+  ): Promise<{ success: boolean }> {
+    const resolved = this.resolveTabView(tabId).tabId
+    await this.dialogService.handle(resolved, params)
+    return { success: true }
+  }
+
+  async archivePage(
+    tabId: string | null,
+    path: string,
+    format: 'pdf' | 'mhtml' | 'html' | 'markdown',
+    options?: { signal?: AbortSignal },
+  ): Promise<{ success: boolean; path: string; format: string }> {
+    const throwIfAborted = () => {
+      if (options?.signal?.aborted) throw options.signal.reason || new Error('archive_aborted')
+    }
+    const { view } = this.resolveTabView(tabId)
+    throwIfAborted()
+    await mkdir(dirname(path), { recursive: true })
+    const reservation = await open(path, 'wx').catch((error) => {
+      if ((error as NodeJS.ErrnoException).code === 'EEXIST') throw new Error('archive_destination_exists')
+      throw error
+    })
+    await reservation.close()
+    const suffix = extname(path) || `.${format}`
+    const temporaryPath = join(dirname(path), `.ready-archive-${randomUUID()}${suffix}.part`)
+    try {
+      throwIfAborted()
+      if (format === 'pdf') {
+        const bytes = await view.webContents.printToPDF({ printBackground: true })
+        throwIfAborted()
+        await writeFile(temporaryPath, bytes, { flag: 'wx' })
+      } else if (format === 'mhtml') {
+        await view.webContents.savePage(temporaryPath, 'MHTML')
+      } else if (format === 'html') {
+        await view.webContents.savePage(temporaryPath, 'HTMLOnly')
+      } else {
+        const page = await this.executeJS(tabId, `(() => ({
+          title: document.title || '',
+          url: location.href,
+          text: document.body?.innerText || '',
+        }))()` , { timeoutMs: 10_000, signal: options?.signal }) as { title?: string; url?: string; text?: string }
+        throwIfAborted()
+        await writeFile(temporaryPath, `# ${String(page.title || 'Archived page')}\n\nSource: ${String(page.url || '')}\n\n${String(page.text || '')}\n`, { encoding: 'utf8', flag: 'wx' })
+      }
+      throwIfAborted()
+      const saved = await stat(temporaryPath)
+      if (!saved.isFile() || saved.size <= 0) throw new Error('archive_output_empty')
+      throwIfAborted()
+      await rename(temporaryPath, path)
+    } catch (error) {
+      await unlink(temporaryPath).catch(() => undefined)
+      await unlink(path).catch(() => undefined)
+      throw error
+    }
+    return { success: true, path, format }
+  }
+
+  async collectConsoleMessages(
+    tabId: string | null,
+    options?: { durationMs?: number; limit?: number },
+  ): Promise<Array<Record<string, unknown>>> {
+    const resolved = this.resolveTabView(tabId).tabId
+    const messages: Array<Record<string, unknown>> = []
+    const limit = Math.max(1, Math.min(500, Number(options?.limit || 100)))
+    const unsubscribe = this.cdpSessionService.subscribe(resolved, (event) => {
+      if (!['Runtime.consoleAPICalled', 'Runtime.exceptionThrown', 'Log.entryAdded'].includes(event.method)) return
+      messages.push({ method: event.method, ...event.params })
+      if (messages.length > limit) messages.splice(0, messages.length - limit)
+    })
+    const releaseRuntime = await this.cdpSessionService.retainDomain(resolved, 'Runtime')
+    const releaseLog = await this.cdpSessionService.retainDomain(resolved, 'Log')
+    try {
+      const durationMs = Math.max(0, Math.min(10_000, Number(options?.durationMs || 250)))
+      if (durationMs > 0) await new Promise((resolve) => setTimeout(resolve, durationMs))
+      return messages
+    } finally {
+      unsubscribe()
+      await Promise.all([releaseRuntime(), releaseLog()])
+    }
+  }
+
+  async clearConsoleMessages(tabId: string | null): Promise<{ success: boolean }> {
+    const resolved = this.resolveTabView(tabId).tabId
+    await this.cdpSessionService.sendCommand(resolved, 'Runtime.discardConsoleEntries').catch(() => undefined)
+    await this.cdpSessionService.sendCommand(resolved, 'Log.clear').catch(() => undefined)
+    return { success: true }
+  }
+
+  async getBrowserSessionStatus(tabId: string | null, requestedOrigin?: string): Promise<Record<string, unknown>> {
+    const { view, tabId: resolvedTabId } = this.resolveTabView(tabId)
+    const tab = this.tabs.get(resolvedTabId)
+    const currentUrl = view.webContents.getURL()
+    return readBrowserSessionStatus({
+      tabId: resolvedTabId,
+      profile: tab?.profile || null,
+      currentUrl,
+      requestedOrigin,
+      getCookieCount: async (origin) => (await view.webContents.session.cookies.get({ url: origin })).length,
+      readStorageCounts: () => view.webContents.executeJavaScript(`(() => ({
+        localStorageKeys: Object.keys(localStorage).length,
+        sessionStorageKeys: Object.keys(sessionStorage).length,
+        hasIndexedDb: typeof indexedDB !== 'undefined',
+      }))()`, true),
+    })
+  }
+
+  async clearBrowserOriginData(
+    tabId: string | null,
+    requestedOrigin?: string,
+    dataTypes?: string[],
+  ): Promise<{ success: boolean; origin: string; cleared: string[] }> {
+    const { view } = this.resolveTabView(tabId)
+    const currentUrl = view.webContents.getURL()
+    const origin = requestedOrigin || new URL(currentUrl).origin
+    const requested = new Set(dataTypes?.length ? dataTypes : ['cookies', 'cache', 'storage', 'service_workers'])
+    const storages: Array<'cookies' | 'localstorage' | 'indexdb' | 'websql' | 'cachestorage' | 'serviceworkers'> = []
+    if (requested.has('cookies')) storages.push('cookies')
+    if (requested.has('storage')) storages.push('localstorage', 'indexdb', 'websql', 'cachestorage')
+    if (requested.has('service_workers')) storages.push('serviceworkers')
+    if (storages.length > 0) await view.webContents.session.clearStorageData({ origin, storages })
+    if (requested.has('cache')) await view.webContents.session.clearCache()
+    return { success: true, origin, cleared: Array.from(requested) }
+  }
+
+  getBrowserPermission(origin: string, permission: string): Record<string, unknown> {
+    return this.sessionPolicyService.getPermissionDecision(permission, origin)
+  }
+
+  setBrowserPermission(origin: string, permission: string, decision: 'allow' | 'deny' | 'ask'): Record<string, unknown> {
+    return this.sessionPolicyService.setPermissionDecision(permission, origin, decision)
+  }
+
   /**
    * Create a new tab and navigate to URL. Returns the tab ID.
    */
   async createTab(
     url: string,
-    options?: { background?: boolean; openerTabId?: string | null },
+    options?: { background?: boolean; openerTabId?: string | null; profile?: string | null },
   ): Promise<{ success: boolean; tabId?: string; error?: string }> {
     if (!options?.background) this.clearSplitTabHost()
     const result = await this.tabLifecycleService.createTab(url, options)
     if (result.success && result.tabId) {
       this.attachUserViewLeaseTakeover(result.tabId)
+      void this.dialogService.ensure(result.tabId).catch(() => undefined)
     }
     return result
   }
@@ -1969,8 +2239,8 @@ export class BrowserController {
   /**
    * Execute JavaScript in a tab's webContents. Runs in BrowserView sandbox (isolated from Node).
    */
-  async executeJS(tabId: string | null, code: string): Promise<unknown> {
-    return this.automationService.executeJS(tabId, code)
+  async executeJS(tabId: string | null, code: string, options?: BrowserExecutionDeadlineOptions): Promise<unknown> {
+    return this.automationService.executeJS(tabId, code, options)
   }
 
   /** D10 frame 穿透：列出主帧+子帧（frameKey '0'=主帧，子帧 pid-rid）。 */
@@ -1979,8 +2249,8 @@ export class BrowserController {
   }
 
   /** D10 frame 穿透：在指定 frameKey 的帧内执行 JS（'0' 回落主帧路径）。 */
-  async executeJSInFrame(tabId: string | null, frameKey: string, code: string): Promise<unknown> {
-    return this.automationService.executeJSInFrame(tabId, frameKey, code)
+  async executeJSInFrame(tabId: string | null, frameKey: string, code: string, options?: BrowserExecutionDeadlineOptions): Promise<unknown> {
+    return this.automationService.executeJSInFrame(tabId, frameKey, code, options)
   }
 
   /**
@@ -2369,6 +2639,9 @@ export class BrowserController {
   } {
     const result = this.tabShellService.switchTab(tabId)
     if (result.success) {
+      if (result.previousActiveTabId && result.previousActiveTabId !== (result.activeTabId ?? tabId)) {
+        clearBrowserAgentPointer()
+      }
       const leaseTabId = getBrowserWriteLeaseService().getLease('user-view')?.tabId ?? null
       const nextTab = this.tabs.get(tabId)
       if (
@@ -2391,6 +2664,7 @@ export class BrowserController {
   }
 
   updateViewBounds(bounds: BrowserViewBoundsUpdate): { success: boolean } {
+    clearBrowserAgentPointer()
     return this.tabShellService.updateViewBounds(bounds)
   }
 
@@ -2398,6 +2672,7 @@ export class BrowserController {
     if (!this.browserVisibilityState.applyHide(payload?.requestId)) {
       return { success: true }
     }
+    clearBrowserAgentPointer()
     this.logBrowserDiag(`[browser-host][visibility] hideAll request=${String(payload?.requestId || 'none')}`)
     return this.tabShellService.hideAllHosts()
   }
@@ -2406,6 +2681,7 @@ export class BrowserController {
     if (!this.browserVisibilityState.applyHide(payload?.requestId)) {
       return { success: true }
     }
+    clearBrowserAgentPointer()
     this.logBrowserDiag(`[browser-host][visibility] hideActive request=${String(payload?.requestId || 'none')}`)
     return this.tabShellService.hideActiveHostOnly()
   }
@@ -2431,6 +2707,7 @@ export class BrowserController {
       if (!this.browserVisibilityState.applyHide(intent.intentId)) {
         return { success: true }
       }
+      clearBrowserAgentPointer()
       this.logBrowserDiag(`[browser-host][intent] hide-all intentId=${intent.intentId} reason=${intent.reason}`)
       return this.tabShellService.applyIntent(intent)
     }
@@ -2442,10 +2719,12 @@ export class BrowserController {
       return this.tabShellService.applyIntent(intent)
     }
     if (intent.kind === 'hide') {
+      clearBrowserAgentPointer()
       this.logBrowserDiag(`[browser-host][intent] hide intentId=${intent.intentId} tab=${intent.tabId} reason=${intent.reason}`)
       return this.tabShellService.applyIntent(intent)
     }
     if (intent.kind === 'set-bounds') {
+      clearBrowserAgentPointer()
       this.logBrowserDiag(`[browser-host][intent] set-bounds intentId=${intent.intentId} tab=${intent.tabId} x=${intent.bounds.x} y=${intent.bounds.y} w=${intent.bounds.w} h=${intent.bounds.h}`)
       return this.tabShellService.applyIntent(intent)
     }
@@ -2526,7 +2805,11 @@ export class BrowserController {
   async downloadUrlToDirectory(
     payload: BrowserDownloadUrlToDirectoryPayload,
   ): Promise<BrowserDownloadUrlToDirectoryResult> {
-    return this.downloadService.downloadUrlToDirectory(session.fromPartition('persist:browser'), payload)
+    let targetSession = session.fromPartition('persist:browser')
+    if (payload.tabId) {
+      try { targetSession = this.resolveTabView(payload.tabId).view.webContents.session } catch { /* use default browser session */ }
+    }
+    return this.downloadService.downloadUrlToDirectory(targetSession, payload)
   }
 
   async startNetworkObserver(
@@ -2540,8 +2823,9 @@ export class BrowserController {
     tabId: string | null,
     method: string,
     params?: Record<string, unknown>,
+    options?: import('./cdp-session-service').BrowserCdpCommandOptions,
   ): Promise<unknown> {
-    return this.cdpSessionService.sendCommand(tabId, method, params)
+    return this.cdpSessionService.sendCommand(tabId, method, params, options)
   }
 
   /**
@@ -2552,18 +2836,18 @@ export class BrowserController {
     await this.fileChooserGuard.arm(tabId)
   }
 
-  confirmCollectionConsent(payload: {
+  async confirmCollectionConsent(payload: {
     requestId?: string
-    confirmedVia?: BrowserCollectionConsentVia
-  }): { success: boolean; data?: unknown; error?: string } {
+  }): Promise<{ success: boolean; data?: unknown; error?: string }> {
     const requestId = String(payload?.requestId || '').trim()
-    const confirmedVia = String(payload?.confirmedVia || '').trim()
     if (!requestId) return { success: false, error: 'Missing requestId' }
-    if (confirmedVia !== 'ask_user_questions' && confirmedVia !== 'ui_action') {
-      return { success: false, error: 'Invalid confirmedVia' }
-    }
-    const record = this.collectionConsentStore.confirmPendingRequest(requestId, confirmedVia)
+    const record = this.collectionConsentStore.confirmPendingRequest(requestId)
     if (!record) return { success: false, error: 'Collection consent request not found' }
+    await this.contentTaskRunner.resolveCollectionConsentProjection({
+      scopeId: record.scopeId,
+      sourceTaskId: record.sourceTaskId,
+      requestId,
+    })
     return { success: true, data: record }
   }
 
@@ -2654,7 +2938,7 @@ export function setupBrowserIPC(
     preloadPath: options?.preloadPath || join(__dirname, '../preload/index.mjs'),
     rendererFile: options?.rendererFile || join(__dirname, '../renderer/index.html'),
   })
-  ipcMain.handle('browser:confirmCollectionConsent', (_, payload: { requestId?: string; confirmedVia?: BrowserCollectionConsentVia }) => {
+  ipcMain.handle('browser:confirmCollectionConsent', (_, payload: { requestId?: string }) => {
     return controller.confirmCollectionConsent(payload)
   })
   ipcMain.handle('browser:resumeTask', (_, payload: { taskId?: string }) => {

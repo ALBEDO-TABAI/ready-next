@@ -110,6 +110,27 @@ export interface BrowserTaskCheckpoint {
   cursor?: string | null
   lastSeenFingerprint?: string | null
   partialResults?: unknown
+  targetList?: Array<{
+    id: string
+    url: string | null
+  }>
+  failures?: Array<{
+    targetId: string
+    classification: 'verification' | 'rate_limit' | 'network' | 'target_missing' | 'unavailable' | 'authorization' | 'unknown'
+    retryable: boolean
+  }>
+  outputHashes?: Array<{
+    targetId: string
+    sha256: string
+  }>
+  binding?: {
+    tabId: string | null
+    documentEpoch: number | null
+  }
+  nextStep?: {
+    action: 'resume' | 'verify' | 'finish' | 'none'
+    cursor: string | null
+  }
 }
 
 export interface BrowserCapabilityTaskHandle {

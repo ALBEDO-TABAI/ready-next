@@ -2,8 +2,8 @@ import { randomUUID } from 'crypto'
 
 import { BrowserRepository } from '../repositories/browser-repository'
 
-export type BrowserCollectionConsentKind = 'partial_collection' | 'high_control_url_batch_downgrade'
-export type BrowserCollectionConsentVia = 'ask_user_questions' | 'ui_action'
+export type BrowserCollectionConsentKind = 'partial_collection'
+export type BrowserCollectionConsentVia = 'ui_action'
 
 export interface BrowserCollectionConsentRecord {
   scopeId: string
@@ -107,14 +107,14 @@ export class BrowserCollectionConsentStore {
     return request
   }
 
-  confirmPendingRequest(requestId: string, confirmedVia: BrowserCollectionConsentVia): BrowserCollectionConsentRecord | null {
+  confirmPendingRequest(requestId: string): BrowserCollectionConsentRecord | null {
     const request = this.readPendingRequest(requestId)
     if (!request) return null
     const record: BrowserCollectionConsentRecord = {
       scopeId: request.scopeId,
       sourceTaskId: request.sourceTaskId,
       consentKind: request.consentKind,
-      confirmedVia,
+      confirmedVia: 'ui_action',
       confirmedAt: new Date().toISOString(),
       ...(request.targetHost ? { targetHost: request.targetHost } : {}),
       ...(request.warningText ? { warningText: request.warningText } : {}),

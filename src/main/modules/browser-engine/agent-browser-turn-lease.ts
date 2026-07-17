@@ -69,7 +69,22 @@ export class BrowserTurnLease {
       this.leaseId = lease.leaseId
       this.hasAcquiredOnce = true
     }
-    const renewed = this.service.heartbeat(this.leaseId)
+    let renewed = this.service.heartbeat(this.leaseId)
+    if (isAgentBrowserError(renewed) && this.service.getState(this.surface) === 'expired') {
+      // The turn still owns the only known lease id, but its TTL elapsed before
+      // this heartbeat. Clear that expired record and replace it exactly once.
+      // Takeover and another task's held lease never enter this branch.
+      this.service.clearTakeover(this.surface)
+      this.leaseId = null
+      const replacement = this.service.acquire({
+        surface: this.surface,
+        taskId: this.ids.taskId,
+        runId: this.ids.runId,
+      })
+      if (isAgentBrowserError(replacement)) return replacement
+      this.leaseId = replacement.leaseId
+      renewed = this.service.heartbeat(this.leaseId)
+    }
     if (isAgentBrowserError(renewed)) return renewed
     return { service: this.service, surface: this.surface, leaseId: this.leaseId }
   }

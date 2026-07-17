@@ -4,6 +4,7 @@ import test from 'node:test'
 import { executeBrowserTool } from '../main/modules/tools/browser-tools'
 import { BrowserAutomationService } from '../main/modules/browser-engine/automation-service'
 import { isAgentBrowserError } from '../main/modules/browser-engine/agent-browser-errors'
+import { parseBrowserSnapshotRef } from '../main/modules/browser-engine/browser-snapshot-service'
 import type { BrowserController } from '../main/modules/browser-engine/ipc-handler'
 
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
@@ -121,24 +122,27 @@ interface FrameCall { frameKey: string; marker: string }
 
 function makeFrameAwareController(options?: {
   frameGone?: boolean
-}): { controller: BrowserController; frameCalls: FrameCall[] } {
+}): { controller: BrowserController; frameCalls: FrameCall[]; mouse: Array<Record<string, unknown>> } {
   const frameCalls: FrameCall[] = []
+  const mouse: Array<Record<string, unknown>> = []
   const markerOf = (code: string): string => {
     if (code.includes('__READY_AGENT_PAGE_MAP__')) return 'page_map'
     if (code.includes('__READY_AGENT_TARGET_PROBE__')) return 'target_probe'
-    if (code.includes('__READY_AGENT_ACT_ON_TARGET__')) return 'act_on_target'
-    if (code.includes('Clicked by text')) return 'click_by_text'
+    if (code.includes('const target = ')) return 'click_by_text'
     return 'other'
   }
   const controller = {
     getActiveTab: () => ({ id: 'tab-1', title: 'T', url: PAGE, active: true }),
     getTabList: () => [{ id: 'tab-1', title: 'T', url: PAGE, active: true }],
+    getViewportMetrics: async () => ({ width: 1000, height: 800, deviceScaleFactor: 1 }),
+    normalizedToCss: async (_tabId: string | null, x: number, y: number) => ({ x, y, width: 1000, height: 800 }),
+    dispatchMouse: async (_tabId: string | null, event: Record<string, unknown>) => { mouse.push(event) },
     getPageContent: async () => '上传视频',
     executeJS: async (_tabId: string | null, code: string) => {
       const marker = markerOf(code)
       if (marker === 'page_map') return mainProbePayload()
-      if (marker === 'click_by_text') return 'Element by text not found: 写长文'
-      if (code.includes('readyState')) return 'complete'
+      if (marker === 'click_by_text') return { ok: false, error: 'Element by text not found: 写长文' }
+      if (code.includes('document.readyState')) return { readyState: 'complete', bodyTextLen: 20, matched: false }
       return { ok: false, error: 'Element by text not found: 写长文' }
     },
     listContentFrames: () => [
@@ -152,13 +156,12 @@ function makeFrameAwareController(options?: {
         throw Object.assign(new Error(`Frame ${frameKey} is no longer present on this page`), { code: 'FRAME_NOT_FOUND' })
       }
       if (marker === 'page_map') return frameProbePayload()
-      if (marker === 'target_probe') return { matchCount: 1, disabled: false, target: { role: 'tab', name: '写长文' } }
-      if (marker === 'act_on_target') return { ok: true, did: 'click' }
-      if (marker === 'click_by_text') return 'Clicked by text: 写长文'
+      if (marker === 'target_probe') return { matchCount: 1, disabled: false, target: { role: 'tab', name: '写长文', box: { x: 400, y: 300, width: 100, height: 40 } } }
+      if (marker === 'click_by_text') return { ok: true, text: '写长文', cssX: 450, cssY: 320, width: 900, height: 700 }
       return null
     },
   } as unknown as BrowserController
-  return { controller, frameCalls }
+  return { controller, frameCalls, mouse }
 }
 
 function parseToolJson(out: unknown): Record<string, unknown> {
@@ -166,15 +169,15 @@ function parseToolJson(out: unknown): Record<string, unknown> {
   return (out as { data?: unknown }).data as Record<string, unknown>
 }
 
-test('browser_read_page_map 合并子帧目标：targetId 带 frameKey，图上出现 iframe 分组', async () => {
+test('browser_snapshot 合并子帧目标：ref 绑定 frameKey，图上出现 iframe 分组', async () => {
   const { controller, frameCalls } = makeFrameAwareController()
-  const out = await executeBrowserTool('browser_read_page_map', {}, controller)
+  const out = await executeBrowserTool('browser_snapshot', {}, controller)
   const parsed = parseToolJson(out)
   const pageMap = parsed.pageMap as { text: string; targets: Array<{ targetId: string; name: string }> }
   assert.ok(frameCalls.some((c) => c.marker === 'page_map' && c.frameKey === '7-21'), '子帧应被 probe')
   const frameTarget = pageMap.targets.find((t) => t.name === '写长文')
   assert.ok(frameTarget, '子帧内目标必须进入 map')
-  assert.match(frameTarget.targetId, /^\d+:7-21:1$/)
+  assert.equal(parseBrowserSnapshotRef(frameTarget.targetId)?.rawTargetId.endsWith(':7-21:1'), true)
   assert.match(pageMap.text, /- iframe "https:\/\/example\.com\/embed"/)
   const evidence = parsed.evidence as { frames?: Array<{ frameKey: string; targetCount: number }>; settleRetried?: boolean; firstAttemptTargetCount?: number }
   assert.equal(evidence.frames?.[0]?.frameKey, '7-21')
@@ -184,39 +187,38 @@ test('browser_read_page_map 合并子帧目标：targetId 带 frameKey，图上�
   assert.equal(typeof evidence.firstAttemptTargetCount, 'number')
 })
 
-test('browser_act_on_target 按 targetId 的 frameKey 把 probe 与 act 路由回子帧', async () => {
-  const { controller, frameCalls } = makeFrameAwareController()
-  const mapOut = await executeBrowserTool('browser_read_page_map', {}, controller)
+test('browser_click 按 target ref 的 frameKey 探测子帧并走可信输入', async () => {
+  const { controller, frameCalls, mouse } = makeFrameAwareController()
+  const mapOut = await executeBrowserTool('browser_snapshot', {}, controller)
   const pageMap = parseToolJson(mapOut).pageMap as { targets: Array<{ targetId: string; name: string }> }
   const targetId = pageMap.targets.find((t) => t.name === '写长文')!.targetId
-  const out = await executeBrowserTool('browser_act_on_target', { target_id: targetId, action: 'click', read_back: 'none' }, controller)
+  const out = await executeBrowserTool('browser_click', { target_id: targetId, read_back: 'none' }, controller)
   const parsed = parseToolJson(out)
   assert.equal(parsed.ok, true)
   const probeCall = frameCalls.find((c) => c.marker === 'target_probe')
-  const actCall = frameCalls.find((c) => c.marker === 'act_on_target')
   assert.equal(probeCall?.frameKey, '7-21', 'live probe 必须在目标所属帧执行')
-  assert.equal(actCall?.frameKey, '7-21', 'act 必须在目标所属帧执行')
+  assert.deepEqual(mouse.map((event) => event.type).slice(0, 3), ['mouseMoved', 'mousePressed', 'mouseReleased'])
 })
 
-test('browser_act_on_target 帧已消失时收 stale_page_map，提示重读 map', async () => {
+test('browser_click 帧已消失时收 stale_page_map，提示重读 snapshot', async () => {
   const alive = makeFrameAwareController()
-  const mapOut = await executeBrowserTool('browser_read_page_map', {}, alive.controller)
+  const mapOut = await executeBrowserTool('browser_snapshot', {}, alive.controller)
   const pageMap = parseToolJson(mapOut).pageMap as { targets: Array<{ targetId: string; name: string }> }
   const targetId = pageMap.targets.find((t) => t.name === '写长文')!.targetId
   // 同一 controller 引用保持 map generation，之后帧消失
   ;(alive.controller as unknown as { executeJSInFrame: unknown }).executeJSInFrame = async () => {
     throw Object.assign(new Error('Frame 7-21 is no longer present on this page'), { code: 'FRAME_NOT_FOUND' })
   }
-  const out = await executeBrowserTool('browser_act_on_target', { target_id: targetId, action: 'click', read_back: 'none' }, alive.controller)
+  const out = await executeBrowserTool('browser_click', { target_id: targetId, read_back: 'none' }, alive.controller)
   const parsed = parseToolJson(out)
   assert.ok(isAgentBrowserError(parsed), '应返回结构化错误')
   assert.equal((parsed as { errorCode?: string }).errorCode, 'stale_page_map')
-  assert.match(String((parsed as { message?: string }).message || ''), /read_page_map/)
+  assert.match(String((parsed as { message?: string }).message || ''), /browser_snapshot/)
 })
 
-test('browser_click_text 主帧 miss 后子帧 JS click 命中，输出带 frame 字段', async () => {
+test('browser_click text 主帧 miss 后子帧定位并走可信输入', async () => {
   const { controller, frameCalls } = makeFrameAwareController()
-  const out = await executeBrowserTool('browser_click_text', { text: '写长文' }, controller)
+  const out = await executeBrowserTool('browser_click', { text: '写长文' }, controller)
   const parsed = parseToolJson(out)
   assert.equal(parsed.ok, true)
   assert.equal(parsed.clickedDirect, true)
@@ -224,10 +226,10 @@ test('browser_click_text 主帧 miss 后子帧 JS click 命中，输出带 frame
   assert.ok(frameCalls.some((c) => c.marker === 'click_by_text' && c.frameKey === '7-21'))
 })
 
-test('browser_click_text 全帧 miss：错误文案标注已搜索的帧数', async () => {
+test('browser_click text 全帧 miss：错误文案标注已搜索的帧数', async () => {
   const { controller } = makeFrameAwareController()
   ;(controller as unknown as { executeJSInFrame: unknown }).executeJSInFrame = async () => 'Element by text not found: 写长文'
-  const out = await executeBrowserTool('browser_click_text', { text: '写长文' }, controller)
+  const out = await executeBrowserTool('browser_click', { text: '写长文' }, controller)
   assert.match(String(out), /Element by text not found/)
   assert.match(String(out), /1 个子帧/)
 })

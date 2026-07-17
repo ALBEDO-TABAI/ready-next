@@ -6,7 +6,7 @@
  * agent 持浏览器写租约执行写动作时武装该 tab 的 CDP
  * Page.setInterceptFileChooserDialog；选择器请求被拦截后站点照常等待文件，
  * 模型收到 file_chooser_intercepted 注记并改走
- * browser_list_upload_targets → browser_upload_scope_attachment
+ * browser_find → browser_upload
  * （DOM.setFileInputFiles，不经原生对话框）。租约离开 held（释放/接管/过期）
  * 时全量解除，用户自己的文件选择器行为不受影响。
  *

@@ -7,7 +7,7 @@
  * shouldHandle(taskType === 'research').
  *
  * Tool routing (落点 17, plan §3.1.12):
- *   - browser-mode      → ['browser_research_topic', 'present_file']
+ *   - browser-mode      → ['browser_collect', 'present_file']
  *   - non-browser-mode  → ['web_search_domains', 'web_search', 'web_fetch', 'present_file']
  * Both modes include `present_file` so the agent can present produced
  * artifacts regardless of which research backend ran (capability group
@@ -105,7 +105,7 @@ export class ResearchDomainAdapter implements DomainAdapter {
     // outputs as an Obsidian-style Markdown note), independent of whether
     // the agent is otherwise in browser-mode for live page interaction.
     const prefixes = isBrowserMode
-      ? ['browser_research_topic', 'present_file', 'web_clip_url']
+      ? ['browser_collect', 'present_file', 'web_clip_url']
       : ['web_search_domains', 'web_search', 'web_fetch', 'present_file', 'web_clip_url']
     const filtered = filterAllowedToolNamesByPrefixes(inputAllowed, prefixes)
     return {
@@ -138,7 +138,7 @@ export class ResearchDomainAdapter implements DomainAdapter {
    *
    * R1-C02 fix: derive from upstream `allowedToolNames` (capability resolver
    * already collected the available tool surface for this turn). When
-   * `browser_research_topic` is allowed, the host's capability profile
+   * `browser_collect` is allowed, the host's capability profile
    * exposes a browser backend → use the browser-mode prefix set; otherwise
    * fall back to the web_search / web_fetch surface.
    *
@@ -149,6 +149,6 @@ export class ResearchDomainAdapter implements DomainAdapter {
   private detectBrowserMode(params: DomainAdapterPrepareParams): boolean {
     const allowed = params.allowedToolNames
     if (!allowed || allowed.length === 0) return false
-    return allowed.some((name) => name === 'browser_research_topic')
+    return allowed.some((name) => name === 'browser_collect')
   }
 }

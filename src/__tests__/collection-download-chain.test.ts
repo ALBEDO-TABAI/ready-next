@@ -3,7 +3,7 @@
  * card progress → completion reconciliation → file-tree refresh.
  *
  * 1. with a completed image_gallery source task in scope, raw
- *    browser_download_urls redirects to browser_download_collected_media
+ *    browser_download redirects to browser_download
  *    (escape hatch: unrelated_to_collection)
  * 2. discovered < page-claimed total → completion 'partial', never complete
  * 3. saved/failed/remaining flow back to the source task (card numbers move)
@@ -19,7 +19,12 @@ import { join } from 'node:path'
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 import { executeBrowserTool } from '../main/modules/tools/browser-tools'
 import { __setBrowserCollectionConsentStoreForTests } from '../main/modules/tools/browser-collection-tools'
-import { __setWebContentsProviderForTests, broadcastDirectoryChanged } from '../main/modules/document-engine/ipc/directory-change-broadcast'
+import {
+  __setWebContentsProviderForTests,
+  broadcastDirectoryChanged,
+  flushDirectoryChangeBroadcastsForTests,
+  resetDirectoryChangeBroadcastsForTests,
+} from '../main/modules/document-engine/ipc/directory-change-broadcast'
 import type { ToolExecutionOutput } from '../main/modules/agent-control/tools-runtime/tool-result-types'
 
 test('collection-download-chain declares transitive sqlite ABI guard', (t) => {
@@ -106,9 +111,9 @@ function makeController(over: Record<string, unknown> = {}) {
   } as never
 }
 
-test('gap 1: raw browser_download_urls redirects to the chained tool when a gallery source task exists', async () => {
+test('gap 1: raw browser_download redirects to the chained tool when a gallery source task exists', async () => {
   const controller = makeController()
-  const output = await executeBrowserTool('browser_download_urls', {
+  const output = await executeBrowserTool('browser_download', {
     urls: ['https://example.com/img-0.jpg'],
     directory: '~/Documents',
   }, controller, undefined, 'scope-img')
@@ -116,13 +121,12 @@ test('gap 1: raw browser_download_urls redirects to the chained tool when a gall
   assert.equal(parsed.ok, false)
   assert.equal(parsed.errorCode, 'use_collected_media_download')
   assert.equal(parsed.sourceTaskId, 'task-gallery-1')
-  assert.equal(parsed.suggestedNextTool, 'browser_download_collected_media')
+  assert.equal(parsed.suggestedNextTool, 'browser_download')
 
   // explicitly unrelated downloads pass the guard (and fail later on the
   // unsupported protocol — proving we got PAST the redirect)
-  const unrelated = await executeBrowserTool('browser_download_urls', {
+  const unrelated = await executeBrowserTool('browser_download', {
     urls: ['ftp://example.com/file.bin'],
-    directory: '~/Documents',
     unrelated_to_collection: true,
   }, controller, undefined, 'scope-img')
   const unrelatedParsed = parseBrowserJson(unrelated)
@@ -130,9 +134,8 @@ test('gap 1: raw browser_download_urls redirects to the chained tool when a gall
 
   // no gallery task in scope → no redirect either
   const bare = makeController({ listTasksByKind: async () => [] })
-  const free = await executeBrowserTool('browser_download_urls', {
+  const free = await executeBrowserTool('browser_download', {
     urls: ['ftp://example.com/file.bin'],
-    directory: '~/Documents',
   }, bare, undefined, 'scope-img')
   assert.equal(parseBrowserJson(free).results[0].error, 'unsupported_protocol')
 
@@ -140,7 +143,7 @@ test('gap 1: raw browser_download_urls redirects to the chained tool when a gall
     listTasksByKind: async () => [partialGalleryTask('task-gallery-1')],
     getTask: async () => partialGalleryTask('task-gallery-1'),
   })
-  const redirectedPartial = await executeBrowserTool('browser_download_urls', {
+  const redirectedPartial = await executeBrowserTool('browser_download', {
     urls: ['https://example.com/img-0.jpg'],
     directory: '~/Documents',
   }, partial, undefined, 'scope-img')
@@ -152,8 +155,10 @@ test('gap 1: raw browser_download_urls redirects to the chained tool when a gall
 test('gaps 2+3: collected-media download reconciles discovered/saved/remaining and writes back to the source task', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'ready-dl-'))
   try {
-    const controller = makeController()
-    const output = await executeBrowserTool('browser_download_collected_media', {
+    const controller = makeController({
+      getTaskPayload: () => ({ scopeId: 'scope-img', template: 'image_gallery', url: 'https://example.com/board', outputRootDir: dir }),
+    })
+    const output = await executeBrowserTool('browser_download', {
       source_task_id: 'task-gallery-1',
       directory: dir,
       expected_total: 72,
@@ -175,7 +180,7 @@ test('gaps 2+3: collected-media download reconciles discovered/saved/remaining a
 
     // no claim ANYWHERE (no arg, no source-recorded total) and everything
     // saved → complete is legitimate
-    const full = await executeBrowserTool('browser_download_collected_media', {
+    const full = await executeBrowserTool('browser_download', {
       source_task_id: 'task-gallery-1',
       directory: dir,
     }, controller, undefined, 'scope-img')
@@ -189,8 +194,9 @@ test('gaps 2+3: collected-media download reconciles discovered/saved/remaining a
     ;(claimedTask.result as Record<string, unknown>).userExpectedTotal = 72
     const claimedController = makeController({
       getTask: async () => claimedTask,
+      getTaskPayload: () => ({ scopeId: 'scope-img', template: 'image_gallery', url: 'https://example.com/board', outputRootDir: dir }),
     })
-    const claimed = await executeBrowserTool('browser_download_collected_media', {
+    const claimed = await executeBrowserTool('browser_download', {
       source_task_id: 'task-gallery-1',
       directory: dir,
     }, claimedController, undefined, 'scope-img')
@@ -210,8 +216,9 @@ test('partial gallery sources require consent, then download discovered media wi
     const controller = makeController({
       listTasksByKind: async () => [partialGalleryTask('task-gallery-1')],
       getTask: async () => partialGalleryTask('task-gallery-1'),
+      getTaskPayload: () => ({ scopeId: 'scope-img', template: 'image_gallery', url: 'https://example.com/board', outputRootDir: dir }),
     })
-    const blocked = await executeBrowserTool('browser_download_collected_media', {
+    const blocked = await executeBrowserTool('browser_download', {
       source_task_id: 'task-gallery-1',
       directory: dir,
       allow_partial: true,
@@ -222,7 +229,7 @@ test('partial gallery sources require consent, then download discovered media wi
     assert.match(blockedParsed.pendingConsentRequest?.requestId || '', /^browser-consent-test-/)
 
     store.confirmPendingRequest(blockedParsed.pendingConsentRequest.requestId)
-    const allowed = await executeBrowserTool('browser_download_collected_media', {
+    const allowed = await executeBrowserTool('browser_download', {
       source_task_id: 'task-gallery-1',
       directory: dir,
       allow_partial: true,
@@ -249,10 +256,11 @@ test('gap 4: successful downloads broadcast document:directoryChanged to every l
     const dir = mkdtempSync(join(tmpdir(), 'ready-dl-bc-'))
     try {
       const controller = makeController({ listTasksByKind: async () => [] })
-      await executeBrowserTool('browser_download_urls', {
+      await executeBrowserTool('browser_download', {
         urls: ['https://example.com/img-0.jpg'],
         directory: dir,
-      }, controller, undefined, 'scope-img')
+      }, controller, undefined, 'scope-img', undefined, undefined, undefined, { workspaceRoots: [dir] })
+      flushDirectoryChangeBroadcastsForTests()
       assert.equal(sent.length, 1, 'one live webContents notified')
       assert.equal(sent[0].channel, 'document:directoryChanged')
       assert.deepEqual(sent[0].payload.paths, [dir])
@@ -264,6 +272,7 @@ test('gap 4: successful downloads broadcast document:directoryChanged to every l
     __setWebContentsProviderForTests(null)
     assert.equal(broadcastDirectoryChanged(['/tmp/x']), 0)
   } finally {
+    resetDirectoryChangeBroadcastsForTests()
     __setWebContentsProviderForTests(null)
   }
 })

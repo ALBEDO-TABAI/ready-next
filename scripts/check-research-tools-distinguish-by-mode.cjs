@@ -4,7 +4,7 @@
  *
  * research-domain-adapter.ts `prepare()` must declare two mutually exclusive
  * prefix sets:
- *   - browser-mode:     ['browser_research_topic', 'present_file']
+ *   - browser-mode:     ['browser_collect', 'present_file']
  *   - non-browser-mode: ['web_search', 'web_fetch', 'present_file']
  *
  * Both modes MUST include 'present_file' so artifact presentation is
@@ -26,11 +26,16 @@ try {
   process.exit(1)
 }
 
-const required = ['browser_research_topic', 'web_search', 'web_fetch', 'present_file']
+const required = ['browser_collect', 'web_search', 'web_fetch', 'present_file']
 const missing = required.filter((name) => !new RegExp(`['"]${name}['"]`).test(src))
 if (missing.length > 0) {
   console.error('[check-research-tools-distinguish-by-mode] FAIL: research-domain-adapter.ts must mention these tool name literals:')
   missing.forEach((name) => console.error('  - ' + name))
+  process.exit(1)
+}
+
+if (/['"]browser_research_topic['"]/.test(src)) {
+  console.error('[check-research-tools-distinguish-by-mode] FAIL: removed browser_research_topic must not reappear')
   process.exit(1)
 }
 

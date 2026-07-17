@@ -234,7 +234,7 @@ export function buildPageMap(rawRoots: RawAxNode[], options: BuildPageMapOptions
 
 /**
  * Parse a targetId back into its parts. Returns null for malformed ids. Used by
- * `browser_act_on_target` to enforce the stale-generation contract (§5.4.1).
+ * `browser_click/browser_type` to enforce the stale-generation contract (§5.4.1).
  */
 export function parseTargetId(
   targetId: string,

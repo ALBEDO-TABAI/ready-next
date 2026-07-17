@@ -6,7 +6,6 @@
  */
 import { BrowserController } from '../browser-engine/ipc-handler'
 import { ToolDomainError } from './tool-errors'
-import type { AgentBrowserAction } from '../browser-engine/agent-browser-act'
 import { ACTION_CONFIRMATION_ERROR_KINDS } from '../agent-control/contracts/error-kinds'
 import { BROWSER_DESTRUCTIVE_TARGET_REGEX_SOURCES } from '../agent-control/safety/action-confirmation-policy'
 
@@ -321,7 +320,48 @@ export function buildBrowserTargetProbeJs(nodeId: string): string {
     if (!el) return { matchCount: 0 };
     const record = readyTargetRecord(el, nodeIndex);
     const disabled = Boolean(record.states && record.states.disabled === true);
-    return { matchCount: 1, disabled, target: record };
+    const rect = el.getBoundingClientRect();
+    return {
+      matchCount: 1,
+      disabled,
+      target: record,
+      clickPoint: {
+        x: rect.left + rect.width / 2,
+        y: rect.top + rect.height / 2,
+        vw: Number(window.innerWidth || 0),
+        vh: Number(window.innerHeight || 0),
+        hostShadow: (el.tagName && el.tagName.indexOf('-') !== -1)
+          ? (el.shadowRoot ? 'open' : 'closed_or_none')
+          : null,
+        rect: { left: rect.left, top: rect.top, width: rect.width, height: rect.height }
+      }
+    };
+  })()`
+}
+
+export function buildBrowserTargetReadJs(nodeId: string): string {
+  return `(() => {
+    const __READY_AGENT_TARGET_READ__ = true;
+    ${buildBrowserDomTargetLibraryJs()}
+    const nodeId = ${JSON.stringify(nodeId)};
+    const nodeIndex = /^\\d+$/.test(nodeId) ? Number(nodeId) - 1 : -1;
+    const elements = readyTargetElements();
+    const el = nodeIndex >= 0 ? elements[nodeIndex] : null;
+    if (!el) return { matchCount: 0, content: '' };
+    const record = readyTargetRecord(el, nodeIndex);
+    const chunks = [
+      el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement
+        ? String(el.value || '')
+        : '',
+      String(el.innerText || ''),
+      String(el.textContent || ''),
+      String(record.name || ''),
+    ].map((value) => value.replace(/\\s+/g, ' ').trim()).filter(Boolean);
+    return {
+      matchCount: 1,
+      content: Array.from(new Set(chunks)).join('\\n'),
+      target: record,
+    };
   })()`
 }
 
@@ -406,8 +446,8 @@ export function buildTargetSemanticsLibraryJs(): string {
 }
 
 /**
- * In-page guard for typing scripts (browser_type / browser_type_smart /
- * browser_compose_message). Returns a blocked-marker object or null.
+ * In-page guard for typing scripts (browser_type / browser_type /
+ * browser_type). Returns a blocked-marker object or null.
  */
 export function buildInputGuardSnippetJs(allowPasswordFill: boolean): string {
   return `
@@ -632,122 +672,6 @@ export function throwIfLiveTargetGuardBlocked(result: unknown, detail: Record<st
   }
 }
 
-export function buildBrowserActOnTargetJs(nodeId: string, action: AgentBrowserAction, value?: string): string {
-  return `(() => {
-    const __READY_AGENT_ACT_ON_TARGET__ = true;
-    ${buildBrowserDomTargetLibraryJs()}
-    const nodeId = ${JSON.stringify(nodeId)};
-    const action = ${JSON.stringify(action)};
-    const value = ${JSON.stringify(value ?? '')};
-    const nodeIndex = /^\\d+$/.test(nodeId) ? Number(nodeId) - 1 : -1;
-    const elements = readyTargetElements();
-    const el = nodeIndex >= 0 ? elements[nodeIndex] : null;
-    if (!el) return { ok: false, errorCode: 'target_not_found', message: 'Target no longer resolves to an element.' };
-    const record = readyTargetRecord(el, nodeIndex);
-    if (record.states && record.states.disabled === true) {
-      return { ok: false, errorCode: 'target_not_found', message: 'Target is disabled.', target: record };
-    }
-    let clickPoint = null;
-    if (action === 'fill') {
-      if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
-        el.focus();
-        // D16-b（真机第十一轮实锚）：React 受控组件在实例上装 valueTracker，
-        // 直接 el.value 赋值会被吞——DOM 有字、框架状态为空，表单校验静默
-        // 失败（发布按钮人点也无反应）。走原型链原生 setter 绕过 tracker，
-        // 再派发 input 让 React 读到真实变更。
-        const __readyProto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
-        const __readyNativeSet = (Object.getOwnPropertyDescriptor(__readyProto, 'value') || {}).set;
-        if (__readyNativeSet) __readyNativeSet.call(el, value);
-        else el.value = value;
-        el.dispatchEvent(new Event('input', { bubbles: true }));
-        el.dispatchEvent(new Event('change', { bubbles: true }));
-      } else if (el.isContentEditable) {
-        el.focus();
-        el.textContent = value;
-        el.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: value }));
-      } else {
-        return { ok: false, errorCode: 'target_not_found', message: 'Target is not fillable.', target: record };
-      }
-    } else if (action === 'choose') {
-      if (el instanceof HTMLSelectElement) {
-        const option = Array.from(el.options).find((opt) => opt.value === value || readyCleanText(opt.textContent) === value);
-        if (!option) return { ok: false, errorCode: 'target_not_found', message: 'Option not found.', target: record };
-        el.value = option.value;
-        el.dispatchEvent(new Event('input', { bubbles: true }));
-        el.dispatchEvent(new Event('change', { bubbles: true }));
-      } else {
-        el.click();
-      }
-    } else if (action === 'hover') {
-      el.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, view: window }));
-      el.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true, view: window }));
-    } else {
-      // D10-c：React 委托型控件监听 pointerdown/mousedown，裸 el.click()
-      // 对它们是 no-op。先派发指针序列，再 click() 保留原生激活语义
-      // （anchor 导航/checkbox 默认行为）；对原生控件多出的前奏无害。
-      // D14：Web Component 的真实按钮在 shadow root 内，host 上的合成事件
-      // 到不了内部监听器。沿 elementFromPoint 逐层穿透 open shadow root，
-      // 把事件派发到命中节点（composed 事件会经重定向冒泡回 host，两侧
-      // 监听器各触发一次）；命中节点不属于 el 时保持原行为。
-      const rect = el.getBoundingClientRect();
-      const cx = rect.left + rect.width / 2;
-      const cy = rect.top + rect.height / 2;
-      let dispatchTarget = el;
-      try {
-        let hit = document.elementFromPoint(cx, cy);
-        let guard = 0;
-        while (hit && hit.shadowRoot && typeof hit.shadowRoot.elementFromPoint === 'function' && guard < 5) {
-          const inner = hit.shadowRoot.elementFromPoint(cx, cy);
-          if (!inner || inner === hit) break;
-          hit = inner;
-          guard += 1;
-        }
-        const belongsToEl = (node) => {
-          let n = node;
-          for (let i = 0; n && i < 12; i++) {
-            if (n === el) return true;
-            if (n.parentElement) { n = n.parentElement; continue; }
-            const root = n.getRootNode ? n.getRootNode() : null;
-            n = root && root.host ? root.host : null;
-          }
-          return false;
-        };
-        if (hit && hit !== el && belongsToEl(hit)) dispatchTarget = hit;
-      } catch {}
-      const opts = { bubbles: true, cancelable: true, composed: true, view: window, clientX: cx, clientY: cy };
-      dispatchTarget.dispatchEvent(new PointerEvent('pointerdown', opts));
-      dispatchTarget.dispatchEvent(new MouseEvent('mousedown', opts));
-      dispatchTarget.dispatchEvent(new PointerEvent('pointerup', opts));
-      dispatchTarget.dispatchEvent(new MouseEvent('mouseup', opts));
-      if (typeof dispatchTarget.click === 'function') dispatchTarget.click();
-      else el.click();
-      // D18：closed shadow root 内的监听器对上面整套合成事件仍然不可达
-      // （事件不会向 shadow 内部传播，host.click() 也点不到内部按钮）。
-      // 把点击坐标交回工具层，readBack 判无效果时由主进程升级为可信
-      // 指针输入（与 browser_click_at 同通道，走真实命中测试）。
-      // D18-b：回传 host 的 shadow 可达性。closed/无 shadowRoot 的自定义
-      // host（dash tag）合成点击必然是 no-op——工具层对这类目标无条件升级，
-      // 不再被动态页面（轮播/占位符轮换）造成的 changed:true 假信号压制
-      // （真机第十三轮实锚：发布按钮 act ok 但升级被 changed 假信号跳过）。
-      clickPoint = {
-        x: cx,
-        y: cy,
-        vw: Number(window.innerWidth || 0),
-        vh: Number(window.innerHeight || 0),
-        hostShadow: (el.tagName && el.tagName.indexOf('-') !== -1)
-          ? (el.shadowRoot ? 'open' : 'closed_or_none')
-          : null,
-        // D18-c：host 包围盒可能横跨整个按钮组（真机第十四轮实锚：
-        // xhs-publish-btn 的 rect 中心落在「暂存离开/发布」之间的死区，
-        // 可信升级点击点空）。把完整 rect 交回工具层，升级前先经 CDP
-        // 组合树命中测试在 rect 内扫描真实内部按钮。
-        rect: { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
-      };
-    }
-    return { ok: true, action, target: record, url: String(location.href || ''), title: String(document.title || ''), clickPoint };
-  })()`
-}
-
 export function buildBrowserActionDeltaJs(): string {
   return `(() => ({
     url: String(location.href || ''),
@@ -755,4 +679,3 @@ export function buildBrowserActionDeltaJs(): string {
     bodyText: String(document.body?.innerText || '').replace(/\\s+/g, ' ').trim().slice(0, 1000)
   }))()`
 }
-

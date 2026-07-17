@@ -2,17 +2,17 @@
  * P3 Phase B7（2026-07-05，纯移动拆分）— browser-tools 行动/导航组。
  *
  * 从 browser-tools.ts 逐字搬出十六个 case 的实现体（browser_navigate /
- * browser_search / browser_act_on_target / browser_click / browser_click_text /
- * browser_type / browser_type_smart / browser_compose_message /
- * browser_list_upload_targets / browser_upload_scope_attachment /
- * browser_click_at / browser_type_at / browser_scroll_at / browser_send_keys /
- * browser_ask_user_takeover / browser_go_back，经 executeBrowserActTool 统一
+ * browser_search / browser_click/browser_type / browser_click / browser_click /
+ * browser_type / browser_type / browser_type /
+ * browser_find / browser_upload /
+ * browser_click / browser_type / browser_scroll / browser_press_key /
+ * browser_request_takeover / browser_navigate(action=back)，经 executeBrowserActTool 统一
  * 入口分发）与本组独占 helper（tab 跟随快照、动作前后 delta 回读、搜索引擎
  * URL 与结果解析、click-by-text 帧穿透定位、scope 附件上传的选择/验证/恢复、
  * recentScopeUploads 单例）。runWorkflowStep（与 browser_search /
- * browser_click_text 同组共享的守卫执行层）随组迁入并 export，browser-tools
+ * browser_click 同组共享的守卫执行层）随组迁入并 export，browser-tools
  * 侧 import 回引后继续注入 power/collection ctx（零环、最少注入面）。
- * browser_act_on_target 的 D18 升级块逐字节未动，页面地图 generation/
+ * browser_click/browser_type 的 D18 升级块逐字节未动，页面地图 generation/
  * ambiguity 经 act→observe 单向 import 回读。attachBrowserActionSessionOutput
  * （sitePermissionNotices 排空合同红线）留在 browser-tools，经
  * BrowserActToolContext 注入回接；BrowserActionFollowedTab 类型因 facade 的
@@ -38,6 +38,7 @@ import {
 } from '../agent-control/safety/action-confirmation-policy'
 import { ACTION_CONFIRMATION_ERROR_KINDS } from '../agent-control/contracts/error-kinds'
 import { parseTargetId } from '../browser-engine/agent-browser-page-map'
+import { browserSnapshotService } from '../browser-engine/browser-snapshot-service'
 import { gateActOnTarget, type AgentBrowserAction, type AgentBrowserReadBack } from '../browser-engine/agent-browser-act'
 import type { ToolExecutionOutput } from '../agent-control/tools-runtime/tool-result-types'
 import {
@@ -50,12 +51,10 @@ import {
   buildTargetSemanticsLibraryJs,
   buildTransientNoticeProbeJs,
   throwIfLiveTargetGuardBlocked,
-  buildBrowserActOnTargetJs,
   buildBrowserActionDeltaJs,
 } from './browser-probe'
 import {
-  buildSmartTypeJs,
-  dispatchClickAt,
+  buildSmartTypeProbeJs,
   resolveCssPoint,
   runGuardedCoordinateClick,
   runGuardedCoordinateType,
@@ -70,17 +69,11 @@ import {
 } from './browser-input-actions'
 import {
   describeComposedPointTarget,
-  invokeShadowNodeClick,
   scanClosedShadowHostForClickPoint,
 } from './browser-shadow-hit-test'
 import {
-  ensureGeminiSubmitted,
-  isLikelyChatPage,
-} from './browser-gemini'
-import {
   captureAgentPageMap,
   currentBrowserPageMapAmbiguity,
-  currentBrowserPageMapGeneration,
   DEFAULT_AGENT_PAGE_MAP_MAX_BYTES,
 } from './browser-observe-tools'
 import {
@@ -111,6 +104,74 @@ interface BrowserToolTabSnapshot {
   active: boolean
 }
 
+function browserActionResultSucceeded(result: string | ToolExecutionOutput): boolean {
+  const data = typeof result === 'string' ? null : result.data
+  if (data && typeof data.ok === 'boolean') return data.ok
+  const text = typeof result === 'string' ? result : result.text
+  try {
+    const parsed = JSON.parse(text) as { ok?: unknown; errorKind?: unknown }
+    if (typeof parsed.ok === 'boolean') return parsed.ok
+    if (typeof parsed.errorKind === 'string' && parsed.errorKind) return false
+  } catch {
+    // silent-catch: plain-text successes remain valid; explicit error prefixes fail closed.
+  }
+  return !/^\s*(?:error|failed|failure|错误|失败)\b/i.test(text)
+}
+
+export async function runBrowserFillFormSequence(
+  fields: unknown[],
+  options: { tabId?: unknown; submit: boolean },
+  invoke: (operation: string, args: Record<string, unknown>) => Promise<string | ToolExecutionOutput>,
+): Promise<Record<string, unknown>> {
+  const results: Array<{ index: number; ok: boolean; result: string | ToolExecutionOutput }> = []
+  for (let index = 0; index < fields.length; index += 1) {
+    const field = fields[index]
+    if (!field || typeof field !== 'object' || Array.isArray(field)) {
+      return {
+        ok: false,
+        errorKind: 'invalid_form_field',
+        failedIndex: index,
+        fields: results,
+        submitted: false,
+      }
+    }
+    const item = field as Record<string, unknown>
+    const operation = typeof item.target_id === 'string'
+      ? 'type_target'
+      : typeof item.selector === 'string'
+        ? 'type_selector'
+        : 'type_smart'
+    const result = await invoke(operation, {
+      ...item,
+      text: String(item.value ?? ''),
+      target: item.label,
+      tab_id: options.tabId,
+      clear_first: true,
+    })
+    const ok = browserActionResultSucceeded(result)
+    results.push({ index, ok, result })
+    if (!ok) {
+      return {
+        ok: false,
+        errorKind: 'form_field_failed',
+        failedIndex: index,
+        fields: results,
+        submitted: false,
+      }
+    }
+  }
+  if (!options.submit) return { ok: true, fields: results, submitted: false }
+  const submitResult = await invoke('press_key', { key: 'Enter', tab_id: options.tabId })
+  const submitted = browserActionResultSucceeded(submitResult)
+  return {
+    ok: submitted,
+    ...(!submitted ? { errorKind: 'form_submit_failed' } : {}),
+    fields: results,
+    submitResult,
+    submitted,
+  }
+}
+
 function snapshotBrowserTabs(controller: BrowserController): BrowserToolTabSnapshot[] {
   try {
     return (controller.getTabList?.() || [])
@@ -124,6 +185,63 @@ function snapshotBrowserTabs(controller: BrowserController): BrowserToolTabSnaps
   } catch {
     // silent-catch: 读取 tab 列表失败按无 tab 处理。
     return []
+  }
+}
+
+async function frameViewportOffset(
+  controller: BrowserController,
+  tabId: string | null,
+  frameId: string,
+): Promise<{ x: number; y: number }> {
+  if (!frameId || frameId === '0') return { x: 0, y: 0 }
+  try {
+    const owner = await controller.sendCdpCommand(tabId, 'DOM.getFrameOwner', { frameId }) as {
+      backendNodeId?: unknown
+    }
+    const backendNodeId = Number(owner.backendNodeId)
+    if (!Number.isFinite(backendNodeId)) return { x: 0, y: 0 }
+    const box = await controller.sendCdpCommand(tabId, 'DOM.getBoxModel', { backendNodeId }) as {
+      model?: { content?: unknown; border?: unknown }
+    }
+    const quad = Array.isArray(box.model?.content)
+      ? box.model.content.map(Number)
+      : Array.isArray(box.model?.border)
+        ? box.model.border.map(Number)
+        : []
+    const xs = quad.filter((_value, index) => index % 2 === 0 && Number.isFinite(quad[index]))
+    const ys = quad.filter((_value, index) => index % 2 === 1 && Number.isFinite(quad[index]))
+    return xs.length > 0 && ys.length > 0
+      ? { x: Math.min(...xs), y: Math.min(...ys) }
+      : { x: 0, y: 0 }
+  } catch {
+    // silent-catch: frame owner geometry is a best-effort offset; callers retain the main-frame point.
+    return { x: 0, y: 0 }
+  }
+}
+
+async function normalizedTargetPoint(
+  controller: BrowserController,
+  tabId: string | null,
+  frameId: string,
+  box: { x?: unknown; y?: unknown; width?: unknown; height?: unknown } | null | undefined,
+): Promise<{ x: number; y: number; cssX: number; cssY: number; width: number; height: number } | null> {
+  const x = Number(box?.x)
+  const y = Number(box?.y)
+  const width = Number(box?.width)
+  const height = Number(box?.height)
+  if (![x, y, width, height].every(Number.isFinite) || width <= 0 || height <= 0) return null
+  const offset = await frameViewportOffset(controller, tabId, frameId)
+  const cssX = offset.x + x + width / 2
+  const cssY = offset.y + y + height / 2
+  const viewport = await controller.getViewportMetrics(tabId)
+  if (!(viewport.width > 0 && viewport.height > 0)) return null
+  return {
+    x: Math.max(0, Math.min(999, (cssX / viewport.width) * 1000)),
+    y: Math.max(0, Math.min(999, (cssY / viewport.height) * 1000)),
+    cssX,
+    cssY,
+    width: viewport.width,
+    height: viewport.height,
   }
 }
 
@@ -305,110 +423,6 @@ async function extractSearchResults(
     .filter((row) => row.title && row.url)
 }
 
-function buildClickByTextJs(text: string, exact: boolean): string {
-  return `
-    (() => {
-      ${buildTargetSemanticsLibraryJs()}
-      const target = ${JSON.stringify(text)}
-      const exact = ${exact ? 'true' : 'false'}
-      const normalize = (s) => (s || '').replace(/\\s+/g, ' ').trim()
-      const queue = [document]
-      const visited = new Set()
-      const all = []
-      while (queue.length) {
-        const root = queue.shift()
-        if (!root || visited.has(root)) continue
-        visited.add(root)
-        let nodes = []
-        try {
-          nodes = Array.from(root.querySelectorAll('*'))
-        } catch {
-          nodes = []
-        }
-        for (const node of nodes) {
-          all.push(node)
-          const shadow = node?.shadowRoot
-          if (shadow && !visited.has(shadow)) queue.push(shadow)
-        }
-      }
-
-      const visible = (el) => {
-        try {
-          const rect = el.getBoundingClientRect()
-          if (!rect || rect.width <= 0 || rect.height <= 0) return false
-          const style = window.getComputedStyle(el)
-          if (!style || style.visibility === 'hidden' || style.display === 'none' || Number(style.opacity || '1') <= 0) return false
-          return true
-        } catch {
-          return false
-        }
-      }
-
-      const isClickable = (el) => {
-        const tag = (el.tagName || '').toLowerCase()
-        if (['a', 'button', 'summary'].includes(tag)) return true
-        if (el instanceof HTMLInputElement && ['button', 'submit'].includes((el.type || '').toLowerCase())) return true
-        const role = (el.getAttribute('role') || '').toLowerCase()
-        if (['button', 'link', 'menuitem', 'option', 'tab'].includes(role)) return true
-        if (typeof el.onclick === 'function') return true
-        if (el.hasAttribute('onclick') || el.hasAttribute('data-testid')) return true
-        return false
-      }
-
-      const candidates = all.filter((el) => el instanceof HTMLElement && visible(el) && isClickable(el))
-      let matched = null
-      for (const el of candidates) {
-        const txt = normalize(el.textContent || el.getAttribute('aria-label') || el.getAttribute('title') || el.getAttribute('value') || '')
-        if (!txt) continue
-        if ((exact && txt === target) || (!exact && txt.includes(target))) {
-          matched = el
-          break
-        }
-      }
-      let viaPointerOwner = false
-      if (!matched) {
-        // D10-c（真机实锚：XHS creator "写长文" 是零语义标记的 span，React
-        // 根委托监听）：文本命中的可见叶子向上爬 cursor:pointer owner。
-        for (const el of all) {
-          if (!(el instanceof HTMLElement) || el.children.length > 0 || !visible(el)) continue
-          const txt = normalize(el.textContent || '')
-          if (!txt) continue
-          if (!((exact && txt === target) || (!exact && txt.includes(target)))) continue
-          let owner = el
-          for (let i = 0; i < 8 && owner; i++) {
-            let cursor = ''
-            try { cursor = window.getComputedStyle(owner).cursor } catch { cursor = '' }
-            if (cursor === 'pointer') { matched = owner; viaPointerOwner = true; break }
-            // D14：爬到 shadow root 顶端时跨界跳到 host 继续——Web Component
-            // 的 pointer 信号可能只标在 host（light 侧）上。
-            owner = owner.parentElement || ((owner.getRootNode && owner.getRootNode().host) || null)
-          }
-          if (matched) break
-        }
-      }
-      if (!matched) return 'Element by text not found: ' + target
-      // EP1-I3 live-target net — the located element's clickable owner may be
-      // a payment/captcha/改密 control even when the search text was generic.
-      const __readyOwnerLabel = readyClickSemanticsLabel(matched)
-      if (__readyOwnerLabel && READY_DESTRUCTIVE_TARGET_PATTERNS.some((p) => p.test(__readyOwnerLabel))) {
-        return { __readyDestructiveTargetBlocked: true, label: __readyOwnerLabel.slice(0, 80) }
-      }
-      matched.scrollIntoView({ block: 'center', behavior: 'instant' })
-      matched.dispatchEvent(new MouseEvent('mousemove', { bubbles: true }))
-      // D10-c：委托型控件监听 pointerdown/mousedown，先派发指针序列再
-      // el.click() 保留原生激活语义；对原生控件多出的前奏无害。
-      const __readyRect = matched.getBoundingClientRect()
-      const __readyOpts = { bubbles: true, cancelable: true, view: window, clientX: __readyRect.left + __readyRect.width / 2, clientY: __readyRect.top + __readyRect.height / 2 }
-      matched.dispatchEvent(new PointerEvent('pointerdown', __readyOpts))
-      matched.dispatchEvent(new MouseEvent('mousedown', __readyOpts))
-      matched.dispatchEvent(new PointerEvent('pointerup', __readyOpts))
-      matched.dispatchEvent(new MouseEvent('mouseup', __readyOpts))
-      matched.click()
-      return 'Clicked by text' + (viaPointerOwner ? ' (pointer-owner)' : '') + ': ' + normalize(matched.textContent || matched.getAttribute('aria-label') || matched.getAttribute('title') || matched.tagName)
-    })()
-  `
-}
-
 // --- D10 frame 穿透（2026-07-04）---------------------------------------
 // 定位器 JS 经 executeJS 只达主帧；创作类页面（XHS creator 等）把交互 UI
 // 渲染在 iframe/OOPIF 内，click_text/read_page_map 永远看不见。这里给
@@ -420,34 +434,59 @@ function isClickByTextMiss(result: unknown): boolean {
 }
 
 /**
- * 主帧 miss 后逐子帧重试 buildClickByTextJs。命中即停（click JS 只在命中
- * 时产生副作用，未命中帧无副作用，顺序尝试安全）；破坏性目标 owner 复查
- * 由 click JS 自身携带，命中封锁对象由调用方统一 throwIfLiveTargetGuardBlocked。
+ * 主帧 miss 后逐子帧做只读定位；命中后把 frame 坐标换算到顶层视口，
+ * 再经同一个可信指针通道点击。
  */
 async function clickByTextAcrossFrames(
   controller: BrowserController,
   tabId: string | null,
   text: string,
   exact: boolean,
+  signal?: AbortSignal,
 ): Promise<{ result: unknown; frameKey: string | null; framesSearched: number }> {
-  const js = buildClickByTextJs(text, exact)
-  const mainResult = await controller.executeJS(tabId, js)
-  if (!isClickByTextMiss(mainResult)) return { result: mainResult, frameKey: null, framesSearched: 0 }
+  const js = buildLocateTextTargetJs(text, exact)
+  const clickLocated = async (raw: unknown, frameKey: string | null): Promise<unknown> => {
+    if (!raw || typeof raw !== 'object' || (raw as { ok?: unknown }).ok !== true) return raw
+    const located = raw as { cssX?: unknown; cssY?: unknown; width?: unknown; height?: unknown; text?: unknown; href?: unknown }
+    const localX = Number(located.cssX)
+    const localY = Number(located.cssY)
+    if (!Number.isFinite(localX) || !Number.isFinite(localY)) return raw
+    const offset = frameKey ? await frameViewportOffset(controller, tabId, frameKey) : { x: 0, y: 0 }
+    const metrics = await controller.getViewportMetrics(tabId)
+    const x = ((offset.x + localX) / Math.max(1, metrics.width)) * 1000
+    const y = ((offset.y + localY) / Math.max(1, metrics.height)) * 1000
+    const clicked = await runGuardedCoordinateClick(controller, tabId, x, y, signal)
+    return {
+      ok: true,
+      trustedInput: true,
+      text: located.text || text,
+      href: located.href,
+      point: { x: clicked.cssX, y: clicked.cssY },
+    }
+  }
+  const mainLocated = await controller.executeJS(tabId, js)
+  if (mainLocated && typeof mainLocated === 'object' && (mainLocated as { ok?: unknown }).ok === true) {
+    return { result: await clickLocated(mainLocated, null), frameKey: null, framesSearched: 0 }
+  }
   const frames = listSubframesSafe(controller, tabId)
   if (typeof controller.executeJSInFrame === 'function') {
     for (const frame of frames) {
       try {
-        const result = await controller.executeJSInFrame(tabId, frame.frameKey, js)
-        if (!isClickByTextMiss(result)) return { result, frameKey: frame.frameKey, framesSearched: frames.length }
+        const located = await controller.executeJSInFrame(tabId, frame.frameKey, js)
+        if (located && typeof located === 'object' && (located as { ok?: unknown }).ok === true) {
+          return {
+            result: await clickLocated(located, frame.frameKey),
+            frameKey: frame.frameKey,
+            framesSearched: frames.length,
+          }
+        }
       } catch {
         // silent-catch: 单帧执行失败（帧销毁/导航中）不阻断其余帧尝试。
         continue
       }
     }
   }
-  const missText = typeof mainResult === 'string'
-    ? `${mainResult}（已搜索主帧与 ${frames.length} 个子帧）`
-    : mainResult
+  const missText = `Element by text not found: ${text}（已搜索主帧与 ${frames.length} 个子帧）`
   return { result: missText, frameKey: null, framesSearched: frames.length }
 }
 
@@ -549,7 +588,7 @@ function buildLocateTextTargetJs(text: string, exact: boolean, hrefContains = ''
             let cursor = ''
             try { cursor = window.getComputedStyle(owner).cursor } catch { cursor = '' }
             if (cursor === 'pointer') { matched = owner; break }
-            // D14：跨 shadow 边界跳 host，同 buildClickByTextJs。
+            // D14：跨 shadow 边界跳 host，继续寻找可见的指针 owner。
             owner = owner.parentElement || ((owner.getRootNode && owner.getRootNode().host) || null)
           }
           if (matched) break
@@ -582,6 +621,60 @@ function buildLocateTextTargetJs(text: string, exact: boolean, hrefContains = ''
       }
     })()
   `
+}
+
+async function runTrustedSmartType(
+  controller: BrowserController,
+  tabId: string | null,
+  options: {
+    target: string
+    text: string
+    clearFirst: boolean
+    submit: boolean
+    allowPasswordFill: boolean
+  },
+  signal?: AbortSignal,
+): Promise<{ ok: boolean; output: string }> {
+  const probe = await controller.executeJS(tabId, buildSmartTypeProbeJs(options))
+  throwIfLiveTargetGuardBlocked(probe, { target: options.target })
+  if (!probe || typeof probe !== 'object' || (probe as { ok?: unknown }).ok !== true) {
+    return { ok: false, output: typeof probe === 'string' ? probe : 'Smart input target was not found.' }
+  }
+  const located = probe as {
+    x?: unknown
+    y?: unknown
+    width?: unknown
+    height?: unknown
+    target?: unknown
+    score?: unknown
+  }
+  const width = Number(located.width)
+  const height = Number(located.height)
+  if (!(width > 0 && height > 0)) return { ok: false, output: 'Smart input target has no visible viewport.' }
+  const typed = await runGuardedCoordinateType(
+    controller,
+    tabId,
+    (Number(located.x) / width) * 1000,
+    (Number(located.y) / height) * 1000,
+    options.text,
+    {
+      clearBefore: options.clearFirst,
+      pressEnter: options.submit,
+      useShiftEnter: false,
+      allowPasswordFill: options.allowPasswordFill,
+    },
+    signal,
+  )
+  return {
+    ok: typed.typed,
+    output: JSON.stringify({
+      ok: typed.typed,
+      trustedInput: true,
+      target: String(located.target || options.target),
+      score: Number(located.score || 0),
+      ...typed,
+    }),
+  }
 }
 
 export async function runWorkflowStep(
@@ -627,10 +720,10 @@ export async function runWorkflowStep(
   if (action === 'click') {
     const selector = String(step.selector || '').trim()
     if (!selector) return 'Error: workflow click missing selector'
-    // EP1-I3 live-target net — browser_run_workflow is not in the dispatch
+    // EP1-I3 live-target net — internal_browser_workflow is not in the dispatch
     // confirmation policy, so the inner click is invisible to the gate; it
     // must re-check at the execution layer via the shared guarded entry.
-    return await runGuardedSelectorClick(controller, tabId, selector)
+    return await runGuardedSelectorClick(controller, tabId, selector, signal)
   }
 
   if (action === 'click_text') {
@@ -639,7 +732,7 @@ export async function runWorkflowStep(
     const exact = step.exact === true
     // The text arg itself is the semantic the model chose to click — guard
     // it directly, and the located-element owner label is re-checked inside
-    // buildClickByTextJs before the click fires.
+    // the shared trusted-input path before the click fires.
     const textHit = matchBrowserDestructiveTarget(text)
     if (textHit) {
       throw new ToolDomainError(
@@ -648,7 +741,7 @@ export async function runWorkflowStep(
         { text, ruleId: textHit.ruleId },
       )
     }
-    const located = await clickByTextAcrossFrames(controller, tabId, text, exact)
+    const located = await clickByTextAcrossFrames(controller, tabId, text, exact, signal)
     throwIfLiveTargetGuardBlocked(located.result, { text, via: 'workflow_click_text' })
     return located.frameKey ? `${String(located.result)} [frame ${located.frameKey}]` : String(located.result)
   }
@@ -674,7 +767,7 @@ export async function runWorkflowStep(
       clearFirst,
       allowPasswordFill: false,
       submit,
-    })
+    }, signal)
   }
 
   if (action === 'type_at') {
@@ -739,12 +832,6 @@ export async function runWorkflowStep(
     return truncate(text, Number(step.max_chars || 6000))
   }
 
-  if (action === 'execute_js') {
-    const code = typeof step.code === 'string' ? step.code : ''
-    if (!code) return 'Error: workflow execute_js missing code'
-    return String(await controller.executeJS(tabId, code))
-  }
-
   if (action === 'compose') {
     const text = String(step.text || '')
     if (!text) return 'Error: workflow compose missing text'
@@ -754,9 +841,14 @@ export async function runWorkflowStep(
     // EP1-I3 live-target net — workflow compose shares the smart-type guard;
     // workflow steps are model-authored, so there is no confirmed-cue path
     // (allowPasswordFill stays false) and markers must throw, not stringify.
-    const rawWorkflowCompose = await controller.executeJS(tabId, buildSmartTypeJs({ target, text, clearFirst, submit }))
-    throwIfLiveTargetGuardBlocked(rawWorkflowCompose, { target, via: 'workflow_compose' })
-    return String(rawWorkflowCompose)
+    const composed = await runTrustedSmartType(controller, tabId, {
+      target,
+      text,
+      clearFirst,
+      submit,
+      allowPasswordFill: false,
+    }, signal)
+    return composed.output
   }
 
   return `Error: unknown workflow action "${action}"`
@@ -859,42 +951,21 @@ async function clickActionTarget(
   target: ActionTargetCandidate,
   abortSignal?: AbortSignal,
 ): Promise<{ ok: boolean; method: string }> {
-  const canUseSelector = typeof target.selectorHint === 'string' &&
-    target.selectorHint.length > 0 &&
-    (target.selectorHint.startsWith('#') || target.selectorHint.includes('['))
+  const selector = typeof target.selectorHint === 'string' ? target.selectorHint : ''
+  const canUseSelector = selector.length > 0 &&
+    (selector.startsWith('#') || selector.includes('['))
   if (canUseSelector) {
-    const result = await controller.executeJS(
-      tabId,
-      `
-        (() => {
-          const selector = ${JSON.stringify(target.selectorHint)}
-          try {
-            const node = document.querySelector(selector)
-            if (!(node instanceof HTMLElement)) return { ok: false, method: 'selector_not_found' }
-            node.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' })
-            node.dispatchEvent(new MouseEvent('mousemove', { bubbles: true }))
-            if (typeof node.click === 'function') node.click()
-            else {
-              node.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
-              node.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }))
-              node.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-            }
-            return { ok: true, method: 'selector_click' }
-          } catch (error) {
-            return { ok: false, method: String(error || 'selector_click_failed') }
-          }
-        })()
-      `,
-    ) as { ok?: boolean; method?: string } | null
-    if (result?.ok) {
-      await settleAfterAction(controller, tabId, abortSignal)
-      return { ok: true, method: String(result.method || 'selector_click') }
+    const result = await runGuardedSelectorClick(controller, tabId, selector, abortSignal)
+    try {
+      const parsed = JSON.parse(result) as { ok?: unknown }
+      if (parsed.ok === true) return { ok: true, method: 'trusted_selector_click' }
+    } catch {
+      // silent-catch: malformed selector-probe output falls through to the already-resolved coordinate candidate.
     }
   }
   if (Number.isFinite(target.x) && Number.isFinite(target.y)) {
-    await dispatchClickAt(controller, tabId, Number(target.x), Number(target.y))
-    await settleAfterAction(controller, tabId, abortSignal)
-    return { ok: true, method: 'coordinate_click' }
+    await runGuardedCoordinateClick(controller, tabId, Number(target.x), Number(target.y), abortSignal)
+    return { ok: true, method: 'trusted_coordinate_click' }
   }
   return { ok: false, method: 'no_clickable_target' }
 }
@@ -929,7 +1000,7 @@ async function attemptRecoverPageState(
   const goBack = controller.goBack(tabId)
   if (goBack.success) {
     await settleAfterAction(controller, tabId, signal)
-    return { recovered: true, method: 'browser_go_back' }
+    return { recovered: true, method: 'browser_navigate(action=back)' }
   }
 
   return { recovered: false, method: 'recover_failed' }
@@ -1067,7 +1138,28 @@ export async function executeBrowserActTool(
 ): Promise<string | ToolExecutionOutput> {
   const { controller, abortSignal, sessionId, currentUserText, attachBrowserActionSessionOutput } = ctx
   switch (toolName) {
-      case 'browser_navigate': {
+      case 'tabs_open': {
+        const url = String(args.url || 'about:blank')
+        const created = await controller.createTab(url, {
+          background: args.background === true,
+          openerTabId: typeof args.opener_tab_id === 'string' ? args.opener_tab_id : null,
+        })
+        return JSON.stringify(created, null, 2)
+      }
+
+      case 'tabs_switch': {
+        const tabId = String(args.tab_id || '')
+        if (!tabId) return 'Error: tab_id is required'
+        return JSON.stringify(controller.switchTab(tabId), null, 2)
+      }
+
+      case 'tabs_close': {
+        const tabId = String(args.tab_id || '')
+        if (!tabId) return 'Error: tab_id is required'
+        return JSON.stringify(controller.closeTab(tabId), null, 2)
+      }
+
+      case 'navigate_open': {
         const url = args.url as string
         if (!url) return 'Error: url is required'
         // Tool-layer tab targeting (plan §7.8): navigate the given tab when set
@@ -1109,7 +1201,7 @@ export async function executeBrowserActTool(
         )
       }
 
-      case 'browser_search': {
+      case 'search': {
         const query = args.query as string
         if (!query) return 'Error: query is required'
         const searchTabId = (args.tab_id as string) || null
@@ -1158,10 +1250,178 @@ export async function executeBrowserActTool(
         return `Search failed for "${query}". Tried: ${uniq.join(', ')}.\n${errors.join('\n')}`
       }
 
-      case 'browser_act_on_target': {
+      case 'fill_form': {
+        const fields = Array.isArray(args.fields) ? args.fields : []
+        if (fields.length === 0) return 'Error: fields is required'
+        const outcome = await runBrowserFillFormSequence(
+          fields,
+          { tabId: args.tab_id, submit: args.submit === true },
+          (operation, input) => executeBrowserActTool(operation, input, ctx),
+        )
+        return browserStructuredOutput(outcome)
+      }
+
+      case 'select': {
+        if (typeof args.target_id === 'string') {
+          return executeBrowserActTool('click_target', {
+            ...args,
+            action: 'choose',
+            value: args.value ?? (Array.isArray(args.values) ? args.values[0] : undefined),
+          }, ctx)
+        }
+        const selector = String(args.selector || '').trim()
+        const values = (Array.isArray(args.values) ? args.values.map(String) : [String(args.value || '')])
+          .map((value) => value.trim())
+          .filter(Boolean)
+        if (!selector || values.length === 0) return 'Error: selector and value are required'
+        const tabId = (args.tab_id as string) || null
+        const probe = await controller.executeJS(tabId, `(() => {
+          const node = document.querySelector(${JSON.stringify(selector)})
+          if (!(node instanceof HTMLSelectElement)) return { ok: false, error: 'select_not_found' }
+          const rect = node.getBoundingClientRect()
+          return {
+            ok: rect.width > 0 && rect.height > 0,
+            rect: { x: rect.left, y: rect.top, width: rect.width, height: rect.height },
+            viewport: { width: innerWidth, height: innerHeight },
+            multiple: node.multiple === true,
+            options: Array.from(node.options).map((option, index) => ({
+              index,
+              value: String(option.value || ''),
+              text: String(option.text || '').trim(),
+              disabled: option.disabled === true,
+            })),
+          }
+        })()`)
+        const select = probe as {
+          ok?: boolean
+          rect?: { x?: number; y?: number; width?: number; height?: number }
+          viewport?: { width?: number; height?: number }
+          multiple?: boolean
+          options?: Array<{ index?: number; value?: string; text?: string; disabled?: boolean }>
+        } | null
+        const viewportWidth = Number(select?.viewport?.width)
+        const viewportHeight = Number(select?.viewport?.height)
+        const rect = select?.rect
+        const options = Array.isArray(select?.options) ? select.options : []
+        if (!select?.ok || !rect || !(viewportWidth > 0 && viewportHeight > 0)) {
+          return browserStructuredOutput({ ok: false, errorKind: 'select_not_found', selector })
+        }
+        const matchedIndexes = values.map((wanted) => {
+          const matches = options.filter((option) => !option.disabled && (option.value === wanted || option.text === wanted))
+          return matches.length === 1 ? Number(matches[0].index) : -1
+        })
+        if (matchedIndexes.some((index) => index < 0)) {
+          return browserStructuredOutput({
+            ok: false,
+            errorKind: 'select_option_not_unique',
+            requested: values,
+            options: options.slice(0, 80),
+          })
+        }
+        const centerX = Number(rect.x) + Number(rect.width) / 2
+        const centerY = Number(rect.y) + Number(rect.height) / 2
+        await runGuardedCoordinateClick(
+          controller,
+          tabId,
+          (centerX / viewportWidth) * 999,
+          (centerY / viewportHeight) * 999,
+          abortSignal,
+        )
+        if (select.multiple === true) {
+          for (const index of [...matchedIndexes].sort((a, b) => a - b)) {
+            await sendKeyStroke(controller, tabId, 'Home')
+            for (let cursor = 0; cursor < index; cursor += 1) {
+              await sendKeyStroke(controller, tabId, 'ArrowDown')
+            }
+            await sendKeyStroke(controller, tabId, 'Space', ['control'])
+          }
+        } else {
+          await sendKeyStroke(controller, tabId, 'Home')
+          for (let cursor = 0; cursor < matchedIndexes[0]; cursor += 1) {
+            await sendKeyStroke(controller, tabId, 'ArrowDown')
+          }
+          await sendKeyStroke(controller, tabId, 'Enter')
+        }
+        return browserStructuredOutput({ ok: true, values, trustedInput: true })
+      }
+
+      case 'hover': {
+        const tabId = (args.tab_id as string) || null
+        let x = Number(args.x)
+        let y = Number(args.y)
+        if (!Number.isFinite(x) || !Number.isFinite(y)) {
+          const payload = await captureAgentPageMap(controller, tabId, DEFAULT_AGENT_PAGE_MAP_MAX_BYTES)
+          const map = payload.pageMap as { viewport?: { width?: number; height?: number }; targets?: Array<{ targetId?: string; box?: { x: number; y: number; width: number; height: number } }> }
+          const target = map.targets?.find((item) => item.targetId === args.target_id)
+          if (target?.box && map.viewport?.width && map.viewport.height) {
+            x = ((target.box.x + target.box.width / 2) / map.viewport.width) * 1000
+            y = ((target.box.y + target.box.height / 2) / map.viewport.height) * 1000
+          } else if (typeof args.selector === 'string') {
+            const rect = await controller.executeJS(tabId, `(() => {
+              const node = document.querySelector(${JSON.stringify(args.selector)})
+              if (!(node instanceof Element)) return null
+              const rect = node.getBoundingClientRect()
+              return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2, width: innerWidth, height: innerHeight }
+            })()`) as { x?: number; y?: number; width?: number; height?: number } | null
+            if (rect?.width && rect.height) {
+              x = (Number(rect.x) / rect.width) * 1000
+              y = (Number(rect.y) / rect.height) * 1000
+            }
+          }
+        }
+        if (!Number.isFinite(x) || !Number.isFinite(y)) return 'Error: hover target not found'
+        const point = await resolveCssPoint(controller, tabId, x, y)
+        await controller.dispatchMouse(tabId, { type: 'mouseMoved', x: point.cssX, y: point.cssY, button: 'none', buttons: 0 })
+        return browserStructuredOutput({ ok: true, normalized: { x: point.nx, y: point.ny }, css: { x: point.cssX, y: point.cssY } })
+      }
+
+      case 'drag': {
+        const tabId = (args.tab_id as string) || null
+        let sourceX = Number(args.source_x)
+        let sourceY = Number(args.source_y)
+        let targetX = Number(args.target_x)
+        let targetY = Number(args.target_y)
+        if (![sourceX, sourceY, targetX, targetY].every(Number.isFinite)) {
+          const payload = await captureAgentPageMap(controller, tabId, DEFAULT_AGENT_PAGE_MAP_MAX_BYTES)
+          const map = payload.pageMap as { viewport?: { width?: number; height?: number }; targets?: Array<{ targetId?: string; box?: { x: number; y: number; width: number; height: number } }> }
+          const center = (targetId: unknown): [number, number] | null => {
+            const item = map.targets?.find((target) => target.targetId === targetId)
+            if (!item?.box || !map.viewport?.width || !map.viewport.height) return null
+            return [
+              ((item.box.x + item.box.width / 2) / map.viewport.width) * 1000,
+              ((item.box.y + item.box.height / 2) / map.viewport.height) * 1000,
+            ]
+          }
+          const source = center(args.source_target_id)
+          const target = center(args.target_target_id)
+          if (source) [sourceX, sourceY] = source
+          if (target) [targetX, targetY] = target
+        }
+        if (![sourceX, sourceY, targetX, targetY].every(Number.isFinite)) return 'Error: drag source and target are required'
+        const source = await resolveCssPoint(controller, tabId, sourceX, sourceY)
+        const target = await resolveCssPoint(controller, tabId, targetX, targetY)
+        await controller.dispatchMouse(tabId, { type: 'mouseMoved', x: source.cssX, y: source.cssY, button: 'left', buttons: 0 })
+        await controller.dispatchMouse(tabId, { type: 'mousePressed', x: source.cssX, y: source.cssY, button: 'left', buttons: 1, clickCount: 1 })
+        for (let step = 1; step <= 8; step += 1) {
+          await controller.dispatchMouse(tabId, {
+            type: 'mouseMoved',
+            x: source.cssX + ((target.cssX - source.cssX) * step) / 8,
+            y: source.cssY + ((target.cssY - source.cssY) * step) / 8,
+            button: 'left',
+            buttons: 1,
+          })
+        }
+        await controller.dispatchMouse(tabId, { type: 'mouseReleased', x: target.cssX, y: target.cssY, button: 'left', buttons: 0, clickCount: 1 })
+        return browserStructuredOutput({ ok: true, source: { x: source.cssX, y: source.cssY }, target: { x: target.cssX, y: target.cssY } })
+      }
+
+      case 'click_target':
+      case 'type_target': {
         const targetId = String(args.target_id || args.targetId || '').trim()
-        const action = String(args.action || 'click') as AgentBrowserAction
-        const value = args.value === undefined ? undefined : String(args.value)
+        const action = String(toolName === 'type_target' ? 'fill' : (args.action || 'click')) as AgentBrowserAction
+        const value = toolName === 'type_target'
+          ? String(args.text || '')
+          : args.value === undefined ? undefined : String(args.value)
         const disambiguation = String(args.disambiguation || '').trim()
         const readBack = String(args.read_back || args.readBack || 'delta') as AgentBrowserReadBack
         if (!targetId) return browserStructuredErrorOutput(agentBrowserError('target_not_found', 'target_id is required'))
@@ -1170,18 +1430,34 @@ export async function executeBrowserActTool(
         }
         let tabId = (args.tab_id as string) || null
         tabId = (await resolveHighControlAgentTab(controller, args, { signal: abortSignal })).tabId
-        const parsed = parseTargetId(targetId)
-        if (!parsed) {
-          return browserStructuredErrorOutput(agentBrowserError('target_not_found', `Malformed target id: ${targetId}`))
+        let resolvedRef = await browserSnapshotService.resolveRef(controller, tabId, targetId)
+        let refreshedFromStaleSnapshot = false
+        if (!resolvedRef.ok && resolvedRef.errorCode === 'stale_snapshot') {
+          await captureAgentPageMap(controller, tabId, DEFAULT_AGENT_PAGE_MAP_MAX_BYTES, { force: true })
+          resolvedRef = browserSnapshotService.rebindRef(controller, tabId, targetId)
+          refreshedFromStaleSnapshot = resolvedRef.ok
         }
-        const currentGeneration = currentBrowserPageMapGeneration(controller, tabId)
-        if (currentGeneration === null) {
+        if (!resolvedRef.ok) {
           return browserStructuredErrorOutput(agentBrowserError(
-            'stale_page_map',
-            'No page map has been read for this tab. Call browser_read_page_map first.',
-            { targetGeneration: parsed.generation },
+            resolvedRef.errorCode === 'malformed_ref' || resolvedRef.errorCode === 'wrong_tab'
+              ? 'target_not_found'
+              : 'stale_page_map',
+            resolvedRef.errorCode === 'stale_document'
+              ? 'The target belongs to an earlier document and can never be used on the current page. Read browser_snapshot again.'
+              : 'The target reference is no longer current. Read browser_snapshot again and choose one of the returned candidates.',
+            {
+              targetId,
+              reason: resolvedRef.errorCode,
+              previousTarget: resolvedRef.previousTarget,
+              currentDocumentEpoch: resolvedRef.currentDocumentEpoch,
+              currentSnapshotRevision: resolvedRef.currentSnapshotRevision,
+            },
           ))
         }
+        const parsed = parseTargetId(resolvedRef.rawTargetId)
+        if (!parsed) return browserStructuredErrorOutput(agentBrowserError('target_not_found', `Malformed internal target id: ${targetId}`))
+        const currentGeneration = resolvedRef.snapshotRevision
+        const activeTargetId = resolvedRef.target.targetId
         // D10 frame 穿透：targetId 的 frameId 槽位路由回 map 索引该目标的
         // 帧（act 靠帧内元素重枚举定位，跨帧索引不通用）。帧已消失按
         // stale_page_map 收口，提示重读 map。
@@ -1195,18 +1471,38 @@ export async function executeBrowserActTool(
         }
         const isFrameGoneError = (error: unknown): boolean =>
           Boolean(error && typeof error === 'object' && (error as { code?: unknown }).code === 'FRAME_NOT_FOUND')
-        let liveProbe: { matchCount?: number; disabled?: boolean; target?: unknown } | null
+        let liveProbe: {
+          matchCount?: number
+          disabled?: boolean
+          target?: unknown
+          clickPoint?: {
+            x?: unknown
+            y?: unknown
+            vw?: unknown
+            vh?: unknown
+            hostShadow?: unknown
+            rect?: { left?: unknown; top?: unknown; width?: unknown; height?: unknown } | null
+          } | null
+        } | null
         try {
           liveProbe = await runInTargetFrame(buildBrowserTargetProbeJs(parsed.node)) as {
             matchCount?: number
             disabled?: boolean
             target?: unknown
+            clickPoint?: {
+              x?: unknown
+              y?: unknown
+              vw?: unknown
+              vh?: unknown
+              hostShadow?: unknown
+              rect?: { left?: unknown; top?: unknown; width?: unknown; height?: unknown } | null
+            } | null
           } | null
         } catch (error) {
           if (isFrameGoneError(error)) {
             return browserStructuredErrorOutput(agentBrowserError(
               'stale_page_map',
-              `Target ${targetId} belongs to frame ${targetFrameKey}, which is no longer present. Call browser_read_page_map again.`,
+              `Target ${targetId} belongs to frame ${targetFrameKey}, which is no longer present. Call browser_snapshot again.`,
               { targetId, frameKey: targetFrameKey },
             ))
           }
@@ -1218,15 +1514,16 @@ export async function executeBrowserActTool(
             currentGeneration,
             matchCount: Number(liveProbe?.matchCount || 0),
             candidates: liveProbe?.target ? [liveProbe.target] : [],
-            ambiguityGroup: currentBrowserPageMapAmbiguity(controller, tabId, targetId),
+            ambiguityGroup: currentBrowserPageMapAmbiguity(controller, tabId, activeTargetId),
+            resolvedRef: parsed,
           },
         )
         if (isAgentBrowserError(gated)) return browserStructuredErrorOutput(gated)
         if (!liveProbe) {
           return browserStructuredErrorOutput(agentBrowserError(
             'target_not_found',
-            `Target ${targetId} was not found on the current page.`,
-            { targetId },
+            `Target ${activeTargetId} was not found on the current page.`,
+            { targetId: activeTargetId },
           ))
         }
         if (liveProbe?.disabled === true) {
@@ -1237,12 +1534,18 @@ export async function executeBrowserActTool(
           ))
         }
         const targetRecord = liveProbe?.target && typeof liveProbe.target === 'object'
-          ? liveProbe.target as { role?: string; name?: string; value?: string; states?: Record<string, unknown> }
+          ? liveProbe.target as {
+              role?: string
+              name?: string
+              value?: string
+              states?: Record<string, unknown>
+              box?: { x?: unknown; y?: unknown; width?: unknown; height?: unknown }
+            }
           : null
         if (targetRecord?.states?.fileInput === true) {
           return browserStructuredErrorOutput(agentBrowserError(
             'script_blocked',
-            `Target ${targetId} is a file input. Use browser_upload_scope_attachment for file upload.`,
+            `Target ${targetId} is a file input. Use browser_upload for file upload.`,
             { targetId, target: liveProbe.target },
           ))
         }
@@ -1288,17 +1591,59 @@ export async function executeBrowserActTool(
         const beforeTabs = snapshotBrowserTabs(controller)
         const before = readBack === 'none' ? null : await readBrowserActionDeltaBestEffort(controller, tabId, 'before')
         let actionResult: unknown
-        try {
-          actionResult = await runInTargetFrame(buildBrowserActOnTargetJs(parsed.node, action, value))
-        } catch (error) {
-          if (isFrameGoneError(error)) {
-            return browserStructuredErrorOutput(agentBrowserError(
-              'stale_page_map',
-              `Target ${targetId} belongs to frame ${targetFrameKey}, which disappeared before the action ran. Call browser_read_page_map again.`,
-              { targetId, frameKey: targetFrameKey },
-            ))
+        const point = await normalizedTargetPoint(controller, tabId, targetFrameKey, targetRecord?.box)
+        if (!point) {
+          return browserStructuredErrorOutput(agentBrowserError(
+            'target_not_found',
+            `Target ${activeTargetId} has no visible hit point. Refresh browser_snapshot after bringing it into view.`,
+            { targetId: activeTargetId, frameKey: targetFrameKey },
+          ))
+        }
+        const boxWidth = Number(targetRecord?.box?.width || 0)
+        const boxHeight = Number(targetRecord?.box?.height || 0)
+        const trustedClickPoint = {
+          x: point.cssX,
+          y: point.cssY,
+          vw: point.width,
+          vh: point.height,
+          hostShadow: liveProbe.clickPoint?.hostShadow || null,
+          rect: {
+            left: point.cssX - boxWidth / 2,
+            top: point.cssY - boxHeight / 2,
+            width: boxWidth,
+            height: boxHeight,
+          },
+        }
+        if (action === 'fill') {
+          const typed = await runGuardedCoordinateType(controller, tabId, point.x, point.y, String(value || ''), {
+            clearBefore: true,
+            pressEnter: false,
+            useShiftEnter: false,
+            allowPasswordFill: argsCarryPasswordCue(JSON.stringify(args)),
+          }, abortSignal)
+          actionResult = {
+            ok: typed.typed,
+            errorCode: typed.typed ? null : typed.skipReason || 'target_not_fillable',
+            trustedInput: true,
+            typed,
           }
-          throw error
+        } else if (action === 'hover') {
+          await controller.dispatchMouse(tabId, {
+            type: 'mouseMoved',
+            x: point.cssX,
+            y: point.cssY,
+            button: 'none',
+            buttons: 0,
+          })
+          actionResult = { ok: true, trustedInput: true, hoverPoint: trustedClickPoint }
+        } else if (action === 'choose') {
+          await runGuardedCoordinateClick(controller, tabId, point.x, point.y, abortSignal)
+          await controller.typeTextDirectly(tabId, String(value || ''))
+          await sendKeyStroke(controller, tabId, 'Enter')
+          actionResult = { ok: true, trustedInput: true, value, clickPoint: trustedClickPoint }
+        } else {
+          const clicked = await runGuardedCoordinateClick(controller, tabId, point.x, point.y, abortSignal)
+          actionResult = { ok: true, trustedInput: true, pointTarget: clicked.pointTarget, clickPoint: trustedClickPoint }
         }
         await settleAfterAction(controller, tabId, abortSignal)
         let followedTab = await waitForActionFollowedTab(controller, tabId, beforeTabs, abortSignal)
@@ -1312,12 +1657,9 @@ export async function executeBrowserActTool(
         // 却报 changed:true，模型因此不升级）。
         let afterDelta = readBack === 'none' ? null : await readBrowserActionDeltaBestEffort(controller, tabId, 'after')
         let changed = didBrowserActionChange(before, afterDelta)
-        // D18 升级通道：合成点击（含 open-shadow 穿透）对 closed shadow root
-        // 内部监听器不可达（事件不向 shadow 内传播，host.click() 也点不到内部
-        // 按钮）。click 判无效果（delta 未变且未开新 tab）时，在同一次调用内
-        // 用可信指针输入（与 browser_click_at 同一 dispatchMouse 通道，含破坏
-        // 性目标闸门）在原点击坐标补真实命中测试点击。只处理主帧：iframe 的
-        // rect 坐标系与视口不同构。
+        // Closed-shadow hosts can expose a larger host rect than their actual
+        // internal button. If the first trusted hit has no observable effect,
+        // scan the composed tree once and retry another trusted coordinate.
         let escalation: Record<string, unknown> | null = null
         const rawClickPoint = !actionFailed && action === 'click' && actionResult && typeof actionResult === 'object'
           ? (actionResult as { clickPoint?: { x?: unknown; y?: unknown; vw?: unknown; vh?: unknown; hostShadow?: unknown } | null }).clickPoint
@@ -1328,18 +1670,15 @@ export async function executeBrowserActTool(
         const cph = Number(rawClickPoint?.vh)
         const clickPointValid = Number.isFinite(cpx) && Number.isFinite(cpy)
           && cpw > 0 && cph > 0 && cpx >= 0 && cpx <= cpw && cpy >= 0 && cpy <= cph
-        // D18-b：closed/无 shadowRoot 的自定义 host 合成点击必然 no-op——
-        // 无条件升级，不受动态页面 changed:true 假信号压制（第十三轮实锚：
-        // XHS 发布页占位符/轮播轮换让 delta 恒变，升级被跳过）。
         const closedShadowHost = rawClickPoint?.hostShadow === 'closed_or_none'
         const shouldEscalate = action === 'click' && !actionFailed && readBack !== 'none'
-          && !followedTab && targetFrameKey === '0' && clickPointValid
+          && !followedTab && clickPointValid
           && (closedShadowHost || !changed)
         if (action === 'click' && !actionFailed) {
           log(`act click outcome target=${targetId} changed=${changed} hostShadow=${String(rawClickPoint?.hostShadow ?? 'n/a')} escalate=${shouldEscalate}${clickPointValid ? '' : ' clickPoint=invalid'}`)
         }
         if (shouldEscalate) {
-          const escalationReason = closedShadowHost ? 'closed_shadow_host' : 'no_change_after_synthetic_click'
+          const escalationReason = closedShadowHost ? 'closed_shadow_host' : 'no_change_after_trusted_click'
           const toNormalized = (cssX: number, cssY: number) => ({
             x: Math.max(0, Math.min(999, Math.round((cssX / cpw) * 1000))),
             y: Math.max(0, Math.min(999, Math.round((cssY / cph) * 1000))),
@@ -1417,7 +1756,7 @@ export async function executeBrowserActTool(
           if (escalationSkipped) {
             const skipHint = escalationSkipped === 'target_disabled'
               ? `扫描确认目标按钮「${scanMatchedState?.text ?? ''}」当前为 disabled（页面校验未通过），任何点击都不会生效。先检查并补齐页面必填项（标题/正文描述/封面等），确认按钮变为可用后再点；不要重复盲点。`
-              : 'shadow root 内发现多个可点按钮，无法唯一判定目标。从 candidates 里选出意图按钮，用 browser_click_at 按其 normalized 坐标直接点击。'
+              : 'shadow root 内发现多个可点按钮，无法唯一判定目标。从 candidates 里选出意图按钮，用 browser_click 按其 normalized 坐标直接点击。'
             escalation = {
               attempted: false,
               mode: 'trusted_pointer',
@@ -1437,38 +1776,13 @@ export async function executeBrowserActTool(
               afterDelta = await readBrowserActionDeltaBestEffort(controller, tabId, 'after')
               let escalatedChanged = didBrowserActionChange(before, afterDelta) || Boolean(escalatedFollowedTab)
               if (escalatedFollowedTab) followedTab = escalatedFollowedTab
-              // R18：可信指针（坐标正确、事件可信）仍无变化 → 组合树直接
-              // invoke 是最后一级机械升级；结果只以 delta/新 tab 复核，不自我
-              // 宣告成功（合成 click isTrusted=false，站点可拒）。
-              let directInvoke: Record<string, unknown> | null = null
-              if (!escalatedChanged && escalationVia.startsWith('scan_')) {
-                const invoked = await invokeShadowNodeClick(
-                  controller,
-                  tabId,
-                  { cssX: escalationCss.x, cssY: escalationCss.y },
-                ).catch(() => null)
-                if (invoked) {
-                  await settleAfterAction(controller, tabId, abortSignal)
-                  const invokeFollowedTab = await waitForActionFollowedTab(controller, tabId, beforeTabs, abortSignal)
-                  afterDelta = await readBrowserActionDeltaBestEffort(controller, tabId, 'after')
-                  const changedAfterInvoke = didBrowserActionChange(before, afterDelta) || Boolean(invokeFollowedTab)
-                  directInvoke = {
-                    clicked: invoked.clicked,
-                    tag: invoked.tag,
-                    text: invoked.text,
-                    changed: changedAfterInvoke,
-                  }
-                  if (invokeFollowedTab) followedTab = invokeFollowedTab
-                  escalatedChanged = escalatedChanged || changedAfterInvoke
-                }
-              }
               // R18：仍无变化时补读瞬时提示层——delta bodyText 前 1000 字符
               // 看不见 body 末尾的校验 toast，页面可能早已说明了拒绝理由。
               const pageNotices = escalatedChanged ? [] : await readTransientPageNotices(controller, tabId)
               const stuckHint = pageNotices.length > 0
                 ? `点击后页面弹出提示：${pageNotices.map((n) => `「${n}」`).join(' ')}——按提示补齐后重试。`
-                : (!escalatedChanged && directInvoke
-                  ? '可信指针点击与组合树直接 invoke 均未引起页面变化：按钮很可能被站点内部校验拦截（常见：必填项为空、内容未就绪）。先检查页面必填项（如正文描述、封面），补齐后再点。'
+                : (!escalatedChanged
+                  ? '可信指针点击未引起页面变化：按钮很可能被站点内部校验拦截（常见：必填项为空、内容未就绪）。先检查页面必填项（如正文描述、封面），补齐后再点。'
                   : null)
               escalation = {
                 attempted: true,
@@ -1479,16 +1793,15 @@ export async function executeBrowserActTool(
                 pointTarget: escalatedPoint.pointTarget,
                 ...(scanCandidatePayload && scanCandidatePayload.length > 0 ? { candidates: scanCandidatePayload } : {}),
                 ...(scanMatchedState ? { matchedTarget: scanMatchedState } : {}),
-                ...(directInvoke ? { directInvoke } : {}),
                 ...(pageNotices.length > 0 ? { pageNotices } : {}),
                 ...(stuckHint ? { hint: stuckHint } : {}),
                 changed: escalatedChanged,
               }
               changed = changed || escalatedChanged
-              log(`act escalation done target=${targetId} via=${escalationVia} pointTarget=${JSON.stringify(escalatedPoint.pointTarget?.label ?? null)} escalatedChanged=${escalatedChanged}${directInvoke ? ` directInvoke=${JSON.stringify(directInvoke)}` : ''}${pageNotices.length > 0 ? ` notices=${JSON.stringify(pageNotices)}` : ''}`)
+              log(`act escalation done target=${targetId} via=${escalationVia} pointTarget=${JSON.stringify(escalatedPoint.pointTarget?.label ?? null)} escalatedChanged=${escalatedChanged}${pageNotices.length > 0 ? ` notices=${JSON.stringify(pageNotices)}` : ''}`)
             } catch (error) {
               // 闸门（grant_required / 待确认拒绝）保持响亮——升级点击与
-              // browser_click_at 的安全语义必须同构，不能因为是兜底就静默。
+              // browser_click 的安全语义必须同构，不能因为是兜底就静默。
               if (error instanceof ToolDomainError) throw error
               escalation = {
                 attempted: true,
@@ -1506,7 +1819,9 @@ export async function executeBrowserActTool(
           : afterDelta
         const payload = {
           ok: !actionFailed,
-          targetId,
+          targetId: activeTargetId,
+          originalTargetId: activeTargetId === targetId ? undefined : targetId,
+          refreshedFromStaleSnapshot,
           action,
           disambiguation: disambiguation || null,
           readBack,
@@ -1540,7 +1855,7 @@ export async function executeBrowserActTool(
         )
       }
 
-      case 'browser_click': {
+      case 'click_selector': {
         const selector = args.selector as string
         if (!selector) return 'Error: selector is required'
         let tabId = (args.tab_id as string) || null
@@ -1551,12 +1866,20 @@ export async function executeBrowserActTool(
         // clicking.
         const beforeTabs = snapshotBrowserTabs(controller)
         const clickBeforeUrl = activeBrowserToolUrl(controller, tabId)
-        const result = await runGuardedSelectorClick(controller, tabId, selector)
+        const result = await runGuardedSelectorClick(controller, tabId, selector, abortSignal)
+        if (result.startsWith('Error:')) {
+          return browserStructuredOutput({
+            ok: false,
+            errorKind: /not found|hidden|no visible viewport/i.test(result) ? 'target_not_found' : 'browser_operation_failed',
+            message: result.slice('Error:'.length).trim(),
+            nextSuggestedAction: 'call browser_snapshot and retry with a current target reference',
+          })
+        }
         await settleAfterAction(controller, tabId, abortSignal)
         const followedTab = await waitForActionFollowedTab(controller, tabId, beforeTabs, abortSignal)
         const confirmation = await detectBrowserPageTransactionConfirmation(controller, followedTab?.tabId || tabId)
         // P1-E5 — deterministic post-action change receipt so the model can skip
-        // a follow-up browser_read_page; never fails the click if the probe errors.
+        // a follow-up browser_read; never fails the click if the probe errors.
         const changeReceipt = await captureBrowserActionReceipt(controller, followedTab?.tabId || tabId, clickBeforeUrl)
         const output = followedTab
           ? JSON.stringify({
@@ -1582,7 +1905,7 @@ export async function executeBrowserActTool(
         })
       }
 
-      case 'browser_click_text': {
+      case 'click_text': {
         const text = String(args.text || '').trim()
         if (!text) return 'Error: text is required'
         const exact = args.exact === true
@@ -1597,12 +1920,12 @@ export async function executeBrowserActTool(
           // 与顶层视口不同构，不能换算成坐标点击）。快照先于点击副作用。
           const frameBeforeTabs = snapshotBrowserTabs(controller)
           const frameBeforeUrl = activeBrowserToolUrl(controller, tabId)
-          const frameClick = await clickByTextAcrossFrames(controller, tabId, text, exact)
+          const frameClick = await clickByTextAcrossFrames(controller, tabId, text, exact, abortSignal)
           if (isClickByTextMiss(frameClick.result)) {
             const missBase = result.error || `Element by text not found: ${text}`
             return `${missBase}（已搜索主帧与 ${frameClick.framesSearched} 个子帧）`
           }
-          throwIfLiveTargetGuardBlocked(frameClick.result, { text, via: 'browser_click_text_frame' })
+          throwIfLiveTargetGuardBlocked(frameClick.result, { text, via: 'browser_click_frame' })
           const frameFollowedTab = await waitForActionFollowedTab(controller, tabId, frameBeforeTabs, abortSignal)
           const frameConfirmation = await detectBrowserPageTransactionConfirmation(controller, frameFollowedTab?.tabId || tabId)
           const frameReceipt = await captureBrowserActionReceipt(controller, frameFollowedTab?.tabId || tabId, frameBeforeUrl)
@@ -1664,7 +1987,7 @@ export async function executeBrowserActTool(
         })
       }
 
-      case 'browser_type': {
+      case 'type_selector': {
         const selector = args.selector as string
         const text = args.text as string
         if (!selector || text === undefined) return 'Error: selector and text are required'
@@ -1680,7 +2003,16 @@ export async function executeBrowserActTool(
         const result = await runGuardedSelectorType(controller, tabId, selector, text, {
           clearFirst,
           allowPasswordFill: argsCarryPasswordCue(JSON.stringify(args)),
-        })
+          submit: args.submit === true,
+        }, abortSignal)
+        if (result.startsWith('Error:')) {
+          return browserStructuredOutput({
+            ok: false,
+            errorKind: /not found|hidden|no visible viewport/i.test(result) ? 'target_not_found' : 'browser_operation_failed',
+            message: result.slice('Error:'.length).trim(),
+            nextSuggestedAction: 'call browser_snapshot and retry with a current target reference',
+          })
+        }
         // P1-E5 — change receipt after typing (focus/toast/validation signal).
         const typeReceipt = await captureBrowserActionReceipt(controller, tabId, typeBeforeUrl)
         return attachBrowserActionSessionOutput(result, {
@@ -1695,41 +2027,21 @@ export async function executeBrowserActTool(
         })
       }
 
-      case 'browser_type_smart': {
-        const target = String(args.target || '').trim()
+      case 'type_smart': {
+        const target = String(args.target || 'input').trim()
         const text = String(args.text || '')
         if (!target || text === undefined) return 'Error: target and text are required'
         const clearFirst = args.clear_first !== false
         const submit = args.submit === true
         const tabId = (args.tab_id as string) || null
-        const shouldGuardSubmit = submit && await isLikelyChatPage(controller, tabId)
-        const rawSmartType = await controller.executeJS(tabId, buildSmartTypeJs({
+        const smartType = await runTrustedSmartType(controller, tabId, {
           target,
           text,
           clearFirst,
-          submit: submit && !shouldGuardSubmit,
+          submit,
           allowPasswordFill: argsCarryPasswordCue(JSON.stringify(args)),
-        }))
-        throwIfLiveTargetGuardBlocked(rawSmartType, { target })
-        const result = String(rawSmartType)
-        if (shouldGuardSubmit) {
-          const attempted: string[] = ['type_smart_submit_guard']
-          const submitState = await ensureGeminiSubmitted(controller, tabId, text, attempted, abortSignal)
-          const confirmation = submitState.submitted ? await detectBrowserPageTransactionConfirmation(controller, tabId) : null
-          return attachBrowserActionSessionOutput(
-            `${result}\n[chat-submit-guard] submitted=${submitState.submitted} method=${submitState.method}`,
-            {
-              toolName,
-              args,
-              controller,
-              sessionId,
-              currentUserText,
-              tabId,
-              confirmation,
-              nextSuggestedAction: confirmation ? 'finish with transaction proof' : 'read map again',
-            },
-          )
-        }
+        }, abortSignal)
+        const result = smartType.output
         const confirmation = submit ? await detectBrowserPageTransactionConfirmation(controller, tabId) : null
         return attachBrowserActionSessionOutput(result, {
           toolName,
@@ -1743,41 +2055,21 @@ export async function executeBrowserActTool(
         })
       }
 
-      case 'browser_compose_message': {
+      case 'type_compose': {
         const text = String(args.text || '')
         if (!text) return 'Error: text is required'
         const target = String(args.target || '')
         const clearFirst = args.clear_first !== false
         const submit = args.submit !== false
         const tabId = (args.tab_id as string) || null
-        const shouldGuardSubmit = submit && await isLikelyChatPage(controller, tabId)
-        const rawCompose = await controller.executeJS(tabId, buildSmartTypeJs({
+        const composed = await runTrustedSmartType(controller, tabId, {
           target,
           text,
           clearFirst,
-          submit: submit && !shouldGuardSubmit,
+          submit,
           allowPasswordFill: argsCarryPasswordCue(JSON.stringify(args)),
-        }))
-        throwIfLiveTargetGuardBlocked(rawCompose, { target })
-        const result = String(rawCompose)
-        if (shouldGuardSubmit) {
-          const attempted: string[] = ['compose_submit_guard']
-          const submitState = await ensureGeminiSubmitted(controller, tabId, text, attempted, abortSignal)
-          const confirmation = submitState.submitted ? await detectBrowserPageTransactionConfirmation(controller, tabId) : null
-          return attachBrowserActionSessionOutput(
-            `${result}\n[chat-submit-guard] submitted=${submitState.submitted} method=${submitState.method}`,
-            {
-              toolName,
-              args,
-              controller,
-              sessionId,
-              currentUserText,
-              tabId,
-              confirmation,
-              nextSuggestedAction: confirmation ? 'finish with transaction proof' : 'read map again',
-            },
-          )
-        }
+        }, abortSignal)
+        const result = composed.output
         const confirmation = submit ? await detectBrowserPageTransactionConfirmation(controller, tabId) : null
         return attachBrowserActionSessionOutput(result, {
           toolName,
@@ -1791,7 +2083,7 @@ export async function executeBrowserActTool(
         })
       }
 
-      case 'browser_list_upload_targets': {
+      case 'find_upload': {
         const tabId = (args.tab_id as string) || null
         const targets = await controller.findUploadTargets(tabId)
         return JSON.stringify({
@@ -1800,7 +2092,7 @@ export async function executeBrowserActTool(
         }, null, 2)
       }
 
-      case 'browser_upload_scope_attachment': {
+      case 'upload': {
         const startedAt = Date.now()
         const uploadMetaFor = (effectiveTabId: string | null) => ({
           ...resolveToolContextMeta(controller, effectiveTabId),
@@ -1996,7 +2288,7 @@ export async function executeBrowserActTool(
         return stringifyBrowserJsonOrFailure(payload)
       }
 
-      case 'browser_click_at': {
+      case 'click_coordinate': {
         const x = Number(args.x)
         const y = Number(args.y)
         if (!Number.isFinite(x) || !Number.isFinite(y)) return 'Error: x and y are required numbers'
@@ -2103,7 +2395,7 @@ export async function executeBrowserActTool(
         })
       }
 
-      case 'browser_type_at': {
+      case 'type_coordinate': {
         const x = Number(args.x)
         const y = Number(args.y)
         const text = String(args.text || '')
@@ -2111,8 +2403,8 @@ export async function executeBrowserActTool(
         if (!text) return 'Error: text is required'
         let tabId = (args.tab_id as string) || null
         tabId = (await resolveHighControlAgentTab(controller, args, { signal: abortSignal })).tabId
-        const pressEnter = args.press_enter !== false
-        const clearBeforeTyping = args.clear_before_typing !== false
+        const pressEnter = args.submit === true || args.press_enter === true
+        const clearBeforeTyping = args.clear_first !== false && args.clear_before_typing !== false
         const useShiftEnter = args.use_shift_enter_for_newline === true
         // EP1-I3 live-target net — shared guarded entry: non-editable
         // destructive-grant target → the focusing click is itself refused;
@@ -2134,7 +2426,7 @@ export async function executeBrowserActTool(
           const refusal = point.skipReason === 'text_exceeds_field_capacity'
             ? {
               errorKind: 'type_field_capacity_exceeded',
-              message: `焦点字段「${point.focusTarget?.label || point.focusTarget?.tag || '未知'}」上限 ${point.focusTarget?.maxLength} 字，本次文本 ${text.length} 字——这是标题/短字段，不是正文编辑器。已拒绝打字。请改用 act fill 正文 contenteditable target（read map 或 browser_probe_readonly(scope=forms) 可见），不要再微调坐标重试。`,
+              message: `焦点字段「${point.focusTarget?.label || point.focusTarget?.tag || '未知'}」上限 ${point.focusTarget?.maxLength} 字，本次文本 ${text.length} 字——这是标题/短字段，不是正文编辑器。已拒绝打字。请改用 act fill 正文 contenteditable target（read map 或 browser_snapshot(scope=forms) 可见），不要再微调坐标重试。`,
             }
             : point.skipReason === 'multiline_into_single_line'
               ? {
@@ -2143,7 +2435,7 @@ export async function executeBrowserActTool(
               }
               : {
                 errorKind: 'type_target_not_editable',
-                message: '坐标点击后焦点不在可编辑控件上，已拒绝打字（避免文字灌进错误的框）。注意 x/y 是 0-1000 归一化坐标；用 browser_locate_input_targets 或 read map 拿准输入框位置，或直接 act fill 编辑器 target。',
+                message: '坐标点击后焦点不在可编辑控件上，已拒绝打字（避免文字灌进错误的框）。注意 x/y 是 0-1000 归一化坐标；用 browser_find 或 read map 拿准输入框位置，或直接 act fill 编辑器 target。',
               }
           return attachBrowserActionSessionOutput(browserStructuredOutput({
             ok: false,
@@ -2184,16 +2476,25 @@ export async function executeBrowserActTool(
         })
       }
 
-      case 'browser_scroll_at': {
+      case 'scroll': {
         let tabId = (args.tab_id as string) || null
         tabId = (await resolveHighControlAgentTab(controller, args, { signal: abortSignal })).tabId
         const x = Number(args.x ?? 500)
         const y = Number(args.y ?? 500)
-        const direction = String(args.direction || '').toLowerCase()
+        const inferredDirection = Number(args.delta_y) < 0
+          ? 'up'
+          : Number(args.delta_y) > 0
+            ? 'down'
+            : Number(args.delta_x) < 0
+              ? 'left'
+              : Number(args.delta_x) > 0
+                ? 'right'
+                : 'down'
+        const direction = String(args.direction || inferredDirection).toLowerCase()
         if (!['up', 'down', 'left', 'right'].includes(direction)) {
           return 'Error: direction must be up/down/left/right'
         }
-        const magnitude = Math.max(40, Math.min(4000, Number(args.magnitude || 800)))
+        const magnitude = Math.max(40, Math.min(4000, Math.abs(Number(args.amount || args.magnitude || args.delta_y || args.delta_x || 800))))
         const point = await resolveCssPoint(controller, tabId, x, y)
         const deltaY = direction === 'up' ? -magnitude : direction === 'down' ? magnitude : 0
         const deltaX = direction === 'left' ? -magnitude : direction === 'right' ? magnitude : 0
@@ -2209,7 +2510,7 @@ export async function executeBrowserActTool(
         return `Scrolled ${direction} at normalized(${point.nx},${point.ny})`
       }
 
-      case 'browser_send_keys': {
+      case 'press_key': {
         const tabId = (args.tab_id as string) || null
         const key = String(args.key || '').trim()
         if (!key) return 'Error: key is required'
@@ -2239,10 +2540,27 @@ export async function executeBrowserActTool(
         })
       }
 
-      case 'browser_ask_user_takeover': {
-        const callToAction = String(args.call_to_action || '').trim()
-        if (!callToAction) return 'Error: call_to_action is required'
-        const details = String(args.details || '')
+      case 'request_takeover': {
+        const callToAction = String(args.reason || args.call_to_action || '').trim()
+        if (!callToAction) return 'Error: reason is required'
+        if (args.action === 'complete') {
+          const userConfirmed = /(?:已完成|完成了|验证好了|验证完成|登录好了|接管完了|操作好了|\bdone\b)/i.test(String(currentUserText || ''))
+          if (!userConfirmed) {
+            return browserStructuredOutput({
+              ok: false,
+              errorKind: 'takeover_completion_not_confirmed',
+              takeover_state: 'submitted',
+              message: 'Only the current user can confirm that takeover work is complete.',
+            })
+          }
+          return browserStructuredOutput({
+            ok: true,
+            takeover_state: 'completed',
+            challengeCleared: true,
+            next_step: 'resume the same task from a fresh browser_snapshot',
+          })
+        }
+        const details = String(args.instruction || args.details || '')
         const timeoutSec = Math.max(30, Math.min(1200, Number(args.timeout_sec || 300)))
         log(`[browser-v3][human-required] action=${callToAction} timeout=${timeoutSec}s`)
         return JSON.stringify({
@@ -2255,11 +2573,25 @@ export async function executeBrowserActTool(
         }, null, 2)
       }
 
-      case 'browser_go_back': {
+      case 'navigate_back': {
         const tabId = (args.tab_id as string) || null
         const result = controller.goBack(tabId)
         if (!result.success) return `Error: ${result.error}`
         return 'Navigated back.'
+      }
+
+      case 'navigate_forward': {
+        const tabId = (args.tab_id as string) || null
+        const result = controller.goForward(tabId)
+        if (!result.success) return `Error: ${result.error}`
+        return 'Navigated forward.'
+      }
+
+      case 'navigate_reload': {
+        const tabId = (args.tab_id as string) || null
+        const result = controller.reload(tabId)
+        if (!result.success) return `Error: ${result.error}`
+        return 'Reloaded page.'
       }
 
       default:

@@ -88,7 +88,7 @@ export function makeNoteCollectProjectionSink(activeRuntime: AgentControlRuntime
       taskId: projectionTaskId,
       detachedTaskId: resumeTaskId,
       resumeKind: 'paused',
-      action: 'browser_resume_task',
+      action: 'browser_task',
     }
   }
 
@@ -221,6 +221,29 @@ export function makeNoteCollectProjectionSink(activeRuntime: AgentControlRuntime
   }
 
   return {
+    async resolveCollectionConsent(input): Promise<void> {
+      const store = activeRuntime.getTaskProjectionStore()
+      const existing = await store.get(input.sourceTaskId)
+      if (!existing || existing.scopeId !== input.scopeId) return
+      const now = new Date().toISOString()
+      await store.update(input.sourceTaskId, {
+        status: 'recoverable_paused',
+        interactionState: 'suspended',
+        waitingFor: 'none',
+        blockedReason: null,
+        progress: existing.progress
+          ? {
+              ...existing.progress,
+              stage: 'consent_confirmed',
+              fingerprint: input.requestId,
+              updatedAt: now,
+              detail: '用户已确认继续处理当前已发现的部分内容。',
+              browserCollectionConsent: null,
+            }
+          : existing.progress,
+        updatedAt: now,
+      })
+    },
     upsert(input): void {
       if (!input.scopeId) return
       // EP2 dogfood follow-up — progress-only refresh: keep the existing

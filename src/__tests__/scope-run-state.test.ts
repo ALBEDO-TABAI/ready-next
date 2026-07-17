@@ -60,7 +60,7 @@ describe('scope run state helpers', () => {
         {
           phase: 'tool_running',
           module: 'browser',
-          intent: 'browser_ask_user_takeover',
+          intent: 'browser_request_takeover',
           controllerId: 'controller-1',
           ownerTabId: 'tab-9',
           timestamp: '2026-03-07T00:00:00.000Z',
@@ -92,7 +92,7 @@ describe('scope run state helpers', () => {
 
       assert.strictEqual(patch.phase, 'takeover')
       assert.strictEqual(patch.module, 'browser')
-      assert.strictEqual(patch.intent, 'browser_ask_user_takeover')
+      assert.strictEqual(patch.intent, 'browser_request_takeover')
       assert.strictEqual(patch.blockedReason, '请检查登录状态 · 页面出现验证码')
       assert.strictEqual(patch.controllerId, 'controller-1')
       assert.strictEqual(patch.ownerTabId, 'tab-9')

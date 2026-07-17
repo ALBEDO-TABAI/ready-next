@@ -153,10 +153,10 @@ test('P0-4 proxy: failing-round tool surface resolves to a non-empty skill+docum
     // Load-bearing check: inject a write-classified browser tool into the real surface and confirm
     // the narrowing actually DROPS it while keeping the skill+document floor — so the >=7 assertion
     // above is carried by a narrowing that does real subtraction, not an identity no-op.
-    const surfaceWithBrowser = [...executorDefinitions, { name: 'browser_visible_collect', domain: 'browser' }]
+    const surfaceWithBrowser = [...executorDefinitions, { name: 'browser_collect', domain: 'browser' }]
     const narrowedNames = narrowToolSurfaceForLocalDocument(surfaceWithBrowser as never, authorization)
       .map((definition) => (definition as { name: string }).name)
-    assert.equal(narrowedNames.includes('browser_visible_collect'), false, 'local-document narrowing must drop the injected browser tool')
+    assert.equal(narrowedNames.includes('browser_collect'), false, 'local-document narrowing must drop the injected browser tool')
     assert.ok(narrowedNames.includes('skill_read_artifact') && narrowedNames.includes('file_read_excerpt'), 'floor must survive alongside the drop')
   } finally {
     clearLastReferenceSkill(sessionId)

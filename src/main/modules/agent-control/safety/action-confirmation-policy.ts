@@ -61,12 +61,13 @@ interface ConfirmationRule {
 }
 
 // Browser interaction tools that can press/submit things on a page.
-// `browser_act_on_target` is in BOTH sets: its action enum spans
-// click/expand/choose AND fill — a payment confirm or password fill routed
-// through a page-map target id must hit the same rules as the plain
-// click/type tools (textual cues come from value/disambiguation, the same
-// trust level as click_text's text argument).
-const CLICK_TOOLS = ['browser_click', 'browser_click_text', 'browser_click_at', 'browser_act_on_target'] as const
+const CLICK_TOOLS = [
+  'browser_click',
+  'browser_type',
+  'browser_fill_form',
+  'browser_select',
+  'browser_press_key',
+] as const
 
 // Browser destructive target patterns. The browser execution layer uses them
 // as code-owned destructive anchors and returns grant_required unless a future
@@ -166,9 +167,8 @@ const FIRST_BATCH_RULES: readonly ConfirmationRule[] = [
     designRef: '05 §3.1 M4 — 下载文件',
     mode: 'M4',
     tools: new Set([
-      'browser_download_urls',
-      'browser_download_gallery',
-      'browser_download_collected_media',
+      'browser_download',
+      'browser_archive',
       'feishu_file_download',
     ]),
     reason: '下载到本地不影响外部状态',

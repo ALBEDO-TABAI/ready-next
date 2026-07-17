@@ -327,7 +327,7 @@ export function prepareAgentSdkTurn(
   }
   // S4-2: a status question ("怎么样了 / 还在跑吗") must report state, never
   // restart work. The guard is the tool surface itself (code-owned): browser
-  // tools narrow to read-classified ones, so the model can browser_get_task
+  // tools narrow to read-classified ones, so the model can browser_task(action=get)
   // but cannot re-dispatch a collection. classifyBrowserToolCall fails
   // closed (unknown → write), which is exactly the conservative default.
   // EP2-I2 — standing negation lifecycle (session lineage): record fresh

@@ -9,6 +9,10 @@ import {
   isBrowserDestructiveEffect,
   normalizeBrowserPowerEffects,
 } from '../../../shared/browser-power'
+import {
+  BROWSER_TOOL_SURFACE_MANIFEST,
+  browserToolSurfaceEntry,
+} from '../../../shared/browser-tool-surface'
 
 export type BrowserPowerDecisionAction = 'allow' | 'grant_required' | 'grant_mismatch' | 'blocked_by_policy'
 
@@ -26,67 +30,29 @@ export interface BrowserPowerDecision {
   destructiveEffects: BrowserPowerEffect[]
   reason: string
   powerModeEnabled: boolean
+  confirmationSource: BrowserPowerGrant['source'] | null
 }
 
 const grantsById = new Map<string, BrowserPowerGrant>()
 const auditEvents: BrowserPowerAuditEvent[] = []
 let browserPowerGlobalModeReader: (() => boolean) | null = null
 
-export const BROWSER_POWER_TOOL_EFFECT_PROFILES: Record<string, BrowserPowerToolEffectProfile> = {
-  browser_navigate: { effects: ['navigate'] },
-  browser_search: { effects: ['navigate'] },
-  browser_get_tabs: { effects: ['observe'] },
-  browser_read_page: { effects: ['observe'] },
-  browser_read_page_map: { effects: ['observe'] },
-  browser_probe_readonly: { effects: ['observe'] },
-  browser_click: { effects: ['page_mutation'] },
-  browser_click_text: { effects: ['page_mutation'] },
-  browser_act_on_target: { effects: ['page_mutation'] },
-  browser_type: { effects: ['page_mutation'] },
-  browser_type_smart: { effects: ['page_mutation'] },
-  browser_compose_message: { effects: ['page_mutation', 'external_submit'] },
-  browser_capture_viewport: { effects: ['observe'] },
-  browser_probe_workflow_state: { effects: ['observe'] },
-  browser_locate_action_targets: { effects: ['observe'] },
-  browser_locate_input_targets: { effects: ['observe'] },
-  browser_analyze_viewport: { effects: ['observe'] },
-  browser_list_upload_targets: { effects: ['observe'] },
-  browser_upload_scope_attachment: { effects: ['upload'] },
-  browser_click_at: { effects: ['page_mutation'] },
-  browser_type_at: { effects: ['page_mutation'] },
-  browser_scroll_at: { effects: ['page_mutation'] },
-  browser_send_keys: { effects: ['page_mutation'] },
-  browser_ask_user_takeover: { effects: ['observe'] },
-  browser_query_gemini: { effects: ['page_mutation', 'external_submit'] },
-  browser_wait: { effects: ['observe'] },
-  browser_wait_for_condition: { effects: ['observe'] },
-  browser_go_back: { effects: ['navigate'] },
-  browser_collect_images: { effects: ['observe'] },
-  browser_download_urls: { effects: ['download'] },
-  browser_download_collected_media: { effects: ['download'] },
-  browser_inspect_resources: { effects: ['observe', 'navigate'] },
-  browser_resolve_video: { effects: ['observe'] },
-  browser_extract_structured: { effects: ['observe', 'navigate'] },
-  browser_scroll_collect: { effects: ['observe', 'page_mutation', 'navigate'] },
-  browser_start_task: { effects: ['observe', 'page_mutation', 'navigate'] },
-  browser_get_task: { effects: ['observe'] },
-  browser_resume_task: { effects: ['observe', 'page_mutation', 'navigate'] },
-  browser_cancel_task: { effects: ['observe'] },
-  browser_aggregate_results: { effects: ['observe'] },
-  browser_download_gallery: { effects: ['observe', 'download', 'navigate'] },
-  browser_research_topic: { effects: ['observe', 'navigate'] },
-  browser_run_workflow: { effects: ['page_mutation'], deprecated: true, replacement: 'browser_power_script_run' },
-  browser_execute_js: { effects: ['page_mutation'], deprecated: true, replacement: 'browser_power_eval' },
-  browser_power_eval: { effects: ['observe', 'page_mutation'] },
-  browser_power_cdp: { effects: ['observe', 'page_mutation'] },
-  browser_power_network_trace: { effects: ['observe', 'navigate'] },
-  browser_power_resource_forensics: { effects: ['observe', 'navigate', 'download'] },
-  browser_power_script_run: { effects: ['page_mutation'] },
-  browser_media_download_advanced: { effects: ['download'] },
-  browser_stage_site_strategy: { effects: ['observe'] },
-  browser_visible_collect: { effects: ['observe', 'page_mutation', 'navigate'] },
-  browser_collect_notes: { effects: ['observe', 'page_mutation', 'download', 'navigate'] },
-  browser_confirm_collection_consent: { effects: ['observe'] },
+export const BROWSER_POWER_TOOL_EFFECT_PROFILES: Record<string, BrowserPowerToolEffectProfile> =
+  Object.fromEntries(BROWSER_TOOL_SURFACE_MANIFEST.map((entry) => [
+    entry.name,
+    { effects: [...entry.effects] },
+  ]))
+
+const PRIVATE_POWER_TOOL_NAMES: Readonly<Record<string, string>> = {
+  eval: 'browser_eval',
+  cdp: 'browser_cdp',
+  network_trace: 'browser_network',
+  resources_forensics: 'browser_resources',
+  download_advanced: 'browser_download',
+}
+
+function publicPowerToolName(toolName: string): string {
+  return PRIVATE_POWER_TOOL_NAMES[toolName] || toolName
 }
 
 export function browserPowerModeEnabled(currentUserText?: string | null): boolean {
@@ -107,7 +73,76 @@ export function setBrowserPowerGlobalModeReader(reader: (() => boolean) | null):
 export { BROWSER_POWER_MODE_SETTING_KEY }
 
 export function browserToolEffectProfile(toolName: string): BrowserPowerToolEffectProfile | null {
-  return BROWSER_POWER_TOOL_EFFECT_PROFILES[toolName] || null
+  return BROWSER_POWER_TOOL_EFFECT_PROFILES[publicPowerToolName(toolName)] || null
+}
+
+function addEffect(effects: BrowserPowerEffect[], effect: BrowserPowerEffect): void {
+  if (!effects.includes(effect)) effects.push(effect)
+}
+
+function inferEvalEffects(code: string): BrowserPowerEffect[] {
+  const effects: BrowserPowerEffect[] = ['observe']
+  const normalized = code.toLowerCase()
+  // Computed global/member calls and dynamic code construction defeat static
+  // effect inference. Treat them as an explicit privileged escape rather than
+  // guessing that they are observation-only.
+  if (
+    /(?:globalThis|window|self|document)\s*\[[^\]]+\]\s*\(/i.test(code)
+    || /(?:\beval\s*\(|\bFunction\s*\(|\bimport\s*\(|setTimeout\s*\(\s*['"`]|setInterval\s*\(\s*['"`])/i.test(code)
+    || /\[['"`][^\]]+\]\s*\.\s*(?:join|map|reduce)\s*\([^)]*\)\s*\]\s*\(/i.test(code)
+  ) {
+    addEffect(effects, 'access_control_circumvention')
+  }
+  if (/\b(?:click|focus|blur|scrollto|scrollby|dispatchEvent|setAttribute|removeAttribute)\s*\(|\.(?:value|checked|selected|innerhtml|innertext|textcontent)\s*=/.test(code)) {
+    addEffect(effects, 'page_mutation')
+  }
+  if (/\b(?:fetch|xmlhttprequest|sendbeacon|websocket)\b|\.submit\s*\(|requestsubmit\s*\(/i.test(code)) {
+    addEffect(effects, 'external_submit')
+  }
+  if (/\b(?:password|passwd|otp|one[-_ ]?time|authorization|bearer)\b/i.test(code)) {
+    addEffect(effects, 'credential_use')
+  }
+  if (/\b(?:document\.cookie|localstorage|sessionstorage|cookiestore)\b/i.test(code)
+      && /\b(?:return|json\.stringify|console\.|postmessage|fetch|sendbeacon)\b/i.test(code)) {
+    addEffect(effects, 'secret_export')
+  }
+  if (/\b(?:delete|remove|destroy)\b/i.test(normalized) && /\b(?:account|user|cloud|remote|post|message|record)\b/i.test(normalized)) {
+    addEffect(effects, 'remote_delete')
+  }
+  if (/\b(?:password|credential|recovery|two[-_ ]?factor|2fa)\b/i.test(normalized)
+      && /\b(?:change|update|replace|reset|set)\b/i.test(normalized)) {
+    addEffect(effects, 'credential_change')
+  }
+  if (/\b(?:checkout|purchase|payment|pay|transfer)\b/i.test(normalized)
+      && /\b(?:submit|confirm|click|fetch|request)\b/i.test(normalized)) {
+    addEffect(effects, 'payment')
+  }
+  return effects
+}
+
+function inferCdpEffects(method: string, params: Record<string, unknown>): BrowserPowerEffect[] {
+  if (/^(?:Network\.getAllCookies|Network\.getCookies|Storage\.getCookies|Storage\.getTrustTokens)$/i.test(method)) {
+    return ['observe', 'secret_export']
+  }
+  if (/^(?:Runtime\.evaluate|Runtime\.callFunctionOn)$/i.test(method)) {
+    const code = typeof params.expression === 'string'
+      ? params.expression
+      : typeof params.functionDeclaration === 'string'
+        ? params.functionDeclaration
+        : ''
+    return inferEvalEffects(code)
+  }
+  if (/^(?:Page\.navigate|Page\.reload|Page\.navigateToHistoryEntry)$/i.test(method)) return ['navigate']
+  if (/^(?:Input\.|DOM\.set|Emulation\.set|Network\.(?:set|clear)|Page\.set|Storage\.clear|Browser\.setWindowBounds)/i.test(method)) {
+    return ['page_mutation']
+  }
+  if (/^(?:Browser\.setDownloadBehavior|Page\.setDownloadBehavior)$/i.test(method)) return ['download']
+  if (/^(?:Network|Page|DOM|Runtime|Accessibility|Performance|CSS|Storage|Browser)\.(?:get|enable|disable|query|describe|capture|snapshot|search|resolve|collect|take|request)/i.test(method)) {
+    return ['observe']
+  }
+  // Unknown CDP commands are not guessed into a non-destructive bucket. They
+  // remain usable after a one-shot, exactly bound grant.
+  return ['access_control_circumvention']
 }
 
 export function inferBrowserPowerEffects(params: {
@@ -116,17 +151,20 @@ export function inferBrowserPowerEffects(params: {
   fallback?: BrowserPowerEffect[]
 }): BrowserPowerEffect[] {
   const args = params.args || {}
-  const profile = browserToolEffectProfile(params.toolName)
-  const fallback = params.fallback || profile?.effects || ['observe']
-  const direct = normalizeBrowserPowerEffects(args.expected_effects, fallback)
-  if (params.toolName !== 'browser_power_cdp') return direct
-
-  const method = typeof args.method === 'string' ? args.method : ''
-  if (/^(Runtime\.evaluate|Runtime\.callFunctionOn)$/i.test(method)) return direct
-  if (/^(Network|Page|DOM|Runtime)\.(get|enable|disable|query|describe|capture|screenshot|snapshot|evaluateOnNewDocument)/i.test(method)) {
-    return normalizeBrowserPowerEffects(args.expected_effects, ['observe'])
+  const publicName = publicPowerToolName(params.toolName)
+  if (publicName === 'browser_cdp') {
+    return inferCdpEffects(
+      typeof args.method === 'string' ? args.method : '',
+      args.params && typeof args.params === 'object' && !Array.isArray(args.params)
+        ? args.params as Record<string, unknown>
+        : args,
+    )
   }
-  return normalizeBrowserPowerEffects(args.expected_effects, ['page_mutation'])
+  if (publicName === 'browser_eval') {
+    return inferEvalEffects(typeof args.code === 'string' ? args.code : '')
+  }
+  const profile = browserToolEffectProfile(publicName)
+  return [...(params.fallback || profile?.effects || browserToolSurfaceEntry(publicName)?.effects || ['observe'])]
 }
 
 export function registerBrowserPowerGrant(input: Omit<BrowserPowerGrant, 'id' | 'createdAt'> & { id?: string }): BrowserPowerGrant {
@@ -189,7 +227,11 @@ function consumeGrantIfMatched(params: {
   grantId: string
   effects: BrowserPowerEffect[]
   scopeId?: string | null
+  runId?: string | null
+  taskId?: string | null
   tabId?: string | null
+  documentKeyHash?: string | null
+  objectRef?: string | null
   url?: string | null
   destination?: string | null
 }): { ok: true; grant: BrowserPowerGrant } | { ok: false; reason: string } {
@@ -200,10 +242,16 @@ function consumeGrantIfMatched(params: {
   if (grant.remainingCalls !== null && grant.remainingCalls !== undefined && grant.remainingCalls <= 0) {
     return { ok: false, reason: 'grant_exhausted' }
   }
-  if (grant.scopeId && params.scopeId && grant.scopeId !== params.scopeId) return { ok: false, reason: 'scope_mismatch' }
-  if (grant.tabId && params.tabId && grant.tabId !== params.tabId) return { ok: false, reason: 'tab_mismatch' }
+  if (grant.scopeId && (!params.scopeId || grant.scopeId !== params.scopeId)) return { ok: false, reason: 'scope_mismatch' }
+  if (grant.runId && (!params.runId || grant.runId !== params.runId)) return { ok: false, reason: 'run_mismatch' }
+  if (grant.taskId && (!params.taskId || grant.taskId !== params.taskId)) return { ok: false, reason: 'task_mismatch' }
+  if (grant.tabId && (!params.tabId || grant.tabId !== params.tabId)) return { ok: false, reason: 'tab_mismatch' }
+  if (grant.documentKeyHash && (!params.documentKeyHash || grant.documentKeyHash !== params.documentKeyHash)) {
+    return { ok: false, reason: 'document_mismatch' }
+  }
+  if (grant.objectRef && (!params.objectRef || grant.objectRef !== params.objectRef)) return { ok: false, reason: 'object_mismatch' }
   if (!grantMatchesUrl(grant, params.url)) return { ok: false, reason: 'url_mismatch' }
-  if (grant.destination && params.destination && grant.destination !== params.destination) {
+  if (grant.destination && (!params.destination || grant.destination !== params.destination)) {
     return { ok: false, reason: 'destination_mismatch' }
   }
   const effectSet = new Set(grant.effects)
@@ -223,7 +271,11 @@ export function resolveBrowserPowerAuthorization(params: {
   effects: BrowserPowerEffect[]
   grantId?: string | null
   scopeId?: string | null
+  runId?: string | null
+  taskId?: string | null
   tabId?: string | null
+  documentKeyHash?: string | null
+  objectRef?: string | null
   url?: string | null
   destination?: string | null
   currentUserText?: string | null
@@ -238,14 +290,26 @@ export function resolveBrowserPowerAuthorization(params: {
       grantId,
       effects,
       scopeId: params.scopeId,
+      runId: params.runId,
+      taskId: params.taskId,
       tabId: params.tabId,
+      documentKeyHash: params.documentKeyHash,
+      objectRef: params.objectRef,
       url: params.url,
       destination: params.destination,
     })
     if (matched.ok) {
-      return { action: 'allow', grantId: matched.grant.id, effects, destructiveEffects, reason: 'matching_grant', powerModeEnabled }
+      return {
+        action: 'allow',
+        grantId: matched.grant.id,
+        effects,
+        destructiveEffects,
+        reason: 'matching_grant',
+        powerModeEnabled,
+        confirmationSource: matched.grant.source,
+      }
     }
-    return { action: 'grant_mismatch', grantId, effects, destructiveEffects, reason: matched.reason, powerModeEnabled }
+    return { action: 'grant_mismatch', grantId, effects, destructiveEffects, reason: matched.reason, powerModeEnabled, confirmationSource: null }
   }
 
   if (browserEffectsIncludeDestructive(effects)) {
@@ -256,17 +320,7 @@ export function resolveBrowserPowerAuthorization(params: {
       destructiveEffects,
       reason: `destructive_effect_requires_grant:${destructiveEffects.join(',') || BROWSER_DESTRUCTIVE_EFFECTS.join(',')}`,
       powerModeEnabled,
-    }
-  }
-
-  if (!powerModeEnabled) {
-    return {
-      action: 'grant_required',
-      grantId: null,
-      effects,
-      destructiveEffects,
-      reason: 'power_mode_not_enabled',
-      powerModeEnabled,
+      confirmationSource: null,
     }
   }
 
@@ -275,8 +329,9 @@ export function resolveBrowserPowerAuthorization(params: {
     grantId: 'current-user-nondestructive-power',
     effects,
     destructiveEffects,
-    reason: 'current_user_text_or_setting_enables_nondestructive_power',
+    reason: 'nondestructive_effects_are_allowed_on_the_exposed_surface',
     powerModeEnabled,
+    confirmationSource: null,
   }
 }
 

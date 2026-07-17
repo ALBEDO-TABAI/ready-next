@@ -56,7 +56,7 @@ export function recordFileChooserInterceptedNotice(tabId: string, url: string): 
     permission: '',
     origin: url || tabId,
     at: new Date().toISOString(),
-    guidance: '页面尝试打开原生文件选择器，已被拦截（agent 模式下原生对话框会挂起工具环）。请用 browser_list_upload_targets 定位上传点，再用 browser_upload_scope_attachment 完成文件上传；站点会在文件注入后继续原流程。',
+    guidance: '页面尝试打开原生文件选择器，已被拦截（agent 模式下原生对话框会挂起工具环）。请用 browser_find 定位上传点，再用 browser_upload 完成文件上传；站点会在文件注入后继续原流程。',
   })
 }
 

@@ -52,37 +52,37 @@
   "methods_typed_only": [],
   "non_literal_push": [
     {
-      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:209",
+      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:230",
       "variable": "channel",
       "channels": [
         "browser:downloadUpdate"
       ],
-      "reason": "Forwarder lambda passed to BrowserDownloadService constructor; the service itself emits literal 'browser:downloadUpdate' at download-service.ts:229,268 (covered by the literal PUSH_EMITTED scan). Stage Y Y1.4 re-verified the upstream literal is still present at the documented lines; removing this entry would require refactoring the DI forwarder pattern (12 sibling forwarders share the shape) which is out of Y1.4 reduction-only scope.",
+      "reason": "Forwarder lambda passed to BrowserDownloadService constructor; the service itself emits literal 'browser:downloadUpdate' at download-service.ts:437,499 (covered by the literal PUSH_EMITTED scan). 2026-07-17 re-verified the upstream literals and re-anchored this entry after BrowserHostController wiring changed; removing it requires refactoring the DI forwarder pattern.",
       "owner": "stage-v-bootstrap",
       "expiry": "2026-08-21"
     },
     {
-      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:215",
+      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:236",
       "variable": "channel",
       "channels": [
         "app:shortcut"
       ],
-      "reason": "Forwarder lambda passed to BrowserAppShortcutBridgeService; the service emits literal 'app:shortcut' at app-shortcut-service.ts:26 (covered by literal scan + behavior-tested in src/__tests__/browser-engine-services.test.ts BrowserAppShortcutBridgeService block). Stage Y Y1.4 re-verified; removing this entry requires forwarder-pattern refactor — out of Y1.4 reduction-only scope.",
+      "reason": "Forwarder lambda passed to BrowserAppShortcutBridgeService; the service emits literal 'app:shortcut' at app-shortcut-service.ts:24 (covered by literal scan + behavior-tested in src/__tests__/browser-engine-services.test.ts BrowserAppShortcutBridgeService block). 2026-07-17 re-verified after BrowserHostController wiring changed; removing this entry requires forwarder-pattern refactor.",
       "owner": "stage-v-bootstrap",
       "expiry": "2026-08-21"
     },
     {
-      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:229",
+      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:250",
       "variable": "channel",
       "channels": [
         "browser:fastCardContextAction"
       ],
-      "reason": "Forwarder lambda passed to BrowserContextMenuService; the service emits literal 'browser:fastCardContextAction' at context-menu-service.ts:401 (covered by literal scan). Stage Y Y1.4 re-verified; removing this entry requires forwarder-pattern refactor — out of Y1.4 reduction-only scope.",
+      "reason": "Forwarder lambda passed to BrowserContextMenuService; the service emits literal 'browser:fastCardContextAction' at context-menu-service.ts:418 (covered by literal scan). 2026-07-17 re-verified after BrowserHostController wiring changed; removing this entry requires forwarder-pattern refactor.",
       "owner": "stage-v-bootstrap",
       "expiry": "2026-08-21"
     },
     {
-      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:238",
+      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:259",
       "variable": "channel",
       "channels": [
         "browser:bookmarksChanged"
@@ -92,48 +92,48 @@
       "expiry": "2026-08-21"
     },
     {
-      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:270",
+      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:295",
       "variable": "channel",
       "channels": [
         "browser:previewUpdate"
       ],
-      "reason": "Forwarder lambda passed to BrowserPreviewService; the service emits literal 'browser:previewUpdate' at preview-service.ts:68 (covered by literal scan). Stage Y Y1.4 re-verified; removing this entry requires forwarder-pattern refactor — out of Y1.4 reduction-only scope.",
+      "reason": "Forwarder lambda passed to BrowserPreviewService; the service emits literal 'browser:previewUpdate' at preview-service.ts:69 (covered by literal scan). 2026-07-17 re-verified after BrowserHostController wiring changed; removing this entry requires forwarder-pattern refactor.",
       "owner": "stage-v-bootstrap",
       "expiry": "2026-08-21"
     },
     {
-      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:331",
+      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:395",
       "variable": "channel",
       "channels": [
         "browser:tabUpdate"
       ],
-      "reason": "Forwarder lambda passed to BrowserTabMetaService; the service emits literal 'browser:tabUpdate' at tab-meta-service.ts:65 (covered by literal scan). Stage Y Y1.4 re-verified; removing this entry requires forwarder-pattern refactor — out of Y1.4 reduction-only scope.",
+      "reason": "Forwarder lambda passed to BrowserTabMetaService; the service emits literal 'browser:tabUpdate' at tab-meta-service.ts:70 (covered by literal scan). 2026-07-17 re-verified after BrowserHostController wiring changed; removing this entry requires forwarder-pattern refactor.",
       "owner": "stage-v-bootstrap",
       "expiry": "2026-08-21"
     },
     {
-      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:350",
+      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:417",
       "variable": "channel",
       "channels": [
         "browser:tabUpdate",
         "browser:tabOpened"
       ],
-      "reason": "Forwarder lambda passed to BrowserTabLifecycleService; the service emits literal 'browser:tabUpdate' across tab-lifecycle-service.ts:194,237,246,255,270 (all covered by literal scan). Stage Y Y1.4 re-verified; removing this entry requires forwarder-pattern refactor — out of Y1.4 reduction-only scope. 2026-07-05 D1: the lifecycle service now also emits browser:tabOpened (activate:false background-tab announcement) through this forwarder — literal at tab-lifecycle-service.ts emitBackgroundTabOpened, behavior-tested in browser-tab-lifecycle-tabopened.test.ts.",
+      "reason": "Forwarder lambda passed to BrowserTabLifecycleService; the service emits literal 'browser:tabOpened' at tab-lifecycle-service.ts:412 and 'browser:tabUpdate' at 435,492,501,510,525 (all covered by literal scan). 2026-07-17 re-verified after BrowserHostController wiring changed; behavior remains covered by browser-tab-lifecycle-tabopened.test.ts.",
       "owner": "stage-v-bootstrap",
       "expiry": "2026-08-21"
     },
     {
-      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:402",
+      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:470",
       "variable": "channel",
       "channels": [
         "browser:adblockUpdate"
       ],
-      "reason": "Forwarder lambda passed to BrowserSessionPolicyService; the service emits literal 'browser:adblockUpdate' at session-policy-service.ts:173,180 (covered by literal scan). Stage Y Y1.4 re-verified; removing this entry requires forwarder-pattern refactor — out of Y1.4 reduction-only scope.",
+      "reason": "Forwarder lambda passed to BrowserSessionPolicyService; the service emits literal 'browser:adblockUpdate' at session-policy-service.ts:218,225 (covered by literal scan). 2026-07-17 re-verified after BrowserHostController wiring changed; removing this entry requires forwarder-pattern refactor.",
       "owner": "stage-v-bootstrap",
       "expiry": "2026-08-21"
     },
     {
-      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:447",
+      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:515",
       "variable": "channel",
       "channels": [
         "browser:bookmarksChanged",
@@ -144,7 +144,7 @@
       "expiry": "2026-08-21"
     },
     {
-      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:559",
+      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:630",
       "variable": "channel",
       "channels": [
         "browser:adblockUpdate",
@@ -158,7 +158,7 @@
         "clip:backgroundUpdate",
         "clip:contentStudyUpdate"
       ],
-      "reason": "BrowserHostController.sendToRenderer is the central main->renderer dispatch used by all browser-engine sub-services and the clipping runners. All emitted channels are still literal at their original call sites and covered by the literal PUSH_EMITTED scan; this is a runtime forwarder, not a fan-out blind spot. Stage Y Y1.4 re-verified the central dispatch shape — removing requires architectural refactor of the central-sendToRenderer surface, out of Y1.4 reduction-only scope.",
+      "reason": "BrowserHostController.sendToRenderer is the central main->renderer dispatch used by all browser-engine sub-services and clipping runners. All emitted channels remain literal at their upstream sites and are covered by the literal PUSH_EMITTED scan; 2026-07-17 re-verified this runtime forwarder after BrowserHostController wiring changed. Removing it requires replacing the central variable-channel surface with typed literal emitters.",
       "owner": "stage-v-bootstrap",
       "expiry": "2026-08-21"
     },

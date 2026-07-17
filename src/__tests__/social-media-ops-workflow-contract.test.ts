@@ -11,7 +11,7 @@ test('social media operations visual workflow uses a model-readable browser tool
     'assets/embedded-skills/social-media-ops/references/ready-workflows.md',
   ), 'utf8')
 
-  assert.ok(BROWSER_INTERACTION_TOOL_NAMES.includes('browser_analyze_viewport'))
-  assert.match(workflow, /视觉判断[^\n]*`browser_analyze_viewport`/)
-  assert.doesNotMatch(workflow, /`browser_capture_viewport`[^\n]{0,80}\+\s*视觉分析/)
+  assert.ok(BROWSER_INTERACTION_TOOL_NAMES.includes('browser_screenshot'))
+  assert.match(workflow, /视觉判断[^\n]*`browser_screenshot`/)
+  assert.doesNotMatch(workflow, /`browser_screenshot`[^\n]{0,80}\+\s*视觉分析/)
 })

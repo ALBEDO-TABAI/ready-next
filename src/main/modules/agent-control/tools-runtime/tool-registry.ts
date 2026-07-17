@@ -31,7 +31,10 @@ import {
   getImageGenerationAnthropicTools,
   getImageGenerationOpenAITools,
 } from '../../tools/image-generation-tool-defs'
-import { IMAGE_GENERATION_TOOL_TIMEOUT_MS } from '../../tools/tool-execution-timeout-policy'
+import {
+  IMAGE_GENERATION_TOOL_TIMEOUT_MS,
+  resolveToolExecutionTimeoutMs,
+} from '../../tools/tool-execution-timeout-policy'
 import {
   AGENT_INTERACTION_TOOL_NAMES,
   getAgentInteractionAnthropicTools,
@@ -68,6 +71,7 @@ import {
   getBrowserAnthropicTools,
   getBrowserOpenAITools,
 } from '../../tools/browser-tool-catalog'
+import { browserToolSurfaceEntry } from '../../../../shared/browser-tool-surface'
 import { getDocumentAnthropicTools, getDocumentOpenAITools } from '../../tools/document-tools'
 // Import the metadata-only entry point (`file-management-tool-defs`) rather than
 // the executor entry (`file-management-tools`). The executor module transitively
@@ -265,24 +269,6 @@ interface StaticSkillActionMeta {
 
 let staticSkillActionMetaCache: Map<string, StaticSkillActionMeta> | null = null
 
-const BROWSER_JOB_TOOL_NAMES = new Set([
-  'browser_start_task',
-  'browser_get_task',
-  'browser_resume_task',
-  'browser_cancel_task',
-  'browser_aggregate_results',
-  'browser_download_gallery',
-  'browser_research_topic',
-  'browser_run_workflow',
-])
-
-const BROWSER_READ_TOOL_NAMES = new Set([
-  'browser_collect_images',
-  'browser_extract_structured',
-  'browser_scroll_collect',
-])
-
-const BROWSER_WRITE_TOOL_NAMES = new Set(['browser_download_urls', 'browser_download_collected_media'])
 const PROJECTION_PATCH_TOOL_DOMAINS = new Set<ToolDomain>(['skill', 'image_generation'])
 const PROJECTION_PATCH_DOCUMENT_TOOL_NAMES = new Set<string>([
   'document_insert_widget',
@@ -437,10 +423,10 @@ function resolveStaticSkillToolNames(sessionId?: string): string[] {
 
 function resolveToolKind(toolName: string, domain: ToolDomain): ToolKind {
   if (domain === 'browser') {
-    if (BROWSER_JOB_TOOL_NAMES.has(toolName)) return 'job'
-    if (BROWSER_READ_TOOL_NAMES.has(toolName)) return 'read'
-    if (BROWSER_WRITE_TOOL_NAMES.has(toolName)) return 'write'
-    return 'interactive'
+    const surface = browserToolSurfaceEntry(toolName)
+    if (surface?.layer === 'long_task') return 'job'
+    if (surface?.defaultAccess === 'read') return 'read'
+    return 'write'
   }
 
   const { accessMode } = getToolResourceTag(toolName)
@@ -484,7 +470,8 @@ function buildToolDefinition(
     projectionHint: resolveToolProjectionHint(toolName, domain, kind),
     description: metadata?.description || toolName,
     schema: metadata?.schema || null,
-    executionTimeoutMs: metadata?.executionTimeoutMs,
+    executionTimeoutMs: metadata?.executionTimeoutMs
+      ?? (domain === 'browser' ? resolveToolExecutionTimeoutMs(toolName) : undefined),
     executionVisibility: metadata?.executionVisibility || 'model',
     requiresExplicitAllowlist: metadata?.requiresExplicitAllowlist,
     resultShape: resolveToolResultShape(toolName, domain),

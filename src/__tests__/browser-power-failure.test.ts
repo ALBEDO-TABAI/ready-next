@@ -38,7 +38,7 @@ test.beforeEach(() => {
 })
 
 test('classifyBrowserPowerFailure maps each failure family to a distinct recovery hint', () => {
-  assert.equal(classifyBrowserPowerFailure('browser_power_eval timed out after 8000ms').failureClass, 'timeout')
+  assert.equal(classifyBrowserPowerFailure('browser_eval timed out after 8000ms').failureClass, 'timeout')
   assert.equal(classifyBrowserPowerFailure('no active tab for network trace').failureClass, 'target_stale')
   assert.equal(classifyBrowserPowerFailure('Target closed').failureClass, 'target_stale')
   assert.equal(classifyBrowserPowerFailure('browser_power_frame_context_unavailable').failureClass, 'frame_context')
@@ -60,10 +60,10 @@ test('browserToolOriginFromUrl extracts origin and tolerates junk', () => {
   assert.equal(browserToolOriginFromUrl('not a url'), null)
 })
 
-test('browser_power_eval failure preserves target identity and a runtime recovery hint', async () => {
+test('browser_eval failure preserves target identity and a runtime recovery hint', async () => {
   const out = await executeBrowserTool(
-    'browser_power_eval',
-    { code: 'boom()', purpose: 'probe editor', tab_id: 'tab-1' },
+    'browser_eval',
+    { code: 'boom()', purpose: 'probe editor', world: 'main', tab_id: 'tab-1' },
     controller({ executeJS: async () => { throw new Error('ReferenceError: boom is not defined') } }),
     undefined,
     'session-1',
@@ -72,7 +72,7 @@ test('browser_power_eval failure preserves target identity and a runtime recover
   )
   const parsed = parseOutput(out)
   assert.equal(parsed.ok, false)
-  assert.equal(parsed.errorKind, 'browser_power_eval_failed')
+  assert.equal(parsed.errorKind, 'browser_eval_failed')
   assert.equal(parsed.failureClass, 'eval_runtime')
   assert.equal(parsed.tabId, 'tab-1')
   assert.equal(parsed.currentUrl, 'https://creator.xiaohongshu.com/publish')
@@ -80,9 +80,9 @@ test('browser_power_eval failure preserves target identity and a runtime recover
   assert.match(String(parsed.nextSuggestedAction), /async IIFE|Runtime\.evaluate/)
 })
 
-test('browser_power_cdp failure is structured (no generic thrown string) with frame hint', async () => {
+test('browser_cdp failure is structured (no generic thrown string) with frame hint', async () => {
   const out = await executeBrowserTool(
-    'browser_power_cdp',
+    'browser_cdp',
     { method: 'Runtime.evaluate', purpose: 'probe', params: {}, tab_id: 'tab-1' },
     controller({
       sendCdpCommand: async () => { throw new Error('Cannot find context with specified id') },
@@ -94,42 +94,17 @@ test('browser_power_cdp failure is structured (no generic thrown string) with fr
   )
   const parsed = parseOutput(out)
   assert.equal(parsed.ok, false)
-  assert.equal(parsed.errorKind, 'browser_power_cdp_failed')
+  assert.equal(parsed.errorKind, 'browser_cdp_failed')
   assert.equal(parsed.tabId, 'tab-1')
   assert.equal(parsed.origin, 'https://creator.xiaohongshu.com')
   assert.equal(parsed.method, 'Runtime.evaluate')
   assert.ok(typeof parsed.nextSuggestedAction === 'string' && (parsed.nextSuggestedAction as string).length > 0)
 })
 
-test('browser_power_network_trace navigate failure is structured with target identity', async () => {
+test('browser_resources failure is structured, not a thrown string', async () => {
   const out = await executeBrowserTool(
-    'browser_power_network_trace',
-    { url: 'https://creator.xiaohongshu.com/publish', duration_ms: 1, purpose: 'trace' },
-    controller({
-      navigate: async () => ({ success: false, error: 'Target closed' }) as never,
-      startNetworkObserver: async () => ({
-        events: () => [],
-        getResponseBody: async () => ({ body: '', base64Encoded: false }),
-        stop: async () => undefined,
-      }) as never,
-    }),
-    undefined,
-    'session-1',
-    undefined,
-    POWER_TEXT,
-  )
-  const parsed = parseOutput(out)
-  assert.equal(parsed.ok, false)
-  assert.equal(parsed.errorKind, 'browser_power_trace_failed')
-  assert.equal(parsed.failureClass, 'target_stale')
-  assert.equal(parsed.origin, 'https://creator.xiaohongshu.com')
-  assert.match(String(parsed.nextSuggestedAction), /browser_get_tabs|rebind/)
-})
-
-test('browser_power_resource_forensics failure is structured, not a thrown string', async () => {
-  const out = await executeBrowserTool(
-    'browser_power_resource_forensics',
-    { purpose: 'sniff', kinds: ['video'], tab_id: 'tab-1' },
+    'browser_resources',
+    { include_response_bodies: true, purpose: 'sniff', kinds: ['video'], tab_id: 'tab-1' },
     controller({
       startNetworkObserver: async () => { throw new Error('observer attach timed out') },
       executeJS: async () => { throw new Error('observer attach timed out') },
@@ -141,7 +116,7 @@ test('browser_power_resource_forensics failure is structured, not a thrown strin
   )
   const parsed = parseOutput(out)
   assert.equal(parsed.ok, false)
-  assert.equal(parsed.errorKind, 'browser_power_forensics_failed')
+  assert.equal(parsed.errorKind, 'browser_resources_failed')
   assert.equal(parsed.tabId, 'tab-1')
   assert.ok(typeof parsed.nextSuggestedAction === 'string')
 })

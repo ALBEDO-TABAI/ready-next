@@ -1,5 +1,5 @@
 /**
- * Target-resolution gating for `browser_act_on_target` (counterplan §5.4, WP3).
+ * Target-resolution gating for `browser_click/browser_type` (counterplan §5.4, WP3).
  *
  * One tool replaces Codex's click/expand/choose/expand_and_read four: the
  * action verb is a parameter. The hard contract this module enforces (pure,
@@ -49,9 +49,10 @@ export function gateActOnTarget(
     matchCount: number
     candidates?: unknown[]
     ambiguityGroup?: { role: string; name: string; targetIds: string[] } | null
+    resolvedRef?: ResolvedTargetRef
   },
 ): ResolvedTargetRef | AgentBrowserStructuredError {
-  const parsed = parseTargetId(request.targetId)
+  const parsed = context.resolvedRef || parseTargetId(request.targetId)
   if (!parsed) {
     return agentBrowserError('target_not_found', `Malformed target id: ${request.targetId}`)
   }

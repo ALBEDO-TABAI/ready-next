@@ -1,42 +1,42 @@
 {
-  "policy": "shared-persist-browser",
-  "description": "P7c4 current policy inventory: these browser surfaces still resolve to the shared persist:browser identity root.",
+  "policy": "shared-default-with-explicit-profiles",
+  "description": "Default browsing remains on persist:browser. browser_session may explicitly open a named cookie/storage profile; popup, download and policy paths follow that tab session.",
   "surfaces": [
     {
       "id": "normal-and-agent-tabs",
       "file": "src/main/modules/browser-engine/tab-lifecycle-service.ts",
-      "partition": "persist:browser",
-      "evidence": "this.host.createHost('persist:browser')"
+      "partition": "persist:browser or persist:browser-profile-*",
+      "evidence": "profile ? `persist:browser-profile-${profile}` : 'persist:browser'"
     },
     {
       "id": "preview-view",
       "file": "src/main/modules/browser-engine/preview-service.ts",
-      "partition": "persist:browser",
+      "partition": "persist:browser (default)",
       "evidence": "this.deps.createHost('persist:browser')"
     },
     {
       "id": "auth-popup",
       "file": "src/main/modules/browser-engine/auth-popup-manager.ts",
-      "partition": "persist:browser",
-      "evidence": "partition: 'persist:browser'"
+      "partition": "source profile or persist:browser",
+      "evidence": "profile ? `persist:browser-profile-${profile}` : 'persist:browser'"
     },
     {
       "id": "background-probe",
       "file": "src/main/modules/browser-engine/ipc-handler.ts",
-      "partition": "persist:browser",
+      "partition": "persist:browser (background probe)",
       "evidence": "partition: 'persist:browser'"
     },
     {
       "id": "download-session",
       "file": "src/main/modules/browser-engine/ipc-handler.ts",
-      "partition": "persist:browser",
-      "evidence": "session.fromPartition('persist:browser')"
+      "partition": "source tab session or persist:browser fallback",
+      "evidence": "targetSession = this.resolveTabView(payload.tabId).view.webContents.session"
     },
     {
       "id": "permission-and-adblock-policy",
-      "file": "src/main/modules/browser-engine/session-policy-service.ts",
-      "partition": "persist:browser",
-      "evidence": "applyForPartition('persist:browser')"
+      "file": "src/main/modules/browser-engine/ipc-handler.ts",
+      "partition": "every created browser partition",
+      "evidence": "this.sessionPolicyService.applyForPartition(partition)"
     }
   ]
 }

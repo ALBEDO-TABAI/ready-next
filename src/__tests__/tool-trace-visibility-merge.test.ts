@@ -17,19 +17,19 @@ function at(ms: number): Date {
 
 test('duplicate rich event backfills toolName/detail onto the kept thin event', () => {
   const visible = filterUserVisibleToolTraceEvents([
-    { id: 'thin', kind: 'call' as const, text: 'browser_read_page(url)', timestamp: at(0) },
+    { id: 'thin', kind: 'call' as const, text: 'browser_read(url)', timestamp: at(0) },
     {
       id: 'rich',
       kind: 'call' as const,
-      text: 'browser_read_page(url)',
+      text: 'browser_read(url)',
       timestamp: at(1),
-      toolName: 'browser_read_page',
+      toolName: 'browser_read',
       detail: '{\n  "url": "https://example.com"\n}',
     },
   ])
   assert.equal(visible.length, 1, 'still deduped to one entry')
   assert.equal(visible[0].id, 'thin', 'first occurrence stays the kept entry')
-  assert.equal(visible[0].toolName, 'browser_read_page')
+  assert.equal(visible[0].toolName, 'browser_read')
   assert.match(visible[0].detail || '', /example\.com/)
 })
 

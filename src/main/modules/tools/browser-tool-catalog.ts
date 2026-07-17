@@ -4,364 +4,82 @@ import {
   normalizeOpenAIToolSchema,
   type ToolParamSchemaSpec,
 } from './tool-schema'
-import { BROWSER_INTERACTION_SCHEMAS } from './schemas/browser-interaction-schemas'
-import { BROWSER_CONTENT_SCHEMAS } from './schemas/browser-content-schemas'
+import { BROWSER_TOOL_SCHEMAS, type BrowserToolSchemaName } from './schemas/browser-tool-schemas'
 import { zodObjectToParamList } from './zod-param-derivation'
 import type { BrowserPowerEffect } from '../../../shared/browser-power'
+import {
+  BROWSER_PUBLIC_TOOL_NAMES,
+  BROWSER_TOOL_SURFACE_MANIFEST,
+  type BrowserPublicToolName,
+} from '../../../shared/browser-tool-surface'
 
 export type BrowserToolDef = {
-  name: string
+  name: BrowserPublicToolName
   description: string
   params: ToolParamSchemaSpec[]
-  effectProfile?: {
+  effectProfile: {
     effects: BrowserPowerEffect[]
     destructive?: boolean
-    deprecated?: boolean
-    replacement?: string
   }
 }
 
-export const BROWSER_INTERACTION_TOOL_NAMES = [
-  'browser_navigate',
-  'browser_search',
-  'browser_get_tabs',
-  'browser_read_page',
-  'browser_read_page_map',
-  'browser_probe_readonly',
-  'browser_click',
-  'browser_click_text',
-  'browser_act_on_target',
-  'browser_type',
-  'browser_type_smart',
-  'browser_compose_message',
-  'browser_capture_viewport',
-  'browser_probe_workflow_state',
-  'browser_locate_action_targets',
-  'browser_locate_input_targets',
-  'browser_analyze_viewport',
-  'browser_list_upload_targets',
-  'browser_upload_scope_attachment',
-  'browser_click_at',
-  'browser_type_at',
-  'browser_scroll_at',
-  'browser_send_keys',
-  'browser_ask_user_takeover',
-  'browser_query_gemini',
-  'browser_wait',
-  'browser_wait_for_condition',
-  'browser_go_back',
-] as const
+const DESCRIPTIONS: Record<BrowserPublicToolName, string> = {
+  browser_tabs: '列出、打开、切换或关闭浏览器标签页；返回标签、来源页和当前任务绑定。',
+  browser_navigate: '在绑定标签页打开地址、后退、前进或刷新，并保留任务与标签绑定。',
+  browser_search: '使用搜索引擎搜索并在绑定标签页打开结果页。',
+  browser_snapshot: '读取当前文档的紧凑可访问结构与稳定目标引用；后续定位优先使用这些引用。',
+  browser_find: '在当前页面快照中按文本、角色或用途查找目标，不重复扫描整页。',
+  browser_read: '读取当前页正文、指定区域或目标引用对应的内容。',
+  browser_screenshot: '返回当前页面的真实截图；可按需附加内部视觉分析。',
+  browser_wait: '等待页面就绪、选择器、文本、URL、网络安静或内容稳定。',
+  browser_click: '按目标引用、语义、选择器或坐标点击；动作后返回可核验结果。',
+  browser_type: '在目标输入区输入内容；自动选择快速填充或逐键输入，可按要求提交。',
+  browser_fill_form: '一次填写多个表单字段，并逐项核验写入结果。',
+  browser_select: '在下拉框、列表框或可选择控件中选择一个或多个值。',
+  browser_hover: '把可信鼠标移动到目标上，触发展开或提示状态。',
+  browser_scroll: '滚动页面或指定容器，并核验滚动是否生效。',
+  browser_press_key: '发送按键或组合键，例如 Enter、Escape、Tab、Meta+L。',
+  browser_drag: '在两个目标或坐标之间执行可信拖拽并核验结果。',
+  browser_upload: '把当前任务明确提供的一个或多个附件上传到页面。',
+  browser_dialog: '读取并处理当前页面的 alert、confirm、prompt 或离开页面提示。',
+  browser_request_takeover: '验证码、安全验证、Passkey 或需要人工判断时请求用户接管，并保留续跑点。',
+  browser_collect: '采集图片、结构化内容、长列表、逐篇详情或跨页研究；长任务返回可续跑句柄。',
+  browser_download: '通过当前浏览器会话流式下载 URL、页面资源或采集结果，并校验文件。',
+  browser_archive: '把当前页面归档为 PDF、MHTML、HTML 或 Markdown。',
+  browser_task: '查询、继续、取消后台浏览器任务或读取完整/部分结果。',
+  browser_status: '读取当前页面、标签绑定、动作结果、上传/提交状态与恢复建议。',
+  browser_console: '读取或清空当前页面的受限控制台日志。',
+  browser_network: '采集或读取当前页面的受限网络请求、响应摘要与时间线。',
+  browser_resources: '发现当前页的图片、音视频、文档和流媒体资源及其证据。',
+  browser_eval: '在绑定页面执行高级 JavaScript；效果由代码和输出通道推导，不接受模型自报。',
+  browser_cdp: '调用受控 Chrome DevTools Protocol 方法；权限由方法和参数推导。',
+  browser_session: '查看登录态，清理当前站点数据，或切换已配置的受控会话配置。',
+  browser_permission: '查看、设置或重置当前站点的受控浏览器权限。',
+}
 
-export const BROWSER_CONTENT_TASK_TOOL_NAMES = [
-  'browser_collect_images',
-  'browser_download_urls',
-  'browser_download_collected_media',
-  'browser_inspect_resources',
-  'browser_resolve_video',
-  'browser_extract_structured',
-  'browser_scroll_collect',
-  'browser_start_task',
-  'browser_get_task',
-  'browser_resume_task',
-  'browser_cancel_task',
-  'browser_aggregate_results',
-  'browser_download_gallery',
-  'browser_research_topic',
-  'browser_run_workflow',
-  'browser_execute_js',
-  'browser_power_eval',
-  'browser_power_cdp',
-  'browser_power_network_trace',
-  'browser_power_resource_forensics',
-  'browser_power_script_run',
-  'browser_media_download_advanced',
-  'browser_stage_site_strategy',
-  'browser_visible_collect',
-  'browser_collect_notes',
-  'browser_confirm_collection_consent',
-] as const
+export const BROWSER_INTERACTION_TOOL_NAMES = BROWSER_TOOL_SURFACE_MANIFEST
+  .filter((entry) => entry.layer === 'read' || entry.layer === 'interaction')
+  .map((entry) => entry.name)
 
-export const BROWSER_TOOLS: BrowserToolDef[] = [
-  {
-    name: 'browser_navigate',
-    description: '导航到指定 URL。如果没有打开的标签页，会自动创建一个新标签页。',
-    params: zodObjectToParamList(BROWSER_INTERACTION_SCHEMAS.browser_navigate) as ToolParamSchemaSpec[],
-  },
-  {
-    name: 'browser_search',
-    description: '使用搜索引擎搜索关键词。默认自动选择引擎并在失败时回退（duckduckgo/google/bing/baidu）。',
-    params: zodObjectToParamList(BROWSER_INTERACTION_SCHEMAS.browser_search) as ToolParamSchemaSpec[],
-  },
-  {
-    name: 'browser_get_tabs',
-    description: '列出当前所有打开的浏览器标签页，包括 URL、标题和活跃状态。',
-    params: zodObjectToParamList(BROWSER_INTERACTION_SCHEMAS.browser_get_tabs) as ToolParamSchemaSpec[],
-  },
-  {
-    name: 'browser_read_page',
-    description: '读取当前页面的纯文本内容（document.body.innerText）。浏览任务默认优先使用 browser_read_page_map；此工具只作为正文补充。',
-    params: zodObjectToParamList(BROWSER_INTERACTION_SCHEMAS.browser_read_page) as ToolParamSchemaSpec[],
-  },
-  {
-    name: 'browser_read_page_map',
-    description: '读取当前页面的结构化页面地图，返回 generation、目标 targetId、角色、名称、状态、基础风险标记和歧义组。浏览操作前优先调用。',
-    params: zodObjectToParamList(BROWSER_INTERACTION_SCHEMAS.browser_read_page_map) as ToolParamSchemaSpec[],
-  },
-  {
-    name: 'browser_probe_readonly',
-    description: '按固定范围执行安全只读页面探针。必须先读取 page map 并携带 fresh generation；不会执行模型脚本、导航、点击、输入或发请求。',
-    params: zodObjectToParamList(BROWSER_INTERACTION_SCHEMAS.browser_probe_readonly) as ToolParamSchemaSpec[],
-  },
-  {
-    name: 'browser_click',
-    description: 'Fallback：点击页面上匹配 CSS 选择器的第一个元素。默认先用 browser_read_page_map + browser_act_on_target。',
-    params: zodObjectToParamList(BROWSER_INTERACTION_SCHEMAS.browser_click) as ToolParamSchemaSpec[],
-  },
-  {
-    name: 'browser_click_text',
-    description: 'Fallback：按可见文本智能点击元素。默认先用 browser_read_page_map + browser_act_on_target，避免绕开 targetId/generation 校验。',
-    params: zodObjectToParamList(BROWSER_INTERACTION_SCHEMAS.browser_click_text) as ToolParamSchemaSpec[],
-  },
-  {
-    name: 'browser_act_on_target',
-    description: '对 browser_read_page_map 返回的唯一目标执行动作。必须携带 target_id 和 fresh generation；支持 click/expand/choose/fill/hover，并在动作后复查。',
-    params: zodObjectToParamList(BROWSER_INTERACTION_SCHEMAS.browser_act_on_target) as ToolParamSchemaSpec[],
-  },
-  {
-    name: 'browser_type',
-    description: 'Fallback：在页面上匹配 CSS 选择器的输入框中输入文字。默认先用 browser_read_page_map + browser_act_on_target(action=fill)。',
-    params: zodObjectToParamList(BROWSER_INTERACTION_SCHEMAS.browser_type) as ToolParamSchemaSpec[],
-  },
-  {
-    name: 'browser_type_smart',
-    description: 'Fallback：按输入框标签/placeholder/name/id 智能定位并输入文本。默认先用 browser_read_page_map + browser_act_on_target(action=fill)。',
-    params: zodObjectToParamList(BROWSER_INTERACTION_SCHEMAS.browser_type_smart) as ToolParamSchemaSpec[],
-  },
-  {
-    name: 'browser_compose_message',
-    description: 'Fallback：在聊天/搜索类页面智能定位消息输入框并输入内容。默认先用页面地图确认输入区和发送目标。',
-    params: zodObjectToParamList(BROWSER_INTERACTION_SCHEMAS.browser_compose_message) as ToolParamSchemaSpec[],
-  },
-  {
-    name: 'browser_capture_viewport',
-    description: '捕获浏览器截图（默认视口），用于坐标点击前后校验。',
-    params: zodObjectToParamList(BROWSER_INTERACTION_SCHEMAS.browser_capture_viewport) as ToolParamSchemaSpec[],
-  },
-  {
-    name: 'browser_probe_workflow_state',
-    description: '批量采集页面身份、截图、上传状态、prompt 状态、DOM 状态与关键动作候选，用于上传/填写/提交工作流，减少重复截图和 DOM 扫描。',
-    params: zodObjectToParamList(BROWSER_INTERACTION_SCHEMAS.browser_probe_workflow_state) as ToolParamSchemaSpec[],
-  },
-  {
-    name: 'browser_locate_action_targets',
-    description: '定位当前页面中与上传/发送/关闭/返回相关的候选控件，返回结构化候选列表；当 action=send 时会优先关联当前焦点输入区附近的控件，减少误点无关按钮。',
-    params: zodObjectToParamList(BROWSER_INTERACTION_SCHEMAS.browser_locate_action_targets) as ToolParamSchemaSpec[],
-  },
-  {
-    name: 'browser_locate_input_targets',
-    description: '定位当前页面可能用于输入提示词/消息/描述的输入区域，返回结构化候选列表；会额外给出当前已聚焦输入区 active_target，以及与该输入区相邻的发送/生成控件 nearby_send_targets，便于先确认焦点再提交。',
-    params: zodObjectToParamList(BROWSER_INTERACTION_SCHEMAS.browser_locate_input_targets) as ToolParamSchemaSpec[],
-  },
-  {
-    name: 'browser_analyze_viewport',
-    description: '当 DOM/A11y 候选不足时，使用当前模型的视觉能力分析截图并返回结构化控件候选。',
-    params: zodObjectToParamList(BROWSER_INTERACTION_SCHEMAS.browser_analyze_viewport) as ToolParamSchemaSpec[],
-  },
-  {
-    name: 'browser_list_upload_targets',
-    description: '枚举当前页面可能的文件上传入口和 file input，适合上传前探测。',
-    params: zodObjectToParamList(BROWSER_INTERACTION_SCHEMAS.browser_list_upload_targets) as ToolParamSchemaSpec[],
-  },
-  {
-    name: 'browser_upload_scope_attachment',
-    description: '把当前会话中的附件上传到页面 file input。可按 attachmentId、文件名或 latest=true 自动选择。',
-    params: zodObjectToParamList(BROWSER_INTERACTION_SCHEMAS.browser_upload_scope_attachment) as ToolParamSchemaSpec[],
-  },
-  {
-    name: 'browser_collect_images',
-    description: '只读取当前视口可见的图片候选（URL/尺寸/alt，默认 20、最多 60），用于轻量探查。整画板/图库/“把这些图都采集下来”这类成规模采集必须用 browser_visible_collect(image_gallery) 走结构化采集链，不要用本工具配 browser_download_urls 手工批量下载。',
-    params: zodObjectToParamList(BROWSER_CONTENT_SCHEMAS.browser_collect_images) as ToolParamSchemaSpec[],
-  },
-  {
-    name: 'browser_download_urls',
-    description: '把一组 URL 下载到本地目录（directory 必填，不传会被拒绝）。仅用于与图片采集无关的零散下载；画板/图库的保存必须走 browser_visible_collect(image_gallery)+browser_download_collected_media，本工具会拦截图床批量下载。',
-    params: zodObjectToParamList(BROWSER_CONTENT_SCHEMAS.browser_download_urls) as ToolParamSchemaSpec[],
-  },
-  {
-    name: 'browser_download_collected_media',
-    description: '从已完成的 browser_visible_collect(image_gallery) 来源任务下载已冻结图片到本地目录；只接受 source_task_id，不接受任意 URL 列表。',
-    params: zodObjectToParamList(BROWSER_CONTENT_SCHEMAS.browser_download_collected_media) as ToolParamSchemaSpec[],
-  },
-  {
-    name: 'browser_inspect_resources',
-    description: '观察当前页或指定 URL 的 DOM、performance 和网络资源候选，返回可下载媒体/图片/文档候选、证据和安全下载头；若无候选，应先播放/展开/滚动/等待后重试，不要直接跳外部下载站。不执行自由脚本，不返回 cookie 或完整响应体。',
-    params: zodObjectToParamList(BROWSER_CONTENT_SCHEMAS.browser_inspect_resources) as ToolParamSchemaSpec[],
-  },
-  {
-    name: 'browser_resolve_video',
-    description: '解析当前页面或指定页面里的视频直链。小红书会复用内嵌 Video Expert Analyzer 的小红书解析器；下载仍交给 browser_download_urls。',
-    params: zodObjectToParamList(BROWSER_CONTENT_SCHEMAS.browser_resolve_video) as ToolParamSchemaSpec[],
-  },
-  {
-    name: 'browser_click_at',
-    description: '按归一化坐标（0-999）执行低层点击，适用于复杂页面和 shadow/editor 场景。',
-    params: zodObjectToParamList(BROWSER_INTERACTION_SCHEMAS.browser_click_at) as ToolParamSchemaSpec[],
-  },
-  {
-    name: 'browser_type_at',
-    description: '按归一化坐标聚焦输入，并用 CDP 低层键盘输入文本，可选回车发送。',
-    params: zodObjectToParamList(BROWSER_INTERACTION_SCHEMAS.browser_type_at) as ToolParamSchemaSpec[],
-  },
-  {
-    name: 'browser_scroll_at',
-    description: '按坐标执行低层滚动（鼠标滚轮）。',
-    params: zodObjectToParamList(BROWSER_INTERACTION_SCHEMAS.browser_scroll_at) as ToolParamSchemaSpec[],
-  },
-  {
-    name: 'browser_send_keys',
-    description: '发送低层按键事件（例如 Enter、Escape、Tab）。',
-    params: zodObjectToParamList(BROWSER_INTERACTION_SCHEMAS.browser_send_keys) as ToolParamSchemaSpec[],
-  },
-  {
-    name: 'browser_ask_user_takeover',
-    description: '当页面出现登录/验证码等人工步骤时请求用户接管。',
-    params: zodObjectToParamList(BROWSER_INTERACTION_SCHEMAS.browser_ask_user_takeover) as ToolParamSchemaSpec[],
-  },
-  {
-    name: 'browser_query_gemini',
-    description: '在 Gemini 页面自动执行“输入并发送”，并检测响应；失败时自动回退到坐标输入。',
-    params: zodObjectToParamList(BROWSER_INTERACTION_SCHEMAS.browser_query_gemini) as ToolParamSchemaSpec[],
-  },
-  {
-    name: 'browser_wait',
-    description: '等待页面进入可交互状态，可选等待 selector 出现。',
-    params: zodObjectToParamList(BROWSER_INTERACTION_SCHEMAS.browser_wait) as ToolParamSchemaSpec[],
-  },
-  {
-    name: 'browser_wait_for_condition',
-    description: '等待复杂条件满足，如页面可读、selector 出现、网络趋稳、内容稳定或自定义 JS 条件。',
-    params: zodObjectToParamList(BROWSER_INTERACTION_SCHEMAS.browser_wait_for_condition) as ToolParamSchemaSpec[],
-  },
-  {
-    name: 'browser_extract_structured',
-    description: '按模板提取当前页或目标页的结构化内容，适合文章列表、图片列表、链接列表和通用卡片。',
-    params: zodObjectToParamList(BROWSER_CONTENT_SCHEMAS.browser_extract_structured) as ToolParamSchemaSpec[],
-  },
-  {
-    name: 'browser_scroll_collect',
-    description: '自动滚动页面并持续收集结构化内容，适合长列表、图集和无限滚动页面。',
-    params: zodObjectToParamList(BROWSER_CONTENT_SCHEMAS.browser_scroll_collect) as ToolParamSchemaSpec[],
-  },
-  {
-    name: 'browser_start_task',
-    description: '启动后台浏览器任务，适合批量下载、长页面采集和跨页研究。',
-    params: zodObjectToParamList(BROWSER_CONTENT_SCHEMAS.browser_start_task) as ToolParamSchemaSpec[],
-  },
-  {
-    name: 'browser_get_task',
-    description: '只读查询后台浏览器任务的当前进度、状态和结果摘要；不会启动、续跑或升级为采集任务。',
-    params: zodObjectToParamList(BROWSER_CONTENT_SCHEMAS.browser_get_task) as ToolParamSchemaSpec[],
-  },
-  {
-    name: 'browser_resume_task',
-    description: '继续同一个已暂停或未完成的后台浏览器任务；不会把已完成的发现任务自动升级为保存采集。',
-    params: zodObjectToParamList(BROWSER_CONTENT_SCHEMAS.browser_resume_task) as ToolParamSchemaSpec[],
-  },
-  {
-    name: 'browser_cancel_task',
-    description: '取消一个后台浏览器任务；若任务卡代表发现任务与后续保存任务组成的链，会停止当前仍在运行的保存任务。',
-    params: zodObjectToParamList(BROWSER_CONTENT_SCHEMAS.browser_cancel_task) as ToolParamSchemaSpec[],
-  },
-  {
-    name: 'browser_aggregate_results',
-    description: '对多页提取结果做拼接、去重和排序，便于后续总结。',
-    params: zodObjectToParamList(BROWSER_CONTENT_SCHEMAS.browser_aggregate_results) as ToolParamSchemaSpec[],
-  },
-  {
-    name: 'browser_download_gallery',
-    description: '面向长图集或画板的薄适配：自动按图集模式启动后台采集与批量下载任务。',
-    params: zodObjectToParamList(BROWSER_CONTENT_SCHEMAS.browser_download_gallery) as ToolParamSchemaSpec[],
-  },
-  {
-    name: 'browser_research_topic',
-    description: '面向跨页研究的薄适配：按主题启动后台研究任务，并返回任务句柄。',
-    params: zodObjectToParamList(BROWSER_CONTENT_SCHEMAS.browser_research_topic) as ToolParamSchemaSpec[],
-  },
-  {
-    name: 'browser_run_workflow',
-    description: '兼容入口：批量执行声明式浏览器任务。包含 execute_js 的旧工作流在 Power Mode 下迁移到 browser_power_script_run。',
-    params: zodObjectToParamList(BROWSER_CONTENT_SCHEMAS.browser_run_workflow) as ToolParamSchemaSpec[],
-    effectProfile: { effects: ['page_mutation'], deprecated: true, replacement: 'browser_power_script_run' },
-  },
-  {
-    name: 'browser_execute_js',
-    description: '兼容入口：Safe Mode 只允许命名只读模板；Power Mode 有授权时转发到 browser_power_eval。',
-    params: zodObjectToParamList(BROWSER_CONTENT_SCHEMAS.browser_execute_js) as ToolParamSchemaSpec[],
-    effectProfile: { effects: ['page_mutation'], deprecated: true, replacement: 'browser_power_eval' },
-  },
-  {
-    name: 'browser_power_eval',
-    description: 'Power Mode：在页面上下文执行自由 JavaScript。必须说明 purpose；非破坏性可由用户原话授权，破坏性效果必须有单独 grant；调用会写审计记录。',
-    params: zodObjectToParamList(BROWSER_CONTENT_SCHEMAS.browser_power_eval) as ToolParamSchemaSpec[],
-    effectProfile: { effects: ['observe', 'page_mutation'] },
-  },
-  {
-    name: 'browser_power_cdp',
-    description: 'Power Mode：调用 Chrome DevTools Protocol 方法，用于 Runtime/Network/Page 等高级网页自动化和诊断；调用会校验 grant 并审计。',
-    params: zodObjectToParamList(BROWSER_CONTENT_SCHEMAS.browser_power_cdp) as ToolParamSchemaSpec[],
-    effectProfile: { effects: ['observe', 'page_mutation'] },
-  },
-  {
-    name: 'browser_power_network_trace',
-    description: 'Power Mode：监听当前页或目标页网络请求，返回 bounded trace、响应摘要和资源线索；可用于视频/音频/隐藏资源嗅探。',
-    params: zodObjectToParamList(BROWSER_CONTENT_SCHEMAS.browser_power_network_trace) as ToolParamSchemaSpec[],
-    effectProfile: { effects: ['observe', 'navigate'] },
-  },
-  {
-    name: 'browser_power_resource_forensics',
-    description: 'Power Mode：综合 DOM/performance/CDP network/response body 做资源 forensics，发现视频、音频、m3u8/mpd、分片、blob/MSE 线索。',
-    params: zodObjectToParamList(BROWSER_CONTENT_SCHEMAS.browser_power_resource_forensics) as ToolParamSchemaSpec[],
-    effectProfile: { effects: ['observe', 'navigate', 'download'] },
-  },
-  {
-    name: 'browser_power_script_run',
-    description: 'Power Mode：执行多步骤浏览器脚本工作流，替代 browser_run_workflow 里的 execute_js 旧入口；整段脚本按声明效果授权和审计。',
-    params: zodObjectToParamList(BROWSER_CONTENT_SCHEMAS.browser_power_script_run) as ToolParamSchemaSpec[],
-    effectProfile: { effects: ['page_mutation'] },
-  },
-  {
-    name: 'browser_media_download_advanced',
-    description: '下载并校验媒体资源。可接收 resource forensics 候选，也可先侦测当前页；支持 referer/header 继承、m3u8/mpd/分片线索；下载后按“文件存在且非空字节”校验（拿到 URL 不等于下载完成）。',
-    params: zodObjectToParamList(BROWSER_CONTENT_SCHEMAS.browser_media_download_advanced) as ToolParamSchemaSpec[],
-    effectProfile: { effects: ['download'] },
-  },
-  {
-    name: 'browser_stage_site_strategy',
-    description: '把成功的网页提取/下载/操作方法沉淀为 staged 站点策略卡；不会直接激活，等待用户后续确认。',
-    params: zodObjectToParamList(BROWSER_CONTENT_SCHEMAS.browser_stage_site_strategy) as ToolParamSchemaSpec[],
-    effectProfile: { effects: ['observe'] },
-  },
-  {
-    name: 'browser_visible_collect',
-    description: 'Agent 右侧分屏可见页面采集器：在 Agent 标签页分轮提取条目、跨轮去重、逐屏滚动，并按轮保存进度，适合信息流/评论区/长列表。后台任务，返回任务句柄。用于逐篇保存时，这一步只负责冻结目标清单；只有 discoveryStatus=complete 且拿到 suggestedNextTool/source_task_id 后才继续调用 browser_collect_notes。若返回 partial/paused 或 suggestedContinueTool，先 browser_resume_task 继续发现。',
-    params: zodObjectToParamList(BROWSER_CONTENT_SCHEMAS.browser_visible_collect) as ToolParamSchemaSpec[],
-  },
-  {
-    name: 'browser_collect_notes',
-    description: '后台逐篇采集子 agent：优先传 browser_visible_collect 返回的 source_task_id/expected_count 接力完整冻结清单；来源清单不是 complete 时默认拒绝，allow_partial 只会被记录为提示，不能替代持久用户确认。用户直接提供 URL 列表时必须来自当前用户消息原文，系统会先合成 source task 再接力。它在独立后台标签页逐篇打开目标，或按 strategy=card_loop 从列表页逐张点开，采集详情和图片，按“序号 - 标题”建目录，写 note.md/manifest.json/assets，并按篇保存进度。数量不一致会拒绝启动。返回后台任务句柄。',
-    params: zodObjectToParamList(BROWSER_CONTENT_SCHEMAS.browser_collect_notes) as ToolParamSchemaSpec[],
-  },
-  {
-    name: 'browser_confirm_collection_consent',
-    description: '确认浏览器采集的 pending consent request。只接受 browser_collect_notes 返回的 requestId 和确认来源，用于写入持久确认记录；不要解析用户自然语言来替代 requestId。',
-    params: zodObjectToParamList(BROWSER_CONTENT_SCHEMAS.browser_confirm_collection_consent) as ToolParamSchemaSpec[],
-  },
-  {
-    name: 'browser_go_back',
-    description: '在当前标签页中后退一页。',
-    params: zodObjectToParamList(BROWSER_INTERACTION_SCHEMAS.browser_go_back) as ToolParamSchemaSpec[],
-  },
-]
+export const BROWSER_CONTENT_TASK_TOOL_NAMES = BROWSER_TOOL_SURFACE_MANIFEST
+  .filter((entry) => entry.layer === 'long_task' || entry.layer === 'advanced')
+  .map((entry) => entry.name)
+
+export const BROWSER_TOOLS: BrowserToolDef[] = BROWSER_PUBLIC_TOOL_NAMES.map((name) => {
+  const surface = BROWSER_TOOL_SURFACE_MANIFEST.find((entry) => entry.name === name)
+  if (!surface) throw new Error(`Browser tool surface metadata missing: ${name}`)
+  const schema = BROWSER_TOOL_SCHEMAS[name as BrowserToolSchemaName]
+  if (!schema) throw new Error(`Browser tool schema missing: ${name}`)
+  return {
+    name,
+    description: DESCRIPTIONS[name],
+    params: zodObjectToParamList(schema) as ToolParamSchemaSpec[],
+    effectProfile: {
+      effects: [...surface.effects],
+      destructive: surface.effects.some((effect) => ['payment', 'remote_delete', 'account_delete', 'credential_change', 'secret_export', 'access_control_circumvention'].includes(effect)),
+    },
+  }
+})
 
 export function getBrowserAnthropicTools(): Array<Record<string, unknown>> {
   return BROWSER_TOOLS.map((tool) => normalizeAnthropicToolSchema({

@@ -6,6 +6,7 @@ import {
   normalizeDownloadTargets,
   pinimgOriginalsUrl,
 } from '../main/modules/tools/browser-tools'
+import { resolveAuthorizedBrowserDownloadDirectory } from '../main/modules/tools/browser-media-download'
 import type { ToolExecutionOutput } from '../main/modules/agent-control/tools-runtime/tool-result-types'
 
 function parseBrowserJson(output: string | ToolExecutionOutput): any {
@@ -58,14 +59,6 @@ test('normalizeDownloadTargets keeps a thumbnail fallback even when /originals/ 
 
 test('download upgrades pinimg to originals and falls back to the thumbnail when originals 404s', async (t) => {
   const requested: string[] = []
-  const originalFetch = globalThis.fetch
-  globalThis.fetch = (async (url: string) => {
-    requested.push(String(url))
-    // originals 404s; the pre-upgrade 474x succeeds
-    if (String(url).includes('/originals/')) return new Response(null, { status: 404 })
-    return new Response(new Uint8Array([1, 2, 3]), { status: 200, headers: { 'content-type': 'image/jpeg' } })
-  }) as typeof fetch
-  t.after(() => { globalThis.fetch = originalFetch })
 
   const { mkdtempSync, rmSync } = await import('node:fs')
   const { tmpdir } = await import('node:os')
@@ -73,11 +66,24 @@ test('download upgrades pinimg to originals and falls back to the thumbnail when
   const dir = mkdtempSync(join(tmpdir(), 'ready-pin-p0-'))
   t.after(() => rmSync(dir, { recursive: true, force: true }))
 
-  const output = await executeBrowserTool('browser_download_urls', {
+  const output = await executeBrowserTool('browser_download', {
     urls: ['https://i.pinimg.com/474x/ab/cd/ef/pinA.jpg'],
     directory: dir,
     unrelated_to_collection: true,
-  }, { executeJS: async () => 'https://i.pinimg.com/' } as never)
+  }, {
+    executeJS: async () => 'https://i.pinimg.com/',
+    downloadUrlToDirectory: async (params: { url: string; targetDir: string; suggestedName?: string | null }) => {
+      requested.push(params.url)
+      if (params.url.includes('/originals/')) return { success: false, error: 'HTTP 404' }
+      return {
+        success: true,
+        savePath: join(params.targetDir, `${params.suggestedName || 'pin'}.jpg`),
+        filename: `${params.suggestedName || 'pin'}.jpg`,
+        size: 3,
+        mimeType: 'image/jpeg',
+      }
+    },
+  } as never, undefined, undefined, undefined, undefined, undefined, { workspaceRoots: [dir] })
   const parsed = parseBrowserJson(output)
   assert.equal(parsed.success, 1, 'pin saved via fallback')
   // originals attempted FIRST, then the 474x fallback
@@ -87,14 +93,10 @@ test('download upgrades pinimg to originals and falls back to the thumbnail when
 
 // ── P0.3 — explicit target folder required (no silent ~/Documents) ──────────
 
-test('browser_download_urls rejects a missing directory instead of defaulting to ~/Documents', async () => {
-  const output = await executeBrowserTool('browser_download_urls', {
-    urls: ['https://example.com/a.jpg'],
-    unrelated_to_collection: true,
-  }, { executeJS: async () => 'https://example.com/' } as never)
-  const parsed = parseBrowserJson(output)
-  assert.equal(parsed.ok, false)
-  assert.equal(parsed.errorCode, 'download_directory_required')
+test('browser_download uses the Ready-owned default when no directory is supplied', () => {
+  const resolved = resolveAuthorizedBrowserDownloadDirectory(undefined)
+  assert.equal(resolved.ok, true)
+  if (resolved.ok) assert.equal(resolved.authority, 'ready_default')
 })
 
 // ── P0.1 — a recent FAILED image_gallery must not be salvaged by manual URLs ─
@@ -119,8 +121,8 @@ function controllerWithFailedGallery() {
   } as never
 }
 
-test('browser_download_urls is blocked after a recent failed image_gallery and steers back to the structured collection', async () => {
-  const output = await executeBrowserTool('browser_download_urls', {
+test('browser_download is blocked after a recent failed image_gallery and steers back to the structured collection', async () => {
+  const output = await executeBrowserTool('browser_download', {
     urls: ['https://i.pinimg.com/474x/ab/cd/ef/pinA.jpg'],
     directory: '/tmp/pin',
   }, controllerWithFailedGallery(), undefined, 'scope-pin')
@@ -128,7 +130,7 @@ test('browser_download_urls is blocked after a recent failed image_gallery and s
   assert.equal(parsed.ok, false)
   assert.equal(parsed.errorCode, 'image_gallery_collection_failed_retry_required')
   assert.equal(parsed.failedTaskId, 'task-failed-1')
-  assert.equal(parsed.suggestedNextTool, 'browser_visible_collect')
+  assert.equal(parsed.suggestedNextTool, 'browser_collect')
 })
 
 test('a pinimg batch with NO prior collection task is steered to the structured image_gallery chain', async () => {
@@ -138,7 +140,7 @@ test('a pinimg batch with NO prior collection task is steered to the structured 
     getTaskPayload: () => null,
     executeJS: async () => 'https://jp.pinterest.com/u/board',
   } as never
-  const output = await executeBrowserTool('browser_download_urls', {
+  const output = await executeBrowserTool('browser_download', {
     urls: [
       'https://i.pinimg.com/474x/a/a/a/p1.jpg',
       'https://i.pinimg.com/474x/b/b/b/p2.jpg',
@@ -149,7 +151,7 @@ test('a pinimg batch with NO prior collection task is steered to the structured 
   const parsed = parseBrowserJson(output)
   assert.equal(parsed.ok, false)
   assert.equal(parsed.errorCode, 'use_structured_image_gallery_collection')
-  assert.equal(parsed.suggestedNextTool, 'browser_visible_collect')
+  assert.equal(parsed.suggestedNextTool, 'browser_collect')
 })
 
 test('a USABLE gallery source wins over a failed one (redirect to collected-media, not retry)', async () => {
@@ -171,7 +173,7 @@ test('a USABLE gallery source wins over a failed one (redirect to collected-medi
     getTaskPayload: (taskId: string) => ({ scopeId: 'scope-pin', template: 'image_gallery', url: 'https://jp.pinterest.com/u/board', taskId }),
     executeJS: async () => 'https://jp.pinterest.com/u/board',
   } as never
-  const output = await executeBrowserTool('browser_download_urls', {
+  const output = await executeBrowserTool('browser_download', {
     urls: ['https://i.pinimg.com/474x/ab/cd/ef/pinA.jpg'],
     directory: '/tmp/pin',
   }, controller, undefined, 'scope-pin')
@@ -180,7 +182,7 @@ test('a USABLE gallery source wins over a failed one (redirect to collected-medi
   assert.equal(parsed.sourceTaskId, 'task-usable-1')
 })
 
-test('browser_start_task(visible_collect) routes through startVisibleCollection with tab_id→tabId + scope', async () => {
+test('browser_collect(visible_collect) routes through startVisibleCollection with tab_id→tabId + scope', async () => {
   const captured: { payload?: Record<string, unknown>; scope?: string } = {}
   let rawStartCalled = false
   const controller = {
@@ -192,7 +194,8 @@ test('browser_start_task(visible_collect) routes through startVisibleCollection 
     },
     startTask: async () => { rawStartCalled = true; return { taskId: 'task-x', status: 'queued' } },
   } as never
-  await executeBrowserTool('browser_start_task', {
+  await executeBrowserTool('browser_collect', {
+    mode: 'start',
     kind: 'visible_collect',
     payload: { tab_id: 'tab-7', template: 'image_gallery' }, // tab_id only, NO url
   }, controller, undefined, 'scope-pin')
@@ -201,7 +204,7 @@ test('browser_start_task(visible_collect) routes through startVisibleCollection 
   assert.equal(captured.scope, 'scope-pin', 'scope passed to startVisibleCollection')
 })
 
-test('browser_start_task(non-collection) still uses raw startTask with mapped tab_id + scope', async () => {
+test('browser_collect(non-collection) still uses raw startTask with mapped tab_id + scope', async () => {
   let captured: { kind?: string; payload?: Record<string, unknown> } = {}
   const controller = {
     startTask: async (req: { kind: string; payload: Record<string, unknown> }) => {
@@ -209,7 +212,8 @@ test('browser_start_task(non-collection) still uses raw startTask with mapped ta
       return { taskId: 'task-y', status: 'queued' }
     },
   } as never
-  await executeBrowserTool('browser_start_task', {
+  await executeBrowserTool('browser_collect', {
+    mode: 'start',
     kind: 'scroll_collect',
     payload: { tab_id: 'tab-3' },
   }, controller, undefined, 'scope-pin')
@@ -218,7 +222,7 @@ test('browser_start_task(non-collection) still uses raw startTask with mapped ta
 })
 
 test('an explicitly unrelated download passes the failed-gallery guard', async () => {
-  const output = await executeBrowserTool('browser_download_urls', {
+  const output = await executeBrowserTool('browser_download', {
     urls: ['ftp://example.com/file.bin'], // unsupported protocol → proves we got PAST the guard
     directory: '/tmp/pin',
     unrelated_to_collection: true,

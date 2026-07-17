@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
-import { existsSync, mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -24,17 +25,40 @@ function createScope(): ConversationScope {
   }
 }
 
-test('browser_download_urls registers downloaded images as recent artifacts', async (t) => {
+function createDownloadController() {
+  return {
+    executeJS: async () => 'https://example.test/page',
+    getActiveTab: () => ({ id: 'tab-1' }),
+    downloadUrlToDirectory: async (payload: {
+      url: string
+      targetDir: string
+      suggestedName?: string | null
+    }) => {
+      const bytes = Buffer.from([1, 2, 3])
+      const filename = `${payload.suggestedName || 'image'}.jpg`
+      const savePath = join(payload.targetDir, filename)
+      writeFileSync(savePath, bytes)
+      return {
+        success: true,
+        savePath,
+        filename,
+        size: bytes.length,
+        sha256: createHash('sha256').update(bytes).digest('hex'),
+        mimeType: 'image/jpeg',
+        urlChain: [payload.url],
+      }
+    },
+  }
+}
+
+test('browser_download registers downloaded images as recent artifacts', async (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'ready-browser-download-artifacts-'))
   const originalFetch = globalThis.fetch
   try {
-    globalThis.fetch = (async () => new Response(new Uint8Array([1, 2, 3]), {
-      status: 200,
-      headers: { 'content-type': 'image/jpeg' },
-    })) as typeof fetch
+    globalThis.fetch = (async () => { throw new Error('Node fetch must not be used for browser downloads') }) as typeof fetch
 
     const output = await executeBrowserTool(
-      'browser_download_urls',
+      'browser_download',
       {
         urls: [
           'https://example.test/one.jpg',
@@ -46,10 +70,13 @@ test('browser_download_urls registers downloaded images as recent artifacts', as
         filename_prefix: 'image',
         unrelated_to_collection: true,
       },
-      {
-        executeJS: async () => 'https://example.test/page',
-        getActiveTab: () => ({ id: 'tab-1' }),
-      } as never,
+      createDownloadController() as never,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { workspaceRoots: [dir] },
     )
 
     assert.equal(typeof output, 'object')
@@ -72,13 +99,10 @@ test('downloaded media flows through projection recentArtifacts into send-im att
   const dir = mkdtempSync(join(tmpdir(), 'ready-browser-download-send-im-'))
   const originalFetch = globalThis.fetch
   try {
-    globalThis.fetch = (async () => new Response(new Uint8Array([1, 2, 3]), {
-      status: 200,
-      headers: { 'content-type': 'image/jpeg' },
-    })) as typeof fetch
+    globalThis.fetch = (async () => { throw new Error('Node fetch must not be used for browser downloads') }) as typeof fetch
 
     const downloadOutput = await executeBrowserTool(
-      'browser_download_urls',
+      'browser_download',
       {
         urls: [
           'https://example.test/one.jpg',
@@ -90,10 +114,13 @@ test('downloaded media flows through projection recentArtifacts into send-im att
         filename_prefix: 'image',
         unrelated_to_collection: true,
       },
-      {
-        executeJS: async () => 'https://example.test/page',
-        getActiveTab: () => ({ id: 'tab-1' }),
-      } as never,
+      createDownloadController() as never,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { workspaceRoots: [dir] },
     )
     assert.equal(typeof downloadOutput, 'object')
     if (typeof downloadOutput === 'string') return

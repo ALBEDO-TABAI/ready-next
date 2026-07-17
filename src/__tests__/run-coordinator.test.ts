@@ -145,7 +145,7 @@ test('RunCoordinator assembles prompt, executes host, and emits planning metadat
         success: true,
         finalText: 'done text',
         cancelled: false,
-      usedTools: ['browser_click_at'],
+      usedTools: ['browser_click'],
       budgetState: request.budgetState,
       taskBudgetRuntime: request.taskBudgetRuntime
         ? {
@@ -216,7 +216,7 @@ test('RunCoordinator assembles prompt, executes host, and emits planning metadat
   assert.equal(events[1]?.executionDiagnostics?.taskBudgetRuntime?.usage?.iterationsUsed, 3)
   assert.equal(recordedOutcome?.success, true)
   assert.equal(recordedOutcome?.finalText, 'done text')
-  assert.deepEqual(recordedOutcome?.usedTools, ['browser_click_at'])
+  assert.deepEqual(recordedOutcome?.usedTools, ['browser_click'])
   assert.equal(reflected, true)
 })
 

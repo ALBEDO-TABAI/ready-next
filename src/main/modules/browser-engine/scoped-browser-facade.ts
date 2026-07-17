@@ -34,29 +34,19 @@ export type ExecuteBrowserToolFn = (
 /** Collection subset the collector may call inside its scoped tab (targetable). */
 export const AGENT_COLLECTOR_TOOL_SUBSET: readonly string[] = [
   'browser_navigate',
-  'browser_get_tabs',
-  'browser_read_page',
-  'browser_capture_viewport',
-  'browser_scroll_at',
-  'browser_click_text',
+  'browser_tabs',
+  'browser_read',
+  'browser_screenshot',
+  'browser_scroll',
+  'browser_click',
   'browser_wait',
-  'browser_wait_for_condition',
-  'browser_collect_images',
-  'browser_resolve_video',
-  'browser_extract_structured',
-  'browser_scroll_collect',
-  'browser_visible_collect',
-  'browser_download_urls',
-  'browser_aggregate_results',
-  'browser_go_back',
+  'browser_collect',
+  'browser_download',
+  'browser_task',
 ]
 
 /** Tools whose `url` arg would route through openTarget and steal the foreground. */
-const URL_FORM_FORBIDDEN = new Set([
-  'browser_visible_collect',
-  'browser_extract_structured',
-  'browser_scroll_collect',
-])
+const URL_FORM_FORBIDDEN = new Set(['browser_collect'])
 
 export interface ScopedBrowserFacadeOptions {
   agentTabId: string

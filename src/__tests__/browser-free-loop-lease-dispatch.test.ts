@@ -63,14 +63,14 @@ describe('free-loop browser dispatch lease gating (WP2)', () => {
     service.recordUserSignal({ surface: 'user-view', source: 'keyboard' })
     const turnLease = new BrowserTurnLease({ taskId: 't', runId: 'r1' }, 'user-view', service)
 
-    const out = await executeToolCall('browser_read_page', {}, ctx(createController(), turnLease))
+    const out = await executeToolCall('browser_read', {}, ctx(createController(), turnLease))
     assert.match(outputText(out), /visible feed text/)
   })
 
   it('write tools acquire the turn lease and pass when free', async () => {
     const service = new BrowserWriteLeaseService()
     const turnLease = new BrowserTurnLease({ taskId: 't', runId: 'r1' }, 'user-view', service)
-    const out = await executeToolCall('browser_go_back', {}, ctx(createController(), turnLease))
+    const out = await executeToolCall('browser_navigate', { action: 'back' }, ctx(createController(), turnLease))
     assert.equal(parseError(out), null, 'write with an acquirable lease must pass')
     assert.equal(service.getState('user-view'), 'held')
   })
@@ -81,7 +81,7 @@ describe('free-loop browser dispatch lease gating (WP2)', () => {
         throw new Error('goBack must not dispatch')
       },
     })
-    const out = await executeToolCall('browser_go_back', {}, ctx(controller, null))
+    const out = await executeToolCall('browser_navigate', { action: 'back' }, ctx(controller, null))
     assert.equal(parseError(out)?.errorCode, 'browser_surface_undeclared')
   })
 
@@ -90,28 +90,28 @@ describe('free-loop browser dispatch lease gating (WP2)', () => {
     const turnLease = new BrowserTurnLease({ taskId: 't', runId: 'r1' }, 'user-view', service)
     const controller = createController()
     // First write acquires the turn lease.
-    await executeToolCall('browser_go_back', {}, ctx(controller, turnLease))
+    await executeToolCall('browser_navigate', { action: 'back' }, ctx(controller, turnLease))
     // User takes over.
     service.recordUserSignal({ surface: 'user-view', source: 'keyboard' })
-    const out = await executeToolCall('browser_go_back', {}, ctx(controller, turnLease))
+    const out = await executeToolCall('browser_navigate', { action: 'back' }, ctx(controller, turnLease))
     const err = parseError(out)
     assert.ok(err, `expected structured lease error, got: ${outputText(out)}`)
     assert.equal(err?.errorCode, 'lease_takeover')
   })
 
-  it('browser_visible_collect hands off the surface (releases the turn lease)', async () => {
+  it('browser_collect visible mode hands off the surface (releases the turn lease)', async () => {
     const service = new BrowserWriteLeaseService()
     const turnLease = new BrowserTurnLease({ taskId: 't', runId: 'r1' }, 'user-view', service)
     const controller = createController()
     // Hold the turn lease via a prior write.
-    await executeToolCall('browser_go_back', {}, ctx(controller, turnLease))
+    await executeToolCall('browser_navigate', { action: 'back' }, ctx(controller, turnLease))
     assert.equal(service.getState('user-view'), 'held')
     // Launching a background collect releases the turn lease so the task can own it.
-    await executeToolCall('browser_visible_collect', { template: 'card_list' }, ctx(controller, turnLease))
+    await executeToolCall('browser_collect', { mode: 'visible', template: 'card_list' }, ctx(controller, turnLease))
     assert.equal(service.getState('user-view'), 'idle', 'surface handed off to the background task')
   })
 
-  it('browser_collect_notes hands off instead of being blocked by the turn user-view lease', async () => {
+  it('browser_collect notes mode hands off instead of being blocked by the turn user-view lease', async () => {
     const service = new BrowserWriteLeaseService()
     const turnLease = new BrowserTurnLease({ taskId: 't', runId: 'r1' }, 'user-view', service)
     const started: Array<Record<string, unknown>> = []
@@ -127,10 +127,11 @@ describe('free-loop browser dispatch lease gating (WP2)', () => {
         return { taskId: 'browser-task-card-1', kind: 'card_loop', status: 'queued', progress: { total: 0, completed: 0, failed: 0, currentLabel: null } } as never
       },
     })
-    await executeToolCall('browser_go_back', {}, ctx(controller, turnLease))
+    await executeToolCall('browser_navigate', { action: 'back' }, ctx(controller, turnLease))
     assert.equal(service.getState('user-view'), 'held')
 
-    const out = await executeToolCall('browser_collect_notes', {
+    const out = await executeToolCall('browser_collect', {
+      mode: 'notes',
       target_profile_url: 'https://www.xiaohongshu.com/user/profile/abc',
       notes: [{ url: 'https://www.xiaohongshu.com/note/1', title: '笔记一' }],
       output_root_dir: '/tmp/out',
@@ -145,7 +146,7 @@ describe('free-loop browser dispatch lease gating (WP2)', () => {
     assert.equal(service.getState('user-view'), 'idle', 'surface handed off before dispatching the agent-view task')
   })
 
-  it('browser_resume_task hands off instead of locking the task it resumes', async () => {
+  it('browser_task resume hands off instead of locking the task it resumes', async () => {
     const service = new BrowserWriteLeaseService()
     const turnLease = new BrowserTurnLease({ taskId: 't', runId: 'r1' }, 'user-view', service)
     const resumed: string[] = []
@@ -155,10 +156,10 @@ describe('free-loop browser dispatch lease gating (WP2)', () => {
         return { taskId, kind: 'card_loop', status: 'queued', progress: { total: 0, completed: 0, failed: 0, currentLabel: null } } as never
       },
     })
-    await executeToolCall('browser_go_back', {}, ctx(controller, turnLease))
+    await executeToolCall('browser_navigate', { action: 'back' }, ctx(controller, turnLease))
     assert.equal(service.getState('user-view'), 'held')
 
-    const out = await executeToolCall('browser_resume_task', { task_id: 'browser-task-card-1' }, ctx(controller, turnLease))
+    const out = await executeToolCall('browser_task', { action: 'resume', task_id: 'browser-task-card-1' }, ctx(controller, turnLease))
 
     assert.equal(parseError(out), null, `resume_task must not return a lease error: ${outputText(out)}`)
     assert.deepEqual(resumed, ['browser-task-card-1'])
@@ -170,14 +171,14 @@ describe('free-loop browser dispatch lease gating (WP2)', () => {
     const turnLease = new BrowserTurnLease({ taskId: 't', runId: 'r1' }, 'user-view', service)
     const controller = createController()
     // First action of the turn is the background collect (no prior acquire).
-    await executeToolCall('browser_visible_collect', { template: 'card_list' }, ctx(controller, turnLease))
+    await executeToolCall('browser_collect', { mode: 'visible', template: 'card_list' }, ctx(controller, turnLease))
     // Background task takes the surface, then the user takes over.
     const bg = service.acquire({ surface: 'user-view', taskId: 'collect', runId: 'rc' })
     assert.ok(!isAgentBrowserError(bg))
     service.recordUserSignal({ surface: 'user-view', source: 'keyboard' })
     assert.equal(service.getState('user-view'), 'takeover')
     // A later foreground write must NOT clear takeover and steal the surface.
-    const out = await executeToolCall('browser_go_back', {}, ctx(controller, turnLease))
+    const out = await executeToolCall('browser_navigate', { action: 'back' }, ctx(controller, turnLease))
     assert.equal(parseError(out)?.errorCode, 'lease_takeover', 'must not steal a taken-over surface')
     assert.equal(service.getState('user-view'), 'takeover')
   })
@@ -186,13 +187,13 @@ describe('free-loop browser dispatch lease gating (WP2)', () => {
     const service = new BrowserWriteLeaseService()
     const turnLease = new BrowserTurnLease({ taskId: 't', runId: 'r1' }, 'user-view', service)
     const controller = createController()
-    await executeToolCall('browser_go_back', {}, ctx(controller, turnLease))
-    await executeToolCall('browser_visible_collect', { template: 'card_list' }, ctx(controller, turnLease))
+    await executeToolCall('browser_navigate', { action: 'back' }, ctx(controller, turnLease))
+    await executeToolCall('browser_collect', { mode: 'visible', template: 'card_list' }, ctx(controller, turnLease))
     // The background task acquires its own lease for the surface.
     const bg = service.acquire({ surface: 'user-view', taskId: 'collect', runId: 'rc' })
     assert.ok(!isAgentBrowserError(bg))
     // A subsequent foreground write in the same turn is now blocked.
-    const out = await executeToolCall('browser_go_back', {}, ctx(controller, turnLease))
+    const out = await executeToolCall('browser_navigate', { action: 'back' }, ctx(controller, turnLease))
     assert.equal(parseError(out)?.errorCode, 'lease_held', 'foreground write blocked while the bg task owns the surface')
   })
 
@@ -204,7 +205,7 @@ describe('free-loop browser dispatch lease gating (WP2)', () => {
     noteBrowserActionSession(sessionId, {
       targetTabId: 'tab-bound',
       currentUrl: 'https://example.com/publish',
-      lastAction: 'browser_click_text',
+      lastAction: 'browser_click',
       nextSuggestedAction: 'read map again',
     })
     const controller = createController({
@@ -220,11 +221,10 @@ describe('free-loop browser dispatch lease gating (WP2)', () => {
       executeJS: async () => ({ title: 'Bound', text: '' }),
     })
 
-    const out = await executeToolCall('browser_power_cdp', {
+    const out = await executeToolCall('browser_cdp', {
       method: 'Runtime.evaluate',
       params: { expression: 'document.title', returnByValue: true },
       purpose: 'read title',
-      expected_effects: ['observe'],
     }, {
       ...ctx(controller, turnLease),
       sessionId,
@@ -244,7 +244,7 @@ describe('free-loop browser dispatch lease gating (WP2)', () => {
     noteBrowserActionSession(sessionId, {
       targetTabId: 'tab-bound',
       currentUrl: 'https://example.com/publish',
-      lastAction: 'browser_click_text',
+      lastAction: 'browser_click',
       nextSuggestedAction: 'read map again',
     })
     const controller = createController({
@@ -260,11 +260,10 @@ describe('free-loop browser dispatch lease gating (WP2)', () => {
       executeJS: async () => ({ title: 'Active', text: '' }),
     })
 
-    const out = await executeToolCall('browser_power_cdp', {
+    const out = await executeToolCall('browser_cdp', {
       method: 'Runtime.evaluate',
       params: { expression: 'document.title', returnByValue: true },
       purpose: 'read title',
-      expected_effects: ['observe'],
     }, {
       ...ctx(controller, turnLease),
       sessionId,

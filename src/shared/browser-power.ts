@@ -35,7 +35,11 @@ const DESTRUCTIVE_EFFECT_SET: ReadonlySet<BrowserPowerEffect> = new Set(BROWSER_
 export interface BrowserPowerGrant {
   id: string
   scopeId?: string | null
+  runId?: string | null
+  taskId?: string | null
   tabId?: string | null
+  documentKeyHash?: string | null
+  objectRef?: string | null
   urlPattern?: string | null
   hostname?: string | null
   destination?: string | null

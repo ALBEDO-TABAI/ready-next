@@ -30,11 +30,11 @@ function createController(overrides?: Partial<BrowserController>): BrowserContro
 // 73ba5299（audit roadmap closures）：拒绝路径从裸 JSON 字符串演进为结构化
 // ToolExecutionOutput（CLAUDE.md「工具错误由 dispatch 层转成结构化
 // ToolExecutionOutput」合同）；.text 仍携带同一 JSON 负载，语义字段不变。
-function parseError(result: string | { text?: string }) {
+function parseError(result: string | { text?: string; data?: Record<string, unknown> | null }) {
+  if (typeof result !== 'string' && result?.data) return result.data
   const text = typeof result === 'string' ? result : String(result?.text ?? '')
   try {
-    const parsed = JSON.parse(text)
-    return isAgentBrowserError(parsed) ? parsed : null
+    return JSON.parse(text) as Record<string, unknown>
   } catch {
     return null
   }
@@ -43,7 +43,7 @@ function parseError(result: string | { text?: string }) {
 describe('lease gate integration on executeBrowserTool', () => {
   it('without a gate, behavior is unchanged (legacy callers unaffected)', async () => {
     const controller = createController()
-    const out = await executeBrowserTool('browser_read_page', {}, controller)
+    const out = await executeBrowserTool('browser_read', {}, controller)
     assert.equal(out, 'visible page text')
   })
 
@@ -51,7 +51,7 @@ describe('lease gate integration on executeBrowserTool', () => {
     const service = new BrowserWriteLeaseService()
     const gate: BrowserLeaseGate = { service, surface: 'user-view', leaseId: null }
     const controller = createController()
-    const out = await executeBrowserTool('browser_click_at', { x: 1, y: 1 }, controller, undefined, undefined, gate)
+    const out = await executeBrowserTool('browser_click', { x: 1, y: 1 }, controller, undefined, undefined, gate)
     const err = parseError(out)
     assert.ok(err, `expected structured error, got: ${out}`)
     assert.equal(err?.errorCode, 'lease_required')
@@ -61,11 +61,11 @@ describe('lease gate integration on executeBrowserTool', () => {
     const service = new BrowserWriteLeaseService()
     const gate: BrowserLeaseGate = { service, surface: 'user-view', leaseId: null }
     const controller = createController()
-    const out = await executeBrowserTool('browser_read_page', {}, controller, undefined, undefined, gate)
+    const out = await executeBrowserTool('browser_read', {}, controller, undefined, undefined, gate)
     assert.equal(out, 'visible page text')
   })
 
-  it('classifies extract_structured by call: read (no url) passes, write (url) is gated', async () => {
+  it('gates both current-page and URL-backed structured collection writes', async () => {
     const service = new BrowserWriteLeaseService()
     const gate: BrowserLeaseGate = { service, surface: 'user-view', leaseId: null }
     const controller = createController({
@@ -74,27 +74,23 @@ describe('lease gate integration on executeBrowserTool', () => {
       openForCaptureTarget: async () => ({ success: true, tabId: 'tab-1' }),
     } as Partial<BrowserController>)
 
-    const readOut = await executeBrowserTool('browser_extract_structured', { template: 'article_list' }, controller, undefined, undefined, gate)
-    assert.equal(parseError(readOut), null, 'extract without url is a read and must pass')
+    const readOut = await executeBrowserTool('browser_collect', { template: 'article_list' }, controller, undefined, undefined, gate)
+    assert.equal(parseError(readOut)?.errorCode, 'lease_required')
 
-    const writeOut = await executeBrowserTool('browser_extract_structured', { template: 'article_list', url: 'https://example.com/feed' }, controller, undefined, undefined, gate)
+    const writeOut = await executeBrowserTool('browser_collect', { template: 'article_list', url: 'https://example.com/feed' }, controller, undefined, undefined, gate)
     const err = parseError(writeOut)
     assert.ok(err, 'extract with url is a write and must be gated')
     assert.equal(err?.errorCode, 'lease_required')
   })
 
-  it('always denies ungated browser_execute_js (undecidable => write), even read-looking code', async () => {
+  it('always gates browser_eval as a write-capable tool, even for read-looking code', async () => {
     const service = new BrowserWriteLeaseService()
     const gate: BrowserLeaseGate = { service, surface: 'user-view', leaseId: null }
     const controller = createController()
-    const out = await executeBrowserTool('browser_execute_js', { code: 'document.title' }, controller, undefined, undefined, gate)
+    const out = await executeBrowserTool('browser_eval', { purpose: 'read title', code: 'document.title' }, controller, undefined, undefined, gate)
     const err = parseError(out)
     assert.ok(err)
-    // 73ba5299 起 Safe Mode 自由脚本裁决先于 lease 闸执行：无 Power 授权的
-    // browser_execute_js 在到达 lease 闸之前就以 freeform_script_denied 拒绝
-    // （拒绝更早、更严——安全侧语义）。分类表仍钉 execute_js ⇒ write
-    // （browser-tool-write-classification 合同测试），undecidable=write 不变。
-    assert.equal(err?.errorCode, 'freeform_script_denied')
+    assert.equal(err?.errorCode, 'lease_required')
   })
 
   it('permits a write once a valid lease is held, then blocks it with lease_takeover after user takeover', async () => {
@@ -102,14 +98,14 @@ describe('lease gate integration on executeBrowserTool', () => {
     const lease = service.acquire({ surface: 'user-view', taskId: 't1', runId: 'r1' })
     if (isAgentBrowserError(lease)) throw new Error('expected lease')
     const gate: BrowserLeaseGate = { service, surface: 'user-view', leaseId: lease.leaseId }
-    // browser_go_back is a lightweight write (no slow verification path).
+    // browser_navigate is a lightweight write (no slow verification path).
     const controller = createController({ goBack: () => ({ success: true }) } as Partial<BrowserController>)
 
-    const ok = await executeBrowserTool('browser_go_back', {}, controller, undefined, undefined, gate)
+    const ok = await executeBrowserTool('browser_navigate', { action: 'back' }, controller, undefined, undefined, gate)
     assert.equal(parseError(ok), null, 'write with a valid lease must pass')
 
     service.recordUserSignal({ surface: 'user-view', source: 'keyboard' })
-    const blocked = await executeBrowserTool('browser_go_back', {}, controller, undefined, undefined, gate)
+    const blocked = await executeBrowserTool('browser_navigate', { action: 'back' }, controller, undefined, undefined, gate)
     const err = parseError(blocked)
     assert.ok(err)
     assert.equal(err?.errorCode, 'lease_takeover')

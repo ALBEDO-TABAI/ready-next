@@ -18,7 +18,7 @@ function at(ms: number): Date {
 
 test('toolTraceRows: pairs each result with the most recent unpaired call and labels duration', () => {
   const rows = deriveToolTraceRows([
-    { id: 'c1', kind: 'call', text: '调用 browser_read_page', timestamp: at(0) },
+    { id: 'c1', kind: 'call', text: '调用 browser_read', timestamp: at(0) },
     { id: 'r1', kind: 'result', text: '读取完成', timestamp: at(1_240) },
     { id: 'c2', kind: 'call', text: '调用 browser_click', timestamp: at(2_000) },
     { id: 'r2', kind: 'result', text: '点击完成', timestamp: at(2_060) },
@@ -55,15 +55,15 @@ test('toolTraceRows: duration formatting tiers', () => {
 
 test('toolTimelineItems: pairs call+result into one item with status and duration', () => {
   const items = deriveToolTimelineItems([
-    { id: 'c1', kind: 'call', text: 'browser_read_page(url)', timestamp: at(0) },
-    { id: 'r1', kind: 'result', text: 'browser_read_page: 读取完成', timestamp: at(1_240) },
+    { id: 'c1', kind: 'call', text: 'browser_read(url)', timestamp: at(0) },
+    { id: 'r1', kind: 'result', text: 'browser_read: 读取完成', timestamp: at(1_240) },
     { id: 'c2', kind: 'call', text: 'browser_click(selector)', timestamp: at(2_000) },
   ])
   assert.equal(items.length, 2)
   assert.equal(items[0].id, 'c1')
   assert.equal(items[0].status, 'done')
-  assert.equal(items[0].callText, 'browser_read_page(url)')
-  assert.equal(items[0].resultText, 'browser_read_page: 读取完成')
+  assert.equal(items[0].callText, 'browser_read(url)')
+  assert.equal(items[0].resultText, 'browser_read: 读取完成')
   assert.equal(items[0].durationLabel, '1.2s')
   assert.equal(items[1].status, 'running')
   assert.equal(items[1].resultText, null)

@@ -11,6 +11,7 @@ interface WindowOpenDetails {
 interface WindowOpenLaneContext {
   sourceTabId: string | null
   sourceOwner: 'manual' | 'agent' | null
+  profile: string | null
 }
 
 export class BrowserWindowOpenService {
@@ -35,7 +36,7 @@ export class BrowserWindowOpenService {
     details: WindowOpenDetails,
     source: 'tab' | 'preview',
     sourceContentsId: number,
-    context: WindowOpenLaneContext = { sourceTabId: null, sourceOwner: null },
+    context: WindowOpenLaneContext = { sourceTabId: null, sourceOwner: null, profile: null },
   ): {
     action: 'allow' | 'deny'
     overrideBrowserWindowOptions?: Electron.BrowserWindowConstructorOptions
@@ -46,7 +47,7 @@ export class BrowserWindowOpenService {
       features: details.features,
       disposition: details.disposition,
       referrer: details.referrer?.url,
-    })
+    }, context)
     this.logBrowserDiag(
       `[browser-v3][popup] source=${source} mode=${resolved.mode} reason=${resolved.reason} url=${details.url}`,
     )

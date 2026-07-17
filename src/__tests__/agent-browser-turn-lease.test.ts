@@ -49,6 +49,29 @@ describe('BrowserTurnLease (free-loop turn lease, WP2)', () => {
     assert.equal(g1.leaseId, g3.leaseId)
   })
 
+  it('atomically replaces its own expired lease once instead of deadlocking the turn', () => {
+    let now = 1_000
+    const service = new BrowserWriteLeaseService({
+      now: () => now,
+      defaultTtlMs: 1_000,
+      generateId: (() => {
+        let sequence = 0
+        return (prefix: string) => `${prefix}-${++sequence}`
+      })(),
+    })
+    const turn = new BrowserTurnLease({ taskId: 't1', runId: 'r1' }, 'user-view', service)
+    const first = turn.ensureGate()
+    assert.ok(!isAgentBrowserError(first))
+    if (isAgentBrowserError(first)) return
+
+    now = 2_001
+    const replacement = turn.ensureGate()
+    assert.ok(!isAgentBrowserError(replacement), 'the same turn should recover its own expired lease')
+    if (isAgentBrowserError(replacement)) return
+    assert.notEqual(replacement.leaseId, first.leaseId)
+    assert.equal(service.getState('user-view'), 'held')
+  })
+
   it('returns lease_held when another task already owns the surface', () => {
     const { service, turn } = make()
     service.acquire({ surface: 'user-view', taskId: 'other', runId: 'r0' })

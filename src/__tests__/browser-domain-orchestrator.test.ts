@@ -77,7 +77,7 @@ test('BrowserDomainOrchestrator advances target steps only from an explicit targ
     state: initialState,
     executedBrowserToolsThisIteration: 1,
     browserToolResultsThisIteration: [{
-      toolName: 'browser_read_page_map',
+      toolName: 'browser_snapshot',
       resultText: JSON.stringify({ ok: true, pageIdentity: { url: 'https://example.com', generation: 1 } }),
     }],
   })
@@ -87,7 +87,7 @@ test('BrowserDomainOrchestrator advances target steps only from an explicit targ
     state: unrelatedMap.state,
     executedBrowserToolsThisIteration: 2,
     browserToolResultsThisIteration: [{
-      toolName: 'browser_probe_readonly',
+      toolName: 'browser_snapshot',
       resultText: JSON.stringify({ ok: true, pageIdentity: { url: 'https://example.com' }, targetMatched: true }),
     }],
   })
@@ -95,7 +95,7 @@ test('BrowserDomainOrchestrator advances target steps only from an explicit targ
   assert.equal(progress.state.stepIndex, 1)
   assert.equal(progress.advancedStepIndex, 1)
   assert.match(progress.checkpointMessage || '', /当前步骤: 2\/2 — ensure_upload: 上传附件/)
-  assert.match(progress.checkpointMessage || '', /browser_probe_readonly:page_target_matched/)
+  assert.match(progress.checkpointMessage || '', /browser_snapshot:page_target_matched/)
 })
 
 test('BrowserDomainOrchestrator rejects failed or generic tool success as completion evidence', () => {
@@ -105,9 +105,9 @@ test('BrowserDomainOrchestrator rejects failed or generic tool success as comple
   const initialState = orchestrator.createToolLoopState(decision)
 
   for (const [toolName, result] of [
-    ['browser_upload_scope_attachment', { ok: false, input_has_files: true }],
-    ['browser_upload_scope_attachment', { ok: true }],
-    ['browser_upload_scope_attachment', { ok: true, input_has_files: false }],
+    ['browser_upload', { ok: false, input_has_files: true }],
+    ['browser_upload', { ok: true }],
+    ['browser_upload', { ok: true, input_has_files: false }],
     ['browser_type', { ok: false, prompt_matched: true }],
     ['browser_navigate', { ok: false }],
   ] as const) {
@@ -139,7 +139,7 @@ test('BrowserDomainOrchestrator requires post-action page state before confirmin
     state: initialState,
     executedBrowserToolsThisIteration: 1,
     browserToolResultsThisIteration: [{
-      toolName: 'browser_act_on_target',
+      toolName: 'browser_click',
       resultText: JSON.stringify({ ok: true, changed: true, action: 'click' }),
     }],
   })
@@ -149,7 +149,7 @@ test('BrowserDomainOrchestrator requires post-action page state before confirmin
     state: clickOnly.state,
     executedBrowserToolsThisIteration: 1,
     browserToolResultsThisIteration: [{
-      toolName: 'browser_probe_readonly',
+      toolName: 'browser_snapshot',
       resultText: JSON.stringify({ ok: true, submit_confirmed: false, running_state: false }),
     }],
   })
@@ -159,7 +159,7 @@ test('BrowserDomainOrchestrator requires post-action page state before confirmin
     state: clickOnly.state,
     executedBrowserToolsThisIteration: 1,
     browserToolResultsThisIteration: [{
-      toolName: 'browser_probe_readonly',
+      toolName: 'browser_snapshot',
       resultText: JSON.stringify({ ok: true, submitEvidence: ['page_processing_state'] }),
     }],
   })

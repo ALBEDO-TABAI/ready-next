@@ -31,6 +31,7 @@ interface FakeBrowserTaskRecord {
 
 class FakeBrowserRepository {
   readonly tasks = new Map<string, FakeBrowserTaskRecord>()
+  beforeUpdate: ((id: string) => void) | null = null
 
   createTask(task: FakeBrowserTaskRecord): void {
     this.tasks.set(task.id, { ...task })
@@ -41,13 +42,22 @@ class FakeBrowserRepository {
     return task ? { ...task } : undefined
   }
 
-  updateTask(id: string, updates: Partial<FakeBrowserTaskRecord>): void {
+  updateTask(
+    id: string,
+    updates: Partial<FakeBrowserTaskRecord>,
+    options?: { expectedUpdatedAt?: string },
+  ): boolean {
+    const beforeUpdate = this.beforeUpdate
+    this.beforeUpdate = null
+    beforeUpdate?.(id)
     const current = this.tasks.get(id)
-    if (!current) return
+    if (!current) return false
+    if (options?.expectedUpdatedAt && current.updated_at !== options.expectedUpdatedAt) return false
     const clean = Object.fromEntries(
       Object.entries(updates).filter(([, value]) => value !== undefined),
     ) as Partial<FakeBrowserTaskRecord>
     this.tasks.set(id, { ...current, ...clean })
+    return true
   }
 
   listTasks(statuses?: string[]): FakeBrowserTaskRecord[] {
@@ -215,6 +225,81 @@ describe('browser task persistence', () => {
     )
   })
 
+  it('uses a terminal CAS so a late completion cannot overwrite cancellation', () => {
+    const repository = new FakeBrowserRepository()
+    const service = new BrowserTaskPersistenceService(repository as never)
+    const taskId = 'browser-task-cancel-race'
+    repository.createTask({
+      ...makeRecord(taskId),
+      status: 'running',
+      result_json: JSON.stringify({ partial: true }),
+    })
+    repository.beforeUpdate = (id) => {
+      const current = repository.tasks.get(id)!
+      repository.tasks.set(id, {
+        ...current,
+        status: 'cancelled',
+        updated_at: '2026-06-21T00:00:01.000Z',
+        finished_at: '2026-06-21T00:00:01.000Z',
+      })
+    }
+
+    const late = service.updateProgress(taskId, { completed: 1 }, {
+      status: 'completed',
+      result: { partial: false, late: true },
+      finishedAt: '2026-06-21T00:00:02.000Z',
+    })
+
+    assert.equal(late?.status, 'cancelled')
+    assert.deepEqual(late?.result, { partial: true })
+    assert.equal(late?.progress.completed, 0)
+  })
+
+  it('persists a complete resume checkpoint contract with targets, failures, hashes, binding and next step', () => {
+    const repository = new FakeBrowserRepository()
+    const service = new BrowserTaskPersistenceService(repository as never)
+    const taskId = 'browser-task-checkpoint-contract'
+    repository.createTask({
+      ...makeRecord(taskId),
+      status: 'running',
+      payload_json: JSON.stringify({
+        agentTabId: 'tab-agent-7',
+        documentEpoch: 9,
+        plan: {
+          notes: [
+            { sourceId: 'note-a', url: 'https://example.com/a' },
+            { sourceId: 'note-b', url: 'https://example.com/b' },
+          ],
+        },
+      }),
+    })
+
+    const updated = service.updateProgress(taskId, { completed: 1, failed: 1 }, {
+      status: 'paused',
+      checkpoint: {
+        taskId,
+        stage: 'note_collect_round',
+        cursor: '1',
+        partialResults: {
+          outputs: [{ sourceId: 'note-a', success: true, files: ['/out/a.md'] }],
+          failed: [{ sourceId: 'note-b', reason: 'HTTP 429', retryable: true }],
+        },
+      },
+    })
+
+    assert.deepEqual(updated?.checkpoint?.targetList, [
+      { id: 'note-a', url: 'https://example.com/a' },
+      { id: 'note-b', url: 'https://example.com/b' },
+    ])
+    assert.deepEqual(updated?.checkpoint?.failures, [
+      { targetId: 'note-b', classification: 'rate_limit', retryable: true },
+    ])
+    assert.equal(updated?.checkpoint?.outputHashes?.[0]?.targetId, 'note-a')
+    assert.match(updated?.checkpoint?.outputHashes?.[0]?.sha256 || '', /^[a-f0-9]{64}$/)
+    assert.deepEqual(updated?.checkpoint?.binding, { tabId: 'tab-agent-7', documentEpoch: 9 })
+    assert.deepEqual(updated?.checkpoint?.nextStep, { action: 'resume', cursor: '1' })
+  })
+
   it('does not include undefined fields in browser task update SQL', async () => {
     const { DatabaseManager } = await import('../main/modules/database')
     let sql = ''
@@ -225,6 +310,7 @@ describe('browser task persistence', () => {
           run: (...args: unknown[]) => {
             sql = source
             params = args
+            return { changes: 1 }
           },
         }),
       },

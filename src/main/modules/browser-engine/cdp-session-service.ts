@@ -17,6 +17,11 @@ export interface BrowserCdpEvent {
   params: Record<string, unknown>
 }
 
+export interface BrowserCdpCommandOptions {
+  timeoutMs?: number
+  signal?: AbortSignal
+}
+
 type BrowserCdpEventHandler = (event: BrowserCdpEvent) => void
 
 export class BrowserCdpSessionService {
@@ -41,9 +46,46 @@ export class BrowserCdpSessionService {
     tabId: string | null,
     method: string,
     params?: Record<string, unknown>,
+    options?: BrowserCdpCommandOptions,
   ): Promise<unknown> {
     const { view } = await this.ensureAttached(tabId)
-    return view.webContents.debugger.sendCommand(method, params)
+    const operation = view.webContents.debugger.sendCommand(method, params)
+    const timeoutMs = Math.max(1, Math.floor(options?.timeoutMs || 15_000))
+    const controller = new AbortController()
+    const abortFromExternal = () => controller.abort(options?.signal?.reason || new Error(`browser_cdp:${method}:aborted`))
+    if (options?.signal?.aborted) abortFromExternal()
+    else options?.signal?.addEventListener('abort', abortFromExternal, { once: true })
+    let timer: ReturnType<typeof setTimeout> | null = null
+    try {
+      return await Promise.race([
+        operation,
+        new Promise<never>((_resolve, reject) => {
+          const stop = async () => {
+            try {
+              if (/^Runtime\.(?:evaluate|callFunctionOn)$/i.test(method)) {
+                await view.webContents.debugger.sendCommand('Runtime.terminateExecution')
+              } else if (/^Page\.(?:navigate|reload)$/i.test(method)) {
+                await view.webContents.debugger.sendCommand('Page.stopLoading')
+              }
+            } catch {
+              // The target may already be gone; the original abort still wins.
+            }
+            reject(controller.signal.reason instanceof Error
+              ? controller.signal.reason
+              : new Error(`browser_cdp:${method}:aborted`))
+          }
+          controller.signal.addEventListener('abort', () => { void stop() }, { once: true })
+          if (controller.signal.aborted) void stop()
+          else timer = setTimeout(() => {
+            controller.abort(new Error(`browser_cdp:${method}:deadline_exceeded:${timeoutMs}`))
+          }, timeoutMs)
+        }),
+      ])
+    } finally {
+      if (timer) clearTimeout(timer)
+      options?.signal?.removeEventListener('abort', abortFromExternal)
+      void operation.catch(() => undefined)
+    }
   }
 
   subscribe(tabId: string | null, handler: BrowserCdpEventHandler): () => void {

@@ -39,6 +39,7 @@ export interface BrowserLifecycleTabRecord {
   canGoForward: boolean
   error: string | null
   openerTabId?: string | null
+  profile?: string | null
   view?: BrowserHostView
 }
 
@@ -271,7 +272,7 @@ export class BrowserTabLifecycleService {
 
   async createTab(
     url: string,
-    options?: { background?: boolean; openerTabId?: string | null },
+    options?: { background?: boolean; openerTabId?: string | null; profile?: string | null },
   ): Promise<{ success: boolean; tabId?: string; error?: string }> {
     if (!this.host.isAllowedUrl(url)) {
       return { success: false, error: 'Blocked URL protocol. Only http:, https:, and local HTML files are allowed.' }
@@ -298,6 +299,7 @@ export class BrowserTabLifecycleService {
         canGoForward: false,
         error: null,
         openerTabId: options?.openerTabId ?? null,
+        profile: options?.profile ?? null,
       }
       this.host.tabs.set(tabId, tab)
       if (!background) this.host.setActiveTabId(tabId)
@@ -305,7 +307,11 @@ export class BrowserTabLifecycleService {
       return { success: true, tabId }
     }
 
-    const view = this.host.createHost('persist:browser')
+    const profile = String(options?.profile || '').trim().toLowerCase()
+    if (profile && !/^[a-z0-9_-]{1,32}$/.test(profile)) {
+      return { success: false, error: 'Invalid browser profile name.' }
+    }
+    const view = this.host.createHost(profile ? `persist:browser-profile-${profile}` : 'persist:browser')
     try {
       view.webContents.setUserAgent(this.host.browserUserAgent)
     } catch {
@@ -338,6 +344,7 @@ export class BrowserTabLifecycleService {
       canGoForward: false,
       error: null,
       openerTabId: options?.openerTabId ?? null,
+      profile: profile || null,
       view,
     }
     this.host.tabs.set(tabId, tab)

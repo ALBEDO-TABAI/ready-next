@@ -330,7 +330,7 @@ test('agent sdk runtime keeps account analysis read-only even with a browser pag
     }
   )
   assert.equal(priorCollection.success, true)
-  assert.ok(toolNames.includes('browser_collect_notes'))
+  assert.ok(toolNames.includes('browser_collect'))
   toolNames = []
 
   const instruction = '帮我分析一下这个小红书账号，然后列一些选题给我'
@@ -350,15 +350,13 @@ test('agent sdk runtime keeps account analysis read-only even with a browser pag
 
   assert.equal(result.success, true)
   assert.equal(result.projectionTruth?.projectionPatch?.browserCollectionRequired, undefined)
-  assert.ok(toolNames.includes('browser_read_page'))
-  assert.ok(toolNames.includes('browser_extract_structured'))
+  assert.ok(toolNames.includes('browser_read'))
+  assert.ok(toolNames.includes('browser_snapshot'))
+  assert.ok(toolNames.includes('browser_resources'))
   for (const name of [
-    'browser_visible_collect',
-    'browser_collect_notes',
-    'browser_download_collected_media',
-    'browser_get_task',
-    'browser_resume_task',
-    'browser_cancel_task'
+    'browser_collect',
+    'browser_download',
+    'browser_task'
   ]) {
     assert.equal(toolNames.includes(name), false, `${name} must require explicit collection intent`)
   }
@@ -392,21 +390,18 @@ test('agent sdk runtime exposes only background collection workflow tools for mu
   assert.equal(result.success, true)
   assert.equal(result.projectionTruth?.projectionPatch?.browserCollectionRequired, true)
   for (const name of [
-    'browser_visible_collect',
-    'browser_collect_notes',
-    'browser_download_collected_media',
-    'browser_resume_task',
-    'browser_get_task'
+    'browser_collect',
+    'browser_download',
+    'browser_task',
+    'browser_request_takeover'
   ]) {
     assert.ok(toolNames.includes(name), `${name} should be exposed`)
   }
   for (const name of [
     'browser_navigate',
-    'browser_click_text',
-    'browser_collect_images',
-    'browser_resolve_video',
-    'browser_download_urls',
-    'browser_extract_structured'
+    'browser_click',
+    'browser_read',
+    'browser_snapshot'
   ]) {
     assert.ok(!toolNames.includes(name), `${name} should be hidden for batch collection`)
   }
@@ -426,11 +421,12 @@ test('agent sdk runtime exposes only background collection workflow tools for mu
     }
   )
   assert.equal(followUp.success, true)
-  assert.ok(toolNames.includes('browser_visible_collect'))
-  assert.ok(toolNames.includes('browser_collect_notes'))
-  assert.ok(toolNames.includes('browser_download_collected_media'))
-  assert.ok(!toolNames.includes('browser_click_text'))
-  assert.ok(!toolNames.includes('browser_download_urls'))
+  assert.ok(toolNames.includes('browser_collect'))
+  assert.ok(toolNames.includes('browser_download'))
+  assert.ok(toolNames.includes('browser_task'))
+  assert.ok(toolNames.includes('browser_request_takeover'))
+  assert.ok(!toolNames.includes('browser_click'))
+  assert.ok(!toolNames.includes('browser_read'))
 })
 
 test('agent sdk runtime demotes widget edits before exposing browser tools', async () => {
@@ -802,15 +798,15 @@ test('agent sdk runtime suppresses browser task tools for active VEA skill resum
 
     assert.equal(collect.success, true)
     assert.equal(resume.success, true)
-    assert.ok(seenToolNames[0]?.includes('browser_resume_task'))
+    assert.ok(seenToolNames[0]?.includes('browser_task'))
     assert.ok(seenToolNames[1]?.includes('skill_video_expert_pipeline'))
     assert.ok(seenToolNames[1]?.includes('skill_video_expert_ai_analyze'))
     for (const name of [
-      'browser_get_task',
-      'browser_resume_task',
-      'browser_visible_collect',
-      'browser_collect_notes',
-      'browser_download_collected_media'
+      'browser_task',
+      'browser_task',
+      'browser_collect',
+      'browser_collect',
+      'browser_download'
     ]) {
       assert.equal(
         seenToolNames[1]?.includes(name),
@@ -866,8 +862,8 @@ test('agent sdk runtime keeps Send IM visible for a bare retry after explicit lo
   assert.equal(seenToolNames.length, 2)
   assert.ok(seenToolNames[0]?.includes('skill_send_im_file'))
   assert.ok(seenToolNames[1]?.includes('skill_send_im_file'))
-  assert.equal(seenToolNames[1]?.includes('browser_visible_collect'), false)
-  assert.equal(seenToolNames[1]?.includes('browser_download_urls'), false)
+  assert.equal(seenToolNames[1]?.includes('browser_collect'), false)
+  assert.equal(seenToolNames[1]?.includes('browser_download'), false)
 })
 
 test('agent sdk runtime keeps Send IM visible for an attached try-this follow-up', async () => {
@@ -919,8 +915,8 @@ test('agent sdk runtime keeps Send IM visible for an attached try-this follow-up
   assert.equal(followUp.success, true)
   assert.equal(seenToolNames.length, 2)
   assert.ok(seenToolNames[1]?.includes('skill_send_im_file'))
-  assert.equal(seenToolNames[1]?.includes('browser_visible_collect'), false)
-  assert.equal(seenToolNames[1]?.includes('browser_download_urls'), false)
+  assert.equal(seenToolNames[1]?.includes('browser_collect'), false)
+  assert.equal(seenToolNames[1]?.includes('browser_download'), false)
 })
 
 test('agent sdk runtime preempts old run and cancels pending renderer actions', async () => {
@@ -5489,7 +5485,7 @@ test('agent sdk runtime executes representative domain tools without losing proj
     {
       label: 'browser',
       tool: {
-        name: 'browser_read_page',
+        name: 'browser_read',
         groupId: 'browser_interaction',
         domain: 'browser',
         kind: 'read'
@@ -5971,17 +5967,13 @@ test('agent sdk runtime preserves browser tools when an explicit reference skill
     for (const expected of [
       'browser_navigate',
       'browser_click',
-      'browser_type',
-      'browser_power_eval',
-      'browser_power_cdp'
+      'browser_type'
     ]) {
       assert.equal(seenToolNames.includes(expected), true, `${expected} should remain visible`)
     }
-    assert.match(seenInstructions, /Power 网页操作配方/)
-    assert.match(seenInstructions, /探测页面结构/)
-    assert.match(seenInstructions, /读回验证/)
-    assert.match(seenInstructions, /viewport=0/)
-    assert.match(seenInstructions, /Page\.getFrameTree/)
+    assert.equal(seenToolNames.includes('browser_eval'), false)
+    assert.equal(seenToolNames.includes('browser_cdp'), false)
+    assert.match(seenInstructions, /本轮未开放 Browser Power 工具/)
     assert.doesNotMatch(seenInstructions, /一律走视觉通道|禁用脚本（封号风险）/)
   } finally {
     clearLastReferenceSkill('scope-browser-reference-skill-tools')
@@ -6602,10 +6594,9 @@ test('agent sdk runtime exposes browser, feishu, file, pet, and research tools w
   assert.equal(result.success, true)
   for (const expected of [
     'browser_navigate',
-    'browser_read_page',
+    'browser_read',
     'browser_click',
     'browser_type',
-    'browser_start_task',
     'feishu_message_reply',
     'file_search',
     'pet_show_sticky_note',
@@ -6615,13 +6606,14 @@ test('agent sdk runtime exposes browser, feishu, file, pet, and research tools w
   ]) {
     assert.ok(seenToolNames.includes(expected), `${expected} should be SDK-visible`)
   }
+  assert.equal(seenToolNames.includes('browser_collect'), false)
 })
 
 test('agent sdk runtime reuses one browser write lease across consecutive tool calls in a run', async () => {
   __resetBrowserWriteLeaseServiceForTests()
   try {
     const goBackDefinition = createToolDefinition({
-      name: 'browser_go_back',
+      name: 'browser_navigate',
       groupId: 'browser',
       domain: 'browser',
       kind: 'write',
@@ -6675,7 +6667,7 @@ test('agent sdk runtime reuses one browser write lease across consecutive tool c
             tool as { invoke: (context: unknown, input: string) => Promise<string> }
           ])
         )
-        const first = await byName.get('browser_go_back')?.invoke({}, '{}')
+        const first = await byName.get('browser_navigate')?.invoke({}, '{}')
         const second = await byName
           .get('browser_navigate')
           ?.invoke({}, JSON.stringify({ url: 'https://example.com' }))
@@ -6729,12 +6721,10 @@ test('agent sdk runtime exposes upload browser tools for upload workflow intent'
   )
 
   assert.equal(result.success, true)
-  assert.ok(seenToolNames.includes('browser_list_upload_targets'))
-  assert.ok(seenToolNames.includes('browser_upload_scope_attachment'))
-  // 6e99f0e6（交易成功证明）起，唯一裁决点 capability-resolver 对
-  // browser_upload_workflow 同步开放 browser_content_tasks（Power 证明工具
-  // 所在组），browser_start_task 随组曝光——与 capability-resolver.test.ts 同源。
-  assert.equal(seenToolNames.includes('browser_start_task'), true)
+  assert.ok(seenToolNames.includes('browser_find'))
+  assert.ok(seenToolNames.includes('browser_upload'))
+  // 上传只需要本轮基础交互面；长任务采集工具必须由当前指令明确请求。
+  assert.equal(seenToolNames.includes('browser_collect'), false)
 })
 
 test('agent sdk runtime records tool and artifact proofs before final adjudication', async () => {

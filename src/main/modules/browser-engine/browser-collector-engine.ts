@@ -45,9 +45,9 @@ export interface BrowserCollectionDeps {
   onProgress?: (progress: BrowserCollectionProgress) => void
   /** Cooperative cancel/lease-loss probe checked before each note. */
   shouldStop?: () => CollectionStopReason | null
-  /** Pace between notes on high-control platforms (plan §4.4 限速). 0 = no pace. */
+  /** @deprecated Pacing is enforced centrally by OriginInteractionBudget. */
   interNoteDelayMs?: number
-  /** Injected sleep so pacing is unit-testable without real timers. */
+  /** @deprecated Kept only for old test fixtures; production does not use fixed sleeps. */
   sleep?: (ms: number) => Promise<void>
   fileOps?: NoteCollectFileOps
   /**
@@ -57,10 +57,6 @@ export interface BrowserCollectionDeps {
    */
   maxTotalImages?: number
   strategy?: 'url_batch' | 'card_loop'
-}
-
-function defaultSleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
 export interface BrowserCollectionResult {
@@ -96,8 +92,6 @@ export async function runBrowserCollection(
   let state = normalizeCollectionLoopState(initialState ?? createCollectionLoopState(deps.now()))
   let rounds = 0
   let totalImages = 0
-  const sleep = deps.sleep ?? defaultSleep
-  const interNoteDelayMs = deps.interNoteDelayMs && deps.interNoteDelayMs > 0 ? deps.interNoteDelayMs : 0
   const maxTotalImages = deps.maxTotalImages && deps.maxTotalImages > 0 ? deps.maxTotalImages : 0
   const titleCounts = new Map<string, number>()
   for (const note of plan.notes) {
@@ -133,7 +127,7 @@ export async function runBrowserCollection(
     )
     if (deps.strategy === 'card_loop' && result.reason === 'detail_not_opened' && plan.targetProfileUrl) {
       await deps.facade.run('browser_navigate', { url: plan.targetProfileUrl }).catch(() => '')
-      await sleep(Math.max(800, Math.min(1500, interNoteDelayMs || 1000)))
+      await deps.facade.run('browser_wait', { condition: 'ready', timeout_ms: 10_000 }).catch(() => '')
       result = await collectOne(
         deps.facade,
         {
@@ -236,15 +230,6 @@ export async function runBrowserCollection(
     }
 
     const note = step.note
-    // Pace between notes (not before the first) so high-control platforms see
-    // human-like spacing. Re-check shouldStop after sleeping (cancel during wait).
-    if (rounds > 0 && interNoteDelayMs > 0) {
-      await sleep(interNoteDelayMs)
-      const afterSleep = deps.shouldStop?.() ?? null
-      if (afterSleep) {
-        return { collected: state.collected, failed: state.failed, notes: state.outputs || [], rounds, stopReason: afterSleep, state }
-      }
-    }
     rounds += 1
     deps.onProgress?.(progressOf(plan, state, note.title ?? note.url, null))
 

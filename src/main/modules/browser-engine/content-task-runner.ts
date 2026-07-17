@@ -112,6 +112,11 @@ export interface BrowserTaskProjectionInput {
 }
 export interface BrowserTaskProjectionSink {
   upsert(input: BrowserTaskProjectionInput): void
+  resolveCollectionConsent?(input: {
+    scopeId: string
+    sourceTaskId: string
+    requestId: string
+  }): void | Promise<void>
 }
 
 function noteCollectState(status: string): BrowserTaskProjectionInput['state'] {
@@ -142,6 +147,21 @@ function hasBrowserTaskCheckpoint(task: BrowserCapabilityTaskHandle, payload: Re
     if (checkpoint.cursor === null || typeof checkpoint.cursor === 'undefined') return false
     return typeof payload.url === 'string' && payload.url.trim().length > 0
       || typeof payload.tabId === 'string' && payload.tabId.trim().length > 0
+  }
+  if (task.kind === 'download_urls') {
+    return checkpoint?.stage === 'batch_download'
+      && Array.isArray(checkpoint.partialResults)
+      && Array.isArray(payload.urls)
+  }
+  if (task.kind === 'research') {
+    return checkpoint?.stage === 'research_collect'
+      && Array.isArray(checkpoint.partialResults)
+      && (Array.isArray(payload.urls) || typeof payload.query === 'string')
+  }
+  if (task.kind === 'scroll_collect') {
+    return checkpoint?.stage === 'scroll_collect'
+      && Array.isArray(checkpoint.partialResults)
+      && typeof payload.url === 'string'
   }
   return false
 }
@@ -355,16 +375,17 @@ function visibleCollectResult(taskId: string, items: BrowserStructuredItem[], ro
     ...(discoveryStatus !== 'complete'
       ? {
           suggestedContinueTool: {
-            name: 'browser_resume_task',
-            args: { task_id: taskId },
+            name: 'browser_task',
+            args: { action: 'resume', task_id: taskId },
           },
         }
       : {}),
     ...(canStartNoteCollect && noteCandidates.length > 0 && targetAssessment.quality !== 'suspect_navigation_pollution'
       ? {
           suggestedNextTool: {
-            name: 'browser_collect_notes',
+            name: 'browser_collect',
             args: {
+              mode: 'notes',
               target_profile_url: targetUrl,
               source_task_id: taskId,
               expected_count: noteCandidates.length,
@@ -378,8 +399,9 @@ function visibleCollectResult(taskId: string, items: BrowserStructuredItem[], ro
     ...(canStartNoteCollect && template === 'image_gallery' && mediaCandidates.length > 0
       ? {
           suggestedNextTool: {
-            name: 'browser_download_collected_media',
+            name: 'browser_download',
             args: {
+              mode: 'collected',
               source_task_id: taskId,
               ...(outputDir ? { directory: outputDir } : {}),
               filename_prefix: 'image',
@@ -543,17 +565,7 @@ function publicNoteCollectStatus(taskStatus: BrowserCapabilityTaskHandle['status
 }
 
 export function normalizeHighControlCollectionPlan(plan: CollectionPlan): CollectionPlan {
-  const isHighControl = isHighControlPlatformText(plan.targetProfileUrl) || plan.notes.some((n) => isHighControlPlatformText(n.url))
-  if (!isHighControl) return plan
-  const isCardLoop = plan.strategy === 'card_loop'
-  return {
-    ...plan,
-    stopConditions: {
-      ...plan.stopConditions,
-      maxDurationMs: Math.min(plan.stopConditions?.maxDurationMs ?? 20 * 60_000, 20 * 60_000),
-      maxConsecutiveFailures: Math.min(plan.stopConditions?.maxConsecutiveFailures ?? (isCardLoop ? 8 : 3), isCardLoop ? 8 : 3),
-    },
-  }
+  return plan
 }
 
 async function writeCollectionSummaryArtifacts(args: {
@@ -661,6 +673,14 @@ export class BrowserContentTaskRunner {
     // sink is wired — re-project active browser collection tasks now so chat cards
     // appear for tasks that were already running/resumed when the sink arrived.
     if (sink) void this.reprojectActiveBrowserCollect()
+  }
+
+  async resolveCollectionConsentProjection(input: {
+    scopeId: string
+    sourceTaskId: string
+    requestId: string
+  }): Promise<void> {
+    await this.taskProjectionSink?.resolveCollectionConsent?.(input)
   }
 
   private taskProjectionSink: BrowserTaskProjectionSink | null = null
@@ -1141,6 +1161,18 @@ export class BrowserContentTaskRunner {
     const inheritedLeaseId = typeof payload.leaseId === 'string' ? payload.leaseId : null
     let leaseId = inheritedLeaseId
     let ownsLease = false
+    if (leaseId && this.leaseService.checkWrite({ surface, leaseId }) !== null) {
+      // A persisted lease id is process-local and is normally stale after a
+      // restart. Reacquire only when the surface is actually idle/expired;
+      // acquire itself refuses user takeover or another task's live lease.
+      const reacquired = this.leaseService.acquire({ surface, taskId, runId: taskId })
+      if (!isAgentBrowserError(reacquired)) {
+        leaseId = reacquired.leaseId
+        ownsLease = true
+        payload = { ...payload, leaseId }
+        this.persistenceService.updateTaskPayload(taskId, payload)
+      }
+    }
     if (!leaseId) {
       const acquired = this.leaseService.acquire({ surface, taskId, runId: taskId })
       if (isAgentBrowserError(acquired)) {
@@ -1171,6 +1203,7 @@ export class BrowserContentTaskRunner {
     surface: AgentBrowserSurface,
     leaseId: string,
   ): Promise<void> {
+    const leaseGate = { service: this.leaseService, surface, leaseId }
     // Guard BEFORE the first page write: opening/navigating the target page is
     // itself a write. If an inherited lease is already lost (user took over),
     // stop with lease_lost without touching the page (counterplan §5.5).
@@ -1195,10 +1228,10 @@ export class BrowserContentTaskRunner {
     const tabId = await (async () => {
       if (!targetUrl) return requestedTabId
       if (requestedTabId) {
-        const opened = await this.capabilityService.navigateTargetTab(requestedTabId, targetUrl)
+        const opened = await this.capabilityService.navigateTargetTab(requestedTabId, targetUrl, leaseGate)
         return opened.success ? opened.tabId || requestedTabId : null
       }
-      return (await this.capabilityService.openTarget(targetUrl, 'prefer_reuse')).tabId || null
+      return (await this.capabilityService.openTarget(targetUrl, 'prefer_reuse', leaseGate)).tabId || null
     })()
     const scopeId = typeof payload.scopeId === 'string' ? payload.scopeId.trim() : ''
     if (targetUrl && requestedTabId && !tabId) {
@@ -1235,13 +1268,11 @@ export class BrowserContentTaskRunner {
       emptyRoundsToStop: toNumberOr(payload.emptyRoundsToStop, DEFAULT_VISIBLE_COLLECT_LIMITS.emptyRoundsToStop),
     }
     const highControl = payload.highControl === true
-    let interRoundDelayMs = 0
     if (highControl) {
       const expectedMinimum = Number(payload.userExpectedTotal || 0) || DEFAULT_VISIBLE_COLLECT_LIMITS.maxItems
       limits.maxItems = Math.max(limits.maxItems, expectedMinimum)
       limits.maxRounds = Math.max(limits.maxRounds, DEFAULT_VISIBLE_COLLECT_LIMITS.maxRounds)
       limits.maxDurationMs = Math.max(limits.maxDurationMs, DEFAULT_VISIBLE_COLLECT_LIMITS.maxDurationMs)
-      interRoundDelayMs = 1_200
     }
     const template = String(payload.template || 'card_list') as never
     const itemSelector = typeof payload.itemSelector === 'string' ? payload.itemSelector : undefined
@@ -1326,7 +1357,7 @@ export class BrowserContentTaskRunner {
       if (stop) {
         if (stop === 'no_new_content') {
           const escalation = await runDiscoveryEscalationProbe<BrowserStructuredItem>({
-            scrollViewportOnce: () => this.capabilityService.scrollViewportOnce(tabId),
+            scrollViewportOnce: () => this.capabilityService.scrollViewportOnce(tabId, leaseGate),
             readFreshItems: async () => {
               const extracted = await this.capabilityService.extractStructured(tabId, {
                 template,
@@ -1377,14 +1408,10 @@ export class BrowserContentTaskRunner {
         break
       }
 
-      const scroll = await this.capabilityService.scrollViewportOnce(tabId)
+      const scroll = await this.capabilityService.scrollViewportOnce(tabId, leaseGate)
       if (scroll.atBottom) {
         // One more extract pass already happened; let an empty round confirm end.
         consecutiveEmptyRounds += 1
-      }
-      // Pace rounds on high-control platforms (plan §4.4 限速).
-      if (interRoundDelayMs > 0 && !this.cancelledTasks.has(taskId)) {
-        await new Promise((resolve) => setTimeout(resolve, interRoundDelayMs))
       }
     }
 
@@ -1483,8 +1510,6 @@ export class BrowserContentTaskRunner {
     }
     const strategy = parsed.plan.strategy === 'card_loop' ? 'card_loop' : 'url_batch'
     const plan = normalizeHighControlCollectionPlan(parsed.plan)
-    const isHighControl = plan !== parsed.plan
-    const interNoteDelayMs = isHighControl ? 3_000 : 0
     // Download-volume budget on high-control platforms (Codex result-review #5):
     // a safety ceiling on total images saved across the collection.
     const maxTotalImages = 0
@@ -1510,7 +1535,7 @@ export class BrowserContentTaskRunner {
         const navOut = await facade.run('browser_navigate', { url: plan.targetProfileUrl })
         const navErr = browserToolErrorCode(navOut)
         if (navErr) throw new Error(`card_loop profile navigation failed: ${navErr}`)
-        await facade.run('browser_wait', { ms: isHighControl ? 1500 : 500 }).catch(() => '')
+        await facade.run('browser_wait', { condition: 'ready', timeout_ms: 10_000 }).catch(() => '')
       }
 
       // Resume from the last per-note checkpoint ONLY if it passes the same
@@ -1535,7 +1560,6 @@ export class BrowserContentTaskRunner {
             writeTextFile: (path, content) => writeFile(path, content, 'utf8'),
           },
           now: () => Date.now(),
-          interNoteDelayMs,
           maxTotalImages,
           strategy,
           shouldStop: () => {
@@ -1737,11 +1761,18 @@ export class BrowserContentTaskRunner {
 
     if (kind === 'download_urls') {
       const urls = toStringArray(payload.urls)
+      const existing = this.persistenceService.getTask(taskId)
+      const resumeResults = existing?.checkpoint?.stage === 'batch_download'
+        && Array.isArray(existing.checkpoint.partialResults)
+        ? existing.checkpoint.partialResults as Array<Record<string, unknown>>
+        : []
       const result = await this.capabilityService.batchDownload(urls, {
         directory: typeof payload.directory === 'string' ? payload.directory : undefined,
         filenamePrefix: typeof payload.filenamePrefix === 'string' ? payload.filenamePrefix : undefined,
         overwrite: payload.overwrite === true,
         retryFailed: payload.retryFailed === true,
+        resumeResults,
+        shouldStop: () => this.cancelledTasks.has(taskId),
         onProgress: (progress) => {
           if (this.cancelledTasks.has(taskId)) return
           this.persistenceService.updateProgress(taskId, progress, {
@@ -1749,6 +1780,7 @@ export class BrowserContentTaskRunner {
               taskId,
               stage: 'batch_download',
               cursor: progress.currentLabel || null,
+              partialResults: progress.results,
             },
           })
         },
@@ -1853,8 +1885,18 @@ export class BrowserContentTaskRunner {
         urls = searchResults.items.map((item) => String(item.link || '').trim()).filter(Boolean).slice(0, maxPages)
       }
 
-      const sources: BrowserStructuredItem[] = []
-      for (let index = 0; index < urls.length; index += 1) {
+      const existing = this.persistenceService.getTask(taskId)
+      const resumeCheckpoint = existing?.checkpoint?.stage === 'research_collect'
+        ? existing.checkpoint
+        : null
+      const sources: BrowserStructuredItem[] = Array.isArray(resumeCheckpoint?.partialResults)
+        ? [...resumeCheckpoint.partialResults as BrowserStructuredItem[]]
+        : []
+      const numericCursor = Number(resumeCheckpoint?.cursor)
+      const startIndex = Number.isFinite(numericCursor) && numericCursor > 0
+        ? Math.min(urls.length, Math.floor(numericCursor))
+        : Math.max(0, urls.findIndex((url) => url === resumeCheckpoint?.cursor) + 1)
+      for (let index = startIndex; index < urls.length; index += 1) {
         if (this.cancelledTasks.has(taskId)) return
         const url = urls[index]
         const extracted = await this.capabilityService.extractStructuredFromUrl(url, {
@@ -1873,7 +1915,7 @@ export class BrowserContentTaskRunner {
           checkpoint: {
             taskId,
             stage: 'research_collect',
-            cursor: url,
+            cursor: String(index + 1),
             partialResults: sources,
           },
         })

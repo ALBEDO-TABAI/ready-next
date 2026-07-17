@@ -34,6 +34,11 @@ import {
   BROWSER_CONTENT_TASK_TOOL_NAMES,
   BROWSER_INTERACTION_TOOL_NAMES
 } from '../../tools/browser-tool-catalog'
+import {
+  browserBaseIntentForInstruction,
+  browserOnDemandToolNames,
+  browserToolNamesForIntent,
+} from '../../../../shared/browser-tool-surface'
 import { GENERAL_RESEARCH_TOOL_NAMES } from '../../tools/general-research-tool-defs'
 import { activeNegations } from '../safety/negation-state'
 import { createBrowserTurnLease } from '../../browser-engine/agent-browser-turn-lease'
@@ -86,10 +91,16 @@ import {
   scopeRunModuleForTool,
   shouldSuppressAskUserQuestionsForOpenConversation,
   stringifyToolResult,
+  toAgentSdkToolResult,
   supplementAuthorizedSkillPrimitiveDefinitions,
   validatePreservedDocumentMutation
 } from './agent-sdk-utils'
 import { buildToolCallDetail, buildToolResultDetail } from './tool-trace-detail'
+import {
+  messageToText,
+  parseEnvelopeResourceReferences,
+  primaryInstructionText,
+} from './agent-sdk-input-context-utils'
 import { log } from './agent-sdk-provider'
 import { AgentSdkSessionManager } from './agent-sdk-session'
 import { getRemainingToolCallBudget } from '../task-projection/run-budget-policy'
@@ -116,6 +127,7 @@ function createVisibleBrowserToolPreserver(params: {
   collectionExposure: boolean
   persistentCollectionExposure: boolean
   batchCollectionExposure: boolean
+  defaultBrowserNames: ReadonlySet<string>
 }): ((name: string) => boolean) | undefined {
   const browserInteractionVisible = params.visibleCapabilityGroupIds.includes('browser_interaction')
   const browserContentTasksVisible =
@@ -131,8 +143,7 @@ function createVisibleBrowserToolPreserver(params: {
           : isBrowserObservationSubsetTool(name)
     }
     return (
-      (browserInteractionVisible && BROWSER_INTERACTION_TOOL_NAME_SET.has(name)) ||
-      (browserContentTasksVisible && BROWSER_CONTENT_TASK_TOOL_NAME_SET.has(name))
+      ((browserInteractionVisible || browserContentTasksVisible) && params.defaultBrowserNames.has(name))
     )
   }
 }
@@ -264,6 +275,21 @@ export class AgentSdkToolExecutor {
     })
     const effectiveBrowserDecisionMode =
       policyConflict.demotedBrowserDecisionMode || browserDecisionMode
+    const currentInstruction =
+      parseEnvelopeResourceReferences(params.requestEnvelope).primaryInstruction
+      || primaryInstructionText(params.message)
+    const instructionForBaseSurface =
+      /^(?:继续|接着|重试|再试|resume\b|continue\b|retry\b)/i.test(currentInstruction.trim())
+      && messageToText(params.message).includes('## 最近会话摘要')
+        ? messageToText(params.message)
+        : currentInstruction
+    const defaultBrowserNames = new Set<string>(browserToolNamesForIntent(
+      effectiveBrowserDecisionMode === 'browser_upload_workflow'
+        ? 'interaction'
+        : browserBaseIntentForInstruction(instructionForBaseSurface)
+    ))
+    for (const name of browserOnDemandToolNames(currentInstruction)) defaultBrowserNames.add(name)
+    if (effectiveBrowserDecisionMode === 'browser_upload_workflow') defaultBrowserNames.add('browser_upload')
     // WP1: decouple browser collection exposure from the deterministic workflow
     // decision. Expose the browser groups (via intentGroupModes, WITHOUT changing
     // the decision mode) when this turn — or a recent turn — shows browser
@@ -330,6 +356,9 @@ export class AgentSdkToolExecutor {
       params.authorization.mode === 'none' && params.skillCatalogAvailable === true
     const intentGroupModes = {
       ...sdkIntentSurface.intentGroupModes,
+      ...(Array.from(defaultBrowserNames).some((name) => BROWSER_CONTENT_TASK_TOOL_NAME_SET.has(name))
+        ? { browser_content_tasks: true }
+        : {}),
       ...(collectionExposure
         ? { browser_interaction: true, browser_content_tasks: true }
         : suppressBrowserContentTasks
@@ -340,6 +369,9 @@ export class AgentSdkToolExecutor {
     }
     const requestedIntentGroupIds = Array.from(new Set([
       ...sdkIntentSurface.requestedIntentGroupIds,
+      ...(Array.from(defaultBrowserNames).some((name) => BROWSER_CONTENT_TASK_TOOL_NAME_SET.has(name))
+        ? ['browser_content_tasks'] as const
+        : []),
       ...(!sdkIntentSurface.browserIntentNegated && explicitBrowserCollectionIntent
         ? ['browser_interaction', 'browser_content_tasks'] as const
         : []),
@@ -398,6 +430,14 @@ export class AgentSdkToolExecutor {
         if (persistentCollectionExposure) return isBrowserCollectionSubsetTool(name)
         return isBrowserObservationSubsetTool(name)
       })
+    } else if (
+      capabilityResolution.visibleCapabilityGroupIds.includes('browser_interaction')
+      || capabilityResolution.visibleCapabilityGroupIds.includes('browser_content_tasks')
+    ) {
+      definitions = definitions.filter((definition) =>
+        (!BROWSER_INTERACTION_TOOL_NAME_SET.has(definition.name)
+          && !BROWSER_CONTENT_TASK_TOOL_NAME_SET.has(definition.name))
+        || defaultBrowserNames.has(definition.name))
     }
     if (capabilityResolution.visibleCapabilityGroupIds.includes('skills')) {
       definitions = supplementAuthorizedSkillPrimitiveDefinitions(definitions, params.authorization)
@@ -428,7 +468,8 @@ export class AgentSdkToolExecutor {
             visibleCapabilityGroupIds: capabilityResolution.visibleCapabilityGroupIds,
             collectionExposure,
             persistentCollectionExposure,
-            batchCollectionExposure
+            batchCollectionExposure,
+            defaultBrowserNames
           })
       const preserveVisibleResearchTool =
         !readOnlyResearchSkill &&
@@ -614,7 +655,7 @@ export class AgentSdkToolExecutor {
             return buildTextToolResultMessage(bridgeResults)
           }
         }
-        return stringifyToolResult(output)
+        return toAgentSdkToolResult(output)
       }, () => stringifyToolResult(createToolExecutionOutput('当前任务已由新 Agent 接管，旧身份不再执行后续工具。', {
         shape: 'json', data: { errorKind: 'handoff_takeover', skipped: true },
       }))),

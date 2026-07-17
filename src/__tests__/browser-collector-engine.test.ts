@@ -27,8 +27,8 @@ function fixedClock(): () => number {
 function facadeAlwaysOk(): NoteCollectFacade {
   return {
     run: async (tool) => {
-      if (tool === 'browser_collect_images') return okImages
-      if (tool === 'browser_download_urls') return JSON.stringify({ success: 1 })
+      if (tool === 'browser_collect') return okImages
+      if (tool === 'browser_download') return JSON.stringify({ success: 1 })
       return JSON.stringify({ ok: true })
     },
   }
@@ -58,8 +58,8 @@ describe('runBrowserCollection (background per-note loop)', () => {
       facade: {
         run: async (tool) => {
           if (tool === 'browser_navigate') processed += 1
-          if (tool === 'browser_collect_images') return okImages
-          if (tool === 'browser_download_urls') return JSON.stringify({ success: 1 })
+          if (tool === 'browser_collect') return okImages
+          if (tool === 'browser_download') return JSON.stringify({ success: 1 })
           return JSON.stringify({ ok: true })
         },
       },
@@ -96,9 +96,9 @@ describe('runBrowserCollection (background per-note loop)', () => {
       facade: {
         run: async (tool, args) => {
           if (tool === 'browser_navigate') navigated.push(String(args?.url))
-          if (tool === 'browser_read_page') return '请扫码登录后继续查看内容'
-          if (tool === 'browser_collect_images') return okImages
-          if (tool === 'browser_download_urls') return JSON.stringify({ success: 1 })
+          if (tool === 'browser_read') return '请扫码登录后继续查看内容'
+          if (tool === 'browser_collect') return okImages
+          if (tool === 'browser_download') return JSON.stringify({ success: 1 })
           return JSON.stringify({ ok: true })
         },
       },
@@ -118,7 +118,7 @@ describe('runBrowserCollection (background per-note loop)', () => {
     const res = await runBrowserCollection(plan, {
       facade: {
         run: async (tool, args) => {
-          if (tool === 'browser_collect_images') {
+          if (tool === 'browser_collect' && args?.mode === 'images') {
             return JSON.stringify({
               count: 1,
               scope: 'xiaohongshu-detail',
@@ -126,10 +126,10 @@ describe('runBrowserCollection (background per-note loop)', () => {
               images: [{ url: imageUrl, width: 1200, height: 1600 }],
             })
           }
-          if (tool === 'browser_extract_structured' && args?.template === 'image_gallery') {
+          if (tool === 'browser_collect' && args?.template === 'image_gallery') {
             return JSON.stringify({ items: [{ link: imageUrl, media: [imageUrl] }] })
           }
-          if (tool === 'browser_download_urls') {
+          if (tool === 'browser_download') {
             throw new Error('under-collected carousel must not download')
           }
           return JSON.stringify({ ok: true })
@@ -149,7 +149,7 @@ describe('runBrowserCollection (background per-note loop)', () => {
     assert.ok(res.failed.every((f) => f.retryable === true), 'partial_images is retryable, not a permanent loss')
   })
 
-  it('paces between notes (not before the first) on high-control platforms', async () => {
+  it('does not add fixed sleeps when the origin interaction budget owns pacing', async () => {
     const plan = planOf(3)
     const sleeps: number[] = []
     const res = await runBrowserCollection(plan, {
@@ -160,7 +160,7 @@ describe('runBrowserCollection (background per-note loop)', () => {
       sleep: async (ms) => { sleeps.push(ms) },
     })
     assert.equal(res.stopReason, 'completed')
-    assert.deepEqual(sleeps, [1500, 1500], 'paces before notes 2 and 3, not before note 1')
+    assert.deepEqual(sleeps, [], 'fixed per-note sleeps are retired in favor of the shared interaction budget')
   })
 
   it('stops with max_images once the download-volume budget is exhausted', async () => {
@@ -170,8 +170,8 @@ describe('runBrowserCollection (background per-note loop)', () => {
     const res = await runBrowserCollection(plan, {
       facade: {
         run: async (tool) => {
-          if (tool === 'browser_collect_images') return JSON.stringify({ count: 3, images: [{ url: 'https://img/a.jpg' }, { url: 'https://img/b.jpg' }, { url: 'https://img/c.jpg' }] })
-          if (tool === 'browser_download_urls') return JSON.stringify({ success: 3 })
+          if (tool === 'browser_collect') return JSON.stringify({ count: 3, images: [{ url: 'https://img/a.jpg' }, { url: 'https://img/b.jpg' }, { url: 'https://img/c.jpg' }] })
+          if (tool === 'browser_download') return JSON.stringify({ success: 3 })
           return JSON.stringify({ ok: true })
         },
       },
@@ -209,8 +209,8 @@ describe('runBrowserCollection (background per-note loop)', () => {
         facade: {
           run: async (tool, args) => {
             if (tool === 'browser_navigate') navigated.push(String(args?.url))
-            if (tool === 'browser_collect_images') return okImages
-            if (tool === 'browser_download_urls') return JSON.stringify({ success: 1 })
+            if (tool === 'browser_collect') return okImages
+            if (tool === 'browser_download') return JSON.stringify({ success: 1 })
             return JSON.stringify({ ok: true })
           },
         },

@@ -1200,13 +1200,13 @@ test('D1: 查图', async (t) => {
     tools: [
       { name: 'web_search', groupId: 'general_research', domain: 'general_research', kind: 'read' },
       { name: 'browser_search', groupId: 'browser_interaction', domain: 'browser', kind: 'read' },
-      { name: 'browser_read_page', groupId: 'browser_interaction', domain: 'browser', kind: 'read' },
+      { name: 'browser_read', groupId: 'browser_interaction', domain: 'browser', kind: 'read' },
       { name: 'present_file', groupId: 'general_research', domain: 'general_research', kind: 'write' },
     ],
     plan: [
       { name: 'web_search', input: { query: '城市夜跑活动 海报 参考图 摄影' } },
       { name: 'browser_search', input: { query: 'city night running event poster photography' } },
-      { name: 'browser_read_page', input: { url: 'https://unsplash.com/search/night-run' } },
+      { name: 'browser_read', input: { url: 'https://unsplash.com/search/night-run' } },
       { name: 'present_file', input: { path: 'outputs/D1-night-run-refs.md' } },
     ],
     executeToolCall: async (toolName) => createToolExecutionOutput(`${toolName} ok`, {
@@ -2205,14 +2205,14 @@ test('J1: 当前浏览器页写入文档', async (t) => {
     input: '读取当前浏览器页面，把页面里的三条核心信息整理到当前文档末尾，并保留来源链接。',
     browserAvailable: true,
     tools: [
-      acceptanceTool('browser_get_tabs', 'browser', 'browser'),
-      acceptanceTool('browser_read_page', 'browser', 'browser'),
+      acceptanceTool('browser_tabs', 'browser', 'browser'),
+      acceptanceTool('browser_read', 'browser', 'browser'),
       acceptanceTool('document_append_content', 'document', 'document', 'write'),
       acceptanceTool('document_save_tab', 'document', 'document', 'write'),
     ],
     plan: [
-      { name: 'browser_get_tabs', input: {} },
-      { name: 'browser_read_page', input: { tabId: 'active-tab' } },
+      { name: 'browser_tabs', input: {} },
+      { name: 'browser_read', input: { tabId: 'active-tab' } },
       { name: 'document_append_content', input: { tabId: 'current-doc', text: '## 页面摘要\n1. A\n2. B\n3. C\n来源：https://source.example/current' } },
       { name: 'document_save_tab', input: { tabId: 'current-doc' } },
     ],
@@ -2220,7 +2220,7 @@ test('J1: 当前浏览器页写入文档', async (t) => {
   })
   reportPanel(t, r)
   expectNoErrorDiagnostics(r)
-  assert.equal(executedArgs(r, 'browser_read_page').tabId, 'active-tab')
+  assert.equal(executedArgs(r, 'browser_read').tabId, 'active-tab')
   assert.match(String(executedArgs(r, 'document_append_content').text), /来源：https:\/\/source\.example\/current/)
 })
 
@@ -2254,7 +2254,7 @@ test('J3: RSS 条目补充浏览器信息后写成文档', async (t) => {
       acceptanceTool('rss_refresh_category', 'rss', 'rss'),
       acceptanceTool('rss_list_items', 'rss', 'rss'),
       acceptanceTool('browser_navigate', 'browser', 'browser'),
-      acceptanceTool('browser_read_page', 'browser', 'browser'),
+      acceptanceTool('browser_read', 'browser', 'browser'),
       acceptanceTool('document_create_tab', 'document', 'document', 'write'),
       acceptanceTool('document_append_content', 'document', 'document', 'write'),
       acceptanceTool('document_save_tab', 'document', 'document', 'write'),
@@ -2263,11 +2263,11 @@ test('J3: RSS 条目补充浏览器信息后写成文档', async (t) => {
       { name: 'rss_refresh_category', input: { category: '科技' } },
       { name: 'rss_list_items', input: { category: '科技', topN: 3 } },
       { name: 'browser_navigate', input: { url: 'https://news.example/a' } },
-      { name: 'browser_read_page', input: { tabId: 'rss-a' } },
+      { name: 'browser_read', input: { tabId: 'rss-a' } },
       { name: 'browser_navigate', input: { url: 'https://news.example/b' } },
-      { name: 'browser_read_page', input: { tabId: 'rss-b' } },
+      { name: 'browser_read', input: { tabId: 'rss-b' } },
       { name: 'browser_navigate', input: { url: 'https://news.example/c' } },
-      { name: 'browser_read_page', input: { tabId: 'rss-c' } },
+      { name: 'browser_read', input: { tabId: 'rss-c' } },
       { name: 'document_create_tab', input: { title: 'J3 科技 RSS 短报告' } },
       { name: 'document_append_content', input: { tabId: 'new', text: '3 条 RSS + 3 个原文来源' } },
       { name: 'document_save_tab', input: { tabId: 'new' } },
@@ -2276,7 +2276,7 @@ test('J3: RSS 条目补充浏览器信息后写成文档', async (t) => {
   })
   reportPanel(t, r)
   expectNoErrorDiagnostics(r)
-  assert.equal(r.executedTools.filter((tool) => tool.name === 'browser_read_page').length, 3)
+  assert.equal(r.executedTools.filter((tool) => tool.name === 'browser_read').length, 3)
   expectAgentMessageContains(r, '3 条 RSS')
 })
 
@@ -2309,13 +2309,13 @@ test('J5: 跨模块任务不串会话', async (t) => {
     sessionId: 'j5-current-session',
     browserAvailable: true,
     tools: [
-      acceptanceTool('browser_read_page', 'browser', 'browser'),
+      acceptanceTool('browser_read', 'browser', 'browser'),
       acceptanceTool('document_open_tab', 'document', 'document'),
       acceptanceTool('document_append_content', 'document', 'document', 'write'),
       acceptanceTool('document_save_tab', 'document', 'document', 'write'),
     ],
     plan: [
-      { name: 'browser_read_page', input: { tabId: 'current-session-tab' } },
+      { name: 'browser_read', input: { tabId: 'current-session-tab' } },
       { name: 'document_open_tab', input: { path: '/workspace/J5-资料整理.md' } },
       { name: 'document_append_content', input: { tabId: 'j5-doc', text: '当前会话网页资料摘要' } },
       { name: 'document_save_tab', input: { tabId: 'j5-doc' } },
@@ -2324,7 +2324,7 @@ test('J5: 跨模块任务不串会话', async (t) => {
   })
   reportPanel(t, r)
   expectNoErrorDiagnostics(r)
-  assert.equal(executedArgs(r, 'browser_read_page').tabId, 'current-session-tab')
+  assert.equal(executedArgs(r, 'browser_read').tabId, 'current-session-tab')
   assert.match(String(executedArgs(r, 'document_open_tab').path), /J5-资料整理/)
   assert.doesNotMatch(String(executedArgs(r, 'document_open_tab').path), /活动计划/)
 })
@@ -2335,13 +2335,13 @@ test('J6: 重启后跨模块结果仍能追踪', async (t) => {
     input: '把当前网页总结成文档，并创建明天复查的日历提醒。完成后我会重启 Ready，再检查它们是否还在。',
     browserAvailable: true,
     tools: [
-      acceptanceTool('browser_read_page', 'browser', 'browser'),
+      acceptanceTool('browser_read', 'browser', 'browser'),
       acceptanceTool('document_create_tab', 'document', 'document', 'write'),
       acceptanceTool('document_save_tab', 'document', 'document', 'write'),
       acceptanceTool('calendar_create_event', 'calendar', 'calendar', 'write'),
     ],
     plan: [
-      { name: 'browser_read_page', input: { tabId: 'active-tab' } },
+      { name: 'browser_read', input: { tabId: 'active-tab' } },
       { name: 'document_create_tab', input: { title: 'J6 网页复查摘要', path: '/workspace/J6-网页复查摘要.md' } },
       { name: 'document_save_tab', input: { tabId: 'j6-doc' } },
       { name: 'calendar_create_event', input: { title: '复查 J6 网页摘要', start: '2026-05-25T09:30:00+08:00' } },

@@ -33,7 +33,7 @@ test('active plan restores from durable scope metadata after in-memory state is 
 
   noteToolResultForActivePlan(
     'scope-durable',
-    'browser_visible_collect',
+    'browser_collect',
     { url: 'https://example.com/u/1' },
     1000,
     JSON.stringify({ taskId: 'discover-durable', status: 'completed', result: { targets: [{ id: 'n1' }] } })
@@ -59,7 +59,7 @@ test('active plan persistence failures never interrupt the tool or reminder path
   assert.doesNotThrow(() => buildActivePlanReminderText('scope-load-failure', 1000))
   assert.doesNotThrow(() => noteToolResultForActivePlan(
     'scope-save-failure',
-    'browser_visible_collect',
+    'browser_collect',
     { url: 'https://example.com/u/1' },
     1000,
     JSON.stringify({ taskId: 'discover-save-failure', status: 'queued' })
@@ -70,7 +70,7 @@ test('active plan persistence failures never interrupt the tool or reminder path
 
 test('expired persisted plans are removed and cannot be revived by later evidence', (t) => {
   const expired = deriveCollectionPlanFromToolCall(
-    'browser_visible_collect',
+    'browser_collect',
     { url: 'https://example.com/old' },
     1000
   )!
@@ -89,7 +89,7 @@ test('expired persisted plans are removed and cannot be revived by later evidenc
 
   noteToolResultForActivePlan(
     'scope-expired',
-    'browser_get_task',
+    'browser_task',
     { task_id: 'old-task' },
     1000 + 31 * 60_000,
     JSON.stringify({ taskId: 'old-task', status: 'completed', result: { targets: [{ id: 'n1' }] } })
@@ -149,7 +149,7 @@ function collectionTool(name: string): ToolDefinition {
 test('collection plan derives, advances on tool results, and stays scoped', () => {
   resetActivePlansForTests()
   const plan = deriveCollectionPlanFromToolCall(
-    'browser_visible_collect',
+    'browser_collect',
     { url: 'https://example.com/u/1' },
     1000
   )
@@ -159,7 +159,7 @@ test('collection plan derives, advances on tool results, and stays scoped', () =
 
   noteToolResultForActivePlan(
     'scope-a',
-    'browser_visible_collect',
+    'browser_collect',
     { url: 'https://example.com/u/1' },
     1000,
     JSON.stringify({ taskId: 'discover-1', status: 'queued' })
@@ -177,7 +177,7 @@ test('collection plan derives, advances on tool results, and stays scoped', () =
 
   noteToolResultForActivePlan(
     'scope-a',
-    'browser_get_task',
+    'browser_task',
     { task_id: 'discover-1' },
     1500,
     JSON.stringify({
@@ -194,8 +194,8 @@ test('collection plan derives, advances on tool results, and stays scoped', () =
 
   noteToolResultForActivePlan(
     'scope-a',
-    'browser_collect_notes',
-    { source_task_id: 'wrong-discovery', expected_count: 2 },
+    'browser_collect',
+    { mode: 'notes', source_task_id: 'wrong-discovery', expected_count: 2 },
     1800,
     JSON.stringify({ taskId: 'collect-wrong', status: 'queued' })
   )
@@ -207,8 +207,8 @@ test('collection plan derives, advances on tool results, and stays scoped', () =
 
   noteToolResultForActivePlan(
     'scope-a',
-    'browser_collect_notes',
-    { source_task_id: 'discover-1', expected_count: 2 },
+    'browser_collect',
+    { mode: 'notes', source_task_id: 'discover-1', expected_count: 2 },
     2000,
     JSON.stringify({ taskId: 'collect-1', status: 'queued' })
   )
@@ -217,7 +217,7 @@ test('collection plan derives, advances on tool results, and stays scoped', () =
 
   noteToolResultForActivePlan(
     'scope-a',
-    'browser_get_task',
+    'browser_task',
     { task_id: 'discover-1' },
     2200,
     JSON.stringify({
@@ -237,7 +237,7 @@ test('collection plan derives, advances on tool results, and stays scoped', () =
 
   noteToolResultForActivePlan(
     'scope-a',
-    'browser_get_task',
+    'browser_task',
     { task_id: 'collect-1' },
     2300,
     JSON.stringify({ taskId: 'collect-1', status: 'completed' })
@@ -251,7 +251,7 @@ test('collection plan derives, advances on tool results, and stays scoped', () =
 
   noteToolResultForActivePlan(
     'scope-a',
-    'browser_get_task',
+    'browser_task',
     { task_id: 'collect-1' },
     2325,
     JSON.stringify({
@@ -264,7 +264,7 @@ test('collection plan derives, advances on tool results, and stays scoped', () =
   )
   noteToolResultForActivePlan(
     'scope-a',
-    'browser_get_task',
+    'browser_task',
     { task_id: 'collect-1' },
     2350,
     JSON.stringify({
@@ -283,7 +283,7 @@ test('collection plan derives, advances on tool results, and stays scoped', () =
 
   noteToolResultForActivePlan(
     'scope-a',
-    'browser_get_task',
+    'browser_task',
     { task_id: 'collect-1' },
     2375,
     JSON.stringify({
@@ -302,7 +302,7 @@ test('collection plan derives, advances on tool results, and stays scoped', () =
 
   noteToolResultForActivePlan(
     'scope-a',
-    'browser_get_task',
+    'browser_task',
     { task_id: 'collect-1' },
     2380,
     JSON.stringify({
@@ -320,7 +320,7 @@ test('collection plan derives, advances on tool results, and stays scoped', () =
 
   noteToolResultForActivePlan(
     'scope-a',
-    'browser_get_task',
+    'browser_task',
     { task_id: 'collect-1' },
     2400,
     JSON.stringify({
@@ -349,7 +349,7 @@ test('image gallery plan advances from discovery to media download', () => {
   resetActivePlansForTests()
   noteToolResultForActivePlan(
     'scope-media',
-    'browser_visible_collect',
+    'browser_collect',
     { template: 'image_gallery', url: 'https://example.com/gallery' },
     1000,
     JSON.stringify({
@@ -366,7 +366,7 @@ test('image gallery plan advances from discovery to media download', () => {
 
   noteToolResultForActivePlan(
     'scope-media',
-    'browser_download_collected_media',
+    'browser_download',
     { source_task_id: 'browser-task-1', directory: '/tmp/gallery' },
     2000,
     JSON.stringify({
@@ -394,7 +394,7 @@ test('frozen collection count cannot be replaced by smaller or larger download e
     resetActivePlansForTests()
     noteToolResultForActivePlan(
       scope,
-      'browser_visible_collect',
+      'browser_collect',
       { template: 'image_gallery', url: 'https://example.com/gallery' },
       1000,
       JSON.stringify({
@@ -405,7 +405,7 @@ test('frozen collection count cannot be replaced by smaller or larger download e
     )
     noteToolResultForActivePlan(
       scope,
-      'browser_download_collected_media',
+      'browser_download',
       { source_task_id: `${scope}-task`, directory: '/tmp/gallery' },
       2000,
       JSON.stringify({
@@ -420,7 +420,7 @@ test('frozen collection count cannot be replaced by smaller or larger download e
     )
     noteToolResultForActivePlan(
       scope,
-      'browser_get_task',
+      'browser_task',
       { task_id: `${scope}-task` },
       3000,
       JSON.stringify({
@@ -438,8 +438,8 @@ test('collection dispatch arguments cannot manufacture discovery evidence', () =
   resetActivePlansForTests()
   noteToolResultForActivePlan(
     'scope-forged-manifest',
-    'browser_collect_notes',
-    { source_task_id: 'forged-discovery', expected_count: 9 },
+    'browser_collect',
+    { mode: 'notes', source_task_id: 'forged-discovery', expected_count: 9 },
     1000,
     JSON.stringify({ taskId: 'collect-1', status: 'queued' })
   )
@@ -451,7 +451,7 @@ test('collection dispatch arguments cannot manufacture discovery evidence', () =
 
   noteToolResultForActivePlan(
     'scope-forged-manifest',
-    'browser_get_task',
+    'browser_task',
     { task_id: 'forged-discovery' },
     1500,
     JSON.stringify({
@@ -471,7 +471,7 @@ test('completed task status does not bless an explicitly partial discovery manif
   resetActivePlansForTests()
   noteToolResultForActivePlan(
     'scope-partial-manifest',
-    'browser_visible_collect',
+    'browser_collect',
     { url: 'https://example.com/u/partial' },
     1000,
     JSON.stringify({
@@ -495,7 +495,7 @@ test('completed discovery with failed or remaining items does not freeze a manif
     resetActivePlansForTests()
     noteToolResultForActivePlan(
       scope,
-      'browser_visible_collect',
+      'browser_collect',
       { url: 'https://example.com/u/incomplete' },
       1000,
       JSON.stringify({ taskId: `${scope}-task`, status: 'completed', result })
@@ -512,7 +512,7 @@ test('image gallery review does not complete on partial collected-media download
   resetActivePlansForTests()
   noteToolResultForActivePlan(
     'scope-media-partial',
-    'browser_visible_collect',
+    'browser_collect',
     { template: 'image_gallery', url: 'https://example.com/gallery' },
     1000,
     JSON.stringify({
@@ -523,7 +523,7 @@ test('image gallery review does not complete on partial collected-media download
   )
   noteToolResultForActivePlan(
     'scope-media-partial',
-    'browser_download_collected_media',
+    'browser_download',
     { source_task_id: 'browser-task-1', directory: '/tmp/gallery' },
     2000,
     JSON.stringify({
@@ -545,7 +545,7 @@ test('image gallery review does not complete on partial collected-media download
 
   noteToolResultForActivePlan(
     'scope-media-partial',
-    'browser_download_collected_media',
+    'browser_download',
     { source_task_id: 'browser-task-1', directory: '/tmp/gallery' },
     2250,
     JSON.stringify({
@@ -559,7 +559,7 @@ test('image gallery review does not complete on partial collected-media download
   )
   noteToolResultForActivePlan(
     'scope-media-partial',
-    'browser_download_collected_media',
+    'browser_download',
     { source_task_id: 'browser-task-1', directory: '/tmp/gallery' },
     2300,
     JSON.stringify({ ok: true, completion: 'complete' })
@@ -572,7 +572,7 @@ test('image gallery review does not complete on partial collected-media download
 
   noteToolResultForActivePlan(
     'scope-media-partial',
-    'browser_download_collected_media',
+    'browser_download',
     { source_task_id: 'browser-task-1', directory: '/tmp/gallery' },
     3000,
     JSON.stringify({ ok: true })
@@ -585,7 +585,7 @@ test('image gallery review does not complete on partial collected-media download
 
   noteToolResultForActivePlan(
     'scope-media-partial',
-    'browser_get_task',
+    'browser_task',
     { task_id: 'browser-task-1' },
     3500,
     JSON.stringify({
@@ -602,7 +602,7 @@ test('image gallery review does not complete on partial collected-media download
 
   noteToolResultForActivePlan(
     'scope-media-partial',
-    'browser_download_collected_media',
+    'browser_download',
     { source_task_id: 'browser-task-1', directory: '/tmp/gallery' },
     4000,
     JSON.stringify({
@@ -623,7 +623,7 @@ test('image gallery review does not complete on partial collected-media download
 
   noteToolResultForActivePlan(
     'scope-media-partial',
-    'browser_get_task',
+    'browser_task',
     { task_id: 'browser-task-1' },
     4500,
     JSON.stringify({ taskId: 'browser-task-1', status: 'completed' })
@@ -636,7 +636,7 @@ test('image gallery review does not complete on partial collected-media download
 
   noteToolResultForActivePlan(
     'scope-media-partial',
-    'browser_get_task',
+    'browser_task',
     { task_id: 'browser-task-1' },
     5000,
     JSON.stringify({
@@ -660,8 +660,8 @@ test('next turn model input carries the re-injected current plan step', async ()
     loadAIConfig: () => ({ ok: true, config: fakeConfig, reason: 'present' }),
     domainAdapters: [],
     listToolDefinitions: () => [
-      collectionTool('browser_visible_collect'),
-      collectionTool('browser_collect_notes')
+      collectionTool('browser_collect'),
+      collectionTool('browser_collect')
     ],
     executeToolCall: async () =>
       createToolExecutionOutput('ok', {
@@ -678,10 +678,10 @@ test('next turn model input carries the re-injected current plan step', async ()
       if (turn === 1) {
         const dispatch = (
           tools as Array<{ name: string; invoke: (ctx: unknown, raw: string) => Promise<string> }>
-        ).find((toolItem) => toolItem.name === 'browser_visible_collect')
+        ).find((toolItem) => toolItem.name === 'browser_collect')
         assert.ok(dispatch)
         await dispatch!.invoke({}, JSON.stringify({ url: 'https://example.com/u/1' }))
-        return { finalText: '已启动清单发现。', toolTrace: [{ name: 'browser_visible_collect' }] }
+        return { finalText: '已启动清单发现。', toolTrace: [{ name: 'browser_collect' }] }
       }
       return { finalText: '收到。', toolTrace: [] }
     }

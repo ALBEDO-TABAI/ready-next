@@ -16,11 +16,13 @@ describe('browser collection consent IPC contract', () => {
     const rendererTypes = read('src/renderer/types/electron.d.ts')
 
     assert.match(main, /ipcMain\.handle\('browser:confirmCollectionConsent'/)
-    assert.match(main, /confirmPendingRequest\(requestId,\s*confirmedVia\)/)
-    assert.match(preload, /confirmCollectionConsent:\s*\(payload:\s*\{ requestId: string; confirmedVia: 'ask_user_questions' \| 'ui_action' \}\)/)
+    assert.match(main, /confirmPendingRequest\(requestId\)/)
+    assert.match(preload, /confirmCollectionConsent:\s*\(payload:\s*\{ requestId: string \}\)/)
     assert.match(preload, /ipcRenderer\.invoke\('browser:confirmCollectionConsent', payload\)/)
     assert.match(rendererTypes, /confirmCollectionConsent:\s*\(payload:\s*\{/)
-    assert.match(rendererTypes, /confirmedVia:\s*'ask_user_questions' \| 'ui_action'/)
+    assert.doesNotMatch(main, /confirmedVia/)
+    assert.doesNotMatch(preload, /confirmedVia/)
+    assert.doesNotMatch(rendererTypes, /confirmedVia/)
   })
 
   it('exposes side-effect-free resume and explicit cancel from main through preload and renderer types', () => {

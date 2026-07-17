@@ -41,12 +41,12 @@ function textOf(out: unknown): string {
 
 test('tool-executor refuses browser writes without a code-derived turn surface', async () => {
   const c = controller()
-  const out = await executeToolCall('browser_go_back', {}, ctx(c))
+  const out = await executeToolCall('browser_navigate', { action: 'back' }, ctx(c))
   assert.match(textOf(out), /browser_surface_undeclared/)
   assert.equal(c.goBackCalls, 0, 'browser write must not dispatch without a surface binding')
 })
 
 test('tool-executor allows browser reads without a write surface', async () => {
-  const out = await executeToolCall('browser_read_page', {}, ctx(controller()))
+  const out = await executeToolCall('browser_read', {}, ctx(controller()))
   assert.match(textOf(out), /page text/)
 })

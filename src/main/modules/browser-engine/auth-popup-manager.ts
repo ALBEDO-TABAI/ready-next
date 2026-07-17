@@ -5,6 +5,7 @@ import { withHtmlInCanvasWebPreferences } from '../app-control/html-in-canvas-fe
 export interface PopupOpenInTabContext {
   sourceTabId?: string | null
   sourceOwner?: 'manual' | 'agent' | null
+  profile?: string | null
 }
 
 type OpenInTabHandler = (url: string, context?: PopupOpenInTabContext) => void
@@ -36,7 +37,7 @@ export class AuthPopupManager {
     this.mainWindow = mainWindow
   }
 
-  getPopupWindowOptions(): Electron.BrowserWindowConstructorOptions {
+  getPopupWindowOptions(profile?: string | null): Electron.BrowserWindowConstructorOptions {
     return {
       show: true,
       width: 980,
@@ -48,7 +49,7 @@ export class AuthPopupManager {
         sandbox: false,
         contextIsolation: true,
         nodeIntegration: false,
-        partition: 'persist:browser',
+        partition: profile ? `persist:browser-profile-${profile}` : 'persist:browser',
         webSecurity: true,
         spellcheck: true,
       }),
@@ -59,6 +60,7 @@ export class AuthPopupManager {
     this.contentContexts.set(contentSource.id, {
       sourceTabId: context.sourceTabId ?? null,
       sourceOwner: context.sourceOwner ?? null,
+      profile: context.profile ?? null,
     })
     if (this.boundContents.has(contentSource.id)) return
     this.boundContents.add(contentSource.id)
@@ -93,6 +95,7 @@ export class AuthPopupManager {
     this.contentContexts.set(contents.id, {
       sourceTabId: context.sourceTabId ?? null,
       sourceOwner: context.sourceOwner ?? null,
+      profile: context.profile ?? null,
     })
     if (this.boundContents.has(contents.id)) return
     this.boundContents.add(contents.id)
@@ -115,7 +118,7 @@ export class AuthPopupManager {
       if (decision.mode === 'allow-popup') {
         return {
           action: 'allow',
-          overrideBrowserWindowOptions: this.getPopupWindowOptions(),
+          overrideBrowserWindowOptions: this.getPopupWindowOptions(this.contentContexts.get(contents.id)?.profile),
         }
       }
       if (decision.mode === 'open-tab') {
@@ -146,7 +149,7 @@ export class AuthPopupManager {
     })
   }
 
-  resolveWindowOpen(context: PopupRequestContext): {
+  resolveWindowOpen(context: PopupRequestContext, source?: PopupOpenInTabContext): {
     action: 'allow' | 'deny'
     overrideBrowserWindowOptions?: Electron.BrowserWindowConstructorOptions
     mode: 'allow-popup' | 'open-tab' | 'external'
@@ -156,7 +159,7 @@ export class AuthPopupManager {
     if (decision.mode === 'allow-popup') {
       return {
         action: 'allow',
-        overrideBrowserWindowOptions: this.getPopupWindowOptions(),
+        overrideBrowserWindowOptions: this.getPopupWindowOptions(source?.profile),
         mode: decision.mode,
         reason: decision.reason,
       }
@@ -181,6 +184,7 @@ export class AuthPopupManager {
       this.contentContexts.set(sourceContentsId, {
         sourceTabId: params.context.sourceTabId ?? null,
         sourceOwner: params.context.sourceOwner ?? null,
+        profile: params.context.profile ?? null,
       })
     }
 

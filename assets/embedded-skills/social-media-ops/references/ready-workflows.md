@@ -12,10 +12,10 @@
 
 ### 1.2 浏览器采集纪律
 - **能采就采，不能采就要**：目标平台页面可公开访问时用浏览器实采；不可访问（登录墙/仅 App 生态）时如实说明，请用户提供截图、导出数据或口述关键数字，**绝不虚构采集结果**。
-- 常用动作：`browser_navigate` 打开目标页 → `browser_read_page`/`browser_extract_structured` 提取结构化字段 → 列表页配 `browser_scroll_collect` 滚动收集 → 视觉判断（封面/版式）直接用 `browser_analyze_viewport` 返回可读分析结果；`browser_capture_viewport` 仅用于坐标动作前后留证，不把其 `image_id` 当作主模型可读图片。
-- **节奏**：详情页每批 3-4 个，批间自然停顿；连续采集触发平台验证/登录时用 `browser_ask_user_takeover` 请用户接管处理，处理完继续，不静默放弃、不硬闯。
-- **并行**：互不依赖的多账号/多关键词采集可用 `browser_start_task` 起后台任务并行跑，`browser_aggregate_results` 汇总；单账号内的详情深读保持串行小批次（防风控）。
-- 开放性调研（找案例/查规则/看讨论）用 `web_search`/`web_fetch`/`browser_research_topic`。
+- 常用动作：`browser_navigate` 打开目标页 → `browser_read`/`browser_collect` 提取结构化字段 → 列表页配 `browser_collect` 滚动收集 → 视觉判断（封面/版式）直接用 `browser_screenshot` 返回可读分析结果；`browser_screenshot` 仅用于坐标动作前后留证，不把其 `image_id` 当作主模型可读图片。
+- **节奏**：详情页每批 3-4 个，批间自然停顿；连续采集触发平台验证/登录时用 `browser_request_takeover` 请用户接管处理，处理完继续，不静默放弃、不硬闯。
+- **并行**：互不依赖的多账号/多关键词采集可用 `browser_collect(mode=start)` 起后台任务并行跑，`browser_task(action=result)` 汇总；单账号内的详情深读保持串行小批次（防风控）。
+- 开放性调研（找案例/查规则/看讨论）用 `web_search`/`web_fetch`/`browser_collect(mode=research)`。
 - **平台规则/门槛数字必须实时核查**后再引用（platform-mechanics.md 只提供基线与核查方向）。
 
 ### 1.3 采集可达性速查

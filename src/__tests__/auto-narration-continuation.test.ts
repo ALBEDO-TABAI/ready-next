@@ -197,7 +197,7 @@ describe('auto narration continuation', () => {
     assert.ok(capabilities.allowedToolNames.includes('file_read_excerpt'))
     assert.ok(capabilities.allowedToolNames.includes('file_search'))
     assert.ok(capabilities.allowedToolNames.includes('web_search'))
-    for (const denied of ['browser_navigate', 'browser_click', 'browser_type', 'browser_screenshot', 'browser_resume_task', 'write_file', 'skill_run_shell']) {
+    for (const denied of ['browser_navigate', 'browser_click', 'browser_type', 'browser_screenshot', 'browser_task', 'write_file', 'skill_run_shell']) {
       assert.equal(capabilities.allowedToolNames.includes(denied), false, `${denied} must not be exposed`)
     }
   })

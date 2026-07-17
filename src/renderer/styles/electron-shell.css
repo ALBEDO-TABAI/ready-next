@@ -474,6 +474,15 @@ html[data-fastcard-overlay-window='true'] #root {
   background: transparent !important;
 }
 
+html[data-browser-lock-overlay-window='true'],
+html[data-browser-lock-overlay-window='true'] body,
+html[data-browser-lock-overlay-window='true'] #root,
+html[data-browser-agent-pointer-window='true'],
+html[data-browser-agent-pointer-window='true'] body,
+html[data-browser-agent-pointer-window='true'] #root {
+  background: transparent !important;
+}
+
 .browser-fastcard-overlay-root .browser-fastcard-drawer {
   width: 100%;
   min-width: 0;

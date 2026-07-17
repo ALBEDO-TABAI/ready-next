@@ -110,7 +110,7 @@ test('completed structured output is not failed merely because its counters incl
     },
   )
   assert.equal(isSuccessfulToolOutput(output), true)
-  assert.ok(collectToolOutputProofs('browser_get_task', output, NOW).length > 0)
+  assert.ok(collectToolOutputProofs('browser_task', output, NOW).length > 0)
 })
 
 test('waiting Tag Forge batches never mint completion proof or successful progress', () => {
@@ -130,7 +130,7 @@ test('successful JSON text is not failed by ordinary words inside document conte
 })
 
 test('tool output proofs mint transaction_confirmed only from explicit confirmation signal', () => {
-  const proofs = collectToolOutputProofs('browser_power_network_trace', createToolExecutionOutput('发布 API 成功', {
+  const proofs = collectToolOutputProofs('browser_network', createToolExecutionOutput('发布 API 成功', {
     shape: 'json',
     data: {
       ok: true,
@@ -147,7 +147,7 @@ test('tool output proofs mint transaction_confirmed only from explicit confirmat
   assert.ok(proofs.some((row) => row.kind === 'tool_result'))
   assert.ok(proofs.some((row) => row.kind === 'transaction_confirmed'))
 
-  const ordinary = collectToolOutputProofs('browser_power_network_trace', createToolExecutionOutput('普通 2xx', {
+  const ordinary = collectToolOutputProofs('browser_network', createToolExecutionOutput('普通 2xx', {
     shape: 'json',
     data: { ok: true, statusCode: 200 },
   }), NOW)

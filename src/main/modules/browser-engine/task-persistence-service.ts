@@ -1,4 +1,4 @@
-import { randomUUID } from 'crypto'
+import { createHash, randomUUID } from 'crypto'
 
 import { BrowserRepository } from '../repositories/browser-repository'
 import type {
@@ -20,10 +20,128 @@ function parseJSON<T>(raw: string | null | undefined, fallback: T): T {
   }
 }
 
+function monotonicIsoAfter(previous: string): string {
+  const previousMs = Date.parse(previous)
+  const now = Date.now()
+  return new Date(Number.isFinite(previousMs) ? Math.max(now, previousMs + 1) : now).toISOString()
+}
+
+function isTerminalStatus(status: BrowserCapabilityTaskStatus): boolean {
+  return status === 'completed' || status === 'failed' || status === 'cancelled'
+}
+
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? value as Record<string, unknown>
     : null
+}
+
+function stableJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`
+  if (value && typeof value === 'object') {
+    return `{${Object.entries(value as Record<string, unknown>)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([key, item]) => `${JSON.stringify(key)}:${stableJson(item)}`)
+      .join(',')}}`
+  }
+  return JSON.stringify(value) ?? 'null'
+}
+
+function sha256(value: unknown): string {
+  return createHash('sha256').update(stableJson(value)).digest('hex')
+}
+
+function targetIdentity(value: unknown, index: number): { id: string; url: string | null } | null {
+  const record = asRecord(value)
+  if (!record) return null
+  const url = readString(record, ['url', 'canonicalUrl', 'openUrl', 'sourceUrl', 'link'])
+  const id = readString(record, ['sourceId', 'id', 'targetId']) || url || `target-${index + 1}`
+  return { id, url }
+}
+
+type BrowserTaskFailureClassification = NonNullable<BrowserTaskCheckpoint['failures']>[number]['classification']
+
+function failureClassification(reason: string): BrowserTaskFailureClassification {
+  if (/captcha|challenge|verification|验证码|验证|扫码|登录墙/i.test(reason)) return 'verification'
+  if (/429|rate.?limit|retry-after|限流|频繁/i.test(reason)) return 'rate_limit'
+  if (/timeout|network|fetch|connection|dns|socket|导航失败/i.test(reason)) return 'network'
+  if (/not.?found|selector|target|目标|元素/i.test(reason)) return 'target_missing'
+  if (/unavailable|deleted|不存在|无法浏览|下架/i.test(reason)) return 'unavailable'
+  if (/permission|authorization|denied|forbidden|权限|授权/i.test(reason)) return 'authorization'
+  return 'unknown'
+}
+
+function checkpointTargetSources(payload: Record<string, unknown>, partialResults: unknown): unknown[] {
+  const plan = asRecord(payload.plan)
+  const partial = asRecord(partialResults)
+  if (Array.isArray(plan?.notes)) return plan.notes
+  if (Array.isArray(payload.urls)) return payload.urls.map((url) => ({ url }))
+  if (Array.isArray(partial?.targets)) return partial.targets
+  if (Array.isArray(partialResults)) return partialResults
+  return []
+}
+
+function checkpointOutputs(partialResults: unknown, result: unknown): unknown[] {
+  const partial = asRecord(partialResults)
+  const resultRecord = asRecord(result)
+  if (Array.isArray(partial?.outputs)) return partial.outputs
+  if (Array.isArray(resultRecord?.notes)) return resultRecord.notes
+  if (Array.isArray(resultRecord?.results)) return resultRecord.results
+  if (Array.isArray(partialResults)) return partialResults
+  return []
+}
+
+function checkpointFailures(partialResults: unknown, result: unknown): unknown[] {
+  const partial = asRecord(partialResults)
+  const resultRecord = asRecord(result)
+  if (Array.isArray(partial?.failed)) return partial.failed
+  if (Array.isArray(resultRecord?.failed)) return resultRecord.failed
+  return []
+}
+
+export function enrichBrowserTaskCheckpoint(
+  checkpoint: Omit<BrowserTaskCheckpoint, 'targetList' | 'failures' | 'outputHashes' | 'binding' | 'nextStep'> & Partial<BrowserTaskCheckpoint>,
+  payload: Record<string, unknown>,
+  result?: unknown,
+): BrowserTaskCheckpoint {
+  const targets = checkpointTargetSources(payload, checkpoint.partialResults)
+    .map(targetIdentity)
+    .filter((target): target is { id: string; url: string | null } => target !== null)
+  const outputs = checkpointOutputs(checkpoint.partialResults, result)
+  const failures = checkpointFailures(checkpoint.partialResults, result)
+  const terminal = ['completed', 'failed', 'cancelled'].includes(checkpoint.stage)
+  const cursor = checkpoint.cursor === undefined ? null : checkpoint.cursor
+  const tabId = readString(payload, ['tabId', 'agentTabId'])
+  const epoch = Number(payload.documentEpoch)
+  return {
+    ...checkpoint,
+    targetList: checkpoint.targetList || targets,
+    failures: checkpoint.failures || failures.map((failure, index) => {
+      const record = asRecord(failure)
+      const reason = String(record?.reason || record?.error || record?.message || 'unknown')
+      const identity = targetIdentity(failure, index)
+      const classification = failureClassification(reason)
+      return {
+        targetId: identity?.id || `failure-${index + 1}`,
+        classification,
+        retryable: typeof record?.retryable === 'boolean'
+          ? record.retryable
+          : !['verification', 'unavailable', 'authorization'].includes(classification),
+      }
+    }),
+    outputHashes: checkpoint.outputHashes || outputs.map((output, index) => ({
+      targetId: targetIdentity(output, index)?.id || `output-${index + 1}`,
+      sha256: sha256(output),
+    })),
+    binding: checkpoint.binding || {
+      tabId,
+      documentEpoch: Number.isFinite(epoch) && epoch > 0 ? Math.floor(epoch) : null,
+    },
+    nextStep: checkpoint.nextStep || {
+      action: terminal ? 'none' : checkpoint.stage.includes('verification') ? 'verify' : 'resume',
+      cursor,
+    },
+  }
 }
 
 function readString(record: Record<string, unknown> | null, keys: readonly string[]): string | null {
@@ -177,10 +295,13 @@ export class BrowserTaskPersistenceService {
   }
 
   updateTaskPayload(taskId: string, payload: Record<string, unknown>): void {
+    const current = this.getTask(taskId)
+    if (!current) return
+    const expectedUpdatedAt = String(current.updatedAt || current.createdAt || '')
     this.repository.updateTask(taskId, {
       payload_json: JSON.stringify(payload || {}),
-      updated_at: new Date().toISOString(),
-    })
+      updated_at: monotonicIsoAfter(expectedUpdatedAt),
+    }, expectedUpdatedAt ? { expectedUpdatedAt } : undefined)
   }
 
   updateProgress(taskId: string, progress: Partial<BrowserCapabilityTaskProgress>, extras?: {
@@ -193,6 +314,10 @@ export class BrowserTaskPersistenceService {
   }): BrowserCapabilityTaskHandle | null {
     const current = this.getTask(taskId)
     if (!current) return null
+    const requestedStatus = extras?.status ?? current.status
+    if (isTerminalStatus(current.status) && requestedStatus !== current.status) {
+      return current
+    }
 
     const nextProgress: BrowserCapabilityTaskProgress = {
       total: progress.total ?? current.progress.total,
@@ -200,9 +325,19 @@ export class BrowserTaskPersistenceService {
       failed: progress.failed ?? current.progress.failed,
       currentLabel: progress.currentLabel ?? current.progress.currentLabel ?? null,
     }
-    this.repository.updateTask(taskId, {
-      status: extras?.status ?? current.status,
-      checkpoint_json: extras?.checkpoint !== undefined ? JSON.stringify(extras.checkpoint) : undefined,
+    const expectedUpdatedAt = String(current.updatedAt || current.createdAt || '')
+    const updatedAt = monotonicIsoAfter(expectedUpdatedAt)
+    const committed = this.repository.updateTask(taskId, {
+      status: requestedStatus,
+      checkpoint_json: extras?.checkpoint !== undefined
+        ? JSON.stringify(extras.checkpoint === null
+          ? null
+          : enrichBrowserTaskCheckpoint(
+              extras.checkpoint,
+              this.getTaskPayload(taskId) || {},
+              extras.result !== undefined ? extras.result : current.result,
+            ))
+        : undefined,
       result_json: extras?.result !== undefined ? JSON.stringify(extras.result) : undefined,
       progress_total: nextProgress.total,
       progress_completed: nextProgress.completed,
@@ -211,8 +346,10 @@ export class BrowserTaskPersistenceService {
       error: extras?.error ?? current.error ?? null,
       started_at: extras?.startedAt,
       finished_at: extras?.finishedAt,
-      updated_at: new Date().toISOString(),
-    })
+      updated_at: updatedAt,
+    }, expectedUpdatedAt ? { expectedUpdatedAt } : undefined)
+
+    if (committed === false) return this.getTask(taskId)
 
     const updated = this.getTask(taskId)
     const bridgeStatus = extras?.status ? toBridgeStatus(extras.status) : null

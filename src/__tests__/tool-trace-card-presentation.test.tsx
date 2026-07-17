@@ -18,7 +18,7 @@ type TraceEvent = { id: string; kind: 'call' | 'result'; text: string; timestamp
 function makeEvents(): TraceEvent[] {
   const base = 1_780_000_000_000
   return [
-    { id: 'c1', kind: 'call', text: '调用 browser_read_page', timestamp: new Date(base) },
+    { id: 'c1', kind: 'call', text: '调用 browser_read', timestamp: new Date(base) },
     { id: 'r1', kind: 'result', text: '读取完成', timestamp: new Date(base + 1_240) },
     { id: 'c2', kind: 'call', text: '调用 browser_click', timestamp: new Date(base + 2_000) },
     { id: 'r2', kind: 'result', text: '点击完成', timestamp: new Date(base + 3_500) },
@@ -153,7 +153,7 @@ test('ToolTraceCard: clicking a timeline item discloses the call and output deta
     const detail = container.querySelector('[data-ready-tool-timeline-detail="true"]')
     assert.ok(detail, 'clicking the row opens the detail block')
     const detailText = detail?.textContent || ''
-    assert.ok(detailText.includes('调用 browser_read_page'), `detail keeps the full call line: ${detailText}`)
+    assert.ok(detailText.includes('调用 browser_read'), `detail keeps the full call line: ${detailText}`)
     assert.ok(detailText.includes('读取完成'), `detail keeps the full output text: ${detailText}`)
   })
 })

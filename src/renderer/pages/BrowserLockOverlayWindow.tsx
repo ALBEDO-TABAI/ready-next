@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Bot, ShieldAlert } from 'lucide-react'
+import { Bot, ShieldAlert, X } from 'lucide-react'
 import type { BrowserLockOverlaySnapshot } from '../../shared/browser-lock-overlay'
 
 export default function BrowserLockOverlayWindow() {
@@ -47,7 +47,7 @@ export default function BrowserLockOverlayWindow() {
       style={{
         width: '100vw',
         height: '100vh',
-        pointerEvents: 'none',
+        pointerEvents: 'auto',
         background: 'transparent',
         display: 'flex',
         alignItems: 'stretch',
@@ -107,6 +107,25 @@ export default function BrowserLockOverlayWindow() {
             {snapshot.detail}
           </div>
         </div>
+        <button
+          type="button"
+          aria-label="关闭 Agent 控制提示"
+          onClick={() => { void window.electronAPI?.browser?.dismissBrowserLockOverlay?.() }}
+          style={{
+            width: 28,
+            height: 28,
+            border: 0,
+            borderRadius: 9,
+            background: 'rgba(80, 94, 120, 0.08)',
+            color: '#657086',
+            display: 'grid',
+            placeItems: 'center',
+            cursor: 'pointer',
+            flexShrink: 0,
+          }}
+        >
+          <X aria-hidden="true" style={{ width: 14, height: 14 }} strokeWidth={2.2} />
+        </button>
       </div>
     </div>
   )

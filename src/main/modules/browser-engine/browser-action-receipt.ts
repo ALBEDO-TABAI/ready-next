@@ -1,7 +1,7 @@
 /**
  * P1-E5 (2026-07-03, browser action receipt contract) — a deterministic,
  * read-only "what changed" summary attached to write actions (click / type)
- * so the model does not have to browser_read_page after every step. Answers
+ * so the model does not have to browser_read after every step. Answers
  * the first-principles question "did this action change the page, and how":
  * URL change, title, focused element, and any visible toast/alert/aria-live.
  *

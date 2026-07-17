@@ -74,7 +74,7 @@ test('handler throw does not abort sibling handlers and emits hook_handler_faile
   })
 
   await registry.fire('pre_tool_use', {
-    toolName: 'browser_read_page',
+    toolName: 'browser_read',
     input: { url: 'https://example.com' },
   })
 
@@ -111,7 +111,7 @@ test('handler exceeding timeoutMs emits hook_handler_timeout and continues', asy
   })
 
   await registry.fire('post_tool_use', {
-    toolName: 'browser_read_page',
+    toolName: 'browser_read',
     result: { text: 'done' },
     success: true,
   })

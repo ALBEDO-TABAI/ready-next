@@ -87,7 +87,7 @@ test('arm enables interception idempotently and fileChooserOpened queues a rerou
   assert.strictEqual(notices.length, 1)
   assert.strictEqual(notices[0]?.kind, 'file_chooser_intercepted')
   assert.strictEqual(notices[0]?.origin, 'https://creator.xiaohongshu.com/publish/publish')
-  assert.ok(notices[0]?.guidance.includes('browser_upload_scope_attachment'))
+  assert.ok(notices[0]?.guidance.includes('browser_upload'))
 })
 
 test('disarmAll disables interception, unsubscribes, and clears armed tabs', async () => {

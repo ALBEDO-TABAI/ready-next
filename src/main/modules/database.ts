@@ -363,6 +363,22 @@ export interface BrowserTaskRecord {
   finished_at: string | null
 }
 
+export interface BrowserPowerPreflightAuditRecord {
+  id: string
+  tool_name: string
+  grant_id: string
+  confirmation_source: string
+  scope_id: string | null
+  tab_id: string | null
+  document_key_hash: string
+  url: string | null
+  object_ref: string | null
+  effects_json: string
+  purpose: string | null
+  input_hash: string
+  created_at: string
+}
+
 export type AgentChannelType =
   | 'local-debug'
   | 'generic-webhook'
@@ -2161,8 +2177,9 @@ export class DatabaseManager {
       updated_at?: string
       finished_at?: string | null
     },
-  ): void {
-    if (!this.db) return
+    options?: { expectedUpdatedAt?: string },
+  ): boolean {
+    if (!this.db) return false
     const setClauses: string[] = []
     const values: unknown[] = []
     for (const [key, value] of Object.entries(updates)) {
@@ -2170,13 +2187,19 @@ export class DatabaseManager {
       setClauses.push(`${key} = ?`)
       values.push(value ?? null)
     }
-    if (setClauses.length === 0) return
+    if (setClauses.length === 0) return false
     if (updates.updated_at === undefined) {
       setClauses.push('updated_at = ?')
       values.push(new Date().toISOString())
     }
     values.push(id)
-    this.db.prepare(`UPDATE browser_tasks SET ${setClauses.join(', ')} WHERE id = ?`).run(...values)
+    let where = 'id = ?'
+    if (options?.expectedUpdatedAt) {
+      where += ' AND updated_at = ?'
+      values.push(options.expectedUpdatedAt)
+    }
+    const result = this.db.prepare(`UPDATE browser_tasks SET ${setClauses.join(', ')} WHERE ${where}`).run(...values) as { changes?: number }
+    return Number(result.changes || 0) === 1
   }
 
   getBrowserTask(id: string): BrowserTaskRecord | undefined {
@@ -2193,6 +2216,37 @@ export class DatabaseManager {
       ).all<BrowserTaskRecord>(...statuses)
     }
     return this.db.prepare('SELECT * FROM browser_tasks ORDER BY updated_at DESC').all<BrowserTaskRecord>()
+  }
+
+  addBrowserPowerPreflightAudit(record: BrowserPowerPreflightAuditRecord): void {
+    if (!this.db) throw new Error('Database not available')
+    this.db.prepare(`
+      INSERT INTO browser_power_preflight_audit (
+        id, tool_name, grant_id, confirmation_source, scope_id, tab_id,
+        document_key_hash, url, object_ref, effects_json, purpose, input_hash, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      record.id,
+      record.tool_name,
+      record.grant_id,
+      record.confirmation_source,
+      record.scope_id,
+      record.tab_id,
+      record.document_key_hash,
+      record.url,
+      record.object_ref,
+      record.effects_json,
+      record.purpose,
+      record.input_hash,
+      record.created_at,
+    )
+  }
+
+  getBrowserPowerPreflightAudit(id: string): BrowserPowerPreflightAuditRecord | undefined {
+    if (!this.db) return undefined
+    return this.db.prepare(
+      'SELECT * FROM browser_power_preflight_audit WHERE id = ? LIMIT 1',
+    ).get<BrowserPowerPreflightAuditRecord>(id)
   }
 
   // ===================== Chat History =====================

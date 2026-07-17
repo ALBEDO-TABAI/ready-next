@@ -92,6 +92,18 @@ interface BrowserShellIPCController {
   prepareP7cLiveProofForegroundProbe(): Promise<{ success: boolean; state?: unknown; error?: string }>
   sampleP7cLiveProofActiveTabState(): Promise<{ success: boolean; state?: unknown; error?: string }>
   sendP7cLiveProofUserKey(key?: string): { success: boolean; error?: string }
+  sendP7cLiveProofAgentClick(x?: number, y?: number): Promise<{
+    success: boolean
+    tabId?: string
+    x?: number
+    y?: number
+    error?: string
+  }>
+  finishP7cLiveProofAgentAction(phase?: 'finish' | 'abort'): {
+    success: boolean
+    phase?: 'finish' | 'abort'
+    error?: string
+  }
   checkP7cLiveProofWriteDenied(): { success: boolean; errorKind?: string; error?: string }
   clearP7cLiveProofState(): { success: boolean; error?: string }
 }
@@ -301,6 +313,20 @@ export function setupBrowserShellIPC(controller: BrowserShellIPCController): voi
   ipcMain.handle('browser:p7cLiveProofSendUserKey', (_, key?: string) => {
     try {
       return controller.sendP7cLiveProofUserKey(key)
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+  ipcMain.handle('browser:p7cLiveProofAgentClick', async (_, x?: number, y?: number) => {
+    try {
+      return await controller.sendP7cLiveProofAgentClick(x, y)
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+  ipcMain.handle('browser:p7cLiveProofFinishAgentAction', (_, phase?: 'finish' | 'abort') => {
+    try {
+      return controller.finishP7cLiveProofAgentAction(phase)
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : String(error) }
     }

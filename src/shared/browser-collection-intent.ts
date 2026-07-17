@@ -14,42 +14,10 @@
  * keeps the exposure alive across follow-up turns via stepCollectionIntentTtl.
  */
 
-/**
- * The collection subset exposed when browser tools are surfaced by collection
- * intent (NOT by a browser_workflow decision). Navigation / read / collect /
- * download / task-control / Power resource forensics only. Legacy execute_js
- * and form-write/transmit tools stay out of this subset; Power tools still go
- * through effect/grant/audit policy at execution time.
- */
-export const BROWSER_COLLECTION_SUBSET_TOOL_NAMES: readonly string[] = [
-  'browser_navigate',
-  'browser_search',
-  'browser_get_tabs',
-  'browser_read_page',
-  'browser_read_page_map',
-  'browser_capture_viewport',
-  'browser_scroll_at',
-  'browser_click_text',
-  'browser_wait',
-  'browser_wait_for_condition',
-  'browser_collect_images',
-  'browser_inspect_resources',
-  'browser_power_network_trace',
-  'browser_power_resource_forensics',
-  'browser_media_download_advanced',
-  'browser_resolve_video',
-  'browser_extract_structured',
-  'browser_scroll_collect',
-  'browser_visible_collect',
-  'browser_collect_notes',
-  'browser_download_urls',
-  'browser_download_collected_media',
-  'browser_aggregate_results',
-  'browser_get_task',
-  'browser_resume_task',
-  'browser_cancel_task',
-  'browser_ask_user_takeover',
-]
+import { browserToolNamesForIntent } from './browser-tool-surface'
+
+/** Collection/read surfaces are generated from the canonical tool manifest. */
+export const BROWSER_COLLECTION_SUBSET_TOOL_NAMES: readonly string[] = browserToolNamesForIntent('collection')
 
 const BROWSER_COLLECTION_SUBSET_SET = new Set(BROWSER_COLLECTION_SUBSET_TOOL_NAMES)
 
@@ -62,25 +30,7 @@ export function isBrowserCollectionSubsetTool(toolName: string): boolean {
  * did not explicitly ask to collect or save anything. In particular this list
  * excludes every persistent collection, download, resume, and cancel tool.
  */
-export const BROWSER_OBSERVATION_SUBSET_TOOL_NAMES: readonly string[] = [
-  'browser_navigate',
-  'browser_search',
-  'browser_get_tabs',
-  'browser_read_page',
-  'browser_read_page_map',
-  'browser_capture_viewport',
-  'browser_scroll_at',
-  'browser_click_text',
-  'browser_wait',
-  'browser_wait_for_condition',
-  'browser_collect_images',
-  'browser_inspect_resources',
-  'browser_power_network_trace',
-  'browser_power_resource_forensics',
-  'browser_extract_structured',
-  'browser_aggregate_results',
-  'browser_ask_user_takeover',
-]
+export const BROWSER_OBSERVATION_SUBSET_TOOL_NAMES: readonly string[] = browserToolNamesForIntent('observation')
 
 const BROWSER_OBSERVATION_SUBSET_SET = new Set(BROWSER_OBSERVATION_SUBSET_TOOL_NAMES)
 
@@ -88,15 +38,7 @@ export function isBrowserObservationSubsetTool(toolName: string): boolean {
   return BROWSER_OBSERVATION_SUBSET_SET.has(toolName)
 }
 
-export const BROWSER_BATCH_COLLECTION_WORKFLOW_TOOL_NAMES: readonly string[] = [
-  'browser_visible_collect',
-  'browser_collect_notes',
-  'browser_download_collected_media',
-  'browser_get_task',
-  'browser_resume_task',
-  'browser_cancel_task',
-  'browser_ask_user_takeover',
-]
+export const BROWSER_BATCH_COLLECTION_WORKFLOW_TOOL_NAMES: readonly string[] = browserToolNamesForIntent('batch_collection')
 
 const BROWSER_BATCH_COLLECTION_WORKFLOW_TOOL_SET = new Set(BROWSER_BATCH_COLLECTION_WORKFLOW_TOOL_NAMES)
 
@@ -104,9 +46,8 @@ export function isBrowserBatchCollectionWorkflowTool(toolName: string): boolean 
   return BROWSER_BATCH_COLLECTION_WORKFLOW_TOOL_SET.has(toolName)
 }
 
-// High-risk-control / login-walled platforms where collection is the primary
-// value. Used both for intent detection and (downstream) for the execution-layer
-// script blacklist (plan §4.4).
+// Login-walled/high-feedback platforms are an intent and pacing signal only.
+// They must never become a domain-name execution blacklist.
 const PLATFORM_PATTERN =
   /(?:小红书|xiaohongshu|xhslink|抖音|douyin|tiktok|微博|weibo|哔哩哔哩|b\s*站|bilibili|知乎|zhihu|小红书|快手|kuaishou|instagram|小红书)/i
 

@@ -32,26 +32,26 @@ export function classifyBrowserPowerFailure(message: string): BrowserPowerFailur
     return {
       failureClass: 'timeout',
       nextSuggestedAction:
-        'reduce probe scope (shorter code / smaller duration) or switch to browser_power_resource_forensics / browser_power_network_trace',
+        'reduce probe scope (shorter code / smaller duration) or switch to browser_resources / browser_network',
     }
   }
   if (TARGET_STALE_PATTERN.test(text)) {
     return {
       failureClass: 'target_stale',
-      nextSuggestedAction: 'use browser_get_tabs and rebind the BrowserActionSession target tab, then retry',
+      nextSuggestedAction: 'use browser_tabs and rebind the BrowserActionSession target tab, then retry',
     }
   }
   if (FRAME_CONTEXT_PATTERN.test(text)) {
     return {
       failureClass: 'frame_context',
-      nextSuggestedAction: 'use browser_power_cdp Page.getFrameTree then retry with the correct frame_id',
+      nextSuggestedAction: 'use browser_cdp Page.getFrameTree then retry with the correct frame_id',
     }
   }
   if (EVAL_RUNTIME_PATTERN.test(text)) {
     return {
       failureClass: 'eval_runtime',
       nextSuggestedAction:
-        'retry browser_power_eval with a wrapped async IIFE, or use browser_power_cdp Runtime.evaluate for exception details',
+        'retry browser_eval with a wrapped async IIFE, or use browser_cdp Runtime.evaluate for exception details',
     }
   }
   return {

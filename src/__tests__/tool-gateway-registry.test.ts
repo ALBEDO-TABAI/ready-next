@@ -62,10 +62,10 @@ test('tool gateway exposes formal capability groups and resolves grouped tools',
 
   assert.ok(browserInteractionTools.includes('browser_navigate'))
   assert.ok(browserInteractionTools.includes('browser_click'))
-  assert.ok(!browserInteractionTools.includes('browser_extract_structured'))
+  assert.ok(!browserInteractionTools.includes('browser_collect'))
 
-  assert.ok(browserContentTools.includes('browser_extract_structured'))
-  assert.ok(browserContentTools.includes('browser_scroll_collect'))
+  assert.ok(browserContentTools.includes('browser_collect'))
+  assert.ok(browserContentTools.includes('browser_collect'))
   assert.ok(!browserContentTools.includes('browser_click'))
 
   assert.ok(systemTools.includes('system_run_embedded_python'))
@@ -77,13 +77,13 @@ test('tool gateway exposes formal capability groups and resolves grouped tools',
   assert.equal(skillsGroup?.hasDynamicSource, true)
   assert.ok(systemOpenAISchemas.some((tool) => (tool.function as { name?: string } | undefined)?.name === 'system_run_openclaw'))
   assert.equal(browserNavigate?.domain, 'browser')
-  assert.equal(browserNavigate?.kind, 'interactive')
+  assert.equal(browserNavigate?.kind, 'write')
   assert.equal(browserNavigate?.concurrency, 'serialized')
   assert.equal(browserNavigate?.interruptBehavior, 'abort_signal')
   assert.equal(browserNavigate?.timeoutProfile, 'browser_interactive')
   assert.equal(browserNavigate?.supportsTextBridge, false)
-  assert.equal(browserNavigate?.projectionHint, null)
-  assert.match(browserNavigate?.description || '', /导航/)
+  assert.deepEqual(browserNavigate?.projectionHint, { mutating: true })
+  assert.match(browserNavigate?.description || '', /打开地址|后退|刷新/)
   assert.equal(browserNavigate?.schema?.type, 'object')
   assert.equal(browserNavigate?.resultShape, 'text')
   assert.equal(documentSave?.domain, 'document')
@@ -138,7 +138,7 @@ test('browser tool schemas stay available after the browser executor module load
     .filter(Boolean)
 
   assert.ok(browserToolNames.includes('browser_search'))
-  assert.ok(browserToolNames.includes('browser_read_page'))
+  assert.ok(browserToolNames.includes('browser_read'))
   assert.equal(gateway.getLastSchemaResolutionError('browser_interaction', 'openai'), null)
 })
 
@@ -233,8 +233,8 @@ test('collectAllowedToolNames keeps browser tools when browser groups are visibl
   })
 
   assert.ok(allowedToolNames.includes('browser_search'))
-  assert.ok(allowedToolNames.includes('browser_read_page'))
-  assert.ok(allowedToolNames.includes('browser_extract_structured'))
+  assert.ok(allowedToolNames.includes('browser_read'))
+  assert.ok(allowedToolNames.includes('browser_collect'))
 })
 
 // ------------------------------------------------------------------

@@ -1,7 +1,11 @@
-import { access, mkdir, writeFile } from 'fs/promises'
+import { access, mkdir } from 'fs/promises'
 import { constants as fsConstants } from 'fs'
-import { basename, extname, join } from 'path'
+import { join } from 'path'
 import { homedir } from 'os'
+import type {
+  BrowserDownloadUrlToDirectoryPayload,
+  BrowserDownloadUrlToDirectoryResult,
+} from './download-service'
 
 import type {
   BrowserAggregateOptions,
@@ -14,6 +18,9 @@ import type {
   BrowserStructuredItem,
   BrowserWaitForConditionOptions,
 } from './capability-types'
+import { BrowserActionExecutor } from '../tools/browser-action-executor'
+import type { ToolExecutionOutput } from '../agent-control/tools-runtime/tool-result-types'
+import type { BrowserLeaseGate } from './agent-browser-lease-gate'
 
 interface BrowserCapabilityHost {
   openForCaptureTarget(url: string): Promise<{ success: boolean; tabId?: string; reused?: boolean; error?: string }>
@@ -21,6 +28,10 @@ interface BrowserCapabilityHost {
   navigate(tabId: string | null, url: string): Promise<{ success: boolean; error?: string }>
   getActiveTab(): { id: string; url: string } | undefined
   executeJS(tabId: string | null, code: string): Promise<unknown>
+  dispatchMouse?(
+    tabId: string | null,
+    payload: Record<string, unknown>,
+  ): Promise<void>
   captureLiveTabPage?(
     url: string,
     options?: { timeoutMs?: number; settleMs?: number; script?: string },
@@ -29,6 +40,32 @@ interface BrowserCapabilityHost {
     url: string,
     options?: { timeoutMs?: number; settleMs?: number; script?: string },
   ): Promise<unknown>
+  downloadUrlToDirectory?(
+    payload: BrowserDownloadUrlToDirectoryPayload,
+  ): Promise<BrowserDownloadUrlToDirectoryResult>
+}
+
+interface ScrollMetrics {
+  url: string
+  x: number
+  y: number
+  viewport: number
+  height: number
+  maxScroll: number
+}
+
+const capabilityActionExecutor = new BrowserActionExecutor()
+
+function outputRecord(output: string | ToolExecutionOutput): Record<string, unknown> {
+  if (typeof output !== 'string') return output.data || {}
+  try {
+    const parsed = JSON.parse(output) as unknown
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : {}
+  } catch {
+    return {}
+  }
 }
 
 function delay(ms: number): Promise<void> {
@@ -53,55 +90,6 @@ function replaceIllegalFilenameChars(value: string): string {
 function sanitizeFilename(value: string, fallback: string): string {
   const trimmed = replaceIllegalFilenameChars(String(value || '').trim())
   return trimmed.length > 0 ? trimmed : fallback
-}
-
-function inferFilename(url: string, prefix: string, contentType: string): { base: string; ext: string } {
-  try {
-    const parsed = new URL(url)
-    const rawName = basename(parsed.pathname || '') || prefix
-    const ext = extname(rawName) || inferExtensionFromContentType(contentType)
-    const base = sanitizeFilename(rawName.replace(new RegExp(`${ext.replace('.', '\\.')}$`), ''), prefix)
-    return { base, ext: ext || '.bin' }
-  } catch {
-    return { base: sanitizeFilename(prefix, 'download'), ext: inferExtensionFromContentType(contentType) || '.bin' }
-  }
-}
-
-function inferExtensionFromContentType(contentType: string): string {
-  const normalized = String(contentType || '').toLowerCase()
-  if (normalized.includes('image/jpeg')) return '.jpg'
-  if (normalized.includes('image/png')) return '.png'
-  if (normalized.includes('image/webp')) return '.webp'
-  if (normalized.includes('image/gif')) return '.gif'
-  if (normalized.includes('application/json')) return '.json'
-  if (normalized.includes('text/html')) return '.html'
-  return ''
-}
-
-async function writeFileSmart(
-  directory: string,
-  base: string,
-  ext: string,
-  buffer: Buffer,
-  overwrite: boolean,
-): Promise<string> {
-  let filePath = join(directory, `${base}${ext}`)
-  if (overwrite) {
-    await writeFile(filePath, buffer)
-    return filePath
-  }
-
-  let suffix = 1
-  while (true) {
-    try {
-      await access(filePath, fsConstants.F_OK)
-      filePath = join(directory, `${base}-${suffix}${ext}`)
-      suffix += 1
-    } catch {
-      await writeFile(filePath, buffer)
-      return filePath
-    }
-  }
 }
 
 function normalizeStructuredItems(sourceUrl: string, raw: unknown): BrowserStructuredItem[] {
@@ -314,6 +302,54 @@ function buildStructuredExtractionScript(options: BrowserExtractStructuredOption
 export class BrowserCapabilityService {
   constructor(private readonly host: BrowserCapabilityHost) {}
 
+  private async readScrollMetrics(tabId: string | null): Promise<ScrollMetrics> {
+    const raw = await this.host.executeJS(tabId, `(() => {
+      const root = document.scrollingElement || document.documentElement || document.body
+      const viewport = Math.max(1, Number(window.innerHeight || root?.clientHeight || 800))
+      const height = Math.max(viewport, Number(root?.scrollHeight || document.body?.scrollHeight || 0))
+      const y = Math.max(0, Number(window.scrollY || root?.scrollTop || 0))
+      return {
+        url: String(location.href || ''),
+        x: Math.max(1, Math.round(Number(window.innerWidth || root?.clientWidth || 800) / 2)),
+        y,
+        viewport,
+        height,
+        maxScroll: Math.max(0, height - viewport)
+      }
+    })()`) as Partial<ScrollMetrics> | null
+    const viewport = Math.max(1, Number(raw?.viewport || 800))
+    const height = Math.max(viewport, Number(raw?.height || viewport))
+    return {
+      url: String(raw?.url || this.host.getActiveTab()?.url || ''),
+      x: Math.max(1, Number(raw?.x || 400)),
+      y: Math.max(0, Number(raw?.y || 0)),
+      viewport,
+      height,
+      maxScroll: Math.max(0, Number(raw?.maxScroll ?? height - viewport)),
+    }
+  }
+
+  private async waitForScrollSettled(
+    tabId: string | null,
+    before: ScrollMetrics,
+    signal: AbortSignal,
+    timeoutMs = 1_200,
+  ): Promise<ScrollMetrics> {
+    const startedAt = Date.now()
+    let last = before
+    let stableReads = 0
+    while (Date.now() - startedAt < timeoutMs) {
+      if (signal.aborted) throw signal.reason instanceof Error ? signal.reason : new Error('browser_scroll_aborted')
+      await delay(50)
+      const next = await this.readScrollMetrics(tabId)
+      const unchanged = Math.abs(next.y - last.y) < 1 && next.height === last.height
+      stableReads = unchanged ? stableReads + 1 : 0
+      last = next
+      if (stableReads >= 2 || next.y >= next.maxScroll - 2) return next
+    }
+    return last
+  }
+
   /** Current active tab (id + url). Used by background collection to record the
    *  resolved page URL when the task was started without an explicit `url`
    *  (current-page collection), so failure-learning has a domain. */
@@ -321,7 +357,21 @@ export class BrowserCapabilityService {
     return this.host.getActiveTab()
   }
 
-  async openTarget(url: string, mode: BrowserOpenTargetMode = 'prefer_reuse'): Promise<BrowserOpenTargetResult> {
+  async openTarget(
+    url: string,
+    mode: BrowserOpenTargetMode = 'prefer_reuse',
+    leaseGate?: BrowserLeaseGate,
+  ): Promise<BrowserOpenTargetResult> {
+    if (leaseGate) {
+      const output = await capabilityActionExecutor.execute({
+        toolName: 'browser_tabs',
+        args: { action: 'open', url },
+        origin: url,
+        leaseGate,
+        dispatch: async () => JSON.stringify(await this.openTarget(url, mode)),
+      })
+      return outputRecord(output) as unknown as BrowserOpenTargetResult
+    }
     if (mode === 'current_tab') {
       const activeTab = this.host.getActiveTab()
       const result = await this.host.navigate(activeTab?.id || null, url)
@@ -348,11 +398,20 @@ export class BrowserCapabilityService {
       : { success: false, error: created.error || reusable.error }
   }
 
-  async navigateTargetTab(tabId: string, url: string): Promise<BrowserOpenTargetResult> {
-    const result = await this.host.navigate(tabId, url)
-    return result.success
-      ? { success: true, tabId, reused: true, url }
-      : { success: false, tabId, reused: true, url, error: result.error }
+  async navigateTargetTab(tabId: string, url: string, leaseGate?: BrowserLeaseGate): Promise<BrowserOpenTargetResult> {
+    const output = await capabilityActionExecutor.execute({
+      toolName: 'browser_navigate',
+      args: { action: 'goto', tab_id: tabId, url },
+      origin: url,
+      leaseGate,
+      dispatch: async () => {
+        const result = await this.host.navigate(tabId, url)
+        return JSON.stringify(result.success
+          ? { success: true, tabId, reused: true, url }
+          : { success: false, tabId, reused: true, url, error: result.error })
+      },
+    })
+    return outputRecord(output) as unknown as BrowserOpenTargetResult
   }
 
   async waitForCondition(tabId: string | null, options: BrowserWaitForConditionOptions): Promise<{ matched: boolean; elapsedMs: number; value?: unknown }> {
@@ -451,21 +510,35 @@ export class BrowserCapabilityService {
    * NOTE: the humanized-input migration (WP5) will route this through the
    * unified write channel; today it is a single instant scroll step.
    */
-  async scrollViewportOnce(tabId: string | null): Promise<{ scrollY: number; atBottom: boolean }> {
-    const raw = await this.host.executeJS(
-      tabId,
-      `
-        (() => {
-          const before = window.scrollY || 0
-          const viewport = window.innerHeight || 800
-          window.scrollBy({ top: Math.round(viewport * 0.9), left: 0, behavior: 'instant' })
-          const after = window.scrollY || 0
-          const maxScroll = Math.max(0, (document.body?.scrollHeight || 0) - viewport)
-          return { scrollY: after, atBottom: after >= maxScroll - 2 || after === before }
-        })()
-      `,
-    ) as { scrollY?: number; atBottom?: boolean } | null
-    return { scrollY: Number(raw?.scrollY || 0), atBottom: Boolean(raw?.atBottom) }
+  async scrollViewportOnce(tabId: string | null, leaseGate?: BrowserLeaseGate): Promise<{ scrollY: number; atBottom: boolean }> {
+    if (!this.host.dispatchMouse) throw new Error('browser_trusted_scroll_unavailable')
+    const before = await this.readScrollMetrics(tabId)
+    const output = await capabilityActionExecutor.execute({
+      toolName: 'browser_scroll',
+      args: { tab_id: tabId, direction: 'down', amount: 'viewport' },
+      origin: before.url,
+      leaseGate,
+      deadlineMs: 4_000,
+      dispatch: async (_invocation, signal) => {
+        await this.host.dispatchMouse?.(tabId, {
+          type: 'mouseWheel',
+          x: before.x,
+          y: Math.max(1, Math.round(before.viewport / 2)),
+          deltaX: 0,
+          deltaY: Math.max(1, Math.round(before.viewport * 0.9)),
+        })
+        const after = await this.waitForScrollSettled(tabId, before, signal)
+        return JSON.stringify({
+          ok: true,
+          trustedInput: true,
+          scrollY: after.y,
+          atBottom: after.y >= after.maxScroll - 2 || after.y === before.y,
+        })
+      },
+    })
+    const record = outputRecord(output)
+    if (record.ok !== true) throw new Error(String(record.errorKind || record.message || 'browser_trusted_scroll_failed'))
+    return { scrollY: Number(record.scrollY || 0), atBottom: record.atBottom === true }
   }
 
   async captureFromUrl(url: string, options: { customScript: string; timeoutMs?: number; settleMs?: number; preferReuse?: boolean }): Promise<unknown | null> {
@@ -519,43 +592,30 @@ export class BrowserCapabilityService {
 
   async scrollCollect(tabId: string | null, options: BrowserScrollCollectOptions): Promise<BrowserScrollCollectResult> {
     const maxScrolls = Math.max(1, Math.min(200, Number(options.maxScrolls || 24)))
-    const scrollDelayMs = Math.max(50, Math.min(5_000, Number(options.scrollDelayMs || 300)))
     const stableRounds = Math.max(1, Math.min(8, Number(options.stableRounds || 2)))
-
-    const raw = await this.host.executeJS(
+    let unchangedRounds = 0
+    let scrolls = 0
+    let previous = await this.readScrollMetrics(tabId)
+    while (scrolls < maxScrolls && unchangedRounds < stableRounds) {
+      const scroll = await this.scrollViewportOnce(tabId)
+      scrolls += 1
+      const next = await this.readScrollMetrics(tabId)
+      const unchanged = next.height === previous.height && next.y === previous.y
+      unchangedRounds = unchanged || scroll.atBottom ? unchangedRounds + 1 : 0
+      previous = next
+      if (!scroll.atBottom) {
+        await this.waitForCondition(tabId, {
+          condition: 'content_stable',
+          timeoutMs: Math.max(500, Math.min(3_000, Number(options.scrollDelayMs || 1_200))),
+          checkIntervalMs: 100,
+          stableIterations: 2,
+        })
+      }
+    }
+    const rawItems = await this.host.executeJS(
       tabId,
-      `
-        (async () => {
-          const __READY_SCROLL_COLLECT__ = ${JSON.stringify(options.template)}
-          const maxScrolls = ${JSON.stringify(maxScrolls)}
-          const scrollDelayMs = ${JSON.stringify(scrollDelayMs)}
-          const stableRoundsTarget = ${JSON.stringify(stableRounds)}
-          const rows = []
-          let stableRounds = 0
-          let lastHeight = 0
-          let scrolls = 0
-
-          while (scrolls < maxScrolls && stableRounds < stableRoundsTarget) {
-            window.scrollTo({ top: document.body.scrollHeight, behavior: 'instant' })
-            await new Promise((resolve) => setTimeout(resolve, scrollDelayMs))
-            const nextHeight = document.body.scrollHeight || 0
-            if (nextHeight === lastHeight) {
-              stableRounds += 1
-            } else {
-              stableRounds = 0
-              lastHeight = nextHeight
-            }
-            scrolls += 1
-          }
-
-          return {
-            items: await (${buildStructuredExtractionScript({ ...options, wait: undefined }).trim()}) ,
-            reachedEnd: stableRounds >= stableRoundsTarget,
-            scrolls,
-          }
-        })()
-      `,
-    ) as { items?: unknown[]; reachedEnd?: boolean; scrolls?: number } | null
+      buildStructuredExtractionScript({ ...options, wait: undefined }),
+    )
 
     // Attribute sourceUrl to the TARGET tab, not the user's active tab: a
     // sub-agent collecting in the agent tab must not mis-source results (Codex
@@ -567,10 +627,10 @@ export class BrowserCapabilityService {
     if (!sourceUrl) sourceUrl = this.host.getActiveTab()?.url || ''
     return {
       template: options.template,
-      items: normalizeStructuredItems(sourceUrl, raw?.items || []),
+      items: normalizeStructuredItems(sourceUrl, rawItems),
       sourceUrl,
-      reachedEnd: Boolean(raw?.reachedEnd),
-      scrolls: Number(raw?.scrolls || 0),
+      reachedEnd: unchangedRounds >= stableRounds,
+      scrolls,
     }
   }
 
@@ -598,7 +658,15 @@ export class BrowserCapabilityService {
       filenamePrefix?: string
       overwrite?: boolean
       retryFailed?: boolean
-      onProgress?: (progress: { total: number; completed: number; failed: number; currentLabel?: string | null }) => void
+      resumeResults?: Array<Record<string, unknown>>
+      shouldStop?: () => boolean
+      onProgress?: (progress: {
+        total: number
+        completed: number
+        failed: number
+        currentLabel?: string | null
+        results: Array<Record<string, unknown>>
+      }) => void
     },
   ): Promise<{
     directory: string
@@ -608,7 +676,6 @@ export class BrowserCapabilityService {
     results: Array<Record<string, unknown>>
   }> {
     const directory = expandHomePath(String(options?.directory || '~/Documents'))
-    const overwrite = options?.overwrite === true
     const retryFailed = options?.retryFailed === true
     const filenamePrefix = sanitizeFilename(String(options?.filenamePrefix || '').trim(), 'download')
     const filteredUrls = urls.map((item) => String(item || '').trim()).filter(Boolean)
@@ -616,30 +683,53 @@ export class BrowserCapabilityService {
     await mkdir(directory, { recursive: true })
     await access(directory, fsConstants.W_OK)
 
-    const results: Array<Record<string, unknown>> = []
-    let completed = 0
-    let failed = 0
+    const results: Array<Record<string, unknown>> = Array.isArray(options?.resumeResults)
+      ? options.resumeResults.map((item) => ({ ...item }))
+      : []
+    const completedUrls = new Set(results
+      .filter((item) => item.success === true)
+      .map((item) => String(item.url || ''))
+      .filter(Boolean))
+    let completed = completedUrls.size
+    let failed = results.filter((item) => item.success !== true).length
     for (let index = 0; index < filteredUrls.length; index += 1) {
       const url = filteredUrls[index]
-      const attemptDownload = async (): Promise<Record<string, unknown>> => {
-        const response = await fetch(url, {
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (Ready Browser Capability)',
-          },
+      if (options?.shouldStop?.()) break
+      if (completedUrls.has(url)) {
+        options?.onProgress?.({
+          total: filteredUrls.length,
+          completed,
+          failed,
+          currentLabel: url,
+          results: results.map((item) => ({ ...item })),
         })
-        if (!response.ok) {
-          throw new Error(`http_${response.status}`)
+        continue
+      }
+      const priorFailures = results.filter((item) => item.success !== true && String(item.url || '') === url).length
+      if (priorFailures > 0) {
+        for (let resultIndex = results.length - 1; resultIndex >= 0; resultIndex -= 1) {
+          const item = results[resultIndex]
+          if (item.success !== true && String(item.url || '') === url) results.splice(resultIndex, 1)
         }
-        const contentType = response.headers.get('content-type') || ''
-        const buffer = Buffer.from(await response.arrayBuffer())
-        const fileParts = inferFilename(url, `${filenamePrefix}-${index + 1}`, contentType)
-        const filePath = await writeFileSmart(directory, fileParts.base, fileParts.ext, buffer, overwrite)
+        failed = Math.max(0, failed - priorFailures)
+      }
+      const attemptDownload = async (): Promise<Record<string, unknown>> => {
+        if (!this.host.downloadUrlToDirectory) throw new Error('browser_session_download_unavailable')
+        const downloaded = await this.host.downloadUrlToDirectory({
+          url,
+          targetDir: directory,
+          suggestedName: `${filenamePrefix}-${index + 1}`,
+        })
+        if (!downloaded.success) throw new Error(downloaded.error || 'browser_session_download_failed')
         return {
           url,
           success: true,
-          path: filePath,
-          size: buffer.byteLength,
-          content_type: contentType,
+          path: downloaded.savePath,
+          size: downloaded.size,
+          sha256: downloaded.sha256,
+          content_type: downloaded.mimeType,
+          url_chain: downloaded.urlChain || [],
+          via: 'browser_session',
         }
       }
 
@@ -676,6 +766,7 @@ export class BrowserCapabilityService {
         completed,
         failed,
         currentLabel: url,
+        results: results.map((item) => ({ ...item })),
       })
     }
 

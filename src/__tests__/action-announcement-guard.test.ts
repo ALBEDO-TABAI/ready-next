@@ -100,7 +100,7 @@ function createSkillAskUserToolDefinition(): ToolDefinition {
   }
 }
 
-function createBrowserToolDefinition(name: string = 'browser_capture_viewport'): ToolDefinition {
+function createBrowserToolDefinition(name: string = 'browser_screenshot'): ToolDefinition {
   return {
     name,
     groupId: 'browser_interaction',
@@ -285,7 +285,7 @@ describe('action announcement guard', () => {
         }),
       runAgent: async ({ input, tools, onTextDelta }) => {
         if (turnIndex === 0) {
-          const capture = tools.find((tool) => tool.name === 'browser_capture_viewport') as
+          const capture = tools.find((tool) => tool.name === 'browser_screenshot') as
             | {
                 invoke: (context: unknown, rawInput: string) => Promise<string>
               }
@@ -324,7 +324,7 @@ describe('action announcement guard', () => {
   test('runtime allows a fresh action-announcement steer after real tool progress', async () => {
     let sawSecondSteerReminder = false
     let turnIndex = 0
-    const toolDefinition = createBrowserToolDefinition('browser_read_page_map')
+    const toolDefinition = createBrowserToolDefinition('browser_snapshot')
     const { runtime } = createRuntime({
       listToolDefinitions: () => [toolDefinition],
       executeToolCall: async () =>
@@ -334,7 +334,7 @@ describe('action announcement guard', () => {
         }),
       runAgent: async ({ input, tools, onTextDelta }) => {
         if (turnIndex === 0) {
-          const readMap = tools.find((tool) => tool.name === 'browser_read_page_map') as
+          const readMap = tools.find((tool) => tool.name === 'browser_snapshot') as
             | {
                 invoke: (context: unknown, rawInput: string) => Promise<string>
               }
@@ -348,7 +348,7 @@ describe('action announcement guard', () => {
           return { finalText: response }
         }
         if (turnIndex === 1) {
-          const readMap = tools.find((tool) => tool.name === 'browser_read_page_map') as
+          const readMap = tools.find((tool) => tool.name === 'browser_snapshot') as
             | {
                 invoke: (context: unknown, rawInput: string) => Promise<string>
               }

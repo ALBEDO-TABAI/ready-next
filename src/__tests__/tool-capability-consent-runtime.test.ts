@@ -69,7 +69,6 @@ test('default SDK executor reports the same suppressed browser groups that it us
     captured?.requestedButSuppressed.map((conflict) => [conflict.groupId, conflict.reason]),
     [
       ['browser_interaction', 'provider_disabled_tools'],
-      ['browser_content_tasks', 'provider_disabled_tools'],
     ],
   )
 })

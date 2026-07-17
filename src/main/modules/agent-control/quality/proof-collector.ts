@@ -62,7 +62,7 @@ export const RESEARCH_SOURCE_DISCOVERY_TOOL_NAMES = new Set([
 
 export const RESEARCH_SOURCE_CONTENT_TOOL_NAMES = new Set([
   'web_fetch',
-  'browser_read_page',
+  'browser_read',
 ])
 
 // Async browser research/collection tools return task handles, not acquired bodies.
