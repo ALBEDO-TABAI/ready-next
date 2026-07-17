@@ -38,8 +38,8 @@ const VARIANT_COLORS: Record<StartupSplashVariant, { logo: string; glow: string 
     glow: 'rgba(255, 75, 43, 0.18)'
   },
   pink: {
-    logo: '#F366AD',
-    glow: 'rgba(243, 102, 173, 0.22)'
+    logo: '#B6467A',
+    glow: 'rgba(182, 70, 122, 0.20)'
   }
 }
 

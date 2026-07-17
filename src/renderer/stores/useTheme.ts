@@ -78,16 +78,21 @@ const accentPalettes: Record<ThemeAccent, Record<ResolvedTheme, { color: string;
     },
 }
 
-const greenPinkAccentPalettes: Partial<Record<ThemeAccent, Record<ResolvedTheme, { color: string; light: string }>>> = {
-    purple: {
-        light: { color: '#F366AD', light: 'rgba(243, 102, 173, 0.14)' },
-        dark: { color: '#F584BF', light: 'rgba(245, 132, 191, 0.18)' },
+// 实色玻璃皮肤的玫瑰强调（仅接管 purple 档）：日间深玫瑰可承载白字（≥4.5:1），
+// 夜间亮玫瑰只做 glyph/描边；绿底配暖玫瑰(H358)、蓝底配冷玫瑰(H352)，与各自底板色相呼应。
+const solidSkinRoseAccents: Partial<Record<ThemeSkin, Record<ResolvedTheme, { color: string; light: string }>>> = {
+    'solid-green-glass': {
+        light: { color: '#B84574', light: 'rgba(184, 69, 116, 0.14)' },
+        dark: { color: '#F298BA', light: 'rgba(242, 152, 186, 0.16)' },
+    },
+    'solid-blue-glass': {
+        light: { color: '#B5467E', light: 'rgba(181, 70, 126, 0.14)' },
+        dark: { color: '#EE99C1', light: 'rgba(238, 153, 193, 0.16)' },
     },
 }
 
 const resolveAccentPalette = (accent: ThemeAccent, resolved: ResolvedTheme, skin: ThemeSkin) => {
-    const usesPinkAccent = skin === 'solid-green-glass' || skin === 'solid-blue-glass'
-    const skinPalette = usesPinkAccent ? greenPinkAccentPalettes[accent] : undefined
+    const skinPalette = accent === 'purple' ? solidSkinRoseAccents[skin] : undefined
     return (skinPalette ?? accentPalettes[accent])[resolved]
 }
 

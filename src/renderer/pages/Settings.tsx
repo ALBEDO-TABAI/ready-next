@@ -790,7 +790,7 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
                               {typeof opt === 'string'
                                 ? opt
                                 : currentSection.id === 'appearance' && setting.id === 'theme' && opt.value === 'purple' && (skin === 'solid-green-glass' || skin === 'solid-blue-glass')
-                                  ? '粉色'
+                                  ? '玫瑰'
                                   : opt.label}
                             </option>
                           ))}

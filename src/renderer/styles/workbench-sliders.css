@@ -102,20 +102,21 @@ html[data-skin='liquid-glass']:is([data-glass-variant='solid-green'], [data-glas
 
 html[data-skin='liquid-glass']:is([data-glass-variant='solid-green'], [data-glass-variant='solid-blue']) .icon-rail-slider {
   border-color: color-mix(in srgb, var(--ready-brand-accent, var(--color-blue)) 26%, rgba(255, 255, 255, 0.36));
-  background: color-mix(in srgb, var(--ready-brand-accent, var(--color-blue)) 38%, rgba(214, 214, 211, 0.86));
+  /* 30% 是未激活图标对 pill 底 ≥4.5:1 的上限，勿再调浓。 */
+  background: color-mix(in srgb, var(--ready-brand-accent, var(--color-blue)) 30%, rgba(214, 214, 211, 0.86));
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.48),
     inset 0 -1px 0 color-mix(in srgb, var(--ready-brand-accent, var(--color-blue)) 16%, rgba(42, 45, 48, 0.04)),
-    0 8px 18px rgba(255, 90, 174, 0.07);
+    0 8px 18px color-mix(in srgb, var(--ready-brand-accent, var(--color-blue)) 9%, transparent);
 }
 
 html[data-skin='liquid-glass']:is([data-glass-variant='solid-green'], [data-glass-variant='solid-blue']) .icon-rail-slider__button {
-  color: var(--ready-rail-inactive-icon, #8A2D62);
+  color: var(--ready-rail-inactive-icon, #72294E);
 }
 
 html[data-skin='liquid-glass']:is([data-glass-variant='solid-green'], [data-glass-variant='solid-blue']) .icon-rail-slider__button:hover {
-  color: var(--ready-rail-inactive-icon, #8A2D62);
-  background: var(--ready-highlight-pink, #F4A0CA);
+  color: var(--ready-rail-inactive-icon, #72294E);
+  background: var(--ready-highlight-wash, rgba(184, 69, 116, 0.16));
 }
 
 html[data-skin='liquid-glass']:is([data-glass-variant='solid-green'], [data-glass-variant='solid-blue']) .icon-rail-slider__button.is-active,

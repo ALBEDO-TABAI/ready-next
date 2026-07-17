@@ -469,9 +469,11 @@ export default function VerticalTabRail({
       className="vertical-tab-rail relative flex flex-shrink-0 flex-col"
       style={{
         width: RAIL_WIDTH,
-        // SOLID chrome, no backdrop-filter — a DOM backdrop-filter element in the BrowserView band
+        // No backdrop-filter — a DOM backdrop-filter element in the BrowserView band
         // fights the macOS vibrancy compositor (ghosting / bleed / false color). See LESSONS 6.8.
-        background: 'var(--workbench-liquid-chrome-bg, var(--bg-content))',
+        // 材质与横向 .browser-header-surface / 文档竖栏同源：夜间 chrome-bg 是近实心海军蓝，
+        // 会让竖栏比横栏更深一档。
+        background: 'var(--workbench-module-surface-bg, var(--workbench-liquid-chrome-bg, var(--bg-content)))',
         borderRight: '1px solid color-mix(in srgb, var(--text-title) 8%, transparent)',
       }}
       onMouseEnter={handleRailEnter}
@@ -630,12 +632,12 @@ export default function VerticalTabRail({
               >
                 {tabIconNode(tab, 18)}
                 {tab.owner === 'agent' && (
-                  <span className="absolute right-[3px] top-[3px] rounded-full" style={{ width: 6, height: 6, background: 'var(--color-blue)', boxShadow: '0 0 0 1.5px var(--workbench-liquid-chrome-bg, var(--bg-content))' }} />
+                  <span className="absolute right-[3px] top-[3px] rounded-full" style={{ width: 6, height: 6, background: 'var(--color-blue)', boxShadow: '0 0 0 1.5px var(--workbench-module-surface-bg, var(--workbench-liquid-chrome-bg, var(--bg-content)))' }} />
                 )}
                 {tab.activity && tab.activity !== 'idle' && (
                   <span
                     className={`absolute bottom-[3px] right-[3px] rounded-full ${tab.activity === 'running' ? 'animate-pulse' : ''}`}
-                    style={{ width: 6, height: 6, background: tab.activity === 'attention' ? 'var(--color-orange)' : 'var(--color-green)', boxShadow: '0 0 0 1.5px var(--workbench-liquid-chrome-bg, var(--bg-content))' }}
+                    style={{ width: 6, height: 6, background: tab.activity === 'attention' ? 'var(--color-orange)' : 'var(--color-green)', boxShadow: '0 0 0 1.5px var(--workbench-module-surface-bg, var(--workbench-liquid-chrome-bg, var(--bg-content)))' }}
                   />
                 )}
                 {tab.required && <Lock className="absolute bottom-[2px] left-[2px] text-[var(--text-light)]" style={{ width: 8, height: 8 }} strokeWidth={2.5} />}
