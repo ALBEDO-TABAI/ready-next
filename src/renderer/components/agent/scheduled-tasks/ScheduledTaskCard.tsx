@@ -4,6 +4,7 @@ import type { AgentScheduleDefinition, ScheduleSpecV1 } from '../../../../shared
 
 export interface ScheduledTaskCardProps {
   task: AgentScheduleDefinition
+  agentName?: string
   busy?: boolean
   onEdit: (task: AgentScheduleDefinition) => void
   onPause: (task: AgentScheduleDefinition) => void
@@ -48,6 +49,7 @@ function issueLabel(task: AgentScheduleDefinition): string | null {
 
 export function ScheduledTaskCard({
   task,
+  agentName,
   busy = false,
   onEdit,
   onPause,
@@ -103,7 +105,7 @@ export function ScheduledTaskCard({
       <div className="scheduled-task-card__meta">
         <span>{scheduleLabel(task.scheduleSpec)}</span>
         <span>{task.enabled ? formatNextRun(task.nextRunAt) : '已暂停'}</span>
-        <span>{task.agentId}</span>
+        <span>{agentName ?? task.agentId}</span>
       </div>
 
       {issue && (
@@ -115,7 +117,7 @@ export function ScheduledTaskCard({
       )}
 
       <div className="scheduled-task-card__actions">
-        <button type="button" disabled={busy || Boolean(issue)} onClick={() => onRunNow(task)}>
+        <button type="button" disabled={busy || !task.enabled || Boolean(issue)} onClick={() => onRunNow(task)}>
           <RotateCw size={14} aria-hidden="true" /> 立即运行
         </button>
         {task.enabled ? (

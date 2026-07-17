@@ -44,6 +44,7 @@ export const ScheduledTasksPanel = forwardRef<HTMLDivElement, ScheduledTasksPane
   const [tasks, setTasks] = useState<AgentScheduleDefinition[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [actionError, setActionError] = useState<string | null>(null)
   const [filter, setFilter] = useState<TaskFilter>('all')
   const [editing, setEditing] = useState<AgentScheduleDefinition | null | 'new'>(null)
   const [historyTask, setHistoryTask] = useState<AgentScheduleDefinition | null>(null)
@@ -87,13 +88,14 @@ export const ScheduledTasksPanel = forwardRef<HTMLDivElement, ScheduledTasksPane
   }, [onClose, open, presentation])
 
   useEffect(() => {
-    if (!open) { setEditing(null); setHistoryTask(null) }
+    if (!open) { setEditing(null); setHistoryTask(null); setActionError(null) }
   }, [open])
 
   const mutate = async (task: AgentScheduleDefinition, action: 'pause' | 'resume' | 'delete' | 'runNow') => {
     setBusyId(task.id)
+    setActionError(null)
     const response = await window.electronAPI.scheduledTasks[action](task.id)
-    if (!response.success) setError(response.error.message)
+    if (!response.success) setActionError(response.error.message)
     await load()
     setBusyId(null)
   }
@@ -150,10 +152,17 @@ export const ScheduledTasksPanel = forwardRef<HTMLDivElement, ScheduledTasksPane
 
           <div className="scheduled-tasks-panel__content">
             {loading && <div className="scheduled-tasks-state"><LoaderCircle className="scheduled-tasks-spin" size={20} />正在读取…</div>}
+            {!loading && !error && actionError && (
+              <div className="scheduled-tasks-action-error" role="alert">
+                <AlertCircle size={15} aria-hidden="true" />
+                <span>{actionError}</span>
+                <button type="button" onClick={() => setActionError(null)}>知道了</button>
+              </div>
+            )}
             {!loading && error && <div className="scheduled-tasks-state is-error"><AlertCircle size={20} /><strong>暂时无法读取</strong><span>{error}</span><button type="button" onClick={() => void load()}>重试</button></div>}
             {!loading && !error && tasks.length === 0 && <div className="scheduled-tasks-state is-empty"><span className="scheduled-tasks-state__icon"><Clock3 size={23} /></span><strong>让 Agent 按时开始</strong><span>在指定时间让 Agent 自动开始一项工作。</span><button type="button" className="is-primary" onClick={() => setEditing('new')}><Plus size={15} />新建定时任务</button></div>}
             {!loading && !error && tasks.length > 0 && filtered.length === 0 && <div className="scheduled-tasks-state"><strong>没有符合条件的任务</strong><span>换一个筛选条件看看。</span></div>}
-            {!loading && !error && filtered.length > 0 && <div className="scheduled-tasks-panel__list">{filtered.map((task) => <ScheduledTaskCard key={task.id} task={task} busy={busyId === task.id} onEdit={setEditing} onHistory={setHistoryTask} onPause={(value) => void mutate(value, 'pause')} onResume={(value) => void mutate(value, 'resume')} onDelete={(value) => void mutate(value, 'delete')} onRunNow={(value) => void mutate(value, 'runNow')} />)}</div>}
+            {!loading && !error && filtered.length > 0 && <div className="scheduled-tasks-panel__list">{filtered.map((task) => <ScheduledTaskCard key={task.id} task={task} agentName={agentOptions?.find((agent) => agent.id === task.agentId)?.name} busy={busyId === task.id} onEdit={setEditing} onHistory={setHistoryTask} onPause={(value) => void mutate(value, 'pause')} onResume={(value) => void mutate(value, 'resume')} onDelete={(value) => void mutate(value, 'delete')} onRunNow={(value) => void mutate(value, 'runNow')} />)}</div>}
           </div>
           <footer className="scheduled-tasks-panel__footer"><span>{tasks.filter((task) => task.enabled).length} 项已启用</span><span>时间由 Ready 主程序统一管理</span></footer>
         </>

@@ -77,7 +77,9 @@ export function ScheduledTaskHistory({ task, onBack, onOpenOccurrence }: Schedul
       {!loading && !error && items.length > 0 && (
         <div className="scheduled-task-history__list">
           {items.map((item) => {
-            const failed = item.claimStatus === 'dispatch_failed' || item.claimStatus === 'blocked_target'
+            const failed = item.claimStatus === 'dispatch_failed'
+              || item.claimStatus === 'blocked_target'
+              || item.runStatus === 'failed'
             const late = item.delayMs > 60_000
             return (
               <article key={item.id} className="scheduled-task-history__item" data-failed={failed ? 'true' : 'false'}>
