@@ -59,7 +59,10 @@ import {
   type BoardSnapGuide,
 } from './boardInteraction'
 import { createBoardSaveCoordinator } from '../../modules/document/boardSaveCoordinator'
-import { registerDocumentSaveHandler } from '../../modules/document/documentSaveRegistry'
+import {
+  getDocumentSaveSerializationKey,
+  registerDocumentSaveHandler,
+} from '../../modules/document/documentSaveRegistry'
 import { registerBeforeQuitFlushHandler } from '../../modules/app/beforeQuitFlushRegistry'
 import { appendExternalBoardImage } from '../../modules/document/boardExternalAsset'
 import {
@@ -68,6 +71,7 @@ import {
 } from '../../modules/document/boardExternalAssetInbox'
 import {
   rememberBoardHandle,
+  retryBoardPathSave,
   trackBoardPathSave,
   waitForBoardPathSave,
 } from '../../modules/document/boardHandleRegistry'
@@ -388,6 +392,8 @@ export default function BoardEditor({ tab, onActivate, isFocused = false }: Boar
   const [textEdit, setTextEdit] = useState<TextEditState | null>(null)
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle')
   const [error, setError] = useState<string | null>(null)
+  const [pathSaveRetryRequired, setPathSaveRetryRequired] = useState(false)
+  const [openAttempt, setOpenAttempt] = useState(0)
   const surfaceRef = useRef<HTMLDivElement | null>(null)
   const textEditorRef = useRef<HTMLTextAreaElement | null>(null)
   const stateRef = useRef(state)
@@ -565,7 +571,14 @@ export default function BoardEditor({ tab, onActivate, isFocused = false }: Boar
     await saveCoordinator.saveNow()
   }, [flushPendingTextEdit, saveCoordinator])
 
-  useEffect(() => registerDocumentSaveHandler(tab.id, saveNow), [saveNow, tab.id])
+  useEffect(
+    () => registerDocumentSaveHandler(
+      tab.id,
+      saveNow,
+      getDocumentSaveSerializationKey(tab.id, tab.path),
+    ),
+    [saveNow, tab.id, tab.path],
+  )
   useEffect(
     () => registerBeforeQuitFlushHandler(`board:${tab.id}`, saveNow),
     [saveNow, tab.id],
@@ -702,10 +715,15 @@ export default function BoardEditor({ tab, onActivate, isFocused = false }: Boar
     async function openBoard() {
       if (!tab.path) return
       setError(null)
+      setPathSaveRetryRequired(false)
       try {
         await waitForBoardPathSave(tab.path)
       } catch (saveError) {
-        if (!disposed) setError(saveError instanceof Error ? saveError.message : String(saveError))
+        if (!disposed) {
+          setPathSaveRetryRequired(true)
+          setSaveStatus('error')
+          setError(saveError instanceof Error ? saveError.message : String(saveError))
+        }
         return
       }
       if (disposed) return
@@ -739,7 +757,22 @@ export default function BoardEditor({ tab, onActivate, isFocused = false }: Boar
     return () => {
       disposed = true
     }
-  }, [tab.id, tab.path])
+  }, [openAttempt, tab.id, tab.path])
+
+  const retryBlockedPathSave = useCallback(async () => {
+    if (!tab.path) return
+    setSaveStatus('saving')
+    try {
+      await retryBoardPathSave(tab.path)
+      setPathSaveRetryRequired(false)
+      setError(null)
+      setSaveStatus('saved')
+      setOpenAttempt((attempt) => attempt + 1)
+    } catch (saveError) {
+      setSaveStatus('error')
+      setError(saveError instanceof Error ? saveError.message : String(saveError))
+    }
+  }, [tab.path])
 
   useEffect(() => {
     if (!boardId || !boardHandlePath) return undefined
@@ -798,7 +831,9 @@ export default function BoardEditor({ tab, onActivate, isFocused = false }: Boar
       mountedRef.current = false
       flushPendingTextEdit()
       const disposal = saveCoordinator.dispose()
-      if (tab.path) void trackBoardPathSave(tab.path, disposal)
+      if (tab.path) {
+        void trackBoardPathSave(tab.path, disposal, () => saveCoordinator.dispose())
+      }
       if (wheelFrameRef.current !== null) window.cancelAnimationFrame(wheelFrameRef.current)
       const drag = dragRef.current
       dragRef.current = null
@@ -1583,7 +1618,9 @@ export default function BoardEditor({ tab, onActivate, isFocused = false }: Boar
       {error && (
         <div className="ready-board-error">
           <span>{error}</span>
-          <button onClick={() => setError(null)}>×</button>
+          {pathSaveRetryRequired
+            ? <button onClick={() => void retryBlockedPathSave()}>重试保存</button>
+            : <button onClick={() => setError(null)}>×</button>}
         </div>
       )}
       <div

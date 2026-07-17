@@ -1077,6 +1077,9 @@ export class BrowserContentTaskRunner {
     if (task.status === 'completed' || task.status === 'cancelled' || task.status === 'running' || task.status === 'queued') {
       return false
     }
+    if (task.kind === 'site_research') {
+      return resultObject(task)?.canResume === true && hasBrowserTaskCheckpoint(task, payload)
+    }
     // B3 — a checkpoint-less task paused on restart is resumable as a rerun from
     // the original request; resumeTask→scheduleTask runs it fresh from payload.
     return hasBrowserTaskCheckpoint(task, payload) || hasRerunFromRequestMarker(task)

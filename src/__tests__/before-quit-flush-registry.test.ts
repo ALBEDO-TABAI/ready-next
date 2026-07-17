@@ -158,27 +158,64 @@ test('before-quit waits for every unmounted board save before acknowledging a si
   trackBoardPathSave('/workspace/slow.readyboard', slow)
   registerBeforeQuitFlushHandler('board:unmounted-saves', waitForAllBoardPathSaves)
   let requestHandler: ((requestId: string) => void) | null = null
-  let acknowledge!: () => void
-  let acknowledged = false
-  const acknowledgement = new Promise<void>((resolve) => { acknowledge = resolve })
+  let acknowledge!: (outcome: { success: boolean; error?: string }) => void
+  let acknowledgementOutcome: { success: boolean; error?: string } | null = null
+  const acknowledgement = new Promise<{ success: boolean; error?: string }>((resolve) => { acknowledge = resolve })
   installBeforeQuitFlushBridge({
     onBeforeQuitFlush: (handler) => {
       requestHandler = handler
       return () => { requestHandler = null }
     },
-    ackBeforeQuitFlushed: () => {
-      acknowledged = true
-      acknowledge()
+    ackBeforeQuitFlushed: (_requestId, outcome) => {
+      acknowledgementOutcome = outcome
+      acknowledge(outcome)
     },
   })
 
   requestHandler?.('quit-multiple-hidden-boards')
   fail(new Error('injected board save failure'))
   await new Promise<void>((resolve) => setImmediate(resolve))
-  assert.equal(acknowledged, false)
+  assert.equal(acknowledgementOutcome, null)
   releaseSlow()
-  await acknowledgement
-  assert.equal(acknowledged, true)
+  const outcome = await acknowledgement
+  assert.equal(outcome.success, false)
+  assert.match(String(outcome.error), /injected board save failure/)
   resetBeforeQuitFlushRegistryForTests()
   resetBoardHandleRegistryForTests()
+})
+
+test('renderer interaction stays frozen after a successful flush until Main closes or cancels it', async () => {
+  resetBeforeQuitFlushRegistryForTests()
+  let release!: () => void
+  const pending = new Promise<void>((resolve) => { release = resolve })
+  registerBeforeQuitFlushHandler('document:dirty-tabs', () => pending)
+  let requestHandler: ((requestId: string) => void) | null = null
+  let cancelHandler: ((requestId: string) => void) | null = null
+  const frozen: boolean[] = []
+  let acknowledge!: (outcome: { success: boolean; error?: string }) => void
+  const acknowledged = new Promise<{ success: boolean; error?: string }>((resolve) => { acknowledge = resolve })
+  const uninstall = installBeforeQuitFlushBridge({
+    onBeforeQuitFlush: (handler) => {
+      requestHandler = handler
+      return () => { requestHandler = null }
+    },
+    onBeforeQuitFlushCancelled: (handler) => {
+      cancelHandler = handler
+      return () => { cancelHandler = null }
+    },
+    ackBeforeQuitFlushed: (_requestId, outcome) => { acknowledge(outcome) },
+  }, {
+    setInteractionFrozen: (value) => { frozen.push(value) },
+  })
+
+  requestHandler?.('flush-freeze')
+  assert.deepEqual(frozen, [true])
+  release()
+  assert.deepEqual(await acknowledged, { success: true })
+  assert.deepEqual(frozen, [true])
+  cancelHandler?.('flush-freeze')
+  assert.deepEqual(frozen, [true, false])
+
+  uninstall()
+  resetBeforeQuitFlushRegistryForTests()
 })

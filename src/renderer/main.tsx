@@ -17,6 +17,8 @@ import {
   registerBeforeQuitFlushHandler,
 } from './modules/app/beforeQuitFlushRegistry'
 import { installBoardExternalAssetBridge } from './modules/document/boardExternalAssetInbox'
+import { installDocumentDirectoryChangeBridge } from './modules/document/directoryChangeBridge'
+import { flushCurrentDocumentTabsForExit } from './modules/document/documentExitFlush'
 import { waitForAllBoardPathSaves } from './modules/document/boardHandleRegistry'
 
 type StartupThemeSnapshot = {
@@ -98,6 +100,8 @@ async function bootstrap() {
   if (!root) throw new Error('Root element #root not found')
   rendererRoot = ReactDOM.createRoot(root)
   installBeforeQuitFlushBridge(window.electronAPI?.app)
+  installDocumentDirectoryChangeBridge(window.electronAPI?.document)
+  registerBeforeQuitFlushHandler('document:dirty-tabs', flushCurrentDocumentTabsForExit)
   registerBeforeQuitFlushHandler('board:unmounted-saves', waitForAllBoardPathSaves)
   installBoardExternalAssetBridge(window.electronAPI?.board)
 

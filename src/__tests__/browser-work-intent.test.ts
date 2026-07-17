@@ -86,6 +86,30 @@ test('query extraction preserves order and removes exact duplicates', () => {
   assert.deepEqual(intent.queries, ['甲', '乙', '丙'])
 })
 
+test('common inline current-site search wording extracts comma-separated queries', () => {
+  const cases: Array<[string, string[]]> = [
+    ['在小红书搜索：甲、乙', ['甲', '乙']],
+    ['在小红书搜索甲、乙', ['甲', '乙']],
+    ['在小红书搜一下护肤、防晒', ['护肤', '防晒']],
+    ['帮我在小红书找找护肤和防晒的爆款', ['护肤', '防晒']],
+    ['在当前页面查找猫粮', ['猫粮']],
+    ['在小红书搜索甲、乙，然后分析当前账号', ['甲', '乙']],
+    ['在小红书搜索甲、乙，并分析当前账号', ['甲', '乙']],
+  ]
+  for (const [message, queries] of cases) {
+    const intent = resolveBrowserWorkIntent(message)
+    assert.equal(intent.kind, 'site_research', message)
+    assert.equal(intent.siteSurface, 'current_site', message)
+    assert.deepEqual(intent.queries, queries, message)
+  }
+})
+
+test('search action extraction rejects negated or instruction-only tails', () => {
+  assert.equal(resolveBrowserWorkIntent('不要在小红书搜索甲、乙').kind, 'observe')
+  assert.equal(resolveBrowserWorkIntent('在小红书搜索后分析当前账号').kind, 'observe')
+  assert.equal(resolveBrowserWorkIntent('打开网页搜索资料，点击并输入内容，同时回复飞书').kind, 'observe')
+})
+
 test('only/just persistence is affirmative and trailing instructions are not queries', () => {
   assert.equal(resolveBrowserWorkIntent('只保存这些笔记').persistenceRequested, true)
   assert.equal(resolveBrowserWorkIntent('仅下载这些图片').persistenceRequested, true)

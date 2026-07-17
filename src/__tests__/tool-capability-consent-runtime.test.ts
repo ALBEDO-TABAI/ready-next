@@ -133,6 +133,7 @@ test('site research and its bare continuation expose the complete live browser w
   }
   for (const definitions of [
     executor.listDefaultToolDefinitionsForTurn({ ...base, message: original }),
+    executor.listDefaultToolDefinitionsForTurn({ ...base, message: '在小红书搜索：甲、乙' }),
     executor.listDefaultToolDefinitionsForTurn({
       ...base,
       message: '继续',

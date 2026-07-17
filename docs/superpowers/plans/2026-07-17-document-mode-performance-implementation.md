@@ -82,7 +82,7 @@ depends_on:
 
 1. 在 doc store 显式记录 `focusedPaneTabId`，必须是 active/split 之一；切标签、关闭和取消分栏时同步归一。
 2. Cmd/Ctrl+S 只保留顶层单一入口，目标为 `focusedPaneTabId ?? activeTabId`；删除每个 MarkdownEditor 的全局监听。已挂载编辑面通过按 tab 注册的 owner 执行并显示保存错误，隐藏/未挂载但可直接写的文本由顶层安全回退。保存仍必须用 snapshot commit，保存期间继续输入不得被旧结果标为 clean。
-3. `document:directoryChanged` 在 Renderer 只由 DocumentMode 订阅一次。只处理可见 active/split 且 clean 的文本标签；同一 `tabId/path` 的并发回读共享 in-flight promise，返回时重新检查 path/dirty。隐藏期只记脏，激活后一次回读。
+3. `document:directoryChanged` 在 Renderer 只由 bootstrap 级 bridge 订阅一次；DocumentMode 与 FilesPanel 只订阅进程内分发，不各自新增 IPC listener。文档回读只处理可见 active/split 且 clean 的文本标签；同一 `tabId/path` 的并发回读共享 in-flight promise，返回时重新检查 path/dirty。隐藏期只记脏，激活后一次回读。
 
 ### 4.5 行为 gate
 
@@ -191,7 +191,9 @@ depends_on:
 ### 9.1 连续刷新和退出冲刷
 
 1. 每个 `tabId/path` 的外部回读记录 generation。请求进行中又来事件时，同一请求至少再读一次；最后一次 generation 检查与从 in-flight map 删除在同一个不可插入的同步段完成。
-2. Renderer 以单一 before-quit bridge 组装所有状态拥有者。Board 和阅读会话只登记 handler，不各自提前 ack；Main 等全部 handler settled 后才继续退出，总时间仍受既有 5 秒上限保护。
+2. Renderer 以单一 before-quit bridge 组装所有状态拥有者。Board 和阅读会话只登记 handler，不各自提前 ack；Main 等全部 handler settled 后才继续退出，总时间仍受既有 5 秒上限保护。任一 handler 失败时 ACK 必须携带聚合错误，Main 取消本次退出并保留应用；慢保存与失败并存时仍先等全部 settled，不能因先见失败而提前放行。
+3. 普通窗口关闭与整个应用退出必须走同一冲刷协调器；重复关闭或重复退出不能绕过等待，关窗期间发生退出时只能升级目标。发送冲刷请求、取消冻结或最终放行任一环节抛错时，必须恢复界面并保留窗口。
+4. 普通文本标签的草稿、metadata、手动保存与已存路径的 dirty 正文统一进入退出冲刷。写盘期间再输入时继续以新快照追平，一个标签失败不能跳过其他标签；未命名标签保留在持久草稿中。
 
 ### 9.2 画板与浏览器联动
 
@@ -213,6 +215,10 @@ depends_on:
 - 只读、软链接、多重硬链接和权限位都有真文件行为测试。超额 loading 页在 loading 结束后自动回收。
 - 聚焦文本未走完常规提交时直接退出，磁盘 readback 仍必须包含最后输入。
 - 一个失败与一个慢保存并存时，退出冲刷必须等慢保存完成后再聚合失败；失败路径在后续同路径成功之前不得允许从旧盘面重开。
+- Renderer 单个保存允许使用完整 5 秒退出预算；3–5 秒内成功的慢保存不得被 Renderer 自己的较短默认超时提前判死。Main 收到失败 ACK 后必须取消退出并给出可读错误。
+- 正常点击关闭窗口与 app quit 均要先完成同一份 dirty 文本落盘；重复关闭/退出不得提前放行，写盘期间的新输入也必须出现在最终 readback 中。
+- 向 Renderer 发送请求或取消冻结时抛错，都不得遗留被冻结界面或误关窗口。退出协调器要用纯行为测试证明关闭/退出、升级、取消和重试语义，不用源码正则匹配冒充验收。
+- Board 保存失败后，重挂载与用户点击“重试保存”都必须重试同一份最新快照；只有真实写盘成功才解除阻断，关闭提示本身不能冒充重试。
 - 原位替换与恢复都失败时保留原文件备份，清理临时文件，并返回可读的 backupPath。
 
 ## 10. 最终验收顺序
@@ -239,9 +245,9 @@ depends_on:
 | P3 变更/guard/查看器 | completed | 合并目录广播、20 MiB 文本边界、Ebook 合并写入与 ImageGallery 目录 LRU 均进入最终 137 项专项行为 gate；Widget 总 gate 196 项通过。 |
 | P4 PDF/Board | completed | 打包态 500 页 PDF 在 200% 缩放和滚动后同时挂载 7 页，Renderer V8 used heap 22.3 MiB；150 节点拖动 5 秒只提交 1 次，诊断记录 120 个合并帧。 |
 | P5 worker/原子发布 | completed | 打包态真实 DOCX/XLSX/EPUB 均在界面打开；连续 600 个 DOCX/XLSX worker 请求 2185.1ms 全成功，10ms Renderer heartbeat 最大 11.5ms；原子中断/恢复和 Electron 42 SQLite 原生 gate 通过。 |
-| P6 对抗时序/所有者 | completed | 连续刷新、退出落盘、只读/链接/权限、画板外部导入、双画板焦点和超额 loading 回收行为合同全部落地；补齐聚焦文本退出提交、保存失败传递、同路径失败阻断旧状态重开、多画板 all-settled 等待和双重失败备份保留。macOS 文件监听进一步补齐启动确认、运行期死亡自动摘除、跨路由失败真值、旧事件仲裁和可见重试。`verify:document-perf` 全部通过，`verify:browser-perf` 117 通过 + 2 项由 native gate 覆盖，IPC 合同与真实 Electron 补验通过。 |
+| P6 对抗时序/所有者 | completed | 连续刷新、退出落盘、只读/链接/权限、画板外部导入、双画板焦点和超额 loading 回收行为合同全部落地；退出 ACK 现在会传递聚合失败并取消退出，Renderer 与 Main 共用完整 5 秒预算，慢保存不会被提前终止。正常关窗、app quit 和重复退出均走同一协调边界，dirty 文本、未命名草稿、写盘期间新输入与同批其他标签会追平后再放行；成功 ACK 转为可释放租约，最终关闭动作失败、取消传输失败或窗口已关闭都能解冻，Renderer 还有独立看门狗。草稿失败不会跳过路径文档；手动保存、Agent `save_tab`、`/doc save`、退出冲刷与 Main helper 均按规范化文件路径串行，超时旧写盘和同路径重开不能再覆盖新版本，写盘期间新输入仍保持 dirty。画板会持续保存到 revision 稳定，失败保留最新快照，重挂载和界面按钮都执行真实重试；bootstrap 只持有一个目录事件 IPC listener；Widget 对账会删除已移除卡片的旧状态并以新正文持久状态为准；Windows 双重替换失败会保留并返回唯一备份路径。macOS 文件监听继续保留启动确认、运行期死亡自动摘除、跨路由失败真值、旧事件仲裁和可见重试。`verify:document-perf` 161 项、Widget/专项行为门、Electron 42 native gate、IPC 合同和真实 Electron 补验均通过。 |
 | 真实 Electron + 系统采样 | completed | `xctrace` 因本机仅有 CommandLineTools 不可用，已按合同使用 `/usr/bin/sample`：Renderer 20 秒样本峰值 244.3 MiB，Main 12 秒样本峰值 302.0 MiB；D1/D5/D7 重放期间等待栈占主导，浏览器交互保持响应，未出现文档解析占用 Main UI 线程的热点。 |
-| 对抗复审 | completed | 全程只使用同一个 fresh adversarial agent；每轮有效问题都先修复、补行为证据，再由它继续复查。最终组合验证覆盖延迟重挂载阻断、一失败+一慢保存全部等完、聚合报错、后续成功清除失败、双重失败保留备份，以及 watcher 启动/运行/跨路由/延迟事件/重复重试竞态；同一复审者第三轮给出 PASS。 |
-| 最终全量验收 | completed | 最终 `npm run verify` 零失败；串行子任务 154 项通过、3 项由 native gate 覆盖，串行时序/性能 35 项全过。文档性能样本已改为测试自建、自清理，macOS 真文件监听改在串行 lane 验收，并对异步启动失败明确报错。`npm run build:dist` 生成 Ready 0.7.5 arm64 应用、ZIP 与 DMG；成品已通过签名、版本、架构、只读挂载、Applications 快捷方式、独立 document worker 和全新隔离资料启动检查。 |
+| 对抗复审 | completed | 同一个 fresh adversarial agent 对首轮 14 类、第二轮 10 类和第三轮 8 类时序/所有者阻断项逐项重审；最终差异、门禁数字、真实关窗和新成品均一致，已明确裁决 `PASS`，没有剩余阻断。 |
+| 最终全量验收 | completed | 修正后的 `npm run verify` 零失败：主测试 7811 项中 7476 项通过、335 项由 Electron native gate 覆盖；串行子任务 154 项通过、3 项由 native gate 覆盖，串行时序/性能 35 项全过。`typecheck`、`verify:document-perf` 161/161、浏览器 surface/reliability/lane/native-lock、`verify:native` 与 production build 均已通过；主进程可注入原子发布后，既有异步 IO 结构合同也已同步并进入这次全量零失败证据。真实 Electron 中恢复 dirty 文档，在正常关闭窗口前立即输入 `typed-immediately-before-live-close`，退出后磁盘回读完全一致。按最终代码重新生成的 Ready 0.7.5 arm64 应用、ZIP 与 DMG 已核对版本、arm64 架构、deep/strict 签名、Applications 快捷方式和包内独立 document worker；应用目录与只读 DMG 均以全新隔离资料真实启动并达到可交互状态。DMG 为 246,196,051 字节（235 MiB），SHA-256 `0bb505a3af3420d3853ba5753d8c664e073e295fa2b472db29fb6110d72c4408`；ZIP 为 240,103,766 字节（229 MiB），SHA-256 `3720946eaad768162ea3cb201f67beb3e86c9adf2ccdddadd4b26a1617b49e7b`。 |
 
-实现与验收阶段均已按证据回填；普通 Node 的 native ABI 项由本轮 Electron 42 `verify:native` 真机原生门补足，不作为跳过验收。最终提交仍以同一对抗复审者给出 PASS 为最后一道门。
+实现与验收阶段均按最终证据回填；普通 Node 的 native ABI 项由本轮 Electron 42 `verify:native` 真机原生门补足，不作为跳过验收。同一对抗复审者已明确给出 `PASS`，计划、实现、全量门、真实 Electron 和 0.7.5 成品均已收口。

@@ -17,8 +17,11 @@ import { buildDocumentOutline } from '../shared/document-side-panels'
 import { resolveDocumentWidgetRenderCode } from '../shared/document-widget-render-code'
 import { buildStructuredNotePreview } from '../renderer/components/document/note-preview-parser'
 import {
+  buildWidgetFenceSource,
   extractWidgetStateMapFromContent,
   getWidgetFenceSignature,
+  getWidgetPersistenceKey,
+  reconcileWidgetStateMapFromContent,
 } from '../renderer/components/document/widget-card-helpers'
 import {
   advanceWidgetFenceSignatureForTextEdit,
@@ -116,6 +119,28 @@ test('widget fence signature ignores ordinary text edits around an unchanged wid
     getWidgetFenceSignature(initial),
     getWidgetFenceSignature(initial.replace('<div>A</div>', '<div>B</div>')),
   )
+})
+
+test('widget state reconciliation prunes deleted keys and lets reinserted fence state win', () => {
+  const codeA = '<label>A<input></label>'
+  const codeB = '<label>B<input></label>'
+  const keyA = getWidgetPersistenceKey('A', codeA)
+  const keyB = getWidgetPersistenceKey('B', codeB)
+  const oldState = { controls: [{ index: 0, tag: 'input' as const, value: 'old' }] }
+  const liveStateB = { controls: [{ index: 0, tag: 'input' as const, value: 'live-b' }] }
+  const newState = { controls: [{ index: 0, tag: 'input' as const, value: 'new' }] }
+
+  const afterDelete = reconcileWidgetStateMapFromContent(
+    buildWidgetFenceSource('B', codeB),
+    { [keyA]: oldState, [keyB]: liveStateB },
+  )
+  assert.deepEqual(afterDelete, { [keyB]: liveStateB })
+
+  const afterReinsert = reconcileWidgetStateMapFromContent(
+    `${buildWidgetFenceSource('A', codeA, { widgetState: newState })}\n${buildWidgetFenceSource('B', codeB)}`,
+    afterDelete,
+  )
+  assert.deepEqual(afterReinsert, { [keyA]: newState, [keyB]: liveStateB })
 })
 
 test('ordinary typing advances widget fence ranges without rescanning the document', () => {

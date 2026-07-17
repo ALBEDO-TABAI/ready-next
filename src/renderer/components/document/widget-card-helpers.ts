@@ -335,13 +335,21 @@ export function renameWidgetFenceTitleInContent(
 }
 
 export function extractWidgetStateMapFromContent(content: string): Record<string, DocumentWidgetPersistedState> {
+  return reconcileWidgetStateMapFromContent(content, {})
+}
+
+export function reconcileWidgetStateMapFromContent(
+  content: string,
+  previous: Record<string, DocumentWidgetPersistedState>,
+): Record<string, DocumentWidgetPersistedState> {
   if (!content.includes('```show-widget')) return {}
   recordDocumentPerformanceCounter('widgetStateParses')
   const widgetStateMap: Record<string, DocumentWidgetPersistedState> = {}
   for (const segment of parseShowWidgetFences(content)) {
-    if (segment.type !== 'widget' || !segment.data.widgetState) continue
+    if (segment.type !== 'widget') continue
     const key = getWidgetPersistenceKey(segment.data.title || 'widget', segment.data.widgetCode)
-    widgetStateMap[key] = segment.data.widgetState
+    const state = segment.data.widgetState || previous[key]
+    if (state) widgetStateMap[key] = state
   }
   return widgetStateMap
 }

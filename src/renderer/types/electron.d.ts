@@ -16,6 +16,7 @@ import type { RSSAutoRefreshSnapshot } from '../../shared/rss-auto-refresh'
 import type { ScheduledTasksAPI } from '../../shared/scheduled-tasks'
 import type { CapabilityRuntimeSnapshot } from '../../shared/ai-capability-runtime'
 import type { RendererAgentMetricName } from '../../shared/renderer-agent-metrics'
+import type { RendererStateFlushOutcome } from '../../shared/renderer-state-flush'
 import type { ContextUsageSnapshot } from '../../shared/context-usage-types'
 import type { ModelPackDownloadUpdate, ModelPackId, ModelPackSelfTestReport, ModelPackStatus, ModelSource } from '../../shared/model-pack-types'
 import type { RuntimeStatus, RuntimeProvisionTaskSnapshot } from '../../shared/runtime-provision-types'
@@ -3276,7 +3277,8 @@ interface ElectronAppAPI {
   onUpdateStatus: (callback: (data: ElectronUpdateStatus) => void) => () => void
   onShortcut: (callback: (data: ElectronAppShortcutEvent) => void) => () => void
   onBeforeQuitFlush: (callback: (requestId: string) => void) => () => void
-  ackBeforeQuitFlushed: (requestId: string) => void
+  onBeforeQuitFlushCancelled: (callback: (requestId: string) => void) => () => void
+  ackBeforeQuitFlushed: (requestId: string, outcome: RendererStateFlushOutcome) => void
   // D1: cache stats + cleanup
   getCacheStats: () => Promise<{
     success: boolean

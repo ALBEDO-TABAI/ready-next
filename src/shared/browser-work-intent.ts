@@ -31,6 +31,10 @@ const NEGATION_PREFIX_RE = /(?:不要|不用|无需|不必|别|禁止|不).{0,6}
 const QUERY_TRANSITION_RE = /^(?:然后|再|接着|随后|最后|并且|同时|另外|并)\s*(?:分析|筛选|整理|总结|判断|评估|结合|针对|输出|给出|推荐|保存|下载|采集)/i
 const QUERY_TRAILING_INSTRUCTION_RE = /^(?:这是|请|如遇|如果|若|不要|不用|无需|不必|禁止).{0,30}(?:任务|处理|完整|发布|点赞|评论|关注|登录|验证|完成|结果)/i
 const NEGATED_EVALUATION_INSTRUCTION_RE = /^(?:不需要|无需|不用|不要|不必|别).{0,12}(?:分析|评估|研究|筛选|匹配).{0,12}(?:账号|博主|主页)/i
+const DIRECT_QUERY_SURFACE_RE = /(?:小红书|抖音|微博|bilibili|这里|当前(?:网页|页面|站点)|这个(?:网页|页面|站点))/i
+const DIRECT_QUERY_ACTION_RE = /(?:搜索|搜一下|查找|检索|找找)\s*(?:一下|这些|以下|关于)?\s*[：:]?\s*/gi
+const QUERY_FOLLOWUP_BOUNDARY_RE = /(?:，|,)?\s*(?:然后|再|接着|随后|最后|并且|并|同时|另外|不要|不用|无需|不必)\s*(?:分析|筛选|整理|总结|判断|评估|结合|针对|输出|给出|推荐|保存|下载|采集|发布|点赞|评论|关注)/i
+const QUERY_ACTION_ONLY_TAIL_RE = /^(?:后|之后|完|完成后|并|然后|再|接着|随后|最后)\s*(?:分析|筛选|整理|总结|判断|评估|结合|针对|输出|给出|推荐)/i
 
 function unique(values: string[]): string[] {
   const seen = new Set<string>()
@@ -64,14 +68,42 @@ function extractQueries(text: string): string[] {
   if (lines.length >= 2) return uniqueQueries(lines)
 
   const labelled = /(?:关键词|查询|搜索词)(?:如下|包括|是)?\s*[：:]\s*([^。]+)/i.exec(text)?.[1]
-  if (!labelled) return []
+  if (!labelled) return extractDirectActionQueries(text)
   const parts: string[] = []
-  for (const rawPart of labelled.split(/[；;、\n]/)) {
+  for (const rawPart of labelled.split(/[；;、，,\n]/)) {
     const part = rawPart.trim()
     if (QUERY_TRANSITION_RE.test(part) || QUERY_TRAILING_INSTRUCTION_RE.test(part) || NEGATED_EVALUATION_INSTRUCTION_RE.test(part)) break
     parts.push(part)
   }
-  return uniqueQueries(parts)
+  const labelledQueries = uniqueQueries(parts)
+  if (labelledQueries.length > 0) return labelledQueries
+  return extractDirectActionQueries(text)
+}
+
+function extractDirectActionQueries(text: string): string[] {
+  if (!DIRECT_QUERY_SURFACE_RE.test(text)) return []
+  DIRECT_QUERY_ACTION_RE.lastIndex = 0
+  for (const match of text.matchAll(DIRECT_QUERY_ACTION_RE)) {
+    const index = match.index ?? 0
+    if (NEGATION_PREFIX_RE.test(text.slice(Math.max(0, index - 12), index))) continue
+    const tail = text.slice(index + match[0].length)
+    if (QUERY_ACTION_ONLY_TAIL_RE.test(tail)) continue
+    const sentence = tail.split(/[。！？!?；;\n]/, 1)[0] || ''
+    const bounded = sentence.split(QUERY_FOLLOWUP_BOUNDARY_RE, 1)[0] || ''
+    const normalized = bounded
+      .replace(/^(?:这些|以下|关于)\s*/i, '')
+      .replace(/(?:的)?(?:爆款|热门)(?:笔记|内容|帖子|作品)?\s*$/i, '')
+      .trim()
+    if (!normalized || QUERY_ACTION_ONLY_TAIL_RE.test(normalized)) continue
+    const queries = uniqueQueries(
+      normalized
+        .split(/\s*(?:[、，,]|和|与)\s*/)
+        .map((value) => value.trim())
+        .filter(Boolean),
+    )
+    if (queries.length > 0) return queries
+  }
+  return []
 }
 
 function actionSegments(text: string): string[] {

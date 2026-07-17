@@ -59,6 +59,10 @@ import { setupImageGenerationIPC } from './modules/image-generation/ipc-handler'
 import { rsshubManager } from './modules/rss-engine/rsshub-process'
 import { reapOrphans } from './modules/process-cleanup/boot-reaper'
 import { runBeforeQuitCleanup } from './modules/process-cleanup/before-quit'
+import {
+  GracefulWindowCloseCoordinator,
+  type GracefulExitAction,
+} from './modules/process-cleanup/graceful-window-close-coordinator'
 import { requestRendererStateFlush, setupRendererStateFlushIPC } from './modules/process-cleanup/renderer-state-flush'
 import { closeAllBrowsers } from './modules/browser-engine/browser-cleanup'
 import { assertPrimaryDatabaseReady, getDatabase } from './modules/database'
@@ -341,7 +345,7 @@ function runFatalProcessCleanup(): Promise<void> {
         console.warn('[process-handlers] closeAllBrowsers errors', result.errors)
       }
     },
-    cleanupRendererState: () => requestRendererStateFlush(mainWindow),
+    cleanupRendererState: () => requestRendererStateFlush(mainWindow).then(() => undefined),
     cleanupDbWorker: () => shutdownWorkerDbBridge(),
     cleanupDocumentWorker: () => shutdownDocumentWorker(),
     cleanupDocumentDirectoryBroadcasts: () => shutdownDirectoryChangeBroadcasts(),
@@ -507,7 +511,11 @@ async function createWindow(): Promise<void> {
   windowMaterialController.attachLifecycle() // Stage 1 是 stub；Stage 2 填监听器
 
   const closedWindow = mainWindow
+  mainWindow.on('close', (event) => {
+    getGracefulWindowCloseCoordinator().handleWindowClose(event)
+  })
   mainWindow.on('closed', () => {
+    getGracefulWindowCloseCoordinator().handleWindowClosed()
     if (mainWindow === closedWindow) {
       mainWindow = null
       windowMaterialController = null
@@ -1076,22 +1084,8 @@ app.on('window-all-closed', () => {
   }
 })
 
-// Clean up before quit. Previous version fired the runtime cleanup with `void`
-// and then synchronously closed the DB, so the process could exit mid-cleanup
-// and leave sidecar / chrome / rsshub orphans. We now defer the quit, await an
-// ordered shutdown (bounded by a 5s timeout so a stuck sidecar can't hang the
-// app), then re-trigger quit. The `isQuitting` guard prevents the second
-// `app.quit()` from re-entering this handler.
-let isQuitting = false
-app.on('before-quit', (event) => {
-  if (isQuitting) return
-  isQuitting = true
-  event.preventDefault()
+async function cleanupBeforeAppQuit(startedAt: number): Promise<void> {
   powerMonitor.removeListener('resume', handlePowerResume)
-  // Stop the reminder scheduler synchronously — it owns only in-process
-  // setTimeout handles, no IO or sidecar processes, so it's safe to run
-  // before the async cleanup chain. Doing it here prevents any timer that
-  // races the shutdown from trying to call into a half-destroyed mainWindow.
   try {
     reminderScheduler?.stop()
   } catch (err) {
@@ -1103,7 +1097,8 @@ app.on('before-quit', (event) => {
     console.warn('[before-quit] calendarSyncScheduler.stop threw:', err)
   }
   const rssAutoRefreshStopped = stopRSSAutoRefresh()
-  void runBeforeQuitCleanup({
+  const remainingTimeoutMs = Math.max(0, 5_000 - (Date.now() - startedAt))
+  await runBeforeQuitCleanup({
     cleanupAgentRuntime,
     cleanupAgentManager: () => agentManager.cleanup(),
     cleanupRsshubManager: async () => {
@@ -1117,15 +1112,51 @@ app.on('before-quit', (event) => {
         console.warn('[before-quit] closeAllBrowsers errors', result.errors)
       }
     },
-    cleanupRendererState: () => requestRendererStateFlush(mainWindow),
     cleanupDbWorker: () => shutdownWorkerDbBridge(),
     cleanupDocumentWorker: () => shutdownDocumentWorker(),
     cleanupDocumentDirectoryBroadcasts: () => shutdownDirectoryChangeBroadcasts(),
     cleanupFileWatchers: () => shutdownFileWatchers().then(() => undefined),
     closeDatabase: () => getDatabase().close(),
-  }).catch((err) => {
-    console.error('[before-quit] cleanup error', err)
-  }).finally(() => {
-    app.quit()
+  }, { timeoutMs: remainingTimeoutMs })
+}
+
+function showGracefulExitFailure(error: unknown, action: GracefulExitAction): void {
+  const detail = error instanceof Error ? error.message : String(error)
+  console.error(`[before-quit] state flush failed; ${action} cancelled`, error)
+  const options = {
+    type: 'error' as const,
+    title: '仍有内容没有保存',
+    message: action === 'quit_app'
+      ? 'Ready 已取消退出，避免丢失未保存内容。'
+      : 'Ready 已取消关窗，避免丢失未保存内容。',
+    detail: `${detail}\n\n请返回文档重试保存后再关闭。`,
+    buttons: ['返回并重试'],
+    defaultId: 0,
+    noLink: true,
+  }
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.show()
+    void dialog.showMessageBox(mainWindow, options)
+  } else {
+    void dialog.showMessageBox(options)
+  }
+}
+
+let gracefulWindowCloseCoordinator: GracefulWindowCloseCoordinator | null = null
+
+function getGracefulWindowCloseCoordinator(): GracefulWindowCloseCoordinator {
+  gracefulWindowCloseCoordinator ??= new GracefulWindowCloseCoordinator({
+    flushRendererState: () => requestRendererStateFlush(mainWindow, 5_000),
+    cleanupBeforeQuit: cleanupBeforeAppQuit,
+    requestWindowClose: () => {
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.close()
+    },
+    requestAppQuit: () => app.quit(),
+    onFailure: showGracefulExitFailure,
   })
+  return gracefulWindowCloseCoordinator
+}
+
+app.on('before-quit', (event) => {
+  getGracefulWindowCloseCoordinator().handleBeforeQuit(event)
 })

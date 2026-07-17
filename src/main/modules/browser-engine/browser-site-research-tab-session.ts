@@ -41,9 +41,11 @@ function xiaohongshuResearchScript(template: BrowserStructuredTemplate, limit: n
       }).filter((item) => item.title && item.link)
       if (items.length > 0) return items
       const pageText = normalize(document.body?.innerText)
-      const state = /验证码|安全验证|访问频繁|扫码登录|登录后查看|请先登录|captcha|verification|challenge/i.test(pageText)
-        ? 'waiting_human'
-        : /暂无(?:相关)?结果|没有找到(?:相关)?内容|搜索无结果|换个词试试/i.test(pageText)
+      const state = /访问频繁|请求频繁|操作频繁|429|rate.?limit/i.test(pageText)
+        ? 'rate_limited'
+        : /验证码|安全验证|扫码登录|登录后查看|请先登录|captcha|verification|challenge|login required|log in required|sign in required|sign in to view|log in to continue|please (?:sign|log) in/i.test(pageText)
+          ? 'waiting_human'
+          : /暂无(?:相关)?结果|没有找到(?:相关)?内容|搜索无结果|换个词试试/i.test(pageText)
           ? 'verified_empty'
           : location.pathname.toLowerCase().startsWith('/user/profile/') && (document.title || pageText)
             ? 'account_read'
@@ -61,7 +63,7 @@ function xiaohongshuResearchScript(template: BrowserStructuredTemplate, limit: n
         },
       }]
     }
-    const roots = Array.from(document.querySelectorAll('.note-detail-mask .note-container, .note-detail-mask .note-content, .note-container, .note-detail, main'))
+    const roots = Array.from(document.querySelectorAll('.note-detail-mask .note-container, .note-detail-mask .note-content, .note-container, .note-detail'))
       .filter(visible)
     for (const root of roots) {
       const body = text(root, ['#detail-desc', '.desc', '.note-text', '[class*="desc"]', '[class*="content"]'])
@@ -81,7 +83,19 @@ function xiaohongshuResearchScript(template: BrowserStructuredTemplate, limit: n
         },
       }]
     }
-    return []
+    const pageText = normalize(document.body?.innerText)
+    const state = /访问频繁|请求频繁|操作频繁|429|rate.?limit/i.test(pageText)
+      ? 'rate_limited'
+      : /验证码|安全验证|扫码登录|登录后查看|请先登录|captcha|verification|challenge|login required|log in required|sign in required|sign in to view|log in to continue|please (?:sign|log) in/i.test(pageText)
+        ? 'waiting_human'
+        : 'structure_unavailable'
+    return [{
+      sourceUrl: location.href,
+      title: '__READY_RESEARCH_STATE__',
+      link: location.href,
+      summary: '',
+      rawFields: { researchState: state, structure: { inMainContentRegion: true } },
+    }]
   })()`
 }
 
@@ -89,9 +103,10 @@ function xiaohongshuReadyScript(template: BrowserStructuredTemplate): string {
   return `(() => {
     const pageText = String(document.body?.innerText || '').replace(/\\s+/g, ' ').trim()
     const terminalText = [
-      '验证码', '安全验证', '访问频繁', '扫码登录', '登录后查看', '请先登录',
+      '验证码', '安全验证', '访问频繁', '请求频繁', '操作频繁', '扫码登录', '登录后查看', '请先登录',
       '暂无相关结果', '没有找到相关内容', '搜索无结果', '换个词试试',
-      'captcha', 'verification', 'challenge',
+      'captcha', 'verification', 'challenge', 'login required', 'log in required', 'sign in required',
+      'sign in to view', 'log in to continue', 'please sign in', 'please log in', 'rate limit', '429',
     ].some((term) => pageText.toLowerCase().includes(term.toLowerCase()))
     if (${JSON.stringify(template)} === 'card_list') {
       if (location.pathname.toLowerCase().startsWith('/user/profile/')) {
@@ -99,7 +114,17 @@ function xiaohongshuReadyScript(template: BrowserStructuredTemplate): string {
       }
       return Boolean(document.querySelector('section.note-item, .note-item')) || terminalText
     }
-    return Boolean(document.querySelector('.note-detail-mask .note-container, .note-detail-mask .note-content, .note-container, .note-detail, main')) || terminalText
+    const detailSelectors = [
+      '#detail-desc', '#detail-title', '.note-detail-mask .desc', '.note-detail-mask .title',
+      '.note-container .desc', '.note-container .note-text', '.note-container h1', '.note-container h2',
+    ]
+    const detailReady = detailSelectors.some((selector) => {
+      const node = document.querySelector(selector)
+      if (!(node instanceof HTMLElement)) return false
+      const rect = node.getBoundingClientRect()
+      return rect.width > 0 && rect.height > 0 && Boolean(String(node.textContent || '').trim())
+    })
+    return detailReady || terminalText
   })()`
 }
 

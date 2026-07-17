@@ -23,6 +23,10 @@ import {
 } from './write-locks'
 import { getActiveDocTab, resolveDocActionTab, resolveDocTab } from './target-resolve'
 import { useDocTabs } from '../../../stores/useDocTabs'
+import {
+  getDocumentSaveSerializationKey,
+  runSerializedDocumentSave,
+} from '../../document/documentSaveRegistry'
 import { requestWorkbenchModeOpen } from '../../workbench/mode-transition'
 import { parseShowWidgetFences, tryParseWidgetPayload } from '../../../components/document/widget-fence-parser'
 import {
@@ -1119,7 +1123,7 @@ async function saveTabWithDialog(tabId: string, title: string, content: string, 
     const docStore = useDocTabs.getState()
     docStore.setTabPath(tabId, harnessAutosavePath)
     docStore.renameTab(tabId, harnessAutosavePath.split('/').pop() || title || '新文档')
-    docStore.markTabSaved(tabId)
+    docStore.commitTabSaveSnapshot(tabId, content, content)
     return { success: true, path: harnessAutosavePath }
   }
 
@@ -1140,8 +1144,52 @@ async function saveTabWithDialog(tabId: string, title: string, content: string, 
   const docStore = useDocTabs.getState()
   docStore.setTabPath(tabId, result.path)
   docStore.renameTab(tabId, result.path.split('/').pop() || title || '新文档')
-  docStore.markTabSaved(tabId)
+  docStore.commitTabSaveSnapshot(tabId, content, content)
   return { success: true, path: result.path }
+}
+
+async function saveExistingDocActionTab(tabId: string, targetPath: string): Promise<string> {
+  return runSerializedDocumentSave(
+    getDocumentSaveSerializationKey(tabId, targetPath),
+    async () => {
+      const docStore = useDocTabs.getState()
+      const tab = docStore.tabs.find((item) => item.id === tabId)
+      if (!tab) return `保存已取消：文档标签已关闭（${targetPath}）`
+      if (typeof window === 'undefined' || !window.electronAPI?.document?.writeFile) {
+        return '当前环境不支持保存文档'
+      }
+      const pendingToolWrite = getPendingToolDocumentWrite(tab.id)
+      const shouldUsePendingToolWrite = Boolean(
+        pendingToolWrite && (tab.content === pendingToolWrite.content || tab.content === pendingToolWrite.baseContent),
+      )
+      const contentToSave = shouldUsePendingToolWrite && pendingToolWrite ? pendingToolWrite.content : tab.content
+      const expectedContent = tab.content
+      if (!tab.isDirty || shouldUsePendingToolWrite) {
+        const disk = await window.electronAPI.document.readFile?.(targetPath).catch(() => null)
+        const diskContent = disk && typeof disk === 'object' && 'success' in disk && disk.success
+          ? String(disk.content || '')
+          : null
+        if (diskContent === contentToSave) {
+          if (pendingToolWrite) clearPendingToolDocumentWrite(tab.id)
+          const committed = docStore.commitTabSaveSnapshot(tab.id, expectedContent, contentToSave)
+          rememberDocActionDocument(tab.id)
+          clearRecentToolTargetTab(tab.id)
+          return committed
+            ? `文档未改动，已跳过保存：${targetPath}`
+            : `磁盘已是目标版本，当前标签仍有新的未保存编辑：${targetPath}`
+        }
+      }
+      const result = await window.electronAPI.document.writeFile(targetPath, contentToSave)
+      if (!result.success) return `保存失败：${result.error || tab.title}`
+      const committed = docStore.commitTabSaveSnapshot(tab.id, expectedContent, contentToSave)
+      clearPendingToolDocumentWrite(tab.id)
+      rememberDocActionDocument(tab.id)
+      clearRecentToolTargetTab(tab.id)
+      return committed
+        ? `已保存文档：${targetPath}`
+        : `已保存文档发起时的版本，当前标签仍有新的未保存编辑：${targetPath}`
+    },
+  )
 }
 
 export async function performDocAction(action: DocActionPayload): Promise<string> {
@@ -1558,35 +1606,7 @@ export async function performDocAction(action: DocActionPayload): Promise<string
     }
     const saveBlockedReason = getDirectSaveBlockReason(targetPath)
     if (saveBlockedReason) return saveBlockedReason
-    if (typeof window === 'undefined' || !window.electronAPI?.document?.writeFile) return '当前环境不支持保存文档'
-    const pendingToolWrite = getPendingToolDocumentWrite(tab.id)
-    const shouldUsePendingToolWrite = Boolean(
-      pendingToolWrite && (tab.content === pendingToolWrite.content || tab.content === pendingToolWrite.baseContent),
-    )
-    const contentToSave = shouldUsePendingToolWrite && pendingToolWrite ? pendingToolWrite.content : tab.content
-    if (!tab.isDirty || shouldUsePendingToolWrite) {
-      const disk = await window.electronAPI.document.readFile?.(targetPath).catch(() => null)
-      const diskContent = disk && typeof disk === 'object' && 'success' in disk && disk.success
-        ? String(disk.content || '')
-        : null
-      if (diskContent === contentToSave) {
-        if (pendingToolWrite) clearPendingToolDocumentWrite(tab.id)
-        if (contentToSave === tab.content) docStore.markTabSaved(tab.id)
-        rememberDocActionDocument(tab.id)
-        clearRecentToolTargetTab(tab.id)
-        return `文档未改动，已跳过保存：${targetPath}`
-      }
-    }
-    const result = await window.electronAPI.document.writeFile(targetPath, contentToSave)
-    if (!result.success) return `保存失败：${result.error || tab.title}`
-    if (contentToSave !== tab.content) {
-      docStore.setTabContent(tab.id, contentToSave)
-    }
-    docStore.markTabSaved(tab.id)
-    clearPendingToolDocumentWrite(tab.id)
-    rememberDocActionDocument(tab.id)
-    clearRecentToolTargetTab(tab.id)
-    return `已保存文档：${targetPath}`
+    return saveExistingDocActionTab(tab.id, targetPath)
   }
 
   return `不支持的文档动作：${type}`
@@ -1883,14 +1903,31 @@ export async function runDocCommand(raw: string): Promise<CommandResult> {
         ? { handled: true, text: `已另存：${saved.path}` }
         : { handled: true, text: `保存失败：${saved.error || tab.title}`, isError: true }
     }
-    if (!tab.isDirty) return { handled: true, text: `文档未改动，已跳过保存：${tab.path}` }
-    const saveBlockedReason = getDirectSaveBlockReason(tab.path)
+    const targetPath = tab.path
+    const saveBlockedReason = getDirectSaveBlockReason(targetPath)
     if (saveBlockedReason) return { handled: true, text: saveBlockedReason, isError: true }
     if (typeof window === 'undefined' || !window.electronAPI?.document?.writeFile) return { handled: true, text: '当前环境不支持保存文档', isError: true }
-    const result = await window.electronAPI.document.writeFile(tab.path, tab.content)
-    if (!result.success) return { handled: true, text: `保存失败：${result.error || tab.path}`, isError: true }
-    docStore.markTabSaved(tab.id)
-    return { handled: true, text: `已保存：${tab.path}` }
+    return runSerializedDocumentSave(
+      getDocumentSaveSerializationKey(tab.id, targetPath),
+      async () => {
+        const currentStore = useDocTabs.getState()
+        const currentTab = currentStore.tabs.find((item) => item.id === tab.id)
+        if (!currentTab || currentTab.path !== targetPath) {
+          return { handled: true, text: `保存已取消：文档标签已关闭或路径已改变（${targetPath}）`, isError: true }
+        }
+        if (!currentTab.isDirty) return { handled: true, text: `文档未改动，已跳过保存：${targetPath}` }
+        const snapshot = currentTab.content
+        const result = await window.electronAPI.document.writeFile(targetPath, snapshot)
+        if (!result.success) return { handled: true, text: `保存失败：${result.error || targetPath}`, isError: true }
+        const committed = currentStore.commitTabSaveSnapshot(currentTab.id, snapshot, snapshot)
+        return {
+          handled: true,
+          text: committed
+            ? `已保存：${targetPath}`
+            : `已保存发起时的版本，当前仍有新的未保存编辑：${targetPath}`,
+        }
+      },
+    )
   }
 
   return { handled: true, text: `未知文档命令：${command}`, isError: true }

@@ -27,6 +27,7 @@ import {
   buildFloatingMenuSurfaceStyle,
 } from '../ui/floatingMenuStyles'
 import { subscribeWorkbenchWindowResize } from '../../modules/workbench/windowResize'
+import { subscribeDocumentDirectoryChanges } from '../../modules/document/directoryChangeBridge'
 import './filesPanelFloatingMenu.css'
 
 interface FilesPanelProps {
@@ -260,9 +261,8 @@ export default function FilesPanel({ isVisible, children }: FilesPanelProps) {
 
   useEffect(() => {
     if (!isVisible || !isConnected) return
-    if (!window.electronAPI?.document?.onDirectoryChange) return
 
-    const unsubscribe = window.electronAPI.document.onDirectoryChange(() => {
+    const unsubscribe = subscribeDocumentDirectoryChanges(() => {
       if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current)
       refreshTimerRef.current = setTimeout(() => {
         refreshTimerRef.current = null

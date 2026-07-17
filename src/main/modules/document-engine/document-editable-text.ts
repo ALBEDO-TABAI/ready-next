@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs'
-import { readFile, stat } from 'node:fs/promises'
-import { extname } from 'node:path'
+import { readFile, realpath, stat } from 'node:fs/promises'
+import { basename, dirname, extname, join, resolve } from 'node:path'
 
 import { EBOOK_BINARY_EXTENSIONS } from '../../../shared/ebook'
 import { BINARY_EXTENSIONS } from './binary-extensions'
@@ -15,6 +15,43 @@ const TEXT_WRITE_BLOCKED_EXTENSIONS = new Set([
   '.docx', '.doc', '.xlsx', '.xls', '.pptx', '.ppt', '.pdf',
   ...EBOOK_BINARY_EXTENSIONS,
 ])
+
+type PublishEditableText = (targetPath: string, data: string | Uint8Array) => Promise<void>
+
+interface DocumentEditableTextWriteOptions {
+  publish?: PublishEditableText
+}
+
+const documentWriteTails = new Map<string, Promise<void>>()
+
+async function resolveDocumentWriteKey(filePath: string): Promise<string> {
+  const absolutePath = resolve(filePath)
+  try {
+    return await realpath(absolutePath)
+  } catch {
+    try {
+      return join(await realpath(dirname(absolutePath)), basename(absolutePath))
+    } catch {
+      return absolutePath
+    }
+  }
+}
+
+async function runSerializedDocumentWrite<T>(filePath: string, operation: () => Promise<T>): Promise<T> {
+  const key = await resolveDocumentWriteKey(filePath)
+  const previous = documentWriteTails.get(key) ?? Promise.resolve()
+  const result = previous.catch(() => undefined).then(operation)
+  const tail = result.then(() => undefined, () => undefined)
+  documentWriteTails.set(key, tail)
+  void tail.then(() => {
+    if (documentWriteTails.get(key) === tail) documentWriteTails.delete(key)
+  })
+  return result
+}
+
+export function resetDocumentEditableTextWriteQueueForTests(): void {
+  documentWriteTails.clear()
+}
 
 export async function readDocumentEditableText(
   filePath: string,
@@ -49,19 +86,22 @@ export async function readDocumentEditableText(
 export async function writeDocumentEditableText(
   filePath: string,
   content: string,
+  options: DocumentEditableTextWriteOptions = {},
 ): Promise<{ success: boolean; error?: string }> {
-  try {
-    const extension = extname(filePath).toLowerCase()
-    if (extension === '.docx') return getDocumentWorker().writeDocx(filePath, content)
-    if (TEXT_WRITE_BLOCKED_EXTENSIONS.has(extension)) {
-      return {
-        success: false,
-        error: `无法直接以纯文本保存到 ${extension || 'binary'} 文件。请另存为 .md/.txt，避免损坏原文件。`,
+  return runSerializedDocumentWrite(filePath, async () => {
+    try {
+      const extension = extname(filePath).toLowerCase()
+      if (extension === '.docx') return getDocumentWorker().writeDocx(filePath, content)
+      if (TEXT_WRITE_BLOCKED_EXTENSIONS.has(extension)) {
+        return {
+          success: false,
+          error: `无法直接以纯文本保存到 ${extension || 'binary'} 文件。请另存为 .md/.txt，避免损坏原文件。`,
+        }
       }
+      await (options.publish ?? publishFileAtomically)(filePath, content)
+      return { success: true }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
     }
-    await publishFileAtomically(filePath, content)
-    return { success: true }
-  } catch (error) {
-    return { success: false, error: error instanceof Error ? error.message : String(error) }
-  }
+  })
 }

@@ -46,6 +46,7 @@ import {
   shouldRefreshDocumentTabOnActivation,
 } from '../../modules/document/documentExternalRefresh'
 import { invalidateImageGalleryDirectories } from '../../modules/document/imageGalleryDirectoryCache'
+import { subscribeDocumentDirectoryChanges } from '../../modules/document/directoryChangeBridge'
 import { registerBeforeQuitFlushHandler } from '../../modules/app/beforeQuitFlushRegistry'
 import { releaseClosedBoardHandles } from '../../modules/document/boardHandleRegistry'
 import {
@@ -495,8 +496,7 @@ export default function DocumentMode({
   }, [activeTab?.id, isActive, refreshCleanTextTabsFromDisk, splitTab?.id])
 
   useEffect(() => {
-    if (!window.electronAPI?.document?.onDirectoryChange) return undefined
-    const unsubscribe = window.electronAPI.document.onDirectoryChange((event) => {
+    const unsubscribe = subscribeDocumentDirectoryChanges((event) => {
       const changedPaths = Array.isArray(event?.paths) ? event.paths : []
       if (changedPaths.length === 0) return
       invalidateImageGalleryDirectories(changedPaths)

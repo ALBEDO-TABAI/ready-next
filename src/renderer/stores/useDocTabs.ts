@@ -123,15 +123,22 @@ export function getDocTabDraftStorageKey(id: string): string {
     return `${DRAFT_STORAGE_PREFIX}${encodeURIComponent(id)}`
 }
 
-function writePendingDraft(id: string): void {
+function writePendingDraft(id: string): boolean {
     const pending = pendingDraftWrites.get(id)
-    if (!pending) return
+    if (!pending) return true
+    const storage = getDocTabStorage()
+    if (!storage) {
+        pending.timer = null
+        return false
+    }
     try {
-        getDocTabStorage()?.setItem(getDocTabDraftStorageKey(id), pending.content)
+        storage.setItem(getDocTabDraftStorageKey(id), pending.content)
         pendingDraftWrites.delete(id)
+        return true
     } catch {
         // silent-catch: keep the draft queued so a later flush can retry it.
         pending.timer = null
+        return false
     }
 }
 
@@ -170,7 +177,6 @@ export function flushPendingDocTabMetadata(): void {
     cancelPendingMetadataSchedules()
     const storage = getDocTabStorage()
     if (!storage) {
-        pendingMetadataWrite = null
         return
     }
     try {
@@ -180,6 +186,17 @@ export function flushPendingDocTabMetadata(): void {
     } catch {
         // silent-catch: retain the latest snapshot so the next lifecycle flush can retry it.
         pendingMetadataWrite = pending
+    }
+}
+
+export function flushPendingDocTabPersistenceForExit(): void {
+    flushPendingDocTabDrafts()
+    flushPendingDocTabMetadata()
+    const failures: string[] = []
+    if (pendingDraftWrites.size > 0) failures.push(`${pendingDraftWrites.size} 份文档草稿`)
+    if (pendingMetadataWrite) failures.push('文档标签恢复信息')
+    if (failures.length > 0) {
+        throw new Error(`${failures.join('、')}未能写入本地恢复存储`)
     }
 }
 

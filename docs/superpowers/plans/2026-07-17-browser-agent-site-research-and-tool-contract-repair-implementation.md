@@ -358,14 +358,15 @@ bind_site_session
 | `browserTaskId` | 浏览器任务与 continuation 主键 | 从创建到清理不变 |
 | `createdByRunId` | 首次创建来源 | 不变，仅审计 |
 | `activeExecutionBinding.runId` | 当前实际执行/恢复它的 Agent run | 每次合法 resume 原子更新 |
-| `parentTaskId` | 用户可见主任务 | 通常不变；合法 handoff 另有显式记录 |
+| `parentTaskId` | 最近一次明确执行/续跑它的用户可见主任务 | 创建时写入；显式 resume/handoff 时与 active binding 一起原子换绑。它用于审计和接力，不是同一 owner + scope 后续只读查询的授权边界 |
 
 projection：
 
 - `taskId = browserTaskId` 或稳定的 source-chain task id。
 - 有 active binding 时，`runId = activeExecutionBinding.runId`；二者在一次 repository 写中校验。
 - 无 active Agent binding 的系统后台 projection 才允许 `runId = browserTaskId`，且 `executionBinding=null`。
-- resume 先通过 run/task/scope admission，再更新 binding 并启动 runner；旧 run 的晚到事件按 revision 拒绝。
+- `browser_task(get/status)` 是纯读取：调用方显式持有 `browserTaskId`，并且 owner 与 scope 相同即可在后续主任务中读取；不得因为 `parentTaskId` 已属于上一轮而把状态复查误拒绝。
+- resume 先通过 run/task/scope admission，再原子更新 active binding 与 parent handoff 并启动 runner；旧 run 的晚到事件按 revision 拒绝。
 
 ### 4.8 browser task 真值优先，projection 可重建
 
@@ -582,14 +583,15 @@ Gate：disabled -> confirm -> new run 只有一次；旧工具面不复活，原
 | 阶段 | 状态 | 证据 |
 |---|---|---|
 | Phase 0 事故合同 | completed | 原始 18 个关键词、账号评价子句、错误 batch 路由、缺失公开参数、投影身份冲突和 0 交付假完成均固定为回归用例。 |
-| Phase 1 意图与公开合同 | completed | 新增独立 `browser_research`，公开工具面为 32 项；原任务解析为 `site_research`，18 个查询保序且不再打开持久采集/下载面。公开 schema、provider wire、typed invocation 与 handler 必填字段由同一组合同覆盖。 |
-| Phase 2 身份与投影 | completed | 浏览器 task、创建 run、当前执行 binding 和父任务分离；真实 SQLite migration/native gate 通过。投影 revision 单调递增，CAS 冲突可见；任务写入与投影并发时会按最新 revision 自动重投，不让旧投影反杀真实任务。 |
-| Phase 3 研究 runner | completed | 站内研究主流程已从通用 content runner 拆到独立任务主机；受控 18-query 场景覆盖顺序执行、重复 URL、多词命中、详情缺失、登录/挑战、限流、暂停、恢复、接管与中止。 |
-| Phase 4 完成真相 | completed | 错误回执不再满足成功证据；0/18、部分 query、缺正文、缺互动指标和可恢复断点均按真实状态显示，不再把后台句柄或失败工具调用投成绿色完成。 |
+| Phase 1 意图与公开合同 | completed | 新增独立 `browser_research`，公开工具面为 32 项；原任务解析为 `site_research`，18 个查询保序且不再打开持久采集/下载面。自然中文单关键词、多关键词、带或不带冒号/逗号的当前站点研究均有正例，普通网页搜索与否定表达有反例；公开 schema、provider wire、typed invocation 与 handler 必填字段由同一组合同覆盖。 |
+| Phase 2 身份与投影 | completed | 浏览器 task、创建 run、当前执行 binding 和父任务分离；真实 SQLite migration/native gate 通过。同 owner + scope 的后续主任务可以凭显式 task id 纯读取状态，只有执行/续跑才原子换绑当前 run 与父任务。投影 revision 单调递增，CAS 冲突可见；任务写入与投影并发时会按最新 revision 自动重投，不让旧投影反杀真实任务。 |
+| Phase 3 研究 runner | completed | 站内研究主流程已从通用 content runner 拆到独立任务主机；受控 18-query 场景覆盖顺序执行、重复 URL、多词命中、详情缺失、中英文登录/挑战、429 限流、暂停、恢复、接管与中止。续跑复用已冻结 query 结果和详情进度，不清零已完成查询；直接小红书文章 URL 已经生产 `TabSession` 路径证明会立即走详情抽取，不再等待列表页条件；完整 18 URL 集不会被默认页数截断；单次任务内重复详情失败会复用结果。agent tab 提前丢失和 lease 冲突分别投影为不可续跑终止与可续跑暂停。 |
+| Phase 4 完成真相 | completed | 错误回执不再满足成功证据；0/18、部分 query、缺正文、缺互动指标和可恢复断点均按真实状态显示。未深读候选标记明确原因；登录/验证码、限流、终止性参数/profile/站点/结构失败分别投影，不能继续的任务不再给出虚假继续入口，也不把后台句柄或失败工具调用投成绿色完成。 |
 | Phase 5 确认后续跑 | completed | provider 工具关闭时仍先确认；确认后只创建一次新 run，重新读取当前配置并保留原始 18-query 请求，拒绝、超时和配置变化不会误启动。 |
-| Phase 6 本地与成品门禁 | completed | 研究与工具合同专项、`verify:browser-surface`、`verify:browser-reliability`、`verify:browser-lane`、native-lock、`verify:native`、`verify:stability` 和全量 `verify` 均通过；最终 `build:dist` 成功。Ready 0.7.5 DMG 已只读挂载核验版本、arm64 架构、Applications 入口、包内资源和 deep/strict 签名，并正常卸载。 |
+| Phase 6 本地与成品门禁 | completed | 修正后的研究与工具合同专项、`verify:browser-surface`、`verify:browser-reliability`、`verify:browser-lane`、native-lock、`verify:native`、`verify:stability`、全量 `verify` 与 production build 均通过。按最终代码重建的 Ready 0.7.5 应用、ZIP 与 DMG 已通过版本、arm64 架构、Applications 入口、包内独立 worker、deep/strict 签名、只读挂载和隔离资料启动检查；DMG 为 246,196,051 字节，SHA-256 为 `0bb505a3af3420d3853ba5753d8c664e073e295fa2b472db29fb6110d72c4408`，ZIP 为 240,103,766 字节，SHA-256 为 `3720946eaad768162ea3cb201f67beb3e86c9adf2ccdddadd4b26a1617b49e7b`。同一对抗复审者已对全部差异与成品明确裁决 `PASS`，本阶段关闭。 |
 | 已登录小红书真站 | completed | Ready 0.7.5 真实 Electron 会话在已登录目标账号页运行原始 18 个关键词，生成单一 `site_research` 任务 `browser-task-9f92b1f6-5c1d-46e6-a3eb-2f84f0f224d8`，没有再逐词打开标签。账号读取先形成 8 条可见内容的 evaluation receipt；18/18 查询完成、0 个查询失败、108 条候选均有页面可见互动指标。验收脚本曾误关专用标签，原任务用持久断点换绑新标签后继续，已完成结果未丢失。详情页最终未暴露可核验正文，因此 `detailCount=0`、`missingEssentialOutputs=["body"]`，任务按合同标为 failed 而非绿色完成；没有把标题或结果卡冒充正文。 |
+| 显式选技后的状态复查 | completed | 在新的父任务 `req-ready075-xhs-skill-status-proof-1784316142240` 中显式选择社媒运营技能后，最终工具面保留 `browser_research`、`browser_task` 与 `browser_request_takeover`，并继续抑制不属于当前站内任务的通用网页研究。Agent 只调用一次 `browser_task(get)`，没有重搜、续跑、页面操作或标签扩散；它准确回报 18/18、108 条候选/互动数据、8 条账号证据、0 正文及 failed/可继续状态。 |
 
 ## 11. 当前裁决
 
-代码、数据合同、迁移、状态机、失败语义、测试门禁、0.7.5 成品路径和已登录真站验收均已完成。真站结果证明 18 个查询会进入同一可恢复研究任务、目标账号证据先于适配判断产生、候选互动数据可追溯；同时也证明当站点不提供详情正文时，系统会明确拒绝绿色完成。这里关闭的是产品修复与诚实状态合同，不把本次未取得的正文伪写成研究交付。
+代码、数据合同、迁移、状态机、失败语义、修正后全量门禁、已登录真站验收和按最终代码重建的 0.7.5 成品已经完成。真站结果证明 18 个查询会进入同一可恢复研究任务、目标账号证据先于适配判断产生、候选互动数据可追溯；同时也证明当站点不提供详情正文时，系统会明确拒绝绿色完成，不把本次未取得的正文伪写成研究交付。同一对抗复审者已对全部阻断项和最终成品明确给出 `PASS`，本计划完成。

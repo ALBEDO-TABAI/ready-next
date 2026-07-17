@@ -1,6 +1,11 @@
 import type { BrowserStructuredItem } from './capability-types'
 
-export type SiteResearchQueryStatus = 'completed' | 'empty' | 'waiting_human' | 'failed'
+export type SiteResearchQueryStatus = 'completed' | 'empty' | 'waiting_human' | 'rate_limited' | 'failed'
+
+export interface SiteResearchInterruption {
+  classification: 'verification' | 'rate_limit' | 'network' | 'invalid_input' | 'unsupported_site' | 'unavailable' | 'cancelled' | 'unknown'
+  retryable: boolean
+}
 
 export interface SiteResearchCandidate {
   rank: number
@@ -37,9 +42,10 @@ export interface SiteResearchCheckpoint {
   queryIndex: number
   detailIndex: number
   queryResults: SiteResearchQueryResult[]
-  phase: 'query_search' | 'read_details' | 'aggregate' | 'completed' | 'waiting_human' | 'failed'
+  phase: 'query_search' | 'read_details' | 'aggregate' | 'completed' | 'waiting_human' | 'rate_limited' | 'failed'
   lastSuccessfulUrl: string | null
   pauseReason: string | null
+  interruption?: SiteResearchInterruption | null
   sourceSiteTabId?: string | null
   siteOrigin?: string | null
   researchTabId?: string | null
@@ -102,6 +108,18 @@ function isXiaohongshuUrl(value: string): boolean {
   try { return /(^|\.)xiaohongshu\.com$/i.test(new URL(value).hostname) } catch { return false }
 }
 
+function isXiaohongshuDirectArticleUrl(value: string): boolean {
+  try {
+    const url = new URL(value)
+    if (!/(^|\.)xiaohongshu\.com$/i.test(url.hostname)) return false
+    const segments = url.pathname.split('/').filter(Boolean)
+    return ((segments[0] === 'search_result' || segments[0] === 'explore') && segments.length >= 2)
+      || (segments[0] === 'user' && segments[1] === 'profile' && segments.length >= 4)
+  } catch {
+    return false
+  }
+}
+
 function researchPageState(items: BrowserStructuredItem[]): string | null {
   for (const item of items) {
     const state = item.rawFields?.researchState
@@ -113,6 +131,7 @@ function researchPageState(items: BrowserStructuredItem[]): string | null {
 function assertResearchPageReadable(url: string, items: BrowserStructuredItem[], candidateCount: number): string | null {
   const state = researchPageState(items)
   if (state === 'waiting_human') throw new Error('security verification or login is required')
+  if (state === 'rate_limited') throw new Error('site research rate limit is active')
   if (state === 'structure_unavailable') throw new Error('research page structure is unavailable')
   if (isXiaohongshuUrl(url) && candidateCount === 0 && state !== 'verified_empty' && state !== 'account_read') {
     throw new Error('research page returned no verifiable result state')
@@ -152,6 +171,7 @@ function numberFromUnknown(value: unknown): number | null {
 }
 
 function candidateFromItem(item: BrowserStructuredItem, query: string, rank: number, capturedAt: string): SiteResearchCandidate | null {
+  if (typeof item.rawFields?.researchState === 'string') return null
   const url = String(item.link || item.sourceUrl || '').trim()
   const title = String(item.title || '').trim()
   if (!url || !title) return null
@@ -190,6 +210,46 @@ function candidateFromItem(item: BrowserStructuredItem, query: string, rank: num
   }
 }
 
+function candidateFromDirectPage(
+  url: string,
+  query: string,
+  items: BrowserStructuredItem[],
+  capturedAt: string,
+): SiteResearchCandidate | null {
+  const item = items.find((candidate) => typeof candidate.rawFields?.researchState !== 'string' && Boolean(
+    String(candidate.title || '').trim()
+    || String(candidate.summary || '').trim()
+    || String(candidate.rawFields?.body || candidate.rawFields?.content || '').trim(),
+  ))
+  const body = detailBody(items)
+  if (!item && !body) return null
+  let fallbackTitle = url
+  try {
+    fallbackTitle = new URL(url).pathname.split('/').filter(Boolean).pop() || new URL(url).hostname
+  } catch {
+    // Keep the supplied URL as the visible fallback title.
+  }
+  return {
+    rank: 1,
+    queryRanks: { [query]: 1 },
+    canonicalUrl: canonicalUrl(url),
+    retrievalUrl: url,
+    title: String(item?.title || '').trim() || fallbackTitle,
+    author: typeof item?.rawFields?.author === 'string' ? item.rawFields.author.trim() || null : null,
+    engagement: numberFromUnknown(
+      item?.rawFields?.engagement
+        ?? item?.rawFields?.likes
+        ?? item?.rawFields?.likeCount
+        ?? item?.rawFields?.interaction,
+    ),
+    publishedAt: typeof item?.rawFields?.publishedAt === 'string' ? item.rawFields.publishedAt : null,
+    body,
+    bodyUnavailableReason: body ? null : 'body_not_visible',
+    capturedAt,
+    matchedQueries: [query],
+  }
+}
+
 function detailBody(items: BrowserStructuredItem[]): string | null {
   const parts = items.flatMap((item) => [item.summary, item.rawFields?.body, item.rawFields?.content])
     .map((value) => typeof value === 'string' ? value.trim() : '')
@@ -197,10 +257,66 @@ function detailBody(items: BrowserStructuredItem[]): string | null {
   return parts.length > 0 ? [...new Set(parts)].join('\n') : null
 }
 
-function isHumanBlock(error: unknown): boolean {
-  return /captcha|challenge|verification|验证码|安全验证|登录墙|扫码|429|rate.?limit/i.test(
-    error instanceof Error ? error.message : String(error),
-  )
+function classifyResearchInterruption(error: unknown): {
+  phase: Extract<SiteResearchCheckpoint['phase'], 'waiting_human' | 'rate_limited' | 'failed'>
+  queryStatus: Extract<SiteResearchQueryStatus, 'waiting_human' | 'rate_limited' | 'failed'>
+  interruption: SiteResearchInterruption
+} {
+  const message = error instanceof Error ? error.message : String(error)
+  if (/429|rate.?limit|retry-after|访问频繁|请求频繁|操作频繁|限流/i.test(message)) {
+    return {
+      phase: 'rate_limited',
+      queryStatus: 'rate_limited',
+      interruption: { classification: 'rate_limit', retryable: true },
+    }
+  }
+  if (/captcha|challenge|verification|验证码|安全验证|登录墙|扫码|(?:login|log\s+in|sign\s+in)\s+(?:is\s+)?required|sign\s+in\s+to\s+view|log\s+in\s+to\s+continue|please\s+(?:sign|log)\s+in|请先登录|登录后查看/i.test(message)) {
+    return {
+      phase: 'waiting_human',
+      queryStatus: 'waiting_human',
+      interruption: { classification: 'verification', retryable: true },
+    }
+  }
+  if (/current account evaluation requires|profile page/i.test(message)) {
+    return {
+      phase: 'failed',
+      queryStatus: 'failed',
+      interruption: { classification: 'invalid_input', retryable: false },
+    }
+  }
+  if (/current-site research is not supported/i.test(message)) {
+    return {
+      phase: 'failed',
+      queryStatus: 'failed',
+      interruption: { classification: 'unsupported_site', retryable: false },
+    }
+  }
+  if (/structure is unavailable|no verifiable result state/i.test(message)) {
+    return {
+      phase: 'failed',
+      queryStatus: 'failed',
+      interruption: { classification: 'unavailable', retryable: false },
+    }
+  }
+  if (/cancelled/i.test(message)) {
+    return {
+      phase: 'failed',
+      queryStatus: 'failed',
+      interruption: { classification: 'cancelled', retryable: true },
+    }
+  }
+  if (/timeout|timed out|network|econn|enotfound|socket|temporar/i.test(message)) {
+    return {
+      phase: 'failed',
+      queryStatus: 'failed',
+      interruption: { classification: 'network', retryable: true },
+    }
+  }
+  return {
+    phase: 'failed',
+    queryStatus: 'failed',
+    interruption: { classification: 'unknown', retryable: false },
+  }
 }
 
 export async function runSiteResearch(input: SiteResearchRunInput, port: SiteResearchRunnerPort): Promise<SiteResearchCheckpoint> {
@@ -213,6 +329,7 @@ export async function runSiteResearch(input: SiteResearchRunInput, port: SiteRes
         phase: 'query_search',
         lastSuccessfulUrl: null,
         pauseReason: null,
+        interruption: null,
       }
   const detailCache = new Map<string, { body: string | null; reason: string | null }>()
   for (const result of checkpoint.queryResults) {
@@ -222,24 +339,34 @@ export async function runSiteResearch(input: SiteResearchRunInput, port: SiteRes
       }
     }
   }
-  if (input.checkpoint?.phase === 'completed') {
-    checkpoint.queryIndex = 0
-    checkpoint.detailIndex = 0
-    checkpoint.phase = 'query_search'
-    checkpoint.pauseReason = null
+
+  const stopAsCancelled = (queryIndex = checkpoint.queryIndex): SiteResearchCheckpoint => {
+    checkpoint.queryIndex = queryIndex
+    checkpoint.phase = 'failed'
+    checkpoint.pauseReason = 'cancelled'
+    checkpoint.interruption = { classification: 'cancelled', retryable: true }
+    port.onCheckpoint(checkpoint)
+    return checkpoint
+  }
+
+  const applyInterruption = (error: unknown): ReturnType<typeof classifyResearchInterruption> => {
+    const classified = classifyResearchInterruption(error)
+    checkpoint.phase = classified.phase
+    checkpoint.pauseReason = error instanceof Error ? error.message : String(error)
+    checkpoint.interruption = classified.interruption
+    return classified
   }
 
   if (input.evaluationRequired && !checkpoint.evaluationReceipt) {
     const evaluationTargetUrl = String(input.evaluationTargetUrl || '').trim()
     checkpoint.evaluationTargetUrl = evaluationTargetUrl || null
     if (!evaluationTargetUrl || !isXiaohongshuUrl(evaluationTargetUrl) || !/\/user\/profile\//i.test(new URL(evaluationTargetUrl).pathname)) {
-      checkpoint.phase = 'failed'
-      checkpoint.pauseReason = 'current account evaluation requires a bound account profile page'
+      applyInterruption(new Error('current account evaluation requires a bound account profile page'))
       port.onCheckpoint(checkpoint)
       return checkpoint
     }
     try {
-      if (port.shouldStop()) return { ...checkpoint, phase: 'failed', pauseReason: 'cancelled' }
+      if (port.shouldStop()) return stopAsCancelled()
       const items = await port.extract(evaluationTargetUrl, { template: 'card_list', limit: input.perQueryLimit })
       const capturedAt = port.now()
       const evidence = items
@@ -260,100 +387,203 @@ export async function runSiteResearch(input: SiteResearchRunInput, port: SiteRes
       checkpoint.evaluationCompleted = true
       checkpoint.phase = 'query_search'
       checkpoint.pauseReason = null
+      checkpoint.interruption = null
       port.onCheckpoint(checkpoint)
     } catch (error) {
-      checkpoint.phase = isHumanBlock(error) ? 'waiting_human' : 'failed'
-      checkpoint.pauseReason = error instanceof Error ? error.message : String(error)
+      applyInterruption(error)
       port.onCheckpoint(checkpoint)
       return checkpoint
     }
   }
 
-  const work: Array<{ query: string; url: string }> = input.scope === 'current_site'
-    ? input.queries.map((query) => ({ query, url: currentSiteSearchUrl(String(input.siteUrl || ''), query) }))
-    : input.urls.map((url, index) => ({ query: input.queries[index] || url, url }))
-
-  for (let queryIndex = checkpoint.queryIndex; queryIndex < work.length; queryIndex += 1) {
-    if (port.shouldStop()) return { ...checkpoint, queryIndex, phase: 'failed', pauseReason: 'cancelled' }
-    const current = work[queryIndex]
-    checkpoint.phase = 'query_search'
-    checkpoint.queryIndex = queryIndex
+  let work: Array<{ query: string; url: string }>
+  try {
+    work = input.scope === 'current_site'
+      ? input.queries.map((query) => ({ query, url: currentSiteSearchUrl(String(input.siteUrl || ''), query) }))
+      : input.urls.map((url, index) => ({ query: input.queries[index] || url, url }))
+  } catch (error) {
+    applyInterruption(error)
     port.onCheckpoint(checkpoint)
-    try {
-      const items = await port.extract(current.url, { template: 'card_list', limit: input.perQueryLimit })
-      const capturedAt = port.now()
-      const candidates = items
-        .map((item, index) => candidateFromItem(item, current.query, index + 1, capturedAt))
-        .filter((item): item is SiteResearchCandidate => item !== null)
-        .slice(0, input.perQueryLimit)
-      assertResearchPageReadable(current.url, items, candidates.length)
-      for (const candidate of candidates) {
-        const cached = detailCache.get(candidate.canonicalUrl)
-        if (cached) {
-          candidate.body = cached.body
-          candidate.bodyUnavailableReason = cached.reason
-        }
-      }
-      const queryResult: SiteResearchQueryResult = {
-        query: current.query,
-        status: candidates.length > 0 ? 'completed' : 'empty',
-        candidates,
-        error: null,
-      }
-      checkpoint.queryResults[queryIndex] = queryResult
-      checkpoint.lastSuccessfulUrl = current.url
-      checkpoint.phase = 'read_details'
-      port.onCheckpoint(checkpoint)
+    return checkpoint
+  }
 
-      const detailCandidates = [...candidates]
-        .sort((a, b) => Number(b.engagement ?? -1) - Number(a.engagement ?? -1))
-        .slice(0, input.detailLimitPerQuery)
-      for (let detailIndex = queryIndex === checkpoint.queryIndex ? checkpoint.detailIndex : 0; detailIndex < detailCandidates.length; detailIndex += 1) {
-        if (port.shouldStop()) {
-          checkpoint.phase = 'failed'
-          checkpoint.pauseReason = 'cancelled'
+  const readFrozenDetails = async (
+    queryIndex: number,
+    candidates: SiteResearchCandidate[],
+    startDetailIndex: number,
+  ): Promise<boolean> => {
+    const detailCandidates = [...candidates]
+      .sort((a, b) => Number(b.engagement ?? -1) - Number(a.engagement ?? -1))
+      .slice(0, input.detailLimitPerQuery)
+    const selectedUrls = new Set(detailCandidates.map((candidate) => candidate.canonicalUrl))
+    for (const candidate of candidates) {
+      if (!selectedUrls.has(candidate.canonicalUrl) && !candidate.body && !candidate.bodyUnavailableReason) {
+        candidate.bodyUnavailableReason = 'detail_not_selected'
+      }
+    }
+
+    checkpoint.phase = 'read_details'
+    checkpoint.queryIndex = queryIndex
+    checkpoint.interruption = null
+    port.onCheckpoint(checkpoint)
+    for (let detailIndex = startDetailIndex; detailIndex < detailCandidates.length; detailIndex += 1) {
+      if (port.shouldStop()) {
+        stopAsCancelled(queryIndex)
+        return false
+      }
+      const candidate = detailCandidates[detailIndex]
+      checkpoint.detailIndex = detailIndex
+      port.onCheckpoint(checkpoint)
+      const cached = detailCache.get(candidate.canonicalUrl)
+      if (cached) {
+        candidate.body = cached.body
+        candidate.bodyUnavailableReason = cached.reason
+        continue
+      }
+      try {
+        const details = await port.extract(candidate.retrievalUrl || candidate.canonicalUrl, {
+          template: 'article_list',
+          limit: 4,
+        })
+        const detailState = researchPageState(details)
+        if (detailState === 'waiting_human' || detailState === 'rate_limited') {
+          assertResearchPageReadable(candidate.retrievalUrl || candidate.canonicalUrl, details, 0)
+        }
+        candidate.body = detailBody(details)
+        candidate.bodyUnavailableReason = candidate.body ? null : 'body_not_visible'
+        detailCache.set(candidate.canonicalUrl, {
+          body: candidate.body,
+          reason: candidate.bodyUnavailableReason,
+        })
+      } catch (error) {
+        const classified = classifyResearchInterruption(error)
+        if (classified.phase === 'waiting_human' || classified.phase === 'rate_limited') {
+          applyInterruption(error)
           port.onCheckpoint(checkpoint)
-          return checkpoint
+          return false
         }
-        const candidate = detailCandidates[detailIndex]
-        checkpoint.detailIndex = detailIndex
+        candidate.bodyUnavailableReason = error instanceof Error ? error.message : String(error)
+        detailCache.set(candidate.canonicalUrl, {
+          body: null,
+          reason: candidate.bodyUnavailableReason,
+        })
+      }
+    }
+    checkpoint.detailIndex = 0
+    return true
+  }
+
+  if (input.checkpoint?.phase === 'completed') {
+    for (let queryIndex = 0; queryIndex < checkpoint.queryResults.length; queryIndex += 1) {
+      const result = checkpoint.queryResults[queryIndex]
+      if (!result || (result.status !== 'completed' && result.status !== 'empty')) continue
+      if (!await readFrozenDetails(queryIndex, result.candidates, 0)) return checkpoint
+    }
+    checkpoint.queryIndex = work.length
+  } else {
+    const resumePhase = input.checkpoint?.phase
+    const resumeQueryIndex = checkpoint.queryIndex
+    for (let queryIndex = checkpoint.queryIndex; queryIndex < work.length; queryIndex += 1) {
+      if (port.shouldStop()) return stopAsCancelled(queryIndex)
+      const current = work[queryIndex]
+      const frozenResult = queryIndex === resumeQueryIndex
+        ? checkpoint.queryResults[queryIndex]
+        : null
+      const canResumeFrozenDetails = Boolean(
+        frozenResult
+        && (frozenResult.status === 'completed' || frozenResult.status === 'empty')
+        && (
+          resumePhase === 'read_details'
+          || resumePhase === 'waiting_human'
+          || resumePhase === 'rate_limited'
+          || (resumePhase === 'failed' && checkpoint.interruption?.retryable === true)
+        ),
+      )
+      if (canResumeFrozenDetails && frozenResult) {
+        if (!await readFrozenDetails(queryIndex, frozenResult.candidates, checkpoint.detailIndex)) return checkpoint
+        checkpoint.queryIndex = queryIndex + 1
         port.onCheckpoint(checkpoint)
-        const cached = detailCache.get(candidate.canonicalUrl)
-        if (cached) {
-          candidate.body = cached.body
-          candidate.bodyUnavailableReason = cached.reason
-          continue
-        }
-        try {
-          const details = await port.extract(candidate.retrievalUrl || candidate.canonicalUrl, { template: 'article_list', limit: 4 })
-          candidate.body = detailBody(details)
-          candidate.bodyUnavailableReason = candidate.body ? null : 'body_not_visible'
-          detailCache.set(candidate.canonicalUrl, { body: candidate.body, reason: candidate.bodyUnavailableReason })
-        } catch (error) {
-          if (isHumanBlock(error)) {
-            checkpoint.phase = 'waiting_human'
-            checkpoint.pauseReason = error instanceof Error ? error.message : String(error)
-            port.onCheckpoint(checkpoint)
-            return checkpoint
-          }
-          candidate.bodyUnavailableReason = error instanceof Error ? error.message : String(error)
-        }
+        continue
       }
-      checkpoint.queryIndex = queryIndex + 1
+
+      checkpoint.phase = 'query_search'
+      checkpoint.queryIndex = queryIndex
       checkpoint.detailIndex = 0
+      checkpoint.pauseReason = null
+      checkpoint.interruption = null
       port.onCheckpoint(checkpoint)
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      checkpoint.queryResults[queryIndex] = {
-        query: current.query,
-        status: isHumanBlock(error) ? 'waiting_human' : 'failed',
-        candidates: [],
-        error: message,
+      try {
+        const directArticle = input.scope === 'url_set' && isXiaohongshuDirectArticleUrl(current.url)
+        const items = await port.extract(current.url, {
+          template: directArticle ? 'article_list' : 'card_list',
+          limit: directArticle ? 4 : input.perQueryLimit,
+        })
+        const capturedAt = port.now()
+        let candidates = directArticle
+          ? [candidateFromDirectPage(current.url, current.query, items, capturedAt)]
+            .filter((item): item is SiteResearchCandidate => item !== null)
+          : items
+            .map((item, index) => candidateFromItem(item, current.query, index + 1, capturedAt))
+            .filter((item): item is SiteResearchCandidate => item !== null)
+            .slice(0, input.perQueryLimit)
+        let readabilityItems = items
+        const listState = researchPageState(items)
+        if (listState === 'waiting_human' || listState === 'rate_limited') {
+          assertResearchPageReadable(current.url, items, candidates.length)
+        }
+        if (directArticle && candidates.length > 0) {
+          const directCandidate = candidates[0]
+          detailCache.set(directCandidate.canonicalUrl, {
+            body: directCandidate.body,
+            reason: directCandidate.bodyUnavailableReason,
+          })
+        }
+        if (input.scope === 'url_set' && !directArticle && candidates.length === 0) {
+          const directItems = await port.extract(current.url, { template: 'article_list', limit: 4 })
+          readabilityItems = directItems
+          const directState = researchPageState(directItems)
+          if (directState === 'waiting_human' || directState === 'rate_limited') {
+            assertResearchPageReadable(current.url, directItems, 0)
+          }
+          const directCandidate = candidateFromDirectPage(current.url, current.query, directItems, capturedAt)
+          if (directCandidate) {
+            candidates = [directCandidate]
+            detailCache.set(directCandidate.canonicalUrl, {
+              body: directCandidate.body,
+              reason: directCandidate.bodyUnavailableReason,
+            })
+          }
+        }
+        if (candidates.length === 0) assertResearchPageReadable(current.url, readabilityItems, 0)
+        for (const candidate of candidates) {
+          const cached = detailCache.get(candidate.canonicalUrl)
+          if (cached) {
+            candidate.body = cached.body
+            candidate.bodyUnavailableReason = cached.reason
+          }
+        }
+        const queryResult: SiteResearchQueryResult = {
+          query: current.query,
+          status: candidates.length > 0 ? 'completed' : 'empty',
+          candidates,
+          error: null,
+        }
+        checkpoint.queryResults[queryIndex] = queryResult
+        checkpoint.lastSuccessfulUrl = current.url
+        if (!await readFrozenDetails(queryIndex, candidates, 0)) return checkpoint
+        checkpoint.queryIndex = queryIndex + 1
+        port.onCheckpoint(checkpoint)
+      } catch (error) {
+        const classified = applyInterruption(error)
+        checkpoint.queryResults[queryIndex] = {
+          query: current.query,
+          status: classified.queryStatus,
+          candidates: [],
+          error: checkpoint.pauseReason,
+        }
+        port.onCheckpoint(checkpoint)
+        return checkpoint
       }
-      checkpoint.phase = isHumanBlock(error) ? 'waiting_human' : 'failed'
-      checkpoint.pauseReason = message
-      port.onCheckpoint(checkpoint)
-      return checkpoint
     }
   }
 
@@ -366,8 +596,11 @@ export async function runSiteResearch(input: SiteResearchRunInput, port: SiteRes
       else {
         existing.matchedQueries = [...new Set([...existing.matchedQueries, ...candidate.matchedQueries])]
         existing.queryRanks = { ...existing.queryRanks, ...candidate.queryRanks }
-        if (!existing.body && candidate.body) existing.body = candidate.body
-        if (!existing.bodyUnavailableReason && candidate.bodyUnavailableReason) {
+        if (!existing.body && candidate.body) {
+          existing.body = candidate.body
+          existing.bodyUnavailableReason = null
+        }
+        if (!existing.body && !existing.bodyUnavailableReason && candidate.bodyUnavailableReason) {
           existing.bodyUnavailableReason = candidate.bodyUnavailableReason
         }
       }
@@ -388,6 +621,7 @@ export async function runSiteResearch(input: SiteResearchRunInput, port: SiteRes
   }
   checkpoint.phase = 'completed'
   checkpoint.pauseReason = null
+  checkpoint.interruption = null
   port.onCheckpoint(checkpoint)
   return checkpoint
 }

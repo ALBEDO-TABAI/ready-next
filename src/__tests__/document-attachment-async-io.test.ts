@@ -106,7 +106,7 @@ describe('document engine attachment async IO', () => {
     )
     assert.ok(helperBlockMatch, 'writeDocumentEditableText not found')
     const helperBlock = helperBlockMatch![0]
-    assert.match(helperBlock, /await publishFileAtomically\(filePath, content\)/)
+    assert.match(helperBlock, /await \(options\.publish \?\? publishFileAtomically\)\(filePath, content\)/)
     assert.doesNotMatch(helperBlock, /writeFileSync\(filePath, content, 'utf-8'\)/)
   })
 })

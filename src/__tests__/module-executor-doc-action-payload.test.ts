@@ -5,9 +5,14 @@ import {
   classifyDocActionMutationOutcome,
   classifyDocActionFailureReason,
   performDocAction,
+  runDocCommand,
   type DocActionPayload,
 } from '../renderer/modules/agent/documentActions'
 import { executeModuleToolAction } from '../renderer/modules/agent/moduleExecutor'
+import {
+  getDocumentSaveSerializationKey,
+  runSerializedDocumentSave,
+} from '../renderer/modules/document/documentSaveRegistry'
 import { useDocTabs } from '../renderer/stores/useDocTabs'
 import { useMode } from '../renderer/stores/useMode'
 import { shouldApplyAsyncDocumentLoad } from '../renderer/components/document/documentLoadGuard'
@@ -353,6 +358,56 @@ describe('executeModuleToolAction · document.updateWidget payload 合约', () =
 })
 
 describe('performDocAction · save_tab disk drift', () => {
+  it('keeps typing made while an Agent save is awaiting disk marked dirty', async () => {
+    const previousWindow = (globalThis as { window?: unknown }).window
+    let releaseWrite!: () => void
+    const writeGate = new Promise<void>((resolve) => { releaseWrite = resolve })
+    let markWriteStarted!: () => void
+    const writeStarted = new Promise<void>((resolve) => { markWriteStarted = resolve })
+    let writtenContent = ''
+    ;(globalThis as { window?: unknown }).window = {
+      electronAPI: {
+        document: {
+          readFile: async () => ({ success: true, content: 'disk-old' }),
+          writeFile: async (_path: string, content: string) => {
+            writtenContent = content
+            markWriteStarted()
+            await writeGate
+            return { success: true }
+          },
+        },
+      },
+    }
+    try {
+      useDocTabs.setState({
+        tabs: [{
+          id: 'agent-save-race',
+          path: '/tmp/agent-save-race.md',
+          title: 'agent-save-race.md',
+          content: 'agent-save-snapshot',
+          isDirty: true,
+        }],
+        activeTabId: 'agent-save-race',
+        splitTabId: null,
+        focusedPaneTabId: 'agent-save-race',
+      })
+
+      const saving = performDocAction({ type: 'save_tab', tabId: 'agent-save-race' })
+      await writeStarted
+      useDocTabs.getState().updateTabContent('agent-save-race', 'typed while agent save awaited')
+      releaseWrite()
+      const result = await saving
+      const tab = useDocTabs.getState().tabs.find((item) => item.id === 'agent-save-race')
+
+      assert.match(result, /当前标签仍有新的未保存编辑/)
+      assert.equal(writtenContent, 'agent-save-snapshot')
+      assert.equal(tab?.content, 'typed while agent save awaited')
+      assert.equal(tab?.isDirty, true)
+    } finally {
+      ;(globalThis as { window?: unknown }).window = previousWindow
+    }
+  })
+
   it('目标路径还不存在时不能把读取失败当成已保存，必须写出文件', async () => {
     const previousWindow = (globalThis as { window?: unknown }).window
     const writes: Array<{ path: string; content: string }> = []
@@ -449,6 +504,56 @@ describe('performDocAction · save_tab disk drift', () => {
       const savedTab = useDocTabs.getState().tabs.find((item) => item.id === tab.id)
       assert.equal(savedTab?.content, '# 人物关系图\n')
       assert.equal(savedTab?.isDirty, false)
+    } finally {
+      ;(globalThis as { window?: unknown }).window = previousWindow
+    }
+  })
+})
+
+describe('runDocCommand · save ordering', () => {
+  it('/doc save waits for an older same-path write and saves the latest queued content', async () => {
+    const previousWindow = (globalThis as { window?: unknown }).window
+    let releaseOlderWrite!: () => void
+    const olderWriteGate = new Promise<void>((resolve) => { releaseOlderWrite = resolve })
+    const writes: string[] = []
+    ;(globalThis as { window?: unknown }).window = {
+      dispatchEvent: () => true,
+      electronAPI: {
+        document: {
+          writeFile: async (_path: string, content: string) => {
+            writes.push(content)
+            return { success: true }
+          },
+        },
+      },
+    }
+    try {
+      useDocTabs.setState({
+        tabs: [{
+          id: 'doc-command-save-race',
+          path: '/tmp/doc-command-save-race.md',
+          title: 'doc-command-save-race.md',
+          content: 'before queue',
+          isDirty: true,
+        }],
+        activeTabId: 'doc-command-save-race',
+        splitTabId: null,
+        focusedPaneTabId: 'doc-command-save-race',
+      })
+      const key = getDocumentSaveSerializationKey('older-tab', '/tmp/doc-command-save-race.md')
+      const olderWrite = runSerializedDocumentSave(key, () => olderWriteGate)
+      const saving = runDocCommand('/doc save')
+      useDocTabs.getState().updateTabContent('doc-command-save-race', 'latest after queue')
+      await Promise.resolve()
+      assert.deepEqual(writes, [])
+
+      releaseOlderWrite()
+      await olderWrite
+      const result = await saving
+
+      assert.match(result.text, /已保存/)
+      assert.deepEqual(writes, ['latest after queue'])
+      assert.equal(useDocTabs.getState().tabs[0]?.isDirty, false)
     } finally {
       ;(globalThis as { window?: unknown }).window = previousWindow
     }

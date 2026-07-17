@@ -27,6 +27,7 @@ export function createBoardSaveCoordinator<T, R>(
   const clearTimer = options.clearTimer ?? ((timer) => clearTimeout(timer))
   let timer: ReturnType<typeof setTimeout> | null = null
   let tail = Promise.resolve()
+  let stabilizing: Promise<void> | null = null
 
   const cancelTimer = () => {
     if (timer === null) return
@@ -49,14 +50,33 @@ export function createBoardSaveCoordinator<T, R>(
     return operation
   }
 
-  const saveNow = async (): Promise<void> => {
+  const stabilize = async (): Promise<void> => {
     cancelTimer()
-    const snapshot = options.getSnapshot()
-    if (!snapshot) {
-      await tail
-      return
+    await tail
+    let previousSnapshot: BoardSaveSnapshot<T> | null = null
+    while (true) {
+      cancelTimer()
+      const snapshot = options.getSnapshot()
+      if (!snapshot) return
+      if (
+        previousSnapshot
+        && snapshot.revision === previousSnapshot.revision
+        && Object.is(snapshot.value, previousSnapshot.value)
+      ) return
+      await enqueue(snapshot)
+      previousSnapshot = snapshot
     }
-    await enqueue(snapshot)
+  }
+
+  const saveNow = (): Promise<void> => {
+    cancelTimer()
+    if (stabilizing) return stabilizing
+    const operation = stabilize()
+    const tracked = operation.finally(() => {
+      if (stabilizing === tracked) stabilizing = null
+    })
+    stabilizing = tracked
+    return tracked
   }
 
   return {
@@ -69,10 +89,7 @@ export function createBoardSaveCoordinator<T, R>(
     },
     saveNow,
     async dispose() {
-      cancelTimer()
-      const snapshot = options.getSnapshot()
-      if (snapshot) await enqueue(snapshot)
-      else await tail
+      await saveNow()
     },
   }
 }

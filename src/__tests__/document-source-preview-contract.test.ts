@@ -41,7 +41,7 @@ test('document widget-only state changes enter shared tab content so clean markd
 
   assert.match(markdownEditor, /const saveInFlightRef = useRef\(false\)/)
   assert.match(markdownEditor, /saveDocumentTabSnapshot\(\{/)
-  assert.match(markdownEditor, /registerDocumentSaveHandler\(tab\.id, saveCurrentTab\)/)
+  assert.match(markdownEditor, /registerDocumentSaveHandler\(\s*tab\.id,\s*saveCurrentTab,/)
   assert.match(markdownEditor, /const widgetStatesRef = useRef\(widgetStates\)/)
   assert.match(markdownEditor, /const tabContentRef = useRef\(tab\.content\)/)
   assert.match(markdownEditor, /const nextWidgetStates = \{[\s\S]*\.\.\.widgetStatesRef\.current,[\s\S]*\[getWidgetPersistenceKey\(widgetTitle, widgetCode\)\]: widgetState,[\s\S]*\}/)

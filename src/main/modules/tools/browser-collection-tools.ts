@@ -385,8 +385,8 @@ function browserResearchProjectionPatch(task: BrowserCapabilityTaskHandle): Reco
   const result = task.result && typeof task.result === 'object' && !Array.isArray(task.result)
     ? task.result as Record<string, unknown>
     : null
-  const resumable = task.status === 'queued' || task.status === 'running' || task.status === 'paused' || task.status === 'waiting_human'
-    || (task.status === 'failed' && Boolean(task.checkpoint))
+  const resumable = task.status === 'queued' || task.status === 'running'
+    || ((task.status === 'paused' || task.status === 'waiting_human' || task.status === 'failed') && result?.canResume === true)
   const satisfied = task.status === 'completed' && result?.essentialOutputSatisfied === true
   const terminalFailure = !resumable && !satisfied
   return {
@@ -1552,6 +1552,16 @@ export async function executeBrowserCollectionTool(
           ? browserTaskAuthorizationFailure(payload, sessionId, taskExecutionContext)
           : null
         if (authorizationFailure) return browserStructuredOutput(authorizationFailure)
+        const currentResult = current?.result && typeof current.result === 'object' && !Array.isArray(current.result)
+          ? current.result as Record<string, unknown>
+          : null
+        if (current?.kind === 'site_research' && currentResult?.canResume !== true) {
+          return browserStructuredOutput({
+            ok: false,
+            errorKind: 'task_not_resumable',
+            message: 'site research task has no recoverable checkpoint',
+          })
+        }
         const rebound = controller.rebindTaskExecution?.(taskId, {
           ownerRunId: taskExecutionContext?.ownerRunId,
           parentTaskId: taskExecutionContext?.parentTaskId,

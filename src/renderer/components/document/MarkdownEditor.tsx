@@ -14,6 +14,7 @@ import {
   getWidgetModeLabel,
   getWidgetPersistenceKey,
   mergeWidgetStateMapIntoContent,
+  reconcileWidgetStateMapFromContent,
   renameWidgetFenceTitleInContent,
   replaceWidgetFenceWithSkeletonInContent,
 } from './widget-card-helpers'
@@ -33,7 +34,10 @@ import {
   advanceWidgetFenceSignatureForTextEdit,
   buildWidgetFenceSignatureSnapshot,
 } from '../../modules/document/widgetFenceSignature'
-import { registerDocumentSaveHandler } from '../../modules/document/documentSaveRegistry'
+import {
+  getDocumentSaveSerializationKey,
+  registerDocumentSaveHandler,
+} from '../../modules/document/documentSaveRegistry'
 import { saveDocumentTabSnapshot } from '../../modules/document/documentSaveRuntime'
 import '../../styles/tiptap.css'
 
@@ -395,10 +399,7 @@ export default function MarkdownEditor({
       return
     }
     setWidgetStates((prev) => {
-      const next: Record<string, DocumentWidgetPersistedState> = {
-        ...extractWidgetStateMapFromContent(tab.content),
-        ...prev,
-      }
+      const next = reconcileWidgetStateMapFromContent(tab.content, prev)
       const previousEntries = Object.entries(prev)
       const unchanged = previousEntries.length === Object.keys(next).length && previousEntries.every(([key, value]) => (
         JSON.stringify(value) === JSON.stringify(next[key])
@@ -446,13 +447,19 @@ export default function MarkdownEditor({
     }
   }, [tab.id])
 
-  useEffect(() => registerDocumentSaveHandler(tab.id, saveCurrentTab), [saveCurrentTab, tab.id])
+  useEffect(
+    () => registerDocumentSaveHandler(
+      tab.id,
+      saveCurrentTab,
+      getDocumentSaveSerializationKey(tab.id, tab.path),
+    ),
+    [saveCurrentTab, tab.id, tab.path],
+  )
 
   const replaceEditorContent = useCallback((nextContent: string) => {
     tabContentRef.current = nextContent
     widgetFenceSnapshotRef.current = buildWidgetFenceSignatureSnapshot(nextContent)
     widgetFenceSnapshotContentRef.current = nextContent
-    widgetFenceSignatureRef.current = widgetFenceSnapshotRef.current.signature
     updateTabContent(tab.id, nextContent)
   }, [tab.id, updateTabContent])
 

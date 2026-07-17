@@ -19,6 +19,7 @@ import type {
 } from '../shared/scheduled-tasks'
 import type { RendererAgentMetricName } from '../shared/renderer-agent-metrics'
 import type { ModelPackDownloadUpdate, ModelPackId, ModelSource } from '../shared/model-pack-types'
+import type { RendererStateFlushOutcome } from '../shared/renderer-state-flush'
 import type { RuntimeStatus, RuntimeProvisionTaskSnapshot } from '../shared/runtime-provision-types'
 import type { PetActivitySnapshot, PetSettings, PetStickyNoteInput, PetWindowSnapshot } from '../shared/pet'
 import type {
@@ -1235,7 +1236,14 @@ const appAPI = {
     ipcRenderer.on('app:flushBeforeQuit', handler)
     return () => ipcRenderer.removeListener('app:flushBeforeQuit', handler)
   },
-  ackBeforeQuitFlushed: (requestId: string) => ipcRenderer.send('app:beforeQuitFlushed', requestId),
+  onBeforeQuitFlushCancelled: (callback: (requestId: string) => void) => {
+    const handler = (_: IpcRendererEvent, requestId: string): void => callback(requestId)
+    ipcRenderer.on('app:cancelBeforeQuitFlush', handler)
+    return () => ipcRenderer.removeListener('app:cancelBeforeQuitFlush', handler)
+  },
+  ackBeforeQuitFlushed: (requestId: string, outcome: RendererStateFlushOutcome) => (
+    ipcRenderer.send('app:beforeQuitFlushed', requestId, outcome)
+  ),
   // D1: cache stats + cleanup
   getCacheStats: () => ipcRenderer.invoke('app:getCacheStats'),
   clearCache: (opts?: { includePuppeteer?: boolean }) =>

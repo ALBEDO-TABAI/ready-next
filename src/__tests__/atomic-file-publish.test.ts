@@ -158,6 +158,48 @@ test('Windows backup-swap restores the original target when replacement fails', 
   }
 })
 
+test('Windows backup-swap exposes and preserves the backup when replacement and restore both fail', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'ready-atomic-windows-double-failure-'))
+  try {
+    const target = join(directory, 'note.md')
+    await writeFile(target, 'original')
+    const ops: AtomicPublishFileOps = {
+      access,
+      copyFile,
+      lstat,
+      open,
+      realpath,
+      stat,
+      unlink,
+      rename: async (from, to) => {
+        if (to === target && (from.includes('.ready-tmp-') || from.includes('.ready-swap-'))) {
+          throw new Error(from.includes('.ready-tmp-') ? 'injected replacement failure' : 'injected restore failure')
+        }
+        await rename(from, to)
+      },
+    }
+
+    let backupPath = ''
+    await assert.rejects(
+      publishFileAtomically(target, 'replacement', { platform: 'win32', ops }),
+      (error: AggregateError & { backupPath?: string }) => {
+        backupPath = error.backupPath || ''
+        assert.match(error.message, /原文件备份保留在/)
+        assert.equal(error.errors.length, 2)
+        return true
+      },
+    )
+    assert.ok(backupPath)
+    assert.equal(await readFile(backupPath, 'utf8'), 'original')
+    assert.deepEqual(
+      (await readdir(directory)).filter((name) => name.includes('.ready-tmp-')),
+      [],
+    )
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
+})
+
 test('atomic publish does not treat permission and IO errors as a missing target', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'ready-atomic-errors-'))
   try {

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { runBeforeQuitCleanup } from '../main/modules/process-cleanup/before-quit'
+import { GracefulWindowCloseCoordinator } from '../main/modules/process-cleanup/graceful-window-close-coordinator'
 
 interface Recorder {
   log: string[]
@@ -25,6 +26,8 @@ function deferred<T = void>(): { promise: Promise<T>; resolve: (v: T) => void; r
   const promise = new Promise<T>((res, rej) => { resolve = res; reject = rej })
   return { promise, resolve, reject }
 }
+
+const noOpExitLease = () => ({ release: () => undefined })
 
 test('runBeforeQuitCleanup awaits all three async cleanups before closing DB', async () => {
   const order: string[] = []
@@ -167,27 +170,146 @@ test('runBeforeQuitCleanup tolerates synchronous void cleanups', async () => {
   assert.equal(order.length, 4)
 })
 
-test('index.ts before-quit handler installs a re-entry guard and awaits cleanup', async () => {
-  // Contract test: ensure the handler in src/main/index.ts (which we cannot
-  // execute without electron) preserves the safety properties. If someone
-  // accidentally drops the guard or the await, this fails loudly.
-  const { readFileSync } = await import('node:fs')
-  const { resolve } = await import('node:path')
-  const src = readFileSync(resolve(process.cwd(), 'src/main/index.ts'), 'utf8')
+test('graceful exit prevents every repeated quit until flush and cleanup finish', async () => {
+  const flush = deferred<void>()
+  let flushes = 0
+  let cleanups = 0
+  let quits = 0
+  let prevented = 0
+  const coordinator = new GracefulWindowCloseCoordinator({
+    flushRendererState: () => { flushes += 1; return flush.promise.then(noOpExitLease) },
+    cleanupBeforeQuit: async () => { cleanups += 1 },
+    requestWindowClose: () => assert.fail('quit must not request window-only close'),
+    requestAppQuit: () => { quits += 1 },
+    onFailure: (error) => assert.fail(String(error)),
+  })
+  const event = { preventDefault: () => { prevented += 1 } }
 
-  // Re-entry guard variable + check.
-  assert.match(src, /let isQuitting = false/, 'isQuitting flag must be declared')
-  assert.match(src, /if \(isQuitting\) return/, 'before-quit must short-circuit on re-entry')
+  coordinator.handleBeforeQuit(event)
+  coordinator.handleBeforeQuit(event)
+  assert.equal(prevented, 2)
+  assert.equal(flushes, 1)
+  assert.equal(quits, 0)
 
-  // Default electron exit must be cancelled so cleanup can run.
-  assert.match(src, /event\.preventDefault\(\)/)
+  flush.resolve()
+  await new Promise<void>((resolve) => setImmediate(resolve))
+  assert.equal(cleanups, 1)
+  assert.equal(quits, 1)
 
-  // Cleanup must be invoked through the awaitable helper, not as `void cleanupAgentRuntime()`.
-  assert.match(src, /runBeforeQuitCleanup\(\{[\s\S]*cleanupAgentRuntime[\s\S]*closeDatabase[\s\S]*\}\)/)
-  assert.match(src, /cleanupRendererState:\s*\(\)\s*=>\s*requestRendererStateFlush\(mainWindow\)/)
-  assert.doesNotMatch(src, /\bvoid cleanupAgentRuntime\(\)/, 'fire-and-forget cleanup regression')
-
-  // Quit must be re-triggered after cleanup so the app actually exits; the
-  // isQuitting guard above prevents this from looping.
-  assert.match(src, /\.finally\(\(\) => \{[\s\S]*app\.quit\(\)[\s\S]*\}\)/)
+  coordinator.handleBeforeQuit(event)
+  assert.equal(prevented, 2, 'the coordinator must allow only its own final quit')
 })
+
+test('window close flushes renderer state before allowing the same close event path', async () => {
+  let prevented = 0
+  let requestedClose = 0
+  let cleanups = 0
+  let releases = 0
+  const coordinator = new GracefulWindowCloseCoordinator({
+    flushRendererState: async () => ({ release: () => { releases += 1 } }),
+    cleanupBeforeQuit: async () => { cleanups += 1 },
+    requestWindowClose: () => { requestedClose += 1 },
+    requestAppQuit: () => assert.fail('window close must not quit the macOS app'),
+    onFailure: (error) => assert.fail(String(error)),
+  })
+  const event = { preventDefault: () => { prevented += 1 } }
+
+  coordinator.handleWindowClose(event)
+  await new Promise<void>((resolve) => setImmediate(resolve))
+  assert.equal(prevented, 1)
+  assert.equal(requestedClose, 1)
+  assert.equal(cleanups, 0)
+
+  coordinator.handleWindowClose(event)
+  assert.equal(prevented, 1)
+  assert.equal(coordinator.getStateForTests(), 'idle')
+  assert.equal(releases, 0, 'the lease stays held until the BrowserWindow closed event')
+  coordinator.handleWindowClosed()
+  assert.equal(releases, 1)
+})
+
+test('app quit upgrades an in-flight window close without starting a second flush', async () => {
+  const flush = deferred<void>()
+  let flushes = 0
+  let closeRequests = 0
+  let quitRequests = 0
+  let prevented = 0
+  const coordinator = new GracefulWindowCloseCoordinator({
+    flushRendererState: () => { flushes += 1; return flush.promise.then(noOpExitLease) },
+    cleanupBeforeQuit: async () => undefined,
+    requestWindowClose: () => { closeRequests += 1 },
+    requestAppQuit: () => { quitRequests += 1 },
+    onFailure: (error) => assert.fail(String(error)),
+  })
+  const event = { preventDefault: () => { prevented += 1 } }
+
+  coordinator.handleWindowClose(event)
+  coordinator.handleBeforeQuit(event)
+  flush.resolve()
+  await new Promise<void>((resolve) => setImmediate(resolve))
+
+  assert.equal(prevented, 2)
+  assert.equal(flushes, 1)
+  assert.equal(closeRequests, 0)
+  assert.equal(quitRequests, 1)
+})
+
+test('flush failure keeps the window open and permits a later clean retry', async () => {
+  let shouldFail = true
+  let failures = 0
+  let closes = 0
+  const coordinator = new GracefulWindowCloseCoordinator({
+    flushRendererState: async () => {
+      if (shouldFail) throw new Error('disk full')
+      return noOpExitLease()
+    },
+    cleanupBeforeQuit: async () => undefined,
+    requestWindowClose: () => { closes += 1 },
+    requestAppQuit: () => assert.fail('window retry must not quit the app'),
+    onFailure: (error) => {
+      failures += 1
+      assert.match(String(error), /disk full/)
+    },
+  })
+  const event = { preventDefault: () => undefined }
+
+  coordinator.handleWindowClose(event)
+  await new Promise<void>((resolve) => setImmediate(resolve))
+  assert.equal(failures, 1)
+  assert.equal(closes, 0)
+  assert.equal(coordinator.getStateForTests(), 'idle')
+
+  shouldFail = false
+  coordinator.handleWindowClose(event)
+  await new Promise<void>((resolve) => setImmediate(resolve))
+  assert.equal(closes, 1)
+})
+
+for (const failingStep of ['close', 'cleanup', 'quit'] as const) {
+  test(`a ${failingStep} action failure releases the successful renderer flush lease`, async () => {
+    let releases = 0
+    let failures = 0
+    const coordinator = new GracefulWindowCloseCoordinator({
+      flushRendererState: async () => ({ release: () => { releases += 1 } }),
+      cleanupBeforeQuit: async () => {
+        if (failingStep === 'cleanup') throw new Error('cleanup failed')
+      },
+      requestWindowClose: () => {
+        if (failingStep === 'close') throw new Error('close failed')
+      },
+      requestAppQuit: () => {
+        if (failingStep === 'quit') throw new Error('quit failed')
+      },
+      onFailure: () => { failures += 1 },
+    })
+    const event = { preventDefault: () => undefined }
+
+    if (failingStep === 'close') coordinator.handleWindowClose(event)
+    else coordinator.handleBeforeQuit(event)
+    await new Promise<void>((resolve) => setImmediate(resolve))
+
+    assert.equal(failures, 1)
+    assert.equal(releases, 1)
+    assert.equal(coordinator.getStateForTests(), 'idle')
+  })
+}

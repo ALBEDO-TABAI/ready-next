@@ -210,10 +210,11 @@ export async function publishFileAtomically(
           await ops.rename(backupPath, publishTargetPath)
           targetMovedToBackup = false
         } catch (restoreError) {
-          throw new AggregateError(
+          targetMovedToBackup = false
+          throw Object.assign(new AggregateError(
             [replaceError, restoreError],
-            `原子替换失败，且无法恢复原文件：${targetPath}`,
-          )
+            `原子替换失败，且无法恢复原文件；原文件备份保留在：${backupPath}`,
+          ), { backupPath })
         }
         throw replaceError
       }
