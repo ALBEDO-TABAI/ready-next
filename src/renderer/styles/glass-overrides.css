@@ -343,6 +343,34 @@ html[data-theme='dark'][data-skin='liquid-glass'][data-glass-variant='solid-blue
     linear-gradient(145deg, #23445A 0%, #10354A 48%, #051F32 100%);
 }
 
+/* 实色玻璃下的大面板底色（定时任务 / 关系图谱全局浏览）：
+   中性 frost 与投影透镜都只适合标准液态玻璃 —— 在实色蓝/绿底板上会投成死灰。
+   面板底色改从各变体自己的 --ready-task-card-bg 派生（绿/蓝、日/夜自动同色相）：
+   日间向白提亮成浅色板，夜间向黑压深一档（面板层级低于卡片）。 */
+html[data-skin='liquid-glass']:is([data-glass-variant='solid-green'], [data-glass-variant='solid-blue']) {
+  --ready-app-panel-glass-bg: color-mix(in srgb, var(--ready-task-card-bg) 46%, rgba(255, 255, 255, 0.95));
+  --ready-app-panel-glass-card-bg: rgba(255, 255, 255, 0.5);
+  --ready-app-panel-glass-control-bg: rgba(255, 255, 255, 0.58);
+  --ready-app-panel-glass-hover-bg: rgba(255, 255, 255, 0.82);
+}
+
+html[data-theme='dark'][data-skin='liquid-glass']:is([data-glass-variant='solid-green'], [data-glass-variant='solid-blue']) {
+  --ready-app-panel-glass-bg: color-mix(in srgb, var(--ready-task-card-bg) 58%, rgba(4, 9, 11, 0.95));
+  --ready-app-panel-glass-card-bg: rgba(255, 255, 255, 0.05);
+  --ready-app-panel-glass-control-bg: rgba(255, 255, 255, 0.08);
+  --ready-app-panel-glass-hover-bg: rgba(255, 255, 255, 0.13);
+}
+
+/* 实色底板上直接画同色相实色板；投影透镜（liquid lens）只留给标准液态玻璃。 */
+html[data-skin='liquid-glass']:is([data-glass-variant='solid-green'], [data-glass-variant='solid-blue']) .ready-app-liquid-panel.scheduled-tasks-panel,
+html[data-skin='liquid-glass']:is([data-glass-variant='solid-green'], [data-glass-variant='solid-blue']) .ready-app-liquid-panel.knowledge-graph-workspace__panel {
+  background: var(--ready-app-panel-glass-bg) !important;
+}
+
+html[data-skin='liquid-glass']:is([data-glass-variant='solid-green'], [data-glass-variant='solid-blue']) .scheduled-tasks-panel > .ready-app-liquid-panel__lens {
+  display: none;
+}
+
 /* ========================================
    Browser Transition Mask Animations
    ======================================== */
