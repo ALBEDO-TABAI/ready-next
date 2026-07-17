@@ -1,5 +1,4 @@
-import { BrowserWindow, ipcMain } from 'electron'
-import { randomUUID } from 'crypto'
+import { ipcMain } from 'electron'
 import { isAbsolute, relative, resolve } from 'path'
 import { realpath } from 'fs/promises'
 
@@ -43,11 +42,6 @@ let fileEmergenceService: FileEmergenceService | null = null
 let documentWriteDispose: (() => void) | null = null
 let documentMoveDispose: (() => void) | null = null
 let tagAssignmentDispose: (() => void) | null = null
-const pendingReadingSessionFlushes = new Map<string, {
-  pendingWebContentsIds: Set<number>
-  resolve: () => void
-  timeout: ReturnType<typeof setTimeout>
-}>()
 
 export function setupFileEmergenceIPC(): void {
   ipcMain.removeHandler('fileEmergence:getSnapshot')
@@ -59,7 +53,6 @@ export function setupFileEmergenceIPC(): void {
   ipcMain.removeHandler('fileEmergence:feedbackProject')
   ipcMain.removeHandler('fileEmergence:listSuppressed')
   ipcMain.removeHandler('fileEmergence:getEvaluation')
-  ipcMain.removeAllListeners('fileEmergence:readingSessionsFlushed')
   if (documentWriteDispose) {
     try { documentWriteDispose() } catch { /* ignore */ }
     documentWriteDispose = null
@@ -96,18 +89,6 @@ export function setupFileEmergenceIPC(): void {
       }
     },
   )
-
-  ipcMain.on('fileEmergence:readingSessionsFlushed', (event, requestId: unknown) => {
-    if (typeof requestId !== 'string') return
-    const pending = pendingReadingSessionFlushes.get(requestId)
-    if (!pending) return
-    pending.pendingWebContentsIds.delete(event.sender.id)
-    if (pending.pendingWebContentsIds.size === 0) {
-      clearTimeout(pending.timeout)
-      pendingReadingSessionFlushes.delete(requestId)
-      pending.resolve()
-    }
-  })
 
   ipcMain.handle(
     'fileEmergence:recordActivity',
@@ -297,30 +278,6 @@ export function setupFileEmergenceIPC(): void {
       kind: isDirectory ? 'directory' : 'file',
     })
     fileEmergenceService?.markStale([root])
-  })
-}
-
-export function requestRendererReadingSessionFlush(timeoutMs = 800): Promise<void> {
-  const targets = BrowserWindow.getAllWindows()
-    .filter((window) => !window.isDestroyed() && !window.webContents.isDestroyed())
-  if (targets.length === 0) return Promise.resolve()
-
-  const requestId = randomUUID()
-  const pendingWebContentsIds = new Set(targets.map((window) => window.webContents.id))
-  return new Promise((resolve) => {
-    const timeout = setTimeout(() => {
-      pendingReadingSessionFlushes.delete(requestId)
-      resolve()
-    }, timeoutMs)
-    if (typeof timeout.unref === 'function') timeout.unref()
-    pendingReadingSessionFlushes.set(requestId, {
-      pendingWebContentsIds,
-      resolve,
-      timeout,
-    })
-    for (const target of targets) {
-      target.webContents.send('fileEmergence:flushReadingSessions', requestId)
-    }
   })
 }
 

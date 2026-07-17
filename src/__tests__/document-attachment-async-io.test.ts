@@ -48,14 +48,14 @@ describe('document engine attachment async IO', () => {
     assert.match(fileMutationSource, /\bcopyFile\b/)
   })
 
-  it('document:saveAs uses async writeFile for base64 + html branches', () => {
+  it('document:saveAs atomically publishes base64 + html branches without sync writes', () => {
     assert.match(
       source,
-      /await writeFile\(saveResult\.filePath, Buffer\.from\(payload\.contentBase64, 'base64'\)\)/,
+      /await publishFileAtomically\(saveResult\.filePath, Buffer\.from\(payload\.contentBase64, 'base64'\)\)/,
     )
     assert.match(
       source,
-      /await writeFile\(saveResult\.filePath, html, 'utf-8'\)/,
+      /await publishFileAtomically\(saveResult\.filePath, html\)/,
     )
     // The blocking writeFileSync calls in saveAs must be gone.
     assert.doesNotMatch(
@@ -98,7 +98,7 @@ describe('document engine attachment async IO', () => {
     assert.match(fileIoSource, /ipcMain\.handle\('document:createFile'[\s\S]*await writeFile\(path, '', 'utf-8'\)/)
   })
 
-  it('writeDocumentEditableText uses await writeFile (not writeFileSync)', () => {
+  it('writeDocumentEditableText uses atomic async publish (not writeFileSync)', () => {
     // The exported helper feeds document:write — must not block the main thread
     // when the renderer commits a multi-MB markdown export.
     const helperBlockMatch = editableTextSource.match(
@@ -106,7 +106,7 @@ describe('document engine attachment async IO', () => {
     )
     assert.ok(helperBlockMatch, 'writeDocumentEditableText not found')
     const helperBlock = helperBlockMatch![0]
-    assert.match(helperBlock, /await writeFile\(filePath, content, 'utf-8'\)/)
+    assert.match(helperBlock, /await publishFileAtomically\(filePath, content\)/)
     assert.doesNotMatch(helperBlock, /writeFileSync\(filePath, content, 'utf-8'\)/)
   })
 })

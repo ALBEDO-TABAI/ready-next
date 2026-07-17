@@ -1,6 +1,7 @@
 import { BrowserWindow, screen } from 'electron'
 import { is } from '@electron-toolkit/utils'
 import type { BrowserAgentPointerSnapshot } from '../../../shared/browser-agent-pointer'
+import { OverlayWindowFollower } from './overlay-window-follower'
 
 interface BrowserAgentPointerWindowOptions {
   mainWindow: BrowserWindow
@@ -12,6 +13,12 @@ export class BrowserAgentPointerWindow {
   private window: BrowserWindow | null = null
   private snapshot: BrowserAgentPointerSnapshot | null = null
   private boundParentWindow: BrowserWindow | null = null
+  private readonly follower = new OverlayWindowFollower({
+    apply: () => this.reposition(),
+    getDisplayMatching: (bounds) => screen.getDisplayMatching(bounds),
+    onDisplayMetricsChanged: (listener) => screen.on('display-metrics-changed', listener),
+    offDisplayMetricsChanged: (listener) => screen.off('display-metrics-changed', listener),
+  })
 
   constructor(private options: BrowserAgentPointerWindowOptions) {
     this.bindParentWindow(options.mainWindow)
@@ -35,6 +42,7 @@ export class BrowserAgentPointerWindow {
 
   hide(): void {
     this.snapshot = null
+    this.follower.cancel()
     if (this.window && !this.window.isDestroyed()) {
       this.window.setAlwaysOnTop(false)
       this.window.hide()
@@ -55,6 +63,7 @@ export class BrowserAgentPointerWindow {
     this.window = null
     this.snapshot = null
     this.boundParentWindow = null
+    this.follower.dispose()
   }
 
   private bindParentWindow(mainWindow: BrowserWindow): void {
@@ -71,6 +80,10 @@ export class BrowserAgentPointerWindow {
   }
 
   private handleParentMoveOrResize = (): void => {
+    this.follower.schedule()
+  }
+
+  private reposition(): void {
     if (this.snapshot && this.window?.isVisible()) this.applyBounds(this.snapshot)
   }
 
@@ -118,7 +131,7 @@ export class BrowserAgentPointerWindow {
   private applyBounds(snapshot: BrowserAgentPointerSnapshot): void {
     if (!this.window || this.window.isDestroyed()) return
     const mainBounds = this.options.mainWindow.getContentBounds()
-    const display = screen.getDisplayMatching(mainBounds)
+    const display = this.follower.displayFor(mainBounds)
     const width = Math.max(1, Math.round(snapshot.bounds.width))
     const height = Math.max(1, Math.round(snapshot.bounds.height))
     const desiredX = mainBounds.x + Math.round(snapshot.bounds.left)

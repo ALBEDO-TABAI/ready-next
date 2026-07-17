@@ -3,6 +3,7 @@ import { describe, it } from 'node:test'
 
 import {
   ATTACHMENT_HARD_CAP_BYTES,
+  DOCUMENT_TEXT_READ_CAP_BYTES,
   EBOOK_INLINE_CAP_BYTES,
   IMAGE_INLINE_CAP_BYTES,
   VIDEO_INLINE_CAP_BYTES,
@@ -10,6 +11,7 @@ import {
   categoryFromSuggestedName,
   decideAttachmentSize,
   decideReadAttachmentSize,
+  isDocumentTextReadTooLarge,
 } from '../main/modules/document-engine/attachment-size-guards'
 
 const MB = 1024 * 1024
@@ -21,6 +23,7 @@ describe('document attachment size guards', () => {
       assert.equal(VIDEO_INLINE_CAP_BYTES, 40 * MB)
       assert.equal(IMAGE_INLINE_CAP_BYTES, 20 * MB)
       assert.equal(EBOOK_INLINE_CAP_BYTES, 40 * MB)
+      assert.equal(DOCUMENT_TEXT_READ_CAP_BYTES, 20 * MB)
     })
   })
 
@@ -180,6 +183,13 @@ describe('document attachment size guards', () => {
         assert.equal(decision.max, ATTACHMENT_HARD_CAP_BYTES)
         assert.equal(decision.actual, 150 * MB)
       }
+    })
+  })
+
+  describe('text read guard', () => {
+    it('accepts the exact 20 MiB boundary and rejects the next byte', () => {
+      assert.equal(isDocumentTextReadTooLarge(DOCUMENT_TEXT_READ_CAP_BYTES), false)
+      assert.equal(isDocumentTextReadTooLarge(DOCUMENT_TEXT_READ_CAP_BYTES + 1), true)
     })
   })
 })

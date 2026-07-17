@@ -27,6 +27,7 @@ export interface ReadyBoardImageNode extends ReadyBoardBaseNode {
   src: string
   title?: string
   alt?: string
+  externalReceiptId?: string
 }
 
 export interface ReadyBoardVideoNode extends ReadyBoardBaseNode {
@@ -111,6 +112,11 @@ export interface ReadyBoardAsset {
   height?: number
   title?: string
   excerpt?: string
+}
+
+export interface ReadyBoardExternalAssetReceipt {
+  id: string
+  asset: ReadyBoardAsset
 }
 
 export function isReadyBoardFile(path: string | null | undefined): boolean {
@@ -321,7 +327,15 @@ export function normalizeReadyBoardState(input: unknown): ReadyBoardState {
         if (type === 'image') {
           const src = textOr(nodeRaw.src)
           if (!isSafeBoardAssetReference(src)) return []
-          return [{ ...base, type, src, title: textOr(nodeRaw.title), alt: textOr(nodeRaw.alt) }]
+          const externalReceiptId = textOr(nodeRaw.externalReceiptId)
+          return [{
+            ...base,
+            type,
+            src,
+            title: textOr(nodeRaw.title),
+            alt: textOr(nodeRaw.alt),
+            ...(externalReceiptId ? { externalReceiptId } : {}),
+          }]
         }
         if (type === 'video') {
           const src = textOr(nodeRaw.src)

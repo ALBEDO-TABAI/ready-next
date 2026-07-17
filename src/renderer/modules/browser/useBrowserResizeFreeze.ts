@@ -1,9 +1,12 @@
-import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react'
 
+import { BoundedLruCache } from '../../../shared/bounded-lru'
 import { PANEL_RESIZE_STATE_EVENT, type PanelResizeStateDetail } from './resize-events'
+import { subscribeWorkbenchWindowResize } from '../workbench/windowResize'
 
 const FREEZE_RELEASE_DELAY_MS = 220
-const cachedFreezeFramesByTabId = new Map<string, BrowserResizeFreezeFrame>()
+const WINDOW_RESIZE_SETTLE_DELAY_MS = 120
+const cachedFreezeFramesByKey = new BoundedLruCache<string, BrowserResizeFreezeFrame>(6)
 
 export interface BrowserResizeFreezeFrame {
   src: string
@@ -14,6 +17,7 @@ interface UseBrowserResizeFreezeParams {
   isActive: boolean
   browserRuntimeReady: boolean
   activeTabId: string | null
+  freezeCacheKey?: string | null
   surfaceRef: RefObject<HTMLDivElement | null>
   sendBoundsImmediate: (options?: { forceExact?: boolean }) => Promise<void>
 }
@@ -23,39 +27,45 @@ export function useBrowserResizeFreeze({
   isActive,
   browserRuntimeReady,
   activeTabId,
+  freezeCacheKey = activeTabId,
   surfaceRef,
   sendBoundsImmediate,
 }: UseBrowserResizeFreezeParams) {
+  const resolvedFreezeCacheKey = freezeCacheKey || activeTabId
   const [freezeFrame, setFreezeFrameState] = useState<BrowserResizeFreezeFrame | null>(null)
-  const [cachedFreezeFrame, setCachedFreezeFrameState] = useState<BrowserResizeFreezeFrame | null>(() => (activeTabId ? cachedFreezeFramesByTabId.get(activeTabId) ?? null : null))
   const freezeFrameRef = useRef<BrowserResizeFreezeFrame | null>(null)
-  const cachedFreezeFrameRef = useRef<BrowserResizeFreezeFrame | null>(cachedFreezeFrame)
+  const cachedFreezeFrameRef = useRef<BrowserResizeFreezeFrame | null>(
+    resolvedFreezeCacheKey ? cachedFreezeFramesByKey.get(resolvedFreezeCacheKey) ?? null : null,
+  )
   const activeTabIdRef = useRef(activeTabId)
+  const freezeCacheKeyRef = useRef(resolvedFreezeCacheKey)
+  const previousFreezeCacheKeyRef = useRef(resolvedFreezeCacheKey)
   const resizingRef = useRef(false)
+  const windowResizingRef = useRef(false)
   const captureSessionRef = useRef(0)
   const releaseTimerRef = useRef<number | null>(null)
   const settleTimerRefs = useRef<number[]>([])
+  const windowResizeEndTimerRef = useRef<number | null>(null)
 
   const setFreezeFrame = useCallback((next: BrowserResizeFreezeFrame | null) => {
     freezeFrameRef.current = next
     setFreezeFrameState(next)
   }, [])
 
-  const setCachedFreezeFrameForTab = useCallback((tabId: string | null, next: BrowserResizeFreezeFrame | null) => {
-    if (tabId) {
+  const setCachedFreezeFrameForKey = useCallback((cacheKey: string | null, next: BrowserResizeFreezeFrame | null) => {
+    if (cacheKey) {
       if (next) {
-        cachedFreezeFramesByTabId.set(tabId, next)
+        cachedFreezeFramesByKey.set(cacheKey, next)
       } else {
-        cachedFreezeFramesByTabId.delete(tabId)
+        cachedFreezeFramesByKey.delete(cacheKey)
       }
     } else if (!next) {
-      cachedFreezeFramesByTabId.clear()
+      cachedFreezeFramesByKey.clear()
     }
 
-    if (activeTabIdRef.current !== tabId) return
+    if (freezeCacheKeyRef.current !== cacheKey) return
 
     cachedFreezeFrameRef.current = next
-    setCachedFreezeFrameState(next)
   }, [])
 
   const clearSettleTimers = useCallback(() => {
@@ -72,15 +82,24 @@ export function useBrowserResizeFreeze({
     }
   }, [])
 
+  const clearWindowResizeEndTimer = useCallback(() => {
+    if (windowResizeEndTimerRef.current) {
+      window.clearTimeout(windowResizeEndTimerRef.current)
+      windowResizeEndTimerRef.current = null
+    }
+  }, [])
+
   const resetFreeze = useCallback(() => {
     clearSettleTimers()
     clearReleaseTimer()
+    clearWindowResizeEndTimer()
+    windowResizingRef.current = false
     setFreezeFrame(null)
-  }, [clearReleaseTimer, clearSettleTimers, setFreezeFrame])
+  }, [clearReleaseTimer, clearSettleTimers, clearWindowResizeEndTimer, setFreezeFrame])
 
-  const clearCachedFreezeFrame = useCallback((tabId: string | null = activeTabIdRef.current) => {
-    setCachedFreezeFrameForTab(tabId, null)
-  }, [setCachedFreezeFrameForTab])
+  const clearCachedFreezeFrame = useCallback((cacheKey: string | null = freezeCacheKeyRef.current) => {
+    setCachedFreezeFrameForKey(cacheKey, null)
+  }, [setCachedFreezeFrameForKey])
 
   const captureSnapshot = useCallback(async () => {
     if (!isElectron || !surfaceRef.current) return null
@@ -107,21 +126,21 @@ export function useBrowserResizeFreeze({
     if (!nextFrame) return
     if (captureSessionRef.current !== sessionId) return
 
-    setCachedFreezeFrameForTab(activeTabIdRef.current, nextFrame)
+    setCachedFreezeFrameForKey(freezeCacheKeyRef.current, nextFrame)
     setFreezeFrame(nextFrame)
-  }, [browserRuntimeReady, captureSnapshot, isActive, isElectron, setCachedFreezeFrameForTab, setFreezeFrame, surfaceRef])
+  }, [browserRuntimeReady, captureSnapshot, isActive, isElectron, setCachedFreezeFrameForKey, setFreezeFrame, surfaceRef])
 
   const captureStableFrame = useCallback(async () => {
     if (!isElectron || !surfaceRef.current) return false
-    const tabId = activeTabIdRef.current
-    if (!tabId) return false
+    const cacheKey = freezeCacheKeyRef.current
+    if (!cacheKey) return false
 
     const nextFrame = await captureSnapshot()
     if (!nextFrame) return false
 
-    setCachedFreezeFrameForTab(tabId, nextFrame)
+    setCachedFreezeFrameForKey(cacheKey, nextFrame)
     return true
-  }, [captureSnapshot, isElectron, setCachedFreezeFrameForTab, surfaceRef])
+  }, [captureSnapshot, isElectron, setCachedFreezeFrameForKey, surfaceRef])
 
   const handleResizeStart = useCallback(() => {
     resizingRef.current = true
@@ -130,15 +149,18 @@ export function useBrowserResizeFreeze({
 
     const sessionId = captureSessionRef.current + 1
     captureSessionRef.current = sessionId
+    if (cachedFreezeFrameRef.current) {
+      setFreezeFrame(cachedFreezeFrameRef.current)
+      return
+    }
     void recaptureFreezeFrame(sessionId)
-  }, [clearReleaseTimer, clearSettleTimers, recaptureFreezeFrame])
+  }, [clearReleaseTimer, clearSettleTimers, recaptureFreezeFrame, setFreezeFrame])
 
   const handleResizeEnd = useCallback(async () => {
     resizingRef.current = false
     const settleSessionId = captureSessionRef.current
 
-    if (!freezeFrameRef.current) return
-
+    await sendBoundsImmediate({ forceExact: true })
     if (activeTabId) {
       await window.electronAPI?.browser?.fitActiveTabToBounds(activeTabId)
     }
@@ -169,7 +191,7 @@ export function useBrowserResizeFreeze({
       }
       releaseTimerRef.current = null
     }, FREEZE_RELEASE_DELAY_MS)
-  }, [activeTabId, clearReleaseTimer, clearSettleTimers, recaptureFreezeFrame, setFreezeFrame])
+  }, [activeTabId, clearReleaseTimer, clearSettleTimers, recaptureFreezeFrame, sendBoundsImmediate, setFreezeFrame])
 
   useEffect(() => {
     const handleResizeState = (event: Event) => {
@@ -190,15 +212,71 @@ export function useBrowserResizeFreeze({
   }, [handleResizeEnd, handleResizeStart])
 
   useEffect(() => {
+    if (!isElectron) return
+    return subscribeWorkbenchWindowResize(() => {
+      if (!isActive || !browserRuntimeReady || !activeTabIdRef.current) return
+      if (!windowResizingRef.current) {
+        windowResizingRef.current = true
+        handleResizeStart()
+      }
+      clearWindowResizeEndTimer()
+      windowResizeEndTimerRef.current = window.setTimeout(() => {
+        windowResizeEndTimerRef.current = null
+        windowResizingRef.current = false
+        void handleResizeEnd()
+      }, WINDOW_RESIZE_SETTLE_DELAY_MS)
+    })
+  }, [browserRuntimeReady, clearWindowResizeEndTimer, handleResizeEnd, handleResizeStart, isActive, isElectron])
+
+  useEffect(() => {
     activeTabIdRef.current = activeTabId
-    cachedFreezeFrameRef.current = activeTabId ? cachedFreezeFramesByTabId.get(activeTabId) ?? null : null
-    setCachedFreezeFrameState(cachedFreezeFrameRef.current)
-  }, [activeTabId])
+    freezeCacheKeyRef.current = resolvedFreezeCacheKey
+    cachedFreezeFrameRef.current = resolvedFreezeCacheKey ? cachedFreezeFramesByKey.get(resolvedFreezeCacheKey) ?? null : null
+  }, [activeTabId, resolvedFreezeCacheKey])
+
+  useEffect(() => {
+    const previousCacheKey = previousFreezeCacheKeyRef.current
+    previousFreezeCacheKeyRef.current = resolvedFreezeCacheKey
+    if (!previousCacheKey || previousCacheKey === resolvedFreezeCacheKey) return
+    if (!resolvedFreezeCacheKey || !isElectron || !isActive || !browserRuntimeReady) return
+
+    let cancelled = false
+    let settleFrame: number | null = null
+    const layoutFrame = window.requestAnimationFrame(() => {
+      settleFrame = window.requestAnimationFrame(() => {
+        if (!cancelled) void captureStableFrame()
+      })
+    })
+    return () => {
+      cancelled = true
+      window.cancelAnimationFrame(layoutFrame)
+      if (settleFrame !== null) window.cancelAnimationFrame(settleFrame)
+    }
+  }, [browserRuntimeReady, captureStableFrame, isActive, isElectron, resolvedFreezeCacheKey])
+
+  useLayoutEffect(() => {
+    const surface = surfaceRef.current
+    if (!surface || !freezeFrame) return
+    const previous = {
+      image: surface.style.backgroundImage,
+      position: surface.style.backgroundPosition,
+      repeat: surface.style.backgroundRepeat,
+      size: surface.style.backgroundSize,
+    }
+    surface.style.backgroundImage = `url("${freezeFrame.src}")`
+    surface.style.backgroundPosition = 'center'
+    surface.style.backgroundRepeat = 'no-repeat'
+    surface.style.backgroundSize = '100% 100%'
+    return () => {
+      surface.style.backgroundImage = previous.image
+      surface.style.backgroundPosition = previous.position
+      surface.style.backgroundRepeat = previous.repeat
+      surface.style.backgroundSize = previous.size
+    }
+  }, [freezeFrame, surfaceRef])
 
   useEffect(() => {
     if (isElectron && isActive && browserRuntimeReady) return
-    // 只清空临时 freezeFrame，不清空 cachedFreezeFrame
-    // cachedFreezeFrame 用于模式切换时的冻结帧显示
     setFreezeFrame(null)
   }, [browserRuntimeReady, isActive, isElectron, setFreezeFrame])
 
@@ -214,9 +292,6 @@ export function useBrowserResizeFreeze({
   }, [resetFreeze])
 
   return {
-    cachedFreezeFrame,
     captureStableFrame,
-    clearCachedFreezeFrame,
-    freezeFrame,
   }
 }

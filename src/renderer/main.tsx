@@ -12,6 +12,12 @@ import './styles/index.css'
 import './styles/ritual-overlay.css'
 import './styles/workbench-sliders.css'
 import { writeStorage } from './utils/storage'
+import {
+  installBeforeQuitFlushBridge,
+  registerBeforeQuitFlushHandler,
+} from './modules/app/beforeQuitFlushRegistry'
+import { installBoardExternalAssetBridge } from './modules/document/boardExternalAssetInbox'
+import { waitForAllBoardPathSaves } from './modules/document/boardHandleRegistry'
 
 type StartupThemeSnapshot = {
   option: string
@@ -91,6 +97,9 @@ async function bootstrap() {
   const root = document.getElementById('root')
   if (!root) throw new Error('Root element #root not found')
   rendererRoot = ReactDOM.createRoot(root)
+  installBeforeQuitFlushBridge(window.electronAPI?.app)
+  registerBeforeQuitFlushHandler('board:unmounted-saves', waitForAllBoardPathSaves)
+  installBoardExternalAssetBridge(window.electronAPI?.board)
 
   if (window.location.hash.startsWith('#/startup-preview')) {
     const { default: StartupPreview } = await import('./pages/StartupPreview')

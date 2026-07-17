@@ -4,6 +4,8 @@ import { beforeEach, describe, it } from 'node:test'
 const values = new Map<string, string>()
 const writes: Array<{ op: 'set' | 'remove'; key: string; value?: string }> = []
 const windowListeners = new Map<string, Array<() => void>>()
+const idleCallbacks = new Map<number, () => void>()
+let nextIdleCallbackId = 0
 
 const localStorageMock = {
   getItem: (key: string) => values.get(key) ?? null,
@@ -22,6 +24,12 @@ const localStorageMock = {
   addEventListener: (event: string, listener: () => void) => {
     windowListeners.set(event, [...(windowListeners.get(event) || []), listener])
   },
+  requestIdleCallback: (callback: () => void) => {
+    const id = ++nextIdleCallbackId
+    idleCallbacks.set(id, callback)
+    return id
+  },
+  cancelIdleCallback: (id: number) => idleCallbacks.delete(id),
 }
 ;(globalThis as typeof globalThis & { document: unknown }).document = {
   visibilityState: 'visible',
@@ -30,6 +38,7 @@ const localStorageMock = {
 
 const {
   flushPendingDocTabDrafts,
+  flushPendingDocTabMetadata,
   getDocTabDraftStorageKey,
   useDocTabs,
 } = await import('../renderer/stores/useDocTabs')
@@ -45,16 +54,20 @@ const baseTab = {
 
 function resetStore(): void {
   flushPendingDocTabDrafts()
+  flushPendingDocTabMetadata()
   values.clear()
   writes.length = 0
+  idleCallbacks.clear()
   useDocTabs.setState({
     tabs: [baseTab],
     tabGroups: [],
     activeTabId: baseTab.id,
     splitTabId: null,
+    focusedPaneTabId: baseTab.id,
     documentSplitRatio: 50,
     pendingReveal: null,
   })
+  flushPendingDocTabMetadata()
   writes.length = 0
 }
 
@@ -65,6 +78,8 @@ describe('document tab persistence', () => {
     const largeDraft = `large-draft:${'x'.repeat(500_000)}`
     useDocTabs.getState().updateTabContent(baseTab.id, largeDraft)
 
+    assert.equal(writes.some((write) => write.key === METADATA_KEY), false)
+    flushPendingDocTabMetadata()
     const metadataWrite = writes.find((write) => write.op === 'set' && write.key === METADATA_KEY)
     assert.ok(metadataWrite?.value)
     assert.equal(metadataWrite.value.includes('large-draft:'), false)
@@ -86,6 +101,64 @@ describe('document tab persistence', () => {
         .some((write) => write.value?.includes('large-draft:')),
       false,
     )
+  })
+
+  it('coalesces rapid metadata-only transitions into one storage write', () => {
+    useDocTabs.getState().renameTab(baseTab.id, 'one.md')
+    useDocTabs.getState().renameTab(baseTab.id, 'two.md')
+    useDocTabs.getState().setDocumentSplitRatio(61)
+    assert.equal(writes.filter((write) => write.key === METADATA_KEY).length, 0)
+
+    flushPendingDocTabMetadata()
+    const metadataWrites = writes.filter((write) => write.op === 'set' && write.key === METADATA_KEY)
+    assert.equal(metadataWrites.length, 1)
+    const persisted = JSON.parse(metadataWrites[0].value || '{}') as {
+      state?: { tabs?: Array<{ title: string }>; documentSplitRatio?: number }
+    }
+    assert.equal(persisted.state?.tabs?.[0]?.title, 'two.md')
+    assert.equal(persisted.state?.documentSplitRatio, 61)
+  })
+
+  it('waits for a quiet typing window before requesting an idle metadata write', async () => {
+    useDocTabs.getState().renameTab(baseTab.id, 'one.md')
+    await new Promise((resolve) => setTimeout(resolve, 80))
+    useDocTabs.getState().renameTab(baseTab.id, 'two.md')
+    await new Promise((resolve) => setTimeout(resolve, 80))
+
+    assert.equal(idleCallbacks.size, 0)
+    assert.equal(writes.filter((write) => write.key === METADATA_KEY).length, 0)
+
+    await new Promise((resolve) => setTimeout(resolve, 130))
+    assert.equal(idleCallbacks.size, 1)
+    const [idleId, idleCallback] = idleCallbacks.entries().next().value as [number, () => void]
+    idleCallbacks.delete(idleId)
+    idleCallback()
+
+    const metadataWrites = writes.filter((write) => write.op === 'set' && write.key === METADATA_KEY)
+    assert.equal(metadataWrites.length, 1)
+    const persisted = JSON.parse(metadataWrites[0].value || '{}') as {
+      state?: { tabs?: Array<{ title: string }> }
+    }
+    assert.equal(persisted.state?.tabs?.[0]?.title, 'two.md')
+  })
+
+  it('flushes metadata within the maximum window during continuous updates', async () => {
+    let index = 0
+    const updates = setInterval(() => {
+      index += 1
+      useDocTabs.getState().renameTab(baseTab.id, `continuous-${index}.md`)
+    }, 40)
+
+    await new Promise((resolve) => setTimeout(resolve, 650))
+    clearInterval(updates)
+
+    assert.equal(writes.filter((write) => write.op === 'set' && write.key === METADATA_KEY).length, 1)
+    flushPendingDocTabMetadata()
+    const metadataWrites = writes.filter((write) => write.op === 'set' && write.key === METADATA_KEY)
+    assert.equal(metadataWrites.length, 2)
+    const latest = metadataWrites.at(-1)
+    const persisted = JSON.parse(latest?.value || '{}') as { state?: { tabs?: Array<{ title: string }> } }
+    assert.equal(persisted.state?.tabs?.[0]?.title, `continuous-${index}.md`)
   })
 
   it('updates draft storage only when document content changes', () => {
@@ -159,6 +232,7 @@ describe('document tab persistence', () => {
   it('restores a dirty draft from split metadata and draft records', async () => {
     useDocTabs.getState().updateTabContent(baseTab.id, 'recover-me')
     flushPendingDocTabDrafts()
+    flushPendingDocTabMetadata()
     const metadata = values.get(METADATA_KEY)
     const draft = values.get(getDocTabDraftStorageKey(baseTab.id))
     assert.ok(metadata)

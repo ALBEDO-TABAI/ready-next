@@ -32,17 +32,21 @@ export interface BeforeQuitCleanupDeps {
    */
   cleanupManagedBrowsers?: () => Promise<void> | void
   /**
-   * Asks renderer windows to flush in-memory document reading sessions before
-   * the DB is closed. Optional because headless tests and crash cleanup paths
-   * may have no renderer windows.
+   * Asks renderer windows to flush registered in-memory state before the DB is
+   * closed. Optional because headless tests and crash cleanup paths may have no
+   * renderer windows.
    */
-  cleanupRendererReadingSessions?: () => Promise<void> | void
+  cleanupRendererState?: () => Promise<void> | void
   /**
    * Tears down the DB worker_thread (perf-rescue B1). Runs in parallel with
    * the other runtime cleanups so a stuck worker can't block quit beyond
    * `timeoutMs`. Optional for tests / environments without the worker.
    */
   cleanupDbWorker?: () => Promise<void> | void
+  /** Stops the lazy document conversion worker after pending atomic writes settle. */
+  cleanupDocumentWorker?: () => Promise<void> | void
+  /** Cancels queued document directory broadcasts and their debounce timers. */
+  cleanupDocumentDirectoryBroadcasts?: () => Promise<void> | void
   /**
    * Closes any active chokidar file watchers (perf-rescue B7). Optional —
    * tests + environments that never opened a watcher can skip this. Runs in
@@ -111,11 +115,17 @@ export async function runBeforeQuitCleanup(
   if (deps.cleanupManagedBrowsers) {
     tasks.push(safeInvoke(deps.cleanupManagedBrowsers, 'cleanupManagedBrowsers', logger))
   }
-  if (deps.cleanupRendererReadingSessions) {
-    tasks.push(safeInvoke(deps.cleanupRendererReadingSessions, 'cleanupRendererReadingSessions', logger))
+  if (deps.cleanupRendererState) {
+    tasks.push(safeInvoke(deps.cleanupRendererState, 'cleanupRendererState', logger))
   }
   if (deps.cleanupDbWorker) {
     tasks.push(safeInvoke(deps.cleanupDbWorker, 'cleanupDbWorker', logger))
+  }
+  if (deps.cleanupDocumentWorker) {
+    tasks.push(safeInvoke(deps.cleanupDocumentWorker, 'cleanupDocumentWorker', logger))
+  }
+  if (deps.cleanupDocumentDirectoryBroadcasts) {
+    tasks.push(safeInvoke(deps.cleanupDocumentDirectoryBroadcasts, 'cleanupDocumentDirectoryBroadcasts', logger))
   }
   if (deps.cleanupFileWatchers) {
     tasks.push(safeInvoke(deps.cleanupFileWatchers, 'cleanupFileWatchers', logger))

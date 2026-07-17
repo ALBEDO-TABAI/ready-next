@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { ChevronDown, ChevronRight, FileText, Plus, X } from 'lucide-react'
 import type { TabGroup, TabGroupColor } from '../../../shared/tab-groups'
@@ -142,7 +142,7 @@ function buildDisplayRows(
   return { rows, flatOrder }
 }
 
-export default function DocumentVerticalTabRail({
+function DocumentVerticalTabRail({
   tabs,
   groups = [],
   onTabClick,
@@ -508,6 +508,7 @@ export default function DocumentVerticalTabRail({
       {expanded && anchorRect && createPortal(
         <div
           className="document-vertical-tab-flyout flex flex-col overflow-hidden"
+          data-ready-native-overlay=""
           style={{
             position: 'fixed', zIndex: 60, left: anchorRect.right, top: anchorRect.top,
             height: flyoutHeight, width: FLYOUT_WIDTH,
@@ -620,6 +621,8 @@ export default function DocumentVerticalTabRail({
     </div>
   )
 }
+
+export default memo(DocumentVerticalTabRail)
 
 // Floating host for the shared Edge-style edit menu: fixed-position portal anchored off
 // the group header ROW (menu left-aligns with the pill), flipping up if it would overflow.

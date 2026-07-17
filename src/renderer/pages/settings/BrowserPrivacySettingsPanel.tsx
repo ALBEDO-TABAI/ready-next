@@ -604,6 +604,7 @@ export function BrowserPrivacySettingsPanel() {
       {/* Confirmation modal — same pattern as StorageSettingsPanel */}
       {confirm && (
         <div
+          data-ready-native-overlay=""
           className="fixed inset-0 z-[100] flex items-center justify-center"
           style={{ background: 'rgba(0,0,0,0.32)' }}
           onClick={() => setConfirm(null)}

@@ -7,14 +7,18 @@ function readWorkspaceFile(path: string): string {
   return readFileSync(resolve(process.cwd(), path), 'utf8')
 }
 
-test('browser runtime restores tab truth from the main process and rebuilds native tabs from persisted renderer cache when main is empty', () => {
+test('browser runtime restores tab truth from the main process and registers persisted background tabs as dormant when main is empty', () => {
   const runtimeHook = readWorkspaceFile('src/renderer/modules/browser/useBrowserRuntimeEffects.ts')
 
   assert.match(runtimeHook, /const existingTabs = await window\.electronAPI\?\.browser\?\.getTabs\(\)/)
   assert.match(runtimeHook, /const rebuildRuntimeFromPersistedTabs = useCallback/)
-  assert.match(runtimeHook, /const result = await window\.electronAPI\?\.browser\?\.createTab\(tab\.url\)/)
+  assert.match(runtimeHook, /const result = await window\.electronAPI\?\.browser\?\.registerDormantTabs\(\{/)
+  assert.match(runtimeHook, /tabs: persistedTabs,[\s\S]*activeTabId: store\.activeTabId,[\s\S]*splitTabId: store\.splitTabId/)
+  assert.match(runtimeHook, /const acceptedTabs = selectAcceptedDormantTabs\(persistedTabs, result\)/)
+  assert.match(runtimeHook, /loading: result\.materializedTabIds\?\.includes\(tab\.id\) \?\? false/)
   assert.match(runtimeHook, /store\.setTabs\(recoveredTabs\)/)
-  assert.match(runtimeHook, /window\.electronAPI\?\.browser\?\.switchTab\(nextActiveTabId\)/)
+  assert.match(runtimeHook, /store\.setSplitTabId\(result\.splitTabId \|\| null\)/)
+  assert.doesNotMatch(runtimeHook, /createTab\(tab\.url\)/)
   assert.match(runtimeHook, /const rebuilt = await rebuildRuntimeFromPersistedTabs\(store\)/)
   assert.match(runtimeHook, /if \(rebuilt\) return true/)
   // restoreExistingTabs reconciles through the group-preserving merge (P1 §6): the

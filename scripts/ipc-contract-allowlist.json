@@ -52,17 +52,17 @@
   "methods_typed_only": [],
   "non_literal_push": [
     {
-      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:230",
+      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:236",
       "variable": "channel",
       "channels": [
         "browser:downloadUpdate"
       ],
-      "reason": "Forwarder lambda passed to BrowserDownloadService constructor; the service itself emits literal 'browser:downloadUpdate' at download-service.ts:437,499 (covered by the literal PUSH_EMITTED scan). 2026-07-17 re-verified the upstream literals and re-anchored this entry after BrowserHostController wiring changed; removing it requires refactoring the DI forwarder pattern.",
+      "reason": "Forwarder lambda passed to BrowserDownloadService constructor; the service itself emits literal 'browser:downloadUpdate' at download-service.ts:485,550 (covered by the literal PUSH_EMITTED scan). 2026-07-17 re-verified the upstream literals and re-anchored this entry after dynamic-load services changed BrowserHostController wiring; removing it requires refactoring the DI forwarder pattern.",
       "owner": "stage-v-bootstrap",
       "expiry": "2026-08-21"
     },
     {
-      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:236",
+      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:271",
       "variable": "channel",
       "channels": [
         "app:shortcut"
@@ -72,17 +72,18 @@
       "expiry": "2026-08-21"
     },
     {
-      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:250",
+      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:286",
       "variable": "channel",
       "channels": [
+        "board:activeBoardExternalImageAdded",
         "browser:fastCardContextAction"
       ],
-      "reason": "Forwarder lambda passed to BrowserContextMenuService; the service emits literal 'browser:fastCardContextAction' at context-menu-service.ts:418 (covered by literal scan). 2026-07-17 re-verified after BrowserHostController wiring changed; removing this entry requires forwarder-pattern refactor.",
+      "reason": "Forwarder lambda passed to BrowserContextMenuService; the service emits literal 'board:activeBoardExternalImageAdded' at context-menu-service.ts:155,159 and 'browser:fastCardContextAction' at :418 (covered by literal scan). 2026-07-17 re-verified after BrowserHostController wiring changed; removing this entry requires forwarder-pattern refactor.",
       "owner": "stage-v-bootstrap",
       "expiry": "2026-08-21"
     },
     {
-      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:259",
+      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:295",
       "variable": "channel",
       "channels": [
         "browser:bookmarksChanged"
@@ -92,7 +93,7 @@
       "expiry": "2026-08-21"
     },
     {
-      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:295",
+      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:333",
       "variable": "channel",
       "channels": [
         "browser:previewUpdate"
@@ -102,28 +103,17 @@
       "expiry": "2026-08-21"
     },
     {
-      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:395",
+      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:462",
       "variable": "channel",
       "channels": [
-        "browser:tabUpdate"
-      ],
-      "reason": "Forwarder lambda passed to BrowserTabMetaService; the service emits literal 'browser:tabUpdate' at tab-meta-service.ts:70 (covered by literal scan). 2026-07-17 re-verified after BrowserHostController wiring changed; removing this entry requires forwarder-pattern refactor.",
-      "owner": "stage-v-bootstrap",
-      "expiry": "2026-08-21"
-    },
-    {
-      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:417",
-      "variable": "channel",
-      "channels": [
-        "browser:tabUpdate",
         "browser:tabOpened"
       ],
-      "reason": "Forwarder lambda passed to BrowserTabLifecycleService; the service emits literal 'browser:tabOpened' at tab-lifecycle-service.ts:412 and 'browser:tabUpdate' at 435,492,501,510,525 (all covered by literal scan). 2026-07-17 re-verified after BrowserHostController wiring changed; behavior remains covered by browser-tab-lifecycle-tabopened.test.ts.",
+      "reason": "Forwarder lambda passed to BrowserTabLifecycleService; the service emits literal 'browser:tabOpened' at tab-lifecycle-service.ts:465 (covered by literal scan). Tab updates now use the typed queueTabUpdate dependency and do not pass through this variable-channel forwarder. 2026-07-17 re-verified after BrowserHostController wiring changed; behavior remains covered by browser-tab-lifecycle-tabopened.test.ts.",
       "owner": "stage-v-bootstrap",
       "expiry": "2026-08-21"
     },
     {
-      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:470",
+      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:519",
       "variable": "channel",
       "channels": [
         "browser:adblockUpdate"
@@ -133,7 +123,7 @@
       "expiry": "2026-08-21"
     },
     {
-      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:515",
+      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:564",
       "variable": "channel",
       "channels": [
         "browser:bookmarksChanged",
@@ -144,21 +134,26 @@
       "expiry": "2026-08-21"
     },
     {
-      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:630",
+      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:692",
       "variable": "channel",
       "channels": [
+        "app:shortcut",
+        "board:activeBoardExternalImageAdded",
         "browser:adblockUpdate",
+        "browser:agentControlChanged",
         "browser:bookmarksChanged",
         "browser:clipCurrentTabRequested",
         "browser:downloadUpdate",
         "browser:fastCardContextAction",
-        "browser:tabOpened",
+        "browser:leaseChanged",
+        "browser:localMediaUploadStatus",
         "browser:previewUpdate",
+        "browser:tabOpened",
         "browser:tabUpdate",
         "clip:backgroundUpdate",
         "clip:contentStudyUpdate"
       ],
-      "reason": "BrowserHostController.sendToRenderer is the central main->renderer dispatch used by all browser-engine sub-services and clipping runners. All emitted channels remain literal at their upstream sites and are covered by the literal PUSH_EMITTED scan; 2026-07-17 re-verified this runtime forwarder after BrowserHostController wiring changed. Removing it requires replacing the central variable-channel surface with typed literal emitters.",
+      "reason": "BrowserHostController.sendToRendererImmediate is the central main->renderer dispatch used by the typed tab-update batcher, browser-engine sub-services, controller literals and clipping runners. Every enumerated channel remains literal at an upstream site and is covered by the literal PUSH_EMITTED scan; 2026-07-17 re-verified and re-anchored the complete channel set after dynamic-load wiring changed. Removing it requires replacing the central variable-channel surface with typed literal emitters.",
       "owner": "stage-v-bootstrap",
       "expiry": "2026-08-21"
     },

@@ -474,6 +474,8 @@ const memoryLifecycleAPI = {
 const browserAPI = {
   createTab: (url: string, options?: { background?: boolean }) =>
     ipcRenderer.invoke('browser:createTab', url, options),
+  registerDormantTabs: (request: import('../shared/browser-tab-session').RegisterDormantBrowserTabsRequest) =>
+    ipcRenderer.invoke('browser:registerDormantTabs', request),
   openForCaptureTarget: (url: string) => ipcRenderer.invoke('browser:openForCaptureTarget', url),
   closeTab: (tabId: string) => ipcRenderer.invoke('browser:closeTab', tabId),
   switchTab: (tabId: string) => ipcRenderer.invoke('browser:switchTab', tabId),
@@ -509,7 +511,7 @@ const browserAPI = {
   captureViewportSnapshot: (tabId?: string | null) => ipcRenderer.invoke('browser:captureViewportSnapshot', tabId),
   getTabs: () => ipcRenderer.invoke('browser:getTabs'),
   getAdblockState: () => ipcRenderer.invoke('browser:getAdblockState'),
-  getDiagnostics: () => ipcRenderer.invoke('browser:getDiagnostics'),
+  getDiagnostics: (options?: { includePerformance?: boolean }) => ipcRenderer.invoke('browser:getDiagnostics', options),
   // Agent-browser supervision (plan §3.6): two-step interrupt + task listing.
   getAgentSupervisionState: () => ipcRenderer.invoke('browser:getAgentSupervisionState'),
   requestAgentInterruption: () => ipcRenderer.invoke('browser:requestAgentInterruption'),
@@ -836,8 +838,10 @@ const documentAPI = {
 const boardAPI = {
   create: (payload: { parentDir: string }) => ipcRenderer.invoke('board:create', payload),
   open: (payload: { path: string }) => ipcRenderer.invoke('board:open', payload),
-  setActive: (payload: { boardId: string | null }) => ipcRenderer.invoke('board:setActive', payload),
+  setActive: (payload: { boardId: string | null; expectedBoardId?: string }) => ipcRenderer.invoke('board:setActive', payload),
   save: (payload: { boardId: string; state: unknown }) => ipcRenderer.invoke('board:save', payload),
+  ackExternalAssets: (payload: { boardId: string; receiptIds: string[] }) =>
+    ipcRenderer.invoke('board:ackExternalAssets', payload),
   importAsset: (payload: { boardId: string; srcPath: string; kind?: 'image' | 'video' | 'markdown' }) =>
     ipcRenderer.invoke('board:importAsset', payload),
   importRemoteImage: (payload: { boardId: string; url: string }) =>
@@ -1218,6 +1222,12 @@ const appAPI = {
     ipcRenderer.on('app:shortcut', handler)
     return () => ipcRenderer.removeListener('app:shortcut', handler)
   },
+  onBeforeQuitFlush: (callback: (requestId: string) => void) => {
+    const handler = (_: IpcRendererEvent, requestId: string): void => callback(requestId)
+    ipcRenderer.on('app:flushBeforeQuit', handler)
+    return () => ipcRenderer.removeListener('app:flushBeforeQuit', handler)
+  },
+  ackBeforeQuitFlushed: (requestId: string) => ipcRenderer.send('app:beforeQuitFlushed', requestId),
   // D1: cache stats + cleanup
   getCacheStats: () => ipcRenderer.invoke('app:getCacheStats'),
   clearCache: (opts?: { includePuppeteer?: boolean }) =>
@@ -1325,13 +1335,6 @@ const fileEmergenceAPI = {
     ipcRenderer.invoke('fileEmergence:assignFile', payload),
   createProjectForFile: (payload: FileEmergenceCreateProjectForFilePayload) =>
     ipcRenderer.invoke('fileEmergence:createProjectForFile', payload),
-  onFlushReadingSessions: (handler: (requestId: string) => void) => {
-    const listener = (_event: IpcRendererEvent, requestId: string) => handler(requestId)
-    ipcRenderer.on('fileEmergence:flushReadingSessions', listener)
-    return () => ipcRenderer.removeListener('fileEmergence:flushReadingSessions', listener)
-  },
-  ackReadingSessionsFlushed: (requestId: string) =>
-    ipcRenderer.send('fileEmergence:readingSessionsFlushed', requestId),
 }
 const tagForgeAPI={
   prepareCreation:(payload:TagForgePrepareCreationPayload)=>ipcRenderer.invoke('tagForge:prepareCreation',payload),

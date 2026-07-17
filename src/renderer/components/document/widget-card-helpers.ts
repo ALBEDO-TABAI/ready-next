@@ -14,9 +14,15 @@ import type {
 } from '../../../shared/document-widget-parse'
 import { collectDocumentWidgets } from '../../../shared/document-widget-parse'
 import { resolveDocumentWidgetRenderCode } from '../../../shared/document-widget-render-code'
+import { recordDocumentPerformanceCounter } from '../../../shared/document-performance-diagnostics'
+import { buildWidgetFenceSignatureSnapshot } from '../../modules/document/widgetFenceSignature'
 
 export function getWidgetPersistenceKey(title: string, widgetCode: string): string {
   return `${title.trim().toLowerCase()}::${widgetCode.trim().slice(0, 160)}`
+}
+
+export function getWidgetFenceSignature(content: string): string {
+  return buildWidgetFenceSignatureSnapshot(content).signature
 }
 
 export function buildWidgetFenceSource(
@@ -78,8 +84,16 @@ export function getDocumentWidgetRenderBudget(content: string): {
       componentSpec: segment.data.componentSpec,
     }).widgetCode)
 
-  const widgetCount = widgets.length
-  const totalWidgetChars = widgets.reduce((sum, widgetCode) => sum + widgetCode.length, 0)
+  return getDocumentWidgetRenderBudgetFromCodes(widgets)
+}
+
+export function getDocumentWidgetRenderBudgetFromCodes(widgetCodes: readonly string[]): {
+  widgetCount: number
+  totalWidgetChars: number
+  forceManualPreviewAll: boolean
+} {
+  const widgetCount = widgetCodes.length
+  const totalWidgetChars = widgetCodes.reduce((sum, widgetCode) => sum + widgetCode.length, 0)
 
   return {
     widgetCount,
@@ -321,6 +335,8 @@ export function renameWidgetFenceTitleInContent(
 }
 
 export function extractWidgetStateMapFromContent(content: string): Record<string, DocumentWidgetPersistedState> {
+  if (!content.includes('```show-widget')) return {}
+  recordDocumentPerformanceCounter('widgetStateParses')
   const widgetStateMap: Record<string, DocumentWidgetPersistedState> = {}
   for (const segment of parseShowWidgetFences(content)) {
     if (segment.type !== 'widget' || !segment.data.widgetState) continue

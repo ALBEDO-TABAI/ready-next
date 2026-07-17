@@ -64,7 +64,7 @@ describe('G-Z12 runtimeDriver 事件接入 ready-tools.log', () => {
     const helperSource = readFileSync(LOG_HELPER_PATH, 'utf8')
     // Stage J log-lifecycle migrated tool-event log creation from
     // `getLogPath('ready-tools.log')` to the rotating-logger helper.
-    assert.match(helperSource, /createRotatingLogger\('ready-tools\.log'\)/)
+    assert.match(helperSource, /createRotatingLogger\('ready-tools\.log', \{ buffered: true \}\)/)
     assert.match(helperSource, /runtimeDriver type=/)
   })
 

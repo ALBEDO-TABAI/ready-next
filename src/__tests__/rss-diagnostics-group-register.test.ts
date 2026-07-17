@@ -74,7 +74,7 @@ function createMockDeps(): DiagnosticsGroupDeps {
     rsshubStop: fail('rsshubStop') as DiagnosticsGroupDeps['rsshubStop'],
     rsshubEnsureHealthy: fail('rsshubEnsureHealthy') as DiagnosticsGroupDeps['rsshubEnsureHealthy'],
     describeRsshubStatus: fail('describeRsshubStatus') as DiagnosticsGroupDeps['describeRsshubStatus'],
-    warmEmbeddedRSSHubForDiagnostics: fail('warmEmbeddedRSSHubForDiagnostics') as DiagnosticsGroupDeps['warmEmbeddedRSSHubForDiagnostics'],
+    isEmbeddedRSSHubRequiredForDiagnostics: fail('isEmbeddedRSSHubRequiredForDiagnostics') as DiagnosticsGroupDeps['isEmbeddedRSSHubRequiredForDiagnostics'],
     buildSourceDiagnostics: fail('buildSourceDiagnostics') as DiagnosticsGroupDeps['buildSourceDiagnostics'],
     getRouteCapabilityMatrix: fail('getRouteCapabilityMatrix') as DiagnosticsGroupDeps['getRouteCapabilityMatrix'],
     loadFetchInvocationSnapshot: fail('loadFetchInvocationSnapshot') as DiagnosticsGroupDeps['loadFetchInvocationSnapshot'],

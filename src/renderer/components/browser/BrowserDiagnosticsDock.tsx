@@ -21,11 +21,22 @@ export default function BrowserDiagnosticsDock({
   const pageState = browserDiagnostics?.pageState || null
   const continuity = browserDiagnostics?.continuity || null
   const lastFailure = browserDiagnostics?.lastFailure || null
+  const rendererProcesses = browserDiagnostics?.rendererProcesses || []
+  const tabLoadStates = browserDiagnostics?.tabLoadStates || []
+  const totalCpu = rendererProcesses.reduce((sum, process) => sum + process.cpuPercent, 0)
+  const totalMemoryMB = rendererProcesses.reduce((sum, process) => sum + process.memoryKB, 0) / 1024
+  const loadStateCounts = tabLoadStates.reduce<Record<string, number>>((counts, entry) => {
+    counts[entry.state] = (counts[entry.state] || 0) + 1
+    return counts
+  }, {})
+  const eventCount = Object.values(browserDiagnostics?.eventCounts60s || {})
+    .reduce((sum, count) => sum + count, 0)
 
   if (!currentTask && !lastFailure && !pageState && !continuity) return null
 
   return (
     <div
+      data-ready-native-overlay=""
       className="pointer-events-auto absolute bottom-4 right-4 z-[32] w-[320px] rounded-2xl border px-4 py-3 shadow-[0_18px_50px_rgba(15,23,42,0.12)]"
       style={{
         background: 'var(--surface-floating-bg)',
@@ -37,7 +48,7 @@ export default function BrowserDiagnosticsDock({
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="text-[11px] font-semibold uppercase tracking-[0.14em]" style={{ color: 'var(--text-light)' }}>
-            浏览器任务诊断
+            浏览器任务与性能诊断
           </div>
           <div className="mt-1 truncate text-[14px] font-semibold" style={{ color: 'var(--text-title)' }}>
             {currentTask?.taskTitle || '最近浏览器任务'}
@@ -80,6 +91,20 @@ export default function BrowserDiagnosticsDock({
           <div>模式页：{pageState?.modeSelection ? '是' : '否'}</div>
         </div>
       )}
+
+      <div
+        className="mt-3 grid grid-cols-2 gap-x-3 gap-y-1 rounded-xl px-3 py-2 text-[11px]"
+        style={{ background: 'var(--bg-hover)', color: 'var(--text-light)' }}
+      >
+        <div>页面进程：{rendererProcesses.length}</div>
+        <div>内存：{totalMemoryMB.toFixed(1)} MB</div>
+        <div>CPU：{totalCpu.toFixed(1)}%</div>
+        <div>近 60 秒事件：{eventCount}</div>
+        <div>前台：{loadStateCounts.visible || 0}</div>
+        <div>后台降载：{loadStateCounts.throttled || 0}</div>
+        <div>任务保护：{loadStateCounts['protected-background'] || 0}</div>
+        <div>休眠：{loadStateCounts.dormant || 0}</div>
+      </div>
 
       {lastFailure?.reason ? (
         <div

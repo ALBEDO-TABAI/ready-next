@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'crypto'
 import { existsSync } from 'fs'
-import { copyFile, mkdir, readFile, realpath, rename, stat, writeFile } from 'fs/promises'
+import { copyFile, mkdir, readFile, realpath, rename, stat, unlink, writeFile } from 'fs/promises'
 import { basename, dirname, extname, join, resolve } from 'path'
 import {
   READY_BOARD_FILE_SUFFIX,
@@ -11,7 +11,7 @@ import {
   renderReadyBoardHtmlFromTemplate,
   type ReadyBoardAsset,
   type ReadyBoardAssetKind,
-  type ReadyBoardImageNode,
+  type ReadyBoardExternalAssetReceipt,
   type ReadyBoardState,
 } from '../../../shared/ready-board'
 import { isPathAllowed } from '../app-control/local-path-safety'
@@ -34,6 +34,7 @@ export interface ReadyBoardOpenData {
   boardId: string
   path: string
   state: ReadyBoardState
+  pendingExternalAssets?: ReadyBoardExternalAssetReceipt[]
 }
 
 export type BoardServiceResponse<T = void> = {
@@ -154,6 +155,9 @@ async function readMarkdownExcerpt(path: string): Promise<{ title: string; excer
 
 export class ReadyBoardService {
   private readonly handles = new Map<string, ReadyBoardHandleRecord>()
+  private readonly boardIdsByPath = new Map<string, string>()
+  private readonly saveQueues = new Map<string, Promise<void>>()
+  private readonly pendingAssetQueues = new Map<string, Promise<void>>()
   private activeBoardId: string | null = null
 
   constructor(private readonly deps: BoardServiceDeps) {}
@@ -169,6 +173,12 @@ export class ReadyBoardService {
     const state = { ...createEmptyReadyBoardState(title), updatedAt: this.nowIso() }
     const template = await this.deps.readTemplate()
     await this.atomicWrite(path, renderReadyBoardHtmlFromTemplate(template, state))
+    const staleReceiptPath = join(realParent, 'assets', `.${basename(path)}.pending-external-assets.json`)
+    try {
+      await unlink(staleReceiptPath)
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException)?.code !== 'ENOENT') throw error
+    }
     this.deps.onDirectoryChanged?.([realParent])
     return this.register(path, state)
   }
@@ -178,12 +188,15 @@ export class ReadyBoardService {
     const real = await realSafePath(absPath, true)
     if (!real) return fail('文件不可访问', 'PATH_NOT_ALLOWED')
     if (!isReadyBoardFile(real)) return fail('不是 Ready 画板文件', 'NOT_BOARD_FILE')
+    await this.saveQueues.get(real)
+    await this.pendingAssetQueues.get(real)
     const html = await readFile(real, 'utf8')
     return this.register(real, extractReadyBoardStateFromHtml(html))
   }
 
-  setActive(boardId: string | null): BoardServiceResponse {
+  setActive(boardId: string | null, expectedBoardId?: string): BoardServiceResponse {
     if (boardId === null) {
+      if (expectedBoardId && this.activeBoardId !== expectedBoardId) return { success: true }
       this.activeBoardId = null
       return { success: true }
     }
@@ -199,8 +212,17 @@ export class ReadyBoardService {
       ...(stateInput && typeof stateInput === 'object' ? stateInput as Record<string, unknown> : {}),
       updatedAt: this.nowIso(),
     })
-    const template = await this.deps.readTemplate()
-    await this.atomicWrite(handle.absPath, renderReadyBoardHtmlFromTemplate(template, state))
+    const previous = this.saveQueues.get(handle.absPath) ?? Promise.resolve()
+    const operation = previous.catch(() => undefined).then(async () => {
+      const template = await this.deps.readTemplate()
+      await this.atomicWrite(handle.absPath, renderReadyBoardHtmlFromTemplate(template, state))
+    })
+    this.saveQueues.set(handle.absPath, operation)
+    try {
+      await operation
+    } finally {
+      if (this.saveQueues.get(handle.absPath) === operation) this.saveQueues.delete(handle.absPath)
+    }
     this.deps.onDirectoryChanged?.([handle.dir])
     return { success: true, data: { boardId, path: handle.absPath, state } }
   }
@@ -232,7 +254,12 @@ export class ReadyBoardService {
     return this.importRemoteImageForHandle(handle, url)
   }
 
-  async addRemoteImageToActiveBoard(url: string): Promise<BoardServiceResponse<{ boardId: string; path: string; asset: ReadyBoardAsset; state: ReadyBoardState }>> {
+  async importRemoteImageToActiveBoard(url: string): Promise<BoardServiceResponse<{
+    boardId: string
+    path: string
+    receiptId: string
+    asset: ReadyBoardAsset
+  }>> {
     const boardId = this.activeBoardId
     if (!boardId) return fail('没有正在编辑的 Reference 画板', 'NO_ACTIVE_BOARD')
     const handle = this.handles.get(boardId)
@@ -241,26 +268,29 @@ export class ReadyBoardService {
     if (!assetResult.success || !assetResult.data) {
       return fail(assetResult.error || '网页图片导入失败', assetResult.errorCode || 'REMOTE_FETCH_FAILED')
     }
-    const opened = await this.open(handle.absPath)
-    if (!opened.success || !opened.data) return fail('无法读取活动画板', 'BOARD_READ_FAILED')
-    const node: ReadyBoardImageNode = {
-      id: `node-${Date.now().toString(36)}`,
-      type: 'image',
-      src: assetResult.data.src,
-      title: assetResult.data.title || assetResult.data.name,
-      x: 0,
-      y: 0,
-      width: 360,
-      height: 240,
+    const receipt: ReadyBoardExternalAssetReceipt = { id: randomUUID(), asset: assetResult.data }
+    await this.updatePendingExternalAssets(handle, (pending) => [...pending, receipt])
+    return {
+      success: true,
+      data: { boardId, path: handle.absPath, receiptId: receipt.id, asset: receipt.asset },
     }
-    const state = {
-      ...opened.data.state,
-      nodes: [...opened.data.state.nodes, node],
-      updatedAt: this.nowIso(),
-    }
-    const saved = await this.save(boardId, state)
-    if (!saved.success || !saved.data) return fail('无法保存活动画板', 'BOARD_SAVE_FAILED')
-    return { success: true, data: { boardId, path: handle.absPath, asset: assetResult.data, state: saved.data.state } }
+  }
+
+  async acknowledgeExternalAssets(
+    boardId: string,
+    receiptIds: readonly string[],
+  ): Promise<BoardServiceResponse<{ acknowledged: number }>> {
+    const handle = this.handles.get(boardId)
+    if (!handle) return fail('画板句柄不存在', 'BOARD_HANDLE_NOT_FOUND')
+    const ids = new Set(receiptIds.map((id) => String(id || '').trim()).filter(Boolean))
+    if (ids.size === 0) return { success: true, data: { acknowledged: 0 } }
+    let acknowledged = 0
+    await this.updatePendingExternalAssets(handle, (pending) => pending.filter((receipt) => {
+      if (!ids.has(receipt.id)) return true
+      acknowledged += 1
+      return false
+    }))
+    return { success: true, data: { acknowledged } }
   }
 
   async openInDocument(boardId: string, relativePath: string): Promise<BoardServiceResponse<{ path: string }>> {
@@ -348,11 +378,85 @@ export class ReadyBoardService {
 
   private async register(path: string, state: ReadyBoardState): Promise<BoardServiceResponse<ReadyBoardOpenData>> {
     const absPath = resolve(path)
-    const boardId = randomUUID()
+    const boardId = this.boardIdsByPath.get(absPath) ?? randomUUID()
     const record = { boardId, absPath, dir: dirname(absPath) }
     this.handles.set(boardId, record)
-    this.activeBoardId = boardId
-    return { success: true, data: { boardId, path: absPath, state: normalizeReadyBoardState(state) } }
+    this.boardIdsByPath.set(absPath, boardId)
+    const pendingExternalAssets = await this.readPendingExternalAssets(record)
+    return {
+      success: true,
+      data: { boardId, path: absPath, state: normalizeReadyBoardState(state), pendingExternalAssets },
+    }
+  }
+
+  private pendingExternalAssetsPath(handle: ReadyBoardHandleRecord): string {
+    return join(handle.dir, 'assets', `.${basename(handle.absPath)}.pending-external-assets.json`)
+  }
+
+  private async readPendingExternalAssets(
+    handle: ReadyBoardHandleRecord,
+  ): Promise<ReadyBoardExternalAssetReceipt[]> {
+    let raw: string
+    try {
+      raw = await readFile(this.pendingExternalAssetsPath(handle), 'utf8')
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') return []
+      throw error
+    }
+    const parsed = JSON.parse(raw) as { receipts?: unknown }
+    if (!Array.isArray(parsed.receipts)) throw new Error('画板外部素材回执格式无效')
+    return parsed.receipts.map((candidate) => {
+      if (!candidate || typeof candidate !== 'object') throw new Error('画板外部素材回执格式无效')
+      const receipt = candidate as { id?: unknown; asset?: unknown }
+      const id = typeof receipt.id === 'string' ? receipt.id.trim() : ''
+      const asset = receipt.asset && typeof receipt.asset === 'object'
+        ? receipt.asset as Partial<ReadyBoardAsset>
+        : null
+      const resolvedAssetPath = typeof asset?.src === 'string' ? resolve(handle.dir, asset.src) : ''
+      if (
+        !id
+        || asset?.kind !== 'image'
+        || typeof asset.src !== 'string'
+        || !asset.src.startsWith('assets/')
+        || asset.src.split('/').includes('..')
+        || typeof asset.name !== 'string'
+        || typeof asset.absPath !== 'string'
+        || resolve(asset.absPath) !== resolvedAssetPath
+        || !isSameOrDescendant(join(handle.dir, 'assets'), resolvedAssetPath)
+        || typeof asset.size !== 'number'
+      ) {
+        throw new Error('画板外部素材回执格式无效')
+      }
+      return { id, asset: asset as ReadyBoardAsset }
+    })
+  }
+
+  private async updatePendingExternalAssets(
+    handle: ReadyBoardHandleRecord,
+    update: (pending: ReadyBoardExternalAssetReceipt[]) => ReadyBoardExternalAssetReceipt[],
+  ): Promise<void> {
+    const previous = this.pendingAssetQueues.get(handle.absPath) ?? Promise.resolve()
+    const operation = previous.catch(() => undefined).then(async () => {
+      const pending = update(await this.readPendingExternalAssets(handle))
+      const receiptPath = this.pendingExternalAssetsPath(handle)
+      if (pending.length === 0) {
+        try {
+          await unlink(receiptPath)
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException)?.code !== 'ENOENT') throw error
+        }
+        return
+      }
+      await mkdir(dirname(receiptPath), { recursive: true })
+      await this.atomicWrite(receiptPath, JSON.stringify({ version: 1, receipts: pending }, null, 2))
+    })
+    const tail = operation.then(() => undefined, () => undefined)
+    this.pendingAssetQueues.set(handle.absPath, tail)
+    try {
+      await operation
+    } finally {
+      if (this.pendingAssetQueues.get(handle.absPath) === tail) this.pendingAssetQueues.delete(handle.absPath)
+    }
   }
 
   private async nextBoardPath(parentDir: string): Promise<string> {
@@ -371,7 +475,7 @@ export class ReadyBoardService {
   }
 
   private async atomicWrite(path: string, content: string): Promise<void> {
-    const temp = `${path}.tmp-${process.pid}-${Date.now()}`
+    const temp = `${path}.tmp-${process.pid}-${randomUUID()}`
     await writeFile(temp, content, 'utf8')
     await rename(temp, path)
   }

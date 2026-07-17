@@ -5,6 +5,7 @@ import {
   type VerticalRailOverlaySnapshot,
 } from '../../../shared/browser-vertical-rail-overlay'
 import { VERTICAL_RAIL_FLYOUT_MIN_HEIGHT } from '../../../shared/vertical-rail-flyout-layout'
+import { OverlayWindowFollower } from './overlay-window-follower'
 
 interface VerticalRailOverlayWindowOptions {
   mainWindow: BrowserWindow
@@ -18,6 +19,12 @@ export class VerticalRailOverlayWindow {
   private window: BrowserWindow | null = null
   private snapshot: VerticalRailOverlaySnapshot | null = null
   private boundParentWindow: BrowserWindow | null = null
+  private readonly follower = new OverlayWindowFollower({
+    apply: () => this.reposition(),
+    getDisplayMatching: (bounds) => screen.getDisplayMatching(bounds),
+    onDisplayMetricsChanged: (listener) => screen.on('display-metrics-changed', listener),
+    offDisplayMetricsChanged: (listener) => screen.off('display-metrics-changed', listener),
+  })
 
   constructor(private options: VerticalRailOverlayWindowOptions) {
     this.bindParentWindow(this.options.mainWindow)
@@ -45,6 +52,7 @@ export class VerticalRailOverlayWindow {
 
   hide(): void {
     this.snapshot = null
+    this.follower.cancel()
     if (this.window && !this.window.isDestroyed()) this.window.hide()
   }
 
@@ -89,6 +97,7 @@ export class VerticalRailOverlayWindow {
     this.boundParentWindow = null
     this.window = null
     this.snapshot = null
+    this.follower.dispose()
   }
 
   private bindParentWindow(mainWindow: BrowserWindow): void {
@@ -105,7 +114,7 @@ export class VerticalRailOverlayWindow {
   }
 
   private handleParentMoveOrResize = (): void => {
-    this.reposition()
+    this.follower.schedule()
   }
 
   private handleParentClosed = (): void => {
@@ -169,7 +178,7 @@ export class VerticalRailOverlayWindow {
 
   private resolveBounds(snapshot: VerticalRailOverlaySnapshot): Electron.Rectangle {
     const mainBounds = this.options.mainWindow.getContentBounds()
-    const display = screen.getDisplayMatching(mainBounds)
+    const display = this.follower.displayFor(mainBounds)
     const width = OVERLAY_WIDTH
     const height = Math.max(VERTICAL_RAIL_FLYOUT_MIN_HEIGHT, Math.round(snapshot.bounds.height))
     // Sit flush to the RIGHT of the icon rail (bounds.left + rail width). The rail icons stay

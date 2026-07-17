@@ -11,11 +11,10 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { BrowserTabShellService, type BrowserShellTabRecord } from '../main/modules/browser-engine/tab-shell-service'
-import type { BrowserBoundsSyncMode } from '../shared/browser-view-layout'
 import type { BrowserHostView, BrowserRect } from '../main/modules/browser-engine/host-types'
 import type { BrowserViewIntent } from '../shared/browser-view-intent'
 
-type ApplyArgs = { view: unknown; syncMode: BrowserBoundsSyncMode; bounds: BrowserRect | null }
+type ApplyArgs = { view: unknown; bounds: BrowserRect | null }
 
 interface HostCalls {
   shown: Array<{ view: unknown; bounds: BrowserRect }>
@@ -80,7 +79,7 @@ function makeShellService(opts: {
     createTab: async () => ({ success: true, tabId: 'created' }),
     detachHost: (v) => calls.detached.push({ view: v }),
     showHost: (v, b) => calls.shown.push({ view: v, bounds: b }),
-    applyBounds: (v, syncMode, bounds) => calls.applied.push({ view: v, syncMode: syncMode ?? 'settled', bounds: bounds ?? null }),
+    applyBounds: (v, bounds) => calls.applied.push({ view: v, bounds: bounds ?? null }),
     hideHost: (v) => calls.hidden.push({ view: v }),
     detachPreviewView: () => { calls.previewDetached += 1 },
     restoreActiveTabHost: () => { calls.restored += 1 },
@@ -240,17 +239,15 @@ test('applyIntent kind=set-bounds applies primary bounds and records viewBounds'
     intentId: 5,
     tabId: 't1',
     bounds: { x: 5, y: 10, w: 600, h: 400 },
-    syncMode: 'transient',
   }
   service.applyIntent(intent)
   assert.equal(calls.applied.length, 1)
   assert.equal(calls.applied[0].view, v1)
-  assert.equal(calls.applied[0].syncMode, 'transient')
   assert.deepEqual(calls.applied[0].bounds, { x: 5, y: 10, width: 600, height: 400 })
   assert.deepEqual(calls.viewBounds, { x: 5, y: 10, width: 600, height: 400 })
 })
 
-test('applyIntent kind=set-bounds defaults syncMode to settled when omitted', () => {
+test('applyIntent kind=set-bounds forwards the exact requested bounds without a second cadence layer', () => {
   const v1 = makeStubView('t1')
   const { service, calls } = makeShellService({
     tabs: [makeTab('t1', v1)],
@@ -263,7 +260,7 @@ test('applyIntent kind=set-bounds defaults syncMode to settled when omitted', ()
     bounds: { x: 0, y: 0, w: 1, h: 1 },
   }
   service.applyIntent(intent)
-  assert.equal(calls.applied[0].syncMode, 'settled')
+  assert.deepEqual(calls.applied[0].bounds, { x: 0, y: 0, width: 1, height: 1 })
 })
 
 test('applyIntent kind=set-bounds preserves frozen tab bounds during collection', () => {
@@ -279,7 +276,6 @@ test('applyIntent kind=set-bounds preserves frozen tab bounds during collection'
     intentId: 7,
     tabId: 't1',
     bounds: { x: 100, y: 200, w: 320, h: 240 },
-    syncMode: 'transient',
   })
 
   assert.deepEqual(calls.applied[0].bounds, frozen)
@@ -298,7 +294,6 @@ test('applyIntent kind=secondary-set-bounds applies bounds to the secondary tab 
     intentId: 7,
     tabId: 't2',
     bounds: { x: 400, y: 0, w: 400, h: 600 },
-    syncMode: 'transient',
   }
   service.applyIntent(intent)
   assert.equal(calls.shown.length, 1)
@@ -306,7 +301,6 @@ test('applyIntent kind=secondary-set-bounds applies bounds to the secondary tab 
   assert.deepEqual(calls.shown[0].bounds, { x: 400, y: 0, width: 400, height: 600 })
   assert.equal(calls.applied.length, 1)
   assert.equal(calls.applied[0].view, v2)
-  assert.equal(calls.applied[0].syncMode, 'transient')
   assert.deepEqual(calls.applied[0].bounds, { x: 400, y: 0, width: 400, height: 600 })
   assert.equal(calls.splitTabId, 't2')
   assert.deepEqual(calls.splitViewBounds, { x: 400, y: 0, width: 400, height: 600 })
@@ -329,7 +323,6 @@ test('applyIntent kind=secondary-set-bounds preserves frozen split tab bounds du
     intentId: 8,
     tabId: 't2',
     bounds: { x: 200, y: 0, w: 300, h: 600 },
-    syncMode: 'transient',
   })
 
   assert.deepEqual(calls.shown[0].bounds, frozen)
@@ -364,7 +357,7 @@ test('applyIntent kind=secondary-set-bounds detaches the previous secondary tab 
   assert.equal(calls.shown.at(-1)?.view, v3)
 })
 
-test('applyIntent kind=secondary-set-bounds is a no-op for an unknown tab id', () => {
+test('applyIntent kind=secondary-set-bounds rejects an unknown tab without publishing split state', () => {
   const v1 = makeStubView('t1')
   const { service, calls } = makeShellService({
     tabs: [makeTab('t1', v1)],
@@ -376,9 +369,8 @@ test('applyIntent kind=secondary-set-bounds is a no-op for an unknown tab id', (
     tabId: 'missing',
     bounds: { x: 0, y: 0, w: 100, h: 100 },
   }
-  service.applyIntent(intent)
+  const result = service.applyIntent(intent)
+  assert.equal(result.success, false)
   assert.equal(calls.applied.length, 0)
-  // splitTabId is still updated even when the view is missing — main
-  // side wants to track the intended split target.
-  assert.equal(calls.splitTabId, 'missing')
+  assert.equal(calls.splitTabId, null)
 })

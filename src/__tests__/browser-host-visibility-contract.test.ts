@@ -78,7 +78,7 @@ test('browser host visibility is explicitly gated and browser bounds keep Browse
   assert.match(boundsHook, /const exactWidth = Math\.round\(rect\.width\)/)
   assert.match(boundsHook, /if \(!isActive\) \{[\s\S]*clearFrameSync\(\)[\s\S]*clearSettleSyncTimeout\(\)[\s\S]*return/)
   assert.match(boundsHook, /const visibilitySyncTokenRef = useRef\(0\)/)
-  assert.match(boundsHook, /const resolvedSyncMode = options\?\.syncMode \?\? \(layoutPhaseRef\.current === 'idle' \? 'settled' : 'transient'\)/)
+  assert.doesNotMatch(boundsHook, /syncMode/)
   assert.match(boundsHook, /const shouldShowBrowserView =\s*!hasError(?:Ref\.current)? && overlayLockCountRef\.current === 0/)
   // PR-shell-1: visibility decisions now emit a `hide-all` BrowserViewIntent
   // instead of calling `browser.hideAll()` directly.

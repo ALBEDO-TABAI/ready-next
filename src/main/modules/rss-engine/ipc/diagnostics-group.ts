@@ -8,7 +8,7 @@
 //                       so the UI can flip the badge without a follow-up
 //                       `rss:status` round-trip)
 //   rss:diagnostics    (read-only snapshot of every runtime probe the UI
-//                       displays: rsshub status + warmup requirement,
+//                       displays: rsshub status + route requirement,
 //                       update lock state, last fetch invocation, opml +
 //                       benchmark artifact presence, latest benchmark
 //                       run, per-source route diagnostics, capability
@@ -19,7 +19,7 @@
 // rss-engine internals directly: every collaborator (the repository
 // surface, the update lock, the rsshub manager, the diagnostics + capability
 // helpers, the fetch invocation snapshot loader, the benchmark snapshot
-// loader, the artifacts directory probe, the rsshub warmup probe) is
+// loader, the artifacts directory probe, the rsshub route-requirement probe) is
 // injected via `DiagnosticsGroupDeps` so the group is testable in isolation
 // and so future moves out of rss-engine stay mechanical.
 //
@@ -87,7 +87,7 @@ export interface LatestBenchmarkSnapshot {
  * the mock-mode dispatch, the verbatim handler bodies, and the channel
  * list. Everything else — repository access, the update lock, the rsshub
  * manager (stop + ensure-healthy + describe), the diagnostics helpers
- * (`buildSourceDiagnostics`, `getRouteCapabilityMatrix`), the warmup
+ * (`buildSourceDiagnostics`, `getRouteCapabilityMatrix`), the route-requirement
  * probe, the fetch invocation + benchmark snapshot loaders, the
  * artifacts directory accessor — is injected by the host.
  *
@@ -107,7 +107,7 @@ export interface DiagnosticsGroupDeps {
   rsshubStop(): Promise<void>
   rsshubEnsureHealthy(): Promise<boolean>
   describeRsshubStatus(): Promise<unknown>
-  warmEmbeddedRSSHubForDiagnostics(): Promise<boolean>
+  isEmbeddedRSSHubRequiredForDiagnostics(): boolean
 
   // --- diagnostics helpers ---
   buildSourceDiagnostics(
@@ -227,7 +227,7 @@ export const diagnosticsGroup: IpcChannelGroup<DiagnosticsGroupDeps> = {
       }
 
       try {
-        const rsshubRequired = await deps.warmEmbeddedRSSHubForDiagnostics()
+        const rsshubRequired = deps.isEmbeddedRSSHubRequiredForDiagnostics()
         const opmlPath = deps.joinPath(deps.getArtifactsRootDir(), 'subscriptions.opml')
         const benchmarkJsonPath = deps.joinPath(deps.getArtifactsRootDir(), 'benchmark.latest.json')
         const benchmarkMarkdownPath = deps.joinPath(deps.getArtifactsRootDir(), 'benchmark.latest.md')

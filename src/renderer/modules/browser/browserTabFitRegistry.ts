@@ -20,8 +20,8 @@ export function clearFitted(tabId: string): void {
   fittedTabKeys.delete(tabId)
 }
 
-export function shouldClearFittedForTabUpdate(event: { type: string; loading?: boolean }): boolean {
-  return event.type === 'navigate' || event.type === 'closed' || (event.type === 'loading' && event.loading === true)
+export function shouldClearFittedForTabUpdate(event: { type: string; loading?: boolean; url?: string }): boolean {
+  return event.type === 'closed' || event.url !== undefined || event.loading === true
 }
 
 export function clearAll(): void {

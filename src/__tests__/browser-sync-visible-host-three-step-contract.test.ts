@@ -29,11 +29,10 @@ test('browser tab fit cache is scoped to the measured host bounds', () => {
 })
 
 test('browser tab fit cache clears only for updates that can change page layout or tab lifetime', () => {
-  assert.equal(shouldClearFittedForTabUpdate({ type: 'navigate' }), true)
-  assert.equal(shouldClearFittedForTabUpdate({ type: 'loading', loading: true }), true)
+  assert.equal(shouldClearFittedForTabUpdate({ type: 'patch', url: 'https://example.com' }), true)
+  assert.equal(shouldClearFittedForTabUpdate({ type: 'patch', loading: true }), true)
   assert.equal(shouldClearFittedForTabUpdate({ type: 'closed' }), true)
 
-  assert.equal(shouldClearFittedForTabUpdate({ type: 'title' }), false)
-  assert.equal(shouldClearFittedForTabUpdate({ type: 'meta' }), false)
-  assert.equal(shouldClearFittedForTabUpdate({ type: 'loading', loading: false }), false)
+  assert.equal(shouldClearFittedForTabUpdate({ type: 'patch' }), false)
+  assert.equal(shouldClearFittedForTabUpdate({ type: 'patch', loading: false }), false)
 })

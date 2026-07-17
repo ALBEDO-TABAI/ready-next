@@ -1,5 +1,3 @@
-export type BrowserBoundsSyncMode = 'transient' | 'settled'
-
 export type BrowserHostLayoutPhase = 'idle' | 'entering' | 'leaving' | 'dragging'
 
 export interface BrowserViewRect {
@@ -17,5 +15,4 @@ export interface BrowserViewBoundsUpdate {
   tabId?: string | null
   secondaryTabId?: string | null
   secondaryBounds?: BrowserViewRect | null
-  syncMode?: BrowserBoundsSyncMode
 }

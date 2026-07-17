@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ChevronDown, ChevronRight, Globe, Loader2, Lock, Plus, X } from 'lucide-react'
 import {
   beginBrowserTabDragSession,
@@ -71,6 +71,162 @@ function tabIconNode(tab: BrowserTab, size: number) {
   return <Globe style={{ width: size, height: size }} className="flex-shrink-0 text-[var(--text-gray)]" strokeWidth={2} />
 }
 
+export interface BrowserTabStripRowProps {
+  tab: BrowserTab
+  group: TabGroup | undefined
+  groupId: string | null
+  isPrimaryActive: boolean
+  isSplitActive: boolean
+  splitIsNextRow: boolean
+  prevSameGroup: boolean
+  nextSameGroup: boolean
+  isDragging: boolean
+  dropIntent: TabDropIntent | null
+  onDragStart: (event: React.DragEvent, tab: BrowserTab) => void
+  onDragEnd: () => void
+  onDragOver: (event: React.DragEvent, tabId: string) => void
+  onDrop: (event: React.DragEvent, tabId: string) => void
+  onActivate: (tabId: string, shiftKey: boolean, groupId: string | null) => void
+  onAuxClick: (event: React.MouseEvent, tabId: string) => void
+  onContextMenu: (event: React.MouseEvent, tab: BrowserTab) => void
+  onClose: (tabId: string) => void
+}
+
+export function areBrowserTabStripRowPropsEqual(
+  previous: BrowserTabStripRowProps,
+  next: BrowserTabStripRowProps,
+): boolean {
+  return previous.tab === next.tab
+    && previous.group === next.group
+    && previous.groupId === next.groupId
+    && previous.isPrimaryActive === next.isPrimaryActive
+    && previous.isSplitActive === next.isSplitActive
+    && previous.splitIsNextRow === next.splitIsNextRow
+    && previous.prevSameGroup === next.prevSameGroup
+    && previous.nextSameGroup === next.nextSameGroup
+    && previous.isDragging === next.isDragging
+    && previous.dropIntent === next.dropIntent
+    && previous.onDragStart === next.onDragStart
+    && previous.onDragEnd === next.onDragEnd
+    && previous.onDragOver === next.onDragOver
+    && previous.onDrop === next.onDrop
+    && previous.onActivate === next.onActivate
+    && previous.onAuxClick === next.onAuxClick
+    && previous.onContextMenu === next.onContextMenu
+    && previous.onClose === next.onClose
+}
+
+const BrowserTabStripRow = memo(function BrowserTabStripRow({
+  tab,
+  group,
+  groupId,
+  isPrimaryActive,
+  isSplitActive,
+  splitIsNextRow,
+  prevSameGroup,
+  nextSameGroup,
+  isDragging,
+  dropIntent,
+  onDragStart,
+  onDragEnd,
+  onDragOver,
+  onDrop,
+  onActivate,
+  onAuxClick,
+  onContextMenu,
+  onClose,
+}: BrowserTabStripRowProps) {
+  const isTabActive = isPrimaryActive || isSplitActive
+  const isDropOnto = dropIntent === 'onto'
+  const isDropBefore = dropIntent === 'before'
+  const isDropAfter = dropIntent === 'after'
+  return (
+    <div
+      className="group relative flex w-full flex-shrink-0 items-center justify-center"
+      draggable
+      onDragStart={(event) => onDragStart(event, tab)}
+      onDragEnd={onDragEnd}
+      onDragOver={(event) => onDragOver(event, tab.id)}
+      onDrop={(event) => onDrop(event, tab.id)}
+    >
+      {group && (
+        <span
+          aria-hidden
+          className="pointer-events-none absolute"
+          style={{
+            left: 0,
+            width: 3,
+            background: tabGroupColorVar(group.color),
+            top: prevSameGroup ? -VERTICAL_RAIL_FLYOUT_ROW_GAP : 8,
+            bottom: nextSameGroup ? 0 : 8,
+            borderTopRightRadius: prevSameGroup ? 0 : 2,
+            borderBottomRightRadius: nextSameGroup ? 0 : 2,
+          }}
+        />
+      )}
+      {isDropBefore && <span aria-hidden className="pointer-events-none absolute left-[6px] right-[6px] top-0 h-[2px] rounded" style={{ background: 'var(--color-blue)' }} />}
+      {isDropAfter && <span aria-hidden className="pointer-events-none absolute left-[6px] right-[6px] bottom-0 h-[2px] rounded" style={{ background: 'var(--color-blue)' }} />}
+      {isPrimaryActive && splitIsNextRow && (
+        <span
+          aria-hidden
+          className="pointer-events-none absolute left-1/2 top-[32px] z-0 h-[14px] w-[18px] -translate-x-1/2"
+          style={{ background: 'var(--files-panel-state-active-bg)' }}
+        />
+      )}
+      <button
+        type="button"
+        onClick={(event) => onActivate(tab.id, event.shiftKey, groupId)}
+        onAuxClick={(event) => onAuxClick(event, tab.id)}
+        onContextMenu={(event) => onContextMenu(event, tab)}
+        className="relative flex items-center justify-center rounded-[10px] transition-[background-color,box-shadow]"
+        title={tab.title || 'New Tab'}
+        style={{
+          width: STRIP_ICON,
+          height: STRIP_ICON,
+          opacity: isDragging ? 0.5 : 1,
+          background: isDropOnto
+            ? (group ? tabGroupColorSoft(group.color, 22) : 'color-mix(in srgb, var(--color-blue) 16%, transparent)')
+            : isTabActive
+              ? 'var(--files-panel-state-active-bg)'
+              : 'transparent',
+          boxShadow: isDropOnto
+            ? `0 0 0 1px ${group ? tabGroupColorVar(group.color) : 'var(--color-blue)'}`
+            : isTabActive
+              ? 'var(--files-panel-state-active-shadow)'
+              : 'none',
+        }}
+      >
+        {tabIconNode(tab, 18)}
+        {tab.owner === 'agent' && (
+          <span className="absolute right-[3px] top-[3px] rounded-full" style={{ width: 6, height: 6, background: 'var(--color-blue)', boxShadow: '0 0 0 1.5px var(--workbench-module-surface-bg, var(--workbench-liquid-chrome-bg, var(--bg-content)))' }} />
+        )}
+        {tab.activity && tab.activity !== 'idle' && (
+          <span
+            className={`absolute bottom-[3px] right-[3px] rounded-full ${tab.activity === 'running' ? 'animate-pulse' : ''}`}
+            style={{ width: 6, height: 6, background: tab.activity === 'attention' ? 'var(--color-orange)' : 'var(--color-green)', boxShadow: '0 0 0 1.5px var(--workbench-module-surface-bg, var(--workbench-liquid-chrome-bg, var(--bg-content)))' }}
+          />
+        )}
+        {tab.required && <Lock className="absolute bottom-[2px] left-[2px] text-[var(--text-light)]" style={{ width: 8, height: 8 }} strokeWidth={2.5} />}
+      </button>
+      <button
+        type="button"
+        aria-label={`关闭 ${tab.title || 'New Tab'}`}
+        title="关闭标签页"
+        draggable={false}
+        onMouseDown={(event) => event.stopPropagation()}
+        onClick={(event) => { event.stopPropagation(); onClose(tab.id) }}
+        className="pointer-events-none absolute right-[4px] top-[1px] z-20 flex h-[16px] w-[16px] items-center justify-center rounded-full opacity-0 transition-[background-color,opacity] hover:bg-[var(--bg-hover)] group-hover:pointer-events-auto group-hover:opacity-100 focus-visible:pointer-events-auto focus-visible:opacity-100"
+        style={{
+          background: 'color-mix(in srgb, var(--surface-floating-bg) 86%, transparent)',
+          boxShadow: '0 0 0 1px color-mix(in srgb, var(--text-title) 8%, transparent)',
+        }}
+      >
+        <X style={{ width: 10, height: 10 }} className="text-[var(--text-gray)]" strokeWidth={2.2} />
+      </button>
+    </div>
+  )
+}, areBrowserTabStripRowPropsEqual)
+
 export default function VerticalTabRail({
   isActive,
   tabs,
@@ -106,6 +262,7 @@ export default function VerticalTabRail({
   const overlayOpenRef = useRef(false)
   const openTimerRef = useRef<number | null>(null)
   const closeTimerRef = useRef<number | null>(null)
+  const scrollSnapshotRafRef = useRef<number | null>(null)
   // The overlay's group-edit menu floats inside the content-sized child window; while it
   // is open the snapshot height must reserve room down to the menu's bottom edge.
   const overlayEditorRef = useRef<{ groupId: string; bottom: number } | null>(null)
@@ -146,6 +303,34 @@ export default function VerticalTabRail({
     () => rows.filter((row) => row.kind === 'group-header' || !(row.groupId && groupById.get(row.groupId)?.collapsed)),
     [rows, groupById],
   )
+  const rowActionsRef = useRef({
+    dropTarget,
+    flatOrder,
+    groupOf,
+    groupById,
+    tabRows,
+    splitTabId,
+    onTabClick,
+    onTabClose,
+    onReorderToRank,
+    onCreateGroup,
+    onAddToGroup,
+    onSetGroupCollapsed,
+  })
+  rowActionsRef.current = {
+    dropTarget,
+    flatOrder,
+    groupOf,
+    groupById,
+    tabRows,
+    splitTabId,
+    onTabClick,
+    onTabClose,
+    onReorderToRank,
+    onCreateGroup,
+    onAddToGroup,
+    onSetGroupCollapsed,
+  }
 
   // D-SNAPSHOT: emit the RAW FLAT tab order + per-tab groupId + the group list. The
   // overlay window does its own run-local split hoist; a reorder command's toRank is
@@ -185,6 +370,14 @@ export default function VerticalTabRail({
     if (snapshot) void window.electronAPI?.browser?.showVerticalRailOverlay?.(snapshot)
   }, [buildSnapshot])
 
+  const scheduleScrollSnapshot = useCallback(() => {
+    if (scrollSnapshotRafRef.current !== null) return
+    scrollSnapshotRafRef.current = window.requestAnimationFrame(() => {
+      scrollSnapshotRafRef.current = null
+      pushSnapshot()
+    })
+  }, [pushSnapshot])
+
   const hideOverlay = useCallback(() => {
     overlayOpenRef.current = false
     overlayEditorRef.current = null
@@ -194,6 +387,7 @@ export default function VerticalTabRail({
   const clearTimers = useCallback(() => {
     if (openTimerRef.current !== null) { window.clearTimeout(openTimerRef.current); openTimerRef.current = null }
     if (closeTimerRef.current !== null) { window.clearTimeout(closeTimerRef.current); closeTimerRef.current = null }
+    if (scrollSnapshotRafRef.current !== null) { window.cancelAnimationFrame(scrollSnapshotRafRef.current); scrollSnapshotRafRef.current = null }
   }, [])
 
   const scheduleClose = useCallback(() => {
@@ -392,18 +586,27 @@ export default function VerticalTabRail({
   const handleRowDrop = useCallback((event: React.DragEvent, targetId: string) => {
     event.preventDefault()
     const movedId = draggingIdRef.current
-    const target = dropTarget
+    const model = rowActionsRef.current
+    const target = model.dropTarget
     clearDragState()
     if (!movedId || movedId === targetId || !target || target.id !== targetId) return
-    const targetGroupId = groupOf[targetId] ?? null
+    const targetGroupId = model.groupOf[targetId] ?? null
     if (target.intent === 'onto') {
-      if (targetGroupId) onAddToGroup(movedId, targetGroupId)
-      else onCreateGroup(movedId, targetId)
+      if (targetGroupId) model.onAddToGroup(movedId, targetGroupId)
+      else model.onCreateGroup(movedId, targetId)
       return
     }
-    const { toRank, intoGroupId } = resolveReorderDrop(tabRows.map((r) => r.id), flatOrder, groupOf, movedId, targetId, target.intent, splitTabId)
-    onReorderToRank(movedId, toRank, intoGroupId)
-  }, [clearDragState, dropTarget, flatOrder, groupOf, onAddToGroup, onCreateGroup, onReorderToRank, splitTabId, tabRows])
+    const { toRank, intoGroupId } = resolveReorderDrop(
+      model.tabRows.map((row) => row.id),
+      model.flatOrder,
+      model.groupOf,
+      movedId,
+      targetId,
+      target.intent,
+      model.splitTabId,
+    )
+    model.onReorderToRank(movedId, toRank, intoGroupId)
+  }, [clearDragState])
 
   // Dropping onto a group chip adds the dragged tab to that group (Edge behavior).
   const handleHeaderDragOver = useCallback((event: React.DragEvent, groupId: string) => {
@@ -432,12 +635,13 @@ export default function VerticalTabRail({
 
   const activateTab = useCallback((id: string, shiftKey: boolean, groupId: string | null) => {
     // D-COLLAPSE: activating a tab inside a collapsed group auto-expands the group.
+    const actions = rowActionsRef.current
     if (groupId) {
-      const g = groupById.get(groupId)
-      if (g?.collapsed) onSetGroupCollapsed(groupId, false)
+      const group = actions.groupById.get(groupId)
+      if (group?.collapsed) actions.onSetGroupCollapsed(groupId, false)
     }
-    void onTabClick(id, { shiftKey })
-  }, [groupById, onSetGroupCollapsed, onTabClick])
+    void actions.onTabClick(id, { shiftKey })
+  }, [])
 
   const handleContextMenu = useCallback((event: React.MouseEvent, tab: BrowserTab) => {
     event.preventDefault()
@@ -446,7 +650,7 @@ export default function VerticalTabRail({
       { x: event.clientX, y: event.clientY },
       { canReference: Boolean(tab.url || tab.title) },
     ).then((action) => {
-      if (action === 'close-tab') { void onTabClose(tab.id); return }
+      if (action === 'close-tab') { void rowActionsRef.current.onTabClose(tab.id); return }
       if (action === 'reference-to-input') {
         void addReadyContextReferenceToAgentInput({
           type: 'browser-tab',
@@ -457,11 +661,15 @@ export default function VerticalTabRail({
         })
       }
     })
-  }, [onTabClose])
+  }, [])
 
   const handleAuxClick = useCallback((event: React.MouseEvent, id: string) => {
-    if (event.button === 1) { event.preventDefault(); void onTabClose(id) }
-  }, [onTabClose])
+    if (event.button === 1) { event.preventDefault(); void rowActionsRef.current.onTabClose(id) }
+  }, [])
+
+  const handleClose = useCallback((tabId: string) => {
+    void rowActionsRef.current.onTabClose(tabId)
+  }, [])
 
   return (
     <div
@@ -482,7 +690,7 @@ export default function VerticalTabRail({
       <div
         ref={railListRef}
         className="flex min-h-0 flex-1 flex-col items-center overflow-y-auto overflow-x-hidden"
-        onScroll={() => pushSnapshot()}
+        onScroll={scheduleScrollSnapshot}
         onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropTarget(null) }}
         // Padding via the shared constant, INLINE — the strip and the overlay flyout must
         // start their first row at the same offset for cross-window row alignment, and a
@@ -553,7 +761,6 @@ export default function VerticalTabRail({
           if (!tab) return null
           const isPrimaryActive = tab.id === activeTabId
           const isSplitActive = tab.id === splitTabId && !isPrimaryActive
-          const isTabActive = isPrimaryActive || isSplitActive
           const prevRow = stripRows[index - 1]
           const nextRow = stripRows[index + 1]
           // The split-pair connector nub bridges the active icon down to the split icon,
@@ -569,95 +776,28 @@ export default function VerticalTabRail({
           // line-free; here the icons have no other affiliation cue below the chip.
           const prevSameGroup = Boolean(group) && prevRow?.kind === 'tab' && prevRow.groupId === row.groupId
           const nextSameGroup = Boolean(group) && nextRow?.kind === 'tab' && nextRow.groupId === row.groupId
-          const isDragging = draggingTabId === tab.id
-          const isDropOnto = dropTarget?.id === tab.id && dropTarget.intent === 'onto'
-          const isDropBefore = dropTarget?.id === tab.id && dropTarget.intent === 'before'
-          const isDropAfter = dropTarget?.id === tab.id && dropTarget.intent === 'after'
           return (
-            <div
+            <BrowserTabStripRow
               key={tab.id}
-              className="group relative flex w-full flex-shrink-0 items-center justify-center"
-              draggable
-              onDragStart={(event) => handleDragStart(event, tab)}
+              tab={tab}
+              group={group}
+              groupId={row.groupId}
+              isPrimaryActive={isPrimaryActive}
+              isSplitActive={isSplitActive}
+              splitIsNextRow={splitIsNextRow}
+              prevSameGroup={prevSameGroup}
+              nextSameGroup={nextSameGroup}
+              isDragging={draggingTabId === tab.id}
+              dropIntent={dropTarget?.id === tab.id ? dropTarget.intent : null}
+              onDragStart={handleDragStart}
               onDragEnd={clearDragState}
-              onDragOver={(event) => handleRowDragOver(event, tab.id)}
-              onDrop={(event) => handleRowDrop(event, tab.id)}
-            >
-              {group && (
-                <span
-                  aria-hidden
-                  className="pointer-events-none absolute"
-                  style={{
-                    left: 0,
-                    width: 3,
-                    background: tabGroupColorVar(group.color),
-                    top: prevSameGroup ? -VERTICAL_RAIL_FLYOUT_ROW_GAP : 8,
-                    bottom: nextSameGroup ? 0 : 8,
-                    borderTopRightRadius: prevSameGroup ? 0 : 2,
-                    borderBottomRightRadius: nextSameGroup ? 0 : 2,
-                  }}
-                />
-              )}
-              {isDropBefore && <span aria-hidden className="pointer-events-none absolute left-[6px] right-[6px] top-0 h-[2px] rounded" style={{ background: 'var(--color-blue)' }} />}
-              {isDropAfter && <span aria-hidden className="pointer-events-none absolute left-[6px] right-[6px] bottom-0 h-[2px] rounded" style={{ background: 'var(--color-blue)' }} />}
-              {isPrimaryActive && splitIsNextRow && (
-                <span
-                  aria-hidden
-                  className="pointer-events-none absolute left-1/2 top-[32px] z-0 h-[14px] w-[18px] -translate-x-1/2"
-                  style={{ background: 'var(--files-panel-state-active-bg)' }}
-                />
-              )}
-              <button
-                type="button"
-                onClick={(event) => activateTab(tab.id, event.shiftKey, row.groupId)}
-                onAuxClick={(event) => handleAuxClick(event, tab.id)}
-                onContextMenu={(event) => handleContextMenu(event, tab)}
-                className="relative flex items-center justify-center rounded-[10px] transition-[background-color,box-shadow]"
-                title={tab.title || 'New Tab'}
-                style={{
-                  width: STRIP_ICON,
-                  height: STRIP_ICON,
-                  opacity: isDragging ? 0.5 : 1,
-                  background: isDropOnto
-                    ? (group ? tabGroupColorSoft(group.color, 22) : 'color-mix(in srgb, var(--color-blue) 16%, transparent)')
-                    : isTabActive
-                      ? 'var(--files-panel-state-active-bg)'
-                      : 'transparent',
-                  boxShadow: isDropOnto
-                    ? `0 0 0 1px ${group ? tabGroupColorVar(group.color) : 'var(--color-blue)'}`
-                    : isTabActive
-                      ? 'var(--files-panel-state-active-shadow)'
-                      : 'none',
-                }}
-              >
-                {tabIconNode(tab, 18)}
-                {tab.owner === 'agent' && (
-                  <span className="absolute right-[3px] top-[3px] rounded-full" style={{ width: 6, height: 6, background: 'var(--color-blue)', boxShadow: '0 0 0 1.5px var(--workbench-module-surface-bg, var(--workbench-liquid-chrome-bg, var(--bg-content)))' }} />
-                )}
-                {tab.activity && tab.activity !== 'idle' && (
-                  <span
-                    className={`absolute bottom-[3px] right-[3px] rounded-full ${tab.activity === 'running' ? 'animate-pulse' : ''}`}
-                    style={{ width: 6, height: 6, background: tab.activity === 'attention' ? 'var(--color-orange)' : 'var(--color-green)', boxShadow: '0 0 0 1.5px var(--workbench-module-surface-bg, var(--workbench-liquid-chrome-bg, var(--bg-content)))' }}
-                  />
-                )}
-                {tab.required && <Lock className="absolute bottom-[2px] left-[2px] text-[var(--text-light)]" style={{ width: 8, height: 8 }} strokeWidth={2.5} />}
-              </button>
-              <button
-                type="button"
-                aria-label={`关闭 ${tab.title || 'New Tab'}`}
-                title="关闭标签页"
-                draggable={false}
-                onMouseDown={(event) => event.stopPropagation()}
-                onClick={(event) => { event.stopPropagation(); void onTabClose(tab.id) }}
-                className="pointer-events-none absolute right-[4px] top-[1px] z-20 flex h-[16px] w-[16px] items-center justify-center rounded-full opacity-0 transition-[background-color,opacity] hover:bg-[var(--bg-hover)] group-hover:pointer-events-auto group-hover:opacity-100 focus-visible:pointer-events-auto focus-visible:opacity-100"
-                style={{
-                  background: 'color-mix(in srgb, var(--surface-floating-bg) 86%, transparent)',
-                  boxShadow: '0 0 0 1px color-mix(in srgb, var(--text-title) 8%, transparent)',
-                }}
-              >
-                <X style={{ width: 10, height: 10 }} className="text-[var(--text-gray)]" strokeWidth={2.2} />
-              </button>
-            </div>
+              onDragOver={handleRowDragOver}
+              onDrop={handleRowDrop}
+              onActivate={activateTab}
+              onAuxClick={handleAuxClick}
+              onContextMenu={handleContextMenu}
+              onClose={handleClose}
+            />
           )
         })}
 

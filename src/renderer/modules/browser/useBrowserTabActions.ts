@@ -65,6 +65,7 @@ export function useBrowserTabActions({
       canGoForward: Boolean(tab.canGoForward),
       domain: tab.domain || extractBrowserDomain(tab.url),
       favicon: tab.favicon || undefined,
+      profile: tab.profile || null,
       owner: tab.owner,
       required: tab.required,
       activity: tab.activity,
@@ -89,6 +90,7 @@ export function useBrowserTabActions({
         title?: string
         domain?: string
         favicon?: string | null
+        profile?: string | null
         owner?: 'manual' | 'agent'
         required?: boolean
         activity?: 'idle' | 'running' | 'attention'

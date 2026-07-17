@@ -420,6 +420,10 @@ export class BrowserSnapshotService {
     }
   }
 
+  disposeTab(controller: BrowserController, tabId: string): void {
+    this.stateMap(controller).delete(tabId)
+  }
+
   resetForTests(): void {
     this.states = new WeakMap()
   }

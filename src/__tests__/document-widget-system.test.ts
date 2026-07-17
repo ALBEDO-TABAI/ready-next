@@ -345,6 +345,10 @@ describe('document widget renderer contract', () => {
       resolve(process.cwd(), 'src/renderer/components/document/NotePreview.tsx'),
       'utf8',
     )
+    const previewBlockSource = readFileSync(
+      resolve(process.cwd(), 'src/renderer/components/document/DocumentWidgetPreviewBlock.tsx'),
+      'utf8',
+    )
     const markdownEditorSource = readFileSync(
       resolve(process.cwd(), 'src/renderer/components/document/MarkdownEditor.tsx'),
       'utf8',
@@ -355,7 +359,8 @@ describe('document widget renderer contract', () => {
     assert.match(shellSource, /label="导出"/)
     assert.doesNotMatch(blockCardSource, /modeLabel=\{modeLabel\}/)
     assert.doesNotMatch(blockCardSource, /hint=\{/)
-    assert.match(notePreviewSource, /DocumentWidgetCardShell/)
+    assert.match(notePreviewSource, /DocumentWidgetPreviewBlock/)
+    assert.match(previewBlockSource, /DocumentWidgetCardShell/)
     assert.match(markdownEditorSource, /handleWidgetQuoteToAgent/)
     assert.match(markdownEditorSource, /handleWidgetExport/)
   })

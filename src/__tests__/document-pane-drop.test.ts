@@ -27,6 +27,7 @@ function resetDocTabs() {
     ],
     activeTabId: 'left',
     splitTabId: 'right',
+    focusedPaneTabId: 'left',
     documentSplitRatio: 50,
     pendingReveal: null,
   })
@@ -56,6 +57,7 @@ test('openTabInPane replaces only the primary pane and preserves the previous di
 
   assert.equal(state.activeTabId, nextId)
   assert.equal(state.splitTabId, 'right')
+  assert.equal(state.focusedPaneTabId, nextId)
   assert.equal(state.tabs.filter((tab) => tab.path === '/tmp/next.md').length, 1)
   assert.deepEqual(
     state.tabs.find((tab) => tab.id === 'left'),
@@ -77,6 +79,7 @@ test('openTabInPane replaces only the split pane', () => {
 
   assert.equal(state.activeTabId, 'left')
   assert.equal(state.splitTabId, nextId)
+  assert.equal(state.focusedPaneTabId, nextId)
   assert.equal(state.tabs.filter((tab) => tab.path === '/tmp/next.md').length, 1)
 })
 
@@ -89,6 +92,7 @@ test('openTabInPane swaps panes when dropping the visible split document onto pr
   assert.equal(nextId, 'right')
   assert.equal(state.activeTabId, 'right')
   assert.equal(state.splitTabId, 'left')
+  assert.equal(state.focusedPaneTabId, 'right')
 })
 
 test('openTabInPane swaps panes when dropping the visible primary document onto split', () => {
@@ -100,6 +104,7 @@ test('openTabInPane swaps panes when dropping the visible primary document onto 
   assert.equal(nextId, 'left')
   assert.equal(state.activeTabId, 'right')
   assert.equal(state.splitTabId, 'left')
+  assert.equal(state.focusedPaneTabId, 'left')
 })
 
 test('openTabInPane reuses an already-open non-visible tab instead of duplicating it', () => {
@@ -124,6 +129,67 @@ test('openTabInPane reuses an already-open non-visible tab instead of duplicatin
   assert.equal(state.activeTabId, 'left')
   assert.equal(state.splitTabId, 'third')
   assert.equal(state.tabs.filter((tab) => tab.path === '/tmp/third.pdf').length, 1)
+})
+
+test('ordinary tab activation swaps a visible split document into primary', () => {
+  resetDocTabs()
+
+  useDocTabs.getState().openTab('/tmp/right.md')
+  const state = useDocTabs.getState()
+
+  assert.equal(state.activeTabId, 'right')
+  assert.equal(state.splitTabId, 'left')
+  assert.equal(state.focusedPaneTabId, 'right')
+})
+
+test('image activation swaps a visible split preview into primary', () => {
+  resetDocTabs()
+  useDocTabs.setState({
+    tabs: useDocTabs.getState().tabs.map((tab) => (
+      tab.id === 'right' ? { ...tab, path: '/tmp/right.png', title: 'right.png' } : tab
+    )),
+  })
+
+  const imageId = useDocTabs.getState().openImageTab('/tmp/next.png')
+  const state = useDocTabs.getState()
+
+  assert.equal(imageId, 'right')
+  assert.equal(state.activeTabId, 'right')
+  assert.equal(state.splitTabId, 'left')
+  assert.equal(state.focusedPaneTabId, 'right')
+  assert.equal(state.tabs.find((tab) => tab.id === 'right')?.path, '/tmp/next.png')
+})
+
+test('closing primary promotes the visible split document and clears split mode', () => {
+  resetDocTabs()
+
+  useDocTabs.getState().closeTab('left')
+  const state = useDocTabs.getState()
+
+  assert.equal(state.activeTabId, 'right')
+  assert.equal(state.splitTabId, null)
+  assert.equal(state.focusedPaneTabId, 'right')
+})
+
+test('split target rejects the primary document and unknown ids', () => {
+  resetDocTabs()
+
+  useDocTabs.getState().setSplitTab('left')
+  assert.equal(useDocTabs.getState().splitTabId, 'right')
+  useDocTabs.getState().setSplitTab('missing')
+  assert.equal(useDocTabs.getState().splitTabId, 'right')
+})
+
+test('pane focus accepts only one of the two visible documents', () => {
+  resetDocTabs()
+  useDocTabs.getState().setFocusedPaneTab('right')
+  assert.equal(useDocTabs.getState().focusedPaneTabId, 'right')
+
+  useDocTabs.getState().setFocusedPaneTab('not-visible')
+  assert.equal(useDocTabs.getState().focusedPaneTabId, 'right')
+
+  useDocTabs.getState().setSplitTab(null)
+  assert.equal(useDocTabs.getState().focusedPaneTabId, 'left')
 })
 
 test('document pane drop accepts document tabs and workspace files but rejects folders and unsupported paths', () => {

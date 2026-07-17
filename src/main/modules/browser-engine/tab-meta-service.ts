@@ -4,6 +4,7 @@ export interface BrowserTabMetaRecord {
   title: string
   domain: string
   favicon: string | null
+  profile?: string | null
   owner: string
   required: boolean
   activity: string
@@ -23,6 +24,7 @@ export interface BrowserTabMetaPayload {
   title: string
   domain: string
   favicon: string | null
+  profile: string | null
   owner: string
   required: boolean
   activity: string
@@ -38,7 +40,7 @@ export interface BrowserTabMetaPayload {
 interface BrowserTabMetaServiceDeps<TTab extends BrowserTabMetaRecord> {
   tabs: Map<string, TTab>
   getActiveTabId(): string | null
-  sendToRenderer: (channel: string, data: unknown) => void
+  queueTabUpdate: (data: { type: string; tabId: string } & Record<string, unknown>) => void
 }
 
 export class BrowserTabMetaService<TTab extends BrowserTabMetaRecord> {
@@ -51,6 +53,7 @@ export class BrowserTabMetaService<TTab extends BrowserTabMetaRecord> {
       title: tab.title,
       domain: tab.domain,
       favicon: tab.favicon,
+      profile: tab.profile ?? null,
       owner: tab.owner,
       required: tab.required,
       activity: tab.activity,
@@ -67,7 +70,7 @@ export class BrowserTabMetaService<TTab extends BrowserTabMetaRecord> {
   emitTabMeta(tabId: string): void {
     const tab = this.deps.tabs.get(tabId)
     if (!tab) return
-    this.deps.sendToRenderer('browser:tabUpdate', {
+    this.deps.queueTabUpdate({
       type: 'meta',
       tabId,
       ...this.buildTabPayload(tab),

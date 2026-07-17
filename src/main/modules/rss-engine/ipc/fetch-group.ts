@@ -13,9 +13,8 @@
 //   rss:benchmarkSources  (per-source latency + capability benchmark; emits
 //                          benchmark.latest.{json,md} artifacts and
 //                          persists route attempts for the diagnostics tab)
-//   rss:status            (rsshub runtime status + update-lock status +
-//                          artifacts directory; warms the embedded rsshub
-//                          when sources require it)
+//   rss:status            (pure read of rsshub runtime status + update-lock
+//                          status + artifacts directory; never starts rsshub)
 //   rss:stats             (totals / unread / platform & category histograms
 //                          from the repository — pure read)
 //
@@ -141,7 +140,7 @@ export interface FetchGroupDeps {
   // --- managers + locks ---
   readonly rssUpdateLock: RSSUpdateLock
   describeRsshubStatus(): Promise<unknown>
-  warmEmbeddedRSSHubForDiagnostics(): Promise<boolean>
+  isEmbeddedRSSHubRequiredForDiagnostics(): boolean
   getArtifactsRootDir(): string
 
   // --- fetch pipeline + diagnostics ---
@@ -211,6 +210,7 @@ export interface FetchGroupDeps {
     tasks: Array<() => Promise<T>>,
     limit: number,
   ): Promise<PromiseSettledResult<T>[]>
+  yieldToEventLoop(): Promise<void>
   readonly sourceRefreshInFlight: Set<string>
 }
 
@@ -301,7 +301,7 @@ export const fetchGroup: {
       }
 
       try {
-        const rsshubRequired = await deps.warmEmbeddedRSSHubForDiagnostics()
+        const rsshubRequired = deps.isEmbeddedRSSHubRequiredForDiagnostics()
         const status = deps.rssUpdateLock.getStatus()
         const rsshubStatus = await deps.describeRsshubStatus()
         return ok(
@@ -773,6 +773,7 @@ export const fetchGroup: {
         })
       } finally {
         deps.sourceRefreshInFlight.delete(sourceId)
+        await deps.yieldToEventLoop()
       }
     })
 

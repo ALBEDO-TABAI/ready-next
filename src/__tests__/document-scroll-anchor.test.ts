@@ -109,3 +109,39 @@ test('document reading position cache ignores corrupt rows and exposes a restore
     anchorProgress: null,
   })
 })
+
+test('resize-time scroll capture skips expensive anchor discovery but keeps the exact scroll position', async () => {
+  const previousHTMLElement = globalThis.HTMLElement
+  const previousTextArea = globalThis.HTMLTextAreaElement
+  class FakeHTMLElement {}
+  class FakeTextAreaElement extends FakeHTMLElement {
+    scrollTop = 240
+    scrollHeight = 1_000
+    clientHeight = 400
+  }
+  Object.assign(globalThis, {
+    HTMLElement: FakeHTMLElement,
+    HTMLTextAreaElement: FakeTextAreaElement,
+  })
+  try {
+    const { captureElementScroll } = await import('../renderer/modules/document/documentScrollRuntime')
+    const snapshot = captureElementScroll(
+      new FakeTextAreaElement() as unknown as HTMLElement,
+      '# A heading that would otherwise create an anchor',
+      { includeAnchor: false },
+    )
+    assert.deepEqual(snapshot, {
+      top: 240,
+      ratio: 0.4,
+      maxScroll: 600,
+      anchorTitle: null,
+      anchorOrdinal: null,
+      anchorProgress: null,
+    })
+  } finally {
+    if (previousHTMLElement) globalThis.HTMLElement = previousHTMLElement
+    else delete (globalThis as { HTMLElement?: unknown }).HTMLElement
+    if (previousTextArea) globalThis.HTMLTextAreaElement = previousTextArea
+    else delete (globalThis as { HTMLTextAreaElement?: unknown }).HTMLTextAreaElement
+  }
+})

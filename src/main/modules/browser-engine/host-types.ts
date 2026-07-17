@@ -1,8 +1,9 @@
-import type { BrowserView, WebContentsView } from 'electron'
-import type { BrowserBoundsSyncMode, BrowserViewBoundsUpdate } from '../../../shared/browser-view-layout'
+import type { WebContentsView } from 'electron'
+import type { BrowserViewBoundsUpdate } from '../../../shared/browser-view-layout'
 
-export type BrowserHostKind = 'browserView' | 'webContentsView'
-export type BrowserHostView = BrowserView | WebContentsView
+export const BROWSER_HOST_KIND = 'webContentsView' as const
+export type BrowserHostKind = typeof BROWSER_HOST_KIND
+export type BrowserHostView = WebContentsView
 
 export interface BrowserRect {
   x: number
@@ -11,7 +12,7 @@ export interface BrowserRect {
   height: number
 }
 
-export type { BrowserBoundsSyncMode, BrowserViewBoundsUpdate }
+export type { BrowserViewBoundsUpdate }
 
 export interface PreviewTabState {
   url: string

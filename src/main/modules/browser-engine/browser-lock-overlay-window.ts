@@ -1,6 +1,8 @@
 import { BrowserWindow, screen } from 'electron'
 import { is } from '@electron-toolkit/utils'
 import type { BrowserLockOverlaySnapshot } from '../../../shared/browser-lock-overlay'
+import { OverlayWindowFollower } from './overlay-window-follower'
+import { BrowserLockOverlayVisibilityState } from './browser-lock-overlay-visibility'
 
 interface BrowserLockOverlayWindowOptions {
   mainWindow: BrowserWindow
@@ -16,9 +18,15 @@ export class BrowserLockOverlayWindow {
   private window: BrowserWindow | null = null
   private snapshot: BrowserLockOverlaySnapshot | null = null
   private boundParentWindow: BrowserWindow | null = null
-  private dismissed = false
+  private readonly visibility = new BrowserLockOverlayVisibilityState()
   private revision = 0
   private terminalHideTimer: ReturnType<typeof setTimeout> | null = null
+  private readonly follower = new OverlayWindowFollower({
+    apply: () => this.reposition(),
+    getDisplayMatching: (bounds) => screen.getDisplayMatching(bounds),
+    onDisplayMetricsChanged: (listener) => screen.on('display-metrics-changed', listener),
+    offDisplayMetricsChanged: (listener) => screen.off('display-metrics-changed', listener),
+  })
 
   constructor(private options: BrowserLockOverlayWindowOptions) {
     this.bindParentWindow(this.options.mainWindow)
@@ -34,7 +42,7 @@ export class BrowserLockOverlayWindow {
 
   async show(snapshot: BrowserLockOverlaySnapshot): Promise<void> {
     this.snapshot = { ...snapshot, revision: ++this.revision }
-    if (this.dismissed) return
+    if (!this.visibility.observe(this.snapshot)) return
     const window = await this.ensureWindow()
     if (!this.snapshot || this.snapshot.revision !== this.revision) {
       if (!this.snapshot && !window.isDestroyed()) window.hide()
@@ -50,6 +58,7 @@ export class BrowserLockOverlayWindow {
   hide(): void {
     if (this.terminalHideTimer) clearTimeout(this.terminalHideTimer)
     this.terminalHideTimer = null
+    this.follower.cancel()
     this.snapshot = null
     if (this.window && !this.window.isDestroyed()) {
       this.window.setAlwaysOnTop(false)
@@ -58,20 +67,21 @@ export class BrowserLockOverlayWindow {
   }
 
   dismiss(): void {
-    this.dismissed = true
+    this.visibility.dismissCurrent()
     if (this.window && !this.window.isDestroyed()) this.window.hide()
   }
 
   noteAction(phase: 'start' | 'finish' | 'abort'): void {
     if (this.terminalHideTimer) clearTimeout(this.terminalHideTimer)
     this.terminalHideTimer = null
+    this.follower.cancel()
     if (phase === 'start') {
-      this.dismissed = false
-      if (this.snapshot) void this.show(this.snapshot)
+      if (this.snapshot && this.visibility.beginAction()) void this.show(this.snapshot)
       return
     }
+    const terminalSnapshot = this.snapshot
     this.terminalHideTimer = setTimeout(() => {
-      this.dismissed = true
+      this.visibility.finishAction(terminalSnapshot)
       if (this.window && !this.window.isDestroyed()) this.window.hide()
       this.terminalHideTimer = null
     }, 800)
@@ -91,6 +101,7 @@ export class BrowserLockOverlayWindow {
   }
 
   destroy(): void {
+    this.follower.dispose()
     if (this.window && !this.window.isDestroyed()) {
       this.window.destroy()
     }
@@ -102,6 +113,7 @@ export class BrowserLockOverlayWindow {
     this.boundParentWindow = null
     this.window = null
     this.snapshot = null
+    this.visibility.reset()
     if (this.terminalHideTimer) clearTimeout(this.terminalHideTimer)
     this.terminalHideTimer = null
   }
@@ -120,9 +132,11 @@ export class BrowserLockOverlayWindow {
   }
 
   private handleParentMoveOrResize = (): void => {
-    if (this.snapshot && this.window && !this.window.isDestroyed() && this.window.isVisible()) {
-      this.applyBounds(this.snapshot)
-    }
+    this.follower.schedule()
+  }
+
+  private reposition(): void {
+    if (this.snapshot && this.window && !this.window.isDestroyed() && this.window.isVisible()) this.applyBounds(this.snapshot)
   }
 
   private handleParentClosed = (): void => {
@@ -179,7 +193,7 @@ export class BrowserLockOverlayWindow {
   private applyBounds(snapshot: BrowserLockOverlaySnapshot): void {
     if (!this.window || this.window.isDestroyed()) return
     const mainBounds = this.options.mainWindow.getContentBounds()
-    const display = screen.getDisplayMatching(mainBounds)
+    const display = this.follower.displayFor(mainBounds)
     const width = Math.min(LOCK_OVERLAY_WIDTH, Math.max(236, Math.round(snapshot.bounds.width - LOCK_OVERLAY_GAP * 2)))
     const height = LOCK_OVERLAY_HEIGHT
     const x = mainBounds.x + Math.round(snapshot.bounds.left + snapshot.bounds.width - width - LOCK_OVERLAY_GAP)

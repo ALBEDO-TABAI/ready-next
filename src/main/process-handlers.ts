@@ -37,7 +37,7 @@ export interface MainProcessHandlerDeps {
 }
 
 const DEFAULT_FATAL_CLEANUP_TIMEOUT_MS = 5_000
-const processEventLogger = createRotatingLogger('ready-process-events.log')
+const processEventLogger = createRotatingLogger('ready-process-events.log', { buffered: true })
 
 function serializeError(error: unknown): MainProcessEventRecord['error'] {
   if (error instanceof Error) {

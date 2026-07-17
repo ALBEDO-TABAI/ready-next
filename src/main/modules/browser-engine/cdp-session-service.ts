@@ -23,9 +23,18 @@ export interface BrowserCdpCommandOptions {
 }
 
 type BrowserCdpEventHandler = (event: BrowserCdpEvent) => void
+type BrowserDebuggerMessageListener = (
+  event: Electron.Event,
+  method: string,
+  params?: Record<string, unknown>,
+  sessionId?: string,
+) => void
 
 export class BrowserCdpSessionService {
   private readonly domainRefsByTab = new Map<string, Map<string, number>>()
+  private readonly attachedByService = new Set<string>()
+  private readonly subscribersByTab = new Map<string, Set<BrowserDebuggerMessageListener>>()
+  private readonly inFlightCommandsByTab = new Map<string, number>()
 
   constructor(private readonly host: BrowserCdpHost) {}
 
@@ -34,6 +43,7 @@ export class BrowserCdpSessionService {
     try {
       if (!view.webContents.debugger.isAttached()) {
         view.webContents.debugger.attach('1.3')
+        this.attachedByService.add(resolvedTabId)
       }
       return { tabId: resolvedTabId, view }
     } catch (error) {
@@ -48,15 +58,17 @@ export class BrowserCdpSessionService {
     params?: Record<string, unknown>,
     options?: BrowserCdpCommandOptions,
   ): Promise<unknown> {
-    const { view } = await this.ensureAttached(tabId)
-    const operation = view.webContents.debugger.sendCommand(method, params)
+    const { tabId: resolvedTabId, view } = await this.ensureAttached(tabId)
     const timeoutMs = Math.max(1, Math.floor(options?.timeoutMs || 15_000))
     const controller = new AbortController()
     const abortFromExternal = () => controller.abort(options?.signal?.reason || new Error(`browser_cdp:${method}:aborted`))
     if (options?.signal?.aborted) abortFromExternal()
     else options?.signal?.addEventListener('abort', abortFromExternal, { once: true })
     let timer: ReturnType<typeof setTimeout> | null = null
+    let operation: Promise<unknown> | null = null
+    this.inFlightCommandsByTab.set(resolvedTabId, (this.inFlightCommandsByTab.get(resolvedTabId) ?? 0) + 1)
     try {
+      operation = view.webContents.debugger.sendCommand(method, params)
       return await Promise.race([
         operation,
         new Promise<never>((_resolve, reject) => {
@@ -84,18 +96,29 @@ export class BrowserCdpSessionService {
     } finally {
       if (timer) clearTimeout(timer)
       options?.signal?.removeEventListener('abort', abortFromExternal)
-      void operation.catch(() => undefined)
+      if (operation) void operation.catch(() => undefined)
+      const remaining = Math.max(0, (this.inFlightCommandsByTab.get(resolvedTabId) ?? 1) - 1)
+      if (remaining > 0) this.inFlightCommandsByTab.set(resolvedTabId, remaining)
+      else this.inFlightCommandsByTab.delete(resolvedTabId)
+      this.maybeDetach(resolvedTabId, view)
     }
   }
 
   subscribe(tabId: string | null, handler: BrowserCdpEventHandler): () => void {
     const { tabId: resolvedTabId, view } = this.host.resolveTabView(tabId)
-    const listener = (_event: unknown, method: string, params?: Record<string, unknown>) => {
+    const listener: BrowserDebuggerMessageListener = (_event, method, params) => {
       handler({ tabId: resolvedTabId, method, params: params || {} })
     }
     view.webContents.debugger.on('message', listener)
+    const subscribers = this.subscribersByTab.get(resolvedTabId) ?? new Set()
+    subscribers.add(listener)
+    this.subscribersByTab.set(resolvedTabId, subscribers)
     return () => {
       view.webContents.debugger.removeListener('message', listener)
+      const latest = this.subscribersByTab.get(resolvedTabId)
+      latest?.delete(listener)
+      if (latest?.size === 0) this.subscribersByTab.delete(resolvedTabId)
+      this.maybeDetach(resolvedTabId, view)
     }
   }
 
@@ -104,14 +127,21 @@ export class BrowserCdpSessionService {
     domain: string,
     enableParams?: Record<string, unknown>,
   ): Promise<() => Promise<void>> {
-    const { tabId: resolvedTabId } = await this.ensureAttached(tabId)
+    const { tabId: resolvedTabId, view } = await this.ensureAttached(tabId)
     const refs = this.domainRefsByTab.get(resolvedTabId) || new Map<string, number>()
     const current = refs.get(domain) || 0
-    if (current === 0) {
-      await this.sendCommand(resolvedTabId, `${domain}.enable`, enableParams)
-    }
     refs.set(domain, current + 1)
     this.domainRefsByTab.set(resolvedTabId, refs)
+    if (current === 0) {
+      try {
+        await this.sendCommand(resolvedTabId, `${domain}.enable`, enableParams)
+      } catch (error) {
+        refs.delete(domain)
+        if (refs.size === 0) this.domainRefsByTab.delete(resolvedTabId)
+        this.maybeDetach(resolvedTabId, view)
+        throw error
+      }
+    }
 
     let released = false
     return async () => {
@@ -131,6 +161,53 @@ export class BrowserCdpSessionService {
       } catch {
         // A tab may be gone by cleanup time; observer teardown must not fail the caller.
       }
+      this.maybeDetach(resolvedTabId)
     }
+  }
+
+  disposeTab(tabId: string): void {
+    let view: BrowserHostView | null = null
+    try {
+      view = this.host.resolveTabView(tabId).view
+    } catch {
+      // Tab teardown can race renderer destruction.
+    }
+    if (view) {
+      for (const listener of this.subscribersByTab.get(tabId) ?? []) {
+        try {
+          view.webContents.debugger.removeListener('message', listener)
+        } catch {
+          // Ignore teardown races.
+        }
+      }
+    }
+    this.subscribersByTab.delete(tabId)
+    this.domainRefsByTab.delete(tabId)
+    this.inFlightCommandsByTab.delete(tabId)
+    this.maybeDetach(tabId, view ?? undefined, true)
+  }
+
+  private maybeDetach(tabId: string, knownView?: BrowserHostView, force = false): void {
+    if (!this.attachedByService.has(tabId)) return
+    if (!force && (
+      (this.domainRefsByTab.get(tabId)?.size ?? 0) > 0
+      || (this.subscribersByTab.get(tabId)?.size ?? 0) > 0
+      || (this.inFlightCommandsByTab.get(tabId) ?? 0) > 0
+    )) return
+    let view = knownView
+    if (!view) {
+      try {
+        view = this.host.resolveTabView(tabId).view
+      } catch {
+        this.attachedByService.delete(tabId)
+        return
+      }
+    }
+    try {
+      if (view.webContents.debugger.isAttached()) view.webContents.debugger.detach()
+    } catch {
+      // The renderer may already be gone.
+    }
+    this.attachedByService.delete(tabId)
   }
 }

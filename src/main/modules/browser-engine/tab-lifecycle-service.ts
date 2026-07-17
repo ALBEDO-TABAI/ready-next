@@ -6,6 +6,10 @@ import {
   BROWSER_LOCAL_MEDIA_UPLOAD_EXTENSIONS,
 } from '../../../shared/browser-local-media-upload'
 import { READY_LOCAL_MEDIA_DROP_SCHEME } from '../../../shared/browser-local-media-drop'
+import type {
+  RegisterDormantBrowserTabsRequest,
+  RegisterDormantBrowserTabsResult,
+} from '../../../shared/browser-tab-session'
 
 function applyRoundedViewport(_view: BrowserHostView): void {
   // Rounded clipping is handled at the native host view layer.
@@ -41,6 +45,10 @@ export interface BrowserLifecycleTabRecord {
   openerTabId?: string | null
   profile?: string | null
   view?: BrowserHostView
+  restoreSnapshot?: {
+    entries: Electron.NavigationEntry[]
+    index: number
+  } | null
 }
 
 interface BrowserWindowOpenDetails {
@@ -60,6 +68,8 @@ interface BrowserTabLifecycleHost {
   tabs: Map<string, BrowserLifecycleTabRecord>
   getActiveTabId(): string | null
   setActiveTabId(tabId: string | null): void
+  setSplitTabId(tabId: string | null): void
+  observeRestoredTabId(tabId: string): void
   getNextTabId(): string
   getViewBounds(): BrowserRect
   shouldPresentHosts(): boolean
@@ -72,6 +82,7 @@ interface BrowserTabLifecycleHost {
   detachHost(view: BrowserHostView): void
   showHost(view: BrowserHostView, bounds: BrowserRect): void
   sendToRenderer(channel: string, data: unknown): void
+  queueTabUpdate(data: { type: string; tabId: string } & Record<string, unknown>): void
   buildTabPayload(tab: BrowserLifecycleTabRecord): BrowserTabMetaPayload
   emitTabMeta(tabId: string): void
   logBrowserDiag(message: string): void
@@ -87,6 +98,7 @@ interface BrowserTabLifecycleHost {
   }): void
   updateHistoryEntryTitle(url: string, title: string, favicon?: string | null): void
   handleLocalMediaDropNavigation(tabId: string, url: string): boolean
+  onTabLoadStateMayChange?(tabId: string, reason: string): void
   browserUserAgent: string
   useMock: boolean
 }
@@ -270,6 +282,77 @@ export function buildLocalMediaDropBridgeScript(): string {
 export class BrowserTabLifecycleService {
   constructor(private readonly host: BrowserTabLifecycleHost) {}
 
+  registerDormantTabs(request: RegisterDormantBrowserTabsRequest): RegisterDormantBrowserTabsResult {
+    if (this.host.tabs.size > 0) {
+      return { success: false, error: 'Browser runtime is already initialized.' }
+    }
+    const inputTabs = Array.isArray(request?.tabs) ? request.tabs : []
+    const seen = new Set<string>()
+    for (const input of inputTabs) {
+      if (seen.size >= 200) break
+      const id = String(input?.id || '').trim()
+      const url = String(input?.url || '').trim()
+      if (!id || seen.has(id) || !this.host.isAllowedUrl(url)) continue
+      const profile = String(input.profile || '').trim().toLowerCase()
+      if (profile && !/^[a-z0-9_-]{1,32}$/.test(profile)) continue
+      seen.add(id)
+      this.host.observeRestoredTabId(id)
+      this.host.tabs.set(id, {
+        id,
+        url,
+        title: String(input.title || 'New Tab'),
+        domain: String(input.domain || this.host.extractDomain(url)),
+        favicon: input.favicon ? String(input.favicon) : null,
+        owner: input.owner === 'agent' ? 'agent' : 'manual',
+        required: Boolean(input.required),
+        activity: input.activity === 'running' || input.activity === 'attention' ? input.activity : 'idle',
+        lastAuditedAt: typeof input.lastAuditedAt === 'number' ? input.lastAuditedAt : null,
+        loading: false,
+        canGoBack: false,
+        canGoForward: false,
+        error: null,
+        profile: profile || null,
+        restoreSnapshot: null,
+      })
+    }
+    if (this.host.tabs.size === 0) return { success: false, error: 'No restorable browser tabs.' }
+
+    const firstTabId = this.host.tabs.keys().next().value as string
+    const activeTabId = request.activeTabId && this.host.tabs.has(request.activeTabId)
+      ? request.activeTabId
+      : firstTabId
+    const splitTabId = request.splitTabId
+      && request.splitTabId !== activeTabId
+      && this.host.tabs.has(request.splitTabId)
+      ? request.splitTabId
+      : null
+    this.host.setActiveTabId(activeTabId)
+    this.host.setSplitTabId(splitTabId)
+
+    const materializedTabIds: string[] = []
+    const activeResult = this.materializeTab(activeTabId, { activate: true })
+    if (!activeResult.success) {
+      return { success: false, error: activeResult.error || 'Active tab restore failed.' }
+    }
+    materializedTabIds.push(activeTabId)
+    let restoredSplitTabId = splitTabId
+    if (splitTabId) {
+      const splitResult = this.materializeTab(splitTabId)
+      if (splitResult.success) materializedTabIds.push(splitTabId)
+      else {
+        restoredSplitTabId = null
+        this.host.setSplitTabId(null)
+      }
+    }
+    return {
+      success: true,
+      activeTabId,
+      splitTabId: restoredSplitTabId,
+      materializedTabIds,
+      dormantTabIds: [...this.host.tabs.keys()].filter((id) => !materializedTabIds.includes(id)),
+    }
+  }
+
   async createTab(
     url: string,
     options?: { background?: boolean; openerTabId?: string | null; profile?: string | null },
@@ -311,6 +394,57 @@ export class BrowserTabLifecycleService {
     if (profile && !/^[a-z0-9_-]{1,32}$/.test(profile)) {
       return { success: false, error: 'Invalid browser profile name.' }
     }
+    const tab: BrowserLifecycleTabRecord = {
+      id: tabId,
+      url,
+      title: 'Loading...',
+      domain: this.host.extractDomain(url),
+      favicon: null,
+      owner: 'manual',
+      required: false,
+      activity: 'idle',
+      lastAuditedAt: null,
+      loading: true,
+      canGoBack: false,
+      canGoForward: false,
+      error: null,
+      openerTabId: options?.openerTabId ?? null,
+      profile: profile || null,
+      restoreSnapshot: null,
+    }
+    this.host.tabs.set(tabId, tab)
+    const materialized = this.materializeTab(tabId, { activate: !background })
+    if (!materialized.success) {
+      this.host.tabs.delete(tabId)
+      return materialized
+    }
+    this.emitBackgroundTabOpened(tab, background)
+    return { success: true, tabId }
+  }
+
+  materializeTab(
+    tabId: string,
+    options: { activate?: boolean } = {},
+  ): { success: boolean; tabId?: string; error?: string } {
+    const tab = this.host.tabs.get(tabId)
+    if (!tab) return { success: false, error: 'Tab not found' }
+    if (tab.view) {
+      if (options.activate) this.host.setActiveTabId(tabId)
+      return { success: true, tabId }
+    }
+    const profile = String(tab.profile || '').trim().toLowerCase()
+    if (profile && !/^[a-z0-9_-]{1,32}$/.test(profile)) {
+      return { success: false, error: 'Invalid browser profile name.' }
+    }
+    if (this.host.useMock) {
+      if (options.activate) this.host.setActiveTabId(tabId)
+      return { success: true, tabId }
+    }
+
+    const previousTab = this.host.getActiveTabId()
+      ? this.host.tabs.get(this.host.getActiveTabId() as string) || null
+      : null
+    const previousView = previousTab?.view || null
     const view = this.host.createHost(profile ? `persist:browser-profile-${profile}` : 'persist:browser')
     try {
       view.webContents.setUserAgent(this.host.browserUserAgent)
@@ -329,25 +463,10 @@ export class BrowserTabLifecycleService {
     // White-flash protection is native paint instead of a navigated page.
     this.host.resetPageBackground(view)
 
-    const tab: BrowserLifecycleTabRecord = {
-      id: tabId,
-      url,
-      title: 'Loading...',
-      domain: this.host.extractDomain(url),
-      favicon: null,
-      owner: 'manual',
-      required: false,
-      activity: 'idle',
-      lastAuditedAt: null,
-      loading: true,
-      canGoBack: false,
-      canGoForward: false,
-      error: null,
-      openerTabId: options?.openerTabId ?? null,
-      profile: profile || null,
-      view,
-    }
-    this.host.tabs.set(tabId, tab)
+    tab.view = view
+    tab.loading = true
+    tab.error = null
+    this.host.onTabLoadStateMayChange?.(tabId, 'created')
 
     this.bindTabEvents(tabId, tab, view)
 
@@ -357,10 +476,6 @@ export class BrowserTabLifecycleService {
     this.host.installContextMenu(view.webContents)
     this.host.ensureDownloadSession(view.webContents.session)
 
-    const previousTab = this.host.getActiveTabId()
-      ? this.host.tabs.get(this.host.getActiveTabId() as string) || null
-      : null
-    const previousView = previousTab?.view || null
     let resolvedSwap = false
     const finalizeSwap = (shouldShow: boolean) => {
       if (resolvedSwap) return
@@ -387,15 +502,30 @@ export class BrowserTabLifecycleService {
     // background: do NOT activate or present. finalizeSwap no-ops while the tab
     // isn't active, so did-stop-loading won't show it either; the page still
     // loads in the background. Switching to it later (user choice) presents it.
-    if (!background) {
+    if (options.activate) {
       this.host.setActiveTabId(tabId)
+      this.host.onTabLoadStateMayChange?.(tabId, 'activated')
       finalizeSwap(true)
     }
-    // fire-and-forget: load failures already surface via the `did-fail-load` webContents event which the host listens to; the catch here just prevents an unhandledRejection.
-    view.webContents.loadURL(url).catch(() => {
-      // handled by did-fail-load
-    })
-    this.emitBackgroundTabOpened(tab, background)
+    try {
+      if (tab.restoreSnapshot) {
+        view.webContents.navigationHistory.restore({
+          entries: tab.restoreSnapshot.entries,
+          index: tab.restoreSnapshot.index,
+        })
+      } else {
+        // fire-and-forget: load failures surface via did-fail-load.
+        void view.webContents.loadURL(tab.url).catch(() => undefined)
+      }
+    } catch (error) {
+      this.host.detachHost(view)
+      view.webContents.close?.()
+      tab.view = undefined
+      tab.loading = false
+      tab.error = error instanceof Error ? error.message : String(error)
+      this.host.onTabLoadStateMayChange?.(tabId, 'restore-failed')
+      return { success: false, error: `Tab restore failed: ${tab.error}` }
+    }
     return { success: true, tabId }
   }
 
@@ -424,6 +554,14 @@ export class BrowserTabLifecycleService {
       })
     })
 
+    view.webContents.on('audio-state-changed', () => {
+      this.host.onTabLoadStateMayChange?.(tabId, 'audio-state-changed')
+    })
+
+    view.webContents.on('before-input-event', () => {
+      this.host.onTabLoadStateMayChange?.(tabId, 'user-input')
+    })
+
     view.webContents.on('will-navigate', (event, url) => {
       if (this.host.handleLocalMediaDropNavigation(tabId, url)) {
         event.preventDefault()
@@ -432,7 +570,7 @@ export class BrowserTabLifecycleService {
 
     view.webContents.on('page-title-updated', (_event, title) => {
       tab.title = title
-      this.host.sendToRenderer('browser:tabUpdate', { type: 'title', tabId, title })
+      this.host.queueTabUpdate({ type: 'title', tabId, title })
       this.host.emitTabMeta(tabId)
       // Backfill the history row written at did-navigate time, when the new
       // page's real title was not yet known (it was still the previous page's
@@ -489,7 +627,8 @@ export class BrowserTabLifecycleService {
     view.webContents.on('did-start-loading', () => {
       this.host.resetPageBackground(view)
       tab.loading = true
-      this.host.sendToRenderer('browser:tabUpdate', { type: 'loading', tabId, loading: true })
+      this.host.queueTabUpdate({ type: 'loading', tabId, loading: true })
+      this.host.onTabLoadStateMayChange?.(tabId, 'load-started')
     })
 
     view.webContents.on('did-stop-loading', () => {
@@ -498,21 +637,24 @@ export class BrowserTabLifecycleService {
       tab.loading = false
       tab.canGoBack = view.webContents.navigationHistory.canGoBack()
       tab.canGoForward = view.webContents.navigationHistory.canGoForward()
-      this.host.sendToRenderer('browser:tabUpdate', { type: 'loading', tabId, loading: false })
+      this.host.queueTabUpdate({ type: 'loading', tabId, loading: false })
       this.host.emitTabMeta(tabId)
+      this.host.onTabLoadStateMayChange?.(tabId, 'load-stopped')
     })
 
     view.webContents.on('did-fail-load', (_event, errorCode, errorDescription, _validatedURL, isMainFrame) => {
       if (!isMainFrame) return
+      if (errorCode === -3) return
       this.host.logBrowserDiag(`[browser-v3][fail-load][tab:${tabId}] code=${String(errorCode)} message=${errorDescription}`)
       tab.loading = false
       tab.error = `${errorDescription} (${errorCode})`
-      this.host.sendToRenderer('browser:tabUpdate', {
+      this.host.queueTabUpdate({
         type: 'error',
         tabId,
         error: `${errorDescription} (${errorCode})`,
       })
       this.host.emitTabMeta(tabId)
+      this.host.onTabLoadStateMayChange?.(tabId, 'load-failed')
     })
   }
 
@@ -522,7 +664,7 @@ export class BrowserTabLifecycleService {
     view: BrowserHostView,
     url: string,
   ): void {
-    this.host.sendToRenderer('browser:tabUpdate', {
+    this.host.queueTabUpdate({
       type: 'navigate',
       tabId,
       url,

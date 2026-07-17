@@ -115,6 +115,7 @@ export function ContextUsageMeter({
   const tooltip = tooltipPosition && typeof document !== 'undefined'
     ? createPortal(
       <div
+        data-ready-native-overlay=""
         data-agent-context-usage-tooltip="true"
         role="tooltip"
         style={{

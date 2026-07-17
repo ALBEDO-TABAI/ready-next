@@ -16,6 +16,7 @@ export const ATTACHMENT_HARD_CAP_BYTES = 100 * 1024 * 1024 // 100 MB any type
 export const VIDEO_INLINE_CAP_BYTES = 40 * 1024 * 1024 // 40 MB video → ref
 export const IMAGE_INLINE_CAP_BYTES = 20 * 1024 * 1024 // 20 MB image → refuse base64
 export const EBOOK_INLINE_CAP_BYTES = 40 * 1024 * 1024 // 40 MB ebook → inline bytes for reader
+export const DOCUMENT_TEXT_READ_CAP_BYTES = 20 * 1024 * 1024 // 20 MB text → explicit refusal before allocation
 
 export type AttachmentCategory = 'image' | 'video' | 'audio' | 'pdf' | 'ebook' | 'binary'
 
@@ -129,4 +130,8 @@ export function decideReadAttachmentSize(
     return { kind: 'ok', loadInlineBytes: true }
   }
   return { kind: 'ok', loadInlineBytes: false }
+}
+
+export function isDocumentTextReadTooLarge(size: number): boolean {
+  return size > DOCUMENT_TEXT_READ_CAP_BYTES
 }

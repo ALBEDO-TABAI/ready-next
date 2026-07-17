@@ -12,10 +12,15 @@ import {
   Images,
 } from 'lucide-react'
 import { type DocTab, useDocTabs } from '../../stores/useDocTabs'
-import { toLocalFileUrl } from '../../utils/dragDrop'
+import {
+  createImageGalleryRequestGate,
+  getImageGalleryDirectory,
+  loadImageGalleryDirectory,
+  subscribeImageGalleryDirectory,
+  type ImageGallerySibling,
+} from '../../modules/document/imageGalleryDirectoryCache'
 
 const TRANSPARENT_EXTS = ['png', 'webp', 'svg', 'gif']
-const IMAGE_EXTS = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp', 'ico']
 
 const tbBtnBase: React.CSSProperties = {
   width: 28,
@@ -27,14 +32,6 @@ const tbBtnBase: React.CSSProperties = {
   justifyContent: 'center',
   cursor: 'pointer',
   padding: 0,
-}
-
-interface SiblingImage {
-  src: string
-  width: number
-  height: number
-  alt: string
-  path: string
 }
 
 interface ImageGalleryProps {
@@ -50,37 +47,40 @@ export default function ImageGallery({ tab, fileUrl, currentExt }: ImageGalleryP
   const [imageDims, setImageDims] = useState<{ w: number; h: number } | null>(null)
   const [panOffset, setPanOffset] = useState({ x: 0, y: 0 })
   const [isDragging, setIsDragging] = useState(false)
-  const [siblings, setSiblings] = useState<SiblingImage[]>([])
+  const [siblings, setSiblings] = useState<ImageGallerySibling[]>([])
 
   const dragStart = useRef({ x: 0, y: 0, ox: 0, oy: 0 })
   const containerRef = useRef<HTMLDivElement>(null)
   const lightboxRef = useRef<PhotoSwipeLightbox | null>(null)
+  const directoryRequestGateRef = useRef(createImageGalleryRequestGate())
 
   const isTransparent = TRANSPARENT_EXTS.includes(currentExt)
   const currentIndex = useMemo(() => siblings.findIndex((s) => s.path === tab.path), [siblings, tab.path])
 
-  // Load sibling images from same directory
-  useEffect(() => {
-    if (!tab.path) return
-    const dir = tab.path.substring(0, tab.path.lastIndexOf('/'))
-    if (!dir || typeof window === 'undefined' || !window.electronAPI) return
+  const directory = useMemo(() => tab.path ? getImageGalleryDirectory(tab.path) : '', [tab.path])
 
-    // fire-and-forget: sibling-image discovery for the gallery; if it fails the gallery just renders the current image with no peers (graceful degradation).
-    window.electronAPI.document.listFiles(dir).then((result) => {
-      if (!result.success || !result.items) return
-      const imageFiles = result.items
-        .filter((f) => !f.isDirectory && IMAGE_EXTS.includes(f.name.split('.').pop()?.toLowerCase() || ''))
-        .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }))
-        .map((f) => ({
-          src: toLocalFileUrl(f.path),
-          width: 1920, // PhotoSwipe needs dimensions; will be updated on load
-          height: 1080,
-          alt: f.name,
-          path: f.path,
-        }))
-      setSiblings(imageFiles)
-    }).catch(() => { /* ignore */ })
-  }, [tab.path])
+  // Load sibling images once per directory and refresh only when that directory changes.
+  useEffect(() => {
+    if (!directory || typeof window === 'undefined' || !window.electronAPI) return undefined
+    let cancelled = false
+    const load = () => {
+      const generation = directoryRequestGateRef.current.begin()
+      void loadImageGalleryDirectory(directory, (path) => window.electronAPI.document.listFiles(path))
+        .then((items) => {
+          if (!cancelled && directoryRequestGateRef.current.isCurrent(generation)) setSiblings(items)
+        })
+        .catch(() => {
+          if (!cancelled && directoryRequestGateRef.current.isCurrent(generation)) setSiblings([])
+        })
+    }
+    const unsubscribe = subscribeImageGalleryDirectory(directory, load)
+    load()
+    return () => {
+      cancelled = true
+      directoryRequestGateRef.current.invalidate()
+      unsubscribe()
+    }
+  }, [directory])
 
   // Init PhotoSwipe lightbox
   useEffect(() => {

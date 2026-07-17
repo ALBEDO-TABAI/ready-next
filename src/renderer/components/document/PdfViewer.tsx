@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect, useMemo } from 'react'
+import { memo, useState, useCallback, useRef, useEffect, useMemo } from 'react'
 import { Document, Page, pdfjs } from 'react-pdf'
 import 'react-pdf/dist/Page/TextLayer.css'
 import 'react-pdf/dist/Page/AnnotationLayer.css'
@@ -15,6 +15,11 @@ import {
   loadDocumentReadingPosition,
   saveDocumentReadingPosition,
 } from '../../modules/document/documentScrollAnchor'
+import {
+  arePdfPageSlotRenderInputsEqual,
+  getPdfPageRenderRange,
+} from '../../modules/document/pdfPageWindow'
+import { recordDocumentPerformanceMaximum } from '../../../shared/document-performance-diagnostics'
 
 // Configure PDF.js worker
 pdfjs.GlobalWorkerOptions.workerSrc = new URL(
@@ -23,145 +28,97 @@ pdfjs.GlobalWorkerOptions.workerSrc = new URL(
 ).toString()
 
 const ZOOM_STEPS = [50, 75, 100, 125, 150, 200, 300]
+const DEFAULT_PDF_PAGE_HEIGHT = 792
+const PAGE_WINDOW_RADIUS = 3
 
 interface PdfViewerProps {
   tab: DocTab
   fileUrl: string
 }
 
-function decodeBase64ToBytes(base64: string): Uint8Array {
-  const binaryString = atob(base64)
-  const bytes = new Uint8Array(binaryString.length)
-  for (let i = 0; i < binaryString.length; i += 1) {
-    bytes[i] = binaryString.charCodeAt(i)
-  }
-  return bytes
+type PdfPageProxy = {
+  getViewport(options: { scale: number }): { height: number }
 }
 
-function normalizePdfBytes(value: unknown): Uint8Array | null {
-  if (!value) return null
-  if (value instanceof Uint8Array) return value
-  if (value instanceof ArrayBuffer) return new Uint8Array(value)
-  if (ArrayBuffer.isView(value)) {
-    return new Uint8Array(value.buffer, value.byteOffset, value.byteLength)
-  }
-  if (Array.isArray(value)) return new Uint8Array(value)
-  if (
-    typeof value === 'object' &&
-    value !== null &&
-    'type' in value &&
-    'data' in value &&
-    value.type === 'Buffer' &&
-    Array.isArray(value.data)
-  ) {
-    return new Uint8Array(value.data)
-  }
-  return null
-}
+const PdfPageSlot = memo(function PdfPageSlot({
+  pageNumber,
+  shouldRender,
+  pageHeight,
+  scale,
+  registerPageRef,
+  recordPageHeight,
+}: {
+  pageNumber: number
+  shouldRender: boolean
+  pageHeight: number
+  scale: number
+  registerPageRef(pageNumber: number, element: HTMLDivElement | null): void
+  recordPageHeight(pageNumber: number, page: PdfPageProxy): void
+}) {
+  const setPageRef = useCallback((element: HTMLDivElement | null) => {
+    registerPageRef(pageNumber, element)
+  }, [pageNumber, registerPageRef])
+  const onPageLoad = useCallback((page: PdfPageProxy) => {
+    recordPageHeight(pageNumber, page)
+  }, [pageNumber, recordPageHeight])
+
+  return (
+    <div
+      ref={setPageRef}
+      data-page={pageNumber}
+      style={{
+        display: 'flex',
+        justifyContent: 'center',
+        alignItems: 'flex-start',
+        minHeight: `calc(${pageHeight}px * var(--ready-pdf-scale, 1) + 24px)`,
+        padding: '12px 0',
+      }}
+    >
+      {shouldRender ? (
+        <div
+          data-ready-pdf-page-mounted={pageNumber}
+          style={{ boxShadow: '0 2px 8px rgba(0,0,0,0.3)' }}
+        >
+          <Page
+            pageNumber={pageNumber}
+            scale={scale}
+            renderTextLayer={true}
+            renderAnnotationLayer={true}
+            loading={null}
+            onLoadSuccess={onPageLoad}
+          />
+        </div>
+      ) : null}
+    </div>
+  )
+}, arePdfPageSlotRenderInputsEqual)
 
 export default function PdfViewer({ tab, fileUrl }: PdfViewerProps) {
   const [numPages, setNumPages] = useState(0)
   const [zoom, setZoom] = useState(100)
   const [currentPage, setCurrentPage] = useState(1)
   const [error, setError] = useState<string | null>(null)
-  const [pdfData, setPdfData] = useState<Uint8Array | null>(null)
-  const [pdfUrl, setPdfUrl] = useState<string | null>(null)
+  const [pageHeights, setPageHeights] = useState<Map<number, number>>(() => new Map())
 
   const containerRef = useRef<HTMLDivElement>(null)
   const pageRefs = useRef<Map<number, HTMLDivElement>>(new Map())
   const observerRef = useRef<IntersectionObserver | null>(null)
+  const visiblePageEntriesRef = useRef<Map<number, IntersectionObserverEntry>>(new Map())
   const saveScrollTimerRef = useRef<number | null>(null)
   const restoredScrollKeyRef = useRef<string | null>(null)
   const documentScrollKey = useMemo(() => tab.path || tab.id, [tab.id, tab.path])
 
-  // Load PDF data via IPC
   useEffect(() => {
-    if (!tab.path) {
-      setPdfData(null)
-      setPdfUrl(null)
-      setError('No file path provided')
-      return
-    }
-
-    let cancelled = false
     setNumPages(0)
     setCurrentPage(1)
-    setPdfData(null)
-    setPdfUrl(null)
-    setError(null)
+    setPageHeights(new Map())
+    setError(tab.path && fileUrl ? null : 'No file path provided')
     pageRefs.current.clear()
+    visiblePageEntriesRef.current.clear()
     restoredScrollKeyRef.current = null
-
-    const loadPdf = async () => {
-      try {
-        const filePath = tab.path
-        if (!filePath) {
-          setError('No file path provided')
-          return
-        }
-
-        console.log('[PdfViewer] Loading PDF from path:', filePath)
-
-        // Read via IPC so renderer does not depend on custom-scheme fetch behavior.
-        const result = await window.electronAPI.document.readFile(filePath)
-
-        if (!result.success) {
-          throw new Error(result.error || 'Failed to read file')
-        }
-
-        const binaryData = result.data?.type === 'binary' ? result.data : null
-        const ipcBytes = normalizePdfBytes(binaryData?.bytes)
-
-        if (!cancelled && binaryData?.category === 'pdf' && ipcBytes && ipcBytes.length > 0) {
-          console.log('[PdfViewer] Loaded PDF bytes from IPC:', ipcBytes.length)
-          setPdfData(ipcBytes)
-          setError(null)
-          return
-        }
-
-        if (!cancelled && binaryData?.category === 'pdf' && binaryData.localUrl) {
-          console.log('[PdfViewer] Falling back to local-file URL:', binaryData.localUrl)
-          setPdfUrl(binaryData.localUrl)
-          setError(null)
-          return
-        }
-
-        if (!cancelled && result.content) {
-          const bytes = decodeBase64ToBytes(result.content)
-          console.log('[PdfViewer] Loaded legacy base64 PDF bytes:', bytes.length)
-          setPdfData(bytes)
-          setError(null)
-          return
-        }
-
-        if (!cancelled && fileUrl) {
-          console.log('[PdfViewer] Falling back to provided file URL:', fileUrl)
-          setPdfUrl(fileUrl)
-          setError(null)
-          return
-        }
-
-        throw new Error('No PDF data returned')
-      } catch (err) {
-        if (!cancelled) {
-          console.error('[PdfViewer] PDF load error:', err)
-          setError(err instanceof Error ? err.message : 'PDF 加载失败')
-        }
-      }
-    }
-
-    loadPdf()
-
-    return () => {
-      cancelled = true
-    }
   }, [tab.path, fileUrl])
 
-  // Stable file prop to avoid Document re-renders
-  const fileOption = useMemo(() => {
-    if (pdfData) return { data: pdfData }
-    return pdfUrl
-  }, [pdfData, pdfUrl])
+  const fileOption = fileUrl || null
 
   const savePdfReadingPosition = useCallback(() => {
     const element = containerRef.current
@@ -181,17 +138,26 @@ export default function PdfViewer({ tab, fileUrl }: PdfViewerProps) {
   const restorePdfReadingPosition = useCallback(() => {
     const snapshot = loadDocumentReadingPosition(documentScrollKey)
     const element = containerRef.current
-    if (!snapshot || !element) return
+    if (!snapshot || !element) return undefined
     const restore = () => {
       const maxScroll = Math.max(0, element.scrollHeight - element.clientHeight)
       const nextTop = snapshot.maxScroll === maxScroll ? snapshot.top : snapshot.ratio * maxScroll
       element.scrollTop = Math.max(0, Math.min(Math.round(nextTop), maxScroll))
     }
-    requestAnimationFrame(restore)
-    requestAnimationFrame(() => requestAnimationFrame(restore))
-    window.setTimeout(restore, 180)
-    window.setTimeout(restore, 520)
-    window.setTimeout(restore, 1100)
+    let frame = requestAnimationFrame(restore)
+    const observer = typeof ResizeObserver === 'undefined'
+      ? null
+      : new ResizeObserver(() => {
+          cancelAnimationFrame(frame)
+          frame = requestAnimationFrame(restore)
+        })
+    observer?.observe(element)
+    const timeout = window.setTimeout(() => observer?.disconnect(), 800)
+    return () => {
+      cancelAnimationFrame(frame)
+      window.clearTimeout(timeout)
+      observer?.disconnect()
+    }
   }, [documentScrollKey])
 
   const onLoadSuccess = useCallback(({ numPages: n }: { numPages: number }) => {
@@ -210,31 +176,37 @@ export default function PdfViewer({ tab, fileUrl }: PdfViewerProps) {
 
     observerRef.current = new IntersectionObserver(
       (entries) => {
-        let topVisiblePage = Infinity
         for (const entry of entries) {
-          if (entry.isIntersecting) {
-            const pageNum = Number(entry.target.getAttribute('data-page'))
-            if (pageNum < topVisiblePage) topVisiblePage = pageNum
-          }
+          const pageNum = Number(entry.target.getAttribute('data-page'))
+          if (!Number.isFinite(pageNum)) continue
+          if (entry.isIntersecting) visiblePageEntriesRef.current.set(pageNum, entry)
+          else visiblePageEntriesRef.current.delete(pageNum)
         }
-        if (topVisiblePage !== Infinity) setCurrentPage(topVisiblePage)
+        const topEntry = Array.from(visiblePageEntriesRef.current.entries())
+          .sort((left, right) => left[1].boundingClientRect.top - right[1].boundingClientRect.top)[0]
+        if (topEntry) setCurrentPage(topEntry[0])
       },
       {
         root: containerRef.current,
         rootMargin: '0px',
-        threshold: 0.3,
+        // A zoomed page can be taller than the viewport, so a 30% threshold
+        // may never fire and the virtual page window would stop advancing.
+        threshold: 0,
       },
     )
 
     pageRefs.current.forEach((el) => observerRef.current?.observe(el))
 
-    return () => observerRef.current?.disconnect()
+    return () => {
+      observerRef.current?.disconnect()
+      visiblePageEntriesRef.current.clear()
+    }
   }, [numPages, zoom])
 
   useEffect(() => {
     if (numPages === 0 || restoredScrollKeyRef.current === documentScrollKey) return
     restoredScrollKeyRef.current = documentScrollKey
-    restorePdfReadingPosition()
+    return restorePdfReadingPosition()
   }, [documentScrollKey, numPages, restorePdfReadingPosition])
 
   useEffect(() => () => {
@@ -248,6 +220,17 @@ export default function PdfViewer({ tab, fileUrl }: PdfViewerProps) {
   const registerPageRef = useCallback((pageNum: number, el: HTMLDivElement | null) => {
     if (el) pageRefs.current.set(pageNum, el)
     else pageRefs.current.delete(pageNum)
+  }, [])
+
+  const recordPageHeight = useCallback((pageNumber: number, page: PdfPageProxy) => {
+    const height = page.getViewport({ scale: 1 }).height
+    if (!Number.isFinite(height) || height <= 0) return
+    setPageHeights((current) => {
+      if (current.get(pageNumber) === height) return current
+      const next = new Map(current)
+      next.set(pageNumber, height)
+      return next
+    })
   }, [])
 
   // Zoom helpers
@@ -267,9 +250,9 @@ export default function PdfViewer({ tab, fileUrl }: PdfViewerProps) {
 
   const fitToWidth = useCallback(() => {
     if (!containerRef.current) return
-    // Default PDF page width is 612pt (~816px at 100%). Approximate fit.
+    // Default PDF page width is 612pt at scale 1. Actual page sizes remain untouched.
     const containerWidth = containerRef.current.clientWidth - 48
-    const pct = Math.round((containerWidth / 816) * 100)
+    const pct = Math.round((containerWidth / 612) * 100)
     setZoom(Math.max(25, Math.min(500, pct)))
   }, [])
 
@@ -310,6 +293,17 @@ export default function PdfViewer({ tab, fileUrl }: PdfViewerProps) {
   }, [savePdfReadingPosition])
 
   const scale = zoom / 100
+  const renderRange = useMemo(
+    () => getPdfPageRenderRange(numPages, currentPage, PAGE_WINDOW_RADIUS),
+    [currentPage, numPages],
+  )
+  const mountedPageCount = renderRange.end >= renderRange.start
+    ? renderRange.end - renderRange.start + 1
+    : 0
+
+  useEffect(() => {
+    recordDocumentPerformanceMaximum('pdfMountedPagesPeak', mountedPageCount)
+  }, [mountedPageCount])
 
   if (error) {
     return (
@@ -330,7 +324,7 @@ export default function PdfViewer({ tab, fileUrl }: PdfViewerProps) {
   }
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full" data-ready-pdf-mounted-page-count={mountedPageCount}>
       {/* Toolbar */}
       <div
         className="flex items-center gap-1 px-3 border-b border-[var(--border-default)]"
@@ -427,7 +421,10 @@ export default function PdfViewer({ tab, fileUrl }: PdfViewerProps) {
         ref={containerRef}
         data-ready-document-scroll-key={documentScrollKey}
         className="panel-hover-scrollbar flex-1 overflow-auto"
-        style={{ background: '#525659' }}
+        style={{
+          background: '#525659',
+          '--ready-pdf-scale': scale,
+        } as React.CSSProperties}
         onWheel={handleWheel}
         onScroll={handleScroll}
       >
@@ -441,28 +438,20 @@ export default function PdfViewer({ tab, fileUrl }: PdfViewerProps) {
             </div>
           }
         >
-          {Array.from({ length: numPages }, (_, i) => (
-            <div
-              key={i + 1}
-              ref={(el) => registerPageRef(i + 1, el)}
-              data-page={i + 1}
-              style={{
-                display: 'flex',
-                justifyContent: 'center',
-                padding: '12px 0',
-              }}
-            >
-              <div style={{ boxShadow: '0 2px 8px rgba(0,0,0,0.3)' }}>
-                <Page
-                  pageNumber={i + 1}
-                  scale={scale}
-                  renderTextLayer={true}
-                  renderAnnotationLayer={true}
-                  loading={null}
-                />
-              </div>
-            </div>
-          ))}
+          {Array.from({ length: numPages }, (_, i) => {
+            const pageNumber = i + 1
+            return (
+              <PdfPageSlot
+                key={pageNumber}
+                pageNumber={pageNumber}
+                shouldRender={pageNumber >= renderRange.start && pageNumber <= renderRange.end}
+                pageHeight={pageHeights.get(pageNumber) ?? DEFAULT_PDF_PAGE_HEIGHT}
+                scale={scale}
+                registerPageRef={registerPageRef}
+                recordPageHeight={recordPageHeight}
+              />
+            )
+          })}
         </Document>
       </div>
     </div>

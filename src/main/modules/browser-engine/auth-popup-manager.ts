@@ -1,6 +1,7 @@
 import { BrowserWindow, shell, WebContents } from 'electron'
 import { decidePopupPolicy, type PopupRequestContext } from './popup-policy'
 import { withHtmlInCanvasWebPreferences } from '../app-control/html-in-canvas-feature'
+import { BrowserPopupProtection } from './browser-popup-protection'
 
 export interface PopupOpenInTabContext {
   sourceTabId?: string | null
@@ -16,6 +17,7 @@ export class AuthPopupManager {
   private readonly knownPopupContents = new Set<number>()
   private readonly pendingPopupFallbacks = new Map<number, { timer: NodeJS.Timeout; url: string; context: PopupOpenInTabContext }>()
   private readonly contentContexts = new Map<number, PopupOpenInTabContext>()
+  private readonly popupProtection: BrowserPopupProtection
   private mainWindow: BrowserWindow
   private readonly openInTab: OpenInTabHandler
   private readonly logger: Logger
@@ -26,11 +28,17 @@ export class AuthPopupManager {
     openInTab: OpenInTabHandler,
     logger?: Logger,
     browserUserAgent?: string,
+    onPopupStateChange?: (tabId: string) => void,
   ) {
     this.mainWindow = mainWindow
     this.openInTab = openInTab
     this.logger = logger || (() => {})
     this.browserUserAgent = String(browserUserAgent || mainWindow.webContents.getUserAgent())
+    this.popupProtection = new BrowserPopupProtection(onPopupStateChange)
+  }
+
+  isSourceTabInPopupFlow(tabId: string): boolean {
+    return this.popupProtection.isProtected(tabId)
   }
 
   setMainWindow(mainWindow: BrowserWindow): void {
@@ -69,6 +77,7 @@ export class AuthPopupManager {
       this.clearPendingFallback(contentSource.id, 'popup-created')
       const childContents = childWindow.webContents
       const childContext = this.contentContexts.get(contentSource.id) ?? {}
+      const releasePopupProtection = this.popupProtection.beginPopup(childContext.sourceTabId)
       this.knownPopupContents.add(childContents.id)
       this.contentContexts.set(childContents.id, childContext)
       this.logger(`[browser-v3][popup] did-create-window id=${childContents.id}`)
@@ -78,6 +87,7 @@ export class AuthPopupManager {
         childWindow.focus()
       }
       childWindow.once('closed', () => {
+        releasePopupProtection()
         this.knownPopupContents.delete(childContents.id)
         this.boundContents.delete(childContents.id)
         this.contentContexts.delete(childContents.id)
@@ -199,6 +209,7 @@ export class AuthPopupManager {
       const pending = this.pendingPopupFallbacks.get(sourceContentsId)
       if (!pending) return
       this.pendingPopupFallbacks.delete(sourceContentsId)
+      this.popupProtection.clearPending(sourceContentsId)
       this.logger(
         `[browser-v3][popup] fallback-open-tab source=${sourceContentsId} url=${pending.url}`,
       )
@@ -210,6 +221,10 @@ export class AuthPopupManager {
       url,
       context: this.contentContexts.get(sourceContentsId) ?? {},
     })
+    this.popupProtection.markPending(
+      sourceContentsId,
+      this.contentContexts.get(sourceContentsId)?.sourceTabId,
+    )
   }
 
   private clearPendingFallback(sourceContentsId: number, reason: string): void {
@@ -217,6 +232,7 @@ export class AuthPopupManager {
     if (!pending) return
     clearTimeout(pending.timer)
     this.pendingPopupFallbacks.delete(sourceContentsId)
+    this.popupProtection.clearPending(sourceContentsId)
     this.logger(`[browser-v3][popup] clear-fallback source=${sourceContentsId} reason=${reason}`)
   }
 }

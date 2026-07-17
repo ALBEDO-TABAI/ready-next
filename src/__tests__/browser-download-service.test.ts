@@ -200,6 +200,31 @@ test('downloadUrlToDirectory passes only allowed identity headers to the browser
   }
 })
 
+test('an active page download protects its source tab until the item is done', () => {
+  const session = new FakeSession()
+  const changes: boolean[] = []
+  let service: BrowserDownloadService
+  service = new BrowserDownloadService({
+    dataService: {
+      addDownload: () => undefined,
+      updateDownloadProgress: () => undefined,
+      updateDownloadState: () => undefined,
+    } as unknown as BrowserDataService,
+    sendToRenderer: () => undefined,
+    resolveTabIdForWebContents: (id) => id === 42 ? 'tab-42' : null,
+    onTabDownloadStateChange: (tabId) => changes.push(service.isTabDownloading(tabId)),
+  })
+  service.ensureRegistered(session as never)
+  const item = new FakeDownloadItem('https://cdn.example.com/file.bin', 'file.bin')
+
+  session.emit('will-download', {}, item, { id: 42 })
+  assert.equal(service.isTabDownloading('tab-42'), true)
+  item.finish('cancelled')
+
+  assert.equal(service.isTabDownloading('tab-42'), false)
+  assert.deepEqual(changes, [true, false])
+})
+
 test('downloadUrlToDirectory rejects unsupported schemes and missing directories before download starts', async () => {
   const service = createDownloadService()
   const session = new FakeSession()

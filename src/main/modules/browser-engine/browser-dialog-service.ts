@@ -16,7 +16,10 @@ export class BrowserDialogService {
   private readonly pendingByTab = new Map<string, BrowserDialogSnapshot>()
   private readonly unsubscribeByTab = new Map<string, () => void>()
 
-  constructor(private readonly cdp: BrowserDialogCdpPort) {}
+  constructor(
+    private readonly cdp: BrowserDialogCdpPort,
+    private readonly onPendingChange?: (tabId: string) => void,
+  ) {}
 
   async ensure(tabId: string): Promise<void> {
     if (this.unsubscribeByTab.has(tabId)) return
@@ -36,17 +39,23 @@ export class BrowserDialogService {
       ...(typeof params.promptText === 'string' ? { promptText: params.promptText } : {}),
     })
     this.pendingByTab.delete(tabId)
+    this.onPendingChange?.(tabId)
+  }
+
+  hasPending(tabId: string): boolean {
+    return this.pendingByTab.has(tabId)
   }
 
   clear(tabId: string): void {
-    this.pendingByTab.delete(tabId)
+    const hadPending = this.pendingByTab.delete(tabId)
     this.unsubscribeByTab.get(tabId)?.()
     this.unsubscribeByTab.delete(tabId)
+    if (hadPending) this.onPendingChange?.(tabId)
   }
 
   private onEvent(event: BrowserCdpEvent): void {
     if (event.method === 'Page.javascriptDialogClosed') {
-      this.pendingByTab.delete(event.tabId)
+      if (this.pendingByTab.delete(event.tabId)) this.onPendingChange?.(event.tabId)
       return
     }
     if (event.method !== 'Page.javascriptDialogOpening') return
@@ -60,5 +69,6 @@ export class BrowserDialogService {
       message: String(event.params.message || ''),
       ...(typeof event.params.defaultPrompt === 'string' ? { defaultPrompt: event.params.defaultPrompt } : {}),
     })
+    this.onPendingChange?.(event.tabId)
   }
 }

@@ -49,7 +49,7 @@ import {
 import { browserSnapshotService } from '../browser-engine/browser-snapshot-service'
 import type { BrowserTaskEnvelope } from '../../../shared/browser-task-envelope'
 
-const logger = createRotatingLogger('ready-tools.log')
+const logger = createRotatingLogger('ready-tools.log', { buffered: true })
 function log(msg: string) {
   try { logger.append(`[${new Date().toISOString()}] ${msg}\n`) } catch { /* silent-catch: 日志写入失败不影响主流程。 */ }
 }

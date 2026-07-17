@@ -1,6 +1,6 @@
 import { createRotatingLogger } from '../../utils/rotating-logger'
 
-const browserDiagnosticsLogger = createRotatingLogger('ready-browser.log')
+const browserDiagnosticsLogger = createRotatingLogger('ready-browser.log', { buffered: true })
 export const BROWSER_DIAGNOSTICS_LOG_PATH = browserDiagnosticsLogger.path
 
 export interface BrowserTaskDiagnosticsSnapshot {

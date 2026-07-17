@@ -154,6 +154,7 @@ export default function Modal({
 
   return (
     <div
+      data-ready-native-overlay=""
       className="fixed inset-0 z-[9999] flex items-center justify-center"
       style={{
         background: dimBackdrop ? 'var(--overlay-bg)' : 'transparent',

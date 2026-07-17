@@ -14,6 +14,7 @@ const BOARD_CHANNELS = [
   'board:open',
   'board:setActive',
   'board:save',
+  'board:ackExternalAssets',
   'board:importAsset',
   'board:importRemoteImage',
   'board:pickAsset',
@@ -104,13 +105,21 @@ export function setupBoardIPC(options: BoardIPCOptions): void {
     return wrap(() => getReadyBoardService().open(path))
   })
 
-  ipcMain.handle('board:setActive', (_, payload: { boardId?: string | null }) => {
-    return getReadyBoardService().setActive(payload?.boardId || null)
+  ipcMain.handle('board:setActive', (_, payload: { boardId?: string | null; expectedBoardId?: string }) => {
+    return getReadyBoardService().setActive(payload?.boardId || null, payload?.expectedBoardId)
   })
 
   ipcMain.handle('board:save', async (_, payload: { boardId?: string; state?: unknown }) => {
     const boardId = String(payload?.boardId || '').trim()
     return wrap(() => getReadyBoardService().save(boardId, payload?.state))
+  })
+
+  ipcMain.handle('board:ackExternalAssets', async (_, payload: { boardId?: string; receiptIds?: unknown }) => {
+    const boardId = String(payload?.boardId || '').trim()
+    const receiptIds = Array.isArray(payload?.receiptIds)
+      ? payload.receiptIds.map((id) => String(id || '').trim()).filter(Boolean)
+      : []
+    return wrap(() => getReadyBoardService().acknowledgeExternalAssets(boardId, receiptIds))
   })
 
   ipcMain.handle('board:importAsset', async (_, payload: { boardId?: string; srcPath?: string; kind?: ReadyBoardAssetKind }) => {

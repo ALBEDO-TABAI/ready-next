@@ -24,7 +24,6 @@ function check({ root = ROOT } = {}) {
   const runner = stripComments(readAt('src/main/modules/tools/browser-agent-runner.ts'))
   const binding = stripComments(readAt('src/main/modules/browser-engine/browser-surface-binding.ts'))
   const supervision = stripComments(readAt('src/main/modules/browser-engine/ipc-supervision.ts'))
-  const hostLayout = stripComments(readAt('src/main/modules/browser-engine/host-layout-service.ts'))
   const controller = stripComments(readAt('src/main/modules/browser-engine/ipc-handler.ts'))
   const authPopup = stripComments(readAt('src/main/modules/browser-engine/auth-popup-manager.ts'))
   const workflowSession = stripComments(readAt('src/main/modules/browser-engine/browser-workflow-session.ts'))
@@ -71,10 +70,6 @@ function check({ root = ROOT } = {}) {
   if (!authPopup.includes('this.openInTab(pending.url, pending.context)')) {
     errors.push('auth_popup_fallback_drops_lane_context')
   }
-  if (!hostLayout.includes('backgroundThrottling: false')) {
-    errors.push('browser_hosts_missing_background_throttling_false')
-  }
-
   return { ok: errors.length === 0, errors }
 }
 

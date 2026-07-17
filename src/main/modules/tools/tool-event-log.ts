@@ -1,6 +1,6 @@
 import { createRotatingLogger } from '../../utils/rotating-logger'
 
-const logger = createRotatingLogger('ready-tools.log')
+const logger = createRotatingLogger('ready-tools.log', { buffered: true })
 
 export interface ToolEventLogPayload {
   type: 'dispatch' | 'ack' | 'watchdog' | 'cancel' | 'self-rescue' | 'duplicate'

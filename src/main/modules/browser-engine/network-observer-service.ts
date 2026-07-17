@@ -57,6 +57,7 @@ export class BrowserNetworkObserverHandle {
     private readonly cdp: BrowserCdpSessionService,
     readonly tabId: string,
     private readonly options: Required<BrowserNetworkObserverOptions>,
+    private readonly onStopped?: (handle: BrowserNetworkObserverHandle) => void,
   ) {}
 
   async start(): Promise<void> {
@@ -89,6 +90,7 @@ export class BrowserNetworkObserverHandle {
     const releaseNetwork = this.releaseNetwork
     this.releaseNetwork = null
     await releaseNetwork?.()
+    this.onStopped?.(this)
   }
 
   private ensureRecord(requestId: string): BrowserNetworkEventRecord {
@@ -154,16 +156,34 @@ export class BrowserNetworkObserverHandle {
 }
 
 export class BrowserNetworkObserverService {
+  private readonly handlesByTab = new Map<string, Set<BrowserNetworkObserverHandle>>()
+
   constructor(private readonly cdp: BrowserCdpSessionService) {}
 
   async start(
     tabId: string,
     options: BrowserNetworkObserverOptions = {},
   ): Promise<BrowserNetworkObserverHandle> {
-    const handle = new BrowserNetworkObserverHandle(this.cdp, tabId, {
-      maxEvents: Math.max(1, Math.min(500, Math.floor(options.maxEvents || 120))),
-    })
+    const handle = new BrowserNetworkObserverHandle(
+      this.cdp,
+      tabId,
+      { maxEvents: Math.max(1, Math.min(500, Math.floor(options.maxEvents || 120))) },
+      (stopped) => {
+        const handles = this.handlesByTab.get(tabId)
+        handles?.delete(stopped)
+        if (handles?.size === 0) this.handlesByTab.delete(tabId)
+      },
+    )
     await handle.start()
+    const handles = this.handlesByTab.get(tabId) ?? new Set()
+    handles.add(handle)
+    this.handlesByTab.set(tabId, handles)
     return handle
+  }
+
+  disposeTab(tabId: string): void {
+    const handles = [...(this.handlesByTab.get(tabId) ?? [])]
+    this.handlesByTab.delete(tabId)
+    for (const handle of handles) void handle.stop().catch(() => undefined)
   }
 }

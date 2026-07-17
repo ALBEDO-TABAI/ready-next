@@ -3,7 +3,6 @@ import {
   statSync, existsSync,
   accessSync, constants as fsConstants,
 } from 'fs'
-import { writeFile } from 'fs/promises'
 import { join, basename, dirname, extname } from 'path'
 import { homedir } from 'os'
 import { buildDocumentHtmlSnapshotExport } from '../../../shared/document-widget-html-export'
@@ -11,7 +10,8 @@ import { documentCommitRegistry } from './document-commit-registry'
 import { validateWorkspaceRoot } from '../../../shared/workspace-validation'
 import { EBOOK_BINARY_EXTENSIONS } from '../../../shared/ebook'
 import { readDocumentEditableText, writeDocumentEditableText } from './document-editable-text'
-import { importEpubAsMarkdown } from './ebook-importer'
+import { getDocumentWorker } from './document-worker-bridge'
+import { publishFileAtomically } from './atomic-file-publish'
 import { getDatabase } from '../database'
 import { DocumentMarksRepository } from './document-marks-repository'
 import { markGroup } from './ipc/mark-group'
@@ -49,30 +49,6 @@ export type {
   AttachmentSizeDecision,
   ReadAttachmentDecision,
 } from './attachment-size-guards'
-
-// Lazy-loaded libraries
-let mammothLib: typeof import('mammoth') | null = null
-let xlsxLib: typeof import('xlsx') | null = null
-
-async function getMammoth(): Promise<typeof import('mammoth') | null> {
-  if (mammothLib) return mammothLib
-  try {
-    mammothLib = await import('mammoth')
-    return mammothLib
-  } catch {
-    return null
-  }
-}
-
-async function getXlsx(): Promise<typeof import('xlsx') | null> {
-  if (xlsxLib) return xlsxLib
-  try {
-    xlsxLib = await import('xlsx')
-    return xlsxLib
-  } catch {
-    return null
-  }
-}
 
 // BINARY_EXTENSIONS lives in `./binary-extensions` so test files (and the
 // search-engine adapter) can import it without pulling `electron` through
@@ -234,14 +210,14 @@ async function saveDocumentWithDialog(payload: {
           actual: decision.actual,
         }
       }
-      await writeFile(saveResult.filePath, Buffer.from(payload.contentBase64, 'base64'))
+      await publishFileAtomically(saveResult.filePath, Buffer.from(payload.contentBase64, 'base64'))
       return { success: true, path: saveResult.filePath }
     }
 
     if (extname(saveResult.filePath).toLowerCase() === '.html') {
       const title = basename(saveResult.filePath, '.html') || 'Document Snapshot'
       const html = buildDocumentHtmlSnapshotExport(payload.content || '', title)
-      await writeFile(saveResult.filePath, html, 'utf-8')
+      await publishFileAtomically(saveResult.filePath, html)
       return { success: true, path: saveResult.filePath }
     }
 
@@ -299,9 +275,8 @@ let parserGroupDispose: IpcDisposeHandle | null = null
 
 /**
  * Stage V V2.3f — dispose handle returned by `watchGroup.register`. The
- * single `document:watchDirectories` channel + the per-sender
- * `document:directoryChanged` push live in `ipc/watch-group.ts`; same
- * dev-reload lifecycle as the other extracted groups. Disposing the
+ * single `document:watchDirectories` channel lives in `ipc/watch-group.ts`;
+ * the shared directory broadcaster owns the per-sender push. Disposing the
  * handle closes every live `FSWatcher` before unhooking the request
  * channel so renderer reloads cannot leak file descriptors.
  */
@@ -340,13 +315,10 @@ export function setupDocumentIPC(useMock = false): void {
     recordCommit: (event) => documentCommitRegistry.record(event),
   })
 
-  // Stage V V2.3f — `document:watchDirectories` (request) and the paired
-  // `document:directoryChanged` push moved into `watchGroup`. The group
-  // owns the per-sender `FSWatcher` session lifecycle, debounced fan-out,
-  // and the `sender.once('destroyed')` cleanup hook; dispose closes every
-  // live watcher before unhooking the channel. The push literal stays
-  // visible to the V5 IPC contract gate via the inline
-  // `session.sender.send('document:directoryChanged', …)` in the group.
+  // Stage V V2.3f — `document:watchDirectories` moved into `watchGroup`.
+  // The group owns each sender's watcher lifecycle and contributes changes
+  // to the shared broadcaster, which is the only directoryChanged push
+  // authority. Dispose closes every live watcher before unhooking the channel.
   if (watchGroupDispose) {
     try { watchGroupDispose.dispose() } catch { /* ignore — handlers may already be gone */ }
     watchGroupDispose = null
@@ -463,9 +435,8 @@ export function setupDocumentIPC(useMock = false): void {
 
   // Stage V V2.3e — 3 parser channels (`document:parseDocx`,
   // `document:parseXlsx`, `document:importEbookAsMarkdown`) moved into
-  // `parserGroup`. The group needs the mock flag, the lazy mammoth/xlsx
-  // module getters (host owns the singleton cache), the ebook importer
-  // facade, and the write-index hook (shared with FileIoGroup so the
+  // `parserGroup`. The group receives lazy document-worker facades and the
+  // write-index hook (shared with FileIoGroup so the
   // ebook importer can fan its `index.md` back into the search engine).
   if (parserGroupDispose) {
     try { parserGroupDispose.dispose() } catch { /* ignore — handlers may already be gone */ }
@@ -474,9 +445,9 @@ export function setupDocumentIPC(useMock = false): void {
   parserGroupDispose = parserGroup.register(ipcMain, {
     useMock,
     getDocumentWriteIndexHook: () => documentWriteIndexHook,
-    getMammothModule: () => getMammoth(),
-    getXlsxModule: () => getXlsx(),
-    importEbookAsMarkdown: (sourcePath) => importEpubAsMarkdown(sourcePath),
+    parseDocxInWorker: (path) => getDocumentWorker().parseDocx(path),
+    parseXlsxInWorker: (path) => getDocumentWorker().parseXlsx(path),
+    importEbookInWorker: (sourcePath) => getDocumentWorker().importEpub(sourcePath),
   })
 
   // --- File Management IPC Handlers ---

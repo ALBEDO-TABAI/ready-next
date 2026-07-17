@@ -1,4 +1,4 @@
-import type { BrowserBoundsSyncMode, BrowserHostView, BrowserRect, BrowserViewBoundsUpdate } from './host-types'
+import type { BrowserHostView, BrowserRect, BrowserViewBoundsUpdate } from './host-types'
 import { isReadyBrowserBlankUrl } from '../../../shared/browser-defaults'
 import { loadUrlIgnoringAbort } from './load-url-safe'
 import type { BrowserViewIntent, Rect } from '../../../shared/browser-view-intent'
@@ -35,6 +35,7 @@ export interface BrowserShellTabRecord {
   title: string
   domain: string
   favicon: string | null
+  profile?: string | null
   owner: BrowserShellTabOwner
   required: boolean
   activity: BrowserShellTabActivity
@@ -55,6 +56,7 @@ export interface BrowserTabSwitchResult {
   title?: string
   domain?: string
   favicon?: string | null
+  profile?: string | null
   owner?: BrowserShellTabOwner
   required?: boolean
   activity?: BrowserShellTabActivity
@@ -77,10 +79,12 @@ interface BrowserTabShellHost {
   shouldPresentHosts(): boolean
   isAllowedUrl(url: string): boolean
   createTab(url: string): Promise<{ success: boolean; tabId?: string; error?: string }>
+  materializeTab?(tabId: string): { success: boolean; tabId?: string; error?: string }
   detachHost(view: BrowserShellView): void
   showHost(view: BrowserShellView, bounds: BrowserRect): void
-  applyBounds(view: BrowserShellView, syncMode?: BrowserBoundsSyncMode, bounds?: BrowserRect): void
+  applyBounds(view: BrowserShellView, bounds?: BrowserRect): void
   hideHost(view: BrowserShellView): void
+  isHostAttached?(view: BrowserShellView): boolean
   detachPreviewView(): void
   restoreActiveTabHost(): void
 }
@@ -88,8 +92,42 @@ interface BrowserTabShellHost {
 export class BrowserTabShellService {
   constructor(private readonly host: BrowserTabShellHost) {}
 
+  reorderTabs(tabIds: string[]): { success: boolean } {
+    const seen = new Set<string>()
+    const reordered = new Map<string, BrowserShellTabRecord>()
+    for (const rawId of tabIds) {
+      const tabId = String(rawId || '')
+      const tab = this.host.tabs.get(tabId)
+      if (!tabId || seen.has(tabId) || !tab) continue
+      reordered.set(tabId, tab)
+      seen.add(tabId)
+    }
+    for (const [tabId, tab] of this.host.tabs) {
+      if (!seen.has(tabId)) reordered.set(tabId, tab)
+    }
+    this.host.tabs.clear()
+    for (const [tabId, tab] of reordered) this.host.tabs.set(tabId, tab)
+    return { success: true }
+  }
+
   private boundsForTab(tabId: string, requested: BrowserRect): BrowserRect {
     return this.host.getFrozenBounds?.(tabId) || requested
+  }
+
+  private ensureTabView(tabId: string):
+    | { success: true; record: BrowserShellTabRecord & { view: BrowserShellView } }
+    | { success: false; error: string } {
+    const existing = this.host.tabs.get(tabId)
+    if (!existing) return { success: false, error: 'Tab not found' }
+    if (!existing.view) {
+      const materialized = this.host.materializeTab?.(tabId)
+      if (!materialized?.success) {
+        return { success: false, error: materialized?.error || 'Tab could not be materialized' }
+      }
+    }
+    const record = this.host.tabs.get(tabId)
+    if (!record?.view) return { success: false, error: 'Tab could not be materialized' }
+    return { success: true, record: record as BrowserShellTabRecord & { view: BrowserShellView } }
   }
 
   private detachNonTargetHosts(targetTabIds: ReadonlySet<string>): void {
@@ -175,17 +213,17 @@ export class BrowserTabShellService {
 
     if (this.host.getActiveTabId() === tabId) {
       this.clearSplitHostState()
-      const remaining = Array.from(this.host.tabs.values())
-      if (remaining.length > 0) {
-        const nextTab = remaining[remaining.length - 1]
-        if (nextTab.view) {
-          this.host.showHost(nextTab.view, this.host.getViewBounds())
-          this.host.applyBounds(nextTab.view)
-        }
-        this.host.setActiveTabId(nextTab.id)
-      } else {
-        this.host.setActiveTabId(null)
+      const remainingTabIds = Array.from(this.host.tabs.keys()).reverse()
+      let nextActiveTabId: string | null = null
+      for (const nextTabId of remainingTabIds) {
+        const nextTab = this.ensureTabView(nextTabId)
+        if (!nextTab.success) continue
+        this.host.showHost(nextTab.record.view, this.host.getViewBounds())
+        this.host.applyBounds(nextTab.record.view)
+        nextActiveTabId = nextTabId
+        break
       }
+      this.host.setActiveTabId(nextActiveTabId)
     } else if (this.host.getSplitTabId() === tabId) {
       this.clearSplitHostState()
     }
@@ -195,8 +233,9 @@ export class BrowserTabShellService {
 
   switchTab(tabId: string): BrowserTabSwitchResult {
     const previousActiveTabId = this.host.getActiveTabId()
-    const nextTab = this.host.tabs.get(tabId)
-    if (!nextTab?.view) return { success: false, error: 'Tab not found' }
+    const nextTabResult = this.ensureTabView(tabId)
+    if (!nextTabResult.success) return nextTabResult
+    const nextTab = nextTabResult.record
     const currentSplitTabId = this.host.getSplitTabId()
     const nextSplitTabId = currentSplitTabId && currentSplitTabId !== tabId && this.host.tabs.get(currentSplitTabId)?.view
       ? currentSplitTabId
@@ -210,7 +249,7 @@ export class BrowserTabShellService {
         const splitTab = this.host.tabs.get(nextSplitTabId)
         if (splitTab?.view) {
           this.host.showHost(splitTab.view, this.host.getSplitViewBounds())
-          this.host.applyBounds(splitTab.view, 'settled', this.host.getSplitViewBounds())
+          this.host.applyBounds(splitTab.view, this.host.getSplitViewBounds())
         }
       }
     }
@@ -226,6 +265,7 @@ export class BrowserTabShellService {
       title: nextTab.title,
       domain: nextTab.domain,
       favicon: nextTab.favicon,
+      profile: nextTab.profile ?? null,
       owner: nextTab.owner,
       required: nextTab.required,
       activity: nextTab.activity,
@@ -237,7 +277,6 @@ export class BrowserTabShellService {
 
   updateViewBounds(bounds: BrowserViewBoundsUpdate): { success: boolean } {
     const {
-      syncMode = 'settled',
       tabId,
       secondaryTabId,
       secondaryBounds,
@@ -261,23 +300,21 @@ export class BrowserTabShellService {
       return { success: true }
     }
     if (resolvedPrimaryTabId) {
-      const activeTab = this.host.tabs.get(resolvedPrimaryTabId)
-      if (activeTab?.view) {
-        this.host.applyBounds(activeTab.view, syncMode, this.boundsForTab(resolvedPrimaryTabId, nextBounds))
-      }
+      const activeTab = this.ensureTabView(resolvedPrimaryTabId)
+      if (!activeTab.success) return { success: false }
+      this.host.applyBounds(activeTab.record.view, this.boundsForTab(resolvedPrimaryTabId, nextBounds))
     }
     if (resolvedSecondaryTabId) {
-      const splitTab = this.host.tabs.get(resolvedSecondaryTabId)
-      if (splitTab?.view) {
-        this.host.applyBounds(splitTab.view, syncMode, this.boundsForTab(resolvedSecondaryTabId, this.host.getSplitViewBounds()))
-      }
+      const splitTab = this.ensureTabView(resolvedSecondaryTabId)
+      if (!splitTab.success) return { success: false }
+      this.host.applyBounds(splitTab.record.view, this.boundsForTab(resolvedSecondaryTabId, this.host.getSplitViewBounds()))
     }
     return { success: true }
   }
 
   hideAllHosts(): { success: boolean } {
     for (const tab of this.host.tabs.values()) {
-      if (tab.view) {
+      if (tab.view && (this.host.isHostAttached?.(tab.view) ?? true)) {
         this.host.hideHost(tab.view)
       }
     }
@@ -307,14 +344,14 @@ export class BrowserTabShellService {
       case 'hide-all':
         return this.hideAllHosts()
       case 'show': {
-        const tab = this.host.tabs.get(intent.tabId)
-        if (!tab?.view) return { success: false }
+        const tab = this.ensureTabView(intent.tabId)
+        if (!tab.success) return { success: false }
         const bounds = rectToBrowserRect(intent.bounds)
         const hostBounds = this.boundsForTab(intent.tabId, bounds)
         this.host.setViewBounds(bounds)
         if (this.host.shouldPresentHosts()) {
-          this.host.showHost(tab.view, hostBounds)
-          this.host.applyBounds(tab.view, 'settled', hostBounds)
+          this.host.showHost(tab.record.view, hostBounds)
+          this.host.applyBounds(tab.record.view, hostBounds)
         }
         return { success: true }
       }
@@ -337,29 +374,25 @@ export class BrowserTabShellService {
       }
       case 'set-bounds': {
         const bounds = rectToBrowserRect(intent.bounds)
-        const syncMode: BrowserBoundsSyncMode = intent.syncMode ?? 'settled'
         const hostBounds = this.boundsForTab(intent.tabId, bounds)
         this.host.setViewBounds(bounds)
         if (!this.host.shouldPresentHosts()) return { success: true }
-        const tab = this.host.tabs.get(intent.tabId)
-        if (tab?.view) {
-          this.host.applyBounds(tab.view, syncMode, hostBounds)
-        }
+        const tab = this.ensureTabView(intent.tabId)
+        if (!tab.success) return { success: false }
+        this.host.applyBounds(tab.record.view, hostBounds)
         return { success: true }
       }
       case 'secondary-set-bounds': {
         const bounds = rectToBrowserRect(intent.bounds)
-        const syncMode: BrowserBoundsSyncMode = intent.syncMode ?? 'settled'
         const hostBounds = this.boundsForTab(intent.tabId, bounds)
         const activeTabId = this.host.getActiveTabId()
+        const tab = this.ensureTabView(intent.tabId)
+        if (!tab.success) return { success: false }
         this.replaceSplitHostState(intent.tabId, activeTabId ? new Set([activeTabId]) : new Set())
         this.host.setSplitViewBounds(bounds)
         if (!this.host.shouldPresentHosts()) return { success: true }
-        const tab = this.host.tabs.get(intent.tabId)
-        if (tab?.view) {
-          this.host.showHost(tab.view, hostBounds)
-          this.host.applyBounds(tab.view, syncMode, hostBounds)
-        }
+        this.host.showHost(tab.record.view, hostBounds)
+        this.host.applyBounds(tab.record.view, hostBounds)
         return { success: true }
       }
       default: {
@@ -380,19 +413,20 @@ export class BrowserTabShellService {
     this.detachNonTargetHosts(visibleTabIds)
 
     if (activeTabId) {
-      const activeTab = this.host.tabs.get(activeTabId)
-      if (activeTab?.view) {
-        this.host.showHost(activeTab.view, this.host.getViewBounds())
-        this.host.applyBounds(activeTab.view, 'settled', this.host.getViewBounds())
-      }
+      const activeTab = this.ensureTabView(activeTabId)
+      if (!activeTab.success) return { success: false }
+      this.host.showHost(activeTab.record.view, this.host.getViewBounds())
+      this.host.applyBounds(activeTab.record.view, this.host.getViewBounds())
     }
 
     if (splitTabId && splitTabId !== activeTabId) {
-      const splitTab = this.host.tabs.get(splitTabId)
-      if (splitTab?.view) {
-        this.host.showHost(splitTab.view, this.host.getSplitViewBounds())
-        this.host.applyBounds(splitTab.view, 'settled', this.host.getSplitViewBounds())
+      const splitTab = this.ensureTabView(splitTabId)
+      if (!splitTab.success) {
+        this.host.setSplitTabId(null)
+        return { success: true }
       }
+      this.host.showHost(splitTab.record.view, this.host.getSplitViewBounds())
+      this.host.applyBounds(splitTab.record.view, this.host.getSplitViewBounds())
     }
     return { success: true }
   }

@@ -111,7 +111,11 @@
 - 附件、`@[文件]`、当前文档与引用片段先进入结构化资源层；多来源、多目标、多步骤任务先计划再执行。
 - 关系图谱中可打开的文档节点必须由 Main 返回真实路径；Renderer 只对本地文档节点提供悬浮正文预览与点击打开，并沿统一工作面切换入口进入 Document，不能用文件名猜路径。
 - 文档标签元数据与可恢复草稿分开持久化：标签激活不得同步重写未变化的大正文；草稿合并写入，并在页面隐藏或退出前冲刷。磁盘回读必须一次性落为 clean 内容，不能先制造 dirty 再补 saved。旧内嵌草稿快照必须无损迁移。
-- 保存只提交发起写盘时的精确正文快照；写盘期间继续输入时，晚到结果不得覆盖新正文或删除新草稿。首次 clean/empty-memory 文本只由编辑器读盘一次，父级激活刷新只处理已有内存正文。
+- 保存只提交发起写盘时的精确正文快照；写盘期间继续输入时，晚到结果不得覆盖新正文或删除新草稿。首次打开由编辑器读盘；激活或目录变更可刷新任何 clean 的本地文本（包括内存正文为空），同一 tab/path 回读合并，结果返回时再次检查 path 与 dirty。
+- 双开文档以 `focusedPaneTabId` 决定唯一保存目标；全局保存只有一个入口，每个编辑面通过注册表提供自己的保存实现。目录变更在 Main 按 Renderer 合并发送，Renderer 只有一个调度入口；dirty 标签不回读，隐藏期只记待刷新标签，激活后只读最新一次。
+- 预览结构解析仍以最新全文为真值，但块渲染使用稳定的内容寻址身份与 memo 边界；Widget 编译、高度和 Mermaid 结果只能放入有容量上限的缓存，全文档 Widget 共用一个主题 observer。隐藏的普通 DocumentMode 卸载重树；含交互 Widget 的最后可见场景冻结正文并保留 iframe，重新显示后再追到最新正文。
+- PDF 通过 `local-file://` 的 HEAD/Range 响应按需读取，Renderer 只挂载当前页前后各 3 页、最多 7 页的重页树；未访问页用轻量占位，尺寸在渲染后按页校准，缩放不重渲染窗口外 slot。Board 节点连续拖动只在 DOM 快路更新，结束时一次提交文档状态；框选、缩放、箭头和滚轮连续事件按动画帧合并，取消必须恢复起始状态。
+- DOCX 读/写、XLSX 解析、EPUB 导入与 Agent/附件的 DOCX/XLSX/PDF 重文档提取只在惰性 document worker 串行执行；Main 不保留同步回退重处理。分段文本提取的 offset/limit 下推到 worker，只返回请求窗口。文本与 DOCX 保存都使用同目录原子发布，失败时不损坏原文件。
 - keep-alive 的 DocumentMode 只在可见时响应文件选择。文件树、搜索和图谱已经打开的目标不得被 DocumentMode 再次 stat/open/activity；文件涌现活动只把快照标脏，刷新经空闲合并调度且同一工作区只允许一轮生成。FileTree 的涌现上下文只订阅 group/path 等结构事实，正文、dirty 与激活时间变化不得重建调度或发查询。
 - H1/H2 freeform 只在命中特定触发词时使用；其他 Widget 使用结构化骨架 A-G、`relation_map` 或 `process_flow`。
 - Widget 视觉唯一来源是 `src/shared/document-widget-theme.ts` 与 `document-widget-dot-charts.ts`：Ready 单橘红、mono 标签、禁饼图/彩虹/Emoji 图标；`pie` 输入渲染为合规占比形态。
@@ -120,7 +124,7 @@
 - `onclick/oninput/onchange` 先由 sanitizer 改写为 `data-ready-on*`，再由 receiver 调用具名函数；静态回退与导出必须剥除事件属性。
 - “信息卡、摘要卡、对比卡、关系图、流程图、图表”必须走 `document_insert_widget`，不能用 Markdown 表格或文本替换冒充。
 - Widget 更新上下文优先于 live-info 判定；天气、新闻、股价、汇率、比分、航班、路况、空气质量和官网公告等实时问题必须进入网页查询工作流。
-- 回归入口：`npm run verify:widget-ready`；详细设计见 `docs/superpowers/plans/2026-07-11-document-widget-ready-design-language-implementation.md`。
+- 回归入口：`npm run verify:document-perf`、`npm run verify:widget-ready`；详细设计见 `docs/superpowers/plans/2026-07-17-document-mode-performance-implementation.md` 与 `docs/superpowers/plans/2026-07-11-document-widget-ready-design-language-implementation.md`。
 
 ## 8. 行动确认、知识与专项 Agent
 

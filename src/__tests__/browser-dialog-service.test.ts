@@ -57,6 +57,28 @@ test('dialog service clears stale state when CDP reports close', async () => {
   assert.equal(service.get('tab-2'), null)
 })
 
+test('dialog pending changes notify the load governor and clear removes the old listener', async () => {
+  let listener: ((event: { tabId: string; method: string; params: Record<string, unknown> }) => void) | null = null
+  const changes: string[] = []
+  const service = new BrowserDialogService({
+    sendCommand: async () => ({}),
+    subscribe: (_tabId, handler) => {
+      listener = handler
+      return () => { listener = null }
+    },
+  }, (tabId) => changes.push(tabId))
+
+  await service.ensure('tab-3')
+  listener?.({ tabId: 'tab-3', method: 'Page.javascriptDialogOpening', params: { type: 'confirm', message: 'Continue?' } })
+  assert.equal(service.hasPending('tab-3'), true)
+  assert.deepEqual(changes, ['tab-3'])
+
+  service.clear('tab-3')
+  assert.equal(service.hasPending('tab-3'), false)
+  assert.equal(listener, null)
+  assert.deepEqual(changes, ['tab-3', 'tab-3'])
+})
+
 test('dialog service classifies alert, confirm, prompt and beforeunload deterministically', async () => {
   let listener: ((event: { tabId: string; method: string; params: Record<string, unknown> }) => void) | null = null
   const service = new BrowserDialogService({

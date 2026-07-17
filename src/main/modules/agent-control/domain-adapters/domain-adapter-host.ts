@@ -56,7 +56,7 @@ import {
 } from '../../claude-bridge/tool-policy-heuristics'
 import { DEFAULT_API_REQUEST_TIMEOUT_MS } from '../../claude-bridge/request-timeout-policy'
 
-const directChatLogger = createRotatingLogger('ready-directchat.log')
+const directChatLogger = createRotatingLogger('ready-directchat.log', { buffered: true })
 const chatRepository = new ChatRepository()
 
 function log(msg: string) {

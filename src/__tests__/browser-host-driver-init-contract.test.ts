@@ -1,16 +1,16 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
-import { resolveBrowserHostKindFromConfig } from '../main/modules/browser-engine/host-kind-config'
+import { BROWSER_HOST_KIND } from '../main/modules/browser-engine/host-types'
 
-test('browser host driver honors persisted setting when env override is absent', () => {
-  assert.equal(resolveBrowserHostKindFromConfig(undefined, () => 'browserView'), 'browserView')
-  assert.equal(resolveBrowserHostKindFromConfig(undefined, () => 'webContentsView'), 'webContentsView')
-})
+test('browser runtime has one rounded-capable host driver with no legacy selector', () => {
+  const controller = readFileSync(new URL('../main/modules/browser-engine/ipc-handler.ts', import.meta.url), 'utf8')
+  const layout = readFileSync(new URL('../main/modules/browser-engine/host-layout-service.ts', import.meta.url), 'utf8')
 
-test('browser host driver env override wins over persisted setting and invalid values default safely', () => {
-  assert.equal(resolveBrowserHostKindFromConfig('webcontentsview', () => 'browserView'), 'webContentsView')
-  assert.equal(resolveBrowserHostKindFromConfig('browserview', () => 'webContentsView'), 'browserView')
-  assert.equal(resolveBrowserHostKindFromConfig(undefined, () => 'bogus'), 'webContentsView')
-  assert.equal(resolveBrowserHostKindFromConfig(undefined, () => { throw new Error('settings unavailable') }), 'webContentsView')
+  assert.equal(BROWSER_HOST_KIND, 'webContentsView')
+  assert.doesNotMatch(controller, /READY_BROWSER_HOST_DRIVER|browser_host_driver/)
+  assert.doesNotMatch(layout, /\bBrowserView\b|addBrowserView|removeBrowserView/)
+  assert.match(layout, /new WebContentsView\(options\)/)
+  assert.match(layout, /view\.setBorderRadius\(HOST_BORDER_RADIUS\)/)
 })

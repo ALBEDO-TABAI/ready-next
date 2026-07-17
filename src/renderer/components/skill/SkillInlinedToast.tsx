@@ -74,6 +74,7 @@ export function SkillInlinedToast(): ReactElement | null {
 
   return (
     <div
+      data-ready-native-overlay=""
       role="status"
       aria-live="polite"
       style={{

@@ -42,7 +42,9 @@ import { EBOOK_BINARY_EXTENSIONS } from '../../../../shared/ebook'
 import { BINARY_EXTENSIONS } from '../binary-extensions'
 import {
   type AttachmentCategory,
+  DOCUMENT_TEXT_READ_CAP_BYTES,
   decideReadAttachmentSize,
+  isDocumentTextReadTooLarge,
 } from '../attachment-size-guards'
 import type { EngineDeps, SaveAsPayload } from './engine-deps'
 import { broadcastDirectoryChanged } from './directory-change-broadcast'
@@ -202,7 +204,19 @@ export const fileIoGroup: IpcChannelGroup<FileIoGroupDeps> = {
           }
         }
 
-        // Text file — read as UTF-8
+        // Text file — reject oversized files before allocating the UTF-8 string.
+        const textStats = await stat(path)
+        if (isDocumentTextReadTooLarge(textStats.size)) {
+          return {
+            success: false,
+            error: '文本文件超过 20 MiB，为避免卡死已停止读取。',
+            errorCode: 'TEXT_FILE_TOO_LARGE',
+            max: DOCUMENT_TEXT_READ_CAP_BYTES,
+            actual: textStats.size,
+            limitBytes: DOCUMENT_TEXT_READ_CAP_BYTES,
+            bytes: textStats.size,
+          }
+        }
         const content = await readFile(path, 'utf-8')
         return {
           success: true,

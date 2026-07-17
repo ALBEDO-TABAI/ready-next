@@ -1,16 +1,14 @@
 import {
   Children,
-  Fragment,
   isValidElement,
   memo,
   useCallback,
   useEffect,
-  useId,
   useMemo,
   useState,
   type ReactNode,
 } from 'react'
-import ReactMarkdown from 'react-markdown'
+import ReactMarkdown, { type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import {
   Check,
@@ -29,12 +27,11 @@ import {
   type PreviewProperty,
   type PreviewTag,
 } from './note-preview-parser'
-import DocumentWidgetCardShell from './DocumentWidgetCardShell'
 import type { DocumentWidgetPersistedState } from './widget-state-runtime'
 import { resolveDocumentWidgetRenderCode } from '../../../shared/document-widget-render-code'
 import type { DocumentWidgetData } from '../../../shared/document-widget-parse'
-import { getDocumentWidgetRenderBudget, getWidgetPersistenceKey } from './widget-card-helpers'
-import WidgetRenderer from './WidgetRenderer'
+import { getDocumentWidgetRenderBudgetFromCodes, getWidgetPersistenceKey } from './widget-card-helpers'
+import DocumentWidgetPreviewBlock from './DocumentWidgetPreviewBlock'
 import {
   EditableBlockShell,
   PreviewAppendComposer,
@@ -47,6 +44,12 @@ import {
   movePreviewBlockSource,
   replacePreviewBlockSource,
 } from '../../modules/document/previewEditOperations'
+import {
+  buildPreviewBlockRenderKeys,
+  buildPreviewBlockSourceLines,
+} from '../../modules/document/notePreviewBlockIdentity'
+import { recordDocumentPerformanceCounter } from '../../../shared/document-performance-diagnostics'
+import MermaidPreviewBlock from './MermaidPreviewBlock'
 
 export const PREVIEW_BLOCK_DRAG_MIME = 'application/x-ready-preview-block'
 
@@ -280,13 +283,26 @@ function BilibiliCard({
   )
 }
 
-function MediaEmbed({
-  embed,
-  onOpen,
-}: {
+interface MediaEmbedProps {
   embed: PreviewEmbed
   onOpen: (href: string, localPath?: string | null) => void
-}) {
+}
+
+const PREVIEW_EMBED_FIELDS: ReadonlyArray<keyof PreviewEmbed> = [
+  'id', 'kind', 'source', 'url', 'displayUrl', 'embedUrl', 'videoId',
+  'thumbnailUrl', 'title', 'channel', 'published', 'duration', 'alt',
+  'localPath', 'isLocal',
+]
+
+export function arePreviewEmbedPropsEqual(previous: MediaEmbedProps, next: MediaEmbedProps): boolean {
+  return previous.onOpen === next.onOpen
+    && PREVIEW_EMBED_FIELDS.every((field) => previous.embed[field] === next.embed[field])
+}
+
+const MediaEmbed = memo(function MediaEmbed({
+  embed,
+  onOpen,
+}: MediaEmbedProps) {
   if (embed.kind === 'youtube') {
     return <YouTubeCard embed={embed} onOpen={onOpen} />
   }
@@ -332,7 +348,7 @@ function MediaEmbed({
       ) : null}
     </figure>
   )
-}
+}, arePreviewEmbedPropsEqual)
 
 function mergeMarkdownClassName(className: string | undefined, previewClassName: string): string {
   return className ? `${className} ${previewClassName}` : previewClassName
@@ -371,70 +387,6 @@ async function copyTextToClipboard(value: string): Promise<boolean> {
 
 function isMermaidLanguage(className: string | undefined): boolean {
   return /\blanguage-mermaid\b/.test(className || '')
-}
-
-function MermaidBlock({ code }: { code: string }) {
-  const renderId = `ready-mermaid-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`
-  const [svg, setSvg] = useState<string | null>(null)
-  const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    let cancelled = false
-    setSvg(null)
-    setError(null)
-
-    void import('mermaid')
-      .then(async (module) => {
-        const mermaid = module.default
-        mermaid.initialize({
-          startOnLoad: false,
-          securityLevel: 'strict',
-          theme: 'base',
-        })
-        return mermaid.render(renderId, code)
-      })
-      .then((result) => {
-        if (!cancelled) setSvg(result.svg)
-      })
-      .catch((err) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : String(err))
-      })
-
-    return () => {
-      cancelled = true
-    }
-  }, [code, renderId])
-
-  if (error) {
-    return (
-      <div className="note-preview-mermaid note-preview-mermaid--error" data-ready-mermaid-render-error={error}>
-        <div className="note-preview-mermaid__error">Mermaid 渲染失败：{error}</div>
-        <button
-          type="button"
-          className="note-preview-repair-button"
-          onClick={() => appendToAgentInput(`请修复当前文档里渲染失败的 Mermaid 图。预览报错：${error}`)}
-        >
-          <Wrench size={14} strokeWidth={2} />
-          <span>让 AI 修复</span>
-        </button>
-      </div>
-    )
-  }
-
-  return (
-    <div className="note-preview-mermaid" data-ready-mermaid="true">
-      {svg ? (
-        <div
-          className="note-preview-mermaid__svg"
-          dangerouslySetInnerHTML={{ __html: svg }}
-        />
-      ) : (
-        <div className="note-preview-mermaid__loading" aria-live="polite">
-          正在渲染图表…
-        </div>
-      )}
-    </div>
-  )
 }
 
 function BrokenWidgetFallback({ reason }: { reason: string }) {
@@ -574,6 +526,47 @@ function MarkdownSourceBlock({ code }: { code: string }) {
   )
 }
 
+const MARKDOWN_REMARK_PLUGINS = [remarkGfm]
+
+const MarkdownPreviewBlock = memo(function MarkdownPreviewBlock({
+  markdown,
+  components,
+}: {
+  markdown: string
+  components: Components
+}) {
+  recordDocumentPerformanceCounter('previewBlockRenders')
+  return (
+    <ReactMarkdown remarkPlugins={MARKDOWN_REMARK_PLUGINS} components={components}>
+      {markdown}
+    </ReactMarkdown>
+  )
+})
+
+const DetailsPreviewBlock = memo(function DetailsPreviewBlock({
+  summary,
+  markdown,
+  open,
+  components,
+}: {
+  summary: string
+  markdown: string
+  open: boolean
+  components: Components
+}) {
+  recordDocumentPerformanceCounter('previewBlockRenders')
+  return (
+    <details className="note-preview-details" open={open || undefined}>
+      <summary className="note-preview-details-summary">{summary}</summary>
+      {markdown ? (
+        <div className="note-preview-details-body">
+          <MarkdownPreviewBlock markdown={markdown} components={components} />
+        </div>
+      ) : null}
+    </details>
+  )
+})
+
 function NotePreview({
   content,
   notePath,
@@ -595,13 +588,20 @@ function NotePreview({
       : content
   ), [content, isEbookMarkdown])
   const preview = useMemo(() => buildStructuredNotePreview(displayContent, notePath), [displayContent, notePath])
+  const blockRenderKeys = useMemo(
+    () => buildPreviewBlockRenderKeys(displayContent, preview.blocks),
+    [displayContent, preview.blocks],
+  )
+  const blockSourceLines = useMemo(
+    () => buildPreviewBlockSourceLines(displayContent, preview.blocks),
+    [displayContent, preview.blocks],
+  )
   // Ebook markdown strips a marker before parsing, so ranges would not line up
   // with the tab content — preview-edit stays off there.
   const canEdit = Boolean(editable && onApplyContentEdit) && !isEbookMarkdown
   const [editingBlockId, setEditingBlockId] = useState<string | null>(null)
   const [draggingBlockId, setDraggingBlockId] = useState<string | null>(null)
   const [dropIndicator, setDropIndicator] = useState<PreviewDropIndicator | null>(null)
-  const widgetRenderBudget = useMemo(() => getDocumentWidgetRenderBudget(displayContent), [displayContent])
   const embedsById = useMemo(
     () => new Map(preview.embeds.map((embed) => [embed.id, embed])),
     [preview.embeds],
@@ -616,6 +616,10 @@ function NotePreview({
       }).widgetCode,
     }])),
     [preview.widgets],
+  )
+  const widgetRenderBudget = useMemo(
+    () => getDocumentWidgetRenderBudgetFromCodes([...widgetsById.values()].map((entry) => entry.renderCode)),
+    [widgetsById],
   )
 
   useEffect(() => {
@@ -782,7 +786,7 @@ function NotePreview({
     ),
     code: ({ children, className, ...props }: { children?: ReactNode; className?: string }) => {
       if (isMermaidLanguage(className)) {
-        return <MermaidBlock code={extractMarkdownText(children).trim()} />
+        return <MermaidPreviewBlock code={extractMarkdownText(children).trim()} />
       }
       return (
         <code className={className ? `${className} note-preview-markdown-code` : 'note-preview-markdown-code'} {...props}>
@@ -823,34 +827,11 @@ function NotePreview({
     },
   }), [notePath, openHref])
 
-  const renderMarkdownBlock = useCallback((block: Extract<PreviewBlock, { type: 'markdown' }>) => (
-    <ReactMarkdown
-      key={block.id}
-      remarkPlugins={[remarkGfm]}
-      components={markdownComponents}
-    >
-      {block.markdown}
-    </ReactMarkdown>
-  ), [markdownComponents])
-
-  const renderDetailsBlock = useCallback((block: Extract<PreviewBlock, { type: 'details' }>) => (
-    <details key={block.id} className="note-preview-details" open={block.open || undefined}>
-      <summary className="note-preview-details-summary">{block.summary}</summary>
-      {block.markdown ? (
-        <div className="note-preview-details-body">
-          <ReactMarkdown
-            remarkPlugins={[remarkGfm]}
-            components={markdownComponents}
-          >
-            {block.markdown}
-          </ReactMarkdown>
-        </div>
-      ) : null}
-    </details>
-  ), [markdownComponents])
-
   return (
-    <div className={isEbookMarkdown ? 'note-preview-shell note-preview-shell--ebook' : 'note-preview-shell'}>
+    <div
+      className={isEbookMarkdown ? 'note-preview-shell note-preview-shell--ebook' : 'note-preview-shell'}
+      data-ready-preview-line-count={preview.lineCount}
+    >
       {preview.warnings.length > 0 ? (
         <div className="note-preview-warning">
           {preview.warnings.join('；')}
@@ -881,11 +862,18 @@ function NotePreview({
         {preview.blocks.map((block) => {
           const renderBlockBody = (): ReactNode => {
             if (block.type === 'markdown') {
-              return renderMarkdownBlock(block)
+              return <MarkdownPreviewBlock markdown={block.markdown} components={markdownComponents} />
             }
 
             if (block.type === 'details') {
-              return renderDetailsBlock(block)
+              return (
+                <DetailsPreviewBlock
+                  summary={block.summary}
+                  markdown={block.markdown}
+                  open={block.open}
+                  components={markdownComponents}
+                />
+              )
             }
 
             if (block.type === 'chips') {
@@ -916,23 +904,20 @@ function NotePreview({
               const { widget, renderCode } = resolvedWidget
               const widgetState = widgetStates?.[getWidgetPersistenceKey(widget.title || 'widget', widget.widgetCode)] || widget.widgetState || null
               return (
-                <DocumentWidgetCardShell
-                  title={widget.title || 'widget'}
-                  onRenameTitle={onWidgetRename ? (nextTitle) => onWidgetRename(widget.title || 'widget', widget.widgetCode, nextTitle) : undefined}
-                  onQuote={onWidgetQuote ? () => onWidgetQuote(widget.title || 'widget', widget.widgetCode) : undefined}
-                  onExport={onWidgetExport ? () => onWidgetExport(widget.title || 'widget', renderCode, widgetState) : undefined}
-                  onEdit={canEdit && onWidgetEdit ? () => onWidgetEdit(widget) : undefined}
-                  dataReadyWidgetTitle={widget.title || ''}
-                  previewClassName="ready-doc-widget-card-preview ready-doc-widget-card-preview-static"
-                >
-                  <WidgetRenderer
-                    title={widget.title}
-                    widgetCode={renderCode}
-                    preferManualPreview={widgetRenderBudget.forceManualPreviewAll}
-                    widgetState={widgetState}
-                    onWidgetStateChange={onWidgetStateChange ? (state) => onWidgetStateChange(widget.title || 'widget', widget.widgetCode, state) : undefined}
-                  />
-                </DocumentWidgetCardShell>
+                <DocumentWidgetPreviewBlock
+                  renderIdentity={blockRenderKeys.get(block.id) || block.id}
+                  widget={widget}
+                  renderCode={renderCode}
+                  widgetState={widgetState}
+                  widgetStateSignature={JSON.stringify(widgetState)}
+                  preferManualPreview={widgetRenderBudget.forceManualPreviewAll}
+                  canEdit={canEdit}
+                  onWidgetRename={onWidgetRename}
+                  onWidgetQuote={onWidgetQuote}
+                  onWidgetExport={onWidgetExport}
+                  onWidgetEdit={onWidgetEdit}
+                  onWidgetStateChange={onWidgetStateChange}
+                />
               )
             }
 
@@ -945,7 +930,16 @@ function NotePreview({
 
           if (!canEdit) {
             const body = renderBlockBody()
-            return body === null ? null : <Fragment key={block.id}>{body}</Fragment>
+            if (body === null) return null
+            return (
+              <div
+                key={blockRenderKeys.get(block.id) || block.id}
+                className="note-preview-render-block"
+                data-ready-block-source-line={blockSourceLines.get(block.id)}
+              >
+                {body}
+              </div>
+            )
           }
 
           const hasSource = block.source !== null
@@ -973,8 +967,9 @@ function NotePreview({
 
           return (
             <EditableBlockShell
-              key={block.id}
+              key={blockRenderKeys.get(block.id) || block.id}
               blockId={block.id}
+              sourceLine={blockSourceLines.get(block.id)}
               textEditable={textEditable}
               draggable={blockDraggable}
               dropTargetable={hasSource && Boolean(draggingBlockId) && draggingBlockId !== block.id}

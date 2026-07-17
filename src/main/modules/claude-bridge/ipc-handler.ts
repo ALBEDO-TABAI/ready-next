@@ -92,54 +92,10 @@ import { isRendererAgentMetricName } from '../../../shared/renderer-agent-metric
 // site (the `agent:sendScoped` payload type) moved into `agentLifecycleGroup`.
 import type { ScopeRunEventPayload } from '../agent-control/contracts/types'
 import type { TaskProjectionChangeEvent } from '../agent-control/contracts/run-contracts'
+import { getDocumentWorker } from '../document-engine/document-worker-bridge'
+import { readHeavyDocumentAttachmentForAI } from './document-attachment-text'
 
-let mammothLib: typeof import('mammoth') | null = null
-let xlsxLib: typeof import('xlsx') | null = null
-
-async function getMammoth(): Promise<typeof import('mammoth') | null> {
-  if (mammothLib) return mammothLib
-  try {
-    mammothLib = await import('mammoth')
-    return mammothLib
-  } catch {
-    return null
-  }
-}
-
-async function getXlsx(): Promise<typeof import('xlsx') | null> {
-  if (xlsxLib) return xlsxLib
-  try {
-    xlsxLib = await import('xlsx')
-    return xlsxLib
-  } catch {
-    return null
-  }
-}
-
-function normalizeCell(value: unknown): string {
-  if (value == null) return ''
-  if (typeof value === 'string') return value
-  if (typeof value === 'number' || typeof value === 'boolean') return String(value)
-  try {
-    return JSON.stringify(value)
-  } catch {
-    return String(value)
-  }
-}
-
-function looksLikeReadableText(value: string): boolean {
-  if (!value || value.trim().length === 0) return false
-  const sample = value.slice(0, 4000)
-  let printable = 0
-  for (let i = 0; i < sample.length; i += 1) {
-    const code = sample.charCodeAt(i)
-    const isControl = code < 32 && code !== 9 && code !== 10 && code !== 13
-    if (!isControl) printable += 1
-  }
-  return printable / sample.length > 0.88
-}
-
-const directChatLogger = createRotatingLogger('ready-directchat.log')
+const directChatLogger = createRotatingLogger('ready-directchat.log', { buffered: true })
 function log(msg: string) {
   try { directChatLogger.append(`[${new Date().toISOString()}] ${msg}\n`) } catch { /* */ }
 }
@@ -1372,7 +1328,6 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
       const videoExts = ['.mp4', '.mov', '.webm', '.mkv', '.avi', '.m4v']
       const audioExts = ['.mp3', '.wav', '.aac', '.ogg', '.flac', '.m4a', '.wma', '.opus']
       const textExts = ['.txt', '.md', '.json', '.js', '.ts', '.tsx', '.jsx', '.html', '.css', '.csv', '.xml', '.yml', '.yaml', '.log']
-      const spreadsheetExts = ['.xlsx', '.xls']
 
       if (imageExts.includes(ext)) {
         // Return base64 encoded image
@@ -1420,74 +1375,8 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
         return { type: 'text', content: `[音频文件: ${basename(filePath)}, 大小: ${(stat.size / 1024 / 1024).toFixed(1)}MB]`, name: basename(filePath) }
       }
 
-      if (ext === '.docx') {
-        const mammoth = await getMammoth()
-        if (!mammoth) {
-          return {
-            type: 'text',
-            content: `[DOCX 文件: ${basename(filePath)}。未检测到 mammoth 解析库，暂无法提取正文内容。]`,
-            name: basename(filePath),
-          }
-        }
-
-        const buffer = readFileSync(filePath)
-        const mammothMod = (mammoth as unknown as { default?: typeof import('mammoth') }).default || mammoth
-        try {
-          const textResult = await mammothMod.extractRawText({ buffer })
-          const raw = (textResult.value || '').trim()
-          const clipped = raw.slice(0, 20_000)
-          const suffix = raw.length > 20_000 ? '\n...[DOCX 内容已截断]' : ''
-          return {
-            type: 'text',
-            content: `--- DOCX: ${basename(filePath)} ---\n${clipped}${suffix}`,
-            name: basename(filePath),
-          }
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error)
-          if (/end of central directory|zip file/i.test(message)) {
-            const fallbackText = readFileSync(filePath, 'utf-8')
-            if (looksLikeReadableText(fallbackText)) {
-              const clipped = fallbackText.slice(0, 20_000)
-              const suffix = fallbackText.length > 20_000 ? '\n...[DOCX 回退文本已截断]' : ''
-              return {
-                type: 'text',
-                content: `--- DOCX(结构损坏回退文本): ${basename(filePath)} ---\n${clipped}${suffix}`,
-                name: basename(filePath),
-              }
-            }
-          }
-          throw error
-        }
-      }
-
-      if (spreadsheetExts.includes(ext)) {
-        const xlsx = await getXlsx()
-        if (!xlsx) {
-          return {
-            type: 'text',
-            content: `[表格文件: ${basename(filePath)}。未检测到 xlsx 解析库，暂无法提取内容。]`,
-            name: basename(filePath),
-          }
-        }
-
-        const xlsxMod = (xlsx as unknown as { default?: typeof import('xlsx') }).default || xlsx
-        const workbook = xlsxMod.read(readFileSync(filePath), { type: 'buffer' })
-        const sheetSummaries: string[] = []
-
-        for (const sheetName of workbook.SheetNames.slice(0, 6)) {
-          const sheet = workbook.Sheets[sheetName]
-          const rows = xlsxMod.utils.sheet_to_json(sheet, { header: 1 }) as unknown[][]
-          const previewRows = rows.slice(0, 40).map((row) =>
-            (Array.isArray(row) ? row : [row]).slice(0, 20).map(normalizeCell).join(' | '),
-          )
-          sheetSummaries.push(
-            `### Sheet: ${sheetName}\n${previewRows.length > 0 ? previewRows.join('\n') : '(空表)'}`
-          )
-        }
-
-        const content = `--- 表格文件: ${basename(filePath)} ---\n${sheetSummaries.join('\n\n')}`.slice(0, 20_000)
-        return { type: 'text', content, name: basename(filePath) }
-      }
+      const heavyDocument = await readHeavyDocumentAttachmentForAI(filePath, getDocumentWorker())
+      if (heavyDocument) return heavyDocument
 
       if (textExts.includes(ext)) {
         const content = readFileSync(filePath, 'utf-8')

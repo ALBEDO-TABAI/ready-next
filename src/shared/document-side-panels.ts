@@ -179,6 +179,7 @@ function hashContent(content: string): string {
 }
 
 export function buildDocumentOutline(content: string, date = new Date()): DocumentOutlineSnapshot {
+  recordDocumentPerformanceCounter('outlineBuilds')
   const normalized = content.replace(/\r\n?/g, '\n')
   const lines = normalized.split('\n')
   const headings = collectHeadings(lines)
@@ -302,10 +303,14 @@ export function getExcerptForLine(content: string, line: number | null): string 
   return ''
 }
 
-export function resolveDocumentMarkLocation(mark: DocumentMarkRecord, content: string): DocumentMarkLocation {
+export function resolveDocumentMarkLocation(
+  mark: DocumentMarkRecord,
+  content: string,
+  existingOutline?: DocumentOutlineSnapshot,
+): DocumentMarkLocation {
   const normalized = content.replace(/\r\n?/g, '\n')
   const lines = normalized.split('\n')
-  const outline = buildDocumentOutline(normalized)
+  const outline = existingOutline || buildDocumentOutline(normalized)
 
   if (mark.anchorTitle) {
     const target = outline.nodes.find((node) => (
@@ -352,3 +357,4 @@ export function resolveDocumentMarkLocation(mark: DocumentMarkRecord, content: s
     lineEnd: null,
   }
 }
+import { recordDocumentPerformanceCounter } from './document-performance-diagnostics'

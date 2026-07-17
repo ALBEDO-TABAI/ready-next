@@ -403,6 +403,8 @@ async function limitConcurrency<T>(
         results[current] = { status: 'fulfilled', value }
       } catch (reason) {
         results[current] = { status: 'rejected', reason }
+      } finally {
+        await yieldToEventLoop()
       }
     }
   }
@@ -410,6 +412,10 @@ async function limitConcurrency<T>(
   const workers = Array.from({ length: Math.min(limit, tasks.length) }, () => runNext())
   await Promise.all(workers)
   return results
+}
+
+function yieldToEventLoop(): Promise<void> {
+  return new Promise((resolve) => setImmediate(resolve))
 }
 
 function normalizeRSSHubBase(url: string): string {
@@ -449,6 +455,8 @@ async function isRSSHubReachable(baseUrl: string): Promise<boolean> {
 }
 
 async function resolveRSSHubBase(): Promise<string> {
+  const releaseRequest = rsshubManager.beginRequest()
+  try {
   const externalRaw = rssRepository.getSetting('rsshub_base_url')
   const external = externalRaw ? normalizeRSSHubBase(externalRaw) : ''
 
@@ -470,6 +478,9 @@ async function resolveRSSHubBase(): Promise<string> {
   throw new Error(
     `RSSHub 不可用。内嵌 RSSHub 启动失败，且外部地址 ${candidate} 不可达。请稍后重试或在设置中配置可用 RSSHub 地址。`,
   )
+  } finally {
+    releaseRequest()
+  }
 }
 
 function isRSSHubRequiredForCurrentSources(): boolean {
@@ -479,13 +490,8 @@ function isRSSHubRequiredForCurrentSources(): boolean {
   )
 }
 
-async function warmEmbeddedRSSHubForDiagnostics(): Promise<boolean> {
-  const required = isRSSHubRequiredForCurrentSources()
-  if (!required) return false
-  const current = rsshubManager.getStatus()
-  if (current.running) return true
-  await rsshubManager.ensureHealthy().catch(() => false)
-  return true
+function isEmbeddedRSSHubRequiredForDiagnostics(): boolean {
+  return isRSSHubRequiredForCurrentSources()
 }
 
 function getArtifactsRootDir(): string {
@@ -798,13 +804,22 @@ async function fetchSourceWithCurrentStack(
   platform: PlatformType,
   rsshubBase?: string,
 ): Promise<{ result: ScrapeResult; backendUsed: SourceBackend }> {
-  const outcome = await fetchSourceWithCurrentStackRaw(source, platform, rsshubBase)
-  return {
-    ...outcome,
-    result: {
-      ...outcome.result,
-      items: normalizeScrapedItemIdentities(outcome.result.items),
-    },
+  const embeddedBase = rsshubManager.getStatus().baseUrl
+  const releaseRequest = rsshubBase && embeddedBase
+    && normalizeRSSHubBase(rsshubBase) === normalizeRSSHubBase(embeddedBase)
+    ? rsshubManager.beginRequest()
+    : null
+  try {
+    const outcome = await fetchSourceWithCurrentStackRaw(source, platform, rsshubBase)
+    return {
+      ...outcome,
+      result: {
+        ...outcome.result,
+        items: normalizeScrapedItemIdentities(outcome.result.items),
+      },
+    }
+  } finally {
+    releaseRequest?.()
   }
 }
 
@@ -884,8 +899,8 @@ async function loadLatestBenchmarkSnapshot(): Promise<{
  * Stage V V2.2a — `rss:addSource` initial-fetch pipeline lifted verbatim
  * from the inline handler so `sourceGroup` can stay focused on response
  * shaping + mock dispatch. Semantics follow the pre-extraction handler body:
- * validate URL → detect existing source → detect platform → warm
- * RSSHub (with bilibili fallback) → scrape → persist → record route
+ * validate URL → detect existing source → detect platform → start
+ * RSSHub only when required (with bilibili fallback) → scrape → persist → record route
  * diagnostics → return shaped result. Mock-mode short-circuits in the
  * group itself before this runs, so this function is only invoked in
  * real-mode.
@@ -1030,14 +1045,6 @@ export function setupRSSIPC(useMock = false): void {
   const analysisManager = getRSSItemAnalysisManager()
   if (!useMock) {
     loadRouteDiagnosticsSnapshot()
-    queueMicrotask(() => {
-      if (isRSSHubRequiredForCurrentSources()) {
-        // fire-and-forget: warm-up health probe; real fetches go through rsshubManager.fetch which retries and surfaces failures via the standard rss error pipeline.
-        void rsshubManager.ensureHealthy().catch(() => {
-          // best-effort warm only
-        })
-      }
-    })
   }
 
   // Stage V V2.2a — 4 source channels (`rss:getSources`, `rss:addSource`,
@@ -1122,7 +1129,7 @@ export function setupRSSIPC(useMock = false): void {
     getRSSStats: () => rssRepository.getRSSStats(),
     rssUpdateLock,
     describeRsshubStatus: () => rsshubManager.describeStatus(),
-    warmEmbeddedRSSHubForDiagnostics,
+    isEmbeddedRSSHubRequiredForDiagnostics,
     getArtifactsRootDir,
     fetchSourceWithCurrentStack,
     resolveRSSHubBase,
@@ -1163,6 +1170,7 @@ export function setupRSSIPC(useMock = false): void {
     loadDigestSnapshot,
     saveDigestSnapshot,
     limitConcurrency,
+    yieldToEventLoop,
     sourceRefreshInFlight,
   })
 
@@ -1210,7 +1218,7 @@ export function setupRSSIPC(useMock = false): void {
     rsshubStop: () => rsshubManager.stop(),
     rsshubEnsureHealthy: () => rsshubManager.ensureHealthy(),
     describeRsshubStatus: () => rsshubManager.describeStatus(),
-    warmEmbeddedRSSHubForDiagnostics,
+    isEmbeddedRSSHubRequiredForDiagnostics,
     buildSourceDiagnostics: (sources) =>
       buildSourceDiagnostics(sources.map((entry) => ({
         id: entry.id,

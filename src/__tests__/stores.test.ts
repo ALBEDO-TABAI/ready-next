@@ -474,6 +474,7 @@ describe('useDocTabs Store', () => {
     it('should set split tab', () => {
         useDocTabs.getState().openTab('/workspace/file1.md')
         const tabId = useDocTabs.getState().tabs[1].id
+        useDocTabs.getState().setActiveTab('reset-tab')
         useDocTabs.getState().setSplitTab(tabId)
         assert.strictEqual(useDocTabs.getState().splitTabId, tabId)
 
@@ -501,6 +502,7 @@ describe('useDocTabs Store', () => {
     it('should clear split when closing the split tab', () => {
         useDocTabs.getState().openTab('/workspace/split.md')
         const splitId = useDocTabs.getState().tabs[1].id
+        useDocTabs.getState().setActiveTab('reset-tab')
         useDocTabs.getState().setSplitTab(splitId)
         assert.strictEqual(useDocTabs.getState().splitTabId, splitId)
 

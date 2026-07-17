@@ -35,13 +35,14 @@ export interface DownloadItem {
 }
 
 export interface TabUpdateEvent {
-  type: 'title' | 'navigate' | 'loading' | 'error' | 'meta' | 'closed'
+  type: 'patch' | 'closed'
   tabId: string
   activeTabId?: string | null
   title?: string
   url?: string
   domain?: string
   favicon?: string | null
+  profile?: string | null
   owner?: 'manual' | 'agent'
   required?: boolean
   activity?: 'idle' | 'running' | 'attention'
@@ -49,7 +50,7 @@ export interface TabUpdateEvent {
   loading?: boolean
   canGoBack?: boolean
   canGoForward?: boolean
-  error?: string
+  error?: string | null
 }
 
 export interface AdblockState {
@@ -71,7 +72,7 @@ export interface BrowserPreviewDiagnosticsState {
 }
 
 export interface BrowserDiagnosticsData {
-  hostDriver: 'browserView' | 'webContentsView'
+  hostDriver: 'webContentsView'
   tabCount: number
   activeTabId: string | null
   diagnosticsLogPath: string
@@ -116,4 +117,19 @@ export interface BrowserDiagnosticsData {
     updatedAt: string
   } | null
   availableActions: string[]
+  rendererProcesses: Array<{
+    pid: number
+    tabIds: string[]
+    domains: string[]
+    loadStates: Array<'visible' | 'protected-background' | 'throttled' | 'dormant'>
+    cpuPercent: number
+    memoryKB: number
+    processType: string
+    creationTime: number
+  }>
+  tabLoadStates: Array<{
+    tabId: string
+    state: 'visible' | 'protected-background' | 'throttled' | 'dormant'
+  }>
+  eventCounts60s: Record<string, number>
 }

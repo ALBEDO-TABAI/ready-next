@@ -21,10 +21,10 @@
 // writer + dialog/shell facades + workspace validation context). V2.3d adds
 // the WorkspaceGroup surface (save/open dialog facades narrowed to the
 // workspace-file payload + a home-directory probe for the default-path
-// hint). V2.3e adds the ParserGroup surface (lazy mammoth/xlsx module
-// getters + the epub-to-markdown importer; the write-index hook is shared
-// with FileIoGroup since the ebook importer fans `index.md` back into the
-// same search-engine pipeline as `document:write`).
+// hint). V2.3e adds the ParserGroup surface (document-worker DOCX/XLSX/EPUB
+// operations; the write-index hook is shared with FileIoGroup since the
+// ebook importer fans `index.md` back into the same search-engine pipeline
+// as `document:write`).
 import type { BrowserWindow, WebContents } from 'electron'
 import type { DocumentMarksRepository } from '../document-marks-repository'
 import type { DocumentWriteIndexHook } from '../ipc-handler'
@@ -202,36 +202,16 @@ export interface EngineDeps {
 
   // --- V2.3e — ParserGroup deps ---
 
-  /**
-   * Resolve the lazy-loaded `mammoth` module the docx parser uses. The
-   * host owns the singleton cache (`mammothLib`) and the `try/catch import`
-   * fallback that returns `null` when the optional dep is not installed,
-   * so the group never imports `mammoth` directly. Returning `null` lets
-   * the handler surface the structured `LIBRARY_NOT_INSTALLED` error
-   * verbatim.
-   */
-  getMammothModule(): Promise<typeof import('mammoth') | null>
-  /**
-   * Resolve the lazy-loaded `xlsx` (SheetJS) module the xlsx parser uses.
-   * Mirrors `getMammothModule` — host-owned singleton cache + null-on-miss
-   * so the handler can return `LIBRARY_NOT_INSTALLED` without importing
-   * `xlsx` itself.
-   */
-  getXlsxModule(): Promise<typeof import('xlsx') | null>
+  /** Route DOCX parsing to the lazy document worker. */
+  parseDocxInWorker(path: string): Promise<Record<string, unknown>>
+  /** Route spreadsheet parsing to the lazy document worker. */
+  parseXlsxInWorker(path: string): Promise<Record<string, unknown>>
   /**
    * Convert an EPUB (or other supported ebook archive) at `sourcePath` to
    * on-disk markdown + assets. Lifted to a dep so the group does not
-   * import `./ebook-importer` directly; the host owns the actual
-   * `importEpubAsMarkdown(sourcePath)` call. The return shape is the same
+   * import `./ebook-importer` directly; the document worker owns the actual
+   * conversion. The return shape is the same
    * structured result the renderer already consumes.
    */
-  importEbookAsMarkdown(sourcePath: string): Promise<{
-    success: boolean
-    indexPath?: string
-    outputDir?: string
-    assetCount?: number
-    warnings?: string[]
-    error?: string
-    errorCode?: string
-  }>
+  importEbookInWorker(sourcePath: string): Promise<Record<string, unknown>>
 }

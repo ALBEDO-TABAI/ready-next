@@ -206,6 +206,7 @@ export default function WidgetEditDrawer({ open, input, onClose, onSave }: Widge
   return createPortal(
     <div
       className="ready-widget-edit-drawer-backdrop"
+      data-ready-native-overlay=""
       onClick={(event) => {
         if (event.target === event.currentTarget) onClose()
       }}

@@ -56,6 +56,19 @@ test('snapshot cache reuses a clean document and refreshes after mutation', asyn
   assert.equal((third.pageIdentity as Record<string, unknown>).snapshotRevision, 2)
 })
 
+test('disposing a tab drops its snapshot and stale refs before rematerialization', async () => {
+  const service = new BrowserSnapshotService()
+  const page = fixture()
+  const first = await service.capture(page.controller, 'tab-a', 16_384, async (revision) => rawPayload(revision))
+  const ref = String(((first.pageMap as { targets: Array<{ targetId: string }> }).targets[0]).targetId)
+
+  service.disposeTab(page.controller, 'tab-a')
+
+  const resolution = await service.resolveRef(page.controller, 'tab-a', ref)
+  assert.equal(resolution.ok, false)
+  if (!resolution.ok) assert.equal(resolution.errorCode, 'stale_snapshot')
+})
+
 test('opaque refs bind tab, document epoch and snapshot revision', async () => {
   const service = new BrowserSnapshotService()
   const page = fixture()

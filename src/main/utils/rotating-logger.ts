@@ -13,6 +13,7 @@ export interface RotatingLogger {
   readonly path: string
   append(text: string): void
   appendAsync(text: string): Promise<void>
+  flush(): void
 }
 
 export interface RotatingLoggerOptions {
@@ -20,6 +21,23 @@ export interface RotatingLoggerOptions {
   maxFiles?: number
   resolvePath?: (filename: string) => string
   emitMetric?: ((name: ProcessMetricName, payload?: Record<string, unknown>) => void) | null
+  buffered?: boolean
+  flushIntervalMs?: number
+  flushBytes?: number
+}
+
+interface BufferedSink {
+  append(text: string): void
+  flush(): void
+}
+
+const DEFAULT_FLUSH_INTERVAL_MS = 250
+const DEFAULT_FLUSH_BYTES = 64 * 1024
+const bufferedSinks = new Map<string, BufferedSink>()
+let exitFlushInstalled = false
+
+export function flushBufferedRotatingLoggers(): void {
+  for (const sink of bufferedSinks.values()) sink.flush()
 }
 
 function parsePositiveInteger(raw: string | undefined, fallback: number): number {
@@ -76,13 +94,25 @@ export function createRotatingLogger(
   const maxBytes = normalizeLimit(options.maxBytes, READY_LOG_MAX_BYTES, DEFAULT_MAX_BYTES)
   const maxFiles = normalizeLimit(options.maxFiles, READY_LOG_MAX_FILES, DEFAULT_MAX_FILES)
   const emitMetric = options.emitMetric === undefined ? defaultEmitMetric : options.emitMetric
+  const flushIntervalMs = options.flushIntervalMs ?? DEFAULT_FLUSH_INTERVAL_MS
+  const flushBytes = options.flushBytes ?? DEFAULT_FLUSH_BYTES
+  const existingBufferedSink = options.buffered ? bufferedSinks.get(path) : undefined
+  if (existingBufferedSink) {
+    return {
+      path,
+      append: (text) => existingBufferedSink.append(text),
+      appendAsync: async (text) => existingBufferedSink.append(text),
+      flush: () => existingBufferedSink.flush(),
+    }
+  }
+  mkdirSync(dirname(path), { recursive: true })
+  let currentBytes = fileSize(path)
 
   const rotateIfNeeded = (incomingBytes: number): void => {
-    mkdirSync(dirname(path), { recursive: true })
-    const currentSize = fileSize(path)
-    if (currentSize === 0 || currentSize + incomingBytes <= maxBytes) return
+    if (currentBytes === 0 || currentBytes + incomingBytes <= maxBytes) return
     try {
       rotate(path, maxFiles)
+      currentBytes = 0
     } catch (error) {
       try {
         emitMetric?.(PROCESS_METRICS.logRotationFailed, {
@@ -95,15 +125,94 @@ export function createRotatingLogger(
     }
   }
 
+  const appendSync = (text: string): void => {
+    const bytes = Buffer.byteLength(text)
+    rotateIfNeeded(bytes)
+    appendFileSync(path, text, 'utf8')
+    currentBytes += bytes
+  }
+
+  if (options.buffered) {
+    let sink = bufferedSinks.get(path)
+    if (!sink) {
+      let chunks: string[] = []
+      let bufferedBytes = 0
+      let timer: ReturnType<typeof setTimeout> | null = null
+
+      const flush = (): void => {
+        if (timer) {
+          clearTimeout(timer)
+          timer = null
+        }
+        if (bufferedBytes === 0) return
+        const text = chunks.join('')
+        chunks = []
+        bufferedBytes = 0
+        try {
+          appendSync(text)
+        } catch (error) {
+          chunks.unshift(text)
+          bufferedBytes += Buffer.byteLength(text)
+          throw error
+        }
+      }
+
+      const schedule = (): void => {
+        if (timer) return
+        timer = setTimeout(() => {
+          try {
+            flush()
+          } catch {
+            // Logging failures must not surface as uncaught timer exceptions.
+          }
+        }, flushIntervalMs)
+        timer.unref?.()
+      }
+
+      sink = {
+        append(text: string): void {
+          chunks.push(text)
+          bufferedBytes += Buffer.byteLength(text)
+          if (bufferedBytes >= flushBytes) {
+            flush()
+          } else {
+            schedule()
+          }
+        },
+        flush,
+      }
+      bufferedSinks.set(path, sink)
+    }
+
+    if (!exitFlushInstalled) {
+      exitFlushInstalled = true
+      process.on('exit', () => {
+        try {
+          flushBufferedRotatingLoggers()
+        } catch {
+          // Exit-time log preservation is best effort and cannot delay shutdown.
+        }
+      })
+    }
+
+    const activeSink = sink
+    return {
+      path,
+      append: (text) => activeSink.append(text),
+      appendAsync: async (text) => activeSink.append(text),
+      flush: () => activeSink.flush(),
+    }
+  }
+
   return {
     path,
-    append(text: string): void {
-      rotateIfNeeded(Buffer.byteLength(text))
-      appendFileSync(path, text, 'utf8')
-    },
+    append: appendSync,
     async appendAsync(text: string): Promise<void> {
-      rotateIfNeeded(Buffer.byteLength(text))
+      const bytes = Buffer.byteLength(text)
+      rotateIfNeeded(bytes)
       await appendFile(path, text, 'utf8')
+      currentBytes += bytes
     },
+    flush(): void {},
   }
 }

@@ -18,7 +18,6 @@ import {
   replaceWidgetFenceWithSkeletonInContent,
 } from './widget-card-helpers'
 import { collectDocumentWidgets, type DocumentWidgetRecord } from '../../../shared/document-widget-parse'
-import { buildDocumentOutline, getOutlineNodeForLine } from '../../../shared/document-side-panels'
 import {
   getDroppedFileKind,
   getDroppedFilesFromDataTransfer,
@@ -26,11 +25,16 @@ import {
 } from '../../utils/dragDrop'
 import { convertDocxHtmlToMarkdownText } from '../../utils/docx-format'
 import { shouldApplyAsyncDocumentLoad } from './documentLoadGuard'
-import { shouldRefreshDocumentTabForDirectoryChange } from '../../modules/document/documentExternalRefresh'
 import {
   endGeneratedImageDrag,
   getGeneratedImageDragPayload,
 } from '../../modules/image-generation/generatedImageDrag'
+import {
+  advanceWidgetFenceSignatureForTextEdit,
+  buildWidgetFenceSignatureSnapshot,
+} from '../../modules/document/widgetFenceSignature'
+import { registerDocumentSaveHandler } from '../../modules/document/documentSaveRegistry'
+import { saveDocumentTabSnapshot } from '../../modules/document/documentSaveRuntime'
 import '../../styles/tiptap.css'
 
 type SaveState = 'idle' | 'saving' | 'saved' | 'error'
@@ -80,6 +84,7 @@ interface ReadResult {
   html?: string
   data?: Record<string, unknown>
   error?: string
+  errorCode?: string
 }
 
 const getFileExt = (path: string | null): string => {
@@ -103,6 +108,14 @@ function escapeHtmlAttr(value: string): string {
     .replace(/"/g, '&quot;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
+}
+
+function getPreviewHeadingSourceLine(heading: HTMLElement): number | null {
+  const direct = Number(heading.dataset.readySourceLine)
+  if (Number.isFinite(direct) && direct > 0) return direct
+  const block = heading.closest<HTMLElement>('[data-ready-block-source-line]')
+  const fromBlock = Number(block?.dataset.readyBlockSourceLine)
+  return Number.isFinite(fromBlock) && fromBlock > 0 ? fromBlock : null
 }
 
 function escapeHtmlText(value: string): string {
@@ -221,24 +234,32 @@ export default function MarkdownEditor({
   onVisibleLineChange,
   onActivate,
 }: MarkdownEditorProps) {
-  const { updateTabContent, hydrateTabContentFromDisk, commitTabSaveSnapshot, pendingReveal, setPendingReveal } = useDocTabs()
+  const updateTabContent = useDocTabs((state) => state.updateTabContent)
+  const hydrateTabContentFromDisk = useDocTabs((state) => state.hydrateTabContentFromDisk)
+  const pendingReveal = useDocTabs((state) => state.pendingReveal)
+  const setPendingReveal = useDocTabs((state) => state.setPendingReveal)
   const [isLoading, setIsLoading] = useState(!!tab.path)
   const [saveState, setSaveState] = useState<SaveState>('idle')
   const [saveError, setSaveError] = useState<string | null>(null)
   const [contentReady, setContentReady] = useState(!tab.path || !!tab.content)
   const [loadError, setLoadError] = useState<string | null>(null)
-  const [reloadNonce, setReloadNonce] = useState(0)
   const [widgetStates, setWidgetStates] = useState<Record<string, DocumentWidgetPersistedState>>(() => (
     extractWidgetStateMapFromContent(tab.content)
   ))
+  const [initialWidgetFenceSnapshot] = useState(() => buildWidgetFenceSignatureSnapshot(tab.content))
   const [editingWidget, setEditingWidget] = useState<DocumentWidgetRecord | null>(null)
   const widgetStatesRef = useRef(widgetStates)
   const tabContentRef = useRef(tab.content)
-  const saveInFlightRef = useRef(false)
+  const widgetFenceSnapshotRef = useRef(initialWidgetFenceSnapshot)
+  const widgetFenceSnapshotContentRef = useRef(tab.content)
+  const widgetFenceSignatureRef = useRef(widgetFenceSnapshotRef.current.signature)
+  const rawEditRangeRef = useRef<SelectionRange | null>(null)
   const rawEditorRef = useRef<HTMLTextAreaElement>(null)
   const editorSurfaceRef = useRef<HTMLDivElement>(null)
   const previewSurfaceRef = useRef<HTMLDivElement>(null)
   const visibleLineFrameRef = useRef<number | null>(null)
+  const previewScrollFrameRef = useRef<number | null>(null)
+  const saveInFlightRef = useRef(false)
 
   // Context menu state
   const [contextMenu, setContextMenu] = useState<{
@@ -255,8 +276,6 @@ export default function MarkdownEditor({
 
   const currentExt = useMemo(() => getFileExt(tab.path), [tab.path])
   const documentScrollKey = useMemo(() => tab.path || tab.id, [tab.id, tab.path])
-  const outlineForVisibility = useMemo(() => buildDocumentOutline(tab.content), [tab.content])
-  const canSave = !!tab.path
   const activeRevealTarget = useMemo(() => {
     if (!tab.path || !pendingReveal || pendingReveal.path !== tab.path) return null
     return pendingReveal
@@ -305,9 +324,14 @@ export default function MarkdownEditor({
       setLoadError(null)
       try {
         const ext = getFileExt(tab.path)
-        if (['md', 'txt', 'json', 'ts', 'tsx', 'js', 'css', 'html'].includes(ext)) {
+        if (['md', 'markdown', 'txt', 'json', 'ts', 'tsx', 'js', 'css', 'html'].includes(ext)) {
           const result = (await window.electronAPI.document.readFile(tab.path)) as ReadResult
-          if (!result.success) throw new Error(result.error || '文件读取失败')
+          if (!result.success) {
+            if (result.errorCode === 'TEXT_FILE_TOO_LARGE') {
+              throw new Error(result.error || '文件过大，无法在文档编辑器中打开。')
+            }
+            throw new Error(result.error || '文件读取失败')
+          }
           if (!cancelled && canCommitLoadedContent()) {
             hydrateTabContentFromDisk(tab.id, result.content || '')
           }
@@ -347,7 +371,7 @@ export default function MarkdownEditor({
     }
     load()
     return () => { cancelled = true }
-  }, [tab.path, reloadNonce]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [tab.path]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!loadError || tab.content.length === 0) return
@@ -357,72 +381,112 @@ export default function MarkdownEditor({
   }, [loadError, tab.content])
 
   useEffect(() => {
-    if (!window.electronAPI?.document?.onDirectoryChange) return undefined
-    const unsubscribe = window.electronAPI.document.onDirectoryChange((event) => {
-      const changedPaths = Array.isArray(event?.paths) ? event.paths : []
-      if (!shouldRefreshDocumentTabForDirectoryChange({
-        path: tab.path,
-        isDirty: tab.isDirty,
-      }, changedPaths)) return
-      setLoadError(null)
-      setContentReady(false)
-      setReloadNonce((value) => value + 1)
-    })
-    return () => unsubscribe()
-  }, [tab.path, tab.isDirty])
-
-  useEffect(() => {
     tabContentRef.current = tab.content
+    if (widgetFenceSnapshotContentRef.current !== tab.content) {
+      widgetFenceSnapshotRef.current = buildWidgetFenceSignatureSnapshot(tab.content)
+      widgetFenceSnapshotContentRef.current = tab.content
+    }
+    const nextSignature = widgetFenceSnapshotRef.current.signature
+    if (nextSignature === widgetFenceSignatureRef.current) return
+    widgetFenceSignatureRef.current = nextSignature
+    if (!nextSignature) {
+      widgetStatesRef.current = {}
+      setWidgetStates({})
+      return
+    }
     setWidgetStates((prev) => {
-      const next = {
+      const next: Record<string, DocumentWidgetPersistedState> = {
         ...extractWidgetStateMapFromContent(tab.content),
         ...prev,
       }
+      const previousEntries = Object.entries(prev)
+      const unchanged = previousEntries.length === Object.keys(next).length && previousEntries.every(([key, value]) => (
+        JSON.stringify(value) === JSON.stringify(next[key])
+      ))
+      if (unchanged) return prev
       widgetStatesRef.current = next
       return next
     })
   }, [tab.content])
 
   // ─── Save logic ─────────────────────────────────────────────
-  const handleSave = useCallback(async () => {
-    if (!tab.path || !canSave || !tab.isDirty || saveInFlightRef.current) return
-    if (typeof window === 'undefined' || !window.electronAPI) return
+  // The app-level shortcut selects one pane; this mounted editor owns the
+  // operation so errors and in-flight state stay with the correct document.
+  const saveCurrentTab = useCallback(async () => {
+    if (saveInFlightRef.current) return
+    const api = window.electronAPI?.document
+    const currentState = useDocTabs.getState()
+    const currentTab = currentState.tabs.find((item) => item.id === tab.id)
+    if (!api || !currentTab) return
+
     saveInFlightRef.current = true
     setSaveState('saving')
     setSaveError(null)
     try {
-      const baseContent = tabContentRef.current
-      const nextContent = mergeWidgetStateMapIntoContent(baseContent, widgetStatesRef.current)
-      const result = (await window.electronAPI.document.writeFile(tab.path, nextContent)) as ReadResult
-      if (!result.success) throw new Error(result.error || '保存失败')
-      const committed = commitTabSaveSnapshot(tab.id, baseContent, nextContent)
-      if (committed && nextContent !== baseContent) {
-        tabContentRef.current = nextContent
+      const outcome = await saveDocumentTabSnapshot({
+        tab: currentTab,
+        api,
+        setTabPath: currentState.setTabPath,
+        renameTab: currentState.renameTab,
+        commitTabSaveSnapshot: currentState.commitTabSaveSnapshot,
+      })
+      if (outcome.status === 'error') {
+        setSaveState('error')
+        setSaveError(outcome.error)
+      } else if (outcome.status === 'saved') {
+        setSaveState('saved')
+      } else {
+        setSaveState('idle')
       }
-      setSaveState(committed ? 'saved' : 'idle')
-      setSaveError(null)
     } catch (error) {
       setSaveState('error')
-      setSaveError(`保存失败：${error instanceof Error ? error.message : String(error)}`)
+      setSaveError(error instanceof Error ? error.message : String(error))
     } finally {
       saveInFlightRef.current = false
     }
-  }, [tab.path, tab.isDirty, canSave, commitTabSaveSnapshot, tab.id])
+  }, [tab.id])
 
-  // Cmd+S keyboard shortcut
-  useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') {
-        e.preventDefault()
-        handleSave()
-      }
+  useEffect(() => registerDocumentSaveHandler(tab.id, saveCurrentTab), [saveCurrentTab, tab.id])
+
+  const replaceEditorContent = useCallback((nextContent: string) => {
+    tabContentRef.current = nextContent
+    widgetFenceSnapshotRef.current = buildWidgetFenceSignatureSnapshot(nextContent)
+    widgetFenceSnapshotContentRef.current = nextContent
+    widgetFenceSignatureRef.current = widgetFenceSnapshotRef.current.signature
+    updateTabContent(tab.id, nextContent)
+  }, [tab.id, updateTabContent])
+
+  const handleRawEditorBeforeInput = useCallback((e: React.FormEvent<HTMLTextAreaElement>) => {
+    rawEditRangeRef.current = {
+      start: e.currentTarget.selectionStart,
+      end: e.currentTarget.selectionEnd,
     }
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [handleSave])
+  }, [])
 
   const handleRawEditorChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    updateTabContent(tab.id, e.target.value)
+    const previousContent = tabContentRef.current
+    const nextContent = e.target.value
+    const editRange = rawEditRangeRef.current
+    rawEditRangeRef.current = null
+    if (editRange) {
+      const insertedLength = nextContent.length - (previousContent.length - (editRange.end - editRange.start))
+      if (insertedLength >= 0 && editRange.start + insertedLength <= nextContent.length) {
+        const advanced = advanceWidgetFenceSignatureForTextEdit(
+          widgetFenceSnapshotRef.current,
+          previousContent,
+          {
+            ...editRange,
+            insertedText: nextContent.slice(editRange.start, editRange.start + insertedLength),
+          },
+        )
+        if (advanced) {
+          widgetFenceSnapshotRef.current = advanced
+          widgetFenceSnapshotContentRef.current = nextContent
+        }
+      }
+    }
+    tabContentRef.current = nextContent
+    updateTabContent(tab.id, nextContent)
     setSaveState('idle')
   }, [tab.id, updateTabContent])
 
@@ -503,7 +567,7 @@ export default function MarkdownEditor({
 
   const handleToolbarChange = useCallback(
     (nextContent: string, nextSelection: SelectionRange) => {
-      updateTabContent(tab.id, nextContent)
+      replaceEditorContent(nextContent)
       setSaveState('idle')
       // After applying a toolbar edit, the mouse anchor is no longer
       // meaningful — fall back to caret-derived placement so the bar
@@ -519,7 +583,7 @@ export default function MarkdownEditor({
         )
       })
     },
-    [tab.id, updateTabContent],
+    [replaceEditorContent],
   )
 
   // ─── Context menu handler ──────────────────────────────────
@@ -602,8 +666,7 @@ export default function MarkdownEditor({
           const prefix = currentContent.trim().length === 0 ? '' : currentContent.endsWith('\n') ? '\n' : '\n\n'
           nextContent = `${currentContent}${prefix}${snippet}\n`
         }
-        tabContentRef.current = nextContent
-        updateTabContent(tab.id, nextContent)
+        replaceEditorContent(nextContent)
         setSaveError(null)
         setSaveState('idle')
       })().catch((error) => {
@@ -627,25 +690,27 @@ export default function MarkdownEditor({
     if (viewMode === 'edit' && rawEditor) {
       const selectionStart = rawEditor.selectionStart
       const selectionEnd = rawEditor.selectionEnd
-      const before = tab.content.slice(0, selectionStart)
-      const after = tab.content.slice(selectionEnd)
+      const currentContent = tabContentRef.current
+      const before = currentContent.slice(0, selectionStart)
+      const after = currentContent.slice(selectionEnd)
       const needsLeadingBreak = before.length > 0 && !before.endsWith('\n')
       const needsTrailingBreak = after.length > 0 && !snippet.endsWith('\n')
       const insertion = `${needsLeadingBreak ? '\n\n' : ''}${snippet}${needsTrailingBreak ? '\n' : ''}`
-      updateTabContent(tab.id, `${before}${insertion}${after}`)
+      replaceEditorContent(`${before}${insertion}${after}`)
       requestAnimationFrame(() => {
         const nextCursor = before.length + insertion.length
         rawEditor.focus()
         rawEditor.setSelectionRange(nextCursor, nextCursor)
       })
     } else {
-      const prefix = tab.content.trim().length === 0
+      const currentContent = tabContentRef.current
+      const prefix = currentContent.trim().length === 0
         ? ''
-        : tab.content.endsWith('\n') ? '\n' : '\n\n'
-      updateTabContent(tab.id, `${tab.content}${prefix}${snippet}\n`)
+        : currentContent.endsWith('\n') ? '\n' : '\n\n'
+      replaceEditorContent(`${currentContent}${prefix}${snippet}\n`)
     }
     setSaveState('idle')
-  }, [currentExt, tab.content, tab.id, tab.path, updateTabContent, viewMode])
+  }, [currentExt, replaceEditorContent, tab.path, viewMode])
 
   const closeContextMenu = useCallback(() => {
     setContextMenu((prev) => ({ ...prev, visible: false }))
@@ -655,7 +720,7 @@ export default function MarkdownEditor({
     const selection = contextSelection.trim()
     if (!selection) return
 
-    const location = findDocumentSelectionLocation(tab.content, selection, contextSelectionRange)
+    const location = findDocumentSelectionLocation(tabContentRef.current, selection, contextSelectionRange)
     addDocumentQuoteReference({
       title: tab.title,
       path: tab.path,
@@ -664,7 +729,7 @@ export default function MarkdownEditor({
       lineStart: location.lineStart,
       lineEnd: location.lineEnd,
     })
-  }, [contextSelection, contextSelectionRange, tab.content, tab.path, tab.title])
+  }, [contextSelection, contextSelectionRange, tab.path, tab.title])
 
   const pasteSelectionToStickyNote = useCallback(async () => {
     const text = contextSelection.trim()
@@ -679,24 +744,24 @@ export default function MarkdownEditor({
   }, [contextSelection])
 
   const handleWidgetRename = useCallback((currentTitle: string, widgetCode: string, nextTitle: string) => {
-    const nextContent = renameWidgetFenceTitleInContent(tab.content, currentTitle, widgetCode, nextTitle)
-    if (nextContent === tab.content) return
-    setWidgetStates((prev) => {
-      const next = { ...prev }
-      const currentKey = getWidgetPersistenceKey(currentTitle, widgetCode)
-      const nextKey = getWidgetPersistenceKey(nextTitle, widgetCode)
-      if (prev[currentKey]) {
-        next[nextKey] = prev[currentKey]
-        delete next[currentKey]
-      }
-      return next
-    })
-    updateTabContent(tab.id, nextContent)
+    const baseContent = tabContentRef.current
+    const nextContent = renameWidgetFenceTitleInContent(baseContent, currentTitle, widgetCode, nextTitle)
+    if (nextContent === baseContent) return
+    const currentKey = getWidgetPersistenceKey(currentTitle, widgetCode)
+    const nextKey = getWidgetPersistenceKey(nextTitle, widgetCode)
+    if (widgetStatesRef.current[currentKey]) {
+      const nextWidgetStates = { ...widgetStatesRef.current }
+      nextWidgetStates[nextKey] = nextWidgetStates[currentKey]
+      delete nextWidgetStates[currentKey]
+      widgetStatesRef.current = nextWidgetStates
+      setWidgetStates(nextWidgetStates)
+    }
+    replaceEditorContent(nextContent)
     setSaveState('idle')
-  }, [tab.content, tab.id, updateTabContent])
+  }, [replaceEditorContent])
 
   const handleWidgetQuoteToAgent = useCallback((widgetTitle: string, widgetCode: string) => {
-    const targetWidget = collectDocumentWidgets(tab.content).find((widget) => (
+    const targetWidget = collectDocumentWidgets(tabContentRef.current).find((widget) => (
       widget.title === widgetTitle && widget.widgetCode.trim() === widgetCode.trim()
     )) || null
     addDocumentWidgetTargetReference({
@@ -708,7 +773,7 @@ export default function MarkdownEditor({
       widgetCode,
       widgetMode: getWidgetModeLabel(widgetCode),
     })
-  }, [tab.content, tab.id, tab.path, tab.title])
+  }, [tab.id, tab.path, tab.title])
 
   const handleWidgetExport = useCallback((widgetTitle: string, widgetCode: string, widgetState?: DocumentWidgetPersistedState | null) => {
     void exportWidgetCardSnapshot(widgetCode, widgetTitle, widgetState, tab.path)
@@ -724,18 +789,17 @@ export default function MarkdownEditor({
     const baseContent = tabContentRef.current
     const nextContent = mergeWidgetStateMapIntoContent(baseContent, nextWidgetStates)
     if (nextContent !== baseContent) {
-      tabContentRef.current = nextContent
-      updateTabContent(tab.id, nextContent)
+      replaceEditorContent(nextContent)
     }
     setSaveState('idle')
-  }, [tab.id, updateTabContent])
+  }, [replaceEditorContent])
 
   // Preview-edit writes land on the same tab-content channel as the source
   // textarea: dirty state + Cmd+S save semantics stay identical.
   const handlePreviewContentEdit = useCallback((nextContent: string) => {
-    updateTabContent(tab.id, nextContent)
+    replaceEditorContent(nextContent)
     setSaveState('idle')
-  }, [tab.id, updateTabContent])
+  }, [replaceEditorContent])
 
   const handleWidgetEditRequest = useCallback((widget: { id?: string; title?: string; widgetCode: string }) => {
     const current = collectDocumentWidgets(tabContentRef.current).find((record) => (
@@ -756,12 +820,11 @@ export default function MarkdownEditor({
       result.skeletonSpec,
     )
     if (nextContent !== baseContent) {
-      tabContentRef.current = nextContent
-      updateTabContent(tab.id, nextContent)
+      replaceEditorContent(nextContent)
       setSaveState('idle')
     }
     setEditingWidget(null)
-  }, [editingWidget, tab.id, updateTabContent])
+  }, [editingWidget, replaceEditorContent])
 
   const handleEditorSurfaceScroll = useCallback(() => {
     const surface = editorSurfaceRef.current
@@ -773,49 +836,46 @@ export default function MarkdownEditor({
   }, [emitVisibleLine, onActivate])
 
   const handlePreviewSurfaceScroll = useCallback(() => {
-    const surface = previewSurfaceRef.current
-    if (!surface) return
     onActivate?.()
-    const headings = Array.from(surface.querySelectorAll<HTMLElement>('[data-ready-heading-title]'))
-    if (headings.length === 0) {
-      const maxScroll = Math.max(1, surface.scrollHeight - surface.clientHeight)
-      const line = Math.max(1, Math.round((surface.scrollTop / maxScroll) * outlineForVisibility.lineCount))
-      emitVisibleLine(line)
-      return
-    }
-
-    const counts = new Map<string, number>()
-    const ordinals = headings.map((heading) => {
-      const title = heading.dataset.readyHeadingTitle || ''
-      const ordinal = counts.get(title) || 0
-      counts.set(title, ordinal + 1)
-      return ordinal
-    })
-    const contentTop = surface.scrollTop + 12
-    const containerTop = surface.getBoundingClientRect().top
-    let nearestIndex = 0
-    for (let index = 0; index < headings.length; index += 1) {
-      const top = headings[index].getBoundingClientRect().top - containerTop + surface.scrollTop
-      if (top <= contentTop + 16) {
-        nearestIndex = index
-        continue
+    if (previewScrollFrameRef.current !== null) return
+    previewScrollFrameRef.current = window.requestAnimationFrame(() => {
+      previewScrollFrameRef.current = null
+      const surface = previewSurfaceRef.current
+      if (!surface) return
+      const headings = Array.from(surface.querySelectorAll<HTMLElement>('[data-ready-heading-title]'))
+      const lineCount = Number(
+        surface.querySelector<HTMLElement>('[data-ready-preview-line-count]')?.dataset.readyPreviewLineCount,
+      ) || 1
+      if (headings.length === 0) {
+        const maxScroll = Math.max(1, surface.scrollHeight - surface.clientHeight)
+        const line = Math.max(1, Math.round((surface.scrollTop / maxScroll) * lineCount))
+        emitVisibleLine(line)
+        return
       }
-      break
-    }
-    const title = headings[nearestIndex]?.dataset.readyHeadingTitle || null
-    const ordinal = ordinals[nearestIndex] || 0
-    const node = outlineForVisibility.nodes.find((item) => (
-      item.kind === 'heading' &&
-      item.anchorTitle === title &&
-      item.anchorOrdinal === ordinal
-    ))
-    emitVisibleLine(node?.lineStart ?? 1)
-  }, [emitVisibleLine, onActivate, outlineForVisibility])
+      const contentTop = surface.scrollTop + 12
+      const containerTop = surface.getBoundingClientRect().top
+      let nearestIndex = 0
+      for (let index = 0; index < headings.length; index += 1) {
+        const top = headings[index].getBoundingClientRect().top - containerTop + surface.scrollTop
+        if (top <= contentTop + 16) {
+          nearestIndex = index
+          continue
+        }
+        break
+      }
+      const sourceLine = headings[nearestIndex] ? getPreviewHeadingSourceLine(headings[nearestIndex]) : null
+      emitVisibleLine(sourceLine || 1)
+    })
+  }, [emitVisibleLine, onActivate])
 
   useEffect(() => () => {
     if (visibleLineFrameRef.current !== null) {
       window.cancelAnimationFrame(visibleLineFrameRef.current)
       visibleLineFrameRef.current = null
+    }
+    if (previewScrollFrameRef.current !== null) {
+      window.cancelAnimationFrame(previewScrollFrameRef.current)
+      previewScrollFrameRef.current = null
     }
   }, [])
 
@@ -863,34 +923,29 @@ export default function MarkdownEditor({
     if (!surface) return
 
     const targetLine = activeRevealTarget.lineStart || 1
-    const targetNode = getOutlineNodeForLine(outlineForVisibility, targetLine)
     const scrollToTop = (top: number) => {
       surface.scrollTop = Math.max(0, Math.min(Math.round(top), Math.max(0, surface.scrollHeight - surface.clientHeight)))
     }
 
     requestAnimationFrame(() => {
-      if (targetNode?.anchorTitle) {
-        const headings = Array.from(surface.querySelectorAll<HTMLElement>('[data-ready-heading-title]'))
-        let seenOrdinal = 0
-        const targetHeading = headings.find((heading) => {
-          if (heading.dataset.readyHeadingTitle !== targetNode.anchorTitle) return false
-          const matches = seenOrdinal === (targetNode.anchorOrdinal || 0)
-          seenOrdinal += 1
-          return matches
-        })
-        if (targetHeading) {
-          const containerTop = surface.getBoundingClientRect().top
-          scrollToTop(targetHeading.getBoundingClientRect().top - containerTop + surface.scrollTop - 8)
-          setPendingReveal(null)
-          return
-        }
+      const headings = Array.from(surface.querySelectorAll<HTMLElement>('[data-ready-heading-title]'))
+      const targetHeading = [...headings].reverse().find((heading) => (getPreviewHeadingSourceLine(heading) || 1) <= targetLine)
+        || headings[0]
+      if (targetHeading) {
+        const containerTop = surface.getBoundingClientRect().top
+        scrollToTop(targetHeading.getBoundingClientRect().top - containerTop + surface.scrollTop - 8)
+        setPendingReveal(null)
+        return
       }
 
-      const ratio = Math.max(0, Math.min(1, targetLine / Math.max(1, outlineForVisibility.lineCount)))
+      const lineCount = Number(
+        surface.querySelector<HTMLElement>('[data-ready-preview-line-count]')?.dataset.readyPreviewLineCount,
+      ) || 1
+      const ratio = Math.max(0, Math.min(1, targetLine / Math.max(1, lineCount)))
       scrollToTop(ratio * Math.max(0, surface.scrollHeight - surface.clientHeight))
       setPendingReveal(null)
     })
-  }, [activeRevealTarget, outlineForVisibility, setPendingReveal, viewMode])
+  }, [activeRevealTarget, setPendingReveal, viewMode])
 
   const blockingLoadError = Boolean(loadError && tab.content.length === 0)
 
@@ -931,7 +986,7 @@ export default function MarkdownEditor({
       {/* ── Content area ──────────────────────────────────── */}
       <div className="flex-1 overflow-hidden flex" style={{ background: 'transparent' }}>
         <>
-          {/* ── Edit pane: TiptapEditor ── */}
+          {/* ── Edit pane: Markdown source textarea ── */}
           {viewMode === 'edit' && (
             <div
               ref={editorSurfaceRef}
@@ -951,6 +1006,7 @@ export default function MarkdownEditor({
                     <textarea
                       ref={rawEditorRef}
                       value={tab.content}
+                      onBeforeInput={handleRawEditorBeforeInput}
                       onChange={handleRawEditorChange}
                       onMouseUp={handleEditorMouseUp}
                       onKeyUp={handleEditorKeyUp}

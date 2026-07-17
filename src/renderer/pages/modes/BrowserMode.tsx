@@ -156,13 +156,24 @@ export default function BrowserMode({
   layoutPhase = 'idle',
 }: BrowserModeProps) {
   // Persistent browser tab state — survives mode switches
-  const {
-    tabs, tabGroups, activeTabId, splitTabId, browserSplitRatio, urlInput,
-    setTabs, setActiveTabId, setUrlInput,
-    setSplitTabId, setBrowserSplitRatio,
-    addTab, updateTab, reorderTabs,
-    renameTabGroup, recolorTabGroup, setTabGroupCollapsed, disbandTabGroup,
-  } = useBrowserTabs()
+  const tabs = useBrowserTabs((state) => state.tabs)
+  const tabGroups = useBrowserTabs((state) => state.tabGroups)
+  const activeTabId = useBrowserTabs((state) => state.activeTabId)
+  const splitTabId = useBrowserTabs((state) => state.splitTabId)
+  const browserSplitRatio = useBrowserTabs((state) => state.browserSplitRatio)
+  const urlInput = useBrowserTabs((state) => state.urlInput)
+  const setTabs = useBrowserTabs((state) => state.setTabs)
+  const setActiveTabId = useBrowserTabs((state) => state.setActiveTabId)
+  const setUrlInput = useBrowserTabs((state) => state.setUrlInput)
+  const setSplitTabId = useBrowserTabs((state) => state.setSplitTabId)
+  const setBrowserSplitRatio = useBrowserTabs((state) => state.setBrowserSplitRatio)
+  const addTab = useBrowserTabs((state) => state.addTab)
+  const updateTab = useBrowserTabs((state) => state.updateTab)
+  const reorderTabs = useBrowserTabs((state) => state.reorderTabs)
+  const renameTabGroup = useBrowserTabs((state) => state.renameTabGroup)
+  const recolorTabGroup = useBrowserTabs((state) => state.recolorTabGroup)
+  const setTabGroupCollapsed = useBrowserTabs((state) => state.setTabGroupCollapsed)
+  const disbandTabGroup = useBrowserTabs((state) => state.disbandTabGroup)
   const [isBrowserSurfaceReady, setIsBrowserSurfaceReady] = useState(false)
   const isAddressEditingRef = useRef(false)
   const hostVisibleRef = useRef(false)
@@ -213,6 +224,17 @@ export default function BrowserMode({
   const agentPaneTaskId = visibleAgentTask?.taskId || (agentRuntimeTab?.activity === 'running' && agentSupervision.agentTabId
     ? `agent-tab:${agentSupervision.agentTabId}`
     : null)
+  const browserLockOverlayIdentity = useMemo(() => {
+    const takeoverSurface = agentSupervision.surfaces?.['user-view']?.state === 'takeover'
+      ? 'user-view'
+      : agentSupervision.surfaces?.['agent-view']?.state === 'takeover'
+        ? 'agent-view'
+        : null
+    const surface = agentSupervision.activeWriteSurface || takeoverSurface
+    const lease = surface ? agentSupervision.surfaces?.[surface] : null
+    const owner = lease?.leaseId || lease?.runId || lease?.heldBy || lease?.tabId || agentPaneTaskId || agentSupervision.agentTabId || activeTab?.id || 'none'
+    return [browserOwnershipStatus.kind, agentSupervision.controlState, surface || 'none', lease?.state || 'none', owner].join(':')
+  }, [activeTab?.id, agentPaneTaskId, agentSupervision.activeWriteSurface, agentSupervision.agentTabId, agentSupervision.controlState, agentSupervision.surfaces, browserOwnershipStatus.kind])
   const agentPaneVisible = Boolean(agentSupervision.agentTabId && agentPaneTaskId && agentPaneTaskId !== dismissedAgentTaskId)
   const agentPaneOpen = agentPaneVisible && !agentPaneCollapsed
   const agentPaneCollapsedVisible = agentPaneVisible && agentPaneCollapsed
@@ -365,12 +387,13 @@ export default function BrowserMode({
     isElectron,
     activeTab,
   })
+  const bookmarkedUrls = useMemo(() => bookmarks.map((item) => item.url), [bookmarks])
 
   const {
     toastVisible,
     adblockState,
     browserDiagnostics,
-    refreshAdblockState,
+    refreshBrowserDiagnostics,
   } = useBrowserDiagnosticsState({
     isElectron,
     tabs,
@@ -850,6 +873,7 @@ export default function BrowserMode({
         return
       }
       const snapshot: BrowserLockOverlaySnapshot = {
+        identity: browserLockOverlayIdentity,
         kind: resolvedOverlayKind,
         label: browserOwnershipStatus.label,
         detail: browserOwnershipStatus.detail,
@@ -878,7 +902,7 @@ export default function BrowserMode({
       observer.disconnect()
       window.removeEventListener('resize', scheduleSnapshot)
     }
-  }, [browserOwnershipStatus, isActive, isElectron, shouldHideAllBrowserHosts, shouldPresentBrowserHost])
+  }, [browserLockOverlayIdentity, browserOwnershipStatus, isActive, isElectron, shouldHideAllBrowserHosts, shouldPresentBrowserHost])
 
   const {
     browserRuntimeReady,
@@ -897,7 +921,10 @@ export default function BrowserMode({
     isActive,
     browserRuntimeReady,
     activeTabId,
-    surfaceRef: contentRef,
+    freezeCacheKey: activeTabId
+      ? `${activeTabId}:${visibleSplitTab?.id || ''}:${agentPaneCollapsedVisible ? 'collapsed' : browserSplitRatio}`
+      : null,
+    surfaceRef: browserContentFrameRef,
     sendBoundsImmediate,
   })
 
@@ -1191,7 +1218,7 @@ export default function BrowserMode({
               tabGroups={tabGroups}
               activeTabId={activeTabId}
               splitTabId={visibleSplitTab?.id || null}
-              bookmarkedUrls={bookmarks.map((item) => item.url)}
+              bookmarkedUrls={bookmarkedUrls}
               onTabClick={handleHeaderTabClick}
               onTabClose={handleCloseTab}
               onNewTab={handleNewTab}
@@ -1340,7 +1367,7 @@ export default function BrowserMode({
                 onContinue={handleContinueBrowserTask}
                 onRetry={handleRetryBrowserTask}
                 onOpenTarget={handleOpenBrowserTarget}
-                onRefresh={() => void refreshAdblockState()}
+                onRefresh={() => void refreshBrowserDiagnostics(true)}
               />
             </div>
           </div>

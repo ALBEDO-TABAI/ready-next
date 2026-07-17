@@ -1,21 +1,17 @@
-import { BrowserView, BrowserWindow, WebContentsView } from 'electron'
+import { BrowserWindow, WebContentsView } from 'electron'
 
-import { type BrowserBoundsSyncMode, type BrowserHostKind, type BrowserHostView, type BrowserRect } from './host-types'
+import { type BrowserHostView, type BrowserRect } from './host-types'
 import { withHtmlInCanvasWebPreferences } from '../app-control/html-in-canvas-feature'
 
 const HOST_BORDER_RADIUS = 18
 
 export class BrowserHostLayoutService {
   private appliedBoundsByView = new WeakMap<BrowserHostView, string>()
-  private hostKindByView = new WeakMap<BrowserHostView, BrowserHostKind>()
   private attachedHosts = new WeakSet<BrowserHostView>()
   private hiddenHosts = new WeakSet<BrowserHostView>()
   private readonly offscreenBounds: BrowserRect = { x: -100000, y: -100000, width: 1, height: 1 }
 
-  constructor(
-    private mainWindow: BrowserWindow,
-    private readonly browserHostKind: BrowserHostKind,
-  ) {}
+  constructor(private mainWindow: BrowserWindow) {}
 
   setMainWindow(mainWindow: BrowserWindow): void {
     this.mainWindow = mainWindow
@@ -31,32 +27,21 @@ export class BrowserHostLayoutService {
         partition,
         spellcheck: true,
         webSecurity: true,
-        backgroundThrottling: false,
       }),
     }
-    const view = this.browserHostKind === 'webContentsView'
-      ? new WebContentsView(options)
-      : new BrowserView(options)
-    if ('setBorderRadius' in view && typeof view.setBorderRadius === 'function') {
-      try {
-        view.setBorderRadius(HOST_BORDER_RADIUS)
-      } catch {
-        // ignore border radius failures on unsupported hosts
-      }
+    const view = new WebContentsView(options)
+    try {
+      view.setBorderRadius(HOST_BORDER_RADIUS)
+    } catch {
+      // Keep the page usable if a platform rejects the visual clipping hint.
     }
-    this.hostKindByView.set(view, this.browserHostKind)
     return view
   }
 
   detachHost(view: BrowserHostView): void {
     if (!this.attachedHosts.has(view)) return
-    const kind = this.hostKindByView.get(view) || 'browserView'
     try {
-      if (kind === 'webContentsView') {
-        this.mainWindow.contentView.removeChildView(view as WebContentsView)
-      } else {
-        this.mainWindow.removeBrowserView(view as BrowserView)
-      }
+      this.mainWindow.contentView.removeChildView(view as WebContentsView)
     } catch {
       // ignore detached host errors
     }
@@ -76,12 +61,12 @@ export class BrowserHostLayoutService {
   }
 
   hideHost(view: BrowserHostView): void {
-    this.attachHost(view)
+    if (!this.attachedHosts.has(view)) return
     this.hiddenHosts.add(view)
     this.setHostBoundsNow(view, this.offscreenBounds)
   }
 
-  applyBounds(view: BrowserHostView, bounds: BrowserRect, _syncMode: BrowserBoundsSyncMode = 'settled'): void {
+  applyBounds(view: BrowserHostView, bounds: BrowserRect): void {
     if (this.hiddenHosts.has(view)) return
     this.setHostBoundsNow(view, bounds)
   }
@@ -100,25 +85,14 @@ export class BrowserHostLayoutService {
 
   private attachHost(view: BrowserHostView): void {
     if (this.attachedHosts.has(view)) return
-    const kind = this.hostKindByView.get(view) || 'browserView'
-    if (kind === 'webContentsView') {
-      this.mainWindow.contentView.addChildView(view as WebContentsView)
-    } else {
-      this.mainWindow.addBrowserView(view as BrowserView)
-    }
+    this.mainWindow.contentView.addChildView(view as WebContentsView)
     this.attachedHosts.add(view)
   }
 
   private raiseHost(view: BrowserHostView): void {
-    const kind = this.hostKindByView.get(view) || 'browserView'
     try {
-      if (kind === 'webContentsView') {
-        this.mainWindow.contentView.removeChildView(view as WebContentsView)
-        this.mainWindow.contentView.addChildView(view as WebContentsView)
-      } else {
-        this.mainWindow.removeBrowserView(view as BrowserView)
-        this.mainWindow.addBrowserView(view as BrowserView)
-      }
+      this.mainWindow.contentView.removeChildView(view as WebContentsView)
+      this.mainWindow.contentView.addChildView(view as WebContentsView)
     } catch {
       // ignore host ordering failures; the bounds sync below still runs.
     }

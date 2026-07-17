@@ -27,6 +27,13 @@ type MarkTab = 'bookmark' | 'note'
 const PANEL_EXIT_ANIMATION_MS = 180
 const MARK_DRAFTS_KEY = 'ready-document-mark-drafts-v1'
 const MAX_MARK_DRAFTS = 200
+const EMPTY_DOCUMENT_OUTLINE: DocumentOutlineSnapshot = {
+  contentHash: '0',
+  generatedAt: new Date(0).toISOString(),
+  lineCount: 1,
+  wordCount: 0,
+  nodes: [],
+}
 
 type MarkDraftCacheEntry = {
   documentPath: string
@@ -219,7 +226,8 @@ export default function DocumentFloatingPanels({
   onReveal,
   showToggles = true,
 }: DocumentFloatingPanelsProps) {
-  const [outline, setOutline] = useState(() => buildDocumentOutline(content))
+  const [outline, setOutline] = useState(EMPTY_DOCUMENT_OUTLINE)
+  const [outlineContent, setOutlineContent] = useState('')
   const [outlineLoading, setOutlineLoading] = useState(false)
   const [selectedOutlineId, setSelectedOutlineId] = useState<string | null>(null)
   const [marks, setMarks] = useState<DocumentMarkRecord[]>([])
@@ -266,13 +274,15 @@ export default function DocumentFloatingPanels({
   }, [marksOpen, marksPanelRendered])
 
   useEffect(() => {
+    if (!outlineOpen && !marksOpen) return undefined
     setOutlineLoading(true)
     const timer = window.setTimeout(() => {
       setOutline(buildDocumentOutline(content))
+      setOutlineContent(content)
       setOutlineLoading(false)
     }, 140)
     return () => window.clearTimeout(timer)
-  }, [content])
+  }, [content, marksOpen, outlineOpen])
 
   const loadMarks = useCallback(async () => {
     if (!documentPath || !window.electronAPI?.document?.listMarks) {
@@ -296,8 +306,9 @@ export default function DocumentFloatingPanels({
   }, [documentPath])
 
   useEffect(() => {
+    if (!marksOpen) return
     void loadMarks()
-  }, [loadMarks])
+  }, [loadMarks, marksOpen])
 
   useEffect(() => {
     if (!documentPath) {
@@ -331,9 +342,10 @@ export default function DocumentFloatingPanels({
 
   const currentOutlineNode = useMemo(() => getOutlineNodeForLine(outline, activeLine), [activeLine, outline])
   const visibleMarks = useMemo(() => marks.filter((mark) => mark.kind === markTab), [markTab, marks])
-  const resolvedMarks = useMemo(() => new Map(
-    marks.map((mark) => [mark.id, resolveDocumentMarkLocation(mark, content)]),
-  ), [content, marks])
+  const resolvedMarks = useMemo(() => {
+    if (!marksPanelRendered) return new Map()
+    return new Map(marks.map((mark) => [mark.id, resolveDocumentMarkLocation(mark, outlineContent, outline)]))
+  }, [marks, marksPanelRendered, outline, outlineContent])
 
   const revealOutlineNode = useCallback((node: DocumentOutlineNode) => {
     setSelectedOutlineId(node.id)

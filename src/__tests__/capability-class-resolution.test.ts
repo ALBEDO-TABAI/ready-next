@@ -25,11 +25,14 @@ import {
 function configFor(providerId: AIProviderType, model?: string, extra?: Partial<AIModelConfig>): AIModelConfig {
   const provider = AI_PROVIDERS.find(p => p.id === providerId)
   if (!provider) throw new Error(`unknown provider: ${providerId}`)
+  const providerClassModel = provider.models.find(m => (
+    m.id !== '__custom__' && m.id !== 'custom' && !m.capabilityOverrides
+  ))
   return {
     provider: providerId,
     baseUrl: provider.baseUrl,
     apiKey: 'test-key',
-    model: model || provider.models.find(m => m.id !== '__custom__' && m.id !== 'custom')?.id || provider.models[0]!.id,
+    model: model || providerClassModel?.id || provider.models[0]!.id,
     ...(extra || {}),
   }
 }

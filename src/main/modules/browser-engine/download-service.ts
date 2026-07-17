@@ -9,6 +9,8 @@ import { BrowserDataService } from './data-service'
 interface BrowserDownloadServiceDeps {
   dataService: BrowserDataService
   sendToRenderer: (channel: string, data: unknown) => void
+  resolveTabIdForWebContents?: (webContentsId: number) => string | null
+  onTabDownloadStateChange?: (tabId: string) => void
 }
 
 export interface BrowserDownloadUrlToDirectoryPayload {
@@ -247,8 +249,13 @@ export class BrowserDownloadService {
   private registeredSessions = new WeakSet<Session>()
   private pendingTargetedDownloads = new Map<string, PendingTargetedDownload[]>()
   private timedOutTargetedDownloads = new Map<string, number>()
+  private activeDownloadsByTab = new Map<string, number>()
 
   constructor(private readonly deps: BrowserDownloadServiceDeps) {}
+
+  isTabDownloading(tabId: string): boolean {
+    return (this.activeDownloadsByTab.get(tabId) ?? 0) > 0
+  }
 
   async downloadUrlToDirectory(
     targetSession: Session,
@@ -382,7 +389,7 @@ export class BrowserDownloadService {
   ensureRegistered(targetSession: Session): void {
     if (this.registeredSessions.has(targetSession)) return
 
-    targetSession.on('will-download', (_event, item) => {
+    targetSession.on('will-download', (_event, item, webContents) => {
       const downloadId = `dl-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
       const urlChain = item.getURLChain()
       const pendingTarget = this.takePendingTargetedDownload(item.getURL(), urlChain)
@@ -446,6 +453,10 @@ export class BrowserDownloadService {
       const totalBytes = item.getTotalBytes()
       const startedAt = Math.floor(Date.now() / 1000)
       const canResume = typeof item.canResume === 'function' ? item.canResume() : false
+      const sourceTabId = webContents
+        ? this.deps.resolveTabIdForWebContents?.(webContents.id) ?? null
+        : null
+      if (sourceTabId) this.markTabDownloadStarted(sourceTabId)
 
       try {
         this.deps.dataService.addDownload({
@@ -493,6 +504,7 @@ export class BrowserDownloadService {
       })
 
       item.once('done', (_ev, state) => {
+        if (sourceTabId) this.markTabDownloadFinished(sourceTabId)
         const downloadedPath = item.getSavePath() || temporaryPath
         void (async () => {
         let completedSize = 0
@@ -572,5 +584,17 @@ export class BrowserDownloadService {
     })
 
     this.registeredSessions.add(targetSession)
+  }
+
+  private markTabDownloadStarted(tabId: string): void {
+    this.activeDownloadsByTab.set(tabId, (this.activeDownloadsByTab.get(tabId) ?? 0) + 1)
+    this.deps.onTabDownloadStateChange?.(tabId)
+  }
+
+  private markTabDownloadFinished(tabId: string): void {
+    const next = Math.max(0, (this.activeDownloadsByTab.get(tabId) ?? 0) - 1)
+    if (next === 0) this.activeDownloadsByTab.delete(tabId)
+    else this.activeDownloadsByTab.set(tabId, next)
+    this.deps.onTabDownloadStateChange?.(tabId)
   }
 }

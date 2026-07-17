@@ -18,8 +18,6 @@
  * intents (PR-shell-2 wires the ack round-trip for `hide-all`).
  */
 
-import type { BrowserBoundsSyncMode } from './browser-view-layout'
-
 export type Rect = { x: number; y: number; w: number; h: number }
 
 export type HideAllReason = 'overlay-open' | 'mode-switch-prepare'
@@ -27,11 +25,11 @@ export type HideReason = 'mode-switch' | 'overlay-open' | 'tab-deactivate' | 'sp
 export type ShowReason = 'mode-switch' | 'tab-activate' | 'split-promote'
 
 export type BrowserViewIntent =
-  | { kind: 'show'; intentId: number; tabId: string; bounds: Rect; reason: ShowReason }
-  | { kind: 'hide'; intentId: number; tabId: string; reason: HideReason }
-  | { kind: 'hide-all'; intentId: number; reason: HideAllReason }
-  | { kind: 'set-bounds'; intentId: number; tabId: string; bounds: Rect; syncMode?: BrowserBoundsSyncMode }
-  | { kind: 'secondary-set-bounds'; intentId: number; tabId: string; bounds: Rect; syncMode?: BrowserBoundsSyncMode }
+  | { kind: 'show'; intentId: number; tabId: string; bounds: Rect; reason: ShowReason; expectsAck?: true }
+  | { kind: 'hide'; intentId: number; tabId: string; reason: HideReason; expectsAck?: true }
+  | { kind: 'hide-all'; intentId: number; reason: HideAllReason; expectsAck?: true }
+  | { kind: 'set-bounds'; intentId: number; tabId: string; bounds: Rect }
+  | { kind: 'secondary-set-bounds'; intentId: number; tabId: string; bounds: Rect }
 
 /**
  * Renderer-side monotonic counter. The renderer owns ordering; the main

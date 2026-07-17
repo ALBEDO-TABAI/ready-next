@@ -13,6 +13,7 @@ import {
   reorderTab,
   setGroupCollapsed,
 } from '../../shared/tab-group-model'
+import { BrowserTabPersistenceWriter } from '../modules/browser/browserTabPersistenceWriter'
 
 export interface BrowserTab {
   id: string
@@ -23,6 +24,7 @@ export interface BrowserTab {
   canGoForward: boolean
   domain?: string
   favicon?: string
+  profile?: string | null
   owner?: 'manual' | 'agent'
   required?: boolean
   activity?: 'idle' | 'running' | 'attention'
@@ -96,6 +98,7 @@ function sanitizeBrowserTab(tab: BrowserTab): BrowserTab {
     canGoForward: Boolean(tab.canGoForward),
     domain: tab.domain || undefined,
     favicon: tab.favicon || undefined,
+    profile: tab.profile || null,
     owner: tab.owner,
     required: Boolean(tab.required),
     activity: tab.activity,
@@ -198,8 +201,27 @@ function readBrowserTabsSnapshot(): BrowserTabsSnapshot {
   } satisfies BrowserTabsSnapshot))
 }
 
+const browserTabsPersistenceWriter = new BrowserTabPersistenceWriter<BrowserTabsSnapshot>({
+  write: (snapshot) => writeJsonStorage(BROWSER_TABS_SNAPSHOT_KEY, snapshot),
+  requestIdleCallback: typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function'
+    ? (callback, options) => window.requestIdleCallback(callback, options)
+    : undefined,
+  cancelIdleCallback: typeof window !== 'undefined' && typeof window.cancelIdleCallback === 'function'
+    ? (handle) => window.cancelIdleCallback(handle)
+    : undefined,
+})
+
 function persistBrowserTabsSnapshot(snapshot: BrowserTabsSnapshot): void {
-  writeJsonStorage(BROWSER_TABS_SNAPSHOT_KEY, sanitizeSnapshot(snapshot))
+  browserTabsPersistenceWriter.schedule(sanitizeSnapshot(snapshot))
+}
+
+export function flushBrowserTabsPersistence(): void {
+  browserTabsPersistenceWriter.flush()
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('pagehide', flushBrowserTabsPersistence)
+  window.addEventListener('beforeunload', flushBrowserTabsPersistence)
 }
 
 const initialBrowserTabsSnapshot = readBrowserTabsSnapshot()
@@ -323,11 +345,16 @@ export const useBrowserTabs = create<BrowserTabsState>((set) => {
       }),
 
     updateTab: (id, updates) =>
-      set((state) =>
-        commit(state, {
+      set((state) => {
+        const current = state.tabs.find((tab) => tab.id === id)
+        if (!current) return state
+        const changed = Object.entries(updates).some(([key, value]) => current[key as keyof BrowserTab] !== value)
+        if (!changed) return state
+        return commit(state, {
           tabs: state.tabs.map((tab) => (tab.id === id ? { ...tab, ...updates } : tab)),
           tabGroups: state.tabGroups,
-        })),
+        })
+      }),
 
     reorderTabs: (fromIndex, toIndex) =>
       set((state) => {

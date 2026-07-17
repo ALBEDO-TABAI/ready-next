@@ -51,6 +51,7 @@ export default function BrowserShellLayout({
           <div
             ref={contentRef}
             data-browser-local-media-drop-surface=""
+            data-ready-native-surface={showBrowserViewCornerFill ? 'browser' : undefined}
             className="relative min-h-0 min-w-0 flex-1 overflow-hidden"
             onDragOver={onDragOver}
             onDrop={onDrop}

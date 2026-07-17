@@ -179,7 +179,7 @@ function slowOkFacadeFactory(): CollectorFacadeFactory {
     const facade: NoteCollectFacade = {
       run: async (tool) => {
         if (tool === 'browser_collect') {
-          await new Promise((resolve) => setTimeout(resolve, 3))
+          await new Promise((resolve) => setTimeout(resolve, 25))
           return imagesJson
         }
         if (tool === 'browser_tabs') return [
@@ -284,7 +284,7 @@ describe('note_collect background task (content-task-runner)', () => {
       scopeId: 'conv-auto-continue',
       plan: {
         ...planPayload(3).plan,
-        stopConditions: { maxDurationMs: 1, maxConsecutiveFailures: 3 },
+        stopConditions: { maxDurationMs: 20, maxConsecutiveFailures: 3 },
       },
     }
 

@@ -5,9 +5,11 @@ import {
   shouldAnimateWorkbenchModeTransition,
   type WorkbenchModeChangePresentation,
 } from '../../modules/workbench/mode-transition'
+import { useNativeSurfaceAwareOverlay } from '../../modules/overlay/useNativeSurfaceAwareOverlay'
 
 type ModeComponentProps = {
   isActive?: boolean
+  isSceneVisible?: boolean
   isSuspended?: boolean
   isMotionSettled?: boolean
   browserLayoutPhase?: BrowserHostLayoutPhase | null
@@ -114,6 +116,7 @@ const ModeScene = memo(function ModeScene({
       <Suspense fallback={<ModeFallback />}>
         <ModeComponent
           isActive={isActive}
+          isSceneVisible={visualState !== 'hidden' && !suspended}
           isSuspended={suspended}
           isMotionSettled={isActive ? isMotionSettled : false}
           browserLayoutPhase={modeKey === 'browser' ? browserLayoutPhase : null}
@@ -156,6 +159,7 @@ export default function WorkbenchModeOutlet({
   browserLayoutPhase?: BrowserHostLayoutPhase | null
   suspended?: boolean
 }) {
+  useNativeSurfaceAwareOverlay()
   const previousModeRef = useRef<WorkbenchMode>(mode)
   const [runtime, setRuntime] = useState<SceneRuntime>({
     current: mode,

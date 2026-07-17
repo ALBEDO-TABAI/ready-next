@@ -63,9 +63,9 @@ function createMockDeps(): ParserGroupDeps {
   return {
     useMock: true,
     getDocumentWriteIndexHook: () => null,
-    getMammothModule: async () => null,
-    getXlsxModule: async () => null,
-    importEbookAsMarkdown: async () => ({ success: false, error: 'mock' }),
+    parseDocxInWorker: async () => ({ success: false, error: 'mock' }),
+    parseXlsxInWorker: async () => ({ success: false, error: 'mock' }),
+    importEbookInWorker: async () => ({ success: false, error: 'mock' }),
   }
 }
 

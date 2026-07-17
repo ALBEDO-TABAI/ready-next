@@ -31,7 +31,7 @@ test('workbench mode switching routes through the shared ritual overlay and imme
   assert.match(ritualHook, /prefers-reduced-motion/)
 
   assert.match(browserMask, /export const BROWSER_OVERLAY_LOCK_EVENT = 'ready:browser-overlay-lock'/)
-  assert.match(browserMask, /export function beginBrowserMask/)
+  assert.match(browserMask, /export async function beginBrowserMask/)
   assert.match(browserMask, /export async function endBrowserMask/)
   assert.match(browserMask, /requestAnimationFrame/)
 
@@ -59,4 +59,27 @@ test('workbench mode switching routes through the shared ritual overlay and imme
 
   assert.match(resizeFreeze, /captureStableFrame/)
   assert.doesNotMatch(resizeFreeze, /BROWSER_CAPTURE_FREEZE_EVENT/)
+})
+
+test('every split layout mutation owns a fresh motion settle frame', () => {
+  const source = readWorkspaceFile('src/renderer/pages/WorkbenchMode.tsx')
+  const splitOpen = source.slice(
+    source.indexOf('const handleWorkbenchModeOpen'),
+    source.indexOf('const handleWorkbenchSplitToggle'),
+  )
+  const splitToggle = source.slice(
+    source.indexOf('const handleWorkbenchSplitToggle'),
+    source.indexOf('useEffect(() => {\n    return () => {'),
+  )
+
+  for (const branch of [splitOpen, splitToggle]) {
+    assert.match(
+      branch,
+      /setIsMotionSettled\(false\)[\s\S]*setSplitMode\([\s\S]*requestAnimationFrame\([\s\S]*setIsMotionSettled\(true\)/,
+    )
+    assert.doesNotMatch(
+      branch,
+      /if \(browserVisibilityTransition === 'enters'\) setIsMotionSettled\(false\)/,
+    )
+  }
 })

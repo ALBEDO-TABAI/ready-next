@@ -83,7 +83,7 @@ function createMockDeps(): FetchGroupDeps {
       isRunning: fail('rssUpdateLock.isRunning'),
     } as unknown as FetchGroupDeps['rssUpdateLock'],
     describeRsshubStatus: fail('describeRsshubStatus') as FetchGroupDeps['describeRsshubStatus'],
-    warmEmbeddedRSSHubForDiagnostics: fail('warmEmbeddedRSSHubForDiagnostics') as FetchGroupDeps['warmEmbeddedRSSHubForDiagnostics'],
+    isEmbeddedRSSHubRequiredForDiagnostics: fail('isEmbeddedRSSHubRequiredForDiagnostics') as FetchGroupDeps['isEmbeddedRSSHubRequiredForDiagnostics'],
     getArtifactsRootDir: fail('getArtifactsRootDir') as FetchGroupDeps['getArtifactsRootDir'],
     fetchSourceWithCurrentStack: fail('fetchSourceWithCurrentStack') as FetchGroupDeps['fetchSourceWithCurrentStack'],
     resolveRSSHubBase: fail('resolveRSSHubBase') as FetchGroupDeps['resolveRSSHubBase'],
@@ -110,6 +110,7 @@ function createMockDeps(): FetchGroupDeps {
     loadDigestSnapshot: fail('loadDigestSnapshot') as FetchGroupDeps['loadDigestSnapshot'],
     saveDigestSnapshot: fail('saveDigestSnapshot') as FetchGroupDeps['saveDigestSnapshot'],
     limitConcurrency: fail('limitConcurrency') as FetchGroupDeps['limitConcurrency'],
+    yieldToEventLoop: fail('yieldToEventLoop') as FetchGroupDeps['yieldToEventLoop'],
     sourceRefreshInFlight: new Set<string>(),
   }
 }
@@ -204,6 +205,24 @@ test('failed fetchAll also records completion so cold start does not retry in a 
   assert.equal(result.success, false)
   assert.equal(result.error, 'database unavailable')
   assert.equal(completedAt.length, 1)
+})
+
+test('single-source refresh yields the main event loop before completing', async () => {
+  const { ipc, handleCalls } = createMockIpc()
+  let yields = 0
+  fetchGroup.register(ipc, {
+    ...createMockDeps(),
+    getRSSSources: () => [],
+    persistFetchInvocation: () => undefined,
+    yieldToEventLoop: async () => { yields += 1 },
+  })
+  const handler = handleCalls.find((entry) => entry.channel === 'rss:refreshSource')?.handler
+  assert.ok(handler)
+
+  const result = await handler({} as IpcMainInvokeEvent, { sourceId: 'missing' }) as { success: boolean }
+
+  assert.equal(result.success, false)
+  assert.equal(yields, 1)
 })
 
 test('IpcDisposeHandle.dispose removes the same 5 channels that register added', () => {

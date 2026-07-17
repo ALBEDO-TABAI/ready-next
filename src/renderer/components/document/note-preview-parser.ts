@@ -1,6 +1,7 @@
 import { format, isValid, parseISO } from 'date-fns'
 import { parse as parseYaml } from 'yaml'
 import { EBOOK_INLINE_IMAGE_TITLE } from '../../../shared/ebook'
+import { recordDocumentPerformanceCounter } from '../../../shared/document-performance-diagnostics'
 import { parseBareWidgetPayloadSegments, parseShowWidgetFences, type DocumentWidgetData } from './widget-fence-parser'
 
 export interface PreviewTag {
@@ -67,6 +68,7 @@ export interface StructuredNotePreview {
   bodyMarkdown: string
   blocks: PreviewBlock[]
   warnings: string[]
+  lineCount: number
 }
 
 const PROPERTY_TOKEN_PATTERN = /(^|\s)([A-Za-z][A-Za-z0-9_-]*):/g
@@ -1406,6 +1408,7 @@ export function buildStructuredNotePreview(
   content: string,
   notePath?: string | null,
 ): StructuredNotePreview {
+  recordDocumentPerformanceCounter('previewParses')
   const normalized = normalizeLineEndings(content)
   const frontmatterResult = splitFrontmatter(normalized)
   const headerResult = parseHeaderMetadata(frontmatterResult.body)
@@ -1428,6 +1431,10 @@ export function buildStructuredNotePreview(
     bodyOffset,
   )
   const embeds = heroEmbed ? [heroEmbed, ...bodyResult.embeds] : bodyResult.embeds
+  let lineCount = 1
+  for (let index = 0; index < normalized.length; index += 1) {
+    if (normalized.charCodeAt(index) === 10) lineCount += 1
+  }
 
   return {
     properties: propertyResult.properties,
@@ -1439,6 +1446,7 @@ export function buildStructuredNotePreview(
     bodyMarkdown: bodyResult.bodyMarkdown,
     blocks: bodyResult.blocks,
     warnings: frontmatterResult.warnings,
+    lineCount,
   }
 }
 

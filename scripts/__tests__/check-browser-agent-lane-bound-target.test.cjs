@@ -34,9 +34,6 @@ test('browser agent lane bound-target gate rejects fixed user-view active-tab fa
     'src/main/modules/browser-engine/ipc-supervision.ts': `
       const activeTasks = []
     `,
-    'src/main/modules/browser-engine/host-layout-service.ts': `
-      const options = { webPreferences: {} }
-    `,
     'src/main/modules/browser-engine/ipc-handler.ts': `
       class BrowserController {}
     `,

@@ -133,6 +133,7 @@ export interface PreviewDropIndicator {
 
 interface EditableBlockShellProps {
   blockId: string
+  sourceLine?: number
   children: React.ReactNode
   /** Block can be opened in the in-place editor. */
   textEditable: boolean
@@ -152,6 +153,7 @@ interface EditableBlockShellProps {
 
 export function EditableBlockShell({
   blockId,
+  sourceLine,
   children,
   textEditable,
   draggable,
@@ -173,10 +175,12 @@ export function EditableBlockShell({
     <div
       className={[
         'note-preview-edit-block',
+        'note-preview-render-block',
         interactive ? 'note-preview-edit-block--interactive' : '',
         isDraggingSelf ? 'note-preview-edit-block--dragging' : '',
       ].filter(Boolean).join(' ')}
       data-preview-block-id={blockId}
+      data-ready-block-source-line={sourceLine}
       draggable={draggable || undefined}
       onDragStart={draggable ? onDragStartBlock : undefined}
       onDragEnd={draggable ? onDragEndBlock : undefined}

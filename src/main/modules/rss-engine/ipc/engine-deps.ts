@@ -68,7 +68,8 @@ export interface EngineDeps {
   mapDraftStoreSourceToAPI(source: unknown): unknown
   /**
    * Execute the full `addSource` initial-fetch pipeline (platform detect →
-   * rsshub warmup → scrape → DB persist → route-diagnostics record). The
+   * start rsshub only when the route needs it → scrape → DB persist →
+   * route-diagnostics record). The
    * host owns the implementation so the group never imports the scraper /
    * rsshub-manager / browser-controller chain directly.
    */

@@ -104,46 +104,31 @@ const tabB: BrowserCloseTestTab = {
 }
 
 test('main closeTab success pushes a closed tab update to the renderer sender', () => {
-  const sent: Array<{ channel: string; payload: unknown }> = []
+  const closed: string[] = []
   const result = closeBrowserTabAndNotify(
     {
-      activeTabId: 'tab-a',
       closeTab: (tabId: string) => ({ success: tabId === 'tab-b' }),
-    },
-    {
-      send: (channel, payload) => {
-        sent.push({ channel, payload })
-      },
+      notifyTabClosed: (tabId: string) => closed.push(tabId),
     },
     'tab-b',
   )
 
   assert.deepEqual(result, { success: true })
-  assert.deepEqual(sent, [
-    {
-      channel: 'browser:tabUpdate',
-      payload: { type: 'closed', tabId: 'tab-b', activeTabId: 'tab-a' },
-    },
-  ])
+  assert.deepEqual(closed, ['tab-b'])
 })
 
 test('main closeTab failure does not send a renderer closed event', () => {
-  const sent: unknown[] = []
+  const closed: string[] = []
   const result = closeBrowserTabAndNotify(
     {
-      activeTabId: 'tab-a',
       closeTab: () => ({ success: false, error: 'not found' }),
-    },
-    {
-      send: (...args) => {
-        sent.push(args)
-      },
+      notifyTabClosed: (tabId: string) => closed.push(tabId),
     },
     'missing-tab',
   )
 
   assert.deepEqual(result, { success: false, error: 'not found' })
-  assert.deepEqual(sent, [])
+  assert.deepEqual(closed, [])
 })
 
 test('renderer removes closed tabs from visible and persisted browser state', async () => {

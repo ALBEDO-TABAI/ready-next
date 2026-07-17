@@ -128,7 +128,7 @@ test('BrowserTabShellService shows primary and secondary hosts with separate bou
   let storedPrimaryBounds: BrowserRect = { x: 0, y: 0, width: 1, height: 1 }
   let storedSecondaryBounds: BrowserRect = { x: 0, y: 0, width: 1, height: 1 }
   const shown: Array<{ id: string; bounds: BrowserRect }> = []
-  const applied: Array<{ id: string; bounds?: BrowserRect; syncMode?: string }> = []
+  const applied: Array<{ id: string; bounds?: BrowserRect }> = []
   const detached: string[] = []
   let previewDetached = false
 
@@ -147,8 +147,8 @@ test('BrowserTabShellService shows primary and secondary hosts with separate bou
     createTab: async () => ({ success: false, error: 'not used' }),
     detachHost: (view) => { detached.push(viewId(view)) },
     showHost: (view, bounds) => { shown.push({ id: viewId(view), bounds }) },
-    applyBounds: (view, syncMode, bounds) => {
-      applied.push({ id: viewId(view), syncMode, bounds })
+    applyBounds: (view, bounds) => {
+      applied.push({ id: viewId(view), bounds })
     },
     hideHost: () => undefined,
     detachPreviewView: () => { previewDetached = true },
@@ -160,7 +160,6 @@ test('BrowserTabShellService shows primary and secondary hosts with separate bou
     tabId: 'tab-a',
     secondaryTabId: 'tab-b',
     secondaryBounds,
-    syncMode: 'settled',
   })
 
   assert.equal(splitTabId, 'tab-b')
@@ -191,7 +190,7 @@ test('BrowserTabShellService preserves split hosts on primary tab switch', () =>
   let splitTabId: string | null = 'tab-b'
   const detached: string[] = []
   const shown: string[] = []
-  const applied: Array<{ id: string; bounds?: BrowserRect; syncMode?: string }> = []
+  const applied: Array<{ id: string; bounds?: BrowserRect }> = []
 
   const service = new BrowserTabShellService({
     tabs,
@@ -208,8 +207,8 @@ test('BrowserTabShellService preserves split hosts on primary tab switch', () =>
     createTab: async () => ({ success: false, error: 'not used' }),
     detachHost: (view) => { detached.push(viewId(view)) },
     showHost: (view) => { shown.push(viewId(view)) },
-    applyBounds: (view, syncMode, bounds) => {
-      applied.push({ id: viewId(view), syncMode, bounds })
+    applyBounds: (view, bounds) => {
+      applied.push({ id: viewId(view), bounds })
     },
     hideHost: () => undefined,
     detachPreviewView: () => undefined,
@@ -224,7 +223,7 @@ test('BrowserTabShellService preserves split hosts on primary tab switch', () =>
   assert.deepEqual(shown, ['tab-c', 'tab-b'])
   assert.deepEqual(detached, ['tab-a'])
   assert.deepEqual(applied, [
-    { id: 'tab-c', syncMode: undefined, bounds: undefined },
-    { id: 'tab-b', syncMode: 'settled', bounds: { x: 0, y: 0, width: 400, height: 600 } },
+    { id: 'tab-c', bounds: undefined },
+    { id: 'tab-b', bounds: { x: 0, y: 0, width: 400, height: 600 } },
   ])
 })

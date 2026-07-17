@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
 
 import type { TabUpdateEvent } from './types'
+import { resolveBrowserTabErrorUpdate } from './browserTabUpdatePatch'
 import { browserTabActivationSequencer } from './browserTabActivationSequencer'
 import { clearFitted, shouldClearFittedForTabUpdate } from './browserTabFitRegistry'
 import { DEFAULT_BROWSER_URL, extractBrowserDomain } from './url-utils'
 import { mergeBackendTabsPreservingGroups, useBrowserTabs, type BrowserTab } from '../../stores/useBrowserTabs'
+import { selectAcceptedDormantTabs } from './browserDormantTabRecovery'
 
 interface UseBrowserRuntimeEffectsParams {
   isElectron: boolean
@@ -19,6 +21,7 @@ interface BrowserTabOpenedEvent {
   title?: string
   domain?: string
   favicon?: string | null
+  profile?: string | null
   owner?: 'manual' | 'agent'
   required?: boolean
   activity?: 'idle' | 'running' | 'attention'
@@ -51,44 +54,28 @@ export function useBrowserRuntimeEffects({
       .map((tab) => ({ ...tab, loading: true, error: undefined }))
     if (persistedTabs.length === 0) return false
 
-    const recoveredTabs: BrowserTab[] = []
-    const previousActiveTabId = store.activeTabId
-    let recoveredActiveTabId: string | null = null
+    const result = await window.electronAPI?.browser?.registerDormantTabs({
+      tabs: persistedTabs,
+      activeTabId: store.activeTabId,
+      splitTabId: store.splitTabId,
+    })
+    if (!result?.success) return false
 
-    for (const tab of persistedTabs) {
-      const result = await window.electronAPI?.browser?.createTab(tab.url) as { success?: boolean; tabId?: string } | undefined
-      if (!result?.success || !result.tabId) continue
-
-      const recoveredTab: BrowserTab = {
-        ...tab,
-        id: result.tabId,
-        title: tab.title || 'Loading...',
-        domain: tab.domain || extractBrowserDomain(tab.url),
-      }
-      recoveredTabs.push(recoveredTab)
-      if (tab.id === previousActiveTabId) {
-        recoveredActiveTabId = result.tabId
-      }
-    }
-
-    if (recoveredTabs.length === 0) return false
-
-    const nextActiveTabId = recoveredActiveTabId || recoveredTabs[recoveredTabs.length - 1]?.id || null
-    // Group preservation here rides on the `{ ...tab }` spread above: the backend
-    // ids are freshly minted on restart, so the id-matching merge helper does NOT
-    // apply — instead each recovered tab keeps the persisted tab's groupId (a stable
-    // grp-* id), and store.tabGroups (hydrated from localStorage) still matches. The
-    // group definitions survive the restart via setTabs preserving state.tabGroups.
+    const acceptedTabs = selectAcceptedDormantTabs(persistedTabs, result)
+    if (acceptedTabs.length === 0) return false
+    const nextActiveTabId = result.activeTabId || acceptedTabs[0]?.id || null
+    const recoveredTabs = acceptedTabs.map((tab) => ({
+      ...tab,
+      loading: result.materializedTabIds?.includes(tab.id) ?? false,
+      title: tab.title || 'New Tab',
+      domain: tab.domain || extractBrowserDomain(tab.url),
+    }))
     store.setTabs(recoveredTabs)
     browserTabActivationSequencer.invalidate()
     store.setActiveTabId(nextActiveTabId)
+    store.setSplitTabId(result.splitTabId || null)
     const activeTab = recoveredTabs.find((tab) => tab.id === nextActiveTabId) || null
     store.setUrlInput(activeTab?.url === DEFAULT_BROWSER_URL ? '' : activeTab?.url || '')
-
-    if (nextActiveTabId && nextActiveTabId !== recoveredTabs[recoveredTabs.length - 1]?.id) {
-      await window.electronAPI?.browser?.switchTab(nextActiveTabId).catch(() => undefined)
-    }
-
     return true
   }, [])
 
@@ -114,6 +101,7 @@ export function useBrowserRuntimeEffects({
       canGoForward: Boolean(tab.canGoForward),
       domain: tab.domain || extractBrowserDomain(tab.url),
       favicon: tab.favicon || undefined,
+      profile: tab.profile || null,
       owner: tab.owner,
       required: tab.required,
       activity: tab.activity,
@@ -198,46 +186,33 @@ export function useBrowserRuntimeEffects({
       const event = data as TabUpdateEvent
       const store = useBrowserTabs.getState()
       switch (event.type) {
-        case 'title':
-          store.updateTab(event.tabId, { title: event.title || '' })
-          break
-        case 'navigate':
+        case 'patch': {
           if (shouldClearFittedForTabUpdate(event)) {
             clearFitted(event.tabId)
           }
-          store.updateTab(event.tabId, {
-            url: event.url || '',
-            domain: event.domain,
-            canGoBack: event.canGoBack || false,
-            canGoForward: event.canGoForward || false,
-            error: undefined,
-          })
+          const updates: Partial<BrowserTab> = {}
+          if (event.title !== undefined) updates.title = event.title
+          if (event.url !== undefined) {
+            updates.url = event.url
+            updates.domain = event.domain
+            updates.canGoBack = Boolean(event.canGoBack)
+            updates.canGoForward = Boolean(event.canGoForward)
+            updates.error = undefined
+          }
+          if (event.favicon !== undefined) updates.favicon = event.favicon || undefined
+          if (event.profile !== undefined) updates.profile = event.profile || null
+          if (event.owner !== undefined) updates.owner = event.owner
+          if (event.required !== undefined) updates.required = event.required
+          if (event.activity !== undefined) updates.activity = event.activity
+          if (event.lastAuditedAt !== undefined) updates.lastAuditedAt = event.lastAuditedAt
+          if (event.loading !== undefined) updates.loading = event.loading
+          Object.assign(updates, resolveBrowserTabErrorUpdate(event.error))
+          store.updateTab(event.tabId, updates)
           if (store.activeTabId === event.tabId && event.url && !isAddressEditingRef.current) {
             store.setUrlInput(event.url === DEFAULT_BROWSER_URL ? '' : event.url)
           }
           break
-        case 'loading':
-          if (shouldClearFittedForTabUpdate(event)) {
-            clearFitted(event.tabId)
-          }
-          store.updateTab(event.tabId, { loading: event.loading || false })
-          break
-        case 'error':
-          store.updateTab(event.tabId, {
-            loading: false,
-            error: event.error || 'Page failed to load',
-          })
-          break
-        case 'meta':
-          store.updateTab(event.tabId, {
-            domain: event.domain,
-            favicon: event.favicon || undefined,
-            owner: event.owner,
-            required: event.required,
-            activity: event.activity,
-            lastAuditedAt: event.lastAuditedAt,
-          })
-          break
+        }
         case 'closed': {
           if (shouldClearFittedForTabUpdate(event)) {
             clearFitted(event.tabId)
@@ -270,6 +245,7 @@ export function useBrowserRuntimeEffects({
         canGoForward: Boolean(tab.canGoForward),
         domain: tab.domain || extractBrowserDomain(tab.url),
         favicon: tab.favicon || undefined,
+        profile: tab.profile || null,
         owner: tab.owner,
         required: tab.required,
         activity: tab.activity,

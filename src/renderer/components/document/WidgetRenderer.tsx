@@ -10,6 +10,8 @@ import { buildWidgetReceiverSrcdoc, sanitizeWidgetHtml, stripWidgetScripts } fro
 import { appendWidgetMessageToAgentInput } from '../../modules/agent/chat-input-bridge'
 import type { DocumentWidgetPersistedState } from './widget-state-runtime'
 import { widgetNeedsManualPreview } from './widget-card-helpers'
+import { subscribeWidgetThemeChanges } from './widget-theme-observer'
+import { BoundedLruCache } from '../../../shared/bounded-lru'
 
 interface WidgetRendererProps {
   title?: string
@@ -31,10 +33,17 @@ function inferBackgroundMode(
 }
 
 const MAX_IFRAME_HEIGHT = 2000
-const widgetHeightCache = new Map<string, number>()
+const widgetHeightCache = new BoundedLruCache<string, number>(96)
 
 function getCacheKey(code: string): string {
-  return code.slice(0, 200)
+  let first = 2166136261
+  let second = 0x9e3779b9
+  for (let index = 0; index < code.length; index += 1) {
+    const value = code.charCodeAt(index)
+    first = Math.imul(first ^ value, 16777619)
+    second = Math.imul(second ^ value, 2246822519)
+  }
+  return `${code.length}:${(first >>> 0).toString(36)}:${(second >>> 0).toString(36)}`
 }
 
 export default function WidgetRenderer({
@@ -131,7 +140,7 @@ export default function WidgetRenderer({
 
     window.addEventListener('message', handleMessage)
     return () => window.removeEventListener('message', handleMessage)
-  }, [onWidgetStateChange, openHref, postTheme, sanitizedWidgetCode.length, title, widgetCode.length])
+  }, [onWidgetStateChange, openHref, postTheme, sanitizedWidgetCode.length, title, widgetCode])
 
   useEffect(() => {
     setReceiverReady(false)
@@ -145,17 +154,7 @@ export default function WidgetRenderer({
 
   useEffect(() => {
     if (!receiverReady) return
-
-    const observer = new MutationObserver(() => {
-      postTheme()
-    })
-
-    observer.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ['class', 'data-theme', 'data-skin'],
-    })
-
-    return () => observer.disconnect()
+    return subscribeWidgetThemeChanges(postTheme)
   }, [postTheme, receiverReady])
 
   useEffect(() => {

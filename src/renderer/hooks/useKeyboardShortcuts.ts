@@ -1,11 +1,15 @@
 import { useEffect, useCallback, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { useMode, type WorkbenchMode } from '../stores/useMode'
 import { useWorkspace } from '../stores/useWorkspace'
 import { useDocTabs } from '../stores/useDocTabs'
 import { requestWorkbenchModeChange } from '../modules/workbench/mode-transition'
 import { shouldIgnoreGlobalKeyboardShortcut } from '../modules/keyboard/shortcut-guard'
 import { resolveReadyAppShortcut, type ReadyAppShortcutAction } from '../../shared/app-shortcuts'
+import { runRegisteredDocumentSave } from '../modules/document/documentSaveRegistry'
+import { saveDocumentTabSnapshot } from '../modules/document/documentSaveRuntime'
+
+const DIRECTLY_WRITABLE_DOCUMENT_EXTENSIONS = new Set(['md', 'markdown', 'txt', 'json', 'ts', 'tsx', 'js', 'css', 'html', 'docx'])
 
 type ShortcutLikeEvent = {
   key: string
@@ -19,16 +23,51 @@ type ShortcutLikeEvent = {
   preventDefault?: () => void
 }
 
+export function resolveDocumentSaveTarget(
+  tabs: ReadonlyArray<{ id: string }>,
+  activeTabId: string,
+  splitTabId: string | null,
+  focusedPaneTabId: string | null,
+): string | null {
+  const visibleTabIds = new Set([activeTabId, splitTabId].filter((id): id is string => Boolean(id)))
+  if (focusedPaneTabId && visibleTabIds.has(focusedPaneTabId) && tabs.some((tab) => tab.id === focusedPaneTabId)) {
+    return focusedPaneTabId
+  }
+  if (activeTabId && tabs.some((tab) => tab.id === activeTabId)) return activeTabId
+  if (splitTabId && tabs.some((tab) => tab.id === splitTabId)) return splitTabId
+  return null
+}
+
+export function isDocumentSaveShortcutAvailable(input: {
+  pathname: string
+  appMode: string
+  workbenchMode: WorkbenchMode
+  splitMode: WorkbenchMode | null
+}): boolean {
+  return input.pathname === '/workbench'
+    && input.appMode === 'workbench'
+    && (input.workbenchMode === 'document' || input.splitMode === 'document')
+}
+
+export function readyShortcutBypassesEditableGuard(
+  action: ReadyAppShortcutAction | null,
+  documentSaveAvailable = false,
+): boolean {
+  return action === 'capture-window' || (action === 'save-document' && documentSaveAvailable)
+}
+
 /**
  * Global keyboard shortcuts for the Ready app.
  * Mount this hook once at the top of the component tree.
  */
 export function useKeyboardShortcuts() {
   const navigate = useNavigate()
-  const { appMode, setWorkbenchMode, setReadySubMode, setAppMode, toggleMode } = useMode()
+  const location = useLocation()
+  const { appMode, workbenchMode, splitMode, setWorkbenchMode, setReadySubMode, setAppMode, toggleMode } = useMode()
   const { toggleSidebar } = useWorkspace()
   const [captureFeedback, setCaptureFeedback] = useState<{ kind: 'success' | 'error'; message: string } | null>(null)
   const captureFeedbackTimerRef = useRef<number | null>(null)
+  const documentSaveInFlightRef = useRef(false)
 
   const publishCaptureFeedback = useCallback((feedback: { kind: 'success' | 'error'; message: string }) => {
     setCaptureFeedback(feedback)
@@ -66,29 +105,39 @@ export function useKeyboardShortcuts() {
   }, [publishCaptureFeedback])
 
   const saveActiveDocument = useCallback(async () => {
-    const { activeTabId, tabs, setTabPath, renameTab, markTabSaved } = useDocTabs.getState()
-    if (!activeTabId) return
-    const tab = tabs.find((item) => item.id === activeTabId)
-    if (!tab || !window.electronAPI?.document) return
-
-    if (tab.path) {
-      const result = await window.electronAPI.document.writeFile(tab.path, tab.content)
-      if (result.success) {
-        markTabSaved(activeTabId)
+    if (documentSaveInFlightRef.current) return
+    documentSaveInFlightRef.current = true
+    try {
+      const {
+        activeTabId,
+        splitTabId,
+        focusedPaneTabId,
+        tabs,
+        setTabPath,
+        renameTab,
+        commitTabSaveSnapshot,
+      } = useDocTabs.getState()
+      const targetTabId = resolveDocumentSaveTarget(tabs, activeTabId, splitTabId, focusedPaneTabId)
+      if (!targetTabId) return
+      const tab = tabs.find((item) => item.id === targetTabId)
+      if (!tab || !window.electronAPI?.document) return
+      if (await runRegisteredDocumentSave(targetTabId)) return
+      const extension = tab.path?.split(/[\\/]/).pop()?.split('.').pop()?.toLowerCase() || ''
+      if (tab.path && !DIRECTLY_WRITABLE_DOCUMENT_EXTENSIONS.has(extension)) return
+      const outcome = await saveDocumentTabSnapshot({
+        tab,
+        api: window.electronAPI.document,
+        setTabPath,
+        renameTab,
+        commitTabSaveSnapshot,
+      })
+      if (outcome.status === 'error') {
+        publishCaptureFeedback({ kind: 'error', message: outcome.error })
       }
-      return
+    } finally {
+      documentSaveInFlightRef.current = false
     }
-
-    const saveResult = await window.electronAPI.document.saveFileAs({
-      content: tab.content,
-      suggestedName: `${tab.title || '新文档'}.md`,
-    })
-    if (!saveResult.success || !saveResult.path) return
-
-    setTabPath(activeTabId, saveResult.path)
-    renameTab(activeTabId, saveResult.path.split('/').pop() || tab.title)
-    markTabSaved(activeTabId)
-  }, [])
+  }, [publishCaptureFeedback])
 
   const activateWorkbenchMode = useCallback((mode: WorkbenchMode) => {
     setReadySubMode(mode)
@@ -104,10 +153,17 @@ export function useKeyboardShortcuts() {
   const handleShortcut = useCallback((e: ShortcutLikeEvent) => {
     const action = resolveReadyAppShortcut(e)
     const preventDefault = () => e.preventDefault?.()
+    const documentSaveAvailable = isDocumentSaveShortcutAvailable({
+      pathname: location.pathname,
+      appMode,
+      workbenchMode,
+      splitMode,
+    })
 
-    if (action === 'capture-window') {
+    if (readyShortcutBypassesEditableGuard(action, documentSaveAvailable)) {
       preventDefault()
-      void captureCurrentWindow()
+      if (action === 'capture-window') void captureCurrentWindow()
+      else void saveActiveDocument()
       return true
     }
 
@@ -154,12 +210,6 @@ export function useKeyboardShortcuts() {
       return true
     }
 
-    if (action === 'save-document') {
-      preventDefault()
-      void saveActiveDocument()
-      return true
-    }
-
     if (action === 'close-document') {
       preventDefault()
       const { activeTabId, closeTab } = useDocTabs.getState()
@@ -184,7 +234,7 @@ export function useKeyboardShortcuts() {
     }
 
     return false
-  }, [activateWorkbenchMode, captureCurrentWindow, navigate, saveActiveDocument, setAppMode, toggleMode, toggleSidebar])
+  }, [activateWorkbenchMode, appMode, captureCurrentWindow, location.pathname, navigate, saveActiveDocument, setAppMode, splitMode, toggleMode, toggleSidebar, workbenchMode])
 
   useEffect(() => () => {
     if (captureFeedbackTimerRef.current !== null) {

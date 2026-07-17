@@ -114,6 +114,7 @@ export default function AddSourceModal({
 
   return (
     <div
+      data-ready-native-overlay=""
       className="fixed inset-0 z-50 flex items-center justify-center animate-fadeIn"
       style={{ background: 'transparent' }}
       onClick={handleBackdropClick}

@@ -55,6 +55,11 @@ function clampWorkbenchChatPanelWidth(width: number): number {
   return Math.max(MIN_CHAT_PANEL_WIDTH, Math.min(MAX_CHAT_PANEL_WIDTH, Math.round(width)))
 }
 
+function clampWorkbenchSplitRatio(ratio: number): number {
+  if (!Number.isFinite(ratio)) return 50
+  return Math.max(20, Math.min(80, ratio))
+}
+
 function setShellWidth(selector: string, width: number) {
   const element = document.querySelector<HTMLElement>(selector)
   if (!element) return
@@ -125,32 +130,41 @@ function WorkbenchSplitResizeHandle({
 }
 
 export default function WorkbenchMode() {
-  const {
-    toggleSidebar,
-    toggleChatPanel,
-    setSidePanelWidth,
-    sidePanelWidths: rawSidePanelWidths,
-    sidebarVisible,
-    chatPanelVisible,
-    chatPanelWidth: rawChatPanelWidth,
-    sidePanelVariant,
-    setSidePanelVariant,
-    renamingPath,
-    creatingType,
-    workspaceRoot,
-    pinnedFolders,
-  } = useWorkspace()
-  const { agents, currentAgent, currentScopeId, loadConversation } = useAgent()
+  const toggleSidebar = useWorkspace((state) => state.toggleSidebar)
+  const toggleChatPanel = useWorkspace((state) => state.toggleChatPanel)
+  const setSidePanelWidth = useWorkspace((state) => state.setSidePanelWidth)
+  const rawSidePanelWidths = useWorkspace((state) => state.sidePanelWidths)
+  const sidebarVisible = useWorkspace((state) => state.sidebarVisible)
+  const chatPanelVisible = useWorkspace((state) => state.chatPanelVisible)
+  const rawChatPanelWidth = useWorkspace((state) => state.chatPanelWidth)
+  const sidePanelVariant = useWorkspace((state) => state.sidePanelVariant)
+  const setSidePanelVariant = useWorkspace((state) => state.setSidePanelVariant)
+  const renamingPath = useWorkspace((state) => state.renamingPath)
+  const creatingType = useWorkspace((state) => state.creatingType)
+  const workspaceRoot = useWorkspace((state) => state.workspaceRoot)
+  const pinnedFolders = useWorkspace((state) => state.pinnedFolders)
+  const agents = useAgent((state) => state.agents)
+  const currentAgent = useAgent((state) => state.currentAgent)
+  const currentScopeId = useAgent((state) => state.currentScopeId)
+  const loadConversation = useAgent((state) => state.loadConversation)
   const chatPanelWidth = clampWorkbenchChatPanelWidth(rawChatPanelWidth)
   const sidePanelWidths = useMemo(
     () => ({ ...rawSidePanelWidths, shared: clampWorkbenchSidePanelWidth(rawSidePanelWidths.shared) }),
     [rawSidePanelWidths],
   )
-  const { workbenchMode, splitMode, workbenchSplitRatio, setWorkbenchSplitRatio, setWorkbenchMode, setSplitMode } = useMode()
+  const workbenchMode = useMode((state) => state.workbenchMode)
+  const splitMode = useMode((state) => state.splitMode)
+  const workbenchSplitRatio = useMode((state) => state.workbenchSplitRatio)
+  const setWorkbenchSplitRatio = useMode((state) => state.setWorkbenchSplitRatio)
+  const setWorkbenchMode = useMode((state) => state.setWorkbenchMode)
+  const setSplitMode = useMode((state) => state.setSplitMode)
   const documentSplitTabId = useDocTabs(s => s.splitTabId)
   const navigate = useNavigate()
   const sceneRef = useRef<HTMLDivElement>(null)
   const splitContainerRef = useRef<HTMLDivElement>(null)
+  const splitPrimaryPaneRef = useRef<HTMLDivElement>(null)
+  const liveWorkbenchSplitRatioRef = useRef(clampWorkbenchSplitRatio(workbenchSplitRatio))
+  const workbenchSplitResizingRef = useRef(false)
   const liveSidebarWidthRef = useRef(sidePanelWidths.shared)
   const liveChatPanelWidthRef = useRef(chatPanelWidth)
   const restoreDocumentLayoutFreezeRef = useRef<(() => void) | null>(null)
@@ -250,6 +264,13 @@ export default function WorkbenchMode() {
   }, [chatPanelVisible, chatPanelWidth])
 
   useEffect(() => {
+    if (workbenchSplitResizingRef.current) return
+    const nextRatio = clampWorkbenchSplitRatio(workbenchSplitRatio)
+    liveWorkbenchSplitRatioRef.current = nextRatio
+    if (splitPrimaryPaneRef.current) splitPrimaryPaneRef.current.style.flexBasis = `${nextRatio}%`
+  }, [workbenchSplitRatio])
+
+  useEffect(() => {
     const setDocumentLayoutFrozen = (frozen: boolean) => {
       if (!frozen) {
         restoreDocumentLayoutFreezeRef.current?.()
@@ -279,9 +300,10 @@ export default function WorkbenchMode() {
     const containerWidth = splitContainerRef.current.offsetWidth
     if (containerWidth <= 0) return
     const deltaPercent = (delta / containerWidth) * 100
-    const currentRatio = useMode.getState().workbenchSplitRatio
-    setWorkbenchSplitRatio(currentRatio + deltaPercent)
-  }, [setWorkbenchSplitRatio])
+    const nextRatio = clampWorkbenchSplitRatio(liveWorkbenchSplitRatioRef.current + deltaPercent)
+    liveWorkbenchSplitRatioRef.current = nextRatio
+    if (splitPrimaryPaneRef.current) splitPrimaryPaneRef.current.style.flexBasis = `${nextRatio}%`
+  }, [])
 
   const initializeWorkspace = useCallback(async () => {
     try {
@@ -334,6 +356,18 @@ export default function WorkbenchMode() {
     setIsPanelResizing(resizing)
     setPanelResizingSignal(resizing)
   }, [])
+
+  const handleWorkbenchSplitResizeStateChange = useCallback((resizing: boolean) => {
+    if (resizing) {
+      workbenchSplitResizingRef.current = true
+      liveWorkbenchSplitRatioRef.current = clampWorkbenchSplitRatio(useMode.getState().workbenchSplitRatio)
+      handlePanelResizeStateChange(true)
+      return
+    }
+    workbenchSplitResizingRef.current = false
+    setWorkbenchSplitRatio(liveWorkbenchSplitRatioRef.current)
+    handlePanelResizeStateChange(false)
+  }, [handlePanelResizeStateChange, setWorkbenchSplitRatio])
 
   const handleIconClick = (icon: string) => {
     if (icon === 'user') {
@@ -527,6 +561,7 @@ export default function WorkbenchMode() {
       kind: 'hide-all',
       intentId,
       reason: 'mode-switch-prepare',
+      expectsAck: true,
     })
     if (!ackSource) return
 
@@ -676,7 +711,9 @@ export default function WorkbenchMode() {
       await hideBrowserBeforeModeCommit()
       if (requestId !== modeChangeRequestRef.current) return
     }
-    if (browserVisibilityTransition === 'enters') setIsMotionSettled(false)
+    // This split request supersedes any settle frame owned by an earlier mode
+    // request, so it must always publish a fresh unsettled -> settled cycle.
+    setIsMotionSettled(false)
     prepareModeScenePresentation(presentation)
     setSplitMode(decision.splitMode)
     reconcileBrowserVisibilityAfterModeDecision(requestId, {
@@ -684,11 +721,9 @@ export default function WorkbenchMode() {
       splitMode: decision.splitMode,
     })
     scheduleWorkbenchSurfaceRefresh()
-    if (browserVisibilityTransition === 'enters') {
-      window.requestAnimationFrame(() => {
-        if (requestId === modeChangeRequestRef.current) setIsMotionSettled(true)
-      })
-    }
+    window.requestAnimationFrame(() => {
+      if (requestId === modeChangeRequestRef.current) setIsMotionSettled(true)
+    })
   }, [
     beginModeChangeRequest,
     handleWorkbenchModeChange,
@@ -717,7 +752,9 @@ export default function WorkbenchMode() {
         await hideBrowserBeforeModeCommit()
         if (requestId !== modeChangeRequestRef.current) return
       }
-      if (browserVisibilityTransition === 'enters') setIsMotionSettled(false)
+      // Split toggles may invalidate a pending settle frame even when browser
+      // visibility itself is unchanged, so this request owns a fresh frame.
+      setIsMotionSettled(false)
       prepareModeScenePresentation('animated')
       setSplitMode(nextSplitMode)
       reconcileBrowserVisibilityAfterModeDecision(requestId, {
@@ -725,11 +762,9 @@ export default function WorkbenchMode() {
         splitMode: nextSplitMode,
       })
       scheduleWorkbenchSurfaceRefresh()
-      if (browserVisibilityTransition === 'enters') {
-        window.requestAnimationFrame(() => {
-          if (requestId === modeChangeRequestRef.current) setIsMotionSettled(true)
-        })
-      }
+      window.requestAnimationFrame(() => {
+        if (requestId === modeChangeRequestRef.current) setIsMotionSettled(true)
+      })
     })()
   }, [
     beginModeChangeRequest,
@@ -876,6 +911,7 @@ export default function WorkbenchMode() {
                   data-workbench-content-backdrop="true"
                 >
                   <div
+                    ref={splitPrimaryPaneRef}
                     className="workbench-split-pane flex flex-col min-w-0"
                     style={{
                       flexBasis: `${workbenchSplitRatio}%`,
@@ -895,7 +931,7 @@ export default function WorkbenchMode() {
                   </div>
                   <WorkbenchSplitResizeHandle
                     onResize={handleSplitResize}
-                    onResizeStateChange={handlePanelResizeStateChange}
+                    onResizeStateChange={handleWorkbenchSplitResizeStateChange}
                   />
                   <div className="workbench-split-pane flex-1 flex flex-col min-w-0" style={{ background: 'transparent' }}>
                     <WorkbenchModeOutlet

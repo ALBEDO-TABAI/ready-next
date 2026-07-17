@@ -43,5 +43,9 @@ test('WorkbenchMode wires the panel-resize signal into the shared ritual gate', 
   const source = readWorkspaceFile('src/renderer/pages/WorkbenchMode.tsx')
 
   assert.match(source, /setPanelResizingSignal\(resizing\)/)
-  assert.match(source, /onResizeStateChange=\{handlePanelResizeStateChange\}/)
+  assert.match(source, /onResizeStateChange=\{handleSidebarResizeStateChange\}/)
+  assert.match(source, /onResizeStateChange=\{handleWorkbenchSplitResizeStateChange\}/)
+  assert.match(source, /onResizeStateChange=\{handleChatResizeStateChange\}/)
+  assert.match(source, /handlePanelResizeStateChange\(true\)/)
+  assert.match(source, /handlePanelResizeStateChange\(false\)/)
 })

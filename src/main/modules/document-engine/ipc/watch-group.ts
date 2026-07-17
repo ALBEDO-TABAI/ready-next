@@ -1,12 +1,12 @@
 // Stage V V2.3f — document-engine WatchGroup channel cluster.
 //
 // Bundles the 1 channel that drives renderer-initiated workspace folder
-// watching plus its companion push emitter:
+// watching. The shared broadcaster owns the companion push emitter:
 //
 //   document:watchDirectories  (request → sync watcher set per sender,
 //                                returns the normalized watched paths)
-//   document:directoryChanged  (push → debounced fs.watch events fanned
-//                                back to the originating sender)
+//   document:directoryChanged  (push → coalesced changes fanned out by
+//                                directory-change-broadcast.ts)
 //
 // Handler body + supporting session helpers are lifted VERBATIM from
 // `ipc-handler.ts` (V2.3f follows the V2.3a/V2.3b/V2.3c/V2.3d/V2.3e move
@@ -15,22 +15,11 @@
 // event's `sender` (typed via electron's own `WebContents`) and the node
 // fs primitives.
 //
-// PUSH-SIDE DECISION (recorded for the V5 IPC contract gate):
-//   `session.sender.send('document:directoryChanged', …)` moves into this
-//   file alongside the request handler because:
-//     • the push site has no caller outside the watcher lifecycle (no
-//       other module emits `document:directoryChanged`);
-//     • the V5 gate (`scripts/check-ipc-contract.cjs`) detects PUSH via
-//       a textual `*.sender.send('literal', …)` scan across all `.ts`
-//       sources, so relocating the call from `ipc-handler.ts` to
-//       `ipc/watch-group.ts` keeps the channel literal visible on the
-//       main side and the preload-side `ipcRenderer.on('document:directoryChanged', …)`
-//       (`src/preload/index.ts`) continues to satisfy the pair.
-//   The host therefore loses BOTH the request handler AND the push
-//   emitter; the only watch-related state that stays on `ipc-handler.ts`
-//   is the import of `FSWatcher`/`watch`/`statSync`/`existsSync` IF other
-//   handlers still need them (they do — `document:read` and the file I/O
-//   group share `existsSync`/`statSync`).
+// PUSH-SIDE DECISION:
+//   This group contributes watcher events to the shared broadcaster. The
+//   broadcaster is the single push authority for watcher, board, file I/O,
+//   and tool-originated directory changes, so one burst becomes one renderer
+//   notification per live sender instead of one notification per producer.
 //
 // The group ships a single channel because the watcher session lifecycle
 // (per-sender Map of `FSWatcher`s + debounced pending-paths set + the
@@ -39,16 +28,19 @@
 // reach into a session model they do not consume.
 import { existsSync, statSync, watch, type FSWatcher } from 'fs'
 import type { IpcMain, WebContents } from 'electron'
+import {
+  cancelDirectoryChangeBroadcast,
+  queueDirectoryChanged,
+} from './directory-change-broadcast'
 import type { IpcChannelGroup, IpcDisposeHandle } from './types'
 
 /**
  * Per-group deps. The watch handler reads only the engine mock flag (to
  * short-circuit dialog-free unit runs) plus an injectable debounce window
  * so tests can pin a deterministic flush interval. Everything else
- * (fs.watch, sender.send) is a direct node/electron primitive that does
- * NOT belong on the dep surface: lifting them would force tests to mock
- * the standard library to no benefit, and the V5 gate's textual
- * `sender.send` scan requires the call site to stay literal.
+ * fs.watch is a direct node primitive that does NOT belong on the dep
+ * surface: lifting it would force tests to mock the standard library to no
+ * benefit. Push delivery belongs to the shared directory broadcaster.
  */
 export interface WatchGroupDeps {
   /** Whether the engine is running in mock mode (no real fs.watch). */
@@ -75,8 +67,6 @@ const DEFAULT_DEBOUNCE_MS = 140
 type DirectoryWatchSession = {
   sender: WebContents
   watchers: Map<string, FSWatcher>
-  debounceTimer: NodeJS.Timeout | null
-  pendingPaths: Set<string>
 }
 
 export const watchGroup: IpcChannelGroup<WatchGroupDeps> = {
@@ -104,9 +94,7 @@ export const watchGroup: IpcChannelGroup<WatchGroupDeps> = {
     const closeDirectoryWatchSession = (senderId: number) => {
       const session = directoryWatchSessions.get(senderId)
       if (!session) return
-      if (session.debounceTimer) {
-        clearTimeout(session.debounceTimer)
-      }
+      cancelDirectoryChangeBroadcast(session.sender)
       session.watchers.forEach((watcher) => watcher.close())
       directoryWatchSessions.delete(senderId)
     }
@@ -118,8 +106,6 @@ export const watchGroup: IpcChannelGroup<WatchGroupDeps> = {
       const session: DirectoryWatchSession = {
         sender,
         watchers: new Map<string, FSWatcher>(),
-        debounceTimer: null,
-        pendingPaths: new Set<string>(),
       }
 
       sender.once('destroyed', () => {
@@ -131,23 +117,7 @@ export const watchGroup: IpcChannelGroup<WatchGroupDeps> = {
     }
 
     const queueDirectoryWatchEvent = (session: DirectoryWatchSession, watchedPath: string) => {
-      session.pendingPaths.add(watchedPath)
-      if (session.debounceTimer) return
-
-      session.debounceTimer = setTimeout(() => {
-        session.debounceTimer = null
-        if (session.sender.isDestroyed()) return
-        const paths = Array.from(session.pendingPaths)
-        session.pendingPaths.clear()
-        // PUSH: `document:directoryChanged` — paired with
-        // `ipcRenderer.on('document:directoryChanged', …)` in
-        // `src/preload/index.ts`. The V5 IPC contract gate matches this
-        // literal via its `*.sender.send('literal', …)` scan.
-        session.sender.send('document:directoryChanged', {
-          paths,
-          timestamp: Date.now(),
-        })
-      }, debounceMs)
+      queueDirectoryChanged(session.sender, [watchedPath], debounceMs)
     }
 
     const syncWatchedDirectories = (sender: WebContents, rawPaths: string[]): string[] => {

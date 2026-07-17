@@ -33,7 +33,7 @@ import type { OriginInteractionSignal } from '../browser-engine/origin-interacti
 
 export { normalizeDownloadTargets, pinimgOriginalsUrl } from './browser-media-download'
 
-const logger = createRotatingLogger('ready-tools.log')
+const logger = createRotatingLogger('ready-tools.log', { buffered: true })
 const actionExecutor = new BrowserActionExecutor()
 
 function log(message: string): void {

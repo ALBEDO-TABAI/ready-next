@@ -94,6 +94,13 @@ export class BrowserFileChooserGuard {
     }
   }
 
+  disposeTab(tabId: string): void {
+    const record = this.armedTabs.get(tabId)
+    if (!record) return
+    this.armedTabs.delete(tabId)
+    record.unsubscribe()
+  }
+
   /** Test-only 可见性。 */
   get armedTabIds(): string[] {
     return Array.from(this.armedTabs.keys())

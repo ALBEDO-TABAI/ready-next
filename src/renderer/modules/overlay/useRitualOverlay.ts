@@ -45,9 +45,9 @@ export const useRitualOverlayStore = create<RitualOverlayState>((set) => ({
 }))
 
 const MODE_SWITCH_TIMELINE: RitualTimelineConfig = {
-  enterDurationMs: 120,
-  holdingMinDurationMs: 100,
-  leaveDurationMs: 100,
+  enterDurationMs: 60,
+  holdingMinDurationMs: 0,
+  leaveDurationMs: 60,
 }
 
 const THEME_TRANSITION_TIMELINE: RitualTimelineConfig = {

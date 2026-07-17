@@ -274,6 +274,7 @@ export default function RssTimeHintBanner({
 
       {open && (
         <div
+          data-ready-native-overlay=""
           className="rss-time-hint-modal-backdrop fixed inset-0 z-50 flex items-center justify-center"
           style={{ background: 'rgba(0,0,0,0.36)' }}
           onClick={handleClose}

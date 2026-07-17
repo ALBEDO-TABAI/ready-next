@@ -46,7 +46,7 @@ function makeSendBoundsImmediate(opts: {
   secondary: Rect
   emit: (intent: BrowserViewIntent) => void
 }) {
-  return async function sendBoundsImmediate(syncMode: 'transient' | 'settled') {
+  return async function sendBoundsImmediate() {
     if (!opts.primary) return
     if (opts.activeTabId) {
       opts.emit({
@@ -54,7 +54,6 @@ function makeSendBoundsImmediate(opts: {
         intentId: nextIntentId(),
         tabId: opts.activeTabId,
         bounds: { x: opts.primary.x, y: opts.primary.y, w: opts.primary.width, h: opts.primary.height },
-        syncMode,
       })
     }
     if (opts.secondary && opts.splitTabId && opts.splitTabId !== opts.activeTabId) {
@@ -63,7 +62,6 @@ function makeSendBoundsImmediate(opts: {
         intentId: nextIntentId(),
         tabId: opts.splitTabId,
         bounds: { x: opts.secondary.x, y: opts.secondary.y, w: opts.secondary.width, h: opts.secondary.height },
-        syncMode,
       })
     }
   }
@@ -79,7 +77,7 @@ test('split mode with both panes mounted: one sendBoundsImmediate call emits bot
     emit: (intent) => emitted.push(intent),
   })
 
-  await send('transient')
+  await send()
 
   assert.equal(emitted.length, 2, 'exactly two intents per drag tick')
   assert.equal(emitted[0].kind, 'set-bounds')
@@ -107,7 +105,7 @@ test('split mode with secondary pane unmounted: only primary intent fires (no sp
     emit: (intent) => emitted.push(intent),
   })
 
-  await send('settled')
+  await send()
 
   assert.equal(emitted.length, 1)
   assert.equal(emitted[0].kind, 'set-bounds')
@@ -123,7 +121,7 @@ test('no split active: only primary intent fires even if a secondary measurement
     emit: (intent) => emitted.push(intent),
   })
 
-  await send('settled')
+  await send()
 
   assert.equal(emitted.length, 1)
   assert.equal(emitted[0].kind, 'set-bounds')
@@ -139,7 +137,7 @@ test('split with same primary+secondary tab id is a no-op for the secondary inte
     emit: (intent) => emitted.push(intent),
   })
 
-  await send('transient')
+  await send()
 
   assert.equal(emitted.length, 1)
   assert.equal(emitted[0].kind, 'set-bounds')

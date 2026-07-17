@@ -1104,6 +1104,7 @@ export default function CalendarMode({
             same `handleSubscribeUrl` IPC path. */}
         {menuSubscribeOpen && (
           <div
+            data-ready-native-overlay=""
             role="dialog"
             aria-modal="true"
             style={{
@@ -1189,6 +1190,7 @@ export default function CalendarMode({
 
         {remoteSuggestion && (
           <div
+            data-ready-native-overlay=""
             role="status"
             aria-live="polite"
             style={{
@@ -1297,6 +1299,7 @@ export default function CalendarMode({
             and modal overlay (modal z-50). */}
         {reminderCapsule && (
           <div
+            data-ready-native-overlay=""
             role="status"
             aria-live="polite"
             style={{

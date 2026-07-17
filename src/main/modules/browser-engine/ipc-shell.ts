@@ -5,6 +5,7 @@ import {
   BROWSER_VIEW_INTENT_CHANNEL,
   type BrowserViewIntent,
 } from '../../../shared/browser-view-intent'
+import type { RegisterDormantBrowserTabsRequest, RegisterDormantBrowserTabsResult } from '../../../shared/browser-tab-session'
 import { closeBrowserTabAndNotify } from './tab-close-notifier'
 
 interface BrowserShellView {
@@ -39,10 +40,12 @@ interface BrowserShellIPCController {
   activeTabId: string | null
   viewBounds: { x: number; y: number; width: number; height: number }
   createTab(url: string, options?: { background?: boolean }): Promise<{ success: boolean; tabId?: string; error?: string }>
+  registerDormantTabs(request: RegisterDormantBrowserTabsRequest): RegisterDormantBrowserTabsResult
   openForCaptureTarget(url: string): Promise<{ success: boolean; tabId?: string; reused?: boolean; error?: string }>
   navigate(tabId: string | null, url: string): Promise<{ success: boolean; error?: string }>
   reorderTabs(tabIds: string[]): { success: boolean; error?: string }
   closeTab(tabId: string): { success: boolean; error?: string }
+  notifyTabClosed(tabId: string): void
   switchTab(tabId: string): {
     success: boolean
     error?: string
@@ -109,6 +112,14 @@ interface BrowserShellIPCController {
 }
 
 export function setupBrowserShellIPC(controller: BrowserShellIPCController): void {
+  ipcMain.handle('browser:registerDormantTabs', (_, request: RegisterDormantBrowserTabsRequest) => {
+    try {
+      return controller.registerDormantTabs(request)
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+
   ipcMain.handle('browser:createTab', async (_, url: string, options?: { background?: boolean }) => {
     try {
       const result = await controller.createTab(url, options)
@@ -129,7 +140,8 @@ export function setupBrowserShellIPC(controller: BrowserShellIPCController): voi
   })
 
   ipcMain.handle('browser:closeTab', (event, tabId: string) => {
-    return closeBrowserTabAndNotify(controller, event.sender, tabId)
+    void event
+    return closeBrowserTabAndNotify(controller, tabId)
   })
 
   ipcMain.handle('browser:switchTab', (_, tabId: string) => {
@@ -193,6 +205,7 @@ export function setupBrowserShellIPC(controller: BrowserShellIPCController): voi
   // need allowlist entries).
   ipcMain.on(BROWSER_VIEW_INTENT_CHANNEL, (event, intent: BrowserViewIntent) => {
     controller.applyBrowserViewIntent(intent)
+    if (!('expectsAck' in intent) || intent.expectsAck !== true) return
     try {
       // Literal channel name — keep in sync with
       // BROWSER_VIEW_INTENT_ACK_CHANNEL in shared/browser-view-intent.ts.

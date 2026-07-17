@@ -12,6 +12,10 @@ import { type DocTab, useDocTabs } from '../../stores/useDocTabs'
 import { useWorkspace } from '../../stores/useWorkspace'
 import { EBOOK_READING_STATE_KEY } from '../../modules/file-emergence/readingIntentContext'
 import { isEpubExtension } from '../../../shared/ebook'
+import {
+  EbookReadingStateWriter,
+  type EbookReaderState,
+} from '../../modules/document/ebookReadingStateWriter'
 
 type FoliateViewElement = HTMLElement & {
   open(book: unknown): Promise<void>
@@ -28,15 +32,6 @@ type FoliateViewElement = HTMLElement & {
     metadata?: { title?: unknown }
     transformTarget?: EventTarget
   }
-}
-
-type ReaderState = {
-  path: string
-  size: number
-  modifiedTime: number
-  fraction?: number
-  index?: number
-  updatedAt: number
 }
 
 type ImportState =
@@ -115,15 +110,15 @@ async function makeBookFromLocalFile(
   return await makeBook(binaryData?.localUrl || fileUrl) as FoliateViewElement['book']
 }
 
-function readStateStore(): ReaderState[] {
+function readStateStore(): EbookReaderState[] {
   try {
     const parsed = JSON.parse(localStorage.getItem(EBOOK_READING_STATE_KEY) || '[]') as unknown
     if (!Array.isArray(parsed)) return []
-    return parsed.filter((item): item is ReaderState => (
+    return parsed.filter((item): item is EbookReaderState => (
       typeof item === 'object' &&
       item !== null &&
-      typeof (item as ReaderState).path === 'string' &&
-      typeof (item as ReaderState).updatedAt === 'number'
+      typeof (item as EbookReaderState).path === 'string' &&
+      typeof (item as EbookReaderState).updatedAt === 'number'
     ))
   } catch {
     // silent-catch: corrupted cached reader state should reset to an empty cache.
@@ -131,7 +126,7 @@ function readStateStore(): ReaderState[] {
   }
 }
 
-function findReaderState(path: string, size: number, modifiedTime: number): ReaderState | null {
+function findReaderState(path: string, size: number, modifiedTime: number): EbookReaderState | null {
   return readStateStore().find((item) => (
     item.path === path &&
     item.size === size &&
@@ -139,7 +134,7 @@ function findReaderState(path: string, size: number, modifiedTime: number): Read
   )) || null
 }
 
-function saveReaderState(next: ReaderState): void {
+function saveReaderState(next: EbookReaderState): void {
   try {
     const rest = readStateStore().filter((item) => item.path !== next.path)
     const merged = [next, ...rest]
@@ -212,7 +207,8 @@ export default function EbookViewer({ tab, fileUrl, currentExt }: EbookViewerPro
   const viewRef = useRef<FoliateViewElement | null>(null)
   const fileMetaRef = useRef<{ size: number; modifiedTime: number }>({ size: 0, modifiedTime: 0 })
   const fontSizeRef = useRef(DEFAULT_FONT_SIZE)
-  const latestReaderStateRef = useRef<ReaderState | null>(null)
+  const latestReaderStateRef = useRef<EbookReaderState | null>(null)
+  const [readingStateWriter] = useState(() => new EbookReadingStateWriter(saveReaderState))
   const openTab = useDocTabs((state) => state.openTab)
   const revealFile = useWorkspace((state) => state.revealFile)
 
@@ -286,7 +282,7 @@ export default function EbookViewer({ tab, fileUrl, currentExt }: EbookViewerPro
             updatedAt: Date.now(),
           }
           latestReaderStateRef.current = nextState
-          saveReaderState(nextState)
+          readingStateWriter.queue(nextState)
         })
 
         containerRef.current.replaceChildren(view)
@@ -321,18 +317,20 @@ export default function EbookViewer({ tab, fileUrl, currentExt }: EbookViewerPro
     return () => {
       cancelled = true
       if (latestReaderStateRef.current) {
-        saveReaderState({ ...latestReaderStateRef.current, updatedAt: Date.now() })
+        readingStateWriter.queue({ ...latestReaderStateRef.current, updatedAt: Date.now() })
       }
+      readingStateWriter.flush()
       disposeView(viewRef.current)
       viewRef.current = null
     }
-  }, [applyReadingStyle, currentExt, fileUrl, tab.path])
+  }, [applyReadingStyle, currentExt, fileUrl, readingStateWriter, tab.path])
 
   useEffect(() => {
     const flush = () => {
       if (latestReaderStateRef.current) {
-        saveReaderState({ ...latestReaderStateRef.current, updatedAt: Date.now() })
+        readingStateWriter.queue({ ...latestReaderStateRef.current, updatedAt: Date.now() })
       }
+      readingStateWriter.flush()
     }
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'hidden') flush()
@@ -345,7 +343,7 @@ export default function EbookViewer({ tab, fileUrl, currentExt }: EbookViewerPro
       window.removeEventListener('beforeunload', flush)
       document.removeEventListener('visibilitychange', handleVisibilityChange)
     }
-  }, [])
+  }, [readingStateWriter])
 
   const handleImport = useCallback(async () => {
     if (!tab.path || !canImport || importState.kind === 'running') return

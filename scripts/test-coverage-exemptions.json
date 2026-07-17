@@ -70,6 +70,60 @@
   ],
   "c4Exempt": [
     {
+      "path": "src/__tests__/browser-capability-service-structure.test.ts",
+      "reason": "Browser capability structure coverage runs extraction against JSDOM pages with a directly constructed capability service. It never opens getDatabase or a repository; only the widened browser service import graph reaches database.ts, so host-Node coverage must remain active.",
+      "since": "2026-07-17",
+      "owner": "browser-performance-dynamic-load"
+    },
+    {
+      "path": "src/__tests__/browser-capability-service.test.ts",
+      "reason": "Browser capability coverage uses JSDOM and synthetic browser contents to exercise page-map and observation behavior. No path opens getDatabase or better-sqlite3; only transitive browser service imports trigger C4, so host-Node coverage must remain active.",
+      "since": "2026-07-17",
+      "owner": "browser-performance-dynamic-load"
+    },
+    {
+      "path": "src/__tests__/browser-dialog-service.test.ts",
+      "reason": "Browser dialog coverage injects fake CDP sessions and a fake BrowserController, including the semantic dispatch path. It never creates the production database or reads a repository; only browser-tools transitive imports trigger C4, so host-Node coverage must remain active.",
+      "since": "2026-07-17",
+      "owner": "browser-performance-dynamic-load"
+    },
+    {
+      "path": "src/__tests__/browser-download-hardening.test.ts",
+      "reason": "Browser download hardening coverage uses temporary files, stubbed fetch responses, synthetic DownloadItems, and injected controller callbacks. It never opens getDatabase or better-sqlite3; only transitive browser controller types and helpers trigger C4.",
+      "since": "2026-07-17",
+      "owner": "browser-performance-dynamic-load"
+    },
+    {
+      "path": "src/__tests__/browser-high-control-guard.test.ts",
+      "reason": "High-control browser coverage dispatches against an injected fake BrowserController and in-memory power-policy state. No path opens getDatabase or a repository; only the semantic browser-tools import graph reaches database.ts, so host-Node coverage must remain active.",
+      "since": "2026-07-17",
+      "owner": "browser-performance-dynamic-load"
+    },
+    {
+      "path": "src/__tests__/browser-power-tools.test.ts",
+      "reason": "Browser Power coverage injects fake controllers, an in-memory grant policy, explicit audit callbacks, and a deliberately failing persistent preflight. It never falls through to the production database; only browser-tools transitive imports trigger C4, so host-Node coverage must remain active.",
+      "since": "2026-07-17",
+      "owner": "browser-performance-dynamic-load"
+    },
+    {
+      "path": "src/__tests__/browser-script-m1-net.test.ts",
+      "reason": "Browser script and CDP policy coverage uses a fake BrowserController plus in-memory grant state to verify effect inference. No test path opens getDatabase or better-sqlite3; only semantic browser-tools transitive imports trigger C4.",
+      "since": "2026-07-17",
+      "owner": "browser-performance-dynamic-load"
+    },
+    {
+      "path": "src/__tests__/browser-semantic-tool-behavior.test.ts",
+      "reason": "Semantic browser behavior coverage uses fake controllers and direct pure helpers for forms, observation, screenshots, tabs, pointer geometry, and origin budgets. It never opens the production database; only the browser-tools import graph triggers C4, so host-Node coverage must remain active.",
+      "since": "2026-07-17",
+      "owner": "browser-performance-dynamic-load"
+    },
+    {
+      "path": "src/__tests__/browser-system-tools.test.ts",
+      "reason": "Browser system-tool coverage injects fake sessions, controllers, permissions, task roots, and temporary files. No test path opens getDatabase or better-sqlite3; only semantic browser-tools transitive imports trigger C4, so host-Node coverage must remain active.",
+      "since": "2026-07-17",
+      "owner": "browser-performance-dynamic-load"
+    },
+    {
       "path": "src/__tests__/app-settings-repository-atomic.test.ts",
       "reason": "AI workspace atomicity coverage injects a transaction-aware in-memory settings database into AppSettingsRepository and deliberately fails the second settings write to prove all keys roll back. No test path calls getDatabase or opens better-sqlite3; host-Node coverage must remain active for the exact transaction boundary.",
       "since": "2026-07-17",

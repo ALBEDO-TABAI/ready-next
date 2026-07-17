@@ -114,6 +114,18 @@ test('disarmAll disables interception, unsubscribes, and clears armed tabs', asy
   assert.deepStrictEqual(guard.armedTabIds, ['tab-7'])
 })
 
+test('tab disposal synchronously drops the old interception subscription', async () => {
+  const fake = makeFakeHost()
+  const cdp = new BrowserCdpSessionService(fake.host)
+  const guard = new BrowserFileChooserGuard({ cdp })
+  await guard.arm('tab-7')
+
+  guard.disposeTab('tab-7')
+
+  assert.deepEqual(guard.armedTabIds, [])
+  assert.equal(fake.listeners.size, 0)
+})
+
 test('arm failure degrades silently (DevTools attach conflict)', async () => {
   const fake = makeFakeHost()
   const host = {

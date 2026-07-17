@@ -471,6 +471,7 @@ export default function MarkdownSelectionToolbar({
   return createPortal(
     <div
       data-ready-md-toolbar=""
+      data-ready-native-overlay=""
       role="toolbar"
       style={{
         position: 'fixed',

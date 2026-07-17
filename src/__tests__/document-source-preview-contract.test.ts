@@ -11,6 +11,7 @@ function readWorkspaceFile(path: string): string {
 test('document edit mode uses raw text editing while preview mode keeps rendered markdown presentation', () => {
   const markdownEditor = readWorkspaceFile('src/renderer/components/document/MarkdownEditor.tsx')
   const notePreview = readWorkspaceFile('src/renderer/components/document/NotePreview.tsx')
+  const mermaidPreview = readWorkspaceFile('src/renderer/components/document/MermaidPreviewBlock.tsx')
 
   assert.match(markdownEditor, /viewMode === 'edit'/)
   assert.match(markdownEditor, /<textarea/)
@@ -20,24 +21,16 @@ test('document edit mode uses raw text editing while preview mode keeps rendered
   assert.match(markdownEditor, /<NotePreview[\s\S]*content=\{tab\.content\}/)
   assert.match(notePreview, /memo,/)
   assert.match(notePreview, /export default memo\(NotePreview\)/)
-  const mermaidErrorBranch = notePreview.slice(
-    notePreview.indexOf('if (error)'),
-    notePreview.indexOf('return (', notePreview.indexOf('if (error)') + 1),
-  )
-  assert.doesNotMatch(mermaidErrorBranch, /note-preview-markdown-code/)
-  const mermaidLoadingBranch = notePreview.slice(
-    notePreview.indexOf('note-preview-mermaid__loading'),
-    notePreview.indexOf('function BrokenWidgetFallback'),
-  )
-  assert.doesNotMatch(mermaidLoadingBranch, /note-preview-markdown-code/)
-  assert.doesNotMatch(mermaidLoadingBranch, /\{code\}/)
+  assert.doesNotMatch(mermaidPreview, /note-preview-markdown-code/)
+  assert.match(mermaidPreview, /note-preview-mermaid__loading[^>]*>正在渲染图表…<\/div>/)
 })
 
 test('document save failures surface a visible alert and keep the tab dirty', () => {
   const markdownEditor = readWorkspaceFile('src/renderer/components/document/MarkdownEditor.tsx')
 
   assert.match(markdownEditor, /const \[saveError, setSaveError\] = useState<string \| null>\(null\)/)
-  assert.match(markdownEditor, /setSaveError\(`保存失败：/)
+  assert.match(markdownEditor, /setSaveError\(outcome\.error\)/)
+  assert.match(markdownEditor, /setSaveError\(error instanceof Error \? error\.message : String\(error\)\)/)
   assert.match(markdownEditor, /role="alert"/)
   assert.match(markdownEditor, /saveState === 'error' && saveError/)
   assert.doesNotMatch(markdownEditor, /catch \{\s*setSaveState\('error'\)\s*\}/)
@@ -47,16 +40,14 @@ test('document widget-only state changes enter shared tab content so clean markd
   const markdownEditor = readWorkspaceFile('src/renderer/components/document/MarkdownEditor.tsx')
 
   assert.match(markdownEditor, /const saveInFlightRef = useRef\(false\)/)
-  assert.match(markdownEditor, /if \(!tab\.path \|\| !canSave \|\| !tab\.isDirty \|\| saveInFlightRef\.current\) return/)
-  assert.match(markdownEditor, /const committed = commitTabSaveSnapshot\(tab\.id, baseContent, nextContent\)/)
-  assert.match(markdownEditor, /setSaveState\(committed \? 'saved' : 'idle'\)/)
+  assert.match(markdownEditor, /saveDocumentTabSnapshot\(\{/)
+  assert.match(markdownEditor, /registerDocumentSaveHandler\(tab\.id, saveCurrentTab\)/)
   assert.match(markdownEditor, /const widgetStatesRef = useRef\(widgetStates\)/)
   assert.match(markdownEditor, /const tabContentRef = useRef\(tab\.content\)/)
   assert.match(markdownEditor, /const nextWidgetStates = \{[\s\S]*\.\.\.widgetStatesRef\.current,[\s\S]*\[getWidgetPersistenceKey\(widgetTitle, widgetCode\)\]: widgetState,[\s\S]*\}/)
   assert.match(markdownEditor, /widgetStatesRef\.current = nextWidgetStates/)
   assert.match(markdownEditor, /const baseContent = tabContentRef\.current[\s\S]*const nextContent = mergeWidgetStateMapIntoContent\(baseContent, nextWidgetStates\)/)
-  assert.match(markdownEditor, /if \(nextContent !== baseContent\) \{[\s\S]*tabContentRef\.current = nextContent[\s\S]*updateTabContent\(tab\.id, nextContent\)[\s\S]*\}/)
-  assert.match(markdownEditor, /mergeWidgetStateMapIntoContent\(baseContent, widgetStatesRef\.current\)/)
+  assert.match(markdownEditor, /if \(nextContent !== baseContent\) \{[\s\S]*replaceEditorContent\(nextContent\)[\s\S]*\}/)
   assert.doesNotMatch(markdownEditor, /widgetStateDirty/)
 })
 
@@ -77,6 +68,7 @@ test('document source editor soft-wraps long markdown lines inside narrow split 
 test('document edit and preview modes share reading scroll position when remounted', () => {
   const markdownEditor = readWorkspaceFile('src/renderer/components/document/MarkdownEditor.tsx')
   const documentMode = readWorkspaceFile('src/renderer/pages/modes/DocumentMode.tsx')
+  const scrollRuntime = readWorkspaceFile('src/renderer/modules/document/documentScrollRuntime.ts')
 
   assert.match(markdownEditor, /const documentScrollKey = useMemo\(\(\) => tab\.path \|\| tab\.id, \[tab\.id, tab\.path\]\)/)
   assert.match(markdownEditor, /data-ready-document-scroll-key=\{documentScrollKey\}/)
@@ -91,14 +83,17 @@ test('document edit and preview modes share reading scroll position when remount
   assert.match(documentMode, /onChange=\{handleEditorModeChange\}/)
   assert.match(documentMode, /\[data-ready-document-scroll-key\]/)
   assert.match(documentMode, /findCurrentScrollElement\(scope\)/)
-  assert.match(documentMode, /anchorTitle: anchor\?\.anchorTitle \|\| null/)
-  assert.match(documentMode, /restoreAnchorScroll\(element, snapshot, content\)/)
-  assert.match(documentMode, /captureMarkdownLineAnchor\(content, lineNumber\)/)
-  assert.match(documentMode, /resolveMarkdownLineFromAnchor\(content, snapshot\)/)
+  assert.match(documentMode, /captureElementScroll\(element, content, options\)/)
+  assert.match(documentMode, /restoreElementScroll\(element, snapshot, content\)/)
+  assert.match(scrollRuntime, /anchorTitle: anchor\?\.anchorTitle \|\| null/)
+  assert.match(scrollRuntime, /restoreAnchorScroll\(element, snapshot, content\)/)
+  assert.match(scrollRuntime, /captureMarkdownLineAnchor\(content, lineNumber\)/)
+  assert.match(scrollRuntime, /resolveMarkdownLineFromAnchor\(content, snapshot\)/)
 
   const notePreview = readWorkspaceFile('src/renderer/components/document/NotePreview.tsx')
+  const mermaidPreview = readWorkspaceFile('src/renderer/components/document/MermaidPreviewBlock.tsx')
   assert.match(notePreview, /data-ready-heading-title=\{extractMarkdownText\(children\)\}/)
-  assert.match(notePreview, /data-ready-mermaid="true"/)
+  assert.match(mermaidPreview, /data-ready-mermaid="true"/)
 })
 
 test('document PDF and mark drafts keep reading context across remounts', () => {
@@ -117,12 +112,14 @@ test('document PDF and mark drafts keep reading context across remounts', () => 
   assert.match(panels, /marksRequestSeqRef/)
 
   assert.match(ebookViewer, /latestReaderStateRef/)
-  assert.match(ebookViewer, /saveReaderState\(\{ \.\.\.latestReaderStateRef\.current, updatedAt: Date\.now\(\) \}\)/)
+  assert.match(ebookViewer, /readingStateWriter\.queue\(\{ \.\.\.latestReaderStateRef\.current, updatedAt: Date\.now\(\) \}\)/)
+  assert.match(ebookViewer, /readingStateWriter\.flush\(\)/)
   assert.match(ebookViewer, /document\.addEventListener\('visibilitychange', handleVisibilityChange\)/)
 })
 
 test('document preview shows repair affordances instead of raw broken visual source', () => {
   const notePreview = readWorkspaceFile('src/renderer/components/document/NotePreview.tsx')
+  const mermaidPreview = readWorkspaceFile('src/renderer/components/document/MermaidPreviewBlock.tsx')
   const parser = readWorkspaceFile('src/renderer/components/document/note-preview-parser.ts')
   const sharedParser = readWorkspaceFile('src/shared/document-widget-parse.ts')
 
@@ -130,7 +127,7 @@ test('document preview shows repair affordances instead of raw broken visual sou
   assert.match(parser, /type: 'widget_error'/)
   assert.match(notePreview, /data-ready-widget-error="true"/)
   assert.match(notePreview, /data-ready-widget-repair="true"/)
-  assert.match(notePreview, /data-ready-mermaid-render-error=\{error\}/)
+  assert.match(mermaidPreview, /data-ready-mermaid-render-error=\{error\}/)
   const brokenWidgetBranch = notePreview.slice(
     notePreview.indexOf('function BrokenWidgetFallback'),
     notePreview.indexOf('function isMermaidPreChildren'),
@@ -176,7 +173,6 @@ test('document split resize applies live width without rerendering document pane
   assert.match(documentMode, /const restoreDocumentLayoutFreezeRef = useRef<\(\(\) => void\) \| null>\(null\)/)
   assert.match(documentMode, /freezeVisibleDocumentLayoutWidths\(\)/)
   assert.match(documentMode, /captureVisibleDocumentScrollPositions\(\{ includeAnchor: false \}\)/)
-  assert.match(documentMode, /options\?\.includeAnchor === false[\s\S]*\? null[\s\S]*: captureTextareaAnchor\(element, content\) \|\| capturePreviewAnchor\(element\)/)
   assert.match(documentMode, /primarySplitPaneRef\.current\.style\.flexBasis = `\$\{nextRatio\}%`/)
   assert.match(documentMode, /onResizeStateChange=\{handleSplitResizeStateChange\}/)
   assert.match(documentMode, /setDocumentSplitRatio\(nextRatio\)/)

@@ -8,6 +8,7 @@ export interface BrowserTabSwitchExecutorResult {
   title?: string
   domain?: string
   favicon?: string | null
+  profile?: string | null
   owner?: 'manual' | 'agent'
   required?: boolean
   activity?: 'idle' | 'running' | 'attention'
@@ -70,6 +71,7 @@ export function createBrowserTabSwitchExecutor({
       title: result.title || tab?.title || '',
       domain: result.domain,
       favicon: result.favicon || undefined,
+      profile: result.profile || null,
       owner: result.owner,
       required: result.required,
       activity: result.activity,

@@ -79,6 +79,7 @@ export const LiquidFloatingPanel = forwardRef<HTMLDivElement, LiquidFloatingPane
     return (
       <div
         {...props}
+        data-ready-native-overlay=""
         ref={ref}
         className={classes}
         style={{

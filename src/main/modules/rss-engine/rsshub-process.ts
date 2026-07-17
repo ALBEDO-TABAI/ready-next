@@ -16,6 +16,7 @@ import {
   killWorkerProcessTree,
   type KillFn,
 } from './rsshub-process-cleanup'
+import { RSSHubIdleLifecycle } from './rsshub-idle-lifecycle'
 
 /**
  * Production kill seam for the worker. Wraps `process.kill` so the helper
@@ -74,6 +75,7 @@ const DEFAULT_PORT = 1200
 const MAX_RESTARTS = 3
 const MAX_PORT_SCAN = 50
 const RESTART_DELAY_MS = 5000
+const RSSHUB_IDLE_STOP_MS = 15 * 60_000
 const START_TIMEOUT_MS = 30000
 const STOP_TIMEOUT_MS = 5000
 const DEFAULT_PUPPETEER_CHROME_BUILD = '136.0.7103.49'
@@ -88,13 +90,21 @@ function isAddrInUseError(error: unknown): boolean {
   return message.includes('EADDRINUSE') || message.includes('address already in use')
 }
 
-class RSSHubManager {
+export class RSSHubManager {
   private child: ChildProcess | null = null
   private port = 0
   private state: RSSHubState = 'stopped'
   private restartCount = 0
   private restartTimer: ReturnType<typeof setTimeout> | null = null
   private startPromise: Promise<number> | null = null
+  private readonly idleLifecycle = new RSSHubIdleLifecycle({
+    idleMs: RSSHUB_IDLE_STOP_MS,
+    onIdle: () => {
+      void this.stop().catch((error) => {
+        console.warn(`[rsshub] idle stop failed: ${error instanceof Error ? error.message : String(error)}`)
+      })
+    },
+  })
   private stopping = false
   private externalWorker = false
   private lastError: string | null = null
@@ -128,7 +138,9 @@ class RSSHubManager {
     this.startPromise = this.startWithPortFallback(preferredPort).finally(() => {
       this.startPromise = null
     })
-    return this.startPromise
+    const port = await this.startPromise
+    this.idleLifecycle.setRunning(true)
+    return port
   }
 
   private async startWithPortFallback(preferredPort: number): Promise<number> {
@@ -480,7 +492,8 @@ class RSSHubManager {
         if (this.stopping) {
           return
         }
-        if (wasRunning && code !== 0 && this.restartCount < MAX_RESTARTS) {
+        this.idleLifecycle.setRunning(false)
+        if (wasRunning && code !== 0 && this.idleLifecycle.hasDemand() && this.restartCount < MAX_RESTARTS) {
           this.recordRuntimeError(`RSSHub exited unexpectedly (code=${code}, signal=${signal})`)
           this.restartCount++
           console.warn(
@@ -500,6 +513,7 @@ class RSSHubManager {
 
   async stop(): Promise<void> {
     this.stopping = true
+    this.idleLifecycle.setRunning(false)
     if (this.restartTimer) {
       clearTimeout(this.restartTimer)
       this.restartTimer = null
@@ -513,6 +527,7 @@ class RSSHubManager {
         // ignored; we're stopping anyway
       }
     }
+    this.idleLifecycle.setRunning(false)
 
     if (this.state === 'stopped') {
       this.state = 'stopped'
@@ -576,29 +591,34 @@ class RSSHubManager {
   }
 
   async ensureHealthy(): Promise<boolean> {
-    if (!this.isRunning()) {
+    const releaseRequest = this.idleLifecycle.beginRequest()
+    try {
+      if (!this.isRunning()) {
+        try {
+          await this.start()
+        } catch {
+          return false
+        }
+      }
+
+      const healthy = await this.healthCheck()
+      if (healthy) {
+        await this.cleanupStaleWorkers(this.port).catch(() => {
+          // best effort
+        })
+        return true
+      }
+
       try {
-        await this.start()
+        await this.stop()
+        await sleep(200)
+        await this.start(this.port || DEFAULT_PORT)
+        return this.healthCheck()
       } catch {
         return false
       }
-    }
-
-    const healthy = await this.healthCheck()
-    if (healthy) {
-      await this.cleanupStaleWorkers(this.port).catch(() => {
-        // best effort
-      })
-      return true
-    }
-
-    try {
-      await this.stop()
-      await sleep(200)
-      await this.start(this.port || DEFAULT_PORT)
-      return this.healthCheck()
-    } catch {
-      return false
+    } finally {
+      releaseRequest()
     }
   }
 
@@ -637,10 +657,11 @@ class RSSHubManager {
   }
 
   async describeStatus(): Promise<RSSHubRuntimeStatus> {
-    await this.preparePuppeteerRuntime().catch(() => {
-      // keep status best-effort
-    })
     return this.getStatus()
+  }
+
+  beginRequest(): () => void {
+    return this.idleLifecycle.beginRequest()
   }
 
   getStatus(): RSSHubRuntimeStatus {
@@ -676,6 +697,7 @@ class RSSHubManager {
    */
   async cleanup(): Promise<void> {
     this.stopping = true
+    this.idleLifecycle.dispose()
     if (this.restartTimer) {
       clearTimeout(this.restartTimer)
       this.restartTimer = null

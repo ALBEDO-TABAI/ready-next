@@ -379,6 +379,16 @@
   gap: 18px;
 }
 
+.note-preview-render-block {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 140px;
+}
+
+.ready-document-export-capture-host .note-preview-render-block {
+  content-visibility: visible;
+  contain-intrinsic-size: none;
+}
+
 .note-preview-markdown-h1 {
   color: var(--text-title);
   font-size: 28px;

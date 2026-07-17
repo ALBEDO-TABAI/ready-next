@@ -26,6 +26,7 @@ export default defineConfig({
           // (graph BFS, FTS scan, reindex). The main bundle never imports
           // this file at runtime; worker-bridge.ts spawns it via Worker(path).
           'db-worker': resolve(__dirname, 'src/main/modules/database/worker.ts'),
+          'document-worker': resolve(__dirname, 'src/main/modules/document-engine/document-worker.ts'),
         }
       }
     }

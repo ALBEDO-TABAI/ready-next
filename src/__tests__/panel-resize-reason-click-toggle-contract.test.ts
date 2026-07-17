@@ -40,7 +40,7 @@ test('browser bounds prop-watch and ResizeObserver both keep drag synced while d
 
   assert.match(
     source,
-    /const handleBoundsShift = \(\) => \{\s*if \(panelResizeReasonRef\.current === 'drag'\) \{[\s\S]*?clearFrameSync\(\)[\s\S]*?void sendBoundsImmediate\(\{ syncMode: 'transient' \}\)[\s\S]*?return[\s\S]*?\}/,
+    /const handleBoundsShift = \(\) => \{\s*if \(panelResizeReasonRef\.current === 'drag'\) \{[\s\S]*?clearFrameSync\(\)[\s\S]*?void sendBoundsImmediate\(\)[\s\S]*?return[\s\S]*?\}/,
   )
   assert.match(
     source,

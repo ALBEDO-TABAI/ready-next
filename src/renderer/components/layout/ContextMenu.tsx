@@ -70,6 +70,7 @@ export default function ContextMenu({ items, x, y, onClose, portal = true, bound
   const menu = (
     <div
       ref={menuRef}
+      data-ready-native-overlay=""
       className="glass-surface-floating ready-floating-menu"
       onMouseDown={(event) => event.stopPropagation()}
       onPointerDown={(event) => event.stopPropagation()}

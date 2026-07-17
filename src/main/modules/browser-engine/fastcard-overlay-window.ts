@@ -1,6 +1,7 @@
 import { BrowserWindow, screen } from 'electron'
 import { is } from '@electron-toolkit/utils'
 import type { FastCardOverlaySnapshot } from '../../../shared/fastcard'
+import { OverlayWindowFollower } from './overlay-window-follower'
 
 interface FastCardOverlayWindowOptions {
   mainWindow: BrowserWindow
@@ -16,6 +17,12 @@ export class FastCardOverlayWindow {
   private window: BrowserWindow | null = null
   private snapshot: FastCardOverlaySnapshot | null = null
   private boundParentWindow: BrowserWindow | null = null
+  private readonly follower = new OverlayWindowFollower({
+    apply: () => this.reposition(),
+    getDisplayMatching: (bounds) => screen.getDisplayMatching(bounds),
+    onDisplayMetricsChanged: (listener) => screen.on('display-metrics-changed', listener),
+    offDisplayMetricsChanged: (listener) => screen.off('display-metrics-changed', listener),
+  })
 
   constructor(private options: FastCardOverlayWindowOptions) {
     this.bindParentWindow(this.options.mainWindow)
@@ -45,6 +52,7 @@ export class FastCardOverlayWindow {
 
   hide(): void {
     this.snapshot = null
+    this.follower.cancel()
     if (this.window && !this.window.isDestroyed()) {
       this.window.hide()
     }
@@ -77,6 +85,7 @@ export class FastCardOverlayWindow {
     this.boundParentWindow = null
     this.window = null
     this.snapshot = null
+    this.follower.dispose()
   }
 
   private bindParentWindow(mainWindow: BrowserWindow): void {
@@ -93,7 +102,7 @@ export class FastCardOverlayWindow {
   }
 
   private handleParentMoveOrResize = (): void => {
-    this.reposition()
+    this.follower.schedule()
   }
 
   private handleParentClosed = (): void => {
@@ -153,7 +162,7 @@ export class FastCardOverlayWindow {
   private applyBounds(snapshot: FastCardOverlaySnapshot): void {
     if (!this.window || this.window.isDestroyed()) return
     const mainBounds = this.options.mainWindow.getContentBounds()
-    const display = screen.getDisplayMatching(mainBounds)
+    const display = this.follower.displayFor(mainBounds)
     const width = Math.min(OVERLAY_WIDTH, Math.max(300, Math.round(snapshot.bounds.width - OVERLAY_GAP * 2)))
     const height = Math.max(OVERLAY_MIN_HEIGHT, Math.round(snapshot.bounds.height))
     const x = mainBounds.x + Math.round(snapshot.bounds.left + snapshot.bounds.width - width - OVERLAY_GAP)

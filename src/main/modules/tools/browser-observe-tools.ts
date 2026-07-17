@@ -31,6 +31,11 @@ import { agentBrowserError } from '../browser-engine/agent-browser-errors'
 import type { BrowserTransactionConfirmation } from '../browser-engine/browser-action-session'
 import { buildPageMap, parseTargetId, type PageMap, type RawAxNode } from '../browser-engine/agent-browser-page-map'
 import { browserSnapshotService } from '../browser-engine/browser-snapshot-service'
+import {
+  getBrowserPageMapAmbiguity,
+  rememberBrowserPageMapAmbiguity as rememberAmbiguity,
+  resetBrowserPageMapAmbiguityForTests,
+} from '../browser-engine/browser-page-map-ambiguity-cache'
 import { createToolExecutionOutput, type ToolExecutionOutput } from '../agent-control/tools-runtime/tool-result-types'
 import {
   createBrowserStructuredOutput as browserStructuredOutput,
@@ -50,7 +55,7 @@ import {
   type ActionTargetCandidate,
 } from './browser-tool-shared'
 
-const logger = createRotatingLogger('ready-tools.log')
+const logger = createRotatingLogger('ready-tools.log', { buffered: true })
 function log(msg: string) {
   try { logger.append(`[${new Date().toISOString()}] ${msg}\n`) } catch { /* silent-catch: 日志写入失败不影响主流程。 */ }
 }
@@ -59,11 +64,9 @@ export const __breaksInvariants = [
   'test-only browser page-map singleton reset mutates shared browser tool state',
 ]
 
-const browserPageMapAmbiguityByTab = new Map<string, Map<string, { role: string; name: string; targetIds: string[] }>>()
-
 export function __resetBrowserAgentPageMapForTests(): void {
   browserSnapshotService.resetForTests()
-  browserPageMapAmbiguityByTab.clear()
+  resetBrowserPageMapAmbiguityForTests()
 }
 
 function resolveBrowserToolTabKey(controller: BrowserController, tabId: string | null): string {
@@ -111,13 +114,7 @@ function rememberBrowserPageMapAmbiguity(
   tabId: string | null,
   groups: Array<{ role: string; name: string; targetIds: string[] }>,
 ): void {
-  const byTarget = new Map<string, { role: string; name: string; targetIds: string[] }>()
-  for (const group of groups) {
-    for (const targetId of group.targetIds) {
-      byTarget.set(targetId, group)
-    }
-  }
-  browserPageMapAmbiguityByTab.set(resolveBrowserToolTabKey(controller, tabId), byTarget)
+  rememberAmbiguity(resolveBrowserToolTabKey(controller, tabId), groups)
 }
 
 export function currentBrowserPageMapAmbiguity(
@@ -125,7 +122,7 @@ export function currentBrowserPageMapAmbiguity(
   tabId: string | null,
   targetId: string,
 ): { role: string; name: string; targetIds: string[] } | null {
-  return browserPageMapAmbiguityByTab.get(resolveBrowserToolTabKey(controller, tabId))?.get(targetId) || null
+  return getBrowserPageMapAmbiguity(resolveBrowserToolTabKey(controller, tabId), targetId)
 }
 
 function buildPageMapAmbiguityGroups(targets: PageMap['targets']): Array<{ role: string; name: string; targetIds: string[] }> {

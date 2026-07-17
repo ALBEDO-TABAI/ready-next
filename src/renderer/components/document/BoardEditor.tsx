@@ -19,6 +19,7 @@ import {
 import type {
   ReadyBoardAsset,
   ReadyBoardAssetKind,
+  ReadyBoardExternalAssetReceipt,
   ReadyBoardArrowNode,
   ReadyBoardImageNode,
   ReadyBoardMarkdownNode,
@@ -29,6 +30,7 @@ import type {
   ReadyBoardVideoNode,
 } from '../../../shared/ready-board'
 import { createEmptyReadyBoardState, normalizeReadyBoardState } from '../../../shared/ready-board'
+import { recordDocumentPerformanceCounter } from '../../../shared/document-performance-diagnostics'
 import { addReadyContextReferenceToAgentInput, appendToAgentInput } from '../../modules/agent/chat-input-bridge'
 import { useDocTabs, type DocTab } from '../../stores/useDocTabs'
 import {
@@ -39,20 +41,37 @@ import {
 } from '../../utils/boardTransfer'
 import { toLocalFileUrl } from '../../utils/dragDrop'
 import {
+  applyBoardNodeDrag,
+  createBoardNodeDragSession,
   getArrowVectorBounds,
   getBoardNodeBounds,
   getMarqueeSelectedNodeIds,
   moveBoardNodesToLayer,
   normalizeBoardRect,
   resolveArrowEndpointDrag,
-  resolveBoardSnapOffset,
+  updateBoardNodeDragSession,
   type BoardArrowEndpoint,
   type BoardLayerPlacement,
   type BoardArrowGeometry,
   type BoardNodeBounds,
+  type BoardNodeDragSession,
   type BoardRect,
   type BoardSnapGuide,
 } from './boardInteraction'
+import { createBoardSaveCoordinator } from '../../modules/document/boardSaveCoordinator'
+import { registerDocumentSaveHandler } from '../../modules/document/documentSaveRegistry'
+import { registerBeforeQuitFlushHandler } from '../../modules/app/beforeQuitFlushRegistry'
+import { appendExternalBoardImage } from '../../modules/document/boardExternalAsset'
+import {
+  enqueueBoardExternalAssetReceipts,
+  registerBoardExternalAssetOwner,
+} from '../../modules/document/boardExternalAssetInbox'
+import {
+  rememberBoardHandle,
+  trackBoardPathSave,
+  waitForBoardPathSave,
+} from '../../modules/document/boardHandleRegistry'
+import { applyPendingBoardTextEdit } from '../../modules/document/boardPendingEdit'
 import BoardContextMenu from './BoardContextMenu'
 import './BoardEditor.css'
 
@@ -75,9 +94,59 @@ type BoardIPCResponse<T> = {
   error?: string
   errorCode?: string
 }
+type BoardSaveValue = {
+  boardId: string
+  state: ReadyBoardState
+}
+
+type BoardNodeDragRuntime = {
+  kind: 'node'
+  session: BoardNodeDragSession
+  elements: Array<{ element: HTMLDivElement; previousTranslate: string }>
+  latestClientX: number
+  latestClientY: number
+  frame: number | null
+}
+
+type BoardMarqueeDragRuntime = {
+  kind: 'marquee'
+  startClientX: number
+  startClientY: number
+  start: { x: number; y: number }
+  current: { x: number; y: number }
+  latestClientX: number
+  latestClientY: number
+  frame: number | null
+}
+
+type BoardResizeDragRuntime = {
+  kind: 'resize'
+  id: string
+  startX: number
+  startY: number
+  width: number
+  height: number
+  latestClientX: number
+  latestClientY: number
+  frame: number | null
+}
+
+type BoardArrowEndpointDragRuntime = {
+  kind: 'arrow-endpoint'
+  id: string
+  endpoint: BoardArrowEndpoint
+  startX: number
+  startY: number
+  startNode: BoardArrowGeometry
+  latestClientX: number
+  latestClientY: number
+  frame: number | null
+}
 
 interface BoardEditorProps {
   tab: DocTab
+  onActivate?: () => void
+  isFocused?: boolean
 }
 
 const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg', 'ico'])
@@ -307,14 +376,14 @@ function getArrowRenderFrame(node: ReadyBoardArrowNode) {
   }
 }
 
-export default function BoardEditor({ tab }: BoardEditorProps) {
+export default function BoardEditor({ tab, onActivate, isFocused = false }: BoardEditorProps) {
   const [boardId, setBoardId] = useState<string | null>(null)
+  const [boardHandlePath, setBoardHandlePath] = useState<string | null>(null)
   const [state, setState] = useState<ReadyBoardState>(() => createEmptyReadyBoardState(tab.title))
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [tool, setTool] = useState<Tool>('select')
   const [snapEnabled, setSnapEnabled] = useState(false)
   const [marqueeRect, setMarqueeRect] = useState<BoardRect | null>(null)
-  const [snapGuides, setSnapGuides] = useState<BoardSnapGuide[]>([])
   const [contextMenu, setContextMenu] = useState<BoardContextMenuState | null>(null)
   const [textEdit, setTextEdit] = useState<TextEditState | null>(null)
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle')
@@ -323,19 +392,41 @@ export default function BoardEditor({ tab }: BoardEditorProps) {
   const textEditorRef = useRef<HTMLTextAreaElement | null>(null)
   const stateRef = useRef(state)
   const boardIdRef = useRef<string | null>(null)
+  const isFocusedRef = useRef(isFocused)
   const selectedIdsRef = useRef<string[]>([])
   const textEditRef = useRef<TextEditState | null>(null)
   const snapEnabledRef = useRef(false)
-  const saveTimerRef = useRef<number | null>(null)
+  const nodeElementsRef = useRef<Map<string, HTMLDivElement>>(new Map())
+  const snapGuideXRef = useRef<HTMLDivElement | null>(null)
+  const snapGuideYRef = useRef<HTMLDivElement | null>(null)
+  const boardRevisionRef = useRef(0)
+  const savedRevisionRef = useRef(0)
+  const mountedRef = useRef(true)
   const dragRef = useRef<
-    | { kind: 'marquee'; startClientX: number; startClientY: number; start: { x: number; y: number }; current: { x: number; y: number } }
-    | { kind: 'node'; ids: string[]; startX: number; startY: number; startNodes: Array<{ id: string; x: number; y: number; width: number; height: number }>; bounds: BoardRect }
-    | { kind: 'resize'; id: string; startX: number; startY: number; width: number; height: number }
-    | { kind: 'arrow-endpoint'; id: string; endpoint: BoardArrowEndpoint; startX: number; startY: number; startNode: BoardArrowGeometry }
+    | BoardMarqueeDragRuntime
+    | BoardNodeDragRuntime
+    | BoardResizeDragRuntime
+    | BoardArrowEndpointDragRuntime
     | { kind: 'path'; points: Array<{ x: number; y: number }> }
     | null
   >(null)
-  const { openTab, markTabSaved } = useDocTabs()
+  const wheelFrameRef = useRef<number | null>(null)
+  const pendingWheelRef = useRef({ panX: 0, panY: 0, zoom: 0 })
+  const openTab = useDocTabs((store) => store.openTab)
+  const markTabSaved = useDocTabs((store) => store.markTabSaved)
+
+  const updateSnapGuideVisuals = useCallback((guides: readonly BoardSnapGuide[]) => {
+    const xGuide = guides.find((guide) => guide.axis === 'x')
+    const yGuide = guides.find((guide) => guide.axis === 'y')
+    if (snapGuideXRef.current) {
+      snapGuideXRef.current.style.display = xGuide ? 'block' : 'none'
+      if (xGuide) snapGuideXRef.current.style.left = `${xGuide.value}px`
+    }
+    if (snapGuideYRef.current) {
+      snapGuideYRef.current.style.display = yGuide ? 'block' : 'none'
+      if (yGuide) snapGuideYRef.current.style.top = `${yGuide.value}px`
+    }
+  }, [])
 
   const setTextEditState = useCallback((next: TextEditState | null) => {
     textEditRef.current = next
@@ -365,8 +456,8 @@ export default function BoardEditor({ tab }: BoardEditorProps) {
 
   useEffect(() => {
     snapEnabledRef.current = snapEnabled
-    if (!snapEnabled) setSnapGuides([])
-  }, [snapEnabled])
+    if (!snapEnabled) updateSnapGuideVisuals([])
+  }, [snapEnabled, updateSnapGuideVisuals])
 
   useEffect(() => {
     boardIdRef.current = boardId
@@ -394,40 +485,203 @@ export default function BoardEditor({ tab }: BoardEditorProps) {
     }
   }, [])
 
-  const saveNow = useCallback(async () => {
-    const id = boardIdRef.current
-    if (!id) return
-    setSaveStatus('saving')
-    const result: BoardIPCResponse<{ state: ReadyBoardState }> | undefined = await window.electronAPI?.board?.save?.({ boardId: id, state: stateRef.current }).catch((saveError) => ({
-      success: false,
-      error: saveError instanceof Error ? saveError.message : String(saveError),
-    }))
-    if (result?.success && result.data?.state) {
-      setState(result.data.state)
-      setSaveStatus('saved')
+  const saveCoordinator = useMemo(() => createBoardSaveCoordinator<BoardSaveValue, ReadyBoardState>({
+    delayMs: 1500,
+    getSnapshot: () => {
+      const boardId = boardIdRef.current
+      const revision = boardRevisionRef.current
+      if (!boardId || revision <= savedRevisionRef.current) return null
+      return { revision, value: { boardId, state: stateRef.current } }
+    },
+    write: async ({ value }) => {
+      const result: BoardIPCResponse<{ state: ReadyBoardState }> | undefined = await window.electronAPI?.board?.save?.({
+        boardId: value.boardId,
+        state: value.state,
+      }).catch((saveError) => ({
+        success: false,
+        error: saveError instanceof Error ? saveError.message : String(saveError),
+      }))
+      if (!result?.success || !result.data?.state) throw new Error(result?.error || '保存失败')
+      return result.data.state
+    },
+    onSaveStart: () => {
+      if (mountedRef.current) setSaveStatus('saving')
+    },
+    onSaveSuccess: (snapshot, savedState) => {
+      savedRevisionRef.current = Math.max(savedRevisionRef.current, snapshot.revision)
+      if (boardRevisionRef.current !== snapshot.revision) {
+        if (mountedRef.current) setSaveStatus('pending')
+        return
+      }
       markTabSaved(tab.id)
-      return
-    }
-    setSaveStatus('error')
-    setError(result?.error || '保存失败')
-  }, [markTabSaved, tab.id])
+      if (!mountedRef.current) return
+      setState(savedState)
+      stateRef.current = savedState
+      setSaveStatus('saved')
+    },
+    onSaveError: (_snapshot, saveError) => {
+      if (!mountedRef.current) return
+      setSaveStatus('error')
+      setError(saveError instanceof Error ? saveError.message : String(saveError))
+    },
+  }), [markTabSaved, tab.id])
+
+  const activateBoard = useCallback(() => {
+    onActivate?.()
+    const id = boardIdRef.current
+    if (id) void window.electronAPI?.board?.setActive?.({ boardId: id })
+  }, [onActivate])
 
   const scheduleSave = useCallback(() => {
-    setSaveStatus('pending')
-    if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current)
-    saveTimerRef.current = window.setTimeout(() => {
-      void saveNow()
-    }, 1500)
-  }, [saveNow])
+    if (mountedRef.current) setSaveStatus('pending')
+    saveCoordinator.schedule()
+  }, [saveCoordinator])
 
-  const patchState = useCallback((updater: (current: ReadyBoardState) => ReadyBoardState, options?: { save?: boolean }) => {
-    setState((current) => {
-      const next = normalizeReadyBoardState(updater(current))
-      stateRef.current = next
-      return next
-    })
+  const patchState = useCallback((
+    updater: (current: ReadyBoardState) => ReadyBoardState,
+    options?: { save?: boolean },
+  ): boolean => {
+    const current = stateRef.current
+    const candidate = updater(current)
+    if (candidate === current) return false
+    const next = normalizeReadyBoardState(candidate)
+    boardRevisionRef.current += 1
+    stateRef.current = next
+    if (mountedRef.current) setState(next)
     if (options?.save !== false) scheduleSave()
+    return true
   }, [scheduleSave])
+
+  const flushPendingTextEdit = useCallback(() => {
+    const edit = textEditRef.current
+    if (!edit) return
+    textEditRef.current = null
+    if (mountedRef.current) setTextEdit(null)
+    patchState((current) => applyPendingBoardTextEdit(current, edit))
+  }, [patchState])
+
+  const saveNow = useCallback(async () => {
+    flushPendingTextEdit()
+    await saveCoordinator.saveNow()
+  }, [flushPendingTextEdit, saveCoordinator])
+
+  useEffect(() => registerDocumentSaveHandler(tab.id, saveNow), [saveNow, tab.id])
+  useEffect(
+    () => registerBeforeQuitFlushHandler(`board:${tab.id}`, saveNow),
+    [saveNow, tab.id],
+  )
+
+  useEffect(() => {
+    isFocusedRef.current = isFocused
+    if (isFocused) activateBoard()
+  }, [activateBoard, isFocused])
+
+  const clearNodeDragVisuals = useCallback((drag: BoardNodeDragRuntime) => {
+    if (drag.frame !== null) {
+      window.cancelAnimationFrame(drag.frame)
+      drag.frame = null
+    }
+    for (const item of drag.elements) item.element.style.translate = item.previousTranslate
+    updateSnapGuideVisuals([])
+  }, [updateSnapGuideVisuals])
+
+  const cancelActiveDrag = useCallback(() => {
+    const drag = dragRef.current
+    dragRef.current = null
+    if (drag && drag.kind !== 'path' && drag.kind !== 'node' && drag.frame !== null) {
+      window.cancelAnimationFrame(drag.frame)
+      drag.frame = null
+    }
+    if (drag?.kind === 'node') clearNodeDragVisuals(drag)
+    if (drag?.kind === 'resize') {
+      boardRevisionRef.current += 1
+      setState((current) => {
+        const next = {
+          ...current,
+          nodes: updateNode(current.nodes, drag.id, { width: drag.width, height: drag.height } as Partial<ReadyBoardNode>),
+        }
+        stateRef.current = next
+        return next
+      })
+    }
+    if (drag?.kind === 'arrow-endpoint') {
+      boardRevisionRef.current += 1
+      setState((current) => {
+        const next = {
+          ...current,
+          nodes: current.nodes.map((node) => (
+            node.id === drag.id && node.type === 'arrow'
+              ? { ...node, ...drag.startNode } as ReadyBoardNode
+              : node
+          )),
+        }
+        stateRef.current = next
+        return next
+      })
+    }
+    updateSnapGuideVisuals([])
+    setMarqueeRect(null)
+  }, [clearNodeDragVisuals, updateSnapGuideVisuals])
+
+  const scheduleNodeDragFrame = useCallback((drag: BoardNodeDragRuntime) => {
+    if (drag.frame !== null) return
+    drag.frame = window.requestAnimationFrame(() => {
+      drag.frame = null
+      if (dragRef.current !== drag) return
+      recordDocumentPerformanceCounter('boardInteractionFrames')
+      updateBoardNodeDragSession(
+        drag.session,
+        drag.latestClientX,
+        drag.latestClientY,
+        snapEnabledRef.current,
+        SNAP_THRESHOLD_PX,
+      )
+      const { dx, dy, guides } = drag.session
+      for (const item of drag.elements) item.element.style.translate = `${dx}px ${dy}px`
+      updateSnapGuideVisuals(guides)
+    })
+  }, [updateSnapGuideVisuals])
+
+  const scheduleBoardInteractionFrame = useCallback((
+    drag: BoardMarqueeDragRuntime | BoardResizeDragRuntime | BoardArrowEndpointDragRuntime,
+  ) => {
+    if (drag.frame !== null) return
+    drag.frame = window.requestAnimationFrame(() => {
+      drag.frame = null
+      if (dragRef.current !== drag) return
+      recordDocumentPerformanceCounter('boardInteractionFrames')
+      if (drag.kind === 'marquee') {
+        const current = screenToBoard(drag.latestClientX, drag.latestClientY)
+        drag.current = current
+        const nextRect = normalizeBoardRect(drag.start, current)
+        setMarqueeRect(nextRect)
+        setSelectedIds(getMarqueeSelectedNodeIds(stateRef.current.nodes.map(getSelectableNodeBounds), nextRect))
+        return
+      }
+      const zoom = stateRef.current.viewport.zoom
+      const dx = (drag.latestClientX - drag.startX) / zoom
+      const dy = (drag.latestClientY - drag.startY) / zoom
+      if (drag.kind === 'resize') {
+        patchState((current) => ({
+          ...current,
+          nodes: updateNode(current.nodes, drag.id, {
+            width: Math.max(48, drag.width + dx),
+            height: Math.max(36, drag.height + dy),
+          } as Partial<ReadyBoardNode>),
+        }), { save: false })
+        return
+      }
+      const next = resolveArrowEndpointDrag(drag.startNode, drag.endpoint, dx, dy)
+      patchState((current) => ({
+        ...current,
+        nodes: current.nodes.map((node) => (
+          node.id === drag.id && node.type === 'arrow'
+            ? { ...node, ...next } as ReadyBoardNode
+            : node
+        )),
+      }), { save: false })
+    })
+  }, [patchState, screenToBoard])
 
   const commitTextEdit = useCallback(() => {
     const edit = textEditRef.current
@@ -448,18 +702,35 @@ export default function BoardEditor({ tab }: BoardEditorProps) {
     async function openBoard() {
       if (!tab.path) return
       setError(null)
-      const result: BoardIPCResponse<{ boardId: string; state: ReadyBoardState }> | undefined = await window.electronAPI?.board?.open?.({ path: tab.path }).catch((openError) => ({
+      try {
+        await waitForBoardPathSave(tab.path)
+      } catch (saveError) {
+        if (!disposed) setError(saveError instanceof Error ? saveError.message : String(saveError))
+        return
+      }
+      if (disposed) return
+      const result: BoardIPCResponse<{
+        boardId: string
+        path: string
+        state: ReadyBoardState
+        pendingExternalAssets?: ReadyBoardExternalAssetReceipt[]
+      }> | undefined = await window.electronAPI?.board?.open?.({ path: tab.path }).catch((openError) => ({
         success: false,
         error: openError instanceof Error ? openError.message : String(openError),
       }))
       if (disposed) return
       if (result?.success && result.data) {
         setBoardId(result.data.boardId)
+        setBoardHandlePath(result.data.path)
         boardIdRef.current = result.data.boardId
+        rememberBoardHandle(tab.id, result.data.boardId)
         setState(result.data.state)
         stateRef.current = result.data.state
+        boardRevisionRef.current = 0
+        savedRevisionRef.current = 0
         setTextEditState(null)
-        void window.electronAPI?.board?.setActive?.({ boardId: result.data.boardId })
+        enqueueBoardExternalAssetReceipts(result.data.path, result.data.pendingExternalAssets ?? [])
+        if (isFocusedRef.current) void window.electronAPI?.board?.setActive?.({ boardId: result.data.boardId })
       } else {
         setError(result?.error || '画板打开失败')
       }
@@ -467,32 +738,39 @@ export default function BoardEditor({ tab }: BoardEditorProps) {
     void openBoard()
     return () => {
       disposed = true
-      const id = boardIdRef.current
-      if (id) void window.electronAPI?.board?.setActive?.({ boardId: null })
     }
-  }, [tab.path])
+  }, [tab.id, tab.path])
 
   useEffect(() => {
-    const unsubscribe = window.electronAPI?.board?.onActiveBoardExternalImageAdded?.((result) => {
-      if (!result?.success || !result.data) {
-        if (result?.error) setError(result.error)
-        return
-      }
-      if (result.data.boardId !== boardIdRef.current) return
-      setState(result.data.state)
-      stateRef.current = result.data.state
-      setSaveStatus('saved')
+    if (!boardId || !boardHandlePath) return undefined
+    return registerBoardExternalAssetOwner({
+      boardId,
+      path: boardHandlePath,
+      onAsset: async (receipt) => {
+        patchState((current) => appendExternalBoardImage(
+          current,
+          receipt.asset,
+          `external-${receipt.id}`,
+          receipt.id,
+        ))
+        const expectedRevision = boardRevisionRef.current
+        await saveCoordinator.saveNow()
+        if (savedRevisionRef.current < expectedRevision) throw new Error('网页图片尚未写入画板')
+        const acknowledged = await window.electronAPI?.board?.ackExternalAssets?.({
+          boardId,
+          receiptIds: [receipt.id],
+        })
+        if (!acknowledged?.success) throw new Error(acknowledged?.error || '网页图片回执确认失败')
+      },
+      reportError: (message) => {
+        if (mountedRef.current) setError(message)
+      },
     })
-    return () => unsubscribe?.()
-  }, [])
+  }, [boardHandlePath, boardId, patchState, saveCoordinator])
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (isEditableEventTarget(event.target)) return
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') {
-        event.preventDefault()
-        void saveNow()
-      }
       if ((event.key === 'Delete' || event.key === 'Backspace') && selectedIds.length > 0) {
         event.preventDefault()
         patchState((current) => ({
@@ -502,22 +780,34 @@ export default function BoardEditor({ tab }: BoardEditorProps) {
         setSelectedIds([])
       }
       if (event.key === 'Escape') {
+        cancelActiveDrag()
         setTextEditState(null)
         setSelectedIds([])
         setMarqueeRect(null)
-        setSnapGuides([])
+        updateSnapGuideVisuals([])
         setTool('select')
       }
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [patchState, saveNow, selectedIds, setTextEditState])
+  }, [cancelActiveDrag, patchState, selectedIds, setTextEditState, updateSnapGuideVisuals])
 
   useEffect(() => {
+    mountedRef.current = true
     return () => {
-      if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current)
+      mountedRef.current = false
+      flushPendingTextEdit()
+      const disposal = saveCoordinator.dispose()
+      if (tab.path) void trackBoardPathSave(tab.path, disposal)
+      if (wheelFrameRef.current !== null) window.cancelAnimationFrame(wheelFrameRef.current)
+      const drag = dragRef.current
+      dragRef.current = null
+      if (drag?.kind === 'node') clearNodeDragVisuals(drag)
+      if (drag && drag.kind !== 'path' && drag.kind !== 'node' && drag.frame !== null) {
+        window.cancelAnimationFrame(drag.frame)
+      }
     }
-  }, [])
+  }, [clearNodeDragVisuals, flushPendingTextEdit, saveCoordinator, tab.path])
 
   const addAssetsAt = useCallback((assets: ReadyBoardAsset[], clientX?: number, clientY?: number) => {
     if (assets.length === 0) return
@@ -760,7 +1050,7 @@ export default function BoardEditor({ tab }: BoardEditorProps) {
 
   const handleSurfacePointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return
-    setSnapGuides([])
+    updateSnapGuideVisuals([])
     if (tool === 'pen') {
       const point = screenToBoard(event.clientX, event.clientY)
       dragRef.current = { kind: 'path', points: [point] }
@@ -776,32 +1066,67 @@ export default function BoardEditor({ tab }: BoardEditorProps) {
       startClientY: event.clientY,
       start: point,
       current: point,
+      latestClientX: event.clientX,
+      latestClientY: event.clientY,
+      frame: null,
     }
     event.currentTarget.setPointerCapture(event.pointerId)
-  }, [screenToBoard, tool])
+  }, [screenToBoard, tool, updateSnapGuideVisuals])
 
   const handleNodePointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>, node: ReadyBoardNode) => {
     if (event.button !== 0 || tool !== 'select') return
     event.stopPropagation()
-    setSnapGuides([])
+    updateSnapGuideVisuals([])
     const ids = selectedIdsRef.current.includes(node.id) ? selectedIdsRef.current : [node.id]
     const selectedNodes = stateRef.current.nodes.filter((item) => ids.includes(item.id))
     const startNodes = selectedNodes
-      .map((item) => ({ id: item.id, x: item.x, y: item.y, width: item.width, height: item.height }))
+      .map((item) => ({ id: item.id, x: item.x, y: item.y }))
     const bounds = getBoardNodeBounds(selectedNodes.map(getSelectableNodeBounds))
     if (!bounds) return
+    const fixedNodes = stateRef.current.nodes
+      .filter((item) => !ids.includes(item.id))
+      .map(getSelectableNodeBounds)
+    const elements = ids.flatMap((id) => {
+      const element = nodeElementsRef.current.get(id)
+      return element ? [{ element, previousTranslate: element.style.translate }] : []
+    })
     setSelectedIds(ids)
-    dragRef.current = { kind: 'node', ids, startX: event.clientX, startY: event.clientY, startNodes, bounds }
+    dragRef.current = {
+      kind: 'node',
+      session: createBoardNodeDragSession({
+        ids,
+        startClientX: event.clientX,
+        startClientY: event.clientY,
+        zoom: stateRef.current.viewport.zoom,
+        startNodes,
+        movingBounds: bounds,
+        fixedNodes,
+      }),
+      elements,
+      latestClientX: event.clientX,
+      latestClientY: event.clientY,
+      frame: null,
+    }
     event.currentTarget.setPointerCapture(event.pointerId)
-  }, [tool])
+  }, [tool, updateSnapGuideVisuals])
 
   const handleResizePointerDown = useCallback((event: React.PointerEvent<HTMLButtonElement>, node: ReadyBoardNode) => {
     event.stopPropagation()
-    setSnapGuides([])
+    updateSnapGuideVisuals([])
     setSelectedIds([node.id])
-    dragRef.current = { kind: 'resize', id: node.id, startX: event.clientX, startY: event.clientY, width: node.width, height: node.height }
+    dragRef.current = {
+      kind: 'resize',
+      id: node.id,
+      startX: event.clientX,
+      startY: event.clientY,
+      width: node.width,
+      height: node.height,
+      latestClientX: event.clientX,
+      latestClientY: event.clientY,
+      frame: null,
+    }
     event.currentTarget.setPointerCapture(event.pointerId)
-  }, [])
+  }, [updateSnapGuideVisuals])
 
   const handleArrowEndpointPointerDown = useCallback((
     event: React.PointerEvent<HTMLButtonElement>,
@@ -809,7 +1134,7 @@ export default function BoardEditor({ tab }: BoardEditorProps) {
     endpoint: BoardArrowEndpoint,
   ) => {
     event.stopPropagation()
-    setSnapGuides([])
+    updateSnapGuideVisuals([])
     setSelectedIds([node.id])
     dragRef.current = {
       kind: 'arrow-endpoint',
@@ -817,6 +1142,9 @@ export default function BoardEditor({ tab }: BoardEditorProps) {
       endpoint,
       startX: event.clientX,
       startY: event.clientY,
+      latestClientX: event.clientX,
+      latestClientY: event.clientY,
+      frame: null,
       startNode: {
         x: node.x,
         y: node.y,
@@ -827,87 +1155,99 @@ export default function BoardEditor({ tab }: BoardEditorProps) {
       },
     }
     event.currentTarget.setPointerCapture(event.pointerId)
-  }, [])
+  }, [updateSnapGuideVisuals])
 
   const handlePointerMove = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     const drag = dragRef.current
     if (!drag) return
     if (drag.kind === 'marquee') {
-      const current = screenToBoard(event.clientX, event.clientY)
-      drag.current = current
-      const nextRect = normalizeBoardRect(drag.start, current)
-      setMarqueeRect(nextRect)
-      setSelectedIds(getMarqueeSelectedNodeIds(stateRef.current.nodes.map(getSelectableNodeBounds), nextRect))
+      drag.latestClientX = event.clientX
+      drag.latestClientY = event.clientY
+      scheduleBoardInteractionFrame(drag)
       return
     }
     if (drag.kind === 'node') {
-      const rawDx = (event.clientX - drag.startX) / stateRef.current.viewport.zoom
-      const rawDy = (event.clientY - drag.startY) / stateRef.current.viewport.zoom
-      let dx = rawDx
-      let dy = rawDy
-      const nextSnapGuides: BoardSnapGuide[] = []
-      if (snapEnabledRef.current) {
-        const snap = resolveBoardSnapOffset({
-          movingBounds: drag.bounds,
-          fixedNodes: stateRef.current.nodes.filter((node) => !drag.ids.includes(node.id)).map(getSelectableNodeBounds),
-          dx: rawDx,
-          dy: rawDy,
-          threshold: SNAP_THRESHOLD_PX / stateRef.current.viewport.zoom,
-        })
-        dx = snap.dx
-        dy = snap.dy
-        nextSnapGuides.push(...snap.guides)
-      }
-      setSnapGuides(nextSnapGuides)
-      patchState((current) => ({
-        ...current,
-        nodes: current.nodes.map((node) => {
-          const startNode = drag.startNodes.find((item) => item.id === node.id)
-          return startNode ? { ...node, x: startNode.x + dx, y: startNode.y + dy } as ReadyBoardNode : node
-        }),
-      }), { save: false })
+      drag.latestClientX = event.clientX
+      drag.latestClientY = event.clientY
+      scheduleNodeDragFrame(drag)
       return
     }
     if (drag.kind === 'resize') {
+      drag.latestClientX = event.clientX
+      drag.latestClientY = event.clientY
+      scheduleBoardInteractionFrame(drag)
+      return
+    }
+    if (drag.kind === 'arrow-endpoint') {
+      drag.latestClientX = event.clientX
+      drag.latestClientY = event.clientY
+      scheduleBoardInteractionFrame(drag)
+      return
+    }
+    if (drag.kind === 'path') {
+      drag.points.push(screenToBoard(event.clientX, event.clientY))
+    }
+  }, [scheduleBoardInteractionFrame, scheduleNodeDragFrame, screenToBoard])
+
+  const handlePointerUp = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    const drag = dragRef.current
+    dragRef.current = null
+    updateSnapGuideVisuals([])
+    if (!drag) return
+    if (drag.kind === 'node') {
+      updateBoardNodeDragSession(
+        drag.session,
+        event.clientX,
+        event.clientY,
+        snapEnabledRef.current,
+        SNAP_THRESHOLD_PX,
+      )
+      clearNodeDragVisuals(drag)
+      if (drag.session.dx !== 0 || drag.session.dy !== 0) {
+        recordDocumentPerformanceCounter('boardDragCommits')
+        patchState((current) => ({
+          ...current,
+          nodes: applyBoardNodeDrag(current.nodes, drag.session),
+        }))
+      }
+      return
+    }
+    if (drag.kind === 'marquee') {
+      if (drag.frame !== null) window.cancelAnimationFrame(drag.frame)
+      drag.current = screenToBoard(event.clientX, event.clientY)
+      const finalRect = normalizeBoardRect(drag.start, drag.current)
+      setSelectedIds(getMarqueeSelectedNodeIds(stateRef.current.nodes.map(getSelectableNodeBounds), finalRect))
+      const moved = Math.hypot(drag.current.x - drag.start.x, drag.current.y - drag.start.y) * stateRef.current.viewport.zoom
+      setMarqueeRect(null)
+      if (moved < MARQUEE_THRESHOLD_PX) setSelectedIds([])
+      return
+    }
+    if (drag.kind === 'resize') {
+      if (drag.frame !== null) window.cancelAnimationFrame(drag.frame)
       const dx = (event.clientX - drag.startX) / stateRef.current.viewport.zoom
       const dy = (event.clientY - drag.startY) / stateRef.current.viewport.zoom
+      recordDocumentPerformanceCounter('boardDragCommits')
       patchState((current) => ({
         ...current,
         nodes: updateNode(current.nodes, drag.id, {
           width: Math.max(48, drag.width + dx),
           height: Math.max(36, drag.height + dy),
         } as Partial<ReadyBoardNode>),
-      }), { save: false })
+      }))
       return
     }
     if (drag.kind === 'arrow-endpoint') {
+      if (drag.frame !== null) window.cancelAnimationFrame(drag.frame)
       const dx = (event.clientX - drag.startX) / stateRef.current.viewport.zoom
       const dy = (event.clientY - drag.startY) / stateRef.current.viewport.zoom
       const next = resolveArrowEndpointDrag(drag.startNode, drag.endpoint, dx, dy)
+      recordDocumentPerformanceCounter('boardDragCommits')
       patchState((current) => ({
         ...current,
         nodes: current.nodes.map((node) => (
-          node.id === drag.id && node.type === 'arrow'
-            ? { ...node, x: next.x, y: next.y, width: next.width, height: next.height, x2: next.x2, y2: next.y2 } as ReadyBoardNode
-            : node
+          node.id === drag.id && node.type === 'arrow' ? { ...node, ...next } as ReadyBoardNode : node
         )),
-      }), { save: false })
-      return
-    }
-    if (drag.kind === 'path') {
-      drag.points.push(screenToBoard(event.clientX, event.clientY))
-    }
-  }, [patchState, screenToBoard])
-
-  const handlePointerUp = useCallback(() => {
-    const drag = dragRef.current
-    dragRef.current = null
-    setSnapGuides([])
-    if (!drag) return
-    if (drag.kind === 'marquee') {
-      const moved = Math.hypot(drag.current.x - drag.start.x, drag.current.y - drag.start.y) * stateRef.current.viewport.zoom
-      setMarqueeRect(null)
-      if (moved < MARQUEE_THRESHOLD_PX) setSelectedIds([])
+      }))
       return
     }
     if (drag.kind === 'path' && drag.points.length > 1) {
@@ -932,30 +1272,38 @@ export default function BoardEditor({ tab }: BoardEditorProps) {
       return
     }
     scheduleSave()
-  }, [patchState, scheduleSave])
+  }, [clearNodeDragVisuals, patchState, scheduleSave, screenToBoard, updateSnapGuideVisuals])
+
+  const handlePointerCancel = useCallback(() => {
+    cancelActiveDrag()
+  }, [cancelActiveDrag])
 
   const handleWheel = useCallback((event: React.WheelEvent<HTMLDivElement>) => {
     event.preventDefault()
     if (event.ctrlKey || event.metaKey) {
-      const delta = event.deltaY > 0 ? -0.08 : 0.08
+      pendingWheelRef.current.zoom += event.deltaY > 0 ? -0.08 : 0.08
+    } else {
+      pendingWheelRef.current.panX -= event.deltaX
+      pendingWheelRef.current.panY -= event.deltaY
+    }
+    if (wheelFrameRef.current !== null) return
+    wheelFrameRef.current = window.requestAnimationFrame(() => {
+      wheelFrameRef.current = null
+      const pending = pendingWheelRef.current
+      pendingWheelRef.current = { panX: 0, panY: 0, zoom: 0 }
+      recordDocumentPerformanceCounter('boardInteractionFrames')
       patchState((current) => ({
         ...current,
         viewport: {
           ...current.viewport,
-          zoom: Math.max(0.12, Math.min(4, current.viewport.zoom + delta)),
+          x: current.viewport.x + pending.panX,
+          y: current.viewport.y + pending.panY,
+          zoom: Math.max(0.12, Math.min(4, current.viewport.zoom + pending.zoom)),
         },
       }), { save: false })
-      return
-    }
-    patchState((current) => ({
-      ...current,
-      viewport: {
-        ...current.viewport,
-        x: current.viewport.x - event.deltaX,
-        y: current.viewport.y - event.deltaY,
-      },
-    }), { save: false })
-  }, [patchState])
+      scheduleSave()
+    })
+  }, [patchState, scheduleSave])
 
   const handleDrop = useCallback((event: React.DragEvent<HTMLDivElement>) => {
     event.preventDefault()
@@ -1050,6 +1398,10 @@ export default function BoardEditor({ tab }: BoardEditorProps) {
     return (
       <div
         key={node.id}
+        ref={(element) => {
+          if (element) nodeElementsRef.current.set(node.id, element)
+          else nodeElementsRef.current.delete(node.id)
+        }}
         className={`ready-board-node ready-board-node--${node.type} ${selected ? 'is-selected' : ''}`}
         style={style}
         onPointerDown={(event) => handleNodePointerDown(event, node)}
@@ -1185,7 +1537,11 @@ export default function BoardEditor({ tab }: BoardEditorProps) {
   }
 
   return (
-    <div className="ready-board-editor">
+    <div
+      className="ready-board-editor"
+      onFocusCapture={activateBoard}
+      onPointerDownCapture={activateBoard}
+    >
       <div className="ready-board-toolbar" role="toolbar">
         <button className={tool === 'select' ? 'is-active' : ''} title="Select" onClick={() => setTool('select')}><MousePointer2 size={16} /></button>
         <button className={tool === 'pen' ? 'is-active' : ''} title="Draw" onClick={() => setTool('pen')}><Pencil size={16} /></button>
@@ -1236,7 +1592,7 @@ export default function BoardEditor({ tab }: BoardEditorProps) {
         onPointerDown={handleSurfacePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
-        onPointerCancel={handlePointerUp}
+        onPointerCancel={handlePointerCancel}
         onWheel={handleWheel}
         onContextMenu={handleSurfaceContextMenu}
         onDragOver={(event) => event.preventDefault()}
@@ -1260,13 +1616,16 @@ export default function BoardEditor({ tab }: BoardEditorProps) {
               }}
             />
           )}
-          {snapGuides.map((guide) => (
-            <div
-              key={`${guide.axis}-${guide.value}`}
-              className={`ready-board-snap-guide ready-board-snap-guide--${guide.axis}`}
-              style={guide.axis === 'x' ? { left: guide.value } : { top: guide.value }}
-            />
-          ))}
+          <div
+            ref={snapGuideXRef}
+            className="ready-board-snap-guide ready-board-snap-guide--x"
+            style={{ display: 'none' }}
+          />
+          <div
+            ref={snapGuideYRef}
+            className="ready-board-snap-guide ready-board-snap-guide--y"
+            style={{ display: 'none' }}
+          />
         </div>
       </div>
       <BoardContextMenu

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Filter,
   Star,
@@ -24,6 +24,7 @@ import Modal from '../ui/Modal'
 import { useModal } from '../ui/useModal'
 import { chatMenuSurfaceStyle } from '../agent/chatMenuStyles'
 import { LiquidFloatingPanel } from '../ui/liquid-glass/LiquidFloatingPanel'
+import { isRSSFeedItemContentEqual } from '../../modules/rss/rssFeedItemEquality'
 
 export interface RSSItem {
   id: string
@@ -260,6 +261,195 @@ function AnalysisProgressRing({
   )
 }
 
+interface RSSFeedItemRowProps {
+  item: RSSItem
+  analysis?: ItemAnalysisProgress
+  isNew: boolean
+  isSelected: boolean
+  onItemClick: (item: RSSItem) => void
+  onMarkItemRead: (itemId: string) => void
+  onToggleStar: (itemId: string) => void
+  onDeleteItem: (itemId: string) => void
+  onOpenAnalysisOutput: (itemId: string) => void
+}
+
+function areRSSFeedItemRowPropsEqual(
+  previous: RSSFeedItemRowProps,
+  next: RSSFeedItemRowProps,
+): boolean {
+  return isRSSFeedItemContentEqual(previous.item, next.item, previous.analysis, next.analysis)
+    && previous.isNew === next.isNew
+    && previous.isSelected === next.isSelected
+    && previous.onItemClick === next.onItemClick
+    && previous.onMarkItemRead === next.onMarkItemRead
+    && previous.onToggleStar === next.onToggleStar
+    && previous.onDeleteItem === next.onDeleteItem
+    && previous.onOpenAnalysisOutput === next.onOpenAnalysisOutput
+}
+
+const RSSFeedItemRow = memo(function RSSFeedItemRow({
+  item,
+  analysis,
+  isNew,
+  isSelected,
+  onItemClick,
+  onMarkItemRead,
+  onToggleStar,
+  onDeleteItem,
+  onOpenAnalysisOutput,
+}: RSSFeedItemRowProps) {
+  const metaText = [
+    item.source,
+    item.author && item.author !== item.source ? item.author : null,
+    item.publishedAt,
+  ]
+    .filter(Boolean)
+    .join('  ')
+
+  return (
+    <button
+      onClick={() => onItemClick(item)}
+      className="w-full rounded-[12px] text-left transition-colors relative"
+      style={{
+        padding: `12px ${Math.max(WORKBENCH_HEADER_EDGE_X - 8, 12)}px`,
+        background: isSelected
+          ? 'color-mix(in srgb, var(--surface-card-bg) 16%, transparent)'
+          : 'color-mix(in srgb, var(--surface-card-bg) 5%, transparent)',
+        boxShadow: isSelected ? 'inset 2px 0 0 var(--color-blue)' : 'none',
+        contentVisibility: 'auto',
+        containIntrinsicSize: '84px',
+      }}
+    >
+      <div className="rss-item-row">
+        <div className="rss-item-main flex items-start gap-2 min-w-0">
+          <div
+            draggable
+            onDragStart={(event) => {
+              setRssItemDragPayload(event, {
+                id: item.id,
+                title: item.title,
+                link: item.link,
+                summary: item.summary,
+                source: item.source,
+                publishedAt: item.publishedAt,
+              })
+              event.stopPropagation()
+            }}
+            onDragEnd={() => {
+              endRssItemDragSession()
+            }}
+            onClick={(event) => event.stopPropagation()}
+            className="mt-0.5 w-4 h-7 rounded cursor-grab active:cursor-grabbing hover:bg-[var(--bg-hover)] transition-colors flex items-center justify-center"
+            title="拖拽到文件管理文件夹"
+          >
+            <span
+              className="block h-4 w-[2px] rounded-full"
+              style={{ background: 'var(--text-light)', opacity: 0.55 }}
+            />
+          </div>
+
+          <div className="rss-item-text-stack flex-1 min-w-0">
+            <div
+              className="mb-1 grid items-center gap-2"
+              style={{
+                gridTemplateColumns: isNew ? 'minmax(0, 1fr) auto' : 'minmax(0, 1fr)',
+              }}
+            >
+              <h3
+                className={`rss-item-line-fade text-[13px] ${
+                  !item.read
+                    ? 'font-semibold text-[var(--text-secondary)]'
+                    : 'text-[var(--text-muted)]'
+                }`}
+                title={item.title}
+              >
+                {item.title}
+              </h3>
+              {isNew && (
+                <span
+                  className="flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-white text-[9px] flex-shrink-0"
+                  style={{ background: 'var(--color-red)' }}
+                >
+                  <Sparkles className="w-2.5 h-2.5" />新
+                </span>
+              )}
+            </div>
+            {item.summary ? (
+              <p
+                className="rss-item-line-fade mb-1.5 text-[12px] text-[var(--text-muted)]"
+                title={item.summary}
+              >
+                {item.summary}
+              </p>
+            ) : null}
+            <div
+              className="rss-item-line-fade text-[11px]"
+              style={{ color: 'var(--text-gray)' }}
+              title={metaText}
+            >
+              {metaText}
+            </div>
+          </div>
+        </div>
+
+        <div className="rss-item-actions flex items-center gap-1.5 justify-end">
+          <button
+            onClick={(event) => {
+              event.stopPropagation()
+              onOpenAnalysisOutput(item.id)
+            }}
+            className="h-7 w-7 rounded-md hover:bg-[var(--bg-hover)] transition-colors flex items-center justify-center"
+            title={progressLabel(analysis)}
+          >
+            <AnalysisProgressRing entry={analysis} />
+          </button>
+          <button
+            onClick={(event) => {
+              event.stopPropagation()
+              if (!item.read) onMarkItemRead(item.id)
+            }}
+            className="h-7 w-7 rounded-md hover:bg-[var(--bg-hover)] transition-colors flex items-center justify-center"
+            title={item.read ? '已读' : '标记为已读'}
+          >
+            <Check
+              className={`w-[16px] h-[16px] ${
+                item.read ? 'text-[var(--color-green)]' : 'text-[var(--text-muted)]'
+              }`}
+            />
+          </button>
+          <button
+            onClick={(event) => {
+              event.stopPropagation()
+              onToggleStar(item.id)
+            }}
+            className="h-7 w-7 rounded-md hover:bg-[var(--bg-hover)] transition-colors flex items-center justify-center"
+            title={item.starred ? '取消收藏' : '收藏'}
+          >
+            <Star
+              className={`w-[16px] h-[16px] ${
+                item.starred
+                  ? 'text-[var(--color-gold)]'
+                  : 'text-[var(--text-light)] opacity-60 hover:opacity-90'
+              }`}
+              fill={item.starred ? 'currentColor' : 'none'}
+            />
+          </button>
+          <button
+            onClick={(event) => {
+              event.stopPropagation()
+              onDeleteItem(item.id)
+            }}
+            className="h-7 w-7 rounded-md hover:bg-[var(--bg-hover)] transition-colors flex items-center justify-center"
+            title="删除此条推送"
+          >
+            <X className="w-[16px] h-[16px] text-[var(--text-light)] opacity-80" />
+          </button>
+        </div>
+      </div>
+    </button>
+  )
+}, areRSSFeedItemRowPropsEqual)
+
 export default function RSSFeed({
   items,
   sources,
@@ -309,12 +499,15 @@ export default function RSSFeed({
   }, [sourceMenuOpen])
 
   // Apply filters
-  const filteredItems = items.filter((item) => {
-    if (selectedSource && item.sourceId !== selectedSource) return false
-    if (filter === 'unread' && item.read) return false
-    if (filter === 'starred' && !item.starred) return false
-    return true
-  })
+  const filteredItems = useMemo(
+    () => items.filter((item) => {
+      if (selectedSource && item.sourceId !== selectedSource) return false
+      if (filter === 'unread' && item.read) return false
+      if (filter === 'starred' && !item.starred) return false
+      return true
+    }),
+    [filter, items, selectedSource],
+  )
 
   const isRefreshing = loading || refreshing
   const unreadCount = useMemo(() => items.filter((i) => !i.read).length, [items])
@@ -917,163 +1110,20 @@ export default function RSSFeed({
               <p className="text-[13px]">暂无内容</p>
             </div>
           ) : (
-            filteredItems.map((item) => {
-              const isNew = newItemIds.has(item.id)
-              const isSelected = selectedItemId === item.id
-              const metaText = [
-                item.source,
-                item.author && item.author !== item.source ? item.author : null,
-                item.publishedAt
-              ]
-                .filter(Boolean)
-                .join('  ')
-              return (
-                <button
-                  key={item.id}
-                  onClick={() => onItemClick(item)}
-                  className="w-full rounded-[12px] text-left transition-colors relative"
-                  style={{
-                    padding: `12px ${Math.max(WORKBENCH_HEADER_EDGE_X - 8, 12)}px`,
-                    background: isSelected
-                      ? 'color-mix(in srgb, var(--surface-card-bg) 16%, transparent)'
-                      : 'color-mix(in srgb, var(--surface-card-bg) 5%, transparent)',
-                    boxShadow: isSelected ? 'inset 2px 0 0 var(--color-blue)' : 'none'
-                  }}
-                >
-                  <div className="rss-item-row">
-                    <div className="rss-item-main flex items-start gap-2 min-w-0">
-                      <div
-                        draggable
-                        onDragStart={(e) => {
-                          setRssItemDragPayload(e, {
-                            id: item.id,
-                            title: item.title,
-                            link: item.link,
-                            summary: item.summary,
-                            source: item.source,
-                            publishedAt: item.publishedAt
-                          })
-                          e.stopPropagation()
-                        }}
-                        onDragEnd={() => {
-                          endRssItemDragSession()
-                        }}
-                        onClick={(e) => e.stopPropagation()}
-                        className="mt-0.5 w-4 h-7 rounded cursor-grab active:cursor-grabbing hover:bg-[var(--bg-hover)] transition-colors flex items-center justify-center"
-                        title="拖拽到文件管理文件夹"
-                      >
-                        <span
-                          className="block h-4 w-[2px] rounded-full"
-                          style={{ background: 'var(--text-light)', opacity: 0.55 }}
-                        />
-                      </div>
-
-                      <div className="rss-item-text-stack flex-1 min-w-0">
-                        <div
-                          className="mb-1 grid items-center gap-2"
-                          style={{
-                            gridTemplateColumns: isNew ? 'minmax(0, 1fr) auto' : 'minmax(0, 1fr)'
-                          }}
-                        >
-                          <h3
-                            className={`rss-item-line-fade text-[13px] ${
-                              !item.read
-                                ? 'font-semibold text-[var(--text-secondary)]'
-                                : 'text-[var(--text-muted)]'
-                            }`}
-                            title={item.title}
-                          >
-                            {item.title}
-                          </h3>
-                          {isNew && (
-                            <span
-                              className="flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-white text-[9px] flex-shrink-0"
-                              style={{ background: 'var(--color-red)' }}
-                            >
-                              <Sparkles className="w-2.5 h-2.5" />新
-                            </span>
-                          )}
-                        </div>
-                        {item.summary ? (
-                          <p
-                            className="rss-item-line-fade mb-1.5 text-[12px] text-[var(--text-muted)]"
-                            title={item.summary}
-                          >
-                            {item.summary}
-                          </p>
-                        ) : null}
-                        <div
-                          className="rss-item-line-fade text-[11px]"
-                          style={{ color: 'var(--text-gray)' }}
-                          title={metaText}
-                        >
-                          {metaText}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="rss-item-actions flex items-center gap-1.5 justify-end">
-                      {(() => {
-                        const analysis = analysisProgressMap[item.id]
-                        return (
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              onOpenAnalysisOutput(item.id)
-                            }}
-                            className="h-7 w-7 rounded-md hover:bg-[var(--bg-hover)] transition-colors flex items-center justify-center"
-                            title={progressLabel(analysis)}
-                          >
-                            <AnalysisProgressRing entry={analysis} />
-                          </button>
-                        )
-                      })()}
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          if (!item.read) onMarkItemRead(item.id)
-                        }}
-                        className="h-7 w-7 rounded-md hover:bg-[var(--bg-hover)] transition-colors flex items-center justify-center"
-                        title={item.read ? '已读' : '标记为已读'}
-                      >
-                        <Check
-                          className={`w-[16px] h-[16px] ${
-                            item.read ? 'text-[var(--color-green)]' : 'text-[var(--text-muted)]'
-                          }`}
-                        />
-                      </button>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          onToggleStar(item.id)
-                        }}
-                        className="h-7 w-7 rounded-md hover:bg-[var(--bg-hover)] transition-colors flex items-center justify-center"
-                        title={item.starred ? '取消收藏' : '收藏'}
-                      >
-                        <Star
-                          className={`w-[16px] h-[16px] ${
-                            item.starred
-                              ? 'text-[var(--color-gold)]'
-                              : 'text-[var(--text-light)] opacity-60 hover:opacity-90'
-                          }`}
-                          fill={item.starred ? 'currentColor' : 'none'}
-                        />
-                      </button>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          onDeleteItem(item.id)
-                        }}
-                        className="h-7 w-7 rounded-md hover:bg-[var(--bg-hover)] transition-colors flex items-center justify-center"
-                        title="删除此条推送"
-                      >
-                        <X className="w-[16px] h-[16px] text-[var(--text-light)] opacity-80" />
-                      </button>
-                    </div>
-                  </div>
-                </button>
-              )
-            })
+            filteredItems.map((item) => (
+              <RSSFeedItemRow
+                key={item.id}
+                item={item}
+                analysis={analysisProgressMap[item.id]}
+                isNew={newItemIds.has(item.id)}
+                isSelected={selectedItemId === item.id}
+                onItemClick={onItemClick}
+                onMarkItemRead={onMarkItemRead}
+                onToggleStar={onToggleStar}
+                onDeleteItem={onDeleteItem}
+                onOpenAnalysisOutput={onOpenAnalysisOutput}
+              />
+            ))
           )}
         </div>
       </div>

@@ -229,7 +229,7 @@ interface BrowserAgentRunnerOptions {
   emitToolEvent?: (type: 'tool_use' | 'tool_result', text: string) => void
 }
 
-const logger = createRotatingLogger('ready-tools.log')
+const logger = createRotatingLogger('ready-tools.log', { buffered: true })
 const STAGE_ATTEMPTS: Record<'ensure_upload' | 'ensure_prompt' | 'submit' | 'final_reconcile' | 'recover', number> = {
   ensure_upload: 2,
   ensure_prompt: 2,

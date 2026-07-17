@@ -33,7 +33,7 @@ import { domainsLikelyMatch } from '../agent-control/domain-adapters/browser-act
 import { waitForReady } from './browser-input-actions'
 import { createRotatingLogger } from '../../utils/rotating-logger'
 
-const logger = createRotatingLogger('ready-tools.log')
+const logger = createRotatingLogger('ready-tools.log', { buffered: true })
 function log(msg: string) {
   try { logger.append(`[${new Date().toISOString()}] ${msg}\n`) } catch { /* silent-catch: 日志写入失败不影响主流程。 */ }
 }

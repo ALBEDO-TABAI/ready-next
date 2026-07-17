@@ -12,7 +12,7 @@ test('browser host bounds do not add a second timer hop after renderer-side drag
 
   assert.match(
     hostLayout,
-    /applyBounds\(view: BrowserHostView, bounds: BrowserRect, _?syncMode: BrowserBoundsSyncMode = 'settled'\): void \{/,
+    /applyBounds\(view: BrowserHostView, bounds: BrowserRect\): void \{/,
   )
   assert.match(
     hostLayout,
@@ -28,11 +28,11 @@ test('browser bounds syncing bypasses the extra renderer rAF during active drag 
 
   assert.match(
     boundsHook,
-    /const buildBoundsSignature = \(bounds: MeasuredBounds, syncMode: BrowserBoundsSyncMode\) =>/,
+    /const buildBoundsSignature = \(bounds: MeasuredBounds\) =>/,
   )
   assert.match(
     boundsHook,
-    /`\$\{syncMode\}:\$\{bounds\.x\}:\$\{bounds\.y\}:\$\{bounds\.width\}:\$\{bounds\.height\}`/,
+    /`\$\{bounds\.x\}:\$\{bounds\.y\}:\$\{bounds\.width\}:\$\{bounds\.height\}`/,
   )
   assert.match(boundsHook, /const frameSyncRequestRef = useRef<PendingBoundsSyncRequest \| null>\(null\)/)
   assert.match(boundsHook, /const dragBoundsSyncRafRef = useRef<number \| null>\(null\)/)
@@ -43,7 +43,7 @@ test('browser bounds syncing bypasses the extra renderer rAF during active drag 
   assert.match(boundsHook, /const stopDragBoundsSync = useCallback\(/)
   assert.match(boundsHook, /dragBoundsSyncRafRef\.current = window\.requestAnimationFrame\(tick\)/)
   assert.match(boundsHook, /window\.addEventListener\(PANEL_RESIZE_STATE_EVENT, handlePanelResizeState as EventListener\)/)
-  assert.match(boundsHook, /if \(panelResizeReasonRef\.current === 'drag'\) \{[\s\S]*sendBoundsImmediate\(\{ syncMode: 'transient' \}\)/)
+  assert.match(boundsHook, /if \(panelResizeReasonRef\.current === 'drag'\) \{[\s\S]*sendBoundsImmediate\(\)/)
   assert.match(boundsHook, /if \(detail\.resizing\) \{[\s\S]*panelResizingRef\.current = true[\s\S]*panelResizeReasonRef\.current = detail\.reason/)
   assert.match(boundsHook, /if \(detail\.reason === 'drag'\) \{[\s\S]*clearFrameSync\(\)[\s\S]*startDragBoundsSync\(\)[\s\S]*return/)
   assert.match(boundsHook, /panelResizingRef\.current = false[\s\S]*stopDragBoundsSync\(\)[\s\S]*void scheduleBoundsSync\('settled', \{ force: true \}\)/)
@@ -63,13 +63,14 @@ test('high-frequency browser bounds syncing uses a fire-and-forget IPC path inst
   // intents on the single `browser:intent` push channel. The legacy
   // `browser:updateBounds` send channel is retired per plan §9.
   assert.match(preload, /sendIntent:\s*\(intent: BrowserViewIntent\)[\s\S]*ipcRenderer\.send\(BROWSER_VIEW_INTENT_CHANNEL, intent\)/)
-  assert.match(boundsHook, /sendIntent\(\{[\s\S]*kind: 'set-bounds'[\s\S]*syncMode: resolvedSyncMode[\s\S]*\}\)/)
+  assert.match(boundsHook, /sendIntent\(\{[\s\S]*kind: 'set-bounds'[\s\S]*bounds: \{ x: bounds\.x, y: bounds\.y, w: bounds\.width, h: bounds\.height \}[\s\S]*\}\)/)
+  assert.doesNotMatch(boundsHook, /syncMode/)
   assert.match(ipcShell, /ipcMain\.on\(BROWSER_VIEW_INTENT_CHANNEL,\s*\(event, intent: BrowserViewIntent\)\s*=>\s*\{/)
   assert.doesNotMatch(preload, /browser:updateBounds/)
   assert.doesNotMatch(ipcShell, /browser:updateBounds/)
 })
 
-test('browser mode surface readiness uses captureStableFrame and hides chrome jank via the shared ritual overlay instead of per-mode freeze frames', () => {
+test('browser mode surface readiness uses captureStableFrame, mode switching uses the ritual overlay, and window resize fills native-surface lag from the cached frame', () => {
   const workbenchMode = readWorkspaceFile('src/renderer/pages/WorkbenchMode.tsx')
   const rafResizeDragHook = readWorkspaceFile('src/renderer/modules/workbench/useRafResizeDrag.ts')
   const browserMode = readWorkspaceFile('src/renderer/pages/modes/BrowserMode.tsx')
@@ -91,7 +92,8 @@ test('browser mode surface readiness uses captureStableFrame and hides chrome ja
   assert.match(browserMode, /layoutPhase !== 'idle'/)
   assert.match(browserMode, /if \(tabs\.length === 0\) \{/)
   assert.match(browserMode, /const modeRootRef = useRef<HTMLDivElement>\(null\)/)
-  assert.match(browserMode, /surfaceRef:\s*contentRef/)
+  assert.match(browserMode, /freezeCacheKey:\s*activeTabId/)
+  assert.match(browserMode, /surfaceRef:\s*browserContentFrameRef/)
   assert.doesNotMatch(browserMode, /surfaceRef:\s*shellRef/)
   assert.match(browserMode, /<div ref=\{modeRootRef\} className="workbench-mode-root relative">/)
   // vertical-tabs（74cab2a7）：主 chrome 委托 BrowserTopBar
@@ -131,10 +133,10 @@ test('browser mode surface readiness uses captureStableFrame and hides chrome ja
   assert.doesNotMatch(browserShellLayout, /browser-surface-mask/)
   assert.match(freezeHook, /surfaceRef: RefObject<HTMLDivElement \| null>/)
   assert.match(freezeHook, /activeTabId: string \| null/)
-  assert.match(freezeHook, /const \[cachedFreezeFrame, setCachedFreezeFrameState\] = useState<BrowserResizeFreezeFrame \| null>\(\(\) => \(activeTabId \? cachedFreezeFramesByTabId\.get\(activeTabId\) \?\? null : null\)\)/)
-  assert.match(freezeHook, /const cachedFreezeFramesByTabId = new Map<string, BrowserResizeFreezeFrame>\(\)/)
+  assert.match(freezeHook, /freezeCacheKey\?: string \| null/)
+  assert.match(freezeHook, /const cachedFreezeFramesByKey = new BoundedLruCache<string, BrowserResizeFreezeFrame>\(6\)/)
   assert.match(freezeHook, /activeTabIdRef\.current = activeTabId/)
-  assert.match(freezeHook, /setCachedFreezeFrameForTab\(activeTabIdRef\.current, nextFrame\)/)
+  assert.match(freezeHook, /setCachedFreezeFrameForKey\(freezeCacheKeyRef\.current, nextFrame\)/)
   assert.match(freezeHook, /if \(activeTabId\) return/)
   assert.match(freezeHook, /clearCachedFreezeFrame\(null\)/)
   assert.doesNotMatch(freezeHook, /return \(\) => \{[\s\S]*clearCachedFreezeFrame\(\)/)
@@ -144,6 +146,12 @@ test('browser mode surface readiness uses captureStableFrame and hides chrome ja
   assert.match(freezeHook, /const settleSessionId = captureSessionRef\.current/)
   assert.match(freezeHook, /void recaptureFreezeFrame\(settleSessionId\)/)
   assert.match(freezeHook, /captureStableFrame,/)
+  assert.match(freezeHook, /subscribeWorkbenchWindowResize/)
+  assert.match(freezeHook, /WINDOW_RESIZE_SETTLE_DELAY_MS = 120/)
+  assert.match(freezeHook, /if \(!windowResizingRef\.current\) \{[\s\S]*handleResizeStart\(\)/)
+  assert.match(freezeHook, /sendBoundsImmediate\(\{ forceExact: true \}\)/)
+  assert.match(freezeHook, /surface\.style\.backgroundImage = `url\("\$\{freezeFrame\.src\}"\)`/)
+  assert.match(freezeHook, /surface\.style\.backgroundSize = '100% 100%'/)
   assert.match(freezeHook, /fitActiveTabToBounds/)
   assert.match(ipcHandler, /view\.webContents\.setZoomFactor\(zoomFactor\)/)
   assert.doesNotMatch(ipcHandler, /root\.style\.zoom =/)

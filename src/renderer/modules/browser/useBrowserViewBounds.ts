@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, type RefObject } from 'react'
-import type { BrowserBoundsSyncMode, BrowserHostLayoutPhase } from '../../../shared/browser-view-layout'
+import type { BrowserHostLayoutPhase } from '../../../shared/browser-view-layout'
 import { nextIntentId } from '../../../shared/browser-view-intent'
 import { subscribeWorkbenchWindowResize } from '../workbench/windowResize'
 import { PANEL_RESIZE_STATE_EVENT, type PanelResizeReason, type PanelResizeStateDetail } from './resize-events'
@@ -36,22 +36,21 @@ interface MeasuredBounds {
 }
 
 interface PendingBoundsSyncRequest {
-  syncMode: BrowserBoundsSyncMode
+  cadence: 'transient' | 'settled'
   force?: boolean
   trailingSettled?: boolean
 }
 
-const buildBoundsSignature = (bounds: MeasuredBounds, syncMode: BrowserBoundsSyncMode) =>
-  `${syncMode}:${bounds.x}:${bounds.y}:${bounds.width}:${bounds.height}`
+const buildBoundsSignature = (bounds: MeasuredBounds) =>
+  `${bounds.x}:${bounds.y}:${bounds.width}:${bounds.height}`
 
 const buildSplitBoundsSignature = (
   bounds: MeasuredBounds,
-  syncMode: BrowserBoundsSyncMode,
   activeTabId?: string | null,
   splitTabId?: string | null,
   splitBounds?: MeasuredBounds | null,
 ) => [
-  buildBoundsSignature(bounds, syncMode),
+  buildBoundsSignature(bounds),
   activeTabId || '',
   splitTabId || '',
   splitBounds ? `${splitBounds.x}:${splitBounds.y}:${splitBounds.width}:${splitBounds.height}` : '',
@@ -159,13 +158,12 @@ export function useBrowserViewBounds({
     }
   }, [])
 
-  const sendBoundsImmediate = useCallback(async (options?: { forceExact?: boolean; syncMode?: BrowserBoundsSyncMode }) => {
+  const sendBoundsImmediate = useCallback(async (options?: { forceExact?: boolean }) => {
     const bounds = measureBounds()
     if (!bounds) return
 
-    const resolvedSyncMode = options?.syncMode ?? (layoutPhaseRef.current === 'idle' ? 'settled' : 'transient')
     const splitBounds = splitTabId && splitTabId !== activeTabId ? measureSplitBounds() : null
-    const boundsKey = buildSplitBoundsSignature(bounds, resolvedSyncMode, activeTabId, splitTabId, splitBounds)
+    const boundsKey = buildSplitBoundsSignature(bounds, activeTabId, splitTabId, splitBounds)
     if (!options?.forceExact && lastBoundsKeyRef.current === boundsKey) return
 
     lastBoundsKeyRef.current = boundsKey
@@ -180,7 +178,6 @@ export function useBrowserViewBounds({
         intentId: nextIntentId(),
         tabId: activeTabId,
         bounds: { x: bounds.x, y: bounds.y, w: bounds.width, h: bounds.height },
-        syncMode: resolvedSyncMode,
       })
     }
     if (splitBounds && splitTabId && splitTabId !== activeTabId) {
@@ -189,7 +186,6 @@ export function useBrowserViewBounds({
         intentId: nextIntentId(),
         tabId: splitTabId,
         bounds: { x: splitBounds.x, y: splitBounds.y, w: splitBounds.width, h: splitBounds.height },
-        syncMode: resolvedSyncMode,
       })
     }
   }, [activeTabId, measureBounds, measureSplitBounds, splitTabId])
@@ -215,14 +211,14 @@ export function useBrowserViewBounds({
         return
       }
 
-      void sendBoundsImmediate({ syncMode: 'transient' })
+      void sendBoundsImmediate()
       dragBoundsSyncRafRef.current = window.requestAnimationFrame(tick)
     }
 
     dragBoundsSyncRafRef.current = window.requestAnimationFrame(tick)
   }, [isElectron, sendBoundsImmediate])
 
-  const scheduleBoundsSync = useCallback((syncMode: BrowserBoundsSyncMode = 'settled', options?: {
+  const scheduleBoundsSync = useCallback((cadence: 'transient' | 'settled' = 'settled', options?: {
     force?: boolean
     trailingSettled?: boolean
   }) => {
@@ -230,8 +226,8 @@ export function useBrowserViewBounds({
 
     const previousRequest = frameSyncRequestRef.current
     frameSyncRequestRef.current = {
-      syncMode:
-        previousRequest?.syncMode === 'settled' || syncMode === 'settled'
+      cadence:
+        previousRequest?.cadence === 'settled' || cadence === 'settled'
           ? 'settled'
           : 'transient',
       force: previousRequest?.force || options?.force,
@@ -248,30 +244,29 @@ export function useBrowserViewBounds({
 
       void sendBoundsImmediate({
         forceExact: request.force,
-        syncMode: request.syncMode,
       }).then(() => {
-        if (!request.trailingSettled || panelResizingRef.current || request.syncMode === 'settled') return
+        if (!request.trailingSettled || panelResizingRef.current || request.cadence === 'settled') return
 
         clearSettleSyncTimeout()
         settleSyncTimeoutRef.current = window.setTimeout(() => {
           settleSyncTimeoutRef.current = null
-          void sendBoundsImmediate({ forceExact: true, syncMode: 'settled' })
+          void sendBoundsImmediate({ forceExact: true })
         }, 64)
       })
     })
   }, [clearSettleSyncTimeout, isElectron, sendBoundsImmediate])
 
-  const sendBounds = useCallback((options?: { forceExact?: boolean; syncMode?: BrowserBoundsSyncMode }) => {
-    const effectiveSyncMode = options?.syncMode ?? (panelResizingRef.current ? 'transient' : (layoutPhaseRef.current === 'idle' ? 'settled' : 'transient'))
-    scheduleBoundsSync(effectiveSyncMode, {
+  const sendBounds = useCallback((options?: { forceExact?: boolean }) => {
+    const cadence = panelResizingRef.current ? 'transient' : (layoutPhaseRef.current === 'idle' ? 'settled' : 'transient')
+    scheduleBoundsSync(cadence, {
       force: options?.forceExact,
-      trailingSettled: !panelResizingRef.current && effectiveSyncMode === 'transient',
+      trailingSettled: !panelResizingRef.current && cadence === 'transient',
     })
   }, [scheduleBoundsSync])
 
   const syncBrowserVisibility = useCallback(async (
-    phaseOrOptions?: 'hidden' | 'visible' | { forceExact?: boolean; syncMode?: BrowserBoundsSyncMode; forceBoundsSync?: boolean },
-    maybeOptions?: { forceExact?: boolean; syncMode?: BrowserBoundsSyncMode; forceBoundsSync?: boolean },
+    phaseOrOptions?: 'hidden' | 'visible' | { forceExact?: boolean; forceBoundsSync?: boolean },
+    maybeOptions?: { forceExact?: boolean; forceBoundsSync?: boolean },
   ) => {
     if (!isElectron) return
     const phase: 'auto' | 'hidden' | 'visible' =
@@ -318,7 +313,6 @@ export function useBrowserViewBounds({
 
     await sendBoundsImmediate({
       forceExact: options.forceExact ?? true,
-      syncMode: options.syncMode ?? 'settled',
     })
     if (requestToken !== visibilitySyncTokenRef.current) return
 
@@ -352,10 +346,10 @@ export function useBrowserViewBounds({
           stableFrames = 0
           previousSignature = currentSignature
           // Keep the (still hidden) view tracking the moving layout so the eventual show is a no-op move.
-          await sendBoundsImmediate({ forceExact: true, syncMode: 'transient' })
+          await sendBoundsImmediate({ forceExact: true })
           if (requestToken !== visibilitySyncTokenRef.current) return
         }
-        await sendBoundsImmediate({ forceExact: true, syncMode: 'settled' })
+        await sendBoundsImmediate({ forceExact: true })
         if (requestToken !== visibilitySyncTokenRef.current) return
       }
     }
@@ -400,7 +394,7 @@ export function useBrowserViewBounds({
     const handleBoundsShift = () => {
       if (panelResizeReasonRef.current === 'drag') {
         clearFrameSync()
-        void sendBoundsImmediate({ syncMode: 'transient' })
+        void sendBoundsImmediate()
         return
       }
       if (panelResizingRef.current && frameSyncRequestRef.current !== null) return
@@ -519,7 +513,7 @@ export function useBrowserViewBounds({
     }
 
     const handleOverlayLock = (event: Event) => {
-      const detail = (event as CustomEvent<{ locked?: boolean; persistent?: boolean }>).detail
+      const detail = (event as CustomEvent<{ locked?: boolean; persistent?: boolean; alreadyHidden?: boolean }>).detail
       if (!detail) return
 
       if (detail.locked) {
@@ -541,6 +535,7 @@ export function useBrowserViewBounds({
           }
         }, OVERLAY_LOCK_SELF_HEAL_MS)
         pendingSelfHealTimers.push(selfHealTimer)
+        if (detail.alreadyHidden) return
       } else {
         overlayLockCountRef.current = Math.max(0, overlayLockCountRef.current - 1)
         if (!detail.persistent) cancelOldestSelfHeal()

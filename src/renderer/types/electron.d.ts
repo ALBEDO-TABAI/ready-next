@@ -95,6 +95,7 @@ import type {
 import type {
   ReadyBoardAsset,
   ReadyBoardAssetKind,
+  ReadyBoardExternalAssetReceipt,
   ReadyBoardState,
 } from '../../shared/ready-board'
 import type {
@@ -1334,6 +1335,7 @@ interface BrowserTabInfo {
   title: string
   domain: string
   favicon: string | null
+  profile: string | null
   owner: 'manual' | 'agent'
   required: boolean
   activity: 'idle' | 'running' | 'attention'
@@ -1354,6 +1356,7 @@ interface BrowserTabUpdateEvent {
   url?: string
   domain?: string
   favicon?: string | null
+  profile?: string | null
   owner?: 'manual' | 'agent'
   required?: boolean
   activity?: 'idle' | 'running' | 'attention'
@@ -1443,6 +1446,9 @@ interface ElectronBrowserAPI {
     url: string,
     options?: { background?: boolean }
   ) => Promise<{ success: boolean; tabId?: string; title?: string; error?: string; mock?: boolean }>
+  registerDormantTabs: (
+    request: import('../../shared/browser-tab-session').RegisterDormantBrowserTabsRequest,
+  ) => Promise<import('../../shared/browser-tab-session').RegisterDormantBrowserTabsResult>
   openForCaptureTarget: (
     url: string
   ) => Promise<{ success: boolean; tabId?: string; reused?: boolean; error?: string }>
@@ -1453,6 +1459,7 @@ interface ElectronBrowserAPI {
     title?: string
     domain?: string
     favicon?: string | null
+    profile?: string | null
     owner?: 'manual' | 'agent'
     required?: boolean
     activity?: 'idle' | 'running' | 'attention'
@@ -1506,7 +1513,7 @@ interface ElectronBrowserAPI {
     data?: BrowserAdblockStateData
     error?: string
   }>
-  getDiagnostics: () => Promise<{ success: boolean; data?: BrowserDiagnosticsData; error?: string }>
+  getDiagnostics: (options?: { includePerformance?: boolean }) => Promise<{ success: boolean; data?: BrowserDiagnosticsData; error?: string }>
   // Agent-browser supervision (plan §3.6): two-step interrupt + task listing.
   getAgentSupervisionState: () => Promise<{
     controlState: AgentBrowserControlState
@@ -1908,6 +1915,9 @@ interface DocumentReadResponse {
   max?: number
   /** When refused due to a size guard, the actual byte size. */
   actual?: number
+  /** Text guard aliases with explicit units. */
+  limitBytes?: number
+  bytes?: number
   mock?: boolean
 }
 
@@ -2148,20 +2158,25 @@ interface BoardOpenData {
   boardId: string
   path: string
   state: ReadyBoardState
+  pendingExternalAssets?: ReadyBoardExternalAssetReceipt[]
 }
 
 interface BoardExternalImageEventData {
   boardId: string
   path: string
+  receiptId: string
   asset: ReadyBoardAsset
-  state: ReadyBoardState
 }
 
 interface ElectronBoardAPI {
   create: (payload: { parentDir: string }) => Promise<IPCResponse<BoardOpenData>>
   open: (payload: { path: string }) => Promise<IPCResponse<BoardOpenData>>
-  setActive: (payload: { boardId: string | null }) => Promise<IPCResponse>
+  setActive: (payload: { boardId: string | null; expectedBoardId?: string }) => Promise<IPCResponse>
   save: (payload: { boardId: string; state: ReadyBoardState }) => Promise<IPCResponse<BoardOpenData>>
+  ackExternalAssets: (payload: {
+    boardId: string
+    receiptIds: string[]
+  }) => Promise<IPCResponse<{ acknowledged: number }>>
   importAsset: (payload: {
     boardId: string
     srcPath: string
@@ -3256,6 +3271,8 @@ interface ElectronAppAPI {
   writeImageToClipboard: (payload: { path: string; text?: string }) => Promise<{ success: boolean; error?: string }>
   onUpdateStatus: (callback: (data: ElectronUpdateStatus) => void) => () => void
   onShortcut: (callback: (data: ElectronAppShortcutEvent) => void) => () => void
+  onBeforeQuitFlush: (callback: (requestId: string) => void) => () => void
+  ackBeforeQuitFlushed: (requestId: string) => void
   // D1: cache stats + cleanup
   getCacheStats: () => Promise<{
     success: boolean
@@ -3924,8 +3941,6 @@ interface ElectronFileEmergenceAPI {
   getEvaluation: (payload: { workspaceRoots: string[] }) => Promise<IPCResponse<unknown>>
   assignFile: (payload: FileEmergenceAssignFilePayload) => Promise<IPCResponse>
   createProjectForFile: (payload: FileEmergenceCreateProjectForFilePayload) => Promise<IPCResponse>
-  onFlushReadingSessions: (handler: (requestId: string) => void) => () => void
-  ackReadingSessionsFlushed: (requestId: string) => void
 }
 interface ElectronTagForgeAPI {
   prepareCreation:(payload:{sourceRunId:string;path:string;workspaceRoots:string[];content:string;proposals:Array<{facet:'form'|'domain'|'entity'|'use';label:string;evidenceCode:string;evidenceExcerpt:string;confidence:number}>;creationPending:boolean})=>Promise<IPCResponse<{receiptId:string;content:string;tags:string[];workflowState:string|null}|null>>

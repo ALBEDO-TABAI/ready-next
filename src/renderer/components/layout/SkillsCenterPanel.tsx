@@ -1180,6 +1180,7 @@ function SkillConfigurationDialog({
 
   return (
     <div
+      data-ready-native-overlay=""
       className="fixed inset-0 z-[10020] flex items-center justify-center"
       style={{ background: 'transparent' }}
       onClick={(event) => {

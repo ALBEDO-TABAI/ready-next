@@ -82,6 +82,48 @@ test('board:save uses the handle path and safely roundtrips state', async () => 
   })
 })
 
+test('board saves to the same file are serialized and the newest state wins', async () => {
+  await withTempDir(async (dir) => {
+    let templateReads = 0
+    let releaseFirstSave!: () => void
+    const firstSaveGate = new Promise<void>((resolve) => { releaseFirstSave = resolve })
+    let markFirstSaveStarted!: () => void
+    const firstSaveStarted = new Promise<void>((resolve) => { markFirstSaveStarted = resolve })
+    const board = new ReadyBoardService({
+      readTemplate: async () => {
+        templateReads += 1
+        if (templateReads === 2) {
+          markFirstSaveStarted()
+          await firstSaveGate
+        }
+        return createReadyBoardTemplate()
+      },
+      now: () => new Date('2026-06-15T00:00:00.000Z'),
+    })
+    const created = await board.create(dir)
+    assert.equal(created.success, true, created.error)
+
+    const olderSave = board.save(created.data!.boardId, { ...created.data!.state, title: 'older' })
+    await firstSaveStarted
+    const newerSave = board.save(created.data!.boardId, { ...created.data!.state, title: 'newer' })
+    await Promise.resolve()
+    assert.equal(templateReads, 2)
+    let reopenSettled = false
+    const reopened = board.open(created.data!.path).then((result) => {
+      reopenSettled = true
+      return result
+    })
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    assert.equal(reopenSettled, false)
+
+    releaseFirstSave()
+    const [, , reopenedResult] = await Promise.all([olderSave, newerSave, reopened])
+    const finalState = extractReadyBoardStateFromHtml(await readFile(created.data!.path, 'utf8'))
+    assert.equal(finalState.title, 'newer')
+    assert.equal(reopenedResult.data?.state.title, 'newer')
+  })
+})
+
 test('board service rejects forged handles and non-board opens', async () => {
   await withTempDir(async (dir) => {
     const board = service()
@@ -144,7 +186,7 @@ test('board:openInDocument resolves only board asset paths', async () => {
   })
 })
 
-test('board:importRemoteImage stores remote images and active board appends a node', async () => {
+test('board:importRemoteImage leaves state ownership to renderer and persists an unacknowledged external receipt', async () => {
   await withTempDir(async (dir) => {
     const fetcher: typeof fetch = async () => new Response(PNG_BYTES, {
       headers: { 'content-type': 'image/png' },
@@ -159,9 +201,67 @@ test('board:importRemoteImage stores remote images and active board appends a no
     assert.equal(imported.data?.src.startsWith('assets/'), true)
     assert.equal(existsSync(join(await realpath(dir), imported.data!.src)), true)
 
-    const appended = await board.addRemoteImageToActiveBoard('https://example.com/active.png')
+    board.setActive(created.data!.boardId)
+    const appended = await board.importRemoteImageToActiveBoard('https://example.com/active.png')
     assert.equal(appended.success, true, appended.error)
-    assert.equal(appended.data?.state.nodes.length, 1)
-    assert.equal(appended.data?.state.nodes[0]?.type, 'image')
+    assert.equal(appended.data?.boardId, created.data!.boardId)
+    assert.equal(appended.data?.asset.kind, 'image')
+    assert.ok(appended.data?.receiptId)
+
+    const restarted = service([], fetcher)
+    const reopened = await restarted.open(created.data!.path)
+    assert.equal(reopened.data?.state.nodes.length, 0)
+    assert.deepEqual(
+      reopened.data?.pendingExternalAssets?.map((receipt) => receipt.id),
+      [appended.data?.receiptId],
+    )
+    const acknowledged = await restarted.acknowledgeExternalAssets(
+      reopened.data!.boardId,
+      [appended.data!.receiptId],
+    )
+    assert.equal(acknowledged.data?.acknowledged, 1)
+    const verified = await service([], fetcher).open(created.data!.path)
+    assert.deepEqual(verified.data?.pendingExternalAssets, [])
+  })
+})
+
+test('clearing an older board cannot clear a newer active board', async () => {
+  await withTempDir(async (dir) => {
+    const fetcher: typeof fetch = async () => new Response(PNG_BYTES, {
+      headers: { 'content-type': 'image/png' },
+    })
+    const board = service([], fetcher)
+    const first = await board.create(dir)
+    const second = await board.create(dir)
+    board.setActive(second.data!.boardId)
+    board.setActive(null, first.data!.boardId)
+    const imported = await board.importRemoteImageToActiveBoard('https://example.com/target.png')
+    assert.equal(imported.success, true, imported.error)
+    assert.equal(imported.data?.boardId, second.data!.boardId)
+  })
+})
+
+test('opening another board never overrides the board explicitly activated by pane focus', async () => {
+  await withTempDir(async (dir) => {
+    const fetcher: typeof fetch = async () => new Response(PNG_BYTES, {
+      headers: { 'content-type': 'image/png' },
+    })
+    const board = service([], fetcher)
+    const focused = await board.create(dir)
+    const other = await board.create(dir)
+    board.setActive(focused.data!.boardId)
+    await board.open(other.data!.path)
+    const imported = await board.importRemoteImageToActiveBoard('https://example.com/focused.png')
+    assert.equal(imported.success, true, imported.error)
+    assert.equal(imported.data?.boardId, focused.data!.boardId)
+  })
+})
+
+test('reopening the same board reuses its handle instead of growing hidden handles', async () => {
+  await withTempDir(async (dir) => {
+    const board = service([])
+    const created = await board.create(dir)
+    const reopened = await board.open(created.data!.path)
+    assert.equal(reopened.data?.boardId, created.data?.boardId)
   })
 })

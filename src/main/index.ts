@@ -1,9 +1,9 @@
 // 本文件是重模块：由 boot-entry.ts（构建入口）在 splash 可见后动态加载。
 // dotenv、userData 路径、协议注册、命令行开关等 pre-ready 配置都在 boot-entry 完成。
 import { app, shell, BrowserWindow, ipcMain, protocol, nativeImage, nativeTheme, Menu, dialog, clipboard, powerMonitor, type MenuItemConstructorOptions, type NativeImage } from 'electron'
-import { join, extname, isAbsolute, basename, resolve } from 'path'
-import { createReadStream, statSync, existsSync, appendFileSync } from 'fs'
-import { readFile, writeFile } from 'fs/promises'
+import { join, isAbsolute, basename, resolve } from 'path'
+import { statSync, existsSync, appendFileSync } from 'fs'
+import { writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 
@@ -13,7 +13,7 @@ import { AgentManager } from './modules/claude-bridge/agent-manager'
 import { setupBrowserIPC, type BrowserController } from './modules/browser-engine/ipc-handler'
 import { setupDocumentIPC } from './modules/document-engine/ipc-handler'
 import { setupSearchIPC, shutdownFileWatchers } from './modules/search-engine/ipc-handler'
-import { requestRendererReadingSessionFlush, setupFileEmergenceIPC } from './modules/file-emergence/ipc-handler'
+import { setupFileEmergenceIPC } from './modules/file-emergence/ipc-handler'
 import { setupTagForgeIPC } from './modules/tag-forge/ipc-handler'
 import {
   fetchAllRSSFeeds,
@@ -50,6 +50,7 @@ import { setupAppCacheIPC } from './modules/app-control/cache-stats-ipc'
 import { setupNativeContextMenuIPC } from './modules/app-control/native-context-menu-ipc'
 import { captureReadyWindow, type ReadyWindowCaptureResult } from './modules/app-control/window-capture-service'
 import { isPathAllowed } from './modules/app-control/local-path-safety'
+import { createLocalFileResponse } from './modules/app-control/local-file-response'
 import { reconcileStartupRunsOnStartup } from './modules/app-control/startup-run-reconciler'
 import { setupBoardIPC } from './modules/board-engine/ipc-handler'
 import { setupSkillsIPC } from './modules/skills-runtime/ipc-handler'
@@ -58,9 +59,15 @@ import { setupImageGenerationIPC } from './modules/image-generation/ipc-handler'
 import { rsshubManager } from './modules/rss-engine/rsshub-process'
 import { reapOrphans } from './modules/process-cleanup/boot-reaper'
 import { runBeforeQuitCleanup } from './modules/process-cleanup/before-quit'
+import { requestRendererStateFlush, setupRendererStateFlushIPC } from './modules/process-cleanup/renderer-state-flush'
 import { closeAllBrowsers } from './modules/browser-engine/browser-cleanup'
 import { assertPrimaryDatabaseReady, getDatabase } from './modules/database'
 import { shutdownWorkerDbBridge } from './modules/database/worker-bridge'
+import { shutdownDocumentWorker } from './modules/document-engine/document-worker-bridge'
+import {
+  setDirectoryChangeBroadcastTargetProvider,
+  shutdownDirectoryChangeBroadcasts,
+} from './modules/document-engine/ipc/directory-change-broadcast'
 import { registerMainProcessHandlers } from './process-handlers'
 import {
   createWindowMaterialController,
@@ -334,8 +341,10 @@ function runFatalProcessCleanup(): Promise<void> {
         console.warn('[process-handlers] closeAllBrowsers errors', result.errors)
       }
     },
-    cleanupRendererReadingSessions: () => requestRendererReadingSessionFlush(),
+    cleanupRendererState: () => requestRendererStateFlush(mainWindow),
     cleanupDbWorker: () => shutdownWorkerDbBridge(),
+    cleanupDocumentWorker: () => shutdownDocumentWorker(),
+    cleanupDocumentDirectoryBroadcasts: () => shutdownDirectoryChangeBroadcasts(),
     cleanupFileWatchers: () => shutdownFileWatchers().then(() => undefined),
     closeDatabase: () => getDatabase().close(),
   }, { timeoutMs: 5_000 })
@@ -582,10 +591,14 @@ async function createWindow(): Promise<void> {
 
 function setupGlobalIPC(): void {
   // Module IPC handlers (no window dependency)
+  setDirectoryChangeBroadcastTargetProvider(() => (
+    mainWindow && !mainWindow.isDestroyed() ? [mainWindow.webContents] : []
+  ))
   setupDocumentIPC(DOCUMENT_USE_MOCK)  // Always real fs
   setupBoardIPC({ getMainWindow: () => mainWindow })
   setupSearchIPC()
   setupFileEmergenceIPC()
+  setupRendererStateFlushIPC()
   setupTagForgeIPC()
   setupImageGenerationIPC()
   setupRSSIPC(RSS_USE_MOCK)
@@ -992,146 +1005,13 @@ app.whenReady().then(async () => {
 
   console.log('[Main] App ready, registering protocol handler...')
 
-  // Register local-file:// protocol handler for serving local files to the renderer
-  // Uses fs directly to properly support Range requests for video seeking.
-  protocol.handle('local-file', async (request) => {
-    // Because local-file is registered as a "standard" scheme, Chromium parses
-    // local-file:///Users/user/file.png as:
-    //   host = "users" (lowercased!), pathname = "/user/file.png"
-    // We must reconstruct the original absolute path from host + pathname.
-    const parsed = new URL(request.url)
-    const decodedPathname = decodeURIComponent(parsed.pathname)
-    let filePath = parsed.host
-      ? `/${parsed.host}${decodedPathname}`
-      : decodedPathname
-
-    // Windows: remove leading slash and fix drive letter case
-    if (process.platform === 'win32' && filePath.startsWith('/')) {
-      filePath = filePath.slice(1)
-      // Fix lowercase drive letter: c:/path -> C:/path
-      if (filePath.length >= 2 && filePath[1] === ':') {
-        filePath = filePath[0].toUpperCase() + filePath.slice(1)
-      }
-    }
-
-    // Security: validate the path before serving
-    if (!isPathAllowed(filePath)) {
-      return new Response('Forbidden', { status: 403 })
-    }
-
-    if (!existsSync(filePath)) {
-      return new Response('Not Found', { status: 404 })
-    }
-
-    // MIME type map
-    const mimeMap: Record<string, string> = {
-      '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
-      '.gif': 'image/gif', '.webp': 'image/webp', '.svg': 'image/svg+xml',
-      '.bmp': 'image/bmp', '.ico': 'image/x-icon', '.avif': 'image/avif',
-      '.tiff': 'image/tiff', '.tif': 'image/tiff',
-      '.mp4': 'video/mp4', '.webm': 'video/webm', '.mov': 'video/quicktime',
-      '.avi': 'video/x-msvideo', '.mkv': 'video/x-matroska', '.ogg': 'video/ogg',
-      '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.flac': 'audio/flac',
-      '.aac': 'audio/aac', '.m4a': 'audio/mp4',
-      '.pdf': 'application/pdf', '.json': 'application/json',
-      '.epub': 'application/epub+zip',
-      '.mobi': 'application/x-mobipocket-ebook',
-      '.azw': 'application/vnd.amazon.ebook',
-      '.azw3': 'application/vnd.amazon.ebook',
-      '.fb2': 'application/x-fictionbook+xml',
-      '.cbz': 'application/vnd.comicbook+zip',
-      '.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript',
-    }
-    const ext = extname(filePath).toLowerCase()
-    const contentType = mimeMap[ext] || 'application/octet-stream'
-    const fileSize = statSync(filePath).size
-    const fullResponseHeaders = {
-      'Content-Type': contentType,
-      'Content-Length': String(fileSize),
-      'Accept-Ranges': 'bytes',
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
-      'Access-Control-Allow-Headers': 'Range',
-    }
-
-    // Parse Range header for partial content (required for video seeking)
-    const rangeHeader = request.headers.get('Range')
-    if (rangeHeader) {
-      const match = rangeHeader.match(/bytes=(\d+)-(\d*)/)
-      if (match) {
-        const start = parseInt(match[1], 10)
-        const end = match[2] ? parseInt(match[2], 10) : fileSize - 1
-        const chunkSize = end - start + 1
-
-        // Use a readable stream for efficient partial reads
-        const stream = createReadStream(filePath, { start, end })
-        const readable = new ReadableStream({
-          start(controller) {
-            stream.on('data', (chunk) => controller.enqueue(chunk))
-            stream.on('end', () => controller.close())
-            stream.on('error', (err) => controller.error(err))
-          },
-          cancel() { stream.destroy() }
-        })
-
-        return new Response(readable, {
-          status: 206,
-          headers: {
-            'Content-Type': contentType,
-            'Content-Range': `bytes ${start}-${end}/${fileSize}`,
-            'Content-Length': String(chunkSize),
-            'Accept-Ranges': 'bytes',
-            'Access-Control-Allow-Origin': '*',
-            'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
-            'Access-Control-Allow-Headers': 'Range',
-          },
-        })
-      }
-    }
-
-    if (request.method === 'HEAD') {
-      return new Response(null, {
-        status: 200,
-        headers: fullResponseHeaders,
-      })
-    }
-
-    if (contentType.startsWith('image/')) {
-      return new Response(await readFile(filePath), {
-        status: 200,
-        headers: fullResponseHeaders,
-      })
-    }
-
-    // Full file response — also use stream for large files
-    const stream = createReadStream(filePath)
-    const readable = new ReadableStream({
-      start(controller) {
-        stream.on('data', (chunk) => controller.enqueue(chunk))
-        stream.on('end', () => controller.close())
-        stream.on('error', (err) => controller.error(err))
-      },
-      cancel() { stream.destroy() }
-    })
-
-    return new Response(readable, {
-      status: 200,
-      headers: fullResponseHeaders,
-    })
-  })
+  protocol.handle('local-file', (request) => createLocalFileResponse(request, { isPathAllowed }))
 
   // Default open or close DevTools by F12 in development
   // and ignore CommandOrControl + R in production.
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window)
   })
-
-  // Start embedded RSSHub instance (non-blocking) unless explicitly mocked.
-  if (!RSS_USE_MOCK) {
-    rsshubManager.start().catch((err) => {
-      console.error('[rsshub] Failed to start embedded RSSHub:', err)
-    })
-  }
 
   await yieldToPresentation()
   // Register global IPC handlers once, before any window is created
@@ -1237,8 +1117,10 @@ app.on('before-quit', (event) => {
         console.warn('[before-quit] closeAllBrowsers errors', result.errors)
       }
     },
-    cleanupRendererReadingSessions: () => requestRendererReadingSessionFlush(),
+    cleanupRendererState: () => requestRendererStateFlush(mainWindow),
     cleanupDbWorker: () => shutdownWorkerDbBridge(),
+    cleanupDocumentWorker: () => shutdownDocumentWorker(),
+    cleanupDocumentDirectoryBroadcasts: () => shutdownDirectoryChangeBroadcasts(),
     cleanupFileWatchers: () => shutdownFileWatchers().then(() => undefined),
     closeDatabase: () => getDatabase().close(),
   }).catch((err) => {

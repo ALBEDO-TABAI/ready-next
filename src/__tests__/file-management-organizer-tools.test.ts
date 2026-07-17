@@ -4,14 +4,41 @@ import { existsSync, realpathSync } from 'node:fs'
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import test from 'node:test'
+import { Worker } from 'node:worker_threads'
+import test, { after, before } from 'node:test'
 
 import { Document, Packer, Paragraph } from 'docx'
 import * as xlsx from 'xlsx'
 
 import { executeFileManagementTool } from '../main/modules/tools/file-management-tools'
+import {
+  DocumentWorkerBridge,
+  setDocumentWorkerForTests,
+  shutdownDocumentWorker,
+  type DocumentWorkerLike,
+} from '../main/modules/document-engine/document-worker-bridge'
 
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
+
+function createSourceDocumentWorker(): DocumentWorkerLike {
+  const tsxApiUrl = import.meta.resolve('tsx/esm/api')
+  const workerModuleUrl = new URL('../main/modules/document-engine/document-worker.ts', import.meta.url).href
+  const bootstrap = [
+    `import { tsImport } from ${JSON.stringify(tsxApiUrl)};`,
+    `await tsImport(${JSON.stringify(workerModuleUrl)}, import.meta.url);`,
+  ].join('\n')
+  return new Worker(new URL(`data:text/javascript,${encodeURIComponent(bootstrap)}`), {
+    type: 'module',
+  }) as unknown as DocumentWorkerLike
+}
+
+before(() => {
+  setDocumentWorkerForTests(new DocumentWorkerBridge(createSourceDocumentWorker, 60_000))
+})
+
+after(async () => {
+  await shutdownDocumentWorker()
+})
 
 test('file-management-organizer-tools declares transitive sqlite ABI guard', (t) => {
   skipIfSqliteUnavailable(t, 'file-management-organizer-tools transitive sqlite load')
@@ -206,12 +233,22 @@ test('file extraction supports docx and xlsx text paths', async () => {
     const context = { searchEngine: fakeSearchEngine(root) as never }
     const docxPath = join(root, 'brief.docx')
     const xlsxPath = join(root, 'sheet.xlsx')
-    await makeDocx(docxPath, 'DOCX 分类正文')
+    await makeDocx(docxPath, '0123456789 DOCX 分类正文')
     await makeXlsx(xlsxPath, 'XLSX 分类正文')
 
     const docxText = JSON.parse(await executeFileManagementTool('file_extract_text', { path: docxPath }, context))
-    assert.equal(docxText.ok, true)
+    assert.equal(docxText.ok, true, JSON.stringify(docxText))
     assert.match(docxText.text, /DOCX 分类正文/)
+
+    const docxWindow = JSON.parse(await executeFileManagementTool('file_extract_text', {
+      path: docxPath,
+      offset: 5,
+      maxChars: 4,
+    }, context))
+    assert.equal(docxWindow.text, '5678')
+    assert.equal(docxWindow.offset, 5)
+    assert.equal(docxWindow.nextOffset, 9)
+    assert.ok(docxWindow.totalChars > docxWindow.text.length)
 
     const xlsxText = JSON.parse(await executeFileManagementTool('file_extract_text', { path: xlsxPath }, context))
     assert.equal(xlsxText.ok, true)
@@ -239,7 +276,7 @@ test('file extraction supports pdf text when a system PDF generator is available
     const pdfText = JSON.parse(await executeFileManagementTool('file_extract_text', {
       path: pdfPath,
     }, { searchEngine: fakeSearchEngine(root) as never }))
-    assert.equal(pdfText.ok, true)
+    assert.equal(pdfText.ok, true, JSON.stringify(pdfText))
     assert.match(pdfText.text, /PDF classify body/)
   } finally {
     await rm(root, { recursive: true, force: true })

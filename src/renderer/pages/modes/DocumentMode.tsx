@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, lazy, Suspense } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, lazy, memo, Suspense } from 'react'
 import { FileText, Loader2 } from 'lucide-react'
 import { computeDesiredRoots, useWorkspace } from '../../stores/useWorkspace'
 import {
@@ -29,17 +29,25 @@ import { useRafResizeDrag } from '../../modules/workbench/useRafResizeDrag'
 import { freezeVisibleDocumentLayoutWidths } from '../../modules/document/documentLayoutFreeze'
 import { shouldHandleSelectedDocument } from '../../modules/document/documentSelectionOpen'
 import {
-  captureMarkdownLineAnchor,
   readDocumentReadingPositionMap,
-  resolveMarkdownLineFromAnchor,
   saveDocumentReadingPosition,
   type DocumentScrollAnchorSnapshot,
 } from '../../modules/document/documentScrollAnchor'
 import {
-  isReloadableTextDocumentPath,
+  captureElementScroll,
+  findCurrentScrollElement,
+  findScrollCandidates,
+  restoreElementScroll,
+} from '../../modules/document/documentScrollRuntime'
+import {
+  type ExternalRefreshInFlightRequest,
+  refreshCleanDocumentTabsFromDisk,
   shouldRefreshDocumentTabForDirectoryChange,
   shouldRefreshDocumentTabOnActivation,
 } from '../../modules/document/documentExternalRefresh'
+import { invalidateImageGalleryDirectories } from '../../modules/document/imageGalleryDirectoryCache'
+import { registerBeforeQuitFlushHandler } from '../../modules/app/beforeQuitFlushRegistry'
+import { releaseClosedBoardHandles } from '../../modules/document/boardHandleRegistry'
 import {
   canAcceptDocumentPaneDrop,
   getDocumentPaneDropPath,
@@ -51,6 +59,12 @@ import {
 import { getFileAppearanceColorValue } from '../../stores/fileAppearance'
 import { startBrowserLocalMediaNativeFileDrag } from '../../modules/browser/localMediaDragBridge'
 import { getFileExtension } from '../../utils/path'
+import { getDocumentTabFileTypeColor } from '../../modules/document/documentTabPresentation'
+import {
+  areRetainedDocumentEditorPropsEqual,
+  resolveRetainedDocumentScene,
+  type RetainedDocumentEditorProps,
+} from '../../modules/document/documentSceneRetention'
 import { isEbookExtension } from '../../../shared/ebook'
 import { isReadyBoardFile } from '../../../shared/ready-board'
 import type { FileEmergenceReadingProgressKind } from '../../../shared/file-emergence'
@@ -66,34 +80,6 @@ import {
 
 const UniverSheet = lazy(() => import('../../components/document/UniverSheet'))
 const BoardEditor = lazy(() => import('../../components/document/BoardEditor'))
-
-const getFileExt = (path: string | null): string => {
-  if (!path) return ''
-  return getFileExtension(path)
-}
-
-function estimateTextareaLineHeight(element: HTMLElement): number {
-  const styles = window.getComputedStyle(element)
-  const lineHeight = Number.parseFloat(styles.lineHeight)
-  if (Number.isFinite(lineHeight) && lineHeight > 0) return lineHeight
-  const fontSize = Number.parseFloat(styles.fontSize)
-  return Number.isFinite(fontSize) && fontSize > 0 ? fontSize * 1.6 : 24
-}
-
-function captureTextareaAnchor(element: HTMLElement, content: string): Pick<DocumentScrollAnchorSnapshot, 'anchorTitle' | 'anchorOrdinal' | 'anchorProgress'> | null {
-  if (!(element instanceof HTMLTextAreaElement)) return null
-  const lineNumber = Math.floor(element.scrollTop / estimateTextareaLineHeight(element)) + 1
-  const anchor = captureMarkdownLineAnchor(content, lineNumber)
-  return anchor
-    ? { anchorTitle: anchor.title, anchorOrdinal: anchor.ordinal, anchorProgress: anchor.progress }
-    : null
-}
-
-function getElementContentOffset(container: HTMLElement, child: HTMLElement, containerTop?: number): number {
-  const resolvedContainerTop = containerTop ?? container.getBoundingClientRect().top
-  const childRect = child.getBoundingClientRect()
-  return childRect.top - resolvedContainerTop + container.scrollTop
-}
 
 type ReadingSessionDraft = {
   path: string
@@ -118,146 +104,8 @@ function captureReadingProgress(path: string): {
   }
 }
 
-function capturePreviewAnchor(element: HTMLElement): Pick<DocumentScrollAnchorSnapshot, 'anchorTitle' | 'anchorOrdinal' | 'anchorProgress'> | null {
-  const headings = Array.from(element.querySelectorAll<HTMLElement>('[data-ready-heading-title]'))
-  if (headings.length === 0) return null
-  const headingCounts = new Map<string, number>()
-  const contentTop = element.scrollTop + 8
-  const containerTop = element.getBoundingClientRect().top
-  let nearest: HTMLElement | null = null
-  let nearestIndex = 0
-  const ordinals = headings.map((heading) => {
-    const title = heading.dataset.readyHeadingTitle || ''
-    const ordinal = headingCounts.get(title) || 0
-    headingCounts.set(title, ordinal + 1)
-    return ordinal
-  })
-  for (let index = 0; index < headings.length; index += 1) {
-    const heading = headings[index]
-    const top = getElementContentOffset(element, heading, containerTop)
-    if (top <= contentTop + 16) {
-      nearest = heading
-      nearestIndex = index
-      continue
-    }
-    if (!nearest) {
-      nearest = heading
-      nearestIndex = index
-    }
-    break
-  }
-  if (!nearest) return null
-  const sectionStart = getElementContentOffset(element, nearest, containerTop)
-  const nextHeading = headings[nearestIndex + 1] || null
-  const sectionEnd = nextHeading
-    ? getElementContentOffset(element, nextHeading, containerTop)
-    : Math.max(element.scrollHeight, sectionStart + element.clientHeight)
-  const sectionLength = Math.max(1, sectionEnd - sectionStart)
-  const progress = Math.max(0, Math.min(1, (contentTop - sectionStart) / sectionLength))
-  return {
-    anchorTitle: nearest.dataset.readyHeadingTitle || null,
-    anchorOrdinal: ordinals[nearestIndex] || 0,
-    anchorProgress: progress,
-  }
-}
-
-function captureElementScroll(
-  element: HTMLElement,
-  content: string,
-  options?: { includeAnchor?: boolean },
-): DocumentScrollAnchorSnapshot {
-  const maxScroll = Math.max(0, element.scrollHeight - element.clientHeight)
-  const top = Math.max(0, Math.min(element.scrollTop, maxScroll))
-  const anchor = options?.includeAnchor === false
-    ? null
-    : captureTextareaAnchor(element, content) || capturePreviewAnchor(element)
-  return {
-    top,
-    ratio: maxScroll > 0 ? top / maxScroll : 0,
-    maxScroll,
-    anchorTitle: anchor?.anchorTitle || null,
-    anchorOrdinal: anchor?.anchorOrdinal ?? null,
-    anchorProgress: anchor?.anchorProgress ?? null,
-  }
-}
-
-function restoreAnchorScroll(element: HTMLElement, snapshot: DocumentScrollAnchorSnapshot, content: string): boolean {
-  if (!snapshot.anchorTitle) return false
-
-  if (element instanceof HTMLTextAreaElement) {
-    const line = resolveMarkdownLineFromAnchor(content, snapshot)
-    if (!line) return false
-    element.scrollTop = Math.max(0, Math.round((line - 1) * estimateTextareaLineHeight(element)))
-    return true
-  }
-
-  const headings = Array.from(element.querySelectorAll<HTMLElement>('[data-ready-heading-title]'))
-  const containerTop = element.getBoundingClientRect().top
-  let seenOrdinal = 0
-  const targetIndex = headings.findIndex((heading) => {
-    if (heading.dataset.readyHeadingTitle !== snapshot.anchorTitle) return false
-    const matches = seenOrdinal === (snapshot.anchorOrdinal || 0)
-    seenOrdinal += 1
-    return matches
-  })
-  const target = targetIndex >= 0 ? headings[targetIndex] : null
-  if (!target) return false
-  const sectionStart = getElementContentOffset(element, target, containerTop)
-  const nextHeading = headings[targetIndex + 1] || null
-  const sectionEnd = nextHeading
-    ? getElementContentOffset(element, nextHeading, containerTop)
-    : Math.max(element.scrollHeight, sectionStart + element.clientHeight)
-  const maxScroll = Math.max(0, element.scrollHeight - element.clientHeight)
-  const progress = Math.max(0, Math.min(1, snapshot.anchorProgress ?? 0))
-  const nextTop = sectionStart + (sectionEnd - sectionStart) * progress - 8
-  element.scrollTop = Math.max(0, Math.min(Math.round(nextTop), maxScroll))
-  return true
-}
-
-function restoreElementScroll(element: HTMLElement, snapshot: DocumentScrollAnchorSnapshot, content: string) {
-  const restore = () => {
-    if (restoreAnchorScroll(element, snapshot, content)) return
-    const maxScroll = Math.max(0, element.scrollHeight - element.clientHeight)
-    const nextTop = snapshot.maxScroll === maxScroll ? snapshot.top : snapshot.ratio * maxScroll
-    element.scrollTop = Math.max(0, Math.min(Math.round(nextTop), maxScroll))
-  }
-  restore()
-  requestAnimationFrame(restore)
-  requestAnimationFrame(() => requestAnimationFrame(restore))
-  window.setTimeout(restore, 160)
-  window.setTimeout(restore, 420)
-  window.setTimeout(restore, 900)
-  window.setTimeout(restore, 1600)
-}
-
-function findScrollCandidates(scope: HTMLElement): HTMLElement[] {
-  return [
-    scope.querySelector('textarea'),
-    scope.querySelector('.document-preview-surface'),
-    scope.querySelector('.document-editor-surface'),
-    scope,
-  ].filter((element): element is HTMLElement => element instanceof HTMLElement)
-}
-
-function findCurrentScrollElement(scope: HTMLElement): HTMLElement | null {
-  const candidates = findScrollCandidates(scope)
-  return candidates.find((element) => element.scrollTop > 0)
-    || candidates.find((element) => element.scrollHeight > element.clientHeight)
-    || null
-}
-
 function clampDocumentSplitRatio(ratio: number): number {
   return Math.max(20, Math.min(80, ratio))
-}
-
-const getFileTypeColor = (path: string | null): string => {
-  const ext = getFileExt(path)
-  if (['md', 'txt', 'docx'].includes(ext)) return 'var(--ready-document-tab-doc-dot, #E97A2B)' // orange - docs
-  if (['xlsx', 'csv', 'xls'].includes(ext)) return '#34D399' // green - sheets
-  if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp', 'ico'].includes(ext)) return '#8B5CF6' // purple - images
-  if (['mp4', 'webm', 'mov', 'avi', 'mkv'].includes(ext)) return '#EB5757' // red - video
-  if (ext === 'pdf') return '#EB5757' // red - pdf
-  return '#5B8DEF' // blue - default
 }
 
 function readDocumentPanelOpenState(key: string): boolean {
@@ -288,22 +136,18 @@ function SplitResizeHandle({
 }
 
 // --- Tab content router ---
-function DocumentEditor({
+type DocumentEditorProps = RetainedDocumentEditorProps<DocTab>
+
+const DocumentEditor = memo(function DocumentEditor({
   tab,
   viewMode,
   previewEditable,
   previewFocusWidgetTitle,
   onVisibleLineChange,
   onActivate,
-}: {
-  tab: DocTab
-  viewMode: 'edit' | 'preview'
-  previewEditable?: boolean
-  previewFocusWidgetTitle?: string | null
-  onVisibleLineChange?: (line: number | null) => void
-  onActivate?: () => void
-}) {
-  const ext = useMemo(() => getFileExt(tab.path), [tab.path])
+  isFocused,
+}: DocumentEditorProps) {
+  const ext = useMemo(() => (tab.path ? getFileExtension(tab.path) : ''), [tab.path])
   const isImage = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp', 'ico'].includes(ext)
   const isVideo = ['mp4', 'webm', 'mov', 'avi', 'mkv', 'ogg'].includes(ext)
   const isPdf = ext === 'pdf'
@@ -313,7 +157,7 @@ function DocumentEditor({
   if (isReadyBoardFile(tab.path)) {
     return (
       <Suspense fallback={<div className="flex-1 flex items-center justify-center"><Loader2 className="w-6 h-6 animate-spin text-[var(--text-muted)]" /></div>}>
-        <BoardEditor tab={tab} />
+        <BoardEditor tab={tab} onActivate={onActivate} isFocused={isFocused} />
       </Suspense>
     )
   }
@@ -341,27 +185,38 @@ function DocumentEditor({
       onActivate={onActivate}
     />
   )
-}
+}, areRetainedDocumentEditorPropsEqual)
 
 // --- DocumentMode main component ---
 interface DocumentModeProps {
   isActive?: boolean
+  isSceneVisible?: boolean
   isMotionSettled?: boolean
 }
 
 export default function DocumentMode({
   isActive = true,
+  isSceneVisible = true,
   isMotionSettled = true,
 }: DocumentModeProps) {
-  const { selectedFile, workspaceRoot, pinnedFolders, fileAppearances } = useWorkspace()
+  const selectedFile = useWorkspace((state) => state.selectedFile)
+  const workspaceRoot = useWorkspace((state) => state.workspaceRoot)
+  const pinnedFolders = useWorkspace((state) => state.pinnedFolders)
+  const fileAppearances = useWorkspace((state) => state.fileAppearances)
+  const tabs = useDocTabs((state) => state.tabs)
+  const tabGroups = useDocTabs((state) => state.tabGroups)
+  const activeTabId = useDocTabs((state) => state.activeTabId)
+  const splitTabId = useDocTabs((state) => state.splitTabId)
+  const focusedPaneTabId = useDocTabs((state) => state.focusedPaneTabId)
+  const documentSplitRatio = useDocTabs((state) => state.documentSplitRatio)
   const {
-    tabs, tabGroups, activeTabId, splitTabId, documentSplitRatio,
     openTab, closeTab, setActiveTab, setSplitTab, setDocumentSplitRatio,
     hydrateTabContentFromDisk, setPendingReveal, openTabInPane,
     openImageTab, ensureTabForPath, createBackgroundTab,
     createTabGroupFromDrop, addTabToGroup, reorderTabToRank,
     renameTabGroup, recolorTabGroup, setTabGroupCollapsed, disbandTabGroup,
-  } = useDocTabs()
+    setFocusedPaneTab,
+  } = useDocTabs.getState()
 
   const splitContainerRef = useRef<HTMLDivElement>(null)
   const primarySplitPaneRef = useRef<HTMLDivElement>(null)
@@ -375,7 +230,6 @@ export default function DocumentMode({
   const [previewFocusWidgetTitle, setPreviewFocusWidgetTitle] = useState<string | null>(null)
   const [outlinePanelOpen, setOutlinePanelOpen] = useState(() => readDocumentPanelOpenState('ready-document-outline-panel-open'))
   const [marksPanelOpen, setMarksPanelOpen] = useState(() => readDocumentPanelOpenState('ready-document-marks-panel-open'))
-  const [panelTargetTabId, setPanelTargetTabId] = useState<string | null>(activeTabId)
   const [visibleLineByTabId, setVisibleLineByTabId] = useState<Record<string, number | null>>({})
   const [documentPaneDropTarget, setDocumentPaneDropTarget] = useState<DocumentPaneTarget | null>(null)
   const documentWorkspaceRoots = useMemo(
@@ -384,6 +238,20 @@ export default function DocumentMode({
   )
   const documentWorkspaceRootsRef = useRef<string[]>(documentWorkspaceRoots)
   const readingSessionRef = useRef<ReadingSessionDraft | null>(null)
+  const refreshInFlightRef = useRef<Map<string, ExternalRefreshInFlightRequest>>(new Map())
+  const pendingExternalRefreshTabIdsRef = useRef<Set<string>>(new Set())
+  const retainedDocumentSceneRef = useRef<{
+    activeTab: DocTab | null
+    splitTab: DocTab | null
+    retainActiveEditor: boolean
+    retainSplitEditor: boolean
+  }>({
+    activeTab: null,
+    splitTab: null,
+    retainActiveEditor: false,
+    retainSplitEditor: false,
+  })
+  const previousSceneVisibleRef = useRef(isSceneVisible)
 
   useEffect(() => {
     documentWorkspaceRootsRef.current = documentWorkspaceRoots
@@ -478,22 +346,33 @@ export default function DocumentMode({
 
   const activeTab = tabs.find(t => t.id === activeTabId)
   const splitTab = splitTabId ? tabs.find(t => t.id === splitTabId) : null
+  const nextRetainedDocumentScene = resolveRetainedDocumentScene({
+    isSceneVisible,
+    wasSceneVisible: previousSceneVisibleRef.current,
+    activeTab: activeTab || null,
+    splitTab: splitTab || null,
+    retained: retainedDocumentSceneRef.current,
+  })
+  useLayoutEffect(() => {
+    retainedDocumentSceneRef.current = nextRetainedDocumentScene
+    previousSceneVisibleRef.current = isSceneVisible
+  }, [isSceneVisible, nextRetainedDocumentScene])
+  const renderedActiveTab = nextRetainedDocumentScene.activeTab
+  const renderedSplitTab = nextRetainedDocumentScene.splitTab
+  const renderActiveEditor = isSceneVisible || nextRetainedDocumentScene.retainActiveEditor
+  const renderSplitEditor = isSceneVisible || nextRetainedDocumentScene.retainSplitEditor
   const activeTabPathLabel = activeTab?.path || activeTab?.title || '未打开文档'
   const panelTargetTab = useMemo(() => {
     const visibleTabs = [activeTab, splitTab].filter((tab): tab is DocTab => Boolean(tab))
-    return visibleTabs.find((tab) => tab.id === panelTargetTabId) || activeTab || splitTab || null
-  }, [activeTab, panelTargetTabId, splitTab])
+    return visibleTabs.find((tab) => tab.id === focusedPaneTabId) || activeTab || splitTab || null
+  }, [activeTab, focusedPaneTabId, splitTab])
   const panelTargetLine = panelTargetTab ? visibleLineByTabId[panelTargetTab.id] ?? null : null
-  const tabByScrollKey = useMemo(() => {
-    const next = new Map<string, DocTab>()
-    tabs.forEach((tab) => next.set(tab.path || tab.id, tab))
+  const tabScrollStructureSignature = tabs.map((tab) => `${tab.id}\u0000${tab.path || ''}`).join('\u0001')
+  const tabIdByScrollKey = useMemo(() => {
+    const next = new Map<string, string>()
+    useDocTabs.getState().tabs.forEach((tab) => next.set(tab.path || tab.id, tab.id))
     return next
-  }, [tabs])
-
-  useEffect(() => {
-    const visibleIds = [activeTab?.id, splitTab?.id].filter((id): id is string => Boolean(id))
-    setPanelTargetTabId((current) => (current && visibleIds.includes(current) ? current : activeTab?.id ?? splitTab?.id ?? null))
-  }, [activeTab?.id, splitTab?.id])
+  }, [tabScrollStructureSignature])
 
   const markReadingSessionInteraction = useCallback(() => {
     const session = readingSessionRef.current
@@ -569,18 +448,16 @@ export default function DocumentMode({
     }
   }, [flushReadingSession, isActive, markReadingSessionInteraction])
 
-  useEffect(() => {
-    const api = window.electronAPI?.fileEmergence
-    if (!api?.onFlushReadingSessions || !api.ackReadingSessionsFlushed) return undefined
-    return api.onFlushReadingSessions((requestId) => {
-      void flushReadingSession().finally(() => {
-        api.ackReadingSessionsFlushed(requestId)
-      })
-    })
-  }, [flushReadingSession])
+  useEffect(
+    () => registerBeforeQuitFlushHandler('document-reading-session', flushReadingSession),
+    [flushReadingSession],
+  )
 
   useEffect(() => {
-    const openIds = new Set(tabs.map((tab) => tab.id))
+    const openIds = new Set(useDocTabs.getState().tabs.map((tab) => tab.id))
+    void releaseClosedBoardHandles(openIds, (expectedBoardId) => (
+      window.electronAPI?.board?.setActive?.({ boardId: null, expectedBoardId })
+    ))
     setVisibleLineByTabId((current) => {
       const next: Record<string, number | null> = {}
       let changed = false
@@ -593,28 +470,28 @@ export default function DocumentMode({
       })
       return changed ? next : current
     })
-  }, [tabs])
+  }, [tabScrollStructureSignature])
 
   const refreshCleanTextTabsFromDisk = useCallback(async (candidateTabs: DocTab[]) => {
-    if (!window.electronAPI?.document?.readFile) return
-    for (const candidate of candidateTabs) {
-      if (!candidate.path || candidate.isDirty || !isReloadableTextDocumentPath(candidate.path)) continue
-      const result = await window.electronAPI.document.readFile(candidate.path).catch(() => null)
-      if (!result?.success) continue
-      const current = useDocTabs.getState().tabs.find((item) => item.id === candidate.id)
-      if (!current || current.path !== candidate.path || current.isDirty) continue
-      const nextContent = result.content || ''
-      if (current.content === nextContent) continue
-      hydrateTabContentFromDisk(current.id, nextContent)
-    }
+    if (!window.electronAPI?.document?.readFile) return new Set<string>()
+    return refreshCleanDocumentTabsFromDisk(candidateTabs, {
+      readFile: (path) => window.electronAPI.document.readFile(path),
+      getCurrentTab: (id) => useDocTabs.getState().tabs.find((item) => item.id === id) || null,
+      hydrateTab: hydrateTabContentFromDisk,
+      inFlight: refreshInFlightRef.current,
+    })
   }, [hydrateTabContentFromDisk])
 
   useEffect(() => {
     if (!isActive) return
     const visibleTabs = [activeTab, splitTab]
       .filter((tab): tab is DocTab => Boolean(tab))
+      .filter((tab) => pendingExternalRefreshTabIdsRef.current.has(tab.id))
       .filter(shouldRefreshDocumentTabOnActivation)
-    void refreshCleanTextTabsFromDisk(visibleTabs)
+    if (visibleTabs.length === 0) return
+    void refreshCleanTextTabsFromDisk(visibleTabs).then((resolvedIds) => {
+      for (const id of resolvedIds) pendingExternalRefreshTabIdsRef.current.delete(id)
+    })
   }, [activeTab?.id, isActive, refreshCleanTextTabsFromDisk, splitTab?.id])
 
   useEffect(() => {
@@ -622,26 +499,34 @@ export default function DocumentMode({
     const unsubscribe = window.electronAPI.document.onDirectoryChange((event) => {
       const changedPaths = Array.isArray(event?.paths) ? event.paths : []
       if (changedPaths.length === 0) return
-      const candidates = useDocTabs
-        .getState()
-        .tabs
-        .filter((tab) => shouldRefreshDocumentTabForDirectoryChange(tab, changedPaths))
-      if (candidates.length > 0) {
-        void refreshCleanTextTabsFromDisk(candidates)
+      invalidateImageGalleryDirectories(changedPaths)
+      const state = useDocTabs.getState()
+      const visibleIds = new Set([state.activeTabId, state.splitTabId].filter(Boolean))
+      const candidates = state.tabs.filter((tab) => shouldRefreshDocumentTabForDirectoryChange(tab, changedPaths))
+      const visibleCandidates = candidates.filter((tab) => isActive && visibleIds.has(tab.id))
+      for (const tab of candidates) pendingExternalRefreshTabIdsRef.current.add(tab.id)
+      if (visibleCandidates.length > 0) {
+        void refreshCleanTextTabsFromDisk(visibleCandidates).then((resolvedIds) => {
+          for (const id of resolvedIds) pendingExternalRefreshTabIdsRef.current.delete(id)
+        })
       }
     })
     return () => unsubscribe()
-  }, [refreshCleanTextTabsFromDisk])
+  }, [isActive, refreshCleanTextTabsFromDisk])
 
   const captureDocumentScrollScope = useCallback((scope: HTMLElement, options?: { includeAnchor?: boolean }) => {
     const key = scope.dataset.readyDocumentScrollKey
     if (!key) return
     const element = findCurrentScrollElement(scope)
     if (!element) return
-    const snapshot = captureElementScroll(element, tabByScrollKey.get(key)?.content || '', options)
+    const tabId = tabIdByScrollKey.get(key)
+    const content = tabId
+      ? useDocTabs.getState().tabs.find((tab) => tab.id === tabId)?.content || ''
+      : ''
+    const snapshot = captureElementScroll(element, content, options)
     scrollSnapshotsRef.current.set(key, snapshot)
     saveDocumentReadingPosition(key, snapshot)
-  }, [tabByScrollKey])
+  }, [tabIdByScrollKey])
 
   const captureVisibleDocumentScrollPositions = useCallback((options?: { includeAnchor?: boolean }) => {
     document.querySelectorAll<HTMLElement>('[data-ready-document-scroll-key]').forEach((scope) => {
@@ -701,18 +586,25 @@ export default function DocumentMode({
   }, [activeTabId, captureDocumentScrollScope, captureVisibleDocumentScrollPositions, editorMode, isActive, splitTabId])
 
   const restoreVisibleDocumentScrollPositions = useCallback(() => {
+    const cleanups: Array<() => void> = []
     document.querySelectorAll<HTMLElement>('[data-ready-document-scroll-key]').forEach((scope) => {
       const key = scope.dataset.readyDocumentScrollKey
       if (!key) return
       const snapshot = scrollSnapshotsRef.current.get(key)
       if (!snapshot) return
-      const content = tabByScrollKey.get(key)?.content || ''
-      findScrollCandidates(scope).forEach((element) => restoreElementScroll(element, snapshot, content))
+      const tabId = tabIdByScrollKey.get(key)
+      const content = tabId
+        ? useDocTabs.getState().tabs.find((tab) => tab.id === tabId)?.content || ''
+        : ''
+      findScrollCandidates(scope).forEach((element) => {
+        cleanups.push(restoreElementScroll(element, snapshot, content))
+      })
     })
-  }, [tabByScrollKey])
+    return () => cleanups.forEach((cleanup) => cleanup())
+  }, [tabIdByScrollKey])
 
   useLayoutEffect(() => {
-    restoreVisibleDocumentScrollPositions()
+    return restoreVisibleDocumentScrollPositions()
   }, [activeTabId, editorMode, restoreVisibleDocumentScrollPositions, splitTabId])
 
   const handleEditorModeChange = useCallback((nextMode: 'edit' | 'preview') => {
@@ -749,8 +641,25 @@ export default function DocumentMode({
   }, [])
 
   const handlePaneActivate = useCallback((tabId: string) => {
-    setPanelTargetTabId(tabId)
-  }, [])
+    setFocusedPaneTab(tabId)
+  }, [setFocusedPaneTab])
+
+  const handlePrimaryVisibleLineChange = useCallback((line: number | null) => {
+    const tabId = useDocTabs.getState().activeTabId
+    if (tabId) handlePanelTargetLineChange(tabId, line)
+  }, [handlePanelTargetLineChange])
+  const handleSplitVisibleLineChange = useCallback((line: number | null) => {
+    const tabId = useDocTabs.getState().splitTabId
+    if (tabId) handlePanelTargetLineChange(tabId, line)
+  }, [handlePanelTargetLineChange])
+  const handlePrimaryActivate = useCallback(() => {
+    const tabId = useDocTabs.getState().activeTabId
+    if (tabId) handlePaneActivate(tabId)
+  }, [handlePaneActivate])
+  const handleSplitActivate = useCallback(() => {
+    const tabId = useDocTabs.getState().splitTabId
+    if (tabId) handlePaneActivate(tabId)
+  }, [handlePaneActivate])
 
   const replaceDocumentPaneFromDrop = useCallback(async (path: string, pane: DocumentPaneTarget) => {
     const result = await window.electronAPI?.document?.stat?.(path).catch(() => null)
@@ -759,10 +668,7 @@ export default function DocumentMode({
 
     captureVisibleDocumentScrollPositions()
     setEditorMode('preview')
-    const nextTabId = openTabInPane(path, pane)
-    if (nextTabId) {
-      setPanelTargetTabId(nextTabId)
-    }
+    openTabInPane(path, pane)
   }, [captureVisibleDocumentScrollPositions, openTabInPane])
 
   const handleDocumentPaneDragOver = useCallback((event: React.DragEvent<HTMLDivElement>, pane: DocumentPaneTarget) => {
@@ -793,22 +699,18 @@ export default function DocumentMode({
     captureVisibleDocumentScrollPositions()
     if (e.shiftKey && id !== activeTabId) {
       setSplitTab(id)
-      setPanelTargetTabId(id)
     } else {
       setActiveTab(id)
-      setPanelTargetTabId(id)
     }
   }, [activeTabId, captureVisibleDocumentScrollPositions, setActiveTab, setSplitTab])
 
   // Drag & drop reorder
-  const dragIndexRef = useRef<number | null>(null)
-  const handleDragStart = useCallback((e: React.DragEvent, index: number) => {
-    dragIndexRef.current = index
+  const handleDragStart = useCallback((e: React.DragEvent, id: string) => {
     e.dataTransfer.effectAllowed = 'copyMove'
     // Attach ready-drag data for cross-component drop (e.g. ChatPanel)
-    const tab = tabs[index]
+    const tab = useDocTabs.getState().tabs.find((candidate) => candidate.id === id)
     if (tab && tab.path) {
-      const ext = getFileExt(tab.path)
+      const ext = getFileExtension(tab.path)
       const data = JSON.stringify({
         type: 'doc-tab' as const,
         path: tab.path,
@@ -825,10 +727,9 @@ export default function DocumentMode({
       // directory confirms the save location.
       setUntitledDocTabDragPayload(e, { tabId: tab.id, title: tab.title })
     }
-  }, [tabs])
+  }, [])
 
   const handleDragEnd = useCallback(() => {
-    dragIndexRef.current = null
     endUntitledDocTabDragSession()
   }, [])
 
@@ -847,8 +748,8 @@ export default function DocumentMode({
     addTabToGroup(newId, groupId)
   }, [addTabToGroup, createBackgroundTab])
 
-  const handleTabContextMenu = useCallback((event: React.MouseEvent<HTMLButtonElement>, id: string) => {
-    const tab = tabs.find((candidate) => candidate.id === id)
+  const handleTabContextMenu = useCallback((event: React.MouseEvent, id: string) => {
+    const tab = useDocTabs.getState().tabs.find((candidate) => candidate.id === id)
     if (!tab) return
     event.preventDefault()
     event.stopPropagation()
@@ -861,12 +762,49 @@ export default function DocumentMode({
         path: tab.path,
         tabId: tab.id,
         content: tab.content,
-        ext: getFileExt(tab.path),
+        ext: tab.path ? getFileExtension(tab.path) : '',
         size: tab.content.length,
         dirty: tab.isDirty,
       })
     })
-  }, [tabs])
+  }, [])
+
+  const railProjectionSignature = tabs.map((tab) => {
+    const appearance = tab.path ? fileAppearances[tab.path] : undefined
+    return [
+      tab.id,
+      tab.path || '',
+      tab.title,
+      tab.isDirty ? '1' : '0',
+      tab.groupId || '',
+      tab.id === activeTabId ? '1' : '0',
+      tab.id === splitTabId ? '1' : '0',
+      appearance?.color || '',
+      appearance?.icon || '',
+    ].join('\u0000')
+  }).join('\u0001')
+  const documentRailTabs = useMemo(() => useDocTabs.getState().tabs.map((tab) => {
+    const isPrimary = tab.id === useDocTabs.getState().activeTabId
+    const isSplit = tab.id === useDocTabs.getState().splitTabId
+    const appearance = tab.path ? useWorkspace.getState().fileAppearances[tab.path] : undefined
+    return {
+      id: tab.id,
+      label: tab.title,
+      pathLabel: tab.path || undefined,
+      title: `${tab.title}${isSplit ? ' (分栏)' : ''}\n按住 Shift 点击可分栏`,
+      dotColor: getFileAppearanceColorValue(appearance?.color) ?? getDocumentTabFileTypeColor(tab.path),
+      customIcon: appearance?.icon ?? null,
+      active: isPrimary,
+      secondaryActive: isSplit && !isPrimary,
+      dirty: tab.isDirty,
+      groupId: tab.groupId ?? null,
+    }
+  }), [railProjectionSignature])
+  const handleRailTabClose = useCallback((id: string) => closeTab(id), [closeTab])
+  const handleRailNewTab = useCallback(() => {
+    setEditorMode('preview')
+    openTab('')
+  }, [openTab])
 
   // Split resize
   const handleSplitResize = useCallback((delta: number) => {
@@ -946,44 +884,21 @@ export default function DocumentMode({
 
           <div className="document-workbench-body flex min-h-0 flex-1">
             <DocumentVerticalTabRail
-              tabs={tabs.map((tab) => {
-                const isPrimary = tab.id === activeTabId
-                const isSplit = tab.id === splitTabId
-                // 文件管理里设置的呈现颜色/图标（FileAppearance）优先于扩展名默认色。
-                const appearance = tab.path ? fileAppearances[tab.path] : undefined
-                return {
-                  id: tab.id,
-                  label: tab.title,
-                  pathLabel: tab.path || undefined,
-                  title: `${tab.title}${isSplit ? ' (分栏)' : ''}\n按住 Shift 点击可分栏`,
-                  dotColor: getFileAppearanceColorValue(appearance?.color) ?? getFileTypeColor(tab.path),
-                  customIcon: appearance?.icon ?? null,
-                  active: isPrimary,
-                  secondaryActive: isSplit && !isPrimary,
-                  dirty: tab.isDirty,
-                  groupId: tab.groupId ?? null,
-                }
-              })}
+              tabs={documentRailTabs}
               groups={tabGroups}
-              onTabClick={(id, event) => handleTabClick(id, event)}
-              onTabClose={(id) => closeTab(id)}
-              onNewTab={() => {
-                setEditorMode('preview')
-                openTab('')
-              }}
-              onTabDragStart={(event, id) => {
-                const index = tabs.findIndex((tab) => tab.id === id)
-                if (index >= 0) handleDragStart(event, index)
-              }}
+              onTabClick={handleTabClick}
+              onTabClose={handleRailTabClose}
+              onNewTab={handleRailNewTab}
+              onTabDragStart={handleDragStart}
               onTabDragEnd={handleDragEnd}
-              onTabContextMenu={(event, id) => handleTabContextMenu(event as React.MouseEvent<HTMLButtonElement>, id)}
-              onCreateGroup={(draggedId, targetId) => createTabGroupFromDrop(draggedId, targetId)}
-              onAddToGroup={(tabId, groupId) => addTabToGroup(tabId, groupId)}
-              onReorderToRank={(movedId, toRank, intoGroupId) => reorderTabToRank(movedId, toRank, intoGroupId)}
-              onRenameGroup={(groupId, name) => renameTabGroup(groupId, name)}
-              onRecolorGroup={(groupId, color) => recolorTabGroup(groupId, color)}
-              onSetGroupCollapsed={(groupId, collapsed) => setTabGroupCollapsed(groupId, collapsed)}
-              onDisbandGroup={(groupId) => disbandTabGroup(groupId)}
+              onTabContextMenu={handleTabContextMenu}
+              onCreateGroup={createTabGroupFromDrop}
+              onAddToGroup={addTabToGroup}
+              onReorderToRank={reorderTabToRank}
+              onRenameGroup={renameTabGroup}
+              onRecolorGroup={recolorTabGroup}
+              onSetGroupCollapsed={setTabGroupCollapsed}
+              onDisbandGroup={disbandTabGroup}
               onDeleteGroup={handleDeleteGroup}
               onNewTabInGroup={handleNewTabInGroup}
             />
@@ -997,27 +912,31 @@ export default function DocumentMode({
               background: 'var(--workbench-module-surface-bg)',
             }}
           >
-            {splitTab && activeTab ? (
+            {renderedSplitTab && renderedActiveTab ? (
               <div className="h-full flex min-w-0 overflow-hidden" ref={splitContainerRef} style={{ gap: 0 }}>
                 <div
                   ref={primarySplitPaneRef}
                   className={`document-pane-drop-target flex flex-col min-w-0 overflow-hidden${documentPaneDropTarget === 'primary' ? ' is-document-pane-drop-target' : ''}`}
                   style={{ flexBasis: `${documentSplitRatio}%`, flexShrink: 0, flexGrow: 0 }}
-                  onFocusCapture={() => handlePaneActivate(activeTab.id)}
-                  onPointerDownCapture={() => handlePaneActivate(activeTab.id)}
+                  onFocusCapture={() => handlePaneActivate(renderedActiveTab.id)}
+                  onPointerDownCapture={() => handlePaneActivate(renderedActiveTab.id)}
                   onDragOverCapture={(event) => handleDocumentPaneDragOver(event, 'primary')}
                   onDragLeaveCapture={(event) => handleDocumentPaneDragLeave(event, 'primary')}
                   onDropCapture={(event) => handleDocumentPaneDrop(event, 'primary')}
                 >
-                  <DocumentEditor
-                    key={activeTab.id}
-                    tab={activeTab}
-                    viewMode={editorMode}
-                    previewEditable={editorMode === 'preview' && previewEditActive}
-                    previewFocusWidgetTitle={previewFocusWidgetTitle}
-                    onVisibleLineChange={(line) => handlePanelTargetLineChange(activeTab.id, line)}
-                    onActivate={() => handlePaneActivate(activeTab.id)}
-                  />
+                  {renderActiveEditor && (
+                    <DocumentEditor
+                      key={renderedActiveTab.id}
+                      tab={renderedActiveTab}
+                      viewMode={editorMode}
+                      previewEditable={editorMode === 'preview' && previewEditActive}
+                      previewFocusWidgetTitle={previewFocusWidgetTitle}
+                      onVisibleLineChange={handlePrimaryVisibleLineChange}
+                      onActivate={handlePrimaryActivate}
+                      isFocused={!focusedPaneTabId || focusedPaneTabId === renderedActiveTab.id}
+                      isSceneVisible={isSceneVisible}
+                    />
+                  )}
                 </div>
                 <SplitResizeHandle
                   onResize={handleSplitResize}
@@ -1025,37 +944,43 @@ export default function DocumentMode({
                 />
                 <div
                   className={`document-pane-drop-target flex-1 flex flex-col min-w-0 overflow-hidden${documentPaneDropTarget === 'split' ? ' is-document-pane-drop-target' : ''}`}
-                  onFocusCapture={() => handlePaneActivate(splitTab.id)}
-                  onPointerDownCapture={() => handlePaneActivate(splitTab.id)}
+                  onFocusCapture={() => handlePaneActivate(renderedSplitTab.id)}
+                  onPointerDownCapture={() => handlePaneActivate(renderedSplitTab.id)}
                   onDragOverCapture={(event) => handleDocumentPaneDragOver(event, 'split')}
                   onDragLeaveCapture={(event) => handleDocumentPaneDragLeave(event, 'split')}
                   onDropCapture={(event) => handleDocumentPaneDrop(event, 'split')}
                 >
-                  <DocumentEditor
-                    key={splitTab.id}
-                    tab={splitTab}
-                    viewMode={editorMode}
-                    previewEditable={editorMode === 'preview' && previewEditActive}
-                    previewFocusWidgetTitle={previewFocusWidgetTitle}
-                    onVisibleLineChange={(line) => handlePanelTargetLineChange(splitTab.id, line)}
-                    onActivate={() => handlePaneActivate(splitTab.id)}
-                  />
+                  {renderSplitEditor && (
+                    <DocumentEditor
+                      key={renderedSplitTab.id}
+                      tab={renderedSplitTab}
+                      viewMode={editorMode}
+                      previewEditable={editorMode === 'preview' && previewEditActive}
+                      previewFocusWidgetTitle={previewFocusWidgetTitle}
+                      onVisibleLineChange={handleSplitVisibleLineChange}
+                      onActivate={handleSplitActivate}
+                      isFocused={focusedPaneTabId === renderedSplitTab.id}
+                      isSceneVisible={isSceneVisible}
+                    />
+                  )}
                 </div>
               </div>
-            ) : activeTab ? (
+            ) : renderedActiveTab && renderActiveEditor ? (
               <div
                 className="h-full flex flex-col min-w-0 overflow-hidden"
-                onFocusCapture={() => handlePaneActivate(activeTab.id)}
-                onPointerDownCapture={() => handlePaneActivate(activeTab.id)}
+                onFocusCapture={() => handlePaneActivate(renderedActiveTab.id)}
+                onPointerDownCapture={() => handlePaneActivate(renderedActiveTab.id)}
               >
                 <DocumentEditor
-                  key={activeTab.id}
-                  tab={activeTab}
+                  key={renderedActiveTab.id}
+                  tab={renderedActiveTab}
                   viewMode={editorMode}
                   previewEditable={editorMode === 'preview' && previewEditActive}
                   previewFocusWidgetTitle={previewFocusWidgetTitle}
-                  onVisibleLineChange={(line) => handlePanelTargetLineChange(activeTab.id, line)}
-                  onActivate={() => handlePaneActivate(activeTab.id)}
+                  onVisibleLineChange={handlePrimaryVisibleLineChange}
+                  onActivate={handlePrimaryActivate}
+                  isFocused={!focusedPaneTabId || focusedPaneTabId === renderedActiveTab.id}
+                  isSceneVisible={isSceneVisible}
                 />
               </div>
             ) : (
@@ -1067,7 +992,7 @@ export default function DocumentMode({
               </div>
             )}
 
-            {panelTargetTab && (
+            {isSceneVisible && panelTargetTab && (
               <DocumentFloatingPanels
                 documentPath={panelTargetTab.path}
                 documentTitle={panelTargetTab.title}

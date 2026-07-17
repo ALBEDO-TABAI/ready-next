@@ -413,6 +413,7 @@ export default function EventModal({
 
   return (
     <div
+      data-ready-native-overlay=""
       ref={overlayRef}
       className="fixed inset-0 z-50 flex items-center justify-center"
       style={{ background: 'rgba(0,0,0,0.18)' }}

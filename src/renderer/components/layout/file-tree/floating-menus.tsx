@@ -165,6 +165,7 @@ export function FileTreeExternalDropMenu({
 
   const content = (
     <div
+      data-ready-native-overlay=""
       ref={menuRef}
       className="glass-surface-floating ready-floating-menu"
       style={{
@@ -289,6 +290,7 @@ export function FileColorPalette({
 
   const content = (
     <div
+      data-ready-native-overlay=""
       ref={menuRef}
       className="glass-surface-floating ready-floating-menu"
       style={{

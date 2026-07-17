@@ -2,6 +2,8 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import {
+  applyBoardNodeDrag,
+  createBoardNodeDragSession,
   getArrowVectorBounds,
   getBoardNodeBounds,
   getMarqueeSelectedNodeIds,
@@ -9,6 +11,7 @@ import {
   normalizeBoardRect,
   resolveArrowEndpointDrag,
   resolveBoardSnapOffset,
+  updateBoardNodeDragSession,
 } from '../renderer/components/document/boardInteraction'
 
 test('marquee selection returns every node intersecting the dragged rectangle', () => {
@@ -128,4 +131,29 @@ test('arrow tail drag preserves the absolute arrow head', () => {
   })
   assert.equal(result.x + result.x2, 220)
   assert.equal(result.y + result.y2, 140)
+})
+
+test('100 node pointer moves keep source state untouched and commit final coordinates once', () => {
+  const nodes = [
+    { id: 'moving', x: 0, y: 0, width: 100, height: 80 },
+    { id: 'fixed', x: 400, y: 0, width: 100, height: 80 },
+  ]
+  const session = createBoardNodeDragSession({
+    ids: ['moving'],
+    startClientX: 10,
+    startClientY: 20,
+    zoom: 2,
+    startNodes: [{ id: 'moving', x: 0, y: 0 }],
+    movingBounds: { x: 0, y: 0, width: 100, height: 80 },
+    fixedNodes: [{ id: 'fixed', x: 400, y: 0, width: 100, height: 80 }],
+  })
+
+  for (let index = 1; index <= 100; index += 1) {
+    updateBoardNodeDragSession(session, 10 + index * 2, 20 + index, false, 8)
+  }
+
+  assert.deepEqual(nodes[0], { id: 'moving', x: 0, y: 0, width: 100, height: 80 })
+  const committed = applyBoardNodeDrag(nodes, session)
+  assert.deepEqual(committed[0], { id: 'moving', x: 100, y: 50, width: 100, height: 80 })
+  assert.equal(committed[1], nodes[1], 'fixed node identity is preserved')
 })

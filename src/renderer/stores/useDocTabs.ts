@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { createJSONStorage, persist } from 'zustand/middleware'
 import { getFilename } from '../utils/path'
 import { isTabGroupColor, pickNextGroupColor, type TabGroup, type TabGroupColor } from '../../shared/tab-groups'
+import { recordDocumentPerformanceCounter } from '../../shared/document-performance-diagnostics'
 import {
     addToGroup,
     createGroupFromDrop,
@@ -43,6 +44,7 @@ interface DocTabsState {
     tabGroups: TabGroup[]
     activeTabId: string
     splitTabId: string | null
+    focusedPaneTabId: string | null
     documentSplitRatio: number
     pendingReveal: PendingDocReveal | null
 
@@ -53,6 +55,7 @@ interface DocTabsState {
     ensureTabForPath: (path: string) => string | null
     closeTab: (id: string) => void
     setActiveTab: (id: string) => void
+    setFocusedPaneTab: (id: string) => void
     renameTab: (id: string, title: string) => void
     setTabPath: (id: string, path: string | null) => void
     setTabContent: (id: string, content: string) => void
@@ -86,6 +89,8 @@ const makeId = () => `doc-${++tabCounter}`
 const STORAGE_KEY = 'ready-doc-tabs-v2'
 const DRAFT_STORAGE_PREFIX = 'ready-doc-tab-draft-v1:'
 const DRAFT_WRITE_DELAY_MS = 300
+const METADATA_WRITE_MAX_DELAY_MS = 500
+const METADATA_IDLE_QUIET_MS = 120
 const IMAGE_PREVIEW_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp', 'ico'])
 
 interface DocTabStorage {
@@ -100,6 +105,10 @@ interface PendingDraftWrite {
 }
 
 const pendingDraftWrites = new Map<string, PendingDraftWrite>()
+let pendingMetadataWrite: { key: string; value: string } | null = null
+let pendingMetadataTimer: ReturnType<typeof setTimeout> | null = null
+let pendingMetadataQuietTimer: ReturnType<typeof setTimeout> | null = null
+let pendingMetadataIdleId: number | null = null
 
 function getDocTabStorage(): DocTabStorage | null {
     try {
@@ -142,6 +151,76 @@ export function flushPendingDocTabDrafts(): void {
         pending.timer = null
         writePendingDraft(id)
     }
+}
+
+function cancelPendingMetadataSchedules(): void {
+    if (pendingMetadataTimer) clearTimeout(pendingMetadataTimer)
+    pendingMetadataTimer = null
+    if (pendingMetadataQuietTimer) clearTimeout(pendingMetadataQuietTimer)
+    pendingMetadataQuietTimer = null
+    if (pendingMetadataIdleId !== null && typeof window !== 'undefined' && typeof window.cancelIdleCallback === 'function') {
+        window.cancelIdleCallback(pendingMetadataIdleId)
+    }
+    pendingMetadataIdleId = null
+}
+
+export function flushPendingDocTabMetadata(): void {
+    const pending = pendingMetadataWrite
+    if (!pending) return
+    cancelPendingMetadataSchedules()
+    const storage = getDocTabStorage()
+    if (!storage) {
+        pendingMetadataWrite = null
+        return
+    }
+    try {
+        storage.setItem(pending.key, pending.value)
+        pendingMetadataWrite = null
+        recordDocumentPerformanceCounter('metadataWrites')
+    } catch {
+        // silent-catch: retain the latest snapshot so the next lifecycle flush can retry it.
+        pendingMetadataWrite = pending
+    }
+}
+
+function queueMetadataWrite(key: string, value: string): void {
+    pendingMetadataWrite = { key, value }
+    if (!pendingMetadataTimer) {
+        pendingMetadataTimer = setTimeout(flushPendingDocTabMetadata, METADATA_WRITE_MAX_DELAY_MS)
+        if (typeof pendingMetadataTimer === 'object' && 'unref' in pendingMetadataTimer && typeof pendingMetadataTimer.unref === 'function') {
+            pendingMetadataTimer.unref()
+        }
+    }
+    if (pendingMetadataQuietTimer) clearTimeout(pendingMetadataQuietTimer)
+    if (pendingMetadataIdleId !== null) {
+        if (typeof window !== 'undefined' && typeof window.cancelIdleCallback === 'function') {
+            window.cancelIdleCallback(pendingMetadataIdleId)
+        }
+        pendingMetadataIdleId = null
+    }
+    pendingMetadataQuietTimer = setTimeout(() => {
+        pendingMetadataQuietTimer = null
+        if (typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function') {
+            pendingMetadataIdleId = window.requestIdleCallback(flushPendingDocTabMetadata, { timeout: METADATA_WRITE_MAX_DELAY_MS })
+        } else {
+            flushPendingDocTabMetadata()
+        }
+    }, METADATA_IDLE_QUIET_MS)
+    if (typeof pendingMetadataQuietTimer === 'object' && 'unref' in pendingMetadataQuietTimer && typeof pendingMetadataQuietTimer.unref === 'function') {
+        pendingMetadataQuietTimer.unref()
+    }
+}
+
+const coalescedMetadataStorage: DocTabStorage = {
+    getItem: (key) => getDocTabStorage()?.getItem(key) ?? null,
+    setItem: queueMetadataWrite,
+    removeItem: (key) => {
+        if (pendingMetadataWrite?.key === key) {
+            pendingMetadataWrite = null
+            cancelPendingMetadataSchedules()
+        }
+        getDocTabStorage()?.removeItem(key)
+    },
 }
 
 function discardDraft(id: string): void {
@@ -194,11 +273,15 @@ function restorePersistedDrafts(tabs: DocTab[]): DocTab[] {
 
 function installDraftFlushListeners(): void {
     if (typeof window === 'undefined' || typeof window.addEventListener !== 'function') return
-    window.addEventListener('pagehide', flushPendingDocTabDrafts)
-    window.addEventListener('beforeunload', flushPendingDocTabDrafts)
+    const flushAll = () => {
+        flushPendingDocTabDrafts()
+        flushPendingDocTabMetadata()
+    }
+    window.addEventListener('pagehide', flushAll)
+    window.addEventListener('beforeunload', flushAll)
     if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
         document.addEventListener('visibilitychange', () => {
-            if (document.visibilityState === 'hidden') flushPendingDocTabDrafts()
+            if (document.visibilityState === 'hidden') flushAll()
         })
     }
 }
@@ -366,6 +449,7 @@ function markTabActivated(tabs: DocTab[], id: string, now = Date.now()): DocTab[
 function replaceDirtyTabContent(tabs: DocTab[], id: string, content: string): DocTab[] {
     const current = tabs.find((tab) => tab.id === id)
     if (!current) return tabs
+    if (current.content === content && current.isDirty) return tabs
     if (current.content !== content || !current.isDirty) queueDraftWrite(id, content)
     return tabs.map((tab) => tab.id === id ? { ...tab, content, isDirty: true } : tab)
 }
@@ -379,7 +463,11 @@ function ensureTabsState(
     syncTabCounterFromTabs(rawTabs)
     const { tabs, tabGroups } = normalizeDocGroups(rawTabs, Array.isArray(state.tabGroups) ? state.tabGroups : [])
     const activeTabId = tabs.some((tab) => tab.id === state.activeTabId) ? state.activeTabId : tabs[0].id
-    const splitTabId = state.splitTabId && tabs.some((tab) => tab.id === state.splitTabId) ? state.splitTabId : null
+    const splitTabId = state.splitTabId
+        && state.splitTabId !== activeTabId
+        && tabs.some((tab) => tab.id === state.splitTabId)
+        ? state.splitTabId
+        : null
     return {
         tabs,
         tabGroups,
@@ -409,11 +497,12 @@ export const useDocTabs = create<DocTabsState>()(persist((set, get) => ({
     tabGroups: [],
     activeTabId: 'doc-1',
     splitTabId: null,
+    focusedPaneTabId: 'doc-1',
     documentSplitRatio: 50,
     pendingReveal: null,
 
     openTab: (path: string) => {
-        const { tabs } = get()
+        const { tabs, activeTabId, splitTabId } = get()
 
         // Empty path = create new blank tab
         if (!path) {
@@ -421,25 +510,31 @@ export const useDocTabs = create<DocTabsState>()(persist((set, get) => ({
             set({
                 tabs: [...tabs, { id, path: null, title: '新文档', content: '', isDirty: false }],
                 activeTabId: id,
+                focusedPaneTabId: id,
             })
             return
         }
 
         const next = ensureDocumentTabForPath(tabs, path)
+        const nextSplitTabId = next.id === splitTabId ? activeTabId : splitTabId
         set({
             tabs: markTabActivated(next.tabs, next.id),
             activeTabId: next.id,
+            splitTabId: nextSplitTabId,
+            focusedPaneTabId: next.id,
         })
     },
 
     openImageTab: (path: string, options) => {
         if (!path || !isImagePreviewPath(path)) return null
-        const { tabs } = get()
+        const { tabs, activeTabId, splitTabId } = get()
         const next = ensureImagePreviewTabForPath(tabs, path)
         const updates: Partial<DocTabsState> = { tabs: next.tabs }
         if (options?.activate !== false) {
             updates.tabs = markTabActivated(next.tabs, next.id)
             updates.activeTabId = next.id
+            updates.splitTabId = next.id === splitTabId ? activeTabId : splitTabId
+            updates.focusedPaneTabId = next.id
         }
         set(updates)
         return next.id
@@ -457,6 +552,7 @@ export const useDocTabs = create<DocTabsState>()(persist((set, get) => ({
                     tabs: markTabActivated(next.tabs, next.id),
                     activeTabId: next.id,
                     splitTabId: activeTabId,
+                    focusedPaneTabId: next.id,
                 })
                 return next.id
             }
@@ -464,6 +560,7 @@ export const useDocTabs = create<DocTabsState>()(persist((set, get) => ({
             set({
                 tabs: markTabActivated(next.tabs, next.id),
                 activeTabId: next.id,
+                focusedPaneTabId: next.id,
             })
             return next.id
         }
@@ -474,11 +571,13 @@ export const useDocTabs = create<DocTabsState>()(persist((set, get) => ({
                     tabs: markTabActivated(next.tabs, next.id),
                     activeTabId: splitTabId,
                     splitTabId: next.id,
+                    focusedPaneTabId: next.id,
                 })
             } else {
                 set({
                     tabs: markTabActivated(next.tabs, next.id),
                     activeTabId: next.id,
+                    focusedPaneTabId: next.id,
                 })
             }
             return next.id
@@ -487,6 +586,7 @@ export const useDocTabs = create<DocTabsState>()(persist((set, get) => ({
         set({
             tabs: markTabActivated(next.tabs, next.id),
             splitTabId: next.id,
+            focusedPaneTabId: next.id,
         })
         return next.id
     },
@@ -532,6 +632,7 @@ export const useDocTabs = create<DocTabsState>()(persist((set, get) => ({
                 tabGroups: [],
                 activeTabId: newId,
                 splitTabId: null,
+                focusedPaneTabId: newId,
             })
             discardDraft(id)
             return
@@ -545,13 +646,18 @@ export const useDocTabs = create<DocTabsState>()(persist((set, get) => ({
         // If closed tab was the split tab, clear split
         if (splitTabId === id) {
             updates.splitTabId = null
+            if (get().focusedPaneTabId === id) updates.focusedPaneTabId = activeTabId
         }
 
-        // If closed tab was active, switch to neighbor
+        // If the primary pane closes while split is visible, promote that exact
+        // visible document instead of leaving the same id in both panes.
         if (activeTabId === id) {
+            const promotedSplit = splitTabId ? remaining.find((tab) => tab.id === splitTabId) : null
             const oldIndex = tabs.findIndex(t => t.id === id)
-            const newActive = remaining[Math.min(oldIndex, remaining.length - 1)]
+            const newActive = promotedSplit || remaining[Math.min(oldIndex, remaining.length - 1)]
             updates.activeTabId = newActive.id
+            if (promotedSplit) updates.splitTabId = null
+            updates.focusedPaneTabId = newActive.id
             updates.tabs = markTabActivated(normalized.tabs, newActive.id)
         }
 
@@ -560,7 +666,14 @@ export const useDocTabs = create<DocTabsState>()(persist((set, get) => ({
     },
 
     setActiveTab: (id: string) => {
-        set({ tabs: markTabActivated(get().tabs, id), activeTabId: id, splitTabId: null })
+        set({ tabs: markTabActivated(get().tabs, id), activeTabId: id, splitTabId: null, focusedPaneTabId: id })
+    },
+
+    setFocusedPaneTab: (id: string) => {
+        const { activeTabId, splitTabId, focusedPaneTabId } = get()
+        if (id === focusedPaneTabId) return
+        if (id !== activeTabId && id !== splitTabId) return
+        set({ focusedPaneTabId: id })
     },
 
     renameTab: (id: string, title: string) => {
@@ -642,7 +755,13 @@ export const useDocTabs = create<DocTabsState>()(persist((set, get) => ({
     },
 
     setSplitTab: (id: string | null) => {
-        set({ tabs: id ? markTabActivated(get().tabs, id) : get().tabs, splitTabId: id })
+        const state = get()
+        if (id !== null && (id === state.activeTabId || !state.tabs.some((tab) => tab.id === id))) return
+        set({
+            tabs: id ? markTabActivated(state.tabs, id) : state.tabs,
+            splitTabId: id,
+            focusedPaneTabId: id || state.activeTabId,
+        })
     },
 
     setDocumentSplitRatio: (ratio: number) => {
@@ -711,7 +830,7 @@ export const useDocTabs = create<DocTabsState>()(persist((set, get) => ({
 }), {
     name: STORAGE_KEY,
     version: 4,
-    storage: createJSONStorage(() => (typeof localStorage !== 'undefined' ? localStorage : fallbackStorage)),
+    storage: createJSONStorage(() => (typeof localStorage !== 'undefined' ? coalescedMetadataStorage : fallbackStorage)),
     partialize: (state) => {
         const tabs = state.tabs.map((tab) => ({ ...tab, content: '' }))
         return {
@@ -737,6 +856,7 @@ export const useDocTabs = create<DocTabsState>()(persist((set, get) => ({
         ...state,
         ...next,
         tabs: restorePersistedDrafts(next.tabs),
+        focusedPaneTabId: next.activeTabId,
       }
     },
     migrate: (persistedState, persistedVersion) => {

@@ -32,6 +32,19 @@ export interface BoardArrowGeometry {
 export type BoardArrowEndpoint = 'tail' | 'head'
 export type BoardLayerPlacement = 'front' | 'back'
 
+export interface BoardNodeDragSession {
+  ids: readonly string[]
+  startClientX: number
+  startClientY: number
+  zoom: number
+  startNodes: ReadonlyArray<{ id: string; x: number; y: number }>
+  movingBounds: BoardRect
+  fixedNodes: readonly BoardNodeBounds[]
+  dx: number
+  dy: number
+  guides: BoardSnapGuide[]
+}
+
 function rectRight(rect: BoardRect): number {
   return rect.x + rect.width
 }
@@ -131,6 +144,64 @@ export function resolveBoardSnapOffset(params: {
       ...(ySnap ? [{ axis: 'y' as const, value: ySnap.value }] : []),
     ],
   }
+}
+
+export function createBoardNodeDragSession(params: {
+  ids: readonly string[]
+  startClientX: number
+  startClientY: number
+  zoom: number
+  startNodes: ReadonlyArray<{ id: string; x: number; y: number }>
+  movingBounds: BoardRect
+  fixedNodes: readonly BoardNodeBounds[]
+}): BoardNodeDragSession {
+  return {
+    ids: [...params.ids],
+    startClientX: params.startClientX,
+    startClientY: params.startClientY,
+    zoom: Math.max(params.zoom, 0.01),
+    startNodes: params.startNodes.map((node) => ({ ...node })),
+    movingBounds: { ...params.movingBounds },
+    fixedNodes: params.fixedNodes.map((node) => ({ ...node })),
+    dx: 0,
+    dy: 0,
+    guides: [],
+  }
+}
+
+export function updateBoardNodeDragSession(
+  session: BoardNodeDragSession,
+  clientX: number,
+  clientY: number,
+  snapEnabled: boolean,
+  snapThresholdPx: number,
+): BoardSnapResult {
+  const rawDx = (clientX - session.startClientX) / session.zoom
+  const rawDy = (clientY - session.startClientY) / session.zoom
+  const next = snapEnabled
+    ? resolveBoardSnapOffset({
+        movingBounds: session.movingBounds,
+        fixedNodes: session.fixedNodes,
+        dx: rawDx,
+        dy: rawDy,
+        threshold: snapThresholdPx / session.zoom,
+      })
+    : { dx: rawDx, dy: rawDy, guides: [] }
+  session.dx = next.dx
+  session.dy = next.dy
+  session.guides = next.guides
+  return next
+}
+
+export function applyBoardNodeDrag<T extends { id: string; x: number; y: number }>(
+  nodes: readonly T[],
+  session: BoardNodeDragSession,
+): T[] {
+  const starts = new Map(session.startNodes.map((node) => [node.id, node]))
+  return nodes.map((node) => {
+    const start = starts.get(node.id)
+    return start ? { ...node, x: start.x + session.dx, y: start.y + session.dy } : node
+  })
 }
 
 export function getArrowVectorBounds(node: Pick<BoardArrowGeometry, 'x2' | 'y2'>): BoardRect {

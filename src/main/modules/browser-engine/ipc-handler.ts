@@ -1,4 +1,4 @@
-import { BrowserWindow, ipcMain, shell, session } from 'electron'
+import { app, BrowserWindow, ipcMain, shell, session } from 'electron'
 import { mkdir, open, rename, stat, unlink, writeFile } from 'node:fs/promises'
 import { dirname, extname, join } from 'node:path'
 import { randomUUID } from 'node:crypto'
@@ -59,14 +59,12 @@ import {
 } from './diagnostics-service'
 import { BrowserHostLayoutService } from './host-layout-service'
 import {
-  type BrowserBoundsSyncMode,
-  type BrowserHostKind,
+  BROWSER_HOST_KIND,
   type BrowserHostView,
   type BrowserRect,
   type BrowserViewBoundsUpdate,
   type PreviewTabState,
 } from './host-types'
-import { resolveBrowserHostKindFromConfig } from './host-kind-config'
 import { setupBrowserClipIPC } from './ipc-clip'
 import { setupBrowserClipDraggedTabIPC } from './ipc-clip-dragged-tab'
 import { setupBrowserContentStudyIPC } from './ipc-content-study-dragged-tab'
@@ -107,7 +105,6 @@ import {
   isAllowedBrowserURL,
   toOAuthCompatibleUserAgent,
 } from './popup-policy'
-import { BrowserVisibilityCommandState } from './visibility-command-state'
 import {
   BrowserWorkflowSessionStore,
   type BrowserWorkflowSession,
@@ -118,6 +115,11 @@ import { READY_BROWSER_BLANK_URL } from '../../../shared/browser-defaults'
 import { parseBrowserLocalMediaDropUrl } from '../../../shared/browser-local-media-drop'
 import type { BrowserPowerPreflightAuditRecord } from '../database'
 import { readBrowserSessionStatus } from './browser-session-status'
+import { BrowserPerformanceRuntime } from './browser-performance-runtime'
+import type { RegisterDormantBrowserTabsRequest, RegisterDormantBrowserTabsResult } from '../../../shared/browser-tab-session'
+import { browserSnapshotService } from './browser-snapshot-service'
+import { disposeBrowserPageMapAmbiguity } from './browser-page-map-ambiguity-cache'
+import { BrowserVisibilityRuntime } from './browser-visibility-runtime'
 
 interface Tab extends BrowserTabMetaRecord {
   id: string
@@ -135,6 +137,10 @@ interface Tab extends BrowserTabMetaRecord {
   error: string | null
   profile?: string | null
   view?: BrowserHostView
+  restoreSnapshot?: {
+    entries: Electron.NavigationEntry[]
+    index: number
+  } | null
 }
 
 export type BrowserTabOwner = 'manual' | 'agent'
@@ -166,9 +172,9 @@ export class BrowserController {
   splitViewBounds: BrowserRect = { x: 0, y: 0, width: 800, height: 600 }
   previewBounds: BrowserRect = { x: 0, y: 0, width: 800, height: 600 }
   private readonly frozenBoundsByTab = new Map<string, { bounds: BrowserRect; tokens: Set<string> }>()
-  private readonly browserVisibilityState = new BrowserVisibilityCommandState()
+  private readonly browserVisibilityRuntime: BrowserVisibilityRuntime
   private readonly localMediaDropRuns = new Map<string, number>()
-  private readonly browserHostKind: BrowserHostKind
+  private readonly browserHostKind = BROWSER_HOST_KIND
   private mainWindow: BrowserWindow
   private useMock: boolean
   private popupManager: AuthPopupManager
@@ -204,6 +210,7 @@ export class BrowserController {
   private readonly tabLifecycleService: BrowserTabLifecycleService
   private readonly tabMetaService: BrowserTabMetaService<Tab>
   private readonly tabShellService: BrowserTabShellService
+  private readonly performanceRuntime: BrowserPerformanceRuntime<Tab>
   private readonly sessionPolicyService: BrowserSessionPolicyService
   private readonly appShortcutBridgeService: BrowserAppShortcutBridgeService
   private readonly utilityMenuService: BrowserUtilityMenuService
@@ -223,14 +230,42 @@ export class BrowserController {
     this.mainWindow = mainWindow
     this.useMock = useMock
     this.dataService = new BrowserDataService()
-    this.browserHostKind = this.resolveBrowserHostKind()
     this.browserUserAgent = toOAuthCompatibleUserAgent(mainWindow.webContents.getUserAgent())
     this.downloadService = new BrowserDownloadService({
       dataService: this.dataService,
       sendToRenderer: (channel, data) => this.sendToRenderer(channel, data),
+      resolveTabIdForWebContents: (webContentsId) => this.getTabIdForWebContents(webContentsId),
+      onTabDownloadStateChange: () => this.performanceRuntime?.reconcile(),
     })
     this.diagnosticsService = new BrowserDiagnosticsService()
-    this.hostLayoutService = new BrowserHostLayoutService(mainWindow, this.browserHostKind)
+    this.hostLayoutService = new BrowserHostLayoutService(mainWindow)
+    this.browserVisibilityRuntime = new BrowserVisibilityRuntime({
+      hideAllHosts: () => this.tabShellService.hideAllHosts(),
+      hideActiveHost: () => this.tabShellService.hideActiveHostOnly(),
+      showActiveHost: () => this.tabShellService.showActiveHost(),
+      applyIntent: (intent) => this.tabShellService.applyIntent(intent),
+      clearAgentPointer: () => clearBrowserAgentPointer(),
+      reconcileLoadStates: () => this.performanceRuntime.reconcile(),
+      recordIntent: (kind) => this.performanceRuntime.recordIntent(kind),
+      log: (message) => this.logBrowserDiag(message),
+    })
+    this.performanceRuntime = new BrowserPerformanceRuntime({
+      getTabs: () => this.tabs.values(),
+      getActiveTabId: () => this.activeTabId,
+      getSplitTabId: () => this.splitTabId,
+      shouldPresentHosts: () => this.browserVisibilityRuntime.shouldPresentHosts(),
+      getProtectionReasons: (tabId) => [
+        this.isTabLeaseProtected(tabId) ? 'agent-lease' : null,
+        this.downloadService.isTabDownloading(tabId) ? 'download' : null,
+        this.dialogService?.hasPending(tabId) ? 'dialog' : null,
+        this.popupManager?.isSourceTabInPopupFlow(tabId) ? 'auth-popup' : null,
+      ].filter((reason): reason is string => Boolean(reason)),
+      detachHost: (view) => this.detachHost(view as BrowserHostView),
+      disposeTabResources: (tabId) => this.disposeTabRuntimeResources(tabId),
+      emitTabUpdate: (payload) => this.sendToRendererImmediate('browser:tabUpdate', payload),
+      log: (message) => this.logBrowserDiag(message),
+      getAppMetrics: () => app.getAppMetrics(),
+    })
     this.pageBackgroundService = new BrowserPageBackgroundService((message) => this.logBrowserDiag(message))
     this.appShortcutBridgeService = new BrowserAppShortcutBridgeService({
       sendToRenderer: (channel, data) => this.sendToRenderer(channel, data),
@@ -240,12 +275,13 @@ export class BrowserController {
       (url) => this.openPopupInTab(url),
       (message) => this.logBrowserDiag(message),
       this.browserUserAgent,
+      () => this.performanceRuntime?.reconcile(),
     )
     this.contextMenuService = new BrowserContextMenuService({
       mainWindow,
       isAllowedUrl: (url) => isAllowedBrowserURL(url),
       createTab: (url, options) => this.createTab(url, options),
-      addImageToActiveBoard: (url) => getReadyBoardService().addRemoteImageToActiveBoard(url),
+      addImageToActiveBoard: (url) => getReadyBoardService().importRemoteImageToActiveBoard(url),
       getTabIdForWebContents: (webContents) => this.getTabIdForWebContents(webContents.id),
       sendToRenderer: (channel, data) => this.sendToRenderer(channel, data),
       logBrowserDiag: (message) => this.logBrowserDiag(message),
@@ -262,7 +298,9 @@ export class BrowserController {
       resolveTabView: (tabId) => this.resolveTabView(tabId),
       createBrowserError: (code, message) => this.createBrowserError(code, message),
     })
-    this.dialogService = new BrowserDialogService(this.cdpSessionService)
+    this.dialogService = new BrowserDialogService(this.cdpSessionService, () => {
+      this.performanceRuntime.reconcile()
+    })
     this.fileChooserGuard = new BrowserFileChooserGuard({
       cdp: this.cdpSessionService,
       resolveTabUrl: (tabId) => {
@@ -308,7 +346,7 @@ export class BrowserController {
       cdpSession: this.cdpSessionService,
       agentInputPassthrough: this.agentInputPassthrough,
       onTrustedInput: (event) => {
-        if (event.tabId !== this.activeTabId || !this.browserVisibilityState.shouldPresentHosts()) return
+        if (event.tabId !== this.activeTabId || !this.browserVisibilityRuntime.shouldPresentHosts()) return
         if (!Number.isFinite(event.x) || !Number.isFinite(event.y)) return
         const phase = event.kind === 'drag'
           ? 'drag'
@@ -392,7 +430,7 @@ export class BrowserController {
     this.tabMetaService = new BrowserTabMetaService({
       tabs: this.tabs,
       getActiveTabId: () => this.activeTabId,
-      sendToRenderer: (channel, data) => this.sendToRenderer(channel, data),
+      queueTabUpdate: (data) => this.performanceRuntime.queueTabUpdate(data),
     })
     this.tabLifecycleService = new BrowserTabLifecycleService({
       tabs: this.tabs,
@@ -400,9 +438,16 @@ export class BrowserController {
       setActiveTabId: (tabId) => {
         this.activeTabId = tabId
       },
+      setSplitTabId: (tabId) => {
+        this.splitTabId = tabId
+      },
+      observeRestoredTabId: (tabId) => {
+        const numericId = /^tab-(\d+)$/.exec(tabId)?.[1]
+        if (numericId) this.tabCounter = Math.max(this.tabCounter, Number(numericId))
+      },
       getNextTabId: () => `tab-${++this.tabCounter}`,
       getViewBounds: () => this.viewBounds,
-      shouldPresentHosts: () => this.browserVisibilityState.shouldPresentHosts(),
+      shouldPresentHosts: () => this.browserVisibilityRuntime.shouldPresentHosts(),
       isAllowedUrl: (url) => isAllowedBrowserURL(url, { allowLocalHtml: true }),
       extractDomain: (url) => extractBrowserDomain(url),
       createHost: (partition) => {
@@ -411,10 +456,11 @@ export class BrowserController {
       },
       resetPageBackground: (view) => this.pageBackgroundService.reset(view),
       syncPageBackground: (view) => this.pageBackgroundService.sync(view),
-      applyBounds: (view) => this.applyBounds(view, 'settled'),
+      applyBounds: (view) => this.applyBounds(view),
       detachHost: (view) => this.detachHost(view),
       showHost: (view, bounds) => this.showHost(view, bounds),
       sendToRenderer: (channel, data) => this.sendToRenderer(channel, data),
+      queueTabUpdate: (data) => this.performanceRuntime.queueTabUpdate(data),
       buildTabPayload: (tab) => this.tabMetaService.buildTabPayload(tab),
       emitTabMeta: (tabId) => this.emitTabMeta(tabId),
       logBrowserDiag: (message) => this.logBrowserDiag(message),
@@ -433,6 +479,7 @@ export class BrowserController {
       addHistoryEntry: (url, title, metadata) => this.dataService.addHistoryEntry(url, title, metadata),
       updateHistoryEntryTitle: (url, title, favicon) => this.dataService.updateHistoryEntryTitle(url, title, favicon),
       handleLocalMediaDropNavigation: (tabId, url) => this.handleLocalMediaDropNavigation(tabId, url),
+      onTabLoadStateMayChange: (tabId, reason) => this.performanceRuntime.onLoadStateMayChange(tabId, reason),
       browserUserAgent: this.browserUserAgent,
       useMock: this.useMock,
     })
@@ -455,13 +502,15 @@ export class BrowserController {
         this.splitViewBounds = bounds
       },
       getFrozenBounds: (tabId) => this.getFrozenBoundsForTab(tabId),
-      shouldPresentHosts: () => this.browserVisibilityState.shouldPresentHosts(),
+      shouldPresentHosts: () => this.browserVisibilityRuntime.shouldPresentHosts(),
       isAllowedUrl: (url) => isAllowedBrowserURL(url, { allowLocalHtml: true }),
       createTab: (url) => this.createTab(url),
+      materializeTab: (tabId) => this.tabLifecycleService.materializeTab(tabId),
       detachHost: (view) => this.detachHost(view),
       showHost: (view, bounds) => this.showHost(view, bounds),
-      applyBounds: (view, syncMode, bounds) => this.applyBounds(view, syncMode, bounds),
+      applyBounds: (view, bounds) => this.applyBounds(view, bounds),
       hideHost: (view) => this.hideHost(view),
+      isHostAttached: (view) => this.hostLayoutService.isHostAttached(view),
       detachPreviewView: () => this.detachPreviewView(),
       restoreActiveTabHost: () => this.restoreActiveTabHost(),
     })
@@ -525,6 +574,7 @@ export class BrowserController {
     })
     getBrowserWriteLeaseService().onTransition((transition) => {
       this.notifyBrowserLeaseChanged()
+      this.performanceRuntime.reconcile()
       // D16 — 写租约离开 held（释放/接管/过期）即解除文件选择器拦截，
       // 用户随后的原生选择器行为不受 agent 遗留影响。
       if (transition.previousState === 'held' && transition.state !== 'held') {
@@ -540,14 +590,22 @@ export class BrowserController {
     this.diagnosticsService.log(message)
   }
 
-  // ── Internal helpers ──────────────────────────────────────────────
-
-  private resolveBrowserHostKind(): BrowserHostKind {
-    return resolveBrowserHostKindFromConfig(
-      process.env.READY_BROWSER_HOST_DRIVER,
-      () => this.dataService.getSetting('browser_host_driver'),
-    )
+  private isTabLeaseProtected(tabId: string): boolean {
+    const leases = getBrowserWriteLeaseService()
+    return leases.getLease('user-view')?.tabId === tabId
+      || leases.getLease('agent-view')?.tabId === tabId
   }
+
+  private disposeTabRuntimeResources(tabId: string): void {
+    this.dialogService.clear(tabId)
+    this.fileChooserGuard.disposeTab(tabId)
+    browserSnapshotService.disposeTab(this, tabId)
+    disposeBrowserPageMapAmbiguity(tabId)
+    this.cdpSessionService.disposeTab(tabId)
+    this.networkObserverService.disposeTab(tabId)
+  }
+
+  // ── Internal helpers ──────────────────────────────────────────────
 
   private resolveOriginDomainForWebContentsId(webContentsId?: number): string {
     if (!webContentsId) return ''
@@ -626,9 +684,21 @@ export class BrowserController {
   }
 
   sendToRenderer(channel: string, data: unknown): void {
+    this.sendToRendererImmediate(channel, data)
+  }
+
+  private sendToRendererImmediate(channel: string, data: unknown): void {
     if (!this.mainWindow.isDestroyed()) {
       this.mainWindow.webContents.send(channel, data)
     }
+  }
+
+  notifyTabClosed(tabId: string): void {
+    this.performanceRuntime.queueTabUpdate({
+      type: 'closed',
+      tabId,
+      activeTabId: this.activeTabId,
+    })
   }
 
   private isDuplicateLocalMediaDrop(signature: string): boolean {
@@ -771,14 +841,13 @@ export class BrowserController {
 
   applyBounds(
     view: BrowserHostView,
-    syncMode: BrowserBoundsSyncMode = 'settled',
     bounds: BrowserRect = this.viewBounds,
   ): void {
-    this.hostLayoutService.applyBounds(view, bounds, syncMode)
+    this.hostLayoutService.applyBounds(view, bounds)
   }
 
   applyPreviewBounds(view: BrowserHostView): void {
-    this.hostLayoutService.applyBounds(view, this.previewBounds, 'settled')
+    this.hostLayoutService.applyBounds(view, this.previewBounds)
   }
 
   private hideActiveTabHost(): boolean {
@@ -795,7 +864,7 @@ export class BrowserController {
     const activeTab = this.tabs.get(this.activeTabId)
     if (activeTab?.view) {
       this.showHost(activeTab.view, this.viewBounds)
-      this.applyBounds(activeTab.view, 'settled')
+      this.applyBounds(activeTab.view)
     }
   }
 
@@ -943,6 +1012,7 @@ export class BrowserController {
     if (updates.activity !== undefined) tab.activity = updates.activity
     if (updates.lastAuditedAt !== undefined) tab.lastAuditedAt = updates.lastAuditedAt
     this.emitTabMeta(resolvedTabId)
+    this.performanceRuntime.reconcile()
     return tab
   }
 
@@ -958,53 +1028,11 @@ export class BrowserController {
     return this.sessionPolicyService.toggleAdblockDomain(domain)
   }
 
-  getTabList(): Array<{
-    id: string
-    url: string
-    title: string
-    domain: string
-    favicon: string | null
-    owner: BrowserTabOwner
-    required: boolean
-    activity: BrowserTabActivity
-    lastAuditedAt: number | null
-    loading: boolean
-    canGoBack: boolean
-    canGoForward: boolean
-    error: string | null
-    active: boolean
-  }> {
-    return this.tabMetaService.getTabList() as Array<{
-      id: string
-      url: string
-      title: string
-      domain: string
-      favicon: string | null
-      owner: BrowserTabOwner
-      required: boolean
-      activity: BrowserTabActivity
-      lastAuditedAt: number | null
-      loading: boolean
-      canGoBack: boolean
-      canGoForward: boolean
-      error: string | null
-      active: boolean
-    }>
+  getTabList() {
+    return this.tabMetaService.getTabList()
   }
 
-  getDiagnostics(): {
-    hostDriver: BrowserHostKind
-    tabCount: number
-    activeTabId: string | null
-    diagnosticsLogPath: string
-    recentLogs: string[]
-    preview: PreviewTabState
-    currentTask: BrowserTaskDiagnosticsSnapshot | null
-    pageState: BrowserPageDiagnosticsSnapshot | null
-    continuity: BrowserContinuityDiagnosticsSnapshot | null
-    lastFailure: { reason: string; updatedAt: string } | null
-    availableActions: string[]
-  } {
+  getDiagnostics(options?: { includePerformance?: boolean }) {
     const agentSnapshot = this.diagnosticsService.getAgentSnapshot()
     return {
       hostDriver: this.browserHostKind,
@@ -1018,6 +1046,7 @@ export class BrowserController {
       continuity: agentSnapshot.continuity,
       lastFailure: agentSnapshot.lastFailure,
       availableActions: agentSnapshot.availableActions,
+      ...this.performanceRuntime.getDiagnostics(options?.includePerformance),
     }
   }
 
@@ -2137,7 +2166,15 @@ export class BrowserController {
     if (result.success && result.tabId) {
       this.attachUserViewLeaseTakeover(result.tabId)
       void this.dialogService.ensure(result.tabId).catch(() => undefined)
+      this.performanceRuntime.reconcile()
+      this.performanceRuntime.scheduleReclaim()
     }
+    return result
+  }
+
+  registerDormantTabs(request: RegisterDormantBrowserTabsRequest): RegisterDormantBrowserTabsResult {
+    const result = this.tabLifecycleService.registerDormantTabs(request)
+    this.performanceRuntime.reconcile()
     return result
   }
 
@@ -2574,6 +2611,14 @@ export class BrowserController {
    * Navigate the active tab (or specified tab) to a URL.
    */
   async navigate(tabId: string | null, url: string): Promise<{ success: boolean; error?: string }> {
+    const resolvedTabId = tabId || this.activeTabId
+    if (resolvedTabId && !this.tabs.get(resolvedTabId)?.view) {
+      const materialized = this.tabLifecycleService.materializeTab(resolvedTabId, {
+        activate: resolvedTabId === this.activeTabId,
+      })
+      if (!materialized.success) return { success: false, error: materialized.error }
+      this.performanceRuntime.reconcile()
+    }
     return this.tabShellService.navigate(tabId, url)
   }
 
@@ -2593,32 +2638,14 @@ export class BrowserController {
   }
 
   closeTab(tabId: string): { success: boolean; error?: string } {
-    return this.tabShellService.closeTab(tabId)
+    if (this.tabs.has(tabId)) this.disposeTabRuntimeResources(tabId)
+    const result = this.tabShellService.closeTab(tabId)
+    if (result.success) this.performanceRuntime.disposeTab(tabId)
+    return result
   }
 
   reorderTabs(tabIds: string[]): { success: boolean; error?: string } {
-    const seen = new Set<string>()
-    const reordered = new Map<string, Tab>()
-
-    for (const rawId of tabIds) {
-      const tabId = String(rawId || '')
-      if (!tabId || seen.has(tabId)) continue
-      const tab = this.tabs.get(tabId)
-      if (!tab) continue
-      reordered.set(tabId, tab)
-      seen.add(tabId)
-    }
-
-    for (const [tabId, tab] of this.tabs.entries()) {
-      if (seen.has(tabId)) continue
-      reordered.set(tabId, tab)
-    }
-
-    this.tabs.clear()
-    for (const [tabId, tab] of reordered.entries()) {
-      this.tabs.set(tabId, tab)
-    }
-    return { success: true }
+    return this.tabShellService.reorderTabs(tabIds)
   }
 
   switchTab(tabId: string): {
@@ -2630,6 +2657,7 @@ export class BrowserController {
     title?: string
     domain?: string
     favicon?: string | null
+    profile?: string | null
     owner?: BrowserTabOwner
     required?: boolean
     activity?: BrowserTabActivity
@@ -2637,8 +2665,13 @@ export class BrowserController {
     canGoBack?: boolean
     canGoForward?: boolean
   } {
+    if (!this.tabs.get(tabId)?.view) {
+      const materialized = this.tabLifecycleService.materializeTab(tabId)
+      if (!materialized.success) return { success: false, error: materialized.error }
+    }
     const result = this.tabShellService.switchTab(tabId)
     if (result.success) {
+      this.performanceRuntime.noteInteraction(tabId)
       if (result.previousActiveTabId && result.previousActiveTabId !== (result.activeTabId ?? tabId)) {
         clearBrowserAgentPointer()
       }
@@ -2669,29 +2702,15 @@ export class BrowserController {
   }
 
   hideAllHosts(payload?: { requestId?: number }): { success: boolean } {
-    if (!this.browserVisibilityState.applyHide(payload?.requestId)) {
-      return { success: true }
-    }
-    clearBrowserAgentPointer()
-    this.logBrowserDiag(`[browser-host][visibility] hideAll request=${String(payload?.requestId || 'none')}`)
-    return this.tabShellService.hideAllHosts()
+    return this.browserVisibilityRuntime.hideAll(payload)
   }
 
   hideActiveHost(payload?: { requestId?: number }): { success: boolean } {
-    if (!this.browserVisibilityState.applyHide(payload?.requestId)) {
-      return { success: true }
-    }
-    clearBrowserAgentPointer()
-    this.logBrowserDiag(`[browser-host][visibility] hideActive request=${String(payload?.requestId || 'none')}`)
-    return this.tabShellService.hideActiveHostOnly()
+    return this.browserVisibilityRuntime.hideActive(payload)
   }
 
   showActiveHost(payload?: { requestId?: number }): { success: boolean } {
-    if (!this.browserVisibilityState.applyShow(payload?.requestId)) {
-      return { success: true }
-    }
-    this.logBrowserDiag(`[browser-host][visibility] showActive request=${String(payload?.requestId || 'none')}`)
-    return this.tabShellService.showActiveHost()
+    return this.browserVisibilityRuntime.showActive(payload)
   }
 
   /**
@@ -2703,36 +2722,7 @@ export class BrowserController {
    * ordering remains intact for PR-shell-2.
    */
   applyBrowserViewIntent(intent: import('../../../shared/browser-view-intent').BrowserViewIntent): { success: boolean } {
-    if (intent.kind === 'hide-all') {
-      if (!this.browserVisibilityState.applyHide(intent.intentId)) {
-        return { success: true }
-      }
-      clearBrowserAgentPointer()
-      this.logBrowserDiag(`[browser-host][intent] hide-all intentId=${intent.intentId} reason=${intent.reason}`)
-      return this.tabShellService.applyIntent(intent)
-    }
-    if (intent.kind === 'show') {
-      if (!this.browserVisibilityState.applyShow(intent.intentId)) {
-        return { success: true }
-      }
-      this.logBrowserDiag(`[browser-host][intent] show intentId=${intent.intentId} tab=${intent.tabId} reason=${intent.reason}`)
-      return this.tabShellService.applyIntent(intent)
-    }
-    if (intent.kind === 'hide') {
-      clearBrowserAgentPointer()
-      this.logBrowserDiag(`[browser-host][intent] hide intentId=${intent.intentId} tab=${intent.tabId} reason=${intent.reason}`)
-      return this.tabShellService.applyIntent(intent)
-    }
-    if (intent.kind === 'set-bounds') {
-      clearBrowserAgentPointer()
-      this.logBrowserDiag(`[browser-host][intent] set-bounds intentId=${intent.intentId} tab=${intent.tabId} x=${intent.bounds.x} y=${intent.bounds.y} w=${intent.bounds.w} h=${intent.bounds.h}`)
-      return this.tabShellService.applyIntent(intent)
-    }
-    if (intent.kind === 'secondary-set-bounds') {
-      this.logBrowserDiag(`[browser-host][intent] secondary-set-bounds intentId=${intent.intentId} tab=${intent.tabId} x=${intent.bounds.x} y=${intent.bounds.y} w=${intent.bounds.w} h=${intent.bounds.h}`)
-      return this.tabShellService.applyIntent(intent)
-    }
-    return { success: false }
+    return this.browserVisibilityRuntime.applyIntent(intent)
   }
 
   async fitActiveTabToBounds(tabId?: string | null): Promise<{ success: boolean; zoomFactor?: number; error?: string }> {

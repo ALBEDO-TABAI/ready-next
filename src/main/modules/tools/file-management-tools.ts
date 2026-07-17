@@ -5,6 +5,8 @@ import { fileURLToPath } from 'url'
 
 import type { SearchEngine } from '../search-engine/indexer'
 import { getWorkerDbBridge } from '../database/worker-bridge'
+import { getDocumentWorker } from '../document-engine/document-worker-bridge'
+import type { DocumentTextExtractResult } from '../document-engine/document-worker-protocol'
 import { parseDocumentGraph } from '../../../shared/document-graph-parse'
 import { resolveDocumentSectionAnchor } from '../../../shared/document-sectioning'
 import { validateWorkspaceRoot } from '../../../shared/workspace-validation'
@@ -674,6 +676,7 @@ function boundedText(content: string, offsetValue: unknown, maxCharsValue: unkno
   offset: number
   maxChars: number
   text: string
+  totalChars: number
   truncated: boolean
   nextOffset: number | null
 } {
@@ -689,67 +692,68 @@ function boundedText(content: string, offsetValue: unknown, maxCharsValue: unkno
     offset,
     maxChars,
     text,
+    totalChars: content.length,
     truncated: nextOffset !== null,
     nextOffset,
   }
 }
 
-async function extractTextFromPath(path: string): Promise<{ ok: true; text: string; kind: string } | { ok: false; error: string; kind: string }> {
+type ExtractedTextWindow = ReturnType<typeof boundedText>
+
+function extractedWorkerWindow(
+  result: DocumentTextExtractResult,
+  maxChars: number,
+): { ok: true; kind: string } & ExtractedTextWindow {
+  return {
+    ok: true,
+    kind: result.kind,
+    text: result.text,
+    totalChars: result.totalChars,
+    truncated: result.truncated,
+    offset: result.offset,
+    maxChars,
+    nextOffset: result.nextOffset,
+  }
+}
+
+async function extractTextFromPath(
+  path: string,
+  offsetValue: unknown = 0,
+  maxCharsValue: unknown = DEFAULT_EXTRACT_CHARS,
+): Promise<({ ok: true; kind: string } & ExtractedTextWindow) | { ok: false; error: string; kind: string }> {
   const ext = extname(path).toLowerCase()
+  const requested = boundedText('', offsetValue, maxCharsValue)
   try {
     if (ext === '.docx') {
-      const mammoth = await import('mammoth')
-      const buffer = await readFile(path)
-      const mammothMod = (mammoth as unknown as { default?: typeof import('mammoth') }).default || mammoth
-      const result = await mammothMod.extractRawText({ buffer })
-      return { ok: true, kind: 'docx', text: result.value || '' }
+      const result = await getDocumentWorker().extractDocumentText(path, {
+        offset: requested.offset,
+        maxChars: requested.maxChars,
+      })
+      return result.success
+        ? extractedWorkerWindow(result, requested.maxChars)
+        : { ok: false, kind: result.kind, error: result.error || 'DOCX parse failed' }
     }
     if (ext === '.xlsx' || ext === '.xls') {
-      const xlsx = await import('xlsx')
-      const buffer = await readFile(path)
-      const xlsxMod = (xlsx as unknown as { default?: typeof import('xlsx') }).default || xlsx
-      const workbook = xlsxMod.read(buffer, { type: 'buffer' })
-      const parts: string[] = []
-      for (const sheetName of workbook.SheetNames) {
-        const sheet = workbook.Sheets[sheetName]
-        const rows = xlsxMod.utils.sheet_to_json(sheet, { header: 1 }) as unknown[][]
-        parts.push(`# ${sheetName}`)
-        for (const row of rows.slice(0, 200)) {
-          parts.push(row.map((cell) => String(cell ?? '')).join('\t').trimEnd())
-        }
-      }
-      return { ok: true, kind: 'spreadsheet', text: parts.join('\n') }
+      const result = await getDocumentWorker().extractDocumentText(path, {
+        maxRowsPerSheet: 200,
+        offset: requested.offset,
+        maxChars: requested.maxChars,
+      })
+      return result.success
+        ? extractedWorkerWindow(result, requested.maxChars)
+        : { ok: false, kind: result.kind, error: result.error || 'Spreadsheet parse failed' }
     }
     if (ext === '.pdf') {
-      const previousDisableLogs = process.env.PDF2JSON_DISABLE_LOGS
-      process.env.PDF2JSON_DISABLE_LOGS = '1'
-      try {
-        const { default: PDFParser } = await import('pdf2json')
-        const buffer = await readFile(path)
-        const text = await new Promise<string>((resolve, reject) => {
-          const parser = new PDFParser(null, true)
-          const timer = setTimeout(() => reject(new Error('PDF text extraction timed out')), 15_000)
-          parser.on('pdfParser_dataError', (errData: Error | { parserError: Error }) => {
-            clearTimeout(timer)
-            reject(errData instanceof Error ? errData : errData.parserError)
-          })
-          parser.on('pdfParser_dataReady', () => {
-            clearTimeout(timer)
-            resolve(parser.getRawTextContent())
-          })
-          parser.parseBuffer(buffer)
-        })
-        return { ok: true, kind: 'pdf', text }
-      } finally {
-        if (previousDisableLogs === undefined) {
-          delete process.env.PDF2JSON_DISABLE_LOGS
-        } else {
-          process.env.PDF2JSON_DISABLE_LOGS = previousDisableLogs
-        }
-      }
+      const result = await getDocumentWorker().extractDocumentText(path, {
+        offset: requested.offset,
+        maxChars: requested.maxChars,
+      })
+      return result.success
+        ? extractedWorkerWindow(result, requested.maxChars)
+        : { ok: false, kind: result.kind, error: result.error || 'PDF parse failed' }
     }
     const text = await readFile(path, 'utf-8')
-    return { ok: true, kind: ext ? ext.slice(1) : 'text', text }
+    return { ok: true, kind: ext ? ext.slice(1) : 'text', ...boundedText(text, requested.offset, requested.maxChars) }
   } catch (error) {
     // silent-catch: extraction failures are returned to the model as tool output.
     return { ok: false, kind: ext ? ext.slice(1) : 'unknown', error: error instanceof Error ? error.message : String(error) }
@@ -764,13 +768,18 @@ async function runFileExtractText(
   const rawPath = typeof args.path === 'string' ? args.path : ''
   const resolved = await resolveReadableDocumentPath(rawPath, engine, context)
   if (!resolved.ok) return toJsonString(resolved.output)
-  const extracted = await extractTextFromPath(resolved.readPath)
+  const extracted = await extractTextFromPath(resolved.readPath, args.offset, args.maxChars)
   if (!extracted.ok) return toJsonString({ ok: false, path: resolved.path, kind: extracted.kind, error: extracted.error })
   return toJsonString({
     ok: true,
     path: resolved.path,
     kind: extracted.kind,
-    ...boundedText(extracted.text, args.offset, args.maxChars),
+    offset: extracted.offset,
+    maxChars: extracted.maxChars,
+    text: extracted.text,
+    totalChars: extracted.totalChars,
+    truncated: extracted.truncated,
+    nextOffset: extracted.nextOffset,
   })
 }
 
@@ -798,8 +807,8 @@ async function runFileInventory(
       let summary: string | null = null
       let summaryError: string | null = item.errorKind ?? null
       if (includeSummaries && item.kind === 'file' && !summaryError) {
-        const extracted = await extractTextFromPath(item.path)
-        if (extracted.ok) summary = extracted.text.slice(0, 600)
+        const extracted = await extractTextFromPath(item.path, 0, 600)
+        if (extracted.ok) summary = extracted.text
         else summaryError = extracted.error
       }
       items.push({ ...item, summary, summaryError })

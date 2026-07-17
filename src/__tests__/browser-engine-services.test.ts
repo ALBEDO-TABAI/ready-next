@@ -42,6 +42,7 @@ function createMockView(options?: {
     goBackCalls: 0,
     goForwardCalls: 0,
     clearHistoryCalls: 0,
+    restoreCalls: [] as Array<{ entries: unknown[]; index: number }>,
     reloadCalls: 0,
     insertedTexts: [] as string[],
     mouseCommands: [] as unknown[],
@@ -114,6 +115,9 @@ function createMockView(options?: {
         },
         clear: () => {
           state.clearHistoryCalls += 1
+        },
+        restore: (snapshot: { entries: unknown[]; index: number }) => {
+          state.restoreCalls.push(snapshot)
         },
       },
     },
@@ -258,6 +262,85 @@ describe('BrowserTabShellService', () => {
     assert.strictEqual(result.canGoForward, true)
   })
 
+  it('materializes a dormant replacement before it becomes active after close', () => {
+    const active = createMockView()
+    const replacement = createMockView()
+    const tabs = new Map([
+      ['tab-active', { id: 'tab-active', url: 'https://active.test', title: 'Active', domain: 'active.test', favicon: null, owner: 'manual', required: false, activity: 'idle', lastAuditedAt: null, view: active.view }],
+      ['tab-dormant', { id: 'tab-dormant', url: 'https://dormant.test', title: 'Dormant', domain: 'dormant.test', favicon: null, owner: 'manual', required: false, activity: 'idle', lastAuditedAt: null }],
+    ])
+    let activeTabId: string | null = 'tab-active'
+    const events: string[] = []
+    const service = new BrowserTabShellService({
+      tabs: tabs as any,
+      getActiveTabId: () => activeTabId,
+      setActiveTabId: (tabId) => { activeTabId = tabId },
+      getSplitTabId: () => null,
+      setSplitTabId: () => undefined,
+      getViewBounds: () => ({ x: 0, y: 0, width: 800, height: 600 }),
+      setViewBounds: () => undefined,
+      getSplitViewBounds: () => ({ x: 0, y: 0, width: 400, height: 600 }),
+      setSplitViewBounds: () => undefined,
+      shouldPresentHosts: () => true,
+      isAllowedUrl: () => true,
+      createTab: async () => ({ success: false }),
+      materializeTab: (tabId) => {
+        events.push(`materialize:${tabId}`)
+        ;(tabs.get(tabId) as any).view = replacement.view
+        return { success: true, tabId }
+      },
+      detachHost: () => undefined,
+      showHost: (view) => { if (view === replacement.view) events.push('show:replacement') },
+      applyBounds: (view) => { if (view === replacement.view) events.push('bounds:replacement') },
+      hideHost: () => undefined,
+      detachPreviewView: () => undefined,
+      restoreActiveTabHost: () => undefined,
+    })
+
+    const result = service.closeTab('tab-active')
+
+    assert.strictEqual(result.success, true)
+    assert.strictEqual(activeTabId, 'tab-dormant')
+    assert.ok(tabs.get('tab-dormant')?.view)
+    assert.deepStrictEqual(events, ['materialize:tab-dormant', 'show:replacement', 'bounds:replacement'])
+  })
+
+  it('materializes a hidden dormant active tab before showing browser hosts again', () => {
+    const restored = createMockView()
+    const tabs = new Map([
+      ['tab-dormant', { id: 'tab-dormant', url: 'https://dormant.test', title: 'Dormant', domain: 'dormant.test', favicon: null, owner: 'manual', required: false, activity: 'idle', lastAuditedAt: null }],
+    ])
+    const events: string[] = []
+    const service = new BrowserTabShellService({
+      tabs: tabs as any,
+      getActiveTabId: () => 'tab-dormant',
+      setActiveTabId: () => undefined,
+      getSplitTabId: () => null,
+      setSplitTabId: () => undefined,
+      getViewBounds: () => ({ x: 0, y: 0, width: 800, height: 600 }),
+      setViewBounds: () => undefined,
+      getSplitViewBounds: () => ({ x: 0, y: 0, width: 400, height: 600 }),
+      setSplitViewBounds: () => undefined,
+      shouldPresentHosts: () => true,
+      isAllowedUrl: () => true,
+      createTab: async () => ({ success: false }),
+      materializeTab: (tabId) => {
+        events.push(`materialize:${tabId}`)
+        ;(tabs.get(tabId) as any).view = restored.view
+        return { success: true, tabId }
+      },
+      detachHost: () => undefined,
+      showHost: (view) => { if (view === restored.view) events.push('show:restored') },
+      applyBounds: (view) => { if (view === restored.view) events.push('bounds:restored') },
+      hideHost: () => undefined,
+      detachPreviewView: () => undefined,
+      restoreActiveTabHost: () => undefined,
+    })
+
+    assert.deepStrictEqual(service.showActiveHost(), { success: true })
+    assert.deepStrictEqual(events, ['materialize:tab-dormant', 'show:restored', 'bounds:restored'])
+  })
+
   it('detaches every non-target host after showing the next tab', () => {
     const first = createMockView()
     const second = createMockView()
@@ -352,7 +435,7 @@ describe('BrowserTabShellService', () => {
     assert.deepStrictEqual(events, ['show-next', 'apply-next', 'detach-prev'])
   })
 
-  it('hides every attached tab host when browser surfaces are globally dismissed', () => {
+  it('hides only attached tab hosts when browser surfaces are globally dismissed', () => {
     const first = createMockView()
     const second = createMockView()
     const tabs = new Map([
@@ -382,6 +465,7 @@ describe('BrowserTabShellService', () => {
         if (view === first.view) hidden.push('tab-1')
         if (view === second.view) hidden.push('tab-2')
       },
+      isHostAttached: (view) => view === first.view,
       detachPreviewView: () => {
         previewDetached += 1
       },
@@ -391,7 +475,7 @@ describe('BrowserTabShellService', () => {
     const result = service.hideAllHosts()
 
     assert.deepStrictEqual(result, { success: true })
-    assert.deepStrictEqual(hidden, ['tab-1', 'tab-2'])
+    assert.deepStrictEqual(hidden, ['tab-1'])
     assert.strictEqual(previewDetached, 1)
   })
 })
@@ -476,6 +560,130 @@ describe('BrowserAutomationService', () => {
 })
 
 describe('BrowserTabLifecycleService', () => {
+  it('materializes only requested persisted tabs and keeps the remaining records dormant', () => {
+    const tabs = new Map<string, BrowserLifecycleTabRecord>()
+    for (let index = 1; index <= 5; index += 1) {
+      tabs.set(`tab-${index}`, {
+        id: `tab-${index}`,
+        url: `https://${index}.example.com`,
+        title: `Tab ${index}`,
+        domain: `${index}.example.com`,
+        favicon: null,
+        owner: 'manual',
+        required: false,
+        activity: 'idle',
+        lastAuditedAt: null,
+        loading: false,
+        canGoBack: false,
+        canGoForward: false,
+        error: null,
+      })
+    }
+    let createHostCalls = 0
+    let activeTabId: string | null = null
+    const service = new BrowserTabLifecycleService({
+      tabs,
+      getActiveTabId: () => activeTabId,
+      setActiveTabId: (tabId) => { activeTabId = tabId },
+      getNextTabId: () => 'tab-6',
+      getViewBounds: () => ({ x: 0, y: 0, width: 800, height: 600 }),
+      shouldPresentHosts: () => true,
+      isAllowedUrl: () => true,
+      extractDomain: (url) => new URL(url).hostname,
+      createHost: () => {
+        createHostCalls += 1
+        return createMockView().view as any
+      },
+      ...noopPageBackgroundDeps,
+      applyBounds: () => undefined,
+      detachHost: () => undefined,
+      showHost: () => undefined,
+      sendToRenderer: () => undefined,
+      queueTabUpdate: () => undefined,
+      emitTabMeta: () => undefined,
+      logBrowserDiag: () => undefined,
+      bindPopup: () => undefined,
+      bindAppShortcutBridge: () => undefined,
+      installContextMenu: () => undefined,
+      handleWindowOpen: () => ({ action: 'deny' }),
+      ensureDownloadSession: () => undefined,
+      addHistoryEntry: () => undefined,
+      updateHistoryEntryTitle: () => undefined,
+      handleLocalMediaDropNavigation: () => false,
+      browserUserAgent: 'test-agent',
+      useMock: false,
+    })
+
+    const result = service.materializeTab('tab-3', { activate: true })
+
+    assert.deepStrictEqual(result, { success: true, tabId: 'tab-3' })
+    assert.equal(activeTabId, 'tab-3')
+    assert.equal(createHostCalls, 1)
+    assert.deepStrictEqual([...tabs.values()].filter((tab) => Boolean(tab.view)).map((tab) => tab.id), ['tab-3'])
+  })
+
+  it('restores a suspended tab from complete Chromium history without falling back to URL reload', () => {
+    const mock = createMockView()
+    const entries = [
+      { url: 'https://first.example', title: 'First', pageState: 'state-1' },
+      { url: 'https://second.example', title: 'Second', pageState: 'state-2' },
+    ] as any
+    const tabs = new Map<string, BrowserLifecycleTabRecord>([[
+      'tab-1',
+      {
+        id: 'tab-1',
+        url: 'https://second.example',
+        title: 'Second',
+        domain: 'second.example',
+        favicon: null,
+        owner: 'manual',
+        required: false,
+        activity: 'idle',
+        lastAuditedAt: null,
+        loading: false,
+        canGoBack: true,
+        canGoForward: false,
+        error: null,
+        restoreSnapshot: { entries, index: 1 },
+      },
+    ]])
+    let activeTabId: string | null = null
+    const service = new BrowserTabLifecycleService({
+      tabs,
+      getActiveTabId: () => activeTabId,
+      setActiveTabId: (tabId) => { activeTabId = tabId },
+      getNextTabId: () => 'tab-2',
+      getViewBounds: () => ({ x: 0, y: 0, width: 800, height: 600 }),
+      shouldPresentHosts: () => true,
+      isAllowedUrl: () => true,
+      extractDomain: (url) => new URL(url).hostname,
+      createHost: () => mock.view as any,
+      ...noopPageBackgroundDeps,
+      applyBounds: () => undefined,
+      detachHost: () => undefined,
+      showHost: () => undefined,
+      sendToRenderer: () => undefined,
+      queueTabUpdate: () => undefined,
+      emitTabMeta: () => undefined,
+      logBrowserDiag: () => undefined,
+      bindPopup: () => undefined,
+      bindAppShortcutBridge: () => undefined,
+      installContextMenu: () => undefined,
+      handleWindowOpen: () => ({ action: 'deny' }),
+      ensureDownloadSession: () => undefined,
+      addHistoryEntry: () => undefined,
+      updateHistoryEntryTitle: () => undefined,
+      handleLocalMediaDropNavigation: () => false,
+      browserUserAgent: 'test-agent',
+      useMock: false,
+    })
+
+    assert.deepEqual(service.materializeTab('tab-1', { activate: true }), { success: true, tabId: 'tab-1' })
+    assert.deepEqual(mock.state.restoreCalls, [{ entries, index: 1 }])
+    assert.deepEqual(mock.state.loadedUrls, [])
+    assert.equal(activeTabId, 'tab-1')
+  })
+
   it('shows a newly created active tab immediately with current bounds instead of waiting for page load completion', async () => {
     const previous = createMockView()
     const next = createMockView()
@@ -494,6 +702,7 @@ describe('BrowserTabLifecycleService', () => {
       }],
     ])
     const events: string[] = []
+    const loadStateReasons: string[] = []
     let activeTabId: string | null = 'tab-0'
     const service = new BrowserTabLifecycleService({
       tabs: tabs as any,
@@ -518,6 +727,8 @@ describe('BrowserTabLifecycleService', () => {
         events.push(`show:${bounds.width}x${bounds.height}`)
       },
       sendToRenderer: () => undefined,
+      queueTabUpdate: () => undefined,
+      onTabLoadStateMayChange: (_tabId, reason) => { loadStateReasons.push(reason) },
       emitTabMeta: () => undefined,
       logBrowserDiag: () => undefined,
       bindPopup: () => undefined,
@@ -542,15 +753,20 @@ describe('BrowserTabLifecycleService', () => {
     assert.deepStrictEqual(events, ['apply', 'detach-previous', 'show:960x640'])
     next.state.emit('did-stop-loading')
     assert.strictEqual(next.state.clearHistoryCalls, 0)
+    assert.ok(loadStateReasons.includes('created'))
+    assert.ok(loadStateReasons.includes('activated'))
+    assert.ok(loadStateReasons.includes('load-stopped'))
   })
 
-  it('ignores subresource did-fail-load events when updating tab error state', async () => {
+  it('ignores subresource and superseded-navigation did-fail-load events', async () => {
     const next = createMockView()
     const rendererEvents: Array<{ channel: string; data: unknown }> = []
     const diagMessages: string[] = []
+    const loadStateReasons: string[] = []
+    const tabs = new Map<string, BrowserLifecycleTabRecord>()
     let activeTabId: string | null = null
     const service = new BrowserTabLifecycleService({
-      tabs: new Map<string, BrowserLifecycleTabRecord>(),
+      tabs,
       getActiveTabId: () => activeTabId,
       setActiveTabId: (tabId) => {
         activeTabId = tabId
@@ -568,6 +784,10 @@ describe('BrowserTabLifecycleService', () => {
       sendToRenderer: (channel, data) => {
         rendererEvents.push({ channel, data })
       },
+      queueTabUpdate: (data) => {
+        rendererEvents.push({ channel: 'browser:tabUpdate', data })
+      },
+      onTabLoadStateMayChange: (_tabId, reason) => { loadStateReasons.push(reason) },
       emitTabMeta: () => undefined,
       logBrowserDiag: (message) => {
         diagMessages.push(message)
@@ -584,9 +804,18 @@ describe('BrowserTabLifecycleService', () => {
 
     await service.createTab('https://example.com')
     next.state.emit('did-fail-load', {}, -105, 'ERR_NAME_NOT_RESOLVED', 'https://cdn.example/script.js', false)
+    next.state.emit('did-start-loading')
+    next.state.emit('did-fail-load', {}, -3, 'ERR_ABORTED', 'https://example.com/replaced', true)
 
     assert.deepStrictEqual(rendererEvents.filter((event) => event.channel === 'browser:tabUpdate' && (event.data as { type?: string }).type === 'error'), [])
     assert.deepStrictEqual(diagMessages, [])
+    assert.equal(tabs.get('tab-1')?.loading, true)
+    assert.equal(tabs.get('tab-1')?.error, null)
+    assert.equal(loadStateReasons.includes('load-failed'), false)
+
+    next.state.emit('did-stop-loading')
+    assert.equal(tabs.get('tab-1')?.loading, false)
+    assert.equal(loadStateReasons.includes('load-stopped'), true)
   })
 
   it('does not write Ready blank tabs into browser history', async () => {
@@ -610,6 +839,7 @@ describe('BrowserTabLifecycleService', () => {
       detachHost: () => undefined,
       showHost: () => undefined,
       sendToRenderer: () => undefined,
+      queueTabUpdate: () => undefined,
       emitTabMeta: () => undefined,
       logBrowserDiag: () => undefined,
       bindPopup: () => undefined,
@@ -654,6 +884,7 @@ describe('BrowserTabLifecycleService', () => {
       detachHost: () => undefined,
       showHost: () => undefined,
       sendToRenderer: () => undefined,
+      queueTabUpdate: () => undefined,
       emitTabMeta: () => undefined,
       logBrowserDiag: () => undefined,
       bindPopup: () => undefined,
@@ -675,6 +906,91 @@ describe('BrowserTabLifecycleService', () => {
     ])
     assert.equal(tabs.get('tab-1')?.profile, 'work')
     assert.equal(tabs.get('tab-2')?.profile, 'personal')
+  })
+
+  it('round-trips a named profile through metadata and cold dormant restore', () => {
+    const sourceRecord: BrowserLifecycleTabRecord = {
+      id: 'tab-41',
+      url: 'https://work.example',
+      title: 'Work',
+      domain: 'work.example',
+      favicon: null,
+      profile: 'work',
+      owner: 'manual',
+      required: false,
+      activity: 'idle',
+      lastAuditedAt: null,
+      loading: false,
+      canGoBack: false,
+      canGoForward: false,
+      error: null,
+    }
+    const metadata = new BrowserTabMetaService({
+      tabs: new Map([[sourceRecord.id, sourceRecord]]),
+      getActiveTabId: () => sourceRecord.id,
+      queueTabUpdate: () => undefined,
+    }).buildTabPayload(sourceRecord)
+    const restoredTabs = new Map<string, BrowserLifecycleTabRecord>()
+    const partitions: string[] = []
+    const view = createMockView()
+    let activeTabId: string | null = null
+    let splitTabId: string | null = null
+    const service = new BrowserTabLifecycleService({
+      tabs: restoredTabs,
+      getActiveTabId: () => activeTabId,
+      setActiveTabId: (tabId) => { activeTabId = tabId },
+      setSplitTabId: (tabId) => { splitTabId = tabId },
+      observeRestoredTabId: () => undefined,
+      getNextTabId: () => 'tab-42',
+      getViewBounds: () => ({ x: 0, y: 0, width: 800, height: 600 }),
+      shouldPresentHosts: () => true,
+      isAllowedUrl: () => true,
+      extractDomain: (url) => new URL(url).hostname,
+      createHost: (partition) => {
+        partitions.push(partition)
+        return view.view as any
+      },
+      ...noopPageBackgroundDeps,
+      applyBounds: () => undefined,
+      detachHost: () => undefined,
+      showHost: () => undefined,
+      sendToRenderer: () => undefined,
+      queueTabUpdate: () => undefined,
+      buildTabPayload: () => metadata,
+      emitTabMeta: () => undefined,
+      logBrowserDiag: () => undefined,
+      bindPopup: () => undefined,
+      bindAppShortcutBridge: () => undefined,
+      installContextMenu: () => undefined,
+      handleWindowOpen: () => ({ action: 'deny' }),
+      ensureDownloadSession: () => undefined,
+      addHistoryEntry: () => undefined,
+      updateHistoryEntryTitle: () => undefined,
+      handleLocalMediaDropNavigation: () => false,
+      browserUserAgent: 'test-agent',
+      useMock: false,
+    })
+
+    const result = service.registerDormantTabs({
+      tabs: [{
+        id: metadata.id,
+        url: metadata.url,
+        title: metadata.title,
+        domain: metadata.domain,
+        favicon: metadata.favicon,
+        profile: metadata.profile,
+        owner: 'manual',
+      }],
+      activeTabId: metadata.id,
+      splitTabId: null,
+    })
+
+    assert.equal(result.success, true)
+    assert.equal(metadata.profile, 'work')
+    assert.equal(restoredTabs.get(metadata.id)?.profile, 'work')
+    assert.equal(activeTabId, metadata.id)
+    assert.equal(splitTabId, null)
+    assert.deepEqual(partitions, ['persist:browser-profile-work'])
   })
 })
 
@@ -855,6 +1171,7 @@ describe('BrowserTabMetaService', () => {
           title: 'Example',
           domain: 'example.com',
           favicon: 'https://example.com/favicon.ico',
+          profile: 'work',
           owner: 'agent',
           required: true,
           activity: 'running',
@@ -866,13 +1183,11 @@ describe('BrowserTabMetaService', () => {
         },
       ],
     ])
-    const emitted: Array<{ channel: string; data: unknown }> = []
+    const emitted: unknown[] = []
     const service = new BrowserTabMetaService({
       tabs,
       getActiveTabId: () => 'tab-1',
-      sendToRenderer: (channel, data) => {
-        emitted.push({ channel, data })
-      },
+      queueTabUpdate: (data) => { emitted.push(data) },
     })
 
     const list = service.getTabList()
@@ -885,6 +1200,7 @@ describe('BrowserTabMetaService', () => {
         title: 'Example',
         domain: 'example.com',
         favicon: 'https://example.com/favicon.ico',
+        profile: 'work',
         owner: 'agent',
         required: true,
         activity: 'running',
@@ -899,8 +1215,6 @@ describe('BrowserTabMetaService', () => {
     ])
     assert.deepStrictEqual(emitted, [
       {
-        channel: 'browser:tabUpdate',
-        data: {
           type: 'meta',
           tabId: 'tab-1',
           id: 'tab-1',
@@ -908,6 +1222,7 @@ describe('BrowserTabMetaService', () => {
           title: 'Example',
           domain: 'example.com',
           favicon: 'https://example.com/favicon.ico',
+          profile: 'work',
           owner: 'agent',
           required: true,
           activity: 'running',
@@ -918,7 +1233,6 @@ describe('BrowserTabMetaService', () => {
           canGoForward: false,
           error: 'temporary failure',
           openerTabId: null,
-        },
       },
     ])
   })

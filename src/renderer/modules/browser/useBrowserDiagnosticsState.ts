@@ -31,11 +31,19 @@ export function useBrowserDiagnosticsState({
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const prevLoadingRef = useRef<Record<string, boolean>>({})
 
+  const refreshBrowserDiagnostics = useCallback(async (includePerformance = false) => {
+    if (!isElectron) return
+    const result = await window.electronAPI?.browser?.getDiagnostics?.({ includePerformance })
+    if (result?.success && result.data) {
+      setBrowserDiagnostics(result.data as BrowserDiagnosticsData)
+    }
+  }, [isElectron])
+
   const refreshAdblockState = useCallback(async () => {
     if (!isElectron) return
     const [adblockResult, diagnosticsResult] = await Promise.all([
       window.electronAPI?.browser?.getAdblockState(),
-      window.electronAPI?.browser?.getDiagnostics?.(),
+      window.electronAPI?.browser?.getDiagnostics?.({ includePerformance: false }),
     ])
     if (adblockResult?.success && adblockResult.data) {
       setAdblockState(adblockResult.data as AdblockState)
@@ -72,12 +80,23 @@ export function useBrowserDiagnosticsState({
 
   useEffect(() => {
     if (!isElectron) return
-    void window.electronAPI?.browser?.getDiagnostics?.().then((result) => {
-      if (result?.success && result.data) {
-        setBrowserDiagnostics(result.data as BrowserDiagnosticsData)
-      }
-    })
-  }, [isElectron, activeTabId, tabs.length, adblockState.networkBlockedCount])
+    void refreshBrowserDiagnostics()
+  }, [isElectron, activeTabId, tabs.length, adblockState.networkBlockedCount, refreshBrowserDiagnostics])
+
+  const diagnosticsDockVisible = Boolean(
+    browserDiagnostics?.currentTask
+    || browserDiagnostics?.lastFailure
+    || browserDiagnostics?.pageState
+    || browserDiagnostics?.continuity,
+  )
+  useEffect(() => {
+    if (!isElectron || !diagnosticsDockVisible) return
+    void refreshBrowserDiagnostics(true)
+    const timer = window.setInterval(() => {
+      void refreshBrowserDiagnostics(true)
+    }, 2_000)
+    return () => window.clearInterval(timer)
+  }, [diagnosticsDockVisible, isElectron, refreshBrowserDiagnostics])
 
   useEffect(() => {
     tabs.forEach((tab) => {
@@ -113,6 +132,7 @@ export function useBrowserDiagnosticsState({
     adblockState,
     browserDiagnostics,
     refreshAdblockState,
+    refreshBrowserDiagnostics,
     handleToggleAdblock,
     handleToggleCurrentSiteAdblock,
   }
