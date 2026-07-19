@@ -250,6 +250,10 @@ export interface ScopeRunTaskStep {
 export type ScopeRunResumeKind = 'snapshot' | 'paused' | 'done_residual'
 
 export interface ScopeRunTaskContinuation {
+  kind?: string | null
+  checkpointId?: string | null
+  browserTaskId?: string | null
+  suspensionReason?: string | null
   taskId?: string | null
   executionId?: string | null
   stepId?: string | null

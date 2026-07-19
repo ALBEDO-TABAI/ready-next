@@ -41,6 +41,8 @@ import { executeAgentSdkModelToolLoop } from './agent-sdk-turn-model-loop'
 import { AgentSessionInputController } from './agent-session-input-controller'
 import { browserSurfaceActiveForDefinitions, prepareBrowserWorkflowTurnState } from './agent-sdk-browser-turn-control'
 import { createAgentSdkToolResultRecorder } from './agent-sdk-turn-tool-result-recorder'
+import { ensureLongRunningTaskBudgetCapacity } from '../task-projection/run-budget-policy'
+import { createBrowserSuspensionController } from './agent-sdk-browser-suspension'
 import type {
   AgentSdkBudgetCheckpointRestore,
   AgentSdkExecutionOptions,
@@ -279,6 +281,10 @@ export async function executeAgentSdkPreparedTurn(
       explicitTaskType: explicitSkillTaskType,
       overrideTaskType: readOnlyResearchSkill,
     })
+    const browserSurfaceActive = browserSurfaceActiveForDefinitions(toolDefinitions)
+    if (browserSurfaceActive && liveTaskBudgetRuntime?.bootstrapBudget) {
+      liveTaskBudgetRuntime = ensureLongRunningTaskBudgetCapacity(liveTaskBudgetRuntime)
+    }
     const turnTaskType = liveTaskBudgetRuntime?.taskType ?? explicitSkillTaskType ?? 'short_task'
     runMetaBudgetRuntime = liveTaskBudgetRuntime
     const sourceMessageProvenance = resolveSourceMessageProvenance({
@@ -291,7 +297,7 @@ export async function executeAgentSdkPreparedTurn(
       taskId,
       runId,
       sessionId,
-      browserSurfaceActive: browserSurfaceActiveForDefinitions(toolDefinitions),
+      browserSurfaceActive,
     })
     const { ownerLocalSession, ownerSessionSeed } = browserTurnState
     const preparedDelivery = await host.dynamicDelivery.prepareOwnerInput({
@@ -381,8 +387,7 @@ export async function executeAgentSdkPreparedTurn(
       }),
       agentContext,
       runHandle: { ...runHandle, capturedSession: ownerModelSession },
-      taskBudgetRuntime: liveTaskBudgetRuntime,
-      budgetWarningMessages: []
+      taskBudgetRuntime: liveTaskBudgetRuntime
     }
     installSameRunSkillActivation({
       runtimeContext: toolBridgeRuntimeContext,
@@ -474,51 +479,26 @@ export async function executeAgentSdkPreparedTurn(
       })
     }
     const skillContextInstruction = skillContextMessagesToInstruction(skillContextMessages)
-    const finishBrowserSuspension = async (input: {
-      reason: 'budget' | 'steering' | 'manual'
-      terminalReason: Extract<
-        TurnTerminalReason,
-        'checkpoint_budget' | 'checkpoint_steered' | 'checkpoint_user_input'
-      >
-      message: string
-    }): Promise<ExecutionTurnResult | null> => {
-      if (modelInputController && toolBridgeRuntimeContext.browserWorkflowRoute) {
-        const checkpoint = await modelInputController.persistSuspension(input.reason)
-        runMetaContinuationRef = {
-          kind: 'browser_checkpoint',
-          checkpointId: checkpoint.checkpointId,
-          browserTaskId: checkpoint.browserTaskId,
-          suspensionReason: input.reason,
-        }
-        const projectionPatch = {
-          status: 'recoverable_paused',
-          interactionState: 'suspended',
-          waitingFor: 'none',
-          blockedReason: `browser_${input.reason}_checkpoint`,
-          resumableActions: ['continue', 'cancel'],
-          canResume: true,
-          continuationRef: runMetaContinuationRef,
-          ...(input.reason === 'budget' ? { budgetWarningLevel: 'exhausted' } : {}),
-        }
-        projectionPatches.push(projectionPatch)
-        finalText = input.message
-        if (finalText) emitOutput(finalText, 'text', projectionPatch)
-        return finalizeEarlyReturn({
-          status: 'checkpoint',
-          terminalReason: input.terminalReason,
-          finalText,
-          taskBudgetRuntime: liveTaskBudgetRuntime,
-          providerDiagnostics: runMetaProviderDiagnostics,
-        })
-      }
-      return null
-    }
+    const browserSuspension = createBrowserSuspensionController({
+      modelInputController,
+      runtimeContext: toolBridgeRuntimeContext,
+      projectionPatches,
+      getTaskBudgetRuntime: () => liveTaskBudgetRuntime,
+      setContinuationRef: (continuation) => { runMetaContinuationRef = continuation },
+      setFinalText: (text) => { finalText = text },
+      emitOutput,
+      finalizeCheckpoint: (params) => finalizeEarlyReturn({
+        status: 'checkpoint',
+        providerDiagnostics: runMetaProviderDiagnostics,
+        ...params,
+      }),
+    })
     const finishSteeringCheckpointIfNeeded = async (): Promise<ExecutionTurnResult | null> => {
       if (
         !toolBridgeRuntimeContext.browserWorkflowRoute
         || !host.runtime?.getAgentSessionCheckpointRepository().hasPendingSteering(taskId)
       ) return null
-      return finishBrowserSuspension({
+      return browserSuspension.finishSuspension({
         reason: 'steering',
         terminalReason: 'checkpoint_steered',
         message: '',
@@ -526,7 +506,7 @@ export async function executeAgentSdkPreparedTurn(
     }
     const finishBudgetCheckpointIfNeeded = async (): Promise<ExecutionTurnResult | null> => {
       if (!liveTaskBudgetRuntime || liveTaskBudgetRuntime.warningLevel !== 'exhausted') return null
-      const browserCheckpoint = await finishBrowserSuspension({
+      const browserCheckpoint = await browserSuspension.finishSuspension({
         reason: 'budget',
         terminalReason: 'checkpoint_budget',
         message: '本轮工具预算已用完，我已保存续跑检查点，可以继续。',
@@ -562,17 +542,6 @@ export async function executeAgentSdkPreparedTurn(
         taskBudgetRuntime: liveTaskBudgetRuntime,
         providerDiagnostics: runMetaProviderDiagnostics
       })
-    }
-    const finishBrowserObservationCheckpoint = async (
-      message = '页面动作已完成，但本轮还没有取得可验证的新页面状态。我已保存现场，继续时只会先观察，不会重复之前的动作。',
-    ): Promise<ExecutionTurnResult> => {
-      const checkpoint = await finishBrowserSuspension({
-        reason: 'manual',
-        terminalReason: 'checkpoint_user_input',
-        message,
-      })
-      if (!checkpoint) throw new Error('browser_observation_checkpoint_unavailable')
-      return checkpoint
     }
     const { maybeHandleSkillClarificationGuard, maybeHandleActionAnnouncementGuard } =
       createAgentSdkTurnGuards({
@@ -810,7 +779,8 @@ export async function executeAgentSdkPreparedTurn(
         : undefined,
       nativeTextToolBoundaryFlush,
       finishBudgetCheckpointIfNeeded,
-      finishBrowserObservationCheckpoint,
+      finishBrowserObservationCheckpoint: browserSuspension.finishObservationCheckpoint,
+      finishBrowserIncompleteCheckpoint: browserSuspension.finishIncompleteCheckpoint,
       maybeHandleSkillClarificationGuard,
       maybeHandleActionAnnouncementGuard,
       finalizeEarlyReturn
@@ -860,6 +830,18 @@ export async function executeAgentSdkPreparedTurn(
         set newDocumentNeedsSave(value) {
           newDocumentNeedsSave = value
         },
+        get runMetaBudgetRuntime() {
+          return runMetaBudgetRuntime
+        },
+        set runMetaBudgetRuntime(value) {
+          runMetaBudgetRuntime = value
+        },
+        get runMetaContinuationRef() {
+          return runMetaContinuationRef
+        },
+        set runMetaContinuationRef(value) {
+          runMetaContinuationRef = value
+        },
         get runMetaProviderDiagnostics() {
           return runMetaProviderDiagnostics
         },
@@ -905,6 +887,7 @@ export async function executeAgentSdkPreparedTurn(
       emitStatusForRun,
       finishBudgetCheckpointIfNeeded,
       finishSteeringCheckpointIfNeeded,
+      finishBrowserIncompleteCheckpoint: browserSuspension.finishIncompleteCheckpoint,
       finalizeEarlyReturn,
       buildResult
     })

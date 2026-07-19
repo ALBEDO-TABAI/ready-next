@@ -12,7 +12,7 @@ import type {
 import type { ContinuationState } from '../contracts/continuation-state'
 
 const DEFAULT_MAX_PARALLEL_TOOL_GROUPS = 5
-const LONG_SKILL_TASK_HARD_CAP_ITERATIONS = 220
+export const LONG_RUNNING_TASK_EMERGENCY_CAP = 220
 const TASK_TYPE_BUDGET_PRESETS: Record<TaskType, Pick<RunBudgetSeed, 'maxIterations' | 'maxToolCalls'>> = {
   direct_answer: {
     maxIterations: 8,
@@ -23,11 +23,9 @@ const TASK_TYPE_BUDGET_PRESETS: Record<TaskType, Pick<RunBudgetSeed, 'maxIterati
     maxToolCalls: 24,
   },
   multi_step_task: {
-    // Reduced 60→40 (skill-resume plan C2): a healthy multi-step task should
-    // make visible progress within 40 tool calls. The recent RSS-loop bug ran
-    // 35+ iterations without progress because there was no dedup; with C1's
-    // dedup detector + this lower ceiling, runaway loops surface much sooner
-    // and the user is asked to intervene (via the 70% warning + ask_user inject).
+    // This preset remains the ordinary non-Browser estimate. Long-running
+    // execution paths widen capacity from structural runtime facts instead of
+    // asking text classification to predict their final size up front.
     maxIterations: 40,
     maxToolCalls: 40,
   },
@@ -44,8 +42,8 @@ const TASK_TYPE_BUDGET_PRESETS: Record<TaskType, Pick<RunBudgetSeed, 'maxIterati
     maxToolCalls: 24,
   },
   research: {
-    maxIterations: 60,
-    maxToolCalls: 60,
+    maxIterations: 220,
+    maxToolCalls: 220,
   },
 }
 
@@ -96,8 +94,8 @@ export function createContinuationRunBudgetSeed(
 export function applyLongSkillTaskBudgetSeed(seed: RunBudgetSeed): RunBudgetSeed {
   return {
     ...seed,
-    maxIterations: Math.max(seed.maxIterations, LONG_SKILL_TASK_HARD_CAP_ITERATIONS),
-    maxToolCalls: Math.max(seed.maxToolCalls, LONG_SKILL_TASK_HARD_CAP_ITERATIONS),
+    maxIterations: Math.max(seed.maxIterations, LONG_RUNNING_TASK_EMERGENCY_CAP),
+    maxToolCalls: Math.max(seed.maxToolCalls, LONG_RUNNING_TASK_EMERGENCY_CAP),
   }
 }
 
@@ -156,6 +154,26 @@ export function createTaskBudgetRuntime(taskType: TaskType, options?: {
     ...runtime,
     warningLevel: getBudgetWarningLevel(getBudgetUsagePercent(runtime)),
   }
+}
+
+/**
+ * Give a structurally long-running execution enough room to finish in one
+ * owner run. This changes capacity only: task semantics, usage, lease and the
+ * provisional bootstrap marker remain untouched until durable task truth
+ * rebinds them.
+ */
+export function ensureLongRunningTaskBudgetCapacity(
+  runtime: TaskBudgetRuntime,
+): TaskBudgetRuntime {
+  const budget = applyLongSkillTaskBudgetSeed(runtime.budget)
+  return createTaskBudgetRuntime(runtime.taskType, {
+    budget,
+    usage: runtime.usage,
+    stepBudget: runtime.stepBudget,
+    frozen: runtime.frozen,
+    bootstrapBudget: runtime.bootstrapBudget,
+    lease: runtime.lease,
+  })
 }
 
 export function grantBudgetSafetyFloor(params: {

@@ -5,6 +5,7 @@ import {
   applyRunBudgetHint,
   createRunBudgetSeed,
   createTaskBudgetRuntime,
+  ensureLongRunningTaskBudgetCapacity,
   getRemainingToolCallBudget,
   rebindTaskBudgetRuntime,
 } from '../main/modules/agent-control/task-projection/run-budget-policy'
@@ -28,6 +29,47 @@ test('task budget runtime rebinds bootstrap budgets to the resolved task preset 
   assert.equal(rebound.bootstrapBudget, false)
   assert.equal(rebound.budget.maxIterations, 60)
   assert.equal(rebound.budget.maxToolCalls, 60)
+  assert.deepEqual(rebound.usage, bootstrap.usage)
+})
+
+test('browser-capable bootstrap gets a high emergency ceiling without changing task semantics or usage', () => {
+  const bootstrap = createTaskBudgetRuntime('short_task', {
+    budget: createRunBudgetSeed('short_task'),
+    usage: {
+      iterationsUsed: 7,
+      toolCallsUsed: 11,
+      parallelToolGroupsUsed: 1,
+    },
+    bootstrapBudget: true,
+  })
+
+  const widened = ensureLongRunningTaskBudgetCapacity(bootstrap)
+
+  assert.equal(widened.taskType, 'short_task')
+  assert.equal(widened.bootstrapBudget, true)
+  assert.equal(widened.budget.maxIterations, 220)
+  assert.equal(widened.budget.maxToolCalls, 220)
+  assert.deepEqual(widened.usage, bootstrap.usage)
+  assert.equal(widened.warningLevel, 'none')
+})
+
+test('durable browser research rebinds the widened bootstrap to research without losing usage', () => {
+  const bootstrap = ensureLongRunningTaskBudgetCapacity(createTaskBudgetRuntime('short_task', {
+    budget: createRunBudgetSeed('short_task'),
+    usage: {
+      iterationsUsed: 7,
+      toolCallsUsed: 11,
+      parallelToolGroupsUsed: 1,
+    },
+    bootstrapBudget: true,
+  }))
+
+  const rebound = rebindTaskBudgetRuntime(bootstrap, 'research', { bootstrapBudget: false })
+
+  assert.equal(rebound.taskType, 'research')
+  assert.equal(rebound.bootstrapBudget, false)
+  assert.equal(rebound.budget.maxIterations, 220)
+  assert.equal(rebound.budget.maxToolCalls, 220)
   assert.deepEqual(rebound.usage, bootstrap.usage)
 })
 

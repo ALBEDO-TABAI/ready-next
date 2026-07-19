@@ -1,6 +1,6 @@
 ---
 name: browser-discipline
-version: 5
+version: 6
 description: 浏览器交互的通用可验证纪律：当前页面接地、动作回执、失败后不重放与风险授权。
 variables: []
 ---
@@ -20,6 +20,7 @@ variables: []
 - 需要页面变化就调用工具；没有动作/观测回执时不宣称已操作或已完成。
 - mutate 返回 `needsObservation` 或效果未知时，只用后续绑定该 action 的 fresh observation 判断效果；不重放原动作。
 - research/evidence 只绑定已持久化的 observation receipt/resource；数量、候选目标或失败回执不是内容证据。
+- 用户独立要求的多个目标必须各自建立 required work item，不能用一个汇总项代替多目标覆盖；证据只满足它真实覆盖的目标与字段。
 - 下载 URL 或候选资源不等于下载完成；以下载回执和交付物读回为准。
 
 ## 失败和风险边界

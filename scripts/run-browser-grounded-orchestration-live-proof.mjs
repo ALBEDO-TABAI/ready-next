@@ -17,6 +17,12 @@ const proofMode = String(process.env.READY_GROUNDED_PROOF_MODE || 'verify').trim
 const correctnessRepeats = positiveInteger(process.env.READY_GROUNDED_CORRECTNESS_REPEATS, 3)
 const performanceRepeats = positiveInteger(process.env.READY_GROUNDED_PERFORMANCE_REPEATS, 20)
 const caseFilter = String(process.env.READY_GROUNDED_CASE_FILTER || '').trim()
+const requestedDeliveryMode = String(
+  process.env.READY_GROUNDED_DELIVERY_MODE || 'adaptive',
+).trim()
+if (!['adaptive', 'thorough'].includes(requestedDeliveryMode)) {
+  throw new Error(`unsupported READY_GROUNDED_DELIVERY_MODE: ${requestedDeliveryMode}`)
+}
 const baselineReportPath = process.env.READY_GROUNDED_BASELINE_REPORT
   ? resolve(process.env.READY_GROUNDED_BASELINE_REPORT)
   : null
@@ -399,7 +405,7 @@ async function evaluate(client, expression, timeoutMs = 420_000) {
   }
 }
 
-function buildCaseExpression(fixtureUrl, prompt, latentRoute) {
+function buildCaseExpression(fixtureUrl, prompt, latentRoute, deliveryMode) {
   return `(
     async () => {
       const api = window.electronAPI?.browser
@@ -431,6 +437,12 @@ function buildCaseExpression(fixtureUrl, prompt, latentRoute) {
           harness.newSession(),
           new Promise((_, reject) => setTimeout(() => reject(new Error('new-session-timeout')), 10000)),
         ])
+        const thoroughButton = document.querySelector('[data-ready-delivery-thorough="true"]')
+        if (!thoroughButton) return JSON.stringify({ ok: false, error: 'delivery-mode-button-not-found' })
+        const thoroughEnabled = thoroughButton.getAttribute('aria-pressed') === 'true'
+        if ((${JSON.stringify(deliveryMode)} === 'thorough') !== thoroughEnabled) thoroughButton.click()
+        await new Promise((resolveWait) => setTimeout(resolveWait, 100))
+        const thoroughPressedBeforeSubmit = thoroughButton.getAttribute('aria-pressed') === 'true'
         const startedAt = Date.now()
         const result = await harness.submit(${JSON.stringify(prompt)}, {
           mode: 'dom',
@@ -451,6 +463,8 @@ function buildCaseExpression(fixtureUrl, prompt, latentRoute) {
           scopeId,
           sourceTabId,
           inputMode: result.inputMode,
+          requestedDeliveryMode: ${JSON.stringify(deliveryMode)},
+          thoroughPressedBeforeSubmit,
           sendResult: result.sendResult,
           toolTrace: snapshot.toolTrace,
           diagnostics: result.diagnostics,
@@ -486,17 +500,21 @@ function sqliteRows(sql) {
 function readDatabaseEvidence(scopeId, runId) {
   if (!scopeId || !databasePath || !existsSync(databasePath)) return { available: false, error: 'ready_db_unavailable' }
   try {
-    const projections = sqliteRows(`SELECT task_id, scope_id, run_id, parent_task_id, task_type, module, status, interaction_state, revision, dependency_generation, request_anchor_json, updated_at FROM task_projections WHERE scope_id = ${sqlQuote(scopeId)} ORDER BY created_at ASC;`)
+    const projections = sqliteRows(`SELECT task_id, scope_id, run_id, parent_task_id, task_type, module, status, interaction_state, revision, dependency_generation, request_anchor_json, budget_json, budget_usage_percent, budget_warning_level, continuation_ref_json, checkpoint_refs_json, resumable_actions_json, updated_at FROM task_projections WHERE scope_id = ${sqlQuote(scopeId)} ORDER BY created_at ASC;`)
     const browserTasks = sqliteRows(`SELECT b.id, b.kind, b.status, b.parent_task_id, b.created_by_run_id, b.revision, b.active_execution_binding_json, b.payload_json, b.checkpoint_json, b.result_json, b.error, b.started_at, b.updated_at, b.finished_at FROM browser_tasks b JOIN task_projections p ON p.task_id = b.parent_task_id WHERE p.scope_id = ${sqlQuote(scopeId)} ORDER BY b.created_at ASC;`)
     const messages = sqliteRows(`SELECT id, conversation_id, role, content, timestamp, meta_json FROM chat_messages WHERE conversation_id = ${sqlQuote(scopeId)} ORDER BY timestamp ASC;`)
     const runMeta = runId
-      ? sqliteRows(`SELECT run_id, task_id, scope_id, status, terminal_reason, duration_ms, input_tokens, output_tokens, total_tokens, provider_diagnostics_json, budget_json, created_at, updated_at FROM run_meta WHERE run_id = ${sqlQuote(runId)} LIMIT 1;`)[0] || null
-      : sqliteRows(`SELECT run_id, task_id, scope_id, status, terminal_reason, duration_ms, input_tokens, output_tokens, total_tokens, provider_diagnostics_json, budget_json, created_at, updated_at FROM run_meta WHERE scope_id = ${sqlQuote(scopeId)} ORDER BY updated_at DESC LIMIT 1;`)[0] || null
+      ? sqliteRows(`SELECT run_id, task_id, scope_id, status, task_type, terminal_reason, duration_ms, input_tokens, output_tokens, total_tokens, provider_diagnostics_json, budget_json, continuation_ref_json, created_at, updated_at FROM run_meta WHERE run_id = ${sqlQuote(runId)} LIMIT 1;`)[0] || null
+      : sqliteRows(`SELECT run_id, task_id, scope_id, status, task_type, terminal_reason, duration_ms, input_tokens, output_tokens, total_tokens, provider_diagnostics_json, budget_json, continuation_ref_json, created_at, updated_at FROM run_meta WHERE scope_id = ${sqlQuote(scopeId)} ORDER BY updated_at DESC LIMIT 1;`)[0] || null
     return {
       available: true,
       projections: projections.map((row) => ({
         ...row,
         requestAnchor: parseJson(row.request_anchor_json, null),
+        budget: parseJson(row.budget_json, null),
+        continuationRef: parseJson(row.continuation_ref_json, null),
+        checkpointRefs: parseJson(row.checkpoint_refs_json, null),
+        resumableActions: parseJson(row.resumable_actions_json, null),
       })),
       browserTasks: browserTasks.map((row) => ({
         ...row,
@@ -510,6 +528,7 @@ function readDatabaseEvidence(scopeId, runId) {
         ...runMeta,
         providerDiagnostics: parseJson(runMeta.provider_diagnostics_json, null),
         budget: parseJson(runMeta.budget_json, null),
+        continuationRef: parseJson(runMeta.continuation_ref_json, null),
       } : null,
     }
   } catch (error) {
@@ -722,6 +741,17 @@ function compactCaseResult(instance, rawResult, databaseEvidence, architectureRe
   const canonicalOwnerReadback = Boolean(canonical)
     && canonical.meta?.taskId === parent?.task_id
     && canonical.meta?.runId === databaseEvidence.runMeta?.run_id
+  const terminalContinuationCleared = parent?.continuationRef == null
+    && databaseEvidence.runMeta?.continuationRef == null
+    && parent?.checkpointRefs?.cleanBaseCheckpointId == null
+    && parent?.checkpointRefs?.suspensionCheckpointId == null
+    && JSON.stringify(parent?.resumableActions) === JSON.stringify(['none'])
+  const terminalBrowserOwnership = parent?.module === 'browser'
+  const terminalBootstrapBudgetCleared = parent?.budget?.bootstrapBudget === false
+    && databaseEvidence.runMeta?.budget?.bootstrapBudget === false
+  const terminalBudgetConsistent = Boolean(parent?.budget && databaseEvidence.runMeta?.budget)
+    && parent.task_type === databaseEvidence.runMeta.task_type
+    && JSON.stringify(parent.budget) === JSON.stringify(databaseEvidence.runMeta.budget)
   const architectureChecks = {
     databaseAvailable: databaseEvidence.available,
     oneBrowserWorkflowChild: workflowChildren.length === 1 && databaseEvidence.browserTasks.length === 1,
@@ -737,6 +767,10 @@ function compactCaseResult(instance, rawResult, databaseEvidence, architectureRe
     canonicalReadback: canonicalReadbackOk,
     canonicalOwnerReadback,
     runMetaTerminal,
+    terminalContinuationCleared,
+    terminalBrowserOwnership,
+    terminalBootstrapBudgetCleared,
+    terminalBudgetConsistent,
     latePageWrites: latePageWrites.length,
   }
   const architectureOk = !architectureRequired || (
@@ -752,6 +786,10 @@ function compactCaseResult(instance, rawResult, databaseEvidence, architectureRe
     && architectureChecks.canonicalReadback
     && architectureChecks.canonicalOwnerReadback
     && architectureChecks.runMetaTerminal
+    && architectureChecks.terminalContinuationCleared
+    && architectureChecks.terminalBrowserOwnership
+    && architectureChecks.terminalBootstrapBudgetCleared
+    && architectureChecks.terminalBudgetConsistent
     && architectureChecks.latePageWrites === 0
   )
   const toolTrace = Array.isArray(rawResult?.toolTrace) ? rawResult.toolTrace : []
@@ -769,11 +807,15 @@ function compactCaseResult(instance, rawResult, databaseEvidence, architectureRe
     ...instance.searchRequests.map((item) => item.at),
     ...instance.events.filter((event) => pageWriteEventKinds.has(event.kind)).map((event) => event.clientAt),
   ].filter(Number.isFinite).sort((left, right) => left - right)[0] || null
-  const diagnosticErrors = (rawResult?.diagnostics || []).filter((diagnostic) => diagnostic.severity === 'error')
+  const diagnostics = (rawResult?.diagnostics || []).map((diagnostic) => diagnostic.id === 'tool_result_failure' && /"delivery"\s*:\s*"not_delivered"[\s\S]*"effectObserved"\s*:\s*false[\s\S]*"needsObservation"\s*:\s*false/.test(String(diagnostic.evidence?.text || '')) ? { ...diagnostic, severity: 'warning', message: '工具尝试未送达且未产生页面影响，最终结果将按真实页面证据验收。' } : diagnostic)
+  const diagnosticErrors = diagnostics.filter((diagnostic) => diagnostic.severity === 'error')
   const markerLeak = instance.goals.some((goal) => goal.marker && buildPrompt(instance.fixture).includes(goal.marker))
-  const ok = rawResult?.ok === true
-    && diagnosticErrors.length === 0
+  const deliveryModeOk = rawResult?.requestedDeliveryMode === requestedDeliveryMode
+    && rawResult?.thoroughPressedBeforeSubmit === (requestedDeliveryMode === 'thorough')
+  const harnessOk = diagnosticErrors.length === 0
+  const ok = harnessOk
     && !markerLeak
+    && deliveryModeOk
     && goalChecks.every((check) => check.ok)
     && fixtureGoalChecks.every((check) => check.ok)
     && duplicateDispatches === 0
@@ -786,7 +828,10 @@ function compactCaseResult(instance, rawResult, databaseEvidence, architectureRe
     phase: instance.phase,
     repeat: instance.repeat,
     ok,
-    harnessOk: rawResult?.ok === true,
+    harnessOk,
+    requestedDeliveryMode,
+    thoroughPressedBeforeSubmit: rawResult?.thoroughPressedBeforeSubmit === true,
+    deliveryModeOk,
     scopeId: rawResult?.scopeId || null,
     runId: rawResult?.activeRun?.requestId || databaseEvidence.runMeta?.run_id || null,
     parentTaskId: parent?.task_id || rawResult?.activeRun?.taskId || null,
@@ -811,7 +856,7 @@ function compactCaseResult(instance, rawResult, databaseEvidence, architectureRe
       observations: observations.length,
     },
     toolNames: [...new Set(toolCalls.map((item) => String(item.text || '').split('(')[0].trim()).filter(Boolean))],
-    diagnostics: rawResult?.diagnostics || [],
+    diagnostics,
     error: rawResult?.error || databaseEvidence.error || null,
   }
 }
@@ -827,6 +872,7 @@ const fixtureServer = await startFixtureServer(instances)
 const report = {
   generatedAt: new Date().toISOString(),
   proofMode,
+  requestedDeliveryMode,
   inputTokenAccounting: 'cumulative_provider_requests_v1',
   remoteDebuggingPort,
   rendererUrl: rendererUrl || null,
@@ -870,7 +916,12 @@ try {
     }
     const rawResult = await evaluate(
       client,
-      buildCaseExpression(`${fixtureServer.origin}/case/${instance.key}`, prompt, Boolean(fixtureCase.latentRoute)),
+      buildCaseExpression(
+        `${fixtureServer.origin}/case/${instance.key}`,
+        prompt,
+        Boolean(fixtureCase.latentRoute),
+        requestedDeliveryMode,
+      ),
       420_000,
     )
     await sleep(250)

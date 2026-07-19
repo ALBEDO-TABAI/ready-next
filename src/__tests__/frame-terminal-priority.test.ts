@@ -6,8 +6,9 @@
  *   - `cancelled_user` (rank 100) overrides everything.
  *   - `failed_skill` (80) overrides `done` (50) — defensive.
  *   - `done` (50) overrides every checkpoint.
- *   - `checkpoint_background` (30) overrides `checkpoint_budget` (20)
- *     overrides `checkpoint_user_input` (10) — fixes v2's silent-drop
+ *   - `checkpoint_background` (30) overrides `checkpoint_incomplete` (25),
+ *     which overrides `checkpoint_budget` (20), which overrides
+ *     `checkpoint_user_input` (10) — fixes v2's silent-drop
  *     case where a provisional user-input checkpoint would otherwise win.
  *
  * Both `mergeTurnFramePatches` (intra-batch) and `applyTurnFramePatch`
@@ -50,7 +51,8 @@ test('TURN_TERMINAL_REASON_RANK: ordering invariants', () => {
   assert.ok(TURN_TERMINAL_REASON_RANK.cancelled_user > TURN_TERMINAL_REASON_RANK.done)
   assert.ok(TURN_TERMINAL_REASON_RANK.failed_skill > TURN_TERMINAL_REASON_RANK.done)
   assert.ok(TURN_TERMINAL_REASON_RANK.done > TURN_TERMINAL_REASON_RANK.checkpoint_background)
-  assert.ok(TURN_TERMINAL_REASON_RANK.checkpoint_background > TURN_TERMINAL_REASON_RANK.checkpoint_budget)
+  assert.ok(TURN_TERMINAL_REASON_RANK.checkpoint_background > TURN_TERMINAL_REASON_RANK.checkpoint_incomplete)
+  assert.ok(TURN_TERMINAL_REASON_RANK.checkpoint_incomplete > TURN_TERMINAL_REASON_RANK.checkpoint_budget)
   assert.ok(TURN_TERMINAL_REASON_RANK.checkpoint_budget > TURN_TERMINAL_REASON_RANK.checkpoint_user_input)
   assert.ok(TURN_TERMINAL_REASON_RANK.persistence_failed > TURN_TERMINAL_REASON_RANK.blocked_config)
   assert.ok(TURN_TERMINAL_REASON_RANK.blocked_config > TURN_TERMINAL_REASON_RANK.blocked_external)

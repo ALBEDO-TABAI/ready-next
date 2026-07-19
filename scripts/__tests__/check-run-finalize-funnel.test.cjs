@@ -129,12 +129,12 @@ test('startup recovery exception does not hide another terminal writer in the sa
   writeFile(
     root,
     'src/main/modules/app-control/startup-run-reconciler.ts',
-    `// run-finalizer-exempt: startup-recovery-only working->interrupted
+    `// run-finalizer-exempt: startup-recovery-only active-owner->interrupted
 export function recover(db: any, runMetaRepository: any) {
   db.prepare(\`UPDATE run_meta
     SET status = 'interrupted', initiator = 'process_exit',
         terminal_reason = 'main_process_restarted', updated_at = ?
-    WHERE status = 'working'\`).run(Date.now())
+    WHERE status IN ('working', 'running')\`).run(Date.now())
   runMetaRepository.update('run-1', { status: 'done', terminalReason: 'done' })
 }`
   )
@@ -276,8 +276,8 @@ test('run finalize gate pins split completion done to finalizeRunOutcome', (t) =
   replaceInFile(
     root,
     'src/main/modules/agent-control/runtime-core/agent-sdk-turn-completion.ts',
-    'const finalizedDone = await finalizeRunOutcome(',
-    'const finalizedDone = await Promise.resolve('
+    'finalizedDone = await finalizeRunOutcome(',
+    'finalizedDone = await Promise.resolve('
   )
   const r = runIn(root)
   assert.equal(r.status, 1)

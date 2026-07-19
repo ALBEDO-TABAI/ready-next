@@ -43,6 +43,7 @@ export type ReminderTopic =
   | 'skill-shell-consent'
   | 'tool-capability-conflict'
   | 'browser-observation-required'
+  | 'browser-research-incomplete'
 
 export interface ReminderEntry {
   readonly topic: ReminderTopic

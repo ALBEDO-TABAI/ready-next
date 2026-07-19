@@ -1,6 +1,6 @@
 # Ready 当前运行时硬合同
 
-> 更新时间：2026-07-17
+> 更新时间：2026-07-19
 > 本文承接原先重复写在 `AGENTS.md` 与 `CLAUDE.md` 里的详细约束。两份根指引保留入口与红线；修改本页覆盖的模块前必须读取对应章节。
 
 代码、类型、行为测试和 CI gate 比本文更权威。若实现与本文冲突，先判断是实现回归还是文档漂移；不得为旧文档复活已退役路径。
@@ -69,13 +69,14 @@
 ## 5. Run 终止、连续性与 Dynamic Delivery
 
 - 所有退出路径都经 `src/main/modules/agent-control/runtime-core/run-finalizer.ts` 的 `finalizeRunOutcome()`；终态账本与可见收口在同一通道完成。通道外写终态由 `check-run-finalize-funnel.cjs` 拒绝。
-- bootstrap 预算只是执行前容量猜测；零工具回合以终态 `direct_answer` 收口时必须先重绑预算，再用同一任务类型写 projection、`run_meta`、裁决和关闭指标。显式 research、browser transaction、continuation 或 skill 预算不得被纯文本逃逸降级。
+- bootstrap 预算只是执行前容量猜测；零工具回合以终态 `direct_answer` 收口时必须先重绑预算，再用同一任务类型写 projection、`run_meta`、裁决和关闭指标。最终工具面含 Browser 时，bootstrap 从第一次 provider 调用起获得 220 次高额应急容量；持久研究状态出现后按结构真值重绑为 `research` 并保留已用量。70%/90% 水位只用于诊断和 UI，不再向模型注入“收敛、总结或询问是否继续”；220 只承担异常循环的最后熔断，不是健康长任务的例行分段点。显式 research、browser transaction、continuation 或 skill 预算不得被纯文本逃逸降级。
 - Renderer 可以保留失败前已流出的正文，但不得把 Main 返回的 `error/adjudication_degraded` 猜成未持久化的绿色完成；合法纯回答必须由 Main 直接写成 `done`。
 - 零工具的行动宣告不能直接判 done：先转向，再 checkpoint；完成判定必须基于本轮真实证据。
 - Renderer 60 秒 watchdog 只是活性探针。Main 确认同 requestId 仍 active 时返回 active 并续期，Renderer 不得终止仍运行的 provider。
 - Main 的 no-progress 守卫独立于 Renderer watchdog，按 requestId 仲裁；用 `main_no_progress_timeout` 区分 renderer/model/tool timeout。
 - Dynamic Delivery 的 adaptive 120 秒、thorough 240 秒是滚动无进展窗口；成功文本或工具结果会续期，持续无进展才以 `delivery_wall_clock_exceeded` 收口。
 - 旧 run 晚到不能覆盖同 scope 新 run；已落库消息不能显示成消息丢失。
+- 冷启动把持久化的 `working | running` 都视为上次进程遗留。仍绑定 Browser workflow 且持有当前 clean checkpoint 的 Owner 必须先经 Browser 单事务转成 owner-crash 可续跑暂停，再由通用 reconciler 清理其余无有效检查点的行；迁移后的 `running` 词汇不能逃过清扫，有检查点的 Parent 也不能被标成不可继续。
 - Dynamic Delivery 默认 `adaptive`，设置页可切 `standard`；输入框 `thorough` 只影响下一次发送并立即复位。
 - 只有结构事实证明有收益时才进入协作/独立复核。worker 永远无工具；Owner 独占工具、写入、确认和外部动作。候选答案在 fresh verifier 接受前不能进入共享会话、流式输出或恢复快照。
 - research 任务只有本轮已有明确引用和足量正文时，才可在 Owner 前派无工具 worker；Boost/thorough 不能绕过证据门。
@@ -86,7 +87,7 @@
 ## 6. 后台任务、采集与浏览器执行
 
 - Browser Agent 负责理解目标、选择下一步和判断证据是否足够；代码只负责能力边界、状态推进、页面动作和可验证结果。链接先作为资源理解，不按站点、语言、控件文案、查询关键词或固定步骤硬编码流程。
-- `assets/prompts/browser/discipline.md` 是 Browser 详细纪律的唯一稳定来源；只在最终工具面真实含浏览器能力时注入一次。普通网页搜索、未激活的浏览器环境和已被 exclusive skill 接管的轮次不得误注入。
+- `assets/prompts/browser/discipline.md` 是 Browser 详细纪律的唯一稳定来源；只在最终工具面真实含浏览器能力时注入一次。普通网页搜索、未激活的浏览器环境和已被 exclusive skill 接管的轮次不得误注入。用户提出多个独立目标时，模型必须把每个目标声明为独立 required work item；一个汇总项不能代替多目标覆盖，一个证据只证明它实际读取到的目标与字段。代码不解析站点、语言、关键词或固定字段替模型做这项语义拆分。
 - 浏览器激活只读取可信结构事实：当前工作面、绑定当前页面的 `browserPageRef` 和本轮技能组合。直接浏览器工作面一次提供完整的 typed browser surface；其他环境通过 `use_browser` 显式进入。能力叠加与互斥由统一组合器决定，不从用户自然语言猜工具子集。
 - `browser-capability-registry` 是公开工具名、operation、effects、运行模式和执行边界的唯一代码真值；共享语义清单和 wire schema 从同一合同派生。条件参数必须在 schema 中表达，模型自报 effects、同意或权限不能改变代码侧结论。
 - 除标签管理等 management 操作外，所有页面绑定操作都必须携带可核对的父任务、Owner run、browser task、物理标签与持久 journal 路由；可信内部调用也不能绕过。路由缺失、冲突或已失效时明确失败，不新建第二套临时进度。
@@ -97,11 +98,12 @@
 - 点击在结构目标已唯一确定但 point probe 暂时失败时允许可信输入通道尽力投递；输入文字、上传和密码目标必须先验证真实目的地。文件上传必须显式选择一个附件、多个附件、名称或 `latest:true`，并在 input readback 中精确核对已赋值文件；禁止静默取“最新附件”。
 - 搜索的 fill 和 submit 是两个独立 action：先回读输入值，再优先提交该输入所属的精确 form；只在无可绑定 form 时才使用显式 submit target 或前台 Enter。提交送达与搜索结果成立分开记录，后续结果/空结果必须来自更新的绑定 observation；不导航不等于未提交，也不自动重发。快照观察到的真实 href 可带来源 ref 直接导航，不强制先点击；仍禁止合成站点 URL。
 - 任一已结算但尚无因果 observation receipt 的页面动作，都会从同一 journal 派生 observe-only barrier；它不依赖 checkpoint cursor，也不另建 pending 状态。barrier 存在时终态候选不能发布，模型在同一 Owner/run/task 内最多获得一次显式观察收口机会，并自行选择合适的只读 Browser 工具；代码不自动调用 snapshot，也不写站点、语言、查询词或步骤规则。原生工具协议在一个有界调用内读回观察；文本工具桥允许一次观察响应和一次无工具的结果合成响应，两者都独立于已耗尽的普通轮次预算。观察响应中的全部调用保持只读，即使首个读取已清除 journal barrier，后续调用也不能写页面；合成响应不再开放工具。未清除 barrier 或未形成最终答复时持久化为可续跑暂停，非观察操作和自动重放一律拒绝。
+- 终态候选还必须核对持久研究覆盖。`research_incomplete` 时候选保持不可见，缺失 work items 作为结构事实回给同一 Owner/run/task 继续；required work item 的覆盖或其绑定证据增加时刷新继续窗口，无关页面动作、观察和未绑定资源不得冒充研究进展。连续两次继续仍没有任何持久进展时才写 `checkpoint_incomplete`，其含义固定为“现场已保存、当前已暂停、可继续”，不得写成失败或伪装成后台 worker 仍在运行。
 - 下载只走当前浏览器 session，以临时文件流式落盘、预算校验、hash 与原子发布收口。公开地址静默跳入本地网络时拒绝，用户明确打开的内网/本地来源保持可用；输出只能进入本轮明确授权或 Ready 管理的目录。
 - Power 工具效果按工具、CDP 方法、目标和输出通道机械推导，不按域名封锁。普通观察与诊断不因审计暂时失败而阻断；真实破坏性或秘密外发动作必须在执行前匹配已持久化的精确 grant。权限请求按 partition、逻辑/物理标签、Owner、任务、scope、origin 和请求身份逐项绑定，不使用全局等待队列。
 - `browser_research` 只维护 `start | evidence | complete` 三类持久研究状态：建立开放 work items、把指定 observation receipt 绑定到指定字段、在完成时核对覆盖与来源。它不运行站点 adapter、固定步骤计划或后台浏览器 runner；下一页面动作始终由主 Agent 通过公开工具决定。
 - browser journal/checkpoint 是动作、证据、暂停和续跑的唯一持久真值。续跑依赖原任务路由、已完成动作和未解决 work items，不继承自然语言意图副本或 collection/batch 标记。只有绑定真实页面读取的 observation resource 能成为来源证据；失败回执、工具日志、URL、标题或候选数量不能冒充正文。
-- Browser workflow closeout 只做一次 typed inspection，结果为 `absent | action_in_flight | observation_required | research_incomplete | sealable`。成功只能从 `sealable` 进入最终复核；error/cancel/interrupted 不复用成功 seal，而是在核对 child revision 与绑定后原子收口，不能留下仍为 running 的 Parent、child 或 run。
+- Browser workflow closeout 只做一次 typed inspection，结果为 `absent | action_in_flight | observation_required | research_incomplete | sealable`。成功只能从 `sealable` 进入最终复核；fresh verifier 拒绝 Browser 候选时，候选保持不可见，结构化 summary/gaps 与被拒候选 digest 必须进入同一个 suspension checkpoint 并由下一 Owner 直接读取，不能只保存泛化暂停文案；任务最终接受后这类恢复事实必须从公共会话提交中移除，不能污染后续新需求。error/cancel/interrupted 不复用成功 seal，而是在核对 child revision 与绑定后原子收口，不能留下仍为 running 的 Parent、child 或 run。`terminalQualityPatch` 属于 Parent 质量账，可以随非成功核心事务写入而不要求成功 seal；只有 Browser `done` 仍必须同时持有当前 seal、fresh verifier accept receipt 与匹配 digest。
 - `browser_research(action=complete)` 只在所有开放 work items 都有匹配当前文档与目标字段的有效证据时完成；正文必须来自详情页读取，列表事实只能覆盖其实际读到的字段。受预算约束的结果与证据摘要写入同一个 task transaction，重启或 rebind 后仍可核验和交付。
 - 浏览器任务永久保留创建 run、活动执行绑定、父任务和 revision。Renderer 只消费 Main projection；旧 revision 不得覆盖新续跑，projection 写失败不得反向杀死真实任务。停止或用户接管时先关闭写栅栏，再持久化可续跑暂停；用户输入继续送入页面，不额外排队或要求二次确认。
 - Agent 指针层只展示真实可信鼠标动作，完全 click-through；动作终态、租约丢失、接管、标签切换、BrowserView 隐藏或 bounds 改变时清除。提示显示状态不改变任务、权限或执行状态。

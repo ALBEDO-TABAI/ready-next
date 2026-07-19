@@ -444,6 +444,9 @@ function resolveTerminalResumableActions(
   if (reason === 'checkpoint_budget' && (summary.taskContinuation || previous?.continuationRef)) {
     return ['continue', 'retry', 'cancel']
   }
+  if (reason === 'checkpoint_incomplete' && (summary.taskContinuation || previous?.continuationRef)) {
+    return ['continue', 'cancel']
+  }
   if (reason === 'checkpoint_background' && (summary.taskContinuation || previous?.continuationRef)) {
     return ['continue', 'cancel']
   }
@@ -508,6 +511,7 @@ function resolveTerminalBlockedReason(reason?: ScopeRunSummary['terminalReason']
   if (reason === 'checkpoint_user_input') return '等待补充信息'
   if (reason === 'manual_suspend') return '任务已暂停，等待继续。'
   if (reason === 'checkpoint_budget') return '预算已暂停'
+  if (reason === 'checkpoint_incomplete') return '任务进度已保存，可以继续。'
   if (reason === 'checkpoint_background') return '后台任务仍在运行'
   return null
 }

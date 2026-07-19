@@ -62,13 +62,21 @@ export class AgentSessionCheckpointCloseoutRepository {
         })
         const messageId = messageTemplate.id
         const parentWinner = db.prepare(
-          `SELECT status, execution_binding_json, delivery_state_json
+          `SELECT status, execution_binding_json, delivery_state_json,
+                  task_type, module, budget_json, budget_usage_percent,
+                  budget_warning_level, continuation_ref_json
              FROM task_projections
             WHERE task_id = ? AND revision = ? AND run_id = ? LIMIT 1`,
         ).get<{
           status: string
           execution_binding_json: string | null
           delivery_state_json: string | null
+          task_type: string
+          module: string
+          budget_json: string | null
+          budget_usage_percent: number | null
+          budget_warning_level: string | null
+          continuation_ref_json: string | null
         }>(
           parent.taskId,
           parent.revision,
@@ -78,9 +86,16 @@ export class AgentSessionCheckpointCloseoutRepository {
           && ['completed', 'failed', 'killed'].includes(parentWinner.status)
         if (parentAlreadyTerminal) {
           const existingRun = db.prepare(
-            `SELECT status, terminal_reason FROM run_meta
+            `SELECT status, terminal_reason, task_type, budget_json, continuation_ref_json
+               FROM run_meta
               WHERE run_id = ? AND task_id = ? AND scope_id = ? LIMIT 1`,
-          ).get<{ status: string; terminal_reason: string | null }>(
+          ).get<{
+            status: string
+            terminal_reason: string | null
+            task_type: string | null
+            budget_json: string | null
+            continuation_ref_json: string | null
+          }>(
             input.ownerRunId,
             parent.taskId,
             parent.scopeId,
@@ -116,6 +131,30 @@ export class AgentSessionCheckpointCloseoutRepository {
           if (
             existingRun?.status !== runMetaStatus
             || existingRun.terminal_reason !== input.terminalReason
+            || existingRun.continuation_ref_json !== null
+            || parentWinner.continuation_ref_json !== null
+            || (input.taskType && existingRun.task_type !== input.taskType)
+            || (input.taskType && parentWinner.task_type !== input.taskType)
+            || (input.module && parentWinner.module !== input.module)
+            || (
+              input.budget
+              && (
+                !existingRun.budget_json
+                || !parentWinner.budget_json
+                || workflowDigest(parseObjectStrict(existingRun.budget_json, 'core_closeout_run_budget_json'))
+                  !== workflowDigest(input.budget)
+                || workflowDigest(parseObjectStrict(parentWinner.budget_json, 'core_closeout_parent_budget_json'))
+                  !== workflowDigest(input.budget)
+              )
+            )
+            || (
+              typeof input.budgetUsagePercent === 'number'
+              && parentWinner.budget_usage_percent !== input.budgetUsagePercent
+            )
+            || (
+              input.budgetWarningLevel
+              && parentWinner.budget_warning_level !== input.budgetWarningLevel
+            )
             || !canonicalMessage
             || canonicalMessage.conversationId !== expectedCanonicalMessage?.conversationId
             || canonicalMessage.content !== expectedCanonicalMessage?.content
@@ -247,9 +286,6 @@ export class AgentSessionCheckpointCloseoutRepository {
         } else if (input.workflowCloseoutSeal) {
           throw new Error('core_closeout_workflow_seal_mismatch')
         }
-        if (input.terminalQualityPatch && !currentWorkflowSeal) {
-          throw new Error('core_closeout_quality_patch_requires_browser_workflow')
-        }
         if (input.completionVerifierReceipt && !currentWorkflowSeal) {
           throw new Error('core_closeout_verifier_receipt_requires_browser_workflow')
         }
@@ -354,7 +390,7 @@ export class AgentSessionCheckpointCloseoutRepository {
               SET status = ?, initiator = ?, duration_ms = ?,
                   task_type = COALESCE(?, task_type), terminal_reason = ?,
                   provider_diagnostics_json = COALESCE(?, provider_diagnostics_json),
-                  budget_json = COALESCE(?, budget_json), continuation_ref_json = ?,
+                  budget_json = COALESCE(?, budget_json), continuation_ref_json = NULL,
                   input_tokens = ?, output_tokens = ?, total_tokens = ?,
                   last_message_text = ?, updated_at = ?
             WHERE run_id = ? AND task_id = ? AND scope_id = ?
@@ -369,9 +405,6 @@ export class AgentSessionCheckpointCloseoutRepository {
             ? serializeWorkflowJson(input.providerDiagnostics, 'run_meta_provider_diagnostics_json')
             : null,
           input.budget ? serializeWorkflowJson(input.budget, 'run_meta_budget_json') : null,
-          input.continuationRef
-            ? serializeWorkflowJson(input.continuationRef, 'run_meta_continuation_ref_json')
-            : null,
           Math.max(0, Math.floor(input.usage?.inputTokens || 0)),
           Math.max(0, Math.floor(input.usage?.outputTokens || 0)),
           Math.max(0, Math.floor(input.usage?.totalTokens || 0)),
@@ -400,7 +433,12 @@ export class AgentSessionCheckpointCloseoutRepository {
               `UPDATE task_projections
                   SET status = ?, interaction_state = ?, waiting_for = 'none',
                       blocked_reason = ?, resumable_actions_json = ?,
-                      continuation_ref_json = ?, delivery_state_json = COALESCE(?, delivery_state_json),
+                      task_type = COALESCE(?, task_type), module = COALESCE(?, module),
+                      budget_json = COALESCE(?, budget_json),
+                      budget_usage_percent = COALESCE(?, budget_usage_percent),
+                      budget_warning_level = COALESCE(?, budget_warning_level),
+                      continuation_ref_json = NULL,
+                      delivery_state_json = COALESCE(?, delivery_state_json),
                       proof_refs_json = ?,
                       checkins_json = ?, criteria_json = ?,
                       learning_refs_json = COALESCE(?, learning_refs_json),
@@ -411,11 +449,13 @@ export class AgentSessionCheckpointCloseoutRepository {
             ).run(
               projectionStatus,
               interactionState,
-          null,
+              null,
               serializeWorkflowJson(resumableActions, 'terminal_resumable_actions_json'),
-              input.continuationRef
-                ? serializeWorkflowJson(input.continuationRef, 'terminal_continuation_ref_json')
-                : null,
+              input.taskType || null,
+              input.module || null,
+              input.budget ? serializeWorkflowJson(input.budget, 'terminal_budget_json') : null,
+              input.budgetUsagePercent ?? null,
+              input.budgetWarningLevel || null,
               input.deliveryState
                 ? serializeWorkflowJson(input.deliveryState, 'terminal_delivery_state_json')
                 : null,
@@ -436,7 +476,12 @@ export class AgentSessionCheckpointCloseoutRepository {
               `UPDATE task_projections
                   SET status = ?, interaction_state = ?, waiting_for = 'none',
                       blocked_reason = ?, resumable_actions_json = ?,
-                      continuation_ref_json = ?, delivery_state_json = COALESCE(?, delivery_state_json),
+                      task_type = COALESCE(?, task_type), module = COALESCE(?, module),
+                      budget_json = COALESCE(?, budget_json),
+                      budget_usage_percent = COALESCE(?, budget_usage_percent),
+                      budget_warning_level = COALESCE(?, budget_warning_level),
+                      continuation_ref_json = NULL,
+                      delivery_state_json = COALESCE(?, delivery_state_json),
                       checkpoint_refs_json = '{"cleanBaseCheckpointId":null,"suspensionCheckpointId":null}',
                       revision = revision + 1, updated_at = ?
                 WHERE task_id = ? AND revision = ? AND run_id = ?
@@ -446,9 +491,11 @@ export class AgentSessionCheckpointCloseoutRepository {
               interactionState,
               null,
               serializeWorkflowJson(resumableActions, 'terminal_resumable_actions_json'),
-              input.continuationRef
-                ? serializeWorkflowJson(input.continuationRef, 'terminal_continuation_ref_json')
-                : null,
+              input.taskType || null,
+              input.module || null,
+              input.budget ? serializeWorkflowJson(input.budget, 'terminal_budget_json') : null,
+              input.budgetUsagePercent ?? null,
+              input.budgetWarningLevel || null,
               input.deliveryState
                 ? serializeWorkflowJson(input.deliveryState, 'terminal_delivery_state_json')
                 : null,
@@ -500,12 +547,18 @@ export class AgentSessionCheckpointCloseoutRepository {
         ).run(parent.taskId)
 
         const runReadback = db.prepare(
-          `SELECT status, terminal_reason FROM run_meta WHERE run_id = ? AND task_id = ? LIMIT 1`,
-        ).get<{ status: string; terminal_reason: string | null }>(input.ownerRunId, parent.taskId)
+          `SELECT status, terminal_reason, continuation_ref_json
+             FROM run_meta WHERE run_id = ? AND task_id = ? LIMIT 1`,
+        ).get<{
+          status: string
+          terminal_reason: string | null
+          continuation_ref_json: string | null
+        }>(input.ownerRunId, parent.taskId)
         if (
           !runReadback
           || runReadback.status !== runMetaStatus
           || runReadback.terminal_reason !== input.terminalReason
+          || runReadback.continuation_ref_json !== null
         ) {
           throw new Error('core_closeout_run_meta_readback_failed')
         }

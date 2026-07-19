@@ -440,9 +440,10 @@ export class AgentSessionCheckpointResumeRepository {
     return { receipt, checkpointId, basisRevision: parent.revision }
   }
 
-  async settleOwnerLaunchFailure(input: {
+  async settleOwnerFailure(input: {
     parentTaskId: string
     failedOwnerRunId: string
+    terminalReason: 'owner_launch_failed' | 'main_process_restarted'
     error: string
     now?: string
   }): Promise<BrowserOwnerCrashRecoveryReceipt | null> {
@@ -547,11 +548,12 @@ export class AgentSessionCheckpointResumeRepository {
       }
       const runUpdate = db.prepare(
         `UPDATE run_meta
-            SET status = 'interrupted', terminal_reason = 'owner_launch_failed',
+            SET status = 'interrupted', terminal_reason = ?,
                 continuation_ref_json = ?, updated_at = ?
           WHERE run_id = ? AND task_id = ? AND status = 'running'
             AND execution_binding_json = ?`,
       ).run(
+        input.terminalReason,
         serializeWorkflowJson(continuation, 'owner_crash_continuation_ref_json'),
         Date.parse(createdAt) || Date.now(),
         input.failedOwnerRunId,
@@ -621,6 +623,7 @@ export class AgentSessionCheckpointResumeRepository {
         'browser_permission',
         'budget',
         'steering',
+        'incomplete',
         'background',
         'foreground',
         'capability',

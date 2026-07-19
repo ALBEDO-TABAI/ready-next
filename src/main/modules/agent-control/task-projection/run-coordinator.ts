@@ -321,6 +321,16 @@ export class RunCoordinator {
     const projectionSteps = Array.isArray(projectionPatch?.steps) ? projectionPatch.steps : undefined
     const projectionCurrentStepId =
       typeof projectionPatch?.currentStepId === 'string' ? projectionPatch.currentStepId : undefined
+    const projectionInteractionState =
+      projectionPatch?.interactionState === 'running'
+      || projectionPatch?.interactionState === 'awaiting_clarification'
+      || projectionPatch?.interactionState === 'awaiting_confirmation'
+      || projectionPatch?.interactionState === 'human_takeover'
+      || projectionPatch?.interactionState === 'suspended'
+      || projectionPatch?.interactionState === 'resuming'
+      || projectionPatch?.interactionState === 'check_in_pending'
+        ? projectionPatch.interactionState
+        : undefined
     const projectionWaitingFor =
       projectionPatch?.waitingFor === 'input'
       || projectionPatch?.waitingFor === 'confirmation'
@@ -342,9 +352,12 @@ export class RunCoordinator {
     const projectionTaskContinuation =
       projectionPatch?.taskContinuation && typeof projectionPatch.taskContinuation === 'object'
         ? projectionPatch.taskContinuation as ScopeRunEventPayload['taskContinuation']
+        : projectionPatch?.continuationRef && typeof projectionPatch.continuationRef === 'object'
+          ? projectionPatch.continuationRef as ScopeRunEventPayload['taskContinuation']
         : undefined
     const lifecycleSignal = result.skillTaskLifecycle || null
     const finalInteractionState = lifecycleSignal?.interactionState
+      || projectionInteractionState
       || (result.terminalReason === 'manual_suspend' ? 'suspended' : result.interactionState)
     const finalWaitingFor = lifecycleSignal ? lifecycleSignal.waitingFor : projectionWaitingFor
     const finalResumableActions = lifecycleSignal

@@ -32,8 +32,12 @@
 | 2026-07-19 | 浏览器 grounded 调度与能力闭环 | `src/main/modules/agent-control/contracts/run-contracts.ts` | 1009 | 净 +33 | 健康 | 只聚合运行合同声明，本轮增加结构化 Browser 终态与恢复字段，并由类型检查和行为测试覆盖。 | 无需处理 |
 | 2026-07-19 | 浏览器 grounded 调度与能力闭环 | `src/main/modules/agent-control/runtime-core/agent-sdk-runtime.ts` | 1305 | 净 +66 | 一般 | 仍是 SDK 组合宿主，具体 Browser 判断已下沉到独立模块。2026-08-19 复查 composition 接线密度。 | 已排期：2026-08-19 |
 | 2026-07-19 | 浏览器 grounded 调度与能力闭环 | `src/main/modules/agent-control/runtime-core/orchestrator.ts` | 1028 | 净 +5 | 一般 | 只透传浏览器运行合同，没有写产品分支。2026-08-19 复查编排入口密度。 | 已排期：2026-08-19 |
-| 2026-07-19 | 浏览器 grounded 调度与能力闭环 | `src/main/modules/agent-control/runtime-core/run-finalizer.ts` | 1228 | 净 +187 | 危险 | 通用终态、投影和持久收口仍集中；本轮虽把 Browser 证据检查下沉，宿主增长仍明显。后续应把通用终态事务与产品证据适配分离。 | 待独立拆分合同；交付时提醒 |
-| 2026-07-19 | 浏览器 grounded 调度与能力闭环 | `src/main/modules/agent-control/runtime-core/runtime.ts` | 2975 | 净 +374 | 危险 | 多类运行服务装配仍集中；本轮核心 Browser 生命周期已下沉，但宿主接线继续增长。后续应迁出 Browser/continuation 组合 facade。 | 待独立拆分合同；交付时提醒 |
+| 2026-07-19 | 浏览器 grounded 调度与能力闭环 | `src/main/modules/agent-control/runtime-core/run-finalizer.ts` | 1252 | 净 +211 | 危险 | 通用终态、投影和持久收口仍集中；本轮虽把 Browser 证据检查下沉，宿主增长仍明显。后续应把通用终态事务与产品证据适配分离。 | 待独立拆分合同；交付时提醒 |
+| 2026-07-19 | 浏览器 grounded 调度与能力闭环 | `src/main/modules/agent-control/runtime-core/runtime.ts` | 2976 | 净 +375 | 危险 | 多类运行服务装配仍集中；本轮核心 Browser 生命周期已下沉，但宿主接线继续增长。后续应迁出 Browser/continuation 组合 facade。 | 待独立拆分合同；交付时提醒 |
+| 2026-07-19 | 浏览器长任务终态一致性 | `src/renderer/modules/agent/agentPanelTestHarness.ts` | 1474 | 净 +1 | 一般 | 仍是开发期 Agent 面板验收入口，本轮只补新的暂停终态枚举。2026-08-19 复查是否按诊断与驱动拆分。 | 已排期：2026-08-19 |
+| 2026-07-19 | 浏览器长任务终态一致性 | `src/renderer/modules/agent/scopeRunState.ts` | 1054 | 净 +1 | 一般 | 仍聚焦 Renderer 运行状态归一化，本轮只补新的暂停终态枚举。2026-08-19 复查事件归一化边界。 | 已排期：2026-08-19 |
+| 2026-07-19 | 浏览器长任务终态一致性 | `src/renderer/types/electron.d.ts` | 4022 | 净 +5 | 健康 | 单一用途的 Renderer 跨进程声明合同，本轮补齐浏览器暂停原因与继续句柄，由类型检查和真实应用验收覆盖。 | 无需处理 |
+| 2026-07-19 | 浏览器长任务真实验收 | `scripts/run-browser-grounded-orchestration-live-proof.mjs` | 1005 | 净 +51 | 一般 | 单一真实应用验收入口，本轮补 normal/Boost 切换及终态预算、归属和续跑清理读回。2026-08-19 复查是否拆出报告读取工具。 | 已排期：2026-08-19 |
 | 2026-07-19 | 浏览器 grounded 调度与能力闭环 | `src/main/modules/agent-control/tools-runtime/tool-registry.ts` | 1534 | 净 +9 | 一般 | 只注册统一 Browser 能力定义，具体行为不在注册表。2026-08-19 复查跨域注册密度。 | 已排期：2026-08-19 |
 | 2026-07-19 | 浏览器 grounded 调度与能力闭环 | `src/main/modules/database.ts` | 3087 | 净 +62 | 危险 | 多产品域数据库入口仍集中；本轮 Browser workflow 数据已下沉仓储，但总管理器仍承担装配。后续应继续迁出任务仓储 facade。 | 待独立拆分合同；交付时提醒 |
 | 2026-07-19 | 浏览器 grounded 调度与能力闭环 | `src/main/modules/migrations.ts` | 3867 | 净 +142 | 健康 | 只追加顺序迁移，为 Browser workflow、checkpoint 和确认账本提供结构；连续编号与真实 Electron SQLite 门禁覆盖。 | 无需处理 |

@@ -7,6 +7,7 @@ import { isVeaAction, isVeaStage, resolveVeaResumeAction } from '../vea-resume-a
 export const TURN_TERMINAL_REASONS = [
   'done',
   'checkpoint_budget',
+  'checkpoint_incomplete',
   'checkpoint_background',
   'checkpoint_user_input',
   'checkpoint_steered',
@@ -307,6 +308,10 @@ const TURN_FRAME_LIVENESS_RANK: Record<TurnFrameLiveness, number> = {
  *     overwritten by a later iteration's budget/background marker.
  *   - `checkpoint_budget` > `checkpoint_user_input`: the real terminal cause
  *     (budget close) overrides a provisional user-input checkpoint marker.
+ *   - `checkpoint_background` > `checkpoint_incomplete`: a live worker outranks
+ *     a saved-but-paused incomplete task.
+ *   - `checkpoint_incomplete` > `checkpoint_budget`: missing durable work is
+ *     more specific than the emergency capacity ceiling.
  *   - `checkpoint_background` > `checkpoint_budget`: when a live worker exists,
  *     `turn-engine.ts:4239-4246` already prefers `checkpoint_background`.
  */
@@ -329,6 +334,7 @@ const TURN_TERMINAL_REASON_RANK: Record<TurnTerminalReason, number> = {
   resume_launch_failed: 55,
   done: 50,
   checkpoint_background: 30,
+  checkpoint_incomplete: 25,
   manual_suspend: 25,
   checkpoint_budget: 20,
   checkpoint_steered: 15,

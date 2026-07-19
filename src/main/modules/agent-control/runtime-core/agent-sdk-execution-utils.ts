@@ -21,6 +21,25 @@ export function throwIfAbortSignalAborted(signal: AbortSignal): void {
   throw error
 }
 
+export async function waitForAbortableRetryDelay(
+  delayMs: number,
+  signal: AbortSignal,
+): Promise<void> {
+  throwIfAbortSignalAborted(signal)
+  await new Promise<void>((resolve) => {
+    let timer: ReturnType<typeof setTimeout> | null = null
+    const finish = () => {
+      if (timer) clearTimeout(timer)
+      timer = null
+      signal.removeEventListener('abort', finish)
+      resolve()
+    }
+    timer = setTimeout(finish, delayMs)
+    signal.addEventListener('abort', finish, { once: true })
+  })
+  throwIfAbortSignalAborted(signal)
+}
+
 export function recoverLooseXmlToolCallText(text: string): {
   visibleText: string
   toolCalls: Array<{ name: string; args: Record<string, unknown> }>

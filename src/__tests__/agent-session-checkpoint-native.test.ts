@@ -9,8 +9,17 @@ import { AgentSessionCheckpointRepository, workflowDigest } from '../main/module
 import { TaskProjectionRepository } from '../main/modules/repositories/task-projection-repository'
 import { RunMetaRepository } from '../main/modules/agent-control/task-projection/run-meta-repository'
 import { browserWorkflowStableDigest } from '../main/modules/browser-engine/browser-workflow-evidence'
+import { reconcileStartupRunsOnStartup } from '../main/modules/app-control/startup-run-reconciler'
 import { buildPreparedSkillTurnTruth } from '../main/modules/agent-control/skills/prepared-skill-turn'
 import { buildExplicitNoSkillAuthorization } from '../main/modules/agent-control/skills/skill-tool-authorization'
+import { AgentSessionInputController } from '../main/modules/agent-control/runtime-core/agent-session-input-controller'
+import {
+  buildBrowserVerifierRecoveryItem,
+  createBrowserSuspensionController,
+  withoutBrowserVerifierRecoveryItems,
+} from '../main/modules/agent-control/runtime-core/agent-sdk-browser-suspension'
+import type { ToolBridgeRuntimeContext } from '../main/modules/agent-control/runtime-core/agent-sdk-types'
+import { createTaskBudgetRuntime } from '../main/modules/agent-control/task-projection/run-budget-policy'
 import {
   KIMI_K3_SESSION_IDENTITY,
   KIMI_K3_SESSION_IDENTITY_FIELD,
@@ -413,6 +422,350 @@ test('browser journal writes are owner-bound atomic transactions and corrupt obs
   }
 })
 
+test('verifier rejection facts survive incomplete suspension and reach the resumed owner', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'browser-incomplete-suspension-native')) return
+  const db = openDb()
+  try {
+    const accessor = { getRawDb: () => db }
+    const projections = new TaskProjectionRepository(accessor)
+    const runMeta = new RunMetaRepository(db)
+    const repository = new AgentSessionCheckpointRepository(accessor)
+    const parentTaskId = 'parent-browser-incomplete-suspension'
+    const scopeId = 'scope-browser-incomplete-suspension'
+    const ownerRunId = 'run-browser-incomplete-suspension'
+    const ownerBinding = executionBinding(ownerRunId)
+    const now = '2026-07-19T01:30:00.000Z'
+    projections.create({
+      taskId: parentTaskId,
+      scopeId,
+      runId: ownerRunId,
+      taskType: 'research',
+      module: 'browser',
+      status: 'running',
+      interactionState: 'running',
+      waitingFor: 'none',
+      steps: [],
+      ownerAgentId: 'butler',
+      taskOrigin: 'user_root',
+      executionBinding: ownerBinding,
+      createdAt: now,
+      updatedAt: now,
+    })
+    runMeta.create({
+      runId: ownerRunId,
+      taskId: parentTaskId,
+      scopeId,
+      agentId: 'butler',
+      executionBinding: ownerBinding,
+      status: 'running',
+    }, Date.parse(now))
+    db.prepare(
+      `INSERT INTO chat_conversations (id, agent, title, created_at, updated_at)
+       VALUES (?, 'butler', 'Browser incomplete suspension', ?, ?)`,
+    ).run(scopeId, now, now)
+    const sourceMessageId = 'message-browser-incomplete-suspension'
+    db.prepare(
+      `INSERT INTO chat_messages (id, conversation_id, role, content, timestamp, meta_json)
+       VALUES (?, ?, 'user', '完成多个网页研究目标', ?, '{}')`,
+    ).run(sourceMessageId, scopeId, now)
+    const route = await repository.bindBrowserWorkflowRoute({
+      parentTaskId,
+      ownerRunId,
+      sourceMessageId,
+      executionBinding: ownerBinding,
+      now,
+    })
+    const sourceItems = [{ role: 'user', content: '继续完成剩余研究目标' } as AgentInputItem]
+    const runtimeContext = {
+      runId: ownerRunId,
+      taskId: parentTaskId,
+      sourceMessageId,
+      executionBinding: ownerBinding,
+      browserWorkflowRoute: {
+        browserTaskId: route.browserTaskId,
+        requestAnchorSnapshotDigest: route.requestAnchorSnapshotDigest,
+      },
+      browserRequiredOperationIds: [],
+      lastEffectiveBrowserActionSeq: 0,
+      browserObservationGaps: [],
+      browserObservationBarrier: null,
+      browserSuspensionRequest: null,
+      activatedCapabilityGroups: ['browser'],
+      preparedSkillTurn: preparedSkill(),
+    } as unknown as ToolBridgeRuntimeContext
+    const modelInputController = new AgentSessionInputController(
+      repository,
+      runtimeContext,
+      null,
+    )
+    await modelInputController.filter(sourceItems, {
+      sourceItems,
+      compacted: false,
+    })
+    const verifierRecovery = buildBrowserVerifierRecoveryItem({
+      rejectedCandidateDigest: workflowDigest('rejected-browser-candidate'),
+      verdict: 'repair',
+      summary: 'Two requested targets still lack source-backed details.',
+      gaps: [{
+        kind: 'text',
+        description: 'Collect and cite the missing details for query-b and query-c.',
+      }],
+    })
+    const suspension = createBrowserSuspensionController({
+      modelInputController,
+      runtimeContext,
+      projectionPatches: [],
+      getTaskBudgetRuntime: () => createTaskBudgetRuntime('research'),
+      setContinuationRef: () => undefined,
+      setFinalText: () => undefined,
+      emitOutput: () => undefined,
+      finalizeCheckpoint: async ({ terminalReason }) => ({
+        status: 'checkpoint',
+        terminalReason,
+      }) as never,
+    })
+    await suspension.finishIncompleteCheckpoint('', [verifierRecovery])
+    const checkpoint = repository.current(parentTaskId, 'suspension')
+    assert.ok(checkpoint)
+    const recoveryItem = checkpoint.finalInput.find((item) => Boolean(
+      (item as { providerData?: Record<string, unknown> }).providerData
+        ?.readyBrowserVerifierRecovery,
+    )) as { providerData?: { readyBrowserVerifierRecovery?: Record<string, unknown> } } | undefined
+    assert.deepEqual(recoveryItem?.providerData?.readyBrowserVerifierRecovery?.gaps, [{
+      kind: 'text',
+      description: 'Collect and cite the missing details for query-b and query-c.',
+    }])
+    assert.equal(
+      recoveryItem?.providerData?.readyBrowserVerifierRecovery?.candidatePublished,
+      false,
+    )
+    assert.doesNotMatch(JSON.stringify(checkpoint.finalInput), /rejected-browser-candidate/)
+
+    const parent = db.prepare(
+      `SELECT status, interaction_state, waiting_for, blocked_reason, continuation_ref_json
+         FROM task_projections WHERE task_id = ?`,
+    ).get<{
+      status: string
+      interaction_state: string
+      waiting_for: string
+      blocked_reason: string
+      continuation_ref_json: string | null
+    }>(parentTaskId)
+    assert.deepEqual(parent && {
+      status: parent.status,
+      interactionState: parent.interaction_state,
+      waitingFor: parent.waiting_for,
+      blockedReason: parent.blocked_reason,
+    }, {
+      status: 'recoverable_paused',
+      interactionState: 'suspended',
+      waitingFor: 'none',
+      blockedReason: 'browser_incomplete_checkpoint',
+    })
+    const run = db.prepare(
+      'SELECT status, terminal_reason, continuation_ref_json FROM run_meta WHERE run_id = ?',
+    ).get<{ status: string; terminal_reason: string; continuation_ref_json: string }>(ownerRunId)
+    assert.equal(run?.status, 'checkpoint')
+    assert.equal(run?.terminal_reason, 'checkpoint_incomplete')
+    assert.deepEqual(JSON.parse(run?.continuation_ref_json || '{}'), {
+      kind: 'browser_checkpoint',
+      checkpointId: checkpoint.checkpointId,
+      browserTaskId: route.browserTaskId,
+      suspensionReason: 'incomplete',
+    })
+    assert.equal(parent?.continuation_ref_json, null)
+    assert.equal(
+      db.prepare('SELECT status FROM browser_tasks WHERE id = ?')
+        .get<{ status: string }>(route.browserTaskId)?.status,
+      'paused',
+    )
+
+    const basisRevision = db.prepare(
+      'SELECT revision FROM task_projections WHERE task_id = ?',
+    ).get<{ revision: number }>(parentTaskId)?.revision
+    assert.ok(Number.isInteger(basisRevision))
+    const wakeKind = 'user_continue' as const
+    const sourceId = 'continue-browser-after-verifier-rejection'
+    const newOwnerRunId = 'run-browser-incomplete-resumed'
+    const newOwnerBinding = executionBinding(newOwnerRunId)
+    const resumed = await repository.resumeSuspendedBrowserWorkflow({
+      taskId: parentTaskId,
+      newOwnerRunId,
+      executionBinding: newOwnerBinding,
+      wake: {
+        wakeId: 'wake-browser-after-verifier-rejection',
+        checkpointId: checkpoint.checkpointId,
+        basisRevision: basisRevision as number,
+        kind: wakeKind,
+        sourceId,
+        sourceDigest: workflowDigest({
+          parentTaskId,
+          checkpointId: checkpoint.checkpointId,
+          basisRevision,
+          kind: wakeKind,
+          sourceId,
+        }),
+        issuedAt: '2026-07-19T01:31:00.000Z',
+      },
+      now: '2026-07-19T01:31:01.000Z',
+    })
+    assert.equal(resumed.checkpoint.ownerRunId, newOwnerRunId)
+    assert.deepEqual(
+      resumed.checkpoint.finalInput.find((item) => Boolean(
+        (item as { providerData?: Record<string, unknown> }).providerData
+          ?.readyBrowserVerifierRecovery,
+      )),
+      recoveryItem,
+    )
+    const resumedRuntimeContext = {
+      ...runtimeContext,
+      runId: newOwnerRunId,
+      executionBinding: newOwnerBinding,
+    } as ToolBridgeRuntimeContext
+    const resumedInputController = new AgentSessionInputController(
+      repository,
+      resumedRuntimeContext,
+      null,
+    )
+    const resumedProviderInput = await resumedInputController.filter(
+      [{ role: 'system', content: 'Compacted browser resume context.' } as AgentInputItem],
+      {
+        sourceItems: resumed.checkpoint.finalInput,
+        compacted: true,
+      },
+    )
+    const resumedRecoveryFacts = resumedProviderInput.filter((item) => Boolean(
+      (item as { providerData?: Record<string, unknown> }).providerData
+        ?.readyBrowserVerifierRecovery,
+    ))
+    assert.equal(resumedRecoveryFacts.length, 1)
+    assert.deepEqual(resumedRecoveryFacts[0], recoveryItem)
+    assert.equal(
+      withoutBrowserVerifierRecoveryItems(resumedProviderInput).some((item) => Boolean(
+        (item as { providerData?: Record<string, unknown> }).providerData
+          ?.readyBrowserVerifierRecovery,
+      )),
+      false,
+    )
+  } finally {
+    db.close()
+  }
+})
+
+test('startup recovery converts a stale Browser owner with a clean checkpoint into a resumable pause', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'browser-owner-startup-recovery-native')) return
+  const db = openDb()
+  try {
+    const accessor = { getRawDb: () => db }
+    const projections = new TaskProjectionRepository(accessor)
+    const runMeta = new RunMetaRepository(db)
+    const repository = new AgentSessionCheckpointRepository(accessor)
+    const parentTaskId = 'parent-browser-startup-recovery'
+    const scopeId = 'scope-browser-startup-recovery'
+    const ownerRunId = 'run-browser-startup-recovery'
+    const ownerBinding = executionBinding(ownerRunId)
+    const now = '2026-07-19T01:45:00.000Z'
+    projections.create({
+      taskId: parentTaskId,
+      scopeId,
+      runId: ownerRunId,
+      taskType: 'research',
+      module: 'browser',
+      status: 'running',
+      interactionState: 'running',
+      waitingFor: 'none',
+      steps: [],
+      ownerAgentId: 'butler',
+      taskOrigin: 'user_root',
+      executionBinding: ownerBinding,
+      createdAt: now,
+      updatedAt: now,
+    })
+    runMeta.create({
+      runId: ownerRunId,
+      taskId: parentTaskId,
+      scopeId,
+      agentId: 'butler',
+      executionBinding: ownerBinding,
+      status: 'running',
+    }, Date.parse(now))
+    db.prepare(
+      `INSERT INTO chat_conversations (id, agent, title, created_at, updated_at)
+       VALUES (?, 'butler', 'Browser startup recovery', ?, ?)`,
+    ).run(scopeId, now, now)
+    const sourceMessageId = 'message-browser-startup-recovery'
+    db.prepare(
+      `INSERT INTO chat_messages (id, conversation_id, role, content, timestamp, meta_json)
+       VALUES (?, ?, 'user', '完成多个网页研究目标', ?, '{}')`,
+    ).run(sourceMessageId, scopeId, now)
+    const route = await repository.bindBrowserWorkflowRoute({
+      parentTaskId,
+      ownerRunId,
+      sourceMessageId,
+      executionBinding: ownerBinding,
+      now,
+    })
+    const sourceItems = [{ role: 'user', content: '完成多个网页研究目标' } as AgentInputItem]
+    const clean = await repository.writeCleanBoundary({
+      parentTaskId,
+      browserTaskId: route.browserTaskId,
+      ownerRunId,
+      sourceItems,
+      sdkSourceItems: sourceItems,
+      sdkSourceItemCount: sourceItems.length,
+      sdkSourcePrefixDigest: workflowDigest(sourceItems),
+      preparedSkill: preparedSkill(),
+      activatedCapabilityGroups: ['browser'],
+      now,
+    })
+
+    const result = await reconcileStartupRunsOnStartup({
+      db,
+      now: new Date('2026-07-19T01:46:00.000Z'),
+      agentSessionCheckpointRepository: repository,
+      logMetric: () => undefined,
+    })
+    assert.deepEqual(result.reconcileCount, {
+      runMeta: 1,
+      taskProjections: 1,
+      browserTasks: 1,
+      skillRuns: 0,
+    })
+    const parent = db.prepare(
+      `SELECT status, interaction_state, waiting_for, blocked_reason, checkpoint_refs_json
+         FROM task_projections WHERE task_id = ?`,
+    ).get<{
+      status: string
+      interaction_state: string
+      waiting_for: string
+      blocked_reason: string
+      checkpoint_refs_json: string
+    }>(parentTaskId)
+    assert.equal(parent?.status, 'recoverable_paused')
+    assert.equal(parent?.interaction_state, 'suspended')
+    assert.equal(parent?.waiting_for, 'none')
+    assert.equal(parent?.blocked_reason, 'browser_owner_crash_checkpoint')
+    const checkpointRefs = JSON.parse(parent?.checkpoint_refs_json || '{}')
+    assert.equal(checkpointRefs.cleanBaseCheckpointId, null)
+    assert.ok(checkpointRefs.suspensionCheckpointId)
+    assert.notEqual(checkpointRefs.suspensionCheckpointId, clean.checkpointId)
+    const run = db.prepare(
+      'SELECT status, terminal_reason, continuation_ref_json FROM run_meta WHERE run_id = ?',
+    ).get<{ status: string; terminal_reason: string; continuation_ref_json: string }>(ownerRunId)
+    assert.equal(run?.status, 'interrupted')
+    assert.equal(run?.terminal_reason, 'main_process_restarted')
+    assert.equal(JSON.parse(run?.continuation_ref_json || '{}').suspensionReason, 'owner_crash')
+    assert.equal(
+      db.prepare('SELECT status FROM browser_tasks WHERE id = ?')
+        .get<{ status: string }>(route.browserTaskId)?.status,
+      'paused',
+    )
+    assert.ok(repository.currentOwnerCrashRecovery(parentTaskId))
+  } finally {
+    db.close()
+  }
+})
+
 test('non-done core closeout terminates all browser ledgers without requiring a success seal', async (t) => {
   if (skipIfSqliteUnavailable(t, 'browser-non-done-closeout-native')) return
   const db = openDb()
@@ -449,6 +802,17 @@ test('non-done core closeout terminates all browser ledgers without requiring a 
       agentId: 'butler',
       executionBinding: ownerBinding,
       status: 'running',
+      taskType: 'short_task',
+      budget: {
+        maxIterations: 24,
+        maxToolCalls: 24,
+        maxParallelToolGroups: 5,
+      },
+      continuationRef: {
+        taskId: parentTaskId,
+        resumeKind: 'snapshot',
+        runStatePath: '/tmp/stale-browser-closeout-snapshot.json',
+      },
     }, Date.parse(now))
     db.prepare(
       `INSERT INTO chat_conversations (id, agent, title, created_at, updated_at)
@@ -466,6 +830,13 @@ test('non-done core closeout terminates all browser ledgers without requiring a 
       executionBinding: ownerBinding,
       now,
     })
+    db.prepare(
+      'UPDATE task_projections SET continuation_ref_json = ? WHERE task_id = ?',
+    ).run(JSON.stringify({
+      taskId: parentTaskId,
+      resumeKind: 'snapshot',
+      runStatePath: '/tmp/stale-browser-closeout-snapshot.json',
+    }), parentTaskId)
     const actionIdentity = {
       documentState: 'document' as const,
       tabId: 'tab-browser-non-done-closeout',
@@ -508,21 +879,88 @@ test('non-done core closeout terminates all browser ledgers without requiring a 
       durationMs: 1,
       finalText: '页面状态未完成观察，本轮已停止。',
       conversationId: scopeId,
+      taskType: 'research',
+      module: 'browser',
+      budget: {
+        taskType: 'research',
+        maxIterations: 220,
+        maxToolCalls: 220,
+        maxParallelToolGroups: 5,
+        reservedToolCalls: 0,
+        iterationsUsed: 12,
+        toolCallsUsed: 9,
+        parallelToolGroupsUsed: 0,
+        stepBudget: null,
+        frozen: false,
+        bootstrapBudget: false,
+      },
+      budgetUsagePercent: 5,
+      budgetWarningLevel: 'none',
+      terminalQualityPatch: {
+        proofRefs: [{ kind: 'tool_result', ref: 'partial-browser-evidence' }],
+        checkins: [{ verdict: 'blocked', blockers: ['research_incomplete'] }],
+        criteria: { template: 'research/browser', items: [] },
+      },
       now,
     })
     assert.equal(closeout.value.browserTaskId, route.browserTaskId)
+    const terminalBudget = {
+      taskType: 'research',
+      maxIterations: 220,
+      maxToolCalls: 220,
+      maxParallelToolGroups: 5,
+      reservedToolCalls: 0,
+      iterationsUsed: 12,
+      toolCallsUsed: 9,
+      parallelToolGroupsUsed: 0,
+      stepBudget: null,
+      frozen: false,
+      bootstrapBudget: false,
+    }
     assert.deepEqual(
-      db.prepare('SELECT status FROM run_meta WHERE run_id = ?').get(ownerRunId),
-      { status: 'error' },
+      db.prepare(
+        'SELECT status, task_type, budget_json, continuation_ref_json FROM run_meta WHERE run_id = ?',
+      ).get(ownerRunId),
+      {
+        status: 'error',
+        task_type: 'research',
+        budget_json: JSON.stringify(terminalBudget),
+        continuation_ref_json: null,
+      },
     )
     assert.deepEqual(
-      db.prepare('SELECT status FROM task_projections WHERE task_id = ?').get(parentTaskId),
-      { status: 'failed' },
+      db.prepare(
+        `SELECT status, task_type, module, budget_json, budget_usage_percent,
+                budget_warning_level, continuation_ref_json
+           FROM task_projections WHERE task_id = ?`,
+      ).get(parentTaskId),
+      {
+        status: 'failed',
+        task_type: 'research',
+        module: 'browser',
+        budget_json: JSON.stringify(terminalBudget),
+        budget_usage_percent: 5,
+        budget_warning_level: 'none',
+        continuation_ref_json: null,
+      },
     )
     assert.deepEqual(
       db.prepare('SELECT status FROM browser_tasks WHERE id = ?').get(route.browserTaskId),
       { status: 'failed' },
     )
+    const quality = db.prepare(
+      'SELECT proof_refs_json, checkins_json, criteria_json FROM task_projections WHERE task_id = ?',
+    ).get<{ proof_refs_json: string; checkins_json: string; criteria_json: string }>(parentTaskId)
+    assert.deepEqual(JSON.parse(quality?.proof_refs_json || '[]'), [
+      { kind: 'tool_result', ref: 'partial-browser-evidence' },
+    ])
+    assert.deepEqual(JSON.parse(quality?.checkins_json || '[]'), [
+      { verdict: 'blocked', blockers: ['research_incomplete'] },
+    ])
+    assert.deepEqual(JSON.parse(quality?.criteria_json || '{}'), {
+      template: 'research/browser',
+      items: [],
+    })
   } finally {
     db.close()
   }

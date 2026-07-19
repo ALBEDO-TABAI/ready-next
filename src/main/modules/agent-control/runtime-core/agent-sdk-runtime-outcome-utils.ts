@@ -220,6 +220,7 @@ export function sdkStatusFromTerminalReason(
 export function isCheckpointTerminalReason(reason: TurnTerminalReason): boolean {
   return (
     reason === 'checkpoint_budget' ||
+    reason === 'checkpoint_incomplete' ||
     reason === 'checkpoint_background' ||
     reason === 'checkpoint_user_input' ||
     reason === 'checkpoint_steered' ||

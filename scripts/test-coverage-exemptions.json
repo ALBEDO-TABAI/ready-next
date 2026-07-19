@@ -70,6 +70,18 @@
   ],
   "c4Exempt": [
     {
+      "path": "src/__tests__/browser-terminal-observation-guard.test.ts",
+      "reason": "Browser terminal-candidate coverage runs the model loop with an in-memory MemorySession, injected host evidence, and checkpoint callbacks that fail if reached unexpectedly. It never constructs a repository or opens getDatabase; only the live loop import graph reaches database.ts, so host-Node coverage must remain active.",
+      "since": "2026-07-19",
+      "owner": "browser-long-task-lifecycle"
+    },
+    {
+      "path": "src/__tests__/browser-observation-lifecycle.test.ts",
+      "reason": "Browser observation lifecycle coverage uses pure journal helpers and executeToolCall with a fully injected BrowserController. It records dispatches in memory and never opens getDatabase or a repository; only the tool-executor import graph reaches database.ts, so host-Node coverage must remain active.",
+      "since": "2026-07-19",
+      "owner": "browser-long-task-lifecycle"
+    },
+    {
       "path": "src/__tests__/browser-cdp-page-map.test.ts",
       "reason": "CDP page-map coverage uses a fully injected BrowserController and the in-memory snapshot service. It never opens getDatabase or a repository; only the browser probe import graph reaches database.ts, so host-Node coverage must remain active.",
       "since": "2026-07-19",

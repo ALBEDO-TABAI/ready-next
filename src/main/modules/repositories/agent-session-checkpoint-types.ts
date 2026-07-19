@@ -9,6 +9,10 @@ import type {
 import type { TaskExecutionBinding } from '../../../shared/agent-execution-profile'
 import type { DeliveryStateV1 } from '../../../shared/dynamic-delivery'
 import type { CanonicalAssistantMessageReceipt } from '../../../shared/ipc-contracts/canonical-message'
+import type {
+  BudgetWarningLevel,
+  TaskBudget,
+} from '../agent-control/contracts/run-contracts'
 import type { VerifiedBrowserWorkflowEvidence } from '../browser-engine/browser-workflow-evidence'
 import type {
   AgentSessionCheckpoint,
@@ -109,11 +113,13 @@ export interface CanonicalCoreCloseoutInput {
   finalText: string
   conversationId: string
   taskType?: string | null
-  budget?: Record<string, unknown> | null
+  module?: string | null
+  budget?: TaskBudget | null
+  budgetUsagePercent?: number | null
+  budgetWarningLevel?: BudgetWarningLevel | null
   providerDiagnostics?: Record<string, unknown> | null
   usage?: { inputTokens?: number; outputTokens?: number; totalTokens?: number } | null
   deliveryState?: DeliveryStateV1 | null
-  continuationRef?: Record<string, unknown> | null
   workflowCloseoutSeal?: BrowserWorkflowCloseoutSeal | null
   terminalQualityPatch?: {
     proofRefs: unknown[]

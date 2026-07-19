@@ -48,7 +48,7 @@ const DIRECT_ANSWER_HISTORY_MIGRATION_MARKER =
   'run-finalizer-exempt: migration-077 repairs persisted legacy false failures only'
 const STARTUP_RUN_RECONCILER_REL = 'src/main/modules/app-control/startup-run-reconciler.ts'
 const STARTUP_RECONCILER_EXEMPT_MARKER =
-  'run-finalizer-exempt: startup-recovery-only working->interrupted'
+  'run-finalizer-exempt: startup-recovery-only active-owner->interrupted'
 const MIGRATIONS_REL = 'src/main/modules/migrations.ts'
 const WORKFLOW_STATUS_MIGRATION_MARKER =
   'run-finalizer-exempt: migration-083 normalizes legacy working owners into the running workflow state'
@@ -126,7 +126,7 @@ function sourceForRunMetaRules(rel, text) {
   if (rel !== STARTUP_RUN_RECONCILER_REL || !text.includes(STARTUP_RECONCILER_EXEMPT_MARKER)) {
     return text
   }
-  const startupRecoverySql = /UPDATE\s+run_meta\s+SET\s+status\s*=\s*['"]interrupted['"]\s*,\s*initiator\s*=\s*['"]process_exit['"]\s*,\s*terminal_reason\s*=\s*['"]main_process_restarted['"]\s*,\s*updated_at\s*=\s*\?\s*WHERE\s+status\s*=\s*['"]working['"]/i
+  const startupRecoverySql = /UPDATE\s+run_meta\s+SET\s+status\s*=\s*['"]interrupted['"]\s*,\s*initiator\s*=\s*['"]process_exit['"]\s*,\s*terminal_reason\s*=\s*['"]main_process_restarted['"]\s*,\s*updated_at\s*=\s*\?\s*WHERE\s+status\s+IN\s*\(\s*['"]working['"]\s*,\s*['"]running['"]\s*\)/i
   return text.replace(startupRecoverySql, (match) => match.replace(/[^\r\n]/g, ' '))
 }
 

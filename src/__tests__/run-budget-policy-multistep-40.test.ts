@@ -33,6 +33,12 @@ describe('run-budget-policy multi_step_task budget', () => {
     assert.equal(seed.maxToolCalls, 60)
   })
 
+  it('research uses the long-running emergency ceiling', () => {
+    const seed = createRunBudgetSeed('research')
+    assert.equal(seed.maxIterations, 220)
+    assert.equal(seed.maxToolCalls, 220)
+  })
+
   it('continuation remains at 24 (unchanged)', () => {
     const seed = createRunBudgetSeed('continuation')
     assert.equal(seed.maxIterations, 24)

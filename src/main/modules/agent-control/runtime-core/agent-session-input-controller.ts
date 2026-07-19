@@ -60,6 +60,15 @@ function steeringReceiptId(item: AgentInputItem): string | null {
   return typeof receiptId === 'string' && receiptId ? receiptId : null
 }
 
+function browserVerifierRecoveryFactId(item: AgentInputItem): string | null {
+  const providerData = (item as { providerData?: unknown }).providerData
+  if (!providerData || typeof providerData !== 'object' || Array.isArray(providerData)) return null
+  const fact = (providerData as Record<string, unknown>).readyBrowserVerifierRecovery
+  if (!fact || typeof fact !== 'object' || Array.isArray(fact)) return null
+  const factId = (fact as Record<string, unknown>).factId
+  return typeof factId === 'string' && factId ? factId : null
+}
+
 function observationFactActionSeq(item: AgentInputItem): number | null {
   const providerData = (item as { providerData?: unknown }).providerData
   if (!providerData || typeof providerData !== 'object' || Array.isArray(providerData)) return null
@@ -114,17 +123,23 @@ function browserObservationFactItem(
   } as AgentInputItem
 }
 
-function appendWithoutDuplicateSteering(
+function appendWithoutDuplicateDurableFacts(
   base: readonly AgentInputItem[],
   suffix: readonly AgentInputItem[],
 ): AgentInputItem[] {
   const result = structuredClone(base) as AgentInputItem[]
   const steeringIds = new Set(result.map(steeringReceiptId).filter((id): id is string => Boolean(id)))
+  const verifierFactIds = new Set(result
+    .map(browserVerifierRecoveryFactId)
+    .filter((id): id is string => Boolean(id)))
   for (const item of suffix) {
     const receiptId = steeringReceiptId(item)
+    const verifierFactId = browserVerifierRecoveryFactId(item)
     if (receiptId && steeringIds.has(receiptId)) continue
+    if (verifierFactId && verifierFactIds.has(verifierFactId)) continue
     result.push(structuredClone(item) as AgentInputItem)
     if (receiptId) steeringIds.add(receiptId)
+    if (verifierFactId) verifierFactIds.add(verifierFactId)
   }
   return result
 }
@@ -192,7 +207,8 @@ export class AgentSessionInputController {
   }
 
   async persistSuspension(
-    reason: 'budget' | 'steering' | 'background' | 'foreground' | 'provider_transfer' | 'manual',
+    reason: 'budget' | 'steering' | 'incomplete' | 'background' | 'foreground' | 'provider_transfer' | 'manual',
+    recoveryItems: readonly AgentInputItem[] = [],
   ) {
     const route = this.runtimeContext.browserWorkflowRoute
     if (!route || !this.runtimeContext.activatedCapabilityGroups.includes('browser')) {
@@ -207,13 +223,14 @@ export class AgentSessionInputController {
         compacted: boundary.compacted,
       },
     )
+    const suspensionInput = appendWithoutDuplicateDurableFacts(cleanInput, recoveryItems)
     return this.repository.writeCleanBoundary({
       parentTaskId: this.runtimeContext.taskId,
       browserTaskId: route.browserTaskId,
       ownerRunId: this.runtimeContext.runId,
       role: 'suspension',
       suspensionReason: reason,
-      sourceItems: cleanInput,
+      sourceItems: suspensionInput,
       sdkSourceItems: boundary.sourceItems,
       sdkSourceItemCount: boundary.sourceItems.length,
       sdkSourcePrefixDigest: workflowDigest(boundary.sourceItems),
@@ -332,10 +349,12 @@ export class AgentSessionInputController {
         ? sourceItems.slice(current.finalInput.length)
         : sourceItems.slice(current.sdkSourceItemCount)
       if (context.compacted) {
-        const durableSteeringItems = current.finalInput.filter((item) => steeringReceiptId(item))
-        finalBase = appendWithoutDuplicateSteering(compactedItems, durableSteeringItems)
+        const durableFactItems = current.finalInput.filter((item) => (
+          steeringReceiptId(item) || browserVerifierRecoveryFactId(item)
+        ))
+        finalBase = appendWithoutDuplicateDurableFacts(compactedItems, durableFactItems)
       } else {
-        finalBase = appendWithoutDuplicateSteering(current.finalInput, suffix)
+        finalBase = appendWithoutDuplicateDurableFacts(current.finalInput, suffix)
       }
     }
 

@@ -110,6 +110,215 @@ function unresolvedEvidence() {
   }
 }
 
+function researchEvidence(satisfied: boolean) {
+  const workItems = ['query-a', 'query-b', 'query-c'].map((workItemId, index) => ({
+    workItemId,
+    goalRefs: [],
+    requirement: `collect ${workItemId}`,
+    query: workItemId,
+    url: null,
+    fieldGoals: ['title', 'body'],
+    required: true,
+    evidenceRefIds: satisfied ? [`evidence-${index}`] : [],
+    createdAt: '2026-07-19T00:00:00.000Z',
+  }))
+  return {
+    journal: {
+      nextActionSeq: 1,
+      nextObservationSeq: 1,
+      activeAction: null,
+      settledOutcomes: [],
+      observationReceipts: [],
+    },
+    resources: [],
+    researchState: satisfied ? 'satisfied' as const : 'incomplete' as const,
+    researchAssessment: {
+      taskId: browserTaskId,
+      satisfied,
+      missingWorkItemIds: satisfied ? [] : workItems.map((item) => item.workItemId),
+      workItems,
+      evidenceRefs: [],
+    },
+    unresolvedActions: [],
+  }
+}
+
+test('research-incomplete terminal candidate stays hidden and the same owner continues', async () => {
+  const modelSession = new MemorySession({ sessionId: 'model-browser-research-incomplete' })
+  const buffer = new DeliveryOutputBuffer()
+  const context = runtimeContext()
+  const loopState = state()
+  loopState.liveTaskBudgetRuntime = createTaskBudgetRuntime('research')
+  loopState.runMetaBudgetRuntime = loopState.liveTaskBudgetRuntime
+  const inputs: unknown[] = []
+  let calls = 0
+  let satisfied = false
+  const host = {
+    runAgent: async ({ input, onTextDelta }: { input: unknown; onTextDelta: (text: string) => void }) => {
+      calls += 1
+      inputs.push(input)
+      if (calls === 1) {
+        onTextDelta('only one of three targets is done')
+        return { finalText: 'only one of three targets is done', iterationsUsed: 1 }
+      }
+      satisfied = true
+      onTextDelta('all three targets are done')
+      return { finalText: 'all three targets are done', iterationsUsed: 1 }
+    },
+    readVerifiedBrowserWorkflowEvidence: () => researchEvidence(satisfied),
+  } as unknown as TurnOrchestratorHost
+  const definition = { name: 'browser_read' } as ToolDefinition
+
+  const result = await executeAgentSdkModelToolLoop({
+    state: loopState,
+    host,
+    name: 'butler',
+    runId,
+    taskId,
+    sessionId: 'scope-browser-research-incomplete',
+    pureUserTurnText: 'collect three independent targets',
+    providerContent: 'collect three independent targets',
+    useTextToolBridge: false,
+    toolDefinitions: [definition],
+    allowedToolNames: ['browser_read'],
+    definitionByName: new Map([[definition.name, definition]]),
+    toolBridgeRuntimeContext: context,
+    documentTargetGuard: null,
+    requiresLocalDocumentExcerpt: false,
+    preferCurrentDocumentRead: false,
+    requiresLocalDocumentWrite: false,
+    runHandle: { capturedSession: modelSession } as RunHandle,
+    modelSession,
+    session: {} as AgentSdkSession,
+    abortController: new AbortController(),
+    instructions: 'system',
+    model: 'model',
+    provider: {} as never,
+    sdkTools: [{} as never],
+    contextWindowTokens: 32_000,
+    maxOutputTokens: 4_000,
+    turnTaskType: 'research',
+    requiredCapabilityGroups: ['browser'],
+    usedTools: [],
+    emitOutput: (chunk, type) => {
+      if (type === 'text') buffer.append(chunk)
+    },
+    emitHeartbeat: () => undefined,
+    candidateOutputBuffer: buffer,
+    nativeTextToolBoundaryFlush: { current: null },
+    finishBudgetCheckpointIfNeeded: async () => null,
+    finishBrowserObservationCheckpoint: async () => {
+      throw new Error('research progress should continue in the same run')
+    },
+    finishBrowserIncompleteCheckpoint: async () => {
+      throw new Error('research progress should not checkpoint')
+    },
+    maybeHandleSkillClarificationGuard: async () => null,
+    maybeHandleActionAnnouncementGuard: async () => null,
+    finalizeEarlyReturn: async () => {
+      throw new Error('early finalization should not be used')
+    },
+  })
+
+  assert.equal(result, null)
+  assert.equal(calls, 2)
+  assert.equal(loopState.finalText, 'all three targets are done')
+  assert.equal(buffer.snapshot(), 'all three targets are done')
+  assert.ok(!buffer.snapshot().includes('only one'))
+  assert.match(JSON.stringify(inputs[1]), /query-a/)
+  assert.match(JSON.stringify(inputs[1]), /query-b/)
+  assert.match(JSON.stringify(inputs[1]), /query-c/)
+})
+
+test('unrelated browser activity cannot postpone a stalled research checkpoint', async () => {
+  const modelSession = new MemorySession({ sessionId: 'model-browser-research-stalled' })
+  const buffer = new DeliveryOutputBuffer()
+  const context = runtimeContext()
+  const loopState = state()
+  loopState.liveTaskBudgetRuntime = createTaskBudgetRuntime('research')
+  loopState.runMetaBudgetRuntime = loopState.liveTaskBudgetRuntime
+  let calls = 0
+  let checkpointMessage = ''
+  const checkpointResult = { status: 'checkpoint', terminalReason: 'checkpoint_incomplete' }
+  const host = {
+    runAgent: async () => {
+      calls += 1
+      return { finalText: `stalled candidate ${calls}`, iterationsUsed: 1 }
+    },
+    readVerifiedBrowserWorkflowEvidence: () => {
+      const evidence = researchEvidence(false)
+      return {
+        ...evidence,
+        journal: {
+          ...evidence.journal,
+          settledOutcomes: [{ actionId: `unrelated-action-${calls}` }],
+          observationReceipts: [{ receiptId: `unrelated-observation-${calls}` }],
+        },
+        resources: [{ resourceId: `unrelated-resource-${calls}` }],
+      }
+    },
+  } as unknown as TurnOrchestratorHost
+  const definition = { name: 'browser_read' } as ToolDefinition
+
+  const result = await executeAgentSdkModelToolLoop({
+    state: loopState,
+    host,
+    name: 'butler',
+    runId,
+    taskId,
+    sessionId: 'scope-browser-research-stalled',
+    pureUserTurnText: 'collect three independent targets',
+    providerContent: 'collect three independent targets',
+    useTextToolBridge: false,
+    toolDefinitions: [definition],
+    allowedToolNames: ['browser_read'],
+    definitionByName: new Map([[definition.name, definition]]),
+    toolBridgeRuntimeContext: context,
+    documentTargetGuard: null,
+    requiresLocalDocumentExcerpt: false,
+    preferCurrentDocumentRead: false,
+    requiresLocalDocumentWrite: false,
+    runHandle: { capturedSession: modelSession } as RunHandle,
+    modelSession,
+    session: {} as AgentSdkSession,
+    abortController: new AbortController(),
+    instructions: 'system',
+    model: 'model',
+    provider: {} as never,
+    sdkTools: [{} as never],
+    contextWindowTokens: 32_000,
+    maxOutputTokens: 4_000,
+    turnTaskType: 'research',
+    requiredCapabilityGroups: ['browser'],
+    usedTools: [],
+    emitOutput: (chunk, type) => {
+      if (type === 'text') buffer.append(chunk)
+    },
+    emitHeartbeat: () => undefined,
+    candidateOutputBuffer: buffer,
+    nativeTextToolBoundaryFlush: { current: null },
+    finishBudgetCheckpointIfNeeded: async () => null,
+    finishBrowserObservationCheckpoint: async () => {
+      throw new Error('observation checkpoint is unrelated')
+    },
+    finishBrowserIncompleteCheckpoint: async (message = '') => {
+      checkpointMessage = message
+      return checkpointResult as never
+    },
+    maybeHandleSkillClarificationGuard: async () => null,
+    maybeHandleActionAnnouncementGuard: async () => null,
+    finalizeEarlyReturn: async () => {
+      throw new Error('generic early finalization should not be used')
+    },
+  })
+
+  assert.equal(result, checkpointResult)
+  assert.equal(calls, 3)
+  assert.match(checkpointMessage, /没有新增页面证据/)
+  assert.equal(buffer.snapshot(), '')
+  assert.ok((loopState.liveTaskBudgetRuntime?.usage.iterationsUsed || 0) < 220)
+})
+
 test('terminal candidate stays hidden while the same owner performs one observation closure phase', async () => {
   const modelSession = new MemorySession({ sessionId: 'model-browser-terminal-observation' })
   const buffer = new DeliveryOutputBuffer()
@@ -180,6 +389,9 @@ test('terminal candidate stays hidden while the same owner performs one observat
     finishBudgetCheckpointIfNeeded: async () => null,
     finishBrowserObservationCheckpoint: async () => {
       throw new Error('observation checkpoint should not be needed')
+    },
+    finishBrowserIncompleteCheckpoint: async () => {
+      throw new Error('research checkpoint should not be needed')
     },
     maybeHandleSkillClarificationGuard: async () => null,
     maybeHandleActionAnnouncementGuard: async () => null,
@@ -294,6 +506,9 @@ test('text bridge gets one bounded synthesis turn after the observation result a
     },
     finishBrowserObservationCheckpoint: async () => {
       throw new Error('observation checkpoint should not be needed')
+    },
+    finishBrowserIncompleteCheckpoint: async () => {
+      throw new Error('research checkpoint should not be needed')
     },
     maybeHandleSkillClarificationGuard: async () => null,
     maybeHandleActionAnnouncementGuard: async () => null,

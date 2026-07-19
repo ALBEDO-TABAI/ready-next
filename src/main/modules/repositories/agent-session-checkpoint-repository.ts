@@ -117,10 +117,10 @@ export class AgentSessionCheckpointRepository {
     return this.resume.currentOwnerCrashRecovery(...args)
   }
 
-  settleOwnerLaunchFailure(
-    ...args: Parameters<AgentSessionCheckpointRepository['resume']['settleOwnerLaunchFailure']>
-  ): ReturnType<AgentSessionCheckpointRepository['resume']['settleOwnerLaunchFailure']> {
-    return this.resume.settleOwnerLaunchFailure(...args)
+  settleOwnerFailure(
+    ...args: Parameters<AgentSessionCheckpointRepository['resume']['settleOwnerFailure']>
+  ): ReturnType<AgentSessionCheckpointRepository['resume']['settleOwnerFailure']> {
+    return this.resume.settleOwnerFailure(...args)
   }
 
   resumeSuspendedBrowserWorkflow(

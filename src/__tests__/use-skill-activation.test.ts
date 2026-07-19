@@ -232,7 +232,6 @@ test('use_skill refreshes authorization and enables the selected skill tool in t
     recordToolResult: () => undefined,
     runHandle: {} as never,
     taskBudgetRuntime: null,
-    budgetWarningMessages: [],
   }
   runtimeContext.activateSkillForCurrentRun = (skillId) => {
     if (skillId !== 'ready-human-touch-ppt') return null

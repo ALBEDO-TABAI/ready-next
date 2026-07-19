@@ -27,11 +27,6 @@ import {
 } from '../task-projection/run-budget-policy'
 import type { ToolDefinition } from '../tools-runtime/tool-definition'
 import { defaultToolRegistry } from '../tools-runtime/tool-registry'
-import type { ToolExecutionOutput } from '../tools-runtime/tool-result-types'
-import {
-  createToolExecutionOutput,
-  normalizeToolExecutionOutput
-} from '../tools-runtime/tool-result-types'
 import {
   messageToText,
   parseAttachmentReferences,
@@ -587,40 +582,6 @@ export function taskBudgetDiagnostics(runtime: TaskBudgetRuntime | null): {
     budgetUsagePercent: usagePercent,
     budgetWarningLevel: runtime.warningLevel || getBudgetWarningLevel(usagePercent)
   }
-}
-
-function buildBudgetWarningSteering(level: BudgetWarningLevel): string {
-  if (level === 'warning') {
-    return '预算提醒：工具预算已接近上限。下一步请优先收敛结果，避免展开新分支。'
-  }
-  if (level === 'converge') {
-    return '预算提醒：工具预算已经很紧。除非缺少关键证据，否则请总结当前结果；如必须继续，请说明需要用户确认继续。'
-  }
-  return ''
-}
-
-export function appendBudgetWarningSteering(
-  output: ToolExecutionOutput,
-  runtimeContext: ToolBridgeRuntimeContext
-): ToolExecutionOutput {
-  const nextWarning = runtimeContext.budgetWarningMessages.shift()
-  const steering = nextWarning ? buildBudgetWarningSteering(nextWarning) : ''
-  if (!steering) return output
-  const normalized = normalizeToolExecutionOutput(output)
-  return createToolExecutionOutput([normalized.text, steering].filter(Boolean).join('\n\n'), {
-    shape: normalized.shape,
-    data: {
-      ...(normalized.data && typeof normalized.data === 'object' && !Array.isArray(normalized.data)
-        ? (normalized.data as Record<string, unknown>)
-        : {}),
-      budgetWarningLevel: nextWarning,
-      budgetSteeringInjected: true
-    },
-    projectionPatch: normalized.projectionPatch || undefined,
-    interactionHint: normalized.interactionHint || undefined,
-    framePatch: normalized.framePatch || undefined,
-    contextModifier: normalized.contextModifier || undefined
-  })
 }
 
 export function resolveAgentSdkProviderDiagnostics(params: {

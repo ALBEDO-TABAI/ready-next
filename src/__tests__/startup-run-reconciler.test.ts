@@ -285,7 +285,7 @@ test('startup run reconciler closes stale run, projection, browser, and skill ro
       runStatePath: null,
     })
 
-    const result = reconcileStartupRunsOnStartup({
+    const result = await reconcileStartupRunsOnStartup({
       db,
       now: new Date('2026-06-10T01:00:00.000Z'),
       skillTaskRunRepository: new SkillTaskRunRepository({ getRawDb: () => db as never }),
@@ -399,7 +399,7 @@ test('startup run reconciler preserves terminal run reasons instead of rewriting
       continuationRef: null,
     })
 
-    const result = reconcileStartupRunsOnStartup({
+    const result = await reconcileStartupRunsOnStartup({
       db,
       now: new Date('2026-06-10T01:00:00.000Z'),
       skillTaskRunRepository: new SkillTaskRunRepository({ getRawDb: () => db as never }),

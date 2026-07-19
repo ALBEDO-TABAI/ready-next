@@ -156,6 +156,21 @@ note: >
 
 修正后的同一独立审查者完成复核并给出 `VERDICT: PASS`：文本工具桥的轮次上限闭环、未清 barrier 的持久暂停、空答复/再次调用工具的暂停、同一观察响应后续写入阻断均已成立；没有发现新的 P0/P1。上述额外观察开销维持为非阻断 P2，不改变本轮正确性与可提交结论。
 
+### 0.7 实测长任务提前失败的合同校正（2026-07-19）
+
+真实小红书 18 查询在 normal 与用户所称 Boost 场景中都出现“已推进、随后本轮失败”。两次同形运行的现场真值为：Parent、Browser child 与 `run_meta` 仍处于 active；研究分别只完成 2/18 与 0/2；运行仍沿用 bootstrap `short_task` 的 24/24 容量；模型在 70%/90% 阈值收到“优先收敛、必要时请用户确认继续”的文字提醒；terminal candidate 被 `research_incomplete` 拒绝后，error closeout 又因 `terminalQualityPatch` 没有成功 workflow seal 抛出 `core_closeout_quality_patch_requires_browser_workflow`。因此这不是 normal/Boost 模式差异，也不是单一额度不足，而是容量、候选发布和非成功收口三个生命周期缺口叠加。
+
+本轮采用以下机器可验证合同，不把某个站点、关键词数量或任务文案写进生产分支：
+
+1. bootstrap 预算只是假设，不能成为浏览器长工作流的意外硬上限。最终工具面含 Browser 能力时，bootstrap 获得 220 次的高额应急容量；持久 `browser_research` 状态出现后，运行时按结构真值重绑为 `research`，保留已用量并同步 Parent 投影。normal 与 thorough/Boost 共用这一条路径。
+2. 70%/90% 只保留诊断和 UI 水位，不再把“收敛、总结、请用户确认继续”注入模型。健康长任务靠滚动无进展窗口、上下文压缩和持久检查点继续同一 owner；220 只作为循环、持续伪进展或异常成本的最后熔断，不作为正常分段目标。真正耗尽时才暂停并保留可续跑现场。
+3. terminal candidate 发布前除 observation barrier 外还要读取同一 typed workflow inspection。`research_incomplete` 时丢弃候选、保留同 owner/run/task/child，并把缺失工作项作为系统事实回给模型继续。只要 required work item 覆盖或其绑定证据增加，继续机会随真实进展刷新；无关动作、观察和未绑定资源不刷新窗口。连续候选没有任何持久进展时才进入 `checkpoint_incomplete`，明确表示“已保存且已暂停”，不得冒充后台仍在运行、报失败或循环到 220。
+4. 模型负责把用户独立要求的目标声明成独立 required work item；通用 Browser discipline 明确“一目标一项、不可用一个汇总项替代多个独立目标、一个证据只证明其真实覆盖内容”。代码不解析站点、语言、关键词列表或固定字段来代替语义判断；原始请求覆盖仍由 fresh CompletionVerifier 复核。
+5. completion 边界再次读到 `research_incomplete`，或 fresh verifier 发现还需新的 Browser 证据时，必须保存为可续跑 checkpoint，不得转成 `blocked_tool_error`。verifier 的结构化 summary/gaps 与被拒候选 digest 必须随 suspension checkpoint 进入下一 Owner 输入，不能丢成一条泛化暂停文案；最终接受后从公共会话提交中移除，不能成为后续新任务的陈旧指令。这条竞态兜底不替代同轮继续，只保证任何残余缺口都不会再产生“本轮失败 + 三本账仍 running”或无信息重复暂停。
+6. `terminalQualityPatch` 是 Parent 质量账，不是 Browser 成功 seal；error/cancel/interrupted 可以在没有 success seal 时随核心事务原子写入。只有 `done` Browser closeout 仍必须同时持有 seal、fresh verifier accept receipt 和匹配 digest。非成功路径必须一次结束 Parent、child 与 run，不能递归进入同一个失败 guard。
+7. 验收使用累计证据：新增预算/候选/核心事务单测；同形多目标研究用 3 个独立目标验证 normal 与 thorough 共路、候选不提前发布、进度后继续、无进展才 checkpoint；再跑受影响 browser orchestration、stability、dynamic delivery、native、typecheck 与真实 Electron。已通过且未受影响的 36+20 矩阵不重数。
+8. 启动恢复必须先处理仍绑定 Browser workflow 且持有当前 clean checkpoint 的遗留 Owner，再做通用 stale-run 清扫：`working | running` 统一识别为上次进程遗留，三本账原子转为 owner-crash 可续跑暂停；没有有效 clean checkpoint 的剩余行才进入通用 interrupted/rerun 兜底。迁移把 `working` 归一为 `running` 后，reconciler 不得继续只查旧词汇，也不得把有检查点的 Parent 标成不可继续。
+
 ## 1. 第二轮现场证据与根因图
 
 ### 1.1 输入链根因
@@ -746,7 +761,7 @@ Gate：matrix每个旧route/writer真实计数为0；任何任务只有一个Par
 - 在 question/confirmation/foreground/takeover 各自的 suspension intent 提交后、标准 tool result 入 session 前杀进程；重启只从最后干净 base checkpoint 恢复 waiting/fence，不伪造 result、不解锁、不重发页面动作；
 - 在 active Browser run 中发送普通补充、问题答案、目标替换和明确停止；前三者必须先持久 canonical message/steering receipt，在 runConfirmed/runCoordinator/beginRun 前完成 Parent CAS且不做语义分类，generation/pending-tool/preempt 计数均为 0；下一 clean boundary 必须从最新 committed final input 合并同 Runner 的 SDK cursor suffix、compact，再把新消息与 digest 原样追加到 provider wire input，checkpoint 与 sealed bundle出现同一 digest并同事务写 contentCheckpointId。连续三次 model iteration 中让 N/N+1 都调用工具，N+1/N+2 仍保留消息语义/digest且 receipt 只消费一次。另让 latent Browser 在首个 Runner 最后 filter 后激活，验证第二、第三个 host.runAgent/text-bridge Runner 从同一 owner-local view获得原请求和前序 call/result，激活时恰好生成一个完整 checkpoint；激活后再验证每个新 Runner 从最新 checkpoint显式重建 cache，共享 MemorySession写入为0、无重复或 mismatch。cursor prefix/seed 被篡改时 provider调用为0且 current owner明确 failed、不等待。当前响应先 terminal 时必须 checkpoint_steered/resume 后交给新 owner；模型读到目标替换后可用稳定 goalId 的 typed mutation 更新同一 Parent，但不能启动第二 owner，只有停止按钮取消；覆盖 ingress 后/CAS 前、CAS 后/boundary 前、checkpoint commit 后/provider 前和 terminal 竞态；
 - 丢弃 Renderer/TaskEventBridge push 并重启，旧 narration runner 启动数仍为 0，Parent/message readback 恢复同一 owner/终稿；
-- checkpoint_budget、checkpoint_steered、checkpoint_background、foreground_required、owner_crash 和共享 terminal reason 其余成员逐一走唯一 exit transition；
+- checkpoint_budget、checkpoint_steered、checkpoint_incomplete、checkpoint_background、foreground_required、owner_crash 和共享 terminal reason 其余成员逐一走唯一 exit transition；
 - 第二 SQLite writer 分别在重试预算内、预算外持锁，并在等待中触发 stop/takeover；验证 Main 不长时间阻塞、短锁只提交一次、长锁零部分写、停止可抢先；
 - canonical core message rollback、同 id/digest 重试和 post-commit FTS/recall/reference-hint 失败/重试分别验证：核心失败无消息/终态，派生失败不回滚且 startup/read-repair 后可回读；
 - Dynamic Delivery accept 后在每个核心 closeout SQL 边界注错：committed MemorySession、scope snapshot、chat row 与 Renderer均无terminal candidate；成功commit后才merge，内存merge失败由canonical row重建；

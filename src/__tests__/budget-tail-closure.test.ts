@@ -64,7 +64,7 @@ test('L-f1: continuation resume and rebind preserve consumed usage (no double bu
   assert.ok(pct > 0, 'usage percent reflects carried consumption')
 })
 
-test('L-f3: crossing the warning threshold injects converge steering into a tool result', async () => {
+test('L-f3: crossing a warning threshold stays diagnostic and does not mutate tool results', async () => {
   const invokeReturns: string[] = []
   const runtime = new AgentSdkRuntime({
     loadAIConfig: () => ({ ok: true, config: fakeConfig, reason: 'present' }),
@@ -87,10 +87,8 @@ test('L-f3: crossing the warning threshold injects converge steering into a tool
     taskBudgetRuntime: createTaskBudgetRuntime('direct_answer'),
   })
   assert.equal(result.success, true)
-  assert.ok(
-    invokeReturns.some((text) => text.includes('budgetSteeringInjected')),
-    `expected steering marker in some tool result, got tails: ${invokeReturns.map((r) => r.slice(-80)).join(' | ')}`,
-  )
+  assert.ok(invokeReturns.every((text) => !text.includes('budgetSteeringInjected')))
+  assert.equal(result.projectionTruth?.projectionPatch?.budgetWarningLevel, 'warning')
 })
 
 test('L-f4/L-f5: run_meta budget carries the live taskType and rolling checkpoint persists mid-run', async () => {

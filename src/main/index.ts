@@ -996,7 +996,7 @@ app.whenReady().then(async () => {
     return
   }
   try {
-    reconcileStartupRunsOnStartup()
+    await reconcileStartupRunsOnStartup()
   } catch (error) {
     console.warn('[startup-run-reconciler] failed:', error instanceof Error ? error.message : String(error))
   }

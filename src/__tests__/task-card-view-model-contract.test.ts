@@ -455,3 +455,35 @@ test('budget exhausted pause uses the same terminal checkpoint truth for task ca
   })
   assert.equal(isStreamingScopeRunState(run), false)
 })
+
+test('incomplete checkpoint is paused and resumable without pretending a background worker exists', () => {
+  const run = {
+    scopeId: 'scope-incomplete-truth',
+    agent: 'assistant',
+    requestId: 'run-incomplete-truth',
+    phase: 'checkpoint' as const,
+    terminalReason: 'checkpoint_incomplete' as const,
+    status: 'recoverable_paused' as const,
+    interactionState: 'suspended' as const,
+    waitingFor: 'none' as const,
+    blockedReason: '任务进度已保存，可以继续。',
+    taskContinuation: {
+      kind: 'browser_checkpoint',
+      checkpointId: 'checkpoint-incomplete-truth',
+      browserTaskId: 'browser-incomplete-truth',
+      suspensionReason: 'incomplete',
+    },
+    canResume: true,
+    resumableActions: ['continue', 'cancel'] as const,
+    toolTrace: [],
+    startedAt: '2026-07-19T00:00:00.000Z',
+    updatedAt: '2026-07-19T00:00:01.000Z',
+  }
+
+  assert.deepEqual(deriveTaskCardRuntimeState(run), {
+    visualState: 'waiting_input',
+    statusLabel: '等待继续',
+    actionSet: ['continue', 'cancel'],
+  })
+  assert.equal(isStreamingScopeRunState(run), false)
+})

@@ -185,6 +185,7 @@ export type BrowserCheckpointSuspensionReason =
   | 'browser_permission'
   | 'budget'
   | 'steering'
+  | 'incomplete'
   | 'background'
   | 'foreground'
   | 'capability'
@@ -208,6 +209,7 @@ export function browserWakeKindForSuspensionReason(
     case 'capability': return 'capability_revision'
     case 'config': return 'config_revision'
     case 'budget':
+    case 'incomplete':
     case 'manual':
       return 'user_continue'
     default: {

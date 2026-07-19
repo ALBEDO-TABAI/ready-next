@@ -1,7 +1,6 @@
 import type { MemorySession } from '@openai/agents'
 import type { AIModelConfig } from '../../../../shared/ai-providers'
 import type {
-  BudgetWarningLevel,
   RunBudgetSeed,
   RunBudgetUsage,
   RunMessage,
@@ -215,7 +214,6 @@ export interface ToolBridgeRuntimeContext {
   runHandle: RunHandle
   browserTurnLease?: BrowserTurnLease | null
   taskBudgetRuntime: TaskBudgetRuntime | null
-  budgetWarningMessages: BudgetWarningLevel[]
   hostControl?: 'handoff_takeover' | null
   toolExecutionChain?: Promise<void>
 }

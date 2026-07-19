@@ -49,6 +49,7 @@ test('shipped discipline is complete, current, and not silently clipped', () => 
   assert.equal(asset.version, String(BROWSER_DISCIPLINE_MAJOR))
   assert.ok(rendered.includes('source target provenance'))
   assert.ok(rendered.includes('observation receipt/resource'))
+  assert.ok(rendered.includes('不能用一个汇总项代替多目标覆盖'))
   assert.ok(rendered.includes('0-999'))
   for (const removed of [
     'evaluate_source',

@@ -9,7 +9,12 @@ import {
   type createTaskProofSink,
 } from '../quality/proof-collector'
 import { logAgentMetric } from '../metrics'
-import { consumeToolCallBudget } from '../task-projection/run-budget-policy'
+import {
+  consumeToolCallBudget,
+  ensureLongRunningTaskBudgetCapacity,
+  LONG_RUNNING_TASK_EMERGENCY_CAP,
+  rebindTaskBudgetRuntime,
+} from '../task-projection/run-budget-policy'
 import { normalizeToolExecutionOutput } from '../tools-runtime/tool-result-types'
 import { applyContextModifier } from '../tools-runtime/tool-runtime'
 import {
@@ -41,7 +46,8 @@ export function createAgentSdkToolResultRecorder(input: {
   projectionPatches: Record<string, unknown>[]
   toolArgsByName: Map<string, Record<string, unknown>[]>
   taskProofSink: ReturnType<typeof createTaskProofSink> | null
-  host: Pick<TurnOrchestratorHost, 'learnSiteCardFromToolFailure'>
+  host: Pick<TurnOrchestratorHost,
+    'learnSiteCardFromToolFailure' | 'readVerifiedBrowserWorkflowEvidence'>
   runId: string
   taskId: string
   noteProgress: () => void
@@ -64,9 +70,7 @@ export function createAgentSdkToolResultRecorder(input: {
         if (
           nextWarning !== 'none'
           && nextWarning !== previousWarning
-          && !runtimeContext.budgetWarningMessages.includes(nextWarning)
         ) {
-          runtimeContext.budgetWarningMessages.push(nextWarning)
           input.projectionPatches.push({ budgetWarningLevel: nextWarning })
         }
       }
@@ -94,6 +98,37 @@ export function createAgentSdkToolResultRecorder(input: {
       input.host.learnSiteCardFromToolFailure(toolName, argsQueue?.shift(), normalized)
       const structuredData = readStructuredResultRecord(normalized)
       recordBrowserWorkflowToolResult(runtimeContext, toolName, structuredData)
+      const route = runtimeContext.browserWorkflowRoute
+      const currentBudget = runtimeContext.taskBudgetRuntime
+      if (
+        route
+        && currentBudget
+        && (
+          currentBudget.taskType !== 'research'
+          || currentBudget.bootstrapBudget
+          || currentBudget.budget.maxIterations < LONG_RUNNING_TASK_EMERGENCY_CAP
+          || currentBudget.budget.maxToolCalls < LONG_RUNNING_TASK_EMERGENCY_CAP
+        )
+      ) {
+        const evidence = input.host.readVerifiedBrowserWorkflowEvidence(route.browserTaskId)
+        if (evidence?.researchAssessment || currentBudget.bootstrapBudget) {
+          const durableTaskType = evidence?.researchAssessment ? 'research' : currentBudget.taskType
+          const rebound = durableTaskType === currentBudget.taskType
+            ? ensureLongRunningTaskBudgetCapacity(currentBudget)
+            : rebindTaskBudgetRuntime(currentBudget, durableTaskType, { bootstrapBudget: false })
+          const nextRuntime = rebound.bootstrapBudget
+            ? { ...rebound, bootstrapBudget: false }
+            : rebound
+          runtimeContext.taskBudgetRuntime = nextRuntime
+          state.runMetaBudgetRuntime = nextRuntime
+          input.setLiveTaskBudgetRuntime(nextRuntime)
+          input.projectionPatches.push({
+            taskType: durableTaskType,
+            module: 'browser',
+            budgetWarningLevel: nextRuntime.warningLevel,
+          })
+        }
+      }
 
       const documentToolFailed = isDocumentToolFailure(normalized)
       const sourceReadFailed = isLocalDocumentSourceReadFailure(toolName, normalized.text)

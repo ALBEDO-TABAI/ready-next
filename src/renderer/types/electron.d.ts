@@ -459,6 +459,10 @@ interface ScopeRunTaskStepData {
 }
 
 interface ScopeRunTaskContinuationData {
+  kind?: string | null
+  checkpointId?: string | null
+  browserTaskId?: string | null
+  suspensionReason?: string | null
   taskId?: string | null
   executionId?: string | null
   stepId?: string | null
@@ -811,6 +815,7 @@ interface ActiveChildRunSummaryData {
 type ScopeRunTerminalReasonData =
   | 'done'
   | 'checkpoint_budget'
+  | 'checkpoint_incomplete'
   | 'checkpoint_background'
   | 'checkpoint_user_input'
   | 'blocked_config'

@@ -11,7 +11,7 @@
  *      shared/task-types.ts.
  *
  * Without (1), creating a research run would fall through to the
- * 'short_task' preset (24/24) instead of the intended 60/60 ceiling.
+ * 'short_task' preset (24/24) instead of the intended long-running ceiling.
  */
 'use strict'
 

@@ -8,14 +8,12 @@ import {
 import { TOOL_ADMISSION_ERROR_KINDS } from '../contracts/error-kinds'
 import type { ExecutionTurnResult, RunMessage, TaskBudgetRuntime, TaskType } from '../contracts/run-contracts'
 import { logAgentMetric } from '../metrics'
-import { consumeIterationBudget } from '../task-projection/run-budget-policy'
 import {
   drainBackgroundTaskTerminalReminders,
   prependSystemReminderInput,
   registerBackgroundTaskTerminalReminder
 } from '../system-reminders/background-task-terminal-reminder'
 import { registerCriteriaSelfCheckReminder } from '../system-reminders/criteria-self-check-reminder'
-import { buildBrowserObservationRequiredInput } from '../system-reminders/browser-observation-required-reminder'
 import { createSystemReminderRegistry } from '../system-reminders/system-reminder-registry'
 import type { ToolDefinition } from '../tools-runtime/tool-definition'
 import {
@@ -39,12 +37,11 @@ import {
   isAbortError,
   recoverLooseXmlToolCallText,
   shouldSuppressVisibleTextOnToolCall,
-  throwIfAbortSignalAborted
+  throwIfAbortSignalAborted,
+  waitForAbortableRetryDelay
 } from './agent-sdk-execution-utils'
 import {
-  ROLLING_BUDGET_CHECKPOINT_TOOL_INTERVAL,
   removeAlreadyEmittedNativeText,
-  resolveAgentSdkMaxTurns,
   splitNativeTextBufferForSafeFlush
 } from './agent-sdk-foundation-utils'
 import { log } from './agent-sdk-provider'
@@ -64,7 +61,11 @@ import type {
 import type { TurnTerminalReason } from './turn-frame'
 import { addRunUsage } from './run-usage-accumulator'
 import { isHandoffTakeoverToolOutput } from '../agents/handoff-control'
-import { syncBrowserObservationGapsFromJournal } from './agent-sdk-browser-turn-control'
+import { createBrowserCandidateClosureController } from './agent-sdk-browser-candidate-closure'
+import {
+  createModelLoopBudgetController,
+  createRollingBudgetCheckpointWriter,
+} from './agent-sdk-model-loop-budget'
 import {
   ensureResearchSearchResultDelivered,
   recoverResearchSearchDeliveryAfterTimeout
@@ -137,6 +138,7 @@ export interface AgentSdkModelToolLoopContext {
   nativeTextToolBoundaryFlush: { current: (() => void) | null }
   finishBudgetCheckpointIfNeeded: () => Promise<ExecutionTurnResult | null>
   finishBrowserObservationCheckpoint: (message?: string) => Promise<ExecutionTurnResult>
+  finishBrowserIncompleteCheckpoint: (message?: string) => Promise<ExecutionTurnResult>
   maybeHandleSkillClarificationGuard: (
     text: string
   ) => Promise<'continue' | ExecutionTurnResult | null>
@@ -198,34 +200,22 @@ export async function executeAgentSdkModelToolLoop(
     nativeTextToolBoundaryFlush,
     finishBudgetCheckpointIfNeeded,
     finishBrowserObservationCheckpoint,
+    finishBrowserIncompleteCheckpoint,
     maybeHandleSkillClarificationGuard,
     maybeHandleActionAnnouncementGuard,
     finalizeEarlyReturn
   } = ctx
-  const currentAgentSdkMaxTurns = (): number =>
-    resolveAgentSdkMaxTurns({
-      message: providerContent,
-      requestEnvelope: effectiveExecutionOptions?.requestEnvelope,
-      requiresLocalDocumentWrite,
-      taskBudgetRuntime: state.liveTaskBudgetRuntime
-    })
-  const consumeModelIterations = (amount: number): number => {
-    if (!state.liveTaskBudgetRuntime) return 0
-    const remaining = Math.max(
-      0,
-      state.liveTaskBudgetRuntime.budget.maxIterations -
-        state.liveTaskBudgetRuntime.usage.iterationsUsed
-    )
-    const count = Math.min(remaining, Math.max(0, Math.round(amount || 0)))
-    let nextBudgetRuntime = state.liveTaskBudgetRuntime
-    for (let index = 0; index < count; index += 1) {
-      nextBudgetRuntime = consumeIterationBudget(nextBudgetRuntime)
-    }
-    state.liveTaskBudgetRuntime = nextBudgetRuntime
-    state.runMetaBudgetRuntime = nextBudgetRuntime
-    toolBridgeRuntimeContext.taskBudgetRuntime = nextBudgetRuntime
-    return count
-  }
+  const modelLoopBudget = createModelLoopBudgetController({
+    providerContent,
+    requestEnvelope: effectiveExecutionOptions?.requestEnvelope,
+    requiresLocalDocumentWrite,
+    getRuntime: () => state.liveTaskBudgetRuntime,
+    setRuntime: (runtime) => {
+      state.liveTaskBudgetRuntime = runtime
+      state.runMetaBudgetRuntime = runtime
+      toolBridgeRuntimeContext.taskBudgetRuntime = runtime
+    },
+  })
   let documentTargetRepairAttempts = 0
   let documentTargetContinuationRepairAttempts = 0
   let documentTargetContentRepairAttempts = 0
@@ -237,26 +227,34 @@ export async function executeAgentSdkModelToolLoop(
     bufferNativeTextUntilParsed && allowedToolNames.includes('skill_ask_user')
   const shouldHoldNativeTextUntilVerified = (): boolean =>
     holdNativeTextUntilFinal || Boolean(toolBridgeRuntimeContext.browserWorkflowRoute)
-  const bridgeTurnLimit = useTextToolBridge ? currentAgentSdkMaxTurns() : 3
-  const browserObservationClosure = {
-    phase: 'idle' as
-      | 'idle'
-      | 'observation_pending'
-      | 'observation_running'
-      | 'synthesis_pending'
-      | 'synthesis_running',
-  }
+  const bridgeTurnLimit = useTextToolBridge ? modelLoopBudget.maxTurns() : 3
+  const browserCandidateClosure = createBrowserCandidateClosureController({
+    state,
+    host,
+    runtimeContext: toolBridgeRuntimeContext,
+    emitHeartbeat,
+    candidateOutputBuffer,
+    finishObservationCheckpoint: finishBrowserObservationCheckpoint,
+    finishIncompleteCheckpoint: finishBrowserIncompleteCheckpoint,
+  })
+  const writeRollingBudgetCheckpointIfDue = createRollingBudgetCheckpointWriter({
+    state,
+    host,
+    agentName: name,
+    sessionId,
+    runId,
+    taskId,
+    runHandle,
+    usedTools,
+    requiredCapabilityGroups,
+    requiredToolNames: allowedToolNames,
+    lastUserMessage: pureUserTurnText,
+    checkpointSnapshotProvider,
+    onError: (error) => log(`rolling budget checkpoint failed: ${errorMessage(error)}`),
+  })
   let bridgeTurn = 0
-  while (
-    bridgeTurn < bridgeTurnLimit
-    || browserObservationClosure.phase === 'observation_pending'
-    || browserObservationClosure.phase === 'synthesis_pending'
-  ) {
-    const observationClosureTurn = browserObservationClosure.phase === 'observation_pending'
-    const observationSynthesisTurn = browserObservationClosure.phase === 'synthesis_pending'
-    if (observationClosureTurn) browserObservationClosure.phase = 'observation_running'
-    if (observationSynthesisTurn) browserObservationClosure.phase = 'synthesis_running'
-    toolBridgeRuntimeContext.browserObservationClosureActive = observationClosureTurn
+  while (bridgeTurn < bridgeTurnLimit || browserCandidateClosure.hasPendingTurn()) {
+    const { observationClosureTurn, observationSynthesisTurn } = browserCandidateClosure.beginTurn()
     bridgeTurn += 1
     let streamedText = ''
     let nativeTextBuffer = ''
@@ -300,40 +298,6 @@ export async function executeAgentSdkModelToolLoop(
     let providerRetryAttempts = 0
     let runResult: ReadyAgentSdkRunResult | null = null
     let successfulRunCandidateStart = candidateOutputBuffer?.snapshot() ?? ''
-    const maybeWriteRollingBudgetCheckpoint = async (): Promise<void> => {
-      if (
-        !state.liveTaskBudgetRuntime ||
-        state.liveTaskBudgetRuntime.warningLevel === 'exhausted' ||
-        state.liveTaskBudgetRuntime.usage.toolCallsUsed - state.lastRollingCheckpointToolCalls <
-          ROLLING_BUDGET_CHECKPOINT_TOOL_INTERVAL
-      ) {
-        return
-      }
-      state.lastRollingCheckpointToolCalls = state.liveTaskBudgetRuntime.usage.toolCallsUsed
-      try {
-        const rolling = await host.runLifecycle.writeBudgetCheckpointState({
-          agentName: name,
-          sessionId,
-          runId,
-          taskId,
-          taskBudgetRuntime: state.liveTaskBudgetRuntime,
-          runHandle,
-          usedTools,
-          requiredCapabilityGroups,
-          requiredToolNames: allowedToolNames,
-          lastUserMessage: pureUserTurnText,
-          resumeKind: 'snapshot',
-          sessionSnapshotOverride: await checkpointSnapshotProvider?.() ?? null
-        })
-        state.runMetaContinuationRef =
-          rolling.projectionPatch.taskContinuation &&
-          typeof rolling.projectionPatch.taskContinuation === 'object'
-            ? (rolling.projectionPatch.taskContinuation as Record<string, unknown>)
-            : state.runMetaContinuationRef
-      } catch (rollingError) {
-        log(`rolling budget checkpoint failed: ${errorMessage(rollingError)}`)
-      }
-    }
     while (true) {
       streamedText = ''
       nativeTextBuffer = ''
@@ -361,7 +325,7 @@ export async function executeAgentSdkModelToolLoop(
         // before a model call is clean: all prior tools settled), so a
         // mid-run crash loses at most N batches instead of everything
         // written only at exhaustion. Failure is loud, never blocking.
-        await maybeWriteRollingBudgetCheckpoint()
+        await writeRollingBudgetCheckpointIfDue()
         const terminalReminderTexts = drainBackgroundTaskTerminalReminders(sessionId)
         if (state.sessionRestoreNotice) {
           terminalReminderTexts.unshift(state.sessionRestoreNotice)
@@ -411,7 +375,7 @@ export async function executeAgentSdkModelToolLoop(
             ? (useTextToolBridge ? 1 : 2)
             : observationSynthesisTurn
               ? 1
-              : currentAgentSdkMaxTurns(),
+              : modelLoopBudget.maxTurns(),
           contextWindowTokens,
           maxOutputTokens,
           callModelInputFilter,
@@ -435,8 +399,8 @@ export async function executeAgentSdkModelToolLoop(
           session.lastUsageTokens = runResult.usage.totalTokens
         }
         state.runMetaUsage = addRunUsage(state.runMetaUsage, runResult.usage)
-        consumeModelIterations(Math.max(1, Math.round(runResult.iterationsUsed || 1)))
-        await maybeWriteRollingBudgetCheckpoint()
+        modelLoopBudget.consumeIterations(Math.max(1, Math.round(runResult.iterationsUsed || 1)))
+        await writeRollingBudgetCheckpointIfDue()
         successfulRunCandidateStart = candidateTextAtAttemptStart
         if (toolBridgeRuntimeContext.hostControl === 'handoff_takeover') {
           return finalizeEarlyReturn({ status: 'checkpoint', terminalReason: 'manual_suspend', finalText: '' })
@@ -484,7 +448,7 @@ export async function executeAgentSdkModelToolLoop(
           error && typeof error === 'object'
             ? Number((error as { iterationsUsed?: unknown }).iterationsUsed || 0)
             : 0
-        if (consumeModelIterations(errorIterations) > 0) {
+        if (modelLoopBudget.consumeIterations(errorIterations) > 0) {
           const checkpointResult = await finishBudgetCheckpointIfNeeded()
           if (checkpointResult) return checkpointResult
         }
@@ -563,27 +527,7 @@ export async function executeAgentSdkModelToolLoop(
             log(
               `provider ${classified.kind} retry ${providerRetryAttempts}/${recovery.maxAttempts} in ${delayMs}ms`
             )
-            // Review-team D5: the wait must yield to abort immediately,
-            // not after the full backoff window.
-            await new Promise<void>((resolve) => {
-              const timer = setTimeout(resolve, delayMs)
-              abortController.signal.addEventListener(
-                'abort',
-                () => {
-                  clearTimeout(timer)
-                  resolve()
-                },
-                { once: true }
-              )
-            })
-            if (abortController.signal.aborted) {
-              const abortError =
-                abortController.signal.reason instanceof Error
-                  ? abortController.signal.reason
-                  : new Error('aborted')
-              abortError.name = 'AbortError'
-              throw abortError
-            }
+            await waitForAbortableRetryDelay(delayMs, abortController.signal)
             if (!abortController.signal.aborted) continue
           }
         }
@@ -592,54 +536,6 @@ export async function executeAgentSdkModelToolLoop(
     }
     if (!runResult) throw new Error('SDK run did not produce a result.')
     const modelText = runResult.finalText || streamedText
-    const refreshBrowserObservationBarrier = (): boolean => {
-      const route = toolBridgeRuntimeContext.browserWorkflowRoute
-      if (!route) return false
-      const evidence = host.readVerifiedBrowserWorkflowEvidence(route.browserTaskId)
-      if (!evidence) throw new Error('browser_observation_evidence_unavailable')
-      syncBrowserObservationGapsFromJournal(
-        toolBridgeRuntimeContext,
-        evidence.unresolvedActions.map((entry) => ({
-          actionId: entry.actionId,
-          actionSeq: entry.actionSeq,
-          outcome: entry.outcome as unknown as Record<string, unknown>,
-        })),
-      )
-      return Boolean(toolBridgeRuntimeContext.browserObservationBarrier)
-    }
-    const continueAfterBrowserObservationToolResults = async (
-      bridgeResults: ToolBridgeResultItem[],
-      visibleText: string,
-    ): Promise<'continue' | ExecutionTurnResult | null> => {
-      if (browserObservationClosure.phase !== 'observation_running') return null
-      state.nextInput = buildTextToolResultMessage(bridgeResults)
-      state.finalText = visibleText
-      toolBridgeRuntimeContext.browserObservationClosureActive = false
-      if (refreshBrowserObservationBarrier()) return finishBrowserObservationCheckpoint()
-      browserObservationClosure.phase = 'synthesis_pending'
-      return 'continue'
-    }
-    const finishBrowserObservationSynthesisCheckpoint = () =>
-      finishBrowserObservationCheckpoint(
-        '页面状态已经核对，但兼容接口没有形成最终答复。我已保存现场，继续时不会重复之前的动作。',
-      )
-    const guardBrowserTerminalCandidate = async (): Promise<
-      'continue' | ExecutionTurnResult | null
-    > => {
-      if (!toolBridgeRuntimeContext.browserWorkflowRoute) return null
-      if (!refreshBrowserObservationBarrier()) return null
-      candidateOutputBuffer?.replace(successfulRunCandidateStart)
-      state.finalText = ''
-      if (browserObservationClosure.phase === 'idle') {
-        browserObservationClosure.phase = 'observation_pending'
-        state.nextInput = buildBrowserObservationRequiredInput(
-          toolBridgeRuntimeContext.browserObservationGaps,
-        )
-        emitHeartbeat('正在核对刚才的页面变化…')
-        return 'continue'
-      }
-      return finishBrowserObservationCheckpoint()
-    }
     const nativeMapCriticalClose = !useTextToolBridge
       ? (toolBridgeRuntimeContext.nativeMapCriticalClose ?? null)
       : null
@@ -667,7 +563,7 @@ export async function executeAgentSdkModelToolLoop(
         leakedToolCall = recoverLooseXmlToolCallText(modelText)
       }
       if (leakedToolCall.toolCalls.length > 0) {
-        if (observationSynthesisTurn) return finishBrowserObservationSynthesisCheckpoint()
+        if (observationSynthesisTurn) return browserCandidateClosure.finishObservationSynthesisCheckpoint()
         const visibleText = visibleNativeTextAfterFlush(leakedToolCall.visibleText)
         if (visibleText && !shouldSuppressVisibleTextOnToolCall(visibleText)) {
           emitOutput(visibleText, 'text')
@@ -711,7 +607,7 @@ export async function executeAgentSdkModelToolLoop(
           }
         }
         {
-          const observationClosureResult = await continueAfterBrowserObservationToolResults(
+          const observationClosureResult = await browserCandidateClosure.continueAfterObservationToolResults(
             bridgeResults,
             leakedToolCall.visibleText,
           )
@@ -756,7 +652,9 @@ export async function executeAgentSdkModelToolLoop(
         continue
       }
       {
-        const browserTerminalGuard = await guardBrowserTerminalCandidate()
+        const browserTerminalGuard = await browserCandidateClosure.guardTerminalCandidate(
+          successfulRunCandidateStart,
+        )
         if (browserTerminalGuard === 'continue') continue
         if (browserTerminalGuard) return browserTerminalGuard
       }
@@ -765,7 +663,7 @@ export async function executeAgentSdkModelToolLoop(
         toolBridgeRuntimeContext.latestResearchSearchDelivery,
       )
       if (observationSynthesisTurn && !state.finalText.trim()) {
-        return finishBrowserObservationSynthesisCheckpoint()
+        return browserCandidateClosure.finishObservationSynthesisCheckpoint()
       }
       {
         const skillClarificationResult = await maybeHandleSkillClarificationGuard(state.finalText)
@@ -836,7 +734,9 @@ export async function executeAgentSdkModelToolLoop(
     const parsed = parseTextToolBridgeResponse(modelText)
     if (parsed.toolCalls.length === 0) {
       {
-        const browserTerminalGuard = await guardBrowserTerminalCandidate()
+        const browserTerminalGuard = await browserCandidateClosure.guardTerminalCandidate(
+          successfulRunCandidateStart,
+        )
         if (browserTerminalGuard === 'continue') continue
         if (browserTerminalGuard) return browserTerminalGuard
       }
@@ -845,7 +745,7 @@ export async function executeAgentSdkModelToolLoop(
         toolBridgeRuntimeContext.latestResearchSearchDelivery,
       )
       if (observationSynthesisTurn && !state.finalText.trim()) {
-        return finishBrowserObservationSynthesisCheckpoint()
+        return browserCandidateClosure.finishObservationSynthesisCheckpoint()
       }
       {
         const skillClarificationResult = await maybeHandleSkillClarificationGuard(state.finalText)
@@ -900,7 +800,7 @@ export async function executeAgentSdkModelToolLoop(
       break
     }
 
-    if (observationSynthesisTurn) return finishBrowserObservationSynthesisCheckpoint()
+    if (observationSynthesisTurn) return browserCandidateClosure.finishObservationSynthesisCheckpoint()
     if (parsed.visibleText && !shouldSuppressVisibleTextOnToolCall(parsed.visibleText)) {
       emitOutput(parsed.visibleText, 'text')
     }
@@ -944,7 +844,7 @@ export async function executeAgentSdkModelToolLoop(
       }
     }
     {
-      const observationClosureResult = await continueAfterBrowserObservationToolResults(
+      const observationClosureResult = await browserCandidateClosure.continueAfterObservationToolResults(
         bridgeResults,
         parsed.visibleText,
       )
@@ -989,6 +889,6 @@ export async function executeAgentSdkModelToolLoop(
   }
 
   throwIfAbortSignalAborted(abortController.signal)
-  toolBridgeRuntimeContext.browserObservationClosureActive = false
+  browserCandidateClosure.clear()
   return null
 }

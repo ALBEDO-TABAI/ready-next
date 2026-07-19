@@ -796,6 +796,7 @@ export function diagnoseAgentPanelSnapshot(snapshot: AgentPanelSnapshot): AgentP
   if (activeRun?.terminalReason && activeRun.terminalReason !== 'done') {
     const recoverableCheckpoint = activeRun.terminalReason === 'checkpoint_background'
       || activeRun.terminalReason === 'checkpoint_budget'
+      || activeRun.terminalReason === 'checkpoint_incomplete'
       || activeRun.terminalReason === 'checkpoint_user_input'
       || activeRun.phase === 'checkpoint'
       || (Boolean(activeRun.waitingFor) && activeRun.waitingFor !== 'none')

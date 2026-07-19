@@ -165,8 +165,8 @@ test('RunCoordinator seeds research runs with the research budget when the trigg
     taskType: 'research',
     bootstrapBudget: false,
     budget: {
-      maxIterations: 60,
-      maxToolCalls: 60,
+      maxIterations: 220,
+      maxToolCalls: 220,
     },
   })
 })
@@ -414,6 +414,64 @@ test('RunCoordinator maps terminalReason checkpoint_budget to checkpoint outcome
   assert.equal(finalEvent?.terminalReason, 'checkpoint_budget')
   assert.equal(outcomes[0]?.success, false)
   assert.equal(outcomes[0]?.lifecyclePhase, 'checkpoint')
+})
+
+test('RunCoordinator preserves an incomplete Browser checkpoint as paused and resumable', async () => {
+  const events: ScopeRunEventPayload[] = []
+  const coordinator = new RunCoordinator({
+    promptAssembly: {
+      buildForScopedRun: async () => ({
+        systemPrompt: 'system prompt',
+        bootstrapMessages: [],
+        memoryRefs: [],
+        triggerHits: [],
+        contextBudget: { totalChars: 0, l0Chars: 0, l1Chars: 0, l2Chars: 0, droppedRefs: [] },
+      }),
+      applyToMessage: (message) => message,
+      recordRunOutcome: () => {},
+    },
+    executeAndCollect: async () => ({
+      success: true,
+      finalText: '任务进度已保存，可以继续。',
+      cancelled: false,
+      usedTools: ['browser_read'],
+      taskType: 'research',
+      terminalReason: 'checkpoint_incomplete',
+      projectionTruth: {
+        projectionPatch: {
+          interactionState: 'suspended',
+          waitingFor: 'none',
+          blockedReason: '任务进度已保存，可以继续。',
+          resumableActions: ['continue', 'cancel'],
+          continuationRef: {
+            kind: 'browser_checkpoint',
+            checkpointId: 'checkpoint-incomplete-1',
+            browserTaskId: 'browser-incomplete-1',
+            suspensionReason: 'incomplete',
+          },
+        },
+        transcriptEvents: [],
+      },
+    }),
+    emitScopeRunEvent: (payload) => events.push(payload),
+    reflectOnConversation: async () => null,
+  })
+
+  const result = await coordinator.runScoped({
+    scope: createScope(),
+    message: '继续完成网页研究',
+    requestId: 'req-incomplete-checkpoint',
+    coordinators: [],
+  })
+
+  const finalEvent = events[events.length - 1]
+  assert.equal(result.success, true)
+  assert.equal(finalEvent?.phase, 'checkpoint')
+  assert.equal(finalEvent?.terminalReason, 'checkpoint_incomplete')
+  assert.equal(finalEvent?.interactionState, 'suspended')
+  assert.equal(finalEvent?.waitingFor, 'none')
+  assert.deepEqual(finalEvent?.resumableActions, ['continue', 'cancel'])
+  assert.equal(finalEvent?.taskContinuation?.checkpointId, 'checkpoint-incomplete-1')
 })
 
 test('RunCoordinator memory reflection does not convert a paused background skill task to done', async () => {

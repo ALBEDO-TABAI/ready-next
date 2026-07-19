@@ -12,6 +12,7 @@ export function resolveTerminalProjectionInteractionState(
     reason === 'blocked_tool_error'
     || reason === 'browser_transaction_unconfirmed'
     || reason === 'checkpoint_budget'
+    || reason === 'checkpoint_incomplete'
     || reason === 'checkpoint_background'
     || reason === 'manual_suspend'
   ) {
@@ -37,6 +38,7 @@ export function resolveTerminalProjectionStatus(
 ): TaskProjectionRecord['status'] | null {
   if (!reason) return null
   if (reason === 'done') return 'completed'
+  if (reason === 'checkpoint_incomplete') return 'recoverable_paused'
   if (reason === 'adjudication_degraded') {
     if (phase === 'done') return 'completed'
     if (phase === 'error') return 'failed'

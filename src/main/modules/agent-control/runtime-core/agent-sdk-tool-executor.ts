@@ -58,7 +58,6 @@ import type { SidecarManager } from '../sidecar-manager'
 import type { AgentControlRuntime } from './runtime'
 import {
   DOCUMENT_TARGET_MUTATION_TOOL_NAMES,
-  appendBudgetWarningSteering,
   authorizedPrimitiveToolNames,
   documentToolMutatedContent,
   errorMessage,
@@ -703,8 +702,7 @@ export class AgentSdkToolExecutor {
       this.buildExecutorContext(runtimeContext)
     )
     runtimeContext.recordToolResult(definition.name, output)
-    const outputWithSteering = appendBudgetWarningSteering(output, runtimeContext)
-    const normalized = normalizeToolExecutionOutput(outputWithSteering)
+    const normalized = normalizeToolExecutionOutput(output)
     const resultTrace = formatToolResultTrace(definition.name, normalized)
     runtimeContext.emitOutput(resultTrace, 'tool_result', normalized.projectionPatch || null)
     this.publishSdkToolEvent({
@@ -715,7 +713,7 @@ export class AgentSdkToolExecutor {
       detail: buildToolResultDetail(normalized),
       projectionPatch: normalized.projectionPatch
     })
-    return outputWithSteering
+    return output
   }
 
   private rejectToolWhenBudgetExhausted(
@@ -925,17 +923,16 @@ export class AgentSdkToolExecutor {
         }
       )
       runtimeContext.recordToolResult(definition.name, output)
-      const outputWithSteering = appendBudgetWarningSteering(output, runtimeContext)
-      const resultTrace = formatToolResultTrace(definition.name, outputWithSteering)
+      const resultTrace = formatToolResultTrace(definition.name, output)
       runtimeContext.emitOutput(resultTrace, 'tool_result')
       this.publishSdkToolEvent({
         runtimeContext,
         definition,
         kind: 'result',
         text: resultTrace,
-        detail: buildToolResultDetail(outputWithSteering)
+        detail: buildToolResultDetail(output)
       })
-      return outputWithSteering
+      return output
     }
     const guard = runtimeContext.documentTargetGuard
     if (guard && definition.name === 'document_new_tab') {
@@ -996,10 +993,9 @@ export class AgentSdkToolExecutor {
       : null
     if (preservationBlocker) {
       runtimeContext.recordToolResult(definition.name, preservationBlocker)
-      const blockerWithSteering = appendBudgetWarningSteering(preservationBlocker, runtimeContext)
       const resultTrace = formatToolResultTrace(
         definition.name,
-        normalizeToolExecutionOutput(blockerWithSteering)
+        normalizeToolExecutionOutput(preservationBlocker)
       )
       runtimeContext.emitOutput(resultTrace, 'tool_result')
       this.publishSdkToolEvent({
@@ -1007,9 +1003,9 @@ export class AgentSdkToolExecutor {
         definition,
         kind: 'result',
         text: resultTrace,
-        detail: buildToolResultDetail(blockerWithSteering)
+        detail: buildToolResultDetail(preservationBlocker)
       })
-      return blockerWithSteering
+      return preservationBlocker
     }
     runtimeContext.emitToolAction(definition.name, effectiveArgs)
     let output = definition.name === 'use_browser'
@@ -1023,9 +1019,8 @@ export class AgentSdkToolExecutor {
       output = this.activateSkillForSameRun(output, runtimeContext)
     }
     runtimeContext.recordToolResult(definition.name, output)
-    const outputWithSteering = appendBudgetWarningSteering(output, runtimeContext)
-    const normalized = normalizeToolExecutionOutput(outputWithSteering)
-    if (isHandoffTakeoverToolOutput(outputWithSteering)) {
+    const normalized = normalizeToolExecutionOutput(output)
+    if (isHandoffTakeoverToolOutput(output)) {
       runtimeContext.hostControl = 'handoff_takeover'
     }
     if (
@@ -1056,7 +1051,7 @@ export class AgentSdkToolExecutor {
       const saveBlocker = await this.ensureExplicitDocumentTargetSaved(runtimeContext)
       if (saveBlocker) return saveBlocker
     }
-    return outputWithSteering
+    return output
   }
 
   private publishSdkToolEvent(params: {

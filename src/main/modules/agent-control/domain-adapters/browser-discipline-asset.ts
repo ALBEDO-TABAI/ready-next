@@ -3,7 +3,7 @@ import type { ToolDefinition } from '../tools-runtime/tool-definition'
 import { PromptAssetLoader } from '../prompt-assets/loader'
 import { promptAssetRoots } from '../prompt-assets/roots'
 
-export const BROWSER_DISCIPLINE_MAJOR = 5
+export const BROWSER_DISCIPLINE_MAJOR = 6
 export const MAX_BROWSER_TEXT_ACTIVATION_CHARS = 64_000
 
 export interface BrowserDisciplineBundle {

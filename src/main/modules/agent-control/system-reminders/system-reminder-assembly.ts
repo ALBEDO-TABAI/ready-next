@@ -34,6 +34,7 @@ const DEFAULT_CONFLICTS: Record<ReminderTopic, ReadonlyArray<ReminderTopic>> = {
   'skill-shell-consent': [],
   'tool-capability-conflict': [],
   'browser-observation-required': [],
+  'browser-research-incomplete': [],
 }
 
 export function composeSystemReminder(

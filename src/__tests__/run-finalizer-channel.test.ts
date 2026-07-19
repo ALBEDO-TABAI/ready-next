@@ -187,6 +187,29 @@ describe('finalizeRunOutcome', () => {
     }])
   })
 
+  test('checkpoint_incomplete closes as resumable only with a durable checkpoint handle', async () => {
+    const { metrics, deps } = createMetricSpy()
+
+    await finalizeRunOutcome({
+      kind: 'checkpoint',
+      runId: 'run-incomplete-checkpoint',
+      continuationHandle: 'checkpoint-incomplete-1',
+      terminalReason: 'checkpoint_incomplete',
+      durationMs: 500,
+      toolCallsUsed: 4,
+      initiator: 'incomplete',
+    }, deps)
+
+    assert.deepEqual(metrics, [{
+      runId: 'run-incomplete-checkpoint',
+      terminalReason: 'checkpoint_incomplete',
+      initiator: 'incomplete',
+      toolCallsUsed: 4,
+      durationMs: 500,
+      taskType: null,
+    }])
+  })
+
   test('budget checkpoint path with a null or empty handle rejects and writes degraded metric', async () => {
     for (const continuationHandle of [null, '']) {
       const { metrics, deps } = createMetricSpy()

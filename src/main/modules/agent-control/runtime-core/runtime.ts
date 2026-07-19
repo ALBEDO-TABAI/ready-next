@@ -2367,9 +2367,10 @@ export class AgentControlRuntime extends EventEmitter {
     let ownerCommitted = false
     const settleLaunchFailure = async (error: unknown): Promise<void> => {
       if (!ownerCommitted) return
-      await this.agentSessionCheckpoints.settleOwnerLaunchFailure({
+      await this.agentSessionCheckpoints.settleOwnerFailure({
         parentTaskId: projection.taskId,
         failedOwnerRunId: newOwnerRunId,
+        terminalReason: 'owner_launch_failed',
         error: error instanceof Error ? error.message : String(error),
       })
     }

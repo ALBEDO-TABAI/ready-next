@@ -7,6 +7,7 @@ import {
   SkillTaskRunRepository,
   type SkillTaskRunStartupReconciliationResult
 } from '../repositories/skill-task-run-repository'
+import { AgentSessionCheckpointRepository } from '../repositories/agent-session-checkpoint-repository'
 
 interface StartupRunReconcilerDb {
   prepare(sql: string): {
@@ -32,6 +33,7 @@ export interface StartupRunReconcilerOptions {
   db?: StartupRunReconcilerDb | null
   now?: Date
   skillTaskRunRepository?: Pick<SkillTaskRunRepository, 'reconcileRunningRowsOnStartup'>
+  agentSessionCheckpointRepository?: Pick<AgentSessionCheckpointRepository, 'settleOwnerFailure'>
   skillStaleAfterMs?: number
   logMetric?: (name: string, payload: Record<string, unknown>) => void
 }
@@ -47,6 +49,11 @@ interface BrowserTaskStartupRow {
   id: string
   checkpoint_json: string | null
   result_json: string | null
+}
+
+interface BrowserWorkflowOwnerStartupRow {
+  task_id: string
+  run_id: string
 }
 
 function changed(result: unknown): number {
@@ -76,7 +83,7 @@ function resultWithRerunMarker(raw: string | null): string {
 }
 
 function reconcileRunMeta(db: StartupRunReconcilerDb, nowMs: number): number {
-  // run-finalizer-exempt: startup-recovery-only working->interrupted
+  // run-finalizer-exempt: startup-recovery-only active-owner->interrupted
   return changed(
     db
       .prepare(
@@ -87,11 +94,55 @@ function reconcileRunMeta(db: StartupRunReconcilerDb, nowMs: number): number {
       initiator = 'process_exit',
       terminal_reason = 'main_process_restarted',
       updated_at = ?
-    WHERE status = 'working'
+    WHERE status IN ('working', 'running')
   `
       )
       .run(nowMs)
   )
+}
+
+async function reconcileBrowserWorkflowOwners(
+  db: StartupRunReconcilerDb,
+  repository: Pick<AgentSessionCheckpointRepository, 'settleOwnerFailure'>,
+  nowIso: string,
+): Promise<{ count: number; failures: Array<{ taskId: string; reason: string }> }> {
+  const rows = db.prepare(`
+    SELECT DISTINCT p.task_id, p.run_id
+      FROM task_projections p
+      JOIN run_meta rm ON rm.run_id = p.run_id AND rm.task_id = p.task_id
+      JOIN browser_tasks b
+        ON b.parent_task_id = p.task_id AND b.kind = 'browser_workflow'
+      JOIN agent_session_checkpoints c
+        ON c.parent_task_id = p.task_id
+       AND c.browser_task_id = b.id
+       AND c.owner_run_id = p.run_id
+       AND c.role = 'clean_base'
+     WHERE p.status = 'running'
+       AND rm.status = 'running'
+       AND b.status = 'running'
+     ORDER BY p.updated_at ASC
+  `).all<BrowserWorkflowOwnerStartupRow>()
+
+  let count = 0
+  const failures: Array<{ taskId: string; reason: string }> = []
+  for (const row of rows) {
+    try {
+      const receipt = await repository.settleOwnerFailure({
+        parentTaskId: row.task_id,
+        failedOwnerRunId: row.run_id,
+        terminalReason: 'main_process_restarted',
+        error: 'main_process_restarted',
+        now: nowIso,
+      })
+      if (receipt) count += 1
+    } catch (error) {
+      failures.push({
+        taskId: row.task_id,
+        reason: error instanceof Error ? error.message : String(error),
+      })
+    }
+  }
+  return { count, failures }
 }
 
 function terminalProjectionTarget(row: TaskProjectionStartupRow): {
@@ -287,9 +338,9 @@ function reconcileSkillRuns(
   }
 }
 
-export function reconcileStartupRunsOnStartup(
+export async function reconcileStartupRunsOnStartup(
   options: StartupRunReconcilerOptions = {}
-): StartupRunReconcileResult {
+): Promise<StartupRunReconcileResult> {
   const now = options.now || new Date()
   const db = options.db || getDatabase().getRawDb()
   if (!db) throw new Error('Database not available')
@@ -297,9 +348,17 @@ export function reconcileStartupRunsOnStartup(
   const skillTaskRunRepository =
     options.skillTaskRunRepository ||
     new SkillTaskRunRepository({ getRawDb: () => db as DatabaseConnection })
-  const runMeta = reconcileRunMeta(db, now.getTime())
-  const taskProjections = reconcileTaskProjections(db, now.toISOString())
-  const browserTasks = reconcileBrowserTasks(db, now.toISOString())
+  const agentSessionCheckpointRepository =
+    options.agentSessionCheckpointRepository ||
+    new AgentSessionCheckpointRepository({ getRawDb: () => db as DatabaseConnection })
+  const browserWorkflowOwners = await reconcileBrowserWorkflowOwners(
+    db,
+    agentSessionCheckpointRepository,
+    now.toISOString(),
+  )
+  const runMeta = browserWorkflowOwners.count + reconcileRunMeta(db, now.getTime())
+  const taskProjections = browserWorkflowOwners.count + reconcileTaskProjections(db, now.toISOString())
+  const browserTasks = browserWorkflowOwners.count + reconcileBrowserTasks(db, now.toISOString())
   const skillRuns = reconcileSkillRuns(skillTaskRunRepository, now, options.skillStaleAfterMs)
   const reconcileCount: StartupRunReconcileCount = {
     runMeta,
@@ -311,6 +370,7 @@ export function reconcileStartupRunsOnStartup(
   const emitMetric = options.logMetric || logAgentMetric
   emitMetric('startup_run_reconciler.reconciled', {
     reconcileCount,
+    browserWorkflowOwnerRecoveryFailures: browserWorkflowOwners.failures,
     skillRunDetails: skillRuns.result
   })
 

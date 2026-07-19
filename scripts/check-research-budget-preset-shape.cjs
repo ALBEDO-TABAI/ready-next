@@ -3,10 +3,10 @@
  * Stage R W1.6 gate.
  *
  * run-budget-policy.ts TASK_TYPE_BUDGET_PRESETS.research must be exactly:
- *   research: { maxIterations: 60, maxToolCalls: 60 }
+ *   research: { maxIterations: 220, maxToolCalls: 220 }
  *
- * 60/60 matches media_task; smaller numbers would throttle deep-research
- * pipelines mid-run.
+ * 220/220 is an emergency ceiling. Healthy research should finish naturally
+ * or stop on a no-progress guard, not be segmented by a small call counter.
  */
 'use strict'
 
@@ -24,11 +24,11 @@ try {
   process.exit(1)
 }
 
-// Match: research: { maxIterations: 60, maxToolCalls: 60 }
+// Match: research: { maxIterations: 220, maxToolCalls: 220 }
 // Whitespace tolerant.
-const re = /research\s*:\s*\{\s*maxIterations\s*:\s*60\s*,\s*maxToolCalls\s*:\s*60\s*,?\s*\}/
+const re = /research\s*:\s*\{\s*maxIterations\s*:\s*220\s*,\s*maxToolCalls\s*:\s*220\s*,?\s*\}/
 if (!re.test(src)) {
-  console.error('[check-research-budget-preset-shape] FAIL: TASK_TYPE_BUDGET_PRESETS.research must be exactly `{ maxIterations: 60, maxToolCalls: 60 }`')
+  console.error('[check-research-budget-preset-shape] FAIL: TASK_TYPE_BUDGET_PRESETS.research must be exactly `{ maxIterations: 220, maxToolCalls: 220 }`')
   process.exit(1)
 }
 

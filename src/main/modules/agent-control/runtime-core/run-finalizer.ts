@@ -25,11 +25,19 @@ import {
   isRunMetaTerminalStatus,
   type RunMetaTerminalStatus
 } from '../../../../shared/run-meta-terminal-status'
-import type { TaskBudgetRuntime, TaskProjectionRecord } from '../contracts/run-contracts'
+import type {
+  BudgetWarningLevel,
+  TaskBudget,
+  TaskBudgetRuntime,
+  TaskProjectionRecord,
+} from '../contracts/run-contracts'
 import { canResumeAsUserPoint } from '../contracts/resume-handle'
 import type { DeliveryStateV1 } from '../../../../shared/dynamic-delivery'
 import { assertDeliveryState } from '../../../../shared/dynamic-delivery'
-import { rebindTaskBudgetRuntime } from '../task-projection/run-budget-policy'
+import {
+  getBudgetUsagePercent,
+  rebindTaskBudgetRuntime,
+} from '../task-projection/run-budget-policy'
 import type { CanonicalAssistantMessageReceipt } from '../../../../shared/ipc-contracts/canonical-message'
 import type {
   BrowserWorkflowCloseoutSeal,
@@ -151,11 +159,13 @@ export interface RunFinalizerDeps {
     finalText: string
     conversationId: string
     taskType?: string | null
-    budget?: Record<string, unknown> | null
+    module?: string | null
+    budget?: TaskBudget | null
+    budgetUsagePercent?: number | null
+    budgetWarningLevel?: BudgetWarningLevel | null
     providerDiagnostics?: Record<string, unknown> | null
     usage?: RunOutcomeUsage | null
     deliveryState?: DeliveryStateV1 | null
-    continuationRef?: Record<string, unknown> | null
     workflowCloseoutSeal?: BrowserWorkflowCloseoutSeal | null
     terminalQualityPatch?: TerminalAdjudicationDecision['terminalQualityPatch'] | null
     completionVerifierReceipt?: BrowserWorkflowCompletionVerifierReceipt | null
@@ -774,15 +784,17 @@ async function writeTerminalOutcome(
       finalText: outcome.finalText,
       conversationId: outcome.scopeId,
       taskType: facts.taskType,
-      budget: outcome.taskBudgetRuntime
-        ? { ...outcome.taskBudgetRuntime.budget, ...outcome.taskBudgetRuntime.usage }
+      module: facts.module,
+      budget: terminalTaskBudgetSnapshot(outcome.taskBudgetRuntime),
+      budgetUsagePercent: outcome.taskBudgetRuntime
+        ? getBudgetUsagePercent(outcome.taskBudgetRuntime)
         : null,
+      budgetWarningLevel: outcome.taskBudgetRuntime?.warningLevel ?? null,
       providerDiagnostics: outcome.providerDiagnostics
         ? { ...outcome.providerDiagnostics }
         : null,
       usage: outcome.usage || null,
       deliveryState,
-      continuationRef: continuationFromProjectionPatch(outcome.projectionPatch),
       workflowCloseoutSeal: outcome.workflowCloseoutSeal || null,
       terminalQualityPatch: adjudication?.terminalQualityPatch || null,
       completionVerifierReceipt,
@@ -871,6 +883,18 @@ function continuationFromProjectionPatch(
   if (continuationRef && typeof continuationRef === 'object')
     return continuationRef as Record<string, unknown>
   return null
+}
+
+function terminalTaskBudgetSnapshot(runtime: TaskBudgetRuntime | null | undefined): TaskBudget | null {
+  if (!runtime) return null
+  return {
+    taskType: runtime.taskType,
+    ...runtime.budget,
+    ...runtime.usage,
+    stepBudget: runtime.stepBudget ? { ...runtime.stepBudget } : null,
+    frozen: runtime.frozen,
+    bootstrapBudget: runtime.bootstrapBudget,
+  }
 }
 
 /**

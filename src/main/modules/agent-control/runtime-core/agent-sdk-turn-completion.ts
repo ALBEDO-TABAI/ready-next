@@ -42,6 +42,10 @@ import { materializeDeliveryArtifacts } from './dynamic-delivery/delivery-artifa
 import type { CanonicalAssistantMessageReceipt } from '../../../../shared/ipc-contracts/canonical-message'
 import { workflowDigest } from '../../repositories/browser-workflow-codec'
 import { buildBrowserWorkflowVerifierEvidenceView } from '../../browser-engine/browser-workflow-verifier-view'
+import {
+  buildBrowserVerifierRecoveryItem,
+  withoutBrowserVerifierRecoveryItems,
+} from './agent-sdk-browser-suspension'
 
 function canonicalAssistantSessionItem(content: string): AgentInputItem {
   return {
@@ -72,6 +76,8 @@ export interface AgentSdkTurnCompletionState {
   lastDocumentSaveSuccessText: string | null
   liveTaskBudgetRuntime: TaskBudgetRuntime | null
   newDocumentNeedsSave: boolean
+  runMetaBudgetRuntime: TaskBudgetRuntime | null
+  runMetaContinuationRef: Record<string, unknown> | null
   runMetaProviderDiagnostics: AgentSdkProviderDiagnostics | null
   runMetaUsage: ReadyAgentSdkRunResult['usage'] | null
 }
@@ -119,6 +125,10 @@ export interface AgentSdkTurnCompletionContext {
   emitStatusForRun: (status: string, terminalReason?: TurnTerminalReason | null) => void
   finishBudgetCheckpointIfNeeded: () => Promise<ExecutionTurnResult | null>
   finishSteeringCheckpointIfNeeded: () => Promise<ExecutionTurnResult | null>
+  finishBrowserIncompleteCheckpoint: (
+    message?: string,
+    recoveryItems?: AgentInputItem[],
+  ) => Promise<ExecutionTurnResult>
   finalizeEarlyReturn: (params: {
     status: 'done' | 'checkpoint' | 'error' | 'cancelled'
     terminalReason: TurnTerminalReason
@@ -169,6 +179,7 @@ export async function finalizeAgentSdkPreparedTurnResult(
     emitStatusForRun,
     finishBudgetCheckpointIfNeeded,
     finishSteeringCheckpointIfNeeded,
+    finishBrowserIncompleteCheckpoint,
     finalizeEarlyReturn,
     buildResult
   } = ctx
@@ -180,6 +191,8 @@ export async function finalizeAgentSdkPreparedTurnResult(
     lastDocumentSaveSuccessText,
     liveTaskBudgetRuntime,
     newDocumentNeedsSave,
+    runMetaBudgetRuntime,
+    runMetaContinuationRef,
     runMetaProviderDiagnostics,
     runMetaUsage
   } = state
@@ -379,6 +392,9 @@ export async function finalizeAgentSdkPreparedTurnResult(
           : browserVerifierInspection.inspection.state === 'research_incomplete'
             ? '网页调研证据还未齐备，本轮未发布候选结果。'
             : '浏览器任务路由已丢失，本轮未发布候选结果。'
+      if (browserVerifierInspection.inspection.state !== 'absent') {
+        return finishBrowserIncompleteCheckpoint(message)
+      }
       return finalizeEarlyReturn({
         status: 'error',
         terminalReason: 'blocked_tool_error',
@@ -473,6 +489,14 @@ export async function finalizeAgentSdkPreparedTurnResult(
       })
       runMetaUsage = mergeRunUsage(runMetaUsage as never, verification.verificationUsage) as ReadyAgentSdkRunResult['usage']
       if (verification.verdict.verdict !== 'accept' || verification.acceptedText === null) {
+        if (browserVerifierBundle) {
+          return finishBrowserIncompleteCheckpoint('', [buildBrowserVerifierRecoveryItem({
+            rejectedCandidateDigest: workflowDigest(verification.sealed.candidateText),
+            verdict: verification.verdict.verdict,
+            summary: verification.verdict.summary,
+            gaps: verification.verdict.gaps,
+          })])
+        }
         const message = verification.verdict.verdict === 'repair'
           ? '独立复核发现仍需修正的缺口，本轮未发布候选结果。'
           : '独立复核未通过，本轮未发布候选结果。'
@@ -480,7 +504,7 @@ export async function finalizeAgentSdkPreparedTurnResult(
           status: 'error',
           terminalReason: 'blocked_tool_error',
           error: message,
-          finalText: message
+          finalText: message,
         })
       }
       finalText = verification.acceptedText
@@ -523,12 +547,12 @@ export async function finalizeAgentSdkPreparedTurnResult(
       ) as ReadyAgentSdkRunResult['usage']
       if (verification.verdict.verdict !== 'accept') {
         const message = '独立复核未通过，本轮未发布候选结果。'
-        return finalizeEarlyReturn({
-          status: 'error',
-          terminalReason: 'blocked_tool_error',
-          error: message,
-          finalText: message,
-        })
+        return finishBrowserIncompleteCheckpoint(message, [buildBrowserVerifierRecoveryItem({
+          rejectedCandidateDigest: workflowDigest(verification.sealed.candidateText),
+          verdict: verification.verdict.verdict,
+          summary: verification.verdict.summary,
+          gaps: verification.verdict.gaps,
+        })])
       }
       workflowVerifierAcceptance = {
         version: 1,
@@ -558,6 +582,7 @@ export async function finalizeAgentSdkPreparedTurnResult(
       finalProjectionPatch,
       usedTools.length
     )
+    runMetaBudgetRuntime = liveTaskBudgetRuntime
     throwIfAbortSignalAborted(abortSignal)
     if (dynamicDeliveryCandidatePending) {
       verifiedCandidateSnapshot = host.dynamicDelivery.inspectVerifiedCandidate(runId)
@@ -639,6 +664,7 @@ export async function finalizeAgentSdkPreparedTurnResult(
             ...verifiedCandidateSnapshot.acceptedDelta,
           ]
         : await committedOwnerSession.getItems()
+      acceptedTruthItems = withoutBrowserVerifierRecoveryItems(acceptedTruthItems)
       if (!hasCanonicalAssistantItem(acceptedTruthItems, finalText)) {
         acceptedTruthItems = [
           ...acceptedTruthItems,
@@ -680,6 +706,7 @@ export async function finalizeAgentSdkPreparedTurnResult(
       )
     }
     const finalizedTerminalReason = finalizedDone.terminalReason as TurnTerminalReason
+    runMetaContinuationRef = null
     // S5-1: persist the scope session snapshot at clean run close so a
     // main-process restart can lazily restore the conversation instead of
     // silently forgetting it. Failure is loud (log), never blocking.
@@ -718,6 +745,8 @@ export async function finalizeAgentSdkPreparedTurnResult(
       lastDocumentSaveSuccessText,
       liveTaskBudgetRuntime,
       newDocumentNeedsSave,
+      runMetaBudgetRuntime,
+      runMetaContinuationRef,
       runMetaProviderDiagnostics,
       runMetaUsage
     })
