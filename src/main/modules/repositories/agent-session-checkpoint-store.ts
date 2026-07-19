@@ -5,6 +5,7 @@ import type {
   BrowserCheckpointSuspensionReason,
   BrowserConfirmationSuspensionRequest,
 } from '../../../shared/browser-workflow-control'
+import { browserHumanTakeoverBlockedReason } from '../../../shared/browser-workflow-control'
 import { BROWSER_OPERATION_IDS } from '../../../shared/browser-capability-registry'
 import { assertAgentInputToolPairIntegrity } from '../agent-control/compaction/compact-agent-input'
 import { readVerifiedBrowserWorkflowEvidence } from '../browser-engine/browser-workflow-evidence'
@@ -351,7 +352,7 @@ export class AgentSessionCheckpointStoreRepository {
               ? 'confirmation'
               : 'none',
             suspensionReason === 'human_takeover'
-              ? 'human_takeover'
+              ? browserHumanTakeoverBlockedReason(parent.humanTakeoverRef?.userPrompt)
               : suspensionReason === 'browser_power_confirmation'
                 ? 'browser_power_confirmation_checkpoint'
                 : suspensionReason === 'browser_permission'

@@ -84,6 +84,11 @@ test('compound action contracts reject calls before their handlers run', () => {
   assert.equal(resolveBrowserToolInvocation('browser_upload', {
     target_id: 'upload-target', attachment_ids: ['attachment-1', 'attachment-2'],
   }, 'model').ok, true)
+  assert.equal(
+    resolveBrowserToolInvocation('browser_type', { target_id: 'search', text: 'query', submit: true }, 'model').ok,
+    false,
+    'text entry and submission must remain separate public actions',
+  )
 })
 
 test('old public names are rejected and model-declared effects are stripped', () => {

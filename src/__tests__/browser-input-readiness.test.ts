@@ -25,25 +25,24 @@ function controllerFor(
 
 const readyDocument = { ready: true, focused: true, activeElementEditable: true }
 
-test('trusted pointer and free keyboard require a visible active foreground host', async () => {
-  for (const transport of ['trusted_pointer', 'trusted_keyboard'] as const) {
-    const ready = await browserInputReadiness(
-      controllerFor('visible', { foreground: true, active: true }),
-      'tab-a',
-      transport,
-      readyDocument,
-    )
-    assert.equal(ready.ready, true)
+test('pointer needs a visible foreground host while target-bound CDP keyboard does not', async () => {
+  const pointer = await browserInputReadiness(
+    controllerFor('parked', { foreground: true, active: true }),
+    'tab-a',
+    'trusted_pointer',
+    readyDocument,
+  )
+  assert.equal(pointer.ready, false)
+  assert.equal(pointer.reason, 'host_not_presented')
 
-    const parked = await browserInputReadiness(
-      controllerFor('parked', { foreground: true, active: true }),
-      'tab-a',
-      transport,
-      readyDocument,
-    )
-    assert.equal(parked.ready, false)
-    assert.equal(parked.reason, 'host_not_presented')
-  }
+  const keyboard = await browserInputReadiness(
+    controllerFor('hidden', { foreground: false, active: false }),
+    'tab-a',
+    'trusted_keyboard',
+    { ready: true, focused: false, activeElementEditable: true },
+  )
+  assert.equal(keyboard.ready, true)
+  assert.equal(keyboard.hostPresentation, 'hidden')
 })
 
 test('direct text accepts a focused editable document on an attached parked host', async () => {
@@ -107,14 +106,14 @@ test('direct text requires an exact editable focus owner but not prior document 
   assert.equal(nonEditable.reason, 'editable_focus_required')
 })
 
-test('environment readiness can preflight compound transports before any page write', () => {
+test('environment readiness keeps hidden target-bound keyboard available to compound actions', () => {
   const hiddenKeyboard = browserInputEnvironmentReadiness(
-    controllerFor('hidden', { foreground: true, active: true }),
+    controllerFor('hidden'),
     'tab-a',
     'trusted_keyboard',
   )
-  assert.equal(hiddenKeyboard.ready, false)
-  assert.equal(hiddenKeyboard.reason, 'host_not_presented')
+  assert.equal(hiddenKeyboard.ready, true)
+  assert.equal(hiddenKeyboard.hostPresentation, 'hidden')
 
   const hiddenText = browserInputEnvironmentReadiness(
     controllerFor('hidden'),

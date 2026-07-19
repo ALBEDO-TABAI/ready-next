@@ -317,7 +317,11 @@ export class BrowserAutomationService {
       payload.text || '',
       payload.unmodifiedText || '',
     ].filter(Boolean))
+    const emulateFocus = payload.emulateFocus === true
     try {
+      if (emulateFocus) {
+        await this.sendCdpCommand(tabId, 'Emulation.setFocusEmulationEnabled', { enabled: true })
+      }
       await this.sendCdpCommand(tabId, 'Input.dispatchKeyEvent', {
         type: payload.type,
         key: payload.key || '',
@@ -337,6 +341,10 @@ export class BrowserAutomationService {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       throw this.host.createBrowserError('CDP_COMMAND_FAILED', `Input.dispatchKeyEvent failed: ${message}`)
+    } finally {
+      if (emulateFocus) {
+        await this.sendCdpCommand(tabId, 'Emulation.setFocusEmulationEnabled', { enabled: false }).catch(() => undefined)
+      }
     }
   }
 

@@ -8,6 +8,7 @@ import {
   type BrowserWorkflowJournalPort,
 } from '../main/modules/tools/browser-action-executor'
 import { browserMutationController } from '../main/modules/tools/browser-mutation-controller'
+import { sendKeyStroke } from '../main/modules/tools/browser-input-actions'
 import type { BrowserController } from '../main/modules/browser-engine/ipc-handler'
 import type { BrowserActionOutcome } from '../shared/browser-action-outcome'
 
@@ -339,6 +340,55 @@ test('exact-target backend probes stay read-only until the physical input transp
   })
   assert.equal(outputData(result).outcome !== undefined, true)
   assert.deepEqual(events.slice(0, 3), ['target_probe', 'begin:1', 'text_transport'])
+})
+
+test('a pause between text delivery and Enter fences the key without taking native focus', async () => {
+  const typed: string[] = []
+  const keys: Array<Record<string, unknown>> = []
+  let focusCalls = 0
+  let admitted = true
+  const controller = {
+    getBrowserInputEnvironment: () => ({
+      mainWindowForeground: false,
+      hostPresentation: 'hidden',
+      tabActive: false,
+    }),
+    getPhysicalTargetToken: () => 'physical-1',
+    focusTrustedKeyboardTarget: () => {
+      focusCalls += 1
+      return true
+    },
+    executeJS: async (_tabId: string | null, script: string) => {
+      if (script.includes('activeElementEditable')) {
+        return { ready: true, focused: false, activeElementEditable: true }
+      }
+      if (script.includes("const token = 'key-'")) return 'key-token'
+      return null
+    },
+    typeTextDirectly: async (_tabId: string | null, text: string) => { typed.push(text) },
+    dispatchKey: async (_tabId: string | null, event: Record<string, unknown>) => { keys.push(event) },
+  } as unknown as BrowserController
+
+  await assert.rejects(
+    new BrowserActionExecutor().execute({
+      toolName: 'browser_type',
+      args: { target_id: 'target-1', text: 'value' },
+      journal: journal(),
+      resolveTargetIdentity: resolveDocumentIdentity,
+      writeAdmission: () => admitted,
+      dispatch: async (_invocation, _signal, boundary) => {
+        const guarded = browserMutationController(controller, 'type_target', boundary)
+        await guarded.typeTextDirectly('tab-1', 'value')
+        admitted = false
+        await sendKeyStroke(guarded, 'tab-1', 'Enter')
+        return JSON.stringify({ ok: true })
+      },
+    }),
+    (error: unknown) => (error as { code?: string }).code === 'browser_workflow_write_fenced',
+  )
+  assert.deepEqual(typed, ['value'])
+  assert.equal(focusCalls, 0)
+  assert.deepEqual(keys, [])
 })
 
 test('failed or cached observations never create a receipt', async () => {

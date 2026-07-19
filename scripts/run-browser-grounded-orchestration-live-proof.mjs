@@ -45,7 +45,7 @@ const fixtureManifest = [
   { ...fixture('en-nav-table', 'en', 'navigation', 'table', 'Ivory Signal', 'ivory signal'), simpleRead: true },
   fixture('zh-spa-cards', 'zh', 'spa', 'cards', '青岚档案', '青岚档案'),
   fixture('zh-nav-list', 'zh', 'navigation', 'list', '松影记录', '松影记录'),
-  fixture('zh-spa-icon', 'zh', 'spa', 'icon', '星河索引', '星河索引'),
+  { ...fixture('zh-spa-icon', 'zh', 'spa', 'icon', '星河索引', '星河索引'), keyboardSubmit: true, latentRoute: true },
   fixture('ja-nav-grid', 'ja', 'navigation', 'grid', '蒼い航路', '蒼い航路'),
   fixture('ja-spa-table', 'ja', 'spa', 'table', '白樺記録', '白樺記録'),
   fixture('ja-nav-cards', 'ja', 'navigation', 'cards', '月影台帳', '月影台帳'),
@@ -233,13 +233,35 @@ function renderMainPage(instance, query) {
   const button = instance.fixture.structure === 'icon'
     ? `<button type="submit" aria-label="${escapeHtml(labels.submit)}" title="${escapeHtml(labels.submit)}">⌕</button>`
     : `<button type="submit">${escapeHtml(labels.submit)}</button>`
+  const searchControl = instance.fixture.keyboardSubmit
+    ? `<div role="search" data-keyboard-submit><label>${escapeHtml(labels.search)}${input}</label></div>`
+    : `<form action="${action}" method="get" role="search"><label>${escapeHtml(labels.search)}${input}</label>${button}</form>`
   const simpleGoal = instance.fixture.simpleRead ? instance.goals[0] : null
   const initialResults = simpleGoal
     ? `<article aria-label="${escapeHtml(simpleGoal.query)}"><h2>${escapeHtml(simpleGoal.query)}</h2><dl><dt>${escapeHtml(labels.code)}</dt><dd data-verification-code>${escapeHtml(simpleGoal.marker)}</dd><dt>${escapeHtml(labels.metric)}</dt><dd data-confidence>${simpleGoal.metric}</dd></dl></article>`
     : instance.fixture.transport === 'navigation' && query
       ? resultMarkup(instance, query)
       : `<p role="status">${escapeHtml(labels.search)}</p>`
-  const spaScript = instance.fixture.transport === 'spa'
+  const spaScript = instance.fixture.keyboardSubmit
+    ? `
+      const control = document.querySelector('[data-keyboard-submit]')
+      const input = control.querySelector('input')
+      const submitSearch = async () => {
+        const query = input.value || ''
+        const response = await fetch('/api/${instance.key}?q=' + encodeURIComponent(query))
+        const payload = await response.json()
+        await new Promise((resolve) => setTimeout(resolve, 80))
+        document.querySelector('#results').innerHTML = payload.html
+        history.replaceState({}, '', '/case/${instance.key}?q=' + encodeURIComponent(query))
+        emit('site_effect', { query, resultCount: payload.resultCount })
+      }
+      input.addEventListener('keydown', (event) => {
+        if (event.key !== 'Enter') return
+        emit('submit', { query: input.value || '', transport: 'keyboard' })
+        void submitSearch()
+      })
+    `
+    : instance.fixture.transport === 'spa'
     ? `
       const form = document.querySelector('form')
       form.addEventListener('submit', async (event) => {
@@ -255,8 +277,8 @@ function renderMainPage(instance, query) {
     `
     : ''
   return `<!doctype html><html lang="${instance.fixture.locale}"><head><meta charset="utf-8"><title>${escapeHtml(instance.fixture.title)}</title><style>
-    body{font:16px system-ui;margin:32px;max-width:920px;line-height:1.5}form{display:flex;gap:10px;align-items:end;margin:22px 0}label{display:grid;gap:6px}input{min-width:340px;padding:10px}button,a{font:inherit}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}.card,article,li,td,th{padding:14px}.card,article{border:1px solid #bbb;border-radius:10px}table{border-collapse:collapse}td,th{border:1px solid #bbb}
-  </style></head><body><main><h1>${escapeHtml(instance.fixture.title)}</h1><form action="${action}" method="get" role="search"><label>${escapeHtml(labels.search)}${input}</label>${button}</form><div id="results" aria-live="polite">${initialResults}</div></main>${probeScript(instance, spaScript)}</body></html>`
+    body{font:16px system-ui;margin:32px;max-width:920px;line-height:1.5}form,[data-keyboard-submit]{display:flex;gap:10px;align-items:end;margin:22px 0}label{display:grid;gap:6px}input{min-width:340px;padding:10px}button,a{font:inherit}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}.card,article,li,td,th{padding:14px}.card,article{border:1px solid #bbb;border-radius:10px}table{border-collapse:collapse}td,th{border:1px solid #bbb}
+  </style></head><body><main><h1>${escapeHtml(instance.fixture.title)}</h1>${searchControl}<div id="results" aria-live="polite">${initialResults}</div></main>${probeScript(instance, spaScript)}</body></html>`
 }
 
 function renderDetailPage(instance, query) {
@@ -405,25 +427,58 @@ async function evaluate(client, expression, timeoutMs = 420_000) {
   }
 }
 
-function buildCaseExpression(fixtureUrl, prompt, latentRoute, deliveryMode) {
+function buildCaseExpression(fixtureUrl, fixtureTitle, prompt, latentRoute, deliveryMode) {
   return `(
     async () => {
       const api = window.electronAPI?.browser
       const agent = window.electronAPI?.agent
       const harness = window.__READY_AGENT_TEST__
-      if (!api?.createTab || !api?.switchTab || !api?.closeTab || !agent?.listTaskProjections || !agent?.getConversationScopeMessages || !harness?.submit) {
+      if (!api?.createTab || !api?.getTabs || !api?.closeTab || !agent?.listTaskProjections || !agent?.getConversationScopeMessages || !harness?.submit) {
         return JSON.stringify({ ok: false, error: 'missing-live-browser-agent-or-harness-api' })
       }
+      const waitFor = async (read, timeoutMs = 10000) => {
+        const deadline = Date.now() + timeoutMs
+        while (Date.now() < deadline) {
+          const value = await read()
+          if (value) return value
+          await new Promise((resolveWait) => setTimeout(resolveWait, 100))
+        }
+        return null
+      }
       const requestedMode = ${latentRoute ? JSON.stringify('document') : JSON.stringify('browser')}
-      const modeButton = document.querySelector('button[data-mode="' + requestedMode + '"]')
-      if (!modeButton) return JSON.stringify({ ok: false, error: requestedMode + '-mode-button-not-found' })
-      modeButton.click()
-      await new Promise((resolveWait) => setTimeout(resolveWait, 500))
-      const created = await api.createTab(${JSON.stringify(fixtureUrl)})
+      const browserModeButton = document.querySelector('button[data-mode="browser"]')
+      if (!browserModeButton) return JSON.stringify({ ok: false, error: 'browser-mode-button-not-found' })
+      if (!browserModeButton.classList.contains('is-active')) browserModeButton.click()
+      const browserModeReady = await waitFor(() => browserModeButton.classList.contains('is-active'))
+      if (!browserModeReady) return JSON.stringify({ ok: false, error: 'browser-mode-not-active' })
+
+      // A foreground create through the low-level preload API updates Main but
+      // intentionally emits no renderer tab event. Create in the background so
+      // the renderer lists it, then activate its real tab control; this keeps
+      // Main, Renderer, bounds and BrowserView presentation on one source tab.
+      const created = await api.createTab(${JSON.stringify(fixtureUrl)}, { background: true })
       const sourceTabId = created?.tabId
       if (!sourceTabId) return JSON.stringify({ ok: false, error: 'fixture-tab-not-created', created })
       try {
-        await api.switchTab(sourceTabId)
+        const sourceTabButton = await waitFor(() => Array.from(document.querySelectorAll('button')).find((button) => {
+          const title = String(button.getAttribute('title') || '').split('\\n')[0]
+          return title === ${JSON.stringify(fixtureTitle)}
+        }) || null)
+        if (!sourceTabButton) return JSON.stringify({ ok: false, error: 'fixture-tab-control-not-found', sourceTabId })
+        sourceTabButton.click()
+        const sourceTabActive = await waitFor(async () => {
+          const tabs = await api.getTabs()
+          return Array.isArray(tabs) && tabs.some((tab) => tab.id === sourceTabId && tab.active === true)
+        })
+        if (!sourceTabActive) return JSON.stringify({ ok: false, error: 'fixture-tab-not-active', sourceTabId })
+
+        if (requestedMode !== 'browser') {
+          const modeButton = document.querySelector('button[data-mode="' + requestedMode + '"]')
+          if (!modeButton) return JSON.stringify({ ok: false, error: requestedMode + '-mode-button-not-found' })
+          modeButton.click()
+          const requestedModeReady = await waitFor(() => modeButton.classList.contains('is-active'))
+          if (!requestedModeReady) return JSON.stringify({ ok: false, error: requestedMode + '-mode-not-active' })
+        }
         await new Promise((resolveWait) => setTimeout(resolveWait, 500))
         harness.clearAttachments?.()
         harness.clearEvents?.()
@@ -886,6 +941,7 @@ const report = {
     structure: item.structure,
     simpleRead: Boolean(item.simpleRead),
     latentRoute: Boolean(item.latentRoute),
+    keyboardSubmit: Boolean(item.keyboardSubmit),
     goals: item.goals.map((goal) => ({ query: goal.query, exists: goal.exists })),
   })),
   expectedCorrectnessRuns: runCorrectness ? selectedManifest.length * correctnessRepeats : 0,
@@ -918,6 +974,7 @@ try {
       client,
       buildCaseExpression(
         `${fixtureServer.origin}/case/${instance.key}`,
+        fixtureCase.title,
         prompt,
         Boolean(fixtureCase.latentRoute),
         requestedDeliveryMode,

@@ -93,7 +93,7 @@ note: >
 以下条件必须同时成立：
 
 1. Browser 工作台/页面资源在当前工具面不是 exclusive 时直接开放完整低风险工具闭包；其他非 exclusive 上下文始终有一个轻量 `use_browser` 结构化入口，由模型选择后在同一 run 的下一次模型迭代开放 latent Browser 闭包，不新建 continuation 或 owner。Browser activation 使用独立 `activatedCapabilityGroups`，不覆盖当前 skill identity、skill floor 或 authorization。实际可见工具面服从 skill capability 层给出的通用 `additive | exclusive` composition：普通技能可与 Browser 相加；exclusive profile 必须由 skill capability 层给出 `exclusiveScopeRef`，绑定现有 typed skill/child terminal receipt，或在没有 durable terminal producer 时明确绑定当前 owner。匹配 terminal receipt 后的下一 model iteration 重新计算 surface；owner-bound scope 只能随现有 exitOwner/resumeOwner 交接结束，不能在同 owner 手动清除。两者都只压住 Browser surface而不删除 Browser activation，合法结束后恢复；Browser 调度层不得比较具体 skillId。工具面不再因用户是否说出“下拉、悬停、拖拽、弹窗”或使用何种语言而缺失。
-2. click、key、wheel、drag、select、direct text 和结构化 form submit 分别使用 Phase 0 证明的动态 readiness 谓词与可靠 transport；矩阵用于验证谓词，不生成永久的布局/窗口组合白名单。direct text 只在稳定 ref 重解析到精确可编辑节点、该节点取得焦点且存在同一 physical target 时可在 hidden/parked/detached host 投递；绑定同一表单的 requestSubmit 同理可用。指针、滚轮、拖拽和键盘事件仍必须要求可见、活动、前台 host；不得用某个单一 focus 布尔值代替这些动作级条件。所有写动作复用现有唯一 BrowserWriteLease，并把真实用户活动 generation 与 dispatch 原子绑定，不新增第二把租约，也不在 Ready 非前台时主动抢 OS 焦点。
+2. click、key、wheel、drag、select、direct text 和结构化 form submit 分别使用 Phase 0 证明的动态 readiness 谓词与可靠 transport；矩阵用于验证谓词，不生成永久的布局/窗口组合白名单。direct text 只在稳定 ref 重解析到精确可编辑节点、该节点取得焦点且存在同一 physical target 时可在 hidden/parked/detached host 投递；绑定同一表单的 requestSubmit 同理可用。定向 CDP 键盘事件只要 physical target 和页面当前 DOM 焦点所有者仍成立，不要求 host 可见、活动或 Ready 前台；detached/hidden target 在单次 guarded dispatch 内临时 offscreen park 并在结束后恢复。指针、滚轮和拖拽仍必须要求可见、活动、前台 host。所有写动作复用现有唯一 BrowserWriteLease，并把真实用户活动 generation 与 dispatch 原子绑定，不新增第二把租约，也不调用 app/BrowserWindow/WebContents focus 抢任何原生焦点。
 3. 模型一旦以首个 observe/mutate Browser operation 选择 Browser route，工具 admission 自动绑定同一个 browser_workflow task，不要求先调用计划工具。唯一穷尽 BrowserCapabilityRegistry 只保存 typed operationId、`control | observe | mutate` mode 与既有 power effects；child binding、写租约和确认从这三项机械派生，不按工具名或文本兜底。其 action journal 是写动作唯一持久权威，mutate 动作只经历 `in_flight → settled`；崩溃看到 in_flight 一律按 effect unknown/mayHaveCommitted，绝不自动重放。
 4. browser_search 分开“提交已送达”和“搜索效果已观察”。未知 SPA 即使未导航、没有预先存在的结果区，只要 submit delivery 成立也返回 `submitted + effect_unknown + needsObservation`，不冒充 search success，也不把真实提交误报成 dispatch failure，更不自动重发。结果、空结果和内容质量必须由随后绑定 searchActionId、queryDigest 与 post-submit frame identity 的 grounded observation 结算后才能推进 research。同一 action-linked post observation 机制适用于全部 mutate，不因未知页面在动作后才新建 toast/结果区而强制人工介入。
 5. 参数、确认、目标、租约和 generation 全部通过后才 CAS 写 in_flight，CAS 返回到 transport dispatch 之间不得 await；未结算即 effect unknown/mayHaveCommitted，不得因粗略页面差异不足或进程重启自动重放。这个极小窗口宁可保守记 unknown，也不新增 prepared 第三状态。任何已 settled 且尚无因果 observation receipt 的动作，无论其 actionSeq 是否已进入 checkpoint cursor，均只从 child journal 派生同一 observation-required barrier；内存 pending set、checkpoint 差值或候选文本都不是第二真值。barrier 存在时 executor 只允许 registry 解析后的 observe operation，严禁 mutate/control 及重放；正确绑定 actionId/actionSeq、successor document identity 的 fresh observation 才能清除。崩溃恢复同样只重算这个 journal 派生视图，不伪造无配对 function result。
@@ -171,6 +171,21 @@ note: >
 7. 验收使用累计证据：新增预算/候选/核心事务单测；同形多目标研究用 3 个独立目标验证 normal 与 thorough 共路、候选不提前发布、进度后继续、无进展才 checkpoint；再跑受影响 browser orchestration、stability、dynamic delivery、native、typecheck 与真实 Electron。已通过且未受影响的 36+20 矩阵不重数。
 8. 启动恢复必须先处理仍绑定 Browser workflow 且持有当前 clean checkpoint 的遗留 Owner，再做通用 stale-run 清扫：`working | running` 统一识别为上次进程遗留，三本账原子转为 owner-crash 可续跑暂停；没有有效 clean checkpoint 的剩余行才进入通用 interrupted/rerun 兜底。迁移把 `working` 归一为 `running` 后，reconciler 不得继续只查旧词汇，也不得把有检查点的 Parent 标成不可继续。
 
+### 0.8 实测填字、回车与人工暂停校正（2026-07-20）
+
+小红书实测中页面已出现新文字，URL 和结果区却没有更新；随后的大写 `ENTER` 返回未送达，Agent 又进入人工接管，Main 已写 `manual_suspend` 而 Renderer 仍显示“思考中”。进程和原任务并未消失；这是输入、提交回执和暂停投影三个缺口叠加后呈现出的“像进程中断”。
+
+对照 `web-access` 与 `browser-use` 的操作纪律后，本轮固定以下通用合同，不加站点、关键词或固定步骤分支：
+
+1. 填字和提交是两个独立动作。公开 `browser_type` 只填字和回读；搜索优先使用自身分步结算的 `browser_search`，其他输入再用显式后续提交。文字落入不得被写成“已提交”。
+2. direct text 可以把文字送到精确的 editable；后续键盘动作由 CDP 定向送到同一 physical target 的当前 DOM 焦点所有者。detached/hidden target 会在该次发键的写栅栏内临时 offscreen park，配合 CDP focus emulation 投递，再按原状态恢复。全程不依赖 DOM `document.hasFocus()`、WebContents 焦点或 OS 前台，也不调用 app/BrowserWindow/WebContents focus。这样只靠 Enter 提交的页面不需人工接管，暂停或接管后也不会先抢原生焦点再被写栅栏拒绝。
+3. 键名先做大小写无关的标准化，同一标准 key/code 用于 CDP 发送和页面事件回执。`ENTER`、`Enter` 与 `enter` 不得因文本形式不同而得到不同结果。
+4. 若文字已落入而后续 Enter 被阻断，工具必须返回 partial commit 与 fresh-observation 指引，不用异常吞掉填字事实，不原样重发，不把普通可恢复输入失败升级为人工接管。
+5. 人工接管的 call-to-action、补充说明和超时与 takeover intent/checkpoint 同步持久化，任务投影立即进入可继续/可取消的等待态。Renderer 把 `manual_suspend` 当作真实终态解锁，不虚构 Agent 回复，也不继续显示活跃运行。
+6. write admission 在每次真实输入投递的同一调用栈内重读。填字与 Enter 之间若发生暂停或接管，Enter 不发送，也不产生聚焦副作用；已落入的文字仍按 partial commit 保留。
+7. 验收只重跑输入/提交、暂停投影、Browser orchestration 与一次当前源码 Electron 复现；不重数已通过且未受影响的全景矩阵。
+8. 最终 Electron 证据把唯一 keyboard-only 案例直接放在 Document mode：填字、Enter submit 与详情载入各 1 次，duplicate dispatch 和终态后写入均为 0，Parent/child/run 全部正常完成；4 次持久 snapshot 的 host presentation 都回读为原始 detached 状态。
+
 ## 1. 第二轮现场证据与根因图
 
 ### 1.1 输入链根因
@@ -184,6 +199,8 @@ Layout B 是普通原生 form。真实回读显示：
 - URL、正文和结果区均未变化。
 
 已确定的根因：当前代码把 CDP 命令无报错、DOM focus 或非零 viewport 当成了可靠投递，而真实页面事件为零。尚待 Phase 0 确定的是：不同动作究竟需要主窗口活动、view 附着、WebContents/document focus 中的哪组最小条件；在矩阵给出充分必要条件前，不把某个焦点信号硬编码成通用答案。
+
+2026-07-20 的最终实机校正已收口这个待定项：单独放宽前台条件或单独开启 CDP focus emulation 仍然无事件；只有在受保护的发键内将 detached/hidden view 临时 offscreen park，再定向发键并恢复，才实测产生一次 keydown/submit。这个结论只属于 keyboard transport，不扩大到指针、滚轮或拖拽。
 
 ### 1.2 动作结果根因
 
@@ -322,7 +339,7 @@ Browser/Parent/run/chat 位于同一 ready.db，核心单事务可行；但搜�
 - 只要稳定目标重解析到同一 rendered editable、精确 `focus()` 后的 activeElement 仍是该节点，且 Main 仍持有对应 physical target，`Input.insertText` 在 Browser host 处于 hidden、parked 或 detached 时仍会产生真实 `beforeinput/input` 并可严格回读；`document.hasFocus` 不是这条通道的必要条件。
 - 直接文本填写的 `clear_first` 不再依赖键盘全选；只对已聚焦的精确 input/textarea/contenteditable 建立 selection，然后用同一次 direct text 替换，不修改其他节点。
 - 若精确输入目标绑定真实 form，`requestSubmit()` 在 host 不可见时仍会产生真实 submit 事件；它不需要猜按钮文案，也不需要模拟 Enter。
-- `Input.dispatchKeyEvent`、指针、滚轮和拖拽在这些不可见 host 上无可靠投递证据，因此仍只在可见、活动、前台的物理 surface 上开放。
+- `Input.dispatchKeyEvent` 定向绑定的 CDP target；detached/hidden host 在受保护的发键期间临时 offscreen park 并开启 CDP focus emulation，因此能保留页面 DOM 焦点所有者并产生真实 keydown/submit，又不需要把 Ready 或 WebContents 抢到前台。指针、滚轮和拖拽仍只在可见、活动、前台的物理 surface 上开放。
 - Agent 面板可以让 Browser host 对 Renderer 呈现为 detached，但底层 WebContents/CDP target 仍存在。readiness 因此必须同时报告 host presentation 和物理 target，不能把 `detached` 一律等于“所有输入禁用”。
 
 这些证据排除了两个极端：既不再把“有非零 viewport”当成全部输入都可用，也不再因 host 被覆盖就把已证明可靠的精确文本/表单通道全部关闭。
@@ -511,7 +528,7 @@ BrowserWorkflowStore 只实现 bind/action/close/exit/resume 的 Unit of Work �
 - browser_search 接受可选 input_target_id、submit_target_id、result_target_id 与 empty_target_id。
 - 多个候选时返回结构化候选，由 Agent 选择 ref 后重试；代码不读控件名称猜用途。
 - search fill 必须回读输入控件的当前值，并在 Unicode NFC、换行和首尾空白规范化后与 query 一致；不一致就停在 fill 阶段。该严格规则只属于 browser_search，不扩大到普通 browser_type。
-- 提交优先复用精确输入目标所属的真实 form，由结构化 `requestSubmit()` 产生并计数 submit/invalid 事件；只在没有可绑定 form 时，才使用已显式选定的 action target 或前台键盘 Enter。三条路径都必须先通过自己的 input readiness 和事件探针；fillActionId 与 submitActionId 分别持久化，Outcome 带 queryDigest 与共同的 searchActionId。
+- 提交优先复用精确输入目标所属的真实 form，由结构化 `requestSubmit()` 产生并计数 submit/invalid 事件；只在没有可绑定 form 时，才使用已显式选定的 action target 或绑定 physical target 的 CDP 键盘 Enter。三条路径都必须先通过自己的 input readiness 和事件探针；fillActionId 与 submitActionId 分别持久化，Outcome 带 queryDigest 与共同的 searchActionId。
 - immediate mechanical search effect 只接受：与 submit 绑定的 loader/navigation identity；调用方指定 result/empty region 的 digest 变化；或目标 frame 在 submit 后开始的 response 与 page identity/指定 region 变化的组合。单独网络请求、轮询、分析请求和广告请求永不证明 search effect。
 - 若 submit delivery 成立但上述 effect 均不可观察，返回 submitted_needs_observation；这不是失败、成功或自动重试信号。Agent 随后用 fresh grounded snapshot/read 检查已有或新出现的任意区域；该 observation receipt 必须绑定 searchActionId、queryDigest、physicalTargetToken、frameId/frameDocumentToken 与 post-submit capture sequence，才能由模型/唯一 verifier 判断结果或空结果。
 - search 的 ok/submitted 单独都不能推进 research；只有 effect_observed 或上述后续结果/空结果 evidence 可以推进，且不消费 toolName。

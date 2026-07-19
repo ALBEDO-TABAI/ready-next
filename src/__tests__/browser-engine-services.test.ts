@@ -47,6 +47,7 @@ function createMockView(options?: {
     insertedTexts: [] as string[],
     mouseCommands: [] as unknown[],
     keyCommands: [] as unknown[],
+    focusEmulation: [] as boolean[],
     emit,
   }
 
@@ -99,6 +100,10 @@ function createMockView(options?: {
           }
           if (command === 'Input.dispatchKeyEvent') {
             state.keyCommands.push(payload)
+            return {}
+          }
+          if (command === 'Emulation.setFocusEmulationEnabled') {
+            state.focusEmulation.push(payload?.enabled === true)
             return {}
           }
           return {}
@@ -576,8 +581,10 @@ describe('BrowserAutomationService', () => {
       code: 'KeyA',
       modifiers: 4,
       commands: ['selectAll'],
+      emulateFocus: true,
     })
 
+    assert.deepEqual(mock.state.focusEmulation, [true, false])
     assert.deepEqual(mock.state.keyCommands, [{
       type: 'rawKeyDown',
       key: 'a',

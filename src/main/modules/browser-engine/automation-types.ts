@@ -55,6 +55,7 @@ export interface BrowserKeyEventPayload {
   unmodifiedText?: string
   location?: number
   commands?: string[]
+  emulateFocus?: boolean
 }
 
 export interface BrowserScreenshotOptions {

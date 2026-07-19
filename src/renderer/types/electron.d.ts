@@ -818,6 +818,7 @@ type ScopeRunTerminalReasonData =
   | 'checkpoint_incomplete'
   | 'checkpoint_background'
   | 'checkpoint_user_input'
+  | 'manual_suspend'
   | 'blocked_config'
   | 'blocked_external'
   | 'blocked_tool_error'

@@ -824,6 +824,43 @@ test('sendScoped success without a canonical terminal cannot unlock or finalize 
   assert.equal(afterSlice.scopeRunStates['scope-A']?.terminalReason, 'done')
 })
 
+test('manual suspend scope event unlocks the composer without inventing an assistant reply', () => {
+  seedTwoSessions({
+    activeSessionId: 'session-A',
+    lockedSessionId: 'session-A',
+    lockedScopeId: 'scope-A',
+    otherScopeId: 'scope-B',
+    requestId: 'req-A',
+  })
+
+  fireOnScopeRunEvent({
+    type: 'updated',
+    scopeId: 'scope-A',
+    sessionId: 'scope-A',
+    agent: 'butler',
+    runId: 'req-A',
+    taskId: 'task-A',
+    phase: 'takeover',
+    terminalReason: 'manual_suspend',
+    interactionState: 'human_takeover',
+    waitingFor: 'confirmation',
+    resumableActions: ['continue', 'cancel'],
+    blockedReason: '请完成页面验证 · 完成后继续任务',
+    timestamp: '2026-07-20T00:00:00.000Z',
+  })
+
+  const state = useAgent.getState()
+  const slice = getSessionSlice(state, 'session-A')
+  assert.equal(slice.isStreaming, false)
+  assert.equal(slice.foregroundBusy, false)
+  assert.equal(slice.composerLocked, false)
+  assert.equal(slice.streamingRequestId, null)
+  assert.equal(slice.messages.length, 0)
+  assert.equal(slice.scopeRunStates['scope-A']?.phase, 'takeover')
+  assert.equal(slice.scopeRunStates['scope-A']?.terminalReason, 'manual_suspend')
+  assert.equal(slice.scopeRunStates['scope-A']?.blockedReason, '请完成页面验证 · 完成后继续任务')
+})
+
 test('accepted steering restores the existing owner and removes only the fake request placeholder', () => {
   seedTwoSessions({
     activeSessionId: 'session-A',

@@ -600,6 +600,11 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
     }
 
     if (!options?.canonicalMessage) {
+      const currentRun = getScopeRunStateFromState(store.getState(), scopeId)
+      if (currentRun?.requestId === requestId && currentRun.terminalReason) {
+        clearInfrastructureWatchdog(scopeId, requestId)
+        return
+      }
       emitRendererAgentMetric('renderer_send_success_without_canonical_terminal', {
         scopeId,
         requestId,

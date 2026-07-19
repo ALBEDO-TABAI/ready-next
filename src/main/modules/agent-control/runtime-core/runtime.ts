@@ -763,6 +763,7 @@ export class AgentControlRuntime extends EventEmitter {
       parentTaskId: input.parentTaskId,
       ownerRunId: input.ownerRunId,
       browserTaskId: input.browserTaskId,
+      userPrompt: input.userPrompt ?? null,
       physicalTarget: {
         surface: input.surface,
         scopeId: input.scopeId,

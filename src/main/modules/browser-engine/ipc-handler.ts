@@ -2124,7 +2124,20 @@ export class BrowserController {
    * Dispatch low-level keyboard event through CDP.
    */
   async dispatchKey(tabId: string | null, payload: BrowserKeyEventPayload): Promise<void> {
-    return this.automationService.dispatchKey(tabId, payload)
+    const resolved = this.resolveTabView(tabId)
+    const previousPresentation = this.hostLayoutService.getHostPresentationState(resolved.view)
+    const temporarilyParked = previousPresentation === 'detached' || previousPresentation === 'hidden'
+    if (temporarilyParked) {
+      this.hostLayoutService.parkHost(resolved.view, this.currentBoundsForTab(resolved.tabId))
+    }
+    try {
+      return await this.automationService.dispatchKey(resolved.tabId, payload)
+    } finally {
+      if (temporarilyParked && this.hostLayoutService.getHostPresentationState(resolved.view) === 'parked') {
+        if (previousPresentation === 'detached') this.hostLayoutService.detachHost(resolved.view)
+        else this.hostLayoutService.hideHost(resolved.view)
+      }
+    }
   }
 
   /**

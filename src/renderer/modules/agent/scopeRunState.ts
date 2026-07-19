@@ -125,6 +125,7 @@ export function normalizeTerminalReason(value: unknown): ScopeRunTerminalReason 
     normalized === 'checkpoint_incomplete' ||
     normalized === 'checkpoint_background' ||
     normalized === 'checkpoint_user_input' ||
+    normalized === 'manual_suspend' ||
     normalized === 'blocked_config' ||
     normalized === 'blocked_external' ||
     normalized === 'blocked_tool_error' ||

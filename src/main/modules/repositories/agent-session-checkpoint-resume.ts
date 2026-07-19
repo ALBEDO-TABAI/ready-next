@@ -5,12 +5,13 @@ import type {
   BrowserCheckpointSuspensionReason,
   BrowserCheckpointWakeKind,
   BrowserConfirmationSuspensionRequest,
+  BrowserHumanTakeoverPrompt,
   BrowserHumanTakeoverPhysicalTarget,
   BrowserOwnerCrashRecoveryReceipt,
   BrowserPowerConfirmationSuspensionRequest,
   HumanTakeoverRef,
 } from '../../../shared/browser-workflow-control'
-import { browserWakeKindForSuspensionReason } from '../../../shared/browser-workflow-control'
+import { browserHumanTakeoverBlockedReason, browserWakeKindForSuspensionReason } from '../../../shared/browser-workflow-control'
 import type { TaskExecutionBinding } from '../../../shared/agent-execution-profile'
 import { assertDeliveryState, type DeliveryStateV1 } from '../../../shared/dynamic-delivery'
 import { assertAgentInputToolPairIntegrity } from '../agent-control/compaction/compact-agent-input'
@@ -59,6 +60,7 @@ export class AgentSessionCheckpointResumeRepository {
     ownerRunId: string
     browserTaskId?: string | null
     physicalTarget?: BrowserHumanTakeoverPhysicalTarget | null
+    userPrompt?: BrowserHumanTakeoverPrompt | null
     now?: string
   }): Promise<HumanTakeoverRef> {
     return this.unitOfWork.runImmediateWithRetry((db) => {
@@ -112,15 +114,19 @@ export class AgentSessionCheckpointResumeRepository {
         state: 'pending',
         claimedByRunId: null,
         physicalTarget,
+        userPrompt: input.userPrompt ?? null,
         createdAt: input.now || new Date().toISOString(),
       }
       const update = db.prepare(
         `UPDATE task_projections
             SET human_takeover_ref_json = ?, interaction_state = 'human_takeover',
+                waiting_for = 'confirmation', blocked_reason = ?, resumable_actions_json = ?,
                 revision = revision + 1, updated_at = ?
           WHERE task_id = ? AND revision = ? AND run_id = ?`,
       ).run(
         serializeWorkflowJson(ref, 'human_takeover_ref_json'),
+        browserHumanTakeoverBlockedReason(ref.userPrompt),
+        serializeWorkflowJson(['continue', 'cancel'], 'takeover_resumable_actions_json'),
         ref.createdAt,
         parent.taskId,
         parent.revision,

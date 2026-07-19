@@ -102,7 +102,6 @@ test('checkpoint rotation keeps 100 turns O(1) rows and losslessly round-trips K
       createdAt: now,
       updatedAt: now,
     })
-
     const sourceItems: AgentInputItem[] = [
       {
         type: 'message',
@@ -761,6 +760,115 @@ test('startup recovery converts a stale Browser owner with a clean checkpoint in
       'paused',
     )
     assert.ok(repository.currentOwnerCrashRecovery(parentTaskId))
+  } finally {
+    db.close()
+  }
+})
+
+test('human takeover keeps its exact user instruction in the durable suspension projection', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'browser-human-takeover-prompt-native')) return
+  const db = openDb()
+  try {
+    const accessor = { getRawDb: () => db }
+    const projections = new TaskProjectionRepository(accessor)
+    const runMeta = new RunMetaRepository(db)
+    const repository = new AgentSessionCheckpointRepository(accessor)
+    const parentTaskId = 'parent-browser-human-takeover'
+    const scopeId = 'scope-browser-human-takeover'
+    const ownerRunId = 'run-browser-human-takeover'
+    const ownerBinding = executionBinding(ownerRunId)
+    const now = '2026-07-20T00:00:00.000Z'
+    projections.create({
+      taskId: parentTaskId,
+      scopeId,
+      runId: ownerRunId,
+      taskType: 'research',
+      module: 'browser',
+      status: 'running',
+      interactionState: 'running',
+      waitingFor: 'none',
+      steps: [],
+      ownerAgentId: 'butler',
+      taskOrigin: 'user_root',
+      executionBinding: ownerBinding,
+      createdAt: now,
+      updatedAt: now,
+    })
+    runMeta.create({
+      runId: ownerRunId,
+      taskId: parentTaskId,
+      scopeId,
+      agentId: 'butler',
+      executionBinding: ownerBinding,
+      status: 'running',
+    }, Date.parse(now))
+    db.prepare(
+      `INSERT INTO chat_conversations (id, agent, title, created_at, updated_at)
+       VALUES (?, 'butler', 'Browser human takeover', ?, ?)`,
+    ).run(scopeId, now, now)
+    const sourceMessageId = 'message-browser-human-takeover'
+    db.prepare(
+      `INSERT INTO chat_messages (id, conversation_id, role, content, timestamp, meta_json)
+       VALUES (?, ?, 'user', '完成网页任务', ?, '{}')`,
+    ).run(sourceMessageId, scopeId, now)
+    const route = await repository.bindBrowserWorkflowRoute({
+      parentTaskId,
+      ownerRunId,
+      sourceMessageId,
+      executionBinding: ownerBinding,
+      now,
+    })
+    const userPrompt = {
+      callToAction: '请完成页面验证',
+      details: '验证完成后继续当前任务',
+      timeoutSec: 90,
+    }
+    const takeover = await repository.createHumanTakeoverIntent({
+      parentTaskId,
+      ownerRunId,
+      browserTaskId: route.browserTaskId,
+      physicalTarget: {
+        surface: 'user-view',
+        scopeId,
+        profileId: 'default',
+        sessionId: null,
+        tabId: 'tab-1',
+        physicalTargetToken: 'physical-tab-1',
+        source: 'supervision_button',
+      },
+      userPrompt,
+      now,
+    })
+    const sourceItems = [{ role: 'user', content: '完成网页任务' } as AgentInputItem]
+    await repository.writeCleanBoundary({
+      parentTaskId,
+      browserTaskId: route.browserTaskId,
+      ownerRunId,
+      role: 'suspension',
+      takeoverId: takeover.takeoverId,
+      suspensionReason: 'human_takeover',
+      sourceItems,
+      sdkSourceItems: sourceItems,
+      sdkSourceItemCount: sourceItems.length,
+      sdkSourcePrefixDigest: workflowDigest(sourceItems),
+      preparedSkill: preparedSkill(),
+      activatedCapabilityGroups: ['browser'],
+      now,
+    })
+
+    const row = db.prepare(
+      `SELECT interaction_state, waiting_for, blocked_reason, human_takeover_ref_json
+         FROM task_projections WHERE task_id = ?`,
+    ).get<{
+      interaction_state: string
+      waiting_for: string
+      blocked_reason: string
+      human_takeover_ref_json: string
+    }>(parentTaskId)
+    assert.equal(row?.interaction_state, 'human_takeover')
+    assert.equal(row?.waiting_for, 'confirmation')
+    assert.equal(row?.blocked_reason, '请完成页面验证 · 验证完成后继续当前任务')
+    assert.deepEqual(JSON.parse(row?.human_takeover_ref_json || '{}').userPrompt, userPrompt)
   } finally {
     db.close()
   }

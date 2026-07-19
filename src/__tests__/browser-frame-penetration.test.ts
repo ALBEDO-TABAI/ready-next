@@ -326,7 +326,6 @@ test('browser_type 在输入环境预检前拒绝明确不可编辑的 target', 
   const out = await executeFrameTool('browser_type', {
     target_id: targetId,
     text: '北欧家具',
-    submit: true,
   }, controller)
   const parsed = parseToolJson(out)
 

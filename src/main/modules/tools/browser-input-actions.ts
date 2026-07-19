@@ -145,6 +145,7 @@ function modifiersToMask(value: unknown): number {
 
 function keyToCode(key: string): string {
   if (!key) return ''
+  if (key === ' ') return 'Space'
   if (key.length === 1) {
     const upper = key.toUpperCase()
     if (/^[A-Z]$/.test(upper)) return `Key${upper}`
@@ -162,6 +163,14 @@ function keyToCode(key: string): string {
     arrowdown: 'ArrowDown',
     arrowleft: 'ArrowLeft',
     arrowright: 'ArrowRight',
+    home: 'Home',
+    end: 'End',
+    pageup: 'PageUp',
+    pagedown: 'PageDown',
+    shift: 'ShiftLeft',
+    control: 'ControlLeft',
+    alt: 'AltLeft',
+    meta: 'MetaLeft',
   }
   const resolved = table[key.toLowerCase()]
   return resolved || key
@@ -203,11 +212,32 @@ function keyToVirtualCode(key: string): number {
 
 function normalizeKeyLabel(key: string): string {
   const normalized = key.toLowerCase()
-  if (normalized === 'ctrl') return 'Control'
-  if (normalized === 'cmd' || normalized === 'command') return 'Meta'
-  if (normalized === 'esc') return 'Escape'
   if (key.length === 1) return key
-  return key.charAt(0).toUpperCase() + key.slice(1)
+  const aliases: Record<string, string> = {
+    alt: 'Alt',
+    arrowdown: 'ArrowDown',
+    arrowleft: 'ArrowLeft',
+    arrowright: 'ArrowRight',
+    arrowup: 'ArrowUp',
+    backspace: 'Backspace',
+    cmd: 'Meta',
+    command: 'Meta',
+    control: 'Control',
+    ctrl: 'Control',
+    delete: 'Delete',
+    end: 'End',
+    enter: 'Enter',
+    esc: 'Escape',
+    escape: 'Escape',
+    home: 'Home',
+    meta: 'Meta',
+    pagedown: 'PageDown',
+    pageup: 'PageUp',
+    shift: 'Shift',
+    space: ' ',
+    tab: 'Tab',
+  }
+  return aliases[normalized] || `${key.charAt(0).toUpperCase()}${key.slice(1).toLowerCase()}`
 }
 
 async function retainTrustedInputSequence(
@@ -451,6 +481,7 @@ export interface GuardedCoordinateTypeResult {
   typed: boolean
   textDelivery: 'delivered' | 'not_delivered' | 'unknown'
   submitDelivery: 'not_requested' | 'not_delivered' | 'delivered' | 'unknown'
+  submitError?: string | null
   skipReason: 'focus_not_editable' | 'selection_unavailable' | 'text_exceeds_field_capacity' | 'multiline_into_single_line' | null
   /** 聚焦点击后的真实焦点身份（frame = 跨帧编辑器，无法验证，放行） */
   focusTarget: {
@@ -606,8 +637,19 @@ async function runGuardedPostFocusType(
     }
   }
   await controller.typeTextDirectly(tabId, text, { useShiftEnterForNewline: opts.useShiftEnter })
+  let submitError: string | null = null
   if (opts.pressEnter) {
-    await sendKeyStroke(controller, tabId, 'Enter', undefined, inputDocumentState)
+    try {
+      // Direct text delivery may establish document focus. Keyboard readiness
+      // must be read at dispatch time instead of reusing the pre-type probe.
+      await sendKeyStroke(controller, tabId, 'Enter')
+    } catch (error) {
+      if (isBrowserAbortError(error)) throw error
+      const readinessReason = (error as { readiness?: { reason?: unknown } } | null)?.readiness?.reason
+      submitError = typeof readinessReason === 'string' && readinessReason
+        ? readinessReason
+        : normalizeErrorCode(error)
+    }
   }
   await settleAfterAction(controller, tabId, abortSignal)
   const typedProbe = await runProbe(buildTypedIntoProbeJs(text)).catch(() => null)
@@ -639,7 +681,9 @@ async function runGuardedPostFocusType(
     }
   }
   let submitDelivery: GuardedCoordinateTypeResult['submitDelivery'] = opts.pressEnter ? 'unknown' : 'not_requested'
-  if (opts.pressEnter && submitProbeToken) {
+  if (submitError) {
+    submitDelivery = 'not_delivered'
+  } else if (opts.pressEnter && submitProbeToken) {
     const delivery = await runProbe(`(() => {
       const state = globalThis.__readySubmitDeliveryProbe;
       if (!state || state.token !== ${JSON.stringify(submitProbeToken)}) return null;
@@ -648,7 +692,16 @@ async function runGuardedPostFocusType(
     })()`).catch(() => null) as { keydown?: unknown; submit?: unknown } | null
     if (Number(delivery?.keydown || 0) > 0 || Number(delivery?.submit || 0) > 0) submitDelivery = 'delivered'
   }
-  return { ...point, typed: true, textDelivery, submitDelivery, skipReason: null, focusTarget, typedInto }
+  return {
+    ...point,
+    typed: true,
+    textDelivery,
+    submitDelivery,
+    ...(submitError ? { submitError } : {}),
+    skipReason: null,
+    focusTarget,
+    typedInto,
+  }
 }
 
 /**
@@ -747,9 +800,10 @@ export async function sendKeyStroke(
   modifiers?: unknown,
   documentState?: BrowserInputDocumentState,
 ): Promise<'delivered' | 'not_delivered' | 'unknown'> {
-  await requireBrowserInputReadiness(controller, tabId, 'trusted_keyboard', documentState)
+  const keyboardReadiness = await requireBrowserInputReadiness(controller, tabId, 'trusted_keyboard', documentState)
+  const emulateFocus = keyboardReadiness.documentFocused !== true
   const keyLabel = normalizeKeyLabel(key)
-  const code = keyToCode(key)
+  const code = keyToCode(keyLabel)
   const vk = keyToVirtualCode(keyLabel)
   const mask = modifiersToMask(modifiers)
   const commandModifierMask = 0b0111 // Alt | Control | Meta
@@ -790,6 +844,7 @@ export async function sendKeyStroke(
       windowsVirtualKeyCode: modifier.vk,
       nativeVirtualKeyCode: modifier.vk,
       isKeypad: false,
+      emulateFocus,
     })
   }
 
@@ -803,6 +858,7 @@ export async function sendKeyStroke(
     modifiers: mask,
     isKeypad: false,
     unmodifiedText: text,
+    emulateFocus,
   })
   await controller.dispatchKey(tabId, {
     type: 'keyUp',
@@ -812,6 +868,7 @@ export async function sendKeyStroke(
     nativeVirtualKeyCode: vk || undefined,
     modifiers: mask,
     isKeypad: false,
+    emulateFocus,
   })
 
   for (let i = modifierTriples.length - 1; i >= 0; i -= 1) {
@@ -824,6 +881,7 @@ export async function sendKeyStroke(
       windowsVirtualKeyCode: modifier.vk,
       nativeVirtualKeyCode: modifier.vk,
       isKeypad: false,
+      emulateFocus,
     })
   }
   const deliveryCount = deliveryToken

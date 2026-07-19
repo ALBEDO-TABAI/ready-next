@@ -131,6 +131,34 @@ describe('scope run state helpers', () => {
     assert.strictEqual(patch.terminalReason, 'context_overflow')
   })
 
+  it('treats manual suspend as a real terminal boundary while preserving takeover guidance', () => {
+    const patch = deriveScopeRunStatePatch(
+      {
+        phase: 'takeover',
+        terminalReason: 'manual_suspend',
+        waitingFor: 'confirmation',
+        resumableActions: ['continue', 'cancel'],
+        blockedReason: '请完成页面验证 · 完成后继续任务',
+        timestamp: '2026-07-20T00:00:00.000Z',
+      },
+      null,
+    )
+
+    assert.strictEqual(patch.phase, 'takeover')
+    assert.strictEqual(patch.terminalReason, 'manual_suspend')
+    assert.strictEqual(patch.blockedReason, '请完成页面验证 · 完成后继续任务')
+    assert.strictEqual(isForegroundBusyScopeRunState({
+      scopeId: 'scope-1',
+      agent: 'butler',
+      requestId: 'run-1',
+      phase: patch.phase!,
+      terminalReason: patch.terminalReason,
+      toolTrace: [],
+      startedAt: '2026-07-20T00:00:00.000Z',
+      updatedAt: '2026-07-20T00:00:00.000Z',
+    }), false)
+  })
+
   it('does not treat detached skill jobs as chat streaming', () => {
     assert.strictEqual(isStreamingScopeRunState({
       scopeId: 'scope-1',

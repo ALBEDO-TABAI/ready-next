@@ -749,7 +749,11 @@ export interface BrowserActToolContext {
     objectRef: string
     inputHash: string
   }) => Promise<boolean>
-  createHumanTakeoverIntent?: () => Promise<{ takeoverId: string }>
+  createHumanTakeoverIntent?: (prompt: {
+    callToAction: string
+    details: string
+    timeoutSec: number
+  }) => Promise<{ takeoverId: string }>
   attachBrowserToolOutput: (
     result: string | ToolExecutionOutput,
     params: {
@@ -1680,15 +1684,22 @@ export async function executeBrowserActTool(
                 ? 'not_delivered'
                 : 'unknown'
           }
+          const submitSucceeded = args.submit !== true || typed.submitDelivery === 'delivered'
           const fillSucceeded = typed.typed
+            && submitSucceeded
             && (!usesExactFormSubmit || (textVerified && formSubmit?.ok === true))
           actionResult = {
             ok: fillSucceeded,
             errorCode: fillSucceeded
               ? null
               : typed.typed
-                ? String(formSubmit?.reason || 'text_delivery_unverified')
+                ? String(
+                    typed.submitError
+                    || formSubmit?.reason
+                    || (args.submit === true ? `submit_${typed.submitDelivery}` : 'text_delivery_unverified'),
+                  )
                 : typed.skipReason || 'target_not_fillable',
+            mayHaveCommitted: typed.typed && typed.textDelivery !== 'not_delivered',
             trustedInput: true,
             typed,
             ...(formSubmit ? { formSubmit } : {}),
@@ -1756,6 +1767,9 @@ export async function executeBrowserActTool(
         const after = readBack === 'map'
           ? await captureAgentPageMap(controller, tabId, DEFAULT_AGENT_PAGE_MAP_MAX_BYTES)
           : afterDelta
+        const actionMayHaveCommitted = actionFailed
+          && actionResult && typeof actionResult === 'object'
+          && (actionResult as { mayHaveCommitted?: unknown }).mayHaveCommitted === true
         const payload = {
           ok: !actionFailed,
           targetId: activeTargetId,
@@ -1769,7 +1783,10 @@ export async function executeBrowserActTool(
           changed,
           followedTab,
           failureKind,
-          nextSuggestedAction: followedTab ? `read map again on tab ${followedTab.tabId}` : 'read map again',
+          mayHaveCommitted: actionMayHaveCommitted,
+          nextSuggestedAction: actionMayHaveCommitted
+            ? 'read map again before any retry because part of the action may already be visible'
+            : followedTab ? `read map again on tab ${followedTab.tabId}` : 'read map again',
         }
         const confirmation = null
         return attachBrowserToolOutput(
@@ -2444,7 +2461,7 @@ export async function executeBrowserActTool(
         const details = String(args.instruction || args.details || '')
         const timeoutSec = Math.max(30, Math.min(1200, Number(args.timeout_sec || 300)))
         log(`[browser-v3][human-required] reasonLength=${callToAction.length} timeout=${timeoutSec}s`)
-        const takeover = await ctx.createHumanTakeoverIntent()
+        const takeover = await ctx.createHumanTakeoverIntent({ callToAction, details, timeoutSec })
         return browserStructuredOutput({
           ok: true,
           operationId: 'request_takeover',

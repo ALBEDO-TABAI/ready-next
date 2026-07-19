@@ -69,7 +69,18 @@ export interface HumanTakeoverRef {
   state: 'pending' | 'claimed'
   claimedByRunId: string | null
   physicalTarget: BrowserHumanTakeoverPhysicalTarget | null
+  userPrompt: BrowserHumanTakeoverPrompt | null
   createdAt: string
+}
+
+export interface BrowserHumanTakeoverPrompt {
+  callToAction: string
+  details: string
+  timeoutSec: number
+}
+
+export function browserHumanTakeoverBlockedReason(prompt?: BrowserHumanTakeoverPrompt | null): string {
+  return [prompt?.callToAction.trim(), prompt?.details.trim()].filter(Boolean).join(' · ') || 'human_takeover'
 }
 
 export interface BrowserHumanTakeoverPhysicalTarget {
@@ -88,6 +99,7 @@ export interface BrowserHumanTakeoverIntentInput extends BrowserHumanTakeoverPhy
   parentTaskId: string
   ownerRunId: string
   browserTaskId: string
+  userPrompt?: BrowserHumanTakeoverPrompt | null
 }
 
 export type BrowserHumanTakeoverIntentPort = (

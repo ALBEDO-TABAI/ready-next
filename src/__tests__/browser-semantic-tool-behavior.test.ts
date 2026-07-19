@@ -4,7 +4,7 @@ import test from 'node:test'
 import type { BrowserController } from '../main/modules/browser-engine/ipc-handler'
 import { mapBrowserAgentPointerToOverlay } from '../shared/browser-agent-pointer'
 import { createToolExecutionOutput, type ToolExecutionOutput } from '../main/modules/agent-control/tools-runtime/tool-result-types'
-import { runBrowserFillFormSequence } from '../main/modules/tools/browser-act-tools'
+import { executeBrowserActTool, runBrowserFillFormSequence } from '../main/modules/tools/browser-act-tools'
 import { executeBrowserTool } from '../main/modules/tools/browser-tools'
 import {
   browserOriginInteractionBudget,
@@ -58,6 +58,34 @@ test('browser_fill_form reports a failed submit instead of claiming submitted', 
   assert.equal(outcome.errorKind, 'form_submit_failed')
   assert.equal(outcome.submitted, false)
   assert.deepEqual(calls, ['type_selector', 'press_key'])
+})
+
+test('browser takeover persists the exact user instruction through the typed intent port', async () => {
+  let capturedPrompt: Record<string, unknown> | null = null
+  const result = await executeBrowserActTool(
+    'request_takeover',
+    {
+      reason: '请完成页面验证',
+      instruction: '验证完成后继续当前任务',
+      timeout_sec: 90,
+    },
+    {
+      controller: {} as BrowserController,
+      mutationBoundary: {} as never,
+      createHumanTakeoverIntent: async (prompt) => {
+        capturedPrompt = prompt
+        return { takeoverId: 'takeover-1' }
+      },
+      attachBrowserToolOutput: (output) => output,
+    },
+  )
+
+  assert.deepEqual(capturedPrompt, {
+    callToAction: '请完成页面验证',
+    details: '验证完成后继续当前任务',
+    timeoutSec: 90,
+  })
+  assert.equal((result as ToolExecutionOutput).data?.phase, 'human_required')
 })
 
 test('browser_read enforces max_chars and returns structured selector ambiguity', async () => {

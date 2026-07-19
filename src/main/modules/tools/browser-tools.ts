@@ -526,7 +526,7 @@ export async function executeBrowserTool(
                 && taskExecutionContext?.parentTaskId
                 && taskExecutionContext.ownerRunId
                 && taskExecutionContext.browserTaskId
-                ? async () => {
+                ? async (userPrompt) => {
                     const groundedTabId = initialTabId || controller.getActiveTab?.()?.id || null
                     const groundedTab = groundedTabId
                       ? controller.getTabList?.().find((tab) => tab.id === groundedTabId) || null
@@ -541,6 +541,7 @@ export async function executeBrowserTool(
                       parentTaskId: taskExecutionContext.parentTaskId!,
                       ownerRunId: taskExecutionContext.ownerRunId!,
                       browserTaskId: taskExecutionContext.browserTaskId!,
+                      userPrompt,
                       surface: groundedTab?.owner === 'agent' ? 'agent-view' : 'user-view',
                       scopeId: sessionId || null,
                       profileId: groundedTab?.profile || null,

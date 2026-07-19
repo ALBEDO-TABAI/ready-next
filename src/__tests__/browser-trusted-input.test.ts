@@ -9,6 +9,7 @@ import {
   runGuardedSelectorClick,
   runGuardedSelectorType,
   runGuardedTargetType,
+  sendKeyStroke,
 } from '../main/modules/tools/browser-input-actions'
 import { throwIfLiveTargetGuardBlocked } from '../main/modules/tools/browser-probe'
 
@@ -17,6 +18,8 @@ function trustedInputFixture() {
   const mouse: Array<Record<string, unknown>> = []
   const keys: Array<Record<string, unknown>> = []
   const typed: string[] = []
+  let documentFocused = true
+  let focusCalls = 0
   const controller = {
     getBrowserInputEnvironment: () => ({
       mainWindowForeground: true,
@@ -33,10 +36,15 @@ function trustedInputFixture() {
     dispatchMouse: async (_tabId: string | null, event: Record<string, unknown>) => { mouse.push(event) },
     dispatchKey: async (_tabId: string | null, event: Record<string, unknown>) => { keys.push(event) },
     typeTextDirectly: async (_tabId: string | null, text: string) => { typed.push(text) },
+    focusTrustedKeyboardTarget: () => {
+      focusCalls += 1
+      documentFocused = true
+      return true
+    },
     executeJS: async (_tabId: string | null, script: string) => {
       scripts.push(script)
       if (script.includes('activeElementEditable')) {
-        return { ready: true, focused: true, activeElementEditable: true }
+        return { ready: true, focused: documentFocused, activeElementEditable: true }
       }
       if (script.includes('__READY_CLICK_POINT_LABEL_PROBE__')) {
         return { label: 'Open', inputLabel: 'Search', editable: true, password: false }
@@ -59,7 +67,15 @@ function trustedInputFixture() {
       return null
     },
   } as unknown as BrowserController
-  return { controller, scripts, mouse, keys, typed }
+  return {
+    controller,
+    scripts,
+    mouse,
+    keys,
+    typed,
+    setDocumentFocused: (focused: boolean) => { documentFocused = focused },
+    focusCallCount: () => focusCalls,
+  }
 }
 
 test('selector click only observes in page and dispatches trusted mouse input', async () => {
@@ -173,6 +189,133 @@ test('target type focuses and verifies inside the target frame without pointer i
   assert.equal(frameScripts.filter((script) => script.includes('__READY_FOCUSED_EDITABLE_PROBE__')).length, 1)
   assert.equal(frameScripts.filter((script) => script.includes('__READY_TYPED_INTO_PROBE__')).length, 1)
   assert.equal(fixture.scripts.some((script) => script.includes('__READY_AGENT_TARGET_FOCUS__')), false)
+})
+
+test('target submit rechecks focus after text delivery instead of reusing the stale pre-type document state', async () => {
+  const fixture = trustedInputFixture()
+  fixture.setDocumentFocused(false)
+  const runInTargetFrame = async (script: string): Promise<unknown> => {
+    if (script.includes('__READY_AGENT_TARGET_FOCUS__')) {
+      return { ok: true, kind: 'editable', tag: 'input', label: 'Search' }
+    }
+    if (script.includes('__READY_FOCUSED_EDITABLE_PROBE__')) {
+      return {
+        kind: 'editable',
+        tag: 'input',
+        label: 'Search',
+        maxLength: 120,
+        singleLine: true,
+        documentFocused: false,
+        documentReady: true,
+      }
+    }
+    if (script.includes('__READY_AGENT_TARGET_SELECT_ALL__')) {
+      return { ok: true, kind: 'text_control' }
+    }
+    if (script.includes("const token = 'text-'")) return 'text-token'
+    if (script.includes("const token = 'submit-'")) return 'submit-token'
+    if (script.includes('return { count: Number(state.count')) return { count: 1, changed: true }
+    if (script.includes('return { keydown: Number(state.keydown')) return { keydown: 1, submit: 0 }
+    if (script.includes('__READY_TYPED_INTO_PROBE__')) {
+      return { tag: 'input', label: 'Search', textHead: 'hello', textLength: 5, textMatchesExpected: true }
+    }
+    return null
+  }
+
+  const result = await runGuardedTargetType(
+    fixture.controller,
+    'tab-a',
+    '3',
+    'document-frame-3',
+    { x: 250, y: 300, cssX: 125, cssY: 150, width: 500, height: 500 },
+    'hello',
+    { clearBefore: true, pressEnter: true, useShiftEnter: false, allowPasswordFill: false },
+    runInTargetFrame,
+  )
+
+  assert.equal(result.typed, true)
+  assert.equal(result.textDelivery, 'delivered')
+  assert.equal(result.submitDelivery, 'delivered')
+  assert.deepEqual(fixture.typed, ['hello'])
+  assert.equal(fixture.focusCallCount(), 0)
+  assert.equal(fixture.keys.at(-2)?.key, 'Enter')
+})
+
+test('target submit returns a partial result when text landed but the keyboard transport fails', async () => {
+  const fixture = trustedInputFixture()
+  const originalExecuteJS = fixture.controller.executeJS.bind(fixture.controller)
+  fixture.controller.executeJS = async (tabId, script) => {
+    if (String(script).includes('activeElementEditable')) {
+      return { ready: true, focused: false, activeElementEditable: true }
+    }
+    return originalExecuteJS(tabId, script)
+  }
+  fixture.controller.dispatchKey = async () => {
+    throw Object.assign(new Error('Input.dispatchKeyEvent failed'), { code: 'CDP_COMMAND_FAILED' })
+  }
+  const runInTargetFrame = async (script: string): Promise<unknown> => {
+    if (script.includes('__READY_AGENT_TARGET_FOCUS__')) {
+      return { ok: true, kind: 'editable', tag: 'input', label: 'Search' }
+    }
+    if (script.includes('__READY_FOCUSED_EDITABLE_PROBE__')) {
+      return {
+        kind: 'editable',
+        tag: 'input',
+        label: 'Search',
+        maxLength: 120,
+        singleLine: true,
+        documentFocused: false,
+        documentReady: true,
+      }
+    }
+    if (script.includes('__READY_AGENT_TARGET_SELECT_ALL__')) return { ok: true, kind: 'text_control' }
+    if (script.includes("const token = 'text-'")) return 'text-token'
+    if (script.includes("const token = 'submit-'")) return 'submit-token'
+    if (script.includes('return { count: Number(state.count')) return { count: 1, changed: true }
+    if (script.includes('return { keydown: Number(state.keydown')) return { keydown: 0, submit: 0 }
+    if (script.includes('__READY_TYPED_INTO_PROBE__')) {
+      return { tag: 'input', label: 'Search', textHead: 'hello', textLength: 5, textMatchesExpected: true }
+    }
+    return null
+  }
+
+  const result = await runGuardedTargetType(
+    fixture.controller,
+    'tab-a',
+    '3',
+    'document-frame-3',
+    { x: 250, y: 300, cssX: 125, cssY: 150, width: 500, height: 500 },
+    'hello',
+    { clearBefore: true, pressEnter: true, useShiftEnter: false, allowPasswordFill: false },
+    runInTargetFrame,
+  )
+
+  assert.equal(result.typed, true)
+  assert.equal(result.textDelivery, 'delivered')
+  assert.equal(result.submitDelivery, 'not_delivered')
+  assert.equal(result.submitError, 'CDP_COMMAND_FAILED')
+  assert.deepEqual(fixture.typed, ['hello'])
+  assert.equal(fixture.keys.length, 0)
+})
+
+test('keyboard aliases dispatch case-insensitively to the exact hidden target without stealing focus', async () => {
+  const fixture = trustedInputFixture()
+  fixture.setDocumentFocused(false)
+  fixture.controller.getBrowserInputEnvironment = () => ({
+    mainWindowForeground: false,
+    hostPresentation: 'hidden',
+    tabActive: false,
+  })
+  await sendKeyStroke(fixture.controller, 'tab-a', 'ENTER')
+  await sendKeyStroke(fixture.controller, 'tab-a', 'SPACE')
+
+  assert.equal(fixture.focusCallCount(), 0)
+  assert.equal(fixture.keys.at(-4)?.key, 'Enter')
+  assert.equal(fixture.keys.at(-4)?.code, 'Enter')
+  assert.equal(fixture.keys.at(-4)?.emulateFocus, true)
+  assert.equal(fixture.keys.at(-3)?.key, 'Enter')
+  assert.equal(fixture.keys.at(-2)?.key, ' ')
+  assert.equal(fixture.keys.at(-2)?.code, 'Space')
 })
 
 test('live target guard is structural and ignores page labels', () => {

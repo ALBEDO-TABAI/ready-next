@@ -15,7 +15,6 @@ export interface BrowserInputReadiness {
     | 'tab_not_active'
     | 'document_unavailable'
     | 'document_not_ready'
-    | 'document_focus_required'
     | 'editable_focus_required'
   physicalTargetToken: string | null
   hostPresentation: BrowserHostPresentationState | null
@@ -36,20 +35,21 @@ export interface BrowserInputDocumentState {
 }
 
 const TRANSPORT_REQUIREMENTS: Readonly<Record<BrowserInputTransport, {
-  documentFocus: boolean
   editableFocus: boolean
 }>> = {
   // A pointer dispatch establishes the target focus itself. Requiring an
   // already focused document would make the first real click impossible.
-  trusted_pointer: { documentFocus: false, editableFocus: false },
-  // Keyboard dispatch is delivered to the document's existing focus owner.
-  trusted_keyboard: { documentFocus: true, editableFocus: false },
+  trusted_pointer: { editableFocus: false },
+  // CDP dispatch targets the exact WebContents directly. The page's current
+  // focus owner remains the recipient even when its native host or Ready is
+  // not foreground, so OS/document focus is not a transport prerequisite.
+  trusted_keyboard: { editableFocus: false },
   // Input.insertText is routed to the exact WebContents target. A structurally
   // verified active editable element is sufficient; Chromium can establish
   // document focus while delivering the text even when the attached host is
   // hidden. Requiring document.hasFocus() before dispatch rejects a transport
   // that is mechanically able to produce trusted beforeinput/input events.
-  direct_text: { documentFocus: false, editableFocus: true },
+  direct_text: { editableFocus: true },
 }
 
 export function browserInputEnvironmentReadiness(
@@ -89,7 +89,7 @@ export function browserInputEnvironmentReadiness(
     activeElementEditable: null,
   }
   if (!base.physicalTargetToken) return { ...base, ready: false, reason: 'physical_target_unavailable' }
-  const requiresPresentedForeground = transport === 'trusted_pointer' || transport === 'trusted_keyboard'
+  const requiresPresentedForeground = transport === 'trusted_pointer'
   if (requiresPresentedForeground && environment.hostPresentation !== 'visible') {
     return { ...base, ready: false, reason: 'host_not_presented' }
   }
@@ -143,9 +143,6 @@ export async function browserInputReadiness(
   if (!focus || typeof focus.ready !== 'boolean') return { ...base, ready: false, reason: 'document_unavailable' }
   if (focus.ready === false) return { ...base, ready: false, reason: 'document_not_ready' }
   const requirements = TRANSPORT_REQUIREMENTS[transport]
-  if (requirements.documentFocus && base.documentFocused !== true) {
-    return { ...base, ready: false, reason: 'document_focus_required' }
-  }
   if (requirements.editableFocus && base.activeElementEditable !== true) {
     return { ...base, ready: false, reason: 'editable_focus_required' }
   }

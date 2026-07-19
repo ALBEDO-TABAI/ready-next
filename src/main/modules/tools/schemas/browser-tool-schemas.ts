@@ -102,7 +102,6 @@ export const BROWSER_TOOL_SCHEMAS = {
     text: z.string().describe('要输入的文字'),
     target: z.string().optional().describe('输入框语义描述'),
     clear_first: z.boolean().optional().describe('是否先清空，默认 true'),
-    submit: z.boolean().optional().describe('输入后是否提交'),
     mode: z.enum(['auto', 'fast_fill', 'key_by_key']).optional().describe('输入模式，默认 auto'),
   }),
   browser_fill_form: z.object({
